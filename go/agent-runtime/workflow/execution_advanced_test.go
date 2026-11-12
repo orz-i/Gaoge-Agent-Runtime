@@ -299,6 +299,7 @@ func TestRetryReusesStableEffectIntentAndStopsAtBound(t *testing.T) {
 			return workflow.EffectResult{
 				Disposition: workflow.DispositionFailed,
 				ErrorCode:   "provider.timeout", ErrorDetail: "retryable timeout",
+				PhysicalNoEffect: true,
 			}
 		}
 		return completedEffect(request, json.RawMessage(`{"ok":true}`))
@@ -393,6 +394,7 @@ func TestCompensationsRunInReverseCompletionOrder(t *testing.T) {
 			return workflow.EffectResult{
 				Disposition: workflow.DispositionFailed,
 				ErrorCode:   "production.failed", ErrorDetail: "boom",
+				PhysicalNoEffect: true,
 			}
 		}
 		return completedEffect(request, request.Input)

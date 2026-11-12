@@ -36,7 +36,7 @@ func TestIssue107MemoryChildGrantAtomicParentTerminal(t *testing.T) {
 	root := newIssue107Run(t, rt, "root", "")
 	mid := newIssue107Run(t, rt, "subworkflow", root.Run.ID)
 	child := newIssue107Run(t, rt, "agentchild", mid.Run.ID)
-	grant, err := rt.BeginChildExecution(t.Context(), child.Run.ID)
+	grant, err := rt.BeginChildExecution(t.Context(), child.Run.ID, child.Run.Revision)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +50,7 @@ func TestIssue107MemoryChildGrantAtomicParentTerminal(t *testing.T) {
 			t.Fatalf("ancestor=%s terminal CAS escaped pending Grant: %v", id, cancelErr)
 		}
 	}
-	if err = store.FinishChildExecution(t.Context(), kernel.ChildExecutionGrant{ID: grant.ID, ChildRunID: "different"}); !errors.Is(err, kernel.ErrExecutionConflict) {
+	if err = store.FinishChildExecution(t.Context(), kernel.ChildExecutionGrant{ID: grant.ID, ChildRunID: "different", ExpectedRevision: grant.ExpectedRevision}); !errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("forged child released original Grant: %v", err)
 	}
 	if err = store.FinishChildExecution(t.Context(), grant); !errors.Is(err, kernel.ErrExecutionConflict) {
@@ -70,7 +70,7 @@ func TestIssue107MemoryChildGrantAtomicParentTerminal(t *testing.T) {
 	if err != nil || cancelled.Run.Status != kernel.RunStatusCancelled {
 		t.Fatalf("verified settlement did not unlock ancestor: %+v err=%v", cancelled.Run, err)
 	}
-	if _, err = rt.BeginChildExecution(t.Context(), child.Run.ID); !errors.Is(err, kernel.ErrExecutionConflict) {
+	if _, err = rt.BeginChildExecution(t.Context(), child.Run.ID, child.Run.Revision); !errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("terminated ancestor admitted child: %v", err)
 	}
 	if _, err = rt.Create(t.Context(), kernel.CreateRequest{
@@ -99,7 +99,7 @@ func TestIssue107MemoryParentCancelChildBeginLinearizable(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				<-gate
-				grant, beginErr = rt.BeginChildExecution(context.Background(), child.Run.ID)
+				grant, beginErr = rt.BeginChildExecution(context.Background(), child.Run.ID, child.Run.Revision)
 			}()
 			go func() {
 				defer wg.Done()
@@ -139,4 +139,8 @@ func TestIssue107MemoryChildExecutionConformance(t *testing.T) {
 
 func TestIssue107MemoryParentedWorkflowPhysicalGrantConformance(t *testing.T) {
 	conformance.RunParentedWorkflowSuite(t, func(child *testing.T) kernel.Store { return memory.NewStore() })
+}
+
+func TestIssue107MemoryRootWorkflowPhysicalGrantConformance(t *testing.T) {
+	conformance.RunRootWorkflowSuite(t, func(child *testing.T) kernel.Store { return memory.NewStore() })
 }

@@ -56,7 +56,7 @@ func (store *Store) childAncestorsLocked(child kernel.Run) ([]string, error) {
 // BeginChildExecution is a persistent physical admission serialized with
 // parent Cancel/Fail/Complete, including native and unleased Run transitions.
 func (store *Store) BeginChildExecution(ctx context.Context, grant kernel.ChildExecutionGrant) error {
-	if store == nil || ctx == nil || grant.ID == "" || grant.ChildRunID == "" {
+	if store == nil || ctx == nil || grant.ID == "" || grant.ChildRunID == "" || grant.ExpectedRevision == 0 {
 		return kernel.ErrInvalidInput
 	}
 	if err := ctx.Err(); err != nil {
@@ -68,13 +68,22 @@ func (store *Store) BeginChildExecution(ctx context.Context, grant kernel.ChildE
 	if !ok {
 		return kernel.ErrNotFound
 	}
-	if child.Run.ParentRunID == "" ||
+	if child.Run.Revision != grant.ExpectedRevision ||
 		(child.Run.Status != kernel.RunStatusRunning && child.Run.Status != kernel.RunStatusWaitingInput) {
 		return kernel.ErrExecutionConflict
 	}
-	ancestors, err := store.childAncestorsLocked(child.Run)
-	if err != nil {
-		return err
+	var ancestors []string
+	if child.Run.ParentRunID == "" {
+		if child.Run.Kind != "workflow" {
+			return kernel.ErrExecutionRequired
+		}
+		ancestors = []string{child.Run.ID} // Root self-fence for Cancel/Apply.
+	} else {
+		var err error
+		ancestors, err = store.childAncestorsLocked(child.Run)
+		if err != nil {
+			return err
+		}
 	}
 	if _, exists := store.childGrants[grant.ID]; exists {
 		return kernel.ErrChildExecutionBusy

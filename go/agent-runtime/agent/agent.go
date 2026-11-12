@@ -619,7 +619,7 @@ func (runner *Runner) startRunWithMiddleware(ctx context.Context, request StartR
 		if createErr != nil {
 			return kernel.Snapshot{}, createErr
 		}
-		snapshot, invokeErr = runner.withChildPhysicalGrant(ctx, created.Run.ID,
+		snapshot, invokeErr = runner.withChildPhysicalGrant(ctx, created.Run.ID, created.Run.Revision,
 			func() (kernel.Snapshot, error) {
 				return runner.runChain.Invoke(ctx, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
 					return runner.continuePreparedRun(nextCtx, created, deferred)
@@ -808,7 +808,7 @@ func (runner *Runner) ResolveApproval(
 	// From this boundary onward a Run middleware, approval handler or
 	// Model/Tool may perform effects; no generic return error proves no-effect.
 	invocation := runInvocation(plugin.RunResolveApproval, snapshot)
-	return runner.withChildPhysicalGrant(ctx, snapshot.Run.ID, func() (kernel.Snapshot, error) {
+	return runner.withChildPhysicalGrant(ctx, snapshot.Run.ID, snapshot.Run.Revision, func() (kernel.Snapshot, error) {
 		return runner.runChain.Invoke(ctx, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
 			return runner.resolveApproval(nextCtx, snapshot, state, response)
 		})
@@ -884,7 +884,7 @@ func (runner *Runner) Resume(ctx context.Context, runID string, expectedRevision
 	// Claim an execution segment BEFORE Run middleware and any Model/Tool
 	// side effect. A runner without RunExecution still follows the original
 	// pre-dispatch Store guard and will be rejected on fenced Runs.
-	resumed, resumeErr := runner.withChildPhysicalGrant(ctx, snapshot.Run.ID, func() (kernel.Snapshot, error) {
+	resumed, resumeErr := runner.withChildPhysicalGrant(ctx, snapshot.Run.ID, snapshot.Run.Revision, func() (kernel.Snapshot, error) {
 		return runner.withRunOwner(ctx, snapshot.Run.ID, snapshot.Run.Revision, func(driveCtx context.Context, scoped *Runner) (kernel.Snapshot, error) {
 			invocation := runInvocation(plugin.RunResume, snapshot)
 			return scoped.runChain.Invoke(driveCtx, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {

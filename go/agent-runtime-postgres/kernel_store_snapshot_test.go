@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -32,14 +31,15 @@ func testKernelStoreApplyOwnSnapshot(t *testing.T, db *gorm.DB) {
 
 	aboutToRead := make(chan struct{})
 	releaseRead := make(chan struct{})
-	var queries atomic.Int32
 	if err := db.Callback().Query().Before("gorm:query").Register("test:apply-own-snapshot-read", func(tx *gorm.DB) {
 		if tx.Statement.Context.Value(ownSnapshotQueryKey{}) != true {
 			return
 		}
-		// The first query reads the row inside the committing transaction.
-		// A second query is the post-commit Load that must not exist.
-		if queries.Add(1) == 2 {
+		// Locking the original Root Run and checking its physical Grant
+		// can issue multiple valid queries INSIDE the commit transaction.
+		// Only a post-commit read would substitute another worker's r3
+		// for the r2 snapshot owned by this Apply operation.
+		if _, insideTransaction := tx.Statement.ConnPool.(*sql.Tx); !insideTransaction {
 			close(aboutToRead)
 			<-releaseRead
 		}

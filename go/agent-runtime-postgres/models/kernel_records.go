@@ -98,6 +98,7 @@ type KernelChildEffectGrantRecord struct {
 	GrantID         string `gorm:"size:128;primaryKey"`
 	ParentRunID     string `gorm:"size:64;primaryKey;index:idx_agent_kernel_child_grants_parent"`
 	ChildRunID      string `gorm:"size:64;not null;index:idx_agent_kernel_child_grants_child"`
+	StartRevision   uint64 `gorm:"not null;default:0"`
 	SettledRevision uint64 `gorm:"not null;default:0"`
 }
 

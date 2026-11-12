@@ -66,7 +66,7 @@ func TestIssue107RealPostgresChildGrantVsParentTermination(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				<-start
-				grant, beginErr = one.BeginChildExecution(context.Background(), child.Run.ID)
+				grant, beginErr = one.BeginChildExecution(context.Background(), child.Run.ID, child.Run.Revision)
 			}()
 			go func() {
 				defer wg.Done()

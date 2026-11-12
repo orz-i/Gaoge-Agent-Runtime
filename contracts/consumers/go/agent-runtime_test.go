@@ -77,15 +77,17 @@ type childPhysicalStoreContract interface {
 }
 
 var (
-	_ kernel.ChildExecutionStore                                                         = (childPhysicalStoreContract)(nil)
-	_ childPhysicalStoreContract                                                         = (kernel.ChildExecutionStore)(nil)
-	_ childPhysicalStoreContract                                                         = (*memory.Store)(nil)
-	_ func(*kernel.Runtime, context.Context, string) (kernel.ChildExecutionGrant, error) = (*kernel.Runtime).BeginChildExecution
-	_ func(*kernel.Runtime, context.Context, string) (kernel.ChildExecutionGrant, error) = (*kernel.Runtime).LookupChildExecution
-	_ func(*agent.Runner, context.Context, string) error                                 = (*agent.Runner).ReconcileChildPhysicalGrant
-	_ func([]byte) string                                                                = agent.FrozenOriginFingerprint
-	_ func(kernel.Snapshot, []byte) bool                                                 = agent.MatchesFrozenOrigin
-	_                                                                                    = agent.Dependencies{
+	_ kernel.ChildExecutionStore                                                                 = (childPhysicalStoreContract)(nil)
+	_ childPhysicalStoreContract                                                                 = (kernel.ChildExecutionStore)(nil)
+	_ childPhysicalStoreContract                                                                 = (*memory.Store)(nil)
+	_ func(*kernel.Runtime, context.Context, string, uint64) (kernel.ChildExecutionGrant, error) = (*kernel.Runtime).BeginChildExecution
+	_ func(*kernel.Runtime, context.Context, string) (kernel.ChildExecutionGrant, error)         = (*kernel.Runtime).LookupChildExecution
+	_ func(*agent.Runner, context.Context, string) error                                         = (*agent.Runner).ReconcileChildPhysicalGrant
+	_ func(*workflow.Runner, context.Context, string) error                                      = (*workflow.Runner).ReconcileChildPhysicalGrant
+	_ func(*kernel.Runtime) *kernel.Runtime                                                      = (*kernel.Runtime).WithoutPhysicalGrant
+	_ func([]byte) string                                                                        = agent.FrozenOriginFingerprint
+	_ func(kernel.Snapshot, []byte) bool                                                         = agent.MatchesFrozenOrigin
+	_                                                                                            = agent.Dependencies{
 		ApprovalControlPreflight: func(context.Context, kernel.Snapshot) error { return nil },
 		StartControlPreflight:    func(context.Context, agent.StartRequest) error { return nil },
 	}

@@ -271,17 +271,38 @@ func (store *KernelStore) applyWithExecution(ctx context.Context, lease *kernel.
 				}
 			}
 		}
-		if kernelPGTerminalStatus(mutation.Record.Run.Status) {
-			if _, lockErr := lockKernelRun(tx, runID); lockErr != nil {
-				return lockErr
-			}
-			var active int64
-			if countErr := tx.Model(&models.KernelChildEffectGrantRecord{}).Where("parent_run_id = ?", runID).Count(&active).Error; countErr != nil {
-				return translateKernelError(countErr)
-			}
-			if active > 0 {
+		// All writes to a root with an admitted physical segment compete
+		// under this exact Run row lock. No other writer can advance a
+		// revision behind a Root Workflow callback, and an authenticated
+		// first-party scoped Runtime may still commit its own segment.
+		lockedRun, lockErr := lockKernelRun(tx, runID)
+		if lockErr != nil {
+			return lockErr
+		}
+		current, decodeErr := kernelSnapshotFrom(lockedRun)
+		if decodeErr != nil {
+			return decodeErr
+		}
+		var active []models.KernelChildEffectGrantRecord
+		if queryErr := tx.Where("parent_run_id = ?", runID).Find(&active).Error; queryErr != nil {
+			return translateKernelError(queryErr)
+		}
+		rootGrantFound := false
+		for _, record := range active {
+			if record.ChildRunID == runID {
+				rootGrantFound = true
+				original := kernel.ChildExecutionGrant{
+					ID: record.GrantID, ChildRunID: runID, ExpectedRevision: record.StartRevision,
+				}
+				if !mutation.PhysicalPermit.Matches(original, current) {
+					return kernel.ErrChildExecutionBusy
+				}
+			} else if kernelPGTerminalStatus(mutation.Record.Run.Status) {
 				return kernel.ErrChildExecutionBusy
 			}
+		}
+		if !rootGrantFound && mutation.PhysicalPermit.IsPresent() {
+			return kernel.ErrExecutionConflict
 		}
 		if guard != nil {
 			persisted, lockErr := lockKernelRun(tx, runID)

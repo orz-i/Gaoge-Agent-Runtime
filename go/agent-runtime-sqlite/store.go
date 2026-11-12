@@ -331,14 +331,44 @@ func (s *Store) applyWithExecution(ctx context.Context, lease *kernel.ExecutionL
 			return kernel.Snapshot{}, err
 		}
 	}
-	if sqliteTerminalStatus(mutation.Record.Run.Status) {
-		var pending int
-		if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM runtime_child_effect_grants WHERE parent_run_id=?", runID).Scan(&pending); err != nil {
-			return kernel.Snapshot{}, err
+	// A Root Workflow's own physical Grant fences ALL concurrent writes,
+	// not just Cancel. Its scoped first-party Kernel Runtime provides one
+	// per-revision proof; a public Grant ID or old Run revision cannot.
+	rows, grantErr := tx.QueryContext(ctx,
+		"SELECT grant_id,child_run_id,start_revision FROM runtime_child_effect_grants WHERE parent_run_id=?", runID)
+	if grantErr != nil {
+		return kernel.Snapshot{}, grantErr
+	}
+	rootGrantFound := false
+	for rows.Next() {
+		var id, childID string
+		var started uint64
+		if scanErr := rows.Scan(&id, &childID, &started); scanErr != nil {
+			_ = rows.Close()
+			return kernel.Snapshot{}, scanErr
 		}
-		if pending > 0 {
+		if childID == runID {
+			rootGrantFound = true
+			if !mutation.PhysicalPermit.Matches(kernel.ChildExecutionGrant{
+				ID: id, ChildRunID: runID, ExpectedRevision: started,
+			}, current) {
+				_ = rows.Close()
+				return kernel.Snapshot{}, kernel.ErrChildExecutionBusy
+			}
+		} else if sqliteTerminalStatus(mutation.Record.Run.Status) {
+			_ = rows.Close()
 			return kernel.Snapshot{}, kernel.ErrChildExecutionBusy
 		}
+	}
+	if scanErr := rows.Err(); scanErr != nil {
+		_ = rows.Close()
+		return kernel.Snapshot{}, scanErr
+	}
+	if closeErr := rows.Close(); closeErr != nil {
+		return kernel.Snapshot{}, closeErr
+	}
+	if !rootGrantFound && mutation.PhysicalPermit.IsPresent() {
+		return kernel.Snapshot{}, kernel.ErrExecutionConflict
 	}
 	if guard != nil {
 		current := current

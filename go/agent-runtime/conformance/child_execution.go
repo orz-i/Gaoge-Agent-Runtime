@@ -33,7 +33,7 @@ func RunChildExecutionSuite(t *testing.T, create func(*testing.T) kernel.Store) 
 		root := newRun("root", "")
 		middle := newRun("middle", root.Run.ID)
 		child := newRun("child", middle.Run.ID)
-		grant, err := rt.BeginChildExecution(t.Context(), child.Run.ID)
+		grant, err := rt.BeginChildExecution(t.Context(), child.Run.ID, child.Run.Revision)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -46,7 +46,7 @@ func RunChildExecutionSuite(t *testing.T, create func(*testing.T) kernel.Store) 
 				t.Fatalf("ancestor %s committed terminal despite pending Grant: %v", owner.Run.ID, err)
 			}
 		}
-		if _, err = rt.BeginChildExecution(t.Context(), child.Run.ID); !errors.Is(err, kernel.ErrChildExecutionBusy) {
+		if _, err = rt.BeginChildExecution(t.Context(), child.Run.ID, child.Run.Revision); !errors.Is(err, kernel.ErrChildExecutionBusy) {
 			t.Fatalf("concurrent second physical Grant was accepted: %v", err)
 		}
 		store := underlying.(kernel.ChildExecutionStore)
@@ -56,7 +56,7 @@ func RunChildExecutionSuite(t *testing.T, create func(*testing.T) kernel.Store) 
 		if observed, lookupErr := rt.LookupChildExecution(t.Context(), child.Run.ID); lookupErr != nil || observed != grant {
 			t.Fatalf("untrusted retirement affected original Grant: %+v err=%v", observed, lookupErr)
 		}
-		if err = store.FinishChildExecution(t.Context(), kernel.ChildExecutionGrant{ID: grant.ID, ChildRunID: "foreign"}); err == nil {
+		if err = store.FinishChildExecution(t.Context(), kernel.ChildExecutionGrant{ID: grant.ID, ChildRunID: "foreign", ExpectedRevision: grant.ExpectedRevision}); err == nil {
 			t.Fatal("foreign child retired trusted Grant")
 		}
 		if err = store.FinishChildExecution(t.Context(), grant); !errors.Is(err, kernel.ErrExecutionConflict) {
@@ -73,6 +73,11 @@ func RunChildExecutionSuite(t *testing.T, create func(*testing.T) kernel.Store) 
 		if err = rt.MarkChildExecutionSettled(t.Context(), grant, proof); err != nil {
 			t.Fatalf("trusted Agent post-callback settlement marker was rejected: %v", err)
 		}
+		forgedRevision := grant
+		forgedRevision.ExpectedRevision++
+		if err = store.FinishChildExecution(t.Context(), forgedRevision); !errors.Is(err, kernel.ErrExecutionConflict) {
+			t.Fatalf("settled original Grant could be retired using a forged StartRevision: original=%d forged=%d err=%v", grant.ExpectedRevision, forgedRevision.ExpectedRevision, err)
+		}
 		if err = store.FinishChildExecution(t.Context(), grant); err != nil {
 			t.Fatal(err)
 		}
@@ -86,7 +91,7 @@ func RunChildExecutionSuite(t *testing.T, create func(*testing.T) kernel.Store) 
 		if err != nil || cancelled.Run.Status != kernel.RunStatusCancelled {
 			t.Fatalf("verified completion failed: %+v err=%v", cancelled.Run, err)
 		}
-		if _, err = rt.BeginChildExecution(t.Context(), child.Run.ID); !errors.Is(err, kernel.ErrExecutionConflict) {
+		if _, err = rt.BeginChildExecution(t.Context(), child.Run.ID, child.Run.Revision); !errors.Is(err, kernel.ErrExecutionConflict) {
 			t.Fatalf("cancelled ancestor admitted new work: %v", err)
 		}
 	})

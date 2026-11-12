@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync/atomic"
 	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
@@ -17,34 +18,73 @@ import (
 // The original Store's admission/terminal CAS share one transaction; reads of
 // parent Status and RunRelation are secondary provenance, not execution grants.
 func (runner *Runner) withChildPhysicalGrant(ctx context.Context, snapshot kernel.Snapshot,
-	physical func() (kernel.Snapshot, error)) (kernel.Snapshot, error) {
+	physical func(*Runner) (kernel.Snapshot, error)) (kernel.Snapshot, error) {
 	if runner == nil || runner.runtime == nil || physical == nil || snapshot.Run.ID == "" {
 		return kernel.Snapshot{}, ErrInvalidExecution
 	}
-	if snapshot.Run.ParentRunID == "" {
-		return physical()
+	executionRuntime := runner.runtime
+	if snapshot.Run.ParentRunID != "" {
+		// A built-in child invoked from a Root's scoped interpreter must NOT
+		// inherit its parent's mutation permit. Its own immutable parent ID
+		// and separate physical Grant control all subsequent child writes.
+		executionRuntime = runner.runtime.WithoutPhysicalGrant()
 	}
-	grant, err := runner.runtime.BeginChildExecution(ctx, snapshot.Run.ID)
+	grant, err := executionRuntime.BeginChildExecution(ctx, snapshot.Run.ID, snapshot.Run.Revision)
 	if err != nil {
 		return snapshot, err
+	}
+	// Even a write failure returned by a Store wrapper can follow a
+	// committed intent CAS. The first-party interpreter tracks whether it
+	// ever reached any physical Effect callback. Only a segment that never
+	// reached the callback has a strong, source-local no-effect witness.
+	calls := new(atomic.Uint32)
+	scoped := *runner
+	scoped.runtime = executionRuntime
+	scoped.physicalCalls = calls
+	physicalRunner := &scoped
+	if snapshot.Run.ParentRunID == "" {
+		// The original root Run is also a physical Feature owner. A root
+		// cannot evade execution admission merely by lacking ancestors.
+		// Bind each per-revision Kernel.Apply to a first-party Root Grant
+		// so legitimate interpreter transitions remain possible while a
+		// concurrent Root Resume/Cancel cannot bypass the active callback.
+		proof := featurecontrol.Seal(snapshot.Run.ID, snapshot.Run.Revision,
+			"workflow_root_physical_owner", grant.ID, snapshot.State, snapshot.Checkpoint)
+		bound, bindErr := executionRuntime.WithPhysicalGrant(ctx, grant, proof)
+		if bindErr != nil {
+			return snapshot, errors.Join(kernel.ErrChildExecutionBusy, bindErr)
+		}
+		scoped.runtime = bound
 	}
 
 	// A panic, pending unknown remote effect, or callback error without a
 	// trustworthy physical receipt leaves the original Grant durable. Do
 	// not release on a timer or an unverified child ID.
-	result, physicalErr := physical()
+	result, physicalErr := physical(physicalRunner)
 	settlementCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 	defer cancel()
-	latest, loadErr := runner.runtime.Load(settlementCtx, snapshot.Run.ID)
-	if loadErr != nil || !runner.knownWorkflowPhysicalSettlement(settlementCtx, latest, physicalErr) {
+	latest, loadErr := executionRuntime.Load(settlementCtx, snapshot.Run.ID)
+	noPhysicalDispatch := calls.Load() == 0
+	if loadErr != nil || (noPhysicalDispatch && latest.Run.ID != snapshot.Run.ID) ||
+		(!noPhysicalDispatch && !runner.knownWorkflowPhysicalSettlement(settlementCtx, latest, physicalErr)) {
 		return result, errors.Join(physicalErr, kernel.ErrChildExecutionBusy, loadErr)
+	}
+	if noPhysicalDispatch {
+		// A *known* no-effect, pre-dispatch segment is authorized to retire
+		// its own Grant even if a journal/intent CAS failed or its ACK was
+		// lost. Never infer this from a mere RunStatus or an arbitrary
+		// executor error: the physical counter was incremented before every
+		// statically composed external Effect callback.
+		if _, stateErr := decodeExecutionState(latest.State); stateErr != nil {
+			return result, errors.Join(physicalErr, kernel.ErrChildExecutionBusy, stateErr)
+		}
 	}
 	proof := featurecontrol.Seal(latest.Run.ID, latest.Run.Revision,
 		"workflow_child_physical_settled", grant.ID, latest.State, latest.Checkpoint)
-	if err := runner.runtime.MarkChildExecutionSettled(settlementCtx, grant, proof); err != nil {
+	if err := executionRuntime.MarkChildExecutionSettled(settlementCtx, grant, proof); err != nil {
 		return result, errors.Join(physicalErr, kernel.ErrChildExecutionBusy, err)
 	}
-	if err := runner.runtime.FinishChildExecution(settlementCtx, grant, proof); err != nil {
+	if err := executionRuntime.FinishChildExecution(settlementCtx, grant, proof); err != nil {
 		return result, errors.Join(physicalErr, kernel.ErrChildExecutionBusy, err)
 	}
 	return result, physicalErr
@@ -62,6 +102,7 @@ func (runner *Runner) knownWorkflowPhysicalSettlement(ctx context.Context, snaps
 	}
 	if physicalErr != nil && !errors.Is(physicalErr, ErrWaitPending) &&
 		!errors.Is(physicalErr, ErrSegmentYielded) &&
+		!errors.Is(physicalErr, ErrEffectFailed) &&
 		!errors.Is(physicalErr, ErrEffectPending) {
 		return false
 	}
@@ -80,13 +121,36 @@ func (runner *Runner) knownWorkflowPhysicalSettlement(ctx context.Context, snaps
 				// A SegmentYielded effect may be scheduled but not
 				// dispatched. ErrEffectPending is an observed external
 				// pending outcome and requires separate trusted evidence.
-				if !errors.Is(physicalErr, ErrSegmentYielded) {
+				if !errors.Is(physicalErr, ErrSegmentYielded) &&
+					(!errors.Is(physicalErr, ErrEffectPending) || !effect.PhysicalNoEffect || effect.ErrorCode == "") {
 					return false
 				}
 				continue
 			}
 			if runner.relations == nil {
-				return false
+				// The built-in Subworkflow executor is an immutable local
+				// Workflow feature, not a dynamically discovered Host effect.
+				// A standalone SDK Workflow may have no relation recorder.
+				// Prove its deterministic child ID and exact frozen definition,
+				// input, actor and Kernel ParentRunID without synthesizing a
+				// foreign/remote relation. Agent/custom effects still fail closed.
+				if effect.Class != EffectClassSubworkflow || runner.registry == nil ||
+					effect.Definition == nil {
+					return false
+				}
+				child, loadErr := runner.runtime.Load(ctx, effect.ChildRunID)
+				if loadErr != nil {
+					return false
+				}
+				if !verifiedSubworkflowChildOrigin(EffectRequest{
+					RunID: snapshot.Run.ID, EffectID: effect.ID,
+					Actor: snapshot.Run.Actor, Thread: snapshot.Run.Thread,
+					Definition:  effect.Definition,
+					NestedDepth: effect.NestedDepth, Input: effect.Input,
+				}, child) {
+					return false
+				}
+				continue
 			}
 			reader, ok := runner.relations.(interface {
 				GetByChild(context.Context, string) (runrelation.Relation, error)
@@ -103,9 +167,12 @@ func (runner *Runner) knownWorkflowPhysicalSettlement(ctx context.Context, snaps
 				return false
 			}
 		case EffectFailed:
-			// Failure without a trusted completed physical receipt
-			// remains outcome-unknown even if the Kernel Run is terminal.
-			return false
+			// A failed original attempt with an explicit Host-attested
+			// pre-dispatch NoEffect is not unknown physical work.
+			// Never apply this to generic failures or timeouts.
+			if !effect.PhysicalNoEffect || effect.ErrorCode == "" {
+				return false
+			}
 		default:
 			return false
 		}

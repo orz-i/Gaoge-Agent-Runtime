@@ -18,8 +18,9 @@ var ErrChildExecutionBusy = errors.New("kernel descendant has an unsettled physi
 // and execution-lease commits. This identity is not a Model/Tool receipt.
 // Unknown effects keep the Grant pending until explicit reconciliation.
 type ChildExecutionGrant struct {
-	ID         string
-	ChildRunID string
+	ID               string
+	ChildRunID       string
+	ExpectedRevision uint64 // Original physical caller's immutable Run revision.
 }
 
 // ChildExecutionSettlement is the opaque first-party Agent-issued physical
@@ -31,8 +32,8 @@ type ChildExecutionGrant struct {
 type ChildExecutionSettlement struct{ proof *featurecontrol.Proof }
 
 func (settlement ChildExecutionSettlement) Matches(grant ChildExecutionGrant, snapshot Snapshot) bool {
-	if grant.ID == "" || grant.ChildRunID == "" ||
-		snapshot.Run.ID != grant.ChildRunID || snapshot.Run.ParentRunID == "" {
+	if grant.ID == "" || grant.ChildRunID == "" || grant.ExpectedRevision == 0 ||
+		snapshot.Run.ID != grant.ChildRunID || snapshot.Run.Revision < grant.ExpectedRevision {
 		return false
 	}
 	var proofKind string
@@ -46,6 +47,70 @@ func (settlement ChildExecutionSettlement) Matches(grant ChildExecutionGrant, sn
 	}
 	return settlement.proof.Matches(grant.ChildRunID, snapshot.Run.Revision,
 		proofKind, grant.ID, snapshot.State, snapshot.Checkpoint)
+}
+
+// PhysicalApplyPermit is an opaque per-Run write proof for a Root Workflow
+// while its own durable physical Grant is active. It is minted exclusively
+// by a first-party Workflow-scoped Kernel Runtime. An external caller holding
+// a visible Grant ID cannot forge this permit or mutate a root mid-dispatch.
+type PhysicalApplyPermit struct {
+	grant ChildExecutionGrant
+	proof *featurecontrol.Proof
+}
+
+func (permit PhysicalApplyPermit) Matches(grant ChildExecutionGrant, snapshot Snapshot) bool {
+	return snapshot.Run.Kind == "workflow" &&
+		grant.ID != "" && grant.ChildRunID == snapshot.Run.ID &&
+		permit.grant == grant &&
+		permit.proof.Matches(snapshot.Run.ID, snapshot.Run.Revision,
+			"workflow_root_physical_apply", grant.ID, snapshot.State, snapshot.Checkpoint)
+}
+
+// IsPresent permits Store adapters to reject a sealed Root execution
+// proof when no corresponding physical Grant exists in the same database.
+func (permit PhysicalApplyPermit) IsPresent() bool {
+	return permit.grant.ID != "" || permit.proof != nil
+}
+
+// WithoutPhysicalGrant drops, but never transfers or creates, a Root Run's
+// active per-Revision write capability. Built-in nested Subworkflows must use
+// their OWN child Run and immutable ParentRunID. A foreign or child Run must
+// not inherit the root's Store-mutation permit from the outer interpreter.
+func (runtime *Runtime) WithoutPhysicalGrant() *Runtime {
+	if runtime == nil {
+		return nil
+	}
+	unbound := *runtime
+	unbound.physicalGrant = nil
+	return &unbound
+}
+
+// WithPhysicalGrant binds a Kernel Runtime to the one original Root Workflow
+// physical Grant. Only a first-party Workflow can mint the required source
+// proof, and the Store validates every subsequent per-revision write under
+// its own atomic lock/transaction. It never bypasses terminal control CAS.
+func (runtime *Runtime) WithPhysicalGrant(ctx context.Context, grant ChildExecutionGrant, proof *featurecontrol.Proof) (*Runtime, error) {
+	if runtime == nil || ctx == nil || grant.ID == "" || grant.ChildRunID == "" || grant.ExpectedRevision == 0 ||
+		runtime.physicalGrant != nil {
+		return nil, ErrInvalidInput
+	}
+	stored, err := runtime.LookupChildExecution(ctx, grant.ChildRunID)
+	if err != nil {
+		return nil, err
+	}
+	current, err := runtime.Load(ctx, grant.ChildRunID)
+	if err != nil {
+		return nil, err
+	}
+	if stored != grant || current.Run.Kind != "workflow" || current.Run.ParentRunID != "" ||
+		current.Run.Revision != grant.ExpectedRevision ||
+		!proof.Matches(current.Run.ID, current.Run.Revision,
+			"workflow_root_physical_owner", grant.ID, current.State, current.Checkpoint) {
+		return nil, ErrExecutionConflict
+	}
+	bound := *runtime
+	bound.physicalGrant = &grant
+	return &bound, nil
 }
 
 // ChildExecutionStore is an optional atomic store port for immutable parented
@@ -74,8 +139,8 @@ func (runtime *Runtime) SupportsChildExecution() bool {
 // BeginChildExecution is the only physical admission for a parent-bound Run.
 // The Store rechecks the original persisted child.ParentRunID, every live
 // ancestor and existing pending Grants under its transactional authority.
-func (runtime *Runtime) BeginChildExecution(ctx context.Context, childRunID string) (ChildExecutionGrant, error) {
-	if runtime == nil || ctx == nil || strings.TrimSpace(childRunID) == "" {
+func (runtime *Runtime) BeginChildExecution(ctx context.Context, childRunID string, expectedRevision uint64) (ChildExecutionGrant, error) {
+	if runtime == nil || ctx == nil || strings.TrimSpace(childRunID) == "" || expectedRevision == 0 {
 		return ChildExecutionGrant{}, ErrInvalidInput
 	}
 	store, ok := runtime.store.(ChildExecutionStore)
@@ -86,7 +151,7 @@ func (runtime *Runtime) BeginChildExecution(ctx context.Context, childRunID stri
 	if err != nil {
 		return ChildExecutionGrant{}, err
 	}
-	grant := ChildExecutionGrant{ID: id, ChildRunID: childRunID}
+	grant := ChildExecutionGrant{ID: id, ChildRunID: childRunID, ExpectedRevision: expectedRevision}
 	if err := store.BeginChildExecution(ctx, grant); err != nil {
 		return ChildExecutionGrant{}, err
 	}
@@ -99,7 +164,7 @@ func (runtime *Runtime) BeginChildExecution(ctx context.Context, childRunID stri
 // revision against the original Grant. A crashed worker cannot mint this
 // marker merely because an unreturned callback has not yet staged a Tool ID.
 func (runtime *Runtime) MarkChildExecutionSettled(ctx context.Context, grant ChildExecutionGrant, proof *featurecontrol.Proof) error {
-	if runtime == nil || ctx == nil || grant.ID == "" || grant.ChildRunID == "" {
+	if runtime == nil || ctx == nil || grant.ID == "" || grant.ChildRunID == "" || grant.ExpectedRevision == 0 {
 		return ErrInvalidInput
 	}
 	store, ok := runtime.store.(ChildExecutionStore)
@@ -122,7 +187,7 @@ func (runtime *Runtime) MarkChildExecutionSettled(ctx context.Context, grant Chi
 // not authorize Finish; the persisted Grant deliberately blocks terminal
 // parent state until its outcome has been reconciled.
 func (runtime *Runtime) FinishChildExecution(ctx context.Context, grant ChildExecutionGrant, proof *featurecontrol.Proof) error {
-	if runtime == nil || ctx == nil || grant.ID == "" || grant.ChildRunID == "" {
+	if runtime == nil || ctx == nil || grant.ID == "" || grant.ChildRunID == "" || grant.ExpectedRevision == 0 {
 		return ErrInvalidInput
 	}
 	store, ok := runtime.store.(ChildExecutionStore)

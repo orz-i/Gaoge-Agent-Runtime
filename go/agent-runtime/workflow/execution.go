@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract"
@@ -117,6 +118,8 @@ type Effect struct {
 	Output       json.RawMessage      `json:"output,omitempty"`
 	ErrorCode    string               `json:"errorCode,omitempty"`
 	Error        string               `json:"error,omitempty"`
+	// Trusted original Executor's explicit no-physical-request receipt.
+	PhysicalNoEffect bool `json:"physicalNoEffect,omitempty"`
 }
 
 // Wait is one explicit host-resolved suspension point.
@@ -235,6 +238,10 @@ type EffectResult struct {
 	ErrorCode   string
 	ErrorDetail string
 	CostUnits   int64
+	// PhysicalNoEffect may be true ONLY with DispositionFailed: it certifies
+	// an original, trusted pre-dispatch failure. An ambiguous timeout or
+	// Pending result MUST leave it false and keep the physical Grant.
+	PhysicalNoEffect bool
 }
 
 // EffectExecutor consumes only stable intents that already exist in Kernel state.
@@ -262,6 +269,11 @@ type Runner struct {
 	ceiling     Limits
 	deferResume bool
 	registry    *DefinitionRegistry
+	// Per-physical-segment counter, copied by pointer into the scoped Runner.
+	// Increment immediately before an external Effect callback, so a
+	// pre-dispatch CAS failure can be proven no-effect independently of a
+	// custom Executor that might have issued a real external operation.
+	physicalCalls *atomic.Uint32
 }
 
 type executionState View
@@ -342,9 +354,9 @@ func (runner *Runner) StartRun(ctx context.Context, request StartRequest) (kerne
 	// Grant before ANY callback, including optional Host telemetry. A
 	// best-effort recorder has no independent parent execution authority.
 	// Root Workflow Runs preserve their original unparented semantics.
-	return runner.withChildPhysicalGrant(ctx, snapshot, func() (kernel.Snapshot, error) {
-		runner.recordRunTelemetry(ctx, snapshot, state, observability.PhaseStarted)
-		return runner.runSegment(ctx, snapshot)
+	return runner.withChildPhysicalGrant(ctx, snapshot, func(scoped *Runner) (kernel.Snapshot, error) {
+		scoped.recordRunTelemetry(ctx, snapshot, state, observability.PhaseStarted)
+		return scoped.runSegment(ctx, snapshot)
 	})
 }
 
@@ -363,8 +375,8 @@ func (runner *Runner) Resume(ctx context.Context, runID string, expectedRevision
 	if snapshot.Run.Status != kernel.RunStatusRunning {
 		return snapshot, ErrWorkflowTerminal
 	}
-	return runner.withChildPhysicalGrant(ctx, snapshot, func() (kernel.Snapshot, error) {
-		return runner.runSegment(ctx, snapshot)
+	return runner.withChildPhysicalGrant(ctx, snapshot, func(scoped *Runner) (kernel.Snapshot, error) {
+		return scoped.runSegment(ctx, snapshot)
 	})
 }
 
@@ -392,7 +404,7 @@ func (runner *Runner) ResolveWait(
 	// already be terminal, and resolving a Wait can synchronously dispatch a
 	// fresh external Effect. Enclose the checkpoint CAS and the optional
 	// next segment in the SAME original Store physical Grant.
-	return runner.withChildPhysicalGrant(ctx, snapshot, func() (kernel.Snapshot, error) {
+	return runner.withChildPhysicalGrant(ctx, snapshot, func(scoped *Runner) (kernel.Snapshot, error) {
 		waitID := state.CurrentWaitID
 		if err = resolveWaitState(&state, response); err != nil {
 			return kernel.Snapshot{}, err
@@ -402,7 +414,7 @@ func (runner *Runner) ResolveWait(
 		if err != nil {
 			return kernel.Snapshot{}, err
 		}
-		running, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
+		running, err := scoped.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
 			Status: kernel.RunStatusRunning, State: encoded, Checkpoint: checkpoint,
 			Events: []kernel.EventDraft{{Type: "workflow.wait.resolved", Message: waitID, Wakeup: true}},
 		})
@@ -412,7 +424,7 @@ func (runner *Runner) ResolveWait(
 		if runner.deferResume {
 			return running, nil
 		}
-		return runner.runSegment(ctx, running)
+		return scoped.runSegment(ctx, running)
 	})
 }
 

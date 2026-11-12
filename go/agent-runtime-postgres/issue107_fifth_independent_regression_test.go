@@ -76,9 +76,9 @@ func TestAuditIssue107RealPostgresBeginOnAlreadyCancelledChild(t *testing.T) {
 	done := make(chan auditBeginChildResult, 1)
 	go func() {
 		beginErr := NewKernelStore(otherDB).BeginChildExecution(ctx, kernel.ChildExecutionGrant{
-			ID: "known-original-grant", ChildRunID: child.Run.ID,
+			ID: "known-original-grant", ChildRunID: child.Run.ID, ExpectedRevision: child.Run.Revision,
 		})
-		done <- auditBeginChildResult{grant: kernel.ChildExecutionGrant{ID: "known-original-grant", ChildRunID: child.Run.ID}, err: beginErr}
+		done <- auditBeginChildResult{grant: kernel.ChildExecutionGrant{ID: "known-original-grant", ChildRunID: child.Run.ID, ExpectedRevision: child.Run.Revision}, err: beginErr}
 	}()
 	// Confirm the child Begin has already read child state and is blocked
 	// waiting on the locked parent row, rather than relying on a timed sleep.

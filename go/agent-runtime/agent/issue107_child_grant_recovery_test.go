@@ -34,7 +34,7 @@ func TestIssue107ManualGrantRecoveryOnlyAfterPhysicalStateSettles(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	original, err := rt.BeginChildExecution(t.Context(), child.Run.ID)
+	original, err := rt.BeginChildExecution(t.Context(), child.Run.ID, child.Run.Revision)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -18,7 +18,7 @@ import (
 // A crashed/unknown Model or Tool outcome retains the Grant. Only an Agent
 // that has committed settlement of every physical intent may close it; no
 // deadline or process-local mutex can silently authorize another executor.
-func (runner *Runner) withChildPhysicalGrant(ctx context.Context, runID string,
+func (runner *Runner) withChildPhysicalGrant(ctx context.Context, runID string, expectedRevision uint64,
 	physical func() (kernel.Snapshot, error)) (kernel.Snapshot, error) {
 	if runner == nil || runner.runtime == nil || physical == nil {
 		return kernel.Snapshot{}, ErrInvalidRequest
@@ -30,7 +30,7 @@ func (runner *Runner) withChildPhysicalGrant(ctx context.Context, runID string,
 	if child.Run.ParentRunID == "" {
 		return physical()
 	}
-	grant, err := runner.runtime.BeginChildExecution(ctx, runID)
+	grant, err := runner.runtime.BeginChildExecution(ctx, runID, expectedRevision)
 	if err != nil {
 		// Store admission rejected BEFORE invoking middleware or any
 		// external Model/Tool. Preserve the original child snapshot as

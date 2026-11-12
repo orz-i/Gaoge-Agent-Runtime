@@ -49,6 +49,10 @@ func NeedsTransitionProjection(status RunStatus, events []EventDraft) bool {
 type StoreMutation struct {
 	Record Record
 	Events []EventDraft
+	// PhysicalPermit proves a Root Workflow's original active execution
+	// segment for precisely the current Run state/revision. Only a first-party
+	// Kernel scoped Runtime can populate this nonforgeable field.
+	PhysicalPermit PhysicalApplyPermit
 }
 
 // CommittedTransition is the feature-neutral durable projection of one

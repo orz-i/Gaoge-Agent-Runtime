@@ -71,3 +71,7 @@ func TestIssue107PostgresChildExecutionConformance(t *testing.T) {
 func TestIssue107PostgresParentedWorkflowPhysicalGrantConformance(t *testing.T) {
 	conformance.RunParentedWorkflowSuite(t, func(child *testing.T) kernel.Store { return NewKernelStore(openKernelStoreTestDB(child)) })
 }
+
+func TestIssue107GORMRootWorkflowPhysicalGrantConformance(t *testing.T) {
+	conformance.RunRootWorkflowSuite(t, func(child *testing.T) kernel.Store { return NewKernelStore(openKernelStoreTestDB(child)) })
+}

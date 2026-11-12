@@ -25,7 +25,7 @@ func TestIssue107PostgresChildGrantSurvivesNewStoreInstance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	grant, err := rt.BeginChildExecution(t.Context(), child.Run.ID)
+	grant, err := rt.BeginChildExecution(t.Context(), child.Run.ID, child.Run.Revision)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -135,8 +135,27 @@ func (store *Store) applyLocked(runID string, expectedRevision uint64, mutation 
 	if current.Run.ParentRunID != mutation.Record.Run.ParentRunID {
 		return kernel.Snapshot{}, kernel.ErrExecutionConflict
 	}
-	if memoryTerminalStatus(mutation.Record.Run.Status) && len(store.childGrantOwners[runID]) != 0 {
-		return kernel.Snapshot{}, kernel.ErrChildExecutionBusy
+	// The root's original physical Grant fences every competing Run write,
+	// not only terminal cancellation. Its own Feature-scoped Kernel Runtime
+	// carries the original per-revision proof. Descendant physical Grants
+	// independently prevent a parent terminal mutation.
+	var rootGrantFound bool
+	for id := range store.childGrantOwners[runID] {
+		granted, ok := store.childGrants[id]
+		if !ok {
+			return kernel.Snapshot{}, kernel.ErrExecutionConflict
+		}
+		if granted.grant.ChildRunID == runID {
+			rootGrantFound = true
+			if !mutation.PhysicalPermit.Matches(granted.grant, current) {
+				return kernel.Snapshot{}, kernel.ErrChildExecutionBusy
+			}
+		} else if memoryTerminalStatus(mutation.Record.Run.Status) {
+			return kernel.Snapshot{}, kernel.ErrChildExecutionBusy
+		}
+	}
+	if !rootGrantFound && mutation.PhysicalPermit.IsPresent() {
+		return kernel.Snapshot{}, kernel.ErrExecutionConflict
 	}
 	next := snapshotFromRecord(mutation.Record)
 	journal := store.events[runID]

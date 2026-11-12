@@ -65,7 +65,7 @@ func (store *KernelStore) lockLiveChildAncestors(tx *gorm.DB, parentID, tenant, 
 }
 
 func (store *KernelStore) BeginChildExecution(ctx context.Context, grant kernel.ChildExecutionGrant) error {
-	if store == nil || store.db == nil || ctx == nil || grant.ID == "" || grant.ChildRunID == "" {
+	if store == nil || store.db == nil || ctx == nil || grant.ID == "" || grant.ChildRunID == "" || grant.ExpectedRevision == 0 {
 		return kernel.ErrInvalidInput
 	}
 	return store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -73,28 +73,35 @@ func (store *KernelStore) BeginChildExecution(ctx context.Context, grant kernel.
 		if err := tx.Where("run_id = ?", grant.ChildRunID).First(&child).Error; err != nil {
 			return translateKernelError(err)
 		}
-		if child.ParentRunID == "" || (child.Status != string(kernel.RunStatusRunning) &&
-			child.Status != string(kernel.RunStatusWaitingInput)) {
+		if child.Revision != grant.ExpectedRevision ||
+			(child.Status != string(kernel.RunStatusRunning) && child.Status != string(kernel.RunStatusWaitingInput)) {
 			return kernel.ErrExecutionConflict
 		}
-		ids, err := store.lockLiveChildAncestors(tx, child.ParentRunID, child.TenantID, child.ActorID, child.ThreadKind, child.ThreadID)
-		if err != nil {
-			return err
+		var ids []string
+		if child.ParentRunID == "" {
+			if child.Kind != "workflow" {
+				return kernel.ErrExecutionRequired
+			}
+			ids = []string{child.RunID} // Root self-fence.
+		} else {
+			var ancestorErr error
+			ids, ancestorErr = store.lockLiveChildAncestors(tx, child.ParentRunID,
+				child.TenantID, child.ActorID, child.ThreadKind, child.ThreadID)
+			if ancestorErr != nil {
+				return ancestorErr
+			}
 		}
-		// The initial child read selected the immutable ancestor chain; it
-		// did NOT establish the child's current execution state. A concurrent
-		// child Cancel/Fail may commit while we wait on the parent row. Lock
-		// the child only AFTER the root-to-leaf ancestor locks, then validate
-		// the exact original identity and live status under that lock.
-		// Approval controls take the same ancestor -> child lock order.
 		lockedChild, lockErr := lockKernelRun(tx, grant.ChildRunID)
 		if lockErr != nil {
 			return lockErr
 		}
-		if lockedChild.ParentRunID != child.ParentRunID ||
+		if lockedChild.Revision != grant.ExpectedRevision ||
+			lockedChild.ParentRunID != child.ParentRunID ||
 			lockedChild.Kind != child.Kind ||
-			lockedChild.TenantID != child.TenantID || lockedChild.ActorID != child.ActorID ||
-			lockedChild.ThreadKind != child.ThreadKind || lockedChild.ThreadID != child.ThreadID ||
+			lockedChild.TenantID != child.TenantID ||
+			lockedChild.ActorID != child.ActorID ||
+			lockedChild.ThreadKind != child.ThreadKind ||
+			lockedChild.ThreadID != child.ThreadID ||
 			(lockedChild.Status != string(kernel.RunStatusRunning) &&
 				lockedChild.Status != string(kernel.RunStatusWaitingInput)) {
 			return kernel.ErrExecutionConflict
@@ -102,7 +109,7 @@ func (store *KernelStore) BeginChildExecution(ctx context.Context, grant kernel.
 		// Ancestor and child locks serialize contenders; never trust a
 		// pre-lock observation or a uniqueness check as the sole guard.
 		var active int64
-		if err = tx.Model(&models.KernelChildEffectGrantRecord{}).Where("child_run_id = ?", grant.ChildRunID).Count(&active).Error; err != nil {
+		if err := tx.Model(&models.KernelChildEffectGrantRecord{}).Where("child_run_id = ?", grant.ChildRunID).Count(&active).Error; err != nil {
 			return translateKernelError(err)
 		}
 		if active > 0 {
@@ -110,9 +117,9 @@ func (store *KernelStore) BeginChildExecution(ctx context.Context, grant kernel.
 		}
 		rows := make([]models.KernelChildEffectGrantRecord, 0, len(ids))
 		for _, id := range ids {
-			rows = append(rows, models.KernelChildEffectGrantRecord{GrantID: grant.ID, ParentRunID: id, ChildRunID: grant.ChildRunID})
+			rows = append(rows, models.KernelChildEffectGrantRecord{GrantID: grant.ID, ParentRunID: id, ChildRunID: grant.ChildRunID, StartRevision: grant.ExpectedRevision})
 		}
-		if err = tx.Create(&rows).Error; err != nil {
+		if err := tx.Create(&rows).Error; err != nil {
 			return translateKernelApplyError(err)
 		}
 		return nil
@@ -125,7 +132,7 @@ func (store *KernelStore) BeginChildExecution(ctx context.Context, grant kernel.
 // the two leaves a provably settled marker, whereas a crash before Mark
 // leaves the physical effect quarantined.
 func (store *KernelStore) MarkChildExecutionSettled(ctx context.Context, grant kernel.ChildExecutionGrant, permit kernel.ChildExecutionSettlement) error {
-	if store == nil || store.db == nil || ctx == nil || grant.ID == "" || grant.ChildRunID == "" {
+	if store == nil || store.db == nil || ctx == nil || grant.ID == "" || grant.ChildRunID == "" || grant.ExpectedRevision == 0 {
 		return kernel.ErrInvalidInput
 	}
 	return store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -149,14 +156,14 @@ func (store *KernelStore) MarkChildExecutionSettled(ctx context.Context, grant k
 			return kernel.ErrExecutionConflict
 		}
 		for _, record := range records {
-			if record.ChildRunID != grant.ChildRunID ||
+			if record.ChildRunID != grant.ChildRunID || record.StartRevision != grant.ExpectedRevision ||
 				(record.SettledRevision != 0 && record.SettledRevision != revision) {
 				return kernel.ErrExecutionConflict
 			}
 		}
 		result := tx.Model(&models.KernelChildEffectGrantRecord{}).
-			Where("grant_id = ? AND child_run_id = ? AND (settled_revision = 0 OR settled_revision = ?)",
-				grant.ID, grant.ChildRunID, revision).Update("settled_revision", revision)
+			Where("grant_id = ? AND child_run_id = ? AND start_revision = ? AND (settled_revision = 0 OR settled_revision = ?)",
+				grant.ID, grant.ChildRunID, grant.ExpectedRevision, revision).Update("settled_revision", revision)
 		if result.Error != nil {
 			return translateKernelApplyError(result.Error)
 		}
@@ -168,7 +175,7 @@ func (store *KernelStore) MarkChildExecutionSettled(ctx context.Context, grant k
 }
 
 func (store *KernelStore) FinishChildExecution(ctx context.Context, grant kernel.ChildExecutionGrant) error {
-	if store == nil || store.db == nil || ctx == nil || grant.ID == "" || grant.ChildRunID == "" {
+	if store == nil || store.db == nil || ctx == nil || grant.ID == "" || grant.ChildRunID == "" || grant.ExpectedRevision == 0 {
 		return kernel.ErrInvalidInput
 	}
 	return store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -185,15 +192,15 @@ func (store *KernelStore) FinishChildExecution(ctx context.Context, grant kernel
 			return kernel.ErrExecutionConflict
 		}
 		if countErr := tx.Model(&models.KernelChildEffectGrantRecord{}).
-			Where("grant_id = ? AND child_run_id = ? AND settled_revision = ?", grant.ID, grant.ChildRunID, child.Revision).
+			Where("grant_id = ? AND child_run_id = ? AND start_revision = ? AND settled_revision = ?", grant.ID, grant.ChildRunID, grant.ExpectedRevision, child.Revision).
 			Count(&count).Error; countErr != nil {
 			return translateKernelError(countErr)
 		}
 		if count != total {
 			return kernel.ErrExecutionConflict
 		}
-		result := tx.Where("grant_id = ? AND child_run_id = ? AND settled_revision = ?",
-			grant.ID, grant.ChildRunID, child.Revision).Delete(&models.KernelChildEffectGrantRecord{})
+		result := tx.Where("grant_id = ? AND child_run_id = ? AND start_revision = ? AND settled_revision = ?",
+			grant.ID, grant.ChildRunID, grant.ExpectedRevision, child.Revision).Delete(&models.KernelChildEffectGrantRecord{})
 		if result.Error != nil {
 			return translateKernelApplyError(result.Error)
 		}
@@ -216,10 +223,11 @@ func (store *KernelStore) LookupChildExecution(ctx context.Context, childID stri
 		return kernel.ChildExecutionGrant{}, kernel.ErrNotFound
 	}
 	id := rows[0].GrantID
+	revision := rows[0].StartRevision
 	for _, row := range rows {
-		if row.GrantID != id {
+		if row.GrantID != id || row.StartRevision != revision || revision == 0 {
 			return kernel.ChildExecutionGrant{}, kernel.ErrExecutionConflict
 		}
 	}
-	return kernel.ChildExecutionGrant{ID: id, ChildRunID: childID}, nil
+	return kernel.ChildExecutionGrant{ID: id, ChildRunID: childID, ExpectedRevision: revision}, nil
 }

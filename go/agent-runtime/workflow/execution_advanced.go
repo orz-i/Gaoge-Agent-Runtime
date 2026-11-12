@@ -523,6 +523,7 @@ func (runner *Runner) applyEffectOutcomes(
 		}
 		switch outcome.Result.Disposition {
 		case DispositionPending:
+			effect.PhysicalNoEffect = false
 			continue
 		case DispositionCompleted:
 			if strings.TrimSpace(outcome.Result.ReceiptID) == "" || !json.Valid(outcome.Result.Output) ||
@@ -543,6 +544,10 @@ func (runner *Runner) applyEffectOutcomes(
 			state.Budget.CostUnitsReserved -= effect.MaxCostUnits
 			state.Budget.CostUnitsUsed += effect.CostUnits
 		case DispositionFailed:
+			// Trust only the original statically composed Executor's
+			// explicit PhysicalNoEffect attestation. No external result or
+			// transport timeout is assumed to be pre-dispatch.
+			effect.PhysicalNoEffect = outcome.Result.PhysicalNoEffect
 			code := strings.TrimSpace(outcome.Result.ErrorCode)
 			if code == "" {
 				code = "workflow.effect_failed"

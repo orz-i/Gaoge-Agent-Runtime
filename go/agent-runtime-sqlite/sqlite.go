@@ -16,7 +16,7 @@ import (
 )
 
 // Pre-stable hard cut: immutable parented Runs and durable child effect Grants.
-const schemaVersion = 2
+const schemaVersion = 3
 
 var (
 	ErrUnsupportedSchema = errors.New("unsupported SQLite runtime schema")
@@ -300,7 +300,7 @@ func (s *Store) initialize(ctx context.Context, create bool) error {
 				return fmt.Errorf("create SQLite runtime schema: %w", err)
 			}
 		}
-		if _, err = tx.ExecContext(ctx, "PRAGMA user_version = 2"); err != nil {
+		if _, err = tx.ExecContext(ctx, "PRAGMA user_version = 3"); err != nil {
 			return err
 		}
 		if err = tx.Commit(); err != nil {
@@ -338,6 +338,7 @@ var schemaDDL = []string{
 		grant_id TEXT NOT NULL,
 		parent_run_id TEXT NOT NULL REFERENCES runtime_runs(run_id),
 		child_run_id TEXT NOT NULL REFERENCES runtime_runs(run_id),
+		start_revision INTEGER NOT NULL,
 		settled_revision INTEGER NOT NULL DEFAULT 0,
 		PRIMARY KEY(grant_id,parent_run_id)
 	)`,
