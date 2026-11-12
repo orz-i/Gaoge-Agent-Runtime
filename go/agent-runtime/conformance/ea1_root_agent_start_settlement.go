@@ -81,6 +81,7 @@ type ea1StartSettlementPhysical struct {
 	rt              *kernel.Runtime
 	tool            bool
 	requests        []model.Request
+	responses       []model.Response
 	intents         []agent.ModelInvocation
 	toolInvocations []plugin.ToolInvocation
 	toolRequests    []tools.ExecutionRequest
@@ -135,6 +136,9 @@ func (p *ea1StartSettlementPhysical) Generate(ctx context.Context, req model.Req
 		response.Continue = false
 		response.ToolCalls = []tools.Call{{ID: "original-call", ToolKey: "effect", Arguments: json.RawMessage(`{"source":"original"}`)}}
 	}
+	p.mu.Lock()
+	p.responses = append(p.responses, model.CloneResponse(response))
+	p.mu.Unlock()
 	return response, nil
 }
 func (p *ea1StartSettlementPhysical) Tool(ctx context.Context, inv plugin.ToolInvocation, next plugin.ToolNext) (tools.ExecutionResult, error) {
@@ -296,7 +300,7 @@ func ea1AssertStartSettlementReceipt(t *testing.T, p *ea1StartSettlementPhysical
 	t.Helper()
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if len(p.requests) != 1 || len(p.intents) != 1 || p.hostCalls != 1 || (p.hostUnknown && p.hostSends != 1) {
+	if len(p.requests) != 1 || len(p.responses) != 1 || len(p.intents) != 1 || p.hostCalls != 1 || (p.hostUnknown && p.hostSends != 1) {
 		t.Fatal("physical callback replayed")
 	}
 	inv := p.intents[0]
@@ -321,6 +325,9 @@ func ea1AssertStartSettlementReceipt(t *testing.T, p *ea1StartSettlementPhysical
 	if settled.ID != inv.ID || settled.RequestHash != inv.RequestHash || settled.Provider != inv.Provider || settled.BindingFingerprint != inv.BindingFingerprint || settled.ExecutionAttempt != 1 || settled.DispatchAttempt != 1 || settled.Status != agent.ModelInvocationConsumed || settled.ProviderResponseID != "original-response" || settled.CompletedAt == nil || settled.ConsumedAt == nil || settled.Usage == nil || settled.Usage.InputTokens != 7 || settled.Usage.OutputTokens != 3 {
 		t.Fatal("consumed receipt not original physical result")
 	}
+	// Compare the whole provider response, including optional fields and raw JSON,
+	// through its persisted JSON representation rather than only receipt metadata.
+	ea1StartSettlementJSONEqual(t, "durable Model response", settled.Response, p.responses[0])
 	if s.Run.ID != req.ID || s.Run.ParentRunID != "" || s.Run.Actor != req.Actor || s.Run.Thread != req.Thread || s.Run.RequestID != req.RequestID || s.Run.Goal != req.Goal || !reflect.DeepEqual(view.Budget.Limits, req.Limits) {
 		t.Fatal("frozen Root source/budget changed")
 	}
@@ -331,6 +338,10 @@ func ea1AssertStartSettlementReceipt(t *testing.T, p *ea1StartSettlementPhysical
 		ti := p.toolInvocations[0]
 		tr := p.toolRequests[0]
 		receipt := p.receipts[0]
+		if s.Result == nil || s.Result.ContentType != "application/json" {
+			t.Fatal("terminal durable result missing or wrong content type")
+		}
+		ea1StartSettlementJSONEqual(t, "terminal durable Tool result", s.Result.Content, receipt.Content)
 		want := tools.ExecutionRequest{RunID: req.ID, Call: tools.Call{ID: "original-call", ToolKey: "effect", Arguments: json.RawMessage(`{"source":"original"}`)}}
 		// Agent binds the public Call.Name from the original catalog definition.
 		want.Call.Name = definition.Name
@@ -339,5 +350,27 @@ func ea1AssertStartSettlementReceipt(t *testing.T, p *ea1StartSettlementPhysical
 		}
 	} else if len(p.toolRequests) != 0 || s.Run.Status != kernel.RunStatusRunning || view.Budget.Usage.ToolCalls != 0 {
 		t.Fatal("model-only yield dispatched Tool or became terminal")
+	}
+}
+
+// JSON normalization preserves every serialized field while ignoring harmless
+// object-key order and whitespace changes introduced by durable storage.
+func ea1StartSettlementJSONEqual(t *testing.T, label string, actual, expected any) {
+	t.Helper()
+	normalize := func(value any) any {
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			t.Fatalf("%s marshal: %v", label, err)
+		}
+		decoder := json.NewDecoder(strings.NewReader(string(encoded)))
+		decoder.UseNumber()
+		var normalized any
+		if err := decoder.Decode(&normalized); err != nil {
+			t.Fatalf("%s normalize: %v", label, err)
+		}
+		return normalized
+	}
+	if !reflect.DeepEqual(normalize(actual), normalize(expected)) {
+		t.Fatalf("%s differs from actual physical return: got %#v want %#v", label, actual, expected)
 	}
 }

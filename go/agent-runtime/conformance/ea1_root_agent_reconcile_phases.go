@@ -104,6 +104,7 @@ func ea1RootReconcilePhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 		}
 		return model.CloneResponse(physical.response), nil
 	})
+	var verifiedToolResult tools.ExecutionResult
 	toolVerifier := agent.ToolOutcomeVerifierFunc(func(_ context.Context, r tools.ExecutionRequest) (tools.ExecutionResult, error) {
 		lookups++
 		if len(physical.tools) != 1 || !ea1RecoveryJSONEqual(r, physical.tools[0]) {
@@ -115,7 +116,8 @@ func ea1RootReconcilePhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 		if unavailable {
 			return tools.ExecutionResult{}, agent.ErrToolOutcomeUnknown
 		}
-		return tools.ExecutionResult{Content: json.RawMessage(`{"committed":true}`), Receipt: tools.Receipt{ExecutionID: r.Call.ID, Disposition: "committed"}}, nil
+		verifiedToolResult = tools.ExecutionResult{Content: json.RawMessage(`{"committed":true}`), Receipt: tools.Receipt{ExecutionID: r.Call.ID, Disposition: "committed"}}
+		return tools.CloneExecutionResult(verifiedToolResult), nil
 	})
 	runnerFor := func(runtime *kernel.Runtime, owner string) *agent.Runner {
 		var host []plugin.RunMiddleware
@@ -282,10 +284,27 @@ func ea1RootReconcilePhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 				t.Fatalf("original owner not active during receipt-only lookup: %v", e)
 			}
 			_, e := competitor.Apply(t.Context(), request.ID, before.Run.Revision, kernel.Mutation{Status: kernel.RunStatusRunning, State: before.State, Checkpoint: before.Checkpoint})
-			if !errors.Is(e, kernel.ErrChildExecutionBusy) {
-				t.Fatalf("Apply escaped recovery fence: %v", e)
+			if !errors.Is(e, kernel.ErrExecutionRequired) {
+				t.Fatalf("unbound Apply escaped native authority gate: %v", e)
 			}
 			unchanged(competitor)
+			if e = peer.(kernel.ExecutionStore).CheckExecution(t.Context(), request.ID, &lease); e != nil {
+				t.Fatalf("unbound Apply revoked original owner: %v", e)
+			}
+			// Original native identity is valid, but WithExecution alone cannot
+			// mint the original physical scope's first-party write permit.
+			nativeOnly, e := competitor.WithExecution(lease)
+			if e != nil {
+				t.Fatal(e)
+			}
+			_, e = nativeOnly.Apply(t.Context(), request.ID, before.Run.Revision, kernel.Mutation{Status: kernel.RunStatusRunning, State: before.State, Checkpoint: before.Checkpoint})
+			if !errors.Is(e, kernel.ErrChildExecutionBusy) {
+				t.Fatalf("native-only Apply escaped physical recovery fence: %v", e)
+			}
+			unchanged(competitor)
+			if e = peer.(kernel.ExecutionStore).CheckExecution(t.Context(), request.ID, &lease); e != nil {
+				t.Fatalf("native-only Apply revoked original owner: %v", e)
+			}
 			_, e = competitor.Cancel(t.Context(), request.ID, before.Run.Revision, "competing cancel")
 			if !errors.Is(e, kernel.ErrChildExecutionBusy) {
 				t.Fatalf("Cancel escaped: %v", e)
@@ -380,7 +399,7 @@ func ea1RootReconcilePhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 				Result tools.ExecutionResult `json:"result"`
 			} `json:"recoveredTools"`
 		}
-		if json.Unmarshal(committed.State, &state) != nil || state.ToolDispatchID != "" || len(state.RecoveredTools) != 1 || !ea1RecoveryJSONEqual(state.RecoveredTools[0].Call, physical.tools[0].Call) || state.RecoveredTools[0].Result.Receipt.ExecutionID != "original-tool-call" || state.RecoveredTools[0].Result.Receipt.Disposition != "committed" {
+		if json.Unmarshal(committed.State, &state) != nil || state.ToolDispatchID != "" || len(state.RecoveredTools) != 1 || !ea1RecoveryJSONEqual(state.RecoveredTools[0].Call, physical.tools[0].Call) || state.RecoveredTools[0].Result.Receipt.ExecutionID != "original-tool-call" || state.RecoveredTools[0].Result.Receipt.Disposition != "committed" || !ea1RecoveryJSONEqual(tools.CloneExecutionResult(state.RecoveredTools[0].Result), tools.CloneExecutionResult(verifiedToolResult)) {
 			t.Fatal("original Tool receipt not durable")
 		}
 	}
