@@ -10,6 +10,7 @@ import (
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
@@ -26,10 +27,16 @@ func ea1RootBoundedTool(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 		}
 		t.Run("P1/"+name, func(t *testing.T) {
 			backing, peer := factory(t)
-			rt := ea1StartRuntime(t, backing)
+			wrapped := ea1AgentAdmissionWrap(t, backing)
+			rt := ea1StartRuntime(t, wrapped)
 			observer := ea1StartRuntime(t, peer)
 			request := ea1AdmissionRequest()
 			request.ToolKeys = []string{"effect"}
+			frozenBytes, marshalErr := json.Marshal(request)
+			if marshalErr != nil {
+				t.Fatal(marshalErr)
+			}
+			request.OriginFingerprint = agent.FrozenOriginFingerprint(frozenBytes)
 			physical := &ea1UnknownAgentPhysical{tool: true, rt: observer}
 			registry, err := tools.NewRegistry([]tools.Registration{{Definition: tools.Definition{Key: "effect", Name: "Effect", InputSchema: json.RawMessage(`{"type":"object"}`)}, Handler: tools.HandlerFunc(func(_ context.Context, req tools.ExecutionRequest) (tools.ExecutionResult, error) {
 				if req.RunID != request.ID || req.Call.ID != "original-tool-call" || string(req.Call.Arguments) != `{"source":"original"}` {
@@ -59,11 +66,21 @@ func ea1RootBoundedTool(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 			if err != nil {
 				t.Fatal(err)
 			}
+			var origin kernel.Snapshot
+			wrapped.afterCreate = func(_ context.Context, created kernel.Snapshot) error {
+				if !runner.VerifyFrozenStartRequest(created, request) {
+					return errors.New("actual Create did not preserve full original Start policy")
+				}
+				origin = created
+				origin.State = append(json.RawMessage(nil), created.State...)
+				return nil
+			}
 			result, callErr := runner.StartRun(t.Context(), request)
 			models, toolCalls := physical.counts()
-			if models != 2 || toolCalls != 1 || result.Run.Status != kernel.RunStatusCompleted || !runner.VerifyFrozenStartRequest(result, request) {
+			if models != 2 || toolCalls != 1 || result.Run.Status != kernel.RunStatusCompleted {
 				t.Fatalf("original known Tool business result changed: models=%d tools=%d status=%s err=%v", models, toolCalls, result.Run.Status, callErr)
 			}
+			ea1BoundedToolOrigin(t, origin, result, request)
 			if bounded {
 				if callErr != nil || len(ports.items) != 2 || ports.items[0].status != "started" || ports.items[1].status != "failed" || ports.items[1].parent != ports.items[0].id || !tools.ValidRecoverableNoEffectReceipt(ports.items[1].result, tools.NewRecoverableCallErrorAllowCompletion("fixture.known_no_effect", "original request was not applied", nil), "original-tool-call") {
 					t.Fatalf("bounded original timeline not settled: %+v err=%v", ports.items, callErr)
@@ -148,4 +165,52 @@ func (p *ea1BoundedTimelinePorts) AppendToolTimeline(_ context.Context, scope ag
 	id := "timeline:" + inv.Request.Call.ID + ":" + status
 	p.items = append(p.items, ea1TimelineItem{id: id, status: status, parent: parent, result: tools.CloneExecutionResult(result)})
 	return id, nil
+}
+
+// Verify the initial policy at actual Create, then compare immutable facts
+// after the intentional, exact capability-refusal guidance insertion. The
+// production initial-prefix verifier is unchanged.
+func ea1BoundedToolOrigin(t *testing.T, before, after kernel.Snapshot, request agent.StartRequest) {
+	t.Helper()
+	a, b := before.Run, after.Run
+	if a.ID == "" || a.ID != b.ID || a.Kind != b.Kind || a.Actor != b.Actor || a.Thread != b.Thread || a.RequestID != b.RequestID || a.ParentRunID != b.ParentRunID || a.Goal != b.Goal || !a.CreatedAt.Equal(b.CreatedAt) || !reflect.DeepEqual(a.DeadlineAt, b.DeadlineAt) {
+		t.Fatal("completed Tool changed original Run identity")
+	}
+	var initial, final map[string]json.RawMessage
+	if err := json.Unmarshal(before.State, &initial); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(after.State, &final); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"originFingerprint", "model", "modelOptions", "toolKeys", "requiredToolKeys", "hostedToolGrants", "outputContract"} {
+		if string(initial[key]) != string(final[key]) {
+			t.Fatalf("completed Tool changed original source field %s", key)
+		}
+	}
+	var fingerprint string
+	if err := json.Unmarshal(final["originFingerprint"], &fingerprint); err != nil || fingerprint != request.OriginFingerprint || fingerprint == "" {
+		t.Fatal("original request fingerprint missing")
+	}
+	var initialBudget, finalBudget map[string]json.RawMessage
+	if err := json.Unmarshal(initial["budget"], &initialBudget); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(final["budget"], &finalBudget); err != nil {
+		t.Fatal(err)
+	}
+	if string(initialBudget["limits"]) != string(finalBudget["limits"]) {
+		t.Fatal("completed Tool changed effective original limits")
+	}
+	var initialMessages, finalMessages []model.Message
+	if err := json.Unmarshal(initial["messages"], &initialMessages); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(final["messages"], &finalMessages); err != nil {
+		t.Fatal(err)
+	}
+	guidance := model.Message{Role: model.RoleSystem, Content: model.TextParts("The unavailable capability cannot be recovered by repeating the same Tool call. A truthful final answer reporting missing sources is allowed now; do not fabricate evidence or citations.")}
+	if len(initialMessages) != 1 || len(finalMessages) < 2 || !reflect.DeepEqual(finalMessages[0], guidance) || !reflect.DeepEqual(finalMessages[1], initialMessages[0]) {
+		t.Fatal("capability guidance or original user source changed")
+	}
 }

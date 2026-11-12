@@ -69,7 +69,7 @@ func TestRootAgentCorrectsWorkflowRevisionTypeBeforeStartingChild(t *testing.T) 
 func TestOrdinaryToolTimelineCannotClaimBoundedRecovery(t *testing.T) {
 	fixture := newCapabilityToolFixtureWithTimeline(t, false)
 	fixture.model.correctArguments = true
-	request := harness.StartRequest{HostThread: harness.HostRef{Kind: testThreadKind, ID: "opaque-capability-thread"}, HostTurn: harness.HostRef{Kind: testContextHostKind, ID: "opaque-capability-turn"}, Actor: kernel.ActorRef{TenantID: testTenant, ActorID: testActor}, Thread: kernel.ThreadRef{Kind: testThreadKind, ID: "opaque-capability-thread"}, RequestID: "opaque-capability-request", Goal: "coordinate the workflow", Config: harness.ConfigSnapshot{Model: "fixture", Commands: fixtureCapabilityCommands(), ToolKeys: []string{harness.CapabilityInvocationToolKey}}}
+	request := harness.StartRequest{HostThread: harness.HostRef{Kind: testThreadKind, ID: "capability-thread"}, HostTurn: harness.HostRef{Kind: testContextHostKind, ID: "capability-turn"}, Actor: kernel.ActorRef{TenantID: testTenant, ActorID: testActor}, Thread: kernel.ThreadRef{Kind: testThreadKind, ID: "capability-thread"}, RequestID: "capability-request", Goal: "coordinate the workflow", Config: harness.ConfigSnapshot{Model: "fixture", Commands: fixtureCapabilityCommands(), ToolKeys: []string{harness.CapabilityInvocationToolKey}}}
 	_, err := fixture.runner.StartAgentTurn(t.Context(), request)
 	if !errors.Is(err, agent.ErrRootOutcomeUnknown) {
 		t.Fatalf("ordinary Tool callback claimed bounded completion: %v", err)
