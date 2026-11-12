@@ -25,7 +25,7 @@ func TestVerifiedApprovalRollbackRetainsEpochAndWait(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = store.Close() }()
-	testAdapter := &controlTestFencedCreateStore{Store: store, execution: store}
+	testAdapter := &controlTestFencedCreateStore{Store: store}
 	starting, err := kernel.New(kernel.Dependencies{Store: testAdapter})
 	if err != nil {
 		t.Fatal(err)
