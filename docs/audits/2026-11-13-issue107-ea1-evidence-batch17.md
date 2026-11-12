@@ -23,3 +23,7 @@ Resume accepts an existing Run and expected revision; it does not accept replace
 All checks passed at the first frozen source; no B17 failure log was discarded. This test-only batch does not repeat full module race runs. Latest complete four-module race evidence remains B14 source `a774e5c`, not this commit. Final same-source full local gates, remaining Runtime matrix rows and independent H-FROZEN/remote authorization restrictions remain outstanding. Strict matrix checker must remain NO-GO.
 
 Independent bounded source review accepted the six-cell implementation with no concrete blocking finding; durable evidence signoff follows separately. Disk remained about 9.2 GiB available, cache cleanup zero. Next frozen batch is Child ResolveApproval P0–P5, with explicit-native checkpoint continuation and legitimate default-child inline Tool execution kept distinct.
+
+## Independent durable signoff
+
+Independent reviewer verified fixed blobs at `a8d72420c248eedde1bd3ce6b680276ba30027bc` against source `606a7f559801e8f64d72dfc5c1f0aca4c90f5e80`: eight matching log hashes/source/zero exits, no skipped tests, both real PG suites actually three times. Only AC-R's six rows change to PASS; the other 138 remain byte-identical and Go source has no drift. Inventory, strict NO-GO and six checker tests agree with 116 PASS / 28 UNRUN. The actual Begin barrier, initial smoke success, no discarded B17 failures and historical full-race limitations are accurately recorded. No tests were rerun by review; this is only batch signoff.
