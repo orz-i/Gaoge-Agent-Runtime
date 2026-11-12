@@ -136,7 +136,39 @@ func (f *ea1ChildControlFixture) assertResolved(s kernel.Snapshot) {
 	cp := s.Checkpoint
 	original := f.waiting.Checkpoint
 	actual := f.approval.resolved
-	if cp == nil || actual == nil || cp.Status != kernel.CheckpointResolved || cp.ResolvedAt == nil || cp.ID != original.ID || cp.Kind != original.Kind || cp.RunID != original.RunID || !cp.CreatedAt.Equal(original.CreatedAt) || !reflect.DeepEqual(cp.Payload, original.Payload) {
+	// This assertion is used only on resolved Running snapshots before
+	// Tool receipt consumption. Terminal snapshots legitimately clear both
+	// Checkpoint and pendingApproval and are checked by terminal Result instead.
+	if s.Run.Status != kernel.RunStatusRunning || s.Run.ID != f.request.ID || s.Run.ID != f.waiting.Run.ID ||
+		s.Run.ParentRunID != f.waiting.Run.ParentRunID || s.Run.Actor != f.waiting.Run.Actor ||
+		s.Run.Thread != f.waiting.Run.Thread || s.Run.RequestID != f.waiting.Run.RequestID {
+		t.Fatal("resolved checkpoint belongs to a different original Run")
+	}
+	var before, current struct {
+		PendingApproval json.RawMessage `json:"pendingApproval"`
+	}
+	if json.Unmarshal(f.waiting.State, &before) != nil || json.Unmarshal(s.State, &current) != nil ||
+		len(before.PendingApproval) == 0 || string(before.PendingApproval) == "null" {
+		t.Fatal("original approval binding absent")
+	}
+	ea1StartSettlementJSONEqual(t, "original complete pending approval binding", current.PendingApproval, before.PendingApproval)
+	var binding struct {
+		CheckpointID string `json:"checkpointID"`
+		CallID       string `json:"callID"`
+		ToolKey      string `json:"toolKey"`
+	}
+	if json.Unmarshal(current.PendingApproval, &binding) != nil || binding.CheckpointID != original.ID ||
+		binding.CallID != f.approval.call.ID || binding.ToolKey != f.approval.call.ToolKey {
+		t.Fatal("resolved checkpoint detached from original approved Call")
+	}
+	var payload interaction.ApprovalRequest
+	if json.Unmarshal(original.Payload, &payload) != nil {
+		t.Fatal("original approval payload invalid")
+	}
+	ea1StartSettlementJSONEqual(t, "full original approval payload", payload, interaction.ApprovalRequest{
+		ToolCallID: f.approval.call.ID, ToolKey: f.approval.call.ToolKey, ToolName: f.approval.call.Name, Arguments: f.approval.call.Arguments,
+	})
+	if cp == nil || actual == nil || cp.Status != kernel.CheckpointResolved || cp.ResolvedAt == nil || cp.ID != original.ID || cp.Kind != original.Kind || !cp.CreatedAt.Equal(original.CreatedAt) || !reflect.DeepEqual(cp.Payload, original.Payload) {
 		t.Fatal("approval checkpoint original identity/payload changed")
 	}
 	ea1StartSettlementJSONEqual(t, "actual full resolved checkpoint", cp, actual)
