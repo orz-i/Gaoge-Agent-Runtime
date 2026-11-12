@@ -10,6 +10,14 @@ import (
 func TestEA1WorkflowRecoveryBoundariesGORM(t *testing.T) {
 	conformance.RunEA1WorkflowRecoveryBoundariesSuite(t, func(t *testing.T) (kernel.Store, func() (kernel.Store, kernel.Store)) {
 		db := openKernelStoreTestDB(t)
+		// This auxiliary GORM-SQLite dialect serializes SQL transactions;
+		// both actual runners still capture the Grant before the Finish barrier.
+		// Independent connection competition is certified by native SQLite/PG.
+		sqlDB, err := db.DB()
+		if err != nil {
+			t.Fatal(err)
+		}
+		sqlDB.SetMaxOpenConns(1)
 		return NewKernelStore(db), func() (kernel.Store, kernel.Store) { return NewKernelStore(db), NewKernelStore(db) }
 	})
 }
