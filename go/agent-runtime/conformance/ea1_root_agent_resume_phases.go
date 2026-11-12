@@ -392,9 +392,10 @@ func ea1RootResumeUnknown(t *testing.T, factory func(*testing.T) (kernel.Store, 
 	for range 2 {
 		_, e = next.Resume(t.Context(), f.request.ID, before.Run.Revision)
 		want := agent.ErrRootOutcomeUnknown
-		if kind == "model" {
+		switch kind {
+		case "model":
 			want = agent.ErrModelOutcomeUnknown
-		} else if kind == "tool" {
+		case "tool":
 			want = agent.ErrToolOutcomeUnknown
 		}
 		if !errors.Is(e, want) {
