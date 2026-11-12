@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -195,9 +196,29 @@ func ea1ChildRecoveryHost(t *testing.T, factory func(*testing.T) (kernel.Store, 
 	parent := ea1ChildRecoveryParent(t, rt)
 	physical := &ea1AdmissionModel{}
 	host := &ea1UnknownHostMiddleware{failure: errors.New("original child Host sent, no receipt")}
-	makeRunner := func(runtime *kernel.Runtime) *agent.Runner { return ea1AdmissionRunner(t, runtime, physical, host) }
+	var originalRequest agent.StartRequest
+	makeRunner := func(runtime *kernel.Runtime) *agent.Runner {
+		r, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: physical, RunExecution: &agent.RunExecution{OwnerID: "original-owner", LeaseDuration: 3 * time.Minute}, RunMiddleware: []plugin.RunMiddleware{host}, StartControlPreflight: func(ctx context.Context, req agent.StartRequest) error {
+			if !reflect.DeepEqual(req, originalRequest) {
+				return agent.ErrInvalidRequest
+			}
+			p, e := runtime.Load(ctx, req.ParentRunID)
+			if e != nil {
+				return e
+			}
+			if !reflect.DeepEqual(p, parent) {
+				return agent.ErrInvalidRequest
+			}
+			return nil
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
 	runner := makeRunner(rt)
 	request := agent.StartRequest{ID: "original-child", ParentRunID: parent.Run.ID, RequestID: "effect", OriginFingerprint: agent.FrozenOriginFingerprint([]byte(`{"original":true}`)), Actor: parent.Run.Actor, Thread: parent.Run.Thread, Goal: "original Host callback", Model: "original-model"}
+	originalRequest = request
 	// PrepareRun also invokes configured RunMiddleware. Build isolated invalid
 	// inputs with a separate no-middleware native setup runner, so the unknown
 	// Host effect occurs only in the actual original Start under test.
