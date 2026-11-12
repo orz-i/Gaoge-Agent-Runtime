@@ -1,0 +1,71 @@
+SOURCE_SHA=0c6fe33c43b5f1bebbafedd4defa6167607c8659
+EXIT_CODE=0
+=== RUN   TestEA1RealPostgresResumeUnknown
+=== RUN   TestEA1RealPostgresResumeUnknown/root
+=== RUN   TestEA1RealPostgresResumeUnknown/child
+--- PASS: TestEA1RealPostgresResumeUnknown (0.47s)
+    --- PASS: TestEA1RealPostgresResumeUnknown/root (0.24s)
+    --- PASS: TestEA1RealPostgresResumeUnknown/child (0.23s)
+=== RUN   TestEA1RealPostgresWaitMarkAck
+=== RUN   TestEA1RealPostgresWaitMarkAck/root
+=== RUN   TestEA1RealPostgresWaitMarkAck/child
+--- PASS: TestEA1RealPostgresWaitMarkAck (0.56s)
+    --- PASS: TestEA1RealPostgresWaitMarkAck/root (0.21s)
+    --- PASS: TestEA1RealPostgresWaitMarkAck/child (0.35s)
+=== RUN   TestEA1RealPostgresWaitBarriers
+=== RUN   TestEA1RealPostgresWaitBarriers/root/P1
+=== RUN   TestEA1RealPostgresWaitBarriers/root/P3
+=== RUN   TestEA1RealPostgresWaitBarriers/child/P1
+=== RUN   TestEA1RealPostgresWaitBarriers/child/P3
+--- PASS: TestEA1RealPostgresWaitBarriers (1.06s)
+    --- PASS: TestEA1RealPostgresWaitBarriers/root/P1 (0.23s)
+    --- PASS: TestEA1RealPostgresWaitBarriers/root/P3 (0.23s)
+    --- PASS: TestEA1RealPostgresWaitBarriers/child/P1 (0.32s)
+    --- PASS: TestEA1RealPostgresWaitBarriers/child/P3 (0.27s)
+=== RUN   TestEA1RealPostgresResumeUnknown
+=== RUN   TestEA1RealPostgresResumeUnknown/root
+=== RUN   TestEA1RealPostgresResumeUnknown/child
+--- PASS: TestEA1RealPostgresResumeUnknown (0.43s)
+    --- PASS: TestEA1RealPostgresResumeUnknown/root (0.20s)
+    --- PASS: TestEA1RealPostgresResumeUnknown/child (0.23s)
+=== RUN   TestEA1RealPostgresWaitMarkAck
+=== RUN   TestEA1RealPostgresWaitMarkAck/root
+=== RUN   TestEA1RealPostgresWaitMarkAck/child
+--- PASS: TestEA1RealPostgresWaitMarkAck (0.43s)
+    --- PASS: TestEA1RealPostgresWaitMarkAck/root (0.21s)
+    --- PASS: TestEA1RealPostgresWaitMarkAck/child (0.23s)
+=== RUN   TestEA1RealPostgresWaitBarriers
+=== RUN   TestEA1RealPostgresWaitBarriers/root/P1
+=== RUN   TestEA1RealPostgresWaitBarriers/root/P3
+=== RUN   TestEA1RealPostgresWaitBarriers/child/P1
+=== RUN   TestEA1RealPostgresWaitBarriers/child/P3
+--- PASS: TestEA1RealPostgresWaitBarriers (0.90s)
+    --- PASS: TestEA1RealPostgresWaitBarriers/root/P1 (0.19s)
+    --- PASS: TestEA1RealPostgresWaitBarriers/root/P3 (0.18s)
+    --- PASS: TestEA1RealPostgresWaitBarriers/child/P1 (0.26s)
+    --- PASS: TestEA1RealPostgresWaitBarriers/child/P3 (0.26s)
+=== RUN   TestEA1RealPostgresResumeUnknown
+=== RUN   TestEA1RealPostgresResumeUnknown/root
+=== RUN   TestEA1RealPostgresResumeUnknown/child
+--- PASS: TestEA1RealPostgresResumeUnknown (0.73s)
+    --- PASS: TestEA1RealPostgresResumeUnknown/root (0.30s)
+    --- PASS: TestEA1RealPostgresResumeUnknown/child (0.43s)
+=== RUN   TestEA1RealPostgresWaitMarkAck
+=== RUN   TestEA1RealPostgresWaitMarkAck/root
+=== RUN   TestEA1RealPostgresWaitMarkAck/child
+--- PASS: TestEA1RealPostgresWaitMarkAck (0.42s)
+    --- PASS: TestEA1RealPostgresWaitMarkAck/root (0.22s)
+    --- PASS: TestEA1RealPostgresWaitMarkAck/child (0.20s)
+=== RUN   TestEA1RealPostgresWaitBarriers
+=== RUN   TestEA1RealPostgresWaitBarriers/root/P1
+=== RUN   TestEA1RealPostgresWaitBarriers/root/P3
+=== RUN   TestEA1RealPostgresWaitBarriers/child/P1
+=== RUN   TestEA1RealPostgresWaitBarriers/child/P3
+--- PASS: TestEA1RealPostgresWaitBarriers (0.77s)
+    --- PASS: TestEA1RealPostgresWaitBarriers/root/P1 (0.17s)
+    --- PASS: TestEA1RealPostgresWaitBarriers/root/P3 (0.18s)
+    --- PASS: TestEA1RealPostgresWaitBarriers/child/P1 (0.22s)
+    --- PASS: TestEA1RealPostgresWaitBarriers/child/P3 (0.21s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	7.182s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]

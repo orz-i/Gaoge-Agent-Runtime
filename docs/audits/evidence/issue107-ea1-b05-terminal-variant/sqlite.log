@@ -1,0 +1,29 @@
+SOURCE_SHA=0c6fe33c43b5f1bebbafedd4defa6167607c8659
+EXIT_CODE=0
+=== RUN   TestEA1ResumeUnknownNativeSQLite
+=== RUN   TestEA1ResumeUnknownNativeSQLite/root
+=== RUN   TestEA1ResumeUnknownNativeSQLite/child
+--- PASS: TestEA1ResumeUnknownNativeSQLite (0.22s)
+    --- PASS: TestEA1ResumeUnknownNativeSQLite/root (0.11s)
+    --- PASS: TestEA1ResumeUnknownNativeSQLite/child (0.11s)
+=== RUN   TestEA1WaitMarkAckNativeSQLite
+=== RUN   TestEA1WaitMarkAckNativeSQLite/root
+=== RUN   TestEA1WaitMarkAckNativeSQLite/child
+--- PASS: TestEA1WaitMarkAckNativeSQLite (0.21s)
+    --- PASS: TestEA1WaitMarkAckNativeSQLite/root (0.10s)
+    --- PASS: TestEA1WaitMarkAckNativeSQLite/child (0.10s)
+=== RUN   TestEA1WaitBarriersSQLite
+=== RUN   TestEA1WaitBarriersSQLite/root/P1
+=== RUN   TestEA1WaitBarriersSQLite/root/P3
+=== RUN   TestEA1WaitBarriersSQLite/child/P1
+=== RUN   TestEA1WaitBarriersSQLite/child/P3
+--- PASS: TestEA1WaitBarriersSQLite (0.37s)
+    --- PASS: TestEA1WaitBarriersSQLite/root/P1 (0.08s)
+    --- PASS: TestEA1WaitBarriersSQLite/root/P3 (0.10s)
+    --- PASS: TestEA1WaitBarriersSQLite/child/P1 (0.11s)
+    --- PASS: TestEA1WaitBarriersSQLite/child/P3 (0.08s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite	2.336s
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/examples/embedded	1.387s [no tests to run]
