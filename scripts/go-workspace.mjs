@@ -86,8 +86,13 @@ function checkTidy(cwd, modulePath) {
     const replaceCore = modulePath !== "go/agent-runtime";
     const replaceProvider = modulePath !== "go/agent-runtime" && modulePath !== "go/agent-runtime-provider";
     const replaceHarness = ["go/agent-runtime-harness-postgres", "go/agent-runtime-http", "go/agent-runtime-harness/examples/task-agent"].includes(modulePath);
+    // Harness integration tests exercise this same source cohort's three
+    // Kernel Stores; tidy must not resolve unreleased adapters from old tags.
+    const kernelTestReplaces = modulePath === "go/agent-runtime-harness-postgres"
+      ? ["agent-runtime-postgres", "agent-runtime-sqlite"].map((name) => `github.com/orz-i/Gaoge-Agent-Runtime/go/${name}`)
+      : [];
     const version = readFileSync(path.join(root, "VERSION"), "utf8").trim();
-    const localVersions = [replaceCore ? core : null, replaceHarness ? harness : null, replaceProvider ? provider : null].filter(Boolean)
+    const localVersions = [replaceCore ? core : null, replaceHarness ? harness : null, replaceProvider ? provider : null, ...kernelTestReplaces].filter(Boolean)
       .flatMap((name) => [`${name} v${version} `, `${name} v${version}/go.mod `]);
     // go mod tidy with temporary source replaces drops genuine release-tag
     // hashes from go.sum. Preserve exact current-cohort pins for direct
@@ -104,7 +109,11 @@ function checkTidy(cwd, modulePath) {
     if (replaceHarness) {
       run("go", ["mod", "edit", `-replace=${harness}=${path.relative(cwd, path.join(root, "go", "agent-runtime-harness"))}`], cwd);
     }
+    for (const name of kernelTestReplaces) {
+      run("go", ["mod", "edit", `-replace=${name}=${path.relative(cwd, path.join(root, "go", name.split("/").at(-1)))}`], cwd);
+    }
     run("go", ["mod", "tidy"], cwd);
+    for (const name of kernelTestReplaces) run("go", ["mod", "edit", `-dropreplace=${name}`], cwd);
     if (replaceCore) run("go", ["mod", "edit", `-dropreplace=${core}`], cwd);
     if (replaceProvider) run("go", ["mod", "edit", `-dropreplace=${provider}`], cwd);
     if (replaceHarness) {
