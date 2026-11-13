@@ -712,6 +712,80 @@ func ea1ChildCancelACKRecovery(t *testing.T, persistent bool) {
 	}
 	items := ea1ChildCancelItems(t, f.store, waiting.Turn.ID)
 	if !reflect.DeepEqual(ea1OnlyCancelIntent(t, items, waiting.Turn.ID, task.RunID), fault.intent) || !harness.VerifiedCancellationFenceReceipt(fault.intent, ea1CancelReceipts(items, fault.intent.ID)) || harness.ActiveCancellationFence(items) {
+		actualIntent := ea1OnlyCancelIntent(t, items, waiting.Turn.ID, task.RunID)
+		actualReceipts := ea1CancelReceipts(items, fault.intent.ID)
+		t.Logf("receipt diagnostics: Verified=%t ActiveFence=%t receiptList=%#v faultReceipt=%#v", harness.VerifiedCancellationFenceReceipt(fault.intent, actualReceipts), harness.ActiveCancellationFence(items), actualReceipts, fault.receipt)
+		ea1ChildCancelItemDiagnostic(t, "intent List versus Append", fault.intent, actualIntent)
+		for index, receipt := range actualReceipts {
+			ea1ChildCancelItemDiagnostic(t, fmt.Sprintf("receipt[%d] List versus Append", index), fault.receipt, receipt)
+		}
+		for _, source := range []struct {
+			name  string
+			store harness.Store
+		}{{"original", f.store}, {"peer", f.backend.peer}} {
+			gotIntent, readErr := source.store.GetItem(t.Context(), fault.intent.ID)
+			t.Logf("%s GetItem intent err=%v full=%#v", source.name, readErr, gotIntent)
+			if readErr == nil {
+				ea1ChildCancelItemDiagnostic(t, source.name+" Get intent versus Append", fault.intent, gotIntent)
+			}
+			gotReceipt, readErr := source.store.GetItem(t.Context(), fault.receipt.ID)
+			t.Logf("%s GetItem receipt err=%v full=%#v", source.name, readErr, gotReceipt)
+			if readErr == nil {
+				ea1ChildCancelItemDiagnostic(t, source.name+" Get receipt versus Append", fault.receipt, gotReceipt)
+			}
+		}
+		// Diagnose the remainder once, but only after actual authoritative
+		// receipt verification. Final FAIL is preserved regardless of outcome.
+		if harness.VerifiedCancellationFenceReceipt(actualIntent, actualReceipts) && !harness.ActiveCancellationFence(items) {
+			t.Log("diagnostic: close original+peer Host pools and reopen; retained Kernel/Features are not a cold restart")
+			diagnosticHost, diagnosticLedgers := f.backend.reopen()
+			reopenedItems, reopenErr := diagnosticHost.ListItems(t.Context(), waiting.Turn.ID, 0, 500)
+			t.Logf("reopen ListItems err=%v equal=%t expected=%#v actual=%#v", reopenErr, reflect.DeepEqual(items, reopenedItems), items, reopenedItems)
+			for index := 0; index < len(items) && index < len(reopenedItems); index++ {
+				ea1ChildCancelItemDiagnostic(t, fmt.Sprintf("reopen timeline index %d", index), items[index], reopenedItems[index])
+			}
+			reopenedLedger, ledgerErr := diagnosticLedgers.LoadBudget(t.Context(), waiting.Turn.ID)
+			ea1ChildCancelValueDiagnostic(t, "reopen full ledger", ledger, reopenedLedger, ledgerErr)
+			reopenedOwner, ownerErr := diagnosticHost.GetInvocation(t.Context(), root.ID)
+			ea1ChildCancelValueDiagnostic(t, "reopen original Invocation", root, reopenedOwner, ownerErr)
+			reopenedIntent, intentErr := diagnosticHost.GetItem(t.Context(), fault.intent.ID)
+			t.Logf("reopen Get intent err=%v", intentErr)
+			ea1ChildCancelItemDiagnostic(t, "reopen original intent", fault.intent, reopenedIntent)
+			reopenedReceipt, receiptErr := diagnosticHost.GetItem(t.Context(), fault.receipt.ID)
+			t.Logf("reopen Get receipt err=%v", receiptErr)
+			ea1ChildCancelItemDiagnostic(t, "reopen original receipt", fault.receipt, reopenedReceipt)
+			canContinue := reopenErr == nil && intentErr == nil && receiptErr == nil && ledgerErr == nil && ownerErr == nil && harness.VerifiedCancellationFenceReceipt(reopenedIntent, ea1CancelReceipts(reopenedItems, reopenedIntent.ID)) && !harness.ActiveCancellationFence(reopenedItems)
+			if canContinue {
+				later, laterErr := ea1ChildCancelRunner(t, f, diagnosticHost, diagnosticLedgers, f.relations).CancelSubtask(t.Context(), waiting.Turn.ID, task.ID, "diagnostic inspect original child receipt after reopen")
+				t.Logf("diagnostic later CancelSubtask err=%v snapshot=%#v", laterErr, later)
+				laterChild, childErr := f.physical.Store.Load(t.Context(), task.RunID)
+				ea1ChildCancelValueDiagnostic(t, "later Kernel child", child, laterChild, childErr)
+				laterParent, parentErr := f.physical.Store.Load(t.Context(), root.ExecutionRefID)
+				ea1ChildCancelValueDiagnostic(t, "later Kernel parent", parent, laterParent, parentErr)
+				laterLedger, laterLedgerErr := diagnosticLedgers.LoadBudget(t.Context(), waiting.Turn.ID)
+				ea1ChildCancelValueDiagnostic(t, "later full ledger", ledger, laterLedger, laterLedgerErr)
+				laterOwner, laterOwnerErr := diagnosticHost.GetInvocation(t.Context(), root.ID)
+				ea1ChildCancelValueDiagnostic(t, "later original Invocation", root, laterOwner, laterOwnerErr)
+				laterItems, laterItemsErr := diagnosticHost.ListItems(t.Context(), waiting.Turn.ID, 0, 500)
+				intentCount := 0
+				for _, item := range laterItems {
+					if item.ParentItemID == harness.CancellationFenceParentItemID {
+						intentCount++
+					}
+				}
+				t.Logf("later ListItems err=%v intentCount=%d activeFence=%t ControlCount=%d ToolCount=%d ModelCount=%d full=%#v", laterItemsErr, intentCount, harness.ActiveCancellationFence(laterItems), f.physical.controlCalls.Load(), f.toolCalls, f.model.calls, laterItems)
+				laterIntent, laterIntentErr := diagnosticHost.GetItem(t.Context(), fault.intent.ID)
+				t.Logf("later original intent Get err=%v", laterIntentErr)
+				ea1ChildCancelItemDiagnostic(t, "later original intent", fault.intent, laterIntent)
+				laterReceipt, laterReceiptErr := diagnosticHost.GetItem(t.Context(), fault.receipt.ID)
+				t.Logf("later original receipt Get err=%v", laterReceiptErr)
+				ea1ChildCancelItemDiagnostic(t, "later original receipt", fault.receipt, laterReceipt)
+			} else {
+				t.Log("UNEXECUTED: later CancelSubtask and post-Cancel Kernel/ledger/intent/receipt comparisons; reopen read/authoritative receipt guard did not succeed")
+			}
+		} else {
+			t.Log("UNEXECUTED: close/reopen and later CancelSubtask diagnostic; original authoritative receipt not verified or fence still active")
+		}
 		t.Fatal("actual ACK-lost original cancellation receipt missing")
 	}
 	// Close old Host and peer pools, then reopen only Host persistence. Kernel,
@@ -746,4 +820,44 @@ func ea1ChildCancelACKRecovery(t *testing.T, persistent bool) {
 
 func ea1ChildCancelExpectedToolRequest(childID string) tools.ExecutionRequest {
 	return tools.ExecutionRequest{RunID: childID, Call: tools.Call{ID: "ea1ChildCancel-call", ToolKey: ea1ChildCancelToolKey, Name: "read_evidence", Arguments: json.RawMessage(`{}`)}}
+}
+
+// Diagnostics only: no comparison or acceptance predicate is normalized.
+func ea1ChildCancelItemDiagnostic(t *testing.T, label string, want, actual harness.Item) {
+	t.Helper()
+	t.Logf("%s full expected=%#v actual=%#v", label, want, actual)
+	w, a := reflect.ValueOf(want), reflect.ValueOf(actual)
+	for index := 0; index < w.NumField(); index++ {
+		expected, got := w.Field(index).Interface(), a.Field(index).Interface()
+		if reflect.DeepEqual(expected, got) {
+			continue
+		}
+		name := w.Type().Field(index).Name
+		t.Logf("%s field %s expected=%#v actual=%#v", label, name, expected, got)
+		if wt, ok := expected.(time.Time); ok {
+			at := got.(time.Time)
+			t.Logf("%s time %s Equal=%t UTCDeepEqual=%t expectedLocation=%q(%p) actualLocation=%q(%p)", label, name, wt.Equal(at), reflect.DeepEqual(wt.UTC(), at.UTC()), wt.Location().String(), wt.Location(), at.Location().String(), at.Location())
+		}
+		if wr, ok := expected.(json.RawMessage); ok {
+			ar := got.(json.RawMessage)
+			var wj, aj any
+			we, ae := json.Unmarshal(wr, &wj), json.Unmarshal(ar, &aj)
+			t.Logf("%s JSON %s expected=%q actual=%q expectedDecode=%v actualDecode=%v decodedEqual=%t", label, name, string(wr), string(ar), we, ae, reflect.DeepEqual(wj, aj))
+		}
+	}
+}
+
+func ea1ChildCancelValueDiagnostic(t *testing.T, label string, want, actual any, err error) {
+	t.Helper()
+	t.Logf("%s err=%v equal=%t expected=%#v actual=%#v", label, err, reflect.DeepEqual(want, actual), want, actual)
+	w, a := reflect.ValueOf(want), reflect.ValueOf(actual)
+	if w.Kind() != reflect.Struct || a.Type() != w.Type() {
+		return
+	}
+	for index := 0; index < w.NumField(); index++ {
+		expected, got := w.Field(index).Interface(), a.Field(index).Interface()
+		if !reflect.DeepEqual(expected, got) {
+			t.Logf("%s field %s expected=%#v actual=%#v", label, w.Type().Field(index).Name, expected, got)
+		}
+	}
 }
