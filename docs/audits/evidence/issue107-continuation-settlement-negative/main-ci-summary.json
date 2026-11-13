@@ -1,0 +1,81 @@
+{
+  "checked_at": "2026-11-13T12:55:06.454215+00:00",
+  "runs": [
+    {
+      "run": "43427690755",
+      "head": "c79d2eea87952bc09d65cee2c4657215873c1262",
+      "status": "completed",
+      "conclusion": "failure",
+      "jobs": [
+        {
+          "name": "Unit, lint, and release consumers",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/orz-i/Gaoge-Agent-Runtime/actions/runs/43427690755/job/131893078571"
+        },
+        {
+          "name": "Go race detector",
+          "status": "completed",
+          "conclusion": "failure",
+          "url": "https://github.com/orz-i/Gaoge-Agent-Runtime/actions/runs/43427690755/job/131893078981"
+        },
+        {
+          "name": "OpenTelemetry Collector E2E",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/orz-i/Gaoge-Agent-Runtime/actions/runs/43427690755/job/131893079013"
+        },
+        {
+          "name": "PostgreSQL and Redis integration",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/orz-i/Gaoge-Agent-Runtime/actions/runs/43427690755/job/131893079035"
+        },
+        {
+          "name": "Windows release command safety",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/orz-i/Gaoge-Agent-Runtime/actions/runs/43427690755/job/131893079055"
+        },
+        {
+          "name": "Vulnerability audit",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/orz-i/Gaoge-Agent-Runtime/actions/runs/43427690755/job/131893079136"
+        },
+        {
+          "name": "Coverage gates",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/orz-i/Gaoge-Agent-Runtime/actions/runs/43427690755/job/131893079903"
+        },
+        {
+          "name": "Unit, race, lint, and release consumers",
+          "status": "completed",
+          "conclusion": "failure",
+          "url": "https://github.com/orz-i/Gaoge-Agent-Runtime/actions/runs/43427690755/job/131897587291"
+        }
+      ]
+    },
+    {
+      "run": "43427690818",
+      "head": "c79d2eea87952bc09d65cee2c4657215873c1262",
+      "status": "completed",
+      "conclusion": "success",
+      "jobs": [
+        {
+          "name": "analyze (go, manual)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/orz-i/Gaoge-Agent-Runtime/actions/runs/43427690818/job/131893078879"
+        },
+        {
+          "name": "analyze (javascript-typescript, none)",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://github.com/orz-i/Gaoge-Agent-Runtime/actions/runs/43427690818/job/131893079234"
+        }
+      ]
+    }
+  ]
+}
