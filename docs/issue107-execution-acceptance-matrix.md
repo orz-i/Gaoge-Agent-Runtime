@@ -1,6 +1,6 @@
 # Issue #107 — Fixed Execution Acceptance Matrix (EA-1)
 
-Status: **matrix inventory locked for WP-RUNTIME; no cell certified yet**.
+Status: **inventory unchanged; 138 Runtime cells locally accepted at `0a4009a8171f1726edaea895798d551051753400`; six H-FROZEN cells remain UNRUN. Overall release/remote-CI NO-GO.** See the [common-source acceptance report](audits/2026-11-13-issue107-runtime-common-source-acceptance.md) and exact ledger for evidence and limitations.
 Specification: [EA-1 contract](issue107-execution-authorization-contract.md).
 Baseline: Runtime `c17eeb49cc1d95b39f16c796edcd403d9b0a5ec2`, Gaoge `c7759dcb27d9ef193f5079be0473cff61626676a`.
 Issue: [#107](https://github.com/orz-i/Gaoge-Agent-Runtime/issues/107); Host [draft PR #69](https://github.com/orz-i/Gaoge/pull/69).
