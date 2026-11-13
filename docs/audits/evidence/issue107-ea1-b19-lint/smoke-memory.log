@@ -1,0 +1,46 @@
+SOURCE_SHA=181411d1c3e900e2d4dec33a097cc728365aee32
+COMMAND=go -C go/agent-runtime test -count=1 ./memory -run '^TestEA1ChildAgentCancelPhases' -v
+=== RUN   TestEA1ChildAgentCancelPhasesMemory
+=== RUN   TestEA1ChildAgentCancelPhasesMemory/P0/missing
+=== RUN   TestEA1ChildAgentCancelPhasesMemory/P0/stale
+=== RUN   TestEA1ChildAgentCancelPhasesMemory/P0/prepared
+=== RUN   TestEA1ChildAgentCancelPhasesMemory/P0/native-pregrant
+=== RUN   TestEA1ChildAgentCancelPhasesMemory/P2/default-child/host
+=== RUN   TestEA1ChildAgentCancelPhasesMemory/P2/default-child/model
+=== RUN   TestEA1ChildAgentCancelPhasesMemory/P2/default-child/tool
+=== RUN   TestEA1ChildAgentCancelPhasesMemory/P3/default-child/yield
+=== RUN   TestEA1ChildAgentCancelPhasesMemory/P3/default-child/terminal-tool
+=== RUN   TestEA1ChildAgentCancelPhasesMemory/P4/default-child/yield
+=== RUN   TestEA1ChildAgentCancelPhasesMemory/P4/default-child/terminal-tool
+=== RUN   TestEA1ChildAgentCancelPhasesMemory/P2/explicit-native/host
+=== RUN   TestEA1ChildAgentCancelPhasesMemory/P2/explicit-native/model
+=== RUN   TestEA1ChildAgentCancelPhasesMemory/P2/explicit-native/tool
+=== RUN   TestEA1ChildAgentCancelPhasesMemory/P3/explicit-native/yield
+=== RUN   TestEA1ChildAgentCancelPhasesMemory/P3/explicit-native/terminal-tool
+=== RUN   TestEA1ChildAgentCancelPhasesMemory/P4/explicit-native/yield
+=== RUN   TestEA1ChildAgentCancelPhasesMemory/P4/explicit-native/terminal-tool
+=== RUN   TestEA1ChildAgentCancelPhasesMemory/P4/actual-child-Cancel-CAS-ACK
+--- PASS: TestEA1ChildAgentCancelPhasesMemory (6.47s)
+    --- PASS: TestEA1ChildAgentCancelPhasesMemory/P0/missing (0.00s)
+    --- PASS: TestEA1ChildAgentCancelPhasesMemory/P0/stale (0.00s)
+    --- PASS: TestEA1ChildAgentCancelPhasesMemory/P0/prepared (0.00s)
+    --- PASS: TestEA1ChildAgentCancelPhasesMemory/P0/native-pregrant (0.00s)
+    --- PASS: TestEA1ChildAgentCancelPhasesMemory/P2/default-child/host (0.00s)
+    --- PASS: TestEA1ChildAgentCancelPhasesMemory/P2/default-child/model (0.00s)
+    --- PASS: TestEA1ChildAgentCancelPhasesMemory/P2/default-child/tool (0.00s)
+    --- PASS: TestEA1ChildAgentCancelPhasesMemory/P3/default-child/yield (0.00s)
+    --- PASS: TestEA1ChildAgentCancelPhasesMemory/P3/default-child/terminal-tool (0.00s)
+    --- PASS: TestEA1ChildAgentCancelPhasesMemory/P4/default-child/yield (0.00s)
+    --- PASS: TestEA1ChildAgentCancelPhasesMemory/P4/default-child/terminal-tool (0.00s)
+    --- PASS: TestEA1ChildAgentCancelPhasesMemory/P2/explicit-native/host (2.15s)
+    --- PASS: TestEA1ChildAgentCancelPhasesMemory/P2/explicit-native/model (2.15s)
+    --- PASS: TestEA1ChildAgentCancelPhasesMemory/P2/explicit-native/tool (2.15s)
+    --- PASS: TestEA1ChildAgentCancelPhasesMemory/P3/explicit-native/yield (0.00s)
+    --- PASS: TestEA1ChildAgentCancelPhasesMemory/P3/explicit-native/terminal-tool (0.00s)
+    --- PASS: TestEA1ChildAgentCancelPhasesMemory/P4/explicit-native/yield (0.00s)
+    --- PASS: TestEA1ChildAgentCancelPhasesMemory/P4/explicit-native/terminal-tool (0.00s)
+    --- PASS: TestEA1ChildAgentCancelPhasesMemory/P4/actual-child-Cancel-CAS-ACK (0.00s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory	6.877s
+
+EXIT_CODE=0

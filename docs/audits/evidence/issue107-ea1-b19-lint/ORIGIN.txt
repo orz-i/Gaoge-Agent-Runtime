@@ -1,0 +1,2 @@
+SOURCE_SHA=181411d1c3e900e2d4dec33a097cc728365aee32
+All three smoke selections PASS; all four module lints collected once. Core QF1003/QF1008 and Host import grouping failed, SQL lints passed. Later backend tests not run. Mechanical fixes only pending.
