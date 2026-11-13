@@ -589,7 +589,7 @@ func runManagedStoreAncestorGate(t *testing.T, factory func(*testing.T) ManagedR
 	for _, mode := range []string{"park-first", "child-first"} {
 		t.Run(mode, func(t *testing.T) {
 			f := managedStoreSetup(t, factory)
-			child, e := f.runtime.Create(t.Context(), kernel.CreateRequest{ID: "managed-child", Kind: "agent", Actor: f.source.Run.Actor, Thread: f.source.Run.Thread, ParentRunID: f.source.Run.ID, State: json.RawMessage(`{"child":"original"}`)})
+			child, e := f.runtime.Create(t.Context(), kernel.CreateRequest{ID: "managed-child", Kind: "agent", Goal: "original managed child", Actor: f.source.Run.Actor, Thread: f.source.Run.Thread, ParentRunID: f.source.Run.ID, State: json.RawMessage(`{"child":"original"}`)})
 			if e != nil {
 				t.Fatal(e)
 			}
@@ -664,23 +664,23 @@ func runManagedStoreOwnerParkCompetition(t *testing.T, factory func(*testing.T) 
 	for _, kind := range []string{"renew", "claim"} {
 		for _, winner := range []string{"owner", "park"} {
 			t.Run(kind+"-"+winner, func(t *testing.T) {
-				f := managedStoreSetup(t, factory)
+				// Install the wrapper before original admission, but do not intercept
+				// setup. The original scoped Runtime remains bound across the T0 revision.
+				var owner *managedStoreRaceGate
+				f := managedStoreSetup(t, func(t *testing.T) ManagedRecoveryStoreFixture {
+					backend := factory(t)
+					owner = &managedStoreRaceGate{managedStorePorts: backend.Store.(managedStorePorts)}
+					backend.Store = owner
+					return backend
+				})
 				arrivedOwner, arrivedPark := make(chan struct{}), make(chan struct{})
 				releaseOwner, releasePark := make(chan struct{}), make(chan struct{})
-				owner := &managedStoreRaceGate{managedStorePorts: f.store, ownerArrived: arrivedOwner, ownerRelease: releaseOwner, kind: kind}
+				owner.ownerArrived = arrivedOwner
+				owner.ownerRelease = releaseOwner
+				owner.kind = kind
 				parker := &managedStoreRaceGate{managedStorePorts: f.backend.Peer.(managedStorePorts), parkArrived: arrivedPark, parkRelease: releasePark}
-				rt, e := kernel.New(kernel.Dependencies{Store: owner})
-				if e != nil {
-					t.Fatal(e)
-				}
-				bound, e := rt.WithExecution(f.lease)
-				if e != nil {
-					t.Fatal(e)
-				}
-				scoped, e := bound.WithPhysicalGrant(t.Context(), f.grant, featurecontrol.Seal(f.source.Run.ID, f.source.Run.Revision, "agent_physical_owner", f.grant.ID, f.source.State, f.source.Checkpoint))
-				if e != nil {
-					t.Fatal(e)
-				}
+				scoped := f.scoped
+				var e error
 				type ownerResult struct {
 					snapshot kernel.Snapshot
 					lease    kernel.ExecutionLease
