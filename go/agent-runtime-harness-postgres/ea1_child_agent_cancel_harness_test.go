@@ -306,6 +306,20 @@ func ea1ChildCancelStart(t *testing.T, f *ea1ChildCancelHarnessFixture) (harness
 	if !ok {
 		t.Fatal("missing original Workflow Invocation")
 	}
+	persistedOwner, err := f.store.GetInvocation(t.Context(), root.ID)
+	if err != nil {
+		t.Fatalf("load original persisted Workflow Invocation baseline: %v", err)
+	}
+	projectionComparison, persistedComparison := root, persistedOwner
+	// The projection can clone [] to nil. Normalize only two genuinely
+	// empty OutputRefs values on comparison copies; never discard an output.
+	if len(projectionComparison.OutputRefs) == 0 && len(persistedComparison.OutputRefs) == 0 {
+		projectionComparison.OutputRefs, persistedComparison.OutputRefs = nil, nil
+	}
+	if !reflect.DeepEqual(projectionComparison, persistedComparison) {
+		t.Fatalf("original Workflow projection differs from persisted owner: projection=%+v persisted=%+v", root, persistedOwner)
+	}
+	root = persistedOwner
 	task := waiting.Subtasks[0]
 	c := budget.Coordinator{Store: f.backend.ledgers}
 	// ExecutionPolicy tightens the submitted limits before sealing Config.
