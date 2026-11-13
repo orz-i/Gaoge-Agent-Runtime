@@ -1,6 +1,6 @@
 module github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-postgres
 
-go 1.26
+go 1.26.0
 
 require (
 	github.com/google/uuid v1.6.0
