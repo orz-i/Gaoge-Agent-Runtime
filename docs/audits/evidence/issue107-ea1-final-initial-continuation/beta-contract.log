@@ -1,0 +1,5 @@
+SOURCE_SHA=e05290927ba0143f625857be08a0aa7493df84cf
+COMMAND=node scripts/check-beta.mjs
+Agent Runtime 0.1.0-beta.24 Beta metadata gate passed
+
+EXIT_CODE=0

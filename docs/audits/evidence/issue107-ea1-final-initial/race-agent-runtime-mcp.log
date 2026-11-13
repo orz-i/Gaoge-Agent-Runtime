@@ -1,0 +1,101 @@
+SOURCE_SHA=e05290927ba0143f625857be08a0aa7493df84cf
+COMMAND=go -C go/agent-runtime-mcp test -race -count=1 -v ./...
+=== RUN   TestClientProjectsNegotiatedExtensions
+=== PAUSE TestClientProjectsNegotiatedExtensions
+=== RUN   TestDiscoveryRejectsInvalidOrOversizedExtensions
+=== PAUSE TestDiscoveryRejectsInvalidOrOversizedExtensions
+=== RUN   TestClientUses20260728StatelessDiscoveryAndToolCall
+=== PAUSE TestClientUses20260728StatelessDiscoveryAndToolCall
+=== RUN   TestClientNegotiatesLegacyStreamableHTTP
+=== PAUSE TestClientNegotiatesLegacyStreamableHTTP
+=== RUN   TestClientRejectsNonObjectArgumentsBeforeNetwork
+=== PAUSE TestClientRejectsNonObjectArgumentsBeforeNetwork
+=== RUN   TestClientPropagatesConnectionFailure
+=== PAUSE TestClientPropagatesConnectionFailure
+=== RUN   TestClientPreservesCanceledContext
+=== PAUSE TestClientPreservesCanceledContext
+=== RUN   TestProjectToolRejectsOversizedRemoteMetadata
+=== PAUSE TestProjectToolRejectsOversizedRemoteMetadata
+=== RUN   TestMCPDeterministicScenarioCorpus
+    evaluation_test.go:48: MCP eval report: {"id":"evalreport_9ad8acdf8e8a676e8b75532fe92ff35f","runID":"evalrun_8ed6a3e46f7dde8a1576a175051428d7","datasetHash":"d0d04c0a5985640dd913d3e90ec71848c7ad34923e1ac3bdd81191f93c2e1a11","passThreshold":1,"overallScore":1,"passed":true,"caseCount":3,"completedCount":3,"passedCount":3,"failedCount":0,"skippedCount":0,"dimensions":[{"name":"runtime_correctness","weight":1,"count":3,"score":1,"min":1,"max":1}],"cases":[{"recordID":"evalcase_fc5385b50c60427feecfd1fad061d67f","caseID":"discover-call-tool","status":"completed","score":1,"passed":true},{"recordID":"evalcase_7b5be3b0ef05f07186c933b04868b931","caseID":"invalid-arguments-fenced","status":"completed","score":1,"passed":true},{"recordID":"evalcase_16d6f97bc58030642c3531b78f93bf56","caseID":"legacy-negotiation","status":"completed","score":1,"passed":true}],"hash":"594887983ec80bdb8331ea174f50fe9c3a932fd19cb872f37ce382934be77c26"}
+--- PASS: TestMCPDeterministicScenarioCorpus (0.03s)
+=== RUN   TestClientRejectsEndpointRedirects
+=== PAUSE TestClientRejectsEndpointRedirects
+=== RUN   TestClientRejectsToolCallRedirectAfterInitialization
+=== PAUSE TestClientRejectsToolCallRedirectAfterInitialization
+=== RUN   TestClientRedirectPolicyPreservesHostDenial
+=== PAUSE TestClientRedirectPolicyPreservesHostDenial
+=== RUN   TestClientRedirectPolicyCannotBeRelaxedByHost
+=== PAUSE TestClientRedirectPolicyCannotBeRelaxedByHost
+=== RUN   TestRegistryRejectsInvalidDiscoveredSchema
+=== PAUSE TestRegistryRejectsInvalidDiscoveredSchema
+=== RUN   TestRegistryRejectsArgumentsBeforeRemoteCall
+=== PAUSE TestRegistryRejectsArgumentsBeforeRemoteCall
+=== RUN   TestRegistryImplementsRuntimeCatalogAndExecutor
+=== PAUSE TestRegistryImplementsRuntimeCatalogAndExecutor
+=== RUN   TestRegistryClonesDiscoveredDefinitions
+=== PAUSE TestRegistryClonesDiscoveredDefinitions
+=== RUN   TestTransportRequiresHostNetworkPolicyAndClonesHeaders
+=== PAUSE TestTransportRequiresHostNetworkPolicyAndClonesHeaders
+=== RUN   TestTransportRejectsCredentialsInEndpoint
+=== PAUSE TestTransportRejectsCredentialsInEndpoint
+=== CONT  TestDiscoveryRejectsInvalidOrOversizedExtensions
+=== CONT  TestClientRejectsToolCallRedirectAfterInitialization
+=== CONT  TestRegistryRejectsArgumentsBeforeRemoteCall
+=== CONT  TestTransportRequiresHostNetworkPolicyAndClonesHeaders
+=== CONT  TestClientPreservesCanceledContext
+=== CONT  TestClientUses20260728StatelessDiscoveryAndToolCall
+=== CONT  TestRegistryRejectsInvalidDiscoveredSchema
+=== CONT  TestClientRejectsEndpointRedirects
+=== CONT  TestProjectToolRejectsOversizedRemoteMetadata
+=== CONT  TestClientPropagatesConnectionFailure
+=== CONT  TestClientRedirectPolicyPreservesHostDenial
+=== CONT  TestClientRedirectPolicyCannotBeRelaxedByHost
+=== CONT  TestClientRejectsNonObjectArgumentsBeforeNetwork
+=== CONT  TestRegistryClonesDiscoveredDefinitions
+=== CONT  TestClientNegotiatesLegacyStreamableHTTP
+=== CONT  TestClientProjectsNegotiatedExtensions
+--- PASS: TestTransportRequiresHostNetworkPolicyAndClonesHeaders (0.00s)
+=== CONT  TestRegistryImplementsRuntimeCatalogAndExecutor
+--- PASS: TestClientPreservesCanceledContext (0.00s)
+--- PASS: TestProjectToolRejectsOversizedRemoteMetadata (0.00s)
+--- PASS: TestRegistryRejectsInvalidDiscoveredSchema (0.00s)
+=== RUN   TestClientRejectsEndpointRedirects/cross-host-301
+=== RUN   TestClientNegotiatesLegacyStreamableHTTP/stateless
+--- PASS: TestRegistryImplementsRuntimeCatalogAndExecutor (0.00s)
+=== CONT  TestTransportRejectsCredentialsInEndpoint
+--- PASS: TestClientRejectsNonObjectArgumentsBeforeNetwork (0.00s)
+--- PASS: TestRegistryClonesDiscoveredDefinitions (0.00s)
+=== PAUSE TestClientNegotiatesLegacyStreamableHTTP/stateless
+--- PASS: TestRegistryRejectsArgumentsBeforeRemoteCall (0.00s)
+=== RUN   TestClientNegotiatesLegacyStreamableHTTP/stateful
+--- PASS: TestTransportRejectsCredentialsInEndpoint (0.00s)
+=== PAUSE TestClientNegotiatesLegacyStreamableHTTP/stateful
+=== CONT  TestClientNegotiatesLegacyStreamableHTTP/stateless
+=== CONT  TestClientNegotiatesLegacyStreamableHTTP/stateful
+--- PASS: TestDiscoveryRejectsInvalidOrOversizedExtensions (0.00s)
+--- PASS: TestClientPropagatesConnectionFailure (0.00s)
+--- PASS: TestClientRedirectPolicyPreservesHostDenial (0.00s)
+=== RUN   TestClientRejectsEndpointRedirects/cross-host-302
+--- PASS: TestClientRejectsToolCallRedirectAfterInitialization (0.01s)
+=== RUN   TestClientRejectsEndpointRedirects/cross-host-303
+--- PASS: TestClientRedirectPolicyCannotBeRelaxedByHost (0.01s)
+--- PASS: TestClientProjectsNegotiatedExtensions (0.01s)
+=== RUN   TestClientRejectsEndpointRedirects/cross-host-307
+=== RUN   TestClientRejectsEndpointRedirects/cross-host-308
+--- PASS: TestClientUses20260728StatelessDiscoveryAndToolCall (0.02s)
+--- PASS: TestClientNegotiatesLegacyStreamableHTTP (0.00s)
+    --- PASS: TestClientNegotiatesLegacyStreamableHTTP/stateless (0.01s)
+    --- PASS: TestClientNegotiatesLegacyStreamableHTTP/stateful (0.01s)
+=== RUN   TestClientRejectsEndpointRedirects/same-origin-307
+--- PASS: TestClientRejectsEndpointRedirects (0.02s)
+    --- PASS: TestClientRejectsEndpointRedirects/cross-host-301 (0.00s)
+    --- PASS: TestClientRejectsEndpointRedirects/cross-host-302 (0.00s)
+    --- PASS: TestClientRejectsEndpointRedirects/cross-host-303 (0.00s)
+    --- PASS: TestClientRejectsEndpointRedirects/cross-host-307 (0.00s)
+    --- PASS: TestClientRejectsEndpointRedirects/cross-host-308 (0.00s)
+    --- PASS: TestClientRejectsEndpointRedirects/same-origin-307 (0.00s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-mcp	1.551s
+
+EXIT_CODE=0

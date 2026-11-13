@@ -1,0 +1,78 @@
+SOURCE_SHA=e05290927ba0143f625857be08a0aa7493df84cf
+COMMAND=go -C go/agent-runtime-redis test -race -count=1 -v ./...
+=== RUN   TestContinuationWaitGenerationSurvivesQueueReconstruction
+--- PASS: TestContinuationWaitGenerationSurvivesQueueReconstruction (0.02s)
+=== RUN   TestRealRedisContinuationWaitGenerationSurvivesQueueReconstruction
+--- PASS: TestRealRedisContinuationWaitGenerationSurvivesQueueReconstruction (0.02s)
+=== RUN   TestRedisQueueLargeIntegerPayloadConflict
+=== PAUSE TestRedisQueueLargeIntegerPayloadConflict
+=== RUN   TestRedisQueueEnqueueIdempotency
+=== PAUSE TestRedisQueueEnqueueIdempotency
+=== RUN   TestRedisQueueConcurrentClaimSingleLease
+=== PAUSE TestRedisQueueConcurrentClaimSingleLease
+=== RUN   TestRedisQueueExpiredLeaseCannotAffectNewGeneration
+=== PAUSE TestRedisQueueExpiredLeaseCannotAffectNewGeneration
+=== RUN   TestRedisQueueClaimRecoversAbandonedLease
+=== PAUSE TestRedisQueueClaimRecoversAbandonedLease
+=== RUN   TestRedisQueueClaimExpirySweepIsBoundedAndMakesProgress
+=== PAUSE TestRedisQueueClaimExpirySweepIsBoundedAndMakesProgress
+=== RUN   TestRedisQueueClaimExpiredLeaseHonorsBackoffAndDeadLetter
+=== PAUSE TestRedisQueueClaimExpiredLeaseHonorsBackoffAndDeadLetter
+=== RUN   TestRedisQueueRetryDeadLetterAndRequeue
+=== PAUSE TestRedisQueueRetryDeadLetterAndRequeue
+=== RUN   TestRedisQueueRenewAndReap
+=== PAUSE TestRedisQueueRenewAndReap
+=== RUN   TestRealRedisQueueFeedConcurrencyAndRestart
+--- PASS: TestRealRedisQueueFeedConcurrencyAndRestart (0.03s)
+=== RUN   TestRealRedisExpiredLeaseRecoveryFencesStaleWorker
+--- PASS: TestRealRedisExpiredLeaseRecoveryFencesStaleWorker (0.03s)
+=== RUN   TestRunFeedStoreConformance
+=== PAUSE TestRunFeedStoreConformance
+=== RUN   TestRunFeedStoreReleaseTerminalExpiresPreservedRedisSequence
+=== PAUSE TestRunFeedStoreReleaseTerminalExpiresPreservedRedisSequence
+=== RUN   TestRunFeedStoreExpiresRetainedEvents
+=== PAUSE TestRunFeedStoreExpiresRetainedEvents
+=== RUN   TestRunFeedStoreClampsSubMillisecondRetention
+=== PAUSE TestRunFeedStoreClampsSubMillisecondRetention
+=== RUN   TestRedisLegacyJobIsNotSilentlyUpgradedToProtectedPolicy
+--- PASS: TestRedisLegacyJobIsNotSilentlyUpgradedToProtectedPolicy (0.00s)
+=== RUN   TestRedisProtectedTerminalFenceSurvivesLeaseExpiryAndRequeue
+--- PASS: TestRedisProtectedTerminalFenceSurvivesLeaseExpiryAndRequeue (0.01s)
+=== RUN   TestRealRedisWorkerRenewsSlowDelivery
+--- PASS: TestRealRedisWorkerRenewsSlowDelivery (1.32s)
+=== CONT  TestRedisQueueClaimExpiredLeaseHonorsBackoffAndDeadLetter
+=== CONT  TestRunFeedStoreConformance
+=== CONT  TestRedisQueueRetryDeadLetterAndRequeue
+=== CONT  TestRedisQueueConcurrentClaimSingleLease
+=== RUN   TestRunFeedStoreConformance/sequence-replay-isolation
+=== CONT  TestRedisQueueEnqueueIdempotency
+=== CONT  TestRedisQueueRenewAndReap
+=== CONT  TestRedisQueueLargeIntegerPayloadConflict
+=== CONT  TestRedisQueueClaimExpirySweepIsBoundedAndMakesProgress
+=== CONT  TestRedisQueueExpiredLeaseCannotAffectNewGeneration
+=== CONT  TestRunFeedStoreReleaseTerminalExpiresPreservedRedisSequence
+--- PASS: TestRedisQueueEnqueueIdempotency (0.02s)
+=== CONT  TestRedisQueueClaimRecoversAbandonedLease
+=== RUN   TestRunFeedStoreConformance/concurrent-sequence
+--- PASS: TestRunFeedStoreReleaseTerminalExpiresPreservedRedisSequence (0.03s)
+=== CONT  TestRunFeedStoreExpiresRetainedEvents
+--- PASS: TestRedisQueueLargeIntegerPayloadConflict (0.03s)
+=== CONT  TestRunFeedStoreClampsSubMillisecondRetention
+--- PASS: TestRedisQueueConcurrentClaimSingleLease (0.03s)
+--- PASS: TestRunFeedStoreClampsSubMillisecondRetention (0.00s)
+--- PASS: TestRedisQueueClaimExpiredLeaseHonorsBackoffAndDeadLetter (0.03s)
+--- PASS: TestRedisQueueExpiredLeaseCannotAffectNewGeneration (0.04s)
+--- PASS: TestRedisQueueRenewAndReap (0.04s)
+--- PASS: TestRunFeedStoreExpiresRetainedEvents (0.01s)
+=== RUN   TestRunFeedStoreConformance/rejects-invalid-data
+--- PASS: TestRunFeedStoreConformance (0.04s)
+    --- PASS: TestRunFeedStoreConformance/sequence-replay-isolation (0.02s)
+    --- PASS: TestRunFeedStoreConformance/concurrent-sequence (0.02s)
+    --- PASS: TestRunFeedStoreConformance/rejects-invalid-data (0.00s)
+--- PASS: TestRedisQueueRetryDeadLetterAndRequeue (0.05s)
+--- PASS: TestRedisQueueClaimRecoversAbandonedLease (0.03s)
+--- PASS: TestRedisQueueClaimExpirySweepIsBoundedAndMakesProgress (0.40s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-redis	3.934s
+
+EXIT_CODE=0

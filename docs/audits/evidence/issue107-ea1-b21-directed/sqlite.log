@@ -1,0 +1,113 @@
+SOURCE_SHA=e05290927ba0143f625857be08a0aa7493df84cf
+COMMAND=go -C go/agent-runtime-sqlite test -race -count=1 ./... -run '^TestEA1MiddlewareNextLifetimeNativeSQLite$' -v
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/root
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/root/P0/create-denied
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/root/P0/stale-admission
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/root/P0/duplicate
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/root/P0/foreign-model
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/root/P1/run
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/root/P2/run/async
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/root/P2/run/unknown
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/root/P2/run/panic
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/root/P5/run/async-election
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/root/P1/model
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/root/P2/model/async
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/root/P2/model/unknown
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/root/P2/model/panic
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/root/P5/model/async-election
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/root/P1/tool
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/root/P2/tool/async
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/root/P2/tool/unknown
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/root/P2/tool/panic
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/root/P5/tool/async-election
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/root/P2/model/swallowed-inner
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/root/P3/durable-before-whole-return
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/root/P4/mark-ack-lost
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/root/P5/deadline-before-new-send
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/root/P1/default-owner
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child/P0/create-denied
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child/P0/stale-admission
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child/P0/duplicate
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child/P0/foreign-model
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child/P0/preflight
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child/P1/run
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child/P2/run/async
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child/P2/run/unknown
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child/P2/run/panic
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child/P5/run/async-election
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child/P1/model
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child/P2/model/async
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child/P2/model/unknown
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child/P2/model/panic
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child/P5/model/async-election
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child/P1/tool
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child/P2/tool/async
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child/P2/tool/unknown
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child/P2/tool/panic
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child/P5/tool/async-election
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child/P2/model/swallowed-inner
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child/P3/durable-before-whole-return
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child/P4/mark-ack-lost
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child/P5/deadline-before-new-send
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child/P1/default-owner
+--- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite (11.61s)
+    --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/root (5.83s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/root/P0/create-denied (0.06s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/root/P0/stale-admission (0.06s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/root/P0/duplicate (0.06s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/root/P0/foreign-model (0.08s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/root/P1/run (0.12s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/root/P2/run/async (0.11s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/root/P2/run/unknown (0.15s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/root/P2/run/panic (0.12s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/root/P5/run/async-election (0.12s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/root/P1/model (0.12s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/root/P2/model/async (0.26s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/root/P2/model/unknown (2.23s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/root/P2/model/panic (0.10s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/root/P5/model/async-election (0.11s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/root/P1/tool (0.12s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/root/P2/tool/async (0.12s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/root/P2/tool/unknown (0.10s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/root/P2/tool/panic (0.12s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/root/P5/tool/async-election (0.12s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/root/P2/model/swallowed-inner (0.12s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/root/P3/durable-before-whole-return (0.13s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/root/P4/mark-ack-lost (0.12s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/root/P5/deadline-before-new-send (1.07s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/root/P1/default-owner (0.11s)
+    --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child (5.78s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child/P0/create-denied (0.05s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child/P0/stale-admission (0.06s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child/P0/duplicate (0.07s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child/P0/foreign-model (0.08s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child/P0/preflight (0.05s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child/P1/run (0.13s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child/P2/run/async (0.12s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child/P2/run/unknown (0.12s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child/P2/run/panic (0.12s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child/P5/run/async-election (0.13s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child/P1/model (0.12s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child/P2/model/async (0.12s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child/P2/model/unknown (2.22s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child/P2/model/panic (0.10s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child/P5/model/async-election (0.12s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child/P1/tool (0.11s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child/P2/tool/async (0.13s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child/P2/tool/unknown (0.11s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child/P2/tool/panic (0.11s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child/P5/tool/async-election (0.13s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child/P2/model/swallowed-inner (0.12s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child/P3/durable-before-whole-return (0.12s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child/P4/mark-ack-lost (0.16s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child/P5/deadline-before-new-send (1.07s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child/P1/default-owner (0.12s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite	13.173s
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/examples/embedded	1.553s [no tests to run]
+
+EXIT_CODE=0

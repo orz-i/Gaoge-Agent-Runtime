@@ -1,0 +1,50 @@
+SOURCE_SHA=e05290927ba0143f625857be08a0aa7493df84cf
+COMMAND=go -C go/agent-runtime-otel test -race -count=1 -v ./...
+=== RUN   TestNewMetricsRequiresMeterProvider
+=== PAUSE TestNewMetricsRequiresMeterProvider
+=== RUN   TestMetricsRecordsTerminalOperationsWithoutIdentityCardinality
+=== PAUSE TestMetricsRecordsTerminalOperationsWithoutIdentityCardinality
+=== RUN   TestMetricsIgnoresCancelledContextAndZeroDuration
+=== PAUSE TestMetricsIgnoresCancelledContextAndZeroDuration
+=== RUN   TestNewRequiresTracerProvider
+=== PAUSE TestNewRequiresTracerProvider
+=== RUN   TestRecorderBuildsRunTreeAndContentSafeAttributes
+=== PAUSE TestRecorderBuildsRunTreeAndContentSafeAttributes
+=== RUN   TestRecorderSynthesizesMissingStartFromDuration
+=== PAUSE TestRecorderSynthesizesMissingStartFromDuration
+=== RUN   TestRecorderIgnoresDuplicateStarts
+=== PAUSE TestRecorderIgnoresDuplicateStarts
+=== RUN   TestRecorderToolSpanLifecycleAcrossAttempts
+=== PAUSE TestRecorderToolSpanLifecycleAcrossAttempts
+=== RUN   TestRecorderKeepsSeparateWorkflowAttemptsAndCompensations
+=== PAUSE TestRecorderKeepsSeparateWorkflowAttemptsAndCompensations
+=== RUN   TestRecorderFinishesOnCancelledContext
+=== PAUSE TestRecorderFinishesOnCancelledContext
+=== RUN   TestRecorderDoesNotSynthesizeTerminalsAfterCancellation
+=== PAUSE TestRecorderDoesNotSynthesizeTerminalsAfterCancellation
+=== CONT  TestNewMetricsRequiresMeterProvider
+--- PASS: TestNewMetricsRequiresMeterProvider (0.00s)
+=== CONT  TestMetricsIgnoresCancelledContextAndZeroDuration
+=== CONT  TestRecorderKeepsSeparateWorkflowAttemptsAndCompensations
+=== CONT  TestRecorderBuildsRunTreeAndContentSafeAttributes
+=== CONT  TestRecorderDoesNotSynthesizeTerminalsAfterCancellation
+=== CONT  TestNewRequiresTracerProvider
+--- PASS: TestNewRequiresTracerProvider (0.00s)
+=== CONT  TestMetricsRecordsTerminalOperationsWithoutIdentityCardinality
+--- PASS: TestRecorderDoesNotSynthesizeTerminalsAfterCancellation (0.00s)
+=== CONT  TestRecorderToolSpanLifecycleAcrossAttempts
+=== CONT  TestRecorderSynthesizesMissingStartFromDuration
+--- PASS: TestRecorderKeepsSeparateWorkflowAttemptsAndCompensations (0.00s)
+--- PASS: TestRecorderBuildsRunTreeAndContentSafeAttributes (0.00s)
+=== CONT  TestRecorderIgnoresDuplicateStarts
+=== CONT  TestRecorderFinishesOnCancelledContext
+--- PASS: TestMetricsIgnoresCancelledContextAndZeroDuration (0.00s)
+--- PASS: TestRecorderSynthesizesMissingStartFromDuration (0.00s)
+--- PASS: TestRecorderIgnoresDuplicateStarts (0.00s)
+--- PASS: TestRecorderToolSpanLifecycleAcrossAttempts (0.00s)
+--- PASS: TestRecorderFinishesOnCancelledContext (0.00s)
+--- PASS: TestMetricsRecordsTerminalOperationsWithoutIdentityCardinality (0.00s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-otel	1.458s
+
+EXIT_CODE=0

@@ -1,0 +1,74 @@
+SOURCE_SHA=e05290927ba0143f625857be08a0aa7493df84cf
+COMMAND=go -C go/agent-runtime test -race -count=1 ./plugin ./internal/callbackscope -v
+=== RUN   TestModelScopeCannotDetachByMutableRequestRunID
+--- PASS: TestModelScopeCannotDetachByMutableRequestRunID (0.00s)
+=== RUN   TestToolScopeRetainsUnknownInnerLayerAcrossReplacedContext
+--- PASS: TestToolScopeRetainsUnknownInnerLayerAcrossReplacedContext (0.00s)
+=== RUN   TestIssue107MiddlewareCannotInvokeRetainedNextAfterPhysicalCallEnds
+=== RUN   TestIssue107MiddlewareCannotInvokeRetainedNextAfterPhysicalCallEnds/run
+=== RUN   TestIssue107MiddlewareCannotInvokeRetainedNextAfterPhysicalCallEnds/model
+=== RUN   TestIssue107MiddlewareCannotInvokeRetainedNextAfterPhysicalCallEnds/tool
+--- PASS: TestIssue107MiddlewareCannotInvokeRetainedNextAfterPhysicalCallEnds (0.00s)
+    --- PASS: TestIssue107MiddlewareCannotInvokeRetainedNextAfterPhysicalCallEnds/run (0.00s)
+    --- PASS: TestIssue107MiddlewareCannotInvokeRetainedNextAfterPhysicalCallEnds/model (0.00s)
+    --- PASS: TestIssue107MiddlewareCannotInvokeRetainedNextAfterPhysicalCallEnds/tool (0.00s)
+=== RUN   TestIssue107MiddlewareReturnWaitsForAdmittedInflightNext
+--- PASS: TestIssue107MiddlewareReturnWaitsForAdmittedInflightNext (0.02s)
+=== RUN   TestIssue107ModelAndToolMiddlewareWaitForInflightPhysicalNext
+=== RUN   TestIssue107ModelAndToolMiddlewareWaitForInflightPhysicalNext/model
+=== RUN   TestIssue107ModelAndToolMiddlewareWaitForInflightPhysicalNext/tool
+--- PASS: TestIssue107ModelAndToolMiddlewareWaitForInflightPhysicalNext (0.04s)
+    --- PASS: TestIssue107ModelAndToolMiddlewareWaitForInflightPhysicalNext/model (0.02s)
+    --- PASS: TestIssue107ModelAndToolMiddlewareWaitForInflightPhysicalNext/tool (0.02s)
+=== RUN   TestRunChainPreservesExplicitOrderAndRejectsDoubleNext
+=== PAUSE TestRunChainPreservesExplicitOrderAndRejectsDoubleNext
+=== RUN   TestApprovalPolicySetEvaluatesAllPoliciesAndRequiresAny
+=== PAUSE TestApprovalPolicySetEvaluatesAllPoliciesAndRequiresAny
+=== RUN   TestApprovalPolicySetFailsClosedOnPolicyError
+=== PAUSE TestApprovalPolicySetFailsClosedOnPolicyError
+=== RUN   TestObserverSetPreservesOrderIsolationAndContainsPanics
+=== PAUSE TestObserverSetPreservesOrderIsolationAndContainsPanics
+=== RUN   TestModelChainClonesRequestAcrossMiddlewareBoundary
+=== PAUSE TestModelChainClonesRequestAcrossMiddlewareBoundary
+=== RUN   TestToolChainRejectsDuplicateNames
+=== PAUSE TestToolChainRejectsDuplicateNames
+=== CONT  TestObserverSetPreservesOrderIsolationAndContainsPanics
+=== CONT  TestApprovalPolicySetFailsClosedOnPolicyError
+--- PASS: TestObserverSetPreservesOrderIsolationAndContainsPanics (0.00s)
+=== CONT  TestApprovalPolicySetEvaluatesAllPoliciesAndRequiresAny
+--- PASS: TestApprovalPolicySetFailsClosedOnPolicyError (0.00s)
+=== CONT  TestModelChainClonesRequestAcrossMiddlewareBoundary
+--- PASS: TestApprovalPolicySetEvaluatesAllPoliciesAndRequiresAny (0.00s)
+=== CONT  TestRunChainPreservesExplicitOrderAndRejectsDoubleNext
+=== CONT  TestToolChainRejectsDuplicateNames
+--- PASS: TestModelChainClonesRequestAcrossMiddlewareBoundary (0.00s)
+--- PASS: TestToolChainRejectsDuplicateNames (0.00s)
+--- PASS: TestRunChainPreservesExplicitOrderAndRejectsDoubleNext (0.00s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin	1.505s
+=== RUN   TestActualLayerCompletionNeedsReturnedNextAndReceipt
+--- PASS: TestActualLayerCompletionNeedsReturnedNextAndReceipt (0.00s)
+=== RUN   TestReceiptCannotBeClaimedByShapeOrAnotherLayer
+=== RUN   TestReceiptCannotBeClaimedByShapeOrAnotherLayer/public-shape
+=== RUN   TestReceiptCannotBeClaimedByShapeOrAnotherLayer/foreign-adapter
+=== RUN   TestReceiptCannotBeClaimedByShapeOrAnotherLayer/duplicate
+=== RUN   TestReceiptCannotBeClaimedByShapeOrAnotherLayer/contradictory-operation
+=== RUN   TestReceiptCannotBeClaimedByShapeOrAnotherLayer/unreturned
+=== RUN   TestReceiptCannotBeClaimedByShapeOrAnotherLayer/post-receipt-panic
+--- PASS: TestReceiptCannotBeClaimedByShapeOrAnotherLayer (0.00s)
+    --- PASS: TestReceiptCannotBeClaimedByShapeOrAnotherLayer/public-shape (0.00s)
+    --- PASS: TestReceiptCannotBeClaimedByShapeOrAnotherLayer/foreign-adapter (0.00s)
+    --- PASS: TestReceiptCannotBeClaimedByShapeOrAnotherLayer/duplicate (0.00s)
+    --- PASS: TestReceiptCannotBeClaimedByShapeOrAnotherLayer/contradictory-operation (0.00s)
+    --- PASS: TestReceiptCannotBeClaimedByShapeOrAnotherLayer/unreturned (0.00s)
+    --- PASS: TestReceiptCannotBeClaimedByShapeOrAnotherLayer/post-receipt-panic (0.00s)
+=== RUN   TestScopeAndNonceAreNotTransferable
+--- PASS: TestScopeAndNonceAreNotTransferable (0.00s)
+=== RUN   TestOpaqueLayerErrorAndPostNextErrorStayUnknown
+--- PASS: TestOpaqueLayerErrorAndPostNextErrorStayUnknown (0.00s)
+=== RUN   TestCompletedScopeProofBindsFullOriginalSource
+--- PASS: TestCompletedScopeProofBindsFullOriginalSource (0.00s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/callbackscope	1.950s
+
+EXIT_CODE=0

@@ -1,0 +1,427 @@
+SOURCE_SHA=e05290927ba0143f625857be08a0aa7493df84cf
+COMMAND=make check-no-race
+node --test scripts/beta-release-policy.test.mjs scripts/check-pr-body-format.test.mjs scripts/release-command.test.mjs scripts/sqlite-release-policy.test.mjs
+✔ Beta releases never publish to the npm registry or request publication credentials (0.577375ms)
+✔ Beta releases retain immutable tags, reviewed notes, and a TypeScript archive (0.08375ms)
+✔ Tag verification and the full Beta gates precede artifact publication (0.275708ms)
+✔ rejects the PR style with literal escaped Markdown separators (1.447542ms)
+✔ accepts actual Markdown line breaks (11.261166ms)
+✔ allows literal newline escapes in fenced or inline code (0.216625ms)
+✔ accepts body-file and rejects malformed GitHub PR event payload (123.023875ms)
+✔ non-Windows commands keep their original argument vector (2.350875ms)
+✔ Windows npm runs its JavaScript entrypoint, not cmd.exe (1.887625ms)
+✔ Windows pnpm can launch the native executable without cmd.exe (0.919125ms)
+✔ Windows pnpm supports the node_modules/.bin shim layout without a shell (0.911709ms)
+✔ missing Windows CLI fails closed instead of falling back to cmd.exe (0.845375ms)
+✔ the runner preserves shell metacharacters as literal argv values (36.741042ms)
+✔ the runner reports executable launch failures instead of a generic exit code (1.323375ms)
+﹣ Windows launches installed npm and pnpm without a shell (0.046959ms) # SKIP
+✔ SQLite joins one coordinated eleven-module Beta cohort (5.517667ms)
+✔ Harness release module stays vendor-neutral and isolates Provider-powered demo (0.810125ms)
+✔ release tag set includes SQLite at precisely the same version (41.079583ms)
+✔ publisher verifies actual tagged modules without source replacements (0.749458ms)
+ℹ tests 19
+ℹ suites 0
+ℹ pass 18
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 1
+ℹ todo 0
+ℹ duration_ms 208.321333
+node scripts/check-beta.mjs
+Agent Runtime 0.1.0-beta.24 Beta metadata gate passed
+python3 -m unittest discover -s scripts -p 'test_agent_*.py'
+...................................................................................................................................
+----------------------------------------------------------------------
+Ran 131 tests in 2.886s
+
+OK
+node scripts/go-workspace.mjs fmt-check
+==> fmt-check go/agent-runtime
+==> fmt-check go/agent-runtime-provider
+==> fmt-check go/agent-runtime-harness
+==> fmt-check go/agent-runtime-harness/examples/task-agent
+==> fmt-check go/agent-runtime-harness-postgres
+==> fmt-check go/agent-runtime-mcp
+==> fmt-check go/agent-runtime-otel
+==> fmt-check go/agent-runtime-a2a
+==> fmt-check go/agent-runtime-postgres
+==> fmt-check go/agent-runtime-sqlite
+==> fmt-check go/agent-runtime-redis
+==> fmt-check go/agent-runtime-http
+node scripts/go-workspace.mjs tidy-check
+==> tidy-check go/agent-runtime
+==> tidy-check go/agent-runtime-provider
+==> tidy-check go/agent-runtime-harness
+==> tidy-check go/agent-runtime-harness/examples/task-agent
+==> tidy-check go/agent-runtime-harness-postgres
+==> tidy-check go/agent-runtime-mcp
+==> tidy-check go/agent-runtime-otel
+==> tidy-check go/agent-runtime-a2a
+==> tidy-check go/agent-runtime-postgres
+==> tidy-check go/agent-runtime-sqlite
+==> tidy-check go/agent-runtime-redis
+==> tidy-check go/agent-runtime-http
+node scripts/go-workspace.mjs vet
+==> vet go/agent-runtime
+==> vet go/agent-runtime-provider
+==> vet go/agent-runtime-harness
+==> vet go/agent-runtime-harness/examples/task-agent
+==> vet go/agent-runtime-harness-postgres
+==> vet go/agent-runtime-mcp
+==> vet go/agent-runtime-otel
+==> vet go/agent-runtime-a2a
+==> vet go/agent-runtime-postgres
+==> vet go/agent-runtime-sqlite
+==> vet go/agent-runtime-redis
+==> vet go/agent-runtime-http
+node scripts/go-workspace.mjs test
+==> test go/agent-runtime
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/continuation	0.419s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/interaction	[no test files]
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/runfeed	[no test files]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/topology	0.413s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent	1.543s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/bootstrap	0.457s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget	0.430s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/compose	0.772s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance	[no test files]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context	1.631s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/continuation	7.540s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/evaluation	0.459s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/examples/configured	[no test files]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/examples/quickstart	0.457s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/groupchat	0.518s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff	0.759s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/interaction	[no test files]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/callbackscope	0.411s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol	0.406s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract	0.423s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel	0.416s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory	102.106s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model	0.441s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/observability	0.419s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin	0.492s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/queue	0.409s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runfeed	0.392s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation	0.403s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/team	0.475s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools	0.426s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workbench	0.403s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workflow	0.445s
+==> test go/agent-runtime-provider
+--- FAIL: TestAnthropicTerminalSSEOrderCannotDispatchLocalTool (0.02s)
+    --- FAIL: TestAnthropicTerminalSSEOrderCannotDispatchLocalTool/late_tool_start (0.00s)
+        anthropic_sse_phase_agent_test.go:129: malformed SSE order/owner dispatched local Tool: err=agent external model result is uncertain
+            agent model failure
+            invalid provider protocol response
+            agent original root callback result is uncertain status=running code=agent.model_failed requests=2 effects=0
+    --- FAIL: TestAnthropicTerminalSSEOrderCannotDispatchLocalTool/late_tool_stop (0.00s)
+        anthropic_sse_phase_agent_test.go:129: malformed SSE order/owner dispatched local Tool: err=agent external model result is uncertain
+            agent model failure
+            invalid provider protocol response
+            agent original root callback result is uncertain status=running code=agent.model_failed requests=2 effects=0
+    --- FAIL: TestAnthropicTerminalSSEOrderCannotDispatchLocalTool/foreign_user_message (0.00s)
+        anthropic_sse_phase_agent_test.go:129: malformed SSE order/owner dispatched local Tool: err=agent external model result is uncertain
+            agent model failure
+            invalid provider protocol response
+            agent original root callback result is uncertain status=running code=agent.model_failed requests=2 effects=0
+    --- FAIL: TestAnthropicTerminalSSEOrderCannotDispatchLocalTool/foreign_tool_message (0.00s)
+        anthropic_sse_phase_agent_test.go:129: malformed SSE order/owner dispatched local Tool: err=agent external model result is uncertain
+            agent model failure
+            invalid provider protocol response
+            agent original root callback result is uncertain status=running code=agent.model_failed requests=2 effects=0
+    --- FAIL: TestAnthropicTerminalSSEOrderCannotDispatchLocalTool/foreign_message_type (0.00s)
+        anthropic_sse_phase_agent_test.go:129: malformed SSE order/owner dispatched local Tool: err=agent external model result is uncertain
+            agent model failure
+            invalid provider protocol response
+            agent original root callback result is uncertain status=running code=agent.model_failed requests=2 effects=0
+    --- FAIL: TestAnthropicTerminalSSEOrderCannotDispatchLocalTool/missing_owner_role (0.00s)
+        anthropic_sse_phase_agent_test.go:129: malformed SSE order/owner dispatched local Tool: err=agent external model result is uncertain
+            agent model failure
+            invalid provider protocol response
+            agent original root callback result is uncertain status=running code=agent.model_failed requests=2 effects=0
+--- FAIL: TestAnthropicRejectedContentBadDeltaNeverCertifiesAgentCompletion (0.01s)
+    --- FAIL: TestAnthropicRejectedContentBadDeltaNeverCertifiesAgentCompletion/wrong_delta_owner (0.01s)
+        anthropic_sse_rejected_delta_agent_test.go:101: bad framing authorized execution or completed run: status=running code=agent.model_failed err=agent external model result is uncertain
+            agent model failure
+            invalid provider protocol response
+            agent original root callback result is uncertain requests=2 effects=0
+    --- FAIL: TestAnthropicRejectedContentBadDeltaNeverCertifiesAgentCompletion/later_tool_input_substitution (0.00s)
+        anthropic_sse_rejected_delta_agent_test.go:101: bad framing authorized execution or completed run: status=running code=agent.model_failed err=agent external model result is uncertain
+            agent model failure
+            invalid provider protocol response
+            agent original root callback result is uncertain requests=2 effects=0
+--- FAIL: TestAnthropicSSEInitialPhysicalContentCannotDispatchTool (0.02s)
+    --- FAIL: TestAnthropicSSEInitialPhysicalContentCannotDispatchTool/foreign_tool (0.00s)
+        anthropic_sse_start_content_agent_test.go:122: physical SSE content was discarded into Tool execution: err=agent external model result is uncertain
+            agent model failure
+            invalid provider protocol response
+            agent original root callback result is uncertain status=running code=agent.model_failed requests=2 effects=0
+    --- FAIL: TestAnthropicSSEInitialPhysicalContentCannotDispatchTool/conflicting_text (0.00s)
+        anthropic_sse_start_content_agent_test.go:122: physical SSE content was discarded into Tool execution: err=agent external model result is uncertain
+            agent model failure
+            invalid provider protocol response
+            agent original root callback result is uncertain status=running code=agent.model_failed requests=2 effects=0
+    --- FAIL: TestAnthropicSSEInitialPhysicalContentCannotDispatchTool/explicit_null (0.01s)
+        anthropic_sse_start_content_agent_test.go:122: physical SSE content was discarded into Tool execution: err=agent external model result is uncertain
+            agent model failure
+            invalid provider protocol response
+            agent original root callback result is uncertain status=running code=agent.model_failed requests=2 effects=0
+    --- FAIL: TestAnthropicSSEInitialPhysicalContentCannotDispatchTool/tool_arguments_replaced (0.00s)
+        anthropic_sse_start_content_agent_test.go:122: physical SSE content was discarded into Tool execution: err=agent external model result is uncertain
+            agent model failure
+            invalid provider protocol response
+            agent original root callback result is uncertain status=running code=agent.model_failed requests=2 effects=0
+    --- FAIL: TestAnthropicSSEInitialPhysicalContentCannotDispatchTool/nested_tool_arguments_replaced (0.00s)
+        anthropic_sse_start_content_agent_test.go:122: physical SSE content was discarded into Tool execution: err=agent external model result is uncertain
+            agent model failure
+            invalid provider protocol response
+            agent original root callback result is uncertain status=running code=agent.model_failed requests=2 effects=0
+    --- FAIL: TestAnthropicSSEInitialPhysicalContentCannotDispatchTool/null_tool_arguments_replaced (0.00s)
+        anthropic_sse_start_content_agent_test.go:122: physical SSE content was discarded into Tool execution: err=agent external model result is uncertain
+            agent model failure
+            invalid provider protocol response
+            agent original root callback result is uncertain status=running code=agent.model_failed requests=2 effects=0
+--- FAIL: TestDuplicateProviderJSONAuthorityNeverDispatchesLocalTool (0.02s)
+    --- FAIL: TestDuplicateProviderJSONAuthorityNeverDispatchesLocalTool/openai_outer_object (0.00s)
+        duplicate_json_authority_agent_test.go:170: duplicate provider fields executed local Tool: err=agent external model result is uncertain
+            agent model failure
+            invalid provider protocol response
+            agent original root callback result is uncertain status=running code=agent.model_failed requests=2 effects=0
+    --- FAIL: TestDuplicateProviderJSONAuthorityNeverDispatchesLocalTool/openai_outer_status (0.00s)
+        duplicate_json_authority_agent_test.go:170: duplicate provider fields executed local Tool: err=agent external model result is uncertain
+            agent model failure
+            invalid provider protocol response
+            agent original root callback result is uncertain status=running code=agent.model_failed requests=2 effects=0
+    --- FAIL: TestDuplicateProviderJSONAuthorityNeverDispatchesLocalTool/openai_tool_id (0.00s)
+        duplicate_json_authority_agent_test.go:170: duplicate provider fields executed local Tool: err=agent external model result is uncertain
+            agent model failure
+            invalid provider protocol response
+            agent original root callback result is uncertain status=running code=agent.model_failed requests=2 effects=0
+    --- FAIL: TestDuplicateProviderJSONAuthorityNeverDispatchesLocalTool/anthropic_outer_role (0.00s)
+        duplicate_json_authority_agent_test.go:170: duplicate provider fields executed local Tool: err=agent external model result is uncertain
+            agent model failure
+            invalid provider protocol response
+            agent original root callback result is uncertain status=running code=agent.model_failed requests=2 effects=0
+    --- FAIL: TestDuplicateProviderJSONAuthorityNeverDispatchesLocalTool/anthropic_stop_reason (0.00s)
+        duplicate_json_authority_agent_test.go:170: duplicate provider fields executed local Tool: err=agent external model result is uncertain
+            agent model failure
+            invalid provider protocol response
+            agent original root callback result is uncertain status=running code=agent.model_failed requests=2 effects=0
+    --- FAIL: TestDuplicateProviderJSONAuthorityNeverDispatchesLocalTool/anthropic_tool_name (0.00s)
+        duplicate_json_authority_agent_test.go:170: duplicate provider fields executed local Tool: err=agent external model result is uncertain
+            agent model failure
+            invalid provider protocol response
+            agent original root callback result is uncertain status=running code=agent.model_failed requests=2 effects=0
+    --- FAIL: TestDuplicateProviderJSONAuthorityNeverDispatchesLocalTool/openai_folded_outer_owner (0.00s)
+        duplicate_json_authority_agent_test.go:170: duplicate provider fields executed local Tool: err=agent external model result is uncertain
+            agent model failure
+            invalid provider protocol response
+            agent original root callback result is uncertain status=running code=agent.model_failed requests=2 effects=0
+    --- FAIL: TestDuplicateProviderJSONAuthorityNeverDispatchesLocalTool/openai_folded_outer_status (0.00s)
+        duplicate_json_authority_agent_test.go:170: duplicate provider fields executed local Tool: err=agent external model result is uncertain
+            agent model failure
+            invalid provider protocol response
+            agent original root callback result is uncertain status=running code=agent.model_failed requests=2 effects=0
+    --- FAIL: TestDuplicateProviderJSONAuthorityNeverDispatchesLocalTool/openai_folded_tool_type (0.00s)
+        duplicate_json_authority_agent_test.go:170: duplicate provider fields executed local Tool: err=agent external model result is uncertain
+            agent model failure
+            invalid provider protocol response
+            agent original root callback result is uncertain status=running code=agent.model_failed requests=2 effects=0
+    --- FAIL: TestDuplicateProviderJSONAuthorityNeverDispatchesLocalTool/anthropic_folded_outer_role (0.00s)
+        duplicate_json_authority_agent_test.go:170: duplicate provider fields executed local Tool: err=agent external model result is uncertain
+            agent model failure
+            invalid provider protocol response
+            agent original root callback result is uncertain status=running code=agent.model_failed requests=2 effects=0
+    --- FAIL: TestDuplicateProviderJSONAuthorityNeverDispatchesLocalTool/anthropic_folded_stop_reason (0.00s)
+        duplicate_json_authority_agent_test.go:170: duplicate provider fields executed local Tool: err=agent external model result is uncertain
+            agent model failure
+            invalid provider protocol response
+            agent original root callback result is uncertain status=running code=agent.model_failed requests=2 effects=0
+    --- FAIL: TestDuplicateProviderJSONAuthorityNeverDispatchesLocalTool/anthropic_folded_usage (0.00s)
+        duplicate_json_authority_agent_test.go:170: duplicate provider fields executed local Tool: err=agent external model result is uncertain
+            agent model failure
+            invalid provider protocol response
+            agent original root callback result is uncertain status=running code=agent.model_failed requests=2 effects=0
+    --- FAIL: TestDuplicateProviderJSONAuthorityNeverDispatchesLocalTool/openai_padded_physical_response_id (0.00s)
+        duplicate_json_authority_agent_test.go:170: duplicate provider fields executed local Tool: err=agent external model result is uncertain
+            agent model failure
+            unsupported OpenAI model request or response
+            agent original root callback result is uncertain status=running code=agent.model_failed requests=2 effects=0
+    --- FAIL: TestDuplicateProviderJSONAuthorityNeverDispatchesLocalTool/anthropic_blank_physical_message_id (0.00s)
+        duplicate_json_authority_agent_test.go:170: duplicate provider fields executed local Tool: err=agent external model result is uncertain
+            agent model failure
+            unsupported Anthropic model request or response
+            agent original root callback result is uncertain status=running code=agent.model_failed requests=2 effects=0
+    --- FAIL: TestDuplicateProviderJSONAuthorityNeverDispatchesLocalTool/anthropic_padded_physical_message_id (0.00s)
+        duplicate_json_authority_agent_test.go:170: duplicate provider fields executed local Tool: err=agent external model result is uncertain
+            agent model failure
+            unsupported Anthropic model request or response
+            agent original root callback result is uncertain status=running code=agent.model_failed requests=2 effects=0
+--- FAIL: TestDuplicatePhysicalProviderCompletionIDNeverAuthorizesNewTool (0.01s)
+    --- FAIL: TestDuplicatePhysicalProviderCompletionIDNeverAuthorizesNewTool/openai/tool (0.00s)
+        duplicate_physical_response_id_agent_test.go:104: duplicate physical response authorized new Tool: err=agent external model result is uncertain
+            agent model failure
+            invalid agent model response
+            agent original root callback result is uncertain status=running code=agent.model_failed requests=2 effects=0
+    --- FAIL: TestDuplicatePhysicalProviderCompletionIDNeverAuthorizesNewTool/anthropic/tool (0.00s)
+        duplicate_physical_response_id_agent_test.go:104: duplicate physical response authorized new Tool: err=agent external model result is uncertain
+            agent model failure
+            invalid agent model response
+            agent original root callback result is uncertain status=running code=agent.model_failed requests=2 effects=0
+    --- FAIL: TestDuplicatePhysicalProviderCompletionIDNeverAuthorizesNewTool/openai/rejected (0.00s)
+        duplicate_physical_response_id_agent_test.go:104: duplicate physical response authorized new Tool: err=agent external model result is uncertain
+            agent model failure
+            invalid agent model response
+            agent original root callback result is uncertain status=running code=agent.model_failed requests=2 effects=0
+    --- FAIL: TestDuplicatePhysicalProviderCompletionIDNeverAuthorizesNewTool/anthropic/rejected (0.00s)
+        duplicate_physical_response_id_agent_test.go:104: duplicate physical response authorized new Tool: err=agent external model result is uncertain
+            agent model failure
+            invalid agent model response
+            agent original root callback result is uncertain status=running code=agent.model_failed requests=2 effects=0
+--- FAIL: TestLateDuplicatePhysicalProviderCompletionIDNeverAuthorizesNewTool (1.01s)
+    --- FAIL: TestLateDuplicatePhysicalProviderCompletionIDNeverAuthorizesNewTool/openai/tool (0.50s)
+        duplicate_physical_response_id_agent_test.go:230: duplicate physical response authorized new Tool: err=agent external model result is uncertain
+            agent model failure
+            invalid agent model response
+            agent original root callback result is uncertain status=running code=agent.model_failed requests=2 effects=0
+    --- FAIL: TestLateDuplicatePhysicalProviderCompletionIDNeverAuthorizesNewTool/anthropic/tool (0.50s)
+        duplicate_physical_response_id_agent_test.go:230: duplicate physical response authorized new Tool: err=agent external model result is uncertain
+            agent model failure
+            invalid agent model response
+            agent original root callback result is uncertain status=running code=agent.model_failed requests=2 effects=0
+--- FAIL: TestOpenAIContradictoryAddedItemStatusNeverExecutesLocalTool (0.00s)
+    --- FAIL: TestOpenAIContradictoryAddedItemStatusNeverExecutesLocalTool/incomplete (0.00s)
+        openai_added_status_agent_test.go:84: added status contradiction dispatched Tool: err=agent external model result is uncertain
+            agent model failure
+            invalid provider protocol response
+            agent original root callback result is uncertain status=running code=agent.model_failed requests=2 effects=0
+    --- FAIL: TestOpenAIContradictoryAddedItemStatusNeverExecutesLocalTool/failed (0.00s)
+        openai_added_status_agent_test.go:84: added status contradiction dispatched Tool: err=agent external model result is uncertain
+            agent model failure
+            invalid provider protocol response
+            agent original root callback result is uncertain status=running code=agent.model_failed requests=2 effects=0
+    --- FAIL: TestOpenAIContradictoryAddedItemStatusNeverExecutesLocalTool/null (0.00s)
+        openai_added_status_agent_test.go:84: added status contradiction dispatched Tool: err=agent external model result is uncertain
+            agent model failure
+            invalid provider protocol response
+            agent original root callback result is uncertain status=running code=agent.model_failed requests=2 effects=0
+    --- FAIL: TestOpenAIContradictoryAddedItemStatusNeverExecutesLocalTool/unknown (0.00s)
+        openai_added_status_agent_test.go:84: added status contradiction dispatched Tool: err=agent external model result is uncertain
+            agent model failure
+            invalid provider protocol response
+            agent original root callback result is uncertain status=running code=agent.model_failed requests=2 effects=0
+--- FAIL: TestOpenAIContradictoryEarlySSELifecycleNeverExecutesLocalTool (0.00s)
+    --- FAIL: TestOpenAIContradictoryEarlySSELifecycleNeverExecutesLocalTool/created_failed (0.00s)
+        openai_early_lifecycle_agent_test.go:82: early lifecycle contradiction dispatched Tool: err=agent external model result is uncertain
+            agent model failure
+            invalid provider protocol response
+            agent original root callback result is uncertain status=running code=agent.model_failed requests=2 effects=0
+    --- FAIL: TestOpenAIContradictoryEarlySSELifecycleNeverExecutesLocalTool/progress_error (0.00s)
+        openai_early_lifecycle_agent_test.go:82: early lifecycle contradiction dispatched Tool: err=agent external model result is uncertain
+            agent model failure
+            invalid provider protocol response
+            agent original root callback result is uncertain status=running code=agent.model_failed requests=2 effects=0
+    --- FAIL: TestOpenAIContradictoryEarlySSELifecycleNeverExecutesLocalTool/created_truncated (0.00s)
+        openai_early_lifecycle_agent_test.go:82: early lifecycle contradiction dispatched Tool: err=agent external model result is uncertain
+            agent model failure
+            invalid provider protocol response
+            agent original root callback result is uncertain status=running code=agent.model_failed requests=2 effects=0
+--- FAIL: TestForeignResponsesOuterResourceNeverExecutesLocalTool (0.00s)
+    --- FAIL: TestForeignResponsesOuterResourceNeverExecutesLocalTool/foreign_chat_completion (0.00s)
+        openai_outer_owner_agent_test.go:102: foreign Responses object executed Tool: err=agent external model result is uncertain
+            agent model failure
+            unsupported OpenAI model request or response
+            agent original root callback result is uncertain status=running code=agent.model_failed requests=2 effects=0
+    --- FAIL: TestForeignResponsesOuterResourceNeverExecutesLocalTool/foreign_image (0.00s)
+        openai_outer_owner_agent_test.go:102: foreign Responses object executed Tool: err=agent external model result is uncertain
+            agent model failure
+            unsupported OpenAI model request or response
+            agent original root callback result is uncertain status=running code=agent.model_failed requests=2 effects=0
+    --- FAIL: TestForeignResponsesOuterResourceNeverExecutesLocalTool/missing_outer_object (0.00s)
+        openai_outer_owner_agent_test.go:102: foreign Responses object executed Tool: err=agent external model result is uncertain
+            agent model failure
+            unsupported OpenAI model request or response
+            agent original root callback result is uncertain status=running code=agent.model_failed requests=2 effects=0
+--- FAIL: TestOpenAIContradictorySSEDoneNeverDispatchesLocalTool (0.01s)
+    --- FAIL: TestOpenAIContradictorySSEDoneNeverDispatchesLocalTool/unfinished_tool_done (0.00s)
+        openai_sse_done_agent_test.go:115: SSE evidence bypassed local Tool boundary: err=agent external model result is uncertain
+            agent model failure
+            invalid provider protocol response
+            agent original root callback result is uncertain status=running code=agent.model_failed requests=2 effects=0
+    --- FAIL: TestOpenAIContradictorySSEDoneNeverDispatchesLocalTool/different_call_id (0.00s)
+        openai_sse_done_agent_test.go:115: SSE evidence bypassed local Tool boundary: err=agent external model result is uncertain
+            agent model failure
+            invalid provider protocol response
+            agent original root callback result is uncertain status=running code=agent.model_failed requests=2 effects=0
+    --- FAIL: TestOpenAIContradictorySSEDoneNeverDispatchesLocalTool/different_arguments (0.00s)
+        openai_sse_done_agent_test.go:115: SSE evidence bypassed local Tool boundary: err=agent external model result is uncertain
+            agent model failure
+            invalid provider protocol response
+            agent original root callback result is uncertain status=running code=agent.model_failed requests=2 effects=0
+    --- FAIL: TestOpenAIContradictorySSEDoneNeverDispatchesLocalTool/wrong_output_index (0.00s)
+        openai_sse_done_agent_test.go:115: SSE evidence bypassed local Tool boundary: err=agent external model result is uncertain
+            agent model failure
+            invalid provider protocol response
+            agent original root callback result is uncertain status=running code=agent.model_failed requests=2 effects=0
+    --- FAIL: TestOpenAIContradictorySSEDoneNeverDispatchesLocalTool/message_done_replaced_by_tool (0.00s)
+        openai_sse_done_agent_test.go:115: SSE evidence bypassed local Tool boundary: err=agent external model result is uncertain
+            agent model failure
+            invalid provider protocol response
+            agent original root callback result is uncertain status=running code=agent.model_failed requests=2 effects=0
+--- FAIL: TestOpenAIContradictoryOuterCompletionNeverExecutesLocalTool (0.00s)
+    --- FAIL: TestOpenAIContradictoryOuterCompletionNeverExecutesLocalTool/error_object (0.00s)
+        openai_terminal_contradiction_agent_test.go:78: contradictory outer completion dispatched Tool: err=agent external model result is uncertain
+            agent model failure
+            unsupported OpenAI model request or response
+            agent original root callback result is uncertain status=running code=agent.model_failed requests=2 effects=0
+    --- FAIL: TestOpenAIContradictoryOuterCompletionNeverExecutesLocalTool/incomplete_details (0.00s)
+        openai_terminal_contradiction_agent_test.go:78: contradictory outer completion dispatched Tool: err=agent external model result is uncertain
+            agent model failure
+            unsupported OpenAI model request or response
+            agent original root callback result is uncertain status=running code=agent.model_failed requests=2 effects=0
+--- FAIL: TestPendingNamedProviderBindingResumesOnlyItsOriginalCatalogSnapshot (0.00s)
+    --- FAIL: TestPendingNamedProviderBindingResumesOnlyItsOriginalCatalogSnapshot/openai (0.00s)
+        pending_binding_compatibility_test.go:136: pending retry lost durable due time
+    --- FAIL: TestPendingNamedProviderBindingResumesOnlyItsOriginalCatalogSnapshot/anthropic (0.00s)
+        pending_binding_compatibility_test.go:136: pending retry lost durable due time
+--- FAIL: TestAgentPersistsAndResumesTransientStreamFailures (0.00s)
+    --- FAIL: TestAgentPersistsAndResumesTransientStreamFailures/openai-failed (0.00s)
+        stream_retry_test.go:105: invalid pending retry: {ID:modelinv_4c7cc5b8e5ccec9fe914f57d79e38060 RunID:openai-failed SourceRevision:1 RequestHash:afd017835628fa18a7acdd2ff20443d572f77ce6c6d2fe3ea3985b8a219460f8 CatalogFingerprints:[] Provider:openai BindingFingerprint:871b479c9e3bae2ce5bc4e6c7cdb839871fcceb1bf853d9fec58dc2f7b507f97 Model: Status:pending Request:{BindingRef: PromptCacheKey: PreviousResponseID: RunID:openai-failed InvocationID:modelinv_4c7cc5b8e5ccec9fe914f57d79e38060 Model: ModelOptions:null OutputContract:<nil> Messages:[{ToolResult:<nil> CacheControl:<nil> Role:user Content:[{Name: CacheControl:<nil> Kind:text Text:answer MediaType: Source:<nil>}] ToolCalls:[] ToolCallID: ProviderReplay:<nil>}] Tools:[] HostedTools:[] MaxOutputTokens:0 HostedToolCallLimit:<nil> RequireToolCall:false} ProviderResponseID: Response:{Content: ToolCalls:[] HostedToolCalls:[] Artifacts:[] Citations:[] ResponseID: Usage:<nil> ProviderReplay:<nil> Refused:false Continue:false} Usage:<nil> ErrorCode: OutcomeErrorCode:agent.model_failed OutcomeErrorDetail:agent model failure
+            unsupported OpenAI model request or response DispatchAttempt:1 ExecutionAttempt:1 ExecutionLeaseUntil:2026-10-24 12:02:00 +0000 UTC RetryAfter:<nil> CreatedAt:2026-10-24 12:00:00 +0000 UTC CompletedAt:<nil> ConsumedAt:<nil>}
+    --- FAIL: TestAgentPersistsAndResumesTransientStreamFailures/openai-error (0.00s)
+        stream_retry_test.go:105: invalid pending retry: {ID:modelinv_aabcfe09e922f9d3f801cc34333c746d RunID:openai-error SourceRevision:1 RequestHash:77de7a4814e0cb01625b375b225d15a9477e2f00be5e7c302440620e6b3eb417 CatalogFingerprints:[] Provider:openai BindingFingerprint:efb671492ae2be26326ee8e983db301cce72f1a3e1836436a3404ecff473c44a Model: Status:pending Request:{BindingRef: PromptCacheKey: PreviousResponseID: RunID:openai-error InvocationID:modelinv_aabcfe09e922f9d3f801cc34333c746d Model: ModelOptions:null OutputContract:<nil> Messages:[{ToolResult:<nil> CacheControl:<nil> Role:user Content:[{Name: CacheControl:<nil> Kind:text Text:answer MediaType: Source:<nil>}] ToolCalls:[] ToolCallID: ProviderReplay:<nil>}] Tools:[] HostedTools:[] MaxOutputTokens:0 HostedToolCallLimit:<nil> RequireToolCall:false} ProviderResponseID: Response:{Content: ToolCalls:[] HostedToolCalls:[] Artifacts:[] Citations:[] ResponseID: Usage:<nil> ProviderReplay:<nil> Refused:false Continue:false} Usage:<nil> ErrorCode: OutcomeErrorCode:agent.model_failed OutcomeErrorDetail:agent model failure
+            unsupported OpenAI model request or response DispatchAttempt:1 ExecutionAttempt:1 ExecutionLeaseUntil:2026-10-24 12:02:00 +0000 UTC RetryAfter:<nil> CreatedAt:2026-10-24 12:00:00 +0000 UTC CompletedAt:<nil> ConsumedAt:<nil>}
+    --- FAIL: TestAgentPersistsAndResumesTransientStreamFailures/anthropic-error (0.00s)
+        stream_retry_test.go:105: invalid pending retry: {ID:modelinv_35974d8a94b3d4daadc598e10f0cc64d RunID:anthropic-error SourceRevision:1 RequestHash:672996c88168a7206d6efcdf449ba2813d72c57400cbeb4a21f8f303d38fd018 CatalogFingerprints:[] Provider:anthropic BindingFingerprint:abeb1783c9f0314ed959d1f5e57d4e6d35fee4d0c46434ec1519e2f4005766b3 Model: Status:pending Request:{BindingRef: PromptCacheKey: PreviousResponseID: RunID:anthropic-error InvocationID:modelinv_35974d8a94b3d4daadc598e10f0cc64d Model: ModelOptions:null OutputContract:<nil> Messages:[{ToolResult:<nil> CacheControl:<nil> Role:user Content:[{Name: CacheControl:<nil> Kind:text Text:answer MediaType: Source:<nil>}] ToolCalls:[] ToolCallID: ProviderReplay:<nil>}] Tools:[] HostedTools:[] MaxOutputTokens:0 HostedToolCallLimit:<nil> RequireToolCall:false} ProviderResponseID: Response:{Content: ToolCalls:[] HostedToolCalls:[] Artifacts:[] Citations:[] ResponseID: Usage:<nil> ProviderReplay:<nil> Refused:false Continue:false} Usage:<nil> ErrorCode: OutcomeErrorCode:agent.model_failed OutcomeErrorDetail:agent model failure
+            unsupported Anthropic model request or response DispatchAttempt:1 ExecutionAttempt:1 ExecutionLeaseUntil:2026-10-24 12:02:00 +0000 UTC RetryAfter:<nil> CreatedAt:2026-10-24 12:00:00 +0000 UTC CompletedAt:<nil> ConsumedAt:<nil>}
+    --- FAIL: TestAgentPersistsAndResumesTransientStreamFailures/openai-permanent (0.00s)
+        stream_retry_test.go:95: permanent stream failure remains resumable: {ID:openai-permanent Kind:agent Actor:{TenantID:fixture ActorID:owner} Thread:{Kind:conversation ID:thread} RequestID: ParentRunID: Goal:answer Status:running Revision:5 ErrorCode:agent.model_failed ErrorDetail:agent model failure
+            unsupported OpenAI model request or response DeadlineAt:<nil> EndedAt:<nil> CreatedAt:2026-10-24 12:00:00 +0000 UTC UpdatedAt:2026-10-24 12:00:00 +0000 UTC}
+    --- FAIL: TestAgentPersistsAndResumesTransientStreamFailures/anthropic-permanent (0.00s)
+        stream_retry_test.go:95: permanent stream failure remains resumable: {ID:anthropic-permanent Kind:agent Actor:{TenantID:fixture ActorID:owner} Thread:{Kind:conversation ID:thread} RequestID: ParentRunID: Goal:answer Status:running Revision:5 ErrorCode:agent.model_failed ErrorDetail:agent model failure
+            unsupported Anthropic model request or response DeadlineAt:<nil> EndedAt:<nil> CreatedAt:2026-10-24 12:00:00 +0000 UTC UpdatedAt:2026-10-24 12:00:00 +0000 UTC}
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider	2.054s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider/anthropic	1.043s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider/examples/providers	[no test files]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider/internal/providerhttp	0.856s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider/openai	1.350s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider/transport	3.814s
+FAIL
+file:///private/tmp/gaoge-runtime-issue107/scripts/go-workspace.mjs:190
+    throw new Error(`${command} ${args.join(" ")} failed with exit code ${result.status ?? 1}`);
+          ^
+
+Error: go test ./... -count=1 failed with exit code 1
+    at run (file:///private/tmp/gaoge-runtime-issue107/scripts/go-workspace.mjs:190:11)
+    at file:///private/tmp/gaoge-runtime-issue107/scripts/go-workspace.mjs:51:24
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+
+Node.js v24.21.0
+make: *** [go-test] Error 1
+
+EXIT_CODE=2

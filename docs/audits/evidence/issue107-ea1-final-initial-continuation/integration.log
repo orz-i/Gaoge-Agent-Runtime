@@ -1,0 +1,457 @@
+SOURCE_SHA=e05290927ba0143f625857be08a0aa7493df84cf
+COMMAND=make integration-test
+node scripts/run-integration.mjs --external-services
+=== RUN   TestRealPostgresAgentRecoveryAcrossProcessCrash
+=== RUN   TestRealPostgresAgentRecoveryAcrossProcessCrash/pending_committed
+=== RUN   TestRealPostgresAgentRecoveryAcrossProcessCrash/claim_committed
+=== RUN   TestRealPostgresAgentRecoveryAcrossProcessCrash/response_before_receipt
+=== RUN   TestRealPostgresAgentRecoveryAcrossProcessCrash/receipt_committed
+--- PASS: TestRealPostgresAgentRecoveryAcrossProcessCrash (1.27s)
+    --- PASS: TestRealPostgresAgentRecoveryAcrossProcessCrash/pending_committed (0.31s)
+    --- PASS: TestRealPostgresAgentRecoveryAcrossProcessCrash/claim_committed (0.40s)
+    --- PASS: TestRealPostgresAgentRecoveryAcrossProcessCrash/response_before_receipt (0.29s)
+    --- PASS: TestRealPostgresAgentRecoveryAcrossProcessCrash/receipt_committed (0.27s)
+=== RUN   TestRealPostgresAgentCancellationFencesLateModelReceipt
+--- PASS: TestRealPostgresAgentCancellationFencesLateModelReceipt (0.30s)
+=== RUN   TestRealPostgresRecordedCallbackSurvivesProcessCrash
+--- PASS: TestRealPostgresRecordedCallbackSurvivesProcessCrash (0.27s)
+=== RUN   TestRealPostgresRunJournalOutboxRollbackTogether
+=== RUN   TestRealPostgresRunJournalOutboxRollbackTogether/agent_kernel_events
+=== RUN   TestRealPostgresRunJournalOutboxRollbackTogether/agent_kernel_transition_outbox
+--- PASS: TestRealPostgresRunJournalOutboxRollbackTogether (0.30s)
+    --- PASS: TestRealPostgresRunJournalOutboxRollbackTogether/agent_kernel_events (0.17s)
+    --- PASS: TestRealPostgresRunJournalOutboxRollbackTogether/agent_kernel_transition_outbox (0.13s)
+=== RUN   TestRealPostgresCrossTenantChildRelationDoesNotWakeAnotherTenant
+--- PASS: TestRealPostgresCrossTenantChildRelationDoesNotWakeAnotherTenant (0.14s)
+=== RUN   TestRealPostgresUnknownRunStatusCannotACKRecovery
+--- PASS: TestRealPostgresUnknownRunStatusCannotACKRecovery (0.12s)
+=== RUN   TestRealPostgresExternalWaitRecoveryAndOutboxGeneration
+--- PASS: TestRealPostgresExternalWaitRecoveryAndOutboxGeneration (0.25s)
+=== RUN   TestRealPostgresIdentifiedApplyLostReplyAndNewerRevisionRecovery
+--- PASS: TestRealPostgresIdentifiedApplyLostReplyAndNewerRevisionRecovery (0.21s)
+=== RUN   TestRealPostgresExpiredExecutionCannotCommitAfterRowLockWait
+--- PASS: TestRealPostgresExpiredExecutionCannotCommitAfterRowLockWait (2.21s)
+=== RUN   TestRealPostgresKernelControlStoreConformance
+=== RUN   TestRealPostgresKernelControlStoreConformance/native-external-signal-guarded-cas
+=== RUN   TestRealPostgresKernelControlStoreConformance/approval-exact-checkpoint-and-revocation
+=== RUN   TestRealPostgresKernelControlStoreConformance/allowance-dimension-and-revocation
+=== RUN   TestRealPostgresKernelControlStoreConformance/cancel-revokes-active-owner
+=== RUN   TestRealPostgresKernelControlStoreConformance/deadline-checks-store-time
+=== RUN   TestRealPostgresKernelControlStoreConformance/bound-owner-cancel
+=== RUN   TestRealPostgresKernelControlStoreConformance/Store-deadline-gates-approval-and-allowance
+=== RUN   TestRealPostgresKernelControlStoreConformance/Store-deadline-gates-approval-and-allowance/approval
+=== RUN   TestRealPostgresKernelControlStoreConformance/Store-deadline-gates-approval-and-allowance/allowance
+=== RUN   TestRealPostgresKernelControlStoreConformance/fast-caller-clock-does-not-report-false-expiry
+=== RUN   TestRealPostgresKernelControlStoreConformance/direct-Store-call-cannot-forge-a-Feature-proof
+--- PASS: TestRealPostgresKernelControlStoreConformance (4.11s)
+    --- PASS: TestRealPostgresKernelControlStoreConformance/native-external-signal-guarded-cas (0.21s)
+    --- PASS: TestRealPostgresKernelControlStoreConformance/approval-exact-checkpoint-and-revocation (0.18s)
+    --- PASS: TestRealPostgresKernelControlStoreConformance/allowance-dimension-and-revocation (0.16s)
+    --- PASS: TestRealPostgresKernelControlStoreConformance/cancel-revokes-active-owner (0.16s)
+    --- PASS: TestRealPostgresKernelControlStoreConformance/deadline-checks-store-time (1.03s)
+    --- PASS: TestRealPostgresKernelControlStoreConformance/bound-owner-cancel (0.13s)
+    --- PASS: TestRealPostgresKernelControlStoreConformance/Store-deadline-gates-approval-and-allowance (1.97s)
+        --- PASS: TestRealPostgresKernelControlStoreConformance/Store-deadline-gates-approval-and-allowance/approval (0.98s)
+        --- PASS: TestRealPostgresKernelControlStoreConformance/Store-deadline-gates-approval-and-allowance/allowance (1.00s)
+    --- PASS: TestRealPostgresKernelControlStoreConformance/fast-caller-clock-does-not-report-false-expiry (0.14s)
+    --- PASS: TestRealPostgresKernelControlStoreConformance/direct-Store-call-cannot-forge-a-Feature-proof (0.13s)
+=== RUN   TestRealPostgresKernelApplyEvidenceConformance
+=== RUN   TestRealPostgresKernelApplyEvidenceConformance/evidence-survives-newer-cas-and-denies-mismatched-replay
+=== RUN   TestRealPostgresKernelApplyEvidenceConformance/fenced-native-apply-evidence-requires-current-lease
+=== RUN   TestRealPostgresKernelApplyEvidenceConformance/many-committed-events-do-not-hide-proof
+=== RUN   TestRealPostgresKernelApplyEvidenceConformance/reserved-proof-event-cannot-be-supplied-through-plain-apply
+--- PASS: TestRealPostgresKernelApplyEvidenceConformance (0.63s)
+    --- PASS: TestRealPostgresKernelApplyEvidenceConformance/evidence-survives-newer-cas-and-denies-mismatched-replay (0.15s)
+    --- PASS: TestRealPostgresKernelApplyEvidenceConformance/fenced-native-apply-evidence-requires-current-lease (0.14s)
+    --- PASS: TestRealPostgresKernelApplyEvidenceConformance/many-committed-events-do-not-hide-proof (0.22s)
+    --- PASS: TestRealPostgresKernelApplyEvidenceConformance/reserved-proof-event-cannot-be-supplied-through-plain-apply (0.12s)
+=== RUN   TestRealPostgresKernelQuarantineStoreConformance
+=== RUN   TestRealPostgresKernelQuarantineStoreConformance/current-work-quarantine-revokes-owner-and-requires-exact-repair
+--- PASS: TestRealPostgresKernelQuarantineStoreConformance (0.17s)
+    --- PASS: TestRealPostgresKernelQuarantineStoreConformance/current-work-quarantine-revokes-owner-and-requires-exact-repair (0.17s)
+=== RUN   TestRealPostgresKernelExecutionStoreConformance
+=== RUN   TestRealPostgresKernelExecutionStoreConformance/execution-mode-frozen-at-create
+=== RUN   TestRealPostgresKernelExecutionStoreConformance/epoch-and-multi-cas-segment
+=== RUN   TestRealPostgresKernelExecutionStoreConformance/client-expiry-is-not-an-authority
+=== RUN   TestRealPostgresKernelExecutionStoreConformance/pending-gates-cannot-acquire
+=== RUN   TestRealPostgresKernelExecutionStoreConformance/simultaneous-claims-are-exclusive
+=== RUN   TestRealPostgresKernelExecutionStoreConformance/fenced-run-cannot-use-legacy-control-bypass
+=== RUN   TestRealPostgresKernelExecutionStoreConformance/pre-dispatch-authority-before-and-after-takeover
+--- PASS: TestRealPostgresKernelExecutionStoreConformance (1.31s)
+    --- PASS: TestRealPostgresKernelExecutionStoreConformance/execution-mode-frozen-at-create (0.10s)
+    --- PASS: TestRealPostgresKernelExecutionStoreConformance/epoch-and-multi-cas-segment (0.29s)
+    --- PASS: TestRealPostgresKernelExecutionStoreConformance/client-expiry-is-not-an-authority (0.21s)
+    --- PASS: TestRealPostgresKernelExecutionStoreConformance/pending-gates-cannot-acquire (0.15s)
+    --- PASS: TestRealPostgresKernelExecutionStoreConformance/simultaneous-claims-are-exclusive (0.16s)
+    --- PASS: TestRealPostgresKernelExecutionStoreConformance/fenced-run-cannot-use-legacy-control-bypass (0.14s)
+    --- PASS: TestRealPostgresKernelExecutionStoreConformance/pre-dispatch-authority-before-and-after-takeover (0.26s)
+=== RUN   TestRealPostgresOwnedPhysicalBindingGuards
+--- PASS: TestRealPostgresOwnedPhysicalBindingGuards (0.22s)
+=== RUN   TestRealPostgresNativeLeaseOnlyPreservesRunProjection
+--- PASS: TestRealPostgresNativeLeaseOnlyPreservesRunProjection (0.13s)
+=== RUN   TestRealPostgresExecutionQuarantineSurvivesReconnection
+--- PASS: TestRealPostgresExecutionQuarantineSurvivesReconnection (0.15s)
+=== RUN   TestRealPostgresExecutionQuarantineRacesWithCommit
+--- PASS: TestRealPostgresExecutionQuarantineRacesWithCommit (0.15s)
+=== RUN   TestRealPostgresClaimTransitionsScansPastThirtyThreePoisonedRows
+--- PASS: TestRealPostgresClaimTransitionsScansPastThirtyThreePoisonedRows (0.15s)
+=== RUN   TestRealPostgresClaimTransitionsBoundsPoisonedScanPerCall
+--- PASS: TestRealPostgresClaimTransitionsBoundsPoisonedScanPerCall (0.27s)
+=== RUN   TestRealPostgresPoisonedOutboxDoesNotStarveOtherRun
+--- PASS: TestRealPostgresPoisonedOutboxDoesNotStarveOtherRun (0.13s)
+=== RUN   TestRealPostgresKernelStoreCreateReturnsPersistedTimestamp
+--- PASS: TestRealPostgresKernelStoreCreateReturnsPersistedTimestamp (0.10s)
+=== RUN   TestRealPostgresKernelStoreApplyReturnsOwnCommittedSnapshot
+--- PASS: TestRealPostgresKernelStoreApplyReturnsOwnCommittedSnapshot (0.11s)
+=== RUN   TestRealPostgresKernelStoreCreateReturnsOwnCommittedSnapshot
+--- PASS: TestRealPostgresKernelStoreCreateReturnsOwnCommittedSnapshot (0.10s)
+=== RUN   TestRealPostgresNativeExternalSignalAndVerifiedReceipt
+--- PASS: TestRealPostgresNativeExternalSignalAndVerifiedReceipt (0.26s)
+=== RUN   TestRealPostgresNativeRunLeaseApprovalAndResume
+--- PASS: TestRealPostgresNativeRunLeaseApprovalAndResume (0.40s)
+=== RUN   TestRealPostgresPR82SubworkflowRelationshipPrecedesPhysicalChild
+=== RUN   TestRealPostgresPR82SubworkflowRelationshipPrecedesPhysicalChild/normal
+=== RUN   TestRealPostgresPR82SubworkflowRelationshipPrecedesPhysicalChild/reject
+=== RUN   TestRealPostgresPR82SubworkflowRelationshipPrecedesPhysicalChild/committed-lost-reply
+--- PASS: TestRealPostgresPR82SubworkflowRelationshipPrecedesPhysicalChild (0.59s)
+    --- PASS: TestRealPostgresPR82SubworkflowRelationshipPrecedesPhysicalChild/normal (0.21s)
+    --- PASS: TestRealPostgresPR82SubworkflowRelationshipPrecedesPhysicalChild/reject (0.21s)
+    --- PASS: TestRealPostgresPR82SubworkflowRelationshipPrecedesPhysicalChild/committed-lost-reply (0.17s)
+=== RUN   TestRealPostgresKernelStoreLoadIndependentOfLargeHistory
+--- PASS: TestRealPostgresKernelStoreLoadIndependentOfLargeHistory (1.82s)
+=== RUN   TestRealPostgresKernelStoreConformanceAndRestart
+=== RUN   TestRealPostgresKernelStoreConformanceAndRestart/create-load-isolation
+=== RUN   TestRealPostgresKernelStoreConformanceAndRestart/duplicate-create
+=== RUN   TestRealPostgresKernelStoreConformanceAndRestart/checkpoint-result-isolation
+=== RUN   TestRealPostgresKernelStoreConformanceAndRestart/cas-and-event-journal
+=== RUN   TestRealPostgresKernelStoreConformanceAndRestart/concurrent-cas
+=== RUN   TestRealPostgresKernelStoreConformanceAndRestart/transition-outbox
+=== RUN   TestRealPostgresKernelStoreConformanceAndRestart/transition-late-ack-before-takeover
+=== RUN   TestRealPostgresKernelStoreConformanceAndRestart/transition-stale-ack-after-takeover
+--- PASS: TestRealPostgresKernelStoreConformanceAndRestart (1.77s)
+    --- PASS: TestRealPostgresKernelStoreConformanceAndRestart/create-load-isolation (0.13s)
+    --- PASS: TestRealPostgresKernelStoreConformanceAndRestart/duplicate-create (0.13s)
+    --- PASS: TestRealPostgresKernelStoreConformanceAndRestart/checkpoint-result-isolation (0.12s)
+    --- PASS: TestRealPostgresKernelStoreConformanceAndRestart/cas-and-event-journal (0.14s)
+    --- PASS: TestRealPostgresKernelStoreConformanceAndRestart/concurrent-cas (0.26s)
+    --- PASS: TestRealPostgresKernelStoreConformanceAndRestart/transition-outbox (0.14s)
+    --- PASS: TestRealPostgresKernelStoreConformanceAndRestart/transition-late-ack-before-takeover (0.19s)
+    --- PASS: TestRealPostgresKernelStoreConformanceAndRestart/transition-stale-ack-after-takeover (0.19s)
+=== RUN   TestRealPostgresReconciliationWatermarkSurvivesRestartAndConcurrentWriters
+--- PASS: TestRealPostgresReconciliationWatermarkSurvivesRestartAndConcurrentWriters (0.40s)
+=== RUN   TestRealPostgresSchedulerReconcileSurvivesRestartAndLateParentWait
+--- PASS: TestRealPostgresSchedulerReconcileSurvivesRestartAndLateParentWait (0.15s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	19.618s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]
+=== RUN   TestRealPostgresAppendItemConcurrentIdentity
+=== RUN   TestRealPostgresAppendItemConcurrentIdentity/same_turn_retries_are_idempotent
+=== RUN   TestRealPostgresAppendItemConcurrentIdentity/same_turn_empty_payload_is_idempotent
+=== RUN   TestRealPostgresAppendItemConcurrentIdentity/cross_turn_global_ID_collision_is_a_conflict
+--- PASS: TestRealPostgresAppendItemConcurrentIdentity (0.32s)
+    --- PASS: TestRealPostgresAppendItemConcurrentIdentity/same_turn_retries_are_idempotent (0.07s)
+    --- PASS: TestRealPostgresAppendItemConcurrentIdentity/same_turn_empty_payload_is_idempotent (0.03s)
+    --- PASS: TestRealPostgresAppendItemConcurrentIdentity/cross_turn_global_ID_collision_is_a_conflict (0.03s)
+=== RUN   TestRealPostgresExistingItemReplayDoesNotWaitForTurnLock
+--- PASS: TestRealPostgresExistingItemReplayDoesNotWaitForTurnLock (0.22s)
+=== RUN   TestRealPostgresApplicationGlobalParentReceiptHistoricalCorruption
+=== RUN   TestRealPostgresApplicationGlobalParentReceiptHistoricalCorruption/dispatch-foreign-Turn-Artifact
+=== RUN   TestRealPostgresApplicationGlobalParentReceiptHistoricalCorruption/dispatch-foreign-Turn-Diagnostic
+=== RUN   TestRealPostgresApplicationGlobalParentReceiptHistoricalCorruption/dispatch-same-Turn-Artifact
+=== RUN   TestRealPostgresApplicationGlobalParentReceiptHistoricalCorruption/host-source-foreign-Turn-Diagnostic
+=== RUN   TestRealPostgresApplicationGlobalParentReceiptHistoricalCorruption/host-source-reserved-ID-Artifact
+=== RUN   TestRealPostgresApplicationGlobalParentReceiptHistoricalCorruption/host-receipt-foreign-Turn-Artifact
+=== RUN   TestRealPostgresApplicationGlobalParentReceiptHistoricalCorruption/orphan-foreign-Turn-claim-ID
+=== RUN   TestRealPostgresApplicationGlobalParentReceiptHistoricalCorruption/orphan-foreign-Turn-done-ID
+=== RUN   TestRealPostgresApplicationGlobalParentReceiptHistoricalCorruption/host-source-ordinary-Artifact-remains-data
+--- PASS: TestRealPostgresApplicationGlobalParentReceiptHistoricalCorruption (4.75s)
+    --- PASS: TestRealPostgresApplicationGlobalParentReceiptHistoricalCorruption/dispatch-foreign-Turn-Artifact (0.49s)
+    --- PASS: TestRealPostgresApplicationGlobalParentReceiptHistoricalCorruption/dispatch-foreign-Turn-Diagnostic (0.38s)
+    --- PASS: TestRealPostgresApplicationGlobalParentReceiptHistoricalCorruption/dispatch-same-Turn-Artifact (0.51s)
+    --- PASS: TestRealPostgresApplicationGlobalParentReceiptHistoricalCorruption/host-source-foreign-Turn-Diagnostic (0.58s)
+    --- PASS: TestRealPostgresApplicationGlobalParentReceiptHistoricalCorruption/host-source-reserved-ID-Artifact (0.68s)
+    --- PASS: TestRealPostgresApplicationGlobalParentReceiptHistoricalCorruption/host-receipt-foreign-Turn-Artifact (0.66s)
+    --- PASS: TestRealPostgresApplicationGlobalParentReceiptHistoricalCorruption/orphan-foreign-Turn-claim-ID (0.35s)
+    --- PASS: TestRealPostgresApplicationGlobalParentReceiptHistoricalCorruption/orphan-foreign-Turn-done-ID (0.59s)
+    --- PASS: TestRealPostgresApplicationGlobalParentReceiptHistoricalCorruption/host-source-ordinary-Artifact-remains-data (0.50s)
+=== RUN   TestRealPostgresApplicationParentFrozenAttemptRecheck
+--- PASS: TestRealPostgresApplicationParentFrozenAttemptRecheck (0.49s)
+=== RUN   TestRealPostgresApplicationOriginalResponseTerminalRepairAndParentContinuation
+=== RUN   TestRealPostgresApplicationOriginalResponseTerminalRepairAndParentContinuation/root
+=== RUN   TestRealPostgresApplicationOriginalResponseTerminalRepairAndParentContinuation/child
+--- PASS: TestRealPostgresApplicationOriginalResponseTerminalRepairAndParentContinuation (0.97s)
+    --- PASS: TestRealPostgresApplicationOriginalResponseTerminalRepairAndParentContinuation/root (0.45s)
+    --- PASS: TestRealPostgresApplicationOriginalResponseTerminalRepairAndParentContinuation/child (0.52s)
+=== RUN   TestRealPostgresSharedBudgetRaceAndRestart
+--- PASS: TestRealPostgresSharedBudgetRaceAndRestart (1.16s)
+=== RUN   TestRealPostgresProvenUnsentModelDispatchRequeueAcrossWorkers
+--- PASS: TestRealPostgresProvenUnsentModelDispatchRequeueAcrossWorkers (0.18s)
+=== RUN   TestRealPostgresCancellationFenceAcrossConnections
+--- PASS: TestRealPostgresCancellationFenceAcrossConnections (0.34s)
+=== RUN   TestRealPostgresEA1HarnessAgentTaskCancelP4
+--- PASS: TestRealPostgresEA1HarnessAgentTaskCancelP4 (0.48s)
+=== RUN   TestRealPostgresEA1RootAgentCancelHostElection
+=== RUN   TestRealPostgresEA1RootAgentCancelHostElection/election-after
+=== RUN   TestRealPostgresEA1RootAgentCancelHostElection/receipt-before
+=== RUN   TestRealPostgresEA1RootAgentCancelHostElection/receipt-ack-loss
+--- PASS: TestRealPostgresEA1RootAgentCancelHostElection (0.73s)
+    --- PASS: TestRealPostgresEA1RootAgentCancelHostElection/election-after (0.26s)
+    --- PASS: TestRealPostgresEA1RootAgentCancelHostElection/receipt-before (0.21s)
+    --- PASS: TestRealPostgresEA1RootAgentCancelHostElection/receipt-ack-loss (0.25s)
+=== RUN   TestRealPostgresGlobalOriginalDispatchAdmissionMatrix
+=== RUN   TestRealPostgresGlobalOriginalDispatchAdmissionMatrix/retry
+=== RUN   TestRealPostgresGlobalOriginalDispatchAdmissionMatrix/retry/valid-original
+=== RUN   TestRealPostgresGlobalOriginalDispatchAdmissionMatrix/retry/foreign-turn-contradiction
+=== RUN   TestRealPostgresGlobalOriginalDispatchAdmissionMatrix/new-physical-grant
+=== RUN   TestRealPostgresGlobalOriginalDispatchAdmissionMatrix/new-physical-grant/valid-original
+=== RUN   TestRealPostgresGlobalOriginalDispatchAdmissionMatrix/new-physical-grant/foreign-turn-contradiction
+=== RUN   TestRealPostgresGlobalOriginalDispatchAdmissionMatrix/terminal-invocation
+=== RUN   TestRealPostgresGlobalOriginalDispatchAdmissionMatrix/terminal-invocation/valid-original
+=== RUN   TestRealPostgresGlobalOriginalDispatchAdmissionMatrix/terminal-invocation/foreign-turn-contradiction
+=== RUN   TestRealPostgresGlobalOriginalDispatchAdmissionMatrix/terminal-turn
+=== RUN   TestRealPostgresGlobalOriginalDispatchAdmissionMatrix/terminal-turn/valid-original
+=== RUN   TestRealPostgresGlobalOriginalDispatchAdmissionMatrix/terminal-turn/foreign-turn-contradiction
+--- PASS: TestRealPostgresGlobalOriginalDispatchAdmissionMatrix (1.59s)
+    --- PASS: TestRealPostgresGlobalOriginalDispatchAdmissionMatrix/retry (0.43s)
+        --- PASS: TestRealPostgresGlobalOriginalDispatchAdmissionMatrix/retry/valid-original (0.20s)
+        --- PASS: TestRealPostgresGlobalOriginalDispatchAdmissionMatrix/retry/foreign-turn-contradiction (0.22s)
+    --- PASS: TestRealPostgresGlobalOriginalDispatchAdmissionMatrix/new-physical-grant (0.34s)
+        --- PASS: TestRealPostgresGlobalOriginalDispatchAdmissionMatrix/new-physical-grant/valid-original (0.19s)
+        --- PASS: TestRealPostgresGlobalOriginalDispatchAdmissionMatrix/new-physical-grant/foreign-turn-contradiction (0.16s)
+    --- PASS: TestRealPostgresGlobalOriginalDispatchAdmissionMatrix/terminal-invocation (0.46s)
+        --- PASS: TestRealPostgresGlobalOriginalDispatchAdmissionMatrix/terminal-invocation/valid-original (0.26s)
+        --- PASS: TestRealPostgresGlobalOriginalDispatchAdmissionMatrix/terminal-invocation/foreign-turn-contradiction (0.20s)
+    --- PASS: TestRealPostgresGlobalOriginalDispatchAdmissionMatrix/terminal-turn (0.36s)
+        --- PASS: TestRealPostgresGlobalOriginalDispatchAdmissionMatrix/terminal-turn/valid-original (0.18s)
+        --- PASS: TestRealPostgresGlobalOriginalDispatchAdmissionMatrix/terminal-turn/foreign-turn-contradiction (0.18s)
+=== RUN   TestRealPostgresAnonymousHostedTerminalStaysHeldAfterRestart
+--- PASS: TestRealPostgresAnonymousHostedTerminalStaysHeldAfterRestart (0.32s)
+=== RUN   TestRealPostgresInteractionAuthorityAcrossConnections
+--- PASS: TestRealPostgresInteractionAuthorityAcrossConnections (0.25s)
+=== RUN   TestRealPostgresCancellationReceiptOwnerAcrossConnections
+--- PASS: TestRealPostgresCancellationReceiptOwnerAcrossConnections (0.17s)
+=== RUN   TestRealPostgresIndependentHostSourceSiblingCannotAuthorizeContinuation
+--- PASS: TestRealPostgresIndependentHostSourceSiblingCannotAuthorizeContinuation (0.19s)
+=== RUN   TestRealPostgresIndependentCrossTurnHostSiblingBlocksContinuation
+--- PASS: TestRealPostgresIndependentCrossTurnHostSiblingBlocksContinuation (0.16s)
+=== RUN   TestRealPostgresIndependentParentProofIndexAcrossConnections
+--- PASS: TestRealPostgresIndependentParentProofIndexAcrossConnections (0.14s)
+=== RUN   TestRealPostgresIndexedItemLookupAcrossConnections
+--- PASS: TestRealPostgresIndexedItemLookupAcrossConnections (0.20s)
+=== RUN   TestRealPostgresTerminalInvocationFenceAcrossConnections
+--- PASS: TestRealPostgresTerminalInvocationFenceAcrossConnections (0.21s)
+=== RUN   TestRealPostgresManagedSessionCompactionAcrossStoreRestart
+--- PASS: TestRealPostgresManagedSessionCompactionAcrossStoreRestart (0.49s)
+=== RUN   TestRealPostgresPR72ConcurrentStartContextFailureDoesNotTerminalizeOriginal
+--- PASS: TestRealPostgresPR72ConcurrentStartContextFailureDoesNotTerminalizeOriginal (0.33s)
+=== RUN   TestRealPostgresPR72PendingGrantPreventsFailureAndRetryAcrossConnections
+--- PASS: TestRealPostgresPR72PendingGrantPreventsFailureAndRetryAcrossConnections (0.19s)
+=== RUN   TestRealPostgresPR82CompositeStartGrantFencesCancel
+--- PASS: TestRealPostgresPR82CompositeStartGrantFencesCancel (0.29s)
+=== RUN   TestRealPostgresPR82DispatchGrantRejectsForeignAndContradictorySettlements
+=== RUN   TestRealPostgresPR82DispatchGrantRejectsForeignAndContradictorySettlements/wrong-invocation
+=== RUN   TestRealPostgresPR82DispatchGrantRejectsForeignAndContradictorySettlements/wrong-run
+=== RUN   TestRealPostgresPR82DispatchGrantRejectsForeignAndContradictorySettlements/wrong-boundary
+=== RUN   TestRealPostgresPR82DispatchGrantRejectsForeignAndContradictorySettlements/wrong-status
+=== RUN   TestRealPostgresPR82DispatchGrantRejectsForeignAndContradictorySettlements/contradictory-rejected
+=== RUN   TestRealPostgresPR82DispatchGrantRejectsForeignAndContradictorySettlements/duplicate-returned
+--- PASS: TestRealPostgresPR82DispatchGrantRejectsForeignAndContradictorySettlements (0.20s)
+    --- PASS: TestRealPostgresPR82DispatchGrantRejectsForeignAndContradictorySettlements/wrong-invocation (0.01s)
+    --- PASS: TestRealPostgresPR82DispatchGrantRejectsForeignAndContradictorySettlements/wrong-run (0.01s)
+    --- PASS: TestRealPostgresPR82DispatchGrantRejectsForeignAndContradictorySettlements/wrong-boundary (0.01s)
+    --- PASS: TestRealPostgresPR82DispatchGrantRejectsForeignAndContradictorySettlements/wrong-status (0.00s)
+    --- PASS: TestRealPostgresPR82DispatchGrantRejectsForeignAndContradictorySettlements/contradictory-rejected (0.00s)
+    --- PASS: TestRealPostgresPR82DispatchGrantRejectsForeignAndContradictorySettlements/duplicate-returned (0.00s)
+=== RUN   TestRealPostgresPR82UnindexedCompositeCancellationPersistsUnknown
+=== RUN   TestRealPostgresPR82UnindexedCompositeCancellationPersistsUnknown/absent
+=== RUN   TestRealPostgresPR82UnindexedCompositeCancellationPersistsUnknown/different
+=== RUN   TestRealPostgresPR82UnindexedCompositeCancellationPersistsUnknown/opaque
+--- PASS: TestRealPostgresPR82UnindexedCompositeCancellationPersistsUnknown (0.37s)
+    --- PASS: TestRealPostgresPR82UnindexedCompositeCancellationPersistsUnknown/absent (0.09s)
+    --- PASS: TestRealPostgresPR82UnindexedCompositeCancellationPersistsUnknown/different (0.08s)
+    --- PASS: TestRealPostgresPR82UnindexedCompositeCancellationPersistsUnknown/opaque (0.07s)
+=== RUN   TestRealPostgresPR82RemoteHandoffCancellationRequiresReceipt
+--- PASS: TestRealPostgresPR82RemoteHandoffCancellationRequiresReceipt (1.68s)
+=== RUN   TestRealPostgresPR82MatchingLocalRunCollisionRemainsUnverified
+--- PASS: TestRealPostgresPR82MatchingLocalRunCollisionRemainsUnverified (0.70s)
+=== RUN   TestRealPostgresPR82RetryRefusesUnresolvedNativeAndRemoteChildren
+=== RUN   TestRealPostgresPR82RetryRefusesUnresolvedNativeAndRemoteChildren/native-running
+=== RUN   TestRealPostgresPR82RetryRefusesUnresolvedNativeAndRemoteChildren/native-waiting
+=== RUN   TestRealPostgresPR82RetryRefusesUnresolvedNativeAndRemoteChildren/native-paused
+=== RUN   TestRealPostgresPR82RetryRefusesUnresolvedNativeAndRemoteChildren/app-running
+=== RUN   TestRealPostgresPR82RetryRefusesUnresolvedNativeAndRemoteChildren/accepted-native-start
+=== RUN   TestRealPostgresPR82RetryRefusesUnresolvedNativeAndRemoteChildren/accepted-remote-handoff
+=== RUN   TestRealPostgresPR82RetryRefusesUnresolvedNativeAndRemoteChildren/accepted-unknown-outcome
+=== RUN   TestRealPostgresPR82RetryRefusesUnresolvedNativeAndRemoteChildren/accepted-never-dispatched
+=== RUN   TestRealPostgresPR82RetryRefusesUnresolvedNativeAndRemoteChildren/accepted-definitive-no-effect
+--- PASS: TestRealPostgresPR82RetryRefusesUnresolvedNativeAndRemoteChildren (0.47s)
+    --- PASS: TestRealPostgresPR82RetryRefusesUnresolvedNativeAndRemoteChildren/native-running (0.06s)
+    --- PASS: TestRealPostgresPR82RetryRefusesUnresolvedNativeAndRemoteChildren/native-waiting (0.04s)
+    --- PASS: TestRealPostgresPR82RetryRefusesUnresolvedNativeAndRemoteChildren/native-paused (0.04s)
+    --- PASS: TestRealPostgresPR82RetryRefusesUnresolvedNativeAndRemoteChildren/app-running (0.03s)
+    --- PASS: TestRealPostgresPR82RetryRefusesUnresolvedNativeAndRemoteChildren/accepted-native-start (0.04s)
+    --- PASS: TestRealPostgresPR82RetryRefusesUnresolvedNativeAndRemoteChildren/accepted-remote-handoff (0.04s)
+    --- PASS: TestRealPostgresPR82RetryRefusesUnresolvedNativeAndRemoteChildren/accepted-unknown-outcome (0.04s)
+    --- PASS: TestRealPostgresPR82RetryRefusesUnresolvedNativeAndRemoteChildren/accepted-never-dispatched (0.03s)
+    --- PASS: TestRealPostgresPR82RetryRefusesUnresolvedNativeAndRemoteChildren/accepted-definitive-no-effect (0.04s)
+=== RUN   TestRealPostgresPR82CompositeRootRequiresNoEffectProof
+=== RUN   TestRealPostgresPR82CompositeRootRequiresNoEffectProof/team-physical-start
+=== RUN   TestRealPostgresPR82CompositeRootRequiresNoEffectProof/workflow-physical-start
+=== RUN   TestRealPostgresPR82CompositeRootRequiresNoEffectProof/groupchat-physical-start
+=== RUN   TestRealPostgresPR82CompositeRootRequiresNoEffectProof/team-no-grant-unverified
+=== RUN   TestRealPostgresPR82CompositeRootRequiresNoEffectProof/workflow-no-effect
+=== RUN   TestRealPostgresPR82CompositeRootRequiresNoEffectProof/team-pre-effect-rejection
+=== RUN   TestRealPostgresPR82CompositeRootRequiresNoEffectProof/groupchat-pre-effect-rejection
+=== RUN   TestRealPostgresPR82CompositeRootRequiresNoEffectProof/team-wrong-owner-no-effect
+=== RUN   TestRealPostgresPR82CompositeRootRequiresNoEffectProof/team-wrong-run-no-effect
+=== RUN   TestRealPostgresPR82CompositeRootRequiresNoEffectProof/team-wrong-boundary
+--- PASS: TestRealPostgresPR82CompositeRootRequiresNoEffectProof (0.42s)
+    --- PASS: TestRealPostgresPR82CompositeRootRequiresNoEffectProof/team-physical-start (0.03s)
+    --- PASS: TestRealPostgresPR82CompositeRootRequiresNoEffectProof/workflow-physical-start (0.02s)
+    --- PASS: TestRealPostgresPR82CompositeRootRequiresNoEffectProof/groupchat-physical-start (0.04s)
+    --- PASS: TestRealPostgresPR82CompositeRootRequiresNoEffectProof/team-no-grant-unverified (0.01s)
+    --- PASS: TestRealPostgresPR82CompositeRootRequiresNoEffectProof/workflow-no-effect (0.05s)
+    --- PASS: TestRealPostgresPR82CompositeRootRequiresNoEffectProof/team-pre-effect-rejection (0.05s)
+    --- PASS: TestRealPostgresPR82CompositeRootRequiresNoEffectProof/groupchat-pre-effect-rejection (0.05s)
+    --- PASS: TestRealPostgresPR82CompositeRootRequiresNoEffectProof/team-wrong-owner-no-effect (0.01s)
+    --- PASS: TestRealPostgresPR82CompositeRootRequiresNoEffectProof/team-wrong-run-no-effect (0.01s)
+    --- PASS: TestRealPostgresPR82CompositeRootRequiresNoEffectProof/team-wrong-boundary (0.03s)
+=== RUN   TestRealPostgresHarnessContextCASAndRestart
+--- PASS: TestRealPostgresHarnessContextCASAndRestart (0.60s)
+=== RUN   TestRealPostgresConcurrentRootInvocationCreation
+--- PASS: TestRealPostgresConcurrentRootInvocationCreation (0.18s)
+=== RUN   TestRealPostgresRetryRefusesUnresolvedApplicationChild
+--- PASS: TestRealPostgresRetryRefusesUnresolvedApplicationChild (0.15s)
+=== RUN   TestRealPostgresIntermediateRetryRefusesPendingDescendantGrant
+--- PASS: TestRealPostgresIntermediateRetryRefusesPendingDescendantGrant (0.15s)
+=== RUN   TestRealPostgresOriginalNoEffectParentAndChildTerminalCASAcrossConnections
+--- PASS: TestRealPostgresOriginalNoEffectParentAndChildTerminalCASAcrossConnections (0.24s)
+=== RUN   TestRealPostgresControlNoEffectCannotGrantSecondPhysicalAttempt
+--- PASS: TestRealPostgresControlNoEffectCannotGrantSecondPhysicalAttempt (0.26s)
+=== RUN   TestRealPostgresEffectfulOriginalStartAndControlNoEffectCannotGrantRetry
+--- PASS: TestRealPostgresEffectfulOriginalStartAndControlNoEffectCannotGrantRetry (0.22s)
+=== RUN   TestRealPostgresTerminalProjectionAndContinuationShareTurnLock
+--- PASS: TestRealPostgresTerminalProjectionAndContinuationShareTurnLock (0.21s)
+=== RUN   TestRealPostgresTrustedSessionRootOwnerAcrossConnections
+=== RUN   TestRealPostgresTrustedSessionRootOwnerAcrossConnections/session-same
+=== RUN   TestRealPostgresTrustedSessionRootOwnerAcrossConnections/session-other_tenant
+=== RUN   TestRealPostgresTrustedSessionRootOwnerAcrossConnections/session-other_actor
+=== RUN   TestRealPostgresTrustedSessionRootOwnerAcrossConnections/session-foreign_host_thread
+=== RUN   TestRealPostgresTrustedSessionRootOwnerAcrossConnections/session-foreign_host_kind
+--- PASS: TestRealPostgresTrustedSessionRootOwnerAcrossConnections (0.84s)
+    --- PASS: TestRealPostgresTrustedSessionRootOwnerAcrossConnections/session-same (0.00s)
+    --- PASS: TestRealPostgresTrustedSessionRootOwnerAcrossConnections/session-other_tenant (0.00s)
+    --- PASS: TestRealPostgresTrustedSessionRootOwnerAcrossConnections/session-other_actor (0.00s)
+    --- PASS: TestRealPostgresTrustedSessionRootOwnerAcrossConnections/session-foreign_host_thread (0.00s)
+    --- PASS: TestRealPostgresTrustedSessionRootOwnerAcrossConnections/session-foreign_host_kind (0.00s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-postgres	22.358s
+=== RUN   TestRealRedisContinuationWaitGenerationSurvivesQueueReconstruction
+--- PASS: TestRealRedisContinuationWaitGenerationSurvivesQueueReconstruction (0.02s)
+=== RUN   TestRealRedisQueueFeedConcurrencyAndRestart
+--- PASS: TestRealRedisQueueFeedConcurrencyAndRestart (0.03s)
+=== RUN   TestRealRedisExpiredLeaseRecoveryFencesStaleWorker
+--- PASS: TestRealRedisExpiredLeaseRecoveryFencesStaleWorker (0.02s)
+=== RUN   TestRealRedisWorkerRenewsSlowDelivery
+--- PASS: TestRealRedisWorkerRenewsSlowDelivery (1.33s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-redis	2.879s
+=== RUN   TestRealPostgresCancellationClaimCommittedLostReplyStaysFenced
+--- PASS: TestRealPostgresCancellationClaimCommittedLostReplyStaysFenced (0.62s)
+=== RUN   TestRealPostgresCancelledRequestNoEffectRecoveryAcrossConnections
+=== RUN   TestRealPostgresCancelledRequestNoEffectRecoveryAcrossConnections/harness-first-read/same-connection
+=== RUN   TestRealPostgresCancelledRequestNoEffectRecoveryAcrossConnections/harness-first-read/new-connection
+=== RUN   TestRealPostgresCancelledRequestNoEffectRecoveryAcrossConnections/kernel-cancel-second-read/same-connection
+=== RUN   TestRealPostgresCancelledRequestNoEffectRecoveryAcrossConnections/kernel-cancel-second-read/new-connection
+=== RUN   TestRealPostgresCancelledRequestNoEffectRecoveryAcrossConnections/kernel-control-third-read/same-connection
+=== RUN   TestRealPostgresCancelledRequestNoEffectRecoveryAcrossConnections/kernel-control-third-read/new-connection
+--- PASS: TestRealPostgresCancelledRequestNoEffectRecoveryAcrossConnections (3.33s)
+    --- PASS: TestRealPostgresCancelledRequestNoEffectRecoveryAcrossConnections/harness-first-read/same-connection (0.60s)
+    --- PASS: TestRealPostgresCancelledRequestNoEffectRecoveryAcrossConnections/harness-first-read/new-connection (0.62s)
+    --- PASS: TestRealPostgresCancelledRequestNoEffectRecoveryAcrossConnections/kernel-cancel-second-read/same-connection (0.50s)
+    --- PASS: TestRealPostgresCancelledRequestNoEffectRecoveryAcrossConnections/kernel-cancel-second-read/new-connection (0.45s)
+    --- PASS: TestRealPostgresCancelledRequestNoEffectRecoveryAcrossConnections/kernel-control-third-read/same-connection (0.59s)
+    --- PASS: TestRealPostgresCancelledRequestNoEffectRecoveryAcrossConnections/kernel-control-third-read/new-connection (0.57s)
+=== RUN   TestRealPostgresCancellationSettlementReceiptHasBoundedRowLockWait
+=== RUN   TestRealPostgresCancellationSettlementReceiptHasBoundedRowLockWait/released-before-deadline
+=== RUN   TestRealPostgresCancellationSettlementReceiptHasBoundedRowLockWait/held-past-deadline
+--- PASS: TestRealPostgresCancellationSettlementReceiptHasBoundedRowLockWait (6.02s)
+    --- PASS: TestRealPostgresCancellationSettlementReceiptHasBoundedRowLockWait/released-before-deadline (0.53s)
+    --- PASS: TestRealPostgresCancellationSettlementReceiptHasBoundedRowLockWait/held-past-deadline (5.49s)
+=== RUN   TestRealPostgresNativeControlNoEffectRecoveryAcrossConnections
+=== RUN   TestRealPostgresNativeControlNoEffectRecoveryAcrossConnections/retry
+=== RUN   TestRealPostgresNativeControlNoEffectRecoveryAcrossConnections/cancel
+--- PASS: TestRealPostgresNativeControlNoEffectRecoveryAcrossConnections (0.94s)
+    --- PASS: TestRealPostgresNativeControlNoEffectRecoveryAcrossConnections/retry (0.46s)
+    --- PASS: TestRealPostgresNativeControlNoEffectRecoveryAcrossConnections/cancel (0.48s)
+=== RUN   TestRealPostgresNativeControlNoEffectProcess
+    control_no_effect_real_test.go:180: subprocess helper
+--- SKIP: TestRealPostgresNativeControlNoEffectProcess (0.00s)
+=== RUN   TestRealPostgresNativeControlNoEffectSurvivesProcessCrash
+=== RUN   TestRealPostgresNativeControlNoEffectSurvivesProcessCrash/agent-preflight-read
+=== RUN   TestRealPostgresNativeControlNoEffectSurvivesProcessCrash/kernel-pre-store-read
+--- PASS: TestRealPostgresNativeControlNoEffectSurvivesProcessCrash (1.41s)
+    --- PASS: TestRealPostgresNativeControlNoEffectSurvivesProcessCrash/agent-preflight-read (0.67s)
+    --- PASS: TestRealPostgresNativeControlNoEffectSurvivesProcessCrash/kernel-pre-store-read (0.73s)
+=== RUN   TestRealPostgresKernelControlPreStoreReadRecoveryAcrossConnections
+=== RUN   TestRealPostgresKernelControlPreStoreReadRecoveryAcrossConnections/retry
+=== RUN   TestRealPostgresKernelControlPreStoreReadRecoveryAcrossConnections/cancel
+--- PASS: TestRealPostgresKernelControlPreStoreReadRecoveryAcrossConnections (0.88s)
+    --- PASS: TestRealPostgresKernelControlPreStoreReadRecoveryAcrossConnections/retry (0.42s)
+    --- PASS: TestRealPostgresKernelControlPreStoreReadRecoveryAcrossConnections/cancel (0.46s)
+=== RUN   TestRealPostgresCustomCancellerPreflightReadRecoveryAcrossConnections
+=== RUN   TestRealPostgresCustomCancellerPreflightReadRecoveryAcrossConnections/same-connection
+=== RUN   TestRealPostgresCustomCancellerPreflightReadRecoveryAcrossConnections/new-connection
+--- PASS: TestRealPostgresCustomCancellerPreflightReadRecoveryAcrossConnections (1.00s)
+    --- PASS: TestRealPostgresCustomCancellerPreflightReadRecoveryAcrossConnections/same-connection (0.48s)
+    --- PASS: TestRealPostgresCustomCancellerPreflightReadRecoveryAcrossConnections/new-connection (0.53s)
+=== RUN   TestRealPostgresRedisOrphanRunLoadKeepsProtectedJobUntilRecovery
+--- PASS: TestRealPostgresRedisOrphanRunLoadKeepsProtectedJobUntilRecovery (0.29s)
+=== RUN   TestRealPostgresManagedAgentSessionRecoveryAcrossProcessCrash
+    managed_agent_session_recovery_real_test.go:117: resume child exit: want=0 err=exit status 1
+        --- FAIL: TestManagedAgentSessionRecoveryProcess (0.07s)
+            managed_agent_session_recovery_real_test.go:199: resume failed outside the confirmed live-lease boundary: harness state conflict
+                harness state conflict
+        FAIL
+--- FAIL: TestRealPostgresManagedAgentSessionRecoveryAcrossProcessCrash (0.59s)
+=== RUN   TestRealPostgresNativeNoEffectCancelAcrossConnections
+=== RUN   TestRealPostgresNativeNoEffectCancelAcrossConnections/harness-first-read/same-connection
+=== RUN   TestRealPostgresNativeNoEffectCancelAcrossConnections/harness-first-read/separate-connection
+=== RUN   TestRealPostgresNativeNoEffectCancelAcrossConnections/kernel-cancel-second-read/same-connection
+=== RUN   TestRealPostgresNativeNoEffectCancelAcrossConnections/kernel-cancel-second-read/separate-connection
+=== RUN   TestRealPostgresNativeNoEffectCancelAcrossConnections/kernel-apply-control-third-read/same-connection
+=== RUN   TestRealPostgresNativeNoEffectCancelAcrossConnections/kernel-apply-control-third-read/separate-connection
+--- PASS: TestRealPostgresNativeNoEffectCancelAcrossConnections (2.89s)
+    --- PASS: TestRealPostgresNativeNoEffectCancelAcrossConnections/harness-first-read/same-connection (0.45s)
+    --- PASS: TestRealPostgresNativeNoEffectCancelAcrossConnections/harness-first-read/separate-connection (0.44s)
+    --- PASS: TestRealPostgresNativeNoEffectCancelAcrossConnections/kernel-cancel-second-read/same-connection (0.49s)
+    --- PASS: TestRealPostgresNativeNoEffectCancelAcrossConnections/kernel-cancel-second-read/separate-connection (0.52s)
+    --- PASS: TestRealPostgresNativeNoEffectCancelAcrossConnections/kernel-apply-control-third-read/same-connection (0.52s)
+    --- PASS: TestRealPostgresNativeNoEffectCancelAcrossConnections/kernel-apply-control-third-read/separate-connection (0.46s)
+=== RUN   TestRealPostgresRedisNativeEarlySignalProviderRecovery
+--- PASS: TestRealPostgresRedisNativeEarlySignalProviderRecovery (0.75s)
+=== RUN   TestRealPostgresRedisSchedulerRestart
+--- PASS: TestRealPostgresRedisSchedulerRestart (0.39s)
+=== RUN   TestRealPostgresRedisStaleRevisionSelfWakeupNeverACKsWithoutProof
+--- PASS: TestRealPostgresRedisStaleRevisionSelfWakeupNeverACKsWithoutProof (0.56s)
+=== RUN   TestRealPostgresRedisTerminalDLQRequiresCommittedRunQuarantine
+--- PASS: TestRealPostgresRedisTerminalDLQRequiresCommittedRunQuarantine (0.72s)
+FAIL
+FAIL	example.com/agent-runtime-continuation-e2e	20.961s
+FAIL
+file:///private/tmp/gaoge-runtime-issue107/scripts/run-integration.mjs:48
+    throw new Error(`${command} ${args.join(" ")} failed with exit code ${result.status ?? 1}`);
+          ^
+
+Error: go test -race ./... -run ^TestRealPostgres -count=1 -v failed with exit code 1
+    at run (file:///private/tmp/gaoge-runtime-issue107/scripts/run-integration.mjs:48:11)
+    at runSuites (file:///private/tmp/gaoge-runtime-issue107/scripts/run-integration.mjs:35:3)
+    at file:///private/tmp/gaoge-runtime-issue107/scripts/run-integration.mjs:11:3
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+
+Node.js v24.21.0
+make: *** [integration-test] Error 1
+
+EXIT_CODE=2

@@ -1,0 +1,19 @@
+environment 0
+check-no-race 2
+race-agent-runtime 0
+race-agent-runtime-provider 1
+race-agent-runtime-harness 0
+race-agent-runtime-harness_examples_task-agent 1
+race-agent-runtime-harness-postgres 0
+race-agent-runtime-mcp 0
+race-agent-runtime-otel 0
+race-agent-runtime-a2a 0
+race-agent-runtime-postgres 0
+race-agent-runtime-sqlite 0
+race-agent-runtime-redis 0
+race-agent-runtime-http 0
+matrix-extra-agent-runtime-postgres-0 0
+Traceback (most recent call last):
+  File "/tmp/ea1-final-local/run.py", line 35, in <module>
+    count=plan['additional_count_after_verified_full_race']
+KeyError: 'additional_count_after_verified_full_race'

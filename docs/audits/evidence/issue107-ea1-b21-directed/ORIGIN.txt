@@ -1,0 +1,2 @@
+SOURCE_SHA=e05290927ba0143f625857be08a0aa7493df84cf
+Mac Pi local frozen-source evidence. Real exits preserved; failures are not acceptance. No push/PR/merge. Original runner stopped after completed PG union due plan-field KeyError; continuation executes only previously unstarted commands.
