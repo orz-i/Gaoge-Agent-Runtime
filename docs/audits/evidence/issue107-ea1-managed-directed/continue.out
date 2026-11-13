@@ -1,0 +1,8 @@
+smoke-core 0
+smoke-sqlite 0
+smoke-nativepg 0
+smoke-hostmemory 0
+smoke-hostpg 0
+smoke-process 0
+final-state 0
+Initial bounded compile/smoke complete; inspect every failure before changes.

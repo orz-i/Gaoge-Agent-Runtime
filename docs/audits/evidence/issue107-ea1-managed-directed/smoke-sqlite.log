@@ -1,0 +1,165 @@
+SOURCE_SHA=5ea99c39844691fb456d63e3ab9db55a243c8e9a
+COMMAND=go -C go/agent-runtime-sqlite test -count=3 -v ./... -run '^TestSQLiteManagedRecoveryStore$'
+=== RUN   TestSQLiteManagedRecoveryStore
+=== RUN   TestSQLiteManagedRecoveryStore/owner-park-competition
+=== RUN   TestSQLiteManagedRecoveryStore/owner-park-competition/renew-owner
+=== RUN   TestSQLiteManagedRecoveryStore/owner-park-competition/renew-park
+=== RUN   TestSQLiteManagedRecoveryStore/owner-park-competition/claim-owner
+=== RUN   TestSQLiteManagedRecoveryStore/owner-park-competition/claim-park
+=== RUN   TestSQLiteManagedRecoveryStore/owner-and-leave
+=== RUN   TestSQLiteManagedRecoveryStore/owner-and-leave/live
+=== RUN   TestSQLiteManagedRecoveryStore/owner-and-leave/renew
+=== RUN   TestSQLiteManagedRecoveryStore/owner-and-leave/leave
+=== RUN   TestSQLiteManagedRecoveryStore/owner-and-leave/claim
+=== RUN   TestSQLiteManagedRecoveryStore/owner-and-leave/eventhead
+=== RUN   TestSQLiteManagedRecoveryStore/parked-ancestor
+=== RUN   TestSQLiteManagedRecoveryStore/parked-ancestor/park-first
+=== RUN   TestSQLiteManagedRecoveryStore/parked-ancestor/child-first
+=== RUN   TestSQLiteManagedRecoveryStore/parked-gates
+=== RUN   TestSQLiteManagedRecoveryStore/selection-ack
+=== RUN   TestSQLiteManagedRecoveryStore/selection-ack/RESUME
+=== RUN   TestSQLiteManagedRecoveryStore/selection-ack/CANCEL
+=== RUN   TestSQLiteManagedRecoveryStore/two-enable-claimants
+=== RUN   TestSQLiteManagedRecoveryStore/transaction-ack
+=== RUN   TestSQLiteManagedRecoveryStore/transaction-ack/t0
+=== RUN   TestSQLiteManagedRecoveryStore/transaction-ack/park
+=== RUN   TestSQLiteManagedRecoveryStore/transaction-ack/enable
+=== RUN   TestSQLiteManagedRecoveryStore/transaction-ack/cancel
+=== RUN   TestSQLiteManagedRecoveryStore/historical-closure
+--- PASS: TestSQLiteManagedRecoveryStore (54.05s)
+    --- PASS: TestSQLiteManagedRecoveryStore/owner-park-competition (12.68s)
+        --- PASS: TestSQLiteManagedRecoveryStore/owner-park-competition/renew-owner (3.17s)
+        --- PASS: TestSQLiteManagedRecoveryStore/owner-park-competition/renew-park (3.17s)
+        --- PASS: TestSQLiteManagedRecoveryStore/owner-park-competition/claim-owner (3.17s)
+        --- PASS: TestSQLiteManagedRecoveryStore/owner-park-competition/claim-park (3.17s)
+    --- PASS: TestSQLiteManagedRecoveryStore/owner-and-leave (9.56s)
+        --- PASS: TestSQLiteManagedRecoveryStore/owner-and-leave/live (0.02s)
+        --- PASS: TestSQLiteManagedRecoveryStore/owner-and-leave/renew (3.16s)
+        --- PASS: TestSQLiteManagedRecoveryStore/owner-and-leave/leave (3.18s)
+        --- PASS: TestSQLiteManagedRecoveryStore/owner-and-leave/claim (3.18s)
+        --- PASS: TestSQLiteManagedRecoveryStore/owner-and-leave/eventhead (0.02s)
+    --- PASS: TestSQLiteManagedRecoveryStore/parked-ancestor (6.34s)
+        --- PASS: TestSQLiteManagedRecoveryStore/parked-ancestor/park-first (3.17s)
+        --- PASS: TestSQLiteManagedRecoveryStore/parked-ancestor/child-first (3.17s)
+    --- PASS: TestSQLiteManagedRecoveryStore/parked-gates (3.18s)
+    --- PASS: TestSQLiteManagedRecoveryStore/selection-ack (6.34s)
+        --- PASS: TestSQLiteManagedRecoveryStore/selection-ack/RESUME (3.17s)
+        --- PASS: TestSQLiteManagedRecoveryStore/selection-ack/CANCEL (3.17s)
+    --- PASS: TestSQLiteManagedRecoveryStore/two-enable-claimants (3.18s)
+    --- PASS: TestSQLiteManagedRecoveryStore/transaction-ack (9.58s)
+        --- PASS: TestSQLiteManagedRecoveryStore/transaction-ack/t0 (0.02s)
+        --- PASS: TestSQLiteManagedRecoveryStore/transaction-ack/park (3.17s)
+        --- PASS: TestSQLiteManagedRecoveryStore/transaction-ack/enable (3.20s)
+        --- PASS: TestSQLiteManagedRecoveryStore/transaction-ack/cancel (3.19s)
+    --- PASS: TestSQLiteManagedRecoveryStore/historical-closure (3.19s)
+=== RUN   TestSQLiteManagedRecoveryStore
+=== RUN   TestSQLiteManagedRecoveryStore/owner-park-competition
+=== RUN   TestSQLiteManagedRecoveryStore/owner-park-competition/renew-owner
+=== RUN   TestSQLiteManagedRecoveryStore/owner-park-competition/renew-park
+=== RUN   TestSQLiteManagedRecoveryStore/owner-park-competition/claim-owner
+=== RUN   TestSQLiteManagedRecoveryStore/owner-park-competition/claim-park
+=== RUN   TestSQLiteManagedRecoveryStore/owner-and-leave
+=== RUN   TestSQLiteManagedRecoveryStore/owner-and-leave/live
+=== RUN   TestSQLiteManagedRecoveryStore/owner-and-leave/renew
+=== RUN   TestSQLiteManagedRecoveryStore/owner-and-leave/leave
+=== RUN   TestSQLiteManagedRecoveryStore/owner-and-leave/claim
+=== RUN   TestSQLiteManagedRecoveryStore/owner-and-leave/eventhead
+=== RUN   TestSQLiteManagedRecoveryStore/parked-ancestor
+=== RUN   TestSQLiteManagedRecoveryStore/parked-ancestor/park-first
+=== RUN   TestSQLiteManagedRecoveryStore/parked-ancestor/child-first
+=== RUN   TestSQLiteManagedRecoveryStore/parked-gates
+=== RUN   TestSQLiteManagedRecoveryStore/selection-ack
+=== RUN   TestSQLiteManagedRecoveryStore/selection-ack/RESUME
+=== RUN   TestSQLiteManagedRecoveryStore/selection-ack/CANCEL
+=== RUN   TestSQLiteManagedRecoveryStore/two-enable-claimants
+=== RUN   TestSQLiteManagedRecoveryStore/transaction-ack
+=== RUN   TestSQLiteManagedRecoveryStore/transaction-ack/t0
+=== RUN   TestSQLiteManagedRecoveryStore/transaction-ack/park
+=== RUN   TestSQLiteManagedRecoveryStore/transaction-ack/enable
+=== RUN   TestSQLiteManagedRecoveryStore/transaction-ack/cancel
+=== RUN   TestSQLiteManagedRecoveryStore/historical-closure
+--- PASS: TestSQLiteManagedRecoveryStore (54.06s)
+    --- PASS: TestSQLiteManagedRecoveryStore/owner-park-competition (12.70s)
+        --- PASS: TestSQLiteManagedRecoveryStore/owner-park-competition/renew-owner (3.18s)
+        --- PASS: TestSQLiteManagedRecoveryStore/owner-park-competition/renew-park (3.18s)
+        --- PASS: TestSQLiteManagedRecoveryStore/owner-park-competition/claim-owner (3.17s)
+        --- PASS: TestSQLiteManagedRecoveryStore/owner-park-competition/claim-park (3.16s)
+    --- PASS: TestSQLiteManagedRecoveryStore/owner-and-leave (9.55s)
+        --- PASS: TestSQLiteManagedRecoveryStore/owner-and-leave/live (0.02s)
+        --- PASS: TestSQLiteManagedRecoveryStore/owner-and-leave/renew (3.17s)
+        --- PASS: TestSQLiteManagedRecoveryStore/owner-and-leave/leave (3.17s)
+        --- PASS: TestSQLiteManagedRecoveryStore/owner-and-leave/claim (3.17s)
+        --- PASS: TestSQLiteManagedRecoveryStore/owner-and-leave/eventhead (0.02s)
+    --- PASS: TestSQLiteManagedRecoveryStore/parked-ancestor (6.36s)
+        --- PASS: TestSQLiteManagedRecoveryStore/parked-ancestor/park-first (3.18s)
+        --- PASS: TestSQLiteManagedRecoveryStore/parked-ancestor/child-first (3.18s)
+    --- PASS: TestSQLiteManagedRecoveryStore/parked-gates (3.18s)
+    --- PASS: TestSQLiteManagedRecoveryStore/selection-ack (6.35s)
+        --- PASS: TestSQLiteManagedRecoveryStore/selection-ack/RESUME (3.17s)
+        --- PASS: TestSQLiteManagedRecoveryStore/selection-ack/CANCEL (3.18s)
+    --- PASS: TestSQLiteManagedRecoveryStore/two-enable-claimants (3.18s)
+    --- PASS: TestSQLiteManagedRecoveryStore/transaction-ack (9.55s)
+        --- PASS: TestSQLiteManagedRecoveryStore/transaction-ack/t0 (0.02s)
+        --- PASS: TestSQLiteManagedRecoveryStore/transaction-ack/park (3.16s)
+        --- PASS: TestSQLiteManagedRecoveryStore/transaction-ack/enable (3.18s)
+        --- PASS: TestSQLiteManagedRecoveryStore/transaction-ack/cancel (3.19s)
+    --- PASS: TestSQLiteManagedRecoveryStore/historical-closure (3.19s)
+=== RUN   TestSQLiteManagedRecoveryStore
+=== RUN   TestSQLiteManagedRecoveryStore/owner-park-competition
+=== RUN   TestSQLiteManagedRecoveryStore/owner-park-competition/renew-owner
+=== RUN   TestSQLiteManagedRecoveryStore/owner-park-competition/renew-park
+=== RUN   TestSQLiteManagedRecoveryStore/owner-park-competition/claim-owner
+=== RUN   TestSQLiteManagedRecoveryStore/owner-park-competition/claim-park
+=== RUN   TestSQLiteManagedRecoveryStore/owner-and-leave
+=== RUN   TestSQLiteManagedRecoveryStore/owner-and-leave/live
+=== RUN   TestSQLiteManagedRecoveryStore/owner-and-leave/renew
+=== RUN   TestSQLiteManagedRecoveryStore/owner-and-leave/leave
+=== RUN   TestSQLiteManagedRecoveryStore/owner-and-leave/claim
+=== RUN   TestSQLiteManagedRecoveryStore/owner-and-leave/eventhead
+=== RUN   TestSQLiteManagedRecoveryStore/parked-ancestor
+=== RUN   TestSQLiteManagedRecoveryStore/parked-ancestor/park-first
+=== RUN   TestSQLiteManagedRecoveryStore/parked-ancestor/child-first
+=== RUN   TestSQLiteManagedRecoveryStore/parked-gates
+=== RUN   TestSQLiteManagedRecoveryStore/selection-ack
+=== RUN   TestSQLiteManagedRecoveryStore/selection-ack/RESUME
+=== RUN   TestSQLiteManagedRecoveryStore/selection-ack/CANCEL
+=== RUN   TestSQLiteManagedRecoveryStore/two-enable-claimants
+=== RUN   TestSQLiteManagedRecoveryStore/transaction-ack
+=== RUN   TestSQLiteManagedRecoveryStore/transaction-ack/t0
+=== RUN   TestSQLiteManagedRecoveryStore/transaction-ack/park
+=== RUN   TestSQLiteManagedRecoveryStore/transaction-ack/enable
+=== RUN   TestSQLiteManagedRecoveryStore/transaction-ack/cancel
+=== RUN   TestSQLiteManagedRecoveryStore/historical-closure
+--- PASS: TestSQLiteManagedRecoveryStore (54.05s)
+    --- PASS: TestSQLiteManagedRecoveryStore/owner-park-competition (12.68s)
+        --- PASS: TestSQLiteManagedRecoveryStore/owner-park-competition/renew-owner (3.17s)
+        --- PASS: TestSQLiteManagedRecoveryStore/owner-park-competition/renew-park (3.18s)
+        --- PASS: TestSQLiteManagedRecoveryStore/owner-park-competition/claim-owner (3.16s)
+        --- PASS: TestSQLiteManagedRecoveryStore/owner-park-competition/claim-park (3.17s)
+    --- PASS: TestSQLiteManagedRecoveryStore/owner-and-leave (9.56s)
+        --- PASS: TestSQLiteManagedRecoveryStore/owner-and-leave/live (0.03s)
+        --- PASS: TestSQLiteManagedRecoveryStore/owner-and-leave/renew (3.17s)
+        --- PASS: TestSQLiteManagedRecoveryStore/owner-and-leave/leave (3.17s)
+        --- PASS: TestSQLiteManagedRecoveryStore/owner-and-leave/claim (3.18s)
+        --- PASS: TestSQLiteManagedRecoveryStore/owner-and-leave/eventhead (0.02s)
+    --- PASS: TestSQLiteManagedRecoveryStore/parked-ancestor (6.34s)
+        --- PASS: TestSQLiteManagedRecoveryStore/parked-ancestor/park-first (3.16s)
+        --- PASS: TestSQLiteManagedRecoveryStore/parked-ancestor/child-first (3.18s)
+    --- PASS: TestSQLiteManagedRecoveryStore/parked-gates (3.18s)
+    --- PASS: TestSQLiteManagedRecoveryStore/selection-ack (6.36s)
+        --- PASS: TestSQLiteManagedRecoveryStore/selection-ack/RESUME (3.18s)
+        --- PASS: TestSQLiteManagedRecoveryStore/selection-ack/CANCEL (3.18s)
+    --- PASS: TestSQLiteManagedRecoveryStore/two-enable-claimants (3.18s)
+    --- PASS: TestSQLiteManagedRecoveryStore/transaction-ack (9.56s)
+        --- PASS: TestSQLiteManagedRecoveryStore/transaction-ack/t0 (0.03s)
+        --- PASS: TestSQLiteManagedRecoveryStore/transaction-ack/park (3.17s)
+        --- PASS: TestSQLiteManagedRecoveryStore/transaction-ack/enable (3.18s)
+        --- PASS: TestSQLiteManagedRecoveryStore/transaction-ack/cancel (3.18s)
+    --- PASS: TestSQLiteManagedRecoveryStore/historical-closure (3.19s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite	162.630s
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/examples/embedded	0.447s [no tests to run]
+
+EXIT_CODE=0

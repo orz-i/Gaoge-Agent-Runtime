@@ -1,0 +1,6 @@
+SOURCE_SHA=5ea99c39844691fb456d63e3ab9db55a243c8e9a
+COMMAND=git status --short; df -h .
+Filesystem      Size    Used   Avail Capacity iused ifree %iused  Mounted on
+/dev/disk2s5   228Gi   183Gi   6.5Gi    97%    2.3M   68M    3%   /System/Volumes/Data
+
+EXIT_CODE=0

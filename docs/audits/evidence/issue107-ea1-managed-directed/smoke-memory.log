@@ -1,0 +1,58 @@
+SOURCE_SHA=5ea99c39844691fb456d63e3ab9db55a243c8e9a
+COMMAND=go -C go/agent-runtime test -count=1 -v ./memory -run '^TestManagedMemoryStoreConformance$'
+=== RUN   TestManagedMemoryStoreConformance
+=== RUN   TestManagedMemoryStoreConformance/owner-park-competition
+=== RUN   TestManagedMemoryStoreConformance/owner-park-competition/renew-owner
+=== RUN   TestManagedMemoryStoreConformance/owner-park-competition/renew-park
+=== RUN   TestManagedMemoryStoreConformance/owner-park-competition/claim-owner
+=== RUN   TestManagedMemoryStoreConformance/owner-park-competition/claim-park
+=== RUN   TestManagedMemoryStoreConformance/owner-and-leave
+=== RUN   TestManagedMemoryStoreConformance/owner-and-leave/live
+=== RUN   TestManagedMemoryStoreConformance/owner-and-leave/renew
+=== RUN   TestManagedMemoryStoreConformance/owner-and-leave/leave
+=== RUN   TestManagedMemoryStoreConformance/owner-and-leave/claim
+=== RUN   TestManagedMemoryStoreConformance/owner-and-leave/eventhead
+=== RUN   TestManagedMemoryStoreConformance/parked-ancestor
+=== RUN   TestManagedMemoryStoreConformance/parked-ancestor/park-first
+=== RUN   TestManagedMemoryStoreConformance/parked-ancestor/child-first
+=== RUN   TestManagedMemoryStoreConformance/parked-gates
+=== RUN   TestManagedMemoryStoreConformance/selection-ack
+=== RUN   TestManagedMemoryStoreConformance/selection-ack/RESUME
+=== RUN   TestManagedMemoryStoreConformance/selection-ack/CANCEL
+=== RUN   TestManagedMemoryStoreConformance/two-enable-claimants
+=== RUN   TestManagedMemoryStoreConformance/transaction-ack
+=== RUN   TestManagedMemoryStoreConformance/transaction-ack/t0
+=== RUN   TestManagedMemoryStoreConformance/transaction-ack/park
+=== RUN   TestManagedMemoryStoreConformance/transaction-ack/enable
+=== RUN   TestManagedMemoryStoreConformance/transaction-ack/cancel
+=== RUN   TestManagedMemoryStoreConformance/historical-closure
+--- PASS: TestManagedMemoryStoreConformance (0.02s)
+    --- PASS: TestManagedMemoryStoreConformance/owner-park-competition (0.00s)
+        --- PASS: TestManagedMemoryStoreConformance/owner-park-competition/renew-owner (0.00s)
+        --- PASS: TestManagedMemoryStoreConformance/owner-park-competition/renew-park (0.00s)
+        --- PASS: TestManagedMemoryStoreConformance/owner-park-competition/claim-owner (0.00s)
+        --- PASS: TestManagedMemoryStoreConformance/owner-park-competition/claim-park (0.00s)
+    --- PASS: TestManagedMemoryStoreConformance/owner-and-leave (0.01s)
+        --- PASS: TestManagedMemoryStoreConformance/owner-and-leave/live (0.00s)
+        --- PASS: TestManagedMemoryStoreConformance/owner-and-leave/renew (0.00s)
+        --- PASS: TestManagedMemoryStoreConformance/owner-and-leave/leave (0.00s)
+        --- PASS: TestManagedMemoryStoreConformance/owner-and-leave/claim (0.00s)
+        --- PASS: TestManagedMemoryStoreConformance/owner-and-leave/eventhead (0.00s)
+    --- PASS: TestManagedMemoryStoreConformance/parked-ancestor (0.00s)
+        --- PASS: TestManagedMemoryStoreConformance/parked-ancestor/park-first (0.00s)
+        --- PASS: TestManagedMemoryStoreConformance/parked-ancestor/child-first (0.00s)
+    --- PASS: TestManagedMemoryStoreConformance/parked-gates (0.00s)
+    --- PASS: TestManagedMemoryStoreConformance/selection-ack (0.00s)
+        --- PASS: TestManagedMemoryStoreConformance/selection-ack/RESUME (0.00s)
+        --- PASS: TestManagedMemoryStoreConformance/selection-ack/CANCEL (0.00s)
+    --- PASS: TestManagedMemoryStoreConformance/two-enable-claimants (0.00s)
+    --- PASS: TestManagedMemoryStoreConformance/transaction-ack (0.00s)
+        --- PASS: TestManagedMemoryStoreConformance/transaction-ack/t0 (0.00s)
+        --- PASS: TestManagedMemoryStoreConformance/transaction-ack/park (0.00s)
+        --- PASS: TestManagedMemoryStoreConformance/transaction-ack/enable (0.00s)
+        --- PASS: TestManagedMemoryStoreConformance/transaction-ack/cancel (0.00s)
+    --- PASS: TestManagedMemoryStoreConformance/historical-closure (0.00s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory	0.848s
+
+EXIT_CODE=0

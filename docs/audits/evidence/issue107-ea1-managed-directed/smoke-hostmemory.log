@@ -1,0 +1,33 @@
+SOURCE_SHA=5ea99c39844691fb456d63e3ab9db55a243c8e9a
+COMMAND=go -C go/agent-runtime-harness test -count=3 -v ./... -run '^TestManaged(HostMemoryRejectsUnissuedProofs|DispatchReceiptExactSchema)$'
+=== RUN   TestManagedHostMemoryRejectsUnissuedProofs
+--- PASS: TestManagedHostMemoryRejectsUnissuedProofs (0.00s)
+=== RUN   TestManagedDispatchReceiptExactSchema
+=== RUN   TestManagedDispatchReceiptExactSchema/RESUME
+=== RUN   TestManagedDispatchReceiptExactSchema/CANCEL
+--- PASS: TestManagedDispatchReceiptExactSchema (0.00s)
+    --- PASS: TestManagedDispatchReceiptExactSchema/RESUME (0.00s)
+    --- PASS: TestManagedDispatchReceiptExactSchema/CANCEL (0.00s)
+=== RUN   TestManagedHostMemoryRejectsUnissuedProofs
+--- PASS: TestManagedHostMemoryRejectsUnissuedProofs (0.00s)
+=== RUN   TestManagedDispatchReceiptExactSchema
+=== RUN   TestManagedDispatchReceiptExactSchema/RESUME
+=== RUN   TestManagedDispatchReceiptExactSchema/CANCEL
+--- PASS: TestManagedDispatchReceiptExactSchema (0.00s)
+    --- PASS: TestManagedDispatchReceiptExactSchema/RESUME (0.00s)
+    --- PASS: TestManagedDispatchReceiptExactSchema/CANCEL (0.00s)
+=== RUN   TestManagedHostMemoryRejectsUnissuedProofs
+--- PASS: TestManagedHostMemoryRejectsUnissuedProofs (0.00s)
+=== RUN   TestManagedDispatchReceiptExactSchema
+=== RUN   TestManagedDispatchReceiptExactSchema/RESUME
+=== RUN   TestManagedDispatchReceiptExactSchema/CANCEL
+--- PASS: TestManagedDispatchReceiptExactSchema (0.00s)
+    --- PASS: TestManagedDispatchReceiptExactSchema/RESUME (0.00s)
+    --- PASS: TestManagedDispatchReceiptExactSchema/CANCEL (0.00s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness	1.081s
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness/examples/session	1.012s [no tests to run]
+
+EXIT_CODE=0
