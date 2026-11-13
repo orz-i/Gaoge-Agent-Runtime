@@ -415,6 +415,19 @@ func ea1ChildCancelAssertOwner(t *testing.T, f *ea1ChildCancelHarnessFixture, ro
 	}
 	got, err := f.store.GetInvocation(t.Context(), root.ID)
 	if err != nil || !reflect.DeepEqual(got, root) {
+		wantFields, gotFields := reflect.ValueOf(root), reflect.ValueOf(got)
+		for index := 0; index < wantFields.NumField(); index++ {
+			want, actual := wantFields.Field(index).Interface(), gotFields.Field(index).Interface()
+			if reflect.DeepEqual(want, actual) {
+				continue
+			}
+			name := wantFields.Type().Field(index).Name
+			t.Logf("Workflow Invocation field %s: expected=%#v actual=%#v", name, want, actual)
+			if wantTime, ok := want.(time.Time); ok {
+				actualTime := actual.(time.Time)
+				t.Logf("Workflow Invocation time %s: Equal=%t expectedLocation=%q(%p) actualLocation=%q(%p) UTCDeepEqual=%t", name, wantTime.Equal(actualTime), wantTime.Location().String(), wantTime.Location(), actualTime.Location().String(), actualTime.Location(), reflect.DeepEqual(wantTime.UTC(), actualTime.UTC()))
+			}
+		}
 		t.Fatalf("cancellation changed original Workflow Invocation: %v", err)
 	}
 }
