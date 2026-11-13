@@ -1,2 +1,2 @@
-Source commit: 2d216518cfe48bc9e2ea6b02beb7733c246376a7
+SOURCE_SHA=2d216518cfe48bc9e2ea6b02beb7733c246376a7
 Main evidence copied byte-for-byte from /tmp/ea1-pr108-final after all 36 gates and exact matrix replay completed. No ledger verdict is changed by this archive. Historical directed supplement, if present, is separately labelled and never counted as same-SHA evidence.

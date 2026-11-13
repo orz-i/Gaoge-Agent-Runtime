@@ -309,8 +309,8 @@
     },
     {
       "path": "ORIGIN.txt",
-      "bytes": 324,
-      "sha256": "bd01b096a78c8c102ae4bb6ceadd5ccd7e1934d3723e493444c7599656661520"
+      "bytes": 320,
+      "sha256": "c67971c55da203dff641530282665c94bfb21312cbc0d60417f491352db82cb7"
     },
     {
       "path": "SOURCE_SHA",
