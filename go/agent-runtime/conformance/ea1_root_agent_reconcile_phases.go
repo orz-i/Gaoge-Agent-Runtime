@@ -25,6 +25,9 @@ func RunEA1RootAgentReconcilePhases(t *testing.T, factory func(*testing.T) (kern
 	for _, phase := range []string{"P0", "P1", "P2", "P3", "P4"} {
 		for _, kind := range []string{"model", "tool"} {
 			t.Run(phase+"/"+kind, func(t *testing.T) { ea1RootReconcilePhase(t, factory, phase, kind) })
+			if phase == "P4" {
+				t.Run(phase+"/"+kind+"/single-mark-ack-loss-no-finish-hold", func(t *testing.T) { ea1RootReconcilePhase(t, factory, phase, kind, false) })
+			}
 		}
 	}
 }
@@ -34,6 +37,9 @@ type ea1RootRecoveryFault struct {
 	phase         string
 	cuts          int
 	recoveryGrant kernel.ChildExecutionGrant
+	holdFinish    bool
+	finishHolds   int
+	heldSource    kernel.Snapshot
 }
 
 func (s *ea1RootRecoveryFault) ApplyOwnedPhysicalRecovery(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, m kernel.StoreMutation, p kernel.OwnedPhysicalRecovery) (kernel.Snapshot, error) {
@@ -55,6 +61,21 @@ func (s *ea1RootRecoveryFault) MarkChildExecutionSettled(ctx context.Context, g 
 	return err
 }
 
+// P4 hold adds a SECOND, explicit precommit fault after genuine Mark ACK
+// loss. The paired no-hold case proves the single original fault is recovered.
+func (s *ea1RootRecoveryFault) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant) error {
+	if s.phase == "P4" && s.holdFinish && s.cuts == 1 && g == s.recoveryGrant {
+		source, e := s.Store.Load(ctx, g.ChildRunID)
+		if e != nil {
+			return e
+		}
+		s.finishHolds++
+		s.heldSource = source
+		return s.injected
+	}
+	return s.ChildExecutionStore.FinishChildExecution(ctx, g)
+}
+
 type ea1RootRecoveryPhysical struct {
 	*ea1UnknownAgentPhysical
 	response model.Response
@@ -72,7 +93,7 @@ func (p *ea1RootRecoveryPhysical) Generate(ctx context.Context, r model.Request)
 	p.response = model.CloneResponse(out)
 	return out, e
 }
-func ea1RootReconcilePhase(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store), phase, kind string) {
+func ea1RootReconcilePhase(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store), phase, kind string, holdOption ...bool) {
 	backing, peer, reopen := factory(t)
 	injected := errors.New("EA1 original receipt/settlement committed ACK fault")
 	event := "agent.model_invocation.completed"
@@ -370,10 +391,23 @@ func ea1RootReconcilePhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 		unchanged(freshRT)
 		return
 	}
+	holdFinish := phase == "P4"
+	if len(holdOption) > 0 {
+		holdFinish = holdOption[0]
+	}
+	fault.holdFinish = holdFinish
 	fault.phase = phase
 	_, err = reconcile(runner, before.Run.Revision, "original-tool-call")
-	if !errors.Is(err, injected) || fault.cuts != 1 || fault.recoveryGrant != grant {
-		t.Fatalf("actual %s commit/ACK cut missing: cuts=%d err=%v", phase, fault.cuts, err)
+	noHoldSuccess := phase == "P4" && !holdFinish
+	if fault.cuts != 1 || fault.recoveryGrant != grant || (noHoldSuccess && err != nil) || (!noHoldSuccess && !errors.Is(err, injected)) {
+		t.Fatalf("actual %s commit/ACK cut: cuts=%d noHold=%v err=%v", phase, fault.cuts, noHoldSuccess, err)
+	}
+	expectedHolds := 0
+	if phase == "P4" && holdFinish {
+		expectedHolds = 1
+	}
+	if fault.finishHolds != expectedHolds {
+		t.Fatalf("exact Finish precommit hold: got %d want %d", fault.finishHolds, expectedHolds)
 	}
 	committed, err := rt.Load(t.Context(), request.ID)
 	if err != nil {
@@ -403,6 +437,34 @@ func ea1RootReconcilePhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 			t.Fatal("original Tool receipt not durable")
 		}
 	}
+	var accepted kernel.OwnedRetirementReceipt
+	if noHoldSuccess {
+		accepted, err = rt.LoadOwnedRetirement(t.Context(), grant.ID)
+		if err != nil || !accepted.Valid() || accepted.Phase != "ACKNOWLEDGED" || accepted.Evidence.Grant != grant || !ea1RecoveryJSONEqual(accepted.Evidence.Snapshot, committed) || accepted.Evidence.Completion != completion || accepted.ACKIdentity != accepted.Identity() {
+			t.Fatalf("single Mark ACK loss did not preserve exact acknowledged retirement: %v", err)
+		}
+		if _, err = rt.LookupChildExecution(t.Context(), request.ID); !errors.Is(err, kernel.ErrNotFound) {
+			t.Fatalf("single-fault success retained active grant: %v", err)
+		}
+		if err = backing.(kernel.ExecutionStore).CheckExecution(t.Context(), request.ID, &lease); !errors.Is(err, kernel.ErrExecutionConflict) {
+			t.Fatalf("single-fault success retained owned lease: %v", err)
+		}
+	} else if phase == "P4" {
+		if !ea1RecoveryJSONEqual(fault.heldSource, committed) {
+			t.Fatal("Finish hold source differs from committed full receipt")
+		}
+		current, e := rt.LookupChildExecution(t.Context(), request.ID)
+		if e != nil || current != grant {
+			t.Fatalf("held Finish lost original grant: %v", e)
+		}
+		c, e := rt.LookupOwnedPhysicalCallbackReturn(t.Context(), grant)
+		if e != nil || c != completion {
+			t.Fatalf("held Finish changed original callback: %v", e)
+		}
+		if _, e = rt.LoadOwnedRetirement(t.Context(), grant.ID); !errors.Is(e, kernel.ErrNotFound) {
+			t.Fatalf("precommit hold fabricated retirement: %v", e)
+		}
+	}
 	fresh := reopen()
 	freshRT := ea1StartRuntime(t, fresh)
 	physical.rt = freshRT
@@ -411,7 +473,16 @@ func ea1RootReconcilePhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 	if e != nil || !ea1RecoveryJSONEqual(durable, committed) {
 		t.Fatal("receipt changed across reopen")
 	}
-	if e = next.ReconcileRootPhysicalExecution(t.Context(), request.ID); e != nil {
+	e = next.ReconcileRootPhysicalExecution(t.Context(), request.ID)
+	if noHoldSuccess {
+		if !errors.Is(e, kernel.ErrNotFound) {
+			t.Fatalf("already acknowledged recovery selected history: %v", e)
+		}
+		retained, readErr := freshRT.LoadOwnedRetirement(t.Context(), grant.ID)
+		if readErr != nil || !ea1RecoveryJSONEqual(retained, accepted) {
+			t.Fatalf("acknowledged retirement changed on reopen: %v", readErr)
+		}
+	} else if e != nil {
 		t.Fatalf("actual first-party Root recovery failed: %v", e)
 	}
 	if _, e = freshRT.LookupChildExecution(t.Context(), request.ID); !errors.Is(e, kernel.ErrNotFound) {
