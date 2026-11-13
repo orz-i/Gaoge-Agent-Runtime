@@ -1,0 +1,10 @@
+[
+  [
+    "diagnostic-p4",
+    "go -C go/agent-runtime test -p 2 -race -count=1 -v ./memory -run '^TestEA1(RootAgent(Start|Resume|Control)Settlement|RootAgentCancelPhases|MiddlewareNextLifetime)Memory$'"
+  ],
+  [
+    "diagnostic-continuation-wrapper",
+    "go -C go/agent-runtime test -p 2 -race -count=1 -v ./continuation -run '^(TestNativeDirectAndContinuationWorkerCompeteUnderSameLease|TestNativeQuarantineBlocksContinuationUntilVerifiedRepair)$'"
+  ]
+]

@@ -324,8 +324,12 @@ func runRetirementRejectedACK(t *testing.T, factory func(*testing.T) ManagedReco
 		}
 	}
 	if variant == "new-source" || variant == "new-epoch" || variant == "replacement-grant" || variant == "descendant-grant" {
-		if _, e := f.rt.LookupOwnedRetirementForRun(t.Context(), source.Run.ID); !errors.Is(e, kernel.ErrExecutionConflict) {
-			t.Fatalf("changed source still selected: %v", e)
+		want := kernel.ErrExecutionConflict
+		if variant == "new-source" || variant == "new-epoch" {
+			want = kernel.ErrNotFound
+		}
+		if _, e := f.rt.LookupOwnedRetirementForRun(t.Context(), source.Run.ID); !errors.Is(e, want) {
+			t.Fatalf("runID selection for %s: got %v want %v", variant, e, want)
 		}
 	}
 	if _, e := f.rt.AcknowledgeOwnedRetirement(t.Context(), g, proof); !errors.Is(e, kernel.ErrExecutionConflict) {

@@ -1,0 +1,9 @@
+SOURCE_SHA=81e666128e8e9ce2a2921248909d95deb45e99fc
+COMMAND=go -C go/agent-runtime-http test -p 2 -run '^$' ./...
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http	0.548s [no tests to run]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http/agent	0.543s [no tests to run]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http/harness	0.624s [no tests to run]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http/team	(cached) [no tests to run]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http/workflow	0.554s [no tests to run]
+
+EXIT_CODE=0

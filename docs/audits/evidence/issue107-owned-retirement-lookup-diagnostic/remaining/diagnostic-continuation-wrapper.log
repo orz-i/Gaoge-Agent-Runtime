@@ -1,0 +1,10 @@
+SOURCE_SHA=81e666128e8e9ce2a2921248909d95deb45e99fc
+COMMAND=go -C go/agent-runtime test -p 2 -race -count=1 -v ./continuation -run '^(TestNativeDirectAndContinuationWorkerCompeteUnderSameLease|TestNativeQuarantineBlocksContinuationUntilVerifiedRepair)$'
+=== RUN   TestNativeDirectAndContinuationWorkerCompeteUnderSameLease
+--- PASS: TestNativeDirectAndContinuationWorkerCompeteUnderSameLease (1.01s)
+=== RUN   TestNativeQuarantineBlocksContinuationUntilVerifiedRepair
+--- PASS: TestNativeQuarantineBlocksContinuationUntilVerifiedRepair (1.26s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/continuation	3.571s
+
+EXIT_CODE=0

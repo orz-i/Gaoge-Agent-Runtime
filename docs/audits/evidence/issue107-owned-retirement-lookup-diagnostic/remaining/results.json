@@ -1,0 +1,10 @@
+[
+  {
+    "name": "diagnostic-p4",
+    "exit": 0
+  },
+  {
+    "name": "diagnostic-continuation-wrapper",
+    "exit": 0
+  }
+]
