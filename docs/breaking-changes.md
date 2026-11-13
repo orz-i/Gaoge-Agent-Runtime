@@ -1,5 +1,9 @@
 # Breaking changes (pre-stable Beta)
 
+## Unreleased — Root-owned retirement acknowledgement
+
+Custom Root Store adapters must implement or forward `kernel.OwnedRetirementStore` on the same transactional backend as native execution and owned scope storage. Missing capability is rejected before dispatch; no unsafe legacy fallback remains. Built-in Memory, SQLite and PostgreSQL are upgraded together; default and borrowed-lease configurations remain supported. See [the migration and acknowledgement boundary](releases/unreleased-owned-retirement-ack.md).
+
 **Policy:** Before a stable release, incompatible architecture/contract changes are permitted when explicitly decided. They must remove old shims/fallbacks rather than retain parallel protocols, document deleted symbols and persistence impact, and pass SDK consumer and recovery tests. A published Beta tag is immutable; publish changes in a new prerelease.
 
 ## 2026-11-12 — Issue #107 seventh independent review: physical self-fencing and Attempt receipts

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -34,6 +35,10 @@ func TestRejectNewerSchemaAndCorruptedState(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = db.Close() }()
+	var originalVersion int
+	if err = db.QueryRow("PRAGMA user_version").Scan(&originalVersion); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := db.Exec("PRAGMA user_version=999"); err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +50,7 @@ func TestRejectNewerSchemaAndCorruptedState(t *testing.T) {
 	if err = db.QueryRow("SELECT count(*) FROM runtime_runs WHERE run_id='must-survive'").Scan(&count); err != nil || count != 1 {
 		t.Fatalf("unsupported schema was modified count=%d err=%v", count, err)
 	}
-	if _, err = db.Exec("PRAGMA user_version=5"); err != nil {
+	if _, err = db.Exec(fmt.Sprintf("PRAGMA user_version=%d", originalVersion)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = db.Exec("UPDATE runtime_runs SET state_json=x'7b' WHERE run_id='must-survive'"); err != nil {

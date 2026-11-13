@@ -22,7 +22,7 @@ func initializeManagedAuthority(ctx context.Context, tx *sql.Tx) error {
 	_, err := tx.ExecContext(ctx, `INSERT INTO runtime_managed_authority(authority_key,namespace,generation,protocol_version) VALUES(?,?,1,1) ON CONFLICT(authority_key) DO NOTHING`, "managed-recovery-authority/v1", hex.EncodeToString(token[:]))
 	return err
 }
-func schemaV4DDL() []string { return schemaDDL[:len(schemaDDL)-len(managedSchemaDDL)] }
+func schemaV4DDL() []string { v5 := schemaV5DDL(); return v5[:len(v5)-len(managedSchemaDDL)] }
 
 // MigrateV4ToV5 is explicit. Stop old writers and retain a backup first.
 // No existing Run receives a suspension proof from this schema migration.
@@ -44,7 +44,7 @@ func (s *Store) migrateV4ToV5(ctx context.Context) error {
 		return err
 	}
 	if version == 5 {
-		return validateSchemaDDL(ctx, tx, schemaDDL)
+		return validateSchemaDDL(ctx, tx, schemaV5DDL())
 	}
 	if version != 4 {
 		return fmt.Errorf("%w: migration requires exact v4, got %d", ErrUnsupportedSchema, version)
@@ -63,7 +63,7 @@ func (s *Store) migrateV4ToV5(ctx context.Context) error {
 	if _, err = tx.ExecContext(ctx, "PRAGMA user_version=5"); err != nil {
 		return err
 	}
-	if err = validateSchemaDDL(ctx, tx, schemaDDL); err != nil {
+	if err = validateSchemaDDL(ctx, tx, schemaV5DDL()); err != nil {
 		return err
 	}
 	return conflictOrDatabaseError(tx.Commit())

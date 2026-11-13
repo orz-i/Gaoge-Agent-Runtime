@@ -517,6 +517,9 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	if !dependencies.Runtime.SupportsExecution() || !dependencies.Runtime.SupportsOwnedPhysicalExecution() || !dependencies.Runtime.SupportsChildExecution() {
 		return nil, ErrInvalidRequest
 	}
+	if !dependencies.Runtime.SupportsOwnedRetirement() {
+		return nil, kernel.ErrExecutionRequired
+	}
 	if dependencies.RunExecution != nil {
 		if !dependencies.Runtime.SupportsExecution() {
 			return nil, ErrInvalidRequest

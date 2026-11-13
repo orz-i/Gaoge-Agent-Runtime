@@ -29,6 +29,9 @@ func (s *Store) BeginOwnedPhysicalExecution(ctx context.Context, g kernel.ChildE
 	if err := s.managedGateLocked(g.ChildRunID); err != nil {
 		return err
 	}
+	if _, retired := s.ownedRetirements[g.ID]; retired {
+		return kernel.ErrExecutionConflict
+	}
 	current, ok := s.records[g.ChildRunID]
 	if !ok {
 		return kernel.ErrNotFound

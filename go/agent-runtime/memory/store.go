@@ -21,6 +21,7 @@ type Store struct {
 	transitionOrder  []string
 	execution        map[string]memoryExecutionState
 	childGrants      map[string]memoryChildGrant
+	ownedRetirements map[string]kernel.OwnedRetirementReceipt
 	childGrantOwners map[string]map[string]struct{}
 	executionClock   func() time.Time
 	managedAuthority kernel.ManagedAuthority

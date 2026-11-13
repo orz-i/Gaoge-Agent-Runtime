@@ -27,6 +27,12 @@ type approvalSettlementBarrierStore struct {
 	release        chan struct{}
 	finished       chan approvalSettlementFinish
 	releaseOnce    sync.Once
+	allowACK       chan struct{}
+	allowWorker    chan struct{}
+	acknowledged   chan kernel.OwnedRetirementAckResult
+	ackCount       int
+	ackOnce        sync.Once
+	workerOnce     sync.Once
 }
 
 type approvalSettlementFinish struct {
@@ -37,12 +43,18 @@ type approvalSettlementFinish struct {
 func (store *approvalSettlementBarrierStore) unblock() {
 	store.releaseOnce.Do(func() { close(store.release) })
 }
+func (store *approvalSettlementBarrierStore) unblockACK() {
+	store.ackOnce.Do(func() { close(store.allowACK) })
+}
+func (store *approvalSettlementBarrierStore) unblockWorker() {
+	store.workerOnce.Do(func() { close(store.allowWorker) })
+}
 
 func (store *approvalSettlementBarrierStore) MarkChildExecutionSettled(ctx context.Context, grant kernel.ChildExecutionGrant, permit kernel.ChildExecutionSettlement) error {
 	store.mu.Lock()
 	target := grant.ChildRunID == store.target && grant.AdmissionOperation == "approval"
 	store.mu.Unlock()
-	if !target {
+	if !target || permit.IsRecovery() {
 		return store.Store.MarkChildExecutionSettled(ctx, grant, permit)
 	}
 	snapshot, err := store.Store.Load(ctx, grant.ChildRunID)
@@ -71,6 +83,16 @@ func (store *approvalSettlementBarrierStore) MarkChildExecutionSettled(ctx conte
 }
 
 func (store *approvalSettlementBarrierStore) FinishChildExecution(ctx context.Context, grant kernel.ChildExecutionGrant) error {
+	store.mu.Lock()
+	waitForOwnerMark := grant.ChildRunID == store.target && grant.AdmissionOperation == "approval"
+	store.mu.Unlock()
+	if waitForOwnerMark {
+		select {
+		case <-store.marked:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 	err := store.Store.FinishChildExecution(ctx, grant)
 	store.mu.Lock()
 	target := grant == store.markedGrant && grant.ID != ""
@@ -86,14 +108,50 @@ func (store *approvalSettlementBarrierStore) FinishChildExecution(ctx context.Co
 	return err
 }
 
+func (store *approvalSettlementBarrierStore) AcknowledgeOwnedRetirement(ctx context.Context, grant kernel.ChildExecutionGrant, proof kernel.OwnedRetirementAcknowledgement) (kernel.OwnedRetirementAckResult, error) {
+	store.mu.Lock()
+	target := grant == store.markedGrant && grant.ID != ""
+	store.mu.Unlock()
+	if !target {
+		return store.Store.AcknowledgeOwnedRetirement(ctx, grant, proof)
+	}
+	select {
+	case <-store.allowACK:
+	case <-ctx.Done():
+		return kernel.OwnedRetirementAckResult{}, ctx.Err()
+	}
+	result, err := store.Store.AcknowledgeOwnedRetirement(ctx, grant, proof)
+	if err != nil {
+		return result, err
+	}
+	store.mu.Lock()
+	store.ackCount++
+	first := store.ackCount == 1
+	store.mu.Unlock()
+	if first {
+		store.acknowledged <- result
+		// Hold only the peer's return, not its transaction/lock. The original call
+		// must observe the same historical ACK without clearing a second lease.
+		select {
+		case <-store.allowWorker:
+		case <-ctx.Done():
+			return result, ctx.Err()
+		}
+	}
+	return result, nil
+}
+
 func TestApprovalWakeupCannotStealOriginalOwnerSettlement(t *testing.T) {
 	store := &approvalSettlementBarrierStore{
 		Store: memory.NewStore(), marked: make(chan struct{}), release: make(chan struct{}),
 		finished: make(chan approvalSettlementFinish, 1),
+		allowACK: make(chan struct{}), allowWorker: make(chan struct{}), acknowledged: make(chan kernel.OwnedRetirementAckResult, 1),
 	}
 	fixture := newContinuationIntegrationFixture(t, store)
 	defer fixture.close(t)
 	defer store.unblock()
+	defer store.unblockACK()
+	defer store.unblockWorker()
 	parent := fixture.startPendingTeam(t)
 	child := fixture.waitingChild(t, parent)
 	if child.Run.ParentRunID != "" {
@@ -156,6 +214,29 @@ func TestApprovalWakeupCannotStealOriginalOwnerSettlement(t *testing.T) {
 	if fixture.executions.Load() != 0 || fixture.model.CallCount() != 1 {
 		t.Fatalf("unexpected physical work before original owner cleanup: tools=%d models=%d", fixture.executions.Load(), fixture.model.CallCount())
 	}
+	retirement, err := store.LoadOwnedRetirement(ctx, grant.ID)
+	if err != nil || !retirement.Valid() || retirement.Evidence.Grant != grant ||
+		kernel.ManagedDigest(retirement.Evidence.Snapshot) != kernel.ManagedDigest(source) ||
+		!retirement.Evidence.Completion.HostCompleted || !retirement.Evidence.Completion.LeaseOwned || retirement.Phase != "RETIRED" {
+		t.Fatalf("missing exact genuine retirement: %#v %v", retirement, err)
+	}
+	store.unblockACK()
+	var firstACK kernel.OwnedRetirementAckResult
+	select {
+	case firstACK = <-store.acknowledged:
+	case <-ctx.Done():
+		t.Fatal("worker ACK not reached", ctx.Err())
+	}
+	if firstACK.ReceiptID != grant.ID || firstACK.PreviouslyAcknowledged || firstACK.Disposition != "released_owned" || firstACK.SettledSourceDigest != kernel.ManagedDigest(source) {
+		t.Fatalf("incorrect first peer ACK: %#v", firstACK)
+	}
+	if err := store.CheckExecution(ctx, child.Run.ID, &lease); !errors.Is(err, kernel.ErrExecutionConflict) {
+		t.Fatalf("original owned lease not retired: %v", err)
+	}
+	after, err = store.Load(ctx, child.Run.ID)
+	if err != nil || !reflect.DeepEqual(source, after) {
+		t.Fatalf("ACK changed Run source: %#v %v", after, err)
+	}
 	store.unblock()
 	var result approvalResult
 	select {
@@ -163,12 +244,23 @@ func TestApprovalWakeupCannotStealOriginalOwnerSettlement(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("original approval did not return", ctx.Err())
 	}
-	// Preserve the public success oracle. On c79d2ee this fails with
-	// ErrRootOutcomeUnknown joined with ErrExecutionConflict after the worker has
-	// legitimately retired the exact marked grant. No expected-error substitution.
+	// Preserve the original public success oracle after actual peer retirement.
+	// The original call confirms the same canonical ACK; it must not recreate
+	// a grant or require the already-deleted grant for managed completion.
 	if result.err != nil || result.snapshot.Run.Status != kernel.RunStatusRunning {
 		t.Fatalf("resolved=%#v err=%v; originalGrant=%#v originalLease=%#v tools=%d models=%d", result.snapshot.Run, result.err, grant, lease, fixture.executions.Load(), fixture.model.CallCount())
 	}
+	store.mu.Lock()
+	ackCount := store.ackCount
+	store.mu.Unlock()
+	if ackCount != 2 {
+		t.Fatalf("owner did not confirm exactly the peer ACK: %d", ackCount)
+	}
+	acknowledged, err := store.LoadOwnedRetirement(ctx, grant.ID)
+	if err != nil || acknowledged.Phase != "ACKNOWLEDGED" || acknowledged.Identity() != retirement.Identity() {
+		t.Fatalf("historical receipt identity changed: %#v %v", acknowledged, err)
+	}
+	store.unblockWorker()
 	fixture.waitForCompletedParent(t, parent.Run.ID)
 	fixture.assertSingleExecution(t)
 }
