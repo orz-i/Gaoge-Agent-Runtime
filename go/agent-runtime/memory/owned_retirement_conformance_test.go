@@ -1,11 +1,12 @@
 package memory_test
 
 import (
+	"testing"
+	"time"
+
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
-	"testing"
-	"time"
 )
 
 func TestOwnedRetirementMemoryStoreConformance(t *testing.T) {

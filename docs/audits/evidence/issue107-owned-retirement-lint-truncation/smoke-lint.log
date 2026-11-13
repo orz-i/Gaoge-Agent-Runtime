@@ -1,0 +1,28 @@
+SOURCE_SHA=1a9a6afd9b5a1a75096beb654f5bb654707829a3
+COMMAND=node scripts/go-workspace.mjs lint
+==> lint go/agent-runtime
+go/agent-runtime/kernel/owned_retirement_test.go:6:1: File is not properly formatted (goimports)
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
+^
+go/agent-runtime/memory/owned_retirement.go:5:1: File is not properly formatted (goimports)
+	"encoding/json"
+^
+go/agent-runtime/memory/owned_retirement_conformance_test.go:3:1: File is not properly formatted (goimports)
+import (
+^
+3 issues:
+* goimports: 3
+file:///private/tmp/gaoge-runtime-c79-continuation/scripts/go-workspace.mjs:182
+    throw new Error(`${command} ${args.join(" ")} failed with exit code ${result.status ?? 1}`);
+          ^
+
+Error: golangci-lint run ./... failed with exit code 1
+    at run (file:///private/tmp/gaoge-runtime-c79-continuation/scripts/go-workspace.mjs:182:11)
+    at file:///private/tmp/gaoge-runtime-c79-continuation/scripts/go-workspace.mjs:55:24
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+
+Node.js v24.21.0
+
+EXIT_CODE=1

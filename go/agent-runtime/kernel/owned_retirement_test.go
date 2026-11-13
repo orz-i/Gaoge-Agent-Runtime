@@ -3,9 +3,10 @@ package kernel
 import (
 	"encoding/json"
 	"errors"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
 	"strings"
 	"testing"
+
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
 )
 
 func retirementFixture() (OwnedRetirementReceipt, ExecutionLease) {
