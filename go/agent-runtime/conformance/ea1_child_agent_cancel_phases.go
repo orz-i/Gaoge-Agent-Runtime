@@ -276,11 +276,12 @@ func ea1ChildCancelPreflight(t *testing.T, factory func(*testing.T) (kernel.Stor
 }
 func ea1ChildCancelUnknown(t *testing.T, factory func(*testing.T) (kernel.Store, func() (kernel.Store, kernel.Store)), native bool, kind string) {
 	f := ea1NewChildCancelFixture(t, factory, kind == "tool", native)
-	if kind == "host" {
+	switch kind {
+	case "host":
 		f.host.fault = f.store.fault
-	} else if kind == "model" {
+	case "model":
 		f.store.event = "agent.model_invocation.completed"
-	} else {
+	default:
 		f.store.event = "tool.completed"
 	}
 	_, e := f.runner(f.rt, "original-unknown-owner", true).Resume(t.Context(), f.request.ID, f.prepared.Run.Revision)
@@ -317,7 +318,7 @@ func ea1ChildCancelUnknown(t *testing.T, factory func(*testing.T) (kernel.Store,
 		if lease.RunID != f.request.ID || lease.OwnerID != "original-unknown-owner" {
 			t.Fatal("unknown missing original native owner")
 		}
-		if e = f.store.ExecutionStore.CheckExecution(t.Context(), f.request.ID, &lease); e != nil {
+		if e = f.store.CheckExecution(t.Context(), f.request.ID, &lease); e != nil {
 			t.Fatal("rejected Cancel revoked live owner", e)
 		}
 		ea1AwaitControlExpiry(t, lease)
