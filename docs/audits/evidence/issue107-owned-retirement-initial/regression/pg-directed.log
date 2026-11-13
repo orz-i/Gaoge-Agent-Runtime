@@ -1,0 +1,139 @@
+SOURCE_SHA=aa20e028c6b9d28af2f2e623eb954d693d6be214
+COMMAND=go -C go/agent-runtime-postgres test -p 2 -race -count=3 -v -run '^TestRealPostgresOwnedRetirementStore$' ./...
+=== RUN   TestRealPostgresOwnedRetirementStore
+=== RUN   TestRealPostgresOwnedRetirementStore/owned
+=== RUN   TestRealPostgresOwnedRetirementStore/borrowed
+=== RUN   TestRealPostgresOwnedRetirementStore/first-ack/nil-proof
+=== RUN   TestRealPostgresOwnedRetirementStore/first-ack/wrong-source
+=== RUN   TestRealPostgresOwnedRetirementStore/first-ack/foreign-grant
+=== RUN   TestRealPostgresOwnedRetirementStore/first-ack/foreign-owner
+=== RUN   TestRealPostgresOwnedRetirementStore/first-ack/foreign-lease
+=== RUN   TestRealPostgresOwnedRetirementStore/first-ack/foreign-epoch
+=== RUN   TestRealPostgresOwnedRetirementStore/first-ack/wrong-revision
+=== RUN   TestRealPostgresOwnedRetirementStore/first-ack/wrong-eventhead
+=== RUN   TestRealPostgresOwnedRetirementStore/first-ack/new-source
+=== RUN   TestRealPostgresOwnedRetirementStore/first-ack/new-epoch
+=== RUN   TestRealPostgresOwnedRetirementStore/first-ack/replacement-grant
+=== RUN   TestRealPostgresOwnedRetirementStore/first-ack/descendant-grant
+=== RUN   TestRealPostgresOwnedRetirementStore/no-release/active
+=== RUN   TestRealPostgresOwnedRetirementStore/no-release/unknown-callback
+=== RUN   TestRealPostgresOwnedRetirementStore/no-release/legacy-mark
+=== RUN   TestRealPostgresOwnedRetirementStore/competing-finish-and-ack
+=== RUN   TestRealPostgresOwnedRetirementStore/actual-Agent-finish-death-public-runID-recovery
+=== RUN   TestRealPostgresOwnedRetirementStore/finish-lost-ACK-runID-reopen
+=== RUN   TestRealPostgresOwnedRetirementStore/managed-T4-before-retirement
+--- PASS: TestRealPostgresOwnedRetirementStore (18.17s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/owned (0.32s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/borrowed (10.29s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/first-ack/nil-proof (0.29s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/first-ack/wrong-source (0.16s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/first-ack/foreign-grant (0.16s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/first-ack/foreign-owner (0.25s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/first-ack/foreign-lease (0.24s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/first-ack/foreign-epoch (0.22s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/first-ack/wrong-revision (0.21s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/first-ack/wrong-eventhead (0.25s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/first-ack/new-source (0.25s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/first-ack/new-epoch (0.19s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/first-ack/replacement-grant (0.21s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/first-ack/descendant-grant (0.20s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/no-release/active (0.22s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/no-release/unknown-callback (0.17s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/no-release/legacy-mark (0.21s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/competing-finish-and-ack (0.27s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/actual-Agent-finish-death-public-runID-recovery (0.33s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/finish-lost-ACK-runID-reopen (0.20s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/managed-T4-before-retirement (3.52s)
+=== RUN   TestRealPostgresOwnedRetirementStore
+=== RUN   TestRealPostgresOwnedRetirementStore/owned
+=== RUN   TestRealPostgresOwnedRetirementStore/borrowed
+=== RUN   TestRealPostgresOwnedRetirementStore/first-ack/nil-proof
+=== RUN   TestRealPostgresOwnedRetirementStore/first-ack/wrong-source
+=== RUN   TestRealPostgresOwnedRetirementStore/first-ack/foreign-grant
+=== RUN   TestRealPostgresOwnedRetirementStore/first-ack/foreign-owner
+=== RUN   TestRealPostgresOwnedRetirementStore/first-ack/foreign-lease
+=== RUN   TestRealPostgresOwnedRetirementStore/first-ack/foreign-epoch
+=== RUN   TestRealPostgresOwnedRetirementStore/first-ack/wrong-revision
+=== RUN   TestRealPostgresOwnedRetirementStore/first-ack/wrong-eventhead
+=== RUN   TestRealPostgresOwnedRetirementStore/first-ack/new-source
+=== RUN   TestRealPostgresOwnedRetirementStore/first-ack/new-epoch
+=== RUN   TestRealPostgresOwnedRetirementStore/first-ack/replacement-grant
+=== RUN   TestRealPostgresOwnedRetirementStore/first-ack/descendant-grant
+=== RUN   TestRealPostgresOwnedRetirementStore/no-release/active
+=== RUN   TestRealPostgresOwnedRetirementStore/no-release/unknown-callback
+=== RUN   TestRealPostgresOwnedRetirementStore/no-release/legacy-mark
+=== RUN   TestRealPostgresOwnedRetirementStore/competing-finish-and-ack
+=== RUN   TestRealPostgresOwnedRetirementStore/actual-Agent-finish-death-public-runID-recovery
+=== RUN   TestRealPostgresOwnedRetirementStore/finish-lost-ACK-runID-reopen
+=== RUN   TestRealPostgresOwnedRetirementStore/managed-T4-before-retirement
+--- PASS: TestRealPostgresOwnedRetirementStore (18.30s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/owned (0.25s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/borrowed (10.30s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/first-ack/nil-proof (0.24s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/first-ack/wrong-source (0.23s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/first-ack/foreign-grant (0.18s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/first-ack/foreign-owner (0.19s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/first-ack/foreign-lease (0.20s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/first-ack/foreign-epoch (0.29s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/first-ack/wrong-revision (0.28s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/first-ack/wrong-eventhead (0.18s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/first-ack/new-source (0.22s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/first-ack/new-epoch (0.30s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/first-ack/replacement-grant (0.23s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/first-ack/descendant-grant (0.22s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/no-release/active (0.17s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/no-release/unknown-callback (0.23s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/no-release/legacy-mark (0.18s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/competing-finish-and-ack (0.16s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/actual-Agent-finish-death-public-runID-recovery (0.29s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/finish-lost-ACK-runID-reopen (0.35s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/managed-T4-before-retirement (3.60s)
+=== RUN   TestRealPostgresOwnedRetirementStore
+=== RUN   TestRealPostgresOwnedRetirementStore/owned
+=== RUN   TestRealPostgresOwnedRetirementStore/borrowed
+=== RUN   TestRealPostgresOwnedRetirementStore/first-ack/nil-proof
+=== RUN   TestRealPostgresOwnedRetirementStore/first-ack/wrong-source
+=== RUN   TestRealPostgresOwnedRetirementStore/first-ack/foreign-grant
+=== RUN   TestRealPostgresOwnedRetirementStore/first-ack/foreign-owner
+=== RUN   TestRealPostgresOwnedRetirementStore/first-ack/foreign-lease
+=== RUN   TestRealPostgresOwnedRetirementStore/first-ack/foreign-epoch
+=== RUN   TestRealPostgresOwnedRetirementStore/first-ack/wrong-revision
+=== RUN   TestRealPostgresOwnedRetirementStore/first-ack/wrong-eventhead
+=== RUN   TestRealPostgresOwnedRetirementStore/first-ack/new-source
+=== RUN   TestRealPostgresOwnedRetirementStore/first-ack/new-epoch
+=== RUN   TestRealPostgresOwnedRetirementStore/first-ack/replacement-grant
+=== RUN   TestRealPostgresOwnedRetirementStore/first-ack/descendant-grant
+=== RUN   TestRealPostgresOwnedRetirementStore/no-release/active
+=== RUN   TestRealPostgresOwnedRetirementStore/no-release/unknown-callback
+=== RUN   TestRealPostgresOwnedRetirementStore/no-release/legacy-mark
+=== RUN   TestRealPostgresOwnedRetirementStore/competing-finish-and-ack
+=== RUN   TestRealPostgresOwnedRetirementStore/actual-Agent-finish-death-public-runID-recovery
+=== RUN   TestRealPostgresOwnedRetirementStore/finish-lost-ACK-runID-reopen
+=== RUN   TestRealPostgresOwnedRetirementStore/managed-T4-before-retirement
+--- PASS: TestRealPostgresOwnedRetirementStore (18.06s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/owned (0.27s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/borrowed (10.32s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/first-ack/nil-proof (0.21s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/first-ack/wrong-source (0.20s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/first-ack/foreign-grant (0.24s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/first-ack/foreign-owner (0.23s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/first-ack/foreign-lease (0.20s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/first-ack/foreign-epoch (0.26s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/first-ack/wrong-revision (0.32s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/first-ack/wrong-eventhead (0.18s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/first-ack/new-source (0.21s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/first-ack/new-epoch (0.21s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/first-ack/replacement-grant (0.25s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/first-ack/descendant-grant (0.23s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/no-release/active (0.16s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/no-release/unknown-callback (0.18s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/no-release/legacy-mark (0.17s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/competing-finish-and-ack (0.17s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/actual-Agent-finish-death-public-runID-recovery (0.27s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/finish-lost-ACK-runID-reopen (0.28s)
+    --- PASS: TestRealPostgresOwnedRetirementStore/managed-T4-before-retirement (3.51s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	56.990s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]
+
+EXIT_CODE=0

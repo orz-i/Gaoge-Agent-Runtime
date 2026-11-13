@@ -1,0 +1,66 @@
+SOURCE_SHA=aa20e028c6b9d28af2f2e623eb954d693d6be214
+COMMAND=go -C go/agent-runtime test -p 2 -race -count=1 -timeout=20m ./...
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/continuation	1.467s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/interaction	[no test files]
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/runfeed	[no test files]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/topology	1.898s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent	5.433s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/bootstrap	1.450s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget	1.435s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/compose	2.302s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance	[no test files]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context	11.804s
+--- FAIL: TestNativeDirectAndContinuationWorkerCompeteUnderSameLease (0.00s)
+    native_activation_competition_test.go:79: kernel run requires fenced execution
+--- FAIL: TestNativeQuarantineBlocksContinuationUntilVerifiedRepair (0.00s)
+    native_quarantine_delivery_test.go:38: kernel run requires fenced execution
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/continuation	5.675s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/evaluation	1.554s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/examples/configured	[no test files]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/examples/quickstart	1.470s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/groupchat	1.576s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff	1.499s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/interaction	[no test files]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/callbackscope	1.473s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol	1.416s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract	1.812s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel	1.302s
+--- FAIL: TestEA1MiddlewareNextLifetimeMemory (6.66s)
+    --- FAIL: TestEA1MiddlewareNextLifetimeMemory/root (3.35s)
+        --- FAIL: TestEA1MiddlewareNextLifetimeMemory/root/P4/mark-ack-lost (0.01s)
+            ea1_middleware_next_lifetime.go:670: actual Mark ACKlost/Finish cut not reached: agent original root callback result is uncertain
+                original MW callback fault
+--- FAIL: TestEA1RootAgentCancelPhasesMemory (9.58s)
+    --- FAIL: TestEA1RootAgentCancelPhasesMemory/P4/yield (0.00s)
+        ea1_root_agent_cancel_phases.go:30: actual original Mark commit/ACK-loss not reached
+    --- FAIL: TestEA1RootAgentCancelPhasesMemory/P4/terminal (0.01s)
+        ea1_root_agent_cancel_phases.go:30: actual original Mark commit/ACK-loss not reached
+--- FAIL: TestEA1RootAgentControlSettlementMemory (2.66s)
+    --- FAIL: TestEA1RootAgentControlSettlementMemory/approval/P4 (0.02s)
+        ea1_root_agent_control_settlement.go:30: P4 actual Mark ACK loss not reached
+--- FAIL: TestEA1RootAgentResumeSettlementMemory (0.07s)
+    --- FAIL: TestEA1RootAgentResumeSettlementMemory/P4/model-yield (0.01s)
+        ea1_root_agent_resume_settlement.go:25: actual original Mark commit/ACK-loss not reached
+    --- FAIL: TestEA1RootAgentResumeSettlementMemory/P4/terminal-tool (0.01s)
+        ea1_root_agent_resume_settlement.go:25: actual original Mark commit/ACK-loss not reached
+--- FAIL: TestEA1RootAgentStartSettlementMemory (0.04s)
+    --- FAIL: TestEA1RootAgentStartSettlementMemory/P4/model-yield (0.00s)
+        ea1_root_agent_start_settlement.go:30: actual original Mark commit/ACK-loss not reached
+    --- FAIL: TestEA1RootAgentStartSettlementMemory/P4/terminal-tool (0.01s)
+        ea1_root_agent_start_settlement.go:30: actual original Mark commit/ACK-loss not reached
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory	104.842s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model	1.749s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/observability	1.414s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin	1.514s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/queue	1.601s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runfeed	1.426s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation	1.460s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/team	1.464s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools	1.498s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workbench	1.450s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workflow	1.693s
+FAIL
+
+EXIT_CODE=1

@@ -1,0 +1,46 @@
+SOURCE_SHA=aa20e028c6b9d28af2f2e623eb954d693d6be214
+COMMAND=go -C go/agent-runtime-sqlite test -p 2 -race -count=1 -timeout=20m ./...
+--- FAIL: TestEA1MiddlewareNextLifetimeNativeSQLite (12.36s)
+    --- FAIL: TestEA1MiddlewareNextLifetimeNativeSQLite/root (6.04s)
+        --- FAIL: TestEA1MiddlewareNextLifetimeNativeSQLite/root/P4/mark-ack-lost (0.13s)
+            ea1_middleware_next_lifetime.go:670: actual Mark ACKlost/Finish cut not reached: agent original root callback result is uncertain
+                original MW callback fault
+--- FAIL: TestEA1RootAgentCancelPhasesNativeSQLite (11.43s)
+    --- FAIL: TestEA1RootAgentCancelPhasesNativeSQLite/P4/yield (0.10s)
+        ea1_root_agent_cancel_phases.go:30: actual original Mark commit/ACK-loss not reached
+    --- FAIL: TestEA1RootAgentCancelPhasesNativeSQLite/P4/terminal (0.13s)
+        ea1_root_agent_cancel_phases.go:30: actual original Mark commit/ACK-loss not reached
+--- FAIL: TestEA1RootAgentControlSettlementNativeSQLite (3.89s)
+    --- FAIL: TestEA1RootAgentControlSettlementNativeSQLite/approval/P4 (0.14s)
+        ea1_root_agent_control_settlement.go:30: P4 actual Mark ACK loss not reached
+--- FAIL: TestEA1RootAgentResumeSettlementNativeSQLite (0.82s)
+    --- FAIL: TestEA1RootAgentResumeSettlementNativeSQLite/P4/model-yield (0.12s)
+        ea1_root_agent_resume_settlement.go:25: actual original Mark commit/ACK-loss not reached
+    --- FAIL: TestEA1RootAgentResumeSettlementNativeSQLite/P4/terminal-tool (0.14s)
+        ea1_root_agent_resume_settlement.go:25: actual original Mark commit/ACK-loss not reached
+--- FAIL: TestEA1RootAgentStartSettlementNativeSQLite (0.56s)
+    --- FAIL: TestEA1RootAgentStartSettlementNativeSQLite/P4/model-yield (0.09s)
+        ea1_root_agent_start_settlement.go:30: actual original Mark commit/ACK-loss not reached
+    --- FAIL: TestEA1RootAgentStartSettlementNativeSQLite/P4/terminal-tool (0.10s)
+        ea1_root_agent_start_settlement.go:30: actual original Mark commit/ACK-loss not reached
+--- FAIL: TestCancelledCreateDoesNotPublishAndCanRetry (0.06s)
+    final_audit_test.go:50: managed recovery schema should be v5: version=6 err=<nil>
+--- FAIL: TestSameDevelopmentV1WithObsoleteLayoutIsRejected (0.09s)
+    final_audit_test.go:124: test expects unchanged schema v5: 6 <nil>
+--- FAIL: TestRejectUnexpectedV1SchemaObjectsBeforeWAL (0.25s)
+    --- FAIL: TestRejectUnexpectedV1SchemaObjectsBeforeWAL/relation-delete-trigger (0.05s)
+        schema_rejection_test.go:158: fixture user_version=6 err=<nil>
+    --- FAIL: TestRejectUnexpectedV1SchemaObjectsBeforeWAL/extra-index (0.05s)
+        schema_rejection_test.go:158: fixture user_version=6 err=<nil>
+    --- FAIL: TestRejectUnexpectedV1SchemaObjectsBeforeWAL/extra-table (0.05s)
+        schema_rejection_test.go:158: fixture user_version=6 err=<nil>
+    --- FAIL: TestRejectUnexpectedV1SchemaObjectsBeforeWAL/extra-view (0.06s)
+        schema_rejection_test.go:158: fixture user_version=6 err=<nil>
+    --- FAIL: TestRejectUnexpectedV1SchemaObjectsBeforeWAL/sqlite-prefix-lookalike (0.05s)
+        schema_rejection_test.go:158: fixture user_version=6 err=<nil>
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite	275.979s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/examples/embedded	2.361s
+FAIL
+
+EXIT_CODE=1

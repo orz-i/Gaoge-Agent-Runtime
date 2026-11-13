@@ -1,0 +1,30 @@
+[
+  [
+    "compile-agent-runtime",
+    "go -C go/agent-runtime test -p 2 -run '^$' ./..."
+  ],
+  [
+    "compile-agent-runtime-sqlite",
+    "go -C go/agent-runtime-sqlite test -p 2 -run '^$' ./..."
+  ],
+  [
+    "compile-agent-runtime-postgres",
+    "go -C go/agent-runtime-postgres test -p 2 -run '^$' ./..."
+  ],
+  [
+    "compile-agent-runtime-harness",
+    "go -C go/agent-runtime-harness test -p 2 -run '^$' ./..."
+  ],
+  [
+    "compile-agent-runtime-harness-postgres",
+    "go -C go/agent-runtime-harness-postgres test -p 2 -run '^$' ./..."
+  ],
+  [
+    "compile-agent-runtime-http",
+    "go -C go/agent-runtime-http test -p 2 -run '^$' ./..."
+  ],
+  [
+    "smoke-root",
+    "go -C go/agent-runtime test -p 2 -race -count=1 -v ./kernel ./memory ./agent ./continuation -run '^(TestOwnedRetirement.*|TestRootRetirement.*|TestApprovalWakeupCannotStealOriginalOwnerSettlement|TestApprovedChildAutomaticallyContinuesOwningTeamOnce)$'"
+  ]
+]
