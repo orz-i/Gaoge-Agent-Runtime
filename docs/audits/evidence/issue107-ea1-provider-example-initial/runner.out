@@ -1,0 +1,5 @@
+compile-provider 0
+compile-example 0
+smoke-provider 1
+smoke-example 1
+final-state 0
