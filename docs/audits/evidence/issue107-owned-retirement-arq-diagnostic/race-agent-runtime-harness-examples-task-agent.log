@@ -1,0 +1,5 @@
+SOURCE_SHA=00d0e69a0d0af64f37df28c98b17cb6b45c63af1
+COMMAND=go -C go/agent-runtime-harness/examples/task-agent test -p 2 -race -count=1 -timeout=20m ./...
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness/examples/task-agent	126.602s
+
+EXIT_CODE=0

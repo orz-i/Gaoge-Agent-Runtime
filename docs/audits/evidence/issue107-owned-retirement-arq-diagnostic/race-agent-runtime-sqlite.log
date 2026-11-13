@@ -1,0 +1,13 @@
+SOURCE_SHA=00d0e69a0d0af64f37df28c98b17cb6b45c63af1
+COMMAND=go -C go/agent-runtime-sqlite test -p 2 -race -count=1 -timeout=20m ./...
+--- FAIL: TestEA1RootAgentReconcilePhasesNativeSQLite (5.66s)
+    --- FAIL: TestEA1RootAgentReconcilePhasesNativeSQLite/P4/model (0.12s)
+        ea1_root_agent_reconcile_phases.go:376: actual P4 commit/ACK cut missing: cuts=1 err=<nil>
+    --- FAIL: TestEA1RootAgentReconcilePhasesNativeSQLite/P4/tool (0.14s)
+        ea1_root_agent_reconcile_phases.go:376: actual P4 commit/ACK cut missing: cuts=1 err=<nil>
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite	284.888s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/examples/embedded	3.175s
+FAIL
+
+EXIT_CODE=1

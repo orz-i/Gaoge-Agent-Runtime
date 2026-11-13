@@ -1,0 +1,118 @@
+[
+  {
+    "name": "smoke-format",
+    "exit": 0
+  },
+  {
+    "name": "smoke-metadata",
+    "exit": 0
+  },
+  {
+    "name": "smoke-lint",
+    "exit": 0
+  },
+  {
+    "name": "compile-agent-runtime",
+    "exit": 0
+  },
+  {
+    "name": "compile-agent-runtime-sqlite",
+    "exit": 0
+  },
+  {
+    "name": "compile-agent-runtime-postgres",
+    "exit": 0
+  },
+  {
+    "name": "compile-agent-runtime-harness",
+    "exit": 0
+  },
+  {
+    "name": "compile-agent-runtime-harness-postgres",
+    "exit": 0
+  },
+  {
+    "name": "compile-agent-runtime-http",
+    "exit": 0
+  },
+  {
+    "name": "smoke-root",
+    "exit": 0
+  },
+  {
+    "name": "smoke-p4",
+    "exit": 0
+  },
+  {
+    "name": "smoke-continuation-wrapper",
+    "exit": 0
+  },
+  {
+    "name": "sqlite-directed",
+    "exit": 0
+  },
+  {
+    "name": "gorm-directed",
+    "exit": 0
+  },
+  {
+    "name": "pg-directed",
+    "exit": 0
+  },
+  {
+    "name": "continuation-race-repeat",
+    "exit": 0
+  },
+  {
+    "name": "race-agent-runtime",
+    "exit": 1
+  },
+  {
+    "name": "race-agent-runtime-sqlite",
+    "exit": 1
+  },
+  {
+    "name": "race-agent-runtime-postgres",
+    "exit": 1
+  },
+  {
+    "name": "race-agent-runtime-harness",
+    "exit": 0
+  },
+  {
+    "name": "race-agent-runtime-harness-postgres",
+    "exit": 0
+  },
+  {
+    "name": "race-agent-runtime-http",
+    "exit": 0
+  },
+  {
+    "name": "race-agent-runtime-provider",
+    "exit": 0
+  },
+  {
+    "name": "race-agent-runtime-a2a",
+    "exit": 0
+  },
+  {
+    "name": "race-agent-runtime-mcp",
+    "exit": 0
+  },
+  {
+    "name": "race-agent-runtime-redis",
+    "exit": 0
+  },
+  {
+    "name": "race-agent-runtime-otel",
+    "exit": 0
+  },
+  {
+    "name": "race-agent-runtime-harness-examples-task-agent",
+    "exit": 0
+  },
+  {
+    "name": "vet-all",
+    "exit": 0
+  }
+]

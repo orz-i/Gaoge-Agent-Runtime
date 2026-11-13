@@ -1,0 +1,58 @@
+2026-11-13T14:35:37Z smoke-format START
+2026-11-13T14:35:38Z smoke-format EXIT 0
+2026-11-13T14:35:38Z smoke-metadata START
+2026-11-13T14:35:40Z smoke-metadata EXIT 0
+2026-11-13T14:35:40Z smoke-lint START
+2026-11-13T14:36:39Z smoke-lint EXIT 0
+2026-11-13T14:36:39Z compile-agent-runtime START
+2026-11-13T14:36:46Z compile-agent-runtime EXIT 0
+2026-11-13T14:36:46Z compile-agent-runtime-sqlite START
+2026-11-13T14:36:46Z compile-agent-runtime-sqlite EXIT 0
+2026-11-13T14:36:46Z compile-agent-runtime-postgres START
+2026-11-13T14:36:47Z compile-agent-runtime-postgres EXIT 0
+2026-11-13T14:36:47Z compile-agent-runtime-harness START
+2026-11-13T14:36:48Z compile-agent-runtime-harness EXIT 0
+2026-11-13T14:36:48Z compile-agent-runtime-harness-postgres START
+2026-11-13T14:36:50Z compile-agent-runtime-harness-postgres EXIT 0
+2026-11-13T14:36:50Z compile-agent-runtime-http START
+2026-11-13T14:36:54Z compile-agent-runtime-http EXIT 0
+2026-11-13T14:36:54Z smoke-root START
+2026-11-13T14:37:02Z smoke-root EXIT 0
+2026-11-13T14:37:02Z smoke-p4 START
+2026-11-13T14:37:22Z smoke-p4 EXIT 0
+2026-11-13T14:37:22Z smoke-continuation-wrapper START
+2026-11-13T14:37:27Z smoke-continuation-wrapper EXIT 0
+2026-11-13T14:37:27Z sqlite-directed START
+2026-11-13T14:38:34Z sqlite-directed EXIT 0
+2026-11-13T14:38:34Z gorm-directed START
+2026-11-13T14:39:39Z gorm-directed EXIT 0
+2026-11-13T14:39:39Z pg-directed START
+2026-11-13T14:40:57Z pg-directed EXIT 0
+2026-11-13T14:40:57Z continuation-race-repeat START
+2026-11-13T14:41:12Z continuation-race-repeat EXIT 0
+2026-11-13T14:41:12Z race-agent-runtime START
+2026-11-13T14:43:26Z race-agent-runtime EXIT 1
+2026-11-13T14:43:26Z race-agent-runtime-sqlite START
+2026-11-13T14:48:13Z race-agent-runtime-sqlite EXIT 1
+2026-11-13T14:48:13Z race-agent-runtime-postgres START
+2026-11-13T14:55:58Z race-agent-runtime-postgres EXIT 1
+2026-11-13T14:55:58Z race-agent-runtime-harness START
+2026-11-13T14:56:45Z race-agent-runtime-harness EXIT 0
+2026-11-13T14:56:45Z race-agent-runtime-harness-postgres START
+2026-11-13T14:57:44Z race-agent-runtime-harness-postgres EXIT 0
+2026-11-13T14:57:45Z race-agent-runtime-http START
+2026-11-13T14:57:55Z race-agent-runtime-http EXIT 0
+2026-11-13T14:57:55Z race-agent-runtime-provider START
+2026-11-13T14:58:11Z race-agent-runtime-provider EXIT 0
+2026-11-13T14:58:11Z race-agent-runtime-a2a START
+2026-11-13T14:58:15Z race-agent-runtime-a2a EXIT 0
+2026-11-13T14:58:15Z race-agent-runtime-mcp START
+2026-11-13T14:58:18Z race-agent-runtime-mcp EXIT 0
+2026-11-13T14:58:18Z race-agent-runtime-redis START
+2026-11-13T14:58:23Z race-agent-runtime-redis EXIT 0
+2026-11-13T14:58:23Z race-agent-runtime-otel START
+2026-11-13T14:58:28Z race-agent-runtime-otel EXIT 0
+2026-11-13T14:58:28Z race-agent-runtime-harness-examples-task-agent START
+2026-11-13T15:00:37Z race-agent-runtime-harness-examples-task-agent EXIT 0
+2026-11-13T15:00:37Z vet-all START
+2026-11-13T15:00:44Z vet-all EXIT 0

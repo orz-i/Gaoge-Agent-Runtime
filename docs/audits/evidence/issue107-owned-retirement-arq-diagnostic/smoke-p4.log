@@ -1,0 +1,190 @@
+SOURCE_SHA=00d0e69a0d0af64f37df28c98b17cb6b45c63af1
+COMMAND=go -C go/agent-runtime test -p 2 -race -count=1 -v ./memory -run '^TestEA1(RootAgent(Start|Resume|Control)Settlement|RootAgentCancelPhases|MiddlewareNextLifetime)Memory$'
+=== RUN   TestEA1MiddlewareNextLifetimeMemory
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/root
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/root/P0/create-denied
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/root/P0/stale-admission
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/root/P0/duplicate
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/root/P0/foreign-model
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/root/P1/run
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/root/P2/run/async
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/root/P2/run/unknown
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/root/P2/run/panic
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/root/P5/run/async-election
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/root/P1/model
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/root/P2/model/async
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/root/P2/model/unknown
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/root/P2/model/panic
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/root/P5/model/async-election
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/root/P1/tool
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/root/P2/tool/async
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/root/P2/tool/unknown
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/root/P2/tool/panic
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/root/P5/tool/async-election
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/root/P2/model/swallowed-inner
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/root/P3/durable-before-whole-return
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/root/P4/mark-ack-lost
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/root/P5/deadline-before-new-send
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/root/P1/default-owner
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child/P0/create-denied
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child/P0/stale-admission
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child/P0/duplicate
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child/P0/foreign-model
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child/P0/preflight
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child/P1/run
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child/P2/run/async
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child/P2/run/unknown
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child/P2/run/panic
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child/P5/run/async-election
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child/P1/model
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child/P2/model/async
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child/P2/model/unknown
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child/P2/model/panic
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child/P5/model/async-election
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child/P1/tool
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child/P2/tool/async
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child/P2/tool/unknown
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child/P2/tool/panic
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child/P5/tool/async-election
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child/P2/model/swallowed-inner
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child/P3/durable-before-whole-return
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child/P4/mark-ack-lost
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child/P5/deadline-before-new-send
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child/P1/default-owner
+--- PASS: TestEA1MiddlewareNextLifetimeMemory (6.65s)
+    --- PASS: TestEA1MiddlewareNextLifetimeMemory/root (3.36s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/root/P0/create-denied (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/root/P0/stale-admission (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/root/P0/duplicate (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/root/P0/foreign-model (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/root/P1/run (0.01s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/root/P2/run/async (0.01s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/root/P2/run/unknown (0.01s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/root/P2/run/panic (0.01s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/root/P5/run/async-election (0.01s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/root/P1/model (0.02s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/root/P2/model/async (0.01s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/root/P2/model/unknown (2.15s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/root/P2/model/panic (0.01s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/root/P5/model/async-election (0.01s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/root/P1/tool (0.01s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/root/P2/tool/async (0.01s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/root/P2/tool/unknown (0.01s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/root/P2/tool/panic (0.01s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/root/P5/tool/async-election (0.01s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/root/P2/model/swallowed-inner (0.01s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/root/P3/durable-before-whole-return (0.01s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/root/P4/mark-ack-lost (0.02s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/root/P5/deadline-before-new-send (1.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/root/P1/default-owner (0.01s)
+    --- PASS: TestEA1MiddlewareNextLifetimeMemory/child (3.29s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/child/P0/create-denied (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/child/P0/stale-admission (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/child/P0/duplicate (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/child/P0/foreign-model (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/child/P0/preflight (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/child/P1/run (0.01s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/child/P2/run/async (0.01s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/child/P2/run/unknown (0.01s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/child/P2/run/panic (0.01s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/child/P5/run/async-election (0.01s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/child/P1/model (0.01s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/child/P2/model/async (0.01s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/child/P2/model/unknown (2.15s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/child/P2/model/panic (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/child/P5/model/async-election (0.01s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/child/P1/tool (0.01s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/child/P2/tool/async (0.01s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/child/P2/tool/unknown (0.01s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/child/P2/tool/panic (0.01s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/child/P5/tool/async-election (0.01s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/child/P2/model/swallowed-inner (0.01s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/child/P3/durable-before-whole-return (0.01s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/child/P4/mark-ack-lost (0.01s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/child/P5/deadline-before-new-send (1.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/child/P1/default-owner (0.01s)
+=== RUN   TestEA1RootAgentCancelPhasesMemory
+=== RUN   TestEA1RootAgentCancelPhasesMemory/P0/missing
+=== RUN   TestEA1RootAgentCancelPhasesMemory/P0/stale
+=== RUN   TestEA1RootAgentCancelPhasesMemory/P0/prepared
+=== RUN   TestEA1RootAgentCancelPhasesMemory/P0/native-before-owned
+=== RUN   TestEA1RootAgentCancelPhasesMemory/P1/active-original-callback
+=== RUN   TestEA1RootAgentCancelPhasesMemory/P2/host
+=== RUN   TestEA1RootAgentCancelPhasesMemory/P2/model
+=== RUN   TestEA1RootAgentCancelPhasesMemory/P2/tool
+=== RUN   TestEA1RootAgentCancelPhasesMemory/P3/yield
+=== RUN   TestEA1RootAgentCancelPhasesMemory/P3/terminal
+=== RUN   TestEA1RootAgentCancelPhasesMemory/P4/yield
+=== RUN   TestEA1RootAgentCancelPhasesMemory/P4/terminal
+=== RUN   TestEA1RootAgentCancelPhasesMemory/P4/actual-cancel-CAS-lost-ACK
+=== RUN   TestEA1RootAgentCancelPhasesMemory/P5/cancel-wins-resume-admission
+=== RUN   TestEA1RootAgentCancelPhasesMemory/P5/resume-scope-rejects-cancel
+=== RUN   TestEA1RootAgentCancelPhasesMemory/P5/two-cancel-owners
+=== RUN   TestEA1RootAgentCancelPhasesMemory/P5/cancel-deadline
+--- PASS: TestEA1RootAgentCancelPhasesMemory (9.59s)
+    --- PASS: TestEA1RootAgentCancelPhasesMemory/P0/missing (0.00s)
+    --- PASS: TestEA1RootAgentCancelPhasesMemory/P0/stale (0.00s)
+    --- PASS: TestEA1RootAgentCancelPhasesMemory/P0/prepared (0.00s)
+    --- PASS: TestEA1RootAgentCancelPhasesMemory/P0/native-before-owned (0.00s)
+    --- PASS: TestEA1RootAgentCancelPhasesMemory/P1/active-original-callback (0.01s)
+    --- PASS: TestEA1RootAgentCancelPhasesMemory/P2/host (2.16s)
+    --- PASS: TestEA1RootAgentCancelPhasesMemory/P2/model (2.16s)
+    --- PASS: TestEA1RootAgentCancelPhasesMemory/P2/tool (2.16s)
+    --- PASS: TestEA1RootAgentCancelPhasesMemory/P3/yield (0.01s)
+    --- PASS: TestEA1RootAgentCancelPhasesMemory/P3/terminal (0.01s)
+    --- PASS: TestEA1RootAgentCancelPhasesMemory/P4/yield (0.01s)
+    --- PASS: TestEA1RootAgentCancelPhasesMemory/P4/terminal (0.01s)
+    --- PASS: TestEA1RootAgentCancelPhasesMemory/P4/actual-cancel-CAS-lost-ACK (0.00s)
+    --- PASS: TestEA1RootAgentCancelPhasesMemory/P5/cancel-wins-resume-admission (0.00s)
+    --- PASS: TestEA1RootAgentCancelPhasesMemory/P5/resume-scope-rejects-cancel (0.01s)
+    --- PASS: TestEA1RootAgentCancelPhasesMemory/P5/two-cancel-owners (0.00s)
+    --- PASS: TestEA1RootAgentCancelPhasesMemory/P5/cancel-deadline (3.03s)
+=== RUN   TestEA1RootAgentControlSettlementMemory
+=== RUN   TestEA1RootAgentControlSettlementMemory/approval/P3
+=== RUN   TestEA1RootAgentControlSettlementMemory/approval/P4
+=== RUN   TestEA1RootAgentControlSettlementMemory/approval/P5
+=== RUN   TestEA1RootAgentControlSettlementMemory/approval/P5-run-deadline
+=== RUN   TestEA1RootAgentControlSettlementMemory/toolwait/P3
+=== RUN   TestEA1RootAgentControlSettlementMemory/toolwait/P4
+=== RUN   TestEA1RootAgentControlSettlementMemory/toolwait/P5
+=== RUN   TestEA1RootAgentControlSettlementMemory/toolwait/P5-run-deadline
+=== RUN   TestEA1RootAgentControlSettlementMemory/toolwait/P5-pending-deadline
+--- PASS: TestEA1RootAgentControlSettlementMemory (2.65s)
+    --- PASS: TestEA1RootAgentControlSettlementMemory/approval/P3 (0.02s)
+    --- PASS: TestEA1RootAgentControlSettlementMemory/approval/P4 (0.02s)
+    --- PASS: TestEA1RootAgentControlSettlementMemory/approval/P5 (0.02s)
+    --- PASS: TestEA1RootAgentControlSettlementMemory/approval/P5-run-deadline (1.00s)
+    --- PASS: TestEA1RootAgentControlSettlementMemory/toolwait/P3 (0.02s)
+    --- PASS: TestEA1RootAgentControlSettlementMemory/toolwait/P4 (0.03s)
+    --- PASS: TestEA1RootAgentControlSettlementMemory/toolwait/P5 (0.02s)
+    --- PASS: TestEA1RootAgentControlSettlementMemory/toolwait/P5-run-deadline (1.01s)
+    --- PASS: TestEA1RootAgentControlSettlementMemory/toolwait/P5-pending-deadline (0.50s)
+=== RUN   TestEA1RootAgentResumeSettlementMemory
+=== RUN   TestEA1RootAgentResumeSettlementMemory/P3/model-yield
+=== RUN   TestEA1RootAgentResumeSettlementMemory/P3/terminal-tool
+=== RUN   TestEA1RootAgentResumeSettlementMemory/P4/model-yield
+=== RUN   TestEA1RootAgentResumeSettlementMemory/P4/terminal-tool
+=== RUN   TestEA1RootAgentResumeSettlementMemory/P3/committed-model-receipt-unknown-host
+--- PASS: TestEA1RootAgentResumeSettlementMemory (0.06s)
+    --- PASS: TestEA1RootAgentResumeSettlementMemory/P3/model-yield (0.01s)
+    --- PASS: TestEA1RootAgentResumeSettlementMemory/P3/terminal-tool (0.01s)
+    --- PASS: TestEA1RootAgentResumeSettlementMemory/P4/model-yield (0.01s)
+    --- PASS: TestEA1RootAgentResumeSettlementMemory/P4/terminal-tool (0.01s)
+    --- PASS: TestEA1RootAgentResumeSettlementMemory/P3/committed-model-receipt-unknown-host (0.01s)
+=== RUN   TestEA1RootAgentStartSettlementMemory
+=== RUN   TestEA1RootAgentStartSettlementMemory/P3/model-yield
+=== RUN   TestEA1RootAgentStartSettlementMemory/P3/terminal-tool
+=== RUN   TestEA1RootAgentStartSettlementMemory/P4/model-yield
+=== RUN   TestEA1RootAgentStartSettlementMemory/P4/terminal-tool
+=== RUN   TestEA1RootAgentStartSettlementMemory/P3/committed-model-receipt-unknown-host
+--- PASS: TestEA1RootAgentStartSettlementMemory (0.05s)
+    --- PASS: TestEA1RootAgentStartSettlementMemory/P3/model-yield (0.01s)
+    --- PASS: TestEA1RootAgentStartSettlementMemory/P3/terminal-tool (0.01s)
+    --- PASS: TestEA1RootAgentStartSettlementMemory/P4/model-yield (0.01s)
+    --- PASS: TestEA1RootAgentStartSettlementMemory/P4/terminal-tool (0.01s)
+    --- PASS: TestEA1RootAgentStartSettlementMemory/P3/committed-model-receipt-unknown-host (0.01s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory	20.131s
+
+EXIT_CODE=0

@@ -1,0 +1,6 @@
+SOURCE_SHA=00d0e69a0d0af64f37df28c98b17cb6b45c63af1
+COMMAND=go -C go/agent-runtime-a2a test -p 2 -race -count=1 -timeout=20m ./...
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-a2a	2.536s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-a2a/internal/tcksut	[no test files]
+
+EXIT_CODE=0
