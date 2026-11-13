@@ -42,3 +42,7 @@ No production Go behavior changed. The test module adds the two existing Kernel 
 Three diagnostic directories remain intact: `issue107-ea1-b20-initial` (unpublished dependency graph before compilation), `issue107-ea1-b20-proof-smoke` (the correct opaque-configuration Unverified rejection, not a production invariant violation), and `issue107-ea1-b20-tidy` (five green test/lint logs plus the initial new-module tidy failure). Independent bounded source review accepted the original closed fixes, authority configuration split and final dependency-only delta; durable evidence review follows separately.
 
 Disk: about 8.9 GiB initially, 9.2 GiB at final verification. No caches or evidence were deleted. No push, PR, merge, production data action or WP-GAOGE edit occurred. Next fixed batch is MW-NEXT P0–P5.
+
+## Same-repository Harness source field
+
+The ledger requires a tested_host_sha for H-AC as well as H-FROZEN. For these six H-AC cells, the actual Harness and Host PostgreSQL modules are in this Runtime repository at the same tested `8091d468a7ee721c51e055f5450f5819ca9dd114`; both SHA fields therefore identify that exact source. This is not a Gaoge SHA or Gaoge certification. The initial inventory check correctly rejected the omitted field; the record was completed without changing the checker or tests. H-FROZEN remains untouched.
