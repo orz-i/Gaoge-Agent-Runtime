@@ -7,7 +7,7 @@ Cells: H-AC P0–P5 only. Ledger: **132 PASS / 12 UNRUN**. The other 138 rows re
 
 The tests execute real Harness StartWorkflowTurn → Workflow AgentTask → original Agent child → ResolveSubtaskApproval/CancelSubtask. This is a registry Tool, not Hosted MCP transport. The same entry runs on Kernel Memory, native SQLite and native PostgreSQL. P0–P2 use Host Memory; P3–P5 additionally use real Host PostgreSQL. Do not claim Host PostgreSQL covers the first three cells.
 
-PostgreSQL uses independent pools. SQLite closes original and peer handles before reopening. P4 reopens both persistent Kernel and Host stores where configured and rebuilds Runtime/Runner routing. Memory retains its state. Immutable definition registries and the external relation recorder are retained; this is not an OS process-kill simulation. No adjacent Core test substitutes for this Harness chain.
+PostgreSQL uses independent pools. SQLite closes original and peer handles before reopening. P4 reopens both persistent Kernel and Host stores where configured and rebuilds Runtime/Runner routing. Memory retains its state. Immutable definitions and the external-call recorder are retained; persistent relation Store handles are actually closed and reopened, and the registry is reconstructed. This is not an OS process-kill simulation. No adjacent Core test substitutes for this Harness chain.
 
 P0 has ten concrete source/caller/checkpoint/runner/recorder negative vectors per Kernel backend, with full before/after Kernel and Host state, timeline/election, grant and shared-budget comparison. P1 uses actual Host and handler cutpoints in default and explicit-native configurations. Peer Kernel operations are competitors against real Harness-held authority, not the entry under certification. Full original Model request/catalog/provider/binding hash and actual Response, checkpoint and Tool request/result are checked; consumed-field pruning does not erase original captured source evidence.
 
@@ -46,3 +46,7 @@ Disk: about 8.9 GiB initially, 9.2 GiB at final verification. No caches or evide
 ## Same-repository Harness source field
 
 The ledger requires a tested_host_sha for H-AC as well as H-FROZEN. For these six H-AC cells, the actual Harness and Host PostgreSQL modules are in this Runtime repository at the same tested `8091d468a7ee721c51e055f5450f5819ca9dd114`; both SHA fields therefore identify that exact source. This is not a Gaoge SHA or Gaoge certification. The initial inventory check correctly rejected the omitted field; the record was completed without changing the checker or tests. H-FROZEN remains untouched.
+
+## Independent durable signoff
+
+The independent reviewer verified fixed commit `530d34b96f16351b0200410286a6ca44e004545a`: six log hashes and source headers match, five exit0 and the genuine Redis tidy exit1; no skipped tests. Four new top-level suites each actually ran three times, all 31 PostgreSQL-containing RUN paths three times, and seven existing regressions once. Only H-AC six rows changed, the other 138 were unchanged, both source fields correctly identify `8091d46`, no Go drift, and all three diagnostic directories remain. Six-cell evidence accepted; overall NO-GO and Redis gate remain. The reviewer did not rerun tests. Its clarification about reopened persistent relation stores versus retained external-call observations is reflected above.
