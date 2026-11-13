@@ -1,5 +1,7 @@
 # Issue107 EA-1 — common-source Runtime local acceptance
 
+Historical acceptance record. Current corrected-source acceptance is documented in [PR108 revalidation](2026-11-13-issue107-pr108-common-source-revalidation.md); the statements below retain their original execution-time scope.
+
 Status: independently accepted for the 138 Runtime-owned cells at the exact tested source below. The fixed inventory has 144 cells. This report concerns 138 Runtime-owned cells only; six H-FROZEN cells and WP-GAOGE remain a separate work package. It is not a release/remote-CI GO.
 
 ## Exact source and evidence
