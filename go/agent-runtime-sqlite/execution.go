@@ -49,6 +49,11 @@ func (s *Store) AcquireExecution(ctx context.Context, req kernel.ExecutionAcquir
 		return kernel.ExecutionLease{}, conflictOrDatabaseError(err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if transfer, e := sqliteLoadManaged(ctx, tx, req.RunID); e == nil && transfer.State == kernel.ManagedParked {
+		return kernel.ExecutionLease{}, kernel.ErrChildExecutionBusy
+	} else if e != nil && !errors.Is(e, kernel.ErrNotFound) {
+		return kernel.ExecutionLease{}, e
+	}
 	if err = ownedGrantBlocks(ctx, tx, req.RunID, nil, true); err != nil {
 		return kernel.ExecutionLease{}, err
 	}

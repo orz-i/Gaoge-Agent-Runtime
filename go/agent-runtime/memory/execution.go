@@ -66,6 +66,9 @@ func (store *Store) AcquireExecution(ctx context.Context, request kernel.Executi
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	if err := store.managedGateLocked(request.RunID); err != nil {
+		return kernel.ExecutionLease{}, kernel.ErrChildExecutionBusy
+	}
 	snap, ok := store.records[request.RunID]
 	if !ok {
 		return kernel.ExecutionLease{}, kernel.ErrNotFound
@@ -123,6 +126,9 @@ func (store *Store) RenewExecution(ctx context.Context, req kernel.ExecutionRene
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	if err := store.managedGateLocked(req.Lease.RunID); err != nil {
+		return kernel.ExecutionLease{}, err
+	}
 	now := store.currentExecutionTime()
 	state := store.execution[req.Lease.RunID]
 	if g, ok := store.ownedGrantLocked(req.Lease.RunID); ok && !g.grant.MatchesExecution(req.Lease) {
@@ -144,6 +150,9 @@ func (store *Store) ReleaseExecution(ctx context.Context, lease kernel.Execution
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	if err := store.managedGateLocked(lease.RunID); err != nil {
+		return err
+	}
 	if _, exists := store.ownedGrantLocked(lease.RunID); exists {
 		return kernel.ErrChildExecutionBusy
 	}
@@ -164,6 +173,9 @@ func (store *Store) ApplyExecution(ctx context.Context, lease kernel.ExecutionLe
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	if err := store.managedGateLocked(lease.RunID); err != nil {
+		return kernel.Snapshot{}, err
+	}
 	state := store.execution[lease.RunID]
 	if g, ok := store.ownedGrantLocked(lease.RunID); ok && !g.grant.MatchesExecution(lease) {
 		return kernel.Snapshot{}, kernel.ErrExecutionConflict
@@ -197,6 +209,9 @@ func (store *Store) CheckExecution(ctx context.Context, runID string, lease *ker
 	}
 	store.mu.RLock()
 	defer store.mu.RUnlock()
+	if err := store.managedGateLocked(runID); err != nil {
+		return err
+	}
 	snap, ok := store.records[runID]
 	if !ok {
 		return kernel.ErrNotFound

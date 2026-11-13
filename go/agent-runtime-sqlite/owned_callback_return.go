@@ -27,6 +27,9 @@ func loadOwnedCallbackReturn(ctx context.Context, q schemaQuery, g kernel.ChildE
 }
 
 func sqliteOwnedIdentityCurrent(ctx context.Context, q schemaQuery, g kernel.ChildExecutionGrant) error {
+	if e := sqliteManagedGate(ctx, q, g.ChildRunID); e != nil {
+		return e
+	}
 	var epoch uint64
 	var owner, id string
 	err := q.QueryRowContext(ctx, "SELECT execution_epoch,execution_owner,execution_lease_id FROM runtime_runs WHERE run_id=?", g.ChildRunID).Scan(&epoch, &owner, &id)

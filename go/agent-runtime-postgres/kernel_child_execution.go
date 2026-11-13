@@ -47,6 +47,9 @@ func (store *KernelStore) lockLiveChildAncestors(tx *gorm.DB, parentID, tenant, 
 		if err != nil {
 			return nil, err
 		}
+		if e := pgManagedGate(tx, id); e != nil {
+			return nil, e
+		}
 		if parent.TenantID != tenant || parent.ActorID != actor || parent.ThreadKind != threadKind || parent.ThreadID != threadID ||
 			kernelPGTerminalStatus(kernel.RunStatus(parent.Status)) {
 			return nil, kernel.ErrExecutionConflict
@@ -97,6 +100,9 @@ func (store *KernelStore) BeginChildExecution(ctx context.Context, grant kernel.
 		if lockErr != nil {
 			return lockErr
 		}
+		if e := pgManagedGate(tx, grant.ChildRunID); e != nil {
+			return e
+		}
 		if lockedChild.Revision != grant.ExpectedRevision ||
 			lockedChild.ParentRunID != child.ParentRunID ||
 			lockedChild.Kind != child.Kind ||
@@ -141,6 +147,9 @@ func (store *KernelStore) MarkChildExecutionSettled(ctx context.Context, grant k
 		child, err := lockKernelRun(tx, grant.ChildRunID)
 		if err != nil {
 			return err
+		}
+		if e := pgManagedGate(tx, grant.ChildRunID); e != nil {
+			return e
 		}
 		snapshot, snapshotErr := kernelSnapshotFrom(child)
 		if snapshotErr != nil {
@@ -204,6 +213,9 @@ func (store *KernelStore) FinishChildExecution(ctx context.Context, grant kernel
 		child, lockErr := lockKernelRun(tx, grant.ChildRunID)
 		if lockErr != nil {
 			return lockErr
+		}
+		if e := pgManagedGate(tx, grant.ChildRunID); e != nil {
+			return e
 		}
 		var records []models.KernelChildEffectGrantRecord
 		if err := tx.Where("grant_id = ?", grant.ID).Find(&records).Error; err != nil {

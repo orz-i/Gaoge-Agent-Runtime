@@ -34,6 +34,9 @@ func sqliteLiveChildAncestors(ctx context.Context, tx *sql.Tx, child kernel.Run)
 		if err != nil {
 			return nil, err
 		}
+		if e := sqliteManagedGate(ctx, tx, id); e != nil {
+			return nil, e
+		}
 		if parent.Run.Actor != child.Actor || parent.Run.Thread != child.Thread || sqliteTerminalStatus(parent.Run.Status) {
 			return nil, kernel.ErrExecutionConflict
 		}
@@ -58,6 +61,9 @@ func (s *Store) BeginChildExecution(ctx context.Context, grant kernel.ChildExecu
 	child, err := loadTx(ctx, tx, grant.ChildRunID)
 	if err != nil {
 		return err
+	}
+	if e := sqliteManagedGate(ctx, tx, grant.ChildRunID); e != nil {
+		return e
 	}
 	if (child.Run.Status != kernel.RunStatusRunning && child.Run.Status != kernel.RunStatusWaitingInput) ||
 		child.Run.Revision != grant.ExpectedRevision {
@@ -106,6 +112,9 @@ func (s *Store) MarkChildExecutionSettled(ctx context.Context, grant kernel.Chil
 	child, err := loadTx(ctx, tx, grant.ChildRunID)
 	if err != nil {
 		return err
+	}
+	if e := sqliteManagedGate(ctx, tx, grant.ChildRunID); e != nil {
+		return e
 	}
 	original, marked, lookupErr := loadPhysicalGrant(ctx, tx, grant.ChildRunID)
 	if errors.Is(lookupErr, kernel.ErrNotFound) {
@@ -192,6 +201,9 @@ func (s *Store) FinishChildExecution(ctx context.Context, grant kernel.ChildExec
 	if err != nil {
 		return err
 	}
+	if e := sqliteManagedGate(ctx, tx, grant.ChildRunID); e != nil {
+		return e
+	}
 	if child.Run.Revision == 0 {
 		return kernel.ErrExecutionConflict
 	}
@@ -271,6 +283,9 @@ func loadPhysicalGrant(ctx context.Context, q schemaQuery, runID string) (kernel
 }
 
 func ownedGrantBlocks(ctx context.Context, q schemaQuery, runID string, lease *kernel.ExecutionLease, deny bool) error {
+	if e := sqliteManagedGate(ctx, q, runID); e != nil {
+		return e
+	}
 	g, _, err := loadPhysicalGrant(ctx, q, runID)
 	if errors.Is(err, kernel.ErrNotFound) {
 		return nil
@@ -291,6 +306,9 @@ func ownedGrantBlocks(ctx context.Context, q schemaQuery, runID string, lease *k
 }
 
 func sqliteBoundLeaseCurrent(ctx context.Context, tx *sql.Tx, g kernel.ChildExecutionGrant, lease kernel.ExecutionLease, live bool) error {
+	if e := sqliteManagedGate(ctx, tx, g.ChildRunID); e != nil {
+		return e
+	}
 	if !validSQLiteExecutionLease(lease) || !g.MatchesExecution(lease) {
 		return kernel.ErrExecutionConflict
 	}

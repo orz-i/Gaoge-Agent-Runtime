@@ -56,13 +56,16 @@ func (a *BoundedContextAdapter) Run(ctx context.Context, inv plugin.RunInvocatio
 	if hydrated == nil || source.RunID != inv.RunID || len(source.SourceBinding) == 0 || !json.Valid(source.SourceBinding) {
 		return kernel.Snapshot{}, ErrInvalidRequest
 	}
+	callbackscope.Operation(ctx, a, "managed.hydrated", source)
 	snapshot, nextErr := next(hydrated)
 	// Runtime owns this entire sequence: one successful read/binding operation,
 	// all Next work returned, and no post-Next host operation can be hidden here.
 	callbackscope.Record(ctx, a, "context.hydrate.returned", source)
 	return snapshot, nextErr
 }
-func (a *BoundedContextAdapter) Prepare(ctx context.Context, incoming model.Request) (model.Request, error) {
+func (a *BoundedContextAdapter) Prepare(ctx context.Context, incoming model.Request) (prepared model.Request, prepareErr error) {
+	callbackscope.ManagedPrepareEntered(ctx, a)
+	defer func() { callbackscope.ManagedPrepareReturned(ctx, a, prepared, prepareErr) }()
 	plan, err := a.ports.Plan(ctx, model.CloneRequest(incoming))
 	if err != nil {
 		return model.Request{}, err

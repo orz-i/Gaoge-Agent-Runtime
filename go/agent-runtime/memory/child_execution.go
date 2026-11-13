@@ -65,6 +65,9 @@ func (store *Store) BeginChildExecution(ctx context.Context, grant kernel.ChildE
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	if err := store.managedGateLocked(grant.ChildRunID); err != nil {
+		return err
+	}
 	child, ok := store.records[grant.ChildRunID]
 	if !ok {
 		return kernel.ErrNotFound
@@ -118,6 +121,9 @@ func (store *Store) MarkChildExecutionSettled(ctx context.Context, grant kernel.
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	if err := store.managedGateLocked(grant.ChildRunID); err != nil {
+		return err
+	}
 	original, ok := store.childGrants[grant.ID]
 	if !ok || original.grant != grant {
 		return kernel.ErrExecutionConflict
@@ -156,6 +162,9 @@ func (store *Store) FinishChildExecution(ctx context.Context, grant kernel.Child
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	if err := store.managedGateLocked(grant.ChildRunID); err != nil {
+		return err
+	}
 	previous, ok := store.childGrants[grant.ID]
 	if !ok || previous.grant != grant || previous.settledRevision == 0 ||
 		store.records[grant.ChildRunID].Run.Revision != previous.settledRevision {

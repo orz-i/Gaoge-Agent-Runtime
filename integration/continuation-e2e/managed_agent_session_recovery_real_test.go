@@ -97,6 +97,16 @@ func TestRealPostgresManagedAgentSessionRecoveryAcrossProcessCrash(t *testing.T)
 		t.Fatalf("crash did not follow committed Tool and frozen model intent: %+v err=%v", before, err)
 	}
 	frozen := before.ModelInvocations[1]
+	originalTransfer, transferErr := postgresadapter.NewKernelStore(db).LoadManagedRecovery(t.Context(), runID)
+	if transferErr != nil || originalTransfer.State != kernel.ManagedAvailable ||
+		originalTransfer.SafePoint.ModelInvocationID != frozen.ID || originalTransfer.SafePoint.ModelRequestHash != frozen.RequestHash ||
+		!reflect.DeepEqual(originalTransfer.SafePoint.Source, pending) {
+		t.Fatalf("original process did not atomically commit exact managed source: %+v err=%v", originalTransfer, transferErr)
+	}
+	originalHostAuthority, authorityErr := store.ManagedRecoveryAuthority(t.Context())
+	if authorityErr != nil || originalHostAuthority != originalTransfer.SafePoint.Host.HostAuthority {
+		t.Fatalf("original Host namespace mismatch: %v", authorityErr)
+	}
 	if !managedRecoveryHasToolResult(frozen.Request.Messages, managedRecoverySubtotalCall) {
 		t.Fatal("frozen next request lost the committed subtotal Tool receipt")
 	}
@@ -124,6 +134,27 @@ func TestRealPostgresManagedAgentSessionRecoveryAcrossProcessCrash(t *testing.T)
 	completed, err := postgresadapter.NewKernelStore(reopened).Load(t.Context(), runID)
 	if err != nil || completed.Run.Status != kernel.RunStatusCompleted || completed.Result == nil {
 		t.Fatalf("same Kernel Run did not complete: %+v err=%v", completed.Run, err)
+	}
+	reservation, reservationErr := reopenedStore.ReadManagedRecovery(t.Context(), originalTransfer.SafePoint.Host, originalTransfer.SafePoint.RecoveryID)
+	if reservationErr != nil || reservation.Mode != kernel.ManagedResume ||
+		reservation.SuspensionID != originalTransfer.SafePoint.ID ||
+		!reflect.DeepEqual(reservation.Cancellation, kernel.ManagedCancellation{}) {
+		t.Fatalf("original immutable RESUME reservation lost: %+v err=%v", reservation, reservationErr)
+	}
+	authority, authorityErr := reopenedStore.ManagedRecoveryAuthority(t.Context())
+	if authorityErr != nil || authority != originalHostAuthority {
+		t.Fatalf("Host namespace changed on restart: %v", authorityErr)
+	}
+	closureRT, closureErr := kernel.New(kernel.Dependencies{Store: postgresadapter.NewKernelStore(reopened)})
+	if closureErr != nil {
+		t.Fatal(closureErr)
+	}
+	closure, closureErr := closureRT.ManagedRecoveryClosure(t.Context(), reservation.SuspensionID)
+	if closureErr != nil || !closure.Matches(reservation) || !reflect.DeepEqual(closure.Snapshot(), completed) {
+		t.Fatalf("original transfer closure missing: %v", closureErr)
+	}
+	if closureErr = reopenedStore.CloseManagedRecovery(t.Context(), closure); closureErr != nil {
+		t.Fatalf("exact closure replay: %v", closureErr)
 	}
 	var answer string
 	if err = json.Unmarshal(completed.Result.Content, &answer); err != nil || answer != managedRecoveryAnswer {
@@ -186,13 +217,13 @@ func TestManagedAgentSessionRecoveryProcess(t *testing.T) {
 	if phase == "" {
 		t.Skip("subprocess helper")
 	}
-	if phase != "crash" && phase != "resume" {
+	if phase != "crash" && phase != "resume" && phase != "opaque-crash" {
 		t.Fatalf("unknown helper phase %q", phase)
 	}
 	db := openManagedRecoveryDB(t, os.Getenv("TEST_POSTGRES_DSN"))
 	files := os.Getenv("GAOGE_TEST_MANAGED_RECOVERY_FILES")
-	session := newManagedRecoverySession(t, db, files, phase == "crash")
-	if phase == "crash" {
+	session := newManagedRecoverySession(t, db, files, phase != "resume", phase != "opaque-crash")
+	if phase != "resume" {
 		_, err := session.Prompt(t.Context(), managedRecoveryTurn, managedRecoveryPrompt)
 		t.Fatalf("expected process exit after second model intent commit, got %v", err)
 	}
@@ -229,6 +260,10 @@ func resumeManagedRecoveryAfterLease(t *testing.T, db *gorm.DB, session *harness
 		old.ExecutionExpiresAt == nil || !old.StoreNow.Before(*old.ExecutionExpiresAt) {
 		t.Fatalf("recovery did not observe the crashed process's live lease: %+v", old)
 	}
+	beforeHost, hostErr := session.Load(ctx, managedRecoveryTurn)
+	if hostErr != nil {
+		t.Fatal(hostErr)
+	}
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	blocked := false
@@ -257,6 +292,10 @@ func resumeManagedRecoveryAfterLease(t *testing.T, db *gorm.DB, session *harness
 		effects := readManagedRecoveryRecords[managedRecoveryEffect](t, filepath.Join(files, "ledger.jsonl"))
 		if len(calls) != 1 || len(effects) != 1 {
 			t.Fatalf("live lease allowed physical execution: model=%d ledger=%d", len(calls), len(effects))
+		}
+		afterHost, hostErr := session.Load(ctx, managedRecoveryTurn)
+		if hostErr != nil || !reflect.DeepEqual(beforeHost, afterHost) {
+			t.Fatalf("liveowner rejection changed full Host state: %v", hostErr)
 		}
 		blocked = true
 		select {
@@ -321,7 +360,7 @@ type managedRecoveryClock struct{}
 
 func (managedRecoveryClock) Now() time.Time { return time.Now().UTC() }
 
-func newManagedRecoverySession(t *testing.T, db *gorm.DB, files string, crash bool) *harness.SessionClient {
+func newManagedRecoverySession(t *testing.T, db *gorm.DB, files string, crash bool, managed ...bool) *harness.SessionClient {
 	t.Helper()
 	hostStore, err := harnesspostgres.New(db)
 	if err != nil {
@@ -364,18 +403,14 @@ func newManagedRecoverySession(t *testing.T, db *gorm.DB, files string, crash bo
 	if err != nil {
 		t.Fatal(err)
 	}
-	prepare, err := harness.NewManagedContextPreparer(hostStore, manager, func(_ context.Context, request model.Request) (runtimecontext.ModelWindow, error) {
+	bounded, err := harness.NewBoundedContextAdapter(hostStore, manager, func(_ context.Context, request model.Request) (runtimecontext.ModelWindow, error) {
 		if request.Model != "fixture-invoice" {
 			return runtimecontext.ModelWindow{}, runtimecontext.ErrModelWindowUnknown
 		}
 		// Deliberately small fixture capacity forces history archival. This is
 		// not an asserted production model capacity or token-admission planner.
 		return runtimecontext.ModelWindow{ContextTokens: 12000, ReservedOutputTokens: 512}, nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	hydrate, err := harness.NewContextRunMiddleware(hostStore, nil)
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -383,16 +418,26 @@ func newManagedRecoverySession(t *testing.T, db *gorm.DB, files string, crash bo
 	if crash {
 		owner = "managed-recovery-before"
 	}
-	direct, err := agent.NewRunner(agent.Dependencies{
+	dependencies := agent.Dependencies{
 		Runtime: runtime, Model: managedRecoveryModel{logPath: filepath.Join(files, "model.jsonl")},
-		Catalog: registry, Executor: registry, PrepareModelRequest: prepare,
-		RunMiddleware: []plugin.RunMiddleware{hydrate},
+		Catalog: registry, Executor: registry, ManagedContextRecovery: bounded,
+		RunMiddleware: []plugin.RunMiddleware{bounded},
 		RunExecution:  &agent.RunExecution{OwnerID: owner, LeaseDuration: managedRecoveryLeaseDuration},
 		Execution: agent.ExecutionPolicy{
 			Model: agent.CallPolicy{Timeout: time.Second, MaxAttempts: 1, MaxConcurrency: 1},
 			Tool:  agent.CallPolicy{Timeout: time.Second, MaxAttempts: 1, MaxConcurrency: 1},
 		},
-	})
+	}
+	if len(managed) == 1 && !managed[0] {
+		ordinary, ordinaryErr := harness.NewContextRunMiddleware(hostStore, nil)
+		if ordinaryErr != nil {
+			t.Fatal(ordinaryErr)
+		}
+		dependencies.ManagedContextRecovery = nil
+		dependencies.RunMiddleware = []plugin.RunMiddleware{ordinary}
+		dependencies.PrepareModelRequest = bounded.Prepare
+	}
+	direct, err := agent.NewRunner(dependencies)
 	if err != nil {
 		t.Fatal(err)
 	}

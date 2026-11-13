@@ -116,6 +116,7 @@ type Runtime struct {
 	// A Store mutation carries a fresh per-revision proof to prevent another
 	// worker from modifying this Root while physical effects are in flight.
 	physicalGrant *ChildExecutionGrant
+	managedIntent *ManagedSafePointProof
 }
 
 // New creates a minimal Runtime with no optional feature dependencies.
@@ -236,6 +237,17 @@ func (runtime *Runtime) apply(ctx context.Context, runID string, expectedRevisio
 				physicalFeatureProofDomain(current.Run.Kind, "apply"),
 				runtime.physicalGrant.ID, current.State, current.Checkpoint),
 		}
+	}
+	if runtime.managedIntent != nil {
+		candidate := runtime.managedIntent.point
+		if runtime.execution == nil || runtime.physicalGrant == nil || !runtime.managedIntent.proof.Matches(current.Run.ID, current.Run.Revision, "managed_intent_source", runtime.physicalGrant.ID, current.State, candidate) {
+			return Snapshot{}, ErrExecutionConflict
+		}
+		candidate.Source = Snapshot{Run: proposed.Record.Run, State: cloneJSON(proposed.Record.State), Checkpoint: cloneCheckpoint(proposed.Record.Checkpoint), Result: cloneResult(proposed.Record.Result), EventHead: current.EventHead + int64(len(proposed.Events))}
+		if !candidate.Valid() {
+			return Snapshot{}, ErrInvalidInput
+		}
+		proposed.ManagedSafePoint = ManagedSafePointProof{point: candidate, proof: featurecontrol.Seal(current.Run.ID, current.Run.Revision, "managed_safe_point", runtime.physicalGrant.ID, current.State, candidate)}
 	}
 	if runtime.execution != nil {
 		store, ok := runtime.store.(ExecutionStore)

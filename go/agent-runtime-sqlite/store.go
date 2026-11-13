@@ -349,6 +349,9 @@ func (s *Store) applyWithAuthority(ctx context.Context, lease *kernel.ExecutionL
 			return kernel.Snapshot{}, kernel.ErrExecutionRequired
 		}
 	}
+	if e := sqliteManagedGate(ctx, tx, runID); e != nil {
+		return kernel.Snapshot{}, e
+	}
 	// Only ordinary leased writes use this gate. Trusted approval and opaque
 	// receipt recovery retain their separate same-transaction authority paths.
 	if lease != nil && guard == nil && recovery == nil && current.Run.Status == kernel.RunStatusWaitingInput {
@@ -540,6 +543,9 @@ func (s *Store) applyWithAuthority(ctx context.Context, lease *kernel.ExecutionL
           AND execution_lease_id=? AND execution_expiry_ms>?
           AND execution_quarantine_revision=0`
 		args = append(args, lease.Epoch, lease.OwnerID, lease.LeaseID, nowMS)
+	}
+	if e := sqliteManagedMutation(ctx, tx, current, mutation, lease); e != nil {
+		return kernel.Snapshot{}, e
 	}
 	updated, err := tx.ExecContext(ctx, updateSQL, args...)
 	if err != nil {

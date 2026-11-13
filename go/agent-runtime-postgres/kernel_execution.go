@@ -90,6 +90,11 @@ func (store *KernelStore) AcquireExecution(ctx context.Context, request kernel.E
 		if err != nil {
 			return err
 		}
+		if transfer, e := pgLoadManaged(tx, request.RunID); e == nil && transfer.State == kernel.ManagedParked {
+			return kernel.ErrChildExecutionBusy
+		} else if e != nil && !errors.Is(e, kernel.ErrNotFound) {
+			return e
+		}
 		if scopeErr := pgRejectOwnedPhysical(tx, request.RunID); scopeErr != nil {
 			return scopeErr
 		}

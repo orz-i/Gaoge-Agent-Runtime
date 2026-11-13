@@ -71,12 +71,45 @@ func TestOwnedSchemaMigrationPreservesOriginalGrants(t *testing.T) {
 	if err = MigrateV3ToV4(t.Context(), path); err != nil {
 		t.Fatalf("repeat migration: %v", err)
 	}
+	// V3ToV4 retains its exact historical destination. No implicit V5 upgrade.
+	raw, err = sql.Open("sqlite", "file:"+filepath.ToSlash(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var version int
+	if err = raw.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 4 {
+		t.Fatalf("V3ToV4 destination: %d %v", version, err)
+	}
+	if err = raw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = OpenExisting(t.Context(), path); !errors.Is(err, ErrUnsupportedSchema) {
+		t.Fatalf("implicit V4 migration: %v", err)
+	}
+	if err = MigrateV4ToV5(t.Context(), path); err != nil {
+		t.Fatal(err)
+	}
+	if err = MigrateV4ToV5(t.Context(), path); err != nil {
+		t.Fatalf("repeat V5 migration: %v", err)
+	}
 	current, err := OpenExisting(t.Context(), path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = current.Close() }()
+	authority, e := current.ManagedRecoveryAuthority(t.Context())
+	if e != nil || !authority.Valid() {
+		t.Fatalf("V5 authority: %+v %v", authority, e)
+	}
+	if e = current.db.QueryRow("PRAGMA user_version").Scan(&version); e != nil || version != 5 {
+		t.Fatalf("V4ToV5 destination: %d %v", version, e)
+	}
+
 	for id, want := range snapshots {
+		if _, e := current.LoadManagedRecovery(t.Context(), id); !errors.Is(e, kernel.ErrNotFound) {
+			t.Fatalf("migration fabricated suspension: %v", e)
+		}
+
 		got, e := current.Load(t.Context(), id)
 		if e != nil || !reflect.DeepEqual(got, want) {
 			t.Fatalf("migration changed original %s: %v", id, e)

@@ -150,6 +150,10 @@ func VerifiedExecutionDispatchReceipt(grant Item, receipts []Item) (string, bool
 		return "", false
 	}
 	switch payload["boundary"] {
+	case "managed_dispatch_transferred", "managed_dispatch_cancelled_before_next_effect":
+		if phase == "start" && managedDispatchReceipt(receipt) {
+			return payload["boundary"], true
+		}
 	case "physical_dispatch_rejected":
 		return payload["boundary"], true
 	case "physical_dispatch_returned":
@@ -363,7 +367,10 @@ func (runner *Runner) withPhysicalInvocationDispatchForContext(
 			return kernel.Snapshot{}, errors.Join(ErrConflict, loadErr)
 		}
 	}
-	physicalCtx := ctx
+	physicalCtx, bindErr := runner.bindManagedOriginalDispatch(ctx, invocation, grant)
+	if bindErr != nil {
+		return kernel.Snapshot{}, errors.Join(bindErr, runner.finishPhysicalDispatchGrant(ctx, grant, "physical_dispatch_rejected"))
+	}
 	if scope != nil {
 		bound := *scope
 		bound.GrantID = grant.ID
@@ -374,7 +381,7 @@ func (runner *Runner) withPhysicalInvocationDispatchForContext(
 		// panics; a retained Context cannot authorize a later approval without
 		// a fresh durable Harness admission.
 		defer bound.active.Store(false)
-		physicalCtx = context.WithValue(ctx, subtaskApprovalDispatchContextKey{}, bound)
+		physicalCtx = context.WithValue(physicalCtx, subtaskApprovalDispatchContextKey{}, bound)
 	}
 	native, nativeAgent := runner.agent.(*agent.Runner)
 	var operation plugin.RunOperation

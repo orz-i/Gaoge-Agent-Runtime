@@ -22,6 +22,9 @@ func pgPhysicalRecord(g kernel.ChildExecutionGrant, parent string) models.Kernel
 // Call only while holding the Run row lock. The same lock serializes admission,
 // controls, owner changes and retirement; TTL is not a completion witness.
 func pgOwnedPhysicalGrants(tx *gorm.DB, runID string) ([]kernel.ChildExecutionGrant, error) {
+	if e := pgManagedGate(tx, runID); e != nil {
+		return nil, e
+	}
 	var rows []models.KernelChildEffectGrantRecord
 	if err := tx.Where("parent_run_id = ?", runID).Find(&rows).Error; err != nil {
 		return nil, translateKernelError(err)
@@ -67,6 +70,9 @@ func (store *KernelStore) BeginOwnedPhysicalExecution(ctx context.Context, grant
 		if err != nil {
 			return err
 		}
+		if e := pgManagedGate(tx, grant.ChildRunID); e != nil {
+			return e
+		}
 		snapshot, err := kernelSnapshotFrom(current)
 		if err != nil {
 			return err
@@ -102,6 +108,9 @@ func (store *KernelStore) ApplyOwnedPhysicalRecovery(ctx context.Context, grant 
 		if err != nil {
 			return err
 		}
+		if e := pgManagedGate(tx, grant.ChildRunID); e != nil {
+			return e
+		}
 		snapshot, err := kernelSnapshotFrom(current)
 		if err != nil {
 			return err
@@ -130,6 +139,9 @@ func (store *KernelStore) ApplyOwnedPhysicalRecovery(ctx context.Context, grant 
 		if err != nil {
 			return err
 		}
+		if err = pgManagedMutation(tx, snapshot, mutation, nil); err != nil {
+			return err
+		}
 		result, err = store.applyKernelMutation(tx, grant.ChildRunID, expectedRevision, updated, mutation, nil, false, true, false)
 		return err
 	})
@@ -149,6 +161,9 @@ func (store *KernelStore) RecordOwnedPhysicalCallbackReturn(ctx context.Context,
 	return store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		current, e := lockKernelRun(tx, g.ChildRunID)
 		if e != nil {
+			return e
+		}
+		if e := pgManagedGate(tx, g.ChildRunID); e != nil {
 			return e
 		}
 		snap, e := kernelSnapshotFrom(current)

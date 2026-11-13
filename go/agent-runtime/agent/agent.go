@@ -279,6 +279,9 @@ type Dependencies struct {
 	// PrepareModelRequest is the only pre-commit message/Tool schema projection.
 	// It does not choose an Agent mode. ModelMiddleware cannot rewrite frozen input.
 	PrepareModelRequest ModelRequestPreparer
+	// ManagedContextRecovery explicitly selects only the concrete Context lifecycle.
+	// PrepareModelRequest must be nil; Runtime installs this adapter preparation.
+	ManagedContextRecovery *BoundedContextAdapter
 	// NormalizeModelPolicy selects and freezes Host options/route policy before preparation.
 	NormalizeModelPolicy ModelPolicyNormalizer
 	ToolMiddleware       []plugin.ToolMiddleware
@@ -339,6 +342,7 @@ type Runner struct {
 	modelMiddlewareConfigured bool
 	rootCallbacks             *rootCallbackState
 	boundedCallbacks          []any
+	managedContextRecovery    *BoundedContextAdapter
 	approvalPolicies          *plugin.ApprovalPolicySet
 	hostedTools               HostedToolCatalog
 	discovery                 ToolDiscovery
@@ -455,6 +459,16 @@ func publicModelInvocations(values []ModelInvocation) []ModelInvocation {
 
 // NewRunner constructs the Agent loop; Host selection and task routing remain external.
 func NewRunner(dependencies Dependencies) (*Runner, error) {
+	if a := dependencies.ManagedContextRecovery; a != nil {
+		if !dependencies.Runtime.SupportsManagedRecovery() {
+			return nil, ErrInvalidRequest
+		}
+		if dependencies.PrepareModelRequest != nil || len(dependencies.RunMiddleware) != 1 || dependencies.RunMiddleware[0] != a || len(dependencies.ModelMiddleware) != 0 || len(dependencies.ToolMiddleware) != 0 || dependencies.NormalizeModelPolicy != nil {
+			return nil, ErrInvalidRequest
+		}
+		dependencies.PrepareModelRequest = a.Prepare
+	}
+
 	if dependencies.Runtime == nil || dependencies.Model == nil ||
 		(dependencies.Catalog == nil) != (dependencies.Executor == nil) {
 		return nil, ErrInvalidRequest
@@ -537,7 +551,8 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		modelLimiter:         newCallLimiter(execution.Model.MaxConcurrency),
 		toolLimiter:          newCallLimiter(execution.Tool.MaxConcurrency),
 		runChain:             runChain, modelChain: modelChain, toolChain: toolChain,
-		boundedCallbacks: collectBoundedCallbacks(dependencies.RunMiddleware, dependencies.ModelMiddleware, dependencies.ToolMiddleware),
+		managedContextRecovery: dependencies.ManagedContextRecovery,
+		boundedCallbacks:       collectBoundedCallbacks(dependencies.RunMiddleware, dependencies.ModelMiddleware, dependencies.ToolMiddleware),
 		kernelOwnedStartCancellation: len(dependencies.RunMiddleware) == 0 &&
 			len(dependencies.ModelMiddleware) == 0 && len(dependencies.ToolMiddleware) == 0 &&
 			dependencies.PrepareModelRequest == nil && dependencies.NormalizeModelPolicy == nil,
@@ -1078,6 +1093,11 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 			return failed, true, failErr
 		}
 		return snapshot, true, err
+	}
+	if runner.managedContextRecovery != nil {
+		if _, leaveErr := runner.runtime.LeaveManagedSafePoint(ctx, snapshot.Run.ID); leaveErr != nil && !kernel.ManagedRecoveryAbsent(leaveErr) {
+			return snapshot, true, leaveErr
+		}
 	}
 	snapshot, state, invocation, err = runner.claimModelInvocationExecution(ctx, snapshot, state, invocation)
 	if err != nil {

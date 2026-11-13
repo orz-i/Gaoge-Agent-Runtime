@@ -56,7 +56,7 @@ func openKernelStoreTestDB(tb testing.TB) *gorm.DB {
 		tb.Fatalf("resolve kernel store sql db: %v", err)
 	}
 	tb.Cleanup(func() { _ = sqlDB.Close() })
-	if err = db.AutoMigrate(Models()...); err != nil {
+	if err = Migrate(db); err != nil {
 		tb.Fatalf("migrate kernel store test db: %v", err)
 	}
 	return db

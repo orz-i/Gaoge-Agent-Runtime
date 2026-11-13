@@ -23,6 +23,9 @@ type Store struct {
 	childGrants      map[string]memoryChildGrant
 	childGrantOwners map[string]map[string]struct{}
 	executionClock   func() time.Time
+	managedAuthority kernel.ManagedAuthority
+	managedTransfers map[string]kernel.ManagedTransfer
+	managedCurrent   map[string]string
 }
 
 type transitionState struct {
@@ -54,6 +57,9 @@ func NewStore() *Store {
 		childGrants:      make(map[string]memoryChildGrant),
 		childGrantOwners: make(map[string]map[string]struct{}),
 		executionClock:   time.Now,
+		managedAuthority: newMemoryManagedAuthority(),
+		managedTransfers: make(map[string]kernel.ManagedTransfer),
+		managedCurrent:   make(map[string]string),
 	}
 }
 
@@ -125,6 +131,9 @@ func (store *Store) Apply(_ context.Context, runID string, expectedRevision uint
 
 // applyLocked is reached only after ordinary or fenced eligibility checks.
 func (store *Store) applyLocked(runID string, expectedRevision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
+	if err := store.managedGateLocked(runID); err != nil {
+		return kernel.Snapshot{}, err
+	}
 	current, ok := store.records[runID]
 	if !ok {
 		return kernel.Snapshot{}, kernel.ErrNotFound
@@ -157,10 +166,31 @@ func (store *Store) applyLocked(runID string, expectedRevision uint64, mutation 
 	if !rootGrantFound && mutation.PhysicalPermit.IsPresent() {
 		return kernel.Snapshot{}, kernel.ErrExecutionConflict
 	}
+	var safe kernel.ManagedSafePoint
+	if mutation.ManagedSafePoint.Present() {
+		g, ok := store.ownedGrantLocked(runID)
+		lease := store.execution[runID].lease
+		safe = mutation.ManagedSafePoint.Point()
+		if !ok || g.settledRevision != 0 || g.completion.GrantID != "" || store.execution[runID].quarantineRev != 0 || !activeMemoryLease(store.execution[runID], lease, store.currentExecutionTime()) || safe.Host.KernelAuthority != store.managedAuthority || !mutation.ManagedSafePoint.Matches(current, mutation.Record, lease, g.grant) || len(mutation.Events) != 1 || mutation.Events[0].Type != "agent.model_invocation.pending" {
+			return kernel.Snapshot{}, kernel.ErrExecutionConflict
+		}
+		if _, exists := store.managedTransfers[safe.ID]; exists {
+			return kernel.Snapshot{}, kernel.ErrExecutionConflict
+		}
+	}
 	next := snapshotFromRecord(mutation.Record)
 	journal := store.events[runID]
 	nextEvents := appendEvents(journal, mutation.Events, mutation.Record.Run.UpdatedAt)
 	next.EventHead = int64(len(nextEvents))
+	if safe.ID != "" && !kernel.ManagedSourceMatches(safe, next) {
+		return kernel.Snapshot{}, kernel.ErrExecutionConflict
+	}
+	if id := store.managedCurrent[runID]; id != "" {
+		store.managedTransfers[id] = kernel.ManagedInvalidateMutation(store.managedTransfers[id])
+	}
+	if safe.ID != "" {
+		store.saveManagedLocked(kernel.ManagedInitialTransfer(safe))
+	}
 	store.records[runID] = cloneSnapshot(next)
 	store.events[runID] = nextEvents
 	store.appendCommittedTransition(mutation.Record.Run, mutation.Events)

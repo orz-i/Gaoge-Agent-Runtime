@@ -22,6 +22,9 @@ func (store *Store) ApplyControl(ctx context.Context, runID string, expectedRevi
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	if err := store.managedGateLocked(runID); err != nil {
+		return kernel.Snapshot{}, false, err
+	}
 	current, ok := store.records[runID]
 	if !ok {
 		return kernel.Snapshot{}, false, kernel.ErrNotFound

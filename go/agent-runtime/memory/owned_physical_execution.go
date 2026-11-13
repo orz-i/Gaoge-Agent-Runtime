@@ -26,6 +26,9 @@ func (s *Store) BeginOwnedPhysicalExecution(ctx context.Context, g kernel.ChildE
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.managedGateLocked(g.ChildRunID); err != nil {
+		return err
+	}
 	current, ok := s.records[g.ChildRunID]
 	if !ok {
 		return kernel.ErrNotFound
@@ -54,6 +57,9 @@ func (s *Store) ApplyOwnedPhysicalRecovery(ctx context.Context, g kernel.ChildEx
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.managedGateLocked(g.ChildRunID); err != nil {
+		return kernel.Snapshot{}, err
+	}
 	current, ok := s.records[g.ChildRunID]
 	if !ok {
 		return kernel.Snapshot{}, kernel.ErrNotFound
@@ -88,6 +94,9 @@ func (s *Store) RecordOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.managedGateLocked(g.ChildRunID); err != nil {
+		return err
+	}
 	original, ok := s.childGrants[g.ID]
 	current, exists := s.records[g.ChildRunID]
 	if !ok || !exists || original.grant != g || !g.IsOwned() || current.Run.Revision != rev || !g.MatchesExecution(s.execution[g.ChildRunID].lease) || !p.Matches(g, current, o) {

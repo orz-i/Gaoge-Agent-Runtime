@@ -292,6 +292,9 @@ func (store *KernelStore) applyWithExecution(ctx context.Context, lease *kernel.
 		if lease == nil && guard == nil && lockedRun.ExecutionEpoch > 0 {
 			return kernel.ErrExecutionRequired
 		}
+		if e := pgManagedGate(tx, runID); e != nil {
+			return e
+		}
 		current, decodeErr := kernelSnapshotFrom(lockedRun)
 		if decodeErr != nil {
 			return decodeErr
@@ -385,6 +388,9 @@ func (store *KernelStore) applyWithExecution(ctx context.Context, lease *kernel.
 		effectiveLease := lease
 		if approvalLease != nil {
 			effectiveLease = approvalLease
+		}
+		if e := pgManagedMutation(tx, current, mutation, effectiveLease); e != nil {
+			return e
 		}
 		snapshot, applyErr = store.applyKernelMutation(tx, runID, expectedRevision, updatedModel, mutation, effectiveLease, guard != nil && approvalLease == nil, false, approvalLease != nil)
 		return applyErr

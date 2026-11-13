@@ -30,6 +30,8 @@ type Ticket struct {
 	returned, failed, receipt, invalid bool
 	proof                              [32]byte
 	operations                         map[string][32]byte
+	managedPreparing                   bool
+	managedPrepared                    json.RawMessage
 }
 
 func New(binding Binding, trusted []any) *Scope {
@@ -175,4 +177,82 @@ func Aborted(t *Ticket) {
 		t.invalid = true
 		t.scope.mu.Unlock()
 	}
+}
+
+// ManagedPrepareReturned records every successful concrete Context prepare
+// path, including read-only early returns. It is NOT whole-callback completion.
+func ManagedPrepareEntered(ctx context.Context, adapter any) {
+	t, _ := ctx.Value(ticketKey{}).(*Ticket)
+	if t == nil {
+		return
+	}
+	s := t.scope
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed || t.adapter != adapter || !s.trusted[adapter] || t.returned || t.managedPreparing {
+		t.invalid = true
+		return
+	}
+	t.managedPreparing = true
+	t.managedPrepared = nil
+}
+func ManagedPrepareReturned(ctx context.Context, adapter any, request any, err error) bool {
+	t, _ := ctx.Value(ticketKey{}).(*Ticket)
+	if t == nil {
+		return false
+	}
+	s := t.scope
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed || t.adapter != adapter || !s.trusted[adapter] || t.returned || !t.managedPreparing || err != nil {
+		t.invalid = true
+		return false
+	}
+	raw, e := json.Marshal(request)
+	if e != nil {
+		t.invalid = true
+		return false
+	}
+	t.managedPreparing = false
+	t.managedPrepared = raw
+	return true
+}
+
+// ManagedSuspension is available only inside the one audited Context Run
+// frame. Every other entered ticket must have returned without an unresolved
+// failure. The output journals actual operations, never a caller promise.
+func ManagedSuspension(ctx context.Context, adapter any, request any) (json.RawMessage, bool) {
+	t, _ := ctx.Value(ticketKey{}).(*Ticket)
+	if t == nil {
+		return nil, false
+	}
+	s := t.scope
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed || t.adapter != adapter || !s.trusted[adapter] || t.returned || t.invalid || t.receipt {
+		return nil, false
+	}
+	if _, ok := t.operations["managed.hydrated"]; !ok {
+		return nil, false
+	}
+	if t.managedPreparing || len(t.managedPrepared) == 0 {
+		return nil, false
+	}
+	for _, other := range s.tickets {
+		if other == t {
+			continue
+		}
+		if other.invalid || !other.returned || (other.failed && !other.receipt) {
+			return nil, false
+		}
+	}
+	b, e := json.Marshal(struct {
+		Binding    Binding
+		Nonce      uint64
+		Input      [32]byte
+		Operations map[string][32]byte
+		Request    any
+		Prepared   json.RawMessage
+	}{s.binding, t.nonce, t.input, t.operations, request, t.managedPrepared})
+	return b, e == nil
 }

@@ -404,11 +404,9 @@ func (runner *Runner) ensureModelInvocation(
 	if err != nil {
 		return kernel.Snapshot{}, runState{}, ModelInvocation{}, err
 	}
-	next, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
+	next, err := runner.commitManagedModelIntent(ctx, snapshot, state, invocation, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
-		Events: []kernel.EventDraft{{
-			Type: "agent.model_invocation.pending", Message: invocation.ID, Wakeup: true,
-		}},
+		Events: []kernel.EventDraft{{Type: "agent.model_invocation.pending", Message: invocation.ID, Wakeup: true}},
 	})
 	if err != nil {
 		return kernel.Snapshot{}, runState{}, ModelInvocation{}, err

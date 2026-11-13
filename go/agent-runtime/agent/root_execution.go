@@ -144,6 +144,10 @@ func (runner *Runner) withRootSegment(ctx context.Context, snapshot kernel.Snaps
 	if err != nil {
 		return current, errors.Join(ErrRootOutcomeUnknown, err)
 	}
+	return runner.executeOwnedRoot(ctx, current, bound, scopedRT, grant, lease, external, execute)
+}
+
+func (runner *Runner) executeOwnedRoot(ctx context.Context, current kernel.Snapshot, bound, scopedRT *kernel.Runtime, grant kernel.ChildExecutionGrant, lease kernel.ExecutionLease, external bool, execute func(context.Context, *Runner, kernel.Snapshot) (kernel.Snapshot, error)) (kernel.Snapshot, error) {
 	scoped := *runner
 	scoped.runtime = scopedRT
 	scoped.activeRunLease = &lease
@@ -175,10 +179,14 @@ func (runner *Runner) withRootSegment(ctx context.Context, snapshot kernel.Snaps
 		}
 		return latest, errors.Join(callErr, ErrRootOutcomeUnknown)
 	}
-	proof = featurecontrol.Seal(latest.Run.ID, latest.Run.Revision, "agent_owned_physical_settled", grant.ID, latest.State, latest.Checkpoint)
-	if err = bound.MarkChildExecutionSettled(cleanup, grant, proof); err != nil {
+	proof := featurecontrol.Seal(latest.Run.ID, latest.Run.Revision, "agent_owned_physical_settled", grant.ID, latest.State, latest.Checkpoint)
+	if err := bound.MarkChildExecutionSettled(cleanup, grant, proof); err != nil {
 		// Mark may have committed before its ACK was lost. Finish accepts only
 		// that exact marker; it does not infer settlement from clean state.
+		completedProof := featurecontrol.Seal(latest.Run.ID, latest.Run.Revision, "managed_successor_completed", grant.ID, latest.State, latest)
+		if completionErr := bound.CompleteManagedRecovery(cleanup, grant, latest, completedProof); completionErr != nil {
+			return latest, errors.Join(callErr, ErrRootOutcomeUnknown, completionErr)
+		}
 		if finishErr := bound.FinishChildExecution(cleanup, grant, proof); finishErr == nil {
 			if !external {
 				if releaseErr := bound.ReleaseExecution(cleanup, lease); releaseErr != nil {
@@ -203,11 +211,15 @@ func (runner *Runner) withRootSegment(ctx context.Context, snapshot kernel.Snaps
 		recordPhysicalObservation(ctx, latest.Run.ID, PhysicalCallSettled)
 		return latest, callErr
 	}
-	if err = bound.FinishChildExecution(cleanup, grant, proof); err != nil {
+	completedProof := featurecontrol.Seal(latest.Run.ID, latest.Run.Revision, "managed_successor_completed", grant.ID, latest.State, latest)
+	if completionErr := bound.CompleteManagedRecovery(cleanup, grant, latest, completedProof); completionErr != nil {
+		return latest, errors.Join(callErr, ErrRootOutcomeUnknown, completionErr)
+	}
+	if err := bound.FinishChildExecution(cleanup, grant, proof); err != nil {
 		return latest, errors.Join(callErr, ErrRootOutcomeUnknown, err)
 	}
 	if !external {
-		if err = bound.ReleaseExecution(cleanup, lease); err != nil {
+		if err := bound.ReleaseExecution(cleanup, lease); err != nil {
 			return latest, errors.Join(callErr, err)
 		}
 	}

@@ -13,12 +13,16 @@ import (
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
 const maxListItems = 500
 
 // MemoryStore is the reference Store implementation used by conformance and small embedded hosts.
 type MemoryStore struct {
+	managedAuthority    kernel.ManagedAuthority
+	managedReservations map[string]kernel.ManagedHostReservation
+	managedClosures     map[string]string
 	*budget.MemoryLedgerStore
 	mu                      sync.RWMutex
 	sessions                map[string]Session
@@ -112,6 +116,9 @@ func (store *MemoryStore) UpdateInvocation(ctx context.Context, value Invocation
 		return Invocation{}, ErrConflict
 	}
 	if current.ExecutionRefID != value.ExecutionRefID {
+		return Invocation{}, ErrConflict
+	}
+	if terminalInvocationStatus(value.Status) && store.managedReservedTurnLocked(value.TurnID) {
 		return Invocation{}, ErrConflict
 	}
 	// Every terminal CAS must assess the same globally complete original
@@ -464,7 +471,12 @@ func listMemoryStoreValues[T any](
 
 // NewMemoryStore creates an empty isolated Harness Store.
 func NewMemoryStore() *MemoryStore {
+	authority, err := NewManagedHostAuthority()
+	if err != nil {
+		panic(err)
+	}
 	return &MemoryStore{
+		managedAuthority: authority, managedReservations: map[string]kernel.ManagedHostReservation{}, managedClosures: map[string]string{},
 		MemoryLedgerStore: budget.NewMemoryLedgerStore(),
 		sessions:          map[string]Session{}, turns: map[string]Turn{}, configs: map[string]ConfigSnapshot{},
 		invocations: map[string]Invocation{}, invocationExecutionRefs: map[string]string{},
@@ -747,6 +759,9 @@ func (store *MemoryStore) UpdateTurn(ctx context.Context, value Turn, expectedRe
 	if current.Revision != expectedRevision || !sameTurnIdentity(current, value) {
 		return Turn{}, ErrConflict
 	}
+	if terminalTurnStatus(value.Status) && store.managedReservedTurnLocked(value.ID) {
+		return Turn{}, ErrConflict
+	}
 	if terminalTurnStatus(current.Status) && current.Status != value.Status {
 		return Turn{}, ErrConflict
 	}
@@ -854,10 +869,13 @@ func (store *MemoryStore) AppendItem(_ context.Context, value Item) (Item, bool,
 		}
 		return cloneItem(existing), false, nil
 	}
+	if IsManagedDispatchClosure(value) || store.managedReservedCompletionLocked(value) {
+		return Item{}, false, ErrConflict
+	}
 	if value.Kind == ItemDiagnostic && value.Status == ItemStarted {
 		switch value.ParentItemID {
 		case CancellationFenceParentItemID:
-			if store.activeCancellationFenceLocked(value.TurnID) {
+			if store.managedReservedTurnLocked(value.TurnID) || store.activeCancellationFenceLocked(value.TurnID) {
 				return Item{}, false, ErrConflict
 			}
 		case ExecutionDispatchParentItemID:

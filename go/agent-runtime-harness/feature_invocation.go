@@ -1477,6 +1477,9 @@ func (runner *Runner) resumeInvocationExecution(
 				return kernel.Snapshot{}, err
 			}
 		}
+		if snapshot, managed, managedErr := runner.recoverManagedInvocation(ctx, invocation); managed {
+			return snapshot, managedErr
+		}
 		resumed, resumeErr := runner.withPhysicalInvocationDispatch(ctx, invocation, "resume", func(physicalCtx context.Context) (kernel.Snapshot, error) {
 			return resumer.Resume(physicalCtx, invocation.ExecutionRefID, expectedRevision)
 		})

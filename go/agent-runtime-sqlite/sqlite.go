@@ -15,8 +15,8 @@ import (
 	sqlite3 "modernc.org/sqlite"
 )
 
-// Schema v4 adds owned Root admission bindings; v3 requires explicit migration.
-const schemaVersion = 4
+// Schema v5 adds source-bound managed recovery; older versions require explicit migration.
+const schemaVersion = 5
 
 var (
 	ErrUnsupportedSchema = errors.New("unsupported SQLite runtime schema")
@@ -148,6 +148,16 @@ func openStore(ctx context.Context, path string, create bool) (*Store, error) {
 }
 
 func openStoreMode(ctx context.Context, path string, create, migrate bool) (*Store, error) {
+	target := 0
+	if migrate {
+		target = 4
+	}
+	return openStoreOptions(ctx, path, create, target)
+}
+func openStoreMigration(ctx context.Context, path string, target int) (*Store, error) {
+	return openStoreOptions(ctx, path, false, target)
+}
+func openStoreOptions(ctx context.Context, path string, create bool, migrate int) (*Store, error) {
 	if ctx == nil || strings.TrimSpace(path) == "" || path == ":memory:" {
 		return nil, kernel.ErrInvalidInput
 	}
@@ -190,8 +200,10 @@ func openStoreMode(ctx context.Context, path string, create, migrate bool) (*Sto
 	}
 	db.SetMaxOpenConns(1)
 	store := &Store{db: db}
-	if migrate {
+	if migrate == 4 {
 		err = store.migrateV3ToV4(ctx)
+	} else if migrate == 5 {
+		err = store.migrateV4ToV5(ctx)
 	} else {
 		err = store.initialize(ctx, create)
 	}
@@ -276,6 +288,9 @@ func (s *Store) initialize(ctx context.Context, create bool) error {
 		if err := s.validateSchema(ctx); err != nil {
 			return err
 		}
+		if _, err := sqliteManagedAuthority(ctx, s.db); err != nil {
+			return err
+		}
 	}
 	if create {
 		var existing int
@@ -309,7 +324,10 @@ func (s *Store) initialize(ctx context.Context, create bool) error {
 				return fmt.Errorf("create SQLite runtime schema: %w", err)
 			}
 		}
-		if _, err = tx.ExecContext(ctx, "PRAGMA user_version = 4"); err != nil {
+		if _, err = tx.ExecContext(ctx, "PRAGMA user_version = 5"); err != nil {
+			return err
+		}
+		if err = initializeManagedAuthority(ctx, tx); err != nil {
 			return err
 		}
 		if err = tx.Commit(); err != nil {
@@ -320,7 +338,7 @@ func (s *Store) initialize(ctx context.Context, create bool) error {
 	return nil
 }
 
-var schemaDDL = []string{
+var schemaDDL = append([]string{
 	`CREATE TABLE runtime_runs (
 		run_id TEXT PRIMARY KEY,
 		scope_id TEXT NOT NULL,
@@ -410,7 +428,7 @@ var schemaDDL = []string{
 		UNIQUE(parent_run_id, kind, owner_node_id)
 	)`,
 	`CREATE INDEX runtime_run_relations_parent_order ON runtime_run_relations(parent_run_id, created_ns, kind, owner_node_id, child_run_id)`,
-}
+}, managedSchemaDDL...)
 
 func errorCode(err error) int {
 	var se *sqlite3.Error

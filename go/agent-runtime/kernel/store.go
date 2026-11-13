@@ -53,6 +53,8 @@ type StoreMutation struct {
 	// segment for precisely the current Run state/revision. Only a first-party
 	// Kernel scoped Runtime can populate this nonforgeable field.
 	PhysicalPermit PhysicalApplyPermit
+	// ManagedSafePoint is a private first-party T0 proof, committed with this mutation.
+	ManagedSafePoint ManagedSafePointProof
 }
 
 // CommittedTransition is the feature-neutral durable projection of one

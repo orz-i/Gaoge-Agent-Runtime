@@ -168,6 +168,9 @@ func (store *Store) UpdateInvocation(ctx context.Context, value harness.Invocati
 					return checkErr
 				}
 			} else {
+				if checkErr := checkManagedReservationTx(tx, value.TurnID); checkErr != nil {
+					return checkErr
+				}
 				pending, checkErr := pendingExecutionDispatchTx(tx, value.TurnID, value.ID)
 				if checkErr != nil {
 					return checkErr
@@ -723,6 +726,7 @@ func Models() []any {
 	return []any{
 		&sessionRecord{}, &turnRecord{}, &invocationRecord{}, &interactionRecord{}, &configRecord{},
 		&contextCheckpointRecord{}, &contextHeadRecord{}, &contextArtifactRecord{}, &itemRecord{}, &budgetRecord{},
+		&managedAuthorityRecord{}, &managedReservationRecord{},
 	}
 }
 
@@ -734,7 +738,12 @@ func Migrate(db *gorm.DB) error {
 	if err := checkInvocationRootMigration(db); err != nil {
 		return err
 	}
-	return db.AutoMigrate(Models()...)
+	return db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.AutoMigrate(Models()...); err != nil {
+			return err
+		}
+		return initializeManagedAuthority(tx)
+	})
 }
 
 func checkInvocationRootMigration(db *gorm.DB) error {
@@ -834,6 +843,9 @@ func (store *Store) UpdateTurn(ctx context.Context, value harness.Turn, expected
 		err = store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 			if lockErr := lockAdmissionTurn(tx, value.ID); lockErr != nil {
 				return lockErr
+			}
+			if checkErr := checkManagedReservationTx(tx, value.ID); checkErr != nil {
+				return checkErr
 			}
 			var current turnRecord
 			if loadErr := tx.Where("id = ?", value.ID).Take(&current).Error; loadErr != nil {
@@ -1392,6 +1404,9 @@ func appendItemTx(tx *gorm.DB, value harness.Item, outcome *itemAppendOutcome) e
 	if err = lockTurn(tx, value.TurnID); err != nil {
 		return err
 	}
+	if err = checkManagedCompletionTx(tx, value); err != nil {
+		return err
+	}
 	// The original authority namespace and its completion identity are
 	// validated for ALL Item kinds, not only the expected Diagnostic kind.
 	// Otherwise a malformed original or orphan completion can reserve the
@@ -1411,6 +1426,9 @@ func appendItemTx(tx *gorm.DB, value harness.Item, outcome *itemAppendOutcome) e
 	if value.Kind == harness.ItemDiagnostic && value.Status == harness.ItemStarted {
 		switch value.ParentItemID {
 		case harness.CancellationFenceParentItemID:
+			if err = checkManagedReservationTx(tx, value.TurnID); err != nil {
+				return err
+			}
 			if err = checkCancellationFenceTx(tx, value.TurnID); err != nil {
 				return err
 			}

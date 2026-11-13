@@ -26,6 +26,9 @@ func (store *Store) QuarantineExecution(ctx context.Context, value kernel.Execut
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	if err := store.managedGateLocked(value.RunID); err != nil {
+		return err
+	}
 	snapshot, ok := store.records[value.RunID]
 	if !ok {
 		return kernel.ErrNotFound
@@ -71,6 +74,9 @@ func (store *Store) RepairExecutionQuarantine(ctx context.Context, value kernel.
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	if err := store.managedGateLocked(value.RunID); err != nil {
+		return err
+	}
 	snapshot, ok := store.records[value.RunID]
 	if !ok {
 		return kernel.ErrNotFound
