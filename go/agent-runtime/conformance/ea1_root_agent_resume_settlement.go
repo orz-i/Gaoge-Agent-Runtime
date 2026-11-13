@@ -134,7 +134,7 @@ func ea1RootResumeSettlement(t *testing.T, factory func(*testing.T) (kernel.Stor
 	} else if !unknownHost && (wrapped.markCommits != 0 || wrapped.markCalls < 2) {
 		t.Fatal("P3 did not retain unmarked callback-return fact")
 	}
-	ea1AssertOriginalRootCompletion(t, rt, grant, before, !unknownHost, true)
+	completion := ea1AssertOriginalRootCompletion(t, rt, grant, before, !unknownHost, true)
 	ea1AssertStartSettlementReceipt(t, physical, req, definition, before, withTool)
 	freshStore := reopen()
 	freshRT, e := kernel.New(kernel.Dependencies{Store: freshStore})

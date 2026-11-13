@@ -222,7 +222,7 @@ func ea1RootStartSettlement(t *testing.T, factory func(*testing.T) (kernel.Store
 	} else if !unknownHost && (wrapped.markCommits != 0 || wrapped.markCalls < 2) {
 		t.Fatal("P3 did not retain unmarked callback-return fact")
 	}
-	ea1AssertOriginalRootCompletion(t, rt, grant, before, !unknownHost, true)
+	completion := ea1AssertOriginalRootCompletion(t, rt, grant, before, !unknownHost, true)
 	ea1AssertStartSettlementReceipt(t, physical, req, definition, before, withTool)
 	freshStore := reopen()
 	freshRT, e := kernel.New(kernel.Dependencies{Store: freshStore})
@@ -370,7 +370,7 @@ func ea1StartSettlementJSONEqual(t *testing.T, label string, actual, expected an
 
 // The new retirement protocol records the actual whole-callback fact before
 // either owner Mark or its recovered retry. Compare the entire immutable fact.
-func ea1AssertOriginalRootCompletion(t *testing.T, rt *kernel.Runtime, grant kernel.ChildExecutionGrant, source kernel.Snapshot, hostCompleted, leaseOwned bool) {
+func ea1AssertOriginalRootCompletion(t *testing.T, rt *kernel.Runtime, grant kernel.ChildExecutionGrant, source kernel.Snapshot, hostCompleted, leaseOwned bool) kernel.OwnedPhysicalCallbackCompletion {
 	t.Helper()
 	outcome := kernel.OwnedPhysicalCallbackOutcome{HostCompleted: hostCompleted, LeaseOwned: leaseOwned}
 	hash := sha256.Sum256(kernel.OwnedPhysicalCallbackReturnPayload(source, outcome))
@@ -379,4 +379,5 @@ func ea1AssertOriginalRootCompletion(t *testing.T, rt *kernel.Runtime, grant ker
 	if e != nil || got != want {
 		t.Fatalf("original whole callback binding: got=%+v want=%+v err=%v", got, want, e)
 	}
+	return got
 }

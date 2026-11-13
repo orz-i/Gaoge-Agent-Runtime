@@ -1,0 +1,1 @@
+Source b819af31df1f3ca5beb72cd014b6cbc9394a0596 compile stopped at two undefined completion baseline references in Start/Resume conformance helpers. This is a fixture compile failure; smoke and full regressions were not run on this source. Subsequent correction must restore the full original baseline comparisons, not remove them.
