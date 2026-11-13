@@ -15,7 +15,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider/openai"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
@@ -82,11 +81,14 @@ func TestDuplicatePhysicalProviderCompletionIDNeverAuthorizesNewTool(t *testing.
 			if err != nil {
 				t.Fatal(err)
 			}
-			rt, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
+			store, clock := newProviderUnknownStore()
+			rt, err := kernel.New(kernel.Dependencies{Store: store, Clock: clock})
 			if err != nil {
 				t.Fatal(err)
 			}
-			runner, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: router, Catalog: registry, Executor: registry})
+			deps := agent.Dependencies{Runtime: rt, Model: router, Catalog: registry, Executor: registry}
+			deps.Clock = clock
+			runner, err := agent.NewRunner(deps)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -99,7 +101,8 @@ func TestDuplicatePhysicalProviderCompletionIDNeverAuthorizesNewTool(t *testing.
 				ToolKeys: []string{"lookup:v1"}, RequiredToolKeys: []string{"lookup:v1"},
 				Limits: agent.Limits{MaxLLMCalls: 4, MaxToolCalls: 2},
 			})
-			if callErr == nil || run.Run.Status != kernel.RunStatusFailed ||
+			assertProviderUnknownNoReplay(t, store, clock, deps, run, callErr, func() int64 { return int64(requests.Load())*1000 + int64(effects.Load()) })
+			if callErr == nil || run.Run.Status != kernel.RunStatusRunning ||
 				requests.Load() != 2 || effects.Load() != 0 {
 				t.Fatalf("duplicate physical response authorized new Tool: err=%v status=%s code=%s requests=%d effects=%d",
 					callErr, run.Run.Status, run.Run.ErrorCode, requests.Load(), effects.Load())
@@ -208,11 +211,14 @@ func TestLateDuplicatePhysicalProviderCompletionIDNeverAuthorizesNewTool(t *test
 			if err != nil {
 				t.Fatal(err)
 			}
-			rt, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
+			store, clock := newProviderUnknownStore()
+			rt, err := kernel.New(kernel.Dependencies{Store: store, Clock: clock})
 			if err != nil {
 				t.Fatal(err)
 			}
-			runner, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: router, Catalog: registry, Executor: registry, Execution: agent.ExecutionPolicy{Model: agent.CallPolicy{Timeout: 500 * time.Millisecond, MaxAttempts: 3}}})
+			deps := agent.Dependencies{Runtime: rt, Model: router, Catalog: registry, Executor: registry, Execution: agent.ExecutionPolicy{Model: agent.CallPolicy{Timeout: 500 * time.Millisecond, MaxAttempts: 3}}}
+			deps.Clock = clock
+			runner, err := agent.NewRunner(deps)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -225,7 +231,8 @@ func TestLateDuplicatePhysicalProviderCompletionIDNeverAuthorizesNewTool(t *test
 				ToolKeys: []string{"lookup:v1"}, RequiredToolKeys: []string{"lookup:v1"},
 				Limits: agent.Limits{MaxLLMCalls: 4, MaxToolCalls: 2},
 			})
-			if callErr == nil || run.Run.Status != kernel.RunStatusFailed ||
+			assertProviderUnknownNoReplay(t, store, clock, deps, run, callErr, func() int64 { return int64(requests.Load())*1000 + int64(effects.Load()) })
+			if callErr == nil || run.Run.Status != kernel.RunStatusRunning ||
 				requests.Load() != 2 || effects.Load() != 0 {
 				t.Fatalf("duplicate physical response authorized new Tool: err=%v status=%s code=%s requests=%d effects=%d",
 					callErr, run.Run.Status, run.Run.ErrorCode, requests.Load(), effects.Load())

@@ -34,11 +34,13 @@ and the verified answer. The release and deployment information are synthetic.
    from that archive. The model extracts the facts and calls `save_draft`.
 5. The local draft is appended and its Tool receipt is committed through the
    fenced Kernel Store. A deliberate Store fault then interrupts the host.
-6. Construct a new model instance, Agent Runner, Harness Runner and Session.
-   The reopened Session has `Transcript: nil`.
-7. An immediate `Resume` is rejected while the old execution lease is valid,
-   with no model or tool calls. The fault-test Store clock then advances beyond
-   its expiry, and `Resume` completes the same Run and Turn.
+6. Before that committed-receipt ACK failure returns, an independent Runtime
+   attempts acquisition. The active original physical scope rejects it with
+   `ErrChildExecutionBusy`; the complete source, grant, lease and counters stay unchanged.
+7. Runtime-owned bounded Context finishes its actual callback lifecycle and
+   retires the known scope. Construct a new model instance, Agent Runner,
+   Harness Runner and Session with `Transcript: nil`. One immediate `Resume`
+   consumes the original result and completes the same Run and Turn, with no TTL wait.
 8. The oracle verifies the result. A repeated terminal `Resume` makes no calls.
 
 The draft handler deliberately does **not** deduplicate writes. A repeated
@@ -185,3 +187,13 @@ missing evidence, a wrong answer, a provider error or inability to finish after
 recovery fails this smoke. Real repeated quality evaluation can reuse
 `agent-runtime/evaluation`'s existing Target/Evaluator and dataset contracts;
 this example adds no new evaluation framework.
+
+### Recovery observation v2
+
+`evidence-draft-recovery-v2` / `in-process-known-receipt-continuation` measures
+`LeaseBlocked` while the original callback is actually in flight, after the
+receipt commit and before its injected ACK error returns. It does not promise
+a post-return lease conflict. The fourth Model call and original result oracle
+are unchanged. This is in-process Memory reconstruction, not a durable process
+restart or provider idempotency guarantee. Ordinary opaque Context failures
+remain Unknown and cannot be released by advancing a clock.

@@ -134,6 +134,12 @@ func (counter recordedInputTokenCounter) Count(ctx context.Context, request runt
 // compose is deliberately local to this example: the host chooses stores,
 // authority, real model limits, preparation order and execution ownership.
 func compose(store kernel.Store, state *taskState, client model.Client, config settings, owner string, transcript harness.TranscriptSource) (*harness.SessionClient, error) {
+	return composeContextMode(store, state, client, config, owner, transcript, false)
+}
+
+// The ordinary mode exists only for the example's opaque-failure regression.
+// It is not a fallback or an alternate recovery path in the public example.
+func composeContextMode(store kernel.Store, state *taskState, client model.Client, config settings, owner string, transcript harness.TranscriptSource, opaque bool) (*harness.SessionClient, error) {
 	rt, err := kernel.New(kernel.Dependencies{Store: store, Clock: state.clock})
 	if err != nil {
 		return nil, err
@@ -177,7 +183,7 @@ func compose(store kernel.Store, state *taskState, client model.Client, config s
 	if err != nil {
 		return nil, err
 	}
-	managed, err := harness.NewManagedContextPreparer(state.store, manager, func(_ context.Context, request model.Request) (runtimecontext.ModelWindow, error) {
+	resolve := func(_ context.Context, request model.Request) (runtimecontext.ModelWindow, error) {
 		if request.Model != config.routedModel() {
 			return runtimecontext.ModelWindow{}, fmt.Errorf("unknown model window: %s", request.Model)
 		}
@@ -187,18 +193,28 @@ func compose(store kernel.Store, state *taskState, client model.Client, config s
 			ContextTokens: config.contextTokens, ReservedOutputTokens: config.outputTokens,
 			TokenCountContext: runtimecontext.TokenCountContext{Protocol: config.provider, Model: config.modelID},
 		}, nil
-	})
+	}
+
+	bounded, err := harness.NewBoundedContextAdapter(state.store, manager, resolve, nil)
 	if err != nil {
 		return nil, err
 	}
-	rehydrate, err := harness.NewContextRunMiddleware(state.store, nil)
-	if err != nil {
-		return nil, err
+	var prepare agent.ModelRequestPreparer = bounded.Prepare
+	var rehydrate plugin.RunMiddleware = bounded
+	if opaque {
+		prepare, err = harness.NewManagedContextPreparer(state.store, manager, resolve)
+		if err != nil {
+			return nil, err
+		}
+		rehydrate, err = harness.NewContextRunMiddleware(state.store, nil)
+		if err != nil {
+			return nil, err
+		}
 	}
 	agentRunner, err := agent.NewRunner(agent.Dependencies{
 		Runtime: rt, Model: client, Catalog: registry, Executor: registry, Clock: state.clock,
-		// Add any host schema projections BEFORE managed, which must be last.
-		PrepareModelRequest: agent.ChainModelRequestPreparers(managed),
+		// Add any host schema projections BEFORE Context preparation, which must be last.
+		PrepareModelRequest: agent.ChainModelRequestPreparers(prepare),
 		RunMiddleware:       []plugin.RunMiddleware{rehydrate},
 		ModelMiddleware:     []plugin.ModelMiddleware{outputCeiling{tokens: config.outputTokens, state: state}},
 		Limits:              taskLimits(),

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -40,7 +41,9 @@ func (clock *demoClock) advance(duration time.Duration) {
 
 type interruptStore struct {
 	*memory.Store
-	fired atomic.Bool
+	fired   atomic.Bool
+	hits    atomic.Int32
+	observe func(context.Context, kernel.ExecutionLease, kernel.Snapshot) error
 }
 
 func (store *interruptStore) ApplyExecution(ctx context.Context, lease kernel.ExecutionLease, revision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
@@ -50,6 +53,12 @@ func (store *interruptStore) ApplyExecution(ctx context.Context, lease kernel.Ex
 	}
 	for _, event := range mutation.Events {
 		if event.Type == "tool.completed" && event.Message == "committed" && store.fired.CompareAndSwap(false, true) {
+			store.hits.Add(1)
+			if store.observe != nil {
+				if observationErr := store.observe(ctx, lease, snapshot); observationErr != nil {
+					return snapshot, errors.Join(errInterrupted, observationErr)
+				}
+			}
 			return snapshot, errInterrupted
 		}
 	}
@@ -250,6 +259,13 @@ func runTask(ctx context.Context, config settings, newModel func() (model.Client
 	}()
 	base := memory.NewStoreWithExecutionClock(state.clock)
 	fault := &interruptStore{Store: base}
+	fault.observe = func(ctx context.Context, lease kernel.ExecutionLease, snapshot kernel.Snapshot) error {
+		if err := observeDraftOwnerExclusion(ctx, base, state, lease, snapshot); err != nil {
+			return err
+		}
+		report.RecoveryChecks.LeaseBlocked = true
+		return nil
+	}
 	client, err := newModel()
 	if err != nil {
 		return report, err
@@ -267,6 +283,9 @@ func runTask(ctx context.Context, config settings, newModel func() (model.Client
 		return report, classifyPreInterruptionFailure(initial, startErr, interruptionCommitted, state.counts().drafts)
 	}
 	report.RecoveryChecks.InterruptionObserved = true
+	if fault.hits.Load() != 1 || !report.RecoveryChecks.LeaseBlocked {
+		return report, taskFailed("lease_fence_failed", nil)
+	}
 	report.Stage = "interrupted"
 	interrupted, err := session.Load(ctx, hostTurnID)
 	if err != nil {
@@ -276,6 +295,10 @@ func runTask(ctx context.Context, config settings, newModel func() (model.Client
 	runID, err := rootRunID(interrupted)
 	if err != nil {
 		return report, err
+	}
+	// Known whole-callback settlement must retire the scope before fresh Resume.
+	if _, scopeErr := base.LookupChildExecution(ctx, runID); !errors.Is(scopeErr, kernel.ErrNotFound) {
+		return report, taskFailed("known_scope_not_retired", scopeErr)
 	}
 	before := state.counts()
 	committedBefore := state.committedExecutions()
@@ -293,13 +316,6 @@ func runTask(ctx context.Context, config settings, newModel func() (model.Client
 	if err != nil {
 		return report, err
 	}
-	report.Stage = "lease_check"
-	_, err = reopened.Resume(ctx, hostTurnID)
-	report.RecoveryChecks.LeaseBlocked = errors.Is(err, kernel.ErrExecutionConflict) && state.counts() == before
-	if !report.RecoveryChecks.LeaseBlocked {
-		return report, taskFailed("lease_fence_failed", err)
-	}
-	state.clock.advance(leaseDuration + time.Second)
 	report.Stage = "resume"
 	completed, err := reopened.Resume(ctx, hostTurnID)
 	updateReportIdentity(&report, completed)
@@ -414,4 +430,52 @@ func verifyTask(ctx context.Context, state *taskState, config settings, snapshot
 		return answer, errors.New("oracle: answer lacks a verified deep artifact read")
 	}
 	return answer, nil
+}
+
+// Observe AFTER the original receipt commit but BEFORE its ACK failure returns.
+// This is a read/control probe, never a second Resume or physical dispatch.
+func observeDraftOwnerExclusion(ctx context.Context, base *memory.Store, state *taskState, lease kernel.ExecutionLease, committed kernel.Snapshot) error {
+	fail := func(cause error) error { return taskFailed("lease_fence_failed", cause) }
+	rt, err := kernel.New(kernel.Dependencies{Store: base, Clock: state.clock})
+	if err != nil {
+		return fail(err)
+	}
+	before, err := rt.Load(ctx, lease.RunID)
+	if err != nil {
+		return fail(err)
+	}
+	if before.Run.Status != kernel.RunStatusRunning || !reflect.DeepEqual(before, committed) {
+		return fail(errors.New("draft receipt source mismatch"))
+	}
+	grant, err := base.LookupChildExecution(ctx, lease.RunID)
+	if err != nil {
+		return fail(err)
+	}
+	if !grant.IsOwned() || !grant.MatchesExecution(lease) {
+		return fail(errors.New("draft receipt has no original owned scope"))
+	}
+	if err = base.CheckExecution(ctx, lease.RunID, &lease); err != nil {
+		return fail(err)
+	}
+	counts := state.counts()
+	executions := state.committedExecutions()
+	acquired, denied := rt.AcquireExecution(ctx, kernel.ExecutionAcquireRequest{RunID: lease.RunID, OwnerID: "task-owner-inflight-probe", LeaseDuration: leaseDuration})
+	if !errors.Is(denied, kernel.ErrChildExecutionBusy) || acquired != (kernel.ExecutionLease{}) {
+		return fail(errors.New("competitor was not denied by original physical scope"))
+	}
+	after, err := rt.Load(ctx, lease.RunID)
+	if err != nil {
+		return fail(err)
+	}
+	afterGrant, err := base.LookupChildExecution(ctx, lease.RunID)
+	if err != nil {
+		return fail(err)
+	}
+	if err = base.CheckExecution(ctx, lease.RunID, &lease); err != nil {
+		return fail(err)
+	}
+	if !reflect.DeepEqual(before, after) || grant != afterGrant || counts != state.counts() || !reflect.DeepEqual(executions, state.committedExecutions()) {
+		return fail(errors.New("competitor probe changed original execution evidence"))
+	}
+	return nil
 }
