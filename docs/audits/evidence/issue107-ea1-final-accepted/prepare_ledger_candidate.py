@@ -7,7 +7,7 @@ back. Independent review is still required even when all mechanical gates pass.
 import collections,csv,hashlib,io,json,pathlib,re,subprocess,sys
 SHA='0a4009a8171f1726edaea895798d551051753400'
 ROOT=pathlib.Path('/tmp/gaoge-runtime-issue107')
-OUT=pathlib.Path('/tmp/ea1-final-coverage-corrected')
+OUT=pathlib.Path('/tmp/ea1-final-coverage-corrected').resolve()
 REL='docs/audits/evidence/issue107-ea1-final-accepted'
 ARCHIVE=ROOT/REL
 LEDGER='docs/issue107-execution-acceptance-ledger.csv'
