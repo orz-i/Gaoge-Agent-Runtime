@@ -453,7 +453,7 @@ func ea1MWExecute(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.S
 		}
 	}
 	if mode == "duplicate" {
-		setup := f.ea1ChildStartFixture.runner(f.rt, "prepare", false)
+		setup := f.runner(f.rt, "prepare", false)
 		var e error
 		retained, e = setup.PrepareRun(t.Context(), f.request)
 		if e != nil {
@@ -496,7 +496,7 @@ func ea1MWExecute(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.S
 		s, g := f.load(f.peer), f.scope(f.peer)
 		f.fenceMW(s, g)
 		if phase == "P5" {
-			candidate := f.ea1ChildStartFixture.runner(f.peer, "competing-resume", false)
+			candidate := f.runner(f.peer, "competing-resume", false)
 			expected := agent.ErrModelOutcomeUnknown
 			if chain == "tool" {
 				expected = agent.ErrToolOutcomeUnknown
@@ -595,7 +595,7 @@ func ea1MWExecute(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.S
 	unknown := mode == "unknown" || mode == "panic" || mode == "swallow"
 	if unknown {
 		if mode == "panic" && chain == "run" {
-			if out.panicked != f.failure {
+			if out.panicked != f.failure { //nolint:errorlint // Require exact panic identity, not a wrapped returned error.
 				t.Fatalf("Run panic not observed: %v", out.panicked)
 			}
 		} else if mode != "swallow" {
@@ -637,7 +637,7 @@ func ea1MWExecute(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.S
 		rt := ea1StartRuntime(t, fresh)
 		f.physical.rt = rt
 		f.unchanged(rt, s, g)
-		recovery := f.ea1ChildStartFixture.runner(rt, "fresh", false)
+		recovery := f.runner(rt, "fresh", false)
 		if child {
 			e = recovery.ReconcileChildPhysicalGrant(t.Context(), s.Run.ID)
 		} else {
@@ -677,7 +677,7 @@ func ea1MWExecute(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.S
 		rt := ea1StartRuntime(t, fresh)
 		f.physical.rt = rt
 		f.unchanged(rt, s, g)
-		recovery := f.ea1ChildStartFixture.runner(rt, "fresh", false)
+		recovery := f.runner(rt, "fresh", false)
 		var e error
 		if child {
 			e = recovery.ReconcileChildPhysicalGrant(t.Context(), s.Run.ID)
