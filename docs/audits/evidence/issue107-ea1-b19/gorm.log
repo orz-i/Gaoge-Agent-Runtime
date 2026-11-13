@@ -1,0 +1,50 @@
+SOURCE_SHA=55d7c2e586c1bbb534b64d987e1e916e078b7ec0
+COMMAND=go -C go/agent-runtime-postgres test -race -count=1 ./... -run '^TestEA1ChildAgentCancelPhases' -v
+=== RUN   TestEA1ChildAgentCancelPhasesGORM
+=== RUN   TestEA1ChildAgentCancelPhasesGORM/P0/missing
+
+2026/11/13 08:43:04 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:209 [35;1mrecord not found
+[0m[33m[0.062ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "missing-child" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+=== RUN   TestEA1ChildAgentCancelPhasesGORM/P0/stale
+=== RUN   TestEA1ChildAgentCancelPhasesGORM/P0/prepared
+=== RUN   TestEA1ChildAgentCancelPhasesGORM/P0/native-pregrant
+=== RUN   TestEA1ChildAgentCancelPhasesGORM/P2/default-child/host
+=== RUN   TestEA1ChildAgentCancelPhasesGORM/P2/default-child/model
+=== RUN   TestEA1ChildAgentCancelPhasesGORM/P2/default-child/tool
+=== RUN   TestEA1ChildAgentCancelPhasesGORM/P3/default-child/yield
+=== RUN   TestEA1ChildAgentCancelPhasesGORM/P3/default-child/terminal-tool
+=== RUN   TestEA1ChildAgentCancelPhasesGORM/P4/default-child/yield
+=== RUN   TestEA1ChildAgentCancelPhasesGORM/P4/default-child/terminal-tool
+=== RUN   TestEA1ChildAgentCancelPhasesGORM/P2/explicit-native/host
+=== RUN   TestEA1ChildAgentCancelPhasesGORM/P2/explicit-native/model
+=== RUN   TestEA1ChildAgentCancelPhasesGORM/P2/explicit-native/tool
+=== RUN   TestEA1ChildAgentCancelPhasesGORM/P3/explicit-native/yield
+=== RUN   TestEA1ChildAgentCancelPhasesGORM/P3/explicit-native/terminal-tool
+=== RUN   TestEA1ChildAgentCancelPhasesGORM/P4/explicit-native/yield
+=== RUN   TestEA1ChildAgentCancelPhasesGORM/P4/explicit-native/terminal-tool
+=== RUN   TestEA1ChildAgentCancelPhasesGORM/P4/actual-child-Cancel-CAS-ACK
+--- PASS: TestEA1ChildAgentCancelPhasesGORM (7.37s)
+    --- PASS: TestEA1ChildAgentCancelPhasesGORM/P0/missing (0.03s)
+    --- PASS: TestEA1ChildAgentCancelPhasesGORM/P0/stale (0.02s)
+    --- PASS: TestEA1ChildAgentCancelPhasesGORM/P0/prepared (0.02s)
+    --- PASS: TestEA1ChildAgentCancelPhasesGORM/P0/native-pregrant (0.03s)
+    --- PASS: TestEA1ChildAgentCancelPhasesGORM/P2/default-child/host (0.05s)
+    --- PASS: TestEA1ChildAgentCancelPhasesGORM/P2/default-child/model (0.06s)
+    --- PASS: TestEA1ChildAgentCancelPhasesGORM/P2/default-child/tool (0.07s)
+    --- PASS: TestEA1ChildAgentCancelPhasesGORM/P3/default-child/yield (0.05s)
+    --- PASS: TestEA1ChildAgentCancelPhasesGORM/P3/default-child/terminal-tool (0.05s)
+    --- PASS: TestEA1ChildAgentCancelPhasesGORM/P4/default-child/yield (0.05s)
+    --- PASS: TestEA1ChildAgentCancelPhasesGORM/P4/default-child/terminal-tool (0.05s)
+    --- PASS: TestEA1ChildAgentCancelPhasesGORM/P2/explicit-native/host (2.19s)
+    --- PASS: TestEA1ChildAgentCancelPhasesGORM/P2/explicit-native/model (2.20s)
+    --- PASS: TestEA1ChildAgentCancelPhasesGORM/P2/explicit-native/tool (2.22s)
+    --- PASS: TestEA1ChildAgentCancelPhasesGORM/P3/explicit-native/yield (0.06s)
+    --- PASS: TestEA1ChildAgentCancelPhasesGORM/P3/explicit-native/terminal-tool (0.07s)
+    --- PASS: TestEA1ChildAgentCancelPhasesGORM/P4/explicit-native/yield (0.06s)
+    --- PASS: TestEA1ChildAgentCancelPhasesGORM/P4/explicit-native/terminal-tool (0.06s)
+    --- PASS: TestEA1ChildAgentCancelPhasesGORM/P4/actual-child-Cancel-CAS-ACK (0.03s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	8.925s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]
+
+EXIT_CODE=0

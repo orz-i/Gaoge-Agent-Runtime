@@ -1,0 +1,12 @@
+SOURCE_SHA=55d7c2e586c1bbb534b64d987e1e916e078b7ec0
+COMMAND=go -C go/agent-runtime-harness-postgres test -race -count=3 ./... -run '^TestRealPostgresEA1HarnessAgentTaskCancelP4$' -v
+=== RUN   TestRealPostgresEA1HarnessAgentTaskCancelP4
+--- PASS: TestRealPostgresEA1HarnessAgentTaskCancelP4 (0.53s)
+=== RUN   TestRealPostgresEA1HarnessAgentTaskCancelP4
+--- PASS: TestRealPostgresEA1HarnessAgentTaskCancelP4 (0.50s)
+=== RUN   TestRealPostgresEA1HarnessAgentTaskCancelP4
+--- PASS: TestRealPostgresEA1HarnessAgentTaskCancelP4 (0.53s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-postgres	2.932s
+
+EXIT_CODE=0

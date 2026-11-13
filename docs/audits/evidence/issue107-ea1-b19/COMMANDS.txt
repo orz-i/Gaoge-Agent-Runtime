@@ -1,0 +1,30 @@
+gorm.log
+COMMAND=go -C go/agent-runtime-postgres test -race -count=1 ./... -run '^TestEA1ChildAgentCancelPhases' -v
+harness-regression.log
+COMMAND=go -C go/agent-runtime-harness test -race -count=1 ./... -run '^(TestIssue107AgentTaskCancelUsesExactPhysicalFence|TestIssue107HostedWaitingApprovalCancellationUsesOriginalHarnessFence|TestIssue107HostedNoStaticFenceFailsBeforeCancelIntent|TestIssue107HostedRepeatedCancelAlreadyTerminalChild|TestIssue107ParentCancelCannotDeclareTerminalWithLiveChildTool)$' -v
+host-memory.log
+COMMAND=go -C go/agent-runtime-harness-postgres test -race -count=1 ./... -run '^TestEA1HarnessAgentTaskCancelP[0234]$' -v
+host-nativepg.log
+COMMAND=go -C go/agent-runtime-harness-postgres test -race -count=3 ./... -run '^TestRealPostgresEA1HarnessAgentTaskCancelP4$' -v
+lint-agent-runtime-harness-postgres.log
+COMMAND=cd go/agent-runtime-harness-postgres && golangci-lint run ./...
+lint-agent-runtime-postgres.log
+COMMAND=cd go/agent-runtime-postgres && golangci-lint run ./...
+lint-agent-runtime-sqlite.log
+COMMAND=cd go/agent-runtime-sqlite && golangci-lint run ./...
+lint-agent-runtime.log
+COMMAND=cd go/agent-runtime && golangci-lint run ./...
+memory.log
+COMMAND=go -C go/agent-runtime test -race -count=1 ./memory -run '^TestEA1ChildAgentCancelPhases' -v
+nativepg.log
+COMMAND=go -C go/agent-runtime-postgres test -race -count=3 ./... -run '^TestEA1RealPostgresChildAgentCancelPhases' -v
+smoke-host-closure.log
+COMMAND=go -C go/agent-runtime-harness-postgres test -count=1 ./... -run '^TestEA1HarnessAgentTaskCancelP(0|2)$' -v
+smoke-host-pg.log
+COMMAND=go -C go/agent-runtime-harness-postgres test -count=1 ./... -run '^TestRealPostgresEA1HarnessAgentTaskCancelP4$' -v
+smoke-host.log
+COMMAND=go -C go/agent-runtime-harness-postgres test -count=1 ./... -run '^TestEA1HarnessAgentTaskCancelP[0234]$' -v
+smoke-memory.log
+COMMAND=go -C go/agent-runtime test -count=1 ./memory -run '^TestEA1ChildAgentCancelPhases' -v
+sqlite.log
+COMMAND=go -C go/agent-runtime-sqlite test -race -count=1 ./... -run '^TestEA1ChildAgentCancelPhases' -v
