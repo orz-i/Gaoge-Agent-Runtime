@@ -1,0 +1,16 @@
+SOURCE_SHA=bac29b079e054716cf90101e6e6f03121e819255
+COMMAND=cd go/agent-runtime-harness && golangci-lint run ./...
+go/agent-runtime-harness/managed_recovery_memory.go:4:1: File is not properly formatted (goimports)
+	"context"
+^
+go/agent-runtime-harness/managed_recovery_test.go:6:1: File is not properly formatted (goimports)
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+^
+go/agent-runtime-harness/managed_recovery.go:142:3: QF1001: could apply De Morgan's law (staticcheck)
+		!((v["boundary"] == "managed_dispatch_transferred" && v["mode"] == string(kernel.ManagedResume)) ||
+		^
+3 issues:
+* goimports: 2
+* staticcheck: 1
+
+EXIT_CODE=1

@@ -1,0 +1,9 @@
+SOURCE_SHA=bac29b079e054716cf90101e6e6f03121e819255
+COMMAND=cd go/agent-runtime-sqlite && golangci-lint run ./...
+go/agent-runtime-sqlite/sqlite.go:203:2: QF1003: could use tagged switch on migrate (staticcheck)
+	if migrate == 4 {
+	^
+1 issues:
+* staticcheck: 1
+
+EXIT_CODE=1
