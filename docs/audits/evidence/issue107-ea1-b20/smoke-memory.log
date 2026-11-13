@@ -1,0 +1,64 @@
+SOURCE_SHA=8091d468a7ee721c51e055f5450f5819ca9dd114
+COMMAND=go -C go/agent-runtime-harness-postgres test -count=1 ./... -run '^(TestEA1HarnessSubtaskControlAdmission|TestEA1HACReceiptBeforeMark|TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart|TestEA1HACApprovalCancellationElection)$/(memory|kernel_memory)$' -v
+=== RUN   TestEA1HACReceiptBeforeMark
+=== RUN   TestEA1HACReceiptBeforeMark/kernel_memory
+=== RUN   TestEA1HACReceiptBeforeMark/kernel_memory/host_memory
+=== RUN   TestEA1HACReceiptBeforeMark/kernel_memory/host_postgres
+--- PASS: TestEA1HACReceiptBeforeMark (0.41s)
+    --- PASS: TestEA1HACReceiptBeforeMark/kernel_memory (0.41s)
+        --- PASS: TestEA1HACReceiptBeforeMark/kernel_memory/host_memory (0.01s)
+        --- PASS: TestEA1HACReceiptBeforeMark/kernel_memory/host_postgres (0.41s)
+=== RUN   TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart
+=== RUN   TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart/kernel_memory
+=== RUN   TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart/kernel_memory/host_memory
+=== RUN   TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart/kernel_memory/host_postgres
+--- PASS: TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart (0.44s)
+    --- PASS: TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart/kernel_memory (0.44s)
+        --- PASS: TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart/kernel_memory/host_memory (0.00s)
+        --- PASS: TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart/kernel_memory/host_postgres (0.43s)
+=== RUN   TestEA1HACApprovalCancellationElection
+=== RUN   TestEA1HACApprovalCancellationElection/kernel_memory
+=== RUN   TestEA1HACApprovalCancellationElection/kernel_memory/host_memory
+=== RUN   TestEA1HACApprovalCancellationElection/kernel_memory/host_postgres
+--- PASS: TestEA1HACApprovalCancellationElection (0.41s)
+    --- PASS: TestEA1HACApprovalCancellationElection/kernel_memory (0.41s)
+        --- PASS: TestEA1HACApprovalCancellationElection/kernel_memory/host_memory (0.00s)
+        --- PASS: TestEA1HACApprovalCancellationElection/kernel_memory/host_postgres (0.40s)
+=== RUN   TestEA1HarnessSubtaskControlAdmission
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P0/missing
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P0/checkpoint
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P0/decision
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P0/actor
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P0/tenant
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P0/thread
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P0/parent
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P0/origin
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P0/original-runner
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P0/foreign-recorder
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P1/default
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P1/native
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P2/unknown-tool
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P2/receipt-fault
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P2/opaque-unknown-tool
+--- PASS: TestEA1HarnessSubtaskControlAdmission (0.03s)
+    --- PASS: TestEA1HarnessSubtaskControlAdmission/memory (0.03s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P0/missing (0.01s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P0/checkpoint (0.00s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P0/decision (0.00s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P0/actor (0.00s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P0/tenant (0.00s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P0/thread (0.00s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P0/parent (0.00s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P0/origin (0.00s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P0/original-runner (0.00s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P0/foreign-recorder (0.00s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P1/default (0.00s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P1/native (0.01s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P2/unknown-tool (0.00s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P2/receipt-fault (0.00s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P2/opaque-unknown-tool (0.00s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-postgres	2.421s
+
+EXIT_CODE=0

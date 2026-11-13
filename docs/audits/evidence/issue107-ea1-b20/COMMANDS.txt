@@ -1,0 +1,12 @@
+all-stores-race.log
+COMMAND=go -C go/agent-runtime-harness-postgres test -race -count=3 ./... -run '^(TestEA1HarnessSubtaskControlAdmission|TestEA1HACReceiptBeforeMark|TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart|TestEA1HACApprovalCancellationElection)$' -v
+harness-regression.log
+COMMAND=go -C go/agent-runtime-harness test -race -count=1 ./... -run '^(TestIssue107WorkflowAgentTaskSubtaskApprovalAndResume|TestIssue107WrongOriginalAgentCannotApprovePhysicalChild|TestIssue107ForeignRelationRecorderCannotExposeApproval|TestIssue107HostedApprovalCancelPhysicalAdmissionRace|TestIssue107HostedWaitingApprovalCancellationUsesOriginalHarnessFence|TestIssue107AgentTaskCancelUsesExactPhysicalFence|TestIssue107ParentCancelCannotDeclareTerminalWithLiveChildTool)$' -v
+lint-host-pg.log
+COMMAND=cd go/agent-runtime-harness-postgres && golangci-lint run ./...
+smoke-all-stores.log
+COMMAND=go -C go/agent-runtime-harness-postgres test -count=1 ./... -run '^(TestEA1HarnessSubtaskControlAdmission|TestEA1HACReceiptBeforeMark|TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart|TestEA1HACApprovalCancellationElection)$' -v
+smoke-memory.log
+COMMAND=go -C go/agent-runtime-harness-postgres test -count=1 ./... -run '^(TestEA1HarnessSubtaskControlAdmission|TestEA1HACReceiptBeforeMark|TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart|TestEA1HACApprovalCancellationElection)$/(memory|kernel_memory)$' -v
+tidy-check.log
+COMMAND=node --check scripts/go-workspace.mjs && node scripts/go-workspace.mjs tidy-check

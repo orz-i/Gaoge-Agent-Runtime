@@ -1,0 +1,2 @@
+SOURCE_SHA=8091d468a7ee721c51e055f5450f5819ca9dd114
+B20 fixed H-AC six cells. Same actual Harness chain across three Kernel Stores. Host Memory P0-P2; Host Memory and PostgreSQL P3-P5. Full state-machine race repeated three times, no skipped selected tests. Local bounded evidence only.
