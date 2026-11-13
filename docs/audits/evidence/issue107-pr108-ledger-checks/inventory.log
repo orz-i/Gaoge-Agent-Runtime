@@ -1,0 +1,5 @@
+SOURCE_SHA=f874ff3cafa95935feb09717878c9b838e026629
+COMMAND=python3 scripts/check-issue107-matrix.py
+EA1-AR-S-P0: log cohort does not match tested SHA
+
+EXIT_CODE=1
