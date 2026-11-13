@@ -58,6 +58,7 @@ func (e *ea1ChildCancelAgentEffect) VerifyAgentTaskOrigin(effect workflow.Effect
 		Goal string `json:"goal"`
 	}
 	return effect.Kind == "fixture.agent" && effect.Revision == "v1" &&
+		agent.MatchesFrozenOrigin(child, effect.Input) &&
 		json.Unmarshal(effect.Input, &input) == nil &&
 		strings.TrimSpace(input.Goal) != "" && strings.TrimSpace(input.Goal) == child.Run.Goal
 }
@@ -553,8 +554,8 @@ func TestEA1HarnessAgentTaskCancelP2(t *testing.T) {
 	if err = f.agent.ReconcileChildPhysicalGrant(t.Context(), task.RunID); !errors.Is(err, kernel.ErrChildExecutionBusy) {
 		t.Fatalf("unknown outcome reconciled: %v", err)
 	}
-	if _, err = f.agent.Resume(t.Context(), task.RunID, child.Run.Revision); !errors.Is(err, kernel.ErrChildExecutionBusy) {
-		t.Fatalf("unknown original grant replay: %v", err)
+	if _, err = f.agent.Resume(t.Context(), task.RunID, child.Run.Revision); !errors.Is(err, agent.ErrToolOutcomeUnknown) {
+		t.Fatalf("unknown original Tool dispatch rejected before grant admission: %v", err)
 	}
 	ea1ChildCancelAssertOwner(t, f, root, parent, child)
 	if f.toolCalls != 1 || f.model.calls != 1 || f.physical.controlCalls.Load() != 1 {
