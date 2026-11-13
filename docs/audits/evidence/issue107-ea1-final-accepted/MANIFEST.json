@@ -1,0 +1,218 @@
+{
+  "source_sha": "0a4009a8171f1726edaea895798d551051753400",
+  "gates": [
+    {
+      "name": "beta-contract",
+      "command": "node scripts/check-beta.mjs",
+      "sha256": "18ddb26a9c0ec6cceac615e557ee5b29544dabc003ce400db149bc1bc2c9d780",
+      "exit": 0
+    },
+    {
+      "name": "check-no-race",
+      "command": "make check-no-race",
+      "sha256": "481a33f41e0bdd45d0dcba736ff810f16fc2035f8d7b99a3ab1f07e883e5880d",
+      "exit": 0
+    },
+    {
+      "name": "coverage-profile-identity",
+      "command": "python3 /tmp/ea1-final-coverage-corrected/compare_profiles.py",
+      "sha256": "b5ca1a229e94cb64c58b1b01d902303b0b0bca32db6880d0c6a51cc4df94c1f2",
+      "exit": 0
+    },
+    {
+      "name": "coverage-reducer-unit",
+      "command": "node --test scripts/go-coverage-summary.test.mjs",
+      "sha256": "add1536c06c8cb9f27296843adef2df793c4433faa1b68309f64ab28d21377e0",
+      "exit": 0
+    },
+    {
+      "name": "coverage",
+      "command": "make coverage",
+      "sha256": "0bc38d76392ea68f8965255f1ed2c06d981034d388df55939106e9a3c8cf5df3",
+      "exit": 0
+    },
+    {
+      "name": "dependency-presence",
+      "command": "test -f node_modules/eslint/package.json && test -f node_modules/typescript/lib/tsc.js && test -f node_modules/vitest/dist/chunks/tinyrainbow.Ht9iggcq.js",
+      "sha256": "734aaaf987ea53a934ce3d9734ed5e682dca18263a3b320ae53c43ca870abc63",
+      "exit": 0
+    },
+    {
+      "name": "environment",
+      "command": "go version; node --version; pnpm --version; golangci-lint version; df -h .; git status --short",
+      "sha256": "933a4d6361c21d6245dbe76cd3a568bae1d22d25d66a4a34c88501e29503abcc",
+      "exit": 0
+    },
+    {
+      "name": "final-state",
+      "command": "git status --short; df -h .",
+      "sha256": "74ab7ec75b81aaaac33d3166063fb43f72fd62b0d9caf5e16f19274caac844e7",
+      "exit": 0
+    },
+    {
+      "name": "integration",
+      "command": "make integration-test",
+      "sha256": "2735008152726704e2387d75be0418d4a605b58e9849e6de3801c6e0cd20c247",
+      "exit": 0
+    },
+    {
+      "name": "managed-extra-core",
+      "command": "go -C go/agent-runtime test -race -count=2 -v ./... -run '^TestManaged'",
+      "sha256": "b0172760f0df2080b422feb254eced0d27fa328a78d1650de1f0aed750364990",
+      "exit": 0
+    },
+    {
+      "name": "managed-extra-host",
+      "command": "go -C go/agent-runtime-harness test -race -count=2 -v ./... -run '^TestManaged(HostMemoryRejectsUnissuedProofs|DispatchReceiptExactSchema)$'",
+      "sha256": "45a0843f20ef8c086b0d4c1af5798910fcd896f920bcf3b2f0aedee5b7705a5b",
+      "exit": 0
+    },
+    {
+      "name": "managed-extra-hostpg",
+      "command": "go -C go/agent-runtime-harness-postgres test -race -count=2 -v ./... -run '^TestManagedHostSQLRejectsUnissuedProofs$'",
+      "sha256": "f843ad6a53de4e669b2e707e6d1a76889ba8d089cf28e9c84d80adb4aa206532",
+      "exit": 0
+    },
+    {
+      "name": "managed-extra-pg",
+      "command": "go -C go/agent-runtime-postgres test -race -count=2 -v ./... -run '^TestRealPostgresManagedRecoveryStore$'",
+      "sha256": "9d2920c784c998d30ee61f1e059651e6e9d505f368b1fbc86447ccd888325ee5",
+      "exit": 0
+    },
+    {
+      "name": "managed-extra-process",
+      "command": "GOWORK=off go -C integration/continuation-e2e test -race -count=2 -v ./... -run '^TestRealPostgres(ManagedAgentSessionRecoveryAcrossProcessCrash|ManagedHostReservationModesAfterProcessCrash|OpaqueManagedProcessCrashRemainsUnknown)$'",
+      "sha256": "194340563bbefd8db669bc134864dc8735c632c0671806f3421fae9937fa73a0",
+      "exit": 0
+    },
+    {
+      "name": "managed-extra-sqlite",
+      "command": "go -C go/agent-runtime-sqlite test -race -count=2 -v ./... -run '^TestSQLiteManagedRecoveryStore$'",
+      "sha256": "473cf645e1e91af5fb2c07fd94cdfa70252635f852c5710a1fd5b1147587ea78",
+      "exit": 0
+    },
+    {
+      "name": "matrix-attempt-extra",
+      "command": "go -C go/agent-runtime test -race -count=2 -v ./... -run '^TestEA1P0WorkflowAttemptLocalNoEffectAcrossRootAndChild$'",
+      "sha256": "e5eb95df945cd24f9f79da6c584634d8ffeeb9a5a297c7da2951fe8b64fe73c7",
+      "exit": 0
+    },
+    {
+      "name": "matrix-extra-agent-runtime-harness-postgres-0",
+      "command": "go -C go/agent-runtime-harness-postgres test -race -count=2 -v ./... -run '^(TestEA1HACApprovalCancellationElection|TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart|TestEA1HACReceiptBeforeMark|TestEA1HarnessSubtaskControlAdmission|TestRealPostgresEA1HarnessAgentTaskCancelP4|TestRealPostgresEA1RootAgentCancelHostElection)$'",
+      "sha256": "fa2de0dd4b65f01997fafacdaff80dc32cb2f2317e9d3a0bedd4e7e79f4bdcee",
+      "exit": 0
+    },
+    {
+      "name": "matrix-extra-agent-runtime-postgres-0",
+      "command": "go -C go/agent-runtime-postgres test -race -count=2 -v ./... -run '^(TestAuditIssue107PostgresBeginCannotBindCallerExpectedChildRevision|TestEA1RealPostgresChildAgentApprovalSettlement|TestEA1RealPostgresChildAgentCancelPhases|TestEA1RealPostgresChildAgentControlPhases|TestEA1RealPostgresChildAgentRecoveryAdmission|TestEA1RealPostgresChildAgentRecoveryPhases|TestEA1RealPostgresChildAgentRecoveryUnknown|TestEA1RealPostgresChildAgentResumePhases|TestEA1RealPostgresChildAgentResumeSettlement|TestEA1RealPostgresChildAgentStartPhases|TestEA1RealPostgresChildWaitAdmission|TestEA1RealPostgresCompensationAdmission|TestEA1RealPostgresCompensationBarriers|TestEA1RealPostgresCompensationMarkAck|TestEA1RealPostgresCompensationUnknown|TestEA1RealPostgresMiddlewareNextLifetime|TestEA1RealPostgresOwnedCallbackReturn|TestEA1RealPostgresP0SourceAdmission|TestEA1RealPostgresReceiptBeforeMark|TestEA1RealPostgresResumeAdmission|TestEA1RealPostgresResumeMarkAck|TestEA1RealPostgresResumeUnknown|TestEA1RealPostgresRootAgentAdmission|TestEA1RealPostgresRootAgentCancelPhases|TestEA1RealPostgresRootAgentControlPhases|TestEA1RealPostgresRootAgentControlSettlement|TestEA1RealPostgresRootAgentDefaultAdmission|TestEA1RealPostgresRootAgentElection|TestEA1RealPostgresRootAgentReconcilePhases|TestEA1RealPostgresRootAgentResumePhases|TestEA1RealPostgresRootAgentResumeSettlement|TestEA1RealPostgresRootAgentStartSettlement|TestEA1RealPostgresRootAgentUnknown|TestEA1RealPostgresRootChildWorkflowMarkAckLostAcrossConnections|TestEA1RealPostgresWaitBarriers|TestEA1RealPostgresWaitMarkAck|TestEA1RealPostgresWaitUnknown|TestEA1RealPostgresWorkflowEntryCompetition|TestEA1RealPostgresWorkflowEntryPhases|TestEA1RealPostgresWorkflowRecoveryBoundaries|TestEA1RealPostgresWorkflowStartBoundaries|TestRealPostgresOwnedPhysicalBindingGuards)$'",
+      "sha256": "73e3aa1e5addb116ca05b1ac04f70f3230b481a9c7c26dd43daa43049a2eac98",
+      "exit": 0
+    },
+    {
+      "name": "matrix-extra-agent-runtime-postgres-1",
+      "command": "go -C go/agent-runtime-postgres test -race -count=2 -v ./... -run '^(TestAuditIssue107PostgresBeginCannotBindCallerExpectedChildRevision)$'",
+      "sha256": "5f34c3fa180cb2068cd8017165e35c39e7c7b9aeeebdf9beca2ba623d4410850",
+      "exit": 0
+    },
+    {
+      "name": "otel",
+      "command": "make integration-otel",
+      "sha256": "8547842767ebc9baa804e7e51b113633e59e577f3512d4732290d472b4f17ad7",
+      "exit": 0
+    },
+    {
+      "name": "preflight-lint",
+      "command": "make go-lint",
+      "sha256": "1fee45804bdc4051a99e347aec9fad545540d5011c5e5abafe1c523817bd4dfb",
+      "exit": 0
+    },
+    {
+      "name": "race-agent-runtime-a2a",
+      "command": "go -C go/agent-runtime-a2a test -race -count=1 -v ./...",
+      "sha256": "0568279fc665b64534d7bee035ca3f5fd052818a4e3cee7b3fa1dc5aa0ea5754",
+      "exit": 0
+    },
+    {
+      "name": "race-agent-runtime-harness-postgres",
+      "command": "go -C go/agent-runtime-harness-postgres test -race -count=1 -v ./...",
+      "sha256": "c6962dd30108bc179fc35431e1778dd2eefec165cf8e6ef5ed3bf23253673d3a",
+      "exit": 0
+    },
+    {
+      "name": "race-agent-runtime-harness",
+      "command": "go -C go/agent-runtime-harness test -race -count=1 -v ./...",
+      "sha256": "75772cd0d2567e9a48c30f7a9070b2db4a85802ccd57b92f486f2aa87559238c",
+      "exit": 0
+    },
+    {
+      "name": "race-agent-runtime-harness_examples_task-agent",
+      "command": "go -C go/agent-runtime-harness/examples/task-agent test -race -count=1 -v ./...",
+      "sha256": "1f3a546b67173ec6a4fb385d9bf75a0d51d3f3d8d465c11719076ed71b3367d1",
+      "exit": 0
+    },
+    {
+      "name": "race-agent-runtime-http",
+      "command": "go -C go/agent-runtime-http test -race -count=1 -v ./...",
+      "sha256": "f0bdfa7f58272ee6fed9084f408c4fe59ea04b388aa7a75511230c4b2c69c5ef",
+      "exit": 0
+    },
+    {
+      "name": "race-agent-runtime-mcp",
+      "command": "go -C go/agent-runtime-mcp test -race -count=1 -v ./...",
+      "sha256": "543ae23fe77f9b9860c6f109aa113ba17c1586ffefacb1ce5b69c8d39c38da48",
+      "exit": 0
+    },
+    {
+      "name": "race-agent-runtime-otel",
+      "command": "go -C go/agent-runtime-otel test -race -count=1 -v ./...",
+      "sha256": "392d3eff01bf1dc65843837391b3fdbfd8fbaf6a71e42624d5ff34cb69672680",
+      "exit": 0
+    },
+    {
+      "name": "race-agent-runtime-postgres",
+      "command": "go -C go/agent-runtime-postgres test -race -count=1 -v ./...",
+      "sha256": "65332402c4ab1e6c66771a1f60e0877a8310a70b88d0eb820d6b6ca245eeba75",
+      "exit": 0
+    },
+    {
+      "name": "race-agent-runtime-provider",
+      "command": "go -C go/agent-runtime-provider test -race -count=1 -v ./...",
+      "sha256": "74f20a8d52dbbd676b5d47010067d2ffebea7122d07cb0f451103282ab9f203e",
+      "exit": 0
+    },
+    {
+      "name": "race-agent-runtime-redis",
+      "command": "go -C go/agent-runtime-redis test -race -count=1 -v ./...",
+      "sha256": "47bafb4927088e21ce9a04e97e3abab19a2842cf081e174201f0608e4e67e23d",
+      "exit": 0
+    },
+    {
+      "name": "race-agent-runtime-sqlite",
+      "command": "go -C go/agent-runtime-sqlite test -race -count=1 -v ./...",
+      "sha256": "5508fe7154d399550c104cb03d17e2f914528fdd036eb08d6842df31db881d27",
+      "exit": 0
+    },
+    {
+      "name": "race-agent-runtime",
+      "command": "go -C go/agent-runtime test -race -count=1 -v ./...",
+      "sha256": "1e69a1cd7a8f135d8ec2a20080249e8faa8335df8acd22fcd2d0c9ef184548e1",
+      "exit": 0
+    },
+    {
+      "name": "schema-fixture-smoke",
+      "command": "go -C go/agent-runtime-sqlite test -race -count=1 -v ./... -run '^TestUnsupportedExperimentalSchemaVersionMustNotBeMigrated$'",
+      "sha256": "e5393a60b740e26f384701ba3301ce5568cfbb0fb934244162fab327a3e94bad",
+      "exit": 0
+    },
+    {
+      "name": "security",
+      "command": "make security",
+      "sha256": "91e54774ceaa0e69d7e85a4f3ad5b12cee7ada7c0a93634aa92e298fff0fdc39",
+      "exit": 0
+    }
+  ],
+  "status": "ACTUAL_GATES_PASS_INDEPENDENT_MATRIX_REVIEW_REQUIRED",
+  "runtime_cells": 138,
+  "host_frozen_unrun": 6
+}
