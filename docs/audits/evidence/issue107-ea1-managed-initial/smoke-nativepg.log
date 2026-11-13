@@ -1,0 +1,48 @@
+SOURCE_SHA=f2187814eff825f3103e04f4d4f655f6923b21d1
+COMMAND=go -C go/agent-runtime-postgres test -count=1 -v ./... -run '^TestRealPostgresManagedRecoveryStore$'
+=== RUN   TestRealPostgresManagedRecoveryStore
+=== RUN   TestRealPostgresManagedRecoveryStore/owner-and-leave
+=== RUN   TestRealPostgresManagedRecoveryStore/owner-and-leave/live
+=== RUN   TestRealPostgresManagedRecoveryStore/owner-and-leave/renew
+=== RUN   TestRealPostgresManagedRecoveryStore/owner-and-leave/leave
+=== RUN   TestRealPostgresManagedRecoveryStore/owner-and-leave/claim
+=== RUN   TestRealPostgresManagedRecoveryStore/owner-and-leave/eventhead
+=== RUN   TestRealPostgresManagedRecoveryStore/parked-gates
+=== RUN   TestRealPostgresManagedRecoveryStore/selection-ack
+=== RUN   TestRealPostgresManagedRecoveryStore/selection-ack/RESUME
+    managed_recovery.go:258: kernel execution lease is not current
+=== RUN   TestRealPostgresManagedRecoveryStore/selection-ack/CANCEL
+=== RUN   TestRealPostgresManagedRecoveryStore/two-enable-claimants
+    managed_recovery.go:535: kernel execution lease is not current
+=== RUN   TestRealPostgresManagedRecoveryStore/transaction-ack
+=== RUN   TestRealPostgresManagedRecoveryStore/transaction-ack/t0
+=== RUN   TestRealPostgresManagedRecoveryStore/transaction-ack/park
+=== RUN   TestRealPostgresManagedRecoveryStore/transaction-ack/enable
+    managed_recovery.go:508: kernel execution lease is not current
+=== RUN   TestRealPostgresManagedRecoveryStore/transaction-ack/cancel
+=== RUN   TestRealPostgresManagedRecoveryStore/historical-closure
+    managed_recovery.go:326: kernel execution lease is not current
+--- FAIL: TestRealPostgresManagedRecoveryStore (37.73s)
+    --- PASS: TestRealPostgresManagedRecoveryStore/owner-and-leave (10.54s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/owner-and-leave/live (0.33s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/owner-and-leave/renew (3.34s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/owner-and-leave/leave (3.31s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/owner-and-leave/claim (3.36s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/owner-and-leave/eventhead (0.20s)
+    --- PASS: TestRealPostgresManagedRecoveryStore/parked-gates (3.37s)
+    --- FAIL: TestRealPostgresManagedRecoveryStore/selection-ack (6.78s)
+        --- FAIL: TestRealPostgresManagedRecoveryStore/selection-ack/RESUME (3.38s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/selection-ack/CANCEL (3.40s)
+    --- FAIL: TestRealPostgresManagedRecoveryStore/two-enable-claimants (3.30s)
+    --- FAIL: TestRealPostgresManagedRecoveryStore/transaction-ack (10.39s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/transaction-ack/t0 (0.23s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/transaction-ack/park (3.40s)
+        --- FAIL: TestRealPostgresManagedRecoveryStore/transaction-ack/enable (3.33s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/transaction-ack/cancel (3.43s)
+    --- FAIL: TestRealPostgresManagedRecoveryStore/historical-closure (3.35s)
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	38.081s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]
+FAIL
+
+EXIT_CODE=1

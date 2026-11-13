@@ -1,0 +1,25 @@
+SOURCE_SHA=f2187814eff825f3103e04f4d4f655f6923b21d1
+COMMAND=GOWORK=off go -C integration/continuation-e2e test -count=1 -v ./... -run '^TestRealPostgres(ManagedAgentSessionRecoveryAcrossProcessCrash|ManagedHostReservationModesAfterProcessCrash|OpaqueManagedProcessCrashRemainsUnknown)$'
+=== RUN   TestRealPostgresManagedAgentSessionRecoveryAcrossProcessCrash
+    managed_agent_session_recovery_real_test.go:127: resume child exit: want=0 err=exit status 1
+        --- FAIL: TestManagedAgentSessionRecoveryProcess (4.93s)
+            managed_agent_session_recovery_real_test.go:230: resume failed outside the confirmed live-lease boundary: harness state conflict
+        FAIL
+--- FAIL: TestRealPostgresManagedAgentSessionRecoveryAcrossProcessCrash (5.75s)
+=== RUN   TestRealPostgresManagedHostReservationModesAfterProcessCrash
+=== RUN   TestRealPostgresManagedHostReservationModesAfterProcessCrash/RESUME
+    managed_host_reservation_real_test.go:122: harness state conflict
+=== RUN   TestRealPostgresManagedHostReservationModesAfterProcessCrash/CANCEL
+    managed_host_reservation_real_test.go:230: harness state conflict
+--- FAIL: TestRealPostgresManagedHostReservationModesAfterProcessCrash (11.22s)
+    --- FAIL: TestRealPostgresManagedHostReservationModesAfterProcessCrash/RESUME (5.49s)
+    --- FAIL: TestRealPostgresManagedHostReservationModesAfterProcessCrash/CANCEL (5.73s)
+=== RUN   TestRealPostgresOpaqueManagedProcessCrashRemainsUnknown
+    managed_host_reservation_real_test.go:304: opaque pending-intent resume: harness state conflict
+        harness state conflict
+--- FAIL: TestRealPostgresOpaqueManagedProcessCrashRemainsUnknown (5.43s)
+FAIL
+FAIL	example.com/agent-runtime-continuation-e2e	22.733s
+FAIL
+
+EXIT_CODE=1

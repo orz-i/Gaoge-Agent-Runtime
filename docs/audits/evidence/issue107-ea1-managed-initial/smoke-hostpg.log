@@ -1,0 +1,8 @@
+SOURCE_SHA=f2187814eff825f3103e04f4d4f655f6923b21d1
+COMMAND=go -C go/agent-runtime-harness-postgres test -count=1 -v ./... -run '^TestManagedHostSQLRejectsUnissuedProofs$'
+=== RUN   TestManagedHostSQLRejectsUnissuedProofs
+--- PASS: TestManagedHostSQLRejectsUnissuedProofs (0.01s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-postgres	0.393s
+
+EXIT_CODE=0
