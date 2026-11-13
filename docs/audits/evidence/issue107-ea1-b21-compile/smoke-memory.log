@@ -1,0 +1,9 @@
+SOURCE_SHA=c421c282f0d1bba22f5b36eda38832136789799a
+COMMAND=go -C go/agent-runtime test -count=1 ./memory -run '^TestEA1MiddlewareNextLifetimeMemory$' -v
+# github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance
+conformance/ea1_middleware_next_lifetime.go:593:7: e redeclared in this block
+	conformance/ea1_middleware_next_lifetime.go:565:9: other declaration of e
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory [build failed]
+FAIL
+
+EXIT_CODE=1

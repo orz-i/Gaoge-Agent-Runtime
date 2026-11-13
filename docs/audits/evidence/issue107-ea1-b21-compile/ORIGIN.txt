@@ -1,0 +1,1 @@
+Source c421c282f0d1bba22f5b36eda38832136789799a. Compile-only failure: duplicate local e declaration after ViewState; no test cutpoint reached. Original failure preserved, ledger unchanged.
