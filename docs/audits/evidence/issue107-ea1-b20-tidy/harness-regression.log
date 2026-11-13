@@ -1,0 +1,103 @@
+SOURCE_SHA=255354ba716378ca64ab02b5e10f8d0c7dcc1009
+COMMAND=go -C go/agent-runtime-harness test -race -count=1 ./... -run '^(TestIssue107WorkflowAgentTaskSubtaskApprovalAndResume|TestIssue107WrongOriginalAgentCannotApprovePhysicalChild|TestIssue107ForeignRelationRecorderCannotExposeApproval|TestIssue107HostedApprovalCancelPhysicalAdmissionRace|TestIssue107HostedWaitingApprovalCancellationUsesOriginalHarnessFence|TestIssue107AgentTaskCancelUsesExactPhysicalFence|TestIssue107ParentCancelCannotDeclareTerminalWithLiveChildTool)$' -v
+=== RUN   TestIssue107ParentCancelCannotDeclareTerminalWithLiveChildTool
+--- PASS: TestIssue107ParentCancelCannotDeclareTerminalWithLiveChildTool (0.04s)
+=== RUN   TestIssue107HostedWaitingApprovalCancellationUsesOriginalHarnessFence
+--- PASS: TestIssue107HostedWaitingApprovalCancellationUsesOriginalHarnessFence (0.01s)
+=== RUN   TestIssue107HostedApprovalCancelPhysicalAdmissionRace
+=== RUN   TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-0
+=== RUN   TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-1
+=== RUN   TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-2
+=== RUN   TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-3
+=== RUN   TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-4
+=== RUN   TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-5
+=== RUN   TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-6
+=== RUN   TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-7
+=== RUN   TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-8
+=== RUN   TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-9
+=== RUN   TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-10
+=== RUN   TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-11
+=== RUN   TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-12
+=== RUN   TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-13
+=== RUN   TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-14
+=== RUN   TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-15
+=== RUN   TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-16
+=== RUN   TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-17
+=== RUN   TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-18
+=== RUN   TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-19
+=== RUN   TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-20
+=== RUN   TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-21
+=== RUN   TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-22
+=== RUN   TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-23
+=== RUN   TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-24
+=== RUN   TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-25
+=== RUN   TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-26
+=== RUN   TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-27
+=== RUN   TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-28
+=== RUN   TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-29
+=== RUN   TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-30
+=== RUN   TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-31
+=== RUN   TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-32
+=== RUN   TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-33
+=== RUN   TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-34
+=== RUN   TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-35
+=== RUN   TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-36
+=== RUN   TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-37
+=== RUN   TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-38
+=== RUN   TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-39
+--- PASS: TestIssue107HostedApprovalCancelPhysicalAdmissionRace (0.92s)
+    --- PASS: TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-0 (0.02s)
+    --- PASS: TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-1 (0.02s)
+    --- PASS: TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-2 (0.01s)
+    --- PASS: TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-3 (0.02s)
+    --- PASS: TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-4 (0.04s)
+    --- PASS: TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-5 (0.01s)
+    --- PASS: TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-6 (0.03s)
+    --- PASS: TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-7 (0.02s)
+    --- PASS: TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-8 (0.02s)
+    --- PASS: TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-9 (0.03s)
+    --- PASS: TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-10 (0.02s)
+    --- PASS: TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-11 (0.03s)
+    --- PASS: TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-12 (0.03s)
+    --- PASS: TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-13 (0.03s)
+    --- PASS: TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-14 (0.03s)
+    --- PASS: TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-15 (0.02s)
+    --- PASS: TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-16 (0.02s)
+    --- PASS: TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-17 (0.03s)
+    --- PASS: TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-18 (0.03s)
+    --- PASS: TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-19 (0.04s)
+    --- PASS: TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-20 (0.04s)
+    --- PASS: TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-21 (0.02s)
+    --- PASS: TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-22 (0.02s)
+    --- PASS: TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-23 (0.02s)
+    --- PASS: TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-24 (0.02s)
+    --- PASS: TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-25 (0.02s)
+    --- PASS: TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-26 (0.02s)
+    --- PASS: TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-27 (0.01s)
+    --- PASS: TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-28 (0.02s)
+    --- PASS: TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-29 (0.03s)
+    --- PASS: TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-30 (0.02s)
+    --- PASS: TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-31 (0.02s)
+    --- PASS: TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-32 (0.03s)
+    --- PASS: TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-33 (0.03s)
+    --- PASS: TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-34 (0.02s)
+    --- PASS: TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-35 (0.02s)
+    --- PASS: TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-36 (0.02s)
+    --- PASS: TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-37 (0.03s)
+    --- PASS: TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-38 (0.02s)
+    --- PASS: TestIssue107HostedApprovalCancelPhysicalAdmissionRace/attempt-39 (0.03s)
+=== RUN   TestIssue107WorkflowAgentTaskSubtaskApprovalAndResume
+--- PASS: TestIssue107WorkflowAgentTaskSubtaskApprovalAndResume (0.04s)
+=== RUN   TestIssue107WrongOriginalAgentCannotApprovePhysicalChild
+--- PASS: TestIssue107WrongOriginalAgentCannotApprovePhysicalChild (0.01s)
+=== RUN   TestIssue107ForeignRelationRecorderCannotExposeApproval
+--- PASS: TestIssue107ForeignRelationRecorderCannotExposeApproval (0.01s)
+=== RUN   TestIssue107AgentTaskCancelUsesExactPhysicalFence
+--- PASS: TestIssue107AgentTaskCancelUsesExactPhysicalFence (0.02s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness	2.605s
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness/examples/session	1.480s [no tests to run]
+
+EXIT_CODE=0

@@ -1,0 +1,5 @@
+SOURCE_SHA=255354ba716378ca64ab02b5e10f8d0c7dcc1009
+COMMAND=cd go/agent-runtime-harness-postgres && golangci-lint run ./...
+0 issues.
+
+EXIT_CODE=0
