@@ -256,52 +256,54 @@ func (s *KernelStore) CancelParkedManagedContinuation(ctx context.Context, q ker
 	})
 }
 
-// Called only after ordinary authority validation and inside its transaction.
-func pgManagedMutation(tx *gorm.DB, current kernel.Snapshot, m kernel.StoreMutation, lease *kernel.ExecutionLease) error {
+// Prepare only after ordinary authority validation and inside its transaction.
+// The caller binds the verified point to the actual committed aggregate after
+// applyKernelMutation succeeds, before this same transaction can commit.
+func pgManagedMutation(tx *gorm.DB, current kernel.Snapshot, m kernel.StoreMutation, lease *kernel.ExecutionLease) (*kernel.ManagedSafePoint, error) {
 	old, e := pgLoadManaged(tx, current.Run.ID)
 	if e != nil && !errors.Is(e, kernel.ErrNotFound) {
-		return e
+		return nil, e
 	}
 	if e == nil {
 		if e = kernel.ManagedOrdinaryGate(old); e != nil {
-			return e
+			return nil, e
 		}
 		n := kernel.ManagedInvalidateMutation(old)
 		if n.Revision != old.Revision {
 			if e = pgSaveManaged(tx, n); e != nil {
-				return e
+				return nil, e
 			}
 		}
 	}
 	if !m.ManagedSafePoint.Present() {
-		return nil
+		return nil, nil
 	}
 	if len(m.Events) != 1 || m.Events[0].Type != "agent.model_invocation.pending" {
-		return kernel.ErrExecutionConflict
+		return nil, kernel.ErrExecutionConflict
 	}
 	if lease == nil {
-		return kernel.ErrExecutionConflict
+		return nil, kernel.ErrExecutionConflict
 	}
 	g, e := pgManagedGrant(tx, current.Run.ID)
 	if e != nil {
-		return e
+		return nil, e
 	}
 	a, e := pgManagedAuthority(tx)
 	if e != nil {
-		return e
+		return nil, e
 	}
 	p := m.ManagedSafePoint.Point()
 	if p.Host.KernelAuthority != a || !m.ManagedSafePoint.Matches(current, m.Record, *lease, g) {
-		return kernel.ErrExecutionConflict
+		return nil, kernel.ErrExecutionConflict
 	}
 	var count int64
 	if e = tx.Model(&models.KernelManagedHistoryRecord{}).Where("suspension_id = ? OR recovery_id = ?", p.ID, p.RecoveryID).Count(&count).Error; e != nil {
-		return translateKernelError(e)
+		return nil, translateKernelError(e)
 	}
 	if count != 0 {
-		return kernel.ErrExecutionConflict
+		return nil, kernel.ErrExecutionConflict
 	}
-	return pgSaveManaged(tx, kernel.ManagedInitialTransfer(p))
+	return &p, nil
 }
 
 func (s *KernelStore) LoadManagedRecoveryByID(ctx context.Context, id string) (kernel.ManagedTransfer, error) {

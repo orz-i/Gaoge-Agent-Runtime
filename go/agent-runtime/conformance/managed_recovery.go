@@ -114,8 +114,8 @@ func managedStoreSetup(t *testing.T, factory func(*testing.T) ManagedRecoverySto
 	if err != nil {
 		t.Fatal(err)
 	}
-	if transfer.State != kernel.ManagedAvailable || transfer.SafePoint.Source.EventHead != source.EventHead || kernel.ManagedDigest(transfer.SafePoint.Source) != kernel.ManagedDigest(source) {
-		persisted, loadErr := rt.Load(t.Context(), v.Run.ID)
+	persisted, loadErr := rt.Load(t.Context(), v.Run.ID)
+	if transfer.State != kernel.ManagedAvailable || transfer.SafePoint.Source.EventHead != source.EventHead || kernel.ManagedDigest(transfer.SafePoint.Source) != kernel.ManagedDigest(source) || loadErr != nil || kernel.ManagedDigest(source) != kernel.ManagedDigest(persisted) {
 		pointJSON, pointJSONErr := json.Marshal(transfer.SafePoint.Source)
 		sourceJSON, sourceJSONErr := json.Marshal(source)
 		persistedJSON, persistedJSONErr := json.Marshal(persisted)

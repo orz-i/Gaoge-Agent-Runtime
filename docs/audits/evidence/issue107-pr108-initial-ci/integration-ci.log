@@ -1,0 +1,839 @@
+﻿2026-11-13T09:25:40.8723642Z Current runner version: '2.338.2'
+2026-11-13T09:25:40.8795759Z ##[group]Runner Image Provisioner
+2026-11-13T09:25:40.8797641Z Hosted Compute Agent
+2026-11-13T09:25:40.8798631Z Version: 20261103.629
+2026-11-13T09:25:40.8799762Z Commit: 15dbd9ccb5dbf34fae002b6ed1a2670f52df37bc
+2026-11-13T09:25:40.8801084Z Build Date: 2026-11-03T17:26:59Z
+2026-11-13T09:25:40.8802320Z Worker ID: {24de605d-7ab7-478b-b1bf-a5c3a2eb7413}
+2026-11-13T09:25:40.8803649Z Region: eastus
+2026-11-13T09:25:40.8804657Z Cloud: Azure
+2026-11-13T09:25:40.8805831Z ##[endgroup]
+2026-11-13T09:25:40.8808650Z ##[group]Operating System
+2026-11-13T09:25:40.8809767Z Ubuntu
+2026-11-13T09:25:40.8810801Z 26.04.1
+2026-11-13T09:25:40.8811627Z LTS
+2026-11-13T09:25:40.8812815Z ##[endgroup]
+2026-11-13T09:25:40.8813748Z ##[group]Runner Image
+2026-11-13T09:25:40.8814726Z Image: ubuntu-26.04
+2026-11-13T09:25:40.8816084Z Version: 20261111.196.1
+2026-11-13T09:25:40.8818543Z Included Software: https://github.com/actions/runner-images/blob/ubuntu26/20261111.196/images/ubuntu/Ubuntu2604-Readme.md
+2026-11-13T09:25:40.8821399Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu26%2F20261111.196
+2026-11-13T09:25:40.8823231Z ##[endgroup]
+2026-11-13T09:25:40.8825638Z ##[group]GITHUB_TOKEN Permissions
+2026-11-13T09:25:40.8828779Z Contents: read
+2026-11-13T09:25:40.8829740Z Metadata: read
+2026-11-13T09:25:40.8830788Z Packages: read
+2026-11-13T09:25:40.8831834Z ##[endgroup]
+2026-11-13T09:25:40.8835250Z Secret source: Actions
+2026-11-13T09:25:40.8836804Z Cache mode: write
+2026-11-13T09:25:40.8838723Z Prepare workflow directory
+2026-11-13T09:25:40.9475372Z Prepare all required actions
+2026-11-13T09:25:40.9523227Z Getting action download info
+2026-11-13T09:25:41.0881655Z Download action repository 'actions/checkout@v7' (SHA:3d3c42e5aac5ba805825da76410c181273ba90b1)
+2026-11-13T09:25:41.3280032Z Complete job name: PostgreSQL and Redis integration
+2026-11-13T09:25:41.4001298Z ##[group]Checking docker version
+2026-11-13T09:25:41.4014345Z ##[command]/usr/bin/docker version --format '{{.Server.APIVersion}}'
+2026-11-13T09:25:41.5234879Z '1.54'
+2026-11-13T09:25:41.5251437Z Docker daemon API version: '1.54'
+2026-11-13T09:25:41.5252263Z ##[command]/usr/bin/docker version --format '{{.Client.APIVersion}}'
+2026-11-13T09:25:41.5434733Z '1.54'
+2026-11-13T09:25:41.5452472Z Docker client API version: '1.54'
+2026-11-13T09:25:41.5458491Z ##[endgroup]
+2026-11-13T09:25:41.5461446Z ##[group]Clean up resources from previous jobs
+2026-11-13T09:25:41.5467369Z ##[command]/usr/bin/docker ps --all --quiet --no-trunc --filter "label=1bdcfd"
+2026-11-13T09:25:41.5636677Z ##[command]/usr/bin/docker network prune --force --filter "label=1bdcfd"
+2026-11-13T09:25:41.5811359Z ##[endgroup]
+2026-11-13T09:25:41.5811910Z ##[group]Create local container network
+2026-11-13T09:25:41.5822372Z ##[command]/usr/bin/docker network create --label 1bdcfd github_network_73c754b1b30746ef89092f56565247c4
+2026-11-13T09:25:41.6328526Z 53d01bfb0a4f615346e4109fdd566e78ab817d23fde3b825a4acba3add1df441
+2026-11-13T09:25:41.6349883Z ##[endgroup]
+2026-11-13T09:25:41.6373838Z ##[group]Starting postgres service container
+2026-11-13T09:25:41.6395562Z ##[command]/usr/bin/docker pull postgres:16-alpine
+2026-11-13T09:25:41.8820953Z 16-alpine: Pulling from library/postgres
+2026-11-13T09:25:42.0821338Z a2d17f5b24d5: Pulling fs layer
+2026-11-13T09:25:42.0822554Z ea98517a315c: Pulling fs layer
+2026-11-13T09:25:42.0823450Z f997efa53d88: Pulling fs layer
+2026-11-13T09:25:42.0824058Z b7106f8586ee: Pulling fs layer
+2026-11-13T09:25:42.0824691Z 6bceb0db2fd1: Pulling fs layer
+2026-11-13T09:25:42.0825884Z 881fc932939e: Pulling fs layer
+2026-11-13T09:25:42.0827026Z 5788ee6f91dc: Pulling fs layer
+2026-11-13T09:25:42.0827795Z f85a33377d83: Pulling fs layer
+2026-11-13T09:25:42.0828369Z 41713cbe7496: Pulling fs layer
+2026-11-13T09:25:42.0828981Z 86cc7190d1c0: Pulling fs layer
+2026-11-13T09:25:42.0829716Z 5959c7ea857a: Pulling fs layer
+2026-11-13T09:25:42.1613986Z 89872578f4c5: Download complete
+2026-11-13T09:25:42.1616293Z df1cd84c95ef: Download complete
+2026-11-13T09:25:42.1620719Z 881fc932939e: Download complete
+2026-11-13T09:25:42.1628484Z f85a33377d83: Download complete
+2026-11-13T09:25:42.1634422Z 86cc7190d1c0: Download complete
+2026-11-13T09:25:42.1643408Z ea98517a315c: Download complete
+2026-11-13T09:25:42.1649101Z 6bceb0db2fd1: Download complete
+2026-11-13T09:25:42.1651600Z b7106f8586ee: Download complete
+2026-11-13T09:25:42.1655285Z 41713cbe7496: Download complete
+2026-11-13T09:25:42.1658951Z f997efa53d88: Download complete
+2026-11-13T09:25:42.1664392Z 5959c7ea857a: Download complete
+2026-11-13T09:25:42.1669438Z 5788ee6f91dc: Download complete
+2026-11-13T09:25:42.3629052Z 881fc932939e: Pull complete
+2026-11-13T09:25:42.3654279Z ea98517a315c: Pull complete
+2026-11-13T09:25:42.3709745Z 41713cbe7496: Pull complete
+2026-11-13T09:25:42.3717709Z f997efa53d88: Pull complete
+2026-11-13T09:25:42.3743414Z 5788ee6f91dc: Pull complete
+2026-11-13T09:25:42.5602061Z a2d17f5b24d5: Download complete
+2026-11-13T09:25:44.3615318Z f85a33377d83: Pull complete
+2026-11-13T09:25:44.3636238Z 86cc7190d1c0: Pull complete
+2026-11-13T09:25:44.3647301Z 6bceb0db2fd1: Pull complete
+2026-11-13T09:25:44.3660325Z b7106f8586ee: Pull complete
+2026-11-13T09:25:44.3687694Z 5959c7ea857a: Pull complete
+2026-11-13T09:25:44.3690003Z a2d17f5b24d5: Pull complete
+2026-11-13T09:25:44.3691333Z Digest: sha256:f377d590e5474681d4d7838635031a2b50647923b7abfa803ce9b5ff35d5c663
+2026-11-13T09:25:44.3692970Z Status: Downloaded newer image for postgres:16-alpine
+2026-11-13T09:25:44.3697189Z docker.io/library/postgres:16-alpine
+2026-11-13T09:25:44.3790257Z ##[command]/usr/bin/docker create --name b7f18f2953ca4d92909905daa7fdcf8c_postgres16alpine_bc07c0 --label 1bdcfd --network github_network_73c754b1b30746ef89092f56565247c4 --network-alias postgres -p 5432:5432 --health-cmd "pg_isready -U agent_runtime -d agent_runtime" --health-interval 5s --health-timeout 3s --health-retries 20 -e "POSTGRES_USER=agent_runtime" -e "POSTGRES_PASSWORD=agent_runtime" -e "POSTGRES_DB=agent_runtime" -e GITHUB_ACTIONS=true -e CI=true postgres:16-alpine
+2026-11-13T09:25:44.9106317Z f7ab50067d857fb8b9ada1d4515cd49ee24f11535b88fbf80ba6f33a5f363478
+2026-11-13T09:25:44.9128993Z ##[command]/usr/bin/docker start f7ab50067d857fb8b9ada1d4515cd49ee24f11535b88fbf80ba6f33a5f363478
+2026-11-13T09:25:45.1418665Z f7ab50067d857fb8b9ada1d4515cd49ee24f11535b88fbf80ba6f33a5f363478
+2026-11-13T09:25:45.1470165Z ##[command]/usr/bin/docker ps --all --filter id=f7ab50067d857fb8b9ada1d4515cd49ee24f11535b88fbf80ba6f33a5f363478 --filter status=running --no-trunc --format "{{.ID}} {{.Status}}"
+2026-11-13T09:25:45.1793341Z f7ab50067d857fb8b9ada1d4515cd49ee24f11535b88fbf80ba6f33a5f363478 Up Less than a second (health: starting)
+2026-11-13T09:25:45.1819857Z ##[command]/usr/bin/docker port f7ab50067d857fb8b9ada1d4515cd49ee24f11535b88fbf80ba6f33a5f363478
+2026-11-13T09:25:45.1985627Z 5432/tcp -> 0.0.0.0:5432
+2026-11-13T09:25:45.1986405Z 5432/tcp -> [::]:5432
+2026-11-13T09:25:45.2036764Z ##[endgroup]
+2026-11-13T09:25:45.2038064Z ##[group]Starting redis service container
+2026-11-13T09:25:45.2039414Z ##[command]/usr/bin/docker pull redis:8-alpine
+2026-11-13T09:25:45.4083965Z 8-alpine: Pulling from library/redis
+2026-11-13T09:25:45.5362949Z a5986f71dff3: Pulling fs layer
+2026-11-13T09:25:45.5369584Z 6de6a661124c: Pulling fs layer
+2026-11-13T09:25:45.5370492Z 74c614fb2c68: Pulling fs layer
+2026-11-13T09:25:45.5372272Z 4f4fb700ef54: Pulling fs layer
+2026-11-13T09:25:45.5372886Z c8ea569334dd: Pulling fs layer
+2026-11-13T09:25:45.5373691Z ab7525b6cc9e: Pulling fs layer
+2026-11-13T09:25:45.5374501Z efd1ae24e8b5: Pulling fs layer
+2026-11-13T09:25:45.6215760Z efd1ae24e8b5: Download complete
+2026-11-13T09:25:45.6224315Z a5986f71dff3: Download complete
+2026-11-13T09:25:45.6247081Z 6de6a661124c: Download complete
+2026-11-13T09:25:45.6248009Z 4f4fb700ef54: Already exists
+2026-11-13T09:25:45.6267017Z 74c614fb2c68: Download complete
+2026-11-13T09:25:45.6267612Z c8ea569334dd: Download complete
+2026-11-13T09:25:45.7214616Z 257b510d195a: Download complete
+2026-11-13T09:25:45.7218464Z a1ad6b274038: Download complete
+2026-11-13T09:25:45.8213276Z ab7525b6cc9e: Download complete
+2026-11-13T09:25:45.8283512Z 74c614fb2c68: Pull complete
+2026-11-13T09:25:45.9336504Z 6de6a661124c: Pull complete
+2026-11-13T09:25:45.9374711Z c8ea569334dd: Pull complete
+2026-11-13T09:25:46.5220780Z efd1ae24e8b5: Pull complete
+2026-11-13T09:25:46.5232973Z a5986f71dff3: Pull complete
+2026-11-13T09:25:46.5245890Z 4f4fb700ef54: Pull complete
+2026-11-13T09:25:46.5255669Z ab7525b6cc9e: Pull complete
+2026-11-13T09:25:46.5367360Z Digest: sha256:7958cfbb9d152f87dadfbc89f1b0b15938f0b81ff8982feb327476f4911935c3
+2026-11-13T09:25:46.5368593Z Status: Downloaded newer image for redis:8-alpine
+2026-11-13T09:25:46.5374586Z docker.io/library/redis:8-alpine
+2026-11-13T09:25:46.5403560Z ##[command]/usr/bin/docker create --name 3a2cefca864e428290bc319b9bb98bd7_redis8alpine_37b09b --label 1bdcfd --network github_network_73c754b1b30746ef89092f56565247c4 --network-alias redis -p 6379:6379 --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 20 -e GITHUB_ACTIONS=true -e CI=true redis:8-alpine
+2026-11-13T09:25:46.6729381Z 861bb7065bd709a5ec6c5855efcd65d570c236099155c4f2c2884bb9fc4b7bc4
+2026-11-13T09:25:46.6752096Z ##[command]/usr/bin/docker start 861bb7065bd709a5ec6c5855efcd65d570c236099155c4f2c2884bb9fc4b7bc4
+2026-11-13T09:25:46.8517157Z 861bb7065bd709a5ec6c5855efcd65d570c236099155c4f2c2884bb9fc4b7bc4
+2026-11-13T09:25:46.8538851Z ##[command]/usr/bin/docker ps --all --filter id=861bb7065bd709a5ec6c5855efcd65d570c236099155c4f2c2884bb9fc4b7bc4 --filter status=running --no-trunc --format "{{.ID}} {{.Status}}"
+2026-11-13T09:25:46.8849033Z 861bb7065bd709a5ec6c5855efcd65d570c236099155c4f2c2884bb9fc4b7bc4 Up Less than a second (health: starting)
+2026-11-13T09:25:46.8867730Z ##[command]/usr/bin/docker port 861bb7065bd709a5ec6c5855efcd65d570c236099155c4f2c2884bb9fc4b7bc4
+2026-11-13T09:25:46.9002529Z 6379/tcp -> 0.0.0.0:6379
+2026-11-13T09:25:46.9003038Z 6379/tcp -> [::]:6379
+2026-11-13T09:25:46.9022195Z ##[endgroup]
+2026-11-13T09:25:46.9033323Z ##[group]Waiting for all services to be ready
+2026-11-13T09:25:46.9046883Z ##[command]/usr/bin/docker inspect --format="{{if .Config.Healthcheck}}{{print .State.Health.Status}}{{end}}" f7ab50067d857fb8b9ada1d4515cd49ee24f11535b88fbf80ba6f33a5f363478
+2026-11-13T09:25:46.9197414Z starting
+2026-11-13T09:25:46.9222210Z postgres service is starting, waiting 2 seconds before checking again.
+2026-11-13T09:25:48.9225583Z ##[command]/usr/bin/docker inspect --format="{{if .Config.Healthcheck}}{{print .State.Health.Status}}{{end}}" f7ab50067d857fb8b9ada1d4515cd49ee24f11535b88fbf80ba6f33a5f363478
+2026-11-13T09:25:48.9367655Z starting
+2026-11-13T09:25:48.9382778Z postgres service is starting, waiting 4 seconds before checking again.
+2026-11-13T09:25:53.1807195Z ##[command]/usr/bin/docker inspect --format="{{if .Config.Healthcheck}}{{print .State.Health.Status}}{{end}}" f7ab50067d857fb8b9ada1d4515cd49ee24f11535b88fbf80ba6f33a5f363478
+2026-11-13T09:25:53.1952388Z healthy
+2026-11-13T09:25:53.1973229Z postgres service is healthy.
+2026-11-13T09:25:53.1974152Z ##[command]/usr/bin/docker inspect --format="{{if .Config.Healthcheck}}{{print .State.Health.Status}}{{end}}" 861bb7065bd709a5ec6c5855efcd65d570c236099155c4f2c2884bb9fc4b7bc4
+2026-11-13T09:25:53.2115390Z healthy
+2026-11-13T09:25:53.2131693Z redis service is healthy.
+2026-11-13T09:25:53.2132367Z ##[endgroup]
+2026-11-13T09:25:53.2511346Z ##[group]Run actions/checkout@v7
+2026-11-13T09:25:53.2511907Z with:
+2026-11-13T09:25:53.2512134Z   repository: orz-i/Gaoge-Agent-Runtime
+2026-11-13T09:25:53.2515369Z   token: ***
+2026-11-13T09:25:53.2515585Z   ssh-strict: true
+2026-11-13T09:25:53.2515785Z   ssh-user: git
+2026-11-13T09:25:53.2515994Z   persist-credentials: true
+2026-11-13T09:25:53.2516227Z   clean: true
+2026-11-13T09:25:53.2516438Z   sparse-checkout-cone-mode: true
+2026-11-13T09:25:53.2516692Z   fetch-depth: 1
+2026-11-13T09:25:53.2516888Z   fetch-tags: false
+2026-11-13T09:25:53.2517093Z   show-progress: true
+2026-11-13T09:25:53.2517294Z   lfs: false
+2026-11-13T09:25:53.2517711Z   submodules: false
+2026-11-13T09:25:53.2517921Z   set-safe-directory: true
+2026-11-13T09:25:53.2518162Z   allow-unsafe-pr-checkout: false
+2026-11-13T09:25:53.2518676Z env:
+2026-11-13T09:25:53.2519185Z   TEST_POSTGRES_DSN: ***127.0.0.1:5432/agent_runtime?sslmode=disable
+2026-11-13T09:25:53.2519543Z   TEST_REDIS_ADDR: 127.0.0.1:6379
+2026-11-13T09:25:53.2519826Z ##[endgroup]
+2026-11-13T09:25:53.5609643Z Syncing repository: orz-i/Gaoge-Agent-Runtime
+2026-11-13T09:25:53.5611746Z ##[group]Getting Git version info
+2026-11-13T09:25:53.5612554Z Working directory is '/home/runner/work/Gaoge-Agent-Runtime/Gaoge-Agent-Runtime'
+2026-11-13T09:25:53.5613725Z [command]/usr/bin/git version
+2026-11-13T09:25:53.5618539Z git version 2.56.1
+2026-11-13T09:25:53.5641973Z ##[endgroup]
+2026-11-13T09:25:53.5654040Z Temporarily overriding HOME='/home/runner/work/_temp/fdc08558-515a-4539-95d3-4f4ce501fa8f' before making global git config changes
+2026-11-13T09:25:53.5655768Z Adding repository directory to the temporary git global config as a safe directory
+2026-11-13T09:25:53.5661719Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/Gaoge-Agent-Runtime/Gaoge-Agent-Runtime
+2026-11-13T09:25:53.5727426Z Deleting the contents of '/home/runner/work/Gaoge-Agent-Runtime/Gaoge-Agent-Runtime'
+2026-11-13T09:25:53.5731052Z ##[group]Determining repository object format
+2026-11-13T09:25:53.5732443Z ##[endgroup]
+2026-11-13T09:25:53.5733151Z ##[group]Initializing the repository
+2026-11-13T09:25:53.5737181Z [command]/usr/bin/git init /home/runner/work/Gaoge-Agent-Runtime/Gaoge-Agent-Runtime
+2026-11-13T09:25:53.5855107Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-11-13T09:25:53.5856236Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-11-13T09:25:53.5857071Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-11-13T09:25:53.5857702Z hint: call:
+2026-11-13T09:25:53.5858021Z hint:
+2026-11-13T09:25:53.5858534Z hint: 	git config --global init.defaultBranch <name>
+2026-11-13T09:25:53.5859034Z hint:
+2026-11-13T09:25:53.5859505Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-11-13T09:25:53.5860418Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-11-13T09:25:53.5861047Z hint:
+2026-11-13T09:25:53.5861381Z hint: 	git branch -m <name>
+2026-11-13T09:25:53.5861739Z hint:
+2026-11-13T09:25:53.5862243Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-11-13T09:25:53.5866932Z Initialized empty Git repository in /home/runner/work/Gaoge-Agent-Runtime/Gaoge-Agent-Runtime/.git/
+2026-11-13T09:25:53.5881375Z [command]/usr/bin/git remote add origin https://github.com/orz-i/Gaoge-Agent-Runtime
+2026-11-13T09:25:53.5939155Z ##[endgroup]
+2026-11-13T09:25:53.5939976Z ##[group]Disabling automatic garbage collection
+2026-11-13T09:25:53.5942772Z [command]/usr/bin/git config --local gc.auto 0
+2026-11-13T09:25:53.5979767Z ##[endgroup]
+2026-11-13T09:25:53.5980796Z ##[group]Setting up auth
+2026-11-13T09:25:53.5981411Z Removing SSH command configuration
+2026-11-13T09:25:53.5987458Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-11-13T09:25:53.6024384Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-11-13T09:25:53.6509700Z Removing HTTP extra header
+2026-11-13T09:25:53.6517003Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-11-13T09:25:53.6566517Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-11-13T09:25:53.6840792Z Removing includeIf entries pointing to credentials config files
+2026-11-13T09:25:53.6846609Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-11-13T09:25:53.6882122Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-11-13T09:25:53.7163174Z [command]/usr/bin/git config --file /home/runner/work/_temp/git-credentials-4aadb2ee-2e29-46a2-9aee-de9a58e95d4e.config http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-11-13T09:25:53.7206839Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/Gaoge-Agent-Runtime/Gaoge-Agent-Runtime/.git.path /home/runner/work/_temp/git-credentials-4aadb2ee-2e29-46a2-9aee-de9a58e95d4e.config
+2026-11-13T09:25:53.7242959Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/Gaoge-Agent-Runtime/Gaoge-Agent-Runtime/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-4aadb2ee-2e29-46a2-9aee-de9a58e95d4e.config
+2026-11-13T09:25:53.7281783Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-4aadb2ee-2e29-46a2-9aee-de9a58e95d4e.config
+2026-11-13T09:25:53.7331200Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-4aadb2ee-2e29-46a2-9aee-de9a58e95d4e.config
+2026-11-13T09:25:53.7363089Z ##[endgroup]
+2026-11-13T09:25:53.7363848Z ##[group]Fetching the repository
+2026-11-13T09:25:53.7370952Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +353a413841c4245efb8738cdc24556b3bbd0603c:refs/remotes/pull/108/merge
+2026-11-13T09:25:54.7630862Z From https://github.com/orz-i/Gaoge-Agent-Runtime
+2026-11-13T09:25:54.7632130Z  * [new ref]         353a413841c4245efb8738cdc24556b3bbd0603c -> pull/108/merge
+2026-11-13T09:25:54.7643211Z ##[endgroup]
+2026-11-13T09:25:54.7643604Z ##[group]Determining the checkout info
+2026-11-13T09:25:54.7644013Z ##[endgroup]
+2026-11-13T09:25:54.7647296Z [command]/usr/bin/git sparse-checkout disable
+2026-11-13T09:25:54.7712324Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-11-13T09:25:54.7745783Z ##[group]Checking out the ref
+2026-11-13T09:25:54.7750513Z [command]/usr/bin/git checkout --progress --force refs/remotes/pull/108/merge
+2026-11-13T09:25:55.0477057Z Note: switching to 'refs/remotes/pull/108/merge'.
+2026-11-13T09:25:55.0477350Z 
+2026-11-13T09:25:55.0477624Z You are in 'detached HEAD' state. You can look around, make experimental
+2026-11-13T09:25:55.0478305Z changes and commit them, and you can discard any commits you make in this
+2026-11-13T09:25:55.0479167Z state without impacting any branches by switching back to a branch.
+2026-11-13T09:25:55.0479853Z 
+2026-11-13T09:25:55.0480203Z If you want to create a new branch to retain commits you create, you may
+2026-11-13T09:25:55.0481028Z do so (now or later) by using -c with the switch command. Example:
+2026-11-13T09:25:55.0481452Z 
+2026-11-13T09:25:55.0481622Z   git switch -c <new-branch-name>
+2026-11-13T09:25:55.0481905Z 
+2026-11-13T09:25:55.0482092Z Or undo this operation with:
+2026-11-13T09:25:55.0482335Z 
+2026-11-13T09:25:55.0482474Z   git switch -
+2026-11-13T09:25:55.0482664Z 
+2026-11-13T09:25:55.0482997Z Turn off this advice by setting config variable advice.detachedHead to false
+2026-11-13T09:25:55.0483492Z 
+2026-11-13T09:25:55.0484325Z HEAD is now at 353a413 Merge 39971b62c7cf7ce0565191a2f7f4bace53259de6 into b3e496a50895d0f52a1dc37ea5c2a3979b05cebd
+2026-11-13T09:25:55.0521223Z ##[endgroup]
+2026-11-13T09:25:55.0578182Z [command]/usr/bin/git log -1 --format=%H
+2026-11-13T09:25:55.0608305Z 353a413841c4245efb8738cdc24556b3bbd0603c
+2026-11-13T09:25:55.0901380Z Prepare all required actions
+2026-11-13T09:25:55.0901938Z Getting action download info
+2026-11-13T09:25:55.1556069Z Download action repository 'actions/setup-go@v7' (SHA:b7ad1dad31e06c5925ef5d2fc7ad053ef454303e)
+2026-11-13T09:25:55.3069976Z Download action repository 'actions/cache@v5' (SHA:caa296126883cff596d87d8935842f9db880ef25)
+2026-11-13T09:25:55.4445137Z ##[group]Run ./.github/actions/setup-go
+2026-11-13T09:25:55.4445645Z env:
+2026-11-13T09:25:55.4446259Z   TEST_POSTGRES_DSN: ***127.0.0.1:5432/agent_runtime?sslmode=disable
+2026-11-13T09:25:55.4446633Z   TEST_REDIS_ADDR: 127.0.0.1:6379
+2026-11-13T09:25:55.4446877Z ##[endgroup]
+2026-11-13T09:25:55.4502826Z ##[start-action display=Run actions/setup-go@v7;id=__self.go]
+2026-11-13T09:25:55.4592116Z ##[group]Run actions/setup-go@v7
+2026-11-13T09:25:55.4592375Z with:
+2026-11-13T09:25:55.4592576Z   go-version-file: go.work
+2026-11-13T09:25:55.4592798Z   cache: false
+2026-11-13T09:25:55.4593004Z   check-latest: false
+2026-11-13T09:25:55.4596036Z   token: ***
+2026-11-13T09:25:55.4596237Z env:
+2026-11-13T09:25:55.4596704Z   TEST_POSTGRES_DSN: ***127.0.0.1:5432/agent_runtime?sslmode=disable
+2026-11-13T09:25:55.4597072Z   TEST_REDIS_ADDR: 127.0.0.1:6379
+2026-11-13T09:25:55.4597311Z ##[endgroup]
+2026-11-13T09:25:55.5812784Z Setup go version spec 1.27.4
+2026-11-13T09:25:55.5822990Z Attempting to download 1.27.4...
+2026-11-13T09:25:56.0644139Z matching 1.27.4...
+2026-11-13T09:25:56.0670219Z Acquiring 1.27.4 from https://github.com/actions/go-versions/releases/download/1.27.4-42945153609/go-1.27.4-linux-x64.tar.gz
+2026-11-13T09:25:56.4647638Z Extracting Go...
+2026-11-13T09:25:56.4721278Z [command]/usr/bin/tar xz --warning=no-unknown-keyword --overwrite -C /home/runner/work/_temp/13ae7d79-324d-4bd6-9579-981d52bc7009 -f /home/runner/work/_temp/6d5c3d72-58ee-4f86-89c9-f90cd03cde58
+2026-11-13T09:25:57.7093412Z Successfully extracted go to /home/runner/work/_temp/13ae7d79-324d-4bd6-9579-981d52bc7009
+2026-11-13T09:25:57.7093987Z Adding to the cache ...
+2026-11-13T09:26:02.8896053Z Successfully cached go to /opt/hostedtoolcache/go/1.27.4/x64
+2026-11-13T09:26:02.8897947Z Added go to the path
+2026-11-13T09:26:02.8900496Z Successfully set up Go version 1.27.4
+2026-11-13T09:26:02.9151497Z go version go1.27.4 linux/amd64
+2026-11-13T09:26:02.9151734Z 
+2026-11-13T09:26:02.9152163Z ##[group]go env
+2026-11-13T09:26:03.0786063Z AR='ar'
+2026-11-13T09:26:03.0786801Z CC='gcc'
+2026-11-13T09:26:03.0787475Z CGO_CFLAGS='-O2 -g'
+2026-11-13T09:26:03.0788173Z CGO_CPPFLAGS=''
+2026-11-13T09:26:03.0788721Z CGO_CXXFLAGS='-O2 -g'
+2026-11-13T09:26:03.0789311Z CGO_ENABLED='1'
+2026-11-13T09:26:03.0789815Z CGO_FFLAGS='-O2 -g'
+2026-11-13T09:26:03.0790445Z CGO_LDFLAGS='-O2 -g'
+2026-11-13T09:26:03.0791040Z CXX='g++'
+2026-11-13T09:26:03.0791458Z GCCGO='gccgo'
+2026-11-13T09:26:03.0792075Z GO111MODULE=''
+2026-11-13T09:26:03.0792801Z GOAMD64='v1'
+2026-11-13T09:26:03.0793272Z GOARCH='amd64'
+2026-11-13T09:26:03.0793876Z GOAUTH='netrc'
+2026-11-13T09:26:03.0794361Z GOBIN='/home/runner/go/bin'
+2026-11-13T09:26:03.0795294Z GOCACHE='/home/runner/.cache/go-build'
+2026-11-13T09:26:03.0795993Z GOCACHEPROG=''
+2026-11-13T09:26:03.0796485Z GODEBUG=''
+2026-11-13T09:26:03.0796973Z GOENV='/home/runner/.config/go/env'
+2026-11-13T09:26:03.0797538Z GOEXE=''
+2026-11-13T09:26:03.0798169Z GOEXPERIMENT=''
+2026-11-13T09:26:03.0798647Z GOFIPS140='off'
+2026-11-13T09:26:03.0799119Z GOFLAGS=''
+2026-11-13T09:26:03.0800464Z GOGCCFLAGS='-fPIC -m64 -pthread -Wl,--no-gc-sections -fmessage-length=0 -ffile-prefix-map=/tmp/go-build3023214930=/tmp/go-build -gno-record-gcc-switches'
+2026-11-13T09:26:03.0802011Z GOHOSTARCH='amd64'
+2026-11-13T09:26:03.0802507Z GOHOSTOS='linux'
+2026-11-13T09:26:03.0802983Z GOINSECURE=''
+2026-11-13T09:26:03.0803545Z GOMOD='/dev/null'
+2026-11-13T09:26:03.0804067Z GOMODCACHE='/home/runner/go/pkg/mod'
+2026-11-13T09:26:03.0804639Z GONOPROXY=''
+2026-11-13T09:26:03.0805263Z GONOSUMDB=''
+2026-11-13T09:26:03.0805729Z GOOS='linux'
+2026-11-13T09:26:03.0806209Z GOPACKAGESDRIVER=''
+2026-11-13T09:26:03.0807054Z GOPATH='/home/runner/go'
+2026-11-13T09:26:03.0807600Z GOPRIVATE=''
+2026-11-13T09:26:03.0808181Z GOPROXY='https://proxy.golang.org,direct'
+2026-11-13T09:26:03.0809051Z GOROOT='/opt/hostedtoolcache/go/1.27.4/x64'
+2026-11-13T09:26:03.0809746Z GOSUMDB='sum.golang.org'
+2026-11-13T09:26:03.0810262Z GOTELEMETRY='local'
+2026-11-13T09:26:03.0810889Z GOTELEMETRYDIR='/home/runner/.config/go/telemetry'
+2026-11-13T09:26:03.0811840Z GOTMPDIR=''
+2026-11-13T09:26:03.0812301Z GOTOOLCHAIN='local'
+2026-11-13T09:26:03.0812969Z GOTOOLDIR='/opt/hostedtoolcache/go/1.27.4/x64/pkg/tool/linux_amd64'
+2026-11-13T09:26:03.0813764Z GOVCS=''
+2026-11-13T09:26:03.0814264Z GOVERSION='go1.27.4'
+2026-11-13T09:26:03.0815210Z GOWORK='/home/runner/work/Gaoge-Agent-Runtime/Gaoge-Agent-Runtime/go.work'
+2026-11-13T09:26:03.0816213Z PKG_CONFIG='pkg-config'
+2026-11-13T09:26:03.0816668Z 
+2026-11-13T09:26:03.0817474Z ##[endgroup]
+2026-11-13T09:26:03.0992289Z ##[end-action id=__self.go;outcome=success;conclusion=success;duration_ms=7648]
+2026-11-13T09:26:03.0996702Z ##[start-action display=Locate Go caches;id=__self.paths]
+2026-11-13T09:26:03.1042277Z ##[group]Run source /etc/os-release
+2026-11-13T09:26:03.1042819Z [36;1msource /etc/os-release[0m
+2026-11-13T09:26:03.1043373Z [36;1mecho "platform=$ID-$VERSION_ID" >> "$GITHUB_OUTPUT"[0m
+2026-11-13T09:26:03.1044038Z [36;1mecho "build=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"[0m
+2026-11-13T09:26:03.1044693Z [36;1mecho "modules=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"[0m
+2026-11-13T09:26:03.1109210Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-11-13T09:26:03.1109601Z env:
+2026-11-13T09:26:03.1110223Z   TEST_POSTGRES_DSN: ***127.0.0.1:5432/agent_runtime?sslmode=disable
+2026-11-13T09:26:03.1110632Z   TEST_REDIS_ADDR: 127.0.0.1:6379
+2026-11-13T09:26:03.1110910Z   GOTOOLCHAIN: local
+2026-11-13T09:26:03.1111261Z ##[endgroup]
+2026-11-13T09:26:03.1292466Z ##[end-action id=__self.paths;outcome=success;conclusion=success;duration_ms=29]
+2026-11-13T09:26:03.1294761Z ##[start-action display=Run actions/cache@v5;id=__self.__actions_cache]
+2026-11-13T09:26:03.9226658Z ##[group]Run actions/cache@v5
+2026-11-13T09:26:03.9226906Z with:
+2026-11-13T09:26:03.9227195Z   path: /home/runner/.cache/go-build
+/home/runner/go/pkg/mod
+
+2026-11-13T09:26:03.9228010Z   key: ubuntu-26.04-X64-go-1.27.4-integration-v1-65433ff37a7ac52e5b571f256c04c1561f6e4314a23f476b69fb59929f891a3c-353a413841c4245efb8738cdc24556b3bbd0603c
+2026-11-13T09:26:03.9229236Z   restore-keys: ubuntu-26.04-X64-go-1.27.4-integration-v1-65433ff37a7ac52e5b571f256c04c1561f6e4314a23f476b69fb59929f891a3c-
+ubuntu-26.04-X64-go-1.27.4-integration-v1-
+
+2026-11-13T09:26:03.9230001Z   enableCrossOsArchive: false
+2026-11-13T09:26:03.9230253Z   fail-on-cache-miss: false
+2026-11-13T09:26:03.9230487Z   lookup-only: false
+2026-11-13T09:26:03.9230700Z   save-always: false
+2026-11-13T09:26:03.9230899Z env:
+2026-11-13T09:26:03.9231477Z   TEST_POSTGRES_DSN: ***127.0.0.1:5432/agent_runtime?sslmode=disable
+2026-11-13T09:26:03.9231845Z   TEST_REDIS_ADDR: 127.0.0.1:6379
+2026-11-13T09:26:03.9232103Z   GOTOOLCHAIN: local
+2026-11-13T09:26:03.9232314Z ##[endgroup]
+2026-11-13T09:26:04.1487529Z Cache hit for restore-key: ubuntu-26.04-X64-go-1.27.4-integration-v1-d3eadec01b698359da7338d866dfcd9e687655b69729a279a1e87936880a5277-b3e496a50895d0f52a1dc37ea5c2a3979b05cebd
+2026-11-13T09:26:04.6820058Z Received 96756866 of 96756866 (100.0%), 189.9 MBs/sec
+2026-11-13T09:26:04.6820891Z Cache Size: ~92 MB (96756866 B)
+2026-11-13T09:26:04.6851271Z [command]/usr/bin/tar -xf /home/runner/work/_temp/61ffa273-ac89-4fc0-af6f-89cd4261b315/cache.tzst -P -C /home/runner/work/Gaoge-Agent-Runtime/Gaoge-Agent-Runtime --use-compress-program unzstd
+2026-11-13T09:26:05.5837337Z Cache restored successfully
+2026-11-13T09:26:05.5955585Z Cache restored from key: ubuntu-26.04-X64-go-1.27.4-integration-v1-d3eadec01b698359da7338d866dfcd9e687655b69729a279a1e87936880a5277-b3e496a50895d0f52a1dc37ea5c2a3979b05cebd
+2026-11-13T09:26:05.6180451Z ##[end-action id=__self.__actions_cache;outcome=success;conclusion=success;duration_ms=2488]
+2026-11-13T09:26:05.6221055Z ##[group]Run sudo apt-get update && sudo apt-get install -y --no-install-recommends libsqlite3-dev
+2026-11-13T09:26:05.6221783Z [36;1msudo apt-get update && sudo apt-get install -y --no-install-recommends libsqlite3-dev[0m
+2026-11-13T09:26:05.6274450Z shell: /usr/bin/bash -e {0}
+2026-11-13T09:26:05.6274718Z env:
+2026-11-13T09:26:05.6275548Z   TEST_POSTGRES_DSN: ***127.0.0.1:5432/agent_runtime?sslmode=disable
+2026-11-13T09:26:05.6276141Z   TEST_REDIS_ADDR: 127.0.0.1:6379
+2026-11-13T09:26:05.6276398Z   GOTOOLCHAIN: local
+2026-11-13T09:26:05.6276606Z ##[endgroup]
+2026-11-13T09:26:05.7828273Z Get:1 file:/etc/apt/apt-mirrors.txt Mirrorlist [144 B]
+2026-11-13T09:26:05.8256331Z Hit:2 http://azure.archive.ubuntu.com/ubuntu resolute InRelease
+2026-11-13T09:26:05.8288784Z Get:6 https://packages.microsoft.com/ubuntu/26.04/prod resolute InRelease [3964 B]
+2026-11-13T09:26:05.8320591Z Get:3 http://azure.archive.ubuntu.com/ubuntu resolute-updates InRelease [137 kB]
+2026-11-13T09:26:05.8416127Z Get:4 http://azure.archive.ubuntu.com/ubuntu resolute-backports InRelease [137 kB]
+2026-11-13T09:26:05.8497138Z Get:5 http://azure.archive.ubuntu.com/ubuntu resolute-security InRelease [137 kB]
+2026-11-13T09:26:05.8981386Z Get:7 https://packages.microsoft.com/ubuntu/26.04/prod resolute/main amd64 Packages [157 kB]
+2026-11-13T09:26:05.9224717Z Get:8 http://azure.archive.ubuntu.com/ubuntu resolute-updates/main amd64v3 Packages [869 kB]
+2026-11-13T09:26:05.9256429Z Get:12 https://packages.microsoft.com/ubuntu/26.04/prod resolute/main arm64 Packages [142 kB]
+2026-11-13T09:26:05.9282343Z Get:9 http://azure.archive.ubuntu.com/ubuntu resolute-updates/main Translation-en [195 kB]
+2026-11-13T09:26:05.9300754Z Get:10 http://azure.archive.ubuntu.com/ubuntu resolute-updates/universe amd64v3 Packages [390 kB]
+2026-11-13T09:26:05.9335215Z Get:11 http://azure.archive.ubuntu.com/ubuntu resolute-updates/universe Translation-en [122 kB]
+2026-11-13T09:26:05.9399028Z Get:13 http://azure.archive.ubuntu.com/ubuntu resolute-security/main amd64v3 Packages [718 kB]
+2026-11-13T09:26:05.9440922Z Get:14 http://azure.archive.ubuntu.com/ubuntu resolute-security/main Translation-en [157 kB]
+2026-11-13T09:26:05.9456158Z Get:15 http://azure.archive.ubuntu.com/ubuntu resolute-security/universe amd64v3 Packages [220 kB]
+2026-11-13T09:26:05.9472701Z Get:16 http://azure.archive.ubuntu.com/ubuntu resolute-security/universe Translation-en [72.5 kB]
+2026-11-13T09:26:05.9486189Z Get:17 http://azure.archive.ubuntu.com/ubuntu resolute-security/restricted amd64v3 Packages [590 kB]
+2026-11-13T09:26:05.9526429Z Get:18 http://azure.archive.ubuntu.com/ubuntu resolute-security/restricted Translation-en [122 kB]
+2026-11-13T09:26:10.2036227Z Fetched 4170 kB in 0s (10.1 MB/s)
+2026-11-13T09:26:10.9013027Z Reading package lists...
+2026-11-13T09:26:10.9354261Z Reading package lists...
+2026-11-13T09:26:11.1081890Z Building dependency tree...
+2026-11-13T09:26:11.1089448Z Reading state information...
+2026-11-13T09:26:11.1473837Z libsqlite3-dev is already the newest version (3.46.1-9ubuntu0.3).
+2026-11-13T09:26:11.2054241Z Solving dependencies...
+2026-11-13T09:26:11.3332019Z 0 upgraded, 0 newly installed, 0 to remove and 24 not upgraded.
+2026-11-13T09:26:11.3387652Z ##[group]Run make integration-test
+2026-11-13T09:26:11.3388007Z [36;1mmake integration-test[0m
+2026-11-13T09:26:11.3436812Z shell: /usr/bin/bash -e {0}
+2026-11-13T09:26:11.3437088Z env:
+2026-11-13T09:26:11.3437861Z   TEST_POSTGRES_DSN: ***127.0.0.1:5432/agent_runtime?sslmode=disable
+2026-11-13T09:26:11.3438266Z   TEST_REDIS_ADDR: 127.0.0.1:6379
+2026-11-13T09:26:11.3438532Z   GOTOOLCHAIN: local
+2026-11-13T09:26:11.3438783Z ##[endgroup]
+2026-11-13T09:26:11.3540700Z node scripts/run-integration.mjs --external-services
+2026-11-13T09:26:50.2755849Z === RUN   TestRealPostgresAgentRecoveryAcrossProcessCrash
+2026-11-13T09:26:50.2757083Z === RUN   TestRealPostgresAgentRecoveryAcrossProcessCrash/pending_committed
+2026-11-13T09:26:50.2758548Z === RUN   TestRealPostgresAgentRecoveryAcrossProcessCrash/claim_committed
+2026-11-13T09:26:50.2759740Z === RUN   TestRealPostgresAgentRecoveryAcrossProcessCrash/response_before_receipt
+2026-11-13T09:26:50.2761089Z === RUN   TestRealPostgresAgentRecoveryAcrossProcessCrash/receipt_committed
+2026-11-13T09:26:50.2762317Z --- PASS: TestRealPostgresAgentRecoveryAcrossProcessCrash (1.23s)
+2026-11-13T09:26:50.2763438Z     --- PASS: TestRealPostgresAgentRecoveryAcrossProcessCrash/pending_committed (0.32s)
+2026-11-13T09:26:50.2764871Z     --- PASS: TestRealPostgresAgentRecoveryAcrossProcessCrash/claim_committed (0.29s)
+2026-11-13T09:26:50.2765903Z     --- PASS: TestRealPostgresAgentRecoveryAcrossProcessCrash/response_before_receipt (0.30s)
+2026-11-13T09:26:50.2766665Z     --- PASS: TestRealPostgresAgentRecoveryAcrossProcessCrash/receipt_committed (0.31s)
+2026-11-13T09:26:50.2767256Z === RUN   TestRealPostgresAgentCancellationFencesLateModelReceipt
+2026-11-13T09:26:50.2768061Z --- PASS: TestRealPostgresAgentCancellationFencesLateModelReceipt (0.28s)
+2026-11-13T09:26:50.2768606Z === RUN   TestRealPostgresRecordedCallbackSurvivesProcessCrash
+2026-11-13T09:26:50.2769134Z --- PASS: TestRealPostgresRecordedCallbackSurvivesProcessCrash (0.33s)
+2026-11-13T09:26:50.2769647Z === RUN   TestRealPostgresRunJournalOutboxRollbackTogether
+2026-11-13T09:26:50.2770165Z === RUN   TestRealPostgresRunJournalOutboxRollbackTogether/agent_kernel_events
+2026-11-13T09:26:50.2770802Z === RUN   TestRealPostgresRunJournalOutboxRollbackTogether/agent_kernel_transition_outbox
+2026-11-13T09:26:50.2771404Z --- PASS: TestRealPostgresRunJournalOutboxRollbackTogether (0.43s)
+2026-11-13T09:26:50.2772079Z     --- PASS: TestRealPostgresRunJournalOutboxRollbackTogether/agent_kernel_events (0.22s)
+2026-11-13T09:26:50.2772860Z     --- PASS: TestRealPostgresRunJournalOutboxRollbackTogether/agent_kernel_transition_outbox (0.21s)
+2026-11-13T09:26:50.2773523Z === RUN   TestRealPostgresCrossTenantChildRelationDoesNotWakeAnotherTenant
+2026-11-13T09:26:50.2774134Z --- PASS: TestRealPostgresCrossTenantChildRelationDoesNotWakeAnotherTenant (0.21s)
+2026-11-13T09:26:50.2774681Z === RUN   TestRealPostgresUnknownRunStatusCannotACKRecovery
+2026-11-13T09:26:50.2775505Z --- PASS: TestRealPostgresUnknownRunStatusCannotACKRecovery (0.17s)
+2026-11-13T09:26:50.2776015Z === RUN   TestRealPostgresExternalWaitRecoveryAndOutboxGeneration
+2026-11-13T09:26:50.2776546Z --- PASS: TestRealPostgresExternalWaitRecoveryAndOutboxGeneration (0.33s)
+2026-11-13T09:26:50.2777122Z === RUN   TestRealPostgresIdentifiedApplyLostReplyAndNewerRevisionRecovery
+2026-11-13T09:26:50.2777750Z --- PASS: TestRealPostgresIdentifiedApplyLostReplyAndNewerRevisionRecovery (0.23s)
+2026-11-13T09:26:50.2778341Z === RUN   TestRealPostgresExpiredExecutionCannotCommitAfterRowLockWait
+2026-11-13T09:26:50.2778915Z --- PASS: TestRealPostgresExpiredExecutionCannotCommitAfterRowLockWait (2.26s)
+2026-11-13T09:26:50.2779432Z === RUN   TestRealPostgresKernelControlStoreConformance
+2026-11-13T09:26:50.2779972Z === RUN   TestRealPostgresKernelControlStoreConformance/native-external-signal-guarded-cas
+2026-11-13T09:26:50.2780684Z === RUN   TestRealPostgresKernelControlStoreConformance/approval-exact-checkpoint-and-revocation
+2026-11-13T09:26:50.2781643Z === RUN   TestRealPostgresKernelControlStoreConformance/allowance-dimension-and-revocation
+2026-11-13T09:26:50.2782374Z === RUN   TestRealPostgresKernelControlStoreConformance/cancel-revokes-active-owner
+2026-11-13T09:26:50.2782995Z === RUN   TestRealPostgresKernelControlStoreConformance/deadline-checks-store-time
+2026-11-13T09:26:50.2783575Z === RUN   TestRealPostgresKernelControlStoreConformance/bound-owner-cancel
+2026-11-13T09:26:50.2784235Z === RUN   TestRealPostgresKernelControlStoreConformance/Store-deadline-gates-approval-and-allowance
+2026-11-13T09:26:50.2785296Z === RUN   TestRealPostgresKernelControlStoreConformance/Store-deadline-gates-approval-and-allowance/approval
+2026-11-13T09:26:50.2786150Z === RUN   TestRealPostgresKernelControlStoreConformance/Store-deadline-gates-approval-and-allowance/allowance
+2026-11-13T09:26:50.2786965Z === RUN   TestRealPostgresKernelControlStoreConformance/fast-caller-clock-does-not-report-false-expiry
+2026-11-13T09:26:50.2787772Z === RUN   TestRealPostgresKernelControlStoreConformance/direct-Store-call-cannot-forge-a-Feature-proof
+2026-11-13T09:26:50.2788587Z --- PASS: TestRealPostgresKernelControlStoreConformance (6.03s)
+2026-11-13T09:26:50.2789303Z     --- PASS: TestRealPostgresKernelControlStoreConformance/native-external-signal-guarded-cas (0.36s)
+2026-11-13T09:26:50.2790378Z     --- PASS: TestRealPostgresKernelControlStoreConformance/approval-exact-checkpoint-and-revocation (1.19s)
+2026-11-13T09:26:50.2791254Z     --- PASS: TestRealPostgresKernelControlStoreConformance/allowance-dimension-and-revocation (0.59s)
+2026-11-13T09:26:50.2792060Z     --- PASS: TestRealPostgresKernelControlStoreConformance/cancel-revokes-active-owner (0.19s)
+2026-11-13T09:26:50.2792836Z     --- PASS: TestRealPostgresKernelControlStoreConformance/deadline-checks-store-time (1.04s)
+2026-11-13T09:26:50.2793563Z     --- PASS: TestRealPostgresKernelControlStoreConformance/bound-owner-cancel (0.19s)
+2026-11-13T09:26:50.2794402Z     --- PASS: TestRealPostgresKernelControlStoreConformance/Store-deadline-gates-approval-and-allowance (2.09s)
+2026-11-13T09:26:50.2795711Z         --- PASS: TestRealPostgresKernelControlStoreConformance/Store-deadline-gates-approval-and-allowance/approval (1.05s)
+2026-11-13T09:26:50.2796843Z         --- PASS: TestRealPostgresKernelControlStoreConformance/Store-deadline-gates-approval-and-allowance/allowance (1.05s)
+2026-11-13T09:26:50.2797852Z     --- PASS: TestRealPostgresKernelControlStoreConformance/fast-caller-clock-does-not-report-false-expiry (0.18s)
+2026-11-13T09:26:50.2798822Z     --- PASS: TestRealPostgresKernelControlStoreConformance/direct-Store-call-cannot-forge-a-Feature-proof (0.19s)
+2026-11-13T09:26:50.2799470Z === RUN   TestRealPostgresKernelApplyEvidenceConformance
+2026-11-13T09:26:50.2800122Z === RUN   TestRealPostgresKernelApplyEvidenceConformance/evidence-survives-newer-cas-and-denies-mismatched-replay
+2026-11-13T09:26:50.2800991Z === RUN   TestRealPostgresKernelApplyEvidenceConformance/fenced-native-apply-evidence-requires-current-lease
+2026-11-13T09:26:50.2801787Z === RUN   TestRealPostgresKernelApplyEvidenceConformance/many-committed-events-do-not-hide-proof
+2026-11-13T09:26:50.2802616Z === RUN   TestRealPostgresKernelApplyEvidenceConformance/reserved-proof-event-cannot-be-supplied-through-plain-apply
+2026-11-13T09:26:50.2803329Z --- PASS: TestRealPostgresKernelApplyEvidenceConformance (0.78s)
+2026-11-13T09:26:50.2804157Z     --- PASS: TestRealPostgresKernelApplyEvidenceConformance/evidence-survives-newer-cas-and-denies-mismatched-replay (0.20s)
+2026-11-13T09:26:50.2805423Z     --- PASS: TestRealPostgresKernelApplyEvidenceConformance/fenced-native-apply-evidence-requires-current-lease (0.19s)
+2026-11-13T09:26:50.2806385Z     --- PASS: TestRealPostgresKernelApplyEvidenceConformance/many-committed-events-do-not-hide-proof (0.22s)
+2026-11-13T09:26:50.2807403Z     --- PASS: TestRealPostgresKernelApplyEvidenceConformance/reserved-proof-event-cannot-be-supplied-through-plain-apply (0.17s)
+2026-11-13T09:26:50.2808117Z === RUN   TestRealPostgresKernelQuarantineStoreConformance
+2026-11-13T09:26:50.2809180Z === RUN   TestRealPostgresKernelQuarantineStoreConformance/current-work-quarantine-revokes-owner-and-requires-exact-repair
+2026-11-13T09:26:50.2810628Z --- PASS: TestRealPostgresKernelQuarantineStoreConformance (0.23s)
+2026-11-13T09:26:50.2811775Z     --- PASS: TestRealPostgresKernelQuarantineStoreConformance/current-work-quarantine-revokes-owner-and-requires-exact-repair (0.23s)
+2026-11-13T09:26:50.2812548Z === RUN   TestRealPostgresKernelExecutionStoreConformance
+2026-11-13T09:26:50.2813093Z === RUN   TestRealPostgresKernelExecutionStoreConformance/execution-mode-frozen-at-create
+2026-11-13T09:26:50.2813754Z === RUN   TestRealPostgresKernelExecutionStoreConformance/epoch-and-multi-cas-segment
+2026-11-13T09:26:50.2814413Z === RUN   TestRealPostgresKernelExecutionStoreConformance/client-expiry-is-not-an-authority
+2026-11-13T09:26:50.2815500Z === RUN   TestRealPostgresKernelExecutionStoreConformance/pending-gates-cannot-acquire
+2026-11-13T09:26:50.2816182Z === RUN   TestRealPostgresKernelExecutionStoreConformance/simultaneous-claims-are-exclusive
+2026-11-13T09:26:50.2816922Z === RUN   TestRealPostgresKernelExecutionStoreConformance/fenced-run-cannot-use-legacy-control-bypass
+2026-11-13T09:26:50.2817727Z === RUN   TestRealPostgresKernelExecutionStoreConformance/pre-dispatch-authority-before-and-after-takeover
+2026-11-13T09:26:50.2818928Z --- PASS: TestRealPostgresKernelExecutionStoreConformance (1.67s)
+2026-11-13T09:26:50.2819664Z     --- PASS: TestRealPostgresKernelExecutionStoreConformance/execution-mode-frozen-at-create (0.19s)
+2026-11-13T09:26:50.2820489Z     --- PASS: TestRealPostgresKernelExecutionStoreConformance/epoch-and-multi-cas-segment (0.34s)
+2026-11-13T09:26:50.2821328Z     --- PASS: TestRealPostgresKernelExecutionStoreConformance/client-expiry-is-not-an-authority (0.28s)
+2026-11-13T09:26:50.2822177Z     --- PASS: TestRealPostgresKernelExecutionStoreConformance/pending-gates-cannot-acquire (0.19s)
+2026-11-13T09:26:50.2823015Z     --- PASS: TestRealPostgresKernelExecutionStoreConformance/simultaneous-claims-are-exclusive (0.19s)
+2026-11-13T09:26:50.2823924Z     --- PASS: TestRealPostgresKernelExecutionStoreConformance/fenced-run-cannot-use-legacy-control-bypass (0.19s)
+2026-11-13T09:26:50.2825090Z     --- PASS: TestRealPostgresKernelExecutionStoreConformance/pre-dispatch-authority-before-and-after-takeover (0.29s)
+2026-11-13T09:26:50.2825831Z === RUN   TestRealPostgresOwnedPhysicalBindingGuards
+2026-11-13T09:26:50.2826257Z --- PASS: TestRealPostgresOwnedPhysicalBindingGuards (0.26s)
+2026-11-13T09:26:50.2826718Z === RUN   TestRealPostgresNativeLeaseOnlyPreservesRunProjection
+2026-11-13T09:26:50.2827230Z --- PASS: TestRealPostgresNativeLeaseOnlyPreservesRunProjection (0.20s)
+2026-11-13T09:26:50.2827760Z === RUN   TestRealPostgresExecutionQuarantineSurvivesReconnection
+2026-11-13T09:26:50.2828291Z --- PASS: TestRealPostgresExecutionQuarantineSurvivesReconnection (0.21s)
+2026-11-13T09:26:50.2828798Z === RUN   TestRealPostgresExecutionQuarantineRacesWithCommit
+2026-11-13T09:26:50.2829286Z --- PASS: TestRealPostgresExecutionQuarantineRacesWithCommit (0.21s)
+2026-11-13T09:26:50.2829834Z === RUN   TestRealPostgresClaimTransitionsScansPastThirtyThreePoisonedRows
+2026-11-13T09:26:50.2830452Z --- PASS: TestRealPostgresClaimTransitionsScansPastThirtyThreePoisonedRows (0.20s)
+2026-11-13T09:26:50.2831046Z === RUN   TestRealPostgresClaimTransitionsBoundsPoisonedScanPerCall
+2026-11-13T09:26:50.2832028Z --- PASS: TestRealPostgresClaimTransitionsBoundsPoisonedScanPerCall (0.25s)
+2026-11-13T09:26:50.2832564Z === RUN   TestRealPostgresPoisonedOutboxDoesNotStarveOtherRun
+2026-11-13T09:26:50.2833056Z --- PASS: TestRealPostgresPoisonedOutboxDoesNotStarveOtherRun (0.19s)
+2026-11-13T09:26:50.2833579Z === RUN   TestRealPostgresKernelStoreCreateReturnsPersistedTimestamp
+2026-11-13T09:26:50.2834137Z --- PASS: TestRealPostgresKernelStoreCreateReturnsPersistedTimestamp (0.17s)
+2026-11-13T09:26:50.2834711Z === RUN   TestRealPostgresKernelStoreApplyReturnsOwnCommittedSnapshot
+2026-11-13T09:26:50.2858333Z --- PASS: TestRealPostgresKernelStoreApplyReturnsOwnCommittedSnapshot (0.18s)
+2026-11-13T09:26:50.2859010Z === RUN   TestRealPostgresKernelStoreCreateReturnsOwnCommittedSnapshot
+2026-11-13T09:26:50.2859630Z --- PASS: TestRealPostgresKernelStoreCreateReturnsOwnCommittedSnapshot (0.18s)
+2026-11-13T09:26:50.2860162Z === RUN   TestRealPostgresManagedRecoveryStore
+2026-11-13T09:26:50.2860617Z === RUN   TestRealPostgresManagedRecoveryStore/owner-park-competition
+2026-11-13T09:26:50.2861186Z === RUN   TestRealPostgresManagedRecoveryStore/owner-park-competition/renew-owner
+2026-11-13T09:26:50.2861905Z     managed_recovery.go:670: T0 did not bind exact committed aggregate
+2026-11-13T09:26:50.2862471Z === RUN   TestRealPostgresManagedRecoveryStore/owner-park-competition/renew-park
+2026-11-13T09:26:50.2863098Z     managed_recovery.go:670: T0 did not bind exact committed aggregate
+2026-11-13T09:26:50.2863653Z === RUN   TestRealPostgresManagedRecoveryStore/owner-park-competition/claim-owner
+2026-11-13T09:26:50.2864270Z     managed_recovery.go:670: T0 did not bind exact committed aggregate
+2026-11-13T09:26:50.2864800Z === RUN   TestRealPostgresManagedRecoveryStore/owner-park-competition/claim-park
+2026-11-13T09:26:50.2865687Z     managed_recovery.go:670: T0 did not bind exact committed aggregate
+2026-11-13T09:26:50.2866310Z === RUN   TestRealPostgresManagedRecoveryStore/owner-and-leave
+2026-11-13T09:26:50.2866949Z === RUN   TestRealPostgresManagedRecoveryStore/owner-and-leave/live
+2026-11-13T09:26:50.2867497Z     managed_recovery.go:132: T0 did not bind exact committed aggregate
+2026-11-13T09:26:50.2867965Z === RUN   TestRealPostgresManagedRecoveryStore/owner-and-leave/renew
+2026-11-13T09:26:50.2868514Z     managed_recovery.go:132: T0 did not bind exact committed aggregate
+2026-11-13T09:26:50.2868978Z === RUN   TestRealPostgresManagedRecoveryStore/owner-and-leave/leave
+2026-11-13T09:26:50.2869510Z     managed_recovery.go:132: T0 did not bind exact committed aggregate
+2026-11-13T09:26:50.2869978Z === RUN   TestRealPostgresManagedRecoveryStore/owner-and-leave/claim
+2026-11-13T09:26:50.2870505Z     managed_recovery.go:132: T0 did not bind exact committed aggregate
+2026-11-13T09:26:50.2870974Z === RUN   TestRealPostgresManagedRecoveryStore/owner-and-leave/eventhead
+2026-11-13T09:26:50.2871541Z     managed_recovery.go:132: T0 did not bind exact committed aggregate
+2026-11-13T09:26:50.2872012Z === RUN   TestRealPostgresManagedRecoveryStore/parked-ancestor
+2026-11-13T09:26:50.2872493Z === RUN   TestRealPostgresManagedRecoveryStore/parked-ancestor/park-first
+2026-11-13T09:26:50.2873053Z     managed_recovery.go:591: T0 did not bind exact committed aggregate
+2026-11-13T09:26:50.2873549Z === RUN   TestRealPostgresManagedRecoveryStore/parked-ancestor/child-first
+2026-11-13T09:26:50.2874128Z     managed_recovery.go:591: T0 did not bind exact committed aggregate
+2026-11-13T09:26:50.2874587Z === RUN   TestRealPostgresManagedRecoveryStore/parked-gates
+2026-11-13T09:26:50.2875322Z     managed_recovery.go:186: T0 did not bind exact committed aggregate
+2026-11-13T09:26:50.2875774Z === RUN   TestRealPostgresManagedRecoveryStore/selection-ack
+2026-11-13T09:26:50.2876224Z === RUN   TestRealPostgresManagedRecoveryStore/selection-ack/RESUME
+2026-11-13T09:26:50.2876758Z     managed_recovery.go:262: T0 did not bind exact committed aggregate
+2026-11-13T09:26:50.2877228Z === RUN   TestRealPostgresManagedRecoveryStore/selection-ack/CANCEL
+2026-11-13T09:26:50.2877755Z     managed_recovery.go:262: T0 did not bind exact committed aggregate
+2026-11-13T09:26:50.2878213Z === RUN   TestRealPostgresManagedRecoveryStore/two-enable-claimants
+2026-11-13T09:26:50.2878742Z     managed_recovery.go:541: T0 did not bind exact committed aggregate
+2026-11-13T09:26:50.2879202Z === RUN   TestRealPostgresManagedRecoveryStore/transaction-ack
+2026-11-13T09:26:50.2879647Z === RUN   TestRealPostgresManagedRecoveryStore/transaction-ack/t0
+2026-11-13T09:26:50.2880170Z     managed_recovery.go:469: T0 did not bind exact committed aggregate
+2026-11-13T09:26:50.2880777Z === RUN   TestRealPostgresManagedRecoveryStore/transaction-ack/park
+2026-11-13T09:26:50.2881307Z     managed_recovery.go:469: T0 did not bind exact committed aggregate
+2026-11-13T09:26:50.2881782Z === RUN   TestRealPostgresManagedRecoveryStore/transaction-ack/enable
+2026-11-13T09:26:50.2882320Z     managed_recovery.go:469: T0 did not bind exact committed aggregate
+2026-11-13T09:26:50.2882784Z === RUN   TestRealPostgresManagedRecoveryStore/transaction-ack/cancel
+2026-11-13T09:26:50.2883311Z     managed_recovery.go:469: T0 did not bind exact committed aggregate
+2026-11-13T09:26:50.2883764Z === RUN   TestRealPostgresManagedRecoveryStore/historical-closure
+2026-11-13T09:26:50.2884285Z     managed_recovery.go:332: T0 did not bind exact committed aggregate
+2026-11-13T09:26:50.2884709Z --- FAIL: TestRealPostgresManagedRecoveryStore (4.43s)
+2026-11-13T09:26:50.2885576Z     --- FAIL: TestRealPostgresManagedRecoveryStore/owner-park-competition (0.87s)
+2026-11-13T09:26:50.2886392Z         --- FAIL: TestRealPostgresManagedRecoveryStore/owner-park-competition/renew-owner (0.22s)
+2026-11-13T09:26:50.2887228Z         --- FAIL: TestRealPostgresManagedRecoveryStore/owner-park-competition/renew-park (0.22s)
+2026-11-13T09:26:50.2888048Z         --- FAIL: TestRealPostgresManagedRecoveryStore/owner-park-competition/claim-owner (0.22s)
+2026-11-13T09:26:50.2889016Z         --- FAIL: TestRealPostgresManagedRecoveryStore/owner-park-competition/claim-park (0.22s)
+2026-11-13T09:26:50.2889677Z     --- FAIL: TestRealPostgresManagedRecoveryStore/owner-and-leave (1.09s)
+2026-11-13T09:26:50.2890355Z         --- FAIL: TestRealPostgresManagedRecoveryStore/owner-and-leave/live (0.22s)
+2026-11-13T09:26:50.2891053Z         --- FAIL: TestRealPostgresManagedRecoveryStore/owner-and-leave/renew (0.22s)
+2026-11-13T09:26:50.2891747Z         --- FAIL: TestRealPostgresManagedRecoveryStore/owner-and-leave/leave (0.22s)
+2026-11-13T09:26:50.2892447Z         --- FAIL: TestRealPostgresManagedRecoveryStore/owner-and-leave/claim (0.22s)
+2026-11-13T09:26:50.2893160Z         --- FAIL: TestRealPostgresManagedRecoveryStore/owner-and-leave/eventhead (0.22s)
+2026-11-13T09:26:50.2893787Z     --- FAIL: TestRealPostgresManagedRecoveryStore/parked-ancestor (0.46s)
+2026-11-13T09:26:50.2894487Z         --- FAIL: TestRealPostgresManagedRecoveryStore/parked-ancestor/park-first (0.24s)
+2026-11-13T09:26:50.2895490Z         --- FAIL: TestRealPostgresManagedRecoveryStore/parked-ancestor/child-first (0.21s)
+2026-11-13T09:26:50.2896136Z     --- FAIL: TestRealPostgresManagedRecoveryStore/parked-gates (0.22s)
+2026-11-13T09:26:50.2896711Z     --- FAIL: TestRealPostgresManagedRecoveryStore/selection-ack (0.44s)
+2026-11-13T09:26:50.2897382Z         --- FAIL: TestRealPostgresManagedRecoveryStore/selection-ack/RESUME (0.22s)
+2026-11-13T09:26:50.2898066Z         --- FAIL: TestRealPostgresManagedRecoveryStore/selection-ack/CANCEL (0.22s)
+2026-11-13T09:26:50.2898694Z     --- FAIL: TestRealPostgresManagedRecoveryStore/two-enable-claimants (0.22s)
+2026-11-13T09:26:50.2899293Z     --- FAIL: TestRealPostgresManagedRecoveryStore/transaction-ack (0.90s)
+2026-11-13T09:26:50.2899954Z         --- FAIL: TestRealPostgresManagedRecoveryStore/transaction-ack/t0 (0.22s)
+2026-11-13T09:26:50.2900700Z         --- FAIL: TestRealPostgresManagedRecoveryStore/transaction-ack/park (0.23s)
+2026-11-13T09:26:50.2901403Z         --- FAIL: TestRealPostgresManagedRecoveryStore/transaction-ack/enable (0.22s)
+2026-11-13T09:26:50.2902106Z         --- FAIL: TestRealPostgresManagedRecoveryStore/transaction-ack/cancel (0.23s)
+2026-11-13T09:26:50.2902735Z     --- FAIL: TestRealPostgresManagedRecoveryStore/historical-closure (0.23s)
+2026-11-13T09:26:50.2903261Z === RUN   TestRealPostgresNativeExternalSignalAndVerifiedReceipt
+2026-11-13T09:26:50.2903790Z --- PASS: TestRealPostgresNativeExternalSignalAndVerifiedReceipt (0.44s)
+2026-11-13T09:26:50.2904305Z === RUN   TestRealPostgresNativeRunLeaseApprovalAndResume
+2026-11-13T09:26:50.2904763Z --- PASS: TestRealPostgresNativeRunLeaseApprovalAndResume (0.48s)
+2026-11-13T09:26:50.2905751Z === RUN   TestRealPostgresPR82SubworkflowRelationshipPrecedesPhysicalChild
+2026-11-13T09:26:50.2906363Z === RUN   TestRealPostgresPR82SubworkflowRelationshipPrecedesPhysicalChild/normal
+2026-11-13T09:26:50.2906998Z === RUN   TestRealPostgresPR82SubworkflowRelationshipPrecedesPhysicalChild/reject
+2026-11-13T09:26:50.2907690Z === RUN   TestRealPostgresPR82SubworkflowRelationshipPrecedesPhysicalChild/committed-lost-reply
+2026-11-13T09:26:50.2908393Z --- PASS: TestRealPostgresPR82SubworkflowRelationshipPrecedesPhysicalChild (0.73s)
+2026-11-13T09:26:50.2909157Z     --- PASS: TestRealPostgresPR82SubworkflowRelationshipPrecedesPhysicalChild/normal (0.28s)
+2026-11-13T09:26:50.2909947Z     --- PASS: TestRealPostgresPR82SubworkflowRelationshipPrecedesPhysicalChild/reject (0.22s)
+2026-11-13T09:26:50.2910806Z     --- PASS: TestRealPostgresPR82SubworkflowRelationshipPrecedesPhysicalChild/committed-lost-reply (0.23s)
+2026-11-13T09:26:50.2911480Z === RUN   TestRealPostgresKernelStoreLoadIndependentOfLargeHistory
+2026-11-13T09:26:50.2912025Z --- PASS: TestRealPostgresKernelStoreLoadIndependentOfLargeHistory (2.33s)
+2026-11-13T09:26:50.2912529Z === RUN   TestRealPostgresKernelStoreConformanceAndRestart
+2026-11-13T09:26:50.2913043Z === RUN   TestRealPostgresKernelStoreConformanceAndRestart/create-load-isolation
+2026-11-13T09:26:50.2913746Z === RUN   TestRealPostgresKernelStoreConformanceAndRestart/duplicate-create
+2026-11-13T09:26:50.2914347Z === RUN   TestRealPostgresKernelStoreConformanceAndRestart/checkpoint-result-isolation
+2026-11-13T09:26:50.2915104Z === RUN   TestRealPostgresKernelStoreConformanceAndRestart/cas-and-event-journal
+2026-11-13T09:26:50.2915678Z === RUN   TestRealPostgresKernelStoreConformanceAndRestart/concurrent-cas
+2026-11-13T09:26:50.2916229Z === RUN   TestRealPostgresKernelStoreConformanceAndRestart/transition-outbox
+2026-11-13T09:26:50.2916879Z === RUN   TestRealPostgresKernelStoreConformanceAndRestart/transition-late-ack-before-takeover
+2026-11-13T09:26:50.2917593Z === RUN   TestRealPostgresKernelStoreConformanceAndRestart/transition-stale-ack-after-takeover
+2026-11-13T09:26:50.2918201Z --- PASS: TestRealPostgresKernelStoreConformanceAndRestart (2.40s)
+2026-11-13T09:26:50.2918870Z     --- PASS: TestRealPostgresKernelStoreConformanceAndRestart/create-load-isolation (0.17s)
+2026-11-13T09:26:50.2919612Z     --- PASS: TestRealPostgresKernelStoreConformanceAndRestart/duplicate-create (0.18s)
+2026-11-13T09:26:50.2920395Z     --- PASS: TestRealPostgresKernelStoreConformanceAndRestart/checkpoint-result-isolation (0.17s)
+2026-11-13T09:26:50.2921169Z     --- PASS: TestRealPostgresKernelStoreConformanceAndRestart/cas-and-event-journal (0.18s)
+2026-11-13T09:26:50.2921892Z     --- PASS: TestRealPostgresKernelStoreConformanceAndRestart/concurrent-cas (0.38s)
+2026-11-13T09:26:50.2922597Z     --- PASS: TestRealPostgresKernelStoreConformanceAndRestart/transition-outbox (0.19s)
+2026-11-13T09:26:50.2923413Z     --- PASS: TestRealPostgresKernelStoreConformanceAndRestart/transition-late-ack-before-takeover (0.24s)
+2026-11-13T09:26:50.2924306Z     --- PASS: TestRealPostgresKernelStoreConformanceAndRestart/transition-stale-ack-after-takeover (0.18s)
+2026-11-13T09:26:50.2925241Z === RUN   TestRealPostgresReconciliationWatermarkSurvivesRestartAndConcurrentWriters
+2026-11-13T09:26:50.2925978Z --- PASS: TestRealPostgresReconciliationWatermarkSurvivesRestartAndConcurrentWriters (0.61s)
+2026-11-13T09:26:50.2926663Z === RUN   TestRealPostgresSchedulerReconcileSurvivesRestartAndLateParentWait
+2026-11-13T09:26:50.2927300Z --- PASS: TestRealPostgresSchedulerReconcileSurvivesRestartAndLateParentWait (0.22s)
+2026-11-13T09:26:50.2927749Z FAIL
+2026-11-13T09:26:50.2928108Z FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	27.942s
+2026-11-13T09:26:50.2928718Z ?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]
+2026-11-13T09:26:50.2929155Z FAIL
+2026-11-13T09:26:50.3463078Z file:///home/runner/work/Gaoge-Agent-Runtime/Gaoge-Agent-Runtime/scripts/run-integration.mjs:48
+2026-11-13T09:26:50.3465173Z     throw new Error(`${command} ${args.join(" ")} failed with exit code ${result.status ?? 1}`);
+2026-11-13T09:26:50.3465972Z           ^
+2026-11-13T09:26:50.3466137Z 
+2026-11-13T09:26:50.3466543Z Error: go test -race ./... -run ^TestRealPostgres -count=1 -v failed with exit code 1
+2026-11-13T09:26:50.3467741Z     at run (file:///home/runner/work/Gaoge-Agent-Runtime/Gaoge-Agent-Runtime/scripts/run-integration.mjs:48:11)
+2026-11-13T09:26:50.3469094Z     at runSuites (file:///home/runner/work/Gaoge-Agent-Runtime/Gaoge-Agent-Runtime/scripts/run-integration.mjs:32:3)
+2026-11-13T09:26:50.3470386Z     at file:///home/runner/work/Gaoge-Agent-Runtime/Gaoge-Agent-Runtime/scripts/run-integration.mjs:11:3
+2026-11-13T09:26:50.3471360Z     at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+2026-11-13T09:26:50.3472017Z     at async node:internal/modules/esm/loader:647:26
+2026-11-13T09:26:50.3472833Z     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+2026-11-13T09:26:50.3473269Z 
+2026-11-13T09:26:50.3473381Z Node.js v24.22.2
+2026-11-13T09:26:50.3537570Z make: *** [Makefile:134: integration-test] Error 1
+2026-11-13T09:26:50.3554596Z ##[error]Process completed with exit code 2.
+2026-11-13T09:26:50.3657712Z Post job cleanup.
+2026-11-13T09:26:50.3661629Z ##[start-action display=Run actions/cache@v5;id=__9a4e50c7-49d8-499e-b527-f49161b2c5a4.__actions_cache]
+2026-11-13T09:26:50.3664841Z ##[end-action id=__9a4e50c7-49d8-499e-b527-f49161b2c5a4.__actions_cache;outcome=skipped;conclusion=skipped;duration_ms=0]
+2026-11-13T09:26:50.3667282Z ##[start-action display=Run actions/setup-go@v7;id=__9a4e50c7-49d8-499e-b527-f49161b2c5a4.go]
+2026-11-13T09:26:50.3669389Z ##[end-action id=__9a4e50c7-49d8-499e-b527-f49161b2c5a4.go;outcome=skipped;conclusion=skipped;duration_ms=0]
+2026-11-13T09:26:50.3735203Z Post job cleanup.
+2026-11-13T09:26:50.4657818Z [command]/usr/bin/git version
+2026-11-13T09:26:50.4706870Z git version 2.56.1
+2026-11-13T09:26:50.4752882Z Temporarily overriding HOME='/home/runner/work/_temp/0868682e-45f5-4ff2-83ec-1aafb34a54b5' before making global git config changes
+2026-11-13T09:26:50.4754443Z Adding repository directory to the temporary git global config as a safe directory
+2026-11-13T09:26:50.4766027Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/Gaoge-Agent-Runtime/Gaoge-Agent-Runtime
+2026-11-13T09:26:50.4805286Z Removing SSH command configuration
+2026-11-13T09:26:50.4813353Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-11-13T09:26:50.4885992Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-11-13T09:26:50.5311744Z Removing HTTP extra header
+2026-11-13T09:26:50.5317232Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-11-13T09:26:50.5374781Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-11-13T09:26:50.5702693Z Removing includeIf entries pointing to credentials config files
+2026-11-13T09:26:50.5711428Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-11-13T09:26:50.5746937Z includeif.gitdir:/home/runner/work/Gaoge-Agent-Runtime/Gaoge-Agent-Runtime/.git.path
+2026-11-13T09:26:50.5748001Z includeif.gitdir:/home/runner/work/Gaoge-Agent-Runtime/Gaoge-Agent-Runtime/.git/worktrees/*.path
+2026-11-13T09:26:50.5748571Z includeif.gitdir:/github/workspace/.git.path
+2026-11-13T09:26:50.5748971Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-11-13T09:26:50.5760852Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/Gaoge-Agent-Runtime/Gaoge-Agent-Runtime/.git.path
+2026-11-13T09:26:50.5788193Z /home/runner/work/_temp/git-credentials-4aadb2ee-2e29-46a2-9aee-de9a58e95d4e.config
+2026-11-13T09:26:50.5801039Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/Gaoge-Agent-Runtime/Gaoge-Agent-Runtime/.git.path \/home\/runner\/work\/_temp\/git\-credentials\-4aadb2ee\-2e29\-46a2\-9aee\-de9a58e95d4e\.config
+2026-11-13T09:26:50.5843999Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/Gaoge-Agent-Runtime/Gaoge-Agent-Runtime/.git/worktrees/*.path
+2026-11-13T09:26:50.5871611Z /home/runner/work/_temp/git-credentials-4aadb2ee-2e29-46a2-9aee-de9a58e95d4e.config
+2026-11-13T09:26:50.5883138Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/Gaoge-Agent-Runtime/Gaoge-Agent-Runtime/.git/worktrees/*.path \/home\/runner\/work\/_temp\/git\-credentials\-4aadb2ee\-2e29\-46a2\-9aee\-de9a58e95d4e\.config
+2026-11-13T09:26:50.5918525Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git.path
+2026-11-13T09:26:50.5942619Z /github/runner_temp/git-credentials-4aadb2ee-2e29-46a2-9aee-de9a58e95d4e.config
+2026-11-13T09:26:50.5951769Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git.path \/github\/runner_temp\/git\-credentials\-4aadb2ee\-2e29\-46a2\-9aee\-de9a58e95d4e\.config
+2026-11-13T09:26:50.5986247Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-11-13T09:26:50.6009760Z /github/runner_temp/git-credentials-4aadb2ee-2e29-46a2-9aee-de9a58e95d4e.config
+2026-11-13T09:26:50.6017818Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path \/github\/runner_temp\/git\-credentials\-4aadb2ee\-2e29\-46a2\-9aee\-de9a58e95d4e\.config
+2026-11-13T09:26:50.6054092Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-11-13T09:26:50.6332356Z Removing credentials config '/home/runner/work/_temp/git-credentials-4aadb2ee-2e29-46a2-9aee-de9a58e95d4e.config'
+2026-11-13T09:26:50.6463152Z Print service container logs: b7f18f2953ca4d92909905daa7fdcf8c_postgres16alpine_bc07c0
+2026-11-13T09:26:50.6468391Z ##[command]/usr/bin/docker logs --details f7ab50067d857fb8b9ada1d4515cd49ee24f11535b88fbf80ba6f33a5f363478
+2026-11-13T09:26:50.6615339Z  The files belonging to this database system will be owned by user "postgres".
+2026-11-13T09:26:50.6617411Z  This user must also own the server process.
+2026-11-13T09:26:50.6617935Z  
+2026-11-13T09:26:50.6618506Z  The database cluster will be initialized with locale "en_US.utf8".
+2026-11-13T09:26:50.6619351Z  The default database encoding has accordingly been set to "UTF8".
+2026-11-13T09:26:50.6620106Z  The default text search configuration will be set to "english".
+2026-11-13T09:26:50.6620746Z  
+2026-11-13T09:26:50.6621089Z  Data page checksums are disabled.
+2026-11-13T09:26:50.6621495Z  
+2026-11-13T09:26:50.6621819Z  fixing permissions on existing directory /var/lib/postgresql/data ... ok
+2026-11-13T09:26:50.6622391Z  creating subdirectories ... ok
+2026-11-13T09:26:50.6622906Z  selecting dynamic shared memory implementation ... posix
+2026-11-13T09:26:50.6623494Z  selecting default max_connections ... 100
+2026-11-13T09:26:50.6623980Z  selecting default shared_buffers ... 128MB
+2026-11-13T09:26:50.6624287Z  selecting default time zone ... UTC
+2026-11-13T09:26:50.6624571Z  creating configuration files ... ok
+2026-11-13T09:26:50.6624840Z  running bootstrap script ... ok
+2026-11-13T09:26:50.6625437Z  performing post-bootstrap initialization ... ok
+2026-11-13T09:26:50.6625755Z  syncing data to disk ... ok
+2026-11-13T09:26:50.6625988Z  
+2026-11-13T09:26:50.6626159Z  
+2026-11-13T09:26:50.6626386Z  Success. You can now start the database server using:
+2026-11-13T09:26:50.6626689Z  
+2026-11-13T09:26:50.6626928Z      pg_ctl -D /var/lib/postgresql/data -l logfile start
+2026-11-13T09:26:50.6627241Z  
+2026-11-13T09:26:50.6627821Z  waiting for server to start....2026-11-13 09:25:46.485 UTC [41] LOG:  starting PostgreSQL 16.16 on x86_64-pc-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit
+2026-11-13T09:26:50.6628631Z  2026-11-13 09:25:46.486 UTC [41] LOG:  listening on Unix socket "/var/run/postgresql/.s.PGSQL.5432"
+2026-11-13T09:26:50.6629214Z  2026-11-13 09:25:46.489 UTC [44] LOG:  database system was shut down at 2026-11-13 09:25:46 UTC
+2026-11-13T09:26:50.6629741Z  2026-11-13 09:25:46.494 UTC [41] LOG:  database system is ready to accept connections
+2026-11-13T09:26:50.6630114Z   done
+2026-11-13T09:26:50.6630302Z  server started
+2026-11-13T09:26:50.6630497Z  CREATE DATABASE
+2026-11-13T09:26:50.6632024Z  sh: locale: not found
+2026-11-13T09:26:50.6632389Z  2026-11-13 09:25:45.673 UTC [35] WARNING:  no usable system locales were found
+2026-11-13T09:26:50.6632881Z  initdb: warning: enabling "trust" authentication for local connections
+2026-11-13T09:26:50.6633583Z  initdb: hint: You can change this by editing pg_hba.conf or using the option -A, or --auth-local and --auth-host, the next time you run initdb.
+2026-11-13T09:26:50.6634469Z  2026-11-13 09:25:46.785 UTC [1] LOG:  starting PostgreSQL 16.16 on x86_64-pc-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit
+2026-11-13T09:26:50.6635693Z  2026-11-13 09:25:46.785 UTC [1] LOG:  listening on IPv4 address "0.0.0.0", port 5432
+2026-11-13T09:26:50.6636528Z  2026-11-13 09:25:46.785 UTC [1] LOG:  listening on IPv6 address "::", port 5432
+2026-11-13T09:26:50.6637541Z  2026-11-13 09:25:46.788 UTC [1] LOG:  listening on Unix socket "/var/run/postgresql/.s.PGSQL.5432"
+2026-11-13T09:26:50.6638138Z  2026-11-13 09:25:46.792 UTC [57] LOG:  database system was shut down at 2026-11-13 09:25:46 UTC
+2026-11-13T09:26:50.6638664Z  2026-11-13 09:25:46.801 UTC [1] LOG:  database system is ready to accept connections
+2026-11-13T09:26:50.6639324Z  2026-11-13 09:26:24.355 UTC [130] ERROR:  new row for relation "agent_kernel_events" violates check constraint "injected_write_failure"
+2026-11-13T09:26:50.6640352Z  2026-11-13 09:26:24.355 UTC [130] DETAIL:  Failing row contains (atomic-transition, 2, test.wakeup, , , 2026-11-13 09:26:24.348928+00).
+2026-11-13T09:26:50.6641262Z  2026-11-13 09:26:24.355 UTC [130] STATEMENT:  INSERT INTO "agent_kernel_events" ("run_id","seq","type","message","data_json","created_at") VALUES ($1,$2,$3,$4,$5,$6)
+2026-11-13T09:26:50.6642237Z  2026-11-13 09:26:24.572 UTC [133] ERROR:  new row for relation "agent_kernel_transition_outbox" violates check constraint "injected_write_failure"
+2026-11-13T09:26:50.6643466Z  2026-11-13 09:26:24.572 UTC [133] DETAIL:  Failing row contains (atomic-transition:2, atomic-transition, test, running, 2, [{"type":"test.wakeup","wakeup":true}], 2026-11-13 09:26:24.564971+00, 2026-11-13 09:26:24.564971+00, 0, , , null, , null).
+2026-11-13T09:26:50.6645490Z  2026-11-13 09:26:24.572 UTC [133] STATEMENT:  INSERT INTO "agent_kernel_transition_outbox" ("id","run_id","kind","status","revision","events_json","committed_at","available_at","attempts","lease_id","worker_id","lease_until","quarantine_code","quarantined_at") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+2026-11-13T09:26:50.6646826Z  2026-11-13 09:26:44.159 UTC [313] ERROR:  duplicate key value violates unique constraint "agent_run_relations_pkey"
+2026-11-13T09:26:50.6647568Z  2026-11-13 09:26:44.159 UTC [313] DETAIL:  Key (child_run_id)=(effect_44efca410dd54388a6b2b2768ae40996-child) already exists.
+2026-11-13T09:26:50.6648632Z  2026-11-13 09:26:44.159 UTC [313] STATEMENT:  INSERT INTO "agent_run_relations" ("child_run_id","parent_run_id","kind","owner_node_id","created_at","last_parent_revision","last_child_revision") VALUES ($1,$2,$3,$4,$5,$6,$7)
+2026-11-13T09:26:50.6649690Z  2026-11-13 09:26:47.322 UTC [332] ERROR:  duplicate key value violates unique constraint "agent_kernel_runs_pkey"
+2026-11-13T09:26:50.6650455Z  2026-11-13 09:26:47.322 UTC [332] DETAIL:  Key (run_id)=(run_duplicate) already exists.
+2026-11-13T09:26:50.6652708Z  2026-11-13 09:26:47.322 UTC [332] STATEMENT:  INSERT INTO "agent_kernel_runs" ("run_id","request_id","parent_run_id","kind","tenant_id","actor_id","thread_kind","thread_id","goal","status","revision","execution_epoch","execution_owner","execution_lease_id","execution_expires_at","execution_quarantine_revision","execution_quarantine_generation","execution_quarantine_code","error_code","error_detail","deadline_at","ended_at","state_json","checkpoint_json","result_json","last_event_seq","created_at","updated_at") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)
+2026-11-13T09:26:50.6654718Z  
+2026-11-13T09:26:50.6655048Z  
+2026-11-13T09:26:50.6655493Z  /usr/local/bin/docker-entrypoint.sh: ignoring /docker-entrypoint-initdb.d/*
+2026-11-13T09:26:50.6655902Z  
+2026-11-13T09:26:50.6656270Z  waiting for server to shut down....2026-11-13 09:25:46.657 UTC [41] LOG:  received fast shutdown request
+2026-11-13T09:26:50.6656806Z  2026-11-13 09:25:46.657 UTC [41] LOG:  aborting any active transactions
+2026-11-13T09:26:50.6657400Z  2026-11-13 09:25:46.660 UTC [41] LOG:  background worker "logical replication launcher" (PID 47) exited with exit code 1
+2026-11-13T09:26:50.6657942Z  2026-11-13 09:25:46.663 UTC [42] LOG:  shutting down
+2026-11-13T09:26:50.6658339Z  2026-11-13 09:25:46.664 UTC [42] LOG:  checkpoint starting: shutdown immediate
+2026-11-13T09:26:50.6659439Z  2026-11-13 09:25:46.688 UTC [42] LOG:  checkpoint complete: wrote 935 buffers (5.7%); 0 WAL file(s) added, 0 removed, 0 recycled; write=0.017 s, sync=0.002 s, total=0.025 s; sync files=301, longest=0.001 s, average=0.001 s; distance=4355 kB, estimate=4355 kB; lsn=0/1949CE0, redo lsn=0/1949CE0
+2026-11-13T09:26:50.6660687Z  2026-11-13 09:25:46.698 UTC [41] LOG:  database system is shut down
+2026-11-13T09:26:50.6661018Z   done
+2026-11-13T09:26:50.6661214Z  server stopped
+2026-11-13T09:26:50.6661416Z  
+2026-11-13T09:26:50.6661657Z  PostgreSQL init process complete; ready for start up.
+2026-11-13T09:26:50.6661966Z  
+2026-11-13T09:26:50.6669072Z Stop and remove container: b7f18f2953ca4d92909905daa7fdcf8c_postgres16alpine_bc07c0
+2026-11-13T09:26:50.6674719Z ##[command]/usr/bin/docker rm --force f7ab50067d857fb8b9ada1d4515cd49ee24f11535b88fbf80ba6f33a5f363478
+2026-11-13T09:26:50.8360010Z f7ab50067d857fb8b9ada1d4515cd49ee24f11535b88fbf80ba6f33a5f363478
+2026-11-13T09:26:50.8414143Z Print service container logs: 3a2cefca864e428290bc319b9bb98bd7_redis8alpine_37b09b
+2026-11-13T09:26:50.8415859Z ##[command]/usr/bin/docker logs --details 861bb7065bd709a5ec6c5855efcd65d570c236099155c4f2c2884bb9fc4b7bc4
+2026-11-13T09:26:50.8567431Z  Starting Redis Server
+2026-11-13T09:26:50.8570378Z  1:C 13 Nov 2026 09:25:46.868 # WARNING Memory overcommit must be enabled! Without it, a background save or replication may fail under low memory condition. Being disabled, it can also cause failures without low memory condition, see https://github.com/jemalloc/jemalloc/issues/1328. To fix this issue add 'vm.overcommit_memory = 1' to /etc/sysctl.conf and then reboot or run the command 'sysctl vm.overcommit_memory=1' for this to take effect.
+2026-11-13T09:26:50.8572159Z  1:C 13 Nov 2026 09:25:46.868 * oO0OoO0OoO0Oo Redis is starting oO0OoO0OoO0Oo
+2026-11-13T09:26:50.8572739Z  1:C 13 Nov 2026 09:25:46.868 * Redis version=8.10.3, bits=64, commit=00000000, modified=1, pid=1, just started
+2026-11-13T09:26:50.8573246Z  1:C 13 Nov 2026 09:25:46.868 * Configuration loaded
+2026-11-13T09:26:50.8573620Z  1:M 13 Nov 2026 09:25:46.868 * monotonic clock: POSIX clock_gettime
+2026-11-13T09:26:50.8574041Z  1:M 13 Nov 2026 09:25:46.869 * Running mode=standalone, port=6379.
+2026-11-13T09:26:50.8574458Z  1:M 13 Nov 2026 09:25:46.870 * <bf> RedisBloom version 8.10.1 (Git=unknown)
+2026-11-13T09:26:50.8575154Z  1:M 13 Nov 2026 09:25:46.870 * <bf> Registering configuration options: [
+2026-11-13T09:26:50.8575907Z  1:M 13 Nov 2026 09:25:46.870 * <bf> 	{ bf-error-rate       :      0.01 }
+2026-11-13T09:26:50.8576603Z  1:M 13 Nov 2026 09:25:46.870 * <bf> 	{ bf-initial-size     :       100 }
+2026-11-13T09:26:50.8577304Z  1:M 13 Nov 2026 09:25:46.870 * <bf> 	{ bf-expansion-factor :         2 }
+2026-11-13T09:26:50.8577879Z  1:M 13 Nov 2026 09:25:46.870 * <bf> 	{ cf-bucket-size      :         2 }
+2026-11-13T09:26:50.8578682Z  1:M 13 Nov 2026 09:25:46.870 * <bf> 	{ cf-initial-size     :      1024 }
+2026-11-13T09:26:50.8579143Z  1:M 13 Nov 2026 09:25:46.870 * <bf> 	{ cf-max-iterations   :        20 }
+2026-11-13T09:26:50.8579545Z  1:M 13 Nov 2026 09:25:46.870 * <bf> 	{ cf-expansion-factor :         1 }
+2026-11-13T09:26:50.8579948Z  1:M 13 Nov 2026 09:25:46.870 * <bf> 	{ cf-max-expansions   :        32 }
+2026-11-13T09:26:50.8580283Z  1:M 13 Nov 2026 09:25:46.870 * <bf> ]
+2026-11-13T09:26:50.8580694Z  1:M 13 Nov 2026 09:25:46.871 * Module 'bf' loaded from /usr/local/lib/redis/modules//redisbloom.so
+2026-11-13T09:26:50.8581326Z  1:M 13 Nov 2026 09:25:46.876 * <search> search-workers default: 4 (min of MAX_WORKER_THREADS=16 and CPU cores)
+2026-11-13T09:26:50.8581924Z  1:M 13 Nov 2026 09:25:46.876 * <search> Redis version found by RedisSearch : 8.10.3 - oss
+2026-11-13T09:26:50.8582406Z  1:M 13 Nov 2026 09:25:46.876 * <search> RediSearch version 8.10.1 (Git=)
+2026-11-13T09:26:50.8583660Z  1:M 13 Nov 2026 09:25:46.876 * <search> gc: ON, prefix min length: 2, min word length to stem: 4, prefix max expansions: 200, query timeout (ms): 500, timeout policy: return, oom policy: return, cursor read size: 1000, cursor max idle (ms): 300000, max doctable size: 1000000, max number of search results:  1000000, default scorer: BM25STD, 
+2026-11-13T09:26:50.8597644Z  1:M 13 Nov 2026 09:25:46.876 * <search> Initialized thread pools!
+2026-11-13T09:26:50.8598366Z  1:M 13 Nov 2026 09:25:46.876 * <search> Enabled workers threadpool of size 4
+2026-11-13T09:26:50.8599266Z  1:M 13 Nov 2026 09:25:46.876 * <search> Subscribe to config changes
+2026-11-13T09:26:50.8600013Z  1:M 13 Nov 2026 09:25:46.876 * <search> Subscribe to cluster slot migration events
+2026-11-13T09:26:50.8600877Z  1:M 13 Nov 2026 09:25:46.876 * <search> Subscribe to cluster topology change events
+2026-11-13T09:26:50.8601574Z  1:M 13 Nov 2026 09:25:46.876 * <search> Enabled role change notification
+2026-11-13T09:26:50.8602373Z  1:M 13 Nov 2026 09:25:46.877 * <search> Cluster configuration: AUTO partitions, type: 0, coordinator timeout: 0ms
+2026-11-13T09:26:50.8603055Z  1:M 13 Nov 2026 09:25:46.877 * Module 'search' loaded from /usr/local/lib/redis/modules//redisearch.so
+2026-11-13T09:26:50.8603614Z  1:M 13 Nov 2026 09:25:46.878 * <timeseries> RedisTimeSeries version 81001, git_sha=
+2026-11-13T09:26:50.8604153Z  1:M 13 Nov 2026 09:25:46.878 * <timeseries> Redis version found by RedisTimeSeries : 8.10.3 - oss
+2026-11-13T09:26:50.8604693Z  1:M 13 Nov 2026 09:25:46.878 * <timeseries> Registering configuration options: [
+2026-11-13T09:26:50.8605450Z  1:M 13 Nov 2026 09:25:46.878 * <timeseries> 	{ ts-compaction-policy   :              }
+2026-11-13T09:26:50.8605958Z  1:M 13 Nov 2026 09:25:46.878 * <timeseries> 	{ ts-num-threads         :            3 }
+2026-11-13T09:26:50.8606450Z  1:M 13 Nov 2026 09:25:46.878 * <timeseries> 	{ ts-libmr-protocol      :     INTERNAL }
+2026-11-13T09:26:50.8606941Z  1:M 13 Nov 2026 09:25:46.878 * <timeseries> 	{ ts-retention-policy    :            0 }
+2026-11-13T09:26:50.8607417Z  1:M 13 Nov 2026 09:25:46.878 * <timeseries> 	{ ts-duplicate-policy    :        block }
+2026-11-13T09:26:50.8607930Z  1:M 13 Nov 2026 09:25:46.878 * <timeseries> 	{ ts-chunk-size-bytes    :         4096 }
+2026-11-13T09:26:50.8608400Z  1:M 13 Nov 2026 09:25:46.878 * <timeseries> 	{ ts-encoding            :   compressed }
+2026-11-13T09:26:50.8608881Z  1:M 13 Nov 2026 09:25:46.878 * <timeseries> 	{ ts-ignore-max-time-diff:            0 }
+2026-11-13T09:26:50.8609368Z  1:M 13 Nov 2026 09:25:46.878 * <timeseries> 	{ ts-ignore-max-val-diff :     0.000000 }
+2026-11-13T09:26:50.8609836Z  1:M 13 Nov 2026 09:25:46.878 * <timeseries> 	{ ts-topology-events     :         true }
+2026-11-13T09:26:50.8610227Z  1:M 13 Nov 2026 09:25:46.878 * <timeseries> ]
+2026-11-13T09:26:50.8610639Z  1:M 13 Nov 2026 09:25:46.879 * <timeseries> Detected redis oss (cluster-enabled=no)
+2026-11-13T09:26:50.8620686Z  1:M 13 Nov 2026 09:25:46.879 * <timeseries> Subscribe to ASM events
+2026-11-13T09:26:50.8621202Z  1:M 13 Nov 2026 09:25:46.879 * <timeseries> Subscribe to topology changes events
+2026-11-13T09:26:50.8621668Z  1:M 13 Nov 2026 09:25:46.879 * <timeseries> Enabled diskless replication
+2026-11-13T09:26:50.8622240Z  1:M 13 Nov 2026 09:25:46.879 * Module 'timeseries' loaded from /usr/local/lib/redis/modules//redistimeseries.so
+2026-11-13T09:26:50.8622864Z  1:M 13 Nov 2026 09:25:46.880 * <ReJSON> Created new data type 'ReJSON-RL'
+2026-11-13T09:26:50.8623348Z  1:M 13 Nov 2026 09:25:46.880 * <ReJSON> version: 81000 git sha: unknown branch: unknown
+2026-11-13T09:26:50.8623807Z  1:M 13 Nov 2026 09:25:46.880 * <ReJSON> Exported RedisJSON_V1 API
+2026-11-13T09:26:50.8624203Z  1:M 13 Nov 2026 09:25:46.880 * <ReJSON> Exported RedisJSON_V2 API
+2026-11-13T09:26:50.8624588Z  1:M 13 Nov 2026 09:25:46.880 * <ReJSON> Exported RedisJSON_V3 API
+2026-11-13T09:26:50.8625241Z  1:M 13 Nov 2026 09:25:46.880 * <ReJSON> Exported RedisJSON_V4 API
+2026-11-13T09:26:50.8625691Z  1:M 13 Nov 2026 09:25:46.880 * <ReJSON> Exported RedisJSON_V5 API
+2026-11-13T09:26:50.8626068Z  1:M 13 Nov 2026 09:25:46.880 * <ReJSON> Exported RedisJSON_V6 API
+2026-11-13T09:26:50.8626441Z  1:M 13 Nov 2026 09:25:46.880 * <ReJSON> Exported RedisJSON_V7 API
+2026-11-13T09:26:50.8626819Z  1:M 13 Nov 2026 09:25:46.880 * <ReJSON> Exported RedisJSON_V8 API
+2026-11-13T09:26:50.8627521Z  1:M 13 Nov 2026 09:25:46.880 * <ReJSON> Enabled diskless replication
+2026-11-13T09:26:50.8628000Z  1:M 13 Nov 2026 09:25:46.880 * <ReJSON> Initialized shared string cache, thread safe: true.
+2026-11-13T09:26:50.8628560Z  1:M 13 Nov 2026 09:25:46.880 * Module 'ReJSON' loaded from /usr/local/lib/redis/modules//rejson.so
+2026-11-13T09:26:50.8629048Z  1:M 13 Nov 2026 09:25:46.880 * <search> Acquired RedisJSON_V8 API
+2026-11-13T09:26:50.8629400Z  1:M 13 Nov 2026 09:25:46.881 * Server initialized
+2026-11-13T09:26:50.8629749Z  1:M 13 Nov 2026 09:25:46.881 * Ready to accept connections tcp
+2026-11-13T09:26:50.8630701Z  1:M 13 Nov 2026 09:25:46.881 # WARNING: Redis does not require authentication and is not protected by network restrictions. Redis will accept connections from any IP address on any network interface.
+2026-11-13T09:26:50.8632300Z Stop and remove container: 3a2cefca864e428290bc319b9bb98bd7_redis8alpine_37b09b
+2026-11-13T09:26:50.8633515Z ##[command]/usr/bin/docker rm --force 861bb7065bd709a5ec6c5855efcd65d570c236099155c4f2c2884bb9fc4b7bc4
+2026-11-13T09:26:50.9820350Z 861bb7065bd709a5ec6c5855efcd65d570c236099155c4f2c2884bb9fc4b7bc4
+2026-11-13T09:26:50.9850183Z Remove container network: github_network_73c754b1b30746ef89092f56565247c4
+2026-11-13T09:26:50.9854562Z ##[command]/usr/bin/docker network rm github_network_73c754b1b30746ef89092f56565247c4
+2026-11-13T09:26:51.0466779Z github_network_73c754b1b30746ef89092f56565247c4
+2026-11-13T09:26:51.0544340Z Cleaning up orphan processes

@@ -1,0 +1,9 @@
+# PR108 exact-head T0 persistence precision correction
+
+The first remote Linux integration job on 39971b62 failed TestRealPostgresManagedRecoveryStore at the full T0 aggregate assertion. Earlier Mac passes do not override that result; formal Runtime/Host GO remains blocked. Original remote evidence is retained in issue107-pr108-initial-ci.
+
+The deterministic 7830f826 diagnostic uses a Feature Runtime clock with a nonzero 123ns sub-microsecond component; the Store lease authority continues to use real database time. The original state, EventHead and full digest assertions are unchanged. A real PostgreSQL run fails with available=true, EventHead equal, returned source equal to a fresh Load, and only safe-point Source.Run.UpdatedAt retaining the pre-write nanoseconds while PostgreSQL returns its stored microsecond precision. This is an actual durable source mismatch, not a fixture expectation to weaken.
+
+The independently accepted limited repair preserves original authority/proof/grant/lease/unique-ID checks and old managed gate/invalidation in the existing transaction. It prepares the authenticated point before the SQL mutation, obtains the actual committed-shape snapshot from applyKernelMutation in that same transaction, then stores InitialTransfer with precisely that snapshot as Source. Any error rolls back the whole transaction. There is no post-commit rebind, timestamp omission, digest relaxation, schema change or new recovery permission. The nil-lease receipt recovery path retains its gate/invalidation and cannot admit a managed point.
+
+The stronger fixture must compare durable Source, mutation return and fresh Load in the success path as well. Subsequent same-source Store/regression evidence and new exact PR-head checks are required; this design record itself is not a pass.

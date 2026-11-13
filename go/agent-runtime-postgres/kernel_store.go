@@ -389,11 +389,22 @@ func (store *KernelStore) applyWithExecution(ctx context.Context, lease *kernel.
 		if approvalLease != nil {
 			effectiveLease = approvalLease
 		}
-		if e := pgManagedMutation(tx, current, mutation, effectiveLease); e != nil {
-			return e
+		managedPoint, managedErr := pgManagedMutation(tx, current, mutation, effectiveLease)
+		if managedErr != nil {
+			return managedErr
 		}
 		snapshot, applyErr = store.applyKernelMutation(tx, runID, expectedRevision, updatedModel, mutation, effectiveLease, guard != nil && approvalLease == nil, false, approvalLease != nil)
-		return applyErr
+		if applyErr != nil {
+			return applyErr
+		}
+		if managedPoint != nil {
+			// PostgreSQL may represent timestamps at a different precision than
+			// the Feature proposal. Bind the full actual same-transaction row,
+			// including EventHead; do not truncate or weaken source comparison.
+			managedPoint.Source = snapshot
+			return pgSaveManaged(tx, kernel.ManagedInitialTransfer(*managedPoint))
+		}
+		return nil
 	})
 	if err != nil {
 		return kernel.Snapshot{}, err

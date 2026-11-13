@@ -1,0 +1,2 @@
+SOURCE_SHA=7830f82612c4ca3265251f4bf43f5f5e7b896dc8
+Deterministic Feature Clock microsecond+123ns. Store lease clock remains real PostgreSQL. Original complete aggregate equality retained. Actual failure: only persisted safe-point UpdatedAt differs from returned/reloaded committed aggregate.

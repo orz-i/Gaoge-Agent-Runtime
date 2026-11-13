@@ -1,0 +1,18 @@
+SOURCE_SHA=7830f82612c4ca3265251f4bf43f5f5e7b896dc8
+COMMAND=go -C go/agent-runtime-postgres test -race -count=1 -v ./... -run ^TestRealPostgresManagedRecoveryStore$/^owner-and-leave$/^live$
+=== RUN   TestRealPostgresManagedRecoveryStore
+=== RUN   TestRealPostgresManagedRecoveryStore/owner-and-leave
+=== RUN   TestRealPostgresManagedRecoveryStore/owner-and-leave/live
+    managed_recovery.go:148: T0 did not bind exact committed aggregate: available=true eventHeadEqual=true sourceDigestEqual=false returnedMatchesLoaded=true loadErr=<nil> JSONErrors=[<nil>,<nil>,<nil>]
+        pointSource={"run":{"id":"owned-agent","kind":"agent","actor":{"tenantID":"tenant","actorID":"actor"},"thread":{"kind":"conversation","id":"thread"},"requestID":"original-source","goal":"original task","status":"running","revision":2,"createdAt":"2026-11-13T09:33:30.248267Z","updatedAt":"2026-11-13T09:33:30.292212123Z"},"state":{"pending":"model-1","dispatchAttempt":0},"eventHead":2}
+        returnedSource={"run":{"id":"owned-agent","kind":"agent","actor":{"tenantID":"tenant","actorID":"actor"},"thread":{"kind":"conversation","id":"thread"},"requestID":"original-source","goal":"original task","status":"running","revision":2,"createdAt":"2026-11-13T09:33:30.248267Z","updatedAt":"2026-11-13T09:33:30.292212Z"},"state":{"pending":"model-1","dispatchAttempt":0},"eventHead":2}
+        loadedSource={"run":{"id":"owned-agent","kind":"agent","actor":{"tenantID":"tenant","actorID":"actor"},"thread":{"kind":"conversation","id":"thread"},"requestID":"original-source","goal":"original task","status":"running","revision":2,"createdAt":"2026-11-13T09:33:30.248267Z","updatedAt":"2026-11-13T09:33:30.292212Z"},"state":{"pending":"model-1","dispatchAttempt":0},"eventHead":2}
+--- FAIL: TestRealPostgresManagedRecoveryStore (0.36s)
+    --- FAIL: TestRealPostgresManagedRecoveryStore/owner-and-leave (0.36s)
+        --- FAIL: TestRealPostgresManagedRecoveryStore/owner-and-leave/live (0.36s)
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	2.521s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]
+FAIL
+
+EXIT_CODE=1

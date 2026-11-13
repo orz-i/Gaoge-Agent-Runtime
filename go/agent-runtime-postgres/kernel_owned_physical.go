@@ -139,7 +139,7 @@ func (store *KernelStore) ApplyOwnedPhysicalRecovery(ctx context.Context, grant 
 		if err != nil {
 			return err
 		}
-		if err = pgManagedMutation(tx, snapshot, mutation, nil); err != nil {
+		if _, err = pgManagedMutation(tx, snapshot, mutation, nil); err != nil {
 			return err
 		}
 		result, err = store.applyKernelMutation(tx, grant.ChildRunID, expectedRevision, updated, mutation, nil, false, true, false)
