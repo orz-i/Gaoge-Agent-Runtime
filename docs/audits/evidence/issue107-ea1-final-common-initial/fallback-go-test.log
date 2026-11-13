@@ -1,0 +1,82 @@
+SOURCE_SHA=20187a21001a6c51fa0f3109460a0738f0991595
+COMMAND=make go-test
+node scripts/go-workspace.mjs test
+==> test go/agent-runtime
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/continuation	0.414s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/interaction	[no test files]
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/runfeed	[no test files]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/topology	0.404s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent	1.482s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/bootstrap	0.433s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget	0.399s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/compose	0.444s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance	[no test files]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context	1.541s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/continuation	7.651s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/evaluation	0.539s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/examples/configured	[no test files]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/examples/quickstart	0.570s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/groupchat	0.599s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff	0.512s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/interaction	[no test files]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/callbackscope	0.435s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol	0.427s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract	0.642s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel	0.470s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory	102.416s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model	0.431s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/observability	0.401s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin	0.476s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/queue	0.409s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runfeed	0.437s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation	0.420s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/team	0.439s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools	0.439s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workbench	0.413s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workflow	0.515s
+==> test go/agent-runtime-provider
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider	2.282s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider/anthropic	1.111s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider/examples/providers	[no test files]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider/internal/providerhttp	0.918s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider/openai	1.835s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider/transport	4.351s
+==> test go/agent-runtime-harness
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness	21.875s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness/examples/session	0.444s
+==> test go/agent-runtime-harness/examples/task-agent
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness/examples/task-agent	11.493s
+==> test go/agent-runtime-harness-postgres
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-postgres	33.867s
+==> test go/agent-runtime-mcp
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-mcp	0.504s
+==> test go/agent-runtime-otel
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-otel	0.426s
+==> test go/agent-runtime-a2a
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-a2a	0.461s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-a2a/internal/tcksut	[no test files]
+==> test go/agent-runtime-postgres
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	367.815s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]
+==> test go/agent-runtime-sqlite
+--- FAIL: TestUnsupportedExperimentalSchemaVersionMustNotBeMigrated (0.01s)
+    audit_regression_test.go:188: unknown experimental schema version implicitly migrated: <nil>
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite	165.635s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/examples/embedded	0.904s
+FAIL
+file:///private/tmp/gaoge-runtime-issue107/scripts/go-workspace.mjs:190
+    throw new Error(`${command} ${args.join(" ")} failed with exit code ${result.status ?? 1}`);
+          ^
+
+Error: go test ./... -count=1 failed with exit code 1
+    at run (file:///private/tmp/gaoge-runtime-issue107/scripts/go-workspace.mjs:190:11)
+    at file:///private/tmp/gaoge-runtime-issue107/scripts/go-workspace.mjs:51:24
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+
+Node.js v24.21.0
+make: *** [go-test] Error 1
+
+EXIT_CODE=2

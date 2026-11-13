@@ -1,0 +1,4 @@
+Removed only this task-generated incomplete node_modules backup after frozen-lockfile reinstall and four TS gates passed.
+No open file handles under backup.
+RECLAIMED_KIB=36820
+Source/evidence/shared caches untouched.

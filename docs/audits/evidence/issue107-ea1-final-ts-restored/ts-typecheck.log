@@ -1,0 +1,7 @@
+SOURCE_SHA=20187a21001a6c51fa0f3109460a0738f0991595
+COMMAND=make ts-typecheck
+pnpm run typecheck
+$ pnpm --filter @orz-i/agent-runtime-client typecheck
+$ tsc -p tsconfig.json --noEmit
+
+EXIT_CODE=0

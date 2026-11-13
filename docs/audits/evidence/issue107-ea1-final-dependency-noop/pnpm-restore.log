@@ -1,0 +1,8 @@
+SOURCE_SHA=20187a21001a6c51fa0f3109460a0738f0991595
+COMMAND=pnpm install --frozen-lockfile --force
+[WARN] using --force I sure hope you know what you are doing
+Scope: all 2 workspace projects
+Already up to date
+Done in 103ms using pnpm v11.22.0
+
+EXIT_CODE=0

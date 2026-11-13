@@ -1,0 +1,17 @@
+SOURCE_SHA=20187a21001a6c51fa0f3109460a0738f0991595
+COMMAND=make tidy-check
+node scripts/go-workspace.mjs tidy-check
+==> tidy-check go/agent-runtime
+==> tidy-check go/agent-runtime-provider
+==> tidy-check go/agent-runtime-harness
+==> tidy-check go/agent-runtime-harness/examples/task-agent
+==> tidy-check go/agent-runtime-harness-postgres
+==> tidy-check go/agent-runtime-mcp
+==> tidy-check go/agent-runtime-otel
+==> tidy-check go/agent-runtime-a2a
+==> tidy-check go/agent-runtime-postgres
+==> tidy-check go/agent-runtime-sqlite
+==> tidy-check go/agent-runtime-redis
+==> tidy-check go/agent-runtime-http
+
+EXIT_CODE=0

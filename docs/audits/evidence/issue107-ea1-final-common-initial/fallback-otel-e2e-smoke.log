@@ -1,0 +1,6 @@
+SOURCE_SHA=20187a21001a6c51fa0f3109460a0738f0991595
+COMMAND=make otel-e2e-smoke
+cd integration/otel-e2e && GOWORK=off go test ./...
+ok  	example.com/agent-runtime-otel-e2e	0.471s
+
+EXIT_CODE=0

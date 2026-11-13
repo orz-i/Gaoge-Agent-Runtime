@@ -1,0 +1,8 @@
+SOURCE_SHA=20187a21001a6c51fa0f3109460a0738f0991595
+COMMAND=make a2a-product-check
+node scripts/check-a2a-product.mjs
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-a2a	0.307s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-a2a/internal/tcksut	[no test files]
+A2A product boundary and regression gate passed
+
+EXIT_CODE=0

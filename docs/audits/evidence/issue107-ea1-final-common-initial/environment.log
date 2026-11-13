@@ -1,0 +1,10 @@
+SOURCE_SHA=20187a21001a6c51fa0f3109460a0738f0991595
+COMMAND=go version; node --version; pnpm --version; golangci-lint version; df -h .; git status --short
+go version go1.27.4 darwin/arm64
+v24.21.0
+11.22.0
+golangci-lint has version 2.14.0 built with go1.27.2 from (unknown, modified: ?, mod sum: "h1:ot8QffRa4LzAAEgtvNYrVs9esxQ7xoTwoAv6uhp4ngA=") on (unknown)
+Filesystem      Size    Used   Avail Capacity iused ifree %iused  Mounted on
+/dev/disk2s5   228Gi   182Gi   7.1Gi    97%    2.2M   74M    3%   /System/Volumes/Data
+
+EXIT_CODE=0

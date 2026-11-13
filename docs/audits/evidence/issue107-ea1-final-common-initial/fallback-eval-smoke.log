@@ -1,0 +1,12 @@
+SOURCE_SHA=20187a21001a6c51fa0f3109460a0738f0991595
+COMMAND=make eval-smoke
+cd go/agent-runtime && go test ./evaluation -run '^TestRuntime.*ScenarioCorpus$' -count=1
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/evaluation	0.466s
+cd go/agent-runtime-a2a && go test -run '^TestA2ADeterministicScenarioCorpus$' -count=1
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-a2a	0.467s
+cd go/agent-runtime-mcp && go test -run '^TestMCPDeterministicScenarioCorpus$' -count=1
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-mcp	0.476s
+
+EXIT_CODE=0

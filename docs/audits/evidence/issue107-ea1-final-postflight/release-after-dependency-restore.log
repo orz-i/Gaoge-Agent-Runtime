@@ -1,0 +1,40 @@
+SOURCE_SHA=20187a21001a6c51fa0f3109460a0738f0991595
+COMMAND=make release-check
+node scripts/check-release.mjs
+ok  	example.com/agent-runtime-consumer	0.802s
+ok  	example.com/agent-runtime-provider-consumer	0.432s
+ok  	example.com/agent-runtime-harness-consumer	(cached) [no tests to run]
+ok  	example.com/agent-runtime-harness-postgres-consumer	(cached) [no tests to run]
+ok  	example.com/agent-runtime-mcp-consumer	0.459s
+ok  	example.com/agent-runtime-otel-consumer	0.407s
+ok  	example.com/agent-runtime-a2a-consumer	0.419s
+ok  	example.com/agent-runtime-postgres-consumer	(cached) [no tests to run]
+ok  	example.com/agent-runtime-sqlite-consumer	0.462s
+ok  	example.com/agent-runtime-redis-consumer	(cached) [no tests to run]
+ok  	example.com/agent-runtime-http-consumer	0.523s
+$ vitest run
+
+ RUN  v5.0.3 /private/tmp/gaoge-runtime-issue107/ts/agent-runtime-client
+
+
+ Test Files  3 passed (3)
+      Tests  46 passed (46)
+   Start at  14:23:33
+   Duration  362ms (transform 60%, tests 25%, import 13%, worker 2%)
+
+$ tsc -p tsconfig.build.json
+Progress: resolved 1, reused 0, downloaded 0, added 0
+Packages are cloned from the content-addressable store to the virtual store.
+  Content-addressable store is at: /Users/mini/Library/pnpm/store/v11
+  Virtual store is at:             node_modules/.pnpm
+Packages: +1
++
+Progress: resolved 1, reused 0, downloaded 1, added 1, done
+
+dependencies:
++ @orz-i/agent-runtime-client 0.1.0-beta.24
+
+Done in 197ms using pnpm v12.4.2
+Agent Runtime 0.1.0-beta.24 clean-consumer local-cohort gate passed
+
+EXIT_CODE=0

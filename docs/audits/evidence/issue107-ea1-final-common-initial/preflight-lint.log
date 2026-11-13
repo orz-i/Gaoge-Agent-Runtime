@@ -1,0 +1,29 @@
+SOURCE_SHA=20187a21001a6c51fa0f3109460a0738f0991595
+COMMAND=make go-lint
+node scripts/go-workspace.mjs lint
+==> lint go/agent-runtime
+0 issues.
+==> lint go/agent-runtime-provider
+0 issues.
+==> lint go/agent-runtime-harness
+0 issues.
+==> lint go/agent-runtime-harness/examples/task-agent
+0 issues.
+==> lint go/agent-runtime-harness-postgres
+0 issues.
+==> lint go/agent-runtime-mcp
+0 issues.
+==> lint go/agent-runtime-otel
+0 issues.
+==> lint go/agent-runtime-a2a
+0 issues.
+==> lint go/agent-runtime-postgres
+0 issues.
+==> lint go/agent-runtime-sqlite
+0 issues.
+==> lint go/agent-runtime-redis
+0 issues.
+==> lint go/agent-runtime-http
+0 issues.
+
+EXIT_CODE=0

@@ -1,0 +1,111 @@
+SOURCE_SHA=20187a21001a6c51fa0f3109460a0738f0991595
+COMMAND=go -C go/agent-runtime-postgres test -race -count=2 -v ./... -run '^TestRealPostgresManagedRecoveryStore$'
+=== RUN   TestRealPostgresManagedRecoveryStore
+=== RUN   TestRealPostgresManagedRecoveryStore/owner-park-competition
+=== RUN   TestRealPostgresManagedRecoveryStore/owner-park-competition/renew-owner
+=== RUN   TestRealPostgresManagedRecoveryStore/owner-park-competition/renew-park
+=== RUN   TestRealPostgresManagedRecoveryStore/owner-park-competition/claim-owner
+=== RUN   TestRealPostgresManagedRecoveryStore/owner-park-competition/claim-park
+=== RUN   TestRealPostgresManagedRecoveryStore/owner-and-leave
+=== RUN   TestRealPostgresManagedRecoveryStore/owner-and-leave/live
+=== RUN   TestRealPostgresManagedRecoveryStore/owner-and-leave/renew
+=== RUN   TestRealPostgresManagedRecoveryStore/owner-and-leave/leave
+=== RUN   TestRealPostgresManagedRecoveryStore/owner-and-leave/claim
+=== RUN   TestRealPostgresManagedRecoveryStore/owner-and-leave/eventhead
+=== RUN   TestRealPostgresManagedRecoveryStore/parked-ancestor
+=== RUN   TestRealPostgresManagedRecoveryStore/parked-ancestor/park-first
+=== RUN   TestRealPostgresManagedRecoveryStore/parked-ancestor/child-first
+=== RUN   TestRealPostgresManagedRecoveryStore/parked-gates
+=== RUN   TestRealPostgresManagedRecoveryStore/selection-ack
+=== RUN   TestRealPostgresManagedRecoveryStore/selection-ack/RESUME
+=== RUN   TestRealPostgresManagedRecoveryStore/selection-ack/CANCEL
+=== RUN   TestRealPostgresManagedRecoveryStore/two-enable-claimants
+=== RUN   TestRealPostgresManagedRecoveryStore/transaction-ack
+=== RUN   TestRealPostgresManagedRecoveryStore/transaction-ack/t0
+=== RUN   TestRealPostgresManagedRecoveryStore/transaction-ack/park
+=== RUN   TestRealPostgresManagedRecoveryStore/transaction-ack/enable
+=== RUN   TestRealPostgresManagedRecoveryStore/transaction-ack/cancel
+=== RUN   TestRealPostgresManagedRecoveryStore/historical-closure
+--- PASS: TestRealPostgresManagedRecoveryStore (58.74s)
+    --- PASS: TestRealPostgresManagedRecoveryStore/owner-park-competition (13.66s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/owner-park-competition/renew-owner (3.52s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/owner-park-competition/renew-park (3.43s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/owner-park-competition/claim-owner (3.35s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/owner-park-competition/claim-park (3.37s)
+    --- PASS: TestRealPostgresManagedRecoveryStore/owner-and-leave (10.64s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/owner-and-leave/live (0.32s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/owner-and-leave/renew (3.41s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/owner-and-leave/leave (3.35s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/owner-and-leave/claim (3.38s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/owner-and-leave/eventhead (0.18s)
+    --- PASS: TestRealPostgresManagedRecoveryStore/parked-ancestor (6.69s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/parked-ancestor/park-first (3.34s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/parked-ancestor/child-first (3.35s)
+    --- PASS: TestRealPostgresManagedRecoveryStore/parked-gates (3.43s)
+    --- PASS: TestRealPostgresManagedRecoveryStore/selection-ack (6.94s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/selection-ack/RESUME (3.46s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/selection-ack/CANCEL (3.49s)
+    --- PASS: TestRealPostgresManagedRecoveryStore/two-enable-claimants (3.39s)
+    --- PASS: TestRealPostgresManagedRecoveryStore/transaction-ack (10.52s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/transaction-ack/t0 (0.22s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/transaction-ack/park (3.46s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/transaction-ack/enable (3.41s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/transaction-ack/cancel (3.44s)
+    --- PASS: TestRealPostgresManagedRecoveryStore/historical-closure (3.46s)
+=== RUN   TestRealPostgresManagedRecoveryStore
+=== RUN   TestRealPostgresManagedRecoveryStore/owner-park-competition
+=== RUN   TestRealPostgresManagedRecoveryStore/owner-park-competition/renew-owner
+=== RUN   TestRealPostgresManagedRecoveryStore/owner-park-competition/renew-park
+=== RUN   TestRealPostgresManagedRecoveryStore/owner-park-competition/claim-owner
+=== RUN   TestRealPostgresManagedRecoveryStore/owner-park-competition/claim-park
+=== RUN   TestRealPostgresManagedRecoveryStore/owner-and-leave
+=== RUN   TestRealPostgresManagedRecoveryStore/owner-and-leave/live
+=== RUN   TestRealPostgresManagedRecoveryStore/owner-and-leave/renew
+=== RUN   TestRealPostgresManagedRecoveryStore/owner-and-leave/leave
+=== RUN   TestRealPostgresManagedRecoveryStore/owner-and-leave/claim
+=== RUN   TestRealPostgresManagedRecoveryStore/owner-and-leave/eventhead
+=== RUN   TestRealPostgresManagedRecoveryStore/parked-ancestor
+=== RUN   TestRealPostgresManagedRecoveryStore/parked-ancestor/park-first
+=== RUN   TestRealPostgresManagedRecoveryStore/parked-ancestor/child-first
+=== RUN   TestRealPostgresManagedRecoveryStore/parked-gates
+=== RUN   TestRealPostgresManagedRecoveryStore/selection-ack
+=== RUN   TestRealPostgresManagedRecoveryStore/selection-ack/RESUME
+=== RUN   TestRealPostgresManagedRecoveryStore/selection-ack/CANCEL
+=== RUN   TestRealPostgresManagedRecoveryStore/two-enable-claimants
+=== RUN   TestRealPostgresManagedRecoveryStore/transaction-ack
+=== RUN   TestRealPostgresManagedRecoveryStore/transaction-ack/t0
+=== RUN   TestRealPostgresManagedRecoveryStore/transaction-ack/park
+=== RUN   TestRealPostgresManagedRecoveryStore/transaction-ack/enable
+=== RUN   TestRealPostgresManagedRecoveryStore/transaction-ack/cancel
+=== RUN   TestRealPostgresManagedRecoveryStore/historical-closure
+--- PASS: TestRealPostgresManagedRecoveryStore (59.01s)
+    --- PASS: TestRealPostgresManagedRecoveryStore/owner-park-competition (13.57s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/owner-park-competition/renew-owner (3.40s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/owner-park-competition/renew-park (3.37s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/owner-park-competition/claim-owner (3.44s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/owner-park-competition/claim-park (3.36s)
+    --- PASS: TestRealPostgresManagedRecoveryStore/owner-and-leave (10.53s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/owner-and-leave/live (0.19s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/owner-and-leave/renew (3.34s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/owner-and-leave/leave (3.45s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/owner-and-leave/claim (3.35s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/owner-and-leave/eventhead (0.20s)
+    --- PASS: TestRealPostgresManagedRecoveryStore/parked-ancestor (6.76s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/parked-ancestor/park-first (3.40s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/parked-ancestor/child-first (3.36s)
+    --- PASS: TestRealPostgresManagedRecoveryStore/parked-gates (3.44s)
+    --- PASS: TestRealPostgresManagedRecoveryStore/selection-ack (6.94s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/selection-ack/RESUME (3.48s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/selection-ack/CANCEL (3.46s)
+    --- PASS: TestRealPostgresManagedRecoveryStore/two-enable-claimants (3.47s)
+    --- PASS: TestRealPostgresManagedRecoveryStore/transaction-ack (10.84s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/transaction-ack/t0 (0.26s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/transaction-ack/park (3.50s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/transaction-ack/enable (3.54s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/transaction-ack/cancel (3.54s)
+    --- PASS: TestRealPostgresManagedRecoveryStore/historical-closure (3.45s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	119.681s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]
+
+EXIT_CODE=0
