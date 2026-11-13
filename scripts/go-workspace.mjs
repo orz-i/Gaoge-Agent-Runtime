@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { summarizeGoCoverage } from "./go-coverage-summary.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const modules = [
@@ -54,7 +55,7 @@ for (const modulePath of modules) {
   if (mode === "lint") run("golangci-lint", ["run", "./..."], cwd);
   if (mode === "coverage") {
     const profile = path.join(coverageDirectory, `${path.basename(modulePath)}.out`);
-    run("go", ["test", "./...", "-count=1", "-covermode=atomic", `-coverprofile=${profile}`], cwd);
+    run("go", ["test", "./...", "-count=1", "-covermode=atomic", "-coverpkg=./...", `-coverprofile=${profile}`], cwd);
     coverageProfiles.push(profile);
   }
   if (mode === "vuln") {
@@ -145,19 +146,10 @@ function walk(directory) {
 }
 
 function writeCoverageSummary(profiles) {
-  let coveredStatements = 0;
-  let totalStatements = 0;
-  for (const profile of profiles) {
-    const lines = readFileSync(profile, "utf8").trim().split("\n").slice(1);
-    for (const line of lines) {
-      const [, statementCountText, executionCountText] = line.trim().split(/\s+/);
-      const statementCount = Number(statementCountText);
-      const executionCount = Number(executionCountText);
-      if (!Number.isFinite(statementCount) || !Number.isFinite(executionCount)) continue;
-      totalStatements += statementCount;
-      if (executionCount > 0) coveredStatements += statementCount;
-    }
-  }
+  const { coveredStatements, totalStatements } = summarizeGoCoverage(profiles.map((profile) => ({
+    name: profile,
+    contents: readFileSync(profile, "utf8"),
+  })));
 
   const percent = totalStatements === 0 ? 100 : (coveredStatements / totalStatements) * 100;
   const minimum = Number(process.env.GO_COVERAGE_MIN ?? "70");
