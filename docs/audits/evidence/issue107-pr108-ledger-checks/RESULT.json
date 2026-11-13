@@ -1,0 +1,12 @@
+{
+  "ledger_commit": "310fdd9c3054fdddd690ab475fc194faea2984cf",
+  "tested_source": "2d216518cfe48bc9e2ea6b02beb7733c246376a7",
+  "counts": {
+    "PASS": 138,
+    "UNRUN": 6
+  },
+  "candidate_exact": true,
+  "six_host_rows_unchanged": true,
+  "non_document_source_drift": false,
+  "strict_result": "NO-GO expected: six independent H-FROZEN cells"
+}
