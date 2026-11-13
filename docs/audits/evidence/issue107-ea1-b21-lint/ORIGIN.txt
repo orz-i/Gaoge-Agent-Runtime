@@ -1,0 +1,2 @@
+SOURCE_SHA=c458b03dbed049eae5baddd94fff4e97f6788c8a
+All 49 Memory vectors pass after bounded Child repair; lint finds only panic-identity comparison annotation, import grouping and redundant embedded selectors. No full backend evidence yet; preserve original logs.

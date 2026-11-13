@@ -1,0 +1,23 @@
+SOURCE_SHA=c458b03dbed049eae5baddd94fff4e97f6788c8a
+COMMAND=cd go/agent-runtime && golangci-lint run ./...
+go/agent-runtime/conformance/ea1_middleware_next_lifetime.go:598:7: comparing with != will fail on wrapped errors. Use errors.Is to check for a specific error (errorlint)
+			if out.panicked != f.failure {
+			   ^
+go/agent-runtime/memory/ea1_middleware_next_lifetime_test.go:3:1: File is not properly formatted (goimports)
+import (
+^
+go/agent-runtime/conformance/ea1_middleware_next_lifetime.go:456:14: QF1008: could remove embedded field "ea1ChildStartFixture" from selector (staticcheck)
+		setup := f.ea1ChildStartFixture.runner(f.rt, "prepare", false)
+		           ^
+go/agent-runtime/conformance/ea1_middleware_next_lifetime.go:499:19: QF1008: could remove embedded field "ea1ChildStartFixture" from selector (staticcheck)
+			candidate := f.ea1ChildStartFixture.runner(f.peer, "competing-resume", false)
+			               ^
+go/agent-runtime/conformance/ea1_middleware_next_lifetime.go:640:17: QF1008: could remove embedded field "ea1ChildStartFixture" from selector (staticcheck)
+		recovery := f.ea1ChildStartFixture.runner(rt, "fresh", false)
+		              ^
+5 issues:
+* errorlint: 1
+* goimports: 1
+* staticcheck: 3
+
+EXIT_CODE=1
