@@ -711,7 +711,7 @@ func ea1ChildCancelACKRecovery(t *testing.T, persistent bool) {
 		t.Fatal("CancelSubtask changed unrelated ledger authority")
 	}
 	items := ea1ChildCancelItems(t, f.store, waiting.Turn.ID)
-	if !reflect.DeepEqual(ea1OnlyCancelIntent(t, items, waiting.Turn.ID, task.RunID), fault.intent) || !harness.VerifiedCancellationFenceReceipt(fault.intent, ea1CancelReceipts(items, fault.intent.ID)) || harness.ActiveCancellationFence(items) {
+	if !ea1ChildCancelItemFullEqual(ea1OnlyCancelIntent(t, items, waiting.Turn.ID, task.RunID), fault.intent) || !harness.VerifiedCancellationFenceReceipt(fault.intent, ea1CancelReceipts(items, fault.intent.ID)) || harness.ActiveCancellationFence(items) {
 		actualIntent := ea1OnlyCancelIntent(t, items, waiting.Turn.ID, task.RunID)
 		actualReceipts := ea1CancelReceipts(items, fault.intent.ID)
 		t.Logf("receipt diagnostics: Verified=%t ActiveFence=%t receiptList=%#v faultReceipt=%#v", harness.VerifiedCancellationFenceReceipt(fault.intent, actualReceipts), harness.ActiveCancellationFence(items), actualReceipts, fault.receipt)
@@ -809,17 +809,28 @@ func ea1ChildCancelACKRecovery(t *testing.T, persistent bool) {
 	// A later completed cancellation may create a new settled election; it
 	// cannot rewrite the original intent/receipt or repeat native Control.
 	original, e := h.GetItem(t.Context(), fault.intent.ID)
-	if e != nil || !reflect.DeepEqual(original, fault.intent) {
+	if e != nil || !ea1ChildCancelItemFullEqual(original, fault.intent) {
 		t.Fatal("recovery replaced original election")
 	}
 	receipt, e := h.GetItem(t.Context(), fault.receipt.ID)
-	if e != nil || !reflect.DeepEqual(receipt, fault.receipt) {
+	if e != nil || !ea1ChildCancelItemFullEqual(receipt, fault.receipt) {
 		t.Fatal("recovery replaced original committed receipt")
 	}
 }
 
 func ea1ChildCancelExpectedToolRequest(childID string) tools.ExecutionRequest {
 	return tools.ExecutionRequest{RunID: childID, Call: tools.Call{ID: "ea1ChildCancel-call", ToolKey: ea1ChildCancelToolKey, Name: "read_evidence", Arguments: json.RawMessage(`{}`)}}
+}
+
+// Preserve every Item field while comparing the proven Append/readback time
+// representation difference only after both timestamps identify the same instant.
+func ea1ChildCancelItemFullEqual(want, actual harness.Item) bool {
+	if !want.CreatedAt.Equal(actual.CreatedAt) || !want.UpdatedAt.Equal(actual.UpdatedAt) {
+		return false
+	}
+	want.CreatedAt, actual.CreatedAt = want.CreatedAt.UTC(), actual.CreatedAt.UTC()
+	want.UpdatedAt, actual.UpdatedAt = want.UpdatedAt.UTC(), actual.UpdatedAt.UTC()
+	return reflect.DeepEqual(want, actual)
 }
 
 // Diagnostics only: no comparison or acceptance predicate is normalized.
