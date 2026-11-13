@@ -3,9 +3,10 @@ package harness
 import (
 	"encoding/json"
 	"errors"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"strings"
 	"testing"
+
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
 func TestManagedHostMemoryRejectsUnissuedProofs(t *testing.T) {

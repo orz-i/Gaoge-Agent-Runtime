@@ -2,9 +2,10 @@ package harnesspostgres_test
 
 import (
 	"errors"
+	"testing"
+
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
-	"testing"
 )
 
 func TestManagedHostSQLRejectsUnissuedProofs(t *testing.T) {

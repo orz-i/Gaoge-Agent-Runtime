@@ -139,8 +139,8 @@ func ManagedClosureItems(p kernel.ManagedClosureProof, r kernel.ManagedHostReser
 func managedDispatchReceipt(item Item) bool {
 	v, ok := authorityStringFields(item.Payload, "boundary", "recoveryID", "mode", "selectionHash", "terminalHash")
 	if !ok || v["recoveryID"] == "" ||
-		!((v["boundary"] == "managed_dispatch_transferred" && v["mode"] == string(kernel.ManagedResume)) ||
-			(v["boundary"] == "managed_dispatch_cancelled_before_next_effect" && v["mode"] == string(kernel.ManagedCancel))) {
+		((v["boundary"] != "managed_dispatch_transferred" || v["mode"] != string(kernel.ManagedResume)) &&
+			(v["boundary"] != "managed_dispatch_cancelled_before_next_effect" || v["mode"] != string(kernel.ManagedCancel))) {
 		return false
 	}
 	for _, name := range []string{"selectionHash", "terminalHash"} {

@@ -200,11 +200,12 @@ func openStoreOptions(ctx context.Context, path string, create bool, migrate int
 	}
 	db.SetMaxOpenConns(1)
 	store := &Store{db: db}
-	if migrate == 4 {
+	switch migrate {
+	case 4:
 		err = store.migrateV3ToV4(ctx)
-	} else if migrate == 5 {
+	case 5:
 		err = store.migrateV4ToV5(ctx)
-	} else {
+	default:
 		err = store.initialize(ctx, create)
 	}
 	if err != nil {

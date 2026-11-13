@@ -27,28 +27,28 @@ func TestManagedRecoveryReducersPreserveSourceAndLiveOwner(t *testing.T) {
 	q := ManagedParkRequest{RunID: s.Run.ID, SuspensionID: original.SafePoint.ID, ExpectedRevision: s.Run.Revision}
 	live := l
 	live.ExpiresAt = now.Add(time.Second)
-	if _, e := ManagedParkTransfer(original, q, s, live, g, a, now); e != ErrExecutionConflict {
+	if _, e := ManagedParkTransfer(original, q, s, live, g, a, now); !errors.Is(e, ErrExecutionConflict) {
 		t.Fatalf("live owner: %v", e)
 	}
 	changed := s
 	changed.EventHead++
-	if _, e := ManagedParkTransfer(original, q, changed, l, g, a, now); e != ErrExecutionConflict {
+	if _, e := ManagedParkTransfer(original, q, changed, l, g, a, now); !errors.Is(e, ErrExecutionConflict) {
 		t.Fatalf("journal mismatch: %v", e)
 	}
 	foreign := a
 	foreign.Generation++
-	if _, e := ManagedParkTransfer(original, q, s, l, g, foreign, now); e != ErrExecutionConflict {
+	if _, e := ManagedParkTransfer(original, q, s, l, g, foreign, now); !errors.Is(e, ErrExecutionConflict) {
 		t.Fatalf("authority mismatch: %v", e)
 	}
 	parked, e := ManagedParkTransfer(original, q, s, l, g, a, now)
 	if e != nil || parked.State != ManagedParked || parked.Revision != 2 || parked.Generation != 2 || ManagedDigest(parked.SafePoint) != ManagedDigest(original.SafePoint) {
 		t.Fatalf("park: %+v %v", parked, e)
 	}
-	if ManagedOrdinaryGate(parked) != ErrExecutionConflict {
+	if !errors.Is(ManagedOrdinaryGate(parked), ErrExecutionConflict) {
 		t.Fatal("park permits ordinary mutation")
 	}
 	invalid := ManagedInvalidateMutation(original)
-	if _, e := ManagedParkTransfer(invalid, q, s, l, g, a, now); e != ErrExecutionConflict {
+	if _, e := ManagedParkTransfer(invalid, q, s, l, g, a, now); !errors.Is(e, ErrExecutionConflict) {
 		t.Fatalf("old claim won but park succeeded: %v", e)
 	}
 }
@@ -80,7 +80,7 @@ func TestManagedRecoveryModeAndExactACKIdentity(t *testing.T) {
 	cancelR.Cancellation = c
 	cancelP := ManagedSelectionProof{reservation: cancelR, transfer: p, valid: true}
 	q.Selection = cancelP
-	if _, e = ManagedEnabledTransfer(p, q, s, l.Epoch, now); e != ErrExecutionConflict {
+	if _, e = ManagedEnabledTransfer(p, q, s, l.Epoch, now); !errors.Is(e, ErrExecutionConflict) {
 		t.Fatalf("CANCEL enabled physical dispatch: %v", e)
 	}
 	cq := ManagedCancelRequest{RunID: s.Run.ID, SuspensionID: "safe", ExpectedTransferRevision: p.Revision, Generation: p.Generation, Selection: cancelP}
@@ -101,7 +101,7 @@ func TestManagedRecoveryModeAndExactACKIdentity(t *testing.T) {
 		t.Fatal("foreign cancellation receipt adopted")
 	}
 	cq.Selection = proof
-	if _, _, e = ManagedCancellationMutation(p, cq, s, now); e != ErrExecutionConflict {
+	if _, _, e = ManagedCancellationMutation(p, cq, s, now); !errors.Is(e, ErrExecutionConflict) {
 		t.Fatalf("RESUME became cancellation: %v", e)
 	}
 }
@@ -113,7 +113,7 @@ func TestManagedSafePointLeaveIsBeforeCallbackPermission(t *testing.T) {
 	if e != nil || next.State != ManagedInvalidated {
 		t.Fatalf("leave %v", e)
 	}
-	if _, e = ManagedLeaveTransfer(next, q, s, l, now); e != ErrExecutionConflict {
+	if _, e = ManagedLeaveTransfer(next, q, s, l, now); !errors.Is(e, ErrExecutionConflict) {
 		t.Fatal("ambiguous ACK was converted into new permission")
 	}
 }
@@ -295,7 +295,7 @@ func TestManagedRecoveryUsesOnlyConstructionBoundHostAndInternalEntropy(t *testi
 	if e != nil {
 		t.Fatal(e)
 	}
-	if _, e = unconfigured.SelectManagedContinuation(t.Context(), proof); e != ErrExecutionConflict {
+	if _, e = unconfigured.SelectManagedContinuation(t.Context(), proof); !errors.Is(e, ErrExecutionConflict) {
 		t.Fatalf("unconfigured proof issuer: %v", e)
 	}
 }

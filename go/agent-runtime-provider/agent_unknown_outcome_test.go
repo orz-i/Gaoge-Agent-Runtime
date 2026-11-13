@@ -90,7 +90,7 @@ type providerUnsentStore struct {
 func (s *providerUnsentStore) ApplyExecution(ctx context.Context, l kernel.ExecutionLease, rev uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
 	for _, e := range m.Events {
 		if s.hits == 0 && m.Record.Run.ID == s.runID && e.Type == "agent.model_invocation.dispatch_intent" {
-			original, err := s.Store.Load(ctx, s.runID)
+			original, err := s.Load(ctx, s.runID)
 			if err != nil {
 				return kernel.Snapshot{}, err
 			}
