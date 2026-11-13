@@ -415,6 +415,27 @@ func ea1MWExecute(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.S
 		f.storeMW.denyCreate = true
 	}
 	var retained kernel.Snapshot
+	var retainedLease kernel.ExecutionLease
+	var retainedAuthorityErr error
+	captureAuthority := func() {
+		retainedLease = f.store.acquired
+		var lease *kernel.ExecutionLease
+		if retainedLease.LeaseID != "" {
+			lease = &retainedLease
+		}
+		retainedAuthorityErr = f.peerStore.(kernel.ExecutionStore).CheckExecution(t.Context(), f.request.ID, lease)
+		if _, e := f.peer.LookupChildExecution(t.Context(), f.request.ID); !errors.Is(e, kernel.ErrNotFound) {
+			t.Fatalf("pre-denial scope must be absent: %v", e)
+		}
+	}
+	ancestorGrants := make([]kernel.ChildExecutionGrant, len(f.ancestors))
+	ancestorGrantErrors := make([]error, len(f.ancestors))
+	for i, a := range f.ancestors {
+		ancestorGrants[i], ancestorGrantErrors[i] = f.peer.LookupChildExecution(t.Context(), a.Run.ID)
+		if ancestorGrantErrors[i] != nil && !errors.Is(ancestorGrantErrors[i], kernel.ErrNotFound) {
+			t.Fatal(ancestorGrantErrors[i])
+		}
+	}
 	if mode == "stale-admission" {
 		winner := func(g kernel.ChildExecutionGrant) {
 			current := f.load(f.peer)
@@ -423,6 +444,7 @@ func ea1MWExecute(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.S
 			if e != nil {
 				t.Fatal(e)
 			}
+			captureAuthority()
 		}
 		if child {
 			f.store.beforeAdmission = winner
@@ -437,12 +459,13 @@ func ea1MWExecute(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.S
 		if e != nil {
 			t.Fatal(e)
 		}
+		captureAuthority()
 		f.storeMW.markCalls, f.storeMW.markCommits, f.storeMW.finishCalls = 0, 0, 0
 	}
 	var foreign kernel.Snapshot
 	if mode == "foreign-model" {
 		var e error
-		foreign, e = f.peer.Create(t.Context(), kernel.CreateRequest{ID: "foreign-run", Kind: "workflow", Actor: f.request.Actor, Thread: f.request.Thread, State: []byte(`{"foreign":true}`)})
+		foreign, e = f.peer.Create(t.Context(), kernel.CreateRequest{ID: "foreign-run", Kind: "workflow", Actor: f.request.Actor, Thread: f.request.Thread, Goal: "independent foreign target", State: []byte(`{"foreign":true}`)})
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -526,9 +549,34 @@ func ea1MWExecute(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.S
 			}
 			if mode == "duplicate" || mode == "stale-admission" {
 				ea1CompBarrierUnchanged(t, f.peer, retained)
+				if f.store.acquired != retainedLease {
+					t.Fatal("denied call changed captured native authority")
+				}
+				var lease *kernel.ExecutionLease
+				if retainedLease.LeaseID != "" {
+					lease = &retainedLease
+				}
+				e := f.peerStore.(kernel.ExecutionStore).CheckExecution(t.Context(), f.request.ID, lease)
+				if !errors.Is(e, retainedAuthorityErr) {
+					t.Fatalf("denied call changed native authority: %v want %v", e, retainedAuthorityErr)
+				}
+			} else {
+				if _, e := f.peer.Load(t.Context(), f.request.ID); !errors.Is(e, kernel.ErrNotFound) {
+					t.Fatalf("pre-Create denial left a Run: %v", e)
+				}
+			}
+			if _, e := f.peer.LookupChildExecution(t.Context(), f.request.ID); !errors.Is(e, kernel.ErrNotFound) {
+				t.Fatalf("denied call left a physical scope: %v", e)
 			}
 		} else {
 			ea1CompBarrierUnchanged(t, f.peer, foreign)
+		}
+		for i, a := range f.ancestors {
+			ea1CompBarrierUnchanged(t, f.peer, a)
+			g, e := f.peer.LookupChildExecution(t.Context(), a.Run.ID)
+			if g != ancestorGrants[i] || !errors.Is(e, ancestorGrantErrors[i]) {
+				t.Fatalf("denied call changed ancestor authority %s: %v", a.Run.ID, e)
+			}
 		}
 		return
 	}

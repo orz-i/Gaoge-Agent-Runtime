@@ -651,10 +651,10 @@ func (runner *Runner) startRunWithMiddleware(ctx context.Context, request StartR
 		operation = "prepare"
 	}
 	snapshot, invokeErr := runner.withRootSegment(ctx, created, operation, func(rootCtx context.Context, root *Runner, admitted kernel.Snapshot) (kernel.Snapshot, error) {
-		return root.withChildPhysicalGrant(rootCtx, admitted.Run.ID, admitted.Run.Revision,
-			func(scoped *Runner) (kernel.Snapshot, error) {
+		return root.withChildPhysicalGrant(rootCtx, admitted.Run.ID, admitted.Run.Revision, operation,
+			func(childCtx context.Context, scoped *Runner) (kernel.Snapshot, error) {
 				middlewareEntered = true
-				return scoped.runChain.Invoke(rootCtx, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
+				return scoped.runChain.Invoke(childCtx, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
 					continuationReached = true
 					return scoped.continuePreparedRun(nextCtx, admitted, deferred)
 				})
@@ -845,13 +845,13 @@ func (runner *Runner) ResolveApproval(
 	ctx = runner.claimPhysicalObservation(ctx, runID, plugin.RunResolveApproval)
 	invocation := runInvocation(plugin.RunResolveApproval, snapshot)
 	return runner.withRootSegment(ctx, snapshot, "approval", func(rootCtx context.Context, root *Runner, admitted kernel.Snapshot) (kernel.Snapshot, error) {
-		return root.withChildPhysicalGrant(rootCtx, admitted.Run.ID, admitted.Run.Revision,
-			func(scoped *Runner) (kernel.Snapshot, error) {
+		return root.withChildPhysicalGrant(rootCtx, admitted.Run.ID, admitted.Run.Revision, "approval",
+			func(childCtx context.Context, scoped *Runner) (kernel.Snapshot, error) {
 				freshState, decodeErr := decodeState(admitted.State)
 				if decodeErr != nil {
 					return admitted, decodeErr
 				}
-				return scoped.runChain.Invoke(rootCtx, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
+				return scoped.runChain.Invoke(childCtx, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
 					return scoped.resolveApproval(nextCtx, admitted, freshState, response)
 				})
 			})
@@ -956,9 +956,9 @@ func (runner *Runner) Resume(ctx context.Context, runID string, expectedRevision
 	// side effect. A runner without RunExecution still follows the original
 	// pre-dispatch Store guard and will be rejected on fenced Runs.
 	resumed, resumeErr := runner.withRootSegment(ctx, snapshot, "resume", func(rootCtx context.Context, root *Runner, admitted kernel.Snapshot) (kernel.Snapshot, error) {
-		return root.withChildPhysicalGrant(rootCtx, admitted.Run.ID, admitted.Run.Revision,
-			func(physical *Runner) (kernel.Snapshot, error) {
-				return physical.withRunOwner(rootCtx, admitted.Run.ID, admitted.Run.Revision,
+		return root.withChildPhysicalGrant(rootCtx, admitted.Run.ID, admitted.Run.Revision, "resume",
+			func(childCtx context.Context, physical *Runner) (kernel.Snapshot, error) {
+				return physical.withRunOwner(childCtx, admitted.Run.ID, admitted.Run.Revision,
 					func(driveCtx context.Context, scoped *Runner) (kernel.Snapshot, error) {
 						invocation := runInvocation(plugin.RunResume, admitted)
 						return scoped.runChain.Invoke(driveCtx, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {

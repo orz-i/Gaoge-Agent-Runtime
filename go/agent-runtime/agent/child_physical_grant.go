@@ -2,9 +2,13 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"time"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/callbackscope"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
@@ -19,8 +23,8 @@ import (
 // A crashed/unknown Model or Tool outcome retains the Grant. Only an Agent
 // that has committed settlement of every physical intent may close it; no
 // deadline or process-local mutex can silently authorize another executor.
-func (runner *Runner) withChildPhysicalGrant(ctx context.Context, runID string, expectedRevision uint64,
-	physical func(*Runner) (kernel.Snapshot, error)) (kernel.Snapshot, error) {
+func (runner *Runner) withChildPhysicalGrant(ctx context.Context, runID string, expectedRevision uint64, operation string,
+	physical func(context.Context, *Runner) (kernel.Snapshot, error)) (kernel.Snapshot, error) {
 	if runner == nil || runner.runtime == nil || physical == nil {
 		return kernel.Snapshot{}, ErrInvalidRequest
 	}
@@ -36,8 +40,17 @@ func (runner *Runner) withChildPhysicalGrant(ctx context.Context, runID string, 
 		// authority has distinct restart/replay semantics. Do not conflate it
 		// with the Workflow Root physical Grant. The Root Start now creates
 		// its Run before any arbitrary Host Run middleware is called.
-		return physical(runner)
+		return physical(ctx, runner)
 	}
+	// This is only the in-process journal source, not new Store authority.
+	source, err := json.Marshal(struct {
+		Snapshot  kernel.Snapshot
+		Operation string
+	}{child, operation})
+	if err != nil {
+		return child, err
+	}
+	sourceHash := sha256.Sum256(source)
 	grant, err := executionRuntime.BeginChildExecution(ctx, runID, expectedRevision)
 	if err != nil {
 		return child, err
@@ -50,12 +63,20 @@ func (runner *Runner) withChildPhysicalGrant(ctx context.Context, runID string, 
 	}
 	scoped := *runner
 	scoped.runtime = bound
+	// Never inherit a parent callback's failure flag or journal. Child
+	// admission has no Root-owned native lease binding.
+	scoped.rootCallbacks = &rootCallbackState{}
+	lifecycle := callbackscope.New(callbackscope.Binding{
+		RunID: grant.ChildRunID, GrantID: grant.ID,
+		SourceHash: hex.EncodeToString(sourceHash[:]), Operation: operation,
+	}, runner.boundedCallbacks)
+	defer lifecycle.Close()
 	// The entire first-party Agent Start/Approval/Resume (including Host
 	// middleware and Model/Tool callbacks) runs with its original scoped
 	// mutation authority. A direct unbound Kernel Cancel/Apply cannot
 	// mutate this Run until trusted physical settlement.
-	result, physicalErr := physical(&scoped)
-	if physicalErr != nil {
+	result, physicalErr := physical(callbackscope.Bind(ctx, lifecycle), &scoped)
+	if physicalErr != nil || !lifecycle.Complete() || scoped.rootCallbacks.unknown.Load() {
 		return result, errors.Join(physicalErr, kernel.ErrChildExecutionBusy)
 	}
 	settlementCtx, stop := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
