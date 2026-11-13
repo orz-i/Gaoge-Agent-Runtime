@@ -254,6 +254,9 @@ func (store *KernelStore) FinishChildExecution(ctx context.Context, grant kernel
 			return kernel.ErrExecutionConflict
 		}
 		if grant.IsOwned() {
+			if !grant.MatchesExecution(pgManagedLease(child)) {
+				return kernel.ErrExecutionConflict
+			}
 			snapshot, e := kernelSnapshotFrom(child)
 			if e != nil {
 				return e

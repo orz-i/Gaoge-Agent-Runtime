@@ -244,6 +244,13 @@ func (s *Store) FinishChildExecution(ctx context.Context, grant kernel.ChildExec
 		if correct != 1 {
 			return kernel.ErrExecutionConflict
 		}
+		native, _, e := sqliteManagedLease(ctx, tx, grant.ChildRunID)
+		if e != nil {
+			return e
+		}
+		if !grant.MatchesExecution(native) {
+			return kernel.ErrExecutionConflict
+		}
 		if e := sqlitePersistOwnedRetirement(ctx, tx, grant, child); e != nil {
 			return e
 		}

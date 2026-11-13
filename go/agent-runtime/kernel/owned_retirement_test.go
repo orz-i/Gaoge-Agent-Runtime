@@ -85,7 +85,7 @@ func TestOwnedRetirementWireAndCanonicalACK(t *testing.T) {
 
 func TestOwnedRetirementRunSelector(t *testing.T) {
 	r, l := retirementFixture()
-	for _, name := range []string{"unique", "absent", "acked", "ambiguous", "corrupt", "source", "epoch", "replacement", "foreign-lease"} {
+	for _, name := range []string{"unique", "absent", "acked", "ambiguous", "corrupt", "source", "epoch", "replacement", "foreign-lease", "old-then-current", "current-then-old", "old-only", "old-corrupt-with-current"} {
 		t.Run(name, func(t *testing.T) {
 			rows := []OwnedRetirementReceipt{r}
 			current := r.Evidence.Snapshot
@@ -112,18 +112,44 @@ func TestOwnedRetirementRunSelector(t *testing.T) {
 				want = ErrExecutionConflict
 			case "source":
 				current.Run.Revision++
-				want = ErrExecutionConflict
+				want = ErrNotFound
 			case "epoch":
 				epoch++
-				want = ErrExecutionConflict
+				want = ErrNotFound
 			case "replacement":
 				busy = true
 				want = ErrExecutionConflict
 			case "foreign-lease":
 				lease.LeaseID = "other"
-				want = ErrExecutionConflict
+				want = ErrNotFound
+			case "old-then-current", "current-then-old", "old-only", "old-corrupt-with-current":
+				old := r
+				old.Evidence.Grant.ID = "old-scope"
+				old.Evidence.Grant.ExecutionLeaseID = "old-lease"
+				old.Evidence.Completion.GrantID = "old-scope"
+				if !old.Valid() {
+					t.Fatal("historical fixture invalid")
+				}
+				rows = []OwnedRetirementReceipt{old, r}
+				if name == "current-then-old" {
+					rows = []OwnedRetirementReceipt{r, old}
+				}
+				if name == "old-only" {
+					rows = []OwnedRetirementReceipt{old}
+					want = ErrNotFound
+				}
+				if name == "old-corrupt-with-current" {
+					rows[0].Evidence.Completion.ReturnSourceHash = "bad"
+					want = ErrExecutionConflict
+				}
 			}
+			before := ManagedDigest(rows)
+			// Multiple current candidates are a defensive pure-helper corruption
+			// vector, not a state produced by lawful single-grant admission.
 			selected, e := SelectOwnedRetirementForRun("root", rows, current, epoch, lease, busy)
+			if ManagedDigest(rows) != before {
+				t.Fatal("selector mutated historical evidence")
+			}
 			if !errors.Is(e, want) {
 				t.Fatalf("got %v want %v", e, want)
 			}

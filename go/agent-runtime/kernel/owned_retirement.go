@@ -131,6 +131,12 @@ func SelectOwnedRetirementForRun(runID string, receipts []OwnedRetirementReceipt
 		if r.Phase == "ACKNOWLEDGED" {
 			continue
 		}
+		g := r.Evidence.Grant
+		// Valid historical rows remain durable facts, not candidates for a
+		// different current source or native owner. Never ACK them by Run ID.
+		if current.Run.ID != runID || epoch != g.ExecutionEpoch || !g.MatchesExecution(lease) || ManagedDigest(current) != ManagedDigest(r.Evidence.Snapshot) {
+			continue
+		}
 		if selected.Version != 0 {
 			return OwnedRetirementReceipt{}, ErrExecutionConflict
 		}
@@ -139,8 +145,7 @@ func SelectOwnedRetirementForRun(runID string, receipts []OwnedRetirementReceipt
 	if selected.Version == 0 {
 		return OwnedRetirementReceipt{}, ErrNotFound
 	}
-	g := selected.Evidence.Grant
-	if current.Run.ID != runID || hasGrants || epoch != g.ExecutionEpoch || !g.MatchesExecution(lease) || ManagedDigest(current) != ManagedDigest(selected.Evidence.Snapshot) {
+	if hasGrants {
 		return OwnedRetirementReceipt{}, ErrExecutionConflict
 	}
 	return selected, nil

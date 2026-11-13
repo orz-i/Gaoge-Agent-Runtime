@@ -23,6 +23,9 @@ type rootRetirementFaultStore struct {
 	acknowledgements       []kernel.OwnedRetirementAckResult
 	releases               int
 	unavailableAfterFinish bool
+	markCalls              int
+	markCommits            int
+	finishCalls            int
 }
 
 func (s *rootRetirementFaultStore) lose(cut string) bool {
@@ -40,8 +43,19 @@ func (s *rootRetirementFaultStore) RecordOwnedPhysicalCallbackReturn(ctx context
 	return err
 }
 func (s *rootRetirementFaultStore) MarkChildExecutionSettled(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
+	s.markCalls++
+	s.grant = g
+	if s.cut == "mark-never-committed" {
+		s.hit = true
+		return errRootRetirementACKLost
+	}
 	err := s.Store.MarkChildExecutionSettled(ctx, g, p)
 	if err == nil {
+		s.markCommits++
+		if s.cut == "mark-always-lost" {
+			s.hit = true
+			return errRootRetirementACKLost
+		}
 		s.grant = g
 		if s.lose("mark") {
 			return errRootRetirementACKLost
@@ -50,6 +64,7 @@ func (s *rootRetirementFaultStore) MarkChildExecutionSettled(ctx context.Context
 	return err
 }
 func (s *rootRetirementFaultStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant) error {
+	s.finishCalls++
 	err := s.Store.FinishChildExecution(ctx, g)
 	if err == nil && s.lose("death") {
 		s.unavailableAfterFinish = true
@@ -266,5 +281,58 @@ func TestRootRetirementFreshRunnerRecoversFinishedCallByRunID(t *testing.T) {
 	}
 	if err := fresh.ReconcileRootPhysicalExecution(t.Context(), original.Run.ID); !errors.Is(err, kernel.ErrNotFound) {
 		t.Fatalf("RunID selected historical ACK: %v", err)
+	}
+}
+
+func TestRootRetirementPersistentMarkACKLossRequiresActualCommittedMarker(t *testing.T) {
+	for _, committed := range []bool{true, false} {
+		cut := "mark-never-committed"
+		if committed {
+			cut = "mark-always-lost"
+		}
+		t.Run(cut, func(t *testing.T) {
+			base := memory.NewStore()
+			store := &rootRetirementFaultStore{Store: base, cut: cut}
+			rt, err := kernel.New(kernel.Dependencies{Store: store})
+			if err != nil {
+				t.Fatal(err)
+			}
+			model := &nativeLeaseFixtureModel{}
+			runner, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: model})
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, callErr := runner.StartRun(t.Context(), startRequest("persistent-"+cut, "original-request", "finish without inventing marker"))
+			if !store.hit || store.markCalls != 2 || store.finishCalls != 1 || model.calls != 1 || store.releases != 0 {
+				t.Fatalf("wrong actual cut counts: mark=%d committed=%d finish=%d model=%d release=%d hit=%v", store.markCalls, store.markCommits, store.finishCalls, model.calls, store.releases, store.hit)
+			}
+			actual, err := base.Load(t.Context(), result.Run.ID)
+			if err != nil || !reflect.DeepEqual(actual, result) {
+				t.Fatalf("full original aggregate changed: %#v %v", actual, err)
+			}
+			if committed {
+				if callErr != nil || result.Run.Status != kernel.RunStatusCompleted || store.markCommits != 2 || len(store.acknowledgements) != 1 {
+					t.Fatalf("committed marker not recovered: %#v err=%v commits=%d ACKs=%#v", result, callErr, store.markCommits, store.acknowledgements)
+				}
+				receipt, err := base.LoadOwnedRetirement(t.Context(), store.grant.ID)
+				if err != nil || !receipt.Valid() || receipt.Phase != "ACKNOWLEDGED" || receipt.Evidence.Grant != store.grant || !reflect.DeepEqual(receipt.Evidence.Snapshot, result) {
+					t.Fatalf("wrong durable retirement: %#v %v", receipt, err)
+				}
+			} else {
+				if !errors.Is(callErr, agent.ErrRootOutcomeUnknown) || !errors.Is(callErr, errRootRetirementACKLost) || !errors.Is(callErr, kernel.ErrExecutionConflict) || store.markCommits != 0 || len(store.acknowledgements) != 0 {
+					t.Fatalf("missing marker was accepted/error chain lost: result=%#v err=%v commits=%d ACKs=%#v", result, callErr, store.markCommits, store.acknowledgements)
+				}
+				if _, err := base.LoadOwnedRetirement(t.Context(), store.grant.ID); !errors.Is(err, kernel.ErrNotFound) {
+					t.Fatalf("fabricated retirement without marker: %v", err)
+				}
+				retained, err := base.LookupChildExecution(t.Context(), result.Run.ID)
+				if err != nil || retained != store.grant {
+					t.Fatalf("original barrier changed: %#v %v", retained, err)
+				}
+				if err := base.FinishChildExecution(t.Context(), retained); !errors.Is(err, kernel.ErrExecutionConflict) {
+					t.Fatalf("ordinary Finish accepted absent marker: %v", err)
+				}
+			}
+		})
 	}
 }

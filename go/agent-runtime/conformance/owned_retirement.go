@@ -26,6 +26,7 @@ func RunOwnedRetirementStoreSuite(t *testing.T, factory func(*testing.T) Managed
 		t.Run("no-release/"+kind, func(t *testing.T) { runRetirementNoRelease(t, factory, kind) })
 	}
 	t.Run("competing-finish-and-ack", func(t *testing.T) { runRetirementCompetition(t, factory) })
+	t.Run("actual-Agent-two-retired-generations", func(t *testing.T) { runRetirementTwoGenerations(t, factory) })
 	t.Run("actual-Agent-finish-death-public-runID-recovery", func(t *testing.T) { runRetirementActualAgentRecovery(t, factory) })
 	t.Run("finish-lost-ACK-runID-reopen", func(t *testing.T) { runRetirementRunIDRecovery(t, factory) })
 	t.Run("managed-T4-before-retirement", func(t *testing.T) { runRetirementManaged(t, factory) })

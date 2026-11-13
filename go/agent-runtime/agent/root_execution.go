@@ -282,29 +282,43 @@ func settleOwnedRoot(ctx context.Context, rt *kernel.Runtime, grant kernel.Child
 	}
 	if !owner || markErr != nil {
 		if found, err := acknowledgeExactOwnedRetirement(ctx, rt, grant, snapshot, completion); found {
-			return err
+			if err != nil {
+				return errors.Join(markErr, err)
+			}
+			return nil
 		}
 		if completion != nil {
 			recovered := featurecontrol.Seal(snapshot.Run.ID, snapshot.Run.Revision, "agent_owned_physical_recovered", grant.ID, snapshot.State, snapshot.Checkpoint)
-			markErr = rt.MarkOwnedPhysicalRecovered(ctx, grant, recovered)
+			markErr = errors.Join(markErr, rt.MarkOwnedPhysicalRecovered(ctx, grant, recovered))
 		}
 	}
 	if markErr != nil {
 		if found, err := acknowledgeExactOwnedRetirement(ctx, rt, grant, snapshot, completion); found {
-			return err
+			if err != nil {
+				return errors.Join(markErr, err)
+			}
+			return nil
 		}
-		return markErr
+		// Both Mark responses may be lost after their actual commits. Continue
+		// with the existing proof-bound T4/Finish; those Store gates alone decide
+		// whether a genuine marker exists. An error is not evidence of absence.
 	}
 	completed := featurecontrol.Seal(snapshot.Run.ID, snapshot.Run.Revision, "managed_successor_completed", grant.ID, snapshot.State, snapshot)
 	if err := rt.CompleteManagedRecovery(ctx, grant, snapshot, completed); err != nil {
 		if found, ackErr := acknowledgeExactOwnedRetirement(ctx, rt, grant, snapshot, completion); found {
-			return ackErr
+			if ackErr != nil {
+				return errors.Join(markErr, err, ackErr)
+			}
+			return nil
 		}
-		return err
+		return errors.Join(markErr, err)
 	}
 	finishErr := rt.FinishChildExecution(ctx, grant, proof)
 	if found, err := acknowledgeExactOwnedRetirement(ctx, rt, grant, snapshot, completion); found {
-		return err
+		if err != nil {
+			return errors.Join(markErr, finishErr, err)
+		}
+		return nil
 	}
 	// Legacy genuine markers without a callback disposition remain retireable,
 	// but never authorize a native lease release. New calls always have a fact.
@@ -312,9 +326,9 @@ func settleOwnedRoot(ctx context.Context, rt *kernel.Runtime, grant kernel.Child
 		return nil
 	}
 	if finishErr != nil {
-		return finishErr
+		return errors.Join(markErr, finishErr)
 	}
-	return kernel.ErrExecutionConflict
+	return errors.Join(markErr, kernel.ErrExecutionConflict)
 }
 
 // The caller supplies the exact grant it admitted/loaded and settled source it
