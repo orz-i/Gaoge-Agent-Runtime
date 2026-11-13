@@ -1,0 +1,66 @@
+SOURCE_SHA=d3d78368d3096be844afb71d744e6578f0ea084e
+COMMAND=go -C go/agent-runtime-postgres test -count=1 -v ./... -run '^TestRealPostgresManagedRecoveryStore$'
+=== RUN   TestRealPostgresManagedRecoveryStore
+=== RUN   TestRealPostgresManagedRecoveryStore/owner-park-competition
+=== RUN   TestRealPostgresManagedRecoveryStore/owner-park-competition/renew-owner
+    managed_recovery.go:682: kernel execution lease is not current
+=== RUN   TestRealPostgresManagedRecoveryStore/owner-park-competition/renew-park
+    managed_recovery.go:682: kernel execution lease is not current
+=== RUN   TestRealPostgresManagedRecoveryStore/owner-park-competition/claim-owner
+    managed_recovery.go:682: kernel execution lease is not current
+=== RUN   TestRealPostgresManagedRecoveryStore/owner-park-competition/claim-park
+    managed_recovery.go:682: kernel execution lease is not current
+=== RUN   TestRealPostgresManagedRecoveryStore/owner-and-leave
+=== RUN   TestRealPostgresManagedRecoveryStore/owner-and-leave/live
+=== RUN   TestRealPostgresManagedRecoveryStore/owner-and-leave/renew
+=== RUN   TestRealPostgresManagedRecoveryStore/owner-and-leave/leave
+=== RUN   TestRealPostgresManagedRecoveryStore/owner-and-leave/claim
+=== RUN   TestRealPostgresManagedRecoveryStore/owner-and-leave/eventhead
+=== RUN   TestRealPostgresManagedRecoveryStore/parked-ancestor
+=== RUN   TestRealPostgresManagedRecoveryStore/parked-ancestor/park-first
+    managed_recovery.go:594: invalid kernel input
+=== RUN   TestRealPostgresManagedRecoveryStore/parked-ancestor/child-first
+    managed_recovery.go:594: invalid kernel input
+=== RUN   TestRealPostgresManagedRecoveryStore/parked-gates
+=== RUN   TestRealPostgresManagedRecoveryStore/selection-ack
+=== RUN   TestRealPostgresManagedRecoveryStore/selection-ack/RESUME
+=== RUN   TestRealPostgresManagedRecoveryStore/selection-ack/CANCEL
+=== RUN   TestRealPostgresManagedRecoveryStore/two-enable-claimants
+=== RUN   TestRealPostgresManagedRecoveryStore/transaction-ack
+=== RUN   TestRealPostgresManagedRecoveryStore/transaction-ack/t0
+=== RUN   TestRealPostgresManagedRecoveryStore/transaction-ack/park
+=== RUN   TestRealPostgresManagedRecoveryStore/transaction-ack/enable
+=== RUN   TestRealPostgresManagedRecoveryStore/transaction-ack/cancel
+=== RUN   TestRealPostgresManagedRecoveryStore/historical-closure
+--- FAIL: TestRealPostgresManagedRecoveryStore (39.20s)
+    --- FAIL: TestRealPostgresManagedRecoveryStore/owner-park-competition (0.99s)
+        --- FAIL: TestRealPostgresManagedRecoveryStore/owner-park-competition/renew-owner (0.26s)
+        --- FAIL: TestRealPostgresManagedRecoveryStore/owner-park-competition/renew-park (0.24s)
+        --- FAIL: TestRealPostgresManagedRecoveryStore/owner-park-competition/claim-owner (0.24s)
+        --- FAIL: TestRealPostgresManagedRecoveryStore/owner-park-competition/claim-park (0.25s)
+    --- PASS: TestRealPostgresManagedRecoveryStore/owner-and-leave (10.44s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/owner-and-leave/live (0.18s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/owner-and-leave/renew (3.38s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/owner-and-leave/leave (3.31s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/owner-and-leave/claim (3.36s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/owner-and-leave/eventhead (0.22s)
+    --- FAIL: TestRealPostgresManagedRecoveryStore/parked-ancestor (0.34s)
+        --- FAIL: TestRealPostgresManagedRecoveryStore/parked-ancestor/park-first (0.18s)
+        --- FAIL: TestRealPostgresManagedRecoveryStore/parked-ancestor/child-first (0.16s)
+    --- PASS: TestRealPostgresManagedRecoveryStore/parked-gates (3.36s)
+    --- PASS: TestRealPostgresManagedRecoveryStore/selection-ack (6.71s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/selection-ack/RESUME (3.36s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/selection-ack/CANCEL (3.36s)
+    --- PASS: TestRealPostgresManagedRecoveryStore/two-enable-claimants (3.40s)
+    --- PASS: TestRealPostgresManagedRecoveryStore/transaction-ack (10.44s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/transaction-ack/t0 (0.24s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/transaction-ack/park (3.41s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/transaction-ack/enable (3.38s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/transaction-ack/cancel (3.40s)
+    --- PASS: TestRealPostgresManagedRecoveryStore/historical-closure (3.52s)
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	39.570s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]
+FAIL
+
+EXIT_CODE=1

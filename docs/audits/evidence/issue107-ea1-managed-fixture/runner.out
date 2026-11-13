@@ -1,0 +1,14 @@
+compile-agent-runtime 0
+compile-agent-runtime-postgres 0
+compile-agent-runtime-sqlite 0
+compile-agent-runtime-harness 0
+compile-agent-runtime-harness-postgres 0
+compile-continuation-e2e 0
+smoke-core 1
+smoke-sqlite 1
+smoke-nativepg 1
+smoke-hostmemory 0
+smoke-hostpg 0
+smoke-process 0
+final-state 0
+Initial bounded compile/smoke complete; inspect every failure before changes.

@@ -1,0 +1,2 @@
+SOURCE_SHA=d3d78368d3096be844afb71d744e6578f0ea084e
+Six compilation gates pass. Original actual process crash recovery, RESUME/CANCEL Host reservation, and opaque conservative negative all pass. Host smoke passes. New conformance owner/park and ancestor fixtures fail before target cuts; previous Store vectors pass. These failures are preserved, not acceptance. Independent review closed the seven production deltas; missing Goal identified as fixture error. No whole-matrix GO.
