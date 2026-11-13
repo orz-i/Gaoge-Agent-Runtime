@@ -1,0 +1,1070 @@
+SOURCE_SHA=08d236bb6766dd54547fbf8802a168a610878f13
+COMMAND=go -C go/agent-runtime-sqlite test -race -count=1 -v ./...
+=== RUN   TestOwnedSchemaMigrationPreservesOriginalGrants
+--- PASS: TestOwnedSchemaMigrationPreservesOriginalGrants (0.13s)
+=== RUN   TestOwnedBarrierRejectsUnboundControlAndExpiredTakeover
+--- PASS: TestOwnedBarrierRejectsUnboundControlAndExpiredTakeover (0.11s)
+=== RUN   TestInvalidProjectionIsIsolatedEvenWithRecomputedFingerprint
+--- PASS: TestInvalidProjectionIsIsolatedEvenWithRecomputedFingerprint (0.04s)
+=== RUN   TestOpenStoreEscapedAbsolutePath
+--- PASS: TestOpenStoreEscapedAbsolutePath (0.04s)
+=== RUN   TestFencedAllowanceProcessChild
+--- PASS: TestFencedAllowanceProcessChild (0.00s)
+=== RUN   TestFencedAgentAllowanceAcrossProcesses
+--- PASS: TestFencedAgentAllowanceAcrossProcesses (2.28s)
+=== RUN   TestIdentifiedApplyProofSurvivesStoreReopenAndLaterRevision
+--- PASS: TestIdentifiedApplyProofSurvivesStoreReopenAndLaterRevision (0.07s)
+=== RUN   TestIdentifiedApplyEvidenceInsertFailureRollsBackRunCAS
+--- PASS: TestIdentifiedApplyEvidenceInsertFailureRollsBackRunCAS (0.07s)
+=== RUN   TestFencedApprovalProcessChild
+--- PASS: TestFencedApprovalProcessChild (0.00s)
+=== RUN   TestFencedAgentBatchApprovalAcrossThreeProcesses
+=== RUN   TestFencedAgentBatchApprovalAcrossThreeProcesses/approve
+=== RUN   TestFencedAgentBatchApprovalAcrossThreeProcesses/reject
+--- PASS: TestFencedAgentBatchApprovalAcrossThreeProcesses (7.09s)
+    --- PASS: TestFencedAgentBatchApprovalAcrossThreeProcesses/approve (3.59s)
+    --- PASS: TestFencedAgentBatchApprovalAcrossThreeProcesses/reject (3.49s)
+=== RUN   TestFencedApprovalAutoDefersUntilNewClaim
+--- PASS: TestFencedApprovalAutoDefersUntilNewClaim (3.43s)
+=== RUN   TestVerifiedApprovalRollbackRetainsEpochAndWait
+--- PASS: TestVerifiedApprovalRollbackRetainsEpochAndWait (0.15s)
+=== RUN   TestPrivateCreateAndFailClosedReopen
+--- PASS: TestPrivateCreateAndFailClosedReopen (0.05s)
+=== RUN   TestPrivatePathAndSymlinkRequirements
+--- PASS: TestPrivatePathAndSymlinkRequirements (0.05s)
+=== RUN   TestStage1SchemaStructuralValidation
+--- PASS: TestStage1SchemaStructuralValidation (0.06s)
+=== RUN   TestUnsupportedExperimentalSchemaVersionMustNotBeMigrated
+--- PASS: TestUnsupportedExperimentalSchemaVersionMustNotBeMigrated (0.05s)
+=== RUN   TestQuarantineCorruptReadyWithoutBlockingHealthyWork
+--- PASS: TestQuarantineCorruptReadyWithoutBlockingHealthyWork (0.06s)
+=== RUN   TestFarFutureRetryAndLeaseDoNotOverflow
+--- PASS: TestFarFutureRetryAndLeaseDoNotOverflow (0.06s)
+=== RUN   TestTerminalProgressPreservesUnconsumedOutboxAndProofs
+--- PASS: TestTerminalProgressPreservesUnconsumedOutboxAndProofs (0.07s)
+=== RUN   TestPoisonAtPageHeadDoesNotStarveLimitOne
+--- PASS: TestPoisonAtPageHeadDoesNotStarveLimitOne (0.05s)
+=== RUN   TestLeaseExpirationBeyondNanosecondMaximumIsRejected
+--- PASS: TestLeaseExpirationBeyondNanosecondMaximumIsRejected (0.04s)
+=== RUN   TestCreateNewRejectsOrphanWALWithoutTouchingDatabase
+--- PASS: TestCreateNewRejectsOrphanWALWithoutTouchingDatabase (0.00s)
+=== RUN   TestGuardedCancelRollbackDoesNotRevokeOwner
+--- PASS: TestGuardedCancelRollbackDoesNotRevokeOwner (0.07s)
+=== RUN   TestEA1ChildAgentApprovalSettlementNativeSQLite
+=== RUN   TestEA1ChildAgentApprovalSettlementNativeSQLite/P3/native-checkpoint
+=== RUN   TestEA1ChildAgentApprovalSettlementNativeSQLite/P4/native-checkpoint
+=== RUN   TestEA1ChildAgentApprovalSettlementNativeSQLite/P5/native-checkpoint/two-approvals
+=== RUN   TestEA1ChildAgentApprovalSettlementNativeSQLite/P3/default-terminal-tool
+=== RUN   TestEA1ChildAgentApprovalSettlementNativeSQLite/P4/default-terminal-tool
+=== RUN   TestEA1ChildAgentApprovalSettlementNativeSQLite/P5/default-terminal-tool/two-approvals
+=== RUN   TestEA1ChildAgentApprovalSettlementNativeSQLite/P5/ancestor-deadline
+--- PASS: TestEA1ChildAgentApprovalSettlementNativeSQLite (4.11s)
+    --- PASS: TestEA1ChildAgentApprovalSettlementNativeSQLite/P3/native-checkpoint (0.15s)
+    --- PASS: TestEA1ChildAgentApprovalSettlementNativeSQLite/P4/native-checkpoint (0.15s)
+    --- PASS: TestEA1ChildAgentApprovalSettlementNativeSQLite/P5/native-checkpoint/two-approvals (0.16s)
+    --- PASS: TestEA1ChildAgentApprovalSettlementNativeSQLite/P3/default-terminal-tool (0.18s)
+    --- PASS: TestEA1ChildAgentApprovalSettlementNativeSQLite/P4/default-terminal-tool (0.17s)
+    --- PASS: TestEA1ChildAgentApprovalSettlementNativeSQLite/P5/default-terminal-tool/two-approvals (0.17s)
+    --- PASS: TestEA1ChildAgentApprovalSettlementNativeSQLite/P5/ancestor-deadline (3.12s)
+=== RUN   TestEA1ChildAgentCancelPhasesNativeSQLite
+=== RUN   TestEA1ChildAgentCancelPhasesNativeSQLite/P0/missing
+=== RUN   TestEA1ChildAgentCancelPhasesNativeSQLite/P0/stale
+=== RUN   TestEA1ChildAgentCancelPhasesNativeSQLite/P0/prepared
+=== RUN   TestEA1ChildAgentCancelPhasesNativeSQLite/P0/native-pregrant
+=== RUN   TestEA1ChildAgentCancelPhasesNativeSQLite/P2/default-child/host
+=== RUN   TestEA1ChildAgentCancelPhasesNativeSQLite/P2/default-child/model
+=== RUN   TestEA1ChildAgentCancelPhasesNativeSQLite/P2/default-child/tool
+=== RUN   TestEA1ChildAgentCancelPhasesNativeSQLite/P3/default-child/yield
+=== RUN   TestEA1ChildAgentCancelPhasesNativeSQLite/P3/default-child/terminal-tool
+=== RUN   TestEA1ChildAgentCancelPhasesNativeSQLite/P4/default-child/yield
+=== RUN   TestEA1ChildAgentCancelPhasesNativeSQLite/P4/default-child/terminal-tool
+=== RUN   TestEA1ChildAgentCancelPhasesNativeSQLite/P2/explicit-native/host
+=== RUN   TestEA1ChildAgentCancelPhasesNativeSQLite/P2/explicit-native/model
+=== RUN   TestEA1ChildAgentCancelPhasesNativeSQLite/P2/explicit-native/tool
+=== RUN   TestEA1ChildAgentCancelPhasesNativeSQLite/P3/explicit-native/yield
+=== RUN   TestEA1ChildAgentCancelPhasesNativeSQLite/P3/explicit-native/terminal-tool
+=== RUN   TestEA1ChildAgentCancelPhasesNativeSQLite/P4/explicit-native/yield
+=== RUN   TestEA1ChildAgentCancelPhasesNativeSQLite/P4/explicit-native/terminal-tool
+=== RUN   TestEA1ChildAgentCancelPhasesNativeSQLite/P4/actual-child-Cancel-CAS-ACK
+--- PASS: TestEA1ChildAgentCancelPhasesNativeSQLite (9.02s)
+    --- PASS: TestEA1ChildAgentCancelPhasesNativeSQLite/P0/missing (0.06s)
+    --- PASS: TestEA1ChildAgentCancelPhasesNativeSQLite/P0/stale (0.06s)
+    --- PASS: TestEA1ChildAgentCancelPhasesNativeSQLite/P0/prepared (0.06s)
+    --- PASS: TestEA1ChildAgentCancelPhasesNativeSQLite/P0/native-pregrant (0.07s)
+    --- PASS: TestEA1ChildAgentCancelPhasesNativeSQLite/P2/default-child/host (0.14s)
+    --- PASS: TestEA1ChildAgentCancelPhasesNativeSQLite/P2/default-child/model (0.15s)
+    --- PASS: TestEA1ChildAgentCancelPhasesNativeSQLite/P2/default-child/tool (0.25s)
+    --- PASS: TestEA1ChildAgentCancelPhasesNativeSQLite/P3/default-child/yield (0.20s)
+    --- PASS: TestEA1ChildAgentCancelPhasesNativeSQLite/P3/default-child/terminal-tool (0.15s)
+    --- PASS: TestEA1ChildAgentCancelPhasesNativeSQLite/P4/default-child/yield (0.15s)
+    --- PASS: TestEA1ChildAgentCancelPhasesNativeSQLite/P4/default-child/terminal-tool (0.15s)
+    --- PASS: TestEA1ChildAgentCancelPhasesNativeSQLite/P2/explicit-native/host (2.27s)
+    --- PASS: TestEA1ChildAgentCancelPhasesNativeSQLite/P2/explicit-native/model (2.27s)
+    --- PASS: TestEA1ChildAgentCancelPhasesNativeSQLite/P2/explicit-native/tool (2.28s)
+    --- PASS: TestEA1ChildAgentCancelPhasesNativeSQLite/P3/explicit-native/yield (0.16s)
+    --- PASS: TestEA1ChildAgentCancelPhasesNativeSQLite/P3/explicit-native/terminal-tool (0.18s)
+    --- PASS: TestEA1ChildAgentCancelPhasesNativeSQLite/P4/explicit-native/yield (0.15s)
+    --- PASS: TestEA1ChildAgentCancelPhasesNativeSQLite/P4/explicit-native/terminal-tool (0.16s)
+    --- PASS: TestEA1ChildAgentCancelPhasesNativeSQLite/P4/actual-child-Cancel-CAS-ACK (0.09s)
+=== RUN   TestEA1ChildAgentControlPhasesNativeSQLite
+=== RUN   TestEA1ChildAgentControlPhasesNativeSQLite/P0/missing
+=== RUN   TestEA1ChildAgentControlPhasesNativeSQLite/P0/stale
+=== RUN   TestEA1ChildAgentControlPhasesNativeSQLite/P0/not-waiting
+=== RUN   TestEA1ChildAgentControlPhasesNativeSQLite/P0/missing-preflight
+=== RUN   TestEA1ChildAgentControlPhasesNativeSQLite/P0/preflight-rejected
+=== RUN   TestEA1ChildAgentControlPhasesNativeSQLite/P0/parent-wins
+=== RUN   TestEA1ChildAgentControlPhasesNativeSQLite/P0/invalid-decision
+=== RUN   TestEA1ChildAgentControlPhasesNativeSQLite/P0/foreign-checkpoint
+=== RUN   TestEA1ChildAgentControlPhasesNativeSQLite/P1/default
+=== RUN   TestEA1ChildAgentControlPhasesNativeSQLite/P1/native
+=== RUN   TestEA1ChildAgentControlPhasesNativeSQLite/P2/host
+=== RUN   TestEA1ChildAgentControlPhasesNativeSQLite/P2/handler
+=== RUN   TestEA1ChildAgentControlPhasesNativeSQLite/P2/tool
+--- PASS: TestEA1ChildAgentControlPhasesNativeSQLite (1.78s)
+    --- PASS: TestEA1ChildAgentControlPhasesNativeSQLite/P0/missing (0.10s)
+    --- PASS: TestEA1ChildAgentControlPhasesNativeSQLite/P0/stale (0.11s)
+    --- PASS: TestEA1ChildAgentControlPhasesNativeSQLite/P0/not-waiting (0.11s)
+    --- PASS: TestEA1ChildAgentControlPhasesNativeSQLite/P0/missing-preflight (0.10s)
+    --- PASS: TestEA1ChildAgentControlPhasesNativeSQLite/P0/preflight-rejected (0.11s)
+    --- PASS: TestEA1ChildAgentControlPhasesNativeSQLite/P0/parent-wins (0.11s)
+    --- PASS: TestEA1ChildAgentControlPhasesNativeSQLite/P0/invalid-decision (0.12s)
+    --- PASS: TestEA1ChildAgentControlPhasesNativeSQLite/P0/foreign-checkpoint (0.12s)
+    --- PASS: TestEA1ChildAgentControlPhasesNativeSQLite/P1/default (0.20s)
+    --- PASS: TestEA1ChildAgentControlPhasesNativeSQLite/P1/native (0.21s)
+    --- PASS: TestEA1ChildAgentControlPhasesNativeSQLite/P2/host (0.19s)
+    --- PASS: TestEA1ChildAgentControlPhasesNativeSQLite/P2/handler (0.14s)
+    --- PASS: TestEA1ChildAgentControlPhasesNativeSQLite/P2/tool (0.15s)
+=== RUN   TestEA1ChildAgentRecoveryPhasesNativeSQLite
+=== RUN   TestEA1ChildAgentRecoveryPhasesNativeSQLite/P1/active-callback-before-and-after-Next
+=== RUN   TestEA1ChildAgentRecoveryPhasesNativeSQLite/P3/unmarked-model-yield
+=== RUN   TestEA1ChildAgentRecoveryPhasesNativeSQLite/P3/marked-model-yield
+=== RUN   TestEA1ChildAgentRecoveryPhasesNativeSQLite/P3/unmarked-terminal-tool
+=== RUN   TestEA1ChildAgentRecoveryPhasesNativeSQLite/P3/marked-terminal-tool
+=== RUN   TestEA1ChildAgentRecoveryPhasesNativeSQLite/P5/two-reconcilers-parent-cancel
+=== RUN   TestEA1ChildAgentRecoveryPhasesNativeSQLite/P5/two-reconcilers-ancestor-deadline
+--- PASS: TestEA1ChildAgentRecoveryPhasesNativeSQLite (4.00s)
+    --- PASS: TestEA1ChildAgentRecoveryPhasesNativeSQLite/P1/active-callback-before-and-after-Next (0.12s)
+    --- PASS: TestEA1ChildAgentRecoveryPhasesNativeSQLite/P3/unmarked-model-yield (0.15s)
+    --- PASS: TestEA1ChildAgentRecoveryPhasesNativeSQLite/P3/marked-model-yield (0.14s)
+    --- PASS: TestEA1ChildAgentRecoveryPhasesNativeSQLite/P3/unmarked-terminal-tool (0.15s)
+    --- PASS: TestEA1ChildAgentRecoveryPhasesNativeSQLite/P3/marked-terminal-tool (0.15s)
+    --- PASS: TestEA1ChildAgentRecoveryPhasesNativeSQLite/P5/two-reconcilers-parent-cancel (0.15s)
+    --- PASS: TestEA1ChildAgentRecoveryPhasesNativeSQLite/P5/two-reconcilers-ancestor-deadline (3.14s)
+=== RUN   TestEA1ChildAgentRecoveryUnknownNativeSQLite
+=== RUN   TestEA1ChildAgentRecoveryUnknownNativeSQLite/host_middleware
+=== RUN   TestEA1ChildAgentRecoveryUnknownNativeSQLite/model
+=== RUN   TestEA1ChildAgentRecoveryUnknownNativeSQLite/tool
+--- PASS: TestEA1ChildAgentRecoveryUnknownNativeSQLite (4.56s)
+    --- PASS: TestEA1ChildAgentRecoveryUnknownNativeSQLite/host_middleware (0.12s)
+    --- PASS: TestEA1ChildAgentRecoveryUnknownNativeSQLite/model (2.22s)
+    --- PASS: TestEA1ChildAgentRecoveryUnknownNativeSQLite/tool (2.22s)
+=== RUN   TestEA1ChildAgentRecoveryAdmissionNativeSQLite
+--- PASS: TestEA1ChildAgentRecoveryAdmissionNativeSQLite (0.16s)
+=== RUN   TestEA1ChildAgentResumePhasesNativeSQLite
+=== RUN   TestEA1ChildAgentResumePhasesNativeSQLite/P0/missing
+=== RUN   TestEA1ChildAgentResumePhasesNativeSQLite/P0/stale-revision
+=== RUN   TestEA1ChildAgentResumePhasesNativeSQLite/P0/terminal
+=== RUN   TestEA1ChildAgentResumePhasesNativeSQLite/P0/parent-wins
+=== RUN   TestEA1ChildAgentResumePhasesNativeSQLite/P0/stale-admission
+=== RUN   TestEA1ChildAgentResumePhasesNativeSQLite/P1/host-before-next
+=== RUN   TestEA1ChildAgentResumePhasesNativeSQLite/P2/host
+=== RUN   TestEA1ChildAgentResumePhasesNativeSQLite/P2/model
+=== RUN   TestEA1ChildAgentResumePhasesNativeSQLite/P2/tool
+--- PASS: TestEA1ChildAgentResumePhasesNativeSQLite (9.45s)
+    --- PASS: TestEA1ChildAgentResumePhasesNativeSQLite/P0/missing (0.07s)
+    --- PASS: TestEA1ChildAgentResumePhasesNativeSQLite/P0/stale-revision (0.08s)
+    --- PASS: TestEA1ChildAgentResumePhasesNativeSQLite/P0/terminal (0.11s)
+    --- PASS: TestEA1ChildAgentResumePhasesNativeSQLite/P0/parent-wins (0.10s)
+    --- PASS: TestEA1ChildAgentResumePhasesNativeSQLite/P0/stale-admission (0.08s)
+    --- PASS: TestEA1ChildAgentResumePhasesNativeSQLite/P1/host-before-next (2.24s)
+    --- PASS: TestEA1ChildAgentResumePhasesNativeSQLite/P2/host (2.26s)
+    --- PASS: TestEA1ChildAgentResumePhasesNativeSQLite/P2/model (2.25s)
+    --- PASS: TestEA1ChildAgentResumePhasesNativeSQLite/P2/tool (2.26s)
+=== RUN   TestEA1ChildAgentResumeSettlementNativeSQLite
+=== RUN   TestEA1ChildAgentResumeSettlementNativeSQLite/P3/model-yield
+=== RUN   TestEA1ChildAgentResumeSettlementNativeSQLite/P3/terminal-tool
+=== RUN   TestEA1ChildAgentResumeSettlementNativeSQLite/P4/model-yield
+=== RUN   TestEA1ChildAgentResumeSettlementNativeSQLite/P4/terminal-tool
+=== RUN   TestEA1ChildAgentResumeSettlementNativeSQLite/P5/two-resumes-parent-cancel
+=== RUN   TestEA1ChildAgentResumeSettlementNativeSQLite/P5/two-resumes-ancestor-deadline
+--- PASS: TestEA1ChildAgentResumeSettlementNativeSQLite (3.95s)
+    --- PASS: TestEA1ChildAgentResumeSettlementNativeSQLite/P3/model-yield (0.14s)
+    --- PASS: TestEA1ChildAgentResumeSettlementNativeSQLite/P3/terminal-tool (0.16s)
+    --- PASS: TestEA1ChildAgentResumeSettlementNativeSQLite/P4/model-yield (0.16s)
+    --- PASS: TestEA1ChildAgentResumeSettlementNativeSQLite/P4/terminal-tool (0.19s)
+    --- PASS: TestEA1ChildAgentResumeSettlementNativeSQLite/P5/two-resumes-parent-cancel (0.16s)
+    --- PASS: TestEA1ChildAgentResumeSettlementNativeSQLite/P5/two-resumes-ancestor-deadline (3.14s)
+=== RUN   TestEA1ChildAgentStartPhasesNativeSQLite
+=== RUN   TestEA1ChildAgentStartPhasesNativeSQLite/P0/origin
+=== RUN   TestEA1ChildAgentStartPhasesNativeSQLite/P0/actor
+=== RUN   TestEA1ChildAgentStartPhasesNativeSQLite/P0/thread
+=== RUN   TestEA1ChildAgentStartPhasesNativeSQLite/P0/missing-parent
+=== RUN   TestEA1ChildAgentStartPhasesNativeSQLite/P0/terminal-parent
+=== RUN   TestEA1ChildAgentStartPhasesNativeSQLite/P0/preflight
+=== RUN   TestEA1ChildAgentStartPhasesNativeSQLite/P0/duplicate
+=== RUN   TestEA1ChildAgentStartPhasesNativeSQLite/P0/stale-admission
+=== RUN   TestEA1ChildAgentStartPhasesNativeSQLite/P0/parent-wins
+=== RUN   TestEA1ChildAgentStartPhasesNativeSQLite/P1/host-before-next
+=== RUN   TestEA1ChildAgentStartPhasesNativeSQLite/P2/host
+=== RUN   TestEA1ChildAgentStartPhasesNativeSQLite/P2/model
+=== RUN   TestEA1ChildAgentStartPhasesNativeSQLite/P2/tool
+=== RUN   TestEA1ChildAgentStartPhasesNativeSQLite/P3/model
+=== RUN   TestEA1ChildAgentStartPhasesNativeSQLite/P3/tool
+=== RUN   TestEA1ChildAgentStartPhasesNativeSQLite/P5/host
+=== RUN   TestEA1ChildAgentStartPhasesNativeSQLite/P5/model
+=== RUN   TestEA1ChildAgentStartPhasesNativeSQLite/P5/tool
+=== RUN   TestEA1ChildAgentStartPhasesNativeSQLite/P5/deadline
+--- PASS: TestEA1ChildAgentStartPhasesNativeSQLite (7.17s)
+    --- PASS: TestEA1ChildAgentStartPhasesNativeSQLite/P0/origin (0.06s)
+    --- PASS: TestEA1ChildAgentStartPhasesNativeSQLite/P0/actor (0.05s)
+    --- PASS: TestEA1ChildAgentStartPhasesNativeSQLite/P0/thread (0.06s)
+    --- PASS: TestEA1ChildAgentStartPhasesNativeSQLite/P0/missing-parent (0.05s)
+    --- PASS: TestEA1ChildAgentStartPhasesNativeSQLite/P0/terminal-parent (0.06s)
+    --- PASS: TestEA1ChildAgentStartPhasesNativeSQLite/P0/preflight (0.06s)
+    --- PASS: TestEA1ChildAgentStartPhasesNativeSQLite/P0/duplicate (0.07s)
+    --- PASS: TestEA1ChildAgentStartPhasesNativeSQLite/P0/stale-admission (0.06s)
+    --- PASS: TestEA1ChildAgentStartPhasesNativeSQLite/P0/parent-wins (0.06s)
+    --- PASS: TestEA1ChildAgentStartPhasesNativeSQLite/P1/host-before-next (0.11s)
+    --- PASS: TestEA1ChildAgentStartPhasesNativeSQLite/P2/host (0.09s)
+    --- PASS: TestEA1ChildAgentStartPhasesNativeSQLite/P2/model (2.23s)
+    --- PASS: TestEA1ChildAgentStartPhasesNativeSQLite/P2/tool (2.24s)
+    --- PASS: TestEA1ChildAgentStartPhasesNativeSQLite/P3/model (0.17s)
+    --- PASS: TestEA1ChildAgentStartPhasesNativeSQLite/P3/tool (0.17s)
+    --- PASS: TestEA1ChildAgentStartPhasesNativeSQLite/P5/host (0.18s)
+    --- PASS: TestEA1ChildAgentStartPhasesNativeSQLite/P5/model (0.17s)
+    --- PASS: TestEA1ChildAgentStartPhasesNativeSQLite/P5/tool (0.17s)
+    --- PASS: TestEA1ChildAgentStartPhasesNativeSQLite/P5/deadline (1.09s)
+=== RUN   TestEA1ChildWaitAdmissionSQLite
+=== RUN   TestEA1ChildWaitAdmissionSQLite/checkpoint
+=== RUN   TestEA1ChildWaitAdmissionSQLite/ancestor-terminal
+--- PASS: TestEA1ChildWaitAdmissionSQLite (0.22s)
+    --- PASS: TestEA1ChildWaitAdmissionSQLite/checkpoint (0.13s)
+    --- PASS: TestEA1ChildWaitAdmissionSQLite/ancestor-terminal (0.09s)
+=== RUN   TestEA1CompensationMarkAckNativeSQLite
+=== RUN   TestEA1CompensationMarkAckNativeSQLite/root
+=== RUN   TestEA1CompensationMarkAckNativeSQLite/child
+--- PASS: TestEA1CompensationMarkAckNativeSQLite (0.25s)
+    --- PASS: TestEA1CompensationMarkAckNativeSQLite/root (0.12s)
+    --- PASS: TestEA1CompensationMarkAckNativeSQLite/child (0.13s)
+=== RUN   TestEA1CompensationAdmissionSQLite
+=== RUN   TestEA1CompensationAdmissionSQLite/root/revision
+=== RUN   TestEA1CompensationAdmissionSQLite/root/terminal
+=== RUN   TestEA1CompensationAdmissionSQLite/child/revision
+=== RUN   TestEA1CompensationAdmissionSQLite/child/terminal
+--- PASS: TestEA1CompensationAdmissionSQLite (0.42s)
+    --- PASS: TestEA1CompensationAdmissionSQLite/root/revision (0.11s)
+    --- PASS: TestEA1CompensationAdmissionSQLite/root/terminal (0.09s)
+    --- PASS: TestEA1CompensationAdmissionSQLite/child/revision (0.12s)
+    --- PASS: TestEA1CompensationAdmissionSQLite/child/terminal (0.10s)
+=== RUN   TestEA1CompensationBarriersSQLite
+=== RUN   TestEA1CompensationBarriersSQLite/root/P1
+=== RUN   TestEA1CompensationBarriersSQLite/root/P5
+=== RUN   TestEA1CompensationBarriersSQLite/root/P5-retry
+=== RUN   TestEA1CompensationBarriersSQLite/child/P1
+=== RUN   TestEA1CompensationBarriersSQLite/child/P5
+=== RUN   TestEA1CompensationBarriersSQLite/child/P5-retry
+--- PASS: TestEA1CompensationBarriersSQLite (2.89s)
+    --- PASS: TestEA1CompensationBarriersSQLite/root/P1 (0.13s)
+    --- PASS: TestEA1CompensationBarriersSQLite/root/P5 (0.14s)
+    --- PASS: TestEA1CompensationBarriersSQLite/root/P5-retry (0.16s)
+    --- PASS: TestEA1CompensationBarriersSQLite/child/P1 (0.18s)
+    --- PASS: TestEA1CompensationBarriersSQLite/child/P5 (2.12s)
+    --- PASS: TestEA1CompensationBarriersSQLite/child/P5-retry (0.17s)
+=== RUN   TestEA1CompensationUnknownNativeSQLite
+=== RUN   TestEA1CompensationUnknownNativeSQLite/root
+=== RUN   TestEA1CompensationUnknownNativeSQLite/child
+--- PASS: TestEA1CompensationUnknownNativeSQLite (0.35s)
+    --- PASS: TestEA1CompensationUnknownNativeSQLite/root (0.16s)
+    --- PASS: TestEA1CompensationUnknownNativeSQLite/child (0.20s)
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/root
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/root/P0/create-denied
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/root/P0/stale-admission
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/root/P0/duplicate
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/root/P0/foreign-model
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/root/P1/run
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/root/P2/run/async
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/root/P2/run/unknown
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/root/P2/run/panic
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/root/P5/run/async-election
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/root/P1/model
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/root/P2/model/async
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/root/P2/model/unknown
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/root/P2/model/panic
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/root/P5/model/async-election
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/root/P1/tool
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/root/P2/tool/async
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/root/P2/tool/unknown
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/root/P2/tool/panic
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/root/P5/tool/async-election
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/root/P2/model/swallowed-inner
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/root/P3/durable-before-whole-return
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/root/P4/mark-ack-lost
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/root/P5/deadline-before-new-send
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/root/P1/default-owner
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child/P0/create-denied
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child/P0/stale-admission
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child/P0/duplicate
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child/P0/foreign-model
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child/P0/preflight
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child/P1/run
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child/P2/run/async
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child/P2/run/unknown
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child/P2/run/panic
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child/P5/run/async-election
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child/P1/model
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child/P2/model/async
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child/P2/model/unknown
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child/P2/model/panic
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child/P5/model/async-election
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child/P1/tool
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child/P2/tool/async
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child/P2/tool/unknown
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child/P2/tool/panic
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child/P5/tool/async-election
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child/P2/model/swallowed-inner
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child/P3/durable-before-whole-return
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child/P4/mark-ack-lost
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child/P5/deadline-before-new-send
+=== RUN   TestEA1MiddlewareNextLifetimeNativeSQLite/child/P1/default-owner
+--- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite (12.16s)
+    --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/root (5.97s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/root/P0/create-denied (0.05s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/root/P0/stale-admission (0.09s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/root/P0/duplicate (0.11s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/root/P0/foreign-model (0.11s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/root/P1/run (0.14s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/root/P2/run/async (0.16s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/root/P2/run/unknown (0.12s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/root/P2/run/panic (0.13s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/root/P5/run/async-election (0.13s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/root/P1/model (0.12s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/root/P2/model/async (0.12s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/root/P2/model/unknown (2.23s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/root/P2/model/panic (0.13s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/root/P5/model/async-election (0.16s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/root/P1/tool (0.12s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/root/P2/tool/async (0.12s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/root/P2/tool/unknown (0.11s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/root/P2/tool/panic (0.11s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/root/P5/tool/async-election (0.12s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/root/P2/model/swallowed-inner (0.12s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/root/P3/durable-before-whole-return (0.12s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/root/P4/mark-ack-lost (0.14s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/root/P5/deadline-before-new-send (1.08s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/root/P1/default-owner (0.13s)
+    --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child (6.18s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child/P0/create-denied (0.06s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child/P0/stale-admission (0.07s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child/P0/duplicate (0.07s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child/P0/foreign-model (0.09s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child/P0/preflight (0.06s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child/P1/run (0.15s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child/P2/run/async (0.15s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child/P2/run/unknown (0.14s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child/P2/run/panic (0.13s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child/P5/run/async-election (0.13s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child/P1/model (0.14s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child/P2/model/async (0.13s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child/P2/model/unknown (2.24s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child/P2/model/panic (0.16s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child/P5/model/async-election (0.13s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child/P1/tool (0.14s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child/P2/tool/async (0.13s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child/P2/tool/unknown (0.12s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child/P2/tool/panic (0.12s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child/P5/tool/async-election (0.18s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child/P2/model/swallowed-inner (0.13s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child/P3/durable-before-whole-return (0.15s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child/P4/mark-ack-lost (0.16s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child/P5/deadline-before-new-send (1.09s)
+        --- PASS: TestEA1MiddlewareNextLifetimeNativeSQLite/child/P1/default-owner (0.14s)
+=== RUN   TestEA1OwnedCallbackReturnSQLite
+=== RUN   TestEA1OwnedCallbackReturnSQLite/unknown-host
+=== RUN   TestEA1OwnedCallbackReturnSQLite/known-host
+--- PASS: TestEA1OwnedCallbackReturnSQLite (2.16s)
+    --- PASS: TestEA1OwnedCallbackReturnSQLite/unknown-host (1.08s)
+    --- PASS: TestEA1OwnedCallbackReturnSQLite/known-host (1.09s)
+=== RUN   TestEA1ResumeMarkAckNativeSQLite
+=== RUN   TestEA1ResumeMarkAckNativeSQLite/root
+=== RUN   TestEA1ResumeMarkAckNativeSQLite/child
+--- PASS: TestEA1ResumeMarkAckNativeSQLite (0.24s)
+    --- PASS: TestEA1ResumeMarkAckNativeSQLite/root (0.11s)
+    --- PASS: TestEA1ResumeMarkAckNativeSQLite/child (0.13s)
+=== RUN   TestEA1ResumeAdmissionSQLite
+=== RUN   TestEA1ResumeAdmissionSQLite/root/revision
+=== RUN   TestEA1ResumeAdmissionSQLite/root/terminal
+=== RUN   TestEA1ResumeAdmissionSQLite/child/revision
+=== RUN   TestEA1ResumeAdmissionSQLite/child/terminal
+--- PASS: TestEA1ResumeAdmissionSQLite (0.40s)
+    --- PASS: TestEA1ResumeAdmissionSQLite/root/revision (0.11s)
+    --- PASS: TestEA1ResumeAdmissionSQLite/root/terminal (0.08s)
+    --- PASS: TestEA1ResumeAdmissionSQLite/child/revision (0.13s)
+    --- PASS: TestEA1ResumeAdmissionSQLite/child/terminal (0.08s)
+=== RUN   TestEA1ResumeUnknownNativeSQLite
+=== RUN   TestEA1ResumeUnknownNativeSQLite/root
+=== RUN   TestEA1ResumeUnknownNativeSQLite/child
+--- PASS: TestEA1ResumeUnknownNativeSQLite (0.26s)
+    --- PASS: TestEA1ResumeUnknownNativeSQLite/root (0.12s)
+    --- PASS: TestEA1ResumeUnknownNativeSQLite/child (0.13s)
+=== RUN   TestEA1RootAgentAdmissionSQLite
+=== RUN   TestEA1RootAgentAdmissionSQLite/P1/callback-completion-bounded
+=== RUN   TestEA1RootAgentAdmissionSQLite/P1/callback-completion-opaque
+=== RUN   TestEA1RootAgentAdmissionSQLite/P1/callback-completion-foreign-hydration
+=== RUN   TestEA1RootAgentAdmissionSQLite/P1/opaque-tool
+=== RUN   TestEA1RootAgentAdmissionSQLite/P1/bounded-tool-timeline
+=== RUN   TestEA1RootAgentAdmissionSQLite/P0/origin-and-claim
+=== RUN   TestEA1RootAgentAdmissionSQLite/P0/control-before-owned-admission
+=== RUN   TestEA1RootAgentAdmissionSQLite/P0/original-external-owner-reuse
+=== RUN   TestEA1RootAgentAdmissionSQLite/P0/same-external-lease-two-callers
+=== RUN   TestEA1RootAgentAdmissionSQLite/P1/middleware-before-physical
+=== RUN   TestEA1RootAgentAdmissionSQLite/P1/owned-admission-before-model
+--- PASS: TestEA1RootAgentAdmissionSQLite (1.16s)
+    --- PASS: TestEA1RootAgentAdmissionSQLite/P1/callback-completion-bounded (0.11s)
+    --- PASS: TestEA1RootAgentAdmissionSQLite/P1/callback-completion-opaque (0.07s)
+    --- PASS: TestEA1RootAgentAdmissionSQLite/P1/callback-completion-foreign-hydration (0.08s)
+    --- PASS: TestEA1RootAgentAdmissionSQLite/P1/opaque-tool (0.14s)
+    --- PASS: TestEA1RootAgentAdmissionSQLite/P1/bounded-tool-timeline (0.16s)
+    --- PASS: TestEA1RootAgentAdmissionSQLite/P0/origin-and-claim (0.14s)
+    --- PASS: TestEA1RootAgentAdmissionSQLite/P0/control-before-owned-admission (0.07s)
+    --- PASS: TestEA1RootAgentAdmissionSQLite/P0/original-external-owner-reuse (0.12s)
+    --- PASS: TestEA1RootAgentAdmissionSQLite/P0/same-external-lease-two-callers (0.12s)
+    --- PASS: TestEA1RootAgentAdmissionSQLite/P1/middleware-before-physical (0.07s)
+    --- PASS: TestEA1RootAgentAdmissionSQLite/P1/owned-admission-before-model (0.07s)
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P1/callback-completion-bounded
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P1/callback-completion-opaque
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P1/callback-completion-foreign-hydration
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P1/opaque-tool
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P1/bounded-tool-timeline
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P0/default-generated-id
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P0/origin-and-claim
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P0/control-before-owned-admission
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P0/original-external-owner-reuse
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P0/same-external-lease-two-callers
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P1/middleware-before-physical
+=== RUN   TestEA1RootAgentDefaultAdmissionSQLite/P1/owned-admission-before-model
+--- PASS: TestEA1RootAgentDefaultAdmissionSQLite (1.19s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionSQLite/P1/callback-completion-bounded (0.11s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionSQLite/P1/callback-completion-opaque (0.07s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionSQLite/P1/callback-completion-foreign-hydration (0.07s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionSQLite/P1/opaque-tool (0.14s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionSQLite/P1/bounded-tool-timeline (0.13s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionSQLite/P0/default-generated-id (0.09s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionSQLite/P0/origin-and-claim (0.13s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionSQLite/P0/control-before-owned-admission (0.06s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionSQLite/P0/original-external-owner-reuse (0.11s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionSQLite/P0/same-external-lease-two-callers (0.12s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionSQLite/P1/middleware-before-physical (0.07s)
+    --- PASS: TestEA1RootAgentDefaultAdmissionSQLite/P1/owned-admission-before-model (0.08s)
+=== RUN   TestEA1RootAgentCancelPhasesNativeSQLite
+=== RUN   TestEA1RootAgentCancelPhasesNativeSQLite/P0/missing
+=== RUN   TestEA1RootAgentCancelPhasesNativeSQLite/P0/stale
+=== RUN   TestEA1RootAgentCancelPhasesNativeSQLite/P0/prepared
+=== RUN   TestEA1RootAgentCancelPhasesNativeSQLite/P0/native-before-owned
+=== RUN   TestEA1RootAgentCancelPhasesNativeSQLite/P1/active-original-callback
+=== RUN   TestEA1RootAgentCancelPhasesNativeSQLite/P2/host
+=== RUN   TestEA1RootAgentCancelPhasesNativeSQLite/P2/model
+=== RUN   TestEA1RootAgentCancelPhasesNativeSQLite/P2/tool
+=== RUN   TestEA1RootAgentCancelPhasesNativeSQLite/P3/yield
+=== RUN   TestEA1RootAgentCancelPhasesNativeSQLite/P3/terminal
+=== RUN   TestEA1RootAgentCancelPhasesNativeSQLite/P4/yield
+=== RUN   TestEA1RootAgentCancelPhasesNativeSQLite/P4/terminal
+=== RUN   TestEA1RootAgentCancelPhasesNativeSQLite/P4/actual-cancel-CAS-lost-ACK
+=== RUN   TestEA1RootAgentCancelPhasesNativeSQLite/P5/cancel-wins-resume-admission
+=== RUN   TestEA1RootAgentCancelPhasesNativeSQLite/P5/resume-scope-rejects-cancel
+=== RUN   TestEA1RootAgentCancelPhasesNativeSQLite/P5/two-cancel-owners
+=== RUN   TestEA1RootAgentCancelPhasesNativeSQLite/P5/cancel-deadline
+--- PASS: TestEA1RootAgentCancelPhasesNativeSQLite (11.46s)
+    --- PASS: TestEA1RootAgentCancelPhasesNativeSQLite/P0/missing (0.08s)
+    --- PASS: TestEA1RootAgentCancelPhasesNativeSQLite/P0/stale (0.07s)
+    --- PASS: TestEA1RootAgentCancelPhasesNativeSQLite/P0/prepared (0.07s)
+    --- PASS: TestEA1RootAgentCancelPhasesNativeSQLite/P0/native-before-owned (0.09s)
+    --- PASS: TestEA1RootAgentCancelPhasesNativeSQLite/P1/active-original-callback (0.12s)
+    --- PASS: TestEA1RootAgentCancelPhasesNativeSQLite/P2/host (2.27s)
+    --- PASS: TestEA1RootAgentCancelPhasesNativeSQLite/P2/model (2.26s)
+    --- PASS: TestEA1RootAgentCancelPhasesNativeSQLite/P2/tool (2.29s)
+    --- PASS: TestEA1RootAgentCancelPhasesNativeSQLite/P3/yield (0.16s)
+    --- PASS: TestEA1RootAgentCancelPhasesNativeSQLite/P3/terminal (0.18s)
+    --- PASS: TestEA1RootAgentCancelPhasesNativeSQLite/P4/yield (0.14s)
+    --- PASS: TestEA1RootAgentCancelPhasesNativeSQLite/P4/terminal (0.17s)
+    --- PASS: TestEA1RootAgentCancelPhasesNativeSQLite/P4/actual-cancel-CAS-lost-ACK (0.09s)
+    --- PASS: TestEA1RootAgentCancelPhasesNativeSQLite/P5/cancel-wins-resume-admission (0.10s)
+    --- PASS: TestEA1RootAgentCancelPhasesNativeSQLite/P5/resume-scope-rejects-cancel (0.15s)
+    --- PASS: TestEA1RootAgentCancelPhasesNativeSQLite/P5/two-cancel-owners (0.11s)
+    --- PASS: TestEA1RootAgentCancelPhasesNativeSQLite/P5/cancel-deadline (3.12s)
+=== RUN   TestEA1RootAgentControlPhasesNativeSQLite
+=== RUN   TestEA1RootAgentControlPhasesNativeSQLite/P0/approval/missing
+=== RUN   TestEA1RootAgentControlPhasesNativeSQLite/P0/approval/stale
+=== RUN   TestEA1RootAgentControlPhasesNativeSQLite/P0/approval/not-waiting
+=== RUN   TestEA1RootAgentControlPhasesNativeSQLite/P0/approval/invalid-decision
+=== RUN   TestEA1RootAgentControlPhasesNativeSQLite/P0/approval/foreign-checkpoint
+=== RUN   TestEA1RootAgentControlPhasesNativeSQLite/P0/approval/native-success
+=== RUN   TestEA1RootAgentControlPhasesNativeSQLite/P0/approval/default-success
+=== RUN   TestEA1RootAgentControlPhasesNativeSQLite/P0/tool-wait-no-wait
+=== RUN   TestEA1RootAgentControlPhasesNativeSQLite/P1/approval
+=== RUN   TestEA1RootAgentControlPhasesNativeSQLite/P2/approval/handler
+=== RUN   TestEA1RootAgentControlPhasesNativeSQLite/P2/approval/tool
+=== RUN   TestEA1RootAgentControlPhasesNativeSQLite/P0/tool-wait
+=== RUN   TestEA1RootAgentControlPhasesNativeSQLite/P1/tool-wait
+=== RUN   TestEA1RootAgentControlPhasesNativeSQLite/P2/tool-wait
+--- PASS: TestEA1RootAgentControlPhasesNativeSQLite (8.14s)
+    --- PASS: TestEA1RootAgentControlPhasesNativeSQLite/P0/approval/missing (0.10s)
+    --- PASS: TestEA1RootAgentControlPhasesNativeSQLite/P0/approval/stale (0.11s)
+    --- PASS: TestEA1RootAgentControlPhasesNativeSQLite/P0/approval/not-waiting (0.11s)
+    --- PASS: TestEA1RootAgentControlPhasesNativeSQLite/P0/approval/invalid-decision (0.11s)
+    --- PASS: TestEA1RootAgentControlPhasesNativeSQLite/P0/approval/foreign-checkpoint (0.11s)
+    --- PASS: TestEA1RootAgentControlPhasesNativeSQLite/P0/approval/native-success (0.12s)
+    --- PASS: TestEA1RootAgentControlPhasesNativeSQLite/P0/approval/default-success (0.18s)
+    --- PASS: TestEA1RootAgentControlPhasesNativeSQLite/P0/tool-wait-no-wait (0.11s)
+    --- PASS: TestEA1RootAgentControlPhasesNativeSQLite/P1/approval (0.15s)
+    --- PASS: TestEA1RootAgentControlPhasesNativeSQLite/P2/approval/handler (2.26s)
+    --- PASS: TestEA1RootAgentControlPhasesNativeSQLite/P2/approval/tool (2.28s)
+    --- PASS: TestEA1RootAgentControlPhasesNativeSQLite/P0/tool-wait (0.13s)
+    --- PASS: TestEA1RootAgentControlPhasesNativeSQLite/P1/tool-wait (0.14s)
+    --- PASS: TestEA1RootAgentControlPhasesNativeSQLite/P2/tool-wait (2.23s)
+=== RUN   TestEA1RootAgentControlSettlementNativeSQLite
+=== RUN   TestEA1RootAgentControlSettlementNativeSQLite/approval/P3
+=== RUN   TestEA1RootAgentControlSettlementNativeSQLite/approval/P4
+=== RUN   TestEA1RootAgentControlSettlementNativeSQLite/approval/P5
+=== RUN   TestEA1RootAgentControlSettlementNativeSQLite/approval/P5-run-deadline
+=== RUN   TestEA1RootAgentControlSettlementNativeSQLite/toolwait/P3
+=== RUN   TestEA1RootAgentControlSettlementNativeSQLite/toolwait/P4
+=== RUN   TestEA1RootAgentControlSettlementNativeSQLite/toolwait/P5
+=== RUN   TestEA1RootAgentControlSettlementNativeSQLite/toolwait/P5-run-deadline
+=== RUN   TestEA1RootAgentControlSettlementNativeSQLite/toolwait/P5-pending-deadline
+--- PASS: TestEA1RootAgentControlSettlementNativeSQLite (3.92s)
+    --- PASS: TestEA1RootAgentControlSettlementNativeSQLite/approval/P3 (0.19s)
+    --- PASS: TestEA1RootAgentControlSettlementNativeSQLite/approval/P4 (0.22s)
+    --- PASS: TestEA1RootAgentControlSettlementNativeSQLite/approval/P5 (0.15s)
+    --- PASS: TestEA1RootAgentControlSettlementNativeSQLite/approval/P5-run-deadline (1.06s)
+    --- PASS: TestEA1RootAgentControlSettlementNativeSQLite/toolwait/P3 (0.19s)
+    --- PASS: TestEA1RootAgentControlSettlementNativeSQLite/toolwait/P4 (0.20s)
+    --- PASS: TestEA1RootAgentControlSettlementNativeSQLite/toolwait/P5 (0.25s)
+    --- PASS: TestEA1RootAgentControlSettlementNativeSQLite/toolwait/P5-run-deadline (1.11s)
+    --- PASS: TestEA1RootAgentControlSettlementNativeSQLite/toolwait/P5-pending-deadline (0.55s)
+=== RUN   TestEA1RootAgentElectionNativeSQLite
+=== RUN   TestEA1RootAgentElectionNativeSQLite/start/host
+=== RUN   TestEA1RootAgentElectionNativeSQLite/start/model
+=== RUN   TestEA1RootAgentElectionNativeSQLite/start/tool
+=== RUN   TestEA1RootAgentElectionNativeSQLite/start/deadline
+=== RUN   TestEA1RootAgentElectionNativeSQLite/start/unknown-model
+=== RUN   TestEA1RootAgentElectionNativeSQLite/start/unknown-tool
+=== RUN   TestEA1RootAgentElectionNativeSQLite/resume/host
+=== RUN   TestEA1RootAgentElectionNativeSQLite/resume/model
+=== RUN   TestEA1RootAgentElectionNativeSQLite/resume/tool
+=== RUN   TestEA1RootAgentElectionNativeSQLite/resume/deadline
+=== RUN   TestEA1RootAgentElectionNativeSQLite/resume/unknown-model
+=== RUN   TestEA1RootAgentElectionNativeSQLite/resume/unknown-tool
+=== RUN   TestEA1RootAgentElectionNativeSQLite/recovery/model/known
+=== RUN   TestEA1RootAgentElectionNativeSQLite/recovery/model/unknown-ttl
+=== RUN   TestEA1RootAgentElectionNativeSQLite/recovery/model/competing-receipt
+=== RUN   TestEA1RootAgentElectionNativeSQLite/recovery/model/deadline-known
+=== RUN   TestEA1RootAgentElectionNativeSQLite/recovery/tool/known
+=== RUN   TestEA1RootAgentElectionNativeSQLite/recovery/tool/unknown-ttl
+=== RUN   TestEA1RootAgentElectionNativeSQLite/recovery/tool/competing-receipt
+=== RUN   TestEA1RootAgentElectionNativeSQLite/recovery/tool/deadline-known
+--- PASS: TestEA1RootAgentElectionNativeSQLite (19.41s)
+    --- PASS: TestEA1RootAgentElectionNativeSQLite/start/host (0.10s)
+    --- PASS: TestEA1RootAgentElectionNativeSQLite/start/model (0.12s)
+    --- PASS: TestEA1RootAgentElectionNativeSQLite/start/tool (0.14s)
+    --- PASS: TestEA1RootAgentElectionNativeSQLite/start/deadline (1.08s)
+    --- PASS: TestEA1RootAgentElectionNativeSQLite/start/unknown-model (2.23s)
+    --- PASS: TestEA1RootAgentElectionNativeSQLite/start/unknown-tool (2.24s)
+    --- PASS: TestEA1RootAgentElectionNativeSQLite/resume/host (0.15s)
+    --- PASS: TestEA1RootAgentElectionNativeSQLite/resume/model (0.13s)
+    --- PASS: TestEA1RootAgentElectionNativeSQLite/resume/tool (0.15s)
+    --- PASS: TestEA1RootAgentElectionNativeSQLite/resume/deadline (1.08s)
+    --- PASS: TestEA1RootAgentElectionNativeSQLite/resume/unknown-model (2.24s)
+    --- PASS: TestEA1RootAgentElectionNativeSQLite/resume/unknown-tool (2.27s)
+    --- PASS: TestEA1RootAgentElectionNativeSQLite/recovery/model/known (0.16s)
+    --- PASS: TestEA1RootAgentElectionNativeSQLite/recovery/model/unknown-ttl (2.24s)
+    --- PASS: TestEA1RootAgentElectionNativeSQLite/recovery/model/competing-receipt (0.18s)
+    --- PASS: TestEA1RootAgentElectionNativeSQLite/recovery/model/deadline-known (1.15s)
+    --- PASS: TestEA1RootAgentElectionNativeSQLite/recovery/tool/known (0.19s)
+    --- PASS: TestEA1RootAgentElectionNativeSQLite/recovery/tool/unknown-ttl (2.25s)
+    --- PASS: TestEA1RootAgentElectionNativeSQLite/recovery/tool/competing-receipt (0.19s)
+    --- PASS: TestEA1RootAgentElectionNativeSQLite/recovery/tool/deadline-known (1.13s)
+=== RUN   TestEA1RootAgentReconcilePhasesNativeSQLite
+=== RUN   TestEA1RootAgentReconcilePhasesNativeSQLite/P2/model-host-evidence
+=== RUN   TestEA1RootAgentReconcilePhasesNativeSQLite/P0/model
+=== RUN   TestEA1RootAgentReconcilePhasesNativeSQLite/P0/tool
+=== RUN   TestEA1RootAgentReconcilePhasesNativeSQLite/P1/model
+=== RUN   TestEA1RootAgentReconcilePhasesNativeSQLite/P1/tool
+=== RUN   TestEA1RootAgentReconcilePhasesNativeSQLite/P2/model
+=== RUN   TestEA1RootAgentReconcilePhasesNativeSQLite/P2/tool
+=== RUN   TestEA1RootAgentReconcilePhasesNativeSQLite/P3/model
+=== RUN   TestEA1RootAgentReconcilePhasesNativeSQLite/P3/tool
+=== RUN   TestEA1RootAgentReconcilePhasesNativeSQLite/P4/model
+=== RUN   TestEA1RootAgentReconcilePhasesNativeSQLite/P4/tool
+--- PASS: TestEA1RootAgentReconcilePhasesNativeSQLite (5.52s)
+    --- PASS: TestEA1RootAgentReconcilePhasesNativeSQLite/P2/model-host-evidence (0.11s)
+    --- PASS: TestEA1RootAgentReconcilePhasesNativeSQLite/P0/model (0.09s)
+    --- PASS: TestEA1RootAgentReconcilePhasesNativeSQLite/P0/tool (0.10s)
+    --- PASS: TestEA1RootAgentReconcilePhasesNativeSQLite/P1/model (0.10s)
+    --- PASS: TestEA1RootAgentReconcilePhasesNativeSQLite/P1/tool (0.12s)
+    --- PASS: TestEA1RootAgentReconcilePhasesNativeSQLite/P2/model (2.23s)
+    --- PASS: TestEA1RootAgentReconcilePhasesNativeSQLite/P2/tool (2.24s)
+    --- PASS: TestEA1RootAgentReconcilePhasesNativeSQLite/P3/model (0.13s)
+    --- PASS: TestEA1RootAgentReconcilePhasesNativeSQLite/P3/tool (0.14s)
+    --- PASS: TestEA1RootAgentReconcilePhasesNativeSQLite/P4/model (0.12s)
+    --- PASS: TestEA1RootAgentReconcilePhasesNativeSQLite/P4/tool (0.13s)
+=== RUN   TestEA1RootAgentResumePhasesNativeSQLite
+=== RUN   TestEA1RootAgentResumePhasesNativeSQLite/P0/missing
+=== RUN   TestEA1RootAgentResumePhasesNativeSQLite/P0/stale
+=== RUN   TestEA1RootAgentResumePhasesNativeSQLite/P0/terminal
+=== RUN   TestEA1RootAgentResumePhasesNativeSQLite/P0/admission-revision
+=== RUN   TestEA1RootAgentResumePhasesNativeSQLite/P0/admission-cancel
+=== RUN   TestEA1RootAgentResumePhasesNativeSQLite/P1/admitted-before-dispatch
+=== RUN   TestEA1RootAgentResumePhasesNativeSQLite/P2/model
+=== RUN   TestEA1RootAgentResumePhasesNativeSQLite/P2/tool
+=== RUN   TestEA1RootAgentResumePhasesNativeSQLite/P2/host
+--- PASS: TestEA1RootAgentResumePhasesNativeSQLite (7.34s)
+    --- PASS: TestEA1RootAgentResumePhasesNativeSQLite/P0/missing (0.07s)
+    --- PASS: TestEA1RootAgentResumePhasesNativeSQLite/P0/stale (0.07s)
+    --- PASS: TestEA1RootAgentResumePhasesNativeSQLite/P0/terminal (0.11s)
+    --- PASS: TestEA1RootAgentResumePhasesNativeSQLite/P0/admission-revision (0.10s)
+    --- PASS: TestEA1RootAgentResumePhasesNativeSQLite/P0/admission-cancel (0.09s)
+    --- PASS: TestEA1RootAgentResumePhasesNativeSQLite/P1/admitted-before-dispatch (0.14s)
+    --- PASS: TestEA1RootAgentResumePhasesNativeSQLite/P2/model (2.26s)
+    --- PASS: TestEA1RootAgentResumePhasesNativeSQLite/P2/tool (2.25s)
+    --- PASS: TestEA1RootAgentResumePhasesNativeSQLite/P2/host (2.25s)
+=== RUN   TestEA1RootAgentResumeSettlementNativeSQLite
+=== RUN   TestEA1RootAgentResumeSettlementNativeSQLite/P3/model-yield
+=== RUN   TestEA1RootAgentResumeSettlementNativeSQLite/P3/terminal-tool
+=== RUN   TestEA1RootAgentResumeSettlementNativeSQLite/P4/model-yield
+=== RUN   TestEA1RootAgentResumeSettlementNativeSQLite/P4/terminal-tool
+=== RUN   TestEA1RootAgentResumeSettlementNativeSQLite/P3/committed-model-receipt-unknown-host
+--- PASS: TestEA1RootAgentResumeSettlementNativeSQLite (0.72s)
+    --- PASS: TestEA1RootAgentResumeSettlementNativeSQLite/P3/model-yield (0.16s)
+    --- PASS: TestEA1RootAgentResumeSettlementNativeSQLite/P3/terminal-tool (0.15s)
+    --- PASS: TestEA1RootAgentResumeSettlementNativeSQLite/P4/model-yield (0.14s)
+    --- PASS: TestEA1RootAgentResumeSettlementNativeSQLite/P4/terminal-tool (0.15s)
+    --- PASS: TestEA1RootAgentResumeSettlementNativeSQLite/P3/committed-model-receipt-unknown-host (0.12s)
+=== RUN   TestEA1RootAgentStartSettlementNativeSQLite
+=== RUN   TestEA1RootAgentStartSettlementNativeSQLite/P3/model-yield
+=== RUN   TestEA1RootAgentStartSettlementNativeSQLite/P3/terminal-tool
+=== RUN   TestEA1RootAgentStartSettlementNativeSQLite/P4/model-yield
+=== RUN   TestEA1RootAgentStartSettlementNativeSQLite/P4/terminal-tool
+=== RUN   TestEA1RootAgentStartSettlementNativeSQLite/P3/committed-model-receipt-unknown-host
+--- PASS: TestEA1RootAgentStartSettlementNativeSQLite (0.66s)
+    --- PASS: TestEA1RootAgentStartSettlementNativeSQLite/P3/model-yield (0.14s)
+    --- PASS: TestEA1RootAgentStartSettlementNativeSQLite/P3/terminal-tool (0.14s)
+    --- PASS: TestEA1RootAgentStartSettlementNativeSQLite/P4/model-yield (0.12s)
+    --- PASS: TestEA1RootAgentStartSettlementNativeSQLite/P4/terminal-tool (0.14s)
+    --- PASS: TestEA1RootAgentStartSettlementNativeSQLite/P3/committed-model-receipt-unknown-host (0.12s)
+=== RUN   TestEA1RootAgentUnknownNativeSQLite
+=== RUN   TestEA1RootAgentUnknownNativeSQLite/host_middleware
+=== RUN   TestEA1RootAgentUnknownNativeSQLite/model
+=== RUN   TestEA1RootAgentUnknownNativeSQLite/tool
+--- PASS: TestEA1RootAgentUnknownNativeSQLite (6.72s)
+    --- PASS: TestEA1RootAgentUnknownNativeSQLite/host_middleware (2.29s)
+    --- PASS: TestEA1RootAgentUnknownNativeSQLite/model (2.21s)
+    --- PASS: TestEA1RootAgentUnknownNativeSQLite/tool (2.22s)
+=== RUN   TestEA1WaitMarkAckNativeSQLite
+=== RUN   TestEA1WaitMarkAckNativeSQLite/root
+=== RUN   TestEA1WaitMarkAckNativeSQLite/child
+--- PASS: TestEA1WaitMarkAckNativeSQLite (0.25s)
+    --- PASS: TestEA1WaitMarkAckNativeSQLite/root (0.12s)
+    --- PASS: TestEA1WaitMarkAckNativeSQLite/child (0.13s)
+=== RUN   TestEA1WaitBarriersSQLite
+=== RUN   TestEA1WaitBarriersSQLite/root/P1
+=== RUN   TestEA1WaitBarriersSQLite/root/P3
+=== RUN   TestEA1WaitBarriersSQLite/child/P1
+=== RUN   TestEA1WaitBarriersSQLite/child/P3
+--- PASS: TestEA1WaitBarriersSQLite (0.47s)
+    --- PASS: TestEA1WaitBarriersSQLite/root/P1 (0.13s)
+    --- PASS: TestEA1WaitBarriersSQLite/root/P3 (0.12s)
+    --- PASS: TestEA1WaitBarriersSQLite/child/P1 (0.12s)
+    --- PASS: TestEA1WaitBarriersSQLite/child/P3 (0.11s)
+=== RUN   TestEA1WaitUnknownNativeSQLite
+=== RUN   TestEA1WaitUnknownNativeSQLite/root
+=== RUN   TestEA1WaitUnknownNativeSQLite/child
+--- PASS: TestEA1WaitUnknownNativeSQLite (0.29s)
+    --- PASS: TestEA1WaitUnknownNativeSQLite/root (0.13s)
+    --- PASS: TestEA1WaitUnknownNativeSQLite/child (0.16s)
+=== RUN   TestEA1WorkflowEntryCompetitionSQLite
+=== RUN   TestEA1WorkflowEntryCompetitionSQLite/resume-child/P1
+=== RUN   TestEA1WorkflowEntryCompetitionSQLite/resume-child/P5
+=== RUN   TestEA1WorkflowEntryCompetitionSQLite/resume-child/P5-retry
+=== RUN   TestEA1WorkflowEntryCompetitionSQLite/wait-root/P5
+=== RUN   TestEA1WorkflowEntryCompetitionSQLite/wait-root/P5-retry
+--- PASS: TestEA1WorkflowEntryCompetitionSQLite (2.69s)
+    --- PASS: TestEA1WorkflowEntryCompetitionSQLite/resume-child/P1 (0.14s)
+    --- PASS: TestEA1WorkflowEntryCompetitionSQLite/resume-child/P5 (2.08s)
+    --- PASS: TestEA1WorkflowEntryCompetitionSQLite/resume-child/P5-retry (0.15s)
+    --- PASS: TestEA1WorkflowEntryCompetitionSQLite/wait-root/P5 (0.13s)
+    --- PASS: TestEA1WorkflowEntryCompetitionSQLite/wait-root/P5-retry (0.19s)
+=== RUN   TestEA1WorkflowEntryPhasesSQLite
+=== RUN   TestEA1WorkflowEntryPhasesSQLite/RootWaitP0
+=== RUN   TestEA1WorkflowEntryPhasesSQLite/ResumeCompensationP3
+=== RUN   TestEA1WorkflowEntryPhasesSQLite/ResumeCompensationP3/resume/root
+=== RUN   TestEA1WorkflowEntryPhasesSQLite/ResumeCompensationP3/resume/child
+=== RUN   TestEA1WorkflowEntryPhasesSQLite/ResumeCompensationP3/compensation/root
+=== RUN   TestEA1WorkflowEntryPhasesSQLite/ResumeCompensationP3/compensation/child
+--- PASS: TestEA1WorkflowEntryPhasesSQLite (0.58s)
+    --- PASS: TestEA1WorkflowEntryPhasesSQLite/RootWaitP0 (0.12s)
+    --- PASS: TestEA1WorkflowEntryPhasesSQLite/ResumeCompensationP3 (0.46s)
+        --- PASS: TestEA1WorkflowEntryPhasesSQLite/ResumeCompensationP3/resume/root (0.11s)
+        --- PASS: TestEA1WorkflowEntryPhasesSQLite/ResumeCompensationP3/resume/child (0.11s)
+        --- PASS: TestEA1WorkflowEntryPhasesSQLite/ResumeCompensationP3/compensation/root (0.11s)
+        --- PASS: TestEA1WorkflowEntryPhasesSQLite/ResumeCompensationP3/compensation/child (0.13s)
+=== RUN   TestEA1WorkflowRecoveryBoundariesNativeSQLite
+=== RUN   TestEA1WorkflowRecoveryBoundariesNativeSQLite/root/P0
+=== RUN   TestEA1WorkflowRecoveryBoundariesNativeSQLite/root/P5
+=== RUN   TestEA1WorkflowRecoveryBoundariesNativeSQLite/child/P0
+=== RUN   TestEA1WorkflowRecoveryBoundariesNativeSQLite/child/P5
+--- PASS: TestEA1WorkflowRecoveryBoundariesNativeSQLite (0.70s)
+    --- PASS: TestEA1WorkflowRecoveryBoundariesNativeSQLite/root/P0 (0.18s)
+    --- PASS: TestEA1WorkflowRecoveryBoundariesNativeSQLite/root/P5 (0.15s)
+    --- PASS: TestEA1WorkflowRecoveryBoundariesNativeSQLite/child/P0 (0.18s)
+    --- PASS: TestEA1WorkflowRecoveryBoundariesNativeSQLite/child/P5 (0.18s)
+=== RUN   TestEA1WorkflowStartBoundariesSQLite
+=== RUN   TestEA1WorkflowStartBoundariesSQLite/child/P0/builtin-subworkflow-source
+=== RUN   TestEA1WorkflowStartBoundariesSQLite/root/P0/revision
+=== RUN   TestEA1WorkflowStartBoundariesSQLite/root/P0/terminal
+=== RUN   TestEA1WorkflowStartBoundariesSQLite/child/P0/revision
+=== RUN   TestEA1WorkflowStartBoundariesSQLite/child/P0/terminal
+=== RUN   TestEA1WorkflowStartBoundariesSQLite/root/P1
+=== RUN   TestEA1WorkflowStartBoundariesSQLite/root/P5
+=== RUN   TestEA1WorkflowStartBoundariesSQLite/root/P5-retry
+--- PASS: TestEA1WorkflowStartBoundariesSQLite (0.76s)
+    --- PASS: TestEA1WorkflowStartBoundariesSQLite/child/P0/builtin-subworkflow-source (0.09s)
+    --- PASS: TestEA1WorkflowStartBoundariesSQLite/root/P0/revision (0.10s)
+    --- PASS: TestEA1WorkflowStartBoundariesSQLite/root/P0/terminal (0.07s)
+    --- PASS: TestEA1WorkflowStartBoundariesSQLite/child/P0/revision (0.10s)
+    --- PASS: TestEA1WorkflowStartBoundariesSQLite/child/P0/terminal (0.08s)
+    --- PASS: TestEA1WorkflowStartBoundariesSQLite/root/P1 (0.09s)
+    --- PASS: TestEA1WorkflowStartBoundariesSQLite/root/P5 (0.10s)
+    --- PASS: TestEA1WorkflowStartBoundariesSQLite/root/P5-retry (0.13s)
+=== RUN   TestRejectNewerSchemaAndCorruptedState
+--- PASS: TestRejectNewerSchemaAndCorruptedState (0.08s)
+=== RUN   TestCreateRollbackWhenReadyInsertFails
+--- PASS: TestCreateRollbackWhenReadyInsertFails (0.06s)
+=== RUN   TestReopenReadyClaimFencingAcrossConnections
+--- PASS: TestReopenReadyClaimFencingAcrossConnections (0.09s)
+=== RUN   TestExternalStaleCASAcrossTwoSQLiteStores
+--- PASS: TestExternalStaleCASAcrossTwoSQLiteStores (0.07s)
+=== RUN   TestBusyWriterDoesNotBecomeRunConflict
+--- PASS: TestBusyWriterDoesNotBecomeRunConflict (0.56s)
+=== RUN   TestUnboundFencedResumeDoesNotExecuteToolBeforeCAS
+--- PASS: TestUnboundFencedResumeDoesNotExecuteToolBeforeCAS (0.19s)
+=== RUN   TestExecutionClaimChild
+--- PASS: TestExecutionClaimChild (0.00s)
+=== RUN   TestExecutionEpochTakeoverAcrossOSProcesses
+--- PASS: TestExecutionEpochTakeoverAcrossOSProcesses (1.26s)
+=== RUN   TestFencedApplyAtomicRollbackOnReadyWorkFailure
+--- PASS: TestFencedApplyAtomicRollbackOnReadyWorkFailure (0.07s)
+=== RUN   TestCancelledCreateDoesNotPublishAndCanRetry
+--- PASS: TestCancelledCreateDoesNotPublishAndCanRetry (0.05s)
+=== RUN   TestConcurrentFirstCreateNeverOverwrites
+--- PASS: TestConcurrentFirstCreateNeverOverwrites (0.06s)
+=== RUN   TestSameDevelopmentV1WithObsoleteLayoutIsRejected
+--- PASS: TestSameDevelopmentV1WithObsoleteLayoutIsRejected (0.07s)
+=== RUN   TestTerminalRunPreservesQuarantineAndAllUnprojectedFacts
+--- PASS: TestTerminalRunPreservesQuarantineAndAllUnprojectedFacts (0.06s)
+=== RUN   TestWellFormedButModifiedReadyEventsAreQuarantined
+--- PASS: TestWellFormedButModifiedReadyEventsAreQuarantined (0.05s)
+=== RUN   TestIssue107SQLiteOriginalPhysicalReceiptAckLostAcrossRestart
+--- PASS: TestIssue107SQLiteOriginalPhysicalReceiptAckLostAcrossRestart (0.10s)
+=== RUN   TestIssue107SQLiteGrantSurvivesReopenUntilOriginalSettlement
+--- PASS: TestIssue107SQLiteGrantSurvivesReopenUntilOriginalSettlement (0.07s)
+=== RUN   TestIssue107SQLiteRootWorkflowOriginalMarkAckLostReopenRecovery
+--- PASS: TestIssue107SQLiteRootWorkflowOriginalMarkAckLostReopenRecovery (0.08s)
+=== RUN   TestAuditIssue107CompletedWorkflowSettlementAckLostAfterSQLiteRestart
+--- PASS: TestAuditIssue107CompletedWorkflowSettlementAckLostAfterSQLiteRestart (0.09s)
+=== RUN   TestSQLiteManagedRecoveryStore
+=== RUN   TestSQLiteManagedRecoveryStore/owner-park-competition
+=== RUN   TestSQLiteManagedRecoveryStore/owner-park-competition/renew-owner
+=== RUN   TestSQLiteManagedRecoveryStore/owner-park-competition/renew-park
+=== RUN   TestSQLiteManagedRecoveryStore/owner-park-competition/claim-owner
+=== RUN   TestSQLiteManagedRecoveryStore/owner-park-competition/claim-park
+=== RUN   TestSQLiteManagedRecoveryStore/owner-and-leave
+=== RUN   TestSQLiteManagedRecoveryStore/owner-and-leave/live
+=== RUN   TestSQLiteManagedRecoveryStore/owner-and-leave/renew
+=== RUN   TestSQLiteManagedRecoveryStore/owner-and-leave/leave
+=== RUN   TestSQLiteManagedRecoveryStore/owner-and-leave/claim
+=== RUN   TestSQLiteManagedRecoveryStore/owner-and-leave/eventhead
+=== RUN   TestSQLiteManagedRecoveryStore/parked-ancestor
+=== RUN   TestSQLiteManagedRecoveryStore/parked-ancestor/park-first
+=== RUN   TestSQLiteManagedRecoveryStore/parked-ancestor/child-first
+=== RUN   TestSQLiteManagedRecoveryStore/parked-gates
+=== RUN   TestSQLiteManagedRecoveryStore/selection-ack
+=== RUN   TestSQLiteManagedRecoveryStore/selection-ack/RESUME
+=== RUN   TestSQLiteManagedRecoveryStore/selection-ack/CANCEL
+=== RUN   TestSQLiteManagedRecoveryStore/two-enable-claimants
+=== RUN   TestSQLiteManagedRecoveryStore/transaction-ack
+=== RUN   TestSQLiteManagedRecoveryStore/transaction-ack/t0
+=== RUN   TestSQLiteManagedRecoveryStore/transaction-ack/park
+=== RUN   TestSQLiteManagedRecoveryStore/transaction-ack/enable
+=== RUN   TestSQLiteManagedRecoveryStore/transaction-ack/cancel
+=== RUN   TestSQLiteManagedRecoveryStore/historical-closure
+--- PASS: TestSQLiteManagedRecoveryStore (55.41s)
+    --- PASS: TestSQLiteManagedRecoveryStore/owner-park-competition (12.90s)
+        --- PASS: TestSQLiteManagedRecoveryStore/owner-park-competition/renew-owner (3.22s)
+        --- PASS: TestSQLiteManagedRecoveryStore/owner-park-competition/renew-park (3.24s)
+        --- PASS: TestSQLiteManagedRecoveryStore/owner-park-competition/claim-owner (3.22s)
+        --- PASS: TestSQLiteManagedRecoveryStore/owner-park-competition/claim-park (3.23s)
+    --- PASS: TestSQLiteManagedRecoveryStore/owner-and-leave (9.85s)
+        --- PASS: TestSQLiteManagedRecoveryStore/owner-and-leave/live (0.09s)
+        --- PASS: TestSQLiteManagedRecoveryStore/owner-and-leave/renew (3.22s)
+        --- PASS: TestSQLiteManagedRecoveryStore/owner-and-leave/leave (3.22s)
+        --- PASS: TestSQLiteManagedRecoveryStore/owner-and-leave/claim (3.24s)
+        --- PASS: TestSQLiteManagedRecoveryStore/owner-and-leave/eventhead (0.09s)
+    --- PASS: TestSQLiteManagedRecoveryStore/parked-ancestor (6.44s)
+        --- PASS: TestSQLiteManagedRecoveryStore/parked-ancestor/park-first (3.22s)
+        --- PASS: TestSQLiteManagedRecoveryStore/parked-ancestor/child-first (3.22s)
+    --- PASS: TestSQLiteManagedRecoveryStore/parked-gates (3.27s)
+    --- PASS: TestSQLiteManagedRecoveryStore/selection-ack (6.52s)
+        --- PASS: TestSQLiteManagedRecoveryStore/selection-ack/RESUME (3.26s)
+        --- PASS: TestSQLiteManagedRecoveryStore/selection-ack/CANCEL (3.26s)
+    --- PASS: TestSQLiteManagedRecoveryStore/two-enable-claimants (3.28s)
+    --- PASS: TestSQLiteManagedRecoveryStore/transaction-ack (9.81s)
+        --- PASS: TestSQLiteManagedRecoveryStore/transaction-ack/t0 (0.09s)
+        --- PASS: TestSQLiteManagedRecoveryStore/transaction-ack/park (3.24s)
+        --- PASS: TestSQLiteManagedRecoveryStore/transaction-ack/enable (3.24s)
+        --- PASS: TestSQLiteManagedRecoveryStore/transaction-ack/cancel (3.24s)
+    --- PASS: TestSQLiteManagedRecoveryStore/historical-closure (3.34s)
+=== RUN   TestNativeExternalSignalChild
+--- PASS: TestNativeExternalSignalChild (0.00s)
+=== RUN   TestNativeExternalReadySignalAcrossProcesses
+--- PASS: TestNativeExternalReadySignalAcrossProcesses (5.52s)
+=== RUN   TestNativeEarlyExternalSignalRedeliveredAcrossProcesses
+--- PASS: TestNativeEarlyExternalSignalRedeliveredAcrossProcesses (5.47s)
+=== RUN   TestNativeLeaseBudgetChild
+--- PASS: TestNativeLeaseBudgetChild (0.00s)
+=== RUN   TestNativeRunExecutionBudgetAcrossProcesses
+--- PASS: TestNativeRunExecutionBudgetAcrossProcesses (3.32s)
+=== RUN   TestNativeLeaseApprovalChild
+--- PASS: TestNativeLeaseApprovalChild (0.00s)
+=== RUN   TestNativeRunExecutionAcrossProcesses
+=== RUN   TestNativeRunExecutionAcrossProcesses/approve
+=== RUN   TestNativeRunExecutionAcrossProcesses/reject
+--- PASS: TestNativeRunExecutionAcrossProcesses (13.23s)
+    --- PASS: TestNativeRunExecutionAcrossProcesses/approve (6.59s)
+    --- PASS: TestNativeRunExecutionAcrossProcesses/reject (6.64s)
+=== RUN   TestNativeResumeReloadsSnapshotAfterAcquireBeforeTool
+    native_run_execution_process_test.go:317: AUDIT native Resume fresh lease BUT stale snapshot: committedRevision=9 callerRevision=8 physicalToolEffects=0 error=kernel run revision conflict resumedStatus=running
+--- PASS: TestNativeResumeReloadsSnapshotAfterAcquireBeforeTool (0.14s)
+=== RUN   TestDefaultNativeRunRejectsCompetingOwnerDuringTool
+    native_run_execution_process_test.go:417: AUDIT default-native Tool already in flight; native claim accepted=false status= physical_effects=1 stale_legacy_error=<nil>
+--- PASS: TestDefaultNativeRunRejectsCompetingOwnerDuringTool (0.16s)
+=== RUN   TestNativeUnknownToolChild
+--- PASS: TestNativeUnknownToolChild (0.00s)
+=== RUN   TestNativeUnknownToolReconcilesAcrossProcessesWithoutReplay
+--- PASS: TestNativeUnknownToolReconcilesAcrossProcessesWithoutReplay (5.52s)
+=== RUN   TestSeparatePrivateProfilesKeepRunIDsAndRecoveryIndependentAfterReopen
+--- PASS: TestSeparatePrivateProfilesKeepRunIDsAndRecoveryIndependentAfterReopen (0.14s)
+=== RUN   TestKernelQuarantinePersistsAcrossSQLiteReopen
+--- PASS: TestKernelQuarantinePersistsAcrossSQLiteReopen (0.10s)
+=== RUN   TestAgentCrashSubprocess
+--- PASS: TestAgentCrashSubprocess (0.00s)
+=== RUN   TestAgentCrashAndResumeInNewProcess
+=== RUN   TestAgentCrashAndResumeInNewProcess/after-create
+=== RUN   TestAgentCrashAndResumeInNewProcess/after-model-receipt
+=== RUN   TestAgentCrashAndResumeInNewProcess/after-tool-receipt
+=== RUN   TestAgentCrashAndResumeInNewProcess/after-callback-return
+--- PASS: TestAgentCrashAndResumeInNewProcess (4.89s)
+    --- PASS: TestAgentCrashAndResumeInNewProcess/after-create (1.23s)
+    --- PASS: TestAgentCrashAndResumeInNewProcess/after-model-receipt (1.21s)
+    --- PASS: TestAgentCrashAndResumeInNewProcess/after-tool-receipt (1.24s)
+    --- PASS: TestAgentCrashAndResumeInNewProcess/after-callback-return (1.20s)
+=== RUN   TestSQLiteRunRelationSubprocessChild
+--- PASS: TestSQLiteRunRelationSubprocessChild (0.00s)
+=== RUN   TestSQLiteRunRelationConcurrentOSProcesses
+=== RUN   TestSQLiteRunRelationConcurrentOSProcesses/same-owner-different-child
+=== RUN   TestSQLiteRunRelationConcurrentOSProcesses/same-child-different-owner
+--- PASS: TestSQLiteRunRelationConcurrentOSProcesses (2.42s)
+    --- PASS: TestSQLiteRunRelationConcurrentOSProcesses/same-owner-different-child (1.23s)
+    --- PASS: TestSQLiteRunRelationConcurrentOSProcesses/same-child-different-owner (1.19s)
+=== RUN   TestSQLiteRunRelationUncommittedCrashRollsBackAcrossProcesses
+--- PASS: TestSQLiteRunRelationUncommittedCrashRollsBackAcrossProcesses (1.19s)
+=== RUN   TestSQLiteRunRelationStoreConformance
+=== RUN   TestSQLiteRunRelationStoreConformance/idempotent-owner
+=== RUN   TestSQLiteRunRelationStoreConformance/conflicts
+=== RUN   TestSQLiteRunRelationStoreConformance/queries
+--- PASS: TestSQLiteRunRelationStoreConformance (0.13s)
+    --- PASS: TestSQLiteRunRelationStoreConformance/idempotent-owner (0.04s)
+    --- PASS: TestSQLiteRunRelationStoreConformance/conflicts (0.04s)
+    --- PASS: TestSQLiteRunRelationStoreConformance/queries (0.05s)
+=== RUN   TestSQLiteRunRelationReopenAndDeterministicOrdering
+--- PASS: TestSQLiteRunRelationReopenAndDeterministicOrdering (0.09s)
+=== RUN   TestSQLiteRunRelationAtomicFailureAndRetry
+--- PASS: TestSQLiteRunRelationAtomicFailureAndRetry (0.08s)
+=== RUN   TestSQLiteRunRelationBusyNotIdentityConflict
+--- PASS: TestSQLiteRunRelationBusyNotIdentityConflict (0.56s)
+=== RUN   TestSQLiteRunRelationInvalidTimeAndCancelledContext
+--- PASS: TestSQLiteRunRelationInvalidTimeAndCancelledContext (0.04s)
+=== RUN   TestSQLiteRunRelationOldUnreleasedV1FailsClosed
+--- PASS: TestSQLiteRunRelationOldUnreleasedV1FailsClosed (0.05s)
+=== RUN   TestIncompatibleV1SchemaRejectedWithoutChangingJournal
+--- PASS: TestIncompatibleV1SchemaRejectedWithoutChangingJournal (0.01s)
+=== RUN   TestCompatibleV1SchemaMaySwitchBackToWAL
+--- PASS: TestCompatibleV1SchemaMaySwitchBackToWAL (0.06s)
+=== RUN   TestRejectUnexpectedV1SchemaObjectsBeforeWAL
+=== RUN   TestRejectUnexpectedV1SchemaObjectsBeforeWAL/relation-delete-trigger
+=== RUN   TestRejectUnexpectedV1SchemaObjectsBeforeWAL/extra-index
+=== RUN   TestRejectUnexpectedV1SchemaObjectsBeforeWAL/extra-table
+=== RUN   TestRejectUnexpectedV1SchemaObjectsBeforeWAL/extra-view
+=== RUN   TestRejectUnexpectedV1SchemaObjectsBeforeWAL/sqlite-prefix-lookalike
+--- PASS: TestRejectUnexpectedV1SchemaObjectsBeforeWAL (0.29s)
+    --- PASS: TestRejectUnexpectedV1SchemaObjectsBeforeWAL/relation-delete-trigger (0.06s)
+    --- PASS: TestRejectUnexpectedV1SchemaObjectsBeforeWAL/extra-index (0.06s)
+    --- PASS: TestRejectUnexpectedV1SchemaObjectsBeforeWAL/extra-table (0.06s)
+    --- PASS: TestRejectUnexpectedV1SchemaObjectsBeforeWAL/extra-view (0.06s)
+    --- PASS: TestRejectUnexpectedV1SchemaObjectsBeforeWAL/sqlite-prefix-lookalike (0.06s)
+=== RUN   TestSQLiteSnapshotScanStateOwnershipAfterReopen
+--- PASS: TestSQLiteSnapshotScanStateOwnershipAfterReopen (0.14s)
+=== RUN   TestSQLiteSnapshotScanParallelReadsStayIsolated
+--- PASS: TestSQLiteSnapshotScanParallelReadsStayIsolated (0.14s)
+=== RUN   TestKernelControlStoreConformance
+=== RUN   TestKernelControlStoreConformance/native-external-signal-guarded-cas
+=== RUN   TestKernelControlStoreConformance/approval-exact-checkpoint-and-revocation
+=== RUN   TestKernelControlStoreConformance/allowance-dimension-and-revocation
+=== RUN   TestKernelControlStoreConformance/cancel-revokes-active-owner
+=== RUN   TestKernelControlStoreConformance/deadline-checks-store-time
+=== RUN   TestKernelControlStoreConformance/bound-owner-cancel
+=== RUN   TestKernelControlStoreConformance/Store-deadline-gates-approval-and-allowance
+=== RUN   TestKernelControlStoreConformance/Store-deadline-gates-approval-and-allowance/approval
+=== RUN   TestKernelControlStoreConformance/Store-deadline-gates-approval-and-allowance/allowance
+=== RUN   TestKernelControlStoreConformance/fast-caller-clock-does-not-report-false-expiry
+=== RUN   TestKernelControlStoreConformance/direct-Store-call-cannot-forge-a-Feature-proof
+--- PASS: TestKernelControlStoreConformance (3.13s)
+    --- PASS: TestKernelControlStoreConformance/native-external-signal-guarded-cas (0.05s)
+    --- PASS: TestKernelControlStoreConformance/approval-exact-checkpoint-and-revocation (0.06s)
+    --- PASS: TestKernelControlStoreConformance/allowance-dimension-and-revocation (0.06s)
+    --- PASS: TestKernelControlStoreConformance/cancel-revokes-active-owner (0.05s)
+    --- PASS: TestKernelControlStoreConformance/deadline-checks-store-time (0.91s)
+    --- PASS: TestKernelControlStoreConformance/bound-owner-cancel (0.05s)
+    --- PASS: TestKernelControlStoreConformance/Store-deadline-gates-approval-and-allowance (1.82s)
+        --- PASS: TestKernelControlStoreConformance/Store-deadline-gates-approval-and-allowance/approval (0.92s)
+        --- PASS: TestKernelControlStoreConformance/Store-deadline-gates-approval-and-allowance/allowance (0.90s)
+    --- PASS: TestKernelControlStoreConformance/fast-caller-clock-does-not-report-false-expiry (0.06s)
+    --- PASS: TestKernelControlStoreConformance/direct-Store-call-cannot-forge-a-Feature-proof (0.06s)
+=== RUN   TestKernelExecutionStoreConformance
+=== RUN   TestKernelExecutionStoreConformance/execution-mode-frozen-at-create
+=== RUN   TestKernelExecutionStoreConformance/epoch-and-multi-cas-segment
+=== RUN   TestKernelExecutionStoreConformance/client-expiry-is-not-an-authority
+=== RUN   TestKernelExecutionStoreConformance/pending-gates-cannot-acquire
+=== RUN   TestKernelExecutionStoreConformance/simultaneous-claims-are-exclusive
+=== RUN   TestKernelExecutionStoreConformance/fenced-run-cannot-use-legacy-control-bypass
+=== RUN   TestKernelExecutionStoreConformance/pre-dispatch-authority-before-and-after-takeover
+--- PASS: TestKernelExecutionStoreConformance (0.69s)
+    --- PASS: TestKernelExecutionStoreConformance/execution-mode-frozen-at-create (0.07s)
+    --- PASS: TestKernelExecutionStoreConformance/epoch-and-multi-cas-segment (0.18s)
+    --- PASS: TestKernelExecutionStoreConformance/client-expiry-is-not-an-authority (0.14s)
+    --- PASS: TestKernelExecutionStoreConformance/pending-gates-cannot-acquire (0.05s)
+    --- PASS: TestKernelExecutionStoreConformance/simultaneous-claims-are-exclusive (0.04s)
+    --- PASS: TestKernelExecutionStoreConformance/fenced-run-cannot-use-legacy-control-bypass (0.05s)
+    --- PASS: TestKernelExecutionStoreConformance/pre-dispatch-authority-before-and-after-takeover (0.15s)
+=== RUN   TestKernelApplyEvidenceConformance
+=== RUN   TestKernelApplyEvidenceConformance/evidence-survives-newer-cas-and-denies-mismatched-replay
+=== RUN   TestKernelApplyEvidenceConformance/fenced-native-apply-evidence-requires-current-lease
+=== RUN   TestKernelApplyEvidenceConformance/many-committed-events-do-not-hide-proof
+=== RUN   TestKernelApplyEvidenceConformance/reserved-proof-event-cannot-be-supplied-through-plain-apply
+--- PASS: TestKernelApplyEvidenceConformance (0.38s)
+    --- PASS: TestKernelApplyEvidenceConformance/evidence-survives-newer-cas-and-denies-mismatched-replay (0.06s)
+    --- PASS: TestKernelApplyEvidenceConformance/fenced-native-apply-evidence-requires-current-lease (0.05s)
+    --- PASS: TestKernelApplyEvidenceConformance/many-committed-events-do-not-hide-proof (0.22s)
+    --- PASS: TestKernelApplyEvidenceConformance/reserved-proof-event-cannot-be-supplied-through-plain-apply (0.05s)
+=== RUN   TestKernelQuarantineStoreConformance
+=== RUN   TestKernelQuarantineStoreConformance/current-work-quarantine-revokes-owner-and-requires-exact-repair
+--- PASS: TestKernelQuarantineStoreConformance (0.08s)
+    --- PASS: TestKernelQuarantineStoreConformance/current-work-quarantine-revokes-owner-and-requires-exact-repair (0.08s)
+=== RUN   TestKernelStoreConformance
+=== RUN   TestKernelStoreConformance/create-load-isolation
+=== RUN   TestKernelStoreConformance/duplicate-create
+=== RUN   TestKernelStoreConformance/checkpoint-result-isolation
+=== RUN   TestKernelStoreConformance/cas-and-event-journal
+=== RUN   TestKernelStoreConformance/concurrent-cas
+=== RUN   TestKernelStoreConformance/transition-outbox
+=== RUN   TestKernelStoreConformance/transition-late-ack-before-takeover
+=== RUN   TestKernelStoreConformance/transition-stale-ack-after-takeover
+--- PASS: TestKernelStoreConformance (0.46s)
+    --- PASS: TestKernelStoreConformance/create-load-isolation (0.04s)
+    --- PASS: TestKernelStoreConformance/duplicate-create (0.04s)
+    --- PASS: TestKernelStoreConformance/checkpoint-result-isolation (0.04s)
+    --- PASS: TestKernelStoreConformance/cas-and-event-journal (0.05s)
+    --- PASS: TestKernelStoreConformance/concurrent-cas (0.08s)
+    --- PASS: TestKernelStoreConformance/transition-outbox (0.05s)
+    --- PASS: TestKernelStoreConformance/transition-late-ack-before-takeover (0.11s)
+    --- PASS: TestKernelStoreConformance/transition-stale-ack-after-takeover (0.05s)
+=== RUN   TestReopenSnapshotCheckpointEventAndTransition
+--- PASS: TestReopenSnapshotCheckpointEventAndTransition (0.06s)
+=== RUN   TestAtomicRollbackWhenJournalReadyOrProofInsertFails
+=== RUN   TestAtomicRollbackWhenJournalReadyOrProofInsertFails/runtime_events
+=== RUN   TestAtomicRollbackWhenJournalReadyOrProofInsertFails/runtime_ready_work
+=== RUN   TestAtomicRollbackWhenJournalReadyOrProofInsertFails/runtime_commit_proofs
+--- PASS: TestAtomicRollbackWhenJournalReadyOrProofInsertFails (0.17s)
+    --- PASS: TestAtomicRollbackWhenJournalReadyOrProofInsertFails/runtime_events (0.05s)
+    --- PASS: TestAtomicRollbackWhenJournalReadyOrProofInsertFails/runtime_ready_work (0.07s)
+    --- PASS: TestAtomicRollbackWhenJournalReadyOrProofInsertFails/runtime_commit_proofs (0.05s)
+=== RUN   TestRejectUnknownSchemaWithoutDataLoss
+--- PASS: TestRejectUnknownSchemaWithoutDataLoss (0.01s)
+=== RUN   TestIssue107SQLiteChildExecutionConformance
+=== RUN   TestIssue107SQLiteChildExecutionConformance/nested_ancestor_Cancel_cannot_overtake_physical_child
+=== RUN   TestIssue107SQLiteChildExecutionConformance/parent_cancellation_blocks_child_Create
+=== RUN   TestIssue107SQLiteChildExecutionConformance/foreign_tenancy_and_provenance_cannot_create_child
+--- PASS: TestIssue107SQLiteChildExecutionConformance (0.17s)
+    --- PASS: TestIssue107SQLiteChildExecutionConformance/nested_ancestor_Cancel_cannot_overtake_physical_child (0.07s)
+    --- PASS: TestIssue107SQLiteChildExecutionConformance/parent_cancellation_blocks_child_Create (0.05s)
+    --- PASS: TestIssue107SQLiteChildExecutionConformance/foreign_tenancy_and_provenance_cannot_create_child (0.05s)
+=== RUN   TestIssue107SQLiteParentedWorkflowPhysicalGrantConformance
+=== RUN   TestIssue107SQLiteParentedWorkflowPhysicalGrantConformance/completed_Effect_fences_parent_then_retires_original_Grant
+=== RUN   TestIssue107SQLiteParentedWorkflowPhysicalGrantConformance/unknown_remote_Pending_pins_parent_and_rejects_replay
+=== RUN   TestIssue107SQLiteParentedWorkflowPhysicalGrantConformance/quiescent_Wait_releases_Grant,_denies_later_root_cancellation_bypass
+--- PASS: TestIssue107SQLiteParentedWorkflowPhysicalGrantConformance (0.23s)
+    --- PASS: TestIssue107SQLiteParentedWorkflowPhysicalGrantConformance/completed_Effect_fences_parent_then_retires_original_Grant (0.08s)
+    --- PASS: TestIssue107SQLiteParentedWorkflowPhysicalGrantConformance/unknown_remote_Pending_pins_parent_and_rejects_replay (0.06s)
+    --- PASS: TestIssue107SQLiteParentedWorkflowPhysicalGrantConformance/quiescent_Wait_releases_Grant,_denies_later_root_cancellation_bypass (0.09s)
+=== RUN   TestIssue107SQLiteRootWorkflowPhysicalGrantConformance
+=== RUN   TestIssue107SQLiteRootWorkflowPhysicalGrantConformance/Root_concurrent_Resume_and_Cancel_are_physically_serialized
+=== RUN   TestIssue107SQLiteRootWorkflowPhysicalGrantConformance/Root_unknown_external_Pending_quarantines_physical_Grant
+=== RUN   TestIssue107SQLiteRootWorkflowPhysicalGrantConformance/Root_revision_CAS_must_predate_physical_Effects
+--- PASS: TestIssue107SQLiteRootWorkflowPhysicalGrantConformance (0.26s)
+    --- PASS: TestIssue107SQLiteRootWorkflowPhysicalGrantConformance/Root_concurrent_Resume_and_Cancel_are_physically_serialized (0.14s)
+    --- PASS: TestIssue107SQLiteRootWorkflowPhysicalGrantConformance/Root_unknown_external_Pending_quarantines_physical_Grant (0.07s)
+    --- PASS: TestIssue107SQLiteRootWorkflowPhysicalGrantConformance/Root_revision_CAS_must_predate_physical_Effects (0.05s)
+=== RUN   TestAuditIssue107SQLiteChildSelfPhysicalGrantFence
+=== RUN   TestAuditIssue107SQLiteChildSelfPhysicalGrantFence/admitted_child_self-cancel_while_parent_cancel_denies
+    issue107_seventh_child_self_fence.go:45: originalGrant=childgrant_c7e4ff383b112cea3a01415c2bd111cf expectedRevision=1 selfCancelErr=kernel descendant has an unsettled physical execution Grant selfStatus=
+=== RUN   TestAuditIssue107SQLiteChildSelfPhysicalGrantFence/admitted_child_remains_version-fenced_against_external_Apply
+    issue107_seventh_child_self_fence.go:78: grant=childgrant_d960668a2b2bdedfd70643c3b1394c31 concurrentApplyErr=kernel descendant has an unsettled physical execution Grant revisionAfter=0
+=== RUN   TestAuditIssue107SQLiteChildSelfPhysicalGrantFence/rejected_child_Cancel_does_not_revoke_original_execution_lease
+--- PASS: TestAuditIssue107SQLiteChildSelfPhysicalGrantFence (0.14s)
+    --- PASS: TestAuditIssue107SQLiteChildSelfPhysicalGrantFence/admitted_child_self-cancel_while_parent_cancel_denies (0.05s)
+    --- PASS: TestAuditIssue107SQLiteChildSelfPhysicalGrantFence/admitted_child_remains_version-fenced_against_external_Apply (0.04s)
+    --- PASS: TestAuditIssue107SQLiteChildSelfPhysicalGrantFence/rejected_child_Cancel_does_not_revoke_original_execution_lease (0.05s)
+=== RUN   TestEA1ReceiptBeforeMarkNativeSQLite
+=== RUN   TestEA1ReceiptBeforeMarkNativeSQLite/root_receipt_committed_before_Mark
+=== RUN   TestEA1ReceiptBeforeMarkNativeSQLite/child_receipt_committed_before_Mark
+--- PASS: TestEA1ReceiptBeforeMarkNativeSQLite (0.16s)
+    --- PASS: TestEA1ReceiptBeforeMarkNativeSQLite/root_receipt_committed_before_Mark (0.08s)
+    --- PASS: TestEA1ReceiptBeforeMarkNativeSQLite/child_receipt_committed_before_Mark (0.08s)
+=== RUN   TestEA1P0SourceAdmissionNativeSQLite
+=== RUN   TestEA1P0SourceAdmissionNativeSQLite/foreign_tenancy_actor_thread_missing_and_terminal_parent
+=== RUN   TestEA1P0SourceAdmissionNativeSQLite/foreign_tenancy_actor_thread_missing_and_terminal_parent/foreign-tenant
+=== RUN   TestEA1P0SourceAdmissionNativeSQLite/foreign_tenancy_actor_thread_missing_and_terminal_parent/foreign-actor
+=== RUN   TestEA1P0SourceAdmissionNativeSQLite/foreign_tenancy_actor_thread_missing_and_terminal_parent/foreign-thread
+=== RUN   TestEA1P0SourceAdmissionNativeSQLite/foreign_tenancy_actor_thread_missing_and_terminal_parent/missing-parent
+=== RUN   TestEA1P0SourceAdmissionNativeSQLite/wrong_kind_duplicate_run_and_stale/future_expected_Revision
+--- PASS: TestEA1P0SourceAdmissionNativeSQLite (0.10s)
+    --- PASS: TestEA1P0SourceAdmissionNativeSQLite/foreign_tenancy_actor_thread_missing_and_terminal_parent (0.06s)
+        --- PASS: TestEA1P0SourceAdmissionNativeSQLite/foreign_tenancy_actor_thread_missing_and_terminal_parent/foreign-tenant (0.00s)
+        --- PASS: TestEA1P0SourceAdmissionNativeSQLite/foreign_tenancy_actor_thread_missing_and_terminal_parent/foreign-actor (0.00s)
+        --- PASS: TestEA1P0SourceAdmissionNativeSQLite/foreign_tenancy_actor_thread_missing_and_terminal_parent/foreign-thread (0.00s)
+        --- PASS: TestEA1P0SourceAdmissionNativeSQLite/foreign_tenancy_actor_thread_missing_and_terminal_parent/missing-parent (0.00s)
+    --- PASS: TestEA1P0SourceAdmissionNativeSQLite/wrong_kind_duplicate_run_and_stale/future_expected_Revision (0.05s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite	259.856s
+=== RUN   TestEmbeddedExamplePersistsAndReopens
+Run complete: local-1794552685108554000 revision=6 status=completed
+New connection: local-1794552685108554000 revision=6 status=completed journalHead=7
+Run complete: local-1794552685180773000 revision=6 status=completed
+New connection: local-1794552685180773000 revision=6 status=completed journalHead=7
+--- PASS: TestEmbeddedExamplePersistsAndReopens (0.22s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/examples/embedded	2.414s
+
+EXIT_CODE=0
