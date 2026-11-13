@@ -1,0 +1,314 @@
+SOURCE_SHA=2d216518cfe48bc9e2ea6b02beb7733c246376a7
+COMMAND=make check-no-race
+node --test scripts/beta-release-policy.test.mjs scripts/check-pr-body-format.test.mjs scripts/release-command.test.mjs scripts/sqlite-release-policy.test.mjs scripts/go-coverage-summary.test.mjs
+✔ Beta releases never publish to the npm registry or request publication credentials (0.993958ms)
+✔ Beta releases retain immutable tags, reviewed notes, and a TypeScript archive (0.092166ms)
+✔ Tag verification and the full Beta gates precede artifact publication (0.086958ms)
+✔ rejects the PR style with literal escaped Markdown separators (1.553584ms)
+✔ accepts actual Markdown line breaks (5.518125ms)
+✔ allows literal newline escapes in fenced or inline code (0.172083ms)
+✔ accepts body-file and rejects malformed GitHub PR event payload (137.79075ms)
+✔ unions duplicate blocks within and across test binaries without losing zeros (9.35525ms)
+✔ full source path and every range coordinate form block identity (0.211709ms)
+✔ all zero-execution blocks remain in the denominator (0.130084ms)
+✔ large execution counters use exact positivity without numeric overflow (0.080875ms)
+✔ same block statement-count conflicts fail closed, including zero counts (0.244708ms)
+✔ valid Go modes are recognized but mixed modes are rejected (0.138542ms)
+✔ missing and malformed headers or rows are not silently discarded (0.130667ms)
+✔ illegal integer syntax and unsafe statement values fail closed (0.304917ms)
+✔ invalid, reversed, or unsafe coordinates fail closed (0.546459ms)
+✔ CRLF profiles and mode-only zero-statement profiles retain existing empty semantics (0.284541ms)
+✔ workspace gate instruments all local packages and preserves its 70 percent contract (1.34475ms)
+✔ non-Windows commands keep their original argument vector (2.396291ms)
+✔ Windows npm runs its JavaScript entrypoint, not cmd.exe (1.799042ms)
+✔ Windows pnpm can launch the native executable without cmd.exe (0.9875ms)
+✔ Windows pnpm supports the node_modules/.bin shim layout without a shell (1.352ms)
+✔ missing Windows CLI fails closed instead of falling back to cmd.exe (1.541667ms)
+✔ the runner preserves shell metacharacters as literal argv values (45.450209ms)
+✔ the runner reports executable launch failures instead of a generic exit code (2.233334ms)
+﹣ Windows launches installed npm and pnpm without a shell (0.052333ms) # SKIP
+✔ SQLite joins one coordinated eleven-module Beta cohort (1.281083ms)
+✔ Harness release module stays vendor-neutral and isolates Provider-powered demo (1.234042ms)
+✔ release tag set includes SQLite at precisely the same version (54.608667ms)
+✔ publisher verifies actual tagged modules without source replacements (0.740791ms)
+ℹ tests 30
+ℹ suites 0
+ℹ pass 29
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 1
+ℹ todo 0
+ℹ duration_ms 267.03175
+node scripts/check-beta.mjs
+Agent Runtime 0.1.0-beta.24 Beta metadata gate passed
+python3 -m unittest discover -s scripts -p 'test_agent_*.py'
+...................................................................................................................................
+----------------------------------------------------------------------
+Ran 131 tests in 3.365s
+
+OK
+node scripts/go-workspace.mjs fmt-check
+==> fmt-check go/agent-runtime
+==> fmt-check go/agent-runtime-provider
+==> fmt-check go/agent-runtime-harness
+==> fmt-check go/agent-runtime-harness/examples/task-agent
+==> fmt-check go/agent-runtime-harness-postgres
+==> fmt-check go/agent-runtime-mcp
+==> fmt-check go/agent-runtime-otel
+==> fmt-check go/agent-runtime-a2a
+==> fmt-check go/agent-runtime-postgres
+==> fmt-check go/agent-runtime-sqlite
+==> fmt-check go/agent-runtime-redis
+==> fmt-check go/agent-runtime-http
+node scripts/go-workspace.mjs tidy-check
+==> tidy-check go/agent-runtime
+==> tidy-check go/agent-runtime-provider
+==> tidy-check go/agent-runtime-harness
+==> tidy-check go/agent-runtime-harness/examples/task-agent
+==> tidy-check go/agent-runtime-harness-postgres
+==> tidy-check go/agent-runtime-mcp
+==> tidy-check go/agent-runtime-otel
+==> tidy-check go/agent-runtime-a2a
+==> tidy-check go/agent-runtime-postgres
+==> tidy-check go/agent-runtime-sqlite
+==> tidy-check go/agent-runtime-redis
+==> tidy-check go/agent-runtime-http
+node scripts/go-workspace.mjs vet
+==> vet go/agent-runtime
+==> vet go/agent-runtime-provider
+==> vet go/agent-runtime-harness
+==> vet go/agent-runtime-harness/examples/task-agent
+==> vet go/agent-runtime-harness-postgres
+==> vet go/agent-runtime-mcp
+==> vet go/agent-runtime-otel
+==> vet go/agent-runtime-a2a
+==> vet go/agent-runtime-postgres
+==> vet go/agent-runtime-sqlite
+==> vet go/agent-runtime-redis
+==> vet go/agent-runtime-http
+node scripts/go-workspace.mjs test
+==> test go/agent-runtime
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/continuation	0.426s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/interaction	[no test files]
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/runfeed	[no test files]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/topology	0.422s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent	1.468s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/bootstrap	0.416s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget	0.396s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/compose	0.421s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance	[no test files]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context	1.441s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/continuation	7.648s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/evaluation	0.544s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/examples/configured	[no test files]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/examples/quickstart	0.523s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/groupchat	0.815s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff	0.726s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/interaction	[no test files]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/callbackscope	0.563s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol	0.541s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract	0.537s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel	0.394s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory	102.278s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model	0.397s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/observability	0.378s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin	0.673s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/queue	0.593s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runfeed	0.644s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation	0.619s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/team	0.480s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools	0.577s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workbench	0.424s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workflow	0.422s
+==> test go/agent-runtime-provider
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider	2.835s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider/anthropic	1.799s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider/examples/providers	[no test files]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider/internal/providerhttp	1.618s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider/openai	1.974s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider/transport	4.959s
+==> test go/agent-runtime-harness
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness	21.923s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness/examples/session	0.617s
+==> test go/agent-runtime-harness/examples/task-agent
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness/examples/task-agent	12.851s
+==> test go/agent-runtime-harness-postgres
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-postgres	45.992s
+==> test go/agent-runtime-mcp
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-mcp	0.927s
+==> test go/agent-runtime-otel
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-otel	0.719s
+==> test go/agent-runtime-a2a
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-a2a	0.935s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-a2a/internal/tcksut	[no test files]
+==> test go/agent-runtime-postgres
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	375.716s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]
+==> test go/agent-runtime-sqlite
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite	166.341s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/examples/embedded	1.209s
+==> test go/agent-runtime-redis
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-redis	2.492s
+==> test go/agent-runtime-http
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http	0.749s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http/agent	0.591s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http/harness	0.594s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http/team	0.572s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http/workflow	0.575s
+node scripts/go-workspace.mjs lint
+==> lint go/agent-runtime
+0 issues.
+==> lint go/agent-runtime-provider
+0 issues.
+==> lint go/agent-runtime-harness
+0 issues.
+==> lint go/agent-runtime-harness/examples/task-agent
+0 issues.
+==> lint go/agent-runtime-harness-postgres
+0 issues.
+==> lint go/agent-runtime-mcp
+0 issues.
+==> lint go/agent-runtime-otel
+0 issues.
+==> lint go/agent-runtime-a2a
+0 issues.
+==> lint go/agent-runtime-postgres
+0 issues.
+==> lint go/agent-runtime-sqlite
+0 issues.
+==> lint go/agent-runtime-redis
+0 issues.
+==> lint go/agent-runtime-http
+0 issues.
+pnpm run lint
+$ pnpm --filter @orz-i/agent-runtime-client lint
+$ eslint src --max-warnings=0
+pnpm run typecheck
+$ pnpm --filter @orz-i/agent-runtime-client typecheck
+$ tsc -p tsconfig.json --noEmit
+pnpm run test
+$ pnpm --filter @orz-i/agent-runtime-client test
+$ vitest run
+
+ RUN  v5.0.3 /private/tmp/gaoge-runtime-issue107/ts/agent-runtime-client
+
+
+ Test Files  3 passed (3)
+      Tests  46 passed (46)
+   Start at  18:10:05
+   Duration  224ms (transform 57%, tests 20%, import 19%, worker 4%)
+
+pnpm run build
+$ pnpm --filter @orz-i/agent-runtime-client build
+$ tsc -p tsconfig.build.json
+cd go/agent-runtime && go test ./evaluation -run '^TestRuntime.*ScenarioCorpus$' -count=1
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/evaluation	0.447s
+cd go/agent-runtime-a2a && go test -run '^TestA2ADeterministicScenarioCorpus$' -count=1
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-a2a	0.470s
+cd go/agent-runtime-mcp && go test -run '^TestMCPDeterministicScenarioCorpus$' -count=1
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-mcp	0.478s
+node scripts/run-benchmarks.mjs --smoke
+goos: darwin
+goarch: arm64
+pkg: github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel
+cpu: Apple M4
+BenchmarkRuntimeCreateMemory-10        	       1	    165125 ns/op	    3024 B/op	      15 allocs/op
+BenchmarkRuntimeLoadMemory-10          	       1	      1500 ns/op	      24 B/op	       1 allocs/op
+BenchmarkRuntimeApplyCASMemory-10      	       1	     26041 ns/op	     120 B/op	       5 allocs/op
+BenchmarkRuntimeListEventsMemory-10    	       1	      7583 ns/op	    9472 B/op	       1 allocs/op
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel	1.188s
+goos: darwin
+goarch: arm64
+pkg: github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation
+cpu: Apple M4
+BenchmarkRunRelationEnsureMemory-10          	       1	      7792 ns/op	    1224 B/op	       4 allocs/op
+BenchmarkRunRelationGetByChildMemory-10      	       1	       250.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkRunRelationListChildrenMemory-10    	       1	     39791 ns/op	   24768 B/op	      14 allocs/op
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation	0.420s
+goos: darwin
+goarch: arm64
+pkg: github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/continuation
+cpu: Apple M4
+BenchmarkContinuationProjectMemory-10    	       1	    341083 ns/op	   34632 B/op	     283 allocs/op
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/continuation	0.851s
+goos: darwin
+goarch: arm64
+pkg: github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent
+cpu: Apple M4
+BenchmarkAgentDeterministicLoopMemory-10    	       1	    983417 ns/op	  238520 B/op	    2076 allocs/op
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent	0.460s
+goos: darwin
+goarch: arm64
+pkg: github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workflow
+cpu: Apple M4
+BenchmarkWorkflowDeterministicReturnMemory-10    	       1	    615667 ns/op	  159712 B/op	    1680 allocs/op
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workflow	0.829s
+goos: darwin
+goarch: arm64
+pkg: github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness
+cpu: Apple M4
+BenchmarkHarnessStartAgentTurnMemory-10         	       1	   1703292 ns/op	  389488 B/op	    3467 allocs/op
+BenchmarkHarnessLoadCompletedTurnMemory-10      	       1	     22166 ns/op	   14840 B/op	      80 allocs/op
+BenchmarkHarnessContextPathLookupMemory-10      	       1	   1699834 ns/op	 1392736 B/op	   21611 allocs/op
+BenchmarkHarnessLoadRelatedSubtasksMemory-10    	       1	    282041 ns/op	  213712 B/op	    1629 allocs/op
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness	0.510s
+goos: darwin
+goarch: arm64
+pkg: github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http
+cpu: Apple M4
+BenchmarkHTTPGetRunMemory-10           	       1	    533791 ns/op	   46560 B/op	     356 allocs/op
+BenchmarkHTTPListRunEventsMemory-10    	       1	     70208 ns/op	   39496 B/op	     264 allocs/op
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http	0.393s
+cd integration/otel-e2e && GOWORK=off go test ./...
+ok  	example.com/agent-runtime-otel-e2e	(cached)
+node scripts/check-a2a-product.mjs
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-a2a	0.873s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-a2a/internal/tcksut	[no test files]
+A2A product boundary and regression gate passed
+node scripts/check-release.mjs
+ok  	example.com/agent-runtime-consumer	0.564s
+ok  	example.com/agent-runtime-provider-consumer	0.475s
+ok  	example.com/agent-runtime-harness-consumer	(cached) [no tests to run]
+ok  	example.com/agent-runtime-harness-postgres-consumer	(cached) [no tests to run]
+ok  	example.com/agent-runtime-mcp-consumer	0.463s
+ok  	example.com/agent-runtime-otel-consumer	0.394s
+ok  	example.com/agent-runtime-a2a-consumer	0.412s
+ok  	example.com/agent-runtime-postgres-consumer	(cached) [no tests to run]
+ok  	example.com/agent-runtime-sqlite-consumer	0.459s
+ok  	example.com/agent-runtime-redis-consumer	(cached) [no tests to run]
+ok  	example.com/agent-runtime-http-consumer	0.521s
+$ vitest run
+
+ RUN  v5.0.3 /private/tmp/gaoge-runtime-issue107/ts/agent-runtime-client
+
+
+ Test Files  3 passed (3)
+      Tests  46 passed (46)
+   Start at  18:10:37
+   Duration  247ms (transform 45%, tests 32%, import 18%, worker 5%)
+
+$ tsc -p tsconfig.build.json
+Progress: resolved 1, reused 0, downloaded 0, added 0
+Packages are cloned from the content-addressable store to the virtual store.
+  Content-addressable store is at: /Users/mini/Library/pnpm/store/v11
+  Virtual store is at:             node_modules/.pnpm
+Packages: +1
++
+Progress: resolved 1, reused 0, downloaded 1, added 1, done
+
+dependencies:
++ @orz-i/agent-runtime-client 0.1.0-beta.24
+
+Done in 183ms using pnpm v12.4.2
+Agent Runtime 0.1.0-beta.24 clean-consumer local-cohort gate passed
+
+EXIT_CODE=0

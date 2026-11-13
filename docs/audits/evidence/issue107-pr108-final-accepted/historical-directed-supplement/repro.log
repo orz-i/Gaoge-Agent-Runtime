@@ -1,0 +1,13 @@
+SOURCE_SHA=2d216518cfe48bc9e2ea6b02beb7733c246376a7
+COMMAND=go -C go/agent-runtime-postgres test -race -count=1 -v ./... -run ^TestRealPostgresManagedRecoveryStore$/^owner-and-leave$/^live$
+=== RUN   TestRealPostgresManagedRecoveryStore
+=== RUN   TestRealPostgresManagedRecoveryStore/owner-and-leave
+=== RUN   TestRealPostgresManagedRecoveryStore/owner-and-leave/live
+--- PASS: TestRealPostgresManagedRecoveryStore (0.41s)
+    --- PASS: TestRealPostgresManagedRecoveryStore/owner-and-leave (0.41s)
+        --- PASS: TestRealPostgresManagedRecoveryStore/owner-and-leave/live (0.41s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	3.638s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]
+
+EXIT_CODE=0

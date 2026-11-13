@@ -1,0 +1,13 @@
+SOURCE_SHA=2d216518cfe48bc9e2ea6b02beb7733c246376a7
+COMMAND=go -C go/agent-runtime-postgres test -race -count=2 -v ./... -run '^(TestAuditIssue107PostgresBeginCannotBindCallerExpectedChildRevision)$'
+=== RUN   TestAuditIssue107PostgresBeginCannotBindCallerExpectedChildRevision
+    issue107_sixth_revision_audit_real_test.go:117: originalCallerRevision=1 currentRevision=2 storeGranted=false grantError=kernel execution lease is not current
+--- PASS: TestAuditIssue107PostgresBeginCannotBindCallerExpectedChildRevision (0.33s)
+=== RUN   TestAuditIssue107PostgresBeginCannotBindCallerExpectedChildRevision
+    issue107_sixth_revision_audit_real_test.go:117: originalCallerRevision=1 currentRevision=2 storeGranted=false grantError=kernel execution lease is not current
+--- PASS: TestAuditIssue107PostgresBeginCannotBindCallerExpectedChildRevision (0.25s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	3.076s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]
+
+EXIT_CODE=0
