@@ -1,0 +1,10 @@
+SOURCE_SHA=2cf7038fc76c028ca0edfac24096866a2afa76e5
+COMMAND=go -C go/agent-runtime-harness-postgres test -count=1 ./... -run '^TestEA1HarnessAgentTaskCancelP0$/^actor$' -v
+=== RUN   TestEA1HarnessAgentTaskCancelP0
+=== RUN   TestEA1HarnessAgentTaskCancelP0/actor
+--- PASS: TestEA1HarnessAgentTaskCancelP0 (0.00s)
+    --- PASS: TestEA1HarnessAgentTaskCancelP0/actor (0.00s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-postgres	0.795s
+
+EXIT_CODE=0
