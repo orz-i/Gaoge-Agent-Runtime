@@ -1,0 +1,1 @@
+Copied verbatim from /tmp/ea1-ci-managed-fixed. Logs lack SOURCE_SHA headers. Historical directed supplement only, excluded from final same-SHA gate counts.

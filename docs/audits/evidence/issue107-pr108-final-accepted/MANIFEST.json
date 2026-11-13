@@ -1,0 +1,881 @@
+{
+  "source_sha": "2d216518cfe48bc9e2ea6b02beb7733c246376a7",
+  "gates": [
+    {
+      "name": "beta-contract",
+      "command": "node scripts/check-beta.mjs",
+      "sha256": "5c05890bb0993e9e171f586a87a7051547e137d2cc4046754a876236dd7fc308",
+      "exit": 0
+    },
+    {
+      "name": "check-no-race",
+      "command": "make check-no-race",
+      "sha256": "f910f86a65b6bfbf33b6bbfa25ef86fc43640ebb21010d401f475a4752bd0269",
+      "exit": 0
+    },
+    {
+      "name": "coverage-profile-identity",
+      "command": "python3 /tmp/ea1-pr108-final/compare_profiles.py",
+      "sha256": "1f511796777e01036b118f71917f6af64c865aec947b1a9589f7210b7620f233",
+      "exit": 0
+    },
+    {
+      "name": "coverage-reducer-unit",
+      "command": "node --test scripts/go-coverage-summary.test.mjs",
+      "sha256": "cff3a1662b967182013b62eaeaa3a88d705b00332bf4ce77282b5a65c525e0b4",
+      "exit": 0
+    },
+    {
+      "name": "coverage",
+      "command": "make coverage",
+      "sha256": "160685322217bc43cd6bc0255b8945d6212cb734b56da9b23149d5e06bfc0924",
+      "exit": 0
+    },
+    {
+      "name": "dependency-presence",
+      "command": "test -f node_modules/eslint/package.json && test -f node_modules/typescript/lib/tsc.js && test -f node_modules/vitest/dist/chunks/tinyrainbow.Ht9iggcq.js",
+      "sha256": "dca1a8b463088088cba5715de6ec01f21b56ea2a61e369ef01a6eb09c3fc986a",
+      "exit": 0
+    },
+    {
+      "name": "dependency-restore",
+      "command": "pnpm install --frozen-lockfile",
+      "sha256": "a1b144969aea3c37f6b00f8bdc44cf6db72c8a0d846bf685f85788555088db10",
+      "exit": 0
+    },
+    {
+      "name": "environment",
+      "command": "go version; node --version; pnpm --version; golangci-lint version; df -h .; git status --short",
+      "sha256": "a24787f6ac2059eb55ee4bdded3c38b89f06859b0956128080b9063585463f45",
+      "exit": 0
+    },
+    {
+      "name": "final-state",
+      "command": "git status --short; df -h .",
+      "sha256": "a154fb944d68c5f736552a1b4cc5926795a74bef5341c9222d1f000e719bf43a",
+      "exit": 0
+    },
+    {
+      "name": "integration",
+      "command": "make integration-test",
+      "sha256": "eaccaa8c0afaec7438cba8b00860cb7ff8efb1e8def518ab1c380ad895b9262c",
+      "exit": 0
+    },
+    {
+      "name": "managed-extra-core",
+      "command": "go -C go/agent-runtime test -race -count=2 -v ./... -run '^TestManaged'",
+      "sha256": "84aeaa6cf28095db1eda11b1fd24f55b17d6515ad47e25a605d5340f8f551e39",
+      "exit": 0
+    },
+    {
+      "name": "managed-extra-host",
+      "command": "go -C go/agent-runtime-harness test -race -count=2 -v ./... -run '^TestManaged(HostMemoryRejectsUnissuedProofs|DispatchReceiptExactSchema)$'",
+      "sha256": "421660ec04fa7002e7e6e3354498a15757583f67860ec2dea35b20f35b9b172d",
+      "exit": 0
+    },
+    {
+      "name": "managed-extra-hostpg",
+      "command": "go -C go/agent-runtime-harness-postgres test -race -count=2 -v ./... -run '^TestManagedHostSQLRejectsUnissuedProofs$'",
+      "sha256": "cb27cede4b3fafab02e388abfcbd5421989974047277ed94a0f325ce0269746c",
+      "exit": 0
+    },
+    {
+      "name": "managed-extra-pg",
+      "command": "go -C go/agent-runtime-postgres test -race -count=2 -v ./... -run '^TestRealPostgresManagedRecoveryStore$'",
+      "sha256": "e1eacaa93e5baf192a419f7481e3fd24bc88d6df622dec6351c02dd1876154e9",
+      "exit": 0
+    },
+    {
+      "name": "managed-extra-process",
+      "command": "GOWORK=off go -C integration/continuation-e2e test -race -count=2 -v ./... -run '^TestRealPostgres(ManagedAgentSessionRecoveryAcrossProcessCrash|ManagedHostReservationModesAfterProcessCrash|OpaqueManagedProcessCrashRemainsUnknown)$'",
+      "sha256": "ba312685b5a43ac887263dd2e95113bc562191d469f9e74393c8c6d83bea765a",
+      "exit": 0
+    },
+    {
+      "name": "managed-extra-sqlite",
+      "command": "go -C go/agent-runtime-sqlite test -race -count=2 -v ./... -run '^TestSQLiteManagedRecoveryStore$'",
+      "sha256": "a490507c6efa5de6c769c9bd5d5726281f3eb598c82cba337725467b4835a48f",
+      "exit": 0
+    },
+    {
+      "name": "matrix-attempt-extra",
+      "command": "go -C go/agent-runtime test -race -count=2 -v ./... -run '^TestEA1P0WorkflowAttemptLocalNoEffectAcrossRootAndChild$'",
+      "sha256": "981b1a6c7516d08c343193d7b258732a98d0067c36f536c39ae8817fd776659e",
+      "exit": 0
+    },
+    {
+      "name": "matrix-extra-agent-runtime-harness-postgres-0",
+      "command": "go -C go/agent-runtime-harness-postgres test -race -count=2 -v ./... -run '^(TestEA1HACApprovalCancellationElection|TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart|TestEA1HACReceiptBeforeMark|TestEA1HarnessSubtaskControlAdmission|TestRealPostgresEA1HarnessAgentTaskCancelP4|TestRealPostgresEA1RootAgentCancelHostElection)$'",
+      "sha256": "a721846083eec978e09cf810c2dbad3d18d1c998c235036530983040b20c09aa",
+      "exit": 0
+    },
+    {
+      "name": "matrix-extra-agent-runtime-postgres-0",
+      "command": "go -C go/agent-runtime-postgres test -race -count=2 -v ./... -run '^(TestAuditIssue107PostgresBeginCannotBindCallerExpectedChildRevision|TestEA1RealPostgresChildAgentApprovalSettlement|TestEA1RealPostgresChildAgentCancelPhases|TestEA1RealPostgresChildAgentControlPhases|TestEA1RealPostgresChildAgentRecoveryAdmission|TestEA1RealPostgresChildAgentRecoveryPhases|TestEA1RealPostgresChildAgentRecoveryUnknown|TestEA1RealPostgresChildAgentResumePhases|TestEA1RealPostgresChildAgentResumeSettlement|TestEA1RealPostgresChildAgentStartPhases|TestEA1RealPostgresChildWaitAdmission|TestEA1RealPostgresCompensationAdmission|TestEA1RealPostgresCompensationBarriers|TestEA1RealPostgresCompensationMarkAck|TestEA1RealPostgresCompensationUnknown|TestEA1RealPostgresMiddlewareNextLifetime|TestEA1RealPostgresOwnedCallbackReturn|TestEA1RealPostgresP0SourceAdmission|TestEA1RealPostgresReceiptBeforeMark|TestEA1RealPostgresResumeAdmission|TestEA1RealPostgresResumeMarkAck|TestEA1RealPostgresResumeUnknown|TestEA1RealPostgresRootAgentAdmission|TestEA1RealPostgresRootAgentCancelPhases|TestEA1RealPostgresRootAgentControlPhases|TestEA1RealPostgresRootAgentControlSettlement|TestEA1RealPostgresRootAgentDefaultAdmission|TestEA1RealPostgresRootAgentElection|TestEA1RealPostgresRootAgentReconcilePhases|TestEA1RealPostgresRootAgentResumePhases|TestEA1RealPostgresRootAgentResumeSettlement|TestEA1RealPostgresRootAgentStartSettlement|TestEA1RealPostgresRootAgentUnknown|TestEA1RealPostgresRootChildWorkflowMarkAckLostAcrossConnections|TestEA1RealPostgresWaitBarriers|TestEA1RealPostgresWaitMarkAck|TestEA1RealPostgresWaitUnknown|TestEA1RealPostgresWorkflowEntryCompetition|TestEA1RealPostgresWorkflowEntryPhases|TestEA1RealPostgresWorkflowRecoveryBoundaries|TestEA1RealPostgresWorkflowStartBoundaries|TestRealPostgresOwnedPhysicalBindingGuards)$'",
+      "sha256": "b76be3a00492637875a173562f90536b19811b0e03d7d3ec9a58a89b668b00ab",
+      "exit": 0
+    },
+    {
+      "name": "matrix-extra-agent-runtime-postgres-1",
+      "command": "go -C go/agent-runtime-postgres test -race -count=2 -v ./... -run '^(TestAuditIssue107PostgresBeginCannotBindCallerExpectedChildRevision)$'",
+      "sha256": "a665e02560cee4aac3a9585b002c462b8d990da171e98557707b3c939327019b",
+      "exit": 0
+    },
+    {
+      "name": "otel",
+      "command": "make integration-otel",
+      "sha256": "f53082e619858361d9512458e1ea39e97b02605f45b3217efccb59118dea99f0",
+      "exit": 0
+    },
+    {
+      "name": "preflight-lint",
+      "command": "make go-lint",
+      "sha256": "816483ab2242603e769a0a9840188184041ba05438f1fcdc83bc8d72878fd21d",
+      "exit": 0
+    },
+    {
+      "name": "race-agent-runtime-a2a",
+      "command": "go -C go/agent-runtime-a2a test -race -count=1 -v ./...",
+      "sha256": "e4e48da82ad97957ddfc6a76aa149a51b2e91297e72685aa294f9f6d3b0d199f",
+      "exit": 0
+    },
+    {
+      "name": "race-agent-runtime-harness-postgres",
+      "command": "go -C go/agent-runtime-harness-postgres test -race -count=1 -v ./...",
+      "sha256": "aeca00b74ad2e855e93e770061fdd9f29751e79751d0956f6fee49c1639d7709",
+      "exit": 0
+    },
+    {
+      "name": "race-agent-runtime-harness",
+      "command": "go -C go/agent-runtime-harness test -race -count=1 -v ./...",
+      "sha256": "b9c61dd386019f0bae9722c5d996cbc970816983fd284db6a442712938097c11",
+      "exit": 0
+    },
+    {
+      "name": "race-agent-runtime-harness_examples_task-agent",
+      "command": "go -C go/agent-runtime-harness/examples/task-agent test -race -count=1 -v ./...",
+      "sha256": "b7d455b30a524e8779ee608bb4f97aff74e336363613235187495e416eb5cf0b",
+      "exit": 0
+    },
+    {
+      "name": "race-agent-runtime-http",
+      "command": "go -C go/agent-runtime-http test -race -count=1 -v ./...",
+      "sha256": "0788ed8fc3d57e8ce77d6c8b89a8205f7a581a227fe4e83a8d8df85e5a179b0a",
+      "exit": 0
+    },
+    {
+      "name": "race-agent-runtime-mcp",
+      "command": "go -C go/agent-runtime-mcp test -race -count=1 -v ./...",
+      "sha256": "4c603bb691c912d9c1272ce8bcad3994bc55379871e2515f8d6777ac7b900aff",
+      "exit": 0
+    },
+    {
+      "name": "race-agent-runtime-otel",
+      "command": "go -C go/agent-runtime-otel test -race -count=1 -v ./...",
+      "sha256": "bb580413e5a90f890a856db37b8825ae37e1e77a2c170fc512589f2d39cec820",
+      "exit": 0
+    },
+    {
+      "name": "race-agent-runtime-postgres",
+      "command": "go -C go/agent-runtime-postgres test -race -count=1 -v ./...",
+      "sha256": "d0f9f9acc733e3971d4cc6a48065a950fc43678d15bb33e1ec167c866c3f2348",
+      "exit": 0
+    },
+    {
+      "name": "race-agent-runtime-provider",
+      "command": "go -C go/agent-runtime-provider test -race -count=1 -v ./...",
+      "sha256": "8b56bfb3dd5194b11ef697580de49864808b43f515f2266d5abd759ac88b50c6",
+      "exit": 0
+    },
+    {
+      "name": "race-agent-runtime-redis",
+      "command": "go -C go/agent-runtime-redis test -race -count=1 -v ./...",
+      "sha256": "81085f9277c47db943dc48593eebe756ab5937d89a6d51e53cb096ee991bfa8d",
+      "exit": 0
+    },
+    {
+      "name": "race-agent-runtime-sqlite",
+      "command": "go -C go/agent-runtime-sqlite test -race -count=1 -v ./...",
+      "sha256": "9e8799d05209122e83bd33e82aad088f5766d419d642635651d2057813284467",
+      "exit": 0
+    },
+    {
+      "name": "race-agent-runtime",
+      "command": "go -C go/agent-runtime test -race -count=1 -v ./...",
+      "sha256": "01eec0a3da26c9bd1f2f1930321b2b98f8033f660b1903303c78a6243c816097",
+      "exit": 0
+    },
+    {
+      "name": "schema-fixture-smoke",
+      "command": "go -C go/agent-runtime-sqlite test -race -count=1 -v ./... -run '^TestUnsupportedExperimentalSchemaVersionMustNotBeMigrated$'",
+      "sha256": "845c3a0e2c494eb812b34c04cfcc73b77ac57706c5e3441346238f68165a031e",
+      "exit": 0
+    },
+    {
+      "name": "security",
+      "command": "make security",
+      "sha256": "2b7907080ca937912adc5a6ad225921481618c0724e119a7b25a38a98e2eeff8",
+      "exit": 0
+    }
+  ],
+  "status": "ACTUAL_GATES_PASS_INDEPENDENT_MATRIX_REVIEW_REQUIRED",
+  "runtime_cells": 138,
+  "host_frozen_unrun": 6,
+  "historical_supplement": [
+    {
+      "path": "historical-directed-supplement/memory.log",
+      "origin": "/tmp/ea1-ci-managed-fixed/memory.log",
+      "sha256": "137023ceced45343798fbf41b7493600a139708297066852218625d572a05fd5",
+      "role": "historical supplement, source not mechanically attested, NOT a main gate"
+    },
+    {
+      "path": "historical-directed-supplement/memory.exit",
+      "origin": "/tmp/ea1-ci-managed-fixed/memory.exit",
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+      "role": "historical supplement, source not mechanically attested, NOT a main gate"
+    },
+    {
+      "path": "historical-directed-supplement/postgres.log",
+      "origin": "/tmp/ea1-ci-managed-fixed/postgres.log",
+      "sha256": "e4216a71f002c63be9dc8482e48a7e0e33889462e8d25edad92f9aac649bc6c6",
+      "role": "historical supplement, source not mechanically attested, NOT a main gate"
+    },
+    {
+      "path": "historical-directed-supplement/postgres.exit",
+      "origin": "/tmp/ea1-ci-managed-fixed/postgres.exit",
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+      "role": "historical supplement, source not mechanically attested, NOT a main gate"
+    },
+    {
+      "path": "historical-directed-supplement/sqlite.log",
+      "origin": "/tmp/ea1-ci-managed-fixed/sqlite.log",
+      "sha256": "9a4a8915031d81746fad0fbe31250bf8d92340fd01d83d0ed30c371d90dc5b92",
+      "role": "historical supplement, source not mechanically attested, NOT a main gate"
+    },
+    {
+      "path": "historical-directed-supplement/sqlite.exit",
+      "origin": "/tmp/ea1-ci-managed-fixed/sqlite.exit",
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+      "role": "historical supplement, source not mechanically attested, NOT a main gate"
+    },
+    {
+      "path": "historical-directed-supplement/repro.log",
+      "origin": "/tmp/ea1-ci-managed-fixed/repro.log",
+      "sha256": "aeb9ee70b22749aa7e630c344dbed6a8eef4934c4e10467e914b5516f0907b79",
+      "role": "historical supplement, source not mechanically attested, NOT a main gate"
+    },
+    {
+      "path": "historical-directed-supplement/repro.exit",
+      "origin": "/tmp/ea1-ci-managed-fixed/repro.exit",
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+      "role": "historical supplement, source not mechanically attested, NOT a main gate"
+    },
+    {
+      "path": "historical-directed-supplement/core-lint.log",
+      "origin": "/tmp/ea1-ci-managed-fixed/core-lint.log",
+      "sha256": "e92606b0bf483111dff0a120c315ea165821348f31365020e2468a0059095c47",
+      "role": "historical supplement, source not mechanically attested, NOT a main gate"
+    },
+    {
+      "path": "historical-directed-supplement/core-lint.exit",
+      "origin": "/tmp/ea1-ci-managed-fixed/core-lint.exit",
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "role": "historical supplement, source not mechanically attested, NOT a main gate"
+    },
+    {
+      "path": "historical-directed-supplement/pg-lint.log",
+      "origin": "/tmp/ea1-ci-managed-fixed/pg-lint.log",
+      "sha256": "e92606b0bf483111dff0a120c315ea165821348f31365020e2468a0059095c47",
+      "role": "historical supplement, source not mechanically attested, NOT a main gate"
+    },
+    {
+      "path": "historical-directed-supplement/pg-lint.exit",
+      "origin": "/tmp/ea1-ci-managed-fixed/pg-lint.exit",
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+      "role": "historical supplement, source not mechanically attested, NOT a main gate"
+    }
+  ],
+  "manifest_scope": "All payload files before MANIFEST.json; SHA256SUMS.txt additionally hashes MANIFEST.json and excludes only itself",
+  "files": [
+    {
+      "path": ".gitattributes",
+      "bytes": 23,
+      "sha256": "9d4337684fcc8c8205728013a6bcc9ba30768442c79f9e995afac0c279a5be1a"
+    },
+    {
+      "path": "COMMANDS.txt",
+      "bytes": 5373,
+      "sha256": "078486fba1590857dfada927ce64e1a4e36f04c5fddb7415985de9f5b3e026f1"
+    },
+    {
+      "path": "ORIGIN.txt",
+      "bytes": 324,
+      "sha256": "bd01b096a78c8c102ae4bb6ceadd5ccd7e1934d3723e493444c7599656661520"
+    },
+    {
+      "path": "SOURCE_SHA",
+      "bytes": 40,
+      "sha256": "fedc69b3496d8f47ca8b9b505a79158341525cce213eca1b0c55919e4d00e6b5"
+    },
+    {
+      "path": "archive_final.py",
+      "bytes": 5646,
+      "sha256": "6b7945a2531caf8d07cb776d9e559da9586a58c0405914b224f5758109a46283"
+    },
+    {
+      "path": "beta-contract.exit",
+      "bytes": 1,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+    },
+    {
+      "path": "beta-contract.log",
+      "bytes": 155,
+      "sha256": "5c05890bb0993e9e171f586a87a7051547e137d2cc4046754a876236dd7fc308"
+    },
+    {
+      "path": "check-no-race.exit",
+      "bytes": 1,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+    },
+    {
+      "path": "check-no-race.log",
+      "bytes": 16166,
+      "sha256": "f910f86a65b6bfbf33b6bbfa25ef86fc43640ebb21010d401f475a4752bd0269"
+    },
+    {
+      "path": "compare_profiles.py",
+      "bytes": 3312,
+      "sha256": "c1f395f690a26bec8a163c03adfac6dd86ab347951365a048b9270106a3b2961"
+    },
+    {
+      "path": "coverage-profile-comparison.json",
+      "bytes": 107835,
+      "sha256": "ce726a5daa0841e16f490e1368a7c03b5208176eeed1f7032feb7b2690c7c708"
+    },
+    {
+      "path": "coverage-profile-identity.exit",
+      "bytes": 1,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+    },
+    {
+      "path": "coverage-profile-identity.log",
+      "bytes": 107957,
+      "sha256": "1f511796777e01036b118f71917f6af64c865aec947b1a9589f7210b7620f233"
+    },
+    {
+      "path": "coverage-reducer-unit.exit",
+      "bytes": 1,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+    },
+    {
+      "path": "coverage-reducer-unit.log",
+      "bytes": 1167,
+      "sha256": "cff3a1662b967182013b62eaeaa3a88d705b00332bf4ce77282b5a65c525e0b4"
+    },
+    {
+      "path": "coverage-summary.json",
+      "bytes": 98,
+      "sha256": "3e44621be62b2d6b837344664221692fc22c21d3916462db3b06ad03c26316a7"
+    },
+    {
+      "path": "coverage.exit",
+      "bytes": 1,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+    },
+    {
+      "path": "coverage.log",
+      "bytes": 8333,
+      "sha256": "160685322217bc43cd6bc0255b8945d6212cb734b56da9b23149d5e06bfc0924"
+    },
+    {
+      "path": "dependency-presence.exit",
+      "bytes": 1,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+    },
+    {
+      "path": "dependency-presence.log",
+      "bytes": 227,
+      "sha256": "dca1a8b463088088cba5715de6ec01f21b56ea2a61e369ef01a6eb09c3fc986a"
+    },
+    {
+      "path": "dependency-restore.exit",
+      "bytes": 1,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+    },
+    {
+      "path": "dependency-restore.log",
+      "bytes": 697,
+      "sha256": "a1b144969aea3c37f6b00f8bdc44cf6db72c8a0d846bf685f85788555088db10"
+    },
+    {
+      "path": "environment.exit",
+      "bytes": 1,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+    },
+    {
+      "path": "environment.log",
+      "bytes": 536,
+      "sha256": "a24787f6ac2059eb55ee4bdded3c38b89f06859b0956128080b9063585463f45"
+    },
+    {
+      "path": "final-state.exit",
+      "bytes": 1,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+    },
+    {
+      "path": "final-state.log",
+      "bytes": 265,
+      "sha256": "a154fb944d68c5f736552a1b4cc5926795a74bef5341c9222d1f000e719bf43a"
+    },
+    {
+      "path": "historical-directed-supplement/ORIGIN.txt",
+      "bytes": 157,
+      "sha256": "9a1545dc95d1e8aefe013ce6703aa3ab224e5f4ac1df7ba212a9c06a8fe60c60"
+    },
+    {
+      "path": "historical-directed-supplement/core-lint.exit",
+      "bytes": 2,
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "path": "historical-directed-supplement/core-lint.log",
+      "bytes": 10,
+      "sha256": "e92606b0bf483111dff0a120c315ea165821348f31365020e2468a0059095c47"
+    },
+    {
+      "path": "historical-directed-supplement/memory.exit",
+      "bytes": 1,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+    },
+    {
+      "path": "historical-directed-supplement/memory.log",
+      "bytes": 7998,
+      "sha256": "137023ceced45343798fbf41b7493600a139708297066852218625d572a05fd5"
+    },
+    {
+      "path": "historical-directed-supplement/pg-lint.exit",
+      "bytes": 2,
+      "sha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa"
+    },
+    {
+      "path": "historical-directed-supplement/pg-lint.log",
+      "bytes": 10,
+      "sha256": "e92606b0bf483111dff0a120c315ea165821348f31365020e2468a0059095c47"
+    },
+    {
+      "path": "historical-directed-supplement/postgres.exit",
+      "bytes": 1,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+    },
+    {
+      "path": "historical-directed-supplement/postgres.log",
+      "bytes": 4318,
+      "sha256": "e4216a71f002c63be9dc8482e48a7e0e33889462e8d25edad92f9aac649bc6c6"
+    },
+    {
+      "path": "historical-directed-supplement/repro.exit",
+      "bytes": 1,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+    },
+    {
+      "path": "historical-directed-supplement/repro.log",
+      "bytes": 766,
+      "sha256": "aeb9ee70b22749aa7e630c344dbed6a8eef4934c4e10467e914b5516f0907b79"
+    },
+    {
+      "path": "historical-directed-supplement/sqlite.exit",
+      "bytes": 1,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+    },
+    {
+      "path": "historical-directed-supplement/sqlite.log",
+      "bytes": 4051,
+      "sha256": "9a4a8915031d81746fad0fbe31250bf8d92340fd01d83d0ed30c371d90dc5b92"
+    },
+    {
+      "path": "integration.exit",
+      "bytes": 1,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+    },
+    {
+      "path": "integration.log",
+      "bytes": 44120,
+      "sha256": "eaccaa8c0afaec7438cba8b00860cb7ff8efb1e8def518ab1c380ad895b9262c"
+    },
+    {
+      "path": "ledger-candidate-summary.json",
+      "bytes": 157067,
+      "sha256": "6d99fdda39d057acf74cc278d1a6a7bb6d1b9a92f1d01271632d66896d4a3ab3"
+    },
+    {
+      "path": "ledger-candidate.csv",
+      "bytes": 413528,
+      "sha256": "e7a7a77922d0bc6b66d77b8e928d1673b0bca4810cb613de5be745d7371f9581"
+    },
+    {
+      "path": "managed-extra-core.exit",
+      "bytes": 1,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+    },
+    {
+      "path": "managed-extra-core.log",
+      "bytes": 14357,
+      "sha256": "84aeaa6cf28095db1eda11b1fd24f55b17d6515ad47e25a605d5340f8f551e39"
+    },
+    {
+      "path": "managed-extra-host.exit",
+      "bytes": 1,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+    },
+    {
+      "path": "managed-extra-host.log",
+      "bytes": 1365,
+      "sha256": "421660ec04fa7002e7e6e3354498a15757583f67860ec2dea35b20f35b9b172d"
+    },
+    {
+      "path": "managed-extra-hostpg.exit",
+      "bytes": 1,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+    },
+    {
+      "path": "managed-extra-hostpg.log",
+      "bytes": 495,
+      "sha256": "cb27cede4b3fafab02e388abfcbd5421989974047277ed94a0f325ce0269746c"
+    },
+    {
+      "path": "managed-extra-pg.exit",
+      "bytes": 1,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+    },
+    {
+      "path": "managed-extra-pg.log",
+      "bytes": 8289,
+      "sha256": "e1eacaa93e5baf192a419f7481e3fd24bc88d6df622dec6351c02dd1876154e9"
+    },
+    {
+      "path": "managed-extra-process.exit",
+      "bytes": 1,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+    },
+    {
+      "path": "managed-extra-process.log",
+      "bytes": 1925,
+      "sha256": "ba312685b5a43ac887263dd2e95113bc562191d469f9e74393c8c6d83bea765a"
+    },
+    {
+      "path": "managed-extra-sqlite.exit",
+      "bytes": 1,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+    },
+    {
+      "path": "managed-extra-sqlite.log",
+      "bytes": 7708,
+      "sha256": "a490507c6efa5de6c769c9bd5d5726281f3eb598c82cba337725467b4835a48f"
+    },
+    {
+      "path": "matrix-attempt-extra.exit",
+      "bytes": 1,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+    },
+    {
+      "path": "matrix-attempt-extra.log",
+      "bytes": 5114,
+      "sha256": "981b1a6c7516d08c343193d7b258732a98d0067c36f536c39ae8817fd776659e"
+    },
+    {
+      "path": "matrix-coverage-completed.json",
+      "bytes": 11508418,
+      "sha256": "7a0a51e2d085c9c8129d233861408683e200e3185b7df636402dfbc1c25a1b34"
+    },
+    {
+      "path": "matrix-extra-agent-runtime-harness-postgres-0.exit",
+      "bytes": 1,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+    },
+    {
+      "path": "matrix-extra-agent-runtime-harness-postgres-0.log",
+      "bytes": 26144,
+      "sha256": "a721846083eec978e09cf810c2dbad3d18d1c998c235036530983040b20c09aa"
+    },
+    {
+      "path": "matrix-extra-agent-runtime-postgres-0.exit",
+      "bytes": 1,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+    },
+    {
+      "path": "matrix-extra-agent-runtime-postgres-0.log",
+      "bytes": 109986,
+      "sha256": "b76be3a00492637875a173562f90536b19811b0e03d7d3ec9a58a89b668b00ab"
+    },
+    {
+      "path": "matrix-extra-agent-runtime-postgres-1.exit",
+      "bytes": 1,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+    },
+    {
+      "path": "matrix-extra-agent-runtime-postgres-1.log",
+      "bytes": 1038,
+      "sha256": "a665e02560cee4aac3a9585b002c462b8d990da171e98557707b3c939327019b"
+    },
+    {
+      "path": "otel.exit",
+      "bytes": 1,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+    },
+    {
+      "path": "otel.log",
+      "bytes": 1447,
+      "sha256": "f53082e619858361d9512458e1ea39e97b02605f45b3217efccb59118dea99f0"
+    },
+    {
+      "path": "preflight-lint.exit",
+      "bytes": 1,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+    },
+    {
+      "path": "preflight-lint.log",
+      "bytes": 655,
+      "sha256": "816483ab2242603e769a0a9840188184041ba05438f1fcdc83bc8d72878fd21d"
+    },
+    {
+      "path": "prepare_ledger_candidate.py",
+      "bytes": 8363,
+      "sha256": "85e6d905f8ed184d5c8f2f6653d2598dceeacb8f93ccd395246559e45d20ea5e"
+    },
+    {
+      "path": "profiles/RAW_SHA256SUMS.txt",
+      "bytes": 1582,
+      "sha256": "aa54e05a3e93e88e998f5519375afb61ca39e1d25d4c633a8d41534d538c5193"
+    },
+    {
+      "path": "profiles/agent-runtime-a2a.out.gz",
+      "bytes": 9816,
+      "sha256": "533357ed9582c9175883ce23b7bd8048c6b180f76501dff75e52a8524e30747a"
+    },
+    {
+      "path": "profiles/agent-runtime-harness-postgres.out.gz",
+      "bytes": 8516,
+      "sha256": "d9c5452d5082a0c68e3f6829c99c24c7cf1c7d96b12f1bb8f8e96955bf128713"
+    },
+    {
+      "path": "profiles/agent-runtime-harness.out.gz",
+      "bytes": 104016,
+      "sha256": "7a41e158564376807117f15822c9c8fce4bcf8a32f0887c6648e83f0db7c1c48"
+    },
+    {
+      "path": "profiles/agent-runtime-http.out.gz",
+      "bytes": 32136,
+      "sha256": "5d0eaaba6e92a89846a51224f8ef46a9b975c6665faa4aba71b0ac5c535fc21b"
+    },
+    {
+      "path": "profiles/agent-runtime-mcp.out.gz",
+      "bytes": 1820,
+      "sha256": "ef0867af46ade355b7b2aa5c52372c75066d424cb0bbf5528feeaa52c664b4fe"
+    },
+    {
+      "path": "profiles/agent-runtime-otel.out.gz",
+      "bytes": 1148,
+      "sha256": "6abafe3bf6431de617a3f17f1d8dc5134421f6812a55546e9acaf4cdc78c5330"
+    },
+    {
+      "path": "profiles/agent-runtime-postgres.out.gz",
+      "bytes": 9869,
+      "sha256": "735cbaf3d1ae3859ac7f32d03eb4fdfbb87ff4e310bac32f343808badb175491"
+    },
+    {
+      "path": "profiles/agent-runtime-provider.out.gz",
+      "bytes": 262084,
+      "sha256": "c0c618bb34d56c0140cd71e79b8a56f4fd6ecf7510fa8b0a3b7f86d84c52a5fd"
+    },
+    {
+      "path": "profiles/agent-runtime-redis.out.gz",
+      "bytes": 1810,
+      "sha256": "71be81475c91a5e384b697d3acb5bdc3d95474ef47dd49214f8b4c0c0c8375a1"
+    },
+    {
+      "path": "profiles/agent-runtime-sqlite.out.gz",
+      "bytes": 20245,
+      "sha256": "ee10bcd17c592288145557c2e5849b8fdfe9151d05dc4fe360bb9c92ecf55d64"
+    },
+    {
+      "path": "profiles/agent-runtime.out.gz",
+      "bytes": 3202360,
+      "sha256": "cb54ca9270c0595434a8c19a7918fb63c41d423f93166800192abfc905c67329"
+    },
+    {
+      "path": "profiles/task-agent.out.gz",
+      "bytes": 8132,
+      "sha256": "0d3f8a19696cae205c2cb1bc16db3d1171b4dd8c7ac1a85c0b82a15101d7a87c"
+    },
+    {
+      "path": "race-agent-runtime-a2a.exit",
+      "bytes": 1,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+    },
+    {
+      "path": "race-agent-runtime-a2a.log",
+      "bytes": 13389,
+      "sha256": "e4e48da82ad97957ddfc6a76aa149a51b2e91297e72685aa294f9f6d3b0d199f"
+    },
+    {
+      "path": "race-agent-runtime-harness-postgres.exit",
+      "bytes": 1,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+    },
+    {
+      "path": "race-agent-runtime-harness-postgres.log",
+      "bytes": 2786633,
+      "sha256": "aeca00b74ad2e855e93e770061fdd9f29751e79751d0956f6fee49c1639d7709"
+    },
+    {
+      "path": "race-agent-runtime-harness.exit",
+      "bytes": 1,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+    },
+    {
+      "path": "race-agent-runtime-harness.log",
+      "bytes": 304833,
+      "sha256": "b9c61dd386019f0bae9722c5d996cbc970816983fd284db6a442712938097c11"
+    },
+    {
+      "path": "race-agent-runtime-harness_examples_task-agent.exit",
+      "bytes": 1,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+    },
+    {
+      "path": "race-agent-runtime-harness_examples_task-agent.log",
+      "bytes": 183162,
+      "sha256": "b7d455b30a524e8779ee608bb4f97aff74e336363613235187495e416eb5cf0b"
+    },
+    {
+      "path": "race-agent-runtime-http.exit",
+      "bytes": 1,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+    },
+    {
+      "path": "race-agent-runtime-http.log",
+      "bytes": 27746,
+      "sha256": "0788ed8fc3d57e8ce77d6c8b89a8205f7a581a227fe4e83a8d8df85e5a179b0a"
+    },
+    {
+      "path": "race-agent-runtime-mcp.exit",
+      "bytes": 1,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+    },
+    {
+      "path": "race-agent-runtime-mcp.log",
+      "bytes": 6607,
+      "sha256": "4c603bb691c912d9c1272ce8bcad3994bc55379871e2515f8d6777ac7b900aff"
+    },
+    {
+      "path": "race-agent-runtime-otel.exit",
+      "bytes": 1,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+    },
+    {
+      "path": "race-agent-runtime-otel.log",
+      "bytes": 2770,
+      "sha256": "bb580413e5a90f890a856db37b8825ae37e1e77a2c170fc512589f2d39cec820"
+    },
+    {
+      "path": "race-agent-runtime-postgres.exit",
+      "bytes": 1,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+    },
+    {
+      "path": "race-agent-runtime-postgres.log",
+      "bytes": 3120730,
+      "sha256": "d0f9f9acc733e3971d4cc6a48065a950fc43678d15bb33e1ec167c866c3f2348"
+    },
+    {
+      "path": "race-agent-runtime-provider.exit",
+      "bytes": 1,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+    },
+    {
+      "path": "race-agent-runtime-provider.log",
+      "bytes": 490672,
+      "sha256": "8b56bfb3dd5194b11ef697580de49864808b43f515f2266d5abd759ac88b50c6"
+    },
+    {
+      "path": "race-agent-runtime-redis.exit",
+      "bytes": 1,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+    },
+    {
+      "path": "race-agent-runtime-redis.log",
+      "bytes": 4434,
+      "sha256": "81085f9277c47db943dc48593eebe756ab5937d89a6d51e53cb096ee991bfa8d"
+    },
+    {
+      "path": "race-agent-runtime-sqlite.exit",
+      "bytes": 1,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+    },
+    {
+      "path": "race-agent-runtime-sqlite.log",
+      "bytes": 78401,
+      "sha256": "9e8799d05209122e83bd33e82aad088f5766d419d642635651d2057813284467"
+    },
+    {
+      "path": "race-agent-runtime.exit",
+      "bytes": 1,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+    },
+    {
+      "path": "race-agent-runtime.log",
+      "bytes": 450508,
+      "sha256": "01eec0a3da26c9bd1f2f1930321b2b98f8033f660b1903303c78a6243c816097"
+    },
+    {
+      "path": "remote-ci-run.json",
+      "bytes": 14754,
+      "sha256": "61040f33a6cd9a8d7eb531e34f5375fe3cdee26987c98aeaa4f0b36ac8f26266"
+    },
+    {
+      "path": "remote-pr-head.json",
+      "bytes": 6180,
+      "sha256": "c5d5f6d8307f6ad209991ff68e65af19d2eb0f36c1721630b098c675e027a72d"
+    },
+    {
+      "path": "remote-required-checks.json",
+      "bytes": 712,
+      "sha256": "809445df8a965a2f829beea9b6c12b0aa32509be0e81417eedd4cb2ac293cc25"
+    },
+    {
+      "path": "run.py",
+      "bytes": 5446,
+      "sha256": "6e41ba58c63ba9e690863cc6f84e77a970bdf4f5a52ddf5e7fdb9ee28e1efb9a"
+    },
+    {
+      "path": "runner.out",
+      "bytes": 987,
+      "sha256": "fa1601f61be3923b8e563abfe9a31aa4db982b25d175f6c76f4a3edaa8c6d160"
+    },
+    {
+      "path": "schema-fixture-smoke.exit",
+      "bytes": 1,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+    },
+    {
+      "path": "schema-fixture-smoke.log",
+      "bytes": 569,
+      "sha256": "845c3a0e2c494eb812b34c04cfcc73b77ac57706c5e3441346238f68165a031e"
+    },
+    {
+      "path": "security.exit",
+      "bytes": 1,
+      "sha256": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+    },
+    {
+      "path": "security.log",
+      "bytes": 1198,
+      "sha256": "2b7907080ca937912adc5a6ad225921481618c0724e119a7b25a38a98e2eeff8"
+    },
+    {
+      "path": "verify_matrix_coverage.py",
+      "bytes": 12128,
+      "sha256": "d287ddaa3c0e9b0ea6ad107918f30991821b9428f3d45f2e05103f7ef11c9424"
+    }
+  ]
+}
