@@ -341,7 +341,17 @@ type ea1HACCancelReceiptBarrier struct {
 }
 
 func (s *ea1HACCancelReceiptBarrier) AppendItem(ctx context.Context, item harness.Item) (harness.Item, bool, error) {
-	if item.RunID == s.child && s.intent.ID != "" && item.ParentItemID == s.intent.ID && item.Status == harness.ItemCompleted && harness.VerifiedCancellationFenceReceipt(s.intent, []harness.Item{item}) {
+	// This is pre-Append admission, not a durable receipt: Seq must still
+	// be zero. Validate exact original identity/payload without inventing a
+	// sequence; the test checks VerifiedCancellationFenceReceipt after commit.
+	if s.intent.Seq > 0 && harness.ValidCancellationFenceIntentAdmission(s.intent) &&
+		item.ID == sqlProofFactID("hcancelclosed", s.intent.ID) &&
+		item.RunID == s.child && item.RunID == s.intent.RunID &&
+		item.TurnID == s.intent.TurnID && item.InvocationID == "" &&
+		item.ParentItemID == s.intent.ID && item.Kind == harness.ItemDiagnostic &&
+		item.Status == harness.ItemCompleted && item.Seq == 0 &&
+		string(item.Payload) == `{"boundary":"cancel_scope_settled"}` &&
+		harness.ValidReservedAuthorityCompletion(item, s.intent, true) {
 		close(s.entered)
 		select {
 		case <-s.release:
