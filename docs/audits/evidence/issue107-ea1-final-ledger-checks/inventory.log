@@ -1,0 +1,7 @@
+SOURCE_SHA=e37e268583fd5a7e5b236b1a32505004732171de
+COMMAND=python3 scripts/check-issue107-matrix.py
+EA-1 inventory: 24 entrypoints x 6 phases = 144 cells
+Inventory: EVIDENCE_TO_VERIFY=92, N_A_REVIEW=5, OPEN_COVERAGE=47
+Evidence: PASS=138, UNRUN=6
+
+EXIT_CODE=0
