@@ -149,7 +149,7 @@ func (e *ea1HACAgentEffect) Execute(ctx context.Context, request workflow.Effect
 
 type ea1HACFixture struct {
 	kernelBackend                      ea1HACKernelBackend
-	native, deferResume                bool
+	native, deferResume, observeHost   bool
 	definitions                        *workflow.DefinitionRegistry
 	approvalBefore, hostBefore         func()
 	hostCalls, approvalCalls           atomic.Int32
@@ -178,10 +178,17 @@ func newEA1HACFixture(t *testing.T, backend string, persistent bool) *ea1HACFixt
 	return newEA1HACFixtureWithOptions(t, backend, persistent, false, true)
 }
 func newEA1HACFixtureWithOptions(t *testing.T, backend string, persistent, native, deferResume bool) *ea1HACFixture {
+	return newEA1HACFixtureWithHostOptions(t, backend, persistent, native, deferResume, true)
+}
+
+// observeHost is frozen before Create and retained through reopening. The
+// no-middleware variant still uses actual Harness physical approval grants,
+// frozen approval policy, original AgentTask route, cancellation and budgets.
+func newEA1HACFixtureWithHostOptions(t *testing.T, backend string, persistent, native, deferResume, observeHost bool) *ea1HACFixture {
 	t.Helper()
 	k := ea1HACBackend(t, backend)
 	h := ea1CancelHostBackend(t, persistent)
-	f := &ea1HACFixture{kernelBackend: k, backend: h, store: h.host, model: &ea1HACModel{}, native: native, deferResume: deferResume}
+	f := &ea1HACFixture{kernelBackend: k, backend: h, store: h.host, model: &ea1HACModel{}, native: native, deferResume: deferResume, observeHost: observeHost}
 	f.physical = &ea1HACKernelStore{ea1HACPortSet: k.store}
 	f.bind(t)
 	return f
@@ -247,7 +254,6 @@ func (f *ea1HACFixture) bind(t *testing.T) {
 		},
 		Runtime: runtime, Model: f.model, Catalog: registry, Executor: registry,
 		Approvals:        &ea1HACApproval{ApprovalHandler: interactionadapter.New(interactionService), f: f},
-		RunMiddleware:    []plugin.RunMiddleware{&ea1HACHost{f: f}},
 		ApprovalPolicies: []plugin.ApprovalPolicy{policy},
 		ApprovalControlPreflight: func(ctx context.Context, snapshot kernel.Snapshot) error {
 			if snapshot.Checkpoint == nil || !harness.VerifiedSubtaskApprovalDispatch(ctx, snapshot.Run.ID, snapshot.Run.Revision, snapshot.Checkpoint.ID) {
@@ -257,12 +263,20 @@ func (f *ea1HACFixture) bind(t *testing.T) {
 		},
 		DeferResumption: f.deferResume,
 	}
+	if f.observeHost {
+		dependencies.RunMiddleware = []plugin.RunMiddleware{&ea1HACHost{f: f}}
+	}
 	if f.native {
 		dependencies.RunExecution = &agent.RunExecution{OwnerID: "ea1-hac-original", LeaseDuration: time.Hour}
 	}
 	f.agent, err = agent.NewRunner(dependencies)
 	if err != nil {
 		t.Fatal(err)
+	}
+	// Certify the actual composed graph, not a fixture boolean pretending to
+	// be cancellation authority. The ordinary middleware variant is opaque.
+	if f.agent.OwnsKernelRuntime(runtime) == f.observeHost {
+		t.Fatal("fixture cancellation ownership does not match actual middleware composition")
 	}
 	f.executor = &ea1HACAgentEffect{original: f.agent, relations: relations, approvalFenced: true}
 	static, err := workflow.NewStaticEffectRouter(nil, workflow.EffectRoute{

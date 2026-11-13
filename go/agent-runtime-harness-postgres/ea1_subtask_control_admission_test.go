@@ -30,7 +30,7 @@ func TestEA1HarnessSubtaskControlAdmission(t *testing.T) {
 				name := map[bool]string{false: "default", true: "native"}[native]
 				t.Run("P1/"+name, func(t *testing.T) { ea1HACAdmissionBarrier(t, backend, native) })
 			}
-			for _, mode := range []string{"unknown-tool", "receipt-fault"} {
+			for _, mode := range []string{"unknown-tool", "receipt-fault", "opaque-unknown-tool"} {
 				t.Run("P2/"+mode, func(t *testing.T) { ea1HACAdmissionUnknown(t, backend, mode) })
 			}
 		})
@@ -227,12 +227,19 @@ func ea1HACAdmissionCheckpoint(t *testing.T, f *ea1HACFixture, s kernel.Snapshot
 }
 
 func ea1HACAdmissionUnknown(t *testing.T, backend, mode string) {
-	f := newEA1HACFixtureWithOptions(t, backend, false, false, false)
+	// Preserve both contracts: native-owned cancellation can reach its
+	// Kernel fence; arbitrary Agent middleware requires stronger local proof.
+	opaque := mode == "opaque-unknown-tool"
+	f := newEA1HACFixtureWithHostOptions(t, backend, false, false, false, opaque)
+	expectedHostCalls := int32(0)
+	if opaque {
+		expectedHostCalls = 1
+	}
 	waiting, task, root, ledger := ea1HACStart(t, f)
 	ea1HACAdmissionModel(t, f, ea1HACLoad(t, f, task.RunID))
 	stop := errors.New("original terminal Tool receipt CAS unavailable")
 	hits := 0
-	if mode == "unknown-tool" {
+	if mode != "receipt-fault" {
 		f.toolUnknown = true
 	} else {
 		f.physical.beforeApply = func(_ context.Context, id string, _ uint64, m kernel.StoreMutation) error {
@@ -258,13 +265,13 @@ func ea1HACAdmissionUnknown(t *testing.T, backend, mode string) {
 	if mode == "receipt-fault" && !errors.Is(err, harness.ErrExecutionOutcomeUnknown) {
 		t.Fatalf("missing Host callback outcome classification: %v", err)
 	}
-	if f.toolCalls != 1 || f.model.calls != 1 || f.approvalCalls.Load() != 1 || f.hostCalls.Load() != 1 || !reflect.DeepEqual(f.toolRequest, ea1HACExpectedToolRequest(task.RunID)) {
+	if f.toolCalls != 1 || f.model.calls != 1 || f.approvalCalls.Load() != 1 || f.hostCalls.Load() != expectedHostCalls || !reflect.DeepEqual(f.toolRequest, ea1HACExpectedToolRequest(task.RunID)) {
 		t.Fatal("actual approved original Tool request/callback counts changed")
 	}
 	if mode == "receipt-fault" && hits != 1 {
 		t.Fatal("ordinary Apply receipt cutpoint did not hit once")
 	}
-	if mode == "unknown-tool" && !reflect.DeepEqual(f.toolResult, tools.ExecutionResult{}) {
+	if mode != "receipt-fault" && !reflect.DeepEqual(f.toolResult, tools.ExecutionResult{}) {
 		t.Fatal("unknown provider fabricated receipt")
 	}
 	if mode == "receipt-fault" {
@@ -292,7 +299,15 @@ func ea1HACAdmissionUnknown(t *testing.T, backend, mode string) {
 		t.Fatal("Host return fact confused with Kernel effect settlement")
 	}
 	_, err = f.harness.CancelSubtask(t.Context(), waiting.Turn.ID, task.ID, "cancel uncertain original approved Tool")
-	if pending {
+	if opaque {
+		if !errors.Is(err, harness.ErrRuntimeCancellationUnverified) {
+			t.Fatalf("opaque Agent cancellation ownership: %v", err)
+		}
+		before.unchanged(t, f)
+		if f.physical.controlCalls.Load() != 0 {
+			t.Fatal("opaque cancellation passed read-only ownership gate")
+		}
+	} else if pending {
 		if !errors.Is(err, harness.ErrConflict) {
 			t.Fatalf("pending Host grant cancellation: %v", err)
 		}
@@ -316,8 +331,12 @@ func ea1HACAdmissionUnknown(t *testing.T, backend, mode string) {
 		t.Fatal("Host cancellation changed unknown Kernel grant")
 	}
 	after := ea1HACAdmissionCapture(t, f, waiting.Turn.ID, root.ID, root.ExecutionRefID, task.RunID)
+	repeatError := harness.ErrConflict
+	if opaque {
+		repeatError = harness.ErrRuntimeCancellationUnverified
+	}
 	_, err = f.harness.CancelSubtask(t.Context(), waiting.Turn.ID, task.ID, "repeat original uncertain cancellation")
-	if !errors.Is(err, harness.ErrConflict) {
+	if !errors.Is(err, repeatError) {
 		t.Fatalf("repeat Host election: %v", err)
 	}
 	after.unchanged(t, f)
@@ -326,7 +345,7 @@ func ea1HACAdmissionUnknown(t *testing.T, backend, mode string) {
 	ea1HACReopen(t, f)
 	after.unchanged(t, f)
 	ea1HACAdmissionModel(t, f, ea1HACLoad(t, f, task.RunID))
-	if _, err = f.harness.CancelSubtask(t.Context(), waiting.Turn.ID, task.ID, "fresh owner observes original fence"); !errors.Is(err, harness.ErrConflict) {
+	if _, err = f.harness.CancelSubtask(t.Context(), waiting.Turn.ID, task.ID, "fresh owner observes original fence"); !errors.Is(err, repeatError) {
 		t.Fatalf("fresh Host election: %v", err)
 	}
 	after.unchanged(t, f)
@@ -341,8 +360,11 @@ func ea1HACAdmissionUnknown(t *testing.T, backend, mode string) {
 	if e != nil || retained != grant {
 		t.Fatal("fresh owner replaced original grant")
 	}
-	if f.toolCalls != 1 || f.model.calls != 1 || f.approvalCalls.Load() != 1 || f.hostCalls.Load() != 1 {
+	if f.toolCalls != 1 || f.model.calls != 1 || f.approvalCalls.Load() != 1 || f.hostCalls.Load() != expectedHostCalls {
 		t.Fatal("fresh recovery dispatched new physical callback")
+	}
+	if opaque && f.physical.controlCalls.Load() != 0 {
+		t.Fatal("opaque repeat/reopen entered Kernel cancellation")
 	}
 	ea1HACAdmissionJSONEqual(t, "retained original Tool call", f.toolRequest.Call, sentRequest)
 	ea1HACAdmissionJSONEqual(t, "retained actual Tool result", f.toolResult, sentResult)

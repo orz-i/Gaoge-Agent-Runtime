@@ -15,6 +15,9 @@ import (
 )
 
 func ea1HACMatrix(t *testing.T, run func(*testing.T, *ea1HACFixture)) {
+	ea1HACMatrixWithHost(t, true, run)
+}
+func ea1HACMatrixWithHost(t *testing.T, observeHost bool, run func(*testing.T, *ea1HACFixture)) {
 	t.Helper()
 	for _, backend := range []string{"memory", "sqlite", "postgres"} {
 		t.Run("kernel_"+backend, func(t *testing.T) {
@@ -23,7 +26,9 @@ func ea1HACMatrix(t *testing.T, run func(*testing.T, *ea1HACFixture)) {
 				if host {
 					label = "host_postgres"
 				}
-				t.Run(label, func(t *testing.T) { run(t, newEA1HACFixture(t, backend, host)) })
+				t.Run(label, func(t *testing.T) {
+					run(t, newEA1HACFixtureWithHostOptions(t, backend, host, false, true, observeHost))
+				})
 			}
 		})
 	}
@@ -110,9 +115,12 @@ func ea1HACReceiptBeforeMark(t *testing.T, f *ea1HACFixture) {
 
 // G11 starts from actual busy Tool execution, never a seeded cancellation fact.
 func TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart(t *testing.T) {
-	ea1HACMatrix(t, ea1HACBusyReceiptRecovery)
+	ea1HACMatrixWithHost(t, false, ea1HACBusyReceiptRecovery)
 }
 func ea1HACBusyReceiptRecovery(t *testing.T, f *ea1HACFixture) {
+	if f.observeHost || !f.agent.OwnsKernelRuntime(f.runtime) {
+		t.Fatal("G11 requires original Kernel-owned cancellation route before Create")
+	}
 	waiting, task, root, before := ea1HACStart(t, f)
 	approved := ea1HACApprove(t, f, waiting, task)
 	f.toolStarted = make(chan struct{})
@@ -206,6 +214,9 @@ func ea1HACBusyReceiptRecovery(t *testing.T, f *ea1HACFixture) {
 		t.Fatal("independent Host peer did not observe original receipt/full budget")
 	}
 	ea1HACReopen(t, f)
+	if f.observeHost || !f.agent.OwnsKernelRuntime(f.runtime) {
+		t.Fatal("reopen changed original Kernel-owned route")
+	}
 	if !reflect.DeepEqual(items, ea1HACItems(t, f.store, waiting.Turn.ID)) || !reflect.DeepEqual(ledger, ea1HACBudget(t, f.backend.ledgers, waiting.Turn.ID)) {
 		t.Fatal("reopen lost original timeline/full ledger")
 	}
