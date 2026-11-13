@@ -1,0 +1,10 @@
+SOURCE_SHA=269bbe04f8efc9cf1c1e12fd8beeea60fa90c192
+COMMAND=go -C go/agent-runtime-harness-postgres test -count=1 ./... -run '^TestRealPostgresEA1HarnessAgentTaskCancelP4$' -v
+=== RUN   TestRealPostgresEA1HarnessAgentTaskCancelP4
+    ea1_child_agent_cancel_harness_test.go:693: actual ACK-lost original cancellation receipt missing
+--- FAIL: TestRealPostgresEA1HarnessAgentTaskCancelP4 (0.36s)
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-postgres	1.184s
+FAIL
+
+EXIT_CODE=1
