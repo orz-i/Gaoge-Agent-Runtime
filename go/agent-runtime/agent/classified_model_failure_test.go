@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -34,9 +35,9 @@ func TestAgentDurableTerminalModelCodeKeepsTypedCauseWithoutNewRetry(t *testing.
 	}{
 		{"auth permanent", "model.upstream_auth_failed", false, "model.upstream_auth_failed", 1},
 		{"quota permanent", "model.upstream_quota_exhausted", false, "model.upstream_quota_exhausted", 1},
-		{"rate limited retry exhausted", "model.upstream_rate_limited", true, "model.upstream_rate_limited", 2},
+		{"rate limited remains unknown", "model.upstream_rate_limited", true, "model.upstream_rate_limited", 1},
 		{"unknown untyped", "", false, "agent.model_failed", 1},
-		{"untyped retry exhausted", "", true, "agent.model_retry_exhausted", 2},
+		{"untyped retryable remains unknown", "", true, "agent.model_failed", 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -68,16 +69,18 @@ func TestAgentDurableTerminalModelCodeKeepsTypedCauseWithoutNewRetry(t *testing.
 			if err == nil || !errors.Is(err, secret) {
 				t.Fatalf("original cause lost: %v", err)
 			}
-			if tc.retryable {
-				if snapshot.Run.Status != kernel.RunStatusRunning || provider.calls != 1 {
-					t.Fatalf("retryable invocation should remain durable after attempt 1: %#v calls=%d", snapshot.Run, provider.calls)
-				}
-				clock.Advance(time.Second)
-				snapshot, err = runner.Resume(t.Context(), snapshot.Run.ID, snapshot.Run.Revision)
+			if !errors.Is(err, ErrModelOutcomeUnknown) || snapshot.Run.Status != kernel.RunStatusRunning || snapshot.Run.ErrorCode != tc.want || provider.calls != tc.attempts || !strings.Contains(snapshot.Run.ErrorDetail, "sk-private") {
+				t.Fatalf("unknown response lost typed/durable diagnostic: status=%s code=%s calls=%d err=%v", snapshot.Run.Status, snapshot.Run.ErrorCode, provider.calls, err)
 			}
-			if snapshot.Run.Status != kernel.RunStatusFailed || snapshot.Run.ErrorCode != tc.want ||
-				provider.calls != tc.attempts || !strings.Contains(snapshot.Run.ErrorDetail, "sk-private") {
-				t.Fatalf("status=%s code=%s calls=%d err=%v", snapshot.Run.Status, snapshot.Run.ErrorCode, provider.calls, err)
+			view, viewErr := ViewState(snapshot)
+			if viewErr != nil || len(view.ModelInvocations) != 1 || view.ModelInvocations[0].Status != ModelInvocationPending || view.ModelInvocations[0].DispatchAttempt != 1 || view.ModelInvocations[0].OutcomeErrorCode != tc.want || !strings.Contains(view.ModelInvocations[0].OutcomeErrorDetail, "sk-private") || view.Budget.Usage.LLMCalls != 0 {
+				t.Fatalf("unproved response was settled or lost evidence: %+v %v", view, viewErr)
+			}
+			clock.Advance(3 * time.Minute)
+			_, resumeErr := runner.Resume(t.Context(), snapshot.Run.ID, snapshot.Run.Revision)
+			after, loadErr := runtime.Load(t.Context(), snapshot.Run.ID)
+			if !errors.Is(resumeErr, ErrModelOutcomeUnknown) || provider.calls != 1 || loadErr != nil || !reflect.DeepEqual(after, snapshot) {
+				t.Fatalf("unknown classified result replayed or mutated: %v calls=%d", resumeErr, provider.calls)
 			}
 		})
 	}

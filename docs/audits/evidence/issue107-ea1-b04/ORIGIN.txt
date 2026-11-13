@@ -1,0 +1,3 @@
+SOURCE_SHA=880253aad587914cc28d4b9177f40aa83d730142
+DATE=2026-11-12
+ISOLATION=dedicated loopback test PostgreSQL16 isolated schema per scenario; SQLite temporary files; no production/Host/provider operations

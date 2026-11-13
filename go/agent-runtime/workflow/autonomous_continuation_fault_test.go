@@ -58,6 +58,22 @@ type workflowFaultStore struct {
 	failed    bool
 }
 
+// The fault injector must faithfully preserve the original physical Store
+// port. Stripping it would make a Root Workflow fail closed BEFORE the
+// injected Apply was ever reached, testing the wrong failure boundary.
+func (store *workflowFaultStore) BeginChildExecution(ctx context.Context, grant kernel.ChildExecutionGrant) error {
+	return store.Store.(kernel.ChildExecutionStore).BeginChildExecution(ctx, grant)
+}
+func (store *workflowFaultStore) LookupChildExecution(ctx context.Context, id string) (kernel.ChildExecutionGrant, error) {
+	return store.Store.(kernel.ChildExecutionStore).LookupChildExecution(ctx, id)
+}
+func (store *workflowFaultStore) MarkChildExecutionSettled(ctx context.Context, grant kernel.ChildExecutionGrant, permit kernel.ChildExecutionSettlement) error {
+	return store.Store.(kernel.ChildExecutionStore).MarkChildExecutionSettled(ctx, grant, permit)
+}
+func (store *workflowFaultStore) FinishChildExecution(ctx context.Context, grant kernel.ChildExecutionGrant) error {
+	return store.Store.(kernel.ChildExecutionStore).FinishChildExecution(ctx, grant)
+}
+
 func (store *workflowFaultStore) Apply(
 	ctx context.Context,
 	runID string,

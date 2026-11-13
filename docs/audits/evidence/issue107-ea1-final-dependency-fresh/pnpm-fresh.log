@@ -1,0 +1,17 @@
+SOURCE_SHA=20187a21001a6c51fa0f3109460a0738f0991595
+COMMAND=pnpm install --frozen-lockfile --force
+[WARN] using --force I sure hope you know what you are doing
+Scope: all 2 workspace projects
+✓ Lockfile passes supply-chain policies (verified 3d ago)
+Lockfile is up to date, resolution step is skipped
+Packages: +193
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+Progress: resolved 0, reused 1, downloaded 0, added 0
+Packages are cloned from the content-addressable store to the virtual store.
+  Content-addressable store is at: /Users/mini/Library/pnpm/store/v11
+  Virtual store is at:             node_modules/.pnpm
+Progress: resolved 0, reused 193, downloaded 0, added 193, done
+
+Done in 977ms using pnpm v11.22.0
+
+EXIT_CODE=0

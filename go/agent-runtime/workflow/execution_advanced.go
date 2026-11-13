@@ -523,6 +523,8 @@ func (runner *Runner) applyEffectOutcomes(
 		}
 		switch outcome.Result.Disposition {
 		case DispositionPending:
+			effect.PhysicalNoEffect = false
+			effect.PhysicalNoEffectAttempt = 0
 			continue
 		case DispositionCompleted:
 			if strings.TrimSpace(outcome.Result.ReceiptID) == "" || !json.Valid(outcome.Result.Output) ||
@@ -535,6 +537,8 @@ func (runner *Runner) applyEffectOutcomes(
 				continue
 			}
 			effect.Status = EffectCompleted
+			effect.PhysicalNoEffect = false
+			effect.PhysicalNoEffectAttempt = 0
 			effect.ReceiptID = strings.TrimSpace(outcome.Result.ReceiptID)
 			effect.Output = cloneJSON(outcome.Result.Output)
 			effect.ErrorCode = ""
@@ -543,6 +547,14 @@ func (runner *Runner) applyEffectOutcomes(
 			state.Budget.CostUnitsReserved -= effect.MaxCostUnits
 			state.Budget.CostUnitsUsed += effect.CostUnits
 		case DispositionFailed:
+			// Trust only the original statically composed Executor's
+			// explicit PhysicalNoEffect attestation. No external result or
+			// transport timeout is assumed to be pre-dispatch.
+			effect.PhysicalNoEffect = outcome.Result.PhysicalNoEffect
+			effect.PhysicalNoEffectAttempt = 0
+			if effect.PhysicalNoEffect {
+				effect.PhysicalNoEffectAttempt = effect.Attempt
+			}
 			code := strings.TrimSpace(outcome.Result.ErrorCode)
 			if code == "" {
 				code = "workflow.effect_failed"
@@ -628,6 +640,13 @@ func scheduleEffectRetry(effect *Effect, code string, cause error) bool {
 	if effect == nil || effect.Status != EffectPending || effect.Attempt >= effect.Retry.MaxAttempts ||
 		!retryCodeAllowed(effect.Retry, code) {
 		return false
+	}
+	// The last safe pre-dispatch failure can schedule a fresh Attempt
+	// without forgetting THAT attempt's original no-effect receipt.
+	// An ambiguous later attempt must discard the prior proof.
+	if !effect.PhysicalNoEffect || effect.PhysicalNoEffectAttempt != effect.Attempt {
+		effect.PhysicalNoEffect = false
+		effect.PhysicalNoEffectAttempt = 0
 	}
 	effect.Attempt++
 	effect.ErrorCode = strings.TrimSpace(code)

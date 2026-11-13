@@ -1,0 +1,2006 @@
+SOURCE_SHA=20187a21001a6c51fa0f3109460a0738f0991595
+COMMAND=go -C go/agent-runtime-harness/examples/task-agent test -race -count=1 -v ./...
+=== RUN   TestResponseDebugRedactsOpaqueReplayInStreamWithoutHidingMessage
+--- PASS: TestResponseDebugRedactsOpaqueReplayInStreamWithoutHidingMessage (0.00s)
+=== RUN   TestPreflightResponseDebugPreservesVisibleBodyAndAnswer
+--- PASS: TestPreflightResponseDebugPreservesVisibleBodyAndAnswer (0.00s)
+=== RUN   TestPreflightResponseDebugRedactsJSONEscapesNamesAndCredentialFields
+--- PASS: TestPreflightResponseDebugRedactsJSONEscapesNamesAndCredentialFields (0.00s)
+=== RUN   TestPreflightResponseDebugKeepsPartialBodyAndWireState
+=== RUN   TestPreflightResponseDebugKeepsPartialBodyAndWireState/incomplete
+=== RUN   TestPreflightResponseDebugKeepsPartialBodyAndWireState/read_error
+--- PASS: TestPreflightResponseDebugKeepsPartialBodyAndWireState (0.00s)
+    --- PASS: TestPreflightResponseDebugKeepsPartialBodyAndWireState/incomplete (0.00s)
+    --- PASS: TestPreflightResponseDebugKeepsPartialBodyAndWireState/read_error (0.00s)
+=== RUN   TestPreflightResponseDebugRedactsPartialJSONAndBoundaryKey
+--- PASS: TestPreflightResponseDebugRedactsPartialJSONAndBoundaryKey (0.01s)
+=== RUN   TestPreflightResponseDebugBoundsUTF8AfterRedaction
+--- PASS: TestPreflightResponseDebugBoundsUTF8AfterRedaction (0.03s)
+=== RUN   TestBaselineEffortValidInputAndFrozenAcrossRecovery
+--- PASS: TestBaselineEffortValidInputAndFrozenAcrossRecovery (0.65s)
+=== RUN   TestBaselineInvalidEffortCannotSendPhysicalHTTP
+=== RUN   TestBaselineInvalidEffortCannotSendPhysicalHTTP/openai-gpt-4.1-high
+=== RUN   TestBaselineInvalidEffortCannotSendPhysicalHTTP/openai-private-unsupported-high
+=== RUN   TestBaselineInvalidEffortCannotSendPhysicalHTTP/anthropic-claude-sonnet-4-5-high
+=== RUN   TestBaselineInvalidEffortCannotSendPhysicalHTTP/anthropic-claude-sonnet-5-5-none
+=== RUN   TestBaselineInvalidEffortCannotSendPhysicalHTTP/openai-gpt-6-sol-unknown
+=== RUN   TestBaselineInvalidEffortCannotSendPhysicalHTTP/openai-gpt-6-sol-
+--- PASS: TestBaselineInvalidEffortCannotSendPhysicalHTTP (0.01s)
+    --- PASS: TestBaselineInvalidEffortCannotSendPhysicalHTTP/openai-gpt-4.1-high (0.00s)
+    --- PASS: TestBaselineInvalidEffortCannotSendPhysicalHTTP/openai-private-unsupported-high (0.00s)
+    --- PASS: TestBaselineInvalidEffortCannotSendPhysicalHTTP/anthropic-claude-sonnet-4-5-high (0.00s)
+    --- PASS: TestBaselineInvalidEffortCannotSendPhysicalHTTP/anthropic-claude-sonnet-5-5-none (0.00s)
+    --- PASS: TestBaselineInvalidEffortCannotSendPhysicalHTTP/openai-gpt-6-sol-unknown (0.00s)
+    --- PASS: TestBaselineInvalidEffortCannotSendPhysicalHTTP/openai-gpt-6-sol- (0.00s)
+=== RUN   TestReplayFailureClassificationPrecedesGenericUnsupported
+--- PASS: TestReplayFailureClassificationPrecedesGenericUnsupported (0.00s)
+=== RUN   TestBaselineHTTPFailedProbeShowsOriginalAnswerAndNormalizedText
+=== RUN   TestBaselineHTTPFailedProbeShowsOriginalAnswerAndNormalizedText/openai
+=== RUN   TestBaselineHTTPFailedProbeShowsOriginalAnswerAndNormalizedText/anthropic
+--- PASS: TestBaselineHTTPFailedProbeShowsOriginalAnswerAndNormalizedText (0.01s)
+    --- PASS: TestBaselineHTTPFailedProbeShowsOriginalAnswerAndNormalizedText/openai (0.01s)
+    --- PASS: TestBaselineHTTPFailedProbeShowsOriginalAnswerAndNormalizedText/anthropic (0.00s)
+=== RUN   TestBaselineHTTPAdaptersCompleteBothCases
+=== RUN   TestBaselineHTTPAdaptersCompleteBothCases/openai
+=== RUN   TestBaselineHTTPAdaptersCompleteBothCases/anthropic
+--- PASS: TestBaselineHTTPAdaptersCompleteBothCases (3.11s)
+    --- PASS: TestBaselineHTTPAdaptersCompleteBothCases/openai (1.54s)
+    --- PASS: TestBaselineHTTPAdaptersCompleteBothCases/anthropic (1.56s)
+=== RUN   TestBaselineHTTPPhasePreflightKeepsStrictSchemaDiagnostics
+=== RUN   TestBaselineHTTPPhasePreflightKeepsStrictSchemaDiagnostics/false_literal
+=== RUN   TestBaselineHTTPPhasePreflightKeepsStrictSchemaDiagnostics/plain_secret
+=== RUN   TestBaselineHTTPPhasePreflightKeepsStrictSchemaDiagnostics/secret_key_and_value
+--- PASS: TestBaselineHTTPPhasePreflightKeepsStrictSchemaDiagnostics (0.02s)
+    --- PASS: TestBaselineHTTPPhasePreflightKeepsStrictSchemaDiagnostics/false_literal (0.01s)
+    --- PASS: TestBaselineHTTPPhasePreflightKeepsStrictSchemaDiagnostics/plain_secret (0.01s)
+    --- PASS: TestBaselineHTTPPhasePreflightKeepsStrictSchemaDiagnostics/secret_key_and_value (0.01s)
+=== RUN   TestBaselineHTTPWireEvidenceSeparatesFinalTextAndUnphasedMessages
+=== RUN   TestBaselineHTTPWireEvidenceSeparatesFinalTextAndUnphasedMessages/single_final_plain_without_format_echo
+=== RUN   TestBaselineHTTPWireEvidenceSeparatesFinalTextAndUnphasedMessages/single_final_plain_with_text_format_echo
+=== RUN   TestBaselineHTTPWireEvidenceSeparatesFinalTextAndUnphasedMessages/strict_format_echo_does_not_validate_content
+=== RUN   TestBaselineHTTPWireEvidenceSeparatesFinalTextAndUnphasedMessages/unknown_format_type_does_not_echo_private_value
+=== RUN   TestBaselineHTTPWireEvidenceSeparatesFinalTextAndUnphasedMessages/two_unphased_messages_remain_ambiguous
+--- PASS: TestBaselineHTTPWireEvidenceSeparatesFinalTextAndUnphasedMessages (0.03s)
+    --- PASS: TestBaselineHTTPWireEvidenceSeparatesFinalTextAndUnphasedMessages/single_final_plain_without_format_echo (0.01s)
+    --- PASS: TestBaselineHTTPWireEvidenceSeparatesFinalTextAndUnphasedMessages/single_final_plain_with_text_format_echo (0.00s)
+    --- PASS: TestBaselineHTTPWireEvidenceSeparatesFinalTextAndUnphasedMessages/strict_format_echo_does_not_validate_content (0.00s)
+    --- PASS: TestBaselineHTTPWireEvidenceSeparatesFinalTextAndUnphasedMessages/unknown_format_type_does_not_echo_private_value (0.00s)
+    --- PASS: TestBaselineHTTPWireEvidenceSeparatesFinalTextAndUnphasedMessages/two_unphased_messages_remain_ambiguous (0.01s)
+=== RUN   TestBaselineHTTPWireObserverPreservesJSONSplitAcrossTextParts
+--- PASS: TestBaselineHTTPWireObserverPreservesJSONSplitAcrossTextParts (0.01s)
+=== RUN   TestBaselineHTTPUnknownCapabilityMakesNoRequest
+=== RUN   TestBaselineHTTPUnknownCapabilityMakesNoRequest/openai
+=== RUN   TestBaselineHTTPUnknownCapabilityMakesNoRequest/anthropic
+--- PASS: TestBaselineHTTPUnknownCapabilityMakesNoRequest (0.01s)
+    --- PASS: TestBaselineHTTPUnknownCapabilityMakesNoRequest/openai (0.00s)
+    --- PASS: TestBaselineHTTPUnknownCapabilityMakesNoRequest/anthropic (0.00s)
+=== RUN   TestBaselineHTTPFailureCannotEchoCredentials
+=== RUN   TestBaselineHTTPFailureCannotEchoCredentials/openai
+=== RUN   TestBaselineHTTPFailureCannotEchoCredentials/anthropic
+--- PASS: TestBaselineHTTPFailureCannotEchoCredentials (0.01s)
+    --- PASS: TestBaselineHTTPFailureCannotEchoCredentials/openai (0.01s)
+    --- PASS: TestBaselineHTTPFailureCannotEchoCredentials/anthropic (0.00s)
+=== RUN   TestBaselineHTTPRedirectDoesNotForwardCredentials
+--- PASS: TestBaselineHTTPRedirectDoesNotForwardCredentials (0.00s)
+=== RUN   TestBaselineHTTPHTMLRootPageFailsPreflight
+=== RUN   TestBaselineHTTPHTMLRootPageFailsPreflight/openai
+=== RUN   TestBaselineHTTPHTMLRootPageFailsPreflight/anthropic
+--- PASS: TestBaselineHTTPHTMLRootPageFailsPreflight (0.01s)
+    --- PASS: TestBaselineHTTPHTMLRootPageFailsPreflight/openai (0.00s)
+    --- PASS: TestBaselineHTTPHTMLRootPageFailsPreflight/anthropic (0.00s)
+=== RUN   TestBaselineHTTPTransportTimeoutPreservesSafeClassification
+=== RUN   TestBaselineHTTPTransportTimeoutPreservesSafeClassification/openai
+=== RUN   TestBaselineHTTPTransportTimeoutPreservesSafeClassification/anthropic
+--- PASS: TestBaselineHTTPTransportTimeoutPreservesSafeClassification (0.01s)
+    --- PASS: TestBaselineHTTPTransportTimeoutPreservesSafeClassification/openai (0.00s)
+    --- PASS: TestBaselineHTTPTransportTimeoutPreservesSafeClassification/anthropic (0.00s)
+=== RUN   TestBaselineHTTPNoResponseDoesNotInventDiagnostics
+=== RUN   TestBaselineHTTPNoResponseDoesNotInventDiagnostics/openai
+=== RUN   TestBaselineHTTPNoResponseDoesNotInventDiagnostics/anthropic
+--- PASS: TestBaselineHTTPNoResponseDoesNotInventDiagnostics (0.01s)
+    --- PASS: TestBaselineHTTPNoResponseDoesNotInventDiagnostics/openai (0.00s)
+    --- PASS: TestBaselineHTTPNoResponseDoesNotInventDiagnostics/anthropic (0.00s)
+=== RUN   TestBaselineHTTPWrongAnswersRemainInFailureDenominator
+--- PASS: TestBaselineHTTPWrongAnswersRemainInFailureDenominator (1.32s)
+=== RUN   TestBaselineInputRejectsShadowedAndExplicitlyEmptyEffort
+=== RUN   TestBaselineInputRejectsShadowedAndExplicitlyEmptyEffort/null
+=== RUN   TestBaselineInputRejectsShadowedAndExplicitlyEmptyEffort/empty
+=== RUN   TestBaselineInputRejectsShadowedAndExplicitlyEmptyEffort/alias-upper
+=== RUN   TestBaselineInputRejectsShadowedAndExplicitlyEmptyEffort/alias-lower
+=== RUN   TestBaselineInputRejectsShadowedAndExplicitlyEmptyEffort/alias-only
+=== RUN   TestBaselineInputRejectsShadowedAndExplicitlyEmptyEffort/same-key-twice
+=== RUN   TestBaselineInputRejectsShadowedAndExplicitlyEmptyEffort/unknown
+--- PASS: TestBaselineInputRejectsShadowedAndExplicitlyEmptyEffort (0.00s)
+    --- PASS: TestBaselineInputRejectsShadowedAndExplicitlyEmptyEffort/null (0.00s)
+    --- PASS: TestBaselineInputRejectsShadowedAndExplicitlyEmptyEffort/empty (0.00s)
+    --- PASS: TestBaselineInputRejectsShadowedAndExplicitlyEmptyEffort/alias-upper (0.00s)
+    --- PASS: TestBaselineInputRejectsShadowedAndExplicitlyEmptyEffort/alias-lower (0.00s)
+    --- PASS: TestBaselineInputRejectsShadowedAndExplicitlyEmptyEffort/alias-only (0.00s)
+    --- PASS: TestBaselineInputRejectsShadowedAndExplicitlyEmptyEffort/same-key-twice (0.00s)
+    --- PASS: TestBaselineInputRejectsShadowedAndExplicitlyEmptyEffort/unknown (0.00s)
+=== RUN   TestDistractorPilotIsOneFixedRealAgentCaseAndNeverAFullQualityScore
+--- PASS: TestDistractorPilotIsOneFixedRealAgentCaseAndNeverAFullQualityScore (0.61s)
+=== RUN   TestDistractorPilotWiresReadOnlyNativeCountAcrossActualContext
+--- PASS: TestDistractorPilotWiresReadOnlyNativeCountAcrossActualContext (0.73s)
+=== RUN   TestDistractorPilotNativeCountFailureClassesFromActualTask
+=== RUN   TestDistractorPilotNativeCountFailureClassesFromActualTask/native-http-422
+=== RUN   TestDistractorPilotNativeCountFailureClassesFromActualTask/native-http-503
+=== RUN   TestDistractorPilotNativeCountFailureClassesFromActualTask/native-malformed-response
+--- PASS: TestDistractorPilotNativeCountFailureClassesFromActualTask (2.11s)
+    --- PASS: TestDistractorPilotNativeCountFailureClassesFromActualTask/native-http-422 (0.66s)
+    --- PASS: TestDistractorPilotNativeCountFailureClassesFromActualTask/native-http-503 (0.72s)
+    --- PASS: TestDistractorPilotNativeCountFailureClassesFromActualTask/native-malformed-response (0.73s)
+=== RUN   TestDistractorPilotRejectsUntrustedModeSelectionBeforeProvider
+--- PASS: TestDistractorPilotRejectsUntrustedModeSelectionBeforeProvider (0.00s)
+=== RUN   TestQualityPilotHasHardSingleCaseCeilingAndRealAgentOracle
+--- PASS: TestQualityPilotHasHardSingleCaseCeilingAndRealAgentOracle (0.61s)
+=== RUN   TestQualityPilotFailureRemainsOneAttemptAndCannotContinue
+--- PASS: TestQualityPilotFailureRemainsOneAttemptAndCannotContinue (0.71s)
+=== RUN   TestQualityPilotRejectsOtherSuitesRepetitionsAndFlagsBeforeProvider
+=== RUN   TestQualityPilotRejectsOtherSuitesRepetitionsAndFlagsBeforeProvider/legacy
+=== RUN   TestQualityPilotRejectsOtherSuitesRepetitionsAndFlagsBeforeProvider/repetitions2
+=== RUN   TestQualityPilotRejectsOtherSuitesRepetitionsAndFlagsBeforeProvider/unknownSuite
+=== RUN   TestQualityPilotRejectsOtherSuitesRepetitionsAndFlagsBeforeProvider/untrustedPilotMode
+=== RUN   TestQualityPilotRejectsOtherSuitesRepetitionsAndFlagsBeforeProvider/providerFlag
+--- PASS: TestQualityPilotRejectsOtherSuitesRepetitionsAndFlagsBeforeProvider (0.01s)
+    --- PASS: TestQualityPilotRejectsOtherSuitesRepetitionsAndFlagsBeforeProvider/legacy (0.00s)
+    --- PASS: TestQualityPilotRejectsOtherSuitesRepetitionsAndFlagsBeforeProvider/repetitions2 (0.01s)
+    --- PASS: TestQualityPilotRejectsOtherSuitesRepetitionsAndFlagsBeforeProvider/unknownSuite (0.00s)
+    --- PASS: TestQualityPilotRejectsOtherSuitesRepetitionsAndFlagsBeforeProvider/untrustedPilotMode (0.00s)
+    --- PASS: TestQualityPilotRejectsOtherSuitesRepetitionsAndFlagsBeforeProvider/providerFlag (0.00s)
+=== RUN   TestQualityPilotPreflightFailureNeverStartsOneRealTask
+--- PASS: TestQualityPilotPreflightFailureNeverStartsOneRealTask (0.01s)
+=== RUN   TestQualityPilotBudgetAllowsBoundedOpaqueReasoningReplayWithoutWeakeningModelLimit
+--- PASS: TestQualityPilotBudgetAllowsBoundedOpaqueReasoningReplayWithoutWeakeningModelLimit (0.73s)
+=== RUN   TestQualityPilotFailsClosedWhenOpaqueReplayExceedsServiceLimit
+--- PASS: TestQualityPilotFailsClosedWhenOpaqueReplayExceedsServiceLimit (0.49s)
+=== RUN   TestQualityPreflightOnlyPassesWithoutAnyTaskExecution
+--- PASS: TestQualityPreflightOnlyPassesWithoutAnyTaskExecution (0.02s)
+=== RUN   TestQualityPreflightOnlyFailedCapabilityCannotCreateTaskSamples
+--- PASS: TestQualityPreflightOnlyFailedCapabilityCannotCreateTaskSamples (0.01s)
+=== RUN   TestBaselineExternallySelectedModelProfileAcrossRecovery
+=== RUN   TestBaselineExternallySelectedModelProfileAcrossRecovery/effort=
+=== RUN   TestBaselineExternallySelectedModelProfileAcrossRecovery/effort=high
+--- PASS: TestBaselineExternallySelectedModelProfileAcrossRecovery (2.54s)
+    --- PASS: TestBaselineExternallySelectedModelProfileAcrossRecovery/effort= (1.23s)
+    --- PASS: TestBaselineExternallySelectedModelProfileAcrossRecovery/effort=high (1.31s)
+=== RUN   TestBaselineSchemaCheckExplainsOnlyFixedFacts
+=== RUN   TestBaselineSchemaCheckExplainsOnlyFixedFacts/empty
+=== RUN   TestBaselineSchemaCheckExplainsOnlyFixedFacts/plain-text
+=== RUN   TestBaselineSchemaCheckExplainsOnlyFixedFacts/code-fence
+=== RUN   TestBaselineSchemaCheckExplainsOnlyFixedFacts/two-documents
+=== RUN   TestBaselineSchemaCheckExplainsOnlyFixedFacts/string
+=== RUN   TestBaselineSchemaCheckExplainsOnlyFixedFacts/array
+=== RUN   TestBaselineSchemaCheckExplainsOnlyFixedFacts/number
+=== RUN   TestBaselineSchemaCheckExplainsOnlyFixedFacts/boolean
+=== RUN   TestBaselineSchemaCheckExplainsOnlyFixedFacts/null
+=== RUN   TestBaselineSchemaCheckExplainsOnlyFixedFacts/missing-ok
+=== RUN   TestBaselineSchemaCheckExplainsOnlyFixedFacts/wrong-ok-type
+=== RUN   TestBaselineSchemaCheckExplainsOnlyFixedFacts/false-ok
+=== RUN   TestBaselineSchemaCheckExplainsOnlyFixedFacts/extra-property
+=== RUN   TestBaselineSchemaCheckExplainsOnlyFixedFacts/valid
+--- PASS: TestBaselineSchemaCheckExplainsOnlyFixedFacts (0.00s)
+    --- PASS: TestBaselineSchemaCheckExplainsOnlyFixedFacts/empty (0.00s)
+    --- PASS: TestBaselineSchemaCheckExplainsOnlyFixedFacts/plain-text (0.00s)
+    --- PASS: TestBaselineSchemaCheckExplainsOnlyFixedFacts/code-fence (0.00s)
+    --- PASS: TestBaselineSchemaCheckExplainsOnlyFixedFacts/two-documents (0.00s)
+    --- PASS: TestBaselineSchemaCheckExplainsOnlyFixedFacts/string (0.00s)
+    --- PASS: TestBaselineSchemaCheckExplainsOnlyFixedFacts/array (0.00s)
+    --- PASS: TestBaselineSchemaCheckExplainsOnlyFixedFacts/number (0.00s)
+    --- PASS: TestBaselineSchemaCheckExplainsOnlyFixedFacts/boolean (0.00s)
+    --- PASS: TestBaselineSchemaCheckExplainsOnlyFixedFacts/null (0.00s)
+    --- PASS: TestBaselineSchemaCheckExplainsOnlyFixedFacts/missing-ok (0.00s)
+    --- PASS: TestBaselineSchemaCheckExplainsOnlyFixedFacts/wrong-ok-type (0.00s)
+    --- PASS: TestBaselineSchemaCheckExplainsOnlyFixedFacts/false-ok (0.00s)
+    --- PASS: TestBaselineSchemaCheckExplainsOnlyFixedFacts/extra-property (0.00s)
+    --- PASS: TestBaselineSchemaCheckExplainsOnlyFixedFacts/valid (0.00s)
+=== RUN   TestBaselineSchemaCheckKeepsValidatorDecisionAndCountsOnly
+--- PASS: TestBaselineSchemaCheckKeepsValidatorDecisionAndCountsOnly (0.00s)
+=== RUN   TestBaselineReportsActualTaskResponseWhenEncryptedReplayMissing
+--- PASS: TestBaselineReportsActualTaskResponseWhenEncryptedReplayMissing (0.05s)
+=== RUN   TestBaselineReportsSecondTaskHTTPResponseAfterSuccessfulLookup
+--- PASS: TestBaselineReportsSecondTaskHTTPResponseAfterSuccessfulLookup (0.45s)
+=== RUN   TestBaselinePreflightObservationKeepsOnlyTypedMetadata
+=== RUN   TestBaselinePreflightObservationKeepsOnlyTypedMetadata/json
+=== RUN   TestBaselinePreflightObservationKeepsOnlyTypedMetadata/json-suffix
+=== RUN   TestBaselinePreflightObservationKeepsOnlyTypedMetadata/html
+=== RUN   TestBaselinePreflightObservationKeepsOnlyTypedMetadata/xhtml
+=== RUN   TestBaselinePreflightObservationKeepsOnlyTypedMetadata/sse
+=== RUN   TestBaselinePreflightObservationKeepsOnlyTypedMetadata/other
+=== RUN   TestBaselinePreflightObservationKeepsOnlyTypedMetadata/nonstandard-status
+=== RUN   TestBaselinePreflightObservationKeepsOnlyTypedMetadata/missing-type
+=== RUN   TestBaselinePreflightObservationKeepsOnlyTypedMetadata/malformed-type
+=== RUN   TestBaselinePreflightObservationKeepsOnlyTypedMetadata/invalid-status
+--- PASS: TestBaselinePreflightObservationKeepsOnlyTypedMetadata (0.00s)
+    --- PASS: TestBaselinePreflightObservationKeepsOnlyTypedMetadata/json (0.00s)
+    --- PASS: TestBaselinePreflightObservationKeepsOnlyTypedMetadata/json-suffix (0.00s)
+    --- PASS: TestBaselinePreflightObservationKeepsOnlyTypedMetadata/html (0.00s)
+    --- PASS: TestBaselinePreflightObservationKeepsOnlyTypedMetadata/xhtml (0.00s)
+    --- PASS: TestBaselinePreflightObservationKeepsOnlyTypedMetadata/sse (0.00s)
+    --- PASS: TestBaselinePreflightObservationKeepsOnlyTypedMetadata/other (0.00s)
+    --- PASS: TestBaselinePreflightObservationKeepsOnlyTypedMetadata/nonstandard-status (0.00s)
+    --- PASS: TestBaselinePreflightObservationKeepsOnlyTypedMetadata/missing-type (0.00s)
+    --- PASS: TestBaselinePreflightObservationKeepsOnlyTypedMetadata/malformed-type (0.00s)
+    --- PASS: TestBaselinePreflightObservationKeepsOnlyTypedMetadata/invalid-status (0.00s)
+=== RUN   TestBaselineInvalidInputEmitsOnlySafeConfigurationFailure
+--- PASS: TestBaselineInvalidInputEmitsOnlySafeConfigurationFailure (0.00s)
+=== RUN   TestBaselineManifestIsComparableAcrossModelConfigurations
+--- PASS: TestBaselineManifestIsComparableAcrossModelConfigurations (0.02s)
+=== RUN   TestBaselineUsageKeepsUnknownCoverageAndDoesNotDoubleCountDetails
+--- PASS: TestBaselineUsageKeepsUnknownCoverageAndDoesNotDoubleCountDetails (0.00s)
+=== RUN   TestBaselineFailureAndCancellationRetainPartialMetrics
+--- PASS: TestBaselineFailureAndCancellationRetainPartialMetrics (0.06s)
+=== RUN   TestBaselineSeparatesNewModelToolIntentFromRuntimeReplay
+--- PASS: TestBaselineSeparatesNewModelToolIntentFromRuntimeReplay (0.73s)
+=== RUN   TestOpenAIToolReplayAdmissionFailsBeforeAnyTaskWhenEncryptionAbsent
+--- PASS: TestOpenAIToolReplayAdmissionFailsBeforeAnyTaskWhenEncryptionAbsent (0.01s)
+=== RUN   TestToolProbeWireEvidenceOnlyComparesFinalizedReasoningCiphertext
+=== RUN   TestToolProbeWireEvidenceOnlyComparesFinalizedReasoningCiphertext/consistent
+=== RUN   TestToolProbeWireEvidenceOnlyComparesFinalizedReasoningCiphertext/mismatch
+=== RUN   TestToolProbeWireEvidenceOnlyComparesFinalizedReasoningCiphertext/no_terminal
+=== RUN   TestToolProbeWireEvidenceOnlyComparesFinalizedReasoningCiphertext/no_done_cipher
+--- PASS: TestToolProbeWireEvidenceOnlyComparesFinalizedReasoningCiphertext (0.00s)
+    --- PASS: TestToolProbeWireEvidenceOnlyComparesFinalizedReasoningCiphertext/consistent (0.00s)
+    --- PASS: TestToolProbeWireEvidenceOnlyComparesFinalizedReasoningCiphertext/mismatch (0.00s)
+    --- PASS: TestToolProbeWireEvidenceOnlyComparesFinalizedReasoningCiphertext/no_terminal (0.00s)
+    --- PASS: TestToolProbeWireEvidenceOnlyComparesFinalizedReasoningCiphertext/no_done_cipher (0.00s)
+=== RUN   TestOpenAIToolProbeContinuesWithAuthoritativeDoneCiphertext
+--- PASS: TestOpenAIToolProbeContinuesWithAuthoritativeDoneCiphertext (0.00s)
+=== RUN   TestOpenAIToolProbeToolOnlyContinuationDoesNotClaimEncryptedReasoning
+--- PASS: TestOpenAIToolProbeToolOnlyContinuationDoesNotClaimEncryptedReasoning (0.00s)
+=== RUN   TestPreflightWireTeePreservesReadAndCloseResults
+--- PASS: TestPreflightWireTeePreservesReadAndCloseResults (0.00s)
+=== RUN   TestPreflightWireCaptureBoundsAndPartialStates
+=== RUN   TestPreflightWireCaptureBoundsAndPartialStates/bytes=262144
+=== RUN   TestPreflightWireCaptureBoundsAndPartialStates/bytes=262145
+=== RUN   TestPreflightWireCaptureBoundsAndPartialStates/bytes=270336
+--- PASS: TestPreflightWireCaptureBoundsAndPartialStates (0.01s)
+    --- PASS: TestPreflightWireCaptureBoundsAndPartialStates/bytes=262144 (0.00s)
+    --- PASS: TestPreflightWireCaptureBoundsAndPartialStates/bytes=262145 (0.01s)
+    --- PASS: TestPreflightWireCaptureBoundsAndPartialStates/bytes=270336 (0.00s)
+=== RUN   TestPreflightWireRequestReadsOnlyIndependentCopy
+--- PASS: TestPreflightWireRequestReadsOnlyIndependentCopy (0.00s)
+=== RUN   TestPreflightWireRequestUnavailableAndInvalidCopies
+=== RUN   TestPreflightWireRequestUnavailableAndInvalidCopies/nil_copy
+=== RUN   TestPreflightWireRequestUnavailableAndInvalidCopies/nil
+=== RUN   TestPreflightWireRequestUnavailableAndInvalidCopies/no_get_body
+=== RUN   TestPreflightWireRequestUnavailableAndInvalidCopies/invalid_json
+=== RUN   TestPreflightWireRequestUnavailableAndInvalidCopies/invalid_envelope
+=== RUN   TestPreflightWireRequestUnavailableAndInvalidCopies/null_envelope
+=== RUN   TestPreflightWireRequestUnavailableAndInvalidCopies/oversized
+--- PASS: TestPreflightWireRequestUnavailableAndInvalidCopies (0.00s)
+    --- PASS: TestPreflightWireRequestUnavailableAndInvalidCopies/nil_copy (0.00s)
+    --- PASS: TestPreflightWireRequestUnavailableAndInvalidCopies/nil (0.00s)
+    --- PASS: TestPreflightWireRequestUnavailableAndInvalidCopies/no_get_body (0.00s)
+    --- PASS: TestPreflightWireRequestUnavailableAndInvalidCopies/invalid_json (0.00s)
+    --- PASS: TestPreflightWireRequestUnavailableAndInvalidCopies/invalid_envelope (0.00s)
+    --- PASS: TestPreflightWireRequestUnavailableAndInvalidCopies/null_envelope (0.00s)
+    --- PASS: TestPreflightWireRequestUnavailableAndInvalidCopies/oversized (0.00s)
+=== RUN   TestPreflightWireResponseRejectsInvalidEnvelopeWithoutPartialFacts
+--- PASS: TestPreflightWireResponseRejectsInvalidEnvelopeWithoutPartialFacts (0.00s)
+=== RUN   TestPreflightWireResponseCapsMessagesAndKeepsOnlyFixedFacts
+--- PASS: TestPreflightWireResponseCapsMessagesAndKeepsOnlyFixedFacts (0.00s)
+=== RUN   TestInputCountUsageComparisonOnlyForExactlyMatchedSuccessfulRequests
+=== RUN   TestInputCountUsageComparisonOnlyForExactlyMatchedSuccessfulRequests/exact
+=== RUN   TestInputCountUsageComparisonOnlyForExactlyMatchedSuccessfulRequests/identical-input-without-fresh-count
+=== RUN   TestInputCountUsageComparisonOnlyForExactlyMatchedSuccessfulRequests/under
+=== RUN   TestInputCountUsageComparisonOnlyForExactlyMatchedSuccessfulRequests/over
+=== RUN   TestInputCountUsageComparisonOnlyForExactlyMatchedSuccessfulRequests/under-smaller-delta
+=== RUN   TestInputCountUsageComparisonOnlyForExactlyMatchedSuccessfulRequests/missing-provider-usage
+=== RUN   TestInputCountUsageComparisonOnlyForExactlyMatchedSuccessfulRequests/repeat-after-missing-usage
+=== RUN   TestInputCountUsageComparisonOnlyForExactlyMatchedSuccessfulRequests/failed-model
+=== RUN   TestInputCountUsageComparisonOnlyForExactlyMatchedSuccessfulRequests/repeat-after-failed-model
+=== RUN   TestInputCountUsageComparisonOnlyForExactlyMatchedSuccessfulRequests/other-model
+=== RUN   TestInputCountUsageComparisonOnlyForExactlyMatchedSuccessfulRequests/changed-source
+--- PASS: TestInputCountUsageComparisonOnlyForExactlyMatchedSuccessfulRequests (0.00s)
+    --- PASS: TestInputCountUsageComparisonOnlyForExactlyMatchedSuccessfulRequests/exact (0.00s)
+    --- PASS: TestInputCountUsageComparisonOnlyForExactlyMatchedSuccessfulRequests/identical-input-without-fresh-count (0.00s)
+    --- PASS: TestInputCountUsageComparisonOnlyForExactlyMatchedSuccessfulRequests/under (0.00s)
+    --- PASS: TestInputCountUsageComparisonOnlyForExactlyMatchedSuccessfulRequests/over (0.00s)
+    --- PASS: TestInputCountUsageComparisonOnlyForExactlyMatchedSuccessfulRequests/under-smaller-delta (0.00s)
+    --- PASS: TestInputCountUsageComparisonOnlyForExactlyMatchedSuccessfulRequests/missing-provider-usage (0.00s)
+    --- PASS: TestInputCountUsageComparisonOnlyForExactlyMatchedSuccessfulRequests/repeat-after-missing-usage (0.00s)
+    --- PASS: TestInputCountUsageComparisonOnlyForExactlyMatchedSuccessfulRequests/failed-model (0.00s)
+    --- PASS: TestInputCountUsageComparisonOnlyForExactlyMatchedSuccessfulRequests/repeat-after-failed-model (0.00s)
+    --- PASS: TestInputCountUsageComparisonOnlyForExactlyMatchedSuccessfulRequests/other-model (0.00s)
+    --- PASS: TestInputCountUsageComparisonOnlyForExactlyMatchedSuccessfulRequests/changed-source (0.00s)
+=== RUN   TestInputCountFingerprintExcludesOnlyNonInputHostMetadata
+=== RUN   TestInputCountFingerprintExcludesOnlyNonInputHostMetadata/user-content
+=== RUN   TestInputCountFingerprintExcludesOnlyNonInputHostMetadata/tool-arguments
+=== RUN   TestInputCountFingerprintExcludesOnlyNonInputHostMetadata/tool-argument-signed-order
+=== RUN   TestInputCountFingerprintExcludesOnlyNonInputHostMetadata/tool-schema
+=== RUN   TestInputCountFingerprintExcludesOnlyNonInputHostMetadata/tool-choice
+=== RUN   TestInputCountFingerprintExcludesOnlyNonInputHostMetadata/model
+=== RUN   TestInputCountFingerprintExcludesOnlyNonInputHostMetadata/effort
+=== RUN   TestInputCountFingerprintExcludesOnlyNonInputHostMetadata/output-schema
+--- PASS: TestInputCountFingerprintExcludesOnlyNonInputHostMetadata (0.00s)
+    --- PASS: TestInputCountFingerprintExcludesOnlyNonInputHostMetadata/user-content (0.00s)
+    --- PASS: TestInputCountFingerprintExcludesOnlyNonInputHostMetadata/tool-arguments (0.00s)
+    --- PASS: TestInputCountFingerprintExcludesOnlyNonInputHostMetadata/tool-argument-signed-order (0.00s)
+    --- PASS: TestInputCountFingerprintExcludesOnlyNonInputHostMetadata/tool-schema (0.00s)
+    --- PASS: TestInputCountFingerprintExcludesOnlyNonInputHostMetadata/tool-choice (0.00s)
+    --- PASS: TestInputCountFingerprintExcludesOnlyNonInputHostMetadata/model (0.00s)
+    --- PASS: TestInputCountFingerprintExcludesOnlyNonInputHostMetadata/effort (0.00s)
+    --- PASS: TestInputCountFingerprintExcludesOnlyNonInputHostMetadata/output-schema (0.00s)
+=== RUN   TestInputCountComparisonIsPassiveAcrossModelOutputCeiling
+--- PASS: TestInputCountComparisonIsPassiveAcrossModelOutputCeiling (0.00s)
+=== RUN   TestNativeInputCountLatencyIsContentFreeAndIncludesUnavailablePaths
+--- PASS: TestNativeInputCountLatencyIsContentFreeAndIncludesUnavailablePaths (0.01s)
+=== RUN   TestTaskAgentArchivesEvidenceAndResumesWithoutRepeatingTools
+=== RUN   TestTaskAgentArchivesEvidenceAndResumesWithoutRepeatingTools/LIME-42
+=== RUN   TestTaskAgentArchivesEvidenceAndResumesWithoutRepeatingTools/VIOLET-83
+--- PASS: TestTaskAgentArchivesEvidenceAndResumesWithoutRepeatingTools (1.00s)
+    --- PASS: TestTaskAgentArchivesEvidenceAndResumesWithoutRepeatingTools/LIME-42 (0.49s)
+    --- PASS: TestTaskAgentArchivesEvidenceAndResumesWithoutRepeatingTools/VIOLET-83 (0.50s)
+=== RUN   TestTaskOracleRejectsPlausibleButIncorrectFinalAnswer
+--- PASS: TestTaskOracleRejectsPlausibleButIncorrectFinalAnswer (0.55s)
+=== RUN   TestLiveSettingsRequireExplicitModelCapacityAndOutputLimit
+--- PASS: TestLiveSettingsRequireExplicitModelCapacityAndOutputLimit (0.00s)
+=== RUN   TestBaselineUnverifiedUserEffortRejectedBeforeHTTP
+=== RUN   TestBaselineUnverifiedUserEffortRejectedBeforeHTTP/openai
+=== RUN   TestBaselineUnverifiedUserEffortRejectedBeforeHTTP/anthropic
+--- PASS: TestBaselineUnverifiedUserEffortRejectedBeforeHTTP (0.00s)
+    --- PASS: TestBaselineUnverifiedUserEffortRejectedBeforeHTTP/openai (0.00s)
+    --- PASS: TestBaselineUnverifiedUserEffortRejectedBeforeHTTP/anthropic (0.00s)
+=== RUN   TestBaselineHostFileRejectsUncertifiedEffort
+=== RUN   TestBaselineHostFileRejectsUncertifiedEffort/openai
+=== RUN   TestBaselineHostFileRejectsUncertifiedEffort/anthropic
+--- PASS: TestBaselineHostFileRejectsUncertifiedEffort (0.01s)
+    --- PASS: TestBaselineHostFileRejectsUncertifiedEffort/openai (0.01s)
+    --- PASS: TestBaselineHostFileRejectsUncertifiedEffort/anthropic (0.00s)
+=== RUN   TestHostModelProfileFileRejectsInvalidOrAmbiguousAuthority
+=== RUN   TestHostModelProfileFileRejectsInvalidOrAmbiguousAuthority/duplicate-model-key
+=== RUN   TestHostModelProfileFileRejectsInvalidOrAmbiguousAuthority/folded-feature-key
+=== RUN   TestHostModelProfileFileRejectsInvalidOrAmbiguousAuthority/unknown-feature
+=== RUN   TestHostModelProfileFileRejectsInvalidOrAmbiguousAuthority/wrong-type
+=== RUN   TestHostModelProfileFileRejectsInvalidOrAmbiguousAuthority/null-document
+=== RUN   TestHostModelProfileFileRejectsInvalidOrAmbiguousAuthority/array-document
+=== RUN   TestHostModelProfileFileRejectsInvalidOrAmbiguousAuthority/trailing-document
+=== RUN   TestHostModelProfileFileRejectsInvalidOrAmbiguousAuthority/oversize
+=== RUN   TestHostModelProfileFileRejectsInvalidOrAmbiguousAuthority/invalid-effort
+=== RUN   TestHostModelProfileFileRejectsInvalidOrAmbiguousAuthority/missing-file
+--- PASS: TestHostModelProfileFileRejectsInvalidOrAmbiguousAuthority (0.01s)
+    --- PASS: TestHostModelProfileFileRejectsInvalidOrAmbiguousAuthority/duplicate-model-key (0.00s)
+    --- PASS: TestHostModelProfileFileRejectsInvalidOrAmbiguousAuthority/folded-feature-key (0.00s)
+    --- PASS: TestHostModelProfileFileRejectsInvalidOrAmbiguousAuthority/unknown-feature (0.00s)
+    --- PASS: TestHostModelProfileFileRejectsInvalidOrAmbiguousAuthority/wrong-type (0.00s)
+    --- PASS: TestHostModelProfileFileRejectsInvalidOrAmbiguousAuthority/null-document (0.00s)
+    --- PASS: TestHostModelProfileFileRejectsInvalidOrAmbiguousAuthority/array-document (0.00s)
+    --- PASS: TestHostModelProfileFileRejectsInvalidOrAmbiguousAuthority/trailing-document (0.00s)
+    --- PASS: TestHostModelProfileFileRejectsInvalidOrAmbiguousAuthority/oversize (0.00s)
+    --- PASS: TestHostModelProfileFileRejectsInvalidOrAmbiguousAuthority/invalid-effort (0.00s)
+    --- PASS: TestHostModelProfileFileRejectsInvalidOrAmbiguousAuthority/missing-file (0.00s)
+=== RUN   TestQualityLongArtifactOffsetHintCorrectsRealAgentToSourceEvidence
+--- PASS: TestQualityLongArtifactOffsetHintCorrectsRealAgentToSourceEvidence (0.83s)
+=== RUN   TestQualityCandidatesRecoverAllDistractorsViaRealAgentAndRecovery
+=== RUN   TestQualityCandidatesRecoverAllDistractorsViaRealAgentAndRecovery/distractor-01/RELEASE
+=== RUN   TestQualityCandidatesRecoverAllDistractorsViaRealAgentAndRecovery/distractor-02/RELEASE
+=== RUN   TestQualityCandidatesRecoverAllDistractorsViaRealAgentAndRecovery/distractor-03/RELEASE
+=== RUN   TestQualityCandidatesRecoverAllDistractorsViaRealAgentAndRecovery/distractor-04/RELEASE
+=== RUN   TestQualityCandidatesRecoverAllDistractorsViaRealAgentAndRecovery/distractor-05/RELEASE
+=== RUN   TestQualityCandidatesRecoverAllDistractorsViaRealAgentAndRecovery/distractor-06/RELEASE
+=== RUN   TestQualityCandidatesRecoverAllDistractorsViaRealAgentAndRecovery/distractor-07/RELEASE
+=== RUN   TestQualityCandidatesRecoverAllDistractorsViaRealAgentAndRecovery/distractor-08/RELEASE
+=== RUN   TestQualityCandidatesRecoverAllDistractorsViaRealAgentAndRecovery/distractor-01/deploymentCode
+=== RUN   TestQualityCandidatesRecoverAllDistractorsViaRealAgentAndRecovery/distractor-02/deploymentCode
+=== RUN   TestQualityCandidatesRecoverAllDistractorsViaRealAgentAndRecovery/distractor-03/deploymentCode
+=== RUN   TestQualityCandidatesRecoverAllDistractorsViaRealAgentAndRecovery/distractor-04/deploymentCode
+=== RUN   TestQualityCandidatesRecoverAllDistractorsViaRealAgentAndRecovery/distractor-05/deploymentCode
+=== RUN   TestQualityCandidatesRecoverAllDistractorsViaRealAgentAndRecovery/distractor-06/deploymentCode
+=== RUN   TestQualityCandidatesRecoverAllDistractorsViaRealAgentAndRecovery/distractor-07/deploymentCode
+=== RUN   TestQualityCandidatesRecoverAllDistractorsViaRealAgentAndRecovery/distractor-08/deploymentCode
+=== RUN   TestQualityCandidatesRecoverAllDistractorsViaRealAgentAndRecovery/distractor-01/deployment
+=== RUN   TestQualityCandidatesRecoverAllDistractorsViaRealAgentAndRecovery/distractor-02/deployment
+=== RUN   TestQualityCandidatesRecoverAllDistractorsViaRealAgentAndRecovery/distractor-03/deployment
+=== RUN   TestQualityCandidatesRecoverAllDistractorsViaRealAgentAndRecovery/distractor-04/deployment
+=== RUN   TestQualityCandidatesRecoverAllDistractorsViaRealAgentAndRecovery/distractor-05/deployment
+=== RUN   TestQualityCandidatesRecoverAllDistractorsViaRealAgentAndRecovery/distractor-06/deployment
+=== RUN   TestQualityCandidatesRecoverAllDistractorsViaRealAgentAndRecovery/distractor-07/deployment
+=== RUN   TestQualityCandidatesRecoverAllDistractorsViaRealAgentAndRecovery/distractor-08/deployment
+--- PASS: TestQualityCandidatesRecoverAllDistractorsViaRealAgentAndRecovery (16.91s)
+    --- PASS: TestQualityCandidatesRecoverAllDistractorsViaRealAgentAndRecovery/distractor-01/RELEASE (0.68s)
+    --- PASS: TestQualityCandidatesRecoverAllDistractorsViaRealAgentAndRecovery/distractor-02/RELEASE (0.70s)
+    --- PASS: TestQualityCandidatesRecoverAllDistractorsViaRealAgentAndRecovery/distractor-03/RELEASE (0.68s)
+    --- PASS: TestQualityCandidatesRecoverAllDistractorsViaRealAgentAndRecovery/distractor-04/RELEASE (0.70s)
+    --- PASS: TestQualityCandidatesRecoverAllDistractorsViaRealAgentAndRecovery/distractor-05/RELEASE (0.73s)
+    --- PASS: TestQualityCandidatesRecoverAllDistractorsViaRealAgentAndRecovery/distractor-06/RELEASE (0.64s)
+    --- PASS: TestQualityCandidatesRecoverAllDistractorsViaRealAgentAndRecovery/distractor-07/RELEASE (0.72s)
+    --- PASS: TestQualityCandidatesRecoverAllDistractorsViaRealAgentAndRecovery/distractor-08/RELEASE (0.67s)
+    --- PASS: TestQualityCandidatesRecoverAllDistractorsViaRealAgentAndRecovery/distractor-01/deploymentCode (0.73s)
+    --- PASS: TestQualityCandidatesRecoverAllDistractorsViaRealAgentAndRecovery/distractor-02/deploymentCode (0.73s)
+    --- PASS: TestQualityCandidatesRecoverAllDistractorsViaRealAgentAndRecovery/distractor-03/deploymentCode (0.70s)
+    --- PASS: TestQualityCandidatesRecoverAllDistractorsViaRealAgentAndRecovery/distractor-04/deploymentCode (0.69s)
+    --- PASS: TestQualityCandidatesRecoverAllDistractorsViaRealAgentAndRecovery/distractor-05/deploymentCode (0.70s)
+    --- PASS: TestQualityCandidatesRecoverAllDistractorsViaRealAgentAndRecovery/distractor-06/deploymentCode (0.70s)
+    --- PASS: TestQualityCandidatesRecoverAllDistractorsViaRealAgentAndRecovery/distractor-07/deploymentCode (0.71s)
+    --- PASS: TestQualityCandidatesRecoverAllDistractorsViaRealAgentAndRecovery/distractor-08/deploymentCode (0.69s)
+    --- PASS: TestQualityCandidatesRecoverAllDistractorsViaRealAgentAndRecovery/distractor-01/deployment (0.70s)
+    --- PASS: TestQualityCandidatesRecoverAllDistractorsViaRealAgentAndRecovery/distractor-02/deployment (0.83s)
+    --- PASS: TestQualityCandidatesRecoverAllDistractorsViaRealAgentAndRecovery/distractor-03/deployment (0.67s)
+    --- PASS: TestQualityCandidatesRecoverAllDistractorsViaRealAgentAndRecovery/distractor-04/deployment (0.71s)
+    --- PASS: TestQualityCandidatesRecoverAllDistractorsViaRealAgentAndRecovery/distractor-05/deployment (0.72s)
+    --- PASS: TestQualityCandidatesRecoverAllDistractorsViaRealAgentAndRecovery/distractor-06/deployment (0.70s)
+    --- PASS: TestQualityCandidatesRecoverAllDistractorsViaRealAgentAndRecovery/distractor-07/deployment (0.74s)
+    --- PASS: TestQualityCandidatesRecoverAllDistractorsViaRealAgentAndRecovery/distractor-08/deployment (0.68s)
+=== RUN   TestQualitySuiteManifestIsDistinctDeterministicAndModelIndependent
+--- PASS: TestQualitySuiteManifestIsDistinctDeterministicAndModelIndependent (0.05s)
+=== RUN   TestQualityServiceContextCapKeepsLegacyHashAndModelCapacityFence
+=== RUN   TestQualityServiceContextCapKeepsLegacyHashAndModelCapacityFence/model-at-admission-floor
+=== RUN   TestQualityServiceContextCapKeepsLegacyHashAndModelCapacityFence/model-smaller-than-service
+=== RUN   TestQualityServiceContextCapKeepsLegacyHashAndModelCapacityFence/model-near-service-ceiling
+=== RUN   TestQualityServiceContextCapKeepsLegacyHashAndModelCapacityFence/service-and-model-ceiling-align
+=== RUN   TestQualityServiceContextCapKeepsLegacyHashAndModelCapacityFence/large-model-service-cap
+=== RUN   TestQualityServiceContextCapKeepsLegacyHashAndModelCapacityFence/live-pilot-output-ceiling-not-usage
+=== RUN   TestQualityServiceContextCapKeepsLegacyHashAndModelCapacityFence/reservation-reduces-actual-input
+--- PASS: TestQualityServiceContextCapKeepsLegacyHashAndModelCapacityFence (0.00s)
+    --- PASS: TestQualityServiceContextCapKeepsLegacyHashAndModelCapacityFence/model-at-admission-floor (0.00s)
+    --- PASS: TestQualityServiceContextCapKeepsLegacyHashAndModelCapacityFence/model-smaller-than-service (0.00s)
+    --- PASS: TestQualityServiceContextCapKeepsLegacyHashAndModelCapacityFence/model-near-service-ceiling (0.00s)
+    --- PASS: TestQualityServiceContextCapKeepsLegacyHashAndModelCapacityFence/service-and-model-ceiling-align (0.00s)
+    --- PASS: TestQualityServiceContextCapKeepsLegacyHashAndModelCapacityFence/large-model-service-cap (0.00s)
+    --- PASS: TestQualityServiceContextCapKeepsLegacyHashAndModelCapacityFence/live-pilot-output-ceiling-not-usage (0.00s)
+    --- PASS: TestQualityServiceContextCapKeepsLegacyHashAndModelCapacityFence/reservation-reduces-actual-input (0.00s)
+=== RUN   TestQualityScriptedCommandEmitsContentFreeCalibrationAndRespectsCancellation
+--- PASS: TestQualityScriptedCommandEmitsContentFreeCalibrationAndRespectsCancellation (22.69s)
+=== RUN   TestQualitySuiteWireAdmissionUsesExactOptionalSuiteAndBoundedRepetitions
+--- PASS: TestQualitySuiteWireAdmissionUsesExactOptionalSuiteAndBoundedRepetitions (0.00s)
+=== RUN   TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle
+=== RUN   TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/code-01
+=== RUN   TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/code-02
+=== RUN   TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/code-03
+=== RUN   TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/code-04
+=== RUN   TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/code-05
+=== RUN   TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/code-06
+=== RUN   TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/code-07
+=== RUN   TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/code-08
+=== RUN   TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/window-01
+=== RUN   TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/window-02
+=== RUN   TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/window-03
+=== RUN   TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/window-04
+=== RUN   TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/window-05
+=== RUN   TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/window-06
+=== RUN   TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/window-07
+=== RUN   TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/window-08
+=== RUN   TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/distractor-01
+=== RUN   TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/distractor-02
+=== RUN   TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/distractor-03
+=== RUN   TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/distractor-04
+=== RUN   TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/distractor-05
+=== RUN   TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/distractor-06
+=== RUN   TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/distractor-07
+=== RUN   TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/distractor-08
+=== RUN   TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/unicode-01
+=== RUN   TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/unicode-02
+=== RUN   TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/unicode-03
+=== RUN   TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/unicode-04
+=== RUN   TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/unicode-05
+=== RUN   TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/unicode-06
+=== RUN   TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/unicode-07
+=== RUN   TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/unicode-08
+=== RUN   TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/layout-01
+=== RUN   TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/layout-02
+=== RUN   TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/layout-03
+=== RUN   TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/layout-04
+=== RUN   TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/layout-05
+=== RUN   TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/layout-06
+=== RUN   TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/layout-07
+=== RUN   TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/layout-08
+--- PASS: TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle (21.42s)
+    --- PASS: TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/code-01 (0.51s)
+    --- PASS: TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/code-02 (0.48s)
+    --- PASS: TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/code-03 (0.50s)
+    --- PASS: TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/code-04 (0.51s)
+    --- PASS: TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/code-05 (0.54s)
+    --- PASS: TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/code-06 (0.61s)
+    --- PASS: TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/code-07 (0.51s)
+    --- PASS: TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/code-08 (0.54s)
+    --- PASS: TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/window-01 (0.56s)
+    --- PASS: TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/window-02 (0.52s)
+    --- PASS: TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/window-03 (0.57s)
+    --- PASS: TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/window-04 (0.58s)
+    --- PASS: TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/window-05 (0.54s)
+    --- PASS: TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/window-06 (0.54s)
+    --- PASS: TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/window-07 (0.62s)
+    --- PASS: TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/window-08 (0.51s)
+    --- PASS: TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/distractor-01 (0.61s)
+    --- PASS: TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/distractor-02 (0.52s)
+    --- PASS: TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/distractor-03 (0.49s)
+    --- PASS: TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/distractor-04 (0.52s)
+    --- PASS: TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/distractor-05 (0.52s)
+    --- PASS: TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/distractor-06 (0.54s)
+    --- PASS: TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/distractor-07 (0.57s)
+    --- PASS: TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/distractor-08 (0.50s)
+    --- PASS: TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/unicode-01 (0.51s)
+    --- PASS: TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/unicode-02 (0.57s)
+    --- PASS: TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/unicode-03 (0.54s)
+    --- PASS: TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/unicode-04 (0.57s)
+    --- PASS: TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/unicode-05 (0.53s)
+    --- PASS: TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/unicode-06 (0.51s)
+    --- PASS: TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/unicode-07 (0.51s)
+    --- PASS: TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/unicode-08 (0.51s)
+    --- PASS: TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/layout-01 (0.55s)
+    --- PASS: TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/layout-02 (0.53s)
+    --- PASS: TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/layout-03 (0.59s)
+    --- PASS: TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/layout-04 (0.50s)
+    --- PASS: TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/layout-05 (0.54s)
+    --- PASS: TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/layout-06 (0.51s)
+    --- PASS: TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/layout-07 (0.51s)
+    --- PASS: TestQualitySuiteAllFortyCasesPassOfflineExecutionAndRecoveryOracle/layout-08 (0.55s)
+=== RUN   TestQualityExactIdentifierRetrievalPreservesDraftToolBudget
+=== RUN   TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/code-01
+=== RUN   TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/code-02
+=== RUN   TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/code-03
+=== RUN   TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/code-04
+=== RUN   TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/code-05
+=== RUN   TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/code-06
+=== RUN   TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/code-07
+=== RUN   TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/code-08
+=== RUN   TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/window-01
+=== RUN   TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/window-02
+=== RUN   TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/window-03
+=== RUN   TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/window-04
+=== RUN   TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/window-05
+=== RUN   TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/window-06
+=== RUN   TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/window-07
+=== RUN   TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/window-08
+=== RUN   TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/distractor-01
+=== RUN   TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/distractor-02
+=== RUN   TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/distractor-03
+=== RUN   TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/distractor-04
+=== RUN   TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/distractor-05
+=== RUN   TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/distractor-06
+=== RUN   TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/distractor-07
+=== RUN   TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/distractor-08
+=== RUN   TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/unicode-01
+=== RUN   TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/unicode-02
+=== RUN   TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/unicode-03
+=== RUN   TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/unicode-04
+=== RUN   TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/unicode-05
+=== RUN   TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/unicode-06
+=== RUN   TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/unicode-07
+=== RUN   TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/unicode-08
+=== RUN   TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/layout-01
+=== RUN   TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/layout-02
+=== RUN   TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/layout-03
+=== RUN   TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/layout-04
+=== RUN   TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/layout-05
+=== RUN   TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/layout-06
+=== RUN   TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/layout-07
+=== RUN   TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/layout-08
+--- PASS: TestQualityExactIdentifierRetrievalPreservesDraftToolBudget (23.79s)
+    --- PASS: TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/code-01 (0.63s)
+    --- PASS: TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/code-02 (0.49s)
+    --- PASS: TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/code-03 (0.57s)
+    --- PASS: TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/code-04 (0.54s)
+    --- PASS: TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/code-05 (0.55s)
+    --- PASS: TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/code-06 (0.55s)
+    --- PASS: TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/code-07 (0.56s)
+    --- PASS: TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/code-08 (0.51s)
+    --- PASS: TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/window-01 (0.59s)
+    --- PASS: TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/window-02 (0.53s)
+    --- PASS: TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/window-03 (0.52s)
+    --- PASS: TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/window-04 (0.58s)
+    --- PASS: TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/window-05 (0.57s)
+    --- PASS: TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/window-06 (0.58s)
+    --- PASS: TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/window-07 (0.55s)
+    --- PASS: TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/window-08 (0.52s)
+    --- PASS: TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/distractor-01 (0.52s)
+    --- PASS: TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/distractor-02 (0.57s)
+    --- PASS: TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/distractor-03 (0.61s)
+    --- PASS: TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/distractor-04 (0.59s)
+    --- PASS: TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/distractor-05 (0.52s)
+    --- PASS: TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/distractor-06 (0.55s)
+    --- PASS: TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/distractor-07 (0.55s)
+    --- PASS: TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/distractor-08 (0.59s)
+    --- PASS: TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/unicode-01 (0.60s)
+    --- PASS: TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/unicode-02 (0.52s)
+    --- PASS: TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/unicode-03 (0.54s)
+    --- PASS: TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/unicode-04 (0.57s)
+    --- PASS: TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/unicode-05 (0.55s)
+    --- PASS: TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/unicode-06 (0.58s)
+    --- PASS: TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/unicode-07 (0.65s)
+    --- PASS: TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/unicode-08 (0.70s)
+    --- PASS: TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/layout-01 (0.70s)
+    --- PASS: TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/layout-02 (0.70s)
+    --- PASS: TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/layout-03 (0.72s)
+    --- PASS: TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/layout-04 (0.73s)
+    --- PASS: TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/layout-05 (0.65s)
+    --- PASS: TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/layout-06 (0.72s)
+    --- PASS: TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/layout-07 (0.78s)
+    --- PASS: TestQualityExactIdentifierRetrievalPreservesDraftToolBudget/layout-08 (0.72s)
+=== RUN   TestPreInterruptionCleanModelTerminalDistinguishedFromFailedProvider
+--- PASS: TestPreInterruptionCleanModelTerminalDistinguishedFromFailedProvider (0.33s)
+=== RUN   TestPreInterruptionProviderFailureUsesSafeTypedCode
+--- PASS: TestPreInterruptionProviderFailureUsesSafeTypedCode (0.01s)
+=== RUN   TestPreInterruptionTypedCauseKeepsOriginalClassification
+--- PASS: TestPreInterruptionTypedCauseKeepsOriginalClassification (0.00s)
+=== RUN   TestPreInterruptionAgentFailurePreservesOnlyFixedTurnCode
+--- PASS: TestPreInterruptionAgentFailurePreservesOnlyFixedTurnCode (0.26s)
+=== RUN   TestPreInterruptionSafelistRejectsUntrustedErrorCodesAndDetails
+=== RUN   TestPreInterruptionSafelistRejectsUntrustedErrorCodesAndDetails/failed/agent.tool_limit
+=== RUN   TestPreInterruptionSafelistRejectsUntrustedErrorCodesAndDetails/failed/agent.model_dispatch_invalid
+=== RUN   TestPreInterruptionSafelistRejectsUntrustedErrorCodesAndDetails/failed/
+=== RUN   TestPreInterruptionSafelistRejectsUntrustedErrorCodesAndDetails/failed/#01
+=== RUN   TestPreInterruptionSafelistRejectsUntrustedErrorCodesAndDetails/completed/
+=== RUN   TestPreInterruptionSafelistRejectsUntrustedErrorCodesAndDetails/running/
+=== RUN   TestPreInterruptionSafelistRejectsUntrustedErrorCodesAndDetails/untrusted/
+--- PASS: TestPreInterruptionSafelistRejectsUntrustedErrorCodesAndDetails (0.00s)
+    --- PASS: TestPreInterruptionSafelistRejectsUntrustedErrorCodesAndDetails/failed/agent.tool_limit (0.00s)
+    --- PASS: TestPreInterruptionSafelistRejectsUntrustedErrorCodesAndDetails/failed/agent.model_dispatch_invalid (0.00s)
+    --- PASS: TestPreInterruptionSafelistRejectsUntrustedErrorCodesAndDetails/failed/ (0.00s)
+    --- PASS: TestPreInterruptionSafelistRejectsUntrustedErrorCodesAndDetails/failed/#01 (0.00s)
+    --- PASS: TestPreInterruptionSafelistRejectsUntrustedErrorCodesAndDetails/completed/ (0.00s)
+    --- PASS: TestPreInterruptionSafelistRejectsUntrustedErrorCodesAndDetails/running/ (0.00s)
+    --- PASS: TestPreInterruptionSafelistRejectsUntrustedErrorCodesAndDetails/untrusted/ (0.00s)
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/000/committed-marker-with-other-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/001/typed-cancellation
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/002/typed-cancellation
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/003/typed-model-failed
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/004/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/005/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/006/cancelled-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/007/typed-context-budget
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/008/committed-marker-with-nil-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/009/failed-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/010/failed-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/011/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/012/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/013/typed-cancellation
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/014/committed-marker-with-other-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/015/typed-context-budget
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/016/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/017/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/018/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/019/failed-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/020/committed-marker-with-nil-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/021/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/022/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/023/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/024/cancelled-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/025/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/026/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/027/successful-terminal-no-draft
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/028/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/029/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/030/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/031/successful-terminal-no-draft
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/032/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/033/typed-invalid-model-response
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/034/typed-invalid-model-response
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/035/committed-marker-with-nil-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/036/failed-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/037/typed-model-failed
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/038/committed-marker-with-other-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/039/committed-marker-with-other-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/040/typed-cancellation
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/041/committed-marker-with-other-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/042/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/043/typed-cancellation
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/044/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/045/successful-terminal-no-draft
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/046/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/047/failed-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/048/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/049/failed-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/050/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/051/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/052/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/053/failed-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/054/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/055/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/056/successful-terminal-no-draft
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/057/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/058/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/059/typed-model-failed
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/060/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/061/typed-cancellation
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/062/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/063/cancelled-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/064/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/065/successful-terminal-no-draft
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/066/failed-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/067/typed-model-failed
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/068/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/069/committed-marker-with-nil-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/070/cancelled-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/071/committed-marker-with-nil-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/072/typed-cancellation
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/073/failed-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/074/successful-terminal-no-draft
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/075/typed-model-failed
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/076/typed-context-budget
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/077/typed-model-failed
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/078/successful-terminal-no-draft
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/079/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/080/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/081/typed-context-budget
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/082/successful-terminal-no-draft
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/083/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/084/typed-cancellation
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/085/typed-context-budget
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/086/successful-terminal-no-draft
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/087/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/088/successful-terminal-no-draft
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/089/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/090/cancelled-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/091/typed-cancellation
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/092/typed-cancellation
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/093/committed-marker-with-nil-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/094/typed-model-failed
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/095/typed-cancellation
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/096/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/097/typed-cancellation
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/098/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/099/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/100/typed-model-failed
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/101/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/102/successful-terminal-no-draft
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/103/failed-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/104/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/105/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/106/typed-cancellation
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/107/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/108/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/109/typed-model-failed
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/110/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/111/typed-model-failed
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/112/successful-terminal-no-draft
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/113/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/114/typed-context-budget
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/115/typed-context-budget
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/116/typed-invalid-model-response
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/117/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/118/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/119/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/120/cancelled-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/121/failed-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/122/typed-model-failed
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/123/typed-model-failed
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/124/cancelled-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/125/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/126/failed-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/127/failed-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/128/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/129/cancelled-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/130/committed-marker-with-other-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/131/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/132/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/133/typed-context-budget
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/134/failed-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/135/typed-invalid-model-response
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/136/typed-context-budget
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/137/typed-invalid-model-response
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/138/typed-context-budget
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/139/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/140/failed-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/141/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/142/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/143/typed-cancellation
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/144/typed-model-failed
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/145/cancelled-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/146/cancelled-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/147/typed-model-failed
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/148/typed-cancellation
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/149/typed-invalid-model-response
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/150/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/151/committed-marker-with-other-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/152/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/153/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/154/successful-terminal-no-draft
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/155/failed-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/156/committed-marker-with-nil-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/157/successful-terminal-no-draft
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/158/typed-cancellation
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/159/committed-marker-with-other-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/160/committed-marker-with-other-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/161/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/162/typed-context-budget
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/163/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/164/failed-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/165/cancelled-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/166/committed-marker-with-nil-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/167/typed-invalid-model-response
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/168/typed-cancellation
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/169/typed-model-failed
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/170/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/171/failed-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/172/failed-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/173/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/174/typed-cancellation
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/175/typed-invalid-model-response
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/176/committed-marker-with-nil-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/177/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/178/cancelled-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/179/failed-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/180/typed-invalid-model-response
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/181/committed-marker-with-other-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/182/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/183/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/184/failed-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/185/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/186/successful-terminal-no-draft
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/187/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/188/successful-terminal-no-draft
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/189/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/190/failed-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/191/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/192/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/193/typed-cancellation
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/194/typed-cancellation
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/195/cancelled-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/196/failed-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/197/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/198/committed-marker-with-other-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/199/typed-cancellation
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/200/failed-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/201/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/202/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/203/typed-cancellation
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/204/typed-cancellation
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/205/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/206/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/207/cancelled-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/208/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/209/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/210/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/211/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/212/typed-context-budget
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/213/committed-marker-with-nil-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/214/typed-invalid-model-response
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/215/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/216/typed-invalid-model-response
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/217/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/218/cancelled-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/219/typed-context-budget
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/220/cancelled-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/221/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/222/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/223/failed-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/224/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/225/typed-cancellation
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/226/committed-marker-with-nil-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/227/committed-marker-with-nil-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/228/committed-marker-with-nil-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/229/committed-marker-with-nil-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/230/committed-marker-with-other-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/231/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/232/committed-marker-with-other-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/233/failed-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/234/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/235/committed-marker-with-nil-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/236/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/237/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/238/successful-terminal-no-draft
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/239/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/240/typed-cancellation
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/241/successful-terminal-no-draft
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/242/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/243/typed-context-budget
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/244/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/245/failed-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/246/typed-cancellation
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/247/committed-marker-with-other-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/248/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/249/failed-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/250/cancelled-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/251/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/252/cancelled-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/253/typed-model-failed
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/254/cancelled-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/255/failed-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/256/cancelled-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/257/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/258/committed-marker-with-nil-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/259/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/260/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/261/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/262/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/263/committed-marker-with-nil-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/264/committed-marker-with-other-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/265/failed-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/266/typed-context-budget
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/267/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/268/typed-context-budget
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/269/typed-invalid-model-response
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/270/typed-context-budget
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/271/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/272/committed-marker-with-other-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/273/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/274/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/275/successful-terminal-no-draft
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/276/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/277/successful-terminal-no-draft
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/278/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/279/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/280/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/281/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/282/failed-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/283/cancelled-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/284/typed-context-budget
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/285/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/286/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/287/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/288/cancelled-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/289/typed-context-budget
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/290/committed-marker-with-nil-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/291/typed-model-failed
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/292/failed-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/293/typed-context-budget
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/294/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/295/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/296/typed-invalid-model-response
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/297/typed-context-budget
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/298/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/299/cancelled-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/300/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/301/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/302/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/303/typed-model-failed
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/304/typed-context-budget
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/305/successful-terminal-no-draft
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/306/committed-marker-with-other-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/307/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/308/successful-terminal-no-draft
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/309/cancelled-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/310/committed-marker-with-other-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/311/typed-context-budget
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/312/successful-terminal-no-draft
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/313/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/314/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/315/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/316/failed-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/317/typed-model-failed
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/318/typed-context-budget
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/319/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/320/typed-cancellation
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/321/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/322/typed-context-budget
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/323/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/324/typed-context-budget
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/325/committed-marker-with-nil-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/326/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/327/successful-terminal-no-draft
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/328/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/329/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/330/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/331/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/332/typed-model-failed
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/333/committed-marker-with-nil-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/334/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/335/typed-invalid-model-response
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/336/typed-model-failed
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/337/committed-marker-with-other-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/338/typed-context-budget
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/339/typed-context-budget
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/340/cancelled-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/341/committed-marker-with-other-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/342/typed-context-budget
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/343/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/344/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/345/committed-marker-with-other-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/346/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/347/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/348/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/349/typed-context-budget
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/350/typed-model-failed
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/351/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/352/failed-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/353/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/354/typed-context-budget
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/355/typed-context-budget
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/356/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/357/typed-model-failed
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/358/successful-terminal-no-draft
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/359/typed-model-failed
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/360/typed-cancellation
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/361/cancelled-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/362/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/363/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/364/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/365/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/366/typed-context-budget
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/367/committed-marker-with-other-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/368/committed-marker-with-other-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/369/typed-context-budget
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/370/successful-terminal-no-draft
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/371/typed-context-budget
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/372/typed-invalid-model-response
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/373/typed-invalid-model-response
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/374/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/375/typed-invalid-model-response
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/376/typed-model-failed
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/377/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/378/typed-invalid-model-response
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/379/typed-context-budget
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/380/typed-cancellation
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/381/committed-marker-with-other-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/382/typed-invalid-model-response
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/383/typed-model-failed
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/384/typed-model-failed
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/385/typed-invalid-model-response
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/386/committed-marker-with-other-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/387/successful-terminal-no-draft
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/388/typed-model-failed
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/389/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/390/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/391/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/392/cancelled-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/393/typed-context-budget
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/394/typed-model-failed
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/395/typed-model-failed
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/396/committed-marker-with-other-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/397/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/398/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/399/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/400/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/401/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/402/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/403/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/404/failed-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/405/typed-model-failed
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/406/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/407/successful-terminal-no-draft
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/408/successful-terminal-no-draft
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/409/committed-marker-with-nil-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/410/committed-marker-with-other-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/411/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/412/typed-invalid-model-response
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/413/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/414/typed-cancellation
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/415/cancelled-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/416/committed-marker-with-other-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/417/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/418/typed-invalid-model-response
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/419/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/420/failed-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/421/successful-terminal-no-draft
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/422/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/423/cancelled-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/424/cancelled-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/425/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/426/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/427/typed-model-failed
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/428/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/429/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/430/typed-cancellation
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/431/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/432/typed-cancellation
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/433/successful-terminal-no-draft
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/434/typed-invalid-model-response
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/435/typed-model-failed
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/436/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/437/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/438/committed-marker-with-nil-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/439/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/440/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/441/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/442/typed-invalid-model-response
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/443/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/444/cancelled-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/445/committed-marker-with-nil-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/446/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/447/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/448/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/449/committed-marker-with-nil-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/450/cancelled-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/451/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/452/committed-marker-with-other-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/453/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/454/typed-context-budget
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/455/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/456/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/457/successful-terminal-no-draft
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/458/typed-model-failed
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/459/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/460/successful-terminal-no-draft
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/461/typed-cancellation
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/462/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/463/cancelled-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/464/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/465/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/466/typed-invalid-model-response
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/467/typed-context-budget
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/468/typed-invalid-model-response
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/469/successful-terminal-no-draft
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/470/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/471/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/472/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/473/typed-context-budget
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/474/typed-context-budget
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/475/typed-context-budget
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/476/committed-marker-with-nil-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/477/committed-marker-with-nil-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/478/typed-context-budget
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/479/committed-marker-with-nil-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/480/committed-marker-with-nil-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/481/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/482/cancelled-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/483/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/484/typed-invalid-model-response
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/485/cancelled-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/486/typed-model-failed
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/487/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/488/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/489/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/490/committed-marker-with-other-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/491/committed-marker-with-other-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/492/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/493/typed-cancellation
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/494/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/495/failed-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/496/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/497/failed-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/498/committed-marker-with-other-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/499/typed-context-budget
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/500/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/501/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/502/cancelled-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/503/typed-invalid-model-response
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/504/failed-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/505/typed-model-failed
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/506/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/507/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/508/committed-marker-with-other-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/509/committed-marker-with-other-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/510/typed-cancellation
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/511/committed-marker-with-nil-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/512/typed-cancellation
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/513/cancelled-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/514/successful-terminal-no-draft
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/515/typed-model-failed
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/516/typed-cancellation
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/517/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/518/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/519/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/520/typed-invalid-model-response
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/521/typed-invalid-model-response
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/522/typed-cancellation
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/523/committed-marker-with-other-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/524/successful-terminal-no-draft
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/525/cancelled-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/526/failed-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/527/typed-model-failed
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/528/committed-marker-with-other-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/529/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/530/typed-cancellation
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/531/failed-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/532/successful-terminal-no-draft
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/533/failed-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/534/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/535/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/536/cancelled-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/537/failed-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/538/typed-invalid-model-response
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/539/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/540/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/541/typed-context-budget
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/542/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/543/failed-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/544/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/545/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/546/typed-model-failed
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/547/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/548/failed-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/549/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/550/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/551/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/552/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/553/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/554/committed-marker-with-other-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/555/cancelled-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/556/committed-marker-with-other-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/557/typed-model-failed
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/558/typed-context-budget
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/559/typed-invalid-model-response
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/560/committed-marker-with-other-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/561/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/562/committed-marker-with-other-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/563/cancelled-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/564/failed-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/565/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/566/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/567/committed-marker-with-other-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/568/failed-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/569/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/570/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/571/cancelled-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/572/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/573/committed-marker-with-nil-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/574/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/575/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/576/typed-cancellation
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/577/typed-context-budget
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/578/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/579/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/580/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/581/typed-cancellation
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/582/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/583/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/584/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/585/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/586/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/587/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/588/typed-cancellation
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/589/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/590/typed-invalid-model-response
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/591/committed-marker-with-nil-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/592/failed-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/593/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/594/cancelled-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/595/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/596/typed-cancellation
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/597/typed-cancellation
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/598/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/599/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/600/cancelled-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/601/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/602/committed-marker-with-other-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/603/typed-cancellation
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/604/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/605/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/606/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/607/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/608/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/609/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/610/typed-model-failed
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/611/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/612/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/613/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/614/typed-context-budget
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/615/typed-invalid-model-response
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/616/committed-marker-with-nil-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/617/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/618/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/619/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/620/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/621/committed-marker-with-nil-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/622/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/623/committed-marker-with-other-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/624/cancelled-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/625/cancelled-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/626/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/627/typed-model-failed
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/628/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/629/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/630/committed-marker-with-other-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/631/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/632/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/633/failed-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/634/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/635/typed-invalid-model-response
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/636/committed-marker-with-other-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/637/typed-cancellation
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/638/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/639/typed-cancellation
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/640/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/641/typed-model-failed
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/642/typed-model-failed
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/643/failed-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/644/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/645/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/646/untyped-failed-run
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/647/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/648/paused-budget-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/649/missing-committed-fault-marker
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/650/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/651/typed-cancellation
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/652/typed-cancellation
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/653/successful-terminal-draft-but-no-fault
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/654/incomplete-running-return
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/655/successful-terminal-no-draft
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/656/typed-invalid-model-response
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/657/cancelled-status-without-typed-error
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/658/typed-invalid-model-response
+=== RUN   TestPreInterruptionStatusAndTypedCauseMatrix/659/incomplete-running-return
+--- PASS: TestPreInterruptionStatusAndTypedCauseMatrix (0.06s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/000/committed-marker-with-other-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/001/typed-cancellation (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/002/typed-cancellation (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/003/typed-model-failed (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/004/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/005/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/006/cancelled-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/007/typed-context-budget (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/008/committed-marker-with-nil-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/009/failed-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/010/failed-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/011/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/012/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/013/typed-cancellation (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/014/committed-marker-with-other-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/015/typed-context-budget (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/016/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/017/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/018/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/019/failed-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/020/committed-marker-with-nil-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/021/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/022/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/023/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/024/cancelled-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/025/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/026/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/027/successful-terminal-no-draft (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/028/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/029/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/030/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/031/successful-terminal-no-draft (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/032/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/033/typed-invalid-model-response (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/034/typed-invalid-model-response (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/035/committed-marker-with-nil-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/036/failed-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/037/typed-model-failed (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/038/committed-marker-with-other-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/039/committed-marker-with-other-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/040/typed-cancellation (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/041/committed-marker-with-other-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/042/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/043/typed-cancellation (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/044/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/045/successful-terminal-no-draft (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/046/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/047/failed-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/048/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/049/failed-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/050/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/051/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/052/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/053/failed-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/054/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/055/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/056/successful-terminal-no-draft (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/057/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/058/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/059/typed-model-failed (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/060/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/061/typed-cancellation (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/062/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/063/cancelled-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/064/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/065/successful-terminal-no-draft (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/066/failed-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/067/typed-model-failed (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/068/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/069/committed-marker-with-nil-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/070/cancelled-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/071/committed-marker-with-nil-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/072/typed-cancellation (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/073/failed-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/074/successful-terminal-no-draft (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/075/typed-model-failed (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/076/typed-context-budget (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/077/typed-model-failed (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/078/successful-terminal-no-draft (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/079/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/080/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/081/typed-context-budget (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/082/successful-terminal-no-draft (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/083/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/084/typed-cancellation (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/085/typed-context-budget (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/086/successful-terminal-no-draft (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/087/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/088/successful-terminal-no-draft (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/089/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/090/cancelled-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/091/typed-cancellation (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/092/typed-cancellation (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/093/committed-marker-with-nil-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/094/typed-model-failed (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/095/typed-cancellation (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/096/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/097/typed-cancellation (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/098/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/099/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/100/typed-model-failed (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/101/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/102/successful-terminal-no-draft (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/103/failed-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/104/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/105/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/106/typed-cancellation (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/107/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/108/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/109/typed-model-failed (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/110/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/111/typed-model-failed (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/112/successful-terminal-no-draft (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/113/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/114/typed-context-budget (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/115/typed-context-budget (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/116/typed-invalid-model-response (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/117/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/118/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/119/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/120/cancelled-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/121/failed-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/122/typed-model-failed (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/123/typed-model-failed (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/124/cancelled-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/125/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/126/failed-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/127/failed-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/128/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/129/cancelled-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/130/committed-marker-with-other-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/131/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/132/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/133/typed-context-budget (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/134/failed-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/135/typed-invalid-model-response (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/136/typed-context-budget (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/137/typed-invalid-model-response (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/138/typed-context-budget (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/139/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/140/failed-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/141/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/142/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/143/typed-cancellation (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/144/typed-model-failed (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/145/cancelled-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/146/cancelled-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/147/typed-model-failed (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/148/typed-cancellation (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/149/typed-invalid-model-response (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/150/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/151/committed-marker-with-other-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/152/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/153/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/154/successful-terminal-no-draft (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/155/failed-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/156/committed-marker-with-nil-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/157/successful-terminal-no-draft (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/158/typed-cancellation (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/159/committed-marker-with-other-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/160/committed-marker-with-other-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/161/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/162/typed-context-budget (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/163/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/164/failed-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/165/cancelled-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/166/committed-marker-with-nil-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/167/typed-invalid-model-response (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/168/typed-cancellation (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/169/typed-model-failed (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/170/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/171/failed-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/172/failed-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/173/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/174/typed-cancellation (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/175/typed-invalid-model-response (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/176/committed-marker-with-nil-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/177/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/178/cancelled-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/179/failed-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/180/typed-invalid-model-response (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/181/committed-marker-with-other-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/182/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/183/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/184/failed-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/185/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/186/successful-terminal-no-draft (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/187/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/188/successful-terminal-no-draft (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/189/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/190/failed-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/191/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/192/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/193/typed-cancellation (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/194/typed-cancellation (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/195/cancelled-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/196/failed-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/197/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/198/committed-marker-with-other-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/199/typed-cancellation (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/200/failed-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/201/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/202/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/203/typed-cancellation (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/204/typed-cancellation (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/205/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/206/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/207/cancelled-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/208/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/209/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/210/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/211/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/212/typed-context-budget (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/213/committed-marker-with-nil-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/214/typed-invalid-model-response (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/215/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/216/typed-invalid-model-response (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/217/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/218/cancelled-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/219/typed-context-budget (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/220/cancelled-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/221/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/222/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/223/failed-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/224/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/225/typed-cancellation (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/226/committed-marker-with-nil-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/227/committed-marker-with-nil-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/228/committed-marker-with-nil-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/229/committed-marker-with-nil-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/230/committed-marker-with-other-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/231/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/232/committed-marker-with-other-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/233/failed-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/234/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/235/committed-marker-with-nil-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/236/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/237/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/238/successful-terminal-no-draft (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/239/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/240/typed-cancellation (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/241/successful-terminal-no-draft (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/242/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/243/typed-context-budget (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/244/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/245/failed-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/246/typed-cancellation (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/247/committed-marker-with-other-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/248/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/249/failed-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/250/cancelled-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/251/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/252/cancelled-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/253/typed-model-failed (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/254/cancelled-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/255/failed-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/256/cancelled-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/257/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/258/committed-marker-with-nil-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/259/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/260/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/261/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/262/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/263/committed-marker-with-nil-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/264/committed-marker-with-other-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/265/failed-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/266/typed-context-budget (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/267/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/268/typed-context-budget (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/269/typed-invalid-model-response (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/270/typed-context-budget (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/271/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/272/committed-marker-with-other-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/273/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/274/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/275/successful-terminal-no-draft (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/276/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/277/successful-terminal-no-draft (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/278/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/279/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/280/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/281/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/282/failed-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/283/cancelled-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/284/typed-context-budget (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/285/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/286/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/287/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/288/cancelled-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/289/typed-context-budget (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/290/committed-marker-with-nil-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/291/typed-model-failed (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/292/failed-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/293/typed-context-budget (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/294/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/295/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/296/typed-invalid-model-response (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/297/typed-context-budget (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/298/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/299/cancelled-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/300/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/301/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/302/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/303/typed-model-failed (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/304/typed-context-budget (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/305/successful-terminal-no-draft (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/306/committed-marker-with-other-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/307/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/308/successful-terminal-no-draft (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/309/cancelled-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/310/committed-marker-with-other-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/311/typed-context-budget (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/312/successful-terminal-no-draft (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/313/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/314/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/315/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/316/failed-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/317/typed-model-failed (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/318/typed-context-budget (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/319/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/320/typed-cancellation (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/321/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/322/typed-context-budget (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/323/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/324/typed-context-budget (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/325/committed-marker-with-nil-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/326/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/327/successful-terminal-no-draft (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/328/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/329/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/330/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/331/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/332/typed-model-failed (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/333/committed-marker-with-nil-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/334/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/335/typed-invalid-model-response (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/336/typed-model-failed (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/337/committed-marker-with-other-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/338/typed-context-budget (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/339/typed-context-budget (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/340/cancelled-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/341/committed-marker-with-other-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/342/typed-context-budget (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/343/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/344/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/345/committed-marker-with-other-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/346/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/347/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/348/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/349/typed-context-budget (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/350/typed-model-failed (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/351/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/352/failed-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/353/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/354/typed-context-budget (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/355/typed-context-budget (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/356/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/357/typed-model-failed (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/358/successful-terminal-no-draft (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/359/typed-model-failed (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/360/typed-cancellation (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/361/cancelled-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/362/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/363/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/364/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/365/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/366/typed-context-budget (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/367/committed-marker-with-other-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/368/committed-marker-with-other-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/369/typed-context-budget (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/370/successful-terminal-no-draft (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/371/typed-context-budget (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/372/typed-invalid-model-response (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/373/typed-invalid-model-response (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/374/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/375/typed-invalid-model-response (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/376/typed-model-failed (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/377/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/378/typed-invalid-model-response (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/379/typed-context-budget (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/380/typed-cancellation (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/381/committed-marker-with-other-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/382/typed-invalid-model-response (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/383/typed-model-failed (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/384/typed-model-failed (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/385/typed-invalid-model-response (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/386/committed-marker-with-other-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/387/successful-terminal-no-draft (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/388/typed-model-failed (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/389/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/390/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/391/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/392/cancelled-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/393/typed-context-budget (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/394/typed-model-failed (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/395/typed-model-failed (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/396/committed-marker-with-other-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/397/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/398/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/399/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/400/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/401/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/402/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/403/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/404/failed-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/405/typed-model-failed (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/406/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/407/successful-terminal-no-draft (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/408/successful-terminal-no-draft (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/409/committed-marker-with-nil-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/410/committed-marker-with-other-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/411/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/412/typed-invalid-model-response (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/413/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/414/typed-cancellation (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/415/cancelled-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/416/committed-marker-with-other-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/417/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/418/typed-invalid-model-response (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/419/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/420/failed-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/421/successful-terminal-no-draft (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/422/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/423/cancelled-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/424/cancelled-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/425/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/426/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/427/typed-model-failed (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/428/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/429/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/430/typed-cancellation (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/431/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/432/typed-cancellation (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/433/successful-terminal-no-draft (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/434/typed-invalid-model-response (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/435/typed-model-failed (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/436/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/437/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/438/committed-marker-with-nil-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/439/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/440/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/441/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/442/typed-invalid-model-response (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/443/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/444/cancelled-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/445/committed-marker-with-nil-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/446/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/447/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/448/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/449/committed-marker-with-nil-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/450/cancelled-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/451/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/452/committed-marker-with-other-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/453/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/454/typed-context-budget (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/455/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/456/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/457/successful-terminal-no-draft (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/458/typed-model-failed (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/459/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/460/successful-terminal-no-draft (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/461/typed-cancellation (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/462/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/463/cancelled-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/464/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/465/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/466/typed-invalid-model-response (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/467/typed-context-budget (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/468/typed-invalid-model-response (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/469/successful-terminal-no-draft (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/470/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/471/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/472/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/473/typed-context-budget (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/474/typed-context-budget (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/475/typed-context-budget (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/476/committed-marker-with-nil-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/477/committed-marker-with-nil-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/478/typed-context-budget (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/479/committed-marker-with-nil-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/480/committed-marker-with-nil-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/481/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/482/cancelled-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/483/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/484/typed-invalid-model-response (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/485/cancelled-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/486/typed-model-failed (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/487/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/488/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/489/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/490/committed-marker-with-other-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/491/committed-marker-with-other-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/492/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/493/typed-cancellation (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/494/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/495/failed-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/496/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/497/failed-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/498/committed-marker-with-other-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/499/typed-context-budget (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/500/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/501/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/502/cancelled-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/503/typed-invalid-model-response (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/504/failed-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/505/typed-model-failed (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/506/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/507/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/508/committed-marker-with-other-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/509/committed-marker-with-other-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/510/typed-cancellation (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/511/committed-marker-with-nil-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/512/typed-cancellation (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/513/cancelled-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/514/successful-terminal-no-draft (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/515/typed-model-failed (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/516/typed-cancellation (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/517/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/518/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/519/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/520/typed-invalid-model-response (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/521/typed-invalid-model-response (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/522/typed-cancellation (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/523/committed-marker-with-other-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/524/successful-terminal-no-draft (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/525/cancelled-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/526/failed-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/527/typed-model-failed (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/528/committed-marker-with-other-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/529/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/530/typed-cancellation (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/531/failed-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/532/successful-terminal-no-draft (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/533/failed-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/534/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/535/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/536/cancelled-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/537/failed-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/538/typed-invalid-model-response (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/539/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/540/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/541/typed-context-budget (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/542/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/543/failed-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/544/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/545/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/546/typed-model-failed (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/547/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/548/failed-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/549/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/550/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/551/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/552/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/553/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/554/committed-marker-with-other-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/555/cancelled-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/556/committed-marker-with-other-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/557/typed-model-failed (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/558/typed-context-budget (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/559/typed-invalid-model-response (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/560/committed-marker-with-other-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/561/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/562/committed-marker-with-other-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/563/cancelled-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/564/failed-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/565/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/566/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/567/committed-marker-with-other-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/568/failed-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/569/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/570/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/571/cancelled-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/572/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/573/committed-marker-with-nil-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/574/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/575/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/576/typed-cancellation (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/577/typed-context-budget (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/578/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/579/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/580/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/581/typed-cancellation (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/582/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/583/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/584/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/585/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/586/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/587/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/588/typed-cancellation (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/589/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/590/typed-invalid-model-response (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/591/committed-marker-with-nil-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/592/failed-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/593/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/594/cancelled-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/595/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/596/typed-cancellation (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/597/typed-cancellation (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/598/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/599/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/600/cancelled-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/601/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/602/committed-marker-with-other-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/603/typed-cancellation (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/604/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/605/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/606/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/607/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/608/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/609/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/610/typed-model-failed (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/611/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/612/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/613/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/614/typed-context-budget (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/615/typed-invalid-model-response (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/616/committed-marker-with-nil-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/617/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/618/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/619/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/620/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/621/committed-marker-with-nil-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/622/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/623/committed-marker-with-other-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/624/cancelled-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/625/cancelled-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/626/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/627/typed-model-failed (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/628/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/629/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/630/committed-marker-with-other-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/631/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/632/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/633/failed-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/634/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/635/typed-invalid-model-response (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/636/committed-marker-with-other-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/637/typed-cancellation (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/638/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/639/typed-cancellation (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/640/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/641/typed-model-failed (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/642/typed-model-failed (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/643/failed-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/644/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/645/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/646/untyped-failed-run (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/647/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/648/paused-budget-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/649/missing-committed-fault-marker (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/650/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/651/typed-cancellation (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/652/typed-cancellation (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/653/successful-terminal-draft-but-no-fault (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/654/incomplete-running-return (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/655/successful-terminal-no-draft (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/656/typed-invalid-model-response (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/657/cancelled-status-without-typed-error (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/658/typed-invalid-model-response (0.00s)
+    --- PASS: TestPreInterruptionStatusAndTypedCauseMatrix/659/incomplete-running-return (0.00s)
+=== RUN   TestAuditPreInterruptionReceiptMismatchHasPriority
+=== RUN   TestAuditPreInterruptionReceiptMismatchHasPriority/committed-but-cancelled
+=== RUN   TestAuditPreInterruptionReceiptMismatchHasPriority/committed-but-deadline
+=== RUN   TestAuditPreInterruptionReceiptMismatchHasPriority/committed-but-upstream-coded
+=== RUN   TestAuditPreInterruptionReceiptMismatchHasPriority/no-commit-but-joined-cancellation
+=== RUN   TestAuditPreInterruptionReceiptMismatchHasPriority/no-commit-but-joined-classified
+=== RUN   TestAuditPreInterruptionReceiptMismatchHasPriority/committed-but-model-invalid
+--- PASS: TestAuditPreInterruptionReceiptMismatchHasPriority (0.00s)
+    --- PASS: TestAuditPreInterruptionReceiptMismatchHasPriority/committed-but-cancelled (0.00s)
+    --- PASS: TestAuditPreInterruptionReceiptMismatchHasPriority/committed-but-deadline (0.00s)
+    --- PASS: TestAuditPreInterruptionReceiptMismatchHasPriority/committed-but-upstream-coded (0.00s)
+    --- PASS: TestAuditPreInterruptionReceiptMismatchHasPriority/no-commit-but-joined-cancellation (0.00s)
+    --- PASS: TestAuditPreInterruptionReceiptMismatchHasPriority/no-commit-but-joined-classified (0.00s)
+    --- PASS: TestAuditPreInterruptionReceiptMismatchHasPriority/committed-but-model-invalid (0.00s)
+=== RUN   TestAuditOriginalClassifiedFailureStillKeepsSpecificCode
+--- PASS: TestAuditOriginalClassifiedFailureStillKeepsSpecificCode (0.00s)
+=== RUN   TestAuditExpectedInterruptionRequiresPureReceiptSignal
+=== RUN   TestAuditExpectedInterruptionRequiresPureReceiptSignal/direct
+=== RUN   TestAuditExpectedInterruptionRequiresPureReceiptSignal/single-wrap
+=== RUN   TestAuditExpectedInterruptionRequiresPureReceiptSignal/single-join
+=== RUN   TestAuditExpectedInterruptionRequiresPureReceiptSignal/nested-single-wrap
+=== RUN   TestAuditExpectedInterruptionRequiresPureReceiptSignal/nil
+=== RUN   TestAuditExpectedInterruptionRequiresPureReceiptSignal/ordinary-provider-error
+=== RUN   TestAuditExpectedInterruptionRequiresPureReceiptSignal/joined-provider-error
+=== RUN   TestAuditExpectedInterruptionRequiresPureReceiptSignal/joined-cancel
+=== RUN   TestAuditExpectedInterruptionRequiresPureReceiptSignal/joined-timeout
+=== RUN   TestAuditExpectedInterruptionRequiresPureReceiptSignal/classified-marker
+--- PASS: TestAuditExpectedInterruptionRequiresPureReceiptSignal (0.00s)
+    --- PASS: TestAuditExpectedInterruptionRequiresPureReceiptSignal/direct (0.00s)
+    --- PASS: TestAuditExpectedInterruptionRequiresPureReceiptSignal/single-wrap (0.00s)
+    --- PASS: TestAuditExpectedInterruptionRequiresPureReceiptSignal/single-join (0.00s)
+    --- PASS: TestAuditExpectedInterruptionRequiresPureReceiptSignal/nested-single-wrap (0.00s)
+    --- PASS: TestAuditExpectedInterruptionRequiresPureReceiptSignal/nil (0.00s)
+    --- PASS: TestAuditExpectedInterruptionRequiresPureReceiptSignal/ordinary-provider-error (0.00s)
+    --- PASS: TestAuditExpectedInterruptionRequiresPureReceiptSignal/joined-provider-error (0.00s)
+    --- PASS: TestAuditExpectedInterruptionRequiresPureReceiptSignal/joined-cancel (0.00s)
+    --- PASS: TestAuditExpectedInterruptionRequiresPureReceiptSignal/joined-timeout (0.00s)
+    --- PASS: TestAuditExpectedInterruptionRequiresPureReceiptSignal/classified-marker (0.00s)
+=== RUN   TestTaskDraftReceiptScopeKnownAndOpaque
+=== RUN   TestTaskDraftReceiptScopeKnownAndOpaque/bounded
+=== RUN   TestTaskDraftReceiptScopeKnownAndOpaque/opaque
+--- PASS: TestTaskDraftReceiptScopeKnownAndOpaque (1.11s)
+    --- PASS: TestTaskDraftReceiptScopeKnownAndOpaque/bounded (0.65s)
+    --- PASS: TestTaskDraftReceiptScopeKnownAndOpaque/opaque (0.45s)
+=== RUN   TestTaskRecoveryProfileDescribesActualInFlightObservation
+--- PASS: TestTaskRecoveryProfileDescribesActualInFlightObservation (0.00s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness/examples/task-agent	105.695s
+
+EXIT_CODE=0

@@ -1,0 +1,12 @@
+lint-agent-runtime-provider 1
+lint-agent-runtime-harness 1
+lint-agent-runtime-harness_examples_task-agent 0
+lint-agent-runtime-harness-postgres 1
+lint-agent-runtime-mcp 0
+lint-agent-runtime-otel 0
+lint-agent-runtime-a2a 0
+lint-agent-runtime-postgres 1
+lint-agent-runtime-sqlite 1
+lint-agent-runtime-redis 0
+lint-agent-runtime-http 0
+lint-final-state 0

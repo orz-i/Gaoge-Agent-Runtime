@@ -139,7 +139,18 @@ func (runner *Runner) NotifyExternalToolResultReady(ctx context.Context, signal 
 		}
 		var next kernel.Snapshot
 		var applyErr error
-		if runner.runExecution != nil {
+		grant, grantErr := runner.runtime.LookupChildExecution(ctx, signal.RunID)
+		if grantErr == nil && grant.IsOwned() {
+			completion, completionErr := runner.runtime.LookupOwnedPhysicalCallbackReturn(ctx, grant)
+			if snapshot.Run.ParentRunID != "" || completionErr != nil || !completion.HostCompleted {
+				return snapshot, ErrRootOutcomeUnknown
+			}
+			source := featurecontrol.Seal(signal.RunID, snapshot.Run.Revision, "agent_owned_receipt_recovery_source", grant.ID, snapshot.State, snapshot.Checkpoint)
+			target := featurecontrol.Seal(signal.RunID, snapshot.Run.Revision, "agent_owned_receipt_recovery_target", grant.ID, encoded, snapshot.Checkpoint)
+			next, applyErr = runner.runtime.ApplyOwnedPhysicalRecovery(ctx, grant, snapshot.Run.Revision, mutation, source, target)
+		} else if grantErr != nil && !errors.Is(grantErr, kernel.ErrNotFound) {
+			return snapshot, grantErr
+		} else if runner.runExecution != nil {
 			// A waiting native Run may have a live/expired owner. This is a
 			// Feature-validated CONTROL, not permission to execute a Tool.
 			// Seal the exact wait identity/next state and recheck inside the

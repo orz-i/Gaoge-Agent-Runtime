@@ -1,0 +1,13 @@
+SOURCE_SHA=df8dad572c82d1a569dc89d28ff32bd14cad3cc5
+COMMAND=cd go/agent-runtime && golangci-lint run ./...
+go/agent-runtime/agent/root_capability_wrappers_test.go:4:1: File is not properly formatted (goimports)
+	"context"
+^
+go/agent-runtime/conformance/ea1_root_agent_admission.go:313:6: func ea1AdmissionRunner is unused (unused)
+func ea1AdmissionRunner(t *testing.T, rt *kernel.Runtime, m model.Client, mw plugin.RunMiddleware) *agent.Runner {
+     ^
+2 issues:
+* goimports: 1
+* unused: 1
+
+EXIT_CODE=1

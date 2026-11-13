@@ -1,0 +1,5 @@
+SOURCE_SHA=909fc79d35739842e452fe52b84fb1941c55e24e
+COMMAND=go -C go/agent-runtime-harness test ./examples/task-agent -run '^$'
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness/examples/task-agent	0.481s [no tests to run]
+
+EXIT_CODE=0

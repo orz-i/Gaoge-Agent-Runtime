@@ -138,7 +138,7 @@ func TestAsyncDelegationCancellationRetriesExternalCleanup(t *testing.T) {
 	if err != nil || child.Run.Status != kernel.RunStatusRunning {
 		t.Fatalf("failed remote cleanup cancelled local shadow: %#v, %v", child.Run, err)
 	}
-	// The parent Kernel is already cancelled, but remote child cleanup is
+	// The returned parent scope remains protected while remote child cleanup is
 	// unknown. Read-only Refresh must NOT terminate the Harness Turn until
 	// the original Cancel resumes and verifies the delegated child.
 	if _, err = runner.Refresh(t.Context(), started.Turn.ID); !errors.Is(err, harness.ErrConflict) {

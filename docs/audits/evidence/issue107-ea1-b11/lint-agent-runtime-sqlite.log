@@ -1,0 +1,5 @@
+SOURCE_SHA=8fc23aae3b5719486d1bc25ed7b8455f01e4ab05
+COMMAND=cd go/agent-runtime-sqlite && golangci-lint run ./...
+0 issues.
+
+EXIT_CODE=0

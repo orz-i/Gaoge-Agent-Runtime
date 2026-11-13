@@ -116,8 +116,8 @@ func (runner *Runner) recordInvocationItem(ctx context.Context, invocation Invoc
 func (runner *Runner) startAgentPhysical(
 	ctx context.Context, invocation Invocation, request StartRequest, config ConfigSnapshot,
 ) (kernel.Snapshot, error) {
-	return runner.withPhysicalInvocationDispatch(ctx, invocation, "start", func() (kernel.Snapshot, error) {
-		return runner.agent.StartRun(ctx, agent.StartRequest{
+	return runner.withPhysicalInvocationDispatch(ctx, invocation, "start", func(physicalCtx context.Context) (kernel.Snapshot, error) {
+		return runner.agent.StartRun(physicalCtx, agent.StartRequest{
 			ID: invocation.ExecutionRefID, Actor: request.Actor, Thread: request.Thread,
 			RequestID: firstNonEmpty(strings.TrimSpace(request.RequestID), invocation.TurnID), Goal: request.Goal,
 			Model: config.Model, ModelOptions: append(json.RawMessage(nil), config.ModelOptions...),
@@ -263,9 +263,9 @@ func (runner *Runner) ResolveApproval(
 	if err != nil {
 		return Snapshot{}, err
 	}
-	resolved, resolveErr := runner.withPhysicalInvocationDispatch(runCtx, invocation, "resolve-approval", func() (kernel.Snapshot, error) {
+	resolved, resolveErr := runner.withPhysicalInvocationDispatch(runCtx, invocation, "resolve-approval", func(physicalCtx context.Context) (kernel.Snapshot, error) {
 		return runner.agent.ResolveApproval(
-			runCtx, runtimeSnapshot.Run.ID, runtimeSnapshot.Run.Revision,
+			physicalCtx, runtimeSnapshot.Run.ID, runtimeSnapshot.Run.Revision,
 			plugin.ApprovalResponse{Decision: decision, Comment: strings.TrimSpace(request.Comment)},
 		)
 	})
@@ -637,6 +637,12 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	if dependencies.Runtime == nil || dependencies.Agent == nil || dependencies.Store == nil {
 		return nil, ErrInvalidRequest
 	}
+	if native, ok := dependencies.Agent.(*agent.Runner); ok && native.SupportsManagedContextRecovery() {
+		host, supported := dependencies.Store.(managedHostStore)
+		if !supported || !dependencies.Runtime.UsesManagedRecoveryHost(host) {
+			return nil, ErrInvalidRequest
+		}
+	}
 	if dependencies.Clock == nil {
 		dependencies.Clock = systemClock{}
 	}
@@ -862,6 +868,16 @@ func (runner *Runner) refreshTurn(ctx context.Context, turnID string, expected *
 		if rootErr != nil || requireSessionRootOwner(turn, root, *expected) != nil {
 			return Snapshot{}, errors.Join(ErrConflict, rootErr)
 		}
+	}
+	// Refresh is observation, not the owner of an admitted cancellation.
+	// Check its durable fence after caller ownership validation but before
+	// any subtask/start-item repair, even while the root remains Running.
+	physicalEvidence, evidenceErr := runner.loadGlobalPhysicalEvidence(ctx, turn.ID)
+	if evidenceErr != nil {
+		return Snapshot{}, evidenceErr
+	}
+	if ActiveCancellationFence(physicalEvidence) {
+		return Snapshot{}, ErrConflict
 	}
 	if err = runner.syncSubtaskItems(ctx, turn); err != nil {
 		return Snapshot{}, err
@@ -1098,7 +1114,28 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 	}
 	runtimeSnapshot, found, err := runner.cancelRuntimeRun(ctx, invocation.ExecutionRefID, reason, &invocation)
 	if err != nil {
-		return Snapshot{}, runner.releaseNoEffectCancellation(ctx, turn, intent, invocation.ExecutionRefID, err)
+		if errors.Is(err, kernel.ErrChildExecutionBusy) && kernel.IsControlNoEffect(err) {
+			attempted, cleanupErr := runner.cleanupReturnedRootChildren(ctx, turn, intent, invocation, reason)
+			if attempted {
+				// Once the original cleanup election has written or dispatched,
+				// the earlier root-only no-effect proof cannot retire its fence.
+				if cleanupErr != nil {
+					return Snapshot{}, errors.Join(err, cleanupErr)
+				}
+				runtimeSnapshot, found, err = runner.cancelRuntimeRun(ctx, invocation.ExecutionRefID, reason, &invocation)
+				if err != nil {
+					return Snapshot{}, err
+				}
+			} else if cleanupErr != nil {
+				// Preserve the direct Kernel proof while the original release
+				// protocol evaluates it. A wrapper is not a new private proof.
+				released := runner.releaseNoEffectCancellation(ctx, turn, intent, invocation.ExecutionRefID, err)
+				return Snapshot{}, errors.Join(released, cleanupErr)
+			}
+		}
+		if err != nil {
+			return Snapshot{}, runner.releaseNoEffectCancellation(ctx, turn, intent, invocation.ExecutionRefID, err)
+		}
 	}
 	if !found {
 		runtimeSnapshot = cancelledRuntimeSnapshot(invocation.ExecutionRefID, reason)
@@ -1593,7 +1630,7 @@ func validateRootRuntimeOwnership(invocation Invocation, snapshot kernel.Snapsho
 	if err := json.Unmarshal(invocation.Input, &input); err != nil || strings.TrimSpace(input.Goal) == "" {
 		return ErrConflict
 	}
-	if strings.TrimSpace(invocation.ExecutionRefID) == "" ||
+	if strings.TrimSpace(invocation.ExecutionRefID) == "" || snapshot.Run.ParentRunID != "" ||
 		snapshot.Run.ID != invocation.ExecutionRefID || snapshot.Run.Kind != kind ||
 		snapshot.Run.Actor != actor || snapshot.Run.Thread != thread ||
 		snapshot.Run.Goal != input.Goal {

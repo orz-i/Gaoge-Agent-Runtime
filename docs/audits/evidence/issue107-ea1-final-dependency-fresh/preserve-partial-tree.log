@@ -1,0 +1,4 @@
+SOURCE_SHA=20187a21001a6c51fa0f3109460a0738f0991595
+COMMAND=mkdir /tmp/ea1-partial-node-modules && mv node_modules /tmp/ea1-partial-node-modules/root && mv ts/agent-runtime-client/node_modules /tmp/ea1-partial-node-modules/client
+
+EXIT_CODE=0

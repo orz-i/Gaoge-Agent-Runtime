@@ -1,0 +1,110 @@
+SOURCE_SHA=c458b03dbed049eae5baddd94fff4e97f6788c8a
+COMMAND=go -C go/agent-runtime test -count=1 ./memory -run '^TestEA1MiddlewareNextLifetimeMemory$' -v
+=== RUN   TestEA1MiddlewareNextLifetimeMemory
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/root
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/root/P0/create-denied
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/root/P0/stale-admission
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/root/P0/duplicate
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/root/P0/foreign-model
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/root/P1/run
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/root/P2/run/async
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/root/P2/run/unknown
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/root/P2/run/panic
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/root/P5/run/async-election
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/root/P1/model
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/root/P2/model/async
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/root/P2/model/unknown
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/root/P2/model/panic
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/root/P5/model/async-election
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/root/P1/tool
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/root/P2/tool/async
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/root/P2/tool/unknown
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/root/P2/tool/panic
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/root/P5/tool/async-election
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/root/P2/model/swallowed-inner
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/root/P3/durable-before-whole-return
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/root/P4/mark-ack-lost
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/root/P5/deadline-before-new-send
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/root/P1/default-owner
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child/P0/create-denied
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child/P0/stale-admission
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child/P0/duplicate
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child/P0/foreign-model
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child/P0/preflight
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child/P1/run
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child/P2/run/async
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child/P2/run/unknown
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child/P2/run/panic
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child/P5/run/async-election
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child/P1/model
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child/P2/model/async
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child/P2/model/unknown
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child/P2/model/panic
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child/P5/model/async-election
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child/P1/tool
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child/P2/tool/async
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child/P2/tool/unknown
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child/P2/tool/panic
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child/P5/tool/async-election
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child/P2/model/swallowed-inner
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child/P3/durable-before-whole-return
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child/P4/mark-ack-lost
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child/P5/deadline-before-new-send
+=== RUN   TestEA1MiddlewareNextLifetimeMemory/child/P1/default-owner
+--- PASS: TestEA1MiddlewareNextLifetimeMemory (6.34s)
+    --- PASS: TestEA1MiddlewareNextLifetimeMemory/root (3.17s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/root/P0/create-denied (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/root/P0/stale-admission (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/root/P0/duplicate (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/root/P0/foreign-model (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/root/P1/run (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/root/P2/run/async (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/root/P2/run/unknown (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/root/P2/run/panic (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/root/P5/run/async-election (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/root/P1/model (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/root/P2/model/async (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/root/P2/model/unknown (2.15s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/root/P2/model/panic (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/root/P5/model/async-election (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/root/P1/tool (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/root/P2/tool/async (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/root/P2/tool/unknown (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/root/P2/tool/panic (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/root/P5/tool/async-election (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/root/P2/model/swallowed-inner (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/root/P3/durable-before-whole-return (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/root/P4/mark-ack-lost (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/root/P5/deadline-before-new-send (1.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/root/P1/default-owner (0.00s)
+    --- PASS: TestEA1MiddlewareNextLifetimeMemory/child (3.17s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/child/P0/create-denied (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/child/P0/stale-admission (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/child/P0/duplicate (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/child/P0/foreign-model (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/child/P0/preflight (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/child/P1/run (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/child/P2/run/async (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/child/P2/run/unknown (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/child/P2/run/panic (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/child/P5/run/async-election (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/child/P1/model (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/child/P2/model/async (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/child/P2/model/unknown (2.15s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/child/P2/model/panic (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/child/P5/model/async-election (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/child/P1/tool (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/child/P2/tool/async (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/child/P2/tool/unknown (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/child/P2/tool/panic (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/child/P5/tool/async-election (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/child/P2/model/swallowed-inner (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/child/P3/durable-before-whole-return (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/child/P4/mark-ack-lost (0.00s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/child/P5/deadline-before-new-send (1.01s)
+        --- PASS: TestEA1MiddlewareNextLifetimeMemory/child/P1/default-owner (0.00s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory	7.163s
+
+EXIT_CODE=0

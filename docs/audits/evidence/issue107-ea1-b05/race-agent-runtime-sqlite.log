@@ -1,0 +1,6 @@
+SOURCE_SHA=d170665f48f3f0bb70df338b6ebced436042ad71
+COMMAND=TEST_POSTGRES_DSN=<dedicated-ephemeral> go -C go/agent-runtime-sqlite test -race -count=1 ./...
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite	65.358s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/examples/embedded	1.500s
+
+EXIT_CODE=0

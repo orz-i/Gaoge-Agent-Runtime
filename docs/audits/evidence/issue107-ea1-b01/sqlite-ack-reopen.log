@@ -1,0 +1,9 @@
+=== RUN   TestIssue107SQLiteRootWorkflowOriginalMarkAckLostReopenRecovery
+--- PASS: TestIssue107SQLiteRootWorkflowOriginalMarkAckLostReopenRecovery (0.10s)
+=== RUN   TestAuditIssue107CompletedWorkflowSettlementAckLostAfterSQLiteRestart
+--- PASS: TestAuditIssue107CompletedWorkflowSettlementAckLostAfterSQLiteRestart (0.08s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite	1.598s
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/examples/embedded	1.401s [no tests to run]

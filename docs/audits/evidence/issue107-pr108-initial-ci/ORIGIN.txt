@@ -1,0 +1,2 @@
+SOURCE_SHA=39971b62c7cf7ce0565191a2f7f4bace53259de6
+GitHub PR108 first remote CI run43401217008 job131804238211. Actual Linux integration failure, not local acceptance evidence.

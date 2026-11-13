@@ -1,0 +1,342 @@
+SOURCE_SHA=2d216518cfe48bc9e2ea6b02beb7733c246376a7
+COMMAND=go -C go/agent-runtime-harness-postgres test -race -count=2 -v ./... -run '^(TestEA1HACApprovalCancellationElection|TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart|TestEA1HACReceiptBeforeMark|TestEA1HarnessSubtaskControlAdmission|TestRealPostgresEA1HarnessAgentTaskCancelP4|TestRealPostgresEA1RootAgentCancelHostElection)$'
+=== RUN   TestRealPostgresEA1HarnessAgentTaskCancelP4
+--- PASS: TestRealPostgresEA1HarnessAgentTaskCancelP4 (0.63s)
+=== RUN   TestEA1HACReceiptBeforeMark
+=== RUN   TestEA1HACReceiptBeforeMark/kernel_memory
+=== RUN   TestEA1HACReceiptBeforeMark/kernel_memory/host_memory
+=== RUN   TestEA1HACReceiptBeforeMark/kernel_memory/host_postgres
+=== RUN   TestEA1HACReceiptBeforeMark/kernel_sqlite
+=== RUN   TestEA1HACReceiptBeforeMark/kernel_sqlite/host_memory
+=== RUN   TestEA1HACReceiptBeforeMark/kernel_sqlite/host_postgres
+=== RUN   TestEA1HACReceiptBeforeMark/kernel_postgres
+=== RUN   TestEA1HACReceiptBeforeMark/kernel_postgres/host_memory
+=== RUN   TestEA1HACReceiptBeforeMark/kernel_postgres/host_postgres
+--- PASS: TestEA1HACReceiptBeforeMark (2.98s)
+    --- PASS: TestEA1HACReceiptBeforeMark/kernel_memory (0.45s)
+        --- PASS: TestEA1HACReceiptBeforeMark/kernel_memory/host_memory (0.05s)
+        --- PASS: TestEA1HACReceiptBeforeMark/kernel_memory/host_postgres (0.40s)
+    --- PASS: TestEA1HACReceiptBeforeMark/kernel_sqlite (0.94s)
+        --- PASS: TestEA1HACReceiptBeforeMark/kernel_sqlite/host_memory (0.26s)
+        --- PASS: TestEA1HACReceiptBeforeMark/kernel_sqlite/host_postgres (0.68s)
+    --- PASS: TestEA1HACReceiptBeforeMark/kernel_postgres (1.59s)
+        --- PASS: TestEA1HACReceiptBeforeMark/kernel_postgres/host_memory (0.57s)
+        --- PASS: TestEA1HACReceiptBeforeMark/kernel_postgres/host_postgres (1.02s)
+=== RUN   TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart
+=== RUN   TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart/kernel_memory
+=== RUN   TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart/kernel_memory/host_memory
+=== RUN   TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart/kernel_memory/host_postgres
+=== RUN   TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart/kernel_sqlite
+=== RUN   TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart/kernel_sqlite/host_memory
+=== RUN   TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart/kernel_sqlite/host_postgres
+=== RUN   TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart/kernel_postgres
+=== RUN   TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart/kernel_postgres/host_memory
+=== RUN   TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart/kernel_postgres/host_postgres
+--- PASS: TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart (4.38s)
+    --- PASS: TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart/kernel_memory (0.80s)
+        --- PASS: TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart/kernel_memory/host_memory (0.04s)
+        --- PASS: TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart/kernel_memory/host_postgres (0.76s)
+    --- PASS: TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart/kernel_sqlite (1.57s)
+        --- PASS: TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart/kernel_sqlite/host_memory (0.39s)
+        --- PASS: TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart/kernel_sqlite/host_postgres (1.18s)
+    --- PASS: TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart/kernel_postgres (2.01s)
+        --- PASS: TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart/kernel_postgres/host_memory (0.52s)
+        --- PASS: TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart/kernel_postgres/host_postgres (1.49s)
+=== RUN   TestEA1HACApprovalCancellationElection
+=== RUN   TestEA1HACApprovalCancellationElection/kernel_memory
+=== RUN   TestEA1HACApprovalCancellationElection/kernel_memory/host_memory
+=== RUN   TestEA1HACApprovalCancellationElection/kernel_memory/host_postgres
+=== RUN   TestEA1HACApprovalCancellationElection/kernel_sqlite
+=== RUN   TestEA1HACApprovalCancellationElection/kernel_sqlite/host_memory
+=== RUN   TestEA1HACApprovalCancellationElection/kernel_sqlite/host_postgres
+=== RUN   TestEA1HACApprovalCancellationElection/kernel_postgres
+=== RUN   TestEA1HACApprovalCancellationElection/kernel_postgres/host_memory
+=== RUN   TestEA1HACApprovalCancellationElection/kernel_postgres/host_postgres
+--- PASS: TestEA1HACApprovalCancellationElection (2.67s)
+    --- PASS: TestEA1HACApprovalCancellationElection/kernel_memory (0.60s)
+        --- PASS: TestEA1HACApprovalCancellationElection/kernel_memory/host_memory (0.03s)
+        --- PASS: TestEA1HACApprovalCancellationElection/kernel_memory/host_postgres (0.57s)
+    --- PASS: TestEA1HACApprovalCancellationElection/kernel_sqlite (0.83s)
+        --- PASS: TestEA1HACApprovalCancellationElection/kernel_sqlite/host_memory (0.16s)
+        --- PASS: TestEA1HACApprovalCancellationElection/kernel_sqlite/host_postgres (0.67s)
+    --- PASS: TestEA1HACApprovalCancellationElection/kernel_postgres (1.24s)
+        --- PASS: TestEA1HACApprovalCancellationElection/kernel_postgres/host_memory (0.43s)
+        --- PASS: TestEA1HACApprovalCancellationElection/kernel_postgres/host_postgres (0.81s)
+=== RUN   TestRealPostgresEA1RootAgentCancelHostElection
+=== RUN   TestRealPostgresEA1RootAgentCancelHostElection/election-after
+=== RUN   TestRealPostgresEA1RootAgentCancelHostElection/receipt-before
+=== RUN   TestRealPostgresEA1RootAgentCancelHostElection/receipt-ack-loss
+--- PASS: TestRealPostgresEA1RootAgentCancelHostElection (1.03s)
+    --- PASS: TestRealPostgresEA1RootAgentCancelHostElection/election-after (0.34s)
+    --- PASS: TestRealPostgresEA1RootAgentCancelHostElection/receipt-before (0.38s)
+    --- PASS: TestRealPostgresEA1RootAgentCancelHostElection/receipt-ack-loss (0.31s)
+=== RUN   TestEA1HarnessSubtaskControlAdmission
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P0/missing
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P0/checkpoint
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P0/decision
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P0/actor
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P0/tenant
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P0/thread
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P0/parent
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P0/origin
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P0/original-runner
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P0/foreign-recorder
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P1/default
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P1/native
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P2/unknown-tool
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P2/receipt-fault
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P2/opaque-unknown-tool
+=== RUN   TestEA1HarnessSubtaskControlAdmission/sqlite
+=== RUN   TestEA1HarnessSubtaskControlAdmission/sqlite/P0/missing
+=== RUN   TestEA1HarnessSubtaskControlAdmission/sqlite/P0/checkpoint
+=== RUN   TestEA1HarnessSubtaskControlAdmission/sqlite/P0/decision
+=== RUN   TestEA1HarnessSubtaskControlAdmission/sqlite/P0/actor
+=== RUN   TestEA1HarnessSubtaskControlAdmission/sqlite/P0/tenant
+=== RUN   TestEA1HarnessSubtaskControlAdmission/sqlite/P0/thread
+=== RUN   TestEA1HarnessSubtaskControlAdmission/sqlite/P0/parent
+=== RUN   TestEA1HarnessSubtaskControlAdmission/sqlite/P0/origin
+=== RUN   TestEA1HarnessSubtaskControlAdmission/sqlite/P0/original-runner
+=== RUN   TestEA1HarnessSubtaskControlAdmission/sqlite/P0/foreign-recorder
+=== RUN   TestEA1HarnessSubtaskControlAdmission/sqlite/P1/default
+=== RUN   TestEA1HarnessSubtaskControlAdmission/sqlite/P1/native
+=== RUN   TestEA1HarnessSubtaskControlAdmission/sqlite/P2/unknown-tool
+=== RUN   TestEA1HarnessSubtaskControlAdmission/sqlite/P2/receipt-fault
+=== RUN   TestEA1HarnessSubtaskControlAdmission/sqlite/P2/opaque-unknown-tool
+=== RUN   TestEA1HarnessSubtaskControlAdmission/postgres
+=== RUN   TestEA1HarnessSubtaskControlAdmission/postgres/P0/missing
+=== RUN   TestEA1HarnessSubtaskControlAdmission/postgres/P0/checkpoint
+=== RUN   TestEA1HarnessSubtaskControlAdmission/postgres/P0/decision
+=== RUN   TestEA1HarnessSubtaskControlAdmission/postgres/P0/actor
+=== RUN   TestEA1HarnessSubtaskControlAdmission/postgres/P0/tenant
+=== RUN   TestEA1HarnessSubtaskControlAdmission/postgres/P0/thread
+=== RUN   TestEA1HarnessSubtaskControlAdmission/postgres/P0/parent
+=== RUN   TestEA1HarnessSubtaskControlAdmission/postgres/P0/origin
+=== RUN   TestEA1HarnessSubtaskControlAdmission/postgres/P0/original-runner
+=== RUN   TestEA1HarnessSubtaskControlAdmission/postgres/P0/foreign-recorder
+=== RUN   TestEA1HarnessSubtaskControlAdmission/postgres/P1/default
+=== RUN   TestEA1HarnessSubtaskControlAdmission/postgres/P1/native
+=== RUN   TestEA1HarnessSubtaskControlAdmission/postgres/P2/unknown-tool
+=== RUN   TestEA1HarnessSubtaskControlAdmission/postgres/P2/receipt-fault
+=== RUN   TestEA1HarnessSubtaskControlAdmission/postgres/P2/opaque-unknown-tool
+--- PASS: TestEA1HarnessSubtaskControlAdmission (8.73s)
+    --- PASS: TestEA1HarnessSubtaskControlAdmission/memory (0.25s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P0/missing (0.01s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P0/checkpoint (0.01s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P0/decision (0.01s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P0/actor (0.02s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P0/tenant (0.01s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P0/thread (0.01s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P0/parent (0.01s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P0/origin (0.01s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P0/original-runner (0.01s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P0/foreign-recorder (0.01s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P1/default (0.02s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P1/native (0.03s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P2/unknown-tool (0.03s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P2/receipt-fault (0.02s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P2/opaque-unknown-tool (0.02s)
+    --- PASS: TestEA1HarnessSubtaskControlAdmission/sqlite (2.53s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/sqlite/P0/missing (0.22s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/sqlite/P0/checkpoint (0.18s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/sqlite/P0/decision (0.13s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/sqlite/P0/actor (0.13s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/sqlite/P0/tenant (0.13s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/sqlite/P0/thread (0.14s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/sqlite/P0/parent (0.14s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/sqlite/P0/origin (0.15s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/sqlite/P0/original-runner (0.15s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/sqlite/P0/foreign-recorder (0.17s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/sqlite/P1/default (0.21s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/sqlite/P1/native (0.20s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/sqlite/P2/unknown-tool (0.20s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/sqlite/P2/receipt-fault (0.19s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/sqlite/P2/opaque-unknown-tool (0.19s)
+    --- PASS: TestEA1HarnessSubtaskControlAdmission/postgres (5.96s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/postgres/P0/missing (0.33s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/postgres/P0/checkpoint (0.41s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/postgres/P0/decision (0.58s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/postgres/P0/actor (0.28s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/postgres/P0/tenant (0.35s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/postgres/P0/thread (0.36s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/postgres/P0/parent (0.29s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/postgres/P0/origin (0.29s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/postgres/P0/original-runner (0.35s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/postgres/P0/foreign-recorder (0.38s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/postgres/P1/default (0.45s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/postgres/P1/native (0.62s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/postgres/P2/unknown-tool (0.48s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/postgres/P2/receipt-fault (0.38s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/postgres/P2/opaque-unknown-tool (0.42s)
+=== RUN   TestRealPostgresEA1HarnessAgentTaskCancelP4
+--- PASS: TestRealPostgresEA1HarnessAgentTaskCancelP4 (0.54s)
+=== RUN   TestEA1HACReceiptBeforeMark
+=== RUN   TestEA1HACReceiptBeforeMark/kernel_memory
+=== RUN   TestEA1HACReceiptBeforeMark/kernel_memory/host_memory
+=== RUN   TestEA1HACReceiptBeforeMark/kernel_memory/host_postgres
+=== RUN   TestEA1HACReceiptBeforeMark/kernel_sqlite
+=== RUN   TestEA1HACReceiptBeforeMark/kernel_sqlite/host_memory
+=== RUN   TestEA1HACReceiptBeforeMark/kernel_sqlite/host_postgres
+=== RUN   TestEA1HACReceiptBeforeMark/kernel_postgres
+=== RUN   TestEA1HACReceiptBeforeMark/kernel_postgres/host_memory
+=== RUN   TestEA1HACReceiptBeforeMark/kernel_postgres/host_postgres
+--- PASS: TestEA1HACReceiptBeforeMark (2.84s)
+    --- PASS: TestEA1HACReceiptBeforeMark/kernel_memory (0.50s)
+        --- PASS: TestEA1HACReceiptBeforeMark/kernel_memory/host_memory (0.03s)
+        --- PASS: TestEA1HACReceiptBeforeMark/kernel_memory/host_postgres (0.47s)
+    --- PASS: TestEA1HACReceiptBeforeMark/kernel_sqlite (0.95s)
+        --- PASS: TestEA1HACReceiptBeforeMark/kernel_sqlite/host_memory (0.26s)
+        --- PASS: TestEA1HACReceiptBeforeMark/kernel_sqlite/host_postgres (0.69s)
+    --- PASS: TestEA1HACReceiptBeforeMark/kernel_postgres (1.39s)
+        --- PASS: TestEA1HACReceiptBeforeMark/kernel_postgres/host_memory (0.47s)
+        --- PASS: TestEA1HACReceiptBeforeMark/kernel_postgres/host_postgres (0.92s)
+=== RUN   TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart
+=== RUN   TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart/kernel_memory
+=== RUN   TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart/kernel_memory/host_memory
+=== RUN   TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart/kernel_memory/host_postgres
+=== RUN   TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart/kernel_sqlite
+=== RUN   TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart/kernel_sqlite/host_memory
+=== RUN   TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart/kernel_sqlite/host_postgres
+=== RUN   TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart/kernel_postgres
+=== RUN   TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart/kernel_postgres/host_memory
+=== RUN   TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart/kernel_postgres/host_postgres
+--- PASS: TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart (4.09s)
+    --- PASS: TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart/kernel_memory (0.75s)
+        --- PASS: TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart/kernel_memory/host_memory (0.04s)
+        --- PASS: TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart/kernel_memory/host_postgres (0.70s)
+    --- PASS: TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart/kernel_sqlite (1.29s)
+        --- PASS: TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart/kernel_sqlite/host_memory (0.30s)
+        --- PASS: TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart/kernel_sqlite/host_postgres (0.99s)
+    --- PASS: TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart/kernel_postgres (2.06s)
+        --- PASS: TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart/kernel_postgres/host_memory (0.67s)
+        --- PASS: TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart/kernel_postgres/host_postgres (1.39s)
+=== RUN   TestEA1HACApprovalCancellationElection
+=== RUN   TestEA1HACApprovalCancellationElection/kernel_memory
+=== RUN   TestEA1HACApprovalCancellationElection/kernel_memory/host_memory
+=== RUN   TestEA1HACApprovalCancellationElection/kernel_memory/host_postgres
+=== RUN   TestEA1HACApprovalCancellationElection/kernel_sqlite
+=== RUN   TestEA1HACApprovalCancellationElection/kernel_sqlite/host_memory
+=== RUN   TestEA1HACApprovalCancellationElection/kernel_sqlite/host_postgres
+=== RUN   TestEA1HACApprovalCancellationElection/kernel_postgres
+=== RUN   TestEA1HACApprovalCancellationElection/kernel_postgres/host_memory
+=== RUN   TestEA1HACApprovalCancellationElection/kernel_postgres/host_postgres
+--- PASS: TestEA1HACApprovalCancellationElection (2.40s)
+    --- PASS: TestEA1HACApprovalCancellationElection/kernel_memory (0.36s)
+        --- PASS: TestEA1HACApprovalCancellationElection/kernel_memory/host_memory (0.02s)
+        --- PASS: TestEA1HACApprovalCancellationElection/kernel_memory/host_postgres (0.34s)
+    --- PASS: TestEA1HACApprovalCancellationElection/kernel_sqlite (0.74s)
+        --- PASS: TestEA1HACApprovalCancellationElection/kernel_sqlite/host_memory (0.18s)
+        --- PASS: TestEA1HACApprovalCancellationElection/kernel_sqlite/host_postgres (0.56s)
+    --- PASS: TestEA1HACApprovalCancellationElection/kernel_postgres (1.29s)
+        --- PASS: TestEA1HACApprovalCancellationElection/kernel_postgres/host_memory (0.45s)
+        --- PASS: TestEA1HACApprovalCancellationElection/kernel_postgres/host_postgres (0.85s)
+=== RUN   TestRealPostgresEA1RootAgentCancelHostElection
+=== RUN   TestRealPostgresEA1RootAgentCancelHostElection/election-after
+=== RUN   TestRealPostgresEA1RootAgentCancelHostElection/receipt-before
+=== RUN   TestRealPostgresEA1RootAgentCancelHostElection/receipt-ack-loss
+--- PASS: TestRealPostgresEA1RootAgentCancelHostElection (0.81s)
+    --- PASS: TestRealPostgresEA1RootAgentCancelHostElection/election-after (0.28s)
+    --- PASS: TestRealPostgresEA1RootAgentCancelHostElection/receipt-before (0.23s)
+    --- PASS: TestRealPostgresEA1RootAgentCancelHostElection/receipt-ack-loss (0.30s)
+=== RUN   TestEA1HarnessSubtaskControlAdmission
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P0/missing
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P0/checkpoint
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P0/decision
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P0/actor
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P0/tenant
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P0/thread
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P0/parent
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P0/origin
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P0/original-runner
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P0/foreign-recorder
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P1/default
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P1/native
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P2/unknown-tool
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P2/receipt-fault
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P2/opaque-unknown-tool
+=== RUN   TestEA1HarnessSubtaskControlAdmission/sqlite
+=== RUN   TestEA1HarnessSubtaskControlAdmission/sqlite/P0/missing
+=== RUN   TestEA1HarnessSubtaskControlAdmission/sqlite/P0/checkpoint
+=== RUN   TestEA1HarnessSubtaskControlAdmission/sqlite/P0/decision
+=== RUN   TestEA1HarnessSubtaskControlAdmission/sqlite/P0/actor
+=== RUN   TestEA1HarnessSubtaskControlAdmission/sqlite/P0/tenant
+=== RUN   TestEA1HarnessSubtaskControlAdmission/sqlite/P0/thread
+=== RUN   TestEA1HarnessSubtaskControlAdmission/sqlite/P0/parent
+=== RUN   TestEA1HarnessSubtaskControlAdmission/sqlite/P0/origin
+=== RUN   TestEA1HarnessSubtaskControlAdmission/sqlite/P0/original-runner
+=== RUN   TestEA1HarnessSubtaskControlAdmission/sqlite/P0/foreign-recorder
+=== RUN   TestEA1HarnessSubtaskControlAdmission/sqlite/P1/default
+=== RUN   TestEA1HarnessSubtaskControlAdmission/sqlite/P1/native
+=== RUN   TestEA1HarnessSubtaskControlAdmission/sqlite/P2/unknown-tool
+=== RUN   TestEA1HarnessSubtaskControlAdmission/sqlite/P2/receipt-fault
+=== RUN   TestEA1HarnessSubtaskControlAdmission/sqlite/P2/opaque-unknown-tool
+=== RUN   TestEA1HarnessSubtaskControlAdmission/postgres
+=== RUN   TestEA1HarnessSubtaskControlAdmission/postgres/P0/missing
+=== RUN   TestEA1HarnessSubtaskControlAdmission/postgres/P0/checkpoint
+=== RUN   TestEA1HarnessSubtaskControlAdmission/postgres/P0/decision
+=== RUN   TestEA1HarnessSubtaskControlAdmission/postgres/P0/actor
+=== RUN   TestEA1HarnessSubtaskControlAdmission/postgres/P0/tenant
+=== RUN   TestEA1HarnessSubtaskControlAdmission/postgres/P0/thread
+=== RUN   TestEA1HarnessSubtaskControlAdmission/postgres/P0/parent
+=== RUN   TestEA1HarnessSubtaskControlAdmission/postgres/P0/origin
+=== RUN   TestEA1HarnessSubtaskControlAdmission/postgres/P0/original-runner
+=== RUN   TestEA1HarnessSubtaskControlAdmission/postgres/P0/foreign-recorder
+=== RUN   TestEA1HarnessSubtaskControlAdmission/postgres/P1/default
+=== RUN   TestEA1HarnessSubtaskControlAdmission/postgres/P1/native
+=== RUN   TestEA1HarnessSubtaskControlAdmission/postgres/P2/unknown-tool
+=== RUN   TestEA1HarnessSubtaskControlAdmission/postgres/P2/receipt-fault
+=== RUN   TestEA1HarnessSubtaskControlAdmission/postgres/P2/opaque-unknown-tool
+--- PASS: TestEA1HarnessSubtaskControlAdmission (8.87s)
+    --- PASS: TestEA1HarnessSubtaskControlAdmission/memory (0.23s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P0/missing (0.01s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P0/checkpoint (0.01s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P0/decision (0.01s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P0/actor (0.01s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P0/tenant (0.01s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P0/thread (0.01s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P0/parent (0.01s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P0/origin (0.01s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P0/original-runner (0.01s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P0/foreign-recorder (0.01s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P1/default (0.03s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P1/native (0.02s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P2/unknown-tool (0.02s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P2/receipt-fault (0.02s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P2/opaque-unknown-tool (0.02s)
+    --- PASS: TestEA1HarnessSubtaskControlAdmission/sqlite (2.59s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/sqlite/P0/missing (0.17s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/sqlite/P0/checkpoint (0.16s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/sqlite/P0/decision (0.14s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/sqlite/P0/actor (0.16s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/sqlite/P0/tenant (0.16s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/sqlite/P0/thread (0.13s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/sqlite/P0/parent (0.14s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/sqlite/P0/origin (0.14s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/sqlite/P0/original-runner (0.18s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/sqlite/P0/foreign-recorder (0.16s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/sqlite/P1/default (0.26s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/sqlite/P1/native (0.21s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/sqlite/P2/unknown-tool (0.19s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/sqlite/P2/receipt-fault (0.19s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/sqlite/P2/opaque-unknown-tool (0.20s)
+    --- PASS: TestEA1HarnessSubtaskControlAdmission/postgres (6.05s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/postgres/P0/missing (0.40s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/postgres/P0/checkpoint (0.32s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/postgres/P0/decision (0.36s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/postgres/P0/actor (0.39s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/postgres/P0/tenant (0.42s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/postgres/P0/thread (0.31s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/postgres/P0/parent (0.37s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/postgres/P0/origin (0.28s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/postgres/P0/original-runner (0.34s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/postgres/P0/foreign-recorder (0.41s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/postgres/P1/default (0.51s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/postgres/P1/native (0.53s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/postgres/P2/unknown-tool (0.42s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/postgres/P2/receipt-fault (0.40s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/postgres/P2/opaque-unknown-tool (0.58s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-postgres	41.618s
+
+EXIT_CODE=0

@@ -1,0 +1,45 @@
+=== RUN   TestEA1RealPostgresP0SourceAdmission
+=== RUN   TestEA1RealPostgresP0SourceAdmission/foreign_tenancy_actor_thread_missing_and_terminal_parent
+=== RUN   TestEA1RealPostgresP0SourceAdmission/foreign_tenancy_actor_thread_missing_and_terminal_parent/foreign-tenant
+=== RUN   TestEA1RealPostgresP0SourceAdmission/foreign_tenancy_actor_thread_missing_and_terminal_parent/foreign-actor
+=== RUN   TestEA1RealPostgresP0SourceAdmission/foreign_tenancy_actor_thread_missing_and_terminal_parent/foreign-thread
+=== RUN   TestEA1RealPostgresP0SourceAdmission/foreign_tenancy_actor_thread_missing_and_terminal_parent/missing-parent
+=== RUN   TestEA1RealPostgresP0SourceAdmission/wrong_kind_duplicate_run_and_stale/future_expected_Revision
+--- PASS: TestEA1RealPostgresP0SourceAdmission (0.47s)
+    --- PASS: TestEA1RealPostgresP0SourceAdmission/foreign_tenancy_actor_thread_missing_and_terminal_parent (0.28s)
+        --- PASS: TestEA1RealPostgresP0SourceAdmission/foreign_tenancy_actor_thread_missing_and_terminal_parent/foreign-tenant (0.00s)
+        --- PASS: TestEA1RealPostgresP0SourceAdmission/foreign_tenancy_actor_thread_missing_and_terminal_parent/foreign-actor (0.00s)
+        --- PASS: TestEA1RealPostgresP0SourceAdmission/foreign_tenancy_actor_thread_missing_and_terminal_parent/foreign-thread (0.00s)
+        --- PASS: TestEA1RealPostgresP0SourceAdmission/foreign_tenancy_actor_thread_missing_and_terminal_parent/missing-parent (0.00s)
+    --- PASS: TestEA1RealPostgresP0SourceAdmission/wrong_kind_duplicate_run_and_stale/future_expected_Revision (0.19s)
+=== RUN   TestEA1RealPostgresP0SourceAdmission
+=== RUN   TestEA1RealPostgresP0SourceAdmission/foreign_tenancy_actor_thread_missing_and_terminal_parent
+=== RUN   TestEA1RealPostgresP0SourceAdmission/foreign_tenancy_actor_thread_missing_and_terminal_parent/foreign-tenant
+=== RUN   TestEA1RealPostgresP0SourceAdmission/foreign_tenancy_actor_thread_missing_and_terminal_parent/foreign-actor
+=== RUN   TestEA1RealPostgresP0SourceAdmission/foreign_tenancy_actor_thread_missing_and_terminal_parent/foreign-thread
+=== RUN   TestEA1RealPostgresP0SourceAdmission/foreign_tenancy_actor_thread_missing_and_terminal_parent/missing-parent
+=== RUN   TestEA1RealPostgresP0SourceAdmission/wrong_kind_duplicate_run_and_stale/future_expected_Revision
+--- PASS: TestEA1RealPostgresP0SourceAdmission (0.38s)
+    --- PASS: TestEA1RealPostgresP0SourceAdmission/foreign_tenancy_actor_thread_missing_and_terminal_parent (0.22s)
+        --- PASS: TestEA1RealPostgresP0SourceAdmission/foreign_tenancy_actor_thread_missing_and_terminal_parent/foreign-tenant (0.01s)
+        --- PASS: TestEA1RealPostgresP0SourceAdmission/foreign_tenancy_actor_thread_missing_and_terminal_parent/foreign-actor (0.00s)
+        --- PASS: TestEA1RealPostgresP0SourceAdmission/foreign_tenancy_actor_thread_missing_and_terminal_parent/foreign-thread (0.00s)
+        --- PASS: TestEA1RealPostgresP0SourceAdmission/foreign_tenancy_actor_thread_missing_and_terminal_parent/missing-parent (0.00s)
+    --- PASS: TestEA1RealPostgresP0SourceAdmission/wrong_kind_duplicate_run_and_stale/future_expected_Revision (0.16s)
+=== RUN   TestEA1RealPostgresP0SourceAdmission
+=== RUN   TestEA1RealPostgresP0SourceAdmission/foreign_tenancy_actor_thread_missing_and_terminal_parent
+=== RUN   TestEA1RealPostgresP0SourceAdmission/foreign_tenancy_actor_thread_missing_and_terminal_parent/foreign-tenant
+=== RUN   TestEA1RealPostgresP0SourceAdmission/foreign_tenancy_actor_thread_missing_and_terminal_parent/foreign-actor
+=== RUN   TestEA1RealPostgresP0SourceAdmission/foreign_tenancy_actor_thread_missing_and_terminal_parent/foreign-thread
+=== RUN   TestEA1RealPostgresP0SourceAdmission/foreign_tenancy_actor_thread_missing_and_terminal_parent/missing-parent
+=== RUN   TestEA1RealPostgresP0SourceAdmission/wrong_kind_duplicate_run_and_stale/future_expected_Revision
+--- PASS: TestEA1RealPostgresP0SourceAdmission (0.32s)
+    --- PASS: TestEA1RealPostgresP0SourceAdmission/foreign_tenancy_actor_thread_missing_and_terminal_parent (0.18s)
+        --- PASS: TestEA1RealPostgresP0SourceAdmission/foreign_tenancy_actor_thread_missing_and_terminal_parent/foreign-tenant (0.00s)
+        --- PASS: TestEA1RealPostgresP0SourceAdmission/foreign_tenancy_actor_thread_missing_and_terminal_parent/foreign-actor (0.00s)
+        --- PASS: TestEA1RealPostgresP0SourceAdmission/foreign_tenancy_actor_thread_missing_and_terminal_parent/foreign-thread (0.00s)
+        --- PASS: TestEA1RealPostgresP0SourceAdmission/foreign_tenancy_actor_thread_missing_and_terminal_parent/missing-parent (0.00s)
+    --- PASS: TestEA1RealPostgresP0SourceAdmission/wrong_kind_duplicate_run_and_stale/future_expected_Revision (0.14s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	2.996s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]

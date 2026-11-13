@@ -486,46 +486,37 @@ type resumeTurnRetryError struct{}
 func (resumeTurnRetryError) Error() string   { return "retryable provider failure" }
 func (resumeTurnRetryError) Retryable() bool { return true }
 
-func TestResumeTurnHonorsDurableModelRetryAfter(t *testing.T) {
+func TestResumeTurnDoesNotReplayRetryableErrorAfterModelDispatch(t *testing.T) {
 	t.Parallel()
 	clock := newResumeTurnClock()
-	base := memory.NewStore()
+	base := memory.NewStoreWithExecutionClock(clock)
 	store := harness.NewMemoryStore()
 	calls := 0
 	provider := resumeTurnModelFunc(func(context.Context, model.Request) (model.Response, error) {
 		calls++
-		if calls == 1 {
-			return model.Response{}, resumeTurnRetryError{}
-		}
-		return model.Response{Content: "recovered"}, nil
+		return model.Response{}, resumeTurnRetryError{}
 	})
 	host, runtime := newResumeTurnHarness(t, base, store, provider, clock, nil)
-	pending, _ := host.StartAgentTurn(t.Context(), testStartRequest())
-	if pending.Turn.Status != harness.TurnRunning || calls != 1 {
-		t.Fatalf("retry was not left running: turn=%+v calls=%d", pending.Turn, calls)
+	pending, startErr := host.StartAgentTurn(t.Context(), testStartRequest())
+	if startErr == nil || calls != 1 {
+		t.Fatalf("dispatched error must remain unknown: %v calls=%d", startErr, calls)
 	}
 	root, _ := harness.TopLevelInvocation(pending)
 	before, err := runtime.Load(t.Context(), root.ExecutionRefID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := agent.ViewState(before)
-	if err != nil || len(view.ModelInvocations) != 1 || view.ModelInvocations[0].RetryAfter == nil {
-		t.Fatalf("missing RetryAfter: view=%+v error=%v", view, err)
-	}
 	restarted, _ := newResumeTurnHarness(t, base, store, provider, clock, nil)
-	blocked, err := restarted.ResumeTurn(t.Context(), pending.Turn.ID)
-	if !errors.Is(err, agent.ErrModelInvocationBusy) || blocked.Turn.ID != pending.Turn.ID || blocked.Turn.Status != harness.TurnRunning || calls != 1 {
-		t.Fatalf("premature resume bypassed due time: turn=%+v error=%v calls=%d", blocked.Turn, err, calls)
-	}
-	after, err := runtime.Load(t.Context(), root.ExecutionRefID)
-	if err != nil || after.Run.Revision != before.Run.Revision {
-		t.Fatalf("blocked retry mutated Runtime: run=%+v error=%v", after.Run, err)
-	}
-	clock.now = view.ModelInvocations[0].RetryAfter.Add(time.Millisecond)
-	done, err := restarted.ResumeTurn(t.Context(), pending.Turn.ID)
-	if err != nil || done.Turn.Status != harness.TurnCompleted || calls != 2 {
-		t.Fatalf("due retry did not finish: turn=%+v error=%v calls=%d", done.Turn, err, calls)
+	for _, advance := range []time.Duration{0, 24 * time.Hour} {
+		clock.now = clock.now.Add(advance)
+		_, err = restarted.ResumeTurn(t.Context(), pending.Turn.ID)
+		if err == nil || calls != 1 {
+			t.Fatalf("retryable provider error replayed after %s: %v calls=%d", advance, err, calls)
+		}
+		after, loadErr := runtime.Load(t.Context(), root.ExecutionRefID)
+		if loadErr != nil || after.Run.Revision != before.Run.Revision || string(after.State) != string(before.State) {
+			t.Fatalf("unknown dispatch changed: %+v %v", after.Run, loadErr)
+		}
 	}
 }
 

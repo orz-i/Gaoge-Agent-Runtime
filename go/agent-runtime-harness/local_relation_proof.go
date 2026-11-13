@@ -30,6 +30,9 @@ func (runner *Runner) verifyLocalApprovalRun(ctx context.Context, candidate kern
 	if err := runner.verifyLocalRelationRun(ctx, candidate, false); err != nil {
 		return err
 	}
+	if err := runner.requireLiveApprovalAncestors(ctx, candidate.Run.ID); err != nil {
+		return err
+	}
 	var feature any
 	if runner.relationReader != nil {
 		relation, err := runner.relationReader.GetByChild(ctx, candidate.Run.ID)
@@ -65,6 +68,60 @@ func (runner *Runner) verifyLocalApprovalRun(ctx context.Context, candidate kern
 		return ErrRuntimeCancellationUnverified
 	}
 	return nil
+}
+
+// requireLiveApprovalAncestors separates read-only descendant ownership from
+// permission to create a new physical approval/Tool dispatch. A parent
+// Workflow/Team/GroupChat may already be cancelled or failed in Kernel while
+// its Harness Turn projection is stale. No terminal parent can mint a fresh
+// child approval, but cancellation cleanup can still traverse that ancestry.
+func (runner *Runner) requireLiveApprovalAncestors(ctx context.Context, childRunID string) error {
+	if runner == nil || runner.runtime == nil || childRunID == "" {
+		return ErrRuntimeCancellationUnverified
+	}
+	if runner.relationReader == nil {
+		// A proven native Invocation without a RunRelation is already
+		// checked by verifyLocalRelationRun. Raw Feature children require
+		// a RelationSource there and cannot reach this fallback.
+		return nil
+	}
+	seen := map[string]struct{}{childRunID: {}}
+	for current := childRunID; ; {
+		relation, err := runner.relationReader.GetByChild(ctx, current)
+		if errors.Is(err, runrelation.ErrNotFound) {
+			return nil // The verified Invocation is the root of this chain.
+		}
+		if err != nil || relation.ChildRunID != current || relation.ParentRunID == "" {
+			return errors.Join(ErrRuntimeCancellationUnverified, err)
+		}
+		switch relation.Kind {
+		case runrelation.KindTeamMember, runrelation.KindGroupChatSpeaker, runrelation.KindWorkflowEffect:
+			// Continue through raw Feature ownership, which has no
+			// independent Harness child Invocation or terminal admission.
+		case runrelation.KindCapability, runrelation.KindDelegation:
+			// These have a separately proven original Invocation/Attempt,
+			// which may be Host Application-owned with no Kernel Run.
+			return nil
+		default:
+			return ErrRuntimeCancellationUnverified
+		}
+		if _, cycle := seen[relation.ParentRunID]; cycle {
+			return ErrRuntimeCancellationUnverified
+		}
+		seen[relation.ParentRunID] = struct{}{}
+		parent, err := runner.runtime.Load(ctx, relation.ParentRunID)
+		if err != nil {
+			return errors.Join(ErrRuntimeCancellationUnverified, err)
+		}
+		switch parent.Run.Status {
+		case kernel.RunStatusRunning, kernel.RunStatusWaitingInput, kernel.RunStatusPausedBudget:
+		case kernel.RunStatusCompleted, kernel.RunStatusFailed, kernel.RunStatusCancelled:
+			return ErrRuntimeCancellationUnverified
+		default:
+			return ErrRuntimeCancellationUnverified
+		}
+		current = relation.ParentRunID
+	}
 }
 
 // verifyCapabilityRelationOwner binds an immutable KindCapability edge to
@@ -122,7 +179,7 @@ func (runner *Runner) verifyLocalRelationChain(ctx context.Context, candidate ke
 	}
 	rawFeatureChild := relationErr == nil && (relation.Kind == runrelation.KindTeamMember ||
 		relation.Kind == runrelation.KindGroupChatSpeaker || relation.Kind == runrelation.KindWorkflowEffect)
-	if rawFeatureChild && control && !runner.localHandoffCancellerOwnsKernel() {
+	if rawFeatureChild && control && !runner.localRelationCancellerOwnsKernel(candidate.Run.Kind) {
 		// A local ChildRunner does not authorize a different physical
 		// Canceller. Reject before any callback, not after its foreign effect.
 		return unverified()
@@ -198,6 +255,16 @@ func (runner *Runner) verifyLocalRelationChain(ctx context.Context, candidate ke
 		return unverified() // These require their own persisted Harness Invocation.
 	default:
 		return unverified()
+	}
+	if relation.Kind == runrelation.KindWorkflowEffect && candidate.Run.Kind == agent.RunKind {
+		// An AgentTask's Host effect must have indexed this physical child in
+		// the *same* immutable registry used by Harness. A coincidentally
+		// matching edge from another registry is never ownership evidence.
+		owner, ok := feature.(localCompositeExecutionOwner)
+		if !ok || !owner.OwnsKernelRuntime(runner.runtime) ||
+			!owner.RecordsRelationsTo(runner.relationReader) {
+			return unverified()
+		}
 	}
 	verifier, ok := feature.(localRelationVerifier)
 	if !ok || !verifier.VerifyLocalChild(runner.runtime, parent, relation, candidate, control) {

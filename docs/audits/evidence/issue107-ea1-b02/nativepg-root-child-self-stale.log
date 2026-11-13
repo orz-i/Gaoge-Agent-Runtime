@@ -1,0 +1,32 @@
+=== RUN   TestAuditIssue107PostgresBeginCannotBindCallerExpectedChildRevision
+    issue107_sixth_revision_audit_real_test.go:117: originalCallerRevision=1 currentRevision=2 storeGranted=false grantError=kernel execution lease is not current
+--- PASS: TestAuditIssue107PostgresBeginCannotBindCallerExpectedChildRevision (0.29s)
+=== RUN   TestIssue107RealPostgresParentedWorkflowPhysicalGrantSuite
+=== RUN   TestIssue107RealPostgresParentedWorkflowPhysicalGrantSuite/completed_Effect_fences_parent_then_retires_original_Grant
+=== RUN   TestIssue107RealPostgresParentedWorkflowPhysicalGrantSuite/unknown_remote_Pending_pins_parent_and_rejects_replay
+=== RUN   TestIssue107RealPostgresParentedWorkflowPhysicalGrantSuite/quiescent_Wait_releases_Grant,_denies_later_root_cancellation_bypass
+--- PASS: TestIssue107RealPostgresParentedWorkflowPhysicalGrantSuite (0.59s)
+    --- PASS: TestIssue107RealPostgresParentedWorkflowPhysicalGrantSuite/completed_Effect_fences_parent_then_retires_original_Grant (0.23s)
+    --- PASS: TestIssue107RealPostgresParentedWorkflowPhysicalGrantSuite/unknown_remote_Pending_pins_parent_and_rejects_replay (0.18s)
+    --- PASS: TestIssue107RealPostgresParentedWorkflowPhysicalGrantSuite/quiescent_Wait_releases_Grant,_denies_later_root_cancellation_bypass (0.18s)
+=== RUN   TestIssue107RealPostgresRootWorkflowPhysicalGrantConformance
+=== RUN   TestIssue107RealPostgresRootWorkflowPhysicalGrantConformance/Root_concurrent_Resume_and_Cancel_are_physically_serialized
+=== RUN   TestIssue107RealPostgresRootWorkflowPhysicalGrantConformance/Root_unknown_external_Pending_quarantines_physical_Grant
+=== RUN   TestIssue107RealPostgresRootWorkflowPhysicalGrantConformance/Root_revision_CAS_must_predate_physical_Effects
+--- PASS: TestIssue107RealPostgresRootWorkflowPhysicalGrantConformance (0.49s)
+    --- PASS: TestIssue107RealPostgresRootWorkflowPhysicalGrantConformance/Root_concurrent_Resume_and_Cancel_are_physically_serialized (0.22s)
+    --- PASS: TestIssue107RealPostgresRootWorkflowPhysicalGrantConformance/Root_unknown_external_Pending_quarantines_physical_Grant (0.14s)
+    --- PASS: TestIssue107RealPostgresRootWorkflowPhysicalGrantConformance/Root_revision_CAS_must_predate_physical_Effects (0.13s)
+=== RUN   TestAuditIssue107NativePostgresChildSelfPhysicalGrantFence
+=== RUN   TestAuditIssue107NativePostgresChildSelfPhysicalGrantFence/admitted_child_self-cancel_while_parent_cancel_denies
+    issue107_seventh_child_self_fence.go:45: originalGrant=childgrant_d920099584d4ce06fba552927116b60b expectedRevision=1 selfCancelErr=kernel descendant has an unsettled physical execution Grant selfStatus=
+=== RUN   TestAuditIssue107NativePostgresChildSelfPhysicalGrantFence/admitted_child_remains_version-fenced_against_external_Apply
+    issue107_seventh_child_self_fence.go:78: grant=childgrant_255966e5d8f9a622bc9b48d333007f8e concurrentApplyErr=kernel descendant has an unsettled physical execution Grant revisionAfter=0
+=== RUN   TestAuditIssue107NativePostgresChildSelfPhysicalGrantFence/rejected_child_Cancel_does_not_revoke_original_execution_lease
+--- PASS: TestAuditIssue107NativePostgresChildSelfPhysicalGrantFence (0.48s)
+    --- PASS: TestAuditIssue107NativePostgresChildSelfPhysicalGrantFence/admitted_child_self-cancel_while_parent_cancel_denies (0.15s)
+    --- PASS: TestAuditIssue107NativePostgresChildSelfPhysicalGrantFence/admitted_child_remains_version-fenced_against_external_Apply (0.16s)
+    --- PASS: TestAuditIssue107NativePostgresChildSelfPhysicalGrantFence/rejected_child_Cancel_does_not_revoke_original_execution_lease (0.17s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	3.286s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]

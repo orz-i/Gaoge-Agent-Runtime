@@ -1,0 +1,2 @@
+SOURCE_SHA=2624aae443ab1a97482f90f200283b5e00654946
+Memory fixture smoke only; EXIT_CODE=1; cross-Store runs not started. P1 unbound Runtime.Apply returned ErrExecutionRequired before the expected physical Busy. No ledger certification.

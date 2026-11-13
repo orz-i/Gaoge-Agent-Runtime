@@ -1,0 +1,34 @@
+SOURCE_SHA=20187a21001a6c51fa0f3109460a0738f0991595
+COMMAND=make metadata
+node --test scripts/beta-release-policy.test.mjs scripts/check-pr-body-format.test.mjs scripts/release-command.test.mjs scripts/sqlite-release-policy.test.mjs
+✔ Beta releases never publish to the npm registry or request publication credentials (0.908084ms)
+✔ Beta releases retain immutable tags, reviewed notes, and a TypeScript archive (0.233125ms)
+✔ Tag verification and the full Beta gates precede artifact publication (0.243375ms)
+✔ rejects the PR style with literal escaped Markdown separators (0.54425ms)
+✔ accepts actual Markdown line breaks (0.973333ms)
+✔ allows literal newline escapes in fenced or inline code (0.088666ms)
+✔ accepts body-file and rejects malformed GitHub PR event payload (107.792916ms)
+✔ non-Windows commands keep their original argument vector (1.438959ms)
+✔ Windows npm runs its JavaScript entrypoint, not cmd.exe (1.927708ms)
+✔ Windows pnpm can launch the native executable without cmd.exe (1.277667ms)
+✔ Windows pnpm supports the node_modules/.bin shim layout without a shell (2.425541ms)
+✔ missing Windows CLI fails closed instead of falling back to cmd.exe (1.48175ms)
+✔ the runner preserves shell metacharacters as literal argv values (46.129083ms)
+✔ the runner reports executable launch failures instead of a generic exit code (1.17975ms)
+﹣ Windows launches installed npm and pnpm without a shell (0.080791ms) # SKIP
+✔ SQLite joins one coordinated eleven-module Beta cohort (4.573708ms)
+✔ Harness release module stays vendor-neutral and isolates Provider-powered demo (0.984875ms)
+✔ release tag set includes SQLite at precisely the same version (45.5635ms)
+✔ publisher verifies actual tagged modules without source replacements (0.683167ms)
+ℹ tests 19
+ℹ suites 0
+ℹ pass 18
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 1
+ℹ todo 0
+ℹ duration_ms 183.129958
+node scripts/check-beta.mjs
+Agent Runtime 0.1.0-beta.24 Beta metadata gate passed
+
+EXIT_CODE=0

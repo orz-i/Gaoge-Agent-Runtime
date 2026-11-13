@@ -1,0 +1,16 @@
+SOURCE_SHA=6d969ba3f07e7672ecf2872883c377d81dc46205
+COMMAND=go -C go/agent-runtime-harness-postgres test -count=1 ./... -run '^(TestEA1HarnessSubtaskControlAdmission|TestEA1HACReceiptBeforeMark|TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart|TestEA1HACApprovalCancellationElection)$/(memory|kernel_memory)$' -v
+# github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-postgres
+../agent-runtime/jsoncontract/schema.go:16:2: github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres@v0.1.0-beta.24: reading github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/go.mod at revision go/agent-runtime-postgres/v0.1.0-beta.24: unknown revision go/agent-runtime-postgres/v0.1.0-beta.24
+# github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-postgres
+../agent-runtime/agent/execution_policy.go:15:2: github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres@v0.1.0-beta.24: reading github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/go.mod at revision go/agent-runtime-postgres/v0.1.0-beta.24: unknown revision go/agent-runtime-postgres/v0.1.0-beta.24
+# github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-postgres
+../agent-runtime/team/team.go:11:2: github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres@v0.1.0-beta.24: reading github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/go.mod at revision go/agent-runtime-postgres/v0.1.0-beta.24: unknown revision go/agent-runtime-postgres/v0.1.0-beta.24
+# github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-postgres
+budget.go:9:2: github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres@v0.1.0-beta.24: reading github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/go.mod at revision go/agent-runtime-postgres/v0.1.0-beta.24: unknown revision go/agent-runtime-postgres/v0.1.0-beta.24
+# github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-postgres
+budget.go:10:2: github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres@v0.1.0-beta.24: reading github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/go.mod at revision go/agent-runtime-postgres/v0.1.0-beta.24: unknown revision go/agent-runtime-postgres/v0.1.0-beta.24
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-postgres [setup failed]
+FAIL
+
+EXIT_CODE=1

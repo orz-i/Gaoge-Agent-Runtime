@@ -1,0 +1,423 @@
+{
+  "status": "PROPOSAL_ONLY_NOT_ACCEPTANCE",
+  "source_sha": "0a4009a8171f1726edaea895798d551051753400",
+  "scope": "Six MW-NEXT candidates and metadata-only native SQLite version correction; no ledger edits or new PASS claims.",
+  "candidates": [
+    {
+      "cell_id": "EA1-MW-NEXT-P0",
+      "reviewer_note": "Actual Root/Child Agent Start exercises denied Create, stale pre-admission control winner, duplicate original Run, and a changed ModelNext RunID; Child additionally exercises original complete-request/ancestor StartControlPreflight rejection. Each exact typed denial preserves original self/ancestor source and authority and sends zero Model/Tool work. Foreign ModelNext is rejected after admission, not misrepresented as zero middleware entry. Public API supplies no independent caller-authentication input; no Host authentication claim.",
+      "actual_backends": "Memory/retained-store fresh-owner; nativeSQLite-v5/independent handles with all-handles-close-reopen for P2/P4; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent pools and fresh recovery pool (original pools retained until cleanup)",
+      "required_leaf_families": [
+        "root+child/create-denied",
+        "root+child/stale-admission",
+        "root+child/duplicate",
+        "root+child/foreign-model",
+        "child/preflight"
+      ],
+      "frozen_verdict": "UNRUN"
+    },
+    {
+      "cell_id": "EA1-MW-NEXT-P1",
+      "reviewer_note": "Actual admitted Run, Model and Tool middleware are held before their Next dispatch. Independent self/ancestor Cancel and ordinary Apply follow exact native-required/physical-busy/terminal precedence without snapshot, grant or epoch mutation. Double and retained Next closures reject ErrNextAlreadyCalled. Explicit native paths cover all three chains; default owner is an additional Run-chain vector, not all-chain/default Cartesian coverage. Successful whole callback settles exactly once.",
+      "actual_backends": "Memory/retained-store fresh-owner; nativeSQLite-v5/independent handles with all-handles-close-reopen for P2/P4; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent pools and fresh recovery pool (original pools retained until cleanup)",
+      "required_leaf_families": [
+        "root+child/P1/run",
+        "root+child/P1/model",
+        "root+child/P1/tool",
+        "root+child/P1/default-owner"
+      ],
+      "frozen_verdict": "UNRUN"
+    },
+    {
+      "cell_id": "EA1-MW-NEXT-P2",
+      "reviewer_note": "Actual Root/Child Run, Model and Tool chains exercise admitted asynchronous Next, post-Next unknown error and panic; outer execution joins admitted Next before return. The swallowed-inner Model error uses a replacement context and an outer nil result: the Child now owns an independent Run/grant/source/operation-bound callback journal, so inner unknown cannot be erased or borrow its parent journal; Root unknown protection remains unchanged. Unknown cases retain the original grant/full source and receipts, with no committed Mark; fresh reconciliation cannot retire them, and retained Next remains rejected. Model unknown with a native lease also tests real expiry without authorizing replay. The original B21 FAIL remains historical evidence; final acceptance requires this source rerun and review, not rewriting the old failure.",
+      "actual_backends": "Memory/retained-store fresh-owner; nativeSQLite-v5/independent handles with all-handles-close-reopen for P2/P4; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent pools and fresh recovery pool (original pools retained until cleanup)",
+      "required_leaf_families": [
+        "root+child/P2/{run,model,tool}/{async,unknown,panic}",
+        "root+child/P2/model/swallowed-inner"
+      ],
+      "frozen_verdict": "FAIL"
+    },
+    {
+      "cell_id": "EA1-MW-NEXT-P3",
+      "reviewer_note": "Actual Model/Tool receipts are durable while the outer original Run callback is still executing after Next. Before whole callback return the marker count is zero; exact self/ancestor control fences and all retained Next closures preserve full source, receipts and grant. Only after the complete original callback returns may ordinary first-party Mark/Finish settle once. Receipt existence alone is not whole-callback completion and does not authorize synthesizing a missing marker.",
+      "actual_backends": "Memory/retained-store fresh-owner; nativeSQLite-v5/independent handles with all-handles-close-reopen for P2/P4; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent pools and fresh recovery pool (original pools retained until cleanup)",
+      "required_leaf_families": [
+        "root+child/P3/durable-before-whole-return"
+      ],
+      "frozen_verdict": "UNRUN"
+    },
+    {
+      "cell_id": "EA1-MW-NEXT-P4",
+      "reviewer_note": "The original Store Mark commits, then its wrapper loses the ACK and holds Finish. Child uses actual ReconcileChildPhysicalGrant once to reach the held Finish; Root follows its own existing recovery entry, not a Child marker substitute. Fresh recovery uses the original committed marker, removes that original grant, and does not replay Model, Tool or retained Next. Full original receipt/source snapshots are retained. SQLite closes both original handles before reopen; PostgreSQL opens a genuinely separate recovery pool, without claiming all pools closed or process restart.",
+      "actual_backends": "Memory/retained-store fresh-owner; nativeSQLite-v5/independent handles with all-handles-close-reopen for P2/P4; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent pools and fresh recovery pool (original pools retained until cleanup)",
+      "required_leaf_families": [
+        "root+child/P4/mark-ack-lost"
+      ],
+      "frozen_verdict": "UNRUN"
+    },
+    {
+      "cell_id": "EA1-MW-NEXT-P5",
+      "reviewer_note": "Explicit entered/returned/release/done barriers hold admitted asynchronous Run, Model and Tool Next while an independent peer performs real Resume and self/ancestor control attempts. The competing Resume is rejected with exact ModelOutcomeUnknown or ToolOutcomeUnknown as applicable; original snapshots, grant, receipts and native authority are unchanged, and the original caller joins Next before settlement. Separate real Run/ancestor deadline vectors reject Expire while the physical scope is active and prevent new physical sends after the deadline. These are active-owner/contender schedules, not two successful recovery winners or durable Host cancellation elections; shared Host budget is not an input of this plugin/Agent fixture.",
+      "actual_backends": "Memory/retained-store fresh-owner; nativeSQLite-v5/independent handles with all-handles-close-reopen for P2/P4; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent pools and fresh recovery pool (original pools retained until cleanup)",
+      "required_leaf_families": [
+        "root+child/P5/{run,model,tool}/async-election",
+        "root+child/P5/deadline-before-new-send"
+      ],
+      "frozen_verdict": "UNRUN"
+    }
+  ],
+  "historical_failure": {
+    "cell_id": "EA1-MW-NEXT-P2",
+    "source_sha": "2af101dec9a5fbc2e53a8e4c1ab462c6944e3be2",
+    "evidence": "docs/audits/evidence/issue107-ea1-b21-smoke/smoke-memory.log",
+    "handling": "Retain original FAIL evidence and old note as history. Candidate final-source note accurately describes independently reviewed Child journal fix; do not carry old No production fix yet into new-source accepted note."
+  },
+  "backend_label_proposals": [
+    {
+      "cell_id": "EA1-AR-S-P0",
+      "old": "Memory/retained-store; nativeSQLite-v4/independent-peer-and-P2-reopen; auxiliary GORM-SQLite/serialized-admission; PostgreSQL16/independent-connections",
+      "proposed": "Memory/retained-store; nativeSQLite-v5/independent-peer-and-P2-reopen; auxiliary GORM-SQLite/serialized-admission; PostgreSQL16/independent-connections",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AR-S-P1",
+      "old": "Memory/retained-store; nativeSQLite-v4/independent-peer-and-P2-reopen; auxiliary GORM-SQLite/serialized-admission; PostgreSQL16/independent-connections",
+      "proposed": "Memory/retained-store; nativeSQLite-v5/independent-peer-and-P2-reopen; auxiliary GORM-SQLite/serialized-admission; PostgreSQL16/independent-connections",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AR-S-P2",
+      "old": "Memory/retained-store; nativeSQLite-v4/independent-peer-and-P2-reopen; auxiliary GORM-SQLite/serialized-admission; PostgreSQL16/independent-connections",
+      "proposed": "Memory/retained-store; nativeSQLite-v5/independent-peer-and-P2-reopen; auxiliary GORM-SQLite/serialized-admission; PostgreSQL16/independent-connections",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AR-S-P3",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AR-S-P4",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AR-S-P5",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AR-R-P0",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AR-R-P1",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AR-R-P2",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AR-R-P3",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AR-R-P4",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AR-R-P5",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AR-A-P0",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AR-A-P1",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AR-A-P2",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AR-A-P3",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AR-A-P4",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AR-A-P5",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AR-C-P0",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools; Host Memory/fresh Runner; Host PostgreSQL/close-original-and-peer then new-pool; Host fixture Kernel Memory retained separately from native Core evidence",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools; Host Memory/fresh Runner; Host PostgreSQL/close-original-and-peer then new-pool; Host fixture Kernel Memory retained separately from native Core evidence",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AR-C-P1",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools; Host Memory/fresh Runner; Host PostgreSQL/close-original-and-peer then new-pool; Host fixture Kernel Memory retained separately from native Core evidence",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools; Host Memory/fresh Runner; Host PostgreSQL/close-original-and-peer then new-pool; Host fixture Kernel Memory retained separately from native Core evidence",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AR-C-P2",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools; Host Memory/fresh Runner; Host PostgreSQL/close-original-and-peer then new-pool; Host fixture Kernel Memory retained separately from native Core evidence",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools; Host Memory/fresh Runner; Host PostgreSQL/close-original-and-peer then new-pool; Host fixture Kernel Memory retained separately from native Core evidence",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AR-C-P3",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools; Host Memory/fresh Runner; Host PostgreSQL/close-original-and-peer then new-pool; Host fixture Kernel Memory retained separately from native Core evidence",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools; Host Memory/fresh Runner; Host PostgreSQL/close-original-and-peer then new-pool; Host fixture Kernel Memory retained separately from native Core evidence",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AR-C-P4",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools; Host Memory/fresh Runner; Host PostgreSQL/close-original-and-peer then new-pool; Host fixture Kernel Memory retained separately from native Core evidence",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools; Host Memory/fresh Runner; Host PostgreSQL/close-original-and-peer then new-pool; Host fixture Kernel Memory retained separately from native Core evidence",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AR-C-P5",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools; Host Memory/fresh Runner; Host PostgreSQL/close-original-and-peer then new-pool; Host fixture Kernel Memory retained separately from native Core evidence",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools; Host Memory/fresh Runner; Host PostgreSQL/close-original-and-peer then new-pool; Host fixture Kernel Memory retained separately from native Core evidence",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AR-Q-P0",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AR-Q-P1",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AR-Q-P2",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AR-Q-P3",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AR-Q-P4",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AR-Q-P5",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/close-reopen and independent-peer; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AC-S-P0",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/all-handles-close-reopen; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/all-handles-close-reopen; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AC-S-P1",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/all-handles-close-reopen; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/all-handles-close-reopen; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AC-S-P2",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/all-handles-close-reopen; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/all-handles-close-reopen; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AC-S-P3",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/all-handles-close-reopen; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/all-handles-close-reopen; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AC-S-P5",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/all-handles-close-reopen; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/all-handles-close-reopen; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AC-R-P0",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/all-handles-close-reopen; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/all-handles-close-reopen; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AC-R-P1",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/all-handles-close-reopen; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/all-handles-close-reopen; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AC-R-P2",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/all-handles-close-reopen; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/all-handles-close-reopen; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AC-R-P3",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/all-handles-close-reopen; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/all-handles-close-reopen; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AC-R-P4",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/all-handles-close-reopen; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/all-handles-close-reopen; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AC-R-P5",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/all-handles-close-reopen; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/all-handles-close-reopen; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AC-A-P0",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/all-handles-close-reopen; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/all-handles-close-reopen; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AC-A-P1",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/all-handles-close-reopen; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/all-handles-close-reopen; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AC-A-P2",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/all-handles-close-reopen; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/all-handles-close-reopen; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AC-A-P3",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/all-handles-close-reopen; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/all-handles-close-reopen; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AC-A-P4",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/all-handles-close-reopen; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/all-handles-close-reopen; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AC-A-P5",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/all-handles-close-reopen; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/all-handles-close-reopen; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AC-C-P0",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/all-handles-close-reopen; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools; Host Memory; Host PostgreSQL/close-old-and-peer/newpool, retained Memory Kernel and original Feature registries",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/all-handles-close-reopen; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools; Host Memory; Host PostgreSQL/close-old-and-peer/newpool, retained Memory Kernel and original Feature registries",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AC-C-P2",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/all-handles-close-reopen; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools; Host Memory; Host PostgreSQL/close-old-and-peer/newpool, retained Memory Kernel and original Feature registries",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/all-handles-close-reopen; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools; Host Memory; Host PostgreSQL/close-old-and-peer/newpool, retained Memory Kernel and original Feature registries",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AC-C-P3",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/all-handles-close-reopen; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools; Host Memory; Host PostgreSQL/close-old-and-peer/newpool, retained Memory Kernel and original Feature registries",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/all-handles-close-reopen; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools; Host Memory; Host PostgreSQL/close-old-and-peer/newpool, retained Memory Kernel and original Feature registries",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AC-C-P4",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/all-handles-close-reopen; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools; Host Memory; Host PostgreSQL/close-old-and-peer/newpool, retained Memory Kernel and original Feature registries",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/all-handles-close-reopen; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools; Host Memory; Host PostgreSQL/close-old-and-peer/newpool, retained Memory Kernel and original Feature registries",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AC-Q-P1",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/all-handles-close-reopen; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/all-handles-close-reopen; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AC-Q-P3",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/all-handles-close-reopen; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/all-handles-close-reopen; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    },
+    {
+      "cell_id": "EA1-AC-Q-P5",
+      "old": "Memory/retained-store fresh-owner; nativeSQLite-v4/all-handles-close-reopen; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "proposed": "Memory/retained-store fresh-owner; nativeSQLite-v5/all-handles-close-reopen; auxiliary GORM-SQLite/shared-DB fresh-wrapper; PostgreSQL16/independent-pools",
+      "condition": "Apply only together with independently accepted final-source rerun; historical old-source backend label/evidence stays intact."
+    }
+  ],
+  "backend_label_count": 54,
+  "static_source_sha256": {
+    "go/agent-runtime/conformance/ea1_middleware_next_lifetime.go": "4de5979adf68c8c0e7fd698d2057ed92564d10e4c991109665a4d9e719bbb253",
+    "go/agent-runtime/agent/child_physical_grant.go": "fc40c95b64aee9396f9d186dbd72ee6b1b6e357ed291c13a666081b6525ea539",
+    "go/agent-runtime/agent/root_execution.go": "bd81598e81c72c1ae400743b06f2c2af7d1e89aea7bb5ea373376f0c3c28b100",
+    "go/agent-runtime-sqlite/sqlite.go": "daad4f483812d1fae96a5486e1eda002147d34795586f176670cafc2e6de0570",
+    "go/agent-runtime/memory/ea1_middleware_next_lifetime_test.go": "8ab08e35e0647d149e5794e3ca497a174941ac052c6c8cbd0ea551b0cd6c48ea",
+    "go/agent-runtime-sqlite/ea1_middleware_next_lifetime_test.go": "6ad2a3830d8537aa3ba458e634dae5f84a22ab4e1b3858d80fb5c651d475dc72",
+    "go/agent-runtime-postgres/ea1_middleware_next_lifetime_test.go": "ceb643ccfa20188990ee983f61487eb147ee02fca91f1c160a55d6327172d5f0",
+    "go/agent-runtime-postgres/ea1_middleware_next_lifetime_real_test.go": "598b26a593f3e5a98cd3c038f39d7873f68e926271759a7930e680ff10dfb2ba"
+  },
+  "limits": [
+    "No test or gate was run for this proposal. All notes await completed same-source evidence plus independent acceptance.",
+    "Root has empty OriginFingerprint; Child uses original parent and ancestor preflight. Source checks are not caller authentication.",
+    "Memory and auxiliary GORM retain process state; fresh wrappers are not restart durability. SQLite P2/P4 close all handles, but saved closures and Feature registries remain in process.",
+    "PostgreSQL uses independent pools and fresh recovery pool; this particular factory does not close all old pools before recovery.",
+    "Only 54 explicit nativeSQLite-v4 labels are proposed for literal version substitution. Other backend labels, reopen restrictions and Host/Kernel separation remain untouched.",
+    "SQLite CreateNew current schemaVersion=5 is a final-source implementation fact, not a claim that all old v4 evidence was run on v5. Historical receipts/logs are never rewritten."
+  ],
+  "proposal_carried_from_source_sha": "08d236bb6766dd54547fbf8802a168a610878f13",
+  "source_recheck": "Every referenced MW implementation/registry and SQLite version file has an identical frozen SHA256 at the new source; proposal remains unsigned."
+}

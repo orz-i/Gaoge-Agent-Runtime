@@ -1,0 +1,8 @@
+SOURCE_SHA=310fdd9c3054fdddd690ab475fc194faea2984cf
+COMMAND=python3 scripts/check-issue107-matrix.py --strict
+EA-1 NO-GO: unrun/failing cells, inconsistent SHAs or open blocker
+EA-1 inventory: 24 entrypoints x 6 phases = 144 cells
+Inventory: EVIDENCE_TO_VERIFY=92, N_A_REVIEW=5, OPEN_COVERAGE=47
+Evidence: PASS=138, UNRUN=6
+
+EXIT_CODE=1

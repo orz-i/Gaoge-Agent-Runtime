@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -27,7 +28,7 @@ func TestUnboundFencedResumeDoesNotExecuteToolBeforeCAS(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = store.Close() }()
-	fenced := &controlTestFencedCreateStore{Store: store, execution: store}
+	fenced := &controlTestFencedCreateStore{Store: store}
 	starting, err := kernel.New(kernel.Dependencies{Store: fenced})
 	if err != nil {
 		t.Fatal(err)
@@ -61,8 +62,13 @@ func TestUnboundFencedResumeDoesNotExecuteToolBeforeCAS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	competitor, err := plain.AcquireExecution(ctx, kernel.ExecutionAcquireRequest{RunID: approved.Run.ID, OwnerID: "actual-competitor", LeaseDuration: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = plain.ReleaseExecution(ctx, competitor) }()
 	_, err = unbound.Resume(ctx, approved.Run.ID, approved.Run.Revision)
-	if !errors.Is(err, kernel.ErrExecutionRequired) {
+	if !errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("unbound Resume not rejected BEFORE effects: %v", err)
 	}
 	after, err := os.ReadFile(marker)
@@ -73,8 +79,16 @@ func TestUnboundFencedResumeDoesNotExecuteToolBeforeCAS(t *testing.T) {
 		t.Fatalf("unbound Resume produced a physical Tool effect: before=%q after=%q", before, after)
 	}
 	still, err := plain.Load(ctx, approved.Run.ID)
-	if err != nil || still.Run.Revision != approved.Run.Revision {
-		t.Fatalf("unbound Resume changed persisted revision %+v %v", still.Run, err)
+	if err != nil || !reflect.DeepEqual(still, approved) {
+		t.Fatalf("unbound Resume changed original snapshot %+v %v", still.Run, err)
+	}
+	if err = store.CheckExecution(ctx, approved.Run.ID, &competitor); err != nil {
+		t.Fatalf("rejected Resume changed the original competing owner: %v", err)
+	}
+	// A different legitimate owner is admitted only after the original caller
+	// explicitly releases its still-current lease, not by fixture takeover.
+	if err = plain.ReleaseExecution(ctx, competitor); err != nil {
+		t.Fatal(err)
 	}
 	lease, err := plain.AcquireExecution(ctx, kernel.ExecutionAcquireRequest{
 		RunID: approved.Run.ID, OwnerID: "authorized", LeaseDuration: time.Minute,

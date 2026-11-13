@@ -13,7 +13,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider/anthropic"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
@@ -78,13 +77,16 @@ func TestAnthropicRejectedContentBadDeltaNeverCertifiesAgentCompletion(t *testin
 			if err != nil {
 				t.Fatal(err)
 			}
-			rt, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
+			store, clock := newProviderUnknownStore()
+			rt, err := kernel.New(kernel.Dependencies{Store: store, Clock: clock})
 			if err != nil {
 				t.Fatal(err)
 			}
-			runner, err := agent.NewRunner(agent.Dependencies{
+			deps := agent.Dependencies{
 				Runtime: rt, Model: router, Catalog: registry, Executor: registry,
-			})
+			}
+			deps.Clock = clock
+			runner, err := agent.NewRunner(deps)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -96,7 +98,8 @@ func TestAnthropicRejectedContentBadDeltaNeverCertifiesAgentCompletion(t *testin
 				ToolKeys: []string{"lookup:v1"}, RequiredToolKeys: []string{"lookup:v1"},
 				Limits: agent.Limits{MaxLLMCalls: 2, MaxToolCalls: 2},
 			})
-			if callErr == nil || run.Run.Status != kernel.RunStatusFailed ||
+			assertProviderUnknownNoReplay(t, store, clock, deps, run, callErr, func() int64 { return int64(requests.Load())*1000 + int64(effects.Load()) })
+			if callErr == nil || run.Run.Status != kernel.RunStatusRunning ||
 				requests.Load() != 2 || effects.Load() != 0 {
 				t.Fatalf("bad framing authorized execution or completed run: status=%s code=%s err=%v requests=%d effects=%d",
 					run.Run.Status, run.Run.ErrorCode, callErr, requests.Load(), effects.Load())

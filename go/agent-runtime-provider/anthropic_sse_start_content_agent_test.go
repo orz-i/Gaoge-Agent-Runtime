@@ -13,7 +13,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider/anthropic"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
@@ -96,13 +95,16 @@ func TestAnthropicSSEInitialPhysicalContentCannotDispatchTool(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
+			store, clock := newProviderUnknownStore()
+			runtime, err := kernel.New(kernel.Dependencies{Store: store, Clock: clock})
 			if err != nil {
 				t.Fatal(err)
 			}
-			runner, err := agent.NewRunner(agent.Dependencies{
+			deps := agent.Dependencies{
 				Runtime: runtime, Model: router, Catalog: registry, Executor: registry,
-			})
+			}
+			deps.Clock = clock
+			runner, err := agent.NewRunner(deps)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -116,7 +118,8 @@ func TestAnthropicSSEInitialPhysicalContentCannotDispatchTool(t *testing.T) {
 				RequiredToolKeys: []string{"lookup:v1"},
 				Limits:           agent.Limits{MaxLLMCalls: 4, MaxToolCalls: 2},
 			})
-			if runErr == nil || snapshot.Run.Status != kernel.RunStatusFailed ||
+			assertProviderUnknownNoReplay(t, store, clock, deps, snapshot, runErr, func() int64 { return int64(requests.Load())*1000 + int64(effects.Load()) })
+			if runErr == nil || snapshot.Run.Status != kernel.RunStatusRunning ||
 				snapshot.Run.ErrorCode != "agent.model_failed" ||
 				requests.Load() != 2 || effects.Load() != 0 {
 				t.Fatalf("physical SSE content was discarded into Tool execution: err=%v status=%s code=%s requests=%d effects=%d",

@@ -1,0 +1,206 @@
+SOURCE_SHA=0a4009a8171f1726edaea895798d551051753400
+COMMAND=go -C go/agent-runtime-a2a test -race -count=1 -v ./...
+=== RUN   TestPluginCancellationUsesFrozenBindingAndChecksRevision
+=== PAUSE TestPluginCancellationUsesFrozenBindingAndChecksRevision
+=== RUN   TestPluginCancellationRetainsRemoteTaskForRetry
+=== PAUSE TestPluginCancellationRetainsRemoteTaskForRetry
+=== RUN   TestPluginCancellationRejectsChangedFrozenBinding
+=== PAUSE TestPluginCancellationRejectsChangedFrozenBinding
+=== RUN   TestClientStreamsA2A10HTTPJSON
+=== PAUSE TestClientStreamsA2A10HTTPJSON
+=== RUN   TestClientSubscribesToRunningTask
+=== PAUSE TestClientSubscribesToRunningTask
+=== RUN   TestClientDiscoversA2A10HTTPJSONAndSendsMessage
+=== PAUSE TestClientDiscoversA2A10HTTPJSONAndSendsMessage
+=== RUN   TestClientSendsRichContentAndListsTasks
+=== PAUSE TestClientSendsRichContentAndListsTasks
+=== RUN   TestClientCancelTaskUsesExactA2AVersion
+=== PAUSE TestClientCancelTaskUsesExactA2AVersion
+=== RUN   TestClientRejectsAgentCardWithoutA2A10HTTPJSON
+=== PAUSE TestClientRejectsAgentCardWithoutA2A10HTTPJSON
+=== RUN   TestProjectDiscoveryRejectsOversizedRemoteSkillSet
+=== PAUSE TestProjectDiscoveryRejectsOversizedRemoteSkillSet
+=== RUN   TestA2ADeterministicScenarioCorpus
+    evaluation_test.go:44: A2A eval report: {"id":"evalreport_8487a66ca22b65e6b63fcaa225b5c9e8","runID":"evalrun_dbe1020f12a9b1af12b564bfdc4f4e77","datasetHash":"4a5f4c89a768e4c0a5028c5727f4cb1d2d83d73a64765f26196869db7e2b07b3","passThreshold":1,"overallScore":1,"passed":true,"caseCount":4,"completedCount":4,"passedCount":4,"failedCount":0,"skippedCount":0,"dimensions":[{"name":"runtime_correctness","weight":1,"count":4,"score":1,"min":1,"max":1}],"cases":[{"recordID":"evalcase_8beb4410a0df36c8501343574bd26f97","caseID":"discover-send-terminal","status":"completed","score":1,"passed":true},{"recordID":"evalcase_9bdfc2017e6a94c80c4ca5243c7f5c85","caseID":"input-required-cancel","status":"completed","score":1,"passed":true},{"recordID":"evalcase_6be24536698ea3f7c366458d5ebdf03f","caseID":"shadow-resume-retry","status":"completed","score":1,"passed":true},{"recordID":"evalcase_21108a4dd4708152352f4843a93d94bc","caseID":"stream-terminal","status":"completed","score":1,"passed":true}],"hash":"201322b49f337ae81bbde1a25d872b36ee867460d87f475a2bcb5bad2b024e7e"}
+--- PASS: TestA2ADeterministicScenarioCorpus (0.04s)
+=== RUN   TestHostedAgentCardSupportsConditionalCaching
+=== PAUSE TestHostedAgentCardSupportsConditionalCaching
+=== RUN   TestHostRejectsUnsupportedProtocolVersionBeforeDispatch
+=== PAUSE TestHostRejectsUnsupportedProtocolVersionBeforeDispatch
+=== RUN   TestHostedSubscriptionReplaysThenStreamsToTerminal
+=== PAUSE TestHostedSubscriptionReplaysThenStreamsToTerminal
+=== RUN   TestProductionHostRejectsImplicitSecurityAndMemoryState
+=== PAUSE TestProductionHostRejectsImplicitSecurityAndMemoryState
+=== RUN   TestProductionHostAuthenticatesIsolatesAndRecoversDurableTasks
+=== PAUSE TestProductionHostAuthenticatesIsolatesAndRecoversDurableTasks
+=== RUN   TestHostServesA2A10HTTPJSON
+=== PAUSE TestHostServesA2A10HTTPJSON
+=== RUN   TestHostStreamsHostedAgentEvents
+=== PAUSE TestHostStreamsHostedAgentEvents
+=== RUN   TestHostedMessageBecomesTerminalTaskStatus
+=== PAUSE TestHostedMessageBecomesTerminalTaskStatus
+=== RUN   TestHostCanReturnDirectMessageWithoutCreatingTask
+=== PAUSE TestHostCanReturnDirectMessageWithoutCreatingTask
+=== RUN   TestDirectMessageCannotFollowTaskEvents
+=== PAUSE TestDirectMessageCannotFollowTaskEvents
+=== RUN   TestPluginResolvesAndFreezesRemoteBindingRevision
+=== PAUSE TestPluginResolvesAndFreezesRemoteBindingRevision
+=== RUN   TestPluginRejectsChangedFrozenBinding
+=== PAUSE TestPluginRejectsChangedFrozenBinding
+=== RUN   TestPluginDescriptorKeepsProtocolAtEdge
+=== PAUSE TestPluginDescriptorKeepsProtocolAtEdge
+=== RUN   TestClientRejectsHTTPRedirects
+=== PAUSE TestClientRejectsHTTPRedirects
+=== RUN   TestClientRejectsSameOriginRedirects
+=== PAUSE TestClientRejectsSameOriginRedirects
+=== RUN   TestClientRedirectPolicyPreservesHostClient
+=== PAUSE TestClientRedirectPolicyPreservesHostClient
+=== RUN   TestShadowRunnerSatisfiesHandoffWithoutA2AImportsInParent
+=== PAUSE TestShadowRunnerSatisfiesHandoffWithoutA2AImportsInParent
+=== RUN   TestShadowRunnerCancelProjectsRemoteTaskLocally
+=== PAUSE TestShadowRunnerCancelProjectsRemoteTaskLocally
+=== RUN   TestShadowRunnerMapsInputRequiredAndResumesRemoteTask
+=== PAUSE TestShadowRunnerMapsInputRequiredAndResumesRemoteTask
+=== RUN   TestShadowRunnerCheckpointProjectsOnlyBoundedStatusMessageText
+=== PAUSE TestShadowRunnerCheckpointProjectsOnlyBoundedStatusMessageText
+=== RUN   TestShadowRunnerRefreshesAuthRequiredRunAfterRemoteCompletion
+=== PAUSE TestShadowRunnerRefreshesAuthRequiredRunAfterRemoteCompletion
+=== RUN   TestShadowRunnerRetriesResumeWithStableMessageIdentity
+=== PAUSE TestShadowRunnerRetriesResumeWithStableMessageIdentity
+=== RUN   TestShadowRunnerUpdatesOneRemoteWaitKindWithoutInvalidTransition
+=== PAUSE TestShadowRunnerUpdatesOneRemoteWaitKindWithoutInvalidTransition
+=== RUN   TestShadowRunnerDoesNotPersistTransportErrorDetails
+=== PAUSE TestShadowRunnerDoesNotPersistTransportErrorDetails
+=== RUN   TestShadowRunnerFailsClosedWhenRemoteIdentityWasNeverPersisted
+=== PAUSE TestShadowRunnerFailsClosedWhenRemoteIdentityWasNeverPersisted
+=== RUN   TestTopologyProviderProjectsRemoteShadowRunWithoutSecrets
+=== PAUSE TestTopologyProviderProjectsRemoteShadowRunWithoutSecrets
+=== RUN   TestTopologyProviderIgnoresNonA2ARuns
+=== PAUSE TestTopologyProviderIgnoresNonA2ARuns
+=== RUN   TestTransportRequiresHostNetworkPolicyAndClonesHeaders
+=== PAUSE TestTransportRequiresHostNetworkPolicyAndClonesHeaders
+=== RUN   TestRemoteAgentDescriptorCloneIsolated
+=== PAUSE TestRemoteAgentDescriptorCloneIsolated
+=== CONT  TestClientSubscribesToRunningTask
+=== CONT  TestHostCanReturnDirectMessageWithoutCreatingTask
+=== CONT  TestHostedMessageBecomesTerminalTaskStatus
+=== CONT  TestClientRejectsAgentCardWithoutA2A10HTTPJSON
+=== CONT  TestHostedAgentCardSupportsConditionalCaching
+=== CONT  TestClientCancelTaskUsesExactA2AVersion
+=== CONT  TestClientSendsRichContentAndListsTasks
+=== CONT  TestProductionHostRejectsImplicitSecurityAndMemoryState
+=== CONT  TestDirectMessageCannotFollowTaskEvents
+=== CONT  TestHostStreamsHostedAgentEvents
+=== CONT  TestClientDiscoversA2A10HTTPJSONAndSendsMessage
+=== CONT  TestHostedSubscriptionReplaysThenStreamsToTerminal
+=== CONT  TestClientStreamsA2A10HTTPJSON
+--- PASS: TestHostedMessageBecomesTerminalTaskStatus (0.00s)
+--- PASS: TestProductionHostRejectsImplicitSecurityAndMemoryState (0.00s)
+--- PASS: TestDirectMessageCannotFollowTaskEvents (0.00s)
+--- PASS: TestHostedAgentCardSupportsConditionalCaching (0.00s)
+=== CONT  TestHostRejectsUnsupportedProtocolVersionBeforeDispatch
+--- PASS: TestHostRejectsUnsupportedProtocolVersionBeforeDispatch (0.00s)
+=== CONT  TestProjectDiscoveryRejectsOversizedRemoteSkillSet
+--- PASS: TestProjectDiscoveryRejectsOversizedRemoteSkillSet (0.00s)
+=== CONT  TestHostServesA2A10HTTPJSON
+--- PASS: TestClientRejectsAgentCardWithoutA2A10HTTPJSON (0.00s)
+=== CONT  TestProductionHostAuthenticatesIsolatesAndRecoversDurableTasks
+--- PASS: TestHostCanReturnDirectMessageWithoutCreatingTask (0.01s)
+=== CONT  TestPluginCancellationRejectsChangedFrozenBinding
+--- PASS: TestPluginCancellationRejectsChangedFrozenBinding (0.00s)
+=== CONT  TestPluginCancellationRetainsRemoteTaskForRetry
+=== RUN   TestPluginCancellationRetainsRemoteTaskForRetry/transport_failure
+=== PAUSE TestPluginCancellationRetainsRemoteTaskForRetry/transport_failure
+=== RUN   TestPluginCancellationRetainsRemoteTaskForRetry/pending_acknowledgement
+=== PAUSE TestPluginCancellationRetainsRemoteTaskForRetry/pending_acknowledgement
+=== CONT  TestPluginCancellationUsesFrozenBindingAndChecksRevision
+--- PASS: TestPluginCancellationUsesFrozenBindingAndChecksRevision (0.00s)
+=== CONT  TestShadowRunnerRetriesResumeWithStableMessageIdentity
+--- PASS: TestShadowRunnerRetriesResumeWithStableMessageIdentity (0.00s)
+=== CONT  TestRemoteAgentDescriptorCloneIsolated
+--- PASS: TestRemoteAgentDescriptorCloneIsolated (0.00s)
+=== CONT  TestTransportRequiresHostNetworkPolicyAndClonesHeaders
+=== CONT  TestTopologyProviderProjectsRemoteShadowRunWithoutSecrets
+=== CONT  TestClientRejectsHTTPRedirects
+=== RUN   TestClientRejectsHTTPRedirects/discover/301
+--- PASS: TestTransportRequiresHostNetworkPolicyAndClonesHeaders (0.00s)
+--- PASS: TestTopologyProviderProjectsRemoteShadowRunWithoutSecrets (0.00s)
+--- PASS: TestClientSubscribesToRunningTask (0.01s)
+=== CONT  TestShadowRunnerCancelProjectsRemoteTaskLocally
+--- PASS: TestShadowRunnerCancelProjectsRemoteTaskLocally (0.00s)
+=== CONT  TestClientRedirectPolicyPreservesHostClient
+=== RUN   TestClientRedirectPolicyPreservesHostClient/default
+--- PASS: TestClientStreamsA2A10HTTPJSON (0.02s)
+=== CONT  TestTopologyProviderIgnoresNonA2ARuns
+--- PASS: TestTopologyProviderIgnoresNonA2ARuns (0.00s)
+=== CONT  TestClientRejectsSameOriginRedirects
+=== RUN   TestClientRejectsSameOriginRedirects/discover
+=== RUN   TestClientRedirectPolicyPreservesHostClient/allow
+=== RUN   TestClientRejectsHTTPRedirects/send/301
+--- PASS: TestClientDiscoversA2A10HTTPJSONAndSendsMessage (0.02s)
+=== CONT  TestShadowRunnerFailsClosedWhenRemoteIdentityWasNeverPersisted
+=== RUN   TestClientRejectsSameOriginRedirects/send
+--- PASS: TestShadowRunnerFailsClosedWhenRemoteIdentityWasNeverPersisted (0.00s)
+=== CONT  TestShadowRunnerRefreshesAuthRequiredRunAfterRemoteCompletion
+--- PASS: TestHostStreamsHostedAgentEvents (0.02s)
+=== CONT  TestShadowRunnerMapsInputRequiredAndResumesRemoteTask
+--- PASS: TestShadowRunnerMapsInputRequiredAndResumesRemoteTask (0.00s)
+=== CONT  TestShadowRunnerDoesNotPersistTransportErrorDetails
+--- PASS: TestShadowRunnerRefreshesAuthRequiredRunAfterRemoteCompletion (0.00s)
+=== CONT  TestShadowRunnerUpdatesOneRemoteWaitKindWithoutInvalidTransition
+=== RUN   TestClientRejectsHTTPRedirects/discover/302
+--- PASS: TestShadowRunnerUpdatesOneRemoteWaitKindWithoutInvalidTransition (0.00s)
+=== CONT  TestShadowRunnerCheckpointProjectsOnlyBoundedStatusMessageText
+--- PASS: TestShadowRunnerDoesNotPersistTransportErrorDetails (0.00s)
+=== CONT  TestPluginResolvesAndFreezesRemoteBindingRevision
+--- PASS: TestClientCancelTaskUsesExactA2AVersion (0.02s)
+--- PASS: TestShadowRunnerCheckpointProjectsOnlyBoundedStatusMessageText (0.00s)
+=== CONT  TestPluginDescriptorKeepsProtocolAtEdge
+--- PASS: TestPluginDescriptorKeepsProtocolAtEdge (0.00s)
+=== CONT  TestPluginRejectsChangedFrozenBinding
+=== CONT  TestPluginCancellationRetainsRemoteTaskForRetry/pending_acknowledgement
+--- PASS: TestClientSendsRichContentAndListsTasks (0.02s)
+=== CONT  TestPluginCancellationRetainsRemoteTaskForRetry/transport_failure
+=== CONT  TestShadowRunnerSatisfiesHandoffWithoutA2AImportsInParent
+--- PASS: TestPluginResolvesAndFreezesRemoteBindingRevision (0.00s)
+=== RUN   TestClientRejectsHTTPRedirects/send/302
+=== RUN   TestClientRedirectPolicyPreservesHostClient/deny
+--- PASS: TestPluginRejectsChangedFrozenBinding (0.00s)
+--- PASS: TestClientRejectsSameOriginRedirects (0.01s)
+    --- PASS: TestClientRejectsSameOriginRedirects/discover (0.00s)
+    --- PASS: TestClientRejectsSameOriginRedirects/send (0.00s)
+--- PASS: TestPluginCancellationRetainsRemoteTaskForRetry (0.00s)
+    --- PASS: TestPluginCancellationRetainsRemoteTaskForRetry/pending_acknowledgement (0.00s)
+    --- PASS: TestPluginCancellationRetainsRemoteTaskForRetry/transport_failure (0.00s)
+--- PASS: TestShadowRunnerSatisfiesHandoffWithoutA2AImportsInParent (0.00s)
+=== RUN   TestClientRejectsHTTPRedirects/discover/303
+=== RUN   TestClientRedirectPolicyPreservesHostClient/last_response
+=== RUN   TestClientRejectsHTTPRedirects/send/303
+=== RUN   TestClientRejectsHTTPRedirects/discover/307
+--- PASS: TestClientRedirectPolicyPreservesHostClient (0.02s)
+    --- PASS: TestClientRedirectPolicyPreservesHostClient/default (0.00s)
+    --- PASS: TestClientRedirectPolicyPreservesHostClient/allow (0.01s)
+    --- PASS: TestClientRedirectPolicyPreservesHostClient/deny (0.00s)
+    --- PASS: TestClientRedirectPolicyPreservesHostClient/last_response (0.00s)
+=== RUN   TestClientRejectsHTTPRedirects/send/307
+--- PASS: TestHostServesA2A10HTTPJSON (0.03s)
+=== RUN   TestClientRejectsHTTPRedirects/discover/308
+=== RUN   TestClientRejectsHTTPRedirects/send/308
+--- PASS: TestClientRejectsHTTPRedirects (0.03s)
+    --- PASS: TestClientRejectsHTTPRedirects/discover/301 (0.01s)
+    --- PASS: TestClientRejectsHTTPRedirects/send/301 (0.00s)
+    --- PASS: TestClientRejectsHTTPRedirects/discover/302 (0.00s)
+    --- PASS: TestClientRejectsHTTPRedirects/send/302 (0.00s)
+    --- PASS: TestClientRejectsHTTPRedirects/discover/303 (0.00s)
+    --- PASS: TestClientRejectsHTTPRedirects/send/303 (0.00s)
+    --- PASS: TestClientRejectsHTTPRedirects/discover/307 (0.00s)
+    --- PASS: TestClientRejectsHTTPRedirects/send/307 (0.00s)
+    --- PASS: TestClientRejectsHTTPRedirects/discover/308 (0.00s)
+    --- PASS: TestClientRejectsHTTPRedirects/send/308 (0.00s)
+--- PASS: TestHostedSubscriptionReplaysThenStreamsToTerminal (0.05s)
+--- PASS: TestProductionHostAuthenticatesIsolatesAndRecoversDurableTasks (0.05s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-a2a	1.572s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-a2a/internal/tcksut	[no test files]
+
+EXIT_CODE=0

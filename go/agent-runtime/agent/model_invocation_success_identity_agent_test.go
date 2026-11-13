@@ -3,6 +3,8 @@ package agent_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -138,12 +140,18 @@ func TestNamedProviderSuccessfulToolRequiresExactPhysicalResponseIdentity(t *tes
 				}
 				return
 			}
-			if callErr == nil || snapshot.Run.Status != kernel.RunStatusFailed || effects != 0 ||
+			if !errors.Is(callErr, agent.ErrModelOutcomeUnknown) || snapshot.Run.Status != kernel.RunStatusRunning || effects != 0 ||
 				underlying.calls != 1 || view.Budget.Usage.LLMCalls != 0 || view.Budget.Usage.ToolCalls != 0 ||
 				len(view.ModelInvocations) != 1 || view.ModelInvocations[0].Status != agent.ModelInvocationPending ||
-				len(view.ModelInvocations[0].Response.ToolCalls) != 0 {
+				len(view.ModelInvocations[0].Response.ToolCalls) != 0 || view.ModelInvocations[0].DispatchAttempt != 1 || view.ModelInvocations[0].CompletedAt != nil {
 				t.Fatalf("unverified physical response authorized Tool: status=%s err=%v effects=%d calls=%d budget=%+v invocations=%+v",
 					snapshot.Run.Status, callErr, effects, underlying.calls, view.Budget.Usage, view.ModelInvocations)
+			}
+			before := mustLoadModelInvocationRun(t, runtime, snapshot.Run.ID)
+			_, resumeErr := runner.Resume(t.Context(), before.Run.ID, before.Run.Revision)
+			after := mustLoadModelInvocationRun(t, runtime, before.Run.ID)
+			if !errors.Is(resumeErr, agent.ErrModelOutcomeUnknown) || underlying.calls != 1 || effects != 0 || !reflect.DeepEqual(before, after) {
+				t.Fatalf("unproved physical identity replayed or changed: %v", resumeErr)
 			}
 		})
 	}

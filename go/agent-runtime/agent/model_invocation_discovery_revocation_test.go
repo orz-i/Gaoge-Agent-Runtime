@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
+	"sync"
 	"testing"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 )
 
@@ -38,9 +41,6 @@ func (provider *retryableCapturedModel) Generate(
 	_ context.Context, request model.Request,
 ) (model.Response, error) {
 	provider.requests = append(provider.requests, model.CloneRequest(request))
-	if len(provider.requests) == 1 {
-		return model.Response{}, model.NewRetryableError(errRetryableProvider)
-	}
 	return model.Response{Content: "done after resume"}, nil
 }
 
@@ -60,7 +60,7 @@ func TestPendingHostedGrantRevocationBlocksProviderRetry(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			runtime, _ := newTestRuntimeAndApprovals(t)
+			runtime := newModelPreparedCutRuntime(t, 1)
 			registry := mustRegistry(t, nil)
 			catalog := &revocableHostedCatalog{
 				enabled: true,
@@ -85,17 +85,22 @@ func TestPendingHostedGrantRevocationBlocksProviderRetry(t *testing.T) {
 					Key: auditHostedToolKey, DefinitionVersion: auditHostedToolVersion,
 				}}
 			}
-			pending, err := runner.StartRun(t.Context(), start)
-			if !errors.Is(err, errRetryableProvider) || pending.Run.Status != kernel.RunStatusRunning ||
-				len(provider.requests) != 1 {
-				t.Fatalf("expected first failed physical delivery: %+v err=%v calls=%d",
+			_, err = runner.StartRun(t.Context(), start)
+			pending := mustLoadModelInvocationRun(t, runtime, start.ID)
+			if !errors.Is(err, errInjectedModelInvocationCrash) || pending.Run.Status != kernel.RunStatusRunning ||
+				len(provider.requests) != 0 {
+				t.Fatalf("expected durable pre-dispatch interruption: %+v err=%v calls=%d",
 					pending.Run, err, len(provider.requests))
 			}
+			assertPreparedUnsentInvocation(t, pending)
 			tc.revoke(catalog)
-			restarted := newModelRunnerAfterRetryDue(t, pending, deps)
+			restarted, restartErr := agent.NewRunner(deps)
+			if restartErr != nil {
+				t.Fatal(restartErr)
+			}
 			after, err := restarted.Resume(t.Context(), pending.Run.ID, pending.Run.Revision)
 			if err == nil || after.Run.Status != kernel.RunStatusFailed ||
-				after.Run.ErrorCode != "agent.discovery_invalid" || len(provider.requests) != 1 {
+				after.Run.ErrorCode != "agent.discovery_invalid" || len(provider.requests) != 0 {
 				t.Fatalf("pending Hosted request bypassed revocation: status=%s code=%s err=%v providerDeliveries=%d",
 					after.Run.Status, after.Run.ErrorCode, err, len(provider.requests))
 			}
@@ -105,7 +110,7 @@ func TestPendingHostedGrantRevocationBlocksProviderRetry(t *testing.T) {
 
 func TestPendingLocalToolDefinitionDriftBlocksProviderRetry(t *testing.T) {
 	t.Parallel()
-	runtime, _ := newTestRuntimeAndApprovals(t)
+	runtime := newModelPreparedCutRuntime(t, 1)
 	executions := 0
 	registry, keys := discoveryTestRegistry(t, 32, &executions)
 	catalog := &changingDiscoveryCatalog{Registry: registry}
@@ -120,17 +125,22 @@ func TestPendingLocalToolDefinitionDriftBlocksProviderRetry(t *testing.T) {
 	}
 	start := startRequest("audit_discovery_pending_retry", "audit_discovery_request", "Find documents", keys...)
 	start.InitialToolKeys = []string{discoveryChosenToolKey}
-	pending, err := runner.StartRun(t.Context(), start)
-	if !errors.Is(err, errRetryableProvider) || pending.Run.Status != kernel.RunStatusRunning ||
-		len(provider.requests) != 1 {
+	_, err = runner.StartRun(t.Context(), start)
+	pending := mustLoadModelInvocationRun(t, runtime, start.ID)
+	if !errors.Is(err, errInjectedModelInvocationCrash) || pending.Run.Status != kernel.RunStatusRunning ||
+		len(provider.requests) != 0 {
 		t.Fatalf("expected pending model intent: run=%+v err=%v physicalCalls=%d",
 			pending.Run, err, len(provider.requests))
 	}
+	assertPreparedUnsentInvocation(t, pending)
 	catalog.changed = true
-	restarted := newModelRunnerAfterRetryDue(t, pending, deps)
+	restarted, restartErr := agent.NewRunner(deps)
+	if restartErr != nil {
+		t.Fatal(restartErr)
+	}
 	after, err := restarted.Resume(t.Context(), pending.Run.ID, pending.Run.Revision)
 	if err == nil || after.Run.Status != kernel.RunStatusFailed ||
-		after.Run.ErrorCode != "agent.discovery_invalid" || len(provider.requests) != 1 || executions != 0 {
+		after.Run.ErrorCode != "agent.discovery_invalid" || len(provider.requests) != 0 || executions != 0 {
 		t.Fatalf("pending Tool Search request escaped frozen catalog: run=%+v err=%v providerCalls=%d toolCalls=%d",
 			after.Run, err, len(provider.requests), executions)
 	}
@@ -138,7 +148,7 @@ func TestPendingLocalToolDefinitionDriftBlocksProviderRetry(t *testing.T) {
 
 func TestPendingUnchangedHostedGrantRetainsInvocationIdentity(t *testing.T) {
 	t.Parallel()
-	runtime, _ := newTestRuntimeAndApprovals(t)
+	runtime := newModelPreparedCutRuntime(t, 1)
 	registry := mustRegistry(t, nil)
 	catalog := &revocableHostedCatalog{
 		enabled: true,
@@ -161,17 +171,64 @@ func TestPendingUnchangedHostedGrantRetainsInvocationIdentity(t *testing.T) {
 	start.HostedToolGrants = []agent.HostedToolGrant{{
 		Key: auditHostedToolKey, DefinitionVersion: auditHostedToolVersion,
 	}}
-	pending, err := runner.StartRun(t.Context(), start)
-	if !errors.Is(err, errRetryableProvider) || pending.Run.Status != kernel.RunStatusRunning {
+	_, err = runner.StartRun(t.Context(), start)
+	pending := mustLoadModelInvocationRun(t, runtime, start.ID)
+	if !errors.Is(err, errInjectedModelInvocationCrash) || pending.Run.Status != kernel.RunStatusRunning || len(provider.requests) != 0 {
 		t.Fatalf("expected recoverable model failure: status=%s err=%v", pending.Run.Status, err)
 	}
-	restarted := newModelRunnerAfterRetryDue(t, pending, deps)
+	original := assertPreparedUnsentInvocation(t, pending)
+	restarted, restartErr := agent.NewRunner(deps)
+	if restartErr != nil {
+		t.Fatal(restartErr)
+	}
 	completed, err := restarted.Resume(t.Context(), pending.Run.ID, pending.Run.Revision)
 	if err != nil || completed.Run.Status != kernel.RunStatusCompleted ||
-		len(provider.requests) != 2 ||
-		provider.requests[0].InvocationID == "" ||
-		provider.requests[0].InvocationID != provider.requests[1].InvocationID {
+		len(provider.requests) != 1 || provider.requests[0].InvocationID != original.ID || !reflect.DeepEqual(provider.requests[0], original.Request) {
 		t.Fatalf("valid Hosted retry no longer preserves durable identity: status=%s err=%v calls=%d",
 			completed.Run.Status, err, len(provider.requests))
 	}
+	view := mustModelInvocationView(t, completed)
+	if view.Budget.Usage.LLMCalls != 1 || view.Budget.Usage.ToolCalls != 0 {
+		t.Fatalf("recovery billed more than one physical response: %+v", view.Budget.Usage)
+	}
+}
+
+// Fail after the original durable intent, before claim or physical Generate.
+// A provider error after an external send is never used as a no-effect proof.
+type modelPreparedCutStore struct {
+	*memory.Store
+	mu           sync.Mutex
+	target, seen int
+}
+
+func (s *modelPreparedCutStore) ApplyExecution(ctx context.Context, l kernel.ExecutionLease, r uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
+	out, e := s.Store.ApplyExecution(ctx, l, r, m)
+	if e != nil {
+		return out, e
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if mutationHasEvent(m.Events, "agent.model_invocation.pending") {
+		s.seen++
+		if s.seen == s.target {
+			return kernel.Snapshot{}, errInjectedModelInvocationCrash
+		}
+	}
+	return out, nil
+}
+func newModelPreparedCutRuntime(t *testing.T, target int) *kernel.Runtime {
+	t.Helper()
+	return newModelInvocationRuntime(t, &modelPreparedCutStore{Store: memory.NewStore(), target: target})
+}
+func assertPreparedUnsentInvocation(t *testing.T, s kernel.Snapshot) agent.ModelInvocation {
+	t.Helper()
+	v := mustModelInvocationView(t, s)
+	if len(v.ModelInvocations) == 0 {
+		t.Fatal("missing original committed intent")
+	}
+	i := v.ModelInvocations[len(v.ModelInvocations)-1]
+	if i.ID == "" || i.RunID != s.Run.ID || i.RequestHash == "" || i.Status != agent.ModelInvocationPending || i.DispatchAttempt != 0 || i.ExecutionAttempt != 0 || i.CompletedAt != nil || i.ConsumedAt != nil {
+		t.Fatalf("fault was not before physical dispatch: %+v", i)
+	}
+	return i
 }

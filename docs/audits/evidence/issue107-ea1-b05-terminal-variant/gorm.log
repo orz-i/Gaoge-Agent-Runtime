@@ -1,0 +1,27 @@
+SOURCE_SHA=0c6fe33c43b5f1bebbafedd4defa6167607c8659
+EXIT_CODE=0
+=== RUN   TestEA1ResumeUnknownGORM
+=== RUN   TestEA1ResumeUnknownGORM/root
+=== RUN   TestEA1ResumeUnknownGORM/child
+--- PASS: TestEA1ResumeUnknownGORM (0.10s)
+    --- PASS: TestEA1ResumeUnknownGORM/root (0.05s)
+    --- PASS: TestEA1ResumeUnknownGORM/child (0.05s)
+=== RUN   TestEA1WaitMarkAckGORM
+=== RUN   TestEA1WaitMarkAckGORM/root
+=== RUN   TestEA1WaitMarkAckGORM/child
+--- PASS: TestEA1WaitMarkAckGORM (0.08s)
+    --- PASS: TestEA1WaitMarkAckGORM/root (0.04s)
+    --- PASS: TestEA1WaitMarkAckGORM/child (0.04s)
+=== RUN   TestEA1WaitBarriersGORM
+=== RUN   TestEA1WaitBarriersGORM/root/P1
+=== RUN   TestEA1WaitBarriersGORM/root/P3
+=== RUN   TestEA1WaitBarriersGORM/child/P1
+=== RUN   TestEA1WaitBarriersGORM/child/P3
+--- PASS: TestEA1WaitBarriersGORM (0.13s)
+    --- PASS: TestEA1WaitBarriersGORM/root/P1 (0.03s)
+    --- PASS: TestEA1WaitBarriersGORM/root/P3 (0.03s)
+    --- PASS: TestEA1WaitBarriersGORM/child/P1 (0.03s)
+    --- PASS: TestEA1WaitBarriersGORM/child/P3 (0.03s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	1.895s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]

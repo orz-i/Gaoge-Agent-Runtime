@@ -1,0 +1,7 @@
+SOURCE_SHA=e05290927ba0143f625857be08a0aa7493df84cf
+COMMAND=make ts-build
+pnpm run build
+$ pnpm --filter @orz-i/agent-runtime-client build
+$ tsc -p tsconfig.build.json
+
+EXIT_CODE=0

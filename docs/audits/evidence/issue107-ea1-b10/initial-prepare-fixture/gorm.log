@@ -1,0 +1,20 @@
+SOURCE_SHA=54985e08a7aba0e54022b77c770485a682c4b75f
+DIAGNOSTIC_ONLY=true
+=== RUN   TestEA1ChildAgentRecoveryUnknownGORM
+=== RUN   TestEA1ChildAgentRecoveryUnknownGORM/host_middleware
+    ea1_child_agent_recovery.go:207: original child Host sent, no receipt
+=== RUN   TestEA1ChildAgentRecoveryUnknownGORM/model
+=== RUN   TestEA1ChildAgentRecoveryUnknownGORM/tool
+--- FAIL: TestEA1ChildAgentRecoveryUnknownGORM (4.36s)
+    --- FAIL: TestEA1ChildAgentRecoveryUnknownGORM/host_middleware (0.02s)
+    --- PASS: TestEA1ChildAgentRecoveryUnknownGORM/model (2.17s)
+    --- PASS: TestEA1ChildAgentRecoveryUnknownGORM/tool (2.17s)
+=== RUN   TestEA1ChildAgentRecoveryAdmissionGORM
+    ea1_child_agent_recovery.go:207: original child Host sent, no receipt
+--- FAIL: TestEA1ChildAgentRecoveryAdmissionGORM (0.04s)
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	4.990s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]
+FAIL
+
+EXIT_CODE=1

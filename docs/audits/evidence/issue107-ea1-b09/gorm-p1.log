@@ -1,0 +1,20 @@
+SOURCE_SHA=2545aa7b6eda95d193ecd549f29f1aecc387d108
+COMMAND=go -C go/agent-runtime-postgres test -race -count=1 ./... -run '^TestEA1RootAgentAdmissionGORM$/^P1' -v
+=== RUN   TestEA1RootAgentAdmissionGORM
+=== RUN   TestEA1RootAgentAdmissionGORM/P1/middleware-before-physical
+    ea1_root_agent_admission.go:144: EA03/G01: arbitrary Root callback reached before authoritative owner: lease={RunID: OwnerID: LeaseID: Epoch:0 ExpiresAt:0001-01-01 00:00:00 +0000 UTC} grantErr=kernel run not found
+    ea1_root_agent_admission.go:151: EA03/G01: competing Cancel did not reject: <nil>
+    ea1_root_agent_admission.go:155: competing control changed full original snapshot
+=== RUN   TestEA1RootAgentAdmissionGORM/P1/acquired-before-model
+    ea1_root_agent_admission.go:151: EA03/G01: competing Cancel did not reject: <nil>
+    ea1_root_agent_admission.go:155: competing control changed full original snapshot
+    ea1_root_agent_admission.go:159: competing Cancel revoked original owner: kernel run is terminal
+--- FAIL: TestEA1RootAgentAdmissionGORM (0.03s)
+    --- FAIL: TestEA1RootAgentAdmissionGORM/P1/middleware-before-physical (0.01s)
+    --- FAIL: TestEA1RootAgentAdmissionGORM/P1/acquired-before-model (0.02s)
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	0.442s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]
+FAIL
+
+EXIT_CODE=1

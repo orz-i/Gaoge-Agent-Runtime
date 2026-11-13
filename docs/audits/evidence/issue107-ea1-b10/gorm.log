@@ -1,0 +1,20 @@
+SOURCE_SHA=14c436216137c9a8ff55c0096664686ee4e77aa4
+COMMAND=go -C go/agent-runtime-postgres test -race -count=1 ./... -run ^TestEA1ChildAgentRecovery -v
+=== RUN   TestEA1ChildAgentRecoveryUnknownGORM
+=== RUN   TestEA1ChildAgentRecoveryUnknownGORM/host_middleware
+=== RUN   TestEA1ChildAgentRecoveryUnknownGORM/model
+=== RUN   TestEA1ChildAgentRecoveryUnknownGORM/tool
+--- PASS: TestEA1ChildAgentRecoveryUnknownGORM (4.37s)
+    --- PASS: TestEA1ChildAgentRecoveryUnknownGORM/host_middleware (0.03s)
+    --- PASS: TestEA1ChildAgentRecoveryUnknownGORM/model (2.17s)
+    --- PASS: TestEA1ChildAgentRecoveryUnknownGORM/tool (2.17s)
+=== RUN   TestEA1ChildAgentRecoveryAdmissionGORM
+
+2026/11/13 01:25:17 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:201 [35;1mrecord not found
+[0m[33m[0.066ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "missing" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+--- PASS: TestEA1ChildAgentRecoveryAdmissionGORM (0.04s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	5.999s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]
+
+EXIT_CODE=0

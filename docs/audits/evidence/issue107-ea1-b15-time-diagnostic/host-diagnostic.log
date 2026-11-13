@@ -1,0 +1,16 @@
+SOURCE_SHA=2191fcc309cf94caec5649a23b361caba43e890e
+COMMAND=go -C go/agent-runtime-harness-postgres test -race -count=1 ./... -run '^TestRealPostgresEA1RootAgentCancelHostElection$/election-after$' -v
+=== RUN   TestRealPostgresEA1RootAgentCancelHostElection
+=== RUN   TestRealPostgresEA1RootAgentCancelHostElection/election-after
+    ea1_root_agent_cancel_election_test.go:153: Invocation field CreatedAt: expected=time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC) actual=time.Date(2026, time.January, 2, 11, 4, 5, 0, time.Local)
+    ea1_root_agent_cancel_election_test.go:153: Invocation time CreatedAt: Equal=true expectedLocation="UTC"(0x103e3a280) actualLocation="Local"(0x103e4ea20) UTCDeepEqual=true
+    ea1_root_agent_cancel_election_test.go:153: Invocation field UpdatedAt: expected=time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC) actual=time.Date(2026, time.January, 2, 11, 4, 5, 0, time.Local)
+    ea1_root_agent_cancel_election_test.go:153: Invocation time UpdatedAt: Equal=true expectedLocation="UTC"(0x103e3a280) actualLocation="Local"(0x103e4ea20) UTCDeepEqual=true
+    ea1_root_agent_cancel_election_test.go:153: original Invocation changed before physical cancel: <nil>
+--- FAIL: TestRealPostgresEA1RootAgentCancelHostElection (0.25s)
+    --- FAIL: TestRealPostgresEA1RootAgentCancelHostElection/election-after (0.25s)
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-postgres	1.158s
+FAIL
+
+EXIT_CODE=1

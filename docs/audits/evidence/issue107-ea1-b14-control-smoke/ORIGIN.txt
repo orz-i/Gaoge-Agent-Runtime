@@ -1,0 +1,2 @@
+SOURCE_SHA=163b04909201ba442988a54016095de27fa6bcac
+Three lint passes. Memory smoke has three failing P5 fixture assertions: duplicate public approval RootOutcomeUnknown vs expected Store Busy, and pending correlation under Root deadline. Cross-Store/full not started. No cell certification.

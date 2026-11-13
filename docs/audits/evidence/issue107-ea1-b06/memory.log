@@ -1,0 +1,36 @@
+SOURCE_SHA=6d08152d30647d8c24939bd5e78cdfcfc943ba43
+COMMAND=go -C go/agent-runtime test -race -count=1 ./memory -run '^TestEA1(CompensationUnknownMemory|CompensationAdmissionMemory|CompensationBarriersMemory)$' -v
+=== RUN   TestEA1CompensationAdmissionMemory
+=== RUN   TestEA1CompensationAdmissionMemory/root/revision
+=== RUN   TestEA1CompensationAdmissionMemory/root/terminal
+=== RUN   TestEA1CompensationAdmissionMemory/child/revision
+=== RUN   TestEA1CompensationAdmissionMemory/child/terminal
+--- PASS: TestEA1CompensationAdmissionMemory (0.05s)
+    --- PASS: TestEA1CompensationAdmissionMemory/root/revision (0.02s)
+    --- PASS: TestEA1CompensationAdmissionMemory/root/terminal (0.01s)
+    --- PASS: TestEA1CompensationAdmissionMemory/child/revision (0.02s)
+    --- PASS: TestEA1CompensationAdmissionMemory/child/terminal (0.01s)
+=== RUN   TestEA1CompensationBarriersMemory
+=== RUN   TestEA1CompensationBarriersMemory/root/P1
+=== RUN   TestEA1CompensationBarriersMemory/root/P5
+=== RUN   TestEA1CompensationBarriersMemory/root/P5-retry
+=== RUN   TestEA1CompensationBarriersMemory/child/P1
+=== RUN   TestEA1CompensationBarriersMemory/child/P5
+=== RUN   TestEA1CompensationBarriersMemory/child/P5-retry
+--- PASS: TestEA1CompensationBarriersMemory (2.11s)
+    --- PASS: TestEA1CompensationBarriersMemory/root/P1 (0.01s)
+    --- PASS: TestEA1CompensationBarriersMemory/root/P5 (0.01s)
+    --- PASS: TestEA1CompensationBarriersMemory/root/P5-retry (0.02s)
+    --- PASS: TestEA1CompensationBarriersMemory/child/P1 (0.01s)
+    --- PASS: TestEA1CompensationBarriersMemory/child/P5 (2.03s)
+    --- PASS: TestEA1CompensationBarriersMemory/child/P5-retry (0.02s)
+=== RUN   TestEA1CompensationUnknownMemory
+=== RUN   TestEA1CompensationUnknownMemory/root
+=== RUN   TestEA1CompensationUnknownMemory/child
+--- PASS: TestEA1CompensationUnknownMemory (0.04s)
+    --- PASS: TestEA1CompensationUnknownMemory/root (0.02s)
+    --- PASS: TestEA1CompensationUnknownMemory/child (0.02s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory	4.468s
+
+EXIT_CODE=0

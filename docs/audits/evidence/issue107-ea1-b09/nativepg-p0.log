@@ -1,0 +1,23 @@
+SOURCE_SHA=2545aa7b6eda95d193ecd549f29f1aecc387d108
+COMMAND=TEST_POSTGRES_DSN=<dedicated-ephemeral> go -C go/agent-runtime-postgres test -race -count=3 ./... -run '^TestEA1RealPostgresRootAgentAdmission$/^P0' -v
+=== RUN   TestEA1RealPostgresRootAgentAdmission
+=== RUN   TestEA1RealPostgresRootAgentAdmission/P0/origin-and-claim
+    ea1_root_agent_admission.go:63: EA01/P0: failed original owner admission entered effect-capable Host middleware 1 times
+--- FAIL: TestEA1RealPostgresRootAgentAdmission (0.28s)
+    --- FAIL: TestEA1RealPostgresRootAgentAdmission/P0/origin-and-claim (0.28s)
+=== RUN   TestEA1RealPostgresRootAgentAdmission
+=== RUN   TestEA1RealPostgresRootAgentAdmission/P0/origin-and-claim
+    ea1_root_agent_admission.go:63: EA01/P0: failed original owner admission entered effect-capable Host middleware 1 times
+--- FAIL: TestEA1RealPostgresRootAgentAdmission (0.40s)
+    --- FAIL: TestEA1RealPostgresRootAgentAdmission/P0/origin-and-claim (0.40s)
+=== RUN   TestEA1RealPostgresRootAgentAdmission
+=== RUN   TestEA1RealPostgresRootAgentAdmission/P0/origin-and-claim
+    ea1_root_agent_admission.go:63: EA01/P0: failed original owner admission entered effect-capable Host middleware 1 times
+--- FAIL: TestEA1RealPostgresRootAgentAdmission (0.23s)
+    --- FAIL: TestEA1RealPostgresRootAgentAdmission/P0/origin-and-claim (0.23s)
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	1.330s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]
+FAIL
+
+EXIT_CODE=1

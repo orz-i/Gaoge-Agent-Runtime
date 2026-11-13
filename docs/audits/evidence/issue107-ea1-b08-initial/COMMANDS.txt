@@ -1,0 +1,14 @@
+import subprocess,pathlib
+w=pathlib.Path('/tmp/ea1-b08-work')
+commands={
+'memory':"go -C go/agent-runtime test -race -count=1 ./memory -run '^TestEA1(WaitUnknownMemory|WaitBarriersMemory|WorkflowRecoveryBoundariesMemory)$' -v",
+'sqlite':"go -C go/agent-runtime-sqlite test -race -count=1 ./... -run '^TestEA1(WaitUnknownNativeSQLite|WaitBarriersSQLite|WorkflowRecoveryBoundariesNativeSQLite)$' -v",
+'gorm':"go -C go/agent-runtime-postgres test -race -count=1 ./... -run '^TestEA1(WaitUnknownGORM|WaitBarriersGORM|WorkflowRecoveryBoundariesGORM)$' -v",
+'nativepg':"TEST_POSTGRES_DSN='<dedicated-ephemeral>' go -C go/agent-runtime-postgres test -race -count=3 ./... -run '^TestEA1RealPostgres(WaitUnknown|WaitBarriers|WorkflowRecoveryBoundaries)$' -v"}
+for m in ['agent-runtime','agent-runtime-postgres','agent-runtime-sqlite']:
+ commands['lint-'+m]='cd go/'+m+' && golangci-lint run ./...'
+for n,c in commands.items():
+ with (w/(n+'.log')).open('w') as f:
+  p=subprocess.run('export PATH=/Users/mini/.gvm/go/bin:/Users/mini/.gvm/tools-bin:$PATH; '+c,shell=True,cwd='/tmp/gaoge-runtime-issue107',stdout=f,stderr=subprocess.STDOUT)
+ (w/(n+'.exit')).write_text(str(p.returncode))
+ print(n,p.returncode,flush=True)

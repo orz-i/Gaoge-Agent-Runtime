@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -270,12 +272,55 @@ func TestHarnessIndependentDelegationsCollectMixedTerminalResults(t *testing.T) 
 	}
 }
 
-type mixedDelegationModel struct{ synthesized bool }
+// A provider error without its authoritative response is not a failed-child
+// receipt. Preserve the known sibling but never synthesize a terminal failure.
+func TestHarnessMixedDelegationUnknownSiblingRemainsPending(t *testing.T) {
+	client := &mixedDelegationModel{unknownFailure: true}
+	runner, _, runtime := newDelegationHarnessWithRuntime(t, client, 4, false)
+	request := testStartRequest()
+	request.Goal = "Synthesize specialist evidence"
+	request.Config.Model = delegationTestModelName
+	request.Config.ToolKeys = []string{harness.DelegationToolKey}
+	request.Config.ToolPolicies = []harness.ToolPolicySnapshot{harness.DelegationToolPolicySnapshot()}
+	pending, err := runner.StartAgentTurn(t.Context(), request)
+	if err != nil || pending.Turn.Status != harness.TurnRunning || client.synthesized {
+		t.Fatalf("unknown child fabricated failed receipt: %+v %v", pending.Turn, err)
+	}
+	root, _ := harness.TopLevelInvocation(pending)
+	before, err := runtime.Load(t.Context(), root.ExecutionRefID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	grant, err := runtime.LookupChildExecution(t.Context(), root.ExecutionRefID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := client.calls.Load()
+	_, resumeErr := runner.ResumeTurn(t.Context(), pending.Turn.ID)
+	if resumeErr == nil || client.calls.Load() != calls || client.synthesized {
+		t.Fatalf("unknown sibling retried or consumed: %v", resumeErr)
+	}
+	after, loadErr := runtime.Load(t.Context(), root.ExecutionRefID)
+	retained, grantErr := runtime.LookupChildExecution(t.Context(), root.ExecutionRefID)
+	if loadErr != nil || grantErr != nil || !reflect.DeepEqual(before, after) || grant != retained {
+		t.Fatalf("unknown sibling changed scope: %v %v", loadErr, grantErr)
+	}
+}
+
+type mixedDelegationModel struct {
+	synthesized    bool
+	unknownFailure bool
+	calls          atomic.Int32
+}
 
 func (client *mixedDelegationModel) Generate(_ context.Context, request model.Request) (model.Response, error) {
+	client.calls.Add(1)
 	if len(request.Tools) == 0 {
 		if strings.Contains(model.TextValue(request.Messages[len(request.Messages)-1].Content), "risk") {
-			return model.Response{}, errors.New("PRIVATE-specialist-provider-failure")
+			if client.unknownFailure {
+				return model.Response{}, errors.New("PRIVATE-specialist-provider-failure")
+			}
+			return model.Response{ResponseID: "mixed-known-rejection", Usage: &model.Usage{InputTokens: 2, OutputTokens: 1}}, model.NewResponseRejectedError(model.NewClassifiedError(errors.New("PRIVATE-specialist-provider-failure"), "model.upstream_request_invalid"))
 		}
 		return model.Response{Content: "successful sibling research"}, nil
 	}

@@ -1,0 +1,24 @@
+SOURCE_SHA=2933f241a17aada53dbdfa5e31b425200cdedde6
+COMMAND=go -C go/agent-runtime-harness-postgres test -count=1 ./... -run '^TestEA1HarnessAgentTaskCancelP(0|2)$' -v
+=== RUN   TestEA1HarnessAgentTaskCancelP0
+=== RUN   TestEA1HarnessAgentTaskCancelP0/actor
+=== RUN   TestEA1HarnessAgentTaskCancelP0/tenant
+=== RUN   TestEA1HarnessAgentTaskCancelP0/thread
+=== RUN   TestEA1HarnessAgentTaskCancelP0/parent
+=== RUN   TestEA1HarnessAgentTaskCancelP0/origin
+=== RUN   TestEA1HarnessAgentTaskCancelP0/original-runner
+=== RUN   TestEA1HarnessAgentTaskCancelP0/foreign-recorder
+--- PASS: TestEA1HarnessAgentTaskCancelP0 (0.01s)
+    --- PASS: TestEA1HarnessAgentTaskCancelP0/actor (0.00s)
+    --- PASS: TestEA1HarnessAgentTaskCancelP0/tenant (0.00s)
+    --- PASS: TestEA1HarnessAgentTaskCancelP0/thread (0.00s)
+    --- PASS: TestEA1HarnessAgentTaskCancelP0/parent (0.00s)
+    --- PASS: TestEA1HarnessAgentTaskCancelP0/origin (0.00s)
+    --- PASS: TestEA1HarnessAgentTaskCancelP0/original-runner (0.00s)
+    --- PASS: TestEA1HarnessAgentTaskCancelP0/foreign-recorder (0.00s)
+=== RUN   TestEA1HarnessAgentTaskCancelP2
+--- PASS: TestEA1HarnessAgentTaskCancelP2 (0.00s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-postgres	0.627s
+
+EXIT_CODE=0

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -973,6 +974,16 @@ func TestRunnerDoesNotReplayModelAfterStreamDeltaFailure(t *testing.T) {
 	snapshot, err := runner.StartRun(t.Context(), startRequest("run_stream_failure", "request_stream_failure", "answer"))
 	assertStreamFailureRun(t, snapshot, err, model)
 	assertStreamFailureFeed(t, feed, snapshot.Run.ID)
+	view := mustModelInvocationView(t, snapshot)
+	if len(view.ModelInvocations) != 1 || view.ModelInvocations[0].DispatchAttempt != 1 || view.ModelInvocations[0].CompletedAt != nil || view.Budget.Usage.LLMCalls != 0 || view.Budget.Usage.ToolCalls != 0 {
+		t.Fatalf("partial stream fabricated a receipt or billing: %+v", view)
+	}
+	before := mustLoadModelInvocationRun(t, runtime, snapshot.Run.ID)
+	_, resumeErr := runner.Resume(t.Context(), before.Run.ID, before.Run.Revision)
+	after := mustLoadModelInvocationRun(t, runtime, before.Run.ID)
+	if !errors.Is(resumeErr, agent.ErrModelOutcomeUnknown) || model.streamCalls != 1 || model.unaryCalls != 0 || !reflect.DeepEqual(before, after) {
+		t.Fatalf("partial stream replayed or changed: %v", resumeErr)
+	}
 }
 
 func assertStreamFailureRun(
@@ -982,7 +993,7 @@ func assertStreamFailureRun(
 	model *deltaThenFailureModel,
 ) {
 	t.Helper()
-	if !errors.Is(err, agent.ErrModelFailure) || snapshot.Run.Status != kernel.RunStatusFailed {
+	if !errors.Is(err, agent.ErrModelFailure) || !errors.Is(err, agent.ErrModelOutcomeUnknown) || !errors.Is(err, errDatabaseUnavailable) || snapshot.Run.Status != kernel.RunStatusRunning {
 		t.Fatalf("snapshot = %#v, error = %v", snapshot.Run, err)
 	}
 	if model.streamCalls != 1 || model.unaryCalls != 0 {
@@ -1000,10 +1011,9 @@ func assertStreamFailureFeed(t *testing.T, feed *runfeed.Feed, runID string) {
 		runfeed.EventRunStarted,
 		runfeed.EventModelStarted,
 		runfeed.EventModelDelta,
-		runfeed.EventRunFailed,
 	})
 	var streamEvent runtimemodel.StreamEvent
-	if len(events) != 4 || json.Unmarshal(events[2].Data, &streamEvent) != nil || streamEvent.Delta != "partial" || !events[3].Terminal {
+	if len(events) != 3 || json.Unmarshal(events[2].Data, &streamEvent) != nil || streamEvent.Delta != "partial" || events[2].Terminal {
 		t.Fatalf("stream failure events = %#v", events)
 	}
 }

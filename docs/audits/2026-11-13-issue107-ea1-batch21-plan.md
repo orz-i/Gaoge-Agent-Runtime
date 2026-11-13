@@ -1,0 +1,16 @@
+# EA-1 batch 21: fixed middleware lifetime cells
+
+Scope: MW-NEXT P0–P5 only. B20 is independently signed at 132 PASS / 12 UNRUN. This is a test implementation plan, not a PASS record. Keep H-FROZEN/WP-GAOGE and remote gates blocked; no push, PR or merge.
+
+Use actual Root and Child Agent StartRun into RunChain/ModelChain/ToolChain, not public Grant IDs as authority. Primary Root/Child explicit-native configurations and precise default-configuration vectors must keep their actual distinct ports and scopes. Child middleware requires pure original-request/ancestor preflight. No Harness cancellation ability is inferred from this Core middleware fixture. Memory, native SQLite and real PostgreSQL execute the same helper; GORM SQLite is auxiliary only.
+
+- P0: actual failed admission/preflight, stale winner, and frozen Model candidate rejection before provider dispatch. Preserve original and foreign full snapshots and source identity.
+- P1: all three chains enforce admitted Next once and reject second/retained calls with exact ErrNextAlreadyCalled; verify real original scopes at Host/Model/Tool cutpoints.
+- P2: an actually entered asynchronous Next remains owned after the middleware function returns. Deterministic channels establish entry and prevent enclosing return/Mark until the original operation returns. Finite unknown, swallowed-error/context-replacement and panic vectors preserve unknown ownership; do not fabricate no-effect from nil or timeout.
+- P3: provider or Tool returning inside its own middleware is not yet a durable receipt. Hold the actual outer RunMiddleware after Next has completed and the inner receipt CAS has happened, but before whole callback return. Compare complete original response/result, keep scope, reject retained inner and duplicate outer Next; only the same callback return may permit Mark.
+- P4: real Store settlement Mark commits, ACK is lost, Finish is held; reopen all persistent handles and invoke actual Root/Child recovery. Original marker/receipt allows retirement without physical replay; old Next remains closed before and after recovery.
+- P5: deterministic peer Cancel/Apply/Resume/deadline competitors during admitted async Next or receipt-before-outer-return preserve original winner, lease/epoch, child and every ancestor. Explain API-specific absence of compensation/shared-budget inputs instead of claiming those paths ran.
+
+Before freezing, statically check all public inputs, mandatory preflight, default ordinary Apply versus native ApplyExecution, interface forwarding, exact fault hit counts, complete captured Model request/catalog/provider/binding hash, actual Response/Usage, Tool ExecutionResult and terminal Result, full snapshots/grants/epochs/budgets, and precise error precedence. Never call internal completion minting APIs from the fixture. Existing regression suites supplement but do not replace measured middleware cutpoints.
+
+One source freeze, minimal Memory smoke, then all Store evidence and limited independent review. Preserve failures and classify the complete bounded set before correcting. No production change is presumed; a real invariant violation must be reported with its exact existing cell. After these six cells, perform actual final common-SHA evidence migration and all local gates, keeping the six Gaoge cells and remote release limits explicit.

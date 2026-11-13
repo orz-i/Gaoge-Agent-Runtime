@@ -1,0 +1,2 @@
+SOURCE_SHA=2af101dec9a5fbc2e53a8e4c1ab462c6944e3be2
+Source 2af101dec9a5fbc2e53a8e4c1ab462c6944e3be2. Real Memory smoke exits1 with Root/Child P0 foreign-model setup invalid Kernel input and Child P2 swallowed-inner missing original physical scope. Remaining observed cases pass. Bounded classification pending; no cross-Store expansion or ledger update yet.

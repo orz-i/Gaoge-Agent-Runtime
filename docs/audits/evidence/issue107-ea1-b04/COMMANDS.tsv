@@ -1,0 +1,7 @@
+memory	Memory/fresh-owner	880253aad587914cc28d4b9177f40aa83d730142	go -C go/agent-runtime test -race -count=1 ./memory -run '^TestEA1Resume(AdmissionMemory|MarkAckMemory)$' -v	docs/audits/evidence/issue107-ea1-b04/memory.log
+sqlite	nativeSQLite-v3/close-reopen	880253aad587914cc28d4b9177f40aa83d730142	go -C go/agent-runtime-sqlite test -race -count=1 ./... -run '^TestEA1Resume(AdmissionSQLite|MarkAckNativeSQLite)$' -v	docs/audits/evidence/issue107-ea1-b04/sqlite.log
+gorm	GORM-SQLite/fresh-owner	880253aad587914cc28d4b9177f40aa83d730142	go -C go/agent-runtime-postgres test -race -count=1 ./... -run '^TestEA1Resume(AdmissionGORM|MarkAckGORM)$' -v	docs/audits/evidence/issue107-ea1-b04/gorm.log
+nativepg	PostgreSQL16/independent-connections	880253aad587914cc28d4b9177f40aa83d730142	TEST_POSTGRES_DSN=<dedicated-ephemeral> go -C go/agent-runtime-postgres test -race -count=3 ./... -run '^TestEA1RealPostgresResume(Admission|MarkAck)$' -v	docs/audits/evidence/issue107-ea1-b04/nativepg.log
+lint-agent-runtime	lint	880253aad587914cc28d4b9177f40aa83d730142	cd go/agent-runtime && golangci-lint run ./...	docs/audits/evidence/issue107-ea1-b04/lint-agent-runtime.log
+lint-agent-runtime-postgres	lint	880253aad587914cc28d4b9177f40aa83d730142	cd go/agent-runtime-postgres && golangci-lint run ./...	docs/audits/evidence/issue107-ea1-b04/lint-agent-runtime-postgres.log
+lint-agent-runtime-sqlite	lint	880253aad587914cc28d4b9177f40aa83d730142	cd go/agent-runtime-sqlite && golangci-lint run ./...	docs/audits/evidence/issue107-ea1-b04/lint-agent-runtime-sqlite.log

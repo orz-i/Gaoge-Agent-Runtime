@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { summarizeGoCoverage } from "./go-coverage-summary.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const modules = [
@@ -54,7 +55,7 @@ for (const modulePath of modules) {
   if (mode === "lint") run("golangci-lint", ["run", "./..."], cwd);
   if (mode === "coverage") {
     const profile = path.join(coverageDirectory, `${path.basename(modulePath)}.out`);
-    run("go", ["test", "./...", "-count=1", "-covermode=atomic", `-coverprofile=${profile}`], cwd);
+    run("go", ["test", "./...", "-count=1", "-covermode=atomic", "-coverpkg=./...", `-coverprofile=${profile}`], cwd);
     coverageProfiles.push(profile);
   }
   if (mode === "vuln") {
@@ -86,8 +87,13 @@ function checkTidy(cwd, modulePath) {
     const replaceCore = modulePath !== "go/agent-runtime";
     const replaceProvider = modulePath !== "go/agent-runtime" && modulePath !== "go/agent-runtime-provider";
     const replaceHarness = ["go/agent-runtime-harness-postgres", "go/agent-runtime-http", "go/agent-runtime-harness/examples/task-agent"].includes(modulePath);
+    // Harness integration tests exercise this same source cohort's three
+    // Kernel Stores; tidy must not resolve unreleased adapters from old tags.
+    const kernelTestReplaces = modulePath === "go/agent-runtime-harness-postgres"
+      ? ["agent-runtime-postgres", "agent-runtime-sqlite"].map((name) => `github.com/orz-i/Gaoge-Agent-Runtime/go/${name}`)
+      : [];
     const version = readFileSync(path.join(root, "VERSION"), "utf8").trim();
-    const localVersions = [replaceCore ? core : null, replaceHarness ? harness : null, replaceProvider ? provider : null].filter(Boolean)
+    const localVersions = [replaceCore ? core : null, replaceHarness ? harness : null, replaceProvider ? provider : null, ...kernelTestReplaces].filter(Boolean)
       .flatMap((name) => [`${name} v${version} `, `${name} v${version}/go.mod `]);
     // go mod tidy with temporary source replaces drops genuine release-tag
     // hashes from go.sum. Preserve exact current-cohort pins for direct
@@ -104,7 +110,11 @@ function checkTidy(cwd, modulePath) {
     if (replaceHarness) {
       run("go", ["mod", "edit", `-replace=${harness}=${path.relative(cwd, path.join(root, "go", "agent-runtime-harness"))}`], cwd);
     }
+    for (const name of kernelTestReplaces) {
+      run("go", ["mod", "edit", `-replace=${name}=${path.relative(cwd, path.join(root, "go", name.split("/").at(-1)))}`], cwd);
+    }
     run("go", ["mod", "tidy"], cwd);
+    for (const name of kernelTestReplaces) run("go", ["mod", "edit", `-dropreplace=${name}`], cwd);
     if (replaceCore) run("go", ["mod", "edit", `-dropreplace=${core}`], cwd);
     if (replaceProvider) run("go", ["mod", "edit", `-dropreplace=${provider}`], cwd);
     if (replaceHarness) {
@@ -136,19 +146,10 @@ function walk(directory) {
 }
 
 function writeCoverageSummary(profiles) {
-  let coveredStatements = 0;
-  let totalStatements = 0;
-  for (const profile of profiles) {
-    const lines = readFileSync(profile, "utf8").trim().split("\n").slice(1);
-    for (const line of lines) {
-      const [, statementCountText, executionCountText] = line.trim().split(/\s+/);
-      const statementCount = Number(statementCountText);
-      const executionCount = Number(executionCountText);
-      if (!Number.isFinite(statementCount) || !Number.isFinite(executionCount)) continue;
-      totalStatements += statementCount;
-      if (executionCount > 0) coveredStatements += statementCount;
-    }
-  }
+  const { coveredStatements, totalStatements } = summarizeGoCoverage(profiles.map((profile) => ({
+    name: profile,
+    contents: readFileSync(profile, "utf8"),
+  })));
 
   const percent = totalStatements === 0 ? 100 : (coveredStatements / totalStatements) * 100;
   const minimum = Number(process.env.GO_COVERAGE_MIN ?? "70");

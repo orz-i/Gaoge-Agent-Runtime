@@ -1,0 +1,102 @@
+SOURCE_SHA=b418f5f225b6a18865749624d272da9392568669
+EXIT_CODE=1
+=== RUN   TestEA1RealPostgresCompensationAdmission
+=== RUN   TestEA1RealPostgresCompensationAdmission/root/revision
+=== RUN   TestEA1RealPostgresCompensationAdmission/root/terminal
+=== RUN   TestEA1RealPostgresCompensationAdmission/child/revision
+=== RUN   TestEA1RealPostgresCompensationAdmission/child/terminal
+--- PASS: TestEA1RealPostgresCompensationAdmission (1.27s)
+    --- PASS: TestEA1RealPostgresCompensationAdmission/root/revision (0.30s)
+    --- PASS: TestEA1RealPostgresCompensationAdmission/root/terminal (0.39s)
+    --- PASS: TestEA1RealPostgresCompensationAdmission/child/revision (0.34s)
+    --- PASS: TestEA1RealPostgresCompensationAdmission/child/terminal (0.24s)
+=== RUN   TestEA1RealPostgresCompensationBarriers
+=== RUN   TestEA1RealPostgresCompensationBarriers/root/P1
+=== RUN   TestEA1RealPostgresCompensationBarriers/root/P5
+=== RUN   TestEA1RealPostgresCompensationBarriers/root/P5-retry
+    ea1_compensation_barriers.go:228: retry changed original request beyond attempt
+=== RUN   TestEA1RealPostgresCompensationBarriers/child/P1
+=== RUN   TestEA1RealPostgresCompensationBarriers/child/P5
+=== RUN   TestEA1RealPostgresCompensationBarriers/child/P5-retry
+    ea1_compensation_barriers.go:228: retry changed original request beyond attempt
+--- FAIL: TestEA1RealPostgresCompensationBarriers (3.55s)
+    --- PASS: TestEA1RealPostgresCompensationBarriers/root/P1 (0.27s)
+    --- PASS: TestEA1RealPostgresCompensationBarriers/root/P5 (0.27s)
+    --- FAIL: TestEA1RealPostgresCompensationBarriers/root/P5-retry (0.23s)
+    --- PASS: TestEA1RealPostgresCompensationBarriers/child/P1 (0.29s)
+    --- PASS: TestEA1RealPostgresCompensationBarriers/child/P5 (2.20s)
+    --- FAIL: TestEA1RealPostgresCompensationBarriers/child/P5-retry (0.28s)
+=== RUN   TestEA1RealPostgresCompensationUnknown
+=== RUN   TestEA1RealPostgresCompensationUnknown/root
+=== RUN   TestEA1RealPostgresCompensationUnknown/child
+--- PASS: TestEA1RealPostgresCompensationUnknown (0.55s)
+    --- PASS: TestEA1RealPostgresCompensationUnknown/root (0.27s)
+    --- PASS: TestEA1RealPostgresCompensationUnknown/child (0.29s)
+=== RUN   TestEA1RealPostgresCompensationAdmission
+=== RUN   TestEA1RealPostgresCompensationAdmission/root/revision
+=== RUN   TestEA1RealPostgresCompensationAdmission/root/terminal
+=== RUN   TestEA1RealPostgresCompensationAdmission/child/revision
+=== RUN   TestEA1RealPostgresCompensationAdmission/child/terminal
+--- PASS: TestEA1RealPostgresCompensationAdmission (0.98s)
+    --- PASS: TestEA1RealPostgresCompensationAdmission/root/revision (0.23s)
+    --- PASS: TestEA1RealPostgresCompensationAdmission/root/terminal (0.20s)
+    --- PASS: TestEA1RealPostgresCompensationAdmission/child/revision (0.31s)
+    --- PASS: TestEA1RealPostgresCompensationAdmission/child/terminal (0.23s)
+=== RUN   TestEA1RealPostgresCompensationBarriers
+=== RUN   TestEA1RealPostgresCompensationBarriers/root/P1
+=== RUN   TestEA1RealPostgresCompensationBarriers/root/P5
+=== RUN   TestEA1RealPostgresCompensationBarriers/root/P5-retry
+    ea1_compensation_barriers.go:228: retry changed original request beyond attempt
+=== RUN   TestEA1RealPostgresCompensationBarriers/child/P1
+=== RUN   TestEA1RealPostgresCompensationBarriers/child/P5
+=== RUN   TestEA1RealPostgresCompensationBarriers/child/P5-retry
+    ea1_compensation_barriers.go:228: retry changed original request beyond attempt
+--- FAIL: TestEA1RealPostgresCompensationBarriers (3.58s)
+    --- PASS: TestEA1RealPostgresCompensationBarriers/root/P1 (0.31s)
+    --- PASS: TestEA1RealPostgresCompensationBarriers/root/P5 (0.30s)
+    --- FAIL: TestEA1RealPostgresCompensationBarriers/root/P5-retry (0.27s)
+    --- PASS: TestEA1RealPostgresCompensationBarriers/child/P1 (0.24s)
+    --- PASS: TestEA1RealPostgresCompensationBarriers/child/P5 (2.18s)
+    --- FAIL: TestEA1RealPostgresCompensationBarriers/child/P5-retry (0.28s)
+=== RUN   TestEA1RealPostgresCompensationUnknown
+=== RUN   TestEA1RealPostgresCompensationUnknown/root
+=== RUN   TestEA1RealPostgresCompensationUnknown/child
+--- PASS: TestEA1RealPostgresCompensationUnknown (0.52s)
+    --- PASS: TestEA1RealPostgresCompensationUnknown/root (0.24s)
+    --- PASS: TestEA1RealPostgresCompensationUnknown/child (0.28s)
+=== RUN   TestEA1RealPostgresCompensationAdmission
+=== RUN   TestEA1RealPostgresCompensationAdmission/root/revision
+=== RUN   TestEA1RealPostgresCompensationAdmission/root/terminal
+=== RUN   TestEA1RealPostgresCompensationAdmission/child/revision
+=== RUN   TestEA1RealPostgresCompensationAdmission/child/terminal
+--- PASS: TestEA1RealPostgresCompensationAdmission (1.02s)
+    --- PASS: TestEA1RealPostgresCompensationAdmission/root/revision (0.22s)
+    --- PASS: TestEA1RealPostgresCompensationAdmission/root/terminal (0.18s)
+    --- PASS: TestEA1RealPostgresCompensationAdmission/child/revision (0.33s)
+    --- PASS: TestEA1RealPostgresCompensationAdmission/child/terminal (0.29s)
+=== RUN   TestEA1RealPostgresCompensationBarriers
+=== RUN   TestEA1RealPostgresCompensationBarriers/root/P1
+=== RUN   TestEA1RealPostgresCompensationBarriers/root/P5
+=== RUN   TestEA1RealPostgresCompensationBarriers/root/P5-retry
+    ea1_compensation_barriers.go:228: retry changed original request beyond attempt
+=== RUN   TestEA1RealPostgresCompensationBarriers/child/P1
+=== RUN   TestEA1RealPostgresCompensationBarriers/child/P5
+=== RUN   TestEA1RealPostgresCompensationBarriers/child/P5-retry
+    ea1_compensation_barriers.go:228: retry changed original request beyond attempt
+--- FAIL: TestEA1RealPostgresCompensationBarriers (3.62s)
+    --- PASS: TestEA1RealPostgresCompensationBarriers/root/P1 (0.23s)
+    --- PASS: TestEA1RealPostgresCompensationBarriers/root/P5 (0.30s)
+    --- FAIL: TestEA1RealPostgresCompensationBarriers/root/P5-retry (0.30s)
+    --- PASS: TestEA1RealPostgresCompensationBarriers/child/P1 (0.28s)
+    --- PASS: TestEA1RealPostgresCompensationBarriers/child/P5 (2.21s)
+    --- FAIL: TestEA1RealPostgresCompensationBarriers/child/P5-retry (0.30s)
+=== RUN   TestEA1RealPostgresCompensationUnknown
+=== RUN   TestEA1RealPostgresCompensationUnknown/root
+=== RUN   TestEA1RealPostgresCompensationUnknown/child
+--- PASS: TestEA1RealPostgresCompensationUnknown (0.48s)
+    --- PASS: TestEA1RealPostgresCompensationUnknown/root (0.22s)
+    --- PASS: TestEA1RealPostgresCompensationUnknown/child (0.26s)
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	16.355s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]
+FAIL

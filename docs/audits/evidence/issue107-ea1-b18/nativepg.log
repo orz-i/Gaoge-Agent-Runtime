@@ -1,0 +1,139 @@
+SOURCE_SHA=85bfba1b686e462761dfd8819411ba7980b81a31
+COMMAND=go -C go/agent-runtime-postgres test -race -count=3 ./... -run '^TestEA1RealPostgresChildAgent(ControlPhases|ApprovalSettlement)' -v
+=== RUN   TestEA1RealPostgresChildAgentApprovalSettlement
+=== RUN   TestEA1RealPostgresChildAgentApprovalSettlement/P3/native-checkpoint
+=== RUN   TestEA1RealPostgresChildAgentApprovalSettlement/P4/native-checkpoint
+=== RUN   TestEA1RealPostgresChildAgentApprovalSettlement/P5/native-checkpoint/two-approvals
+=== RUN   TestEA1RealPostgresChildAgentApprovalSettlement/P3/default-terminal-tool
+=== RUN   TestEA1RealPostgresChildAgentApprovalSettlement/P4/default-terminal-tool
+=== RUN   TestEA1RealPostgresChildAgentApprovalSettlement/P5/default-terminal-tool/two-approvals
+=== RUN   TestEA1RealPostgresChildAgentApprovalSettlement/P5/ancestor-deadline
+--- PASS: TestEA1RealPostgresChildAgentApprovalSettlement (5.51s)
+    --- PASS: TestEA1RealPostgresChildAgentApprovalSettlement/P3/native-checkpoint (0.47s)
+    --- PASS: TestEA1RealPostgresChildAgentApprovalSettlement/P4/native-checkpoint (0.32s)
+    --- PASS: TestEA1RealPostgresChildAgentApprovalSettlement/P5/native-checkpoint/two-approvals (0.32s)
+    --- PASS: TestEA1RealPostgresChildAgentApprovalSettlement/P3/default-terminal-tool (0.27s)
+    --- PASS: TestEA1RealPostgresChildAgentApprovalSettlement/P4/default-terminal-tool (0.42s)
+    --- PASS: TestEA1RealPostgresChildAgentApprovalSettlement/P5/default-terminal-tool/two-approvals (0.42s)
+    --- PASS: TestEA1RealPostgresChildAgentApprovalSettlement/P5/ancestor-deadline (3.29s)
+=== RUN   TestEA1RealPostgresChildAgentControlPhases
+=== RUN   TestEA1RealPostgresChildAgentControlPhases/P0/missing
+=== RUN   TestEA1RealPostgresChildAgentControlPhases/P0/stale
+=== RUN   TestEA1RealPostgresChildAgentControlPhases/P0/not-waiting
+=== RUN   TestEA1RealPostgresChildAgentControlPhases/P0/missing-preflight
+=== RUN   TestEA1RealPostgresChildAgentControlPhases/P0/preflight-rejected
+=== RUN   TestEA1RealPostgresChildAgentControlPhases/P0/parent-wins
+=== RUN   TestEA1RealPostgresChildAgentControlPhases/P0/invalid-decision
+=== RUN   TestEA1RealPostgresChildAgentControlPhases/P0/foreign-checkpoint
+=== RUN   TestEA1RealPostgresChildAgentControlPhases/P1/default
+=== RUN   TestEA1RealPostgresChildAgentControlPhases/P1/native
+=== RUN   TestEA1RealPostgresChildAgentControlPhases/P2/host
+=== RUN   TestEA1RealPostgresChildAgentControlPhases/P2/handler
+=== RUN   TestEA1RealPostgresChildAgentControlPhases/P2/tool
+--- PASS: TestEA1RealPostgresChildAgentControlPhases (4.02s)
+    --- PASS: TestEA1RealPostgresChildAgentControlPhases/P0/missing (0.28s)
+    --- PASS: TestEA1RealPostgresChildAgentControlPhases/P0/stale (0.27s)
+    --- PASS: TestEA1RealPostgresChildAgentControlPhases/P0/not-waiting (0.36s)
+    --- PASS: TestEA1RealPostgresChildAgentControlPhases/P0/missing-preflight (0.27s)
+    --- PASS: TestEA1RealPostgresChildAgentControlPhases/P0/preflight-rejected (0.33s)
+    --- PASS: TestEA1RealPostgresChildAgentControlPhases/P0/parent-wins (0.22s)
+    --- PASS: TestEA1RealPostgresChildAgentControlPhases/P0/invalid-decision (0.31s)
+    --- PASS: TestEA1RealPostgresChildAgentControlPhases/P0/foreign-checkpoint (0.27s)
+    --- PASS: TestEA1RealPostgresChildAgentControlPhases/P1/default (0.49s)
+    --- PASS: TestEA1RealPostgresChildAgentControlPhases/P1/native (0.39s)
+    --- PASS: TestEA1RealPostgresChildAgentControlPhases/P2/host (0.25s)
+    --- PASS: TestEA1RealPostgresChildAgentControlPhases/P2/handler (0.27s)
+    --- PASS: TestEA1RealPostgresChildAgentControlPhases/P2/tool (0.31s)
+=== RUN   TestEA1RealPostgresChildAgentApprovalSettlement
+=== RUN   TestEA1RealPostgresChildAgentApprovalSettlement/P3/native-checkpoint
+=== RUN   TestEA1RealPostgresChildAgentApprovalSettlement/P4/native-checkpoint
+=== RUN   TestEA1RealPostgresChildAgentApprovalSettlement/P5/native-checkpoint/two-approvals
+=== RUN   TestEA1RealPostgresChildAgentApprovalSettlement/P3/default-terminal-tool
+=== RUN   TestEA1RealPostgresChildAgentApprovalSettlement/P4/default-terminal-tool
+=== RUN   TestEA1RealPostgresChildAgentApprovalSettlement/P5/default-terminal-tool/two-approvals
+=== RUN   TestEA1RealPostgresChildAgentApprovalSettlement/P5/ancestor-deadline
+--- PASS: TestEA1RealPostgresChildAgentApprovalSettlement (5.26s)
+    --- PASS: TestEA1RealPostgresChildAgentApprovalSettlement/P3/native-checkpoint (0.32s)
+    --- PASS: TestEA1RealPostgresChildAgentApprovalSettlement/P4/native-checkpoint (0.37s)
+    --- PASS: TestEA1RealPostgresChildAgentApprovalSettlement/P5/native-checkpoint/two-approvals (0.41s)
+    --- PASS: TestEA1RealPostgresChildAgentApprovalSettlement/P3/default-terminal-tool (0.32s)
+    --- PASS: TestEA1RealPostgresChildAgentApprovalSettlement/P4/default-terminal-tool (0.33s)
+    --- PASS: TestEA1RealPostgresChildAgentApprovalSettlement/P5/default-terminal-tool/two-approvals (0.28s)
+    --- PASS: TestEA1RealPostgresChildAgentApprovalSettlement/P5/ancestor-deadline (3.24s)
+=== RUN   TestEA1RealPostgresChildAgentControlPhases
+=== RUN   TestEA1RealPostgresChildAgentControlPhases/P0/missing
+=== RUN   TestEA1RealPostgresChildAgentControlPhases/P0/stale
+=== RUN   TestEA1RealPostgresChildAgentControlPhases/P0/not-waiting
+=== RUN   TestEA1RealPostgresChildAgentControlPhases/P0/missing-preflight
+=== RUN   TestEA1RealPostgresChildAgentControlPhases/P0/preflight-rejected
+=== RUN   TestEA1RealPostgresChildAgentControlPhases/P0/parent-wins
+=== RUN   TestEA1RealPostgresChildAgentControlPhases/P0/invalid-decision
+=== RUN   TestEA1RealPostgresChildAgentControlPhases/P0/foreign-checkpoint
+=== RUN   TestEA1RealPostgresChildAgentControlPhases/P1/default
+=== RUN   TestEA1RealPostgresChildAgentControlPhases/P1/native
+=== RUN   TestEA1RealPostgresChildAgentControlPhases/P2/host
+=== RUN   TestEA1RealPostgresChildAgentControlPhases/P2/handler
+=== RUN   TestEA1RealPostgresChildAgentControlPhases/P2/tool
+--- PASS: TestEA1RealPostgresChildAgentControlPhases (3.81s)
+    --- PASS: TestEA1RealPostgresChildAgentControlPhases/P0/missing (0.21s)
+    --- PASS: TestEA1RealPostgresChildAgentControlPhases/P0/stale (0.32s)
+    --- PASS: TestEA1RealPostgresChildAgentControlPhases/P0/not-waiting (0.26s)
+    --- PASS: TestEA1RealPostgresChildAgentControlPhases/P0/missing-preflight (0.31s)
+    --- PASS: TestEA1RealPostgresChildAgentControlPhases/P0/preflight-rejected (0.25s)
+    --- PASS: TestEA1RealPostgresChildAgentControlPhases/P0/parent-wins (0.27s)
+    --- PASS: TestEA1RealPostgresChildAgentControlPhases/P0/invalid-decision (0.26s)
+    --- PASS: TestEA1RealPostgresChildAgentControlPhases/P0/foreign-checkpoint (0.34s)
+    --- PASS: TestEA1RealPostgresChildAgentControlPhases/P1/default (0.36s)
+    --- PASS: TestEA1RealPostgresChildAgentControlPhases/P1/native (0.35s)
+    --- PASS: TestEA1RealPostgresChildAgentControlPhases/P2/host (0.29s)
+    --- PASS: TestEA1RealPostgresChildAgentControlPhases/P2/handler (0.29s)
+    --- PASS: TestEA1RealPostgresChildAgentControlPhases/P2/tool (0.30s)
+=== RUN   TestEA1RealPostgresChildAgentApprovalSettlement
+=== RUN   TestEA1RealPostgresChildAgentApprovalSettlement/P3/native-checkpoint
+=== RUN   TestEA1RealPostgresChildAgentApprovalSettlement/P4/native-checkpoint
+=== RUN   TestEA1RealPostgresChildAgentApprovalSettlement/P5/native-checkpoint/two-approvals
+=== RUN   TestEA1RealPostgresChildAgentApprovalSettlement/P3/default-terminal-tool
+=== RUN   TestEA1RealPostgresChildAgentApprovalSettlement/P4/default-terminal-tool
+=== RUN   TestEA1RealPostgresChildAgentApprovalSettlement/P5/default-terminal-tool/two-approvals
+=== RUN   TestEA1RealPostgresChildAgentApprovalSettlement/P5/ancestor-deadline
+--- PASS: TestEA1RealPostgresChildAgentApprovalSettlement (5.17s)
+    --- PASS: TestEA1RealPostgresChildAgentApprovalSettlement/P3/native-checkpoint (0.28s)
+    --- PASS: TestEA1RealPostgresChildAgentApprovalSettlement/P4/native-checkpoint (0.35s)
+    --- PASS: TestEA1RealPostgresChildAgentApprovalSettlement/P5/native-checkpoint/two-approvals (0.32s)
+    --- PASS: TestEA1RealPostgresChildAgentApprovalSettlement/P3/default-terminal-tool (0.28s)
+    --- PASS: TestEA1RealPostgresChildAgentApprovalSettlement/P4/default-terminal-tool (0.28s)
+    --- PASS: TestEA1RealPostgresChildAgentApprovalSettlement/P5/default-terminal-tool/two-approvals (0.43s)
+    --- PASS: TestEA1RealPostgresChildAgentApprovalSettlement/P5/ancestor-deadline (3.23s)
+=== RUN   TestEA1RealPostgresChildAgentControlPhases
+=== RUN   TestEA1RealPostgresChildAgentControlPhases/P0/missing
+=== RUN   TestEA1RealPostgresChildAgentControlPhases/P0/stale
+=== RUN   TestEA1RealPostgresChildAgentControlPhases/P0/not-waiting
+=== RUN   TestEA1RealPostgresChildAgentControlPhases/P0/missing-preflight
+=== RUN   TestEA1RealPostgresChildAgentControlPhases/P0/preflight-rejected
+=== RUN   TestEA1RealPostgresChildAgentControlPhases/P0/parent-wins
+=== RUN   TestEA1RealPostgresChildAgentControlPhases/P0/invalid-decision
+=== RUN   TestEA1RealPostgresChildAgentControlPhases/P0/foreign-checkpoint
+=== RUN   TestEA1RealPostgresChildAgentControlPhases/P1/default
+=== RUN   TestEA1RealPostgresChildAgentControlPhases/P1/native
+=== RUN   TestEA1RealPostgresChildAgentControlPhases/P2/host
+=== RUN   TestEA1RealPostgresChildAgentControlPhases/P2/handler
+=== RUN   TestEA1RealPostgresChildAgentControlPhases/P2/tool
+--- PASS: TestEA1RealPostgresChildAgentControlPhases (4.14s)
+    --- PASS: TestEA1RealPostgresChildAgentControlPhases/P0/missing (0.25s)
+    --- PASS: TestEA1RealPostgresChildAgentControlPhases/P0/stale (0.21s)
+    --- PASS: TestEA1RealPostgresChildAgentControlPhases/P0/not-waiting (0.23s)
+    --- PASS: TestEA1RealPostgresChildAgentControlPhases/P0/missing-preflight (0.30s)
+    --- PASS: TestEA1RealPostgresChildAgentControlPhases/P0/preflight-rejected (0.30s)
+    --- PASS: TestEA1RealPostgresChildAgentControlPhases/P0/parent-wins (0.30s)
+    --- PASS: TestEA1RealPostgresChildAgentControlPhases/P0/invalid-decision (0.29s)
+    --- PASS: TestEA1RealPostgresChildAgentControlPhases/P0/foreign-checkpoint (0.29s)
+    --- PASS: TestEA1RealPostgresChildAgentControlPhases/P1/default (0.51s)
+    --- PASS: TestEA1RealPostgresChildAgentControlPhases/P1/native (0.52s)
+    --- PASS: TestEA1RealPostgresChildAgentControlPhases/P2/host (0.30s)
+    --- PASS: TestEA1RealPostgresChildAgentControlPhases/P2/handler (0.31s)
+    --- PASS: TestEA1RealPostgresChildAgentControlPhases/P2/tool (0.33s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	29.324s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]
+
+EXIT_CODE=0

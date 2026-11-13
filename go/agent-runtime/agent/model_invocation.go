@@ -57,6 +57,9 @@ type ModelInvocation struct {
 	Response            model.Response        `json:"response,omitempty"`
 	Usage               *model.Usage          `json:"usage,omitempty"`
 	ErrorCode           string                `json:"errorCode,omitempty"`
+	OutcomeErrorCode    string                `json:"outcomeErrorCode,omitempty"`
+	OutcomeErrorDetail  string                `json:"outcomeErrorDetail,omitempty"`
+	DispatchAttempt     uint32                `json:"dispatchAttempt,omitempty"`
 	ExecutionAttempt    uint32                `json:"executionAttempt,omitempty"`
 	ExecutionLeaseUntil *time.Time            `json:"executionLeaseUntil,omitempty"`
 	// RetryAfter is the Feature-owned ReadyAt gate for a released,
@@ -213,6 +216,9 @@ func validModelInvocations(values []ModelInvocation) bool {
 		if (invocation.Status == ModelInvocationPending || invocation.Status == ModelInvocationCompleted) &&
 			(invocation.Provider != "" || invocation.BindingFingerprint != "") &&
 			!validBindingFingerprint(invocation.BindingFingerprint) {
+			return false
+		}
+		if invocation.DispatchAttempt > invocation.ExecutionAttempt || (invocation.DispatchAttempt != 0 && invocation.DispatchAttempt != invocation.ExecutionAttempt) {
 			return false
 		}
 		switch invocation.Status {
@@ -398,11 +404,9 @@ func (runner *Runner) ensureModelInvocation(
 	if err != nil {
 		return kernel.Snapshot{}, runState{}, ModelInvocation{}, err
 	}
-	next, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
+	next, err := runner.commitManagedModelIntent(ctx, snapshot, state, invocation, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
-		Events: []kernel.EventDraft{{
-			Type: "agent.model_invocation.pending", Message: invocation.ID, Wakeup: true,
-		}},
+		Events: []kernel.EventDraft{{Type: "agent.model_invocation.pending", Message: invocation.ID, Wakeup: true}},
 	})
 	if err != nil {
 		return kernel.Snapshot{}, runState{}, ModelInvocation{}, err
@@ -474,6 +478,7 @@ func (runner *Runner) buildModelRequest(
 	originalTools := append([]tools.Definition(nil), request.Tools...)
 	if runner.prepareModelRequest != nil {
 		prepared, prepareErr := runner.prepareModelRequest(ctx, model.CloneRequest(request))
+		runner.noteRootCallbackFailure(prepareErr)
 		if prepareErr != nil {
 			return model.Request{}, nil, prepareErr
 		}
@@ -763,7 +768,29 @@ func (runner *Runner) executeModelInvocation(
 			if err := runner.validateModelInvocationClaim(dispatchCtx, snapshot, invocation); err != nil {
 				return err
 			}
-			return runner.runtime.RequireExecution(dispatchCtx, snapshot.Run.ID)
+			if err := runner.runtime.RequireExecution(dispatchCtx, snapshot.Run.ID); err != nil {
+				return err
+			}
+			if invocation.DispatchAttempt != 0 {
+				return ErrModelOutcomeUnknown
+			}
+			invocation.DispatchAttempt = invocation.ExecutionAttempt
+			if !replaceLastModelInvocation(&state, invocation) {
+				return ErrInvalidRequest
+			}
+			encoded, err := encodeState(state)
+			if err != nil {
+				return err
+			}
+			staged, err := runner.runtime.Apply(dispatchCtx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
+				Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
+				Events: []kernel.EventDraft{{Type: "agent.model_invocation.dispatch_intent", Message: invocation.ID, Wakeup: true}},
+			})
+			if err != nil {
+				return err
+			}
+			snapshot = staged
+			return nil
 		},
 		&authority,
 	)
@@ -864,7 +891,7 @@ func (runner *Runner) executeModelInvocation(
 			ResponseID: response.ResponseID, Attempt: int(invocation.ExecutionAttempt), ErrorCode: "receipt_persist_failed",
 			ObservedAt: endedAt, Duration: endedAt.Sub(startedAt), Usage: telemetryModelUsage(response.Usage),
 		})
-		return snapshot, state, err
+		return snapshot, state, errors.Join(ErrModelOutcomeUnknown, err)
 	}
 	endedAt := runner.clock.Now().UTC()
 	runner.recordTelemetry(ctx, observability.Event{
@@ -922,6 +949,9 @@ func (runner *Runner) claimModelInvocationExecution(
 	if invocation.Status != ModelInvocationPending {
 		return snapshot, state, invocation, ErrInvalidRequest
 	}
+	if invocation.DispatchAttempt != 0 {
+		return snapshot, state, invocation, ErrModelOutcomeUnknown
+	}
 	now := runner.clock.Now().UTC()
 	if (invocation.ExecutionLeaseUntil != nil && now.Before(invocation.ExecutionLeaseUntil.UTC())) ||
 		(invocation.RetryAfter != nil && now.Before(invocation.RetryAfter.UTC())) {
@@ -957,6 +987,9 @@ func (runner *Runner) releaseModelInvocationExecution(
 	state runState,
 	invocation ModelInvocation,
 ) (kernel.Snapshot, error) {
+	if invocation.DispatchAttempt != 0 {
+		return snapshot, ErrModelOutcomeUnknown
+	}
 	if invocation.Status != ModelInvocationPending || invocation.ExecutionLeaseUntil == nil {
 		return snapshot, nil
 	}

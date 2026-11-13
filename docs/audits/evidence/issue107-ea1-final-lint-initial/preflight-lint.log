@@ -1,0 +1,41 @@
+SOURCE_SHA=bac29b079e054716cf90101e6e6f03121e819255
+COMMAND=make go-lint
+node scripts/go-workspace.mjs lint
+==> lint go/agent-runtime
+go/agent-runtime/kernel/managed_recovery_test.go:30:67: comparing with != will fail on wrapped errors. Use errors.Is to check for a specific error (errorlint)
+	if _, e := ManagedParkTransfer(original, q, s, live, g, a, now); e != ErrExecutionConflict {
+	                                                                 ^
+go/agent-runtime/kernel/managed_recovery_test.go:35:70: comparing with != will fail on wrapped errors. Use errors.Is to check for a specific error (errorlint)
+	if _, e := ManagedParkTransfer(original, q, changed, l, g, a, now); e != ErrExecutionConflict {
+	                                                                    ^
+go/agent-runtime/kernel/managed_recovery_test.go:40:70: comparing with != will fail on wrapped errors. Use errors.Is to check for a specific error (errorlint)
+	if _, e := ManagedParkTransfer(original, q, s, l, g, foreign, now); e != ErrExecutionConflict {
+	                                                                    ^
+go/agent-runtime/kernel/managed_recovery.go:289:2: missing cases in switch of type reflect.Kind: reflect.Invalid, reflect.Bool, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64, reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr, reflect.Float32, reflect.Float64, reflect.Complex64, reflect.Complex128, reflect.Array, reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.String, reflect.UnsafePointer (exhaustive)
+	switch v.Kind() {
+	^
+go/agent-runtime/kernel/managed_recovery.go:420:2: missing cases in switch of type kernel.ManagedRecoveryState: kernel.ManagedAvailable, kernel.ManagedInvalidated, kernel.ManagedEnabled, kernel.ManagedCancelled, kernel.ManagedClosed (exhaustive)
+	switch t.State {
+	^
+go/agent-runtime/memory/managed_recovery_test.go:3:1: File is not properly formatted (goimports)
+import (
+^
+6 issues:
+* errorlint: 3
+* exhaustive: 2
+* goimports: 1
+file:///private/tmp/gaoge-runtime-issue107/scripts/go-workspace.mjs:190
+    throw new Error(`${command} ${args.join(" ")} failed with exit code ${result.status ?? 1}`);
+          ^
+
+Error: golangci-lint run ./... failed with exit code 1
+    at run (file:///private/tmp/gaoge-runtime-issue107/scripts/go-workspace.mjs:190:11)
+    at file:///private/tmp/gaoge-runtime-issue107/scripts/go-workspace.mjs:54:24
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+
+Node.js v24.21.0
+make: *** [go-lint] Error 1
+
+EXIT_CODE=2

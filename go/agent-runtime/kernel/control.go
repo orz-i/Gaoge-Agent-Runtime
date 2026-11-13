@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"strings"
 	"time"
@@ -61,6 +62,7 @@ func ValidateControl(current Snapshot, guard ControlGuard, mutation StoreMutatio
 	if next.Run.Kind != current.Run.Kind || next.Run.Actor != current.Run.Actor ||
 		next.Run.Thread != current.Run.Thread || next.Run.Goal != current.Run.Goal ||
 		next.Run.RequestID != current.Run.RequestID ||
+		next.Run.ParentRunID != current.Run.ParentRunID ||
 		!next.Run.CreatedAt.Equal(current.Run.CreatedAt) ||
 		(next.Run.DeadlineAt == nil) != (current.Run.DeadlineAt == nil) {
 		return ErrInvalidInput
@@ -185,7 +187,10 @@ func ValidateControl(current Snapshot, guard ControlGuard, mutation StoreMutatio
 // a new execution claim before the Feature dispatches external effects.
 func (runtime *Runtime) ApplyControl(ctx context.Context, runID string, expectedRevision uint64,
 	guard ControlGuard, mutation Mutation, permit *featurecontrol.Proof) (Snapshot, bool, error) {
-	if runtime == nil || runtime.execution != nil || hasReservedApplyEvidence(mutation.Events) {
+	if runtime == nil || hasReservedApplyEvidence(mutation.Events) {
+		return Snapshot{}, false, controlNoEffectBeforeStore(ErrInvalidInput)
+	}
+	if runtime.execution != nil && (guard.Kind != ControlApproval || runtime.physicalGrant == nil || !runtime.physicalGrant.IsOwned() || !runtime.physicalGrant.MatchesExecution(*runtime.execution)) {
 		return Snapshot{}, false, controlNoEffectBeforeStore(ErrInvalidInput)
 	}
 	current, err := runtime.Load(ctx, runID)
@@ -199,6 +204,18 @@ func (runtime *Runtime) ApplyControl(ctx context.Context, runID string, expected
 		return Snapshot{}, false, controlNoEffectBeforeStore(err)
 	}
 	next := runtime.makeStoreMutation(current, mutation)
+	if runtime.physicalGrant != nil {
+		if current.Run.ID != runtime.physicalGrant.ChildRunID {
+			return Snapshot{}, false, controlNoEffectBeforeStore(ErrExecutionConflict)
+		}
+		next.PhysicalPermit = PhysicalApplyPermit{
+			grant:     *runtime.physicalGrant,
+			execution: runtime.execution,
+			proof: featurecontrol.Seal(current.Run.ID, current.Run.Revision,
+				physicalFeatureProofDomain(current.Run.Kind, "apply"),
+				runtime.physicalGrant.ID, current.State, current.Checkpoint),
+		}
+	}
 	// The Store sees the exact same unforgeable, mutation-bound proof and
 	// checks it again under the authoritative transaction/row lock.
 	guard.verified = permit
@@ -209,6 +226,14 @@ func (runtime *Runtime) ApplyControl(ctx context.Context, runID string, expected
 	// error as no-effect: even a failed CAS response can be outcome-unknown.
 	if store, ok := runtime.store.(ControlStore); ok {
 		snapshot, revoked, writeErr := store.ApplyControl(ctx, runID, expectedRevision, guard, next)
+		if guard.Kind == ControlCancel && errors.Is(writeErr, ErrChildExecutionBusy) {
+			if _, authorized := runtime.store.(ChildExecutionStore); authorized {
+				// Every ChildExecutionStore MUST attest this busy outcome was
+				// rejected BEFORE any CAS mutation; unlike a generic Store
+				// ErrConflict it is a source-specific no-effect proof.
+				return Snapshot{}, false, &controlChildBusyNoEffect{cause: writeErr}
+			}
+		}
 		return snapshot, revoked, controlStoreOutcome(writeErr)
 	}
 	// Older custom stores implement no execution epochs and retain the existing

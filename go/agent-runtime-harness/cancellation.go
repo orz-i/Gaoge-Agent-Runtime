@@ -30,6 +30,16 @@ type LocalKernelCanceller interface {
 	OwnsKernelRuntime(*kernel.Runtime) bool
 }
 
+// LocalKernelRunKindCanceller is a narrower alternative for mixed local
+// Kernel and remote cancellers. It proves that Cancel for exactly this RunKind
+// delegates to the same Kernel, without asserting that the entire canceller
+// owns remote A2A/Handoff effects. Harness still verifies the original
+// Feature/Agent route and the committed cancellation result independently.
+type LocalKernelRunKindCanceller interface {
+	RuntimeCanceller
+	OwnsKernelRunKind(*kernel.Runtime, kernel.RunKind) bool
+}
+
 // ErrHandoffCancellationUnverified means a delegated ChildRunner owns a Run
 // that the Harness-local Kernel cannot observe or cancel. No terminal status
 // may be projected without a verified, route-owned cancellation outcome.
@@ -160,6 +170,11 @@ func (runner *Runner) cancelRuntimeRun(
 			return kernel.Snapshot{}, true, err
 		}
 		if terminalRuntimeStatus(current.Run.Status) {
+			// The original route-specific ownership proof above owns
+			// physical settlement semantics. Workflow AgentTask checks
+			// unresolved native Tool/Model intents before reaching here;
+			// independently routed Handoffs retain their own external
+			// cleanup and reconciliation contract instead of inheriting it.
 			return current, true, nil
 		}
 		// An A2A shadow Run is local evidence of a remote task, not the
@@ -245,7 +260,7 @@ func sameCancellationRunOrigin(expected, candidate kernel.Run) bool {
 	return expected.ID != "" && candidate.ID == expected.ID &&
 		candidate.Kind == expected.Kind && candidate.Actor == expected.Actor &&
 		candidate.Thread == expected.Thread && candidate.Goal == expected.Goal &&
-		candidate.RequestID == expected.RequestID
+		candidate.RequestID == expected.RequestID && candidate.ParentRunID == expected.ParentRunID
 }
 
 // A correct ChildRunner alone cannot authorize cancellation when the Host
@@ -261,6 +276,17 @@ func (runner *Runner) localHandoffCancellerOwnsKernel() bool {
 	}
 	owner, ok := runner.cancellation.(LocalKernelCanceller)
 	return ok && owner.OwnsKernelRuntime(runner.runtime)
+}
+
+// Only the fixed native Run Kind may use a mixed Host canceller's local
+// Kernel delegation. A generic local-ownership proof retains its previous
+// semantics; an A2A route cannot inherit a native Agent's authority.
+func (runner *Runner) localRelationCancellerOwnsKernel(kind kernel.RunKind) bool {
+	if runner.localHandoffCancellerOwnsKernel() {
+		return true
+	}
+	owner, ok := runner.cancellation.(LocalKernelRunKindCanceller)
+	return ok && runner.runtime != nil && owner.OwnsKernelRunKind(runner.runtime, kind)
 }
 
 // localHandoffCancellationAuthority proves that a coincidentally present

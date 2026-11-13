@@ -146,7 +146,10 @@ the request's persisted Provider HMAC binding fingerprint. Rebuilding an
 adapter after an external-catalog change does **not** revoke an existing
 pending invocation for an unchanged model. Changing that selected model's
 verified capabilities, endpoint, credential or Host binding *does* cause the
-Agent's existing `ErrProviderBindingMismatch` fail-closed recovery fence.
+Agent's existing `ErrProviderBindingMismatch` fail-closed recovery fence for
+a legitimately resumable, unsent invocation. If a physical dispatch is already
+unresolved, `ErrModelOutcomeUnknown` takes precedence: changing or restoring
+the binding does not authorize another send.
 There is no silent fallback, policy downgrade or second retry protocol. Do not
 mutate a snapshot from another goroutine while the Host loader is reading it.
 
@@ -594,7 +597,14 @@ is permitted. See the [P1 frame audit](audits/2026-11-03-pr87-anthropic-sse-reje
   and [Anthropic effort reference](https://platform.claude.com/docs/en/build-with-claude/effort).
 - Retryable HTTP status 408/409/425/429/5xx and transport failures return
   `model.RetryableError`; 400/401/403 errors do not. Agent owns retry
-  budgets. A typed `net.Error` timeout from HTTP dispatch, while the caller
+  budgets. This classification is not a receipt or proof of non-dispatch.
+  After a committed physical dispatch, malformed/contradictory SSE, duplicate
+  response authority, HTTP failure or stream error without a trustworthy
+  completion leaves the original invocation Pending and the Run Running with
+  `ErrModelOutcomeUnknown`. Lease expiry and a fresh runner do not replay it;
+  prior verified receipts and budget usage remain unchanged. A genuine
+  pre-dispatch Store CAS rejection can remain eligible for the existing retry
+  protocol, with the original invocation and selected binding preserved. A typed `net.Error` timeout from HTTP dispatch, while the caller
   Context is still active, also retains the existing
   `model.upstream_timeout` classification. The safe cause remains local;
   network error text, URLs, addresses and underlying errors are not retained.

@@ -1,0 +1,20 @@
+matrix-extra-agent-runtime-postgres-1 0
+matrix-extra-agent-runtime-harness-postgres-0 0
+matrix-attempt-extra 0
+coverage 2
+security 0
+integration 2
+otel 0
+beta-contract 0
+go-lint 0
+ts-lint 0
+ts-typecheck 0
+ts-test 0
+ts-build 0
+eval-smoke 0
+benchmark-smoke 0
+otel-e2e-smoke 0
+a2a-product-check 0
+release-check 0
+final-state 0
+Continuation completed; inspect exits.

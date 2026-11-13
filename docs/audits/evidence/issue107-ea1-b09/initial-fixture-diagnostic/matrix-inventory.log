@@ -1,0 +1,7 @@
+SOURCE_SHA=2bf48748548dcd34092e87aecc26c9ec616f556c
+DIAGNOSTIC_ONLY=true
+EA-1 inventory: 24 entrypoints x 6 phases = 144 cells
+Inventory: EVIDENCE_TO_VERIFY=92, N_A_REVIEW=5, OPEN_COVERAGE=47
+Evidence: PASS=70, UNRUN=74
+
+EXIT_CODE=0

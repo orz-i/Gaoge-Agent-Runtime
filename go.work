@@ -20,3 +20,7 @@ replace github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime v0.1.0-beta.24 => 
 replace github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness v0.1.0-beta.24 => ./go/agent-runtime-harness
 
 replace github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider v0.1.0-beta.24 => ./go/agent-runtime-provider
+
+replace github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres v0.1.0-beta.24 => ./go/agent-runtime-postgres
+
+replace github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite v0.1.0-beta.24 => ./go/agent-runtime-sqlite

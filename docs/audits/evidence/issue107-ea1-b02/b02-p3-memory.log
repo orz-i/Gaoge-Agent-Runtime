@@ -1,0 +1,8 @@
+=== RUN   TestEA1ReceiptBeforeMarkMemory
+=== RUN   TestEA1ReceiptBeforeMarkMemory/root_receipt_committed_before_Mark
+=== RUN   TestEA1ReceiptBeforeMarkMemory/child_receipt_committed_before_Mark
+--- PASS: TestEA1ReceiptBeforeMarkMemory (0.01s)
+    --- PASS: TestEA1ReceiptBeforeMarkMemory/root_receipt_committed_before_Mark (0.01s)
+    --- PASS: TestEA1ReceiptBeforeMarkMemory/child_receipt_committed_before_Mark (0.00s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory	1.338s

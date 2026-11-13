@@ -41,34 +41,41 @@ and the beta.24 breaking-change ledger.
 
 **Stage 2 governance:** The [final Stage 2 exit audit](../../docs/audits/2026-10-16-stage2-final-exit-audit.md) closes the previously demonstrated 2A/2B/2C experimental engineering increments, **not** ADR 0008's full production acceptance. A [subsequent hard-gate correction](../../docs/audits/2026-10-16-stage2-hard-gates-followup.md) adds Run Store quarantine and exact internal repair, self-wakeup source binding and partial Direct/Worker concurrency proof. A [subsequent terminal-DLQ handoff test](../../docs/audits/2026-10-16-stage2-terminal-dlq-handoff.md) now verifies protected Queue expiry and PG-quarantine-before-Redis-Nack ordering. Actual product host authorization/Provider identity, migration of old unprotected Jobs and full Direct/Pump/Hosted eligibility are **still not certified**. Do not treat this opt-in API as unattended production multi-worker certification.
 
-An opt-in `agent.Dependencies.RunExecution` configuration lets the Agent
-`StartRun` or `Resume` claim the existing Store execution lease
-before its Model/Tool loop. It is **not** a workflow scheduler or a new
-state machine. For example:
+`agent.Dependencies.RunExecution` optionally configures the Root execution
+owner and lease duration. When unset, the Runner creates a unique internal
+owner and a checked lease duration covering the configured call window.
+Both configurations require Execution, ChildExecution and OwnedPhysicalExecution
+Store capabilities. Root middleware and the full synchronous Next lifetime are
+covered by one durable physical scope bound to the original execution lease.
+A caller-bound `Runtime.WithExecution` lease is reused without acquiring,
+renewing or releasing the caller's lease.
 
-```go
-RunExecution: &agent.RunExecution{
-    OwnerID: "profile-worker-1",
-    LeaseDuration: 5 * time.Minute,
-},
-```
+Explicit configuration still requires a caller-stable nonempty Start Run ID.
+Default configuration retains auto-generated Run IDs. A failed or lost Create
+response must be reconciled by the original Run ID, not retried with a new one.
+Root creation reserves execution authority atomically; old epoch-zero Runs
+cannot be upgraded while unleased executors may still be running.
 
-The Store must implement `kernel.ExecutionStore`; otherwise Runner
-construction fails. **Native `StartRun` requires a caller-stable nonempty Run ID**, allocated before any Create attempt: a scope-scoped unique `RequestID` is not guaranteed by the current Store. A failed or lost Create response must be reconciled by that same Run ID, never retried with a freshly minted identity. HTTP hosts using experimental Native mode must therefore supply a stable `ClientRunID` or their own authenticated idempotency admission layer. Legacy single-executor Starts retain their optional auto-ID behavior. Native creation **atomically reserves Epoch 1**;
-Legacy Runs at Epoch 0 cannot be upgraded to native execution while
-old executors may still be running. The first native owner claims Epoch 2.
-The lease must cover the configured Tool retry/backoff window, though
-external calls may still ignore Context deadlines. In opt-in Native mode,
-a retryable Model error persists `ModelInvocation.RetryAfter` in existing
-Agent State alongside the committed Outbox `WakeupAt`. Calling `Resume`
-before the due time returns `ErrModelInvocationBusy` **without claiming a
-new Store Epoch or calling the Model**; due recovery reuses the same
-invocation identity. The host must provide a trusted consistent Model
-scheduling clock. The same durable retry due time also applies when
-`RunExecution` is unset: an early explicit `Resume` returns
-`ErrModelInvocationBusy` without another Provider attempt. See
-[ADR 0011](../../docs/adr/0011-model-invocation-lease-and-retry-governance.md).
-This contract does not start a background recovery worker.
+Before each Model send, the original invocation and attempt receive a durable
+dispatch-intent marker. A dispatched invocation without an authoritative receipt
+returns `ErrModelOutcomeUnknown`; neither RetryAfter, lease expiry nor a generic
+retryable error permits resending. A pre-dispatch denial remains distinct from
+an uncertain physical outcome. No background recovery worker is started.
+A completed receipt may be consumed without reissuing the original invocation.
+Root Host errors retain the original scope; TTL cannot manufacture completion.
+`ReconcileRootPhysicalExecution` can retire a durable completion marker or an
+original grant-bound callback-returned completion record with all physical intents settled.
+A clean snapshot alone is insufficient. A Run status alone never proves callback completion; the original opaque
+completion record or durable settlement marker is required. This is not production multi-worker certification.
+
+An explicitly configured `ModelOutcomeVerifier` may read the original settled
+Model receipt without invoking middleware or generating another response. If
+the original Host callback completed, receipt recovery can retire its scope.
+If that Host callback remains unknown, complete authoritative response evidence
+may be saved without consuming it: the original scope, errors, messages, Tool
+state and SDK budget usage stay unchanged. Billing-only evidence cannot promote
+a pending invocation to completed. No wakeup or further execution is authorized
+by this evidence-only write.
 
 A native Tool writes a durable dispatch intent containing the stable
 Call ID **before** executing. The returned native receipt must match

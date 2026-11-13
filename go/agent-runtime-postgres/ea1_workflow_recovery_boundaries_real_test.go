@@ -1,0 +1,46 @@
+package postgres
+
+import (
+	"os"
+	"strings"
+	"testing"
+
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	pgdriver "gorm.io/driver/postgres"
+	"gorm.io/gorm"
+)
+
+func TestEA1RealPostgresWorkflowRecoveryBoundaries(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("TEST_POSTGRES_DSN"))
+	if dsn == "" {
+		t.Skip("TEST_POSTGRES_DSN not configured")
+	}
+	conformance.RunEA1WorkflowRecoveryBoundariesSuite(t, func(t *testing.T) (kernel.Store, func() (kernel.Store, kernel.Store)) {
+		db, isolatedDSN := openIsolatedRealPostgres(t, dsn)
+		if err := Migrate(db); err != nil {
+			t.Fatal(err)
+		}
+		return NewKernelStore(db), func() (kernel.Store, kernel.Store) {
+			fresh, err := gorm.Open(pgdriver.Open(isolatedDSN), realPostgresTestConfig())
+			if err != nil {
+				t.Fatal(err)
+			}
+			sqlDB, err := fresh.DB()
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = sqlDB.Close() })
+			peer, err := gorm.Open(pgdriver.Open(isolatedDSN), realPostgresTestConfig())
+			if err != nil {
+				t.Fatal(err)
+			}
+			peerDB, err := peer.DB()
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = peerDB.Close() })
+			return NewKernelStore(fresh), NewKernelStore(peer)
+		}
+	})
+}

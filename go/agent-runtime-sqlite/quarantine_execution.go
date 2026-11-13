@@ -29,6 +29,9 @@ func (s *Store) QuarantineExecution(ctx context.Context, value kernel.ExecutionQ
 		return conflictOrDatabaseError(err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err = ownedGrantBlocks(ctx, tx, value.RunID, nil, true); err != nil {
+		return err
+	}
 	var revision, epoch, blockRevision, blockGeneration int64
 	var status, code string
 	err = tx.QueryRowContext(ctx, `SELECT revision,status,execution_epoch,

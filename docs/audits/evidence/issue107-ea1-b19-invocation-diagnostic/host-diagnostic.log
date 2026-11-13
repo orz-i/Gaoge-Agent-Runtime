@@ -1,0 +1,11 @@
+SOURCE_SHA=9e3c765da6748a5f49209a9aed8723d6ff6e0012
+COMMAND=go -C go/agent-runtime-harness-postgres test -count=1 ./... -run '^TestRealPostgresEA1HarnessAgentTaskCancelP4$' -v
+=== RUN   TestRealPostgresEA1HarnessAgentTaskCancelP4
+    ea1_child_agent_cancel_harness_test.go:679: Workflow Invocation field OutputRefs: expected=[]harness.HostRef(nil) actual=[]harness.HostRef{}
+    ea1_child_agent_cancel_harness_test.go:679: cancellation changed original Workflow Invocation: <nil>
+--- FAIL: TestRealPostgresEA1HarnessAgentTaskCancelP4 (0.36s)
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-postgres	1.183s
+FAIL
+
+EXIT_CODE=1

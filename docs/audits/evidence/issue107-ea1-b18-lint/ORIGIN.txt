@@ -1,0 +1,2 @@
+SOURCE_SHA=53e7ad944b42881618ffb6f4141f8cb727191a50
+Exact Tool-port smoke and all twenty Memory cases PASS. Core lint QF1008 redundant embedded selector failed; later backends not run.

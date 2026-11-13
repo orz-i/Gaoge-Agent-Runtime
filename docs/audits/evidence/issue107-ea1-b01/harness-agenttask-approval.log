@@ -1,0 +1,17 @@
+=== RUN   TestFinalAuditParentTerminalCannotApproveLiveChild
+=== RUN   TestFinalAuditParentTerminalCannotApproveLiveChild/cancelled
+    issue107_independent_audit_regression_test.go:42: approval outcome parent=cancelled: harness state conflict
+        harness runtime cancellation outcome is unverified
+--- PASS: TestFinalAuditParentTerminalCannotApproveLiveChild (0.02s)
+    --- PASS: TestFinalAuditParentTerminalCannotApproveLiveChild/cancelled (0.02s)
+=== RUN   TestIssue107RecoveryCannotRetireActiveApprovalGrantBeforeMiddleware
+--- PASS: TestIssue107RecoveryCannotRetireActiveApprovalGrantBeforeMiddleware (0.02s)
+=== RUN   TestIssue107WorkflowAgentTaskSubtaskApprovalAndResume
+--- PASS: TestIssue107WorkflowAgentTaskSubtaskApprovalAndResume (0.04s)
+=== RUN   TestIssue107AgentTaskCancelUsesExactPhysicalFence
+--- PASS: TestIssue107AgentTaskCancelUsesExactPhysicalFence (0.01s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness	1.654s
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness/examples/session	1.458s [no tests to run]

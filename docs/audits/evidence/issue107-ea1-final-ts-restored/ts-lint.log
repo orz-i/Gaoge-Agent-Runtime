@@ -1,0 +1,7 @@
+SOURCE_SHA=20187a21001a6c51fa0f3109460a0738f0991595
+COMMAND=make ts-lint
+pnpm run lint
+$ pnpm --filter @orz-i/agent-runtime-client lint
+$ eslint src --max-warnings=0
+
+EXIT_CODE=0

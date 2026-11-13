@@ -1,0 +1,2 @@
+SOURCE_SHA=6b4197ee70665f27f637a6d7a489ec0e7c545366
+Memory smoke and directed PASS; SQLite/GORM/realPG P1 unbound Apply typed-error mismatch. Three lint PASS. No production change or matrix certification.

@@ -1,0 +1,2 @@
+SOURCE_SHA=2bf48748548dcd34092e87aecc26c9ec616f556c
+Not acceptance evidence. Initial Tool fixture expected Completed instead of actual Consumed; both versions omit P0 zero-Host assertion.

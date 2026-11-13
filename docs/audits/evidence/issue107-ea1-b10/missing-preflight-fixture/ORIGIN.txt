@@ -1,0 +1,2 @@
+SOURCE_SHA=cb3d5887ade174ba6be762d2612dab10c02e1d18
+Fixture diagnostic only, not production defect or certification.

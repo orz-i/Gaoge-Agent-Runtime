@@ -1,0 +1,29 @@
+=== RUN   TestIssue107PostgresParentedWorkflowPhysicalGrantConformance
+=== RUN   TestIssue107PostgresParentedWorkflowPhysicalGrantConformance/completed_Effect_fences_parent_then_retires_original_Grant
+=== RUN   TestIssue107PostgresParentedWorkflowPhysicalGrantConformance/unknown_remote_Pending_pins_parent_and_rejects_replay
+=== RUN   TestIssue107PostgresParentedWorkflowPhysicalGrantConformance/quiescent_Wait_releases_Grant,_denies_later_root_cancellation_bypass
+--- PASS: TestIssue107PostgresParentedWorkflowPhysicalGrantConformance (0.09s)
+    --- PASS: TestIssue107PostgresParentedWorkflowPhysicalGrantConformance/completed_Effect_fences_parent_then_retires_original_Grant (0.04s)
+    --- PASS: TestIssue107PostgresParentedWorkflowPhysicalGrantConformance/unknown_remote_Pending_pins_parent_and_rejects_replay (0.03s)
+    --- PASS: TestIssue107PostgresParentedWorkflowPhysicalGrantConformance/quiescent_Wait_releases_Grant,_denies_later_root_cancellation_bypass (0.02s)
+=== RUN   TestIssue107GORMRootWorkflowPhysicalGrantConformance
+=== RUN   TestIssue107GORMRootWorkflowPhysicalGrantConformance/Root_concurrent_Resume_and_Cancel_are_physically_serialized
+=== RUN   TestIssue107GORMRootWorkflowPhysicalGrantConformance/Root_unknown_external_Pending_quarantines_physical_Grant
+=== RUN   TestIssue107GORMRootWorkflowPhysicalGrantConformance/Root_revision_CAS_must_predate_physical_Effects
+--- PASS: TestIssue107GORMRootWorkflowPhysicalGrantConformance (0.07s)
+    --- PASS: TestIssue107GORMRootWorkflowPhysicalGrantConformance/Root_concurrent_Resume_and_Cancel_are_physically_serialized (0.04s)
+    --- PASS: TestIssue107GORMRootWorkflowPhysicalGrantConformance/Root_unknown_external_Pending_quarantines_physical_Grant (0.02s)
+    --- PASS: TestIssue107GORMRootWorkflowPhysicalGrantConformance/Root_revision_CAS_must_predate_physical_Effects (0.01s)
+=== RUN   TestAuditIssue107GORMChildSelfPhysicalGrantFence
+=== RUN   TestAuditIssue107GORMChildSelfPhysicalGrantFence/admitted_child_self-cancel_while_parent_cancel_denies
+    issue107_seventh_child_self_fence.go:45: originalGrant=childgrant_20adb43cee68cd5e9e09558d5690f834 expectedRevision=1 selfCancelErr=kernel descendant has an unsettled physical execution Grant selfStatus=
+=== RUN   TestAuditIssue107GORMChildSelfPhysicalGrantFence/admitted_child_remains_version-fenced_against_external_Apply
+    issue107_seventh_child_self_fence.go:78: grant=childgrant_949aaa3d8f96f3d2c5117d694b2742cf concurrentApplyErr=kernel descendant has an unsettled physical execution Grant revisionAfter=0
+=== RUN   TestAuditIssue107GORMChildSelfPhysicalGrantFence/rejected_child_Cancel_does_not_revoke_original_execution_lease
+--- PASS: TestAuditIssue107GORMChildSelfPhysicalGrantFence (0.03s)
+    --- PASS: TestAuditIssue107GORMChildSelfPhysicalGrantFence/admitted_child_self-cancel_while_parent_cancel_denies (0.01s)
+    --- PASS: TestAuditIssue107GORMChildSelfPhysicalGrantFence/admitted_child_remains_version-fenced_against_external_Apply (0.01s)
+    --- PASS: TestAuditIssue107GORMChildSelfPhysicalGrantFence/rejected_child_Cancel_does_not_revoke_original_execution_lease (0.01s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	1.745s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]

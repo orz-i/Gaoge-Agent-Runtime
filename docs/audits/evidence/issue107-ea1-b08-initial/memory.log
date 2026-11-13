@@ -1,0 +1,30 @@
+SOURCE_SHA=97539e4880a6c9aa5ffb7464784bdfb583a95f53
+EXIT_CODE=0
+=== RUN   TestEA1WaitBarriersMemory
+=== RUN   TestEA1WaitBarriersMemory/root/P1
+=== RUN   TestEA1WaitBarriersMemory/root/P3
+=== RUN   TestEA1WaitBarriersMemory/child/P1
+=== RUN   TestEA1WaitBarriersMemory/child/P3
+--- PASS: TestEA1WaitBarriersMemory (0.04s)
+    --- PASS: TestEA1WaitBarriersMemory/root/P1 (0.01s)
+    --- PASS: TestEA1WaitBarriersMemory/root/P3 (0.01s)
+    --- PASS: TestEA1WaitBarriersMemory/child/P1 (0.01s)
+    --- PASS: TestEA1WaitBarriersMemory/child/P3 (0.01s)
+=== RUN   TestEA1WaitUnknownMemory
+=== RUN   TestEA1WaitUnknownMemory/root
+=== RUN   TestEA1WaitUnknownMemory/child
+--- PASS: TestEA1WaitUnknownMemory (0.03s)
+    --- PASS: TestEA1WaitUnknownMemory/root (0.01s)
+    --- PASS: TestEA1WaitUnknownMemory/child (0.02s)
+=== RUN   TestEA1WorkflowRecoveryBoundariesMemory
+=== RUN   TestEA1WorkflowRecoveryBoundariesMemory/root/P0
+=== RUN   TestEA1WorkflowRecoveryBoundariesMemory/root/P5
+=== RUN   TestEA1WorkflowRecoveryBoundariesMemory/child/P0
+=== RUN   TestEA1WorkflowRecoveryBoundariesMemory/child/P5
+--- PASS: TestEA1WorkflowRecoveryBoundariesMemory (0.06s)
+    --- PASS: TestEA1WorkflowRecoveryBoundariesMemory/root/P0 (0.02s)
+    --- PASS: TestEA1WorkflowRecoveryBoundariesMemory/root/P5 (0.01s)
+    --- PASS: TestEA1WorkflowRecoveryBoundariesMemory/child/P0 (0.02s)
+    --- PASS: TestEA1WorkflowRecoveryBoundariesMemory/child/P5 (0.02s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory	1.998s

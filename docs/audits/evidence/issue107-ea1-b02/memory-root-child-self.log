@@ -1,0 +1,108 @@
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/continuation	1.489s [no tests to run]
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/interaction	[no test files]
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/runfeed	[no test files]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/topology	1.487s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent	1.523s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/bootstrap	1.491s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget	1.448s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/compose	1.486s [no tests to run]
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance	[no test files]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context	1.648s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/continuation	1.958s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/evaluation	1.952s [no tests to run]
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/examples/configured	[no test files]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/examples/quickstart	1.601s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/groupchat	1.981s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff	1.967s [no tests to run]
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/interaction	[no test files]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol	1.636s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract	1.671s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel	1.583s [no tests to run]
+=== RUN   TestIssue107MemoryParentedWorkflowPhysicalGrantConformance
+=== RUN   TestIssue107MemoryParentedWorkflowPhysicalGrantConformance/completed_Effect_fences_parent_then_retires_original_Grant
+=== RUN   TestIssue107MemoryParentedWorkflowPhysicalGrantConformance/unknown_remote_Pending_pins_parent_and_rejects_replay
+=== RUN   TestIssue107MemoryParentedWorkflowPhysicalGrantConformance/quiescent_Wait_releases_Grant,_denies_later_root_cancellation_bypass
+--- PASS: TestIssue107MemoryParentedWorkflowPhysicalGrantConformance (0.02s)
+    --- PASS: TestIssue107MemoryParentedWorkflowPhysicalGrantConformance/completed_Effect_fences_parent_then_retires_original_Grant (0.01s)
+    --- PASS: TestIssue107MemoryParentedWorkflowPhysicalGrantConformance/unknown_remote_Pending_pins_parent_and_rejects_replay (0.00s)
+    --- PASS: TestIssue107MemoryParentedWorkflowPhysicalGrantConformance/quiescent_Wait_releases_Grant,_denies_later_root_cancellation_bypass (0.01s)
+=== RUN   TestIssue107MemoryRootWorkflowPhysicalGrantConformance
+=== RUN   TestIssue107MemoryRootWorkflowPhysicalGrantConformance/Root_concurrent_Resume_and_Cancel_are_physically_serialized
+=== RUN   TestIssue107MemoryRootWorkflowPhysicalGrantConformance/Root_unknown_external_Pending_quarantines_physical_Grant
+=== RUN   TestIssue107MemoryRootWorkflowPhysicalGrantConformance/Root_revision_CAS_must_predate_physical_Effects
+--- PASS: TestIssue107MemoryRootWorkflowPhysicalGrantConformance (0.03s)
+    --- PASS: TestIssue107MemoryRootWorkflowPhysicalGrantConformance/Root_concurrent_Resume_and_Cancel_are_physically_serialized (0.03s)
+    --- PASS: TestIssue107MemoryRootWorkflowPhysicalGrantConformance/Root_unknown_external_Pending_quarantines_physical_Grant (0.00s)
+    --- PASS: TestIssue107MemoryRootWorkflowPhysicalGrantConformance/Root_revision_CAS_must_predate_physical_Effects (0.00s)
+=== RUN   TestAuditIssue107MemoryChildSelfPhysicalGrantFence
+=== RUN   TestAuditIssue107MemoryChildSelfPhysicalGrantFence/admitted_child_self-cancel_while_parent_cancel_denies
+    issue107_seventh_child_self_fence.go:45: originalGrant=childgrant_6fcc76863c9dbd6fb33e86d48797bf21 expectedRevision=1 selfCancelErr=kernel descendant has an unsettled physical execution Grant selfStatus=
+=== RUN   TestAuditIssue107MemoryChildSelfPhysicalGrantFence/admitted_child_remains_version-fenced_against_external_Apply
+    issue107_seventh_child_self_fence.go:78: grant=childgrant_8a81ee8ce7288b4f24a0c113cbd70dad concurrentApplyErr=kernel descendant has an unsettled physical execution Grant revisionAfter=0
+=== RUN   TestAuditIssue107MemoryChildSelfPhysicalGrantFence/rejected_child_Cancel_does_not_revoke_original_execution_lease
+--- PASS: TestAuditIssue107MemoryChildSelfPhysicalGrantFence (0.00s)
+    --- PASS: TestAuditIssue107MemoryChildSelfPhysicalGrantFence/admitted_child_self-cancel_while_parent_cancel_denies (0.00s)
+    --- PASS: TestAuditIssue107MemoryChildSelfPhysicalGrantFence/admitted_child_remains_version-fenced_against_external_Apply (0.00s)
+    --- PASS: TestAuditIssue107MemoryChildSelfPhysicalGrantFence/rejected_child_Cancel_does_not_revoke_original_execution_lease (0.00s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory	1.635s
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model	1.531s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/observability	1.489s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin	1.478s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/queue	1.868s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runfeed	1.464s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation	1.561s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/team	1.564s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools	1.730s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workbench	1.772s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workflow	1.770s [no tests to run]

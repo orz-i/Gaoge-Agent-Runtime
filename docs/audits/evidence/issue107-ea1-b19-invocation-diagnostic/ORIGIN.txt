@@ -1,0 +1,2 @@
+SOURCE_SHA=9e3c765da6748a5f49209a9aed8723d6ff6e0012
+Exactly one Host PG P4 diagnostic run: only original Workflow Invocation OutputRefs nil versus empty representation differed. No time or other field difference reported. Original predicate remained unchanged; no production behavior conclusion.

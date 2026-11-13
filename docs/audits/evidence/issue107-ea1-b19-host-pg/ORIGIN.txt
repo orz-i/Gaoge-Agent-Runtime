@@ -1,0 +1,2 @@
+SOURCE_SHA=2933f241a17aada53dbdfa5e31b425200cdedde6
+Thirteen logs PASS incl all Core backends, four lints, Host Memory, existing Harness regression. HostPG P4 all three runs full Workflow Invocation inequality; exact field diagnostic pending. No fixture normalization or production assumption made.

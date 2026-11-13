@@ -1,0 +1,2 @@
+SOURCE_SHA=8778ae96be8f6d3fe57fe0b15f67b2aa5adc1049
+B16 eight fixed Child Agent Start/Reconcile cells. Eight zero-exit logs, isolated PostgreSQL16; no whole-matrix or remote certification.

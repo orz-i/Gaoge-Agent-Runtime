@@ -8,6 +8,7 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 )
@@ -31,7 +32,10 @@ func (proofModel) Generate(context.Context, model.Request) (model.Response, erro
 }
 
 func TestApprovalUsesOriginalFixedAgent(t *testing.T) {
-	runtime := &kernel.Runtime{}
+	runtime, runtimeErr := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
+	if runtimeErr != nil {
+		t.Fatal(runtimeErr)
+	}
 	original, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: proofModel{}})
 	if err != nil {
 		t.Fatal(err)
@@ -63,7 +67,10 @@ func TestApprovalUsesOriginalFixedAgent(t *testing.T) {
 }
 
 func TestVerifyLocalChildRequiresRouteAndFrozenIdentity(t *testing.T) {
-	runtime := &kernel.Runtime{}
+	runtime, runtimeErr := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
+	if runtimeErr != nil {
+		t.Fatal(runtimeErr)
+	}
 	fixed, err := handoff.New(proofChildRunner{runtime})
 	if err != nil {
 		t.Fatal(err)

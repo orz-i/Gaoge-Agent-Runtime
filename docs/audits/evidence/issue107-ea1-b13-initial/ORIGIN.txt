@@ -1,0 +1,2 @@
+SOURCE_SHA=3e653a65f7e4595968de489f2941ad761c9cde7d
+Memory smoke EXIT_CODE=1; sole P2/tool fixture mixed original Request with legally pruned consumed CatalogFingerprints. No cross-Store run or certification.

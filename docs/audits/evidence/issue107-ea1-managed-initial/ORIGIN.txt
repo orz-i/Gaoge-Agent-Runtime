@@ -1,0 +1,2 @@
+SOURCE_SHA=f2187814eff825f3103e04f4d4f655f6923b21d1
+Six compile gates passed. Core/Memory/SQLite/PG and process smoke failures preserved; Host zero-proof negatives passed. No whole-matrix acceptance. One bounded correction set recorded in adjacent report.

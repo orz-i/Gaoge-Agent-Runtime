@@ -1,0 +1,2 @@
+SOURCE_SHA=cf786cffc2cf1cce1664f8faab9e3d797fc4e40a
+Bounded Provider and task-agent example compilation and full-package smoke, no final acceptance.

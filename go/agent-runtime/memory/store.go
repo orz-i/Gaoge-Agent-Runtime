@@ -14,13 +14,18 @@ import (
 
 // Store is the single-process atomic Kernel adapter used by minimal hosts and tests.
 type Store struct {
-	mu              sync.RWMutex
-	records         map[string]kernel.Snapshot
-	events          map[string][]kernel.Event
-	transitions     map[string]transitionState
-	transitionOrder []string
-	execution       map[string]memoryExecutionState
-	executionClock  func() time.Time
+	mu               sync.RWMutex
+	records          map[string]kernel.Snapshot
+	events           map[string][]kernel.Event
+	transitions      map[string]transitionState
+	transitionOrder  []string
+	execution        map[string]memoryExecutionState
+	childGrants      map[string]memoryChildGrant
+	childGrantOwners map[string]map[string]struct{}
+	executionClock   func() time.Time
+	managedAuthority kernel.ManagedAuthority
+	managedTransfers map[string]kernel.ManagedTransfer
+	managedCurrent   map[string]string
 }
 
 type transitionState struct {
@@ -47,9 +52,14 @@ func cloneRun(run kernel.Run) kernel.Run {
 func NewStore() *Store {
 	return &Store{
 		records: make(map[string]kernel.Snapshot), events: make(map[string][]kernel.Event),
-		transitions:    make(map[string]transitionState),
-		execution:      make(map[string]memoryExecutionState),
-		executionClock: time.Now,
+		transitions:      make(map[string]transitionState),
+		execution:        make(map[string]memoryExecutionState),
+		childGrants:      make(map[string]memoryChildGrant),
+		childGrantOwners: make(map[string]map[string]struct{}),
+		executionClock:   time.Now,
+		managedAuthority: newMemoryManagedAuthority(),
+		managedTransfers: make(map[string]kernel.ManagedTransfer),
+		managedCurrent:   make(map[string]string),
 	}
 }
 
@@ -59,6 +69,11 @@ func (store *Store) Create(_ context.Context, record kernel.Record, events []ker
 	defer store.mu.Unlock()
 	if _, exists := store.records[record.Run.ID]; exists {
 		return kernel.Snapshot{}, kernel.ErrAlreadyExists
+	}
+	if record.Run.ParentRunID != "" {
+		if _, err := store.childAncestorsLocked(record.Run); err != nil {
+			return kernel.Snapshot{}, err
+		}
 	}
 	snapshot := snapshotFromRecord(record)
 	journal := appendEvents(nil, events, record.Run.UpdatedAt)
@@ -116,6 +131,9 @@ func (store *Store) Apply(_ context.Context, runID string, expectedRevision uint
 
 // applyLocked is reached only after ordinary or fenced eligibility checks.
 func (store *Store) applyLocked(runID string, expectedRevision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
+	if err := store.managedGateLocked(runID); err != nil {
+		return kernel.Snapshot{}, err
+	}
 	current, ok := store.records[runID]
 	if !ok {
 		return kernel.Snapshot{}, kernel.ErrNotFound
@@ -123,10 +141,56 @@ func (store *Store) applyLocked(runID string, expectedRevision uint64, mutation 
 	if current.Run.Revision != expectedRevision {
 		return kernel.Snapshot{}, kernel.ErrConflict
 	}
+	if current.Run.ParentRunID != mutation.Record.Run.ParentRunID {
+		return kernel.Snapshot{}, kernel.ErrExecutionConflict
+	}
+	// The original self-owned physical Grant fences every competing Run
+	// write, not only terminal cancellation. Only a first-party scoped
+	// Kernel Runtime carries its exact per-revision proof. Descendant
+	// Grants independently fence all competing ancestor mutations.
+	var rootGrantFound bool
+	for id := range store.childGrantOwners[runID] {
+		granted, ok := store.childGrants[id]
+		if !ok {
+			return kernel.Snapshot{}, kernel.ErrExecutionConflict
+		}
+		if granted.grant.ChildRunID == runID {
+			rootGrantFound = true
+			if !mutation.PhysicalPermit.Matches(granted.grant, current) {
+				return kernel.Snapshot{}, kernel.ErrChildExecutionBusy
+			}
+		} else {
+			return kernel.Snapshot{}, kernel.ErrChildExecutionBusy
+		}
+	}
+	if !rootGrantFound && mutation.PhysicalPermit.IsPresent() {
+		return kernel.Snapshot{}, kernel.ErrExecutionConflict
+	}
+	var safe kernel.ManagedSafePoint
+	if mutation.ManagedSafePoint.Present() {
+		g, ok := store.ownedGrantLocked(runID)
+		lease := store.execution[runID].lease
+		safe = mutation.ManagedSafePoint.Point()
+		if !ok || g.settledRevision != 0 || g.completion.GrantID != "" || store.execution[runID].quarantineRev != 0 || !activeMemoryLease(store.execution[runID], lease, store.currentExecutionTime()) || safe.Host.KernelAuthority != store.managedAuthority || !mutation.ManagedSafePoint.Matches(current, mutation.Record, lease, g.grant) || len(mutation.Events) != 1 || mutation.Events[0].Type != "agent.model_invocation.pending" {
+			return kernel.Snapshot{}, kernel.ErrExecutionConflict
+		}
+		if _, exists := store.managedTransfers[safe.ID]; exists {
+			return kernel.Snapshot{}, kernel.ErrExecutionConflict
+		}
+	}
 	next := snapshotFromRecord(mutation.Record)
 	journal := store.events[runID]
 	nextEvents := appendEvents(journal, mutation.Events, mutation.Record.Run.UpdatedAt)
 	next.EventHead = int64(len(nextEvents))
+	if safe.ID != "" && !kernel.ManagedSourceMatches(safe, next) {
+		return kernel.Snapshot{}, kernel.ErrExecutionConflict
+	}
+	if id := store.managedCurrent[runID]; id != "" {
+		store.managedTransfers[id] = kernel.ManagedInvalidateMutation(store.managedTransfers[id])
+	}
+	if safe.ID != "" {
+		store.saveManagedLocked(kernel.ManagedInitialTransfer(safe))
+	}
 	store.records[runID] = cloneSnapshot(next)
 	store.events[runID] = nextEvents
 	store.appendCommittedTransition(mutation.Record.Run, mutation.Events)

@@ -143,7 +143,7 @@ func TestNamedRejectedResponseWithoutPhysicalIDIsNotBillable(t *testing.T) {
 	result, err := runner.StartRun(t.Context(), startRequest(
 		"idless-rejection", "idless-rejection-req", "finish from evidence",
 	))
-	if !errors.Is(err, agent.ErrInvalidModelResponse) || result.Run.Status != kernel.RunStatusFailed ||
+	if !errors.Is(err, agent.ErrInvalidModelResponse) || !errors.Is(err, agent.ErrModelOutcomeUnknown) || result.Run.Status != kernel.RunStatusRunning ||
 		len(provider.callsCopy()) != 1 {
 		t.Fatalf("unproved completed rejection proceeded: run=%+v err=%v calls=%d",
 			result.Run, err, len(provider.callsCopy()))
@@ -281,21 +281,15 @@ func TestModelInvocationRecoversCrashAfterProviderResponseBeforeReceipt(t *testi
 	restarted := newModelInvocationRunnerWithClock(
 		t, runtime, provider, modelInvocationClock{offset: 3 * time.Minute},
 	)
-	completed, err := restarted.Resume(t.Context(), pending.Run.ID, pending.Run.Revision)
-	if err != nil {
-		t.Fatal(err)
+	_, err = restarted.Resume(t.Context(), pending.Run.ID, pending.Run.Revision)
+	if !errors.Is(err, agent.ErrModelOutcomeUnknown) || len(provider.callsCopy()) != 1 {
+		t.Fatalf("unreceipted physical response replayed: %v calls=%d", err, len(provider.callsCopy()))
 	}
-	calls := provider.callsCopy()
-	if len(calls) != 2 || calls[0].InvocationID != calls[1].InvocationID {
-		t.Fatalf("physical retries did not reuse logical invocation: %#v", calls)
+	after := mustLoadModelInvocationRun(t, runtime, pending.Run.ID)
+	if after.Run.Revision != pending.Run.Revision || string(after.State) != string(pending.State) {
+		t.Fatal("unknown original attempt mutated")
 	}
-	view := mustModelInvocationView(t, completed)
-	assertConsumedInvocation(t, view, calls[0].InvocationID)
-	if view.Budget.Usage.LLMCalls != 1 || view.Budget.Usage.InputTokens != 7 ||
-		view.Budget.Usage.OutputTokens != 3 || view.Budget.Usage.TotalTokens != 10 ||
-		view.Budget.Usage.ReasoningTokens != 2 {
-		t.Fatalf("receipt usage was not consumed exactly once: %#v", view.Budget.Usage)
-	}
+
 }
 
 func TestModelInvocationRecoversCrashAfterReceiptBeforeConsumption(t *testing.T) {
@@ -398,17 +392,16 @@ func TestModelInvocationRetryableProviderErrorReusesPendingIntent(t *testing.T) 
 		t.Fatalf("retryable provider error made run terminal: %s", pending.Run.Status)
 	}
 	assertInvocationState(t, pending, agent.ModelInvocationPending, 0)
-	due := newModelRunnerAfterRetryDue(t, pending, agent.Dependencies{Runtime: runtime, Model: provider})
-	completed, err := due.Resume(t.Context(), pending.Run.ID, pending.Run.Revision)
-	if err != nil {
-		t.Fatal(err)
+	due := newModelInvocationRunnerWithClock(t, runtime, provider, modelInvocationClock{offset: 3 * time.Minute})
+	_, err = due.Resume(t.Context(), pending.Run.ID, pending.Run.Revision)
+	if !errors.Is(err, agent.ErrModelOutcomeUnknown) || len(provider.callsCopy()) != 1 {
+		t.Fatalf("retryable error is not no-effect proof: %v", err)
 	}
-	calls := provider.callsCopy()
-	if len(calls) != 2 || calls[0].InvocationID == "" || calls[0].InvocationID != calls[1].InvocationID {
-		t.Fatalf("retryable provider call changed invocation identity: %#v", calls)
+	after := mustLoadModelInvocationRun(t, runtime, pending.Run.ID)
+	if after.Run.Revision != pending.Run.Revision || string(after.State) != string(pending.State) {
+		t.Fatal("unknown retry mutated original attempt")
 	}
-	view := mustModelInvocationView(t, completed)
-	assertConsumedInvocation(t, view, calls[0].InvocationID)
+
 }
 
 func TestModelInvocationPersistsStreamingResponseMetadata(t *testing.T) {

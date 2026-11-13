@@ -1,0 +1,48 @@
+SOURCE_SHA=0586a69d104b0555c67d38fa4e9a117048d355c2
+COMMAND=go -C go/agent-runtime test -race -count=1 -timeout=180s ./...
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/continuation	1.776s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/interaction	[no test files]
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/runfeed	[no test files]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/topology	1.710s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent	4.789s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/bootstrap	1.757s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget	1.432s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/compose	1.516s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance	[no test files]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context	12.072s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/continuation	9.183s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/evaluation	1.530s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/examples/configured	[no test files]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/examples/quickstart	1.786s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/groupchat	1.606s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff	1.485s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/interaction	[no test files]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/callbackscope	1.393s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol	1.386s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract	1.462s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel	1.388s
+--- FAIL: TestEA1RootAgentAdmissionMemory (0.04s)
+    --- FAIL: TestEA1RootAgentAdmissionMemory/P1/opaque-tool (0.01s)
+        ea1_root_bounded_tool.go:65: original known Tool business result changed: models=2 tools=1 status=completed err=agent original root callback result is uncertain
+    --- FAIL: TestEA1RootAgentAdmissionMemory/P1/bounded-tool-timeline (0.01s)
+        ea1_root_bounded_tool.go:65: original known Tool business result changed: models=2 tools=1 status=completed err=<nil>
+--- FAIL: TestEA1RootAgentDefaultAdmissionMemory (0.06s)
+    --- FAIL: TestEA1RootAgentDefaultAdmissionMemory/P1/opaque-tool (0.02s)
+        ea1_root_bounded_tool.go:65: original known Tool business result changed: models=2 tools=1 status=completed err=agent original root callback result is uncertain
+    --- FAIL: TestEA1RootAgentDefaultAdmissionMemory/P1/bounded-tool-timeline (0.01s)
+        ea1_root_bounded_tool.go:65: original known Tool business result changed: models=2 tools=1 status=completed err=<nil>
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory	20.891s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model	1.449s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/observability	1.383s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin	1.527s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/queue	1.391s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runfeed	1.417s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation	1.395s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/team	1.438s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools	1.455s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workbench	1.407s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workflow	1.655s
+FAIL
+
+EXIT_CODE=1

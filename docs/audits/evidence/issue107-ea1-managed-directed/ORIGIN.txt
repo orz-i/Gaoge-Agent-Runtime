@@ -1,0 +1,2 @@
+SOURCE_SHA=5ea99c39844691fb456d63e3ab9db55a243c8e9a
+Local Mac Pi bounded managed verification, no remote action.

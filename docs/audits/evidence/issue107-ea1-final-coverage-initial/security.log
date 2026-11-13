@@ -1,0 +1,40 @@
+SOURCE_SHA=08d236bb6766dd54547fbf8802a168a610878f13
+COMMAND=make security
+node scripts/go-workspace.mjs vuln
+==> vuln go/agent-runtime
+No vulnerabilities found.
+==> vuln go/agent-runtime-provider
+No vulnerabilities found.
+==> vuln go/agent-runtime-harness
+No vulnerabilities found.
+==> vuln go/agent-runtime-harness/examples/task-agent
+No vulnerabilities found.
+==> vuln go/agent-runtime-harness-postgres
+No vulnerabilities found.
+==> vuln go/agent-runtime-mcp
+No vulnerabilities found.
+==> vuln go/agent-runtime-otel
+No vulnerabilities found.
+==> vuln go/agent-runtime-a2a
+No vulnerabilities found.
+==> vuln go/agent-runtime-postgres
+No vulnerabilities found.
+==> vuln go/agent-runtime-sqlite
+No vulnerabilities found.
+==> vuln go/agent-runtime-redis
+No vulnerabilities found.
+==> vuln go/agent-runtime-http
+=== Symbol Results ===
+
+No vulnerabilities found.
+
+Your code is affected by 0 vulnerabilities.
+This scan also found 0 vulnerabilities in packages you import and 3
+vulnerabilities in modules you require, but your code doesn't appear to call
+these vulnerabilities.
+Use '-show verbose' for more details.
+pnpm audit --audit-level high
+1 vulnerabilities found
+Severity: 1 moderate
+
+EXIT_CODE=0

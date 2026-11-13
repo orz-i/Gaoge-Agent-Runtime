@@ -8,6 +8,8 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
 )
 
 // Clock supplies orchestration time.
@@ -99,6 +101,8 @@ type Dependencies struct {
 	Store Store
 	Clock Clock
 	IDs   IDSource
+	// ManagedRecoveryHost is trusted storage configured once, never a per-call issuer.
+	ManagedRecoveryHost ManagedRecoveryHostStore
 }
 
 // Runtime owns feature-neutral Run transitions and no background workers.
@@ -109,6 +113,13 @@ type Runtime struct {
 	// execution optionally binds this Runtime to one Store-authorized segment.
 	// It is never inherited by a fresh Runtime created from the same Store.
 	execution *ExecutionLease
+	// physicalGrant binds a first-party Root/child Workflow or parented
+	// Agent execution segment to its original Store Grant.
+	// A Store mutation carries a fresh per-revision proof to prevent another
+	// worker from modifying this Root while physical effects are in flight.
+	physicalGrant *ChildExecutionGrant
+	managedIntent *ManagedSafePointProof
+	managedHost   *managedHostRegistration
 }
 
 // New creates a minimal Runtime with no optional feature dependencies.
@@ -122,9 +133,11 @@ func New(dependencies Dependencies) (*Runtime, error) {
 	if dependencies.IDs == nil {
 		dependencies.IDs = randomIDSource{}
 	}
-	return &Runtime{
-		store: dependencies.Store, clock: dependencies.Clock, ids: dependencies.IDs,
-	}, nil
+	registration, err := newManagedHostRegistration(dependencies.ManagedRecoveryHost)
+	if err != nil {
+		return nil, err
+	}
+	return &Runtime{store: dependencies.Store, clock: dependencies.Clock, ids: dependencies.IDs, managedHost: registration}, nil
 }
 
 // Descriptor exposes only the minimal Kernel capability.
@@ -139,6 +152,12 @@ func (runtime *Runtime) Create(ctx context.Context, request CreateRequest) (Snap
 	}
 	if request.ExecutionRequired && !runtime.SupportsExecution() {
 		return Snapshot{}, ErrExecutionRequired
+	}
+	if request.ParentRunID != "" {
+		if request.ParentRunID == request.ID || strings.TrimSpace(request.ParentRunID) != request.ParentRunID ||
+			!runtime.SupportsChildExecution() {
+			return Snapshot{}, ErrExecutionRequired
+		}
 	}
 	runID := strings.TrimSpace(request.ID)
 	if runID == "" {
@@ -157,7 +176,8 @@ func (runtime *Runtime) Create(ctx context.Context, request CreateRequest) (Snap
 		ExecutionRequired: request.ExecutionRequired,
 		Run: Run{
 			ID: runID, Kind: request.Kind, Actor: request.Actor, Thread: request.Thread,
-			RequestID: strings.TrimSpace(request.RequestID), Goal: strings.TrimSpace(request.Goal),
+			RequestID: strings.TrimSpace(request.RequestID), ParentRunID: request.ParentRunID,
+			Goal:   strings.TrimSpace(request.Goal),
 			Status: RunStatusRunning, Revision: 1, DeadlineAt: deadlineAt, CreatedAt: now, UpdatedAt: now,
 		},
 		State: cloneJSON(request.State),
@@ -211,6 +231,29 @@ func (runtime *Runtime) apply(ctx context.Context, runID string, expectedRevisio
 		return Snapshot{}, err
 	}
 	proposed := runtime.makeStoreMutation(current, mutation)
+	if runtime.physicalGrant != nil {
+		if current.Run.ID != runtime.physicalGrant.ChildRunID {
+			return Snapshot{}, ErrExecutionConflict
+		}
+		proposed.PhysicalPermit = PhysicalApplyPermit{
+			grant:     *runtime.physicalGrant,
+			execution: runtime.execution,
+			proof: featurecontrol.Seal(current.Run.ID, current.Run.Revision,
+				physicalFeatureProofDomain(current.Run.Kind, "apply"),
+				runtime.physicalGrant.ID, current.State, current.Checkpoint),
+		}
+	}
+	if runtime.managedIntent != nil {
+		candidate := runtime.managedIntent.point
+		if runtime.execution == nil || runtime.physicalGrant == nil || !runtime.managedIntent.proof.Matches(current.Run.ID, current.Run.Revision, "managed_intent_source", runtime.physicalGrant.ID, current.State, candidate) {
+			return Snapshot{}, ErrExecutionConflict
+		}
+		candidate.Source = Snapshot{Run: proposed.Record.Run, State: cloneJSON(proposed.Record.State), Checkpoint: cloneCheckpoint(proposed.Record.Checkpoint), Result: cloneResult(proposed.Record.Result), EventHead: current.EventHead + int64(len(proposed.Events))}
+		if !candidate.Valid() {
+			return Snapshot{}, ErrInvalidInput
+		}
+		proposed.ManagedSafePoint = ManagedSafePointProof{point: candidate, proof: featurecontrol.Seal(current.Run.ID, current.Run.Revision, "managed_safe_point", runtime.physicalGrant.ID, current.State, candidate)}
+	}
 	if runtime.execution != nil {
 		store, ok := runtime.store.(ExecutionStore)
 		if !ok {

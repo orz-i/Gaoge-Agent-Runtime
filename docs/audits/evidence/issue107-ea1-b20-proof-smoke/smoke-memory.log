@@ -1,0 +1,67 @@
+SOURCE_SHA=2ccb9b10976c2cca6d9967aabd2d8c15e90fa8b7
+COMMAND=go -C go/agent-runtime-harness-postgres test -count=1 ./... -run '^(TestEA1HarnessSubtaskControlAdmission|TestEA1HACReceiptBeforeMark|TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart|TestEA1HACApprovalCancellationElection)$/(memory|kernel_memory)$' -v
+=== RUN   TestEA1HACReceiptBeforeMark
+=== RUN   TestEA1HACReceiptBeforeMark/kernel_memory
+=== RUN   TestEA1HACReceiptBeforeMark/kernel_memory/host_memory
+=== RUN   TestEA1HACReceiptBeforeMark/kernel_memory/host_postgres
+--- PASS: TestEA1HACReceiptBeforeMark (0.42s)
+    --- PASS: TestEA1HACReceiptBeforeMark/kernel_memory (0.42s)
+        --- PASS: TestEA1HACReceiptBeforeMark/kernel_memory/host_memory (0.00s)
+        --- PASS: TestEA1HACReceiptBeforeMark/kernel_memory/host_postgres (0.41s)
+=== RUN   TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart
+=== RUN   TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart/kernel_memory
+=== RUN   TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart/kernel_memory/host_memory
+    ea1_harness_agent_task_lifecycle_test.go:144: live Tool cancel=Run "effect_1f343b34694686ea5c18e06ff3922f3c" has no verified local execution owner: harness runtime cancellation outcome is unverified
+=== RUN   TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart/kernel_memory/host_postgres
+    ea1_harness_agent_task_lifecycle_test.go:144: live Tool cancel=Run "effect_2613a73e63df3ca3a040f790094c506b" has no verified local execution owner: harness runtime cancellation outcome is unverified
+--- FAIL: TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart (0.27s)
+    --- FAIL: TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart/kernel_memory (0.27s)
+        --- FAIL: TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart/kernel_memory/host_memory (0.00s)
+        --- FAIL: TestEA1HACCancelledBudgetSameIntentAcrossStoreRestart/kernel_memory/host_postgres (0.26s)
+=== RUN   TestEA1HACApprovalCancellationElection
+=== RUN   TestEA1HACApprovalCancellationElection/kernel_memory
+=== RUN   TestEA1HACApprovalCancellationElection/kernel_memory/host_memory
+=== RUN   TestEA1HACApprovalCancellationElection/kernel_memory/host_postgres
+--- PASS: TestEA1HACApprovalCancellationElection (0.32s)
+    --- PASS: TestEA1HACApprovalCancellationElection/kernel_memory (0.32s)
+        --- PASS: TestEA1HACApprovalCancellationElection/kernel_memory/host_memory (0.00s)
+        --- PASS: TestEA1HACApprovalCancellationElection/kernel_memory/host_postgres (0.32s)
+=== RUN   TestEA1HarnessSubtaskControlAdmission
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P0/missing
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P0/checkpoint
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P0/decision
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P0/actor
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P0/tenant
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P0/thread
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P0/parent
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P0/origin
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P0/original-runner
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P0/foreign-recorder
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P1/default
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P1/native
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P2/unknown-tool
+    ea1_subtask_control_admission_test.go:302: admitted cancellation lost original Kernel fence: Run "effect_6d404df53abdce466f9c6e178d29f0e9" has no verified local execution owner: harness runtime cancellation outcome is unverified
+=== RUN   TestEA1HarnessSubtaskControlAdmission/memory/P2/receipt-fault
+    ea1_subtask_control_admission_test.go:297: pending Host grant cancellation: Run "effect_1bb46619e3311d9b732661842e3a540f" has no verified local execution owner: harness runtime cancellation outcome is unverified
+--- FAIL: TestEA1HarnessSubtaskControlAdmission (0.02s)
+    --- FAIL: TestEA1HarnessSubtaskControlAdmission/memory (0.02s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P0/missing (0.00s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P0/checkpoint (0.00s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P0/decision (0.00s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P0/actor (0.00s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P0/tenant (0.00s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P0/thread (0.00s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P0/parent (0.00s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P0/origin (0.00s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P0/original-runner (0.00s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P0/foreign-recorder (0.00s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P1/default (0.00s)
+        --- PASS: TestEA1HarnessSubtaskControlAdmission/memory/P1/native (0.00s)
+        --- FAIL: TestEA1HarnessSubtaskControlAdmission/memory/P2/unknown-tool (0.00s)
+        --- FAIL: TestEA1HarnessSubtaskControlAdmission/memory/P2/receipt-fault (0.00s)
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-postgres	1.973s
+FAIL
+
+EXIT_CODE=1

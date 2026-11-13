@@ -37,7 +37,19 @@ func (runner *Runner) releaseNoEffectCancellation(
 	_, nativeKernel := runner.cancellation.(*kernel.Runtime)
 	_, preflightRead := cause.(cancellationReadNoEffect) //nolint:errorlint // Only a direct Harness-minted proof is valid.
 	nativeNoEffect := nativeKernel && kernel.IsControlNoEffect(cause)
-	preDispatchNoEffect := preflightRead || nativeNoEffect
+	// A mixed, same-Kernel Host Canceller may pass through the Kernel's
+	// unforgeable ChildExecutionStore busy-no-effect proof. Recheck its
+	// exact native RunKind before trusting it; arbitrary custom Cancellers
+	// cannot manufacture admission authority from an error string.
+	hostChildBusyNoEffect := false
+	if !nativeKernel && kernel.IsControlNoEffect(cause) && errors.Is(cause, kernel.ErrChildExecutionBusy) {
+		if owner, ok := runner.cancellation.(LocalKernelRunKindCanceller); ok && runner.runtime != nil {
+			if candidate, loadErr := runner.runtime.Load(ctx, runID); loadErr == nil {
+				hostChildBusyNoEffect = owner.OwnsKernelRunKind(runner.runtime, candidate.Run.Kind)
+			}
+		}
+	}
+	preDispatchNoEffect := preflightRead || nativeNoEffect || hostChildBusyNoEffect
 	customNoEffect := !preflightRead && !nativeKernel && errors.Is(cause, kernel.ErrConflict)
 	if !preDispatchNoEffect && !customNoEffect {
 		return cause
@@ -49,8 +61,28 @@ func (runner *Runner) releaseNoEffectCancellation(
 	recoveryCtx, stopRecovery := cancellationSettlementContext(ctx)
 	defer stopRecovery()
 	ledger, err := runner.loadTurnBudget(recoveryCtx, turn)
-	if err != nil || ledger != nil {
+	if err != nil {
 		return errors.Join(cause, err)
+	}
+	if ledger != nil {
+		// The shared budget was deliberately revoked BEFORE physical
+		// cancellation. An exact Kernel ChildGrant busy-no-effect does not
+		// erase that protective budget action, so never retire its Turn
+		// cancellation intent. Persist an independent, immutable deferral
+		// witness and resume the SAME elected cancellation after the Tool
+		// result is reconciled. Only the original no-effect Kernel proof
+		// can mint this witness; generic Host failures remain quarantined.
+		if ledger.Cancelled && (nativeNoEffect || hostChildBusyNoEffect) &&
+			errors.Is(cause, kernel.ErrChildExecutionBusy) {
+			run, loadErr := runner.runtime.Load(recoveryCtx, runID)
+			if loadErr != nil || run.Run.ID != runID || terminalRuntimeStatus(run.Run.Status) {
+				return errors.Join(cause, loadErr)
+			}
+			if saveErr := runner.recordDeferredChildGrantCancellation(recoveryCtx, turn, intent, runID); saveErr != nil {
+				return errors.Join(cause, saveErr)
+			}
+		}
+		return cause
 	}
 	interactions, err := runner.store.ListInteractions(recoveryCtx, turn.ID)
 	if err != nil || len(interactions) != 0 {

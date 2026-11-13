@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -181,11 +182,20 @@ func TestUnsupportedExperimentalSchemaVersionMustNotBeMigrated(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = db.Close() }()
-	if _, err = db.Exec("PRAGMA user_version=2"); err != nil {
+	var currentVersion int
+	if err = db.QueryRow("PRAGMA user_version").Scan(&currentVersion); err != nil || currentVersion <= 0 {
+		t.Fatalf("created schema version=%d err=%v", currentVersion, err)
+	}
+	unknownVersion := currentVersion + 1
+	if _, err = db.Exec(fmt.Sprintf("PRAGMA user_version=%d", unknownVersion)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = sqlite.Open(t.Context(), path); !errors.Is(err, sqlite.ErrUnsupportedSchema) {
 		t.Fatalf("unknown experimental schema version implicitly migrated: %v", err)
+	}
+	var retainedVersion int
+	if err = db.QueryRow("PRAGMA user_version").Scan(&retainedVersion); err != nil || retainedVersion != unknownVersion {
+		t.Fatalf("version rejection migrated schema: got=%d want=%d err=%v", retainedVersion, unknownVersion, err)
 	}
 	var count int
 	if err = db.QueryRow(`SELECT count(*) FROM runtime_runs WHERE run_id='preserve'`).Scan(&count); err != nil || count != 1 {

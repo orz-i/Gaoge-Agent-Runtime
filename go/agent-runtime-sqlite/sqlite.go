@@ -15,8 +15,8 @@ import (
 	sqlite3 "modernc.org/sqlite"
 )
 
-// The first public schema is still under development; retain version 1.
-const schemaVersion = 1
+// Schema v5 adds source-bound managed recovery; older versions require explicit migration.
+const schemaVersion = 5
 
 var (
 	ErrUnsupportedSchema = errors.New("unsupported SQLite runtime schema")
@@ -144,6 +144,20 @@ func checkNewDestination(abs string) error {
 // The caller owns the app Profile directory and platform credentials. Stage 1
 // supports a single executor, NOT multi-worker execution epoch isolation.
 func openStore(ctx context.Context, path string, create bool) (*Store, error) {
+	return openStoreMode(ctx, path, create, false)
+}
+
+func openStoreMode(ctx context.Context, path string, create, migrate bool) (*Store, error) {
+	target := 0
+	if migrate {
+		target = 4
+	}
+	return openStoreOptions(ctx, path, create, target)
+}
+func openStoreMigration(ctx context.Context, path string, target int) (*Store, error) {
+	return openStoreOptions(ctx, path, false, target)
+}
+func openStoreOptions(ctx context.Context, path string, create bool, migrate int) (*Store, error) {
 	if ctx == nil || strings.TrimSpace(path) == "" || path == ":memory:" {
 		return nil, kernel.ErrInvalidInput
 	}
@@ -186,7 +200,15 @@ func openStore(ctx context.Context, path string, create bool) (*Store, error) {
 	}
 	db.SetMaxOpenConns(1)
 	store := &Store{db: db}
-	if err = store.initialize(ctx, create); err != nil {
+	switch migrate {
+	case 4:
+		err = store.migrateV3ToV4(ctx)
+	case 5:
+		err = store.migrateV4ToV5(ctx)
+	default:
+		err = store.initialize(ctx, create)
+	}
+	if err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -267,6 +289,9 @@ func (s *Store) initialize(ctx context.Context, create bool) error {
 		if err := s.validateSchema(ctx); err != nil {
 			return err
 		}
+		if _, err := sqliteManagedAuthority(ctx, s.db); err != nil {
+			return err
+		}
 	}
 	if create {
 		var existing int
@@ -300,7 +325,10 @@ func (s *Store) initialize(ctx context.Context, create bool) error {
 				return fmt.Errorf("create SQLite runtime schema: %w", err)
 			}
 		}
-		if _, err = tx.ExecContext(ctx, "PRAGMA user_version = 1"); err != nil {
+		if _, err = tx.ExecContext(ctx, "PRAGMA user_version = 5"); err != nil {
+			return err
+		}
+		if err = initializeManagedAuthority(ctx, tx); err != nil {
 			return err
 		}
 		if err = tx.Commit(); err != nil {
@@ -311,7 +339,7 @@ func (s *Store) initialize(ctx context.Context, create bool) error {
 	return nil
 }
 
-var schemaDDL = []string{
+var schemaDDL = append([]string{
 	`CREATE TABLE runtime_runs (
 		run_id TEXT PRIMARY KEY,
 		scope_id TEXT NOT NULL,
@@ -332,6 +360,27 @@ var schemaDDL = []string{
         execution_quarantine_generation INTEGER NOT NULL DEFAULT 0,
         execution_quarantine_code TEXT NOT NULL DEFAULT ''
     )`,
+	// A child Grant is persisted against every ancestor. Terminal parent CAS
+	// checks this table in the SAME SQLite writer transaction as its Run CAS.
+	`CREATE TABLE runtime_child_effect_grants (
+		grant_id TEXT NOT NULL,
+		parent_run_id TEXT NOT NULL REFERENCES runtime_runs(run_id),
+		child_run_id TEXT NOT NULL REFERENCES runtime_runs(run_id),
+		start_revision INTEGER NOT NULL,
+		settled_revision INTEGER NOT NULL DEFAULT 0,
+		execution_owner_id TEXT NOT NULL DEFAULT '',
+		execution_lease_id TEXT NOT NULL DEFAULT '',
+		execution_epoch INTEGER NOT NULL DEFAULT 0,
+		admission_source_hash TEXT NOT NULL DEFAULT '',
+		admission_operation TEXT NOT NULL DEFAULT '',
+		callback_return_revision INTEGER NOT NULL DEFAULT 0,
+		callback_return_source_hash TEXT NOT NULL DEFAULT '',
+		callback_host_completed INTEGER NOT NULL DEFAULT 0,
+		callback_lease_owned INTEGER NOT NULL DEFAULT 0,
+		PRIMARY KEY(grant_id,parent_run_id)
+	)`,
+	`CREATE INDEX runtime_child_grants_parent ON runtime_child_effect_grants(parent_run_id,grant_id)`,
+	`CREATE INDEX runtime_child_grants_child ON runtime_child_effect_grants(child_run_id)`,
 	`CREATE TABLE runtime_events (
 		run_id TEXT NOT NULL REFERENCES runtime_runs(run_id),
 		seq INTEGER NOT NULL,
@@ -380,7 +429,7 @@ var schemaDDL = []string{
 		UNIQUE(parent_run_id, kind, owner_node_id)
 	)`,
 	`CREATE INDEX runtime_run_relations_parent_order ON runtime_run_relations(parent_run_id, created_ns, kind, owner_node_id, child_run_id)`,
-}
+}, managedSchemaDDL...)
 
 func errorCode(err error) int {
 	var se *sqlite3.Error

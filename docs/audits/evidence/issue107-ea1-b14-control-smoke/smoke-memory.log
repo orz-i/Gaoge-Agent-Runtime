@@ -1,0 +1,60 @@
+SOURCE_SHA=163b04909201ba442988a54016095de27fa6bcac
+COMMAND=go -C go/agent-runtime test -race -count=1 ./memory -run '^TestEA1RootAgent(ControlPhases|ControlSettlement)' -v
+=== RUN   TestEA1RootAgentControlPhasesMemory
+=== RUN   TestEA1RootAgentControlPhasesMemory/P0/approval/missing
+=== RUN   TestEA1RootAgentControlPhasesMemory/P0/approval/stale
+=== RUN   TestEA1RootAgentControlPhasesMemory/P0/approval/not-waiting
+=== RUN   TestEA1RootAgentControlPhasesMemory/P0/approval/invalid-decision
+=== RUN   TestEA1RootAgentControlPhasesMemory/P0/approval/foreign-checkpoint
+=== RUN   TestEA1RootAgentControlPhasesMemory/P0/approval/native-success
+=== RUN   TestEA1RootAgentControlPhasesMemory/P0/approval/default-success
+=== RUN   TestEA1RootAgentControlPhasesMemory/P0/tool-wait-no-wait
+=== RUN   TestEA1RootAgentControlPhasesMemory/P1/approval
+=== RUN   TestEA1RootAgentControlPhasesMemory/P2/approval/handler
+=== RUN   TestEA1RootAgentControlPhasesMemory/P2/approval/tool
+=== RUN   TestEA1RootAgentControlPhasesMemory/P0/tool-wait
+=== RUN   TestEA1RootAgentControlPhasesMemory/P1/tool-wait
+=== RUN   TestEA1RootAgentControlPhasesMemory/P2/tool-wait
+--- PASS: TestEA1RootAgentControlPhasesMemory (6.56s)
+    --- PASS: TestEA1RootAgentControlPhasesMemory/P0/approval/missing (0.01s)
+    --- PASS: TestEA1RootAgentControlPhasesMemory/P0/approval/stale (0.01s)
+    --- PASS: TestEA1RootAgentControlPhasesMemory/P0/approval/not-waiting (0.00s)
+    --- PASS: TestEA1RootAgentControlPhasesMemory/P0/approval/invalid-decision (0.01s)
+    --- PASS: TestEA1RootAgentControlPhasesMemory/P0/approval/foreign-checkpoint (0.01s)
+    --- PASS: TestEA1RootAgentControlPhasesMemory/P0/approval/native-success (0.01s)
+    --- PASS: TestEA1RootAgentControlPhasesMemory/P0/approval/default-success (0.01s)
+    --- PASS: TestEA1RootAgentControlPhasesMemory/P0/tool-wait-no-wait (0.01s)
+    --- PASS: TestEA1RootAgentControlPhasesMemory/P1/approval (0.02s)
+    --- PASS: TestEA1RootAgentControlPhasesMemory/P2/approval/handler (2.16s)
+    --- PASS: TestEA1RootAgentControlPhasesMemory/P2/approval/tool (2.16s)
+    --- PASS: TestEA1RootAgentControlPhasesMemory/P0/tool-wait (0.01s)
+    --- PASS: TestEA1RootAgentControlPhasesMemory/P1/tool-wait (0.01s)
+    --- PASS: TestEA1RootAgentControlPhasesMemory/P2/tool-wait (2.16s)
+=== RUN   TestEA1RootAgentControlSettlementMemory
+=== RUN   TestEA1RootAgentControlSettlementMemory/approval/P3
+=== RUN   TestEA1RootAgentControlSettlementMemory/approval/P4
+=== RUN   TestEA1RootAgentControlSettlementMemory/approval/P5
+    ea1_root_agent_control_settlement.go:292: duplicate approval passed owner: agent original root callback result is uncertain
+=== RUN   TestEA1RootAgentControlSettlementMemory/approval/P5-run-deadline
+    ea1_root_agent_control_settlement.go:292: duplicate approval passed owner: agent original root callback result is uncertain
+=== RUN   TestEA1RootAgentControlSettlementMemory/toolwait/P3
+=== RUN   TestEA1RootAgentControlSettlementMemory/toolwait/P4
+=== RUN   TestEA1RootAgentControlSettlementMemory/toolwait/P5
+=== RUN   TestEA1RootAgentControlSettlementMemory/toolwait/P5-run-deadline
+    ea1_root_agent_control_settlement.go:30: pending Tool full correlation changed
+=== RUN   TestEA1RootAgentControlSettlementMemory/toolwait/P5-pending-deadline
+--- FAIL: TestEA1RootAgentControlSettlementMemory (0.61s)
+    --- PASS: TestEA1RootAgentControlSettlementMemory/approval/P3 (0.02s)
+    --- PASS: TestEA1RootAgentControlSettlementMemory/approval/P4 (0.02s)
+    --- FAIL: TestEA1RootAgentControlSettlementMemory/approval/P5 (0.01s)
+    --- FAIL: TestEA1RootAgentControlSettlementMemory/approval/P5-run-deadline (0.01s)
+    --- PASS: TestEA1RootAgentControlSettlementMemory/toolwait/P3 (0.02s)
+    --- PASS: TestEA1RootAgentControlSettlementMemory/toolwait/P4 (0.02s)
+    --- PASS: TestEA1RootAgentControlSettlementMemory/toolwait/P5 (0.02s)
+    --- FAIL: TestEA1RootAgentControlSettlementMemory/toolwait/P5-run-deadline (0.01s)
+    --- PASS: TestEA1RootAgentControlSettlementMemory/toolwait/P5-pending-deadline (0.50s)
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory	7.929s
+FAIL
+
+EXIT_CODE=1

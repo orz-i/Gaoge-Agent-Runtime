@@ -1,0 +1,2 @@
+SOURCE_SHA=55d7c2e586c1bbb534b64d987e1e916e078b7ec0
+B19 four fixed Child Cancel cells. Fifteen zero-exit logs, isolated PostgreSQL16; no whole-matrix or remote certification.

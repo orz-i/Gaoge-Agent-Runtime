@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -83,7 +84,7 @@ func TestWorkflowValidatesOutputBeforeSuccessfulCompletion(t *testing.T) {
 	}
 }
 
-func TestEffectIntentIsPersistedBeforeDispatchAndReplayed(t *testing.T) {
+func TestUnknownExternalEffectIntentCannotReplayWithoutReceipt(t *testing.T) {
 	t.Parallel()
 	runtime := newWorkflowRuntime(t)
 	executor := &scriptedExecutor{
@@ -109,16 +110,24 @@ func TestEffectIntentIsPersistedBeforeDispatchAndReplayed(t *testing.T) {
 	}
 	effectID := pendingView.Effects[0].ID
 
-	completed, err := runner.Resume(context.Background(), pending.Run.ID, pending.Run.Revision)
-	if err != nil {
-		t.Fatalf("resume workflow: %v", err)
+	// The initial external Executor returned DispositionPending without a
+	// verifiable local child or physical receipt. Replay cannot be treated
+	// as safe idempotency just because it reuses the same Effect ID.
+	if !errors.Is(err, kernel.ErrChildExecutionBusy) {
+		t.Fatalf("unknown original physical callback was not fenced: %v", err)
 	}
-	assertWorkflowCompleted(t, completed)
-	if len(executor.calls) != 2 || executor.calls[0] != effectID || executor.calls[1] != effectID {
-		t.Fatalf("effect replay changed identity: %v", executor.calls)
+	resumed, resumeErr := runner.Resume(context.Background(), pending.Run.ID, pending.Run.Revision)
+	if !errors.Is(resumeErr, kernel.ErrChildExecutionBusy) {
+		t.Fatalf("unknown physical Effect could be re-admitted: status=%s err=%v", resumed.Run.Status, resumeErr)
+	}
+	if len(executor.calls) != 1 || executor.calls[0] != effectID {
+		t.Fatalf("unknown external Effect was replayed: %v", executor.calls)
+	}
+	if _, lookupErr := runtime.LookupChildExecution(context.Background(), pending.Run.ID); lookupErr != nil {
+		t.Fatalf("unknown physical Grant was prematurely retired: %v", lookupErr)
 	}
 	if !executor.allCallsObservedPersistedIntent() {
-		t.Fatal("executor observed an effect before its intent was persisted")
+		t.Fatal("Executor observed an Effect before its durable intent")
 	}
 }
 
@@ -270,7 +279,7 @@ func TestEffectFailureFailsWorkflow(t *testing.T) {
 	}
 }
 
-func TestConcurrentResumeUsesOneStableEffectIdentity(t *testing.T) {
+func TestConcurrentResumeNeverReplaysUnknownExternalEffect(t *testing.T) {
 	t.Parallel()
 	runtime := newWorkflowRuntime(t)
 	executor := newBarrierExecutor(runtime)
@@ -291,11 +300,12 @@ func TestConcurrentResumeUsesOneStableEffectIdentity(t *testing.T) {
 			results <- resumeResult{snapshot: snapshot, err: resumeErr}
 		}()
 	}
-	first := <-results
-	second := <-results
-	winners, conflicts := countResumeOutcomes(t, []resumeResult{first, second})
-	if winners != 1 || conflicts != 1 || !executor.sameEffectIdentity() {
-		t.Fatalf("unexpected CAS outcome: winners=%d conflicts=%d calls=%v", winners, conflicts, executor.calls())
+	first, second := <-results, <-results
+	if !errors.Is(first.err, kernel.ErrChildExecutionBusy) ||
+		!errors.Is(second.err, kernel.ErrChildExecutionBusy) ||
+		len(executor.calls()) != 1 {
+		t.Fatalf("duplicate queue Resume replayed an unknown pending Effect: first=%v second=%v calls=%v",
+			first.err, second.err, executor.calls())
 	}
 }
 
@@ -367,24 +377,6 @@ func assertResolvedWait(t *testing.T, snapshot kernel.Snapshot, response json.Ra
 		string(view.Waits[0].Response) != string(response) || view.Activations[0].Status != workflow.ActivationCompleted {
 		t.Fatalf("unexpected resolved wait state: %#v", view)
 	}
-}
-
-func countResumeOutcomes(t *testing.T, results []resumeResult) (int, int) {
-	t.Helper()
-	winners := 0
-	conflicts := 0
-	for _, result := range results {
-		if result.err == nil && result.snapshot.Run.Status == kernel.RunStatusCompleted {
-			winners++
-			continue
-		}
-		if errors.Is(result.err, kernel.ErrConflict) {
-			conflicts++
-			continue
-		}
-		t.Fatalf("unexpected concurrent resume result: %#v, %v", result.snapshot, result.err)
-	}
-	return winners, conflicts
 }
 
 func mustWorkflowView(t *testing.T, snapshot kernel.Snapshot) workflow.View {
@@ -481,15 +473,6 @@ func (executor *barrierExecutor) Execute(
 	}, nil
 }
 
-func (executor *barrierExecutor) sameEffectIdentity() bool {
-	executor.mu.Lock()
-	defer executor.mu.Unlock()
-	if len(executor.ids) != 3 {
-		return false
-	}
-	return executor.ids[0] == executor.ids[1] && executor.ids[1] == executor.ids[2]
-}
-
 func (executor *barrierExecutor) calls() []string {
 	executor.mu.Lock()
 	defer executor.mu.Unlock()
@@ -519,9 +502,11 @@ func (workflowClock) Now() time.Time {
 	return time.Date(2026, 8, 6, 12, 0, 0, 0, time.UTC)
 }
 
-type workflowIDs struct{ next int }
+// Concurrent queue-worker Resume now correctly obtains an original Store
+// Grant before external effects, so the deterministic test ID generator
+// must be safe for simultaneous preflight Grant ID requests.
+type workflowIDs struct{ next atomic.Uint64 }
 
 func (ids *workflowIDs) NewID(prefix string) (string, error) {
-	ids.next++
-	return fmt.Sprintf("%s_%d", prefix, ids.next), nil
+	return fmt.Sprintf("%s_%d", prefix, ids.next.Add(1)), nil
 }

@@ -62,7 +62,7 @@ func baselineProfile(provider string) measurementProfile {
 		PreflightTimeoutMs: preflightTimeout.Milliseconds(), PreflightVersion: version, MaxLLMCalls: maxModelCalls, MaxToolCalls: maxToolCalls,
 		ModelTimeoutMs: modelTimeout.Milliseconds(), ToolTimeoutMs: toolTimeout.Milliseconds(),
 		MaxAttempts: 1, MaxConcurrency: 1, LeaseDurationMs: leaseDuration.Milliseconds(), ContextPolicy: taskContextPolicy(), ArtifactReadInstructionLimit: artifactReadLimit,
-		OracleVersion: "evidence-draft-recovery-v1", Recovery: "in-process-store-clock-expiry",
+		OracleVersion: "evidence-draft-recovery-v2", Recovery: "in-process-known-receipt-continuation",
 		ModelCallCounting: "adapter-invocations", ToolCallCounting: "registered-handler-invocations",
 		DurationClock: "wall-monotonic-ms", LatencyPercentile: "nearest-rank", UsageAccounting: "final-response-known-subtotal",
 	}

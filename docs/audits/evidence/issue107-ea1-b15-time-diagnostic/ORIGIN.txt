@@ -1,0 +1,2 @@
+SOURCE_SHA=2191fcc309cf94caec5649a23b361caba43e890e
+One exact Host PG election-after diagnostic run EXIT_CODE=1 with unchanged predicate. Only CreatedAt/UpdatedAt time.Location differ: same instant Time.Equal=true and UTCDeepEqual=true. No other Invocation field differences. No certification.

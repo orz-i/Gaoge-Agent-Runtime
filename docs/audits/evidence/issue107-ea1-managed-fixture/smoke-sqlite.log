@@ -1,0 +1,68 @@
+SOURCE_SHA=d3d78368d3096be844afb71d744e6578f0ea084e
+COMMAND=go -C go/agent-runtime-sqlite test -count=1 -v ./... -run '^TestSQLiteManagedRecoveryStore$'
+=== RUN   TestSQLiteManagedRecoveryStore
+=== RUN   TestSQLiteManagedRecoveryStore/owner-park-competition
+=== RUN   TestSQLiteManagedRecoveryStore/owner-park-competition/renew-owner
+    managed_recovery.go:682: kernel execution lease is not current
+=== RUN   TestSQLiteManagedRecoveryStore/owner-park-competition/renew-park
+    managed_recovery.go:682: kernel execution lease is not current
+=== RUN   TestSQLiteManagedRecoveryStore/owner-park-competition/claim-owner
+    managed_recovery.go:682: kernel execution lease is not current
+=== RUN   TestSQLiteManagedRecoveryStore/owner-park-competition/claim-park
+    managed_recovery.go:682: kernel execution lease is not current
+=== RUN   TestSQLiteManagedRecoveryStore/owner-and-leave
+=== RUN   TestSQLiteManagedRecoveryStore/owner-and-leave/live
+=== RUN   TestSQLiteManagedRecoveryStore/owner-and-leave/renew
+=== RUN   TestSQLiteManagedRecoveryStore/owner-and-leave/leave
+=== RUN   TestSQLiteManagedRecoveryStore/owner-and-leave/claim
+=== RUN   TestSQLiteManagedRecoveryStore/owner-and-leave/eventhead
+=== RUN   TestSQLiteManagedRecoveryStore/parked-ancestor
+=== RUN   TestSQLiteManagedRecoveryStore/parked-ancestor/park-first
+    managed_recovery.go:594: invalid kernel input
+=== RUN   TestSQLiteManagedRecoveryStore/parked-ancestor/child-first
+    managed_recovery.go:594: invalid kernel input
+=== RUN   TestSQLiteManagedRecoveryStore/parked-gates
+=== RUN   TestSQLiteManagedRecoveryStore/selection-ack
+=== RUN   TestSQLiteManagedRecoveryStore/selection-ack/RESUME
+=== RUN   TestSQLiteManagedRecoveryStore/selection-ack/CANCEL
+=== RUN   TestSQLiteManagedRecoveryStore/two-enable-claimants
+=== RUN   TestSQLiteManagedRecoveryStore/transaction-ack
+=== RUN   TestSQLiteManagedRecoveryStore/transaction-ack/t0
+=== RUN   TestSQLiteManagedRecoveryStore/transaction-ack/park
+=== RUN   TestSQLiteManagedRecoveryStore/transaction-ack/enable
+=== RUN   TestSQLiteManagedRecoveryStore/transaction-ack/cancel
+=== RUN   TestSQLiteManagedRecoveryStore/historical-closure
+--- FAIL: TestSQLiteManagedRecoveryStore (35.07s)
+    --- FAIL: TestSQLiteManagedRecoveryStore/owner-park-competition (0.07s)
+        --- FAIL: TestSQLiteManagedRecoveryStore/owner-park-competition/renew-owner (0.03s)
+        --- FAIL: TestSQLiteManagedRecoveryStore/owner-park-competition/renew-park (0.02s)
+        --- FAIL: TestSQLiteManagedRecoveryStore/owner-park-competition/claim-owner (0.01s)
+        --- FAIL: TestSQLiteManagedRecoveryStore/owner-park-competition/claim-park (0.01s)
+    --- PASS: TestSQLiteManagedRecoveryStore/owner-and-leave (9.55s)
+        --- PASS: TestSQLiteManagedRecoveryStore/owner-and-leave/live (0.02s)
+        --- PASS: TestSQLiteManagedRecoveryStore/owner-and-leave/renew (3.18s)
+        --- PASS: TestSQLiteManagedRecoveryStore/owner-and-leave/leave (3.18s)
+        --- PASS: TestSQLiteManagedRecoveryStore/owner-and-leave/claim (3.17s)
+        --- PASS: TestSQLiteManagedRecoveryStore/owner-and-leave/eventhead (0.01s)
+    --- FAIL: TestSQLiteManagedRecoveryStore/parked-ancestor (0.03s)
+        --- FAIL: TestSQLiteManagedRecoveryStore/parked-ancestor/park-first (0.02s)
+        --- FAIL: TestSQLiteManagedRecoveryStore/parked-ancestor/child-first (0.01s)
+    --- PASS: TestSQLiteManagedRecoveryStore/parked-gates (3.16s)
+    --- PASS: TestSQLiteManagedRecoveryStore/selection-ack (6.36s)
+        --- PASS: TestSQLiteManagedRecoveryStore/selection-ack/RESUME (3.17s)
+        --- PASS: TestSQLiteManagedRecoveryStore/selection-ack/CANCEL (3.19s)
+    --- PASS: TestSQLiteManagedRecoveryStore/two-enable-claimants (3.17s)
+    --- PASS: TestSQLiteManagedRecoveryStore/transaction-ack (9.54s)
+        --- PASS: TestSQLiteManagedRecoveryStore/transaction-ack/t0 (0.02s)
+        --- PASS: TestSQLiteManagedRecoveryStore/transaction-ack/park (3.17s)
+        --- PASS: TestSQLiteManagedRecoveryStore/transaction-ack/enable (3.17s)
+        --- PASS: TestSQLiteManagedRecoveryStore/transaction-ack/cancel (3.17s)
+    --- PASS: TestSQLiteManagedRecoveryStore/historical-closure (3.18s)
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite	35.378s
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/examples/embedded	0.762s [no tests to run]
+FAIL
+
+EXIT_CODE=1

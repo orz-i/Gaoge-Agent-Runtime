@@ -1,0 +1,22 @@
+SOURCE_SHA=2d216518cfe48bc9e2ea6b02beb7733c246376a7
+COMMAND=make integration-otel
+node scripts/run-otel-integration.mjs
+OpenTelemetry Collector image ready: ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector-contrib:0.149.0 -> otel/opentelemetry-collector-contrib@sha256:0fba96233274f6d665ac8831ad99dfe6479a9a20459f6e2719c0d20945773b46,ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector-contrib@sha256:0fba96233274f6d665ac8831ad99dfe6479a9a20459f6e2719c0d20945773b46
+ Network gaoge-agent-runtime-otel_default Creating 
+ Network gaoge-agent-runtime-otel_default Creating 
+ Network gaoge-agent-runtime-otel_default Created 
+ Network gaoge-agent-runtime-otel_default Created 
+ Container gaoge-agent-runtime-otel-otel-collector-1 Creating 
+ Container gaoge-agent-runtime-otel-otel-collector-1 Created 
+ Container gaoge-agent-runtime-otel-otel-collector-1 Starting 
+ Container gaoge-agent-runtime-otel-otel-collector-1 Started 
+OpenTelemetry Collector E2E emission completed
+OpenTelemetry Collector E2E trace/metric gate passed
+ Container gaoge-agent-runtime-otel-otel-collector-1 Stopping 
+ Container gaoge-agent-runtime-otel-otel-collector-1 Stopped 
+ Container gaoge-agent-runtime-otel-otel-collector-1 Removing 
+ Container gaoge-agent-runtime-otel-otel-collector-1 Removed 
+ Network gaoge-agent-runtime-otel_default Removing 
+ Network gaoge-agent-runtime-otel_default Removed 
+
+EXIT_CODE=0

@@ -1,0 +1,72 @@
+SOURCE_SHA=df8dad572c82d1a569dc89d28ff32bd14cad3cc5
+COMMAND=go -C go/agent-runtime-harness test -race -count=1 -timeout=180s ./...
+--- FAIL: TestNamedBudgetCompletionReplayDoesNotRedispatchProvider (0.00s)
+    --- FAIL: TestNamedBudgetCompletionReplayDoesNotRedispatchProvider/rejected (0.00s)
+        budget_completion_authority_test.go:120: invalid agent run request
+    --- FAIL: TestNamedBudgetCompletionReplayDoesNotRedispatchProvider/successful (0.00s)
+        budget_completion_authority_test.go:120: invalid agent run request
+--- FAIL: TestBudgetProjectionFailureCannotEraseSettledModelReceipt (0.00s)
+    --- FAIL: TestBudgetProjectionFailureCannotEraseSettledModelReceipt/initial_return (0.00s)
+        budget_model_receipt_test.go:72: invalid agent run request
+    --- FAIL: TestBudgetProjectionFailureCannotEraseSettledModelReceipt/receipt_replay (0.00s)
+        budget_model_receipt_test.go:72: invalid agent run request
+--- FAIL: TestSettledRejectionRecoversSDKReceiptWithoutRegeneration (0.00s)
+    --- FAIL: TestSettledRejectionRecoversSDKReceiptWithoutRegeneration//before_receipt_commit (0.00s)
+        budget_model_receipt_test.go:149: invalid agent run request
+    --- FAIL: TestSettledRejectionRecoversSDKReceiptWithoutRegeneration//after_receipt_commit (0.00s)
+        budget_model_receipt_test.go:149: invalid agent run request
+    --- FAIL: TestSettledRejectionRecoversSDKReceiptWithoutRegeneration//caller_cancelled (0.00s)
+        budget_model_receipt_test.go:149: invalid agent run request
+    --- FAIL: TestSettledRejectionRecoversSDKReceiptWithoutRegeneration/model.post_generation_failed/before_receipt_commit (0.00s)
+        budget_model_receipt_test.go:149: invalid agent run request
+    --- FAIL: TestSettledRejectionRecoversSDKReceiptWithoutRegeneration/model.post_generation_failed/after_receipt_commit (0.00s)
+        budget_model_receipt_test.go:149: invalid agent run request
+    --- FAIL: TestSettledRejectionRecoversSDKReceiptWithoutRegeneration/model.post_generation_failed/caller_cancelled (0.00s)
+        budget_model_receipt_test.go:149: invalid agent run request
+--- FAIL: TestManagedContextResumeAfterRolloverBeforeModelIntentCommit (0.00s)
+    context_managed_fault_test.go:89: invalid agent run request
+--- FAIL: TestNativeControlReadFailureClosesOnlyProvenNoEffectGrant (0.00s)
+    --- FAIL: TestNativeControlReadFailureClosesOnlyProvenNoEffectGrant/allowance/retry (0.00s)
+        control_no_effect_recovery_test.go:131: invalid agent run request
+    --- FAIL: TestNativeControlReadFailureClosesOnlyProvenNoEffectGrant/allowance/cancel (0.00s)
+        control_no_effect_recovery_test.go:131: invalid agent run request
+    --- FAIL: TestNativeControlReadFailureClosesOnlyProvenNoEffectGrant/approval/retry (0.00s)
+        control_no_effect_recovery_test.go:133: invalid agent run request
+    --- FAIL: TestNativeControlReadFailureClosesOnlyProvenNoEffectGrant/approval/cancel (0.00s)
+        control_no_effect_recovery_test.go:133: invalid agent run request
+--- FAIL: TestNativeAgentRunMiddlewareCannotForgeControlNoEffectProof (0.01s)
+    --- FAIL: TestNativeAgentRunMiddlewareCannotForgeControlNoEffectProof/sentinel (0.01s)
+        control_no_effect_recovery_test.go:396: Host middleware bypassed fail-closed admission using an exported sentinel
+    --- FAIL: TestNativeAgentRunMiddlewareCannotForgeControlNoEffectProof/wrapped-sentinel (0.01s)
+        control_no_effect_recovery_test.go:396: Host middleware bypassed fail-closed admission using an exported sentinel
+--- FAIL: TestLostNativeNoEffectReceiptRemainsFailClosed (0.00s)
+    control_no_effect_recovery_test.go:433: invalid agent run request
+--- FAIL: TestSessionFacadeFrozenOwnerBlocksForeignPendingModelDispatch (0.00s)
+    session_actor_binding_negative_test.go:143: invalid agent run request
+--- FAIL: TestSessionFacadeRechecksActualRootAndKernelBeforePhysicalResume (0.00s)
+    session_actor_frozen_root_swap_test.go:88: invalid agent run request
+--- FAIL: TestAsyncDelegationCancellationRetriesExternalCleanup (0.03s)
+    delegation_async_test.go:135: remote cancellation error was lost: kernel descendant has an unsettled physical execution Grant
+--- FAIL: TestResumeTurnHonorsDurableModelRetryAfter (0.01s)
+    resume_turn_test.go:514: missing RetryAfter: view={Messages:[{ToolResult:<nil> CacheControl:<nil> Role:user Content:[{Name: CacheControl:<nil> Kind:text Text:answer directly MediaType: Source:<nil>}] ToolCalls:[] ToolCallID: ProviderReplay:<nil>}] Model:model ModelOptions:null OutputContract:<nil> ToolKeys:[] RequiredToolKeys:[] Budget:{Limits:{MaxLLMCalls:8 MaxToolCalls:16 MaxHostedToolCalls:0 MaxInputTokens:0 MaxOutputTokens:0 MaxTotalTokens:0 MaxOutputBytes:0 MaxStateBytes:0 MaxChildRuns:0 MaxCostUnits:0 MaxConcurrentRuns:0 MaxConcurrentDescendants:0} Usage:{LLMCalls:0 ToolCalls:0 HostedToolCalls:0 InputTokens:0 OutputTokens:0 TotalTokens:0 CacheReadTokens:0 CacheWriteTokens:0 ReasoningTokens:0 OutputBytes:0 StateBytes:0 ChildRuns:0 CostUnits:0}} CallAllowance:<nil> AutoAllowance:<nil> ModelInvocations:[{ID:modelinv_a52520ac6c37381d4f7ca7e2a3412a8a RunID:hr_ac9879e5c8dd2666d0dc9edd SourceRevision:1 RequestHash:1f3c17f3f0b3271e225c73b89cea303ac4ca0ca98511c02b1f3c404f972a4f92 CatalogFingerprints:[] Provider: BindingFingerprint: Model:model Status:pending Request:{BindingRef: PromptCacheKey: PreviousResponseID: RunID:hr_ac9879e5c8dd2666d0dc9edd InvocationID:modelinv_a52520ac6c37381d4f7ca7e2a3412a8a Model:model ModelOptions:null OutputContract:<nil> Messages:[{ToolResult:<nil> CacheControl:<nil> Role:user Content:[{Name: CacheControl:<nil> Kind:text Text:answer directly MediaType: Source:<nil>}] ToolCalls:[] ToolCallID: ProviderReplay:<nil>}] Tools:[] HostedTools:[] MaxOutputTokens:0 HostedToolCallLimit:<nil> RequireToolCall:false} ProviderResponseID: Response:{Content: ToolCalls:[] HostedToolCalls:[] Artifacts:[] Citations:[] ResponseID: Usage:<nil> ProviderReplay:<nil> Refused:false Continue:false} Usage:<nil> ErrorCode: DispatchAttempt:1 ExecutionAttempt:1 ExecutionLeaseUntil:2026-10-24 10:02:00 +0000 UTC RetryAfter:<nil> CreatedAt:2026-10-24 10:00:00 +0000 UTC CompletedAt:<nil> ConsumedAt:<nil>}] PendingTool:<nil>} error=<nil>
+--- FAIL: TestResumeTurnDoesNotReplayUnknownNativeToolOutcome (0.02s)
+    resume_turn_test.go:563: external call did not pause: turn={ID:ht_5a852e1adcdc1a8f16961678 SessionID:hs_00fc10f2df8edb6494fc5de1 HostTurn:{Kind:conversation_turn ID:conversation_turn_1} ConfigSnapshotID:hcfg_91a40a8d7db020d5c504e313 ContextCheckpointID: ContextRef:{ID: Generation:0 Revision:0 LineageHash: CoveredThroughSourceID: ContentHash:} Status:running Revision:2 ErrorCode: ErrorDetail: CreatedAt:2026-10-24 10:00:00 +0000 UTC UpdatedAt:2026-10-24 10:00:00 +0000 UTC} error=agent original root callback result is uncertain calls=1
+--- FAIL: TestSessionResumeReusesFrozenIntentWithoutTranscriptOrPreparation (0.00s)
+    resume_turn_test.go:111: invalid agent run request
+--- FAIL: TestCancelWhileAgentIsRunningConvergesBothCallersToCancelled (0.00s)
+    harness_test.go:185: cancel snapshot=harness.Snapshot{Session:harness.Session{ID:"", HostThread:harness.HostRef{Kind:"", ID:""}, Actor:kernel.ActorRef{TenantID:"", ActorID:""}, Revision:0x0, CreatedAt:time.Date(1, time.January, 1, 0, 0, 0, 0, time.UTC), UpdatedAt:time.Date(1, time.January, 1, 0, 0, 0, 0, time.UTC)}, Turn:harness.Turn{ID:"", SessionID:"", HostTurn:harness.HostRef{Kind:"", ID:""}, ConfigSnapshotID:"", ContextCheckpointID:"", ContextRef:harness.ContextCheckpointRef{ID:"", Generation:0, Revision:0, LineageHash:"", CoveredThroughSourceID:"", ContentHash:""}, Status:"", Revision:0x0, ErrorCode:"", ErrorDetail:"", CreatedAt:time.Date(1, time.January, 1, 0, 0, 0, 0, time.UTC), UpdatedAt:time.Date(1, time.January, 1, 0, 0, 0, 0, time.UTC)}, Config:harness.ConfigSnapshot{ID:"", TurnID:"", Environment:harness.VersionRef{ID:"", Revision:0x0}, Instructions:"", Model:"", ModelOptions:jsontext.Value(nil), OutputContract:(*model.OutputContract)(nil), ToolKeys:[]string(nil), ToolPolicies:[]harness.ToolPolicySnapshot(nil), Commands:[]harness.CommandDescriptor(nil), Skills:[]harness.SkillSnapshot(nil), MemoryPolicy:"", ContextPolicy:context.Policy{MaxInputTokens:0, SoftLimitPercent:0, EstimateSafetyPercent:0, MaxSerializedBytes:0, PreserveRecentTurns:0, MinimumRecentTurns:0, MaxCompactionTokens:0, MaxToolResultBytes:0}, ApprovalPolicyVersion:0x0, Limits:budget.Limits{MaxLLMCalls:0, MaxToolCalls:0, MaxHostedToolCalls:0, MaxInputTokens:0, MaxOutputTokens:0, MaxTotalTokens:0, MaxOutputBytes:0, MaxStateBytes:0, MaxChildRuns:0, MaxCostUnits:0, MaxConcurrentRuns:0, MaxConcurrentDescendants:0}, SharedBudget:(*budget.Limits)(nil), DelegationPolicy:harness.DelegationPolicySnapshot{MaxDepth:0}, Roles:[]harness.RoleSnapshot(nil), ContentHash:"", CreatedAt:time.Date(1, time.January, 1, 0, 0, 0, 0, time.UTC), AdmissionHash:"", InputMessage:(*harness.HostRef)(nil), OutputMessage:(*harness.HostRef)(nil)}, Invocations:[]harness.Invocation(nil), Interactions:[]harness.Interaction(nil), Items:[]harness.Item(nil), Output:(*harness.Output)(nil), Budget:(*budget.LedgerView)(nil), ToolUsage:(*harness.ToolUsage)(nil), Subtasks:[]harness.Subtask(nil)} err=kernel descendant has an unsettled physical execution Grant
+--- FAIL: TestHarnessIndependentDelegationsCollectMixedTerminalResults (0.08s)
+    delegation_test.go:253: mixed delegation root did not complete: harness.Turn{ID:"ht_9e83aa61583da3238576d6e9", SessionID:"hs_d4c630499679b51063c5d5ae", HostTurn:harness.HostRef{Kind:"conversation_turn", ID:"mixed-delegation-turn"}, ConfigSnapshotID:"hcfg_55c3268e7aeea9ba4961d130", ContextCheckpointID:"", ContextRef:harness.ContextCheckpointRef{ID:"", Generation:0, Revision:0, LineageHash:"", CoveredThroughSourceID:"", ContentHash:""}, Status:"running", Revision:0x2, ErrorCode:"", ErrorDetail:"", CreatedAt:time.Date(2026, time.August, 15, 7, 0, 0, 0, time.UTC), UpdatedAt:time.Date(2026, time.August, 15, 7, 0, 0, 0, time.UTC)}, err=<nil>
+--- FAIL: TestAsyncDelegationCancellationPreservesChildTerminalOutcome (0.00s)
+    --- FAIL: TestAsyncDelegationCancellationPreservesChildTerminalOutcome/cancelled (0.03s)
+        delegation_async_test.go:120: parent cancellation = harness.Turn{ID:"", SessionID:"", HostTurn:harness.HostRef{Kind:"", ID:""}, ConfigSnapshotID:"", ContextCheckpointID:"", ContextRef:harness.ContextCheckpointRef{ID:"", Generation:0, Revision:0, LineageHash:"", CoveredThroughSourceID:"", ContentHash:""}, Status:"", Revision:0x0, ErrorCode:"", ErrorDetail:"", CreatedAt:time.Date(1, time.January, 1, 0, 0, 0, 0, time.UTC), UpdatedAt:time.Date(1, time.January, 1, 0, 0, 0, 0, time.UTC)}, kernel descendant has an unsettled physical execution Grant
+    --- FAIL: TestAsyncDelegationCancellationPreservesChildTerminalOutcome/completed (0.04s)
+        delegation_async_test.go:120: parent cancellation = harness.Turn{ID:"", SessionID:"", HostTurn:harness.HostRef{Kind:"", ID:""}, ConfigSnapshotID:"", ContextCheckpointID:"", ContextRef:harness.ContextCheckpointRef{ID:"", Generation:0, Revision:0, LineageHash:"", CoveredThroughSourceID:"", ContentHash:""}, Status:"", Revision:0x0, ErrorCode:"", ErrorDetail:"", CreatedAt:time.Date(1, time.January, 1, 0, 0, 0, 0, time.UTC), UpdatedAt:time.Date(1, time.January, 1, 0, 0, 0, 0, time.UTC)}, kernel descendant has an unsettled physical execution Grant
+    --- FAIL: TestAsyncDelegationCancellationPreservesChildTerminalOutcome/failed (0.04s)
+        delegation_async_test.go:120: parent cancellation = harness.Turn{ID:"", SessionID:"", HostTurn:harness.HostRef{Kind:"", ID:""}, ConfigSnapshotID:"", ContextCheckpointID:"", ContextRef:harness.ContextCheckpointRef{ID:"", Generation:0, Revision:0, LineageHash:"", CoveredThroughSourceID:"", ContentHash:""}, Status:"", Revision:0x0, ErrorCode:"", ErrorDetail:"", CreatedAt:time.Date(1, time.January, 1, 0, 0, 0, 0, time.UTC), UpdatedAt:time.Date(1, time.January, 1, 0, 0, 0, 0, time.UTC)}, kernel descendant has an unsettled physical execution Grant
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness	28.179s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness/examples/session	1.811s
+FAIL
+
+EXIT_CODE=1

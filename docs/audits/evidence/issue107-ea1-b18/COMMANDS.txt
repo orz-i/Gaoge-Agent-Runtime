@@ -1,0 +1,18 @@
+gorm.log
+COMMAND=go -C go/agent-runtime-postgres test -race -count=1 ./... -run '^TestEA1ChildAgent(ControlPhases|ApprovalSettlement)' -v
+lint-agent-runtime-postgres.log
+COMMAND=cd go/agent-runtime-postgres && golangci-lint run ./...
+lint-agent-runtime-sqlite.log
+COMMAND=cd go/agent-runtime-sqlite && golangci-lint run ./...
+lint-agent-runtime.log
+COMMAND=cd go/agent-runtime && golangci-lint run ./...
+memory.log
+COMMAND=go -C go/agent-runtime test -race -count=1 ./memory -run '^TestEA1ChildAgent(ControlPhases|ApprovalSettlement)' -v
+nativepg.log
+COMMAND=go -C go/agent-runtime-postgres test -race -count=3 ./... -run '^TestEA1RealPostgresChildAgent(ControlPhases|ApprovalSettlement)' -v
+smoke-memory.log
+COMMAND=go -C go/agent-runtime test -count=1 ./memory -run '^TestEA1ChildAgent(ControlPhases|ApprovalSettlement)' -v
+smoke-tool-port.log
+COMMAND=go -C go/agent-runtime test -count=1 ./memory -run '^TestEA1ChildAgentControlPhasesMemory$/^P2$/^tool$' -v
+sqlite.log
+COMMAND=go -C go/agent-runtime-sqlite test -race -count=1 ./... -run '^TestEA1ChildAgent(ControlPhases|ApprovalSettlement)' -v

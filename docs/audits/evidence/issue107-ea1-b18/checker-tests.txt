@@ -1,0 +1,11 @@
+......
+----------------------------------------------------------------------
+Ran 6 tests in 0.011s
+
+OK
+EA-1 inventory: 24 entrypoints x 6 phases = 1 cells
+Inventory: OPEN_COVERAGE=1
+Evidence: FAIL=1
+EA-1 inventory: 24 entrypoints x 6 phases = 1 cells
+Inventory: OPEN_COVERAGE=1
+Evidence: FAIL=1

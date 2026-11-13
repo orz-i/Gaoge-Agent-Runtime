@@ -1,0 +1,44 @@
+SOURCE_SHA=996dd3466c12ad1880f1721ed4987720e4b32ead
+COMMAND=go -C go/agent-runtime test ./... -run '^$'
+# github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent
+agent/agent.go:1100:51: cannot use active (variable of type *ModelInvocation) as ModelInvocation value in argument to replaceLastModelInvocation
+agent/root_model_recovery.go:52:49: cannot use inv (variable of type *ModelInvocation) as ModelInvocation value in argument to matchesFrozenProviderBinding
+agent/root_model_recovery.go:61:234: not enough arguments in call to duplicatePhysicalProviderResponseID
+	have (runState, string)
+	want (runState, ModelInvocation, string)
+agent/root_model_recovery.go:109:34: cannot use inv (variable of type *ModelInvocation) as ModelInvocation value in argument to validModelInvocationReceipt
+agent/root_model_recovery.go:109:78: cannot use inv (variable of type *ModelInvocation) as ModelInvocation value in argument to replaceLastModelInvocation
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/continuation [build failed]
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/interaction	[no test files]
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/runfeed	[no test files]
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/topology [build failed]
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent [build failed]
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/bootstrap [build failed]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget	(cached) [no tests to run]
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/compose [build failed]
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance [build failed]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context	(cached) [no tests to run]
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/continuation [build failed]
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/evaluation [build failed]
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/examples/configured [build failed]
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/examples/quickstart [build failed]
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/groupchat [build failed]
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff [build failed]
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/interaction	[no test files]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol	(cached) [no tests to run]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract	(cached) [no tests to run]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel	0.697s [no tests to run]
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory [build failed]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model	(cached) [no tests to run]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/observability	(cached) [no tests to run]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin	(cached) [no tests to run]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/queue	(cached) [no tests to run]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runfeed	0.675s [no tests to run]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation	0.673s [no tests to run]
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/team [build failed]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools	(cached) [no tests to run]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workbench	(cached) [no tests to run]
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workflow [build failed]
+FAIL
+
+EXIT_CODE=1

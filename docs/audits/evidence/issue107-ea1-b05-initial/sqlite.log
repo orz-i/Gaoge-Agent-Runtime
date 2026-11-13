@@ -1,0 +1,34 @@
+SOURCE_SHA=793fbc202bce6f96fb81bc9b4f29d2841508a902
+EXIT_CODE=1
+=== RUN   TestEA1ResumeUnknownNativeSQLite
+=== RUN   TestEA1ResumeUnknownNativeSQLite/root
+=== RUN   TestEA1ResumeUnknownNativeSQLite/child
+    ea1_resume_unknown.go:112: unknown self/ancestor apply: <nil>
+--- FAIL: TestEA1ResumeUnknownNativeSQLite (0.21s)
+    --- PASS: TestEA1ResumeUnknownNativeSQLite/root (0.11s)
+    --- FAIL: TestEA1ResumeUnknownNativeSQLite/child (0.10s)
+=== RUN   TestEA1WaitMarkAckNativeSQLite
+=== RUN   TestEA1WaitMarkAckNativeSQLite/root
+=== RUN   TestEA1WaitMarkAckNativeSQLite/child
+--- PASS: TestEA1WaitMarkAckNativeSQLite (0.21s)
+    --- PASS: TestEA1WaitMarkAckNativeSQLite/root (0.10s)
+    --- PASS: TestEA1WaitMarkAckNativeSQLite/child (0.11s)
+=== RUN   TestEA1WaitBarriersSQLite
+=== RUN   TestEA1WaitBarriersSQLite/root/P1
+    ea1_wait_barriers.go:148: apply not fenced: invalid kernel input
+=== RUN   TestEA1WaitBarriersSQLite/root/P3
+=== RUN   TestEA1WaitBarriersSQLite/child/P1
+    ea1_wait_barriers.go:148: apply not fenced: invalid kernel input
+=== RUN   TestEA1WaitBarriersSQLite/child/P3
+    ea1_wait_barriers.go:148: apply not fenced: <nil>
+--- FAIL: TestEA1WaitBarriersSQLite (0.28s)
+    --- FAIL: TestEA1WaitBarriersSQLite/root/P1 (0.06s)
+    --- PASS: TestEA1WaitBarriersSQLite/root/P3 (0.08s)
+    --- FAIL: TestEA1WaitBarriersSQLite/child/P1 (0.06s)
+    --- FAIL: TestEA1WaitBarriersSQLite/child/P3 (0.08s)
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite	1.417s
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/examples/embedded	1.713s [no tests to run]
+FAIL

@@ -1,0 +1,21 @@
+=== RUN   TestEA1RealPostgresRootChildWorkflowMarkAckLostAcrossConnections
+=== RUN   TestEA1RealPostgresRootChildWorkflowMarkAckLostAcrossConnections/root_committed_mark_and_lost_ACK
+=== RUN   TestEA1RealPostgresRootChildWorkflowMarkAckLostAcrossConnections/child_committed_mark_and_lost_ACK
+--- PASS: TestEA1RealPostgresRootChildWorkflowMarkAckLostAcrossConnections (0.52s)
+    --- PASS: TestEA1RealPostgresRootChildWorkflowMarkAckLostAcrossConnections/root_committed_mark_and_lost_ACK (0.28s)
+    --- PASS: TestEA1RealPostgresRootChildWorkflowMarkAckLostAcrossConnections/child_committed_mark_and_lost_ACK (0.24s)
+=== RUN   TestEA1RealPostgresRootChildWorkflowMarkAckLostAcrossConnections
+=== RUN   TestEA1RealPostgresRootChildWorkflowMarkAckLostAcrossConnections/root_committed_mark_and_lost_ACK
+=== RUN   TestEA1RealPostgresRootChildWorkflowMarkAckLostAcrossConnections/child_committed_mark_and_lost_ACK
+--- PASS: TestEA1RealPostgresRootChildWorkflowMarkAckLostAcrossConnections (0.50s)
+    --- PASS: TestEA1RealPostgresRootChildWorkflowMarkAckLostAcrossConnections/root_committed_mark_and_lost_ACK (0.24s)
+    --- PASS: TestEA1RealPostgresRootChildWorkflowMarkAckLostAcrossConnections/child_committed_mark_and_lost_ACK (0.26s)
+=== RUN   TestEA1RealPostgresRootChildWorkflowMarkAckLostAcrossConnections
+=== RUN   TestEA1RealPostgresRootChildWorkflowMarkAckLostAcrossConnections/root_committed_mark_and_lost_ACK
+=== RUN   TestEA1RealPostgresRootChildWorkflowMarkAckLostAcrossConnections/child_committed_mark_and_lost_ACK
+--- PASS: TestEA1RealPostgresRootChildWorkflowMarkAckLostAcrossConnections (0.48s)
+    --- PASS: TestEA1RealPostgresRootChildWorkflowMarkAckLostAcrossConnections/root_committed_mark_and_lost_ACK (0.24s)
+    --- PASS: TestEA1RealPostgresRootChildWorkflowMarkAckLostAcrossConnections/child_committed_mark_and_lost_ACK (0.24s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	2.934s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]

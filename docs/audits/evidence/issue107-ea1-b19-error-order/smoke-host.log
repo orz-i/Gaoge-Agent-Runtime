@@ -1,0 +1,31 @@
+SOURCE_SHA=2cf7038fc76c028ca0edfac24096866a2afa76e5
+COMMAND=go -C go/agent-runtime-harness-postgres test -count=1 ./... -run '^TestEA1HarnessAgentTaskCancelP[0234]$' -v
+=== RUN   TestEA1HarnessAgentTaskCancelP0
+=== RUN   TestEA1HarnessAgentTaskCancelP0/actor
+=== RUN   TestEA1HarnessAgentTaskCancelP0/tenant
+=== RUN   TestEA1HarnessAgentTaskCancelP0/thread
+=== RUN   TestEA1HarnessAgentTaskCancelP0/parent
+=== RUN   TestEA1HarnessAgentTaskCancelP0/origin
+    ea1_child_agent_cancel_harness_test.go:483: unexpected rejection class: invalid kernel input
+=== RUN   TestEA1HarnessAgentTaskCancelP0/original-runner
+=== RUN   TestEA1HarnessAgentTaskCancelP0/foreign-recorder
+--- FAIL: TestEA1HarnessAgentTaskCancelP0 (0.01s)
+    --- PASS: TestEA1HarnessAgentTaskCancelP0/actor (0.00s)
+    --- PASS: TestEA1HarnessAgentTaskCancelP0/tenant (0.00s)
+    --- PASS: TestEA1HarnessAgentTaskCancelP0/thread (0.00s)
+    --- PASS: TestEA1HarnessAgentTaskCancelP0/parent (0.00s)
+    --- FAIL: TestEA1HarnessAgentTaskCancelP0/origin (0.00s)
+    --- PASS: TestEA1HarnessAgentTaskCancelP0/original-runner (0.00s)
+    --- PASS: TestEA1HarnessAgentTaskCancelP0/foreign-recorder (0.00s)
+=== RUN   TestEA1HarnessAgentTaskCancelP2
+    ea1_child_agent_cancel_harness_test.go:557: unknown original grant replay: agent external tool result is uncertain
+--- FAIL: TestEA1HarnessAgentTaskCancelP2 (0.00s)
+=== RUN   TestEA1HarnessAgentTaskCancelP3
+--- PASS: TestEA1HarnessAgentTaskCancelP3 (0.00s)
+=== RUN   TestEA1HarnessAgentTaskCancelP4
+--- PASS: TestEA1HarnessAgentTaskCancelP4 (0.00s)
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-postgres	0.328s
+FAIL
+
+EXIT_CODE=1

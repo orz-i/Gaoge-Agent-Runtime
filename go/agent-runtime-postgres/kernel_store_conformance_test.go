@@ -56,8 +56,36 @@ func openKernelStoreTestDB(tb testing.TB) *gorm.DB {
 		tb.Fatalf("resolve kernel store sql db: %v", err)
 	}
 	tb.Cleanup(func() { _ = sqlDB.Close() })
-	if err = db.AutoMigrate(Models()...); err != nil {
+	if err = Migrate(db); err != nil {
 		tb.Fatalf("migrate kernel store test db: %v", err)
 	}
 	return db
+}
+
+func TestIssue107PostgresChildExecutionConformance(t *testing.T) {
+	conformance.RunChildExecutionSuite(t, func(child *testing.T) kernel.Store {
+		return NewKernelStore(openKernelStoreTestDB(child))
+	})
+}
+
+func TestIssue107PostgresParentedWorkflowPhysicalGrantConformance(t *testing.T) {
+	conformance.RunParentedWorkflowSuite(t, func(child *testing.T) kernel.Store { return NewKernelStore(openKernelStoreTestDB(child)) })
+}
+
+func TestIssue107GORMRootWorkflowPhysicalGrantConformance(t *testing.T) {
+	conformance.RunRootWorkflowSuite(t, func(child *testing.T) kernel.Store { return NewKernelStore(openKernelStoreTestDB(child)) })
+}
+
+func TestAuditIssue107GORMChildSelfPhysicalGrantFence(t *testing.T) {
+	conformance.RunAuditPhysicalChildSelfFence(t, func(child *testing.T) kernel.Store { return NewKernelStore(openKernelStoreTestDB(child)) })
+}
+
+// EA-1 frozen P3 cut: original Effect receipt committed, Store Mark pending.
+func TestEA1ReceiptBeforeMarkGORM(t *testing.T) {
+	conformance.RunEA1ReceiptBeforeMarkSuite(t, func(sub *testing.T) kernel.Store { return NewKernelStore(openKernelStoreTestDB(sub)) })
+}
+
+// EA-1 P0: original source, tenant/actor/thread, duplicate ID and Revision.
+func TestEA1P0SourceAdmissionGORM(t *testing.T) {
+	conformance.RunEA1P0SourceAdmissionSuite(t, func(sub *testing.T) kernel.Store { return NewKernelStore(openKernelStoreTestDB(sub)) })
 }

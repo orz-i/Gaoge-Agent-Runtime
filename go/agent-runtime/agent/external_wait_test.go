@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -190,12 +191,15 @@ func TestExternalSignalRejectsWrongIdentityCancelAndDeadline(t *testing.T) {
 			case "digest":
 				signal.InputDigest = strings.Repeat("b", 64)
 			case "cancelled":
-				var err error
-				waiting, err = fixture.runtime.Cancel(t.Context(), waiting.Run.ID, waiting.Run.Revision, "stop")
-				if err != nil {
-					t.Fatal(err)
+				_, cancelErr := fixture.runtime.Cancel(t.Context(), waiting.Run.ID, waiting.Run.Revision, "stop")
+				if !errors.Is(cancelErr, kernel.ErrChildExecutionBusy) {
+					t.Fatalf("unknown effect cancellation=%v", cancelErr)
 				}
-				expected = agent.ErrToolNotPending
+				retained, loadErr := fixture.runtime.Load(t.Context(), waiting.Run.ID)
+				if loadErr != nil || !reflect.DeepEqual(waiting, retained) {
+					t.Fatalf("rejected cancel mutated snapshot: %v", loadErr)
+				}
+				signal.CallID = "foreign-after-denied-cancel"
 			case "deadline":
 				fixture.clock.now = fixture.clock.now.Add(2 * time.Minute)
 				expected = kernel.ErrDeadline
@@ -208,7 +212,11 @@ func TestExternalSignalRejectsWrongIdentityCancelAndDeadline(t *testing.T) {
 				t.Fatalf("rejected signal mutated state: %#v, %v", current.Run, err)
 			}
 			if field == "deadline" {
-				expired, err := fixture.runner.ResumeToolWait(t.Context(), current.Run.ID, current.Run.Revision, waiting.Run.Revision)
+				pending, pendingErr := fixture.runner.QueryPendingTool(t.Context(), current.Run.ID, "external-call")
+				if pendingErr != nil {
+					t.Fatal(pendingErr)
+				}
+				expired, err := fixture.runner.ResumeToolWait(t.Context(), current.Run.ID, current.Run.Revision, pending.Generation)
 				if expired.Run.Status != kernel.RunStatusRunning ||
 					!errors.Is(err, agent.ErrToolOutcomeUnknown) || !errors.Is(err, agent.ErrToolOutcomeOverdue) {
 					t.Fatalf("unverified provider expiry must retain original operation identity: expired=%#v err=%v", expired.Run, err)
@@ -223,6 +231,14 @@ func TestExternalCancellationAndDeadlineCannotBeRevivedBySignals(t *testing.T) {
 		t.Run(outcome, func(t *testing.T) {
 			fixture := newExternalFixture(t)
 			waiting := fixture.start(t)
+			original, err := fixture.runtime.LookupChildExecution(t.Context(), waiting.Run.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			pending, err := fixture.runner.QueryPendingTool(t.Context(), waiting.Run.ID, "external-call")
+			if err != nil {
+				t.Fatal(err)
+			}
 			if outcome == "deadline" {
 				fixture.clock.now = fixture.clock.now.Add(2 * time.Minute)
 			}
@@ -233,43 +249,33 @@ func TestExternalCancellationAndDeadlineCannotBeRevivedBySignals(t *testing.T) {
 				if outcome == "cancel" {
 					_, terminalErr = fixture.runtime.Cancel(t.Context(), waiting.Run.ID, waiting.Run.Revision, "cancel")
 				} else {
-					_, terminalErr = fixture.runner.ResumeToolWait(t.Context(), waiting.Run.ID, waiting.Run.Revision, waiting.Run.Revision)
+					_, terminalErr = fixture.runner.ResumeToolWait(t.Context(), waiting.Run.ID, waiting.Run.Revision, pending.Generation)
 				}
 			})
 			group.Wait()
-			if notifyErr != nil && !errors.Is(notifyErr, agent.ErrToolNotPending) && !errors.Is(notifyErr, kernel.ErrDeadline) {
-				t.Fatalf("notify race = %v", notifyErr)
+			if notifyErr != nil && !errors.Is(notifyErr, kernel.ErrDeadline) {
+				t.Fatal(notifyErr)
 			}
-			if terminalErr != nil && !errors.Is(terminalErr, kernel.ErrConflict) && !errors.Is(terminalErr, agent.ErrToolOutcomeUnknown) {
-				t.Fatalf("terminal race = %v", terminalErr)
+			if !errors.Is(terminalErr, kernel.ErrChildExecutionBusy) && !errors.Is(terminalErr, kernel.ErrConflict) && !errors.Is(terminalErr, agent.ErrToolOutcomeUnknown) {
+				t.Fatalf("unsettled operation improperly terminalized: %v", terminalErr)
 			}
 			current, err := fixture.runtime.Load(t.Context(), waiting.Run.ID)
-			if err != nil {
-				t.Fatal(err)
+			if err != nil || current.Run.Status != kernel.RunStatusRunning {
+				t.Fatalf("lost original pending run: %v", err)
 			}
-			if current.Run.Status == kernel.RunStatusRunning {
-				current, err = fixture.runtime.Cancel(t.Context(), current.Run.ID, current.Run.Revision, "cancel")
-				if err != nil {
-					t.Fatal(err)
-				}
-			}
-			revision := current.Run.Revision
-			_, signalErr := fixture.runner.NotifyExternalToolResultReady(t.Context(), externalSignal())
-			if signalErr != nil && !errors.Is(signalErr, agent.ErrToolNotPending) {
-				t.Fatalf("late signal = %v", signalErr)
+			_, err = fixture.runtime.Cancel(t.Context(), current.Run.ID, current.Run.Revision, "cancel")
+			if !errors.Is(err, kernel.ErrChildExecutionBusy) {
+				t.Fatalf("unknown cancellation = %v", err)
 			}
 			final, err := fixture.runtime.Load(t.Context(), waiting.Run.ID)
-			if err != nil || final.Run.Revision != revision || final.Run.Status == kernel.RunStatusRunning {
-				t.Fatalf("late signal revived run: %#v, %v", final.Run, err)
+			retained, grantErr := fixture.runtime.LookupChildExecution(t.Context(), waiting.Run.ID)
+			if err != nil || grantErr != nil || !reflect.DeepEqual(current, final) || retained != original {
+				t.Fatalf("rejected cancel changed source/grant: %v %v", err, grantErr)
 			}
 			view, err := agent.ViewState(final)
 			if err != nil || view.Budget.Usage.ToolCalls != 0 || fixture.executions != 1 || fixture.model.calls != 1 {
-				t.Fatalf("race consumed result: %#v, %v", view, err)
+				t.Fatalf("unknown effect replay/billing: %+v %v", view, err)
 			}
-			// A provider wait expiry without an external COMMIT is not
-			// definitive proof that its physical effect was absent. The
-			// explicit parent cancellation above may close the Run, but
-			// it must not replay or synthesize the external result.
 		})
 	}
 }

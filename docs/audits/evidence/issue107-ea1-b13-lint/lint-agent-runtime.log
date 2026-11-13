@@ -1,0 +1,9 @@
+SOURCE_SHA=089f57ed7ae05676df776b6bbf7d9b8b7355bed1
+COMMAND=cd go/agent-runtime && golangci-lint run ./...
+go/agent-runtime/conformance/ea1_root_agent_resume_phases.go:395:3: QF1003: could use tagged switch on kind (staticcheck)
+		if kind == "model" {
+		^
+1 issues:
+* staticcheck: 1
+
+EXIT_CODE=1

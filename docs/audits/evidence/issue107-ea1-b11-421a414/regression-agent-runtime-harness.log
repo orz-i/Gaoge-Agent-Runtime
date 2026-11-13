@@ -1,0 +1,19 @@
+SOURCE_SHA=421a414ba46770156c047f018bf7ac6b2360ac4a
+COMMAND=go -C go/agent-runtime-harness test -race -count=1 -timeout=180s ./...
+--- FAIL: TestRootAgentCorrectsWorkflowRevisionTypeBeforeStartingChild (0.03s)
+    capability_tool_test.go:53: harness physical feature start outcome is unknown
+        agent original root callback result is uncertain
+--- FAIL: TestDelegationChildRunExhaustionBecomesRecoverableModelGuidance (0.03s)
+    delegation_budget_exhaustion_test.go:84: turn=harness.Turn{ID:"", SessionID:"", HostTurn:harness.HostRef{Kind:"", ID:""}, ConfigSnapshotID:"", ContextCheckpointID:"", ContextRef:harness.ContextCheckpointRef{ID:"", Generation:0, Revision:0, LineageHash:"", CoveredThroughSourceID:"", ContentHash:""}, Status:"", Revision:0x0, ErrorCode:"", ErrorDetail:"", CreatedAt:time.Date(1, time.January, 1, 0, 0, 0, 0, time.UTC), UpdatedAt:time.Date(1, time.January, 1, 0, 0, 0, 0, time.UTC)} err=harness physical feature start outcome is unknown
+        agent original root callback result is uncertain
+        harness physical feature start outcome is unknown
+--- FAIL: TestHarnessIndependentDelegationsCollectMixedTerminalResults (0.09s)
+    delegation_test.go:253: mixed delegation root did not complete: harness.Turn{ID:"ht_9e83aa61583da3238576d6e9", SessionID:"hs_d4c630499679b51063c5d5ae", HostTurn:harness.HostRef{Kind:"conversation_turn", ID:"mixed-delegation-turn"}, ConfigSnapshotID:"hcfg_55c3268e7aeea9ba4961d130", ContextCheckpointID:"", ContextRef:harness.ContextCheckpointRef{ID:"", Generation:0, Revision:0, LineageHash:"", CoveredThroughSourceID:"", ContentHash:""}, Status:"running", Revision:0x2, ErrorCode:"", ErrorDetail:"", CreatedAt:time.Date(2026, time.August, 15, 7, 0, 0, 0, time.UTC), UpdatedAt:time.Date(2026, time.August, 15, 7, 0, 0, 0, time.UTC)}, err=<nil>
+--- FAIL: TestAsyncDelegationCancellationRetriesExternalCleanup (0.05s)
+    delegation_async_test.go:145: Refresh bypassed unresolved cancellation: <nil>
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness	28.713s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness/examples/session	1.835s
+FAIL
+
+EXIT_CODE=1

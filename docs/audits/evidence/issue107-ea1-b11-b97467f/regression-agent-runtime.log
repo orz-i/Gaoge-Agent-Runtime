@@ -1,0 +1,84 @@
+SOURCE_SHA=b97467f52afaf877167d5d8c7deae8ec629d9c98
+COMMAND=go -C go/agent-runtime test -race -count=1 -timeout=180s ./...
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/continuation	1.420s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/interaction	[no test files]
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/runfeed	[no test files]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/topology	1.437s
+--- FAIL: TestDeferredApprovalRejectsMismatchedOrRejectedGrant (0.04s)
+    --- FAIL: TestDeferredApprovalRejectsMismatchedOrRejectedGrant/payload-changed (0.01s)
+        approval_binding_recovery_test.go:109: invalid kernel input
+--- FAIL: TestExternalSignalConcurrentDuplicateAndRestartConsumesOnce (0.01s)
+    external_wait_test.go:149: kernel execution lease is not current
+--- FAIL: TestNamedProviderSuccessfulToolRequiresExactPhysicalResponseIdentity (0.07s)
+    --- FAIL: TestNamedProviderSuccessfulToolRequiresExactPhysicalResponseIdentity/unary_missing_id (0.00s)
+        model_invocation_success_identity_agent_test.go:154: unproved physical identity replayed or changed: agent external model result is uncertain
+    --- FAIL: TestNamedProviderSuccessfulToolRequiresExactPhysicalResponseIdentity/unary_padded_id (0.00s)
+        model_invocation_success_identity_agent_test.go:154: unproved physical identity replayed or changed: agent external model result is uncertain
+    --- FAIL: TestNamedProviderSuccessfulToolRequiresExactPhysicalResponseIdentity/stream_missing_id (0.00s)
+        model_invocation_success_identity_agent_test.go:154: unproved physical identity replayed or changed: agent external model result is uncertain
+    --- FAIL: TestNamedProviderSuccessfulToolRequiresExactPhysicalResponseIdentity/stream_padded_event_id (0.00s)
+        model_invocation_success_identity_agent_test.go:154: unproved physical identity replayed or changed: agent external model result is uncertain
+    --- FAIL: TestNamedProviderSuccessfulToolRequiresExactPhysicalResponseIdentity/stream_mismatched_event_id (0.01s)
+        model_invocation_success_identity_agent_test.go:154: unproved physical identity replayed or changed: agent external model result is uncertain
+    --- FAIL: TestNamedProviderSuccessfulToolRequiresExactPhysicalResponseIdentity/stream_conflicting_event_ids (0.00s)
+        model_invocation_success_identity_agent_test.go:154: unproved physical identity replayed or changed: agent external model result is uncertain
+    --- FAIL: TestNamedProviderSuccessfulToolRequiresExactPhysicalResponseIdentity/stream_ignores_callback_error (0.00s)
+        model_invocation_success_identity_agent_test.go:154: unproved physical identity replayed or changed: agent external model result is uncertain
+    --- FAIL: TestNamedProviderSuccessfulToolRequiresExactPhysicalResponseIdentity/stream_padded_final_id (0.00s)
+        model_invocation_success_identity_agent_test.go:154: unproved physical identity replayed or changed: agent external model result is uncertain
+    --- FAIL: TestNamedProviderSuccessfulToolRequiresExactPhysicalResponseIdentity/middleware_erases_unary_id (0.00s)
+        model_invocation_success_identity_agent_test.go:154: unproved physical identity replayed or changed: agent external model result is uncertain
+    --- FAIL: TestNamedProviderSuccessfulToolRequiresExactPhysicalResponseIdentity/middleware_pads_stream_id (0.00s)
+        model_invocation_success_identity_agent_test.go:154: unproved physical identity replayed or changed: agent external model result is uncertain
+--- FAIL: TestRootUnknownHostRetainsExactModelEvidenceWithoutConsumption (0.01s)
+    root_model_evidence_test.go:91: duplicate evidence not idempotent: invalid agent model response
+--- FAIL: TestRunnerDoesNotReplayModelAfterStreamDeltaFailure (0.03s)
+    agent_test.go:985: partial stream replayed or changed: agent external model result is uncertain
+--- FAIL: TestAgentDurableTerminalModelCodeKeepsTypedCauseWithoutNewRetry (0.04s)
+    --- FAIL: TestAgentDurableTerminalModelCodeKeepsTypedCauseWithoutNewRetry/auth_permanent (0.01s)
+        classified_model_failure_test.go:83: unknown classified result replayed or mutated: agent external model result is uncertain calls=1
+    --- FAIL: TestAgentDurableTerminalModelCodeKeepsTypedCauseWithoutNewRetry/quota_permanent (0.01s)
+        classified_model_failure_test.go:83: unknown classified result replayed or mutated: agent external model result is uncertain calls=1
+    --- FAIL: TestAgentDurableTerminalModelCodeKeepsTypedCauseWithoutNewRetry/rate_limited_remains_unknown (0.00s)
+        classified_model_failure_test.go:83: unknown classified result replayed or mutated: agent external model result is uncertain calls=1
+    --- FAIL: TestAgentDurableTerminalModelCodeKeepsTypedCauseWithoutNewRetry/unknown_untyped (0.01s)
+        classified_model_failure_test.go:83: unknown classified result replayed or mutated: agent external model result is uncertain calls=1
+    --- FAIL: TestAgentDurableTerminalModelCodeKeepsTypedCauseWithoutNewRetry/untyped_retryable_remains_unknown (0.01s)
+        classified_model_failure_test.go:83: unknown classified result replayed or mutated: agent external model result is uncertain calls=1
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent	4.090s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/bootstrap	1.561s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget	1.491s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/compose	1.615s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance	[no test files]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context	11.884s
+--- FAIL: TestNativeDirectAndContinuationWorkerCompeteUnderSameLease (1.01s)
+    native_activation_competition_test.go:140: direct activation bypassed hosted lease: err=agent external model result is uncertain model=1
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/continuation	7.890s
+--- FAIL: TestRuntimeFeatureScenarioCorpus (0.09s)
+    runtime_feature_scenario_test.go:48: runtime feature baseline regressed: [overall score 0.8333 below baseline 1.0000 passed cases 5 below baseline 6 report no longer passes its dataset threshold]
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/evaluation	0.618s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/examples/configured	[no test files]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/examples/quickstart	1.600s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/groupchat	1.665s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff	1.780s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/interaction	[no test files]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol	1.393s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract	1.498s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel	1.385s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory	21.858s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model	1.448s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/observability	1.385s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin	1.530s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/queue	1.380s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runfeed	1.379s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation	1.378s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/team	1.423s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools	1.451s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workbench	1.379s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workflow	1.679s
+FAIL
+
+EXIT_CODE=1

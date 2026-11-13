@@ -1,0 +1,2 @@
+SOURCE_SHA=5354c161c3c1ac64328b609dfa2ba7cb76b12bcb
+Eleven logs exit zero; Host real-PG log exit one solely election-after Invocation full comparison on all three repeats. Receipt-before and receipt-ack-loss and existing Host PG regressions pass. Actual field delta not yet determined; no matrix certification.

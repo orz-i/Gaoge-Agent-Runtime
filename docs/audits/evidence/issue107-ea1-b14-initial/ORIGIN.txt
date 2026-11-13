@@ -1,0 +1,2 @@
+SOURCE_SHA=e94c62ba6c5671470f291306fad4f55ed7922f54
+Three lint checks pass. Memory control phases P0..P2 pass; settlement P3..P5 fixtures stop at legally pruned Model Request comparison before target cutpoint. Three SQL P1 approval runs demonstrate native-only WaitingInput error parity defect (Busy rather than Required). No cell certified.

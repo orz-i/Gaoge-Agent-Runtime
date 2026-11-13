@@ -3,6 +3,7 @@ package agent_test
 import (
 	"context"
 	"errors"
+	"reflect"
 	"slices"
 	"testing"
 
@@ -25,15 +26,12 @@ func (stub *initialRetryModel) Generate(_ context.Context, request model.Request
 		!slices.ContainsFunc(request.Tools, func(tool tools.Definition) bool { return tool.Key == agent.ToolDiscoveryKey }) {
 		stub.t.Fatalf("initial first-party tool disappeared across retry: %+v", request.Tools)
 	}
-	if len(stub.requests) == 1 {
-		return model.Response{}, model.NewRetryableError(errRetryableProvider)
-	}
 	return model.Response{Content: "completed without invoking any tools"}, nil
 }
 
 func TestRuntimeToolDiscoveryInitialSetSurvivesRetryAndRunnerRestart(t *testing.T) {
 	t.Parallel()
-	runtime, _ := newTestRuntimeAndApprovals(t)
+	runtime := newModelPreparedCutRuntime(t, 1)
 	executions := 0
 	registry, keys := discoveryTestRegistry(t, 32, &executions)
 	stub := &initialRetryModel{t: t, initialKey: keys[0]}
@@ -47,21 +45,28 @@ func TestRuntimeToolDiscoveryInitialSetSurvivesRetryAndRunnerRestart(t *testing.
 	}
 	start := startRequest("initial-retry-run", "initial-retry-request", "Answer", keys...)
 	start.InitialToolKeys = []string{keys[0]}
-	pending, err := runner.StartRun(t.Context(), start)
-	if !errors.Is(err, errRetryableProvider) || pending.Run.Status != kernel.RunStatusRunning ||
-		len(stub.requests) != 1 {
+	_, err = runner.StartRun(t.Context(), start)
+	pending := mustLoadModelInvocationRun(t, runtime, start.ID)
+	if !errors.Is(err, errInjectedModelInvocationCrash) || pending.Run.Status != kernel.RunStatusRunning ||
+		len(stub.requests) != 0 {
 		t.Fatalf("expected durable retryable model attempt: run=%+v err=%v calls=%d", pending.Run, err, len(stub.requests))
 	}
-	restarted := newModelRunnerAfterRetryDue(t, pending, deps)
+	original := assertPreparedUnsentInvocation(t, pending)
+	restarted, restartErr := agent.NewRunner(deps)
+	if restartErr != nil {
+		t.Fatal(restartErr)
+	}
 	completed, err := restarted.Resume(t.Context(), pending.Run.ID, pending.Run.Revision)
 	if err != nil || completed.Run.Status != kernel.RunStatusCompleted ||
-		len(stub.requests) != 2 || executions != 0 {
+		len(stub.requests) != 1 || executions != 0 {
 		t.Fatalf("initial state lost on resume: run=%+v err=%v calls=%d exec=%d",
 			completed.Run, err, len(stub.requests), executions)
 	}
-	if stub.requests[0].InvocationID == "" ||
-		stub.requests[0].InvocationID != stub.requests[1].InvocationID {
-		t.Fatalf("pending invocation identity changed: first=%q next=%q",
-			stub.requests[0].InvocationID, stub.requests[1].InvocationID)
+	if stub.requests[0].InvocationID != original.ID || !reflect.DeepEqual(stub.requests[0], original.Request) {
+		t.Fatalf("pending invocation identity/source changed: original=%s actual=%s", original.ID, stub.requests[0].InvocationID)
+	}
+	view := mustModelInvocationView(t, completed)
+	if view.Budget.Usage.LLMCalls != 1 || view.Budget.Usage.ToolCalls != 0 {
+		t.Fatalf("initial-set recovery double billed: %+v", view.Budget.Usage)
 	}
 }

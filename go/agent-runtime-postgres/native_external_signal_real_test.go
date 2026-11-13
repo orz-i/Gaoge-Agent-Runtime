@@ -94,12 +94,28 @@ func TestRealPostgresNativeExternalSignalAndVerifiedReceipt(t *testing.T) {
 	notifier, rt := mk(NewKernelStore(reopenRecoveryPostgres(t, isolation)), "notifier")
 	signal := agent.ExternalToolResultSignal{RunID: wait.Run.ID, CallID: "real-pg-tool", OperationID: "real-pg-op",
 		InputDigest: strings.Repeat("c", 64), SignalID: "signal-1"}
+	originalGrant, err := rt.LookupChildExecution(t.Context(), wait.Run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalCompletion, err := rt.LookupOwnedPhysicalCallbackReturn(t.Context(), originalGrant)
+	if err != nil {
+		t.Fatal(err)
+	}
 	notified, err := notifier.NotifyExternalToolResultReady(t.Context(), signal)
 	if err != nil || notified.Run.Revision != wait.Run.Revision+1 {
 		t.Fatalf("PG native guarded signal: %+v %v", notified.Run, err)
 	}
-	if err = rt.RequireExecution(t.Context(), wait.Run.ID); !errors.Is(err, kernel.ErrExecutionRequired) {
+	if err = rt.RequireExecution(t.Context(), wait.Run.ID); !errors.Is(err, kernel.ErrChildExecutionBusy) {
 		t.Fatalf("signal did not preserve native sticky fence: %v", err)
+	}
+	currentGrant, err := rt.LookupChildExecution(t.Context(), wait.Run.ID)
+	if err != nil || currentGrant != originalGrant {
+		t.Fatal("signal replaced original grant")
+	}
+	completion, err := rt.LookupOwnedPhysicalCallbackReturn(t.Context(), originalGrant)
+	if err != nil || completion != originalCompletion || effects != 1 || modelCalls != 1 {
+		t.Fatal("signal changed original callback completion or dispatched")
 	}
 	reconciler, _ := mk(NewKernelStore(reopenRecoveryPostgres(t, isolation)), "reconciler")
 	done, err := reconciler.ReconcileToolOutcome(t.Context(), notified.Run.ID, notified.Run.Revision, "real-pg-tool")

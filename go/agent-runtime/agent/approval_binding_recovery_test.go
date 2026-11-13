@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"testing"
 
 	interactionadapter "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/interaction"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/interaction"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	runtimemodel "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
@@ -58,7 +60,7 @@ func TestDeferredApprovalMissingBindingCannotRecoverGrantedTool(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	running, err := runtime.Apply(t.Context(), waiting.Run.ID, waiting.Run.Revision, kernel.Mutation{
+	running, err := seedApprovalRecoveryFixture(t.Context(), runtime, waiting, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: legacyState, Checkpoint: checkpoint,
 	})
 	if err != nil {
@@ -101,9 +103,19 @@ func TestDeferredApprovalRejectsMismatchedOrRejectedGrant(t *testing.T) {
 			if testcase == "payload-changed" {
 				checkpoint.Payload = json.RawMessage(`{"toolCallID":"different","toolKey":"story.publish_change_set","arguments":{}}`)
 			}
-			running, err := runtime.Apply(t.Context(), waiting.Run.ID, waiting.Run.Revision, kernel.Mutation{
+			running, err := seedApprovalRecoveryFixture(t.Context(), runtime, waiting, kernel.Mutation{
 				Status: kernel.RunStatusRunning, State: state, Checkpoint: checkpoint,
 			})
+			if testcase == "payload-changed" {
+				if !errors.Is(err, kernel.ErrInvalidInput) {
+					t.Fatalf("changed original checkpoint payload admitted: %v", err)
+				}
+				unchanged, loadErr := runtime.Load(t.Context(), waiting.Run.ID)
+				if loadErr != nil || !reflect.DeepEqual(unchanged, waiting) || *executions != 0 {
+					t.Fatalf("rejected payload changed original checkpoint/source: %v", loadErr)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -153,7 +165,7 @@ func TestDeferredApprovalMissingBindingCannotBeReused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	running, err := runtime.Apply(t.Context(), waiting.Run.ID, waiting.Run.Revision, kernel.Mutation{
+	running, err := seedApprovalRecoveryFixture(t.Context(), runtime, waiting, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: legacyState, Checkpoint: checkpoint,
 	})
 	if err != nil {
@@ -163,4 +175,12 @@ func TestDeferredApprovalMissingBindingCannotBeReused(t *testing.T) {
 	if err != nil || next.Run.Status != kernel.RunStatusWaitingInput || *executions != 0 {
 		t.Fatalf("stale legacy grant reused: run=%+v executions=%d err=%v", next.Run, *executions, err)
 	}
+}
+
+// Inject a trusted pre-upgrade checkpoint fixture through the fenced control
+// seam; a public unbound Apply must not bypass native execution authority.
+func seedApprovalRecoveryFixture(ctx context.Context, rt *kernel.Runtime, source kernel.Snapshot, m kernel.Mutation) (kernel.Snapshot, error) {
+	proof := featurecontrol.Seal(source.Run.ID, source.Run.Revision, string(kernel.ControlApproval), source.Checkpoint.ID, m.State, m.Checkpoint)
+	next, _, err := rt.ApplyControl(ctx, source.Run.ID, source.Run.Revision, kernel.ControlGuard{Kind: kernel.ControlApproval, CheckpointID: source.Checkpoint.ID}, m, proof)
+	return next, err
 }

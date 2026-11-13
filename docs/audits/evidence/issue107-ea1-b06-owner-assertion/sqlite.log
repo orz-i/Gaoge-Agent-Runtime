@@ -1,0 +1,40 @@
+SOURCE_SHA=b418f5f225b6a18865749624d272da9392568669
+EXIT_CODE=1
+=== RUN   TestEA1CompensationAdmissionSQLite
+=== RUN   TestEA1CompensationAdmissionSQLite/root/revision
+=== RUN   TestEA1CompensationAdmissionSQLite/root/terminal
+=== RUN   TestEA1CompensationAdmissionSQLite/child/revision
+=== RUN   TestEA1CompensationAdmissionSQLite/child/terminal
+--- PASS: TestEA1CompensationAdmissionSQLite (0.41s)
+    --- PASS: TestEA1CompensationAdmissionSQLite/root/revision (0.12s)
+    --- PASS: TestEA1CompensationAdmissionSQLite/root/terminal (0.07s)
+    --- PASS: TestEA1CompensationAdmissionSQLite/child/revision (0.13s)
+    --- PASS: TestEA1CompensationAdmissionSQLite/child/terminal (0.09s)
+=== RUN   TestEA1CompensationBarriersSQLite
+=== RUN   TestEA1CompensationBarriersSQLite/root/P1
+=== RUN   TestEA1CompensationBarriersSQLite/root/P5
+=== RUN   TestEA1CompensationBarriersSQLite/root/P5-retry
+    ea1_compensation_barriers.go:228: retry changed original request beyond attempt
+=== RUN   TestEA1CompensationBarriersSQLite/child/P1
+=== RUN   TestEA1CompensationBarriersSQLite/child/P5
+=== RUN   TestEA1CompensationBarriersSQLite/child/P5-retry
+    ea1_compensation_barriers.go:228: retry changed original request beyond attempt
+--- FAIL: TestEA1CompensationBarriersSQLite (2.69s)
+    --- PASS: TestEA1CompensationBarriersSQLite/root/P1 (0.11s)
+    --- PASS: TestEA1CompensationBarriersSQLite/root/P5 (0.10s)
+    --- FAIL: TestEA1CompensationBarriersSQLite/root/P5-retry (0.12s)
+    --- PASS: TestEA1CompensationBarriersSQLite/child/P1 (0.11s)
+    --- PASS: TestEA1CompensationBarriersSQLite/child/P5 (2.10s)
+    --- FAIL: TestEA1CompensationBarriersSQLite/child/P5-retry (0.15s)
+=== RUN   TestEA1CompensationUnknownNativeSQLite
+=== RUN   TestEA1CompensationUnknownNativeSQLite/root
+=== RUN   TestEA1CompensationUnknownNativeSQLite/child
+--- PASS: TestEA1CompensationUnknownNativeSQLite (0.29s)
+    --- PASS: TestEA1CompensationUnknownNativeSQLite/root (0.13s)
+    --- PASS: TestEA1CompensationUnknownNativeSQLite/child (0.16s)
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite	3.912s
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/examples/embedded	1.381s [no tests to run]
+FAIL

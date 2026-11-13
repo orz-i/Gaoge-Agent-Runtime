@@ -84,6 +84,21 @@ func (runner *Runner) resumeTurn(ctx context.Context, turnID string, expected *s
 	if err = validateRootRuntimeOwnership(invocation, runtimeSnapshot); err != nil {
 		return Snapshot{}, err
 	}
+	// Managed recovery is a separate source-bound continuation. Validate
+	// frozen admission first, but do not run ordinary restoration/preparation
+	// or terminal projection before Kernel PARK/ENABLE or exact T4 repair.
+	if err = runner.requireFrozenAdmission(ctx, turn); err != nil {
+		return runner.resumeTurnError(ctx, turn, &runtimeSnapshot, err)
+	}
+	if recovered, managed, recoveryErr := runner.recoverManagedInvocation(ctx, invocation); managed {
+		if recoveryErr != nil {
+			return runner.resumeTurnError(ctx, turn, &runtimeSnapshot, recoveryErr)
+		}
+		if recovered.Run.Status == kernel.RunStatusCancelled {
+			return runner.syncRuntimeSnapshotWithRetryAfterCancellation(ctx, turn, invocation, recovered)
+		}
+		return runner.syncRuntimeSnapshotWithRetry(ctx, turn, invocation, recovered)
+	}
 	status, err := runner.invocationRuntimeStatus(ctx, invocation, runtimeSnapshot)
 	if err != nil {
 		return runner.resumeTurnError(ctx, turn, &runtimeSnapshot, err)

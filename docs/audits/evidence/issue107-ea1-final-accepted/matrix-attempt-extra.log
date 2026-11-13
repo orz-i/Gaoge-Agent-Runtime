@@ -1,0 +1,101 @@
+SOURCE_SHA=0a4009a8171f1726edaea895798d551051753400
+COMMAND=go -C go/agent-runtime test -race -count=2 -v ./... -run '^TestEA1P0WorkflowAttemptLocalNoEffectAcrossRootAndChild$'
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/continuation	1.497s [no tests to run]
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/interaction	[no test files]
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/runfeed	[no test files]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/topology	1.485s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent	1.475s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/bootstrap	1.442s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget	1.558s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/compose	1.617s [no tests to run]
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance	[no test files]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context	1.632s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/continuation	1.635s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/evaluation	1.610s [no tests to run]
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/examples/configured	[no test files]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/examples/quickstart	1.545s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/groupchat	1.448s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff	1.444s [no tests to run]
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/interaction	[no test files]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/callbackscope	1.416s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol	1.404s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract	1.716s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel	1.605s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory	1.671s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model	1.632s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/observability	1.569s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin	1.614s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/queue	1.411s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runfeed	1.396s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation	1.401s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/team	1.461s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools	1.428s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workbench	1.401s [no tests to run]
+=== RUN   TestEA1P0WorkflowAttemptLocalNoEffectAcrossRootAndChild
+=== RUN   TestEA1P0WorkflowAttemptLocalNoEffectAcrossRootAndChild/root
+=== RUN   TestEA1P0WorkflowAttemptLocalNoEffectAcrossRootAndChild/child
+--- PASS: TestEA1P0WorkflowAttemptLocalNoEffectAcrossRootAndChild (0.01s)
+    --- PASS: TestEA1P0WorkflowAttemptLocalNoEffectAcrossRootAndChild/root (0.01s)
+    --- PASS: TestEA1P0WorkflowAttemptLocalNoEffectAcrossRootAndChild/child (0.01s)
+=== RUN   TestEA1P0WorkflowAttemptLocalNoEffectAcrossRootAndChild
+=== RUN   TestEA1P0WorkflowAttemptLocalNoEffectAcrossRootAndChild/root
+=== RUN   TestEA1P0WorkflowAttemptLocalNoEffectAcrossRootAndChild/child
+--- PASS: TestEA1P0WorkflowAttemptLocalNoEffectAcrossRootAndChild (0.01s)
+    --- PASS: TestEA1P0WorkflowAttemptLocalNoEffectAcrossRootAndChild/root (0.01s)
+    --- PASS: TestEA1P0WorkflowAttemptLocalNoEffectAcrossRootAndChild/child (0.01s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workflow	1.481s
+
+EXIT_CODE=0

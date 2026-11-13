@@ -69,8 +69,8 @@ func (runner *Runner) GrantCallAllowance(
 	if err = runner.requireFrozenAdmission(ctx, turn); err != nil {
 		return Snapshot{}, err
 	}
-	resumed, err := runner.withPhysicalInvocationDispatch(ctx, invocation, "grant-call-allowance", func() (kernel.Snapshot, error) {
-		return grant.GrantCallAllowance(ctx, current.Run.ID, current.Run.Revision, increment)
+	resumed, err := runner.withPhysicalInvocationDispatch(ctx, invocation, "grant-call-allowance", func(physicalCtx context.Context) (kernel.Snapshot, error) {
+		return grant.GrantCallAllowance(physicalCtx, current.Run.ID, current.Run.Revision, increment)
 	})
 	if err != nil {
 		switch {

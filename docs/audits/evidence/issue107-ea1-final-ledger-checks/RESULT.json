@@ -1,0 +1,25 @@
+{
+  "ledger_commit": "e37e268583fd5a7e5b236b1a32505004732171de",
+  "runtime_source": "0a4009a8171f1726edaea895798d551051753400",
+  "ledger_equals_reviewed_candidate": true,
+  "six_host_rows_byte_unchanged": true,
+  "non_document_source_diff": [],
+  "gates": [
+    {
+      "command": "python3 scripts/check-issue107-matrix.py",
+      "exit": 0,
+      "expected": 0
+    },
+    {
+      "command": "python3 scripts/check-issue107-matrix.py --strict",
+      "exit": 1,
+      "expected": 1
+    },
+    {
+      "command": "python3 scripts/test_issue107_matrix_evidence.py",
+      "exit": 0,
+      "expected": 0
+    }
+  ],
+  "overall_status": "NO-GO: H-FROZEN and external gates remain"
+}

@@ -1,0 +1,13 @@
+SOURCE_SHA=2bf48748548dcd34092e87aecc26c9ec616f556c
+DIAGNOSTIC_ONLY=true
+=== RUN   TestEA1RootAgentAdmissionSQLite
+=== RUN   TestEA1RootAgentAdmissionSQLite/P0/origin-and-claim
+--- PASS: TestEA1RootAgentAdmissionSQLite (0.09s)
+    --- PASS: TestEA1RootAgentAdmissionSQLite/P0/origin-and-claim (0.09s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite	1.634s
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/examples/embedded	1.532s [no tests to run]
+
+EXIT_CODE=0

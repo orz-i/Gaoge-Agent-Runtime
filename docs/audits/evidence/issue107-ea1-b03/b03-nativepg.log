@@ -1,0 +1,67 @@
+SOURCE_SHA=c91a17a1a92c1116b99962992e36a618aad2ecc6
+COMMAND=TEST_POSTGRES_DSN=<dedicated-ephemeral> go -C /tmp/gaoge-runtime-issue107/go/agent-runtime-postgres test -race -count=3 ./... -run '^TestEA1RealPostgres(WorkflowEntryPhases|CompensationMarkAck)$' -v
+=== RUN   TestEA1RealPostgresCompensationMarkAck
+=== RUN   TestEA1RealPostgresCompensationMarkAck/root
+=== RUN   TestEA1RealPostgresCompensationMarkAck/child
+--- PASS: TestEA1RealPostgresCompensationMarkAck (0.56s)
+    --- PASS: TestEA1RealPostgresCompensationMarkAck/root (0.31s)
+    --- PASS: TestEA1RealPostgresCompensationMarkAck/child (0.25s)
+=== RUN   TestEA1RealPostgresWorkflowEntryPhases
+=== RUN   TestEA1RealPostgresWorkflowEntryPhases/RootWaitP0
+=== RUN   TestEA1RealPostgresWorkflowEntryPhases/ResumeCompensationP3
+=== RUN   TestEA1RealPostgresWorkflowEntryPhases/ResumeCompensationP3/resume/root
+=== RUN   TestEA1RealPostgresWorkflowEntryPhases/ResumeCompensationP3/resume/child
+=== RUN   TestEA1RealPostgresWorkflowEntryPhases/ResumeCompensationP3/compensation/root
+=== RUN   TestEA1RealPostgresWorkflowEntryPhases/ResumeCompensationP3/compensation/child
+--- PASS: TestEA1RealPostgresWorkflowEntryPhases (1.15s)
+    --- PASS: TestEA1RealPostgresWorkflowEntryPhases/RootWaitP0 (0.25s)
+    --- PASS: TestEA1RealPostgresWorkflowEntryPhases/ResumeCompensationP3 (0.91s)
+        --- PASS: TestEA1RealPostgresWorkflowEntryPhases/ResumeCompensationP3/resume/root (0.19s)
+        --- PASS: TestEA1RealPostgresWorkflowEntryPhases/ResumeCompensationP3/resume/child (0.30s)
+        --- PASS: TestEA1RealPostgresWorkflowEntryPhases/ResumeCompensationP3/compensation/root (0.23s)
+        --- PASS: TestEA1RealPostgresWorkflowEntryPhases/ResumeCompensationP3/compensation/child (0.19s)
+=== RUN   TestEA1RealPostgresCompensationMarkAck
+=== RUN   TestEA1RealPostgresCompensationMarkAck/root
+=== RUN   TestEA1RealPostgresCompensationMarkAck/child
+--- PASS: TestEA1RealPostgresCompensationMarkAck (0.58s)
+    --- PASS: TestEA1RealPostgresCompensationMarkAck/root (0.27s)
+    --- PASS: TestEA1RealPostgresCompensationMarkAck/child (0.31s)
+=== RUN   TestEA1RealPostgresWorkflowEntryPhases
+=== RUN   TestEA1RealPostgresWorkflowEntryPhases/RootWaitP0
+=== RUN   TestEA1RealPostgresWorkflowEntryPhases/ResumeCompensationP3
+=== RUN   TestEA1RealPostgresWorkflowEntryPhases/ResumeCompensationP3/resume/root
+=== RUN   TestEA1RealPostgresWorkflowEntryPhases/ResumeCompensationP3/resume/child
+=== RUN   TestEA1RealPostgresWorkflowEntryPhases/ResumeCompensationP3/compensation/root
+=== RUN   TestEA1RealPostgresWorkflowEntryPhases/ResumeCompensationP3/compensation/child
+--- PASS: TestEA1RealPostgresWorkflowEntryPhases (1.26s)
+    --- PASS: TestEA1RealPostgresWorkflowEntryPhases/RootWaitP0 (0.30s)
+    --- PASS: TestEA1RealPostgresWorkflowEntryPhases/ResumeCompensationP3 (0.96s)
+        --- PASS: TestEA1RealPostgresWorkflowEntryPhases/ResumeCompensationP3/resume/root (0.25s)
+        --- PASS: TestEA1RealPostgresWorkflowEntryPhases/ResumeCompensationP3/resume/child (0.26s)
+        --- PASS: TestEA1RealPostgresWorkflowEntryPhases/ResumeCompensationP3/compensation/root (0.23s)
+        --- PASS: TestEA1RealPostgresWorkflowEntryPhases/ResumeCompensationP3/compensation/child (0.23s)
+=== RUN   TestEA1RealPostgresCompensationMarkAck
+=== RUN   TestEA1RealPostgresCompensationMarkAck/root
+=== RUN   TestEA1RealPostgresCompensationMarkAck/child
+--- PASS: TestEA1RealPostgresCompensationMarkAck (0.46s)
+    --- PASS: TestEA1RealPostgresCompensationMarkAck/root (0.23s)
+    --- PASS: TestEA1RealPostgresCompensationMarkAck/child (0.24s)
+=== RUN   TestEA1RealPostgresWorkflowEntryPhases
+=== RUN   TestEA1RealPostgresWorkflowEntryPhases/RootWaitP0
+=== RUN   TestEA1RealPostgresWorkflowEntryPhases/ResumeCompensationP3
+=== RUN   TestEA1RealPostgresWorkflowEntryPhases/ResumeCompensationP3/resume/root
+=== RUN   TestEA1RealPostgresWorkflowEntryPhases/ResumeCompensationP3/resume/child
+=== RUN   TestEA1RealPostgresWorkflowEntryPhases/ResumeCompensationP3/compensation/root
+=== RUN   TestEA1RealPostgresWorkflowEntryPhases/ResumeCompensationP3/compensation/child
+--- PASS: TestEA1RealPostgresWorkflowEntryPhases (1.50s)
+    --- PASS: TestEA1RealPostgresWorkflowEntryPhases/RootWaitP0 (0.32s)
+    --- PASS: TestEA1RealPostgresWorkflowEntryPhases/ResumeCompensationP3 (1.18s)
+        --- PASS: TestEA1RealPostgresWorkflowEntryPhases/ResumeCompensationP3/resume/root (0.26s)
+        --- PASS: TestEA1RealPostgresWorkflowEntryPhases/ResumeCompensationP3/resume/child (0.28s)
+        --- PASS: TestEA1RealPostgresWorkflowEntryPhases/ResumeCompensationP3/compensation/root (0.33s)
+        --- PASS: TestEA1RealPostgresWorkflowEntryPhases/ResumeCompensationP3/compensation/child (0.32s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	6.969s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]
+
+EXIT_CODE=0

@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"sync/atomic"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/callbackscope"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
@@ -30,12 +32,13 @@ const (
 
 // RunInvocation contains only common immutable Run facts. Middleware cannot rewrite it through next.
 type RunInvocation struct {
-	Operation RunOperation
-	Kind      kernel.RunKind
-	RunID     string
-	Actor     kernel.ActorRef
-	Thread    kernel.ThreadRef
-	Goal      string
+	Operation   RunOperation
+	Kind        kernel.RunKind
+	RunID       string
+	ParentRunID string
+	Actor       kernel.ActorRef
+	Thread      kernel.ThreadRef
+	Goal        string
 }
 
 func approvalPolicyNames(values []ApprovalPolicy) []string {
@@ -210,8 +213,24 @@ func (chain *RunChain) Invoke(ctx context.Context, invocation RunInvocation, ter
 	for index := len(chain.middleware) - 1; index >= 0; index-- {
 		current := chain.middleware[index]
 		downstream := next
-		next = func(callCtx context.Context) (kernel.Snapshot, error) {
-			return current.Run(callCtx, invocation, onceRunNext(downstream))
+		next = func(callCtx context.Context) (out kernel.Snapshot, callbackErr error) {
+			layerCtx, ticket := callbackscope.Enter(callCtx, invocation.RunID, current, invocation)
+			lifetime := newNextLifetime()
+			defer func() {
+				lifetime.finish()
+				if failure := recover(); failure != nil {
+					callbackscope.Aborted(ticket)
+					panic(failure)
+				}
+				callbackscope.Returned(ticket, callbackErr)
+			}()
+			return current.Run(layerCtx, invocation, onceRunNext(func(nextCtx context.Context) (kernel.Snapshot, error) {
+				if !lifetime.enter() {
+					return kernel.Snapshot{}, ErrNextAlreadyCalled
+				}
+				defer lifetime.leave()
+				return downstream(callbackscope.Inherit(nextCtx, layerCtx))
+			}))
 		}
 	}
 	return next(ctx)
@@ -242,8 +261,25 @@ func (chain *ModelChain) Invoke(
 	for index := len(chain.middleware) - 1; index >= 0; index-- {
 		current := chain.middleware[index]
 		downstream := next
-		next = func(callCtx context.Context, callRequest model.Request, callEmit model.StreamSink) (model.Response, error) {
-			return current.Model(callCtx, model.CloneRequest(callRequest), callEmit, onceModelNext(downstream))
+		next = func(callCtx context.Context, callRequest model.Request, callEmit model.StreamSink) (out model.Response, callbackErr error) {
+			layerCtx, ticket := callbackscope.Enter(callCtx, request.RunID, current, callRequest)
+			lifetime := newNextLifetime()
+			defer func() {
+				lifetime.finish()
+				if failure := recover(); failure != nil {
+					callbackscope.Aborted(ticket)
+					panic(failure)
+				}
+				callbackscope.Returned(ticket, callbackErr)
+			}()
+			return current.Model(layerCtx, model.CloneRequest(callRequest), callEmit,
+				onceModelNext(func(nextCtx context.Context, nextRequest model.Request, nextEmit model.StreamSink) (model.Response, error) {
+					if !lifetime.enter() {
+						return model.Response{}, ErrNextAlreadyCalled
+					}
+					defer lifetime.leave()
+					return downstream(callbackscope.Inherit(nextCtx, layerCtx), nextRequest, nextEmit)
+				}))
 		}
 	}
 	return next(ctx, model.CloneRequest(request), emit)
@@ -273,11 +309,67 @@ func (chain *ToolChain) Invoke(
 	for index := len(chain.middleware) - 1; index >= 0; index-- {
 		current := chain.middleware[index]
 		downstream := next
-		next = func(callCtx context.Context) (tools.ExecutionResult, error) {
-			return current.Tool(callCtx, cloneToolInvocation(invocation), onceToolNext(downstream))
+		next = func(callCtx context.Context) (out tools.ExecutionResult, callbackErr error) {
+			layerCtx, ticket := callbackscope.Enter(callCtx, invocation.Run.ID, current, invocation)
+			lifetime := newNextLifetime()
+			defer func() {
+				lifetime.finish()
+				if failure := recover(); failure != nil {
+					callbackscope.Aborted(ticket)
+					panic(failure)
+				}
+				callbackscope.Returned(ticket, callbackErr)
+			}()
+			return current.Tool(layerCtx, cloneToolInvocation(invocation), onceToolNext(func(nextCtx context.Context) (tools.ExecutionResult, error) {
+				if !lifetime.enter() {
+					return tools.ExecutionResult{}, ErrNextAlreadyCalled
+				}
+				defer lifetime.leave()
+				return downstream(callbackscope.Inherit(nextCtx, layerCtx))
+			}))
 		}
 	}
 	return next(ctx)
+}
+
+// nextLifetime is the single physical-callback lifetime contract for Run,
+// Model and Tool middleware. Single-use alone is insufficient: a middleware
+// may retain Next and invoke it after its own Run/Model/Tool method returns,
+// or start a goroutine that continues dispatching effects after that return.
+//
+// Admit Next while its parent callback is active, count admitted calls before
+// releasing the mutex, and wait for all admitted descendants before returning
+// to an enclosing Kernel physical Grant. After finish closes admission,
+// a retained callback fails before reaching any downstream external effect.
+//
+// Do not add a deadline or detach an in-flight Next: an unknown callback must
+// retain its original physical Grant rather than manufacture a no-effect
+// acknowledgement on caller timeout.
+type nextLifetime struct {
+	mu       sync.Mutex
+	open     bool
+	inflight sync.WaitGroup
+}
+
+func newNextLifetime() *nextLifetime { return &nextLifetime{open: true} }
+
+func (scope *nextLifetime) enter() bool {
+	scope.mu.Lock()
+	defer scope.mu.Unlock()
+	if !scope.open {
+		return false
+	}
+	scope.inflight.Add(1)
+	return true
+}
+
+func (scope *nextLifetime) leave() { scope.inflight.Done() }
+
+func (scope *nextLifetime) finish() {
+	scope.mu.Lock()
+	scope.open = false
+	scope.mu.Unlock()
+	scope.inflight.Wait()
 }
 
 func onceRunNext(next RunNext) RunNext {

@@ -1,0 +1,44 @@
+SOURCE_SHA=2545aa7b6eda95d193ecd549f29f1aecc387d108
+COMMAND=TEST_POSTGRES_DSN=<dedicated-ephemeral> go -C go/agent-runtime-postgres test -race -count=3 ./... -run '^TestEA1RealPostgresRootAgentUnknown$' -v
+=== RUN   TestEA1RealPostgresRootAgentUnknown
+=== RUN   TestEA1RealPostgresRootAgentUnknown/host_middleware
+    ea1_root_agent_unknown.go:357: EA-06 G02 UNKNOWN Host callback replayed after fresh owner/real TTL: sends=2 err=test-only Host write sent; outcome unknown
+    ea1_root_agent_unknown.go:372: unknown Host recovery mutated original full state: test-only Host write sent; outcome unknown
+=== RUN   TestEA1RealPostgresRootAgentUnknown/model
+    ea1_root_agent_unknown.go:148: EA-06 UNKNOWN replay: model 1->2 tool 0->0 resumeErr=<nil> originalInvocation=modelinv_c2ac453ea84b648673b89ebd424e714b attempt=1
+    ea1_root_agent_unknown.go:164: UNKNOWN recovery changed original full Run/invocation/attempt state; resumeErr=<nil>
+=== RUN   TestEA1RealPostgresRootAgentUnknown/tool
+--- FAIL: TestEA1RealPostgresRootAgentUnknown (7.16s)
+    --- FAIL: TestEA1RealPostgresRootAgentUnknown/host_middleware (2.39s)
+    --- FAIL: TestEA1RealPostgresRootAgentUnknown/model (2.43s)
+    --- PASS: TestEA1RealPostgresRootAgentUnknown/tool (2.34s)
+=== RUN   TestEA1RealPostgresRootAgentUnknown
+=== RUN   TestEA1RealPostgresRootAgentUnknown/host_middleware
+    ea1_root_agent_unknown.go:357: EA-06 G02 UNKNOWN Host callback replayed after fresh owner/real TTL: sends=2 err=test-only Host write sent; outcome unknown
+    ea1_root_agent_unknown.go:372: unknown Host recovery mutated original full state: test-only Host write sent; outcome unknown
+=== RUN   TestEA1RealPostgresRootAgentUnknown/model
+    ea1_root_agent_unknown.go:148: EA-06 UNKNOWN replay: model 1->2 tool 0->0 resumeErr=<nil> originalInvocation=modelinv_c2ac453ea84b648673b89ebd424e714b attempt=1
+    ea1_root_agent_unknown.go:164: UNKNOWN recovery changed original full Run/invocation/attempt state; resumeErr=<nil>
+=== RUN   TestEA1RealPostgresRootAgentUnknown/tool
+--- FAIL: TestEA1RealPostgresRootAgentUnknown (7.13s)
+    --- FAIL: TestEA1RealPostgresRootAgentUnknown/host_middleware (2.43s)
+    --- FAIL: TestEA1RealPostgresRootAgentUnknown/model (2.36s)
+    --- PASS: TestEA1RealPostgresRootAgentUnknown/tool (2.34s)
+=== RUN   TestEA1RealPostgresRootAgentUnknown
+=== RUN   TestEA1RealPostgresRootAgentUnknown/host_middleware
+    ea1_root_agent_unknown.go:357: EA-06 G02 UNKNOWN Host callback replayed after fresh owner/real TTL: sends=2 err=test-only Host write sent; outcome unknown
+    ea1_root_agent_unknown.go:372: unknown Host recovery mutated original full state: test-only Host write sent; outcome unknown
+=== RUN   TestEA1RealPostgresRootAgentUnknown/model
+    ea1_root_agent_unknown.go:148: EA-06 UNKNOWN replay: model 1->2 tool 0->0 resumeErr=<nil> originalInvocation=modelinv_c2ac453ea84b648673b89ebd424e714b attempt=1
+    ea1_root_agent_unknown.go:164: UNKNOWN recovery changed original full Run/invocation/attempt state; resumeErr=<nil>
+=== RUN   TestEA1RealPostgresRootAgentUnknown/tool
+--- FAIL: TestEA1RealPostgresRootAgentUnknown (7.01s)
+    --- FAIL: TestEA1RealPostgresRootAgentUnknown/host_middleware (2.36s)
+    --- FAIL: TestEA1RealPostgresRootAgentUnknown/model (2.34s)
+    --- PASS: TestEA1RealPostgresRootAgentUnknown/tool (2.30s)
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	21.683s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]
+FAIL
+
+EXIT_CODE=1

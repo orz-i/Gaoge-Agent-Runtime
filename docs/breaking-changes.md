@@ -2,6 +2,399 @@
 
 **Policy:** Before a stable release, incompatible architecture/contract changes are permitted when explicitly decided. They must remove old shims/fallbacks rather than retain parallel protocols, document deleted symbols and persistence impact, and pass SDK consumer and recovery tests. A published Beta tag is immutable; publish changes in a new prerelease.
 
+## 2026-11-12 — Issue #107 seventh independent review: physical self-fencing and Attempt receipts
+
+The seventh independent audit locked Runtime `71bad5d` and Gaoge
+`c7759dc` and reproduced four P1 variants. Workflow.Cancel called an
+external compensator without physical Store admission; a parented child
+with a live physical Grant could still Cancel itself or accept an
+unbound Apply; an earlier truthful `PhysicalNoEffect` was reused for a
+later ambiguous external attempt, allowing a duplicate write; and Root
+Agent Start ran arbitrary Host RunMiddleware before a duplicate Kernel
+Create failed.
+
+**Physical execution authority is now self-owned.** Every admitted
+parented Agent or Root/child Workflow Grant is indexed against its own
+Run ID *and* every immutable ancestor. An external Cancel, Control,
+ordinary Apply or lease-bearing mutation cannot alter the executing
+Run without its original first-party, per-revision
+`PhysicalApplyPermit`. This permission is opaque to third-party
+callers; the Store validates it under the same authoritative
+transaction that writes the state. A rejected direct Kernel Cancel
+does not revoke a current ExecutionLease epoch before reporting
+`ErrChildExecutionBusy`. The same invariant is tested on Memory,
+GORM PostgreSQL, native SQLite and real PostgreSQL 16 with an active
+execution lease, not solely on one process-local mutex.
+
+**Workflow cancellation is a physical feature execution.** The public
+`Workflow.Runner.Cancel` now acquires its original
+`BeginChildExecution` Grant before writing failure intent or issuing
+compensation Effects, and holds it through first-party persisted
+effect receipts and the final terminal CAS. An unacknowledged
+external undo cannot be treated as successfully cancelled or
+released by a concurrent Kernel writer. Compensation uses the
+original Workflow physical settlement protocol; it cannot bypass
+the Store via a direct Host executor callback.
+
+**NoEffect is per physical Attempt.** The persisted Workflow Effect
+State now records `physicalNoEffectAttempt` alongside the explicit
+`physicalNoEffect` marker. An original, trusted no-effect response
+may schedule the *next* Attempt, but it certifies only the prior
+pre-dispatch failure. A subsequent ambiguous send resets that
+prior proof and leaves the original physical Grant quarantined.
+Neither timeout nor a generic error constitutes no-effect evidence.
+This is an intentional pre-stable Workflow State JSON contract
+change, without a new SQL table or schema version.
+
+**Root Agent Start creates the immutable Run first.** After the pure
+native request/capability checks, Kernel.Create succeeds before the
+first arbitrary Host RunMiddleware callback. Duplicate/conflicting
+Root IDs are rejected without calling middleware. A middleware
+that returns an error without reaching the native continuation
+cannot present the newly created Run as proof that its possible
+Host side effects were safely completed; Harness continues to
+treat that physical dispatch as unknown. Root Agent's established
+ModelInvocation, ToolDispatch and optional ExecutionLease semantics
+are NOT replaced with the Workflow Root Grant: the two have
+different pending-provider replay and recovery contracts. Their
+remaining cross-feature Host middleware ownership boundary must
+be evaluated in a later independent audit; this remediation is not
+a declaration of complete Host exactly-once semantics.
+
+**Validation and release limits.** The seventh independent audit's
+minimal P1 repros are retained; cross-Store conformance covers
+self Cancel, unbound Apply and preservation of original Agent
+execution owner on a rejected control. First-party Agent and
+Workflow positive paths, original Hosted approval/cancellation,
+real PostgreSQL lock/Grant recovery and Go Race are mandatory.
+The prior SQLite v3 / PostgreSQL `start_revision` hard cut remains
+unchanged; no production migration has been attempted. The
+separate Gaoge #69 ProviderReplay conflict, old SDK gitlink,
+actual PR-head CI and final independent reviewer approval remain
+NO-GO gates.
+
+## 2026-11-12 — Issue #107 sixth independent review: version-bound Root/Child physical admission
+
+The sixth independent review locked Runtime `30ad120` and Gaoge
+`c7759dc` and found the remaining physical authorization gap:
+Workflow.Resume and ResolveWait verified a loaded Run revision R, then
+called `BeginChildExecution` with only the child ID. A concurrent worker
+could advance R to R+1 while status remained Running or WaitingInput;
+the old interpreter would send an external Effect and only later fail
+its Kernel CAS. A pure stale Wait CAS could conversely retain an UNKNOWN
+physical Grant forever although no Effect was ever dispatched. Root
+Workflow skipped the physical Grant entirely, allowing duplicate queue
+workers to execute the same Effect twice. A completed Workflow with a
+committed post-callback settlement marker but lost ACK had no reliable
+recovery API after restart.
+
+**Unified execution authority:** Kernel `ChildExecutionGrant` now seals
+`ExpectedRevision` as well as the immutable Run ID. The Store must
+atomically validate the exact original revision, current status, owner
+ancestry and active Grant exclusivity before admitting any physical
+callback. Root Workflow obtains a durable self-owned Grant, not a
+parentless exception. A root-scoped Kernel Runtime carries a first-party
+nonforgeable `PhysicalApplyPermit` so that its own legitimate state
+transitions can commit while competing unbound writers are rejected.
+Built-in nested Workflows explicitly drop their parent's root mutation
+permit and obtain their **own** original child Grant. Root/Child effect
+issuance, cancellation and outcome settlement now share the same Store
+physical admission authority on Memory, PostgreSQL and SQLite.
+
+**Effect outcome policy:** A Workflow EffectExecutor must return a trusted
+completed receipt or an explicit `PhysicalNoEffect` attestation on
+`DispositionFailed` to permit retry or compensation. Unknown remote
+`DispositionPending`, timeouts and ambiguous effects retain the
+original durable Grant and may not be re-dispatched simply because the
+Effect ID is unchanged. A purely pre-dispatch interpreter failure can
+be settled only when the first-party interpreter confirms it invoked
+**zero** physical Effect callbacks in that segment. A replayable
+snapshot cannot be inferred from an unacknowledged physical operation.
+
+**Durable recovery:** `(*workflow.Runner).ReconcileChildPhysicalGrant`
+checks the original persisted child/Root state, exact original Grant
+and prior Store-settled receipt without invoking any Effect. It can
+release a completed callback after a lost settlement ACK and Store
+restart. A clean-looking but still-running callback has no durable
+post-return settlement marker and stays quarantined. Agent's existing
+first-party recovery protocol remains separate but uses the same
+Kernel physical Store contract.
+
+**Schema hard cut:** PostgreSQL's `agent_kernel_child_effect_grants`
+adds required `start_revision`, checked against the exact caller's
+version at `BeginChildExecution`, `MarkChildExecutionSettled`,
+`FinishChildExecution` and `LookupChildExecution`. Native SQLite
+candidate Schema advances from experimental **v2 to v3** (strict
+`PRAGMA user_version=3`, new `start_revision` column). There is **no**
+automatic migration or compatibility shim. Hosts must explicitly
+rehearse, drain and quarantine unresolved physical effects before
+recreating a v3 Profile or migrating PostgreSQL off a drained instance.
+No stable release or public beta.24 tag exists yet.
+
+**Acceptance remains blocked:** New adversarial regressions cover stale
+Revision Effect dispatch, Wait CAS with no physical effect, same-revision
+Root double Resume, ACK-loss/reopen, cross-Store strict Grant identity
+and original external NoEffect receipts. This is local governance, not
+final independent merge approval. The Gaoge #69 full Hosted ProviderReplay
+failure, its outdated SDK gitlink, exact PR Head GitHub CI and live
+external-provider acceptance are separate NO-GO gates.
+
+## 2026-11-12 — Issue #107 fifth audit: close remaining physical Feature admission paths
+
+The fifth independent review of Runtime `3e2a2739` and Gaoge
+`7a01b9db` reproduced three P1 authorization failures: a nested
+Workflow custom Effect or Wait resume could execute after its parent
+Kernel Workflow was cancelled; parented Agent RunStart middleware ran
+BEFORE child Create/Grant and could issue external effects before a later
+rejected Create; and real PostgreSQL `BeginChildExecution` admitted an
+already Cancelled child after reading stale status before waiting on a
+locked parent row.
+
+**Uniform parented Workflow execution:** `workflow.Runner.StartRun`,
+`Resume`, and `ResolveWait` now hold the original Kernel
+`ChildExecutionGrant` throughout interpreter segment execution, custom
+EffectExecutor callbacks, nested Subworkflow dispatch and Host telemetry.
+The same Store admission competes atomically with terminal mutations of
+every immutable Kernel ancestor. A Workflow settlement proof uses its own
+first-party domain; an Agent receipt cannot settle a Workflow Grant.
+Completed Effects require original receipts. An external
+`DispositionPending` with no trustworthy local child/receipt retains its
+Grant as UNKNOWN and cannot be resumed or cancelled as though no effect
+began. Quiescent Waits, pre-dispatch segment yields and pending children
+whose original same-Kernel Feature/RunRelation identity has been verified
+can settle their synchronous callback without pretending unknown remote
+effects are complete.
+
+**Uniform parented Agent Start:** After pre-Create read-only input checks,
+an original Host-defined `agent.Dependencies.StartControlPreflight`
+must validate the frozen Workflow Effect, parent and original relation
+before Kernel.Create when RunMiddleware is configured. Missing/denying
+preflight rejects the parented Start BEFORE creating a child or pinning
+a physical Grant. The Kernel then creates the child under its live
+ancestor and acquires the physical Grant BEFORE ANY RunMiddleware,
+Agent Model/Tool dispatch or Host observer callback. The Host repeats
+the frozen persisted `OriginFingerprint` check inside its actual RunStart
+middleware after admission. Pure Start preflight is not a substitute
+for the physical Kernel Store Grant; arbitrary Host callbacks may not
+perform external work in this read-only admission phase.
+
+**Middleware Next lifecycle:** The Run, Model and Tool middleware chains
+enforce one physical callback lifetime in addition to once-only Next.
+A retained Next invoked after its parent middleware returns is rejected
+before reaching the provider or Tool. A Next already admitted on another
+goroutine must complete before the parent middleware can return and
+release the enclosing physical Grant. Detached Host side effects that
+ignore Next entirely remain Host-owned and require their own receipt
+contract; Runtime cannot certify they were not executed.
+
+**PostgreSQL child-lock linearization:** `BeginChildExecution` now
+locks ancestor rows root-to-leaf and then explicitly locks/revalidates
+the child Run's immutable parent, kind, tenant, Actor, Thread and
+Running/WaitingInput status. The first unlocked child read is only
+a tentative ancestry lookup. Any Cancel/Fail of the child while waiting
+for its parent lock is observed before Grant commit. Existing Memory
+and native SQLite stores already read live child state inside their
+single authoritative writer locks. No additional database schema version
+is added beyond the fourth-round hard cut.
+
+**Verification and migration:** Original fifth-audit reproductions are
+mandatory tests. Additional cases exercise unknown external Pending,
+quiescent local nested Wait, original local Subworkflow child pending,
+retained and in-flight Run/Model/Tool Next callbacks, Memory/GORM
+PostgreSQL/native SQLite complete Workflow physical suites, and real
+PostgreSQL stale-child interleavings. Historical unknown external effects
+remain quarantined; the original SQLite v2 / PostgreSQL grant schema
+requires explicit nonproduction rehearsal and production drain before
+cutover. Gaoge #69 Hosted ProviderReplay, outdated SDK gitlink,
+independent final audit, required PR Head CI and real external provider
+billing/replay remain NO-GO gates.
+
+## 2026-11-12 — Issue #107 parent/child physical Grant and frozen source hard-cut (beta.24 candidate)
+
+Fourth independent review confirmed that repeated Host/Harness `Load` checks
+still allowed a parent Workflow to terminate after the final status read and
+before its child Agent's approval CAS or Model/Tool dispatch. It also
+confirmed that missing RunRelation evidence could silently downgrade a child
+to a directly approvable Agent, and that `isolatedContext` was not bound to
+the frozen Agent identity. The former bug executed a real in-memory Tool
+handler after parent cancellation, while subsequent Root/child state writes
+looked locally valid. The previous read/check approach is removed as an
+authorizing boundary; it may remain as defense-in-depth.
+
+**Physical execution authorization now belongs to Kernel Store.** New
+`kernel.Run.ParentRunID` and `kernel.CreateRequest.ParentRunID` are immutable
+Kernel ancestry, not a replacement for the original relation proof.
+`agent.StartRequest` and nested `workflow.StartRequest` carry this parent
+source; the first-party `agent.FrozenOriginFingerprint` preserves the exact
+raw frozen Workflow Effect input, including its Context-isolation/source
+policy, in the persisted Agent State. `agent.MatchesFrozenOrigin` and the
+original Runner reject contradictory same-ID resumes. Parent-bound Agent
+approval requires an immutable `agent.Dependencies.ApprovalControlPreflight`
+that the Host must implement as a **pure** verification of the original
+Harness physical approval Grant. A missing verifier denies approval before
+Model/Tool middleware or a Kernel physical Grant starts. No fallback to
+unbound Root when the RunRelation index disappears.
+
+**Atomic child effect protocol:** Kernel `ChildExecutionStore` has original
+`BeginChildExecution`, read-only `LookupChildExecution`, validated
+`MarkChildExecutionSettled` and `FinishChildExecution` ports. A child
+Start/Approval/Resume holds a durable, original-ID Grant across its physical
+callback, Model/Tool invocation and Host middleware. Grant admission and
+all terminal mutations of the original parent and its Kernel ancestors
+compete in one authoritative Store transaction. A known in-flight child
+returns a typed `ErrChildExecutionBusy` no-effect rejection to the parent
+Cancel, not a fabricated success; existing approved Tool work is allowed
+to reach a trusted receipt. An interrupted/unknown callback keeps its Grant
+durably quarantined, with **no automatic TTL release or effect replay**.
+
+A clean-looking persisted Agent State or a public Grant ID is **not**
+physical completion evidence. After the original physical callback returns
+successfully, the trusted Agent validates all Model/Tool physical receipts,
+mints an opaque original-Grant/revision/state proof, and atomically records
+its post-callback `SettledRevision` through the Store port. The Store
+verifies that proof **again under its own lock/transaction**. Only a matching
+durable settlement marker permits `FinishChildExecution`. A crash between
+the settlement marker and its ACK is recovered by
+`agent.ReconcileChildPhysicalGrant`; a crash before the marker, a late
+effect, or a returned callback error remains BLOCKED until trustworthy
+manual/Host receipt reconciliation. A direct call to `Store.Mark` with a
+zero or forged permit cannot retire the Grant.
+
+**Shared-budget cancellation:** The Harness cancels the Turn budget before
+the parent Kernel CAS. A `ChildGrantBusy` rejection proves no parent CAS
+committed, so the original still-active Harness cancellation intent may
+record one strictly structured, original-identity deferred fact and resume
+the **same** cancellation after the child Tool receipt. The budget is not
+restored and the request does not mint a second cancellation election.
+Ordinary Host errors, damaged/duplicated proof Items, unknown Store ACKs
+and remote Handoffs cannot use this deferral path.
+
+**Persistent breaking change:** PostgreSQL adds the immutable
+`agent_kernel_runs.parent_run_id` column and
+`agent_kernel_child_effect_grants` table (with original
+`settled_revision` for each ancestor). This requires the unpublished
+schema migration via `postgres.Migrate` on a safely drained environment.
+The embedded SQLite Profile Store schema hard-cuts from experimental v1 to
+**v2**; opening an older database fails closed without implicit migration,
+repair, table replacement or deleting existing data. Export/drain and
+explicitly recreate a fresh v2 Profile before re-admitting work; keep
+unreconciled old effects quarantined. There is no backwards compatibility
+shim and existing parentless historical child Runs are NOT silently trusted
+or reparented. Public beta.24 is still unreleased; published tags stay
+immutable.
+
+**Acceptance limits:** Conformance covers Memory, PostgreSQL (including
+independent real-server connections), SQLite, nested ancestry and restart
+with pending Grants. Deterministic real Hosted races test parent Cancel
+after the final read and before Approval/Tool dispatch. Separate tests cover
+lost settlement ACK on a new Store process, forged proofs, shared-budget
+cancel retry and the original independent audit findings. The full Gaoge
+#69 Hosted ProviderReplay and pinned SDK/gitlink upgrade remain separate
+NO-GO gates. Full final independent audit and actual GitHub PR-head CI are
+required before shipping.
+
+## 2026-11-11 — Workflow AgentTask child ownership and approval proof (beta.24 candidate)
+
+A `workflow.Runner` now permits local observation and Harness approval of
+a Workflow `NodeAgentTask` child only when the original *static*
+`workflow.StaticEffectRouter` Agent class executor implements
+`workflow.LocalAgentTaskOwner`: it returns the original concrete `*agent.Runner`,
+the original `runrelation.Recorder` and a pure `VerifyAgentTaskOrigin` proof
+for the Host's frozen Effect input. Both pointer authorities are snapshotted
+once at router construction and checked again against the live executor;
+the returned Agent must observe the same Kernel. The parent must contain
+one explicit AgentTask Definition node, one matching Activation/Effect, one
+current Attempt and the exact deterministic child Run ID, RequestID,
+Actor/tenant/thread and relation owner. A custom/dynamic executor, a foreign
+recorder/Kernel, stale Attempt, remote Run or unverified origin fails closed.
+Physical child cancellation normally requires the original Agent's
+`OwnsKernelRuntime` fence. A Host-prepared Agent with middleware may opt in
+only for a **quiescent, exact pending Tool approval**, not for a Running,
+completed or unknown external effect: the Agent's new
+`QuiescentApprovalCancellation` checks committed checkpoint binding and the
+absence of unresolved Tool/Model dispatch, while the original static Host
+executor must additionally implement
+`LocalAgentTaskApprovalCancellationOwner.FencesAgentTaskApprovalThroughHarness`.
+Harness then serializes cancellation against the original Turn's physical
+approval Dispatch Grant; the Host's first Run middleware must check
+`VerifiedSubtaskApprovalDispatch` before any approval effects, disallowing
+direct `Agent.ResolveApproval` entry. The transient private grant is
+deactivated after the physical callback returns; saved middleware Context
+cannot authorize later replay. A missing opt-in or non-quiescent
+child fails before recording a new cancellation intent, retaining an
+actionable checkpoint rather than stranding the Turn. An already terminal,
+immutably verified child is read for idempotent cancellation settlement
+without invoking another physical Cancel; a malformed Completed result
+fails closed. Parent EffectCompleted
+must have a child Completed with the same receipt ID and normalized JSON
+output; a finished parent with a waiting child cannot grant control.
+AgentTask-only Workflow does not require a Subworkflow DefinitionRegistry.
+
+The Harness `RunRelationSource` must be the original Workflow recorder,
+and mixed Host cancellers may use the new narrowly scoped
+`LocalKernelRunKindCanceller.OwnsKernelRunKind` only for original native Agent/Workflow kinds
+in the same exact Kernel. This does not authorize remote A2A, Team Handoff,
+other Run kinds or generic Host callbacks. Unknown post-write cancellation
+outcomes remain fenced and cannot be reclassified as no-effect from a raw
+Store `ErrConflict`. No blanket `OwnsKernelRuntime` relaxation was made.
+
+The original relation recorder may not be replaced by a copied index with
+coincidentally equal child IDs. No prior remote or custom Effect can become
+local through this new opt-in. The existing native Subworkflow proof,
+Tool approval CAS, per-child physical dispatch fences, model replay and
+Session ownership are not weakened. The new Host opt-in is a source-contract
+extension, not a legacy compatibility API.
+
+There is no SQL schema or on-disk state format change. **This does not
+retroactively certify old unproven AgentTask Runs**. Pending or ambiguous
+historical children remain quarantined until their exact persisted parent
+Effect and original static Host route can be verified. A Host must not
+replay an unverified external Tool effect, silently authorize a replacement
+runner, or treat a timeout as a no-effect receipt. Full Gaoge hosted cutover
+remains separately gated on host integration, provider replay, media
+admission, migration and reconciliation. See
+[audit and contract](audits/2026-11-11-issue107-workflow-agenttask-ownership.md).
+
+## 2026-11-12 — Issue #107 terminal-ancestry approval, physical-effect settlement and exact child origin
+
+A confirmed local AgentTask ancestry is **read-only ownership evidence**,
+not permission to introduce new Tool/Model effects when a parent Workflow has
+already reached `completed`, `failed` or `cancelled`. Harness now checks
+every raw Feature ancestor's current Kernel Run status before child approval,
+rechecks after persisting the physical approval Dispatch Grant and before
+invoking Agent middleware, and settles a denied pre-dispatch grant without
+pretending physical execution occurred. The Gaoge Workflow Agent Run middleware
+also checks the live parent on Start, ResolveApproval and Resume, including a
+direct child continuation that bypassed a stale Harness Turn projection.
+Already-terminal parents remain traversable for genuinely safe descendant
+cancellation and read-only recovery.
+
+Terminal child state is no longer sufficient to assert **physical cleanup**.
+The new public `agent.TerminalPhysicalEffectsSettled` pure proof rejects a
+terminal Agent with an unacknowledged Tool dispatch, active/unconsumed Model
+invocation, unresolved Tool wait, external signal or deferred child execution.
+The original local Workflow AgentTask verification consumes this proof before
+reporting cancellation settlement; non-Workflow Handoff/Delegation and remote
+A2A cleanup continue to obey their *separate* ownership protocols. A genuine
+unknown physical outcome remains quarantined and requires authoritative
+reconciliation; a late Kernel CAS failure is not an external no-effect receipt.
+
+The public `(*agent.Runner).VerifyFrozenStartRequest` binds a reused child to
+the *same original Agent policy* and its exact effective Model/Tool hard
+limits, immutable initial transcript, frozen Tool keys, model/options,
+Run/Request ID and Actor/Thread. Gaoge's `VerifyAgentTaskOrigin` checks this
+proof before accepting a same-ID child, instead of re-implementing the Agent
+limit/default resolution with potentially weaker Host logic. A changed Host
+admission policy may intentionally quarantine a previously created child:
+restore the original trusted configuration or reconcile it explicitly; do not
+silently widen budgets or add a compatibility fallback.
+
+This source-contract extension changes no persistence schema or RunState
+format, does not publish a new Beta tag, and does not make Gaoge #69 ready for
+cutover. Standalone consumers must compile against the same unpublished
+beta.24 Runtime cohort. The Gaoge provider replay failure and production
+migration gates remain independent blockers.
+
 ## 2026-11-08 — Exact-model media-input grants (beta.24 candidate)
 
 OpenAI Responses and Anthropic Messages already supported ordered User image

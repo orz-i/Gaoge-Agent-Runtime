@@ -225,13 +225,12 @@ func TestNativeRunExecutionAcrossProcesses(t *testing.T) {
 // loaded its candidate Snapshot, then persists an unrelated legal CAS under
 // the just-issued lease. The caller now holds a VALID epoch but STALE revision.
 type auditClaimAdvancesRevision struct {
-	kernel.Store
-	kernel.ExecutionStore
+	*sqlite.Store
 	did bool
 }
 
 func (w *auditClaimAdvancesRevision) AcquireExecution(ctx context.Context, req kernel.ExecutionAcquireRequest) (kernel.ExecutionLease, error) {
-	lease, err := w.ExecutionStore.AcquireExecution(ctx, req)
+	lease, err := w.Store.AcquireExecution(ctx, req)
 	if err != nil {
 		return lease, err
 	}
@@ -296,7 +295,7 @@ func TestNativeResumeReloadsSnapshotAfterAcquireBeforeTool(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wrapper := &auditClaimAdvancesRevision{Store: store, ExecutionStore: store}
+	wrapper := &auditClaimAdvancesRevision{Store: store}
 	wrappedRT, err := kernel.New(kernel.Dependencies{Store: wrapper})
 	if err != nil {
 		t.Fatal(err)
@@ -333,7 +332,7 @@ func TestNativeResumeReloadsSnapshotAfterAcquireBeforeTool(t *testing.T) {
 	}
 }
 
-func TestLegacyRunCannotJoinNativeExecutionDuringTool(t *testing.T) {
+func TestDefaultNativeRunRejectsCompetingOwnerDuringTool(t *testing.T) {
 	ctx := t.Context()
 	profile := privateDir(t)
 	store, err := sqlite.CreateNew(ctx, filepath.Join(profile, "mixed.sqlite"))
@@ -404,7 +403,7 @@ func TestLegacyRunCannotJoinNativeExecutionDuringTool(t *testing.T) {
 	// Every Tool dispatch now advances the Agent Revision to commit its
 	// immutable external-effect intent, even without a RunExecution lease.
 	// First prove the stale caller is rejected by CAS, then re-read under
-	// the same in-flight Legacy Tool and prove epoch-0 cannot be upgraded.
+	// the same in-flight default-native Tool and prove its owner cannot be replaced.
 	current, currentErr := rt.Load(ctx, ready.Run.ID)
 	if currentErr != nil {
 		t.Fatal(currentErr)
@@ -415,13 +414,13 @@ func TestLegacyRunCannotJoinNativeExecutionDuringTool(t *testing.T) {
 	})
 	close(unblockFirst)
 	oldErr := <-oldDone
-	t.Logf("AUDIT MIXED legacy epoch0 Tool already in flight; native claim accepted=%t status=%s physical_effects=%d stale_legacy_error=%v",
+	t.Logf("AUDIT default-native Tool already in flight; native claim accepted=%t status=%s physical_effects=%d stale_legacy_error=%v",
 		nativeErr == nil, next.Run.Status, physical.Load(), oldErr)
 	if !errors.Is(nativeErr, kernel.ErrConflict) ||
 		!errors.Is(freshNativeErr, agent.ErrToolOutcomeUnknown) ||
-		!errors.Is(forbiddenClaimErr, kernel.ErrExecutionRequired) ||
+		!errors.Is(forbiddenClaimErr, kernel.ErrChildExecutionBusy) ||
 		physical.Load() != 1 || oldErr != nil {
-		t.Fatalf("legacy Run was upgraded into concurrent native execution: effects=%d stale=%v fresh=%v storeClaim=%v legacy=%v",
+		t.Fatalf("default-native Run admitted competing execution: effects=%d stale=%v fresh=%v storeClaim=%v legacy=%v",
 			physical.Load(), nativeErr, freshNativeErr, forbiddenClaimErr, oldErr)
 	}
 }

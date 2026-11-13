@@ -1,0 +1,378 @@
+SOURCE_SHA=e05290927ba0143f625857be08a0aa7493df84cf
+COMMAND=go -C go/agent-runtime-http test -race -count=1 -v ./...
+=== RUN   TestWorkflowDraftOpenAPIRejectsUnsupportedTopLevelExtensions
+--- PASS: TestWorkflowDraftOpenAPIRejectsUnsupportedTopLevelExtensions (0.04s)
+=== RUN   TestOpenAPIRejectsEmptyRequiredRequestStrings
+--- PASS: TestOpenAPIRejectsEmptyRequiredRequestStrings (0.27s)
+=== RUN   TestOpenAPIAllowanceGrantAndPausedStatuses
+--- PASS: TestOpenAPIAllowanceGrantAndPausedStatuses (0.18s)
+=== RUN   TestCancellationRouterUsesExactStaticRunKind
+=== PAUSE TestCancellationRouterUsesExactStaticRunKind
+=== RUN   TestCancellationRouterRejectsDuplicateKind
+=== PAUSE TestCancellationRouterRejectsDuplicateKind
+=== RUN   TestBindStrictJSONRejectsMalformedAndInvalidRequestFields
+=== RUN   TestBindStrictJSONRejectsMalformedAndInvalidRequestFields/missing_required_revision
+=== RUN   TestBindStrictJSONRejectsMalformedAndInvalidRequestFields/zero_revision
+=== RUN   TestBindStrictJSONRejectsMalformedAndInvalidRequestFields/reason_exceeds_binding_max
+=== RUN   TestBindStrictJSONRejectsMalformedAndInvalidRequestFields/unknown_field
+=== RUN   TestBindStrictJSONRejectsMalformedAndInvalidRequestFields/second_JSON_document
+=== RUN   TestBindStrictJSONRejectsMalformedAndInvalidRequestFields/trailing_object_delimiter
+=== RUN   TestBindStrictJSONRejectsMalformedAndInvalidRequestFields/trailing_array_delimiter
+=== RUN   TestBindStrictJSONRejectsMalformedAndInvalidRequestFields/trailing_garbage
+=== RUN   TestBindStrictJSONRejectsMalformedAndInvalidRequestFields/empty_body
+--- PASS: TestBindStrictJSONRejectsMalformedAndInvalidRequestFields (0.00s)
+    --- PASS: TestBindStrictJSONRejectsMalformedAndInvalidRequestFields/missing_required_revision (0.00s)
+    --- PASS: TestBindStrictJSONRejectsMalformedAndInvalidRequestFields/zero_revision (0.00s)
+    --- PASS: TestBindStrictJSONRejectsMalformedAndInvalidRequestFields/reason_exceeds_binding_max (0.00s)
+    --- PASS: TestBindStrictJSONRejectsMalformedAndInvalidRequestFields/unknown_field (0.00s)
+    --- PASS: TestBindStrictJSONRejectsMalformedAndInvalidRequestFields/second_JSON_document (0.00s)
+    --- PASS: TestBindStrictJSONRejectsMalformedAndInvalidRequestFields/trailing_object_delimiter (0.00s)
+    --- PASS: TestBindStrictJSONRejectsMalformedAndInvalidRequestFields/trailing_array_delimiter (0.00s)
+    --- PASS: TestBindStrictJSONRejectsMalformedAndInvalidRequestFields/trailing_garbage (0.00s)
+    --- PASS: TestBindStrictJSONRejectsMalformedAndInvalidRequestFields/empty_body (0.00s)
+=== RUN   TestBindStrictJSONValidatesNestedFieldsAndCollections
+--- PASS: TestBindStrictJSONValidatesNestedFieldsAndCollections (0.00s)
+=== RUN   TestBindStrictJSONRejectsOversizedBody
+--- PASS: TestBindStrictJSONRejectsOversizedBody (0.03s)
+=== RUN   TestBindStrictJSONAcceptsExactEightMiBBody
+--- PASS: TestBindStrictJSONAcceptsExactEightMiBBody (0.29s)
+=== RUN   TestOversizedStrictJSONReturnsHTTP413
+--- PASS: TestOversizedStrictJSONReturnsHTTP413 (0.03s)
+=== RUN   TestBindStrictJSONAcceptsBoundaryAndRestoresBody
+--- PASS: TestBindStrictJSONAcceptsBoundaryAndRestoresBody (0.00s)
+=== RUN   TestCancelRunDoesNotPersistInvalidBinding
+--- PASS: TestCancelRunDoesNotPersistInvalidBinding (0.00s)
+=== RUN   TestGetRunReleasesFeedMetadataForAuthoritativeTerminalSnapshot
+--- PASS: TestGetRunReleasesFeedMetadataForAuthoritativeTerminalSnapshot (0.00s)
+=== RUN   TestStreamRunFeedReplaysAfterSequenceThroughTerminal
+--- PASS: TestStreamRunFeedReplaysAfterSequenceThroughTerminal (0.00s)
+=== RUN   TestStreamRunFeedDisconnectDoesNotCancelRun
+--- PASS: TestStreamRunFeedDisconnectDoesNotCancelRun (0.02s)
+=== RUN   TestStreamRunFeedHidesAnotherActorsRun
+--- PASS: TestStreamRunFeedHidesAnotherActorsRun (0.00s)
+=== RUN   TestWriteRunFeedCursorExpiredReturnsRecoveryHead
+--- PASS: TestWriteRunFeedCursorExpiredReturnsRecoveryHead (0.00s)
+=== RUN   TestOpenAPIStrictJSONBodyLimitsAnd413Responses
+--- PASS: TestOpenAPIStrictJSONBodyLimitsAnd413Responses (0.03s)
+=== RUN   TestOpenAPIExposesTargetRuntimeAndHarnessResources
+=== PAUSE TestOpenAPIExposesTargetRuntimeAndHarnessResources
+=== RUN   TestOwnerRunHTTPDoesNotReturnRawFailureDetailAcrossRoutes
+=== PAUSE TestOwnerRunHTTPDoesNotReturnRawFailureDetailAcrossRoutes
+=== RUN   TestPublicDiagnosticProjectionRetainsLegitimateBusinessFailurePayload
+=== PAUSE TestPublicDiagnosticProjectionRetainsLegitimateBusinessFailurePayload
+=== RUN   TestPublicWorkbenchRehashesChangedVisibleProjection
+=== PAUSE TestPublicWorkbenchRehashesChangedVisibleProjection
+=== RUN   TestPublicWorkflowStateKeepsFailureStatusAndCodeButNotPrivateDetail
+=== PAUSE TestPublicWorkflowStateKeepsFailureStatusAndCodeButNotPrivateDetail
+=== RUN   TestPublicDiagnosticPayloadPreservesJSONNumbersAndRedaction
+=== PAUSE TestPublicDiagnosticPayloadPreservesJSONNumbersAndRedaction
+=== RUN   TestPublicDiagnosticPayloadRejectsMalformedJSON
+=== PAUSE TestPublicDiagnosticPayloadRejectsMalformedJSON
+=== RUN   TestPublicCompletedGenerationFailuresKeepBoundedRecoveryFacts
+--- PASS: TestPublicCompletedGenerationFailuresKeepBoundedRecoveryFacts (0.00s)
+=== RUN   TestPublicContextLimitFailuresExplainRecoveryWithoutDiagnosticBytes
+=== PAUSE TestPublicContextLimitFailuresExplainRecoveryWithoutDiagnosticBytes
+=== RUN   TestPublicSDKFailureProjectionKeepsCodesWithoutDiagnosticBytes
+=== PAUSE TestPublicSDKFailureProjectionKeepsCodesWithoutDiagnosticBytes
+=== RUN   TestPublicSDKWorkbenchAndFeedExcludeNestedProviderErrors
+=== PAUSE TestPublicSDKWorkbenchAndFeedExcludeNestedProviderErrors
+=== RUN   TestPublicSDKStructuredDiagnosticsDoNotForwardNestedHeadersOrGenericErrorObjects
+=== PAUSE TestPublicSDKStructuredDiagnosticsDoNotForwardNestedHeadersOrGenericErrorObjects
+=== RUN   TestPublicSDKErrorJournalFailsClosedOnMalformedDiagnostics
+=== PAUSE TestPublicSDKErrorJournalFailsClosedOnMalformedDiagnostics
+=== RUN   TestPublicRunFeedRedactsToolArgumentsAndProviderDeltaMetadata
+=== PAUSE TestPublicRunFeedRedactsToolArgumentsAndProviderDeltaMetadata
+=== RUN   TestPublicToolFeedProjectionDoesNotForwardUntrustedToolIdentifier
+=== PAUSE TestPublicToolFeedProjectionDoesNotForwardUntrustedToolIdentifier
+=== RUN   TestPublicRunFeedDiscoveryProgressOnlyAcceptsTrustedEnumeratedFacts
+=== PAUSE TestPublicRunFeedDiscoveryProgressOnlyAcceptsTrustedEnumeratedFacts
+=== RUN   TestPublicRunFeedPairsStableToolPhasesWithoutDisclosure
+=== PAUSE TestPublicRunFeedPairsStableToolPhasesWithoutDisclosure
+=== RUN   TestPublicRunFeedRedactsToolRequestPendingAndApprovalCheckpoint
+=== PAUSE TestPublicRunFeedRedactsToolRequestPendingAndApprovalCheckpoint
+=== RUN   TestPublicRunFeedUnknownInteractionAndMalformedPayloadFailClosed
+=== PAUSE TestPublicRunFeedUnknownInteractionAndMalformedPayloadFailClosed
+=== RUN   TestProviderReplayRemovedFromPublicStateAndNestedBusinessPayloads
+=== PAUSE TestProviderReplayRemovedFromPublicStateAndNestedBusinessPayloads
+=== RUN   TestProviderReplayScrubbedFromAllPublicDiagnosticSurfaces
+=== PAUSE TestProviderReplayScrubbedFromAllPublicDiagnosticSurfaces
+=== RUN   TestRunFeedSSEWriterNeverEmitsRequestedToolOrApprovalArguments
+--- PASS: TestRunFeedSSEWriterNeverEmitsRequestedToolOrApprovalArguments (0.00s)
+=== RUN   TestSelectorPreparedInputRemovedFromPublicDiagnosticSurfaces
+--- PASS: TestSelectorPreparedInputRemovedFromPublicDiagnosticSurfaces (0.00s)
+=== RUN   TestCoreRouterExposesOnlyFeatureNeutralResources
+=== PAUSE TestCoreRouterExposesOnlyFeatureNeutralResources
+=== RUN   TestRunObjectAuthorizationHidesCrossTenantResources
+=== PAUSE TestRunObjectAuthorizationHidesCrossTenantResources
+=== RUN   TestRunEventJournalPagesAuthorizedHistory
+=== PAUSE TestRunEventJournalPagesAuthorizedHistory
+=== RUN   TestRunObjectAuthorizationAllowsHostPolicyOverride
+=== PAUSE TestRunObjectAuthorizationAllowsHostPolicyOverride
+=== RUN   TestHTTPWireFixturesMatchGoAndOpenAPI
+=== RUN   TestHTTPWireFixturesMatchGoAndOpenAPI/snapshot-running.json
+=== RUN   TestHTTPWireFixturesMatchGoAndOpenAPI/snapshot-external-wait.json
+=== RUN   TestHTTPWireFixturesMatchGoAndOpenAPI/snapshot-child-wait.json
+=== RUN   TestHTTPWireFixturesMatchGoAndOpenAPI/snapshot-waiting.json
+=== RUN   TestHTTPWireFixturesMatchGoAndOpenAPI/snapshot-completed.json
+=== RUN   TestHTTPWireFixturesMatchGoAndOpenAPI/snapshot-extension.json
+=== RUN   TestHTTPWireFixturesMatchGoAndOpenAPI/events.json
+=== RUN   TestHTTPWireFixturesMatchGoAndOpenAPI/events-empty.json
+=== RUN   TestHTTPWireFixturesMatchGoAndOpenAPI/cancel.json
+=== RUN   TestHTTPWireFixturesMatchGoAndOpenAPI/error.json
+=== RUN   TestHTTPWireFixturesMatchGoAndOpenAPI/feed-terminal.json
+--- PASS: TestHTTPWireFixturesMatchGoAndOpenAPI (0.35s)
+    --- PASS: TestHTTPWireFixturesMatchGoAndOpenAPI/snapshot-running.json (0.05s)
+    --- PASS: TestHTTPWireFixturesMatchGoAndOpenAPI/snapshot-external-wait.json (0.03s)
+    --- PASS: TestHTTPWireFixturesMatchGoAndOpenAPI/snapshot-child-wait.json (0.03s)
+    --- PASS: TestHTTPWireFixturesMatchGoAndOpenAPI/snapshot-waiting.json (0.03s)
+    --- PASS: TestHTTPWireFixturesMatchGoAndOpenAPI/snapshot-completed.json (0.03s)
+    --- PASS: TestHTTPWireFixturesMatchGoAndOpenAPI/snapshot-extension.json (0.03s)
+    --- PASS: TestHTTPWireFixturesMatchGoAndOpenAPI/events.json (0.03s)
+    --- PASS: TestHTTPWireFixturesMatchGoAndOpenAPI/events-empty.json (0.03s)
+    --- PASS: TestHTTPWireFixturesMatchGoAndOpenAPI/cancel.json (0.03s)
+    --- PASS: TestHTTPWireFixturesMatchGoAndOpenAPI/error.json (0.03s)
+    --- PASS: TestHTTPWireFixturesMatchGoAndOpenAPI/feed-terminal.json (0.03s)
+=== RUN   TestOpenAPIRunSnapshotRejectsContractViolations
+=== RUN   TestOpenAPIRunSnapshotRejectsContractViolations/string_revision
+=== RUN   TestOpenAPIRunSnapshotRejectsContractViolations/missing_result_content
+=== RUN   TestOpenAPIRunSnapshotRejectsContractViolations/invalid_checkpoint_status
+=== RUN   TestOpenAPIRunSnapshotRejectsContractViolations/unknown_envelope_field
+--- PASS: TestOpenAPIRunSnapshotRejectsContractViolations (0.03s)
+    --- PASS: TestOpenAPIRunSnapshotRejectsContractViolations/string_revision (0.00s)
+    --- PASS: TestOpenAPIRunSnapshotRejectsContractViolations/missing_result_content (0.00s)
+    --- PASS: TestOpenAPIRunSnapshotRejectsContractViolations/invalid_checkpoint_status (0.00s)
+    --- PASS: TestOpenAPIRunSnapshotRejectsContractViolations/unknown_envelope_field (0.00s)
+=== RUN   TestOpenAPIRunSnapshotAllowsHostKind
+--- PASS: TestOpenAPIRunSnapshotAllowsHostKind (0.03s)
+=== RUN   TestCoreHTTPDoesNotImportConcreteFeatures
+--- PASS: TestCoreHTTPDoesNotImportConcreteFeatures (0.00s)
+=== RUN   TestExplicitFeatureModulesComposePublishedRoutes
+=== PAUSE TestExplicitFeatureModulesComposePublishedRoutes
+=== CONT  TestCancellationRouterRejectsDuplicateKind
+=== CONT  TestExplicitFeatureModulesComposePublishedRoutes
+--- PASS: TestCancellationRouterRejectsDuplicateKind (0.00s)
+=== CONT  TestProviderReplayScrubbedFromAllPublicDiagnosticSurfaces
+=== CONT  TestPublicSDKErrorJournalFailsClosedOnMalformedDiagnostics
+=== CONT  TestRunEventJournalPagesAuthorizedHistory
+=== CONT  TestPublicRunFeedDiscoveryProgressOnlyAcceptsTrustedEnumeratedFacts
+=== CONT  TestRunObjectAuthorizationAllowsHostPolicyOverride
+=== CONT  TestPublicRunFeedRedactsToolRequestPendingAndApprovalCheckpoint
+=== RUN   TestPublicRunFeedRedactsToolRequestPendingAndApprovalCheckpoint/requested
+--- PASS: TestExplicitFeatureModulesComposePublishedRoutes (0.00s)
+=== CONT  TestPublicSDKStructuredDiagnosticsDoNotForwardNestedHeadersOrGenericErrorObjects
+=== CONT  TestPublicWorkflowStateKeepsFailureStatusAndCodeButNotPrivateDetail
+=== CONT  TestCoreRouterExposesOnlyFeatureNeutralResources
+--- PASS: TestCoreRouterExposesOnlyFeatureNeutralResources (0.00s)
+=== CONT  TestRunObjectAuthorizationHidesCrossTenantResources
+=== RUN   TestPublicRunFeedRedactsToolRequestPendingAndApprovalCheckpoint/pending
+=== CONT  TestProviderReplayRemovedFromPublicStateAndNestedBusinessPayloads
+--- PASS: TestPublicSDKStructuredDiagnosticsDoNotForwardNestedHeadersOrGenericErrorObjects (0.00s)
+=== CONT  TestPublicRunFeedUnknownInteractionAndMalformedPayloadFailClosed
+--- PASS: TestRunEventJournalPagesAuthorizedHistory (0.00s)
+=== CONT  TestPublicDiagnosticPayloadRejectsMalformedJSON
+=== CONT  TestPublicSDKFailureProjectionKeepsCodesWithoutDiagnosticBytes
+--- PASS: TestPublicRunFeedDiscoveryProgressOnlyAcceptsTrustedEnumeratedFacts (0.00s)
+--- PASS: TestPublicSDKErrorJournalFailsClosedOnMalformedDiagnostics (0.00s)
+=== CONT  TestOwnerRunHTTPDoesNotReturnRawFailureDetailAcrossRoutes
+=== CONT  TestOpenAPIExposesTargetRuntimeAndHarnessResources
+=== RUN   TestPublicDiagnosticPayloadRejectsMalformedJSON/#00
+--- PASS: TestRunObjectAuthorizationAllowsHostPolicyOverride (0.00s)
+--- PASS: TestPublicWorkflowStateKeepsFailureStatusAndCodeButNotPrivateDetail (0.00s)
+--- PASS: TestPublicRunFeedUnknownInteractionAndMalformedPayloadFailClosed (0.00s)
+--- PASS: TestRunObjectAuthorizationHidesCrossTenantResources (0.00s)
+=== CONT  TestPublicWorkbenchRehashesChangedVisibleProjection
+=== CONT  TestPublicSDKWorkbenchAndFeedExcludeNestedProviderErrors
+=== RUN   TestPublicRunFeedRedactsToolRequestPendingAndApprovalCheckpoint/approval
+=== CONT  TestPublicDiagnosticProjectionRetainsLegitimateBusinessFailurePayload
+--- PASS: TestPublicSDKFailureProjectionKeepsCodesWithoutDiagnosticBytes (0.00s)
+=== CONT  TestPublicDiagnosticPayloadPreservesJSONNumbersAndRedaction
+=== RUN   TestPublicDiagnosticPayloadRejectsMalformedJSON/___
+=== RUN   TestPublicDiagnosticPayloadRejectsMalformedJSON/{
+=== RUN   TestPublicDiagnosticPayloadRejectsMalformedJSON/{"id":9007199254740993}_{"debug":"private"}
+=== RUN   TestPublicDiagnosticPayloadRejectsMalformedJSON/{"id":1}garbage
+=== RUN   TestPublicDiagnosticPayloadRejectsMalformedJSON/"value"_true
+--- PASS: TestPublicDiagnosticPayloadRejectsMalformedJSON (0.00s)
+    --- PASS: TestPublicDiagnosticPayloadRejectsMalformedJSON/#00 (0.00s)
+    --- PASS: TestPublicDiagnosticPayloadRejectsMalformedJSON/___ (0.00s)
+    --- PASS: TestPublicDiagnosticPayloadRejectsMalformedJSON/{ (0.00s)
+    --- PASS: TestPublicDiagnosticPayloadRejectsMalformedJSON/{"id":9007199254740993}_{"debug":"private"} (0.00s)
+    --- PASS: TestPublicDiagnosticPayloadRejectsMalformedJSON/{"id":1}garbage (0.00s)
+    --- PASS: TestPublicDiagnosticPayloadRejectsMalformedJSON/"value"_true (0.00s)
+=== CONT  TestPublicToolFeedProjectionDoesNotForwardUntrustedToolIdentifier
+--- PASS: TestPublicRunFeedRedactsToolRequestPendingAndApprovalCheckpoint (0.00s)
+    --- PASS: TestPublicRunFeedRedactsToolRequestPendingAndApprovalCheckpoint/requested (0.00s)
+    --- PASS: TestPublicRunFeedRedactsToolRequestPendingAndApprovalCheckpoint/pending (0.00s)
+    --- PASS: TestPublicRunFeedRedactsToolRequestPendingAndApprovalCheckpoint/approval (0.00s)
+=== CONT  TestPublicRunFeedPairsStableToolPhasesWithoutDisclosure
+--- PASS: TestPublicWorkbenchRehashesChangedVisibleProjection (0.00s)
+=== CONT  TestPublicRunFeedRedactsToolArgumentsAndProviderDeltaMetadata
+--- PASS: TestPublicToolFeedProjectionDoesNotForwardUntrustedToolIdentifier (0.00s)
+=== CONT  TestCancellationRouterUsesExactStaticRunKind
+=== CONT  TestPublicContextLimitFailuresExplainRecoveryWithoutDiagnosticBytes
+--- PASS: TestPublicDiagnosticPayloadPreservesJSONNumbersAndRedaction (0.00s)
+--- PASS: TestPublicSDKWorkbenchAndFeedExcludeNestedProviderErrors (0.00s)
+--- PASS: TestPublicRunFeedPairsStableToolPhasesWithoutDisclosure (0.00s)
+--- PASS: TestOwnerRunHTTPDoesNotReturnRawFailureDetailAcrossRoutes (0.00s)
+--- PASS: TestCancellationRouterUsesExactStaticRunKind (0.00s)
+--- PASS: TestPublicDiagnosticProjectionRetainsLegitimateBusinessFailurePayload (0.00s)
+--- PASS: TestPublicContextLimitFailuresExplainRecoveryWithoutDiagnosticBytes (0.00s)
+--- PASS: TestPublicRunFeedRedactsToolArgumentsAndProviderDeltaMetadata (0.00s)
+--- PASS: TestProviderReplayRemovedFromPublicStateAndNestedBusinessPayloads (0.00s)
+--- PASS: TestProviderReplayScrubbedFromAllPublicDiagnosticSurfaces (0.00s)
+--- PASS: TestOpenAPIExposesTargetRuntimeAndHarnessResources (0.03s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http	2.999s
+=== RUN   TestPendingToolSnapshotPublicProjectionHasNoHostCorrelation
+[GIN-debug] [WARNING] Running in "debug" mode. Switch to "release" mode in production.
+ - using env:	export GIN_MODE=release
+ - using code:	gin.SetMode(gin.ReleaseMode)
+
+[GIN-debug] GET    /v1/runs/:run_id          --> github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http.(*Handler).GetRun-fm (1 handlers)
+[GIN-debug] GET    /v1/runs/:run_id/events   --> github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http.(*Handler).GetRunEvents-fm (1 handlers)
+[GIN-debug] GET    /v1/runs/:run_id/feed     --> github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http.(*Handler).StreamRunFeed-fm (1 handlers)
+[GIN-debug] POST   /v1/runs/:run_id/cancel   --> github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http.(*Handler).CancelRun-fm (1 handlers)
+[GIN-debug] GET    /v1/runs/:run_id/workbench --> github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http.(*Handler).GetWorkbench-fm (1 handlers)
+[GIN-debug] [WARNING] Running in "debug" mode. Switch to "release" mode in production.
+ - using env:	export GIN_MODE=release
+ - using code:	gin.SetMode(gin.ReleaseMode)
+
+[GIN-debug] GET    /v1/runs/:run_id          --> github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http.(*Handler).GetRun-fm (1 handlers)
+[GIN-debug] GET    /v1/runs/:run_id/events   --> github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http.(*Handler).GetRunEvents-fm (1 handlers)
+[GIN-debug] GET    /v1/runs/:run_id/feed     --> github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http.(*Handler).StreamRunFeed-fm (1 handlers)
+[GIN-debug] POST   /v1/runs/:run_id/cancel   --> github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http.(*Handler).CancelRun-fm (1 handlers)
+[GIN-debug] GET    /v1/runs/:run_id/workbench --> github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http.(*Handler).GetWorkbench-fm (1 handlers)
+--- PASS: TestPendingToolSnapshotPublicProjectionHasNoHostCorrelation (0.02s)
+=== RUN   TestRegisterRoutesAndNilComposition
+--- PASS: TestRegisterRoutesAndNilComposition (0.00s)
+=== RUN   TestStartRunRejectsUnavailableAndInvalidJSON
+=== RUN   TestStartRunRejectsUnavailableAndInvalidJSON/unavailable
+=== RUN   TestStartRunRejectsUnavailableAndInvalidJSON/invalid_json
+--- PASS: TestStartRunRejectsUnavailableAndInvalidJSON (0.00s)
+    --- PASS: TestStartRunRejectsUnavailableAndInvalidJSON/unavailable (0.00s)
+    --- PASS: TestStartRunRejectsUnavailableAndInvalidJSON/invalid_json (0.00s)
+=== RUN   TestAgentHTTPCreateAndAuthorizedReadRedactProviderEvidence
+=== RUN   TestAgentHTTPCreateAndAuthorizedReadRedactProviderEvidence/anthropic
+=== RUN   TestAgentHTTPCreateAndAuthorizedReadRedactProviderEvidence/openai
+--- PASS: TestAgentHTTPCreateAndAuthorizedReadRedactProviderEvidence (0.04s)
+    --- PASS: TestAgentHTTPCreateAndAuthorizedReadRedactProviderEvidence/anthropic (0.02s)
+    --- PASS: TestAgentHTTPCreateAndAuthorizedReadRedactProviderEvidence/openai (0.01s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http/agent	1.668s
+=== RUN   TestBudgetGrantHTTPAuthorizesOwningTurnAndEnforcesCAS
+--- PASS: TestBudgetGrantHTTPAuthorizesOwningTurnAndEnforcesCAS (0.03s)
+=== RUN   TestHarnessHTTPApprovalRequiresCheckpointBeforeRuntimeControl
+--- PASS: TestHarnessHTTPApprovalRequiresCheckpointBeforeRuntimeControl (0.01s)
+=== RUN   TestInteractionUnknownOutcomeReturnsSafeConflict
+--- PASS: TestInteractionUnknownOutcomeReturnsSafeConflict (0.00s)
+=== RUN   TestApplicationUnknownOutcomeReturnsSafeConflict
+--- PASS: TestApplicationUnknownOutcomeReturnsSafeConflict (0.00s)
+=== RUN   TestManualNewsCapabilityRefusalReturnsSafeActionableHTTPError
+--- PASS: TestManualNewsCapabilityRefusalReturnsSafeActionableHTTPError (0.00s)
+=== RUN   TestRegisterRoutesAndNilComposition
+--- PASS: TestRegisterRoutesAndNilComposition (0.00s)
+=== RUN   TestHandlerGuardsUnavailableAndMissingTurnID
+=== RUN   TestHandlerGuardsUnavailableAndMissingTurnID/turn_unavailable
+=== RUN   TestHandlerGuardsUnavailableAndMissingTurnID/turn_id_required
+--- PASS: TestHandlerGuardsUnavailableAndMissingTurnID (0.00s)
+    --- PASS: TestHandlerGuardsUnavailableAndMissingTurnID/turn_unavailable (0.00s)
+    --- PASS: TestHandlerGuardsUnavailableAndMissingTurnID/turn_id_required (0.00s)
+=== RUN   TestSnapshotResponseMasksTerminalHostOutputUntilProjectionAcknowledgement
+--- PASS: TestSnapshotResponseMasksTerminalHostOutputUntilProjectionAcknowledgement (0.00s)
+=== RUN   TestSnapshotResponseProjectsGenericInteraction
+--- PASS: TestSnapshotResponseProjectsGenericInteraction (0.00s)
+=== RUN   TestSnapshotResponseProjectsInvocationWithoutRuntimeExecutionIdentity
+--- PASS: TestSnapshotResponseProjectsInvocationWithoutRuntimeExecutionIdentity (0.00s)
+=== RUN   TestSnapshotResponseProjectsManualDelegationMetadataAndChildRun
+--- PASS: TestSnapshotResponseProjectsManualDelegationMetadataAndChildRun (0.00s)
+=== RUN   TestSnapshotContainsRetryableChildInvocationAllowsOnlyChildRetry
+--- PASS: TestSnapshotContainsRetryableChildInvocationAllowsOnlyChildRetry (0.00s)
+=== RUN   TestWriteTurnFeedCursorExpiredReturnsRecoveryHead
+--- PASS: TestWriteTurnFeedCursorExpiredReturnsRecoveryHead (0.00s)
+=== RUN   TestPR72PrivatePhysicalIDsAreAbsentFromTimelineAndFeedProjections
+--- PASS: TestPR72PrivatePhysicalIDsAreAbsentFromTimelineAndFeedProjections (0.00s)
+=== RUN   TestPR72UnknownPhysicalStartUsesSafeConflictHTTP
+--- PASS: TestPR72UnknownPhysicalStartUsesSafeConflictHTTP (0.00s)
+=== RUN   TestPublicHarnessSnapshotAndFeedRedactAllFailureDetails
+=== PAUSE TestPublicHarnessSnapshotAndFeedRedactAllFailureDetails
+=== RUN   TestPublicHarnessApprovalItemOmitsRawArgumentsInSnapshotAndFeed
+=== PAUSE TestPublicHarnessApprovalItemOmitsRawArgumentsInSnapshotAndFeed
+=== RUN   TestBoundedHarnessHTTPStateAndTimelineOwnerAccess
+--- PASS: TestBoundedHarnessHTTPStateAndTimelineOwnerAccess (0.01s)
+=== CONT  TestPublicHarnessApprovalItemOmitsRawArgumentsInSnapshotAndFeed
+=== CONT  TestPublicHarnessSnapshotAndFeedRedactAllFailureDetails
+=== RUN   TestPublicHarnessApprovalItemOmitsRawArgumentsInSnapshotAndFeed/started
+--- PASS: TestPublicHarnessSnapshotAndFeedRedactAllFailureDetails (0.00s)
+=== RUN   TestPublicHarnessApprovalItemOmitsRawArgumentsInSnapshotAndFeed/completed
+--- PASS: TestPublicHarnessApprovalItemOmitsRawArgumentsInSnapshotAndFeed (0.00s)
+    --- PASS: TestPublicHarnessApprovalItemOmitsRawArgumentsInSnapshotAndFeed/started (0.00s)
+    --- PASS: TestPublicHarnessApprovalItemOmitsRawArgumentsInSnapshotAndFeed/completed (0.00s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http/harness	1.689s
+=== RUN   TestRegisterRoutesAndNilComposition
+--- PASS: TestRegisterRoutesAndNilComposition (0.00s)
+=== RUN   TestStartRunRejectsUnavailableAndInvalidJSON
+=== RUN   TestStartRunRejectsUnavailableAndInvalidJSON/unavailable
+=== RUN   TestStartRunRejectsUnavailableAndInvalidJSON/invalid_json
+--- PASS: TestStartRunRejectsUnavailableAndInvalidJSON (0.00s)
+    --- PASS: TestStartRunRejectsUnavailableAndInvalidJSON/unavailable (0.00s)
+    --- PASS: TestStartRunRejectsUnavailableAndInvalidJSON/invalid_json (0.00s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http/team	1.599s
+=== RUN   TestPublicWorkflowTraceUsesBoundedErrorCodes
+=== PAUSE TestPublicWorkflowTraceUsesBoundedErrorCodes
+=== RUN   TestDefinitionRequestsEnforceRequiredDraftMembers
+=== RUN   TestDefinitionRequestsEnforceRequiredDraftMembers/compile
+=== RUN   TestDefinitionRequestsEnforceRequiredDraftMembers/compile/missing_draft
+=== RUN   TestDefinitionRequestsEnforceRequiredDraftMembers/compile/null_draft
+=== RUN   TestDefinitionRequestsEnforceRequiredDraftMembers/compile/empty_draft
+=== RUN   TestDefinitionRequestsEnforceRequiredDraftMembers/compile/missing_revision
+=== RUN   TestDefinitionRequestsEnforceRequiredDraftMembers/compile/missing_nodes
+=== RUN   TestDefinitionRequestsEnforceRequiredDraftMembers/compile/null_nodes
+=== RUN   TestDefinitionRequestsEnforceRequiredDraftMembers/compile/invalid_ID
+=== RUN   TestDefinitionRequestsEnforceRequiredDraftMembers/compile/valid_revision_zero
+=== RUN   TestDefinitionRequestsEnforceRequiredDraftMembers/publish
+=== RUN   TestDefinitionRequestsEnforceRequiredDraftMembers/publish/missing_draft
+=== RUN   TestDefinitionRequestsEnforceRequiredDraftMembers/publish/null_draft
+=== RUN   TestDefinitionRequestsEnforceRequiredDraftMembers/publish/empty_draft
+=== RUN   TestDefinitionRequestsEnforceRequiredDraftMembers/publish/missing_revision
+=== RUN   TestDefinitionRequestsEnforceRequiredDraftMembers/publish/missing_nodes
+=== RUN   TestDefinitionRequestsEnforceRequiredDraftMembers/publish/null_nodes
+=== RUN   TestDefinitionRequestsEnforceRequiredDraftMembers/publish/invalid_ID
+=== RUN   TestDefinitionRequestsEnforceRequiredDraftMembers/publish/valid_revision_zero
+--- PASS: TestDefinitionRequestsEnforceRequiredDraftMembers (0.01s)
+    --- PASS: TestDefinitionRequestsEnforceRequiredDraftMembers/compile (0.00s)
+        --- PASS: TestDefinitionRequestsEnforceRequiredDraftMembers/compile/missing_draft (0.00s)
+        --- PASS: TestDefinitionRequestsEnforceRequiredDraftMembers/compile/null_draft (0.00s)
+        --- PASS: TestDefinitionRequestsEnforceRequiredDraftMembers/compile/empty_draft (0.00s)
+        --- PASS: TestDefinitionRequestsEnforceRequiredDraftMembers/compile/missing_revision (0.00s)
+        --- PASS: TestDefinitionRequestsEnforceRequiredDraftMembers/compile/missing_nodes (0.00s)
+        --- PASS: TestDefinitionRequestsEnforceRequiredDraftMembers/compile/null_nodes (0.00s)
+        --- PASS: TestDefinitionRequestsEnforceRequiredDraftMembers/compile/invalid_ID (0.00s)
+        --- PASS: TestDefinitionRequestsEnforceRequiredDraftMembers/compile/valid_revision_zero (0.00s)
+    --- PASS: TestDefinitionRequestsEnforceRequiredDraftMembers/publish (0.00s)
+        --- PASS: TestDefinitionRequestsEnforceRequiredDraftMembers/publish/missing_draft (0.00s)
+        --- PASS: TestDefinitionRequestsEnforceRequiredDraftMembers/publish/null_draft (0.00s)
+        --- PASS: TestDefinitionRequestsEnforceRequiredDraftMembers/publish/empty_draft (0.00s)
+        --- PASS: TestDefinitionRequestsEnforceRequiredDraftMembers/publish/missing_revision (0.00s)
+        --- PASS: TestDefinitionRequestsEnforceRequiredDraftMembers/publish/missing_nodes (0.00s)
+        --- PASS: TestDefinitionRequestsEnforceRequiredDraftMembers/publish/null_nodes (0.00s)
+        --- PASS: TestDefinitionRequestsEnforceRequiredDraftMembers/publish/invalid_ID (0.00s)
+        --- PASS: TestDefinitionRequestsEnforceRequiredDraftMembers/publish/valid_revision_zero (0.00s)
+=== RUN   TestDefinitionRegistryHTTPPublishesStartsAndDisablesImmutableRevision
+=== PAUSE TestDefinitionRegistryHTTPPublishesStartsAndDisablesImmutableRevision
+=== RUN   TestDefinitionMutationRequiresHostAuthorizer
+=== PAUSE TestDefinitionMutationRequiresHostAuthorizer
+=== RUN   TestStartRunReturnsAcceptedForPersistedPendingEffect
+=== PAUSE TestStartRunReturnsAcceptedForPersistedPendingEffect
+=== CONT  TestStartRunReturnsAcceptedForPersistedPendingEffect
+=== CONT  TestDefinitionRegistryHTTPPublishesStartsAndDisablesImmutableRevision
+=== CONT  TestDefinitionMutationRequiresHostAuthorizer
+=== CONT  TestPublicWorkflowTraceUsesBoundedErrorCodes
+--- PASS: TestPublicWorkflowTraceUsesBoundedErrorCodes (0.00s)
+--- PASS: TestDefinitionMutationRequiresHostAuthorizer (0.00s)
+--- PASS: TestStartRunReturnsAcceptedForPersistedPendingEffect (0.01s)
+--- PASS: TestDefinitionRegistryHTTPPublishesStartsAndDisablesImmutableRevision (0.01s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http/workflow	1.932s
+
+EXIT_CODE=0

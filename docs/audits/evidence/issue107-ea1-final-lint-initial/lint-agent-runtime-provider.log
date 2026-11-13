@@ -1,0 +1,9 @@
+SOURCE_SHA=bac29b079e054716cf90101e6e6f03121e819255
+COMMAND=cd go/agent-runtime-provider && golangci-lint run ./...
+go/agent-runtime-provider/agent_unknown_outcome_test.go:93:23: QF1008: could remove embedded field "Store" from selector (staticcheck)
+			original, err := s.Store.Load(ctx, s.runID)
+			                   ^
+1 issues:
+* staticcheck: 1
+
+EXIT_CODE=1

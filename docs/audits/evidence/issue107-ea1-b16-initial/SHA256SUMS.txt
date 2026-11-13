@@ -1,0 +1,1 @@
+66c6de7e5c46bc0bb5ee5fbefc89018fbca84730fb7e415256e7592671892e40  smoke-memory.log

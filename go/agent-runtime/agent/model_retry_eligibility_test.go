@@ -14,27 +14,6 @@ type modelEligibilityClock struct{ now time.Time }
 
 func (clock *modelEligibilityClock) Now() time.Time { return clock.now }
 
-// Model retries use a persisted due time. Tests that focus on the pending
-// identity/revocation rebuild the Runner at that due time instead of relying
-// on a deprecated immediate-retry Resume path or waiting on wall-clock sleeps.
-func newModelRunnerAfterRetryDue(t *testing.T, pending kernel.Snapshot, deps agent.Dependencies) *agent.Runner {
-	t.Helper()
-	view, err := agent.ViewState(pending)
-	if err != nil || len(view.ModelInvocations) == 0 {
-		t.Fatalf("pending invocation unavailable: err=%v", err)
-	}
-	due := view.ModelInvocations[len(view.ModelInvocations)-1].RetryAfter
-	if due == nil {
-		t.Fatal("retryable invocation has no durable ReadyAt")
-	}
-	deps.Clock = &modelEligibilityClock{now: due.Add(time.Second)}
-	runner, err := agent.NewRunner(deps)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return runner
-}
-
 func TestModelRetryReadyAtCannotBeBypassedByDirectResume(t *testing.T) {
 	for _, native := range []bool{false, true} {
 		label := "direct"
@@ -72,16 +51,16 @@ func TestModelRetryReadyAtCannotBeBypassedByDirectResume(t *testing.T) {
 				view.ModelInvocations[0].Status != agent.ModelInvocationPending {
 				t.Fatalf("retryable intent not durable: %+v err=%v", view, viewErr)
 			}
-			if view.ModelInvocations[0].RetryAfter == nil ||
-				!view.ModelInvocations[0].RetryAfter.After(clock.Now()) {
-				t.Fatal("retry due time must be durable for all Agent execution modes")
+			if view.ModelInvocations[0].DispatchAttempt != 1 {
+				t.Fatal("unknown original dispatch attempt missing")
 			}
+
 			before, err := rt.Load(t.Context(), run.Run.ID)
 			if err != nil {
 				t.Fatal(err)
 			}
 			_, err = runner.Resume(t.Context(), run.Run.ID, before.Run.Revision)
-			if !errors.Is(err, agent.ErrModelInvocationBusy) || len(model.callsCopy()) != 1 {
+			if !errors.Is(err, agent.ErrModelOutcomeUnknown) || len(model.callsCopy()) != 1 {
 				t.Fatalf("early direct Resume bypassed retry due time: err=%v providerCalls=%d", err, len(model.callsCopy()))
 			}
 			after, err := rt.Load(t.Context(), run.Run.ID)
@@ -90,7 +69,7 @@ func TestModelRetryReadyAtCannotBeBypassedByDirectResume(t *testing.T) {
 			}
 			clock.now = clock.now.Add(4 * time.Minute)
 			done, err := runner.Resume(t.Context(), run.Run.ID, after.Run.Revision)
-			if err != nil || done.Run.Status != kernel.RunStatusCompleted || len(model.callsCopy()) != 2 {
+			if !errors.Is(err, agent.ErrModelOutcomeUnknown) || done.Run.Status != kernel.RunStatusRunning || len(model.callsCopy()) != 1 {
 				t.Fatalf("due retry not completed exactly once: run=%+v calls=%d err=%v", done.Run, len(model.callsCopy()), err)
 			}
 		})

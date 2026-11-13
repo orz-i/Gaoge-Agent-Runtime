@@ -1,0 +1,7 @@
+=== RUN   TestIssue107SQLiteOriginalPhysicalReceiptAckLostAcrossRestart
+--- PASS: TestIssue107SQLiteOriginalPhysicalReceiptAckLostAcrossRestart (0.08s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite	2.144s
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/examples/embedded	2.065s [no tests to run]

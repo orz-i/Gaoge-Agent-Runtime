@@ -1,0 +1,87 @@
+SOURCE_SHA=f146f20cfc59d8516f35c0b1f415a5381dbd275a
+COMMAND=go -C go/agent-runtime-sqlite test -race -count=1 ./... -run '^TestEA1RootAgent(CancelPhases|Election)' -v
+=== RUN   TestEA1RootAgentCancelPhasesNativeSQLite
+=== RUN   TestEA1RootAgentCancelPhasesNativeSQLite/P0/missing
+=== RUN   TestEA1RootAgentCancelPhasesNativeSQLite/P0/stale
+=== RUN   TestEA1RootAgentCancelPhasesNativeSQLite/P0/prepared
+=== RUN   TestEA1RootAgentCancelPhasesNativeSQLite/P0/native-before-owned
+=== RUN   TestEA1RootAgentCancelPhasesNativeSQLite/P1/active-original-callback
+=== RUN   TestEA1RootAgentCancelPhasesNativeSQLite/P2/host
+=== RUN   TestEA1RootAgentCancelPhasesNativeSQLite/P2/model
+=== RUN   TestEA1RootAgentCancelPhasesNativeSQLite/P2/tool
+=== RUN   TestEA1RootAgentCancelPhasesNativeSQLite/P3/yield
+=== RUN   TestEA1RootAgentCancelPhasesNativeSQLite/P3/terminal
+=== RUN   TestEA1RootAgentCancelPhasesNativeSQLite/P4/yield
+=== RUN   TestEA1RootAgentCancelPhasesNativeSQLite/P4/terminal
+=== RUN   TestEA1RootAgentCancelPhasesNativeSQLite/P4/actual-cancel-CAS-lost-ACK
+=== RUN   TestEA1RootAgentCancelPhasesNativeSQLite/P5/cancel-wins-resume-admission
+=== RUN   TestEA1RootAgentCancelPhasesNativeSQLite/P5/resume-scope-rejects-cancel
+=== RUN   TestEA1RootAgentCancelPhasesNativeSQLite/P5/two-cancel-owners
+=== RUN   TestEA1RootAgentCancelPhasesNativeSQLite/P5/cancel-deadline
+--- PASS: TestEA1RootAgentCancelPhasesNativeSQLite (11.14s)
+    --- PASS: TestEA1RootAgentCancelPhasesNativeSQLite/P0/missing (0.08s)
+    --- PASS: TestEA1RootAgentCancelPhasesNativeSQLite/P0/stale (0.07s)
+    --- PASS: TestEA1RootAgentCancelPhasesNativeSQLite/P0/prepared (0.07s)
+    --- PASS: TestEA1RootAgentCancelPhasesNativeSQLite/P0/native-before-owned (0.10s)
+    --- PASS: TestEA1RootAgentCancelPhasesNativeSQLite/P1/active-original-callback (0.10s)
+    --- PASS: TestEA1RootAgentCancelPhasesNativeSQLite/P2/host (2.25s)
+    --- PASS: TestEA1RootAgentCancelPhasesNativeSQLite/P2/model (2.23s)
+    --- PASS: TestEA1RootAgentCancelPhasesNativeSQLite/P2/tool (2.25s)
+    --- PASS: TestEA1RootAgentCancelPhasesNativeSQLite/P3/yield (0.13s)
+    --- PASS: TestEA1RootAgentCancelPhasesNativeSQLite/P3/terminal (0.14s)
+    --- PASS: TestEA1RootAgentCancelPhasesNativeSQLite/P4/yield (0.13s)
+    --- PASS: TestEA1RootAgentCancelPhasesNativeSQLite/P4/terminal (0.12s)
+    --- PASS: TestEA1RootAgentCancelPhasesNativeSQLite/P4/actual-cancel-CAS-lost-ACK (0.09s)
+    --- PASS: TestEA1RootAgentCancelPhasesNativeSQLite/P5/cancel-wins-resume-admission (0.07s)
+    --- PASS: TestEA1RootAgentCancelPhasesNativeSQLite/P5/resume-scope-rejects-cancel (0.12s)
+    --- PASS: TestEA1RootAgentCancelPhasesNativeSQLite/P5/two-cancel-owners (0.09s)
+    --- PASS: TestEA1RootAgentCancelPhasesNativeSQLite/P5/cancel-deadline (3.09s)
+=== RUN   TestEA1RootAgentElectionNativeSQLite
+=== RUN   TestEA1RootAgentElectionNativeSQLite/start/host
+=== RUN   TestEA1RootAgentElectionNativeSQLite/start/model
+=== RUN   TestEA1RootAgentElectionNativeSQLite/start/tool
+=== RUN   TestEA1RootAgentElectionNativeSQLite/start/deadline
+=== RUN   TestEA1RootAgentElectionNativeSQLite/start/unknown-model
+=== RUN   TestEA1RootAgentElectionNativeSQLite/start/unknown-tool
+=== RUN   TestEA1RootAgentElectionNativeSQLite/resume/host
+=== RUN   TestEA1RootAgentElectionNativeSQLite/resume/model
+=== RUN   TestEA1RootAgentElectionNativeSQLite/resume/tool
+=== RUN   TestEA1RootAgentElectionNativeSQLite/resume/deadline
+=== RUN   TestEA1RootAgentElectionNativeSQLite/resume/unknown-model
+=== RUN   TestEA1RootAgentElectionNativeSQLite/resume/unknown-tool
+=== RUN   TestEA1RootAgentElectionNativeSQLite/recovery/model/known
+=== RUN   TestEA1RootAgentElectionNativeSQLite/recovery/model/unknown-ttl
+=== RUN   TestEA1RootAgentElectionNativeSQLite/recovery/model/competing-receipt
+=== RUN   TestEA1RootAgentElectionNativeSQLite/recovery/model/deadline-known
+=== RUN   TestEA1RootAgentElectionNativeSQLite/recovery/tool/known
+=== RUN   TestEA1RootAgentElectionNativeSQLite/recovery/tool/unknown-ttl
+=== RUN   TestEA1RootAgentElectionNativeSQLite/recovery/tool/competing-receipt
+=== RUN   TestEA1RootAgentElectionNativeSQLite/recovery/tool/deadline-known
+--- PASS: TestEA1RootAgentElectionNativeSQLite (18.91s)
+    --- PASS: TestEA1RootAgentElectionNativeSQLite/start/host (0.11s)
+    --- PASS: TestEA1RootAgentElectionNativeSQLite/start/model (0.09s)
+    --- PASS: TestEA1RootAgentElectionNativeSQLite/start/tool (0.11s)
+    --- PASS: TestEA1RootAgentElectionNativeSQLite/start/deadline (1.07s)
+    --- PASS: TestEA1RootAgentElectionNativeSQLite/start/unknown-model (2.21s)
+    --- PASS: TestEA1RootAgentElectionNativeSQLite/start/unknown-tool (2.21s)
+    --- PASS: TestEA1RootAgentElectionNativeSQLite/resume/host (0.11s)
+    --- PASS: TestEA1RootAgentElectionNativeSQLite/resume/model (0.11s)
+    --- PASS: TestEA1RootAgentElectionNativeSQLite/resume/tool (0.12s)
+    --- PASS: TestEA1RootAgentElectionNativeSQLite/resume/deadline (1.07s)
+    --- PASS: TestEA1RootAgentElectionNativeSQLite/resume/unknown-model (2.22s)
+    --- PASS: TestEA1RootAgentElectionNativeSQLite/resume/unknown-tool (2.24s)
+    --- PASS: TestEA1RootAgentElectionNativeSQLite/recovery/model/known (0.14s)
+    --- PASS: TestEA1RootAgentElectionNativeSQLite/recovery/model/unknown-ttl (2.22s)
+    --- PASS: TestEA1RootAgentElectionNativeSQLite/recovery/model/competing-receipt (0.13s)
+    --- PASS: TestEA1RootAgentElectionNativeSQLite/recovery/model/deadline-known (1.13s)
+    --- PASS: TestEA1RootAgentElectionNativeSQLite/recovery/tool/known (0.15s)
+    --- PASS: TestEA1RootAgentElectionNativeSQLite/recovery/tool/unknown-ttl (2.23s)
+    --- PASS: TestEA1RootAgentElectionNativeSQLite/recovery/tool/competing-receipt (0.15s)
+    --- PASS: TestEA1RootAgentElectionNativeSQLite/recovery/tool/deadline-known (1.10s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite	31.872s
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/examples/embedded	1.848s [no tests to run]
+
+EXIT_CODE=0

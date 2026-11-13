@@ -2,7 +2,9 @@ package harness
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -67,40 +69,63 @@ func TestBudgetProjectionFailureCannotEraseSettledModelReceipt(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			runner, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: client, Clock: durabilityTestClock{now: now}, ModelMiddleware: []plugin.ModelMiddleware{shared}, RunMiddleware: []plugin.RunMiddleware{shared}})
+			runner, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: client, ModelOutcomeVerifier: shared, Clock: durabilityTestClock{now: now}, ModelMiddleware: []plugin.ModelMiddleware{shared}, RunMiddleware: []plugin.RunMiddleware{shared}})
 			if err != nil {
 				t.Fatal(err)
 			}
 			final, callErr := runner.StartRun(t.Context(), agent.StartRequest{ID: request.RunID, Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "owner"}, Thread: kernel.ThreadRef{Kind: "test", ID: "receipt"}, Goal: "finish", Limits: budget.Limits{MaxLLMCalls: 1}})
+			if callErr == nil || client.calls != 1 {
+				t.Fatalf("original projection/receipt fault missing: %v calls=%d", callErr, client.calls)
+			}
+			original, err := runtime.Load(t.Context(), request.RunID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			grant, err := runtime.LookupChildExecution(t.Context(), request.RunID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			completion, err := runtime.LookupOwnedPhysicalCallbackReturn(t.Context(), grant)
+			if err != nil || completion.HostCompleted {
+				t.Fatalf("unknown whole Host callback incorrectly completed: %+v %v", completion, err)
+			}
+			ledgerBefore, err := store.LoadBudget(t.Context(), "hosted-budget-turn")
+			if err != nil {
+				t.Fatal(err)
+			}
 			if replay {
-				projection.fail = true
-				runner, err = agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: client, Clock: durabilityTestClock{now: now.Add(3 * time.Minute)}, ModelMiddleware: []plugin.ModelMiddleware{shared}, RunMiddleware: []plugin.RunMiddleware{shared}})
+				projection.fail = true // Pure receipt recovery must never call this projection.
+				runner, err = agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: client, ModelOutcomeVerifier: shared, Clock: durabilityTestClock{now: now.Add(3 * time.Minute)}, ModelMiddleware: []plugin.ModelMiddleware{shared}, RunMiddleware: []plugin.RunMiddleware{shared}})
 				if err != nil {
 					t.Fatal(err)
 				}
-				pending, loadErr := runtime.Load(t.Context(), request.RunID)
-				if loadErr != nil {
-					t.Fatal(loadErr)
+				final, callErr = runner.Resume(t.Context(), original.Run.ID, original.Run.Revision)
+				assertRootReceiptEvidenceOnly(t, runtime, original, final, grant, callErr)
+				again, againErr := runner.Resume(t.Context(), final.Run.ID, final.Run.Revision)
+				if !errors.Is(againErr, agent.ErrRootOutcomeUnknown) || !reflect.DeepEqual(again, final) {
+					t.Fatalf("duplicate unknown receipt advanced: %v", againErr)
 				}
-				final, callErr = runner.Resume(t.Context(), pending.Run.ID, pending.Run.Revision)
+				view, _ := agent.ViewState(final)
+				if view.ModelInvocations[0].ErrorCode != "" || view.ModelInvocations[0].Response.Content != "known final answer" {
+					t.Fatal("recovery reran projection or rewrote original accepted response")
+				}
+			} else {
+				// The original callback already consumed its known rejected response
+				// before Host return. Do not roll back that real terminal outcome.
+				view, viewErr := agent.ViewState(final)
+				if viewErr != nil || final.Run.Status != kernel.RunStatusFailed || final.Run.ErrorCode != "model.post_generation_failed" || len(view.ModelInvocations) != 1 || view.ModelInvocations[0].Status != agent.ModelInvocationConsumed || view.ModelInvocations[0].ProviderResponseID != "known-completion" || view.Budget.Usage.TotalTokens != 30 {
+					t.Fatalf("original known rejection lost: %+v %v", view, viewErr)
+				}
 			}
-			if callErr == nil || final.Run.Status != kernel.RunStatusFailed || final.Run.ErrorCode != "model.post_generation_failed" || client.calls != 1 {
-				t.Fatalf("projection failure lost final receipt: status=%s code=%s calls=%d err=%v", final.Run.Status, final.Run.ErrorCode, client.calls, callErr)
+			ledgerAfter, err := store.LoadBudget(t.Context(), "hosted-budget-turn")
+			if err != nil || !reflect.DeepEqual(ledgerBefore, ledgerAfter) || ledgerAfter.View("").UnknownUsage || ledgerAfter.View("").Usage.LLMCalls != 1 || ledgerAfter.View("").Usage.TotalTokens != 30 || ledgerAfter.View("").Usage.ToolCalls != 0 || ledgerAfter.View("").Reserved.LLMCalls != 0 || client.calls != 1 {
+				t.Fatalf("known ledger receipt changed: %+v %v calls=%d", ledgerAfter, err, client.calls)
 			}
-			view, err := agent.ViewState(final)
-			if err != nil {
-				t.Fatal(err)
+			actualGrant, err := runtime.LookupChildExecution(t.Context(), request.RunID)
+			if err != nil || actualGrant != grant {
+				t.Fatalf("unknown Host scope retired: %v", err)
 			}
-			if view.Budget.Usage.LLMCalls != 1 || len(view.ModelInvocations) != 1 || view.ModelInvocations[0].Status != agent.ModelInvocationConsumed || view.ModelInvocations[0].ProviderResponseID != "known-completion" {
-				t.Fatalf("SDK lost settled projection receipt: %+v", view)
-			}
-			ledger, err := store.LoadBudget(t.Context(), "hosted-budget-turn")
-			if err != nil {
-				t.Fatal(err)
-			}
-			if ledger.View("").UnknownUsage || ledger.View("").Reserved.LLMCalls != 0 || view.Budget.Usage.TotalTokens != ledger.View("").Usage.TotalTokens {
-				t.Fatalf("projection error changed actual accounting: %+v %+v", view.Budget, ledger.View(""))
-			}
+
 		})
 	}
 }
@@ -144,7 +169,7 @@ func TestSettledRejectionRecoversSDKReceiptWithoutRegeneration(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					runner, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: client, Clock: durabilityTestClock{now: at}, ModelMiddleware: []plugin.ModelMiddleware{shared}, RunMiddleware: []plugin.RunMiddleware{shared}})
+					runner, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: client, ModelOutcomeVerifier: shared, Clock: durabilityTestClock{now: at}, ModelMiddleware: []plugin.ModelMiddleware{shared}, RunMiddleware: []plugin.RunMiddleware{shared}})
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -160,24 +185,29 @@ func TestSettledRejectionRecoversSDKReceiptWithoutRegeneration(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				final, err := restarted.Resume(t.Context(), pending.Run.ID, pending.Run.Revision)
-				if err == nil || final.Run.Status != kernel.RunStatusFailed || client.calls != 1 {
-					t.Fatalf("status=%s generations=%d err=%v", final.Run.Status, client.calls, err)
-				}
-				view, err := agent.ViewState(final)
+				grant, err := runtime.LookupChildExecution(t.Context(), request.RunID)
 				if err != nil {
 					t.Fatal(err)
+				}
+				ledgerBefore, err := store.LoadBudget(t.Context(), "hosted-budget-turn")
+				if err != nil {
+					t.Fatal(err)
+				}
+				final, err := restarted.Resume(t.Context(), pending.Run.ID, pending.Run.Revision)
+				assertRootReceiptEvidenceOnly(t, runtime, pending, final, grant, err)
+				again, againErr := restarted.Resume(t.Context(), final.Run.ID, final.Run.Revision)
+				if !errors.Is(againErr, agent.ErrRootOutcomeUnknown) || !reflect.DeepEqual(again, final) {
+					t.Fatalf("duplicate unknown receipt advanced: %v", againErr)
+				}
+				view, _ := agent.ViewState(final)
+				if view.ModelInvocations[0].ErrorCode == "" {
+					t.Fatal("original rejected receipt lost rejection")
 				}
 				ledger, err := store.LoadBudget(t.Context(), "hosted-budget-turn")
-				if err != nil {
-					t.Fatal(err)
+				if err != nil || !reflect.DeepEqual(ledgerBefore, ledger) || ledger.View("").UnknownUsage || ledger.View("").Reserved.LLMCalls != 0 || ledger.View("").Usage.TotalTokens != 30 || ledger.View("").Usage.ToolCalls != 0 || client.calls != 1 {
+					t.Fatalf("receipt lookup changed ledger/generation: %+v %v calls=%d", ledger, err, client.calls)
 				}
-				if view.Budget.Usage.LLMCalls != 1 || view.Budget.Usage.TotalTokens != ledger.View("").Usage.TotalTokens || ledger.View("").UnknownUsage || ledger.View("").Reserved.LLMCalls != 0 {
-					t.Fatalf("SDK/ledger diverged: %+v %+v", view.Budget, ledger.View(""))
-				}
-				if len(view.ModelInvocations) != 1 || view.ModelInvocations[0].Status != agent.ModelInvocationConsumed || view.ModelInvocations[0].ErrorCode == "" || view.ModelInvocations[0].ProviderResponseID != "known-completion" {
-					t.Fatalf("known receipt lost: %+v", view.ModelInvocations)
-				}
+
 			})
 		}
 	}
@@ -247,5 +277,52 @@ func TestRejectedResponseCannotTurnPartialUsageIntoKnownCompletion(t *testing.T)
 				t.Fatalf("uncertain charge was released or settled: %+v", view)
 			}
 		})
+	}
+}
+
+// Receipt evidence is not permission to consume it or complete an unknown Host.
+func assertRootReceiptEvidenceOnly(t *testing.T, runtime *kernel.Runtime, before, after kernel.Snapshot, grant kernel.ChildExecutionGrant, outcome error) {
+	t.Helper()
+	if !errors.Is(outcome, agent.ErrRootOutcomeUnknown) || after.Run.Status != kernel.RunStatusRunning {
+		t.Fatalf("receipt recovery advanced unknown Host: %+v %v", after.Run, outcome)
+	}
+	view, err := agent.ViewState(after)
+	if err != nil || len(view.ModelInvocations) != 1 {
+		t.Fatalf("missing receipt evidence: %+v %v", view, err)
+	}
+	receipt := view.ModelInvocations[0]
+	if receipt.Status != agent.ModelInvocationCompleted || receipt.ProviderResponseID != "known-completion" || receipt.Usage == nil || receipt.Usage.InputTokens != 20 || receipt.Usage.OutputTokens != 10 || receipt.ConsumedAt != nil || view.Budget.Usage.LLMCalls != 0 || view.Budget.Usage.ToolCalls != 0 {
+		t.Fatalf("receipt consumed/lost: %+v", view)
+	}
+	old, err := agent.ViewState(before)
+	if err != nil || len(old.ModelInvocations) != 1 {
+		t.Fatal("missing original invocation")
+	}
+	original := old.ModelInvocations[0]
+	if receipt.ID != original.ID || receipt.RunID != original.RunID || receipt.SourceRevision != original.SourceRevision || receipt.RequestHash != original.RequestHash || receipt.Provider != original.Provider || receipt.BindingFingerprint != original.BindingFingerprint || receipt.Model != original.Model || receipt.DispatchAttempt != original.DispatchAttempt || receipt.ExecutionAttempt != original.ExecutionAttempt || !reflect.DeepEqual(receipt.Request, original.Request) {
+		t.Fatal("receipt rebound original source/attempt")
+	}
+	var left, right map[string]json.RawMessage
+	if json.Unmarshal(before.State, &left) != nil || json.Unmarshal(after.State, &right) != nil {
+		t.Fatal("invalid state")
+	}
+	delete(left, "modelInvocations")
+	delete(right, "modelInvocations")
+	if !reflect.DeepEqual(left, right) || !reflect.DeepEqual(before.Checkpoint, after.Checkpoint) || !reflect.DeepEqual(before.Result, after.Result) {
+		t.Fatal("receipt-only changed messages/budget/tool/deferred/control state")
+	}
+	originalRun := before.Run
+	originalRun.Revision = after.Run.Revision
+	originalRun.UpdatedAt = after.Run.UpdatedAt
+	if !reflect.DeepEqual(originalRun, after.Run) {
+		t.Fatal("receipt-only changed Run identity/status")
+	}
+	actual, err := runtime.LookupChildExecution(t.Context(), before.Run.ID)
+	if err != nil || actual != grant {
+		t.Fatalf("receipt-only retired original scope: %v", err)
+	}
+	completion, err := runtime.LookupOwnedPhysicalCallbackReturn(t.Context(), grant)
+	if err != nil || completion.HostCompleted {
+		t.Fatalf("receipt-only upgraded Host completion: %+v %v", completion, err)
 	}
 }

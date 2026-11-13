@@ -1,0 +1,50 @@
+SOURCE_SHA=f2187814eff825f3103e04f4d4f655f6923b21d1
+COMMAND=go -C go/agent-runtime-sqlite test -count=1 -v ./... -run '^TestSQLiteManagedRecoveryStore$'
+=== RUN   TestSQLiteManagedRecoveryStore
+=== RUN   TestSQLiteManagedRecoveryStore/owner-and-leave
+=== RUN   TestSQLiteManagedRecoveryStore/owner-and-leave/live
+=== RUN   TestSQLiteManagedRecoveryStore/owner-and-leave/renew
+=== RUN   TestSQLiteManagedRecoveryStore/owner-and-leave/leave
+=== RUN   TestSQLiteManagedRecoveryStore/owner-and-leave/claim
+=== RUN   TestSQLiteManagedRecoveryStore/owner-and-leave/eventhead
+=== RUN   TestSQLiteManagedRecoveryStore/parked-gates
+=== RUN   TestSQLiteManagedRecoveryStore/selection-ack
+=== RUN   TestSQLiteManagedRecoveryStore/selection-ack/RESUME
+    managed_recovery.go:258: kernel execution lease is not current
+=== RUN   TestSQLiteManagedRecoveryStore/selection-ack/CANCEL
+=== RUN   TestSQLiteManagedRecoveryStore/two-enable-claimants
+    managed_recovery.go:535: kernel execution lease is not current
+=== RUN   TestSQLiteManagedRecoveryStore/transaction-ack
+=== RUN   TestSQLiteManagedRecoveryStore/transaction-ack/t0
+=== RUN   TestSQLiteManagedRecoveryStore/transaction-ack/park
+=== RUN   TestSQLiteManagedRecoveryStore/transaction-ack/enable
+    managed_recovery.go:508: kernel execution lease is not current
+=== RUN   TestSQLiteManagedRecoveryStore/transaction-ack/cancel
+=== RUN   TestSQLiteManagedRecoveryStore/historical-closure
+    managed_recovery.go:326: kernel execution lease is not current
+--- FAIL: TestSQLiteManagedRecoveryStore (35.00s)
+    --- PASS: TestSQLiteManagedRecoveryStore/owner-and-leave (9.60s)
+        --- PASS: TestSQLiteManagedRecoveryStore/owner-and-leave/live (0.03s)
+        --- PASS: TestSQLiteManagedRecoveryStore/owner-and-leave/renew (3.19s)
+        --- PASS: TestSQLiteManagedRecoveryStore/owner-and-leave/leave (3.17s)
+        --- PASS: TestSQLiteManagedRecoveryStore/owner-and-leave/claim (3.17s)
+        --- PASS: TestSQLiteManagedRecoveryStore/owner-and-leave/eventhead (0.03s)
+    --- PASS: TestSQLiteManagedRecoveryStore/parked-gates (3.18s)
+    --- FAIL: TestSQLiteManagedRecoveryStore/selection-ack (6.34s)
+        --- FAIL: TestSQLiteManagedRecoveryStore/selection-ack/RESUME (3.17s)
+        --- PASS: TestSQLiteManagedRecoveryStore/selection-ack/CANCEL (3.17s)
+    --- FAIL: TestSQLiteManagedRecoveryStore/two-enable-claimants (3.17s)
+    --- FAIL: TestSQLiteManagedRecoveryStore/transaction-ack (9.54s)
+        --- PASS: TestSQLiteManagedRecoveryStore/transaction-ack/t0 (0.02s)
+        --- PASS: TestSQLiteManagedRecoveryStore/transaction-ack/park (3.17s)
+        --- FAIL: TestSQLiteManagedRecoveryStore/transaction-ack/enable (3.17s)
+        --- PASS: TestSQLiteManagedRecoveryStore/transaction-ack/cancel (3.18s)
+    --- FAIL: TestSQLiteManagedRecoveryStore/historical-closure (3.17s)
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite	35.285s
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/examples/embedded	0.276s [no tests to run]
+FAIL
+
+EXIT_CODE=1

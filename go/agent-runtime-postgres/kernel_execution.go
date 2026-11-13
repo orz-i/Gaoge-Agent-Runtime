@@ -90,11 +90,23 @@ func (store *KernelStore) AcquireExecution(ctx context.Context, request kernel.E
 		if err != nil {
 			return err
 		}
+		if transfer, e := pgLoadManaged(tx, request.RunID); e == nil && transfer.State == kernel.ManagedParked {
+			return kernel.ErrChildExecutionBusy
+		} else if e != nil && !errors.Is(e, kernel.ErrNotFound) {
+			return e
+		}
+		if scopeErr := pgRejectOwnedPhysical(tx, request.RunID); scopeErr != nil {
+			return scopeErr
+		}
 		switch kernel.RunStatus(current.Status) {
 		case kernel.RunStatusCompleted, kernel.RunStatusFailed, kernel.RunStatusCancelled:
 			return kernel.ErrTerminal
 		case kernel.RunStatusRunning:
-		case kernel.RunStatusWaitingInput, kernel.RunStatusPausedBudget:
+		case kernel.RunStatusWaitingInput:
+			if current.Kind != "agent" || current.ExecutionEpoch == 0 {
+				return kernel.ErrExecutionConflict
+			}
+		case kernel.RunStatusPausedBudget:
 			return kernel.ErrExecutionConflict
 		default:
 			return kernel.ErrExecutionConflict
@@ -118,7 +130,7 @@ func (store *KernelStore) AcquireExecution(ctx context.Context, request kernel.E
 		}
 		expiration := now.Add(request.LeaseDuration).UTC()
 		res := tx.Model(&models.KernelRunRecord{}).Where("run_id = ? AND revision = ? AND execution_epoch = ?",
-			request.RunID, current.Revision, current.ExecutionEpoch).Updates(map[string]any{
+			request.RunID, current.Revision, current.ExecutionEpoch).UpdateColumns(map[string]any{
 			"execution_epoch": current.ExecutionEpoch + 1,
 			"execution_owner": strings.TrimSpace(request.OwnerID), "execution_lease_id": id,
 			"execution_expires_at": expiration,
@@ -155,6 +167,9 @@ func (store *KernelStore) RenewExecution(ctx context.Context, req kernel.Executi
 		if err != nil {
 			return err
 		}
+		if scopeErr := pgMatchOwnedPhysical(tx, lease.RunID, &lease); scopeErr != nil {
+			return scopeErr
+		}
 		now, err := pgStoreNow(tx)
 		if err != nil {
 			return err
@@ -170,7 +185,7 @@ func (store *KernelStore) RenewExecution(ctx context.Context, req kernel.Executi
 		} else {
 			query = query.Where("execution_expires_at > ?", time.Now().UTC())
 		}
-		res := query.Update("execution_expires_at", now.Add(req.LeaseDuration).UTC())
+		res := query.UpdateColumn("execution_expires_at", now.Add(req.LeaseDuration).UTC())
 		if res.Error != nil {
 			return executionQueryError(tx, res.Error)
 		}
@@ -201,6 +216,9 @@ func (store *KernelStore) ReleaseExecution(ctx context.Context, lease kernel.Exe
 		if err != nil {
 			return err
 		}
+		if scopeErr := pgRejectOwnedPhysical(tx, lease.RunID); scopeErr != nil {
+			return scopeErr
+		}
 		now, err := pgStoreNow(tx)
 		if err != nil {
 			return err
@@ -216,7 +234,7 @@ func (store *KernelStore) ReleaseExecution(ctx context.Context, lease kernel.Exe
 		} else {
 			query = query.Where("execution_expires_at > ?", time.Now().UTC())
 		}
-		res := query.Updates(map[string]any{"execution_owner": "", "execution_lease_id": "", "execution_expires_at": nil})
+		res := query.UpdateColumns(map[string]any{"execution_owner": "", "execution_lease_id": "", "execution_expires_at": nil})
 		if res.Error != nil {
 			return executionQueryError(tx, res.Error)
 		}
@@ -274,14 +292,14 @@ func (store *KernelStore) CheckExecution(ctx context.Context, runID string, leas
 		return err
 	}
 	return store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var record models.KernelRunRecord
-		err := tx.Where("run_id = ?", runID).First(&record).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return kernel.ErrNotFound
-		}
+		record, err := lockKernelRun(tx, runID)
 		if err != nil {
-			return executionQueryError(tx, err)
+			return err
 		}
+		if err = pgMatchOwnedPhysical(tx, runID, lease); err != nil {
+			return err
+		}
+
 		switch kernel.RunStatus(record.Status) {
 		case kernel.RunStatusCompleted, kernel.RunStatusFailed, kernel.RunStatusCancelled:
 			return kernel.ErrTerminal

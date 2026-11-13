@@ -1,0 +1,31 @@
+SOURCE_SHA=793fbc202bce6f96fb81bc9b4f29d2841508a902
+EXIT_CODE=1
+=== RUN   TestEA1ResumeUnknownMemory
+=== RUN   TestEA1ResumeUnknownMemory/root
+=== RUN   TestEA1ResumeUnknownMemory/child
+    ea1_resume_unknown.go:112: unknown self/ancestor apply: <nil>
+--- FAIL: TestEA1ResumeUnknownMemory (0.02s)
+    --- PASS: TestEA1ResumeUnknownMemory/root (0.01s)
+    --- FAIL: TestEA1ResumeUnknownMemory/child (0.01s)
+=== RUN   TestEA1WaitMarkAckMemory
+=== RUN   TestEA1WaitMarkAckMemory/root
+=== RUN   TestEA1WaitMarkAckMemory/child
+--- PASS: TestEA1WaitMarkAckMemory (0.02s)
+    --- PASS: TestEA1WaitMarkAckMemory/root (0.01s)
+    --- PASS: TestEA1WaitMarkAckMemory/child (0.01s)
+=== RUN   TestEA1WaitBarriersMemory
+=== RUN   TestEA1WaitBarriersMemory/root/P1
+    ea1_wait_barriers.go:148: apply not fenced: invalid kernel input
+=== RUN   TestEA1WaitBarriersMemory/root/P3
+=== RUN   TestEA1WaitBarriersMemory/child/P1
+    ea1_wait_barriers.go:148: apply not fenced: invalid kernel input
+=== RUN   TestEA1WaitBarriersMemory/child/P3
+    ea1_wait_barriers.go:148: apply not fenced: <nil>
+--- FAIL: TestEA1WaitBarriersMemory (0.03s)
+    --- FAIL: TestEA1WaitBarriersMemory/root/P1 (0.00s)
+    --- PASS: TestEA1WaitBarriersMemory/root/P3 (0.01s)
+    --- FAIL: TestEA1WaitBarriersMemory/child/P1 (0.00s)
+    --- FAIL: TestEA1WaitBarriersMemory/child/P3 (0.01s)
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory	0.963s
+FAIL

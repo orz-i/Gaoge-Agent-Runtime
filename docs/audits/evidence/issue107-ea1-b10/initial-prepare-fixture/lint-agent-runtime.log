@@ -1,0 +1,9 @@
+SOURCE_SHA=54985e08a7aba0e54022b77c770485a682c4b75f
+DIAGNOSTIC_ONLY=true
+go/agent-runtime/conformance/ea1_child_agent_recovery.go:7:1: File is not properly formatted (goimports)
+	"errors"
+^
+1 issues:
+* goimports: 1
+
+EXIT_CODE=1

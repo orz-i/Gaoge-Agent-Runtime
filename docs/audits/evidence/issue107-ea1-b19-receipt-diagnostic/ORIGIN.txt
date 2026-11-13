@@ -1,0 +1,2 @@
+SOURCE_SHA=269bbe04f8efc9cf1c1e12fd8beeea60fa90c192
+Exact Host PG P4 passed persisted Invocation baseline, then original cancellation receipt combined assertion failed. Intent equality versus verified receipt versus active fence requires exact diagnostic; no conclusion or weakening applied. Later tests not run.

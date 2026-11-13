@@ -53,27 +53,20 @@ func (m controlTestModel) Generate(_ context.Context, request model.Request) (mo
 }
 
 type controlTestFencedCreateStore struct {
-	kernel.Store
-	execution kernel.ExecutionStore
-	lease     kernel.ExecutionLease
+	*sqlite.Store
+	lease kernel.ExecutionLease
 }
 
 func (s *controlTestFencedCreateStore) Create(ctx context.Context, record kernel.Record, events []kernel.EventDraft) (kernel.Snapshot, error) {
 	record.ExecutionRequired = true
-	snap, err := s.Store.Create(ctx, record, events)
-	if err != nil {
-		return snap, err
-	}
-	s.lease, err = s.execution.AcquireExecution(ctx, kernel.ExecutionAcquireRequest{
-		RunID: record.Run.ID, OwnerID: "starter", LeaseDuration: 30 * time.Second,
-	})
-	if err != nil {
-		return kernel.Snapshot{}, err
-	}
-	return snap, nil
+	return s.Store.Create(ctx, record, events)
 }
-func (s *controlTestFencedCreateStore) Apply(ctx context.Context, id string, revision uint64, mut kernel.StoreMutation) (kernel.Snapshot, error) {
-	return s.execution.ApplyExecution(ctx, s.lease, revision, mut)
+func (s *controlTestFencedCreateStore) AcquireExecution(ctx context.Context, req kernel.ExecutionAcquireRequest) (kernel.ExecutionLease, error) {
+	lease, err := s.Store.AcquireExecution(ctx, req)
+	if err == nil {
+		s.lease = lease
+	}
+	return lease, err
 }
 
 func controlTestRunner(rt *kernel.Runtime, markerPath string, deferResumption bool) (*agent.Runner, error) {
@@ -130,7 +123,7 @@ func TestFencedApprovalProcessChild(t *testing.T) {
 	var rt *kernel.Runtime
 	var startStore *controlTestFencedCreateStore
 	if phase == "start" {
-		startStore = &controlTestFencedCreateStore{Store: store, execution: store}
+		startStore = &controlTestFencedCreateStore{Store: store}
 		rt, err = kernel.New(kernel.Dependencies{Store: startStore})
 	} else {
 		rt, err = kernel.New(kernel.Dependencies{Store: store})
@@ -233,6 +226,11 @@ func TestFencedApprovalProcessChild(t *testing.T) {
 	next, err := resumedRunner.Resume(ctx, resolved.Run.ID, resolved.Run.Revision)
 	if err != nil {
 		t.Fatalf("fenced resume after %s: %v", phase, err)
+	}
+	// This Runtime was explicitly bound by the caller; its owner must release
+	// before a later process acquires the next approval segment.
+	if err = rt.ReleaseExecution(ctx, newLease); err != nil {
+		t.Fatal(err)
 	}
 	if phase == "first" {
 		if next.Run.Status != kernel.RunStatusWaitingInput {

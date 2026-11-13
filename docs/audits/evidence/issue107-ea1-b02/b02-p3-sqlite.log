@@ -1,0 +1,11 @@
+=== RUN   TestEA1ReceiptBeforeMarkNativeSQLite
+=== RUN   TestEA1ReceiptBeforeMarkNativeSQLite/root_receipt_committed_before_Mark
+=== RUN   TestEA1ReceiptBeforeMarkNativeSQLite/child_receipt_committed_before_Mark
+--- PASS: TestEA1ReceiptBeforeMarkNativeSQLite (0.16s)
+    --- PASS: TestEA1ReceiptBeforeMarkNativeSQLite/root_receipt_committed_before_Mark (0.08s)
+    --- PASS: TestEA1ReceiptBeforeMarkNativeSQLite/child_receipt_committed_before_Mark (0.08s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite	1.573s
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/examples/embedded	1.408s [no tests to run]

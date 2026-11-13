@@ -1,0 +1,24 @@
+{
+  "old": {
+    "blocks": 16116,
+    "duplicate_rows": 0,
+    "total": 23607,
+    "covered": 9954,
+    "raw_total": 23607,
+    "raw_covered": 9954,
+    "conformance_total": 10251,
+    "conformance_covered": 0
+  },
+  "new": {
+    "blocks": 16116,
+    "duplicate_rows": 425676,
+    "total": 23607,
+    "covered": 18650,
+    "raw_total": 647713,
+    "raw_covered": 38069,
+    "conformance_total": 10251,
+    "conformance_covered": 8052
+  },
+  "same_block_set": true,
+  "same_statement_counts": true
+}

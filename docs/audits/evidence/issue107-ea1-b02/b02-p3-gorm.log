@@ -1,0 +1,9 @@
+=== RUN   TestEA1ReceiptBeforeMarkGORM
+=== RUN   TestEA1ReceiptBeforeMarkGORM/root_receipt_committed_before_Mark
+=== RUN   TestEA1ReceiptBeforeMarkGORM/child_receipt_committed_before_Mark
+--- PASS: TestEA1ReceiptBeforeMarkGORM (0.06s)
+    --- PASS: TestEA1ReceiptBeforeMarkGORM/root_receipt_committed_before_Mark (0.03s)
+    --- PASS: TestEA1ReceiptBeforeMarkGORM/child_receipt_committed_before_Mark (0.03s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	1.880s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]

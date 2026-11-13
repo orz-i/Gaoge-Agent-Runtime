@@ -1,0 +1,11 @@
+SOURCE_SHA=2d216518cfe48bc9e2ea6b02beb7733c246376a7
+COMMAND=go -C go/agent-runtime-sqlite test -race -count=1 -v ./... -run '^TestUnsupportedExperimentalSchemaVersionMustNotBeMigrated$'
+=== RUN   TestUnsupportedExperimentalSchemaVersionMustNotBeMigrated
+--- PASS: TestUnsupportedExperimentalSchemaVersionMustNotBeMigrated (0.06s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite	1.894s
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/examples/embedded	1.795s [no tests to run]
+
+EXIT_CODE=0

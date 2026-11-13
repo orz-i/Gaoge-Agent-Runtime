@@ -35,6 +35,10 @@ func TestDelegationChildRunExhaustionBecomesRecoverableModelGuidance(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
+	bounded, err := harness.NewBoundedBudgetAdapter(harness.BudgetMiddlewareDependencies{Store: store, Relations: relations, Clock: fixedClock{}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	delegation := harness.NewDelegationToolHandler()
 	registry, err := tools.NewRegistry([]tools.Registration{harness.DelegationToolRegistration(delegation)})
 	if err != nil {
@@ -47,9 +51,9 @@ func TestDelegationChildRunExhaustionBecomesRecoverableModelGuidance(t *testing.
 	client := &childRunLimitModel{t: t}
 	direct, err := agent.NewRunner(agent.Dependencies{
 		Runtime: runtime, Model: client, Catalog: registry, Executor: registry,
-		RunMiddleware:       []plugin.RunMiddleware{shared},
-		PrepareModelRequest: rolePreparer, ModelMiddleware: []plugin.ModelMiddleware{shared},
-		ToolMiddleware: []plugin.ToolMiddleware{shared},
+		RunMiddleware:       []plugin.RunMiddleware{bounded},
+		PrepareModelRequest: rolePreparer, ModelMiddleware: []plugin.ModelMiddleware{bounded},
+		ToolMiddleware: []plugin.ToolMiddleware{bounded},
 		Limits:         agent.Limits{MaxLLMCalls: 6, MaxToolCalls: 4},
 	})
 	if err != nil {

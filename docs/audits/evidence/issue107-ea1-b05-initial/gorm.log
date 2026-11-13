@@ -1,0 +1,38 @@
+SOURCE_SHA=793fbc202bce6f96fb81bc9b4f29d2841508a902
+EXIT_CODE=1
+=== RUN   TestEA1ResumeUnknownGORM
+=== RUN   TestEA1ResumeUnknownGORM/root
+=== RUN   TestEA1ResumeUnknownGORM/child
+    ea1_resume_unknown.go:112: unknown self/ancestor apply: <nil>
+--- FAIL: TestEA1ResumeUnknownGORM (0.11s)
+    --- PASS: TestEA1ResumeUnknownGORM/root (0.07s)
+    --- FAIL: TestEA1ResumeUnknownGORM/child (0.05s)
+=== RUN   TestEA1WaitMarkAckGORM
+=== RUN   TestEA1WaitMarkAckGORM/root
+=== RUN   TestEA1WaitMarkAckGORM/child
+--- PASS: TestEA1WaitMarkAckGORM (0.09s)
+    --- PASS: TestEA1WaitMarkAckGORM/root (0.04s)
+    --- PASS: TestEA1WaitMarkAckGORM/child (0.05s)
+=== RUN   TestEA1WaitBarriersGORM
+=== RUN   TestEA1WaitBarriersGORM/root/P1
+    ea1_wait_barriers.go:148: apply not fenced: invalid kernel input
+
+2026/11/13 00:14:46 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_child_execution.go:221 [35;1msql: database is closed
+[0m[33m[0.019ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_child_effect_grants` WHERE child_run_id = "original" ORDER BY grant_id, parent_run_id LIMIT 65
+=== RUN   TestEA1WaitBarriersGORM/root/P3
+=== RUN   TestEA1WaitBarriersGORM/child/P1
+    ea1_wait_barriers.go:148: apply not fenced: invalid kernel input
+
+2026/11/13 00:14:46 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_child_execution.go:221 [35;1msql: database is closed
+[0m[33m[0.025ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_child_effect_grants` WHERE child_run_id = "original" ORDER BY grant_id, parent_run_id LIMIT 65
+=== RUN   TestEA1WaitBarriersGORM/child/P3
+    ea1_wait_barriers.go:148: apply not fenced: <nil>
+--- FAIL: TestEA1WaitBarriersGORM (0.12s)
+    --- FAIL: TestEA1WaitBarriersGORM/root/P1 (0.02s)
+    --- PASS: TestEA1WaitBarriersGORM/root/P3 (0.04s)
+    --- FAIL: TestEA1WaitBarriersGORM/child/P1 (0.03s)
+    --- FAIL: TestEA1WaitBarriersGORM/child/P3 (0.03s)
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	0.894s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]
+FAIL

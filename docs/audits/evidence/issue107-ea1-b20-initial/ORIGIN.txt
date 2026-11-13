@@ -1,0 +1,1 @@
+Source 6d969ba3f07e7672ecf2872883c377d81dc46205. Initial Memory smoke exits1 before compilation: newly required unpublished Kernel PostgreSQL/SQLite beta cohort lacks version-specific workspace replacements. No matrix cutpoint ran; this is setup FAIL, not a production invariant diagnosis. Original log retained verbatim except CRLF normalization. No ledger changes.

@@ -1,0 +1,126 @@
+SOURCE_SHA=e05290927ba0143f625857be08a0aa7493df84cf
+COMMAND=go -C go/agent-runtime-postgres test -race -count=1 ./... -run '^TestEA1MiddlewareNextLifetimeGORM$' -v
+=== RUN   TestEA1MiddlewareNextLifetimeGORM
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/root
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/root/P0/create-denied
+
+2026/11/13 10:02:24 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:209 [35;1mrecord not found
+[0m[33m[0.159ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "actual-start-child" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/root/P0/stale-admission
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/root/P0/duplicate
+
+2026/11/13 10:02:24 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:170 [35;1mUNIQUE constraint failed: agent_kernel_runs.run_id
+[0m[33m[0.123ms] [34;1m[rows:0][0m INSERT INTO `agent_kernel_runs` (`run_id`,`request_id`,`parent_run_id`,`kind`,`tenant_id`,`actor_id`,`thread_kind`,`thread_id`,`goal`,`status`,`revision`,`execution_epoch`,`execution_owner`,`execution_lease_id`,`execution_expires_at`,`execution_quarantine_revision`,`execution_quarantine_generation`,`execution_quarantine_code`,`error_code`,`error_detail`,`deadline_at`,`ended_at`,`state_json`,`checkpoint_json`,`result_json`,`last_event_seq`,`created_at`,`updated_at`) VALUES ("actual-start-child","original-child-effect","","agent","tenant","owner","conversation","thread","original Child Start","running",1,1,"","",NULL,0,0,"","","",NULL,NULL,"{""messages"":[{""role"":""system"",""content"":[{""kind"":""text"",""text"":""Preserve child source""}]},{""role"":""user"",""content"":[{""kind"":""text"",""text"":""original Child Start""}]}],""model"":""fixture-model"",""modelOptions"":{""temperature"":0.1},""toolKeys"":[""effect""],""budget"":{""limits"":{""maxLLMCalls"":2,""maxToolCalls"":1},""usage"":{}}}","","",2,"2026-11-13 02:02:24.919","2026-11-13 02:02:24.919")
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/root/P0/foreign-model
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/root/P1/run
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/root/P2/run/async
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/root/P2/run/unknown
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/root/P2/run/panic
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/root/P5/run/async-election
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/root/P1/model
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/root/P2/model/async
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/root/P2/model/unknown
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/root/P2/model/panic
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/root/P5/model/async-election
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/root/P1/tool
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/root/P2/tool/async
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/root/P2/tool/unknown
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/root/P2/tool/panic
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/root/P5/tool/async-election
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/root/P2/model/swallowed-inner
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/root/P3/durable-before-whole-return
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/root/P4/mark-ack-lost
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/root/P5/deadline-before-new-send
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/root/P1/default-owner
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/child
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/child/P0/create-denied
+
+2026/11/13 10:02:29 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:209 [35;1mrecord not found
+[0m[33m[0.180ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "actual-start-child" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/child/P0/stale-admission
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/child/P0/duplicate
+
+2026/11/13 10:02:29 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:170 [35;1mUNIQUE constraint failed: agent_kernel_runs.run_id
+[0m[33m[0.129ms] [34;1m[rows:0][0m INSERT INTO `agent_kernel_runs` (`run_id`,`request_id`,`parent_run_id`,`kind`,`tenant_id`,`actor_id`,`thread_kind`,`thread_id`,`goal`,`status`,`revision`,`execution_epoch`,`execution_owner`,`execution_lease_id`,`execution_expires_at`,`execution_quarantine_revision`,`execution_quarantine_generation`,`execution_quarantine_code`,`error_code`,`error_detail`,`deadline_at`,`ended_at`,`state_json`,`checkpoint_json`,`result_json`,`last_event_seq`,`created_at`,`updated_at`) VALUES ("actual-start-child","original-child-effect","middle","agent","tenant","owner","conversation","thread","original Child Start","running",1,1,"","",NULL,0,0,"","","",NULL,NULL,"{""originFingerprint"":""5f1a775cb9e60f324a6f3fd5cf5967b72c31c90a5894ac962c4d468d82a4adc6"",""messages"":[{""role"":""system"",""content"":[{""kind"":""text"",""text"":""Preserve child source""}]},{""role"":""user"",""content"":[{""kind"":""text"",""text"":""original Child Start""}]}],""model"":""fixture-model"",""modelOptions"":{""temperature"":0.1},""toolKeys"":[""effect""],""budget"":{""limits"":{""maxLLMCalls"":2,""maxToolCalls"":1},""usage"":{}}}","","",2,"2026-11-13 02:02:29.051","2026-11-13 02:02:29.051")
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/child/P0/foreign-model
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/child/P0/preflight
+
+2026/11/13 10:02:29 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:209 [35;1mrecord not found
+[0m[33m[0.064ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "actual-start-child" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/child/P1/run
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/child/P2/run/async
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/child/P2/run/unknown
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/child/P2/run/panic
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/child/P5/run/async-election
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/child/P1/model
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/child/P2/model/async
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/child/P2/model/unknown
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/child/P2/model/panic
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/child/P5/model/async-election
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/child/P1/tool
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/child/P2/tool/async
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/child/P2/tool/unknown
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/child/P2/tool/panic
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/child/P5/tool/async-election
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/child/P2/model/swallowed-inner
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/child/P3/durable-before-whole-return
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/child/P4/mark-ack-lost
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/child/P5/deadline-before-new-send
+=== RUN   TestEA1MiddlewareNextLifetimeGORM/child/P1/default-owner
+--- PASS: TestEA1MiddlewareNextLifetimeGORM (8.35s)
+    --- PASS: TestEA1MiddlewareNextLifetimeGORM/root (4.16s)
+        --- PASS: TestEA1MiddlewareNextLifetimeGORM/root/P0/create-denied (0.01s)
+        --- PASS: TestEA1MiddlewareNextLifetimeGORM/root/P0/stale-admission (0.02s)
+        --- PASS: TestEA1MiddlewareNextLifetimeGORM/root/P0/duplicate (0.05s)
+        --- PASS: TestEA1MiddlewareNextLifetimeGORM/root/P0/foreign-model (0.04s)
+        --- PASS: TestEA1MiddlewareNextLifetimeGORM/root/P1/run (0.05s)
+        --- PASS: TestEA1MiddlewareNextLifetimeGORM/root/P2/run/async (0.05s)
+        --- PASS: TestEA1MiddlewareNextLifetimeGORM/root/P2/run/unknown (0.06s)
+        --- PASS: TestEA1MiddlewareNextLifetimeGORM/root/P2/run/panic (0.05s)
+        --- PASS: TestEA1MiddlewareNextLifetimeGORM/root/P5/run/async-election (0.06s)
+        --- PASS: TestEA1MiddlewareNextLifetimeGORM/root/P1/model (0.05s)
+        --- PASS: TestEA1MiddlewareNextLifetimeGORM/root/P2/model/async (0.05s)
+        --- PASS: TestEA1MiddlewareNextLifetimeGORM/root/P2/model/unknown (2.16s)
+        --- PASS: TestEA1MiddlewareNextLifetimeGORM/root/P2/model/panic (0.03s)
+        --- PASS: TestEA1MiddlewareNextLifetimeGORM/root/P5/model/async-election (0.05s)
+        --- PASS: TestEA1MiddlewareNextLifetimeGORM/root/P1/tool (0.04s)
+        --- PASS: TestEA1MiddlewareNextLifetimeGORM/root/P2/tool/async (0.05s)
+        --- PASS: TestEA1MiddlewareNextLifetimeGORM/root/P2/tool/unknown (0.03s)
+        --- PASS: TestEA1MiddlewareNextLifetimeGORM/root/P2/tool/panic (0.06s)
+        --- PASS: TestEA1MiddlewareNextLifetimeGORM/root/P5/tool/async-election (0.05s)
+        --- PASS: TestEA1MiddlewareNextLifetimeGORM/root/P2/model/swallowed-inner (0.05s)
+        --- PASS: TestEA1MiddlewareNextLifetimeGORM/root/P3/durable-before-whole-return (0.06s)
+        --- PASS: TestEA1MiddlewareNextLifetimeGORM/root/P4/mark-ack-lost (0.04s)
+        --- PASS: TestEA1MiddlewareNextLifetimeGORM/root/P5/deadline-before-new-send (1.02s)
+        --- PASS: TestEA1MiddlewareNextLifetimeGORM/root/P1/default-owner (0.04s)
+    --- PASS: TestEA1MiddlewareNextLifetimeGORM/child (4.19s)
+        --- PASS: TestEA1MiddlewareNextLifetimeGORM/child/P0/create-denied (0.01s)
+        --- PASS: TestEA1MiddlewareNextLifetimeGORM/child/P0/stale-admission (0.02s)
+        --- PASS: TestEA1MiddlewareNextLifetimeGORM/child/P0/duplicate (0.02s)
+        --- PASS: TestEA1MiddlewareNextLifetimeGORM/child/P0/foreign-model (0.03s)
+        --- PASS: TestEA1MiddlewareNextLifetimeGORM/child/P0/preflight (0.01s)
+        --- PASS: TestEA1MiddlewareNextLifetimeGORM/child/P1/run (0.05s)
+        --- PASS: TestEA1MiddlewareNextLifetimeGORM/child/P2/run/async (0.05s)
+        --- PASS: TestEA1MiddlewareNextLifetimeGORM/child/P2/run/unknown (0.04s)
+        --- PASS: TestEA1MiddlewareNextLifetimeGORM/child/P2/run/panic (0.05s)
+        --- PASS: TestEA1MiddlewareNextLifetimeGORM/child/P5/run/async-election (0.04s)
+        --- PASS: TestEA1MiddlewareNextLifetimeGORM/child/P1/model (0.05s)
+        --- PASS: TestEA1MiddlewareNextLifetimeGORM/child/P2/model/async (0.04s)
+        --- PASS: TestEA1MiddlewareNextLifetimeGORM/child/P2/model/unknown (2.18s)
+        --- PASS: TestEA1MiddlewareNextLifetimeGORM/child/P2/model/panic (0.04s)
+        --- PASS: TestEA1MiddlewareNextLifetimeGORM/child/P5/model/async-election (0.06s)
+        --- PASS: TestEA1MiddlewareNextLifetimeGORM/child/P1/tool (0.05s)
+        --- PASS: TestEA1MiddlewareNextLifetimeGORM/child/P2/tool/async (0.05s)
+        --- PASS: TestEA1MiddlewareNextLifetimeGORM/child/P2/tool/unknown (0.04s)
+        --- PASS: TestEA1MiddlewareNextLifetimeGORM/child/P2/tool/panic (0.04s)
+        --- PASS: TestEA1MiddlewareNextLifetimeGORM/child/P5/tool/async-election (0.05s)
+        --- PASS: TestEA1MiddlewareNextLifetimeGORM/child/P2/model/swallowed-inner (0.04s)
+        --- PASS: TestEA1MiddlewareNextLifetimeGORM/child/P3/durable-before-whole-return (0.05s)
+        --- PASS: TestEA1MiddlewareNextLifetimeGORM/child/P4/mark-ack-lost (0.06s)
+        --- PASS: TestEA1MiddlewareNextLifetimeGORM/child/P5/deadline-before-new-send (1.03s)
+        --- PASS: TestEA1MiddlewareNextLifetimeGORM/child/P1/default-owner (0.08s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	9.942s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]
+
+EXIT_CODE=0

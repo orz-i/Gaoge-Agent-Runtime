@@ -3,6 +3,7 @@ package continuation_test
 import (
 	"context"
 	"errors"
+	"reflect"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -135,10 +136,20 @@ func TestNativeDirectAndContinuationWorkerCompeteUnderSameLease(t *testing.T) {
 	if err != nil || latest.Run.Revision <= started.Run.Revision {
 		t.Fatalf("hosted owner did not persist its model intent: %+v err=%v", latest.Run, err)
 	}
-	_, contender := direct.Resume(t.Context(), started.Run.ID, latest.Run.Revision)
-	if !errors.Is(contender, kernel.ErrExecutionConflict) || m.calls.Load() != 1 {
-		t.Fatalf("direct activation bypassed hosted lease: err=%v model=%d", contender, m.calls.Load())
+	grant, err := rt.LookupChildExecution(t.Context(), started.Run.ID)
+	if err != nil {
+		t.Fatal(err)
 	}
+	_, contender := direct.Resume(t.Context(), started.Run.ID, latest.Run.Revision)
+	if !errors.Is(contender, agent.ErrModelOutcomeUnknown) || m.calls.Load() != 1 {
+		t.Fatalf("direct activation bypassed pending physical outcome: %v calls=%d", contender, m.calls.Load())
+	}
+	unchanged, loadErr := rt.Load(t.Context(), started.Run.ID)
+	retained, grantErr := rt.LookupChildExecution(t.Context(), started.Run.ID)
+	if loadErr != nil || grantErr != nil || !reflect.DeepEqual(latest, unchanged) || grant != retained {
+		t.Fatalf("rejected activation changed owner: %v %v", loadErr, grantErr)
+	}
+
 	close(m.release)
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {

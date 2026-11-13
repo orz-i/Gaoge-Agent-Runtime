@@ -1,0 +1,62 @@
+SOURCE_SHA=8778ae96be8f6d3fe57fe0b15f67b2aa5adc1049
+COMMAND=go -C go/agent-runtime test -count=1 ./memory -run '^TestEA1ChildAgent(StartPhases|RecoveryPhases)' -v
+=== RUN   TestEA1ChildAgentRecoveryPhasesMemory
+=== RUN   TestEA1ChildAgentRecoveryPhasesMemory/P1/active-callback-before-and-after-Next
+=== RUN   TestEA1ChildAgentRecoveryPhasesMemory/P3/unmarked-model-yield
+=== RUN   TestEA1ChildAgentRecoveryPhasesMemory/P3/marked-model-yield
+=== RUN   TestEA1ChildAgentRecoveryPhasesMemory/P3/unmarked-terminal-tool
+=== RUN   TestEA1ChildAgentRecoveryPhasesMemory/P3/marked-terminal-tool
+=== RUN   TestEA1ChildAgentRecoveryPhasesMemory/P5/two-reconcilers-parent-cancel
+=== RUN   TestEA1ChildAgentRecoveryPhasesMemory/P5/two-reconcilers-ancestor-deadline
+--- PASS: TestEA1ChildAgentRecoveryPhasesMemory (3.04s)
+    --- PASS: TestEA1ChildAgentRecoveryPhasesMemory/P1/active-callback-before-and-after-Next (0.00s)
+    --- PASS: TestEA1ChildAgentRecoveryPhasesMemory/P3/unmarked-model-yield (0.00s)
+    --- PASS: TestEA1ChildAgentRecoveryPhasesMemory/P3/marked-model-yield (0.00s)
+    --- PASS: TestEA1ChildAgentRecoveryPhasesMemory/P3/unmarked-terminal-tool (0.00s)
+    --- PASS: TestEA1ChildAgentRecoveryPhasesMemory/P3/marked-terminal-tool (0.00s)
+    --- PASS: TestEA1ChildAgentRecoveryPhasesMemory/P5/two-reconcilers-parent-cancel (0.00s)
+    --- PASS: TestEA1ChildAgentRecoveryPhasesMemory/P5/two-reconcilers-ancestor-deadline (3.03s)
+=== RUN   TestEA1ChildAgentStartPhasesMemory
+=== RUN   TestEA1ChildAgentStartPhasesMemory/P0/origin
+=== RUN   TestEA1ChildAgentStartPhasesMemory/P0/actor
+=== RUN   TestEA1ChildAgentStartPhasesMemory/P0/thread
+=== RUN   TestEA1ChildAgentStartPhasesMemory/P0/missing-parent
+=== RUN   TestEA1ChildAgentStartPhasesMemory/P0/terminal-parent
+=== RUN   TestEA1ChildAgentStartPhasesMemory/P0/preflight
+=== RUN   TestEA1ChildAgentStartPhasesMemory/P0/duplicate
+=== RUN   TestEA1ChildAgentStartPhasesMemory/P0/stale-admission
+=== RUN   TestEA1ChildAgentStartPhasesMemory/P0/parent-wins
+=== RUN   TestEA1ChildAgentStartPhasesMemory/P1/host-before-next
+=== RUN   TestEA1ChildAgentStartPhasesMemory/P2/host
+=== RUN   TestEA1ChildAgentStartPhasesMemory/P2/model
+=== RUN   TestEA1ChildAgentStartPhasesMemory/P2/tool
+=== RUN   TestEA1ChildAgentStartPhasesMemory/P3/model
+=== RUN   TestEA1ChildAgentStartPhasesMemory/P3/tool
+=== RUN   TestEA1ChildAgentStartPhasesMemory/P5/host
+=== RUN   TestEA1ChildAgentStartPhasesMemory/P5/model
+=== RUN   TestEA1ChildAgentStartPhasesMemory/P5/tool
+=== RUN   TestEA1ChildAgentStartPhasesMemory/P5/deadline
+--- PASS: TestEA1ChildAgentStartPhasesMemory (5.31s)
+    --- PASS: TestEA1ChildAgentStartPhasesMemory/P0/origin (0.00s)
+    --- PASS: TestEA1ChildAgentStartPhasesMemory/P0/actor (0.00s)
+    --- PASS: TestEA1ChildAgentStartPhasesMemory/P0/thread (0.00s)
+    --- PASS: TestEA1ChildAgentStartPhasesMemory/P0/missing-parent (0.00s)
+    --- PASS: TestEA1ChildAgentStartPhasesMemory/P0/terminal-parent (0.00s)
+    --- PASS: TestEA1ChildAgentStartPhasesMemory/P0/preflight (0.00s)
+    --- PASS: TestEA1ChildAgentStartPhasesMemory/P0/duplicate (0.00s)
+    --- PASS: TestEA1ChildAgentStartPhasesMemory/P0/stale-admission (0.00s)
+    --- PASS: TestEA1ChildAgentStartPhasesMemory/P0/parent-wins (0.00s)
+    --- PASS: TestEA1ChildAgentStartPhasesMemory/P1/host-before-next (0.00s)
+    --- PASS: TestEA1ChildAgentStartPhasesMemory/P2/host (0.00s)
+    --- PASS: TestEA1ChildAgentStartPhasesMemory/P2/model (2.15s)
+    --- PASS: TestEA1ChildAgentStartPhasesMemory/P2/tool (2.15s)
+    --- PASS: TestEA1ChildAgentStartPhasesMemory/P3/model (0.00s)
+    --- PASS: TestEA1ChildAgentStartPhasesMemory/P3/tool (0.00s)
+    --- PASS: TestEA1ChildAgentStartPhasesMemory/P5/host (0.00s)
+    --- PASS: TestEA1ChildAgentStartPhasesMemory/P5/model (0.00s)
+    --- PASS: TestEA1ChildAgentStartPhasesMemory/P5/tool (0.00s)
+    --- PASS: TestEA1ChildAgentStartPhasesMemory/P5/deadline (1.00s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory	9.079s
+
+EXIT_CODE=0

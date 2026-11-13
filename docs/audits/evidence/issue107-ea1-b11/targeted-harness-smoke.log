@@ -1,0 +1,13 @@
+SOURCE_SHA=8fc23aae3b5719486d1bc25ed7b8455f01e4ab05
+COMMAND=go -C go/agent-runtime-harness test -race -count=1 -timeout=90s ./... -run '^(TestOrdinaryToolTimelineCannotClaimBoundedRecovery|TestRootAgentCorrectsWorkflowRevisionTypeBeforeStartingChild)$' -v
+=== RUN   TestRootAgentCorrectsWorkflowRevisionTypeBeforeStartingChild
+--- PASS: TestRootAgentCorrectsWorkflowRevisionTypeBeforeStartingChild (0.07s)
+=== RUN   TestOrdinaryToolTimelineCannotClaimBoundedRecovery
+--- PASS: TestOrdinaryToolTimelineCannotClaimBoundedRecovery (0.02s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness	2.011s
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness/examples/session	1.875s [no tests to run]
+
+EXIT_CODE=0

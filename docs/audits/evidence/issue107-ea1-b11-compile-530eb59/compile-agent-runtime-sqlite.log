@@ -1,0 +1,11 @@
+SOURCE_SHA=530eb59dbd1e04c925287da554456d4d7602452f
+COMMAND=go -C go/agent-runtime-sqlite test ./... -run '^$'
+# github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite_test [github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite.test]
+./allowance_control_process_test.go:81:57: unknown field execution in struct literal of type controlTestFencedCreateStore
+./approval_control_rollback_test.go:28:61: unknown field execution in struct literal of type controlTestFencedCreateStore
+./execution_dispatch_guard_test.go:30:56: unknown field execution in struct literal of type controlTestFencedCreateStore
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite [build failed]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/examples/embedded	0.423s [no tests to run]
+FAIL
+
+EXIT_CODE=1

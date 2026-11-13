@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync/atomic"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
 // ErrExecutionNoEffect may be returned by a host Feature StartRun ONLY when
@@ -142,6 +144,12 @@ func VerifiedExecutionDispatchReceipt(grant Item, receipts []Item) (string, bool
 		receipt.TurnID != grant.TurnID || receipt.InvocationID != grant.InvocationID ||
 		receipt.RunID != grant.RunID || receipt.Seq <= grant.Seq {
 		return "", false
+	}
+	// Managed closure has its own exact five-field schema. Do not relax the
+	// original single-field receipt contract or accept duplicate/unknown keys.
+	if phase == "start" && managedDispatchReceipt(receipt) {
+		fields, _ := authorityStringFields(receipt.Payload, "boundary", "recoveryID", "mode", "selectionHash", "terminalHash")
+		return fields["boundary"], true
 	}
 	payload, ok := authorityStringFields(receipt.Payload, "boundary")
 	if !ok {
@@ -286,7 +294,7 @@ func (runner *Runner) nativeAgentStartOwnedByKernel(ctx context.Context, grant I
 // ambiguous no-snapshot outcome stays fenced for explicit reconciliation.
 func (runner *Runner) withPhysicalInvocationDispatch(
 	ctx context.Context, invocation Invocation, phase string,
-	physical func() (kernel.Snapshot, error),
+	physical func(context.Context) (kernel.Snapshot, error),
 ) (kernel.Snapshot, error) {
 	return runner.withPhysicalInvocationDispatchFor(ctx, invocation, phase, invocation.ExecutionRefID, physical)
 }
@@ -296,16 +304,108 @@ func (runner *Runner) withPhysicalInvocationDispatch(
 // belongs to the owning Invocation for cancellation arbitration.
 func (runner *Runner) withPhysicalInvocationDispatchFor(
 	ctx context.Context, invocation Invocation, phase, resultRunID string,
-	physical func() (kernel.Snapshot, error),
+	physical func(context.Context) (kernel.Snapshot, error),
 ) (kernel.Snapshot, error) {
 	if physical == nil {
+		return kernel.Snapshot{}, ErrInvalidRequest
+	}
+	return runner.withPhysicalInvocationDispatchForContext(ctx, invocation, phase, resultRunID,
+		nil, physical)
+}
+
+// An AgentTask approval carries a private per-call proof only AFTER the
+// Store has admitted its original-Invocation Grant. The checkpoint identity
+// is scoped to the exact revision; a process-local Context cannot substitute
+// for a new physical dispatch after a later approval checkpoint is created.
+func (runner *Runner) withPhysicalSubtaskApprovalDispatch(
+	ctx context.Context, invocation Invocation, childRunID string,
+	childRevision uint64, checkpointID string,
+	physical func(context.Context) (kernel.Snapshot, error),
+) (kernel.Snapshot, error) {
+	if childRevision == 0 || strings.TrimSpace(checkpointID) == "" {
+		return kernel.Snapshot{}, ErrInvalidRequest
+	}
+	return runner.withPhysicalInvocationDispatchForContext(
+		ctx, invocation, "resolve-subtask-approval", childRunID,
+		&subtaskApprovalDispatchScope{
+			ChildRunID: childRunID, CheckpointID: checkpointID, Revision: childRevision,
+		}, physical)
+}
+
+func (runner *Runner) withPhysicalInvocationDispatchForContext(
+	ctx context.Context, invocation Invocation, phase, resultRunID string,
+	scope *subtaskApprovalDispatchScope,
+	physical func(context.Context) (kernel.Snapshot, error),
+) (kernel.Snapshot, error) {
+	if physical == nil || (scope != nil && phase != "resolve-subtask-approval") {
 		return kernel.Snapshot{}, ErrInvalidRequest
 	}
 	grant, err := runner.beginPhysicalInvocationDispatch(ctx, invocation, phase, resultRunID)
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
-	snapshot, physicalErr := physical()
+	if scope != nil {
+		// The first ownership read happened before a potentially stale Turn
+		// projection. Recheck AFTER durable grant admission and BEFORE any
+		// Agent middleware or external effect, so a parent already terminal
+		// cannot use an otherwise valid child checkpoint.
+		child, loadErr := runner.runtime.Load(ctx, scope.ChildRunID)
+		if loadErr == nil && (child.Run.ID != scope.ChildRunID ||
+			child.Run.Revision != scope.Revision ||
+			child.Checkpoint == nil || child.Checkpoint.ID != scope.CheckpointID) {
+			loadErr = ErrConflict
+		}
+		if loadErr == nil {
+			loadErr = runner.verifyLocalApprovalRun(ctx, child)
+		}
+		if loadErr != nil {
+			// No physical callback has started in this grant, so this
+			// rejection is definitive no-effect. The receipt must be sealed,
+			// not kept as an unknown external operation on a stale parent.
+			settled := runner.finishPhysicalDispatchGrant(ctx, grant, "physical_dispatch_rejected")
+			if settled != nil {
+				return kernel.Snapshot{}, errors.Join(ErrExecutionOutcomeUnknown, loadErr, settled)
+			}
+			return kernel.Snapshot{}, errors.Join(ErrConflict, loadErr)
+		}
+	}
+	physicalCtx, bindErr := runner.bindManagedOriginalDispatch(ctx, invocation, grant)
+	if bindErr != nil {
+		return kernel.Snapshot{}, errors.Join(bindErr, runner.finishPhysicalDispatchGrant(ctx, grant, "physical_dispatch_rejected"))
+	}
+	if scope != nil {
+		bound := *scope
+		bound.GrantID = grant.ID
+		bound.active = new(atomic.Bool)
+		bound.active.Store(true)
+		// Middleware may retain Context for later asynchronous work. Expire
+		// this grant capability when the exact physical callback returns or
+		// panics; a retained Context cannot authorize a later approval without
+		// a fresh durable Harness admission.
+		defer bound.active.Store(false)
+		physicalCtx = context.WithValue(physicalCtx, subtaskApprovalDispatchContextKey{}, bound)
+	}
+	native, nativeAgent := runner.agent.(*agent.Runner)
+	var operation plugin.RunOperation
+	observe := nativeAgent && invocation.ExecutionClass == ExecutionAgent
+	switch phase {
+	case "start", "start-retry":
+		operation = plugin.RunStart
+	case "resume":
+		operation = plugin.RunResume
+	case "resolve-approval", "resolve-subtask-approval":
+		operation = plugin.RunResolveApproval
+	default:
+		observe = false // Pure native allowance CAS and non-Agent features keep their own exact contracts.
+	}
+	var snapshot kernel.Snapshot
+	var physicalErr error
+	var outcome agent.PhysicalCallOutcome
+	if observe {
+		snapshot, outcome, physicalErr = native.ObservePhysicalCall(physicalCtx, resultRunID, operation, physical)
+	} else {
+		snapshot, physicalErr = physical(physicalCtx)
+	}
 	if snapshot.Run.ID == "" {
 		// An arbitrary Feature may have dispatched remote side effects
 		// before returning a generic error, including a Kernel CAS conflict.
@@ -350,6 +450,12 @@ func (runner *Runner) withPhysicalInvocationDispatchFor(
 	}
 	if snapshot.Run.ID != resultRunID {
 		return snapshot, errors.Join(physicalErr, ErrConflict)
+	}
+	if observe && !outcome.Matches(resultRunID, operation) {
+		// A nonempty Run is recoverable identity, not this callback's receipt.
+		// Only the current first-party invocation can certify settled or a
+		// durable known yield still protected by its original Kernel scope.
+		return snapshot, errors.Join(ErrExecutionOutcomeUnknown, physicalErr)
 	}
 	return snapshot, errors.Join(physicalErr, runner.finishPhysicalDispatchGrant(ctx, grant, "physical_dispatch_returned"))
 }

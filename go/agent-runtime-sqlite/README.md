@@ -96,7 +96,8 @@ unavailability separately from new-database initialization.
   `VerifyIdentifiedApply` can verify that exact old operation after later
   revisions or Store reopen; loss of the journal is an UNKNOWN outcome, never
   an authorization to repeat external effects. This does **not** change the
-  unreleased SQLite v1 DDL. See the [S2-G6 audit](../../docs/audits/2026-10-16-stage2-g6-identified-apply-evidence.md).
+  historical unreleased SQLite v1 DDL; the current Issue #107
+candidate has since hard-cut to Schema v3. See the [S2-G6 audit](../../docs/audits/2026-10-16-stage2-g6-identified-apply-evidence.md).
 
 All Run/Create/Apply changes to these four tables use a **single short
 SQLite transaction**. The adapter uses `WAL`, `foreign_keys=ON`,
@@ -129,19 +130,27 @@ block a subsequent explicit CreateNew. Do not delete unknown files
 indiscriminately. If an error occurs *after* successful publication,
 inspect/reopen the existing path rather than attempting to overwrite it.
 
-**Schema:** the **unreleased first-version Schema remains
-`PRAGMA user_version=1`**. Changing development-only DDL does **not**
-automatically create a new persisted format version. The adapter
-strictly validates expected table and index definitions on Open and
-rejects extra persistent tables, indexes, views and triggers (ignoring
-SQLite's reserved internal objects). An unrecognized trigger can otherwise
-make a successful relation insert disappear. Earlier experimental files
-using a different v1 layout fail with `ErrUnsupportedSchema`; their
-contents are neither migrated nor removed. This includes earlier v1
-development files missing quarantine columns or Stage 5 RunRelation
-DDL. Back up and explicitly transform or recreate those experimental
-fixtures; do not call this a published-schema v2 migration. No existing
-data is silently deleted or migrated.
+**Schema (unreleased beta.24 hard cut):** the current experimental
+Profile database is **Schema v3** (`PRAGMA user_version=3`). Earlier
+unreleased development variants v1 and v2 are **not** accepted, repaired,
+or silently migrated by `OpenExisting`. The v3 layout includes immutable
+`parent_run_id` in the Kernel Run and a durable
+`runtime_child_effect_grants` table with original
+`start_revision` plus `settled_revision`. An original Root Workflow
+physical segment is also recorded under its own Run ID, so a concurrent
+worker cannot claim the same Effect. The Store checks the exact Run
+revision at admission, and `FinishChildExecution` rejects a different
+start revision even if the Grant ID and child ID match.
+
+Changing from the previous v2 candidate to v3 is an explicit
+**pre-stable persistence break**, not a compatibility migration. Hosts
+must drain/quarantine unknown physical operations, export or back up
+existing experimental Profiles, then intentionally recreate a clean v3
+Profile. An interrupted Tool/Model/Workflow operation cannot be treated
+as absent simply by deleting the old database. The adapter validates
+expected table/index definitions and rejects extra persistent objects,
+including untrusted triggers that could alter a successful Store CAS.
+No existing data is deleted or migrated automatically.
 
 Persisted timestamps used for ready/lease/due operations and relation
 creation must fit signed nanoseconds (~1677–2262); invalid/overflowing
@@ -160,7 +169,7 @@ GOWORK=off GOFLAGS=-mod=readonly go test -count=1 ./...
 ```
 
 For an existing database, `OpenExisting` first validates the full
-version-1 Schema **before** attempting to enable WAL; malformed
+version-3 Schema **before** attempting to enable WAL; malformed
 experimental files are rejected without changing their journal mode.
 The shared `conformance.RunKernelStoreSuite` covers CAS, event history,
 event metadata isolation, Checkpoint/Result deep-copy, transition
@@ -248,8 +257,10 @@ New tests cover snapshot isolation across loads, mutation, concurrent readers
 and store reopening. This changes neither persisted DDL nor event/commit
 proof retention. See the [Stage 6 performance and safety audit](../../docs/audits/2026-10-17-stage6-sqlite-snapshot-buffer-optimization.md).
 
-The execution columns remain part of the still-**unreleased Schema v1**;
-no schema migration or version bump is implied. The older published Core
+Execution leases, physical Root/Child Grants and exact revision
+settlement are part of the still-**unreleased Schema v3**. This is an
+intentional pre-stable break from the previous v2 candidate, not an
+implicit production migration. The older published Core
 `v0.1.0-beta.22` does not export the opt-in execution APIs. The coordinated
 **beta.24** candidate pins Core and SQLite to the same future release,
 and the repository tests both a `GOWORK=off` source cohort and a separate

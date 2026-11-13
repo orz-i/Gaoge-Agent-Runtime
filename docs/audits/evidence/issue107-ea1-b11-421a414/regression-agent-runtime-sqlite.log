@@ -1,0 +1,10 @@
+SOURCE_SHA=421a414ba46770156c047f018bf7ac6b2360ac4a
+COMMAND=go -C go/agent-runtime-sqlite test -race -count=1 -timeout=180s ./...
+--- FAIL: TestUnboundFencedResumeDoesNotExecuteToolBeforeCAS (0.11s)
+    execution_dispatch_guard_test.go:88: kernel execution lease is not current
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite	89.162s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/examples/embedded	1.850s
+FAIL
+
+EXIT_CODE=1

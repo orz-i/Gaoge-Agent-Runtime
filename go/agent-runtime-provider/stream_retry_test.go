@@ -1,6 +1,7 @@
 package provider_test
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -80,9 +81,10 @@ func TestAgentPersistsAndResumesTransientStreamFailures(t *testing.T) {
 				ID: tc.name, Actor: kernel.ActorRef{TenantID: "fixture", ActorID: "owner"},
 				Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"}, Goal: "answer",
 			})
-			if err == nil || model.IsRetryableError(err) != tc.retryable || requests != 1 {
+			if !errors.Is(err, agent.ErrModelOutcomeUnknown) || model.IsRetryableError(err) != tc.retryable || requests != 1 {
 				t.Fatalf("first request: run=%+v calls=%d err=%v", first.Run, requests, err)
 			}
+			physicalErr := err
 			persisted, err := runtime.Load(t.Context(), first.Run.ID)
 			if err != nil {
 				t.Fatal(err)
@@ -90,31 +92,8 @@ func TestAgentPersistsAndResumesTransientStreamFailures(t *testing.T) {
 			if strings.Contains(string(persisted.State)+persisted.Run.ErrorDetail, "PRIVATE_STREAM_DETAIL") {
 				t.Fatal("upstream stream detail entered durable state")
 			}
-			if !tc.retryable {
-				if persisted.Run.Status != kernel.RunStatusFailed {
-					t.Fatalf("permanent stream failure remains resumable: %+v", persisted.Run)
-				}
-				return
-			}
-			view, err := agent.ViewState(persisted)
-			if err != nil || persisted.Run.Status != kernel.RunStatusRunning || len(view.ModelInvocations) != 1 {
-				t.Fatalf("retry intent not durable: run=%+v state=%+v err=%v", persisted.Run, view, err)
-			}
-			invocation := view.ModelInvocations[0]
-			if invocation.Status != agent.ModelInvocationPending || invocation.RetryAfter == nil || invocation.ExecutionAttempt != 1 {
-				t.Fatalf("invalid pending retry: %+v", invocation)
-			}
-			clock.now = invocation.RetryAfter.Add(time.Second)
-			_, resumed := newRunner()
-			done, err := resumed.Resume(t.Context(), persisted.Run.ID, persisted.Run.Revision)
-			if err != nil || done.Run.Status != kernel.RunStatusCompleted || requests != 2 {
-				t.Fatalf("resumed request: run=%+v calls=%d err=%v", done.Run, requests, err)
-			}
-			final, err := agent.ViewState(done)
-			if err != nil || len(final.ModelInvocations) != 1 || final.ModelInvocations[0].ID != invocation.ID ||
-				final.ModelInvocations[0].Status != agent.ModelInvocationConsumed || final.ModelInvocations[0].ExecutionAttempt != 2 {
-				t.Fatalf("retry replaced invocation identity: state=%+v err=%v", final, err)
-			}
+			assertProviderUnknownNoReplay(t, store, clock, agent.Dependencies{Model: client}, first, physicalErr, func() int64 { return int64(requests) })
+
 		})
 	}
 }

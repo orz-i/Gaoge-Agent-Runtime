@@ -5,6 +5,103 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- Issue #107 seventh independent review / eighth remediation (2026-11-12):
+  eliminate the missing executing-child self-fence across Memory, native
+  SQLite and PostgreSQL. A physical Grant now protects its own Run and
+  every immutable ancestor, with the first-party Agent/Workflow carrying
+  an opaque per-revision mutation permit for legitimate state progression.
+  Rejected direct Cancel cannot revoke the original Agent ExecutionLease
+  epoch. The public Workflow.Cancel compensation path now acquires the
+  original physical Grant before any custom undo Executor. Frozen
+  `PhysicalNoEffect` evidence is bound to its exact Effect Attempt;
+  an ambiguous subsequent physical dispatch cannot inherit an earlier
+  attempt's no-effect receipt. Root Agent Start creates the durable Run
+  BEFORE entering arbitrary Host RunMiddleware and a middleware error
+  without native continuation remains unknown to Harness, not a
+  fabricated no-effect/committed-success receipt. Reuse existing Root
+  Agent ModelInvocation/ToolDispatch/ExecutionLease recovery semantics;
+  no legacy protocol bridge or new database schema is added. See the
+  Issue #107 audit and breaking-change ledger.
+
+- Issue #107 sixth independent review / seventh governance (2026-11-12):
+  unify Root and Child Workflow physical admission with an original
+  `(RunID, ExpectedRevision)` Store-authoritative Grant. Untrusted stale
+  Resume/Wait continuations fail before any Model/Tool/Effect invocation;
+  Root Workflow no longer skips physical admission or permits duplicate
+  queue-worker dispatch. Persist an opaque Root per-revision mutation proof
+  across Memory/PostgreSQL/SQLite, and add first-party Workflow recovery
+  for already committed settlement receipts whose ACK was lost. An
+  explicit original Executor `PhysicalNoEffect` receipt distinguishes
+  a safe pre-dispatch failure from unknown external Pending. A forged
+  `ExpectedRevision` cannot retire a settled Grant in SQL. Full
+  Root/Child Store conformance and actual PostgreSQL cross-connection
+  races are required. SQLite development Schema hard-cuts v2 to v3 and
+  PostgreSQL's physical Grant table adds `start_revision`. No legacy
+  compatibility path. See `docs/breaking-changes.md`.
+
+- Issue #107 fifth independent P1 audit remediation (2026-11-12):
+  nested Workflow Start/Resume/ResolveWait, arbitrary EffectExecutor and
+  compensation run under the original Kernel parent/child physical Grant.
+  Unknown external Pending retains its Grant; quiescent Waits and statically
+  verified same-Kernel pending children can retire it safely. Parented Agent
+  Start creates the original child and acquires Grant BEFORE all Host
+  RunMiddleware; a pure StartControlPreflight verifies frozen ownership
+  before Create. Run/Model/Tool Next callbacks cannot escape their original
+  physical callback lifetime. PostgreSQL locks and revalidates the actual
+  child after acquiring ancestor row locks, preventing stale cancelled-child
+  admission. Added independent P1 repros, cross-Store actual Workflow suites,
+  real PostgreSQL interleavings and SDK external consumer tests. No new
+  persistence schema beyond the previous pre-stable hard cut; no shim.
+  See `docs/breaking-changes.md` and the Issue #107 audit note.
+
+- Issue #107 fourth-audit atomic parent/child authority remediation
+  (2026-11-12): replace untrusted read/check parent liveness with a
+  Store-serialized physical Grant covering child Agent Start, Approval and
+  Resume. Preserve immutable parent ancestry across nested Subworkflows;
+  seal the original Context-isolation source and require pre-Grant Host
+  approval admission. Memory, PostgreSQL and SQLite persist Grant status,
+  validate first-party post-callback settlement proofs, and block parent
+  terminal state during unknown Tool/Model dispatch. A committed
+  settlement marker survives lost ACK/restart; a merely clean child State
+  never releases a live callback's Grant. The Harness retains the original
+  cancellation election after a typed busy rejection when shared budget
+  is already revoked, with a single verified deferred receipt. SQLite
+  development schema hard-cuts v1 to v2; PostgreSQL adds parent identity
+  and child Grant table. See `docs/breaking-changes.md`.
+
+- Issue #107 independent third-round governance (2026-11-12): A terminal parent
+  Workflow cannot authorize new AgentTask approval or Tool continuation, even
+  if the Harness Turn has not been projected. The original raw Feature ancestor
+  chain is checked again after physical Grant admission and before middleware;
+  rejected grants are settled as definitive no-effect. AgentTask terminal
+  reconciliation now consumes a pure physical-outcome proof that rejects
+  persisted unknown Tool/Model dispatch, rather than treating Kernel terminal
+  status as external cleanup. This proof is scoped to native Workflow AgentTask,
+  preserving Handoff/Delegation's independent remote cancellation contract.
+  A new Agent-owned exact frozen Start binding prevents a same-ID child from
+  widening configured effective hard limits or replacing initial task content.
+  Add independent P1/P2 regression cases, post-grant interleaving, full
+  Model/Tool settlement matrices and external consumer API contracts;
+  no compatibility shims or SQL schema changes. See
+  `docs/breaking-changes.md` and the Issue #107 audit note.
+
+- Issue #107: admit only a statically composed, same-Kernel Workflow
+  AgentTask child with an exact frozen Effect/Activation, deterministic
+  attempt/owner identity, immutable Agent Runner and relation recorder and
+  Host-verified child origin. Harness now checks its own recorder before
+  projecting AgentTask approval. Original approval route, cancellation and
+  per-child dispatch grants remain independently fenced; custom/remote and
+  unverified Effect routes fail closed. No schema migration or compatibility
+  bridge. Independent audit P1/P2 follow-up further constrains physical
+  cancellation of Host-prepared children to exact pending Tool approval,
+  restores actionability after a proven pre-cancel rejection, rejects
+  inconsistent parent-completed/child-waiting receipts, and removes
+  unrelated AgentTask DefinitionRegistry coupling. The same Turn Store
+  serializes cancellation with physical approval Dispatch Grants; the Host
+  validates the unforgeable per-call approval context before middleware.
+  A RunKind-specific local Kernel Canceller cannot borrow A2A/remote
+  authority. See `docs/audits/2026-11-11-issue107-workflow-agenttask-ownership.md`.
+
 - Add public tenant-scoped PostgreSQL Run/event metadata and Harness Turn
   configuration queries. Actor erasure and event pruning remain separately
   gated on an enforced recovery-retirement/reconciliation policy; see

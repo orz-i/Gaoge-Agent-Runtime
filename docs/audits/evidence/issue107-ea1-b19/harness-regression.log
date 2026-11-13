@@ -1,0 +1,19 @@
+SOURCE_SHA=55d7c2e586c1bbb534b64d987e1e916e078b7ec0
+COMMAND=go -C go/agent-runtime-harness test -race -count=1 ./... -run '^(TestIssue107AgentTaskCancelUsesExactPhysicalFence|TestIssue107HostedWaitingApprovalCancellationUsesOriginalHarnessFence|TestIssue107HostedNoStaticFenceFailsBeforeCancelIntent|TestIssue107HostedRepeatedCancelAlreadyTerminalChild|TestIssue107ParentCancelCannotDeclareTerminalWithLiveChildTool)$' -v
+=== RUN   TestIssue107ParentCancelCannotDeclareTerminalWithLiveChildTool
+--- PASS: TestIssue107ParentCancelCannotDeclareTerminalWithLiveChildTool (0.05s)
+=== RUN   TestIssue107HostedWaitingApprovalCancellationUsesOriginalHarnessFence
+--- PASS: TestIssue107HostedWaitingApprovalCancellationUsesOriginalHarnessFence (0.01s)
+=== RUN   TestIssue107HostedNoStaticFenceFailsBeforeCancelIntent
+--- PASS: TestIssue107HostedNoStaticFenceFailsBeforeCancelIntent (0.02s)
+=== RUN   TestIssue107HostedRepeatedCancelAlreadyTerminalChild
+--- PASS: TestIssue107HostedRepeatedCancelAlreadyTerminalChild (0.02s)
+=== RUN   TestIssue107AgentTaskCancelUsesExactPhysicalFence
+--- PASS: TestIssue107AgentTaskCancelUsesExactPhysicalFence (0.02s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness	1.647s
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness/examples/session	1.440s [no tests to run]
+
+EXIT_CODE=0

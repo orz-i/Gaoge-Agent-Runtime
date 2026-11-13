@@ -1,0 +1,16 @@
+SOURCE_SHA=d3d78368d3096be844afb71d744e6578f0ea084e
+COMMAND=GOWORK=off go -C integration/continuation-e2e test -count=1 -v ./... -run '^TestRealPostgres(ManagedAgentSessionRecoveryAcrossProcessCrash|ManagedHostReservationModesAfterProcessCrash|OpaqueManagedProcessCrashRemainsUnknown)$'
+=== RUN   TestRealPostgresManagedAgentSessionRecoveryAcrossProcessCrash
+--- PASS: TestRealPostgresManagedAgentSessionRecoveryAcrossProcessCrash (5.76s)
+=== RUN   TestRealPostgresManagedHostReservationModesAfterProcessCrash
+=== RUN   TestRealPostgresManagedHostReservationModesAfterProcessCrash/RESUME
+=== RUN   TestRealPostgresManagedHostReservationModesAfterProcessCrash/CANCEL
+--- PASS: TestRealPostgresManagedHostReservationModesAfterProcessCrash (11.83s)
+    --- PASS: TestRealPostgresManagedHostReservationModesAfterProcessCrash/RESUME (6.14s)
+    --- PASS: TestRealPostgresManagedHostReservationModesAfterProcessCrash/CANCEL (5.69s)
+=== RUN   TestRealPostgresOpaqueManagedProcessCrashRemainsUnknown
+--- PASS: TestRealPostgresOpaqueManagedProcessCrashRemainsUnknown (5.43s)
+PASS
+ok  	example.com/agent-runtime-continuation-e2e	23.356s
+
+EXIT_CODE=0

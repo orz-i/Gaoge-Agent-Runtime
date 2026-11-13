@@ -1,0 +1,29 @@
+SOURCE_SHA=c91a17a1a92c1116b99962992e36a618aad2ecc6
+COMMAND=go -C /tmp/gaoge-runtime-issue107/go/agent-runtime-sqlite test -race -count=1 ./... -run '^TestEA1(WorkflowEntryPhasesSQLite|CompensationMarkAckNativeSQLite)$' -v
+=== RUN   TestEA1CompensationMarkAckNativeSQLite
+=== RUN   TestEA1CompensationMarkAckNativeSQLite/root
+=== RUN   TestEA1CompensationMarkAckNativeSQLite/child
+--- PASS: TestEA1CompensationMarkAckNativeSQLite (0.23s)
+    --- PASS: TestEA1CompensationMarkAckNativeSQLite/root (0.13s)
+    --- PASS: TestEA1CompensationMarkAckNativeSQLite/child (0.11s)
+=== RUN   TestEA1WorkflowEntryPhasesSQLite
+=== RUN   TestEA1WorkflowEntryPhasesSQLite/RootWaitP0
+=== RUN   TestEA1WorkflowEntryPhasesSQLite/ResumeCompensationP3
+=== RUN   TestEA1WorkflowEntryPhasesSQLite/ResumeCompensationP3/resume/root
+=== RUN   TestEA1WorkflowEntryPhasesSQLite/ResumeCompensationP3/resume/child
+=== RUN   TestEA1WorkflowEntryPhasesSQLite/ResumeCompensationP3/compensation/root
+=== RUN   TestEA1WorkflowEntryPhasesSQLite/ResumeCompensationP3/compensation/child
+--- PASS: TestEA1WorkflowEntryPhasesSQLite (0.49s)
+    --- PASS: TestEA1WorkflowEntryPhasesSQLite/RootWaitP0 (0.10s)
+    --- PASS: TestEA1WorkflowEntryPhasesSQLite/ResumeCompensationP3 (0.39s)
+        --- PASS: TestEA1WorkflowEntryPhasesSQLite/ResumeCompensationP3/resume/root (0.09s)
+        --- PASS: TestEA1WorkflowEntryPhasesSQLite/ResumeCompensationP3/resume/child (0.09s)
+        --- PASS: TestEA1WorkflowEntryPhasesSQLite/ResumeCompensationP3/compensation/root (0.12s)
+        --- PASS: TestEA1WorkflowEntryPhasesSQLite/ResumeCompensationP3/compensation/child (0.09s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite	3.325s
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/examples/embedded	2.596s [no tests to run]
+
+EXIT_CODE=0

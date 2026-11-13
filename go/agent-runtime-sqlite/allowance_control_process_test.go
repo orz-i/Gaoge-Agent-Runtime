@@ -78,7 +78,7 @@ func TestFencedAllowanceProcessChild(t *testing.T) {
 	var runtime *kernel.Runtime
 	var fencing *controlTestFencedCreateStore
 	if phase == "start" {
-		fencing = &controlTestFencedCreateStore{Store: store, execution: store}
+		fencing = &controlTestFencedCreateStore{Store: store}
 		runtime, err = kernel.New(kernel.Dependencies{Store: fencing})
 	} else {
 		runtime, err = kernel.New(kernel.Dependencies{Store: store})

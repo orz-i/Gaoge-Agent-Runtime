@@ -1,0 +1,9 @@
+SOURCE_SHA=53e7ad944b42881618ffb6f4141f8cb727191a50
+COMMAND=cd go/agent-runtime && golangci-lint run ./...
+go/agent-runtime/conformance/ea1_child_agent_control_phases.go:79:11: QF1008: could remove embedded field "ea1ChildStartStore" from selector (staticcheck)
+	return s.ea1ChildStartStore.Store.Apply(ctx, id, rev, m)
+	         ^
+1 issues:
+* staticcheck: 1
+
+EXIT_CODE=1

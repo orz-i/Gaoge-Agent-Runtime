@@ -1,0 +1,10 @@
+SOURCE_SHA=0586a69d104b0555c67d38fa4e9a117048d355c2
+COMMAND=go -C go/agent-runtime-harness test -race -count=1 -timeout=180s ./...
+--- FAIL: TestOrdinaryToolTimelineCannotClaimBoundedRecovery (0.02s)
+    capability_tool_test.go:340: capability materialization identity = actor:kernel.ActorRef{TenantID:"tenant", ActorID:"actor"} thread:kernel.ThreadRef{Kind:"conversation", ID:"opaque-capability-thread"}
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness	28.590s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness/examples/session	1.785s
+FAIL
+
+EXIT_CODE=1

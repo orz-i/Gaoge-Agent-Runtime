@@ -1,0 +1,13 @@
+SOURCE_SHA=e94c62ba6c5671470f291306fad4f55ed7922f54
+COMMAND=go -C go/agent-runtime-postgres test -race -count=1 ./... -run '^TestEA1RootAgentControlPhasesGORM$/P1/approval' -v
+=== RUN   TestEA1RootAgentControlPhasesGORM
+=== RUN   TestEA1RootAgentControlPhasesGORM/P1/approval
+    ea1_root_agent_control_phases.go:408: native-only write gate: kernel descendant has an unsettled physical execution Grant want kernel run requires fenced execution
+--- FAIL: TestEA1RootAgentControlPhasesGORM (0.05s)
+    --- FAIL: TestEA1RootAgentControlPhasesGORM/P1/approval (0.05s)
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	0.580s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]
+FAIL
+
+EXIT_CODE=1

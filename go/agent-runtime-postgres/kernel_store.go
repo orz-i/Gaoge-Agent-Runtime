@@ -49,6 +49,8 @@ func (store *KernelStore) applyKernelMutation(
 	mutation kernel.StoreMutation,
 	lease *kernel.ExecutionLease,
 	control bool,
+	ownedRecovery bool,
+	ownedApproval bool,
 ) (kernel.Snapshot, error) {
 	// Lock before evaluating the DB-time expiry predicate. An UPDATE can
 	// otherwise evaluate it before waiting for an unchanged row's lock and
@@ -58,16 +60,22 @@ func (store *KernelStore) applyKernelMutation(
 			return kernel.Snapshot{}, err
 		}
 	}
-	query := db.Model(&models.KernelRunRecord{}).Where("run_id = ? AND revision = ?", runID, expectedRevision)
-	if control {
+	query := db.Model(&models.KernelRunRecord{}).Where("run_id = ? AND revision = ? AND parent_run_id = ?", runID, expectedRevision, updatedModel.ParentRunID)
+	if ownedRecovery {
+		// Only the opaque, exact-source recovery transaction may reach here.
+	} else if control {
 		// Guarded controls are independently validated under a row lock by
 		// applyWithExecution. Do NOT enforce active execution-lease identity.
 	} else if lease == nil {
 		query = query.Where("execution_epoch = ?", 0)
 	} else {
+		expectedStatus := kernel.RunStatusRunning
+		if ownedApproval {
+			expectedStatus = kernel.RunStatusWaitingInput
+		}
 		query = query.Where(`status = ? AND execution_epoch = ? AND execution_owner = ? AND
             execution_lease_id = ? AND execution_quarantine_revision = 0`,
-			string(kernel.RunStatusRunning), lease.Epoch, lease.OwnerID, lease.LeaseID)
+			string(expectedStatus), lease.Epoch, lease.OwnerID, lease.LeaseID)
 		if db.Name() == "postgres" {
 			query = query.Where("execution_expires_at > clock_timestamp()")
 		} else {
@@ -154,6 +162,11 @@ func (store *KernelStore) Create(
 	}
 	var snapshot kernel.Snapshot
 	err = store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if model.ParentRunID != "" {
+			if _, checkErr := store.lockLiveChildAncestors(tx, model.ParentRunID, model.TenantID, model.ActorID, model.ThreadKind, model.ThreadID); checkErr != nil {
+				return checkErr
+			}
+		}
 		if createErr := tx.Create(&model).Error; createErr != nil {
 			return translateKernelError(createErr)
 		}
@@ -252,6 +265,96 @@ func (store *KernelStore) applyWithExecution(ctx context.Context, lease *kernel.
 	}
 	var snapshot kernel.Snapshot
 	err = store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Parent terminal control and already admitted child effects share the
+		// authoritative parent row lock. A child Approval control must lock its
+		// ancestry first so a concurrent parent Cancel cannot slip past CAS.
+		if guard != nil && guard.Kind == kernel.ControlApproval {
+			var child models.KernelRunRecord
+			if readErr := tx.Where("run_id = ?", runID).First(&child).Error; readErr != nil {
+				return translateKernelError(readErr)
+			}
+			if child.ParentRunID != "" {
+				if _, lockErr := store.lockLiveChildAncestors(tx, child.ParentRunID, child.TenantID, child.ActorID, child.ThreadKind, child.ThreadID); lockErr != nil {
+					return lockErr
+				}
+			}
+		}
+		// All writes to a root with an admitted physical segment compete
+		// under this exact Run row lock. No other writer can advance a
+		// revision behind a Root Workflow callback, and an authenticated
+		// first-party scoped Runtime may still commit its own segment.
+		lockedRun, lockErr := lockKernelRun(tx, runID)
+		if lockErr != nil {
+			return lockErr
+		}
+		// Native authority is required before evaluating a physical-scope fence.
+		// Control and exact leased writes retain their separate authority paths.
+		if lease == nil && guard == nil && lockedRun.ExecutionEpoch > 0 {
+			return kernel.ErrExecutionRequired
+		}
+		if e := pgManagedGate(tx, runID); e != nil {
+			return e
+		}
+		current, decodeErr := kernelSnapshotFrom(lockedRun)
+		if decodeErr != nil {
+			return decodeErr
+		}
+		var active []models.KernelChildEffectGrantRecord
+		if queryErr := tx.Where("parent_run_id = ?", runID).Find(&active).Error; queryErr != nil {
+			return translateKernelError(queryErr)
+		}
+		// A native waiting owner cannot bypass approval through ordinary Apply.
+		// Preserve Memory's authority precedence before checking the gate.
+		if lease != nil && guard == nil && current.Run.Status == kernel.RunStatusWaitingInput {
+			for _, row := range active {
+				original := pgPhysicalGrant(row)
+				if original.ChildRunID == runID && original.IsOwned() && !original.MatchesExecution(*lease) {
+					return kernel.ErrExecutionConflict
+				}
+			}
+			if lockedRun.ExecutionQuarantineRevision != 0 {
+				return kernel.ErrExecutionQuarantined
+			}
+			now, clockErr := pgStoreNow(tx)
+			if clockErr != nil {
+				return clockErr
+			}
+			if !pgLeaseMatches(lockedRun, *lease, now) {
+				return kernel.ErrExecutionConflict
+			}
+			return kernel.ErrExecutionRequired
+		}
+		var approvalLease *kernel.ExecutionLease
+		rootGrantFound := false
+		for _, record := range active {
+			if record.ChildRunID == runID {
+				rootGrantFound = true
+				original := pgPhysicalGrant(record)
+				if original.IsOwned() {
+					if guard != nil {
+						originalLease, ok := mutation.PhysicalPermit.ExecutionLease()
+						now, timeErr := pgStoreNow(tx)
+						if timeErr != nil {
+							return timeErr
+						}
+						if guard.Kind != kernel.ControlApproval || !ok || !original.MatchesExecution(originalLease) || !pgLeaseMatches(lockedRun, originalLease, now) {
+							return kernel.ErrChildExecutionBusy
+						}
+						approvalLease = &originalLease
+					} else if lease == nil || !original.MatchesExecution(*lease) {
+						return kernel.ErrChildExecutionBusy
+					}
+				}
+				if !mutation.PhysicalPermit.Matches(original, current) {
+					return kernel.ErrChildExecutionBusy
+				}
+			} else {
+				return kernel.ErrChildExecutionBusy
+			}
+		}
+		if !rootGrantFound && mutation.PhysicalPermit.IsPresent() {
+			return kernel.ErrExecutionConflict
+		}
 		if guard != nil {
 			persisted, lockErr := lockKernelRun(tx, runID)
 			if lockErr != nil {
@@ -278,12 +381,30 @@ func (store *KernelStore) applyWithExecution(ctx context.Context, lease *kernel.
 				return kernel.ErrExecutionConflict
 			}
 			if revoked != nil {
-				*revoked = persisted.ExecutionEpoch > 0
+				*revoked = persisted.ExecutionEpoch > 0 && approvalLease == nil
 			}
 		}
 		var applyErr error
-		snapshot, applyErr = store.applyKernelMutation(tx, runID, expectedRevision, updatedModel, mutation, lease, guard != nil)
-		return applyErr
+		effectiveLease := lease
+		if approvalLease != nil {
+			effectiveLease = approvalLease
+		}
+		managedPoint, managedErr := pgManagedMutation(tx, current, mutation, effectiveLease)
+		if managedErr != nil {
+			return managedErr
+		}
+		snapshot, applyErr = store.applyKernelMutation(tx, runID, expectedRevision, updatedModel, mutation, effectiveLease, guard != nil && approvalLease == nil, false, approvalLease != nil)
+		if applyErr != nil {
+			return applyErr
+		}
+		if managedPoint != nil {
+			// PostgreSQL may represent timestamps at a different precision than
+			// the Feature proposal. Bind the full actual same-transaction row,
+			// including EventHead; do not truncate or weaken source comparison.
+			managedPoint.Source = snapshot
+			return pgSaveManaged(tx, kernel.ManagedInitialTransfer(*managedPoint))
+		}
+		return nil
 	})
 	if err != nil {
 		return kernel.Snapshot{}, err
@@ -433,7 +554,7 @@ func kernelRunRecordFrom(record kernel.Record, lastEventSeq int64) (models.Kerne
 		return models.KernelRunRecord{}, errKernelStateJSON
 	}
 	return models.KernelRunRecord{
-		RunID: record.Run.ID, RequestID: record.Run.RequestID, Kind: string(record.Run.Kind),
+		RunID: record.Run.ID, RequestID: record.Run.RequestID, ParentRunID: record.Run.ParentRunID, Kind: string(record.Run.Kind),
 		TenantID: record.Run.Actor.TenantID, ActorID: record.Run.Actor.ActorID,
 		ThreadKind: record.Run.Thread.Kind, ThreadID: record.Run.Thread.ID,
 		Goal: record.Run.Goal, Status: string(record.Run.Status), Revision: record.Run.Revision,
@@ -446,7 +567,7 @@ func kernelRunRecordFrom(record kernel.Record, lastEventSeq int64) (models.Kerne
 
 func kernelRunUpdates(record models.KernelRunRecord, eventCount int) map[string]interface{} {
 	return map[string]interface{}{
-		"request_id": record.RequestID, "kind": record.Kind,
+		"request_id": record.RequestID, "parent_run_id": record.ParentRunID, "kind": record.Kind,
 		kernelColumnTenantID: record.TenantID, "actor_id": record.ActorID,
 		"thread_kind": record.ThreadKind, "thread_id": record.ThreadID,
 		"goal": record.Goal, kernelColumnStatus: record.Status, kernelColumnRevision: record.Revision,
@@ -572,7 +693,7 @@ func kernelSnapshotFrom(runRecord models.KernelRunRecord) (kernel.Snapshot, erro
 			ID: runRecord.RunID, Kind: kernel.RunKind(runRecord.Kind),
 			Actor:     kernel.ActorRef{TenantID: runRecord.TenantID, ActorID: runRecord.ActorID},
 			Thread:    kernel.ThreadRef{Kind: runRecord.ThreadKind, ID: runRecord.ThreadID},
-			RequestID: runRecord.RequestID, Goal: runRecord.Goal,
+			RequestID: runRecord.RequestID, ParentRunID: runRecord.ParentRunID, Goal: runRecord.Goal,
 			Status: kernel.RunStatus(runRecord.Status), Revision: runRecord.Revision,
 			ErrorCode: runRecord.ErrorCode, ErrorDetail: runRecord.ErrorDetail,
 			DeadlineAt: cloneTime(runRecord.DeadlineAt), EndedAt: cloneTime(runRecord.EndedAt),

@@ -8,17 +8,25 @@ import (
 	"strings"
 )
 
-// The first published Schema v1 is still in development. Validate its
-// complete current DDL: a development file with the same user_version but
-// an obsolete table/index shape must fail closed, never be reinterpreted.
-// Once released, incompatible persisted formats require explicit migrations.
+// Validate the complete expected DDL. A file with the same user_version but
+// an incompatible table/index shape fails closed, never reinterpreted.
+// Historical schema acceptance is limited to the explicit migration entry.
+type schemaQuery interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}
+
 func (s *Store) validateSchema(ctx context.Context) error {
+	return validateSchemaDDL(ctx, s.db, schemaDDL)
+}
+
+func validateSchemaDDL(ctx context.Context, query schemaQuery, ddlSet []string) error {
 	// The SQLite runtime owns the whole private database, not merely its
 	// expected tables. Unknown persistent objects (notably triggers) can
 	// change a successful INSERT into a missing or altered durable record.
 	type schemaObject struct{ kind, name string }
-	expected := make(map[schemaObject]struct{}, len(schemaDDL))
-	for _, ddl := range schemaDDL {
+	expected := make(map[schemaObject]struct{}, len(ddlSet))
+	for _, ddl := range ddlSet {
 		parts := strings.Fields(ddl)
 		if len(parts) < 3 {
 			return fmt.Errorf("%w: malformed expected DDL", ErrUnsupportedSchema)
@@ -26,7 +34,7 @@ func (s *Store) validateSchema(ctx context.Context) error {
 		kind, name := strings.ToLower(parts[1]), parts[2]
 		expected[schemaObject{kind, name}] = struct{}{}
 		var actual string
-		err := s.db.QueryRowContext(ctx, "SELECT sql FROM sqlite_master WHERE type=? AND name=?", kind, name).Scan(&actual)
+		err := query.QueryRowContext(ctx, "SELECT sql FROM sqlite_master WHERE type=? AND name=?", kind, name).Scan(&actual)
 		if errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("%w: missing %s %s", ErrUnsupportedSchema, kind, name)
 		}
@@ -40,7 +48,7 @@ func (s *Store) validateSchema(ctx context.Context) error {
 			return fmt.Errorf("%w: unexpected %s definition for %s", ErrUnsupportedSchema, kind, name)
 		}
 	}
-	rows, err := s.db.QueryContext(ctx, "SELECT type,name FROM sqlite_master WHERE type IN ('table','index','view','trigger')")
+	rows, err := query.QueryContext(ctx, "SELECT type,name FROM sqlite_master WHERE type IN ('table','index','view','trigger')")
 	if err != nil {
 		return err
 	}

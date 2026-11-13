@@ -1,0 +1,5 @@
+SOURCE_SHA=d3d78368d3096be844afb71d744e6578f0ea084e
+COMMAND=GOWORK=off go -C integration/continuation-e2e test ./... -run '^$'
+ok  	example.com/agent-runtime-continuation-e2e	0.828s [no tests to run]
+
+EXIT_CODE=0

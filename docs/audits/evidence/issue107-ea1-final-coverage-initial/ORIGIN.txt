@@ -1,0 +1,2 @@
+SOURCE_SHA=08d236bb6766dd54547fbf8802a168a610878f13
+All commands complete. All local gates except aggregate coverage passed. Coverage tests passed but 61.74% is below unchanged 70%; no acceptance/ledger migration. Original profiles preserved for measurement diagnosis.

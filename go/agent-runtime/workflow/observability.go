@@ -56,6 +56,9 @@ func (runner *Runner) executeObservedEffectFunc(
 		RunID: request.RunID, RunKind: RunKind, OperationID: request.EffectID, Operation: request.Kind,
 		Attempt: request.Attempt, Compensation: request.Compensation, ObservedAt: startedAt,
 	})
+	if runner.physicalCalls != nil {
+		runner.physicalCalls.Add(1)
+	}
 	result, err := execute(ctx, request)
 	endedAt := runner.runtime.Now()
 	phase := observability.PhaseCompleted

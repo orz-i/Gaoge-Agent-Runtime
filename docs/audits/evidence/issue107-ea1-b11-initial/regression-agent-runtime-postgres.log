@@ -1,0 +1,335 @@
+SOURCE_SHA=df8dad572c82d1a569dc89d28ff32bd14cad3cc5
+COMMAND=go -C go/agent-runtime-postgres test -race -count=1 -timeout=180s ./...
+--- FAIL: TestRealPostgresAgentRecoveryAcrossProcessCrash (0.75s)
+    --- FAIL: TestRealPostgresAgentRecoveryAcrossProcessCrash/pending_committed (0.24s)
+        agent_recovery_real_test.go:53: crash process: exit status 1
+            --- FAIL: TestAgentRecoveryCrashProcess (0.02s)
+                agent_recovery_real_test.go:120: invalid agent run request
+            FAIL
+    --- FAIL: TestRealPostgresAgentRecoveryAcrossProcessCrash/claim_committed (0.16s)
+        agent_recovery_real_test.go:53: crash process: exit status 1
+            --- FAIL: TestAgentRecoveryCrashProcess (0.02s)
+                agent_recovery_real_test.go:120: invalid agent run request
+            FAIL
+    --- FAIL: TestRealPostgresAgentRecoveryAcrossProcessCrash/response_before_receipt (0.16s)
+        agent_recovery_real_test.go:53: crash process: exit status 1
+            --- FAIL: TestAgentRecoveryCrashProcess (0.01s)
+                agent_recovery_real_test.go:120: invalid agent run request
+            FAIL
+    --- FAIL: TestRealPostgresAgentRecoveryAcrossProcessCrash/receipt_committed (0.19s)
+        agent_recovery_real_test.go:53: crash process: exit status 1
+            --- FAIL: TestAgentRecoveryCrashProcess (0.02s)
+                agent_recovery_real_test.go:120: invalid agent run request
+            FAIL
+--- FAIL: TestRealPostgresAgentCancellationFencesLateModelReceipt (0.21s)
+    agent_recovery_real_test.go:156: kernel descendant has an unsettled physical execution Grant
+--- FAIL: TestEA1RealPostgresChildAgentRecoveryUnknown (4.80s)
+    --- FAIL: TestEA1RealPostgresChildAgentRecoveryUnknown/host_middleware (0.16s)
+        ea1_child_agent_recovery.go:276: rejected control mutated full snapshot
+--- FAIL: TestEA1RealPostgresChildAgentRecoveryAdmission (0.24s)
+    ea1_child_agent_recovery.go:276: rejected control mutated full snapshot
+--- FAIL: TestEA1ChildAgentRecoveryUnknownGORM (4.37s)
+    --- FAIL: TestEA1ChildAgentRecoveryUnknownGORM/host_middleware (0.03s)
+        ea1_child_agent_recovery.go:276: rejected control mutated full snapshot
+--- FAIL: TestEA1ChildAgentRecoveryAdmissionGORM (0.03s)
+    ea1_child_agent_recovery.go:276: rejected control mutated full snapshot
+
+2026/11/13 01:46:13 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:209 [35;1mrecord not found
+[0m[33m[0.152ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "missing" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+
+2026/11/13 01:46:14 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:209 [35;1mrecord not found
+[0m[33m[0.051ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "missing" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+
+2026/11/13 01:46:15 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:209 [35;1mrecord not found
+[0m[33m[0.063ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "missing" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+
+2026/11/13 01:46:15 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:209 [35;1mrecord not found
+[0m[33m[0.059ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "missing" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+
+2026/11/13 01:46:15 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:209 [35;1mrecord not found
+[0m[33m[0.051ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "missing" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+
+2026/11/13 01:46:15 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:209 [35;1mrecord not found
+[0m[33m[0.054ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "missing" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+
+2026/11/13 01:46:24 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:209 [35;1mrecord not found
+[0m[33m[0.053ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "missing" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+
+2026/11/13 01:46:24 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:209 [35;1mrecord not found
+[0m[33m[0.051ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "missing" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+
+2026/11/13 01:46:24 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:209 [35;1mrecord not found
+[0m[33m[0.087ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "missing" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+
+2026/11/13 01:46:24 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:209 [35;1mrecord not found
+[0m[33m[0.050ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "missing" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+--- FAIL: TestEA1RealPostgresRootAgentAdmission (0.74s)
+    --- FAIL: TestEA1RealPostgresRootAgentAdmission/P0/origin-and-claim (0.13s)
+        ea1_root_agent_admission.go:69: claim conflict concealed created Root or dispatched: kernel execution lease is not current {ID: Kind: Actor:{TenantID: ActorID:} Thread:{Kind: ID:} RequestID: ParentRunID: Goal: Status: Revision:0 ErrorCode: ErrorDetail: DeadlineAt:<nil> EndedAt:<nil> CreatedAt:0001-01-01 00:00:00 +0000 UTC UpdatedAt:0001-01-01 00:00:00 +0000 UTC}
+    --- FAIL: TestEA1RealPostgresRootAgentAdmission/P0/original-external-owner-reuse (0.20s)
+        ea1_root_agent_admission.go:207: rejected control mutated full snapshot
+--- FAIL: TestEA1RealPostgresRootAgentDefaultAdmission (0.97s)
+    --- FAIL: TestEA1RealPostgresRootAgentDefaultAdmission/P0/origin-and-claim (0.17s)
+        ea1_root_agent_admission.go:52: invalid missing-id: <nil>
+    --- FAIL: TestEA1RealPostgresRootAgentDefaultAdmission/P0/original-external-owner-reuse (0.21s)
+        ea1_root_agent_admission.go:207: rejected control mutated full snapshot
+
+2026/11/13 01:46:26 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:209 [35;1mrecord not found
+[0m[33m[0.116ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "invalid-empty-goal" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+
+2026/11/13 01:46:26 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:209 [35;1mrecord not found
+[0m[33m[0.062ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "invalid-child-origin-on-root" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+--- FAIL: TestEA1RootAgentAdmissionGORM (0.12s)
+    --- FAIL: TestEA1RootAgentAdmissionGORM/P0/origin-and-claim (0.03s)
+        ea1_root_agent_admission.go:69: claim conflict concealed created Root or dispatched: kernel execution lease is not current {ID: Kind: Actor:{TenantID: ActorID:} Thread:{Kind: ID:} RequestID: ParentRunID: Goal: Status: Revision:0 ErrorCode: ErrorDetail: DeadlineAt:<nil> EndedAt:<nil> CreatedAt:0001-01-01 00:00:00 +0000 UTC UpdatedAt:0001-01-01 00:00:00 +0000 UTC}
+    --- FAIL: TestEA1RootAgentAdmissionGORM/P0/original-external-owner-reuse (0.04s)
+        ea1_root_agent_admission.go:207: rejected control mutated full snapshot
+--- FAIL: TestEA1RootAgentDefaultAdmissionGORM (0.15s)
+    --- FAIL: TestEA1RootAgentDefaultAdmissionGORM/P0/origin-and-claim (0.04s)
+        ea1_root_agent_admission.go:52: invalid missing-id: <nil>
+    --- FAIL: TestEA1RootAgentDefaultAdmissionGORM/P0/original-external-owner-reuse (0.05s)
+        ea1_root_agent_admission.go:207: rejected control mutated full snapshot
+
+2026/11/13 01:46:50 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:209 [35;1mrecord not found
+[0m[33m[0.213ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "absent-original" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+
+2026/11/13 01:46:51 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:209 [35;1mrecord not found
+[0m[33m[0.081ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "missing" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+
+2026/11/13 01:46:51 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:209 [35;1mrecord not found
+[0m[33m[0.058ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "missing" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+
+2026/11/13 01:46:53 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:209 [35;1mrecord not found
+[0m[33m[0.090ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "effect_7df87fddefa8740044120574cf443715-child" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+
+2026/11/13 01:46:53 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:209 [35;1mrecord not found
+[0m[33m[0.138ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "bad-definition" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+
+2026/11/13 01:46:53 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:170 [35;1mUNIQUE constraint failed: agent_kernel_runs.run_id
+[0m[33m[0.127ms] [34;1m[rows:0][0m INSERT INTO `agent_kernel_runs` (`run_id`,`request_id`,`parent_run_id`,`kind`,`tenant_id`,`actor_id`,`thread_kind`,`thread_id`,`goal`,`status`,`revision`,`execution_epoch`,`execution_owner`,`execution_lease_id`,`execution_expires_at`,`execution_quarantine_revision`,`execution_quarantine_generation`,`execution_quarantine_code`,`error_code`,`error_detail`,`deadline_at`,`ended_at`,`state_json`,`checkpoint_json`,`result_json`,`last_event_seq`,`created_at`,`updated_at`) VALUES ("original","original-source","","workflow","tenant","owner","conversation","original","original Start","running",1,0,"","",NULL,0,0,"","","",NULL,NULL,"{""definition"":{""id"":""start-source"",""revision"":1,""name"":""original Start"",""inputSchema"":true,""outputSchema"":true,""nodes"":[{""id"":""effect"",""type"":""effect"",""effect"":{""kind"":""external.once"",""input"":{""source"":""original""},""maxCostUnits"":1,""retry"":{""maxAttempts"":2,""retryableErrorCodes"":[""safe-retry""]}}},{""id"":""return"",""type"":""return"",""return"":{""value"":{}}}],""limits"":{""maxNodeActivations"":256,""maxEffects"":64,""maxSegments"":256,""maxActivationsPerSegment"":8,""maxStateBytes"":1048576,""maxFanOut"":64,""maxConcurrency"":8,""maxNestedDepth"":8,""maxAttemptsPerEffect"":3},""policy"":{""costClass"":""low"",""maxCostUnits"":1,""sideEffectClass"":""write""},""hash"":""ff1b7712ef43d0b344eb70fce33c8dfbc4b26f01945327d1151ce3f602bc314e""},""input"":{},""nestedDepth"":0,""currentNode"":0,""activations"":[],""effects"":[],""waits"":[],""budget"":{""nodeActivations"":0,""effects"":0,""segments"":0,""stateBytes"":896,""costUnitsUsed"":0,""costUnitsReserved"":0}}","","",2,"2026-11-12 17:46:53.751","2026-11-12 17:46:53.751")
+
+2026/11/13 01:46:53 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:170 [35;1mUNIQUE constraint failed: agent_kernel_runs.run_id
+[0m[33m[0.121ms] [34;1m[rows:0][0m INSERT INTO `agent_kernel_runs` (`run_id`,`request_id`,`parent_run_id`,`kind`,`tenant_id`,`actor_id`,`thread_kind`,`thread_id`,`goal`,`status`,`revision`,`execution_epoch`,`execution_owner`,`execution_lease_id`,`execution_expires_at`,`execution_quarantine_revision`,`execution_quarantine_generation`,`execution_quarantine_code`,`error_code`,`error_detail`,`deadline_at`,`ended_at`,`state_json`,`checkpoint_json`,`result_json`,`last_event_seq`,`created_at`,`updated_at`) VALUES ("original","original-source","","workflow","tenant","other","conversation","original","original Start","running",1,0,"","",NULL,0,0,"","","",NULL,NULL,"{""definition"":{""id"":""start-source"",""revision"":1,""name"":""original Start"",""inputSchema"":true,""outputSchema"":true,""nodes"":[{""id"":""effect"",""type"":""effect"",""effect"":{""kind"":""external.once"",""input"":{""source"":""original""},""maxCostUnits"":1,""retry"":{""maxAttempts"":2,""retryableErrorCodes"":[""safe-retry""]}}},{""id"":""return"",""type"":""return"",""return"":{""value"":{}}}],""limits"":{""maxNodeActivations"":256,""maxEffects"":64,""maxSegments"":256,""maxActivationsPerSegment"":8,""maxStateBytes"":1048576,""maxFanOut"":64,""maxConcurrency"":8,""maxNestedDepth"":8,""maxAttemptsPerEffect"":3},""policy"":{""costClass"":""low"",""maxCostUnits"":1,""sideEffectClass"":""write""},""hash"":""ff1b7712ef43d0b344eb70fce33c8dfbc4b26f01945327d1151ce3f602bc314e""},""input"":{},""nestedDepth"":0,""currentNode"":0,""activations"":[],""effects"":[],""waits"":[],""budget"":{""nodeActivations"":0,""effects"":0,""segments"":0,""stateBytes"":896,""costUnitsUsed"":0,""costUnitsReserved"":0}}","","",2,"2026-11-12 17:46:53.752","2026-11-12 17:46:53.752")
+
+2026/11/13 01:46:53 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:170 [35;1mUNIQUE constraint failed: agent_kernel_runs.run_id
+[0m[33m[0.272ms] [34;1m[rows:0][0m INSERT INTO `agent_kernel_runs` (`run_id`,`request_id`,`parent_run_id`,`kind`,`tenant_id`,`actor_id`,`thread_kind`,`thread_id`,`goal`,`status`,`revision`,`execution_epoch`,`execution_owner`,`execution_lease_id`,`execution_expires_at`,`execution_quarantine_revision`,`execution_quarantine_generation`,`execution_quarantine_code`,`error_code`,`error_detail`,`deadline_at`,`ended_at`,`state_json`,`checkpoint_json`,`result_json`,`last_event_seq`,`created_at`,`updated_at`) VALUES ("original","original-source","","workflow","tenant","owner","conversation","other","original Start","running",1,0,"","",NULL,0,0,"","","",NULL,NULL,"{""definition"":{""id"":""start-source"",""revision"":1,""name"":""original Start"",""inputSchema"":true,""outputSchema"":true,""nodes"":[{""id"":""effect"",""type"":""effect"",""effect"":{""kind"":""external.once"",""input"":{""source"":""original""},""maxCostUnits"":1,""retry"":{""maxAttempts"":2,""retryableErrorCodes"":[""safe-retry""]}}},{""id"":""return"",""type"":""return"",""return"":{""value"":{}}}],""limits"":{""maxNodeActivations"":256,""maxEffects"":64,""maxSegments"":256,""maxActivationsPerSegment"":8,""maxStateBytes"":1048576,""maxFanOut"":64,""maxConcurrency"":8,""maxNestedDepth"":8,""maxAttemptsPerEffect"":3},""policy"":{""costClass"":""low"",""maxCostUnits"":1,""sideEffectClass"":""write""},""hash"":""ff1b7712ef43d0b344eb70fce33c8dfbc4b26f01945327d1151ce3f602bc314e""},""input"":{},""nestedDepth"":0,""currentNode"":0,""activations"":[],""effects"":[],""waits"":[],""budget"":{""nodeActivations"":0,""effects"":0,""segments"":0,""stateBytes"":896,""costUnitsUsed"":0,""costUnitsReserved"":0}}","","",2,"2026-11-12 17:46:53.753","2026-11-12 17:46:53.753")
+
+2026/11/13 01:46:53 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:170 [35;1mUNIQUE constraint failed: agent_kernel_runs.run_id
+[0m[33m[0.300ms] [34;1m[rows:0][0m INSERT INTO `agent_kernel_runs` (`run_id`,`request_id`,`parent_run_id`,`kind`,`tenant_id`,`actor_id`,`thread_kind`,`thread_id`,`goal`,`status`,`revision`,`execution_epoch`,`execution_owner`,`execution_lease_id`,`execution_expires_at`,`execution_quarantine_revision`,`execution_quarantine_generation`,`execution_quarantine_code`,`error_code`,`error_detail`,`deadline_at`,`ended_at`,`state_json`,`checkpoint_json`,`result_json`,`last_event_seq`,`created_at`,`updated_at`) VALUES ("original","original-source","","workflow","tenant","owner","conversation","original","original Start","running",1,0,"","",NULL,0,0,"","","",NULL,NULL,"{""definition"":{""id"":""start-source"",""revision"":1,""name"":""original Start"",""inputSchema"":true,""outputSchema"":true,""nodes"":[{""id"":""effect"",""type"":""effect"",""effect"":{""kind"":""external.once"",""input"":{""source"":""original""},""maxCostUnits"":1,""retry"":{""maxAttempts"":2,""retryableErrorCodes"":[""safe-retry""]}}},{""id"":""return"",""type"":""return"",""return"":{""value"":{}}}],""limits"":{""maxNodeActivations"":256,""maxEffects"":64,""maxSegments"":256,""maxActivationsPerSegment"":8,""maxStateBytes"":1048576,""maxFanOut"":64,""maxConcurrency"":8,""maxNestedDepth"":8,""maxAttemptsPerEffect"":3},""policy"":{""costClass"":""low"",""maxCostUnits"":1,""sideEffectClass"":""write""},""hash"":""ff1b7712ef43d0b344eb70fce33c8dfbc4b26f01945327d1151ce3f602bc314e""},""input"":{""other"":true},""nestedDepth"":0,""currentNode"":0,""activations"":[],""effects"":[],""waits"":[],""budget"":{""nodeActivations"":0,""effects"":0,""segments"":0,""stateBytes"":908,""costUnitsUsed"":0,""costUnitsReserved"":0}}","","",2,"2026-11-12 17:46:53.755","2026-11-12 17:46:53.755")
+
+2026/11/13 01:46:53 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:170 [35;1mUNIQUE constraint failed: agent_kernel_runs.run_id
+[0m[33m[0.272ms] [34;1m[rows:0][0m INSERT INTO `agent_kernel_runs` (`run_id`,`request_id`,`parent_run_id`,`kind`,`tenant_id`,`actor_id`,`thread_kind`,`thread_id`,`goal`,`status`,`revision`,`execution_epoch`,`execution_owner`,`execution_lease_id`,`execution_expires_at`,`execution_quarantine_revision`,`execution_quarantine_generation`,`execution_quarantine_code`,`error_code`,`error_detail`,`deadline_at`,`ended_at`,`state_json`,`checkpoint_json`,`result_json`,`last_event_seq`,`created_at`,`updated_at`) VALUES ("original","original-source","","workflow","tenant","owner","conversation","original","original Start","running",1,0,"","",NULL,0,0,"","","",NULL,NULL,"{""definition"":{""id"":""other"",""revision"":1,""name"":""original Start"",""inputSchema"":true,""outputSchema"":true,""nodes"":[{""id"":""effect"",""type"":""effect"",""effect"":{""kind"":""external.once"",""input"":{""source"":""original""},""maxCostUnits"":1,""retry"":{""maxAttempts"":2,""retryableErrorCodes"":[""safe-retry""]}}},{""id"":""return"",""type"":""return"",""return"":{""value"":{}}}],""limits"":{""maxNodeActivations"":256,""maxEffects"":64,""maxSegments"":256,""maxActivationsPerSegment"":8,""maxStateBytes"":1048576,""maxFanOut"":64,""maxConcurrency"":8,""maxNestedDepth"":8,""maxAttemptsPerEffect"":3},""policy"":{""costClass"":""low"",""maxCostUnits"":1,""sideEffectClass"":""write""},""hash"":""31b5c5402c486e54d61081f02d55a0de33bf7d589729a15c600b0dffcba536e2""},""input"":{},""nestedDepth"":0,""currentNode"":0,""activations"":[],""effects"":[],""waits"":[],""budget"":{""nodeActivations"":0,""effects"":0,""segments"":0,""stateBytes"":889,""costUnitsUsed"":0,""costUnitsReserved"":0}}","","",2,"2026-11-12 17:46:53.758","2026-11-12 17:46:53.758")
+
+2026/11/13 01:46:53 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:209 [35;1mrecord not found
+[0m[33m[0.109ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "bad-definition" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+
+2026/11/13 01:46:53 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:170 [35;1mUNIQUE constraint failed: agent_kernel_runs.run_id
+[0m[33m[0.131ms] [34;1m[rows:0][0m INSERT INTO `agent_kernel_runs` (`run_id`,`request_id`,`parent_run_id`,`kind`,`tenant_id`,`actor_id`,`thread_kind`,`thread_id`,`goal`,`status`,`revision`,`execution_epoch`,`execution_owner`,`execution_lease_id`,`execution_expires_at`,`execution_quarantine_revision`,`execution_quarantine_generation`,`execution_quarantine_code`,`error_code`,`error_detail`,`deadline_at`,`ended_at`,`state_json`,`checkpoint_json`,`result_json`,`last_event_seq`,`created_at`,`updated_at`) VALUES ("original","original-source","","workflow","tenant","owner","conversation","original","original Start","running",1,0,"","",NULL,0,0,"","","",NULL,NULL,"{""definition"":{""id"":""start-source"",""revision"":1,""name"":""original Start"",""inputSchema"":true,""outputSchema"":true,""nodes"":[{""id"":""effect"",""type"":""effect"",""effect"":{""kind"":""external.once"",""input"":{""source"":""original""},""maxCostUnits"":1,""retry"":{""maxAttempts"":2,""retryableErrorCodes"":[""safe-retry""]}}},{""id"":""return"",""type"":""return"",""return"":{""value"":{}}}],""limits"":{""maxNodeActivations"":256,""maxEffects"":64,""maxSegments"":256,""maxActivationsPerSegment"":8,""maxStateBytes"":1048576,""maxFanOut"":64,""maxConcurrency"":8,""maxNestedDepth"":8,""maxAttemptsPerEffect"":3},""policy"":{""costClass"":""low"",""maxCostUnits"":1,""sideEffectClass"":""write""},""hash"":""ff1b7712ef43d0b344eb70fce33c8dfbc4b26f01945327d1151ce3f602bc314e""},""input"":{},""nestedDepth"":0,""currentNode"":0,""activations"":[],""effects"":[],""waits"":[],""budget"":{""nodeActivations"":0,""effects"":0,""segments"":0,""stateBytes"":896,""costUnitsUsed"":0,""costUnitsReserved"":0}}","","",2,"2026-11-12 17:46:53.788","2026-11-12 17:46:53.788")
+
+2026/11/13 01:46:53 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:170 [35;1mUNIQUE constraint failed: agent_kernel_runs.run_id
+[0m[33m[0.111ms] [34;1m[rows:0][0m INSERT INTO `agent_kernel_runs` (`run_id`,`request_id`,`parent_run_id`,`kind`,`tenant_id`,`actor_id`,`thread_kind`,`thread_id`,`goal`,`status`,`revision`,`execution_epoch`,`execution_owner`,`execution_lease_id`,`execution_expires_at`,`execution_quarantine_revision`,`execution_quarantine_generation`,`execution_quarantine_code`,`error_code`,`error_detail`,`deadline_at`,`ended_at`,`state_json`,`checkpoint_json`,`result_json`,`last_event_seq`,`created_at`,`updated_at`) VALUES ("original","original-source","","workflow","tenant","other","conversation","original","original Start","running",1,0,"","",NULL,0,0,"","","",NULL,NULL,"{""definition"":{""id"":""start-source"",""revision"":1,""name"":""original Start"",""inputSchema"":true,""outputSchema"":true,""nodes"":[{""id"":""effect"",""type"":""effect"",""effect"":{""kind"":""external.once"",""input"":{""source"":""original""},""maxCostUnits"":1,""retry"":{""maxAttempts"":2,""retryableErrorCodes"":[""safe-retry""]}}},{""id"":""return"",""type"":""return"",""return"":{""value"":{}}}],""limits"":{""maxNodeActivations"":256,""maxEffects"":64,""maxSegments"":256,""maxActivationsPerSegment"":8,""maxStateBytes"":1048576,""maxFanOut"":64,""maxConcurrency"":8,""maxNestedDepth"":8,""maxAttemptsPerEffect"":3},""policy"":{""costClass"":""low"",""maxCostUnits"":1,""sideEffectClass"":""write""},""hash"":""ff1b7712ef43d0b344eb70fce33c8dfbc4b26f01945327d1151ce3f602bc314e""},""input"":{},""nestedDepth"":0,""currentNode"":0,""activations"":[],""effects"":[],""waits"":[],""budget"":{""nodeActivations"":0,""effects"":0,""segments"":0,""stateBytes"":896,""costUnitsUsed"":0,""costUnitsReserved"":0}}","","",2,"2026-11-12 17:46:53.789","2026-11-12 17:46:53.789")
+
+2026/11/13 01:46:53 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:170 [35;1mUNIQUE constraint failed: agent_kernel_runs.run_id
+[0m[33m[0.115ms] [34;1m[rows:0][0m INSERT INTO `agent_kernel_runs` (`run_id`,`request_id`,`parent_run_id`,`kind`,`tenant_id`,`actor_id`,`thread_kind`,`thread_id`,`goal`,`status`,`revision`,`execution_epoch`,`execution_owner`,`execution_lease_id`,`execution_expires_at`,`execution_quarantine_revision`,`execution_quarantine_generation`,`execution_quarantine_code`,`error_code`,`error_detail`,`deadline_at`,`ended_at`,`state_json`,`checkpoint_json`,`result_json`,`last_event_seq`,`created_at`,`updated_at`) VALUES ("original","original-source","","workflow","tenant","owner","conversation","other","original Start","running",1,0,"","",NULL,0,0,"","","",NULL,NULL,"{""definition"":{""id"":""start-source"",""revision"":1,""name"":""original Start"",""inputSchema"":true,""outputSchema"":true,""nodes"":[{""id"":""effect"",""type"":""effect"",""effect"":{""kind"":""external.once"",""input"":{""source"":""original""},""maxCostUnits"":1,""retry"":{""maxAttempts"":2,""retryableErrorCodes"":[""safe-retry""]}}},{""id"":""return"",""type"":""return"",""return"":{""value"":{}}}],""limits"":{""maxNodeActivations"":256,""maxEffects"":64,""maxSegments"":256,""maxActivationsPerSegment"":8,""maxStateBytes"":1048576,""maxFanOut"":64,""maxConcurrency"":8,""maxNestedDepth"":8,""maxAttemptsPerEffect"":3},""policy"":{""costClass"":""low"",""maxCostUnits"":1,""sideEffectClass"":""write""},""hash"":""ff1b7712ef43d0b344eb70fce33c8dfbc4b26f01945327d1151ce3f602bc314e""},""input"":{},""nestedDepth"":0,""currentNode"":0,""activations"":[],""effects"":[],""waits"":[],""budget"":{""nodeActivations"":0,""effects"":0,""segments"":0,""stateBytes"":896,""costUnitsUsed"":0,""costUnitsReserved"":0}}","","",2,"2026-11-12 17:46:53.79","2026-11-12 17:46:53.79")
+
+2026/11/13 01:46:53 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:170 [35;1mUNIQUE constraint failed: agent_kernel_runs.run_id
+[0m[33m[0.101ms] [34;1m[rows:0][0m INSERT INTO `agent_kernel_runs` (`run_id`,`request_id`,`parent_run_id`,`kind`,`tenant_id`,`actor_id`,`thread_kind`,`thread_id`,`goal`,`status`,`revision`,`execution_epoch`,`execution_owner`,`execution_lease_id`,`execution_expires_at`,`execution_quarantine_revision`,`execution_quarantine_generation`,`execution_quarantine_code`,`error_code`,`error_detail`,`deadline_at`,`ended_at`,`state_json`,`checkpoint_json`,`result_json`,`last_event_seq`,`created_at`,`updated_at`) VALUES ("original","original-source","","workflow","tenant","owner","conversation","original","original Start","running",1,0,"","",NULL,0,0,"","","",NULL,NULL,"{""definition"":{""id"":""start-source"",""revision"":1,""name"":""original Start"",""inputSchema"":true,""outputSchema"":true,""nodes"":[{""id"":""effect"",""type"":""effect"",""effect"":{""kind"":""external.once"",""input"":{""source"":""original""},""maxCostUnits"":1,""retry"":{""maxAttempts"":2,""retryableErrorCodes"":[""safe-retry""]}}},{""id"":""return"",""type"":""return"",""return"":{""value"":{}}}],""limits"":{""maxNodeActivations"":256,""maxEffects"":64,""maxSegments"":256,""maxActivationsPerSegment"":8,""maxStateBytes"":1048576,""maxFanOut"":64,""maxConcurrency"":8,""maxNestedDepth"":8,""maxAttemptsPerEffect"":3},""policy"":{""costClass"":""low"",""maxCostUnits"":1,""sideEffectClass"":""write""},""hash"":""ff1b7712ef43d0b344eb70fce33c8dfbc4b26f01945327d1151ce3f602bc314e""},""input"":{""other"":true},""nestedDepth"":0,""currentNode"":0,""activations"":[],""effects"":[],""waits"":[],""budget"":{""nodeActivations"":0,""effects"":0,""segments"":0,""stateBytes"":908,""costUnitsUsed"":0,""costUnitsReserved"":0}}","","",2,"2026-11-12 17:46:53.791","2026-11-12 17:46:53.791")
+
+2026/11/13 01:46:53 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:170 [35;1mUNIQUE constraint failed: agent_kernel_runs.run_id
+[0m[33m[0.103ms] [34;1m[rows:0][0m INSERT INTO `agent_kernel_runs` (`run_id`,`request_id`,`parent_run_id`,`kind`,`tenant_id`,`actor_id`,`thread_kind`,`thread_id`,`goal`,`status`,`revision`,`execution_epoch`,`execution_owner`,`execution_lease_id`,`execution_expires_at`,`execution_quarantine_revision`,`execution_quarantine_generation`,`execution_quarantine_code`,`error_code`,`error_detail`,`deadline_at`,`ended_at`,`state_json`,`checkpoint_json`,`result_json`,`last_event_seq`,`created_at`,`updated_at`) VALUES ("original","original-source","","workflow","tenant","owner","conversation","original","original Start","running",1,0,"","",NULL,0,0,"","","",NULL,NULL,"{""definition"":{""id"":""other"",""revision"":1,""name"":""original Start"",""inputSchema"":true,""outputSchema"":true,""nodes"":[{""id"":""effect"",""type"":""effect"",""effect"":{""kind"":""external.once"",""input"":{""source"":""original""},""maxCostUnits"":1,""retry"":{""maxAttempts"":2,""retryableErrorCodes"":[""safe-retry""]}}},{""id"":""return"",""type"":""return"",""return"":{""value"":{}}}],""limits"":{""maxNodeActivations"":256,""maxEffects"":64,""maxSegments"":256,""maxActivationsPerSegment"":8,""maxStateBytes"":1048576,""maxFanOut"":64,""maxConcurrency"":8,""maxNestedDepth"":8,""maxAttemptsPerEffect"":3},""policy"":{""costClass"":""low"",""maxCostUnits"":1,""sideEffectClass"":""write""},""hash"":""31b5c5402c486e54d61081f02d55a0de33bf7d589729a15c600b0dffcba536e2""},""input"":{},""nestedDepth"":0,""currentNode"":0,""activations"":[],""effects"":[],""waits"":[],""budget"":{""nodeActivations"":0,""effects"":0,""segments"":0,""stateBytes"":889,""costUnitsUsed"":0,""costUnitsReserved"":0}}","","",2,"2026-11-12 17:46:53.792","2026-11-12 17:46:53.792")
+
+2026/11/13 01:46:53 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:209 [35;1mrecord not found
+[0m[33m[0.074ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "bad-definition" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+
+2026/11/13 01:46:53 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:209 [35;1mrecord not found
+[0m[33m[0.110ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "bad-tenant" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+
+2026/11/13 01:46:53 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:209 [35;1mrecord not found
+[0m[33m[0.056ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "bad-actor" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+
+2026/11/13 01:46:53 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:209 [35;1mrecord not found
+[0m[33m[0.076ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "bad-thread" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+
+2026/11/13 01:46:53 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_child_execution.go:36 [35;1mrecord not found
+[0m[33m[0.060ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "missing" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+
+2026/11/13 01:46:53 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:209 [35;1mrecord not found
+[0m[33m[0.054ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "bad-missing" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+
+2026/11/13 01:46:53 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:170 [35;1mUNIQUE constraint failed: agent_kernel_runs.run_id
+[0m[33m[0.130ms] [34;1m[rows:0][0m INSERT INTO `agent_kernel_runs` (`run_id`,`request_id`,`parent_run_id`,`kind`,`tenant_id`,`actor_id`,`thread_kind`,`thread_id`,`goal`,`status`,`revision`,`execution_epoch`,`execution_owner`,`execution_lease_id`,`execution_expires_at`,`execution_quarantine_revision`,`execution_quarantine_generation`,`execution_quarantine_code`,`error_code`,`error_detail`,`deadline_at`,`ended_at`,`state_json`,`checkpoint_json`,`result_json`,`last_event_seq`,`created_at`,`updated_at`) VALUES ("original","original-source","parent","workflow","tenant","owner","conversation","original","original Start","running",1,0,"","",NULL,0,0,"","","",NULL,NULL,"{""definition"":{""id"":""start-source"",""revision"":1,""name"":""original Start"",""inputSchema"":true,""outputSchema"":true,""nodes"":[{""id"":""effect"",""type"":""effect"",""effect"":{""kind"":""external.once"",""input"":{""source"":""original""},""maxCostUnits"":1,""retry"":{""maxAttempts"":2,""retryableErrorCodes"":[""safe-retry""]}}},{""id"":""return"",""type"":""return"",""return"":{""value"":{}}}],""limits"":{""maxNodeActivations"":256,""maxEffects"":64,""maxSegments"":256,""maxActivationsPerSegment"":8,""maxStateBytes"":1048576,""maxFanOut"":64,""maxConcurrency"":8,""maxNestedDepth"":8,""maxAttemptsPerEffect"":3},""policy"":{""costClass"":""low"",""maxCostUnits"":1,""sideEffectClass"":""write""},""hash"":""ff1b7712ef43d0b344eb70fce33c8dfbc4b26f01945327d1151ce3f602bc314e""},""input"":{},""nestedDepth"":0,""currentNode"":0,""activations"":[],""effects"":[],""waits"":[],""budget"":{""nodeActivations"":0,""effects"":0,""segments"":0,""stateBytes"":896,""costUnitsUsed"":0,""costUnitsReserved"":0}}","","",2,"2026-11-12 17:46:53.811","2026-11-12 17:46:53.811")
+
+2026/11/13 01:46:53 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:170 [35;1mUNIQUE constraint failed: agent_kernel_runs.run_id
+[0m[33m[0.215ms] [34;1m[rows:0][0m INSERT INTO `agent_kernel_runs` (`run_id`,`request_id`,`parent_run_id`,`kind`,`tenant_id`,`actor_id`,`thread_kind`,`thread_id`,`goal`,`status`,`revision`,`execution_epoch`,`execution_owner`,`execution_lease_id`,`execution_expires_at`,`execution_quarantine_revision`,`execution_quarantine_generation`,`execution_quarantine_code`,`error_code`,`error_detail`,`deadline_at`,`ended_at`,`state_json`,`checkpoint_json`,`result_json`,`last_event_seq`,`created_at`,`updated_at`) VALUES ("original","original-source","parent","workflow","tenant","owner","conversation","original","original Start","running",1,0,"","",NULL,0,0,"","","",NULL,NULL,"{""definition"":{""id"":""start-source"",""revision"":1,""name"":""original Start"",""inputSchema"":true,""outputSchema"":true,""nodes"":[{""id"":""effect"",""type"":""effect"",""effect"":{""kind"":""external.once"",""input"":{""source"":""original""},""maxCostUnits"":1,""retry"":{""maxAttempts"":2,""retryableErrorCodes"":[""safe-retry""]}}},{""id"":""return"",""type"":""return"",""return"":{""value"":{}}}],""limits"":{""maxNodeActivations"":256,""maxEffects"":64,""maxSegments"":256,""maxActivationsPerSegment"":8,""maxStateBytes"":1048576,""maxFanOut"":64,""maxConcurrency"":8,""maxNestedDepth"":8,""maxAttemptsPerEffect"":3},""policy"":{""costClass"":""low"",""maxCostUnits"":1,""sideEffectClass"":""write""},""hash"":""ff1b7712ef43d0b344eb70fce33c8dfbc4b26f01945327d1151ce3f602bc314e""},""input"":{""other"":true},""nestedDepth"":0,""currentNode"":0,""activations"":[],""effects"":[],""waits"":[],""budget"":{""nodeActivations"":0,""effects"":0,""segments"":0,""stateBytes"":908,""costUnitsUsed"":0,""costUnitsReserved"":0}}","","",2,"2026-11-12 17:46:53.816","2026-11-12 17:46:53.816")
+
+2026/11/13 01:46:53 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:170 [35;1mUNIQUE constraint failed: agent_kernel_runs.run_id
+[0m[33m[0.252ms] [34;1m[rows:0][0m INSERT INTO `agent_kernel_runs` (`run_id`,`request_id`,`parent_run_id`,`kind`,`tenant_id`,`actor_id`,`thread_kind`,`thread_id`,`goal`,`status`,`revision`,`execution_epoch`,`execution_owner`,`execution_lease_id`,`execution_expires_at`,`execution_quarantine_revision`,`execution_quarantine_generation`,`execution_quarantine_code`,`error_code`,`error_detail`,`deadline_at`,`ended_at`,`state_json`,`checkpoint_json`,`result_json`,`last_event_seq`,`created_at`,`updated_at`) VALUES ("original","original-source","parent","workflow","tenant","owner","conversation","original","original Start","running",1,0,"","",NULL,0,0,"","","",NULL,NULL,"{""definition"":{""id"":""other"",""revision"":1,""name"":""original Start"",""inputSchema"":true,""outputSchema"":true,""nodes"":[{""id"":""effect"",""type"":""effect"",""effect"":{""kind"":""external.once"",""input"":{""source"":""original""},""maxCostUnits"":1,""retry"":{""maxAttempts"":2,""retryableErrorCodes"":[""safe-retry""]}}},{""id"":""return"",""type"":""return"",""return"":{""value"":{}}}],""limits"":{""maxNodeActivations"":256,""maxEffects"":64,""maxSegments"":256,""maxActivationsPerSegment"":8,""maxStateBytes"":1048576,""maxFanOut"":64,""maxConcurrency"":8,""maxNestedDepth"":8,""maxAttemptsPerEffect"":3},""policy"":{""costClass"":""low"",""maxCostUnits"":1,""sideEffectClass"":""write""},""hash"":""31b5c5402c486e54d61081f02d55a0de33bf7d589729a15c600b0dffcba536e2""},""input"":{},""nestedDepth"":0,""currentNode"":0,""activations"":[],""effects"":[],""waits"":[],""budget"":{""nodeActivations"":0,""effects"":0,""segments"":0,""stateBytes"":889,""costUnitsUsed"":0,""costUnitsReserved"":0}}","","",2,"2026-11-12 17:46:53.819","2026-11-12 17:46:53.819")
+
+2026/11/13 01:46:53 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:209 [35;1mrecord not found
+[0m[33m[0.136ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "bad-definition" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+
+2026/11/13 01:46:53 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:209 [35;1mrecord not found
+[0m[33m[0.124ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "bad-tenant" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+
+2026/11/13 01:46:53 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:209 [35;1mrecord not found
+[0m[33m[0.066ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "bad-actor" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+
+2026/11/13 01:46:53 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:209 [35;1mrecord not found
+[0m[33m[0.064ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "bad-thread" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+
+2026/11/13 01:46:53 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_child_execution.go:36 [35;1mrecord not found
+[0m[33m[0.056ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "missing" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+
+2026/11/13 01:46:53 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:209 [35;1mrecord not found
+[0m[33m[0.062ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "bad-missing" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+
+2026/11/13 01:46:53 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:170 [35;1mUNIQUE constraint failed: agent_kernel_runs.run_id
+[0m[33m[0.143ms] [34;1m[rows:0][0m INSERT INTO `agent_kernel_runs` (`run_id`,`request_id`,`parent_run_id`,`kind`,`tenant_id`,`actor_id`,`thread_kind`,`thread_id`,`goal`,`status`,`revision`,`execution_epoch`,`execution_owner`,`execution_lease_id`,`execution_expires_at`,`execution_quarantine_revision`,`execution_quarantine_generation`,`execution_quarantine_code`,`error_code`,`error_detail`,`deadline_at`,`ended_at`,`state_json`,`checkpoint_json`,`result_json`,`last_event_seq`,`created_at`,`updated_at`) VALUES ("original","original-source","","workflow","tenant","owner","conversation","original","original Start","running",1,0,"","",NULL,0,0,"","","",NULL,NULL,"{""definition"":{""id"":""start-source"",""revision"":1,""name"":""original Start"",""inputSchema"":true,""outputSchema"":true,""nodes"":[{""id"":""effect"",""type"":""effect"",""effect"":{""kind"":""external.once"",""input"":{""source"":""original""},""maxCostUnits"":1,""retry"":{""maxAttempts"":2,""retryableErrorCodes"":[""safe-retry""]}}},{""id"":""return"",""type"":""return"",""return"":{""value"":{}}}],""limits"":{""maxNodeActivations"":256,""maxEffects"":64,""maxSegments"":256,""maxActivationsPerSegment"":8,""maxStateBytes"":1048576,""maxFanOut"":64,""maxConcurrency"":8,""maxNestedDepth"":8,""maxAttemptsPerEffect"":3},""policy"":{""costClass"":""low"",""maxCostUnits"":1,""sideEffectClass"":""write""},""hash"":""ff1b7712ef43d0b344eb70fce33c8dfbc4b26f01945327d1151ce3f602bc314e""},""input"":{},""nestedDepth"":0,""currentNode"":0,""activations"":[],""effects"":[],""waits"":[],""budget"":{""nodeActivations"":0,""effects"":0,""segments"":0,""stateBytes"":896,""costUnitsUsed"":0,""costUnitsReserved"":0}}","","",2,"2026-11-12 17:46:53.877","2026-11-12 17:46:53.877")
+
+2026/11/13 01:46:53 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:170 [35;1mUNIQUE constraint failed: agent_kernel_runs.run_id
+[0m[33m[0.151ms] [34;1m[rows:0][0m INSERT INTO `agent_kernel_runs` (`run_id`,`request_id`,`parent_run_id`,`kind`,`tenant_id`,`actor_id`,`thread_kind`,`thread_id`,`goal`,`status`,`revision`,`execution_epoch`,`execution_owner`,`execution_lease_id`,`execution_expires_at`,`execution_quarantine_revision`,`execution_quarantine_generation`,`execution_quarantine_code`,`error_code`,`error_detail`,`deadline_at`,`ended_at`,`state_json`,`checkpoint_json`,`result_json`,`last_event_seq`,`created_at`,`updated_at`) VALUES ("original","original-source","","workflow","tenant","owner","conversation","original","original Start","running",1,0,"","",NULL,0,0,"","","",NULL,NULL,"{""definition"":{""id"":""start-source"",""revision"":1,""name"":""original Start"",""inputSchema"":true,""outputSchema"":true,""nodes"":[{""id"":""effect"",""type"":""effect"",""effect"":{""kind"":""external.once"",""input"":{""source"":""original""},""maxCostUnits"":1,""retry"":{""maxAttempts"":2,""retryableErrorCodes"":[""safe-retry""]}}},{""id"":""return"",""type"":""return"",""return"":{""value"":{}}}],""limits"":{""maxNodeActivations"":256,""maxEffects"":64,""maxSegments"":256,""maxActivationsPerSegment"":8,""maxStateBytes"":1048576,""maxFanOut"":64,""maxConcurrency"":8,""maxNestedDepth"":8,""maxAttemptsPerEffect"":3},""policy"":{""costClass"":""low"",""maxCostUnits"":1,""sideEffectClass"":""write""},""hash"":""ff1b7712ef43d0b344eb70fce33c8dfbc4b26f01945327d1151ce3f602bc314e""},""input"":{},""nestedDepth"":0,""currentNode"":0,""activations"":[],""effects"":[],""waits"":[],""budget"":{""nodeActivations"":0,""effects"":0,""segments"":0,""stateBytes"":896,""costUnitsUsed"":0,""costUnitsReserved"":0}}","","",2,"2026-11-12 17:46:53.91","2026-11-12 17:46:53.91")
+
+2026/11/13 01:46:53 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:170 [35;1mUNIQUE constraint failed: agent_kernel_runs.run_id
+[0m[33m[0.135ms] [34;1m[rows:0][0m INSERT INTO `agent_kernel_runs` (`run_id`,`request_id`,`parent_run_id`,`kind`,`tenant_id`,`actor_id`,`thread_kind`,`thread_id`,`goal`,`status`,`revision`,`execution_epoch`,`execution_owner`,`execution_lease_id`,`execution_expires_at`,`execution_quarantine_revision`,`execution_quarantine_generation`,`execution_quarantine_code`,`error_code`,`error_detail`,`deadline_at`,`ended_at`,`state_json`,`checkpoint_json`,`result_json`,`last_event_seq`,`created_at`,`updated_at`) VALUES ("original","original-source","","workflow","tenant","owner","conversation","original","original Start","running",1,0,"","",NULL,0,0,"","","",NULL,NULL,"{""definition"":{""id"":""start-source"",""revision"":1,""name"":""original Start"",""inputSchema"":true,""outputSchema"":true,""nodes"":[{""id"":""effect"",""type"":""effect"",""effect"":{""kind"":""external.once"",""input"":{""source"":""original""},""maxCostUnits"":1,""retry"":{""maxAttempts"":2,""retryableErrorCodes"":[""safe-retry""]}}},{""id"":""return"",""type"":""return"",""return"":{""value"":{}}}],""limits"":{""maxNodeActivations"":256,""maxEffects"":64,""maxSegments"":256,""maxActivationsPerSegment"":8,""maxStateBytes"":1048576,""maxFanOut"":64,""maxConcurrency"":8,""maxNestedDepth"":8,""maxAttemptsPerEffect"":3},""policy"":{""costClass"":""low"",""maxCostUnits"":1,""sideEffectClass"":""write""},""hash"":""ff1b7712ef43d0b344eb70fce33c8dfbc4b26f01945327d1151ce3f602bc314e""},""input"":{},""nestedDepth"":0,""currentNode"":0,""activations"":[],""effects"":[],""waits"":[],""budget"":{""nodeActivations"":0,""effects"":0,""segments"":0,""stateBytes"":896,""costUnitsUsed"":0,""costUnitsReserved"":0}}","","",2,"2026-11-12 17:46:53.939","2026-11-12 17:46:53.939")
+--- FAIL: TestRealPostgresKernelExecutionStoreConformance (1.23s)
+    --- FAIL: TestRealPostgresKernelExecutionStoreConformance/pending-gates-cannot-acquire (0.12s)
+        execution_store.go:272: waiting_input bypassed by acquire: kernel run requires fenced execution
+--- FAIL: TestKernelExecutionStoreConformance (0.37s)
+    --- FAIL: TestKernelExecutionStoreConformance/pending-gates-cannot-acquire (0.01s)
+        execution_store.go:272: waiting_input bypassed by acquire: kernel run requires fenced execution
+
+2026/11/13 01:47:10 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_execution.go:66 [35;1mrecord not found
+[0m[33m[0.054ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "foreign" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+
+2026/11/13 01:47:10 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_child_execution.go:36 [35;1mrecord not found
+[0m[33m[0.052ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "not-present" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+
+2026/11/13 01:47:10 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:209 [35;1mrecord not found
+[0m[33m[0.059ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "denied-foreign-tenant" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+
+2026/11/13 01:47:10 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:209 [35;1mrecord not found
+[0m[33m[0.154ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "denied-foreign-actor" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+
+2026/11/13 01:47:10 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:209 [35;1mrecord not found
+[0m[33m[0.118ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "denied-foreign-thread" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+
+2026/11/13 01:47:10 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_child_execution.go:36 [35;1mrecord not found
+[0m[33m[0.145ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "does-not-exist" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+
+2026/11/13 01:47:10 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:209 [35;1mrecord not found
+[0m[33m[0.231ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "denied-missing-parent" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+
+2026/11/13 01:47:10 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:209 [35;1mrecord not found
+[0m[33m[0.078ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "late-child" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+
+2026/11/13 01:47:10 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:170 [35;1mUNIQUE constraint failed: agent_kernel_runs.run_id
+[0m[33m[0.104ms] [34;1m[rows:0][0m INSERT INTO `agent_kernel_runs` (`run_id`,`request_id`,`parent_run_id`,`kind`,`tenant_id`,`actor_id`,`thread_kind`,`thread_id`,`goal`,`status`,`revision`,`execution_epoch`,`execution_owner`,`execution_lease_id`,`execution_expires_at`,`execution_quarantine_revision`,`execution_quarantine_generation`,`execution_quarantine_code`,`error_code`,`error_detail`,`deadline_at`,`ended_at`,`state_json`,`checkpoint_json`,`result_json`,`last_event_seq`,`created_at`,`updated_at`) VALUES ("root","","","workflow","tenant","actor","conversation","thread","different original owner","running",1,0,"","",NULL,0,0,"","","",NULL,NULL,"{}","","",1,"2026-11-12 17:47:10.332","2026-11-12 17:47:10.332")
+--- FAIL: TestRealPostgresNativeExternalSignalAndVerifiedReceipt (0.25s)
+    native_external_signal_real_test.go:102: signal did not preserve native sticky fence: kernel descendant has an unsettled physical execution Grant
+--- FAIL: TestRealPostgresNativeRunLeaseApprovalAndResume (0.37s)
+    native_run_execution_real_test.go:103: control raced ahead of execution claim: {ID:real-pg-native-lease Kind:agent Actor:{TenantID:p ActorID:a} Thread:{Kind:conversation ID:t} RequestID: ParentRunID: Goal:one approval through native leases Status:completed Revision:15 ErrorCode: ErrorDetail: DeadlineAt:<nil> EndedAt:2026-11-12 17:47:11.338876 +0000 UTC CreatedAt:2026-11-12 17:47:11.104549 +0000 UTC UpdatedAt:2026-11-12 17:47:11.338876 +0000 UTC} tools=1 err=<nil>
+
+2026/11/13 01:47:16 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/runrelation_store.go:34 [35;1mUNIQUE constraint failed: agent_run_relations.parent_run_id, agent_run_relations.kind, agent_run_relations.owner_node_id
+[0m[33m[0.122ms] [34;1m[rows:0][0m INSERT INTO `agent_run_relations` (`child_run_id`,`parent_run_id`,`kind`,`owner_node_id`,`created_at`,`last_parent_revision`,`last_child_revision`) VALUES ("child-1","parent-1","capability","step-1","2026-08-08 01:00:00",0,0)
+
+2026/11/13 01:47:16 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/workflow_definition_store.go:266 [35;1mrecord not found
+[0m[33m[0.203ms] [34;1m[rows:0][0m SELECT * FROM `agent_workflow_definition_revisions` WHERE scope_kind = "system" AND tenant_id = "" AND actor_id = "" AND idempotency_key = "request-1" ORDER BY `agent_workflow_definition_revisions`.`scope_kind` LIMIT 1
+
+2026/11/13 01:47:16 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/workflow_definition_store.go:305 [35;1mrecord not found
+[0m[33m[0.104ms] [34;1m[rows:0][0m SELECT * FROM `agent_workflow_definition_heads` WHERE scope_kind = "system" AND tenant_id = "" AND actor_id = "" AND definition_id = "flow" ORDER BY `agent_workflow_definition_heads`.`scope_kind` LIMIT 1 
+
+2026/11/13 01:47:16 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/runrelation_store.go:34 [35;1mUNIQUE constraint failed: agent_run_relations.parent_run_id, agent_run_relations.kind, agent_run_relations.owner_node_id
+[0m[33m[0.203ms] [34;1m[rows:0][0m INSERT INTO `agent_run_relations` (`child_run_id`,`parent_run_id`,`kind`,`owner_node_id`,`created_at`,`last_parent_revision`,`last_child_revision`) VALUES ("child-2","parent-1","team_member","member-1","2026-08-08 00:00:01",0,0)
+
+2026/11/13 01:47:16 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:170 [35;1mUNIQUE constraint failed: agent_kernel_runs.run_id
+[0m[33m[0.200ms] [34;1m[rows:0][0m INSERT INTO `agent_kernel_runs` (`run_id`,`request_id`,`parent_run_id`,`kind`,`tenant_id`,`actor_id`,`thread_kind`,`thread_id`,`goal`,`status`,`revision`,`execution_epoch`,`execution_owner`,`execution_lease_id`,`execution_expires_at`,`execution_quarantine_revision`,`execution_quarantine_generation`,`execution_quarantine_code`,`error_code`,`error_detail`,`deadline_at`,`ended_at`,`state_json`,`checkpoint_json`,`result_json`,`last_event_seq`,`created_at`,`updated_at`) VALUES ("run_duplicate","","","conformance","tenant","actor","conversation","thread","test","running",1,0,"","",NULL,0,0,"","","","2026-08-06 14:00:00",NULL,"{""value"":1}","","",0,"2026-08-06 13:00:00","2026-08-06 13:00:00")
+
+2026/11/13 01:47:16 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/runrelation_store.go:34 [35;1mUNIQUE constraint failed: agent_run_relations.child_run_id
+[0m[33m[0.159ms] [34;1m[rows:0][0m INSERT INTO `agent_run_relations` (`child_run_id`,`parent_run_id`,`kind`,`owner_node_id`,`created_at`,`last_parent_revision`,`last_child_revision`) VALUES ("child-1","parent-2","workflow_effect","effect-1","2026-08-08 00:00:02",0,0)
+
+2026/11/13 01:47:16 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/runrelation_store.go:59 [35;1mrecord not found
+[0m[33m[0.054ms] [34;1m[rows:0][0m SELECT * FROM `agent_run_relations` WHERE parent_run_id = "parent-2" AND kind = "workflow_effect" AND owner_node_id = "effect-1" ORDER BY `agent_run_relations`.`child_run_id` LIMIT 1
+
+2026/11/13 01:47:16 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/workflow_definition_store.go:266 [35;1mrecord not found
+[0m[33m[0.112ms] [34;1m[rows:0][0m SELECT * FROM `agent_workflow_definition_revisions` WHERE scope_kind = "system" AND tenant_id = "" AND actor_id = "" AND idempotency_key = "request-1" ORDER BY `agent_workflow_definition_revisions`.`scope_kind` LIMIT 1
+
+2026/11/13 01:47:16 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/workflow_definition_store.go:305 [35;1mrecord not found
+[0m[33m[0.076ms] [34;1m[rows:0][0m SELECT * FROM `agent_workflow_definition_heads` WHERE scope_kind = "system" AND tenant_id = "" AND actor_id = "" AND definition_id = "flow" ORDER BY `agent_workflow_definition_heads`.`scope_kind` LIMIT 1 
+
+2026/11/13 01:47:16 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/workflow_definition_store.go:266 [35;1mrecord not found
+[0m[33m[0.065ms] [34;1m[rows:0][0m SELECT * FROM `agent_workflow_definition_revisions` WHERE scope_kind = "system" AND tenant_id = "" AND actor_id = "" AND idempotency_key = "request-stale" ORDER BY `agent_workflow_definition_revisions`.`scope_kind` LIMIT 1
+
+2026/11/13 01:47:16 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/workflow_definition_store.go:266 [35;1mrecord not found
+[0m[33m[0.111ms] [34;1m[rows:0][0m SELECT * FROM `agent_workflow_definition_revisions` WHERE scope_kind = "system" AND tenant_id = "" AND actor_id = "" AND idempotency_key = "request-stale" ORDER BY `agent_workflow_definition_revisions`.`scope_kind` LIMIT 1
+
+2026/11/13 01:47:16 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/workflow_definition_store.go:266 [35;1mrecord not found
+[0m[33m[0.053ms] [34;1m[rows:0][0m SELECT * FROM `agent_workflow_definition_revisions` WHERE scope_kind = "system" AND tenant_id = "" AND actor_id = "" AND idempotency_key = "request-2" ORDER BY `agent_workflow_definition_revisions`.`scope_kind` LIMIT 1
+
+2026/11/13 01:47:16 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/workflow_definition_store.go:266 [35;1mrecord not found
+[0m[33m[0.102ms] [34;1m[rows:0][0m SELECT * FROM `agent_workflow_definition_revisions` WHERE scope_kind = "tenant" AND tenant_id = "tenant" AND actor_id = "" AND idempotency_key = "request-1" ORDER BY `agent_workflow_definition_revisions`.`scope_kind` LIMIT 1
+
+2026/11/13 01:47:16 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/workflow_definition_store.go:305 [35;1mrecord not found
+[0m[33m[0.092ms] [34;1m[rows:0][0m SELECT * FROM `agent_workflow_definition_heads` WHERE scope_kind = "tenant" AND tenant_id = "tenant" AND actor_id = "" AND definition_id = "flow" ORDER BY `agent_workflow_definition_heads`.`scope_kind` LIMIT 1 
+
+2026/11/13 01:47:16 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/workflow_definition_store.go:266 [35;1mrecord not found
+[0m[33m[0.111ms] [34;1m[rows:0][0m SELECT * FROM `agent_workflow_definition_revisions` WHERE scope_kind = "tenant" AND tenant_id = "tenant" AND actor_id = "" AND idempotency_key = "request-2" ORDER BY `agent_workflow_definition_revisions`.`scope_kind` LIMIT 1
+
+2026/11/13 01:47:16 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/workflow_definition_store.go:266 [35;1mrecord not found
+[0m[33m[0.490ms] [34;1m[rows:0][0m SELECT * FROM `agent_workflow_definition_revisions` WHERE scope_kind = "system" AND tenant_id = "" AND actor_id = "" AND idempotency_key = "request-z" ORDER BY `agent_workflow_definition_revisions`.`scope_kind` LIMIT 1
+
+2026/11/13 01:47:16 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:96 [35;1mdatabase is locked
+[0m[33m[0.372ms] [34;1m[rows:0][0m UPDATE `agent_kernel_runs` SET `actor_id`="actor",`checkpoint_json`="",`created_at`="2026-08-06 13:00:00",`deadline_at`="2026-08-06 14:00:00",`ended_at`=NULL,`error_code`="",`error_detail`="",`goal`="test",`kind`="conformance",`last_event_seq`=last_event_seq + 1,`parent_run_id`="",`request_id`="",`result_json`="",`revision`=2,`state_json`="{""winner"":true}",`status`="running",`tenant_id`="tenant",`thread_id`="thread",`thread_kind`="conversation",`updated_at`="2026-08-06 13:00:00" WHERE (run_id = "run_concurrent" AND revision = 1 AND parent_run_id = "") AND execution_epoch = 0
+
+2026/11/13 01:47:16 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/workflow_definition_store.go:305 [35;1mrecord not found
+[0m[33m[0.070ms] [34;1m[rows:0][0m SELECT * FROM `agent_workflow_definition_heads` WHERE scope_kind = "system" AND tenant_id = "" AND actor_id = "" AND definition_id = "z-flow" ORDER BY `agent_workflow_definition_heads`.`scope_kind` LIMIT 1 
+
+2026/11/13 01:47:16 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:96 [35;1mdatabase is locked
+[0m[33m[0.245ms] [34;1m[rows:0][0m UPDATE `agent_kernel_runs` SET `actor_id`="actor",`checkpoint_json`="",`created_at`="2026-08-06 13:00:00",`deadline_at`="2026-08-06 14:00:00",`ended_at`=NULL,`error_code`="",`error_detail`="",`goal`="test",`kind`="conformance",`last_event_seq`=last_event_seq + 1,`parent_run_id`="",`request_id`="",`result_json`="",`revision`=2,`state_json`="{""winner"":true}",`status`="running",`tenant_id`="tenant",`thread_id`="thread",`thread_kind`="conversation",`updated_at`="2026-08-06 13:00:00" WHERE (run_id = "run_concurrent" AND revision = 1 AND parent_run_id = "") AND execution_epoch = 0
+
+2026/11/13 01:47:16 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:96 [35;1mdatabase is locked
+[0m[33m[0.169ms] [34;1m[rows:0][0m UPDATE `agent_kernel_runs` SET `actor_id`="actor",`checkpoint_json`="",`created_at`="2026-08-06 13:00:00",`deadline_at`="2026-08-06 14:00:00",`ended_at`=NULL,`error_code`="",`error_detail`="",`goal`="test",`kind`="conformance",`last_event_seq`=last_event_seq + 1,`parent_run_id`="",`request_id`="",`result_json`="",`revision`=2,`state_json`="{""winner"":true}",`status`="running",`tenant_id`="tenant",`thread_id`="thread",`thread_kind`="conversation",`updated_at`="2026-08-06 13:00:00" WHERE (run_id = "run_concurrent" AND revision = 1 AND parent_run_id = "") AND execution_epoch = 0
+
+2026/11/13 01:47:16 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:96 [35;1mdatabase is locked
+[0m[33m[0.139ms] [34;1m[rows:0][0m UPDATE `agent_kernel_runs` SET `actor_id`="actor",`checkpoint_json`="",`created_at`="2026-08-06 13:00:00",`deadline_at`="2026-08-06 14:00:00",`ended_at`=NULL,`error_code`="",`error_detail`="",`goal`="test",`kind`="conformance",`last_event_seq`=last_event_seq + 1,`parent_run_id`="",`request_id`="",`result_json`="",`revision`=2,`state_json`="{""winner"":true}",`status`="running",`tenant_id`="tenant",`thread_id`="thread",`thread_kind`="conversation",`updated_at`="2026-08-06 13:00:00" WHERE (run_id = "run_concurrent" AND revision = 1 AND parent_run_id = "") AND execution_epoch = 0
+
+2026/11/13 01:47:16 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:96 [35;1mdatabase is locked
+[0m[33m[0.107ms] [34;1m[rows:0][0m UPDATE `agent_kernel_runs` SET `actor_id`="actor",`checkpoint_json`="",`created_at`="2026-08-06 13:00:00",`deadline_at`="2026-08-06 14:00:00",`ended_at`=NULL,`error_code`="",`error_detail`="",`goal`="test",`kind`="conformance",`last_event_seq`=last_event_seq + 1,`parent_run_id`="",`request_id`="",`result_json`="",`revision`=2,`state_json`="{""winner"":true}",`status`="running",`tenant_id`="tenant",`thread_id`="thread",`thread_kind`="conversation",`updated_at`="2026-08-06 13:00:00" WHERE (run_id = "run_concurrent" AND revision = 1 AND parent_run_id = "") AND execution_epoch = 0
+
+2026/11/13 01:47:16 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:96 [35;1mdatabase is locked
+[0m[33m[6.967ms] [34;1m[rows:0][0m UPDATE `agent_kernel_runs` SET `actor_id`="actor",`checkpoint_json`="",`created_at`="2026-08-06 13:00:00",`deadline_at`="2026-08-06 14:00:00",`ended_at`=NULL,`error_code`="",`error_detail`="",`goal`="test",`kind`="conformance",`last_event_seq`=last_event_seq + 1,`parent_run_id`="",`request_id`="",`result_json`="",`revision`=2,`state_json`="{""winner"":true}",`status`="running",`tenant_id`="tenant",`thread_id`="thread",`thread_kind`="conversation",`updated_at`="2026-08-06 13:00:00" WHERE (run_id = "run_concurrent" AND revision = 1 AND parent_run_id = "") AND execution_epoch = 0
+
+2026/11/13 01:47:16 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:96 [35;1mdatabase is locked
+[0m[33m[0.152ms] [34;1m[rows:0][0m UPDATE `agent_kernel_runs` SET `actor_id`="actor",`checkpoint_json`="",`created_at`="2026-08-06 13:00:00",`deadline_at`="2026-08-06 14:00:00",`ended_at`=NULL,`error_code`="",`error_detail`="",`goal`="test",`kind`="conformance",`last_event_seq`=last_event_seq + 1,`parent_run_id`="",`request_id`="",`result_json`="",`revision`=2,`state_json`="{""winner"":true}",`status`="running",`tenant_id`="tenant",`thread_id`="thread",`thread_kind`="conversation",`updated_at`="2026-08-06 13:00:00" WHERE (run_id = "run_concurrent" AND revision = 1 AND parent_run_id = "") AND execution_epoch = 0
+
+2026/11/13 01:47:16 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:96 [35;1mdatabase is locked
+[0m[33m[0.325ms] [34;1m[rows:0][0m UPDATE `agent_kernel_runs` SET `actor_id`="actor",`checkpoint_json`="",`created_at`="2026-08-06 13:00:00",`deadline_at`="2026-08-06 14:00:00",`ended_at`=NULL,`error_code`="",`error_detail`="",`goal`="test",`kind`="conformance",`last_event_seq`=last_event_seq + 1,`parent_run_id`="",`request_id`="",`result_json`="",`revision`=2,`state_json`="{""winner"":true}",`status`="running",`tenant_id`="tenant",`thread_id`="thread",`thread_kind`="conversation",`updated_at`="2026-08-06 13:00:00" WHERE (run_id = "run_concurrent" AND revision = 1 AND parent_run_id = "") AND execution_epoch = 0
+
+2026/11/13 01:47:16 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/workflow_definition_store.go:266 [35;1mrecord not found
+[0m[33m[0.135ms] [34;1m[rows:0][0m SELECT * FROM `agent_workflow_definition_revisions` WHERE scope_kind = "system" AND tenant_id = "" AND actor_id = "" AND idempotency_key = "request-a" ORDER BY `agent_workflow_definition_revisions`.`scope_kind` LIMIT 1
+
+2026/11/13 01:47:16 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:96 [35;1mdatabase is locked
+[0m[33m[0.232ms] [34;1m[rows:0][0m UPDATE `agent_kernel_runs` SET `actor_id`="actor",`checkpoint_json`="",`created_at`="2026-08-06 13:00:00",`deadline_at`="2026-08-06 14:00:00",`ended_at`=NULL,`error_code`="",`error_detail`="",`goal`="test",`kind`="conformance",`last_event_seq`=last_event_seq + 1,`parent_run_id`="",`request_id`="",`result_json`="",`revision`=2,`state_json`="{""winner"":true}",`status`="running",`tenant_id`="tenant",`thread_id`="thread",`thread_kind`="conversation",`updated_at`="2026-08-06 13:00:00" WHERE (run_id = "run_concurrent" AND revision = 1 AND parent_run_id = "") AND execution_epoch = 0
+
+2026/11/13 01:47:16 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:96 [35;1mdatabase is locked
+[0m[33m[0.640ms] [34;1m[rows:0][0m UPDATE `agent_kernel_runs` SET `actor_id`="actor",`checkpoint_json`="",`created_at`="2026-08-06 13:00:00",`deadline_at`="2026-08-06 14:00:00",`ended_at`=NULL,`error_code`="",`error_detail`="",`goal`="test",`kind`="conformance",`last_event_seq`=last_event_seq + 1,`parent_run_id`="",`request_id`="",`result_json`="",`revision`=2,`state_json`="{""winner"":true}",`status`="running",`tenant_id`="tenant",`thread_id`="thread",`thread_kind`="conversation",`updated_at`="2026-08-06 13:00:00" WHERE (run_id = "run_concurrent" AND revision = 1 AND parent_run_id = "") AND execution_epoch = 0
+
+2026/11/13 01:47:16 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/workflow_definition_store.go:305 [35;1mrecord not found
+[0m[33m[0.393ms] [34;1m[rows:0][0m SELECT * FROM `agent_workflow_definition_heads` WHERE scope_kind = "system" AND tenant_id = "" AND actor_id = "" AND definition_id = "a-flow" ORDER BY `agent_workflow_definition_heads`.`scope_kind` LIMIT 1 
+
+2026/11/13 01:47:16 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:96 [35;1mdatabase is locked
+[0m[33m[0.121ms] [34;1m[rows:0][0m UPDATE `agent_kernel_runs` SET `actor_id`="actor",`checkpoint_json`="",`created_at`="2026-08-06 13:00:00",`deadline_at`="2026-08-06 14:00:00",`ended_at`=NULL,`error_code`="",`error_detail`="",`goal`="test",`kind`="conformance",`last_event_seq`=last_event_seq + 1,`parent_run_id`="",`request_id`="",`result_json`="",`revision`=2,`state_json`="{""winner"":true}",`status`="running",`tenant_id`="tenant",`thread_id`="thread",`thread_kind`="conversation",`updated_at`="2026-08-06 13:00:00" WHERE (run_id = "run_concurrent" AND revision = 1 AND parent_run_id = "") AND execution_epoch = 0
+
+2026/11/13 01:47:16 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:96 [35;1mdatabase is locked
+[0m[33m[0.821ms] [34;1m[rows:0][0m UPDATE `agent_kernel_runs` SET `actor_id`="actor",`checkpoint_json`="",`created_at`="2026-08-06 13:00:00",`deadline_at`="2026-08-06 14:00:00",`ended_at`=NULL,`error_code`="",`error_detail`="",`goal`="test",`kind`="conformance",`last_event_seq`=last_event_seq + 1,`parent_run_id`="",`request_id`="",`result_json`="",`revision`=2,`state_json`="{""winner"":true}",`status`="running",`tenant_id`="tenant",`thread_id`="thread",`thread_kind`="conversation",`updated_at`="2026-08-06 13:00:00" WHERE (run_id = "run_concurrent" AND revision = 1 AND parent_run_id = "") AND execution_epoch = 0
+
+2026/11/13 01:47:16 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/workflow_definition_store.go:266 [35;1mrecord not found
+[0m[33m[0.055ms] [34;1m[rows:0][0m SELECT * FROM `agent_workflow_definition_revisions` WHERE scope_kind = "tenant" AND tenant_id = "tenant" AND actor_id = "" AND idempotency_key = "request-tenant" ORDER BY `agent_workflow_definition_revisions`.`scope_kind` LIMIT 1
+
+2026/11/13 01:47:16 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/workflow_definition_store.go:305 [35;1mrecord not found
+[0m[33m[0.048ms] [34;1m[rows:0][0m SELECT * FROM `agent_workflow_definition_heads` WHERE scope_kind = "tenant" AND tenant_id = "tenant" AND actor_id = "" AND definition_id = "tenant-flow" ORDER BY `agent_workflow_definition_heads`.`scope_kind` LIMIT 1 
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	75.116s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]
+FAIL
+
+EXIT_CODE=1

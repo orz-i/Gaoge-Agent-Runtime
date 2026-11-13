@@ -1,0 +1,84 @@
+SOURCE_SHA=d96a3e79c16f1464e38ce837a152333b960c8a51
+COMMAND=go -C go/agent-runtime test -race -count=1 ./memory -run '^TestEA1RootAgent(CancelPhases|Election)' -v
+=== RUN   TestEA1RootAgentCancelPhasesMemory
+=== RUN   TestEA1RootAgentCancelPhasesMemory/P0/missing
+=== RUN   TestEA1RootAgentCancelPhasesMemory/P0/stale
+=== RUN   TestEA1RootAgentCancelPhasesMemory/P0/prepared
+=== RUN   TestEA1RootAgentCancelPhasesMemory/P0/native-before-owned
+=== RUN   TestEA1RootAgentCancelPhasesMemory/P1/active-original-callback
+=== RUN   TestEA1RootAgentCancelPhasesMemory/P2/host
+=== RUN   TestEA1RootAgentCancelPhasesMemory/P2/model
+=== RUN   TestEA1RootAgentCancelPhasesMemory/P2/tool
+=== RUN   TestEA1RootAgentCancelPhasesMemory/P3/yield
+=== RUN   TestEA1RootAgentCancelPhasesMemory/P3/terminal
+=== RUN   TestEA1RootAgentCancelPhasesMemory/P4/yield
+=== RUN   TestEA1RootAgentCancelPhasesMemory/P4/terminal
+=== RUN   TestEA1RootAgentCancelPhasesMemory/P4/actual-cancel-CAS-lost-ACK
+=== RUN   TestEA1RootAgentCancelPhasesMemory/P5/cancel-wins-resume-admission
+=== RUN   TestEA1RootAgentCancelPhasesMemory/P5/resume-scope-rejects-cancel
+=== RUN   TestEA1RootAgentCancelPhasesMemory/P5/two-cancel-owners
+=== RUN   TestEA1RootAgentCancelPhasesMemory/P5/cancel-deadline
+--- PASS: TestEA1RootAgentCancelPhasesMemory (9.56s)
+    --- PASS: TestEA1RootAgentCancelPhasesMemory/P0/missing (0.01s)
+    --- PASS: TestEA1RootAgentCancelPhasesMemory/P0/stale (0.00s)
+    --- PASS: TestEA1RootAgentCancelPhasesMemory/P0/prepared (0.00s)
+    --- PASS: TestEA1RootAgentCancelPhasesMemory/P0/native-before-owned (0.00s)
+    --- PASS: TestEA1RootAgentCancelPhasesMemory/P1/active-original-callback (0.01s)
+    --- PASS: TestEA1RootAgentCancelPhasesMemory/P2/host (2.15s)
+    --- PASS: TestEA1RootAgentCancelPhasesMemory/P2/model (2.16s)
+    --- PASS: TestEA1RootAgentCancelPhasesMemory/P2/tool (2.15s)
+    --- PASS: TestEA1RootAgentCancelPhasesMemory/P3/yield (0.01s)
+    --- PASS: TestEA1RootAgentCancelPhasesMemory/P3/terminal (0.01s)
+    --- PASS: TestEA1RootAgentCancelPhasesMemory/P4/yield (0.01s)
+    --- PASS: TestEA1RootAgentCancelPhasesMemory/P4/terminal (0.01s)
+    --- PASS: TestEA1RootAgentCancelPhasesMemory/P4/actual-cancel-CAS-lost-ACK (0.00s)
+    --- PASS: TestEA1RootAgentCancelPhasesMemory/P5/cancel-wins-resume-admission (0.00s)
+    --- PASS: TestEA1RootAgentCancelPhasesMemory/P5/resume-scope-rejects-cancel (0.00s)
+    --- PASS: TestEA1RootAgentCancelPhasesMemory/P5/two-cancel-owners (0.00s)
+    --- PASS: TestEA1RootAgentCancelPhasesMemory/P5/cancel-deadline (3.03s)
+=== RUN   TestEA1RootAgentElectionMemory
+=== RUN   TestEA1RootAgentElectionMemory/start/host
+=== RUN   TestEA1RootAgentElectionMemory/start/model
+=== RUN   TestEA1RootAgentElectionMemory/start/tool
+=== RUN   TestEA1RootAgentElectionMemory/start/deadline
+=== RUN   TestEA1RootAgentElectionMemory/start/unknown-model
+=== RUN   TestEA1RootAgentElectionMemory/start/unknown-tool
+=== RUN   TestEA1RootAgentElectionMemory/resume/host
+=== RUN   TestEA1RootAgentElectionMemory/resume/model
+=== RUN   TestEA1RootAgentElectionMemory/resume/tool
+=== RUN   TestEA1RootAgentElectionMemory/resume/deadline
+=== RUN   TestEA1RootAgentElectionMemory/resume/unknown-model
+=== RUN   TestEA1RootAgentElectionMemory/resume/unknown-tool
+=== RUN   TestEA1RootAgentElectionMemory/recovery/model/known
+=== RUN   TestEA1RootAgentElectionMemory/recovery/model/unknown-ttl
+=== RUN   TestEA1RootAgentElectionMemory/recovery/model/competing-receipt
+=== RUN   TestEA1RootAgentElectionMemory/recovery/model/deadline-known
+=== RUN   TestEA1RootAgentElectionMemory/recovery/tool/known
+=== RUN   TestEA1RootAgentElectionMemory/recovery/tool/unknown-ttl
+=== RUN   TestEA1RootAgentElectionMemory/recovery/tool/competing-receipt
+=== RUN   TestEA1RootAgentElectionMemory/recovery/tool/deadline-known
+--- PASS: TestEA1RootAgentElectionMemory (17.06s)
+    --- PASS: TestEA1RootAgentElectionMemory/start/host (0.00s)
+    --- PASS: TestEA1RootAgentElectionMemory/start/model (0.00s)
+    --- PASS: TestEA1RootAgentElectionMemory/start/tool (0.01s)
+    --- PASS: TestEA1RootAgentElectionMemory/start/deadline (1.01s)
+    --- PASS: TestEA1RootAgentElectionMemory/start/unknown-model (2.15s)
+    --- PASS: TestEA1RootAgentElectionMemory/start/unknown-tool (2.15s)
+    --- PASS: TestEA1RootAgentElectionMemory/resume/host (0.01s)
+    --- PASS: TestEA1RootAgentElectionMemory/resume/model (0.00s)
+    --- PASS: TestEA1RootAgentElectionMemory/resume/tool (0.01s)
+    --- PASS: TestEA1RootAgentElectionMemory/resume/deadline (1.01s)
+    --- PASS: TestEA1RootAgentElectionMemory/resume/unknown-model (2.16s)
+    --- PASS: TestEA1RootAgentElectionMemory/resume/unknown-tool (2.16s)
+    --- PASS: TestEA1RootAgentElectionMemory/recovery/model/known (0.01s)
+    --- PASS: TestEA1RootAgentElectionMemory/recovery/model/unknown-ttl (2.15s)
+    --- PASS: TestEA1RootAgentElectionMemory/recovery/model/competing-receipt (0.01s)
+    --- PASS: TestEA1RootAgentElectionMemory/recovery/model/deadline-known (1.01s)
+    --- PASS: TestEA1RootAgentElectionMemory/recovery/tool/known (0.01s)
+    --- PASS: TestEA1RootAgentElectionMemory/recovery/tool/unknown-ttl (2.16s)
+    --- PASS: TestEA1RootAgentElectionMemory/recovery/tool/competing-receipt (0.01s)
+    --- PASS: TestEA1RootAgentElectionMemory/recovery/tool/deadline-known (1.01s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory	28.897s
+
+EXIT_CODE=0

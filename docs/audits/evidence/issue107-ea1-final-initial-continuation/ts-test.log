@@ -1,0 +1,16 @@
+SOURCE_SHA=e05290927ba0143f625857be08a0aa7493df84cf
+COMMAND=make ts-test
+pnpm run test
+$ pnpm --filter @orz-i/agent-runtime-client test
+$ vitest run
+
+ RUN  v5.0.3 /private/tmp/gaoge-runtime-issue107/ts/agent-runtime-client
+
+
+ Test Files  3 passed (3)
+      Tests  46 passed (46)
+   Start at  10:36:49
+   Duration  278ms (transform 56%, tests 26%, import 16%, worker 2%)
+
+
+EXIT_CODE=0

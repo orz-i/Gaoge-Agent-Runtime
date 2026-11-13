@@ -3,6 +3,7 @@ package harness
 import (
 	"context"
 	"errors"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -55,18 +56,32 @@ func (client *countedBudgetModel) Generate(context.Context, model.Request) (mode
 // invoked, the budget must not leave an unknown charge that permanently
 // prevents a valid later Resume with the same durable invocation identity.
 func TestSharedBudgetReleasesProvenUnsentModelClaimAndAllowsRecovery(t *testing.T) {
+	testSharedBudgetUnsentClaim(t, true)
+}
+func TestSharedBudgetOpaqueHeldCallbackRemainsUnknown(t *testing.T) {
+	testSharedBudgetUnsentClaim(t, false)
+}
+func testSharedBudgetUnsentClaim(t *testing.T, bounded bool) {
 	store, shared, _ := hostedBudgetFixture(t, budget.Limits{MaxLLMCalls: 2, MaxConcurrentRuns: 1})
 	clock := newBudgetClaimClock()
 	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore(), Clock: clock})
 	if err != nil {
 		t.Fatal(err)
 	}
-	held := &heldBudgetModelMiddleware{entered: make(chan struct{}), release: make(chan struct{})}
+	held := &heldBudgetModelMiddleware{entered: make(chan struct{}, 1), release: make(chan struct{})}
 	var once sync.Once
 	unblock := func() { once.Do(func() { close(held.release) }) }
 	t.Cleanup(unblock)
 	provider := &countedBudgetModel{}
-	runner, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Clock: clock, Model: provider, ModelMiddleware: []plugin.ModelMiddleware{shared, held}})
+	boundedBudget, err := NewBoundedBudgetAdapter(shared.dependencies)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var gate plugin.ModelMiddleware = held
+	if bounded {
+		gate = agent.NewModelAdmissionBarrier(held.entered, held.release)
+	}
+	runner, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Clock: clock, Model: provider, ModelMiddleware: []plugin.ModelMiddleware{boundedBudget, gate}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,6 +127,23 @@ func TestSharedBudgetReleasesProvenUnsentModelClaimAndAllowsRecovery(t *testing.
 	}
 	if ledger.View("").UnknownUsage || ledger.View("").Reserved.LLMCalls != 0 || provider.calls.Load() != 0 {
 		t.Fatalf("proven unsent dispatch retained uncertain quota: %+v calls=%d", ledger.View(""), provider.calls.Load())
+	}
+	if !bounded {
+		grant, grantErr := runtime.LookupChildExecution(t.Context(), pending.Run.ID)
+		if grantErr != nil {
+			t.Fatal(grantErr)
+		}
+		_, resumeErr := runner.Resume(t.Context(), pending.Run.ID, pending.Run.Revision)
+		if !errors.Is(resumeErr, agent.ErrRootOutcomeUnknown) || provider.calls.Load() != 0 {
+			t.Fatalf("opaque layer borrowed bounded Budget authority: %v calls=%d", resumeErr, provider.calls.Load())
+		}
+		actual, loadErr := runtime.Load(t.Context(), pending.Run.ID)
+		retained, lookupErr := runtime.LookupChildExecution(t.Context(), pending.Run.ID)
+		afterLedger, ledgerErr := store.LoadBudget(t.Context(), "hosted-budget-turn")
+		if loadErr != nil || lookupErr != nil || ledgerErr != nil || !reflect.DeepEqual(pending, actual) || grant != retained || !reflect.DeepEqual(ledger, afterLedger) {
+			t.Fatalf("opaque callback recovery changed durable authority: %v %v %v", loadErr, lookupErr, ledgerErr)
+		}
+		return
 	}
 	recovered, err := runner.Resume(t.Context(), pending.Run.ID, pending.Run.Revision)
 	if err != nil || recovered.Run.Status != kernel.RunStatusCompleted || provider.calls.Load() != 1 {

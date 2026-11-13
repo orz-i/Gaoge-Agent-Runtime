@@ -1,0 +1,160 @@
+SOURCE_SHA=0a4009a8171f1726edaea895798d551051753400
+COMMAND=python3 /tmp/ea1-final-coverage-corrected/compare_profiles.py
+{
+  "agent-runtime-a2a.out": {
+    "same_source_blocks_and_statement_counts": true,
+    "old_blocks": 1170,
+    "new_blocks": 1170,
+    "old_statements": 1647,
+    "new_statements": 1647,
+    "old_covered": 1104,
+    "new_covered": 1104,
+    "duplicate_rows": 100,
+    "removed_blocks": [],
+    "added_blocks": []
+  },
+  "agent-runtime-harness-postgres.out": {
+    "same_source_blocks_and_statement_counts": true,
+    "old_blocks": 1023,
+    "new_blocks": 1023,
+    "old_statements": 1350,
+    "new_statements": 1350,
+    "old_covered": 971,
+    "new_covered": 971,
+    "duplicate_rows": 0,
+    "removed_blocks": [],
+    "added_blocks": []
+  },
+  "agent-runtime-harness.out": {
+    "same_source_blocks_and_statement_counts": true,
+    "old_blocks": 6719,
+    "new_blocks": 6719,
+    "old_statements": 8927,
+    "new_statements": 8927,
+    "old_covered": 7107,
+    "new_covered": 7107,
+    "duplicate_rows": 6719,
+    "removed_blocks": [],
+    "added_blocks": []
+  },
+  "agent-runtime-http.out": {
+    "same_source_blocks_and_statement_counts": true,
+    "old_blocks": 879,
+    "new_blocks": 879,
+    "old_statements": 1295,
+    "new_statements": 1295,
+    "old_covered": 797,
+    "new_covered": 809,
+    "duplicate_rows": 3516,
+    "removed_blocks": [],
+    "added_blocks": []
+  },
+  "agent-runtime-mcp.out": {
+    "same_source_blocks_and_statement_counts": true,
+    "old_blocks": 227,
+    "new_blocks": 227,
+    "old_statements": 315,
+    "new_statements": 315,
+    "old_covered": 249,
+    "new_covered": 249,
+    "duplicate_rows": 0,
+    "removed_blocks": [],
+    "added_blocks": []
+  },
+  "agent-runtime-otel.out": {
+    "same_source_blocks_and_statement_counts": true,
+    "old_blocks": 147,
+    "new_blocks": 147,
+    "old_statements": 177,
+    "new_statements": 177,
+    "old_covered": 154,
+    "new_covered": 154,
+    "duplicate_rows": 0,
+    "removed_blocks": [],
+    "added_blocks": []
+  },
+  "agent-runtime-postgres.out": {
+    "same_source_blocks_and_statement_counts": true,
+    "old_blocks": 1169,
+    "new_blocks": 1169,
+    "old_statements": 1473,
+    "new_statements": 1473,
+    "old_covered": 1148,
+    "new_covered": 1154,
+    "duplicate_rows": 10,
+    "removed_blocks": [],
+    "added_blocks": []
+  },
+  "agent-runtime-provider.out": {
+    "same_source_blocks_and_statement_counts": true,
+    "old_blocks": 7252,
+    "new_blocks": 7252,
+    "old_statements": 9478,
+    "new_statements": 9478,
+    "old_covered": 7637,
+    "new_covered": 7667,
+    "duplicate_rows": 29038,
+    "removed_blocks": [],
+    "added_blocks": []
+  },
+  "agent-runtime-redis.out": {
+    "same_source_blocks_and_statement_counts": true,
+    "old_blocks": 225,
+    "new_blocks": 225,
+    "old_statements": 306,
+    "new_statements": 306,
+    "old_covered": 233,
+    "new_covered": 233,
+    "duplicate_rows": 0,
+    "removed_blocks": [],
+    "added_blocks": []
+  },
+  "agent-runtime-sqlite.out": {
+    "same_source_blocks_and_statement_counts": true,
+    "old_blocks": 1364,
+    "new_blocks": 1364,
+    "old_statements": 1743,
+    "new_statements": 1743,
+    "old_covered": 1329,
+    "new_covered": 1329,
+    "duplicate_rows": 1364,
+    "removed_blocks": [],
+    "added_blocks": []
+  },
+  "agent-runtime.out": {
+    "same_source_blocks_and_statement_counts": true,
+    "old_blocks": 16116,
+    "new_blocks": 16116,
+    "old_statements": 23607,
+    "new_statements": 23607,
+    "old_covered": 9954,
+    "new_covered": 18639,
+    "duplicate_rows": 425676,
+    "removed_blocks": [],
+    "added_blocks": []
+  },
+  "task-agent.out": {
+    "same_source_blocks_and_statement_counts": true,
+    "old_blocks": 931,
+    "new_blocks": 931,
+    "old_statements": 1472,
+    "new_statements": 1472,
+    "old_covered": 1290,
+    "new_covered": 1290,
+    "duplicate_rows": 0,
+    "removed_blocks": [],
+    "added_blocks": []
+  },
+  "global": {
+    "statements": 51790,
+    "covered": 40706,
+    "summary": {
+      "coveredStatements": 40706,
+      "totalStatements": 51790,
+      "percent": 78.6,
+      "minimum": 70
+    }
+  }
+}
+
+EXIT_CODE=0

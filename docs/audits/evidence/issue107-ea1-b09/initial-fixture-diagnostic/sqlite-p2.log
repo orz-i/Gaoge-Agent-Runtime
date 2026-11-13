@@ -1,0 +1,22 @@
+SOURCE_SHA=2bf48748548dcd34092e87aecc26c9ec616f556c
+DIAGNOSTIC_ONLY=true
+=== RUN   TestEA1RootAgentUnknownNativeSQLite
+=== RUN   TestEA1RootAgentUnknownNativeSQLite/host_middleware
+    ea1_root_agent_unknown.go:312: EA-06 G02 UNKNOWN Host callback replayed after fresh owner/real TTL: sends=2 err=test-only Host write sent; outcome unknown
+=== RUN   TestEA1RootAgentUnknownNativeSQLite/model
+    ea1_root_agent_unknown.go:144: EA-06 UNKNOWN replay: model 1->2 tool 0->0 resumeErr=<nil> originalInvocation=modelinv_c2ac453ea84b648673b89ebd424e714b attempt=1
+    ea1_root_agent_unknown.go:160: UNKNOWN recovery changed original full Run/invocation/attempt state; resumeErr=<nil>
+=== RUN   TestEA1RootAgentUnknownNativeSQLite/tool
+    ea1_root_agent_unknown.go:96: Tool fixture lost prior Model receipt
+--- FAIL: TestEA1RootAgentUnknownNativeSQLite (4.55s)
+    --- FAIL: TestEA1RootAgentUnknownNativeSQLite/host_middleware (2.27s)
+    --- FAIL: TestEA1RootAgentUnknownNativeSQLite/model (2.22s)
+    --- FAIL: TestEA1RootAgentUnknownNativeSQLite/tool (0.06s)
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite	4.928s
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/examples/embedded	1.386s [no tests to run]
+FAIL
+
+EXIT_CODE=1

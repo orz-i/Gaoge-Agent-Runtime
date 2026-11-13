@@ -1,0 +1,85 @@
+SOURCE_SHA=b97467f52afaf877167d5d8c7deae8ec629d9c98
+COMMAND=go -C go/agent-runtime-harness test -race -count=1 -timeout=180s ./...
+--- FAIL: TestNamedBudgetCompletionReplayDoesNotRedispatchProvider (0.01s)
+    --- FAIL: TestNamedBudgetCompletionReplayDoesNotRedispatchProvider/rejected (0.01s)
+        budget_completion_authority_test.go:143: named replay receipt lost: {Messages:[{ToolResult:<nil> CacheControl:<nil> Role:user Content:[{Name: CacheControl:<nil> Kind:text Text:finish MediaType: Source:<nil>}] ToolCalls:[] ToolCallID: ProviderReplay:<nil>}] Model: ModelOptions:null OutputContract:<nil> ToolKeys:[] RequiredToolKeys:[] Budget:{Limits:{MaxLLMCalls:1 MaxToolCalls:16 MaxHostedToolCalls:0 MaxInputTokens:0 MaxOutputTokens:0 MaxTotalTokens:0 MaxOutputBytes:0 MaxStateBytes:0 MaxChildRuns:0 MaxCostUnits:0 MaxConcurrentRuns:0 MaxConcurrentDescendants:0} Usage:{LLMCalls:0 ToolCalls:0 HostedToolCalls:0 InputTokens:0 OutputTokens:0 TotalTokens:0 CacheReadTokens:0 CacheWriteTokens:0 ReasoningTokens:0 OutputBytes:0 StateBytes:0 ChildRuns:0 CostUnits:0}} CallAllowance:<nil> AutoAllowance:<nil> ModelInvocations:[{ID:modelinv_167f9d4577a68a86734d7361e57a1d5e RunID:hosted-run SourceRevision:1 RequestHash:9d40bcbda1189cc0902c96d0a5baff3baf87e6314376053d7637eb0ce1d96d8c CatalogFingerprints:[] Provider:audit BindingFingerprint:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa Model: Status:pending Request:{BindingRef: PromptCacheKey: PreviousResponseID: RunID:hosted-run InvocationID:modelinv_167f9d4577a68a86734d7361e57a1d5e Model: ModelOptions:null OutputContract:<nil> Messages:[{ToolResult:<nil> CacheControl:<nil> Role:user Content:[{Name: CacheControl:<nil> Kind:text Text:finish MediaType: Source:<nil>}] ToolCalls:[] ToolCallID: ProviderReplay:<nil>}] Tools:[] HostedTools:[] MaxOutputTokens:0 HostedToolCallLimit:<nil> RequireToolCall:false} ProviderResponseID: Response:{Content: ToolCalls:[] HostedToolCalls:[] Artifacts:[] Citations:[] ResponseID: Usage:<nil> ProviderReplay:<nil> Refused:false Continue:false} Usage:<nil> ErrorCode: OutcomeErrorCode:agent.model_failed OutcomeErrorDetail:agent external model result is uncertain
+            completed model response was rejected DispatchAttempt:1 ExecutionAttempt:1 ExecutionLeaseUntil:2026-11-12 18:56:33.31934 +0000 UTC RetryAfter:<nil> CreatedAt:2026-11-12 18:54:33.31934 +0000 UTC CompletedAt:<nil> ConsumedAt:<nil>}] PendingTool:<nil>}
+    --- FAIL: TestNamedBudgetCompletionReplayDoesNotRedispatchProvider/successful (0.00s)
+        budget_completion_authority_test.go:136: replay changed outcome or regenerated: calls=1 err=agent external model result is uncertain
+--- FAIL: TestSharedBudgetReleasesProvenUnsentModelClaimAndAllowsRecovery (0.00s)
+    model_dispatch_budget_claim_test.go:118: valid new Claim could not recover same request: {ID:hosted-run Kind:agent Actor:{TenantID:audit ActorID:actor} Thread:{Kind:conversation ID:budget-claim} RequestID: ParentRunID: Goal:recover Status:running Revision:3 ErrorCode: ErrorDetail: DeadlineAt:<nil> EndedAt:<nil> CreatedAt:2026-10-23 08:00:00 +0000 UTC UpdatedAt:2026-10-23 08:00:00 +0000 UTC} err=agent original root callback result is uncertain
+        kernel execution lease is not current calls=0
+--- FAIL: TestRootAgentCorrectsWorkflowRevisionTypeBeforeStartingChild (0.03s)
+    capability_tool_test.go:53: harness physical feature start outcome is unknown
+        agent original root callback result is uncertain
+--- FAIL: TestManagedContextResumeAfterRolloverBeforeModelIntentCommit (0.03s)
+    context_managed_fault_test.go:137: resume failed: status=running err=agent original root callback result is uncertain
+        kernel execution lease is not current calls=0
+--- FAIL: TestDelegatedRoleCompatibleWithFrozenContextPreparation (0.02s)
+    delegated_parent_tool_integration_test.go:222: delegation result= err=harness physical feature start outcome is unknown
+        harness physical feature start outcome is unknown
+--- FAIL: TestDelegationChildRunExhaustionBecomesRecoverableModelGuidance (0.03s)
+    delegation_budget_exhaustion_test.go:84: turn=harness.Turn{ID:"", SessionID:"", HostTurn:harness.HostRef{Kind:"", ID:""}, ConfigSnapshotID:"", ContextCheckpointID:"", ContextRef:harness.ContextCheckpointRef{ID:"", Generation:0, Revision:0, LineageHash:"", CoveredThroughSourceID:"", ContentHash:""}, Status:"", Revision:0x0, ErrorCode:"", ErrorDetail:"", CreatedAt:time.Date(1, time.January, 1, 0, 0, 0, 0, time.UTC), UpdatedAt:time.Date(1, time.January, 1, 0, 0, 0, 0, time.UTC)} err=harness physical feature start outcome is unknown
+        agent original root callback result is uncertain
+        harness physical feature start outcome is unknown
+--- FAIL: TestLocalDelegationExternalWaitDoesNotPollAndResumesBothCalls (0.01s)
+    external_wait_test.go:105: harness physical feature start outcome is unknown
+--- FAIL: TestIssue107ParentCancelCannotDeclareTerminalWithLiveChildTool (0.02s)
+    issue107_atomic_parent_cancel_test.go:66: previous busy parent could not be safely reconciled: turn={ID: SessionID: HostTurn:{Kind: ID:} ConfigSnapshotID: ContextCheckpointID: ContextRef:{ID: Generation:0 Revision:0 LineageHash: CoveredThroughSourceID: ContentHash:} Status: Revision:0 ErrorCode: ErrorDetail: CreatedAt:0001-01-01 00:00:00 +0000 UTC UpdatedAt:0001-01-01 00:00:00 +0000 UTC} err=harness state conflict
+--- FAIL: TestRoleDelegationFreezesExecutionAndProjectsChildApproval (0.04s)
+    --- FAIL: TestRoleDelegationFreezesExecutionAndProjectsChildApproval/original-child (0.02s)
+        role_budget_test.go:43: harness physical feature start outcome is unknown
+--- FAIL: TestRoleScopedHostedToolWithoutParentActivation (0.02s)
+    role_scoped_hosted_test.go:77: scoped hosted delegation failed: harness physical feature start outcome is unknown
+        harness physical feature start outcome is unknown
+--- FAIL: TestRoleScopedHostedToolWith128ScaleSearchInitial (0.13s)
+    role_scoped_hosted_test.go:81: scoped hosted delegation failed: harness physical feature start outcome is unknown
+        harness physical feature start outcome is unknown
+--- FAIL: TestRootAgentCanExplicitlyAssignMatchingModelHostedTool (0.04s)
+    delegated_parent_tool_integration_test.go:102: delegation result= err=harness physical feature start outcome is unknown
+        harness physical feature start outcome is unknown
+--- FAIL: TestAsyncDelegationCancellationRetriesExternalCleanup (0.05s)
+    delegation_async_test.go:135: remote cancellation error was lost: kernel descendant has an unsettled physical execution Grant
+        harness state conflict
+--- FAIL: TestRoleHostedToolCanUseExactInheritedParentModelWithoutParentActivation (0.06s)
+    delegated_parent_tool_integration_test.go:313: inherited model hosted: status= err=harness physical feature start outcome is unknown
+        harness physical feature start outcome is unknown root=2 child=1
+--- FAIL: TestHarnessIndependentDelegationsCollectMixedTerminalResults (0.08s)
+    delegation_test.go:253: mixed delegation root did not complete: harness.Turn{ID:"ht_9e83aa61583da3238576d6e9", SessionID:"hs_d4c630499679b51063c5d5ae", HostTurn:harness.HostRef{Kind:"conversation_turn", ID:"mixed-delegation-turn"}, ConfigSnapshotID:"hcfg_55c3268e7aeea9ba4961d130", ContextCheckpointID:"", ContextRef:harness.ContextCheckpointRef{ID:"", Generation:0, Revision:0, LineageHash:"", CoveredThroughSourceID:"", ContentHash:""}, Status:"running", Revision:0x2, ErrorCode:"", ErrorDetail:"", CreatedAt:time.Date(2026, time.August, 15, 7, 0, 0, 0, time.UTC), UpdatedAt:time.Date(2026, time.August, 15, 7, 0, 0, 0, time.UTC)}, err=harness physical feature start outcome is unknown
+--- FAIL: TestRootAgentDoesNotImplicitlyCopyHostedToolsToDelegatedChild (0.11s)
+    delegated_parent_tool_integration_test.go:102: delegation result= err=harness physical feature start outcome is unknown
+        harness physical feature start outcome is unknown
+--- FAIL: TestHarnessDelegationToolStartsStableChildAndRecordsRelation (0.05s)
+    delegation_test.go:97: run delegated Harness turn: harness physical feature start outcome is unknown
+        harness physical feature start outcome is unknown
+--- FAIL: TestHarnessDelegationPolicyPreparesActualChildGoal (0.08s)
+    delegation_test.go:130: run policy-prepared delegated Harness turn: harness physical feature start outcome is unknown
+        harness physical feature start outcome is unknown
+--- FAIL: TestHarnessDelegationChildDoesNotInheritParentContextCheckpoint (0.07s)
+    delegation_test.go:72: run context-bound delegated Harness turn: harness physical feature start outcome is unknown
+        harness physical feature start outcome is unknown
+--- FAIL: TestHarnessCancelRefusesUnsettledDelegationDispatch (0.09s)
+    delegation_test.go:204: completed snapshot=harness.Turn{ID:"", SessionID:"", HostTurn:harness.HostRef{Kind:"", ID:""}, ConfigSnapshotID:"", ContextCheckpointID:"", ContextRef:harness.ContextCheckpointRef{ID:"", Generation:0, Revision:0, LineageHash:"", CoveredThroughSourceID:"", ContentHash:""}, Status:"", Revision:0x0, ErrorCode:"", ErrorDetail:"", CreatedAt:time.Date(1, time.January, 1, 0, 0, 0, 0, time.UTC), UpdatedAt:time.Date(1, time.January, 1, 0, 0, 0, 0, time.UTC)} err=harness physical feature start outcome is unknown
+        harness physical feature start outcome is unknown
+--- FAIL: TestHarnessDelegationRelationsExistBeforeChildExecution (0.11s)
+    delegation_test.go:156: completed snapshot=harness.Turn{ID:"", SessionID:"", HostTurn:harness.HostRef{Kind:"", ID:""}, ConfigSnapshotID:"", ContextCheckpointID:"", ContextRef:harness.ContextCheckpointRef{ID:"", Generation:0, Revision:0, LineageHash:"", CoveredThroughSourceID:"", ContentHash:""}, Status:"", Revision:0x0, ErrorCode:"", ErrorDetail:"", CreatedAt:time.Date(1, time.January, 1, 0, 0, 0, 0, time.UTC), UpdatedAt:time.Date(1, time.January, 1, 0, 0, 0, 0, time.UTC)} err=harness physical feature start outcome is unknown
+        harness physical feature start outcome is unknown
+--- FAIL: TestHarnessDelegatesDifferentGoalsToSameMember (0.15s)
+    delegation_test.go:224: completed snapshot=harness.Turn{ID:"", SessionID:"", HostTurn:harness.HostRef{Kind:"", ID:""}, ConfigSnapshotID:"", ContextCheckpointID:"", ContextRef:harness.ContextCheckpointRef{ID:"", Generation:0, Revision:0, LineageHash:"", CoveredThroughSourceID:"", ContentHash:""}, Status:"", Revision:0x0, ErrorCode:"", ErrorDetail:"", CreatedAt:time.Date(1, time.January, 1, 0, 0, 0, 0, time.UTC), UpdatedAt:time.Date(1, time.January, 1, 0, 0, 0, 0, time.UTC)} err=harness physical feature start outcome is unknown
+        harness physical feature start outcome is unknown
+--- FAIL: TestAsyncDelegationCancellationPreservesChildTerminalOutcome (0.00s)
+    --- FAIL: TestAsyncDelegationCancellationPreservesChildTerminalOutcome/cancelled (0.03s)
+        delegation_async_test.go:120: parent cancellation = harness.Turn{ID:"", SessionID:"", HostTurn:harness.HostRef{Kind:"", ID:""}, ConfigSnapshotID:"", ContextCheckpointID:"", ContextRef:harness.ContextCheckpointRef{ID:"", Generation:0, Revision:0, LineageHash:"", CoveredThroughSourceID:"", ContentHash:""}, Status:"", Revision:0x0, ErrorCode:"", ErrorDetail:"", CreatedAt:time.Date(1, time.January, 1, 0, 0, 0, 0, time.UTC), UpdatedAt:time.Date(1, time.January, 1, 0, 0, 0, 0, time.UTC)}, kernel descendant has an unsettled physical execution Grant
+            harness state conflict
+    --- FAIL: TestAsyncDelegationCancellationPreservesChildTerminalOutcome/completed (0.05s)
+        delegation_async_test.go:120: parent cancellation = harness.Turn{ID:"", SessionID:"", HostTurn:harness.HostRef{Kind:"", ID:""}, ConfigSnapshotID:"", ContextCheckpointID:"", ContextRef:harness.ContextCheckpointRef{ID:"", Generation:0, Revision:0, LineageHash:"", CoveredThroughSourceID:"", ContentHash:""}, Status:"", Revision:0x0, ErrorCode:"", ErrorDetail:"", CreatedAt:time.Date(1, time.January, 1, 0, 0, 0, 0, time.UTC), UpdatedAt:time.Date(1, time.January, 1, 0, 0, 0, 0, time.UTC)}, kernel descendant has an unsettled physical execution Grant
+            harness state conflict
+    --- FAIL: TestAsyncDelegationCancellationPreservesChildTerminalOutcome/failed (0.03s)
+        delegation_async_test.go:120: parent cancellation = harness.Turn{ID:"", SessionID:"", HostTurn:harness.HostRef{Kind:"", ID:""}, ConfigSnapshotID:"", ContextCheckpointID:"", ContextRef:harness.ContextCheckpointRef{ID:"", Generation:0, Revision:0, LineageHash:"", CoveredThroughSourceID:"", ContentHash:""}, Status:"", Revision:0x0, ErrorCode:"", ErrorDetail:"", CreatedAt:time.Date(1, time.January, 1, 0, 0, 0, 0, time.UTC), UpdatedAt:time.Date(1, time.January, 1, 0, 0, 0, 0, time.UTC)}, kernel descendant has an unsettled physical execution Grant
+            harness state conflict
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness	29.199s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness/examples/session	1.782s
+FAIL
+
+EXIT_CODE=1

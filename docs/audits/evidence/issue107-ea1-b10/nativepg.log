@@ -1,0 +1,37 @@
+SOURCE_SHA=14c436216137c9a8ff55c0096664686ee4e77aa4
+COMMAND=TEST_POSTGRES_DSN=<dedicated-ephemeral> go -C go/agent-runtime-postgres test -race -count=3 ./... -run ^TestEA1RealPostgresChildAgentRecovery -v
+=== RUN   TestEA1RealPostgresChildAgentRecoveryUnknown
+=== RUN   TestEA1RealPostgresChildAgentRecoveryUnknown/host_middleware
+=== RUN   TestEA1RealPostgresChildAgentRecoveryUnknown/model
+=== RUN   TestEA1RealPostgresChildAgentRecoveryUnknown/tool
+--- PASS: TestEA1RealPostgresChildAgentRecoveryUnknown (4.87s)
+    --- PASS: TestEA1RealPostgresChildAgentRecoveryUnknown/host_middleware (0.25s)
+    --- PASS: TestEA1RealPostgresChildAgentRecoveryUnknown/model (2.31s)
+    --- PASS: TestEA1RealPostgresChildAgentRecoveryUnknown/tool (2.31s)
+=== RUN   TestEA1RealPostgresChildAgentRecoveryAdmission
+--- PASS: TestEA1RealPostgresChildAgentRecoveryAdmission (0.27s)
+=== RUN   TestEA1RealPostgresChildAgentRecoveryUnknown
+=== RUN   TestEA1RealPostgresChildAgentRecoveryUnknown/host_middleware
+=== RUN   TestEA1RealPostgresChildAgentRecoveryUnknown/model
+=== RUN   TestEA1RealPostgresChildAgentRecoveryUnknown/tool
+--- PASS: TestEA1RealPostgresChildAgentRecoveryUnknown (4.81s)
+    --- PASS: TestEA1RealPostgresChildAgentRecoveryUnknown/host_middleware (0.19s)
+    --- PASS: TestEA1RealPostgresChildAgentRecoveryUnknown/model (2.31s)
+    --- PASS: TestEA1RealPostgresChildAgentRecoveryUnknown/tool (2.31s)
+=== RUN   TestEA1RealPostgresChildAgentRecoveryAdmission
+--- PASS: TestEA1RealPostgresChildAgentRecoveryAdmission (0.25s)
+=== RUN   TestEA1RealPostgresChildAgentRecoveryUnknown
+=== RUN   TestEA1RealPostgresChildAgentRecoveryUnknown/host_middleware
+=== RUN   TestEA1RealPostgresChildAgentRecoveryUnknown/model
+=== RUN   TestEA1RealPostgresChildAgentRecoveryUnknown/tool
+--- PASS: TestEA1RealPostgresChildAgentRecoveryUnknown (4.83s)
+    --- PASS: TestEA1RealPostgresChildAgentRecoveryUnknown/host_middleware (0.19s)
+    --- PASS: TestEA1RealPostgresChildAgentRecoveryUnknown/model (2.29s)
+    --- PASS: TestEA1RealPostgresChildAgentRecoveryUnknown/tool (2.35s)
+=== RUN   TestEA1RealPostgresChildAgentRecoveryAdmission
+--- PASS: TestEA1RealPostgresChildAgentRecoveryAdmission (0.26s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	16.697s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]
+
+EXIT_CODE=0

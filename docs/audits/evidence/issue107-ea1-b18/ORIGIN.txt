@@ -1,0 +1,2 @@
+SOURCE_SHA=85bfba1b686e462761dfd8819411ba7980b81a31
+B18 six fixed Child Agent ResolveApproval cells. Nine zero-exit logs, isolated PostgreSQL16; no whole-matrix or remote certification.

@@ -1,0 +1,63 @@
+SOURCE_SHA=20187a21001a6c51fa0f3109460a0738f0991595
+COMMAND=make benchmark-smoke
+node scripts/run-benchmarks.mjs --smoke
+goos: darwin
+goarch: arm64
+pkg: github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel
+cpu: Apple M4
+BenchmarkRuntimeCreateMemory-10        	       1	    161459 ns/op	    3024 B/op	      15 allocs/op
+BenchmarkRuntimeLoadMemory-10          	       1	      1750 ns/op	      24 B/op	       1 allocs/op
+BenchmarkRuntimeApplyCASMemory-10      	       1	     20833 ns/op	     120 B/op	       5 allocs/op
+BenchmarkRuntimeListEventsMemory-10    	       1	      6958 ns/op	    9472 B/op	       1 allocs/op
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel	0.777s
+goos: darwin
+goarch: arm64
+pkg: github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation
+cpu: Apple M4
+BenchmarkRunRelationEnsureMemory-10          	       1	     11667 ns/op	    1224 B/op	       4 allocs/op
+BenchmarkRunRelationGetByChildMemory-10      	       1	       667.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkRunRelationListChildrenMemory-10    	       1	     44917 ns/op	   24768 B/op	      14 allocs/op
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation	0.441s
+goos: darwin
+goarch: arm64
+pkg: github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/continuation
+cpu: Apple M4
+BenchmarkContinuationProjectMemory-10    	       1	    219083 ns/op	   34952 B/op	     285 allocs/op
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/continuation	0.424s
+goos: darwin
+goarch: arm64
+pkg: github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent
+cpu: Apple M4
+BenchmarkAgentDeterministicLoopMemory-10    	       1	   1537041 ns/op	  238376 B/op	    2076 allocs/op
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent	0.454s
+goos: darwin
+goarch: arm64
+pkg: github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workflow
+cpu: Apple M4
+BenchmarkWorkflowDeterministicReturnMemory-10    	       1	    701250 ns/op	  158912 B/op	    1675 allocs/op
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workflow	0.451s
+goos: darwin
+goarch: arm64
+pkg: github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness
+cpu: Apple M4
+BenchmarkHarnessStartAgentTurnMemory-10         	       1	   2386583 ns/op	  389152 B/op	    3464 allocs/op
+BenchmarkHarnessLoadCompletedTurnMemory-10      	       1	     19084 ns/op	   14840 B/op	      80 allocs/op
+BenchmarkHarnessContextPathLookupMemory-10      	       1	   2778166 ns/op	 1398200 B/op	   21630 allocs/op
+BenchmarkHarnessLoadRelatedSubtasksMemory-10    	       1	    569958 ns/op	  213776 B/op	    1630 allocs/op
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness	0.541s
+goos: darwin
+goarch: arm64
+pkg: github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http
+cpu: Apple M4
+BenchmarkHTTPGetRunMemory-10           	       1	    494084 ns/op	   45600 B/op	     350 allocs/op
+BenchmarkHTTPListRunEventsMemory-10    	       1	     57791 ns/op	   41064 B/op	     276 allocs/op
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http	0.532s
+
+EXIT_CODE=0

@@ -42,11 +42,14 @@ type ThreadRef struct {
 
 // Run is the minimal durable runtime root.
 type Run struct {
-	ID          string     `json:"id"`
-	Kind        RunKind    `json:"kind"`
-	Actor       ActorRef   `json:"actor"`
-	Thread      ThreadRef  `json:"thread"`
-	RequestID   string     `json:"requestID,omitempty"`
+	ID        string    `json:"id"`
+	Kind      RunKind   `json:"kind"`
+	Actor     ActorRef  `json:"actor"`
+	Thread    ThreadRef `json:"thread"`
+	RequestID string    `json:"requestID,omitempty"`
+	// ParentRunID is the immutable, Store-fenced physical ancestry of a child.
+	// A relation index is not an authoritative substitute when unavailable.
+	ParentRunID string     `json:"parentRunID,omitempty"`
 	Goal        string     `json:"goal"`
 	Status      RunStatus  `json:"status"`
 	Revision    uint64     `json:"revision"`
@@ -128,6 +131,7 @@ type CreateRequest struct {
 	Actor             ActorRef
 	Thread            ThreadRef
 	RequestID         string
+	ParentRunID       string
 	Goal              string
 	DeadlineAt        *time.Time
 	State             json.RawMessage

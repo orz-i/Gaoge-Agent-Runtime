@@ -10,7 +10,9 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workflow"
 )
 
 // Keep host-implemented ports explicit: embedding the SDK interface would hide
@@ -60,6 +62,58 @@ var (
 	_ func(agent.Dependencies) (*agent.Runner, error)     = agent.NewRunner
 	_ func([]tools.Registration) (*tools.Registry, error) = tools.NewRegistry
 	_ continuation.ToolWaitResumer                        = (*agent.Runner)(nil)
+)
+
+// A separately linked Host implements only the narrow, immutable first-party
+// AgentTask ownership proof. Missing methods must fail the external SDK build.
+// External clients can see a pending original child Grant but cannot create
+// the Agent's internal settlement proof. Store backends must check the opaque
+// marker inside their own authoritative commit transaction.
+type childPhysicalStoreContract interface {
+	BeginChildExecution(context.Context, kernel.ChildExecutionGrant) error
+	LookupChildExecution(context.Context, string) (kernel.ChildExecutionGrant, error)
+	MarkChildExecutionSettled(context.Context, kernel.ChildExecutionGrant, kernel.ChildExecutionSettlement) error
+	FinishChildExecution(context.Context, kernel.ChildExecutionGrant) error
+}
+
+var (
+	_ kernel.ChildExecutionStore                                                                 = (childPhysicalStoreContract)(nil)
+	_ childPhysicalStoreContract                                                                 = (kernel.ChildExecutionStore)(nil)
+	_ childPhysicalStoreContract                                                                 = (*memory.Store)(nil)
+	_ func(*kernel.Runtime, context.Context, string, uint64) (kernel.ChildExecutionGrant, error) = (*kernel.Runtime).BeginChildExecution
+	_ func(*kernel.Runtime, context.Context, string) (kernel.ChildExecutionGrant, error)         = (*kernel.Runtime).LookupChildExecution
+	_ func(*agent.Runner, context.Context, string) error                                         = (*agent.Runner).ReconcileChildPhysicalGrant
+	_ func(*workflow.Runner, context.Context, string) error                                      = (*workflow.Runner).ReconcileChildPhysicalGrant
+	_ workflow.Effect                                                                            = workflow.Effect{PhysicalNoEffect: true, PhysicalNoEffectAttempt: 1}
+	_ func(*kernel.Runtime) *kernel.Runtime                                                      = (*kernel.Runtime).WithoutPhysicalGrant
+	_ func([]byte) string                                                                        = agent.FrozenOriginFingerprint
+	_ func(kernel.Snapshot, []byte) bool                                                         = agent.MatchesFrozenOrigin
+	_                                                                                            = agent.Dependencies{
+		ApprovalControlPreflight: func(context.Context, kernel.Snapshot) error { return nil },
+		StartControlPreflight:    func(context.Context, agent.StartRequest) error { return nil },
+	}
+)
+
+type workflowAgentTaskOwnerContract interface {
+	LocalAgentTaskRunner() *agent.Runner
+	LocalAgentTaskRecorder() runrelation.Recorder
+	VerifyAgentTaskOrigin(workflow.Effect, kernel.Snapshot) bool
+}
+
+type workflowAgentTaskApprovalCancellationContract interface {
+	FencesAgentTaskApprovalThroughHarness() bool
+}
+
+var (
+	_ workflow.LocalAgentTaskOwner                                                                               = (workflowAgentTaskOwnerContract)(nil)
+	_ workflowAgentTaskOwnerContract                                                                             = (workflow.LocalAgentTaskOwner)(nil)
+	_ func(*agent.Runner, kernel.Snapshot, agent.StartRequest) bool                                              = (*agent.Runner).VerifyFrozenStartRequest
+	_ func(kernel.Snapshot) bool                                                                                 = agent.TerminalPhysicalEffectsSettled
+	_ workflow.LocalAgentTaskApprovalCancellationOwner                                                           = (workflowAgentTaskApprovalCancellationContract)(nil)
+	_ workflowAgentTaskApprovalCancellationContract                                                              = (workflow.LocalAgentTaskApprovalCancellationOwner)(nil)
+	_ func(*agent.Runner, *kernel.Runtime, kernel.Snapshot) bool                                                 = (*agent.Runner).QuiescentApprovalCancellation
+	_ func(*workflow.Runner, *kernel.Runtime, *agent.Runner) bool                                                = (*workflow.Runner).UsesLocalAgentRunner
+	_ func(*workflow.Runner, *kernel.Runtime, kernel.Snapshot, runrelation.Relation, kernel.Snapshot, bool) bool = (*workflow.Runner).VerifyLocalChild
 )
 
 type externalWaitContract interface {

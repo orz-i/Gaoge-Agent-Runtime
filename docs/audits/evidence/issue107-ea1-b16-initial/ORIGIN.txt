@@ -1,0 +1,2 @@
+SOURCE_SHA=fc9a3b967b92c908dd2db3fb0556b1c106436de3
+Initial Memory smoke gate EXIT_CODE=1. Start phases actual 19 subcases passed; recovery phases rejected invalid Agent request before target settlement cutpoints. No production defect claimed from this fixture rejection. Later lint and cross-Store commands not run; ledger unchanged.

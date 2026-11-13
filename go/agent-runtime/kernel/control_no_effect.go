@@ -6,8 +6,10 @@ package kernel
 // snapshot, checking the expected revision and validating mutation/proof are
 // read-only operations under the Kernel Store contract.
 //
-// Never attach this proof to any error returned by a write-capable Store
-// method: even a conflict/error with no snapshot may follow a committed CAS.
+// Never attach this proof to arbitrary errors returned by a write-capable
+// Store. A separate, tightly typed ChildExecutionStore busy-no-effect proof
+// is permitted only by its explicitly audited, atomic no-mutation contract;
+// generic errors (including Store ErrConflict) can follow a committed CAS.
 type controlPreStoreFailure struct {
 	cause error
 }
@@ -40,11 +42,24 @@ func controlStoreOutcome(cause error) error {
 	return &controlStoreOutcomeError{cause: cause}
 }
 
-// IsControlNoEffect reports only a direct Kernel-created pre-Store control
-// failure. It intentionally does not traverse wrapped errors; a consumer must
+// controlChildBusyNoEffect is minted ONLY by Kernel for a ChildExecutionStore
+// whose atomic contract guarantees ErrChildExecutionBusy was returned before
+// mutating a parent Run. It is not a generic Store conflict or timeout proof.
+// The Store has authoritative, immutable pending child Grants under its CAS.
+type controlChildBusyNoEffect struct{ cause error }
+
+func (e *controlChildBusyNoEffect) Error() string { return e.cause.Error() }
+func (e *controlChildBusyNoEffect) Unwrap() error { return e.cause }
+
+// IsControlNoEffect reports direct Kernel-created pre-Store failures OR the
+// narrowly attested atomic ChildExecutionStore busy rejection. It intentionally does not traverse wrapped errors; a consumer must
 // not mistake an externally wrapped error for Kernel write-boundary evidence.
 // The original error remains inspectable with errors.Is/As.
 func IsControlNoEffect(err error) bool {
-	_, ok := err.(*controlPreStoreFailure) //nolint:errorlint // Proof requires a direct private result.
-	return ok
+	switch err.(type) { //nolint:errorlint // Direct private proof, no wrapped results.
+	case *controlPreStoreFailure, *controlChildBusyNoEffect:
+		return true
+	default:
+		return false
+	}
 }

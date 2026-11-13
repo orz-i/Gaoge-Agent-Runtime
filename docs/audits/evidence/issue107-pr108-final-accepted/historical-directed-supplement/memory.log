@@ -1,0 +1,141 @@
+SOURCE_SHA=2d216518cfe48bc9e2ea6b02beb7733c246376a7
+COMMAND=go -C go/agent-runtime test -race -count=1 -v ./... -run ^TestManagedMemoryStoreConformance$
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/continuation	1.468s [no tests to run]
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/interaction	[no test files]
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/runfeed	[no test files]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/topology	1.475s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent	1.520s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/bootstrap	1.486s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget	1.432s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/compose	1.772s [no tests to run]
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance	[no test files]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context	1.601s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/continuation	1.609s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/evaluation	1.970s [no tests to run]
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/examples/configured	[no test files]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/examples/quickstart	1.954s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/groupchat	1.461s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff	1.436s [no tests to run]
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/interaction	[no test files]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/callbackscope	1.428s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol	1.424s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract	1.456s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel	1.420s [no tests to run]
+=== RUN   TestManagedMemoryStoreConformance
+=== RUN   TestManagedMemoryStoreConformance/owner-park-competition
+=== RUN   TestManagedMemoryStoreConformance/owner-park-competition/renew-owner
+=== RUN   TestManagedMemoryStoreConformance/owner-park-competition/renew-park
+=== RUN   TestManagedMemoryStoreConformance/owner-park-competition/claim-owner
+=== RUN   TestManagedMemoryStoreConformance/owner-park-competition/claim-park
+=== RUN   TestManagedMemoryStoreConformance/owner-and-leave
+=== RUN   TestManagedMemoryStoreConformance/owner-and-leave/live
+=== RUN   TestManagedMemoryStoreConformance/owner-and-leave/renew
+=== RUN   TestManagedMemoryStoreConformance/owner-and-leave/leave
+=== RUN   TestManagedMemoryStoreConformance/owner-and-leave/claim
+=== RUN   TestManagedMemoryStoreConformance/owner-and-leave/eventhead
+=== RUN   TestManagedMemoryStoreConformance/parked-ancestor
+=== RUN   TestManagedMemoryStoreConformance/parked-ancestor/park-first
+=== RUN   TestManagedMemoryStoreConformance/parked-ancestor/child-first
+=== RUN   TestManagedMemoryStoreConformance/parked-gates
+=== RUN   TestManagedMemoryStoreConformance/selection-ack
+=== RUN   TestManagedMemoryStoreConformance/selection-ack/RESUME
+=== RUN   TestManagedMemoryStoreConformance/selection-ack/CANCEL
+=== RUN   TestManagedMemoryStoreConformance/two-enable-claimants
+=== RUN   TestManagedMemoryStoreConformance/transaction-ack
+=== RUN   TestManagedMemoryStoreConformance/transaction-ack/t0
+=== RUN   TestManagedMemoryStoreConformance/transaction-ack/park
+=== RUN   TestManagedMemoryStoreConformance/transaction-ack/enable
+=== RUN   TestManagedMemoryStoreConformance/transaction-ack/cancel
+=== RUN   TestManagedMemoryStoreConformance/historical-closure
+--- PASS: TestManagedMemoryStoreConformance (0.11s)
+    --- PASS: TestManagedMemoryStoreConformance/owner-park-competition (0.02s)
+        --- PASS: TestManagedMemoryStoreConformance/owner-park-competition/renew-owner (0.00s)
+        --- PASS: TestManagedMemoryStoreConformance/owner-park-competition/renew-park (0.00s)
+        --- PASS: TestManagedMemoryStoreConformance/owner-park-competition/claim-owner (0.00s)
+        --- PASS: TestManagedMemoryStoreConformance/owner-park-competition/claim-park (0.00s)
+    --- PASS: TestManagedMemoryStoreConformance/owner-and-leave (0.02s)
+        --- PASS: TestManagedMemoryStoreConformance/owner-and-leave/live (0.00s)
+        --- PASS: TestManagedMemoryStoreConformance/owner-and-leave/renew (0.00s)
+        --- PASS: TestManagedMemoryStoreConformance/owner-and-leave/leave (0.01s)
+        --- PASS: TestManagedMemoryStoreConformance/owner-and-leave/claim (0.00s)
+        --- PASS: TestManagedMemoryStoreConformance/owner-and-leave/eventhead (0.00s)
+    --- PASS: TestManagedMemoryStoreConformance/parked-ancestor (0.01s)
+        --- PASS: TestManagedMemoryStoreConformance/parked-ancestor/park-first (0.00s)
+        --- PASS: TestManagedMemoryStoreConformance/parked-ancestor/child-first (0.00s)
+    --- PASS: TestManagedMemoryStoreConformance/parked-gates (0.01s)
+    --- PASS: TestManagedMemoryStoreConformance/selection-ack (0.02s)
+        --- PASS: TestManagedMemoryStoreConformance/selection-ack/RESUME (0.01s)
+        --- PASS: TestManagedMemoryStoreConformance/selection-ack/CANCEL (0.01s)
+    --- PASS: TestManagedMemoryStoreConformance/two-enable-claimants (0.01s)
+    --- PASS: TestManagedMemoryStoreConformance/transaction-ack (0.02s)
+        --- PASS: TestManagedMemoryStoreConformance/transaction-ack/t0 (0.00s)
+        --- PASS: TestManagedMemoryStoreConformance/transaction-ack/park (0.00s)
+        --- PASS: TestManagedMemoryStoreConformance/transaction-ack/enable (0.01s)
+        --- PASS: TestManagedMemoryStoreConformance/transaction-ack/cancel (0.01s)
+    --- PASS: TestManagedMemoryStoreConformance/historical-closure (0.01s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory	1.879s
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model	1.621s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/observability	1.532s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin	1.775s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/queue	1.462s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runfeed	1.433s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation	1.574s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/team	1.489s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools	1.451s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workbench	1.450s [no tests to run]
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workflow	1.860s [no tests to run]
+
+EXIT_CODE=0

@@ -1,0 +1,2 @@
+SOURCE_SHA=606a7f559801e8f64d72dfc5c1f0aca4c90f5e80
+B17 six fixed Child Agent Resume cells. Eight zero-exit logs, isolated PostgreSQL16; no whole-matrix or remote certification.

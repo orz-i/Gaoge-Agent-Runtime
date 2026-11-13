@@ -1,0 +1,2 @@
+SOURCE_SHA=8619f206d9820677bbb7560f4773dd329113a40d
+One complete remaining-path diagnostic. Verified receipt=true, ActiveFence=false; original/peer/Get/List/reopen/final intent and receipt differ from Append only in CreatedAt/UpdatedAt Location, all Time.Equal and UTCDeepEqual=true. Reopened timeline/ledger/Invocation equal; later Cancel nil, original child/parent/ledger/Invocation equal, Control1 Tool0 Model1. Original failing predicate retained so exit1 is expected diagnostic, not a passing matrix certificate. Full untruncated log retained.

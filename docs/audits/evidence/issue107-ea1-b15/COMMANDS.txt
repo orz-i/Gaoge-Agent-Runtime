@@ -1,0 +1,22 @@
+gorm.log
+COMMAND=go -C go/agent-runtime-postgres test -race -count=1 ./... -run '^TestEA1RootAgent(CancelPhases|Election)' -v
+harness-regression.log
+COMMAND=go -C go/agent-runtime-harness test -race -count=1 ./... -run '^(TestPR82RootCancelRejectsForeignNativeKernelCanceller|TestNativeCancellationEarlyReadStagesAllowRetry|TestIndependentCancellationIntentPreventsLateChildAdmission|TestCancellationClaimCommittedHostCASLostReplyKeepsIntent|TestNativeCancellationDoesNotReleaseUncertainStoreConflict|TestCancelWhileAgentIsRunningCannotRevokePhysicalOwner|TestCancellationSuccessReceiptTimeoutKeepsIntentForReconciliation|TestAuditPR82CustomRootCancelForeignTerminalCannotSettle|TestCancellationCompletionLostACKRequiresDurableReceiptEvidence|TestNativeConcurrentKernelRevisionDuringCancelRetries|TestCancelledRequestNoEffectRecoveryIsBoundedAndFailClosed|TestAsyncDelegationCancellationRetriesExternalCleanup)$' -v
+host-nativepg.log
+COMMAND=go -C go/agent-runtime-harness-postgres test -race -count=3 ./... -run '^TestRealPostgresEA1RootAgentCancelHostElection$' -v
+lint-agent-runtime-harness-postgres.log
+COMMAND=cd go/agent-runtime-harness-postgres && golangci-lint run ./...
+lint-agent-runtime-postgres.log
+COMMAND=cd go/agent-runtime-postgres && golangci-lint run ./...
+lint-agent-runtime-sqlite.log
+COMMAND=cd go/agent-runtime-sqlite && golangci-lint run ./...
+lint-agent-runtime.log
+COMMAND=cd go/agent-runtime && golangci-lint run ./...
+memory.log
+COMMAND=go -C go/agent-runtime test -race -count=1 ./memory -run '^TestEA1RootAgent(CancelPhases|Election)' -v
+nativepg.log
+COMMAND=go -C go/agent-runtime-postgres test -race -count=3 ./... -run '^TestEA1RealPostgresRootAgent(CancelPhases|Election)' -v
+smoke-host.log
+COMMAND=go -C go/agent-runtime-harness-postgres test -race -count=1 ./... -run '^TestEA1RootAgentCancelHostElection$' -v
+sqlite.log
+COMMAND=go -C go/agent-runtime-sqlite test -race -count=1 ./... -run '^TestEA1RootAgent(CancelPhases|Election)' -v

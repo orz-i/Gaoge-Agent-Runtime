@@ -1,0 +1,38 @@
+=== RUN   TestEA1P0SourceAdmissionGORM
+=== RUN   TestEA1P0SourceAdmissionGORM/foreign_tenancy_actor_thread_missing_and_terminal_parent
+=== RUN   TestEA1P0SourceAdmissionGORM/foreign_tenancy_actor_thread_missing_and_terminal_parent/foreign-tenant
+
+2026/11/12 23:21:36 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:201 [35;1mrecord not found
+[0m[33m[0.087ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "denied-foreign-tenant" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+=== RUN   TestEA1P0SourceAdmissionGORM/foreign_tenancy_actor_thread_missing_and_terminal_parent/foreign-actor
+
+2026/11/12 23:21:36 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:201 [35;1mrecord not found
+[0m[33m[0.075ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "denied-foreign-actor" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+=== RUN   TestEA1P0SourceAdmissionGORM/foreign_tenancy_actor_thread_missing_and_terminal_parent/foreign-thread
+
+2026/11/12 23:21:36 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:201 [35;1mrecord not found
+[0m[33m[0.073ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "denied-foreign-thread" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+=== RUN   TestEA1P0SourceAdmissionGORM/foreign_tenancy_actor_thread_missing_and_terminal_parent/missing-parent
+
+2026/11/12 23:21:36 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_child_execution.go:36 [35;1mrecord not found
+[0m[33m[0.128ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "does-not-exist" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+
+2026/11/12 23:21:36 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:201 [35;1mrecord not found
+[0m[33m[0.057ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "denied-missing-parent" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+
+2026/11/12 23:21:36 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:201 [35;1mrecord not found
+[0m[33m[0.061ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "late-child" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+=== RUN   TestEA1P0SourceAdmissionGORM/wrong_kind_duplicate_run_and_stale/future_expected_Revision
+
+2026/11/12 23:21:36 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:162 [35;1mUNIQUE constraint failed: agent_kernel_runs.run_id
+[0m[33m[0.153ms] [34;1m[rows:0][0m INSERT INTO `agent_kernel_runs` (`run_id`,`request_id`,`parent_run_id`,`kind`,`tenant_id`,`actor_id`,`thread_kind`,`thread_id`,`goal`,`status`,`revision`,`execution_epoch`,`execution_owner`,`execution_lease_id`,`execution_expires_at`,`execution_quarantine_revision`,`execution_quarantine_generation`,`execution_quarantine_code`,`error_code`,`error_detail`,`deadline_at`,`ended_at`,`state_json`,`checkpoint_json`,`result_json`,`last_event_seq`,`created_at`,`updated_at`) VALUES ("root","","","workflow","tenant","actor","conversation","thread","different original owner","running",1,0,"","",NULL,0,0,"","","",NULL,NULL,"{}","","",1,"2026-11-12 15:21:36.851","2026-11-12 15:21:36.851")
+--- PASS: TestEA1P0SourceAdmissionGORM (0.03s)
+    --- PASS: TestEA1P0SourceAdmissionGORM/foreign_tenancy_actor_thread_missing_and_terminal_parent (0.02s)
+        --- PASS: TestEA1P0SourceAdmissionGORM/foreign_tenancy_actor_thread_missing_and_terminal_parent/foreign-tenant (0.00s)
+        --- PASS: TestEA1P0SourceAdmissionGORM/foreign_tenancy_actor_thread_missing_and_terminal_parent/foreign-actor (0.00s)
+        --- PASS: TestEA1P0SourceAdmissionGORM/foreign_tenancy_actor_thread_missing_and_terminal_parent/foreign-thread (0.00s)
+        --- PASS: TestEA1P0SourceAdmissionGORM/foreign_tenancy_actor_thread_missing_and_terminal_parent/missing-parent (0.00s)
+    --- PASS: TestEA1P0SourceAdmissionGORM/wrong_kind_duplicate_run_and_stale/future_expected_Revision (0.02s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	1.472s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]

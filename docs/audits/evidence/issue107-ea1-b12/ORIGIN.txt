@@ -1,0 +1,2 @@
+SOURCE_SHA=eaf89e66114b8d02af638a685dc68d579cf909a1
+B12 AR-S P3/P4 and AR-Q P0..P4 only. Dedicated isolated PostgreSQL16. Twelve completed zero-exit logs; no remote gate or whole-matrix certification.

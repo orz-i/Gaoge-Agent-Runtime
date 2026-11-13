@@ -340,6 +340,23 @@ func (runner *Runner) CancelSubtask(ctx context.Context, turnID, taskID, reason 
 			return Snapshot{}, err
 		}
 	}
+	// An AgentTask child with a Host-prepared Agent may be readable but not
+	// physically cancellable (e.g. it is running a Model/Tool, has unknown
+	// effects or lacks the frozen Harness approval-fence proof). Reject such
+	// known local cases BEFORE minting the Turn cancellation intent. The
+	// authoritative proof is repeated after admission by cancelRuntimeRun;
+	// this read-only preflight cannot authorize a physical cancellation.
+	if task.Kind == string(runrelation.KindWorkflowEffect) {
+		candidate, loadErr := runner.runtime.Load(ctx, task.RunID)
+		if loadErr != nil && !errors.Is(loadErr, kernel.ErrNotFound) {
+			return Snapshot{}, loadErr
+		}
+		if loadErr == nil && candidate.Run.Kind == agent.RunKind {
+			if err = runner.verifyLocalRelationRun(ctx, candidate, true); err != nil {
+				return Snapshot{}, err
+			}
+		}
+	}
 	// A terminal Subtask is only the parent's execution status. A composite
 	// Team/Workflow/GroupChat can still own Running RunRelation children;
 	// never treat the displayed parent status as proof of descendant cleanup.
@@ -467,9 +484,12 @@ func (runner *Runner) ResolveSubtaskApproval(ctx context.Context, turnID, taskID
 	if err != nil {
 		return Snapshot{}, err
 	}
-	resolved, resolveErr := runner.withPhysicalInvocationDispatchFor(ctx, invocation, "resolve-subtask-approval", task.RunID, func() (kernel.Snapshot, error) {
-		return runner.agent.ResolveApproval(ctx, task.RunID, snapshot.Run.Revision, plugin.ApprovalResponse{Decision: decision, Comment: request.Comment})
-	})
+	resolved, resolveErr := runner.withPhysicalSubtaskApprovalDispatch(
+		ctx, invocation, task.RunID, snapshot.Run.Revision, checkpointID,
+		func(physicalCtx context.Context) (kernel.Snapshot, error) {
+			return runner.agent.ResolveApproval(physicalCtx, task.RunID, snapshot.Run.Revision,
+				plugin.ApprovalResponse{Decision: decision, Comment: request.Comment})
+		})
 	if resolveErr != nil {
 		return Snapshot{}, resolveErr
 	}

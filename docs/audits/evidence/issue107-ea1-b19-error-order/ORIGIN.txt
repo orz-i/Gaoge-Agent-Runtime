@@ -1,0 +1,2 @@
+SOURCE_SHA=2cf7038fc76c028ca0edfac24096866a2afa76e5
+Host setup and Core Memory PASS; Host P3/P4 PASS. Remaining Host P0 origin returns InvalidInput; P2 Resume returns ToolOutcomeUnknown, fixture expected different layer errors. Exact entry error ordering under diagnosis; no production safety finding. Later checks not run.

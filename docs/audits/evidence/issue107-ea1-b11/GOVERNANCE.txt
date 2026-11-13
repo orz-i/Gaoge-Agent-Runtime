@@ -1,0 +1,1 @@
+Inventory checker exit=0; strict exit=1 expected NO-GO; six checker regression tests exit=0. Executed after the three-row ledger update, without Go source changes.

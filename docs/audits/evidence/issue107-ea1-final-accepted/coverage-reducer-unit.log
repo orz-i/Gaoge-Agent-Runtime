@@ -1,0 +1,23 @@
+SOURCE_SHA=0a4009a8171f1726edaea895798d551051753400
+COMMAND=node --test scripts/go-coverage-summary.test.mjs
+✔ unions duplicate blocks within and across test binaries without losing zeros (1.659125ms)
+✔ full source path and every range coordinate form block identity (0.088792ms)
+✔ all zero-execution blocks remain in the denominator (0.056875ms)
+✔ large execution counters use exact positivity without numeric overflow (0.052791ms)
+✔ same block statement-count conflicts fail closed, including zero counts (0.2145ms)
+✔ valid Go modes are recognized but mixed modes are rejected (0.11475ms)
+✔ missing and malformed headers or rows are not silently discarded (0.135542ms)
+✔ illegal integer syntax and unsafe statement values fail closed (0.184292ms)
+✔ invalid, reversed, or unsafe coordinates fail closed (0.13575ms)
+✔ CRLF profiles and mode-only zero-statement profiles retain existing empty semantics (0.101541ms)
+✔ workspace gate instruments all local packages and preserves its 70 percent contract (0.677125ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 11
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 54.825417
+
+EXIT_CODE=0

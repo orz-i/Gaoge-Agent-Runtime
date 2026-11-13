@@ -1,0 +1,6 @@
+SOURCE_SHA=a774e5ca6caac2abb65bcc76b2c3f343579cb07f
+COMMAND=go -C go/agent-runtime-harness test -race -count=1 -timeout=180s ./...
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness	29.287s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness/examples/session	1.798s
+
+EXIT_CODE=0

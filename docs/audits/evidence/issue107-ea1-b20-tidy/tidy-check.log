@@ -1,0 +1,21 @@
+SOURCE_SHA=255354ba716378ca64ab02b5e10f8d0c7dcc1009
+COMMAND=node --check scripts/go-workspace.mjs && node scripts/go-workspace.mjs tidy-check
+==> tidy-check go/agent-runtime
+==> tidy-check go/agent-runtime-provider
+==> tidy-check go/agent-runtime-harness
+==> tidy-check go/agent-runtime-harness/examples/task-agent
+==> tidy-check go/agent-runtime-harness-postgres
+file:///private/tmp/gaoge-runtime-issue107/scripts/go-workspace.mjs:130
+      throw new Error(`go mod tidy changed ${changed.map(([file]) => path.relative(root, file)).join(", ")}`);
+            ^
+
+Error: go mod tidy changed go/agent-runtime-harness-postgres/go.mod, go/agent-runtime-harness-postgres/go.sum
+    at checkTidy (file:///private/tmp/gaoge-runtime-issue107/scripts/go-workspace.mjs:130:13)
+    at file:///private/tmp/gaoge-runtime-issue107/scripts/go-workspace.mjs:49:30
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+
+Node.js v24.21.0
+
+EXIT_CODE=1

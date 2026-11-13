@@ -1,0 +1,37 @@
+SOURCE_SHA=b418f5f225b6a18865749624d272da9392568669
+EXIT_CODE=1
+=== RUN   TestEA1CompensationAdmissionMemory
+=== RUN   TestEA1CompensationAdmissionMemory/root/revision
+=== RUN   TestEA1CompensationAdmissionMemory/root/terminal
+=== RUN   TestEA1CompensationAdmissionMemory/child/revision
+=== RUN   TestEA1CompensationAdmissionMemory/child/terminal
+--- PASS: TestEA1CompensationAdmissionMemory (0.07s)
+    --- PASS: TestEA1CompensationAdmissionMemory/root/revision (0.03s)
+    --- PASS: TestEA1CompensationAdmissionMemory/root/terminal (0.01s)
+    --- PASS: TestEA1CompensationAdmissionMemory/child/revision (0.02s)
+    --- PASS: TestEA1CompensationAdmissionMemory/child/terminal (0.01s)
+=== RUN   TestEA1CompensationBarriersMemory
+=== RUN   TestEA1CompensationBarriersMemory/root/P1
+=== RUN   TestEA1CompensationBarriersMemory/root/P5
+=== RUN   TestEA1CompensationBarriersMemory/root/P5-retry
+    ea1_compensation_barriers.go:228: retry changed original request beyond attempt
+=== RUN   TestEA1CompensationBarriersMemory/child/P1
+=== RUN   TestEA1CompensationBarriersMemory/child/P5
+=== RUN   TestEA1CompensationBarriersMemory/child/P5-retry
+    ea1_compensation_barriers.go:228: retry changed original request beyond attempt
+--- FAIL: TestEA1CompensationBarriersMemory (2.11s)
+    --- PASS: TestEA1CompensationBarriersMemory/root/P1 (0.02s)
+    --- PASS: TestEA1CompensationBarriersMemory/root/P5 (0.02s)
+    --- FAIL: TestEA1CompensationBarriersMemory/root/P5-retry (0.02s)
+    --- PASS: TestEA1CompensationBarriersMemory/child/P1 (0.02s)
+    --- PASS: TestEA1CompensationBarriersMemory/child/P5 (2.03s)
+    --- FAIL: TestEA1CompensationBarriersMemory/child/P5-retry (0.02s)
+=== RUN   TestEA1CompensationUnknownMemory
+=== RUN   TestEA1CompensationUnknownMemory/root
+=== RUN   TestEA1CompensationUnknownMemory/child
+--- PASS: TestEA1CompensationUnknownMemory (0.04s)
+    --- PASS: TestEA1CompensationUnknownMemory/root (0.02s)
+    --- PASS: TestEA1CompensationUnknownMemory/child (0.02s)
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory	3.084s
+FAIL

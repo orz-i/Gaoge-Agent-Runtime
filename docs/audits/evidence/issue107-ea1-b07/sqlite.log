@@ -1,0 +1,51 @@
+SOURCE_SHA=49237900d5dcf51c070b80233fa4a2e639972ec8
+COMMAND=go -C go/agent-runtime-sqlite test -race -count=1 ./... -run '^TestEA1(WaitUnknownNativeSQLite|ChildWaitAdmissionSQLite|WorkflowEntryCompetitionSQLite|WorkflowStartBoundariesSQLite)$' -v
+=== RUN   TestEA1ChildWaitAdmissionSQLite
+=== RUN   TestEA1ChildWaitAdmissionSQLite/checkpoint
+=== RUN   TestEA1ChildWaitAdmissionSQLite/ancestor-terminal
+--- PASS: TestEA1ChildWaitAdmissionSQLite (0.19s)
+    --- PASS: TestEA1ChildWaitAdmissionSQLite/checkpoint (0.12s)
+    --- PASS: TestEA1ChildWaitAdmissionSQLite/ancestor-terminal (0.07s)
+=== RUN   TestEA1WaitUnknownNativeSQLite
+=== RUN   TestEA1WaitUnknownNativeSQLite/root
+=== RUN   TestEA1WaitUnknownNativeSQLite/child
+--- PASS: TestEA1WaitUnknownNativeSQLite (0.24s)
+    --- PASS: TestEA1WaitUnknownNativeSQLite/root (0.11s)
+    --- PASS: TestEA1WaitUnknownNativeSQLite/child (0.13s)
+=== RUN   TestEA1WorkflowEntryCompetitionSQLite
+=== RUN   TestEA1WorkflowEntryCompetitionSQLite/resume-child/P1
+=== RUN   TestEA1WorkflowEntryCompetitionSQLite/resume-child/P5
+=== RUN   TestEA1WorkflowEntryCompetitionSQLite/resume-child/P5-retry
+=== RUN   TestEA1WorkflowEntryCompetitionSQLite/wait-root/P5
+=== RUN   TestEA1WorkflowEntryCompetitionSQLite/wait-root/P5-retry
+--- PASS: TestEA1WorkflowEntryCompetitionSQLite (2.49s)
+    --- PASS: TestEA1WorkflowEntryCompetitionSQLite/resume-child/P1 (0.10s)
+    --- PASS: TestEA1WorkflowEntryCompetitionSQLite/resume-child/P5 (2.05s)
+    --- PASS: TestEA1WorkflowEntryCompetitionSQLite/resume-child/P5-retry (0.15s)
+    --- PASS: TestEA1WorkflowEntryCompetitionSQLite/wait-root/P5 (0.09s)
+    --- PASS: TestEA1WorkflowEntryCompetitionSQLite/wait-root/P5-retry (0.10s)
+=== RUN   TestEA1WorkflowStartBoundariesSQLite
+=== RUN   TestEA1WorkflowStartBoundariesSQLite/child/P0/builtin-subworkflow-source
+=== RUN   TestEA1WorkflowStartBoundariesSQLite/root/P0/revision
+=== RUN   TestEA1WorkflowStartBoundariesSQLite/root/P0/terminal
+=== RUN   TestEA1WorkflowStartBoundariesSQLite/child/P0/revision
+=== RUN   TestEA1WorkflowStartBoundariesSQLite/child/P0/terminal
+=== RUN   TestEA1WorkflowStartBoundariesSQLite/root/P1
+=== RUN   TestEA1WorkflowStartBoundariesSQLite/root/P5
+=== RUN   TestEA1WorkflowStartBoundariesSQLite/root/P5-retry
+--- PASS: TestEA1WorkflowStartBoundariesSQLite (0.58s)
+    --- PASS: TestEA1WorkflowStartBoundariesSQLite/child/P0/builtin-subworkflow-source (0.06s)
+    --- PASS: TestEA1WorkflowStartBoundariesSQLite/root/P0/revision (0.07s)
+    --- PASS: TestEA1WorkflowStartBoundariesSQLite/root/P0/terminal (0.06s)
+    --- PASS: TestEA1WorkflowStartBoundariesSQLite/child/P0/revision (0.08s)
+    --- PASS: TestEA1WorkflowStartBoundariesSQLite/child/P0/terminal (0.07s)
+    --- PASS: TestEA1WorkflowStartBoundariesSQLite/root/P1 (0.08s)
+    --- PASS: TestEA1WorkflowStartBoundariesSQLite/root/P5 (0.07s)
+    --- PASS: TestEA1WorkflowStartBoundariesSQLite/root/P5-retry (0.09s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite	5.056s
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/examples/embedded	1.524s [no tests to run]
+
+EXIT_CODE=0

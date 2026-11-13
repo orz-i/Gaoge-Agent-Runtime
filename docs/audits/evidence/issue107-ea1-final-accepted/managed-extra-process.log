@@ -1,0 +1,26 @@
+SOURCE_SHA=0a4009a8171f1726edaea895798d551051753400
+COMMAND=GOWORK=off go -C integration/continuation-e2e test -race -count=2 -v ./... -run '^TestRealPostgres(ManagedAgentSessionRecoveryAcrossProcessCrash|ManagedHostReservationModesAfterProcessCrash|OpaqueManagedProcessCrashRemainsUnknown)$'
+=== RUN   TestRealPostgresManagedAgentSessionRecoveryAcrossProcessCrash
+--- PASS: TestRealPostgresManagedAgentSessionRecoveryAcrossProcessCrash (7.30s)
+=== RUN   TestRealPostgresManagedHostReservationModesAfterProcessCrash
+=== RUN   TestRealPostgresManagedHostReservationModesAfterProcessCrash/RESUME
+=== RUN   TestRealPostgresManagedHostReservationModesAfterProcessCrash/CANCEL
+--- PASS: TestRealPostgresManagedHostReservationModesAfterProcessCrash (12.24s)
+    --- PASS: TestRealPostgresManagedHostReservationModesAfterProcessCrash/RESUME (6.41s)
+    --- PASS: TestRealPostgresManagedHostReservationModesAfterProcessCrash/CANCEL (5.83s)
+=== RUN   TestRealPostgresOpaqueManagedProcessCrashRemainsUnknown
+--- PASS: TestRealPostgresOpaqueManagedProcessCrashRemainsUnknown (5.41s)
+=== RUN   TestRealPostgresManagedAgentSessionRecoveryAcrossProcessCrash
+--- PASS: TestRealPostgresManagedAgentSessionRecoveryAcrossProcessCrash (7.20s)
+=== RUN   TestRealPostgresManagedHostReservationModesAfterProcessCrash
+=== RUN   TestRealPostgresManagedHostReservationModesAfterProcessCrash/RESUME
+=== RUN   TestRealPostgresManagedHostReservationModesAfterProcessCrash/CANCEL
+--- PASS: TestRealPostgresManagedHostReservationModesAfterProcessCrash (12.13s)
+    --- PASS: TestRealPostgresManagedHostReservationModesAfterProcessCrash/RESUME (6.22s)
+    --- PASS: TestRealPostgresManagedHostReservationModesAfterProcessCrash/CANCEL (5.91s)
+=== RUN   TestRealPostgresOpaqueManagedProcessCrashRemainsUnknown
+--- PASS: TestRealPostgresOpaqueManagedProcessCrashRemainsUnknown (5.55s)
+PASS
+ok  	example.com/agent-runtime-continuation-e2e	51.430s
+
+EXIT_CODE=0

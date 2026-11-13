@@ -21,7 +21,7 @@ func TestVerifyLocalChildOnlyBuiltInSubworkflow(t *testing.T) {
 		return data
 	}
 	parent := kernel.Snapshot{Run: kernel.Run{ID: "parent", Kind: RunKind, Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"}}, State: encode(executionState{Effects: []Effect{effect}})}
-	child := kernel.Snapshot{Run: kernel.Run{ID: "effect-child", Kind: RunKind, Actor: parent.Run.Actor, Thread: parent.Run.Thread, RequestID: "effect", Goal: "subworkflow:nested", Status: kernel.RunStatusRunning}, State: encode(executionState{Definition: Definition{ID: "nested", Revision: 1, Hash: "hash"}, NestedDepth: 1, Input: effect.Input})}
+	child := kernel.Snapshot{Run: kernel.Run{ID: "effect-child", Kind: RunKind, ParentRunID: parent.Run.ID, Actor: parent.Run.Actor, Thread: parent.Run.Thread, RequestID: "effect", Goal: "subworkflow:nested", Status: kernel.RunStatusRunning}, State: encode(executionState{Definition: Definition{ID: "nested", Revision: 1, Hash: "hash"}, NestedDepth: 1, Input: effect.Input})}
 	relation := runrelation.Relation{ParentRunID: "parent", ChildRunID: "effect-child", Kind: runrelation.KindWorkflowEffect, OwnerNodeID: "node"}
 	for _, control := range []bool{false, true} {
 		if !runner.VerifyLocalChild(runtime, parent, relation, child, control) {
@@ -31,6 +31,11 @@ func TestVerifyLocalChildOnlyBuiltInSubworkflow(t *testing.T) {
 		foreign.Run.Actor.TenantID = "foreign"
 		if runner.VerifyLocalChild(runtime, parent, relation, foreign, control) {
 			t.Fatal("foreign task accepted")
+		}
+		foreign = child
+		foreign.Run.ParentRunID = "foreign-workflow"
+		if runner.VerifyLocalChild(runtime, parent, relation, foreign, control) {
+			t.Fatal("nested Workflow reused a foreign immutable Kernel parent")
 		}
 		foreign = child
 		foreign.State = encode(executionState{Definition: Definition{ID: "nested", Revision: 2, Hash: "hash"}, NestedDepth: 1, Input: effect.Input})

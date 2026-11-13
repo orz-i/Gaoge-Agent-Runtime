@@ -73,7 +73,8 @@ func (runner *Runner) startSubworkflowChild(
 	}
 	child, err := runner.StartRun(ctx, StartRequest{
 		ID: childID, Actor: request.Actor, Thread: request.Thread, RequestID: request.EffectID,
-		Goal: "subworkflow:" + published.Definition.ID, Definition: published.Definition,
+		ParentRunID: request.RunID,
+		Goal:        "subworkflow:" + published.Definition.ID, Definition: published.Definition,
 		Input: cloneJSON(request.Input), NestedDepth: request.NestedDepth,
 	})
 	if errors.Is(err, kernel.ErrConflict) {
@@ -97,6 +98,7 @@ func verifiedSubworkflowChildOrigin(request EffectRequest, child kernel.Snapshot
 		!json.Valid(request.Input) || child.Run.Kind != RunKind ||
 		child.Run.ID != strings.TrimSpace(request.EffectID)+"-child" ||
 		child.Run.Actor != request.Actor || child.Run.Thread != request.Thread ||
+		child.Run.ParentRunID != request.RunID ||
 		child.Run.RequestID != strings.TrimSpace(request.EffectID) ||
 		child.Run.Goal != strings.TrimSpace("subworkflow:"+request.Definition.ID) {
 		return false

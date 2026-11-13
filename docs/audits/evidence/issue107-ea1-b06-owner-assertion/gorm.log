@@ -1,0 +1,50 @@
+SOURCE_SHA=b418f5f225b6a18865749624d272da9392568669
+EXIT_CODE=1
+=== RUN   TestEA1CompensationAdmissionGORM
+=== RUN   TestEA1CompensationAdmissionGORM/root/revision
+
+2026/11/13 00:31:03 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:201 [35;1mrecord not found
+[0m[33m[0.132ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "missing" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+=== RUN   TestEA1CompensationAdmissionGORM/root/terminal
+
+2026/11/13 00:31:03 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:201 [35;1mrecord not found
+[0m[33m[0.060ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "missing" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+=== RUN   TestEA1CompensationAdmissionGORM/child/revision
+
+2026/11/13 00:31:03 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:201 [35;1mrecord not found
+[0m[33m[0.112ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "missing" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+=== RUN   TestEA1CompensationAdmissionGORM/child/terminal
+
+2026/11/13 00:31:03 [31;1m/private/tmp/gaoge-runtime-issue107/go/agent-runtime-postgres/kernel_store.go:201 [35;1mrecord not found
+[0m[33m[0.054ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "missing" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+--- PASS: TestEA1CompensationAdmissionGORM (0.23s)
+    --- PASS: TestEA1CompensationAdmissionGORM/root/revision (0.06s)
+    --- PASS: TestEA1CompensationAdmissionGORM/root/terminal (0.05s)
+    --- PASS: TestEA1CompensationAdmissionGORM/child/revision (0.08s)
+    --- PASS: TestEA1CompensationAdmissionGORM/child/terminal (0.04s)
+=== RUN   TestEA1CompensationBarriersGORM
+=== RUN   TestEA1CompensationBarriersGORM/root/P1
+=== RUN   TestEA1CompensationBarriersGORM/root/P5
+=== RUN   TestEA1CompensationBarriersGORM/root/P5-retry
+    ea1_compensation_barriers.go:228: retry changed original request beyond attempt
+=== RUN   TestEA1CompensationBarriersGORM/child/P1
+=== RUN   TestEA1CompensationBarriersGORM/child/P5
+=== RUN   TestEA1CompensationBarriersGORM/child/P5-retry
+    ea1_compensation_barriers.go:228: retry changed original request beyond attempt
+--- FAIL: TestEA1CompensationBarriersGORM (2.36s)
+    --- PASS: TestEA1CompensationBarriersGORM/root/P1 (0.06s)
+    --- PASS: TestEA1CompensationBarriersGORM/root/P5 (0.05s)
+    --- FAIL: TestEA1CompensationBarriersGORM/root/P5-retry (0.06s)
+    --- PASS: TestEA1CompensationBarriersGORM/child/P1 (0.06s)
+    --- PASS: TestEA1CompensationBarriersGORM/child/P5 (2.06s)
+    --- FAIL: TestEA1CompensationBarriersGORM/child/P5-retry (0.07s)
+=== RUN   TestEA1CompensationUnknownGORM
+=== RUN   TestEA1CompensationUnknownGORM/root
+=== RUN   TestEA1CompensationUnknownGORM/child
+--- PASS: TestEA1CompensationUnknownGORM (0.14s)
+    --- PASS: TestEA1CompensationUnknownGORM/root (0.06s)
+    --- PASS: TestEA1CompensationUnknownGORM/child (0.08s)
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	3.343s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]
+FAIL
