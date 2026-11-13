@@ -65,7 +65,7 @@ func (s *ea1RootRecoveryFault) MarkChildExecutionSettled(ctx context.Context, g 
 // loss. The paired no-hold case proves the single original fault is recovered.
 func (s *ea1RootRecoveryFault) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant) error {
 	if s.phase == "P4" && s.holdFinish && s.cuts == 1 && g == s.recoveryGrant {
-		source, e := s.Store.Load(ctx, g.ChildRunID)
+		source, e := s.Load(ctx, g.ChildRunID)
 		if e != nil {
 			return e
 		}
