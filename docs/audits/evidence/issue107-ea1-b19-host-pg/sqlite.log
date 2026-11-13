@@ -1,0 +1,49 @@
+SOURCE_SHA=2933f241a17aada53dbdfa5e31b425200cdedde6
+COMMAND=go -C go/agent-runtime-sqlite test -race -count=1 ./... -run '^TestEA1ChildAgentCancelPhases' -v
+=== RUN   TestEA1ChildAgentCancelPhasesNativeSQLite
+=== RUN   TestEA1ChildAgentCancelPhasesNativeSQLite/P0/missing
+=== RUN   TestEA1ChildAgentCancelPhasesNativeSQLite/P0/stale
+=== RUN   TestEA1ChildAgentCancelPhasesNativeSQLite/P0/prepared
+=== RUN   TestEA1ChildAgentCancelPhasesNativeSQLite/P0/native-pregrant
+=== RUN   TestEA1ChildAgentCancelPhasesNativeSQLite/P2/default-child/host
+=== RUN   TestEA1ChildAgentCancelPhasesNativeSQLite/P2/default-child/model
+=== RUN   TestEA1ChildAgentCancelPhasesNativeSQLite/P2/default-child/tool
+=== RUN   TestEA1ChildAgentCancelPhasesNativeSQLite/P3/default-child/yield
+=== RUN   TestEA1ChildAgentCancelPhasesNativeSQLite/P3/default-child/terminal-tool
+=== RUN   TestEA1ChildAgentCancelPhasesNativeSQLite/P4/default-child/yield
+=== RUN   TestEA1ChildAgentCancelPhasesNativeSQLite/P4/default-child/terminal-tool
+=== RUN   TestEA1ChildAgentCancelPhasesNativeSQLite/P2/explicit-native/host
+=== RUN   TestEA1ChildAgentCancelPhasesNativeSQLite/P2/explicit-native/model
+=== RUN   TestEA1ChildAgentCancelPhasesNativeSQLite/P2/explicit-native/tool
+=== RUN   TestEA1ChildAgentCancelPhasesNativeSQLite/P3/explicit-native/yield
+=== RUN   TestEA1ChildAgentCancelPhasesNativeSQLite/P3/explicit-native/terminal-tool
+=== RUN   TestEA1ChildAgentCancelPhasesNativeSQLite/P4/explicit-native/yield
+=== RUN   TestEA1ChildAgentCancelPhasesNativeSQLite/P4/explicit-native/terminal-tool
+=== RUN   TestEA1ChildAgentCancelPhasesNativeSQLite/P4/actual-child-Cancel-CAS-ACK
+--- PASS: TestEA1ChildAgentCancelPhasesNativeSQLite (8.54s)
+    --- PASS: TestEA1ChildAgentCancelPhasesNativeSQLite/P0/missing (0.07s)
+    --- PASS: TestEA1ChildAgentCancelPhasesNativeSQLite/P0/stale (0.05s)
+    --- PASS: TestEA1ChildAgentCancelPhasesNativeSQLite/P0/prepared (0.06s)
+    --- PASS: TestEA1ChildAgentCancelPhasesNativeSQLite/P0/native-pregrant (0.06s)
+    --- PASS: TestEA1ChildAgentCancelPhasesNativeSQLite/P2/default-child/host (0.10s)
+    --- PASS: TestEA1ChildAgentCancelPhasesNativeSQLite/P2/default-child/model (0.13s)
+    --- PASS: TestEA1ChildAgentCancelPhasesNativeSQLite/P2/default-child/tool (0.14s)
+    --- PASS: TestEA1ChildAgentCancelPhasesNativeSQLite/P3/default-child/yield (0.12s)
+    --- PASS: TestEA1ChildAgentCancelPhasesNativeSQLite/P3/default-child/terminal-tool (0.14s)
+    --- PASS: TestEA1ChildAgentCancelPhasesNativeSQLite/P4/default-child/yield (0.14s)
+    --- PASS: TestEA1ChildAgentCancelPhasesNativeSQLite/P4/default-child/terminal-tool (0.15s)
+    --- PASS: TestEA1ChildAgentCancelPhasesNativeSQLite/P2/explicit-native/host (2.25s)
+    --- PASS: TestEA1ChildAgentCancelPhasesNativeSQLite/P2/explicit-native/model (2.25s)
+    --- PASS: TestEA1ChildAgentCancelPhasesNativeSQLite/P2/explicit-native/tool (2.26s)
+    --- PASS: TestEA1ChildAgentCancelPhasesNativeSQLite/P3/explicit-native/yield (0.12s)
+    --- PASS: TestEA1ChildAgentCancelPhasesNativeSQLite/P3/explicit-native/terminal-tool (0.14s)
+    --- PASS: TestEA1ChildAgentCancelPhasesNativeSQLite/P4/explicit-native/yield (0.14s)
+    --- PASS: TestEA1ChildAgentCancelPhasesNativeSQLite/P4/explicit-native/terminal-tool (0.14s)
+    --- PASS: TestEA1ChildAgentCancelPhasesNativeSQLite/P4/actual-child-Cancel-CAS-ACK (0.08s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite	10.030s
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/examples/embedded	1.474s [no tests to run]
+
+EXIT_CODE=0
