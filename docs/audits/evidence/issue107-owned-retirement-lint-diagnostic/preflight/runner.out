@@ -1,0 +1,24 @@
+2026-11-13T14:20:37Z compile-agent-runtime START
+2026-11-13T14:20:42Z compile-agent-runtime EXIT 0
+2026-11-13T14:20:42Z compile-agent-runtime-sqlite START
+2026-11-13T14:20:44Z compile-agent-runtime-sqlite EXIT 0
+2026-11-13T14:20:44Z compile-agent-runtime-postgres START
+2026-11-13T14:20:48Z compile-agent-runtime-postgres EXIT 0
+2026-11-13T14:20:48Z compile-agent-runtime-harness START
+2026-11-13T14:20:48Z compile-agent-runtime-harness EXIT 0
+2026-11-13T14:20:48Z compile-agent-runtime-harness-postgres START
+2026-11-13T14:20:48Z compile-agent-runtime-harness-postgres EXIT 0
+2026-11-13T14:20:48Z compile-agent-runtime-http START
+2026-11-13T14:20:50Z compile-agent-runtime-http EXIT 0
+2026-11-13T14:20:50Z smoke-root START
+2026-11-13T14:20:57Z smoke-root EXIT 0
+2026-11-13T14:20:57Z smoke-p4 START
+2026-11-13T14:21:18Z smoke-p4 EXIT 0
+2026-11-13T14:21:18Z smoke-continuation-wrapper START
+2026-11-13T14:21:22Z smoke-continuation-wrapper EXIT 0
+2026-11-13T14:21:22Z smoke-format START
+2026-11-13T14:21:23Z smoke-format EXIT 0
+2026-11-13T14:21:23Z smoke-metadata START
+2026-11-13T14:21:25Z smoke-metadata EXIT 0
+2026-11-13T14:21:25Z smoke-lint START
+2026-11-13T14:21:36Z smoke-lint EXIT 1

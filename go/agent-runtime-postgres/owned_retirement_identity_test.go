@@ -2,14 +2,15 @@ package postgres
 
 import (
 	"errors"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
-	"gorm.io/gorm"
 	"os"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"gorm.io/gorm"
 )
 
 func TestOwnedRetirementFinishNativeIdentityGORM(t *testing.T) {

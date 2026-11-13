@@ -3,11 +3,12 @@ package conformance
 import (
 	"context"
 	"errors"
+	"testing"
+	"time"
+
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"testing"
-	"time"
 )
 
 type retirementAgentDeathStore struct {

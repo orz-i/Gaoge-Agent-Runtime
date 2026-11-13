@@ -3,11 +3,12 @@ package sqlite
 import (
 	"bytes"
 	"database/sql"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
 func TestOwnedRetirementV5MigrationPreservesOriginalNativeMark(t *testing.T) {
@@ -48,7 +49,11 @@ func TestOwnedRetirementV5MigrationPreservesOriginalNativeMark(t *testing.T) {
 		if e != nil {
 			t.Fatal(e)
 		}
-		defer rows.Close()
+		defer func() {
+			if err := rows.Close(); err != nil {
+				t.Errorf("close rows: %v", err)
+			}
+		}()
 		if !rows.Next() {
 			t.Fatal("missing original grant")
 		}
@@ -76,7 +81,11 @@ func TestOwnedRetirementV5MigrationPreservesOriginalNativeMark(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer current.Close()
+	defer func() {
+		if err := current.Close(); err != nil {
+			t.Errorf("close current: %v", err)
+		}
+	}()
 	if !reflect.DeepEqual(read(current.db), before) {
 		t.Fatal("migration changed original native mark/callback")
 	}

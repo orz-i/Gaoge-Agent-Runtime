@@ -2,6 +2,7 @@ package kernel
 
 import (
 	"context"
+
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
 )
 

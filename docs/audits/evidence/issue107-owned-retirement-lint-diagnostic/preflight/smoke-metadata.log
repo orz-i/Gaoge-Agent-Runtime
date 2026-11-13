@@ -1,0 +1,45 @@
+SOURCE_SHA=a3cc2feaf9c766c8dfd5e54607822d4b1c561fcf
+COMMAND=make metadata
+node --test scripts/beta-release-policy.test.mjs scripts/check-pr-body-format.test.mjs scripts/release-command.test.mjs scripts/sqlite-release-policy.test.mjs scripts/go-coverage-summary.test.mjs
+✔ Beta releases never publish to the npm registry or request publication credentials (1.317167ms)
+✔ Beta releases retain immutable tags, reviewed notes, and a TypeScript archive (0.218ms)
+✔ Tag verification and the full Beta gates precede artifact publication (0.184875ms)
+✔ rejects the PR style with literal escaped Markdown separators (0.815625ms)
+✔ accepts actual Markdown line breaks (2.01175ms)
+✔ allows literal newline escapes in fenced or inline code (0.211333ms)
+✔ accepts body-file and rejects malformed GitHub PR event payload (124.396416ms)
+✔ unions duplicate blocks within and across test binaries without losing zeros (3.700709ms)
+✔ full source path and every range coordinate form block identity (0.278417ms)
+✔ all zero-execution blocks remain in the denominator (0.258958ms)
+✔ large execution counters use exact positivity without numeric overflow (0.27625ms)
+✔ same block statement-count conflicts fail closed, including zero counts (0.481875ms)
+✔ valid Go modes are recognized but mixed modes are rejected (0.249583ms)
+✔ missing and malformed headers or rows are not silently discarded (0.267209ms)
+✔ illegal integer syntax and unsafe statement values fail closed (0.397167ms)
+✔ invalid, reversed, or unsafe coordinates fail closed (0.292ms)
+✔ CRLF profiles and mode-only zero-statement profiles retain existing empty semantics (0.227833ms)
+✔ workspace gate instruments all local packages and preserves its 70 percent contract (3.43525ms)
+✔ non-Windows commands keep their original argument vector (4.871333ms)
+✔ Windows npm runs its JavaScript entrypoint, not cmd.exe (1.83575ms)
+✔ Windows pnpm can launch the native executable without cmd.exe (1.564209ms)
+✔ Windows pnpm supports the node_modules/.bin shim layout without a shell (0.990959ms)
+✔ missing Windows CLI fails closed instead of falling back to cmd.exe (0.930167ms)
+✔ the runner preserves shell metacharacters as literal argv values (44.91ms)
+✔ the runner reports executable launch failures instead of a generic exit code (1.238583ms)
+﹣ Windows launches installed npm and pnpm without a shell (0.050167ms) # SKIP
+✔ SQLite joins one coordinated eleven-module Beta cohort (1.372833ms)
+✔ Harness release module stays vendor-neutral and isolates Provider-powered demo (0.534291ms)
+✔ release tag set includes SQLite at precisely the same version (42.942084ms)
+✔ publisher verifies actual tagged modules without source replacements (0.852292ms)
+ℹ tests 30
+ℹ suites 0
+ℹ pass 29
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 1
+ℹ todo 0
+ℹ duration_ms 196.143458
+node scripts/check-beta.mjs
+Agent Runtime 0.1.0-beta.24 Beta metadata gate passed
+
+EXIT_CODE=0

@@ -2,11 +2,12 @@ package sqlite
 
 import (
 	"errors"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
 func TestOwnedRetirementFinishNativeIdentity(t *testing.T) {
@@ -16,7 +17,11 @@ func TestOwnedRetirementFinishNativeIdentity(t *testing.T) {
 			if e != nil {
 				t.Fatal(e)
 			}
-			defer store.Close()
+			defer func() {
+				if err := store.Close(); err != nil {
+					t.Errorf("close store: %v", err)
+				}
+			}()
 			rt, e := kernel.New(kernel.Dependencies{Store: store})
 			if e != nil {
 				t.Fatal(e)
@@ -57,7 +62,11 @@ func TestOwnedRetirementFinishNativeIdentity(t *testing.T) {
 				if e != nil {
 					t.Fatal(e)
 				}
-				defer rows.Close()
+				defer func() {
+					if err := rows.Close(); err != nil {
+						t.Errorf("close rows: %v", err)
+					}
+				}()
 				cols, e := rows.Columns()
 				if e != nil {
 					t.Fatal(e)

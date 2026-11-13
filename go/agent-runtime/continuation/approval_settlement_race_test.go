@@ -57,7 +57,7 @@ func (store *approvalSettlementBarrierStore) MarkChildExecutionSettled(ctx conte
 	if !target || permit.IsRecovery() {
 		return store.Store.MarkChildExecutionSettled(ctx, grant, permit)
 	}
-	snapshot, err := store.Store.Load(ctx, grant.ChildRunID)
+	snapshot, err := store.Load(ctx, grant.ChildRunID)
 	if err != nil {
 		return err
 	}

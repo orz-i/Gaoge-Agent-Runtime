@@ -1,10 +1,11 @@
 package postgres
 
 import (
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"testing"
 	"time"
+
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
 func TestOwnedRetirementGORM(t *testing.T) {

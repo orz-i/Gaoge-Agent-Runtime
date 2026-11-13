@@ -1,0 +1,124 @@
+SOURCE_SHA=a3cc2feaf9c766c8dfd5e54607822d4b1c561fcf
+COMMAND=go -C go/agent-runtime test -p 2 -race -count=1 -v ./kernel ./memory ./agent ./continuation -run '^(TestOwnedRetirement.*|TestRootRetirement.*|TestApprovalWakeupCannotStealOriginalOwnerSettlement|TestApprovedChildAutomaticallyContinuesOwningTeamOnce)$'
+=== RUN   TestOwnedRetirementWireAndCanonicalACK
+=== RUN   TestOwnedRetirementWireAndCanonicalACK/nil-proof
+=== RUN   TestOwnedRetirementWireAndCanonicalACK/epoch
+=== RUN   TestOwnedRetirementWireAndCanonicalACK/source
+=== RUN   TestOwnedRetirementWireAndCanonicalACK/replacement
+=== RUN   TestOwnedRetirementWireAndCanonicalACK/lease
+--- PASS: TestOwnedRetirementWireAndCanonicalACK (0.00s)
+    --- PASS: TestOwnedRetirementWireAndCanonicalACK/nil-proof (0.00s)
+    --- PASS: TestOwnedRetirementWireAndCanonicalACK/epoch (0.00s)
+    --- PASS: TestOwnedRetirementWireAndCanonicalACK/source (0.00s)
+    --- PASS: TestOwnedRetirementWireAndCanonicalACK/replacement (0.00s)
+    --- PASS: TestOwnedRetirementWireAndCanonicalACK/lease (0.00s)
+=== RUN   TestOwnedRetirementRunSelector
+=== RUN   TestOwnedRetirementRunSelector/unique
+=== RUN   TestOwnedRetirementRunSelector/absent
+=== RUN   TestOwnedRetirementRunSelector/acked
+=== RUN   TestOwnedRetirementRunSelector/ambiguous
+=== RUN   TestOwnedRetirementRunSelector/corrupt
+=== RUN   TestOwnedRetirementRunSelector/source
+=== RUN   TestOwnedRetirementRunSelector/epoch
+=== RUN   TestOwnedRetirementRunSelector/replacement
+=== RUN   TestOwnedRetirementRunSelector/foreign-lease
+=== RUN   TestOwnedRetirementRunSelector/old-then-current
+=== RUN   TestOwnedRetirementRunSelector/current-then-old
+=== RUN   TestOwnedRetirementRunSelector/old-only
+=== RUN   TestOwnedRetirementRunSelector/old-corrupt-with-current
+--- PASS: TestOwnedRetirementRunSelector (0.00s)
+    --- PASS: TestOwnedRetirementRunSelector/unique (0.00s)
+    --- PASS: TestOwnedRetirementRunSelector/absent (0.00s)
+    --- PASS: TestOwnedRetirementRunSelector/acked (0.00s)
+    --- PASS: TestOwnedRetirementRunSelector/ambiguous (0.00s)
+    --- PASS: TestOwnedRetirementRunSelector/corrupt (0.00s)
+    --- PASS: TestOwnedRetirementRunSelector/source (0.00s)
+    --- PASS: TestOwnedRetirementRunSelector/epoch (0.00s)
+    --- PASS: TestOwnedRetirementRunSelector/replacement (0.00s)
+    --- PASS: TestOwnedRetirementRunSelector/foreign-lease (0.00s)
+    --- PASS: TestOwnedRetirementRunSelector/old-then-current (0.00s)
+    --- PASS: TestOwnedRetirementRunSelector/current-then-old (0.00s)
+    --- PASS: TestOwnedRetirementRunSelector/old-only (0.00s)
+    --- PASS: TestOwnedRetirementRunSelector/old-corrupt-with-current (0.00s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel	1.460s
+=== RUN   TestOwnedRetirementMemoryStoreConformance
+=== RUN   TestOwnedRetirementMemoryStoreConformance/owned
+=== RUN   TestOwnedRetirementMemoryStoreConformance/borrowed
+=== RUN   TestOwnedRetirementMemoryStoreConformance/first-ack/nil-proof
+=== RUN   TestOwnedRetirementMemoryStoreConformance/first-ack/wrong-source
+=== RUN   TestOwnedRetirementMemoryStoreConformance/first-ack/foreign-grant
+=== RUN   TestOwnedRetirementMemoryStoreConformance/first-ack/foreign-owner
+=== RUN   TestOwnedRetirementMemoryStoreConformance/first-ack/foreign-lease
+=== RUN   TestOwnedRetirementMemoryStoreConformance/first-ack/foreign-epoch
+=== RUN   TestOwnedRetirementMemoryStoreConformance/first-ack/wrong-revision
+=== RUN   TestOwnedRetirementMemoryStoreConformance/first-ack/wrong-eventhead
+=== RUN   TestOwnedRetirementMemoryStoreConformance/first-ack/new-source
+=== RUN   TestOwnedRetirementMemoryStoreConformance/first-ack/new-epoch
+=== RUN   TestOwnedRetirementMemoryStoreConformance/first-ack/replacement-grant
+=== RUN   TestOwnedRetirementMemoryStoreConformance/first-ack/descendant-grant
+=== RUN   TestOwnedRetirementMemoryStoreConformance/no-release/active
+=== RUN   TestOwnedRetirementMemoryStoreConformance/no-release/unknown-callback
+=== RUN   TestOwnedRetirementMemoryStoreConformance/no-release/legacy-mark
+=== RUN   TestOwnedRetirementMemoryStoreConformance/competing-finish-and-ack
+=== RUN   TestOwnedRetirementMemoryStoreConformance/actual-Agent-two-retired-generations
+=== RUN   TestOwnedRetirementMemoryStoreConformance/actual-Agent-finish-death-public-runID-recovery
+=== RUN   TestOwnedRetirementMemoryStoreConformance/finish-lost-ACK-runID-reopen
+=== RUN   TestOwnedRetirementMemoryStoreConformance/managed-T4-before-retirement
+--- PASS: TestOwnedRetirementMemoryStoreConformance (0.09s)
+    --- PASS: TestOwnedRetirementMemoryStoreConformance/owned (0.00s)
+    --- PASS: TestOwnedRetirementMemoryStoreConformance/borrowed (0.00s)
+    --- PASS: TestOwnedRetirementMemoryStoreConformance/first-ack/nil-proof (0.00s)
+    --- PASS: TestOwnedRetirementMemoryStoreConformance/first-ack/wrong-source (0.00s)
+    --- PASS: TestOwnedRetirementMemoryStoreConformance/first-ack/foreign-grant (0.00s)
+    --- PASS: TestOwnedRetirementMemoryStoreConformance/first-ack/foreign-owner (0.00s)
+    --- PASS: TestOwnedRetirementMemoryStoreConformance/first-ack/foreign-lease (0.00s)
+    --- PASS: TestOwnedRetirementMemoryStoreConformance/first-ack/foreign-epoch (0.00s)
+    --- PASS: TestOwnedRetirementMemoryStoreConformance/first-ack/wrong-revision (0.00s)
+    --- PASS: TestOwnedRetirementMemoryStoreConformance/first-ack/wrong-eventhead (0.00s)
+    --- PASS: TestOwnedRetirementMemoryStoreConformance/first-ack/new-source (0.00s)
+    --- PASS: TestOwnedRetirementMemoryStoreConformance/first-ack/new-epoch (0.00s)
+    --- PASS: TestOwnedRetirementMemoryStoreConformance/first-ack/replacement-grant (0.00s)
+    --- PASS: TestOwnedRetirementMemoryStoreConformance/first-ack/descendant-grant (0.00s)
+    --- PASS: TestOwnedRetirementMemoryStoreConformance/no-release/active (0.00s)
+    --- PASS: TestOwnedRetirementMemoryStoreConformance/no-release/unknown-callback (0.00s)
+    --- PASS: TestOwnedRetirementMemoryStoreConformance/no-release/legacy-mark (0.00s)
+    --- PASS: TestOwnedRetirementMemoryStoreConformance/competing-finish-and-ack (0.00s)
+    --- PASS: TestOwnedRetirementMemoryStoreConformance/actual-Agent-two-retired-generations (0.02s)
+    --- PASS: TestOwnedRetirementMemoryStoreConformance/actual-Agent-finish-death-public-runID-recovery (0.01s)
+    --- PASS: TestOwnedRetirementMemoryStoreConformance/finish-lost-ACK-runID-reopen (0.00s)
+    --- PASS: TestOwnedRetirementMemoryStoreConformance/managed-T4-before-retirement (0.02s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory	1.594s
+=== RUN   TestRootRetirementActualCallbackSurvivesCommittedACKLoss
+=== RUN   TestRootRetirementActualCallbackSurvivesCommittedACKLoss/record
+=== RUN   TestRootRetirementActualCallbackSurvivesCommittedACKLoss/mark
+=== RUN   TestRootRetirementActualCallbackSurvivesCommittedACKLoss/finish
+=== RUN   TestRootRetirementActualCallbackSurvivesCommittedACKLoss/ack
+--- PASS: TestRootRetirementActualCallbackSurvivesCommittedACKLoss (0.02s)
+    --- PASS: TestRootRetirementActualCallbackSurvivesCommittedACKLoss/record (0.01s)
+    --- PASS: TestRootRetirementActualCallbackSurvivesCommittedACKLoss/mark (0.01s)
+    --- PASS: TestRootRetirementActualCallbackSurvivesCommittedACKLoss/finish (0.00s)
+    --- PASS: TestRootRetirementActualCallbackSurvivesCommittedACKLoss/ack (0.01s)
+=== RUN   TestRootRetirementPreservesBorrowedLease
+--- PASS: TestRootRetirementPreservesBorrowedLease (0.01s)
+=== RUN   TestRootRetirementCapabilityRequiredBeforeCreate
+--- PASS: TestRootRetirementCapabilityRequiredBeforeCreate (0.00s)
+=== RUN   TestRootRetirementFreshRunnerRecoversFinishedCallByRunID
+--- PASS: TestRootRetirementFreshRunnerRecoversFinishedCallByRunID (0.01s)
+=== RUN   TestRootRetirementPersistentMarkACKLossRequiresActualCommittedMarker
+=== RUN   TestRootRetirementPersistentMarkACKLossRequiresActualCommittedMarker/mark-always-lost
+=== RUN   TestRootRetirementPersistentMarkACKLossRequiresActualCommittedMarker/mark-never-committed
+--- PASS: TestRootRetirementPersistentMarkACKLossRequiresActualCommittedMarker (0.01s)
+    --- PASS: TestRootRetirementPersistentMarkACKLossRequiresActualCommittedMarker/mark-always-lost (0.01s)
+    --- PASS: TestRootRetirementPersistentMarkACKLossRequiresActualCommittedMarker/mark-never-committed (0.00s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent	1.363s
+=== RUN   TestApprovalWakeupCannotStealOriginalOwnerSettlement
+--- PASS: TestApprovalWakeupCannotStealOriginalOwnerSettlement (0.30s)
+=== RUN   TestApprovedChildAutomaticallyContinuesOwningTeamOnce
+--- PASS: TestApprovedChildAutomaticallyContinuesOwningTeamOnce (0.28s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/continuation	2.299s
+
+EXIT_CODE=0
