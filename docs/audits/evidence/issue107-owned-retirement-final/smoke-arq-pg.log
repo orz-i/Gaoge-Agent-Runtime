@@ -1,0 +1,35 @@
+SOURCE_SHA=a279dceb1b2b1752f12066d4051550bf3f79e657
+COMMAND=go -C go/agent-runtime-postgres test -p 2 -race -count=1 -v -run '^TestEA1RealPostgresRootAgentReconcilePhases$' ./...
+=== RUN   TestEA1RealPostgresRootAgentReconcilePhases
+=== RUN   TestEA1RealPostgresRootAgentReconcilePhases/P2/model-host-evidence
+=== RUN   TestEA1RealPostgresRootAgentReconcilePhases/P0/model
+=== RUN   TestEA1RealPostgresRootAgentReconcilePhases/P0/tool
+=== RUN   TestEA1RealPostgresRootAgentReconcilePhases/P1/model
+=== RUN   TestEA1RealPostgresRootAgentReconcilePhases/P1/tool
+=== RUN   TestEA1RealPostgresRootAgentReconcilePhases/P2/model
+=== RUN   TestEA1RealPostgresRootAgentReconcilePhases/P2/tool
+=== RUN   TestEA1RealPostgresRootAgentReconcilePhases/P3/model
+=== RUN   TestEA1RealPostgresRootAgentReconcilePhases/P3/tool
+=== RUN   TestEA1RealPostgresRootAgentReconcilePhases/P4/model
+=== RUN   TestEA1RealPostgresRootAgentReconcilePhases/P4/model/single-mark-ack-loss-no-finish-hold
+=== RUN   TestEA1RealPostgresRootAgentReconcilePhases/P4/tool
+=== RUN   TestEA1RealPostgresRootAgentReconcilePhases/P4/tool/single-mark-ack-loss-no-finish-hold
+--- PASS: TestEA1RealPostgresRootAgentReconcilePhases (8.25s)
+    --- PASS: TestEA1RealPostgresRootAgentReconcilePhases/P2/model-host-evidence (0.32s)
+    --- PASS: TestEA1RealPostgresRootAgentReconcilePhases/P0/model (0.20s)
+    --- PASS: TestEA1RealPostgresRootAgentReconcilePhases/P0/tool (0.23s)
+    --- PASS: TestEA1RealPostgresRootAgentReconcilePhases/P1/model (0.35s)
+    --- PASS: TestEA1RealPostgresRootAgentReconcilePhases/P1/tool (0.35s)
+    --- PASS: TestEA1RealPostgresRootAgentReconcilePhases/P2/model (2.39s)
+    --- PASS: TestEA1RealPostgresRootAgentReconcilePhases/P2/tool (2.45s)
+    --- PASS: TestEA1RealPostgresRootAgentReconcilePhases/P3/model (0.41s)
+    --- PASS: TestEA1RealPostgresRootAgentReconcilePhases/P3/tool (0.40s)
+    --- PASS: TestEA1RealPostgresRootAgentReconcilePhases/P4/model (0.33s)
+    --- PASS: TestEA1RealPostgresRootAgentReconcilePhases/P4/model/single-mark-ack-loss-no-finish-hold (0.26s)
+    --- PASS: TestEA1RealPostgresRootAgentReconcilePhases/P4/tool (0.29s)
+    --- PASS: TestEA1RealPostgresRootAgentReconcilePhases/P4/tool/single-mark-ack-loss-no-finish-hold (0.27s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	9.807s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]
+
+EXIT_CODE=0

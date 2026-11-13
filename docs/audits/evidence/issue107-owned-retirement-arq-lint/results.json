@@ -1,0 +1,14 @@
+[
+  {
+    "name": "smoke-format",
+    "exit": 0
+  },
+  {
+    "name": "smoke-metadata",
+    "exit": 0
+  },
+  {
+    "name": "smoke-lint",
+    "exit": 1
+  }
+]

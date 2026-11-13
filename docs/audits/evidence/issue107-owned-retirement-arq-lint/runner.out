@@ -1,0 +1,6 @@
+2026-11-13T15:09:39Z smoke-format START
+2026-11-13T15:09:40Z smoke-format EXIT 0
+2026-11-13T15:09:40Z smoke-metadata START
+2026-11-13T15:09:41Z smoke-metadata EXIT 0
+2026-11-13T15:09:41Z smoke-lint START
+2026-11-13T15:10:08Z smoke-lint EXIT 1

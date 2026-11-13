@@ -1,0 +1,17 @@
+SOURCE_SHA=a279dceb1b2b1752f12066d4051550bf3f79e657
+COMMAND=make fmt-check
+node scripts/go-workspace.mjs fmt-check
+==> fmt-check go/agent-runtime
+==> fmt-check go/agent-runtime-provider
+==> fmt-check go/agent-runtime-harness
+==> fmt-check go/agent-runtime-harness/examples/task-agent
+==> fmt-check go/agent-runtime-harness-postgres
+==> fmt-check go/agent-runtime-mcp
+==> fmt-check go/agent-runtime-otel
+==> fmt-check go/agent-runtime-a2a
+==> fmt-check go/agent-runtime-postgres
+==> fmt-check go/agent-runtime-sqlite
+==> fmt-check go/agent-runtime-redis
+==> fmt-check go/agent-runtime-http
+
+EXIT_CODE=0

@@ -1,0 +1,207 @@
+SOURCE_SHA=a279dceb1b2b1752f12066d4051550bf3f79e657
+COMMAND=go -C go/agent-runtime-sqlite test -p 2 -race -count=3 -v -run '^(TestSQLiteOwnedRetirementStore|TestOwnedRetirement.*)$' ./...
+=== RUN   TestOwnedRetirementFinishNativeIdentity
+=== RUN   TestOwnedRetirementFinishNativeIdentity/owner
+=== RUN   TestOwnedRetirementFinishNativeIdentity/lease
+=== RUN   TestOwnedRetirementFinishNativeIdentity/epoch
+=== RUN   TestOwnedRetirementFinishNativeIdentity/cleared
+=== RUN   TestOwnedRetirementFinishNativeIdentity/expired
+--- PASS: TestOwnedRetirementFinishNativeIdentity (0.30s)
+    --- PASS: TestOwnedRetirementFinishNativeIdentity/owner (0.07s)
+    --- PASS: TestOwnedRetirementFinishNativeIdentity/lease (0.06s)
+    --- PASS: TestOwnedRetirementFinishNativeIdentity/epoch (0.06s)
+    --- PASS: TestOwnedRetirementFinishNativeIdentity/cleared (0.05s)
+    --- PASS: TestOwnedRetirementFinishNativeIdentity/expired (0.06s)
+=== RUN   TestOwnedRetirementV5MigrationPreservesOriginalNativeMark
+--- PASS: TestOwnedRetirementV5MigrationPreservesOriginalNativeMark (0.07s)
+=== RUN   TestOwnedRetirementMigrationRejectsUnknownAndMalformedWithoutWrites
+=== RUN   TestOwnedRetirementMigrationRejectsUnknownAndMalformedWithoutWrites/unknown
+=== RUN   TestOwnedRetirementMigrationRejectsUnknownAndMalformedWithoutWrites/malformed-v5
+--- PASS: TestOwnedRetirementMigrationRejectsUnknownAndMalformedWithoutWrites (0.06s)
+    --- PASS: TestOwnedRetirementMigrationRejectsUnknownAndMalformedWithoutWrites/unknown (0.03s)
+    --- PASS: TestOwnedRetirementMigrationRejectsUnknownAndMalformedWithoutWrites/malformed-v5 (0.03s)
+=== RUN   TestSQLiteOwnedRetirementStore
+=== RUN   TestSQLiteOwnedRetirementStore/owned
+=== RUN   TestSQLiteOwnedRetirementStore/borrowed
+=== RUN   TestSQLiteOwnedRetirementStore/first-ack/nil-proof
+=== RUN   TestSQLiteOwnedRetirementStore/first-ack/wrong-source
+=== RUN   TestSQLiteOwnedRetirementStore/first-ack/foreign-grant
+=== RUN   TestSQLiteOwnedRetirementStore/first-ack/foreign-owner
+=== RUN   TestSQLiteOwnedRetirementStore/first-ack/foreign-lease
+=== RUN   TestSQLiteOwnedRetirementStore/first-ack/foreign-epoch
+=== RUN   TestSQLiteOwnedRetirementStore/first-ack/wrong-revision
+=== RUN   TestSQLiteOwnedRetirementStore/first-ack/wrong-eventhead
+=== RUN   TestSQLiteOwnedRetirementStore/first-ack/new-source
+=== RUN   TestSQLiteOwnedRetirementStore/first-ack/new-epoch
+=== RUN   TestSQLiteOwnedRetirementStore/first-ack/replacement-grant
+=== RUN   TestSQLiteOwnedRetirementStore/first-ack/descendant-grant
+=== RUN   TestSQLiteOwnedRetirementStore/no-release/active
+=== RUN   TestSQLiteOwnedRetirementStore/no-release/unknown-callback
+=== RUN   TestSQLiteOwnedRetirementStore/no-release/legacy-mark
+=== RUN   TestSQLiteOwnedRetirementStore/competing-finish-and-ack
+=== RUN   TestSQLiteOwnedRetirementStore/actual-Agent-two-retired-generations
+=== RUN   TestSQLiteOwnedRetirementStore/actual-Agent-finish-death-public-runID-recovery
+=== RUN   TestSQLiteOwnedRetirementStore/finish-lost-ACK-runID-reopen
+=== RUN   TestSQLiteOwnedRetirementStore/managed-T4-before-retirement
+--- PASS: TestSQLiteOwnedRetirementStore (20.41s)
+    --- PASS: TestSQLiteOwnedRetirementStore/owned (0.10s)
+    --- PASS: TestSQLiteOwnedRetirementStore/borrowed (10.14s)
+    --- PASS: TestSQLiteOwnedRetirementStore/first-ack/nil-proof (0.09s)
+    --- PASS: TestSQLiteOwnedRetirementStore/first-ack/wrong-source (0.08s)
+    --- PASS: TestSQLiteOwnedRetirementStore/first-ack/foreign-grant (0.09s)
+    --- PASS: TestSQLiteOwnedRetirementStore/first-ack/foreign-owner (0.09s)
+    --- PASS: TestSQLiteOwnedRetirementStore/first-ack/foreign-lease (0.09s)
+    --- PASS: TestSQLiteOwnedRetirementStore/first-ack/foreign-epoch (0.08s)
+    --- PASS: TestSQLiteOwnedRetirementStore/first-ack/wrong-revision (0.08s)
+    --- PASS: TestSQLiteOwnedRetirementStore/first-ack/wrong-eventhead (0.08s)
+    --- PASS: TestSQLiteOwnedRetirementStore/first-ack/new-source (0.08s)
+    --- PASS: TestSQLiteOwnedRetirementStore/first-ack/new-epoch (0.09s)
+    --- PASS: TestSQLiteOwnedRetirementStore/first-ack/replacement-grant (0.08s)
+    --- PASS: TestSQLiteOwnedRetirementStore/first-ack/descendant-grant (0.09s)
+    --- PASS: TestSQLiteOwnedRetirementStore/no-release/active (0.12s)
+    --- PASS: TestSQLiteOwnedRetirementStore/no-release/unknown-callback (0.08s)
+    --- PASS: TestSQLiteOwnedRetirementStore/no-release/legacy-mark (0.07s)
+    --- PASS: TestSQLiteOwnedRetirementStore/competing-finish-and-ack (0.09s)
+    --- PASS: TestSQLiteOwnedRetirementStore/actual-Agent-two-retired-generations (5.29s)
+    --- PASS: TestSQLiteOwnedRetirementStore/actual-Agent-finish-death-public-runID-recovery (0.13s)
+    --- PASS: TestSQLiteOwnedRetirementStore/finish-lost-ACK-runID-reopen (0.09s)
+    --- PASS: TestSQLiteOwnedRetirementStore/managed-T4-before-retirement (3.28s)
+=== RUN   TestOwnedRetirementFinishNativeIdentity
+=== RUN   TestOwnedRetirementFinishNativeIdentity/owner
+=== RUN   TestOwnedRetirementFinishNativeIdentity/lease
+=== RUN   TestOwnedRetirementFinishNativeIdentity/epoch
+=== RUN   TestOwnedRetirementFinishNativeIdentity/cleared
+=== RUN   TestOwnedRetirementFinishNativeIdentity/expired
+--- PASS: TestOwnedRetirementFinishNativeIdentity (0.29s)
+    --- PASS: TestOwnedRetirementFinishNativeIdentity/owner (0.05s)
+    --- PASS: TestOwnedRetirementFinishNativeIdentity/lease (0.05s)
+    --- PASS: TestOwnedRetirementFinishNativeIdentity/epoch (0.06s)
+    --- PASS: TestOwnedRetirementFinishNativeIdentity/cleared (0.06s)
+    --- PASS: TestOwnedRetirementFinishNativeIdentity/expired (0.07s)
+=== RUN   TestOwnedRetirementV5MigrationPreservesOriginalNativeMark
+--- PASS: TestOwnedRetirementV5MigrationPreservesOriginalNativeMark (0.08s)
+=== RUN   TestOwnedRetirementMigrationRejectsUnknownAndMalformedWithoutWrites
+=== RUN   TestOwnedRetirementMigrationRejectsUnknownAndMalformedWithoutWrites/unknown
+=== RUN   TestOwnedRetirementMigrationRejectsUnknownAndMalformedWithoutWrites/malformed-v5
+--- PASS: TestOwnedRetirementMigrationRejectsUnknownAndMalformedWithoutWrites (0.08s)
+    --- PASS: TestOwnedRetirementMigrationRejectsUnknownAndMalformedWithoutWrites/unknown (0.03s)
+    --- PASS: TestOwnedRetirementMigrationRejectsUnknownAndMalformedWithoutWrites/malformed-v5 (0.05s)
+=== RUN   TestSQLiteOwnedRetirementStore
+=== RUN   TestSQLiteOwnedRetirementStore/owned
+=== RUN   TestSQLiteOwnedRetirementStore/borrowed
+=== RUN   TestSQLiteOwnedRetirementStore/first-ack/nil-proof
+=== RUN   TestSQLiteOwnedRetirementStore/first-ack/wrong-source
+=== RUN   TestSQLiteOwnedRetirementStore/first-ack/foreign-grant
+=== RUN   TestSQLiteOwnedRetirementStore/first-ack/foreign-owner
+=== RUN   TestSQLiteOwnedRetirementStore/first-ack/foreign-lease
+=== RUN   TestSQLiteOwnedRetirementStore/first-ack/foreign-epoch
+=== RUN   TestSQLiteOwnedRetirementStore/first-ack/wrong-revision
+=== RUN   TestSQLiteOwnedRetirementStore/first-ack/wrong-eventhead
+=== RUN   TestSQLiteOwnedRetirementStore/first-ack/new-source
+=== RUN   TestSQLiteOwnedRetirementStore/first-ack/new-epoch
+=== RUN   TestSQLiteOwnedRetirementStore/first-ack/replacement-grant
+=== RUN   TestSQLiteOwnedRetirementStore/first-ack/descendant-grant
+=== RUN   TestSQLiteOwnedRetirementStore/no-release/active
+=== RUN   TestSQLiteOwnedRetirementStore/no-release/unknown-callback
+=== RUN   TestSQLiteOwnedRetirementStore/no-release/legacy-mark
+=== RUN   TestSQLiteOwnedRetirementStore/competing-finish-and-ack
+=== RUN   TestSQLiteOwnedRetirementStore/actual-Agent-two-retired-generations
+=== RUN   TestSQLiteOwnedRetirementStore/actual-Agent-finish-death-public-runID-recovery
+=== RUN   TestSQLiteOwnedRetirementStore/finish-lost-ACK-runID-reopen
+=== RUN   TestSQLiteOwnedRetirementStore/managed-T4-before-retirement
+--- PASS: TestSQLiteOwnedRetirementStore (20.41s)
+    --- PASS: TestSQLiteOwnedRetirementStore/owned (0.13s)
+    --- PASS: TestSQLiteOwnedRetirementStore/borrowed (10.14s)
+    --- PASS: TestSQLiteOwnedRetirementStore/first-ack/nil-proof (0.09s)
+    --- PASS: TestSQLiteOwnedRetirementStore/first-ack/wrong-source (0.09s)
+    --- PASS: TestSQLiteOwnedRetirementStore/first-ack/foreign-grant (0.08s)
+    --- PASS: TestSQLiteOwnedRetirementStore/first-ack/foreign-owner (0.08s)
+    --- PASS: TestSQLiteOwnedRetirementStore/first-ack/foreign-lease (0.08s)
+    --- PASS: TestSQLiteOwnedRetirementStore/first-ack/foreign-epoch (0.09s)
+    --- PASS: TestSQLiteOwnedRetirementStore/first-ack/wrong-revision (0.08s)
+    --- PASS: TestSQLiteOwnedRetirementStore/first-ack/wrong-eventhead (0.08s)
+    --- PASS: TestSQLiteOwnedRetirementStore/first-ack/new-source (0.10s)
+    --- PASS: TestSQLiteOwnedRetirementStore/first-ack/new-epoch (0.10s)
+    --- PASS: TestSQLiteOwnedRetirementStore/first-ack/replacement-grant (0.09s)
+    --- PASS: TestSQLiteOwnedRetirementStore/first-ack/descendant-grant (0.10s)
+    --- PASS: TestSQLiteOwnedRetirementStore/no-release/active (0.06s)
+    --- PASS: TestSQLiteOwnedRetirementStore/no-release/unknown-callback (0.06s)
+    --- PASS: TestSQLiteOwnedRetirementStore/no-release/legacy-mark (0.07s)
+    --- PASS: TestSQLiteOwnedRetirementStore/competing-finish-and-ack (0.08s)
+    --- PASS: TestSQLiteOwnedRetirementStore/actual-Agent-two-retired-generations (5.30s)
+    --- PASS: TestSQLiteOwnedRetirementStore/actual-Agent-finish-death-public-runID-recovery (0.13s)
+    --- PASS: TestSQLiteOwnedRetirementStore/finish-lost-ACK-runID-reopen (0.09s)
+    --- PASS: TestSQLiteOwnedRetirementStore/managed-T4-before-retirement (3.27s)
+=== RUN   TestOwnedRetirementFinishNativeIdentity
+=== RUN   TestOwnedRetirementFinishNativeIdentity/owner
+=== RUN   TestOwnedRetirementFinishNativeIdentity/lease
+=== RUN   TestOwnedRetirementFinishNativeIdentity/epoch
+=== RUN   TestOwnedRetirementFinishNativeIdentity/cleared
+=== RUN   TestOwnedRetirementFinishNativeIdentity/expired
+--- PASS: TestOwnedRetirementFinishNativeIdentity (0.28s)
+    --- PASS: TestOwnedRetirementFinishNativeIdentity/owner (0.05s)
+    --- PASS: TestOwnedRetirementFinishNativeIdentity/lease (0.07s)
+    --- PASS: TestOwnedRetirementFinishNativeIdentity/epoch (0.06s)
+    --- PASS: TestOwnedRetirementFinishNativeIdentity/cleared (0.05s)
+    --- PASS: TestOwnedRetirementFinishNativeIdentity/expired (0.05s)
+=== RUN   TestOwnedRetirementV5MigrationPreservesOriginalNativeMark
+--- PASS: TestOwnedRetirementV5MigrationPreservesOriginalNativeMark (0.09s)
+=== RUN   TestOwnedRetirementMigrationRejectsUnknownAndMalformedWithoutWrites
+=== RUN   TestOwnedRetirementMigrationRejectsUnknownAndMalformedWithoutWrites/unknown
+=== RUN   TestOwnedRetirementMigrationRejectsUnknownAndMalformedWithoutWrites/malformed-v5
+--- PASS: TestOwnedRetirementMigrationRejectsUnknownAndMalformedWithoutWrites (0.06s)
+    --- PASS: TestOwnedRetirementMigrationRejectsUnknownAndMalformedWithoutWrites/unknown (0.03s)
+    --- PASS: TestOwnedRetirementMigrationRejectsUnknownAndMalformedWithoutWrites/malformed-v5 (0.04s)
+=== RUN   TestSQLiteOwnedRetirementStore
+=== RUN   TestSQLiteOwnedRetirementStore/owned
+=== RUN   TestSQLiteOwnedRetirementStore/borrowed
+=== RUN   TestSQLiteOwnedRetirementStore/first-ack/nil-proof
+=== RUN   TestSQLiteOwnedRetirementStore/first-ack/wrong-source
+=== RUN   TestSQLiteOwnedRetirementStore/first-ack/foreign-grant
+=== RUN   TestSQLiteOwnedRetirementStore/first-ack/foreign-owner
+=== RUN   TestSQLiteOwnedRetirementStore/first-ack/foreign-lease
+=== RUN   TestSQLiteOwnedRetirementStore/first-ack/foreign-epoch
+=== RUN   TestSQLiteOwnedRetirementStore/first-ack/wrong-revision
+=== RUN   TestSQLiteOwnedRetirementStore/first-ack/wrong-eventhead
+=== RUN   TestSQLiteOwnedRetirementStore/first-ack/new-source
+=== RUN   TestSQLiteOwnedRetirementStore/first-ack/new-epoch
+=== RUN   TestSQLiteOwnedRetirementStore/first-ack/replacement-grant
+=== RUN   TestSQLiteOwnedRetirementStore/first-ack/descendant-grant
+=== RUN   TestSQLiteOwnedRetirementStore/no-release/active
+=== RUN   TestSQLiteOwnedRetirementStore/no-release/unknown-callback
+=== RUN   TestSQLiteOwnedRetirementStore/no-release/legacy-mark
+=== RUN   TestSQLiteOwnedRetirementStore/competing-finish-and-ack
+=== RUN   TestSQLiteOwnedRetirementStore/actual-Agent-two-retired-generations
+=== RUN   TestSQLiteOwnedRetirementStore/actual-Agent-finish-death-public-runID-recovery
+=== RUN   TestSQLiteOwnedRetirementStore/finish-lost-ACK-runID-reopen
+=== RUN   TestSQLiteOwnedRetirementStore/managed-T4-before-retirement
+--- PASS: TestSQLiteOwnedRetirementStore (20.49s)
+    --- PASS: TestSQLiteOwnedRetirementStore/owned (0.12s)
+    --- PASS: TestSQLiteOwnedRetirementStore/borrowed (10.12s)
+    --- PASS: TestSQLiteOwnedRetirementStore/first-ack/nil-proof (0.08s)
+    --- PASS: TestSQLiteOwnedRetirementStore/first-ack/wrong-source (0.10s)
+    --- PASS: TestSQLiteOwnedRetirementStore/first-ack/foreign-grant (0.09s)
+    --- PASS: TestSQLiteOwnedRetirementStore/first-ack/foreign-owner (0.09s)
+    --- PASS: TestSQLiteOwnedRetirementStore/first-ack/foreign-lease (0.08s)
+    --- PASS: TestSQLiteOwnedRetirementStore/first-ack/foreign-epoch (0.09s)
+    --- PASS: TestSQLiteOwnedRetirementStore/first-ack/wrong-revision (0.08s)
+    --- PASS: TestSQLiteOwnedRetirementStore/first-ack/wrong-eventhead (0.09s)
+    --- PASS: TestSQLiteOwnedRetirementStore/first-ack/new-source (0.13s)
+    --- PASS: TestSQLiteOwnedRetirementStore/first-ack/new-epoch (0.09s)
+    --- PASS: TestSQLiteOwnedRetirementStore/first-ack/replacement-grant (0.10s)
+    --- PASS: TestSQLiteOwnedRetirementStore/first-ack/descendant-grant (0.09s)
+    --- PASS: TestSQLiteOwnedRetirementStore/no-release/active (0.07s)
+    --- PASS: TestSQLiteOwnedRetirementStore/no-release/unknown-callback (0.07s)
+    --- PASS: TestSQLiteOwnedRetirementStore/no-release/legacy-mark (0.08s)
+    --- PASS: TestSQLiteOwnedRetirementStore/competing-finish-and-ack (0.09s)
+    --- PASS: TestSQLiteOwnedRetirementStore/actual-Agent-two-retired-generations (5.30s)
+    --- PASS: TestSQLiteOwnedRetirementStore/actual-Agent-finish-death-public-runID-recovery (0.13s)
+    --- PASS: TestSQLiteOwnedRetirementStore/finish-lost-ACK-runID-reopen (0.11s)
+    --- PASS: TestSQLiteOwnedRetirementStore/managed-T4-before-retirement (3.30s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite	64.133s
+testing: warning: no tests to run
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/examples/embedded	1.473s [no tests to run]
+
+EXIT_CODE=0

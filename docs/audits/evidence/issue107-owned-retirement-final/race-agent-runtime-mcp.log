@@ -1,0 +1,5 @@
+SOURCE_SHA=a279dceb1b2b1752f12066d4051550bf3f79e657
+COMMAND=go -C go/agent-runtime-mcp test -p 2 -race -count=1 -timeout=20m ./...
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-mcp	2.119s
+
+EXIT_CODE=0

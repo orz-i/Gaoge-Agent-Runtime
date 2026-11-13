@@ -1,0 +1,34 @@
+SOURCE_SHA=a279dceb1b2b1752f12066d4051550bf3f79e657
+COMMAND=go -C go/agent-runtime test -p 2 -race -count=1 -v ./memory -run '^TestEA1RootAgentReconcilePhasesMemory$'
+=== RUN   TestEA1RootAgentReconcilePhasesMemory
+=== RUN   TestEA1RootAgentReconcilePhasesMemory/P2/model-host-evidence
+=== RUN   TestEA1RootAgentReconcilePhasesMemory/P0/model
+=== RUN   TestEA1RootAgentReconcilePhasesMemory/P0/tool
+=== RUN   TestEA1RootAgentReconcilePhasesMemory/P1/model
+=== RUN   TestEA1RootAgentReconcilePhasesMemory/P1/tool
+=== RUN   TestEA1RootAgentReconcilePhasesMemory/P2/model
+=== RUN   TestEA1RootAgentReconcilePhasesMemory/P2/tool
+=== RUN   TestEA1RootAgentReconcilePhasesMemory/P3/model
+=== RUN   TestEA1RootAgentReconcilePhasesMemory/P3/tool
+=== RUN   TestEA1RootAgentReconcilePhasesMemory/P4/model
+=== RUN   TestEA1RootAgentReconcilePhasesMemory/P4/model/single-mark-ack-loss-no-finish-hold
+=== RUN   TestEA1RootAgentReconcilePhasesMemory/P4/tool
+=== RUN   TestEA1RootAgentReconcilePhasesMemory/P4/tool/single-mark-ack-loss-no-finish-hold
+--- PASS: TestEA1RootAgentReconcilePhasesMemory (4.42s)
+    --- PASS: TestEA1RootAgentReconcilePhasesMemory/P2/model-host-evidence (0.02s)
+    --- PASS: TestEA1RootAgentReconcilePhasesMemory/P0/model (0.01s)
+    --- PASS: TestEA1RootAgentReconcilePhasesMemory/P0/tool (0.01s)
+    --- PASS: TestEA1RootAgentReconcilePhasesMemory/P1/model (0.01s)
+    --- PASS: TestEA1RootAgentReconcilePhasesMemory/P1/tool (0.01s)
+    --- PASS: TestEA1RootAgentReconcilePhasesMemory/P2/model (2.15s)
+    --- PASS: TestEA1RootAgentReconcilePhasesMemory/P2/tool (2.16s)
+    --- PASS: TestEA1RootAgentReconcilePhasesMemory/P3/model (0.01s)
+    --- PASS: TestEA1RootAgentReconcilePhasesMemory/P3/tool (0.01s)
+    --- PASS: TestEA1RootAgentReconcilePhasesMemory/P4/model (0.01s)
+    --- PASS: TestEA1RootAgentReconcilePhasesMemory/P4/model/single-mark-ack-loss-no-finish-hold (0.01s)
+    --- PASS: TestEA1RootAgentReconcilePhasesMemory/P4/tool (0.01s)
+    --- PASS: TestEA1RootAgentReconcilePhasesMemory/P4/tool/single-mark-ack-loss-no-finish-hold (0.01s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory	5.839s
+
+EXIT_CODE=0
