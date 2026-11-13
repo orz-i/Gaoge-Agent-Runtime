@@ -590,7 +590,6 @@ func ea1MWExecute(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.S
 		f.physical.rt = rt
 		f.unchanged(rt, s, g)
 		recovery := f.ea1ChildStartFixture.runner(rt, "fresh", false)
-		var e error
 		if child {
 			e = recovery.ReconcileChildPhysicalGrant(t.Context(), s.Run.ID)
 		} else {
