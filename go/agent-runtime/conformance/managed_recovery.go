@@ -56,6 +56,14 @@ type managedStoreFixture struct {
 	host            *managedStoreHost
 }
 
+// Force a real-time Feature timestamp with a non-microsecond remainder on all
+// platforms. Store lease authority and backend AdvanceTo remain unchanged.
+type managedStorePrecisionClock struct{}
+
+func (managedStorePrecisionClock) Now() time.Time {
+	return time.Now().UTC().Truncate(time.Microsecond).Add(123 * time.Nanosecond)
+}
+
 func managedStoreSetup(t *testing.T, factory func(*testing.T) ManagedRecoveryStoreFixture) managedStoreFixture {
 	t.Helper()
 	backend := factory(t)
@@ -64,7 +72,7 @@ func managedStoreSetup(t *testing.T, factory func(*testing.T) ManagedRecoverySto
 		t.Fatal("incomplete managed Store factory")
 	}
 	hostStore := &managedStoreHost{}
-	rt, err := kernel.New(kernel.Dependencies{Store: s, ManagedRecoveryHost: hostStore})
+	rt, err := kernel.New(kernel.Dependencies{Store: s, ManagedRecoveryHost: hostStore, Clock: managedStorePrecisionClock{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +115,15 @@ func managedStoreSetup(t *testing.T, factory func(*testing.T) ManagedRecoverySto
 		t.Fatal(err)
 	}
 	if transfer.State != kernel.ManagedAvailable || transfer.SafePoint.Source.EventHead != source.EventHead || kernel.ManagedDigest(transfer.SafePoint.Source) != kernel.ManagedDigest(source) {
-		t.Fatal("T0 did not bind exact committed aggregate")
+		persisted, loadErr := rt.Load(t.Context(), v.Run.ID)
+		pointJSON, pointJSONErr := json.Marshal(transfer.SafePoint.Source)
+		sourceJSON, sourceJSONErr := json.Marshal(source)
+		persistedJSON, persistedJSONErr := json.Marshal(persisted)
+		t.Fatalf("T0 did not bind exact committed aggregate: available=%t eventHeadEqual=%t sourceDigestEqual=%t returnedMatchesLoaded=%t loadErr=%v JSONErrors=[%v,%v,%v]\npointSource=%s\nreturnedSource=%s\nloadedSource=%s",
+			transfer.State == kernel.ManagedAvailable, transfer.SafePoint.Source.EventHead == source.EventHead,
+			kernel.ManagedDigest(transfer.SafePoint.Source) == kernel.ManagedDigest(source),
+			loadErr == nil && kernel.ManagedDigest(source) == kernel.ManagedDigest(persisted), loadErr,
+			pointJSONErr, sourceJSONErr, persistedJSONErr, pointJSON, sourceJSON, persistedJSON)
 	}
 	return managedStoreFixture{store: s, backend: backend, runtime: rt, scoped: scoped, source: source, grant: g, lease: l, point: transfer.SafePoint, host: hostStore}
 }
