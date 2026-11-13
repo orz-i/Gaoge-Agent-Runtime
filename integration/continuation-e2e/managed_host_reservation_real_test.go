@@ -14,7 +14,6 @@ import (
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
 	harnesspostgres "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-postgres"
 	postgresadapter "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 )
@@ -58,7 +57,9 @@ func TestRealPostgresManagedHostReservationModesAfterProcessCrash(t *testing.T) 
 				t.Fatal(e)
 			}
 			turnID, root := managedRecoveryRoot(t, host)
-			rt, e := kernel.New(kernel.Dependencies{Store: postgresadapter.NewKernelStore(db)})
+			fault := errors.New("Host reservation committed ACK lost")
+			lossy := &managedHostLostACK{Store: host, fault: fault}
+			rt, e := kernel.New(kernel.Dependencies{Store: postgresadapter.NewKernelStore(db), ManagedRecoveryHost: lossy})
 			if e != nil {
 				t.Fatal(e)
 			}
@@ -106,9 +107,7 @@ func TestRealPostgresManagedHostReservationModesAfterProcessCrash(t *testing.T) 
 					t.Fatalf("actual cancellation contender: %v", e)
 				}
 			}
-			fault := errors.New("Host reservation committed ACK lost")
-			lossy := &managedHostLostACK{Store: host, fault: fault}
-			if _, e = rt.SelectManagedContinuation(t.Context(), lossy, parked); !errors.Is(e, fault) {
+			if _, e = rt.SelectManagedContinuation(t.Context(), parked); !errors.Is(e, fault) {
 				t.Fatalf("actual reserve ACK cut not hit: %v", e)
 			}
 			assertNoSend()
@@ -117,7 +116,11 @@ func TestRealPostgresManagedHostReservationModesAfterProcessCrash(t *testing.T) 
 			if e != nil {
 				t.Fatal(e)
 			}
-			selected, e := rt.SelectManagedContinuation(t.Context(), peer, parked)
+			peerRT, e := kernel.New(kernel.Dependencies{Store: postgresadapter.NewKernelStore(secondDB), ManagedRecoveryHost: peer})
+			if e != nil {
+				t.Fatal(e)
+			}
+			selected, e := peerRT.SelectManagedContinuation(t.Context(), parked)
 			if e != nil {
 				t.Fatal(e)
 			}
@@ -207,7 +210,7 @@ func TestRealPostgresManagedHostReservationModesAfterProcessCrash(t *testing.T) 
 				if parked.Transfer().Generation <= enabled.Generation {
 					t.Fatal("activation generation did not advance")
 				}
-				selected, e = rt.SelectManagedContinuation(t.Context(), peer, parked)
+				selected, e = peerRT.SelectManagedContinuation(t.Context(), parked)
 				if e != nil || !reflect.DeepEqual(selected.Reservation(), r) {
 					t.Fatalf("new generation changed Host mode/identity: %v", e)
 				}
@@ -298,14 +301,23 @@ func TestRealPostgresOpaqueManagedProcessCrashRemainsUnknown(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 		lease = readManagedRecoveryLease(t, t.Context(), db, root.ExecutionRefID)
 	}
+	// The original owned physical fence precedes the legacy Epoch fallback.
+	if e = store.CheckExecution(t.Context(), root.ExecutionRefID, nil); !errors.Is(e, kernel.ErrChildExecutionBusy) {
+		t.Fatalf("opaque original physical authority: %v", e)
+	}
+	originalLease := readManagedRecoveryLease(t, t.Context(), db, root.ExecutionRefID)
 	session := newManagedRecoverySession(t, db, files, false, false)
 	_, e = session.Resume(t.Context(), managedRecoveryTurn)
-	if !errors.Is(e, agent.ErrModelOutcomeUnknown) {
+	if !errors.Is(e, harness.ErrConflict) {
 		t.Fatalf("opaque pending-intent resume: %v", e)
 	}
 	after, e := store.Load(t.Context(), root.ExecutionRefID)
 	if e != nil || !reflect.DeepEqual(before, after) {
 		t.Fatalf("opaque recovery changed Kernel source: %v", e)
+	}
+	afterLease := readManagedRecoveryLease(t, t.Context(), db, root.ExecutionRefID)
+	if !sameManagedRecoveryLease(originalLease, afterLease) {
+		t.Fatal("opaque denied recovery changed original native authority")
 	}
 	retained, e := store.LookupChildExecution(t.Context(), root.ExecutionRefID)
 	if e != nil || retained != grant {

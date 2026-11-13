@@ -145,15 +145,17 @@ func VerifiedExecutionDispatchReceipt(grant Item, receipts []Item) (string, bool
 		receipt.RunID != grant.RunID || receipt.Seq <= grant.Seq {
 		return "", false
 	}
+	// Managed closure has its own exact five-field schema. Do not relax the
+	// original single-field receipt contract or accept duplicate/unknown keys.
+	if phase == "start" && managedDispatchReceipt(receipt) {
+		fields, _ := authorityStringFields(receipt.Payload, "boundary", "recoveryID", "mode", "selectionHash", "terminalHash")
+		return fields["boundary"], true
+	}
 	payload, ok := authorityStringFields(receipt.Payload, "boundary")
 	if !ok {
 		return "", false
 	}
 	switch payload["boundary"] {
-	case "managed_dispatch_transferred", "managed_dispatch_cancelled_before_next_effect":
-		if phase == "start" && managedDispatchReceipt(receipt) {
-			return payload["boundary"], true
-		}
 	case "physical_dispatch_rejected":
 		return payload["boundary"], true
 	case "physical_dispatch_returned":

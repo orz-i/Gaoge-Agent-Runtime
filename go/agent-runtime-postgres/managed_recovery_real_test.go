@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"context"
 	"database/sql"
 	"os"
 	"strings"
@@ -58,7 +59,7 @@ func TestRealPostgresManagedRecoveryStore(t *testing.T) {
 		if e != nil || pa != authority {
 			t.Fatalf("independent pool changed authority: %v", e)
 		}
-		return conformance.ManagedRecoveryStoreFixture{Store: first, Peer: peer,
+		return conformance.ManagedRecoveryStoreFixture{Store: &managedProjectionStore{KernelStore: first, t: t}, Peer: &managedProjectionStore{KernelStore: peer, t: t},
 			AdvanceTo: func(target time.Time) {
 				if delay := time.Until(target) + 50*time.Millisecond; delay > 0 {
 					time.Sleep(delay)
@@ -71,8 +72,43 @@ func TestRealPostgresManagedRecoveryStore(t *testing.T) {
 				if e != nil || a != authority {
 					t.Fatalf("reopen changed authority: %v", e)
 				}
-				return fresh
+				return &managedProjectionStore{KernelStore: fresh, t: t}
 			},
 		}
 	})
+}
+
+// All directed ENABLE calls (including exact ACK replay and losing claimants)
+// and Leave calls must preserve the full sealed source, not just revision.
+// The suite does not concurrently mutate feature state at these boundaries.
+type managedProjectionStore struct {
+	*KernelStore
+	t *testing.T
+}
+
+func (s *managedProjectionStore) EnableManagedRecovery(ctx context.Context, q kernel.ManagedEnableRequest) (kernel.ManagedTransfer, error) {
+	before, e := s.Load(ctx, q.RunID)
+	if e != nil {
+		s.t.Errorf("load before authority operation: %v", e)
+		return kernel.ManagedTransfer{}, e
+	}
+	out, callErr := s.KernelStore.EnableManagedRecovery(ctx, q)
+	after, e := s.Load(ctx, q.RunID)
+	if e != nil || kernel.ManagedDigest(before) != kernel.ManagedDigest(after) {
+		s.t.Errorf("ENABLE/ACK changed sealed aggregate (including UpdatedAt/EventHead): %v", e)
+	}
+	return out, callErr
+}
+func (s *managedProjectionStore) LeaveManagedSafePoint(ctx context.Context, q kernel.ManagedLeaveRequest) (kernel.ManagedTransfer, error) {
+	before, e := s.Load(ctx, q.RunID)
+	if e != nil {
+		s.t.Errorf("load before authority operation: %v", e)
+		return kernel.ManagedTransfer{}, e
+	}
+	out, callErr := s.KernelStore.LeaveManagedSafePoint(ctx, q)
+	after, e := s.Load(ctx, q.RunID)
+	if e != nil || kernel.ManagedDigest(before) != kernel.ManagedDigest(after) {
+		s.t.Errorf("Leave changed sealed aggregate (including UpdatedAt/EventHead): %v", e)
+	}
+	return out, callErr
 }

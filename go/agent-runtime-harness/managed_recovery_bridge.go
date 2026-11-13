@@ -26,7 +26,7 @@ func (r *Runner) bindManagedOriginalDispatch(ctx context.Context, inv Invocation
 		return ctx, nil
 	}
 	host, ok := r.store.(managedHostStore)
-	if !ok {
+	if !ok || !r.runtime.UsesManagedRecoveryHost(host) {
 		return ctx, kernel.ErrExecutionRequired
 	}
 	if inv.Attempt <= 0 || uint64(inv.Attempt) > math.MaxUint32 {
@@ -64,7 +64,7 @@ func (r *Runner) bindManagedOriginalDispatch(ctx context.Context, inv Invocation
 		return ctx, err
 	}
 	b := kernel.ManagedHostBinding{KernelAuthority: ka, HostAuthority: ha, TurnID: turn.ID, InvocationID: inv.ID, Attempt: uint32(inv.Attempt), RunID: inv.ExecutionRefID, DispatchID: saved.ID, Phase: phase, Source: source}
-	return r.runtime.BindManagedDispatch(ctx, host, b)
+	return r.runtime.BindManagedDispatch(ctx, b)
 }
 
 // recoverManagedInvocation does not open a new physical dispatch. The Core
@@ -98,7 +98,7 @@ func (r *Runner) recoverManagedInvocation(ctx context.Context, inv Invocation) (
 		if boundary, settled := VerifiedExecutionDispatchReceipt(item, items); settled &&
 			boundary != "managed_dispatch_transferred" && boundary != "managed_dispatch_cancelled_before_next_effect" {
 			host, ok := r.store.(managedHostStore)
-			if !ok {
+			if !ok || !r.runtime.UsesManagedRecoveryHost(host) {
 				return kernel.Snapshot{}, true, kernel.ErrExecutionRequired
 			}
 			if _, e := host.ReadManagedRecovery(ctx, b, ""); !errors.Is(e, kernel.ErrNotFound) {
@@ -108,7 +108,7 @@ func (r *Runner) recoverManagedInvocation(ctx context.Context, inv Invocation) (
 		}
 	}
 	host, ok := r.store.(managedHostStore)
-	if !ok {
+	if !ok || !r.runtime.UsesManagedRecoveryHost(host) {
 		return kernel.Snapshot{}, true, kernel.ErrExecutionRequired
 	}
 	// Actual source-bound storage check precedes any PARK mutation.
@@ -127,7 +127,7 @@ func (r *Runner) recoverManagedInvocation(ctx context.Context, inv Invocation) (
 		}
 		return proof.Snapshot(), true, nil
 	}
-	snap, proof, err := native.RecoverManagedContinuation(ctx, host, inv.ExecutionRefID)
+	snap, proof, err := native.RecoverManagedContinuation(ctx, inv.ExecutionRefID)
 	if err != nil {
 		return snap, true, err
 	}

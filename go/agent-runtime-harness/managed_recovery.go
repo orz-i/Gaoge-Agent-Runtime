@@ -137,13 +137,19 @@ func ManagedClosureItems(p kernel.ManagedClosureProof, r kernel.ManagedHostReser
 	return items, nil
 }
 func managedDispatchReceipt(item Item) bool {
-	var v struct{ Boundary, RecoveryID, Mode, SelectionHash, TerminalHash string }
-	if json.Unmarshal(item.Payload, &v) != nil {
+	v, ok := authorityStringFields(item.Payload, "boundary", "recoveryID", "mode", "selectionHash", "terminalHash")
+	if !ok || v["recoveryID"] == "" ||
+		!((v["boundary"] == "managed_dispatch_transferred" && v["mode"] == string(kernel.ManagedResume)) ||
+			(v["boundary"] == "managed_dispatch_cancelled_before_next_effect" && v["mode"] == string(kernel.ManagedCancel))) {
 		return false
 	}
-	return (v.Boundary == "managed_dispatch_transferred" && v.Mode == string(kernel.ManagedResume) ||
-		v.Boundary == "managed_dispatch_cancelled_before_next_effect" && v.Mode == string(kernel.ManagedCancel)) &&
-		v.RecoveryID != "" && len(v.SelectionHash) == 64 && len(v.TerminalHash) == 64
+	for _, name := range []string{"selectionHash", "terminalHash"} {
+		hash, err := hex.DecodeString(v[name])
+		if err != nil || len(hash) != 32 || hex.EncodeToString(hash) != v[name] {
+			return false
+		}
+	}
+	return true
 }
 
 // IsManagedDispatchClosure reserves this namespace to CloseManagedRecovery.

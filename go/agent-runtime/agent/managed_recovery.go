@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/callbackscope"
@@ -43,8 +45,8 @@ func (r *Runner) commitManagedModelIntent(ctx context.Context, s kernel.Snapshot
 // It resumes only the exact persisted concrete continuation, after Kernel-first
 // PARK and committed Host mode selection. No configurable callback runs before
 // the new owner's explicit LeaveManagedSafePoint ACK.
-func (r *Runner) RecoverManagedContinuation(ctx context.Context, host kernel.ManagedRecoveryHostStore, id string) (kernel.Snapshot, kernel.ManagedClosureProof, error) {
-	if !r.SupportsManagedContextRecovery() || host == nil {
+func (r *Runner) RecoverManagedContinuation(ctx context.Context, id string) (kernel.Snapshot, kernel.ManagedClosureProof, error) {
+	if !r.SupportsManagedContextRecovery() {
 		return kernel.Snapshot{}, kernel.ManagedClosureProof{}, ErrRootOutcomeUnknown
 	}
 	current, err := r.runtime.LoadManagedRecovery(ctx, id)
@@ -53,7 +55,7 @@ func (r *Runner) RecoverManagedContinuation(ctx context.Context, host kernel.Man
 	}
 	// Once a Host selection exists, later safe points may have moved the Run's
 	// current pointer. Reconstruct the ORIGINAL selected transfer from its ID.
-	reservation, readErr := host.ReadManagedRecovery(ctx, current.SafePoint.Host, "")
+	reservation, readErr := r.runtime.ReadManagedReservation(ctx, current.SafePoint.Host, "")
 	if readErr == nil {
 		if !reservation.Valid() {
 			return kernel.Snapshot{}, kernel.ManagedClosureProof{}, kernel.ErrExecutionConflict
@@ -77,7 +79,7 @@ func (r *Runner) RecoverManagedContinuation(ctx context.Context, host kernel.Man
 	if err != nil {
 		return kernel.Snapshot{}, kernel.ManagedClosureProof{}, err
 	}
-	selected, err := r.runtime.SelectManagedContinuation(ctx, host, parked)
+	selected, err := r.runtime.SelectManagedContinuation(ctx, parked)
 	if err != nil {
 		return kernel.Snapshot{}, kernel.ManagedClosureProof{}, err
 	}
@@ -89,7 +91,7 @@ func (r *Runner) RecoverManagedContinuation(ctx context.Context, host kernel.Man
 		p, e := r.runtime.ManagedRecoveryClosure(ctx, t.SafePoint.ID)
 		return p.Snapshot(), p, e
 	}
-	claimant, err := r.runtime.NewID("managedclaimant")
+	claimant, err := newManagedClaimantID()
 	if err != nil {
 		return kernel.Snapshot{}, kernel.ManagedClosureProof{}, err
 	}
@@ -125,7 +127,7 @@ func (r *Runner) RecoverManagedContinuation(ctx context.Context, host kernel.Man
 	}
 	// Rebind only the original stored dispatch. This is an actual storage read,
 	// after Leave; it does not create a second physical Host dispatch.
-	ctx, err = r.runtime.BindManagedDispatch(ctx, host, t.SafePoint.Host)
+	ctx, err = r.runtime.BindManagedDispatch(ctx, t.SafePoint.Host)
 	if err != nil {
 		return snapshot, kernel.ManagedClosureProof{}, err
 	}
@@ -165,4 +167,14 @@ func (r *Runner) retireManagedClosure(ctx context.Context, p kernel.ManagedClosu
 		return e
 	}
 	return nil
+}
+
+// Internal entropy is not an IDSource callback and cannot run user code before
+// the newly enabled owner has acknowledged LeaveManagedSafePoint.
+func newManagedClaimantID() (string, error) {
+	var id [32]byte
+	if _, err := rand.Read(id[:]); err != nil {
+		return "", err
+	}
+	return "managedclaimant-" + hex.EncodeToString(id[:]), nil
 }

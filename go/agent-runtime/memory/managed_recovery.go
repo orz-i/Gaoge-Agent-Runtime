@@ -97,7 +97,7 @@ func (s *Store) ParkManagedRecovery(ctx context.Context, q kernel.ManagedParkReq
 		return kernel.ManagedTransfer{}, err
 	}
 	g, ok := s.ownedGrantLocked(q.RunID)
-	if !ok || g.settledRevision != 0 || g.completion.GrantID != "" || s.execution[q.RunID].quarantineRev != 0 {
+	if !ok || !s.managedSoleGrantLocked(q.RunID, g.grant.ID) || g.settledRevision != 0 || g.completion.GrantID != "" || s.execution[q.RunID].quarantineRev != 0 {
 		return kernel.ManagedTransfer{}, kernel.ErrExecutionConflict
 	}
 	next, err := kernel.ManagedParkTransfer(t, q, snap, s.execution[q.RunID].lease, g.grant, s.managedAuthority, s.currentExecutionTime())
@@ -164,7 +164,7 @@ func (s *Store) EnableManagedRecovery(ctx context.Context, q kernel.ManagedEnabl
 	expected, expectedLease := kernel.ManagedCurrentAuthority(t)
 	old, ok := s.childGrants[expected.ID]
 	state := s.execution[q.RunID]
-	if !ok || old.grant != expected || old.settledRevision != 0 || old.completion.GrantID != "" || !expected.MatchesExecution(state.lease) || state.epoch != expectedLease.Epoch || state.quarantineRev != 0 || t.SafePoint.Host.KernelAuthority != s.managedAuthority {
+	if !ok || !s.managedSoleGrantLocked(q.RunID, expected.ID) || old.grant != expected || old.settledRevision != 0 || old.completion.GrantID != "" || !expected.MatchesExecution(state.lease) || state.epoch != expectedLease.Epoch || state.quarantineRev != 0 || t.SafePoint.Host.KernelAuthority != s.managedAuthority {
 		return kernel.ManagedTransfer{}, kernel.ErrExecutionConflict
 	}
 	if _, exists := s.childGrants[q.GrantID]; exists {
@@ -179,7 +179,10 @@ func (s *Store) EnableManagedRecovery(ctx context.Context, q kernel.ManagedEnabl
 	state.lease = next.SuccessorLease
 	s.execution[q.RunID] = state
 	s.childGrants[next.SuccessorGrant.ID] = memoryChildGrant{grant: next.SuccessorGrant, ancestors: []string{q.RunID}}
-	s.childGrantOwners[q.RunID] = map[string]struct{}{next.SuccessorGrant.ID: {}}
+	if s.childGrantOwners[q.RunID] == nil {
+		s.childGrantOwners[q.RunID] = make(map[string]struct{})
+	}
+	s.childGrantOwners[q.RunID][next.SuccessorGrant.ID] = struct{}{}
 	s.saveManagedLocked(next)
 	return cloneMemoryManagedTransfer(next), nil
 }
@@ -203,7 +206,7 @@ func (s *Store) CancelParkedManagedContinuation(ctx context.Context, q kernel.Ma
 	expected, expectedLease := kernel.ManagedCurrentAuthority(t)
 	old, ok := s.childGrants[expected.ID]
 	state := s.execution[q.RunID]
-	if !ok || old.grant != expected || old.settledRevision != 0 || old.completion.GrantID != "" || !expected.MatchesExecution(state.lease) || state.epoch != expectedLease.Epoch || state.epoch == math.MaxUint64 || state.quarantineRev != 0 || t.SafePoint.Host.KernelAuthority != s.managedAuthority {
+	if !ok || !s.managedSoleGrantLocked(q.RunID, expected.ID) || old.grant != expected || old.settledRevision != 0 || old.completion.GrantID != "" || !expected.MatchesExecution(state.lease) || state.epoch != expectedLease.Epoch || state.epoch == math.MaxUint64 || state.quarantineRev != 0 || t.SafePoint.Host.KernelAuthority != s.managedAuthority {
 		return kernel.ManagedTransfer{}, kernel.ErrExecutionConflict
 	}
 	next, m, err := kernel.ManagedCancellationMutation(t, q, snap, s.currentExecutionTime())
@@ -286,4 +289,11 @@ func (s *Store) CompleteManagedRecovery(ctx context.Context, g kernel.ChildExecu
 		}
 	}
 	return nil
+}
+
+// Never discard independently indexed descendant authority during transfer.
+func (s *Store) managedSoleGrantLocked(runID, grantID string) bool {
+	owners := s.childGrantOwners[runID]
+	_, ok := owners[grantID]
+	return ok && len(owners) == 1
 }

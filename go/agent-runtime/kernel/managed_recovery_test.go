@@ -1,7 +1,10 @@
 package kernel
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -112,5 +115,187 @@ func TestManagedSafePointLeaveIsBeforeCallbackPermission(t *testing.T) {
 	}
 	if _, e = ManagedLeaveTransfer(next, q, s, l, now); e != ErrExecutionConflict {
 		t.Fatal("ambiguous ACK was converted into new permission")
+	}
+}
+
+func TestManagedReservationCloneAndPersistencePreserveModeZero(t *testing.T) {
+	transfer, _, _, _, _, _ := managedReducerFixture()
+	resume := ManagedHostReservation{ID: "reservation", RecoveryID: transfer.SafePoint.RecoveryID, SuspensionID: transfer.SafePoint.ID, Binding: transfer.SafePoint.Host, Mode: ManagedResume, Revision: 1}
+	if !resume.Valid() {
+		t.Fatal("invalid source fixture")
+	}
+	cloned := managedClone(resume)
+	if !cloned.Valid() || !reflect.DeepEqual(cloned, resume) {
+		t.Fatal("clone changed zero cancellation")
+	}
+	encoded, err := json.Marshal(resume)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var restored ManagedHostReservation
+	if err = json.Unmarshal(encoded, &restored); err != nil {
+		t.Fatal(err)
+	}
+	if !restored.Valid() || !reflect.DeepEqual(restored, resume) {
+		t.Fatalf("persistent roundtrip changed mode source: %s", encoded)
+	}
+	empty := resume
+	empty.Cancellation.Payload = json.RawMessage{}
+	if empty.Valid() {
+		t.Fatal("nonnil empty cancellation accepted")
+	}
+	if _, e := json.Marshal(empty); e == nil {
+		t.Fatal("empty cancellation erased on persistent write")
+	}
+	explicit := resume
+	explicit.Cancellation.Payload = json.RawMessage("null")
+	explicitClone := managedClone(explicit)
+	if explicitClone.Valid() || !reflect.DeepEqual(explicit, explicitClone) {
+		t.Fatal("explicit null was erased into RESUME authority")
+	}
+	raw, err := json.Marshal(explicit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var restoredNull ManagedHostReservation
+	if err = json.Unmarshal(raw, &restoredNull); err != nil {
+		t.Fatal(err)
+	}
+	if restoredNull.Valid() {
+		t.Fatal("persistent explicit null accepted")
+	}
+	cloned.Binding.Source[0] = 'x'
+	if reflect.DeepEqual(cloned.Binding.Source, resume.Binding.Source) {
+		t.Fatal("mutable source alias")
+	}
+	cancel := resume
+	cancel.Mode = ManagedCancel
+	cancel.Cancellation = ManagedCancellation{IntentID: "original", Seq: 8, Payload: json.RawMessage(`{"target":"root"}`)}
+	cancel.Cancellation.PayloadDigest = ManagedDigest(cancel.Cancellation.Payload)
+	raw, err = json.Marshal(cancel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var restoredCancel ManagedHostReservation
+	if err = json.Unmarshal(raw, &restoredCancel); err != nil {
+		t.Fatal(err)
+	}
+	if !restoredCancel.Valid() || !reflect.DeepEqual(cancel, restoredCancel) {
+		t.Fatal("CANCEL source lost in codec")
+	}
+}
+
+type managedConfiguredKernel struct {
+	Store
+	ManagedRecoveryStore
+	transfer ManagedTransfer
+	enable   ManagedEnableRequest
+}
+
+func (s *managedConfiguredKernel) ManagedRecoveryAuthority(context.Context) (ManagedAuthority, error) {
+	return s.transfer.SafePoint.Host.KernelAuthority, nil
+}
+func (s *managedConfiguredKernel) LoadManagedRecovery(context.Context, string) (ManagedTransfer, error) {
+	return managedClone(s.transfer), nil
+}
+func (s *managedConfiguredKernel) EnableManagedRecovery(_ context.Context, q ManagedEnableRequest) (ManagedTransfer, error) {
+	s.enable = q
+	return managedClone(s.transfer), nil
+}
+
+type managedConfiguredHost struct {
+	binding     ManagedHostBinding
+	reservation ManagedHostReservation
+	calls       int
+}
+
+func (s *managedConfiguredHost) ManagedRecoveryAuthority(context.Context) (ManagedAuthority, error) {
+	s.calls++
+	return s.binding.HostAuthority, nil
+}
+func (s *managedConfiguredHost) ReadManagedOriginalDispatch(_ context.Context, b ManagedHostBinding) (ManagedHostBinding, error) {
+	s.calls++
+	if !reflect.DeepEqual(b, s.binding) {
+		return ManagedHostBinding{}, ErrExecutionConflict
+	}
+	return managedClone(s.binding), nil
+}
+func (s *managedConfiguredHost) ReserveManagedRecovery(_ context.Context, p ManagedParkedProof) (ManagedHostReservation, error) {
+	s.calls++
+	if !p.Matches(s.binding) {
+		return ManagedHostReservation{}, ErrExecutionConflict
+	}
+	return managedClone(s.reservation), nil
+}
+func (s *managedConfiguredHost) ReadManagedRecovery(_ context.Context, b ManagedHostBinding, id string) (ManagedHostReservation, error) {
+	s.calls++
+	if !reflect.DeepEqual(b, s.binding) || id != s.reservation.RecoveryID {
+		return ManagedHostReservation{}, ErrExecutionConflict
+	}
+	return managedClone(s.reservation), nil
+}
+
+type managedForbiddenIDSource struct{ calls int }
+
+func (s *managedForbiddenIDSource) NewID(string) (string, error) {
+	s.calls++
+	return "", errors.New("configured entropy called before Leave")
+}
+
+func TestManagedRecoveryUsesOnlyConstructionBoundHostAndInternalEntropy(t *testing.T) {
+	initial, s, l, g, a, now := managedReducerFixture()
+	parked, e := ManagedParkTransfer(initial, ManagedParkRequest{RunID: s.Run.ID, SuspensionID: initial.SafePoint.ID, ExpectedRevision: s.Run.Revision}, s, l, g, a, now)
+	if e != nil {
+		t.Fatal(e)
+	}
+	host := &managedConfiguredHost{binding: parked.SafePoint.Host, reservation: ManagedHostReservation{ID: "reserved", RecoveryID: parked.SafePoint.RecoveryID, SuspensionID: parked.SafePoint.ID, Binding: parked.SafePoint.Host, Mode: ManagedResume, Revision: 1}}
+	counterfeit := &managedConfiguredHost{binding: host.binding, reservation: host.reservation}
+	counterfeit.reservation.Mode = ManagedCancel
+	store := &managedConfiguredKernel{transfer: parked}
+	ids := &managedForbiddenIDSource{}
+	rt, e := New(Dependencies{Store: store, IDs: ids, ManagedRecoveryHost: host})
+	if e != nil {
+		t.Fatal(e)
+	}
+	if !rt.UsesManagedRecoveryHost(host) || rt.UsesManagedRecoveryHost(counterfeit) {
+		t.Fatal("runtime accepted foreign per-call port")
+	}
+	bound, e := rt.BindManagedDispatch(t.Context(), host.binding)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, ok := rt.ManagedDispatch(bound, s.Run.ID); !ok {
+		t.Fatal("actual bound dispatch lost")
+	}
+	// A deliberately reconstructed Runtime is a different trusted configuration,
+	// and may not borrow the prior Runtime's bound actual-call context.
+	other, e := New(Dependencies{Store: store, ManagedRecoveryHost: counterfeit})
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, ok := other.ManagedDispatch(bound, s.Run.ID); ok {
+		t.Fatal("different construction borrowed original binding")
+	}
+	proof := ManagedParkedProof{transfer: parked, authority: a, valid: true}
+	selected, e := rt.SelectManagedContinuation(t.Context(), proof)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if selected.Reservation().Mode != ManagedResume || counterfeit.calls != 0 {
+		t.Fatal("unconfigured Host minted selection")
+	}
+	_, e = rt.EnableManagedContinuation(t.Context(), selected, "actual-claimant", "next-owner", time.Minute)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if ids.calls != 0 || store.enable.LeaseID == "" || store.enable.GrantID == "" || store.enable.LeaseID == store.enable.GrantID {
+		t.Fatal("pre-Leave entropy was configurable or unbound")
+	}
+	unconfigured, e := New(Dependencies{Store: store})
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = unconfigured.SelectManagedContinuation(t.Context(), proof); e != ErrExecutionConflict {
+		t.Fatalf("unconfigured proof issuer: %v", e)
 	}
 }

@@ -37,6 +37,9 @@ func (store *Store) childAncestorsLocked(child kernel.Run) ([]string, error) {
 			return nil, kernel.ErrInvalidInput
 		}
 		seen[id] = struct{}{}
+		if err := store.managedGateLocked(id); err != nil {
+			return nil, err
+		}
 		parent, ok := store.records[id]
 		if !ok {
 			return nil, kernel.ErrNotFound

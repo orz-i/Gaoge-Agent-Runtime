@@ -55,7 +55,7 @@ type ManagedHostBinding struct {
 	RunID           string
 	DispatchID      string
 	Phase           string
-	Source          json.RawMessage
+	Source          json.RawMessage `json:",omitempty"`
 }
 
 func (b ManagedHostBinding) Valid() bool {
@@ -68,9 +68,27 @@ func (b ManagedHostBinding) Valid() bool {
 type ManagedCancellation struct {
 	IntentID      string
 	Seq           uint64
-	Payload       json.RawMessage
+	Payload       json.RawMessage `json:",omitempty"`
 	PayloadDigest string
 	Reason        string
+}
+
+// MarshalJSON omits ONLY nil payload. A nonnil empty RawMessage is malformed,
+// not an absent cancellation field, and must fail encoding rather than become
+// valid RESUME authority after a persistent round trip.
+func (c ManagedCancellation) MarshalJSON() ([]byte, error) {
+	var payload *json.RawMessage
+	if c.Payload != nil {
+		value := c.Payload
+		payload = &value
+	}
+	return json.Marshal(struct {
+		IntentID      string
+		Seq           uint64
+		Payload       *json.RawMessage `json:",omitempty"`
+		PayloadDigest string
+		Reason        string
+	}{c.IntentID, c.Seq, payload, c.PayloadDigest, c.Reason})
 }
 
 func (c ManagedCancellation) Valid() bool {
@@ -261,18 +279,44 @@ func ManagedRecoveryID(id string, b ManagedHostBinding) string {
 func sameManagedLease(a, b ExecutionLease) bool {
 	return a.RunID == b.RunID && a.OwnerID == b.OwnerID && a.LeaseID == b.LeaseID && a.Epoch == b.Epoch
 }
+
+// managedClone copies the finite persistence types without a codec round trip.
+// In particular nil RawMessage remains nil; explicit JSON null remains bytes.
 func managedClone[T any](v T) T {
-	b, e := json.Marshal(v)
-	if e != nil {
-		var zero T
-		return zero
+	return cloneManagedValue(reflect.ValueOf(v)).Interface().(T)
+}
+func cloneManagedValue(v reflect.Value) reflect.Value {
+	switch v.Kind() {
+	case reflect.Pointer:
+		if v.IsNil() {
+			return reflect.Zero(v.Type())
+		}
+		out := reflect.New(v.Type().Elem())
+		out.Elem().Set(cloneManagedValue(v.Elem()))
+		return out
+	case reflect.Slice:
+		if v.IsNil() {
+			return reflect.Zero(v.Type())
+		}
+		out := reflect.MakeSlice(v.Type(), v.Len(), v.Len())
+		for i := 0; i < v.Len(); i++ {
+			out.Index(i).Set(cloneManagedValue(v.Index(i)))
+		}
+		return out
+	case reflect.Struct:
+		// Preserve immutable unexported time.Time representation, and recursively
+		// copy all exported fields containing mutable buffers/pointers.
+		out := reflect.New(v.Type()).Elem()
+		out.Set(v)
+		for i := 0; i < v.NumField(); i++ {
+			if v.Type().Field(i).IsExported() {
+				out.Field(i).Set(cloneManagedValue(v.Field(i)))
+			}
+		}
+		return out
+	default:
+		return v
 	}
-	var out T
-	if json.Unmarshal(b, &out) != nil {
-		var zero T
-		return zero
-	}
-	return out
 }
 
 // ManagedCurrentAuthority selects the only active native identity. Original

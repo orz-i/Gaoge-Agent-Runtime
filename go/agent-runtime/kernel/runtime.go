@@ -101,6 +101,8 @@ type Dependencies struct {
 	Store Store
 	Clock Clock
 	IDs   IDSource
+	// ManagedRecoveryHost is trusted storage configured once, never a per-call issuer.
+	ManagedRecoveryHost ManagedRecoveryHostStore
 }
 
 // Runtime owns feature-neutral Run transitions and no background workers.
@@ -117,6 +119,7 @@ type Runtime struct {
 	// worker from modifying this Root while physical effects are in flight.
 	physicalGrant *ChildExecutionGrant
 	managedIntent *ManagedSafePointProof
+	managedHost   *managedHostRegistration
 }
 
 // New creates a minimal Runtime with no optional feature dependencies.
@@ -130,9 +133,11 @@ func New(dependencies Dependencies) (*Runtime, error) {
 	if dependencies.IDs == nil {
 		dependencies.IDs = randomIDSource{}
 	}
-	return &Runtime{
-		store: dependencies.Store, clock: dependencies.Clock, ids: dependencies.IDs,
-	}, nil
+	registration, err := newManagedHostRegistration(dependencies.ManagedRecoveryHost)
+	if err != nil {
+		return nil, err
+	}
+	return &Runtime{store: dependencies.Store, clock: dependencies.Clock, ids: dependencies.IDs, managedHost: registration}, nil
 }
 
 // Descriptor exposes only the minimal Kernel capability.

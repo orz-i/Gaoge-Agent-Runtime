@@ -33,7 +33,9 @@ type managedStorePorts interface {
 
 func RunManagedRecoveryStoreSuite(t *testing.T, factory func(*testing.T) ManagedRecoveryStoreFixture) {
 	t.Helper()
+	t.Run("owner-park-competition", func(t *testing.T) { runManagedStoreOwnerParkCompetition(t, factory) })
 	t.Run("owner-and-leave", func(t *testing.T) { runManagedStoreLiveOwnerAndLeaveCompetition(t, factory) })
+	t.Run("parked-ancestor", func(t *testing.T) { runManagedStoreAncestorGate(t, factory) })
 	t.Run("parked-gates", func(t *testing.T) { runManagedStoreParkedAuthorityGates(t, factory) })
 	t.Run("selection-ack", func(t *testing.T) { runManagedStoreSelectionAndExactACK(t, factory) })
 	t.Run("two-enable-claimants", func(t *testing.T) { runManagedStoreEnableCompetition(t, factory) })
@@ -51,6 +53,7 @@ type managedStoreFixture struct {
 	grant           kernel.ChildExecutionGrant
 	lease           kernel.ExecutionLease
 	point           kernel.ManagedSafePoint
+	host            *managedStoreHost
 }
 
 func managedStoreSetup(t *testing.T, factory func(*testing.T) ManagedRecoveryStoreFixture) managedStoreFixture {
@@ -60,7 +63,8 @@ func managedStoreSetup(t *testing.T, factory func(*testing.T) ManagedRecoverySto
 	if !ok || backend.Peer == nil || backend.AdvanceTo == nil || backend.Reopen == nil {
 		t.Fatal("incomplete managed Store factory")
 	}
-	rt, err := kernel.New(kernel.Dependencies{Store: s})
+	hostStore := &managedStoreHost{}
+	rt, err := kernel.New(kernel.Dependencies{Store: s, ManagedRecoveryHost: hostStore})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +109,7 @@ func managedStoreSetup(t *testing.T, factory func(*testing.T) ManagedRecoverySto
 	if transfer.State != kernel.ManagedAvailable || transfer.SafePoint.Source.EventHead != source.EventHead || kernel.ManagedDigest(transfer.SafePoint.Source) != kernel.ManagedDigest(source) {
 		t.Fatal("T0 did not bind exact committed aggregate")
 	}
-	return managedStoreFixture{store: s, backend: backend, runtime: rt, scoped: scoped, source: source, grant: g, lease: l, point: transfer.SafePoint}
+	return managedStoreFixture{store: s, backend: backend, runtime: rt, scoped: scoped, source: source, grant: g, lease: l, point: transfer.SafePoint, host: hostStore}
 }
 func managedStoreSame(t *testing.T, f managedStoreFixture, before kernel.ManagedTransfer) {
 	t.Helper()
@@ -245,7 +249,8 @@ func managedStoreSelection(t *testing.T, f managedStoreFixture, mode kernel.Mana
 		r.Cancellation = kernel.ManagedCancellation{IntentID: "hcancel", Seq: 7, Payload: json.RawMessage(`{"target":"owned-agent","reason":"original"}`), Reason: "original"}
 		r.Cancellation.PayloadDigest = kernel.ManagedDigest(r.Cancellation.Payload)
 	}
-	proof, e := f.runtime.SelectManagedContinuation(t.Context(), &managedStoreHost{r}, parked)
+	f.host.reservation = r
+	proof, e := f.runtime.SelectManagedContinuation(t.Context(), parked)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -272,7 +277,9 @@ func runManagedStoreSelectionAndExactACK(t *testing.T, factory func(*testing.T) 
 				altered.Cancellation.Seq++
 				// Two individually authentic reads must still not overwrite the already
 				// chosen immutable cancellation tuple on the Kernel side.
-				different, e := f.runtime.SelectManagedContinuation(t.Context(), &managedStoreHost{altered}, parkedProof)
+				f.host.reservation = altered
+				different, e := f.runtime.SelectManagedContinuation(t.Context(), parkedProof)
+				f.host.reservation = proof.Reservation()
 				if e != nil {
 					t.Fatal(e)
 				}
@@ -576,4 +583,178 @@ func runManagedStoreEnableCompetition(t *testing.T, factory func(*testing.T) Man
 		t.Fatal("ENABLE race changed source")
 	}
 	managedStoreReopenEqual(t, f, one.transfer)
+}
+
+func runManagedStoreAncestorGate(t *testing.T, factory func(*testing.T) ManagedRecoveryStoreFixture) {
+	for _, mode := range []string{"park-first", "child-first"} {
+		t.Run(mode, func(t *testing.T) {
+			f := managedStoreSetup(t, factory)
+			child, e := f.runtime.Create(t.Context(), kernel.CreateRequest{ID: "managed-child", Kind: "agent", Actor: f.source.Run.Actor, Thread: f.source.Run.Thread, ParentRunID: f.source.Run.ID, State: json.RawMessage(`{"child":"original"}`)})
+			if e != nil {
+				t.Fatal(e)
+			}
+			grant := kernel.ChildExecutionGrant{ID: "child-grant", ChildRunID: child.Run.ID, ExpectedRevision: child.Run.Revision}
+			peer := f.backend.Peer.(managedStorePorts)
+			original, e := f.store.LoadManagedRecovery(t.Context(), f.source.Run.ID)
+			if e != nil {
+				t.Fatal(e)
+			}
+			q := kernel.ManagedParkRequest{RunID: f.source.Run.ID, SuspensionID: f.point.ID, ExpectedRevision: f.source.Run.Revision}
+			if mode == "child-first" {
+				if e = peer.BeginChildExecution(t.Context(), grant); e != nil {
+					t.Fatal(e)
+				}
+				f.backend.AdvanceTo(f.lease.ExpiresAt.Add(100 * time.Millisecond))
+				if _, e = f.store.ParkManagedRecovery(t.Context(), q); !errors.Is(e, kernel.ErrExecutionConflict) {
+					t.Fatalf("PARK discarded descendant authority: %v", e)
+				}
+				actual, e := peer.LookupChildExecution(t.Context(), child.Run.ID)
+				if e != nil || actual != grant {
+					t.Fatal("descendant index lost")
+				}
+			} else {
+				f.backend.AdvanceTo(f.lease.ExpiresAt.Add(100 * time.Millisecond))
+				original, e = f.store.ParkManagedRecovery(t.Context(), q)
+				if e != nil {
+					t.Fatal(e)
+				}
+				if e = peer.BeginChildExecution(t.Context(), grant); !errors.Is(e, kernel.ErrExecutionConflict) {
+					t.Fatalf("child passed parked ancestor: %v", e)
+				}
+				if _, e = peer.LookupChildExecution(t.Context(), child.Run.ID); !errors.Is(e, kernel.ErrNotFound) {
+					t.Fatalf("rejected child acquired index: %v", e)
+				}
+			}
+			actual, e := peer.Load(t.Context(), child.Run.ID)
+			if e != nil || kernel.ManagedDigest(actual) != kernel.ManagedDigest(child) {
+				t.Fatal("child aggregate mutated")
+			}
+			managedStoreSame(t, f, original)
+		})
+	}
+}
+
+type managedStoreRaceGate struct {
+	managedStorePorts
+	ownerArrived, parkArrived chan struct{}
+	ownerRelease, parkRelease chan struct{}
+	kind                      string
+}
+
+func (g *managedStoreRaceGate) RenewExecution(ctx context.Context, q kernel.ExecutionRenewRequest) (kernel.ExecutionLease, error) {
+	if g.kind == "renew" {
+		close(g.ownerArrived)
+		<-g.ownerRelease
+	}
+	return g.managedStorePorts.RenewExecution(ctx, q)
+}
+func (g *managedStoreRaceGate) ApplyExecution(ctx context.Context, l kernel.ExecutionLease, rev uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
+	if g.kind == "claim" {
+		close(g.ownerArrived)
+		<-g.ownerRelease
+	}
+	return g.managedStorePorts.ApplyExecution(ctx, l, rev, m)
+}
+func (g *managedStoreRaceGate) ParkManagedRecovery(ctx context.Context, q kernel.ManagedParkRequest) (kernel.ManagedTransfer, error) {
+	close(g.parkArrived)
+	<-g.parkRelease
+	return g.managedStorePorts.ParkManagedRecovery(ctx, q)
+}
+func runManagedStoreOwnerParkCompetition(t *testing.T, factory func(*testing.T) ManagedRecoveryStoreFixture) {
+	for _, kind := range []string{"renew", "claim"} {
+		for _, winner := range []string{"owner", "park"} {
+			t.Run(kind+"-"+winner, func(t *testing.T) {
+				f := managedStoreSetup(t, factory)
+				arrivedOwner, arrivedPark := make(chan struct{}), make(chan struct{})
+				releaseOwner, releasePark := make(chan struct{}), make(chan struct{})
+				owner := &managedStoreRaceGate{managedStorePorts: f.store, ownerArrived: arrivedOwner, ownerRelease: releaseOwner, kind: kind}
+				parker := &managedStoreRaceGate{managedStorePorts: f.backend.Peer.(managedStorePorts), parkArrived: arrivedPark, parkRelease: releasePark}
+				rt, e := kernel.New(kernel.Dependencies{Store: owner})
+				if e != nil {
+					t.Fatal(e)
+				}
+				bound, e := rt.WithExecution(f.lease)
+				if e != nil {
+					t.Fatal(e)
+				}
+				scoped, e := bound.WithPhysicalGrant(t.Context(), f.grant, featurecontrol.Seal(f.source.Run.ID, f.source.Run.Revision, "agent_physical_owner", f.grant.ID, f.source.State, f.source.Checkpoint))
+				if e != nil {
+					t.Fatal(e)
+				}
+				type ownerResult struct {
+					snapshot kernel.Snapshot
+					lease    kernel.ExecutionLease
+					err      error
+				}
+				ownerDone := make(chan ownerResult, 1)
+				type parkResult struct {
+					transfer kernel.ManagedTransfer
+					err      error
+				}
+				parkDone := make(chan parkResult, 1)
+				q := kernel.ManagedParkRequest{RunID: f.source.Run.ID, SuspensionID: f.point.ID, ExpectedRevision: f.source.Run.Revision}
+				go func() {
+					if kind == "renew" {
+						v, e := owner.RenewExecution(t.Context(), kernel.ExecutionRenewRequest{Lease: f.lease, LeaseDuration: time.Minute})
+						ownerDone <- ownerResult{lease: v, err: e}
+					} else {
+						v, e := scoped.Apply(t.Context(), f.source.Run.ID, f.source.Run.Revision, kernel.Mutation{Status: kernel.RunStatusRunning, State: json.RawMessage(`{"claim":"original"}`)})
+						ownerDone <- ownerResult{snapshot: v, err: e}
+					}
+				}()
+				go func() { v, e := parker.ParkManagedRecovery(t.Context(), q); parkDone <- parkResult{v, e} }()
+				// Both real requests have reached the Store boundary with the original
+				// source. Release one transaction first; no scheduling sleep guesses.
+				<-arrivedOwner
+				<-arrivedPark
+				if winner == "owner" {
+					close(releaseOwner)
+					first := <-ownerDone
+					if first.err != nil {
+						close(releasePark)
+						<-parkDone
+						t.Fatalf("owner winner: %v", first.err)
+					}
+					f.backend.AdvanceTo(f.lease.ExpiresAt.Add(100 * time.Millisecond))
+					close(releasePark)
+					second := <-parkDone
+					if !errors.Is(second.err, kernel.ErrExecutionConflict) {
+						t.Fatalf("PARK after owner winner: %v", second.err)
+					}
+					if kind == "claim" {
+						f.source = first.snapshot
+					} else if e = f.store.CheckExecution(t.Context(), f.source.Run.ID, &first.lease); e != nil {
+						t.Fatalf("PARK revoked renewed lease: %v", e)
+					}
+					transfer, e := f.store.LoadManagedRecovery(t.Context(), f.source.Run.ID)
+					if e != nil {
+						t.Fatal(e)
+					}
+					want := kernel.ManagedAvailable
+					if kind == "claim" {
+						want = kernel.ManagedInvalidated
+					}
+					if transfer.State != want {
+						t.Fatalf("owner winner state %s", transfer.State)
+					}
+					managedStoreSame(t, f, transfer)
+				} else {
+					f.backend.AdvanceTo(f.lease.ExpiresAt.Add(100 * time.Millisecond))
+					close(releasePark)
+					first := <-parkDone
+					if first.err != nil {
+						close(releaseOwner)
+						<-ownerDone
+						t.Fatalf("PARK winner: %v", first.err)
+					}
+					close(releaseOwner)
+					second := <-ownerDone
+					if !errors.Is(second.err, kernel.ErrExecutionConflict) {
+						t.Fatalf("old owner after PARK: %v", second.err)
+					}
+					managedStoreSame(t, f, first.transfer)
+				}
+			})
+		}
+	}
 }

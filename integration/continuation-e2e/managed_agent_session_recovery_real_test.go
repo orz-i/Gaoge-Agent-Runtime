@@ -370,7 +370,7 @@ func newManagedRecoverySession(t *testing.T, db *gorm.DB, files string, crash bo
 	if crash {
 		kernelStore = &managedRecoveryCrashStore{KernelStore: postgresadapter.NewKernelStore(db)}
 	}
-	runtime, err := kernel.New(kernel.Dependencies{Store: kernelStore})
+	runtime, err := kernel.New(kernel.Dependencies{Store: kernelStore, ManagedRecoveryHost: hostStore})
 	if err != nil {
 		t.Fatal(err)
 	}

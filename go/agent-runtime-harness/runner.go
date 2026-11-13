@@ -637,6 +637,12 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	if dependencies.Runtime == nil || dependencies.Agent == nil || dependencies.Store == nil {
 		return nil, ErrInvalidRequest
 	}
+	if native, ok := dependencies.Agent.(*agent.Runner); ok && native.SupportsManagedContextRecovery() {
+		host, supported := dependencies.Store.(managedHostStore)
+		if !supported || !dependencies.Runtime.UsesManagedRecoveryHost(host) {
+			return nil, ErrInvalidRequest
+		}
+	}
 	if dependencies.Clock == nil {
 		dependencies.Clock = systemClock{}
 	}

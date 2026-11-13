@@ -39,10 +39,11 @@ type managedDispatchBinding struct {
 	binding ManagedHostBinding
 }
 
-func (r *Runtime) BindManagedDispatch(ctx context.Context, host ManagedRecoveryHostStore, b ManagedHostBinding) (context.Context, error) {
-	if r == nil || host == nil || !b.Valid() {
+func (r *Runtime) BindManagedDispatch(ctx context.Context, b ManagedHostBinding) (context.Context, error) {
+	if r == nil || r.managedHost == nil || !b.Valid() {
 		return ctx, ErrInvalidInput
 	}
+	host := r.managedHost.store
 	ka, e := r.ManagedRecoveryAuthority(ctx)
 	if e != nil {
 		return ctx, e
@@ -68,7 +69,7 @@ func (r *Runtime) BindManagedDispatch(ctx context.Context, host ManagedRecoveryH
 // Runtime copies share the same actual Store and must have the original Run.
 func (r *Runtime) ManagedDispatch(ctx context.Context, id string) (ManagedHostBinding, bool) {
 	b, ok := ctx.Value(managedDispatchKey{}).(managedDispatchBinding)
-	if !ok || b.runtime == nil || r == nil || b.runtime.store != r.store || b.binding.RunID != id {
+	if !ok || b.runtime == nil || r == nil || b.runtime.store != r.store || b.runtime.managedHost != r.managedHost || r.managedHost == nil || b.host != r.managedHost.store || b.binding.RunID != id {
 		return ManagedHostBinding{}, false
 	}
 	return managedClone(b.binding), true
@@ -136,10 +137,11 @@ func (r *Runtime) ParkManagedContinuation(ctx context.Context, id string) (Manag
 }
 
 // SelectManagedContinuation only accepts the fixed committed Host selection.
-func (r *Runtime) SelectManagedContinuation(ctx context.Context, host ManagedRecoveryHostStore, p ManagedParkedProof) (ManagedSelectionProof, error) {
-	if host == nil || !p.Matches(p.transfer.SafePoint.Host) {
+func (r *Runtime) SelectManagedContinuation(ctx context.Context, p ManagedParkedProof) (ManagedSelectionProof, error) {
+	if r == nil || r.managedHost == nil || !p.Matches(p.transfer.SafePoint.Host) {
 		return ManagedSelectionProof{}, ErrExecutionConflict
 	}
+	host := r.managedHost.store
 	current, e := r.LoadManagedRecovery(ctx, p.transfer.SafePoint.Host.RunID)
 	if e != nil {
 		return ManagedSelectionProof{}, e
@@ -173,13 +175,13 @@ func (r *Runtime) EnableManagedContinuation(ctx context.Context, p ManagedSelect
 	if !ok {
 		return ManagedTransfer{}, ErrExecutionRequired
 	}
-	// IDs are generated only after PARK and Host reservation; no old liveowner
-	// rejection calls configured entropy. They identify THIS actual claimant.
-	lid, e := r.NewID("managedlease")
+	// Fixed internal entropy only: even after PARK, no configured callback may
+	// run before Leave. These tokens identify THIS actual claimant.
+	lid, e := (randomIDSource{}).NewID("managedlease")
 	if e != nil {
 		return ManagedTransfer{}, e
 	}
-	gid, e := r.NewID("managedgrant")
+	gid, e := (randomIDSource{}).NewID("managedgrant")
 	if e != nil {
 		return ManagedTransfer{}, e
 	}
@@ -254,4 +256,40 @@ func (r *Runtime) SupportsManagedRecovery() bool {
 	}
 	_, ok := r.store.(ManagedRecoveryStore)
 	return ok
+}
+
+// Registration is immutable trusted configuration, like the Kernel Store.
+// Reconstructing a Runtime with a malicious Store changes that trust boundary;
+// an existing Runtime cannot replace it during a recovery call.
+type managedHostRegistration struct{ store ManagedRecoveryHostStore }
+
+func newManagedHostRegistration(host ManagedRecoveryHostStore) (*managedHostRegistration, error) {
+	if host == nil {
+		return nil, nil
+	}
+	value := reflect.ValueOf(host)
+	if value.Kind() != reflect.Pointer || value.IsNil() || !value.Type().Comparable() {
+		return nil, ErrInvalidInput
+	}
+	return &managedHostRegistration{store: host}, nil
+}
+func (r *Runtime) UsesManagedRecoveryHost(host ManagedRecoveryHostStore) bool {
+	if r == nil || r.managedHost == nil || host == nil {
+		return false
+	}
+	value := reflect.ValueOf(host)
+	return value.Kind() == reflect.Pointer && !value.IsNil() && value.Type().Comparable() && r.managedHost.store == host
+}
+func (r *Runtime) ReadManagedReservation(ctx context.Context, b ManagedHostBinding, id string) (ManagedHostReservation, error) {
+	if r == nil || r.managedHost == nil {
+		return ManagedHostReservation{}, ErrExecutionRequired
+	}
+	a, e := r.managedHost.store.ManagedRecoveryAuthority(ctx)
+	if e != nil {
+		return ManagedHostReservation{}, e
+	}
+	if a != b.HostAuthority {
+		return ManagedHostReservation{}, ErrExecutionConflict
+	}
+	return r.managedHost.store.ReadManagedRecovery(ctx, b, id)
 }

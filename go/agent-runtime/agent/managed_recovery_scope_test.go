@@ -101,3 +101,17 @@ func TestManagedContextFailedPreparationCannotCreateSafePoint(t *testing.T) {
 		t.Fatal("failed Prepare swallowed")
 	}
 }
+
+func TestManagedClaimantUsesFixedInternalEntropy(t *testing.T) {
+	first, err := newManagedClaimantID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := newManagedClaimantID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first) != len("managedclaimant-")+64 || first == second {
+		t.Fatal("claimants are not distinct internal entropy")
+	}
+}
