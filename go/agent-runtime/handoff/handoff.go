@@ -153,8 +153,9 @@ func (resolver staticChildRunnerResolver) ResolveChild(context.Context, Delegati
 
 // Coordinator starts or recovers stable delegated Child Agent Runs.
 type Coordinator struct {
-	resolver ChildRunnerResolver
-	requires []kernel.Capability
+	resolver      ChildRunnerResolver
+	requires      []kernel.Capability
+	deferredAgent *agent.Runner
 }
 
 // New constructs the Handoff capability without owning a root Run.
@@ -166,6 +167,23 @@ func New(children ChildRunner) (*Coordinator, error) {
 		resolver: staticChildRunnerResolver{children: children},
 		requires: []kernel.Capability{agent.CapabilityRunner},
 	}, nil
+}
+
+// NewDeferredAgent binds one concrete local Agent while leaving physical
+// continuation to the caller's existing worker. PrepareRun may execute Host
+// middleware; it does not dispatch Model or Tool work. Observation, continuation,
+// and cancellation retain New's separate identity and ownership checks.
+// This is a static local composition, not proof about any routed/remote child.
+func NewDeferredAgent(original *agent.Runner) (*Coordinator, error) {
+	if original == nil {
+		return nil, ErrInvalidDelegation
+	}
+	coordinator, err := New(original)
+	if err != nil {
+		return nil, err
+	}
+	coordinator.deferredAgent = original
+	return coordinator, nil
 }
 
 // NewRouted constructs Handoff with a finite host-owned child routing policy.
@@ -264,7 +282,11 @@ func (coordinator *Coordinator) StartOrLoad(
 	if !errors.Is(err, kernel.ErrNotFound) {
 		return Delegation{}, err
 	}
-	child, err = children.StartRun(ctx, agent.StartRequest{
+	start := children.StartRun
+	if coordinator.deferredAgent != nil {
+		start = coordinator.deferredAgent.PrepareRun
+	}
+	child, err = start(ctx, agent.StartRequest{
 		ID:               delegation.ChildRunID,
 		Actor:            parent.Run.Actor,
 		Thread:           parent.Run.Thread,
