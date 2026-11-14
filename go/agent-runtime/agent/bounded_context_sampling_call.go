@@ -23,7 +23,7 @@ func (r *Runner) prepareSelectedContext(ctx context.Context, source kernel.Snaps
 			callbackscope.Aborted(ticket)
 		}
 	}()
-	prepared, disposition, err := a.prepareSampling(callCtx, model.CloneRequest(request), cloneSampling(source))
+	prepared, disposition, err := a.prepareSampling(callCtx, model.CloneRequest(request), cloneSamplingSnapshot(source))
 	if disposition == samplingPrepared && (err != nil || !validPreparedModelRequest(request, prepared)) {
 		disposition = samplingUnknown
 		err = ErrInvalidRequest

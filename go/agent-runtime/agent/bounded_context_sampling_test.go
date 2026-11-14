@@ -4,13 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
+	"testing"
+	"time"
+
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/callbackscope"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
-	"testing"
-	"time"
 )
 
 type samplingTestPorts struct {
@@ -33,7 +35,7 @@ func (p *samplingTestPorts) PlanSampling(_ context.Context, r model.Request, s k
 	}
 	plan := SamplingPlan{Source: s, Request: r}
 	if p.plan != nil {
-		plan = cloneSampling(*p.plan)
+		plan = cloneSamplingPlan(*p.plan)
 		plan.Source = s
 		plan.Request = r
 	}
@@ -74,7 +76,7 @@ func (p *samplingTestPorts) PutArtifact(_ context.Context, a runtimecontext.Arti
 }
 func (p *samplingTestPorts) CommitSampling(_ context.Context, c SamplingCursor, next runtimecontext.Checkpoint) (SamplingCommitReceipt, error) {
 	p.calls++
-	p.commits = append(p.commits, cloneSampling(c))
+	p.commits = append(p.commits, cloneSamplingCursor(c))
 	if p.fail == "commit" {
 		return SamplingCommitReceipt{}, runtimecontext.ErrBudgetExceeded
 	}
@@ -90,7 +92,7 @@ func (p *samplingTestPorts) CommitSampling(_ context.Context, c SamplingCursor, 
 }
 func (p *samplingTestPorts) BindSampling(_ context.Context, c SamplingCursor, next runtimecontext.Checkpoint) (SamplingBindingReceipt, error) {
 	p.calls++
-	p.binds = append(p.binds, cloneSampling(c))
+	p.binds = append(p.binds, cloneSamplingCursor(c))
 	if p.fail == "bind" {
 		return SamplingBindingReceipt{}, runtimecontext.ErrBudgetExceeded
 	}
@@ -142,8 +144,9 @@ func TestSamplingPreparationActualCallRejectVersusHostError(t *testing.T) {
 			runner.rootCallbacks.unknown.Store(tc.oldUnknown)
 			source := kernel.Snapshot{Run: kernel.Run{ID: "run", Revision: 1}}
 			_, err = chain.Invoke(callbackscope.Bind(t.Context(), lifecycle), plugin.RunInvocation{RunID: "run", Operation: plugin.RunStart}, func(ctx context.Context) (kernel.Snapshot, error) {
-				prepared, e := runner.prepareSelectedContext(ctx, source, model.Request{RunID: "run", Model: "model"})
-				if e == nil && prepared.Model != "model" {
+				request := model.CloneRequest(model.Request{RunID: "run", Model: "model", Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("hello")}}})
+				prepared, e := runner.prepareSelectedContext(ctx, source, request)
+				if e == nil && !reflect.DeepEqual(prepared, request) {
 					t.Fatal("lost original prepared request")
 				}
 				if lifecycle.Complete() {
@@ -217,7 +220,7 @@ func TestSamplingFrozenCheckpointReceipts(t *testing.T) {
 			stamp := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 			turn := SamplingTurn{ID: "turn", SessionID: "session", ConfigSnapshotID: "config", ContextCheckpointID: cp.ID, ContextRef: samplingRef(cp), Status: "running", Revision: 17, CreatedAt: stamp, UpdatedAt: stamp}
 			plan := SamplingPlan{Checkpoint: &cp, Owner: true, WindowFingerprint: "new-window", Cursor: SamplingCursor{Turn: turn, Checkpoint: cp, ExpectedTurnCheckpointID: cp.ID, ExpectedHeadCheckpointID: "different-head-expectation", UpdatedAt: stamp.Add(time.Second)}}
-			baseline := cloneSampling(plan)
+			baseline := cloneSamplingPlan(plan)
 			ports := &samplingTestPorts{fail: failure, plan: &plan}
 			adapter, err := NewSamplingBoundedContextAdapter(manager, ports)
 			if err != nil {

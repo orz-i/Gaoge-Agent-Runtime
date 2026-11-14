@@ -23,11 +23,11 @@ const (
 )
 
 func (a *BoundedContextAdapter) prepareSampling(ctx context.Context, incoming model.Request, source kernel.Snapshot) (model.Request, samplingDisposition, error) {
-	plan, err := a.sampling.PlanSampling(ctx, model.CloneRequest(incoming), cloneSampling(source))
+	plan, err := a.sampling.PlanSampling(ctx, model.CloneRequest(incoming), cloneSamplingSnapshot(source))
 	if err != nil {
 		return model.Request{}, samplingUnknown, err
 	}
-	plan = cloneSampling(plan)
+	plan = cloneSamplingPlan(plan)
 	if !sameBoundedValue(plan.Source, source) || plan.Request.RunID != incoming.RunID {
 		return model.Request{}, samplingUnknown, ErrInvalidRequest
 	}
@@ -209,7 +209,7 @@ func samplingDurable(messages []model.Message, p SamplingPlan) []model.Message {
 	return out
 }
 func (a *BoundedContextAdapter) evaluateSampling(ctx context.Context, p SamplingPlan, r model.Request, w runtimecontext.Window, native bool) (SamplingEvaluation, error) {
-	result, err := a.sampling.EvaluateSampling(ctx, cloneSampling(p), model.CloneRequest(r), runtimecontext.CloneWindow(w), native)
+	result, err := a.sampling.EvaluateSampling(ctx, cloneSamplingPlan(p), model.CloneRequest(r), runtimecontext.CloneWindow(w), native)
 	if err != nil {
 		return SamplingEvaluation{}, err
 	}
@@ -222,7 +222,7 @@ func (a *BoundedContextAdapter) evaluateSampling(ctx context.Context, p Sampling
 	}{p, r, w, native, result}) {
 		return SamplingEvaluation{}, ErrInvalidRequest
 	}
-	return cloneSampling(result), nil
+	return cloneSamplingEvaluation(result), nil
 }
 func (a *BoundedContextAdapter) putSamplingArtifacts(ctx context.Context, artifacts []runtimecontext.Artifact) error {
 	for _, artifact := range artifacts {
@@ -257,20 +257,20 @@ func (a *BoundedContextAdapter) commitSampling(ctx context.Context, p *SamplingP
 	if next.ID == p.Checkpoint.ID {
 		return nil
 	}
-	cursor := cloneSampling(p.Cursor)
+	cursor := cloneSamplingCursor(p.Cursor)
 	expected := cursor.Turn
 	expected.ContextCheckpointID = next.ID
 	expected.ContextRef = samplingRef(next)
 	expected.Revision++
 	expected.UpdatedAt = cursor.UpdatedAt
-	receipt, err := a.sampling.CommitSampling(ctx, cloneSampling(cursor), runtimecontext.CloneCheckpoint(next))
+	receipt, err := a.sampling.CommitSampling(ctx, cloneSamplingCursor(cursor), runtimecontext.CloneCheckpoint(next))
 	if err != nil {
 		return err
 	}
 	if !sameBoundedValue(receipt.Turn, expected) || !sameBoundedValue(receipt.Checkpoint, next) || receipt.ExpectedTurnCheckpointID != cursor.ExpectedTurnCheckpointID || receipt.ExpectedHeadCheckpointID != cursor.ExpectedHeadCheckpointID {
 		return ErrInvalidRequest
 	}
-	bound, err := a.sampling.BindSampling(ctx, cloneSampling(cursor), runtimecontext.CloneCheckpoint(next))
+	bound, err := a.sampling.BindSampling(ctx, cloneSamplingCursor(cursor), runtimecontext.CloneCheckpoint(next))
 	if err != nil {
 		return err
 	}

@@ -3,11 +3,12 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"time"
+
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
-	"time"
 )
 
 // SamplingTurn is the complete durable Turn projection needed by a checkpoint
@@ -83,16 +84,4 @@ func NewSamplingBoundedContextAdapter(manager *runtimecontext.Manager, ports Sam
 }
 func samplingRef(c runtimecontext.Checkpoint) SamplingCheckpointRef {
 	return SamplingCheckpointRef{ID: c.ID, Generation: c.Generation, Revision: c.Revision, LineageHash: c.LineageHash, CoveredThroughSourceID: c.CoveredThroughSourceID, ContentHash: c.ContentHash}
-}
-func cloneSampling[T any](v T) T {
-	// Only the closed, typed DTOs in this file use this helper.
-	raw, err := json.Marshal(v)
-	if err != nil {
-		panic(err)
-	}
-	var out T
-	if err = json.Unmarshal(raw, &out); err != nil {
-		panic(err)
-	}
-	return out
 }
