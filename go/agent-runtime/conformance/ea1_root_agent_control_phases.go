@@ -165,7 +165,7 @@ func ea1NewControlFixture(t *testing.T, factory func(*testing.T) (kernel.Store, 
 	f.host = &ea1ControlHost{t: t, request: f.request}
 	// Setup performs real Store reads under the Model call deadline. Keep this
 	// allowance separate from the measured control runner and its fault clocks.
-	setup := f.runnerWithModelTimeout(rt, true, false, time.Second)
+	setup := f.runnerWithModelTimeout(rt, true, false, 500*time.Millisecond)
 	s.afterCreate = func(_ context.Context, v kernel.Snapshot) error {
 		f.created = v
 		if v.Run.ParentRunID != "" || f.request.OriginFingerprint != "" || !setup.VerifyFrozenStartRequest(v, f.request) {
