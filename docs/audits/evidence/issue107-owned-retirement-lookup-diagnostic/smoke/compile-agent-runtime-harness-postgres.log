@@ -1,0 +1,5 @@
+SOURCE_SHA=81e666128e8e9ce2a2921248909d95deb45e99fc
+COMMAND=go -C go/agent-runtime-harness-postgres test -p 2 -run '^$' ./...
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-postgres	0.568s [no tests to run]
+
+EXIT_CODE=0

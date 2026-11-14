@@ -669,7 +669,13 @@ func ea1MWExecute(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.S
 		if !errors.Is(out.err, f.failure) || f.storeMW.markCommits == 0 || f.storeMW.finishCalls == 0 {
 			t.Fatalf("actual Mark ACKlost/Finish cut not reached: %v", out.err)
 		}
+		if !child && (f.storeMW.markCalls != 2 || f.storeMW.markCommits != 2 || f.storeMW.finishCalls != 1) {
+			t.Fatalf("exact Root owner/recovery Mark ACKloss sequence: calls=%d committed=%d finish=%d", f.storeMW.markCalls, f.storeMW.markCommits, f.storeMW.finishCalls)
+		}
 		g := f.scope(f.peer)
+		if !child {
+			ea1AssertOriginalRootCompletion(t, f.peer, g, s, true, true)
+		}
 		f.receipts(s, true)
 		f.layer.rejected("all")
 		f.unchanged(f.peer, s, g)

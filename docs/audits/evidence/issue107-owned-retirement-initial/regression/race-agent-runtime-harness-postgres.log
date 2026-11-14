@@ -1,0 +1,5 @@
+SOURCE_SHA=aa20e028c6b9d28af2f2e623eb954d693d6be214
+COMMAND=go -C go/agent-runtime-harness-postgres test -p 2 -race -count=1 -timeout=20m ./...
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-postgres	50.248s
+
+EXIT_CODE=0

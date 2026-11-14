@@ -1,0 +1,11 @@
+SOURCE_SHA=da341986a46207691933cb536bf1b1b94dd3d7c3
+BASE_SHA=c79d2eea87952bc09d65cee2c4657215873c1262
+COMMAND=go -C go/agent-runtime test -p 2 -race -count=1 -v ./continuation -run ^TestApprovalWakeupCannotStealOriginalOwnerSettlement$
+=== RUN   TestApprovalWakeupCannotStealOriginalOwnerSettlement
+    approval_settlement_race_test.go:170: resolved=kernel.Run{ID:"run-3", Kind:"agent", Actor:kernel.ActorRef{TenantID:"tenant", ActorID:"actor"}, Thread:kernel.ThreadRef{Kind:"conversation", ID:"thread"}, RequestID:"parent-team:handoff-2", ParentRunID:"", Goal:"publish once", Status:"running", Revision:0x8, ErrorCode:"", ErrorDetail:"", DeadlineAt:<nil>, EndedAt:<nil>, CreatedAt:time.Date(2026, time.November, 13, 12, 58, 59, 221978000, time.UTC), UpdatedAt:time.Date(2026, time.November, 13, 12, 58, 59, 234902000, time.UTC)} err=agent original root callback result is uncertain
+        kernel execution lease is not current; originalGrant=kernel.ChildExecutionGrant{ID:"ownedgrant-6", ChildRunID:"run-3", ExpectedRevision:0x7, ExecutionOwnerID:"agentowner-1", ExecutionLeaseID:"e5e480b3a46f41818a2aa5cfae116cc2", ExecutionEpoch:0x3, AdmissionSourceHash:"0e2389b6843e9c13df145083224e01b73953fa3b3d9988ffbf70f8241cefeafd", AdmissionOperation:"approval"} originalLease=kernel.ExecutionLease{RunID:"run-3", OwnerID:"agentowner-1", LeaseID:"e5e480b3a46f41818a2aa5cfae116cc2", Epoch:0x3, ExpiresAt:time.Date(2026, time.November, 13, 13, 0, 34, 232383000, time.UTC)} tools=0 models=1
+--- FAIL: TestApprovalWakeupCannotStealOriginalOwnerSettlement (0.03s)
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/continuation	1.123s
+FAIL
+EXIT_CODE=1

@@ -1,0 +1,6 @@
+SOURCE_SHA=aa20e028c6b9d28af2f2e623eb954d693d6be214
+COMMAND=go -C go/agent-runtime-sqlite test -p 2 -run '^$' ./...
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite	0.515s [no tests to run]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/examples/embedded	0.515s [no tests to run]
+
+EXIT_CODE=0

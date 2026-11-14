@@ -15,8 +15,8 @@ import (
 	sqlite3 "modernc.org/sqlite"
 )
 
-// Schema v5 adds source-bound managed recovery; older versions require explicit migration.
-const schemaVersion = 5
+// Schema v6 adds genuine Root-owned retirement receipts; older versions require explicit migration.
+const schemaVersion = 6
 
 var (
 	ErrUnsupportedSchema = errors.New("unsupported SQLite runtime schema")
@@ -205,6 +205,8 @@ func openStoreOptions(ctx context.Context, path string, create bool, migrate int
 		err = store.migrateV3ToV4(ctx)
 	case 5:
 		err = store.migrateV4ToV5(ctx)
+	case 6:
+		err = store.migrateV5ToV6(ctx)
 	default:
 		err = store.initialize(ctx, create)
 	}
@@ -325,7 +327,7 @@ func (s *Store) initialize(ctx context.Context, create bool) error {
 				return fmt.Errorf("create SQLite runtime schema: %w", err)
 			}
 		}
-		if _, err = tx.ExecContext(ctx, "PRAGMA user_version = 5"); err != nil {
+		if _, err = tx.ExecContext(ctx, "PRAGMA user_version = 6"); err != nil {
 			return err
 		}
 		if err = initializeManagedAuthority(ctx, tx); err != nil {
@@ -339,7 +341,7 @@ func (s *Store) initialize(ctx context.Context, create bool) error {
 	return nil
 }
 
-var schemaDDL = append([]string{
+var schemaDDL = append(append([]string{
 	`CREATE TABLE runtime_runs (
 		run_id TEXT PRIMARY KEY,
 		scope_id TEXT NOT NULL,
@@ -377,6 +379,7 @@ var schemaDDL = append([]string{
 		callback_return_source_hash TEXT NOT NULL DEFAULT '',
 		callback_host_completed INTEGER NOT NULL DEFAULT 0,
 		callback_lease_owned INTEGER NOT NULL DEFAULT 0,
+		settlement_evidence_json BLOB,
 		PRIMARY KEY(grant_id,parent_run_id)
 	)`,
 	`CREATE INDEX runtime_child_grants_parent ON runtime_child_effect_grants(parent_run_id,grant_id)`,
@@ -429,7 +432,7 @@ var schemaDDL = append([]string{
 		UNIQUE(parent_run_id, kind, owner_node_id)
 	)`,
 	`CREATE INDEX runtime_run_relations_parent_order ON runtime_run_relations(parent_run_id, created_ns, kind, owner_node_id, child_run_id)`,
-}, managedSchemaDDL...)
+}, managedSchemaDDL...), ownedRetirementSchemaDDL...)
 
 func errorCode(err error) int {
 	var se *sqlite3.Error

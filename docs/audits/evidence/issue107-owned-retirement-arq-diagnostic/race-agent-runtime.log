@@ -1,0 +1,43 @@
+SOURCE_SHA=00d0e69a0d0af64f37df28c98b17cb6b45c63af1
+COMMAND=go -C go/agent-runtime test -p 2 -race -count=1 -timeout=20m ./...
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/continuation	1.909s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/interaction	[no test files]
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/runfeed	[no test files]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/topology	1.804s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent	5.183s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/bootstrap	1.573s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget	1.593s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/compose	1.623s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance	[no test files]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context	11.554s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/continuation	9.227s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/evaluation	1.828s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/examples/configured	[no test files]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/examples/quickstart	2.083s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/groupchat	1.800s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff	1.637s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/interaction	[no test files]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/callbackscope	2.084s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol	1.605s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract	2.120s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel	1.629s
+--- FAIL: TestEA1RootAgentReconcilePhasesMemory (4.38s)
+    --- FAIL: TestEA1RootAgentReconcilePhasesMemory/P4/model (0.01s)
+        ea1_root_agent_reconcile_phases.go:376: actual P4 commit/ACK cut missing: cuts=1 err=<nil>
+    --- FAIL: TestEA1RootAgentReconcilePhasesMemory/P4/tool (0.01s)
+        ea1_root_agent_reconcile_phases.go:376: actual P4 commit/ACK cut missing: cuts=1 err=<nil>
+FAIL
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory	105.554s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model	1.705s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/observability	4.079s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin	1.137s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/queue	1.896s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runfeed	1.473s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation	1.919s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/team	1.517s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools	1.511s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workbench	2.274s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workflow	1.808s
+FAIL
+
+EXIT_CODE=1

@@ -1,0 +1,6 @@
+SOURCE_SHA=00d0e69a0d0af64f37df28c98b17cb6b45c63af1
+COMMAND=go -C go/agent-runtime-harness test -p 2 -run '^$' ./...
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness	0.141s [no tests to run]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness/examples/session	0.065s [no tests to run]
+
+EXIT_CODE=0

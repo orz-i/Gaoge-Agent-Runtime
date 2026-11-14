@@ -433,6 +433,9 @@ func ea1ControlSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, 
 			t.Fatalf("real original callback return missing: %v", e)
 		}
 	}
+	if entry == "approval" {
+		ea1AssertOriginalRootCompletion(t, rt, grant, before, true, true)
+	}
 	if entry == "toolwait" && grant != originalGrant {
 		t.Fatal("ToolWait invented new authority")
 	}
@@ -442,7 +445,7 @@ func ea1ControlSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, 
 	if phase == "P3" && wrapped.markCommits != 0 {
 		t.Fatal("P3 unexpectedly marked")
 	}
-	if phase == "P4" && wrapped.markCommits != 1 {
+	if phase == "P4" && ((entry == "approval" && (wrapped.markCalls != 2 || wrapped.markCommits != 2 || wrapped.finishCalls != 1)) || (entry == "toolwait" && wrapped.markCommits != 1)) {
 		t.Fatal("P4 actual Mark ACK loss not reached")
 	}
 	if wrapped.markCalls == 0 {

@@ -1,0 +1,46 @@
+[
+  [
+    "lint-agent-runtime-sqlite",
+    "cd go/agent-runtime-sqlite && golangci-lint run ./..."
+  ],
+  [
+    "lint-agent-runtime-postgres",
+    "cd go/agent-runtime-postgres && golangci-lint run ./..."
+  ],
+  [
+    "lint-agent-runtime-harness",
+    "cd go/agent-runtime-harness && golangci-lint run ./..."
+  ],
+  [
+    "lint-agent-runtime-harness-postgres",
+    "cd go/agent-runtime-harness-postgres && golangci-lint run ./..."
+  ],
+  [
+    "lint-agent-runtime-http",
+    "cd go/agent-runtime-http && golangci-lint run ./..."
+  ],
+  [
+    "lint-agent-runtime-provider",
+    "cd go/agent-runtime-provider && golangci-lint run ./..."
+  ],
+  [
+    "lint-agent-runtime-a2a",
+    "cd go/agent-runtime-a2a && golangci-lint run ./..."
+  ],
+  [
+    "lint-agent-runtime-mcp",
+    "cd go/agent-runtime-mcp && golangci-lint run ./..."
+  ],
+  [
+    "lint-agent-runtime-redis",
+    "cd go/agent-runtime-redis && golangci-lint run ./..."
+  ],
+  [
+    "lint-agent-runtime-otel",
+    "cd go/agent-runtime-otel && golangci-lint run ./..."
+  ],
+  [
+    "lint-agent-runtime-harness-examples-task-agent",
+    "cd go/agent-runtime-harness/examples/task-agent && golangci-lint run ./..."
+  ]
+]

@@ -551,11 +551,12 @@ type ea1HACPortSet struct {
 	kernel.ControlStore
 	kernel.ChildExecutionStore
 	kernel.OwnedPhysicalExecutionStore
+	kernel.OwnedRetirementStore
 	kernel.ExecutionQuarantineStore
 }
 
 func ea1HACPorts(s kernel.Store) *ea1HACPortSet {
-	return &ea1HACPortSet{s, s.(kernel.ExecutionStore), s.(kernel.ControlStore), s.(kernel.ChildExecutionStore), s.(kernel.OwnedPhysicalExecutionStore), s.(kernel.ExecutionQuarantineStore)}
+	return &ea1HACPortSet{s, s.(kernel.ExecutionStore), s.(kernel.ControlStore), s.(kernel.ChildExecutionStore), s.(kernel.OwnedPhysicalExecutionStore), s.(kernel.OwnedRetirementStore), s.(kernel.ExecutionQuarantineStore)}
 }
 
 type ea1HACKernelBackend struct {

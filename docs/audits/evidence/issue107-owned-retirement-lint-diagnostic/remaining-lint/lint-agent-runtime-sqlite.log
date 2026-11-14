@@ -1,0 +1,25 @@
+SOURCE_SHA=a3cc2feaf9c766c8dfd5e54607822d4b1c561fcf
+COMMAND=cd go/agent-runtime-sqlite && golangci-lint run ./...
+go/agent-runtime-sqlite/owned_retirement_identity_test.go:19:21: Error return value of `store.Close` is not checked (errcheck)
+			defer store.Close()
+			                 ^
+go/agent-runtime-sqlite/owned_retirement_identity_test.go:60:21: Error return value of `rows.Close` is not checked (errcheck)
+				defer rows.Close()
+				                ^
+go/agent-runtime-sqlite/owned_retirement_migration_test.go:51:19: Error return value of `rows.Close` is not checked (errcheck)
+		defer rows.Close()
+		                ^
+go/agent-runtime-sqlite/owned_retirement_migration_test.go:79:21: Error return value of `current.Close` is not checked (errcheck)
+	defer current.Close()
+	                   ^
+go/agent-runtime-sqlite/owned_retirement_identity_test.go:5:1: File is not properly formatted (goimports)
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+^
+go/agent-runtime-sqlite/owned_retirement_migration_test.go:6:1: File is not properly formatted (goimports)
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+^
+6 issues:
+* errcheck: 4
+* goimports: 2
+
+EXIT_CODE=1

@@ -186,3 +186,39 @@ func (s *beforeModelIntentStore) QuarantineExecution(ctx context.Context, q kern
 func (s *beforeModelIntentStore) RepairExecutionQuarantine(ctx context.Context, q kernel.ExecutionQuarantine) error {
 	return s.Store.(kernel.ExecutionQuarantineStore).RepairExecutionQuarantine(ctx, q)
 }
+
+// Preserve the backend's atomic retirement authority through this fault decorator.
+func (s *resumeTurnFaultStore) LoadOwnedRetirement(ctx context.Context, id string) (kernel.OwnedRetirementReceipt, error) {
+	return s.Store.(kernel.OwnedRetirementStore).LoadOwnedRetirement(ctx, id)
+}
+func (s *resumeTurnFaultStore) AcknowledgeOwnedRetirement(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.OwnedRetirementAcknowledgement) (kernel.OwnedRetirementAckResult, error) {
+	return s.Store.(kernel.OwnedRetirementStore).AcknowledgeOwnedRetirement(ctx, g, p)
+}
+
+// Preserve the backend's atomic retirement authority through this fault decorator.
+func (s *preDispatchReadFaultStore) LoadOwnedRetirement(ctx context.Context, id string) (kernel.OwnedRetirementReceipt, error) {
+	return s.Store.(kernel.OwnedRetirementStore).LoadOwnedRetirement(ctx, id)
+}
+func (s *preDispatchReadFaultStore) AcknowledgeOwnedRetirement(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.OwnedRetirementAcknowledgement) (kernel.OwnedRetirementAckResult, error) {
+	return s.Store.(kernel.OwnedRetirementStore).AcknowledgeOwnedRetirement(ctx, g, p)
+}
+
+// Preserve the backend's atomic retirement authority through this fault decorator.
+func (s *beforeModelIntentStore) LoadOwnedRetirement(ctx context.Context, id string) (kernel.OwnedRetirementReceipt, error) {
+	return s.Store.(kernel.OwnedRetirementStore).LoadOwnedRetirement(ctx, id)
+}
+func (s *beforeModelIntentStore) AcknowledgeOwnedRetirement(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.OwnedRetirementAcknowledgement) (kernel.OwnedRetirementAckResult, error) {
+	return s.Store.(kernel.OwnedRetirementStore).AcknowledgeOwnedRetirement(ctx, g, p)
+}
+
+func (s *resumeTurnFaultStore) LookupOwnedRetirementForRun(ctx context.Context, id string) (kernel.OwnedRetirementReceipt, error) {
+	return s.Store.(kernel.OwnedRetirementStore).LookupOwnedRetirementForRun(ctx, id)
+}
+
+func (s *preDispatchReadFaultStore) LookupOwnedRetirementForRun(ctx context.Context, id string) (kernel.OwnedRetirementReceipt, error) {
+	return s.Store.(kernel.OwnedRetirementStore).LookupOwnedRetirementForRun(ctx, id)
+}
+
+func (s *beforeModelIntentStore) LookupOwnedRetirementForRun(ctx context.Context, id string) (kernel.OwnedRetirementReceipt, error) {
+	return s.Store.(kernel.OwnedRetirementStore).LookupOwnedRetirementForRun(ctx, id)
+}

@@ -154,7 +154,7 @@ func TestRejectUnexpectedV1SchemaObjectsBeforeWAL(t *testing.T) {
 				t.Fatal(err)
 			}
 			var version int
-			if err = raw.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 5 {
+			if err = raw.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 6 {
 				t.Fatalf("fixture user_version=%d err=%v", version, err)
 			}
 			if err = raw.Close(); err != nil {

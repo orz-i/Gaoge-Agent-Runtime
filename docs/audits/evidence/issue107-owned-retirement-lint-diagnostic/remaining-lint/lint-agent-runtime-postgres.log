@@ -1,0 +1,12 @@
+SOURCE_SHA=a3cc2feaf9c766c8dfd5e54607822d4b1c561fcf
+COMMAND=cd go/agent-runtime-postgres && golangci-lint run ./...
+go/agent-runtime-postgres/owned_retirement_identity_test.go:5:1: File is not properly formatted (goimports)
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models"
+^
+go/agent-runtime-postgres/owned_retirement_test.go:4:1: File is not properly formatted (goimports)
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance"
+^
+2 issues:
+* goimports: 2
+
+EXIT_CODE=1

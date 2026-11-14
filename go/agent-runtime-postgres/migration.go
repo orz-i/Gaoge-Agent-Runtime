@@ -16,6 +16,7 @@ func Models() []interface{} {
 	return []interface{}{
 		&models.KernelRunRecord{}, &models.KernelEventRecord{}, &models.KernelTransitionOutboxRecord{},
 		&models.KernelChildEffectGrantRecord{},
+		&models.KernelOwnedRetirementRecord{},
 		&models.KernelManagedAuthorityRecord{}, &models.KernelManagedTransferRecord{}, &models.KernelManagedHistoryRecord{},
 		&models.RunRelationRecord{},
 		&models.WorkflowDefinitionRevisionRecord{}, &models.WorkflowDefinitionHeadRecord{},

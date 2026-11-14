@@ -216,20 +216,13 @@ func ea1RootStartSettlement(t *testing.T, factory func(*testing.T) (kernel.Store
 		t.Fatal("original owned source binding missing")
 	}
 	if phase == "P4" && !unknownHost {
-		if wrapped.markCommits != 1 || wrapped.finishCalls == 0 {
+		if wrapped.markCalls != 2 || wrapped.markCommits != 2 || wrapped.finishCalls != 1 {
 			t.Fatal("actual original Mark commit/ACK-loss not reached")
 		}
 	} else if !unknownHost && (wrapped.markCommits != 0 || wrapped.markCalls < 2) {
 		t.Fatal("P3 did not retain unmarked callback-return fact")
 	}
-	completion, completionErr := rt.LookupOwnedPhysicalCallbackReturn(t.Context(), grant)
-	if phase == "P3" {
-		if completionErr != nil || completion.HostCompleted == unknownHost || !completion.LeaseOwned || completion.ReturnRevision != before.Run.Revision {
-			t.Fatalf("original callback return fact: %+v %v", completion, completionErr)
-		}
-	} else if !errors.Is(completionErr, kernel.ErrNotFound) {
-		t.Fatalf("marked ACK-loss fabricated callback-return fallback: %v", completionErr)
-	}
+	completion := ea1AssertOriginalRootCompletion(t, rt, grant, before, !unknownHost, true)
 	ea1AssertStartSettlementReceipt(t, physical, req, definition, before, withTool)
 	freshStore := reopen()
 	freshRT, e := kernel.New(kernel.Dependencies{Store: freshStore})
@@ -373,4 +366,18 @@ func ea1StartSettlementJSONEqual(t *testing.T, label string, actual, expected an
 	if !reflect.DeepEqual(normalize(actual), normalize(expected)) {
 		t.Fatalf("%s differs from actual physical return: got %#v want %#v", label, actual, expected)
 	}
+}
+
+// The new retirement protocol records the actual whole-callback fact before
+// either owner Mark or its recovered retry. Compare the entire immutable fact.
+func ea1AssertOriginalRootCompletion(t *testing.T, rt *kernel.Runtime, grant kernel.ChildExecutionGrant, source kernel.Snapshot, hostCompleted, leaseOwned bool) kernel.OwnedPhysicalCallbackCompletion {
+	t.Helper()
+	outcome := kernel.OwnedPhysicalCallbackOutcome{HostCompleted: hostCompleted, LeaseOwned: leaseOwned}
+	hash := sha256.Sum256(kernel.OwnedPhysicalCallbackReturnPayload(source, outcome))
+	want := kernel.OwnedPhysicalCallbackCompletion{GrantID: grant.ID, ReturnRevision: source.Run.Revision, ReturnSourceHash: hex.EncodeToString(hash[:]), HostCompleted: hostCompleted, LeaseOwned: leaseOwned}
+	got, e := rt.LookupOwnedPhysicalCallbackReturn(t.Context(), grant)
+	if e != nil || got != want {
+		t.Fatalf("original whole callback binding: got=%+v want=%+v err=%v", got, want, e)
+	}
+	return got
 }

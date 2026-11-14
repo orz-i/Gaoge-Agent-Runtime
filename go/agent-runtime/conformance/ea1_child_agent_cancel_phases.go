@@ -197,12 +197,16 @@ func ea1NewChildCancelFixture(t *testing.T, factory func(*testing.T) (kernel.Sto
 	return f
 }
 func (f *ea1ChildCancelFixture) runner(rt *kernel.Runtime, owner string, host bool) *agent.Runner {
+	return f.runnerWithModelTimeout(rt, owner, host, 100*time.Millisecond)
+}
+
+func (f *ea1ChildCancelFixture) runnerWithModelTimeout(rt *kernel.Runtime, owner string, host bool, modelTimeout time.Duration) *agent.Runner {
 	var middleware []plugin.RunMiddleware
 	if host {
 		middleware = []plugin.RunMiddleware{f.host}
 	}
 	deps := agent.Dependencies{Runtime: rt, Model: f.physical, Catalog: f.registry, Executor: f.registry, RunMiddleware: middleware, ToolMiddleware: []plugin.ToolMiddleware{f.physical},
-		Execution: agent.ExecutionPolicy{Model: agent.CallPolicy{Timeout: 100 * time.Millisecond, MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}, Tool: agent.CallPolicy{Timeout: 100 * time.Millisecond, MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}}}
+		Execution: agent.ExecutionPolicy{Model: agent.CallPolicy{Timeout: modelTimeout, MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}, Tool: agent.CallPolicy{Timeout: 100 * time.Millisecond, MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}}}
 	if f.native {
 		deps.RunExecution = &agent.RunExecution{OwnerID: owner, LeaseDuration: 2 * time.Second}
 	}
@@ -403,7 +407,9 @@ func ea1ChildCancelSettlement(t *testing.T, factory func(*testing.T) (kernel.Sto
 	f := ea1NewChildCancelFixture(t, factory, tool, native)
 	f.store.mode = phase
 	f.store.markAttempts = 0
-	_, e := f.runner(f.rt, "original-settlement-owner", true).Resume(t.Context(), f.request.ID, f.prepared.Run.Revision)
+	// The successful Model callback reads the real Store before the Mark fault.
+	// This is not a Model timeout vector; keep all other runners at 100ms.
+	_, e := f.runnerWithModelTimeout(f.rt, "original-settlement-owner", true, 500*time.Millisecond).Resume(t.Context(), f.request.ID, f.prepared.Run.Revision)
 	if !errors.Is(e, f.store.fault) || !errors.Is(e, kernel.ErrChildExecutionBusy) || f.store.markAttempts != 1 || f.store.finishes != 0 {
 		t.Fatal("actual original Mark cut not reached exactly once", e)
 	}

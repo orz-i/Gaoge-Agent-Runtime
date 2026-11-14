@@ -58,9 +58,14 @@ type continuationIntegrationFixture struct {
 	model         *approvalIntegrationModel
 }
 
-func newContinuationIntegrationFixture(t *testing.T) continuationIntegrationFixture {
+type integrationRuntimeStore interface {
+	kernel.Store
+	kernel.TransitionOutbox
+}
+
+func newContinuationIntegrationFixture(t *testing.T, stores ...integrationRuntimeStore) continuationIntegrationFixture {
 	t.Helper()
-	runtime, scheduler, relations, delivery := newIntegrationRuntime(t)
+	runtime, scheduler, relations, delivery := newIntegrationRuntime(t, stores...)
 	executions := &atomic.Int32{}
 	registry := newIntegrationToolRegistry(t, executions)
 	agentRunner, model := newIntegrationAgent(t, runtime, registry)
@@ -75,6 +80,7 @@ func newContinuationIntegrationFixture(t *testing.T) continuationIntegrationFixt
 
 func newIntegrationRuntime(
 	t *testing.T,
+	stores ...integrationRuntimeStore,
 ) (*kernel.Runtime, *continuation.Scheduler, *runrelation.Registry, *queuecore.Memory) {
 	t.Helper()
 	relations, err := runrelation.New(memory.NewRunRelationStore(), nil)
@@ -82,7 +88,13 @@ func newIntegrationRuntime(
 		t.Fatal(err)
 	}
 	delivery := queuecore.NewMemory(queuecore.Dependencies{})
-	store := memory.NewStore()
+	var store integrationRuntimeStore = memory.NewStore()
+	if len(stores) > 1 {
+		t.Fatal("at most one integration Store may be supplied")
+	}
+	if len(stores) == 1 {
+		store = stores[0]
+	}
 	var runtime *kernel.Runtime
 	scheduler, err := continuation.NewScheduler(continuation.SchedulerDependencies{
 		Outbox: store, Queue: delivery, Relations: relations,

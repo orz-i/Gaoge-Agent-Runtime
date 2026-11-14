@@ -1,0 +1,14 @@
+2026-11-13T14:15:49Z compile-agent-runtime START
+2026-11-13T14:15:55Z compile-agent-runtime EXIT 0
+2026-11-13T14:15:55Z compile-agent-runtime-sqlite START
+2026-11-13T14:15:57Z compile-agent-runtime-sqlite EXIT 0
+2026-11-13T14:15:57Z compile-agent-runtime-postgres START
+2026-11-13T14:16:01Z compile-agent-runtime-postgres EXIT 0
+2026-11-13T14:16:01Z compile-agent-runtime-harness START
+2026-11-13T14:16:09Z compile-agent-runtime-harness EXIT 0
+2026-11-13T14:16:09Z compile-agent-runtime-harness-postgres START
+2026-11-13T14:16:12Z compile-agent-runtime-harness-postgres EXIT 0
+2026-11-13T14:16:12Z compile-agent-runtime-http START
+2026-11-13T14:16:16Z compile-agent-runtime-http EXIT 0
+2026-11-13T14:16:16Z smoke-root START
+2026-11-13T14:16:27Z smoke-root EXIT 1

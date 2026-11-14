@@ -1,0 +1,6 @@
+SOURCE_SHA=a3cc2feaf9c766c8dfd5e54607822d4b1c561fcf
+COMMAND=go -C go/agent-runtime-postgres test -p 2 -run '^$' ./...
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	0.975s [no tests to run]
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]
+
+EXIT_CODE=0

@@ -192,9 +192,17 @@ func (store *KernelStore) MarkChildExecutionSettled(ctx context.Context, grant k
 				return kernel.ErrExecutionConflict
 			}
 		}
+		updates := map[string]any{"settled_revision": revision}
+		if grant.IsOwned() {
+			evidence, evidenceErr := pgOwnedMarkEvidence(records[0], grant, snapshot, permit)
+			if evidenceErr != nil {
+				return evidenceErr
+			}
+			updates["settlement_evidence"] = evidence
+		}
 		result := tx.Model(&models.KernelChildEffectGrantRecord{}).
 			Where("grant_id = ? AND child_run_id = ? AND start_revision = ? AND (settled_revision = 0 OR settled_revision = ?)",
-				grant.ID, grant.ChildRunID, grant.ExpectedRevision, revision).Update("settled_revision", revision)
+				grant.ID, grant.ChildRunID, grant.ExpectedRevision, revision).UpdateColumns(updates)
 		if result.Error != nil {
 			return translateKernelApplyError(result.Error)
 		}
@@ -244,6 +252,18 @@ func (store *KernelStore) FinishChildExecution(ctx context.Context, grant kernel
 		}
 		if count != total {
 			return kernel.ErrExecutionConflict
+		}
+		if grant.IsOwned() {
+			if !grant.MatchesExecution(pgManagedLease(child)) {
+				return kernel.ErrExecutionConflict
+			}
+			snapshot, e := kernelSnapshotFrom(child)
+			if e != nil {
+				return e
+			}
+			if e = pgPersistOwnedRetirement(tx, records[0], grant, snapshot); e != nil {
+				return e
+			}
 		}
 		result := tx.Where("grant_id = ? AND child_run_id = ? AND start_revision = ? AND settled_revision = ?",
 			grant.ID, grant.ChildRunID, grant.ExpectedRevision, child.Revision).Delete(&models.KernelChildEffectGrantRecord{})

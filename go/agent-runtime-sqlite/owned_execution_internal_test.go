@@ -92,6 +92,29 @@ func TestOwnedSchemaMigrationPreservesOriginalGrants(t *testing.T) {
 	if err = MigrateV4ToV5(t.Context(), path); err != nil {
 		t.Fatalf("repeat V5 migration: %v", err)
 	}
+	raw, err = sql.Open("sqlite", "file:"+filepath.ToSlash(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = raw.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 5 {
+		t.Fatalf("V4ToV5 destination: %d %v", version, err)
+	}
+	var oldNamespace string
+	if err = raw.QueryRow("SELECT namespace FROM runtime_managed_authority").Scan(&oldNamespace); err != nil {
+		t.Fatal(err)
+	}
+	if err = raw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = OpenExisting(t.Context(), path); !errors.Is(err, ErrUnsupportedSchema) {
+		t.Fatalf("implicit V5 migration: %v", err)
+	}
+	if err = MigrateV5ToV6(t.Context(), path); err != nil {
+		t.Fatal(err)
+	}
+	if err = MigrateV5ToV6(t.Context(), path); err != nil {
+		t.Fatalf("repeat V6 migration: %v", err)
+	}
 	current, err := OpenExisting(t.Context(), path)
 	if err != nil {
 		t.Fatal(err)
@@ -101,10 +124,20 @@ func TestOwnedSchemaMigrationPreservesOriginalGrants(t *testing.T) {
 	if e != nil || !authority.Valid() {
 		t.Fatalf("V5 authority: %+v %v", authority, e)
 	}
-	if e = current.db.QueryRow("PRAGMA user_version").Scan(&version); e != nil || version != 5 {
-		t.Fatalf("V4ToV5 destination: %d %v", version, e)
+	if authority.Namespace != oldNamespace {
+		t.Fatal("migration replaced authority")
+	}
+	if e = current.db.QueryRow("PRAGMA user_version").Scan(&version); e != nil || version != 6 {
+		t.Fatalf("V5ToV6 destination: %d %v", version, e)
 	}
 
+	var count int
+	if e = current.db.QueryRow("SELECT count(*) FROM runtime_owned_retirements").Scan(&count); e != nil || count != 0 {
+		t.Fatalf("fabricated retirement: %d %v", count, e)
+	}
+	if e = current.db.QueryRow("SELECT count(*) FROM runtime_child_effect_grants WHERE settlement_evidence_json IS NOT NULL").Scan(&count); e != nil || count != 0 {
+		t.Fatalf("fabricated mark evidence: %d %v", count, e)
+	}
 	for id, want := range snapshots {
 		if _, e := current.LoadManagedRecovery(t.Context(), id); !errors.Is(e, kernel.ErrNotFound) {
 			t.Fatalf("migration fabricated suspension: %v", e)

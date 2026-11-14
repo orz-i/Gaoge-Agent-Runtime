@@ -1,0 +1,9 @@
+SOURCE_SHA=a279dceb1b2b1752f12066d4051550bf3f79e657
+COMMAND=go -C go/agent-runtime-http test -p 2 -race -count=1 -timeout=20m ./...
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http	3.169s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http/agent	1.824s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http/harness	1.815s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http/team	1.747s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http/workflow	1.746s
+
+EXIT_CODE=0

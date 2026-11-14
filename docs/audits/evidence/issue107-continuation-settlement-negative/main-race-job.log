@@ -1,0 +1,380 @@
+﻿2026-11-13T12:44:16.1126169Z Current runner version: '2.338.2'
+2026-11-13T12:44:16.1141635Z ##[group]Runner Image Provisioner
+2026-11-13T12:44:16.1142186Z Hosted Compute Agent
+2026-11-13T12:44:16.1142541Z Version: 20261103.629
+2026-11-13T12:44:16.1143142Z Commit: 15dbd9ccb5dbf34fae002b6ed1a2670f52df37bc
+2026-11-13T12:44:16.1143562Z Build Date: 2026-11-03T17:26:59Z
+2026-11-13T12:44:16.1143978Z Worker ID: {1767dfac-4731-4219-bc4e-fbb9a197739b}
+2026-11-13T12:44:16.1144458Z Region: westus3
+2026-11-13T12:44:16.1144780Z Cloud: Azure
+2026-11-13T12:44:16.1145124Z ##[endgroup]
+2026-11-13T12:44:16.1145861Z ##[group]Operating System
+2026-11-13T12:44:16.1146271Z Ubuntu
+2026-11-13T12:44:16.1146672Z 26.04.1
+2026-11-13T12:44:16.1146995Z LTS
+2026-11-13T12:44:16.1147323Z ##[endgroup]
+2026-11-13T12:44:16.1147642Z ##[group]Runner Image
+2026-11-13T12:44:16.1147967Z Image: ubuntu-26.04
+2026-11-13T12:44:16.1148365Z Version: 20261111.196.1
+2026-11-13T12:44:16.1149069Z Included Software: https://github.com/actions/runner-images/blob/ubuntu26/20261111.196/images/ubuntu/Ubuntu2604-Readme.md
+2026-11-13T12:44:16.1149945Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu26%2F20261111.196
+2026-11-13T12:44:16.1150467Z ##[endgroup]
+2026-11-13T12:44:16.1151223Z ##[group]GITHUB_TOKEN Permissions
+2026-11-13T12:44:16.1152346Z Contents: read
+2026-11-13T12:44:16.1152734Z Metadata: read
+2026-11-13T12:44:16.1153176Z Packages: read
+2026-11-13T12:44:16.1153788Z ##[endgroup]
+2026-11-13T12:44:16.1155103Z Secret source: Actions
+2026-11-13T12:44:16.1155715Z Cache mode: write
+2026-11-13T12:44:16.1156239Z Prepare workflow directory
+2026-11-13T12:44:16.1349705Z Prepare all required actions
+2026-11-13T12:44:16.1379060Z Getting action download info
+2026-11-13T12:44:16.4236282Z Download action repository 'actions/checkout@v7' (SHA:3d3c42e5aac5ba805825da76410c181273ba90b1)
+2026-11-13T12:44:16.4928693Z Download action repository 'actions/setup-node@v7' (SHA:949feb2413d6458794dcd2491c4babbbce0c15c1)
+2026-11-13T12:44:16.6341901Z Complete job name: Go race detector
+2026-11-13T12:44:16.6824587Z ##[group]Run actions/checkout@v7
+2026-11-13T12:44:16.6824987Z with:
+2026-11-13T12:44:16.6825232Z   repository: orz-i/Gaoge-Agent-Runtime
+2026-11-13T12:44:16.6827121Z   token: ***
+2026-11-13T12:44:16.6827349Z   ssh-strict: true
+2026-11-13T12:44:16.6827584Z   ssh-user: git
+2026-11-13T12:44:16.6827823Z   persist-credentials: true
+2026-11-13T12:44:16.6828082Z   clean: true
+2026-11-13T12:44:16.6828324Z   sparse-checkout-cone-mode: true
+2026-11-13T12:44:16.6828602Z   fetch-depth: 1
+2026-11-13T12:44:16.6828832Z   fetch-tags: false
+2026-11-13T12:44:16.6829074Z   show-progress: true
+2026-11-13T12:44:16.6829307Z   lfs: false
+2026-11-13T12:44:16.6829525Z   submodules: false
+2026-11-13T12:44:16.6829763Z   set-safe-directory: true
+2026-11-13T12:44:16.6830036Z   allow-unsafe-pr-checkout: false
+2026-11-13T12:44:16.6830374Z ##[endgroup]
+2026-11-13T12:44:16.8588059Z Syncing repository: orz-i/Gaoge-Agent-Runtime
+2026-11-13T12:44:16.8589566Z ##[group]Getting Git version info
+2026-11-13T12:44:16.8590293Z Working directory is '/home/runner/work/Gaoge-Agent-Runtime/Gaoge-Agent-Runtime'
+2026-11-13T12:44:16.8591138Z [command]/usr/bin/git version
+2026-11-13T12:44:16.8596664Z git version 2.56.1
+2026-11-13T12:44:16.8609967Z ##[endgroup]
+2026-11-13T12:44:16.8617858Z Temporarily overriding HOME='/home/runner/work/_temp/78be5fa9-04af-4046-ad4a-7f476c07232a' before making global git config changes
+2026-11-13T12:44:16.8618939Z Adding repository directory to the temporary git global config as a safe directory
+2026-11-13T12:44:16.8621150Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/Gaoge-Agent-Runtime/Gaoge-Agent-Runtime
+2026-11-13T12:44:16.8673839Z Deleting the contents of '/home/runner/work/Gaoge-Agent-Runtime/Gaoge-Agent-Runtime'
+2026-11-13T12:44:16.8676563Z ##[group]Determining repository object format
+2026-11-13T12:44:16.8677617Z ##[endgroup]
+2026-11-13T12:44:16.8678197Z ##[group]Initializing the repository
+2026-11-13T12:44:16.8680736Z [command]/usr/bin/git init /home/runner/work/Gaoge-Agent-Runtime/Gaoge-Agent-Runtime
+2026-11-13T12:44:16.8761003Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-11-13T12:44:16.8761699Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-11-13T12:44:16.8762189Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-11-13T12:44:16.8762582Z hint: call:
+2026-11-13T12:44:16.8763044Z hint:
+2026-11-13T12:44:16.8763325Z hint: 	git config --global init.defaultBranch <name>
+2026-11-13T12:44:16.8763648Z hint:
+2026-11-13T12:44:16.8763953Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-11-13T12:44:16.8764445Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-11-13T12:44:16.8764922Z hint:
+2026-11-13T12:44:16.8765147Z hint: 	git branch -m <name>
+2026-11-13T12:44:16.8765401Z hint:
+2026-11-13T12:44:16.8765734Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-11-13T12:44:16.8768331Z Initialized empty Git repository in /home/runner/work/Gaoge-Agent-Runtime/Gaoge-Agent-Runtime/.git/
+2026-11-13T12:44:16.8777621Z [command]/usr/bin/git remote add origin https://github.com/orz-i/Gaoge-Agent-Runtime
+2026-11-13T12:44:16.8821529Z ##[endgroup]
+2026-11-13T12:44:16.8821952Z ##[group]Disabling automatic garbage collection
+2026-11-13T12:44:16.8824493Z [command]/usr/bin/git config --local gc.auto 0
+2026-11-13T12:44:16.8853145Z ##[endgroup]
+2026-11-13T12:44:16.8854154Z ##[group]Setting up auth
+2026-11-13T12:44:16.8854446Z Removing SSH command configuration
+2026-11-13T12:44:16.8858101Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-11-13T12:44:16.8888080Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-11-13T12:44:16.9217432Z Removing HTTP extra header
+2026-11-13T12:44:16.9222054Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-11-13T12:44:16.9255222Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-11-13T12:44:16.9455086Z Removing includeIf entries pointing to credentials config files
+2026-11-13T12:44:16.9458599Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-11-13T12:44:16.9483232Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-11-13T12:44:16.9683363Z [command]/usr/bin/git config --file /home/runner/work/_temp/git-credentials-4716f79b-d6ec-40c2-b442-430d5e8cb44c.config http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-11-13T12:44:16.9711185Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/Gaoge-Agent-Runtime/Gaoge-Agent-Runtime/.git.path /home/runner/work/_temp/git-credentials-4716f79b-d6ec-40c2-b442-430d5e8cb44c.config
+2026-11-13T12:44:16.9736278Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/Gaoge-Agent-Runtime/Gaoge-Agent-Runtime/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-4716f79b-d6ec-40c2-b442-430d5e8cb44c.config
+2026-11-13T12:44:16.9763510Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-4716f79b-d6ec-40c2-b442-430d5e8cb44c.config
+2026-11-13T12:44:16.9788376Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-4716f79b-d6ec-40c2-b442-430d5e8cb44c.config
+2026-11-13T12:44:16.9811678Z ##[endgroup]
+2026-11-13T12:44:16.9812096Z ##[group]Fetching the repository
+2026-11-13T12:44:16.9815929Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +c79d2eea87952bc09d65cee2c4657215873c1262:refs/remotes/origin/main
+2026-11-13T12:44:19.1710146Z From https://github.com/orz-i/Gaoge-Agent-Runtime
+2026-11-13T12:44:19.1711676Z  * [new ref]         c79d2eea87952bc09d65cee2c4657215873c1262 -> origin/main
+2026-11-13T12:44:19.1717306Z [command]/usr/bin/git branch --list --remote origin/main
+2026-11-13T12:44:19.1745300Z   origin/main
+2026-11-13T12:44:19.1752585Z [command]/usr/bin/git rev-parse refs/remotes/origin/main
+2026-11-13T12:44:19.1778434Z c79d2eea87952bc09d65cee2c4657215873c1262
+2026-11-13T12:44:19.1783221Z ##[endgroup]
+2026-11-13T12:44:19.1784701Z ##[group]Determining the checkout info
+2026-11-13T12:44:19.1786108Z ##[endgroup]
+2026-11-13T12:44:19.1787015Z [command]/usr/bin/git sparse-checkout disable
+2026-11-13T12:44:19.1838059Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-11-13T12:44:19.1869901Z ##[group]Checking out the ref
+2026-11-13T12:44:19.1872696Z [command]/usr/bin/git checkout --progress --force -B main refs/remotes/origin/main
+2026-11-13T12:44:19.3992006Z Switched to a new branch 'main'
+2026-11-13T12:44:19.3994896Z branch 'main' set up to track 'origin/main'.
+2026-11-13T12:44:19.4027508Z ##[endgroup]
+2026-11-13T12:44:19.4074836Z [command]/usr/bin/git log -1 --format=%H
+2026-11-13T12:44:19.4097813Z c79d2eea87952bc09d65cee2c4657215873c1262
+2026-11-13T12:44:19.4330393Z Prepare all required actions
+2026-11-13T12:44:19.4330825Z Getting action download info
+2026-11-13T12:44:19.5695373Z Download action repository 'actions/setup-go@v7' (SHA:b7ad1dad31e06c5925ef5d2fc7ad053ef454303e)
+2026-11-13T12:44:20.2086812Z Download action repository 'actions/cache@v5' (SHA:caa296126883cff596d87d8935842f9db880ef25)
+2026-11-13T12:44:20.3194337Z ##[group]Run ./.github/actions/setup-go
+2026-11-13T12:44:20.3194563Z ##[endgroup]
+2026-11-13T12:44:20.3230490Z ##[start-action display=Run actions/setup-go@v7;id=__self.go]
+2026-11-13T12:44:20.3281546Z ##[group]Run actions/setup-go@v7
+2026-11-13T12:44:20.3281728Z with:
+2026-11-13T12:44:20.3281875Z   go-version-file: go.work
+2026-11-13T12:44:20.3282046Z   cache: false
+2026-11-13T12:44:20.3282200Z   check-latest: false
+2026-11-13T12:44:20.3283610Z   token: ***
+2026-11-13T12:44:20.3283767Z ##[endgroup]
+2026-11-13T12:44:20.4041554Z Setup go version spec 1.27.4
+2026-11-13T12:44:20.4045588Z Attempting to download 1.27.4...
+2026-11-13T12:44:21.3843372Z matching 1.27.4...
+2026-11-13T12:44:21.3845266Z Acquiring 1.27.4 from https://github.com/actions/go-versions/releases/download/1.27.4-42945153609/go-1.27.4-linux-x64.tar.gz
+2026-11-13T12:44:21.8825309Z Extracting Go...
+2026-11-13T12:44:21.8920916Z [command]/usr/bin/tar xz --warning=no-unknown-keyword --overwrite -C /home/runner/work/_temp/bbd4f55c-2a70-45da-a60a-4170d3e9e331 -f /home/runner/work/_temp/601d186c-9c82-46fc-8f87-c51a326f0ba2
+2026-11-13T12:44:22.7828233Z Successfully extracted go to /home/runner/work/_temp/bbd4f55c-2a70-45da-a60a-4170d3e9e331
+2026-11-13T12:44:22.7828758Z Adding to the cache ...
+2026-11-13T12:44:26.1187436Z Successfully cached go to /opt/hostedtoolcache/go/1.27.4/x64
+2026-11-13T12:44:26.1188291Z Added go to the path
+2026-11-13T12:44:26.1199899Z Successfully set up Go version 1.27.4
+2026-11-13T12:44:26.1363668Z go version go1.27.4 linux/amd64
+2026-11-13T12:44:26.1364055Z 
+2026-11-13T12:44:26.1364466Z ##[group]go env
+2026-11-13T12:44:26.2428733Z AR='ar'
+2026-11-13T12:44:26.2429033Z CC='gcc'
+2026-11-13T12:44:26.2429189Z CGO_CFLAGS='-O2 -g'
+2026-11-13T12:44:26.2429339Z CGO_CPPFLAGS=''
+2026-11-13T12:44:26.2429472Z CGO_CXXFLAGS='-O2 -g'
+2026-11-13T12:44:26.2429604Z CGO_ENABLED='1'
+2026-11-13T12:44:26.2429730Z CGO_FFLAGS='-O2 -g'
+2026-11-13T12:44:26.2429852Z CGO_LDFLAGS='-O2 -g'
+2026-11-13T12:44:26.2429978Z CXX='g++'
+2026-11-13T12:44:26.2430093Z GCCGO='gccgo'
+2026-11-13T12:44:26.2430209Z GO111MODULE=''
+2026-11-13T12:44:26.2430326Z GOAMD64='v1'
+2026-11-13T12:44:26.2430441Z GOARCH='amd64'
+2026-11-13T12:44:26.2430555Z GOAUTH='netrc'
+2026-11-13T12:44:26.2430718Z GOBIN='/home/runner/go/bin'
+2026-11-13T12:44:26.2430877Z GOCACHE='/home/runner/.cache/go-build'
+2026-11-13T12:44:26.2431039Z GOCACHEPROG=''
+2026-11-13T12:44:26.2431417Z GODEBUG=''
+2026-11-13T12:44:26.2431558Z GOENV='/home/runner/.config/go/env'
+2026-11-13T12:44:26.2431770Z GOEXE=''
+2026-11-13T12:44:26.2431878Z GOEXPERIMENT=''
+2026-11-13T12:44:26.2431997Z GOFIPS140='off'
+2026-11-13T12:44:26.2432110Z GOFLAGS=''
+2026-11-13T12:44:26.2432490Z GOGCCFLAGS='-fPIC -m64 -pthread -Wl,--no-gc-sections -fmessage-length=0 -ffile-prefix-map=/tmp/go-build3965841931=/tmp/go-build -gno-record-gcc-switches'
+2026-11-13T12:44:26.2433017Z GOHOSTARCH='amd64'
+2026-11-13T12:44:26.2433141Z GOHOSTOS='linux'
+2026-11-13T12:44:26.2433260Z GOINSECURE=''
+2026-11-13T12:44:26.2433384Z GOMOD='/dev/null'
+2026-11-13T12:44:26.2433520Z GOMODCACHE='/home/runner/go/pkg/mod'
+2026-11-13T12:44:26.2433668Z GONOPROXY=''
+2026-11-13T12:44:26.2433783Z GONOSUMDB=''
+2026-11-13T12:44:26.2433890Z GOOS='linux'
+2026-11-13T12:44:26.2434005Z GOPACKAGESDRIVER=''
+2026-11-13T12:44:26.2434136Z GOPATH='/home/runner/go'
+2026-11-13T12:44:26.2434272Z GOPRIVATE=''
+2026-11-13T12:44:26.2434430Z GOPROXY='https://proxy.golang.org,direct'
+2026-11-13T12:44:26.2434625Z GOROOT='/opt/hostedtoolcache/go/1.27.4/x64'
+2026-11-13T12:44:26.2434790Z GOSUMDB='sum.golang.org'
+2026-11-13T12:44:26.2434945Z GOTELEMETRY='local'
+2026-11-13T12:44:26.2435102Z GOTELEMETRYDIR='/home/runner/.config/go/telemetry'
+2026-11-13T12:44:26.2435428Z GOTMPDIR=''
+2026-11-13T12:44:26.2435547Z GOTOOLCHAIN='local'
+2026-11-13T12:44:26.2435733Z GOTOOLDIR='/opt/hostedtoolcache/go/1.27.4/x64/pkg/tool/linux_amd64'
+2026-11-13T12:44:26.2435924Z GOVCS=''
+2026-11-13T12:44:26.2436036Z GOVERSION='go1.27.4'
+2026-11-13T12:44:26.2436239Z GOWORK='/home/runner/work/Gaoge-Agent-Runtime/Gaoge-Agent-Runtime/go.work'
+2026-11-13T12:44:26.2436461Z PKG_CONFIG='pkg-config'
+2026-11-13T12:44:26.2436542Z 
+2026-11-13T12:44:26.2436868Z ##[endgroup]
+2026-11-13T12:44:26.2579068Z ##[end-action id=__self.go;outcome=success;conclusion=success;duration_ms=5934]
+2026-11-13T12:44:26.2582605Z ##[start-action display=Locate Go caches;id=__self.paths]
+2026-11-13T12:44:26.2609122Z ##[group]Run source /etc/os-release
+2026-11-13T12:44:26.2609374Z [36;1msource /etc/os-release[0m
+2026-11-13T12:44:26.2609589Z [36;1mecho "platform=$ID-$VERSION_ID" >> "$GITHUB_OUTPUT"[0m
+2026-11-13T12:44:26.2609817Z [36;1mecho "build=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"[0m
+2026-11-13T12:44:26.2610045Z [36;1mecho "modules=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"[0m
+2026-11-13T12:44:26.2657011Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-11-13T12:44:26.2657206Z env:
+2026-11-13T12:44:26.2657321Z   GOTOOLCHAIN: local
+2026-11-13T12:44:26.2657445Z ##[endgroup]
+2026-11-13T12:44:26.2786740Z ##[end-action id=__self.paths;outcome=success;conclusion=success;duration_ms=20]
+2026-11-13T12:44:26.2788146Z ##[start-action display=Run actions/cache@v5;id=__self.__actions_cache]
+2026-11-13T12:44:26.6976399Z ##[group]Run actions/cache@v5
+2026-11-13T12:44:26.6976577Z with:
+2026-11-13T12:44:26.6976739Z   path: /home/runner/.cache/go-build
+/home/runner/go/pkg/mod
+
+2026-11-13T12:44:26.6977161Z   key: ubuntu-26.04-X64-go-1.27.4-race-v1-65433ff37a7ac52e5b571f256c04c1561f6e4314a23f476b69fb59929f891a3c-c79d2eea87952bc09d65cee2c4657215873c1262
+2026-11-13T12:44:26.6977771Z   restore-keys: ubuntu-26.04-X64-go-1.27.4-race-v1-65433ff37a7ac52e5b571f256c04c1561f6e4314a23f476b69fb59929f891a3c-
+ubuntu-26.04-X64-go-1.27.4-race-v1-
+
+2026-11-13T12:44:26.6978149Z   enableCrossOsArchive: false
+2026-11-13T12:44:26.6978293Z   fail-on-cache-miss: false
+2026-11-13T12:44:26.6978431Z   lookup-only: false
+2026-11-13T12:44:26.6978562Z   save-always: false
+2026-11-13T12:44:26.6978678Z env:
+2026-11-13T12:44:26.6978784Z   GOTOOLCHAIN: local
+2026-11-13T12:44:26.6978902Z ##[endgroup]
+2026-11-13T12:44:26.9752144Z Cache hit for restore-key: ubuntu-26.04-X64-go-1.27.4-race-v1-d3eadec01b698359da7338d866dfcd9e687655b69729a279a1e87936880a5277-b3e496a50895d0f52a1dc37ea5c2a3979b05cebd
+2026-11-13T12:44:28.2291367Z Received 41943040 of 340691704 (12.3%), 40.0 MBs/sec
+2026-11-13T12:44:29.2288082Z Received 176160768 of 340691704 (51.7%), 84.0 MBs/sec
+2026-11-13T12:44:30.2313929Z Received 285212672 of 340691704 (83.7%), 90.6 MBs/sec
+2026-11-13T12:44:30.5670173Z Received 340691704 of 340691704 (100.0%), 97.3 MBs/sec
+2026-11-13T12:44:30.5671065Z Cache Size: ~325 MB (340691704 B)
+2026-11-13T12:44:30.5715040Z [command]/usr/bin/tar -xf /home/runner/work/_temp/44931ef2-5f5c-477c-950d-709714540181/cache.tzst -P -C /home/runner/work/Gaoge-Agent-Runtime/Gaoge-Agent-Runtime --use-compress-program unzstd
+2026-11-13T12:44:32.6777104Z Cache restored successfully
+2026-11-13T12:44:32.7025848Z Cache restored from key: ubuntu-26.04-X64-go-1.27.4-race-v1-d3eadec01b698359da7338d866dfcd9e687655b69729a279a1e87936880a5277-b3e496a50895d0f52a1dc37ea5c2a3979b05cebd
+2026-11-13T12:44:32.7270970Z ##[end-action id=__self.__actions_cache;outcome=success;conclusion=success;duration_ms=6448]
+2026-11-13T12:44:32.7351006Z ##[group]Run actions/setup-node@v7
+2026-11-13T12:44:32.7351169Z with:
+2026-11-13T12:44:32.7351288Z   node-version: 24
+2026-11-13T12:44:32.7351413Z   check-latest: false
+2026-11-13T12:44:32.7353014Z   token: ***
+2026-11-13T12:44:32.7353202Z   package-manager-cache: true
+2026-11-13T12:44:32.7353413Z env:
+2026-11-13T12:44:32.7353589Z   GOTOOLCHAIN: local
+2026-11-13T12:44:32.7353776Z ##[endgroup]
+2026-11-13T12:44:32.8293381Z Found in cache @ /opt/hostedtoolcache/node/24.22.2/x64
+2026-11-13T12:44:32.8856503Z ##[group]Environment details
+2026-11-13T12:44:33.1331112Z node: v24.22.2
+2026-11-13T12:44:33.1331368Z npm: 11.19.1
+2026-11-13T12:44:33.1331560Z yarn: 1.22.22
+2026-11-13T12:44:33.1332011Z ##[endgroup]
+2026-11-13T12:44:33.1968745Z ##[group]Run sudo apt-get update && sudo apt-get install -y --no-install-recommends libsqlite3-dev
+2026-11-13T12:44:33.1969311Z [36;1msudo apt-get update && sudo apt-get install -y --no-install-recommends libsqlite3-dev[0m
+2026-11-13T12:44:33.2014564Z shell: /usr/bin/bash -e {0}
+2026-11-13T12:44:33.2014715Z env:
+2026-11-13T12:44:33.2014837Z   GOTOOLCHAIN: local
+2026-11-13T12:44:33.2014968Z ##[endgroup]
+2026-11-13T12:44:33.2683957Z Get:1 file:/etc/apt/apt-mirrors.txt Mirrorlist [144 B]
+2026-11-13T12:44:33.3084910Z Get:6 https://packages.microsoft.com/ubuntu/26.04/prod resolute InRelease [3964 B]
+2026-11-13T12:44:33.3280095Z Hit:2 http://azure.archive.ubuntu.com/ubuntu resolute InRelease
+2026-11-13T12:44:33.3303046Z Get:3 http://azure.archive.ubuntu.com/ubuntu resolute-updates InRelease [137 kB]
+2026-11-13T12:44:33.3307416Z Get:7 https://packages.microsoft.com/ubuntu/26.04/prod resolute/main arm64 Packages [142 kB]
+2026-11-13T12:44:33.4058573Z Get:4 http://azure.archive.ubuntu.com/ubuntu resolute-backports InRelease [137 kB]
+2026-11-13T12:44:33.4086451Z Get:8 https://packages.microsoft.com/ubuntu/26.04/prod resolute/main amd64 Packages [157 kB]
+2026-11-13T12:44:33.4380484Z Get:5 http://azure.archive.ubuntu.com/ubuntu resolute-security InRelease [137 kB]
+2026-11-13T12:44:33.4474686Z Get:9 http://azure.archive.ubuntu.com/ubuntu resolute-updates/main amd64v3 Packages [869 kB]
+2026-11-13T12:44:33.4983794Z Get:10 http://azure.archive.ubuntu.com/ubuntu resolute-updates/main Translation-en [195 kB]
+2026-11-13T12:44:33.5599136Z Get:11 http://azure.archive.ubuntu.com/ubuntu resolute-updates/universe amd64v3 Packages [390 kB]
+2026-11-13T12:44:33.5599925Z Get:12 http://azure.archive.ubuntu.com/ubuntu resolute-updates/universe Translation-en [122 kB]
+2026-11-13T12:44:33.5611895Z Get:13 http://azure.archive.ubuntu.com/ubuntu resolute-security/main amd64v3 Packages [718 kB]
+2026-11-13T12:44:33.6778721Z Get:14 http://azure.archive.ubuntu.com/ubuntu resolute-security/main Translation-en [157 kB]
+2026-11-13T12:44:33.6788775Z Get:15 http://azure.archive.ubuntu.com/ubuntu resolute-security/universe amd64v3 Packages [220 kB]
+2026-11-13T12:44:33.6810347Z Get:16 http://azure.archive.ubuntu.com/ubuntu resolute-security/universe Translation-en [72.5 kB]
+2026-11-13T12:44:33.6839907Z Get:17 http://azure.archive.ubuntu.com/ubuntu resolute-security/restricted amd64v3 Packages [590 kB]
+2026-11-13T12:44:33.6849800Z Get:18 http://azure.archive.ubuntu.com/ubuntu resolute-security/restricted Translation-en [122 kB]
+2026-11-13T12:44:35.9736905Z Fetched 4170 kB in 1s (8101 kB/s)
+2026-11-13T12:44:36.3718330Z Reading package lists...
+2026-11-13T12:44:36.3988127Z Reading package lists...
+2026-11-13T12:44:36.5175621Z Building dependency tree...
+2026-11-13T12:44:36.5180921Z Reading state information...
+2026-11-13T12:44:36.5410727Z libsqlite3-dev is already the newest version (3.46.1-9ubuntu0.3).
+2026-11-13T12:44:36.5774446Z Solving dependencies...
+2026-11-13T12:44:36.6594324Z 0 upgraded, 0 newly installed, 0 to remove and 24 not upgraded.
+2026-11-13T12:44:36.6639691Z ##[group]Run make go-race
+2026-11-13T12:44:36.6639877Z [36;1mmake go-race[0m
+2026-11-13T12:44:36.6681808Z shell: /usr/bin/bash -e {0}
+2026-11-13T12:44:36.6681956Z env:
+2026-11-13T12:44:36.6682077Z   GOTOOLCHAIN: local
+2026-11-13T12:44:36.6682208Z ##[endgroup]
+2026-11-13T12:44:36.6756476Z node scripts/go-workspace.mjs race
+2026-11-13T12:44:36.6965787Z ==> race go/agent-runtime
+2026-11-13T12:44:41.4579392Z ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/continuation	1.040s
+2026-11-13T12:44:41.4580600Z ?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/interaction	[no test files]
+2026-11-13T12:44:41.4581650Z ?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/runfeed	[no test files]
+2026-11-13T12:44:41.8596645Z ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/topology	1.046s
+2026-11-13T12:44:47.8264428Z ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent	4.572s
+2026-11-13T12:44:47.8265218Z ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/bootstrap	1.043s
+2026-11-13T12:44:47.8266116Z ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget	1.018s
+2026-11-13T12:44:47.8267037Z ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/compose	1.051s
+2026-11-13T12:44:47.8268050Z ?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance	[no test files]
+2026-11-13T12:44:55.8724148Z ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context	11.306s
+2026-11-13T12:44:55.8724795Z --- FAIL: TestApprovedChildAutomaticallyContinuesOwningTeamOnce (0.04s)
+2026-11-13T12:44:55.8727135Z     integration_test.go:45: resolved=kernel.Run{ID:"run-3", Kind:"agent", Actor:kernel.ActorRef{TenantID:"tenant", ActorID:"actor"}, Thread:kernel.ThreadRef{Kind:"conversation", ID:"thread"}, RequestID:"parent-team:handoff-2", ParentRunID:"", Goal:"publish once", Status:"running", Revision:0x8, ErrorCode:"", ErrorDetail:"", DeadlineAt:<nil>, EndedAt:<nil>, CreatedAt:time.Date(2026, time.November, 13, 12, 44, 46, 37307003, time.UTC), UpdatedAt:time.Date(2026, time.November, 13, 12, 44, 46, 54372264, time.UTC)} err=agent original root callback result is uncertain
+2026-11-13T12:44:55.8728277Z         kernel execution lease is not current
+2026-11-13T12:44:55.8728470Z FAIL
+2026-11-13T12:44:55.8728773Z FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/continuation	7.339s
+2026-11-13T12:44:55.8729123Z ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/evaluation	1.155s
+2026-11-13T12:44:55.8729569Z ?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/examples/configured	[no test files]
+2026-11-13T12:44:55.8730151Z ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/examples/quickstart	1.086s
+2026-11-13T12:44:55.8730487Z ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/groupchat	1.132s
+2026-11-13T12:44:55.8730817Z ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff	1.041s
+2026-11-13T12:44:55.8731198Z ?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/interaction	[no test files]
+2026-11-13T12:44:55.8731594Z ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/callbackscope	1.018s
+2026-11-13T12:44:55.8732170Z ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol	1.013s
+2026-11-13T12:44:55.8732567Z ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract	1.075s
+2026-11-13T12:44:55.8733049Z ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel	1.030s
+2026-11-13T12:46:35.6130042Z ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory	104.644s
+2026-11-13T12:46:35.6130427Z ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model	1.039s
+2026-11-13T12:46:35.6130747Z ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/observability	1.010s
+2026-11-13T12:46:35.6131212Z ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin	1.095s
+2026-11-13T12:46:35.6131544Z ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/queue	1.012s
+2026-11-13T12:46:35.6132200Z ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runfeed	1.014s
+2026-11-13T12:46:35.6132542Z ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation	1.009s
+2026-11-13T12:46:35.6133030Z ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/team	1.029s
+2026-11-13T12:46:35.6133342Z ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools	1.044s
+2026-11-13T12:46:35.6134806Z ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workbench	1.015s
+2026-11-13T12:46:35.6164360Z ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workflow	1.201s
+2026-11-13T12:46:35.6164672Z FAIL
+2026-11-13T12:46:35.6870284Z file:///home/runner/work/Gaoge-Agent-Runtime/Gaoge-Agent-Runtime/scripts/go-workspace.mjs:182
+2026-11-13T12:46:35.6871580Z     throw new Error(`${command} ${args.join(" ")} failed with exit code ${result.status ?? 1}`);
+2026-11-13T12:46:35.6872024Z           ^
+2026-11-13T12:46:35.6902385Z 
+2026-11-13T12:46:35.6902739Z Error: go test -race ./... -count=1 failed with exit code 1
+2026-11-13T12:46:35.6903467Z     at run (file:///home/runner/work/Gaoge-Agent-Runtime/Gaoge-Agent-Runtime/scripts/go-workspace.mjs:182:11)
+2026-11-13T12:46:35.6903940Z     at file:///home/runner/work/Gaoge-Agent-Runtime/Gaoge-Agent-Runtime/scripts/go-workspace.mjs:53:24
+2026-11-13T12:46:35.6904295Z     at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+2026-11-13T12:46:35.6904548Z     at async node:internal/modules/esm/loader:647:26
+2026-11-13T12:46:35.6904861Z     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+2026-11-13T12:46:35.6905039Z 
+2026-11-13T12:46:35.6905100Z Node.js v24.22.2
+2026-11-13T12:46:35.6905278Z make: *** [Makefile:57: go-race] Error 1
+2026-11-13T12:46:35.6916282Z ##[error]Process completed with exit code 2.
+2026-11-13T12:46:35.6980497Z Post job cleanup.
+2026-11-13T12:46:35.6983109Z ##[start-action display=Run actions/cache@v5;id=__828397b7-41b1-4146-9eae-97ffed81cd13.__actions_cache]
+2026-11-13T12:46:35.6985048Z ##[end-action id=__828397b7-41b1-4146-9eae-97ffed81cd13.__actions_cache;outcome=skipped;conclusion=skipped;duration_ms=0]
+2026-11-13T12:46:35.6986100Z ##[start-action display=Run actions/setup-go@v7;id=__828397b7-41b1-4146-9eae-97ffed81cd13.go]
+2026-11-13T12:46:35.6987109Z ##[end-action id=__828397b7-41b1-4146-9eae-97ffed81cd13.go;outcome=skipped;conclusion=skipped;duration_ms=0]
+2026-11-13T12:46:35.7023465Z Post job cleanup.
+2026-11-13T12:46:35.7573037Z [command]/usr/bin/git version
+2026-11-13T12:46:35.7598373Z git version 2.56.1
+2026-11-13T12:46:35.7618608Z Temporarily overriding HOME='/home/runner/work/_temp/b8d90a2d-3cd3-48a9-8d52-cfe3a6f350db' before making global git config changes
+2026-11-13T12:46:35.7619590Z Adding repository directory to the temporary git global config as a safe directory
+2026-11-13T12:46:35.7621801Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/Gaoge-Agent-Runtime/Gaoge-Agent-Runtime
+2026-11-13T12:46:35.7649582Z Removing SSH command configuration
+2026-11-13T12:46:35.7653513Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-11-13T12:46:35.7681035Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-11-13T12:46:35.7946708Z Removing HTTP extra header
+2026-11-13T12:46:35.7947616Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-11-13T12:46:35.7973800Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-11-13T12:46:35.8214607Z Removing includeIf entries pointing to credentials config files
+2026-11-13T12:46:35.8221627Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-11-13T12:46:35.8244223Z includeif.gitdir:/home/runner/work/Gaoge-Agent-Runtime/Gaoge-Agent-Runtime/.git.path
+2026-11-13T12:46:35.8244644Z includeif.gitdir:/home/runner/work/Gaoge-Agent-Runtime/Gaoge-Agent-Runtime/.git/worktrees/*.path
+2026-11-13T12:46:35.8245117Z includeif.gitdir:/github/workspace/.git.path
+2026-11-13T12:46:35.8245508Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-11-13T12:46:35.8251165Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/Gaoge-Agent-Runtime/Gaoge-Agent-Runtime/.git.path
+2026-11-13T12:46:35.8269730Z /home/runner/work/_temp/git-credentials-4716f79b-d6ec-40c2-b442-430d5e8cb44c.config
+2026-11-13T12:46:35.8276731Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/Gaoge-Agent-Runtime/Gaoge-Agent-Runtime/.git.path \/home\/runner\/work\/_temp\/git\-credentials\-4716f79b\-d6ec\-40c2\-b442\-430d5e8cb44c\.config
+2026-11-13T12:46:35.8305823Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/Gaoge-Agent-Runtime/Gaoge-Agent-Runtime/.git/worktrees/*.path
+2026-11-13T12:46:35.8324505Z /home/runner/work/_temp/git-credentials-4716f79b-d6ec-40c2-b442-430d5e8cb44c.config
+2026-11-13T12:46:35.8330071Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/Gaoge-Agent-Runtime/Gaoge-Agent-Runtime/.git/worktrees/*.path \/home\/runner\/work\/_temp\/git\-credentials\-4716f79b\-d6ec\-40c2\-b442\-430d5e8cb44c\.config
+2026-11-13T12:46:35.8355323Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git.path
+2026-11-13T12:46:35.8373774Z /github/runner_temp/git-credentials-4716f79b-d6ec-40c2-b442-430d5e8cb44c.config
+2026-11-13T12:46:35.8379056Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git.path \/github\/runner_temp\/git\-credentials\-4716f79b\-d6ec\-40c2\-b442\-430d5e8cb44c\.config
+2026-11-13T12:46:35.8405334Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-11-13T12:46:35.8423220Z /github/runner_temp/git-credentials-4716f79b-d6ec-40c2-b442-430d5e8cb44c.config
+2026-11-13T12:46:35.8427861Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path \/github\/runner_temp\/git\-credentials\-4716f79b\-d6ec\-40c2\-b442\-430d5e8cb44c\.config
+2026-11-13T12:46:35.8454333Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-11-13T12:46:35.8659862Z Removing credentials config '/home/runner/work/_temp/git-credentials-4716f79b-d6ec-40c2-b442-430d5e8cb44c.config'
+2026-11-13T12:46:35.8837865Z Cleaning up orphan processes

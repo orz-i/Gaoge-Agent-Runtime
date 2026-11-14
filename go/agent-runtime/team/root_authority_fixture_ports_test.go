@@ -56,3 +56,15 @@ func (s *teamFaultStore) QuarantineExecution(ctx context.Context, q kernel.Execu
 func (s *teamFaultStore) RepairExecutionQuarantine(ctx context.Context, q kernel.ExecutionQuarantine) error {
 	return s.Store.(kernel.ExecutionQuarantineStore).RepairExecutionQuarantine(ctx, q)
 }
+
+// Preserve the backend's atomic retirement authority through this fault decorator.
+func (s *teamFaultStore) LoadOwnedRetirement(ctx context.Context, id string) (kernel.OwnedRetirementReceipt, error) {
+	return s.Store.(kernel.OwnedRetirementStore).LoadOwnedRetirement(ctx, id)
+}
+func (s *teamFaultStore) AcknowledgeOwnedRetirement(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.OwnedRetirementAcknowledgement) (kernel.OwnedRetirementAckResult, error) {
+	return s.Store.(kernel.OwnedRetirementStore).AcknowledgeOwnedRetirement(ctx, g, p)
+}
+
+func (s *teamFaultStore) LookupOwnedRetirementForRun(ctx context.Context, id string) (kernel.OwnedRetirementReceipt, error) {
+	return s.Store.(kernel.OwnedRetirementStore).LookupOwnedRetirementForRun(ctx, id)
+}

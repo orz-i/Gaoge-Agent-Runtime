@@ -304,3 +304,11 @@ See [ADR 0008](../../docs/adr/0008-minimal-agent-runtime-architecture.md),
 the [Stage 0 decision record](../../docs/audits/2026-10-15-minimal-runtime-stage0-decisions.md),
 the [Stage 1 post-audit fixes](../../docs/audits/2026-10-15-minimal-runtime-stage1-audit-remediation.md),
 and the [implementation contract](../../docs/minimal-agent-runtime-implementation.md).
+
+### Owned-retirement receipt schema (v6)
+
+Schema v6 adds immutable owned settlement evidence and durable retirement/ACK
+receipts. Existing v5 files require explicit `MigrateV5ToV6` with old writers
+stopped and a retained backup. Opening a v5 file does not migrate it. Migration
+preserves original grants, marks, callback records and managed authority and
+does not fabricate retirement receipts or historical Mark provenance.

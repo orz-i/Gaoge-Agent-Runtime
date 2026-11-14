@@ -1,0 +1,86 @@
+SOURCE_SHA=aa20e028c6b9d28af2f2e623eb954d693d6be214
+COMMAND=go -C go/agent-runtime test -p 2 -race -count=20 -v ./continuation -run '^(TestApprovalWakeupCannotStealOriginalOwnerSettlement|TestApprovedChildAutomaticallyContinuesOwningTeamOnce)$'
+=== RUN   TestApprovalWakeupCannotStealOriginalOwnerSettlement
+--- PASS: TestApprovalWakeupCannotStealOriginalOwnerSettlement (0.29s)
+=== RUN   TestApprovedChildAutomaticallyContinuesOwningTeamOnce
+--- PASS: TestApprovedChildAutomaticallyContinuesOwningTeamOnce (0.28s)
+=== RUN   TestApprovalWakeupCannotStealOriginalOwnerSettlement
+--- PASS: TestApprovalWakeupCannotStealOriginalOwnerSettlement (0.30s)
+=== RUN   TestApprovedChildAutomaticallyContinuesOwningTeamOnce
+--- PASS: TestApprovedChildAutomaticallyContinuesOwningTeamOnce (0.28s)
+=== RUN   TestApprovalWakeupCannotStealOriginalOwnerSettlement
+--- PASS: TestApprovalWakeupCannotStealOriginalOwnerSettlement (0.30s)
+=== RUN   TestApprovedChildAutomaticallyContinuesOwningTeamOnce
+--- PASS: TestApprovedChildAutomaticallyContinuesOwningTeamOnce (0.31s)
+=== RUN   TestApprovalWakeupCannotStealOriginalOwnerSettlement
+--- PASS: TestApprovalWakeupCannotStealOriginalOwnerSettlement (0.29s)
+=== RUN   TestApprovedChildAutomaticallyContinuesOwningTeamOnce
+--- PASS: TestApprovedChildAutomaticallyContinuesOwningTeamOnce (0.29s)
+=== RUN   TestApprovalWakeupCannotStealOriginalOwnerSettlement
+--- PASS: TestApprovalWakeupCannotStealOriginalOwnerSettlement (0.28s)
+=== RUN   TestApprovedChildAutomaticallyContinuesOwningTeamOnce
+--- PASS: TestApprovedChildAutomaticallyContinuesOwningTeamOnce (0.29s)
+=== RUN   TestApprovalWakeupCannotStealOriginalOwnerSettlement
+--- PASS: TestApprovalWakeupCannotStealOriginalOwnerSettlement (0.29s)
+=== RUN   TestApprovedChildAutomaticallyContinuesOwningTeamOnce
+--- PASS: TestApprovedChildAutomaticallyContinuesOwningTeamOnce (0.30s)
+=== RUN   TestApprovalWakeupCannotStealOriginalOwnerSettlement
+--- PASS: TestApprovalWakeupCannotStealOriginalOwnerSettlement (0.29s)
+=== RUN   TestApprovedChildAutomaticallyContinuesOwningTeamOnce
+--- PASS: TestApprovedChildAutomaticallyContinuesOwningTeamOnce (0.29s)
+=== RUN   TestApprovalWakeupCannotStealOriginalOwnerSettlement
+--- PASS: TestApprovalWakeupCannotStealOriginalOwnerSettlement (0.30s)
+=== RUN   TestApprovedChildAutomaticallyContinuesOwningTeamOnce
+--- PASS: TestApprovedChildAutomaticallyContinuesOwningTeamOnce (0.28s)
+=== RUN   TestApprovalWakeupCannotStealOriginalOwnerSettlement
+--- PASS: TestApprovalWakeupCannotStealOriginalOwnerSettlement (0.30s)
+=== RUN   TestApprovedChildAutomaticallyContinuesOwningTeamOnce
+--- PASS: TestApprovedChildAutomaticallyContinuesOwningTeamOnce (0.54s)
+=== RUN   TestApprovalWakeupCannotStealOriginalOwnerSettlement
+--- PASS: TestApprovalWakeupCannotStealOriginalOwnerSettlement (0.29s)
+=== RUN   TestApprovedChildAutomaticallyContinuesOwningTeamOnce
+--- PASS: TestApprovedChildAutomaticallyContinuesOwningTeamOnce (0.28s)
+=== RUN   TestApprovalWakeupCannotStealOriginalOwnerSettlement
+--- PASS: TestApprovalWakeupCannotStealOriginalOwnerSettlement (0.28s)
+=== RUN   TestApprovedChildAutomaticallyContinuesOwningTeamOnce
+--- PASS: TestApprovedChildAutomaticallyContinuesOwningTeamOnce (0.28s)
+=== RUN   TestApprovalWakeupCannotStealOriginalOwnerSettlement
+--- PASS: TestApprovalWakeupCannotStealOriginalOwnerSettlement (0.28s)
+=== RUN   TestApprovedChildAutomaticallyContinuesOwningTeamOnce
+--- PASS: TestApprovedChildAutomaticallyContinuesOwningTeamOnce (0.29s)
+=== RUN   TestApprovalWakeupCannotStealOriginalOwnerSettlement
+--- PASS: TestApprovalWakeupCannotStealOriginalOwnerSettlement (0.29s)
+=== RUN   TestApprovedChildAutomaticallyContinuesOwningTeamOnce
+--- PASS: TestApprovedChildAutomaticallyContinuesOwningTeamOnce (0.28s)
+=== RUN   TestApprovalWakeupCannotStealOriginalOwnerSettlement
+--- PASS: TestApprovalWakeupCannotStealOriginalOwnerSettlement (0.30s)
+=== RUN   TestApprovedChildAutomaticallyContinuesOwningTeamOnce
+--- PASS: TestApprovedChildAutomaticallyContinuesOwningTeamOnce (0.29s)
+=== RUN   TestApprovalWakeupCannotStealOriginalOwnerSettlement
+--- PASS: TestApprovalWakeupCannotStealOriginalOwnerSettlement (0.29s)
+=== RUN   TestApprovedChildAutomaticallyContinuesOwningTeamOnce
+--- PASS: TestApprovedChildAutomaticallyContinuesOwningTeamOnce (0.28s)
+=== RUN   TestApprovalWakeupCannotStealOriginalOwnerSettlement
+--- PASS: TestApprovalWakeupCannotStealOriginalOwnerSettlement (0.29s)
+=== RUN   TestApprovedChildAutomaticallyContinuesOwningTeamOnce
+--- PASS: TestApprovedChildAutomaticallyContinuesOwningTeamOnce (0.28s)
+=== RUN   TestApprovalWakeupCannotStealOriginalOwnerSettlement
+--- PASS: TestApprovalWakeupCannotStealOriginalOwnerSettlement (0.30s)
+=== RUN   TestApprovedChildAutomaticallyContinuesOwningTeamOnce
+--- PASS: TestApprovedChildAutomaticallyContinuesOwningTeamOnce (0.29s)
+=== RUN   TestApprovalWakeupCannotStealOriginalOwnerSettlement
+--- PASS: TestApprovalWakeupCannotStealOriginalOwnerSettlement (0.29s)
+=== RUN   TestApprovedChildAutomaticallyContinuesOwningTeamOnce
+--- PASS: TestApprovedChildAutomaticallyContinuesOwningTeamOnce (0.28s)
+=== RUN   TestApprovalWakeupCannotStealOriginalOwnerSettlement
+--- PASS: TestApprovalWakeupCannotStealOriginalOwnerSettlement (0.29s)
+=== RUN   TestApprovedChildAutomaticallyContinuesOwningTeamOnce
+--- PASS: TestApprovedChildAutomaticallyContinuesOwningTeamOnce (0.29s)
+=== RUN   TestApprovalWakeupCannotStealOriginalOwnerSettlement
+--- PASS: TestApprovalWakeupCannotStealOriginalOwnerSettlement (0.29s)
+=== RUN   TestApprovedChildAutomaticallyContinuesOwningTeamOnce
+--- PASS: TestApprovedChildAutomaticallyContinuesOwningTeamOnce (0.28s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/continuation	13.515s
+
+EXIT_CODE=0

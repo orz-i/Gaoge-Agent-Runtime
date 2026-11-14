@@ -1,0 +1,46 @@
+[
+  {
+    "name": "lint-agent-runtime-sqlite",
+    "exit": 1
+  },
+  {
+    "name": "lint-agent-runtime-postgres",
+    "exit": 1
+  },
+  {
+    "name": "lint-agent-runtime-harness",
+    "exit": 0
+  },
+  {
+    "name": "lint-agent-runtime-harness-postgres",
+    "exit": 0
+  },
+  {
+    "name": "lint-agent-runtime-http",
+    "exit": 0
+  },
+  {
+    "name": "lint-agent-runtime-provider",
+    "exit": 0
+  },
+  {
+    "name": "lint-agent-runtime-a2a",
+    "exit": 0
+  },
+  {
+    "name": "lint-agent-runtime-mcp",
+    "exit": 0
+  },
+  {
+    "name": "lint-agent-runtime-redis",
+    "exit": 0
+  },
+  {
+    "name": "lint-agent-runtime-otel",
+    "exit": 0
+  },
+  {
+    "name": "lint-agent-runtime-harness-examples-task-agent",
+    "exit": 0
+  }
+]

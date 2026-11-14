@@ -27,6 +27,7 @@ type managedStorePorts interface {
 	kernel.ControlStore
 	kernel.ChildExecutionStore
 	kernel.OwnedPhysicalExecutionStore
+	kernel.OwnedRetirementStore
 	kernel.ExecutionQuarantineStore
 	kernel.ManagedRecoveryStore
 }

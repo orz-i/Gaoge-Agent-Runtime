@@ -1,0 +1,28 @@
+SOURCE_SHA=00d0e69a0d0af64f37df28c98b17cb6b45c63af1
+COMMAND=rc=0; for m in agent-runtime agent-runtime-sqlite agent-runtime-postgres agent-runtime-harness agent-runtime-harness-postgres agent-runtime-http agent-runtime-provider agent-runtime-a2a agent-runtime-mcp agent-runtime-redis agent-runtime-otel agent-runtime-harness/examples/task-agent; do echo "LINT_MODULE=$m"; (cd go/$m && golangci-lint run --max-same-issues=0 --max-issues-per-linter=0 ./...) || rc=1; done; exit $rc
+LINT_MODULE=agent-runtime
+0 issues.
+LINT_MODULE=agent-runtime-sqlite
+0 issues.
+LINT_MODULE=agent-runtime-postgres
+0 issues.
+LINT_MODULE=agent-runtime-harness
+0 issues.
+LINT_MODULE=agent-runtime-harness-postgres
+0 issues.
+LINT_MODULE=agent-runtime-http
+0 issues.
+LINT_MODULE=agent-runtime-provider
+0 issues.
+LINT_MODULE=agent-runtime-a2a
+0 issues.
+LINT_MODULE=agent-runtime-mcp
+0 issues.
+LINT_MODULE=agent-runtime-redis
+0 issues.
+LINT_MODULE=agent-runtime-otel
+0 issues.
+LINT_MODULE=agent-runtime-harness/examples/task-agent
+0 issues.
+
+EXIT_CODE=0

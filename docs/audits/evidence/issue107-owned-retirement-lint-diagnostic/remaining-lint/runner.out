@@ -1,0 +1,22 @@
+2026-11-13T14:23:01Z lint-agent-runtime-sqlite START
+2026-11-13T14:23:06Z lint-agent-runtime-sqlite EXIT 1
+2026-11-13T14:23:06Z lint-agent-runtime-postgres START
+2026-11-13T14:23:11Z lint-agent-runtime-postgres EXIT 1
+2026-11-13T14:23:11Z lint-agent-runtime-harness START
+2026-11-13T14:23:21Z lint-agent-runtime-harness EXIT 0
+2026-11-13T14:23:21Z lint-agent-runtime-harness-postgres START
+2026-11-13T14:23:26Z lint-agent-runtime-harness-postgres EXIT 0
+2026-11-13T14:23:26Z lint-agent-runtime-http START
+2026-11-13T14:23:29Z lint-agent-runtime-http EXIT 0
+2026-11-13T14:23:29Z lint-agent-runtime-provider START
+2026-11-13T14:23:35Z lint-agent-runtime-provider EXIT 0
+2026-11-13T14:23:35Z lint-agent-runtime-a2a START
+2026-11-13T14:23:37Z lint-agent-runtime-a2a EXIT 0
+2026-11-13T14:23:37Z lint-agent-runtime-mcp START
+2026-11-13T14:23:38Z lint-agent-runtime-mcp EXIT 0
+2026-11-13T14:23:38Z lint-agent-runtime-redis START
+2026-11-13T14:23:40Z lint-agent-runtime-redis EXIT 0
+2026-11-13T14:23:40Z lint-agent-runtime-otel START
+2026-11-13T14:23:41Z lint-agent-runtime-otel EXIT 0
+2026-11-13T14:23:41Z lint-agent-runtime-harness-examples-task-agent START
+2026-11-13T14:23:44Z lint-agent-runtime-harness-examples-task-agent EXIT 0

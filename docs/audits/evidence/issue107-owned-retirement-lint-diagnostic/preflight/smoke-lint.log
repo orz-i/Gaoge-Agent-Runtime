@@ -1,0 +1,32 @@
+SOURCE_SHA=a3cc2feaf9c766c8dfd5e54607822d4b1c561fcf
+COMMAND=node scripts/go-workspace.mjs lint
+==> lint go/agent-runtime
+go/agent-runtime/conformance/owned_retirement_agent.go:5:1: File is not properly formatted (goimports)
+	"errors"
+^
+go/agent-runtime/conformance/owned_retirement_forwarding.go:4:1: File is not properly formatted (goimports)
+	"context"
+^
+go/agent-runtime/kernel/owned_retirement_runtime.go:4:1: File is not properly formatted (goimports)
+	"context"
+^
+go/agent-runtime/continuation/approval_settlement_race_test.go:60:25: QF1008: could remove embedded field "Store" from selector (staticcheck)
+	snapshot, err := store.Store.Load(ctx, grant.ChildRunID)
+	                       ^
+4 issues:
+* goimports: 3
+* staticcheck: 1
+file:///private/tmp/gaoge-runtime-c79-continuation/scripts/go-workspace.mjs:182
+    throw new Error(`${command} ${args.join(" ")} failed with exit code ${result.status ?? 1}`);
+          ^
+
+Error: golangci-lint run ./... failed with exit code 1
+    at run (file:///private/tmp/gaoge-runtime-c79-continuation/scripts/go-workspace.mjs:182:11)
+    at file:///private/tmp/gaoge-runtime-c79-continuation/scripts/go-workspace.mjs:55:24
+    at ModuleJob.run (node:internal/modules/esm/module_job:561:25)
+    at async node:internal/modules/esm/loader:647:26
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5)
+
+Node.js v24.21.0
+
+EXIT_CODE=1

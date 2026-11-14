@@ -1,0 +1,43 @@
+SOURCE_SHA=b819af31df1f3ca5beb72cd014b6cbc9394a0596
+COMMAND=go -C go/agent-runtime test -p 2 -run '^$' ./...
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/continuation	(cached) [no tests to run]
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/interaction	[no test files]
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/runfeed	[no test files]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/topology	(cached) [no tests to run]
+# github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance
+conformance/ea1_root_agent_resume_settlement.go:187:30: undefined: completion
+conformance/ea1_root_agent_start_settlement.go:275:30: undefined: completion
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent	2.260s [no tests to run]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/bootstrap	2.161s [no tests to run]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget	(cached) [no tests to run]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/compose	0.466s [no tests to run]
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance [build failed]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context	(cached) [no tests to run]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/continuation	0.476s [no tests to run]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/evaluation	0.427s [no tests to run]
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/examples/configured	[no test files]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/examples/quickstart	0.422s [no tests to run]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/groupchat	0.437s [no tests to run]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff	(cached) [no tests to run]
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/interaction	[no test files]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/callbackscope	(cached) [no tests to run]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol	(cached) [no tests to run]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract	(cached) [no tests to run]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel	0.405s [no tests to run]
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory [build failed]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model	(cached) [no tests to run]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/observability	(cached) [no tests to run]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin	(cached) [no tests to run]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/queue	(cached) [no tests to run]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runfeed	(cached) [no tests to run]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation	(cached) [no tests to run]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/team	0.447s [no tests to run]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools	(cached) [no tests to run]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workbench	(cached) [no tests to run]
+# github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance [github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workflow.test]
+conformance/ea1_root_agent_resume_settlement.go:187:30: undefined: completion
+conformance/ea1_root_agent_start_settlement.go:275:30: undefined: completion
+FAIL	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workflow [build failed]
+FAIL
+
+EXIT_CODE=1

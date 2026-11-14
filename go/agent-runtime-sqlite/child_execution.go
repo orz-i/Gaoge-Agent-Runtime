@@ -172,9 +172,20 @@ func (s *Store) MarkChildExecutionSettled(ctx context.Context, grant kernel.Chil
 	if valid != total {
 		return kernel.ErrExecutionConflict
 	}
-	result, err := tx.ExecContext(ctx,
-		"UPDATE runtime_child_effect_grants SET settled_revision=? WHERE grant_id=? AND child_run_id=? AND start_revision=? AND (settled_revision=0 OR settled_revision=?)",
-		revision, grant.ID, grant.ChildRunID, grant.ExpectedRevision, revision)
+	query := "UPDATE runtime_child_effect_grants SET settled_revision=? WHERE grant_id=? AND child_run_id=? AND start_revision=? AND (settled_revision=0 OR settled_revision=?)"
+	args := []any{revision, grant.ID, grant.ChildRunID, grant.ExpectedRevision, revision}
+	if grant.IsOwned() {
+		if total != 1 {
+			return kernel.ErrExecutionConflict
+		}
+		evidence, evidenceErr := sqliteOwnedMarkEvidence(ctx, tx, grant, child, marked, permit)
+		if evidenceErr != nil {
+			return evidenceErr
+		}
+		query = "UPDATE runtime_child_effect_grants SET settled_revision=?,settlement_evidence_json=? WHERE grant_id=? AND child_run_id=? AND start_revision=? AND (settled_revision=0 OR settled_revision=?)"
+		args = []any{revision, evidence, grant.ID, grant.ChildRunID, grant.ExpectedRevision, revision}
+	}
+	result, err := tx.ExecContext(ctx, query, args...)
 	if err != nil {
 		return conflictOrDatabaseError(err)
 	}
@@ -228,6 +239,21 @@ func (s *Store) FinishChildExecution(ctx context.Context, grant kernel.ChildExec
 	}
 	if correct == 0 || correct != anyCount {
 		return kernel.ErrExecutionConflict
+	}
+	if grant.IsOwned() {
+		if correct != 1 {
+			return kernel.ErrExecutionConflict
+		}
+		native, _, e := sqliteManagedLease(ctx, tx, grant.ChildRunID)
+		if e != nil {
+			return e
+		}
+		if !grant.MatchesExecution(native) {
+			return kernel.ErrExecutionConflict
+		}
+		if e := sqlitePersistOwnedRetirement(ctx, tx, grant, child); e != nil {
+			return e
+		}
 	}
 	result, err := tx.ExecContext(ctx,
 		"DELETE FROM runtime_child_effect_grants WHERE grant_id=? AND child_run_id=? AND start_revision=? AND settled_revision=?",

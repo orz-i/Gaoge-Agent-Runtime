@@ -13,6 +13,7 @@ type memoryChildGrant struct {
 	ancestors       []string
 	settledRevision uint64
 	completion      kernel.OwnedPhysicalCallbackCompletion
+	settlement      *kernel.OwnedSettlementEvidence
 }
 
 func memoryTerminalStatus(status kernel.RunStatus) bool {
@@ -148,6 +149,20 @@ func (store *Store) MarkChildExecutionSettled(ctx context.Context, grant kernel.
 	if grant.IsOwned() && permit.IsRecovery() && (original.completion.GrantID != grant.ID || !original.completion.HostCompleted) {
 		return kernel.ErrExecutionConflict
 	}
+	if grant.IsOwned() && original.settlement == nil {
+		origin := "LEGACY_UNKNOWN"
+		if original.completion.GrantID != "" {
+			origin = "OWNER_RETURN"
+			if permit.IsRecovery() {
+				origin = "RECOVERED_RETURN"
+			}
+		}
+		evidence := kernel.OwnedSettlementEvidence{Version: 1, Grant: grant, Snapshot: cloneSnapshot(child), Completion: original.completion, MarkOrigin: origin}
+		if !evidence.Valid() {
+			return kernel.ErrExecutionConflict
+		}
+		original.settlement = &evidence
+	}
 	original.settledRevision = child.Run.Revision
 	store.childGrants[grant.ID] = original
 	return nil
@@ -172,6 +187,11 @@ func (store *Store) FinishChildExecution(ctx context.Context, grant kernel.Child
 	if !ok || previous.grant != grant || previous.settledRevision == 0 ||
 		store.records[grant.ChildRunID].Run.Revision != previous.settledRevision {
 		return kernel.ErrExecutionConflict
+	}
+	if grant.IsOwned() {
+		if err := store.retireOwnedLocked(previous); err != nil {
+			return err
+		}
 	}
 	delete(store.childGrants, grant.ID)
 	for _, id := range previous.ancestors {

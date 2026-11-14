@@ -1,0 +1,16 @@
+SOURCE_SHA=00d0e69a0d0af64f37df28c98b17cb6b45c63af1
+COMMAND=node scripts/go-workspace.mjs vet
+==> vet go/agent-runtime
+==> vet go/agent-runtime-provider
+==> vet go/agent-runtime-harness
+==> vet go/agent-runtime-harness/examples/task-agent
+==> vet go/agent-runtime-harness-postgres
+==> vet go/agent-runtime-mcp
+==> vet go/agent-runtime-otel
+==> vet go/agent-runtime-a2a
+==> vet go/agent-runtime-postgres
+==> vet go/agent-runtime-sqlite
+==> vet go/agent-runtime-redis
+==> vet go/agent-runtime-http
+
+EXIT_CODE=0

@@ -70,20 +70,13 @@ func ea1RootCancelSettlement(t *testing.T, factory func(*testing.T) (kernel.Stor
 		t.Fatal("original owned source binding missing")
 	}
 	if phase == "P4" {
-		if wrapped.markCommits != 1 || wrapped.finishCalls == 0 {
+		if wrapped.markCalls != 2 || wrapped.markCommits != 2 || wrapped.finishCalls != 1 {
 			t.Fatal("actual original Mark commit/ACK-loss not reached")
 		}
 	} else if wrapped.markCommits != 0 || wrapped.markCalls < 2 {
 		t.Fatal("P3 did not retain unmarked callback-return fact")
 	}
-	completion, completionErr := rt.LookupOwnedPhysicalCallbackReturn(t.Context(), grant)
-	if phase == "P3" {
-		if completionErr != nil || !completion.HostCompleted || !completion.LeaseOwned || completion.ReturnRevision != before.Run.Revision {
-			t.Fatalf("original callback return fact: %+v %v", completion, completionErr)
-		}
-	} else if !errors.Is(completionErr, kernel.ErrNotFound) {
-		t.Fatalf("marked ACK-loss fabricated callback-return fallback: %v", completionErr)
-	}
+	ea1AssertOriginalRootCompletion(t, rt, grant, before, true, true)
 	ea1AssertStartSettlementReceipt(t, physical, req, definition, before, withTool)
 	wantCancel := kernel.ErrChildExecutionBusy
 	if before.Run.Status == kernel.RunStatusCompleted {

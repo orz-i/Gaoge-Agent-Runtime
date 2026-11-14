@@ -1,0 +1,118 @@
+[
+  [
+    "compile-agent-runtime",
+    "go -C go/agent-runtime test -p 2 -run '^$' ./..."
+  ],
+  [
+    "compile-agent-runtime-sqlite",
+    "go -C go/agent-runtime-sqlite test -p 2 -run '^$' ./..."
+  ],
+  [
+    "compile-agent-runtime-postgres",
+    "go -C go/agent-runtime-postgres test -p 2 -run '^$' ./..."
+  ],
+  [
+    "compile-agent-runtime-harness",
+    "go -C go/agent-runtime-harness test -p 2 -run '^$' ./..."
+  ],
+  [
+    "compile-agent-runtime-harness-postgres",
+    "go -C go/agent-runtime-harness-postgres test -p 2 -run '^$' ./..."
+  ],
+  [
+    "compile-agent-runtime-http",
+    "go -C go/agent-runtime-http test -p 2 -run '^$' ./..."
+  ],
+  [
+    "smoke-root",
+    "go -C go/agent-runtime test -p 2 -race -count=1 -v ./kernel ./memory ./agent ./continuation -run '^(TestOwnedRetirement.*|TestRootRetirement.*|TestApprovalWakeupCannotStealOriginalOwnerSettlement|TestApprovedChildAutomaticallyContinuesOwningTeamOnce)$'"
+  ],
+  [
+    "smoke-p4",
+    "go -C go/agent-runtime test -p 2 -race -count=1 -v ./memory -run '^TestEA1(RootAgent(Start|Resume|Control)Settlement|RootAgentCancelPhases|MiddlewareNextLifetime)Memory$'"
+  ],
+  [
+    "smoke-continuation-wrapper",
+    "go -C go/agent-runtime test -p 2 -race -count=1 -v ./continuation -run '^(TestNativeDirectAndContinuationWorkerCompeteUnderSameLease|TestNativeQuarantineBlocksContinuationUntilVerifiedRepair)$'"
+  ],
+  [
+    "smoke-format",
+    "make fmt-check"
+  ],
+  [
+    "smoke-metadata",
+    "make metadata"
+  ],
+  [
+    "smoke-lint",
+    "node scripts/go-workspace.mjs lint"
+  ],
+  [
+    "sqlite-directed",
+    "go -C go/agent-runtime-sqlite test -p 2 -race -count=3 -v -run '^(TestSQLiteOwnedRetirementStore|TestOwnedRetirement.*)$' ./..."
+  ],
+  [
+    "gorm-directed",
+    "go -C go/agent-runtime-postgres test -p 2 -race -count=3 -v -run '^TestOwnedRetirement(GORM|FinishNativeIdentityGORM)$' ./..."
+  ],
+  [
+    "pg-directed",
+    "go -C go/agent-runtime-postgres test -p 2 -race -count=3 -v -run '^TestRealPostgresOwnedRetirement(Store|FinishNativeIdentity)$' ./..."
+  ],
+  [
+    "continuation-race-repeat",
+    "go -C go/agent-runtime test -p 2 -race -count=20 -v ./continuation -run '^(TestApprovalWakeupCannotStealOriginalOwnerSettlement|TestApprovedChildAutomaticallyContinuesOwningTeamOnce)$'"
+  ],
+  [
+    "race-agent-runtime",
+    "go -C go/agent-runtime test -p 2 -race -count=1 -timeout=20m ./..."
+  ],
+  [
+    "race-agent-runtime-sqlite",
+    "go -C go/agent-runtime-sqlite test -p 2 -race -count=1 -timeout=20m ./..."
+  ],
+  [
+    "race-agent-runtime-postgres",
+    "go -C go/agent-runtime-postgres test -p 2 -race -count=1 -timeout=20m ./..."
+  ],
+  [
+    "race-agent-runtime-harness",
+    "go -C go/agent-runtime-harness test -p 2 -race -count=1 -timeout=20m ./..."
+  ],
+  [
+    "race-agent-runtime-harness-postgres",
+    "go -C go/agent-runtime-harness-postgres test -p 2 -race -count=1 -timeout=20m ./..."
+  ],
+  [
+    "race-agent-runtime-http",
+    "go -C go/agent-runtime-http test -p 2 -race -count=1 -timeout=20m ./..."
+  ],
+  [
+    "race-agent-runtime-provider",
+    "go -C go/agent-runtime-provider test -p 2 -race -count=1 -timeout=20m ./..."
+  ],
+  [
+    "race-agent-runtime-a2a",
+    "go -C go/agent-runtime-a2a test -p 2 -race -count=1 -timeout=20m ./..."
+  ],
+  [
+    "race-agent-runtime-mcp",
+    "go -C go/agent-runtime-mcp test -p 2 -race -count=1 -timeout=20m ./..."
+  ],
+  [
+    "race-agent-runtime-redis",
+    "go -C go/agent-runtime-redis test -p 2 -race -count=1 -timeout=20m ./..."
+  ],
+  [
+    "race-agent-runtime-otel",
+    "go -C go/agent-runtime-otel test -p 2 -race -count=1 -timeout=20m ./..."
+  ],
+  [
+    "race-agent-runtime-harness-examples-task-agent",
+    "go -C go/agent-runtime-harness/examples/task-agent test -p 2 -race -count=1 -timeout=20m ./..."
+  ],
+  [
+    "vet-all",
+    "node scripts/go-workspace.mjs vet"
+  ]
+]

@@ -1,0 +1,1028 @@
+SOURCE_SHA=a279dceb1b2b1752f12066d4051550bf3f79e657
+COMMAND=go -C go/agent-runtime-postgres test -p 2 -race -count=1 -v -run '^TestEA1RootAgentReconcilePhasesGORM$' ./...
+=== RUN   TestEA1RootAgentReconcilePhasesGORM
+=== RUN   TestEA1RootAgentReconcilePhasesGORM/P2/model-host-evidence
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.059ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.170ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.123ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.106ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.088ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.154ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.116ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.048ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.044ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.058ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.050ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.056ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.040ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.036ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.055ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.056ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.049ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+=== RUN   TestEA1RootAgentReconcilePhasesGORM/P0/model
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.054ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.086ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.056ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.045ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.085ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.051ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.048ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.059ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.043ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.040ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.176ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.179ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.044ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.041ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.050ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_store.go:209 [35;1mrecord not found
+[0m[33m[0.054ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "missing-root" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_store.go:209 [35;1mrecord not found
+[0m[33m[0.057ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "missing-root" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.046ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+=== RUN   TestEA1RootAgentReconcilePhasesGORM/P0/tool
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.075ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.170ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.045ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.042ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.038ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.297ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.038ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.059ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.040ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.040ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.043ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.045ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.036ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.041ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.039ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.039ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.047ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.048ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.044ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.040ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.041ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_store.go:209 [35;1mrecord not found
+[0m[33m[0.056ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "missing-root" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_store.go:209 [35;1mrecord not found
+[0m[33m[0.060ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_runs` WHERE run_id = "missing-root" ORDER BY `agent_kernel_runs`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.049ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+=== RUN   TestEA1RootAgentReconcilePhasesGORM/P1/model
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.043ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.060ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.042ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.047ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.042ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.045ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.035ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.041ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.039ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.043ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.045ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.040ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.035ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.042ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.042ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.047ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.040ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.048ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.110ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.121ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.042ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.039ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.044ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.062ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+=== RUN   TestEA1RootAgentReconcilePhasesGORM/P1/tool
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.039ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.068ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.042ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.036ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.047ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.039ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.038ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.038ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.044ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.041ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.043ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.040ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.033ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.033ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.042ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.039ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.049ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.063ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.055ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.041ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.052ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.046ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.039ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.040ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.051ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.038ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.045ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.044ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.040ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.039ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+=== RUN   TestEA1RootAgentReconcilePhasesGORM/P2/model
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.052ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.068ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.043ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.038ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.042ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.043ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.040ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.038ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.041ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.049ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.046ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.039ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.036ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.038ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:35 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.042ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:37 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.073ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+=== RUN   TestEA1RootAgentReconcilePhasesGORM/P2/tool
+
+2026/11/13 23:13:38 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.046ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:38 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.059ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:38 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.038ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:38 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.072ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:38 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.099ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:38 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.114ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:38 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.104ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:38 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.095ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:38 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.122ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:38 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.040ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:38 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.080ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:38 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.105ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:38 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.041ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:38 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.055ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:38 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.083ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:38 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.069ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:38 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.041ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:38 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.047ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:38 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.047ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:38 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.047ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:38 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.045ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.545ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+=== RUN   TestEA1RootAgentReconcilePhasesGORM/P3/model
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.053ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.091ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.080ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.092ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.103ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.050ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.040ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.129ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.126ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.080ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.086ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.074ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.073ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.108ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.242ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.065ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.077ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_owned_retirement.go:104 [35;1mrecord not found
+[0m[33m[0.056ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_owned_retirements` WHERE grant_id = "ownedgrant_ba000ba192161f0c104fe30ffbba457a" ORDER BY `agent_kernel_owned_retirements`.`grant_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_owned_retirement.go:104 [35;1mrecord not found
+[0m[33m[0.062ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_owned_retirements` WHERE grant_id = "ownedgrant_ba000ba192161f0c104fe30ffbba457a" ORDER BY `agent_kernel_owned_retirements`.`grant_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.063ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.044ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.051ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.048ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.050ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+=== RUN   TestEA1RootAgentReconcilePhasesGORM/P3/tool
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.051ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.065ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.281ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.053ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.041ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.052ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.052ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.044ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.050ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.050ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.042ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.042ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.042ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.037ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.048ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.050ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.039ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.045ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.074ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.109ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.130ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.046ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.080ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_owned_retirement.go:104 [35;1mrecord not found
+[0m[33m[0.119ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_owned_retirements` WHERE grant_id = "ownedgrant_2ab4bc0d1148609079baf11c09acbbb4" ORDER BY `agent_kernel_owned_retirements`.`grant_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_owned_retirement.go:104 [35;1mrecord not found
+[0m[33m[0.130ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_owned_retirements` WHERE grant_id = "ownedgrant_2ab4bc0d1148609079baf11c09acbbb4" ORDER BY `agent_kernel_owned_retirements`.`grant_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.095ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.043ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.062ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.050ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.039ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+=== RUN   TestEA1RootAgentReconcilePhasesGORM/P4/model
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.043ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.057ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.042ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.037ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.041ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.039ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.046ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.064ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.101ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.080ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.108ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.098ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.043ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.044ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.212ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.046ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.047ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_owned_retirement.go:104 [35;1mrecord not found
+[0m[33m[0.046ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_owned_retirements` WHERE grant_id = "ownedgrant_315c9fffa058ef22d9cfd30afd31cdbc" ORDER BY `agent_kernel_owned_retirements`.`grant_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_owned_retirement.go:104 [35;1mrecord not found
+[0m[33m[0.042ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_owned_retirements` WHERE grant_id = "ownedgrant_315c9fffa058ef22d9cfd30afd31cdbc" ORDER BY `agent_kernel_owned_retirements`.`grant_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.039ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_owned_retirement.go:104 [35;1mrecord not found
+[0m[33m[0.054ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_owned_retirements` WHERE grant_id = "ownedgrant_315c9fffa058ef22d9cfd30afd31cdbc" ORDER BY `agent_kernel_owned_retirements`.`grant_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_owned_retirement.go:104 [35;1mrecord not found
+[0m[33m[0.045ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_owned_retirements` WHERE grant_id = "ownedgrant_315c9fffa058ef22d9cfd30afd31cdbc" ORDER BY `agent_kernel_owned_retirements`.`grant_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_owned_retirement.go:104 [35;1mrecord not found
+[0m[33m[0.045ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_owned_retirements` WHERE grant_id = "ownedgrant_315c9fffa058ef22d9cfd30afd31cdbc" ORDER BY `agent_kernel_owned_retirements`.`grant_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_owned_retirement.go:104 [35;1mrecord not found
+[0m[33m[0.046ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_owned_retirements` WHERE grant_id = "ownedgrant_315c9fffa058ef22d9cfd30afd31cdbc" ORDER BY `agent_kernel_owned_retirements`.`grant_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_owned_retirement.go:104 [35;1mrecord not found
+[0m[33m[0.045ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_owned_retirements` WHERE grant_id = "ownedgrant_315c9fffa058ef22d9cfd30afd31cdbc" ORDER BY `agent_kernel_owned_retirements`.`grant_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.040ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.052ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.044ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.040ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.038ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+=== RUN   TestEA1RootAgentReconcilePhasesGORM/P4/model/single-mark-ack-loss-no-finish-hold
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.043ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.065ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.037ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.039ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.040ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.057ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.046ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.056ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.043ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.099ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.125ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.068ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.092ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.069ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.047ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.122ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.136ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_owned_retirement.go:104 [35;1mrecord not found
+[0m[33m[0.047ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_owned_retirements` WHERE grant_id = "ownedgrant_8ab4d06dcdaef9b8fb6742fe61d210e1" ORDER BY `agent_kernel_owned_retirements`.`grant_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_owned_retirement.go:104 [35;1mrecord not found
+[0m[33m[0.044ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_owned_retirements` WHERE grant_id = "ownedgrant_8ab4d06dcdaef9b8fb6742fe61d210e1" ORDER BY `agent_kernel_owned_retirements`.`grant_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.049ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_owned_retirement.go:104 [35;1mrecord not found
+[0m[33m[0.043ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_owned_retirements` WHERE grant_id = "ownedgrant_8ab4d06dcdaef9b8fb6742fe61d210e1" ORDER BY `agent_kernel_owned_retirements`.`grant_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.042ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.058ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.057ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.056ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.054ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.079ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+=== RUN   TestEA1RootAgentReconcilePhasesGORM/P4/tool
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.059ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.067ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.103ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.082ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.050ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.064ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.049ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.044ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.042ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.047ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.041ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.114ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.076ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.075ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.043ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.041ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.043ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.047ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.047ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.040ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.040ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.041ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.043ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_owned_retirement.go:104 [35;1mrecord not found
+[0m[33m[0.052ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_owned_retirements` WHERE grant_id = "ownedgrant_0900de4d31eb929945110e5d9eb8ca44" ORDER BY `agent_kernel_owned_retirements`.`grant_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_owned_retirement.go:104 [35;1mrecord not found
+[0m[33m[0.049ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_owned_retirements` WHERE grant_id = "ownedgrant_0900de4d31eb929945110e5d9eb8ca44" ORDER BY `agent_kernel_owned_retirements`.`grant_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.044ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_owned_retirement.go:104 [35;1mrecord not found
+[0m[33m[0.045ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_owned_retirements` WHERE grant_id = "ownedgrant_0900de4d31eb929945110e5d9eb8ca44" ORDER BY `agent_kernel_owned_retirements`.`grant_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_owned_retirement.go:104 [35;1mrecord not found
+[0m[33m[0.045ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_owned_retirements` WHERE grant_id = "ownedgrant_0900de4d31eb929945110e5d9eb8ca44" ORDER BY `agent_kernel_owned_retirements`.`grant_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_owned_retirement.go:104 [35;1mrecord not found
+[0m[33m[0.050ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_owned_retirements` WHERE grant_id = "ownedgrant_0900de4d31eb929945110e5d9eb8ca44" ORDER BY `agent_kernel_owned_retirements`.`grant_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_owned_retirement.go:104 [35;1mrecord not found
+[0m[33m[0.044ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_owned_retirements` WHERE grant_id = "ownedgrant_0900de4d31eb929945110e5d9eb8ca44" ORDER BY `agent_kernel_owned_retirements`.`grant_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_owned_retirement.go:104 [35;1mrecord not found
+[0m[33m[0.042ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_owned_retirements` WHERE grant_id = "ownedgrant_0900de4d31eb929945110e5d9eb8ca44" ORDER BY `agent_kernel_owned_retirements`.`grant_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.044ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.050ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.178ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.087ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.076ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+=== RUN   TestEA1RootAgentReconcilePhasesGORM/P4/tool/single-mark-ack-loss-no-finish-hold
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.044ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.068ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.039ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.041ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.042ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.039ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.041ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.038ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.042ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.079ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.100ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.089ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.104ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.069ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.058ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.126ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.063ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.051ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.051ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.045ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.046ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.046ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.042ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_owned_retirement.go:104 [35;1mrecord not found
+[0m[33m[0.047ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_owned_retirements` WHERE grant_id = "ownedgrant_3b0153fadcf435be401afc4777f0ebad" ORDER BY `agent_kernel_owned_retirements`.`grant_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_owned_retirement.go:104 [35;1mrecord not found
+[0m[33m[0.052ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_owned_retirements` WHERE grant_id = "ownedgrant_3b0153fadcf435be401afc4777f0ebad" ORDER BY `agent_kernel_owned_retirements`.`grant_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.045ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_owned_retirement.go:104 [35;1mrecord not found
+[0m[33m[0.048ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_owned_retirements` WHERE grant_id = "ownedgrant_3b0153fadcf435be401afc4777f0ebad" ORDER BY `agent_kernel_owned_retirements`.`grant_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.040ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.050ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.105ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.075ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.050ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+
+2026/11/13 23:13:40 [31;1m/private/tmp/gaoge-runtime-c79-continuation/go/agent-runtime-postgres/kernel_managed_recovery.go:37 [35;1mrecord not found
+[0m[33m[0.038ms] [34;1m[rows:0][0m SELECT * FROM `agent_kernel_managed_transfers` WHERE run_id = "root-reconcile" ORDER BY `agent_kernel_managed_transfers`.`run_id` LIMIT 1
+--- PASS: TestEA1RootAgentReconcilePhasesGORM (4.87s)
+    --- PASS: TestEA1RootAgentReconcilePhasesGORM/P2/model-host-evidence (0.05s)
+    --- PASS: TestEA1RootAgentReconcilePhasesGORM/P0/model (0.03s)
+    --- PASS: TestEA1RootAgentReconcilePhasesGORM/P0/tool (0.03s)
+    --- PASS: TestEA1RootAgentReconcilePhasesGORM/P1/model (0.04s)
+    --- PASS: TestEA1RootAgentReconcilePhasesGORM/P1/tool (0.04s)
+    --- PASS: TestEA1RootAgentReconcilePhasesGORM/P2/model (2.18s)
+    --- PASS: TestEA1RootAgentReconcilePhasesGORM/P2/tool (2.17s)
+    --- PASS: TestEA1RootAgentReconcilePhasesGORM/P3/model (0.06s)
+    --- PASS: TestEA1RootAgentReconcilePhasesGORM/P3/tool (0.06s)
+    --- PASS: TestEA1RootAgentReconcilePhasesGORM/P4/model (0.05s)
+    --- PASS: TestEA1RootAgentReconcilePhasesGORM/P4/model/single-mark-ack-loss-no-finish-hold (0.05s)
+    --- PASS: TestEA1RootAgentReconcilePhasesGORM/P4/tool (0.06s)
+    --- PASS: TestEA1RootAgentReconcilePhasesGORM/P4/tool/single-mark-ack-loss-no-finish-hold (0.06s)
+PASS
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres	6.682s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models	[no test files]
+
+EXIT_CODE=0

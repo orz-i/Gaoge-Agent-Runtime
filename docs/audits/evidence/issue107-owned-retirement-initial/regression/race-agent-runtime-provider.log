@@ -1,0 +1,10 @@
+SOURCE_SHA=aa20e028c6b9d28af2f2e623eb954d693d6be214
+COMMAND=go -C go/agent-runtime-provider test -p 2 -race -count=1 -timeout=20m ./...
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider	4.486s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider/anthropic	2.179s
+?   	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider/examples/providers	[no test files]
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider/internal/providerhttp	1.521s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider/openai	3.406s
+ok  	github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider/transport	6.834s
+
+EXIT_CODE=0
