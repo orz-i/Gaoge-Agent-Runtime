@@ -163,7 +163,9 @@ func ea1NewControlFixture(t *testing.T, factory func(*testing.T) (kernel.Store, 
 	}
 	f.request = agent.StartRequest{ID: "root-control", RequestID: "original-request", Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"}, Goal: "original controlled effect", Instructions: "Use original call only.", Model: "fixture-model", ToolKeys: []string{"effect"}}
 	f.host = &ea1ControlHost{t: t, request: f.request}
-	setup := f.runner(rt, true, false)
+	// Setup performs real Store reads under the Model call deadline. Keep this
+	// allowance separate from the measured control runner and its fault clocks.
+	setup := f.runnerWithModelTimeout(rt, true, false, time.Second)
 	s.afterCreate = func(_ context.Context, v kernel.Snapshot) error {
 		f.created = v
 		if v.Run.ParentRunID != "" || f.request.OriginFingerprint != "" || !setup.VerifyFrozenStartRequest(v, f.request) {
@@ -220,7 +222,10 @@ func ea1NewControlFixture(t *testing.T, factory func(*testing.T) (kernel.Store, 
 	return f
 }
 func (f *ea1ControlFixture) runner(rt *kernel.Runtime, native, host bool) *agent.Runner {
-	d := agent.Dependencies{Runtime: rt, Model: f.physical, Catalog: f.registry, Executor: f.registry, Approvals: f.approval, Clock: ea1UnknownAgentClock{offset: f.offset}, Execution: agent.ExecutionPolicy{Model: agent.CallPolicy{Timeout: 100 * time.Millisecond, MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}, Tool: agent.CallPolicy{Timeout: 100 * time.Millisecond, MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}}}
+	return f.runnerWithModelTimeout(rt, native, host, 100*time.Millisecond)
+}
+func (f *ea1ControlFixture) runnerWithModelTimeout(rt *kernel.Runtime, native, host bool, modelTimeout time.Duration) *agent.Runner {
+	d := agent.Dependencies{Runtime: rt, Model: f.physical, Catalog: f.registry, Executor: f.registry, Approvals: f.approval, Clock: ea1UnknownAgentClock{offset: f.offset}, Execution: agent.ExecutionPolicy{Model: agent.CallPolicy{Timeout: modelTimeout, MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}, Tool: agent.CallPolicy{Timeout: 100 * time.Millisecond, MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}}}
 	if native {
 		d.RunExecution = &agent.RunExecution{OwnerID: "control-owner", LeaseDuration: 2 * time.Second}
 	}
