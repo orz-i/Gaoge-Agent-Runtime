@@ -232,9 +232,17 @@ func TestSamplingFrozenCheckpointReceipts(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			request := model.Request{RunID: "run", Model: "model", Messages: runtimecontext.Materialize(cp.Window)}
+			// Match buildModelRequest's cloned collection representation before
+			// entering the selected preparer; the strict binding check is unchanged.
+			request := model.CloneRequest(model.Request{RunID: "run", Model: "model", Messages: runtimecontext.Materialize(cp.Window)})
+			if request.HostedTools == nil || len(request.HostedTools) != 0 {
+				t.Fatal("fixture must retain the production empty hosted-tool collection")
+			}
 			_, err = chain.Invoke(callbackscope.Bind(t.Context(), lifecycle), plugin.RunInvocation{RunID: "run"}, func(ctx context.Context) (kernel.Snapshot, error) {
-				_, e := runner.prepareSelectedContext(ctx, kernel.Snapshot{Run: kernel.Run{ID: "run", Revision: 4}}, request)
+				prepared, e := runner.prepareSelectedContext(ctx, kernel.Snapshot{Run: kernel.Run{ID: "run", Revision: 4}}, request)
+				if e == nil && !reflect.DeepEqual(prepared, request) {
+					t.Fatal("checkpoint preparation changed the original complete request")
+				}
 				return kernel.Snapshot{}, e
 			})
 			if failure == "" {
