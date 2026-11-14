@@ -247,7 +247,7 @@ func (handler *DelegationToolHandler) VerifyCommittedTool(
 // ID (even with matching public metadata) does not establish Kernel residence.
 func (runner *Runner) localDelegationObservation(ctx context.Context, runID string) (kernel.Snapshot, handoff.Delegation, error) {
 	coordinator, ok := runner.handoffs.(*handoff.Coordinator)
-	if !ok || !coordinator.ObservesLocalKernelRunner(runner.runtime) {
+	if !ok || !coordinator.SupportsLocalDelegationObservation(runner.runtime) {
 		return kernel.Snapshot{}, handoff.Delegation{}, ErrHandoffCancellationUnverified
 	}
 	owner, err := runner.store.GetInvocationByExecutionRefID(ctx, runID)
@@ -261,6 +261,9 @@ func (runner *Runner) localDelegationObservation(ctx context.Context, runID stri
 	frozen, _, err := runner.localHandoffCancellationAuthority(ctx, owner, child)
 	if err != nil {
 		return kernel.Snapshot{}, handoff.Delegation{}, err
+	}
+	if (!coordinator.ObservesLocalKernelRunner(runner.runtime) && child.Run.Kind != agent.RunKind) || !coordinator.ObservesLocalDelegation(runner.runtime, frozen) {
+		return kernel.Snapshot{}, handoff.Delegation{}, ErrHandoffCancellationUnverified
 	}
 	return child, frozen, nil
 }

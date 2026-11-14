@@ -272,3 +272,12 @@ func (middleware contextRunMiddleware) hydrateTurn(
 	ctx = withContextCheckpoint(ctx, checkpoint)
 	return withContextWindowBinding(ctx, turn.ID, access), nil
 }
+
+// HydrateContextRun exposes only the existing read-only authority/hydration
+// sequence. It neither invokes Next nor issues lifecycle completion evidence.
+func HydrateContextRun(ctx context.Context, store Store, relations ContextRunRelationSource, invocation plugin.RunInvocation) (context.Context, error) {
+	if store == nil {
+		return nil, ErrInvalidRequest
+	}
+	return (contextRunMiddleware{store: store, relations: relations}).hydrate(ctx, strings.TrimSpace(invocation.RunID))
+}

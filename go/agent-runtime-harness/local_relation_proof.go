@@ -60,7 +60,13 @@ func (runner *Runner) verifyLocalApprovalRun(ctx context.Context, candidate kern
 		if !isHandoffDelegationInvocation(owner) {
 			return nil
 		}
-		feature = runner.handoffs
+		original, ok := runner.agent.(*agent.Runner)
+		coordinator, bound := runner.handoffs.(*handoff.Coordinator)
+		frozen, _, proofErr := runner.localHandoffCancellationAuthority(ctx, owner, candidate)
+		if !ok || !bound || proofErr != nil || (!coordinator.ObservesLocalKernelRunner(runner.runtime) && candidate.Run.Kind != agent.RunKind) || !coordinator.UsesLocalAgentForDelegation(runner.runtime, original, frozen) {
+			return ErrRuntimeCancellationUnverified
+		}
+		return nil
 	}
 	original, ok := runner.agent.(*agent.Runner)
 	verifier, verified := feature.(localAgentRouteVerifier)
@@ -199,10 +205,11 @@ func (runner *Runner) verifyLocalRelationChain(ctx context.Context, candidate ke
 	if err == nil && !rawFeatureChild {
 		if isHandoffDelegationInvocation(owner) {
 			coordinator, ok := runner.handoffs.(*handoff.Coordinator)
-			if !ok || !coordinator.ObservesLocalKernelRunner(runner.runtime) || (control && !coordinator.OwnsLocalKernelRunner(runner.runtime)) {
+			if !ok {
 				return unverified()
 			}
-			if _, _, err = runner.localHandoffCancellationAuthority(ctx, owner, candidate); err != nil {
+			frozen, _, proofErr := runner.localHandoffCancellationAuthority(ctx, owner, candidate)
+			if proofErr != nil || (!coordinator.ObservesLocalKernelRunner(runner.runtime) && candidate.Run.Kind != agent.RunKind) || !coordinator.ObservesLocalDelegation(runner.runtime, frozen) || (control && !coordinator.OwnsLocalDelegation(runner.runtime, frozen)) {
 				return unverified()
 			}
 		} else {

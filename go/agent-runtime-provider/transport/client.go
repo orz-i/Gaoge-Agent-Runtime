@@ -863,6 +863,17 @@ type UpstreamError struct {
 	Debug      *UpstreamDebugSnapshot
 }
 
+// upstreamErrorWithCause preserves the diagnostic projection without changing
+// UpstreamError's public fields or discarding the original transport cause.
+type upstreamErrorWithCause struct {
+	*UpstreamError
+	cause error
+}
+
+func (e *upstreamErrorWithCause) Unwrap() []error {
+	return []error{e.UpstreamError, e.cause}
+}
+
 var errStreamDone = errors.New("llm stream done")
 
 // UpstreamDebugSnapshot 记录上游请求与响应的调试快照。
@@ -1315,11 +1326,14 @@ func attachUpstreamDebug(err error, debug *UpstreamDebugSnapshot) error {
 	if message == "" {
 		message = fmt.Sprintf("upstream_status_%d", statusCode)
 	}
-	return &UpstreamError{
-		StatusCode: statusCode,
-		Message:    message,
-		Body:       debug.Response.Body,
-		Debug:      debug,
+	return &upstreamErrorWithCause{
+		UpstreamError: &UpstreamError{
+			StatusCode: statusCode,
+			Message:    message,
+			Body:       debug.Response.Body,
+			Debug:      debug,
+		},
+		cause: err,
 	}
 }
 

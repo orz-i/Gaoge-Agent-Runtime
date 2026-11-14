@@ -182,7 +182,7 @@ func stripDiagnosticFields(value any, businessContent bool) {
 					}
 					continue
 				}
-			case "errorcode":
+			case "errorcode", "outcomeerrorcode":
 				if !businessContent {
 					if code, ok := child.(string); ok {
 						item[key] = PublicFailureCode(code)
@@ -196,7 +196,7 @@ func stripDiagnosticFields(value any, businessContent bool) {
 					delete(item, key)
 					continue
 				}
-			case "errordetail", "errormessage", "errorpreview", "cancelerror",
+			case "outcomeerrordetail", "errordetail", "errormessage", "errorpreview", "cancelerror",
 				"diagnostic", "diagnostics", "privatedebug", "upstreamdebug",
 				"providererror", "providerresponse", "providerrequest",
 				"requestbody", "responsebody", "rawerror", "stacktrace",

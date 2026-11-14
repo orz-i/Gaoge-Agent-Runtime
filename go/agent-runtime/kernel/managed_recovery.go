@@ -280,52 +280,6 @@ func sameManagedLease(a, b ExecutionLease) bool {
 	return a.RunID == b.RunID && a.OwnerID == b.OwnerID && a.LeaseID == b.LeaseID && a.Epoch == b.Epoch
 }
 
-// managedClone copies the finite persistence types without a codec round trip.
-// In particular nil RawMessage remains nil; explicit JSON null remains bytes.
-func managedClone[T any](v T) T {
-	return cloneManagedValue(reflect.ValueOf(v)).Interface().(T)
-}
-func cloneManagedValue(v reflect.Value) reflect.Value {
-	switch v.Kind() {
-	case reflect.Pointer:
-		if v.IsNil() {
-			return reflect.Zero(v.Type())
-		}
-		out := reflect.New(v.Type().Elem())
-		out.Elem().Set(cloneManagedValue(v.Elem()))
-		return out
-	case reflect.Slice:
-		if v.IsNil() {
-			return reflect.Zero(v.Type())
-		}
-		out := reflect.MakeSlice(v.Type(), v.Len(), v.Len())
-		for i := 0; i < v.Len(); i++ {
-			out.Index(i).Set(cloneManagedValue(v.Index(i)))
-		}
-		return out
-	case reflect.Struct:
-		// Preserve immutable unexported time.Time representation, and recursively
-		// copy all exported fields containing mutable buffers/pointers.
-		out := reflect.New(v.Type()).Elem()
-		out.Set(v)
-		for i := 0; i < v.NumField(); i++ {
-			if v.Type().Field(i).IsExported() {
-				out.Field(i).Set(cloneManagedValue(v.Field(i)))
-			}
-		}
-		return out
-	case reflect.Invalid, reflect.Bool, reflect.Int, reflect.Int8, reflect.Int16,
-		reflect.Int32, reflect.Int64, reflect.Uint, reflect.Uint8, reflect.Uint16,
-		reflect.Uint32, reflect.Uint64, reflect.Uintptr, reflect.Float32,
-		reflect.Float64, reflect.Complex64, reflect.Complex128, reflect.Array,
-		reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.String,
-		reflect.UnsafePointer:
-		return v
-	default:
-		return v
-	}
-}
-
 // ManagedCurrentAuthority selects the only active native identity. Original
 // authority remains immutable historical evidence after a successor is enabled.
 func ManagedCurrentAuthority(t ManagedTransfer) (ChildExecutionGrant, ExecutionLease) {

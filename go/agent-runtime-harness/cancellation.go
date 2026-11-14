@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
@@ -100,8 +101,7 @@ func (runner *Runner) cancelRuntimeRun(
 		// composition proof can authorize a local physical Cancel. No
 		// heuristic fallback for custom/dynamic Handoff routes.
 		coordinator, ok := runner.handoffs.(*handoff.Coordinator)
-		if !ok || !coordinator.OwnsLocalKernelRunner(runner.runtime) ||
-			!runner.localHandoffCancellerOwnsKernel() {
+		if !ok || !coordinator.SupportsLocalDelegationObservation(runner.runtime) || (coordinator.ObservesLocalKernelRunner(runner.runtime) && !coordinator.OwnsLocalKernelRunner(runner.runtime)) || !runner.localHandoffCancellerOwnsKernel() {
 			return kernel.Snapshot{}, false, fmt.Errorf("routed Handoff Run %q has no local execution-owner/canceller proof: %w", runID, ErrHandoffCancellationUnverified)
 		}
 	}
@@ -160,6 +160,10 @@ func (runner *Runner) cancelRuntimeRun(
 		var delegation handoff.Delegation
 		if delegatedChild != nil {
 			delegation, parentRun, err = runner.localHandoffCancellationAuthority(ctx, *delegatedChild, current)
+			coordinator := runner.handoffs.(*handoff.Coordinator)
+			if err == nil && ((!coordinator.ObservesLocalKernelRunner(runner.runtime) && current.Run.Kind != agent.RunKind) || !coordinator.OwnsLocalDelegation(runner.runtime, delegation)) {
+				err = ErrHandoffCancellationUnverified
+			}
 			if err != nil {
 				return kernel.Snapshot{}, true, err
 			}
@@ -319,6 +323,9 @@ func (runner *Runner) localHandoffCancellationAuthority(
 	var payload delegationItemPayload
 	if err := json.Unmarshal(item.Payload, &payload); err != nil {
 		return unverified(err)
+	}
+	if coordinator, ok := runner.handoffs.(*handoff.Coordinator); ok && !coordinator.ObservesLocalKernelRunner(runner.runtime) && payload.Execution == nil {
+		return unverified(ErrConflict)
 	}
 	if payload.DelegationID != delegation.ID || payload.ChildRunID != delegation.ChildRunID ||
 		payload.ChildRunID != child.ExecutionRefID ||
