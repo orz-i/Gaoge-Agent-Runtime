@@ -282,6 +282,9 @@ type Dependencies struct {
 	// ManagedContextRecovery explicitly selects only the concrete Context lifecycle.
 	// PrepareModelRequest must be nil; Runtime installs this adapter preparation.
 	ManagedContextRecovery *BoundedContextAdapter
+	// ContextPreparation selects the concrete synchronous sampling algorithm.
+	// It grants no managed suspension/recovery authority.
+	ContextPreparation *BoundedContextAdapter
 	// NormalizeModelPolicy selects and freezes Host options/route policy before preparation.
 	NormalizeModelPolicy ModelPolicyNormalizer
 	ToolMiddleware       []plugin.ToolMiddleware
@@ -343,6 +346,7 @@ type Runner struct {
 	rootCallbacks             *rootCallbackState
 	boundedCallbacks          []any
 	managedContextRecovery    *BoundedContextAdapter
+	contextPreparation        *BoundedContextAdapter
 	approvalPolicies          *plugin.ApprovalPolicySet
 	hostedTools               HostedToolCatalog
 	discovery                 ToolDiscovery
@@ -459,6 +463,17 @@ func publicModelInvocations(values []ModelInvocation) []ModelInvocation {
 
 // NewRunner constructs the Agent loop; Host selection and task routing remain external.
 func NewRunner(dependencies Dependencies) (*Runner, error) {
+	if a := dependencies.ContextPreparation; a != nil {
+		count := 0
+		for _, layer := range dependencies.RunMiddleware {
+			if layer == a {
+				count++
+			}
+		}
+		if a.sampling == nil || count != 1 || dependencies.PrepareModelRequest != nil || dependencies.ManagedContextRecovery != nil {
+			return nil, ErrInvalidRequest
+		}
+	}
 	if a := dependencies.ManagedContextRecovery; a != nil {
 		if !dependencies.Runtime.SupportsManagedRecovery() {
 			return nil, ErrInvalidRequest
@@ -555,10 +570,11 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		toolLimiter:          newCallLimiter(execution.Tool.MaxConcurrency),
 		runChain:             runChain, modelChain: modelChain, toolChain: toolChain,
 		managedContextRecovery: dependencies.ManagedContextRecovery,
+		contextPreparation:     dependencies.ContextPreparation,
 		boundedCallbacks:       collectBoundedCallbacks(dependencies.RunMiddleware, dependencies.ModelMiddleware, dependencies.ToolMiddleware),
 		kernelOwnedStartCancellation: len(dependencies.RunMiddleware) == 0 &&
 			len(dependencies.ModelMiddleware) == 0 && len(dependencies.ToolMiddleware) == 0 &&
-			dependencies.PrepareModelRequest == nil && dependencies.NormalizeModelPolicy == nil,
+			dependencies.PrepareModelRequest == nil && dependencies.ContextPreparation == nil && dependencies.NormalizeModelPolicy == nil,
 		prepareModelRequest:   dependencies.PrepareModelRequest,
 		modelPolicyNormalizer: dependencies.NormalizeModelPolicy,
 		deferResume:           dependencies.DeferResumption,

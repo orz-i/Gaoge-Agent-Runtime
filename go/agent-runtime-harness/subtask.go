@@ -160,7 +160,7 @@ func (runner *Runner) materializeSubtask(ctx context.Context, value Subtask, led
 			return value, nil
 		}
 		coordinator, ok := runner.handoffs.(*handoff.Coordinator)
-		if !ok || !coordinator.ObservesLocalKernelRunner(runner.runtime) {
+		if !ok || !coordinator.SupportsLocalDelegationObservation(runner.runtime) {
 			return value, nil // Remote/dynamic execution has no same-Kernel proof.
 		}
 		delegatedChild = child

@@ -256,3 +256,36 @@ func ManagedSuspension(ctx context.Context, adapter any, request any) (json.RawM
 	}{s.binding, t.nonce, t.input, t.operations, request, t.managedPrepared})
 	return b, e == nil
 }
+
+// EnterPreparation creates a separate synchronous ticket, never borrowing the
+// innermost Budget/Host ticket. The selected concrete Context Run must actually
+// be active and have completed hydration in this very scope.
+func EnterPreparation(ctx context.Context, runID string, adapter any, input any) (context.Context, *Ticket) {
+	s, _ := ctx.Value(scopeKey{}).(*Scope)
+	if s == nil {
+		return ctx, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed || s.binding.RunID != runID || !s.trusted[adapter] {
+		return ctx, nil
+	}
+	active := 0
+	for _, t := range s.tickets {
+		if t.adapter == adapter && !t.returned && !t.invalid && !t.receipt {
+			if _, ok := t.operations["managed.hydrated"]; ok {
+				active++
+			}
+		}
+	}
+	if active != 1 {
+		return ctx, nil
+	}
+	raw, err := json.Marshal(input)
+	if err != nil {
+		return ctx, nil
+	}
+	t := &Ticket{scope: s, adapter: adapter, nonce: uint64(len(s.tickets) + 1), input: sha256.Sum256(raw)}
+	s.tickets = append(s.tickets, t)
+	return context.WithValue(ctx, ticketKey{}, t), t
+}

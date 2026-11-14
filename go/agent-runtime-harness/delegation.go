@@ -302,7 +302,7 @@ func (runner *Runner) reconcileLocalTerminalHandoffEvidence(
 	ctx context.Context, turn Turn,
 ) error {
 	coordinator, ok := runner.handoffs.(*handoff.Coordinator)
-	if !ok || !coordinator.ObservesLocalKernelRunner(runner.runtime) {
+	if !ok || !coordinator.SupportsLocalDelegationObservation(runner.runtime) {
 		return nil
 	}
 	items, err := listAllItems(ctx, runner.store, turn.ID)
@@ -334,7 +334,7 @@ func (runner *Runner) reconcileLocalTerminalHandoffEvidence(
 			return ErrConflict
 		}
 		child, _, observationErr := runner.localDelegationObservation(ctx, item.RunID)
-		if errors.Is(observationErr, kernel.ErrNotFound) {
+		if errors.Is(observationErr, kernel.ErrNotFound) || (!coordinator.ObservesLocalKernelRunner(runner.runtime) && errors.Is(observationErr, ErrHandoffCancellationUnverified)) {
 			continue
 		}
 		if observationErr != nil {

@@ -476,7 +476,13 @@ func (runner *Runner) buildModelRequest(
 	// The final Request and original Catalog fingerprints are both hashed into
 	// the same durable ModelInvocation, never recomputed on resume.
 	originalTools := append([]tools.Definition(nil), request.Tools...)
-	if runner.prepareModelRequest != nil {
+	if runner.contextPreparation != nil {
+		prepared, prepareErr := runner.prepareSelectedContext(ctx, snapshot, request)
+		if prepareErr != nil {
+			return model.Request{}, nil, prepareErr
+		}
+		request = prepared
+	} else if runner.prepareModelRequest != nil {
 		prepared, prepareErr := runner.prepareModelRequest(ctx, model.CloneRequest(request))
 		runner.noteRootCallbackFailure(prepareErr)
 		if prepareErr != nil {

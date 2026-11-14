@@ -724,7 +724,7 @@ func (runner *Runner) RefreshInvocation(ctx context.Context, invocationID string
 	// A remote/dynamic route needs its own ChildRunner-owned observation.
 	if isHandoffDelegationInvocation(invocation) {
 		coordinator, ok := runner.handoffs.(*handoff.Coordinator)
-		if !ok || !coordinator.OwnsLocalKernelRunner(runner.runtime) {
+		if !ok || !coordinator.SupportsLocalDelegationObservation(runner.runtime) || (coordinator.ObservesLocalKernelRunner(runner.runtime) && !coordinator.OwnsLocalKernelRunner(runner.runtime)) {
 			return Snapshot{}, ErrHandoffCancellationUnverified
 		}
 	}
@@ -733,8 +733,13 @@ func (runner *Runner) RefreshInvocation(ctx context.Context, invocationID string
 		return Snapshot{}, err
 	}
 	if isHandoffDelegationInvocation(invocation) {
-		if _, _, err := runner.localHandoffCancellationAuthority(ctx, invocation, runtimeSnapshot); err != nil {
-			return Snapshot{}, err
+		frozen, _, proofErr := runner.localHandoffCancellationAuthority(ctx, invocation, runtimeSnapshot)
+		if proofErr != nil {
+			return Snapshot{}, proofErr
+		}
+		coordinator := runner.handoffs.(*handoff.Coordinator)
+		if (!coordinator.ObservesLocalKernelRunner(runner.runtime) && runtimeSnapshot.Run.Kind != agent.RunKind) || !coordinator.OwnsLocalDelegation(runner.runtime, frozen) {
+			return Snapshot{}, ErrHandoffCancellationUnverified
 		}
 	}
 	pending, err := runner.resolvedInteractionClaimPending(ctx, turn.ID, "")

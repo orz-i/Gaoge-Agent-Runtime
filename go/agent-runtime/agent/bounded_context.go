@@ -37,8 +37,9 @@ type BoundedContextPorts interface {
 	BindCheckpoint(context.Context, string, runtimecontext.Checkpoint) error
 }
 type BoundedContextAdapter struct {
-	manager *runtimecontext.Manager
-	ports   BoundedContextPorts
+	manager  *runtimecontext.Manager
+	ports    BoundedContextPorts
+	sampling SamplingContextPorts
 }
 
 func NewBoundedContextAdapter(manager *runtimecontext.Manager, ports BoundedContextPorts) (*BoundedContextAdapter, error) {
@@ -49,7 +50,14 @@ func NewBoundedContextAdapter(manager *runtimecontext.Manager, ports BoundedCont
 }
 func (*BoundedContextAdapter) Name() string { return "runtime.bounded_context.v1" }
 func (a *BoundedContextAdapter) Run(ctx context.Context, inv plugin.RunInvocation, next plugin.RunNext) (kernel.Snapshot, error) {
-	hydrated, source, err := a.ports.Hydrate(ctx, inv)
+	var hydrated context.Context
+	var source BoundedContextHydration
+	var err error
+	if a.sampling != nil {
+		hydrated, source, err = a.sampling.Hydrate(ctx, inv)
+	} else {
+		hydrated, source, err = a.ports.Hydrate(ctx, inv)
+	}
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
@@ -64,6 +72,9 @@ func (a *BoundedContextAdapter) Run(ctx context.Context, inv plugin.RunInvocatio
 	return snapshot, nextErr
 }
 func (a *BoundedContextAdapter) Prepare(ctx context.Context, incoming model.Request) (prepared model.Request, prepareErr error) {
+	if a.sampling != nil {
+		return model.Request{}, ErrInvalidRequest
+	}
 	callbackscope.ManagedPrepareEntered(ctx, a)
 	defer func() { callbackscope.ManagedPrepareReturned(ctx, a, prepared, prepareErr) }()
 	plan, err := a.ports.Plan(ctx, model.CloneRequest(incoming))
