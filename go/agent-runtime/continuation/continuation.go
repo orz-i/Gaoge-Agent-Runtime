@@ -105,13 +105,16 @@ type Handler interface {
 }
 
 // Reconciler recovers missed child-terminal delivery from durable Run relations.
+// A Worker may call it concurrently with Projector.Project on the same object;
+// implementations must isolate any shared state. Reconcile calls do not overlap.
 type Reconciler interface {
 	Reconcile(context.Context) error
 }
 
 // Projector drains feature-neutral committed transitions into durable
 // continuation Jobs. The Store outbox, not an in-memory callback, is the source
-// of truth for projection work.
+// of truth for projection work. A Worker may call it concurrently with
+// Reconciler.Reconcile on the same object; Project calls do not overlap.
 type Projector interface {
 	Project(context.Context) error
 }
