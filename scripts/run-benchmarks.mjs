@@ -13,8 +13,8 @@ const count = smoke ? "1" : "5";
 const suites = [
   {
     cwd: path.join(root, "go", "agent-runtime"),
-    packages: ["./kernel", "./runrelation", "./continuation", "./agent", "./workflow"],
-    benchmark: "^(BenchmarkRuntime|BenchmarkRunRelation|BenchmarkContinuation|BenchmarkAgent|BenchmarkWorkflow)",
+    packages: ["./kernel", "./runrelation", "./continuation", "./agent", "./handoff"],
+    benchmark: "^(BenchmarkRuntime|BenchmarkRunRelation|BenchmarkContinuation|BenchmarkAgent|BenchmarkHandoff)",
   },
   {
     cwd: path.join(root, "go", "agent-runtime-harness"),

@@ -1,7 +1,7 @@
 # @orz-i/agent-runtime-client
 
 Framework-neutral TypeScript client for Agent Runtime HTTP v1. The client exposes
-feature-specific execution APIs, shared run inspection and feeds, and Harness
+Agent Run execution, shared run inspection and feeds, and Harness
 interactions. Host application data and authorization remain owned by the host.
 
 ## Install a Beta
@@ -52,8 +52,8 @@ for await (const event of runtime.runs.feed(started.run.id, { afterSeq: lastSeq 
 }
 ```
 
-Run IDs are returned as `snapshot.run.id`. Start runs through their feature
-namespace, such as `agent.start`, not `runs.create`. Snapshots expose only the
+Run IDs are returned as `snapshot.run.id`. Start runs with
+`agent.start`, not `runs.create`. Snapshots expose only the
 current aggregate plus `eventHead`; durable Kernel event history is paged with
 `runs.events(runID, { afterSeq, limit })`. Semantic live/replay feeds are async
 iterables returned by `runs.feed`, not callback-based `events.stream`.
@@ -63,27 +63,26 @@ and ends after an event marked `terminal`. Persist `lastSeq` if the caller needs
 to reconnect after a reload. The optional `onCursorExpired` callback receives
 a replacement snapshot when the server reports an expired cursor.
 
+> **BREAKING CHANGE:** The development candidate removes Team, GroupChat and
+> Workflow clients and DTOs. Use the Agent/SubAgent delegation APIs. Existing
+> composite Runs are not replayed. See [ADR 0018](../../docs/adr/0018-subagent-only-orchestration-hardcut.md).
+
 ## Supported client surface
 
 | Namespace | Methods |
 | --- | --- |
 | `agent` | `start` |
-| `plans` | `start`, `approve` |
-| `teams` | `start` |
-| `workflows` | `start`, `resolveWait`, `cancel`, `trace` |
-| `workflows.definitions` | `compile`, `publish`, `list`, `get`, `setActivation` |
 | `runs` | `get`, `events`, `cancel`, `workbench`, `feed` |
 | `harness.turns` | `get`, `feed`, `resolveApproval`, `resolveInteraction`, `retryInvocation`, `cancelSubtask`, `resolveSubtaskApproval` |
 
-Use the exported request types for each feature. Having a client method does not
+Use the exported request types for the supported Agent/Harness operations. Having a client method does not
 grant permission: the host decides which routes and capabilities are available
 to a caller. Generic `admin`, `agents`, `events`, and `interactions` namespaces,
 and generic run delegation/resume methods, are not part of this client.
 
 `RuntimeKind` is a feature-owned string. Handle unfamiliar kinds when reading
-Runs or Workbench snapshots; built-ins include `agent`,
-`workflow`, `team`, and `a2a.remote`. Feature-specific start methods remain
-explicit. JSON payloads typed as `unknown` require the host feature's own schema.
+Runs or Workbench snapshots; built-ins include `agent` and `a2a.remote`. Feature-specific start methods remain
+explicit. JSON payloads typed as `unknown` require their owning host schema.
 
 ## Harness input and approval
 
@@ -102,11 +101,11 @@ await runtime.harness.turns.resolveInteraction(
 
 The response shape is defined by the specific host interaction. Host policy may
 require `resolveApproval` instead; do not substitute a generic run resume for a
-Harness decision or a Workflow wait.
+Harness decision.
 
 Pass the displayed approval's `checkpointID` in the `resolveApproval` request
 options to bind the decision to that request. If the Turn has advanced to a newer
-approval, the server returns a conflict. Older clients may omit this field.
+approval, the server returns a conflict. The `checkpointID` is required for this candidate.
 
 ## Cancellation
 
@@ -120,7 +119,6 @@ await runtime.runs.cancel(latest.run.id, {
 });
 ```
 
-Use `workflows.cancel` for Workflow-specific cancellation and compensation.
 A revision conflict requires reloading current state before making a new decision.
 
 ## Error handling

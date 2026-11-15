@@ -12,8 +12,6 @@ import type {
 } from "./types.js";
 import { createAgentCapability } from "./capabilities/agent.js";
 import { pathPart } from "./capabilities/shared.js";
-import { createTeamsCapability } from "./capabilities/teams.js";
-import { createWorkflowsCapability } from "./capabilities/workflows.js";
 
 export type RuntimeHeaders = HeadersInit | (() => HeadersInit | Promise<HeadersInit>);
 export type RuntimeClientOptions = { baseURL: string; fetch?: typeof globalThis.fetch; headers?: RuntimeHeaders };
@@ -207,8 +205,6 @@ type ErrorResponse = { error?: { code?: string; message?: string; requestID?: st
 
 export class RuntimeClient {
   readonly agent: ReturnType<typeof createAgentCapability>;
-  readonly workflows: ReturnType<typeof createWorkflowsCapability>;
-  readonly teams: ReturnType<typeof createTeamsCapability>;
   readonly harness;
   readonly runs;
   private readonly fetcher: typeof globalThis.fetch;
@@ -218,8 +214,6 @@ export class RuntimeClient {
     const capabilityRequest = <T>(path: string, init: RequestInit = {}, request?: RequestOptions) =>
       this.request<T>(path, init, request);
     this.agent = createAgentCapability(capabilityRequest);
-    this.workflows = createWorkflowsCapability(capabilityRequest);
-    this.teams = createTeamsCapability(capabilityRequest);
     this.harness = {
       turns: {
         get: (turnID: string, request?: RequestOptions) =>
