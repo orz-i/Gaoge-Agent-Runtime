@@ -141,11 +141,11 @@ func TestPR113ResumeOutcomeUnknownNeverResendsAcrossRestartOrSameStateGET(t *tes
 		t.Fatalf("resume ambiguity leaked or was falsely made retryable: %+v %v", pending.Run, err)
 	}
 	persisted, err := rt.Load(t.Context(), initial.Run.ID)
-	if err != nil || persisted.Run.Revision != initial.Run.Revision+1 || persisted.Run.Status != kernel.RunStatusRunning {
+	if err != nil || persisted.Run.Revision != initial.Run.Revision+2 || persisted.Run.Status != kernel.RunStatusRunning {
 		t.Fatalf("original physical send intent not durable: %+v %v", persisted.Run, err)
 	}
 	state, err := runner.decodeState(persisted)
-	if err != nil || state.PendingMessageID != initial.Run.ID+":message:2" || state.PendingInputHash == "" {
+	if err != nil || state.PendingMessageID != initial.Run.ID+":message:2" || state.PendingInputHash == "" || !state.PendingMessageReturned {
 		t.Fatalf("lost original pending resume proof: %+v %v", state, err)
 	}
 	wire, err := json.Marshal(persisted)

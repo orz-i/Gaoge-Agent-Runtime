@@ -2,7 +2,9 @@ package a2a
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
@@ -31,7 +33,7 @@ func TestPluginCancellationUsesFrozenBindingAndChecksRevision(t *testing.T) {
 	}
 }
 
-func TestPluginCancellationRetainsRemoteTaskForRetry(t *testing.T) {
+func TestPluginCancellationPreservesUncertainPhysicalIntentWithoutRetry(t *testing.T) {
 	t.Parallel()
 	for _, pending := range []bool{false, true} {
 		name := "transport_failure"
@@ -41,24 +43,44 @@ func TestPluginCancellationRetainsRemoteTaskForRetry(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			fixture := newPluginCancellationFixture(t)
-			wantErr := ErrRemoteCancellationPending
 			fixture.remote.cancelPending = pending
 			if !pending {
-				wantErr = errors.New("temporary remote failure")
-				fixture.remote.cancelErr = wantErr
+				fixture.remote.cancelErr = errors.New("Bearer private upstream credential")
 			}
 			_, err := fixture.plugin.Cancel(t.Context(), fixture.started.Run.ID, fixture.started.Run.Revision, "stop")
-			if !errors.Is(err, wantErr) {
-				t.Fatalf("cancellation error = %v, want %v", err, wantErr)
+			wantErr := ErrRemoteOutcomeUnknown
+			if pending {
+				wantErr = ErrRemoteCancellationPending
+			}
+			if !errors.Is(err, wantErr) || strings.Contains(err.Error(), "private") {
+				t.Fatalf("unverified cancellation became an ACK or leaked provider detail: %v", err)
 			}
 			current, err := fixture.runtime.Load(t.Context(), fixture.started.Run.ID)
-			if err != nil || current.Run.Status != kernel.RunStatusRunning {
-				t.Fatalf("unconfirmed cancellation became terminal: %#v, %v", current.Run, err)
+			if err != nil || current.Run.Status != kernel.RunStatusRunning || current.Run.Revision != fixture.started.Run.Revision+2 {
+				t.Fatalf("cancel intent not persisted: %#v, %v", current.Run, err)
+			}
+			state, err := fixture.plugin.certifiedShadow(t.Context(), current)
+			if err != nil || state == nil {
+				t.Fatalf("cancel intent lost trusted origin: %v", err)
 			}
 			fixture.remote.cancelErr, fixture.remote.cancelPending = nil, false
-			cancelled, err := fixture.plugin.Cancel(t.Context(), current.Run.ID, current.Run.Revision, "stop")
-			if err != nil || cancelled.Run.Status != kernel.RunStatusCancelled || fixture.remote.cancelCalls != 2 {
-				t.Fatalf("cancellation retry = %#v calls=%d err=%v", cancelled.Run, fixture.remote.cancelCalls, err)
+			_, err = fixture.plugin.Cancel(t.Context(), current.Run.ID, current.Run.Revision, "stop")
+			if !errors.Is(err, ErrRemoteOutcomeUnknown) || fixture.remote.cancelCalls != 1 {
+				t.Fatalf("unverified cancellation replayed: calls=%d err=%v", fixture.remote.cancelCalls, err)
+			}
+			// An independent later Task status may settle the original pending
+			// control read-only; no new CancelTask RPC is permitted.
+			fixture.remote.task = completedTask()
+			fixture.remote.task.State = "TASK_STATE_CANCELED"
+			fixture.remote.task.Terminal = true
+			fixture.remote.task.Raw = json.RawMessage(`{"id":"remote-1","contextId":"context-1","status":{"state":"TASK_STATE_CANCELED"}}`)
+			child, err := fixture.plugin.resolveChild(t.Context(), handoff.Delegation{MemberID: "a2a:remote-agent", MemberRevision: "revision-1", ChildRunID: current.Run.ID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			cancelled, err := child.LoadRun(t.Context(), current.Run.ID)
+			if err != nil || cancelled.Run.Status != kernel.RunStatusCancelled || fixture.remote.cancelCalls != 1 {
+				t.Fatalf("original remote cancel did not reconcile read-only: %+v calls=%d err=%v", cancelled.Run, fixture.remote.cancelCalls, err)
 			}
 		})
 	}

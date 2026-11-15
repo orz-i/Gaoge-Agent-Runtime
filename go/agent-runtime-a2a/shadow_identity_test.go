@@ -127,7 +127,21 @@ func TestShadowCancelRejectsForeignTaskResponseWithoutSettling(t *testing.T) {
 			if !errors.Is(err, ErrRemoteBindingChanged) || remote.cancelCalls != 1 {
 				t.Fatalf("foreign CancelTask accepted: err=%v calls=%d", err, remote.cancelCalls)
 			}
-			assertUnchangedShadow(t, rt, before, returned)
+			// The original cancellation was physically issued. Its durable
+			// intent and callback-return fact must remain, even when a hostile
+			// response cannot be accepted. Never revert to pre-send state and
+			// accidentally authorize a second CancelTask.
+			current, loadErr := rt.Load(t.Context(), started.Run.ID)
+			state, proofErr := runner.decodeState(current)
+			if loadErr != nil || proofErr != nil || current.Run.Status != kernel.RunStatusRunning ||
+				current.Run.Revision != before.Run.Revision+2 ||
+				!state.PendingCancel || !state.PendingCancelReturned ||
+				returned.Run.Revision != current.Run.Revision || current.Result != nil {
+				t.Fatalf("foreign cancellation response poisoned original intent: %+v %+v %v %v", current.Run, state, loadErr, proofErr)
+			}
+			if _, retryErr := runner.CancelRun(t.Context(), started.Run.ID); !errors.Is(retryErr, ErrRemoteOutcomeUnknown) || remote.cancelCalls != 1 {
+				t.Fatalf("foreign cancellation outcome was retried: %v (%d calls)", retryErr, remote.cancelCalls)
+			}
 		})
 	}
 }
