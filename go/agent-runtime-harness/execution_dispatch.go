@@ -299,7 +299,7 @@ func (runner *Runner) withPhysicalInvocationDispatch(
 	return runner.withPhysicalInvocationDispatchFor(ctx, invocation, phase, invocation.ExecutionRefID, physical)
 }
 
-// Workflow child Wait resolution may mutate a proven descendant Run rather
+// SubAgent control may mutate a proven descendant Run rather
 // than the owning Harness Invocation's root Run. The durable grant still
 // belongs to the owning Invocation for cancellation arbitration.
 func (runner *Runner) withPhysicalInvocationDispatchFor(

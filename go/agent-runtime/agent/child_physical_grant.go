@@ -18,7 +18,7 @@ import (
 // Store admission atomically fences the executing child ITSELF and all its
 // ancestors against unbound physical/terminal writes. A Root Agent retains
 // its separate ModelInvocation, ToolDispatch and ExecutionLease protocol;
-// do not silently substitute a Workflow Root Grant for its replay semantics.
+// never substitute an unrelated child Grant for its replay semantics.
 //
 // A crashed/unknown Model or Tool outcome retains the Grant. Only an Agent
 // that has committed settlement of every physical intent may close it; no
@@ -38,7 +38,7 @@ func (runner *Runner) withChildPhysicalGrant(ctx context.Context, runID string, 
 	if child.Run.ParentRunID == "" {
 		// Root Agent's durable ModelInvocation/ToolDispatch and ExecutionLease
 		// authority has distinct restart/replay semantics. Do not conflate it
-		// with the Workflow Root physical Grant. The Root Start now creates
+		// with a child execution Grant. The Root Start creates
 		// its Run before any arbitrary Host Run middleware is called.
 		return physical(ctx, runner)
 	}

@@ -44,7 +44,13 @@ func TestRoleDelegationFreezesExecutionAndProjectsChildApproval(t *testing.T) {
 	}
 }
 
-func testRoleDelegationChildApproval(t *testing.T, wrongRoute bool) {
+// An active child physical grant must prevent the parent from reaching a
+// terminal state while a delegated approval remains pending.
+func TestRoleDelegationParentCancellationFencedByActiveChild(t *testing.T) {
+	testRoleDelegationChildApproval(t, false, true)
+}
+
+func testRoleDelegationChildApproval(t *testing.T, wrongRoute bool, terminalParent ...bool) {
 	t.Helper()
 	store := harness.NewMemoryStore()
 	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
@@ -138,7 +144,7 @@ func testRoleDelegationChildApproval(t *testing.T, wrongRoute bool) {
 	if _, err = runner.ResolveSubtaskApproval(t.Context(), started.Turn.ID, task.ID, "old-checkpoint", harness.ResolveApprovalRequest{Decision: harness.ApprovalApprove}); !errors.Is(err, harness.ErrConflict) {
 		t.Fatalf("stale approval=%v", err)
 	}
-	// A delegated Agent Run has no standalone Harness Invocation. Its approval
+	// The delegated Agent has a frozen Child Invocation. Its approval
 	// must still compete with the same Turn-wide cancellation intent.
 	rootInvocation, ok := harness.TopLevelInvocation(started)
 	if !ok {
@@ -169,8 +175,8 @@ func testRoleDelegationChildApproval(t *testing.T, wrongRoute bool) {
 	}); closeErr != nil {
 		t.Fatal(closeErr)
 	}
-	// The same physical grant identifies the delegated child Run even though
-	// its durable ownership is the root Invocation.
+	// The same physical grant identifies the delegated child Run and its
+	// original frozen child owner; a forged root-only grant is not authority.
 	grant := harness.Item{
 		ID: "role-child-approval-grant", TurnID: started.Turn.ID,
 		Kind: harness.ItemDiagnostic, Status: harness.ItemStarted,
@@ -197,6 +203,21 @@ func testRoleDelegationChildApproval(t *testing.T, wrongRoute bool) {
 	beforeItems, err := store.ListItems(t.Context(), started.Turn.ID, 0, 500)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(terminalParent) > 0 && terminalParent[0] {
+		root, readErr := runtime.Load(t.Context(), rootInvocation.ExecutionRefID)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		before := len(meteredModel.requests)
+		if _, cancelErr := runtime.Cancel(t.Context(), root.Run.ID, root.Run.Revision, "parent terminal before child approval"); !errors.Is(cancelErr, kernel.ErrChildExecutionBusy) {
+			t.Fatalf("parent terminal CAS bypassed pending child physical grant: %v", cancelErr)
+		}
+		after, readErr := runtime.Load(t.Context(), root.Run.ID)
+		if readErr != nil || after.Run.Status != root.Run.Status || after.Run.Revision != root.Run.Revision || len(meteredModel.requests) != before {
+			t.Fatalf("denied parent cancellation mutated run or executed a model: after=%+v err=%v calls=%d->%d", after.Run, readErr, before, len(meteredModel.requests))
+		}
+		return
 	}
 	approved, err := runner.ResolveSubtaskApproval(t.Context(), started.Turn.ID, task.ID, task.Approval.CheckpointID, harness.ResolveApprovalRequest{Decision: harness.ApprovalApprove})
 	if wrongRoute {

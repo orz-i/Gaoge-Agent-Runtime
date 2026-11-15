@@ -21,13 +21,13 @@ func RunAuditPhysicalChildSelfFence(t *testing.T, makeStore func(*testing.T) ker
 		actor := kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}
 		thread := kernel.ThreadRef{Kind: "conversation", ID: "thread"}
 		parent, err := rt.Create(t.Context(), kernel.CreateRequest{
-			ID: "root", Kind: "workflow", Actor: actor, Thread: thread, Goal: "original root", State: []byte(`{}`),
+			ID: "root", Kind: "agent", Actor: actor, Thread: thread, Goal: "original root", State: []byte(`{}`),
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
 		child, err := rt.Create(t.Context(), kernel.CreateRequest{
-			ID: "child", ParentRunID: parent.Run.ID, Kind: "workflow",
+			ID: "child", ParentRunID: parent.Run.ID, Kind: "agent",
 			Actor: actor, Thread: thread, Goal: "original child", State: []byte(`{}`),
 		})
 		if err != nil {
@@ -56,13 +56,13 @@ func RunAuditPhysicalChildSelfFence(t *testing.T, makeStore func(*testing.T) ker
 		actor := kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}
 		thread := kernel.ThreadRef{Kind: "conversation", ID: "thread"}
 		parent, err := rt.Create(t.Context(), kernel.CreateRequest{
-			ID: "root", Kind: "workflow", Actor: actor, Thread: thread, Goal: "root", State: []byte(`{}`),
+			ID: "root", Kind: "agent", Actor: actor, Thread: thread, Goal: "root", State: []byte(`{}`),
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
 		child, err := rt.Create(t.Context(), kernel.CreateRequest{
-			ID: "child", ParentRunID: parent.Run.ID, Kind: "workflow",
+			ID: "child", ParentRunID: parent.Run.ID, Kind: "agent",
 			Actor: actor, Thread: thread, Goal: "child", State: []byte(`{}`),
 		})
 		if err != nil {
@@ -88,7 +88,7 @@ func RunAuditPhysicalChildSelfFence(t *testing.T, makeStore func(*testing.T) ker
 		actor := kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}
 		thread := kernel.ThreadRef{Kind: "conversation", ID: "thread"}
 		parent, err := rt.Create(t.Context(), kernel.CreateRequest{
-			ID: "root", Kind: "workflow", Actor: actor, Thread: thread, Goal: "original root", State: []byte(`{}`),
+			ID: "root", Kind: "agent", Actor: actor, Thread: thread, Goal: "original root", State: []byte(`{}`),
 		})
 		if err != nil {
 			t.Fatal(err)

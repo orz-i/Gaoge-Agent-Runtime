@@ -17,7 +17,7 @@ import (
 )
 
 // RunEA1RootAgentUnknownSuite covers AR-S P2 only, using actual Agent StartRun
-// with the native ExecutionLease protocol, never a substitute Workflow Grant.
+// with the native ExecutionLease protocol, never an arbitrary child Grant.
 // Receipt-write failure is after the physical callback. Advancing Agent time
 // expires only its model claim; native Store lease expiry is awaited in real
 // wall-clock time before reopening, without private-table mutation.

@@ -52,7 +52,7 @@ func roleToolKeys(role RoleSnapshot) []string {
 	result := make([]string, 0, len(role.ToolKeys))
 	for _, key := range role.ToolKeys {
 		key = strings.TrimSpace(key)
-		if key == "" || key == GroupChatHandoffToolKey {
+		if key == "" {
 			continue
 		}
 		result = append(result, key)

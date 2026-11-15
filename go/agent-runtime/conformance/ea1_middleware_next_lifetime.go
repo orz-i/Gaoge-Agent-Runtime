@@ -465,7 +465,7 @@ func ea1MWExecute(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.S
 	var foreign kernel.Snapshot
 	if mode == "foreign-model" {
 		var e error
-		foreign, e = f.peer.Create(t.Context(), kernel.CreateRequest{ID: "foreign-run", Kind: "workflow", Actor: f.request.Actor, Thread: f.request.Thread, Goal: "independent foreign target", State: []byte(`{"foreign":true}`)})
+		foreign, e = f.peer.Create(t.Context(), kernel.CreateRequest{ID: "foreign-run", Kind: "agent", Actor: f.request.Actor, Thread: f.request.Thread, Goal: "independent foreign target", State: []byte(`{"foreign":true}`)})
 		if e != nil {
 			t.Fatal(e)
 		}

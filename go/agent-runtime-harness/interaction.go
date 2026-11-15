@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workflow"
 )
 
 // InteractionKind describes a host-renderable input shape without embedding
@@ -127,33 +126,6 @@ type InteractionResponseHandler interface {
 // invalid business choice from permanently consuming the only waiting input.
 type InteractionResponseValidator interface {
 	ValidateInteractionResponse(context.Context, InteractionResponseContext) error
-}
-
-// WorkflowWaitInteractionContext contains the immutable Workflow wait and its
-// durable Harness owners. Applications project the wait into business UI
-// semantics without teaching Harness about product-specific artifacts.
-type WorkflowWaitInteractionContext struct {
-	Wait       workflow.WaitRequest
-	Invocation Invocation
-	Session    Session
-}
-
-// WorkflowWaitInteractionProjection is the host-renderable business contract
-// for one explicit Workflow wait. Harness supplies the durable owner identity.
-type WorkflowWaitInteractionProjection struct {
-	ApplicationRef *HostRef
-	ArtifactRefs   []HostRef
-	Key            string
-	Kind           InteractionKind
-	Schema         json.RawMessage
-	Presentation   json.RawMessage
-}
-
-// WorkflowWaitInteractionProjector optionally maps a generic Workflow wait to
-// an application-owned interaction. Implementations must be deterministic for
-// the same immutable wait because recovery can project it repeatedly.
-type WorkflowWaitInteractionProjector interface {
-	ProjectWorkflowWaitInteraction(context.Context, WorkflowWaitInteractionContext) (WorkflowWaitInteractionProjection, error)
 }
 
 // ErrInteractionResponseHandlerUnavailable reports missing static application
@@ -342,8 +314,8 @@ func (runner *Runner) ResolveInteraction(
 func (runner *Runner) replayResolvedInteraction(ctx context.Context, interaction Interaction) (Snapshot, error) {
 	// A prior successful callback may already have claimed exactly one
 	// physical Runtime continuation. Product response replay is read-only:
-	// neither replay the business callback nor re-enter the same Workflow
-	// Wait / Agent segment. An in-flight continuation with no newer visible
+	// neither replay the business callback nor re-enter the same
+	// Agent execution segment. An in-flight continuation with no newer visible
 	// projection remains unknown and must be reconciled explicitly.
 	claimed, err := runner.interactionContinuationClaimed(ctx, interaction)
 	if err != nil {
@@ -551,7 +523,7 @@ func (runner *Runner) prepareResolvedInteractionContinuation(
 	// Unrelated replay/Refresh callers still observe without dispatching.
 	unconfirmedRunning := interactionOwnersRunning(turn, invocation) &&
 		!interactionCallbackConfirmed(ctx, turn.ID, invocation.ID, interaction.ID)
-	if (waiting || unconfirmedRunning) && !runner.projectsWorkflowWaits(invocation) {
+	if waiting || unconfirmedRunning {
 		snapshot, loadErr := runner.loadSnapshot(ctx, turn, nil)
 		return turn, invocation, snapshot, true, loadErr
 	}
@@ -743,9 +715,6 @@ func (runner *Runner) resumeResolvedInteractionOwner(
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if runner.projectsWorkflowWaits(invocation) {
-		return runner.resumeWorkflowInteraction(ctx, turn, invocation, runtimeSnapshot, interaction)
-	}
 	return runner.resumeRuntimeInteractionOwner(ctx, turn, invocation, runtimeSnapshot, interaction.Response)
 }
 
@@ -772,22 +741,10 @@ func (runner *Runner) resumeRuntimeInteractionOwner(
 	turn Turn,
 	invocation Invocation,
 	runtimeSnapshot kernel.Snapshot,
-	response json.RawMessage,
+	_ json.RawMessage,
 ) (Snapshot, error) {
 	if runtimeSnapshot.Run.Status == kernel.RunStatusWaitingInput {
-		if invocation.ExecutionClass != ExecutionWorkflow || runner.workflows == nil || len(response) == 0 {
-			return runner.loadSnapshot(ctx, turn, &runtimeSnapshot)
-		}
-		resolved, resolveErr := runner.withPhysicalInvocationDispatch(ctx, invocation, "resolve-wait", func(physicalCtx context.Context) (kernel.Snapshot, error) {
-			return runner.workflows.ResolveWait(
-				physicalCtx, invocation.ExecutionRefID, runtimeSnapshot.Run.Revision, append(json.RawMessage(nil), response...),
-			)
-		})
-		if resolved.Run.ID == "" {
-			return Snapshot{}, resolveErr
-		}
-		snapshot, syncErr := runner.finishResolvedInteractionOwner(ctx, turn, invocation, resolved)
-		return snapshot, normalizedFeatureStartError(invocation.ExecutionClass, resolved, resolveErr, syncErr)
+		return runner.loadSnapshot(ctx, turn, &runtimeSnapshot)
 	}
 	if terminalRuntimeStatus(runtimeSnapshot.Run.Status) {
 		return runner.finishResolvedInteractionOwner(ctx, turn, invocation, runtimeSnapshot)
@@ -804,10 +761,7 @@ func (runner *Runner) resumeRuntimeInteractionOwner(
 		return Snapshot{}, resumeErr
 	}
 	snapshot, syncErr := runner.finishResolvedInteractionOwner(ctx, turn, invocation, resumed)
-	if invocation.ExecutionClass == ExecutionAgent {
-		return snapshot, errors.Join(resumeErr, syncErr)
-	}
-	return snapshot, normalizedFeatureStartError(invocation.ExecutionClass, resumed, resumeErr, syncErr)
+	return snapshot, errors.Join(resumeErr, syncErr)
 }
 
 func (runner *Runner) finishResolvedInteractionOwner(

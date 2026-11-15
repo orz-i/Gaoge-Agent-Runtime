@@ -80,7 +80,7 @@ func (runner *Runner) StartApplicationTurn(ctx context.Context, request Applicat
 	if err != nil {
 		return Snapshot{}, err
 	}
-	prepared, err := runner.prepareTopLevelFeatureStart(
+	prepared, err := runner.prepareTopLevelApplicationStart(
 		ctx, request.StartRequest, strings.TrimSpace(request.CapabilityKey), strings.TrimSpace(request.DefinitionVersion),
 		ExecutionApplication, input, inputHash,
 	)
@@ -522,7 +522,7 @@ func (runner *Runner) repairApplicationProjection(ctx context.Context, turn Turn
 }
 
 // Application has no Kernel Run, but shares the same host-owned Assistant
-// Message acknowledgement and terminal feed protocol as Agent/Team/Workflow.
+// Message acknowledgement and terminal feed protocol as Agent.
 // A committed terminal Invocation does not authorize emitting a terminal
 // event while the host output Item is still unacknowledged.
 func (runner *Runner) finalizeApplicationTerminalProjection(ctx context.Context, turn Turn, invocation Invocation) error {

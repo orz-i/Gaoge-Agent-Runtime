@@ -11,13 +11,11 @@ import (
 	continuationadapter "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/continuation"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/continuation"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	queuecore "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/queue"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/team"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
@@ -37,7 +35,6 @@ type durableWaitFixture struct {
 	runtime    *kernel.Runtime
 	clock      *durableWaitClock
 	agent      *agent.Runner
-	teams      *team.Runner
 	queue      *queuecore.Memory
 	scheduler  *continuation.Scheduler
 	relations  *runrelation.Registry
@@ -89,20 +86,12 @@ func newDurableWaitFixture(t *testing.T) *durableWaitFixture {
 		t.Fatal(err)
 	}
 	fixture.relations = relations
-	coordinator, err := handoff.New(fixture.agent)
-	if err != nil {
-		t.Fatal(err)
-	}
-	fixture.teams, err = team.NewRunner(team.Dependencies{Runtime: fixture.runtime, Handoffs: coordinator, Relations: relations})
-	if err != nil {
-		t.Fatal(err)
-	}
 	fixture.queue = queuecore.NewMemory(queuecore.Dependencies{Clock: fixture.clock})
 	fixture.scheduler, err = continuation.NewScheduler(continuation.SchedulerDependencies{Outbox: fixture.store, Queue: fixture.queue, Relations: relations, Runs: fixture.runtime, Clock: fixture.clock}, continuationadapter.Triggers()...)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fixture.dispatcher, err = continuation.NewDispatcher(fixture.runtime, continuation.RegisterResumer(agent.RunKind, fixture.agent), continuation.RegisterResumer(team.RunKind, fixture.teams))
+	fixture.dispatcher, err = continuation.NewDispatcher(fixture.runtime, continuation.RegisterResumer(agent.RunKind, fixture.agent))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +186,7 @@ func TestChildTerminalReconcileRequeuesFactAfterParentWaitCommit(t *testing.T) {
 		return snapshot
 	}
 	parent, child := create("parent-before-wait"), create("child-before-wait")
-	if _, err := fixture.relations.Ensure(t.Context(), runrelation.Draft{ParentRunID: parent.Run.ID, ChildRunID: child.Run.ID, Kind: runrelation.KindTeamMember, OwnerNodeID: "member"}); err != nil {
+	if _, err := fixture.relations.Ensure(t.Context(), runrelation.Draft{ParentRunID: parent.Run.ID, ChildRunID: child.Run.ID, Kind: runrelation.KindDelegation, OwnerNodeID: "member"}); err != nil {
 		t.Fatal(err)
 	}
 	_, err := fixture.runtime.Apply(t.Context(), child.Run.ID, child.Run.Revision, kernel.Mutation{Status: kernel.RunStatusCompleted, State: child.State, Result: &kernel.Result{ContentType: "application/json", Content: json.RawMessage(`42`)}})
@@ -231,61 +220,6 @@ func TestChildTerminalReconcileRequeuesFactAfterParentWaitCommit(t *testing.T) {
 	var payload continuation.Payload
 	if err = json.Unmarshal(recovered[0].Job.Payload, &payload); err != nil || payload.ExpectedRevision != committed.Run.Revision {
 		t.Fatalf("recovered parent generation=%#v, %v", payload, err)
-	}
-}
-
-func TestTeamExternalWaitSixtySecondsNoPollingThenDurableChildWakeup(t *testing.T) {
-	fixture := newDurableWaitFixture(t)
-	parent, err := fixture.teams.StartRun(t.Context(), team.StartRequest{
-		ID: "team-external-wait", Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "test", ID: "thread"}, Goal: "wait", Mode: team.ExecutionSequential,
-		Members: []team.Member{{ID: "member", Goal: "compute", ToolKeys: []string{"test.durable_wait"}}},
-		Join:    handoff.Join{Mode: handoff.JoinAll, Quorum: 1, FailurePolicy: handoff.FailureCollect},
-	})
-	if !errors.Is(err, team.ErrMemberPending) {
-		t.Fatalf("team start = %v", err)
-	}
-	view, err := team.ViewState(parent)
-	if err != nil {
-		t.Fatal(err)
-	}
-	childID := view.Members[0].Delegation.ChildRunID
-	child, err := fixture.runtime.Load(t.Context(), childID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for second := 0; second < 60; second++ {
-		fixture.clock.now = fixture.clock.now.Add(time.Second)
-		fixture.pump(t)
-	}
-	after, err := fixture.runtime.Load(t.Context(), parent.Run.ID)
-	if err != nil || after.Run.Revision != parent.Run.Revision {
-		t.Fatalf("team polled: %#v, %v", after.Run, err)
-	}
-	childAfter, err := fixture.runtime.Load(t.Context(), childID)
-	if err != nil || childAfter.Run.Revision != child.Run.Revision || fixture.executions != 1 || fixture.model.calls != 1 {
-		t.Fatalf("child polled: %#v calls=%d/%d %v", childAfter.Run, fixture.executions, fixture.model.calls, err)
-	}
-	// Public refresh/replay is also a no-op while every child is unchanged.
-	after, err = fixture.teams.Resume(t.Context(), after.Run.ID, after.Run.Revision)
-	if !errors.Is(err, team.ErrMemberPending) || after.Run.Revision != parent.Run.Revision {
-		t.Fatalf("team refresh wrote state: %#v %v", after.Run, err)
-	}
-	fixture.ready = true
-	_, err = fixture.agent.NotifyExternalToolResultReady(t.Context(), agent.ExternalToolResultSignal{RunID: childID, CallID: "wait-call", OperationID: "wait-operation", InputDigest: strings.Repeat("c", 64), SignalID: "team-result"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Simulate restart: recovery uses stored facts rather than an in-memory hook.
-	fixture.pump(t)
-	fixture.pump(t)
-	fixture.clock.now = fixture.clock.now.Add(time.Second)
-	fixture.pump(t)
-	completed, err := fixture.runtime.Load(t.Context(), parent.Run.ID)
-	if err != nil || completed.Run.Status != kernel.RunStatusCompleted {
-		t.Fatalf("parent lost child wakeup: %#v, %v", completed.Run, err)
-	}
-	if fixture.executions != 1 || fixture.model.calls != 1 {
-		t.Fatalf("verified provider read incorrectly reexecuted Tool: %d/%d", fixture.executions, fixture.model.calls)
 	}
 }
 

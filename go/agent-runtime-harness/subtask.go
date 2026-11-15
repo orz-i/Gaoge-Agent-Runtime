@@ -340,26 +340,6 @@ func (runner *Runner) CancelSubtask(ctx context.Context, turnID, taskID, reason 
 			return Snapshot{}, err
 		}
 	}
-	// An AgentTask child with a Host-prepared Agent may be readable but not
-	// physically cancellable (e.g. it is running a Model/Tool, has unknown
-	// effects or lacks the frozen Harness approval-fence proof). Reject such
-	// known local cases BEFORE minting the Turn cancellation intent. The
-	// authoritative proof is repeated after admission by cancelRuntimeRun;
-	// this read-only preflight cannot authorize a physical cancellation.
-	if task.Kind == string(runrelation.KindWorkflowEffect) {
-		candidate, loadErr := runner.runtime.Load(ctx, task.RunID)
-		if loadErr != nil && !errors.Is(loadErr, kernel.ErrNotFound) {
-			return Snapshot{}, loadErr
-		}
-		if loadErr == nil && candidate.Run.Kind == agent.RunKind {
-			if err = runner.verifyLocalRelationRun(ctx, candidate, true); err != nil {
-				return Snapshot{}, err
-			}
-		}
-	}
-	// A terminal Subtask is only the parent's execution status. A composite
-	// Team/Workflow/GroupChat can still own Running RunRelation children;
-	// never treat the displayed parent status as proof of descendant cleanup.
 	// CancelSubtask is another physical Runtime cancellation entrypoint. It
 	// must compete with any already-resolved business callback BEFORE
 	// revoking the shared budget or cancelling the target Run.
@@ -472,17 +452,13 @@ func (runner *Runner) ResolveSubtaskApproval(ctx context.Context, turnID, taskID
 	if snapshot.Checkpoint == nil || snapshot.Checkpoint.ID != checkpointID {
 		return Snapshot{}, ErrConflict
 	}
-	// Many Team/Workflow child Agent Runs have no dedicated Harness
-	// Invocation. Anchor their physical approval dispatch to the owning
-	// root Invocation while retaining the actual child Run ID in the grant
-	// for precise Subtask cancellation arbitration.
+	// A SubAgent approval is executable only through its original frozen
+	// Child Invocation. Missing child ownership is an invalid pre-stable
+	// execution, not permission to route physical approval through the root.
 	invocation, err := runner.store.GetInvocationByExecutionRefID(ctx, task.RunID)
-	hasChildInvocation := err == nil
-	if errors.Is(err, ErrNotFound) {
-		invocation, err = loadTopLevelInvocation(ctx, runner.store, turn.ID)
-	}
-	if err != nil {
-		return Snapshot{}, err
+	if err != nil || invocation.ParentItemID == "" || invocation.ExecutionClass != ExecutionAgent ||
+		invocation.ExecutionRefID != task.RunID || invocation.TurnID != turn.ID {
+		return Snapshot{}, errors.Join(ErrConflict, err)
 	}
 	resolved, resolveErr := runner.withPhysicalSubtaskApprovalDispatch(
 		ctx, invocation, task.RunID, snapshot.Run.Revision, checkpointID,
@@ -492,12 +468,6 @@ func (runner *Runner) ResolveSubtaskApproval(ctx context.Context, turnID, taskID
 		})
 	if resolveErr != nil {
 		return Snapshot{}, resolveErr
-	}
-	if !hasChildInvocation {
-		if err = runner.syncSubtaskItems(ctx, turn); err != nil {
-			return Snapshot{}, err
-		}
-		return runner.loadSnapshot(ctx, turn, nil)
 	}
 	pending, _, err := approvalRequestFromSnapshot(snapshot)
 	if err != nil {

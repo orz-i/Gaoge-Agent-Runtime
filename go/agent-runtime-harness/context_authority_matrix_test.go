@@ -18,8 +18,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
-// Fresh cross-boundary audit: a corrupt indexed Turn read must never grant
-// another session's durable window to a physically different Run.
 type matrixWrongTurnStore struct {
 	Store
 	requestedTurn string
@@ -36,10 +34,12 @@ func TestAuditMatrixForeignTurnIdentityNeverAuthorizesDifferentSession(t *testin
 	store, turn, _, root := contextRunMiddlewareFixture(t)
 	now := time.Date(2026, 10, 17, 12, 0, 0, 0, time.UTC)
 	manager := runtimecontext.NewManager(runtimecontext.Dependencies{})
-	foreignCheckpoint, err := manager.Open(t.Context(), runtimecontext.OpenRequest{
-		ScopeID: "foreign-session-with-secret", StaticFingerprint: runtimecontext.StaticFingerprint("foreign-static"),
-		SourcePath: []string{"foreign-source"}, Instructions: "private foreign session",
-		Entries: []runtimecontext.Entry{{ID: "foreign-entry", SourceID: "foreign-source", TurnID: "foreign-host-turn", Message: model.Message{Role: model.RoleUser, Content: model.TextParts("SECRET FOREIGN SESSION BYTES")}}}})
+	foreignCheckpoint, err := manager.Open(t.Context(), runtimecontext.OpenRequest{ScopeID: "foreign-session-with-secret", StaticFingerprint: runtimecontext.StaticFingerprint("foreign-static"), SourcePath: []string{ // A root Agent's complete Input + hash and deterministic ID are durable
+		// provenance, not optional metadata once an execution reference exists.
+		// Budget is a second consumer of the same Run->Invocation->Turn identity.
+		// A corrupted Invocation TurnID cannot reassign physical model charges to
+		// another session's ledger without an authority conflict.
+		"foreign-source"}, Instructions: "private foreign session", Entries: []runtimecontext.Entry{{ID: "foreign-entry", SourceID: "foreign-source", TurnID: "foreign-host-turn", Message: model.Message{Role: model.RoleUser, Content: model.TextParts("SECRET FOREIGN SESSION BYTES")}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,10 +104,11 @@ func TestAuditMatrixArtifactPayloadIdentityAndHashNeverTrusted(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		sub  runtimecontext.Artifact
-	}{
-		{name: "mismatched_artifact_identity", sub: other},
-		{name: "invalid_content_hash", sub: func() runtimecontext.Artifact { a := artifact; a.Content = "CORRUPTED PAYLOAD"; return a }()},
-	} {
+	}{{name: "mismatched_artifact_identity", sub: other}, {name: "invalid_content_hash", sub: func() runtimecontext.Artifact {
+		a := artifact
+		a.Content = "CORRUPTED PAYLOAD"
+		return a
+	}()}} {
 		t.Run(tc.name, func(t *testing.T) {
 			handler := NewContextArtifactToolHandler(matrixArtifactReadStore{Store: store, artifactID: artifact.ID, substitute: tc.sub}, nil)
 			request := tools.ExecutionRequest{RunID: root.ExecutionRefID, Call: tools.Call{ID: "matrix-read", ToolKey: ContextArtifactToolKey, Arguments: mustContextArtifactArguments(t, artifact.ID, 0, contextArtifactMaxLimit)}}
@@ -119,9 +120,6 @@ func TestAuditMatrixArtifactPayloadIdentityAndHashNeverTrusted(t *testing.T) {
 	}
 }
 
-// Excluded Context must stay excluded even when a later trusted component
-// bound a checkpoint to the same child context; otherwise an early return
-// bypasses the execution-scoped durable ownership proof.
 func TestAuditMatrixExcludedContextCannotCarryReboundCheckpoint(t *testing.T) {
 	store, turn, checkpoint, root := contextRunMiddlewareFixture(t)
 	mw, err := NewContextRunMiddleware(store, nil)
@@ -151,14 +149,10 @@ func TestAuditMatrixExcludedContextCannotCarryReboundCheckpoint(t *testing.T) {
 	}
 }
 
-// Deterministic generative state-property test. Exercise every combination
-// of physical Run class, process Context state and Agent lifecycle operation.
-// This oracle is independent of individual patch-specific regression cases.
 func TestAuditPropertyContextAuthorityTransitions(t *testing.T) {
 	property := func(runClass, callerContext, operation uint8) bool {
 		store, turn, checkpoint, root := contextRunMiddlewareFixture(t)
-		delegation := handoff.Delegation{ID: "state-specialist", MemberID: "specialist", RoleID: "specialist",
-			ChildRunID: "state-specialist-run", Goal: "isolated", Status: handoff.StatusQueued}
+		delegation := handoff.Delegation{ID: "state-specialist", MemberID: "specialist", RoleID: "specialist", ChildRunID: "state-specialist-run", Goal: "isolated", Status: handoff.StatusQueued}
 		input, hash, err := marshalInvocationValue(delegation)
 		if err != nil {
 			t.Error(err)
@@ -180,11 +174,7 @@ func TestAuditPropertyContextAuthorityTransitions(t *testing.T) {
 			t.Error(err)
 			return false
 		}
-		relations := contextRunRelationFixture{
-			"state-plain-child":           {ParentRunID: root.ExecutionRefID, ChildRunID: "state-plain-child", Kind: runrelation.KindCapability, OwnerNodeID: "plain-child", CreatedAt: time.Now().UTC()},
-			"state-specialist-grandchild": {ParentRunID: child.ExecutionRefID, ChildRunID: "state-specialist-grandchild", Kind: runrelation.KindCapability, OwnerNodeID: "spec-child", CreatedAt: time.Now().UTC()},
-			"state-invalid-child":         {ParentRunID: root.ExecutionRefID, ChildRunID: "state-invalid-child", Kind: runrelation.Kind("not-a-kind"), OwnerNodeID: "bad", CreatedAt: time.Now().UTC()},
-		}
+		relations := contextRunRelationFixture{"state-plain-child": {ParentRunID: root.ExecutionRefID, ChildRunID: "state-plain-child", Kind: runrelation.KindCapability, OwnerNodeID: "plain-child", CreatedAt: time.Now().UTC()}, "state-specialist-grandchild": {ParentRunID: child.ExecutionRefID, ChildRunID: "state-specialist-grandchild", Kind: runrelation.KindCapability, OwnerNodeID: "spec-child", CreatedAt: time.Now().UTC()}, "state-invalid-child": {ParentRunID: root.ExecutionRefID, ChildRunID: "state-invalid-child", Kind: runrelation.Kind("not-a-kind"), OwnerNodeID: "bad", CreatedAt: time.Now().UTC()}}
 		mw, err := NewContextRunMiddleware(store, relations)
 		if err != nil {
 			t.Error(err)
@@ -249,7 +239,6 @@ func TestAuditPropertyContextAuthorityTransitions(t *testing.T) {
 		}
 		return true
 	}
-	// Complete finite state product and randomized variants with a deterministic seed.
 	for runClass := uint8(0); runClass < 6; runClass++ {
 		for callerContext := uint8(0); callerContext < 7; callerContext++ {
 			for op := uint8(0); op < 3; op++ {
@@ -264,7 +253,6 @@ func TestAuditPropertyContextAuthorityTransitions(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-
 func TestAuditPropertyInvalidRelationFieldsCannotGrantContext(t *testing.T) {
 	property := func(mask uint8) bool {
 		store, _, _, root := contextRunMiddlewareFixture(t)
@@ -317,8 +305,6 @@ func TestAuditPropertyInvalidRelationFieldsCannotGrantContext(t *testing.T) {
 	}
 }
 
-// A root Agent's complete Input + hash and deterministic ID are durable
-// provenance, not optional metadata once an execution reference exists.
 type matrixCorruptRootInvocationStore struct {
 	Store
 	target string
@@ -335,7 +321,7 @@ func (s matrixCorruptRootInvocationStore) GetInvocationByExecutionRefID(ctx cont
 		case "rewrite_invocation_identity":
 			val.ID = "different-unrelated-invocation-id"
 		case "rewrite_capability_key":
-			val.CapabilityKey = CapabilityTeam
+			val.CapabilityKey = "runtime.removed"
 		}
 	}
 	return val, err
@@ -372,9 +358,6 @@ func TestAuditMatrixRootProvenanceMutationNeverGrantsOwner(t *testing.T) {
 	}
 }
 
-// Budget is a second consumer of the same Run->Invocation->Turn identity.
-// A corrupted Invocation TurnID cannot reassign physical model charges to
-// another session's ledger without an authority conflict.
 type matrixBudgetOwnerSwapStore struct {
 	Store
 	target     string

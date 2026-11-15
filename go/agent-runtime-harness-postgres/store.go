@@ -866,7 +866,7 @@ func (store *Store) UpdateTurn(ctx context.Context, value harness.Turn, expected
 				}
 				// All child statuses are read under the same owning Turn
 				// lock as their terminal UpdateInvocation CAS. A terminal
-				// root cannot hide a still-running Application/Team child.
+				// root cannot hide a still-running Application/SubAgent child.
 				var ownerRows []invocationRecord
 				if loadErr := tx.Where("turn_id = ?", value.ID).Find(&ownerRows).Error; loadErr != nil {
 					return loadErr

@@ -9,12 +9,9 @@ import (
 	"sync"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/team"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workflow"
 )
 
 const CapabilityInvocationToolKey = "harness.invoke_capability"
@@ -34,17 +31,6 @@ type CapabilityMaterializeRequest struct {
 	Thread     kernel.ThreadRef
 }
 
-type TeamCapabilitySpec struct {
-	Mode    team.ExecutionMode
-	Members []team.Member
-	Join    handoff.Join
-}
-
-type WorkflowCapabilitySpec struct {
-	Definition workflow.Definition
-	Input      json.RawMessage
-}
-
 type ApplicationCapabilitySpec struct {
 	Input json.RawMessage
 }
@@ -52,8 +38,6 @@ type ApplicationCapabilitySpec struct {
 // CapabilityInvocationSpec is a closed typed union. Exactly one Runtime
 // Feature payload must match the frozen descriptor ExecutionClass.
 type CapabilityInvocationSpec struct {
-	Team        *TeamCapabilitySpec
-	Workflow    *WorkflowCapabilitySpec
 	Application *ApplicationCapabilitySpec
 }
 
@@ -266,12 +250,6 @@ func validateCapabilityInvocationSpec(descriptor CommandDescriptor, spec Capabil
 
 func capabilityInvocationSpecClass(spec CapabilityInvocationSpec) (ExecutionClass, error) {
 	classes := make([]ExecutionClass, 0, 1)
-	if spec.Team != nil {
-		classes = append(classes, ExecutionTeam)
-	}
-	if spec.Workflow != nil {
-		classes = append(classes, ExecutionWorkflow)
-	}
 	if spec.Application != nil {
 		classes = append(classes, ExecutionApplication)
 	}
@@ -288,16 +266,6 @@ func (runner *Runner) startMaterializedCapability(
 	spec CapabilityInvocationSpec,
 ) (Snapshot, error) {
 	switch {
-	case spec.Team != nil:
-		return runner.StartTeamInvocation(ctx, turnID, TeamInvocationRequest{
-			ParentItemID: parentItemID, RequestID: requestID, Goal: goal,
-			Mode: spec.Team.Mode, Members: append([]team.Member(nil), spec.Team.Members...), Join: spec.Team.Join,
-		})
-	case spec.Workflow != nil:
-		return runner.StartWorkflowInvocation(ctx, turnID, WorkflowInvocationRequest{
-			ParentItemID: parentItemID, RequestID: requestID, Goal: goal,
-			Definition: spec.Workflow.Definition, Input: append(json.RawMessage(nil), spec.Workflow.Input...),
-		})
 	case spec.Application != nil:
 		return runner.StartApplicationInvocation(ctx, turnID, ApplicationInvocationRequest{
 			ParentItemID: parentItemID, RequestID: requestID, Goal: goal,

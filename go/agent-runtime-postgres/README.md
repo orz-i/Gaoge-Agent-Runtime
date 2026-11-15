@@ -8,8 +8,12 @@ transaction context private and implements the complete Kernel `Store` contract.
 if err := postgres.Migrate(db); err != nil { return err }
 store := postgres.NewKernelStore(db)
 relations := postgres.NewRunRelationStore(db)
-definitions := postgres.NewWorkflowDefinitionStore(db)
 ```
+
+The former Workflow Definition Store API and its migration models were
+removed in beta.24. Legacy tables can be retired only after explicitly
+reconciling obsolete executions and following
+[`docs/migrations/retire-obsolete-orchestration.sql`](../../docs/migrations/retire-obsolete-orchestration.sql).
 
 Run migrations explicitly before starting workers. Constructing a store does
 not migrate the schema. The experimental Stage 2 Phase 1 branch adds

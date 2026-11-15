@@ -19,7 +19,7 @@ func RunEA1P0SourceAdmissionSuite(t *testing.T, makeStore func(*testing.T) kerne
 		actor := kernel.ActorRef{TenantID: "tenant-one", ActorID: "actor-one"}
 		thread := kernel.ThreadRef{Kind: "conversation", ID: "original-thread"}
 		parent, err := rt.Create(t.Context(), kernel.CreateRequest{
-			ID: "original-parent", Kind: "workflow", Actor: actor, Thread: thread,
+			ID: "original-parent", Kind: "agent", Actor: actor, Thread: thread,
 			Goal: "original parent", State: []byte(`{}`),
 		})
 		if err != nil {
@@ -80,14 +80,14 @@ func RunEA1P0SourceAdmissionSuite(t *testing.T, makeStore func(*testing.T) kerne
 		actor := kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}
 		thread := kernel.ThreadRef{Kind: "conversation", ID: "thread"}
 		root, err := rt.Create(t.Context(), kernel.CreateRequest{
-			ID: "root", Kind: "workflow", Actor: actor, Thread: thread,
+			ID: "root", Kind: "agent", Actor: actor, Thread: thread,
 			Goal: "original owner", State: []byte(`{}`),
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
 		if _, err = rt.Create(t.Context(), kernel.CreateRequest{
-			ID: root.Run.ID, Kind: "workflow", Actor: actor, Thread: thread,
+			ID: root.Run.ID, Kind: "agent", Actor: actor, Thread: thread,
 			Goal: "different original owner", State: []byte(`{}`),
 		}); err == nil {
 			t.Fatal("duplicate Run ID accepted a foreign source")

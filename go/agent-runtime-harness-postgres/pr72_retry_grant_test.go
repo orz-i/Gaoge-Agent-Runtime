@@ -35,8 +35,8 @@ func TestPR72RetryCASPreservesPendingPhysicalExecutionInMemoryAndSQL(t *testing.
 			digest := sha256.Sum256(input)
 			child := harness.Invocation{
 				ID: "retry-unsettled-child", TurnID: turn.ID, ParentItemID: "some-parent-item",
-				CapabilityKey: harness.CapabilityTeam, DefinitionVersion: harness.RuntimeCapabilityVersion,
-				ExecutionClass: harness.ExecutionTeam, ExecutionRefID: "old-in-doubt-run",
+				CapabilityKey: harness.CapabilityAgent, DefinitionVersion: harness.RuntimeCapabilityVersion,
+				ExecutionClass: harness.ExecutionAgent, ExecutionRefID: "old-in-doubt-run",
 				Input: input, InputHash: hex.EncodeToString(digest[:]),
 				Status: harness.InvocationAccepted, Attempt: 1, Revision: 1,
 				OutputRefs: []harness.HostRef{}, CreatedAt: now, UpdatedAt: now,
@@ -135,8 +135,8 @@ func TestRealPostgresPR72PendingGrantPreventsFailureAndRetryAcrossConnections(t 
 	digest := sha256.Sum256(input)
 	inv := harness.Invocation{
 		ID: "pr72-real-fence-inv", TurnID: turn.ID, ParentItemID: "pr72-parent",
-		CapabilityKey: harness.CapabilityTeam, DefinitionVersion: harness.RuntimeCapabilityVersion,
-		ExecutionClass: harness.ExecutionTeam, Input: input, InputHash: hex.EncodeToString(digest[:]),
+		CapabilityKey: harness.CapabilityAgent, DefinitionVersion: harness.RuntimeCapabilityVersion,
+		ExecutionClass: harness.ExecutionAgent, Input: input, InputHash: hex.EncodeToString(digest[:]),
 		ExecutionRefID: "pr72-original-effect", Status: harness.InvocationAccepted,
 		Attempt: 1, Revision: 1, OutputRefs: []harness.HostRef{}, CreatedAt: now, UpdatedAt: now,
 	}
@@ -166,7 +166,7 @@ func TestRealPostgresPR72PendingGrantPreventsFailureAndRetryAcrossConnections(t 
 	settled := harness.Item{ID: sqlProofFactID("hdispatchdone", grant.ID), TurnID: turn.ID,
 		InvocationID: inv.ID, RunID: inv.ExecutionRefID,
 		Kind: harness.ItemDiagnostic, Status: harness.ItemCompleted, ParentItemID: grant.ID,
-		Payload: json.RawMessage(`{"boundary":"feature_start_no_effect"}`), CreatedAt: now, UpdatedAt: now}
+		Payload: json.RawMessage(`{"boundary":"physical_dispatch_rejected"}`), CreatedAt: now, UpdatedAt: now}
 	if _, created, e := first.AppendItem(t.Context(), settled); e != nil || !created {
 		t.Fatalf("settle=%t %v", created, e)
 	}

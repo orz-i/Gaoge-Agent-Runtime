@@ -37,7 +37,7 @@ func crossTenantRelationFixture(t *testing.T) (schedulerFixture, kernel.Snapshot
 	} {
 		ensureRelation(t, f.relations, runrelation.Draft{
 			ParentRunID: pair.parent.Run.ID, ChildRunID: pair.child.Run.ID,
-			Kind: runrelation.KindTeamMember, OwnerNodeID: "member",
+			Kind: runrelation.KindDelegation, OwnerNodeID: "member",
 		})
 		completeRun(t, f.runtime, pair.child)
 	}
@@ -86,7 +86,7 @@ func TestCrossTenantPoisonBacklogDoesNotStarveLaterHealthyRelation(t *testing.T)
 		child := createTenantRun(t, f.runtime, fmt.Sprintf("bad-child-%03d", index), "tenant-B")
 		ensureRelation(t, f.relations, runrelation.Draft{
 			ParentRunID: parent.Run.ID, ChildRunID: child.Run.ID,
-			Kind: runrelation.KindTeamMember, OwnerNodeID: "member",
+			Kind: runrelation.KindDelegation, OwnerNodeID: "member",
 		})
 		completeRun(t, f.runtime, child)
 	}
@@ -94,7 +94,7 @@ func TestCrossTenantPoisonBacklogDoesNotStarveLaterHealthyRelation(t *testing.T)
 	child := createTenantRun(t, f.runtime, "zz-healthy-child", "tenant-A")
 	ensureRelation(t, f.relations, runrelation.Draft{
 		ParentRunID: healthy.Run.ID, ChildRunID: child.Run.ID,
-		Kind: runrelation.KindTeamMember, OwnerNodeID: "member",
+		Kind: runrelation.KindDelegation, OwnerNodeID: "member",
 	})
 	completeRun(t, f.runtime, child)
 	for tick := 0; tick < 2; tick++ {

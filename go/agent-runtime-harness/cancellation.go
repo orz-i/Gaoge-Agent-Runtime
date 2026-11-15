@@ -67,13 +67,6 @@ func (runner *Runner) cancelRuntimeRun(
 	// explicit contract that kernel.ErrConflict certifies zero external
 	// cleanup; never infer that guarantee from a native Store conflict.
 	_, nativeKernel := runner.cancellation.(*kernel.Runtime)
-	// A Host-composed Feature may run in a different Kernel even when a
-	// matching relation registry or a same-ID local Run exists. Check the
-	// original Invocation's route before native/custom Cancel, terminal
-	// acceptance or the synthetic missing-Run no-effect path.
-	if err := runner.requireCompositeRelationIndex(ctx, runID); err != nil {
-		return kernel.Snapshot{}, false, err
-	}
 	var delegatedChild *Invocation
 	if runner.store != nil {
 		owner, ownerErr := runner.store.GetInvocationByExecutionRefID(ctx, runID)
@@ -175,8 +168,8 @@ func (runner *Runner) cancelRuntimeRun(
 		}
 		if terminalRuntimeStatus(current.Run.Status) {
 			// The original route-specific ownership proof above owns
-			// physical settlement semantics. Workflow AgentTask checks
-			// unresolved native Tool/Model intents before reaching here;
+			// physical settlement semantics. Native Agent checks
+			// unresolved Tool/Model intents before reaching here;
 			// independently routed Handoffs retain their own external
 			// cleanup and reconciliation contract instead of inheriting it.
 			return current, true, nil
@@ -280,17 +273,6 @@ func (runner *Runner) localHandoffCancellerOwnsKernel() bool {
 	}
 	owner, ok := runner.cancellation.(LocalKernelCanceller)
 	return ok && owner.OwnsKernelRuntime(runner.runtime)
-}
-
-// Only the fixed native Run Kind may use a mixed Host canceller's local
-// Kernel delegation. A generic local-ownership proof retains its previous
-// semantics; an A2A route cannot inherit a native Agent's authority.
-func (runner *Runner) localRelationCancellerOwnsKernel(kind kernel.RunKind) bool {
-	if runner.localHandoffCancellerOwnsKernel() {
-		return true
-	}
-	owner, ok := runner.cancellation.(LocalKernelRunKindCanceller)
-	return ok && runner.runtime != nil && owner.OwnsKernelRunKind(runner.runtime, kind)
 }
 
 // localHandoffCancellationAuthority proves that a coincidentally present
@@ -619,8 +601,8 @@ func (runner *Runner) verifyMissingRelatedCancellation(ctx context.Context, runI
 		return nil
 	}
 	// An indexed RunRelation records execution ownership, not local Kernel
-	// residence. Team Members, Workflow Effects and GroupChat speakers can
-	// run on an independent ChildRunner without a Harness Invocation. A
+	// residence. Delegated SubAgents can run on an independent
+	// ChildRunner without a Harness Invocation. A
 	// missing local Run is therefore NOT an authoritative no-effect or
 	// terminal receipt for a related physical child. Preserve the intent
 	// for the original execution owner to reconcile or quarantine.
@@ -654,12 +636,6 @@ func (runner *Runner) verifyMissingRelatedCancellation(ctx context.Context, runI
 }
 
 func (runner *Runner) relatedChildRunIDs(ctx context.Context, runID string) ([]string, error) {
-	// An absent or mismatched RunRelation index is not proof that a Team,
-	// GroupChat or Workflow did not dispatch physical children. Check the
-	// original composite Feature before traversing its indexed edges.
-	if err := runner.requireCompositeRelationIndex(ctx, runID); err != nil {
-		return nil, err
-	}
 	if runner.relationReader == nil {
 		return nil, nil
 	}

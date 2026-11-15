@@ -9,11 +9,8 @@ import (
 	"time"
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runfeed"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/team"
 )
 
 type auditLostInteractionReceiptStore struct {
@@ -28,46 +25,32 @@ func (s *auditLostInteractionReceiptStore) UpdateInvocation(ctx context.Context,
 	return s.Store.UpdateInvocation(ctx, v, expected)
 }
 
-// Read-only host reconciliation never dispatches or changes the external business
-// object. "known" is asserted only after querying a verified host business receipt.
 type auditReadOnlyInteractionReconciler struct {
 	reauditBusinessResponseEffect
 	known atomic.Bool
 	reads atomic.Int32
 }
 
-func (h *auditReadOnlyInteractionReconciler) ReconcileInteractionResponse(
-	_ context.Context, _ harness.InteractionResponseContext,
-) (harness.InteractionResponseResult, bool, error) {
+func (h *auditReadOnlyInteractionReconciler) ReconcileInteractionResponse(_ context.Context, _ harness.InteractionResponseContext) (harness.InteractionResponseResult, bool, error) {
 	h.reads.Add(1)
 	if !h.known.Load() {
 		return harness.InteractionResponseResult{}, false, nil
 	}
 	return harness.InteractionResponseResult{OutputRefs: []harness.HostRef{{Kind: testApplicationDecisionRefKind, ID: testApplicationDecisionID}}}, true, nil
 }
-
 func TestIndependentAuditedInteractionSuccessfulCallbackReceiptLossCanRecover(t *testing.T) {
 	runtime := newFeatureInvocationRuntime(t)
 	store := &auditLostInteractionReceiptStore{Store: harness.NewMemoryStore()}
-	executor := &applicationCapabilityExecutorFixture{interaction: &harness.ApplicationInteractionRequest{
-		ApplicationRef: &harness.HostRef{Kind: testApplicationStoryRefKind, ID: "story_lost_callback_receipt"},
-		Key:            testApplicationCapabilityKey, Kind: harness.InteractionChoice, Schema: json.RawMessage("{}"),
-	}}
+	executor := &applicationCapabilityExecutorFixture{interaction: &harness.ApplicationInteractionRequest{ApplicationRef: &harness.HostRef{Kind: testApplicationStoryRefKind, ID: "story_lost_callback_receipt"}, Key: testApplicationCapabilityKey, Kind: harness.InteractionChoice, Schema: json.RawMessage("{}")}}
 	handler := &auditReadOnlyInteractionReconciler{}
 	newRunner := func() *harness.Runner {
-		r, err := harness.NewRunner(harness.Dependencies{
-			Runtime: runtime, Agent: loadingFeatureAgent{runtime: runtime}, Store: store, Clock: featureInvocationClock{},
-			Applications: executor, Interactions: handler,
-		})
+		r, err := harness.NewRunner(harness.Dependencies{Runtime: runtime, Agent: loadingFeatureAgent{runtime: runtime}, Store: store, Clock: featureInvocationClock{}, Applications: executor, Interactions: handler})
 		if err != nil {
 			t.Fatal(err)
 		}
 		return r
 	}
-	req := harness.ApplicationTurnRequest{
-		StartRequest: testStartRequest(), CapabilityKey: testApplicationCapabilityKey,
-		DefinitionVersion: testApplicationVersion, Input: json.RawMessage("{}"),
-	}
+	req := harness.ApplicationTurnRequest{StartRequest: testStartRequest(), CapabilityKey: testApplicationCapabilityKey, DefinitionVersion: testApplicationVersion, Input: json.RawMessage("{}")}
 	waiting, err := newRunner().StartApplicationTurn(t.Context(), req)
 	if err != nil || waiting.Turn.Status != harness.TurnWaitingInput || len(waiting.Interactions) != 1 {
 		t.Fatalf("unexpected setup turn=%s interactions=%d err=%v", waiting.Turn.Status, len(waiting.Interactions), err)
@@ -77,8 +60,6 @@ func TestIndependentAuditedInteractionSuccessfulCallbackReceiptLossCanRecover(t 
 	if err == nil || !store.faulted.Load() || handler.count.Load() != 1 {
 		t.Fatalf("fault setup: err=%v injected=%v calls=%d", err, store.faulted.Load(), handler.count.Load())
 	}
-	// External effect completed, but the Harness receipt was lost. Recovery
-	// MUST verify the host business receipt read-only before committing it.
 	reopened := newRunner()
 	observed, err := reopened.Refresh(t.Context(), waiting.Turn.ID)
 	if err != nil {
@@ -102,7 +83,7 @@ func TestIndependentAuditedInteractionSuccessfulCallbackReceiptLossCanRecover(t 
 	if _, err = reopened.ReconcileInteraction(t.Context(), waiting.Turn.ID, waiting.Interactions[0].ID); !errors.Is(err, harness.ErrInteractionOutcomeUnknown) {
 		t.Fatalf("unverified external outcome must fail closed: %v", err)
 	}
-	handler.known.Store(true) // Host has externally confirmed the effect via a durable business receipt.
+	handler.known.Store(true)
 	recovered, err := reopened.ReconcileInteraction(t.Context(), waiting.Turn.ID, waiting.Interactions[0].ID)
 	if err != nil || recovered.Turn.Status != harness.TurnCompleted {
 		t.Fatalf("verified response failed to repair stored completion: turn=%+v err=%v", recovered.Turn, err)
@@ -119,8 +100,12 @@ func TestIndependentAuditedInteractionSuccessfulCallbackReceiptLossCanRecover(t 
 
 type auditEpochClock struct{ unixNano atomic.Int64 }
 
-func (c *auditEpochClock) Now() time.Time                 { return time.Unix(0, c.unixNano.Load()).UTC() }
-func (c *auditEpochClock) Advance(duration time.Duration) { c.unixNano.Add(int64(duration)) }
+func (c *auditEpochClock) Now() time.Time {
+	return time.Unix(0, c.unixNano.Load()).UTC()
+}
+func (c *auditEpochClock) Advance(duration time.Duration) {
+	c.unixNano.Add(int64(duration))
+}
 
 type auditExpireDuringApplication struct{ clock *auditEpochClock }
 
@@ -140,7 +125,6 @@ func (s *auditCountTerminalDrafts) Append(ctx context.Context, id string, d runf
 	}
 	return s.Store.Append(ctx, id, d, now, retention)
 }
-
 func TestIndependentAuditedLongRunningTurnTerminalEventSurvivesFeedRetention(t *testing.T) {
 	c := &auditEpochClock{}
 	c.unixNano.Store(time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC).UnixNano())
@@ -155,17 +139,11 @@ func TestIndependentAuditedLongRunningTurnTerminalEventSurvivesFeedRetention(t *
 	}
 	runtime := newFeatureInvocationRuntime(t)
 	executor := auditExpireDuringApplication{clock: c}
-	runner, err := harness.NewRunner(harness.Dependencies{
-		Runtime: runtime, Agent: loadingFeatureAgent{runtime: runtime}, Store: harness.NewMemoryStore(),
-		Clock: c, Applications: executor, TurnFeed: feed,
-	})
+	runner, err := harness.NewRunner(harness.Dependencies{Runtime: runtime, Agent: loadingFeatureAgent{runtime: runtime}, Store: harness.NewMemoryStore(), Clock: c, Applications: executor, TurnFeed: feed})
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := harness.ApplicationTurnRequest{
-		StartRequest: testStartRequest(), CapabilityKey: testApplicationCapabilityKey,
-		DefinitionVersion: testApplicationVersion, Input: json.RawMessage("{}"),
-	}
+	req := harness.ApplicationTurnRequest{StartRequest: testStartRequest(), CapabilityKey: testApplicationCapabilityKey, DefinitionVersion: testApplicationVersion, Input: json.RawMessage("{}")}
 	finished, err := runner.StartApplicationTurn(t.Context(), req)
 	if err != nil || finished.Turn.Status != harness.TurnCompleted {
 		t.Fatalf("completed Turn: status=%s err=%v", finished.Turn.Status, err)
@@ -181,150 +159,5 @@ func TestIndependentAuditedLongRunningTurnTerminalEventSurvivesFeedRetention(t *
 	}
 	if backingFeed.attempts.Load() != 1 {
 		t.Fatalf("retained terminal suffix not recognized after prefix expiry: attempts=%d", backingFeed.attempts.Load())
-	}
-}
-
-type auditRunningTeamFeature struct{ runtime *kernel.Runtime }
-
-// This test-only Team runner never launches a child; zero relation writes
-// are complete. Explicitly attest its Kernel and no-descendant contract so
-// cancellation arbitration tests still reach their intended Host barriers.
-func (f auditRunningTeamFeature) OwnsKernelRuntime(rt *kernel.Runtime) bool {
-	return f.runtime != nil && f.runtime == rt
-}
-func (auditRunningTeamFeature) RecordsRelationsTo(runrelation.Recorder) bool { return true }
-
-func (f auditRunningTeamFeature) StartRun(ctx context.Context, req team.StartRequest) (kernel.Snapshot, error) {
-	return f.runtime.Create(ctx, kernel.CreateRequest{
-		ID: req.ID, Kind: team.RunKind, Actor: req.Actor, Thread: req.Thread, RequestID: req.RequestID, Goal: req.Goal, State: json.RawMessage("{}"),
-	})
-}
-func (f auditRunningTeamFeature) Resume(ctx context.Context, id string, _ uint64) (kernel.Snapshot, error) {
-	return f.runtime.Load(ctx, id)
-}
-
-type auditBlockBusinessHandler struct {
-	start   chan struct{}
-	release chan struct{}
-	calls   atomic.Int32
-}
-
-func (h *auditBlockBusinessHandler) HandleInteractionResponse(context.Context, harness.InteractionResponseContext) (harness.InteractionResponseResult, error) {
-	close(h.start)
-	<-h.release
-	h.calls.Add(1)
-	return harness.InteractionResponseResult{}, nil
-}
-func TestIndependentAuditedCancelSubtaskCannotBypassClaimedBusinessHandler(t *testing.T) {
-	_, turnID, parentItemID, relations, _, store, runtime := newFeatureInvocationHarness(t)
-	handler := &auditBlockBusinessHandler{start: make(chan struct{}), release: make(chan struct{})}
-	runner, err := harness.NewRunner(harness.Dependencies{
-		Runtime: runtime, Agent: loadingFeatureAgent{runtime: runtime},
-		Store: store, Clock: featureInvocationClock{}, Teams: auditRunningTeamFeature{runtime: runtime},
-		Relations: relations, Interactions: handler,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	started, err := runner.StartTeamInvocation(t.Context(), turnID, harness.TeamInvocationRequest{
-		ParentItemID: parentItemID, RequestID: "child_interaction_cancel", Goal: "child waiting work",
-		Mode: team.ExecutionSequential, Members: []team.Member{{ID: "member", Goal: "task"}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var child harness.Invocation
-	for _, inv := range started.Invocations {
-		if inv.ParentItemID != "" && inv.ExecutionClass == harness.ExecutionTeam {
-			child = inv
-			break
-		}
-	}
-	if child.ID == "" {
-		t.Fatal("missing child invocation")
-	}
-	if len(started.Subtasks) == 0 {
-		t.Fatal("no related subtask")
-	}
-	task := started.Subtasks[0]
-	if task.RunID != child.ExecutionRefID {
-		t.Fatalf("not targeted child: task=%+v child=%+v", task, child)
-	}
-	waiting, err := runner.RequestInteraction(t.Context(), turnID, harness.RequestInteraction{
-		InvocationID: child.ID, ParentItemID: "", Key: "child_input_wait", Kind: harness.InteractionChoice, Schema: json.RawMessage("{}"),
-	})
-	if err != nil || len(waiting.Interactions) == 0 {
-		t.Fatalf("no waiting interaction: err=%v status=%s", err, waiting.Turn.Status)
-	}
-	done := make(chan error, 1)
-	go func() {
-		_, callErr := runner.ResolveInteraction(context.Background(), turnID, waiting.Interactions[0].ID,
-			harness.ResolveInteractionRequest{Response: json.RawMessage("{}")})
-		done <- callErr
-	}()
-	<-handler.start
-	cancelled, cancelErr := runner.CancelSubtask(t.Context(), turnID, task.ID, "cancel child while business callback claimed")
-	if !errors.Is(cancelErr, harness.ErrConflict) {
-		close(handler.release)
-		<-done
-		t.Fatalf("CancelSubtask did not honor running interaction claim: child=%s status=%s err=%v", task.ID, cancelled.Turn.Status, cancelErr)
-	}
-	observed, err := runner.Load(t.Context(), turnID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, subtask := range observed.Subtasks {
-		if subtask.ID == task.ID && subtask.Status == "cancelled" {
-			t.Fatalf("subtask cancelled despite already running business callback")
-		}
-	}
-	close(handler.release)
-	<-done
-}
-
-func TestSubtaskWaitingInteractionCanStillCancelBeforeBusinessDispatch(t *testing.T) {
-	_, turnID, parentItemID, relations, _, store, runtime := newFeatureInvocationHarness(t)
-	handler := &auditBlockBusinessHandler{start: make(chan struct{}), release: make(chan struct{})}
-	runner, err := harness.NewRunner(harness.Dependencies{
-		Runtime: runtime, Agent: loadingFeatureAgent{runtime: runtime}, Store: store,
-		Clock: featureInvocationClock{}, Teams: auditRunningTeamFeature{runtime: runtime},
-		Relations: relations, Interactions: handler,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	started, err := runner.StartTeamInvocation(t.Context(), turnID, harness.TeamInvocationRequest{
-		ParentItemID: parentItemID, RequestID: "cancel-before-callback", Goal: "cancel waiting child",
-		Mode: team.ExecutionSequential, Members: []team.Member{{ID: "writer", Goal: "write"}},
-	})
-	if err != nil || len(started.Subtasks) != 1 {
-		t.Fatalf("start=%v subtasks=%d", err, len(started.Subtasks))
-	}
-	var child harness.Invocation
-	for _, inv := range started.Invocations {
-		if inv.ExecutionClass == harness.ExecutionTeam && inv.ParentItemID != "" {
-			child = inv
-			break
-		}
-	}
-	if child.ID == "" {
-		t.Fatal("child invocation missing")
-	}
-	_, err = runner.RequestInteraction(t.Context(), turnID, harness.RequestInteraction{
-		InvocationID: child.ID, Key: "pending-choice", Kind: harness.InteractionChoice,
-		Schema: json.RawMessage(`{}`),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	cancelled, err := runner.CancelSubtask(t.Context(), turnID, started.Subtasks[0].ID, "stop before dispatch")
-	if err != nil {
-		t.Fatalf("cancel pending subtask: %v", err)
-	}
-	if handler.calls.Load() != 0 {
-		t.Fatalf("cancel dispatched business callback: calls=%d", handler.calls.Load())
-	}
-	if len(cancelled.Subtasks) != 1 || cancelled.Subtasks[0].Status != string(kernel.RunStatusCancelled) {
-		t.Fatalf("pending child was not cancelled: %+v", cancelled.Subtasks)
 	}
 }

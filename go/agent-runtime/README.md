@@ -2,8 +2,10 @@
 
 `github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime` is the host-neutral Agent Runtime
 Core. The module is split into explicit capability packages such as `kernel`,
-`agent`, `tools`, `interaction`, `workflow`, `team`, and `compose`. Hosts construct only the capabilities they need; there is no
-compatibility `Engine` facade or automatic Runtime-kind selector.
+`agent`, `handoff`, `tools`, `interaction`, `runrelation`, and `compose`.
+The only built-in orchestration is Agent/SubAgent delegation, not a separate
+Team/GroupChat/Workflow engine. There is no compatibility facade or automatic
+Runtime-kind selector.
 
 For an in-process durable-contract implementation, use `memory`:
 
@@ -172,18 +174,18 @@ conflicts require diagnostics and bounded Host intervention. See the
 This fail-closed safety fix does not certify autonomous recovery or production
 Hosted readiness.
 
-## Runtime kinds
+## Run kinds and subagents
 
-Agent Runtime exposes explicit Run kinds over the same durable Kernel primitives:
+The built-in model/Tool execution loop is `agent.Runner`. It supports delegated
+SubAgents through `handoff.Coordinator`, scoped child Runs, the Harness
+Delegation Tool, and authoritative `runrelation.KindDelegation` ownership facts.
+The Host chooses the role, model, tool policy, and delegation scope before
+dispatch; the Kernel remains neutral about product intent.
 
-- Agent Run is the direct model/Tool loop and is provided by `agent.Runner`.
-- Agent Team is coordinator-led, open-ended multi-agent collaboration.
-- Dynamic Workflow is a versioned, deterministic DSL with structured data,
-  bounded concurrency, hard budgets, durable waits, cache policy, and
-  compensation.
-
-These kinds do not masquerade as one another through modes or compatibility
-facades. Callers select the Runtime kind before Run creation.
+Removed orchestration kinds and their APIs are intentionally not loadable or
+recoverable as first-party executions. See
+[ADR 0018](../../docs/adr/0018-subagent-only-orchestration-hardcut.md) for the
+pre-stable breaking change.
 
 Kernel terminal output remains feature-neutral through `kernel.Result`; each
 Feature owns the schema placed in that result. Provider-specific protocols and

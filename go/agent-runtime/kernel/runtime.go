@@ -113,7 +113,7 @@ type Runtime struct {
 	// execution optionally binds this Runtime to one Store-authorized segment.
 	// It is never inherited by a fresh Runtime created from the same Store.
 	execution *ExecutionLease
-	// physicalGrant binds a first-party Root/child Workflow or parented
+	// physicalGrant binds a first-party parented or owned
 	// Agent execution segment to its original Store Grant.
 	// A Store mutation carries a fresh per-revision proof to prevent another
 	// worker from modifying this Root while physical effects are in flight.

@@ -28,7 +28,7 @@ func TestSchedulerReconcileRetriesEarlierError(t *testing.T) {
 	for i := 0; i < runrelation.MaxReconcilePageSize+3; i++ {
 		parent := createRun(t, f.runtime, fmt.Sprintf("retry-parent-%03d", i), "retry.parent")
 		child := createRun(t, f.runtime, fmt.Sprintf("retry-child-%03d", i), "retry.child")
-		ensureRelation(t, f.relations, runrelation.Draft{ParentRunID: parent.Run.ID, ChildRunID: child.Run.ID, Kind: runrelation.KindTeamMember, OwnerNodeID: "member"})
+		ensureRelation(t, f.relations, runrelation.Draft{ParentRunID: parent.Run.ID, ChildRunID: child.Run.ID, Kind: runrelation.KindDelegation, OwnerNodeID: "member"})
 		completeRun(t, f.runtime, child)
 	}
 	pager, _ := f.relations.ReconciliationPager()

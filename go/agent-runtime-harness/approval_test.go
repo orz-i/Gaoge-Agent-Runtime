@@ -2,10 +2,8 @@ package harness_test
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -18,7 +16,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
@@ -32,26 +29,20 @@ func TestHarnessApprovalUsesFrozenToolPolicyAndPersistsDecisionItems(t *testing.
 	harnessRunner, config := newApprovalHarness(t)
 	waiting := startApprovalHarness(t, harnessRunner, config)
 	assertHarnessApprovalWait(t, waiting, 1)
-
-	// Mutating the caller-owned Config after Start must not change the durable policy.
 	config.ToolPolicies[0].ApprovalMode = "never"
 	waitingAgain := resolveApproval(t, harnessRunner, waiting, "first approved")
 	assertHarnessApprovalWait(t, waitingAgain, 2)
-
 	completed := resolveApproval(t, harnessRunner, waitingAgain, "second approved")
 	if completed.Turn.Status != harness.TurnCompleted || approvalItemCount(completed.Items, harness.ItemCompleted) != 2 {
 		t.Fatalf("approval lifecycle did not complete: turn=%#v items=%#v", completed.Turn, completed.Items)
 	}
 }
-
 func TestHarnessApprovalRejectsStaleCheckpointWithoutResolvingNextRequest(t *testing.T) {
 	t.Parallel()
 	runner, config := newApprovalHarness(t)
 	waiting := startApprovalHarness(t, runner, config)
 	checkpointID := latestApprovalCheckpoint(t, waiting)
-	next, err := runner.ResolveApproval(t.Context(), waiting.Turn.ID, harness.ResolveApprovalRequest{
-		CheckpointID: checkpointID, Decision: harness.ApprovalApprove, Comment: "first approved",
-	})
+	next, err := runner.ResolveApproval(t.Context(), waiting.Turn.ID, harness.ResolveApprovalRequest{CheckpointID: checkpointID, Decision: harness.ApprovalApprove, Comment: "first approved"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,47 +52,35 @@ func TestHarnessApprovalRejectsStaleCheckpointWithoutResolvingNextRequest(t *tes
 		t.Fatal("the second tool call reused the first approval checkpoint")
 	}
 	for _, decision := range []harness.ApprovalDecision{harness.ApprovalApprove, harness.ApprovalReject} {
-		if _, err = runner.ResolveApproval(t.Context(), waiting.Turn.ID, harness.ResolveApprovalRequest{
-			CheckpointID: checkpointID, Decision: decision, Comment: "stale owner action",
-		}); !errors.Is(err, harness.ErrConflict) {
+		if _, err = runner.ResolveApproval(t.Context(), waiting.Turn.ID, harness.ResolveApprovalRequest{CheckpointID: checkpointID, Decision: decision, Comment: "stale owner action"}); !errors.Is(err, harness.ErrConflict) {
 			t.Fatalf("stale %s resolved the next checkpoint: %v", decision, err)
 		}
 	}
-	completed, err := runner.ResolveApproval(t.Context(), waiting.Turn.ID, harness.ResolveApprovalRequest{
-		CheckpointID: nextCheckpointID, Decision: harness.ApprovalApprove, Comment: "second approved",
-	})
+	completed, err := runner.ResolveApproval(t.Context(), waiting.Turn.ID, harness.ResolveApprovalRequest{CheckpointID: nextCheckpointID, Decision: harness.ApprovalApprove, Comment: "second approved"})
 	if err != nil || completed.Turn.Status != harness.TurnCompleted || approvalItemCount(completed.Items, harness.ItemCompleted) != 2 {
 		t.Fatalf("the current approval did not remain actionable: turn=%#v err=%v", completed.Turn, err)
 	}
 }
-
 func TestHarnessApprovalRejectsMissingCheckpointBeforeEffects(t *testing.T) {
 	t.Parallel()
 	runner, config := newApprovalHarness(t)
 	waiting := startApprovalHarness(t, runner, config)
 	for _, invalid := range []string{"", " ", " checkpoint-with-space", strings.Repeat("x", 129)} {
-		if _, err := runner.ResolveApproval(t.Context(), waiting.Turn.ID, harness.ResolveApprovalRequest{
-			CheckpointID: invalid, Decision: harness.ApprovalApprove,
-		}); !errors.Is(err, harness.ErrInvalidRequest) {
+		if _, err := runner.ResolveApproval(t.Context(), waiting.Turn.ID, harness.ResolveApprovalRequest{CheckpointID: invalid, Decision: harness.ApprovalApprove}); !errors.Is(err, harness.ErrInvalidRequest) {
 			t.Fatalf("unbound approval %q was admitted: %v", invalid, err)
 		}
 	}
 	still, err := runner.Load(t.Context(), waiting.Turn.ID)
-	if err != nil || still.Turn.Status != harness.TurnWaitingInput ||
-		latestApprovalCheckpoint(t, still) != latestApprovalCheckpoint(t, waiting) ||
-		approvalItemCount(still.Items, harness.ItemCompleted) != 0 {
+	if err != nil || still.Turn.Status != harness.TurnWaitingInput || latestApprovalCheckpoint(t, still) != latestApprovalCheckpoint(t, waiting) || approvalItemCount(still.Items, harness.ItemCompleted) != 0 {
 		t.Fatalf("unbound approvals mutated first checkpoint: %#v, err=%v", still, err)
 	}
 	next := resolveApproval(t, runner, waiting, "first exact approval")
 	assertHarnessApprovalWait(t, next, 2)
-	if _, err = runner.ResolveApproval(t.Context(), next.Turn.ID, harness.ResolveApprovalRequest{
-		Decision: harness.ApprovalReject,
-	}); !errors.Is(err, harness.ErrInvalidRequest) {
+	if _, err = runner.ResolveApproval(t.Context(), next.Turn.ID, harness.ResolveApprovalRequest{Decision: harness.ApprovalReject}); !errors.Is(err, harness.ErrInvalidRequest) {
 		t.Fatalf("replayed Turn-only approval acted on next checkpoint: %v", err)
 	}
 	still, err = runner.Load(t.Context(), waiting.Turn.ID)
-	if err != nil || still.Turn.Status != harness.TurnWaitingInput ||
-		latestApprovalCheckpoint(t, still) != latestApprovalCheckpoint(t, next) {
+	if err != nil || still.Turn.Status != harness.TurnWaitingInput || latestApprovalCheckpoint(t, still) != latestApprovalCheckpoint(t, next) {
 		t.Fatalf("unbound replay changed second checkpoint: %#v, err=%v", still.Turn, err)
 	}
 	completed := resolveApproval(t, runner, next, "second exact approval")
@@ -109,7 +88,6 @@ func TestHarnessApprovalRejectsMissingCheckpointBeforeEffects(t *testing.T) {
 		t.Fatalf("exact approvals failed to complete: %#v", completed.Turn)
 	}
 }
-
 func latestApprovalCheckpoint(t *testing.T, snapshot harness.Snapshot) string {
 	t.Helper()
 	for index := len(snapshot.Items) - 1; index >= 0; index-- {
@@ -128,66 +106,6 @@ func latestApprovalCheckpoint(t *testing.T, snapshot harness.Snapshot) string {
 	t.Fatal("no waiting approval checkpoint")
 	return ""
 }
-
-func TestFrozenApprovalPolicyFollowsChildRunRelations(t *testing.T) {
-	t.Parallel()
-	store := harness.NewMemoryStore()
-	relations, err := runrelation.New(memory.NewRunRelationStore(), approvalTestClock{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	policy, err := harness.NewFrozenApprovalPolicy(store, relations)
-	if err != nil {
-		t.Fatal(err)
-	}
-	now := approvalTestClock{}.Now()
-	config, err := harness.SealConfigSnapshot("turn-descendant-approval", harness.ConfigSnapshot{
-		ToolKeys: []string{approvalTestToolKey},
-		ToolPolicies: []harness.ToolPolicySnapshot{{
-			Key: approvalTestToolKey, DefinitionVersion: "v1",
-			ApprovalCapability: approvalTestCapabilityPerCall, ApprovalMode: "always",
-		}},
-	}, now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err = store.PutConfigSnapshot(t.Context(), config); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err = store.CreateTurn(t.Context(), harness.Turn{
-		ID: config.TurnID, SessionID: "session-descendant-approval",
-		HostTurn:         harness.HostRef{Kind: testContextHostKind, ID: "host-descendant-approval"},
-		ConfigSnapshotID: config.ID, Status: harness.TurnRunning, Revision: 1,
-		CreatedAt: now, UpdatedAt: now,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	input := json.RawMessage(`{"goal":"team"}`)
-	inputHash := sha256.Sum256(input)
-	if _, _, err = store.CreateInvocation(t.Context(), harness.Invocation{
-		ID: "invocation-descendant-approval", TurnID: config.TurnID,
-		CapabilityKey: harness.CapabilityTeam, DefinitionVersion: harness.RuntimeCapabilityVersion,
-		ExecutionClass: harness.ExecutionTeam, Input: input, InputHash: fmt.Sprintf("%x", inputHash),
-		ExecutionRefID: "team-run", Status: harness.InvocationRunning, Attempt: 1, Revision: 1,
-		CreatedAt: now, UpdatedAt: now,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = relations.Ensure(t.Context(), runrelation.Draft{
-		ParentRunID: "team-run", ChildRunID: "member-agent-run",
-		Kind: runrelation.KindTeamMember, OwnerNodeID: "member-1",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	requirement, err := policy.Approval(t.Context(), plugin.ToolInvocation{
-		Run:        kernel.Run{ID: "member-agent-run"},
-		Definition: tools.Definition{Key: approvalTestToolKey},
-	})
-	if err != nil || requirement != plugin.ApprovalRequired {
-		t.Fatalf("descendant approval requirement = %q, err=%v", requirement, err)
-	}
-}
-
 func newApprovalHarness(t *testing.T) (*harness.Runner, harness.ConfigSnapshot) {
 	t.Helper()
 	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
@@ -204,55 +122,32 @@ func newApprovalHarness(t *testing.T) (*harness.Runner, harness.ConfigSnapshot) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	agentRunner, err := agent.NewRunner(agent.Dependencies{
-		Runtime: runtime, Model: &approvalTestModel{}, Catalog: registry, Executor: registry,
-		Approvals: interactionadapter.New(approvals), ApprovalPolicies: []plugin.ApprovalPolicy{policy},
-		Limits: agent.Limits{MaxLLMCalls: 3, MaxToolCalls: 2},
-	})
+	agentRunner, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: &approvalTestModel{}, Catalog: registry, Executor: registry, Approvals: interactionadapter.New(approvals), ApprovalPolicies: []plugin.ApprovalPolicy{policy}, Limits: agent.Limits{MaxLLMCalls: 3, MaxToolCalls: 2}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	harnessRunner, err := harness.NewRunner(harness.Dependencies{
-		Runtime: runtime, Agent: agentRunner, Store: store, Clock: approvalTestClock{}, Catalog: registry,
-	})
+	harnessRunner, err := harness.NewRunner(harness.Dependencies{Runtime: runtime, Agent: agentRunner, Store: store, Clock: approvalTestClock{}, Catalog: registry})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return harnessRunner, harness.ConfigSnapshot{
-		ToolKeys: []string{approvalTestToolKey},
-		ToolPolicies: []harness.ToolPolicySnapshot{{
-			Key: approvalTestToolKey, DefinitionVersion: "v1",
-			ApprovalCapability: approvalTestCapabilityPerCall, ApprovalMode: "always",
-		}},
-	}
+	return harnessRunner, harness.ConfigSnapshot{ToolKeys: []string{approvalTestToolKey}, ToolPolicies: []harness.ToolPolicySnapshot{{Key: approvalTestToolKey, DefinitionVersion: "v1", ApprovalCapability: approvalTestCapabilityPerCall, ApprovalMode: "always"}}}
 }
-
 func startApprovalHarness(t *testing.T, runner *harness.Runner, config harness.ConfigSnapshot) harness.Snapshot {
 	t.Helper()
-	waiting, err := runner.StartAgentTurn(t.Context(), harness.StartRequest{
-		HostThread: harness.HostRef{Kind: testThreadKind, ID: "thread-approval"},
-		HostTurn:   harness.HostRef{Kind: testContextHostKind, ID: "turn-approval"},
-		Actor:      kernel.ActorRef{TenantID: "tenant", ActorID: "actor"},
-		Thread:     kernel.ThreadRef{Kind: testThreadKind, ID: "thread-approval"},
-		Goal:       "lookup twice", Config: config,
-	})
+	waiting, err := runner.StartAgentTurn(t.Context(), harness.StartRequest{HostThread: harness.HostRef{Kind: testThreadKind, ID: "thread-approval"}, HostTurn: harness.HostRef{Kind: testContextHostKind, ID: "turn-approval"}, Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: testThreadKind, ID: "thread-approval"}, Goal: "lookup twice", Config: config})
 	if err != nil {
 		t.Fatalf("start approval Harness: %v", err)
 	}
 	return waiting
 }
-
 func resolveApproval(t *testing.T, runner *harness.Runner, waiting harness.Snapshot, comment string) harness.Snapshot {
 	t.Helper()
-	snapshot, err := runner.ResolveApproval(t.Context(), waiting.Turn.ID, harness.ResolveApprovalRequest{
-		CheckpointID: latestApprovalCheckpoint(t, waiting), Decision: harness.ApprovalApprove, Comment: comment,
-	})
+	snapshot, err := runner.ResolveApproval(t.Context(), waiting.Turn.ID, harness.ResolveApprovalRequest{CheckpointID: latestApprovalCheckpoint(t, waiting), Decision: harness.ApprovalApprove, Comment: comment})
 	if err != nil {
 		t.Fatalf("resolve approval: %v", err)
 	}
 	return snapshot
 }
-
 func assertHarnessApprovalWait(t *testing.T, snapshot harness.Snapshot, wantWaiting int) {
 	t.Helper()
 	invocation, ok := harness.TopLevelInvocation(snapshot)
@@ -263,7 +158,6 @@ func assertHarnessApprovalWait(t *testing.T, snapshot harness.Snapshot, wantWait
 		t.Fatalf("waiting approval item count=%d want=%d items=%#v", got, wantWaiting, snapshot.Items)
 	}
 }
-
 func approvalItemCount(items []harness.Item, status harness.ItemStatus) int {
 	count := 0
 	for _, item := range items {
@@ -273,20 +167,11 @@ func approvalItemCount(items []harness.Item, status harness.ItemStatus) int {
 	}
 	return count
 }
-
 func newApprovalTestRegistry(t *testing.T) *tools.Registry {
 	t.Helper()
-	registry, err := tools.NewRegistry([]tools.Registration{{
-		Definition: tools.Definition{
-			Key: approvalTestToolKey, Name: "Approval Lookup", InputSchema: json.RawMessage(`{"type":"object"}`),
-		},
-		Handler: tools.HandlerFunc(func(_ context.Context, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
-			return tools.ExecutionResult{
-				Content: json.RawMessage(`{"value":"ok"}`),
-				Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: "committed"},
-			}, nil
-		}),
-	}})
+	registry, err := tools.NewRegistry([]tools.Registration{{Definition: tools.Definition{Key: approvalTestToolKey, Name: "Approval Lookup", InputSchema: json.RawMessage(`{"type":"object"}`)}, Handler: tools.HandlerFunc(func(_ context.Context, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
+		return tools.ExecutionResult{Content: json.RawMessage(`{"value":"ok"}`), Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: "committed"}}, nil
+	})}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -304,9 +189,7 @@ func (client *approvalTestModel) Generate(_ context.Context, request model.Reque
 				return model.Response{}, agent.ErrInvalidModelResponse
 			}
 		}
-		return model.Response{ToolCalls: []tools.Call{{
-			ToolKey: approvalTestToolKey, Arguments: json.RawMessage(`{"query":"value"}`),
-		}}}, nil
+		return model.Response{ToolCalls: []tools.Call{{ToolKey: approvalTestToolKey, Arguments: json.RawMessage(`{"query":"value"}`)}}}, nil
 	}
 	return model.Response{Content: "approved answer"}, nil
 }

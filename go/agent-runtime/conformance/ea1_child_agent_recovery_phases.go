@@ -114,11 +114,11 @@ func ea1ChildRecoveryPhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 		v := time.Now().UTC().Add(3 * time.Second)
 		due = &v
 	}
-	grandparent, e := rt.Create(t.Context(), kernel.CreateRequest{ID: "original-grandparent", Kind: "workflow", Actor: actor, Thread: thread, Goal: "grandparent", State: json.RawMessage("{}"), DeadlineAt: due})
+	grandparent, e := rt.Create(t.Context(), kernel.CreateRequest{ID: "original-grandparent", Kind: "agent", Actor: actor, Thread: thread, Goal: "grandparent", State: json.RawMessage("{}"), DeadlineAt: due})
 	if e != nil {
 		t.Fatal(e)
 	}
-	parent, e := rt.Create(t.Context(), kernel.CreateRequest{ID: "original-parent", ParentRunID: grandparent.Run.ID, Kind: "workflow", Actor: actor, Thread: thread, Goal: "parent", State: json.RawMessage("{}")})
+	parent, e := rt.Create(t.Context(), kernel.CreateRequest{ID: "original-parent", ParentRunID: grandparent.Run.ID, Kind: "agent", Actor: actor, Thread: thread, Goal: "parent", State: json.RawMessage("{}")})
 	if e != nil {
 		t.Fatal(e)
 	}

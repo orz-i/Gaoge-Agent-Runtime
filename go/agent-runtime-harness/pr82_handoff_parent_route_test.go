@@ -8,7 +8,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 )
 
 func TestPR82HandoffParentRequiresOwnedLocalObservation(t *testing.T) {
@@ -83,24 +82,5 @@ func TestPR82HandoffParentRequiresOwnedLocalObservation(t *testing.T) {
 				}
 			})
 		}
-	}
-}
-
-func TestPR82RawFeatureCannotBorrowUndispatchedHandoffProof(t *testing.T) {
-	f := newPR82HandoffFixture(t)
-	d := f.delegation()
-	if err := f.runner.prepareHandoffChild(t.Context(), f.turn, f.parent, d, f.startedItemID); err != nil {
-		t.Fatal(err)
-	}
-	_, err := f.runner.relations.Ensure(t.Context(), runrelation.Draft{ParentRunID: f.parent.ExecutionRefID, ChildRunID: d.ChildRunID, Kind: runrelation.KindTeamMember, OwnerNodeID: "remote-member"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	f.runner.relationReader = f.runner.relations.(RunRelationSource)
-	if err = f.runner.verifyMissingRelatedCancellation(t.Context(), d.ChildRunID); !errors.Is(err, ErrRuntimeCancellationUnverified) {
-		t.Fatalf("missing raw child borrowed Handoff proof: %v", err)
-	}
-	if _, _, err = f.runner.cancelRuntimeRun(t.Context(), d.ChildRunID, "stop", nil); !errors.Is(err, ErrRuntimeCancellationUnverified) {
-		t.Fatalf("direct cancel borrowed Handoff proof: %v", err)
 	}
 }

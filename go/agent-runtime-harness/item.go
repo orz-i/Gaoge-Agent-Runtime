@@ -10,20 +10,19 @@ import (
 type ItemKind string
 
 const (
-	ItemUserMessage      ItemKind = "user_message"
-	ItemAgentRun         ItemKind = "agent_run"
-	ItemAgentMessage     ItemKind = "agent_message"
-	ItemTool             ItemKind = "tool"
-	ItemApproval         ItemKind = "approval"
-	ItemDelegation       ItemKind = "delegation"
-	ItemInvocation       ItemKind = "capability_invocation"
-	ItemInteraction      ItemKind = "interaction"
-	ItemArtifact         ItemKind = "artifact"
-	ItemContext          ItemKind = "context"
-	ItemDiagnostic       ItemKind = "diagnostic"
-	ItemBudget           ItemKind = "budget"
-	ItemSubtask          ItemKind = "subtask"
-	ItemGroupChatHandoff ItemKind = "group_chat_handoff"
+	ItemUserMessage  ItemKind = "user_message"
+	ItemAgentRun     ItemKind = "agent_run"
+	ItemAgentMessage ItemKind = "agent_message"
+	ItemTool         ItemKind = "tool"
+	ItemApproval     ItemKind = "approval"
+	ItemDelegation   ItemKind = "delegation"
+	ItemInvocation   ItemKind = "capability_invocation"
+	ItemInteraction  ItemKind = "interaction"
+	ItemArtifact     ItemKind = "artifact"
+	ItemContext      ItemKind = "context"
+	ItemDiagnostic   ItemKind = "diagnostic"
+	ItemBudget       ItemKind = "budget"
+	ItemSubtask      ItemKind = "subtask"
 )
 
 // ItemStatus is one durable item lifecycle state.
@@ -67,7 +66,7 @@ func validItem(value Item) bool {
 
 func validItemKind(value ItemKind) bool {
 	switch value {
-	case ItemUserMessage, ItemAgentRun, ItemAgentMessage, ItemTool, ItemApproval, ItemDelegation, ItemInvocation, ItemInteraction, ItemArtifact, ItemContext, ItemDiagnostic, ItemBudget, ItemSubtask, ItemGroupChatHandoff:
+	case ItemUserMessage, ItemAgentRun, ItemAgentMessage, ItemTool, ItemApproval, ItemDelegation, ItemInvocation, ItemInteraction, ItemArtifact, ItemContext, ItemDiagnostic, ItemBudget, ItemSubtask:
 		return true
 	default:
 		return false

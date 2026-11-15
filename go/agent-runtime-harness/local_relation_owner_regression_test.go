@@ -131,3 +131,30 @@ func TestNativeCapabilityRelationRequiresExactOwnerNodeAndRootEdge(t *testing.T)
 		})
 	}
 }
+
+// A RunRelation edge is only a routing assertion, not physical control authority.
+// A forged delegation edge cannot relabel an unrelated valid root Agent as a
+// child of another Turn, even when the local Run and Invocation match exactly.
+func TestDelegationRelationCannotBorrowUnrelatedNativeAgentRoot(t *testing.T) {
+	f := newPR82HandoffFixture(t)
+	f.runner.relationReader = f.runner.relations.(RunRelationSource)
+	relations := f.runner.relations.(*runrelation.Registry)
+	_, err := relations.Ensure(t.Context(), runrelation.Draft{
+		ParentRunID: "foreign-turn-root", ChildRunID: f.parentRun.Run.ID,
+		Kind: runrelation.KindDelegation, OwnerNodeID: "foreign-delegation",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = f.runner.verifyLocalRelationRun(t.Context(), f.parentRun, true); !errors.Is(err, ErrRuntimeCancellationUnverified) {
+		t.Fatalf("forged delegation edge borrowed valid native root execution authority: %v", err)
+	}
+	f.runner.cancellation = f.runtime
+	if _, _, err = f.runner.cancelRuntimeRun(t.Context(), f.parentRun.Run.ID, "forged parent cancellation", &f.parent); !errors.Is(err, ErrRuntimeCancellationUnverified) {
+		t.Fatalf("forged delegation index reached physical cancellation: %v", err)
+	}
+	persisted, loadErr := f.runtime.Load(t.Context(), f.parentRun.Run.ID)
+	if loadErr != nil || persisted.Run.Status != kernel.RunStatusRunning {
+		t.Fatalf("foreign cancellation changed original Agent: status=%s err=%v", persisted.Run.Status, loadErr)
+	}
+}

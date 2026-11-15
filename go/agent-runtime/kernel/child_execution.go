@@ -28,7 +28,7 @@ type ChildExecutionGrant struct {
 	AdmissionOperation  string
 }
 
-// ChildExecutionSettlement is the opaque first-party Agent/Workflow physical
+// ChildExecutionSettlement is the opaque first-party Agent physical
 // callback completion permit. Only the internal Feature control
 // boundary can populate it. Store adapters MUST validate Matches against the
 // authoritative child Snapshot INSIDE the SAME transaction as setting the
@@ -60,8 +60,6 @@ func (settlement ChildExecutionSettlement) Matches(grant ChildExecutionGrant, sn
 	switch snapshot.Run.Kind {
 	case "agent":
 		proofKind = "agent_child_physical_settled"
-	case "workflow":
-		proofKind = "workflow_child_physical_settled"
 	default:
 		return false
 	}
@@ -79,7 +77,7 @@ func (settlement ChildExecutionSettlement) Matches(grant ChildExecutionGrant, sn
 }
 
 // PhysicalApplyPermit is an opaque per-Run write proof for a Root or child
-// Agent/Workflow while its own durable physical Grant is active. It is minted
+// Agent while its own durable physical Grant is active. It is minted
 // exclusively by a first-party Feature-scoped Kernel Runtime. An external caller holding
 // a visible Grant ID cannot forge this permit or mutate a root mid-dispatch.
 type PhysicalApplyPermit struct {
@@ -108,7 +106,7 @@ func (permit PhysicalApplyPermit) Matches(grant ChildExecutionGrant, snapshot Sn
 
 func physicalFeatureProofDomain(kind RunKind, phase string) string {
 	switch kind {
-	case "agent", "workflow":
+	case "agent":
 		return string(kind) + "_physical_" + phase
 	default:
 		return ""
@@ -122,8 +120,8 @@ func (permit PhysicalApplyPermit) IsPresent() bool {
 }
 
 // WithoutPhysicalGrant drops, but never transfers or creates, a Root Run's
-// active per-Revision write capability. Built-in nested Subworkflows must use
-// their OWN child Run and immutable ParentRunID. A foreign or child Run must
+// active per-Revision write capability. Any nested Child executor must use
+// its OWN child Run and immutable ParentRunID. A foreign or child Run must
 // not inherit the root's Store-mutation permit from the outer interpreter.
 func (runtime *Runtime) WithoutPhysicalGrant() *Runtime {
 	if runtime == nil {
@@ -135,7 +133,7 @@ func (runtime *Runtime) WithoutPhysicalGrant() *Runtime {
 }
 
 // WithPhysicalGrant binds a Kernel Runtime to the original Root/child
-// Agent/Workflow physical Grant. Only the first-party Feature can mint a
+// Agent physical Grant. Only the first-party Feature can mint a
 // valid internal source proof, and the Store validates every subsequent per-revision write under
 // its own atomic lock/transaction. It never bypasses terminal control CAS.
 func (runtime *Runtime) WithPhysicalGrant(ctx context.Context, grant ChildExecutionGrant, proof *featurecontrol.Proof) (*Runtime, error) {
@@ -258,9 +256,7 @@ func (runtime *Runtime) FinishChildExecution(ctx context.Context, grant ChildExe
 	if err != nil {
 		return err
 	}
-	// Agent and Workflow use different first-party Feature proof domains.
-	// They share the same opaque Store settlement permit; a Workflow proof
-	// must never be accepted as an Agent proof (or the inverse).
+	// Agent child settlement uses the original sealed physical proof.
 	permit := ChildExecutionSettlement{proof: proof, execution: runtime.execution}
 	if !permit.Matches(grant, snapshot) {
 		permit.recovery = true

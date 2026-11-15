@@ -54,16 +54,12 @@ func TestOpenAPIStrictJSONBodyLimitsAnd413Responses(t *testing.T) {
 			operations[method.OperationID] = true
 		}
 	}
-	for _, operation := range []string{
-		"createAgentRun", "createWorkflowRun", "resolveWorkflowWait", "cancelWorkflowRun",
-		"compileWorkflowDefinition", "publishWorkflowDefinition", "setWorkflowDefinitionActivation",
-		"createTeamRun", "cancelRun", "grantHarnessCallAllowance",
-	} {
+	for _, operation := range []string{"createAgentRun", "cancelRun", "grantHarnessCallAllowance"} {
 		if !operations[operation] {
 			t.Errorf("strict JSON operation missing body size/413 contract: %s", operation)
 		}
 	}
-	if len(operations) != 10 {
+	if len(operations) != 3 {
 		t.Fatalf("unexpected bounded request operations: %v", operations)
 	}
 }
@@ -96,9 +92,6 @@ func TestOpenAPIExposesTargetRuntimeAndHarnessResources(t *testing.T) {
 		"get /runs/{runID}/events",
 		"get /runs/{runID}/feed",
 		"get /runs/{runID}/workbench",
-		"get /workflow-definitions",
-		"get /workflow-definitions/{definitionID}/revisions/{revision}",
-		"get /workflow-runs/{runID}/trace",
 		"post /agent-runs",
 		"post /harness/turns/{turnID}/allowance",
 		"post /harness/turns/{turnID}/approval",
@@ -108,13 +101,6 @@ func TestOpenAPIExposesTargetRuntimeAndHarnessResources(t *testing.T) {
 		"post /harness/turns/{turnID}/subtasks/{subtaskID}/approval",
 		"post /harness/turns/{turnID}/subtasks/{subtaskID}/cancel",
 		"post /runs/{runID}/cancel",
-		"post /team-runs",
-		"post /workflow-definitions",
-		"post /workflow-definitions/compile",
-		"post /workflow-definitions/{definitionID}/activation",
-		"post /workflow-runs",
-		"post /workflow-runs/{runID}/cancel",
-		"post /workflow-runs/{runID}/wait",
 	}
 	if !reflect.DeepEqual(operations, expected) {
 		t.Fatalf("OpenAPI operations = %#v, want %#v", operations, expected)
@@ -148,7 +134,7 @@ type capabilityFragment struct {
 func assertCapabilityFragments(t *testing.T, paths openAPIPaths) {
 	t.Helper()
 	fragmentFS := os.DirFS(filepath.Join("..", "..", "contracts", "agent-runtime", "v1", "capabilities"))
-	fragmentNames := []string{"core.json", "agent.json", "workflow.json", "team.json", "harness.json"}
+	fragmentNames := []string{"core.json", "agent.json", "harness.json"}
 	actual := make([]string, 0)
 	seenCapabilities := map[string]struct{}{}
 	for _, fragmentName := range fragmentNames {

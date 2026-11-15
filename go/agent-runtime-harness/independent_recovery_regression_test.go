@@ -12,7 +12,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runfeed"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/team"
 )
 
 func TestIndependentAuditRefreshMustNotDispatchAcceptedApplication(t *testing.T) {
@@ -22,21 +21,13 @@ func TestIndependentAuditRefreshMustNotDispatchAcceptedApplication(t *testing.T)
 	executor := &applicationCapabilityExecutorFixture{}
 	newRunner := func(s harness.Store) *harness.Runner {
 		t.Helper()
-		runner, err := harness.NewRunner(harness.Dependencies{
-			Runtime: runtime, Agent: loadingFeatureAgent{runtime: runtime},
-			Store: s, Clock: featureInvocationClock{}, Applications: executor,
-		})
+		runner, err := harness.NewRunner(harness.Dependencies{Runtime: runtime, Agent: loadingFeatureAgent{runtime: runtime}, Store: s, Clock: featureInvocationClock{}, Applications: executor})
 		if err != nil {
 			t.Fatal(err)
 		}
 		return runner
 	}
-	request := harness.ApplicationTurnRequest{
-		StartRequest:      testStartRequest(),
-		CapabilityKey:     testApplicationCapabilityKey,
-		DefinitionVersion: testApplicationVersion,
-		Input:             json.RawMessage("{}"),
-	}
+	request := harness.ApplicationTurnRequest{StartRequest: testStartRequest(), CapabilityKey: testApplicationCapabilityKey, DefinitionVersion: testApplicationVersion, Input: json.RawMessage("{}")}
 	_, err := newRunner(flaky).StartApplicationTurn(context.Background(), request)
 	if err == nil || !flaky.failed || executor.calls != 0 {
 		t.Fatalf("fault preconditions: err=%v failed=%v calls=%d", err, flaky.failed, executor.calls)
@@ -65,63 +56,6 @@ func TestIndependentAuditRefreshMustNotDispatchAcceptedApplication(t *testing.T)
 	}
 }
 
-func TestIndependentAuditLegacyTurnCannotStartNewTeamChild(t *testing.T) {
-	runtime := newFeatureInvocationRuntime(t)
-	store := harness.NewMemoryStore()
-	now := featureInvocationClock{}.Now()
-	hostThread := harness.HostRef{Kind: testThreadKind, ID: "legacy-thread"}
-	sessionID, err := harness.SessionID(hostThread)
-	if err != nil {
-		t.Fatal(err)
-	}
-	hostTurn := harness.HostRef{Kind: testContextHostKind, ID: "legacy-turn"}
-	turnID, err := harness.TurnID(sessionID, hostTurn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	actor := kernel.ActorRef{TenantID: testTenant, ActorID: testActor}
-	thread := kernel.ThreadRef{Kind: testThreadKind, ID: hostThread.ID}
-	_, _, err = store.CreateSession(t.Context(), harness.Session{
-		ID: sessionID, HostThread: hostThread, Actor: actor, Revision: 1, CreatedAt: now, UpdatedAt: now,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	config, err := harness.SealConfigSnapshot(turnID, harness.ConfigSnapshot{Model: "fixture"}, now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if config.AdmissionHash != "" {
-		t.Fatal("not a legacy config")
-	}
-	_, _, err = store.PutConfigSnapshot(t.Context(), config)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, _, err = store.CreateTurn(t.Context(), harness.Turn{
-		ID: turnID, SessionID: sessionID, HostTurn: hostTurn, ConfigSnapshotID: config.ID,
-		Status: harness.TurnRunning, Revision: 1, CreatedAt: now, UpdatedAt: now,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, parentItemID := seedFeatureInvocationParent(t, runtime, store, turnID, actor, thread, now)
-	runner, err := harness.NewRunner(harness.Dependencies{
-		Runtime: runtime, Agent: loadingFeatureAgent{runtime: runtime},
-		Store: store, Clock: featureInvocationClock{}, Teams: completedTeamFeature{runtime},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, err := runner.StartTeamInvocation(t.Context(), turnID, harness.TeamInvocationRequest{
-		ParentItemID: parentItemID, RequestID: "legacy-child", Goal: "do legacy child",
-		Mode: team.ExecutionSequential, Members: []team.Member{{ID: "writer", Goal: "draft"}},
-	})
-	if !errors.Is(err, harness.ErrConflict) {
-		t.Fatalf("REPRO: old Turn admitted new Team child: status=%s err=%v invocations=%d", result.Turn.Status, err, len(result.Invocations))
-	}
-}
-
 type auditBlockFirstGetSession struct {
 	harness.Store
 	first   atomic.Bool
@@ -136,32 +70,21 @@ func (s *auditBlockFirstGetSession) GetSession(ctx context.Context, id string) (
 	}
 	return s.Store.GetSession(ctx, id)
 }
-
 func TestIndependentAuditApplicationCancellationBeforePhysicalDispatch(t *testing.T) {
 	runtime := newFeatureInvocationRuntime(t)
-	store := &auditBlockFirstGetSession{
-		Store:   harness.NewMemoryStore(),
-		entered: make(chan struct{}), release: make(chan struct{}),
-	}
+	store := &auditBlockFirstGetSession{Store: harness.NewMemoryStore(), entered: make(chan struct{}), release: make(chan struct{})}
 	executor := &applicationCapabilityExecutorFixture{}
-	runner, err := harness.NewRunner(harness.Dependencies{
-		Runtime: runtime, Agent: loadingFeatureAgent{runtime: runtime},
-		Store: store, Clock: featureInvocationClock{}, Applications: executor,
-	})
+	runner, err := harness.NewRunner(harness.Dependencies{Runtime: runtime, Agent: loadingFeatureAgent{runtime: runtime}, Store: store, Clock: featureInvocationClock{}, Applications: executor})
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := harness.ApplicationTurnRequest{
-		StartRequest:  testStartRequest(),
-		CapabilityKey: testApplicationCapabilityKey, DefinitionVersion: testApplicationVersion,
-		Input: json.RawMessage("{}"),
-	}
+	req := harness.ApplicationTurnRequest{StartRequest: testStartRequest(), CapabilityKey: testApplicationCapabilityKey, DefinitionVersion: testApplicationVersion, Input: json.RawMessage("{}")}
 	finished := make(chan error, 1)
 	go func() {
 		_, e := runner.StartApplicationTurn(context.Background(), req)
 		finished <- e
 	}()
-	<-store.entered // Invocation Running, but actual external effect not dispatched
+	<-store.entered
 	sid, _ := harness.SessionID(req.HostThread)
 	tid, _ := harness.TurnID(sid, req.HostTurn)
 	cancelled, err := runner.Cancel(context.Background(), tid, "user cancelled before dispatch")
@@ -192,8 +115,7 @@ func TestIndependentAuditLegacyInteractionCannotApplyHostEffect(t *testing.T) {
 	tid, _ := harness.TurnID(sid, hostTurn)
 	actor := kernel.ActorRef{TenantID: testTenant, ActorID: testActor}
 	thread := kernel.ThreadRef{Kind: testThreadKind, ID: hostThread.ID}
-	_, _, err := store.CreateSession(t.Context(), harness.Session{
-		ID: sid, HostThread: hostThread, Actor: actor, Revision: 1, CreatedAt: now, UpdatedAt: now})
+	_, _, err := store.CreateSession(t.Context(), harness.Session{ID: sid, HostThread: hostThread, Actor: actor, Revision: 1, CreatedAt: now, UpdatedAt: now})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,26 +127,17 @@ func TestIndependentAuditLegacyInteractionCannotApplyHostEffect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, err = store.CreateTurn(t.Context(), harness.Turn{ID: tid, SessionID: sid, HostTurn: hostTurn,
-		ConfigSnapshotID: cfg.ID, Status: harness.TurnRunning, Revision: 1, CreatedAt: now, UpdatedAt: now})
+	_, _, err = store.CreateTurn(t.Context(), harness.Turn{ID: tid, SessionID: sid, HostTurn: hostTurn, ConfigSnapshotID: cfg.ID, Status: harness.TurnRunning, Revision: 1, CreatedAt: now, UpdatedAt: now})
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, parentItemID := seedFeatureInvocationParent(t, runtime, store, tid, actor, thread, now)
 	handler := &auditCountingInteractionHandler{}
-	runner, err := harness.NewRunner(harness.Dependencies{
-		Runtime: runtime, Agent: loadingFeatureAgent{runtime: runtime},
-		Store: store, Clock: featureInvocationClock{}, Interactions: handler,
-	})
+	runner, err := harness.NewRunner(harness.Dependencies{Runtime: runtime, Agent: loadingFeatureAgent{runtime: runtime}, Store: store, Clock: featureInvocationClock{}, Interactions: handler})
 	if err != nil {
 		t.Fatal(err)
 	}
-	pending := harness.Interaction{
-		ID: "historical-interaction", TurnID: tid, InvocationID: featureParentInvocationID(tid),
-		ParentItemID: parentItemID, Key: "old-approval",
-		Kind: harness.InteractionChoice, Schema: json.RawMessage("{}"),
-		Status: harness.InteractionWaiting, Revision: 1, CreatedAt: now, UpdatedAt: now,
-	}
+	pending := harness.Interaction{ID: "historical-interaction", TurnID: tid, InvocationID: featureParentInvocationID(tid), ParentItemID: parentItemID, Key: "old-approval", Kind: harness.InteractionChoice, Schema: json.RawMessage("{}"), Status: harness.InteractionWaiting, Revision: 1, CreatedAt: now, UpdatedAt: now}
 	parent, err := store.GetInvocation(t.Context(), featureParentInvocationID(tid))
 	if err != nil {
 		t.Fatal(err)
@@ -247,56 +160,9 @@ func TestIndependentAuditLegacyInteractionCannotApplyHostEffect(t *testing.T) {
 	if _, err = store.UpdateTurn(t.Context(), turn, turn.Revision); err != nil {
 		t.Fatal(err)
 	}
-	_, err = runner.ResolveInteraction(t.Context(), tid, pending.ID, harness.ResolveInteractionRequest{
-		Response: json.RawMessage("{}"),
-	})
+	_, err = runner.ResolveInteraction(t.Context(), tid, pending.ID, harness.ResolveInteractionRequest{Response: json.RawMessage("{}")})
 	if handler.calls != 0 {
 		t.Fatalf("REPRO: legacy Turn called business-side InteractionResponseHandler=%d before hardcut resume check (err=%v)", handler.calls, err)
-	}
-}
-
-type auditFailFirstRootCreate struct {
-	harness.Store
-	failed bool
-}
-
-func (s *auditFailFirstRootCreate) CreateInvocation(ctx context.Context, invocation harness.Invocation) (harness.Invocation, bool, error) {
-	if invocation.ParentItemID == "" && !s.failed {
-		s.failed = true
-		return harness.Invocation{}, false, errors.New("inject failure after Turn but before root Invocation")
-	}
-	return s.Store.CreateInvocation(ctx, invocation)
-}
-
-func TestIndependentAuditTypedTopLevelInputMustFreezeBeforeTurnCommit(t *testing.T) {
-	runtime := newFeatureInvocationRuntime(t)
-	backing := harness.NewMemoryStore()
-	faulty := &auditFailFirstRootCreate{Store: backing}
-	makeRunner := func(store harness.Store) *harness.Runner {
-		t.Helper()
-		runner, err := harness.NewRunner(harness.Dependencies{
-			Runtime: runtime, Agent: loadingFeatureAgent{runtime: runtime},
-			Store: store, Clock: featureInvocationClock{}, Teams: completedTeamFeature{runtime},
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return runner
-	}
-	start := harness.TeamTurnRequest{
-		StartRequest: testStartRequest(),
-		Mode:         team.ExecutionSequential,
-		Members:      []team.Member{{ID: "writer", Goal: "original authorized work"}},
-	}
-	_, err := makeRunner(faulty).StartTeamTurn(t.Context(), start)
-	if err == nil || !faulty.failed {
-		t.Fatalf("could not inject after Turn, before invocation: %v", err)
-	}
-	// All generic StartRequest fields are unchanged; only the typed execution plan drifts.
-	start.Members = []team.Member{{ID: "writer", Goal: "CHANGED work without original intent"}}
-	resumed, err := makeRunner(backing).StartTeamTurn(t.Context(), start)
-	if !errors.Is(err, harness.ErrConflict) {
-		t.Fatalf("REPRO: same Turn accepted changed top-level Team members: err=%v turn=%s invocation_count=%d", err, resumed.Turn.Status, len(resumed.Invocations))
 	}
 }
 
@@ -369,112 +235,14 @@ func TestIndependentAuditRecoveredTerminalTurnFeedHasTerminalEvent(t *testing.T)
 	}
 }
 
-func TestIndependentAuditCapabilityKindCannotChangeAfterTurnPersisted(t *testing.T) {
-	runtime := newFeatureInvocationRuntime(t)
-	backing := harness.NewMemoryStore()
-	faulty := &auditFailFirstRootCreate{Store: backing}
-	executor := &applicationCapabilityExecutorFixture{}
-	makeRunner := func(s harness.Store) *harness.Runner {
-		r, err := harness.NewRunner(harness.Dependencies{
-			Runtime: runtime, Agent: loadingFeatureAgent{runtime: runtime},
-			Teams: completedTeamFeature{runtime}, Applications: executor,
-			Store: s, Clock: featureInvocationClock{},
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return r
-	}
-	original := harness.TeamTurnRequest{
-		StartRequest: testStartRequest(), Mode: team.ExecutionSequential,
-		Members: []team.Member{{ID: "author", Goal: "original"}},
-	}
-	_, err := makeRunner(faulty).StartTeamTurn(t.Context(), original)
-	if err == nil || !faulty.failed {
-		t.Fatalf("fault not committed: %v", err)
-	}
-	changed := harness.ApplicationTurnRequest{
-		StartRequest:      original.StartRequest,
-		CapabilityKey:     testApplicationCapabilityKey,
-		DefinitionVersion: testApplicationVersion, Input: json.RawMessage("{}"),
-	}
-	snapshot, err := makeRunner(backing).StartApplicationTurn(t.Context(), changed)
-	if !errors.Is(err, harness.ErrConflict) {
-		t.Fatalf("REPRO: after persisted Team Turn, root capability switched to Application: err=%v status=%s appEffects=%d", err, snapshot.Turn.Status, executor.calls)
-	}
-}
-
-// The admission hash freezes the logical input, but dispatch must also consume
-// the stored Invocation rather than a caller-owned slice mutated after Create.
-type auditMutateAfterInvocation struct {
-	harness.Store
-	onCreate func()
-}
-
-func (store *auditMutateAfterInvocation) CreateInvocation(ctx context.Context, value harness.Invocation) (harness.Invocation, bool, error) {
-	created, fresh, err := store.Store.CreateInvocation(ctx, value)
-	if fresh && err == nil && value.ParentItemID == "" && store.onCreate != nil {
-		store.onCreate()
-	}
-	return created, fresh, err
-}
-
-type auditObservedTeam struct {
-	runtime *kernel.Runtime
-	goal    string
-}
-
-func (teamRunner *auditObservedTeam) StartRun(ctx context.Context, request team.StartRequest) (kernel.Snapshot, error) {
-	if len(request.Members) != 1 {
-		return kernel.Snapshot{}, harness.ErrConflict
-	}
-	teamRunner.goal = request.Members[0].Goal
-	return (completedTeamFeature{runtime: teamRunner.runtime}).StartRun(ctx, request)
-}
-
-func (teamRunner *auditObservedTeam) Resume(ctx context.Context, id string, revision uint64) (kernel.Snapshot, error) {
-	return (completedTeamFeature{runtime: teamRunner.runtime}).Resume(ctx, id, revision)
-}
-
-func TestHardcutTopLevelFeatureDispatchReadsFrozenInput(t *testing.T) {
-	runtime := newFeatureInvocationRuntime(t)
-	feature := &auditObservedTeam{runtime: runtime}
-	input := harness.TeamTurnRequest{
-		StartRequest: testStartRequest(),
-		Mode:         team.ExecutionSequential,
-		Members:      []team.Member{{ID: "writer", Goal: "sealed original task"}},
-	}
-	store := &auditMutateAfterInvocation{Store: harness.NewMemoryStore(), onCreate: func() {
-		input.Members[0].Goal = "mutated after admission"
-	}}
-	host, err := harness.NewRunner(harness.Dependencies{
-		Runtime: runtime, Agent: loadingFeatureAgent{runtime: runtime},
-		Store: store, Clock: featureInvocationClock{}, Teams: feature,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, err := host.StartTeamTurn(t.Context(), input)
-	if err != nil || result.Turn.Status != harness.TurnCompleted ||
-		feature.goal != "sealed original task" {
-		t.Fatalf("model saw mutable host input: status=%s featureGoal=%q err=%v", result.Turn.Status, feature.goal, err)
-	}
-}
-
 func TestHardcutRunningApplicationCancelCannotClaimEffectStopped(t *testing.T) {
 	runtime := newFeatureInvocationRuntime(t)
 	executor := &blockingHardcutApplication{started: make(chan struct{}), release: make(chan struct{})}
-	host, err := harness.NewRunner(harness.Dependencies{
-		Runtime: runtime, Agent: loadingFeatureAgent{runtime: runtime},
-		Store: harness.NewMemoryStore(), Clock: featureInvocationClock{}, Applications: executor,
-	})
+	host, err := harness.NewRunner(harness.Dependencies{Runtime: runtime, Agent: loadingFeatureAgent{runtime: runtime}, Store: harness.NewMemoryStore(), Clock: featureInvocationClock{}, Applications: executor})
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := harness.ApplicationTurnRequest{
-		StartRequest: testStartRequest(), CapabilityKey: testApplicationCapabilityKey,
-		DefinitionVersion: testApplicationVersion, Input: json.RawMessage("{}"),
-	}
+	request := harness.ApplicationTurnRequest{StartRequest: testStartRequest(), CapabilityKey: testApplicationCapabilityKey, DefinitionVersion: testApplicationVersion, Input: json.RawMessage("{}")}
 	done := make(chan error, 1)
 	go func() {
 		_, callErr := host.StartApplicationTurn(context.Background(), request)

@@ -178,7 +178,7 @@ func RunEA1ChildAgentRecoveryUnknownSuite(t *testing.T, factory func(*testing.T)
 
 func ea1ChildRecoveryParent(t *testing.T, rt *kernel.Runtime) kernel.Snapshot {
 	t.Helper()
-	p, e := rt.Create(t.Context(), kernel.CreateRequest{ID: "parent", Kind: "workflow", Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"}, Goal: "original parent", State: json.RawMessage(`{}`)})
+	p, e := rt.Create(t.Context(), kernel.CreateRequest{ID: "parent", Kind: "agent", Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"}, Goal: "original parent", State: json.RawMessage(`{}`)})
 	if e != nil {
 		t.Fatal(e)
 	}

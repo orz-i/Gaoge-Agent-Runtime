@@ -19,7 +19,6 @@ func Models() []interface{} {
 		&models.KernelOwnedRetirementRecord{},
 		&models.KernelManagedAuthorityRecord{}, &models.KernelManagedTransferRecord{}, &models.KernelManagedHistoryRecord{},
 		&models.RunRelationRecord{},
-		&models.WorkflowDefinitionRevisionRecord{}, &models.WorkflowDefinitionHeadRecord{},
 	}
 }
 

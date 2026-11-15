@@ -211,7 +211,7 @@ func (runner *Runner) requireItemOwnerAttempt(
 	return runner.requireRunDescendsFrom(ctx, item.RunID, owner.ExecutionRefID)
 }
 
-// Workflow/Team/GroupChat Items can reference a legitimate nested Runtime
+// Delegation/Capability Items can reference a legitimate nested Runtime
 // Run instead of their owning Invocation's top-level Run. The immutable
 // child->parent RunRelation index proves the exact originating Attempt;
 // a missing index/edge may never silently turn a foreign Run into authority.

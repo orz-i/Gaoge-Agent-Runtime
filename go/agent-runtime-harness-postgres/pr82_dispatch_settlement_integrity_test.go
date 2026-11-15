@@ -55,8 +55,8 @@ func assertPR82DispatchSettlementIntegrity(t *testing.T, store harness.Store, pr
 	input := json.RawMessage(`{"goal":"frozen"}`)
 	digest := sha256.Sum256(input)
 	root := harness.Invocation{
-		ID: "root-" + turnID, TurnID: turnID, CapabilityKey: harness.CapabilityTeam,
-		ExecutionClass: harness.ExecutionTeam, ExecutionRefID: "team-" + turnID,
+		ID: "root-" + turnID, TurnID: turnID, CapabilityKey: harness.CapabilityAgent,
+		ExecutionClass: harness.ExecutionAgent, ExecutionRefID: "agent-" + turnID,
 		Input: input, InputHash: hex.EncodeToString(digest[:]),
 		Status: harness.InvocationRunning, Attempt: 1, Revision: 1,
 		OutputRefs: []harness.HostRef{}, CreatedAt: now, UpdatedAt: now,
@@ -142,7 +142,7 @@ func assertPR82DispatchSettlementIntegrity(t *testing.T, store harness.Store, pr
 	if _, err := store.UpdateTurn(ctx, turn, turn.Revision); !errors.Is(err, harness.ErrConflict) {
 		t.Fatalf("effectful Start was mistaken for terminal Turn failure: %v", err)
 	}
-	if rotated, retryErr := store.RetryInvocation(ctx, failed.ID, root.Revision, "next-team-"+turnID, now.Add(time.Second)); !errors.Is(retryErr, harness.ErrConflict) {
-		t.Fatalf("effectful Team start allowed another Attempt: %+v %v", rotated, retryErr)
+	if rotated, retryErr := store.RetryInvocation(ctx, failed.ID, root.Revision, "next-agent-"+turnID, now.Add(time.Second)); !errors.Is(retryErr, harness.ErrConflict) {
+		t.Fatalf("effectful Agent start allowed another Attempt: %+v %v", rotated, retryErr)
 	}
 }
