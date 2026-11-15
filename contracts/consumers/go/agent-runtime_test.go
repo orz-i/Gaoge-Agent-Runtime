@@ -7,12 +7,11 @@ import (
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/continuation"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workflow"
 )
 
 // Keep host-implemented ports explicit: embedding the SDK interface would hide
@@ -83,8 +82,6 @@ var (
 	_ func(*kernel.Runtime, context.Context, string, uint64) (kernel.ChildExecutionGrant, error) = (*kernel.Runtime).BeginChildExecution
 	_ func(*kernel.Runtime, context.Context, string) (kernel.ChildExecutionGrant, error)         = (*kernel.Runtime).LookupChildExecution
 	_ func(*agent.Runner, context.Context, string) error                                         = (*agent.Runner).ReconcileChildPhysicalGrant
-	_ func(*workflow.Runner, context.Context, string) error                                      = (*workflow.Runner).ReconcileChildPhysicalGrant
-	_ workflow.Effect                                                                            = workflow.Effect{PhysicalNoEffect: true, PhysicalNoEffectAttempt: 1}
 	_ func(*kernel.Runtime) *kernel.Runtime                                                      = (*kernel.Runtime).WithoutPhysicalGrant
 	_ func([]byte) string                                                                        = agent.FrozenOriginFingerprint
 	_ func(kernel.Snapshot, []byte) bool                                                         = agent.MatchesFrozenOrigin
@@ -94,26 +91,14 @@ var (
 	}
 )
 
-type workflowAgentTaskOwnerContract interface {
-	LocalAgentTaskRunner() *agent.Runner
-	LocalAgentTaskRecorder() runrelation.Recorder
-	VerifyAgentTaskOrigin(workflow.Effect, kernel.Snapshot) bool
-}
-
-type workflowAgentTaskApprovalCancellationContract interface {
-	FencesAgentTaskApprovalThroughHarness() bool
-}
-
+// SubAgent uses the same original Agent loop, not a composite executor.
 var (
-	_ workflow.LocalAgentTaskOwner                                                                               = (workflowAgentTaskOwnerContract)(nil)
-	_ workflowAgentTaskOwnerContract                                                                             = (workflow.LocalAgentTaskOwner)(nil)
-	_ func(*agent.Runner, kernel.Snapshot, agent.StartRequest) bool                                              = (*agent.Runner).VerifyFrozenStartRequest
-	_ func(kernel.Snapshot) bool                                                                                 = agent.TerminalPhysicalEffectsSettled
-	_ workflow.LocalAgentTaskApprovalCancellationOwner                                                           = (workflowAgentTaskApprovalCancellationContract)(nil)
-	_ workflowAgentTaskApprovalCancellationContract                                                              = (workflow.LocalAgentTaskApprovalCancellationOwner)(nil)
-	_ func(*agent.Runner, *kernel.Runtime, kernel.Snapshot) bool                                                 = (*agent.Runner).QuiescentApprovalCancellation
-	_ func(*workflow.Runner, *kernel.Runtime, *agent.Runner) bool                                                = (*workflow.Runner).UsesLocalAgentRunner
-	_ func(*workflow.Runner, *kernel.Runtime, kernel.Snapshot, runrelation.Relation, kernel.Snapshot, bool) bool = (*workflow.Runner).VerifyLocalChild
+	_ handoff.ChildRunner                                           = (*agent.Runner)(nil)
+	_ func(handoff.ChildRunner) (*handoff.Coordinator, error)       = handoff.New
+	_ func(*agent.Runner) (*handoff.Coordinator, error)             = handoff.NewDeferredAgent
+	_ func(*agent.Runner, kernel.Snapshot, agent.StartRequest) bool = (*agent.Runner).VerifyFrozenStartRequest
+	_ func(kernel.Snapshot) bool                                    = agent.TerminalPhysicalEffectsSettled
+	_ func(*agent.Runner, *kernel.Runtime, kernel.Snapshot) bool    = (*agent.Runner).QuiescentApprovalCancellation
 )
 
 type externalWaitContract interface {

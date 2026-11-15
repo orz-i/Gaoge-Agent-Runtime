@@ -20,6 +20,16 @@ const json = (value: unknown, status = 200) => new Response(JSON.stringify(value
 });
 
 describe("RuntimeClient target API", () => {
+  it("does not expose deleted composite orchestrators", () => {
+    const client = new RuntimeClient({ baseURL: "https://runtime.test/api/v1" });
+    const surface = client as unknown as Record<string, unknown>;
+    expect(surface.teams).toBeUndefined();
+    expect(surface.workflows).toBeUndefined();
+    expect(surface.groupchat).toBeUndefined();
+    expect(client.agent.start).toBeTypeOf("function");
+    expect(client.harness.turns.cancelSubtask).toBeTypeOf("function");
+  });
+
   it("uses bounded owner-scoped Harness status and Timeline endpoints", async () => {
     const committed = {
       turn: { id: "ht/1", hostTurn: { kind: "conversation_turn", id: "turn" },
@@ -64,11 +74,6 @@ describe("RuntimeClient target API", () => {
     ));
     const client = new RuntimeClient({ baseURL: "https://runtime.test/api/v1", fetch: fetcher });
     await client.agent.start({ thread: { kind: "conversation", id: "thread-1" }, input: { content: "Answer" } });
-    await client.workflows.start({ thread: { kind: "conversation", id: "thread-1" }, input: {}, goal: "Flow", definition: { id: "flow", revision: 1, name: "Flow", nodes: [{ id: "return", type: "return", return: { value: {} } }] } });
-    await client.workflows.resolveWait("workflow/1", { expectedRevision: 2, response: {} });
-    await client.workflows.cancel("workflow/1", { expectedRevision: 3, reason: "stop and compensate" });
-    await client.workflows.trace("workflow/1");
-    await client.teams.start({ thread: { kind: "conversation", id: "thread-1" }, goal: "Team", mode: "parallel", members: [{ id: "one", goal: "One" }], join: { mode: "all" } });
     await client.runs.get("run/1");
     await client.runs.events("run/1", { afterSeq: 4, limit: 25 });
     await client.runs.cancel("run/1", { expectedRevision: 2, reason: "stop" });
@@ -78,51 +83,11 @@ describe("RuntimeClient target API", () => {
     }
     expect(fetcher.mock.calls.map((call) => call[0])).toEqual([
       "https://runtime.test/api/v1/agent-runs",
-      "https://runtime.test/api/v1/workflow-runs",
-      "https://runtime.test/api/v1/workflow-runs/workflow%2F1/wait",
-      "https://runtime.test/api/v1/workflow-runs/workflow%2F1/cancel",
-      "https://runtime.test/api/v1/workflow-runs/workflow%2F1/trace",
-      "https://runtime.test/api/v1/team-runs",
       "https://runtime.test/api/v1/runs/run%2F1",
       "https://runtime.test/api/v1/runs/run%2F1/events?afterSeq=4&limit=25",
       "https://runtime.test/api/v1/runs/run%2F1/cancel",
       "https://runtime.test/api/v1/runs/run%2F1/workbench",
       "https://runtime.test/api/v1/runs/run%2F1/feed?afterSeq=0",
-    ]);
-  });
-
-  it("round-trips immutable Workflow definition registry contracts", async () => {
-    const fetcher = vi.fn().mockImplementation(() => Promise.resolve(json({})));
-    const client = new RuntimeClient({ baseURL: "https://runtime.test/api/v1", fetch: fetcher });
-    const draft = {
-      id: "story.shot-plan.v2",
-      revision: 1,
-      name: "Shot Plan",
-      nodes: [{ id: "done", type: "return" as const, return: { value: { status: "ready" } } }],
-      policy: { costClass: "none" as const, maxCostUnits: 0, sideEffectClass: "none" as const },
-    };
-
-    await client.workflows.definitions.compile({ scope: { kind: "actor" }, draft });
-    await client.workflows.definitions.publish({
-      scope: { kind: "tenant" }, draft, expectedRevision: 0, idempotencyKey: "publish-1",
-    });
-    await client.workflows.definitions.list();
-    await client.workflows.definitions.get("story.shot-plan/v2", 2, "tenant");
-    await client.workflows.definitions.setActivation("story.shot-plan/v2", {
-      scope: { kind: "tenant" }, availability: "active", targetRevision: 2, expectedVersion: 3,
-    });
-    await client.workflows.start({
-      thread: { kind: "conversation", id: "thread-1" }, input: { storyID: "story-1" },
-      goal: "compile shot plan", definitionReference: { id: "story.shot-plan.v2" },
-    });
-
-    expect(fetcher.mock.calls.map((call) => call[0])).toEqual([
-      "https://runtime.test/api/v1/workflow-definitions/compile",
-      "https://runtime.test/api/v1/workflow-definitions",
-      "https://runtime.test/api/v1/workflow-definitions",
-      "https://runtime.test/api/v1/workflow-definitions/story.shot-plan%2Fv2/revisions/2?scope=tenant",
-      "https://runtime.test/api/v1/workflow-definitions/story.shot-plan%2Fv2/activation",
-      "https://runtime.test/api/v1/workflow-runs",
     ]);
   });
 
