@@ -197,7 +197,7 @@ func (handler *DelegationToolHandler) VerifyCommittedTool(
 	if stored == nil {
 		return tools.ExecutionResult{}, agent.ErrToolOutcomeUnknown
 	}
-	child, frozen, err := runner.localDelegationObservation(ctx, stored.ChildRunID)
+	child, frozen, err := runner.delegationObservation(ctx, stored.ChildRunID)
 	if err != nil {
 		return tools.ExecutionResult{}, errors.Join(agent.ErrToolOutcomeUnknown, err)
 	}
@@ -268,6 +268,43 @@ func (runner *Runner) localDelegationObservation(ctx context.Context, runID stri
 	return child, frozen, nil
 }
 
+// remoteDelegationObservation checks the frozen Harness authority, exact
+// first-party A2A route and already committed local shadow. The provider
+// outcome verifier itself does not refresh the remote task or mutate Kernel.
+func (runner *Runner) remoteDelegationObservation(ctx context.Context, runID string) (kernel.Snapshot, handoff.Delegation, error) {
+	coordinator, ok := runner.handoffs.(*handoff.Coordinator)
+	if !ok {
+		return kernel.Snapshot{}, handoff.Delegation{}, ErrHandoffCancellationUnverified
+	}
+	owner, err := runner.store.GetInvocationByExecutionRefID(ctx, runID)
+	if err != nil || !isHandoffDelegationInvocation(owner) || owner.ExecutionRefID != runID {
+		return kernel.Snapshot{}, handoff.Delegation{}, errors.Join(ErrHandoffCancellationUnverified, err)
+	}
+	child, err := runner.runtime.Load(ctx, runID)
+	if err != nil {
+		return kernel.Snapshot{}, handoff.Delegation{}, err
+	}
+	if child.Run.Kind != handoff.RemoteAgentRunKind {
+		return kernel.Snapshot{}, handoff.Delegation{}, ErrHandoffCancellationUnverified
+	}
+	frozen, _, err := runner.localHandoffCancellationAuthority(ctx, owner, child)
+	if err != nil || !coordinator.ObservesRemoteShadow(ctx, runner.runtime, frozen, child) {
+		return kernel.Snapshot{}, handoff.Delegation{}, errors.Join(ErrHandoffCancellationUnverified, err)
+	}
+	return child, frozen, nil
+}
+
+// delegationObservation requires a physical, immutable, exact-route proof for
+// either the locally prepared Agent or the first-party A2A shadow. A foreign
+// same-ID Run may not impersonate either.
+func (runner *Runner) delegationObservation(ctx context.Context, runID string) (kernel.Snapshot, handoff.Delegation, error) {
+	child, frozen, err := runner.localDelegationObservation(ctx, runID)
+	if !errors.Is(err, ErrHandoffCancellationUnverified) {
+		return child, frozen, err
+	}
+	return runner.remoteDelegationObservation(ctx, runID)
+}
+
 // A local Agent's terminal output includes full native search receipts for
 // auditing. Forward the actual answer, citations and artifact references to
 // its supervisor, plus receipt identities, rather than copying whole web pages
@@ -316,14 +353,14 @@ func delegationReceiptErrorCode(status handoff.Status) string {
 // Only the local SDK Agent has an autonomous committed-transition contract.
 // Custom/remote runners retain their existing scheduled observation behavior.
 func (runner *Runner) localDelegationWait(ctx context.Context, delegation handoff.Delegation) (*tools.PendingExecution, error) {
-	child, frozen, err := runner.localDelegationObservation(ctx, delegation.ChildRunID)
+	child, frozen, err := runner.delegationObservation(ctx, delegation.ChildRunID)
 	if errors.Is(err, kernel.ErrNotFound) || errors.Is(err, ErrHandoffCancellationUnverified) {
 		return nil, nil // No local autonomous wait for an unproven route.
 	}
 	if err != nil {
 		return nil, err
 	}
-	if child.Run.Kind != agent.RunKind || !sameHandoffFrozenExecution(frozen, delegation) {
+	if (child.Run.Kind != agent.RunKind && child.Run.Kind != handoff.RemoteAgentRunKind) || !sameHandoffFrozenExecution(frozen, delegation) {
 		return nil, nil
 	}
 	return &tools.PendingExecution{

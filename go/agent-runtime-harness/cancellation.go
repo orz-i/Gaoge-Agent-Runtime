@@ -41,6 +41,14 @@ type LocalKernelRunKindCanceller interface {
 	OwnsKernelRunKind(*kernel.Runtime, kernel.RunKind) bool
 }
 
+// RemoteDelegationCanceller is an explicit Host-owned A2A cancellation proof.
+// The original frozen target and persisted remote shadow must agree; generic
+// Agent Kernel control can never grant authority over remote effects.
+type RemoteDelegationCanceller interface {
+	RuntimeCanceller
+	OwnsRemoteDelegation(context.Context, *kernel.Runtime, handoff.Delegation, kernel.Snapshot) bool
+}
+
 // ErrHandoffCancellationUnverified means a delegated ChildRunner owns a Run
 // that the Harness-local Kernel cannot observe or cancel. No terminal status
 // may be projected without a verified, route-owned cancellation outcome.
@@ -90,12 +98,11 @@ func (runner *Runner) cancelRuntimeRun(
 		if !possible {
 			return kernel.Snapshot{}, false, nil
 		}
-		// Only the fixed original ChildRunner's explicit same-Kernel
-		// composition proof can authorize a local physical Cancel. No
-		// heuristic fallback for custom/dynamic Handoff routes.
-		coordinator, ok := runner.handoffs.(*handoff.Coordinator)
-		if !ok || !coordinator.SupportsLocalDelegationObservation(runner.runtime) || (coordinator.ObservesLocalKernelRunner(runner.runtime) && !coordinator.OwnsLocalKernelRunner(runner.runtime)) || !runner.localHandoffCancellerOwnsKernel() {
-			return kernel.Snapshot{}, false, fmt.Errorf("routed Handoff Run %q has no local execution-owner/canceller proof: %w", runID, ErrHandoffCancellationUnverified)
+		// A delegated child must use a verified original, statically
+		// composed local Agent or authenticated remote A2A Shadow route.
+		// No generic dynamic ChildRunner can inherit physical control.
+		if _, ok := runner.handoffs.(*handoff.Coordinator); !ok {
+			return kernel.Snapshot{}, false, fmt.Errorf("unproven Handoff route %q: %w", runID, ErrHandoffCancellationUnverified)
 		}
 	}
 	// For ordinary Root/Feature Runs as well, a native Canceller must be
@@ -104,6 +111,9 @@ func (runner *Runner) cancelRuntimeRun(
 	// A wrong native Runtime did no physical work; its rejection is a
 	// Harness-minted pre-callback proof for cancellation-intent recovery.
 	if native, ok := runner.cancellation.(*kernel.Runtime); ok && native != runner.runtime {
+		if delegatedChild != nil {
+			return kernel.Snapshot{}, false, fmt.Errorf("foreign Handoff Canceller: %w", ErrHandoffCancellationUnverified)
+		}
 		return kernel.Snapshot{}, false, cancellationReadNoEffect{cause: fmt.Errorf("native Canceller is not the Harness Kernel: %w", ErrConflict)}
 	}
 	var lastNativeNoEffect error
@@ -154,8 +164,22 @@ func (runner *Runner) cancelRuntimeRun(
 		if delegatedChild != nil {
 			delegation, parentRun, err = runner.localHandoffCancellationAuthority(ctx, *delegatedChild, current)
 			coordinator := runner.handoffs.(*handoff.Coordinator)
-			if err == nil && ((!coordinator.ObservesLocalKernelRunner(runner.runtime) && current.Run.Kind != agent.RunKind) || !coordinator.OwnsLocalDelegation(runner.runtime, delegation)) {
-				err = ErrHandoffCancellationUnverified
+			if err == nil {
+				switch current.Run.Kind {
+				case agent.RunKind:
+					if !coordinator.ObservesLocalDelegation(runner.runtime, delegation) ||
+						!coordinator.OwnsLocalDelegation(runner.runtime, delegation) ||
+						!runner.localRelationCancellerOwnsKernel(agent.RunKind) {
+						err = ErrHandoffCancellationUnverified
+					}
+				case handoff.RemoteAgentRunKind:
+					if !coordinator.ObservesRemoteShadow(ctx, runner.runtime, delegation, current) ||
+						!runner.remoteHandoffCancellerOwnsDelegation(ctx, delegation, current) {
+						err = ErrHandoffCancellationUnverified
+					}
+				default:
+					err = ErrHandoffCancellationUnverified
+				}
 			}
 			if err != nil {
 				return kernel.Snapshot{}, true, err
@@ -273,6 +297,26 @@ func (runner *Runner) localHandoffCancellerOwnsKernel() bool {
 	}
 	owner, ok := runner.cancellation.(LocalKernelCanceller)
 	return ok && owner.OwnsKernelRuntime(runner.runtime)
+}
+
+// Local Agent and remote A2A control require independent, exact-Kernel
+// authority declarations. Mixed cancellers may claim only Agent RunKind.
+func (runner *Runner) localRelationCancellerOwnsKernel(kind kernel.RunKind) bool {
+	if runner.localHandoffCancellerOwnsKernel() {
+		return true
+	}
+	owner, ok := runner.cancellation.(LocalKernelRunKindCanceller)
+	return ok && runner.runtime != nil && owner.OwnsKernelRunKind(runner.runtime, kind)
+}
+
+func (runner *Runner) remoteHandoffCancellerOwnsDelegation(
+	ctx context.Context, frozen handoff.Delegation, child kernel.Snapshot,
+) bool {
+	if runner == nil || runner.runtime == nil {
+		return false
+	}
+	owner, ok := runner.cancellation.(RemoteDelegationCanceller)
+	return ok && owner.OwnsRemoteDelegation(ctx, runner.runtime, frozen, child)
 }
 
 // localHandoffCancellationAuthority proves that a coincidentally present

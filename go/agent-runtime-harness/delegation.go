@@ -333,7 +333,7 @@ func (runner *Runner) reconcileLocalTerminalHandoffEvidence(
 			owner.TurnID != turn.ID || owner.ParentItemID != item.ID {
 			return ErrConflict
 		}
-		child, _, observationErr := runner.localDelegationObservation(ctx, item.RunID)
+		child, _, observationErr := runner.delegationObservation(ctx, item.RunID)
 		if errors.Is(observationErr, kernel.ErrNotFound) || (!coordinator.ObservesLocalKernelRunner(runner.runtime) && errors.Is(observationErr, ErrHandoffCancellationUnverified)) {
 			continue
 		}

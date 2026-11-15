@@ -112,6 +112,15 @@ type ChildRunner interface {
 	LoadRun(context.Context, string) (kernel.Snapshot, error)
 }
 
+// RemoteShadowObserver is a first-party, read-only route-binding proof.
+// A generic ChildRunner or a same-ID remote Kernel twin cannot implement this
+// contract accidentally: the plugin must verify its original Kernel instance,
+// frozen target revision and persisted remote discovery before accepting it.
+type RemoteShadowObserver interface {
+	ChildRunner
+	ObservesFrozenRemoteShadow(*kernel.Runtime, Delegation, kernel.Snapshot) bool
+}
+
 // LocalKernelChildRunner is an explicit Host contract that its ChildRunner
 // executes directly in the supplied Kernel Runtime, not in a remote ChildRunner
 // or A2A shadow. Only a fixed New(children) Coordinator can use this proof;

@@ -116,3 +116,41 @@ func (c *Coordinator) SupportsLocalDelegationObservation(rt *kernel.Runtime) boo
 	}
 	return c.ObservesLocalKernelRunner(rt)
 }
+
+// ObservesRemoteShadow validates a previously admitted A2A shadow without
+// issuing a remote GET or mutating Kernel state. The original frozen route
+// must resolve to an explicit first-party observer; untyped/custom routes
+// cannot borrow this authority even when their Run metadata matches.
+func (c *Coordinator) ObservesRemoteShadow(
+	ctx context.Context, rt *kernel.Runtime, d Delegation, child kernel.Snapshot,
+) bool {
+	if c == nil || rt == nil || !c.ObservesRemoteDelegation(d) {
+		return false
+	}
+	r, ok := c.resolver.(*deferredAgentRoutes)
+	if !ok || r.remote == nil {
+		return false
+	}
+	resolved, err := r.remote.ResolveChild(ctx, cloneDelegation(d))
+	if err != nil {
+		return false
+	}
+	observer, ok := resolved.(RemoteShadowObserver)
+	return ok && observer.ObservesFrozenRemoteShadow(rt, cloneDelegation(d), child)
+}
+
+// ObservesRemoteDelegation attests only that this statically composed deferred
+// route selects its original remote ChildRunner for the frozen Delegation.
+// It neither grants execution nor certifies a terminal result. Callers must
+// independently verify the parent, child Run and original Harness invocation.
+func (c *Coordinator) ObservesRemoteDelegation(d Delegation) bool {
+	if c == nil || !validDelegation(d) {
+		return false
+	}
+	r, ok := c.resolver.(*deferredAgentRoutes)
+	if !ok || r.remote == nil {
+		return false
+	}
+	route, err := r.route(d)
+	return err == nil && route == DelegationRouteRemote
+}
