@@ -5,6 +5,18 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- **P1 A2A Shadow identity binding correction (2026-11-14):** A remote
+  `GetTask` response is now checked against the original Task/Context identity
+  before same-state observation; `CancelTask`, resumed `SendMessage` Task and
+  Message results, and nested Task status/history/artifact identities follow
+  the same fail-closed boundary. Identity mismatches return an error without
+  completing or rebinding the Shadow Run. After an uncertain resume send, the
+  original pending-message identity remains durable for reconciliation.
+  **Breaking behavior:** a Message responding to an already-bound remote Task
+  must supply both matching `taskId` and `contextId`; missing identities are
+  no longer accepted as completion proof. Initial Task-free direct Message
+  replies remain supported. See the A2A identity follow-up audit.
+
 - **BREAKING CHANGE (2026-11-14), SubAgent-only orchestration:** Fully delete
   Team, GroupChat, Dynamic Workflow and their Go/HTTP/TypeScript/Harness API,
   native RunRelation types, continuation, topology and SQL Definition Store

@@ -1,5 +1,25 @@
 # Breaking changes (pre-stable Beta)
 
+## 2026-11-14 — A2A Shadow remote identity hardening (P1 follow-up)
+
+For any Shadow Run already bound to a remote Task, `GetTask`, `CancelTask`,
+`SendMessage` Task and Message results must preserve both the exact original
+Task ID and Context ID. Messages returned for a bound Task must explicitly
+carry both matching identifiers; a message with an absent `taskId` is not
+sufficient authority to settle a previously bound remote Task. Nested Task
+status/history messages may omit their own IDs, but any explicit foreign ID
+fails closed; artifact projection must identify the same Task/Context.
+
+A mismatch returns `ErrRemoteBindingChanged` without changing the bound
+identity or completing the Shadow Run. A resumed message may already have
+crossed the transport boundary: its durable pending identity is retained rather
+than being silently retried or falsely marked completed. Reconcile the original
+Task ID through a verified `GetTask`; never accept an unrelated remote Context
+or reset the pending effect on a generic mismatch. Initial direct Message
+responses without a previously bound Task remain valid.
+
+See [the A2A P1 follow-up audit](audits/2026-11-14-pr112-a2a-shadow-identity-followup.md).
+
 ## 2026-11-14 — BREAKING CHANGE: remove composite orchestration; SubAgent only
 
 **This is a hard removal, not a deprecation or a feature toggle.**
