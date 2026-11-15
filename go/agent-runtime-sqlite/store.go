@@ -410,7 +410,7 @@ func (s *Store) applyWithAuthority(ctx context.Context, lease *kernel.ExecutionL
 		}
 
 	}
-	// A Root Workflow's own physical Grant fences ALL concurrent writes,
+	// An owned Agent physical Grant fences ALL concurrent writes,
 	// not just Cancel. Its scoped first-party Kernel Runtime provides one
 	// per-revision proof; a public Grant ID or old Run revision cannot.
 	rows, grantErr := tx.QueryContext(ctx,

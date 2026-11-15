@@ -18,14 +18,14 @@ if err != nil {
     return err
 }
 
-runner, err := agent.New(agent.Dependencies{
+runner, err := agent.NewRunner(agent.Dependencies{
     Runtime: runtime,
     // ...
     Telemetry: []observability.Recorder{telemetry, metrics},
 })
 ```
 
-Run spans are parents of model, tool, workflow-effect, A2A, and Harness spans
+Run spans are parents of model, tool, A2A, and Harness spans
 when their start observations occur in the same process. A terminal observation
 without a matching in-memory start still produces a span using the reported
 duration, which keeps recovery paths observable after process restarts.
@@ -35,7 +35,7 @@ provider/model/response identity, and error codes. Metrics intentionally omit
 Run/operation/response IDs to avoid unbounded timeseries cardinality. The
 metrics surface records terminal operation count/duration and completed model
 input/output token distributions. Neither signal exports prompts, completions,
-tool arguments/results, workflow input/output, arbitrary attribute maps, or
+tool arguments/results, SubAgent task input/output, arbitrary attribute maps, or
 other content.
 
 For production, configure the host-owned OpenTelemetry SDK with a batching span

@@ -15,18 +15,12 @@ import (
 
 func newIssue107Run(t *testing.T, rt *kernel.Runtime, id, parent string) kernel.Snapshot {
 	t.Helper()
-	snapshot, err := rt.Create(t.Context(), kernel.CreateRequest{
-		ID: id, Kind: "workflow", ParentRunID: parent,
-		Actor:     kernel.ActorRef{TenantID: "tenant", ActorID: "actor"},
-		Thread:    kernel.ThreadRef{Kind: "conversation", ID: "thread"},
-		RequestID: id, Goal: "original child authority", State: []byte(`{}`),
-	})
+	snapshot, err := rt.Create(t.Context(), kernel.CreateRequest{ID: id, Kind: "agent", ParentRunID: parent, Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"}, RequestID: id, Goal: "original child authority", State: []byte(`{}`)})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return snapshot
 }
-
 func TestIssue107MemoryChildGrantAtomicParentTerminal(t *testing.T) {
 	store := memory.NewStore()
 	rt, err := kernel.New(kernel.Dependencies{Store: store})
@@ -34,7 +28,7 @@ func TestIssue107MemoryChildGrantAtomicParentTerminal(t *testing.T) {
 		t.Fatal(err)
 	}
 	root := newIssue107Run(t, rt, "root", "")
-	mid := newIssue107Run(t, rt, "subworkflow", root.Run.ID)
+	mid := newIssue107Run(t, rt, "middle-child", root.Run.ID)
 	child := newIssue107Run(t, rt, "agentchild", mid.Run.ID)
 	grant, err := rt.BeginChildExecution(t.Context(), child.Run.ID, child.Run.Revision)
 	if err != nil {
@@ -56,7 +50,7 @@ func TestIssue107MemoryChildGrantAtomicParentTerminal(t *testing.T) {
 	if err = store.FinishChildExecution(t.Context(), grant); !errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("unsafe original pre-callback release accepted: %v", err)
 	}
-	proof := featurecontrol.Seal(child.Run.ID, child.Run.Revision, "workflow_child_physical_settled", grant.ID, child.State, child.Checkpoint)
+	proof := featurecontrol.Seal(child.Run.ID, child.Run.Revision, "agent_child_physical_settled", grant.ID, child.State, child.Checkpoint)
 	if err = rt.MarkChildExecutionSettled(t.Context(), grant, proof); err != nil {
 		t.Fatal(err)
 	}
@@ -73,14 +67,10 @@ func TestIssue107MemoryChildGrantAtomicParentTerminal(t *testing.T) {
 	if _, err = rt.BeginChildExecution(t.Context(), child.Run.ID, child.Run.Revision); !errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("terminated ancestor admitted child: %v", err)
 	}
-	if _, err = rt.Create(t.Context(), kernel.CreateRequest{
-		ID: "late-child", Kind: "agent", ParentRunID: root.Run.ID,
-		Actor: root.Run.Actor, Thread: root.Run.Thread, Goal: "late", State: []byte(`{}`),
-	}); !errors.Is(err, kernel.ErrExecutionConflict) {
+	if _, err = rt.Create(t.Context(), kernel.CreateRequest{ID: "late-child", Kind: "agent", ParentRunID: root.Run.ID, Actor: root.Run.Actor, Thread: root.Run.Thread, Goal: "late", State: []byte(`{}`)}); !errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("late child created after parent Cancel: %v", err)
 	}
 }
-
 func TestIssue107MemoryParentCancelChildBeginLinearizable(t *testing.T) {
 	for iteration := 0; iteration < 80; iteration++ {
 		t.Run(fmt.Sprint(iteration), func(t *testing.T) {
@@ -115,7 +105,7 @@ func TestIssue107MemoryParentCancelChildBeginLinearizable(t *testing.T) {
 				if !errors.Is(cancelErr, kernel.ErrChildExecutionBusy) {
 					t.Fatalf("child won but parent Cancel=%v", cancelErr)
 				}
-				proof := featurecontrol.Seal(child.Run.ID, child.Run.Revision, "workflow_child_physical_settled", grant.ID, child.State, child.Checkpoint)
+				proof := featurecontrol.Seal(child.Run.ID, child.Run.Revision, "agent_child_physical_settled", grant.ID, child.State, child.Checkpoint)
 				if err = rt.MarkChildExecutionSettled(t.Context(), grant, proof); err != nil {
 					t.Fatal(err)
 				}
@@ -132,29 +122,18 @@ func TestIssue107MemoryParentCancelChildBeginLinearizable(t *testing.T) {
 		})
 	}
 }
-
 func TestIssue107MemoryChildExecutionConformance(t *testing.T) {
-	conformance.RunChildExecutionSuite(t, func(*testing.T) kernel.Store { return memory.NewStore() })
+	conformance.RunChildExecutionSuite(t, func(*testing.T) kernel.Store {
+		return memory.NewStore()
+	})
 }
-
-func TestIssue107MemoryParentedWorkflowPhysicalGrantConformance(t *testing.T) {
-	conformance.RunParentedWorkflowSuite(t, func(child *testing.T) kernel.Store { return memory.NewStore() })
-}
-
-func TestIssue107MemoryRootWorkflowPhysicalGrantConformance(t *testing.T) {
-	conformance.RunRootWorkflowSuite(t, func(child *testing.T) kernel.Store { return memory.NewStore() })
-}
-
 func TestAuditIssue107MemoryChildSelfPhysicalGrantFence(t *testing.T) {
-	conformance.RunAuditPhysicalChildSelfFence(t, func(child *testing.T) kernel.Store { return memory.NewStore() })
+	conformance.RunAuditPhysicalChildSelfFence(t, func(child *testing.T) kernel.Store {
+		return memory.NewStore()
+	})
 }
-
-// EA-1 frozen P3 cut: original Effect receipt committed, Store Mark pending.
-func TestEA1ReceiptBeforeMarkMemory(t *testing.T) {
-	conformance.RunEA1ReceiptBeforeMarkSuite(t, func(sub *testing.T) kernel.Store { return memory.NewStore() })
-}
-
-// EA-1 P0: original source, tenant/actor/thread, duplicate ID and Revision.
 func TestEA1P0SourceAdmissionMemory(t *testing.T) {
-	conformance.RunEA1P0SourceAdmissionSuite(t, func(sub *testing.T) kernel.Store { return memory.NewStore() })
+	conformance.RunEA1P0SourceAdmissionSuite(t, func(sub *testing.T) kernel.Store {
+		return memory.NewStore()
+	})
 }

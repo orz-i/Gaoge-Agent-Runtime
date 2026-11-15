@@ -9,14 +9,11 @@ import (
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/groupchat"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/team"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workflow"
 )
 
 const (
@@ -557,9 +554,6 @@ type agentResumer interface {
 type Dependencies struct {
 	Runtime      *kernel.Runtime
 	Agent        AgentStarter
-	Teams        TeamFeature
-	GroupChats   GroupChatFeature
-	Workflows    WorkflowFeature
 	Store        Store
 	Clock        Clock // optional; defaults to the system clock
 	TurnFeed     *TurnFeed
@@ -592,9 +586,6 @@ type RunRelationSource interface {
 type Runner struct {
 	runtime                *kernel.Runtime
 	agent                  AgentStarter
-	teams                  TeamFeature
-	groupChats             GroupChatFeature
-	workflows              WorkflowFeature
 	store                  Store
 	clock                  Clock
 	turnFeed               *TurnFeed
@@ -646,19 +637,6 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	if dependencies.Clock == nil {
 		dependencies.Clock = systemClock{}
 	}
-	// Concrete first-party composite runners have fixed Kernel residence.
-	// Reject a foreign Kernel at Host composition, before any Turn or
-	// physical feature dispatch can be admitted. Custom Feature adapters
-	// require explicit authority at cancellation/recovery boundaries.
-	if native, ok := dependencies.Teams.(*team.Runner); ok && !native.OwnsKernelRuntime(dependencies.Runtime) {
-		return nil, ErrInvalidRequest
-	}
-	if native, ok := dependencies.GroupChats.(*groupchat.Runner); ok && !native.OwnsKernelRuntime(dependencies.Runtime) {
-		return nil, ErrInvalidRequest
-	}
-	if native, ok := dependencies.Workflows.(*workflow.Runner); ok && !native.OwnsKernelRuntime(dependencies.Runtime) {
-		return nil, ErrInvalidRequest
-	}
 	if dependencies.Cancellation == nil {
 		dependencies.Cancellation = dependencies.Runtime
 	}
@@ -678,7 +656,6 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	}
 	runner := &Runner{
 		runtime: dependencies.Runtime, agent: dependencies.Agent, cancellation: dependencies.Cancellation,
-		teams: dependencies.Teams, groupChats: dependencies.GroupChats, workflows: dependencies.Workflows,
 		store: dependencies.Store, clock: dependencies.Clock,
 		turnFeed: dependencies.TurnFeed,
 		context:  dependencies.Context, catalog: dependencies.Catalog,
@@ -931,8 +908,8 @@ func (runner *Runner) refreshTurn(ctx context.Context, turnID string, expected *
 	if terminalTurnStatus(turn.Status) && !terminalRuntimeStatus(runtimeSnapshot.Run.Status) {
 		return Snapshot{}, ErrConflict
 	}
-	// Refresh races naturally with Runtime continuation callbacks: a Team member,
-	// Plan step, or Workflow effect can advance the same root between the initial
+	// Refresh races naturally with Agent/ChildRunner continuation callbacks,
+	// which can advance the same root between the initial
 	// load and our Harness CAS. Treat that as a retryable observation race rather
 	// than surfacing a transient Harness conflict to the product projection.
 	return runner.syncRuntimeSnapshotWithRetry(ctx, turn, invocation, runtimeSnapshot)
@@ -950,8 +927,8 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 		return Snapshot{}, err
 	}
 	// A terminal Harness Turn is not evidence that all RunRelation children
-	// stopped. Even a Failed/Completed root may have a still-running Team
-	// member or remote ChildRunner; reconcile its descendants under the
+	// stopped. Even a Failed/Completed root may have a still-running
+	// delegated SubAgent or remote ChildRunner; reconcile its descendants under the
 	// standard durable cancellation fence before returning success.
 	invocation, err := loadTopLevelInvocation(ctx, runner.store, turn.ID)
 	if err != nil || !validInvocationExecutionAuthority(invocation) || invocation.TurnID != turn.ID ||
@@ -1359,9 +1336,6 @@ func (runner *Runner) syncRuntimeSnapshotWithCancellationProof(
 	if err = runner.recordRuntimeSnapshotItems(ctx, turn, invocation, runtimeSnapshot); err != nil {
 		return Snapshot{}, err
 	}
-	if err = runner.projectWorkflowWaitInteraction(ctx, turn, invocation, runtimeSnapshot); err != nil {
-		return Snapshot{}, err
-	}
 	deferTerminalProjection, err := runner.hostOutputProjectionPending(ctx, turn)
 	if err != nil {
 		return Snapshot{}, err
@@ -1605,12 +1579,6 @@ func validateRootRuntimeOwnership(invocation Invocation, snapshot kernel.Snapsho
 	switch invocation.ExecutionClass {
 	case ExecutionAgent:
 		kind = agent.RunKind
-	case ExecutionTeam:
-		kind = team.RunKind
-	case ExecutionGroupChat:
-		kind = groupchat.RunKind
-	case ExecutionWorkflow:
-		kind = workflow.RunKind
 	case ExecutionApplication:
 		// Host-owned Application must not read Kernel results at all.
 		return ErrConflict

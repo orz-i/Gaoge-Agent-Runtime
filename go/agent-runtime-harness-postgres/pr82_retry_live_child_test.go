@@ -50,15 +50,15 @@ func assertRetryChildExecutionFenceScenarios(t *testing.T, store harness.Store, 
 		status  harness.InvocationStatus
 		receipt string
 	}{
-		{"native-running", harness.ExecutionTeam, harness.InvocationRunning, "physical_dispatch_returned"},
-		{"native-waiting", harness.ExecutionTeam, harness.InvocationWaitingInput, "physical_dispatch_returned"},
-		{"native-paused", harness.ExecutionTeam, harness.InvocationPausedBudget, "physical_dispatch_returned"},
+		{"native-running", harness.ExecutionAgent, harness.InvocationRunning, "physical_dispatch_returned"},
+		{"native-waiting", harness.ExecutionAgent, harness.InvocationWaitingInput, "physical_dispatch_returned"},
+		{"native-paused", harness.ExecutionAgent, harness.InvocationPausedBudget, "physical_dispatch_returned"},
 		{"app-running", harness.ExecutionApplication, harness.InvocationRunning, ""},
-		{"accepted-native-start", harness.ExecutionTeam, harness.InvocationAccepted, "physical_dispatch_returned"},
+		{"accepted-native-start", harness.ExecutionAgent, harness.InvocationAccepted, "physical_dispatch_returned"},
 		{"accepted-remote-handoff", harness.ExecutionAgent, harness.InvocationAccepted, "handoff_start_returned"},
 		{"accepted-unknown-outcome", harness.ExecutionAgent, harness.InvocationAccepted, "none"},
-		{"accepted-never-dispatched", harness.ExecutionTeam, harness.InvocationAccepted, ""},
-		{"accepted-definitive-no-effect", harness.ExecutionTeam, harness.InvocationAccepted, "physical_dispatch_rejected"},
+		{"accepted-never-dispatched", harness.ExecutionAgent, harness.InvocationAccepted, ""},
+		{"accepted-definitive-no-effect", harness.ExecutionAgent, harness.InvocationAccepted, "physical_dispatch_rejected"},
 	}
 	for _, scenario := range scenarios {
 		t.Run(scenario.name, func(t *testing.T) {

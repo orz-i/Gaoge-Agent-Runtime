@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 )
 
@@ -29,14 +28,12 @@ func TestStartRejectsAnotherRootRequestID(t *testing.T) {
 			}
 			request.RequestID = "original-root"
 			replayed, err := runner.StartAgentTurn(t.Context(), request)
-			if err != nil || len(replayed.Invocations) != 1 || replayed.Invocations[0].ID != first.Invocations[0].ID ||
-				replayed.Turn.Status != first.Turn.Status || client.calls.Load() != 1 {
+			if err != nil || len(replayed.Invocations) != 1 || replayed.Invocations[0].ID != first.Invocations[0].ID || replayed.Turn.Status != first.Turn.Status || client.calls.Load() != 1 {
 				t.Fatalf("root changed or redispatched: snapshot=%#v calls=%d err=%v", replayed, client.calls.Load(), err)
 			}
 		})
 	}
 }
-
 func TestConcurrentStartDispatchesOneRoot(t *testing.T) {
 	client := &rootInvocationModel{continuing: true}
 	runner := newHarnessRunnerWithModel(t, client)
@@ -73,39 +70,6 @@ func TestConcurrentStartDispatchesOneRoot(t *testing.T) {
 	snapshot, err := runner.Refresh(t.Context(), turnID)
 	if err != nil || winners != 1 || client.calls.Load() != 1 || len(snapshot.Invocations) != 1 {
 		t.Fatalf("competing roots: winners=%d calls=%d invocations=%#v err=%v", winners, client.calls.Load(), snapshot.Invocations, err)
-	}
-}
-
-func TestCommandTurnRejectsAnotherRootCapability(t *testing.T) {
-	runtime := newFeatureInvocationRuntime(t)
-	runner, err := harness.NewRunner(harness.Dependencies{
-		Runtime: runtime, Agent: unusedFeatureAgent{}, Store: harness.NewMemoryStore(), Clock: fixedClock{},
-		Workflows: completedWorkflowFeature{runtime: runtime}, Teams: completedTeamFeature{runtime: runtime},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	request := testStartRequest()
-	request.RequestID = "workflow-root"
-	first, err := runner.StartWorkflowTurn(t.Context(), harness.WorkflowTurnRequest{StartRequest: request})
-	if err != nil {
-		t.Fatal(err)
-	}
-	request.RequestID = "team-root"
-	if _, err = runner.StartTeamTurn(t.Context(), harness.TeamTurnRequest{StartRequest: request}); !errors.Is(err, harness.ErrConflict) {
-		t.Fatalf("different root capability error=%v", err)
-	}
-	invocationID, err := harness.InvocationID(first.Turn.ID, "", harness.CapabilityTeam, request.RequestID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = runtime.Load(t.Context(), harness.CapabilityExecutionRefID(invocationID)); !errors.Is(err, kernel.ErrNotFound) {
-		t.Fatalf("conflicting command dispatched a Run: %v", err)
-	}
-	request.RequestID = "workflow-root"
-	replayed, err := runner.StartWorkflowTurn(t.Context(), harness.WorkflowTurnRequest{StartRequest: request})
-	if err != nil || len(replayed.Invocations) != 1 || replayed.Invocations[0].ID != first.Invocations[0].ID {
-		t.Fatalf("original command replay: snapshot=%#v err=%v", replayed, err)
 	}
 }
 

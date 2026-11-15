@@ -11,14 +11,14 @@ import (
 func TestExplicitAgentStartDoesNotExposeLegacyGenericStart(t *testing.T) {
 	api := reflect.TypeOf((*harness.Runner)(nil))
 	for _, prohibited := range []string{
-		"Start", "StartDirect", "StartDirectAgent", "PrepareIntent", "IntentRouter", "RouteIntent", "SelectMode",
+		"Start", "StartDirect", "StartDirectAgent", "PrepareIntent", "IntentRouter", "RouteIntent", "SelectMode", "StartTeamTurn", "StartGroupChatTurn", "StartWorkflowTurn", "StartTeamInvocation", "StartWorkflowInvocation",
 	} {
 		if _, present := api.MethodByName(prohibited); present {
 			t.Fatalf("Host-only intent/mode operation %s reintroduced into Harness", prohibited)
 		}
 	}
 	for _, selected := range []string{
-		"StartAgentTurn", "StartTeamTurn", "StartGroupChatTurn", "StartWorkflowTurn", "StartApplicationTurn",
+		"StartAgentTurn", "StartApplicationTurn",
 	} {
 		if _, present := api.MethodByName(selected); !present {
 			t.Fatalf("Host-selected capability entry %s unavailable", selected)

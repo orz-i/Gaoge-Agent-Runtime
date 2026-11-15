@@ -15,37 +15,30 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	queuecore "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/queue"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/team"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workflow"
 )
 
+// Both surviving relation kinds must deliver one terminal child fact to the
+// original Agent parent without replaying duplicate queue entries.
 func TestSchedulerEnqueuesOneOwningParentContinuation(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name         string
-		parentKind   kernel.RunKind
-		childKind    kernel.RunKind
-		relationKind runrelation.Kind
-		ownerNodeID  string
+	for _, tc := range []struct {
+		name  string
+		kind  runrelation.Kind
+		owner string
 	}{
-		{name: "team member", parentKind: team.RunKind, childKind: agent.RunKind, relationKind: runrelation.KindTeamMember, ownerNodeID: "member-1"},
-		{name: "harness capability", parentKind: agent.RunKind, childKind: workflow.RunKind, relationKind: runrelation.KindCapability, ownerNodeID: "invocation-1"},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
+		{"delegated_subagent", runrelation.KindDelegation, "subagent-1"},
+		{"native_agent_capability", runrelation.KindCapability, "invocation-1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			fixture := newSchedulerFixture(t)
-			parent := createRun(t, fixture.runtime, "parent", test.parentKind)
-			child := createRun(t, fixture.runtime, "child", test.childKind)
-			ensureRelation(t, fixture.relations, runrelation.Draft{
-				ParentRunID: parent.Run.ID, ChildRunID: child.Run.ID,
-				Kind: test.relationKind, OwnerNodeID: test.ownerNodeID,
-			})
+			parent := createRun(t, fixture.runtime, "parent", agent.RunKind)
+			child := createRun(t, fixture.runtime, "child", agent.RunKind)
+			ensureRelation(t, fixture.relations, runrelation.Draft{ParentRunID: parent.Run.ID, ChildRunID: child.Run.ID, Kind: tc.kind, OwnerNodeID: tc.owner})
 			completed := completeRun(t, fixture.runtime, child)
-			if err := fixture.scheduler.Project(t.Context()); err != nil {
-				t.Fatal(err)
-			}
-			if err := fixture.scheduler.Project(t.Context()); err != nil {
-				t.Fatal(err)
+			for range 2 {
+				if err := fixture.scheduler.Project(t.Context()); err != nil {
+					t.Fatal(err)
+				}
 			}
 			jobs := queuedJobs(t, fixture.delivery, 1)
 			assertParentPayload(t, jobs[0], parent, completed)
@@ -57,16 +50,11 @@ func TestDispatcherRejectsDuplicateResumerRegistration(t *testing.T) {
 	t.Parallel()
 	runtime := newRuntime(t)
 	resumer := &recordingResumer{}
-	_, err := continuation.NewDispatcher(
-		runtime,
-		continuation.RegisterResumer(kernel.RunKind("echo"), resumer),
-		continuation.RegisterResumer(kernel.RunKind("echo"), resumer),
-	)
+	_, err := continuation.NewDispatcher(runtime, continuation.RegisterResumer(kernel.RunKind("echo"), resumer), continuation.RegisterResumer(kernel.RunKind("echo"), resumer))
 	if !errors.Is(err, continuation.ErrInvalidInput) {
 		t.Fatalf("duplicate resumer error = %v", err)
 	}
 }
-
 func TestSchedulerRejectsDuplicateTriggerRegistration(t *testing.T) {
 	t.Parallel()
 	store := memory.NewStore()
@@ -79,65 +67,26 @@ func TestSchedulerRejectsDuplicateTriggerRegistration(t *testing.T) {
 	resolver := func(kernel.EventDraft) (continuation.Trigger, bool) {
 		return continuation.TriggerSegmentYielded, true
 	}
-	_, err = continuation.NewScheduler(
-		continuation.SchedulerDependencies{
-			Outbox: store, Queue: delivery, Relations: relations, Runs: runtime,
-			Clock: fixedClock{}, ProjectorID: "duplicate-trigger-test",
-		},
-		continuation.RegisterTriggers(kernel.RunKind("echo"), resolver),
-		continuation.RegisterTriggers(kernel.RunKind("echo"), resolver),
-	)
+	_, err = continuation.NewScheduler(continuation.SchedulerDependencies{Outbox: store, Queue: delivery, Relations: relations, Runs: runtime, Clock: fixedClock{}, ProjectorID: "duplicate-trigger-test"}, continuation.RegisterTriggers(kernel.RunKind("echo"), resolver), continuation.RegisterTriggers(kernel.RunKind("echo"), resolver))
 	if !errors.Is(err, continuation.ErrInvalidInput) {
 		t.Fatalf("duplicate trigger error = %v", err)
 	}
 }
-
-func assertParentPayload(
-	t *testing.T,
-	job queuecore.Job,
-	parent kernel.Snapshot,
-	child kernel.Snapshot,
-) {
+func assertParentPayload(t *testing.T, job queuecore.Job, parent kernel.Snapshot, child kernel.Snapshot) {
 	t.Helper()
 	var payload continuation.Payload
 	if err := json.Unmarshal(job.Payload, &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload.RunID != parent.Run.ID || payload.ExpectedRevision != parent.Run.Revision ||
-		payload.Trigger != continuation.TriggerChildTerminal || payload.SourceRunID != child.Run.ID ||
-		payload.SourceRevision != child.Run.Revision {
+	if payload.RunID != parent.Run.ID || payload.ExpectedRevision != parent.Run.Revision || payload.Trigger != continuation.TriggerChildTerminal || payload.SourceRunID != child.Run.ID || payload.SourceRevision != child.Run.Revision {
 		t.Fatalf("payload = %#v", payload)
 	}
 }
-
-func TestSchedulerProjectsOnlyActionableSelfTransitions(t *testing.T) {
-	t.Parallel()
-	fixture := newSchedulerFixture(t)
-	workflowRun := createRun(t, fixture.runtime, "workflow", workflow.RunKind)
-	_, err := fixture.runtime.Apply(t.Context(), workflowRun.Run.ID, workflowRun.Run.Revision, kernel.Mutation{
-		Status: kernel.RunStatusRunning, State: json.RawMessage(`{}`),
-		Events: []kernel.EventDraft{
-			{Type: "workflow.segment.yielded", Message: "effect_pending"},
-			{Type: "workflow.segment.yielded", Message: "activation_budget", Wakeup: true},
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = fixture.scheduler.Project(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	queuedJobs(t, fixture.delivery, 1)
-}
-
 func TestSchedulerProjectsUnknownWakeupAsGenericRunReady(t *testing.T) {
 	t.Parallel()
 	fixture := newSchedulerFixture(t)
 	run := createRun(t, fixture.runtime, "generic-ready", kernel.RunKind("custom_feature"))
-	committed, err := fixture.runtime.Apply(t.Context(), run.Run.ID, run.Run.Revision, kernel.Mutation{
-		Status: kernel.RunStatusRunning, State: json.RawMessage(`{}`),
-		Events: []kernel.EventDraft{{Type: "custom.autonomous_progress", Wakeup: true}},
-	})
+	committed, err := fixture.runtime.Apply(t.Context(), run.Run.ID, run.Run.Revision, kernel.Mutation{Status: kernel.RunStatusRunning, State: json.RawMessage(`{}`), Events: []kernel.EventDraft{{Type: "custom.autonomous_progress", Wakeup: true}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,87 +98,15 @@ func TestSchedulerProjectsUnknownWakeupAsGenericRunReady(t *testing.T) {
 	if err = json.Unmarshal(jobs[0].Payload, &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload.RunID != committed.Run.ID || payload.ExpectedRevision != committed.Run.Revision ||
-		payload.Trigger != continuation.TriggerRunReady || payload.SourceRevision != committed.Run.Revision {
+	if payload.RunID != committed.Run.ID || payload.ExpectedRevision != committed.Run.Revision || payload.Trigger != continuation.TriggerRunReady || payload.SourceRevision != committed.Run.Revision {
 		t.Fatalf("generic wakeup payload = %#v", payload)
 	}
 }
-
-func TestSchedulerPreservesDurableWakeupAvailability(t *testing.T) {
-	t.Parallel()
-	fixture := newSchedulerFixture(t)
-	workflowRun := createRun(t, fixture.runtime, "workflow-delayed", workflow.RunKind)
-	wakeupAt := fixedClock{}.Now().Add(2 * time.Minute)
-	_, err := fixture.runtime.Apply(t.Context(), workflowRun.Run.ID, workflowRun.Run.Revision, kernel.Mutation{
-		Status: kernel.RunStatusRunning, State: json.RawMessage(`{}`),
-		Events: []kernel.EventDraft{{
-			Type: "workflow.segment.yielded", Message: "activation_budget", Wakeup: true, WakeupAt: &wakeupAt,
-		}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = fixture.scheduler.Project(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	jobs := queuedJobs(t, fixture.delivery, 1)
-	if !jobs[0].AvailableAt.Equal(wakeupAt) {
-		t.Fatalf("availableAt = %s, want %s", jobs[0].AvailableAt, wakeupAt)
-	}
-}
-
-func TestDispatcherRoutesExactRevisionAndRetainsUnverifiedStaleDelivery(t *testing.T) {
-	t.Parallel()
-	runtime := newRuntime(t)
-	resumers := map[kernel.RunKind]*recordingResumer{
-		agent.RunKind:          {},
-		workflow.RunKind:       {},
-		team.RunKind:           {},
-		kernel.RunKind("echo"): {},
-	}
-	registrations := make([]continuation.ResumerRegistration, 0, len(resumers))
-	for kind, resumer := range resumers {
-		registrations = append(registrations, continuation.RegisterResumer(kind, resumer))
-	}
-	dispatcher, err := continuation.NewDispatcher(runtime, registrations...)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for kind, resumer := range resumers {
-		snapshot := createRun(t, runtime, string(kind), kind)
-		payload := continuation.Payload{
-			RunID: snapshot.Run.ID, ExpectedRevision: snapshot.Run.Revision,
-			Trigger:     continuation.TriggerSegmentYielded,
-			SourceRunID: snapshot.Run.ID, SourceRevision: snapshot.Run.Revision,
-		}
-		resumer.snapshot = snapshot
-		if err = dispatcher.Dispatch(t.Context(), payload); err != nil || resumer.calls != 1 {
-			t.Fatalf("kind %s: calls=%d error=%v", kind, resumer.calls, err)
-		}
-		// An actual stale delivery carries its original immutable source
-		// revision after a different Run mutation has advanced the Store.
-		if _, err = runtime.Apply(t.Context(), snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
-			Status: kernel.RunStatusRunning, State: snapshot.State,
-		}); err != nil {
-			t.Fatal(err)
-		}
-		// A newer running Revision is not an authoritative consumption
-		// marker. Retain this old candidate without replaying it.
-		if err = dispatcher.Dispatch(t.Context(), payload); !errors.Is(err, kernel.ErrConflict) || resumer.calls != 1 {
-			t.Fatalf("stale unverified kind %s: calls=%d error=%v", kind, resumer.calls, err)
-		}
-	}
-}
-
 func TestDispatcherSkipsPausedBudgetUntilExplicitGrantWakeup(t *testing.T) {
 	t.Parallel()
 	runtime := newRuntime(t)
 	initial := createRun(t, runtime, "pause-then-grant", agent.RunKind)
-	paused, err := runtime.Apply(t.Context(), initial.Run.ID, initial.Run.Revision, kernel.Mutation{
-		Status: kernel.RunStatusPausedBudget, State: json.RawMessage(`{"allowance":1}`),
-		ErrorCode: "agent.model_allowance_exhausted",
-		Events:    []kernel.EventDraft{{Type: "agent.budget_paused"}},
-	})
+	paused, err := runtime.Apply(t.Context(), initial.Run.ID, initial.Run.Revision, kernel.Mutation{Status: kernel.RunStatusPausedBudget, State: json.RawMessage(`{"allowance":1}`), ErrorCode: "agent.model_allowance_exhausted", Events: []kernel.EventDraft{{Type: "agent.budget_paused"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,17 +115,11 @@ func TestDispatcherSkipsPausedBudgetUntilExplicitGrantWakeup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	payload := continuation.Payload{
-		RunID: paused.Run.ID, ExpectedRevision: paused.Run.Revision, Trigger: continuation.TriggerRunReady,
-		SourceRunID: paused.Run.ID, SourceRevision: paused.Run.Revision,
-	}
+	payload := continuation.Payload{RunID: paused.Run.ID, ExpectedRevision: paused.Run.Revision, Trigger: continuation.TriggerRunReady, SourceRunID: paused.Run.ID, SourceRevision: paused.Run.Revision}
 	if err = dispatcher.Dispatch(t.Context(), payload); err != nil || resumer.calls != 0 {
 		t.Fatalf("paused Run wakeup improperly dispatched: %d %v", resumer.calls, err)
 	}
-	renewed, err := runtime.Apply(t.Context(), paused.Run.ID, paused.Run.Revision, kernel.Mutation{
-		Status: kernel.RunStatusRunning, State: json.RawMessage(`{"allowance":2}`),
-		Events: []kernel.EventDraft{{Type: "agent.allowance_granted", Wakeup: true}},
-	})
+	renewed, err := runtime.Apply(t.Context(), paused.Run.ID, paused.Run.Revision, kernel.Mutation{Status: kernel.RunStatusRunning, State: json.RawMessage(`{"allowance":2}`), Events: []kernel.EventDraft{{Type: "agent.allowance_granted", Wakeup: true}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,14 +129,10 @@ func TestDispatcherSkipsPausedBudgetUntilExplicitGrantWakeup(t *testing.T) {
 	if err = dispatcher.Dispatch(t.Context(), payload); err != nil || resumer.calls != 1 {
 		t.Fatalf("granted Run did not dispatch: %d %v", resumer.calls, err)
 	}
-	if err = dispatcher.Dispatch(t.Context(), continuation.Payload{
-		RunID: renewed.Run.ID, ExpectedRevision: paused.Run.Revision, Trigger: continuation.TriggerRunReady,
-		SourceRunID: renewed.Run.ID, SourceRevision: paused.Run.Revision,
-	}); !errors.Is(err, kernel.ErrConflict) || resumer.calls != 1 {
+	if err = dispatcher.Dispatch(t.Context(), continuation.Payload{RunID: renewed.Run.ID, ExpectedRevision: paused.Run.Revision, Trigger: continuation.TriggerRunReady, SourceRunID: renewed.Run.ID, SourceRevision: paused.Run.Revision}); !errors.Is(err, kernel.ErrConflict) || resumer.calls != 1 {
 		t.Fatalf("stale pause lost its unverified recovery fact or replayed: %d %v", resumer.calls, err)
 	}
 }
-
 func TestWorkerClaimsDispatchesAndAcknowledges(t *testing.T) {
 	t.Parallel()
 	fixture := newWorkerFixture(t)
@@ -280,7 +147,6 @@ func TestWorkerClaimsDispatchesAndAcknowledges(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-
 func assertWorkerDispatch(t *testing.T, fixture workerFixture) {
 	t.Helper()
 	select {
@@ -292,7 +158,6 @@ func assertWorkerDispatch(t *testing.T, fixture workerFixture) {
 		t.Fatal("worker did not dispatch")
 	}
 }
-
 func waitForCompletedJob(t *testing.T, delivery *queuecore.Memory, jobID string) {
 	t.Helper()
 	deadline := time.Now().Add(time.Second)
@@ -328,37 +193,26 @@ func newSchedulerFixture(t *testing.T) schedulerFixture {
 		t.Fatal(err)
 	}
 	delivery := queuecore.NewMemory(queuecore.Dependencies{Clock: fixedClock{}})
-	scheduler, err := continuation.NewScheduler(continuation.SchedulerDependencies{
-		Outbox: store, Queue: delivery, Relations: relations, Runs: runtime,
-		Clock: fixedClock{}, ProjectorID: "scheduler-test",
-	}, continuationadapter.Triggers()...)
+	scheduler, err := continuation.NewScheduler(continuation.SchedulerDependencies{Outbox: store, Queue: delivery, Relations: relations, Runs: runtime, Clock: fixedClock{}, ProjectorID: "scheduler-test"}, continuationadapter.Triggers()...)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return schedulerFixture{
-		runtime: runtime, store: store, relations: relations, delivery: delivery, scheduler: scheduler,
-	}
+	return schedulerFixture{runtime: runtime, store: store, relations: relations, delivery: delivery, scheduler: scheduler}
 }
-
 func ensureRelation(t *testing.T, relations *runrelation.Registry, draft runrelation.Draft) {
 	t.Helper()
 	if _, err := relations.Ensure(t.Context(), draft); err != nil {
 		t.Fatal(err)
 	}
 }
-
 func completeRun(t *testing.T, runtime *kernel.Runtime, child kernel.Snapshot) kernel.Snapshot {
 	t.Helper()
-	completed, err := runtime.Apply(t.Context(), child.Run.ID, child.Run.Revision, kernel.Mutation{
-		Status: kernel.RunStatusCompleted, State: json.RawMessage(`{}`),
-		Result: &kernel.Result{ContentType: "text", Content: json.RawMessage(`"done"`)},
-	})
+	completed, err := runtime.Apply(t.Context(), child.Run.ID, child.Run.Revision, kernel.Mutation{Status: kernel.RunStatusCompleted, State: json.RawMessage(`{}`), Result: &kernel.Result{ContentType: "text", Content: json.RawMessage(`"done"`)}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return completed
 }
-
 func queuedJobs(t *testing.T, delivery *queuecore.Memory, count int) []queuecore.Job {
 	t.Helper()
 	jobs, err := delivery.List(t.Context(), continuation.QueueName, queuecore.StatusQueued)
@@ -380,36 +234,25 @@ func newWorkerFixture(t *testing.T) workerFixture {
 	t.Helper()
 	delivery := queuecore.NewMemory(queuecore.Dependencies{})
 	handler := &recordingHandler{called: make(chan continuation.Payload, 1)}
-	worker, err := continuation.NewWorker(delivery, handler, continuation.WorkerOptions{
-		WorkerID: "worker-test", PollInterval: time.Millisecond,
-	})
+	worker, err := continuation.NewWorker(delivery, handler, continuation.WorkerOptions{WorkerID: "worker-test", PollInterval: time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}
-	payload := continuation.Payload{
-		SchemaVersion: continuation.SchemaVersion, RunID: "run-1", ExpectedRevision: 3,
-		Trigger: continuation.TriggerWaitResolved, SourceRunID: "run-1", SourceRevision: 3,
-	}
+	payload := continuation.Payload{SchemaVersion: continuation.SchemaVersion, RunID: "run-1", ExpectedRevision: 3, Trigger: continuation.TriggerWaitResolved, SourceRunID: "run-1", SourceRevision: 3}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		t.Fatal(err)
 	}
-	enqueued, err := delivery.Enqueue(t.Context(), queuecore.EnqueueRequest{
-		Queue: continuation.QueueName, ClientJobID: "test-job", Kind: continuation.JobKind, Payload: encoded,
-	})
+	enqueued, err := delivery.Enqueue(t.Context(), queuecore.EnqueueRequest{Queue: continuation.QueueName, ClientJobID: "test-job", Kind: continuation.JobKind, Payload: encoded})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return workerFixture{
-		delivery: delivery, handler: handler, worker: worker, payload: payload, jobID: enqueued.Job.ID,
-	}
+	return workerFixture{delivery: delivery, handler: handler, worker: worker, payload: payload, jobID: enqueued.Job.ID}
 }
-
 func newRuntime(t *testing.T) *kernel.Runtime {
 	t.Helper()
 	return newRuntimeWithStore(t, memory.NewStore())
 }
-
 func newRuntimeWithStore(t *testing.T, store kernel.Store) *kernel.Runtime {
 	t.Helper()
 	runtime, err := kernel.New(kernel.Dependencies{Store: store, Clock: fixedClock{}})
@@ -418,13 +261,9 @@ func newRuntimeWithStore(t *testing.T, store kernel.Store) *kernel.Runtime {
 	}
 	return runtime
 }
-
 func createRun(t *testing.T, runtime *kernel.Runtime, id string, kind kernel.RunKind) kernel.Snapshot {
 	t.Helper()
-	snapshot, err := runtime.Create(t.Context(), kernel.CreateRequest{
-		ID: id, Kind: kind, Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"},
-		Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"}, Goal: "continue", State: json.RawMessage(`{}`),
-	})
+	snapshot, err := runtime.Create(t.Context(), kernel.CreateRequest{ID: id, Kind: kind, Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"}, Goal: "continue", State: json.RawMessage(`{}`)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -433,18 +272,16 @@ func createRun(t *testing.T, runtime *kernel.Runtime, id string, kind kernel.Run
 
 type fixedClock struct{}
 
-func (fixedClock) Now() time.Time { return time.Date(2026, 8, 8, 0, 0, 0, 0, time.UTC) }
+func (fixedClock) Now() time.Time {
+	return time.Date(2026, 8, 8, 0, 0, 0, 0, time.UTC)
+}
 
 type recordingResumer struct {
 	calls    int
 	snapshot kernel.Snapshot
 }
 
-func (resumer *recordingResumer) Resume(
-	_ context.Context,
-	_ string,
-	_ uint64,
-) (kernel.Snapshot, error) {
+func (resumer *recordingResumer) Resume(_ context.Context, _ string, _ uint64) (kernel.Snapshot, error) {
 	resumer.calls++
 	return resumer.snapshot, nil
 }

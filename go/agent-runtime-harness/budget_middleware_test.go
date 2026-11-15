@@ -23,7 +23,6 @@ type ledgerTestModel struct {
 func (*ledgerTestModel) PlanTokenAdmission(context.Context, model.Request) (model.TokenAdmission, error) {
 	return model.TokenAdmission{InputUpperBound: 100, MaxOutputTokens: 50}, nil
 }
-
 func (client *ledgerTestModel) Generate(_ context.Context, request model.Request) (model.Response, error) {
 	client.request = model.CloneRequest(request)
 	if client.missing {
@@ -31,7 +30,6 @@ func (client *ledgerTestModel) Generate(_ context.Context, request model.Request
 	}
 	return model.Response{Content: "receipt", Usage: &model.Usage{InputTokens: 20, OutputTokens: 10, CacheReadTokens: 15, ReasoningTokens: 5}}, nil
 }
-
 func newLedgerHarness(t *testing.T, client *ledgerTestModel) (*harness.MemoryStore, *harness.BudgetMiddleware, harness.Snapshot) {
 	t.Helper()
 	store := harness.NewMemoryStore()
@@ -59,73 +57,6 @@ func newLedgerHarness(t *testing.T, client *ledgerTestModel) (*harness.MemorySto
 	}
 	return store, shared, snapshot
 }
-
-func TestSharedBudgetBindsGroupChatSelectorModelCallToHarnessTurn(t *testing.T) {
-	client := &ledgerTestModel{}
-	store := harness.NewMemoryStore()
-	now := fixedClock{}.Now()
-	config, err := harness.SealConfigSnapshot("turn-groupchat-budget", harness.ConfigSnapshot{
-		Environment: harness.VersionRef{ID: "environment", Revision: 1},
-		Model:       "selector-model",
-		SharedBudget: &budget.Limits{
-			MaxTotalTokens: 1000, MaxLLMCalls: 4, MaxConcurrentRuns: 2, MaxChildRuns: 4,
-		},
-	}, now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err = store.PutConfigSnapshot(t.Context(), config); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err = store.CreateTurn(t.Context(), harness.Turn{
-		ID: config.TurnID, SessionID: "session-groupchat-budget",
-		HostTurn:         harness.HostRef{Kind: "conversation_turn", ID: "host-groupchat-budget"},
-		ConfigSnapshotID: config.ID, Status: harness.TurnRunning, Revision: 1,
-		CreatedAt: now, UpdatedAt: now,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err = store.CreateInvocation(t.Context(), harness.Invocation{
-		ID: "invocation-groupchat-budget", TurnID: config.TurnID,
-		CapabilityKey: harness.CapabilityGroupChat, DefinitionVersion: harness.RuntimeCapabilityVersion,
-		ExecutionClass: harness.ExecutionGroupChat, ExecutionRefID: "groupchat-run-budget",
-		Status: harness.InvocationRunning, Attempt: 1, Revision: 1,
-		CreatedAt: now, UpdatedAt: now,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	shared, err := harness.NewBudgetMiddleware(harness.BudgetMiddlewareDependencies{
-		Store: store, Clock: fixedClock{}, Meter: client,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	request := model.Request{
-		RunID: "groupchat-run-budget", InvocationID: "selectorinv-budget-1",
-		Model: "selector-model", Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("select")}},
-	}
-	response, err := shared.Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
-		if bounded.MaxOutputTokens <= 0 {
-			t.Fatalf("selector call was not token-bounded: %#v", bounded)
-		}
-		return model.Response{
-			Content: `{"speakerID":"participant-reviewer"}`,
-			Usage:   &model.Usage{InputTokens: 20, OutputTokens: 10},
-		}, nil
-	})
-	if err != nil || response.Content == "" {
-		t.Fatalf("selector budget response=%#v err=%v", response, err)
-	}
-	ledger, err := store.LoadBudget(t.Context(), config.TurnID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	view := ledger.View("groupchat-run-budget")
-	if view.Usage.LLMCalls != 1 || view.Usage.TotalTokens != 30 {
-		t.Fatalf("selector usage not charged to Harness Turn: %#v", view)
-	}
-}
-
 func TestSharedBudgetUnknownReceiptSurvivesRestartWithoutRedispatch(t *testing.T) {
 	client := &ledgerTestModel{missing: true}
 	store, _, snapshot := newLedgerHarness(t, client)
@@ -151,7 +82,6 @@ func TestSharedBudgetUnknownReceiptSurvivesRestartWithoutRedispatch(t *testing.T
 		t.Fatalf("unknown=%+v", view)
 	}
 }
-
 func TestSharedBudgetReplaysSettledReceiptAndRejectsUnmeteredRemote(t *testing.T) {
 	client := &ledgerTestModel{}
 	store, shared, snapshot := newLedgerHarness(t, client)
@@ -180,12 +110,11 @@ func TestSharedBudgetReplaysSettledReceiptAndRejectsUnmeteredRemote(t *testing.T
 		t.Fatalf("changed request=%v", err)
 	}
 }
-
 func TestBudgetModelOutcomeVerifierOnlyReadsOriginalSettledReceipt(t *testing.T) {
 	client := &ledgerTestModel{}
 	store, shared, snapshot := newLedgerHarness(t, client)
 	request := model.CloneRequest(client.request)
-	request.MaxOutputTokens = 0 // Original pre-reservation middleware input.
+	request.MaxOutputTokens = 0
 	before, err := store.LoadBudget(t.Context(), snapshot.Turn.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -194,12 +123,15 @@ func TestBudgetModelOutcomeVerifierOnlyReadsOriginalSettledReceipt(t *testing.T)
 	if err != nil || response.Content != "receipt" {
 		t.Fatalf("original receipt: %+v %v", response, err)
 	}
-	for _, mutate := range []func(*model.Request){
-		func(r *model.Request) { r.RunID = "foreign-run" },
-		func(r *model.Request) { r.InvocationID = "foreign-invocation" },
-		func(r *model.Request) { r.Model = "foreign-model" },
-		func(r *model.Request) { r.MaxOutputTokens++ },
-	} {
+	for _, mutate := range []func(*model.Request){func(r *model.Request) {
+		r.RunID = "foreign-run"
+	}, func(r *model.Request) {
+		r.InvocationID = "foreign-invocation"
+	}, func(r *model.Request) {
+		r.Model = "foreign-model"
+	}, func(r *model.Request) {
+		r.MaxOutputTokens++
+	}} {
 		wrong := model.CloneRequest(request)
 		mutate(&wrong)
 		if _, err := shared.VerifyModelOutcome(t.Context(), wrong); err == nil {

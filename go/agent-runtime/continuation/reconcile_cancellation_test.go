@@ -34,7 +34,7 @@ func TestSchedulerReconcileCancellationPreservesUnprocessedPage(t *testing.T) {
 		child := createRun(t, fixture.runtime, fmt.Sprintf("cancel-child-%03d", index), "cancel.child")
 		ensureRelation(t, fixture.relations, runrelation.Draft{
 			ParentRunID: parent.Run.ID, ChildRunID: child.Run.ID,
-			Kind: runrelation.KindTeamMember, OwnerNodeID: "member",
+			Kind: runrelation.KindDelegation, OwnerNodeID: "member",
 		})
 		completeRun(t, fixture.runtime, child)
 	}

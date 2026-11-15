@@ -61,8 +61,8 @@ func TestRealPostgresCancellationFenceAcrossConnections(t *testing.T) {
 	}
 	late := harness.Invocation{
 		ID: "pg_fence_late_child", TurnID: turn.ID, ParentItemID: "parent_item",
-		CapabilityKey: harness.CapabilityTeam, DefinitionVersion: harness.RuntimeCapabilityVersion,
-		ExecutionClass: harness.ExecutionTeam, ExecutionRefID: "pg_fence_child",
+		CapabilityKey: harness.CapabilityAgent, DefinitionVersion: harness.RuntimeCapabilityVersion,
+		ExecutionClass: harness.ExecutionAgent, ExecutionRefID: "pg_fence_child",
 		Status: harness.InvocationAccepted, Attempt: 1, Revision: 1, OutputRefs: []harness.HostRef{},
 		CreatedAt: now, UpdatedAt: now,
 	}

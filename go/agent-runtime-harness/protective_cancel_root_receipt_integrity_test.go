@@ -45,7 +45,7 @@ func (s *protectiveRootReadFaultStore) ListInvocations(ctx context.Context, turn
 			case "bad-parent":
 				items[i].ParentItemID = "foreign-parent"
 			case "bad-class":
-				items[i].ExecutionClass = harness.ExecutionWorkflow
+				items[i].ExecutionClass = harness.ExecutionClass("removed")
 			case "bad-lifecycle":
 				items[i].Revision = 0
 			}
@@ -92,7 +92,6 @@ func TestProtectiveRootStopUsesFrozenIdentityNotOutputMetadata(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-
 			if after.Run.Status != kernel.RunStatusCancelled {
 				t.Errorf("STOP_BLOCKED_BY_UNRELATED_METADATA: mutation %s err=%v status=%s", mutation, cancelErr, after.Run.Status)
 			}
@@ -100,19 +99,12 @@ func TestProtectiveRootStopUsesFrozenIdentityNotOutputMetadata(t *testing.T) {
 	}
 }
 
-// Refusing an unrelated OutputRef must not expand physical cancellation
-// authority. Every immutable origin mutation must leave the real Run alive.
 func TestProtectiveRootStopRejectsBrokenFrozenExecutionIdentity(t *testing.T) {
-	for _, mutation := range []string{
-		"bad-input-hash", "bad-input", "bad-turn", "bad-attempt",
-		"bad-run", "bad-id", "bad-parent", "bad-class", "bad-lifecycle",
-	} {
+	for _, mutation := range []string{"bad-input-hash", "bad-input", "bad-turn", "bad-attempt", "bad-run", "bad-id", "bad-parent", "bad-class", "bad-lifecycle"} {
 		t.Run(mutation, func(t *testing.T) {
 			runtime := newFeatureInvocationRuntime(t)
 			store := &protectiveRootReadFaultStore{Store: harness.NewMemoryStore(), mutation: mutation}
-			runner, err := harness.NewRunner(harness.Dependencies{
-				Runtime: runtime, Agent: protectiveRootPendingAgent{runtime: runtime}, Store: store, Clock: featureInvocationClock{},
-			})
+			runner, err := harness.NewRunner(harness.Dependencies{Runtime: runtime, Agent: protectiveRootPendingAgent{runtime: runtime}, Store: store, Clock: featureInvocationClock{}})
 			if err != nil {
 				t.Fatal(err)
 			}

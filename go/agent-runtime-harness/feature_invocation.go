@@ -8,63 +8,12 @@ import (
 	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/groupchat"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/team"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workflow"
 )
 
-// TeamFeature is the narrow Team Runtime capability consumed by Harness.
-type TeamFeature interface {
-	StartRun(context.Context, team.StartRequest) (kernel.Snapshot, error)
-	Resume(context.Context, string, uint64) (kernel.Snapshot, error)
-}
-
-// GroupChatFeature is the narrow Group Chat Runtime capability consumed by Harness.
-type GroupChatFeature interface {
-	StartRun(context.Context, groupchat.StartRequest) (kernel.Snapshot, error)
-	Resume(context.Context, string, uint64) (kernel.Snapshot, error)
-}
-
-// TeamTurnRequest starts Team as the top-level capability of one Harness Turn.
-type TeamTurnRequest struct {
-	StartRequest
-	Mode    team.ExecutionMode
-	Members []team.Member
-	Join    handoff.Join
-}
-
-// GroupChatSpeakerSelection binds a host-owned visible participant identity to
-// one frozen executable Role snapshot. RoleID is only the Harness config lookup
-// key; Author* is the visible product identity projected by Group Chat.
-type GroupChatSpeakerSelection struct {
-	ParticipantID  string `json:"participantID"`
-	RoleID         string `json:"roleID"`
-	AuthorKind     string `json:"authorKind"`
-	AuthorID       string `json:"authorID"`
-	AuthorRevision string `json:"authorRevision"`
-	AuthorName     string `json:"authorName"`
-}
-
-// GroupChatTurnRequest starts directed Group Chat as the top-level capability.
-type GroupChatTurnRequest struct {
-	StartRequest
-	SpeakerPolicy groupchat.SpeakerPolicy
-	Participants  []groupchat.Participant
-	Speakers      []GroupChatSpeakerSelection
-	MaxUtterances int
-}
-
-// WorkflowTurnRequest starts one compiled Dynamic Workflow as the top-level capability.
-type WorkflowTurnRequest struct {
-	StartRequest
-	Definition workflow.Definition
-	Input      json.RawMessage
-}
-
-type topLevelFeatureStart struct {
+type topLevelApplicationStart struct {
 	turn       Turn
 	invocation Invocation
 	runContext context.Context
@@ -79,282 +28,7 @@ type topLevelStartEnvelope struct {
 	now     time.Time
 }
 
-type teamInvocationInput struct {
-	Goal    string             `json:"goal"`
-	Actor   kernel.ActorRef    `json:"actor"`
-	Thread  kernel.ThreadRef   `json:"thread"`
-	Mode    team.ExecutionMode `json:"mode"`
-	Members []team.Member      `json:"members"`
-	Join    handoff.Join       `json:"join"`
-}
-
-// Each native composite Feature has exactly one private projection from the
-// original frozen Invocation input. Root/child/retry supply only their own
-// physical execution identity, never mutable Host capability definitions.
-func (input teamInvocationInput) startRequest(
-	id string, actor kernel.ActorRef, thread kernel.ThreadRef, requestID string,
-) team.StartRequest {
-	return team.StartRequest{
-		ID: id, Actor: actor, Thread: thread, RequestID: requestID, Goal: input.Goal,
-		Mode: input.Mode, Members: append([]team.Member(nil), input.Members...), Join: input.Join,
-	}
-}
-
-type groupChatInvocationInput struct {
-	Goal                 string                    `json:"goal"`
-	Actor                kernel.ActorRef           `json:"actor"`
-	Thread               kernel.ThreadRef          `json:"thread"`
-	SpeakerPolicy        groupchat.SpeakerPolicy   `json:"speakerPolicy"`
-	Participants         []groupchat.Participant   `json:"participants"`
-	SpeakerConfigs       []groupchat.SpeakerConfig `json:"speakerConfigs"`
-	DirectedSpeakerIDs   []string                  `json:"directedSpeakerIDs,omitempty"`
-	CandidateSpeakerIDs  []string                  `json:"candidateSpeakerIDs,omitempty"`
-	SelectorModel        string                    `json:"selectorModel,omitempty"`
-	SelectorModelOptions json.RawMessage           `json:"selectorModelOptions,omitempty"`
-	MaxUtterances        int                       `json:"maxUtterances"`
-}
-
-type workflowInvocationInput struct {
-	Goal       string              `json:"goal"`
-	Actor      kernel.ActorRef     `json:"actor"`
-	Thread     kernel.ThreadRef    `json:"thread"`
-	Definition workflow.Definition `json:"definition"`
-	Input      json.RawMessage     `json:"input"`
-}
-
-func (input workflowInvocationInput) startRequest(
-	id string, actor kernel.ActorRef, thread kernel.ThreadRef, requestID string,
-) workflow.StartRequest {
-	return workflow.StartRequest{
-		ID: id, Actor: actor, Thread: thread, RequestID: requestID, Goal: input.Goal,
-		Definition: input.Definition, Input: append(json.RawMessage(nil), input.Input...),
-	}
-}
-
-// StartTeamTurn starts Team without creating a placeholder Agent root.
-func (runner *Runner) StartTeamTurn(ctx context.Context, request TeamTurnRequest) (Snapshot, error) {
-	if runner == nil || runner.teams == nil {
-		return Snapshot{}, ErrInvalidRequest
-	}
-	input, inputHash, err := marshalInvocationValue(teamInvocationInput{
-		Goal: strings.TrimSpace(request.Goal), Actor: request.Actor, Thread: request.Thread,
-		Mode: request.Mode, Members: append([]team.Member(nil), request.Members...), Join: request.Join,
-	})
-	if err != nil {
-		return Snapshot{}, err
-	}
-	prepared, err := runner.prepareTopLevelFeatureStart(
-		ctx, request.StartRequest, CapabilityTeam, RuntimeCapabilityVersion, ExecutionTeam, input, inputHash,
-	)
-	if err != nil {
-		return Snapshot{}, err
-	}
-	if prepared.replayed {
-		if snapshot, handled, replayErr := runner.replayTopLevelFeatureStart(ctx, prepared); handled || replayErr != nil {
-			return snapshot, replayErr
-		}
-	}
-	var frozen teamInvocationInput
-	if err = json.Unmarshal(prepared.invocation.Input, &frozen); err != nil {
-		return Snapshot{}, ErrConflict
-	}
-	runtimeSnapshot, startErr := runner.withPhysicalInvocationDispatch(prepared.runContext, prepared.invocation, "start", func(physicalCtx context.Context) (kernel.Snapshot, error) {
-		return runner.teams.StartRun(physicalCtx, frozen.startRequest(
-			prepared.invocation.ExecutionRefID, frozen.Actor, frozen.Thread,
-			firstNonEmpty(strings.TrimSpace(request.RequestID), prepared.turn.ID),
-		))
-	})
-	return runner.finishTopLevelStart(ctx, prepared.turn, prepared.invocation, runtimeSnapshot, startErr)
-}
-
-// StartGroupChatTurn starts Group Chat without creating a placeholder Agent root.
-func (runner *Runner) StartGroupChatTurn(ctx context.Context, request GroupChatTurnRequest) (Snapshot, error) {
-	if runner == nil || runner.groupChats == nil {
-		return Snapshot{}, ErrInvalidRequest
-	}
-	speakerConfigs, speakerIDs, err := materializeGroupChatSpeakerConfigs(request.Config, request.Speakers)
-	if err != nil {
-		return Snapshot{}, err
-	}
-	input, err := materializeGroupChatPolicy(request, speakerConfigs, speakerIDs)
-	if err != nil {
-		return Snapshot{}, err
-	}
-	encodedInput, inputHash, err := marshalInvocationValue(input)
-	if err != nil {
-		return Snapshot{}, err
-	}
-	prepared, err := runner.prepareTopLevelFeatureStart(
-		ctx, request.StartRequest, CapabilityGroupChat, RuntimeCapabilityVersion, ExecutionGroupChat, encodedInput, inputHash,
-	)
-	if err != nil {
-		return Snapshot{}, err
-	}
-	if prepared.replayed {
-		if snapshot, handled, replayErr := runner.replayTopLevelFeatureStart(ctx, prepared); handled || replayErr != nil {
-			return snapshot, replayErr
-		}
-	}
-	var frozen groupChatInvocationInput
-	if err = json.Unmarshal(prepared.invocation.Input, &frozen); err != nil {
-		return Snapshot{}, ErrConflict
-	}
-	// The committed Invocation is the only source for physical GroupChat
-	// inputs. A separate pre-commit runtimeRequest can drift if new fields
-	// are added or the Host mutates its request during durable admission.
-	runtimeRequest := frozen.startRequest(
-		prepared.invocation.ExecutionRefID, frozen.Actor, frozen.Thread,
-		firstNonEmpty(strings.TrimSpace(request.RequestID), prepared.turn.ID),
-	)
-	runtimeSnapshot, startErr := runner.withPhysicalInvocationDispatch(prepared.runContext, prepared.invocation, "start", func(physicalCtx context.Context) (kernel.Snapshot, error) {
-		return runner.groupChats.StartRun(physicalCtx, runtimeRequest)
-	})
-	return runner.finishTopLevelStart(ctx, prepared.turn, prepared.invocation, runtimeSnapshot, startErr)
-}
-
-func materializeGroupChatPolicy(
-	request GroupChatTurnRequest,
-	speakerConfigs []groupchat.SpeakerConfig,
-	speakerIDs []string,
-) (groupChatInvocationInput, error) {
-	input := groupChatInvocationInput{
-		Goal: strings.TrimSpace(request.Goal), Actor: request.Actor, Thread: request.Thread,
-		SpeakerPolicy:  request.SpeakerPolicy,
-		Participants:   append([]groupchat.Participant(nil), request.Participants...),
-		SpeakerConfigs: speakerConfigs, MaxUtterances: request.MaxUtterances,
-	}
-	switch request.SpeakerPolicy {
-	case groupchat.SpeakerDirected:
-		input.DirectedSpeakerIDs = append([]string(nil), speakerIDs...)
-	case groupchat.SpeakerSelector:
-		if strings.TrimSpace(request.Config.Model) == "" {
-			return groupChatInvocationInput{}, ErrInvalidRequest
-		}
-		input.CandidateSpeakerIDs = append([]string(nil), speakerIDs...)
-		input.SelectorModel = strings.TrimSpace(request.Config.Model)
-		input.SelectorModelOptions = append(json.RawMessage(nil), request.Config.ModelOptions...)
-	case groupchat.SpeakerHandoff:
-		if len(speakerIDs) < 2 {
-			return groupChatInvocationInput{}, ErrInvalidRequest
-		}
-		for index := range speakerConfigs {
-			speakerConfigs[index].ToolKeys = normalizeStrings(append(speakerConfigs[index].ToolKeys, GroupChatHandoffToolKey))
-		}
-		input.SpeakerConfigs = speakerConfigs
-		input.CandidateSpeakerIDs = append([]string(nil), speakerIDs...)
-	default:
-		return groupChatInvocationInput{}, ErrInvalidRequest
-	}
-	return input, nil
-}
-
-// startRequest is the one GroupChat projection from immutable Invocation
-// input into its physical Runtime request. Both initial Start and durable
-// Retry call it, passing only their own original execution/actor identity.
-// Never reconstruct missing execution authority from a mutable Host request.
-func (input groupChatInvocationInput) startRequest(
-	id string, actor kernel.ActorRef, thread kernel.ThreadRef, requestID string,
-) groupchat.StartRequest {
-	return groupchat.StartRequest{
-		ID: id, Actor: actor, Thread: thread, RequestID: requestID, Goal: input.Goal,
-		SpeakerPolicy:        input.SpeakerPolicy,
-		Participants:         append([]groupchat.Participant(nil), input.Participants...),
-		SpeakerConfigs:       append([]groupchat.SpeakerConfig(nil), input.SpeakerConfigs...),
-		DirectedSpeakerIDs:   append([]string(nil), input.DirectedSpeakerIDs...),
-		CandidateSpeakerIDs:  append([]string(nil), input.CandidateSpeakerIDs...),
-		SelectorModel:        input.SelectorModel,
-		SelectorModelOptions: append(json.RawMessage(nil), input.SelectorModelOptions...),
-		MaxUtterances:        input.MaxUtterances,
-	}
-}
-
-func materializeGroupChatSpeakerConfigs(
-	config ConfigSnapshot,
-	selections []GroupChatSpeakerSelection,
-) ([]groupchat.SpeakerConfig, []string, error) {
-	if len(selections) == 0 || len(selections) > groupchat.MaxParticipantCount {
-		return nil, nil, ErrInvalidRequest
-	}
-	configs := make([]groupchat.SpeakerConfig, 0, len(selections))
-	ids := make([]string, 0, len(selections))
-	seen := make(map[string]struct{}, len(selections))
-	for _, selection := range selections {
-		participantID := strings.TrimSpace(selection.ParticipantID)
-		roleID := strings.TrimSpace(selection.RoleID)
-		authorKind := strings.TrimSpace(selection.AuthorKind)
-		authorID := strings.TrimSpace(selection.AuthorID)
-		authorRevision := strings.TrimSpace(selection.AuthorRevision)
-		authorName := strings.TrimSpace(selection.AuthorName)
-		if participantID == "" || roleID == "" || authorKind == "" || authorID == "" ||
-			authorRevision == "" || authorName == "" {
-			return nil, nil, ErrInvalidRequest
-		}
-		if _, duplicate := seen[participantID]; duplicate {
-			return nil, nil, ErrInvalidRequest
-		}
-		seen[participantID] = struct{}{}
-		role, found := findRole(config.Roles, roleID)
-		if !found {
-			return nil, nil, toolsRoleUnavailable()
-		}
-		modelName := firstNonEmpty(role.Model, config.Model)
-		modelOptions := append(json.RawMessage(nil), config.ModelOptions...)
-		if len(role.ModelOptions) != 0 {
-			modelOptions = append(json.RawMessage(nil), role.ModelOptions...)
-		}
-		memberID := strings.TrimSpace(role.MemberID)
-		if memberID == "" {
-			memberID = participantID
-		}
-		configs = append(configs, groupchat.SpeakerConfig{
-			ParticipantID: participantID,
-			AuthorKind:    authorKind, AuthorID: authorID, AuthorRevision: authorRevision, AuthorName: authorName,
-			MemberID: memberID, MemberRevision: strings.TrimSpace(role.MemberRevision),
-			Instructions: roleInstructions(role), Model: modelName, ModelOptions: modelOptions,
-			ToolKeys: roleToolKeys(role), Limits: roleAgentLimits(config.Limits, role.Limits),
-		})
-		ids = append(ids, participantID)
-	}
-	return configs, ids, nil
-}
-
-// StartWorkflowTurn starts Workflow without a placeholder Agent root.
-func (runner *Runner) StartWorkflowTurn(ctx context.Context, request WorkflowTurnRequest) (Snapshot, error) {
-	if runner == nil || runner.workflows == nil {
-		return Snapshot{}, ErrInvalidRequest
-	}
-	input, inputHash, err := marshalInvocationValue(workflowInvocationInput{
-		Goal: strings.TrimSpace(request.Goal), Actor: request.Actor, Thread: request.Thread,
-		Definition: request.Definition, Input: append(json.RawMessage(nil), request.Input...),
-	})
-	if err != nil {
-		return Snapshot{}, err
-	}
-	prepared, err := runner.prepareTopLevelFeatureStart(
-		ctx, request.StartRequest, CapabilityWorkflow, RuntimeCapabilityVersion, ExecutionWorkflow, input, inputHash,
-	)
-	if err != nil {
-		return Snapshot{}, err
-	}
-	if prepared.replayed {
-		if snapshot, handled, replayErr := runner.replayTopLevelFeatureStart(ctx, prepared); handled || replayErr != nil {
-			return snapshot, replayErr
-		}
-	}
-	var frozen workflowInvocationInput
-	if err = json.Unmarshal(prepared.invocation.Input, &frozen); err != nil {
-		return Snapshot{}, ErrConflict
-	}
-	runtimeSnapshot, startErr := runner.withPhysicalInvocationDispatch(prepared.runContext, prepared.invocation, "start", func(physicalCtx context.Context) (kernel.Snapshot, error) {
-		return runner.workflows.StartRun(physicalCtx, frozen.startRequest(
-			prepared.invocation.ExecutionRefID, frozen.Actor, frozen.Thread,
-			firstNonEmpty(strings.TrimSpace(request.RequestID), prepared.turn.ID),
-		))
-	})
-	return runner.finishTopLevelStart(ctx, prepared.turn, prepared.invocation, runtimeSnapshot, startErr)
-}
-
-func (runner *Runner) prepareTopLevelFeatureStart(
+func (runner *Runner) prepareTopLevelApplicationStart(
 	ctx context.Context,
 	request StartRequest,
 	capabilityKey string,
@@ -362,23 +36,23 @@ func (runner *Runner) prepareTopLevelFeatureStart(
 	executionClass ExecutionClass,
 	input json.RawMessage,
 	inputHash string,
-) (topLevelFeatureStart, error) {
+) (topLevelApplicationStart, error) {
 	envelope, err := runner.prepareTopLevelStartEnvelope(ctx, request, rootAdmission{
 		ExecutionClass: executionClass, CapabilityKey: capabilityKey,
 		DefinitionVersion: definitionVersion, InputHash: inputHash,
 	})
 	if err != nil {
-		return topLevelFeatureStart{}, err
+		return topLevelApplicationStart{}, err
 	}
-	invocation, err := runner.prepareTopLevelFeatureInvocation(
+	invocation, err := runner.prepareTopLevelApplicationInvocation(
 		ctx, envelope, capabilityKey, definitionVersion, executionClass, input, inputHash,
 	)
 	if err != nil {
-		return topLevelFeatureStart{}, err
+		return topLevelApplicationStart{}, err
 	}
 	if !envelope.created {
 		if err := runner.repairStartItems(ctx, envelope.turn, invocation); err != nil {
-			return topLevelFeatureStart{}, err
+			return topLevelApplicationStart{}, err
 		}
 		turn, runCtx, contextErr := runner.restoreOrBuildContext(
 			ctx, envelope.turn, envelope.request.Context, envelope.config,
@@ -386,16 +60,16 @@ func (runner *Runner) prepareTopLevelFeatureStart(
 		if contextErr != nil {
 			// A replay's Context read is not terminal execution authority.
 			// Another Start may own the same immutable Turn concurrently.
-			return topLevelFeatureStart{}, contextErr
+			return topLevelApplicationStart{}, contextErr
 		}
 		runCtx = withContextWindowBinding(runCtx, turn.ID, ContextWindowReadOnly)
-		return topLevelFeatureStart{turn: turn, invocation: invocation, runContext: runCtx, replayed: true}, nil
+		return topLevelApplicationStart{turn: turn, invocation: invocation, runContext: runCtx, replayed: true}, nil
 	}
-	turn, runCtx, err := runner.prepareTopLevelFeatureContext(ctx, envelope, invocation)
+	turn, runCtx, err := runner.prepareTopLevelApplicationContext(ctx, envelope, invocation)
 	if err != nil {
-		return topLevelFeatureStart{}, err
+		return topLevelApplicationStart{}, err
 	}
-	return topLevelFeatureStart{turn: turn, invocation: invocation, runContext: runCtx}, nil
+	return topLevelApplicationStart{turn: turn, invocation: invocation, runContext: runCtx}, nil
 }
 
 func (runner *Runner) prepareTopLevelStartEnvelope(
@@ -427,7 +101,7 @@ func (runner *Runner) prepareTopLevelStartEnvelope(
 	return topLevelStartEnvelope{request: request, turn: turn, config: config, created: created, now: now}, nil
 }
 
-func (runner *Runner) prepareTopLevelFeatureInvocation(
+func (runner *Runner) prepareTopLevelApplicationInvocation(
 	ctx context.Context,
 	envelope topLevelStartEnvelope,
 	capabilityKey string,
@@ -460,7 +134,7 @@ func (runner *Runner) prepareTopLevelFeatureInvocation(
 	return invocation, nil
 }
 
-func (runner *Runner) prepareTopLevelFeatureContext(
+func (runner *Runner) prepareTopLevelApplicationContext(
 	ctx context.Context,
 	envelope topLevelStartEnvelope,
 	invocation Invocation,
@@ -480,60 +154,6 @@ func (runner *Runner) prepareTopLevelFeatureContext(
 		return Turn{}, nil, err
 	}
 	return updated, withContextWindowBinding(runCtx, updated.ID, ContextWindowReadOnly), nil
-}
-
-func (runner *Runner) replayTopLevelFeatureStart(
-	ctx context.Context,
-	prepared topLevelFeatureStart,
-) (Snapshot, bool, error) {
-	if terminalTurnStatus(prepared.turn.Status) || terminalInvocationStatus(prepared.invocation.Status) {
-		snapshot, err := runner.Refresh(ctx, prepared.turn.ID)
-		return snapshot, true, err
-	}
-	pending, err := runner.resolvedInteractionClaimPending(ctx, prepared.turn.ID, "")
-	if err != nil {
-		return Snapshot{}, true, err
-	}
-	if pending {
-		snapshot, loadErr := runner.loadSnapshot(ctx, prepared.turn, nil)
-		return snapshot, true, loadErr
-	}
-	runtimeSnapshot, err := runner.runtime.Load(ctx, prepared.invocation.ExecutionRefID)
-	if err == nil {
-		// Replay must prove the original physical owner before invoking any
-		// Feature Resume. A later projection ErrConflict cannot undo effects
-		// that a foreign same-ID Team/Workflow/GroupChat already executed.
-		if err = validateRootRuntimeOwnership(prepared.invocation, runtimeSnapshot); err != nil {
-			return Snapshot{}, true, err
-		}
-		if runtimeSnapshot.Run.Status != kernel.RunStatusRunning {
-			snapshot, syncErr := runner.syncRuntimeSnapshotWithRetry(ctx, prepared.turn, prepared.invocation, runtimeSnapshot)
-			return snapshot, true, syncErr
-		}
-		resumed, resumeErr := runner.resumeFeature(
-			prepared.runContext, prepared.invocation, runtimeSnapshot.Run.Revision,
-		)
-		// A replay can race the execution owner that accepted the same durable
-		// invocation. The Runtime CAS then correctly rejects this second resume,
-		// but the Harness request is still an idempotent success: another worker
-		// has advanced (or is advancing) the exact same run. Refresh from the
-		// durable Runtime snapshot instead of failing the product projection.
-		if errors.Is(resumeErr, kernel.ErrConflict) {
-			snapshot, refreshErr := runner.Refresh(ctx, prepared.turn.ID)
-			return snapshot, true, refreshErr
-		}
-		if resumed.Run.ID == "" {
-			return Snapshot{}, true, resumeErr
-		}
-		snapshot, syncErr := runner.syncRuntimeSnapshotWithRetry(ctx, prepared.turn, prepared.invocation, resumed)
-		return snapshot, true, normalizedFeatureStartError(
-			prepared.invocation.ExecutionClass, resumed, resumeErr, syncErr,
-		)
-	}
-	if errors.Is(err, kernel.ErrNotFound) && prepared.invocation.Status == InvocationAccepted {
-		return Snapshot{}, false, nil
-	}
-	return Snapshot{}, true, err
 }
 
 func (runner *Runner) finishTopLevelStart(
@@ -577,7 +197,7 @@ func (runner *Runner) finishTopLevelStart(
 	if initialAgentCancelledStartConflict(invocation, snapshot.Turn.Status, startErr) {
 		startErr = nil
 	}
-	return snapshot, normalizedFeatureStartError(invocation.ExecutionClass, runtimeSnapshot, startErr, syncErr)
+	return snapshot, errors.Join(startErr, syncErr)
 }
 
 // The original Agent Start caller may observe a committed cancellation instead
@@ -588,32 +208,6 @@ func initialAgentCancelledStartConflict(invocation Invocation, status TurnStatus
 		status == TurnCancelled && errors.Is(startErr, kernel.ErrConflict)
 }
 
-// WorkflowFeature is the narrow Dynamic Workflow Runtime capability consumed by Harness.
-type WorkflowFeature interface {
-	StartRun(context.Context, workflow.StartRequest) (kernel.Snapshot, error)
-	Resume(context.Context, string, uint64) (kernel.Snapshot, error)
-	ResolveWait(context.Context, string, uint64, json.RawMessage) (kernel.Snapshot, error)
-}
-
-// TeamInvocationRequest starts one exact first-party Team capability.
-type TeamInvocationRequest struct {
-	ParentItemID string
-	RequestID    string
-	Goal         string
-	Mode         team.ExecutionMode
-	Members      []team.Member
-	Join         handoff.Join
-}
-
-// WorkflowInvocationRequest starts one exact first-party Dynamic Workflow capability.
-type WorkflowInvocationRequest struct {
-	ParentItemID string
-	RequestID    string
-	Goal         string
-	Definition   workflow.Definition
-	Input        json.RawMessage
-}
-
 type childInvocationContext struct {
 	turn                 Turn
 	root                 Invocation
@@ -621,84 +215,6 @@ type childInvocationContext struct {
 	parentExecutionRefID string
 	actor                kernel.ActorRef
 	thread               kernel.ThreadRef
-}
-
-// StartTeamInvocation starts Team as one child Invocation in an existing Harness Turn.
-func (runner *Runner) StartTeamInvocation(
-	ctx context.Context,
-	turnID string,
-	request TeamInvocationRequest,
-) (Snapshot, error) {
-	if runner == nil || runner.teams == nil {
-		return Snapshot{}, ErrInvalidRequest
-	}
-	input, inputHash, err := marshalInvocationValue(teamInvocationInput{
-		Goal: strings.TrimSpace(request.Goal), Mode: request.Mode, Members: append([]team.Member(nil), request.Members...), Join: request.Join,
-	})
-	if err != nil {
-		return Snapshot{}, err
-	}
-	invocation, child, replayed, err := runner.beginChildInvocation(
-		ctx, turnID, request.ParentItemID, request.RequestID,
-		CapabilityTeam, RuntimeCapabilityVersion, ExecutionTeam, input, inputHash,
-	)
-	if err != nil {
-		return Snapshot{}, err
-	}
-	if replayed {
-		if snapshot, handled, replayErr := runner.replayChildInvocationStart(ctx, child.turn, invocation); handled || replayErr != nil {
-			return snapshot, replayErr
-		}
-	}
-	var frozen teamInvocationInput
-	if err = json.Unmarshal(invocation.Input, &frozen); err != nil {
-		return Snapshot{}, ErrConflict
-	}
-	runtimeSnapshot, startErr := runner.withPhysicalInvocationDispatch(ctx, invocation, "start", func(physicalCtx context.Context) (kernel.Snapshot, error) {
-		return runner.teams.StartRun(physicalCtx, frozen.startRequest(
-			invocation.ExecutionRefID, child.actor, child.thread, strings.TrimSpace(request.RequestID),
-		))
-	})
-	return runner.finishChildInvocationStart(ctx, child.turn, invocation, runtimeSnapshot, startErr)
-}
-
-// StartWorkflowInvocation starts one exact compiled Dynamic Workflow as a child Invocation.
-func (runner *Runner) StartWorkflowInvocation(
-	ctx context.Context,
-	turnID string,
-	request WorkflowInvocationRequest,
-) (Snapshot, error) {
-	if runner == nil || runner.workflows == nil {
-		return Snapshot{}, ErrInvalidRequest
-	}
-	input, inputHash, err := marshalInvocationValue(workflowInvocationInput{
-		Goal: strings.TrimSpace(request.Goal), Definition: request.Definition, Input: append(json.RawMessage(nil), request.Input...),
-	})
-	if err != nil {
-		return Snapshot{}, err
-	}
-	invocation, child, replayed, err := runner.beginChildInvocation(
-		ctx, turnID, request.ParentItemID, request.RequestID,
-		CapabilityWorkflow, RuntimeCapabilityVersion, ExecutionWorkflow, input, inputHash,
-	)
-	if err != nil {
-		return Snapshot{}, err
-	}
-	if replayed {
-		if snapshot, handled, replayErr := runner.replayChildInvocationStart(ctx, child.turn, invocation); handled || replayErr != nil {
-			return snapshot, replayErr
-		}
-	}
-	var frozen workflowInvocationInput
-	if err = json.Unmarshal(invocation.Input, &frozen); err != nil {
-		return Snapshot{}, ErrConflict
-	}
-	runtimeSnapshot, startErr := runner.withPhysicalInvocationDispatch(ctx, invocation, "start", func(physicalCtx context.Context) (kernel.Snapshot, error) {
-		return runner.workflows.StartRun(physicalCtx, frozen.startRequest(
-			invocation.ExecutionRefID, child.actor, child.thread, strings.TrimSpace(request.RequestID),
-		))
-	})
-	return runner.finishChildInvocationStart(ctx, child.turn, invocation, runtimeSnapshot, startErr)
 }
 
 // RefreshInvocation reconciles one child Runtime execution into its durable Harness Invocation.
@@ -791,7 +307,7 @@ func (runner *Runner) ResumeInvocation(ctx context.Context, invocationID string)
 	if err = runner.requireFrozenAdmission(ctx, turn); err != nil {
 		return Snapshot{}, err
 	}
-	resumed, resumeErr := runner.resumeFeature(ctx, invocation, runtimeSnapshot.Run.Revision)
+	resumed, resumeErr := runner.resumeInvocationExecution(ctx, invocation, runtimeSnapshot.Run.Revision)
 	if resumed.Run.ID == "" {
 		return Snapshot{}, resumeErr
 	}
@@ -996,12 +512,6 @@ func (runner *Runner) startInvocationAttempt(
 		switch invocation.ExecutionClass {
 		case ExecutionAgent:
 			return runner.startRetriedAgent(physicalCtx, invocation, child, requestID)
-		case ExecutionTeam:
-			return runner.startRetriedTeam(physicalCtx, invocation, child, requestID)
-		case ExecutionGroupChat:
-			return runner.startRetriedGroupChat(physicalCtx, invocation, child, requestID)
-		case ExecutionWorkflow:
-			return runner.startRetriedWorkflow(physicalCtx, invocation, child, requestID)
 		case ExecutionApplication:
 			return kernel.Snapshot{}, ErrInvalidRequest
 		default:
@@ -1032,45 +542,6 @@ func (runner *Runner) startRetriedAgent(ctx context.Context, invocation Invocati
 		RequiredToolKeys: append([]string(nil), input.RequiredToolKeys...),
 		InitialToolKeys:  append([]string(nil), input.InitialToolKeys...), Limits: config.Limits,
 	})
-}
-
-func (runner *Runner) startRetriedTeam(ctx context.Context, invocation Invocation, child childInvocationContext, requestID string) (kernel.Snapshot, error) {
-	if runner.teams == nil {
-		return kernel.Snapshot{}, ErrInvalidRequest
-	}
-	var input teamInvocationInput
-	if err := json.Unmarshal(invocation.Input, &input); err != nil {
-		return kernel.Snapshot{}, ErrConflict
-	}
-	return runner.teams.StartRun(ctx, input.startRequest(
-		invocation.ExecutionRefID, child.actor, child.thread, requestID,
-	))
-}
-
-func (runner *Runner) startRetriedGroupChat(ctx context.Context, invocation Invocation, child childInvocationContext, requestID string) (kernel.Snapshot, error) {
-	if runner.groupChats == nil {
-		return kernel.Snapshot{}, ErrInvalidRequest
-	}
-	var input groupChatInvocationInput
-	if err := json.Unmarshal(invocation.Input, &input); err != nil {
-		return kernel.Snapshot{}, ErrConflict
-	}
-	return runner.groupChats.StartRun(ctx, input.startRequest(
-		invocation.ExecutionRefID, child.actor, child.thread, requestID,
-	))
-}
-
-func (runner *Runner) startRetriedWorkflow(ctx context.Context, invocation Invocation, child childInvocationContext, requestID string) (kernel.Snapshot, error) {
-	if runner.workflows == nil {
-		return kernel.Snapshot{}, ErrInvalidRequest
-	}
-	var input workflowInvocationInput
-	if err := json.Unmarshal(invocation.Input, &input); err != nil {
-		return kernel.Snapshot{}, ErrConflict
-	}
-	return runner.workflows.StartRun(ctx, input.startRequest(
-		invocation.ExecutionRefID, child.actor, child.thread, requestID,
-	))
 }
 
 // CancelInvocation cancels one child Runtime Feature by its durable Invocation identity.
@@ -1122,8 +593,8 @@ func (runner *Runner) CancelInvocation(ctx context.Context, invocationID, reason
 		runtimeSnapshot = cancelledRuntimeSnapshot(invocation.ExecutionRefID, reason)
 	}
 	runs := map[string]kernel.Snapshot{invocation.ExecutionRefID: runtimeSnapshot}
-	// Failed/Completed parent Features may still own active physical Team,
-	// Workflow, GroupChat or Handoff descendants in RunRelation. Only a
+	// Failed/Completed parent Agents may still own active physical
+	// Handoff descendants in RunRelation. Only a
 	// proven terminal subtree may settle this child's cancellation intent.
 	if terminalRuntimeStatus(runtimeSnapshot.Run.Status) {
 		descendants, cancelErr := runner.cancelOwnedDescendants(ctx, turn, invocation.ExecutionRefID, reason)
@@ -1273,27 +744,6 @@ func (runner *Runner) validateParentItem(ctx context.Context, turnID, parentItem
 	return nil
 }
 
-func (runner *Runner) replayChildInvocationStart(
-	ctx context.Context,
-	turn Turn,
-	invocation Invocation,
-
-) (Snapshot, bool, error) {
-	runtimeSnapshot, err := runner.runtime.Load(ctx, invocation.ExecutionRefID)
-	if err == nil {
-		snapshot, syncErr := runner.syncChildInvocationSnapshot(ctx, turn, invocation, runtimeSnapshot)
-		return snapshot, true, syncErr
-	}
-	if errors.Is(err, kernel.ErrNotFound) && invocation.Status == InvocationAccepted {
-		return Snapshot{}, false, nil
-	}
-	if errors.Is(err, kernel.ErrNotFound) && terminalInvocationStatus(invocation.Status) {
-		snapshot, loadErr := runner.loadSnapshot(ctx, turn, nil)
-		return snapshot, true, loadErr
-	}
-	return Snapshot{}, true, err
-}
-
 func (runner *Runner) finishChildInvocationStart(
 	ctx context.Context,
 	turn Turn,
@@ -1310,46 +760,7 @@ func (runner *Runner) finishChildInvocationStart(
 		return runner.failChildInvocation(ctx, turn, invocation, startErr)
 	}
 	snapshot, syncErr := runner.syncChildInvocationSnapshot(ctx, turn, invocation, runtimeSnapshot)
-	return snapshot, normalizedFeatureStartError(invocation.ExecutionClass, runtimeSnapshot, startErr, syncErr)
-}
-
-func normalizedFeatureStartError(
-	executionClass ExecutionClass,
-	runtimeSnapshot kernel.Snapshot,
-	startErr error,
-	syncErr error,
-) error {
-	if syncErr != nil {
-		return errors.Join(startErr, syncErr)
-	}
-	if startErr == nil || !pendingRuntimeStatus(runtimeSnapshot.Run.Status) {
-		return startErr
-	}
-	if expectedFeaturePendingError(executionClass, startErr) {
-		return nil
-	}
-	return startErr
-}
-
-func expectedFeaturePendingError(executionClass ExecutionClass, err error) bool {
-	switch executionClass {
-	case ExecutionTeam:
-		return errors.Is(err, team.ErrMemberPending)
-	case ExecutionGroupChat:
-		return errors.Is(err, groupchat.ErrSpeakerPending) || errors.Is(err, groupchat.ErrSelectorPending) ||
-			errors.Is(err, groupchat.ErrSelectorInvocationBusy)
-	case ExecutionWorkflow:
-		return errors.Is(err, workflow.ErrEffectPending) || errors.Is(err, workflow.ErrWaitPending) ||
-			errors.Is(err, workflow.ErrSegmentYielded)
-	case ExecutionAgent, ExecutionApplication:
-		return false
-	default:
-		return false
-	}
-}
-
-func pendingRuntimeStatus(status kernel.RunStatus) bool {
-	return status == kernel.RunStatusRunning || status == kernel.RunStatusWaitingInput || status == kernel.RunStatusPausedBudget
+	return snapshot, errors.Join(startErr, syncErr)
 }
 
 func (runner *Runner) failChildInvocation(
@@ -1395,51 +806,6 @@ func (runner *Runner) loadInvocationRuntime(
 	}
 	runtimeSnapshot, err := runner.runtime.Load(ctx, invocation.ExecutionRefID)
 	return invocation, turn, runtimeSnapshot, err
-}
-
-func (runner *Runner) resumeFeature(
-	ctx context.Context,
-	invocation Invocation,
-	expectedRevision uint64,
-) (kernel.Snapshot, error) {
-	if err := runner.requireUnclaimedInteractionContinuation(ctx, invocation.TurnID, invocation.ID); err != nil {
-		return kernel.Snapshot{}, err
-	}
-	if invocation.ParentItemID != "" {
-		// The public ResumeInvocation and verified Interaction continuation
-		// converge here. Verify a fresh physical snapshot immediately before
-		// any Team/GroupChat/Workflow Resume, not after its effects.
-		observed, err := runner.runtime.Load(ctx, invocation.ExecutionRefID)
-		if err != nil {
-			return kernel.Snapshot{}, err
-		}
-		if err := runner.validateChildRuntimeOwnership(ctx, invocation, observed); err != nil {
-			return kernel.Snapshot{}, err
-		}
-	}
-	return runner.withPhysicalInvocationDispatch(ctx, invocation, "resume", func(physicalCtx context.Context) (kernel.Snapshot, error) {
-		switch invocation.ExecutionClass {
-		case ExecutionTeam:
-			if runner.teams == nil {
-				return kernel.Snapshot{}, ErrInvalidRequest
-			}
-			return runner.teams.Resume(physicalCtx, invocation.ExecutionRefID, expectedRevision)
-		case ExecutionGroupChat:
-			if runner.groupChats == nil {
-				return kernel.Snapshot{}, ErrInvalidRequest
-			}
-			return runner.groupChats.Resume(physicalCtx, invocation.ExecutionRefID, expectedRevision)
-		case ExecutionWorkflow:
-			if runner.workflows == nil {
-				return kernel.Snapshot{}, ErrInvalidRequest
-			}
-			return runner.workflows.Resume(physicalCtx, invocation.ExecutionRefID, expectedRevision)
-		case ExecutionAgent, ExecutionApplication:
-			return kernel.Snapshot{}, ErrInvalidRequest
-		default:
-			return kernel.Snapshot{}, ErrInvalidRequest
-		}
-	})
 }
 
 func (runner *Runner) resumeInvocationExecution(
@@ -1497,7 +863,7 @@ func (runner *Runner) resumeInvocationExecution(
 		}
 		return resumed, resumeErr
 	}
-	return runner.resumeFeature(ctx, invocation, expectedRevision)
+	return kernel.Snapshot{}, ErrInvalidRequest
 }
 
 func (runner *Runner) syncChildInvocationSnapshot(
@@ -1577,9 +943,6 @@ func (runner *Runner) syncChildInvocationSnapshot(
 			return Snapshot{}, err
 		}
 	}
-	if err = runner.projectWorkflowWaitInteraction(ctx, turn, invocation, runtimeSnapshot); err != nil {
-		return Snapshot{}, err
-	}
 	if err = runner.syncSubtaskItems(ctx, turn); err != nil {
 		return Snapshot{}, err
 	}
@@ -1630,4 +993,19 @@ func (runner *Runner) projectChildInvocationOutcome(
 		Payload: payload, CreatedAt: now, UpdatedAt: now,
 	})
 	return err
+}
+
+// invocationRuntimeStatus reflects persisted generic Host interactions while
+// keeping native Agent and delegated child execution ownership unchanged.
+func (runner *Runner) invocationRuntimeStatus(ctx context.Context, invocation Invocation, snapshot kernel.Snapshot) (TurnStatus, error) {
+	if snapshot.Run.Status == kernel.RunStatusRunning && invocation.ParentItemID == "" {
+		waiting, err := runner.hasOtherWaitingInteraction(ctx, Interaction{TurnID: invocation.TurnID})
+		if err != nil {
+			return "", err
+		}
+		if waiting {
+			return TurnWaitingInput, nil
+		}
+	}
+	return turnStatusFromRuntime(snapshot.Run.Status)
 }

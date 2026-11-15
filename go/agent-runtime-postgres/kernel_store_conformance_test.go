@@ -15,25 +15,21 @@ func TestKernelControlStoreConformance(t *testing.T) {
 		return NewKernelStore(openKernelStoreTestDB(child))
 	})
 }
-
 func TestKernelApplyEvidenceConformance(t *testing.T) {
 	conformance.RunKernelApplyEvidenceSuite(t, func(child *testing.T) kernel.Store {
 		return NewKernelStore(openKernelStoreTestDB(child))
 	})
 }
-
 func TestKernelQuarantineStoreConformance(t *testing.T) {
 	conformance.RunKernelQuarantineSuite(t, func(child *testing.T) kernel.Store {
 		return NewKernelStore(openKernelStoreTestDB(child))
 	})
 }
-
 func TestKernelExecutionStoreConformance(t *testing.T) {
 	conformance.RunKernelExecutionSuite(t, func(child *testing.T) kernel.Store {
 		return NewKernelStore(openKernelStoreTestDB(child))
 	})
 }
-
 func TestKernelStoreConformance(t *testing.T) {
 	t.Parallel()
 	conformance.RunKernelStoreSuite(t, func(tb testing.TB) kernel.Store {
@@ -42,11 +38,9 @@ func TestKernelStoreConformance(t *testing.T) {
 		return NewKernelStore(db)
 	})
 }
-
 func openKernelStoreTestDB(tb testing.TB) *gorm.DB {
 	tb.Helper()
-	dsn := "file:" + filepath.ToSlash(filepath.Join(tb.TempDir(), "kernel.db")) +
-		"?_busy_timeout=5000&_journal_mode=WAL"
+	dsn := "file:" + filepath.ToSlash(filepath.Join(tb.TempDir(), "kernel.db")) + "?_busy_timeout=5000&_journal_mode=WAL"
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	if err != nil {
 		tb.Fatalf("open kernel store test db: %v", err)
@@ -55,37 +49,26 @@ func openKernelStoreTestDB(tb testing.TB) *gorm.DB {
 	if err != nil {
 		tb.Fatalf("resolve kernel store sql db: %v", err)
 	}
-	tb.Cleanup(func() { _ = sqlDB.Close() })
+	tb.Cleanup(func() {
+		_ = sqlDB.Close()
+	})
 	if err = Migrate(db); err != nil {
 		tb.Fatalf("migrate kernel store test db: %v", err)
 	}
 	return db
 }
-
 func TestIssue107PostgresChildExecutionConformance(t *testing.T) {
 	conformance.RunChildExecutionSuite(t, func(child *testing.T) kernel.Store {
 		return NewKernelStore(openKernelStoreTestDB(child))
 	})
 }
-
-func TestIssue107PostgresParentedWorkflowPhysicalGrantConformance(t *testing.T) {
-	conformance.RunParentedWorkflowSuite(t, func(child *testing.T) kernel.Store { return NewKernelStore(openKernelStoreTestDB(child)) })
-}
-
-func TestIssue107GORMRootWorkflowPhysicalGrantConformance(t *testing.T) {
-	conformance.RunRootWorkflowSuite(t, func(child *testing.T) kernel.Store { return NewKernelStore(openKernelStoreTestDB(child)) })
-}
-
 func TestAuditIssue107GORMChildSelfPhysicalGrantFence(t *testing.T) {
-	conformance.RunAuditPhysicalChildSelfFence(t, func(child *testing.T) kernel.Store { return NewKernelStore(openKernelStoreTestDB(child)) })
+	conformance.RunAuditPhysicalChildSelfFence(t, func(child *testing.T) kernel.Store {
+		return NewKernelStore(openKernelStoreTestDB(child))
+	})
 }
-
-// EA-1 frozen P3 cut: original Effect receipt committed, Store Mark pending.
-func TestEA1ReceiptBeforeMarkGORM(t *testing.T) {
-	conformance.RunEA1ReceiptBeforeMarkSuite(t, func(sub *testing.T) kernel.Store { return NewKernelStore(openKernelStoreTestDB(sub)) })
-}
-
-// EA-1 P0: original source, tenant/actor/thread, duplicate ID and Revision.
 func TestEA1P0SourceAdmissionGORM(t *testing.T) {
-	conformance.RunEA1P0SourceAdmissionSuite(t, func(sub *testing.T) kernel.Store { return NewKernelStore(openKernelStoreTestDB(sub)) })
+	conformance.RunEA1P0SourceAdmissionSuite(t, func(sub *testing.T) kernel.Store {
+		return NewKernelStore(openKernelStoreTestDB(sub))
+	})
 }

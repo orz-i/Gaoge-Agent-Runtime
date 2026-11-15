@@ -43,7 +43,7 @@ func TestOwnedSchemaMigrationPreservesOriginalGrants(t *testing.T) {
 	}
 	snapshots := map[string]kernel.Snapshot{}
 	for _, id := range []string{"active", "marked"} {
-		s, e := rt.Create(t.Context(), kernel.CreateRequest{ID: id, Kind: "workflow", Actor: kernel.ActorRef{TenantID: "t", ActorID: "a"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "th"}, Goal: "original", State: json.RawMessage("{}")})
+		s, e := rt.Create(t.Context(), kernel.CreateRequest{ID: id, Kind: "agent", Actor: kernel.ActorRef{TenantID: "t", ActorID: "a"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "th"}, Goal: "original", State: json.RawMessage("{}")})
 		if e != nil {
 			t.Fatal(e)
 		}

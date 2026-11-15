@@ -47,10 +47,29 @@ func TestOriginalNoEffectParentAndChildAllowLegitimateRetryAcrossStores(t *testi
 			child := root
 			child.ID = "child-no-effect-" + name
 			child.ParentItemID = "original-parent-item"
-			child.ExecutionClass = harness.ExecutionTeam
-			child.CapabilityKey = harness.CapabilityTeam
+			child.ExecutionClass = harness.ExecutionAgent
+			child.CapabilityKey = harness.CapabilityAgent
 			child.ExecutionRefID = "original-child-run-" + name
 			child.Status = harness.InvocationAccepted
+			// Preserve the native child Agent's original frozen root Attempt.
+			childInput, bindErr := json.Marshal(struct {
+				Goal        string `json:"goal"`
+				HarnessRoot struct {
+					InvocationID   string `json:"invocationID"`
+					ExecutionRefID string `json:"executionRefID"`
+					Attempt        int    `json:"attempt"`
+				} `json:"harnessRoot"`
+			}{Goal: "retry only after exact no effect", HarnessRoot: struct {
+				InvocationID   string `json:"invocationID"`
+				ExecutionRefID string `json:"executionRefID"`
+				Attempt        int    `json:"attempt"`
+			}{root.ID, root.ExecutionRefID, root.Attempt}})
+			if bindErr != nil {
+				t.Fatal(bindErr)
+			}
+			child.Input = childInput
+			childHash := sha256.Sum256(child.Input)
+			child.InputHash = hex.EncodeToString(childHash[:])
 			if _, fresh, err := store.CreateInvocation(t.Context(), child); err != nil || !fresh {
 				t.Fatalf("create child: fresh=%v err=%v", fresh, err)
 			}

@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	providerWorkflow = "workflow"
-	providerContext  = "context"
+	providerAgent   = "agent"
+	providerContext = "context"
 )
 
 var errProviderFailed = errors.New("provider failed")
@@ -23,7 +23,7 @@ func TestQueryBuildsStableSectionsAndBaseDetail(t *testing.T) {
 	t.Parallel()
 	snapshot := baseSnapshot()
 	query := mustQuery(t, snapshot, []workbench.Registration{
-		{Provider: staticProvider{name: providerWorkflow, content: json.RawMessage(`{"waits":1,"budget":{"used":2}}`)}},
+		{Provider: staticProvider{name: providerAgent, content: json.RawMessage(`{"waits":1,"budget":{"used":2}}`)}},
 		{Provider: staticProvider{name: providerContext, content: json.RawMessage(`{ "revision": 2, "artifacts": 3 }`)}},
 	})
 	detail, err := query.Get(context.Background(), snapshot.Run.ID)
@@ -49,8 +49,8 @@ func assertWorkbenchOverview(t *testing.T, snapshot kernel.Snapshot, detail work
 
 func assertWorkbenchSections(t *testing.T, detail workbench.Detail) {
 	t.Helper()
-	if len(detail.Sections) != 2 || detail.Sections[0].Name != providerContext ||
-		detail.Sections[1].Name != providerWorkflow {
+	if len(detail.Sections) != 2 || detail.Sections[0].Name != providerAgent ||
+		detail.Sections[1].Name != providerContext {
 		t.Fatalf("section order is unstable: %#v", detail.Sections)
 	}
 	for _, section := range detail.Sections {
@@ -93,8 +93,8 @@ func TestQueryRejectsDuplicateProviderNames(t *testing.T) {
 	t.Parallel()
 	snapshot := baseSnapshot()
 	_, err := workbench.NewQuery(fakeRunSource{snapshot: snapshot}, fakeRunSource{snapshot: snapshot}, []workbench.Registration{
-		{Provider: staticProvider{name: providerWorkflow}},
-		{Provider: staticProvider{name: " " + providerWorkflow + " "}},
+		{Provider: staticProvider{name: providerAgent}},
+		{Provider: staticProvider{name: " " + providerAgent + " "}},
 	})
 	if !errors.Is(err, workbench.ErrInvalidInput) {
 		t.Fatalf("expected duplicate provider rejection, got %v", err)
@@ -165,7 +165,7 @@ func baseSnapshot() kernel.Snapshot {
 		},
 		State: json.RawMessage(`{"node":2}`),
 		Checkpoint: &kernel.Checkpoint{
-			ID: "wait_1", Kind: "workflow_wait", Status: kernel.CheckpointPending,
+			ID: "wait_1", Kind: "agent_wait", Status: kernel.CheckpointPending,
 			Payload: json.RawMessage(`{"kind":"approval"}`), CreatedAt: createdAt.Add(2 * time.Second),
 		},
 		EventHead: 2,
@@ -189,8 +189,8 @@ func (source fakeRunSource) ListEvents(_ context.Context, runID string, afterSeq
 	}
 	createdAt := source.snapshot.Run.CreatedAt
 	events := []kernel.Event{
-		{Seq: 1, Type: "workflow.started", CreatedAt: createdAt},
-		{Seq: 2, Type: "workflow.wait.created", Message: "wait_1", CreatedAt: createdAt.Add(time.Second)},
+		{Seq: 1, Type: "agent.started", CreatedAt: createdAt},
+		{Seq: 2, Type: "agent.wait.created", Message: "wait_1", CreatedAt: createdAt.Add(time.Second)},
 	}
 	start := int(afterSeq)
 	if start > len(events) {

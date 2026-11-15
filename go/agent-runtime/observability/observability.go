@@ -25,7 +25,6 @@ const (
 	ScopeRun             Scope = "run"
 	ScopeModelInvocation Scope = "model_invocation"
 	ScopeToolInvocation  Scope = "tool_invocation"
-	ScopeWorkflowEffect  Scope = "workflow_effect"
 	ScopeA2AInvocation   Scope = "a2a_invocation"
 )
 
@@ -39,7 +38,7 @@ const (
 )
 
 // Event contains only structural telemetry facts. Text/model prompts,
-// completions, Tool arguments/results, Workflow inputs/outputs and arbitrary
+// completions, Tool arguments/results, SubAgent inputs/outputs and arbitrary
 // attribute maps are intentionally absent so adapters are content-off by
 // construction unless a separate explicit content policy is added later.
 type Event struct {

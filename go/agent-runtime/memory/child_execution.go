@@ -81,7 +81,7 @@ func (store *Store) BeginChildExecution(ctx context.Context, grant kernel.ChildE
 		return kernel.ErrExecutionConflict
 	}
 	var ancestors []string
-	if child.Run.Kind != "workflow" && child.Run.Kind != "agent" {
+	if child.Run.Kind != "agent" {
 		return kernel.ErrExecutionRequired
 	}
 	if child.Run.ParentRunID != "" {

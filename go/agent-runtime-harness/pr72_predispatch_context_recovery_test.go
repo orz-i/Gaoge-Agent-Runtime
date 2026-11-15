@@ -18,9 +18,6 @@ import (
 
 var errPR72TransientContextRead = errors.New("audit: transient Context Store read failure")
 
-// The first request has created its immutable Turn but has not finished
-// preparing Context. The second, identical replay must never terminalize the
-// shared Turn when its independent read-only preflight fails.
 type pr72ReplayContextReadStore struct {
 	harness.Store
 	reads   atomic.Int32
@@ -38,7 +35,6 @@ func (s *pr72ReplayContextReadStore) GetActiveContextCheckpoint(ctx context.Cont
 	}
 	return s.Store.GetActiveContextCheckpoint(ctx, scope)
 }
-
 func TestPR72DirectStartContextReplayReadFailureCannotTerminalizeOriginal(t *testing.T) {
 	rt, err := kernel.New(kernel.Dependencies{Store: memory.NewStore(), Clock: fixedClock{}})
 	if err != nil {
@@ -50,18 +46,16 @@ func TestPR72DirectStartContextReplayReadFailureCannotTerminalizeOriginal(t *tes
 	}
 	backing := harness.NewMemoryStore()
 	store := &pr72ReplayContextReadStore{Store: backing, entered: make(chan struct{}), release: make(chan struct{})}
-	release := sync.OnceFunc(func() { close(store.release) })
-	defer release()
-	runner, err := harness.NewRunner(harness.Dependencies{
-		Runtime: rt, Agent: direct, Store: store, Clock: fixedClock{},
-		Context: runtimecontext.NewManager(runtimecontext.Dependencies{}),
+	release := sync.OnceFunc(func() {
+		close(store.release)
 	})
+	defer release()
+	runner, err := harness.NewRunner(harness.Dependencies{Runtime: rt, Agent: direct, Store: store, Clock: fixedClock{}, Context: runtimecontext.NewManager(runtimecontext.Dependencies{})})
 	if err != nil {
 		t.Fatal(err)
 	}
 	request := testStartRequest()
-	request.Context = contextSeed("frozen instructions",
-		contextEntry("pr72-current", "pr72-turn", model.RoleUser, "answer directly", true))
+	request.Context = contextSeed("frozen instructions", contextEntry("pr72-current", "pr72-turn", model.RoleUser, "answer directly", true))
 	type outcome struct {
 		snapshot harness.Snapshot
 		err      error
@@ -106,63 +100,6 @@ func TestPR72DirectStartContextReplayReadFailureCannotTerminalizeOriginal(t *tes
 	}
 }
 
-func TestPR72WorkflowStartContextReplayReadFailureCannotTerminalizeOriginal(t *testing.T) {
-	rt := newFeatureInvocationRuntime(t)
-	backing := harness.NewMemoryStore()
-	store := &pr72ReplayContextReadStore{Store: backing, entered: make(chan struct{}), release: make(chan struct{})}
-	release := sync.OnceFunc(func() { close(store.release) })
-	defer release()
-	runner, err := harness.NewRunner(harness.Dependencies{
-		Runtime: rt, Agent: unusedFeatureAgent{}, Store: store, Clock: featureInvocationClock{},
-		Context:   runtimecontext.NewManager(runtimecontext.Dependencies{}),
-		Workflows: completedWorkflowFeature{runtime: rt},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	request := blockedWorkflowTurnRequest("pr72-context-replay")
-	request.Context = contextSeed("frozen instructions",
-		contextEntry("pr72-workflow-current", "pr72-workflow-turn", model.RoleUser, request.Goal, true))
-	type outcome struct {
-		snapshot harness.Snapshot
-		err      error
-	}
-	first := make(chan outcome, 1)
-	go func() {
-		snapshot, e := runner.StartWorkflowTurn(context.Background(), request)
-		first <- outcome{snapshot, e}
-	}()
-	select {
-	case <-store.entered:
-	case <-time.After(5 * time.Second):
-		t.Fatal("original Workflow Start never reached Context preflight")
-	}
-	_, replayErr := runner.StartWorkflowTurn(t.Context(), request)
-	if !errors.Is(replayErr, errPR72TransientContextRead) {
-		t.Errorf("replay did not surface read failure: %v", replayErr)
-	}
-	turnID := workflowTurnID(t, request)
-	before, err := backing.GetTurn(t.Context(), turnID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	release()
-	if before.Status != harness.TurnAccepted {
-		t.Errorf("Workflow replay terminalized in-flight owner: %s", before.Status)
-	}
-	select {
-	case original := <-first:
-		if original.err != nil || original.snapshot.Turn.Status != harness.TurnCompleted {
-			t.Errorf("original Workflow Start failed: status=%s err=%v", original.snapshot.Turn.Status, original.err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("original Workflow Start hung")
-	}
-}
-
-// Even the original Start may hit a transient read error after Turn creation.
-// Its absence of execution authority is not permission to make the shared Turn
-// terminal: a subsequent identical request can safely complete the admission.
 type pr72FirstContextReadFailsStore struct {
 	harness.Store
 	once atomic.Bool
@@ -174,7 +111,6 @@ func (s *pr72FirstContextReadFailsStore) GetActiveContextCheckpoint(ctx context.
 	}
 	return s.Store.GetActiveContextCheckpoint(ctx, scope)
 }
-
 func TestPR72OriginalContextReadFailureLeavesRetryableAdmission(t *testing.T) {
 	rt, err := kernel.New(kernel.Dependencies{Store: memory.NewStore(), Clock: fixedClock{}})
 	if err != nil {
@@ -185,16 +121,12 @@ func TestPR72OriginalContextReadFailureLeavesRetryableAdmission(t *testing.T) {
 		t.Fatal(err)
 	}
 	backing := harness.NewMemoryStore()
-	runner, err := harness.NewRunner(harness.Dependencies{
-		Runtime: rt, Agent: direct, Store: &pr72FirstContextReadFailsStore{Store: backing}, Clock: fixedClock{},
-		Context: runtimecontext.NewManager(runtimecontext.Dependencies{}),
-	})
+	runner, err := harness.NewRunner(harness.Dependencies{Runtime: rt, Agent: direct, Store: &pr72FirstContextReadFailsStore{Store: backing}, Clock: fixedClock{}, Context: runtimecontext.NewManager(runtimecontext.Dependencies{})})
 	if err != nil {
 		t.Fatal(err)
 	}
 	request := testStartRequest()
-	request.Context = contextSeed("instructions",
-		contextEntry("pr72-newcurrent", "pr72-newturn", model.RoleUser, "answer directly", true))
+	request.Context = contextSeed("instructions", contextEntry("pr72-newcurrent", "pr72-newturn", model.RoleUser, "answer directly", true))
 	_, err = runner.StartAgentTurn(t.Context(), request)
 	if !errors.Is(err, errPR72TransientContextRead) {
 		t.Fatalf("failed to inject first Context read: %v", err)

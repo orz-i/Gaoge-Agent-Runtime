@@ -9,7 +9,7 @@ import (
 // pure feature-state proof, NOT standalone physical cancellation authority.
 //
 // A Host-composed Agent with middleware additionally needs its original
-// Workflow AgentTask route to attest that every approval/continuation admission
+// delegated Agent execution route to attest that every approval/continuation admission
 // for this child is serialized by the same Harness physical dispatch grants
 // and cancellation intent. A running Run, unknown external effect, unbound
 // checkpoint or direct Host callback is not covered by this exception.

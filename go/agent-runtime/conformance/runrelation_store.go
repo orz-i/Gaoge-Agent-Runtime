@@ -40,15 +40,15 @@ func testRunRelationIdempotentOwner(t *testing.T, store runrelation.Store) {
 
 func testRunRelationConflicts(t *testing.T, store runrelation.Store) {
 	t.Helper()
-	original := testRunRelation("parent-1", "child-1", runrelation.KindTeamMember, "member-1", 0)
+	original := testRunRelation("parent-1", "child-1", runrelation.KindDelegation, "member-1", 0)
 	if _, _, err := store.Put(context.Background(), original); err != nil {
 		t.Fatal(err)
 	}
-	ownerConflict := testRunRelation("parent-1", "child-2", runrelation.KindTeamMember, "member-1", 1)
+	ownerConflict := testRunRelation("parent-1", "child-2", runrelation.KindDelegation, "member-1", 1)
 	if _, _, err := store.Put(context.Background(), ownerConflict); !errors.Is(err, runrelation.ErrConflict) {
 		t.Fatalf("owner conflict error = %v", err)
 	}
-	childConflict := testRunRelation("parent-2", "child-1", runrelation.KindWorkflowEffect, "effect-1", 2)
+	childConflict := testRunRelation("parent-2", "child-1", runrelation.KindCapability, "effect-1", 2)
 	if _, _, err := store.Put(context.Background(), childConflict); !errors.Is(err, runrelation.ErrConflict) {
 		t.Fatalf("child conflict error = %v", err)
 	}
@@ -58,7 +58,7 @@ func testRunRelationQueries(t *testing.T, store runrelation.Store) {
 	t.Helper()
 	second := testRunRelation("parent-list", "child-2", runrelation.KindCapability, "step-2", 2)
 	first := testRunRelation("parent-list", "child-1", runrelation.KindCapability, "step-1", 1)
-	other := testRunRelation("parent-other", "child-3", runrelation.KindTeamMember, "member-1", 0)
+	other := testRunRelation("parent-other", "child-3", runrelation.KindDelegation, "member-1", 0)
 	for _, relation := range []runrelation.Relation{second, other, first} {
 		if _, _, err := store.Put(context.Background(), relation); err != nil {
 			t.Fatal(err)

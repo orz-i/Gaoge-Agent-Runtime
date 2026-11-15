@@ -22,7 +22,7 @@ import (
 )
 
 // RunEA1RootAgentControlSettlementSuite covers AR-A P3/P4/P5. Root has no
-// ancestor. These APIs expose neither Workflow compensation nor shared-budget
+// ancestor. These APIs expose neither external compensation nor shared-budget
 // election; the entire original Budget is nevertheless protected on rejection.
 func RunEA1RootAgentControlSettlementSuite(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store)) {
 	for _, entry := range []string{"approval", "toolwait"} {

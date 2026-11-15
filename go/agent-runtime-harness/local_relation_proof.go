@@ -11,18 +11,9 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 )
 
-// Local Run IDs are not execution-owner evidence for raw Feature descendants.
-// Every edge must be vouched for by its statically composed Feature, all the
-// way back to a Harness Invocation. Matching public task fields alone cannot
-// distinguish identical Runs in independent Kernels.
-type localRelationVerifier interface {
-	VerifyLocalChild(*kernel.Runtime, kernel.Snapshot, runrelation.Relation, kernel.Snapshot, bool) bool
-}
-
-type localAgentRouteVerifier interface {
-	UsesLocalAgentRunner(*kernel.Runtime, *agent.Runner) bool
-}
-
+// Matching a local Run ID is never sufficient execution ownership.
+// Native Agent and delegated ChildRunner receipts must identify the original
+// frozen Invocation, Attempt and physical executor before approval/control.
 // Approval is physical Agent continuation, not merely a same-Kernel read.
 // Native Invocation owners use their configured Agent; delegated/raw Feature
 // children must retain the original fixed Agent object and all its hooks.
@@ -33,44 +24,19 @@ func (runner *Runner) verifyLocalApprovalRun(ctx context.Context, candidate kern
 	if err := runner.requireLiveApprovalAncestors(ctx, candidate.Run.ID); err != nil {
 		return err
 	}
-	var feature any
-	if runner.relationReader != nil {
-		relation, err := runner.relationReader.GetByChild(ctx, candidate.Run.ID)
-		if err != nil && !errors.Is(err, runrelation.ErrNotFound) {
-			return err
-		}
-		if err == nil {
-			switch relation.Kind {
-			case runrelation.KindTeamMember:
-				feature = runner.teams
-			case runrelation.KindGroupChatSpeaker:
-				feature = runner.groupChats
-			case runrelation.KindWorkflowEffect:
-				feature = runner.workflows
-			case runrelation.KindDelegation, runrelation.KindCapability:
-				// Dedicated Invocation below owns these Harness routes.
-			}
-		}
+	owner, err := runner.store.GetInvocationByExecutionRefID(ctx, candidate.Run.ID)
+	if err != nil {
+		return err
 	}
-	if feature == nil {
-		owner, err := runner.store.GetInvocationByExecutionRefID(ctx, candidate.Run.ID)
-		if err != nil {
-			return err
-		}
-		if !isHandoffDelegationInvocation(owner) {
-			return nil
-		}
-		original, ok := runner.agent.(*agent.Runner)
-		coordinator, bound := runner.handoffs.(*handoff.Coordinator)
-		frozen, _, proofErr := runner.localHandoffCancellationAuthority(ctx, owner, candidate)
-		if !ok || !bound || proofErr != nil || (!coordinator.ObservesLocalKernelRunner(runner.runtime) && candidate.Run.Kind != agent.RunKind) || !coordinator.UsesLocalAgentForDelegation(runner.runtime, original, frozen) {
-			return ErrRuntimeCancellationUnverified
-		}
+	if !isHandoffDelegationInvocation(owner) {
 		return nil
 	}
 	original, ok := runner.agent.(*agent.Runner)
-	verifier, verified := feature.(localAgentRouteVerifier)
-	if !ok || !verified || !verifier.UsesLocalAgentRunner(runner.runtime, original) {
+	coordinator, bound := runner.handoffs.(*handoff.Coordinator)
+	frozen, _, proofErr := runner.localHandoffCancellationAuthority(ctx, owner, candidate)
+	if !ok || !bound || proofErr != nil ||
+		(!coordinator.ObservesLocalKernelRunner(runner.runtime) && candidate.Run.Kind != agent.RunKind) ||
+		!coordinator.UsesLocalAgentForDelegation(runner.runtime, original, frozen) {
 		return ErrRuntimeCancellationUnverified
 	}
 	return nil
@@ -78,7 +44,7 @@ func (runner *Runner) verifyLocalApprovalRun(ctx context.Context, candidate kern
 
 // requireLiveApprovalAncestors separates read-only descendant ownership from
 // permission to create a new physical approval/Tool dispatch. A parent
-// Workflow/Team/GroupChat may already be cancelled or failed in Kernel while
+// Agent may already be cancelled or failed in Kernel while
 // its Harness Turn projection is stale. No terminal parent can mint a fresh
 // child approval, but cancellation cleanup can still traverse that ancestry.
 func (runner *Runner) requireLiveApprovalAncestors(ctx context.Context, childRunID string) error {
@@ -86,41 +52,61 @@ func (runner *Runner) requireLiveApprovalAncestors(ctx context.Context, childRun
 		return ErrRuntimeCancellationUnverified
 	}
 	if runner.relationReader == nil {
-		// A proven native Invocation without a RunRelation is already
-		// checked by verifyLocalRelationRun. Raw Feature children require
-		// a RelationSource there and cannot reach this fallback.
+		// Without an indexed relation, the original native Invocation proof
+		// is the only authorization route. The child cannot invent an edge.
 		return nil
 	}
 	seen := map[string]struct{}{childRunID: {}}
 	for current := childRunID; ; {
 		relation, err := runner.relationReader.GetByChild(ctx, current)
 		if errors.Is(err, runrelation.ErrNotFound) {
-			return nil // The verified Invocation is the root of this chain.
+			// Absence of an index is only a root boundary. A physical
+			// descendant, or an independently routed Handoff child whose
+			// parent is frozen in its Invocation, must not silently become
+			// an approval root if its indexed relation is missing.
+			physical, loadErr := runner.runtime.Load(ctx, current)
+			if loadErr != nil || physical.Run.ID != current {
+				return errors.Join(ErrRuntimeCancellationUnverified, loadErr)
+			}
+			if physical.Run.ParentRunID != "" {
+				return ErrRuntimeCancellationUnverified
+			}
+			if runner.store != nil {
+				owner, ownerErr := runner.store.GetInvocationByExecutionRefID(ctx, current)
+				if ownerErr == nil && owner.ParentItemID != "" {
+					return ErrRuntimeCancellationUnverified
+				}
+				if ownerErr != nil && !errors.Is(ownerErr, ErrNotFound) {
+					return errors.Join(ErrRuntimeCancellationUnverified, ownerErr)
+				}
+			}
+			return nil
 		}
 		if err != nil || relation.ChildRunID != current || relation.ParentRunID == "" {
 			return errors.Join(ErrRuntimeCancellationUnverified, err)
 		}
-		switch relation.Kind {
-		case runrelation.KindTeamMember, runrelation.KindGroupChatSpeaker, runrelation.KindWorkflowEffect:
-			// Continue through raw Feature ownership, which has no
-			// independent Harness child Invocation or terminal admission.
-		case runrelation.KindCapability, runrelation.KindDelegation:
-			// These have a separately proven original Invocation/Attempt,
-			// which may be Host Application-owned with no Kernel Run.
-			return nil
-		default:
+		// Only retained delegation/capability edges can extend authority.
+		// An obsolete or unknown composite relation must not authorize work.
+		if relation.Kind != runrelation.KindCapability && relation.Kind != runrelation.KindDelegation {
 			return ErrRuntimeCancellationUnverified
 		}
 		if _, cycle := seen[relation.ParentRunID]; cycle {
 			return ErrRuntimeCancellationUnverified
 		}
 		seen[relation.ParentRunID] = struct{}{}
-		parent, err := runner.runtime.Load(ctx, relation.ParentRunID)
-		if err != nil {
-			return errors.Join(ErrRuntimeCancellationUnverified, err)
+		child, loadErr := runner.runtime.Load(ctx, current)
+		if loadErr != nil || child.Run.ID != current ||
+			(child.Run.ParentRunID != "" && child.Run.ParentRunID != relation.ParentRunID) {
+			return errors.Join(ErrRuntimeCancellationUnverified, loadErr)
+		}
+		parent, loadErr := runner.runtime.Load(ctx, relation.ParentRunID)
+		if loadErr != nil || parent.Run.ID != relation.ParentRunID {
+			return errors.Join(ErrRuntimeCancellationUnverified, loadErr)
 		}
 		switch parent.Run.Status {
 		case kernel.RunStatusRunning, kernel.RunStatusWaitingInput, kernel.RunStatusPausedBudget:
+			// The next ancestor may have been terminated independently. Keep
+			// walking; a live immediate parent alone is never sufficient.
 		case kernel.RunStatusCompleted, kernel.RunStatusFailed, kernel.RunStatusCancelled:
 			return ErrRuntimeCancellationUnverified
 		default:
@@ -172,9 +158,6 @@ func (runner *Runner) verifyLocalRelationChain(ctx context.Context, candidate ke
 		return unverified()
 	}
 	seen[candidate.Run.ID] = true
-	// A global Invocation lookup must not hide an incoming Feature edge.
-	// Another Turn (or an unrelated sibling) may own a local Run whose ID
-	// collides with a remote Feature child. Prove that edge first.
 	var relation runrelation.Relation
 	relationErr := runrelation.ErrNotFound
 	if runner.relationReader != nil {
@@ -183,99 +166,54 @@ func (runner *Runner) verifyLocalRelationChain(ctx context.Context, candidate ke
 	if relationErr != nil && !errors.Is(relationErr, runrelation.ErrNotFound) {
 		return errors.Join(unverified(), relationErr)
 	}
-	rawFeatureChild := relationErr == nil && (relation.Kind == runrelation.KindTeamMember ||
-		relation.Kind == runrelation.KindGroupChatSpeaker || relation.Kind == runrelation.KindWorkflowEffect)
-	if rawFeatureChild && control && !runner.localRelationCancellerOwnsKernel(candidate.Run.Kind) {
-		// A local ChildRunner does not authorize a different physical
-		// Canceller. Reject before any callback, not after its foreign effect.
-		return unverified()
-	}
 	owner, err := runner.store.GetInvocationByExecutionRefID(ctx, candidate.Run.ID)
-	if relationErr == nil && relation.Kind == runrelation.KindCapability {
-		// A locally valid Invocation from another Turn does not authorize
-		// this parent Run's capability edge. Only the original child Attempt
-		// and its frozen root may supply the edge's OwnerNodeID/ParentRunID.
-		if err != nil {
-			return errors.Join(unverified(), err)
-		}
-		if proofErr := runner.verifyCapabilityRelationOwner(ctx, relation, owner); proofErr != nil {
-			return errors.Join(unverified(), proofErr)
-		}
-	}
-	if err == nil && !rawFeatureChild {
-		if isHandoffDelegationInvocation(owner) {
-			coordinator, ok := runner.handoffs.(*handoff.Coordinator)
-			if !ok {
-				return unverified()
-			}
-			frozen, _, proofErr := runner.localHandoffCancellationAuthority(ctx, owner, candidate)
-			if proofErr != nil || (!coordinator.ObservesLocalKernelRunner(runner.runtime) && candidate.Run.Kind != agent.RunKind) || !coordinator.ObservesLocalDelegation(runner.runtime, frozen) || (control && !coordinator.OwnsLocalDelegation(runner.runtime, frozen)) {
-				return unverified()
-			}
-		} else {
-			// A matching indexed Invocation proves only the claimed Run ID,
-			// not the actual Kernel execution owner. Reuse the existing
-			// frozen root/child provenance before any physical Cancel,
-			// approval continuation, or read-only Subtask Result projection.
-			// Incoming raw Feature edges still take precedence above; routed
-			// Handoff children retain their distinct ChildRunner proof.
-			var proofErr error
-			if owner.ParentItemID == "" {
-				proofErr = validateRootRuntimeOwnership(owner, candidate)
-			} else {
-				proofErr = runner.validateChildRuntimeOwnership(ctx, owner, candidate)
-			}
-			if proofErr != nil {
-				return errors.Join(unverified(), proofErr)
-			}
-		}
-		return nil
-	}
-	if err != nil && !errors.Is(err, ErrNotFound) {
-		return err
-	}
-	if runner.relationReader == nil {
-		return unverified()
-	}
-	if relationErr != nil {
-		return errors.Join(unverified(), relationErr)
-	}
-	if relation.ChildRunID != candidate.Run.ID || relation.ParentRunID == "" {
-		return unverified()
-	}
-	parent, err := runner.runtime.Load(ctx, relation.ParentRunID)
 	if err != nil {
 		return errors.Join(unverified(), err)
 	}
-	if err = runner.verifyLocalRelationChain(ctx, parent, control, seen); err != nil {
-		return err
-	}
-	var feature any
-	switch relation.Kind {
-	case runrelation.KindTeamMember:
-		feature = runner.teams
-	case runrelation.KindGroupChatSpeaker:
-		feature = runner.groupChats
-	case runrelation.KindWorkflowEffect:
-		feature = runner.workflows
-	case runrelation.KindDelegation, runrelation.KindCapability:
-		return unverified() // These require their own persisted Harness Invocation.
-	default:
-		return unverified()
-	}
-	if relation.Kind == runrelation.KindWorkflowEffect && candidate.Run.Kind == agent.RunKind {
-		// An AgentTask's Host effect must have indexed this physical child in
-		// the *same* immutable registry used by Harness. A coincidentally
-		// matching edge from another registry is never ownership evidence.
-		owner, ok := feature.(localCompositeExecutionOwner)
-		if !ok || !owner.OwnsKernelRuntime(runner.runtime) ||
-			!owner.RecordsRelationsTo(runner.relationReader) {
+	// A relation is only an index. It cannot grant a foreign parent control
+	// over an otherwise legitimate Run merely by naming its ID. Only the
+	// original frozen child Invocation and Handoff/Capability receipt can
+	// authenticate an incoming edge.
+	if relationErr == nil {
+		switch relation.Kind {
+		case runrelation.KindCapability:
+			if proofErr := runner.verifyCapabilityRelationOwner(ctx, relation, owner); proofErr != nil {
+				return errors.Join(unverified(), proofErr)
+			}
+		case runrelation.KindDelegation:
+			if !isHandoffDelegationInvocation(owner) {
+				return unverified()
+			}
+		default:
 			return unverified()
 		}
 	}
-	verifier, ok := feature.(localRelationVerifier)
-	if !ok || !verifier.VerifyLocalChild(runner.runtime, parent, relation, candidate, control) {
-		return unverified()
+	if isHandoffDelegationInvocation(owner) {
+		coordinator, ok := runner.handoffs.(*handoff.Coordinator)
+		if !ok {
+			return unverified()
+		}
+		frozen, parent, proofErr := runner.localHandoffCancellationAuthority(ctx, owner, candidate)
+		if proofErr != nil || (!coordinator.ObservesLocalKernelRunner(runner.runtime) && candidate.Run.Kind != agent.RunKind) ||
+			!coordinator.ObservesLocalDelegation(runner.runtime, frozen) ||
+			(control && !coordinator.OwnsLocalDelegation(runner.runtime, frozen)) {
+			return unverified()
+		}
+		if relationErr == nil && (relation.Kind != runrelation.KindDelegation ||
+			relation.ChildRunID != candidate.Run.ID || relation.ParentRunID != parent.ID ||
+			relation.OwnerNodeID != frozen.ID) {
+			return unverified()
+		}
+	} else {
+		var proofErr error
+		if owner.ParentItemID == "" {
+			proofErr = validateRootRuntimeOwnership(owner, candidate)
+		} else {
+			proofErr = runner.validateChildRuntimeOwnership(ctx, owner, candidate)
+		}
+		if proofErr != nil {
+			return errors.Join(unverified(), proofErr)
+		}
 	}
 	return nil
 }

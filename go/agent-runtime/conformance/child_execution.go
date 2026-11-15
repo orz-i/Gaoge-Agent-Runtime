@@ -23,7 +23,7 @@ func RunChildExecutionSuite(t *testing.T, create func(*testing.T) kernel.Store) 
 		thread := kernel.ThreadRef{Kind: "conversation", ID: "thread"}
 		newRun := func(id, parent string) kernel.Snapshot {
 			t.Helper()
-			s, err := rt.Create(t.Context(), kernel.CreateRequest{ID: id, Kind: "workflow", ParentRunID: parent,
+			s, err := rt.Create(t.Context(), kernel.CreateRequest{ID: id, Kind: "agent", ParentRunID: parent,
 				Actor: actor, Thread: thread, Goal: "shared-physical-authority", RequestID: id, State: []byte(`{}`)})
 			if err != nil {
 				t.Fatal(err)
@@ -69,7 +69,7 @@ func RunChildExecutionSuite(t *testing.T, create func(*testing.T) kernel.Store) 
 		if loadErr != nil {
 			t.Fatal(loadErr)
 		}
-		proof := featurecontrol.Seal(latest.Run.ID, latest.Run.Revision, "workflow_child_physical_settled", grant.ID, latest.State, latest.Checkpoint)
+		proof := featurecontrol.Seal(latest.Run.ID, latest.Run.Revision, "agent_child_physical_settled", grant.ID, latest.State, latest.Checkpoint)
 		if err = rt.MarkChildExecutionSettled(t.Context(), grant, proof); err != nil {
 			t.Fatalf("trusted Agent post-callback settlement marker was rejected: %v", err)
 		}
@@ -102,7 +102,7 @@ func RunChildExecutionSuite(t *testing.T, create func(*testing.T) kernel.Store) 
 		}
 		actor := kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}
 		thread := kernel.ThreadRef{Kind: "conversation", ID: "thread"}
-		parent, err := rt.Create(t.Context(), kernel.CreateRequest{ID: "parent", Kind: "workflow",
+		parent, err := rt.Create(t.Context(), kernel.CreateRequest{ID: "parent", Kind: "agent",
 			Actor: actor, Thread: thread, Goal: "parent", State: []byte(`{}`)})
 		if err != nil {
 			t.Fatal(err)
@@ -124,7 +124,7 @@ func RunChildExecutionSuite(t *testing.T, create func(*testing.T) kernel.Store) 
 		}
 		actor := kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}
 		thread := kernel.ThreadRef{Kind: "conversation", ID: "thread"}
-		_, err = rt.Create(t.Context(), kernel.CreateRequest{ID: "parent", Kind: "workflow",
+		_, err = rt.Create(t.Context(), kernel.CreateRequest{ID: "parent", Kind: "agent",
 			Actor: actor, Thread: thread, Goal: "parent", State: []byte(`{}`)})
 		if err != nil {
 			t.Fatal(err)

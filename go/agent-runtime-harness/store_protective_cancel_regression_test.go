@@ -9,8 +9,6 @@ import (
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/team"
 )
 
 type protectiveCancelReadFaultStore struct {
@@ -80,18 +78,12 @@ func TestProtectiveCancelKeepsNativeAgentStoppingUnderReadFailure(t *testing.T) 
 	}
 }
 
-// A narrow protective-stop read must still refuse a different Turn identity
-// even if that Store record names a real running Kernel Run. The cancel target
-// remains the requested Host Turn, not whatever row a Store happened to return.
 func TestProtectiveCancelNeverTargetsForeignTenantRun(t *testing.T) {
 	for _, mode := range []string{"redirect-turn", "foreign-session-link", "host-turn-rebind"} {
 		t.Run(mode, func(t *testing.T) {
 			runtime := newFeatureInvocationRuntime(t)
 			store := &readOwnerFaultStore{Store: harness.NewMemoryStore()}
-			runner, err := harness.NewRunner(harness.Dependencies{
-				Runtime: runtime, Agent: protectiveCancelAgentStarter{rt: runtime},
-				Store: store, Clock: featureInvocationClock{},
-			})
+			runner, err := harness.NewRunner(harness.Dependencies{Runtime: runtime, Agent: protectiveCancelAgentStarter{rt: runtime}, Store: store, Clock: featureInvocationClock{}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -138,58 +130,6 @@ func TestProtectiveCancelNeverTargetsForeignTenantRun(t *testing.T) {
 			blueRun, err := runtime.Load(t.Context(), blueRoot.ExecutionRefID)
 			if err != nil || blueRun.Run.Status != kernel.RunStatusRunning {
 				t.Fatalf("legitimate red stop affected blue: err=%v status=%s", err, blueRun.Run.Status)
-			}
-		})
-	}
-}
-
-type protectiveRunningTeam struct {
-	runtime   *kernel.Runtime
-	relations *runrelation.Registry
-}
-
-func (f *protectiveRunningTeam) StartRun(ctx context.Context, request team.StartRequest) (kernel.Snapshot, error) {
-	return f.runtime.Create(ctx, kernel.CreateRequest{ID: request.ID, Kind: team.RunKind, Actor: request.Actor, Thread: request.Thread, RequestID: request.RequestID, Goal: request.Goal, State: json.RawMessage(`{}`)})
-}
-func (f *protectiveRunningTeam) Resume(ctx context.Context, id string, _ uint64) (kernel.Snapshot, error) {
-	return f.runtime.Load(ctx, id)
-}
-func (f *protectiveRunningTeam) OwnsKernelRuntime(rt *kernel.Runtime) bool { return f.runtime == rt }
-func (f *protectiveRunningTeam) RecordsRelationsTo(r runrelation.Recorder) bool {
-	return r == f.relations
-}
-func TestProtectiveChildCancelStillStopsUnderReadFailure(t *testing.T) {
-	for _, mode := range []string{"config", "session"} {
-		t.Run(mode, func(t *testing.T) {
-			_, tid, parentID, relations, parentRunID, base, rt := newFeatureInvocationHarness(t)
-			store := &protectiveCancelReadFaultStore{Store: base}
-			teams := &protectiveRunningTeam{runtime: rt, relations: relations}
-			runner, err := harness.NewRunner(harness.Dependencies{Runtime: rt, Agent: loadingFeatureAgent{runtime: rt}, Store: store, Clock: featureInvocationClock{}, Teams: teams, Relations: relations, Interactions: noopInteractionResponseHandler{}})
-			if err != nil {
-				t.Fatal(err)
-			}
-			snap, err := runner.StartTeamInvocation(t.Context(), tid, harness.TeamInvocationRequest{ParentItemID: parentID, RequestID: "protective-team", Goal: "run child task", Mode: team.ExecutionSequential, Members: []team.Member{{ID: "writer", Goal: "write"}}})
-			if err != nil {
-				t.Fatalf("start child: %v", err)
-			}
-			child := teamChildInvocation(t, snap)
-			running, err := rt.Load(t.Context(), child.ExecutionRefID)
-			if err != nil || running.Run.Status != kernel.RunStatusRunning {
-				t.Fatalf("child run=%+v err=%v", running.Run, err)
-			}
-			store.failMode = mode
-			_, stopErr := runner.CancelInvocation(t.Context(), child.ID, "stop child")
-			after, loadErr := rt.Load(t.Context(), child.ExecutionRefID)
-			if loadErr != nil {
-				t.Fatal(loadErr)
-			}
-			parent, loadErr := rt.Load(t.Context(), parentRunID)
-			if loadErr != nil {
-				t.Fatal(loadErr)
-			}
-
-			if after.Run.Status != kernel.RunStatusCancelled || parent.Run.Status != kernel.RunStatusRunning {
-				t.Fatalf("child cancel availability or parent isolation violated: child=%s parent=%s err=%v", after.Run.Status, parent.Run.Status, stopErr)
 			}
 		})
 	}

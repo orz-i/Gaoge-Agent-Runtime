@@ -9,8 +9,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/team"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workflow"
 )
 
 type forgedInvocationReceiptStore struct {
@@ -36,7 +34,7 @@ func (s *forgedInvocationReceiptStore) CreateInvocation(ctx context.Context, val
 	case "run-id":
 		original.ExecutionRefID = "hr_unrelated"
 	case "class":
-		original.ExecutionClass = harness.ExecutionWorkflow
+		original.ExecutionClass = harness.ExecutionClass("removed-composite")
 	case "capability":
 		original.CapabilityKey = "runtime.alternate"
 	case "definition":
@@ -83,11 +81,7 @@ func (s *forgedInvocationReceiptStore) CreateInvocation(ctx context.Context, val
 }
 
 func TestHardcutCreateInvocationReceiptCannotSubstituteExecutionAuthority(t *testing.T) {
-	for _, kind := range []string{
-		"turn-id", "invocation-id", "run-id", "class", "capability",
-		"definition", "input", "input-hash", "attempt", "parent",
-		"fresh-status", "fresh-revision", "foreign-persisted",
-	} {
+	for _, kind := range []string{"turn-id", "invocation-id", "run-id", "class", "capability", "definition", "input", "input-hash", "attempt", "parent", "fresh-status", "fresh-revision", "foreign-persisted"} {
 		t.Run(kind, func(t *testing.T) {
 			runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
 			if err != nil {
@@ -106,60 +100,6 @@ func TestHardcutCreateInvocationReceiptCannotSubstituteExecutionAuthority(t *tes
 			_, err = runner.StartAgentTurn(t.Context(), testStartRequest())
 			if !errors.Is(err, harness.ErrConflict) || len(client.requests) != 0 {
 				t.Fatalf("CreateInvocation %s returned err=%v model_calls=%d; need ErrConflict before effect", kind, err, len(client.requests))
-			}
-		})
-	}
-}
-
-type countedTeamPhysicalStart struct {
-	completedTeamFeature
-	calls int
-}
-
-func (feature *countedTeamPhysicalStart) StartRun(ctx context.Context, request team.StartRequest) (kernel.Snapshot, error) {
-	feature.calls++
-	return feature.completedTeamFeature.StartRun(ctx, request)
-}
-
-type countedWorkflowPhysicalStart struct {
-	completedWorkflowFeature
-	calls int
-}
-
-func (feature *countedWorkflowPhysicalStart) StartRun(ctx context.Context, request workflow.StartRequest) (kernel.Snapshot, error) {
-	feature.calls++
-	return feature.completedWorkflowFeature.StartRun(ctx, request)
-}
-
-func TestHardcutForeignInvocationReceiptBlocksCompositeStart(t *testing.T) {
-	for _, name := range []string{"Team", "Workflow"} {
-		t.Run(name, func(t *testing.T) {
-			runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
-			if err != nil {
-				t.Fatal(err)
-			}
-			loop, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: directModel{}})
-			if err != nil {
-				t.Fatal(err)
-			}
-			store := &forgedInvocationReceiptStore{Store: harness.NewMemoryStore(), mutation: "foreign-persisted"}
-			teams := &countedTeamPhysicalStart{completedTeamFeature: completedTeamFeature{runtime: runtime}}
-			workflows := &countedWorkflowPhysicalStart{completedWorkflowFeature: completedWorkflowFeature{runtime: runtime}}
-			runner, err := harness.NewRunner(harness.Dependencies{Runtime: runtime, Agent: loop, Store: store,
-				Teams: teams, Workflows: workflows})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if name == "Team" {
-				_, err = runner.StartTeamTurn(t.Context(), harness.TeamTurnRequest{StartRequest: testStartRequest(),
-					Mode: team.ExecutionSequential, Members: []team.Member{{ID: "writer", Goal: "write"}}})
-			} else {
-				_, err = runner.StartWorkflowTurn(t.Context(), harness.WorkflowTurnRequest{StartRequest: testStartRequest(),
-					Definition: workflow.Definition{}})
-			}
-			if !errors.Is(err, harness.ErrConflict) || teams.calls != 0 || workflows.calls != 0 {
-				t.Fatalf("foreign Invocation reached %s physical execution: err=%v team_calls=%d workflow_calls=%d",
-					name, err, teams.calls, workflows.calls)
 			}
 		})
 	}

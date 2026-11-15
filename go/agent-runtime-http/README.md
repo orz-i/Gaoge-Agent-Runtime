@@ -26,10 +26,9 @@ Handlers using `BindStrictJSON` accept one complete JSON document up to 8 MiB
 (8388608 bytes), reject unknown fields and trailing JSON, and enforce `binding`
 field rules (including nested DTOs) before invoking runtime operations. Invalid
 JSON or fields return HTTP 400; oversized bodies return HTTP 413 with
-`request.body_too_large`. Workflow definition requests also verify the required
-`draft` members, including the presence of a zero-valued `revision` property.
-Both errors leave runtime state unchanged. Workflow drafts accept only their
-named top-level fields; nested `inputSchema`/`outputSchema` are opaque JSON.
+`request.body_too_large`. Both errors leave runtime state unchanged.
+The only first-party orchestration routes are Agent Run and Harness/Subtask
+endpoints; no obsolete composite routes are mounted.
 
 `GET /runs/:run_id` returns the current aggregate plus `eventHead`, not the full
 Kernel Event journal. Use `GET /runs/:run_id/events?afterSeq=...&limit=...` for

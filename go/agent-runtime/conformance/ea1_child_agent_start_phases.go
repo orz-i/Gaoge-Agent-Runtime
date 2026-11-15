@@ -122,7 +122,7 @@ func ea1NewChildStart(t *testing.T, factory func(*testing.T) (kernel.Store, kern
 	}
 	parentID := ""
 	for _, id := range []string{"root", "middle"} {
-		s, e := f.rt.Create(t.Context(), kernel.CreateRequest{ID: id, ParentRunID: parentID, Kind: "workflow", Actor: f.request.Actor, Thread: f.request.Thread, Goal: "original " + id, State: json.RawMessage(`{"original":true}`), DeadlineAt: f.request.DeadlineAt})
+		s, e := f.rt.Create(t.Context(), kernel.CreateRequest{ID: id, ParentRunID: parentID, Kind: "agent", Actor: f.request.Actor, Thread: f.request.Thread, Goal: "original " + id, State: json.RawMessage(`{"original":true}`), DeadlineAt: f.request.DeadlineAt})
 		if e != nil {
 			t.Fatal(e)
 		}

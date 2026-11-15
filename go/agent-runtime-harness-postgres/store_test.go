@@ -18,16 +18,6 @@ import (
 	"gorm.io/gorm"
 )
 
-// Host fixtures, not Runtime defaults. They exercise frozen capability
-// descriptors through the persistent adapter.
-func fixturePostgresCapabilityCommands() []harness.CommandDescriptor {
-	return []harness.CommandDescriptor{{
-		ID: "team", CapabilityKey: harness.CapabilityTeam, DefinitionVersion: harness.RuntimeCapabilityVersion,
-		ExecutionClass: harness.ExecutionTeam, Source: harness.CommandSourceFirstParty,
-		InputSchema: json.RawMessage(`{"type":"object","additionalProperties":false}`),
-	}}
-}
-
 const (
 	testHarnessExecutionRefID = "hr_pg"
 	testContextBaseSourceID   = "message-pg"
@@ -45,7 +35,6 @@ func TestStorePersistsHarnessLifecycleAndCAS(t *testing.T) {
 	assertSessionLifecycle(t, store, session)
 	config, err := harness.SealConfigSnapshot("ht_pg", harness.ConfigSnapshot{
 		Environment: harness.VersionRef{ID: "general", Revision: 7}, Model: "model",
-		Commands: fixturePostgresCapabilityCommands(),
 	}, now)
 	if err != nil {
 		t.Fatalf("seal config: %v", err)
@@ -72,76 +61,25 @@ func TestStorePersistsHarnessLifecycleAndCAS(t *testing.T) {
 	assertItemLifecycle(t, store, turn.ID, invocation.ID, now)
 }
 
-func TestStoredLegacyCommandPresentationFailsClosedOnRead(t *testing.T) {
-	store, db := newStoreWithDB(t)
-	config, err := harness.SealConfigSnapshot("legacy-command-turn", harness.ConfigSnapshot{
-		Commands: fixturePostgresCapabilityCommands(),
-	}, time.Date(2026, 10, 30, 10, 0, 0, 0, time.UTC))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := store.PutConfigSnapshot(t.Context(), config); err != nil {
-		t.Fatal(err)
-	}
-	var record struct {
-		PayloadJSON string `gorm:"column:payload_json"`
-	}
-	if err := db.Table("agent_harness_config_snapshots").Select("payload_json").Where("id = ?", config.ID).Take(&record).Error; err != nil {
-		t.Fatal(err)
-	}
-	var payload map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(record.PayloadJSON), &payload); err != nil {
-		t.Fatal(err)
-	}
-	var commands []map[string]json.RawMessage
-	if err := json.Unmarshal(payload["commands"], &commands); err != nil || len(commands) != 1 {
-		t.Fatalf("decode commands: %#v, %v", commands, err)
-	}
-	commands[0]["trigger"] = json.RawMessage(`"/team"`)
-	payload["commands"], err = json.Marshal(commands)
-	if err != nil {
-		t.Fatal(err)
-	}
-	legacy, err := json.Marshal(payload)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Table("agent_harness_config_snapshots").Where("id = ?", config.ID).Update("payload_json", string(legacy)).Error; err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.GetConfigSnapshot(t.Context(), config.ID); !errors.Is(err, harness.ErrConflict) {
-		t.Fatalf("legacy Host command presentation did not fail closed: %v", err)
-	}
-}
-
 func TestStoreConcurrentContextOwnerCommitPersistsDetachedBranch(t *testing.T) {
 	store := newStore(t)
 	now := time.Date(2026, 8, 23, 2, 15, 0, 0, time.UTC)
 	base := newContextCheckpoint(t, "scope-context-concurrent")
-	rootTurn, fresh, err := store.CreateTurn(t.Context(), harness.Turn{
-		ID: "turn-context-root", SessionID: base.ScopeID,
-		HostTurn: harness.HostRef{Kind: "conversation_turn", ID: "context-root"}, ConfigSnapshotID: "config-context-root",
-		Status: harness.TurnAccepted, Revision: 1, CreatedAt: now, UpdatedAt: now,
-	})
+	rootTurn, fresh, err := store.CreateTurn(t.Context(), harness.Turn{ID: "turn-context-root", SessionID: base.ScopeID, HostTurn: harness.HostRef{Kind: "conversation_turn", ID: "context-root"}, ConfigSnapshotID: "config-context-root", Status: harness.TurnAccepted, Revision: 1, CreatedAt: now, UpdatedAt: now})
 	if err != nil || !fresh {
 		t.Fatalf("create root turn fresh=%v err=%v", fresh, err)
 	}
-	rootTurn, err = store.CommitContextCheckpoint(t.Context(), harness.ContextCheckpointCommit{
-		TurnID: rootTurn.ID, ExpectedTurnRevision: rootTurn.Revision, Checkpoint: base, UpdatedAt: now.Add(time.Second),
-	})
+	rootTurn, err = store.CommitContextCheckpoint(t.Context(), harness.ContextCheckpointCommit{TurnID: rootTurn.ID, ExpectedTurnRevision: rootTurn.Revision, Checkpoint: base, UpdatedAt: now.Add(time.Second)})
 	if err != nil {
 		t.Fatal(err)
 	}
 	manager := runtimecontext.NewManager(runtimecontext.Dependencies{})
 	openBranch := func(turnID, sourceID, content string) runtimecontext.Checkpoint {
 		t.Helper()
-		checkpoint, openErr := manager.Open(t.Context(), runtimecontext.OpenRequest{
-			ScopeID: base.ScopeID, StaticFingerprint: base.StaticFingerprint, Instructions: base.Window.Instructions,
-			SourcePath: []string{sourceID}, Entries: []runtimecontext.Entry{{
-				ID: "entry-" + sourceID, SourceID: sourceID, TurnID: turnID,
-				Message: model.Message{Role: model.RoleUser, Content: model.TextParts(content)},
-			}}, SourceDelta: true, Previous: &base,
-		})
+		checkpoint, openErr := manager.Open(t.Context(), runtimecontext.OpenRequest{ScopeID: base.ScopeID, StaticFingerprint: base.StaticFingerprint, Instructions: base.Window.Instructions, SourcePath: []string{ // ResolveInteraction, not the removed general UpdateInteraction bypass,
+			// is the only Host response CAS. Model the normal WaitingInput owner
+			// transition before committing the business response.
+			sourceID}, Entries: []runtimecontext.Entry{{ID: "entry-" + sourceID, SourceID: sourceID, TurnID: turnID, Message: model.Message{Role: model.RoleUser, Content: model.TextParts(content)}}}, SourceDelta: true, Previous: &base})
 		if openErr != nil {
 			t.Fatal(openErr)
 		}
@@ -149,33 +87,19 @@ func TestStoreConcurrentContextOwnerCommitPersistsDetachedBranch(t *testing.T) {
 	}
 	branchA := openBranch("turn-context-a", "message-context-a", "branch a")
 	branchB := openBranch("turn-context-b", "message-context-b", "branch b")
-	turnA, fresh, err := store.CreateTurn(t.Context(), harness.Turn{
-		ID: "turn-context-a", SessionID: base.ScopeID,
-		HostTurn: harness.HostRef{Kind: "conversation_turn", ID: "context-a"}, ConfigSnapshotID: "config-context-a",
-		Status: harness.TurnAccepted, Revision: 1, CreatedAt: now, UpdatedAt: now,
-	})
+	turnA, fresh, err := store.CreateTurn(t.Context(), harness.Turn{ID: "turn-context-a", SessionID: base.ScopeID, HostTurn: harness.HostRef{Kind: "conversation_turn", ID: "context-a"}, ConfigSnapshotID: "config-context-a", Status: harness.TurnAccepted, Revision: 1, CreatedAt: now, UpdatedAt: now})
 	if err != nil || !fresh {
 		t.Fatalf("create branch A turn fresh=%v err=%v", fresh, err)
 	}
-	turnB, fresh, err := store.CreateTurn(t.Context(), harness.Turn{
-		ID: "turn-context-b", SessionID: base.ScopeID,
-		HostTurn: harness.HostRef{Kind: "conversation_turn", ID: "context-b"}, ConfigSnapshotID: "config-context-b",
-		Status: harness.TurnAccepted, Revision: 1, CreatedAt: now, UpdatedAt: now,
-	})
+	turnB, fresh, err := store.CreateTurn(t.Context(), harness.Turn{ID: "turn-context-b", SessionID: base.ScopeID, HostTurn: harness.HostRef{Kind: "conversation_turn", ID: "context-b"}, ConfigSnapshotID: "config-context-b", Status: harness.TurnAccepted, Revision: 1, CreatedAt: now, UpdatedAt: now})
 	if err != nil || !fresh {
 		t.Fatalf("create branch B turn fresh=%v err=%v", fresh, err)
 	}
-	turnA, err = store.CommitContextCheckpoint(t.Context(), harness.ContextCheckpointCommit{
-		TurnID: turnA.ID, ExpectedTurnRevision: turnA.Revision, ExpectedHeadCheckpointID: base.ID,
-		Checkpoint: branchA, UpdatedAt: now.Add(2 * time.Second),
-	})
+	turnA, err = store.CommitContextCheckpoint(t.Context(), harness.ContextCheckpointCommit{TurnID: turnA.ID, ExpectedTurnRevision: turnA.Revision, ExpectedHeadCheckpointID: base.ID, Checkpoint: branchA, UpdatedAt: now.Add(2 * time.Second)})
 	if err != nil {
 		t.Fatalf("advance branch A: %v", err)
 	}
-	turnB, err = store.CommitContextCheckpoint(t.Context(), harness.ContextCheckpointCommit{
-		TurnID: turnB.ID, ExpectedTurnRevision: turnB.Revision, ExpectedHeadCheckpointID: base.ID,
-		Checkpoint: branchB, UpdatedAt: now.Add(3 * time.Second),
-	})
+	turnB, err = store.CommitContextCheckpoint(t.Context(), harness.ContextCheckpointCommit{TurnID: turnB.ID, ExpectedTurnRevision: turnB.Revision, ExpectedHeadCheckpointID: base.ID, Checkpoint: branchB, UpdatedAt: now.Add(3 * time.Second)})
 	if err != nil {
 		t.Fatalf("detached branch B commit: %v", err)
 	}
@@ -188,7 +112,6 @@ func TestStoreConcurrentContextOwnerCommitPersistsDetachedBranch(t *testing.T) {
 	}
 	_ = turnA
 }
-
 func requirePutContextCheckpoint(t *testing.T, store *harnesspostgres.Store, checkpoint runtimecontext.Checkpoint) {
 	t.Helper()
 	created, fresh, err := store.PutContextCheckpoint(t.Context(), checkpoint)
@@ -196,7 +119,6 @@ func requirePutContextCheckpoint(t *testing.T, store *harnesspostgres.Store, che
 		t.Fatalf("put context checkpoint=%#v fresh=%v err=%v", created, fresh, err)
 	}
 }
-
 func TestStoreFindContextCheckpointForPathUsesBoundedIndexedCandidates(t *testing.T) {
 	store, db := newStoreWithDB(t)
 	manager := runtimecontext.NewManager(runtimecontext.Dependencies{})
@@ -206,9 +128,7 @@ func TestStoreFindContextCheckpointForPathUsesBoundedIndexedCandidates(t *testin
 	branch := newBranchContextCheckpoint(t, manager, base)
 	requirePutContextCheckpoint(t, store, branch)
 	observation := observeContextCheckpointCandidateQueries(t, db)
-	found, err := store.FindContextCheckpointForPath(t.Context(), harness.ContextCheckpointPathQuery{
-		ScopeID: base.ScopeID, StaticFingerprint: base.StaticFingerprint, SourcePath: contextCheckpointFuturePath(298),
-	})
+	found, err := store.FindContextCheckpointForPath(t.Context(), harness.ContextCheckpointPathQuery{ScopeID: base.ScopeID, StaticFingerprint: base.StaticFingerprint, SourcePath: contextCheckpointFuturePath(298)})
 	if err != nil || found.ID != branch.ID {
 		t.Fatalf("indexed path lookup=%#v want=%s err=%v", found, branch.ID, err)
 	}
@@ -219,44 +139,20 @@ func TestStoreFindContextCheckpointForPathUsesBoundedIndexedCandidates(t *testin
 		t.Fatalf("checkpoint reuse query expanded ancestry-sized SQL args: vars=%d", observation.maxCandidateVars)
 	}
 }
-
-func seedUnrelatedContextCheckpoints(
-	t *testing.T,
-	store *harnesspostgres.Store,
-	manager *runtimecontext.Manager,
-	base runtimecontext.Checkpoint,
-	count int,
-) {
+func seedUnrelatedContextCheckpoints(t *testing.T, store *harnesspostgres.Store, manager *runtimecontext.Manager, base runtimecontext.Checkpoint, count int) {
 	t.Helper()
 	for index := 0; index < count; index++ {
 		sourceID := fmt.Sprintf("unrelated-%04d", index)
-		checkpoint, err := manager.Open(t.Context(), runtimecontext.OpenRequest{
-			ScopeID: base.ScopeID, StaticFingerprint: base.StaticFingerprint, Instructions: base.Window.Instructions,
-			SourcePath: []string{sourceID}, Entries: []runtimecontext.Entry{{
-				ID: "entry-" + sourceID, SourceID: sourceID, TurnID: "turn-" + sourceID,
-				Message: model.Message{Role: model.RoleUser, Content: model.TextParts(sourceID)},
-			}},
-		})
+		checkpoint, err := manager.Open(t.Context(), runtimecontext.OpenRequest{ScopeID: base.ScopeID, StaticFingerprint: base.StaticFingerprint, Instructions: base.Window.Instructions, SourcePath: []string{sourceID}, Entries: []runtimecontext.Entry{{ID: "entry-" + sourceID, SourceID: sourceID, TurnID: "turn-" + sourceID, Message: model.Message{Role: model.RoleUser, Content: model.TextParts(sourceID)}}}})
 		if err != nil {
 			t.Fatal(err)
 		}
 		requirePutContextCheckpoint(t, store, checkpoint)
 	}
 }
-
-func newBranchContextCheckpoint(
-	t *testing.T,
-	manager *runtimecontext.Manager,
-	base runtimecontext.Checkpoint,
-) runtimecontext.Checkpoint {
+func newBranchContextCheckpoint(t *testing.T, manager *runtimecontext.Manager, base runtimecontext.Checkpoint) runtimecontext.Checkpoint {
 	t.Helper()
-	branch, err := manager.Open(t.Context(), runtimecontext.OpenRequest{
-		ScopeID: base.ScopeID, StaticFingerprint: base.StaticFingerprint, Instructions: base.Window.Instructions,
-		SourcePath: []string{testContextBranchChildID}, Entries: []runtimecontext.Entry{{
-			ID: "entry-" + testContextBranchChildID, SourceID: testContextBranchChildID, TurnID: "turn-" + testContextBranchChildID,
-			Message: model.Message{Role: model.RoleAssistant, Content: model.TextParts("branch child")},
-		}}, SourceDelta: true, Previous: &base,
-	})
+	branch, err := manager.Open(t.Context(), runtimecontext.OpenRequest{ScopeID: base.ScopeID, StaticFingerprint: base.StaticFingerprint, Instructions: base.Window.Instructions, SourcePath: []string{testContextBranchChildID}, Entries: []runtimecontext.Entry{{ID: "entry-" + testContextBranchChildID, SourceID: testContextBranchChildID, TurnID: "turn-" + testContextBranchChildID, Message: model.Message{Role: model.RoleAssistant, Content: model.TextParts("branch child")}}}, SourceDelta: true, Previous: &base})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,15 +185,14 @@ func observeContextCheckpointCandidateQueries(t *testing.T, db *gorm.DB) *contex
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = db.Callback().Query().Remove(callbackName) })
+	t.Cleanup(func() {
+		_ = db.Callback().Query().Remove(callbackName)
+	})
 	return observation
 }
-
 func isContextCheckpointCandidateQuery(sql string) bool {
-	return strings.Contains(sql, "agent_harness_context_checkpoints") &&
-		strings.Contains(sql, "covered_through_source_id") && strings.Contains(sql, "source_aligned")
+	return strings.Contains(sql, "agent_harness_context_checkpoints") && strings.Contains(sql, "covered_through_source_id") && strings.Contains(sql, "source_aligned")
 }
-
 func contextCheckpointFuturePath(futureChildren int) []string {
 	path := []string{testContextBaseSourceID, testContextBranchChildID}
 	for index := 0; index < futureChildren; index++ {
@@ -305,61 +200,29 @@ func contextCheckpointFuturePath(futureChildren int) []string {
 	}
 	return path
 }
-
-func createContextCommitTurn(
-	t *testing.T,
-	store *harnesspostgres.Store,
-	scopeID string,
-	suffix string,
-	now time.Time,
-) harness.Turn {
+func createContextCommitTurn(t *testing.T, store *harnesspostgres.Store, scopeID string, suffix string, now time.Time) harness.Turn {
 	t.Helper()
-	turn, fresh, err := store.CreateTurn(t.Context(), harness.Turn{
-		ID: "turn-" + suffix, SessionID: scopeID,
-		HostTurn: harness.HostRef{Kind: "conversation_turn", ID: suffix}, ConfigSnapshotID: "config-" + suffix,
-		Status: harness.TurnAccepted, Revision: 1, CreatedAt: now, UpdatedAt: now,
-	})
+	turn, fresh, err := store.CreateTurn(t.Context(), harness.Turn{ID: "turn-" + suffix, SessionID: scopeID, HostTurn: harness.HostRef{Kind: "conversation_turn", ID: suffix}, ConfigSnapshotID: "config-" + suffix, Status: harness.TurnAccepted, Revision: 1, CreatedAt: now, UpdatedAt: now})
 	if err != nil || !fresh {
 		t.Fatalf("create Context commit turn fresh=%v err=%v", fresh, err)
 	}
 	return turn
 }
-
-func requireCommitContextCheckpoint(
-	t *testing.T,
-	store *harnesspostgres.Store,
-	turn harness.Turn,
-	expectedTurnCheckpointID string,
-	expectedHeadCheckpointID string,
-	checkpoint runtimecontext.Checkpoint,
-	updatedAt time.Time,
-) harness.Turn {
+func requireCommitContextCheckpoint(t *testing.T, store *harnesspostgres.Store, turn harness.Turn, expectedTurnCheckpointID string, expectedHeadCheckpointID string, checkpoint runtimecontext.Checkpoint, updatedAt time.Time) harness.Turn {
 	t.Helper()
-	updated, err := store.CommitContextCheckpoint(t.Context(), harness.ContextCheckpointCommit{
-		TurnID: turn.ID, ExpectedTurnRevision: turn.Revision,
-		ExpectedTurnCheckpointID: expectedTurnCheckpointID, ExpectedHeadCheckpointID: expectedHeadCheckpointID,
-		Checkpoint: checkpoint, UpdatedAt: updatedAt,
-	})
+	updated, err := store.CommitContextCheckpoint(t.Context(), harness.ContextCheckpointCommit{TurnID: turn.ID, ExpectedTurnRevision: turn.Revision, ExpectedTurnCheckpointID: expectedTurnCheckpointID, ExpectedHeadCheckpointID: expectedHeadCheckpointID, Checkpoint: checkpoint, UpdatedAt: updatedAt})
 	if err != nil || updated.ContextCheckpointID != checkpoint.ID {
 		t.Fatalf("commit Context checkpoint turn=%#v err=%v", updated, err)
 	}
 	return updated
 }
-
-func requireActiveContextCheckpoint(
-	t *testing.T,
-	store *harnesspostgres.Store,
-	scopeID string,
-	wantID string,
-	wantGeneration int,
-) {
+func requireActiveContextCheckpoint(t *testing.T, store *harnesspostgres.Store, scopeID string, wantID string, wantGeneration int) {
 	t.Helper()
 	active, err := store.GetActiveContextCheckpoint(t.Context(), scopeID)
 	if err != nil || active.ID != wantID || active.Generation != wantGeneration {
 		t.Fatalf("active checkpoint=%#v want=%s/%d err=%v", active, wantID, wantGeneration, err)
 	}
 }
-
 func TestStoreContextCheckpointRequiresDurableArtifactsAndCommitsActiveHead(t *testing.T) {
 	store := newStore(t)
 	now := time.Date(2026, 8, 22, 9, 0, 0, 0, time.UTC)
@@ -370,17 +233,12 @@ func TestStoreContextCheckpointRequiresDurableArtifactsAndCommitsActiveHead(t *t
 	}
 	turn := createContextCommitTurn(t, store, base.ScopeID, "context-head", now)
 	turn = requireCommitContextCheckpoint(t, store, turn, "", "", base, now.Add(time.Second))
-	artifact, err := runtimecontext.NewArtifact(
-		runtimecontext.ArtifactCompaction, base.ScopeID, base.Generation+1, base.CoveredThroughSourceID,
-		"compacted durable history", json.RawMessage(`{"strategy":"portable"}`),
-	)
+	artifact, err := runtimecontext.NewArtifact(runtimecontext.ArtifactCompaction, base.ScopeID, base.Generation+1, base.CoveredThroughSourceID, "compacted durable history", json.RawMessage(`{"strategy":"portable"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	manager := runtimecontext.NewManager(runtimecontext.Dependencies{})
-	rollover, err := manager.Rollover(t.Context(), runtimecontext.RolloverRequest{
-		Previous: base, Window: base.Window, Artifacts: []runtimecontext.Artifact{artifact}, Reason: "soft_limit",
-	})
+	rollover, err := manager.Rollover(t.Context(), runtimecontext.RolloverRequest{Previous: base, Window: base.Window, Artifacts: []runtimecontext.Artifact{artifact}, Reason: "soft_limit"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -399,44 +257,26 @@ func TestStoreContextCheckpointRequiresDurableArtifactsAndCommitsActiveHead(t *t
 		t.Fatalf("loaded artifact=%#v err=%v", loadedArtifact, err)
 	}
 }
-
 func TestStoreFailedContextCommitDoesNotAdvanceHeadOrPersistCheckpoint(t *testing.T) {
 	store := newStore(t)
 	now := time.Date(2026, 8, 22, 9, 10, 0, 0, time.UTC)
 	base := newContextCheckpoint(t, "scope-context-cas")
-	turn, fresh, err := store.CreateTurn(t.Context(), harness.Turn{
-		ID: "turn-context-cas", SessionID: base.ScopeID,
-		HostTurn: harness.HostRef{Kind: "conversation_turn", ID: "context-cas"}, ConfigSnapshotID: "config-context-cas",
-		Status: harness.TurnAccepted, Revision: 1, CreatedAt: now, UpdatedAt: now,
-	})
+	turn, fresh, err := store.CreateTurn(t.Context(), harness.Turn{ID: "turn-context-cas", SessionID: base.ScopeID, HostTurn: harness.HostRef{Kind: "conversation_turn", ID: "context-cas"}, ConfigSnapshotID: "config-context-cas", Status: harness.TurnAccepted, Revision: 1, CreatedAt: now, UpdatedAt: now})
 	if err != nil || !fresh {
 		t.Fatalf("create turn fresh=%v err=%v", fresh, err)
 	}
-	turn, err = store.CommitContextCheckpoint(t.Context(), harness.ContextCheckpointCommit{
-		TurnID: turn.ID, ExpectedTurnRevision: turn.Revision, Checkpoint: base, UpdatedAt: now.Add(time.Second),
-	})
+	turn, err = store.CommitContextCheckpoint(t.Context(), harness.ContextCheckpointCommit{TurnID: turn.ID, ExpectedTurnRevision: turn.Revision, Checkpoint: base, UpdatedAt: now.Add(time.Second)})
 	if err != nil {
 		t.Fatalf("commit base: %v", err)
 	}
 	manager := runtimecontext.NewManager(runtimecontext.Dependencies{})
 	entries := runtimecontext.CloneEntries(base.Window.Entries)
-	entries = append(entries, runtimecontext.Entry{
-		ID: "entry-context-cas-next", SourceID: "message-cas-next", TurnID: "turn-cas-next",
-		Message: model.Message{Role: model.RoleAssistant, Content: model.TextParts("next context")},
-	})
-	candidate, err := manager.Open(t.Context(), runtimecontext.OpenRequest{
-		ScopeID: base.ScopeID, StaticFingerprint: base.StaticFingerprint,
-		SourcePath: []string{testContextBaseSourceID, "message-cas-next"}, Instructions: base.Window.Instructions,
-		Entries: entries, Previous: &base,
-	})
+	entries = append(entries, runtimecontext.Entry{ID: "entry-context-cas-next", SourceID: "message-cas-next", TurnID: "turn-cas-next", Message: model.Message{Role: model.RoleAssistant, Content: model.TextParts("next context")}})
+	candidate, err := manager.Open(t.Context(), runtimecontext.OpenRequest{ScopeID: base.ScopeID, StaticFingerprint: base.StaticFingerprint, SourcePath: []string{testContextBaseSourceID, "message-cas-next"}, Instructions: base.Window.Instructions, Entries: entries, Previous: &base})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = store.CommitContextCheckpoint(t.Context(), harness.ContextCheckpointCommit{
-		TurnID: turn.ID, ExpectedTurnRevision: turn.Revision + 1,
-		ExpectedTurnCheckpointID: base.ID, ExpectedHeadCheckpointID: base.ID,
-		Checkpoint: candidate, UpdatedAt: now.Add(2 * time.Second),
-	})
+	_, err = store.CommitContextCheckpoint(t.Context(), harness.ContextCheckpointCommit{TurnID: turn.ID, ExpectedTurnRevision: turn.Revision + 1, ExpectedTurnCheckpointID: base.ID, ExpectedHeadCheckpointID: base.ID, Checkpoint: candidate, UpdatedAt: now.Add(2 * time.Second)})
 	if !errors.Is(err, harness.ErrConflict) {
 		t.Fatalf("stale Context commit error=%v", err)
 	}
@@ -448,40 +288,23 @@ func TestStoreFailedContextCommitDoesNotAdvanceHeadOrPersistCheckpoint(t *testin
 		t.Fatalf("failed commit left speculative checkpoint durable: %v", err)
 	}
 }
-
 func TestStoreContextCommitRejectsCrossLineageParent(t *testing.T) {
 	store := newStore(t)
 	now := time.Date(2026, 8, 23, 8, 40, 0, 0, time.UTC)
 	manager := runtimecontext.NewManager(runtimecontext.Dependencies{})
 	base := newContextCheckpoint(t, "scope-cross-lineage-cas")
-	other, err := manager.Open(t.Context(), runtimecontext.OpenRequest{
-		ScopeID: base.ScopeID, StaticFingerprint: base.StaticFingerprint, Instructions: base.Window.Instructions,
-		SourcePath: []string{"message-other-lineage"}, Entries: []runtimecontext.Entry{{
-			ID: "entry-other-lineage", SourceID: "message-other-lineage", TurnID: "turn-other-lineage",
-			Message: model.Message{Role: model.RoleUser, Content: model.TextParts("other lineage")},
-		}},
-	})
+	other, err := manager.Open(t.Context(), runtimecontext.OpenRequest{ScopeID: base.ScopeID, StaticFingerprint: base.StaticFingerprint, Instructions: base.Window.Instructions, SourcePath: []string{"message-other-lineage"}, Entries: []runtimecontext.Entry{{ID: "entry-other-lineage", SourceID: "message-other-lineage", TurnID: "turn-other-lineage", Message: model.Message{Role: model.RoleUser, Content: model.TextParts("other lineage")}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	requirePutContextCheckpoint(t, store, other)
 	turn := createContextCommitTurn(t, store, base.ScopeID, "cross-lineage-cas", now)
 	turn = requireCommitContextCheckpoint(t, store, turn, "", "", base, now.Add(time.Second))
-	candidate, err := manager.Open(t.Context(), runtimecontext.OpenRequest{
-		ScopeID: base.ScopeID, StaticFingerprint: base.StaticFingerprint, Instructions: base.Window.Instructions,
-		SourcePath: []string{"message-other-child"}, Entries: []runtimecontext.Entry{{
-			ID: "entry-other-child", SourceID: "message-other-child", TurnID: "turn-other-child",
-			Message: model.Message{Role: model.RoleAssistant, Content: model.TextParts("other child")},
-		}}, SourceDelta: true, Previous: &other,
-	})
+	candidate, err := manager.Open(t.Context(), runtimecontext.OpenRequest{ScopeID: base.ScopeID, StaticFingerprint: base.StaticFingerprint, Instructions: base.Window.Instructions, SourcePath: []string{"message-other-child"}, Entries: []runtimecontext.Entry{{ID: "entry-other-child", SourceID: "message-other-child", TurnID: "turn-other-child", Message: model.Message{Role: model.RoleAssistant, Content: model.TextParts("other child")}}}, SourceDelta: true, Previous: &other})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = store.CommitContextCheckpoint(t.Context(), harness.ContextCheckpointCommit{
-		TurnID: turn.ID, ExpectedTurnRevision: turn.Revision,
-		ExpectedTurnCheckpointID: base.ID, ExpectedHeadCheckpointID: base.ID,
-		Checkpoint: candidate, UpdatedAt: now.Add(2 * time.Second),
-	})
+	_, err = store.CommitContextCheckpoint(t.Context(), harness.ContextCheckpointCommit{TurnID: turn.ID, ExpectedTurnRevision: turn.Revision, ExpectedTurnCheckpointID: base.ID, ExpectedHeadCheckpointID: base.ID, Checkpoint: candidate, UpdatedAt: now.Add(2 * time.Second)})
 	if !errors.Is(err, harness.ErrConflict) {
 		t.Fatalf("cross-lineage Context commit error=%v", err)
 	}
@@ -494,52 +317,31 @@ func TestStoreContextCommitRejectsCrossLineageParent(t *testing.T) {
 		t.Fatalf("cross-lineage commit changed owning Turn=%#v err=%v", storedTurn, err)
 	}
 }
-
 func TestStoreFindContextCheckpointForPathChoosesNearestSourceAlignedAncestor(t *testing.T) {
 	store := newStore(t)
 	manager := runtimecontext.NewManager(runtimecontext.Dependencies{})
 	base := newContextCheckpoint(t, "scope-path-reuse")
 	requirePutContextCheckpoint(t, store, base)
-
-	branchA1, err := manager.Open(t.Context(), runtimecontext.OpenRequest{
-		ScopeID: base.ScopeID, StaticFingerprint: base.StaticFingerprint, Instructions: base.Window.Instructions,
-		SourcePath: []string{"a1"}, Entries: []runtimecontext.Entry{{
-			ID: "entry-a1", SourceID: "a1", TurnID: "turn-a1", Message: model.Message{Role: model.RoleAssistant, Content: model.TextParts("a1")},
-		}}, SourceDelta: true, Previous: &base,
-	})
+	branchA1, err := manager.Open(t.Context(), runtimecontext.OpenRequest{ScopeID: base.ScopeID, StaticFingerprint: base.StaticFingerprint, Instructions: base.Window.Instructions, SourcePath: []string{"a1"}, Entries: []runtimecontext.Entry{{ID: "entry-a1", SourceID: "a1", TurnID: "turn-a1", Message: model.Message{Role: model.RoleAssistant, Content: model.TextParts("a1")}}}, SourceDelta: true, Previous: &base})
 	if err != nil {
 		t.Fatal(err)
 	}
 	requirePutContextCheckpoint(t, store, branchA1)
-	branchA2, err := manager.Open(t.Context(), runtimecontext.OpenRequest{
-		ScopeID: base.ScopeID, StaticFingerprint: base.StaticFingerprint, Instructions: base.Window.Instructions,
-		SourcePath: []string{"a2"}, Entries: []runtimecontext.Entry{{
-			ID: "entry-a2", SourceID: "a2", TurnID: "turn-a2", Message: model.Message{Role: model.RoleUser, Content: model.TextParts("a2")},
-		}}, SourceDelta: true, Previous: &branchA1,
-	})
+	branchA2, err := manager.Open(t.Context(), runtimecontext.OpenRequest{ScopeID: base.ScopeID, StaticFingerprint: base.StaticFingerprint, Instructions: base.Window.Instructions, SourcePath: []string{"a2"}, Entries: []runtimecontext.Entry{{ID: "entry-a2", SourceID: "a2", TurnID: "turn-a2", Message: model.Message{Role: model.RoleUser, Content: model.TextParts("a2")}}}, SourceDelta: true, Previous: &branchA1})
 	if err != nil {
 		t.Fatal(err)
 	}
 	requirePutContextCheckpoint(t, store, branchA2)
-
-	runtimeTail, err := manager.Capture(t.Context(), runtimecontext.CaptureRequest{
-		Previous: branchA2, StaticFingerprint: branchA2.StaticFingerprint, RunID: "run-a2",
-		Messages: append(runtimecontext.Materialize(branchA2.Window), model.Message{Role: model.RoleAssistant, Content: model.TextParts("runtime tail")}),
-	})
+	runtimeTail, err := manager.Capture(t.Context(), runtimecontext.CaptureRequest{Previous: branchA2, StaticFingerprint: branchA2.StaticFingerprint, RunID: "run-a2", Messages: append(runtimecontext.Materialize(branchA2.Window), model.Message{Role: model.RoleAssistant, Content: model.TextParts("runtime tail")})})
 	if err != nil {
 		t.Fatal(err)
 	}
 	requirePutContextCheckpoint(t, store, runtimeTail)
-
-	found, err := store.FindContextCheckpointForPath(t.Context(), harness.ContextCheckpointPathQuery{
-		ScopeID: base.ScopeID, StaticFingerprint: base.StaticFingerprint,
-		SourcePath: []string{testContextBaseSourceID, "a1", "a2", "a3"},
-	})
+	found, err := store.FindContextCheckpointForPath(t.Context(), harness.ContextCheckpointPathQuery{ScopeID: base.ScopeID, StaticFingerprint: base.StaticFingerprint, SourcePath: []string{testContextBaseSourceID, "a1", "a2", "a3"}})
 	if err != nil || found.ID != branchA2.ID {
 		t.Fatalf("nearest source-aligned checkpoint=%#v want=%s err=%v", found, branchA2.ID, err)
 	}
 }
-
 func TestStoreFindContextCheckpointForPathDoesNotScaleSQLArgumentsWithAncestry(t *testing.T) {
 	store := newStore(t)
 	const ancestrySize = 40_000
@@ -547,44 +349,31 @@ func TestStoreFindContextCheckpointForPathDoesNotScaleSQLArgumentsWithAncestry(t
 	for index := range path {
 		path[index] = fmt.Sprintf("message-%05d", index)
 	}
-	_, err := store.FindContextCheckpointForPath(t.Context(), harness.ContextCheckpointPathQuery{
-		ScopeID: "scope-large-path-query", StaticFingerprint: runtimecontext.StaticFingerprint("large-path"), SourcePath: path,
-	})
+	_, err := store.FindContextCheckpointForPath(t.Context(), harness.ContextCheckpointPathQuery{ScopeID: "scope-large-path-query", StaticFingerprint: runtimecontext.StaticFingerprint("large-path"), SourcePath: path})
 	if !errors.Is(err, harness.ErrNotFound) {
 		t.Fatalf("large ancestry lookup should execute without an ancestor-sized IN clause, got %v", err)
 	}
 }
-
 func TestStoreFindContextCheckpointForPathRejectsMalformedSourcePath(t *testing.T) {
 	t.Parallel()
 	store := newStore(t)
-	for name, sourcePath := range map[string][]string{
-		"empty":     {testContextPathRootID, "   ", "message-leaf"},
-		"duplicate": {testContextPathRootID, testContextPathRootID},
-	} {
+	for name, sourcePath := range map[string][]string{"empty": {testContextPathRootID, "   ", "message-leaf"}, "duplicate": {testContextPathRootID, testContextPathRootID}} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			_, err := store.FindContextCheckpointForPath(t.Context(), harness.ContextCheckpointPathQuery{
-				ScopeID: "scope-malformed-path", StaticFingerprint: runtimecontext.StaticFingerprint("stable"),
-				SourcePath: sourcePath,
-			})
+			_, err := store.FindContextCheckpointForPath(t.Context(), harness.ContextCheckpointPathQuery{ScopeID: "scope-malformed-path", StaticFingerprint: runtimecontext.StaticFingerprint("stable"), SourcePath: sourcePath})
 			if !errors.Is(err, harness.ErrInvalidRequest) {
 				t.Fatalf("malformed Context path error=%v", err)
 			}
 		})
 	}
 }
-
 func TestStoreRetriesInvocationWithAtomicAttemptRotation(t *testing.T) {
 	store := newStore(t)
 	now := time.Date(2026, 8, 20, 4, 20, 0, 0, time.UTC)
 	value := createRetryInvocationFixture(t, store, now)
-	retried, err := store.RetryInvocation(
-		t.Context(), value.ID, value.Revision, "run_retry_pg_2", now.Add(time.Second),
-	)
+	retried, err := store.RetryInvocation(t.Context(), value.ID, value.Revision, "run_retry_pg_2", now.Add(time.Second))
 	assertRetriedInvocation(t, store, value, retried, err)
 }
-
 func TestStoreRetriesTopLevelInvocationAndReopensTurnAtomically(t *testing.T) {
 	store := newStore(t)
 	now := time.Date(2026, 8, 20, 4, 25, 0, 0, time.UTC)
@@ -593,31 +382,23 @@ func TestStoreRetriesTopLevelInvocationAndReopensTurnAtomically(t *testing.T) {
 	assertTopLevelInvocationRetried(t, retried, err)
 	assertTopLevelTurnReopened(t, store, turn.ID)
 }
-
 func TestStorePersistsInteractionResolutionBeforeOwnersResume(t *testing.T) {
 	store := newStore(t)
 	turn, invocation, interaction := createWaitingInteractionFixture(t, store, "resolve")
 	interaction.Status = harness.InteractionResolved
 	interaction.Response = json.RawMessage(`{"candidateID":"candidate-2"}`)
 	interaction.UpdatedAt = interaction.UpdatedAt.Add(time.Second)
-
 	resolution, err := store.ResolveInteraction(t.Context(), interaction, interaction.Revision)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resolution.Interaction.Status != harness.InteractionResolved || resolution.Interaction.Revision != 2 ||
-		resolution.Invocation.Status != harness.InvocationWaitingInput || resolution.Invocation.Revision != invocation.Revision ||
-		resolution.Turn.Status != harness.TurnWaitingInput || resolution.Turn.Revision != turn.Revision {
+	if resolution.Interaction.Status != harness.InteractionResolved || resolution.Interaction.Revision != 2 || resolution.Invocation.Status != harness.InvocationWaitingInput || resolution.Invocation.Revision != invocation.Revision || resolution.Turn.Status != harness.TurnWaitingInput || resolution.Turn.Revision != turn.Revision {
 		t.Fatalf("interaction resolution resumed owners before continuation = %#v", resolution)
 	}
 }
-
 func TestStoreRejectsInteractionResolutionAfterCancellation(t *testing.T) {
 	store := newStore(t)
 	turn, invocation, interaction := createWaitingInteractionFixture(t, store, "cancel")
-	// Model a historical completed cancellation: this test validates
-	// late Interaction.Resolve rejection, not the new authorization to
-	// terminalize a live Invocation/Turn without Kernel control proof.
 	invocation.Status = harness.InvocationCancelled
 	invocation.UpdatedAt = invocation.UpdatedAt.Add(time.Second)
 	if _, err := harnesspostgres.TerminalFixtureInvocationForTest(t.Context(), store, invocation, invocation.Revision); err != nil {
@@ -631,7 +412,6 @@ func TestStoreRejectsInteractionResolutionAfterCancellation(t *testing.T) {
 	interaction.Status = harness.InteractionResolved
 	interaction.Response = json.RawMessage(`{"candidateID":"candidate-2"}`)
 	interaction.UpdatedAt = interaction.UpdatedAt.Add(2 * time.Second)
-
 	if _, err := store.ResolveInteraction(t.Context(), interaction, interaction.Revision); !errors.Is(err, harness.ErrConflict) {
 		t.Fatalf("late interaction resolution error = %v", err)
 	}
@@ -643,37 +423,18 @@ func TestStoreRejectsInteractionResolutionAfterCancellation(t *testing.T) {
 		t.Fatalf("late resolution mutated interaction: %#v", persisted)
 	}
 }
-
-func createWaitingInteractionFixture(
-	t *testing.T,
-	store *harnesspostgres.Store,
-	suffix string,
-) (harness.Turn, harness.Invocation, harness.Interaction) {
+func createWaitingInteractionFixture(t *testing.T, store *harnesspostgres.Store, suffix string) (harness.Turn, harness.Invocation, harness.Interaction) {
 	t.Helper()
 	now := time.Date(2026, 8, 20, 5, 0, 0, 0, time.UTC)
-	turn := harness.Turn{
-		ID: "turn_interaction_" + suffix, SessionID: "session_interaction_" + suffix,
-		HostTurn:         harness.HostRef{Kind: "conversation_turn", ID: "host_" + suffix},
-		ConfigSnapshotID: "config_interaction_" + suffix, Status: harness.TurnRunning,
-		Revision: 1, CreatedAt: now, UpdatedAt: now,
-	}
+	turn := harness.Turn{ID: "turn_interaction_" + suffix, SessionID: "session_interaction_" + suffix, HostTurn: harness.HostRef{Kind: "conversation_turn", ID: "host_" + suffix}, ConfigSnapshotID: "config_interaction_" + suffix, Status: harness.TurnRunning, Revision: 1, CreatedAt: now, UpdatedAt: now}
 	if _, fresh, err := store.CreateTurn(t.Context(), turn); err != nil || !fresh {
 		t.Fatalf("create interaction turn fresh=%v err=%v", fresh, err)
 	}
-	invocation := harness.Invocation{
-		ID: "invocation_interaction_" + suffix, TurnID: turn.ID, CapabilityKey: "runtime.agent",
-		DefinitionVersion: "v1", ExecutionClass: harness.ExecutionAgent,
-		ExecutionRefID: "run_interaction_" + suffix, Status: harness.InvocationRunning,
-		Attempt: 1, OutputRefs: []harness.HostRef{}, Revision: 1, CreatedAt: now, UpdatedAt: now,
-	}
+	invocation := harness.Invocation{ID: "invocation_interaction_" + suffix, TurnID: turn.ID, CapabilityKey: "runtime.agent", DefinitionVersion: "v1", ExecutionClass: harness.ExecutionAgent, ExecutionRefID: "run_interaction_" + suffix, Status: harness.InvocationRunning, Attempt: 1, OutputRefs: []harness.HostRef{}, Revision: 1, CreatedAt: now, UpdatedAt: now}
 	if _, fresh, err := store.CreateInvocation(t.Context(), invocation); err != nil || !fresh {
 		t.Fatalf("create interaction invocation fresh=%v err=%v", fresh, err)
 	}
-	interaction := harness.Interaction{
-		ID: "interaction_" + suffix, TurnID: turn.ID, InvocationID: invocation.ID,
-		Key: "candidate-choice", Kind: harness.InteractionChoice, Schema: json.RawMessage(`{"type":"object"}`),
-		Status: harness.InteractionWaiting, Revision: 1, CreatedAt: now, UpdatedAt: now,
-	}
+	interaction := harness.Interaction{ID: "interaction_" + suffix, TurnID: turn.ID, InvocationID: invocation.ID, Key: "candidate-choice", Kind: harness.InteractionChoice, Schema: json.RawMessage(`{"type":"object"}`), Status: harness.InteractionWaiting, Revision: 1, CreatedAt: now, UpdatedAt: now}
 	if _, fresh, err := store.CreateInteraction(t.Context(), interaction, turn.Revision, invocation.Revision); err != nil || !fresh {
 		t.Fatalf("create interaction fresh=%v err=%v", fresh, err)
 	}
@@ -692,85 +453,46 @@ func createWaitingInteractionFixture(
 	}
 	return turn, invocation, interaction
 }
-
-func createTopLevelRetryFixture(
-	t *testing.T,
-	store *harnesspostgres.Store,
-	now time.Time,
-) (harness.Turn, harness.Invocation) {
+func createTopLevelRetryFixture(t *testing.T, store *harnesspostgres.Store, now time.Time) (harness.Turn, harness.Invocation) {
 	t.Helper()
-	turn := harness.Turn{
-		ID: "turn_retry_root_pg", SessionID: "session_retry_root_pg",
-		HostTurn:         harness.HostRef{Kind: "conversation_turn", ID: "retry-root"},
-		ConfigSnapshotID: "config_retry_root_pg", Status: harness.TurnFailed, Revision: 1,
-		ErrorCode: "fixture.failed", ErrorDetail: "first attempt failed", CreatedAt: now, UpdatedAt: now,
-	}
+	turn := harness.Turn{ID: "turn_retry_root_pg", SessionID: "session_retry_root_pg", HostTurn: harness.HostRef{Kind: "conversation_turn", ID: "retry-root"}, ConfigSnapshotID: "config_retry_root_pg", Status: harness.TurnFailed, Revision: 1, ErrorCode: "fixture.failed", ErrorDetail: "first attempt failed", CreatedAt: now, UpdatedAt: now}
 	if _, fresh, err := store.CreateTurn(t.Context(), turn); err != nil || !fresh {
 		t.Fatalf("create root retry turn fresh=%v err=%v", fresh, err)
 	}
 	input := json.RawMessage(`{"goal":"retry root"}`)
 	hash := sha256.Sum256(input)
-	invocation := harness.Invocation{
-		ID: "hiv_retry_root_pg", TurnID: turn.ID, CapabilityKey: harness.CapabilityAgent,
-		DefinitionVersion: harness.RuntimeCapabilityVersion, ExecutionClass: harness.ExecutionAgent,
-		Input: input, InputHash: fmt.Sprintf("%x", hash[:]), ExecutionRefID: "run_retry_root_pg_1",
-		Status: harness.InvocationFailed, Attempt: 1, OutputRefs: []harness.HostRef{}, Revision: 1,
-		CreatedAt: now, UpdatedAt: now,
-	}
+	invocation := harness.Invocation{ID: "hiv_retry_root_pg", TurnID: turn.ID, CapabilityKey: harness.CapabilityAgent, DefinitionVersion: harness.RuntimeCapabilityVersion, ExecutionClass: harness.ExecutionAgent, Input: input, InputHash: fmt.Sprintf("%x", hash[:]), ExecutionRefID: "run_retry_root_pg_1", Status: harness.InvocationFailed, Attempt: 1, OutputRefs: []harness.HostRef{}, Revision: 1, CreatedAt: now, UpdatedAt: now}
 	if _, fresh, err := store.CreateInvocation(t.Context(), invocation); err != nil || !fresh {
 		t.Fatalf("create root retry invocation fresh=%v err=%v", fresh, err)
 	}
 	return turn, invocation
 }
-
 func assertTopLevelInvocationRetried(t *testing.T, retried harness.Invocation, err error) {
 	t.Helper()
 	if err != nil || retried.Attempt != 2 || retried.Status != harness.InvocationAccepted {
 		t.Fatalf("retry root invocation = %#v err=%v", retried, err)
 	}
 }
-
 func assertTopLevelTurnReopened(t *testing.T, store *harnesspostgres.Store, turnID string) {
 	t.Helper()
 	reopened, err := store.GetTurn(t.Context(), turnID)
-	if err != nil || reopened.Status != harness.TurnRunning || reopened.Revision != 2 ||
-		reopened.ErrorCode != "" || reopened.ErrorDetail != "" {
+	if err != nil || reopened.Status != harness.TurnRunning || reopened.Revision != 2 || reopened.ErrorCode != "" || reopened.ErrorDetail != "" {
 		t.Fatalf("reopened root turn = %#v err=%v", reopened, err)
 	}
 }
-
-func createRetryInvocationFixture(
-	t *testing.T,
-	store *harnesspostgres.Store,
-	now time.Time,
-) harness.Invocation {
+func createRetryInvocationFixture(t *testing.T, store *harnesspostgres.Store, now time.Time) harness.Invocation {
 	t.Helper()
 	input := json.RawMessage(`{"goal":"retry"}`)
 	hash := sha256.Sum256(input)
-	value := harness.Invocation{
-		ID: "hiv_retry_pg", TurnID: "turn_retry_pg", ParentItemID: "parent-item", CapabilityKey: harness.CapabilityAgent,
-		DefinitionVersion: harness.RuntimeCapabilityVersion, ExecutionClass: harness.ExecutionAgent,
-		Input: input, InputHash: fmt.Sprintf("%x", hash[:]), ExecutionRefID: "run_retry_pg_1",
-		Status: harness.InvocationFailed, Attempt: 1, OutputRefs: []harness.HostRef{}, Revision: 1,
-		CreatedAt: now, UpdatedAt: now,
-	}
+	value := harness.Invocation{ID: "hiv_retry_pg", TurnID: "turn_retry_pg", ParentItemID: "parent-item", CapabilityKey: harness.CapabilityAgent, DefinitionVersion: harness.RuntimeCapabilityVersion, ExecutionClass: harness.ExecutionAgent, Input: input, InputHash: fmt.Sprintf("%x", hash[:]), ExecutionRefID: "run_retry_pg_1", Status: harness.InvocationFailed, Attempt: 1, OutputRefs: []harness.HostRef{}, Revision: 1, CreatedAt: now, UpdatedAt: now}
 	if _, fresh, err := store.CreateInvocation(t.Context(), value); err != nil || !fresh {
 		t.Fatalf("create retry fixture fresh=%v err=%v", fresh, err)
 	}
 	return value
 }
-
-func assertRetriedInvocation(
-	t *testing.T,
-	store *harnesspostgres.Store,
-	original harness.Invocation,
-	retried harness.Invocation,
-	err error,
-) {
+func assertRetriedInvocation(t *testing.T, store *harnesspostgres.Store, original harness.Invocation, retried harness.Invocation, err error) {
 	t.Helper()
-	if err != nil || retried.Attempt != 2 || retried.Status != harness.InvocationAccepted ||
-		retried.ExecutionRefID != "run_retry_pg_2" || string(retried.Input) != string(original.Input) ||
-		retried.InputHash != original.InputHash {
+	if err != nil || retried.Attempt != 2 || retried.Status != harness.InvocationAccepted || retried.ExecutionRefID != "run_retry_pg_2" || string(retried.Input) != string(original.Input) || retried.InputHash != original.InputHash {
 		t.Fatalf("retry invocation=%#v err=%v", retried, err)
 	}
 	byRef, loadErr := store.GetInvocationByExecutionRefID(t.Context(), retried.ExecutionRefID)
@@ -778,7 +500,6 @@ func assertRetriedInvocation(
 		t.Fatalf("retry execution lookup=%#v err=%v", byRef, loadErr)
 	}
 }
-
 func assertSessionLifecycle(t *testing.T, store *harnesspostgres.Store, session harness.Session) {
 	t.Helper()
 	created, fresh, err := store.CreateSession(t.Context(), session)
@@ -790,7 +511,6 @@ func assertSessionLifecycle(t *testing.T, store *harnesspostgres.Store, session 
 		t.Fatalf("replay session: %#v fresh=%v err=%v", replayed, fresh, err)
 	}
 }
-
 func assertConfigLifecycle(t *testing.T, store *harnesspostgres.Store, config harness.ConfigSnapshot) {
 	t.Helper()
 	created, fresh, err := store.PutConfigSnapshot(t.Context(), config)
@@ -798,29 +518,19 @@ func assertConfigLifecycle(t *testing.T, store *harnesspostgres.Store, config ha
 		t.Fatalf("put config: %#v fresh=%v err=%v", created, fresh, err)
 	}
 	loaded, err := store.GetConfigSnapshot(t.Context(), config.ID)
-	if err != nil || loaded.ContentHash != config.ContentHash || loaded.Model != config.Model ||
-		len(loaded.Commands) != len(config.Commands) || loaded.Commands[0].ID != config.Commands[0].ID {
+	if err != nil || loaded.ContentHash != config.ContentHash || loaded.Model != config.Model || len(loaded.Commands) != len(config.Commands) {
 		t.Fatalf("load config: %#v err=%v", loaded, err)
 	}
 }
-
 func newContextCheckpoint(t *testing.T, scopeID string) runtimecontext.Checkpoint {
 	t.Helper()
 	manager := runtimecontext.NewManager(runtimecontext.Dependencies{})
-	checkpoint, err := manager.Open(t.Context(), runtimecontext.OpenRequest{
-		ScopeID: scopeID, StaticFingerprint: runtimecontext.StaticFingerprint("sealed"),
-		SourcePath: []string{testContextBaseSourceID}, Instructions: "sealed",
-		Entries: []runtimecontext.Entry{{
-			ID: "entry-pg-" + scopeID, SourceID: testContextBaseSourceID, TurnID: "turn-pg",
-			Message: model.Message{Role: model.RoleUser, Content: model.TextParts("postgres context")},
-		}},
-	})
+	checkpoint, err := manager.Open(t.Context(), runtimecontext.OpenRequest{ScopeID: scopeID, StaticFingerprint: runtimecontext.StaticFingerprint("sealed"), SourcePath: []string{testContextBaseSourceID}, Instructions: "sealed", Entries: []runtimecontext.Entry{{ID: "entry-pg-" + scopeID, SourceID: testContextBaseSourceID, TurnID: "turn-pg", Message: model.Message{Role: model.RoleUser, Content: model.TextParts("postgres context")}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return checkpoint
 }
-
 func assertContextCheckpointLifecycle(t *testing.T, store *harnesspostgres.Store, checkpoint runtimecontext.Checkpoint) {
 	t.Helper()
 	created, fresh, err := store.PutContextCheckpoint(t.Context(), checkpoint)
@@ -839,7 +549,6 @@ func assertContextCheckpointLifecycle(t *testing.T, store *harnesspostgres.Store
 		t.Fatalf("immutable checkpoint became active without commit: %#v err=%v", active, err)
 	}
 }
-
 func assertTurnLifecycle(t *testing.T, store *harnesspostgres.Store, turn harness.Turn, now time.Time) harness.Turn {
 	t.Helper()
 	created, fresh, err := store.CreateTurn(t.Context(), turn)
@@ -853,13 +562,11 @@ func assertTurnLifecycle(t *testing.T, store *harnesspostgres.Store, turn harnes
 		t.Fatalf("update turn: %#v err=%v", updated, err)
 	}
 	loaded, err := store.GetTurn(t.Context(), turn.ID)
-	if err != nil || loaded.Revision != 2 || loaded.Status != harness.TurnRunning ||
-		loaded.ContextCheckpointID != turn.ContextCheckpointID || loaded.ContextRef != turn.ContextRef {
+	if err != nil || loaded.Revision != 2 || loaded.Status != harness.TurnRunning || loaded.ContextCheckpointID != turn.ContextCheckpointID || loaded.ContextRef != turn.ContextRef {
 		t.Fatalf("load turn: %#v err=%v", loaded, err)
 	}
 	return updated
 }
-
 func assertInvocationLifecycle(t *testing.T, store *harnesspostgres.Store, turnID string, now time.Time) harness.Invocation {
 	t.Helper()
 	created := createInvocationFixture(t, store, turnID, now)
@@ -868,22 +575,15 @@ func assertInvocationLifecycle(t *testing.T, store *harnesspostgres.Store, turnI
 	assertInvocationList(t, store, turnID, updated)
 	return updated
 }
-
 func createInvocationFixture(t *testing.T, store *harnesspostgres.Store, turnID string, now time.Time) harness.Invocation {
 	t.Helper()
-	value := harness.Invocation{
-		ID: "hiv_pg", TurnID: turnID, CapabilityKey: "runtime.agent", DefinitionVersion: "v1",
-		ExecutionClass: harness.ExecutionAgent, InputHash: strings.Repeat("a", 64), ExecutionRefID: testHarnessExecutionRefID,
-		Status: harness.InvocationAccepted, Attempt: 1, OutputRefs: []harness.HostRef{}, Revision: 1,
-		CreatedAt: now, UpdatedAt: now,
-	}
+	value := harness.Invocation{ID: "hiv_pg", TurnID: turnID, CapabilityKey: "runtime.agent", DefinitionVersion: "v1", ExecutionClass: harness.ExecutionAgent, InputHash: strings.Repeat("a", 64), ExecutionRefID: testHarnessExecutionRefID, Status: harness.InvocationAccepted, Attempt: 1, OutputRefs: []harness.HostRef{}, Revision: 1, CreatedAt: now, UpdatedAt: now}
 	created, fresh, err := store.CreateInvocation(t.Context(), value)
 	if err != nil || !fresh || created.ExecutionRefID != testHarnessExecutionRefID {
 		t.Fatalf("create invocation: %#v fresh=%v err=%v", created, fresh, err)
 	}
 	return created
 }
-
 func assertInvocationLookupByExecutionRef(t *testing.T, store *harnesspostgres.Store, created harness.Invocation) {
 	t.Helper()
 	byExecution, err := store.GetInvocationByExecutionRefID(t.Context(), testHarnessExecutionRefID)
@@ -891,13 +591,7 @@ func assertInvocationLookupByExecutionRef(t *testing.T, store *harnesspostgres.S
 		t.Fatalf("load invocation by execution ref: %#v err=%v", byExecution, err)
 	}
 }
-
-func updateInvocationFixture(
-	t *testing.T,
-	store *harnesspostgres.Store,
-	created harness.Invocation,
-	now time.Time,
-) harness.Invocation {
+func updateInvocationFixture(t *testing.T, store *harnesspostgres.Store, created harness.Invocation, now time.Time) harness.Invocation {
 	t.Helper()
 	created.Status = harness.InvocationRunning
 	created.UpdatedAt = now.Add(time.Second)
@@ -907,7 +601,6 @@ func updateInvocationFixture(
 	}
 	return updated
 }
-
 func assertInvocationList(t *testing.T, store *harnesspostgres.Store, turnID string, updated harness.Invocation) {
 	t.Helper()
 	listed, err := store.ListInvocations(t.Context(), turnID)
@@ -915,35 +608,16 @@ func assertInvocationList(t *testing.T, store *harnesspostgres.Store, turnID str
 		t.Fatalf("list invocations: %#v err=%v", listed, err)
 	}
 }
-
-func assertInteractionLifecycle(
-	t *testing.T,
-	store *harnesspostgres.Store,
-	turnID, invocationID string,
-	now time.Time,
-) {
+func assertInteractionLifecycle(t *testing.T, store *harnesspostgres.Store, turnID, invocationID string, now time.Time) {
 	t.Helper()
 	created := createInteractionFixture(t, store, turnID, invocationID, now)
 	assertInteractionLoad(t, store, invocationID, created)
 	updated := updateInteractionFixture(t, store, created, now)
 	assertInteractionList(t, store, turnID, updated)
 }
-
-func createInteractionFixture(
-	t *testing.T,
-	store *harnesspostgres.Store,
-	turnID, invocationID string,
-	now time.Time,
-) harness.Interaction {
+func createInteractionFixture(t *testing.T, store *harnesspostgres.Store, turnID, invocationID string, now time.Time) harness.Interaction {
 	t.Helper()
-	value := harness.Interaction{
-		ID: "hinteraction_pg", TurnID: turnID, InvocationID: invocationID, ParentItemID: "parent-item",
-		ApplicationRef: &harness.HostRef{Kind: "story", ID: "story_pg"},
-		ArtifactRefs:   []harness.HostRef{{Kind: "story_candidate_portfolio", ID: "portfolio_pg"}},
-		Key:            "candidate-choice", Kind: harness.InteractionChoice,
-		Schema: json.RawMessage(`{"type":"object"}`), Presentation: json.RawMessage(`{"title":"Choose"}`),
-		Status: harness.InteractionWaiting, Revision: 1, CreatedAt: now, UpdatedAt: now,
-	}
+	value := harness.Interaction{ID: "hinteraction_pg", TurnID: turnID, InvocationID: invocationID, ParentItemID: "parent-item", ApplicationRef: &harness.HostRef{Kind: "story", ID: "story_pg"}, ArtifactRefs: []harness.HostRef{{Kind: "story_candidate_portfolio", ID: "portfolio_pg"}}, Key: "candidate-choice", Kind: harness.InteractionChoice, Schema: json.RawMessage(`{"type":"object"}`), Presentation: json.RawMessage(`{"title":"Choose"}`), Status: harness.InteractionWaiting, Revision: 1, CreatedAt: now, UpdatedAt: now}
 	turn, err := store.GetTurn(t.Context(), turnID)
 	if err != nil {
 		t.Fatal(err)
@@ -972,32 +646,15 @@ func createInteractionFixture(
 	}
 	return created
 }
-
-func assertInteractionLoad(
-	t *testing.T,
-	store *harnesspostgres.Store,
-	invocationID string,
-	created harness.Interaction,
-) {
+func assertInteractionLoad(t *testing.T, store *harnesspostgres.Store, invocationID string, created harness.Interaction) {
 	t.Helper()
 	loaded, err := store.GetInteraction(t.Context(), created.ID)
-	if err != nil || loaded.InvocationID != invocationID || string(loaded.Schema) != string(created.Schema) ||
-		loaded.ApplicationRef == nil || *loaded.ApplicationRef != *created.ApplicationRef ||
-		len(loaded.ArtifactRefs) != 1 || loaded.ArtifactRefs[0] != created.ArtifactRefs[0] {
+	if err != nil || loaded.InvocationID != invocationID || string(loaded.Schema) != string(created.Schema) || loaded.ApplicationRef == nil || *loaded.ApplicationRef != *created.ApplicationRef || len(loaded.ArtifactRefs) != 1 || loaded.ArtifactRefs[0] != created.ArtifactRefs[0] {
 		t.Fatalf("load interaction: %#v err=%v", loaded, err)
 	}
 }
-
-func updateInteractionFixture(
-	t *testing.T,
-	store *harnesspostgres.Store,
-	created harness.Interaction,
-	now time.Time,
-) harness.Interaction {
+func updateInteractionFixture(t *testing.T, store *harnesspostgres.Store, created harness.Interaction, now time.Time) harness.Interaction {
 	t.Helper()
-	// ResolveInteraction, not the removed general UpdateInteraction bypass,
-	// is the only Host response CAS. Model the normal WaitingInput owner
-	// transition before committing the business response.
 	turn, err := store.GetTurn(t.Context(), created.TurnID)
 	if err != nil {
 		t.Fatal(err)
@@ -1025,28 +682,17 @@ func updateInteractionFixture(
 	}
 	return resolution.Interaction
 }
-
-func assertInteractionList(
-	t *testing.T,
-	store *harnesspostgres.Store,
-	turnID string,
-	updated harness.Interaction,
-) {
+func assertInteractionList(t *testing.T, store *harnesspostgres.Store, turnID string, updated harness.Interaction) {
 	t.Helper()
 	listed, err := store.ListInteractions(t.Context(), turnID)
 	if err != nil || len(listed) != 1 || string(listed[0].Response) != string(updated.Response) {
 		t.Fatalf("list interactions: %#v err=%v", listed, err)
 	}
 }
-
 func assertItemLifecycle(t *testing.T, store *harnesspostgres.Store, turnID, invocationID string, now time.Time) {
 	t.Helper()
 	for _, id := range []string{"hi_pg_1", "hi_pg_2"} {
-		item := harness.Item{
-			ID: id, TurnID: turnID, Kind: harness.ItemDiagnostic, Status: harness.ItemCompleted,
-			InvocationID: invocationID,
-			Payload:      json.RawMessage(`{"ok":true}`), CreatedAt: now, UpdatedAt: now,
-		}
+		item := harness.Item{ID: id, TurnID: turnID, Kind: harness.ItemDiagnostic, Status: harness.ItemCompleted, InvocationID: invocationID, Payload: json.RawMessage(`{"ok":true}`), CreatedAt: now, UpdatedAt: now}
 		created, fresh, err := store.AppendItem(t.Context(), item)
 		if err != nil || !fresh || created.Seq == 0 {
 			t.Fatalf("append item: %#v fresh=%v err=%v", created, fresh, err)
@@ -1057,12 +703,10 @@ func assertItemLifecycle(t *testing.T, store *harnesspostgres.Store, turnID, inv
 		t.Fatalf("list items: %#v err=%v", items, err)
 	}
 }
-
 func newStore(t *testing.T) *harnesspostgres.Store {
 	store, _ := newStoreWithDB(t)
 	return store
 }
-
 func newStoreWithDB(t *testing.T) (*harnesspostgres.Store, *gorm.DB) {
 	t.Helper()
 	dsn := fmt.Sprintf("file:harness-%d?mode=memory&cache=shared", time.Now().UnixNano())

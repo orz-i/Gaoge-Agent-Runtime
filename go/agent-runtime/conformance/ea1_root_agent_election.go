@@ -19,7 +19,7 @@ import (
 )
 
 // RunEA1RootAgentElectionSuite measures AR-S/R/Q P5 through distinct real
-// public entries. Roots have no ancestors; these APIs expose neither Workflow
+// public entries. Roots have no ancestors; these APIs expose neither external
 // compensation nor a shared-budget election. Full Budget/Usage remains part of
 // every denial snapshot, and physical unknown never acquires retry authority.
 func RunEA1RootAgentElectionSuite(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store)) {

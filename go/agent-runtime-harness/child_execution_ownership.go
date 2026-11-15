@@ -6,10 +6,7 @@ import (
 	"strings"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/groupchat"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/team"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workflow"
 )
 
 // validateChildRuntimeOwnership proves that a locally executed child belongs
@@ -30,12 +27,6 @@ func (runner *Runner) validateChildRuntimeOwnership(
 	switch child.ExecutionClass {
 	case ExecutionAgent:
 		expectedKind = agent.RunKind
-	case ExecutionTeam:
-		expectedKind = team.RunKind
-	case ExecutionGroupChat:
-		expectedKind = groupchat.RunKind
-	case ExecutionWorkflow:
-		expectedKind = workflow.RunKind
 	case ExecutionApplication:
 		return ErrConflict
 	default:

@@ -116,7 +116,7 @@ func (handler *Handler) releaseTerminalRunFeed(context *gin.Context, snapshot ke
 }
 
 // WriteKernelError maps only feature-neutral Kernel failures. Feature modules
-// own their private validation and workflow errors before delegating here.
+// own their private validation and errors before delegating here.
 func WriteKernelError(context *gin.Context, capability string, err error) {
 	switch {
 	case errors.Is(err, kernel.ErrNotFound):

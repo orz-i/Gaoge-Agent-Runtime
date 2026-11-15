@@ -6,15 +6,11 @@ import (
 	"testing"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/team"
 )
 
 func auditMixedNativeChild(t *testing.T, f *pr82HandoffFixture, parentItem, id string) Invocation {
 	t.Helper()
-	// A physical native child always freezes its own original Goal; an
-	// empty synthetic Input cannot prove a same-ID Kernel Run belongs here.
 	raw, hash, e := marshalInvocationValue(struct {
 		Goal string `json:"goal"`
 	}{Goal: id})
@@ -35,67 +31,6 @@ func auditMixedNativeChild(t *testing.T, f *pr82HandoffFixture, parentItem, id s
 		t.Fatal(e)
 	}
 	return child
-}
-func TestAuditPR82ApplicationMixedDescendantCancellationPreservesSibling(t *testing.T) {
-	f, parent, parentItem, _ := newPR82NestedApplicationParent(t, InvocationRunning)
-	f.runner.cancellation = f.runtime
-	f.runner.relationReader = f.runner.relations.(RunRelationSource)
-	coordinator, e := handoff.New(&pr82BoundKernelChild{runtime: f.runtime})
-	if e != nil {
-		t.Fatal(e)
-	}
-	feature, e := team.NewRunner(team.Dependencies{Runtime: f.runtime, Handoffs: coordinator, Relations: f.runner.relations})
-	if e != nil {
-		t.Fatal(e)
-	}
-	f.runner.teams = feature
-	started, e := f.runner.StartTeamInvocation(t.Context(), f.turn.ID, TeamInvocationRequest{
-		ParentItemID: parentItem, RequestID: "mixed-native-child", Goal: "real local Team", Mode: team.ExecutionSequential,
-		Members: []team.Member{{ID: "leaf", Goal: "leaf"}},
-	})
-	if e != nil && !errors.Is(e, team.ErrMemberPending) {
-		t.Fatal(e)
-	}
-	var child Invocation
-	for _, inv := range started.Invocations {
-		if inv.ExecutionClass == ExecutionTeam {
-			child = inv
-		}
-	}
-	if child.ID == "" {
-		t.Fatal("missing real Team child")
-	}
-	teamRun, e := f.runtime.Load(t.Context(), child.ExecutionRefID)
-	if e != nil {
-		t.Fatal(e)
-	}
-	view, e := team.ViewState(teamRun)
-	if e != nil || len(view.Members) != 1 {
-		t.Fatalf("member view: %+v %v", view, e)
-	}
-	leaf, e := f.runtime.Load(t.Context(), view.Members[0].Delegation.ChildRunID)
-	if e != nil {
-		t.Fatal(e)
-	}
-	sibling := auditMixedNativeChild(t, f, f.startedItemID, "unrelated-native-sibling")
-	_, e = f.runner.completeApplicationInvocation(t.Context(), f.turn, parent, nil)
-	if e != nil {
-		t.Fatal(e)
-	}
-	_, e = f.runner.CancelInvocation(t.Context(), parent.ID, "stop subtree")
-	if e != nil {
-		t.Fatal(e)
-	}
-	for _, id := range []string{child.ExecutionRefID, leaf.Run.ID} {
-		s, e := f.runtime.Load(t.Context(), id)
-		if e != nil || s.Run.Status != kernel.RunStatusCancelled {
-			t.Fatalf("target %s status=%s err=%v", id, s.Run.Status, e)
-		}
-	}
-	s, e := f.runtime.Load(t.Context(), sibling.ExecutionRefID)
-	if e != nil || s.Run.Status != kernel.RunStatusRunning {
-		t.Fatalf("unrelated sibling changed: %s %v", s.Run.Status, e)
-	}
 }
 
 type auditIntermediateLateClaimStore struct {

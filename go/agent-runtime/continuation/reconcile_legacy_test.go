@@ -34,7 +34,7 @@ func TestSchedulerReconcileLegacyStoreCompatibility(t *testing.T) {
 	child := createRun(t, runtime, "legacy-child", "legacy.child")
 	ensureRelation(t, registry, runrelation.Draft{
 		ParentRunID: parent.Run.ID, ChildRunID: child.Run.ID,
-		Kind: runrelation.KindTeamMember, OwnerNodeID: "member",
+		Kind: runrelation.KindDelegation, OwnerNodeID: "member",
 	})
 	completeRun(t, runtime, child)
 	if err := scheduler.Reconcile(t.Context()); err != nil {

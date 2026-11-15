@@ -11,8 +11,8 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
 )
 
-// IsOwned distinguishes ANY native binding from legacy child/Workflow grants.
-// Partial bindings are owned-invalid, never a fallback to legacy authority.
+// IsOwned distinguishes ANY native binding from separately owned child grants.
+// Partial bindings are owned-invalid, never a fallback to unrelated authority.
 func (g ChildExecutionGrant) IsOwned() bool {
 	return g.ExecutionOwnerID != "" || g.ExecutionLeaseID != "" || g.ExecutionEpoch != 0 || g.AdmissionSourceHash != "" || g.AdmissionOperation != ""
 }

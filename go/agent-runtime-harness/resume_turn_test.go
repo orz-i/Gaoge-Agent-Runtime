@@ -31,8 +31,9 @@ func (fn resumeTurnModelFunc) Generate(ctx context.Context, request model.Reques
 
 type resumeTurnClock struct{ now time.Time }
 
-func (clock *resumeTurnClock) Now() time.Time { return clock.now }
-
+func (clock *resumeTurnClock) Now() time.Time {
+	return clock.now
+}
 func newResumeTurnClock() *resumeTurnClock {
 	return &resumeTurnClock{now: time.Date(2026, 10, 24, 10, 0, 0, 0, time.UTC)}
 }
@@ -53,7 +54,6 @@ func (store *resumeTurnFaultStore) Apply(ctx context.Context, id string, revisio
 	}
 	return store.Store.Apply(ctx, id, revision, mutation)
 }
-
 func newResumeTurnHarness(t *testing.T, store kernel.Store, sessionStore harness.Store, provider model.Client, clock *resumeTurnClock, configure func(*agent.Dependencies)) (*harness.Runner, *kernel.Runtime) {
 	t.Helper()
 	runtime, err := kernel.New(kernel.Dependencies{Store: store, Clock: clock})
@@ -68,30 +68,17 @@ func newResumeTurnHarness(t *testing.T, store kernel.Store, sessionStore harness
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Deliberately omit ContextRunMiddleware: ResumeTurn must restore its own
-	// durable root binding, even after the original execution context is lost.
-	host, err := harness.NewRunner(harness.Dependencies{
-		Runtime: runtime, Agent: direct, Store: sessionStore, Clock: clock,
-		Context: runtimecontext.NewManager(runtimecontext.Dependencies{}), Catalog: dependencies.Catalog,
-	})
+	host, err := harness.NewRunner(harness.Dependencies{Runtime: runtime, Agent: direct, Store: sessionStore, Clock: clock, Context: runtimecontext.NewManager(runtimecontext.Dependencies{}), Catalog: dependencies.Catalog})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return host, runtime
 }
-
 func resumeTurnSessionOptions() harness.SessionOptions {
-	return harness.SessionOptions{
-		HostThread: harness.HostRef{Kind: "conversation", ID: "resume-session"},
-		Actor:      kernel.ActorRef{TenantID: "tenant", ActorID: "owner"},
-		Thread:     kernel.ThreadRef{Kind: "conversation", ID: "resume-session"},
-		Config:     harness.ConfigSnapshot{Model: "fixture", Instructions: "frozen session instructions"},
-		Transcript: harness.TranscriptSourceFunc(func(_ context.Context, _, turn harness.HostRef, prompt string) (*harness.ContextSeed, error) {
-			return contextSeed("frozen host evidence", contextEntry("source-"+turn.ID, turn.ID, model.RoleUser, prompt, true)), nil
-		}),
-	}
+	return harness.SessionOptions{HostThread: harness.HostRef{Kind: "conversation", ID: "resume-session"}, Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "owner"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "resume-session"}, Config: harness.ConfigSnapshot{Model: "fixture", Instructions: "frozen session instructions"}, Transcript: harness.TranscriptSourceFunc(func(_ context.Context, _, turn harness.HostRef, prompt string) (*harness.ContextSeed, error) {
+		return contextSeed("frozen host evidence", contextEntry("source-"+turn.ID, turn.ID, model.RoleUser, prompt, true)), nil
+	})}
 }
-
 func mustResumeSession(t *testing.T, host *harness.Runner, options harness.SessionOptions) *harness.SessionClient {
 	t.Helper()
 	session, err := host.OpenSession(options)
@@ -100,7 +87,6 @@ func mustResumeSession(t *testing.T, host *harness.Runner, options harness.Sessi
 	}
 	return session
 }
-
 func TestSessionResumeReusesFrozenIntentWithoutTranscriptOrPreparation(t *testing.T) {
 	t.Parallel()
 	base := memory.NewStore()
@@ -151,7 +137,6 @@ func TestSessionResumeReusesFrozenIntentWithoutTranscriptOrPreparation(t *testin
 		t.Fatalf("terminal resume was not idempotent: turn=%+v error=%v calls=%d", again.Turn, err, len(provider.requests))
 	}
 }
-
 func TestSessionResumeRestoresContextAndChecksOwnerWithoutTranscript(t *testing.T) {
 	t.Parallel()
 	base := memory.NewStore()
@@ -196,131 +181,6 @@ func TestSessionResumeRestoresContextAndChecksOwnerWithoutTranscript(t *testing.
 	}
 }
 
-func TestResumeTurnDoesNotInventUnstartedRuntime(t *testing.T) {
-	t.Parallel()
-	for _, hasRoot := range []bool{false, true} {
-		name := "before-root"
-		if hasRoot {
-			name = "before-runtime"
-		}
-		t.Run(name, func(t *testing.T) {
-			store := harness.NewMemoryStore()
-			clock := newResumeTurnClock()
-			provider := &multiContextCaptureModel{}
-			host, runtime := newResumeTurnHarness(t, memory.NewStore(), store, provider, clock, nil)
-			turn := seedAcceptedResumeTurn(t, store, clock, hasRoot, harness.ExecutionAgent)
-			resumed, err := host.ResumeTurn(t.Context(), turn.ID)
-			if !errors.Is(err, harness.ErrNotFound) || resumed.Turn.ID != turn.ID || resumed.Turn.Status != harness.TurnAccepted || resumed.Turn.Revision != turn.Revision || len(provider.requests) != 0 {
-				t.Fatalf("unstarted admission was reconstructed: turn=%+v error=%v calls=%d", resumed.Turn, err, len(provider.requests))
-			}
-			if hasRoot {
-				root, ok := harness.TopLevelInvocation(resumed)
-				if !ok {
-					t.Fatal("missing accepted root")
-				}
-				if _, err = runtime.Load(t.Context(), root.ExecutionRefID); !errors.Is(err, kernel.ErrNotFound) {
-					t.Fatalf("Resume created a Runtime Run: %v", err)
-				}
-			}
-		})
-	}
-}
-
-func seedAcceptedResumeTurn(t *testing.T, store harness.Store, clock *resumeTurnClock, hasRoot bool, class harness.ExecutionClass) harness.Turn {
-	t.Helper()
-	options := resumeTurnSessionOptions()
-	sessionID, err := harness.SessionID(options.HostThread)
-	if err != nil {
-		t.Fatal(err)
-	}
-	hostTurn := harness.HostRef{Kind: "conversation_turn", ID: "admitted"}
-	turnID, err := harness.TurnID(sessionID, hostTurn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	config, err := harness.SealConfigSnapshot(turnID, options.Config, clock.Now())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err = store.CreateSession(t.Context(), harness.Session{ID: sessionID, HostThread: options.HostThread, Actor: options.Actor, Revision: 1, CreatedAt: clock.Now(), UpdatedAt: clock.Now()}); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err = store.PutConfigSnapshot(t.Context(), config); err != nil {
-		t.Fatal(err)
-	}
-	turn := harness.Turn{ID: turnID, SessionID: sessionID, HostTurn: hostTurn, ConfigSnapshotID: config.ID, Status: harness.TurnAccepted, Revision: 1, CreatedAt: clock.Now(), UpdatedAt: clock.Now()}
-	if _, _, err = store.CreateTurn(t.Context(), turn); err != nil {
-		t.Fatal(err)
-	}
-	if hasRoot {
-		key := harness.CapabilityAgent
-		if class == harness.ExecutionTeam {
-			key = harness.CapabilityTeam
-		}
-		id, idErr := harness.InvocationID(turnID, "", key, "admitted")
-		if idErr != nil {
-			t.Fatal(idErr)
-		}
-		if _, _, err = store.CreateInvocation(t.Context(), harness.Invocation{
-			ID: id, TurnID: turnID, CapabilityKey: key, DefinitionVersion: harness.RuntimeCapabilityVersion,
-			ExecutionClass: class, ExecutionRefID: harness.AgentExecutionRefID(id), Status: harness.InvocationAccepted,
-			Attempt: 1, Revision: 1, CreatedAt: clock.Now(), UpdatedAt: clock.Now(),
-		}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return turn
-}
-
-func TestResumeTurnRejectsOtherRootCapabilities(t *testing.T) {
-	t.Parallel()
-	store := harness.NewMemoryStore()
-	clock := newResumeTurnClock()
-	provider := &multiContextCaptureModel{}
-	host, _ := newResumeTurnHarness(t, memory.NewStore(), store, provider, clock, nil)
-	turn := seedAcceptedResumeTurn(t, store, clock, true, harness.ExecutionTeam)
-	_, err := host.ResumeTurn(t.Context(), turn.ID)
-	if !errors.Is(err, harness.ErrInvalidRequest) || len(provider.requests) != 0 {
-		t.Fatalf("non-Agent root was driven: error=%v calls=%d", err, len(provider.requests))
-	}
-}
-
-func TestResumeTurnRejectsMismatchedRuntimeIdentityBeforeDispatch(t *testing.T) {
-	t.Parallel()
-	options := resumeTurnSessionOptions()
-	for _, candidate := range []struct {
-		name  string
-		kind  kernel.RunKind
-		actor kernel.ActorRef
-	}{
-		{name: "kind", kind: "other-feature", actor: options.Actor},
-		{name: "tenant", kind: agent.RunKind, actor: kernel.ActorRef{TenantID: "other", ActorID: options.Actor.ActorID}},
-		{name: "actor", kind: agent.RunKind, actor: kernel.ActorRef{TenantID: options.Actor.TenantID, ActorID: "other"}},
-	} {
-		t.Run(candidate.name, func(t *testing.T) {
-			store := harness.NewMemoryStore()
-			clock := newResumeTurnClock()
-			provider := &multiContextCaptureModel{}
-			host, runtime := newResumeTurnHarness(t, memory.NewStore(), store, provider, clock, nil)
-			turn := seedAcceptedResumeTurn(t, store, clock, true, harness.ExecutionAgent)
-			invocations, err := store.ListInvocations(t.Context(), turn.ID)
-			if err != nil || len(invocations) != 1 {
-				t.Fatalf("accepted root: %+v error=%v", invocations, err)
-			}
-			if _, err = runtime.Create(t.Context(), kernel.CreateRequest{
-				ID: invocations[0].ExecutionRefID, Kind: candidate.kind, Actor: candidate.actor, Thread: options.Thread,
-				Goal: "unrelated execution", State: json.RawMessage(`{}`),
-			}); err != nil {
-				t.Fatal(err)
-			}
-			snapshot, err := host.ResumeTurn(t.Context(), turn.ID)
-			if !errors.Is(err, harness.ErrConflict) || snapshot.Output != nil || len(provider.requests) != 0 {
-				t.Fatalf("mismatched runtime reached Agent: error=%v calls=%d output=%+v", err, len(provider.requests), snapshot.Output)
-			}
-		})
-	}
-}
-
 type resumeTurnErrorAgent struct {
 	unusedFeatureAgent
 	runtime *kernel.Runtime
@@ -337,7 +197,6 @@ func (resumer *resumeTurnErrorAgent) Resume(ctx context.Context, runID string, _
 	snapshot, err := resumer.runtime.Load(ctx, runID)
 	return snapshot, errors.Join(resumer.cause, err)
 }
-
 func TestResumeTurnPreservesExecutionErrorAndReadableSnapshot(t *testing.T) {
 	t.Parallel()
 	for _, zero := range []bool{false, true} {
@@ -368,7 +227,6 @@ func TestResumeTurnPreservesExecutionErrorAndReadableSnapshot(t *testing.T) {
 		})
 	}
 }
-
 func TestResumeTurnDoesNotResolveApprovalOrGrantBudget(t *testing.T) {
 	t.Parallel()
 	t.Run("approval", func(t *testing.T) {
@@ -399,7 +257,6 @@ func TestResumeTurnDoesNotResolveApprovalOrGrantBudget(t *testing.T) {
 		}
 	})
 }
-
 func TestResumeTurnDrivesCommittedControlDespiteStaleProjection(t *testing.T) {
 	t.Parallel()
 	t.Run("approval", func(t *testing.T) {
@@ -426,13 +283,7 @@ func TestResumeTurnDrivesCommittedControlDespiteStaleProjection(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
-		waiting := startApprovalHarness(t, host, harness.ConfigSnapshot{
-			ToolKeys: []string{approvalTestToolKey},
-			ToolPolicies: []harness.ToolPolicySnapshot{{
-				Key: approvalTestToolKey, DefinitionVersion: "v1",
-				ApprovalCapability: approvalTestCapabilityPerCall, ApprovalMode: "always",
-			}},
-		})
+		waiting := startApprovalHarness(t, host, harness.ConfigSnapshot{ToolKeys: []string{approvalTestToolKey}, ToolPolicies: []harness.ToolPolicySnapshot{{Key: approvalTestToolKey, DefinitionVersion: "v1", ApprovalCapability: approvalTestCapabilityPerCall, ApprovalMode: "always"}}})
 		checkpoint := latestApprovalCheckpoint(t, waiting)
 		root, _ := harness.TopLevelInvocation(waiting)
 		current, err := runtime.Load(t.Context(), root.ExecutionRefID)
@@ -483,9 +334,12 @@ func TestResumeTurnDrivesCommittedControlDespiteStaleProjection(t *testing.T) {
 
 type resumeTurnRetryError struct{}
 
-func (resumeTurnRetryError) Error() string   { return "retryable provider failure" }
-func (resumeTurnRetryError) Retryable() bool { return true }
-
+func (resumeTurnRetryError) Error() string {
+	return "retryable provider failure"
+}
+func (resumeTurnRetryError) Retryable() bool {
+	return true
+}
 func TestResumeTurnDoesNotReplayRetryableErrorAfterModelDispatch(t *testing.T) {
 	t.Parallel()
 	clock := newResumeTurnClock()
@@ -519,20 +373,16 @@ func TestResumeTurnDoesNotReplayRetryableErrorAfterModelDispatch(t *testing.T) {
 		}
 	}
 }
-
 func TestResumeTurnDoesNotReplayUnknownNativeToolOutcome(t *testing.T) {
 	t.Parallel()
 	clock := newResumeTurnClock()
 	base := memory.NewStoreWithExecutionClock(clock)
 	store := harness.NewMemoryStore()
 	toolCalls := 0
-	registry, err := tools.NewRegistry([]tools.Registration{{
-		Definition: tools.Definition{Key: "external", Name: "external", InputSchema: json.RawMessage(`{"type":"object"}`)},
-		Handler: tools.HandlerFunc(func(_ context.Context, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
-			toolCalls++
-			return tools.ExecutionResult{Content: json.RawMessage(`{"started":true}`), Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: tools.ReceiptDispositionPending}}, nil
-		}),
-	}})
+	registry, err := tools.NewRegistry([]tools.Registration{{Definition: tools.Definition{Key: "external", Name: "external", InputSchema: json.RawMessage(`{"type":"object"}`)}, Handler: tools.HandlerFunc(func(_ context.Context, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
+		toolCalls++
+		return tools.ExecutionResult{Content: json.RawMessage(`{"started":true}`), Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: tools.ReceiptDispositionPending}}, nil
+	})}})
 	if err != nil {
 		t.Fatal(err)
 	}

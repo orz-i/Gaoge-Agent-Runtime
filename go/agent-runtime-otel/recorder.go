@@ -30,7 +30,7 @@ type spanKey struct {
 }
 
 // Recorder translates structural runtime observations into spans. It never
-// records prompts, completions, tool arguments/results, workflow payloads, or
+// records prompts, completions, tool arguments/results, child payloads, or
 // arbitrary user content because those values are absent from observability.Event.
 type Recorder struct {
 	tracer trace.Tracer
@@ -165,8 +165,6 @@ func spanName(scope observability.Scope) string {
 		return "agent.runtime.model"
 	case observability.ScopeToolInvocation:
 		return "agent.runtime.tool"
-	case observability.ScopeWorkflowEffect:
-		return "agent.runtime.workflow.effect"
 	case observability.ScopeA2AInvocation:
 		return "agent.runtime.a2a"
 	case observability.ScopeHarnessTurn:

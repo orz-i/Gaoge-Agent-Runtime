@@ -153,11 +153,11 @@ func ea1NewChildCancelFixture(t *testing.T, factory func(*testing.T) (kernel.Sto
 	actor := kernel.ActorRef{TenantID: "tenant", ActorID: "owner"}
 	thread := kernel.ThreadRef{Kind: "conversation", ID: "original-thread"}
 	var e error
-	f.grandparent, e = rt.Create(t.Context(), kernel.CreateRequest{ID: "grandparent", Kind: "workflow", Actor: actor, Thread: thread, Goal: "original grandparent", State: json.RawMessage("{}")})
+	f.grandparent, e = rt.Create(t.Context(), kernel.CreateRequest{ID: "grandparent", Kind: "agent", Actor: actor, Thread: thread, Goal: "original grandparent", State: json.RawMessage("{}")})
 	if e != nil {
 		t.Fatal(e)
 	}
-	f.parent, e = rt.Create(t.Context(), kernel.CreateRequest{ID: "parent", ParentRunID: f.grandparent.Run.ID, Kind: "workflow", Actor: actor, Thread: thread, Goal: "original parent", State: json.RawMessage("{}")})
+	f.parent, e = rt.Create(t.Context(), kernel.CreateRequest{ID: "parent", ParentRunID: f.grandparent.Run.ID, Kind: "agent", Actor: actor, Thread: thread, Goal: "original parent", State: json.RawMessage("{}")})
 	if e != nil {
 		t.Fatal(e)
 	}

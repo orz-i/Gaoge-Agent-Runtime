@@ -7,7 +7,6 @@ import (
 )
 
 const (
-	CommandSourceFirstParty  = "first_party"
 	CommandSourceApplication = "application"
 )
 
@@ -105,14 +104,6 @@ func validCommandIdentity(value CommandDescriptor) bool {
 
 func validCommandExecution(value CommandDescriptor) bool {
 	switch value.Source {
-	case CommandSourceFirstParty:
-		if value.ApplicationKind != "" {
-			return false
-		}
-		// These are the only first-party child capabilities supported by
-		// the typed materializer. Agent/GroupChat are not implicit routes.
-		return value.ExecutionClass == ExecutionTeam && value.CapabilityKey == CapabilityTeam ||
-			value.ExecutionClass == ExecutionWorkflow && value.CapabilityKey == CapabilityWorkflow
 	case CommandSourceApplication:
 		return value.ExecutionClass == ExecutionApplication && value.ApplicationKind != ""
 	default:

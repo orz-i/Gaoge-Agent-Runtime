@@ -111,11 +111,11 @@ func ea1NewChildResumeSettlement(t *testing.T, factory func(*testing.T) (kernel.
 		due = &v
 	}
 	var e error
-	f.grandparent, e = rt.Create(t.Context(), kernel.CreateRequest{ID: "grandparent", Kind: "workflow", Actor: actor, Thread: thread, Goal: "original grandparent", State: json.RawMessage("{}"), DeadlineAt: due})
+	f.grandparent, e = rt.Create(t.Context(), kernel.CreateRequest{ID: "grandparent", Kind: "agent", Actor: actor, Thread: thread, Goal: "original grandparent", State: json.RawMessage("{}"), DeadlineAt: due})
 	if e != nil {
 		t.Fatal(e)
 	}
-	f.parent, e = rt.Create(t.Context(), kernel.CreateRequest{ID: "parent", ParentRunID: f.grandparent.Run.ID, Kind: "workflow", Actor: actor, Thread: thread, Goal: "original parent", State: json.RawMessage("{}")})
+	f.parent, e = rt.Create(t.Context(), kernel.CreateRequest{ID: "parent", ParentRunID: f.grandparent.Run.ID, Kind: "agent", Actor: actor, Thread: thread, Goal: "original parent", State: json.RawMessage("{}")})
 	if e != nil {
 		t.Fatal(e)
 	}

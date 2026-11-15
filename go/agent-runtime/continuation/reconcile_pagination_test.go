@@ -57,7 +57,7 @@ func TestSchedulerReconcileUsesBoundedPagesWithoutHistoricalDuplicateJobs(t *tes
 		child := createRun(t, fixture.runtime, fmt.Sprintf("paged-child-%03d", index), "paged.child")
 		ensureRelation(t, fixture.relations, runrelation.Draft{
 			ParentRunID: parent.Run.ID, ChildRunID: child.Run.ID,
-			Kind: runrelation.KindTeamMember, OwnerNodeID: "member",
+			Kind: runrelation.KindDelegation, OwnerNodeID: "member",
 		})
 		completeRun(t, fixture.runtime, child)
 	}
@@ -94,7 +94,7 @@ func TestSchedulerReconcileReschedulesAfterParentWaitCommitButNotUnchanged(t *te
 	child := createRun(t, fixture.runtime, "paged-early-child", "paged.child")
 	ensureRelation(t, fixture.relations, runrelation.Draft{
 		ParentRunID: parent.Run.ID, ChildRunID: child.Run.ID,
-		Kind: runrelation.KindTeamMember, OwnerNodeID: "member",
+		Kind: runrelation.KindDelegation, OwnerNodeID: "member",
 	})
 	completed := completeRun(t, fixture.runtime, child)
 	if err := fixture.scheduler.Reconcile(t.Context()); err != nil {
@@ -150,7 +150,7 @@ func TestSchedulerReconcileRetriesAfterEnqueueBeforeWatermarkFailure(t *testing.
 	child := createRun(t, fixture.runtime, "paged-fault-child", "paged.child")
 	ensureRelation(t, fixture.relations, runrelation.Draft{
 		ParentRunID: parent.Run.ID, ChildRunID: child.Run.ID,
-		Kind: runrelation.KindTeamMember, OwnerNodeID: "member",
+		Kind: runrelation.KindDelegation, OwnerNodeID: "member",
 	})
 	completeRun(t, fixture.runtime, child)
 	pager, ok := fixture.relations.ReconciliationPager()

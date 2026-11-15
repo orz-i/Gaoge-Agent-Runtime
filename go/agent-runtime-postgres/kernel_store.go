@@ -281,7 +281,7 @@ func (store *KernelStore) applyWithExecution(ctx context.Context, lease *kernel.
 		}
 		// All writes to a root with an admitted physical segment compete
 		// under this exact Run row lock. No other writer can advance a
-		// revision behind a Root Workflow callback, and an authenticated
+		// revision behind an owned Agent callback, and an authenticated
 		// first-party scoped Runtime may still commit its own segment.
 		lockedRun, lockErr := lockKernelRun(tx, runID)
 		if lockErr != nil {
