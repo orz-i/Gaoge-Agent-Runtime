@@ -150,9 +150,17 @@ func (runner *Runner) delegate(ctx context.Context, turn Turn, invocation Invoca
 		}
 		return DelegationResult{}, err
 	}
-	startedItemID, err := runner.recordDelegationItem(ctx, turn, invocation, delegation, ItemStarted, "")
+	// Ordinary Tool/Manual entry and autonomous Waiting recovery share the
+	// same Store-serialized first-writer boundary. A settled physical Grant
+	// is not permission to call StartOrLoad again; even a returned Running
+	// child could have performed non-idempotent remote work. Reconciliation
+	// must use the original read-only receipt path instead.
+	startedItemID, admitted, err := runner.recordDelegationItemWithAdmission(ctx, turn, invocation, delegation, ItemStarted, "")
 	if err != nil {
 		return DelegationResult{}, err
+	}
+	if !admitted {
+		return DelegationResult{}, ErrExecutionOutcomeUnknown
 	}
 	return runner.executeDelegation(ctx, turn, invocation, parent, delegation, startedItemID)
 }
