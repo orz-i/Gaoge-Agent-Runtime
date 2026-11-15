@@ -226,8 +226,27 @@ func TestTerminalHandoffFrozenIntermediateAttemptCannotCrossRetry(t *testing.T) 
 	}
 	child.Input = raw
 	child.InputHash = hashInvocationBytes(raw)
+	// A nested Handoff is initiated by its nearest frozen ancestor, not
+	// the Turn root. Move the original Started/terminal facts together to
+	// that exact original parent. A root-owned sibling is not a valid
+	// substitute, even though both belong to the same Turn.
+	for index := range facts {
+		if facts[index].Kind != ItemDelegation {
+			continue
+		}
+		facts[index].InvocationID = "intermediate"
+		var payload delegationItemPayload
+		if err := json.Unmarshal(facts[index].Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		payload.ParentRunID = "old-parent-run"
+		facts[index].Payload, err = json.Marshal(payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	if !VerifiedTerminalHandoffChild(root, child, facts) {
-		t.Fatal("valid original historic binding rejected by basic syntax verifier")
+		t.Fatal("valid nested original parent/attempt binding rejected")
 	}
 	parent := Invocation{
 		ID: "intermediate", TurnID: root.TurnID, ParentItemID: "original-parent-item",
@@ -235,6 +254,29 @@ func TestTerminalHandoffFrozenIntermediateAttemptCannotCrossRetry(t *testing.T) 
 	}
 	if !ValidTurnTerminalDescendants(root, []Invocation{root, parent, child}, facts) {
 		t.Fatal("same original frozen intermediate Attempt was rejected after successful child terminalization")
+	}
+	for _, tc := range []struct {
+		name   string
+		mutate func([]Item)
+	}{
+		{"root-impersonates-immediate-parent", func(items []Item) { items[0].InvocationID = root.ID }},
+		{"foreign-parent-run", func(items []Item) {
+			var payload delegationItemPayload
+			if err := json.Unmarshal(items[1].Payload, &payload); err != nil {
+				t.Fatal(err)
+			}
+			payload.ParentRunID = "foreign-run"
+			items[1].Payload, _ = json.Marshal(payload)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			corrupt := append([]Item(nil), facts...)
+			tc.mutate(corrupt)
+			if VerifiedTerminalHandoffChild(root, child, corrupt) ||
+				ValidTurnTerminalDescendants(root, []Invocation{root, parent, child}, corrupt) {
+				t.Fatal("nested terminal proof accepted forged immediate parent")
+			}
+		})
 	}
 	parent.ExecutionRefID = "new-parent-run"
 	parent.Attempt = 2

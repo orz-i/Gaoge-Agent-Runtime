@@ -368,9 +368,22 @@ func appendItemFact(
 	feed *TurnFeed,
 	item Item,
 ) (Item, error) {
+	createdItem, _, err := appendItemFactWithAdmission(ctx, store, feed, item)
+	return createdItem, err
+}
+
+// This Store-provided fresh bit is the sole authority for exactly-once
+// Start admission. A same-ID replay returns the original Item but can never
+// authorize a second physical child dispatch.
+func appendItemFactWithAdmission(
+	ctx context.Context,
+	store Store,
+	feed *TurnFeed,
+	item Item,
+) (Item, bool, error) {
 	createdItem, created, err := store.AppendItem(ctx, item)
 	if err != nil || !created || feed == nil {
-		return createdItem, err
+		return createdItem, created, err
 	}
 	raw, marshalErr := json.Marshal(createdItem)
 	if marshalErr == nil {
@@ -379,5 +392,5 @@ func appendItemFact(
 			Data: raw, Status: string(createdItem.Status),
 		})
 	}
-	return createdItem, nil
+	return createdItem, created, nil
 }

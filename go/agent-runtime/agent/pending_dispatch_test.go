@@ -1,0 +1,55 @@
+package agent
+
+import (
+	"encoding/json"
+	"errors"
+	"testing"
+
+	runtimebudget "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
+)
+
+func TestFrozenPendingDispatchReadsOriginalCallWithoutGrantingReplay(t *testing.T) {
+	arguments := "{\"roleID\":\"analyst\",\"goal\":\"review\"}"
+	state := runState{
+		Budget:         runtimebudget.Snapshot{Limits: runtimebudget.Limits{MaxLLMCalls: 4, MaxToolCalls: 4}},
+		PendingCalls:   []tools.Call{{ID: "delegate-1", ToolKey: "harness.delegate_agent", Arguments: json.RawMessage(arguments)}},
+		ToolDispatchID: "delegate-1",
+	}
+	raw, err := json.Marshal(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := kernel.Snapshot{Run: kernel.Run{Kind: RunKind, Status: kernel.RunStatusRunning}, State: raw}
+	call, pending, err := FrozenPendingDispatch(snapshot)
+	if err != nil || !pending || call.ID != state.ToolDispatchID || call.ToolKey != state.PendingCalls[0].ToolKey {
+		t.Fatalf("original Tool identity lost: call=%+v pending=%v err=%v", call, pending, err)
+	}
+	call.Arguments[0] = 'X'
+	if string(snapshot.State) != string(raw) || string(state.PendingCalls[0].Arguments) != arguments {
+		t.Fatal("returned Tool argument borrowed mutable original backing memory")
+	}
+	terminal := snapshot
+	terminal.Run.Status = kernel.RunStatusCompleted
+	if _, found, err := FrozenPendingDispatch(terminal); found || err != nil {
+		t.Fatalf("terminal Agent allowed a pending physical dispatch: %v %v", found, err)
+	}
+	foreign := snapshot
+	foreign.Run.Kind = kernel.RunKind("other")
+	if _, found, err := FrozenPendingDispatch(foreign); found || err != nil {
+		t.Fatalf("foreign RunKind authorized a Tool: %v %v", found, err)
+	}
+	state.ToolDispatchID = "unrelated"
+	snapshot.State, err = json.Marshal(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := FrozenPendingDispatch(snapshot); found || !errors.Is(err, ErrToolOutcomeUnknown) {
+		t.Fatalf("unmatched ToolDispatchID lost its no-replay fence: %v %v", found, err)
+	}
+	snapshot.State = json.RawMessage("{\"budget\":")
+	if _, found, err := FrozenPendingDispatch(snapshot); found || err == nil {
+		t.Fatalf("corrupted Agent state was trusted: %v %v", found, err)
+	}
+}

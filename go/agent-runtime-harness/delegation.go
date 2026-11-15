@@ -484,6 +484,21 @@ func (runner *Runner) recordDelegationItem(
 	status ItemStatus,
 	parentItemID string,
 ) (string, error) {
+	id, _, err := runner.recordDelegationItemWithAdmission(ctx, turn, invocation, delegation, status, parentItemID)
+	return id, err
+}
+
+// A trusted waiting-child continuation may dispatch only the first Store
+// writer of its original stable Started Item; duplicate admission is not
+// a physical execution grant.
+func (runner *Runner) recordDelegationItemWithAdmission(
+	ctx context.Context,
+	turn Turn,
+	invocation Invocation,
+	delegation handoff.Delegation,
+	status ItemStatus,
+	parentItemID string,
+) (string, bool, error) {
 	payload, err := json.Marshal(delegationItemPayload{
 		DelegationID: delegation.ID, MemberID: delegation.MemberID, MemberRevision: delegation.MemberRevision, ChildRunID: delegation.ChildRunID,
 		Goal: delegation.Goal, Status: delegation.Status, Result: append(json.RawMessage(nil), delegation.Result...),
@@ -491,16 +506,16 @@ func (runner *Runner) recordDelegationItem(
 		Execution: frozenDelegationExecution(delegation),
 	})
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	itemID := stableID("hid", turn.ID, delegation.ID, string(status))
 	now := runner.clock.Now().UTC()
-	_, err = appendItemFact(ctx, runner.store, runner.turnFeed, Item{
+	_, created, err := appendItemFactWithAdmission(ctx, runner.store, runner.turnFeed, Item{
 		ID: itemID, TurnID: turn.ID, Kind: ItemDelegation, Status: status,
 		RunID: delegation.ChildRunID, InvocationID: invocation.ID, ParentItemID: parentItemID,
 		Payload: payload, CreatedAt: now, UpdatedAt: now,
 	})
-	return itemID, err
+	return itemID, created, err
 }
 
 func delegationItemStatus(status handoff.Status) ItemStatus {

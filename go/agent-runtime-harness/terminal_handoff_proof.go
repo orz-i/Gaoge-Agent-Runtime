@@ -53,9 +53,21 @@ func verifiedTerminalHandoffFrozenSource(
 // item, a single terminal child of that item, and the original physical
 // handoff grant's unique observed-return receipt.
 func VerifiedTerminalHandoffChild(root, child Invocation, items []Item) bool {
-	frozen, _, valid := verifiedTerminalHandoffFrozenSource(root, child)
+	frozen, binding, valid := verifiedTerminalHandoffFrozenSource(root, child)
 	if !valid {
 		return false
+	}
+	// A nested Subagent's original parent is the closest frozen ancestor
+	// Attempt, not necessarily the top-level Turn Invocation. This derives
+	// the only permitted parent from the original sealed child input.
+	// ValidTurnTerminalDescendants independently checks every ancestor
+	// against the Store-serialized Invocation set before terminal Turn CAS.
+	immediate := binding.attempt()
+	if len(binding.Parents) != 0 {
+		// Frozen ancestors are ordered nearest-first by sealChildRootInput.
+		// A great-grandchild must belong to its leaf parent, not the
+		// coordinator farther up the same Turn.
+		immediate = binding.Parents[0]
 	}
 	startedID := child.ParentItemID
 	var started, terminal Item
@@ -73,9 +85,9 @@ func VerifiedTerminalHandoffChild(root, child Invocation, items []Item) bool {
 	}
 	if startCount != 1 || terminalCount != 1 ||
 		started.Kind != ItemDelegation || started.Status != ItemStarted ||
-		started.TurnID != root.TurnID || started.InvocationID != root.ID ||
+		started.TurnID != root.TurnID || started.InvocationID != immediate.InvocationID ||
 		started.RunID != child.ExecutionRefID || started.Seq == 0 ||
-		terminal.TurnID != root.TurnID || terminal.InvocationID != root.ID ||
+		terminal.TurnID != root.TurnID || terminal.InvocationID != immediate.InvocationID ||
 		terminal.RunID != child.ExecutionRefID || terminal.Seq <= started.Seq ||
 		terminal.ParentItemID != started.ID {
 		return false
@@ -85,8 +97,8 @@ func VerifiedTerminalHandoffChild(root, child Invocation, items []Item) bool {
 		!decodeTypedAuthorityJSON(terminal.Payload, &terminalPayload) ||
 		startPayload.DelegationID != frozen.ID || terminalPayload.DelegationID != frozen.ID ||
 		startPayload.ChildRunID != frozen.ChildRunID || terminalPayload.ChildRunID != frozen.ChildRunID ||
-		startPayload.ParentRunID != root.ExecutionRefID ||
-		terminalPayload.ParentRunID != root.ExecutionRefID ||
+		startPayload.ParentRunID != immediate.ExecutionRefID ||
+		terminalPayload.ParentRunID != immediate.ExecutionRefID ||
 		startPayload.MemberID != frozen.MemberID || terminalPayload.MemberID != frozen.MemberID ||
 		startPayload.Goal != frozen.Goal || terminalPayload.Goal != frozen.Goal {
 		return false
