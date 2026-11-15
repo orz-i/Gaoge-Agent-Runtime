@@ -160,9 +160,69 @@ func (runner *Runner) delegate(ctx context.Context, turn Turn, invocation Invoca
 		return DelegationResult{}, err
 	}
 	if !admitted {
-		return DelegationResult{}, ErrExecutionOutcomeUnknown
+		// Do not issue another physical Handoff, but allow a duplicate
+		// Manual/API caller to read a fully authenticated *original*
+		// terminal result. A merely Running child, absent grant receipt,
+		// foreign route, or inconsistent terminal projection is unknown.
+		return runner.verifiedTerminalDelegationReplay(ctx, turn, delegation, startedItemID)
 	}
 	return runner.executeDelegation(ctx, turn, invocation, parent, delegation, startedItemID)
+}
+
+// verifiedTerminalDelegationReplay is read-only. It cannot run the original
+// Tool/Model, issue a ChildRunner Start, or turn a matching Run ID into a
+// terminal receipt. Both the original physical-grant return and original
+// immutable ancestor/child proof must agree with the live physical owner.
+func (runner *Runner) verifiedTerminalDelegationReplay(
+	ctx context.Context, turn Turn, frozen handoff.Delegation, startedItemID string,
+) (DelegationResult, error) {
+	unknown := func() (DelegationResult, error) {
+		return DelegationResult{}, ErrExecutionOutcomeUnknown
+	}
+	childOwner, err := runner.store.GetInvocationByExecutionRefID(ctx, frozen.ChildRunID)
+	if err != nil || !isHandoffDelegationInvocation(childOwner) ||
+		childOwner.ParentItemID != startedItemID || childOwner.TurnID != turn.ID {
+		return unknown()
+	}
+	root, err := loadTopLevelInvocation(ctx, runner.store, turn.ID)
+	if err != nil {
+		return unknown()
+	}
+	items, err := listAllItems(ctx, runner.store, turn.ID)
+	if err != nil || !VerifiedTerminalHandoffChild(root, childOwner, items) {
+		return unknown()
+	}
+	child, physical, err := runner.delegationObservation(ctx, frozen.ChildRunID)
+	if err != nil || !sameHandoffFrozenExecution(frozen, physical) ||
+		!terminalRuntimeStatus(child.Run.Status) {
+		return unknown()
+	}
+	result := frozen
+	result.Status = handoff.Status(child.Run.Status)
+	result.ErrorCode = child.Run.ErrorCode
+	if child.Result != nil {
+		result.Result = append(json.RawMessage(nil), child.Result.Content...)
+	}
+	// A physical terminal Run and a forged terminal Item must never
+	// disagree. The ordinary original-return Item is authoritative only
+	// when VerifiedTerminalHandoffChild also verified its unique grant.
+	matched := false
+	for _, item := range items {
+		if item.Kind == ItemDelegation && item.ParentItemID == startedItemID {
+			if item.Status != delegationItemStatus(result.Status) {
+				return unknown()
+			}
+			matched = true
+		}
+	}
+	if !matched {
+		return unknown()
+	}
+	snapshot, err := runner.Load(ctx, turn.ID)
+	if err != nil {
+		return DelegationResult{}, err
+	}
+	return DelegationResult{Delegation: result, Snapshot: snapshot}, nil
 }
 
 func (runner *Runner) canDelegate(invocation Invocation) bool {
