@@ -5,6 +5,17 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- **Continuation/A2A projection isolation (2026-11-14):** The Worker no
+  longer serializes its committed-transition outbox Projector behind a
+  relation Reconciler that may poll remote A2A `GetTask`. Queue delivery,
+  global projection and relation reconciliation run in distinct lifecycle-
+  joined lanes, with one in-flight call per Projector/Reconciler. Close cancels
+  and waits for all lanes. Host-defined Projector and Reconciler adapters
+  shared by one Worker must now support concurrent Project/Reconcile calls;
+  each callback remains individually single-flight. Added red-before-fix
+  isolation tests and a real A2A Shadow/GetTask + independent Agent wakeup
+  regression. See `docs/audits/2026-11-14-pr112-continuation-a2a-projection-isolation.md`.
+
 - **P1 A2A Shadow identity binding correction (2026-11-14):** A remote
   `GetTask` response is now checked against the original Task/Context identity
   before same-state observation; `CancelTask`, resumed `SendMessage` Task and

@@ -1,5 +1,22 @@
 # Breaking changes (pre-stable Beta)
 
+## 2026-11-14 — Continuation Worker projector/reconciler concurrency
+
+`continuation.Worker` now runs the committed-transition `Projector.Project`
+and RunRelation `Reconciler.Reconcile` on independent, lifecycle-joined lanes.
+Previously these two callbacks were serialized within the same worker loop;
+now they may execute concurrently, even if the Host supplies the same object
+for both interfaces. Host-defined implementations must synchronize only their
+own shared mutable state. A given Projector or Reconciler is **not** invoked
+concurrently with itself; the Worker does not spawn unbounded calls per tick.
+This prevents slow A2A `GetTask` polling during relation reconciliation from
+blocking the global transition outbox and unrelated Agent continuations.
+`Close` continues to cancel and await all active work. Remote operations must
+honor cancellation or bound their network calls; a stalled Reconcile still
+blocks its own relation lane but cannot stop outbox Project or queue consumers.
+
+See [the P1 follow-up audit](audits/2026-11-14-pr112-continuation-a2a-projection-isolation.md).
+
 ## 2026-11-14 — A2A Shadow remote identity hardening (P1 follow-up)
 
 For any Shadow Run already bound to a remote Task, `GetTask`, `CancelTask`,

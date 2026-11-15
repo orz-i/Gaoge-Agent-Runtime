@@ -23,7 +23,10 @@ type WorkerOptions struct {
 	Concurrency int
 	// ClaimLimit bounds the number of just-in-time deliveries per poll. A
 	// worker never pre-leases jobs that are waiting behind a slow handler.
-	ClaimLimit        int
+	ClaimLimit int
+	// Projector and Reconciler run in separate, single-flight loops.
+	// When the same implementation supplies both, its shared state must be
+	// safe for concurrent Project and Reconcile calls.
 	Projector         Projector
 	Reconciler        Reconciler
 	ReconcileInterval time.Duration
@@ -135,27 +138,57 @@ func (worker *Worker) Close(ctx context.Context) error {
 
 func (worker *Worker) loop(ctx context.Context, done chan<- struct{}) {
 	defer close(done)
-	var consumers sync.WaitGroup
+	var workers sync.WaitGroup
 	for range worker.options.Concurrency {
-		consumers.Go(func() { worker.consumeLoop(ctx) })
+		workers.Go(func() { worker.consumeLoop(ctx) })
 	}
-	defer consumers.Wait()
+	// Project and Reconcile operate on distinct durable sources of truth.
+	// In particular, Reconcile may Load an A2A Shadow Run and wait on a
+	// remote GetTask call. It must not stall global committed-transition
+	// projection (nor vice versa). Both lanes run at most one call at a
+	// time, independently of the queue's bounded consumer concurrency.
+	if worker.options.Projector != nil {
+		workers.Go(func() { worker.projectLoop(ctx) })
+	}
+	if worker.options.Reconciler != nil {
+		workers.Go(func() { worker.reconcileLoop(ctx) })
+	}
+	<-ctx.Done()
+	// Close waits for both lanes and consumers. Do not abandon a running
+	// Store mutation or claim it stopped merely because its Context ended.
+	workers.Wait()
+}
+
+func (worker *Worker) projectLoop(ctx context.Context) {
 	ticker := time.NewTicker(worker.options.PollInterval)
 	defer ticker.Stop()
-	nextReconcile := time.Time{}
-	for {
-		if worker.options.Projector != nil {
-			worker.report(worker.options.Projector.Project(ctx))
-		}
-		if worker.options.Reconciler != nil && !time.Now().Before(nextReconcile) {
-			worker.report(worker.options.Reconciler.Reconcile(ctx))
-			nextReconcile = time.Now().Add(worker.options.ReconcileInterval)
-		}
+	for ctx.Err() == nil {
+		worker.report(worker.options.Projector.Project(ctx))
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
 		}
+	}
+}
+
+func (worker *Worker) reconcileLoop(ctx context.Context) {
+	// Reconcile immediately on startup, then wait the configured interval
+	// *after* each complete pass. Never overlap two Reconcile passes or
+	// pile up background goroutines when remote observations are slow.
+	timer := time.NewTimer(0)
+	defer timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		worker.report(worker.options.Reconciler.Reconcile(ctx))
+		timer.Reset(worker.options.ReconcileInterval)
 	}
 }
 
