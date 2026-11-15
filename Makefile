@@ -1,4 +1,4 @@
-.PHONY: bootstrap metadata agent-baseline agent-quality agent-quality-pilot agent-quality-distractor-pilot agent-quality-probe agent-quality-calibrate agent-baseline-test agent-quality-anchor-check benchmark-agent-policy fmt-check tidy-check go-test go-race go-vet go-lint go-coverage go-vuln ts-lint ts-typecheck ts-test ts-coverage ts-build unit coverage security eval eval-smoke benchmark benchmark-baseline benchmark-smoke benchmark-compare benchmark-integration benchmark-integration-smoke benchmark-integration-baseline benchmark-integration-compare benchmark-integration-test otel-e2e-smoke integration integration-test integration-otel integration-otel-test a2a-product-check a2a-tck release-check check check-no-race beta
+.PHONY: bootstrap metadata agent-baseline agent-quality agent-quality-pilot agent-quality-distractor-pilot agent-quality-probe agent-quality-calibrate agent-baseline-test agent-quality-anchor-check benchmark-agent-policy fmt-check tidy-check go-test go-race go-vet go-lint go-coverage go-vuln ts-lint ts-typecheck ts-test ts-coverage ts-build unit coverage security eval eval-smoke benchmark benchmark-baseline benchmark-smoke benchmark-compare benchmark-integration benchmark-integration-smoke benchmark-integration-baseline benchmark-integration-compare benchmark-integration-test otel-e2e-smoke integration-compile integration integration-test integration-otel integration-otel-test a2a-product-check a2a-tck release-check check check-no-race beta
 
 bootstrap:
 	pnpm install --frozen-lockfile
@@ -130,10 +130,16 @@ benchmark-integration-test:
 otel-e2e-smoke:
 	cd integration/otel-e2e && GOWORK=off go test ./...
 
-integration-test:
+# This E2E module uses GOWORK=off and local module replacements. Compile
+# it in ordinary CI too, not only after the expensive real-engine suites.
+# A removed SDK API must fail before a PostgreSQL/Redis integration run.
+integration-compile:
+	cd integration/continuation-e2e && GOWORK=off go test ./... -run '^$$' -count=1
+
+integration-test: integration-compile
 	node scripts/run-integration.mjs --external-services
 
-integration:
+integration: integration-compile
 	node scripts/run-integration.mjs
 
 integration-otel:
@@ -153,7 +159,7 @@ release-check:
 
 # CI runs race tests on an isolated runner, never alongside tidy-check in the
 # same checkout (tidy-check temporarily edits module files).
-CHECK_TARGETS := metadata agent-baseline-test fmt-check tidy-check go-vet go-test go-race go-lint ts-lint ts-typecheck ts-test ts-build eval-smoke benchmark-smoke otel-e2e-smoke a2a-product-check release-check
+CHECK_TARGETS := metadata agent-baseline-test fmt-check tidy-check integration-compile go-vet go-test go-race go-lint ts-lint ts-typecheck ts-test ts-build eval-smoke benchmark-smoke otel-e2e-smoke a2a-product-check release-check
 
 check: $(CHECK_TARGETS)
 

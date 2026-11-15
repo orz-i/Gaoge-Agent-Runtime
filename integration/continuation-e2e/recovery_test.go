@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	postgresadapter "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres"
 	redisadapter "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-redis"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/continuation"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	queuecore "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/queue"
@@ -54,7 +55,7 @@ func TestRealPostgresRedisSchedulerRestart(t *testing.T) {
 	create := func(suffix string) kernel.Snapshot {
 		t.Helper()
 		snapshot, e := runtime.Create(t.Context(), kernel.CreateRequest{
-			ID: id + suffix, Kind: "test", Actor: kernel.ActorRef{TenantID: "test", ActorID: "test"},
+			ID: id + suffix, Kind: agent.RunKind, Actor: kernel.ActorRef{TenantID: "test", ActorID: "test"},
 			Thread: kernel.ThreadRef{Kind: "test", ID: "test"}, Goal: "test", State: json.RawMessage("{}"),
 		})
 		if e != nil {
@@ -65,7 +66,7 @@ func TestRealPostgresRedisSchedulerRestart(t *testing.T) {
 	parent, child := create("parent"), create("child")
 	if _, err := relations.Ensure(t.Context(), runrelation.Draft{
 		ParentRunID: parent.Run.ID, ChildRunID: child.Run.ID,
-		Kind: runrelation.KindTeamMember, OwnerNodeID: "member",
+		Kind: runrelation.KindDelegation, OwnerNodeID: "subagent-delegation",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -104,6 +105,13 @@ func TestRealPostgresRedisSchedulerRestart(t *testing.T) {
 	relations2, err := runrelation.New(postgresadapter.NewRunRelationStore(db2), nil)
 	if err != nil {
 		t.Fatal(err)
+	}
+	// A restarted adapter must retain exactly the supported SubAgent
+	// delegation edge, not a retired composite execution relation.
+	restored, err := relations2.GetByChild(t.Context(), child.Run.ID)
+	if err != nil || restored.Kind != runrelation.KindDelegation ||
+		restored.ParentRunID != parent.Run.ID || restored.OwnerNodeID != "subagent-delegation" {
+		t.Fatalf("restarted SubAgent relation = %+v; error = %v", restored, err)
 	}
 	restarted, err := continuation.NewScheduler(continuation.SchedulerDependencies{
 		Outbox: store2, Queue: queue2, Relations: relations2, Runs: runtime2,
