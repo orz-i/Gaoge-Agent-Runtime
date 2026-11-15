@@ -69,3 +69,5 @@ explicitly opts into 40 real task samples. Preflight-only and pilot runs are
 not numerically comparable with a complete quality benchmark;
 one family of tasks is not a measure of general Agent ability. `make agent-baseline-test` verifies both report protocols offline and
 is part of `make check`; real models remain opt-in.
+
+The PR #113 A2A Control Admission hard cut additionally covers persisted send/cancel intents, a signed callback-return marker, stale original revisions, competing control operations, and fail-closed Store lost-ACK recovery. The `integration/continuation-e2e` test module exercises the identical external-admission ordering on independent SQLite and PostgreSQL connections; it requires `TEST_POSTGRES_DSN` for the real PostgreSQL case.
