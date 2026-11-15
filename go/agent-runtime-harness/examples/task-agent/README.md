@@ -60,6 +60,14 @@ it does not deploy, publish, send a message or modify repository files.
   queries without automatically selecting a target record. Candidate hints are
   bounded, scoped to the original artifact and must be followed by an exact
   read before a draft can pass the Oracle.
+- The opt-in quality experiment may select `qualityTreatment=generic-navigation-v1`
+  from the Host input via `quality-generic` / `pilot-distractor-generic`.
+  It changes only instruction wording; the original quality treatment is the
+  default and its complete dataset hash remains unchanged. Both must still
+  obtain exact original evidence and meet the same strict Tool/Recovery Oracle.
+  The standalone `compare-treatment` command is an offline, same-clean-revision
+  matched-workload comparison, **not** a real-model performance claim. See the
+  [Q0–Q2 candidate](../../../../docs/audits/2026-11-16-agent-quality-q0-q2-candidate.md).
 - The model-window resolver accepts only the exact configured model. Scripted
   mode declares a 16,384-token synthetic capacity. Live mode requires the host
   to supply the selected model's documented capacity.

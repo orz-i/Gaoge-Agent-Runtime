@@ -392,6 +392,30 @@ Every report records the code revision/dirty bit, suite, task version, dataset h
 
 For a credible real comparison, use the same configuration and budget, identical corpus, at least 2–3 repetitions if budget allows, and disclose endpoint, model, operating environment and code revision. Small differences between groups of eight samples should not be treated as statistically meaningful; this report automatically declares no winner.
 
+## Q0–Q2 Agent quality experiment identity (2026-11-16 candidate)
+
+The first quality governance implementation is documented in
+[the Q0–Q2 candidate evidence](audits/2026-11-16-agent-quality-q0-q2-candidate.md).
+New start events add `workloadHash` (task, sources, Oracle and recovery
+contract) and `treatmentHash` (Host instructions, Tool declarations/policies
+and execution profile) while keeping the original full `datasetHash`
+**unchanged**. Historical reports without either new hash are still readable;
+partial hash pairs are invalid. The existing `compare` retains same-full-manifest
+comparison semantics, including its refusal to compare altered instructions.
+
+An explicitly opted-in Host strategy can use
+`python3 scripts/run-agent-baseline.py quality-generic` or the narrower
+`pilot-distractor-generic`; the ordinary `quality` and `pilot-distractor`
+commands stay on the original treatment. Both still require a hidden API key
+and may incur charges; no live-model uplift is implied. Two complete reports
+can be checked *offline* with
+`python3 scripts/run-agent-baseline.py compare-treatment old.json new.json`.
+This experimental comparison requires matching workload, runtime profile,
+exact Provider/model/endpoint and limits, repetitions and the same clean source revision,
+but cannot by itself attest that only the desired Host treatment changed.
+Unknown usage, incomplete samples and preflight-only/pilot results must not
+be represented as a complete quality improvement.
+
 ## Acceptance and known limits
 
 Automatic CI must verify every fixture against the scripted real Agent path, data uniqueness and model-independent dataset hash, strict suite ID/count/repetition admission, fail-closed invalid reports, unknown Token semantics, partial sampling and legacy report compatibility. The scripted path is not a proxy for real Provider performance.
