@@ -40,7 +40,7 @@ func (remote *identityReplyRemote) CancelTask(ctx context.Context, discovery Dis
 
 func newIdentityTestShadow(t *testing.T, rt *kernel.Runtime, client RemoteClient) *ShadowRunner {
 	t.Helper()
-	runner, err := NewShadowRunner(ShadowDependencies{Runtime: rt, Client: client, Discovery: Discovery{
+	runner, err := NewShadowRunner(ShadowDependencies{AttestationKey: testA2AShadowKey(), Runtime: rt, Client: client, Discovery: Discovery{
 		Descriptor: RemoteAgentDescriptor{Name: "remote-agent", PreferredURL: testShadowRemoteURL,
 			ProtocolVersion: ProtocolVersion, ProtocolBinding: "HTTP+JSON"},
 	}})

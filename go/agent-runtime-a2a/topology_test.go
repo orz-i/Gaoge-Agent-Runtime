@@ -29,7 +29,7 @@ func newTopologyShadow(t *testing.T) kernel.Snapshot {
 	t.Helper()
 	runtime := newShadowRuntime(t)
 	remote := &shadowRemote{task: workingTask()}
-	runner, err := NewShadowRunner(ShadowDependencies{
+	runner, err := NewShadowRunner(ShadowDependencies{AttestationKey: testA2AShadowKey(),
 		Runtime: runtime, Client: remote,
 		Discovery: Discovery{Descriptor: RemoteAgentDescriptor{
 			Name: "remote-agent", PreferredURL: testTopologyEndpoint,

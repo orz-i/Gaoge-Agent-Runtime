@@ -14,7 +14,7 @@ func TestPluginResolvesAndFreezesRemoteBindingRevision(t *testing.T) {
 	runtime := newShadowRuntime(t)
 	remote := &shadowRemote{task: workingTask()}
 	requestedRevisions := make([]string, 0, 2)
-	plugin, err := NewPlugin(PluginDependencies{
+	plugin, err := NewPlugin(PluginDependencies{AttestationKey: testA2AShadowKey(),
 		Runtime: runtime,
 		Bindings: BindingResolverFunc(func(_ context.Context, targetID, revision string) (Binding, error) {
 			requestedRevisions = append(requestedRevisions, revision)
@@ -54,7 +54,7 @@ func TestPluginRejectsChangedFrozenBinding(t *testing.T) {
 	runtime := newShadowRuntime(t)
 	remote := &shadowRemote{task: workingTask()}
 	activeRevision := "revision-1"
-	plugin, err := NewPlugin(PluginDependencies{
+	plugin, err := NewPlugin(PluginDependencies{AttestationKey: testA2AShadowKey(),
 		Runtime: runtime,
 		Bindings: BindingResolverFunc(func(_ context.Context, targetID, _ string) (Binding, error) {
 			return Binding{
@@ -89,7 +89,7 @@ func TestPluginRejectsChangedFrozenBinding(t *testing.T) {
 
 func TestPluginDescriptorKeepsProtocolAtEdge(t *testing.T) {
 	t.Parallel()
-	plugin, err := NewPlugin(PluginDependencies{
+	plugin, err := NewPlugin(PluginDependencies{AttestationKey: testA2AShadowKey(),
 		Runtime: newShadowRuntime(t),
 		Bindings: BindingResolverFunc(func(context.Context, string, string) (Binding, error) {
 			return Binding{}, ErrBindingMissing

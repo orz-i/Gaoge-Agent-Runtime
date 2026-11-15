@@ -57,7 +57,7 @@ func TestBlockedA2AShadowGetTaskCannotStarveUnrelatedContinuationProjection(t *t
 		t.Fatal(err)
 	}
 	remote := &heldA2ARemote{shadowRemote: &shadowRemote{task: workingTask()}, started: make(chan struct{}), release: make(chan struct{})}
-	shadow, err := NewShadowRunner(ShadowDependencies{Runtime: runtime, Client: remote,
+	shadow, err := NewShadowRunner(ShadowDependencies{AttestationKey: testA2AShadowKey(), Runtime: runtime, Client: remote,
 		Discovery: Discovery{Descriptor: RemoteAgentDescriptor{Name: "remote-agent", PreferredURL: testShadowRemoteURL, ProtocolVersion: ProtocolVersion}},
 	})
 	if err != nil {

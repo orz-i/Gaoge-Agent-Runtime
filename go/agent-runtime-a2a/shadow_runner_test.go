@@ -284,8 +284,8 @@ func TestShadowRunnerFailsClosedWhenRemoteIdentityWasNeverPersisted(t *testing.T
 		t.Fatal(err)
 	}
 	failed, err := runner.LoadRun(t.Context(), "a2a-lost")
-	if !errors.Is(err, ErrRemoteIdentityLost) || failed.Run.Status != kernel.RunStatusFailed {
-		t.Fatalf("failed=%#v err=%v", failed.Run, err)
+	if !errors.Is(err, ErrRemoteBindingChanged) || failed.Run.Status != kernel.RunStatusRunning {
+		t.Fatalf("unattested original shadow was not fenced: %#v err=%v", failed.Run, err)
 	}
 }
 
@@ -300,7 +300,7 @@ func newShadowRuntime(t *testing.T) *kernel.Runtime {
 
 func newShadowRunner(t *testing.T, runtime *kernel.Runtime, remote *shadowRemote) *ShadowRunner {
 	t.Helper()
-	runner, err := NewShadowRunner(ShadowDependencies{
+	runner, err := NewShadowRunner(ShadowDependencies{AttestationKey: testA2AShadowKey(),
 		Runtime: runtime, Client: remote,
 		Discovery: Discovery{Descriptor: RemoteAgentDescriptor{
 			Name: "remote-agent", PreferredURL: testShadowRemoteURL,
@@ -373,4 +373,10 @@ func cloneTaskSnapshot(task *TaskSnapshot) *TaskSnapshot {
 func cloneTaskValue(task TaskSnapshot) TaskSnapshot {
 	task.Raw = append(json.RawMessage(nil), task.Raw...)
 	return task
+}
+
+// Stable test-only A2A receipt key. Production Hosts must supply a private,
+// stable secret and must never store that key in Kernel State.
+func testA2AShadowKey() []byte {
+	return []byte("test-only-not-production-a2a-shadow-attestation-key-v1")
 }

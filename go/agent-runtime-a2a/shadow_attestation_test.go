@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
@@ -34,19 +35,26 @@ func TestShadowRunnerAttestationRequiresExactFrozenBinding(t *testing.T) {
 	discovery := Discovery{Descriptor: RemoteAgentDescriptor{
 		Name: "remote", PreferredURL: "https://example.invalid/a2a", ProtocolVersion: ProtocolVersion,
 	}}
-	child, err := NewShadowRunner(ShadowDependencies{
+	child, err := NewShadowRunner(ShadowDependencies{AttestationKey: testA2AShadowKey(),
 		Runtime: original, Client: noRemoteIOAllowed{}, Discovery: discovery,
 		TargetID: "remote", TargetRevision: "revision-1",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	state := []byte("{\"remoteName\":\"remote\",\"targetID\":\"remote\",\"targetRevision\":\"revision-1\",\"remoteURL\":\"https://example.invalid/a2a\",\"protocolVersion\":\"1.0\",\"messageID\":\"child:message\",\"remoteTaskID\":\"remote-task\"}")
-	snapshot, err := original.Create(t.Context(), kernel.CreateRequest{
-		ID: "child", Kind: RunKind, Goal: "finish remotely",
-		Actor:  kernel.ActorRef{TenantID: "tenant", ActorID: "42"},
+	// Observe a real first-party SendMessage outcome, not merely a matching
+	// user-writable Kernel State. A separate observer intentionally has no
+	// network capabilities: only the stable Host key grants read-only proof.
+	issuer, err := NewShadowRunner(ShadowDependencies{AttestationKey: testA2AShadowKey(),
+		Runtime: original, Client: &shadowRemote{task: workingTask()}, Discovery: discovery,
+		TargetID: "remote", TargetRevision: "revision-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := issuer.StartRun(t.Context(), agent.StartRequest{
+		ID: "child", Goal: "finish remotely", Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "42"},
 		Thread: kernel.ThreadRef{Kind: "conversation", ID: "one"},
-		State:  state,
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -87,7 +87,7 @@ func newPluginCancellationFixture(t *testing.T) *pluginCancellationFixture {
 	t.Helper()
 	fixture := &pluginCancellationFixture{runtime: newShadowRuntime(t), remote: &shadowRemote{task: workingTask()}, bindingRevision: "revision-1"}
 	var err error
-	fixture.plugin, err = NewPlugin(PluginDependencies{Runtime: fixture.runtime, Bindings: BindingResolverFunc(
+	fixture.plugin, err = NewPlugin(PluginDependencies{AttestationKey: testA2AShadowKey(), Runtime: fixture.runtime, Bindings: BindingResolverFunc(
 		func(_ context.Context, targetID, revision string) (Binding, error) {
 			fixture.revisions = append(fixture.revisions, revision)
 			return Binding{TargetID: targetID, Revision: fixture.bindingRevision, Client: fixture.remote,
