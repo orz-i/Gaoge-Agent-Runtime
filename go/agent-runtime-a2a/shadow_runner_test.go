@@ -255,8 +255,14 @@ func TestShadowRunnerDoesNotPersistTransportErrorDetails(t *testing.T) {
 	}
 	runner := newShadowRunner(t, runtime, remote)
 	failed, err := runner.StartRun(t.Context(), shadowStartRequest("a2a-child-transport-error"))
-	if err == nil || failed.Run.Status != kernel.RunStatusFailed || failed.Run.ErrorDetail != ErrRemoteSendFailed.Error() {
-		t.Fatalf("failed=%#v err=%v", failed.Run, err)
+	if !errors.Is(err, ErrRemoteOutcomeUnknown) || failed.Run.Status != kernel.RunStatusRunning || failed.Run.ErrorCode != "" || failed.Run.ErrorDetail != "" {
+		t.Fatalf("initial SendMessage transport ambiguity must remain unresolved: %+v err=%v", failed.Run, err)
+	}
+	// Unknown remote submission remains the exact same logical Run across
+	// restarts, with the original first-party intent proof intact.
+	still, loadErr := runner.LoadRun(t.Context(), failed.Run.ID)
+	if !errors.Is(loadErr, ErrRemoteOutcomeUnknown) || still.Run.Status != kernel.RunStatusRunning {
+		t.Fatalf("unknown SendMessage incorrectly became a terminal result: %+v %v", still.Run, loadErr)
 	}
 	raw, marshalErr := json.Marshal(failed)
 	if marshalErr != nil || strings.Contains(string(raw), "Bearer secret") || strings.Contains(string(raw), "private.example") {

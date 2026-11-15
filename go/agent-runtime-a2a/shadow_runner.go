@@ -17,10 +17,13 @@ import (
 const shadowResultContentType = "application/json"
 
 var (
-	ErrInvalidShadowRunner  = errors.New("invalid A2A shadow runner")
-	ErrRemoteIdentityLost   = errors.New("A2A remote task identity is unavailable")
+	ErrInvalidShadowRunner = errors.New("invalid A2A shadow runner")
+	ErrRemoteIdentityLost  = errors.New("A2A remote task identity is unavailable")
+	// An initial Send/response cannot prove no remote task was started.
+	// Preserve the original local shadow and stable MessageID for operator
+	// reconciliation; never mint a terminal failed/cancelled HMAC receipt.
+	ErrRemoteOutcomeUnknown = errors.New("A2A remote execution outcome is unverified")
 	ErrRemoteBindingChanged = errors.New("A2A remote binding changed")
-	ErrRemoteSendFailed     = errors.New("A2A remote message send failed")
 	ErrRemoteTaskFailed     = errors.New("A2A remote task failed")
 	ErrRemoteInputRequired  = errors.New("A2A remote task is not waiting for input")
 )
@@ -115,6 +118,20 @@ func (runner *ShadowRunner) StartRun(ctx context.Context, request agent.StartReq
 		return kernel.Snapshot{}, ErrInvalidShadowRunner
 	}
 	state := runner.initialState(runID)
+	// Seal the initial committed send intent before any network effect. A
+	// response-lost or malformed reply leaves this original Run unresolved,
+	// but its source must still be authenticated on every later read.
+	initial := kernel.Snapshot{Run: kernel.Run{
+		ID: runID, Kind: RunKind, Actor: request.Actor, Thread: request.Thread,
+		RequestID: strings.TrimSpace(request.RequestID), Goal: goal,
+		Revision: 1, Status: kernel.RunStatusRunning,
+	}}
+	proof, err := runner.proofMAC(initial, state, initial.Run.Revision,
+		initial.Run.Status, nil, nil, "", "")
+	if err != nil {
+		return kernel.Snapshot{}, err
+	}
+	state.Proof = fmt.Sprintf("%x", proof)
 	encoded, err := json.Marshal(state)
 	if err != nil {
 		return kernel.Snapshot{}, err
@@ -127,12 +144,18 @@ func (runner *ShadowRunner) StartRun(ctx context.Context, request agent.StartReq
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
+	if _, err = runner.decodeState(snapshot); err != nil {
+		return snapshot, err // No external call on a substituted Create result.
+	}
 	interaction, sendErr := runner.client.SendMessage(ctx, runner.discovery, SendRequest{
 		MessageID: state.MessageID, Text: goal,
 	})
 	if sendErr != nil {
-		failed, applyErr := runner.fail(ctx, snapshot, state, "a2a.send_failed", ErrRemoteSendFailed)
-		return failed, errors.Join(sendErr, applyErr)
+		// The provider may have accepted the message before the HTTP reply
+		// was lost. Signed terminal failure would strand a live remote task
+		// and incorrectly settle the parent. Do not persist upstream errors
+		// (which may contain credentials), nor issue another physical send.
+		return snapshot, ErrRemoteOutcomeUnknown
 	}
 	return runner.applyInteraction(ctx, snapshot, state, interaction)
 }
@@ -157,8 +180,10 @@ func (runner *ShadowRunner) LoadRun(ctx context.Context, runID string) (kernel.S
 		return snapshot, nil
 	}
 	if state.RemoteTaskID == "" {
-		failed, applyErr := runner.fail(ctx, snapshot, state, "a2a.remote_identity_lost", ErrRemoteIdentityLost)
-		return failed, errors.Join(ErrRemoteIdentityLost, applyErr)
+		// This could be an unknown first Send outcome. Without the remote
+		// Task ID a GET is impossible; never convert that uncertainty into
+		// a locally certified failed/no-effect receipt.
+		return snapshot, errors.Join(ErrRemoteOutcomeUnknown, ErrRemoteIdentityLost)
 	}
 	remote, err := runner.client.GetTask(ctx, runner.discovery, state.RemoteTaskID)
 	if err != nil {
@@ -330,7 +355,7 @@ func (runner *ShadowRunner) applyInteraction(
 		return runner.applyTask(ctx, snapshot, state, *interaction.Task)
 	}
 	if interaction.Message == nil || len(interaction.Raw) == 0 {
-		return runner.fail(ctx, snapshot, state, "a2a.invalid_result", ErrInvalidResult)
+		return snapshot, errors.Join(ErrRemoteOutcomeUnknown, ErrInvalidResult)
 	}
 	if err := validateRemoteMessageBinding(state, *interaction.Message); err != nil {
 		return snapshot, err // Do not complete, rebind or erase a pending resume.
@@ -353,7 +378,7 @@ func (runner *ShadowRunner) applyTask(
 		return snapshot, err // Never persist an alien Task or Context identity.
 	}
 	if strings.TrimSpace(remote.ID) == "" || strings.TrimSpace(remote.ContextID) == "" || strings.TrimSpace(remote.State) == "" {
-		return runner.fail(ctx, snapshot, state, "a2a.invalid_task", ErrInvalidTask)
+		return snapshot, errors.Join(ErrRemoteOutcomeUnknown, ErrInvalidTask)
 	}
 	state.RemoteTaskID = remote.ID
 	state.RemoteContextID = remote.ContextID
@@ -374,7 +399,7 @@ func (runner *ShadowRunner) applyTask(
 	case "TASK_STATE_SUBMITTED", "TASK_STATE_WORKING":
 		return runner.keepRunning(ctx, snapshot, state)
 	default:
-		return runner.fail(ctx, snapshot, state, "a2a.invalid_task_state", ErrInvalidTask)
+		return snapshot, errors.Join(ErrRemoteOutcomeUnknown, ErrInvalidTask)
 	}
 }
 
