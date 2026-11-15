@@ -5,6 +5,19 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- **BREAKING CHANGE (2026-11-14), SubAgent-only orchestration:** Fully delete
+  Team, GroupChat, Dynamic Workflow and their Go/HTTP/TypeScript/Harness API,
+  native RunRelation types, continuation, topology and SQL Definition Store
+  integration. Keep native Agent, SubAgent Handoff/Delegation, Join and
+  authorization/recovery fences. No compatibility bridge, feature flag,
+  automatic composite-to-SubAgent migration or legacy recovery is provided.
+  Quiesce old workers and reconcile old composite Runs/physical effects before
+  upgrading. Retired SQL Definition tables require explicitly approved
+  deletion after backup; see `docs/adr/0018-subagent-only-orchestration-hardcut.md`
+  and `docs/breaking-changes.md`. Previous changelog paragraphs below describe
+  *historical pre-stable implementations* that this hard cut supersedes.
+
+
 - Issue #107 seventh independent review / eighth remediation (2026-11-12):
   eliminate the missing executing-child self-fence across Memory, native
   SQLite and PostgreSQL. A physical Grant now protects its own Run and

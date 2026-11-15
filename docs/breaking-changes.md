@@ -1,5 +1,36 @@
 # Breaking changes (pre-stable Beta)
 
+## 2026-11-14 — BREAKING CHANGE: remove composite orchestration; SubAgent only
+
+**This is a hard removal, not a deprecation or a feature toggle.**
+`go/agent-runtime/{team,groupchat,workflow}`, their HTTP modules,
+TypeScript `teams`/`workflows` and Workflow Definition DTOs, native
+Continuation/Topology bindings, Harness root/child start/retry/resume modes,
+GroupChat handoff Tool, Workflow wait/compensation interpreter and dedicated
+SQL Definition Store are deleted. `ExecutionTeam`, `ExecutionGroupChat`,
+`ExecutionWorkflow`, their capability keys and corresponding `KindTeamMember`,
+`KindGroupChatSpeaker`, `KindWorkflowEffect` are no longer accepted as
+first-party execution/ownership contracts. Agent/SubAgent delegation and its
+own Join semantics remain; there is no replacement composite interpreter.
+
+**Upgrade is not in-place execution-compatible:** an old Team, GroupChat or
+Workflow Run cannot resume, compensate or dispatch on this version. Before
+upgrading, quiesce old workers, reconcile all possible external effects, and
+explicitly drain/cancel/abandon such Runs using the old matched binaries and
+storage. Do not reuse their Run IDs as Agent/SubAgent IDs and do not assume
+that a successful Store migration proves recoverability. There is no legacy
+codec, fallback resumer, alias, feature flag or automatic SubAgent conversion.
+Existing `agent_workflow_definition_heads` and
+`agent_workflow_definition_revisions` are no longer mapped; they may be
+removed with the **operator-approved** SQL in
+[`docs/migrations/retire-obsolete-orchestration.sql`](migrations/retire-obsolete-orchestration.sql)
+after backup and reconciliation. The standard migration does not drop data.
+Old HTTP/TypeScript consumers must be upgraded alongside the SDK.
+
+See [ADR 0018](adr/0018-subagent-only-orchestration-hardcut.md) for the sole
+supported architecture and the acceptance criteria. Prior dated notes below
+remain a record of *superseded pre-stable behavior*, not current support.
+
 ## Unreleased — Root-owned retirement acknowledgement
 
 Custom Root Store adapters must implement or forward `kernel.OwnedRetirementStore` on the same transactional backend as native execution and owned scope storage. Missing capability is rejected before dispatch; no unsafe legacy fallback remains. Built-in Memory, SQLite and PostgreSQL are upgraded together; default and borrowed-lease configurations remain supported. See [the migration and acknowledgement boundary](releases/unreleased-owned-retirement-ack.md).

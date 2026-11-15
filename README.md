@@ -1,9 +1,13 @@
 # Gaoge Agent Runtime
 
-> **Next pre-stable Beta (unreleased):** Model dispatch and pre-intent request preparation
-> have an explicitly breaking API/persistence contract. See
-> [Breaking Changes](docs/breaking-changes.md) and [ADR 0010](docs/adr/0010-prestable-model-dispatch-contract.md)
-> before resuming in-flight Runs from earlier prereleases.
+> **BREAKING CHANGE (unreleased beta.24):** Team, GroupChat and Dynamic Workflow
+> orchestration are deleted across Go, Harness, HTTP, TypeScript and contracts.
+> **Only Agent/SubAgent orchestration is supported.** There are no compatibility
+> facades or replay of obsolete in-flight Runs. See
+> [migration instructions](docs/breaking-changes.md) and
+> [ADR 0018](docs/adr/0018-subagent-only-orchestration-hardcut.md).
+> Model dispatch and pre-intent preparation have additional breaking contracts;
+> see [ADR 0010](docs/adr/0010-prestable-model-dispatch-contract.md).
 
 Gaoge Agent Runtime is a framework-neutral runtime SDK for durable, tool-using
 agents. It separates the deterministic run state machine from optional agent,
@@ -17,7 +21,7 @@ is **v0.1.0-beta.23**; see the [beta.24 upgrade notes](docs/releases/v0.1.0-beta
 
 | Package | Purpose | Beta support |
 | --- | --- | --- |
-| `go/agent-runtime` | Kernel, agent loop, tools, context, workflows, teams, queues, evaluation | Supported |
+| `go/agent-runtime` | Kernel, Agent/SubAgent loop, Handoff/Delegation, tools, context, queues, evaluation | Supported |
 | `go/agent-runtime-provider` | Optional OpenAI/Anthropic provider adapters and explicit router | Candidate (next prerelease) |
 | `go/agent-runtime-harness` | Durable turn orchestration, interactions, timelines, delegation | Supported |
 | `go/agent-runtime-http` | HTTP v1 handlers and SSE feeds | Supported |
@@ -83,7 +87,7 @@ go run ./go/agent-runtime-harness/examples/session
 ```
 
 It uses the **same** Agent Loop with optional Harness, a Host-owned transcript,
-and explicit Context projection; no Workflow, Team, scheduler, or intent router
+and explicit Context projection; no additional orchestration engine or intent router
 is involved. For a text-only conversation, `harness.OpenTextAgentSession`
 composes the existing runners and `harness.TranscriptHistoryFunc` projects
 prior text-only User/Assistant messages with stable IDs, validates the history
