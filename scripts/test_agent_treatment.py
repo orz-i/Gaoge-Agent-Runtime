@@ -24,6 +24,10 @@ class QualityTreatmentProtocolTests(unittest.TestCase):
         baseline.validate_report(historical)
         self.assertNotIn("workloadHash", historical["runner"])
         self.assertNotIn("treatmentHash", historical["runner"])
+        historical_quality = quality.quality_report()
+        historical_quality["runner"].pop("workloadHash")
+        historical_quality["runner"].pop("treatmentHash")
+        baseline.validate_report(historical_quality)
         first, second = pair()
         self.assertNotEqual(first["runner"]["datasetHash"], second["runner"]["datasetHash"])
         self.assertEqual(first["runner"]["workloadHash"], second["runner"]["workloadHash"])
@@ -51,6 +55,12 @@ class QualityTreatmentProtocolTests(unittest.TestCase):
                 with self.assertRaisesRegex(baseline.ProtocolFailure, "invalid_start_identity"):
                     baseline.accept_event(report, next_event)
                 self.assertEqual(report["runner"], {})
+        experimental_config = quality.quality_config() | {"qualityTreatment": baseline.QUALITY_GENERIC_TREATMENT}
+        missing_experiment_identity = quality.quality_start(experimental_config)
+        missing_experiment_identity.pop("workloadHash")
+        missing_experiment_identity.pop("treatmentHash")
+        with self.assertRaisesRegex(baseline.ProtocolFailure, "invalid_start_identity"):
+            baseline.accept_event(baseline.new_report(experimental_config, {}), missing_experiment_identity)
         report = quality.quality_report()
         del report["runner"]["treatmentHash"]
         with self.assertRaisesRegex(baseline.ProtocolFailure, "invalid_start_identity"):
@@ -79,6 +89,12 @@ class QualityTreatmentProtocolTests(unittest.TestCase):
         strict_text, strict_ok = baseline.comparison_markdown(first, second)
         self.assertFalse(strict_ok)
         self.assertIn("datasetHash", strict_text)
+        repeat_text, repeat_ok = baseline.comparison_markdown(first, first)
+        self.assertTrue(repeat_ok)
+        self.assertNotIn("无法进行数值比较", repeat_text)
+        same_text, same_ok = baseline.comparison_markdown(first, first, treatment=True)
+        self.assertFalse(same_ok)
+        self.assertIn("distinctTreatment", same_text)
         treatment_text, treatment_ok = baseline.comparison_markdown(first, second, treatment=True)
         self.assertTrue(treatment_ok)
         self.assertIn("Agent Treatment A/B", treatment_text)
@@ -96,7 +112,6 @@ class QualityTreatmentProtocolTests(unittest.TestCase):
             ("budget", lambda r: r["runner"]["profile"].update(maxToolCalls=20)),
             ("dirty", lambda r: r["source"].update(dirty=True)),
             ("different_revision", lambda r: r["source"].update(revision="b" * 40)),
-            ("missing", lambda r: (r["runner"].pop("workloadHash"), r["runner"].pop("treatmentHash"))),
         ]
         for kind, mutation in changes:
             with self.subTest(kind=kind):
@@ -104,6 +119,13 @@ class QualityTreatmentProtocolTests(unittest.TestCase):
                 mutation(candidate)
                 _, comparable = baseline.comparison_markdown(first, candidate, treatment=True)
                 self.assertFalse(comparable, "a changed control escaped comparison: " + kind)
+        # A new experimental report without both identities is invalid in
+        # the strict protocol itself, not merely in the comparison UI.
+        missing = copy.deepcopy(second)
+        missing["runner"].pop("workloadHash")
+        missing["runner"].pop("treatmentHash")
+        with self.assertRaisesRegex(baseline.ProtocolFailure, "invalid_start_identity"):
+            baseline.comparison_markdown(first, missing, treatment=True)
 
     def test_read_only_cli_selector_never_starts_provider_in_comparison_mode(self):
         original, variant = pair()
