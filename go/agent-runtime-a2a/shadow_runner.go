@@ -272,9 +272,13 @@ func (runner *ShadowRunner) cancelRunAtRevision(
 	// A verified read before physical control rejects foreign GetTask replies.
 	// Any intervening mutation is fenced by the *original* expectedRevision.
 	observed, readErr := runner.LoadRun(ctx, runID)
-	if readErr != nil && !(errors.Is(readErr, ErrRemoteOutcomeUnknown) &&
+	// Only an already-returned, original Resume callback may carry a
+	// read-only outcome-unknown result into cancellation admission. A remote
+	// GET failure or an unfinished physical send is never this authority.
+	verifiedPendingResume := errors.Is(readErr, ErrRemoteOutcomeUnknown) &&
 		!errors.Is(readErr, errRemoteReadUnavailable) &&
-		state.PendingMessageID != "" && state.PendingMessageReturned) {
+		state.PendingMessageID != "" && state.PendingMessageReturned
+	if readErr != nil && !verifiedPendingResume {
 		return observed, readErr
 	}
 	if observed.Run.Revision != expectedRevision {
