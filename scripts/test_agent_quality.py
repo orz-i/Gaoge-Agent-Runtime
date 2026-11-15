@@ -23,6 +23,12 @@ def quality_config(repetitions=1):
 def quality_start(config):
     event = fixtures.start_event(config)
     event["taskVersion"] = "release-evidence-quality-v1"
+    # Fixed synthetic hashes test the report contract, not cryptographic
+    # reconstruction of the Go source/fixture bytes.
+    generic = config.get("qualityTreatment") == baseline.QUALITY_GENERIC_TREATMENT
+    event["datasetHash"] = "sha256:" + ("e" if generic else "d") * 64
+    event["workloadHash"] = "sha256:" + "a" * 64
+    event["treatmentHash"] = "sha256:" + ("b" if generic else "c") * 64
     event["requestedSamples"] = len(baseline.QUALITY_CASE_IDS) * config["repetitions"]
     return event
 

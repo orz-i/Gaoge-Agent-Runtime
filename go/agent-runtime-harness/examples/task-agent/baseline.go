@@ -69,10 +69,15 @@ func baselineProfile(provider string) measurementProfile {
 }
 
 type startEvent struct {
-	Type             string              `json:"type"`
-	SchemaVersion    int                 `json:"schemaVersion"`
-	TaskVersion      string              `json:"taskVersion"`
-	DatasetHash      string              `json:"datasetHash"`
+	Type          string `json:"type"`
+	SchemaVersion int    `json:"schemaVersion"`
+	TaskVersion   string `json:"taskVersion"`
+	DatasetHash   string `json:"datasetHash"`
+	// WorkloadHash identifies the immutable task, source fixtures, output contract
+	// and Oracle. TreatmentHash identifies the selected instructions, Tool
+	// contracts and execution profile. Neither replaces the historical full hash.
+	WorkloadHash     string              `json:"workloadHash"`
+	TreatmentHash    string              `json:"treatmentHash"`
 	Profile          measurementProfile  `json:"profile"`
 	Configuration    publicConfiguration `json:"configuration"`
 	RequestedSamples int                 `json:"requestedSamples"`
@@ -87,6 +92,10 @@ type startEvent struct {
 func baselineStart(configuration publicConfiguration) (startEvent, error) {
 	if configuration.Suite != "" && configuration.Suite != qualitySuite {
 		return startEvent{}, errors.New("invalid baseline suite")
+	}
+	if configuration.QualityTreatment != "" &&
+		(configuration.Suite != qualitySuite || configuration.QualityTreatment != genericNavigationTreatment) {
+		return startEvent{}, errors.New("invalid quality treatment")
 	}
 	profile := baselineProfile(configuration.Provider)
 	profile.ContextPolicy = taskContextPolicyForSuite(configuration.Suite)
@@ -107,7 +116,7 @@ func baselineStart(configuration publicConfiguration) (startEvent, error) {
 		ToolPolicies []harness.ToolPolicySnapshot `json:"toolPolicies"`
 		Cases        []caseManifest               `json:"cases"`
 		Profile      measurementProfile           `json:"profile"`
-	}{TaskVersion: taskVersion, Prompt: taskPrompt, Instructions: taskInstructionsForSuite(configuration.Suite), OutputSchema: answerSchema, ToolPolicies: taskToolPoliciesForSuite(configuration.Suite), Profile: profile}
+	}{TaskVersion: taskVersion, Prompt: taskPrompt, Instructions: taskInstructionsForTreatment(configuration.Suite, configuration.QualityTreatment), OutputSchema: answerSchema, ToolPolicies: taskToolPoliciesForSuite(configuration.Suite), Profile: profile}
 	for _, item := range cases {
 		manifest.Cases = append(manifest.Cases, caseManifest{ID: item.id, SourceHash: digest([]byte(item.source.document()))})
 	}
@@ -119,8 +128,33 @@ func baselineStart(configuration publicConfiguration) (startEvent, error) {
 	if err != nil {
 		return startEvent{}, err
 	}
+	// An additive experiment identity: the original datasetHash remains
+	// byte-for-byte unchanged so old anchors and strict comparisons are valid.
+	// Workload never includes Provider choices, navigation instructions or
+	// budgets; a treatment comparison must independently hold those fixed.
+	workloadBody, err := json.Marshal(struct {
+		TaskVersion  string          `json:"taskVersion"`
+		Prompt       string          `json:"prompt"`
+		OutputSchema json.RawMessage `json:"outputSchema"`
+		Oracle       string          `json:"oracle"`
+		Recovery     string          `json:"recovery"`
+		Cases        []caseManifest  `json:"cases"`
+	}{taskVersion, manifest.Prompt, manifest.OutputSchema, profile.OracleVersion, profile.Recovery, manifest.Cases})
+	if err != nil {
+		return startEvent{}, err
+	}
+	treatmentBody, err := json.Marshal(struct {
+		Instructions string                       `json:"instructions"`
+		Tools        []tools.Definition           `json:"tools"`
+		ToolPolicies []harness.ToolPolicySnapshot `json:"toolPolicies"`
+		Profile      measurementProfile           `json:"profile"`
+	}{manifest.Instructions, manifest.Tools, manifest.ToolPolicies, manifest.Profile})
+	if err != nil {
+		return startEvent{}, err
+	}
 	return startEvent{
-		Type: "start", SchemaVersion: baselineSchemaVersion, TaskVersion: taskVersion, DatasetHash: digest(body),
+		Type: "start", SchemaVersion: baselineSchemaVersion, TaskVersion: taskVersion,
+		DatasetHash: digest(body), WorkloadHash: digest(workloadBody), TreatmentHash: digest(treatmentBody),
 		Profile: profile, Configuration: configuration, RequestedSamples: len(manifest.Cases) * configuration.Repetitions,
 	}, nil
 }

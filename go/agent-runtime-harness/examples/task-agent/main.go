@@ -27,6 +27,7 @@ type settings struct {
 	allowUnknownStructuredModel              bool
 	reasoningEffort                          string
 	suite                                    string // Validated Host baseline suite, not Model policy.
+	qualityTreatment                         string // Explicit Host-owned A/B instruction variant.
 	modelProfiles                            model.ModelProfileSource
 	httpClient                               *http.Client
 }
@@ -92,6 +93,10 @@ func runCommand(ctx context.Context, args []string, input io.Reader, output io.W
 }
 
 func (config *settings) resolve() error {
+	if config.qualityTreatment != "" &&
+		(config.suite != qualitySuite || config.qualityTreatment != genericNavigationTreatment) {
+		return errors.New("invalid quality treatment")
+	}
 	switch config.mode {
 	case "scripted":
 		if config.provider != "" || config.modelID != "" || config.contextTokens != 0 || config.outputTokens != 0 {

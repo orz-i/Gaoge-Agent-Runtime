@@ -23,6 +23,8 @@ const (
 	taskInstructions  = "Use only returned evidence. Call lookup_release, recover the deep RELEASE R-17 record with read_context_artifact query and limit 128, then save_draft exactly once. Return the saved draft as JSON. Copy exact artifact IDs; never guess them."
 )
 
+const genericNavigationTreatment = "generic-navigation-v1"
+
 // The quality-only instruction teaches navigation of ambiguous evidence; it
 // does not embed expected deployment facts or bypass the original deep-read
 // and draft Oracle. Historical two-case prompts remain byte-for-byte intact.
@@ -31,6 +33,16 @@ func taskInstructionsForSuite(suite string) string {
 		return taskInstructions
 	}
 	return taskInstructions + " For long or ambiguous archives, first search the exact distinctive record identifier supplied in the user's request (here the literal RELEASE R-17), not broad words such as RELEASE or repeated offset=0 scans. Set read_context_artifact query to that full identifier, offset=0 and limit=128. If found=true and the returned content contains the complete matching original record with both requested fields, that content is exact source evidence: save_draft next, without another redundant read. If exact search misses or returns only navigation matches, inspect at most the bounded candidates, select the original target offset and re-read that exact original source before saving. Normalized_hints are NOT evidence; never infer target facts from a preview. This task has a strict shared Tool-call limit of 10 including lookup, Artifact reads and save_draft; reserve at least one call for save_draft. Do not repeat an ineffective query or offset cursor, invent facts, or weaken the draft/Oracle checks."
+}
+
+// Host-selected experimental navigation wording. It changes no Tool schema,
+// source facts, SDK budget, Oracle or physical authorization. The default
+// treatment remains exactly the original quality profile and dataset hash.
+func taskInstructionsForTreatment(suite, treatment string) string {
+	if suite != qualitySuite || treatment != genericNavigationTreatment {
+		return taskInstructionsForSuite(suite)
+	}
+	return taskInstructions + " In ambiguous documents extract the FULL target record identifier from the user's request, then search that literal identifier at offset=0 with a bounded excerpt. Avoid broad searches and repeating the same query/offset without new evidence. A found=true original-source excerpt containing all required fields is evidence: proceed to the required write once, without rereading it. Candidate previews and normalized navigation hints are not source evidence; select an original offset and re-read that exact source before using any facts. Preserve a Tool call for the required final write within the unchanged hard limit, and report missing evidence rather than guessing."
 }
 
 var answerSchema = json.RawMessage(`{"type":"object","properties":{"release":{"type":"string"},"deploymentCode":{"type":"string"},"window":{"type":"string"},"artifactID":{"type":"string"},"draftID":{"type":"string"}},"required":["release","deploymentCode","window","artifactID","draftID"],"additionalProperties":false}`)
