@@ -55,21 +55,26 @@ func (resolver BindingResolverFunc) ResolveBinding(
 type PluginDependencies struct {
 	Runtime  *kernel.Runtime
 	Bindings BindingResolver
+	// A Host-owned stable secret (at least 32 bytes), independent of the
+	// shared Kernel and remote credentials. Preserve across restarts.
+	AttestationKey []byte `json:"-"`
 }
 
 // Plugin is the typed A2A Feature and Handoff routing adapter. It does not
 // discover code, open listeners, or register itself globally.
 type Plugin struct {
-	runtime  *kernel.Runtime
-	bindings BindingResolver
+	runtime        *kernel.Runtime
+	bindings       BindingResolver
+	attestationKey []byte
 }
 
 // NewPlugin constructs one explicit A2A edge plugin.
 func NewPlugin(dependencies PluginDependencies) (*Plugin, error) {
-	if dependencies.Runtime == nil || dependencies.Bindings == nil {
+	if dependencies.Runtime == nil || dependencies.Bindings == nil || len(dependencies.AttestationKey) < 32 {
 		return nil, ErrInvalidPlugin
 	}
-	return &Plugin{runtime: dependencies.Runtime, bindings: dependencies.Bindings}, nil
+	return &Plugin{runtime: dependencies.Runtime, bindings: dependencies.Bindings,
+		attestationKey: append([]byte(nil), dependencies.AttestationKey...)}, nil
 }
 
 // Descriptor declares the static microkernel dependency direction.
@@ -113,6 +118,7 @@ func (plugin *Plugin) resolveChild(ctx context.Context, delegation handoff.Deleg
 	return NewShadowRunner(ShadowDependencies{
 		Runtime: plugin.runtime, Client: binding.Client, Discovery: binding.Discovery,
 		TargetID: targetID, TargetRevision: binding.Revision,
+		AttestationKey: plugin.attestationKey,
 	})
 }
 

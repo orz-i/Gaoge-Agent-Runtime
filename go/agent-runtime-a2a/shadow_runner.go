@@ -39,16 +39,19 @@ type ShadowDependencies struct {
 	Discovery      Discovery
 	TargetID       string
 	TargetRevision string
+	// Stable secret, at least 32 bytes; never persist or expose it in Kernel.
+	AttestationKey []byte `json:"-"`
 }
 
 // ShadowRunner implements the existing Handoff ChildRunner shape without
 // importing Handoff or leaking A2A wire types into parent orchestrators.
 type ShadowRunner struct {
-	runtime   *kernel.Runtime
-	client    RemoteClient
-	discovery Discovery
-	targetID  string
-	revision  string
+	runtime        *kernel.Runtime
+	client         RemoteClient
+	discovery      Discovery
+	targetID       string
+	revision       string
+	attestationKey []byte
 }
 
 type shadowState struct {
@@ -66,18 +69,20 @@ type shadowState struct {
 	RemoteContextID  string `json:"remoteContextID,omitempty"`
 	RemoteState      string `json:"remoteState,omitempty"`
 	RemotePrompt     string `json:"remotePrompt,omitempty"`
+	Proof            string `json:"proof,omitempty"`
 }
 
 // NewShadowRunner creates one A2A ChildRunner bound to one immutable discovery.
 func NewShadowRunner(dependencies ShadowDependencies) (*ShadowRunner, error) {
 	descriptor := dependencies.Discovery.Descriptor
-	if dependencies.Runtime == nil || dependencies.Client == nil || strings.TrimSpace(descriptor.Name) == "" ||
+	if dependencies.Runtime == nil || dependencies.Client == nil || len(dependencies.AttestationKey) < 32 || strings.TrimSpace(descriptor.Name) == "" ||
 		strings.TrimSpace(descriptor.PreferredURL) == "" || descriptor.ProtocolVersion != ProtocolVersion {
 		return nil, ErrInvalidShadowRunner
 	}
 	return &ShadowRunner{
 		runtime: dependencies.Runtime, client: dependencies.Client, discovery: cloneDiscovery(dependencies.Discovery),
 		targetID: strings.TrimSpace(dependencies.TargetID), revision: strings.TrimSpace(dependencies.TargetRevision),
+		attestationKey: append([]byte(nil), dependencies.AttestationKey...),
 	}, nil
 }
 
@@ -98,7 +103,8 @@ func (runner *ShadowRunner) ObservesFrozenRemoteShadow(
 	state, err := runner.decodeState(child)
 	return err == nil && state.TargetID == runner.targetID &&
 		state.TargetRevision == runner.revision &&
-		(state.RemoteTaskID != "" || state.RemoteMessageID != "")
+		((state.RemoteTaskID != "" && state.RemoteContextID != "") ||
+			(state.RemoteTaskID == "" && state.RemoteMessageID != ""))
 }
 
 // StartRun creates the durable local shadow before sending the remote A2A message.
@@ -137,12 +143,18 @@ func (runner *ShadowRunner) LoadRun(ctx context.Context, runID string) (kernel.S
 		return kernel.Snapshot{}, ErrInvalidShadowRunner
 	}
 	snapshot, err := runner.runtime.Load(ctx, runID)
-	if err != nil || !shadowRunRefreshable(snapshot.Run.Status) {
+	if err != nil {
 		return snapshot, err
 	}
+	// Even a terminal Run is untrusted until its first-party remote receipt
+	// attestation is checked. Previously this fast path accepted any local
+	// Kernel twin with matching public identity, without a single A2A call.
 	state, err := runner.decodeState(snapshot)
 	if err != nil {
-		return kernel.Snapshot{}, err
+		return snapshot, err
+	}
+	if !shadowRunRefreshable(snapshot.Run.Status) {
+		return snapshot, nil
 	}
 	if state.RemoteTaskID == "" {
 		failed, applyErr := runner.fail(ctx, snapshot, state, "a2a.remote_identity_lost", ErrRemoteIdentityLost)
@@ -240,7 +252,9 @@ func (runner *ShadowRunner) decodeState(snapshot kernel.Snapshot) (shadowState, 
 	descriptor := runner.discovery.Descriptor
 	if state.RemoteName != descriptor.Name || state.RemoteURL != descriptor.PreferredURL ||
 		state.ProtocolVersion != descriptor.ProtocolVersion || state.TargetID != runner.targetID ||
-		state.TargetRevision != runner.revision {
+		state.TargetRevision != runner.revision ||
+		(state.RemoteTaskID != "" && state.RemoteContextID == "") ||
+		!runner.verifiedProof(snapshot, state) {
 		return shadowState{}, ErrRemoteBindingChanged
 	}
 	return state, nil
@@ -374,22 +388,14 @@ func (runner *ShadowRunner) waitForInput(
 	state shadowState,
 ) (kernel.Snapshot, error) {
 	if snapshot.Run.Status == kernel.RunStatusWaitingInput {
-		encoded, err := json.Marshal(state)
-		if err != nil {
-			return kernel.Snapshot{}, err
-		}
-		refreshed, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
-			Status: kernel.RunStatusRunning, State: encoded,
+		refreshed, err := runner.applyAttested(ctx, snapshot, state, kernel.Mutation{
+			Status: kernel.RunStatusRunning,
 			Events: []kernel.EventDraft{{Type: "a2a.remote_wait_refreshed", Message: "A2A remote wait state changed"}},
 		})
 		if err != nil {
 			return kernel.Snapshot{}, err
 		}
 		snapshot = refreshed
-	}
-	encoded, err := json.Marshal(state)
-	if err != nil {
-		return kernel.Snapshot{}, err
 	}
 	eventType := "a2a.remote_input_required"
 	if state.RemoteState == "TASK_STATE_AUTH_REQUIRED" {
@@ -399,8 +405,8 @@ func (runner *ShadowRunner) waitForInput(
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
-	return runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
-		Status: kernel.RunStatusWaitingInput, State: encoded,
+	return runner.applyAttested(ctx, snapshot, state, kernel.Mutation{
+		Status:     kernel.RunStatusWaitingInput,
 		Checkpoint: checkpoint,
 		Events:     []kernel.EventDraft{{Type: eventType, Message: state.RemoteState}},
 	})
@@ -411,12 +417,8 @@ func (runner *ShadowRunner) markResumePending(
 	snapshot kernel.Snapshot,
 	state shadowState,
 ) (kernel.Snapshot, error) {
-	encoded, err := json.Marshal(state)
-	if err != nil {
-		return kernel.Snapshot{}, err
-	}
-	return runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
-		Status: kernel.RunStatusRunning, State: encoded,
+	return runner.applyAttested(ctx, snapshot, state, kernel.Mutation{
+		Status: kernel.RunStatusRunning,
 		Events: []kernel.EventDraft{{Type: "a2a.remote_resume_requested", Message: "A2A remote input submitted"}},
 	})
 }
@@ -427,16 +429,12 @@ func (runner *ShadowRunner) resumeSendFailed(
 	state shadowState,
 	_ error,
 ) (kernel.Snapshot, error) {
-	encoded, err := json.Marshal(state)
-	if err != nil {
-		return kernel.Snapshot{}, err
-	}
 	checkpoint, err := runner.remoteCheckpoint(snapshot.Run.ID, state)
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
-	return runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
-		Status: kernel.RunStatusWaitingInput, State: encoded,
+	return runner.applyAttested(ctx, snapshot, state, kernel.Mutation{
+		Status:     kernel.RunStatusWaitingInput,
 		Checkpoint: checkpoint,
 		Events:     []kernel.EventDraft{{Type: "a2a.remote_resume_deferred", Message: "A2A remote resume deferred"}},
 	})
@@ -489,12 +487,8 @@ func remoteStatusPrompt(message *MessageSnapshot) string {
 }
 
 func (runner *ShadowRunner) keepRunning(ctx context.Context, snapshot kernel.Snapshot, state shadowState) (kernel.Snapshot, error) {
-	encoded, err := json.Marshal(state)
-	if err != nil {
-		return kernel.Snapshot{}, err
-	}
-	return runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
-		Status: kernel.RunStatusRunning, State: encoded,
+	return runner.applyAttested(ctx, snapshot, state, kernel.Mutation{
+		Status: kernel.RunStatusRunning,
 		Events: []kernel.EventDraft{{Type: "a2a.remote_updated", Message: state.RemoteState}},
 	})
 }
@@ -505,12 +499,11 @@ func (runner *ShadowRunner) complete(
 	state shadowState,
 	content json.RawMessage,
 ) (kernel.Snapshot, error) {
-	encoded, err := json.Marshal(state)
-	if err != nil || !json.Valid(content) {
-		return kernel.Snapshot{}, errors.Join(err, ErrInvalidResult)
+	if !json.Valid(content) {
+		return kernel.Snapshot{}, ErrInvalidResult
 	}
-	return runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
-		Status: kernel.RunStatusCompleted, State: encoded,
+	return runner.applyAttested(ctx, snapshot, state, kernel.Mutation{
+		Status: kernel.RunStatusCompleted,
 		Result: &kernel.Result{ContentType: shadowResultContentType, Content: append(json.RawMessage(nil), content...)},
 		Events: []kernel.EventDraft{{Type: "a2a.remote_completed", Message: "A2A remote child completed"}},
 	})
@@ -523,12 +516,8 @@ func (runner *ShadowRunner) fail(
 	code string,
 	cause error,
 ) (kernel.Snapshot, error) {
-	encoded, err := json.Marshal(state)
-	if err != nil {
-		return kernel.Snapshot{}, err
-	}
-	return runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
-		Status: kernel.RunStatusFailed, State: encoded,
+	return runner.applyAttested(ctx, snapshot, state, kernel.Mutation{
+		Status:    kernel.RunStatusFailed,
 		ErrorCode: code, ErrorDetail: cause.Error(),
 		Events: []kernel.EventDraft{{Type: "a2a.remote_failed", Message: cause.Error()}},
 	})
@@ -540,12 +529,8 @@ func (runner *ShadowRunner) cancel(
 	state shadowState,
 	reason string,
 ) (kernel.Snapshot, error) {
-	encoded, err := json.Marshal(state)
-	if err != nil {
-		return kernel.Snapshot{}, err
-	}
-	return runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
-		Status: kernel.RunStatusCancelled, State: encoded,
+	return runner.applyAttested(ctx, snapshot, state, kernel.Mutation{
+		Status:    kernel.RunStatusCancelled,
 		ErrorCode: "a2a.remote_cancelled", ErrorDetail: strings.TrimSpace(reason),
 		Events: []kernel.EventDraft{{Type: "a2a.remote_cancelled", Message: strings.TrimSpace(reason)}},
 	})
