@@ -146,19 +146,12 @@ func (plugin *Plugin) ResumeRun(
 	if expectedRevision == 0 || snapshot.Run.Revision != expectedRevision {
 		return kernel.Snapshot{}, kernel.ErrConflict
 	}
+	child, err := plugin.certifiedShadow(ctx, snapshot)
+	if err != nil {
+		return snapshot, err
+	}
 	if snapshot.Run.Status != kernel.RunStatusWaitingInput {
 		return snapshot, ErrRemoteInputRequired
-	}
-	state, err := decodeTopologyState(snapshot.State)
-	if err != nil || strings.TrimSpace(state.TargetID) == "" || strings.TrimSpace(state.TargetRevision) == "" {
-		return kernel.Snapshot{}, errors.Join(ErrRemoteIdentityLost, err)
-	}
-	child, err := plugin.resolveChild(ctx, handoff.Delegation{
-		MemberID: TargetPrefix + state.TargetID, MemberRevision: state.TargetRevision,
-		ChildRunID: snapshot.Run.ID,
-	})
-	if err != nil {
-		return kernel.Snapshot{}, err
 	}
 	return child.ResumeRun(ctx, snapshot.Run.ID, strings.TrimSpace(text))
 }
@@ -182,24 +175,42 @@ func (plugin *Plugin) Cancel(
 	if snapshot.Run.Revision != expectedRevision {
 		return kernel.Snapshot{}, kernel.ErrConflict
 	}
+	// A terminal local Kernel status is not an authenticated remote
+	// cancellation receipt. The original route and HMAC must be verified
+	// BEFORE the fast path can return a successful terminal observation.
+	child, err := plugin.certifiedShadow(ctx, snapshot)
+	if err != nil {
+		return snapshot, err
+	}
 	if !shadowRunRefreshable(snapshot.Run.Status) {
 		return snapshot, nil
-	}
-	state, err := decodeTopologyState(snapshot.State)
-	if err != nil {
-		return kernel.Snapshot{}, err
-	}
-	child, err := plugin.resolveChild(ctx, handoff.Delegation{
-		MemberID: TargetPrefix + state.TargetID, ChildRunID: snapshot.Run.ID,
-	})
-	if err != nil {
-		return kernel.Snapshot{}, err
 	}
 	cancelled, err := child.CancelRun(ctx, snapshot.Run.ID)
 	if err == nil && shadowRunRefreshable(cancelled.Run.Status) {
 		err = ErrRemoteCancellationPending
 	}
 	return cancelled, err
+}
+
+// certifiedShadow is the common read-only source proof for public Control
+// entry points. Resolver metadata alone may select a binding but can never
+// authenticate a same-ID forged terminal or authorize remote side effects.
+func (plugin *Plugin) certifiedShadow(ctx context.Context, snapshot kernel.Snapshot) (*ShadowRunner, error) {
+	state, err := decodeTopologyState(snapshot.State)
+	if err != nil || strings.TrimSpace(state.TargetID) == "" || strings.TrimSpace(state.TargetRevision) == "" {
+		return nil, errors.Join(ErrRemoteBindingChanged, err)
+	}
+	child, err := plugin.resolveChild(ctx, handoff.Delegation{
+		MemberID: TargetPrefix + state.TargetID, MemberRevision: state.TargetRevision,
+		ChildRunID: snapshot.Run.ID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if _, err = child.decodeState(snapshot); err != nil {
+		return nil, err
+	}
+	return child, nil
 }
 
 func (plugin *Plugin) frozenRevision(ctx context.Context, runID, targetID string) (string, error) {

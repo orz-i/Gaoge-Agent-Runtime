@@ -23,3 +23,9 @@
 
 - A real remote A2A provider acceptance test and physical Browser stop/ack protocol remain separate release requirements.
 - Cross-process PostgreSQL adversarial admission and Host secret lifecycle/rotation procedures remain deployment-specific checks. This change introduces no migration or legacy proof bridge.
+
+## Follow-up: original SendMessage uncertainty and complete public Control gates
+
+- A `SendMessage` transport failure, incomplete Task/Context ID, malformed response, or unknown Task state is not authenticated remote failure/no-effect. `ShadowRunner.StartRun` preserves a **signed initial Running send intent**, the original Run ID and Message ID, and reports `ErrRemoteOutcomeUnknown` instead of signing terminal `failed`. A retrying Handoff never repeats the original physical Send; `LoadRun` with no bound Task ID reports an explicit unresolved identity and never issues an invented GET. An operator-proven remote outcome is required to reconcile this gap; there is no automatic resend or synthetic failed status.
+- `Plugin.Cancel` and `Plugin.ResumeRun` now share the original `certifiedShadow` read-only proof check **before** a terminal or waiting-state shortcut. A same-Kernel forged `cancelled` Run cannot return a successful cancellation ACK. Missing/rotated proof or binding fails closed; a legitimate signed completed Run may be read without a remote side effect.
+- The negative matrix tests response-lost, invalid response, missing Task ID, missing Context ID, unknown state, concurrent Handoff replay, same-ID unsigned terminal/waiting Shadow and wrong or rotated Host keys. All proof-bearing terminal statuses must originate from a validated, explicit remote Task/Message outcome.
