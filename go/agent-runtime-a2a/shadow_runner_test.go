@@ -207,26 +207,29 @@ func TestShadowRunnerRefreshesAuthRequiredRunAfterRemoteCompletion(t *testing.T)
 	}
 }
 
-func TestShadowRunnerRetriesResumeWithStableMessageIdentity(t *testing.T) {
+func TestShadowRunnerUncertainResumeIsReadOnlyUntilRemoteTerminal(t *testing.T) {
 	t.Parallel()
 	runtime := newShadowRuntime(t)
 	remote := &shadowRemote{task: inputRequiredTask()}
 	runner := newShadowRunner(t, runtime, remote)
-	started, err := runner.StartRun(t.Context(), shadowStartRequest("a2a-child-resume-retry"))
+	started, err := runner.StartRun(t.Context(), shadowStartRequest("a2a-child-resume-unknown"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	remote.sendErr = errors.New("temporary network failure")
-	waiting, err := runner.ResumeRun(t.Context(), started.Run.ID, "approved")
-	if err == nil || waiting.Run.Status != kernel.RunStatusWaitingInput {
-		t.Fatalf("waiting=%#v err=%v", waiting.Run, err)
+	pending, err := runner.ResumeRun(t.Context(), started.Run.ID, "approved")
+	if !errors.Is(err, ErrRemoteOutcomeUnknown) || pending.Run.Status != kernel.RunStatusRunning {
+		t.Fatalf("unknown resume was retriable: %+v err=%v", pending.Run, err)
 	}
-	messageID := remote.sent.MessageID
+	originalMessageID := remote.sent.MessageID
 	remote.sendErr = nil
 	remote.task = completedTask()
-	completed, err := runner.ResumeRun(t.Context(), started.Run.ID, "approved")
-	if err != nil || completed.Run.Status != kernel.RunStatusCompleted || remote.sent.MessageID != messageID {
-		t.Fatalf("completed=%#v messageID=%q err=%v", completed.Run, remote.sent.MessageID, err)
+	if _, err := runner.ResumeRun(t.Context(), started.Run.ID, "approved"); !errors.Is(err, ErrRemoteOutcomeUnknown) || remote.sent.MessageID != originalMessageID {
+		t.Fatalf("unverified resume re-sent the original message: %q err=%v", remote.sent.MessageID, err)
+	}
+	completed, err := runner.LoadRun(t.Context(), started.Run.ID)
+	if err != nil || completed.Run.Status != kernel.RunStatusCompleted {
+		t.Fatalf("original remote terminal did not reconcile: %+v err=%v", completed.Run, err)
 	}
 }
 

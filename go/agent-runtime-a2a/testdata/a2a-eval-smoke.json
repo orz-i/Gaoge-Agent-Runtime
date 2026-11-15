@@ -1,6 +1,6 @@
 {
   "id": "a2a-deterministic-smoke",
-  "revision": 1,
+  "revision": 2,
   "name": "A2A deterministic smoke",
   "passThreshold": 1,
   "scenarios": [
@@ -45,23 +45,23 @@
       }
     },
     {
-      "id": "shadow-resume-retry",
-      "name": "Shadow resume retry preserves the durable message identity",
-      "input": {"operation": "shadow_resume_retry"},
+      "id": "shadow-resume-uncertain",
+      "name": "Unknown resume is single-dispatch and settled by read-only terminal GET",
+      "input": {"operation": "shadow_resume_unknown"},
       "expected": {
         "status": "completed",
-        "revision": 5,
+        "revision": 4,
         "eventTypes": [
           "run.created",
           "a2a.remote_started",
           "a2a.remote_input_required",
           "a2a.remote_resume_requested",
-          "a2a.remote_resume_deferred",
           "a2a.remote_completed"
         ],
         "effects": [
-          {"key": "resume_retry", "count": 1},
-          {"key": "stable_message_identity", "count": 1}
+          {"key": "resume_send_attempts", "count": 1},
+          {"key": "duplicate_resume_sends", "count": 0},
+          {"key": "read_only_reconciliation", "count": 1}
         ]
       }
     },

@@ -194,6 +194,13 @@ func (runner *ShadowRunner) LoadRun(ctx context.Context, runID string) (kernel.S
 	if err := validateRemoteTaskBinding(state, remote); err != nil {
 		return snapshot, err
 	}
+	// A pending resume is an already-issued physical SendMessage intent.
+	// A GET that still reports a nonterminal Task cannot prove that the
+	// input did not reach the remote peer. Never turn this observation into
+	// a new input grant (even if the peer still says INPUT_REQUIRED).
+	if state.PendingMessageID != "" && !remoteTaskTerminalState(remote.State) {
+		return snapshot, ErrRemoteOutcomeUnknown
+	}
 	if remote.State == state.RemoteState && !remote.Terminal {
 		return snapshot, nil
 	}
@@ -203,7 +210,11 @@ func (runner *ShadowRunner) LoadRun(ctx context.Context, runID string) (kernel.S
 // CancelRun explicitly cancels a non-terminal remote Task and projects the result locally.
 func (runner *ShadowRunner) CancelRun(ctx context.Context, runID string) (kernel.Snapshot, error) {
 	snapshot, err := runner.LoadRun(ctx, runID)
-	if err != nil || !shadowRunRefreshable(snapshot.Run.Status) {
+	// A proven, known Task can still be cancelled during an uncertain input
+	// submission. Only a successfully validated read with a pending resume
+	// may return ErrRemoteOutcomeUnknown here. The remote Task/Context pair
+	// is verified again before issuing the physical cancel.
+	if (err != nil && !errors.Is(err, ErrRemoteOutcomeUnknown)) || !shadowRunRefreshable(snapshot.Run.Status) {
 		return snapshot, err
 	}
 	state, err := runner.decodeState(snapshot)
@@ -228,32 +239,42 @@ func (runner *ShadowRunner) ResumeRun(ctx context.Context, runID, text string) (
 	if err != nil {
 		return snapshot, err
 	}
+	state, err := runner.decodeState(snapshot)
+	if err != nil {
+		return snapshot, err
+	}
+	// The original physical input Send may have succeeded even if its reply
+	// was lost or the process died after the Store CAS. A stable MessageID
+	// is a correlation key, NOT a remote deduplication guarantee. Neither
+	// another caller nor another process may send it again.
+	if state.PendingMessageID != "" {
+		return snapshot, ErrRemoteOutcomeUnknown
+	}
 	if snapshot.Run.Status != kernel.RunStatusWaitingInput {
 		return snapshot, ErrRemoteInputRequired
 	}
-	state, err := runner.decodeState(snapshot)
-	if err != nil || state.RemoteTaskID == "" || state.RemoteContextID == "" {
-		return snapshot, errors.Join(err, ErrRemoteIdentityLost)
+	if state.RemoteTaskID == "" || state.RemoteContextID == "" {
+		return snapshot, ErrRemoteIdentityLost
 	}
 	inputHash := fmt.Sprintf("%x", sha256.Sum256([]byte(text)))
-	if state.PendingMessageID == "" {
-		state.MessageSequence++
-		state.PendingMessageID = runID + ":message:" + strconv.Itoa(state.MessageSequence)
-		state.PendingInputHash = inputHash
-		snapshot, err = runner.markResumePending(ctx, snapshot, state)
-		if err != nil {
-			return snapshot, err
-		}
-	} else if state.PendingInputHash != inputHash {
-		return snapshot, ErrRemoteInputRequired
+	state.MessageSequence++
+	state.PendingMessageID = runID + ":message:" + strconv.Itoa(state.MessageSequence)
+	state.PendingInputHash = inputHash
+	// The atomic Running transition is a one-way physical admission: a
+	// crash or a concurrent request cannot reopen the original send.
+	snapshot, err = runner.markResumePending(ctx, snapshot, state)
+	if err != nil {
+		return snapshot, err
 	}
 	interaction, sendErr := runner.client.SendMessage(ctx, runner.discovery, SendRequest{
 		MessageID: state.PendingMessageID, ContextID: state.RemoteContextID,
 		TaskID: state.RemoteTaskID, Text: text,
 	})
 	if sendErr != nil {
-		waiting, applyErr := runner.resumeSendFailed(ctx, snapshot, state, sendErr)
-		return waiting, errors.Join(sendErr, applyErr)
+		// The provider may have consumed the input before the response was
+		// lost. Retain the attested Running send intent and never expose
+		// upstream error text (which can contain credentials).
+		return snapshot, ErrRemoteOutcomeUnknown
 	}
 	state.MessageID = state.PendingMessageID
 	state.PendingMessageID = ""
@@ -403,6 +424,15 @@ func (runner *ShadowRunner) applyTask(
 	}
 }
 
+func remoteTaskTerminalState(status string) bool {
+	switch status {
+	case "TASK_STATE_COMPLETED", "TASK_STATE_FAILED", "TASK_STATE_REJECTED", "TASK_STATE_CANCELED":
+		return true
+	default:
+		return false
+	}
+}
+
 func shadowRunRefreshable(status kernel.RunStatus) bool {
 	return status == kernel.RunStatusRunning || status == kernel.RunStatusWaitingInput
 }
@@ -445,23 +475,6 @@ func (runner *ShadowRunner) markResumePending(
 	return runner.applyAttested(ctx, snapshot, state, kernel.Mutation{
 		Status: kernel.RunStatusRunning,
 		Events: []kernel.EventDraft{{Type: "a2a.remote_resume_requested", Message: "A2A remote input submitted"}},
-	})
-}
-
-func (runner *ShadowRunner) resumeSendFailed(
-	ctx context.Context,
-	snapshot kernel.Snapshot,
-	state shadowState,
-	_ error,
-) (kernel.Snapshot, error) {
-	checkpoint, err := runner.remoteCheckpoint(snapshot.Run.ID, state)
-	if err != nil {
-		return kernel.Snapshot{}, err
-	}
-	return runner.applyAttested(ctx, snapshot, state, kernel.Mutation{
-		Status:     kernel.RunStatusWaitingInput,
-		Checkpoint: checkpoint,
-		Events:     []kernel.EventDraft{{Type: "a2a.remote_resume_deferred", Message: "A2A remote resume deferred"}},
 	})
 }
 
