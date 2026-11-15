@@ -25,6 +25,7 @@ import warnings
 
 SCHEMA_VERSION = 1
 QUALITY_SUITE = "evidence-40-v1"
+QUALITY_GENERIC_TREATMENT = "generic-navigation-v1"  # Explicit Host-only A/B treatment.
 PILOT_CASE_ID = "code-01"  # Historical fixed first-case pilot.
 DISTRACTOR_PILOT_CASE_ID = "distractor-05"  # Fixed ambiguous-evidence pilot.
 PILOT_CASE_IDS = frozenset((PILOT_CASE_ID, DISTRACTOR_PILOT_CASE_ID))
@@ -203,7 +204,8 @@ def validate_configuration(value, service_input_tokens=SERVICE_INPUT_TOKENS):
     for name in value:
         if (isinstance(name, str) and
                 ((name.casefold() == "reasoningeffort" and name != "reasoningEffort") or
-                 (name.casefold() == "suite" and name != "suite"))):
+                 (name.casefold() == "suite" and name != "suite") or
+                 (name.casefold() == "qualitytreatment" and name != "qualityTreatment"))):
             raise SafeFailure("invalid_configuration")
     config = {name: value[name] for name in PUBLIC_CONFIGURATION if name in value}
     if len(config) != len(PUBLIC_CONFIGURATION):
@@ -220,6 +222,10 @@ def validate_configuration(value, service_input_tokens=SERVICE_INPUT_TOKENS):
     positive_integer(config["repetitions"], maximum=3 if suite == QUALITY_SUITE else 20)
     if suite:
         config["suite"] = suite
+    if "qualityTreatment" in value:
+        if suite != QUALITY_SUITE or type(value["qualityTreatment"]) is not str or value["qualityTreatment"] != QUALITY_GENERIC_TREATMENT:
+            raise SafeFailure("invalid_quality_treatment")
+        config["qualityTreatment"] = value["qualityTreatment"]
     available_input = config["contextTokens"] - config["maxOutputTokens"]
     if service_input_tokens is not None:
         positive_integer(service_input_tokens)
@@ -250,7 +256,7 @@ def prompt_integer(label, default=None, maximum=None):
 
 
 def collect_configuration(suite="", preflight_only=False, pilot_only=False,
-                          pilot_case_id=PILOT_CASE_ID):
+                          pilot_case_id=PILOT_CASE_ID, quality_treatment=""):
     cases = len(QUALITY_CASE_IDS) if suite == QUALITY_SUITE else LEGACY_CASE_COUNT
     print("真实模型 Agent 基线：%d 个合成证据任务，验证取证、草稿、Context 与中断恢复。" % cases)
     while True:
@@ -293,6 +299,8 @@ def collect_configuration(suite="", preflight_only=False, pilot_only=False,
         candidate["reasoningEffort"] = effort
     if suite:
         candidate["suite"] = suite
+    if quality_treatment:
+        candidate["qualityTreatment"] = quality_treatment
     config = validate_configuration(candidate)
     display_configuration(config, preflight_only=preflight_only, pilot_only=pilot_only,
                           pilot_case_id=pilot_case_id)
@@ -308,6 +316,7 @@ def display_configuration(config, heading="配置", preflight_only=False, pilot_
     repetitions = config["repetitions"]
     count = len(QUALITY_CASE_IDS) if config.get("suite") == QUALITY_SUITE else LEGACY_CASE_COUNT
     print("  suite: %s" % config.get("suite", "legacy-2"))
+    print("  qualityTreatment: %s" % config.get("qualityTreatment", "current/default"))
     if preflight_only:
         print("本次为仅预检模式：只执行 Schema 与必要的工具/加密回放探测；"
               "不会运行任何任务样本，即使预检通过。实际 Provider 探测可能产生费用。")
@@ -1423,6 +1432,13 @@ def accept_event(report, event):
         for name in ("taskVersion", "datasetHash"):
             if not isinstance(event.get(name), str) or not event[name] or len(event[name]) > 256:
                 raise ProtocolFailure("invalid_start")
+        # Old reports have neither identity. New reports must provide BOTH
+        # well-formed hashes; a partial or forged type is not a comparison key.
+        has_workload, has_treatment = "workloadHash" in event, "treatmentHash" in event
+        if has_workload != has_treatment or (has_workload and any(
+                type(event[name]) is not str or re.fullmatch(r"sha256:[0-9a-f]{64}", event[name]) is None
+                for name in ("workloadHash", "treatmentHash"))):
+            raise ProtocolFailure("invalid_start_identity")
         if not isinstance(event.get("profile"), dict) or not event["profile"] or not isinstance(event.get("configuration"), dict):
             raise ProtocolFailure("invalid_start")
         if "preflightOnly" in event and event["preflightOnly"] is not True:
@@ -1444,7 +1460,8 @@ def accept_event(report, event):
             if configuration.get(name) != report["configuration"][name]:
                 raise ProtocolFailure("configuration_mismatch")
         if (configuration.get("reasoningEffort") != report["configuration"].get("reasoningEffort") or
-                configuration.get("suite", "") != suite):
+                configuration.get("suite", "") != suite or
+                configuration.get("qualityTreatment") != report["configuration"].get("qualityTreatment")):
             raise ProtocolFailure("configuration_mismatch")
         endpoint = report["configuration"].get("endpoint")
         if not isinstance(endpoint, str):
@@ -1458,9 +1475,12 @@ def accept_event(report, event):
             raise ProtocolFailure("configuration_mismatch")
         public = {name: configuration[name] for name in (
             "provider", "model", "endpointOrigin", "endpointHash", "contextTokens",
-            "maxOutputTokens", "repetitions", "allowUnknownStructuredModel", "reasoningEffort", "suite",
+            "maxOutputTokens", "repetitions", "allowUnknownStructuredModel", "reasoningEffort", "suite", "qualityTreatment",
         ) if name in configuration}
         report["runner"] = {name: event[name] for name in ("schemaVersion", "taskVersion", "datasetHash", "profile", "requestedSamples")}
+        if has_workload:
+            report["runner"]["workloadHash"] = event["workloadHash"]
+            report["runner"]["treatmentHash"] = event["treatmentHash"]
         if event.get("preflightOnly") is True:
             report["runner"]["preflightOnly"] = True
         if event.get("pilotOnly") is True:
@@ -2016,18 +2036,40 @@ def read_report(path):
     return read_report_bytes(raw)
 
 
-def comparison_markdown(old, new):
+def comparison_markdown(old, new, treatment=False):
     validate_report(old)
     validate_report(new)
-    lines = ["# 模型基线比较", "", "| 配置 | 基线 | 新报告 |", "| --- | --- | --- |"]
+    lines = ["# %s" % ("Agent Treatment A/B 观察" if treatment else "模型基线比较"), "", "| 配置 | 基线 | 新报告 |", "| --- | --- | --- |"]
     for name in ("suite", "provider", "endpoint", "model", "contextTokens", "maxOutputTokens", "repetitions", "reasoningEffort"):
         lines.append("| %s | %s | %s |" % (name, md_cell(old["configuration"].get(name)), md_cell(new["configuration"].get(name))))
     lines.append("| revision | %s | %s |" % (md_cell(old.get("source", {}).get("revision")), md_cell(new.get("source", {}).get("revision"))))
     incompatible = []
-    for name in ("taskVersion", "datasetHash", "profile"):
+    for name in (("taskVersion", "workloadHash", "profile") if treatment else
+                 ("taskVersion", "datasetHash", "profile")):
         left, right = old["runner"].get(name), new["runner"].get(name)
         if left is None or right is None or left != right:
             incompatible.append(name)
+    if treatment:
+        # Treatment comparisons have a much narrower scope than the existing
+        # model comparison. A declared workload hash cannot replace matching
+        # Provider, exact model, endpoint, budgets, repetition or clean source.
+        if old["configuration"].get("suite") != QUALITY_SUITE or new["configuration"].get("suite") != QUALITY_SUITE:
+            incompatible.append("qualitySuite")
+        for name in ("provider", "endpoint", "model", "contextTokens", "reasoningEffort",
+                     "allowUnknownStructuredModel"):
+            if old["configuration"].get(name) != new["configuration"].get(name):
+                incompatible.append(name)
+        if old.get("source", {}).get("dirty") is not False or new.get("source", {}).get("dirty") is not False:
+            incompatible.append("cleanSource")
+        original_revision = old.get("source", {}).get("revision")
+        new_revision = new.get("source", {}).get("revision")
+        if (not isinstance(original_revision, str) or
+                re.fullmatch(r"[0-9a-f]{40,64}", original_revision) is None or
+                original_revision != new_revision):
+            incompatible.append("sourceRevision")
+        if (old["runner"].get("datasetHash") == new["runner"].get("datasetHash")) != (
+                old["runner"].get("treatmentHash") == new["runner"].get("treatmentHash")):
+            incompatible.append("datasetHash/treatmentHash")
     if old["configuration"].get("maxOutputTokens") != new["configuration"].get("maxOutputTokens"):
         incompatible.append("maxOutputTokens")
     if old["configuration"].get("repetitions") != new["configuration"].get("repetitions"):
@@ -2039,8 +2081,15 @@ def comparison_markdown(old, new):
     if old["runner"].get("pilotOnly") or new["runner"].get("pilotOnly"):
         incompatible.append("pilotOnly")
     if incompatible:
-        lines += ["", "无法进行数值比较：%s 不一致或缺失。请使用相同任务、数据集、执行策略和输出上限重新采样。" % "、".join(incompatible), ""]
+        reason = ("无法进行 Treatment 数值对比：必须有同一工作负载、完整双哈希、相同模型/端点/预算、同一 Profile、相同干净提交。" if treatment else
+                  "无法进行数值比较：请使用相同任务、数据集、执行策略和输出上限重新采样。")
+        lines += ["", "%s 不满足：%s。" % (reason, "、".join(incompatible)), ""]
         return "\n".join(lines), False
+    if treatment:
+        lines += ["", "工作负载哈希一致，执行 Profile 与 Provider 配置一致；两组 Treatment 哈希：%s / %s。" % (
+            md_cell(old["runner"]["treatmentHash"]), md_cell(new["runner"]["treatmentHash"])),
+            "不同 Treatment 允许工具描述、指令等受控差异，但哈希本身不能证明只修改了一个变量；需另行审计方案。",
+            "这不是同一完整 datasetHash/Profile 的标准比较，也不代表统计显著性或自动胜者结论。"]
     if old["configuration"].get("contextTokens") != new["configuration"].get("contextTokens"):
         lines += ["", "两边 context capacity 不同；执行 profile（含固定服务输入上限）相同，请将容量差异保留为解释条件。"]
     complete = all(
@@ -2071,27 +2120,34 @@ def comparison_markdown(old, new):
 def main(argv=None):
     args = list(sys.argv[1:] if argv is None else argv)
     usage = ("用法：python3 scripts/run-agent-baseline.py "
-             "[quality | pilot [report.json] | pilot-distractor [report.json] | probe [report.json] | retry report.json [--repetitions 1..20] | compare old.json new.json]")
+             "[quality | quality-generic | pilot [report.json] | pilot-distractor [report.json] | pilot-distractor-generic | probe [report.json] | retry report.json [--repetitions 1..20] | compare old.json new.json | compare-treatment old.json new.json]")
     try:
         if args in (["--help"], ["-h"]):
             print(usage + "\n无参数执行原两任务基线；quality 选择 40 个合成证据案例；"
                   "pilot 仅运行 code-01；pilot-distractor 仅运行 distractor-05；两者均限一次；"
+                  "quality-generic/pilot-distractor-generic 显式选择通用导航实验指令；"
                   "probe 只做付费前预检，绝不启动任务样本；"
                   "pilot/probe report.json 复用原配置并重新隐藏输入 key；"
-                  "retry 运行完整任务；compare 离线读取报告，不会联网。")
+                  "retry 运行完整任务；compare/compare-treatment 离线读取报告，不会联网。")
             return 0
-        if len(args) == 3 and args[0] == "compare":
-            rendered, complete = comparison_markdown(read_report(args[1]), read_report(args[2]))
+        if len(args) == 3 and args[0] in ("compare", "compare-treatment"):
+            rendered, complete = comparison_markdown(
+                read_report(args[1]), read_report(args[2]), treatment=args[0] == "compare-treatment")
             print(rendered)
             return 0 if complete else 2
-        if args == ["quality"]:
+        if args in (["quality"], ["quality-generic"]):
             if not sys.stdin.isatty() or not sys.stderr.isatty():
                 raise SafeFailure("interactive_tty_required")
-            return launch(collect_configuration(QUALITY_SUITE), repository_root())
-        if args and args[0] in ("pilot", "pilot-distractor"):
-            selected_case = (DISTRACTOR_PILOT_CASE_ID if args[0] == "pilot-distractor"
+            if args == ["quality-generic"]:
+                config = collect_configuration(QUALITY_SUITE, quality_treatment=QUALITY_GENERIC_TREATMENT)
+            else:
+                config = collect_configuration(QUALITY_SUITE)
+            return launch(config, repository_root())
+        if args and args[0] in ("pilot", "pilot-distractor", "pilot-distractor-generic"):
+            experimental = args[0] == "pilot-distractor-generic"
+            selected_case = (DISTRACTOR_PILOT_CASE_ID if args[0].startswith("pilot-distractor")
                              else PILOT_CASE_ID)
-            if len(args) not in (1, 2):
+            if len(args) not in ((1,) if experimental else (1, 2)):
                 print(usage, file=sys.stderr)
                 return 2
             if not sys.stdin.isatty() or not sys.stderr.isatty():
@@ -2103,8 +2159,13 @@ def main(argv=None):
                 display_configuration(config, "固定单例试运行：复用已核实的历史公开配置",
                                       pilot_only=True, pilot_case_id=selected_case)
             else:
-                config = collect_configuration(QUALITY_SUITE, pilot_only=True,
-                                               pilot_case_id=selected_case)
+                if experimental:
+                    config = collect_configuration(QUALITY_SUITE, pilot_only=True,
+                                                   pilot_case_id=selected_case,
+                                                   quality_treatment=QUALITY_GENERIC_TREATMENT)
+                else:
+                    config = collect_configuration(QUALITY_SUITE, pilot_only=True,
+                                                   pilot_case_id=selected_case)
             return launch(config, repository_root(), pilot_only=True,
                           pilot_case_id=selected_case)
         if args and args[0] == "probe":

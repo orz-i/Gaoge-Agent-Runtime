@@ -37,6 +37,7 @@ type baselineInput struct {
 	AllowUnknownStructuredModel bool   `json:"allowUnknownStructuredModel"`
 	ReasoningEffort             string `json:"reasoningEffort,omitempty"`
 	Suite                       string `json:"suite,omitempty"`
+	QualityTreatment            string `json:"qualityTreatment,omitempty"`
 }
 
 // This separate type is the only configuration permitted in events.
@@ -51,6 +52,7 @@ type publicConfiguration struct {
 	AllowUnknownStructuredModel bool   `json:"allowUnknownStructuredModel"`
 	ReasoningEffort             string `json:"reasoningEffort,omitempty"`
 	Suite                       string `json:"suite,omitempty"`
+	QualityTreatment            string `json:"qualityTreatment,omitempty"`
 }
 
 var modelIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,127}$`)
@@ -90,7 +92,8 @@ func readBaselineInput(reader io.Reader) (baselineInput, publicConfiguration, er
 		strings.Contains(input.Model, input.APIKey) || strings.Contains(input.Endpoint, input.APIKey) ||
 		!validBaselineReasoningEffort(input.Provider, input.ReasoningEffort) ||
 		(input.Suite != "" && input.Suite != qualitySuite) ||
-		(input.Suite == qualitySuite && input.Repetitions > 3) {
+		(input.Suite == qualitySuite && input.Repetitions > 3) ||
+		(input.QualityTreatment != "" && (input.Suite != qualitySuite || input.QualityTreatment != genericNavigationTreatment)) {
 		return baselineInput{}, publicConfiguration{}, errors.New("invalid configuration")
 	}
 	origin := (&url.URL{Scheme: endpoint.Scheme, Host: endpoint.Host}).String()
@@ -100,6 +103,7 @@ func readBaselineInput(reader io.Reader) (baselineInput, publicConfiguration, er
 		AllowUnknownStructuredModel: input.AllowUnknownStructuredModel,
 		ReasoningEffort:             input.ReasoningEffort,
 		Suite:                       input.Suite,
+		QualityTreatment:            input.QualityTreatment,
 	}, nil
 }
 
@@ -135,7 +139,7 @@ func uniqueObjectFields(raw []byte) bool {
 		// authority-bearing value while passing an exact-duplicate scan.
 		switch name {
 		case "schemaVersion", "provider", "endpoint", "apiKey", "model",
-			"contextTokens", "maxOutputTokens", "repetitions", "allowUnknownStructuredModel", "reasoningEffort", "suite":
+			"contextTokens", "maxOutputTokens", "repetitions", "allowUnknownStructuredModel", "reasoningEffort", "suite", "qualityTreatment":
 		default:
 			return false
 		}
@@ -147,6 +151,12 @@ func uniqueObjectFields(raw []byte) bool {
 		if name == "suite" {
 			var suite string
 			if json.Unmarshal(value, &suite) != nil || suite != qualitySuite {
+				return false
+			}
+		}
+		if name == "qualityTreatment" {
+			var treatment string
+			if json.Unmarshal(value, &treatment) != nil || treatment != genericNavigationTreatment {
 				return false
 			}
 		}
@@ -170,6 +180,7 @@ func (input baselineInput) settings() settings {
 		allowUnknownStructuredModel: input.AllowUnknownStructuredModel,
 		reasoningEffort:             input.ReasoningEffort,
 		suite:                       input.Suite,
+		qualityTreatment:            input.QualityTreatment,
 	}
 }
 

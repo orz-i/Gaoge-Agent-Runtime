@@ -241,7 +241,7 @@ func composeContextMode(store kernel.Store, state *taskState, client model.Clien
 		Config: harness.ConfigSnapshot{
 			Model:          config.routedModel(),
 			ModelOptions:   config.modelOptions(),
-			Instructions:   taskInstructionsForSuite(config.suite),
+			Instructions:   taskInstructionsForTreatment(config.suite, config.qualityTreatment),
 			OutputContract: &model.OutputContract{Name: "task_answer", Schema: answerSchema},
 			ToolKeys:       []string{lookupKey, harness.ContextArtifactToolKey, draftKey},
 			ToolPolicies:   taskToolPoliciesForSuite(config.suite),
