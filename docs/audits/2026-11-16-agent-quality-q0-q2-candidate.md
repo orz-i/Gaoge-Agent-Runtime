@@ -117,6 +117,27 @@ repetitions and a held-out corpus before claiming a production uplift.
   whole-workspace Go test modules and full workspace race/security gates
   are **not certified** by this evidence.
 
+## Bounded self-review follow-up (2026-11-16)
+
+Self-review walked Host input → Go manifest hash creation → Python start event
+validation → read-only treatment comparison. Two reproducible report-contract
+issues were closed without changing SDK execution behavior:
+
+1. Same-treatment reports previously returned eligible from
+   `compare-treatment`, despite not forming an A/B strategy comparison.
+   The experimental comparator now requires distinct `treatmentHash` values;
+   ordinary `compare` remains the appropriate same-treatment repeat check.
+2. New explicit `generic-navigation-v1` reports previously could omit **both**
+   experiment identity hashes and be accepted as historical-format reports.
+   Explicit treatment now requires both validated hashes; historical reports
+   without a treatment remain readable and untouched.
+
+Each case was reproduced against the prior implementation and rejected by the
+new regression test. The 137-test Python protocol suite passed after repair.
+This is a scoped self-review, **not** an external independent audit, complete
+whole-workspace CI admission or real-model effectiveness evidence. No further
+execution-authorization or Kernel changes were indicated by this review.
+
 ## Conformance and release gates
 
 The new Go tests assert the current default manifest hash, separate identities

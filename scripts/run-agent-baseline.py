@@ -1435,9 +1435,11 @@ def accept_event(report, event):
         # Old reports have neither identity. New reports must provide BOTH
         # well-formed hashes; a partial or forged type is not a comparison key.
         has_workload, has_treatment = "workloadHash" in event, "treatmentHash" in event
-        if has_workload != has_treatment or (has_workload and any(
-                type(event[name]) is not str or re.fullmatch(r"sha256:[0-9a-f]{64}", event[name]) is None
-                for name in ("workloadHash", "treatmentHash"))):
+        if (has_workload != has_treatment or
+                (report["configuration"].get("qualityTreatment") and not has_workload) or
+                (has_workload and any(
+                    type(event[name]) is not str or re.fullmatch(r"sha256:[0-9a-f]{64}", event[name]) is None
+                    for name in ("workloadHash", "treatmentHash")))):
             raise ProtocolFailure("invalid_start_identity")
         if not isinstance(event.get("profile"), dict) or not event["profile"] or not isinstance(event.get("configuration"), dict):
             raise ProtocolFailure("invalid_start")
@@ -2050,6 +2052,8 @@ def comparison_markdown(old, new, treatment=False):
         if left is None or right is None or left != right:
             incompatible.append(name)
     if treatment:
+        if old["runner"].get("treatmentHash") == new["runner"].get("treatmentHash"):
+            incompatible.append("distinctTreatment")
         # Treatment comparisons have a much narrower scope than the existing
         # model comparison. A declared workload hash cannot replace matching
         # Provider, exact model, endpoint, budgets, repetition or clean source.
