@@ -67,8 +67,8 @@ func (executor a2aScenarioExecutor) Execute(
 		return executor.streamTerminal(ctx)
 	case "input_required_cancel":
 		return executor.inputRequiredCancel(ctx)
-	case "shadow_resume_retry":
-		return executor.shadowResumeRetry(ctx)
+	case "shadow_resume_unknown":
+		return executor.shadowResumeUnknown(ctx)
 	default:
 		return evaluation.ScenarioObservation{}, errors.New("unsupported A2A evaluation scenario")
 	}
@@ -171,25 +171,33 @@ func (executor a2aScenarioExecutor) inputRequiredCancel(ctx context.Context) (ev
 	}, nil
 }
 
-func (executor a2aScenarioExecutor) shadowResumeRetry(ctx context.Context) (evaluation.ScenarioObservation, error) {
+func (executor a2aScenarioExecutor) shadowResumeUnknown(ctx context.Context) (evaluation.ScenarioObservation, error) {
 	runtime := newShadowRuntime(executor.t)
-	remote := &shadowRemote{task: inputRequiredTask()}
-	runner := newShadowRunner(executor.t, runtime, remote)
-	started, err := runner.StartRun(ctx, shadowStartRequest("a2a-eval-shadow-retry"))
+	remote := newUncertainResumeClient()
+	runner := newIdentityTestShadow(executor.t, runtime, remote)
+	started, err := runner.StartRun(ctx, shadowStartRequest("a2a-eval-shadow-uncertain"))
 	if err != nil || started.Run.Status != kernel.RunStatusWaitingInput {
 		return evaluation.ScenarioObservation{}, errors.New("A2A shadow did not enter waiting input")
 	}
-	remote.sendErr = errors.New("temporary network failure")
-	waiting, err := runner.ResumeRun(ctx, started.Run.ID, "approved")
-	if err == nil || waiting.Run.Status != kernel.RunStatusWaitingInput {
-		return evaluation.ScenarioObservation{}, errors.New("A2A shadow retry did not preserve wait")
+	remote.resumeErr = errors.New("response lost after possible remote input acceptance")
+	pending, err := runner.ResumeRun(ctx, started.Run.ID, "approved")
+	if !errors.Is(err, ErrRemoteOutcomeUnknown) || pending.Run.Status != kernel.RunStatusRunning {
+		return evaluation.ScenarioObservation{}, errors.New("A2A shadow did not persist the uncertain input intent")
 	}
-	messageID := remote.sent.MessageID
-	remote.sendErr = nil
-	remote.task = completedTask()
-	completed, err := runner.ResumeRun(ctx, started.Run.ID, "approved")
-	if err != nil || completed.Run.Status != kernel.RunStatusCompleted || remote.sent.MessageID != messageID {
-		return evaluation.ScenarioObservation{}, errors.New("A2A shadow retry changed message identity")
+	if _, err := runner.ResumeRun(ctx, started.Run.ID, "approved"); !errors.Is(err, ErrRemoteOutcomeUnknown) {
+		return evaluation.ScenarioObservation{}, errors.New("A2A unknown resume permitted a second physical send")
+	}
+	if _, err := runner.LoadRun(ctx, started.Run.ID); !errors.Is(err, ErrRemoteOutcomeUnknown) {
+		return evaluation.ScenarioObservation{}, errors.New("unchanged remote input-required status incorrectly settled unknown outcome")
+	}
+	remote.setTask(completedTask())
+	completed, err := newIdentityTestShadow(executor.t, runtime, remote).LoadRun(ctx, started.Run.ID)
+	if err != nil || completed.Run.Status != kernel.RunStatusCompleted {
+		return evaluation.ScenarioObservation{}, errors.New("read-only remote terminal reconciliation failed")
+	}
+	_, resumes, _, _ := remote.counts()
+	if resumes != 1 {
+		return evaluation.ScenarioObservation{}, errors.New("A2A uncertain input was dispatched more than once")
 	}
 	events, err := runtime.ListEvents(ctx, completed.Run.ID, 0, 100)
 	if err != nil {
@@ -202,8 +210,9 @@ func (executor a2aScenarioExecutor) shadowResumeRetry(ctx context.Context) (eval
 	return evaluation.ScenarioObservation{
 		Status: completed.Run.Status, Revision: completed.Run.Revision, EventTypes: eventTypes,
 		Effects: []evaluation.EffectCount{
-			{Key: "resume_retry", Count: 1},
-			{Key: "stable_message_identity", Count: 1},
+			{Key: "resume_send_attempts", Count: resumes},
+			{Key: "duplicate_resume_sends", Count: 0},
+			{Key: "read_only_reconciliation", Count: 1},
 		},
 	}, nil
 }

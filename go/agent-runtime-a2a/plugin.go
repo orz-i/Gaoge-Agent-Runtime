@@ -150,6 +150,16 @@ func (plugin *Plugin) ResumeRun(
 	if err != nil {
 		return snapshot, err
 	}
+	// Pending remote input may have taken effect. Surface uncertainty through
+	// the public Control API too, rather than masquerading as a new wait or
+	// claiming the original input was never dispatched.
+	state, err := child.decodeState(snapshot)
+	if err != nil {
+		return snapshot, err
+	}
+	if state.PendingMessageID != "" {
+		return snapshot, ErrRemoteOutcomeUnknown
+	}
 	if snapshot.Run.Status != kernel.RunStatusWaitingInput {
 		return snapshot, ErrRemoteInputRequired
 	}
