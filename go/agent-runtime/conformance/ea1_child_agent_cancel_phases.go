@@ -27,6 +27,13 @@ func RunEA1ChildAgentCancelPhases(t *testing.T, factory func(*testing.T) (kernel
 		for _, kind := range []string{"host", "model", "tool"} {
 			t.Run("P2/"+mode+"/"+kind, func(t *testing.T) { ea1ChildCancelUnknown(t, factory, native, kind) })
 		}
+		if native {
+			// A reproducibly slow (but successful) original Model read must
+			// still reach the injected Tool-receipt Store fault, not time out.
+			t.Run("P2/"+mode+"/tool/delayed-model-read", func(t *testing.T) {
+				ea1ChildCancelUnknownWithModelReadDelay(t, factory, native, "tool", 175*time.Millisecond)
+			})
+		}
 		for _, phase := range []string{"P3", "P4"} {
 			for _, tool := range []bool{false, true} {
 				name := map[bool]string{false: "yield", true: "terminal-tool"}[tool]
@@ -41,7 +48,16 @@ type ea1ChildCancelStore struct {
 	*ea1AgentAdmissionStore
 	runID, event, mode                                                        string
 	fault                                                                     error
+	lastRenewed                                                               kernel.ExecutionLease
 	begins, marks, finishes, markAttempts, applyHits, nativeHits, controlHits int
+}
+
+func (s *ea1ChildCancelStore) RenewExecution(ctx context.Context, req kernel.ExecutionRenewRequest) (kernel.ExecutionLease, error) {
+	lease, err := s.ea1AgentAdmissionStore.RenewExecution(ctx, req)
+	if err == nil {
+		s.lastRenewed = lease
+	}
+	return lease, err
 }
 
 func (s *ea1ChildCancelStore) BeginChildExecution(ctx context.Context, g kernel.ChildExecutionGrant) error {
@@ -197,7 +213,13 @@ func ea1NewChildCancelFixture(t *testing.T, factory func(*testing.T) (kernel.Sto
 	return f
 }
 func (f *ea1ChildCancelFixture) runner(rt *kernel.Runtime, owner string, host bool) *agent.Runner {
-	return f.runnerWithModelTimeout(rt, owner, host, 100*time.Millisecond)
+	// These cases inject exact Host, Model-receipt, Tool-receipt and Grant
+	// faults. They do NOT test call timeouts. Under -race, a real SQLite or
+	// PostgreSQL Store read inside the Model callback can exceed 100ms,
+	// turning a deliberate Store fault into an unrelated timeout and leaving
+	// the physical Grant open. The explicit 2s native lease requires a
+	// strictly greater than 1s safety margin, so bound these calls at 900ms.
+	return f.runnerWithModelTimeout(rt, owner, host, 900*time.Millisecond)
 }
 
 func (f *ea1ChildCancelFixture) runnerWithModelTimeout(rt *kernel.Runtime, owner string, host bool, modelTimeout time.Duration) *agent.Runner {
@@ -206,7 +228,7 @@ func (f *ea1ChildCancelFixture) runnerWithModelTimeout(rt *kernel.Runtime, owner
 		middleware = []plugin.RunMiddleware{f.host}
 	}
 	deps := agent.Dependencies{Runtime: rt, Model: f.physical, Catalog: f.registry, Executor: f.registry, RunMiddleware: middleware, ToolMiddleware: []plugin.ToolMiddleware{f.physical},
-		Execution: agent.ExecutionPolicy{Model: agent.CallPolicy{Timeout: modelTimeout, MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}, Tool: agent.CallPolicy{Timeout: 100 * time.Millisecond, MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}}}
+		Execution: agent.ExecutionPolicy{Model: agent.CallPolicy{Timeout: modelTimeout, MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}, Tool: agent.CallPolicy{Timeout: 900 * time.Millisecond, MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}}}
 	if f.native {
 		deps.RunExecution = &agent.RunExecution{OwnerID: owner, LeaseDuration: 2 * time.Second}
 	}
@@ -279,7 +301,15 @@ func ea1ChildCancelPreflight(t *testing.T, factory func(*testing.T) (kernel.Stor
 	}
 }
 func ea1ChildCancelUnknown(t *testing.T, factory func(*testing.T) (kernel.Store, func() (kernel.Store, kernel.Store)), native bool, kind string) {
+	ea1ChildCancelUnknownWithModelReadDelay(t, factory, native, kind, 0)
+}
+
+func ea1ChildCancelUnknownWithModelReadDelay(
+	t *testing.T, factory func(*testing.T) (kernel.Store, func() (kernel.Store, kernel.Store)),
+	native bool, kind string, modelReadDelay time.Duration,
+) {
 	f := ea1NewChildCancelFixture(t, factory, kind == "tool", native)
+	f.physical.modelReadDelay = modelReadDelay
 	switch kind {
 	case "host":
 		f.host.fault = f.store.fault
@@ -325,7 +355,19 @@ func ea1ChildCancelUnknown(t *testing.T, factory func(*testing.T) (kernel.Store,
 		if e = f.store.CheckExecution(t.Context(), f.request.ID, &lease); e != nil {
 			t.Fatal("rejected Cancel revoked live owner", e)
 		}
-		ea1AwaitControlExpiry(t, lease)
+		// A long but valid Model Store read can renew this same live native
+		// lease. Wait for its latest actual expiry, not the superseded first
+		// expiry; the stable LeaseID/Epoch are the identity to check below.
+		latest := lease
+		if renewed := f.store.lastRenewed; renewed.RunID != "" {
+			if renewed.RunID != lease.RunID || renewed.LeaseID != lease.LeaseID ||
+				renewed.Epoch != lease.Epoch || renewed.OwnerID != lease.OwnerID ||
+				renewed.ExpiresAt.Before(lease.ExpiresAt) {
+				t.Fatal("renewal lost original owner identity")
+			}
+			latest = renewed
+		}
+		ea1AwaitControlExpiry(t, latest)
 	} else if f.store.acquireCalls != 0 {
 		t.Fatal("default child fabricated Root native owner")
 	}
@@ -407,9 +449,9 @@ func ea1ChildCancelSettlement(t *testing.T, factory func(*testing.T) (kernel.Sto
 	f := ea1NewChildCancelFixture(t, factory, tool, native)
 	f.store.mode = phase
 	f.store.markAttempts = 0
-	// The successful Model callback reads the real Store before the Mark fault.
-	// This is not a Model timeout vector; keep all other runners at 100ms.
-	_, e := f.runnerWithModelTimeout(f.rt, "original-settlement-owner", true, 500*time.Millisecond).Resume(t.Context(), f.request.ID, f.prepared.Run.Revision)
+	// The successful Model callback reads the real Store before the Mark
+	// fault. This is a settlement fault vector, not a Model timeout vector.
+	_, e := f.runner(f.rt, "original-settlement-owner", true).Resume(t.Context(), f.request.ID, f.prepared.Run.Revision)
 	if !errors.Is(e, f.store.fault) || !errors.Is(e, kernel.ErrChildExecutionBusy) || f.store.markAttempts != 1 || f.store.finishes != 0 {
 		t.Fatal("actual original Mark cut not reached exactly once", e)
 	}

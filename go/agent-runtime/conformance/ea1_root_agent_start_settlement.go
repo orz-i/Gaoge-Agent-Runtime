@@ -77,9 +77,12 @@ func (s *ea1StartSettlementStore) FinishChildExecution(ctx context.Context, g ke
 }
 
 type ea1StartSettlementPhysical struct {
-	mu              sync.Mutex
-	rt              *kernel.Runtime
-	tool            bool
+	mu   sync.Mutex
+	rt   *kernel.Runtime
+	tool bool
+	// Fault-injection latency before the physical Model reads its real Store.
+	// Zero for all existing scenarios; used to prove timeout-independent P2.
+	modelReadDelay  time.Duration
 	requests        []model.Request
 	responses       []model.Response
 	intents         []agent.ModelInvocation
@@ -114,6 +117,15 @@ func (p *ea1StartSettlementPhysical) Run(ctx context.Context, inv plugin.RunInvo
 	return result, err
 }
 func (p *ea1StartSettlementPhysical) Generate(ctx context.Context, req model.Request) (model.Response, error) {
+	if p.modelReadDelay > 0 {
+		timer := time.NewTimer(p.modelReadDelay)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			return model.Response{}, ctx.Err()
+		}
+	}
 	snap, err := p.rt.Load(ctx, req.RunID)
 	if err != nil {
 		return model.Response{}, err
