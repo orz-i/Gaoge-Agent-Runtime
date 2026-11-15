@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
@@ -78,6 +79,26 @@ func NewShadowRunner(dependencies ShadowDependencies) (*ShadowRunner, error) {
 		runtime: dependencies.Runtime, client: dependencies.Client, discovery: cloneDiscovery(dependencies.Discovery),
 		targetID: strings.TrimSpace(dependencies.TargetID), revision: strings.TrimSpace(dependencies.TargetRevision),
 	}, nil
+}
+
+// ObservesFrozenRemoteShadow is the first-party, read-only ownership
+// attestation used by Harness receipt and cancellation checks. It makes no
+// network call and never applies a Kernel mutation. Frozen origin/Invocation
+// authority remains independently checked by the Harness.
+func (runner *ShadowRunner) ObservesFrozenRemoteShadow(
+	runtime *kernel.Runtime, delegation handoff.Delegation, child kernel.Snapshot,
+) bool {
+	if runner == nil || runtime == nil || runner.runtime != runtime ||
+		child.Run.Kind != RunKind || child.Run.ID != delegation.ChildRunID ||
+		child.Run.Goal != strings.TrimSpace(delegation.Goal) ||
+		delegation.MemberID != TargetPrefix+runner.targetID ||
+		delegation.MemberRevision == "" || delegation.MemberRevision != runner.revision {
+		return false
+	}
+	state, err := runner.decodeState(child)
+	return err == nil && state.TargetID == runner.targetID &&
+		state.TargetRevision == runner.revision &&
+		(state.RemoteTaskID != "" || state.RemoteMessageID != "")
 }
 
 // StartRun creates the durable local shadow before sending the remote A2A message.

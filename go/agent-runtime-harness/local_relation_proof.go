@@ -194,9 +194,22 @@ func (runner *Runner) verifyLocalRelationChain(ctx context.Context, candidate ke
 			return unverified()
 		}
 		frozen, parent, proofErr := runner.localHandoffCancellationAuthority(ctx, owner, candidate)
-		if proofErr != nil || (!coordinator.ObservesLocalKernelRunner(runner.runtime) && candidate.Run.Kind != agent.RunKind) ||
-			!coordinator.ObservesLocalDelegation(runner.runtime, frozen) ||
-			(control && !coordinator.OwnsLocalDelegation(runner.runtime, frozen)) {
+		if proofErr != nil {
+			return unverified()
+		}
+		switch candidate.Run.Kind {
+		case handoff.RemoteAgentRunKind:
+			if !coordinator.ObservesRemoteShadow(ctx, runner.runtime, frozen, candidate) ||
+				(control && !runner.remoteHandoffCancellerOwnsDelegation(ctx, frozen, candidate)) {
+				return unverified()
+			}
+		case agent.RunKind:
+			if !coordinator.ObservesLocalDelegation(runner.runtime, frozen) ||
+				(control && (!coordinator.OwnsLocalDelegation(runner.runtime, frozen) ||
+					!runner.localRelationCancellerOwnsKernel(agent.RunKind))) {
+				return unverified()
+			}
+		default:
 			return unverified()
 		}
 		if relationErr == nil && (relation.Kind != runrelation.KindDelegation ||
