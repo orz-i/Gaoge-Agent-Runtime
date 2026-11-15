@@ -131,6 +131,11 @@ func (runner *ShadowRunner) LoadRun(ctx context.Context, runID string) (kernel.S
 	if err != nil {
 		return snapshot, err
 	}
+	// Validate the original remote identity before the same-state shortcut.
+	// State equality is not proof that GetTask returned the requested Task.
+	if err := validateRemoteTaskBinding(state, remote); err != nil {
+		return snapshot, err
+	}
 	if remote.State == state.RemoteState && !remote.Terminal {
 		return snapshot, nil
 	}
@@ -220,17 +225,83 @@ func (runner *ShadowRunner) decodeState(snapshot kernel.Snapshot) (shadowState, 
 	return state, nil
 }
 
+// The first SendMessage establishes the remote Task/Context pair. After that,
+// GetTask, CancelTask and all subsequent SendMessage responses must name the
+// *same* immutable pair. A missing identity cannot be substituted by a
+// coincidentally matching state or by a new remote Context.
+func validateRemoteTaskBinding(state shadowState, remote TaskSnapshot) error {
+	if state.RemoteTaskID != "" || state.RemoteContextID != "" {
+		if state.RemoteTaskID == "" || state.RemoteContextID == "" {
+			return ErrRemoteIdentityLost
+		}
+		if remote.ID != state.RemoteTaskID || remote.ContextID != state.RemoteContextID {
+			return ErrRemoteBindingChanged
+		}
+	}
+	// The Task envelope alone is insufficient if its status, history or
+	// artifacts explicitly claim another task or context. This check also
+	// runs on the first Task response before binding it to the Shadow Run.
+	if remote.StatusMessage != nil && !remoteMessageBelongsToTask(*remote.StatusMessage, remote) {
+		return ErrRemoteBindingChanged
+	}
+	for _, message := range remote.History {
+		if !remoteMessageBelongsToTask(message, remote) {
+			return ErrRemoteBindingChanged
+		}
+	}
+	for _, artifact := range remote.Artifacts {
+		if artifact.TaskID != remote.ID || artifact.ContextID != remote.ContextID {
+			return ErrRemoteBindingChanged
+		}
+	}
+	return nil
+}
+
+func remoteMessageBelongsToTask(message MessageSnapshot, task TaskSnapshot) bool {
+	// A2A Message taskId/contextId may be omitted inside a Task envelope;
+	// when supplied they must never name a different task or context.
+	return (message.TaskID == "" || message.TaskID == task.ID) &&
+		(message.ContextID == "" || message.ContextID == task.ContextID)
+}
+
+func validateRemoteMessageBinding(state shadowState, remote MessageSnapshot) error {
+	if state.RemoteTaskID == "" && state.RemoteContextID == "" {
+		return nil // A direct initial Message has no previously bound Task.
+	}
+	if state.RemoteTaskID == "" || state.RemoteContextID == "" {
+		return ErrRemoteIdentityLost
+	}
+	// Both identifiers are required for a Message that claims to answer
+	// a pre-existing Task. Omitting taskId cannot prove task ownership when
+	// multiple Tasks may share the same Context.
+	if remote.TaskID != state.RemoteTaskID || remote.ContextID != state.RemoteContextID {
+		return ErrRemoteBindingChanged
+	}
+	return nil
+}
+
 func (runner *ShadowRunner) applyInteraction(
 	ctx context.Context,
 	snapshot kernel.Snapshot,
 	state shadowState,
 	interaction Interaction,
 ) (kernel.Snapshot, error) {
+	// A2A v1 SendMessage resolves to exactly one Task OR Message.
+	// Do not prefer a plausible Task when a conflicting Message is present.
+	if interaction.Task != nil && interaction.Message != nil {
+		return snapshot, ErrInvalidResult
+	}
 	if interaction.Task != nil {
 		return runner.applyTask(ctx, snapshot, state, *interaction.Task)
 	}
 	if interaction.Message == nil || len(interaction.Raw) == 0 {
 		return runner.fail(ctx, snapshot, state, "a2a.invalid_result", ErrInvalidResult)
+	}
+	if err := validateRemoteMessageBinding(state, *interaction.Message); err != nil {
+		return snapshot, err // Do not complete, rebind or erase a pending resume.
+	}
+	if strings.TrimSpace(interaction.Message.ID) == "" {
+		return snapshot, ErrInvalidMessage
 	}
 	state.RemoteMessageID = interaction.Message.ID
 	state.RemoteContextID = interaction.Message.ContextID
@@ -243,6 +314,9 @@ func (runner *ShadowRunner) applyTask(
 	state shadowState,
 	remote TaskSnapshot,
 ) (kernel.Snapshot, error) {
+	if err := validateRemoteTaskBinding(state, remote); err != nil {
+		return snapshot, err // Never persist an alien Task or Context identity.
+	}
 	if strings.TrimSpace(remote.ID) == "" || strings.TrimSpace(remote.ContextID) == "" || strings.TrimSpace(remote.State) == "" {
 		return runner.fail(ctx, snapshot, state, "a2a.invalid_task", ErrInvalidTask)
 	}
