@@ -27,6 +27,7 @@ func TestFrozenWaitingDelegationRejectsForgedToolAndAuthority(t *testing.T) {
 		DelegationID: id, MemberID: frozen.MemberID, ChildRunID: childID,
 		Goal: frozen.Goal, ParentRunID: owner.ExecutionRefID, RoleID: frozen.RoleID,
 		RoleRevision: frozen.RoleRevision, Status: handoff.StatusQueued, Execution: &frozen,
+		OriginalCallHash: hashInvocationBytes(call.Arguments),
 	}
 	wire, err := json.Marshal(payload)
 	if err != nil {
@@ -39,6 +40,26 @@ func TestFrozenWaitingDelegationRejectsForgedToolAndAuthority(t *testing.T) {
 	if err != nil || !sameHandoffFrozenExecution(frozen, got) {
 		t.Fatalf("original frozen waiting delegation rejected: %v", err)
 	}
+	t.Run("host-authorized-goal-rewrite", func(t *testing.T) {
+		// The original Tool still says "review", while the Host policy
+		// explicitly appends instruction text *before* freezing the Waiting
+		// Item. The unchanged original-call hash is its replay identity.
+		approved := frozen
+		approved.Goal += "\n\nhost-frozen evidence"
+		changed := payload
+		changed.Execution = &approved
+		changed.Goal = approved.Goal
+		raw, err := json.Marshal(changed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		previous := waiting
+		previous.Payload = raw
+		generated, err := verifiedFrozenWaitingDelegation(previous, turn, owner, owner.ExecutionRefID, call)
+		if err != nil || generated.Goal != approved.Goal {
+			t.Fatalf("original Host-approved goal was not preserved: %v", err)
+		}
+	})
 	for _, test := range []struct {
 		name   string
 		mutate func(*Item, *tools.Call)
@@ -52,6 +73,16 @@ func TestFrozenWaitingDelegationRejectsForgedToolAndAuthority(t *testing.T) {
 		{"injected-parent-item", func(item *Item, _ *tools.Call) { item.ParentItemID = "foreign" }},
 		{"wrong-kind", func(item *Item, _ *tools.Call) { item.Kind = ItemDiagnostic }},
 		{"wrong-original-tool", func(_ *Item, call *tools.Call) { call.ToolKey = "browser.execute" }},
+		{"missing-original-call-digest", func(item *Item, _ *tools.Call) {
+			changed := payload
+			changed.OriginalCallHash = ""
+			item.Payload, _ = json.Marshal(changed)
+		}},
+		{"changed-original-call-digest", func(item *Item, _ *tools.Call) {
+			changed := payload
+			changed.OriginalCallHash = hashInvocationBytes([]byte("foreign-model-call"))
+			item.Payload, _ = json.Marshal(changed)
+		}},
 		{"foreign-role", func(_ *Item, call *tools.Call) {
 			call.Arguments = json.RawMessage(`{"roleID":"foreign","goal":"review","toolKeys":["web"]}`)
 		}},

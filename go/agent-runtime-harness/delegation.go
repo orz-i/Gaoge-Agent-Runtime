@@ -29,6 +29,9 @@ type DelegateRequest struct {
 	// Omitting this field never copies the parent's full toolset.
 	ToolKeys []string `json:"toolKeys,omitempty"`
 	callID   string
+	// The first Tool call is hashed once; Host policy may rewrite Goal or
+	// role while preserving the original immutable model-call identity.
+	callHash string
 }
 
 type DelegationResult struct {
@@ -37,18 +40,19 @@ type DelegationResult struct {
 }
 
 type delegationItemPayload struct {
-	DelegationID   string              `json:"delegationID"`
-	MemberID       string              `json:"memberID"`
-	MemberRevision string              `json:"memberRevision,omitempty"`
-	ChildRunID     string              `json:"childRunID"`
-	Goal           string              `json:"goal"`
-	Status         handoff.Status      `json:"status"`
-	Result         json.RawMessage     `json:"result,omitempty"`
-	ParentRunID    string              `json:"parentRunID,omitempty"`
-	RoleID         string              `json:"roleID,omitempty"`
-	RoleRevision   uint64              `json:"roleRevision,omitempty"`
-	RoleName       string              `json:"roleName,omitempty"`
-	Execution      *handoff.Delegation `json:"execution,omitempty"`
+	DelegationID     string              `json:"delegationID"`
+	MemberID         string              `json:"memberID"`
+	MemberRevision   string              `json:"memberRevision,omitempty"`
+	ChildRunID       string              `json:"childRunID"`
+	Goal             string              `json:"goal"`
+	Status           handoff.Status      `json:"status"`
+	Result           json.RawMessage     `json:"result,omitempty"`
+	ParentRunID      string              `json:"parentRunID,omitempty"`
+	RoleID           string              `json:"roleID,omitempty"`
+	RoleRevision     uint64              `json:"roleRevision,omitempty"`
+	RoleName         string              `json:"roleName,omitempty"`
+	Execution        *handoff.Delegation `json:"execution,omitempty"`
+	OriginalCallHash string              `json:"originalCallHash,omitempty"`
 }
 
 func normalizeDelegateRequest(request DelegateRequest) (DelegateRequest, error) {
@@ -138,7 +142,7 @@ func (runner *Runner) delegate(ctx context.Context, turn Turn, invocation Invoca
 			// Freeze the requested delegation, but create no child Invocation,
 			// relation or Run until lifetime capacity is available. The same
 			// logical Tool call is observed again by the scheduled continuation.
-			if _, itemErr := runner.recordDelegationItem(ctx, turn, invocation, delegation, ItemWaiting, ""); itemErr != nil {
+			if _, itemErr := runner.recordDelegationItem(ctx, turn, invocation, delegation, ItemWaiting, "", request.callHash); itemErr != nil {
 				return DelegationResult{}, itemErr
 			}
 			snapshot, loadErr := runner.Load(ctx, turn.ID)
@@ -483,8 +487,9 @@ func (runner *Runner) recordDelegationItem(
 	delegation handoff.Delegation,
 	status ItemStatus,
 	parentItemID string,
+	originalCallHash ...string,
 ) (string, error) {
-	id, _, err := runner.recordDelegationItemWithAdmission(ctx, turn, invocation, delegation, status, parentItemID)
+	id, _, err := runner.recordDelegationItemWithAdmission(ctx, turn, invocation, delegation, status, parentItemID, originalCallHash...)
 	return id, err
 }
 
@@ -498,12 +503,20 @@ func (runner *Runner) recordDelegationItemWithAdmission(
 	delegation handoff.Delegation,
 	status ItemStatus,
 	parentItemID string,
+	originalCallHash ...string,
 ) (string, bool, error) {
+	// Only the original Tool Handler writes a model-arguments hash to a
+	// Waiting Item. Older or synthetic records lack this admission proof
+	// and cannot be resumed by the new autonomous continuation.
+	callHash := ""
+	if status == ItemWaiting && len(originalCallHash) == 1 {
+		callHash = originalCallHash[0]
+	}
 	payload, err := json.Marshal(delegationItemPayload{
 		DelegationID: delegation.ID, MemberID: delegation.MemberID, MemberRevision: delegation.MemberRevision, ChildRunID: delegation.ChildRunID,
 		Goal: delegation.Goal, Status: delegation.Status, Result: append(json.RawMessage(nil), delegation.Result...),
 		ParentRunID: invocation.ExecutionRefID, RoleID: delegation.RoleID, RoleRevision: delegation.RoleRevision, RoleName: delegation.RoleName,
-		Execution: frozenDelegationExecution(delegation),
+		Execution: frozenDelegationExecution(delegation), OriginalCallHash: callHash,
 	})
 	if err != nil {
 		return "", false, err

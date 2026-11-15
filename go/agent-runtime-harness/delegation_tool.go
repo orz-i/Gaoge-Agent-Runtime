@@ -385,6 +385,7 @@ func (handler *DelegationToolHandler) prepareRequest(
 		}
 	}
 	input.callID = request.Call.ID
+	input.callHash = hashInvocationBytes(request.Call.Arguments)
 	return input, nil
 }
 

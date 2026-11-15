@@ -3,8 +3,6 @@ package harness
 import (
 	"context"
 	"errors"
-	"slices"
-	"strings"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
@@ -152,14 +150,10 @@ func verifiedFrozenWaitingDelegation(
 		waiting.RunID != stableID("hchild", parentRunID, id) {
 		return handoff.Delegation{}, ErrConflict
 	}
-	var input DelegateRequest
-	if !decodeTypedAuthorityJSON(call.Arguments, &input) {
-		return handoff.Delegation{}, ErrConflict
-	}
-	input, err := normalizeDelegateRequest(input)
-	if err != nil {
-		return handoff.Delegation{}, ErrConflict
-	}
+	// Host policy may change the model-proposed Goal, role and allowed
+	// tools once on first dispatch. Its already-frozen Waiting Item is
+	// the authority; its original Tool arguments hash binds that fact to
+	// this exact committed model call without rerunning Host policy.
 	var payload delegationItemPayload
 	if !decodeTypedAuthorityJSON(waiting.Payload, &payload) {
 		return handoff.Delegation{}, ErrConflict
@@ -170,31 +164,16 @@ func verifiedFrozenWaitingDelegation(
 		frozen.Error != "" || frozen.ErrorCode != "" ||
 		payload.DelegationID != id || payload.ChildRunID != waiting.RunID ||
 		payload.ParentRunID != parentRunID ||
+		len(payload.OriginalCallHash) != 64 ||
+		payload.OriginalCallHash != hashInvocationBytes(call.Arguments) ||
 		payload.Status != handoff.StatusQueued || len(payload.Result) != 0 ||
 		frozen.MemberID != payload.MemberID ||
 		frozen.MemberRevision != payload.MemberRevision ||
 		frozen.RoleID != payload.RoleID ||
 		frozen.RoleRevision != payload.RoleRevision ||
 		frozen.RoleName != payload.RoleName ||
-		frozen.Goal != payload.Goal ||
-		input.Goal != strings.TrimSpace(frozen.Goal) {
+		frozen.Goal != payload.Goal {
 		return handoff.Delegation{}, ErrConflict
-	}
-	// A Role may map to a pinned remote MemberID, but cannot change the
-	// original model-selected RoleID. Member-only delegation binds directly.
-	if (input.RoleID != "" && input.RoleID != frozen.RoleID) ||
-		(input.MemberID != "" && input.MemberID != frozen.MemberID) {
-		return handoff.Delegation{}, ErrConflict
-	}
-	for _, selected := range input.ToolKeys {
-		if slices.Contains(frozen.ToolKeys, selected) {
-			continue
-		}
-		if !slices.ContainsFunc(frozen.HostedToolGrants, func(grant agent.HostedToolGrant) bool {
-			return grant.Key == selected
-		}) {
-			return handoff.Delegation{}, ErrConflict
-		}
 	}
 	return *frozen, nil
 }
