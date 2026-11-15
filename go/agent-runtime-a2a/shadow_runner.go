@@ -26,6 +26,9 @@ var (
 	ErrRemoteBindingChanged = errors.New("A2A remote binding changed")
 	ErrRemoteTaskFailed     = errors.New("A2A remote task failed")
 	ErrRemoteInputRequired  = errors.New("A2A remote task is not waiting for input")
+	// A failed GET is not the adapter's own unresolved physical-send proof.
+	// Keep these distinctions private and never expose upstream credentials.
+	errRemoteReadUnavailable = errors.New("A2A remote task observation is unavailable")
 )
 
 // RemoteClient is the minimum A2A client capability required by one local shadow Run.
@@ -67,12 +70,21 @@ type shadowState struct {
 	MessageSequence  int    `json:"messageSequence,omitempty"`
 	PendingMessageID string `json:"pendingMessageID,omitempty"`
 	PendingInputHash string `json:"pendingInputHash,omitempty"`
-	RemoteMessageID  string `json:"remoteMessageID,omitempty"`
-	RemoteTaskID     string `json:"remoteTaskID,omitempty"`
-	RemoteContextID  string `json:"remoteContextID,omitempty"`
-	RemoteState      string `json:"remoteState,omitempty"`
-	RemotePrompt     string `json:"remotePrompt,omitempty"`
-	Proof            string `json:"proof,omitempty"`
+	// A committed send-intent is an exclusive physical admission. Until its
+	// original callback returns and durably seals this bit, no observer or
+	// canceller may certify a terminal state: the physical send may still
+	// begin after the observer/canceller returns.
+	PendingMessageReturned bool `json:"pendingMessageReturned,omitempty"`
+	// Task cancellation uses the same exclusive CAS protocol as input Send.
+	// An uncertain CancelTask must not be physically retried.
+	PendingCancel         bool   `json:"pendingCancel,omitempty"`
+	PendingCancelReturned bool   `json:"pendingCancelReturned,omitempty"`
+	RemoteMessageID       string `json:"remoteMessageID,omitempty"`
+	RemoteTaskID          string `json:"remoteTaskID,omitempty"`
+	RemoteContextID       string `json:"remoteContextID,omitempty"`
+	RemoteState           string `json:"remoteState,omitempty"`
+	RemotePrompt          string `json:"remotePrompt,omitempty"`
+	Proof                 string `json:"proof,omitempty"`
 }
 
 // NewShadowRunner creates one A2A ChildRunner bound to one immutable discovery.
@@ -179,6 +191,13 @@ func (runner *ShadowRunner) LoadRun(ctx context.Context, runID string) (kernel.S
 	if !shadowRunRefreshable(snapshot.Run.Status) {
 		return snapshot, nil
 	}
+	// A committed physical intent that has not *returned* may still issue
+	// network IO. No GET result, including terminal cancellation, can close
+	// this window: otherwise a delayed sender could execute after an ACK.
+	if (state.PendingMessageID != "" && !state.PendingMessageReturned) ||
+		(state.PendingCancel && !state.PendingCancelReturned) {
+		return snapshot, ErrRemoteOutcomeUnknown
+	}
 	if state.RemoteTaskID == "" {
 		// This could be an unknown first Send outcome. Without the remote
 		// Task ID a GET is impossible; never convert that uncertainty into
@@ -187,7 +206,10 @@ func (runner *ShadowRunner) LoadRun(ctx context.Context, runID string) (kernel.S
 	}
 	remote, err := runner.client.GetTask(ctx, runner.discovery, state.RemoteTaskID)
 	if err != nil {
-		return snapshot, err
+		// A provider transport failure cannot prove a terminal/no-effect
+		// result. Do not expose remote error strings that may carry secrets,
+		// or accidentally treat them as the pending-send marker below.
+		return snapshot, errors.Join(ErrRemoteOutcomeUnknown, errRemoteReadUnavailable)
 	}
 	// Validate the original remote identity before the same-state shortcut.
 	// State equality is not proof that GetTask returned the requested Task.
@@ -198,7 +220,7 @@ func (runner *ShadowRunner) LoadRun(ctx context.Context, runID string) (kernel.S
 	// A GET that still reports a nonterminal Task cannot prove that the
 	// input did not reach the remote peer. Never turn this observation into
 	// a new input grant (even if the peer still says INPUT_REQUIRED).
-	if state.PendingMessageID != "" && !remoteTaskTerminalState(remote.State) {
+	if (state.PendingMessageID != "" || state.PendingCancel) && !remoteTaskTerminalState(remote.State) {
 		return snapshot, ErrRemoteOutcomeUnknown
 	}
 	if remote.State == state.RemoteState && !remote.Terminal {
@@ -207,30 +229,98 @@ func (runner *ShadowRunner) LoadRun(ctx context.Context, runID string) (kernel.S
 	return runner.applyTask(ctx, snapshot, state, remote)
 }
 
-// CancelRun explicitly cancels a non-terminal remote Task and projects the result locally.
+// CancelRun uses the current revision as an implicit one-shot control source.
+// The public Plugin additionally pins the caller's original revision.
 func (runner *ShadowRunner) CancelRun(ctx context.Context, runID string) (kernel.Snapshot, error) {
-	snapshot, err := runner.LoadRun(ctx, runID)
-	// A proven, known Task can still be cancelled during an uncertain input
-	// submission. Only a successfully validated read with a pending resume
-	// may return ErrRemoteOutcomeUnknown here. The remote Task/Context pair
-	// is verified again before issuing the physical cancel.
-	if (err != nil && !errors.Is(err, ErrRemoteOutcomeUnknown)) || !shadowRunRefreshable(snapshot.Run.Status) {
-		return snapshot, err
+	if runner == nil || runner.runtime == nil {
+		return kernel.Snapshot{}, ErrInvalidShadowRunner
+	}
+	original, err := runner.runtime.Load(ctx, runID)
+	if err != nil {
+		return original, err
+	}
+	return runner.cancelRunAtRevision(ctx, runID, original.Run.Revision)
+}
+
+// cancelRunAtRevision gives one physical CancelTask the same durable CAS
+// admission as Resume input. An existing input/cancel callback which has not
+// returned can never race a successful cancellation ACK. No locks, TTLs or
+// process-local state grant authority; the sealed Store revision does.
+func (runner *ShadowRunner) cancelRunAtRevision(
+	ctx context.Context, runID string, expectedRevision uint64,
+) (kernel.Snapshot, error) {
+	if runner == nil || runner.runtime == nil || expectedRevision == 0 {
+		return kernel.Snapshot{}, ErrInvalidShadowRunner
+	}
+	snapshot, err := runner.runtime.Load(ctx, runID)
+	if err != nil || snapshot.Run.Revision != expectedRevision {
+		if err != nil {
+			return snapshot, err
+		}
+		return snapshot, kernel.ErrConflict
 	}
 	state, err := runner.decodeState(snapshot)
-	if err != nil || state.RemoteTaskID == "" {
-		return snapshot, errors.Join(err, ErrRemoteIdentityLost)
-	}
-	remote, err := runner.client.CancelTask(ctx, runner.discovery, state.RemoteTaskID)
-	if err != nil {
+	if err != nil || !shadowRunRefreshable(snapshot.Run.Status) {
 		return snapshot, err
 	}
-	return runner.applyTask(ctx, snapshot, state, remote)
+	if state.PendingCancel || (state.PendingMessageID != "" && !state.PendingMessageReturned) {
+		return snapshot, ErrRemoteOutcomeUnknown
+	}
+	if state.RemoteTaskID == "" || state.RemoteContextID == "" {
+		return snapshot, errors.Join(ErrRemoteOutcomeUnknown, ErrRemoteIdentityLost)
+	}
+	// A verified read before physical control rejects foreign GetTask replies.
+	// Any intervening mutation is fenced by the *original* expectedRevision.
+	observed, readErr := runner.LoadRun(ctx, runID)
+	if readErr != nil && !(errors.Is(readErr, ErrRemoteOutcomeUnknown) &&
+		!errors.Is(readErr, errRemoteReadUnavailable) &&
+		state.PendingMessageID != "" && state.PendingMessageReturned) {
+		return observed, readErr
+	}
+	if observed.Run.Revision != expectedRevision {
+		return observed, kernel.ErrConflict
+	}
+	if !shadowRunRefreshable(observed.Run.Status) {
+		return observed, nil
+	}
+	// No second physical control may run once this record exists. The CAS
+	// excludes an in-flight Resume admission and a concurrent Cancel.
+	state.PendingCancel = true
+	admitted, err := runner.applyAttested(ctx, observed, state, kernel.Mutation{
+		Status: kernel.RunStatusRunning,
+		Events: []kernel.EventDraft{{Type: "a2a.remote_cancel_requested", Message: "A2A cancellation admitted"}},
+	})
+	if err != nil {
+		return admitted, err
+	}
+	remote, cancelErr := runner.client.CancelTask(ctx, runner.discovery, state.RemoteTaskID)
+	// Physical callback has now returned, including transport failures. Seal
+	// the release BEFORE a GET may declare a terminal result. If this Store
+	// write is lost, retain a conservative unresolved physical intent.
+	state.PendingCancelReturned = true
+	returned, returnErr := runner.applyAttested(ctx, admitted, state, kernel.Mutation{
+		Status: kernel.RunStatusRunning,
+		Events: []kernel.EventDraft{{Type: "a2a.remote_cancel_returned", Message: "A2A cancellation callback returned"}},
+	})
+	if returnErr != nil {
+		return admitted, errors.Join(ErrRemoteOutcomeUnknown, returnErr)
+	}
+	if cancelErr != nil {
+		return returned, ErrRemoteOutcomeUnknown // Never expose remote error text.
+	}
+	if !remoteTaskTerminalState(remote.State) {
+		if err = validateRemoteTaskBinding(state, remote); err != nil {
+			return returned, err
+		}
+		return returned, ErrRemoteCancellationPending
+	}
+	return runner.applyTask(ctx, returned, state, remote)
 }
 
 // ResumeRun continues a remote input-required or auth-required task with one
-// durable, idempotently identified user message. Only a hash of the pending
-// input is persisted locally; message content stays in the caller request.
+// durable, uniquely identified user message. The MessageID is correlation,
+// NOT proof that a remote peer deduplicates sends. Only the pending input hash
+// is persisted locally; message content stays in the caller request.
 func (runner *ShadowRunner) ResumeRun(ctx context.Context, runID, text string) (kernel.Snapshot, error) {
 	if runner == nil || runner.runtime == nil || strings.TrimSpace(runID) == "" || strings.TrimSpace(text) == "" {
 		return kernel.Snapshot{}, ErrInvalidShadowRunner
@@ -238,6 +328,25 @@ func (runner *ShadowRunner) ResumeRun(ctx context.Context, runID, text string) (
 	snapshot, err := runner.runtime.Load(ctx, strings.TrimSpace(runID))
 	if err != nil {
 		return snapshot, err
+	}
+	return runner.resumeRunAtRevision(ctx, runID, snapshot.Run.Revision, text)
+}
+
+// resumeRunAtRevision binds the caller's original wait revision all the way
+// through the Store CAS granting the physical SendMessage. A resolver or GET
+// may not transparently select a newer prompt or cancellation state.
+func (runner *ShadowRunner) resumeRunAtRevision(
+	ctx context.Context, runID string, expectedRevision uint64, text string,
+) (kernel.Snapshot, error) {
+	if runner == nil || runner.runtime == nil || expectedRevision == 0 || strings.TrimSpace(runID) == "" || strings.TrimSpace(text) == "" {
+		return kernel.Snapshot{}, ErrInvalidShadowRunner
+	}
+	snapshot, err := runner.runtime.Load(ctx, strings.TrimSpace(runID))
+	if err != nil || snapshot.Run.Revision != expectedRevision {
+		if err != nil {
+			return snapshot, err
+		}
+		return snapshot, kernel.ErrConflict
 	}
 	state, err := runner.decodeState(snapshot)
 	if err != nil {
@@ -247,7 +356,7 @@ func (runner *ShadowRunner) ResumeRun(ctx context.Context, runID, text string) (
 	// was lost or the process died after the Store CAS. A stable MessageID
 	// is a correlation key, NOT a remote deduplication guarantee. Neither
 	// another caller nor another process may send it again.
-	if state.PendingMessageID != "" {
+	if state.PendingMessageID != "" || state.PendingCancel {
 		return snapshot, ErrRemoteOutcomeUnknown
 	}
 	if snapshot.Run.Status != kernel.RunStatusWaitingInput {
@@ -270,16 +379,27 @@ func (runner *ShadowRunner) ResumeRun(ctx context.Context, runID, text string) (
 		MessageID: state.PendingMessageID, ContextID: state.RemoteContextID,
 		TaskID: state.RemoteTaskID, Text: text,
 	})
+	// This original physical Send has now *returned*. Persist that fact
+	// independently of response validation or transport errors; until it is
+	// committed, an observer must NOT acknowledge a remote terminal result.
+	state.PendingMessageReturned = true
+	returned, returnErr := runner.applyAttested(ctx, snapshot, state, kernel.Mutation{
+		Status: kernel.RunStatusRunning,
+		Events: []kernel.EventDraft{{Type: "a2a.remote_resume_returned", Message: "A2A input callback returned"}},
+	})
+	if returnErr != nil {
+		return snapshot, errors.Join(ErrRemoteOutcomeUnknown, returnErr)
+	}
 	if sendErr != nil {
 		// The provider may have consumed the input before the response was
-		// lost. Retain the attested Running send intent and never expose
-		// upstream error text (which can contain credentials).
-		return snapshot, ErrRemoteOutcomeUnknown
+		// lost. Never expose its upstream transport error text.
+		return returned, ErrRemoteOutcomeUnknown
 	}
 	state.MessageID = state.PendingMessageID
 	state.PendingMessageID = ""
 	state.PendingInputHash = ""
-	return runner.applyInteraction(ctx, snapshot, state, interaction)
+	state.PendingMessageReturned = false
+	return runner.applyInteraction(ctx, returned, state, interaction)
 }
 
 func (runner *ShadowRunner) initialState(runID string) shadowState {
@@ -300,6 +420,10 @@ func (runner *ShadowRunner) decodeState(snapshot kernel.Snapshot) (shadowState, 
 		state.ProtocolVersion != descriptor.ProtocolVersion || state.TargetID != runner.targetID ||
 		state.TargetRevision != runner.revision ||
 		(state.RemoteTaskID != "" && state.RemoteContextID == "") ||
+		(state.PendingMessageID == "" && (state.PendingInputHash != "" || state.PendingMessageReturned)) ||
+		(state.PendingMessageID != "" && (state.PendingInputHash == "" || snapshot.Run.Status != kernel.RunStatusRunning)) ||
+		(state.PendingCancelReturned && !state.PendingCancel) ||
+		(state.PendingCancel && snapshot.Run.Status != kernel.RunStatusRunning) ||
 		!runner.verifiedProof(snapshot, state) {
 		return shadowState{}, ErrRemoteBindingChanged
 	}
@@ -400,6 +524,15 @@ func (runner *ShadowRunner) applyTask(
 	}
 	if strings.TrimSpace(remote.ID) == "" || strings.TrimSpace(remote.ContextID) == "" || strings.TrimSpace(remote.State) == "" {
 		return snapshot, errors.Join(ErrRemoteOutcomeUnknown, ErrInvalidTask)
+	}
+	// Only a terminal receipt, after the original physical callback has
+	// durably returned, may clear the outstanding external control intent.
+	if remoteTaskTerminalState(remote.State) {
+		state.PendingCancel = false
+		state.PendingCancelReturned = false
+		state.PendingMessageID = ""
+		state.PendingInputHash = ""
+		state.PendingMessageReturned = false
 	}
 	state.RemoteTaskID = remote.ID
 	state.RemoteContextID = remote.ContextID

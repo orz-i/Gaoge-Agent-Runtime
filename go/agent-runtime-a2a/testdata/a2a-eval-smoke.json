@@ -1,6 +1,6 @@
 {
   "id": "a2a-deterministic-smoke",
-  "revision": 2,
+  "revision": 3,
   "name": "A2A deterministic smoke",
   "passThreshold": 1,
   "scenarios": [
@@ -50,12 +50,13 @@
       "input": {"operation": "shadow_resume_unknown"},
       "expected": {
         "status": "completed",
-        "revision": 4,
+        "revision": 5,
         "eventTypes": [
           "run.created",
           "a2a.remote_started",
           "a2a.remote_input_required",
           "a2a.remote_resume_requested",
+          "a2a.remote_resume_returned",
           "a2a.remote_completed"
         ],
         "effects": [

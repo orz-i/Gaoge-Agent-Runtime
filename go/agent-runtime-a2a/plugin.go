@@ -123,7 +123,8 @@ func (plugin *Plugin) resolveChild(ctx context.Context, delegation handoff.Deleg
 }
 
 // Cancel resolves the shadow's frozen binding and cancels the remote task.
-// A transport error or pending acknowledgement leaves the shadow retryable.
+// A transport error or pending acknowledgement keeps the physical cancel
+// outcome unknown; another CancelTask is not automatically sent.
 // ResumeRun continues one durable remote input/auth wait using the frozen
 // target binding recorded by the shadow Run. expectedRevision prevents a
 // response for an older wait from resuming a newer remote state.
@@ -157,13 +158,13 @@ func (plugin *Plugin) ResumeRun(
 	if err != nil {
 		return snapshot, err
 	}
-	if state.PendingMessageID != "" {
+	if state.PendingMessageID != "" || state.PendingCancel {
 		return snapshot, ErrRemoteOutcomeUnknown
 	}
 	if snapshot.Run.Status != kernel.RunStatusWaitingInput {
 		return snapshot, ErrRemoteInputRequired
 	}
-	return child.ResumeRun(ctx, snapshot.Run.ID, strings.TrimSpace(text))
+	return child.resumeRunAtRevision(ctx, snapshot.Run.ID, expectedRevision, strings.TrimSpace(text))
 }
 
 func (plugin *Plugin) Cancel(
@@ -195,7 +196,7 @@ func (plugin *Plugin) Cancel(
 	if !shadowRunRefreshable(snapshot.Run.Status) {
 		return snapshot, nil
 	}
-	cancelled, err := child.CancelRun(ctx, snapshot.Run.ID)
+	cancelled, err := child.cancelRunAtRevision(ctx, snapshot.Run.ID, expectedRevision)
 	if err == nil && shadowRunRefreshable(cancelled.Run.Status) {
 		err = ErrRemoteCancellationPending
 	}
