@@ -2044,6 +2044,10 @@ def comparison_markdown(old, new, treatment=False):
     lines = ["# %s" % ("Agent Treatment A/B 观察" if treatment else "模型基线比较"), "", "| 配置 | 基线 | 新报告 |", "| --- | --- | --- |"]
     for name in ("suite", "provider", "endpoint", "model", "contextTokens", "maxOutputTokens", "repetitions", "reasoningEffort"):
         lines.append("| %s | %s | %s |" % (name, md_cell(old["configuration"].get(name)), md_cell(new["configuration"].get(name))))
+    if treatment:
+        lines.append("| qualityTreatment | %s | %s |" % (
+            md_cell(old["configuration"].get("qualityTreatment", "current/default")),
+            md_cell(new["configuration"].get("qualityTreatment", "current/default"))))
     lines.append("| revision | %s | %s |" % (md_cell(old.get("source", {}).get("revision")), md_cell(new.get("source", {}).get("revision"))))
     incompatible = []
     for name in (("taskVersion", "workloadHash", "profile") if treatment else
@@ -2054,6 +2058,10 @@ def comparison_markdown(old, new, treatment=False):
     if treatment:
         if old["runner"].get("treatmentHash") == new["runner"].get("treatmentHash"):
             incompatible.append("distinctTreatment")
+        # A self-declared hash difference cannot turn two runs with the same
+        # explicitly recorded Host strategy into an A/B comparison.
+        if old["configuration"].get("qualityTreatment", "") == new["configuration"].get("qualityTreatment", ""):
+            incompatible.append("distinctTreatmentLabel")
         # Treatment comparisons have a much narrower scope than the existing
         # model comparison. A declared workload hash cannot replace matching
         # Provider, exact model, endpoint, budgets, repetition or clean source.

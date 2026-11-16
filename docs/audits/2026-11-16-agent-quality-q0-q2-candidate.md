@@ -138,6 +138,22 @@ This is a scoped self-review, **not** an external independent audit, complete
 whole-workspace CI admission or real-model effectiveness evidence. No further
 execution-authorization or Kernel changes were indicated by this review.
 
+## PR #114 audit follow-up — F1 report attribution
+
+The independent PR audit reproduced a report-pair inconsistency: two validated
+reports with the **same** recorded `qualityTreatment` label were accepted by
+`compare-treatment` after only their self-declared `datasetHash` and
+`treatmentHash` values were changed to distinct, well-formed hashes. This was
+an A/B attribution risk, not a Runtime or Provider authorization issue.
+
+The comparator now requires **both** distinct recorded Host treatment labels
+(the default and the explicitly opted-in `generic-navigation-v1`) and distinct
+`treatmentHash` values. Its table displays the labels alongside the existing
+hash comparison. The negative regression was observed failing before the fix;
+post-fix tests cover both same-label spoofing variants and both valid A/B
+orders. All original workload/source/profile/budget checks remain intact.
+The hashes remain runner-declared identities, not cryptographic signatures.
+
 ## Conformance and release gates
 
 The new Go tests assert the current default manifest hash, separate identities

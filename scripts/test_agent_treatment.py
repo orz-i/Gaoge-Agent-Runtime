@@ -127,6 +127,27 @@ class QualityTreatmentProtocolTests(unittest.TestCase):
         with self.assertRaisesRegex(baseline.ProtocolFailure, "invalid_start_identity"):
             baseline.comparison_markdown(first, missing, treatment=True)
 
+    def test_distinct_hashes_cannot_disguise_same_treatment_label(self):
+        control, generic = pair()
+        # A hash is self-declared report metadata, not proof that the Host
+        # actually selected a different treatment. A/B needs both identities.
+        for original in (control, generic):
+            with self.subTest(treatment=original["configuration"].get("qualityTreatment", "current/default")):
+                spoofed = copy.deepcopy(original)
+                spoofed["runner"]["datasetHash"] = "sha256:" + "f" * 64
+                spoofed["runner"]["treatmentHash"] = "sha256:" + "e" * 64
+                baseline.validate_report(spoofed)
+                text, comparable = baseline.comparison_markdown(original, spoofed, treatment=True)
+                self.assertFalse(comparable)
+                self.assertIn("distinctTreatmentLabel", text)
+        for first, second in ((control, generic), (generic, control)):
+            with self.subTest(order=first["configuration"].get("qualityTreatment", "current/default")):
+                text, comparable = baseline.comparison_markdown(first, second, treatment=True)
+                self.assertTrue(comparable)
+                self.assertIn("| qualityTreatment |", text)
+                self.assertIn("current/default", text)
+                self.assertIn(baseline.QUALITY_GENERIC_TREATMENT, text)
+
     def test_read_only_cli_selector_never_starts_provider_in_comparison_mode(self):
         original, variant = pair()
         with mock.patch.object(baseline, "read_report", side_effect=[original, variant]), \
