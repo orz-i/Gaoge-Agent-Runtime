@@ -175,27 +175,25 @@ func (handler *DelegationToolHandler) VerifyCommittedTool(
 	}
 	delegationID := delegationToolID(invocation, request.Call.ID)
 	startedID := stableID("hid", invocation.TurnID, delegationID, string(ItemStarted))
-	items, err := listAllItems(ctx, runner.store, invocation.TurnID)
+	// This original Tool call has one deterministic Started Item ID. Reading
+	// every unrelated Turn Item cannot strengthen its ownership proof.
+	item, err := runner.store.GetItem(ctx, startedID)
+	if errors.Is(err, ErrNotFound) {
+		return tools.ExecutionResult{}, agent.ErrToolOutcomeUnknown
+	}
 	if err != nil {
 		return tools.ExecutionResult{}, err
 	}
-	var stored *delegationItemPayload
-	for _, item := range items {
-		if item.ID != startedID || item.Kind != ItemDelegation || item.Status != ItemStarted ||
-			item.InvocationID != invocation.ID || item.RunID == "" {
-			continue
-		}
-		var payload delegationItemPayload
-		if err = json.Unmarshal(item.Payload, &payload); err != nil ||
-			payload.DelegationID != delegationID || payload.ParentRunID != request.RunID ||
-			payload.ChildRunID != item.RunID || payload.ChildRunID != stableID("hchild", request.RunID, delegationID) {
-			return tools.ExecutionResult{}, errors.Join(agent.ErrToolOutcomeUnknown, err)
-		}
-		stored = &payload
-		break
-	}
-	if stored == nil {
+	if item.ID != startedID || item.TurnID != invocation.TurnID ||
+		item.Seq == 0 || item.Kind != ItemDelegation || item.Status != ItemStarted ||
+		item.InvocationID != invocation.ID || item.RunID == "" {
 		return tools.ExecutionResult{}, agent.ErrToolOutcomeUnknown
+	}
+	var stored delegationItemPayload
+	if err = json.Unmarshal(item.Payload, &stored); err != nil ||
+		stored.DelegationID != delegationID || stored.ParentRunID != request.RunID ||
+		stored.ChildRunID != item.RunID || stored.ChildRunID != stableID("hchild", request.RunID, delegationID) {
+		return tools.ExecutionResult{}, errors.Join(agent.ErrToolOutcomeUnknown, err)
 	}
 	child, frozen, err := runner.delegationObservation(ctx, stored.ChildRunID)
 	if err != nil {
@@ -399,23 +397,43 @@ func (runner *Runner) preparedDelegationToolRequest(
 	if err != nil {
 		return DelegateRequest{}, false, err
 	}
-	items, err := listAllItems(ctx, runner.store, invocation.TurnID)
-	if err != nil {
-		return DelegateRequest{}, false, err
-	}
-	startedID := stableID("hid", invocation.TurnID, delegationToolID(invocation, request.Call.ID), string(ItemStarted))
-	waitingID := stableID("hid", invocation.TurnID, delegationToolID(invocation, request.Call.ID), string(ItemWaiting))
-	for _, item := range items {
-		if (item.ID != startedID && item.ID != waitingID) || item.Kind != ItemDelegation || item.InvocationID != invocation.ID {
+	delegationID := delegationToolID(invocation, request.Call.ID)
+	// There are at most two original frozen candidates for this Tool call:
+	// Waiting (before physical dispatch) and Started (after admission).
+	// The old full-Turn scan chose the earlier Item by Seq. Preserve that
+	// ordering when both are present; all unrelated business history can be
+	// ignored without granting any new physical execution authority.
+	var first Item
+	found := false
+	for _, status := range []ItemStatus{ItemStarted, ItemWaiting} {
+		id := stableID("hid", invocation.TurnID, delegationID, string(status))
+		item, itemErr := runner.store.GetItem(ctx, id)
+		if errors.Is(itemErr, ErrNotFound) {
 			continue
 		}
-		var payload delegationItemPayload
-		if err = json.Unmarshal(item.Payload, &payload); err != nil {
-			return DelegateRequest{}, false, err
+		if itemErr != nil {
+			return DelegateRequest{}, false, itemErr
 		}
-		return DelegateRequest{RoleID: payload.RoleID, MemberID: payload.MemberID, Goal: payload.Goal, callID: request.Call.ID}, true, nil
+		if item.ID != id || item.TurnID != invocation.TurnID || item.Seq == 0 ||
+			item.Kind != ItemDelegation || item.Status != status ||
+			item.InvocationID != invocation.ID {
+			return DelegateRequest{}, false, ErrConflict
+		}
+		if found && item.Seq == first.Seq {
+			return DelegateRequest{}, false, ErrConflict
+		}
+		if !found || item.Seq < first.Seq {
+			first, found = item, true
+		}
 	}
-	return DelegateRequest{}, false, nil
+	if !found {
+		return DelegateRequest{}, false, nil
+	}
+	var payload delegationItemPayload
+	if err = json.Unmarshal(first.Payload, &payload); err != nil {
+		return DelegateRequest{}, false, err
+	}
+	return DelegateRequest{RoleID: payload.RoleID, MemberID: payload.MemberID, Goal: payload.Goal, callID: request.Call.ID}, true, nil
 }
 
 func delegationToolID(invocation Invocation, callID string) string {
