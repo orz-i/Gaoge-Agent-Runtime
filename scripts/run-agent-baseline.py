@@ -26,6 +26,15 @@ import warnings
 SCHEMA_VERSION = 1
 QUALITY_SUITE = "evidence-40-v1"
 QUALITY_GENERIC_TREATMENT = "generic-navigation-v1"  # Explicit Host-only A/B treatment.
+# The generic report protocol permits extension codes and old dataset strings.
+# The Q3 diagnostic must never echo arbitrary source-provided strings as facts.
+Q3_DIAGNOSTIC_FAILURE_CODES = frozenset({
+    "context_budget_exceeded", "task_did_not_reach_interruption",
+    "task_failed_before_interruption", "task_model_failed_before_interruption",
+    "task_model_response_invalid_before_interruption", "task_completed_without_draft",
+    "task_completed_before_interruption", "task_returned_without_interruption",
+    "task_interruption_evidence_inconsistent", "oracle_failed", "task_execution_failed",
+})
 PILOT_CASE_ID = "code-01"  # Historical fixed first-case pilot.
 DISTRACTOR_PILOT_CASE_ID = "distractor-05"  # Fixed ambiguous-evidence pilot.
 PILOT_CASE_IDS = frozenset((PILOT_CASE_ID, DISTRACTOR_PILOT_CASE_ID))
@@ -885,6 +894,138 @@ def quality_group_markdown(report):
     lines += ["", "分组按已尝试样本计数；未运行的案例不计为成功。Token 用量仅在全部模型调用均有已知 usage 时展示，否则标为未知。",
               "这 40 例属于同一证据任务族，不能推断通用 Agent 智力或不同任务族的整体胜负。", ""]
     return lines
+
+
+def quality_pressure_facts(report):
+    """Q3-A: classify *observed* quality failures without re-running or re-scoring.
+
+    Reports are validated before reading any facts. Only existing allowlisted
+    sample metrics leave this function. In particular, an aggregate accepted
+    Count() result cannot identify the count source of the *rejected* request;
+    no current report records that exact Assessment or compaction decision.
+    """
+    validate_report(report)
+    if report["configuration"].get("suite") != QUALITY_SUITE:
+        raise SafeFailure("quality_suite_required")
+    runner = report["runner"]
+    summary = report["summary"] or {}
+    samples = report["samples"]
+    counts = {"contextBudgetRejected": 0, "agentToolLimit": 0, "otherOrUnknown": 0}
+    countCoverage = {"samplesWithCount": 0, "attempts": 0, "accepted": 0,
+                     "unavailable": 0, "matchedUsage": 0, "belowUsage": 0}
+    for sample in samples:
+        native = sample.get("inputCountObservations")
+        if native is None:
+            continue
+        countCoverage["samplesWithCount"] += 1
+        for field in ("attempts", "accepted", "unavailable"):
+            countCoverage[field] += native[field]
+        compared = sample.get("inputCountComparison")
+        if compared is not None:
+            countCoverage["matchedUsage"] += compared["compared"]
+            countCoverage["belowUsage"] += compared["belowUsage"]
+    failures = []
+    for sample in samples:
+        if sample["status"] != "failed":
+            continue
+        evidence = sample.get("preInterruption") or {}
+        trusted_tool_limit = (evidence.get("turnStatus") == "failed" and
+                              evidence.get("agentErrorCode") == "agent.tool_limit")
+        # A contradictory trusted terminal code is not a license to choose
+        # whichever failure attribution looks more convenient.
+        if sample["failureCode"] == "context_budget_exceeded" and not trusted_tool_limit:
+            category, counter = "local_context_budget_rejection", "contextBudgetRejected"
+        elif trusted_tool_limit and sample["failureCode"] != "context_budget_exceeded":
+            category, counter = "trusted_agent_tool_limit", "agentToolLimit"
+        else:
+            category, counter = "other_or_unknown", "otherOrUnknown"
+        counts[counter] += 1
+        modes = sample.get("artifactReadStrategy")
+        native = sample.get("inputCountObservations")
+        compared = sample.get("inputCountComparison")
+        failures.append({
+            "caseID": sample["caseID"], "repetition": sample["repetition"],
+            "failureCode": (sample["failureCode"] if sample["failureCode"] in Q3_DIAGNOSTIC_FAILURE_CODES
+                            else "unrecognized_code"), "category": category,
+            "artifactReads": sample["artifactReads"],
+            "artifactReadModes": ({"queried": modes["queried"], "offsetOnly": modes["offsetOnly"]}
+                                  if modes is not None else None),
+            "nativeCount": ({"attempts": native["attempts"], "accepted": native["accepted"],
+                             "unavailable": native["unavailable"],
+                             "matchedUsage": compared["compared"] if compared is not None else None}
+                            if native is not None else None),
+            # Explicit unknown, not zero. These are not currently captured in
+            # historical or newly emitted task-agent baseline reports.
+            "rejectedRequestAssessment": None,
+            "compactionOutcome": None,
+        })
+    requested = runner.get("requestedSamples") or summary.get("requested")
+    original_hash = runner.get("datasetHash")
+    safe_hash = (original_hash if type(original_hash) is str and
+                 re.fullmatch(r"sha256:[0-9a-f]{64}", original_hash) else None)
+    complete = bool(summary.get("complete") is True and
+                    report.get("status") in ("passed", "failed") and
+                    not runner.get("pilotOnly") and not runner.get("preflightOnly"))
+    return {
+        "datasetHash": safe_hash,
+        "qualityTreatment": report["configuration"].get("qualityTreatment", "current/default"),
+        "sourceClean": report["source"].get("dirty") is False,
+        "coverage": {"requested": requested, "attempted": len(samples),
+                     "complete": complete, "pilotOnly": runner.get("pilotOnly") is True,
+                     "preflightOnly": runner.get("preflightOnly") is True},
+        "counts": counts,
+        "countCoverage": countCoverage,
+        "failures": failures,
+    }
+
+
+def quality_pressure_markdown(facts):
+    """Render only prevalidated, content-free Q3-A observations."""
+    coverage = facts["coverage"]
+    counts = facts["counts"]
+    counted = facts["countCoverage"]
+    lines = ["# Q3-A Context 压力归因（离线，只读）", "",
+             "- Dataset Hash：%s；策略：%s；报告声明源码干净：%s。" %
+             (md_cell(facts["datasetHash"]), md_cell(facts["qualityTreatment"]),
+              "是" if facts["sourceClean"] else "否或未知"),
+             "- 样本：请求 %s；已观察 %d；完整采样覆盖：%s。" %
+             (md_cell(coverage["requested"]), coverage["attempted"],
+              "是" if coverage["complete"] else "否（Pilot、预检或不完整均不是完整质量得分）"),
+             "- 已观察的失败分类：本地 Context 预算拒绝 %d；经可信 Turn 认证的 Agent Tool 上限 %d；其他或根因未知 %d。" %
+             (counts["contextBudgetRejected"], counts["agentToolLimit"], counts["otherOrUnknown"]),
+             "- 已观测的 Count 汇总：可观测样本 %d / %d；调用 %d、接受 %d、不可用 %d；"
+             "同输入对照 %d 次，其中低估 %d 次。缺失样本不计作计数成功或失败。" %
+             (counted["samplesWithCount"], coverage["attempted"], counted["attempts"],
+              counted["accepted"], counted["unavailable"], counted["matchedUsage"], counted["belowUsage"]),
+             "- Dataset Hash 是 Runner 自声明标识，并非签名；原始报告来源需独立锚点核验。",
+             "- 分类仅对应原始固定失败码与可信 Turn 状态；Context 拒绝不是 Provider HTTP 4xx 拒绝，"
+             "Tool 上限不是 Context 超限。任何 Artifact 读取次数都不能单独证明重复检索是根因。",
+             "", "## 失败样本的已观察证据", "",
+             "| 案例 / 次数 | 固定失败码 | 归因分类 | Artifact Reads | Query / Offset | Count 尝试 / 接受 / 不可用 | 同输入 Count-Usage 对照 |",
+             "| --- | --- | --- | ---: | --- | --- | --- |"]
+    for failure in facts["failures"]:
+        modes, native = failure["artifactReadModes"], failure["nativeCount"]
+        mode_text = "%d / %d" % (modes["queried"], modes["offsetOnly"]) if modes is not None else "未记录"
+        count_text = "%d / %d / %d" % (native["attempts"], native["accepted"], native["unavailable"]) if native is not None else "未记录"
+        matched_text = str(native["matchedUsage"]) if native is not None and native["matchedUsage"] is not None else "未记录"
+        lines.append("| %s / %d | %s | %s | %d | %s | %s | %s |" %
+                     (failure["caseID"], failure["repetition"], failure["failureCode"],
+                      failure["category"], failure["artifactReads"], mode_text, count_text, matched_text))
+    if not facts["failures"]:
+        lines.append("| 未观察到已尝试样本失败 | — | — | — | — | — | — |")
+    lines += ["", "## 本轮仍未知的边界", ""]
+    if counts["contextBudgetRejected"]:
+        lines.append("- 本地 Context 拒绝的具体请求：精确 Count 来源、Hard/Soft Token 估值、序列化大小均未记录。"
+                     "已有 Count 汇总即使全部接受，也不能定位到最后一次被拒绝的请求。")
+    else:
+        lines.append("- 已观察样本中没有固定码确认的 Context 预算拒绝；不能据此证明未执行样本或其他 Profile 永远不会超限。")
+    if counted["belowUsage"]:
+        lines.append("- 存在同输入原生计数低于已认证 Provider Usage 的观测；这是独立的计量安全复核信号，"
+                     "不能自动推断某个样本失败原因。")
+    lines += ["- Portable/Tool 压缩候选、拒绝原因与预计释放空间未记录；不得断言压缩本应成功。",
+              "- 现有样本诊断不是模型成本、真实调用端点计数或 Context 策略 A/B 的因果实验。"
+              "不能借由此命令改变报告、重跑样本、提升预算或推断同版本 A/B 收益。", ""]
+    return "\n".join(lines)
 
 
 def quality_native_count_latency_markdown(report):
@@ -2132,7 +2273,7 @@ def comparison_markdown(old, new, treatment=False):
 def main(argv=None):
     args = list(sys.argv[1:] if argv is None else argv)
     usage = ("用法：python3 scripts/run-agent-baseline.py "
-             "[quality | quality-generic | pilot [report.json] | pilot-distractor [report.json] | pilot-distractor-generic | probe [report.json] | retry report.json [--repetitions 1..20] | compare old.json new.json | compare-treatment old.json new.json]")
+             "[quality | quality-generic | pilot [report.json] | pilot-distractor [report.json] | pilot-distractor-generic | probe [report.json] | retry report.json [--repetitions 1..20] | compare old.json new.json | compare-treatment old.json new.json | diagnose-quality report.json]")
     try:
         if args in (["--help"], ["-h"]):
             print(usage + "\n无参数执行原两任务基线；quality 选择 40 个合成证据案例；"
@@ -2140,13 +2281,16 @@ def main(argv=None):
                   "quality-generic/pilot-distractor-generic 显式选择通用导航实验指令；"
                   "probe 只做付费前预检，绝不启动任务样本；"
                   "pilot/probe report.json 复用原配置并重新隐藏输入 key；"
-                  "retry 运行完整任务；compare/compare-treatment 离线读取报告，不会联网。")
+                  "retry 运行完整任务；compare/compare-treatment 与 diagnose-quality 离线读取报告，不会联网。")
             return 0
         if len(args) == 3 and args[0] in ("compare", "compare-treatment"):
             rendered, complete = comparison_markdown(
                 read_report(args[1]), read_report(args[2]), treatment=args[0] == "compare-treatment")
             print(rendered)
             return 0 if complete else 2
+        if len(args) == 2 and args[0] == "diagnose-quality":
+            print(quality_pressure_markdown(quality_pressure_facts(read_report(args[1]))))
+            return 0  # Observational success never means the Agent task passed.
         if args in (["quality"], ["quality-generic"]):
             if not sys.stdin.isatty() or not sys.stderr.isatty():
                 raise SafeFailure("interactive_tty_required")

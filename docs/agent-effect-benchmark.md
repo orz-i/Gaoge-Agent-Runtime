@@ -419,6 +419,25 @@ Host treatment changed.
 Unknown usage, incomplete samples and preflight-only/pilot results must not
 be represented as a complete quality improvement.
 
+## Q3-A1 — offline Context-pressure attribution (diagnostic only)
+
+For an existing **validated** `evidence-40-v1` report, inspect its content-free
+failure classification without running an Agent or a Provider request:
+
+```sh
+python3 scripts/run-agent-baseline.py diagnose-quality artifacts/agent-baselines/EXISTING_REPORT.json
+```
+
+The output distinguishes a trusted local `context_budget_exceeded` error from
+an authenticated `agent.tool_limit` and from unresolved failures. It shows
+available Artifact-read and native Count aggregates, but always marks the exact
+rejected-request token assessment, its count source and compaction outcome as
+**unobserved**; an aggregate native count is not a per-request admission
+receipt. Historical missing diagnostic fields remain unknown, and pilot or
+partial sampling does not become a complete benchmark. No input budgets,
+Provider projection, durable state, old report bytes, or compare-treatment
+contracts change. See the [Q3-A1 candidate and later evidence gates](audits/2026-11-16-agent-quality-q3a-context-pressure-diagnosis.md).
+
 ## Acceptance and known limits
 
 Automatic CI must verify every fixture against the scripted real Agent path, data uniqueness and model-independent dataset hash, strict suite ID/count/repetition admission, fail-closed invalid reports, unknown Token semantics, partial sampling and legacy report compatibility. The scripted path is not a proxy for real Provider performance.
