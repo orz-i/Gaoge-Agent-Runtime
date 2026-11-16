@@ -30,26 +30,11 @@ func seededParentItemBenchmark(b *testing.B, size int) (*Runner, Invocation) {
 	// its Invocation status is still required by the ancestry fence.
 	store.invocations[parentInvocationID] = Invocation{
 		ID: parentInvocationID, TurnID: turnID,
-		ExecutionClass: ExecutionApplication, Status: InvocationRunning,
+		ExecutionClass: ExecutionAgent, Status: InvocationRunning,
 	}
 	child := Invocation{ID: "child-application", TurnID: turnID, ParentItemID: parentItemID,
-		ExecutionClass: ExecutionApplication, Status: InvocationAccepted}
+		ExecutionClass: ExecutionAgent, Status: InvocationAccepted}
 	return &Runner{store: store}, child
-}
-
-func BenchmarkRequireLiveInvocationParentsMemoryScaling(b *testing.B) {
-	for _, size := range []int{500, 2000, 10000} {
-		b.Run(fmt.Sprint(size), func(b *testing.B) {
-			runner, child := seededParentItemBenchmark(b, size)
-			b.ReportAllocs()
-			b.ResetTimer()
-			for range b.N {
-				if err := runner.requireLiveInvocationParents(context.Background(), child); err != nil {
-					b.Fatal(err)
-				}
-			}
-		})
-	}
 }
 
 func BenchmarkListAllItemsMemoryScaling(b *testing.B) {

@@ -21,7 +21,7 @@ func pr103SQLGlobalPhysicalAdmission(t *testing.T, db *gorm.DB, operation string
 	store := pr103SQLBacking(t, db)
 	runtime := pr103SQLRuntime(t)
 	turnID, _ := pr103SQLSeedRootAgent(t, store, runtime)
-	root, err := store.GetInvocation(t.Context(), pr103RootID(t, store, turnID))
+	root, err := store.GetInvocation(t.Context(), nativeSQLRootID(t, store, turnID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +48,7 @@ func pr103SQLGlobalPhysicalAdmission(t *testing.T, db *gorm.DB, operation string
 		t.Fatalf("original physical grant: created=%v err=%v", created, err)
 	}
 	_, created, err = store.AppendItem(t.Context(), harness.Item{
-		ID: pr103RetryID("hdispatchdone", id), TurnID: turnID,
+		ID: sqlProofFactID("hdispatchdone", id), TurnID: turnID,
 		Kind: harness.ItemDiagnostic, Status: harness.ItemCompleted,
 		InvocationID: root.ID, RunID: root.ExecutionRefID,
 		ParentItemID: grant.ID,

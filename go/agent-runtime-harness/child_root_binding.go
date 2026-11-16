@@ -46,13 +46,8 @@ func validChildAttempt(value childAttemptBinding) bool {
 		strings.TrimSpace(value.ExecutionRefID) != "" && value.Attempt > 0
 }
 
-// An Accepted Application has not committed its Host-effect claim. Neither a
-// root nor an intermediate Application can authorize descendants before that
-// claim; unlike a Kernel-backed Invocation, it has no Run to prove liveness.
-func unclaimedApplicationParent(parent Invocation) bool {
-	return parent.ExecutionClass == ExecutionApplication && parent.Status == InvocationAccepted
-}
-
+// A child freezes its original Agent root/ancestor Attempts. A changed
+// current owner is never authority for the old child physical effect.
 func sealChildRootInput(input json.RawMessage, inputHash string, root Invocation, parents ...childAttemptBinding) (json.RawMessage, string, error) {
 	if len(input) == 0 || hashInvocationBytes(input) != inputHash ||
 		!validChildAttempt(invocationAttempt(root)) || strings.TrimSpace(root.ParentItemID) != "" ||
@@ -151,11 +146,10 @@ func (runner *Runner) requireLiveParentAttempt(ctx context.Context, turnID strin
 	}
 	if parent.TurnID != turnID || strings.TrimSpace(parent.ParentItemID) == "" ||
 		invocationAttempt(parent) != bound || !validExecutionClass(parent.ExecutionClass) ||
-		!validInvocationStatus(parent.Status) || terminalInvocationStatus(parent.Status) ||
-		unclaimedApplicationParent(parent) {
+		!validInvocationStatus(parent.Status) || terminalInvocationStatus(parent.Status) {
 		return ErrConflict
 	}
-	if parent.ExecutionClass != ExecutionApplication {
+	if parent.ExecutionClass == ExecutionAgent {
 		if runner.runtime == nil {
 			return ErrConflict
 		}

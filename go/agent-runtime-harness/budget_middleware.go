@@ -310,7 +310,7 @@ func (middleware *BudgetMiddleware) Tool(ctx context.Context, invocation plugin.
 	reservation := budget.Reservation{ID: id, RunID: invocation.Run.ID, RequestHash: hashInvocationBytes(raw), Requested: budget.Usage{ToolCalls: 1}}
 	// Infrastructure calls may synchronously enter child Features; counting the
 	// waiting coordinator as active would deadlock a one-slot environment.
-	active := invocation.Definition.Key != DelegationToolKey && invocation.Definition.Key != CapabilityInvocationToolKey
+	active := invocation.Definition.Key != DelegationToolKey
 	ledger, err = middleware.coordinator().Reserve(ctx, ledger.ID, reservation, active)
 	if projectErr := middleware.project(ctx, ledger); projectErr != nil {
 		return tools.ExecutionResult{}, projectErr

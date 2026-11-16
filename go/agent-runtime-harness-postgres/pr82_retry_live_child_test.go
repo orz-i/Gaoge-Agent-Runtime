@@ -53,7 +53,6 @@ func assertRetryChildExecutionFenceScenarios(t *testing.T, store harness.Store, 
 		{"native-running", harness.ExecutionAgent, harness.InvocationRunning, "physical_dispatch_returned"},
 		{"native-waiting", harness.ExecutionAgent, harness.InvocationWaitingInput, "physical_dispatch_returned"},
 		{"native-paused", harness.ExecutionAgent, harness.InvocationPausedBudget, "physical_dispatch_returned"},
-		{"app-running", harness.ExecutionApplication, harness.InvocationRunning, ""},
 		{"accepted-native-start", harness.ExecutionAgent, harness.InvocationAccepted, "physical_dispatch_returned"},
 		{"accepted-remote-handoff", harness.ExecutionAgent, harness.InvocationAccepted, "handoff_start_returned"},
 		{"accepted-unknown-outcome", harness.ExecutionAgent, harness.InvocationAccepted, "none"},
@@ -147,11 +146,7 @@ func assertRetryChildExecutionFenceScenarios(t *testing.T, store harness.Store, 
 					scenario.status, scenario.receipt, err)
 			}
 			_, err = store.RetryInvocation(ctx, root.ID, failed.Revision, "r2-"+turnID, now.Add(time.Second))
-			if scenario.class == harness.ExecutionApplication && scenario.status == harness.InvocationRunning {
-				if !errors.Is(err, harness.ErrApplicationOutcomeUnknown) && !errors.Is(err, harness.ErrConflict) {
-					t.Fatalf("live Application child permitted parent Retry: %v", err)
-				}
-			} else if !errors.Is(err, harness.ErrConflict) {
+			if !errors.Is(err, harness.ErrConflict) {
 				t.Fatalf("nonterminal native/remote child permitted Retry: %v", err)
 			}
 			unchanged, loadErr := store.GetInvocation(ctx, root.ID)

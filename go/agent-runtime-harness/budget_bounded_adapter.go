@@ -124,5 +124,5 @@ func (p boundedBudgetPorts) ValidateSettlement(before, after budget.Ledger, res 
 
 // Coordinator Tools wait for children and must not occupy the child's slot.
 func (p boundedBudgetPorts) ToolReservationActive(invocation plugin.ToolInvocation) bool {
-	return invocation.Definition.Key != DelegationToolKey && invocation.Definition.Key != CapabilityInvocationToolKey
+	return invocation.Definition.Key != DelegationToolKey
 }

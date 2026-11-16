@@ -23,8 +23,7 @@ const (
 type ExecutionClass string
 
 const (
-	ExecutionAgent       ExecutionClass = "agent"
-	ExecutionApplication ExecutionClass = "application"
+	ExecutionAgent ExecutionClass = "agent"
 )
 
 // InvocationStatus is the durable lifecycle of one capability invocation.
@@ -40,9 +39,8 @@ const (
 	InvocationCancelled    InvocationStatus = "cancelled"
 )
 
-// Invocation is the durable Harness envelope around one explicit Runtime
-// Feature or application capability execution. Runtime Feature-private state
-// remains in its owning Feature and is referenced only by ExecutionRefID.
+// Invocation is the durable Harness envelope around one Agent execution.
+// Original Run identity and lifecycle facts remain bound to ExecutionRefID.
 type Invocation struct {
 	ID                string           `json:"id"`
 	TurnID            string           `json:"turnID"`
@@ -63,16 +61,6 @@ type Invocation struct {
 	UpdatedAt         time.Time        `json:"updatedAt"`
 }
 
-// CapabilityExecutionRefID deterministically derives the Runtime execution
-// identity for a non-Agent typed capability Invocation.
-func CapabilityExecutionRefID(invocationID string) string {
-	invocationID = strings.TrimSpace(invocationID)
-	if invocationID == "" {
-		return ""
-	}
-	return stableID("hcr", invocationID)
-}
-
 // AgentExecutionRefID deterministically derives the Agent Runtime Run
 // identity owned by one already-created Agent Invocation. It is used only by
 // host composition that must bind Tool state before the Agent begins.
@@ -84,19 +72,15 @@ func AgentExecutionRefID(invocationID string) string {
 	return stableID("hr", invocationID)
 }
 
-func invocationExecutionRefID(invocationID string, executionClass ExecutionClass, attempt int) string {
+func invocationExecutionRefID(invocationID string, attempt int) string {
 	invocationID = strings.TrimSpace(invocationID)
 	if invocationID == "" || attempt <= 0 {
 		return ""
 	}
-	prefix := "hcr"
-	if executionClass == ExecutionAgent {
-		prefix = "hr"
-	}
 	if attempt == 1 {
-		return stableID(prefix, invocationID)
+		return AgentExecutionRefID(invocationID)
 	}
-	return stableID(prefix, invocationID, attemptString(attempt))
+	return stableID("hr", invocationID, attemptString(attempt))
 }
 
 func retryableInvocationStatus(status InvocationStatus) bool {
@@ -212,7 +196,7 @@ func InvocationID(turnID, parentItemID, capabilityKey, requestID string) (string
 
 func validExecutionClass(value ExecutionClass) bool {
 	switch value {
-	case ExecutionAgent, ExecutionApplication:
+	case ExecutionAgent:
 		return true
 	default:
 		return false

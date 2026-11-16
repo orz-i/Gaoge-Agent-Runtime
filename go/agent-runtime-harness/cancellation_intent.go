@@ -6,8 +6,6 @@ import (
 	"errors"
 	"strings"
 	"time"
-
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
 // cancellationSettlementTimeout bounds cancellation receipt and failure
@@ -134,14 +132,6 @@ func (runner *Runner) beginCancellationFence(ctx context.Context, turn Turn, run
 func (runner *Runner) resumeCommittedCancellationFence(ctx context.Context, turn Turn, runID string) (Item, error) {
 	snapshot, err := runner.runtime.Load(ctx, runID)
 	terminal := err == nil && terminalRuntimeStatus(snapshot.Run.Status)
-	if errors.Is(err, kernel.ErrNotFound) {
-		// Application execution has no Kernel Run. Its exact durable
-		// Invocation is the authority after cancellation/projection committed
-		// but the cancellation settlement acknowledgement was lost.
-		owner, ownerErr := runner.store.GetInvocationByExecutionRefID(ctx, runID)
-		terminal = ownerErr == nil && owner.ExecutionRefID == runID && owner.TurnID == turn.ID &&
-			owner.ExecutionClass == ExecutionApplication && terminalInvocationStatus(owner.Status)
-	}
 	if !terminal && err != nil {
 		return Item{}, errors.Join(ErrConflict, err)
 	}

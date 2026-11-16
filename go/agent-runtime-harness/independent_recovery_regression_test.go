@@ -3,8 +3,6 @@ package harness_test
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"sync/atomic"
 	"testing"
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
@@ -13,91 +11,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runfeed"
 )
-
-func TestIndependentAuditRefreshMustNotDispatchAcceptedApplication(t *testing.T) {
-	runtime := newFeatureInvocationRuntime(t)
-	backing := harness.NewMemoryStore()
-	flaky := &auditInvocationFaultOnce{Store: backing}
-	executor := &applicationCapabilityExecutorFixture{}
-	newRunner := func(s harness.Store) *harness.Runner {
-		t.Helper()
-		runner, err := harness.NewRunner(harness.Dependencies{Runtime: runtime, Agent: loadingFeatureAgent{runtime: runtime}, Store: s, Clock: featureInvocationClock{}, Applications: executor})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return runner
-	}
-	request := harness.ApplicationTurnRequest{StartRequest: testStartRequest(), CapabilityKey: testApplicationCapabilityKey, DefinitionVersion: testApplicationVersion, Input: json.RawMessage("{}")}
-	_, err := newRunner(flaky).StartApplicationTurn(context.Background(), request)
-	if err == nil || !flaky.failed || executor.calls != 0 {
-		t.Fatalf("fault preconditions: err=%v failed=%v calls=%d", err, flaky.failed, executor.calls)
-	}
-	sessionID, err := harness.SessionID(request.HostThread)
-	if err != nil {
-		t.Fatal(err)
-	}
-	turnID, err := harness.TurnID(sessionID, request.HostTurn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	accepted, err := backing.GetTurn(context.Background(), turnID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if accepted.Status != harness.TurnAccepted {
-		t.Fatalf("turn not accepted: %v", accepted.Status)
-	}
-	_, err = newRunner(backing).Refresh(context.Background(), turnID)
-	if err != nil {
-		t.Logf("Refresh error: %v", err)
-	}
-	if executor.calls != 0 {
-		t.Fatalf("REPRO: Refresh dispatched an unstarted Application Capability: physical calls=%d", executor.calls)
-	}
-}
-
-type auditBlockFirstGetSession struct {
-	harness.Store
-	first   atomic.Bool
-	entered chan struct{}
-	release chan struct{}
-}
-
-func (s *auditBlockFirstGetSession) GetSession(ctx context.Context, id string) (harness.Session, error) {
-	if s.first.CompareAndSwap(false, true) {
-		close(s.entered)
-		<-s.release
-	}
-	return s.Store.GetSession(ctx, id)
-}
-func TestIndependentAuditApplicationCancellationBeforePhysicalDispatch(t *testing.T) {
-	runtime := newFeatureInvocationRuntime(t)
-	store := &auditBlockFirstGetSession{Store: harness.NewMemoryStore(), entered: make(chan struct{}), release: make(chan struct{})}
-	executor := &applicationCapabilityExecutorFixture{}
-	runner, err := harness.NewRunner(harness.Dependencies{Runtime: runtime, Agent: loadingFeatureAgent{runtime: runtime}, Store: store, Clock: featureInvocationClock{}, Applications: executor})
-	if err != nil {
-		t.Fatal(err)
-	}
-	req := harness.ApplicationTurnRequest{StartRequest: testStartRequest(), CapabilityKey: testApplicationCapabilityKey, DefinitionVersion: testApplicationVersion, Input: json.RawMessage("{}")}
-	finished := make(chan error, 1)
-	go func() {
-		_, e := runner.StartApplicationTurn(context.Background(), req)
-		finished <- e
-	}()
-	<-store.entered
-	sid, _ := harness.SessionID(req.HostThread)
-	tid, _ := harness.TurnID(sid, req.HostTurn)
-	cancelled, err := runner.Cancel(context.Background(), tid, "user cancelled before dispatch")
-	if err != nil || cancelled.Turn.Status != harness.TurnCancelled {
-		close(store.release)
-		t.Fatalf("cannot commit cancellation before release: status=%s err=%v", cancelled.Turn.Status, err)
-	}
-	close(store.release)
-	launchErr := <-finished
-	if executor.calls != 0 {
-		t.Fatalf("REPRO: Executor dispatched after cancellation committed: calls=%d startErr=%v", executor.calls, launchErr)
-	}
-}
 
 type auditCountingInteractionHandler struct{ calls int }
 
@@ -232,41 +145,5 @@ func TestIndependentAuditRecoveredTerminalTurnFeedHasTerminalEvent(t *testing.T)
 	}
 	if terminal != 1 {
 		t.Fatalf("repeated Refresh duplicated terminal event: count=%d", terminal)
-	}
-}
-
-func TestHardcutRunningApplicationCancelCannotClaimEffectStopped(t *testing.T) {
-	runtime := newFeatureInvocationRuntime(t)
-	executor := &blockingHardcutApplication{started: make(chan struct{}), release: make(chan struct{})}
-	host, err := harness.NewRunner(harness.Dependencies{Runtime: runtime, Agent: loadingFeatureAgent{runtime: runtime}, Store: harness.NewMemoryStore(), Clock: featureInvocationClock{}, Applications: executor})
-	if err != nil {
-		t.Fatal(err)
-	}
-	request := harness.ApplicationTurnRequest{StartRequest: testStartRequest(), CapabilityKey: testApplicationCapabilityKey, DefinitionVersion: testApplicationVersion, Input: json.RawMessage("{}")}
-	done := make(chan error, 1)
-	go func() {
-		_, callErr := host.StartApplicationTurn(context.Background(), request)
-		done <- callErr
-	}()
-	<-executor.started
-	sessionID, err := harness.SessionID(request.HostThread)
-	if err != nil {
-		t.Fatal(err)
-	}
-	turnID, err := harness.TurnID(sessionID, request.HostTurn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = host.Cancel(t.Context(), turnID, "stop")
-	if !errors.Is(err, harness.ErrApplicationOutcomeUnknown) {
-		t.Fatalf("in-flight Application wrongly reported cancelled: %v", err)
-	}
-	observed, err := host.Load(t.Context(), turnID)
-	if err != nil || observed.Turn.Status != harness.TurnRunning {
-		t.Fatalf("in-flight Application mutated by failed cancellation: %v %+v", err, observed.Turn)
-	}
-	close(executor.release)
-	if err = <-done; err != nil || executor.calls.Load() != 1 {
-		t.Fatalf("running effect failed to settle: err=%v calls=%d", err, executor.calls.Load())
 	}
 }

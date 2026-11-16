@@ -55,7 +55,7 @@ export type HarnessInteractionDTO = {
   updatedAt: string;
 };
 
-export type HarnessExecutionClass = "agent" | "application";
+export type HarnessExecutionClass = "agent";
 export type HarnessInvocationStatus = "accepted" | RunStatus;
 
 export type HarnessCapabilityInvocationDTO = {

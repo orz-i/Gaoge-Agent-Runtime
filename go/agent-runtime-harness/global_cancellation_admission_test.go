@@ -10,7 +10,7 @@ import (
 // A cancellation intent is another globally unique original operation. Its
 // canonical completion plus one foreign-Turn child must remain active to the
 // Memory Store, matching SQL's globally indexed pendingCancellationFenceTx.
-func seedGloballyContradictoryCancellation(t *testing.T, fx frozenApplicationParentFixture) {
+func seedGloballyContradictoryCancellation(t *testing.T, fx frozenAgentEffectFixture) {
 	t.Helper()
 	ctx := t.Context()
 	intentID := "hcancel_original_globally_unique_intent"
@@ -54,7 +54,7 @@ func seedGloballyContradictoryCancellation(t *testing.T, fx frozenApplicationPar
 
 func TestGlobalOriginalCancellationEvidenceFencesMemoryAdmission(t *testing.T) {
 	t.Run("Retry-after-corrupt-completion", func(t *testing.T) {
-		fx := newFrozenApplicationParentFixture(t, true, false)
+		fx := newFrozenAgentEffectFixture(t)
 		seedGloballyContradictoryCancellation(t, fx)
 		_, err := retryOriginalRootWithWitness(t.Context(), fx, "next-run-after-cancel")
 		if !errors.Is(err, ErrConflict) {
@@ -62,7 +62,7 @@ func TestGlobalOriginalCancellationEvidenceFencesMemoryAdmission(t *testing.T) {
 		}
 	})
 	t.Run("new-Dispatch-and-Child-after-corrupt-completion", func(t *testing.T) {
-		fx := newFrozenApplicationParentFixture(t, true, false)
+		fx := newFrozenAgentEffectFixture(t)
 		next := fx.retryRoot(t)
 		seedGloballyContradictoryCancellation(t, fx)
 		// The contradictory cancellation completion must retain the Turn
@@ -82,8 +82,8 @@ func TestGlobalOriginalCancellationEvidenceFencesMemoryAdmission(t *testing.T) {
 		input := json.RawMessage(`{"goal":"new child"}`)
 		_, created, err = fx.store.CreateInvocation(t.Context(), Invocation{
 			ID: "new-child-after-invalid-cancel", TurnID: fx.root.TurnID,
-			ParentItemID: "original-parent-item", CapabilityKey: "application.child",
-			DefinitionVersion: "v1", ExecutionClass: ExecutionApplication,
+			ParentItemID: "original-parent-item", CapabilityKey: CapabilityAgent,
+			DefinitionVersion: "v1", ExecutionClass: ExecutionAgent,
 			Input: input, InputHash: hashInvocationBytes(input),
 			ExecutionRefID: "new-child-effect", Status: InvocationAccepted,
 			Attempt: 1, Revision: 1, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
@@ -93,7 +93,7 @@ func TestGlobalOriginalCancellationEvidenceFencesMemoryAdmission(t *testing.T) {
 		}
 	})
 	t.Run("read-only-pending-remains-active", func(t *testing.T) {
-		fx := newFrozenApplicationParentFixture(t, true, false)
+		fx := newFrozenAgentEffectFixture(t)
 		seedGloballyContradictoryCancellation(t, fx)
 		facts, err := (&Runner{store: fx.store}).loadGlobalPhysicalEvidence(t.Context(), fx.root.TurnID)
 		if err != nil || !ActiveCancellationFence(facts) {

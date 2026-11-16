@@ -2,10 +2,8 @@ package harness_test
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"strconv"
-	"sync/atomic"
 	"testing"
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
@@ -167,100 +165,6 @@ func TestAuditRefreshRepairsTerminalProjectionCrash(t *testing.T) {
 	}
 }
 
-type auditApplicationTerminalFaultOnce struct {
-	harness.Store
-	failed bool
-}
-
-func (store *auditApplicationTerminalFaultOnce) AppendItem(ctx context.Context, item harness.Item) (harness.Item, bool, error) {
-	if item.Kind == harness.ItemInvocation && item.Status == harness.ItemCompleted && !store.failed {
-		store.failed = true
-		return harness.Item{}, false, errors.New("audit: crash after application Invocation completion before Turn completion")
-	}
-	return store.Store.AppendItem(ctx, item)
-}
-func TestAuditApplicationTerminalInvocationReconcilesTurnOnRefresh(t *testing.T) {
-	runtime := newFeatureInvocationRuntime(t)
-	executor := &applicationCapabilityExecutorFixture{outputRefs: []harness.HostRef{{Kind: testApplicationReviewRefKind, ID: "audit-output"}}}
-	backing := harness.NewMemoryStore()
-	flaky := &auditApplicationTerminalFaultOnce{Store: backing}
-	newRunner := func(s harness.Store) *harness.Runner {
-		t.Helper()
-		result, e := harness.NewRunner(harness.Dependencies{Runtime: runtime, Agent: loadingFeatureAgent{runtime: runtime}, Store: s, Clock: featureInvocationClock{}, Applications: executor})
-		if e != nil {
-			t.Fatal(e)
-		}
-		return result
-	}
-	request := harness.ApplicationTurnRequest{StartRequest: testStartRequest(), CapabilityKey: testApplicationCapabilityKey, DefinitionVersion: testApplicationVersion, Input: json.RawMessage("{}")}
-	_, err := newRunner(flaky).StartApplicationTurn(t.Context(), request)
-	if err == nil || !flaky.failed {
-		t.Fatalf("expected fault after application completion, err=%v", err)
-	}
-	sessionID, err := harness.SessionID(request.HostThread)
-	if err != nil {
-		t.Fatal(err)
-	}
-	turnID, err := harness.TurnID(sessionID, request.HostTurn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	recovered, err := newRunner(backing).Refresh(t.Context(), turnID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	invocation, ok := harness.TopLevelInvocation(recovered)
-	if !ok {
-		t.Fatal("no root Invocation")
-	}
-	if invocation.Status != harness.InvocationCompleted || recovered.Turn.Status != harness.TurnCompleted {
-		t.Fatalf("REPRO: completed Application Invocation but Turn still %s, invocation=%s, calls=%d", recovered.Turn.Status, invocation.Status, executor.calls)
-	}
-}
-
-type auditApplicationEffectLoss struct {
-	harness.Store
-	failed bool
-}
-
-func (store *auditApplicationEffectLoss) UpdateInvocation(ctx context.Context, value harness.Invocation, expectedRevision uint64) (harness.Invocation, error) {
-	if value.ExecutionClass == harness.ExecutionApplication && value.Status == harness.InvocationCompleted && !store.failed {
-		store.failed = true
-		return harness.Invocation{}, errors.New("audit: crash after host capability effect but before completion commit")
-	}
-	return store.Store.UpdateInvocation(ctx, value, expectedRevision)
-}
-func TestAuditApplicationEffectDoesNotRedispatchUnknownOutcome(t *testing.T) {
-	runtime := newFeatureInvocationRuntime(t)
-	executor := &applicationCapabilityExecutorFixture{outputRefs: []harness.HostRef{{Kind: testApplicationReviewRefKind, ID: "audit-effect"}}}
-	backing := harness.NewMemoryStore()
-	flaky := &auditApplicationEffectLoss{Store: backing}
-	newRunner := func(s harness.Store) *harness.Runner {
-		t.Helper()
-		result, e := harness.NewRunner(harness.Dependencies{Runtime: runtime, Agent: loadingFeatureAgent{runtime: runtime}, Store: s, Clock: featureInvocationClock{}, Applications: executor})
-		if e != nil {
-			t.Fatal(e)
-		}
-		return result
-	}
-	req := harness.ApplicationTurnRequest{StartRequest: testStartRequest(), CapabilityKey: testApplicationCapabilityKey, DefinitionVersion: testApplicationVersion, Input: json.RawMessage("{}")}
-	_, err := newRunner(flaky).StartApplicationTurn(t.Context(), req)
-	if err == nil || !flaky.failed || executor.calls != 1 {
-		t.Fatalf("expected first effect then crash: err=%v calls=%d", err, executor.calls)
-	}
-	sessionID, err := harness.SessionID(req.HostThread)
-	if err != nil {
-		t.Fatal(err)
-	}
-	turnID, err := harness.TurnID(sessionID, req.HostTurn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = newRunner(backing).Refresh(t.Context(), turnID)
-	if executor.calls != 1 || !errors.Is(err, harness.ErrApplicationOutcomeUnknown) {
-		t.Fatalf("Application executor re-dispatched after unknown external outcome, calls=%d, err=%v", executor.calls, err)
-	}
-}
 func TestAuditAcceptedTurnRejectsChangedContextSeed(t *testing.T) {
 	store := harness.NewMemoryStore()
 	clock := newResumeTurnClock()
@@ -320,87 +224,6 @@ func BenchmarkAuditTimelineReadScaling(b *testing.B) {
 	}
 }
 
-type hardcutReconciler struct {
-	*applicationCapabilityExecutorFixture
-	observations int
-}
-
-func (value *hardcutReconciler) ReconcileApplicationCapability(_ context.Context, request harness.ApplicationCapabilityRequest) (harness.ApplicationCapabilityResult, bool, error) {
-	value.observations++
-	if request.Invocation.ExecutionRefID == "" || request.Invocation.Status != harness.InvocationRunning {
-		return harness.ApplicationCapabilityResult{}, false, harness.ErrConflict
-	}
-	return harness.ApplicationCapabilityResult{OutputRefs: append([]harness.HostRef(nil), value.outputRefs...)}, true, nil
-}
-func TestHardcutApplicationReconcilerRepairsWithoutNewEffect(t *testing.T) {
-	runtime := newFeatureInvocationRuntime(t)
-	executor := &hardcutReconciler{applicationCapabilityExecutorFixture: &applicationCapabilityExecutorFixture{outputRefs: []harness.HostRef{{Kind: testApplicationReviewRefKind, ID: "known-external-effect"}}}}
-	store := harness.NewMemoryStore()
-	fault := &auditApplicationEffectLoss{Store: store}
-	create := func(persistence harness.Store) *harness.Runner {
-		t.Helper()
-		runner, err := harness.NewRunner(harness.Dependencies{Runtime: runtime, Agent: loadingFeatureAgent{runtime: runtime}, Store: persistence, Clock: featureInvocationClock{}, Applications: executor})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return runner
-	}
-	request := harness.ApplicationTurnRequest{StartRequest: testStartRequest(), CapabilityKey: testApplicationCapabilityKey, DefinitionVersion: testApplicationVersion, Input: json.RawMessage("{}")}
-	_, err := create(fault).StartApplicationTurn(t.Context(), request)
-	if err == nil || !fault.failed || executor.calls != 1 {
-		t.Fatalf("expected effect followed by a lost receipt: %v, calls=%d", err, executor.calls)
-	}
-	sessionID, _ := harness.SessionID(request.HostThread)
-	turnID, _ := harness.TurnID(sessionID, request.HostTurn)
-	restored, err := create(store).Refresh(t.Context(), turnID)
-	if err != nil || restored.Turn.Status != harness.TurnCompleted || executor.calls != 1 || executor.observations != 1 {
-		t.Fatalf("reconciled=%s err=%v effects=%d observations=%d", restored.Turn.Status, err, executor.calls, executor.observations)
-	}
-}
-
-type blockingHardcutApplication struct {
-	calls   atomic.Int32
-	started chan struct{}
-	release chan struct{}
-}
-
-func (e *blockingHardcutApplication) ExecuteApplicationCapability(ctx context.Context, _ harness.ApplicationCapabilityRequest) (harness.ApplicationCapabilityResult, error) {
-	if e.calls.Add(1) == 1 {
-		close(e.started)
-	}
-	select {
-	case <-e.release:
-		return harness.ApplicationCapabilityResult{}, nil
-	case <-ctx.Done():
-		return harness.ApplicationCapabilityResult{}, ctx.Err()
-	}
-}
-func TestHardcutConcurrentApplicationStartAdmitsOneEffect(t *testing.T) {
-	runtime := newFeatureInvocationRuntime(t)
-	executor := &blockingHardcutApplication{started: make(chan struct{}), release: make(chan struct{})}
-	runner, err := harness.NewRunner(harness.Dependencies{Runtime: runtime, Agent: loadingFeatureAgent{runtime: runtime}, Store: harness.NewMemoryStore(), Clock: featureInvocationClock{}, Applications: executor})
-	if err != nil {
-		t.Fatal(err)
-	}
-	request := harness.ApplicationTurnRequest{StartRequest: testStartRequest(), CapabilityKey: testApplicationCapabilityKey, DefinitionVersion: testApplicationVersion, Input: json.RawMessage("{}")}
-	done := make(chan error, 1)
-	go func() {
-		_, callErr := runner.StartApplicationTurn(context.Background(), request)
-		done <- callErr
-	}()
-	<-executor.started
-	_, err = runner.StartApplicationTurn(t.Context(), request)
-	if !errors.Is(err, harness.ErrApplicationOutcomeUnknown) || executor.calls.Load() != 1 {
-		t.Fatalf("concurrent replay entered an external effect: err=%v calls=%d", err, executor.calls.Load())
-	}
-	close(executor.release)
-	if err = <-done; err != nil {
-		t.Fatal(err)
-	}
-	if executor.calls.Load() != 1 {
-		t.Fatalf("executor ran %d times", executor.calls.Load())
-	}
-}
 func TestHardcutLoadStateAndPaginatedTimeline(t *testing.T) {
 	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore(), Clock: fixedClock{}})
 	if err != nil {
@@ -492,45 +315,6 @@ func BenchmarkHardcutLoadStateScaling(b *testing.B) {
 	}
 }
 
-func TestHardcutTerminalApplicationTurnNeverDispatchesAcceptedInvocation(t *testing.T) {
-	runtime := newFeatureInvocationRuntime(t)
-	executor := &applicationCapabilityExecutorFixture{}
-	store := harness.NewMemoryStore()
-	now := featureInvocationClock{}.Now()
-	request := harness.ApplicationTurnRequest{StartRequest: testStartRequest(), CapabilityKey: testApplicationCapabilityKey, DefinitionVersion: testApplicationVersion, Input: json.RawMessage("{}")}
-	flaky := &auditInvocationFaultOnce{Store: store}
-	newRunner := func(s harness.Store) *harness.Runner {
-		t.Helper()
-		value, err := harness.NewRunner(harness.Dependencies{Runtime: runtime, Agent: loadingFeatureAgent{runtime: runtime}, Store: s, Clock: featureInvocationClock{}, Applications: executor})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return value
-	}
-	_, err := newRunner(flaky).StartApplicationTurn(t.Context(), request)
-	if err == nil || !flaky.failed || executor.calls != 0 {
-		t.Fatalf("expected accepted, undispatched Invocation: err=%v calls=%d", err, executor.calls)
-	}
-	sessionID, _ := harness.SessionID(request.HostThread)
-	turnID, _ := harness.TurnID(sessionID, request.HostTurn)
-	turn, err := store.GetTurn(t.Context(), turnID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	turn.Status = harness.TurnCancelled
-	turn.UpdatedAt = now
-	if _, err = harness.TerminalFixtureTurnForTest(store, turn, turn.Revision); err != nil {
-		t.Fatal(err)
-	}
-	_, err = newRunner(store).Refresh(t.Context(), turnID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = newRunner(store).StartApplicationTurn(t.Context(), request)
-	if err != nil || executor.calls != 0 {
-		t.Fatalf("terminal Turn dispatched an Application effect: err=%v calls=%d", err, executor.calls)
-	}
-}
 func TestHardcutTerminalProjectionNeverRewritesAnotherTerminalOutcome(t *testing.T) {
 	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore(), Clock: fixedClock{}})
 	if err != nil {

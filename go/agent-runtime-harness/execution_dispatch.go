@@ -560,12 +560,6 @@ func (runner *Runner) requireLiveInvocationParents(ctx context.Context, invocati
 	if err != nil {
 		return err
 	}
-	if root.ExecutionClass == ExecutionApplication {
-		if unclaimedApplicationParent(root) {
-			return ErrConflict
-		}
-		return nil
-	}
 	if runner.runtime == nil || strings.TrimSpace(root.ExecutionRefID) == "" {
 		return ErrConflict
 	}

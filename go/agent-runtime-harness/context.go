@@ -271,14 +271,13 @@ func contextStaticFingerprint(config ConfigSnapshot, seed *ContextSeed, catalog 
 		Model          string                   `json:"model"`
 		OutputContract *model.OutputContract    `json:"outputContract,omitempty"`
 		Tools          []contextToolFingerprint `json:"tools"`
-		Commands       []CommandDescriptor      `json:"commands"`
 		Skills         []SkillSnapshot          `json:"skills"`
 		MemoryPolicy   string                   `json:"memoryPolicy,omitempty"`
 	}{
 		Environment:  config.Environment,
 		Instructions: strings.TrimSpace(strings.Join([]string{config.Instructions, seed.Instructions}, "\n\n")),
 		Model:        strings.TrimSpace(config.Model), OutputContract: model.CloneOutputContract(config.OutputContract), Tools: definitions,
-		Commands: cloneCommandDescriptors(config.Commands), Skills: append([]SkillSnapshot(nil), config.Skills...),
+		Skills:       append([]SkillSnapshot(nil), config.Skills...),
 		MemoryPolicy: strings.TrimSpace(config.MemoryPolicy),
 	})
 	if err != nil {

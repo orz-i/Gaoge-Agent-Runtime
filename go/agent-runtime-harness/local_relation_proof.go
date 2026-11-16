@@ -127,7 +127,6 @@ func (runner *Runner) verifyCapabilityRelationOwner(
 	if runner == nil || runner.store == nil || relation.Kind != runrelation.KindCapability ||
 		child.ParentItemID == "" || child.Attempt <= 0 ||
 		!validExecutionClass(child.ExecutionClass) || isHandoffDelegationInvocation(child) ||
-		child.ExecutionClass == ExecutionApplication ||
 		child.ExecutionRefID == "" || relation.ChildRunID != child.ExecutionRefID ||
 		relation.OwnerNodeID != invocationRelationOwnerID(child) {
 		return ErrConflict
@@ -139,7 +138,6 @@ func (runner *Runner) verifyCapabilityRelationOwner(
 	root, err := runner.store.GetInvocation(ctx, binding.InvocationID)
 	if err != nil || root.ID != binding.InvocationID || root.TurnID != child.TurnID ||
 		root.ParentItemID != "" || !validExecutionClass(root.ExecutionClass) ||
-		root.ExecutionClass == ExecutionApplication ||
 		invocationAttempt(root) != binding.attempt() {
 		return ErrConflict
 	}

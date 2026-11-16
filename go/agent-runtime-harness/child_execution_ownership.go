@@ -27,8 +27,6 @@ func (runner *Runner) validateChildRuntimeOwnership(
 	switch child.ExecutionClass {
 	case ExecutionAgent:
 		expectedKind = agent.RunKind
-	case ExecutionApplication:
-		return ErrConflict
 	default:
 		return ErrConflict
 	}
@@ -39,7 +37,7 @@ func (runner *Runner) validateChildRuntimeOwnership(
 	root, err := runner.store.GetInvocation(ctx, binding.InvocationID)
 	if err != nil || root.ID == child.ID || root.ID != binding.InvocationID ||
 		root.TurnID != child.TurnID || root.ParentItemID != "" ||
-		invocationAttempt(root) != binding.attempt() || root.ExecutionClass == ExecutionApplication {
+		invocationAttempt(root) != binding.attempt() || root.ExecutionClass != ExecutionAgent {
 		return ErrConflict
 	}
 	actor, thread, err := frozenTopLevelInvocationIdentity(root)

@@ -15,9 +15,9 @@ import (
 // reference Store's global indexes model the exact persisted corruption that
 // SQL can also contain. All public decision paths must agree that the original
 // physical Resume is unresolved, independent of the child's bogus Turn.
-func addForeignGlobalDispatchSibling(t *testing.T, fx frozenApplicationParentFixture, kind ItemKind, differentOwner bool) {
+func addForeignGlobalDispatchSibling(t *testing.T, fx frozenAgentEffectFixture, kind ItemKind, differentOwner bool) {
 	t.Helper()
-	const grantID = "hdispatch_original_agent_resume_after_child"
+	const grantID = "hdispatch_original_agent_resume"
 	existing, err := fx.store.ListItemChildren(t.Context(), grantID, ItemChildProofAll)
 	if err != nil || len(existing) != 1 {
 		t.Fatalf("expected original canonical physical receipt: count=%d err=%v", len(existing), err)
@@ -47,7 +47,7 @@ func addForeignGlobalDispatchSibling(t *testing.T, fx frozenApplicationParentFix
 	}
 }
 
-func retryOriginalRootWithWitness(ctx context.Context, fx frozenApplicationParentFixture, nextRunID string) (Invocation, error) {
+func retryOriginalRootWithWitness(ctx context.Context, fx frozenAgentEffectFixture, nextRunID string) (Invocation, error) {
 	original, err := fx.store.GetInvocation(ctx, fx.root.ID)
 	if err != nil {
 		return Invocation{}, err
@@ -73,7 +73,7 @@ func TestGlobalOriginalDispatchEvidenceFencesEveryMemoryAdmission(t *testing.T) 
 			}
 			t.Run(name, func(t *testing.T) {
 				t.Run("RetryInvocation", func(t *testing.T) {
-					fx := newFrozenApplicationParentFixture(t, true, false)
+					fx := newFrozenAgentEffectFixture(t)
 					addForeignGlobalDispatchSibling(t, fx, kind, differentOwner)
 					_, err := retryOriginalRootWithWitness(t.Context(), fx, "attempt2")
 					if !errors.Is(err, ErrConflict) {
@@ -81,7 +81,7 @@ func TestGlobalOriginalDispatchEvidenceFencesEveryMemoryAdmission(t *testing.T) 
 					}
 				})
 				t.Run("new-physical-Resume-grant", func(t *testing.T) {
-					fx := newFrozenApplicationParentFixture(t, true, false)
+					fx := newFrozenAgentEffectFixture(t)
 					next := fx.retryRoot(t)
 					addForeignGlobalDispatchSibling(t, fx, kind, differentOwner)
 					grant := Item{
@@ -98,7 +98,7 @@ func TestGlobalOriginalDispatchEvidenceFencesEveryMemoryAdmission(t *testing.T) 
 					}
 				})
 				t.Run("terminal-Invocation-CAS", func(t *testing.T) {
-					fx := newFrozenApplicationParentFixture(t, true, false)
+					fx := newFrozenAgentEffectFixture(t)
 					next := fx.retryRoot(t)
 					addForeignGlobalDispatchSibling(t, fx, kind, differentOwner)
 					ctx, err := withOriginalKernelTerminalWitness(t.Context(), next, kernel.Snapshot{
@@ -115,7 +115,7 @@ func TestGlobalOriginalDispatchEvidenceFencesEveryMemoryAdmission(t *testing.T) 
 					}
 				})
 				t.Run("terminal-Turn-CAS", func(t *testing.T) {
-					fx := newFrozenApplicationParentFixture(t, true, false)
+					fx := newFrozenAgentEffectFixture(t)
 					// The earlier Retry fixture deliberately seeds a minimal
 					// Turn. Store.UpdateTurn additionally validates its full
 					// Host identity, so provide a legitimate original envelope.
@@ -156,7 +156,7 @@ func TestGlobalOriginalDispatchEvidenceFencesEveryMemoryAdmission(t *testing.T) 
 					}
 				})
 				t.Run("Runner-cancel-pending", func(t *testing.T) {
-					fx := newFrozenApplicationParentFixture(t, true, false)
+					fx := newFrozenAgentEffectFixture(t)
 					addForeignGlobalDispatchSibling(t, fx, kind, differentOwner)
 					pending, err := (&Runner{store: fx.store}).pendingExecutionDispatch(
 						t.Context(), fx.root.TurnID, nil, nil,
@@ -171,7 +171,7 @@ func TestGlobalOriginalDispatchEvidenceFencesEveryMemoryAdmission(t *testing.T) 
 }
 
 func TestGlobalDispatchReceiptReaderRejectsSplitBrainAndPreservesCanonicalEvidence(t *testing.T) {
-	fx := newFrozenApplicationParentFixture(t, true, false)
+	fx := newFrozenAgentEffectFixture(t)
 	// The entire old Turn is still internally valid and must not be denied
 	// merely because its physical dispatch parent has a global index.
 	got, err := (&Runner{store: fx.store}).loadGlobalPhysicalEvidence(t.Context(), fx.root.TurnID)
@@ -179,7 +179,7 @@ func TestGlobalDispatchReceiptReaderRejectsSplitBrainAndPreservesCanonicalEviden
 		t.Fatal(err)
 	}
 	seen := executionDispatchReceiptIndex(got)
-	grant, err := fx.store.GetItem(t.Context(), "hdispatch_original_agent_resume_after_child")
+	grant, err := fx.store.GetItem(t.Context(), "hdispatch_original_agent_resume")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +219,7 @@ func FuzzGlobalOriginalDispatchAdmission(f *testing.F) {
 		f.Add(mask)
 	}
 	f.Fuzz(func(t *testing.T, mask uint8) {
-		fx := newFrozenApplicationParentFixture(t, true, false)
+		fx := newFrozenAgentEffectFixture(t)
 		kind := ItemDiagnostic
 		if mask&4 != 0 {
 			kind = ItemArtifact

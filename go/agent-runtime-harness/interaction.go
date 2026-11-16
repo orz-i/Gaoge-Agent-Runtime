@@ -356,25 +356,6 @@ func (runner *Runner) replayResolvedInteraction(ctx context.Context, interaction
 	if owner.Status == InvocationRunning {
 		return Snapshot{}, ErrInteractionOutcomeUnknown
 	}
-	if owner.ExecutionClass == ExecutionApplication && owner.Status == InvocationCompleted {
-		// The original Application callback already committed its terminal
-		// Invocation. Replaying its business response must repair its own
-		// Turn projection, never enter a nonexistent Application Kernel Run.
-		// For a child, the parent Agent Resume remains a separate physical
-		// operation: a later original receipt is required to report progress.
-		turn, loadErr := loadVerifiedTurn(ctx, runner.store, interaction.TurnID)
-		if loadErr != nil {
-			return Snapshot{}, loadErr
-		}
-		refreshed, refreshErr := runner.Refresh(ctx, turn.ID)
-		if refreshErr != nil || terminalTurnStatus(refreshed.Turn.Status) || owner.ParentItemID == "" {
-			return refreshed, refreshErr
-		}
-		if err := runner.requireObservedApplicationParentContinuation(ctx, interaction, owner); err != nil {
-			return refreshed, err
-		}
-		return refreshed, nil
-	}
 	return runner.continueResolvedInteraction(ctx, interaction)
 }
 
@@ -472,9 +453,6 @@ func (runner *Runner) continueConfirmedInteraction(
 	ctx = context.WithValue(ctx, completedInteractionCallbackKey{}, completedInteractionCallback{
 		turnID: turn.ID, invocationID: invocation.ID, interactionID: interaction.ID,
 	})
-	if invocation.ExecutionClass == ExecutionApplication {
-		return runner.finishResolvedApplicationInteraction(ctx, turn, invocation, result)
-	}
 	turn, invocation, snapshot, handled, err := runner.prepareResolvedInteractionContinuation(ctx, interaction)
 	if err != nil || handled {
 		return snapshot, err
@@ -708,32 +686,11 @@ func (runner *Runner) resumeResolvedInteractionOwner(
 	invocation Invocation,
 	interaction Interaction,
 ) (Snapshot, error) {
-	if invocation.ExecutionClass == ExecutionApplication {
-		return runner.resumeApplicationInteractionOwner(ctx, turn, invocation)
-	}
 	runtimeSnapshot, err := runner.runtime.Load(ctx, invocation.ExecutionRefID)
 	if err != nil {
 		return Snapshot{}, err
 	}
 	return runner.resumeRuntimeInteractionOwner(ctx, turn, invocation, runtimeSnapshot, interaction.Response)
-}
-
-func (runner *Runner) resumeApplicationInteractionOwner(
-	ctx context.Context,
-	turn Turn,
-	invocation Invocation,
-) (Snapshot, error) {
-	if err := runner.reconcileInvocationStatus(ctx, invocation.ID, InvocationRunning); err != nil {
-		return Snapshot{}, err
-	}
-	updated, changed, err := runner.reconcileTurnStatus(ctx, turn.ID, TurnRunning)
-	if err != nil {
-		return Snapshot{}, err
-	}
-	if changed {
-		runner.publishTurnStatus(ctx, updated, EventTurnStarted, false)
-	}
-	return runner.loadSnapshot(ctx, updated, nil)
 }
 
 func (runner *Runner) resumeRuntimeInteractionOwner(

@@ -149,8 +149,8 @@ without changing a persisted model intent on restart. A separately opt-in
 managed preparer estimates routed model-window pressure and archives removed
 history as durable, retrievable Context artifacts; unknown token limits and
 unsafe compaction fail closed. Admitted Turn inputs, Context and execution
-allowances are frozen before persistence; Application capabilities with unknown
-external effects cannot be blindly replayed. No additional Session authority
+allowances are frozen before persistence; external Tool and Host Interaction
+effects with unknown outcomes cannot be blindly replayed. No additional Session authority
 or database schema is introduced. See [Session and Context governance, composition and limits](docs/session-context-governance.md)
 and the [pre-stable hard-cut notes](docs/breaking-changes.md).
 
