@@ -17,8 +17,8 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 )
 
-// Both surviving relation kinds must deliver one terminal child fact to the
-// original Agent parent without replaying duplicate queue entries.
+// A delegated child delivers one terminal fact to its original parent
+// without replaying duplicate continuation queue entries.
 func TestSchedulerEnqueuesOneOwningParentContinuation(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -27,7 +27,6 @@ func TestSchedulerEnqueuesOneOwningParentContinuation(t *testing.T) {
 		owner string
 	}{
 		{"delegated_subagent", runrelation.KindDelegation, "subagent-1"},
-		{"native_agent_capability", runrelation.KindCapability, "invocation-1"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fixture := newSchedulerFixture(t)

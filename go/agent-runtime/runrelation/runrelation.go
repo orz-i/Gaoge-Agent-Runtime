@@ -25,7 +25,6 @@ type Kind string
 
 const (
 	KindDelegation Kind = "delegation"
-	KindCapability Kind = "capability"
 )
 
 // Draft is one relation before its creation timestamp is assigned.
@@ -231,7 +230,7 @@ func Sort(items []Relation) {
 }
 
 func validKind(kind Kind) bool {
-	return kind == KindDelegation || kind == KindCapability
+	return kind == KindDelegation
 }
 
 type systemClock struct{}

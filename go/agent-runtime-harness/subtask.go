@@ -318,27 +318,10 @@ func (runner *Runner) CancelSubtask(ctx context.Context, turnID, taskID, reason 
 	if err != nil {
 		return Snapshot{}, err
 	}
-	// A KindCapability Subtask is an indexed child, not evidence that its
-	// physical Run belongs to this Turn. Verify the original frozen parent
-	// edge before creating a cancellation intent or revoking any budget.
-	// This is Store metadata only; no extra Kernel read changes the existing
-	// post-intent pre-Store cancellation recovery boundary.
-	if task.Kind == string(runrelation.KindCapability) {
-		if runner.relationReader == nil {
-			return Snapshot{}, ErrConflict
-		}
-		relation, relationErr := runner.relationReader.GetByChild(ctx, task.RunID)
-		if relationErr != nil || relation.ChildRunID != task.RunID ||
-			relation.ParentRunID != task.ParentRunID {
-			return Snapshot{}, errors.Join(ErrConflict, relationErr)
-		}
-		owner, ownerErr := runner.store.GetInvocationByExecutionRefID(ctx, task.RunID)
-		if ownerErr != nil || owner.TurnID != turn.ID {
-			return Snapshot{}, errors.Join(ErrConflict, ownerErr)
-		}
-		if err := runner.verifyCapabilityRelationOwner(ctx, relation, owner); err != nil {
-			return Snapshot{}, err
-		}
+	// Only original Handoff Delegation subtasks may reach physical control.
+	// A stored relation kind is metadata, not permission to cancel a Run.
+	if task.Kind != string(runrelation.KindDelegation) {
+		return Snapshot{}, ErrConflict
 	}
 	// CancelSubtask is another physical Runtime cancellation entrypoint. It
 	// must compete with any already-resolved business callback BEFORE

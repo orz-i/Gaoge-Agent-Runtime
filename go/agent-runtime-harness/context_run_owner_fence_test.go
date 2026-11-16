@@ -101,7 +101,7 @@ func TestContextRunMiddlewareDowngradesInheritedOwnerForDescendant(t *testing.T)
 	const childRunID = "child-with-inherited-owner"
 	middleware, err := NewContextRunMiddleware(store, contextRunRelationFixture{
 		childRunID: {ParentRunID: root.ExecutionRefID, ChildRunID: childRunID,
-			Kind: runrelation.KindCapability, OwnerNodeID: "child-inherited", CreatedAt: time.Now().UTC()},
+			Kind: runrelation.KindDelegation, OwnerNodeID: "child-inherited", CreatedAt: time.Now().UTC()},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -275,7 +275,7 @@ func TestIndependentContextRunHandoffDescendantsNeverInheritSupervisorContext(t 
 			descendantID := "specialist-inner-agent"
 			relations := contextRunRelationFixture{
 				descendantID: runrelation.Relation{ParentRunID: specialist.ExecutionRefID, ChildRunID: descendantID,
-					Kind: runrelation.KindCapability, OwnerNodeID: "specialist-child-step", CreatedAt: time.Now().UTC()},
+					Kind: runrelation.KindDelegation, OwnerNodeID: "specialist-child-step", CreatedAt: time.Now().UTC()},
 			}
 			middleware, err := NewContextRunMiddleware(store, relations)
 			if err != nil {
@@ -308,7 +308,7 @@ func TestIndependentContextRunRejectsRelationWhoseChildDoesNotMatchLookup(t *tes
 	const unrelated = "unrelated-run-id"
 	middleware, err := NewContextRunMiddleware(store, contextRunRelationFixture{
 		unrelated: runrelation.Relation{ParentRunID: root.ExecutionRefID, ChildRunID: "OTHER-RUN-ID",
-			Kind: runrelation.KindCapability, OwnerNodeID: "nonmatching-owner", CreatedAt: time.Now().UTC()},
+			Kind: runrelation.KindDelegation, OwnerNodeID: "nonmatching-owner", CreatedAt: time.Now().UTC()},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -407,7 +407,7 @@ func TestContextRunRelationRejectsMalformedOwnerLinks(t *testing.T) {
 			}
 			middleware, err := NewContextRunMiddleware(store, contextRunRelationFixture{
 				"foreign-run": {ChildRunID: tc.child, ParentRunID: parent,
-					Kind: runrelation.KindCapability, OwnerNodeID: "wrong-index", CreatedAt: time.Now().UTC()},
+					Kind: runrelation.KindDelegation, OwnerNodeID: "wrong-index", CreatedAt: time.Now().UTC()},
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -427,8 +427,8 @@ func TestContextRunRelationRejectsMalformedOwnerLinks(t *testing.T) {
 func TestContextRunRelationCycleFailsClosed(t *testing.T) {
 	store, _, _, _ := contextRunMiddlewareFixture(t)
 	relations := contextRunRelationFixture{
-		"a": {ParentRunID: "b", ChildRunID: "a", Kind: runrelation.KindCapability, OwnerNodeID: "owner-a", CreatedAt: time.Now().UTC()},
-		"b": {ParentRunID: "a", ChildRunID: "b", Kind: runrelation.KindCapability, OwnerNodeID: "owner-b", CreatedAt: time.Now().UTC()},
+		"a": {ParentRunID: "b", ChildRunID: "a", Kind: runrelation.KindDelegation, OwnerNodeID: "owner-a", CreatedAt: time.Now().UTC()},
+		"b": {ParentRunID: "a", ChildRunID: "b", Kind: runrelation.KindDelegation, OwnerNodeID: "owner-b", CreatedAt: time.Now().UTC()},
 	}
 	middleware, err := NewContextRunMiddleware(store, relations)
 	if err != nil {
@@ -459,7 +459,7 @@ func (s *auditRelationAppearsOnSecondRead) GetByChild(_ context.Context, childID
 		return runrelation.Relation{}, runrelation.ErrNotFound
 	}
 	return runrelation.Relation{ChildRunID: s.childID, ParentRunID: s.parentID,
-		Kind: runrelation.KindCapability, OwnerNodeID: "specialist-grandchild", CreatedAt: time.Now().UTC()}, nil
+		Kind: runrelation.KindDelegation, OwnerNodeID: "specialist-grandchild", CreatedAt: time.Now().UTC()}, nil
 }
 
 // Independent TOCTOU audit. The two reads of the same relation key can
@@ -556,7 +556,7 @@ func TestIndependentHandoffArtifactReadNeverLeaksSupervisorArchive(t *testing.T)
 	}
 	const descendantID = "specialist-archive-grandchild"
 	relations := contextRunRelationFixture{descendantID: {ParentRunID: child.ExecutionRefID, ChildRunID: descendantID,
-		Kind: runrelation.KindCapability, OwnerNodeID: "descendant", CreatedAt: time.Now().UTC()}}
+		Kind: runrelation.KindDelegation, OwnerNodeID: "descendant", CreatedAt: time.Now().UTC()}}
 	handler := NewContextArtifactToolHandler(store, relations)
 	for _, runID := range []string{child.ExecutionRefID, descendantID} {
 		t.Run(runID, func(t *testing.T) {
@@ -804,7 +804,7 @@ func TestIndependentAuditMissingHandoffInputMustNotBecomeOrdinaryChild(t *testin
 func TestIndependentAuditMalformedRelationMetadataCannotGrantContext(t *testing.T) {
 	store, turn, checkpoint, root := contextRunMiddlewareFixture(t)
 	const childID = "unrelated-malformed-relation"
-	base := runrelation.Relation{ParentRunID: root.ExecutionRefID, ChildRunID: childID, Kind: runrelation.KindCapability, OwnerNodeID: "owner", CreatedAt: time.Now().UTC()}
+	base := runrelation.Relation{ParentRunID: root.ExecutionRefID, ChildRunID: childID, Kind: runrelation.KindDelegation, OwnerNodeID: "owner", CreatedAt: time.Now().UTC()}
 	cases := []struct {
 		name   string
 		mutate func(*runrelation.Relation)

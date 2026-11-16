@@ -75,15 +75,15 @@ func TestPR72RetryCASPreservesPendingPhysicalExecutionInMemoryAndSQL(t *testing.
 			if _, fresh, err := store.AppendItem(t.Context(), settled); err != nil || !fresh {
 				t.Fatalf("settle: %t %v", fresh, err)
 			}
-			// Once the no-effect completion is durable, terminal projection
-			// and then explicit retry can safely rotate the identity.
+			// A settled grant may project the original Child failure, but
+			// after the Native Child hard cut it cannot create a second Run.
 			child, err = store.UpdateInvocation(t.Context(), child, child.Revision)
 			if err != nil {
 				t.Fatalf("settled failure projection: %v", err)
 			}
-			retried, err := store.RetryInvocation(t.Context(), child.ID, child.Revision, "allowed-new-run", now.Add(time.Second))
-			if err != nil || retried.ExecutionRefID != "allowed-new-run" || retried.Attempt != 2 || retried.Status != harness.InvocationAccepted {
-				t.Fatalf("settled grant did not admit a legal retry: %+v err=%v", retried, err)
+			retried, err := store.RetryInvocation(t.Context(), child.ID, child.Revision, "forbidden-new-child-run", now.Add(time.Second))
+			if !errors.Is(err, harness.ErrConflict) || retried.ID != "" {
+				t.Fatalf("retired child acquired new physical authority: %+v err=%v", retried, err)
 			}
 		})
 	}

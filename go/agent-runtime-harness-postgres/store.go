@@ -334,8 +334,8 @@ func invalidInvocationRetryRequest(
 }
 
 func validStoredInvocationRetry(current harness.Invocation, expectedRevision uint64) bool {
-	return current.ExecutionClass == harness.ExecutionAgent && current.Revision == expectedRevision &&
-		retryableInvocationStatus(current.Status) && len(current.Input) > 0
+	return current.ExecutionClass == harness.ExecutionAgent && current.ParentItemID == "" &&
+		current.Revision == expectedRevision && retryableInvocationStatus(current.Status) && len(current.Input) > 0
 }
 
 func rotateInvocationAttempt(

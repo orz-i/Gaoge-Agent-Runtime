@@ -1,5 +1,26 @@
 # Breaking changes (pre-stable Beta)
 
+## 2026-11-16 — Native Child Capability / RunRelation hard cut
+
+**Breaking Go/HTTP/TypeScript contract:** Harness no longer starts, retries,
+resumes or cancels an arbitrary native Child Capability. The sole first-party
+child creator is the original Handoff Delegation path, which retains its
+fixed ChildRunner, parent Attempt, approval, cancellation and receipt proofs.
+The native `Runner.ResumeInvocation` method, child Retry path, HTTP
+`/harness/turns/{turnID}/invocations/{invocationID}/retry` endpoint, TypeScript
+`harness.turns.retryInvocation`, and `runrelation.KindCapability` are removed
+without aliases. `Runner.RetryInvocation` and `Store.RetryInvocation` may rotate
+**only** the original root Agent; Handoff Child Run IDs cannot rotate.
+
+Existing persisted `capability` RunRelation rows are not interpreted as
+Delegations. The continuation projector/reconciler and native physical-control
+entrypoints reject them, rather than silently waking another Run. Before the
+upgrade, drain or explicitly retire old native Child executions and reconcile
+any unknown external effects using their original code. No automatic Run ID
+conversion, data rewrite or compatibility bridge is supplied. The existing
+`Kind` and `ExecutionClass` durable discriminators remain for rejection of
+old records; their storage columns are not dropped.
+
 ## 2026-11-16 — Harness Application execution interpreter removed (hard cut)
 
 **Breaking Go API and persisted execution contract:** The beta.24 candidate

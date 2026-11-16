@@ -104,7 +104,7 @@ func TestContextRunMiddlewareRehydratesDescendantAgentReadOnly(t *testing.T) {
 	middleware, err := NewContextRunMiddleware(store, contextRunRelationFixture{
 		childRunID: {
 			ParentRunID: root.ExecutionRefID, ChildRunID: childRunID,
-			Kind: runrelation.KindCapability, OwnerNodeID: "child-1", CreatedAt: time.Now().UTC(),
+			Kind: runrelation.KindDelegation, OwnerNodeID: "child-1", CreatedAt: time.Now().UTC(),
 		},
 	})
 	if err != nil {

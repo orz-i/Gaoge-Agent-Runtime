@@ -53,7 +53,7 @@ func TestStandaloneSQLiteConsumerPersistsSnapshotAndRelation(t *testing.T) {
 		t.Fatalf("unexpected Create snapshot: %+v", created)
 	}
 	relation := runrelation.Relation{
-		ParentRunID: "parent", ChildRunID: "child", Kind: runrelation.KindCapability,
+		ParentRunID: "parent", ChildRunID: "child", Kind: runrelation.KindDelegation,
 		OwnerNodeID: "step", CreatedAt: time.Now().UTC(),
 	}
 	first, reused, err := sqlite.NewRunRelationStore(store).Put(ctx, relation)

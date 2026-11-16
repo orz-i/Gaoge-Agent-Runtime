@@ -109,7 +109,7 @@ func BenchmarkHarnessLoadRelatedSubtasksMemory(b *testing.B) {
 		}
 		if _, err = relations.Ensure(context.Background(), runrelation.Draft{
 			ParentRunID: parentRunID, ChildRunID: childRunID,
-			Kind: runrelation.KindCapability, OwnerNodeID: "child-" + strconv.Itoa(index),
+			Kind: runrelation.KindDelegation, OwnerNodeID: "child-" + strconv.Itoa(index),
 		}); err != nil {
 			b.Fatal(err)
 		}

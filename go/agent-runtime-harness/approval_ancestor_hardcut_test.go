@@ -12,7 +12,7 @@ import (
 // A terminal parent must never authorize a later delegated/native child
 // approval, even while the Harness Turn projection remains Running.
 func TestSubAgentApprovalRequiresLiveRelationAncestors(t *testing.T) {
-	for _, kind := range []runrelation.Kind{runrelation.KindDelegation, runrelation.KindCapability} {
+	for _, kind := range []runrelation.Kind{runrelation.KindDelegation} {
 		t.Run(string(kind), func(t *testing.T) {
 			rt, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
 			if err != nil {
@@ -80,7 +80,7 @@ func TestSubAgentApprovalRejectsCancelledGrandparentAndForgedParentEdge(t *testi
 	leaf := makeRun("leaf", middle.Run.ID)
 	foreign := makeRun("foreign", "")
 	runner := &Runner{runtime: rt, relationReader: relations}
-	if _, e := relations.Ensure(t.Context(), runrelation.Draft{ParentRunID: foreign.Run.ID, ChildRunID: leaf.Run.ID, OwnerNodeID: "bad-parent", Kind: runrelation.KindCapability}); e != nil {
+	if _, e := relations.Ensure(t.Context(), runrelation.Draft{ParentRunID: foreign.Run.ID, ChildRunID: leaf.Run.ID, OwnerNodeID: "bad-parent", Kind: runrelation.KindDelegation}); e != nil {
 		t.Fatal(e)
 	}
 	if e := runner.requireLiveApprovalAncestors(t.Context(), leaf.Run.ID); !errors.Is(e, ErrRuntimeCancellationUnverified) {
@@ -92,7 +92,7 @@ func TestSubAgentApprovalRejectsCancelledGrandparentAndForgedParentEdge(t *testi
 	if _, e := relations.Ensure(t.Context(), runrelation.Draft{ParentRunID: middle.Run.ID, ChildRunID: other.Run.ID, OwnerNodeID: "subagent", Kind: runrelation.KindDelegation}); e != nil {
 		t.Fatal(e)
 	}
-	if _, e := relations.Ensure(t.Context(), runrelation.Draft{ParentRunID: root.Run.ID, ChildRunID: middle.Run.ID, OwnerNodeID: "middle", Kind: runrelation.KindCapability}); e != nil {
+	if _, e := relations.Ensure(t.Context(), runrelation.Draft{ParentRunID: root.Run.ID, ChildRunID: middle.Run.ID, OwnerNodeID: "middle", Kind: runrelation.KindDelegation}); e != nil {
 		t.Fatal(e)
 	}
 	if e := runner.requireLiveApprovalAncestors(t.Context(), other.Run.ID); e != nil {

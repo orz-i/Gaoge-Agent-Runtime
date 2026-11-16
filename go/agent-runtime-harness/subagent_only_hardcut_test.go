@@ -17,7 +17,7 @@ func TestRemovedCompositeExecutionClassesAreNotAdmitted(t *testing.T) {
 
 	}
 	api := reflect.TypeOf((*Runner)(nil))
-	for _, method := range []string{"StartTeamTurn", "StartGroupChatTurn", "StartWorkflowTurn", "StartTeamInvocation", "StartWorkflowInvocation"} {
+	for _, method := range []string{"StartTeamTurn", "StartGroupChatTurn", "StartWorkflowTurn", "StartTeamInvocation", "StartWorkflowInvocation", "ResumeInvocation"} {
 		if _, ok := api.MethodByName(method); ok {
 			t.Fatalf("removed method %s reintroduced", method)
 		}
@@ -62,7 +62,26 @@ func TestRetiredApplicationStoreRetryCannotRotateIntoAgent(t *testing.T) {
 	if _, err := runner.RefreshInvocation(t.Context(), old.ID); !errors.Is(err, ErrConflict) {
 		t.Fatalf("Runner refreshed retired Application as Agent: %v", err)
 	}
-	if _, err := runner.ResumeInvocation(t.Context(), old.ID); !errors.Is(err, ErrConflict) {
-		t.Fatalf("Runner resumed retired Application as Agent: %v", err)
+	// A historical arbitrary Native Child has no first-party physical
+	// starter or resumer, even when its execution class says Agent.
+	child := old
+	child.ID = "legacy-native-child"
+	child.ExecutionClass = ExecutionAgent
+	child.ParentItemID = "parent-item"
+	child.ExecutionRefID = "old-native-child-run"
+	child.CapabilityKey = CapabilityAgent
+	store.invocations[child.ID] = child
+	store.invocationExecutionRefs[child.ExecutionRefID] = child.ID
+	if _, err := store.RetryInvocation(t.Context(), child.ID, child.Revision, "hr-next-child", now.Add(time.Second)); !errors.Is(err, ErrConflict) {
+		t.Fatalf("Store rotated retired native Child: %v", err)
+	}
+	if _, err := runner.RetryInvocation(t.Context(), child.ID); !errors.Is(err, ErrConflict) {
+		t.Fatalf("Runner retried retired native Child: %v", err)
+	}
+	if _, err := runner.RefreshInvocation(t.Context(), child.ID); !errors.Is(err, ErrConflict) {
+		t.Fatalf("Runner observed retired native Child: %v", err)
+	}
+	if _, err := runner.CancelInvocation(t.Context(), child.ID, "no original route"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("Runner cancelled retired native Child: %v", err)
 	}
 }

@@ -25,7 +25,7 @@ func RunRunRelationStoreSuite(t *testing.T, factory RunRelationStoreFactory) {
 
 func testRunRelationIdempotentOwner(t *testing.T, store runrelation.Store) {
 	t.Helper()
-	relation := testRunRelation("parent-1", "child-1", runrelation.KindCapability, "step-1", 0)
+	relation := testRunRelation("parent-1", "child-1", runrelation.KindDelegation, "step-1", 0)
 	created, reused, err := store.Put(context.Background(), relation)
 	if err != nil || reused || !runrelation.EqualIdentity(created, relation) {
 		t.Fatalf("create = %#v, reused=%t, err=%v", created, reused, err)
@@ -48,16 +48,20 @@ func testRunRelationConflicts(t *testing.T, store runrelation.Store) {
 	if _, _, err := store.Put(context.Background(), ownerConflict); !errors.Is(err, runrelation.ErrConflict) {
 		t.Fatalf("owner conflict error = %v", err)
 	}
-	childConflict := testRunRelation("parent-2", "child-1", runrelation.KindCapability, "effect-1", 2)
+	childConflict := testRunRelation("parent-2", "child-1", runrelation.KindDelegation, "effect-1", 2)
 	if _, _, err := store.Put(context.Background(), childConflict); !errors.Is(err, runrelation.ErrConflict) {
 		t.Fatalf("child conflict error = %v", err)
+	}
+	legacy := testRunRelation("parent-old", "child-old", runrelation.Kind("capability"), "native-child", 3)
+	if _, _, err := store.Put(context.Background(), legacy); !errors.Is(err, runrelation.ErrInvalidInput) {
+		t.Fatalf("retired Native Child relation admitted: %v", err)
 	}
 }
 
 func testRunRelationQueries(t *testing.T, store runrelation.Store) {
 	t.Helper()
-	second := testRunRelation("parent-list", "child-2", runrelation.KindCapability, "step-2", 2)
-	first := testRunRelation("parent-list", "child-1", runrelation.KindCapability, "step-1", 1)
+	second := testRunRelation("parent-list", "child-2", runrelation.KindDelegation, "step-2", 2)
+	first := testRunRelation("parent-list", "child-1", runrelation.KindDelegation, "step-1", 1)
 	other := testRunRelation("parent-other", "child-3", runrelation.KindDelegation, "member-1", 0)
 	for _, relation := range []runrelation.Relation{second, other, first} {
 		if _, _, err := store.Put(context.Background(), relation); err != nil {

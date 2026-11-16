@@ -265,12 +265,6 @@ export class RuntimeClient {
           { method: "POST", body: JSON.stringify({ response }) },
           request,
         ),
-        retryInvocation: (turnID: string, invocationID: string, request?: RequestOptions) =>
-          this.request<HarnessTurnSnapshotDTO>(
-            `/harness/turns/${pathPart(turnID)}/invocations/${pathPart(invocationID)}/retry`,
-            { method: "POST" },
-            request,
-          ),
         createSubtask: (turnID: string, roleID: string, goal: string, request?: RequestOptions) =>
           this.request<HarnessTurnSnapshotDTO>(
             `/harness/turns/${pathPart(turnID)}/subtasks`,

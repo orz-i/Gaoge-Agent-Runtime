@@ -80,7 +80,7 @@ func TestPR82HandoffRetryCannotRotateOrStartNativeAgent(t *testing.T) {
 	}
 }
 
-func TestPR82HandoffResumeNeverCreatesNativeDispatchGrant(t *testing.T) {
+func TestPR82HandoffInternalResumeNeverCreatesNativeDispatchGrant(t *testing.T) {
 	for _, mode := range []string{"member-only", "role"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newPR82HandoffFixture(t)
@@ -102,9 +102,9 @@ func TestPR82HandoffResumeNeverCreatesNativeDispatchGrant(t *testing.T) {
 			}); err != nil {
 				t.Fatal(err)
 			}
-			_, err = f.runner.ResumeInvocation(t.Context(), child.ID)
+			_, err = f.runner.resumeInvocationExecution(t.Context(), child, 1)
 			if !errors.Is(err, ErrInvalidRequest) {
-				t.Errorf("public ResumeInvocation must reject routed Handoff child: %v", err)
+				t.Errorf("native root-only continuation must reject routed Handoff child: %v", err)
 			}
 			items, listErr := f.store.ListItems(t.Context(), f.turn.ID, 0, 500)
 			if listErr != nil || PendingExecutionDispatch(items, "") {

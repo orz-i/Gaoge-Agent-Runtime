@@ -216,7 +216,7 @@ func (runner *Runner) pendingInteractionContinuation(ctx context.Context, turnID
 			return true, nil
 		case continuationHostReturnedUnclaimed:
 			// An ACK loss between the committed callback response and
-			// claim must not let ResumeTurn/ResumeInvocation enter Kernel.
+			// claim must not let ResumeTurn enter Kernel.
 			return true, nil
 		case continuationAbsent:
 			if owner.Status == InvocationRunning {
