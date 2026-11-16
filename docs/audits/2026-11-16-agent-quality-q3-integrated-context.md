@@ -1,7 +1,7 @@
 # Q3 — Integrated Context-pressure and Agent-quality governance
 
 - Base: `main@5d04c65b611dda7a1e70eafccb8f6ee88d9f979a` (merged PR #114).
-- Branch: `governance/agent-quality-q3-20261116` in an isolated local worktree, not yet published.
+- Branch: `governance/agent-quality-q3-20261116` in an isolated worktree; PR Head status is verified separately.
 - Goal: close Q3 as **one bounded end-to-end change**: existing real evidence → Context admission decision → trustworthy failure receipt → Agent quality report → offline root-cause analysis → local stress verification. Q3-A1's original offline diagnostic remains the first commit in the same branch, **not a separate review/approval workflow**.
 - The work does **not** change input/Tool/Model limits, Native Count protocol, signed Provider replay, persisted checkpoint/Tool receipts, Context compaction algorithm or authorization. It does not issue billable Provider calls.
 
@@ -44,4 +44,12 @@ A real `task-agent` HTTP fixture with an oversized synthetic signed reasoning re
 - `agent_quality_anchors.py --evidence-dir` on the original main worktree: **2/2 PASS**, original private JSON files verified read-only; historical reports were not rewritten.
 - Whole-workspace CI and real Provider A/B have **not** been run for this local branch.
 
-The deliverable is a **local integrated Q3 candidate**, not an automatically merged PR. Actual PR Head CI and independent final merge review remain delivery validation, not additional Q3 architectural phases. Existing Q3-A1 diagnostic-only record remains historical provenance of the initial local implementation.
+## Full-change audit follow-up
+
+The PR-delivery review followed **final request → Context hard admission → original error identity → task-agent report projection → strict Python event validation → offline diagnosis**, including successful execution, local refusal, legacy reports, encrypted replay and recovery fixtures. It confirmed `errors.Is(ErrBudgetExceeded)` continuity, no additional Count/generation/Tool call, no changed execution authorization, no raw input/replay emission, and unchanged normal Path/Q2 hash semantics.
+
+The review added one focused negative boundary to each affected language: **exact Token Count within the budget must still reject when the separate serialized-byte limit is exceeded**, and an optional report carrying that byte-only refusal must validate without falsely claiming a Token overrun. Both tests pass. No new P0/P1/P2 blocker was identified in the scoped changed path. This does not certify external Provider quality or root-cause resolution for old, immutable historical failures.
+
+The previous long local whole-workspace `make go-test` invocation was interrupted by its remote session after several modules passed, so it is not recorded as a whole-workspace pass. The changed Core/task-agent suites and related Harness/Context modules passed in separate local runs; final PR Head required CI remains an independent gate.
+
+The deliverable is an **integrated Q3 PR candidate**, not an automatically merged change. Actual PR Head CI and final merge review are delivery validation, not additional Q3 architectural phases. Existing Q3-A1 diagnostic-only record remains historical provenance of the initial local implementation.

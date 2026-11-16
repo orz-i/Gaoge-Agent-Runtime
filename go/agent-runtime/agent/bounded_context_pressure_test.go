@@ -80,6 +80,28 @@ func TestBoundedContextNativeCountCanAdmitLargeBytesWithoutRaisingHostLimit(t *t
 	}
 }
 
+func TestBoundedContextSerializedByteLimitRejectsEvenWithExactTokenCount(t *testing.T) {
+	counter := &pressureTestCounter{count: 24}
+	manager := runtimecontext.NewManager(runtimecontext.Dependencies{Counter: counter})
+	adapter, err := NewBoundedContextAdapter(manager, pressureTestPorts{exact: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := model.Request{RunID: "run", Model: "openai/example", Messages: []model.Message{{
+		Role: model.RoleUser, Content: model.TextParts(strings.Repeat("B", 4096)),
+	}}}
+	_, err = adapter.Prepare(t.Context(), request)
+	var details *BoundedContextBudgetError
+	if !errors.Is(err, runtimecontext.ErrBudgetExceeded) || !errors.As(err, &details) ||
+		details.Assessment.TokenCountSource != runtimecontext.CountExact ||
+		details.Assessment.HardTokenEstimate != 24 ||
+		details.Assessment.HardInputTokens != 48 ||
+		details.Assessment.SerializedBytes <= details.MaxSerializedBytes ||
+		details.Reason != "no_artifact_reader" || counter.calls != 1 {
+		t.Fatalf("byte-hard limit bypassed or misattributed after exact count: %v detail=%+v calls=%d", err, details, counter.calls)
+	}
+}
+
 func TestBoundedContextBudgetRejectionReportsOriginalAssessmentWithoutInput(t *testing.T) {
 	secret := "PRIVATE_USER_API_KEY_DO_NOT_PRINT"
 	for _, tc := range []struct {
