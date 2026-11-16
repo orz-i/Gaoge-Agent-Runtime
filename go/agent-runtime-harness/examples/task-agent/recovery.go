@@ -13,6 +13,7 @@ import (
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
+	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
@@ -114,6 +115,32 @@ func safePreInterruptionEvidence(snapshot harness.Snapshot) *preInterruptionEvid
 	return result
 }
 
+// contextPressureReceipt is a rejected-request budget decision, not an
+// estimate of billed Provider tokens or an authorization to retry.
+type contextPressureReceipt struct {
+	CountSource        runtimecontext.CountSource `json:"countSource"`
+	HardInputTokens    int64                      `json:"hardInputTokens"`
+	SoftInputTokens    int64                      `json:"softInputTokens"`
+	HardTokenEstimate  int64                      `json:"hardTokenEstimate"`
+	SerializedBytes    int64                      `json:"serializedBytes"`
+	MaxSerializedBytes int64                      `json:"maxSerializedBytes"`
+	Reason             string                     `json:"reason"`
+}
+
+func observedContextPressure(err error) *contextPressureReceipt {
+	var pressure *agent.BoundedContextBudgetError
+	if !errors.As(err, &pressure) || pressure == nil {
+		return nil
+	}
+	a := pressure.Assessment
+	return &contextPressureReceipt{
+		CountSource: a.TokenCountSource, HardInputTokens: a.HardInputTokens,
+		SoftInputTokens: a.SoftInputTokens, HardTokenEstimate: a.HardTokenEstimate,
+		SerializedBytes: a.SerializedBytes, MaxSerializedBytes: pressure.MaxSerializedBytes,
+		Reason: pressure.Reason,
+	}
+}
+
 type taskReport struct {
 	Mode                   string                     `json:"mode"`
 	Model                  string                     `json:"model"`
@@ -132,6 +159,7 @@ type taskReport struct {
 	ArtifactReadStrategy   *artifactReadStrategy      `json:"artifactReadStrategy,omitempty"`
 	InputCountObservations *inputCountObservations    `json:"inputCountObservations,omitempty"`
 	InputCountComparison   *inputCountUsageComparison `json:"inputCountComparison,omitempty"`
+	ContextPressure        *contextPressureReceipt    `json:"contextPressure,omitempty"`
 	DraftWrites            int                        `json:"draftWrites"`
 	OraclePassed           bool                       `json:"oraclePassed"`
 	RecoveryChecks         recoveryChecks             `json:"recoveryChecks"`
@@ -253,6 +281,9 @@ func runTask(ctx context.Context, config settings, newModel func() (model.Client
 		state.collectMetrics(&report)
 		if runErr != nil {
 			report.Status, report.FailureCode = "failed", failureCode(runErr, "task_execution_failed")
+			if report.FailureCode == "context_budget_exceeded" {
+				report.ContextPressure = observedContextPressure(runErr)
+			}
 		} else {
 			report.Status = "passed"
 		}

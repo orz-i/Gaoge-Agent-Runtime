@@ -419,24 +419,32 @@ Host treatment changed.
 Unknown usage, incomplete samples and preflight-only/pilot results must not
 be represented as a complete quality improvement.
 
-## Q3-A1 — offline Context-pressure attribution (diagnostic only)
+## Q3 — Context budget, compaction and Agent-quality diagnosis (integrated candidate)
 
-For an existing **validated** `evidence-40-v1` report, inspect its content-free
-failure classification without running an Agent or a Provider request:
+Run the offline diagnostic on an existing, strictly validated quality report:
 
 ```sh
 python3 scripts/run-agent-baseline.py diagnose-quality artifacts/agent-baselines/EXISTING_REPORT.json
 ```
 
-The output distinguishes a trusted local `context_budget_exceeded` error from
-an authenticated `agent.tool_limit` and from unresolved failures. It shows
-available Artifact-read and native Count aggregates, but always marks the exact
-rejected-request token assessment, its count source and compaction outcome as
-**unobserved**; an aggregate native count is not a per-request admission
-receipt. Historical missing diagnostic fields remain unknown, and pilot or
-partial sampling does not become a complete benchmark. No input budgets,
-Provider projection, durable state, old report bytes, or compare-treatment
-contracts change. See the [Q3-A1 candidate and later evidence gates](audits/2026-11-16-agent-quality-q3a-context-pressure-diagnosis.md).
+Q3 classifies actual local Context budget denials separately from authenticated
+`agent.tool_limit` and unknown causes. On **new** budget-rejected task samples,
+the original `BoundedContextAdapter` assessment is also carried as a small
+optional content-free receipt (`contextPressure`): hard/soft input limits,
+hard estimate, serialized-byte size and cap, exact/estimated Count source, and
+the fixed reason no reader, no owner or no eligible safe compaction. No extra
+Token Count or Model call is introduced, and the original hard admission,
+Provider replay, Context compression and execution authority are unchanged.
+Missing old receipt fields remain **unknown**, not zero. Neither a diagnostic
+result nor a one-case Pilot constitutes a 40-case benchmark improvement.
+
+A deterministic same-request test confirms that valid exact native counting
+can admit a large-byte input under an *unchanged* Host hard limit, while the
+fallback without a counter correctly denies it. Signed oversized reasoning
+replay still fails closed, now with its original numeric assessment visible.
+The Q2 Host navigation A/B remains a separate, already-versioned treatment;
+there is no new SDK-owned adaptive router or automatic budget escalation.
+See the [integrated Q3 evidence and test matrix](audits/2026-11-16-agent-quality-q3-integrated-context.md).
 
 ## Acceptance and known limits
 

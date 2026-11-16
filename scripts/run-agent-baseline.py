@@ -77,7 +77,7 @@ SAMPLE_FIELDS = {
     "sampleID", "caseID", "repetition", "status", "stage", "failureCode",
     "durationMs", "modelCalls", "toolCalls", "oraclePassed", "recoveryChecks",
     "usage", "contextGeneration", "runID", "turnID", "modelDurationsMs",
-    "toolExecutions", "lookupCalls", "artifactReads", "draftWrites", "artifactReadStrategy", "inputCountObservations", "inputCountComparison",
+    "toolExecutions", "lookupCalls", "artifactReads", "draftWrites", "artifactReadStrategy", "inputCountObservations", "inputCountComparison", "contextPressure",
     "providerHTTPRequests", "lastHTTPStatus", "lastResponseKind", "lastResponseDebug", "preInterruption",
 }
 TRUSTED_TURN_STATUSES = {
@@ -897,7 +897,7 @@ def quality_group_markdown(report):
 
 
 def quality_pressure_facts(report):
-    """Q3-A: classify *observed* quality failures without re-running or re-scoring.
+    """Q3: classify *observed* quality failures without re-running or re-scoring.
 
     Reports are validated before reading any facts. Only existing allowlisted
     sample metrics leave this function. In particular, an aggregate accepted
@@ -943,6 +943,7 @@ def quality_pressure_facts(report):
         modes = sample.get("artifactReadStrategy")
         native = sample.get("inputCountObservations")
         compared = sample.get("inputCountComparison")
+        pressure = sample.get("contextPressure")
         failures.append({
             "caseID": sample["caseID"], "repetition": sample["repetition"],
             "failureCode": (sample["failureCode"] if sample["failureCode"] in Q3_DIAGNOSTIC_FAILURE_CODES
@@ -954,10 +955,13 @@ def quality_pressure_facts(report):
                              "unavailable": native["unavailable"],
                              "matchedUsage": compared["compared"] if compared is not None else None}
                             if native is not None else None),
-            # Explicit unknown, not zero. These are not currently captured in
-            # historical or newly emitted task-agent baseline reports.
-            "rejectedRequestAssessment": None,
-            "compactionOutcome": None,
+            # Historical reports have no rejected-request observation. New
+            # reports retain only the original numeric assessment and the
+            # actual bounded Context rejection branch, never the payload.
+            "rejectedRequestAssessment": ({key: pressure[key] for key in (
+                "countSource", "hardInputTokens", "softInputTokens", "hardTokenEstimate",
+                "serializedBytes", "maxSerializedBytes")} if pressure is not None else None),
+            "compactionOutcome": pressure["reason"] if pressure is not None else None,
         })
     requested = runner.get("requestedSamples") or summary.get("requested")
     original_hash = runner.get("datasetHash")
@@ -980,11 +984,11 @@ def quality_pressure_facts(report):
 
 
 def quality_pressure_markdown(facts):
-    """Render only prevalidated, content-free Q3-A observations."""
+    """Render only prevalidated, content-free Q3 observations."""
     coverage = facts["coverage"]
     counts = facts["counts"]
     counted = facts["countCoverage"]
-    lines = ["# Q3-A Context 压力归因（离线，只读）", "",
+    lines = ["# Q3 Context 压力归因（离线，只读）", "",
              "- Dataset Hash：%s；策略：%s；报告声明源码干净：%s。" %
              (md_cell(facts["datasetHash"]), md_cell(facts["qualityTreatment"]),
               "是" if facts["sourceClean"] else "否或未知"),
@@ -1001,28 +1005,45 @@ def quality_pressure_markdown(facts):
              "- 分类仅对应原始固定失败码与可信 Turn 状态；Context 拒绝不是 Provider HTTP 4xx 拒绝，"
              "Tool 上限不是 Context 超限。任何 Artifact 读取次数都不能单独证明重复检索是根因。",
              "", "## 失败样本的已观察证据", "",
-             "| 案例 / 次数 | 固定失败码 | 归因分类 | Artifact Reads | Query / Offset | Count 尝试 / 接受 / 不可用 | 同输入 Count-Usage 对照 |",
-             "| --- | --- | --- | ---: | --- | --- | --- |"]
+             "| 案例 / 次数 | 固定失败码 | 归因分类 | Artifact Reads | Query / Offset | Count 尝试 / 接受 / 不可用 | 同输入 Count-Usage 对照 | 被拒绝请求：Hard / Estimate | Count 来源 / 压缩决策 |",
+             "| --- | --- | --- | ---: | --- | --- | --- | --- | --- |"]
     for failure in facts["failures"]:
         modes, native = failure["artifactReadModes"], failure["nativeCount"]
         mode_text = "%d / %d" % (modes["queried"], modes["offsetOnly"]) if modes is not None else "未记录"
         count_text = "%d / %d / %d" % (native["attempts"], native["accepted"], native["unavailable"]) if native is not None else "未记录"
         matched_text = str(native["matchedUsage"]) if native is not None and native["matchedUsage"] is not None else "未记录"
-        lines.append("| %s / %d | %s | %s | %d | %s | %s | %s |" %
+        assessment = failure["rejectedRequestAssessment"]
+        budget_text = ("%d / %d" % (assessment["hardInputTokens"], assessment["hardTokenEstimate"])
+                       if assessment is not None else "未记录")
+        reason_text = ("%s / %s" % (assessment["countSource"], failure["compactionOutcome"])
+                       if assessment is not None else "未记录")
+        lines.append("| %s / %d | %s | %s | %d | %s | %s | %s | %s | %s |" %
                      (failure["caseID"], failure["repetition"], failure["failureCode"],
-                      failure["category"], failure["artifactReads"], mode_text, count_text, matched_text))
+                      failure["category"], failure["artifactReads"], mode_text, count_text,
+                      matched_text, budget_text, reason_text))
     if not facts["failures"]:
-        lines.append("| 未观察到已尝试样本失败 | — | — | — | — | — | — |")
+        lines.append("| 未观察到已尝试样本失败 | — | — | — | — | — | — | — | — |")
     lines += ["", "## 本轮仍未知的边界", ""]
     if counts["contextBudgetRejected"]:
-        lines.append("- 本地 Context 拒绝的具体请求：精确 Count 来源、Hard/Soft Token 估值、序列化大小均未记录。"
-                     "已有 Count 汇总即使全部接受，也不能定位到最后一次被拒绝的请求。")
+        observed = [f for f in facts["failures"] if f["category"] == "local_context_budget_rejection" and
+                    f["rejectedRequestAssessment"] is not None]
+        lines.append("- 本地 Context 拒绝的逐请求 Assessment：观测 %d / %d；历史缺失仍标未知。"
+                     "没有逐请求 Assessment 时，Count 汇总即使全部接受，也不能定位到最终被拒绝的请求。" %
+                     (len(observed), counts["contextBudgetRejected"]))
+        for failure in observed:
+            a = failure["rejectedRequestAssessment"]
+            lines.append("- 样本 %s：Soft=%d、Hard=%d、硬估计=%d、序列化字节=%d、字节限制=%d；"
+                         "Count 来源=%s、拒绝分支=%s。该记录不包含原始请求，不代表 Provider Usage 或计费。" %
+                         (failure["caseID"], a["softInputTokens"], a["hardInputTokens"],
+                          a["hardTokenEstimate"], a["serializedBytes"], a["maxSerializedBytes"],
+                          a["countSource"], failure["compactionOutcome"]))
     else:
         lines.append("- 已观察样本中没有固定码确认的 Context 预算拒绝；不能据此证明未执行样本或其他 Profile 永远不会超限。")
     if counted["belowUsage"]:
         lines.append("- 存在同输入原生计数低于已认证 Provider Usage 的观测；这是独立的计量安全复核信号，"
                      "不能自动推断某个样本失败原因。")
-    lines += ["- Portable/Tool 压缩候选、拒绝原因与预计释放空间未记录；不得断言压缩本应成功。",
+    lines += ["- 拒绝分支只说明缺少 Artifact Reader、Owner 或安全可用压缩候选；"
+              "不记录各候选预计释放空间，不能据此断言某个压缩本应成功。",
               "- 现有样本诊断不是模型成本、真实调用端点计数或 Context 策略 A/B 的因果实验。"
               "不能借由此命令改变报告、重跑样本、提升预算或推断同版本 A/B 收益。", ""]
     return "\n".join(lines)
@@ -1455,6 +1476,21 @@ def validate_sample_diagnostics(sample):
                 (comparison["belowUsage"] == 0 and comparison["maxUnderestimate"] != 0) or
                 (comparison["belowUsage"] > 0 and comparison["maxUnderestimate"] == 0)):
             raise ProtocolFailure("invalid_input_count_comparison")
+    if "contextPressure" in sample:
+        pressure = sample["contextPressure"]
+        fields = {"countSource", "hardInputTokens", "softInputTokens", "hardTokenEstimate",
+                  "serializedBytes", "maxSerializedBytes", "reason"}
+        numeric = fields - {"countSource", "reason"}
+        if (not isinstance(pressure, dict) or set(pressure) != fields or
+                sample["status"] != "failed" or sample.get("failureCode") != "context_budget_exceeded" or
+                pressure["countSource"] not in ("exact", "estimated") or
+                pressure["reason"] not in ("no_artifact_reader", "not_owner", "no_safe_compaction") or
+                any(type(pressure[key]) is not int or not 0 < pressure[key] <= (1 << 40)
+                    for key in numeric) or
+                pressure["softInputTokens"] > pressure["hardInputTokens"] or
+                (pressure["hardTokenEstimate"] <= pressure["hardInputTokens"] and
+                 pressure["serializedBytes"] <= pressure["maxSerializedBytes"])):
+            raise ProtocolFailure("invalid_context_pressure")
     for name in ("lookupCalls", "artifactReads", "draftWrites", "contextGeneration"):
         if name in sample and (type(sample[name]) is not int or sample[name] < 0):
             raise ProtocolFailure("invalid_sample_diagnostics")
@@ -1702,6 +1738,16 @@ def accept_event(report, event):
         if not isinstance(checks, dict) or set(checks) != RECOVERY_FIELDS or any(type(value) is not bool for value in checks.values()):
             raise ProtocolFailure("invalid_sample")
         validate_sample_diagnostics(sample)
+        pressure = sample.get("contextPressure")
+        if pressure is not None:
+            policy = runner["profile"].get("contextPolicy", {})
+            service_limit = policy.get("maxInputTokens")
+            remaining_model_window = (report["configuration"]["contextTokens"] -
+                                      report["configuration"]["maxOutputTokens"])
+            if (type(service_limit) is not int or service_limit <= 0 or
+                    pressure["hardInputTokens"] != min(service_limit, remaining_model_window) or
+                    pressure["maxSerializedBytes"] != policy.get("maxSerializedBytes")):
+                raise ProtocolFailure("context_pressure_profile_mismatch")
         validate_sample_consistency(sample)
         if "artifactReadStrategy" in sample and suite != QUALITY_SUITE:
             raise ProtocolFailure("invalid_artifact_read_strategy")

@@ -36,6 +36,24 @@ type BoundedContextPorts interface {
 	CommitCheckpoint(context.Context, BoundedContextPlan, runtimecontext.Checkpoint) (runtimecontext.Checkpoint, error)
 	BindCheckpoint(context.Context, string, runtimecontext.Checkpoint) error
 }
+
+// BoundedContextBudgetError exposes only numeric admission facts for a
+// rejected model request. The original request, Provider replay, Tool payload,
+// Context artifact and model identity never enter this error.
+// It wraps ErrBudgetExceeded so existing execution/failure paths are unchanged.
+type BoundedContextBudgetError struct {
+	Assessment         runtimecontext.Assessment
+	MaxSerializedBytes int64
+	Reason             string // no_artifact_reader, not_owner, or no_safe_compaction
+}
+
+func (*BoundedContextBudgetError) Error() string { return runtimecontext.ErrBudgetExceeded.Error() }
+func (*BoundedContextBudgetError) Unwrap() error { return runtimecontext.ErrBudgetExceeded }
+
+func rejectedContextBudget(a runtimecontext.Assessment, policy runtimecontext.Policy, reason string) error {
+	return &BoundedContextBudgetError{Assessment: a, MaxSerializedBytes: policy.MaxSerializedBytes, Reason: reason}
+}
+
 type BoundedContextAdapter struct {
 	manager  *runtimecontext.Manager
 	ports    BoundedContextPorts
@@ -104,7 +122,11 @@ func (a *BoundedContextAdapter) Prepare(ctx context.Context, incoming model.Requ
 		if withinHard {
 			return request, nil
 		}
-		return model.Request{}, runtimecontext.ErrBudgetExceeded
+		reason := "no_artifact_reader"
+		if plan.ArtifactReader {
+			reason = "not_owner"
+		}
+		return model.Request{}, rejectedContextBudget(assessment, policy, reason)
 	}
 	choice, ok, err := a.selectCompaction(ctx, *plan.Checkpoint, request, plan.ModelWindow, policy, assessment, withinHard)
 	if err != nil {
@@ -114,7 +136,7 @@ func (a *BoundedContextAdapter) Prepare(ctx context.Context, incoming model.Requ
 		if withinHard {
 			return request, nil
 		}
-		return model.Request{}, runtimecontext.ErrBudgetExceeded
+		return model.Request{}, rejectedContextBudget(assessment, policy, "no_safe_compaction")
 	}
 	next, err := a.manager.Rollover(ctx, runtimecontext.RolloverRequest{Previous: *plan.Checkpoint, Window: choice.window, Artifacts: choice.artifacts, Reason: "model_window_pressure", ModelWindowFingerprint: runtimecontext.ModelWindowFingerprint(plan.ModelWindow), Assessment: &choice.assessment})
 	if err != nil {
