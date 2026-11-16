@@ -410,9 +410,12 @@ commands stay on the original treatment. Both still require a hidden API key
 and may incur charges; no live-model uplift is implied. Two complete reports
 can be checked *offline* with
 `python3 scripts/run-agent-baseline.py compare-treatment old.json new.json`.
-This experimental comparison requires matching workload, runtime profile,
-exact Provider/model/endpoint and limits, repetitions and the same clean source revision,
-but cannot by itself attest that only the desired Host treatment changed.
+This experimental comparison requires **different recorded Host treatment labels**
+(current/default versus `generic-navigation-v1`) and distinct treatment hashes,
+as well as matching workload, runtime profile, exact Provider/model/endpoint and
+limits, repetitions and the same clean source revision. It displays both
+strategy labels and hashes, but cannot by itself attest that only the desired
+Host treatment changed.
 Unknown usage, incomplete samples and preflight-only/pilot results must not
 be represented as a complete quality improvement.
 
