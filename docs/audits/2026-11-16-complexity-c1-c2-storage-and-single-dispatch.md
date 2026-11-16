@@ -110,6 +110,12 @@ materializer needs a source update before beta.24 ships.
 
 ## C3 — measured boundary, not a speculative code rewrite
 
+**Follow-up:** the single proven `invocationDelegationDepth` full-Timeline
+scan has since been replaced with an already indexed, owner-checked ancestor
+walk. Before/after measurements, the negative ownership matrix and the
+remaining unmodified safety-critical scans are recorded in the
+[C3 indexed-depth audit](2026-11-16-complexity-c3-indexed-delegation-depth.md).
+
 Twenty-plus current Harness call sites load full immutable Turn Items via
 `listAllItems` for delegation, cancellation, interaction and authorization
 proof. These are plausible cost centers, **not proof of a redundant scan or
