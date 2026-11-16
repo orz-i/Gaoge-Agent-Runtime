@@ -117,9 +117,11 @@ is this document plus [ADR 0018](adr/0018-subagent-only-orchestration-hardcut.md
 
 The only built-in top-level Agent entry points are
 `agent.Runner.StartRun`, `harness.Runner.StartAgentTurn` and the optional
-`harness.OpenTextAgentSession` facade. Host-owned Application capabilities can
-still execute through their explicitly configured external adapter, but they
-are not runtime-native multi-agent orchestration.
+`harness.OpenTextAgentSession` facade. The former Harness-native Application
+execution interpreter, its Command Catalog and `harness.invoke_capability`
+Tool are removed. Host business effects remain available as explicitly
+authorized Agent Tools and Host Interaction callbacks; they are not an
+alternate Harness execution class.
 
 The HTTP/TypeScript surface exposes Agent Runs, generic Run inspect/cancel,
 Harness Turns, approvals and Subtask controls. Removed orchestrators have **no**

@@ -186,9 +186,6 @@ func TestTextAgentSessionRejectsUncomposedFeatures(t *testing.T) {
 		{"policy without registry", func(o *harness.TextAgentSessionOptions) {
 			o.Session.Config.ToolPolicies = []harness.ToolPolicySnapshot{{Key: "some-tool"}}
 		}},
-		{"command without executor", func(o *harness.TextAgentSessionOptions) {
-			o.Session.Config.Commands = []harness.CommandDescriptor{{ID: "command"}}
-		}},
 		{"role without composer", func(o *harness.TextAgentSessionOptions) {
 			o.Session.Config.Roles = []harness.RoleSnapshot{{ID: "role"}}
 		}},

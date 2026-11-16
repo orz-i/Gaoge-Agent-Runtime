@@ -518,7 +518,7 @@ func assertConfigLifecycle(t *testing.T, store *harnesspostgres.Store, config ha
 		t.Fatalf("put config: %#v fresh=%v err=%v", created, fresh, err)
 	}
 	loaded, err := store.GetConfigSnapshot(t.Context(), config.ID)
-	if err != nil || loaded.ContentHash != config.ContentHash || loaded.Model != config.Model || len(loaded.Commands) != len(config.Commands) {
+	if err != nil || loaded.ContentHash != config.ContentHash || loaded.Model != config.Model {
 		t.Fatalf("load config: %#v err=%v", loaded, err)
 	}
 }

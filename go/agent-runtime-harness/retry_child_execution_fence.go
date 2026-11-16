@@ -9,9 +9,6 @@ func RetryChildEffectFence(invocations []Invocation, items []Item, rotating Invo
 		}
 		switch child.Status {
 		case InvocationRunning:
-			if child.ExecutionClass == ExecutionApplication {
-				return ErrApplicationOutcomeUnknown
-			}
 			return ErrConflict
 		case InvocationWaitingInput, InvocationPausedBudget:
 			return ErrConflict

@@ -201,14 +201,15 @@ func (store *MemoryStore) RetryInvocation(
 	// Retrying even an intermediate parent cannot outlive a descendant's
 	// pre-effect dispatch grant. Take the conservative Turn-wide barrier:
 	// grants do not encode a transactional transitive ownership snapshot.
-	if current.Revision != expectedRevision || !retryableInvocationStatus(current.Status) || len(current.Input) == 0 ||
+	if !validExecutionClass(current.ExecutionClass) || current.Revision != expectedRevision ||
+		!retryableInvocationStatus(current.Status) || len(current.Input) == 0 ||
 		store.activeCancellationFenceLocked(current.TurnID) ||
 		PendingExecutionDispatch(physicalItems, "") ||
 		!RetryOriginalOperationEvidenceValid(ctx, physicalItems, current) {
 		return Invocation{}, ErrConflict
 	}
-	// Check all potentially executing children, not just unclaimed Host
-	// Application callbacks. An acknowledged native/Handoff Start settles its
+	// Check all potentially executing children. An acknowledged Agent/Handoff
+	// Start settles its
 	// grant while its child may still run; status and grant proof are inspected
 	// under this same Turn mutex before rotating any Attempt.
 	children := make([]Invocation, 0)

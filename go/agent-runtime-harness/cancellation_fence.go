@@ -102,12 +102,6 @@ func (runner *Runner) inspectRelatedCancellation(ctx context.Context, turn Turn,
 			targetInvocations[inv.ID] = struct{}{}
 		}
 	}
-	for _, inv := range invocations {
-		if _, target := targetInvocations[inv.ID]; target &&
-			inv.ExecutionClass == ExecutionApplication && inv.Status == InvocationRunning {
-			return nil, ErrApplicationOutcomeUnknown
-		}
-	}
 	// Cancellation and Refresh/Resume must accept the exact same Host
 	// response proof. Scope is the original affected set; a missing
 	// RunRelation index widens only read-only admission, never writes.
@@ -143,10 +137,9 @@ func (runner *Runner) inspectRelatedCancellation(ctx context.Context, turn Turn,
 	return targetInvocations, nil
 }
 
-// Follow child Invocation ownership through the same persisted Item references
-// used by Harness admission. This catches Application children intentionally
-// excluded from RunRelation without treating unrelated sibling branches as
-// descendants. A malformed or cyclic Item ancestry fails closed.
+// Follow original child Invocation ownership through persisted Item references
+// without treating unrelated sibling branches as descendants. A malformed
+// or cyclic Item ancestry fails closed.
 func (runner *Runner) addItemOwnedCancellationDescendants(
 	ctx context.Context, turnID string, invocations []Invocation, targets map[string]struct{},
 ) error {
@@ -206,15 +199,3 @@ func (runner *Runner) addItemOwnedCancellationDescendants(
 // The top-level Turn's cancellation can reach Application child Invocations
 // even without a RunRelation. A Running Application executor has an uncertain
 // physical outcome and cannot be reported as safely cancelled.
-func (runner *Runner) fenceTurnApplicationEffects(ctx context.Context, turnID string) error {
-	invocations, err := runner.store.ListInvocations(ctx, turnID)
-	if err != nil {
-		return err
-	}
-	for _, invocation := range invocations {
-		if invocation.ExecutionClass == ExecutionApplication && invocation.Status == InvocationRunning {
-			return ErrApplicationOutcomeUnknown
-		}
-	}
-	return nil
-}

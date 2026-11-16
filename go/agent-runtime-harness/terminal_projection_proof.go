@@ -136,8 +136,7 @@ func ValidTerminalProjectionProof(
 			// immutable. Recovery may project that committed result after
 			// losing the ephemeral callback context. Neither Running nor
 			// a missing/contradictory receipt can take this path.
-			if verifiedCompletedApplicationResponse(items, interaction, owner) ||
-				interactionCallbackConfirmed(ctx, turnID, owner.ID, interaction.ID) {
+			if interactionCallbackConfirmed(ctx, turnID, owner.ID, interaction.ID) {
 				continue
 			}
 			return false

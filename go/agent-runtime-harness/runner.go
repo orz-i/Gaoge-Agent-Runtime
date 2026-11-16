@@ -563,7 +563,6 @@ type Dependencies struct {
 	Relations    RunRelationSource
 	Cancellation RuntimeCanceller
 	Interactions InteractionResponseHandler
-	Applications ApplicationCapabilityExecutor
 	Budget       *BudgetMiddleware
 	Execution    ExecutionPolicy
 	// Applies only to direct manual subtask creation. The Agent Tool handler
@@ -596,7 +595,6 @@ type Runner struct {
 	relationReader         RunRelationSource
 	cancellation           RuntimeCanceller
 	interactions           InteractionResponseHandler
-	applications           ApplicationCapabilityExecutor
 	budgets                *BudgetMiddleware
 	execution              ExecutionPolicy
 	manualDelegationPolicy DelegationToolPolicy
@@ -660,7 +658,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		turnFeed: dependencies.TurnFeed,
 		context:  dependencies.Context, catalog: dependencies.Catalog,
 		handoffs: dependencies.Handoffs, relations: dependencies.Relations,
-		interactions: dependencies.Interactions, applications: dependencies.Applications, budgets: dependencies.Budget,
+		interactions: dependencies.Interactions, budgets: dependencies.Budget,
 		execution:              execution,
 		manualDelegationPolicy: dependencies.ManualDelegationPolicy,
 	}
@@ -863,6 +861,9 @@ func (runner *Runner) refreshTurn(ctx context.Context, turnID string, expected *
 	if expected != nil && (err != nil || requireSessionRootOwner(turn, invocation, *expected) != nil) {
 		return Snapshot{}, errors.Join(ErrConflict, err)
 	}
+	if err == nil && invocation.ExecutionClass != ExecutionAgent {
+		return Snapshot{}, ErrConflict
+	}
 	if err != nil || strings.TrimSpace(invocation.ExecutionRefID) == "" {
 		if terminalTurnStatus(turn.Status) {
 			return runner.loadSnapshot(ctx, turn, nil)
@@ -880,9 +881,6 @@ func (runner *Runner) refreshTurn(ctx context.Context, turnID string, expected *
 		// The parent Turn can be running while a child owns an unverified
 		// business callback. Never terminalize or resume through that claim.
 		return runner.loadSnapshot(ctx, turn, nil)
-	}
-	if invocation.ExecutionClass == ExecutionApplication {
-		return runner.refreshApplicationInvocation(ctx, invocation, turn)
 	}
 	runtimeSnapshot, err := runner.runtime.Load(ctx, invocation.ExecutionRefID)
 	if errors.Is(err, kernel.ErrNotFound) && terminalTurnStatus(turn.Status) && missingRuntimeSnapshotAllowed(turn, invocation) {
@@ -938,7 +936,7 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 	if err = verifyProtectiveInvocation(ctx, runner.store, invocation); err != nil {
 		return Snapshot{}, err
 	}
-	if terminalTurnStatus(turn.Status) && turn.Status != TurnCancelled && invocation.ExecutionClass != ExecutionApplication {
+	if terminalTurnStatus(turn.Status) && turn.Status != TurnCancelled {
 		// A Failed admission may have been rejected before its Kernel Run
 		// existed. Preserve the original no-effect terminal replay, but only
 		// when no child Invocation, RunRelation or delegation can be left
@@ -973,9 +971,6 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 	}
 	intent, err := runner.cancelPreflightWithIntent(ctx, turn, invocation.ExecutionRefID,
 		func() error {
-			if checkErr := runner.fenceTurnApplicationEffects(ctx, turn.ID); checkErr != nil {
-				return checkErr
-			}
 			if checkErr := runner.checkInteractionCancellation(ctx, turn, ""); checkErr != nil {
 				return checkErr
 			}
@@ -989,9 +984,6 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 			return nil
 		},
 		func(writeAttempted *bool) error {
-			if checkErr := runner.fenceTurnApplicationEffects(ctx, turn.ID); checkErr != nil {
-				return checkErr
-			}
 			pending, checkErr := runner.pendingExecutionDispatch(ctx, turn.ID, nil, nil)
 			if checkErr != nil {
 				return checkErr
@@ -1010,82 +1002,6 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 			err = runner.finishCancellationFenceAfterRequest(ctx, intent)
 		}
 	}()
-	if invocation.ExecutionClass == ExecutionApplication {
-		// Application roots have no Kernel Run, but own the same Turn-wide
-		// child claims and Interaction effects. Reconcile every Application
-		// child only after the shared admission fence blocks late claims.
-		children, loadErr := runner.store.ListInvocations(ctx, turn.ID)
-		if loadErr != nil {
-			return Snapshot{}, loadErr
-		}
-		for _, child := range children {
-			if child.ID == invocation.ID {
-				continue
-			}
-			if child.ExecutionClass != ExecutionApplication {
-				return Snapshot{}, ErrConflict
-			}
-			if _, cancelErr := runner.cancelApplicationInvocation(ctx, turn, child, reason); cancelErr != nil {
-				return Snapshot{}, cancelErr
-			}
-		}
-		// Interaction fencing can already have cancelled a Waiting root.
-		current, loadErr := runner.store.GetInvocation(ctx, invocation.ID)
-		if loadErr != nil {
-			return Snapshot{}, loadErr
-		}
-		if (current.Status == InvocationCompleted || current.Status == InvocationFailed) &&
-			current.ParentItemID == "" {
-			// The root Application finished before a descendant requested
-			// Host input. That root's completion is immutable, but the
-			// still-active Turn must be cancelable once this original
-			// elected cancellation has confirmed all descendants stopped.
-			liveChildren, childErr := runner.applicationRootHasLiveDescendants(ctx, turn.ID, current.ID)
-			if childErr != nil {
-				return Snapshot{}, childErr
-			}
-			if liveChildren {
-				return Snapshot{}, ErrApplicationOutcomeUnknown
-			}
-			// A completed/failed Application root cannot change its original
-			// terminal outcome merely because a later Cancel has now cleaned
-			// up an accepted descendant. Preserve the immutable Turn status
-			// and settle only the original cancellation fence. If the Turn is
-			// still active, the elected Cancel path can project Cancelled.
-			if terminalTurnStatus(turn.Status) {
-				if turn.Status != turnStatusFromInvocation(current.Status) {
-					return Snapshot{}, ErrConflict
-				}
-				if terminalErr := runner.finalizeApplicationTerminalProjection(ctx, turn, current); terminalErr != nil {
-					return Snapshot{}, terminalErr
-				}
-				snapshot, loadErr := runner.loadSnapshot(ctx, turn, nil)
-				if loadErr != nil {
-					return Snapshot{}, loadErr
-				}
-				return snapshot, runner.cancelTurnBudget(ctx, turn)
-			}
-			cancelCtx := withOriginalApplicationTerminalWitness(ctx, current, TurnCancelled)
-			cancelCtx = withVerifiedCancellationProjection(cancelCtx, turn.ID)
-			cancelledTurn, _, turnErr := runner.reconcileTurnStatus(cancelCtx, turn.ID, TurnCancelled)
-			if turnErr != nil {
-				return Snapshot{}, turnErr
-			}
-			if terminalErr := runner.finalizeApplicationTerminalProjection(cancelCtx, cancelledTurn, current); terminalErr != nil {
-				return Snapshot{}, terminalErr
-			}
-			snapshot, loadErr := runner.loadSnapshot(cancelCtx, cancelledTurn, nil)
-			if loadErr != nil {
-				return Snapshot{}, loadErr
-			}
-			return snapshot, runner.cancelTurnBudget(cancelCtx, cancelledTurn)
-		}
-		cancelled, cancelErr := runner.cancelApplicationInvocation(ctx, turn, current, reason)
-		if cancelErr != nil {
-			return cancelled, cancelErr
-		}
-		return cancelled, runner.cancelTurnBudget(ctx, cancelled.Turn)
-	}
 	if err = runner.cancelTurnBudget(ctx, turn); err != nil {
 		return Snapshot{}, err
 	}
@@ -1472,9 +1388,7 @@ func (runner *Runner) terminalRuntimeSnapshot(ctx context.Context, turn Turn) (k
 	}
 	result := kernel.Snapshot{Run: kernel.Run{ID: invocation.ExecutionRefID}}
 	executionRefID := strings.TrimSpace(invocation.ExecutionRefID)
-	// Application outputs are Host-owned references, never physical Kernel
-	// results. A coincident Kernel Run ID must not supply the message hash.
-	if executionRefID == "" || invocation.ExecutionClass == ExecutionApplication {
+	if executionRefID == "" {
 		return result, nil
 	}
 	loaded, err := runner.runtime.Load(ctx, executionRefID)
@@ -1572,19 +1486,13 @@ func (runner *Runner) recordTerminalAgentMessageItem(
 
 // validateRootRuntimeOwnership binds presentation of a physical Result to
 // the original frozen root execution owner. Equal Run IDs are insufficient:
-// an unrelated Kernel Run can occupy that ID while an Application has no Run
-// or an admitted Agent has not created its Run yet.
+// an unrelated Kernel Run can occupy that ID before an admitted Agent
+// has created its original physical Run.
 func validateRootRuntimeOwnership(invocation Invocation, snapshot kernel.Snapshot) error {
-	var kind kernel.RunKind
-	switch invocation.ExecutionClass {
-	case ExecutionAgent:
-		kind = agent.RunKind
-	case ExecutionApplication:
-		// Host-owned Application must not read Kernel results at all.
-		return ErrConflict
-	default:
+	if invocation.ExecutionClass != ExecutionAgent {
 		return ErrConflict
 	}
+	kind := agent.RunKind
 	actor, thread, err := frozenTopLevelInvocationIdentity(invocation)
 	if err != nil {
 		return err
@@ -1705,7 +1613,7 @@ func (runner *Runner) recordAgentRunItem(ctx context.Context, turn Turn, invocat
 }
 
 func (runner *Runner) failTopLevelInvocationAndTurn(ctx context.Context, turn Turn, invocation Invocation, cause error) (Snapshot, error) {
-	// Only a proved no-effect original Start (or Application call) may
+	// Only a proved no-effect original Agent Start may
 	// terminalize an Invocation without a Kernel terminal result.
 	var proofErr error
 	ctx, proofErr = withOriginalNoEffectTerminalWitness(ctx, invocation, cause)
@@ -1929,12 +1837,11 @@ func (runner *Runner) loadSnapshot(ctx context.Context, turn Turn, provided *ker
 	// become the Turn Output; reload the authoritative root instead. Keep
 	// the check here so future child observation paths cannot bypass it.
 	if runtimeSnapshot != nil && (!hasRootInvocation ||
-		rootInvocation.ExecutionClass == ExecutionApplication ||
 		strings.TrimSpace(rootInvocation.ExecutionRefID) == "" ||
 		runtimeSnapshot.Run.ID != rootInvocation.ExecutionRefID) {
 		runtimeSnapshot = nil
 	}
-	if runtimeSnapshot == nil && hasRootInvocation && rootInvocation.ExecutionClass != ExecutionApplication &&
+	if runtimeSnapshot == nil && hasRootInvocation &&
 		strings.TrimSpace(rootInvocation.ExecutionRefID) != "" {
 		loaded, loadErr := runner.runtime.Load(ctx, rootInvocation.ExecutionRefID)
 		if loadErr != nil {
@@ -1962,7 +1869,6 @@ func (runner *Runner) loadSnapshot(ctx context.Context, turn Turn, provided *ker
 
 func missingRuntimeSnapshotAllowed(turn Turn, invocation Invocation) bool {
 	return turn.Status == TurnAccepted && invocation.Status == InvocationAccepted ||
-		invocation.ExecutionClass == ExecutionApplication ||
 		turn.Status == TurnFailed && invocation.Status == InvocationFailed ||
 		turn.Status == TurnCancelled && invocation.Status == InvocationCancelled
 }

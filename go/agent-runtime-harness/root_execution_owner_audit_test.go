@@ -93,7 +93,7 @@ func TestRootRetryRequestIDUsesFrozenAttemptDerivation(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			secondRef := invocationExecutionRefID(first.ID, first.ExecutionClass, first.Attempt+1)
+			secondRef := invocationExecutionRefID(first.ID, first.Attempt+1)
 			second, err := store.RetryInvocation(t.Context(), first.ID, first.Revision, secondRef, time.Now().UTC())
 			if err != nil || second.Attempt != 2 {
 				t.Fatalf("retry rotation failed: attempt=%d err=%v", second.Attempt, err)

@@ -1,21 +1,31 @@
 # Breaking changes (pre-stable Beta)
 
-## 2026-11-16 — Harness Capability materialization single-Application hard cut
+## 2026-11-16 — Harness Application execution interpreter removed (hard cut)
 
-The obsolete `harness.CapabilityInvocationSpec` one-branch union has been
-**removed**. A custom `harness.CapabilityInvocationMaterializer` now implements
-`MaterializeCapability(context.Context, harness.CapabilityMaterializeRequest) (*harness.ApplicationCapabilitySpec, error)`,
-returning the single Application `Input` or `nil` when it cannot materialize
-a command. The old `(harness.CapabilityInvocationSpec, error)` signature
-will not compile against this beta.24 candidate; update Host composition with
-no compatibility wrapper or second dispatch path.
+**Breaking Go API and persisted execution contract:** The beta.24 candidate
+removes `StartApplicationTurn`, `StartApplicationInvocation`,
+`ExecutionApplication`, the Application Executor/Reconciler, the Command Catalog,
+`ConfigSnapshot.Commands`, and the dedicated `harness.invoke_capability` Tool.
+The previous one-variant `CapabilityInvocationMaterializer` simplification is
+**superseded**: the entire native Application execution branch is gone, not
+renamed or wrapped. HTTP no longer exposes its special unknown-outcome code;
+the TypeScript Harness execution class now admits only `agent`.
 
-Only Host Application commands were valid before this change. The frozen
-`CommandDescriptor` execution class and source rules, Agent/SubAgent
-orchestration, persisted Invocation and Tool receipt formats, Kernel
-Store grants, Provider requests and SQL migrations are **unchanged**. A
-foreign Agent Invocation can no longer be projected as an Application Tool
-completion. See [the C1/C2 complexity audit](audits/2026-11-16-complexity-c1-c2-storage-and-single-dispatch.md).
+The single Agent/SubAgent loop, Host Interaction callback/reconciler, normal
+Host-provided Agent Tools, Kernel Run/lease/CAS/receipt contracts, and
+RunRelation ownership remain. The retained `ExecutionClass` storage field
+accepts only `agent`; a retired `application` record must fail closed rather
+than be reinterpreted as a physical Agent Run.
+
+**All historical Harness ConfigSnapshot hashes change**: previous sealing
+serialized a `commands` member even when empty; its removal changes the
+canonical input and derived ContentHash/ID for Agent-only Turns too. Drain
+or explicitly retire *all* in-flight Harness Turns created with an older
+sealed config, not merely Application Invocations, before deploying the
+new code. Explicitly reconcile outstanding external Host effects using
+the previous code; do not assume an unknown outcome performed no effect.
+No compatibility bridge, silent data conversion or automatic destructive
+migration is added.
 
 ## 2026-11-14 — Continuation Worker projector/reconciler concurrency
 

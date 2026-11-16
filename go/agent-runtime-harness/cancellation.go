@@ -442,13 +442,7 @@ func (runner *Runner) cancelOwnedDescendants(ctx context.Context, turn Turn, roo
 			rootInvocationID = invocation.ID
 			continue
 		}
-		if invocation.ExecutionClass == ExecutionApplication {
-			if _, err = runner.cancelApplicationInvocation(ctx, turn, invocation, reason); err != nil {
-				return nil, err
-			}
-		} else {
-			seeds = append(seeds, invocation.ExecutionRefID)
-		}
+		seeds = append(seeds, invocation.ExecutionRefID)
 	}
 	runs, err := runner.cancelRelatedRuns(ctx, rootRunID, seeds, reason)
 	if err != nil {

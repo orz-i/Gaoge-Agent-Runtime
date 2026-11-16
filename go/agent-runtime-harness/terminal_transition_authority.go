@@ -9,9 +9,8 @@ import (
 )
 
 // terminalTransitionWitness is a private, ephemeral admission capability.
-// Only the original Runner call path that observed a Kernel terminal result,
-// a conclusively no-effect Start, or an Application's committed result can
-// mint one. The Store checks this together with original durable facts in
+// Only the original Runner call path that observed a Kernel terminal result
+// or a conclusively no-effect Start can mint one. The Store checks this together with original durable facts in
 // the same Turn CAS; neither a terminal Status nor a settled dispatch receipt
 // can manufacture this capability.
 type terminalTransitionKind uint8
@@ -19,7 +18,6 @@ type terminalTransitionKind uint8
 const (
 	terminalFromKernel terminalTransitionKind = iota + 1
 	terminalFromNoEffect
-	terminalFromApplication
 	terminalFromHostCancellation
 )
 
@@ -58,17 +56,10 @@ func withOriginalKernelTerminalWitness(
 func withOriginalNoEffectTerminalWitness(
 	ctx context.Context, owner Invocation, proofErr error,
 ) (context.Context, error) {
-	if !isDispatchProvenNoEffect(proofErr) && !errors.Is(proofErr, ErrApplicationNoEffect) {
+	if !isDispatchProvenNoEffect(proofErr) {
 		return ctx, ErrConflict
 	}
 	return withTerminalWitness(ctx, owner, TurnFailed, terminalFromNoEffect), nil
-}
-
-// withOriginalApplicationTerminalWitness is only called after the owning
-// Host Application result/no-effect cancellation has been accepted by its
-// original Runner path. Its identity is still checked by the Store.
-func withOriginalApplicationTerminalWitness(ctx context.Context, owner Invocation, target TurnStatus) context.Context {
-	return withTerminalWitness(ctx, owner, target, terminalFromApplication)
 }
 
 // withOriginalWaitingCancellationWitness is issued solely after the
@@ -199,21 +190,9 @@ func ValidTurnTerminalTransition(ctx context.Context, current, requested Turn, r
 	if root.TurnID != requested.ID {
 		return false
 	}
-	// An Application root can complete its original Host result while a
-	// descendant remains WaitingInput. The subsequently elected Cancel
-	// operation may close the still-nonterminal Turn after cleaning up
-	// that subtree. It cannot rewrite the already-committed root status.
-	// This exception requires both an exact Application-root witness AND
-	// the original verified cancellation-control context. Store admission
-	// separately checks that the durable same-Turn cancellation intent
-	// remains active under its original Turn lock.
+	// A single Agent root cannot terminalize a different Turn outcome.
 	if root.Status != invocationStatusFromTurn(requested.Status) {
-		if requested.Status != TurnCancelled ||
-			root.ExecutionClass != ExecutionApplication ||
-			(root.Status != InvocationCompleted && root.Status != InvocationFailed) ||
-			!VerifiedCancellationProjection(ctx, requested.ID) {
-			return false
-		}
+		return false
 	}
 	return VerifiedTurnTerminalWitness(ctx, root, requested.Status)
 }
@@ -297,11 +276,6 @@ func withOriginalKernelRetryWitness(
 func (runner *Runner) withOriginalRetryAuthority(
 	ctx context.Context, owner Invocation,
 ) (context.Context, error) {
-	if owner.ExecutionClass == ExecutionApplication {
-		// Host-owned Application has no Kernel Run of its own; its distinct
-		// Host effect/cancellation fences remain the Retry authority.
-		return ctx, nil
-	}
 	if runner == nil || runner.runtime == nil || owner.ExecutionRefID == "" {
 		return ctx, ErrConflict
 	}

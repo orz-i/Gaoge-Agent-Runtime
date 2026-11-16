@@ -23,9 +23,7 @@ type InteractionResponseReconciler interface {
 // through the host's read-only reconciler, then commits/replays its Harness
 // projection. It never calls HandleInteractionResponse again. The caller must
 // authorize the owning Turn; this is an explicit operator/host recovery action.
-// A completed child Application with no observed subsequent parent Agent
-// Resume returns ErrApplicationParentContinuationUnverified and its current
-// snapshot. The host may explicitly call ResumeTurn; this read-only recovery
+// The host may explicitly call ResumeTurn; this read-only recovery
 // never dispatches the parent continuation automatically.
 func (runner *Runner) ReconcileInteraction(
 	ctx context.Context, turnID, interactionID string,
@@ -50,15 +48,11 @@ func (runner *Runner) ReconcileInteraction(
 	if terminalTurnStatus(turn.Status) || terminalInvocationStatus(invocation.Status) {
 		// A successful callback may have committed its Invocation but crashed
 		// before Turn/Item projection. Refresh only committed facts. A
-		// terminal child Application needs a separate observed parent Agent
-		// continuation; returning an error-free Running snapshot without
-		// that receipt falsely claims that reconciliation made progress.
+		// This is observation-only. A terminal owner does not authorize
+		// re-entering the Agent or replaying the business callback.
 		refreshed, refreshErr := runner.Refresh(ctx, turn.ID)
 		if refreshErr != nil || terminalTurnStatus(refreshed.Turn.Status) {
 			return refreshed, refreshErr
-		}
-		if err := runner.requireObservedApplicationParentContinuation(ctx, interaction, invocation); err != nil {
-			return refreshed, err
 		}
 		return refreshed, nil
 	}
