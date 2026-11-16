@@ -78,6 +78,17 @@ class QualityContextPressureTests(unittest.TestCase):
         self.assertIn("观测 1 / 1", text)
         self.assertIn("Soft=6553", text)
         self.assertIn("14100", text)
+        # An exact count can fit the Token budget while the separate
+        # serialized-byte limit still denies the request.
+        bytes_only = copy.deepcopy(report)
+        bytes_only_pressure = next(s for s in bytes_only["samples"]
+                                   if s["caseID"] == "distractor-05")["contextPressure"]
+        bytes_only_pressure.update(countSource="exact", hardTokenEstimate=1024,
+                                   serializedBytes=(4 << 20) + 1,
+                                   reason="no_artifact_reader")
+        bytes_facts = baseline.quality_pressure_facts(bytes_only)
+        self.assertEqual(bytes_facts["failures"][0]["rejectedRequestAssessment"]["hardTokenEstimate"], 1024)
+        self.assertEqual(bytes_facts["failures"][0]["compactionOutcome"], "no_artifact_reader")
         for change in (
             lambda s: s["contextPressure"].update(countSource="forged"),
             lambda s: s["contextPressure"].update(hardInputTokens=1),
