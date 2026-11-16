@@ -51,24 +51,31 @@ func invocationDelegationDepth(ctx context.Context, store Store, invocation Invo
 	if store == nil || strings.TrimSpace(invocation.ID) == "" || strings.TrimSpace(invocation.TurnID) == "" {
 		return 0, ErrInvalidRequest
 	}
-	items, err := listAllItems(ctx, store, invocation.TurnID)
-	if err != nil {
-		return 0, err
-	}
-	byID := make(map[string]Item, len(items))
-	for _, item := range items {
-		byID[item.ID] = item
-	}
+	// Only the original ancestor chain determines delegation depth. A full
+	// Turn Timeline scan scales with unrelated Items and allocates an index
+	// that already exists in both Memory and PostgreSQL Stores.
+	// GetItem reads the globally unique immutable ID directly; recheck Turn
+	// and parent identity because a global hit is not permission to traverse
+	// an Item from a different Host Turn.
 	depth := 0
 	current := invocation
 	visited := map[string]struct{}{}
 	for strings.TrimSpace(current.ParentItemID) != "" {
+		if current.TurnID != invocation.TurnID {
+			return 0, ErrConflict
+		}
 		if _, exists := visited[current.ID]; exists {
 			return 0, ErrConflict
 		}
 		visited[current.ID] = struct{}{}
-		item, exists := byID[current.ParentItemID]
-		if !exists {
+		item, err := store.GetItem(ctx, current.ParentItemID)
+		if errors.Is(err, ErrNotFound) {
+			return 0, ErrConflict
+		}
+		if err != nil {
+			return 0, err
+		}
+		if item.ID != current.ParentItemID || item.TurnID != invocation.TurnID {
 			return 0, ErrConflict
 		}
 		if item.Kind == ItemDelegation {
@@ -83,6 +90,9 @@ func invocationDelegationDepth(ctx context.Context, store Store, invocation Invo
 		}
 		if loadErr != nil {
 			return 0, loadErr
+		}
+		if parent.ID != item.InvocationID || parent.TurnID != invocation.TurnID {
+			return 0, ErrConflict
 		}
 		current = parent
 	}

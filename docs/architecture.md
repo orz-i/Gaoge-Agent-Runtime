@@ -46,6 +46,23 @@ only persists a Run; `agent.Runner.StartRun` executes its Tool/Model loop.
 | External endpoints, business policy, user-intent selection and principal scoping | Host and edge adapters | No automatic capability routing or implicit permissions |
 | Delivery of already-authorized wakeups | Continuation | A Queue ACK is not proof of an executed external effect |
 
+## Store ports and backend coverage
+
+`agent-runtime-harness` is an optional **Session/Turn/Invocation and Context
+feature layer**, not a SQL backend. Kernel Run and grant/outbox authority live
+behind `kernel.Store` (Memory, PostgreSQL or experimental SQLite); Harness
+Session/Turn/Invocation/Timeline/Context facts live behind the distinct
+`harness.Store` (Memory or PostgreSQL). The `runrelation.Store` owner index
+has Memory, PostgreSQL and experimental SQLite adapters. No general file-based
+Store exists; SQLite is itself a transactional file database.
+
+The PostgreSQL Kernel and Harness adapters may use the same physical database,
+but separate API calls are **not automatically one atomic transaction**.
+Continue to use the existing original grant, receipt and managed-recovery
+proofs across their execution boundary. The SQLite Kernel backend is **not**
+full durable Harness Session/Context persistence. See the [C1/C2 storage
+responsibility matrix](audits/2026-11-16-complexity-c1-c2-storage-and-single-dispatch.md).
+
 ## SubAgent composition
 
 A host may execute a standalone Agent without Harness. For durable specialist

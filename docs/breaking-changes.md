@@ -1,5 +1,22 @@
 # Breaking changes (pre-stable Beta)
 
+## 2026-11-16 — Harness Capability materialization single-Application hard cut
+
+The obsolete `harness.CapabilityInvocationSpec` one-branch union has been
+**removed**. A custom `harness.CapabilityInvocationMaterializer` now implements
+`MaterializeCapability(context.Context, harness.CapabilityMaterializeRequest) (*harness.ApplicationCapabilitySpec, error)`,
+returning the single Application `Input` or `nil` when it cannot materialize
+a command. The old `(harness.CapabilityInvocationSpec, error)` signature
+will not compile against this beta.24 candidate; update Host composition with
+no compatibility wrapper or second dispatch path.
+
+Only Host Application commands were valid before this change. The frozen
+`CommandDescriptor` execution class and source rules, Agent/SubAgent
+orchestration, persisted Invocation and Tool receipt formats, Kernel
+Store grants, Provider requests and SQL migrations are **unchanged**. A
+foreign Agent Invocation can no longer be projected as an Application Tool
+completion. See [the C1/C2 complexity audit](audits/2026-11-16-complexity-c1-c2-storage-and-single-dispatch.md).
+
 ## 2026-11-14 — Continuation Worker projector/reconciler concurrency
 
 `continuation.Worker` now runs the committed-transition `Projector.Project`
