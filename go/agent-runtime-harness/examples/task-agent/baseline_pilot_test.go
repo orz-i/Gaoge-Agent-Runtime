@@ -374,7 +374,7 @@ func TestQualityPilotBudgetAllowsBoundedOpaqueReasoningReplayWithoutWeakeningMod
 	modelRequests, toolsProbe := fixture.streams, fixture.probeStreams
 	fixture.mu.Unlock()
 	if code != 0 || len(start) != 1 || len(samples) != 1 ||
-		samples[0]["status"] != "passed" || len(summaries) != 1 ||
+		samples[0]["status"] != "passed" || samples[0]["contextPressure"] != nil || len(summaries) != 1 ||
 		summaries[0]["attempted"] != float64(1) || summaries[0]["skipped"] != float64(39) ||
 		modelRequests != 4 || toolsProbe != 2 ||
 		start[0]["profile"].(map[string]any)["contextPolicy"].(map[string]any)["maxInputTokens"] != float64(32768) {
@@ -412,5 +412,13 @@ func TestQualityPilotFailsClosedWhenOpaqueReplayExceedsServiceLimit(t *testing.T
 		summaries[0]["skipped"] != float64(39) || dispatched != 2 {
 		t.Fatalf("oversized signed replay bypassed Host budget: exit=%d requests=%d failure=%v",
 			code, dispatched, samples)
+	}
+	pressure, ok := samples[0]["contextPressure"].(map[string]any)
+	if !ok || pressure["countSource"] != "estimated" ||
+		pressure["reason"] != "no_safe_compaction" ||
+		pressure["hardInputTokens"] != float64(32768) ||
+		pressure["hardTokenEstimate"].(float64) <= pressure["hardInputTokens"].(float64) ||
+		pressure["serializedBytes"].(float64) <= 0 || pressure["maxSerializedBytes"].(float64) <= 0 {
+		t.Fatalf("missing content-free assessment on original rejected request: %+v", samples[0])
 	}
 }

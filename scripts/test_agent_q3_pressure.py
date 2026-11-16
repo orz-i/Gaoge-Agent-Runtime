@@ -61,6 +61,39 @@ class QualityContextPressureTests(unittest.TestCase):
         report["samples"][20].pop("preInterruption")
         self.assertEqual(baseline.quality_pressure_facts(report)["failures"][0]["category"], "other_or_unknown")
 
+    def test_real_rejected_request_assessment_is_reported_separately_from_aggregate_count(self):
+        report = failed_quality_report()
+        sample = next(s for s in report["samples"] if s["caseID"] == "distractor-05")
+        report["runner"]["profile"]["contextPolicy"]["maxSerializedBytes"] = 4 << 20
+        sample["contextPressure"] = {
+            "countSource": "estimated", "hardInputTokens": 8192,
+            "softInputTokens": 6553, "hardTokenEstimate": 14100,
+            "serializedBytes": 12000, "maxSerializedBytes": 4 << 20,
+            "reason": "no_safe_compaction",
+        }
+        facts = baseline.quality_pressure_facts(report)
+        self.assertEqual(facts["failures"][0]["rejectedRequestAssessment"]["hardTokenEstimate"], 14100)
+        self.assertEqual(facts["failures"][0]["compactionOutcome"], "no_safe_compaction")
+        text = baseline.quality_pressure_markdown(facts)
+        self.assertIn("观测 1 / 1", text)
+        self.assertIn("Soft=6553", text)
+        self.assertIn("14100", text)
+        for change in (
+            lambda s: s["contextPressure"].update(countSource="forged"),
+            lambda s: s["contextPressure"].update(hardInputTokens=1),
+            lambda s: s["contextPressure"].update(hardTokenEstimate=1),
+            lambda s: s["contextPressure"].update(maxSerializedBytes=100),
+            lambda s: s["contextPressure"].update(reason="secret response"),
+            lambda s: s["contextPressure"].update(serializedBytes=True),
+            lambda s: s["contextPressure"].update(secret="payload"),
+            lambda s: s.update(failureCode="oracle_failed"),
+        ):
+            candidate = copy.deepcopy(report)
+            wrong = next(s for s in candidate["samples"] if s["caseID"] == "distractor-05")
+            change(wrong)
+            with self.subTest(change=change), self.assertRaises(baseline.SafeFailure):
+                baseline.quality_pressure_facts(candidate)
+
     def test_aggregate_counter_is_not_a_per_rejected_request_proof(self):
         report = failed_quality_report()
         sample = next(item for item in report["samples"] if item["caseID"] == "distractor-05")
@@ -79,7 +112,7 @@ class QualityContextPressureTests(unittest.TestCase):
         self.assertIsNone(failure["compactionOutcome"])
         text = baseline.quality_pressure_markdown(facts)
         self.assertIn("5 / 4 / 1", text)
-        self.assertIn("不能定位到最后一次被拒绝的请求", text)
+        self.assertIn("不能定位到最终被拒绝的请求", text)
 
     def test_matched_input_undercount_is_a_separate_safety_signal(self):
         config = quality.quality_config()
