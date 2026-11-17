@@ -195,7 +195,7 @@ func (plugin *Plugin) Cancel(
 // entry points. Resolver metadata alone may select a binding but can never
 // authenticate a same-ID forged terminal or authorize remote side effects.
 func (plugin *Plugin) certifiedShadow(ctx context.Context, snapshot kernel.Snapshot) (*ShadowRunner, error) {
-	state, err := decodeTopologyState(snapshot.State)
+	state, err := decodeShadowIdentityState(snapshot.State)
 	if err != nil || strings.TrimSpace(state.TargetID) == "" || strings.TrimSpace(state.TargetRevision) == "" {
 		return nil, errors.Join(ErrRemoteBindingChanged, err)
 	}
@@ -223,7 +223,7 @@ func (plugin *Plugin) frozenRevision(ctx context.Context, runID, targetID string
 	if snapshot.Run.Kind != RunKind {
 		return "", ErrInvalidTarget
 	}
-	state, err := decodeTopologyState(snapshot.State)
+	state, err := decodeShadowIdentityState(snapshot.State)
 	if err != nil || state.TargetID != targetID || strings.TrimSpace(state.TargetRevision) == "" {
 		return "", ErrRemoteBindingChanged
 	}

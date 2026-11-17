@@ -33,7 +33,6 @@ func TestOwnerRunHTTPDoesNotReturnRawFailureDetailAcrossRoutes(t *testing.T) {
 	for _, endpoint := range []string{
 		"/api/v1/runs/owner-failed-run",
 		"/api/v1/runs/owner-failed-run/events",
-		"/api/v1/runs/owner-failed-run/workbench",
 	} {
 		res := performAuthorizationRequest(t, engine, stdhttp.MethodGet, endpoint, nil)
 		if res.Code != stdhttp.StatusOK || strings.Contains(res.Body.String(), privateDiagnosticFixture) {

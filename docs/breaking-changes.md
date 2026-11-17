@@ -1,5 +1,20 @@
 # Breaking changes (pre-stable Beta)
 
+## 2026-11-17 — Remove Runtime Workbench and Topology display contracts
+
+**Breaking Go/HTTP/TypeScript API:** Delete Core `workbench`,
+`adapters/topology`, A2A's Workbench `TopologyProvider` and the optional
+HTTP `GET /runs/{runID}/workbench` route, Handler Workbench injection,
+OpenAPI Workbench/Topology schemas and TypeScript `runs.workbench`/DTOs.
+There is no compatibility bridge or replacement SDK presentation framework.
+
+Hosts build their own product detail, timeline and topology views from
+`GET /runs/{runID}`, `GET /runs/{runID}/events` and
+`GET /runs/{runID}/feed`, subject to existing Host authorization and public
+redaction requirements. The A2A Shadow state decoder remains on the real
+execution/identity-proof path; remote target binding and Handoff physical
+receipts are not changed. No persisted Run/Turn/Store data is migrated.
+
 ## 2026-11-17 — Remove Core Host Bootstrap / Compose / Feature metadata
 
 **Breaking Go API:** The pre-stable `agent-runtime/bootstrap` and

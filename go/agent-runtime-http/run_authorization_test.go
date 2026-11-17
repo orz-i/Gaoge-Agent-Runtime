@@ -11,7 +11,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workbench"
 )
 
 func TestRunObjectAuthorizationHidesCrossTenantResources(t *testing.T) {
@@ -27,12 +26,6 @@ func TestRunObjectAuthorizationHidesCrossTenantResources(t *testing.T) {
 		t.Fatalf("forbidden=%d %s missing=%d %s", private.Code, private.Body.String(), missing.Code, missing.Body.String())
 	}
 
-	workbenchResponse := performAuthorizationRequest(
-		t, engine, stdhttp.MethodGet, "/api/v1/runs/private-run/workbench", nil,
-	)
-	if workbenchResponse.Code != stdhttp.StatusNotFound {
-		t.Fatalf("workbench status=%d body=%s", workbenchResponse.Code, workbenchResponse.Body.String())
-	}
 	eventsResponse := performAuthorizationRequest(
 		t, engine, stdhttp.MethodGet, "/api/v1/runs/private-run/events", nil,
 	)
@@ -141,14 +134,10 @@ func newAuthorizationHTTPTest(
 	if err != nil {
 		t.Fatal(err)
 	}
-	query, err := workbench.NewQuery(runtime, runtime, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
 	engine := gin.New()
 	NewModule(NewHandler(Dependencies{
-		Runtime: runtime, Workbench: query,
-		Shared: NewShared(authorizationPrincipal{actor: principal}, nil, runtime, authorizer),
+		Runtime: runtime,
+		Shared:  NewShared(authorizationPrincipal{actor: principal}, nil, runtime, authorizer),
 	})).RegisterRoutes(engine.Group("/api/v1"))
 	return engine, runtime
 }

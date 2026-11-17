@@ -8,7 +8,6 @@ import type {
   RunEventPageDTO,
   RunSnapshotDTO,
   RunFeedEventDTO,
-  WorkbenchDTO,
 } from "./types.js";
 import { createAgentCapability } from "./capabilities/agent.js";
 import { pathPart } from "./capabilities/shared.js";
@@ -296,8 +295,6 @@ export class RuntimeClient {
       },
       cancel: (runID: string, payload: CancelRunRequest, request?: RequestOptions) =>
         this.request<CancelRunResponse>(`/runs/${pathPart(runID)}/cancel`, { method: "POST", body: JSON.stringify(payload) }, request),
-      workbench: (runID: string, request?: RequestOptions) =>
-        this.request<WorkbenchDTO>(`/runs/${pathPart(runID)}/workbench`, {}, request),
       feed: (runID: string, request?: RunFeedOptions) => this.streamRunFeed(runID, request),
     };
   }

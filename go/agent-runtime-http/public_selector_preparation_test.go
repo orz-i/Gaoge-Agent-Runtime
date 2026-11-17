@@ -7,7 +7,6 @@ import (
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runfeed"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workbench"
 )
 
 const selectorPrivateInput = "PRIVATE_SELECTOR_PREPARED_INPUT"
@@ -40,26 +39,12 @@ func TestSelectorPreparedInputRemovedFromPublicDiagnosticSurfaces(t *testing.T) 
 	assertNoSelectorPreparedInput(t, PublicDiagnosticPayload(public))
 	snapshot := kernel.Snapshot{Run: kernel.Run{Kind: "group_chat", ID: "selector-private"}, State: payload}
 	assertNoSelectorPreparedInput(t, SnapshotResponse(snapshot).State)
-	detail := workbench.Detail{
-		Run:      snapshot.Run,
-		Sections: []workbench.Section{{Name: "state", Available: true, Content: payload}},
-		Timeline: []workbench.TimelineItem{{ID: "selector-event", Kind: "event", Data: payload}},
-		Topology: &workbench.TopologyV1{
-			Nodes: []workbench.TopologyNode{{ID: "selector-node", Kind: "selector", Data: payload}},
-			Edges: []workbench.TopologyEdge{{ID: "selector-edge", Data: payload}},
-		},
-	}
-	encoded, err := json.Marshal(publicWorkbench(detail))
+	encoded, err := json.Marshal(publicRunFeedEvent(runfeed.Event{RunID: snapshot.Run.ID, Type: runfeed.EventRunStarted, Data: payload}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertNoSelectorPreparedInput(t, encoded)
-	encoded, err = json.Marshal(publicRunFeedEvent(runfeed.Event{RunID: snapshot.Run.ID, Type: runfeed.EventRunStarted, Data: payload}))
-	if err != nil {
-		t.Fatal(err)
-	}
-	assertNoSelectorPreparedInput(t, encoded)
-	if !bytes.Equal(payload, original) || !bytes.Equal(snapshot.State, original) || !bytes.Equal(detail.Sections[0].Content, original) {
+	if !bytes.Equal(payload, original) || !bytes.Equal(snapshot.State, original) {
 		t.Fatal("public projection mutated authoritative selector input")
 	}
 }

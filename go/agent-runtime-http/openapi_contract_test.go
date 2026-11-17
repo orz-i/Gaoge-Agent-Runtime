@@ -91,7 +91,6 @@ func TestOpenAPIExposesTargetRuntimeAndHarnessResources(t *testing.T) {
 		"get /runs/{runID}",
 		"get /runs/{runID}/events",
 		"get /runs/{runID}/feed",
-		"get /runs/{runID}/workbench",
 		"post /agent-runs",
 		"post /harness/turns/{turnID}/allowance",
 		"post /harness/turns/{turnID}/approval",

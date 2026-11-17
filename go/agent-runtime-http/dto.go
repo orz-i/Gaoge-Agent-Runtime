@@ -12,7 +12,6 @@ import (
 	"github.com/gin-gonic/gin/binding"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workbench"
 )
 
 var (
@@ -96,8 +95,6 @@ func snapshotResponse(snapshot kernel.Snapshot) RunSnapshotResponse {
 	}
 	return response
 }
-
-func workbenchResponse(detail workbench.Detail) workbench.Detail { return publicWorkbench(detail) }
 
 func bindStrictJSON(context *gin.Context, target interface{}) error {
 	if context == nil || context.Request == nil || context.Request.Body == nil {

@@ -4,7 +4,6 @@
     {"method": "get", "path": "/runs/{runID}", "operationId": "getRun"},
     {"method": "get", "path": "/runs/{runID}/events", "operationId": "listRunEvents"},
     {"method": "get", "path": "/runs/{runID}/feed", "operationId": "streamRunFeed"},
-    {"method": "post", "path": "/runs/{runID}/cancel", "operationId": "cancelRun"},
-    {"method": "get", "path": "/runs/{runID}/workbench", "operationId": "getWorkbench"}
+    {"method": "post", "path": "/runs/{runID}/cancel", "operationId": "cancelRun"}
   ]
 }

@@ -87,6 +87,18 @@ type shadowState struct {
 	Proof                 string `json:"proof,omitempty"`
 }
 
+// decodeShadowIdentityState reads the persisted identity for the original
+// remote ChildRunner. This is an execution-proof prerequisite; it does not
+// authorize a network call or substitute for the frozen ChildRunner proof.
+func decodeShadowIdentityState(raw json.RawMessage) (shadowState, error) {
+	var state shadowState
+	if json.Unmarshal(raw, &state) != nil || strings.TrimSpace(state.RemoteName) == "" ||
+		strings.TrimSpace(state.RemoteURL) == "" || strings.TrimSpace(state.ProtocolVersion) == "" {
+		return shadowState{}, ErrRemoteBindingChanged
+	}
+	return state, nil
+}
+
 // NewShadowRunner creates one A2A ChildRunner bound to one immutable discovery.
 func NewShadowRunner(dependencies ShadowDependencies) (*ShadowRunner, error) {
 	descriptor := dependencies.Discovery.Descriptor

@@ -1,7 +1,7 @@
 # Agent Runtime HTTP Adapter
 
 `github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-http` exposes HTTP v1 for Runtime
-Runs and Workbench resources. The first-party `harness` submodule exposes the
+Runs, durable Events and Run Feed. The first-party `harness` submodule exposes the
 Harness Turn snapshot, semantic feed and approval continuation resources on
 the same versioned wire surface without making Harness part of Runtime Core.
 The host injects `PrincipalResolver`, request metadata, the authoritative Run
@@ -12,7 +12,6 @@ Passing a nil authorizer selects the fail-closed owner-only policy:
 shared := runtimehttp.NewShared(principalResolver, metadataResolver, runtime, runAuthorizer)
 handler := runtimehttp.NewHandler(runtimehttp.Dependencies{
     Runtime: runtime,
-    Workbench: workbenchQuery,
     Feed: runFeed,
     Shared: shared,
 })

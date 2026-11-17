@@ -13,7 +13,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workbench"
 )
 
 func BenchmarkHTTPGetRunMemory(b *testing.B) {
@@ -72,14 +71,10 @@ func benchmarkHTTPEngine(b *testing.B, eventCount int) (*gin.Engine, *kernel.Run
 			b.Fatal(err)
 		}
 	}
-	query, err := workbench.NewQuery(runtime, runtime, nil)
-	if err != nil {
-		b.Fatal(err)
-	}
 	engine := gin.New()
 	NewModule(NewHandler(Dependencies{
-		Runtime: runtime, Workbench: query,
-		Shared: NewShared(httpBenchmarkPrincipal{actor: actor}, nil, runtime, nil),
+		Runtime: runtime,
+		Shared:  NewShared(httpBenchmarkPrincipal{actor: actor}, nil, runtime, nil),
 	})).RegisterRoutes(engine.Group("/api/v1"))
 	return engine, runtime
 }
