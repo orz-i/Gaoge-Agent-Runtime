@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"testing"
-	"time"
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
@@ -63,7 +62,7 @@ func (capture *roleScopedHostedModel) Generate(_ context.Context, request model.
 		if capture.rootCalls == 1 {
 			return model.Response{ToolCalls: []tools.Call{{
 				ToolKey:   harness.DelegationToolKey,
-				Arguments: json.RawMessage(`{"roleID":"researcher","goal":"search the latest information"}`),
+				Arguments: json.RawMessage(`{"memberID":"researcher","goal":"search the latest information"}`),
 			}}}, nil
 		}
 		return model.Response{Content: "research summarized"}, nil
@@ -92,6 +91,9 @@ func runRoleScopedHostedTool(t *testing.T, discovery bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	hostDelegationPolicy0 := hostSelectedAgentPolicy{MemberID: "researcher", Agent: agent.StartRequest{
+		Model: "specialist-model", HostedToolGrants: []agent.HostedToolGrant{{Key: scopedSearchKey, DefinitionVersion: "role-web-version-1"}},
+	}}
 	delegation := harness.NewDelegationToolHandler()
 	registrations := []tools.Registration{harness.DelegationToolRegistration(delegation)}
 	keys := []string{harness.DelegationToolKey}
@@ -133,7 +135,9 @@ func runRoleScopedHostedTool(t *testing.T, discovery bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner, err := harness.NewRunner(delegationHarnessDependencies(runtime, direct, store, registry, handoffs, relations, false))
+	composed := delegationHarnessDependencies(runtime, direct, store, registry, handoffs, relations, false)
+	composed.DelegationPolicy = hostDelegationPolicy0
+	runner, err := harness.NewRunner(composed)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,13 +159,6 @@ func runRoleScopedHostedTool(t *testing.T, discovery bool) {
 			Model:        "root-model",
 			ToolKeys:     keys,
 			ToolPolicies: policies,
-			Roles: []harness.RoleSnapshot{{
-				ID: "researcher", Revision: 1, Name: "Researcher",
-				Model: "specialist-model",
-				HostedToolGrants: []agent.HostedToolGrant{{
-					Key: scopedSearchKey, DefinitionVersion: "role-web-version-1",
-				}},
-			}},
 		},
 	})
 	if err != nil {
@@ -172,50 +169,5 @@ func runRoleScopedHostedTool(t *testing.T, discovery bool) {
 	}
 	if capture.rootCalls != 2 || capture.childCalls != 1 {
 		t.Fatalf("root calls=%d child calls=%d", capture.rootCalls, capture.childCalls)
-	}
-}
-
-func TestRoleHostedGrantSealedWithoutParentToolKey(t *testing.T) {
-	_, err := harness.SealConfigSnapshot("turn-grant", harness.ConfigSnapshot{
-		Model: "root-model", ToolKeys: []string{harness.DelegationToolKey},
-		Roles: []harness.RoleSnapshot{{
-			ID: "researcher", Revision: 1, Name: "Researcher", Model: "specialist-model",
-			HostedToolGrants: []agent.HostedToolGrant{{Key: scopedSearchKey, DefinitionVersion: "v1"}},
-		}},
-	}, time.Now())
-	if err != nil {
-		t.Fatalf("scoped provider Tool must not require parent activation: %v", err)
-	}
-
-	_, err = harness.SealConfigSnapshot("turn-invalid", harness.ConfigSnapshot{
-		Model: "root-model", ToolKeys: []string{harness.DelegationToolKey},
-		Roles: []harness.RoleSnapshot{{
-			ID: "researcher", Revision: 1, Name: "Researcher", Model: "specialist-model",
-			HostedToolGrants: []agent.HostedToolGrant{{Key: scopedSearchKey, DefinitionVersion: ""}},
-		}},
-	}, time.Now())
-	if err == nil {
-		t.Fatal("unversioned role Hosted grant accepted")
-	}
-
-	_, err = harness.SealConfigSnapshot("turn-inherited-role-model", harness.ConfigSnapshot{
-		Model: "root-model", ToolKeys: []string{harness.DelegationToolKey},
-		Roles: []harness.RoleSnapshot{{
-			ID: "researcher", Revision: 1, Name: "Researcher",
-			HostedToolGrants: []agent.HostedToolGrant{{Key: scopedSearchKey, DefinitionVersion: "v1"}},
-		}},
-	}, time.Now())
-	if err != nil {
-		t.Fatalf("inherited frozen parent model must support versioned child grant: %v", err)
-	}
-	_, err = harness.SealConfigSnapshot("turn-no-model", harness.ConfigSnapshot{
-		ToolKeys: []string{harness.DelegationToolKey},
-		Roles: []harness.RoleSnapshot{{
-			ID: "researcher", Revision: 1, Name: "Researcher",
-			HostedToolGrants: []agent.HostedToolGrant{{Key: scopedSearchKey, DefinitionVersion: "v1"}},
-		}},
-	}, time.Now())
-	if err == nil {
-		t.Fatal("unbound inherited model accepted a Hosted grant")
 	}
 }

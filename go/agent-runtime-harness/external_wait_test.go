@@ -33,7 +33,7 @@ func (client *localExternalDelegationModel) Generate(_ context.Context, request 
 	if model.TextValue(last.Content) == "compute child" {
 		return model.Response{ToolCalls: []tools.Call{{ID: "child-external-call", ToolKey: "test.local_external", Arguments: json.RawMessage(`{}`)}}}, nil
 	}
-	return model.Response{ToolCalls: []tools.Call{{ID: "local-delegation-call", ToolKey: harness.DelegationToolKey, Arguments: json.RawMessage(`{"roleID":"researcher","goal":"compute child"}`)}}}, nil
+	return model.Response{ToolCalls: []tools.Call{{ID: "local-delegation-call", ToolKey: harness.DelegationToolKey, Arguments: json.RawMessage(`{"memberID":"researcher","goal":"compute child"}`)}}}, nil
 }
 
 func TestLocalDelegationExternalWaitDoesNotPollAndResumesBothCalls(t *testing.T) {
@@ -44,6 +44,7 @@ func TestLocalDelegationExternalWaitDoesNotPollAndResumesBothCalls(t *testing.T)
 	}
 	store := harness.NewMemoryStore()
 	client := &localExternalDelegationModel{}
+	hostDelegationPolicy0 := hostSelectedAgentPolicy{MemberID: "researcher", Agent: agent.StartRequest{Model: "fixture", ToolKeys: []string{"test.local_external"}}}
 	handler := harness.NewDelegationToolHandler()
 	ready, executions := false, 0
 	registry, err := tools.NewRegistry([]tools.Registration{harness.DelegationToolRegistration(handler), {
@@ -86,7 +87,9 @@ func TestLocalDelegationExternalWaitDoesNotPollAndResumesBothCalls(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner, err := harness.NewRunner(delegationHarnessDependencies(runtime, direct, store, registry, coordinator, relations, false))
+	composed := delegationHarnessDependencies(runtime, direct, store, registry, coordinator, relations, false)
+	composed.DelegationPolicy = hostDelegationPolicy0
+	runner, err := harness.NewRunner(composed)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,8 +100,7 @@ func TestLocalDelegationExternalWaitDoesNotPollAndResumesBothCalls(t *testing.T)
 		HostThread: harness.HostRef{Kind: testThreadKind, ID: "local-external-thread"}, HostTurn: harness.HostRef{Kind: testContextHostKind, ID: "local-external-turn"},
 		Actor: kernel.ActorRef{TenantID: testTenant, ActorID: testActor}, Thread: kernel.ThreadRef{Kind: testThreadKind, ID: "local-external-thread"}, Goal: "delegate calculation",
 		Config: harness.ConfigSnapshot{
-			Model: "fixture", ToolKeys: []string{harness.DelegationToolKey, "test.local_external"}, ToolPolicies: []harness.ToolPolicySnapshot{harness.DelegationToolPolicySnapshot()},
-			Roles: []harness.RoleSnapshot{{ID: "researcher", Revision: 1, Name: "Researcher", Model: "fixture", ToolKeys: []string{"test.local_external"}}},
+			Model: "fixture", ToolKeys: []string{harness.DelegationToolKey, "test.local_external"}, ToolPolicies: []harness.ToolPolicySnapshot{harness.DelegationToolPolicySnapshot(), {Key: "test.local_external", DefinitionVersion: "v1", ExecutionMode: "local_dispatch"}},
 		},
 	})
 	if err != nil {

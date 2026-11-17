@@ -11,7 +11,7 @@ import (
 )
 
 func TestFrozenPendingDispatchReadsOriginalCallWithoutGrantingReplay(t *testing.T) {
-	arguments := "{\"roleID\":\"analyst\",\"goal\":\"review\"}"
+	arguments := "{\"memberID\":\"analyst\",\"goal\":\"review\"}"
 	state := runState{
 		Budget:         runtimebudget.Snapshot{Limits: runtimebudget.Limits{MaxLLMCalls: 4, MaxToolCalls: 4}},
 		PendingCalls:   []tools.Call{{ID: "delegate-1", ToolKey: "harness.delegate_agent", Arguments: json.RawMessage(arguments)}},

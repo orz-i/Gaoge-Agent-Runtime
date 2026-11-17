@@ -24,15 +24,7 @@ func TestModelOptionsAreUniqueBeforeFrozenConfigHash(t *testing.T) {
 			if err == nil {
 				t.Fatal("ambiguous ModelOptions were normalized before freezing")
 			}
-			_, err = harness.SealConfigSnapshot("audit-turn", harness.ConfigSnapshot{
-				Model: "gpt-6-sol",
-				Roles: []harness.RoleSnapshot{{
-					ID: "role", Revision: 1, Name: "Role", ModelOptions: json.RawMessage(options),
-				}},
-			}, time.Now().UTC())
-			if err == nil {
-				t.Fatal("ambiguous Role ModelOptions were normalized before freezing")
-			}
+
 		})
 	}
 	accepted := json.RawMessage(`{"reasoning":{"effort":"high"},"temperature":0.25}`)

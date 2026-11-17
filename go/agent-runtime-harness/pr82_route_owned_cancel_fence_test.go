@@ -14,7 +14,6 @@ import (
 func TestPR82ExactOriginCollisionCannotAuthorizeRemoteCancellation(t *testing.T) {
 	f, child := pr82StartedRemoteHandoff(t, false)
 	d := f.delegation()
-	d.RoleID = ""
 	remote, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
 	if err != nil {
 		t.Fatal(err)

@@ -29,19 +29,12 @@ type DelegationToolPolicy interface {
 // DelegationToolHandler is explicitly bound once by the composition root after Runner construction.
 // The Tool Registry remains immutable; this is not a dynamic capability registry.
 type DelegationToolHandler struct {
-	mu       sync.RWMutex
-	runner   *Runner
-	policies []DelegationToolPolicy
+	mu     sync.RWMutex
+	runner *Runner
 }
 
-func NewDelegationToolHandler(policies ...DelegationToolPolicy) *DelegationToolHandler {
-	bound := make([]DelegationToolPolicy, 0, len(policies))
-	for _, policy := range policies {
-		if policy != nil {
-			bound = append(bound, policy)
-		}
-	}
-	return &DelegationToolHandler{policies: bound}
+func NewDelegationToolHandler() *DelegationToolHandler {
+	return &DelegationToolHandler{}
 }
 
 func (handler *DelegationToolHandler) Bind(runner *Runner) error {
@@ -94,8 +87,8 @@ func (handler *DelegationToolHandler) Execute(
 	}
 	if err != nil {
 		if code, _, correctable := tools.RecoverableCallErrorInfo(err); correctable &&
-			(code == "delegation.tool_selection_denied" || code == "delegation.role_unavailable") {
-			// These two exact rejections originate in prepareDelegation,
+			code == "delegation.tool_selection_denied" {
+			// This exact authorization denial originates in prepareDelegation,
 			// before child admission, relation writes, or physical effect.
 			return tools.RecoverableNoEffectResult(request.Call.ID, err)
 		}
@@ -373,14 +366,18 @@ func (handler *DelegationToolHandler) prepareRequest(
 	input DelegateRequest,
 ) (DelegateRequest, error) {
 	prepared, found, err := runner.preparedDelegationToolRequest(ctx, request)
-	if err != nil || found {
-		return prepared, err
+	if err != nil {
+		return DelegateRequest{}, err
 	}
-	for _, policy := range handler.policies {
-		input, err = policy.PrepareDelegation(ctx, tools.CloneExecutionRequest(request), input)
-		if err != nil {
-			return DelegateRequest{}, err
-		}
+	if found {
+		// This frozen Tool intent was already authorized by the Host on its
+		// first dispatch. Recovery must not re-run Host policy.
+		prepared.hostAuthorized = true
+		return prepared, nil
+	}
+	input, err = runner.authorizeDelegation(ctx, tools.CloneExecutionRequest(request), input)
+	if err != nil {
+		return DelegateRequest{}, err
 	}
 	input.callID = request.Call.ID
 	input.callHash = hashInvocationBytes(request.Call.Arguments)
@@ -430,10 +427,10 @@ func (runner *Runner) preparedDelegationToolRequest(
 		return DelegateRequest{}, false, nil
 	}
 	var payload delegationItemPayload
-	if err = json.Unmarshal(first.Payload, &payload); err != nil {
-		return DelegateRequest{}, false, err
+	if !decodeTypedAuthorityJSON(first.Payload, &payload) {
+		return DelegateRequest{}, false, ErrConflict
 	}
-	return DelegateRequest{RoleID: payload.RoleID, MemberID: payload.MemberID, Goal: payload.Goal, callID: request.Call.ID}, true, nil
+	return DelegateRequest{MemberID: payload.MemberID, MemberRevision: payload.MemberRevision, Goal: payload.Goal, callID: request.Call.ID}, true, nil
 }
 
 func delegationToolID(invocation Invocation, callID string) string {
@@ -446,7 +443,7 @@ func DelegationToolRegistration(handler *DelegationToolHandler) tools.Registrati
 			Key:         DelegationToolKey,
 			Name:        "delegate_to_specialist_agent",
 			Description: "Delegate one focused subtask to an authorized specialist. A failed or cancelled child returns a status receipt; use successful evidence, retry selectively, or explain the limitation instead of assuming the parent task failed.",
-			InputSchema: json.RawMessage(`{"type":"object","additionalProperties":false,"required":["goal"],"anyOf":[{"required":["roleID"]},{"required":["memberID"]}],"properties":{"roleID":{"type":"string","minLength":1,"maxLength":160},"memberID":{"type":"string","minLength":1,"maxLength":160},"goal":{"type":"string","minLength":1,"maxLength":200000},"toolKeys":{"type":"array","maxItems":16,"uniqueItems":true,"items":{"type":"string","minLength":1,"maxLength":160}}}}`),
+			InputSchema: json.RawMessage(`{"type":"object","additionalProperties":false,"required":["memberID","goal"],"properties":{"memberID":{"type":"string","minLength":1,"maxLength":160},"goal":{"type":"string","minLength":1,"maxLength":200000}}}`),
 		},
 		Handler: handler,
 	}

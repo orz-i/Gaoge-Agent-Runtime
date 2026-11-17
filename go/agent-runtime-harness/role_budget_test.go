@@ -66,6 +66,11 @@ func testRoleDelegationChildApproval(t *testing.T, wrongRoute bool, terminalPare
 	if err != nil {
 		t.Fatal(err)
 	}
+	hostDelegationPolicy0 := hostSelectedAgentPolicy{
+		MemberID: "researcher", MemberRevision: "v3",
+		Agent: agent.StartRequest{Model: "specialist-model", Instructions: "Use frozen evidence.\n\n## Evidence\nQuote the evidence.",
+			ToolKeys: []string{roleEvidenceTool}, Limits: budget.Limits{MaxLLMCalls: 2}},
+	}
 	delegation := harness.NewDelegationToolHandler()
 	registry, err := tools.NewRegistry([]tools.Registration{harness.DelegationToolRegistration(delegation), {
 		Definition: tools.Definition{Key: roleEvidenceTool, Name: "read_evidence", InputSchema: json.RawMessage(`{"type":"object"}`)}, Handler: roleEvidenceHandler{},
@@ -81,10 +86,6 @@ func testRoleDelegationChildApproval(t *testing.T, wrongRoute bool, terminalPare
 	if err != nil {
 		t.Fatal(err)
 	}
-	rolePreparer, err := harness.NewRoleModelRequestPreparer(store)
-	if err != nil {
-		t.Fatal(err)
-	}
 	verifiedTool, err := shared.VerifiedToolOutcomeVerifier(delegation)
 	if err != nil {
 		t.Fatal(err)
@@ -92,7 +93,7 @@ func testRoleDelegationChildApproval(t *testing.T, wrongRoute bool, terminalPare
 	direct, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: meteredModel, Catalog: registry, Executor: registry,
 		Approvals: interactionadapter.New(approvals), ApprovalPolicies: []plugin.ApprovalPolicy{policy},
 		ToolOutcomeVerifier: verifiedTool,
-		RunMiddleware:       []plugin.RunMiddleware{shared}, PrepareModelRequest: rolePreparer, ModelMiddleware: []plugin.ModelMiddleware{shared}, ToolMiddleware: []plugin.ToolMiddleware{shared}})
+		RunMiddleware:       []plugin.RunMiddleware{shared}, ModelMiddleware: []plugin.ModelMiddleware{shared}, ToolMiddleware: []plugin.ToolMiddleware{shared}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +107,7 @@ func testRoleDelegationChildApproval(t *testing.T, wrongRoute bool, terminalPare
 		rootAgent = wrong
 	}
 	runner, err := harness.NewRunner(harness.Dependencies{Runtime: runtime, Agent: rootAgent, Store: store, Clock: fixedClock{},
-		Handoffs: handoffs, Relations: relations, Budget: shared})
+		Handoffs: handoffs, Relations: relations, Budget: shared, DelegationPolicy: hostDelegationPolicy0})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,11 +119,7 @@ func testRoleDelegationChildApproval(t *testing.T, wrongRoute bool, terminalPare
 	request.Config.DelegationPolicy = harness.DelegationPolicySnapshot{MaxDepth: 1}
 	request.Config.ToolKeys = []string{harness.DelegationToolKey, roleEvidenceTool}
 	request.Config.ToolPolicies = []harness.ToolPolicySnapshot{harness.DelegationToolPolicySnapshot(), {
-		Key: roleEvidenceTool, DefinitionVersion: "v1", ApprovalCapability: "per_call", ApprovalMode: "always",
-	}}
-	request.Config.Roles = []harness.RoleSnapshot{{ID: "researcher", Revision: 3, Name: "Researcher", Model: "specialist-model", Instructions: "Use frozen evidence.",
-		ToolKeys: []string{harness.DelegationToolKey, roleEvidenceTool}, Limits: budget.Limits{MaxLLMCalls: 2},
-		Skills: []harness.SkillSnapshot{{ID: "skill-1", Revision: 2, Title: "Evidence", Markdown: "Quote the evidence."}},
+		Key: roleEvidenceTool, DefinitionVersion: "v1", ExecutionMode: "local_dispatch", ApprovalCapability: "per_call", ApprovalMode: "always",
 	}}
 	started, err := runner.StartAgentTurn(t.Context(), request)
 	if err != nil {
@@ -132,10 +129,10 @@ func testRoleDelegationChildApproval(t *testing.T, wrongRoute bool, terminalPare
 		t.Fatalf("subtasks=%+v", started.Subtasks)
 	}
 	task := started.Subtasks[0]
-	if task.Model != "specialist-model" || task.RoleRevision != 3 || task.Status != "waiting_input" {
+	if task.Model != "specialist-model" || task.MemberRevision != "v3" || task.Status != "waiting_input" {
 		t.Fatalf("role=%+v", task)
 	}
-	if _, nestedErr := runner.DelegateByExecutionRefID(t.Context(), task.RunID, harness.DelegateRequest{RoleID: "researcher", Goal: "Nested analysis"}); !errors.Is(nestedErr, harness.ErrInvalidRequest) {
+	if _, nestedErr := runner.DelegateByExecutionRefID(t.Context(), task.RunID, harness.DelegateRequest{MemberID: "researcher", Goal: "Nested analysis"}); !errors.Is(nestedErr, harness.ErrInvalidRequest) {
 		t.Fatalf("nested delegation bypassed depth policy: %v", nestedErr)
 	}
 	if started.Budget == nil || started.Budget.ActiveRuns != 0 || started.Budget.Usage.ChildRuns != 1 {
@@ -286,7 +283,7 @@ func (client *roleBudgetModel) Generate(_ context.Context, request model.Request
 	if request.Model == "specialist-model" {
 		response.ToolCalls = []tools.Call{{ID: "lookup", ToolKey: roleEvidenceTool, Arguments: json.RawMessage(`{}`)}}
 	} else {
-		response.ToolCalls = []tools.Call{{ID: "delegate", ToolKey: harness.DelegationToolKey, Arguments: json.RawMessage(`{"roleID":"researcher","goal":"Find evidence"}`)}}
+		response.ToolCalls = []tools.Call{{ID: "delegate", ToolKey: harness.DelegationToolKey, Arguments: json.RawMessage(`{"memberID":"researcher","goal":"Find evidence"}`)}}
 	}
 	return response, nil
 }

@@ -17,16 +17,15 @@ func TestFrozenWaitingDelegationRejectsForgedToolAndAuthority(t *testing.T) {
 	turn := Turn{ID: "turn-1"}
 	owner := Invocation{ID: "owner", TurnID: turn.ID, ExecutionRefID: "parent-run"}
 	call := tools.Call{ID: "delegate-1", ToolKey: DelegationToolKey,
-		Arguments: json.RawMessage(`{"roleID":"analyst","goal":"review","toolKeys":["web"]}`)}
+		Arguments: json.RawMessage(`{"memberID":"analyst","goal":"review","toolKeys":["web"]}`)}
 	id := delegationToolID(owner, call.ID)
 	childID := stableID("hchild", owner.ExecutionRefID, id)
-	frozen := handoff.Delegation{ID: id, RoleID: "analyst", RoleRevision: 1,
+	frozen := handoff.Delegation{ID: id, MemberRevision: "frozen-v1",
 		MemberID: "analyst", ChildRunID: childID, Goal: "review",
 		Status: handoff.StatusQueued, ToolKeys: []string{"web"}}
 	payload := delegationItemPayload{
 		DelegationID: id, MemberID: frozen.MemberID, ChildRunID: childID,
-		Goal: frozen.Goal, ParentRunID: owner.ExecutionRefID, RoleID: frozen.RoleID,
-		RoleRevision: frozen.RoleRevision, Status: handoff.StatusQueued, Execution: &frozen,
+		Goal: frozen.Goal, ParentRunID: owner.ExecutionRefID, MemberRevision: frozen.MemberRevision, Status: handoff.StatusQueued, Execution: &frozen,
 		OriginalCallHash: hashInvocationBytes(call.Arguments),
 	}
 	wire, err := json.Marshal(payload)
@@ -83,23 +82,23 @@ func TestFrozenWaitingDelegationRejectsForgedToolAndAuthority(t *testing.T) {
 			changed.OriginalCallHash = hashInvocationBytes([]byte("foreign-model-call"))
 			item.Payload, _ = json.Marshal(changed)
 		}},
-		{"foreign-role", func(_ *Item, call *tools.Call) {
-			call.Arguments = json.RawMessage(`{"roleID":"foreign","goal":"review","toolKeys":["web"]}`)
+		{"foreign-member", func(_ *Item, call *tools.Call) {
+			call.Arguments = json.RawMessage(`{"memberID":"foreign","goal":"review","toolKeys":["web"]}`)
 		}},
 		{"foreign-member", func(_ *Item, call *tools.Call) {
-			call.Arguments = json.RawMessage(`{"roleID":"analyst","memberID":"foreign","goal":"review","toolKeys":["web"]}`)
+			call.Arguments = json.RawMessage(`{"memberID":"analyst","memberID":"foreign","goal":"review","toolKeys":["web"]}`)
 		}},
 		{"foreign-goal", func(_ *Item, call *tools.Call) {
-			call.Arguments = json.RawMessage(`{"roleID":"analyst","goal":"foreign","toolKeys":["web"]}`)
+			call.Arguments = json.RawMessage(`{"memberID":"analyst","goal":"foreign","toolKeys":["web"]}`)
 		}},
 		{"ungranted-tool", func(_ *Item, call *tools.Call) {
-			call.Arguments = json.RawMessage(`{"roleID":"analyst","goal":"review","toolKeys":["forbidden"]}`)
+			call.Arguments = json.RawMessage(`{"memberID":"analyst","goal":"review","toolKeys":["forbidden"]}`)
 		}},
 		{"duplicate-tool-argument", func(_ *Item, call *tools.Call) {
-			call.Arguments = json.RawMessage(`{"roleID":"analyst","roleID":"other","goal":"review"}`)
+			call.Arguments = json.RawMessage(`{"memberID":"analyst","memberID":"other","goal":"review"}`)
 		}},
 		{"unknown-tool-argument", func(_ *Item, call *tools.Call) {
-			call.Arguments = json.RawMessage(`{"roleID":"analyst","goal":"review","admin":true}`)
+			call.Arguments = json.RawMessage(`{"memberID":"analyst","goal":"review","admin":true}`)
 		}},
 		{"ambiguous-waiting-payload", func(item *Item, _ *tools.Call) {
 			item.Payload = append(append(json.RawMessage(nil), wire[:len(wire)-1]...), []byte(`,"goal":"forged"}`)...)
@@ -109,9 +108,9 @@ func TestFrozenWaitingDelegationRejectsForgedToolAndAuthority(t *testing.T) {
 			changed.ParentRunID = "foreign-parent"
 			item.Payload, _ = json.Marshal(changed)
 		}},
-		{"forged-payload-role", func(item *Item, _ *tools.Call) {
+		{"forged-payload-member-revision", func(item *Item, _ *tools.Call) {
 			changed := payload
-			changed.RoleID = "foreign-role"
+			changed.MemberRevision = "foreign-revision"
 			item.Payload, _ = json.Marshal(changed)
 		}},
 		{"forged-child-execution", func(item *Item, _ *tools.Call) {

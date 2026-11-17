@@ -206,7 +206,6 @@ func snapshotResponse(snapshot harness.Snapshot) (SnapshotResponse, error) {
 		Items:        items,
 		Output:       output,
 		Budget:       snapshot.Budget, Subtasks: publicSubtasks(snapshot.Subtasks),
-		Delegation: delegationResponse(snapshot),
 	}, nil
 }
 
@@ -439,36 +438,6 @@ type InvocationResponse struct {
 	UpdatedAt         time.Time                `json:"updatedAt"`
 }
 
-type DelegationRoleResponse struct {
-	ID          string `json:"id"`
-	Revision    uint64 `json:"revision"`
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-}
-
-type DelegationResponse struct {
-	CanSpawn bool                     `json:"canSpawn"`
-	MaxDepth int                      `json:"maxDepth,omitempty"`
-	Roles    []DelegationRoleResponse `json:"roles"`
-}
-
-func delegationResponse(snapshot harness.Snapshot) *DelegationResponse {
-	if len(snapshot.Config.Roles) == 0 && snapshot.Config.DelegationPolicy.MaxDepth == 0 {
-		return nil
-	}
-	roles := make([]DelegationRoleResponse, 0, len(snapshot.Config.Roles))
-	for _, role := range snapshot.Config.Roles {
-		roles = append(roles, DelegationRoleResponse{
-			ID: role.ID, Revision: role.Revision, Name: role.Name, Description: role.Description,
-		})
-	}
-	canSpawn := len(roles) > 0 && (snapshot.Turn.Status == harness.TurnRunning || snapshot.Turn.Status == harness.TurnWaitingInput)
-	if snapshot.Budget != nil && snapshot.Budget.Cancelled {
-		canSpawn = false
-	}
-	return &DelegationResponse{CanSpawn: canSpawn, MaxDepth: snapshot.Config.DelegationPolicy.MaxDepth, Roles: roles}
-}
-
 type SnapshotResponse struct {
 	Turn         TurnResponse          `json:"turn"`
 	Invocations  []InvocationResponse  `json:"invocations"`
@@ -477,7 +446,6 @@ type SnapshotResponse struct {
 	Output       *harness.Output       `json:"output,omitempty"`
 	Budget       *budget.LedgerView    `json:"budget,omitempty"`
 	Subtasks     []harness.Subtask     `json:"subtasks,omitempty"`
-	Delegation   *DelegationResponse   `json:"delegation,omitempty"`
 }
 
 type ResolveApprovalRequest struct {
@@ -583,7 +551,7 @@ func (handler *Handler) authorizedTurn(context *gin.Context) (harness.Snapshot, 
 }
 
 func writeHarnessError(context *gin.Context, err error) {
-	// A known, frozen-role capability refusal is safe, user-actionable and
+	// A known, frozen-delegation capability refusal is safe, user-actionable and
 	// not a generic malformed request. Never serialize the policy's cause.
 	if code, _, recoverable := tools.RecoverableCallErrorInfo(err); recoverable && code == "delegation.current_evidence_unavailable" {
 		runtimehttp.WriteError(context, stdhttp.StatusUnprocessableEntity, code,

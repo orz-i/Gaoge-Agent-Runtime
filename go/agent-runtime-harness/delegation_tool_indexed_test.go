@@ -31,7 +31,7 @@ func appendOriginalDelegationToolItem(t *testing.T, store *MemoryStore, inv Invo
 	t.Helper()
 	id := delegationToolID(inv, callID)
 	payload, err := json.Marshal(delegationItemPayload{
-		DelegationID: id, RoleID: "researcher", Goal: goal,
+		DelegationID: id, MemberID: "researcher", Goal: goal,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -77,7 +77,7 @@ func TestIndexedPreparedDelegationPreservesChronologicalOriginal(t *testing.T) {
 			got, found, err := runner.preparedDelegationToolRequest(t.Context(), request)
 			startedID := stableID("hid", inv.TurnID, delegationToolID(inv, request.Call.ID), string(ItemStarted))
 			waitingID := stableID("hid", inv.TurnID, delegationToolID(inv, request.Call.ID), string(ItemWaiting))
-			if err != nil || found != tc.found || (found && (got.Goal != tc.goal || got.RoleID != "researcher" || got.callID != request.Call.ID)) ||
+			if err != nil || found != tc.found || (found && (got.Goal != tc.goal || got.MemberID != "researcher" || got.callID != request.Call.ID)) ||
 				spy.listCalls != 0 || !reflect.DeepEqual(spy.itemCalls, []string{startedID, waitingID}) {
 				t.Fatalf("original evidence not preserved: got=%+v found=%v err=%v scans=%d indexed=%v", got, found, err, spy.listCalls, spy.itemCalls)
 			}
@@ -103,7 +103,7 @@ func TestIndexedDelegationRecoveryRejectsForeignAndCorruptItems(t *testing.T) {
 			if tc.malformedPayload {
 				itemID := stableID("hid", inv.TurnID, delegationToolID(inv, request.Call.ID), string(tc.status))
 				item := store.itemIDs[itemID]
-				item.Payload = json.RawMessage(`{"roleID":`)
+				item.Payload = json.RawMessage(`{"memberID":`)
 				store.itemIDs[itemID] = item
 			}
 			spy := &indexOnlyParentStore{Store: store}

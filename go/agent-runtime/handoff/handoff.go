@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
@@ -68,14 +69,14 @@ const (
 
 // Delegation is a durable parent-owned reference to one stable Child Agent Run.
 type Delegation struct {
-	ID               string                  `json:"id"`
-	MemberID         string                  `json:"memberID"`
-	MemberRevision   string                  `json:"memberRevision,omitempty"`
-	RoleID           string                  `json:"roleID,omitempty"`
-	RoleRevision     uint64                  `json:"roleRevision,omitempty"`
-	RoleName         string                  `json:"roleName,omitempty"`
-	Instructions     string                  `json:"instructions,omitempty"`
-	Limits           agent.Limits            `json:"limits,omitempty"`
+	ID             string       `json:"id"`
+	MemberID       string       `json:"memberID"`
+	MemberRevision string       `json:"memberRevision,omitempty"`
+	Instructions   string       `json:"instructions,omitempty"`
+	Limits         agent.Limits `json:"limits,omitempty"`
+	// Full Host-selected subtree ceilings belong to the shared ledger. The
+	// Agent runner accepts only local model/tool ceilings in Limits.
+	SubtreeLimits    *budget.Limits          `json:"subtreeLimits,omitempty"`
 	ChildRunID       string                  `json:"childRunID"`
 	Goal             string                  `json:"goal"`
 	Model            string                  `json:"model,omitempty"`
@@ -529,6 +530,10 @@ func validJoin(join Join, delegations []Delegation) bool {
 }
 
 func cloneDelegation(delegation Delegation) Delegation {
+	if delegation.SubtreeLimits != nil {
+		copy := *delegation.SubtreeLimits
+		delegation.SubtreeLimits = &copy
+	}
 	delegation.ModelOptions = append(json.RawMessage(nil), delegation.ModelOptions...)
 	delegation.ToolKeys = append([]string(nil), delegation.ToolKeys...)
 	delegation.InitialToolKeys = append([]string(nil), delegation.InitialToolKeys...)

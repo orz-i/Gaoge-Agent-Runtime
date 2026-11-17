@@ -2,7 +2,7 @@
 
 Gaoge Agent Runtime is a statically composed SDK for durable tool-using Agents.
 **Agent/SubAgent delegation is its only first-party multi-agent orchestration.**
-The Host selects roles, capability permissions and routing. The SDK does not
+The Host selects Named Agents, authorizes their execution scope and chooses routes. The SDK does not
 implement an intent router or a second composite execution interpreter.
 
 > **BREAKING CHANGE:** The pre-stable Team, GroupChat and Dynamic Workflow
@@ -15,7 +15,7 @@ implement an intent router or a second composite execution interpreter.
 ## Layers and execution path
 
 ```text
-Application Host (auth, role selection, transcript, business effects)
+Application Host (auth, Named Agent selection, transcript, business effects)
   |-- optional HTTP, TypeScript client, MCP, A2A and telemetry adapters
   |-- optional Harness (Session / Turn / Invocation / Timeline)
   |      |-- Delegate / Delegation Tool / Subtask controls
@@ -71,14 +71,24 @@ responsibility matrix](audits/2026-11-16-complexity-c1-c2-storage-and-single-dis
 A host may execute a standalone Agent without Harness. For durable specialist
 children, compose `agent.NewRunner` with `handoff.New` or
 `handoff.NewDeferredAgent`, a fixed ChildRunner, and an optional Harness Runner
-that receives `Handoffs` and `Relations` in its dependencies. The Host freezes
-Role snapshots, model/tool selection, tool scope and delegation depth before
-the first physical Child dispatch.
+that receives `Handoffs` and `Relations` in its dependencies. The Host chooses and authorizes each Named Agent (including its Model,
+Tools, Skills and Instructions) before delegation. Harness freezes the
+resulting execution request and the original MemberID/MemberRevision route;
+Kernel and Handoff enforce Tool scope, budgets, parent/child identity and
+physical dispatch authority. The Runtime never resolves a Role catalog or
+selects an Agent on behalf of the Host.
 
 `harness.Runner.Delegate` and `DelegateByExecutionRefID` create or reload a
-stable SubAgent delegation. The `DelegationToolHandler` is the agent-facing
-Tool entry for eligible parent Runs. The child may execute on the original
-local Agent Runner or an explicitly verified routed ChildRunner. `a2a.remote`
+stable SubAgent delegation only after the shared Host-owned
+`Dependencies.DelegationPolicy` authorizes the selected member. The
+`DelegationToolHandler` is the agent-facing Tool entry for eligible parent Runs;
+model calls and manual/HTTP calls share one Host authorization boundary.
+The frozen Handoff envelope carries both Agent-local limits and enforceable
+shared subtree ceilings for ledger admission. Harness rejects cost/state-byte
+hard limits it cannot meter. No Supervisor Context Tool is implicitly assigned
+to a delegated child; isolated Context Artifact reads stay prohibited. The child
+may execute on the original local Agent Runner or an explicitly verified routed
+ChildRunner. `a2a.remote`
 remains an optional **remote Agent shadow**, not a composite interpreter.
 
 There is no native generic Child Capability Start/Retry/Resume interpreter.

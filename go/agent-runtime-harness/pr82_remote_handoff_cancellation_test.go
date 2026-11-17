@@ -15,8 +15,8 @@ func pr82StartedRemoteHandoff(t *testing.T, role bool) (*pr82HandoffFixture, Inv
 	t.Helper()
 	f := newPR82HandoffFixture(t)
 	delegation := f.delegation()
-	if !role {
-		delegation.RoleID = ""
+	if role {
+		delegation.MemberRevision = "member-v2"
 	}
 	// Use an actual frozen Started Item for either route. A generic
 	// fixture Role Item must not be treated as a Member-only admission.
@@ -89,8 +89,8 @@ func TestPR82NeverDispatchedHandoffCanBeCancelled(t *testing.T) {
 	for _, role := range []bool{false, true} {
 		f := newPR82HandoffFixture(t)
 		delegation := f.delegation()
-		if !role {
-			delegation.RoleID = ""
+		if role {
+			delegation.MemberRevision = "member-v2"
 		}
 		if err := f.runner.prepareHandoffChild(t.Context(), f.turn, f.parent, delegation, f.startedItemID); err != nil {
 			t.Fatal(err)
@@ -108,7 +108,6 @@ func TestPR82NeverDispatchedHandoffCanBeCancelled(t *testing.T) {
 func TestPR82UnsealedHandoffCannotClaimNoExternalEffect(t *testing.T) {
 	f := newPR82HandoffFixture(t)
 	d := f.delegation()
-	d.RoleID = ""
 	input, hash, err := marshalInvocationValue(d)
 	if err != nil {
 		t.Fatal(err)
@@ -197,8 +196,8 @@ func TestPR82DefaultKernelCancellerCannotFalsifyA2AShadowCancellation(t *testing
 		for _, rootCancel := range []bool{false, true} {
 			f := newPR82HandoffFixture(t)
 			delegation := f.delegation()
-			if !role {
-				delegation.RoleID = ""
+			if role {
+				delegation.MemberRevision = "member-v2"
 			}
 			f.handoff.result = func(d handoff.Delegation) (handoff.Delegation, error) {
 				_, err := f.runtime.Create(t.Context(), kernel.CreateRequest{ID: d.ChildRunID,

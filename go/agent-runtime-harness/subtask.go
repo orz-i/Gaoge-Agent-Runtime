@@ -19,29 +19,28 @@ import (
 // Subtask is a product projection of a durable execution relation, folded by
 // delegation identity. It is delivered with the Turn, not a separate Run feed.
 type Subtask struct {
-	ID            string             `json:"id"`
-	RunID         string             `json:"runID,omitempty"`
-	ParentRunID   string             `json:"-"`
-	ParentID      string             `json:"parentID,omitempty"`
-	Kind          string             `json:"kind"`
-	RoleID        string             `json:"roleID,omitempty"`
-	RoleRevision  uint64             `json:"roleRevision,omitempty"`
-	RoleName      string             `json:"roleName,omitempty"`
-	Goal          string             `json:"goal"`
-	Model         string             `json:"model,omitempty"`
-	Status        string             `json:"status"`
-	StartedAt     *time.Time         `json:"startedAt,omitempty"`
-	UpdatedAt     *time.Time         `json:"updatedAt,omitempty"`
-	EndedAt       *time.Time         `json:"endedAt,omitempty"`
-	Budget        *budget.LedgerView `json:"budget,omitempty"`
-	UsageKnown    bool               `json:"usageKnown"`
-	Result        json.RawMessage    `json:"result,omitempty"`
-	ErrorCode     string             `json:"errorCode,omitempty"`
-	ErrorDetail   string             `json:"errorDetail,omitempty"`
-	Approval      *SubtaskApproval   `json:"approval,omitempty"`
-	CancelStatus  string             `json:"cancelStatus,omitempty"`
-	CancelError   string             `json:"cancelError,omitempty"`
-	CancelAttempt uint64             `json:"cancelAttempt,omitempty"`
+	ID             string             `json:"id"`
+	RunID          string             `json:"runID,omitempty"`
+	ParentRunID    string             `json:"-"`
+	ParentID       string             `json:"parentID,omitempty"`
+	Kind           string             `json:"kind"`
+	MemberID       string             `json:"memberID,omitempty"`
+	MemberRevision string             `json:"memberRevision,omitempty"`
+	Goal           string             `json:"goal"`
+	Model          string             `json:"model,omitempty"`
+	Status         string             `json:"status"`
+	StartedAt      *time.Time         `json:"startedAt,omitempty"`
+	UpdatedAt      *time.Time         `json:"updatedAt,omitempty"`
+	EndedAt        *time.Time         `json:"endedAt,omitempty"`
+	Budget         *budget.LedgerView `json:"budget,omitempty"`
+	UsageKnown     bool               `json:"usageKnown"`
+	Result         json.RawMessage    `json:"result,omitempty"`
+	ErrorCode      string             `json:"errorCode,omitempty"`
+	ErrorDetail    string             `json:"errorDetail,omitempty"`
+	Approval       *SubtaskApproval   `json:"approval,omitempty"`
+	CancelStatus   string             `json:"cancelStatus,omitempty"`
+	CancelError    string             `json:"cancelError,omitempty"`
+	CancelAttempt  uint64             `json:"cancelAttempt,omitempty"`
 }
 
 type SubtaskApproval struct {
@@ -73,10 +72,10 @@ func (runner *Runner) loadSubtasks(ctx context.Context, turn Turn, items []Item,
 			}
 		}
 		value := Subtask{ID: payload.DelegationID, RunID: payload.ChildRunID, ParentRunID: parentRunID, Kind: "delegation",
-			RoleID: payload.RoleID, RoleRevision: payload.RoleRevision, RoleName: firstNonEmpty(payload.RoleName, payload.MemberID),
+			MemberID: payload.MemberID, MemberRevision: payload.MemberRevision,
 			Goal: payload.Goal, Status: string(payload.Status), Result: append(json.RawMessage(nil), payload.Result...)}
 		if existing, ok := byRun[value.RunID]; ok {
-			value.RoleID, value.RoleRevision, value.RoleName = existing.RoleID, existing.RoleRevision, existing.RoleName
+			value.MemberID, value.MemberRevision = existing.MemberID, existing.MemberRevision
 		}
 		if payload.Execution != nil {
 			value.Model = payload.Execution.Model

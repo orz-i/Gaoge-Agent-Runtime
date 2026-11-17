@@ -36,7 +36,6 @@ type TextAgentSessionOptions struct {
 func OpenTextAgentSession(options TextAgentSessionOptions) (*SessionClient, error) {
 	if options.Runtime == nil || options.Store == nil || options.Model == nil ||
 		len(options.Session.Config.ToolKeys) != 0 || len(options.Session.Config.ToolPolicies) != 0 ||
-		len(options.Session.Config.Roles) != 0 ||
 		len(options.Session.Config.Skills) != 0 || strings.TrimSpace(options.Session.Config.MemoryPolicy) != "" ||
 		runtimecontext.NormalizePolicy(options.Session.Config.ContextPolicy) != runtimecontext.NormalizePolicy(runtimecontext.Policy{}) ||
 		options.Session.Config.SharedBudget != nil || options.Session.Config.DelegationPolicy.MaxDepth != 0 {

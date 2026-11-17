@@ -79,20 +79,13 @@ func (capture *parentHostedAssignmentModel) Generate(_ context.Context, request 
 			capture.t.Fatal("delegation Tool not offered")
 		}
 		fields := schema["properties"].(map[string]interface{})
-		_, ok := fields["toolKeys"]
-		if capture.expectedChildModel == "specialist-model" && !ok {
-			capture.t.Fatal("parent Hosted capability unavailable in delegated tool schema")
-		}
-		if capture.expectedChildModel != "specialist-model" && ok {
-			capture.t.Fatal("Hosted parent Tool offered where every child uses different model")
+		if fields["memberID"] == nil || fields["goal"] == nil || fields["toolKeys"] != nil || fields["roleID"] != nil {
+			capture.t.Fatalf("model received dynamic Role/Tool authorization schema: %+v", fields)
 		}
 		args, _ := json.Marshal(struct {
-			RoleID   string   `json:"roleID"`
-			Goal     string   `json:"goal"`
-			ToolKeys []string `json:"toolKeys,omitempty"`
-		}{
-			RoleID: "researcher", Goal: "Find only verified current news", ToolKeys: capture.requested,
-		})
+			MemberID string `json:"memberID"`
+			Goal     string `json:"goal"`
+		}{MemberID: "researcher", Goal: "Find only verified current news"})
 		return model.Response{ToolCalls: []tools.Call{{ID: "delegate-news-1", ToolKey: harness.DelegationToolKey, Arguments: args}}}, nil
 	}
 	return model.Response{Content: "Parent finished after delegation result."}, nil
@@ -113,6 +106,27 @@ func runSelectedHostedParentToolWithFrozenContext(t *testing.T, childModel strin
 	if err != nil {
 		t.Fatal(err)
 	}
+	hostDelegationPolicy0 := hostDelegatePolicyFunc(func(
+		_ context.Context, _ tools.ExecutionRequest, input harness.DelegateRequest,
+	) (harness.DelegateRequest, error) {
+		if input.MemberID != "researcher" {
+			return harness.DelegateRequest{}, harness.ErrInvalidRequest
+		}
+		// The Host authorizes a versioned, independently bound Hosted Tool.
+		// The model cannot add it through Tool JSON arguments.
+		if len(selected) != 0 && childModel != "specialist-model" {
+			return harness.DelegateRequest{}, tools.NewRecoverableCallError(
+				"delegation.tool_selection_denied", "No cross-model parent Hosted Tool grants", harness.ErrInvalidRequest)
+		}
+		input.Agent.Model = childModel
+		if frozen {
+			input.Agent.Instructions = "You are a delegated specialist. Execute the assigned task."
+		}
+		if len(selected) != 0 {
+			input.Agent.HostedToolGrants = []agent.HostedToolGrant{{Key: scopedSearchKey, DefinitionVersion: "role-web-version-1"}}
+		}
+		return input, nil
+	})
 	handler := harness.NewDelegationToolHandler()
 	registry, err := tools.NewRegistry([]tools.Registration{harness.DelegationToolRegistration(handler)})
 	if err != nil {
@@ -120,11 +134,6 @@ func runSelectedHostedParentToolWithFrozenContext(t *testing.T, childModel strin
 	}
 	capture := &parentHostedAssignmentModel{t: t, requested: selected, expectedChildModel: childModel, frozen: frozen}
 	dependencies := delegationAgentDependencies(runtime, capture, registry, approvals, 12, false)
-	rolePrepare, err := harness.NewRoleModelRequestPreparer(store)
-	if err != nil {
-		t.Fatal(err)
-	}
-	dependencies.PrepareModelRequest = rolePrepare
 	var manager *runtimecontext.Manager
 	projectedRoleWindowChecked := false
 	if frozen {
@@ -132,8 +141,9 @@ func runSelectedHostedParentToolWithFrozenContext(t *testing.T, childModel strin
 		managed, prepareErr := harness.NewManagedContextPreparer(store, manager, func(_ context.Context, request model.Request) (runtimecontext.ModelWindow, error) {
 			for _, definition := range request.Tools {
 				if definition.Key == harness.DelegationToolKey {
-					if !strings.Contains(definition.Description, "Available roles:") || !strings.Contains(string(definition.InputSchema), "roleID") {
-						t.Fatalf("managed Context measured unprojected delegation Tool: %+v", definition)
+					if !strings.Contains(string(definition.InputSchema), "memberID") || strings.Contains(string(definition.InputSchema), "roleID") ||
+						strings.Contains(string(definition.InputSchema), "toolKeys") {
+						t.Fatalf("managed Context encountered model-assignable Role/Tool policy: %+v", definition)
 					}
 					projectedRoleWindowChecked = true
 				}
@@ -143,7 +153,7 @@ func runSelectedHostedParentToolWithFrozenContext(t *testing.T, childModel strin
 		if prepareErr != nil {
 			t.Fatal(prepareErr)
 		}
-		dependencies.PrepareModelRequest = agent.ChainModelRequestPreparers(rolePrepare, managed)
+		dependencies.PrepareModelRequest = managed
 		ctxRun, contextErr := harness.NewContextRunMiddleware(store, nil)
 		if contextErr != nil {
 			t.Fatal(contextErr)
@@ -164,6 +174,7 @@ func runSelectedHostedParentToolWithFrozenContext(t *testing.T, childModel strin
 		t.Fatal(err)
 	}
 	composed := delegationHarnessDependencies(runtime, direct, store, registry, handoffs, relations, false)
+	composed.DelegationPolicy = hostDelegationPolicy0
 	if frozen {
 		composed.Context = manager
 	}
@@ -184,7 +195,7 @@ func runSelectedHostedParentToolWithFrozenContext(t *testing.T, childModel strin
 			ToolPolicies: []harness.ToolPolicySnapshot{
 				harness.DelegationToolPolicySnapshot(),
 				{Key: scopedSearchKey, DefinitionVersion: "role-web-version-1", ExecutionMode: "provider_hosted"},
-			}, Roles: []harness.RoleSnapshot{{ID: "researcher", Revision: 1, Name: "Researcher", Model: childModel}},
+			},
 		},
 	}
 	if frozen {
@@ -215,9 +226,9 @@ func runSelectedHostedParentToolWithFrozenContext(t *testing.T, childModel strin
 	}
 }
 
-// Proves a delegated child with role-specific instructions can run through
-// pre-intent Context and role Tool schema preparation in one frozen intent.
-func TestDelegatedRoleCompatibleWithFrozenContextPreparation(t *testing.T) {
+// Host-selected Agent instructions and Context preparation seal one
+// original Model request without a second Role schema interpreter.
+func TestHostSelectedAgentCompatibleWithFrozenContextPreparation(t *testing.T) {
 	for _, selected := range [][]string{nil, {scopedSearchKey}} {
 		runSelectedHostedParentToolWithFrozenContext(t, "specialist-model", selected, true, true)
 	}
@@ -257,11 +268,11 @@ func (client *inheritedModelRoleHostedClient) Generate(_ context.Context, reques
 		client.t.Fatalf("role Scoped Hosted Tool leaked into root: %+v", request.HostedTools)
 	}
 	if client.rootCalls == 1 {
-		return model.Response{ToolCalls: []tools.Call{{ID: "inherit-role-model-1", ToolKey: harness.DelegationToolKey, Arguments: json.RawMessage(`{"roleID":"researcher","goal":"research current news with inherited model"}`)}}}, nil
+		return model.Response{ToolCalls: []tools.Call{{ID: "inherit-role-model-1", ToolKey: harness.DelegationToolKey, Arguments: json.RawMessage(`{"memberID":"researcher","goal":"research current news with inherited model"}`)}}}, nil
 	}
 	return model.Response{Content: "the delegated specialist completed"}, nil
 }
-func TestRoleHostedToolCanUseExactInheritedParentModelWithoutParentActivation(t *testing.T) {
+func TestHostHostedToolUsesInheritedParentModelWithoutParentActivation(t *testing.T) {
 	t.Parallel()
 	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
 	if err != nil {
@@ -272,6 +283,9 @@ func TestRoleHostedToolCanUseExactInheritedParentModelWithoutParentActivation(t 
 	if err != nil {
 		t.Fatal(err)
 	}
+	hostDelegationPolicy1 := hostSelectedAgentPolicy{MemberID: "researcher", Agent: agent.StartRequest{
+		HostedToolGrants: []agent.HostedToolGrant{{Key: scopedSearchKey, DefinitionVersion: "role-web-version-1"}},
+	}}
 	handler := harness.NewDelegationToolHandler()
 	registry, err := tools.NewRegistry([]tools.Registration{harness.DelegationToolRegistration(handler)})
 	if err != nil {
@@ -292,7 +306,9 @@ func TestRoleHostedToolCanUseExactInheritedParentModelWithoutParentActivation(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner, err := harness.NewRunner(delegationHarnessDependencies(runtime, direct, store, registry, handoffs, relations, false))
+	composed := delegationHarnessDependencies(runtime, direct, store, registry, handoffs, relations, false)
+	composed.DelegationPolicy = hostDelegationPolicy1
+	runner, err := harness.NewRunner(composed)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,8 +321,6 @@ func TestRoleHostedToolCanUseExactInheritedParentModelWithoutParentActivation(t 
 		Goal: "ask inheriting model role to research", Config: harness.ConfigSnapshot{
 			Model: "specialist-model", ToolKeys: []string{harness.DelegationToolKey},
 			ToolPolicies: []harness.ToolPolicySnapshot{harness.DelegationToolPolicySnapshot()},
-			Roles: []harness.RoleSnapshot{{ID: "researcher", Revision: 1, Name: "Researcher", Model: "",
-				HostedToolGrants: []agent.HostedToolGrant{{Key: scopedSearchKey, DefinitionVersion: "role-web-version-1"}}}},
 		},
 	})
 	if err != nil || snapshot.Turn.Status != harness.TurnCompleted || capture.rootCalls != 2 || capture.childCalls != 1 {

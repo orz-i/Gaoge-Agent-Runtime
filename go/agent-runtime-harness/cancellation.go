@@ -333,9 +333,9 @@ func (runner *Runner) localHandoffCancellationAuthority(
 	if _, err := frozenChildRoot(child); err != nil {
 		return unverified(err)
 	}
-	var delegation handoff.Delegation
-	if err := json.Unmarshal(child.Input, &delegation); err != nil {
-		return unverified(err)
+	delegation, decodeErr := decodeFrozenHandoffDelegation(child.Input)
+	if decodeErr != nil {
+		return unverified(decodeErr)
 	}
 	item, err := runner.store.GetItem(ctx, child.ParentItemID)
 	if err != nil {
@@ -356,8 +356,7 @@ func (runner *Runner) localHandoffCancellationAuthority(
 	if payload.DelegationID != delegation.ID || payload.ChildRunID != delegation.ChildRunID ||
 		payload.ChildRunID != child.ExecutionRefID ||
 		payload.MemberID != delegation.MemberID || payload.MemberRevision != delegation.MemberRevision ||
-		payload.RoleID != delegation.RoleID || payload.RoleRevision != delegation.RoleRevision ||
-		payload.RoleName != delegation.RoleName || payload.Goal != delegation.Goal ||
+		payload.Goal != delegation.Goal ||
 		strings.TrimSpace(payload.ParentRunID) == "" ||
 		(payload.Execution != nil && !sameHandoffFrozenExecution(delegation, *payload.Execution)) {
 		return unverified(ErrConflict)

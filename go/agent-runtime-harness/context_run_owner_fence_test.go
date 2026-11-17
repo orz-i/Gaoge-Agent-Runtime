@@ -172,7 +172,7 @@ func TestContextRunMiddlewareRetainsExplicitReadOnlyOnSameRun(t *testing.T) {
 func TestContextRunMiddlewareHandoffIgnoresInheritedSupervisorContext(t *testing.T) {
 	store, turn, checkpoint, root := contextRunMiddlewareFixture(t)
 	delegation := handoff.Delegation{
-		ID: "specialist-delegation", MemberID: "specialist", RoleID: "specialist",
+		ID: "specialist-delegation", MemberID: "specialist",
 		ChildRunID: "specialist-inherited", Goal: "specialized task", Status: handoff.StatusQueued,
 	}
 	input, hash, err := marshalInvocationValue(delegation)
@@ -249,7 +249,7 @@ func TestIndependentContextRunHandoffDescendantsNeverInheritSupervisorContext(t 
 		t.Run(testName, func(t *testing.T) {
 			store, turn, checkpoint, root := contextRunMiddlewareFixture(t)
 			delegation := handoff.Delegation{
-				ID: "isolated-delegation", MemberID: "isolated-specialist", RoleID: "specialist",
+				ID: "isolated-delegation", MemberID: "isolated-specialist",
 				ChildRunID: "specialist-root-run", Goal: "independent task", Status: handoff.StatusQueued,
 			}
 			input, inputHash, err := marshalInvocationValue(delegation)
@@ -350,7 +350,7 @@ func (store *auditOnceFailedContextLookup) GetInvocationByExecutionRefID(ctx con
 // Specialist into an ordinary read-only child of the Supervisor.
 func TestIndependentHandoffFirstOwnershipReadErrorMustNotExposeSupervisor(t *testing.T) {
 	store, turn, checkpoint, root := contextRunMiddlewareFixture(t)
-	delegation := handoff.Delegation{ID: "lookup-failure-handoff", MemberID: "specialist", RoleID: "specialist",
+	delegation := handoff.Delegation{ID: "lookup-failure-handoff", MemberID: "specialist",
 		ChildRunID: "handoff-lookup-fail", Goal: "specialized task", Status: handoff.StatusQueued}
 	input, hash, err := marshalInvocationValue(delegation)
 	if err != nil {
@@ -474,7 +474,7 @@ func TestIndependentContextRunFirstMissingThenPresentHandoffRelationNeverExposes
 		}
 		t.Run(mode, func(t *testing.T) {
 			store, turn, checkpoint, root := contextRunMiddlewareFixture(t)
-			delegation := handoff.Delegation{ID: "late-relation-delegation", MemberID: "specialist", RoleID: "specialist",
+			delegation := handoff.Delegation{ID: "late-relation-delegation", MemberID: "specialist",
 				ChildRunID: "late-specialist", Goal: "isolated task", Status: handoff.StatusQueued}
 			input, hash, err := marshalInvocationValue(delegation)
 			if err != nil {
@@ -535,7 +535,7 @@ func TestIndependentHandoffArtifactReadNeverLeaksSupervisorArchive(t *testing.T)
 	if _, _, err = store.PutContextArtifact(t.Context(), artifact); err != nil {
 		t.Fatal(err)
 	}
-	delegation := handoff.Delegation{ID: "archive-delegation", MemberID: "specialist", RoleID: "specialist",
+	delegation := handoff.Delegation{ID: "archive-delegation", MemberID: "specialist",
 		ChildRunID: "archive-specialist", Goal: "isolated work", Status: handoff.StatusQueued}
 	input, hash, err := marshalInvocationValue(delegation)
 	if err != nil {
@@ -639,7 +639,7 @@ func (f auditCorruptHandoffInvocationReadStore) GetInvocationByExecutionRefID(ct
 // may inherit its Supervisor history as an ordinary read-only child.
 func TestIndependentContextRunInvalidHandoffInvocationInputHashMustFailClosed(t *testing.T) {
 	store, turn, checkpoint, root := contextRunMiddlewareFixture(t)
-	delegation := handoff.Delegation{ID: "corrupt-handoff", MemberID: "specialist", RoleID: "specialist",
+	delegation := handoff.Delegation{ID: "corrupt-handoff", MemberID: "specialist",
 		ChildRunID: "corrupt-specialist", Goal: "independent task", Status: handoff.StatusQueued}
 	input, hash, err := marshalInvocationValue(delegation)
 	if err != nil {
@@ -745,7 +745,7 @@ func (s auditMissingHandoffInputStore) GetInvocationByExecutionRefID(ctx context
 
 func TestIndependentAuditMissingHandoffInputMustNotBecomeOrdinaryChild(t *testing.T) {
 	store, turn, checkpoint, root := contextRunMiddlewareFixture(t)
-	delegation := handoff.Delegation{ID: "audit-missing-input", MemberID: "specialist", RoleID: "specialist", ChildRunID: "audit-specialist-run", Goal: "isolated task", Status: handoff.StatusQueued}
+	delegation := handoff.Delegation{ID: "audit-missing-input", MemberID: "specialist", ChildRunID: "audit-specialist-run", Goal: "isolated task", Status: handoff.StatusQueued}
 	input, hash, err := marshalInvocationValue(delegation)
 	if err != nil {
 		t.Fatal(err)

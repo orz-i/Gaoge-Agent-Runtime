@@ -1,5 +1,59 @@
 # Breaking changes (pre-stable Beta)
 
+## 2026-11-17 — Remove Runtime Role catalog and unify Host-selected Agent delegation
+
+**Breaking Go/HTTP/TypeScript and sealed Config contract:** Harness no longer
+owns a Role directory or Role-to-Model/Tool/Skill policy interpreter. Remove
+`RoleSnapshot`, `ConfigSnapshot.Roles`, the Role-aware ModelRequestPreparer,
+RoleID/RoleRevision/RoleName on Handoff/Delegation/Subtask, and the derived
+HTTP delegation-role listing. The manual Subtask request, TypeScript
+`createSubtask`, and model-visible `harness.delegate_agent` Tool accept
+`memberID` and `goal`, not `roleID` or model-supplied `toolKeys`.
+
+The Host resolves and authorizes a Named Agent before delegation, using the
+existing `agent.StartRequest` to supply optional Model, ModelOptions,
+Instructions, local ToolKeys, versioned HostedToolGrants and Limits through
+trusted Go `DelegateRequest.Agent` or `DelegationToolPolicy`. Those fields
+are deliberately excluded from Tool JSON: the model can request a named
+member, but cannot grant its own capabilities. Runtime freezes the resulting
+original ChildRunner route and execution scope, verifies parent Tool policies
+before local transfers, caps child limits, and preserves grant, budget,
+physical receipt, cancellation and wait-recovery fences. SharedBudget applies
+to MemberID-only delegations without a Role directory.
+
+**Follow-up authorization hard cut:** Compose exactly one Host policy through
+`harness.Dependencies.DelegationPolicy`. `NewDelegationToolHandler()` no longer
+accepts independent policy arguments, and `ManualDelegationPolicy` is removed.
+The policy authorizes model Tool, direct Go, and HTTP/manual member requests;
+without it new delegations are denied before any child effect. Durable Waiting
+and Started Tool intents reuse their original authorization on recovery.
+
+**Child budget enforcement:** The Host's `agent.StartRequest.Limits` is frozen
+as local Agent call/token limits plus `handoff.Delegation.SubtreeLimits` for the
+Turn-wide shared ledger. Child-run, concurrency and descendant ceilings are
+accounted by that ledger, not discarded to satisfy Agent-local validation.
+`MaxCostUnits` and `MaxStateBytes` are not measured by this Harness budget
+meter: setting either on a SharedBudget or selected Child Agent is rejected
+before execution, including when resuming a frozen Waiting delegation. Those
+fields remain available to other Features that can meter them. Existing
+persisted Harness Turns using these unsupported hard limits must be retired
+before this pre-stable upgrade; no silent reinterpretation is performed.
+Requesting subtree-only limits without `SharedBudget` also fails closed. Nested delegates
+inherit their *immediate* parent's frozen Model and ModelOptions unless the
+Host explicitly selects another Model.
+
+**Child Tool boundary:** No Context Archive reader or other Harness Tool is
+implicitly injected into `ToolKeys` / `InitialToolKeys` for a delegated Agent,
+including nested children. Only explicitly authorized child Tools can be
+frozen; the existing isolated Context Artifact Handler remains unchanged.
+
+**Upgrade:** nonempty persisted Role catalogs change sealed Config identity;
+legacy Role-bearing Handoff Invocation inputs fail closed even if their stored
+Run and Member IDs match. Drain or explicitly retire those prior Turns and
+reconcile unknown external effects with their original code. There is no
+Role-to-Member migration or compatibility interpreter. Ordinary Role-free
+Agent/Turn definitions are not rewritten by this change.
+
 ## 2026-11-17 — Remove Runtime Workbench and Topology display contracts
 
 **Breaking Go/HTTP/TypeScript API:** Delete Core `workbench`,

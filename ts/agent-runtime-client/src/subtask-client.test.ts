@@ -9,7 +9,7 @@ it("addresses manual spawn, subtask cancellation and checkpoint approval inside 
   expect(await client.harness.turns.cancelSubtask("turn/1", "delegation/1", "stop")).toEqual(body);
   await client.harness.turns.resolveSubtaskApproval("turn/1", "delegation/1", "checkpoint-2", "approve", "checked");
   expect(fetcher.mock.calls.map(([url, init]) => [url, init.method, JSON.parse(init.body)])).toEqual([
-    ["https://runtime.test/api/v1/harness/turns/turn%2F1/subtasks", "POST", { roleID: "researcher", goal: "Inspect evidence" }],
+    ["https://runtime.test/api/v1/harness/turns/turn%2F1/subtasks", "POST", { memberID: "researcher", goal: "Inspect evidence" }],
     ["https://runtime.test/api/v1/harness/turns/turn%2F1/subtasks/delegation%2F1/cancel", "POST", { reason: "stop" }],
     ["https://runtime.test/api/v1/harness/turns/turn%2F1/subtasks/delegation%2F1/approval", "POST", { checkpointID: "checkpoint-2", decision: "approve", comment: "checked" }],
   ]);
