@@ -87,19 +87,6 @@ export type HarnessTurnDTO = {
   updatedAt: string;
 };
 
-export type HarnessDelegationRoleDTO = {
-  id: string;
-  revision: number;
-  name: string;
-  description?: string;
-};
-
-export type HarnessDelegationDTO = {
-  canSpawn: boolean;
-  maxDepth?: number;
-  roles: HarnessDelegationRoleDTO[];
-};
-
 /** Committed Harness status, independent of Host assistant-output acknowledgement. */
 export type HarnessTurnStateDTO = { turn: HarnessTurnDTO };
 /** Cursor-paged, publicly filtered Harness Timeline facts. */
@@ -112,7 +99,6 @@ export type HarnessTurnSnapshotDTO = {
   items: HarnessItemDTO[];
   output?: ResultDTO | null;
   budget?: HarnessBudgetDTO;
-  delegation?: HarnessDelegationDTO;
   subtasks?: HarnessSubtaskDTO[];
 };
 
@@ -162,9 +148,8 @@ export type HarnessSubtaskDTO = {
   runID?: string;
   parentID?: string;
   kind: string;
-  roleID?: string;
-  roleRevision?: number;
-  roleName?: string;
+  memberID?: string;
+  memberRevision?: string;
   goal: string;
   model?: string;
   status: RunStatus | "queued" | "waiting_budget";

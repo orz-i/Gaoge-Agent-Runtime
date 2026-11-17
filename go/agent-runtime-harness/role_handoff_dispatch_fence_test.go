@@ -124,7 +124,7 @@ func newPR82HandoffFixture(t *testing.T) *pr82HandoffFixture {
 	if _, _, err = store.CreateInvocation(ctx, root); err != nil {
 		t.Fatal(err)
 	}
-	startedPayload, err := json.Marshal(delegationItemPayload{DelegationID: "pr82-delegation", MemberID: "analyst", RoleID: "analyst",
+	startedPayload, err := json.Marshal(delegationItemPayload{DelegationID: "pr82-delegation", MemberID: "analyst",
 		ChildRunID: "pr82-delegated-run", ParentRunID: root.ExecutionRefID, Goal: "review", Status: handoff.StatusQueued})
 	if err != nil {
 		t.Fatal(err)
@@ -146,7 +146,7 @@ func newPR82HandoffFixture(t *testing.T) *pr82HandoffFixture {
 }
 
 func (f *pr82HandoffFixture) delegation() handoff.Delegation {
-	return handoff.Delegation{ID: "pr82-delegation", MemberID: "analyst", RoleID: "analyst",
+	return handoff.Delegation{ID: "pr82-delegation", MemberID: "analyst",
 		ChildRunID: "pr82-delegated-run", Goal: "review", Status: handoff.StatusQueued}
 }
 

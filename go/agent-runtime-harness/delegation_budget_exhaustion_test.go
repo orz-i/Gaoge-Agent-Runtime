@@ -39,22 +39,18 @@ func TestDelegationChildRunExhaustionBecomesRecoverableModelGuidance(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	delegation := harness.NewDelegationToolHandler()
+	delegation := harness.NewDelegationToolHandler(hostSelectedAgentPolicy{MemberID: "researcher", Agent: agent.StartRequest{Model: "specialist-model"}})
 	registry, err := tools.NewRegistry([]tools.Registration{harness.DelegationToolRegistration(delegation)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	rolePreparer, err := harness.NewRoleModelRequestPreparer(store)
 	if err != nil {
 		t.Fatal(err)
 	}
 	client := &childRunLimitModel{t: t}
 	direct, err := agent.NewRunner(agent.Dependencies{
 		Runtime: runtime, Model: client, Catalog: registry, Executor: registry,
-		RunMiddleware:       []plugin.RunMiddleware{bounded},
-		PrepareModelRequest: rolePreparer, ModelMiddleware: []plugin.ModelMiddleware{bounded},
-		ToolMiddleware: []plugin.ToolMiddleware{bounded},
-		Limits:         agent.Limits{MaxLLMCalls: 6, MaxToolCalls: 4},
+		RunMiddleware:   []plugin.RunMiddleware{bounded},
+		ModelMiddleware: []plugin.ModelMiddleware{bounded},
+		ToolMiddleware:  []plugin.ToolMiddleware{bounded},
+		Limits:          agent.Limits{MaxLLMCalls: 6, MaxToolCalls: 4},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -79,9 +75,6 @@ func TestDelegationChildRunExhaustionBecomesRecoverableModelGuidance(t *testing.
 	request.Config.DelegationPolicy = harness.DelegationPolicySnapshot{MaxDepth: 1}
 	request.Config.ToolKeys = []string{harness.DelegationToolKey}
 	request.Config.ToolPolicies = []harness.ToolPolicySnapshot{harness.DelegationToolPolicySnapshot()}
-	request.Config.Roles = []harness.RoleSnapshot{{
-		ID: "researcher", Revision: 1, Name: "Researcher", Model: "specialist-model",
-	}}
 
 	snapshot, err := runner.StartAgentTurn(t.Context(), request)
 	if err != nil || snapshot.Turn.Status != harness.TurnCompleted {
@@ -122,7 +115,7 @@ func (client *childRunLimitModel) Generate(_ context.Context, request model.Requ
 		callID := "delegate-" + string(rune('0'+client.rootCalls))
 		return model.Response{ToolCalls: []tools.Call{{
 			ID: callID, ToolKey: harness.DelegationToolKey,
-			Arguments: json.RawMessage(`{"roleID":"researcher","goal":"collect evidence"}`),
+			Arguments: json.RawMessage(`{"memberID":"researcher","goal":"collect evidence"}`),
 		}}}, nil
 	default:
 		client.final = model.CloneRequest(request)

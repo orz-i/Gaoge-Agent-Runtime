@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
@@ -19,18 +20,18 @@ type HandoffStarter interface {
 	StartOrLoad(context.Context, kernel.Snapshot, handoff.Delegation) (handoff.Delegation, error)
 }
 
-// DelegateRequest selects one frozen environment role for a specialist Child
-// Agent. MemberID remains readable for Turns stored before role configuration.
+// DelegateRequest names a Host-authorized ChildRunner route. The model-visible
+// fields select only a member and a task. Agent carries a trusted Host-selected
+// Agent execution request, not a second role catalog or model-writable authority.
+// JSON Tool input cannot grant its own Model, Tool, Skills or physical identity.
 type DelegateRequest struct {
-	RoleID   string `json:"roleID,omitempty"`
-	MemberID string `json:"memberID,omitempty"`
-	Goal     string `json:"goal"`
-	// Explicit subset of this parent Run's currently authorized tools.
-	// Omitting this field never copies the parent's full toolset.
-	ToolKeys []string `json:"toolKeys,omitempty"`
-	callID   string
-	// The first Tool call is hashed once; Host policy may rewrite Goal or
-	// role while preserving the original immutable model-call identity.
+	MemberID       string             `json:"memberID"`
+	Goal           string             `json:"goal"`
+	MemberRevision string             `json:"-"`
+	Agent          agent.StartRequest `json:"-"`
+	callID         string
+	// Preserve the first model Call identity even after Host policy prepares
+	// the final execution scope; recovery uses the original persisted receipt.
 	callHash string
 }
 
@@ -48,30 +49,50 @@ type delegationItemPayload struct {
 	Status           handoff.Status      `json:"status"`
 	Result           json.RawMessage     `json:"result,omitempty"`
 	ParentRunID      string              `json:"parentRunID,omitempty"`
-	RoleID           string              `json:"roleID,omitempty"`
-	RoleRevision     uint64              `json:"roleRevision,omitempty"`
-	RoleName         string              `json:"roleName,omitempty"`
 	Execution        *handoff.Delegation `json:"execution,omitempty"`
 	OriginalCallHash string              `json:"originalCallHash,omitempty"`
 }
 
 func normalizeDelegateRequest(request DelegateRequest) (DelegateRequest, error) {
 	request.MemberID = strings.TrimSpace(request.MemberID)
-	request.RoleID = strings.TrimSpace(request.RoleID)
+	request.MemberRevision = strings.TrimSpace(request.MemberRevision)
 	request.Goal = strings.TrimSpace(request.Goal)
-	if (request.MemberID == "" && request.RoleID == "") || request.Goal == "" || len(request.MemberID) > 160 || len(request.RoleID) > 160 || len(request.Goal) > 200_000 || len(request.ToolKeys) > 16 {
+	if request.MemberID == "" || len(request.MemberID) > 160 || len(request.MemberRevision) > 256 ||
+		request.Goal == "" || len(request.Goal) > 200_000 {
 		return DelegateRequest{}, ErrInvalidRequest
 	}
-	seen := map[string]bool{}
-	for index, key := range request.ToolKeys {
-		key = strings.TrimSpace(key)
-		if key == "" || len(key) > 160 || seen[key] {
+	// The Host may only fill execution options. Physical identity, parent
+	// lineage, Actor/Thread, Goal, and continuation grants are Runtime-owned.
+	a := &request.Agent
+	if a.ID != "" || a.RequestID != "" || a.ParentRunID != "" || a.OriginFingerprint != "" ||
+		a.Actor != (kernel.ActorRef{}) || a.Thread != (kernel.ThreadRef{}) || a.Goal != "" ||
+		a.DeadlineAt != nil || a.CallAllowance != nil || a.AutoAllowance != nil ||
+		len(a.RequiredToolKeys) != 0 || a.OutputContract != nil || !budget.ValidLimits(a.Limits) {
+		return DelegateRequest{}, ErrInvalidRequest
+	}
+	a.Instructions = strings.TrimSpace(a.Instructions)
+	a.Model = strings.TrimSpace(a.Model)
+	var err error
+	a.ModelOptions, err = canonicalJSON(a.ModelOptions)
+	if err != nil {
+		return DelegateRequest{}, err
+	}
+	a.ToolKeys = normalizeStrings(a.ToolKeys)
+	a.InitialToolKeys = normalizeStrings(a.InitialToolKeys)
+	for _, key := range a.InitialToolKeys {
+		if !slices.Contains(a.ToolKeys, key) {
 			return DelegateRequest{}, ErrInvalidRequest
 		}
-		seen[key] = true
-		request.ToolKeys[index] = key
 	}
-	request.ToolKeys = normalizeStrings(request.ToolKeys)
+	a.HostedToolGrants, err = agent.NormalizeHostedToolGrantsForRole(a.HostedToolGrants)
+	if err != nil {
+		return DelegateRequest{}, ErrInvalidRequest
+	}
+	for _, grant := range a.HostedToolGrants {
+		if slices.Contains(a.ToolKeys, grant.Key) {
+			return DelegateRequest{}, ErrInvalidRequest
+		}
+	}
 	return request, nil
 }
 
@@ -100,7 +121,7 @@ func (runner *Runner) Delegate(ctx context.Context, turnID string, request Deleg
 		}
 		request, err = runner.manualDelegationPolicy.PrepareDelegation(ctx, tools.ExecutionRequest{
 			RunID: invocation.ExecutionRefID, Call: tools.Call{
-				ID:      stableID("manual", turn.ID, normalized.RoleID, normalized.Goal),
+				ID:      stableID("manual", turn.ID, normalized.MemberID, normalized.Goal),
 				ToolKey: DelegationToolKey, Arguments: callArguments,
 			},
 		}, normalized)
@@ -137,7 +158,7 @@ func (runner *Runner) delegate(ctx context.Context, turn Turn, invocation Invoca
 	if err != nil {
 		return DelegationResult{}, err
 	}
-	if err = runner.admitRoleChild(ctx, turn, invocation, delegation); err != nil {
+	if err = runner.admitDelegationChild(ctx, turn, invocation, delegation); err != nil {
 		if errors.Is(err, budget.ErrWaiting) {
 			// Freeze the requested delegation, but create no child Invocation,
 			// relation or Run until lifetime capacity is available. The same
@@ -247,10 +268,7 @@ func (runner *Runner) prepareDelegation(
 	if err != nil || terminalRuntimeStatus(parent.Run.Status) {
 		return handoff.Delegation{}, kernel.Snapshot{}, errors.Join(ErrConflict, err)
 	}
-	delegationID := stableID("hd", turn.ID, firstNonEmpty(request.RoleID, request.MemberID), request.Goal)
-	if len(request.ToolKeys) != 0 && request.callID == "" {
-		delegationID = stableID("hd", turn.ID, firstNonEmpty(request.RoleID, request.MemberID), request.Goal, strings.Join(request.ToolKeys, "\x00"))
-	}
+	delegationID := stableID("hd", turn.ID, request.MemberID, request.Goal)
 	if request.callID != "" {
 		delegationID = delegationToolID(invocation, request.callID)
 	}
@@ -266,58 +284,61 @@ func (runner *Runner) prepareDelegation(
 	if frozen, found, loadErr := runner.frozenDelegation(ctx, turn.ID, delegationID); found || loadErr != nil {
 		return frozen, parent, loadErr
 	}
-	if config.Roles == nil && config.SharedBudget == nil && request.RoleID == "" {
-		if len(request.ToolKeys) != 0 {
-			return handoff.Delegation{}, parent, ErrInvalidRequest
-		}
-		return delegation, parent, nil
-	}
-	role, found := findRole(config.Roles, request.RoleID)
-	if !found {
-		return handoff.Delegation{}, parent, toolsRoleUnavailable()
-	}
-	delegation.MemberID = firstNonEmpty(role.MemberID, role.ID)
-	delegation.MemberRevision = role.MemberRevision
-	delegation.RoleID, delegation.RoleRevision, delegation.RoleName = role.ID, role.Revision, role.Name
-	if view, viewErr := agent.ViewState(parent); viewErr == nil {
-		delegation.Model = firstNonEmpty(role.Model, view.Model)
-		delegation.ModelOptions = append(json.RawMessage(nil), view.ModelOptions...)
+	// The Host chose the named Agent before entering Runtime. Freeze only the
+	// resulting execution inputs; Runtime may tighten authority, never resolve
+	// names into an independent Role/Tool/Skill policy of its own.
+	a := request.Agent
+	delegation.MemberRevision = request.MemberRevision
+	delegation.Model = firstNonEmpty(a.Model, config.Model)
+	// Inherit frozen options only with the original Model. A Host-selected
+	// different Model must never accidentally reuse another provider's options.
+	// Routed members with no local Tool transfer need no Agent state inspection.
+	if a.Model == "" || a.Model == config.Model {
+		delegation.ModelOptions = append(json.RawMessage(nil), config.ModelOptions...)
 	} else {
-		return handoff.Delegation{}, parent, viewErr
+		delegation.ModelOptions = nil
 	}
-	if len(role.ModelOptions) != 0 {
-		delegation.ModelOptions = append(json.RawMessage(nil), role.ModelOptions...)
+	if len(a.ModelOptions) != 0 {
+		delegation.ModelOptions = append(json.RawMessage(nil), a.ModelOptions...)
 	}
-	view, viewErr := agent.ViewState(parent)
-	if viewErr != nil {
-		return handoff.Delegation{}, parent, viewErr
+	delegation.Instructions = a.Instructions
+	var local []string
+	if len(a.ToolKeys) != 0 {
+		view, viewErr := agent.ViewState(parent)
+		if viewErr != nil {
+			return handoff.Delegation{}, parent, viewErr
+		}
+		local, err = authorizedDelegatedLocalTools(config, view, a.ToolKeys)
 	}
-	selectedLocal, selectedHosted, selectErr := delegatedParentToolSelection(config, view, role, request.ToolKeys)
-	if selectErr != nil {
-		return handoff.Delegation{}, parent, tools.NewRecoverableCallError(
-			"delegation.tool_selection_denied", "Select only tools already authorized on the parent Run and supported by the child model. Provider-hosted Tools require the same parent/child model.", selectErr)
-	}
-	delegation.Instructions = delegatedRoleInstructions(role)
-	delegation.ToolKeys = append(delegation.ToolKeys, roleToolKeys(role)...)
-	delegation.ToolKeys = append(delegation.ToolKeys, selectedLocal...)
-	if view, viewErr := agent.ViewState(parent); viewErr == nil {
-		delegation.ToolKeys = intersectToolKeys(delegation.ToolKeys, view.ToolKeys)
-	}
-	// This grant is frozen specifically for the selected role. It does not
-	// change the parent Agent's ToolKeys, or become available to sibling Runs.
-	delegation.HostedToolGrants, err = joinDelegatedHostedGrants(role.HostedToolGrants, selectedHosted)
 	if err != nil {
+		return handoff.Delegation{}, parent, tools.NewRecoverableCallError(
+			"delegation.tool_selection_denied", "The requested child tools are not authorized by the original parent Run.", err)
+	}
+	delegation.ToolKeys = normalizeStrings(append(delegation.ToolKeys, local...))
+	delegation.HostedToolGrants = append([]agent.HostedToolGrant(nil), a.HostedToolGrants...)
+	if len(delegation.HostedToolGrants) > 0 && delegation.Model == "" {
 		return handoff.Delegation{}, parent, ErrInvalidRequest
 	}
 	for _, grant := range delegation.HostedToolGrants {
 		delegation.ToolKeys = append(delegation.ToolKeys, grant.Key)
 	}
 	delegation.ToolKeys = normalizeStrings(delegation.ToolKeys)
-	// Only the previously scoped context-artifact read capability is eager
-	// in a large child Tool Search catalog. Never turn other Role/MCP keys
-	// or Hosted grants into an implicit loaded Tool.
-	delegation.InitialToolKeys = intersectToolKeys(delegation.InitialToolKeys, delegation.ToolKeys)
-	delegation.Limits = roleAgentLimits(config.Limits, role.Limits)
+	delegation.InitialToolKeys = normalizeStrings(append(delegation.InitialToolKeys, a.InitialToolKeys...))
+	for _, key := range delegation.InitialToolKeys {
+		if !slices.Contains(delegation.ToolKeys, key) {
+			return handoff.Delegation{}, parent, ErrInvalidRequest
+		}
+	}
+	// A Child may tighten Root hard ceilings, never raise them. Descendant
+	// lifetime/concurrency accounting belongs to the Turn-wide budget ledger.
+	parentLimits, childLimits := config.Limits, a.Limits
+	parentLimits.MaxChildRuns, parentLimits.MaxConcurrentRuns, parentLimits.MaxCostUnits, parentLimits.MaxStateBytes = 0, 0, 0, 0
+	childLimits.MaxChildRuns, childLimits.MaxConcurrentRuns, childLimits.MaxCostUnits, childLimits.MaxStateBytes = 0, 0, 0, 0
+	parentLimits.MaxConcurrentDescendants, childLimits.MaxConcurrentDescendants = 0, 0
+	delegation.Limits, err = budget.TightenLimits(parentLimits, childLimits)
+	if err != nil {
+		return handoff.Delegation{}, parent, ErrInvalidRequest
+	}
 	return delegation, parent, nil
 }
 
@@ -344,7 +365,7 @@ func (runner *Runner) executeDelegation(
 	if err := runner.ensureDelegationRelation(ctx, invocation.ExecutionRefID, delegation); err != nil {
 		return DelegationResult{}, err
 	}
-	// Every delegated child, whether selected by RoleID or MemberID, owns
+	// Every delegated child selected by its frozen MemberID owns
 	// one frozen Invocation and the same cancellation-fenced physical grant.
 	// A member-only Handoff must not bypass this boundary.
 	if err := runner.prepareHandoffChild(ctx, turn, invocation, delegation, startedItemID); err != nil {
@@ -439,8 +460,8 @@ func (runner *Runner) dispatchHandoff(
 	// the immutable execution authority. A ChildRunner can mutate a passed
 	// ToolKeys/HostedToolGrants backing array in place; comparing its reply
 	// with the original Go value would silently compare the same mutation.
-	var frozen handoff.Delegation
-	if json.Unmarshal(child.Input, &frozen) != nil || !sameHandoffFrozenExecution(frozen, delegation) {
+	frozen, decodeErr := decodeFrozenHandoffDelegation(child.Input)
+	if decodeErr != nil || !sameHandoffFrozenExecution(frozen, delegation) {
 		return handoff.Delegation{}, ErrConflict
 	}
 	// Unlike a native Feature Start, Handoff may route to an independent
@@ -524,8 +545,8 @@ func (runner *Runner) projectDelegationRelations(ctx context.Context, turn Turn)
 			continue
 		}
 		var payload delegationItemPayload
-		if err = json.Unmarshal(item.Payload, &payload); err != nil {
-			return err
+		if !decodeTypedAuthorityJSON(item.Payload, &payload) {
+			return ErrConflict
 		}
 		if _, exists := projected[payload.DelegationID]; exists {
 			continue
@@ -583,8 +604,8 @@ func (runner *Runner) recordDelegationItemWithAdmission(
 	payload, err := json.Marshal(delegationItemPayload{
 		DelegationID: delegation.ID, MemberID: delegation.MemberID, MemberRevision: delegation.MemberRevision, ChildRunID: delegation.ChildRunID,
 		Goal: delegation.Goal, Status: delegation.Status, Result: append(json.RawMessage(nil), delegation.Result...),
-		ParentRunID: invocation.ExecutionRefID, RoleID: delegation.RoleID, RoleRevision: delegation.RoleRevision, RoleName: delegation.RoleName,
-		Execution: frozenDelegationExecution(delegation), OriginalCallHash: callHash,
+		ParentRunID: invocation.ExecutionRefID,
+		Execution:   frozenDelegationExecution(delegation), OriginalCallHash: callHash,
 	})
 	if err != nil {
 		return "", false, err

@@ -94,8 +94,8 @@ func (handler *DelegationToolHandler) Execute(
 	}
 	if err != nil {
 		if code, _, correctable := tools.RecoverableCallErrorInfo(err); correctable &&
-			(code == "delegation.tool_selection_denied" || code == "delegation.role_unavailable") {
-			// These two exact rejections originate in prepareDelegation,
+			code == "delegation.tool_selection_denied" {
+			// This exact authorization denial originates in prepareDelegation,
 			// before child admission, relation writes, or physical effect.
 			return tools.RecoverableNoEffectResult(request.Call.ID, err)
 		}
@@ -430,10 +430,10 @@ func (runner *Runner) preparedDelegationToolRequest(
 		return DelegateRequest{}, false, nil
 	}
 	var payload delegationItemPayload
-	if err = json.Unmarshal(first.Payload, &payload); err != nil {
-		return DelegateRequest{}, false, err
+	if !decodeTypedAuthorityJSON(first.Payload, &payload) {
+		return DelegateRequest{}, false, ErrConflict
 	}
-	return DelegateRequest{RoleID: payload.RoleID, MemberID: payload.MemberID, Goal: payload.Goal, callID: request.Call.ID}, true, nil
+	return DelegateRequest{MemberID: payload.MemberID, MemberRevision: payload.MemberRevision, Goal: payload.Goal, callID: request.Call.ID}, true, nil
 }
 
 func delegationToolID(invocation Invocation, callID string) string {
@@ -446,7 +446,7 @@ func DelegationToolRegistration(handler *DelegationToolHandler) tools.Registrati
 			Key:         DelegationToolKey,
 			Name:        "delegate_to_specialist_agent",
 			Description: "Delegate one focused subtask to an authorized specialist. A failed or cancelled child returns a status receipt; use successful evidence, retry selectively, or explain the limitation instead of assuming the parent task failed.",
-			InputSchema: json.RawMessage(`{"type":"object","additionalProperties":false,"required":["goal"],"anyOf":[{"required":["roleID"]},{"required":["memberID"]}],"properties":{"roleID":{"type":"string","minLength":1,"maxLength":160},"memberID":{"type":"string","minLength":1,"maxLength":160},"goal":{"type":"string","minLength":1,"maxLength":200000},"toolKeys":{"type":"array","maxItems":16,"uniqueItems":true,"items":{"type":"string","minLength":1,"maxLength":160}}}}`),
+			InputSchema: json.RawMessage(`{"type":"object","additionalProperties":false,"required":["memberID","goal"],"properties":{"memberID":{"type":"string","minLength":1,"maxLength":160},"goal":{"type":"string","minLength":1,"maxLength":200000}}}`),
 		},
 		Handler: handler,
 	}

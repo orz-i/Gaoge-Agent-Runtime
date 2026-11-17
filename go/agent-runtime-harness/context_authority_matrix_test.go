@@ -152,7 +152,7 @@ func TestAuditMatrixExcludedContextCannotCarryReboundCheckpoint(t *testing.T) {
 func TestAuditPropertyContextAuthorityTransitions(t *testing.T) {
 	property := func(runClass, callerContext, operation uint8) bool {
 		store, turn, checkpoint, root := contextRunMiddlewareFixture(t)
-		delegation := handoff.Delegation{ID: "state-specialist", MemberID: "specialist", RoleID: "specialist", ChildRunID: "state-specialist-run", Goal: "isolated", Status: handoff.StatusQueued}
+		delegation := handoff.Delegation{ID: "state-specialist", MemberID: "specialist", ChildRunID: "state-specialist-run", Goal: "isolated", Status: handoff.StatusQueued}
 		input, hash, err := marshalInvocationValue(delegation)
 		if err != nil {
 			t.Error(err)

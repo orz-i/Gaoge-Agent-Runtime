@@ -131,7 +131,7 @@ func (client *repeatedDeniedDelegationModel) Generate(_ context.Context, request
 			client.t.Fatal("first denial must not remove other authorized delegation alternatives")
 		}
 		return model.Response{ToolCalls: []tools.Call{{ID: fmt.Sprintf("denied-%d", client.calls), ToolKey: "harness.delegate_agent",
-			Arguments: json.RawMessage(fmt.Sprintf(`{"roleID":"specialist%d","goal":"find current news evidence"}`, client.calls))}}}, nil
+			Arguments: json.RawMessage(fmt.Sprintf(`{"memberID":"specialist%d","goal":"find current news evidence"}`, client.calls))}}}, nil
 	case 3:
 		if request.RequireToolCall || slices.ContainsFunc(request.Tools, func(item tools.Definition) bool { return item.Key == "harness.delegate_agent" }) {
 			client.t.Fatalf("repeated lack of evidence authority still forces delegation: %#v", request.Tools)

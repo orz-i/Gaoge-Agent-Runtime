@@ -71,9 +71,6 @@ type Delegation struct {
 	ID               string                  `json:"id"`
 	MemberID         string                  `json:"memberID"`
 	MemberRevision   string                  `json:"memberRevision,omitempty"`
-	RoleID           string                  `json:"roleID,omitempty"`
-	RoleRevision     uint64                  `json:"roleRevision,omitempty"`
-	RoleName         string                  `json:"roleName,omitempty"`
 	Instructions     string                  `json:"instructions,omitempty"`
 	Limits           agent.Limits            `json:"limits,omitempty"`
 	ChildRunID       string                  `json:"childRunID"`

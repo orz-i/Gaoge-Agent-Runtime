@@ -41,14 +41,14 @@ func TestPreparedDelegationReusesFrozenWaitingOrStartedIntent(t *testing.T) {
 			handler := NewDelegationToolHandler(policy)
 			callID := "child-at-capacity"
 			execution := tools.ExecutionRequest{RunID: modelRequest.RunID, Call: tools.Call{
-				ID: callID, ToolKey: DelegationToolKey, Arguments: json.RawMessage(`{"roleID":"researcher","goal":"lookup"}`),
+				ID: callID, ToolKey: DelegationToolKey, Arguments: json.RawMessage(`{"memberID":"researcher","goal":"lookup"}`),
 			}}
-			prepared, err := handler.prepareRequest(t.Context(), runner, execution, DelegateRequest{RoleID: "researcher", Goal: "lookup"})
+			prepared, err := handler.prepareRequest(t.Context(), runner, execution, DelegateRequest{MemberID: "researcher", Goal: "lookup"})
 			if err != nil || policy.calls != 1 {
 				t.Fatalf("initial preparation=%+v calls=%d err=%v", prepared, policy.calls, err)
 			}
 			delegation := handoff.Delegation{
-				ID: delegationToolID(invocation, callID), RoleID: prepared.RoleID, Goal: prepared.Goal,
+				ID: delegationToolID(invocation, callID), MemberID: prepared.MemberID, Goal: prepared.Goal,
 				ChildRunID: "not-started-child", Status: handoff.StatusQueued,
 			}
 			if _, err = runner.recordDelegationItem(t.Context(), turn, invocation, delegation, status, ""); err != nil {
@@ -60,13 +60,13 @@ func TestPreparedDelegationReusesFrozenWaitingOrStartedIntent(t *testing.T) {
 			}
 			// Resumed args cannot override the identity and host-approved goal.
 			recovered, err := handler.prepareRequest(t.Context(), runner, execution,
-				DelegateRequest{RoleID: "attacker", Goal: "changed goal"})
-			if err != nil || recovered.RoleID != prepared.RoleID ||
+				DelegateRequest{MemberID: "attacker", Goal: "changed goal"})
+			if err != nil || recovered.MemberID != prepared.MemberID ||
 				recovered.Goal != prepared.Goal || recovered.callID != callID || policy.calls != 1 {
 				t.Fatalf("resumption repeated policy or ignored freeze: recovered=%+v calls=%d err=%v", recovered, policy.calls, err)
 			}
 			// Multiple wakeups must remain idempotent.
-			_, err = handler.prepareRequest(t.Context(), runner, execution, DelegateRequest{RoleID: "attacker", Goal: "another change"})
+			_, err = handler.prepareRequest(t.Context(), runner, execution, DelegateRequest{MemberID: "attacker", Goal: "another change"})
 			if err != nil || policy.calls != 1 {
 				t.Fatalf("duplicate wakeup re-ran policy: calls=%d err=%v", policy.calls, err)
 			}

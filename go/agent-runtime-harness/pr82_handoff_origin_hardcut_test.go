@@ -37,12 +37,12 @@ func (starter *pr82UnexpectedNativeAgent) Resume(ctx context.Context, runID stri
 }
 
 func TestPR82HandoffRetryCannotRotateOrStartNativeAgent(t *testing.T) {
-	for _, mode := range []string{"member-only", "role"} {
+	for _, mode := range []string{"member-only", "member-revision"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newPR82HandoffFixture(t)
 			delegation := f.delegation()
-			if mode == "member-only" {
-				delegation.RoleID = ""
+			if mode == "member-revision" {
+				delegation.MemberRevision = "member-v2"
 			}
 			if err := f.runner.prepareHandoffChild(t.Context(), f.turn, f.parent, delegation, f.startedItemID); err != nil {
 				t.Fatal(err)
@@ -81,12 +81,12 @@ func TestPR82HandoffRetryCannotRotateOrStartNativeAgent(t *testing.T) {
 }
 
 func TestPR82HandoffInternalResumeNeverCreatesNativeDispatchGrant(t *testing.T) {
-	for _, mode := range []string{"member-only", "role"} {
+	for _, mode := range []string{"member-only", "member-revision"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newPR82HandoffFixture(t)
 			delegation := f.delegation()
-			if mode == "member-only" {
-				delegation.RoleID = ""
+			if mode == "member-revision" {
+				delegation.MemberRevision = "member-v2"
 			}
 			if err := f.runner.prepareHandoffChild(t.Context(), f.turn, f.parent, delegation, f.startedItemID); err != nil {
 				t.Fatal(err)
@@ -115,12 +115,12 @@ func TestPR82HandoffInternalResumeNeverCreatesNativeDispatchGrant(t *testing.T) 
 }
 
 func TestPR82HandoffInternalContinuationNeverResumesNativeAgent(t *testing.T) {
-	for _, mode := range []string{"member-only", "role"} {
+	for _, mode := range []string{"member-only", "member-revision"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newPR82HandoffFixture(t)
 			delegation := f.delegation()
-			if mode == "member-only" {
-				delegation.RoleID = ""
+			if mode == "member-revision" {
+				delegation.MemberRevision = "member-v2"
 			}
 			if err := f.runner.prepareHandoffChild(t.Context(), f.turn, f.parent, delegation, f.startedItemID); err != nil {
 				t.Fatal(err)
@@ -152,15 +152,15 @@ func TestPR82HandoffInternalContinuationNeverResumesNativeAgent(t *testing.T) {
 }
 
 func TestPR82HandoffResumedMemberAndRoleExcludeSupervisorContext(t *testing.T) {
-	for _, mode := range []string{"member-only", "role"} {
+	for _, mode := range []string{"member-only", "member-revision"} {
 		t.Run(mode, func(t *testing.T) {
 			store, turn, _, root := contextRunMiddlewareFixture(t)
 			delegation := handoff.Delegation{
 				ID: "specialist-delegation", MemberID: "specialist", ChildRunID: "specialist-child",
 				Goal: "independent specialist task", Status: handoff.StatusQueued,
 			}
-			if mode == "role" {
-				delegation.RoleID = "specialist"
+			if mode == "member-revision" {
+				delegation.MemberRevision = "specialist-v1"
 			}
 			input, inputHash, err := marshalInvocationValue(delegation)
 			if err != nil {
@@ -212,7 +212,7 @@ func TestPR82HandoffReturnMustMatchFrozenMemberAndRoleIdentity(t *testing.T) {
 		{name: "member-only-other-member-revision", member: true, alter: func(d *handoff.Delegation) { d.MemberRevision = "other-revision" }},
 		{name: "role-other-member", alter: func(d *handoff.Delegation) { d.MemberID = "other-member" }},
 		{name: "role-other-member-revision", alter: func(d *handoff.Delegation) { d.MemberRevision = "other-revision" }},
-		{name: "role-other-role-revision", alter: func(d *handoff.Delegation) { d.RoleRevision++ }},
+		{name: "role-other-role-revision", alter: func(d *handoff.Delegation) { d.MemberRevision = "other-member-revision" }},
 		{name: "role-other-goal", alter: func(d *handoff.Delegation) { d.Goal = "unrelated goal" }},
 	}
 	for _, tc := range cases {
@@ -220,10 +220,8 @@ func TestPR82HandoffReturnMustMatchFrozenMemberAndRoleIdentity(t *testing.T) {
 			f := newPR82HandoffFixture(t)
 			delegation := f.delegation()
 			delegation.MemberRevision = "expected-member-revision"
-			if tc.member {
-				delegation.RoleID = ""
-			} else {
-				delegation.RoleRevision = 5
+			if !tc.member {
+				delegation.MemberRevision = "member-v5"
 			}
 			f.handoff.result = func(d handoff.Delegation) (handoff.Delegation, error) {
 				d.Status = handoff.StatusRunning
@@ -254,7 +252,6 @@ func TestPR82HandoffReturnMustMatchFrozenMemberAndRoleIdentity(t *testing.T) {
 func TestPR82HandoffMatchingMemberIdentityCanSettleGrant(t *testing.T) {
 	f := newPR82HandoffFixture(t)
 	delegation := f.delegation()
-	delegation.RoleID = ""
 	delegation.MemberRevision = "member-revision"
 	f.handoff.result = func(d handoff.Delegation) (handoff.Delegation, error) {
 		d.Status = handoff.StatusRunning

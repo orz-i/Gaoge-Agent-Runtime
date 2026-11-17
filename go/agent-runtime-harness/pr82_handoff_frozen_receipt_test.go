@@ -21,7 +21,7 @@ func pr82FrozenReceiptDelegation(role bool) handoff.Delegation {
 		Limits:           agent.Limits{MaxLLMCalls: 2, MaxToolCalls: 4},
 	}
 	if role {
-		delegation.RoleID, delegation.RoleRevision, delegation.RoleName = "analyst", 5, "Research Analyst"
+		delegation.MemberRevision = "member-v5"
 	}
 	return delegation
 }

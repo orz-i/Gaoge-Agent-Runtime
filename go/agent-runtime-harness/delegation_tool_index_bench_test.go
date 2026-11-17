@@ -31,7 +31,7 @@ func benchmarkPreparedDelegationStore(b *testing.B, size int) (*Runner, tools.Ex
 	_, _, err := store.AppendItem(context.Background(), Item{
 		ID:     stableID("hid", turnID, id, string(ItemStarted)),
 		TurnID: turnID, Kind: ItemDelegation, Status: ItemStarted, InvocationID: parentInvocationID,
-		Payload: json.RawMessage(`{"roleID":"reviewer","goal":"review the draft","delegationID":"` + id + `"}`),
+		Payload: json.RawMessage(`{"memberID":"reviewer","goal":"review the draft","delegationID":"` + id + `"}`),
 	})
 	if err != nil {
 		b.Fatal(err)
@@ -49,7 +49,7 @@ func BenchmarkPreparedDelegationToolRequestMemoryScaling(b *testing.B) {
 			b.ResetTimer()
 			for range b.N {
 				got, found, err := runner.preparedDelegationToolRequest(context.Background(), request)
-				if err != nil || !found || got.RoleID != "reviewer" || got.Goal != "review the draft" {
+				if err != nil || !found || got.MemberID != "reviewer" || got.Goal != "review the draft" {
 					b.Fatalf("frozen request lost: %+v found=%v err=%v", got, found, err)
 				}
 			}

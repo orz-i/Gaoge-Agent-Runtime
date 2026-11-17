@@ -19,15 +19,15 @@ func (handler *Handler) CreateSubtask(ctx *gin.Context) {
 		return
 	}
 	var request struct {
-		RoleID string `json:"roleID" binding:"required,min=1,max=160"`
-		Goal   string `json:"goal" binding:"required,min=1,max=200000"`
+		MemberID string `json:"memberID" binding:"required,min=1,max=160"`
+		Goal     string `json:"goal" binding:"required,min=1,max=200000"`
 	}
 	if ctx.ShouldBindJSON(&request) != nil {
 		runtimehttp.WriteError(ctx, http.StatusBadRequest, "harness.subtask_invalid_request", "invalid subtask request")
 		return
 	}
 	result, err := handler.runner.Delegate(ctx.Request.Context(), snapshot.Turn.ID, harness.DelegateRequest{
-		RoleID: strings.TrimSpace(request.RoleID), Goal: strings.TrimSpace(request.Goal),
+		MemberID: strings.TrimSpace(request.MemberID), Goal: strings.TrimSpace(request.Goal),
 	})
 	if err != nil {
 		writeHarnessError(ctx, err)

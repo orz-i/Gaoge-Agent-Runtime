@@ -264,10 +264,10 @@ export class RuntimeClient {
           { method: "POST", body: JSON.stringify({ response }) },
           request,
         ),
-        createSubtask: (turnID: string, roleID: string, goal: string, request?: RequestOptions) =>
+        createSubtask: (turnID: string, memberID: string, goal: string, request?: RequestOptions) =>
           this.request<HarnessTurnSnapshotDTO>(
             `/harness/turns/${pathPart(turnID)}/subtasks`,
-            { method: "POST", body: JSON.stringify({ roleID, goal }) }, request,
+            { method: "POST", body: JSON.stringify({ memberID, goal }) }, request,
           ),
         cancelSubtask: (turnID: string, subtaskID: string, reason = "", request?: RequestOptions) =>
           this.request<HarnessTurnSnapshotDTO>(

@@ -92,9 +92,7 @@ func (runner *Runner) ResumeWaitingDelegation(
 			original.ChildRunID != frozen.ChildRunID ||
 			original.MemberID != frozen.MemberID ||
 			original.MemberRevision != frozen.MemberRevision ||
-			original.RoleID != frozen.RoleID ||
-			original.RoleRevision != frozen.RoleRevision ||
-			original.RoleName != frozen.RoleName || original.Goal != frozen.Goal ||
+			original.Goal != frozen.Goal ||
 			original.Status != handoff.StatusQueued || len(original.Result) != 0 ||
 			original.Execution.Status != handoff.StatusQueued ||
 			len(original.Execution.Result) != 0 ||
@@ -105,7 +103,7 @@ func (runner *Runner) ResumeWaitingDelegation(
 	} else if !errors.Is(loadErr, ErrNotFound) {
 		return true, loadErr
 	}
-	if err := runner.admitRoleChild(ctx, turn, owner, frozen); err != nil {
+	if err := runner.admitDelegationChild(ctx, turn, owner, frozen); err != nil {
 		if errors.Is(err, budget.ErrWaiting) {
 			return true, budget.ErrWaiting
 		}
@@ -169,9 +167,6 @@ func verifiedFrozenWaitingDelegation(
 		payload.Status != handoff.StatusQueued || len(payload.Result) != 0 ||
 		frozen.MemberID != payload.MemberID ||
 		frozen.MemberRevision != payload.MemberRevision ||
-		frozen.RoleID != payload.RoleID ||
-		frozen.RoleRevision != payload.RoleRevision ||
-		frozen.RoleName != payload.RoleName ||
 		frozen.Goal != payload.Goal {
 		return handoff.Delegation{}, ErrConflict
 	}

@@ -78,7 +78,7 @@ func assertPR82RemoteCancellationOnStore(t *testing.T, store harness.Store, role
 	}
 	delegation := handoff.Delegation{ID: "pr82-delegation", MemberID: "specialist", ChildRunID: childRunID, Goal: "inspect", Status: handoff.StatusQueued}
 	if role {
-		delegation.RoleID = "specialist"
+		delegation.MemberRevision = "specialist-v1"
 	}
 	invocationID, err := harness.InvocationID(turnID, parentItemID, harness.CapabilityAgent, delegation.ID)
 	if err != nil {

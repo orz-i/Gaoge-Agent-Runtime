@@ -134,7 +134,6 @@ type ConfigSnapshot struct {
 	Limits                agent.Limits             `json:"limits"`
 	SharedBudget          *budget.Limits           `json:"sharedBudget,omitempty"`
 	DelegationPolicy      DelegationPolicySnapshot `json:"delegationPolicy,omitempty"`
-	Roles                 []RoleSnapshot           `json:"roles,omitempty"`
 	ContentHash           string                   `json:"contentHash"`
 	CreatedAt             time.Time                `json:"createdAt"`
 	// AdmissionHash binds the immutable start request (including Context and
@@ -160,7 +159,6 @@ type configPayload struct {
 	Limits                agent.Limits             `json:"limits"`
 	SharedBudget          *budget.Limits           `json:"sharedBudget,omitempty"`
 	DelegationPolicy      DelegationPolicySnapshot `json:"delegationPolicy,omitempty"`
-	Roles                 []RoleSnapshot           `json:"roles,omitempty"`
 	AdmissionHash         string                   `json:"admissionHash,omitempty"`
 	InputMessage          *HostRef                 `json:"inputMessage,omitempty"`
 	OutputMessage         *HostRef                 `json:"outputMessage,omitempty"`
@@ -233,16 +231,12 @@ func SealConfigSnapshot(turnID string, value ConfigSnapshot, now time.Time) (Con
 	if value.DelegationPolicy.MaxDepth < 0 || value.DelegationPolicy.MaxDepth > 32 {
 		return ConfigSnapshot{}, ErrInvalidRequest
 	}
-	value.Roles, err = normalizeRoleSnapshots(value.Roles, value.ToolKeys, value.Model)
-	if err != nil {
-		return ConfigSnapshot{}, err
-	}
 	payload := configPayload{
 		TurnID: turnID, Environment: value.Environment, Instructions: value.Instructions,
 		Model: value.Model, ModelOptions: value.ModelOptions, OutputContract: value.OutputContract, ToolKeys: value.ToolKeys,
 		ToolPolicies: value.ToolPolicies, Skills: value.Skills, MemoryPolicy: value.MemoryPolicy,
 		ContextPolicy: value.ContextPolicy, ApprovalPolicyVersion: value.ApprovalPolicyVersion, Limits: value.Limits,
-		SharedBudget: value.SharedBudget, DelegationPolicy: value.DelegationPolicy, Roles: value.Roles,
+		SharedBudget: value.SharedBudget, DelegationPolicy: value.DelegationPolicy,
 		AdmissionHash: value.AdmissionHash, InputMessage: value.InputMessage, OutputMessage: value.OutputMessage,
 	}
 	raw, err := json.Marshal(payload)
@@ -262,7 +256,7 @@ func canonicalJSON(value json.RawMessage) (json.RawMessage, error) {
 		return nil, nil
 	}
 	// Validate original bytes before json.Unmarshal can erase duplicates or
-	// Unicode/case-fold aliases. This also applies to Role ModelOptions.
+	// Unicode/case-fold aliases for Host-supplied execution options.
 	if err := jsoncontract.ValidateUniqueJSONObject(trimmed); err != nil {
 		return nil, ErrInvalidRequest
 	}
@@ -302,7 +296,6 @@ func cloneConfigSnapshot(value ConfigSnapshot) ConfigSnapshot {
 		copied := *value.SharedBudget
 		value.SharedBudget = &copied
 	}
-	value.Roles = cloneRoleSnapshots(value.Roles)
 	value.ModelOptions = append(json.RawMessage(nil), value.ModelOptions...)
 	value.OutputContract = model.CloneOutputContract(value.OutputContract)
 	value.ToolKeys = append([]string(nil), value.ToolKeys...)

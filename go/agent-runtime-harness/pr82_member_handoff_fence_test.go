@@ -92,7 +92,6 @@ func TestPR82MemberHandoffFencedAfterChildCreate(t *testing.T) {
 			}
 			f.runner.store = store
 			delegation := f.delegation()
-			delegation.RoleID = ""
 			_, err := f.runner.executeDelegation(t.Context(), f.turn, f.parent, f.parentRun, delegation, f.startedItemID)
 			if !errors.Is(err, ErrConflict) {
 				t.Fatalf("Member Handoff did not reject %s after child Create: %v", scenario, err)
@@ -110,7 +109,6 @@ func TestPR82MemberHandoffUnknownOutcomeRetainsGrant(t *testing.T) {
 		return handoff.Delegation{}, errors.New("child StartOrLoad reply lost")
 	}
 	delegation := f.delegation()
-	delegation.RoleID = ""
 	dispatch := func() error {
 		_, err := f.runner.executeDelegation(t.Context(), f.turn, f.parent, f.parentRun, delegation, f.startedItemID)
 		return err

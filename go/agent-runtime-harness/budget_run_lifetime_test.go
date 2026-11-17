@@ -48,14 +48,14 @@ func TestDescendantAdmissionReconcilesCommittedFailureAndFreezesCapacityWait(t *
 	}
 	parent := Invocation{ExecutionRefID: request.RunID}
 	a := handoff.Delegation{ID: "delegation-a", ChildRunID: "child-a", Status: handoff.StatusQueued}
-	if err = runner.admitRoleChild(t.Context(), turn, parent, a); err != nil {
+	if err = runner.admitDelegationChild(t.Context(), turn, parent, a); err != nil {
 		t.Fatal(err)
 	}
 	b := handoff.Delegation{ID: "delegation-b", ChildRunID: "child-b", Status: handoff.StatusQueued, Instructions: "frozen input"}
-	if err = runner.admitRoleChild(t.Context(), turn, parent, b); !errors.Is(err, budget.ErrWaiting) {
+	if err = runner.admitDelegationChild(t.Context(), turn, parent, b); !errors.Is(err, budget.ErrWaiting) {
 		t.Fatal(err)
 	}
-	b.RoleID = "frozen-role"
+	b.MemberRevision = "frozen-revision"
 	if _, err = runner.recordDelegationItem(t.Context(), turn, parent, b, ItemWaiting, ""); err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestDescendantAdmissionReconcilesCommittedFailureAndFreezesCapacityWait(t *
 	if err != nil || !found || frozen.Instructions != b.Instructions {
 		t.Fatalf("frozen=%+v %v", frozen, err)
 	}
-	b.RoleID = ""
+	b.MemberRevision = ""
 	ledger, err := store.LoadBudget(t.Context(), turn.ID)
 	if err != nil || ledger.View("").Usage.ChildRuns != 1 || len(ledger.Runs) != 2 {
 		t.Fatalf("queued charged a child: %+v %v", ledger, err)
@@ -78,7 +78,7 @@ func TestDescendantAdmissionReconcilesCommittedFailureAndFreezesCapacityWait(t *
 	}
 	// Simulate process loss before Run middleware can release the lifetime slot.
 	restarted := &Runner{store: store, runtime: runtime, budgets: shared, clock: hostedBudgetClock{}}
-	if err = restarted.admitRoleChild(t.Context(), turn, parent, b); err != nil {
+	if err = restarted.admitDelegationChild(t.Context(), turn, parent, b); err != nil {
 		t.Fatal(err)
 	}
 	ledger, err = store.LoadBudget(t.Context(), turn.ID)
@@ -112,14 +112,14 @@ func TestChildRegistrationProjectionCrashCanReplayOriginalRunID(t *testing.T) {
 	parent := Invocation{ExecutionRefID: request.RunID}
 	delegation := handoff.Delegation{ID: "crashed", ChildRunID: "child-crashed", Status: handoff.StatusQueued}
 	failed := &Runner{store: budgetProjectionCrashStore{store}, runtime: runtime, budgets: shared, clock: hostedBudgetClock{}}
-	if err = failed.admitRoleChild(t.Context(), turn, parent, delegation); err == nil {
+	if err = failed.admitDelegationChild(t.Context(), turn, parent, delegation); err == nil {
 		t.Fatal("fault not injected after budget registration")
 	}
 	if _, e := runtime.Load(t.Context(), delegation.ChildRunID); !errors.Is(e, kernel.ErrNotFound) {
 		t.Fatalf("child unexpectedly exists: %v", e)
 	}
 	resumed := &Runner{store: store, runtime: runtime, budgets: shared, clock: hostedBudgetClock{}}
-	if err = resumed.admitRoleChild(t.Context(), turn, parent, delegation); err != nil {
+	if err = resumed.admitDelegationChild(t.Context(), turn, parent, delegation); err != nil {
 		t.Fatal(err)
 	}
 	ledger, err := store.LoadBudget(t.Context(), turn.ID)
@@ -147,7 +147,7 @@ func TestRegisteredButNeverCreatedChildIsFencedAfterTerminalParent(t *testing.T)
 	}
 	parent := Invocation{ExecutionRefID: request.RunID}
 	a := handoff.Delegation{ID: "owner", ChildRunID: "owner-run", Status: handoff.StatusQueued}
-	if err = runner.admitRoleChild(t.Context(), turn, parent, a); err != nil {
+	if err = runner.admitDelegationChild(t.Context(), turn, parent, a); err != nil {
 		t.Fatal(err)
 	}
 	owner, err := runtime.Create(t.Context(), kernel.CreateRequest{ID: a.ChildRunID, Kind: "test", Actor: kernel.ActorRef{TenantID: "test", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "test", ID: "thread"}, Goal: "owner", State: json.RawMessage(`{}`)})
@@ -155,7 +155,7 @@ func TestRegisteredButNeverCreatedChildIsFencedAfterTerminalParent(t *testing.T)
 		t.Fatal(err)
 	}
 	orphan := handoff.Delegation{ID: "lost", ChildRunID: "never-created", Status: handoff.StatusQueued}
-	if err = runner.admitRoleChild(t.Context(), turn, Invocation{ExecutionRefID: a.ChildRunID}, orphan); err != nil {
+	if err = runner.admitDelegationChild(t.Context(), turn, Invocation{ExecutionRefID: a.ChildRunID}, orphan); err != nil {
 		t.Fatal(err)
 	}
 	ledger, err := store.LoadBudget(t.Context(), turn.ID)
@@ -166,7 +166,7 @@ func TestRegisteredButNeverCreatedChildIsFencedAfterTerminalParent(t *testing.T)
 		t.Fatal(err)
 	}
 	b := handoff.Delegation{ID: "replacement", ChildRunID: "replacement-run", Status: handoff.StatusQueued}
-	if err = runner.admitRoleChild(t.Context(), turn, parent, b); err != nil {
+	if err = runner.admitDelegationChild(t.Context(), turn, parent, b); err != nil {
 		t.Fatal(err)
 	}
 	ledger, err = store.LoadBudget(t.Context(), turn.ID)

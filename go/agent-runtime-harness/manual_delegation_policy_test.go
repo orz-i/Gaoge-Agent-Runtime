@@ -19,7 +19,7 @@ type denyingManualNewsPolicy struct{ requests []tools.ExecutionRequest }
 
 func (policy *denyingManualNewsPolicy) PrepareDelegation(_ context.Context, request tools.ExecutionRequest, input harness.DelegateRequest) (harness.DelegateRequest, error) {
 	policy.requests = append(policy.requests, tools.CloneExecutionRequest(request))
-	if input.RoleID != "general" || input.Goal != "Search today's latest AI news and cite current sources" {
+	if input.MemberID != "general" || input.Goal != "Search today's latest AI news and cite current sources" {
 		return harness.DelegateRequest{}, harness.ErrInvalidRequest
 	}
 	return harness.DelegateRequest{}, tools.NewRecoverableCallErrorAllowCompletion(
@@ -63,7 +63,7 @@ func TestManualDelegationPreflightRejectsUnarmedNewsBeforeAnyChildSideEffect(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	input := harness.DelegateRequest{RoleID: "general", Goal: "Search today's latest AI news and cite current sources"}
+	input := harness.DelegateRequest{MemberID: "general", Goal: "Search today's latest AI news and cite current sources"}
 	for range 2 {
 		_, err = runner.Delegate(t.Context(), turn.ID, input)
 		code, _, recoverable := tools.RecoverableCallErrorInfo(err)
@@ -77,10 +77,10 @@ func TestManualDelegationPreflightRejectsUnarmedNewsBeforeAnyChildSideEffect(t *
 		t.Fatalf("unstable, unauthorized manual policy identity: %#v", policy.requests)
 	}
 	var args struct {
-		RoleID string `json:"roleID"`
-		Goal   string `json:"goal"`
+		MemberID string `json:"memberID"`
+		Goal     string `json:"goal"`
 	}
-	if json.Unmarshal(policy.requests[0].Call.Arguments, &args) != nil || args.RoleID != input.RoleID || args.Goal != input.Goal {
+	if json.Unmarshal(policy.requests[0].Call.Arguments, &args) != nil || args.MemberID != input.MemberID || args.Goal != input.Goal {
 		t.Fatalf("missing frozen manual input: %+v", args)
 	}
 	items, err := store.ListItems(t.Context(), turn.ID, 0, 100)

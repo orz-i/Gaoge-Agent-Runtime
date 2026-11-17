@@ -18,7 +18,7 @@ type contextRunRelationFixture map[string]runrelation.Relation
 func TestDelegatedSpecialistResumeDoesNotRehydrateSupervisorContext(t *testing.T) {
 	store, turn, _, root := contextRunMiddlewareFixture(t)
 	delegation := handoff.Delegation{
-		ID: "researcher-delegation", MemberID: "researcher", RoleID: "researcher",
+		ID: "researcher-delegation", MemberID: "researcher",
 		ChildRunID: "specialist-child", Goal: "independent task", Status: handoff.StatusQueued,
 	}
 	input, inputHash, err := marshalInvocationValue(delegation)
