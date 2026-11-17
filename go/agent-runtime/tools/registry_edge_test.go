@@ -46,11 +46,6 @@ func TestRegistryCatalogAndExecutionBoundaries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	descriptor := registry.Descriptor()
-	if descriptor.Name != "tools" || len(descriptor.Provides) != 2 ||
-		descriptor.Provides[0] != tools.CapabilityCatalog || descriptor.Provides[1] != tools.CapabilityExecutor {
-		t.Fatalf("descriptor=%#v", descriptor)
-	}
 
 	definition, ok := registry.Resolve(" alpha ")
 	if !ok || definition.Key != "alpha" || definition.Name != "alpha" || definition.Description != "first" {

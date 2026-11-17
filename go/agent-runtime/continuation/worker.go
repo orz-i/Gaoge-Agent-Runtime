@@ -9,9 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	queuecore "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/queue"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 )
 
 // WorkerOptions bound polling, lease consumption and error reporting.
@@ -81,16 +79,6 @@ func NewWorker(queue DeliveryQueue, handler Handler, options WorkerOptions) (*Wo
 		return nil, ErrInvalidInput
 	}
 	return &Worker{queue: queue, handler: handler, options: options, runs: map[string]*workerRunGate{}}, nil
-}
-
-// Descriptor declares the explicitly composed background recovery graph.
-func (worker *Worker) Descriptor() kernel.FeatureDescriptor {
-	return kernel.FeatureDescriptor{
-		Name: "continuation", Requires: []kernel.Capability{
-			kernel.CapabilityRuntime, queuecore.CapabilityQueue, runrelation.CapabilityRelations,
-		},
-		Provides: []kernel.Capability{CapabilityDispatcher},
-	}
 }
 
 // Start begins bounded polling until the host context or Close cancels it.

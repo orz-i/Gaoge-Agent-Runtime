@@ -31,8 +31,11 @@ Application Host (auth, role selection, transcript, business effects)
 
 The dependency direction is inward: Kernel does not import Provider SDKs,
 HTTP, Redis, PostgreSQL, MCP, A2A or OpenTelemetry. The Host must explicitly
-compose adapters and authenticate the current principal. `kernel.Create`
-only persists a Run; `agent.Runner.StartRun` executes its Tool/Model loop.
+compose adapters and authenticate the current principal. Configuration,
+factory selection, secrets and background Worker lifecycle are exclusively
+Host concerns; no generic Feature graph or bootstrap package is embedded in
+Core. `kernel.Create` only persists a Run; `agent.Runner.StartRun` executes
+its Tool/Model loop.
 
 ## Ownership boundaries
 

@@ -5,18 +5,10 @@ import (
 	"time"
 )
 
-// Capability identifies one explicitly provided runtime capability.
-type Capability string
-
-const (
-	// CapabilityRuntime is the minimal Run state-machine capability.
-	CapabilityRuntime Capability = "kernel.runtime"
-)
-
 // RunKind identifies the state-machine owner selected before Run creation.
 type RunKind string
 
-// RunStatus is the lifecycle state shared by all runtime features.
+// RunStatus is the durable lifecycle shared by all Kernel Run kinds.
 type RunStatus string
 
 const (

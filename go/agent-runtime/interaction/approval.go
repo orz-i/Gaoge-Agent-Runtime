@@ -9,8 +9,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
-const CapabilityApproval kernel.Capability = "interaction.approval"
-
 const toolApprovalCheckpointKind = "tool_approval"
 
 var (
@@ -51,14 +49,6 @@ func New(runtime *kernel.Runtime) (*Approvals, error) {
 		return nil, ErrInvalidApproval
 	}
 	return &Approvals{runtime: runtime}, nil
-}
-
-// Descriptor declares approval capability and its Kernel dependency.
-func (service *Approvals) Descriptor() kernel.FeatureDescriptor {
-	return kernel.FeatureDescriptor{
-		Name: "interaction", Requires: []kernel.Capability{kernel.CapabilityRuntime},
-		Provides: []kernel.Capability{CapabilityApproval},
-	}
 }
 
 // PrepareToolApproval creates one pending checkpoint for a stable Tool call.

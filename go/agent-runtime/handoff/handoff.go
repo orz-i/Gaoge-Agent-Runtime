@@ -11,8 +11,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
-const CapabilityCoordinator kernel.Capability = "handoff.coordinator"
-
 // RemoteAgentRunKind is the A2A remote-Agent shadow RunKind. Handoff may
 // consume an Agent Run or this explicitly bound remote Agent proxy, but never
 // an unrelated custom Kernel state machine.
@@ -163,7 +161,6 @@ func (resolver staticChildRunnerResolver) ResolveChild(context.Context, Delegati
 // Coordinator starts or recovers stable delegated Child Agent Runs.
 type Coordinator struct {
 	resolver      ChildRunnerResolver
-	requires      []kernel.Capability
 	deferredAgent *agent.Runner
 }
 
@@ -174,7 +171,6 @@ func New(children ChildRunner) (*Coordinator, error) {
 	}
 	return &Coordinator{
 		resolver: staticChildRunnerResolver{children: children},
-		requires: []kernel.Capability{agent.CapabilityRunner},
 	}, nil
 }
 
@@ -196,8 +192,7 @@ func NewDeferredAgent(original *agent.Runner) (*Coordinator, error) {
 }
 
 // NewRouted constructs Handoff with a finite host-owned child routing policy.
-// Unlike New, the resolver's dependencies are already explicitly composed, so
-// the coordinator does not claim that every route requires agent.runner.
+// The Host explicitly owns the resolver and concrete ChildRunner dependencies.
 func NewRouted(resolver ChildRunnerResolver) (*Coordinator, error) {
 	if resolver == nil {
 		return nil, ErrInvalidDelegation
@@ -257,15 +252,6 @@ func (coordinator *Coordinator) UsesLocalAgentRunner(runtime *kernel.Runtime, ca
 	}
 	original, ok := fixed.children.(*agent.Runner)
 	return ok && original == candidate && candidate.ObservesKernelRuntime(runtime)
-}
-
-// Descriptor declares the reusable Handoff capability.
-func (coordinator *Coordinator) Descriptor() kernel.FeatureDescriptor {
-	return kernel.FeatureDescriptor{
-		Name:     "handoff",
-		Requires: append([]kernel.Capability(nil), coordinator.requires...),
-		Provides: []kernel.Capability{CapabilityCoordinator},
-	}
 }
 
 // StartOrLoad returns the existing Child Run or starts it with the persisted ID.

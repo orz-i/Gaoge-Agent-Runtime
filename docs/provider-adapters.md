@@ -81,11 +81,9 @@ router, err := provider.NewRouter("openai",
 // agent.StartRequest{Model: "anthropic/<model-id>", ...}
 ```
 
-For Koanf bootstrap, keep the existing host-owned manual
-`bootstrap.Registry.RegisterModel` factory. Look up `api_key` via
-`FactoryInput.Secret(ctx, "api_key")`; do not register secret-bearing
-global factories. The host chooses whether to construct a single adapter or a
-multi-provider router.
+The Host reads its own credentials or secret store, then explicitly constructs
+these provider adapters and selects a single client or multi-provider router.
+The SDK does not register provider factories or parse Host configuration.
 
 ## Supported model contract
 

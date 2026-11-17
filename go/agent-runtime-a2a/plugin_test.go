@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
 func TestPluginResolvesAndFreezesRemoteBindingRevision(t *testing.T) {
@@ -87,9 +86,9 @@ func TestPluginRejectsChangedFrozenBinding(t *testing.T) {
 	}
 }
 
-func TestPluginDescriptorKeepsProtocolAtEdge(t *testing.T) {
+func TestPluginOnlyClaimsA2ATargets(t *testing.T) {
 	t.Parallel()
-	plugin, err := NewPlugin(PluginDependencies{AttestationKey: testA2AShadowKey(),
+	_, err := NewPlugin(PluginDependencies{AttestationKey: testA2AShadowKey(),
 		Runtime: newShadowRuntime(t),
 		Bindings: BindingResolverFunc(func(context.Context, string, string) (Binding, error) {
 			return Binding{}, ErrBindingMissing
@@ -97,12 +96,6 @@ func TestPluginDescriptorKeepsProtocolAtEdge(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
-	}
-	descriptor := plugin.Descriptor()
-	if descriptor.Name != "a2a" || len(descriptor.Requires) != 1 ||
-		descriptor.Requires[0] != kernel.CapabilityRuntime || len(descriptor.Provides) != 1 ||
-		descriptor.Provides[0] != CapabilityPlugin {
-		t.Fatalf("descriptor = %#v", descriptor)
 	}
 	if _, ok := ParseTargetMemberID("local-agent"); ok {
 		t.Fatal("non-A2A member was claimed")

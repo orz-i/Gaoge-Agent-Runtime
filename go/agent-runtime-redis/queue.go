@@ -55,11 +55,6 @@ func (queue *DeliveryQueue) DurableQueue() bool {
 	return queue != nil && queue.client != nil
 }
 
-// Descriptor declares the Queue delivery capability.
-func (queue *DeliveryQueue) Descriptor() kernel.FeatureDescriptor {
-	return kernel.FeatureDescriptor{Name: "redis-queue", Provides: []kernel.Capability{queuecore.CapabilityQueue}}
-}
-
 // Enqueue atomically creates or reuses one canonical Job.
 func (queue *DeliveryQueue) Enqueue(
 	ctx context.Context,

@@ -14,8 +14,6 @@ import (
 )
 
 const (
-	CapabilityFeed kernel.Capability = "runfeed.feed"
-
 	EventRunStarted          = "run.started"
 	EventRunWaitingInput     = "run.waiting_input"
 	EventRunPausedBudget     = "run.paused_budget"
@@ -134,11 +132,6 @@ func New(store Store, options Options) (*Feed, error) {
 		store: store, retention: options.Retention, pollInterval: options.PollInterval,
 		batchSize: options.BatchSize, bufferSize: options.BufferSize, clock: options.Clock,
 	}, nil
-}
-
-// Descriptor declares the replayable Run Feed capability.
-func (feed *Feed) Descriptor() kernel.FeatureDescriptor {
-	return kernel.FeatureDescriptor{Name: "runfeed", Provides: []kernel.Capability{CapabilityFeed}}
 }
 
 // Publish appends one best-effort live fact without mutating Kernel state.

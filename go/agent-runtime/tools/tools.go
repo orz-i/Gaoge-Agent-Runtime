@@ -8,13 +8,9 @@ import (
 	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
 const (
-	CapabilityCatalog  kernel.Capability = "tools.catalog"
-	CapabilityExecutor kernel.Capability = "tools.executor"
-
 	// MaxExecutionResultContentBytes is the absolute in-process safety ceiling for one exact Tool
 	// result payload. Larger payloads must be externalized by the Tool instead of entering Runtime
 	// state or Context artifacts as inline JSON.
@@ -430,13 +426,6 @@ func NewRegistry(registrations []Registration) (*Registry, error) {
 		registry.handlers[definition.Key] = registration.Handler
 	}
 	return registry, nil
-}
-
-// Descriptor provides the Tool catalog and executor capabilities.
-func (registry *Registry) Descriptor() kernel.FeatureDescriptor {
-	return kernel.FeatureDescriptor{
-		Name: "tools", Provides: []kernel.Capability{CapabilityCatalog, CapabilityExecutor},
-	}
 }
 
 // Resolve returns one isolated Tool definition.
