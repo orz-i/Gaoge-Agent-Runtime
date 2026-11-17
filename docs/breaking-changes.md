@@ -30,11 +30,22 @@ and Started Tool intents reuse their original authorization on recovery.
 
 **Child budget enforcement:** The Host's `agent.StartRequest.Limits` is frozen
 as local Agent call/token limits plus `handoff.Delegation.SubtreeLimits` for the
-Turn-wide shared ledger. Its child-run, cost, state, concurrency and descendant
-ceilings are enforced by the latter, not discarded to satisfy Agent-local limit
-validation. Requesting those subtree-only limits without `SharedBudget` fails
-closed. Nested delegates inherit their *immediate* parent's frozen Model and
-ModelOptions unless the Host explicitly selects another Model.
+Turn-wide shared ledger. Child-run, concurrency and descendant ceilings are
+accounted by that ledger, not discarded to satisfy Agent-local validation.
+`MaxCostUnits` and `MaxStateBytes` are not measured by this Harness budget
+meter: setting either on a SharedBudget or selected Child Agent is rejected
+before execution, including when resuming a frozen Waiting delegation. Those
+fields remain available to other Features that can meter them. Existing
+persisted Harness Turns using these unsupported hard limits must be retired
+before this pre-stable upgrade; no silent reinterpretation is performed.
+Requesting subtree-only limits without `SharedBudget` also fails closed. Nested delegates
+inherit their *immediate* parent's frozen Model and ModelOptions unless the
+Host explicitly selects another Model.
+
+**Child Tool boundary:** No Context Archive reader or other Harness Tool is
+implicitly injected into `ToolKeys` / `InitialToolKeys` for a delegated Agent,
+including nested children. Only explicitly authorized child Tools can be
+frozen; the existing isolated Context Artifact Handler remains unchanged.
 
 **Upgrade:** nonempty persisted Role catalogs change sealed Config identity;
 legacy Role-bearing Handoff Invocation inputs fail closed even if their stored

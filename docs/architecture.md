@@ -83,9 +83,12 @@ stable SubAgent delegation only after the shared Host-owned
 `Dependencies.DelegationPolicy` authorizes the selected member. The
 `DelegationToolHandler` is the agent-facing Tool entry for eligible parent Runs;
 model calls and manual/HTTP calls share one Host authorization boundary.
-The frozen Handoff envelope carries both Agent-local limits and full shared
-subtree ceilings for ledger admission. The child may execute on the original
-local Agent Runner or an explicitly verified routed ChildRunner. `a2a.remote`
+The frozen Handoff envelope carries both Agent-local limits and enforceable
+shared subtree ceilings for ledger admission. Harness rejects cost/state-byte
+hard limits it cannot meter. No Supervisor Context Tool is implicitly assigned
+to a delegated child; isolated Context Artifact reads stay prohibited. The child
+may execute on the original local Agent Runner or an explicitly verified routed
+ChildRunner. `a2a.remote`
 remains an optional **remote Agent shadow**, not a composite interpreter.
 
 There is no native generic Child Capability Start/Retry/Resume interpreter.

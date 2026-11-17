@@ -221,7 +221,7 @@ func SealConfigSnapshot(turnID string, value ConfigSnapshot, now time.Time) (Con
 		return ConfigSnapshot{}, err
 	}
 	if value.SharedBudget != nil {
-		if !budget.ValidLimits(*value.SharedBudget) {
+		if !enforceableHarnessBudgetLimits(*value.SharedBudget) {
 			return ConfigSnapshot{}, ErrInvalidRequest
 		}
 		// The sealed hash and later execution must use the same owned value.
@@ -281,6 +281,14 @@ func normalizeStrings(values []string) []string {
 	}
 	slices.Sort(result)
 	return slices.Compact(result)
+}
+
+// The Harness SharedBudget meter has no authoritative cost or state-byte
+// consumption signal. Never admit these as hard ceilings: storing an unused
+// limit in a durable ledger is not enforcement. Other Features may support
+// these budget dimensions independently.
+func enforceableHarnessBudgetLimits(value budget.Limits) bool {
+	return budget.ValidLimits(value) && value.MaxCostUnits == 0 && value.MaxStateBytes == 0
 }
 
 func cloneConfigSnapshot(value ConfigSnapshot) ConfigSnapshot {

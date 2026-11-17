@@ -41,7 +41,7 @@ func TestHostSelectedSubtreeCeilingsAreFrozenSeparatelyFromAgentLimits(t *testin
 	}
 	turn := f.turn
 	turn.ConfigSnapshotID = config.ID
-	limits := budget.Limits{MaxLLMCalls: 2, MaxChildRuns: 1, MaxConcurrentDescendants: 1, MaxConcurrentRuns: 1, MaxCostUnits: 100, MaxStateBytes: 12}
+	limits := budget.Limits{MaxLLMCalls: 2, MaxChildRuns: 1, MaxConcurrentDescendants: 1, MaxConcurrentRuns: 1}
 	frozen, _, err := f.runner.prepareDelegation(t.Context(), turn, f.parent, DelegateRequest{
 		MemberID: "authorized", Goal: "inspect", Agent: agent.StartRequest{Limits: limits},
 	})
@@ -59,7 +59,7 @@ func TestHostSelectedSubtreeCeilingsAreFrozenSeparatelyFromAgentLimits(t *testin
 }
 
 func TestHostSelectedSubtreeCeilingsSurviveAdmissionAndReplay(t *testing.T) {
-	store, shared, request := hostedBudgetFixture(t, budget.Limits{MaxChildRuns: 8, MaxConcurrentDescendants: 8, MaxCostUnits: 500, MaxStateBytes: 50})
+	store, shared, request := hostedBudgetFixture(t, budget.Limits{MaxChildRuns: 8, MaxConcurrentDescendants: 8})
 	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
 	if err != nil {
 		t.Fatal(err)
@@ -69,7 +69,7 @@ func TestHostSelectedSubtreeCeilingsSurviveAdmissionAndReplay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	policy := budget.Limits{MaxLLMCalls: 2, MaxChildRuns: 1, MaxConcurrentDescendants: 1, MaxConcurrentRuns: 1, MaxCostUnits: 100, MaxStateBytes: 12}
+	policy := budget.Limits{MaxLLMCalls: 2, MaxChildRuns: 1, MaxConcurrentDescendants: 1, MaxConcurrentRuns: 1}
 	delegation := handoff.Delegation{ID: "approved-child", ChildRunID: "child-of-root", Status: handoff.StatusQueued,
 		Limits: budget.Limits{MaxLLMCalls: 2}, SubtreeLimits: &policy}
 	parent := Invocation{ExecutionRefID: request.RunID}

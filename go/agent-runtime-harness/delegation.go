@@ -70,7 +70,7 @@ func normalizeDelegateRequest(request DelegateRequest) (DelegateRequest, error) 
 	if a.ID != "" || a.RequestID != "" || a.ParentRunID != "" || a.OriginFingerprint != "" ||
 		a.Actor != (kernel.ActorRef{}) || a.Thread != (kernel.ThreadRef{}) || a.Goal != "" ||
 		a.DeadlineAt != nil || a.CallAllowance != nil || a.AutoAllowance != nil ||
-		len(a.RequiredToolKeys) != 0 || a.OutputContract != nil || !budget.ValidLimits(a.Limits) {
+		len(a.RequiredToolKeys) != 0 || a.OutputContract != nil || !enforceableHarnessBudgetLimits(a.Limits) {
 		return DelegateRequest{}, ErrInvalidRequest
 	}
 	a.Instructions = strings.TrimSpace(a.Instructions)
@@ -297,13 +297,9 @@ func (runner *Runner) prepareDelegation(
 		delegationID = delegationToolID(invocation, request.callID)
 	}
 	childRunID := stableID("hchild", invocation.ExecutionRefID, delegationID)
-	contextKeys := contextDelegationToolKeys(turn, config)
 	delegation := handoff.Delegation{
 		ID: delegationID, MemberID: request.MemberID, ChildRunID: childRunID,
-		Goal: request.Goal, Model: config.Model, ModelOptions: append(json.RawMessage(nil), config.ModelOptions...),
-		ToolKeys:        append([]string(nil), contextKeys...),
-		InitialToolKeys: append([]string(nil), contextKeys...),
-		Status:          handoff.StatusQueued,
+		Goal: request.Goal, Status: handoff.StatusQueued,
 	}
 	if frozen, found, loadErr := runner.frozenDelegation(ctx, turn.ID, delegationID); found || loadErr != nil {
 		return frozen, parent, loadErr
@@ -360,8 +356,8 @@ func (runner *Runner) prepareDelegation(
 		}
 	}
 	// Shared descendant ceilings and local Agent call/token limits have
-	// distinct enforcers. Freeze the full Host-selected policy for the ledger
-	// before removing unsupported dimensions from the physical Agent request.
+	// distinct enforcers. Freeze only limits with actual accounting signals
+	// for the ledger; cost and state-byte hard ceilings are rejected earlier.
 	// The original parent subtree remains enforced by the ledger ancestry.
 	resolved, limitErr := budget.TightenLimits(parentLimits, a.Limits)
 	if limitErr != nil {
@@ -373,7 +369,7 @@ func (runner *Runner) prepareDelegation(
 		subtreeLimits := resolved
 		delegation.SubtreeLimits = &subtreeLimits
 	} else if a.Limits.MaxChildRuns > 0 || a.Limits.MaxConcurrentRuns > 0 ||
-		a.Limits.MaxConcurrentDescendants > 0 || a.Limits.MaxCostUnits > 0 || a.Limits.MaxStateBytes > 0 {
+		a.Limits.MaxConcurrentDescendants > 0 {
 		// Without a shared ledger, Agent-local budget cannot enforce these.
 		return handoff.Delegation{}, parent, ErrInvalidRequest
 	}
@@ -381,18 +377,6 @@ func (runner *Runner) prepareDelegation(
 	resolved.MaxConcurrentDescendants = 0
 	delegation.Limits = resolved
 	return delegation, parent, nil
-}
-
-func contextDelegationToolKeys(turn Turn, config ConfigSnapshot) []string {
-	if strings.TrimSpace(turn.ContextCheckpointID) == "" {
-		return nil
-	}
-	for _, key := range config.ToolKeys {
-		if strings.TrimSpace(key) == ContextArtifactToolKey {
-			return []string{ContextArtifactToolKey}
-		}
-	}
-	return nil
 }
 
 func (runner *Runner) executeDelegation(
