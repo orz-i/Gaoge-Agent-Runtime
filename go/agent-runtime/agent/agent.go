@@ -20,8 +20,7 @@ import (
 )
 
 const (
-	RunKind          kernel.RunKind    = "agent"
-	CapabilityRunner kernel.Capability = "agent.runner"
+	RunKind kernel.RunKind = "agent"
 
 	autonomousWakeupDelay = time.Second
 )
@@ -603,19 +602,6 @@ func (runner *Runner) OwnsKernelRuntime(runtime *kernel.Runtime) bool {
 // Host middleware/preparers can perform side effects outside Kernel CAS.
 func (runner *Runner) ObservesKernelRuntime(runtime *kernel.Runtime) bool {
 	return runner != nil && runtime != nil && runner.runtime == runtime
-}
-
-// Descriptor declares the explicit Agent capability graph.
-func (runner *Runner) Descriptor() kernel.FeatureDescriptor {
-	requires := []kernel.Capability{kernel.CapabilityRuntime}
-	if runner != nil && runner.catalog != nil && runner.executor != nil {
-		requires = append(requires, tools.CapabilityCatalog, tools.CapabilityExecutor)
-	}
-	return kernel.FeatureDescriptor{
-		Name:     "agent",
-		Requires: requires,
-		Provides: []kernel.Capability{CapabilityRunner},
-	}
 }
 
 // StartRun creates and drives one Agent Run until terminal or approval wait.

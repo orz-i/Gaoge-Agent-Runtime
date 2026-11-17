@@ -40,7 +40,6 @@ type executorContract interface {
 }
 
 type workerContract interface {
-	Descriptor() kernel.FeatureDescriptor
 	Start(context.Context) error
 	Close(context.Context) error
 }
@@ -54,8 +53,7 @@ var (
 	_ catalogContract                                     = (tools.Catalog)(nil)
 	_ tools.Executor                                      = (executorContract)(nil)
 	_ executorContract                                    = (tools.Executor)(nil)
-	_ kernel.WorkerFeature                                = (workerContract)(nil)
-	_ workerContract                                      = (kernel.WorkerFeature)(nil)
+	_ workerContract                                      = (*continuation.Worker)(nil)
 	_ kernel.Store                                        = (*memory.Store)(nil)
 	_ func(kernel.Dependencies) (*kernel.Runtime, error)  = kernel.New
 	_ func(agent.Dependencies) (*agent.Runner, error)     = agent.NewRunner
@@ -146,9 +144,5 @@ func TestHostRunsAgentWithoutGaoge(t *testing.T) {
 	loaded, err := runtime.Load(ctx, snapshot.Run.ID)
 	if err != nil || loaded.Run.Revision != snapshot.Run.Revision || loaded.EventHead == 0 {
 		t.Fatalf("load durable result: %#v, %v", loaded, err)
-	}
-	descriptor := runner.Descriptor()
-	if descriptor.Name == "" || len(descriptor.Requires) == 0 || len(descriptor.Provides) == 0 {
-		t.Fatalf("incomplete feature descriptor: %#v", descriptor)
 	}
 }

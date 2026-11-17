@@ -8,11 +8,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
-
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
-
-const CapabilityRunner kernel.Capability = "evaluation.runner"
 
 var ErrInvalidExecution = errors.New("invalid evaluation execution")
 
@@ -180,11 +176,6 @@ func NewRunner(target Target, registrations []EvaluatorRegistration) (*Runner, e
 		return nil, err
 	}
 	return &Runner{target: target, evaluators: evaluators}, nil
-}
-
-// Descriptor declares Evaluation as a pure capability with no Runtime Kind.
-func (runner *Runner) Descriptor() kernel.FeatureDescriptor {
-	return kernel.FeatureDescriptor{Name: "evaluation", Provides: []kernel.Capability{CapabilityRunner}}
 }
 
 // Execute evaluates all Dataset cases with stable identities and deterministic ordering.

@@ -1,5 +1,23 @@
 # Breaking changes (pre-stable Beta)
 
+## 2026-11-17 — Remove Core Host Bootstrap / Compose / Feature metadata
+
+**Breaking Go API:** The pre-stable `agent-runtime/bootstrap` and
+`agent-runtime/compose` packages, configured bootstrap example and
+`kernel.Feature`, `kernel.FeatureDescriptor`, `kernel.WorkerFeature`,
+`kernel.Capability` and related `Descriptor()`/capability constants are removed.
+The Core Go module no longer imports the Koanf YAML/environment configuration
+stack. No compatibility aliases or replacement container are introduced.
+
+Hosts now explicitly assemble Stores, Agents, Tools, Model clients, optional
+Handoff/Continuation and telemetry with their existing constructors, and
+control Worker `Start`/`Close` in their own application lifecycle. The
+`continuation.DeliveryQueue` contract retains the real leased queue methods
+without requiring generic Feature metadata. Kernel Run state, execution
+leases/CAS, original Handoff identity and replay/cancellation proofs are
+unchanged. Existing binaries using deleted Go symbols must update their Host
+wiring; persisted Run/Turn/Store data is not transformed by this change.
+
 ## 2026-11-16 — Native Child Capability / RunRelation hard cut
 
 **Breaking Go/HTTP/TypeScript contract:** Harness no longer starts, retries,

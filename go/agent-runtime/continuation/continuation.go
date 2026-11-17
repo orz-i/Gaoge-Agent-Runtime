@@ -12,8 +12,6 @@ import (
 	queuecore "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/queue"
 )
 
-const CapabilityDispatcher kernel.Capability = "continuation.dispatcher"
-
 const (
 	QueueName     = "runtime-continuations"
 	JobKind       = "runtime.continuation.v1"
@@ -66,7 +64,6 @@ type Enqueuer interface {
 
 // DeliveryQueue is the leased delivery capability owned by Worker.
 type DeliveryQueue interface {
-	kernel.Feature
 	Enqueuer
 	Claim(context.Context, queuecore.ClaimRequest) ([]queuecore.Delivery, error)
 	Ack(context.Context, queuecore.LeaseRequest) (queuecore.Job, error)

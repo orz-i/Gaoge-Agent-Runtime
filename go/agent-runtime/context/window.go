@@ -14,11 +14,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 )
-
-const CapabilityWindow kernel.Capability = "context.window"
 
 // MaxArtifactPayloadBytes is the absolute durable payload ceiling for one Context Artifact.
 // Portable transcript archives use multiple Artifacts when their combined payload exceeds this
@@ -534,10 +531,6 @@ type Manager struct {
 }
 
 func NewManager(dependencies Dependencies) *Manager { return &Manager{counter: dependencies.Counter} }
-
-func (manager *Manager) Descriptor() kernel.FeatureDescriptor {
-	return kernel.FeatureDescriptor{Name: "context", Provides: []kernel.Capability{CapabilityWindow}}
-}
 
 // NormalizePolicy applies non-model defaults only. It intentionally never invents a model token limit.
 func NormalizePolicy(value Policy) Policy {

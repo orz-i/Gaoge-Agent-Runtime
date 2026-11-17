@@ -56,9 +56,6 @@ func TestRoutedCoordinatorSelectsChildPerDelegation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if descriptor := coordinator.Descriptor(); len(descriptor.Requires) != 0 {
-		t.Fatalf("routed descriptor leaked concrete requirements: %#v", descriptor)
-	}
 	parent := kernel.Snapshot{Run: kernel.Run{
 		ID: "team_1", Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"},
 		Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"},

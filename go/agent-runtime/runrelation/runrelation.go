@@ -12,8 +12,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
-const CapabilityRelations kernel.Capability = "runrelation.registry"
-
 var (
 	ErrInvalidInput = errors.New("invalid run relation input")
 	ErrConflict     = errors.New("run relation conflict")
@@ -126,11 +124,6 @@ func New(store Store, clock kernel.Clock) (*Registry, error) {
 		clock = systemClock{}
 	}
 	return &Registry{store: store, clock: clock}, nil
-}
-
-// Descriptor declares the feature-neutral relation capability.
-func (registry *Registry) Descriptor() kernel.FeatureDescriptor {
-	return kernel.FeatureDescriptor{Name: "runrelation", Provides: []kernel.Capability{CapabilityRelations}}
 }
 
 // Ensure creates or reuses one identical stable relation.

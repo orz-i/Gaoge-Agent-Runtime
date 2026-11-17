@@ -140,11 +140,6 @@ func New(dependencies Dependencies) (*Runtime, error) {
 	return &Runtime{store: dependencies.Store, clock: dependencies.Clock, ids: dependencies.IDs, managedHost: registration}, nil
 }
 
-// Descriptor exposes only the minimal Kernel capability.
-func (runtime *Runtime) Descriptor() FeatureDescriptor {
-	return FeatureDescriptor{Name: "kernel", Provides: []Capability{CapabilityRuntime}}
-}
-
 // Create starts one explicitly selected Runtime Kind.
 func (runtime *Runtime) Create(ctx context.Context, request CreateRequest) (Snapshot, error) {
 	if runtime == nil || !validCreateRequest(request) || hasReservedApplyEvidence(request.Events) {

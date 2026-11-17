@@ -25,8 +25,8 @@ for (const file of goFiles(a2aRoot)) {
   }
 }
 
-requireText("go/agent-runtime-a2a/plugin.go", "CapabilityPlugin kernel.Capability = \"protocol.a2a\"");
-requireText("go/agent-runtime-a2a/plugin.go", "TargetPrefix     string            = \"a2a:\"");
+requireText("go/agent-runtime-a2a/plugin.go", "func (plugin *Plugin) ResolveChild(");
+requireText("go/agent-runtime-a2a/plugin.go", "const TargetPrefix string = \"a2a:\"");
 requireText("go/agent-runtime-a2a/client.go", "ProtocolVersion    = \"1.0\"");
 requireText("go/agent-runtime-a2a/client.go", "a2asdk.TransportProtocolHTTPJSON");
 requireText("go/agent-runtime-a2a/host.go", "ProtocolBinding: a2asdk.TransportProtocolHTTPJSON");

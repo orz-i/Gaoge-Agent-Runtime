@@ -9,11 +9,7 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
-const (
-	// CapabilityPlugin is provided by one explicitly composed A2A edge plugin.
-	CapabilityPlugin kernel.Capability = "protocol.a2a"
-	TargetPrefix     string            = "a2a:"
-)
+const TargetPrefix string = "a2a:"
 
 var (
 	ErrInvalidPlugin             = errors.New("invalid A2A plugin")
@@ -75,14 +71,6 @@ func NewPlugin(dependencies PluginDependencies) (*Plugin, error) {
 	}
 	return &Plugin{runtime: dependencies.Runtime, bindings: dependencies.Bindings,
 		attestationKey: append([]byte(nil), dependencies.AttestationKey...)}, nil
-}
-
-// Descriptor declares the static microkernel dependency direction.
-func (*Plugin) Descriptor() kernel.FeatureDescriptor {
-	return kernel.FeatureDescriptor{
-		Name: "a2a", Requires: []kernel.Capability{kernel.CapabilityRuntime},
-		Provides: []kernel.Capability{CapabilityPlugin},
-	}
 }
 
 // ResolveChild implements Handoff routing only for a2a:<public-id> members.
@@ -284,6 +272,5 @@ func validBinding(binding Binding, targetID, revision string) bool {
 }
 
 var (
-	_ kernel.Feature              = (*Plugin)(nil)
 	_ handoff.ChildRunnerResolver = (*Plugin)(nil)
 )

@@ -154,34 +154,24 @@ effects with unknown outcomes cannot be blindly replayed. No additional Session 
 or database schema is introduced. See [Session and Context governance, composition and limits](docs/session-context-governance.md)
 and the [pre-stable hard-cut notes](docs/breaking-changes.md).
 
-### Configuration-driven bootstrap
+### Explicit Host composition
 
-Hosts that prefer configuration-driven assembly can use the optional
-`bootstrap` package. It uses Koanf for YAML/JSON plus environment overrides,
-but keeps DI manual: the host explicitly registers allowed store, optional
-Kernel feature (for example queue/run-feed adapters), model, Tool, and telemetry
-factories in Go, and configuration can only select those
-factories. `kernel.New` remains supported and the Kernel does not import Koanf
-or provider SDKs.
+The Runtime SDK does not parse Host configuration or own a dependency-injection
+container. The Host chooses the Store, Model, Tool and telemetry adapters and
+constructs the components directly:
 
 ```go
-cfg, err := bootstrap.Load("runtime.yaml", bootstrap.LoadOptions{})
-registry := bootstrap.NewDefaultRegistry()
-_ = registry.RegisterModel("my-model", newModelFromConfig)
-host, err := bootstrap.Build(ctx, cfg, registry, bootstrap.EnvSecretResolver{})
-if err != nil {
-    log.Fatal(err)
-}
-if err = host.Start(ctx); err != nil {
-    log.Fatal(err)
-}
-defer host.Close(context.Background())
+runtime, err := kernel.New(kernel.Dependencies{Store: store})
+if err != nil { return err }
+agentRunner, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: modelClient})
+if err != nil { return err }
+_ = agentRunner // StartRun uses this explicitly constructed Agent.
 ```
 
-Environment overrides use `GAOGE_` by default and `__` for nesting, for example
-`GAOGE_AGENT__EXECUTION__MODEL__TIMEOUT=45s`. Secret values are not stored in
-the config document; component `secret_refs` are resolved only during startup.
-See [the configured example](go/agent-runtime/examples/configured/main.go).
+Any YAML/JSON configuration, environment variables, secret resolution and
+Worker Start/Close ordering are responsibilities of the Host application.
+The SDK does not provide a generic Feature registry, configuration bootstrap
+or worker lifecycle orchestrator. See [quickstart](go/agent-runtime/examples/quickstart/main.go).
 
 ## Compatibility
 

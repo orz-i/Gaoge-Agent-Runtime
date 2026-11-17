@@ -35,11 +35,6 @@ func NewMemory(dependencies Dependencies) *Memory {
 // DurableQueue reports that this reference adapter loses Jobs on restart.
 func (queue *Memory) DurableQueue() bool { return false }
 
-// Descriptor declares the Queue delivery capability.
-func (queue *Memory) Descriptor() kernel.FeatureDescriptor {
-	return kernel.FeatureDescriptor{Name: "queue", Provides: []kernel.Capability{CapabilityQueue}}
-}
-
 // Enqueue creates or reuses one stable Job identity.
 func (queue *Memory) Enqueue(ctx context.Context, request EnqueueRequest) (EnqueueResult, error) {
 	if err := ctx.Err(); err != nil {

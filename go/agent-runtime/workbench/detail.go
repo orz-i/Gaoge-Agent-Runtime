@@ -12,8 +12,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
-const CapabilityQuery kernel.Capability = "workbench.query"
-
 const (
 	diagnosticProviderError = "provider_error"
 	diagnosticUnavailable   = "unavailable"
@@ -120,11 +118,6 @@ func NewQuery(runs RunSource, events EventSource, registrations []Registration) 
 		return nil, err
 	}
 	return &Query{runs: runs, events: events, providers: providers, topologyProviders: topologyProviders}, nil
-}
-
-// Descriptor declares the Workbench read capability.
-func (query *Query) Descriptor() kernel.FeatureDescriptor {
-	return kernel.FeatureDescriptor{Name: "workbench", Provides: []kernel.Capability{CapabilityQuery}}
 }
 
 // Get returns base Run detail even when optional providers are unavailable.

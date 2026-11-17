@@ -8,11 +8,7 @@ import (
 	"errors"
 	"strings"
 	"time"
-
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
-
-const CapabilityQueue kernel.Capability = "queue.delivery"
 
 var (
 	ErrInvalidInput = errors.New("invalid queue input")
