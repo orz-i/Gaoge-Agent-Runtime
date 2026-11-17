@@ -35,6 +35,16 @@ is **v0.1.0-beta.23**; see the [beta.24 upgrade notes](docs/releases/v0.1.0-beta
 | `ts/agent-runtime-client` | Dependency-free TypeScript HTTP v1 client | Supported |
 | `contracts/agent-runtime/v1` | OpenAPI and capability contracts | Supported |
 
+### Independently versioned protocol module
+
+[`go/provider-transport`](go/provider-transport/README.md) contains the 38
+host-neutral provider wire adapters, physically extracted from the former
+`agent-runtime-provider/transport` package. It has no execution SDK dependency
+and its own `VERSION` and module tag namespace. It is tested in this workspace
+but is **not** part of the synchronized Runtime release cohort. Its initial
+`v0.1.0-beta.1` is an unreleased candidate; this change creates no release tags.
+See [the extraction decision](docs/adr/0019-independent-provider-transport.md).
+
 ## Install
 
 ```bash
