@@ -145,7 +145,12 @@ func ea1RootReconcilePhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 		if phase == "P2-evidence" {
 			host = []plugin.RunMiddleware{&ea1AdmissionMiddleware{}}
 		}
-		r, e := agent.NewRunner(agent.Dependencies{Runtime: runtime, RunMiddleware: host, Model: physical, Catalog: registry, Executor: registry, ModelOutcomeVerifier: modelVerifier, ToolOutcomeVerifier: toolVerifier, RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: 2 * time.Second}, Execution: agent.ExecutionPolicy{Model: agent.CallPolicy{Timeout: 100 * time.Millisecond, MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}, Tool: agent.CallPolicy{Timeout: 100 * time.Millisecond, MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}}})
+		// These cases assert injected receipt/settlement faults, not Provider timeouts.
+		// The fake Model reads the actual durable intent; under -race SQLite I/O
+		// may exceed 100ms on CI and hide the intended receipt failure.
+		// Keep the call bound below the 2s lease's mandatory 1s safety margin.
+		const physicalCallTimeout = 750 * time.Millisecond
+		r, e := agent.NewRunner(agent.Dependencies{Runtime: runtime, RunMiddleware: host, Model: physical, Catalog: registry, Executor: registry, ModelOutcomeVerifier: modelVerifier, ToolOutcomeVerifier: toolVerifier, RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: 2 * time.Second}, Execution: agent.ExecutionPolicy{Model: agent.CallPolicy{Timeout: physicalCallTimeout, MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}, Tool: agent.CallPolicy{Timeout: physicalCallTimeout, MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}}})
 		if e != nil {
 			t.Fatal(e)
 		}
