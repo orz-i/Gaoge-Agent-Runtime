@@ -174,8 +174,16 @@ func TestRealPostgresPR72PendingGrantPreventsFailureAndRetryAcrossConnections(t 
 	if e != nil {
 		t.Fatalf("settled no-effect cannot fail: %v", e)
 	}
-	retried, e := second.RetryInvocation(t.Context(), inv.ID, failed.Revision, "pr72-verified-new-effect", now.Add(time.Second))
-	if e != nil || retried.ExecutionRefID != "pr72-verified-new-effect" || retried.Attempt != 2 {
-		t.Fatalf("verified no-effect retry: %+v %v", retried, e)
+	// A settled no-effect grant permits terminal projection, but a retired
+	// native Child must never rotate its original Run identity.
+	retried, e := second.RetryInvocation(t.Context(), inv.ID, failed.Revision, "pr72-forbidden-child-retry", now.Add(time.Second))
+	if !errors.Is(e, harness.ErrConflict) || retried.ID != "" {
+		t.Fatalf("retired child acquired new physical authority: %+v err=%v", retried, e)
+	}
+	unchanged, e := first.GetInvocation(t.Context(), inv.ID)
+	if e != nil || unchanged.Status != harness.InvocationFailed ||
+		unchanged.ExecutionRefID != inv.ExecutionRefID || unchanged.Attempt != 1 ||
+		unchanged.Revision != failed.Revision {
+		t.Fatalf("rejected cross-connection child retry changed original identity: %+v err=%v", unchanged, e)
 	}
 }
