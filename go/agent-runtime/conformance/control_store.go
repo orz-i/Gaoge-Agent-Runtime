@@ -18,11 +18,15 @@ func (c controlFastClock) Now() time.Time { return c.at }
 // without introducing a separate command queue or progress schema.
 func RunKernelControlSuite(t *testing.T, factory ExecutionStoreFactory) {
 	t.Helper()
-	create := func(t *testing.T, goal string, deadline *time.Time) (*kernel.Runtime, kernel.Snapshot) {
+	create := func(t *testing.T, goal string, deadlineAfterSetup func() *time.Time) (*kernel.Runtime, kernel.Snapshot) {
 		t.Helper()
 		runtime, err := kernel.New(kernel.Dependencies{Store: factory(t)})
 		if err != nil {
 			t.Fatal(err)
+		}
+		var deadline *time.Time
+		if deadlineAfterSetup != nil {
+			deadline = deadlineAfterSetup()
 		}
 		created, err := runtime.Create(t.Context(), kernel.CreateRequest{ExecutionRequired: true,
 			ID: "gate-run", Kind: "agent", Actor: kernel.ActorRef{TenantID: "p", ActorID: "actor"},
@@ -243,10 +247,12 @@ func RunKernelControlSuite(t *testing.T, factory ExecutionStoreFactory) {
 		}
 	})
 	t.Run("deadline-checks-store-time", func(t *testing.T) {
-		// Real PostgreSQL migration and row-lock setup can consume more than
-		// a 150ms deadline under -race. Keep ample scheduling margin.
-		future := time.Now().UTC().Add(750 * time.Millisecond)
-		rt, created := create(t, "deadline", &future)
+		// The factory may migrate PostgreSQL before returning the Store. Start
+		// the Run's deadline after that unrelated setup, not before it.
+		rt, created := create(t, "deadline", func() *time.Time {
+			future := time.Now().UTC().Add(750 * time.Millisecond)
+			return &future
+		})
 		_, bound := acquire(t, rt)
 		early, expired, err := rt.Expire(t.Context(), created.Run.ID, created.Run.Revision)
 		if err != nil || expired || early.Run.Status != kernel.RunStatusRunning {
@@ -277,8 +283,10 @@ func RunKernelControlSuite(t *testing.T, factory ExecutionStoreFactory) {
 	t.Run("Store-deadline-gates-approval-and-allowance", func(t *testing.T) {
 		for _, gate := range []kernel.ControlKind{kernel.ControlApproval, kernel.ControlAllowance} {
 			t.Run(string(gate), func(t *testing.T) {
-				deadline := time.Now().UTC().Add(750 * time.Millisecond)
-				rt, created := create(t, "deadline before control", &deadline)
+				rt, created := create(t, "deadline before control", func() *time.Time {
+					deadline := time.Now().UTC().Add(750 * time.Millisecond)
+					return &deadline
+				})
 				_, bound := acquire(t, rt)
 				pending := kernel.Mutation{Status: kernel.RunStatusWaitingInput, State: created.State}
 				var cp *kernel.Checkpoint
