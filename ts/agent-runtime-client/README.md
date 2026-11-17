@@ -73,7 +73,7 @@ a replacement snapshot when the server reports an expired cursor.
 | --- | --- |
 | `agent` | `start` |
 | `runs` | `get`, `events`, `cancel`, `workbench`, `feed` |
-| `harness.turns` | `get`, `feed`, `resolveApproval`, `resolveInteraction`, `retryInvocation`, `cancelSubtask`, `resolveSubtaskApproval` |
+| `harness.turns` | `get`, `feed`, `resolveApproval`, `resolveInteraction`, `cancelSubtask`, `resolveSubtaskApproval` |
 
 Use the exported request types for the supported Agent/Harness operations. Having a client method does not
 grant permission: the host decides which routes and capabilities are available

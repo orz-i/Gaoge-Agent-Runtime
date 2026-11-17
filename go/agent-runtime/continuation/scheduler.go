@@ -164,6 +164,9 @@ func (scheduler *Scheduler) retryReconcileFailures(ctx context.Context) error {
 func (scheduler *Scheduler) reconcileCandidate(
 	ctx context.Context, candidate runrelation.ReconciliationCandidate,
 ) error {
+	if candidate.Relation.Kind != runrelation.KindDelegation {
+		return fmt.Errorf("%w: retired RunRelation kind %q", ErrInvalidInput, candidate.Relation.Kind)
+	}
 	child, err := scheduler.runs.Load(ctx, candidate.Relation.ChildRunID)
 	if errors.Is(err, kernel.ErrNotFound) || (err == nil && !terminal(child.Run.Status)) {
 		return nil
@@ -385,6 +388,9 @@ func (scheduler *Scheduler) scheduleRelation(
 	relation runrelation.Relation,
 	child kernel.Snapshot,
 ) error {
+	if relation.Kind != runrelation.KindDelegation {
+		return fmt.Errorf("%w: retired RunRelation kind %q", ErrInvalidInput, relation.Kind)
+	}
 	parent, err := scheduler.runs.Load(ctx, relation.ParentRunID)
 	if errors.Is(err, kernel.ErrNotFound) {
 		return nil

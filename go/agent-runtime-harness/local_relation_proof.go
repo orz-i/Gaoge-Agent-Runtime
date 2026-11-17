@@ -85,9 +85,9 @@ func (runner *Runner) requireLiveApprovalAncestors(ctx context.Context, childRun
 		if err != nil || relation.ChildRunID != current || relation.ParentRunID == "" {
 			return errors.Join(ErrRuntimeCancellationUnverified, err)
 		}
-		// Only retained delegation/capability edges can extend authority.
-		// An obsolete or unknown composite relation must not authorize work.
-		if relation.Kind != runrelation.KindCapability && relation.Kind != runrelation.KindDelegation {
+		// Only an original Delegation edge can extend approval authority.
+		// A retired native Capability relation must not authorize work.
+		if relation.Kind != runrelation.KindDelegation {
 			return ErrRuntimeCancellationUnverified
 		}
 		if _, cycle := seen[relation.ParentRunID]; cycle {
@@ -116,34 +116,6 @@ func (runner *Runner) requireLiveApprovalAncestors(ctx context.Context, childRun
 	}
 }
 
-// verifyCapabilityRelationOwner binds an immutable KindCapability edge to
-// the first-party native child Invocation that originally minted it. A valid
-// Run from a different Turn (including its valid root Invocation) cannot
-// borrow this edge to expose Subtask results or receive physical control.
-// Physical Run identity is separately verified by verifyLocalRelationChain.
-func (runner *Runner) verifyCapabilityRelationOwner(
-	ctx context.Context, relation runrelation.Relation, child Invocation,
-) error {
-	if runner == nil || runner.store == nil || relation.Kind != runrelation.KindCapability ||
-		child.ParentItemID == "" || child.Attempt <= 0 ||
-		!validExecutionClass(child.ExecutionClass) || isHandoffDelegationInvocation(child) ||
-		child.ExecutionRefID == "" || relation.ChildRunID != child.ExecutionRefID ||
-		relation.OwnerNodeID != invocationRelationOwnerID(child) {
-		return ErrConflict
-	}
-	binding, err := frozenChildRoot(child)
-	if err != nil || relation.ParentRunID == "" || relation.ParentRunID != binding.ExecutionRefID {
-		return ErrConflict
-	}
-	root, err := runner.store.GetInvocation(ctx, binding.InvocationID)
-	if err != nil || root.ID != binding.InvocationID || root.TurnID != child.TurnID ||
-		root.ParentItemID != "" || !validExecutionClass(root.ExecutionClass) ||
-		invocationAttempt(root) != binding.attempt() {
-		return ErrConflict
-	}
-	return nil
-}
-
 func (runner *Runner) verifyLocalRelationRun(ctx context.Context, candidate kernel.Snapshot, control bool) error {
 	return runner.verifyLocalRelationChain(ctx, candidate, control, make(map[string]bool))
 }
@@ -170,21 +142,10 @@ func (runner *Runner) verifyLocalRelationChain(ctx context.Context, candidate ke
 	}
 	// A relation is only an index. It cannot grant a foreign parent control
 	// over an otherwise legitimate Run merely by naming its ID. Only the
-	// original frozen child Invocation and Handoff/Capability receipt can
-	// authenticate an incoming edge.
-	if relationErr == nil {
-		switch relation.Kind {
-		case runrelation.KindCapability:
-			if proofErr := runner.verifyCapabilityRelationOwner(ctx, relation, owner); proofErr != nil {
-				return errors.Join(unverified(), proofErr)
-			}
-		case runrelation.KindDelegation:
-			if !isHandoffDelegationInvocation(owner) {
-				return unverified()
-			}
-		default:
-			return unverified()
-		}
+	// original frozen child Invocation and Delegation receipt can
+	// authenticate an incoming edge. Never accept a retired Capability relation.
+	if relationErr == nil && (relation.Kind != runrelation.KindDelegation || !isHandoffDelegationInvocation(owner)) {
+		return unverified()
 	}
 	if isHandoffDelegationInvocation(owner) {
 		coordinator, ok := runner.handoffs.(*handoff.Coordinator)
@@ -216,13 +177,11 @@ func (runner *Runner) verifyLocalRelationChain(ctx context.Context, candidate ke
 			return unverified()
 		}
 	} else {
-		var proofErr error
-		if owner.ParentItemID == "" {
-			proofErr = validateRootRuntimeOwnership(owner, candidate)
-		} else {
-			proofErr = runner.validateChildRuntimeOwnership(ctx, owner, candidate)
+		// Only an Agent root can be locally owned without Delegation.
+		if owner.ParentItemID != "" {
+			return unverified()
 		}
-		if proofErr != nil {
+		if proofErr := validateRootRuntimeOwnership(owner, candidate); proofErr != nil {
 			return errors.Join(unverified(), proofErr)
 		}
 	}

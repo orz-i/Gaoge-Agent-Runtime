@@ -201,8 +201,8 @@ func (store *MemoryStore) RetryInvocation(
 	// Retrying even an intermediate parent cannot outlive a descendant's
 	// pre-effect dispatch grant. Take the conservative Turn-wide barrier:
 	// grants do not encode a transactional transitive ownership snapshot.
-	if !validExecutionClass(current.ExecutionClass) || current.Revision != expectedRevision ||
-		!retryableInvocationStatus(current.Status) || len(current.Input) == 0 ||
+	if !validExecutionClass(current.ExecutionClass) || current.ParentItemID != "" ||
+		current.Revision != expectedRevision || !retryableInvocationStatus(current.Status) || len(current.Input) == 0 ||
 		store.activeCancellationFenceLocked(current.TurnID) ||
 		PendingExecutionDispatch(physicalItems, "") ||
 		!RetryOriginalOperationEvidenceValid(ctx, physicalItems, current) {

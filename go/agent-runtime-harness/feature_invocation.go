@@ -10,7 +10,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 )
 
 type topLevelStartEnvelope struct {
@@ -102,51 +101,35 @@ func initialAgentCancelledStartConflict(invocation Invocation, status TurnStatus
 		status == TurnCancelled && errors.Is(startErr, kernel.ErrConflict)
 }
 
-type childInvocationContext struct {
-	turn                 Turn
-	root                 Invocation
-	parentAttempts       []childAttemptBinding
-	parentExecutionRefID string
-	actor                kernel.ActorRef
-	thread               kernel.ThreadRef
-}
-
-// RefreshInvocation reconciles one child Runtime execution into its durable Harness Invocation.
-// Root Invocations belong to Refresh, which also synchronizes the owning Turn.
+// RefreshInvocation observes an original fixed-local Handoff child.
+// Root Agents use Refresh; remote/dynamic Handoff observations stay with their ChildRunner.
 func (runner *Runner) RefreshInvocation(ctx context.Context, invocationID string) (Snapshot, error) {
 	invocation, err := runner.store.GetInvocation(ctx, strings.TrimSpace(invocationID))
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if invocation.ExecutionClass != ExecutionAgent {
+	if invocation.ExecutionClass != ExecutionAgent || !isHandoffDelegationInvocation(invocation) {
 		return Snapshot{}, ErrConflict
-	}
-	if strings.TrimSpace(invocation.ParentItemID) == "" {
-		return Snapshot{}, ErrInvalidRequest
 	}
 	// A routed Handoff belongs to its original ChildRunner, not an arbitrary
 	// Run with the same ID in the Harness Kernel. Only an explicitly fixed
 	// same-Kernel route may be observed through the local Invocation reader.
 	// A remote/dynamic route needs its own ChildRunner-owned observation.
-	if isHandoffDelegationInvocation(invocation) {
-		coordinator, ok := runner.handoffs.(*handoff.Coordinator)
-		if !ok || !coordinator.SupportsLocalDelegationObservation(runner.runtime) || (coordinator.ObservesLocalKernelRunner(runner.runtime) && !coordinator.OwnsLocalKernelRunner(runner.runtime)) {
-			return Snapshot{}, ErrHandoffCancellationUnverified
-		}
+	coordinator, ok := runner.handoffs.(*handoff.Coordinator)
+	if !ok || !coordinator.SupportsLocalDelegationObservation(runner.runtime) ||
+		(coordinator.ObservesLocalKernelRunner(runner.runtime) && !coordinator.OwnsLocalKernelRunner(runner.runtime)) {
+		return Snapshot{}, ErrHandoffCancellationUnverified
 	}
 	invocation, turn, runtimeSnapshot, err := runner.loadInvocationRuntime(ctx, invocationID)
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if isHandoffDelegationInvocation(invocation) {
-		frozen, _, proofErr := runner.localHandoffCancellationAuthority(ctx, invocation, runtimeSnapshot)
-		if proofErr != nil {
-			return Snapshot{}, proofErr
-		}
-		coordinator := runner.handoffs.(*handoff.Coordinator)
-		if (!coordinator.ObservesLocalKernelRunner(runner.runtime) && runtimeSnapshot.Run.Kind != agent.RunKind) || !coordinator.OwnsLocalDelegation(runner.runtime, frozen) {
-			return Snapshot{}, ErrHandoffCancellationUnverified
-		}
+	frozen, _, proofErr := runner.localHandoffCancellationAuthority(ctx, invocation, runtimeSnapshot)
+	if proofErr != nil {
+		return Snapshot{}, proofErr
+	}
+	if (!coordinator.ObservesLocalKernelRunner(runner.runtime) && runtimeSnapshot.Run.Kind != agent.RunKind) || !coordinator.OwnsLocalDelegation(runner.runtime, frozen) {
+		return Snapshot{}, ErrHandoffCancellationUnverified
 	}
 	pending, err := runner.resolvedInteractionClaimPending(ctx, turn.ID, "")
 	if err != nil {
@@ -158,65 +141,19 @@ func (runner *Runner) RefreshInvocation(ctx context.Context, invocationID string
 	return runner.syncChildInvocationSnapshot(ctx, turn, invocation, runtimeSnapshot)
 }
 
-// ResumeInvocation resumes a running child Feature through the exact typed adapter selected at creation.
-// Root Agent continuations must use ResumeTurn; other roots remain Feature-owned.
-func (runner *Runner) ResumeInvocation(ctx context.Context, invocationID string) (Snapshot, error) {
-	invocation, err := runner.store.GetInvocation(ctx, strings.TrimSpace(invocationID))
-	if err != nil {
-		return Snapshot{}, err
-	}
-	if invocation.ExecutionClass != ExecutionAgent {
-		return Snapshot{}, ErrConflict
-	}
-	if strings.TrimSpace(invocation.ParentItemID) == "" || isHandoffDelegationInvocation(invocation) {
-		// A routed Handoff child has no native Feature Resume adapter.
-		// Reject before minting a physical dispatch grant.
-		return Snapshot{}, ErrInvalidRequest
-	}
-	invocation, turn, runtimeSnapshot, err := runner.loadInvocationRuntime(ctx, invocationID)
-	if err != nil {
-		return Snapshot{}, err
-	}
-	pending, pendingErr := runner.resolvedInteractionClaimPending(ctx, turn.ID, "")
-	if pendingErr != nil {
-		return Snapshot{}, pendingErr
-	}
-	if pending {
-		return runner.loadSnapshot(ctx, turn, &runtimeSnapshot)
-	}
-	if runtimeSnapshot.Run.Status != kernel.RunStatusRunning {
-		return runner.syncChildInvocationSnapshot(ctx, turn, invocation, runtimeSnapshot)
-	}
-	if err = runner.validateChildRuntimeOwnership(ctx, invocation, runtimeSnapshot); err != nil {
-		return Snapshot{}, err
-	}
-	if err = runner.requireFrozenAdmission(ctx, turn); err != nil {
-		return Snapshot{}, err
-	}
-	resumed, resumeErr := runner.resumeInvocationExecution(ctx, invocation, runtimeSnapshot.Run.Revision)
-	if resumed.Run.ID == "" {
-		return Snapshot{}, resumeErr
-	}
-	snapshot, syncErr := runner.syncChildInvocationSnapshot(ctx, turn, invocation, resumed)
-	return snapshot, errors.Join(resumeErr, syncErr)
-}
-
-// RetryInvocation starts the next durable attempt of one failed or cancelled
-// Feature Invocation. Replaying a partially-started retry repairs the same
-// attempt rather than allocating another execution identity.
+// RetryInvocation starts a new attempt of the original root Agent only.
+// Retired Native Child Capability and routed Handoff children cannot rotate
+// their original physical execution identity.
 func (runner *Runner) RetryInvocation(ctx context.Context, invocationID string) (Snapshot, error) {
 	invocation, err := runner.store.GetInvocation(ctx, strings.TrimSpace(invocationID))
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if invocation.ExecutionClass != ExecutionAgent || len(invocation.Input) == 0 || isHandoffDelegationInvocation(invocation) {
-		// A Handoff child was admitted through a frozen external route.
-		// Rotating its Attempt would break the original ChildRunID and
-		// must not fall through to the native Agent retry adapter.
+	if invocation.ExecutionClass != ExecutionAgent || invocation.ParentItemID != "" || len(invocation.Input) == 0 {
 		return Snapshot{}, ErrConflict
 	}
 	turn, err := loadVerifiedTurn(ctx, runner.store, invocation.TurnID)
-	if err != nil || (strings.TrimSpace(invocation.ParentItemID) != "" && terminalTurnStatus(turn.Status)) {
+	if err != nil {
 		return Snapshot{}, errors.Join(ErrConflict, err)
 	}
 	if err = runner.requireFrozenAdmission(ctx, turn); err != nil {
@@ -228,23 +165,10 @@ func (runner *Runner) RetryInvocation(ctx context.Context, invocationID string) 
 	if !retryableInvocationStatus(invocation.Status) {
 		return Snapshot{}, ErrConflict
 	}
-	// A retry attempt commits a new physical Run identity. For a root,
-	// its Actor and Kernel Thread must already be sealed in the Invocation:
-	// never reconstruct missing authority from Session.HostThread/Actor.
-	if strings.TrimSpace(invocation.ParentItemID) == "" {
-		if _, _, err := frozenTopLevelInvocationIdentity(invocation); err != nil {
-			return Snapshot{}, err
-		}
-	} else {
-		// A child retry has no authority to rotate its Run when its original
-		// Agent root or any intermediate Invocation has already terminated.
-		// Verify the actual parent Runtime as well as frozen ancestry.
-		if _, err := runner.childInvocationContext(ctx, turn.ID, invocation.ParentItemID, invocation.ExecutionClass); err != nil {
-			return Snapshot{}, err
-		}
-		if err := runner.requireLiveInvocationParents(ctx, invocation); err != nil {
-			return Snapshot{}, err
-		}
+	// Retry rotates a physical root Run identity only from its originally
+	// frozen Actor and Kernel Thread, never mutable Session values.
+	if _, _, err := frozenTopLevelInvocationIdentity(invocation); err != nil {
+		return Snapshot{}, err
 	}
 	retryCtx, authorityErr := runner.withOriginalRetryAuthority(ctx, invocation)
 	if authorityErr != nil {
@@ -271,7 +195,7 @@ func (runner *Runner) startNextInvocationAttempt(
 	if err != nil {
 		return Snapshot{}, err
 	}
-	return runner.startRetriedInvocation(ctx, turn, retried)
+	return runner.startRetriedTopLevelInvocation(ctx, turn, retried)
 }
 
 func (runner *Runner) replayRetriedInvocation(
@@ -281,10 +205,7 @@ func (runner *Runner) replayRetriedInvocation(
 ) (Snapshot, error) {
 	loaded, err := runner.runtime.Load(ctx, invocation.ExecutionRefID)
 	if err == nil {
-		if strings.TrimSpace(invocation.ParentItemID) == "" {
-			return runner.syncRuntimeSnapshotWithRetry(ctx, turn, invocation, loaded)
-		}
-		return runner.syncChildInvocationSnapshot(ctx, turn, invocation, loaded)
+		return runner.syncRuntimeSnapshotWithRetry(ctx, turn, invocation, loaded)
 	}
 	if !errors.Is(err, kernel.ErrNotFound) || invocation.Status != InvocationAccepted {
 		return Snapshot{}, err
@@ -292,31 +213,7 @@ func (runner *Runner) replayRetriedInvocation(
 	if err = runner.recordInvocationItem(ctx, invocation); err != nil {
 		return Snapshot{}, err
 	}
-	return runner.startRetriedInvocation(ctx, turn, invocation)
-}
-
-func (runner *Runner) startRetriedInvocation(
-	ctx context.Context,
-	turn Turn,
-	invocation Invocation,
-) (Snapshot, error) {
-	if strings.TrimSpace(invocation.ParentItemID) == "" {
-		return runner.startRetriedTopLevelInvocation(ctx, turn, invocation)
-	}
-	child, err := runner.childInvocationContext(ctx, turn.ID, invocation.ParentItemID, invocation.ExecutionClass)
-	if err != nil {
-		return Snapshot{}, err
-	}
-	if runner.relations != nil {
-		if _, err = runner.relations.Ensure(ctx, runrelation.Draft{
-			ParentRunID: child.parentExecutionRefID, ChildRunID: invocation.ExecutionRefID,
-			Kind: runrelation.KindCapability, OwnerNodeID: invocationRelationOwnerID(invocation),
-		}); err != nil {
-			return Snapshot{}, err
-		}
-	}
-	runtimeSnapshot, startErr := runner.startInvocationAttempt(ctx, invocation, child)
-	return runner.finishChildInvocationStart(ctx, turn, invocation, runtimeSnapshot, startErr)
+	return runner.startRetriedTopLevelInvocation(ctx, turn, invocation)
 }
 
 func (runner *Runner) startRetriedTopLevelInvocation(
@@ -324,6 +221,9 @@ func (runner *Runner) startRetriedTopLevelInvocation(
 	turn Turn,
 	invocation Invocation,
 ) (Snapshot, error) {
+	if invocation.ParentItemID != "" || invocation.ExecutionClass != ExecutionAgent {
+		return Snapshot{}, ErrConflict
+	}
 	actor, thread, err := frozenTopLevelInvocationIdentity(invocation)
 	if err != nil {
 		return Snapshot{}, err
@@ -333,9 +233,7 @@ func (runner *Runner) startRetriedTopLevelInvocation(
 		return Snapshot{}, err
 	}
 	runner.publishTurnStatus(ctx, turn, EventTurnStarted, false)
-	runtimeSnapshot, startErr := runner.startInvocationAttempt(runCtx, invocation, childInvocationContext{
-		turn: turn, actor: actor, thread: thread,
-	})
+	runtimeSnapshot, startErr := runner.startInvocationAttempt(runCtx, invocation, turn, actor, thread)
 	return runner.finishTopLevelStart(ctx, turn, invocation, runtimeSnapshot, startErr)
 }
 
@@ -378,44 +276,35 @@ func (runner *Runner) topLevelRetryContext(ctx context.Context, turn Turn) (cont
 func (runner *Runner) startInvocationAttempt(
 	ctx context.Context,
 	invocation Invocation,
-	child childInvocationContext,
+	turn Turn,
+	actor kernel.ActorRef,
+	thread kernel.ThreadRef,
 ) (kernel.Snapshot, error) {
+	if invocation.ParentItemID != "" || invocation.ExecutionClass != ExecutionAgent {
+		return kernel.Snapshot{}, ErrConflict
+	}
 	requestID := stableID("hretry", invocation.ID, attemptString(invocation.Attempt))
 	return runner.withPhysicalInvocationDispatch(ctx, invocation, "start-retry", func(physicalCtx context.Context) (kernel.Snapshot, error) {
-		switch invocation.ExecutionClass {
-		case ExecutionAgent:
-			return runner.startRetriedAgent(physicalCtx, invocation, child, requestID)
-		default:
-			return kernel.Snapshot{}, ErrInvalidRequest
+		var input agentInvocationInput
+		if err := json.Unmarshal(invocation.Input, &input); err != nil {
+			return kernel.Snapshot{}, ErrConflict
 		}
+		config, err := loadSealedConfig(physicalCtx, runner.store, turn.ConfigSnapshotID)
+		if err != nil {
+			return kernel.Snapshot{}, err
+		}
+		return runner.agent.StartRun(physicalCtx, agent.StartRequest{
+			ID: invocation.ExecutionRefID, Actor: actor, Thread: thread,
+			RequestID: requestID, Goal: input.Goal, Model: config.Model,
+			ModelOptions: append(json.RawMessage(nil), config.ModelOptions...), ToolKeys: append([]string(nil), config.ToolKeys...),
+			RequiredToolKeys: append([]string(nil), input.RequiredToolKeys...),
+			InitialToolKeys:  append([]string(nil), input.InitialToolKeys...), Limits: config.Limits,
+		})
 	})
 }
 
-func (runner *Runner) startRetriedAgent(ctx context.Context, invocation Invocation, child childInvocationContext, requestID string) (kernel.Snapshot, error) {
-	// A second defense at the physical entry: a delegated child is never
-	// a generic Agent retry, even if an earlier Store operation already
-	// rotated its identity. No implicit local replacement of the route.
-	if isHandoffDelegationInvocation(invocation) {
-		return kernel.Snapshot{}, ErrConflict
-	}
-	var input agentInvocationInput
-	if err := json.Unmarshal(invocation.Input, &input); err != nil {
-		return kernel.Snapshot{}, ErrConflict
-	}
-	config, err := loadSealedConfig(ctx, runner.store, child.turn.ConfigSnapshotID)
-	if err != nil {
-		return kernel.Snapshot{}, err
-	}
-	return runner.agent.StartRun(ctx, agent.StartRequest{
-		ID: invocation.ExecutionRefID, Actor: child.actor, Thread: child.thread,
-		RequestID: requestID, Goal: input.Goal, Model: config.Model,
-		ModelOptions: append(json.RawMessage(nil), config.ModelOptions...), ToolKeys: append([]string(nil), config.ToolKeys...),
-		RequiredToolKeys: append([]string(nil), input.RequiredToolKeys...),
-		InitialToolKeys:  append([]string(nil), input.InitialToolKeys...), Limits: config.Limits,
-	})
-}
-
-// CancelInvocation cancels one child Runtime Feature by its durable Invocation identity.
+// CancelInvocation cancels one original Handoff child with its frozen route
+// and durable Invocation identity; ordinary Native Child is retired.
 func (runner *Runner) CancelInvocation(ctx context.Context, invocationID, reason string) (snapshot Snapshot, err error) {
 	invocationID = strings.TrimSpace(invocationID)
 	invocation, err := runner.store.GetInvocation(ctx, invocationID)
@@ -423,7 +312,7 @@ func (runner *Runner) CancelInvocation(ctx context.Context, invocationID, reason
 		return Snapshot{}, err
 	}
 	if !validInvocationExecutionAuthority(invocation) || invocation.ID != invocationID ||
-		strings.TrimSpace(invocation.ParentItemID) == "" || strings.TrimSpace(invocation.ExecutionRefID) == "" {
+		!isHandoffDelegationInvocation(invocation) || strings.TrimSpace(invocation.ExecutionRefID) == "" {
 		return Snapshot{}, ErrConflict
 	}
 	if err = verifyProtectiveInvocation(ctx, runner.store, invocation); err != nil {
@@ -482,55 +371,6 @@ func (runner *Runner) CancelInvocation(ctx context.Context, invocationID, reason
 	return runner.loadSnapshot(ctx, turn, nil)
 }
 
-func (runner *Runner) childInvocationContext(
-	ctx context.Context,
-	turnID, parentItemID string,
-	executionClass ExecutionClass,
-) (childInvocationContext, error) {
-	// Child admission cannot silently become a second root by omitting its
-	// parent. The Store root-uniqueness constraint is not a routing policy.
-	if strings.TrimSpace(parentItemID) == "" {
-		return childInvocationContext{}, ErrInvalidRequest
-	}
-	turn, err := loadVerifiedTurn(ctx, runner.store, strings.TrimSpace(turnID))
-	if err != nil || terminalTurnStatus(turn.Status) {
-		return childInvocationContext{}, errors.Join(ErrConflict, err)
-	}
-	if err = runner.requireFrozenAdmission(ctx, turn); err != nil {
-		return childInvocationContext{}, err
-	}
-	if err = runner.validateParentItem(ctx, turn.ID, parentItemID); err != nil {
-		return childInvocationContext{}, err
-	}
-	parent, err := loadTopLevelInvocation(ctx, runner.store, turn.ID)
-	if err != nil || strings.TrimSpace(parent.ExecutionRefID) == "" ||
-		strings.TrimSpace(parent.ParentItemID) != "" || !validExecutionClass(parent.ExecutionClass) ||
-		!validInvocationStatus(parent.Status) || terminalInvocationStatus(parent.Status) {
-		return childInvocationContext{}, errors.Join(ErrConflict, err)
-	}
-	parentAttempts, err := runner.freezeChildParentAttempts(ctx, turn.ID, parentItemID, parent)
-	if err != nil {
-		return childInvocationContext{}, err
-	}
-	if runner.runtime == nil {
-		return childInvocationContext{}, ErrConflict
-	}
-	runtimeSnapshot, err := runner.runtime.Load(ctx, parent.ExecutionRefID)
-	if err != nil || runtimeSnapshot.Run.ID != parent.ExecutionRefID || terminalRuntimeStatus(runtimeSnapshot.Run.Status) {
-		return childInvocationContext{}, errors.Join(ErrConflict, err)
-	}
-	// A same-ID physical root is not a parent execution grant. Prove its
-	// frozen Kind, Actor, Thread, Goal and Attempt-bound RequestID before
-	// using that Run's identity for any child admission or physical Start.
-	if err := validateRootRuntimeOwnership(parent, runtimeSnapshot); err != nil {
-		return childInvocationContext{}, err
-	}
-	return childInvocationContext{
-		turn: turn, root: parent, parentAttempts: parentAttempts, parentExecutionRefID: parent.ExecutionRefID,
-		actor: runtimeSnapshot.Run.Actor, thread: runtimeSnapshot.Run.Thread,
-	}, nil
-}
-
 func (runner *Runner) validateParentItem(ctx context.Context, turnID, parentItemID string) error {
 	parentItemID = strings.TrimSpace(parentItemID)
 	if parentItemID == "" {
@@ -557,54 +397,6 @@ func (runner *Runner) validateParentItem(ctx context.Context, turnID, parentItem
 	return nil
 }
 
-func (runner *Runner) finishChildInvocationStart(
-	ctx context.Context,
-	turn Turn,
-	invocation Invocation,
-	runtimeSnapshot kernel.Snapshot,
-	startErr error,
-) (Snapshot, error) {
-	if runtimeSnapshot.Run.ID == "" {
-		if !isDispatchProvenNoEffect(startErr) {
-			// An accepted child with an unknown remote Start must retain its
-			// execution reference and unresolved grant, not become retryable.
-			return Snapshot{}, startErr
-		}
-		return runner.failChildInvocation(ctx, turn, invocation, startErr)
-	}
-	snapshot, syncErr := runner.syncChildInvocationSnapshot(ctx, turn, invocation, runtimeSnapshot)
-	return snapshot, errors.Join(startErr, syncErr)
-}
-
-func (runner *Runner) failChildInvocation(
-	ctx context.Context,
-	turn Turn,
-	invocation Invocation,
-	cause error,
-) (Snapshot, error) {
-	var proofErr error
-	ctx, proofErr = withOriginalNoEffectTerminalWitness(ctx, invocation, cause)
-	if proofErr != nil {
-		return Snapshot{}, proofErr
-	}
-	invocation.Status = InvocationFailed
-	invocation.ErrorCode = "harness.capability_start_failed"
-	invocation.ErrorDetail = "capability execution did not start"
-	if cause != nil {
-		invocation.ErrorDetail = strings.TrimSpace(cause.Error())
-	}
-	invocation.UpdatedAt = runner.clock.Now().UTC()
-	updated, err := runner.store.UpdateInvocation(ctx, invocation, invocation.Revision)
-	if err != nil {
-		return Snapshot{}, err
-	}
-	if err = runner.recordInvocationItem(ctx, updated); err != nil {
-		return Snapshot{}, err
-	}
-	snapshot, loadErr := runner.loadSnapshot(ctx, turn, nil)
-	return snapshot, errors.Join(cause, loadErr)
-}
-
 func (runner *Runner) loadInvocationRuntime(
 	ctx context.Context,
 	invocationID string,
@@ -626,9 +418,9 @@ func (runner *Runner) resumeInvocationExecution(
 	invocation Invocation,
 	expectedRevision uint64,
 ) (kernel.Snapshot, error) {
-	if isHandoffDelegationInvocation(invocation) {
-		// Interaction resolution also enters here. It may not turn a routed
-		// delegated child into a locally resumed native Agent Run.
+	if invocation.ExecutionClass != ExecutionAgent || invocation.ParentItemID != "" {
+		// Only Root Agent continuation is local. Handoff children retain
+		// the original ChildRunner-owned physical continuation.
 		return kernel.Snapshot{}, ErrInvalidRequest
 	}
 	turn, err := loadVerifiedTurn(ctx, runner.store, invocation.TurnID)
@@ -686,7 +478,7 @@ func (runner *Runner) syncChildInvocationSnapshot(
 	runtimeSnapshot kernel.Snapshot,
 	verifiedNoRunCancel ...bool,
 ) (Snapshot, error) {
-	// Feature callbacks can also synchronize an independently advancing
+	// Handoff observations can also synchronize an independently advancing
 	// Kernel Run. Do not overwrite a claimed, unverified business response
 	// solely because its parent Turn was already projected as running.
 	pending, err := runner.resolvedInteractionClaimPending(ctx, turn.ID, invocation.ID)
@@ -696,7 +488,7 @@ func (runner *Runner) syncChildInvocationSnapshot(
 	if pending {
 		return runner.loadSnapshot(ctx, turn, &runtimeSnapshot)
 	}
-	// Child Refresh and public Resume must not commit a terminal child
+	// Handoff Refresh must not commit a terminal child
 	// projection while its original Host callback continuation is unknown.
 	// A Cancel path has its own verified no-Run cancellation proof.
 	verifiedCancel := len(verifiedNoRunCancel) == 1 && verifiedNoRunCancel[0]
@@ -714,21 +506,18 @@ func (runner *Runner) syncChildInvocationSnapshot(
 	}
 	// Reject a foreign child observation before status CAS and Artifact or
 	// diagnostic output. Delegated Handoff children retain their separate
-	// explicit physical-owner and receipt validation instead of this local
-	// native Feature proof.
+	// explicit physical-owner and receipt validation.
 	// Only a verified Cancel/CancelInvocation descendant cleanup may
 	// synthesize a cancelled child whose Kernel Run never existed. Public
-	// Refresh/Resume and all real physical snapshots must prove the original
+	// Refresh and all real physical snapshots must prove the original
 	// frozen owner even when the Run has no Result.
 	noRunProven := len(verifiedNoRunCancel) == 1 && verifiedNoRunCancel[0] &&
 		runtimeSnapshot.Run.ID == invocation.ExecutionRefID &&
 		runtimeSnapshot.Run.Kind == "" && runtimeSnapshot.Result == nil &&
 		runtimeSnapshot.Run.Status == kernel.RunStatusCancelled &&
 		runtimeSnapshot.Run.ErrorCode == "run.cancelled"
-	if !isHandoffDelegationInvocation(invocation) && !noRunProven {
-		if err := runner.validateChildRuntimeOwnership(ctx, invocation, runtimeSnapshot); err != nil {
-			return Snapshot{}, err
-		}
+	if !isHandoffDelegationInvocation(invocation) {
+		return Snapshot{}, ErrConflict
 	}
 	status, err := runner.invocationRuntimeStatus(ctx, invocation, runtimeSnapshot)
 	if err != nil {

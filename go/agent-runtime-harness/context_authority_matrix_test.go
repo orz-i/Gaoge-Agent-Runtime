@@ -174,7 +174,7 @@ func TestAuditPropertyContextAuthorityTransitions(t *testing.T) {
 			t.Error(err)
 			return false
 		}
-		relations := contextRunRelationFixture{"state-plain-child": {ParentRunID: root.ExecutionRefID, ChildRunID: "state-plain-child", Kind: runrelation.KindCapability, OwnerNodeID: "plain-child", CreatedAt: time.Now().UTC()}, "state-specialist-grandchild": {ParentRunID: child.ExecutionRefID, ChildRunID: "state-specialist-grandchild", Kind: runrelation.KindCapability, OwnerNodeID: "spec-child", CreatedAt: time.Now().UTC()}, "state-invalid-child": {ParentRunID: root.ExecutionRefID, ChildRunID: "state-invalid-child", Kind: runrelation.Kind("not-a-kind"), OwnerNodeID: "bad", CreatedAt: time.Now().UTC()}}
+		relations := contextRunRelationFixture{"state-plain-child": {ParentRunID: root.ExecutionRefID, ChildRunID: "state-plain-child", Kind: runrelation.KindDelegation, OwnerNodeID: "plain-child", CreatedAt: time.Now().UTC()}, "state-specialist-grandchild": {ParentRunID: child.ExecutionRefID, ChildRunID: "state-specialist-grandchild", Kind: runrelation.KindDelegation, OwnerNodeID: "spec-child", CreatedAt: time.Now().UTC()}, "state-invalid-child": {ParentRunID: root.ExecutionRefID, ChildRunID: "state-invalid-child", Kind: runrelation.Kind("not-a-kind"), OwnerNodeID: "bad", CreatedAt: time.Now().UTC()}}
 		mw, err := NewContextRunMiddleware(store, relations)
 		if err != nil {
 			t.Error(err)
@@ -256,7 +256,7 @@ func TestAuditPropertyContextAuthorityTransitions(t *testing.T) {
 func TestAuditPropertyInvalidRelationFieldsCannotGrantContext(t *testing.T) {
 	property := func(mask uint8) bool {
 		store, _, _, root := contextRunMiddlewareFixture(t)
-		base := runrelation.Relation{ParentRunID: root.ExecutionRefID, ChildRunID: "prop-child", Kind: runrelation.KindCapability, OwnerNodeID: "prop-node", CreatedAt: time.Now().UTC()}
+		base := runrelation.Relation{ParentRunID: root.ExecutionRefID, ChildRunID: "prop-child", Kind: runrelation.KindDelegation, OwnerNodeID: "prop-node", CreatedAt: time.Now().UTC()}
 		switch mask % 10 {
 		case 0:
 			base.ParentRunID = ""

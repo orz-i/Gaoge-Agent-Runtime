@@ -25,7 +25,7 @@ Application Host (auth, role selection, transcript, business effects)
   |-- Continuation Dispatcher / Scheduler (optional)
   |-- Kernel Runtime (durable Run state machine and execution authority)
          |-- Kernel Store: Memory / PostgreSQL / experimental SQLite
-         |-- RunRelation (Delegation or Harness-owned Capability relations)
+         |-- RunRelation (original Delegation ownership only)
          |-- Queue / Run Feed: memory or Redis
 ```
 
@@ -42,7 +42,7 @@ only persists a Run; `agent.Runner.StartRun` executes its Tool/Model loop.
 | Model and Tool invocations, immutable tool-call receipts, bounded execution | Agent | Unknown external outcomes are never retried on a guessed result |
 | SubAgent role, ChildRunner route, delegation identity, result and Join | Handoff and Harness | A child cannot borrow a different physical executor or ancestor authority |
 | Host Turn/Invocation admission, timeline, Context, interaction response and operator control | Harness | The frozen original request and parent Attempt authorize effects |
-| Durable parent/child ownership index | RunRelation | Only `delegation` and `capability` relation kinds are supported |
+| Durable parent/child ownership index | RunRelation | Only `delegation` relations may authorize a child; obsolete `capability` records fail closed |
 | External endpoints, business policy, user-intent selection and principal scoping | Host and edge adapters | No automatic capability routing or implicit permissions |
 | Delivery of already-authorized wakeups | Continuation | A Queue ACK is not proof of an executed external effect |
 
@@ -77,6 +77,12 @@ stable SubAgent delegation. The `DelegationToolHandler` is the agent-facing
 Tool entry for eligible parent Runs. The child may execute on the original
 local Agent Runner or an explicitly verified routed ChildRunner. `a2a.remote`
 remains an optional **remote Agent shadow**, not a composite interpreter.
+
+There is no native generic Child Capability Start/Retry/Resume interpreter.
+The only first-party child admission is `prepareHandoffChild` through original
+Handoff Delegation. `RunRelation.KindCapability` and the child-only HTTP/TS
+Invocation Retry operation have been removed without aliases; Go
+`Runner.RetryInvocation` remains exclusively for an original root Agent.
 
 `harness.Runner.CancelSubtask` and `ResolveSubtaskApproval` bind the physical
 child identity to the original Harness Turn and delegation receipt. Frozen

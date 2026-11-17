@@ -367,12 +367,18 @@ func TestStoreFindContextCheckpointForPathRejectsMalformedSourcePath(t *testing.
 		})
 	}
 }
-func TestStoreRetriesInvocationWithAtomicAttemptRotation(t *testing.T) {
+func TestStoreRejectsRetiredNativeChildAttemptRotation(t *testing.T) {
 	store := newStore(t)
 	now := time.Date(2026, 8, 20, 4, 20, 0, 0, time.UTC)
 	value := createRetryInvocationFixture(t, store, now)
 	retried, err := store.RetryInvocation(t.Context(), value.ID, value.Revision, "run_retry_pg_2", now.Add(time.Second))
-	assertRetriedInvocation(t, store, value, retried, err)
+	if !errors.Is(err, harness.ErrConflict) || retried.ID != "" {
+		t.Fatalf("retired Native Child was retried: %+v err=%v", retried, err)
+	}
+	unchanged, loadErr := store.GetInvocation(t.Context(), value.ID)
+	if loadErr != nil || unchanged.Attempt != value.Attempt || unchanged.ExecutionRefID != value.ExecutionRefID {
+		t.Fatalf("rejected child retry changed original identity: %+v err=%v", unchanged, loadErr)
+	}
 }
 func TestStoreRetriesTopLevelInvocationAndReopensTurnAtomically(t *testing.T) {
 	store := newStore(t)
@@ -489,16 +495,6 @@ func createRetryInvocationFixture(t *testing.T, store *harnesspostgres.Store, no
 		t.Fatalf("create retry fixture fresh=%v err=%v", fresh, err)
 	}
 	return value
-}
-func assertRetriedInvocation(t *testing.T, store *harnesspostgres.Store, original harness.Invocation, retried harness.Invocation, err error) {
-	t.Helper()
-	if err != nil || retried.Attempt != 2 || retried.Status != harness.InvocationAccepted || retried.ExecutionRefID != "run_retry_pg_2" || string(retried.Input) != string(original.Input) || retried.InputHash != original.InputHash {
-		t.Fatalf("retry invocation=%#v err=%v", retried, err)
-	}
-	byRef, loadErr := store.GetInvocationByExecutionRefID(t.Context(), retried.ExecutionRefID)
-	if loadErr != nil || byRef.ID != original.ID {
-		t.Fatalf("retry execution lookup=%#v err=%v", byRef, loadErr)
-	}
 }
 func assertSessionLifecycle(t *testing.T, store *harnesspostgres.Store, session harness.Session) {
 	t.Helper()

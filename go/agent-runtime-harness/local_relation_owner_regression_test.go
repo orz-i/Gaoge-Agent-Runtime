@@ -8,14 +8,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 )
 
-// Independent permanent regression: native child Invocation with a frozen owned Goal has a same
-// ID but foreign physical Agent Run. A public child Cancel must NOT perform
-// irreversible Kernel Cancel before validating the original child owner.
-// Independent permanent read-only regression: after a physical Agent child Run
-// carrying a foreign Goal and Result appears under the same deterministic ID,
-// public Turn.Load must not copy its result into the Subtask model.
-// Canonical KindCapability edges bind the original child Attempt to its
-// frozen root, not merely a valid local Run ID or a coincident child owner.
 // A RunRelation edge is only a routing assertion, not physical control authority.
 // A forged delegation edge cannot relabel an unrelated valid root Agent as a
 // child of another Turn, even when the local Run and Invocation match exactly.

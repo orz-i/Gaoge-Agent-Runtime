@@ -89,13 +89,6 @@ func retryableInvocationStatus(status InvocationStatus) bool {
 
 func attemptString(attempt int) string { return strconv.Itoa(attempt) }
 
-func invocationRelationOwnerID(invocation Invocation) string {
-	if invocation.Attempt <= 1 {
-		return invocation.ID
-	}
-	return stableID("hivattempt", invocation.ID, attemptString(invocation.Attempt))
-}
-
 func loadTopLevelInvocation(ctx context.Context, store Store, turnID string) (Invocation, error) {
 	values, err := store.ListInvocations(ctx, strings.TrimSpace(turnID))
 	if err != nil {

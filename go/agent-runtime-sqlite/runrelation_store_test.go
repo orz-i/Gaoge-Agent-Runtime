@@ -17,7 +17,7 @@ import (
 
 func sqliteRelation(parent, child, owner string, at time.Time) runrelation.Relation {
 	return runrelation.Relation{
-		ParentRunID: parent, ChildRunID: child, Kind: runrelation.KindCapability,
+		ParentRunID: parent, ChildRunID: child, Kind: runrelation.KindDelegation,
 		OwnerNodeID: owner, CreatedAt: at,
 	}
 }
@@ -143,7 +143,7 @@ func TestSQLiteRunRelationBusyNotIdentityConflict(t *testing.T) {
 	}
 	defer func() { _ = tx.Rollback() }()
 	if _, err = tx.ExecContext(t.Context(), "INSERT INTO runtime_run_relations(child_run_id,parent_run_id,kind,owner_node_id,created_ns) VALUES(?,?,?,?,?)",
-		"occupied", "held-parent", string(runrelation.KindCapability), "held-owner", time.Now().UnixNano()); err != nil {
+		"occupied", "held-parent", string(runrelation.KindDelegation), "held-owner", time.Now().UnixNano()); err != nil {
 		t.Fatal(err)
 	}
 	item := sqliteRelation("parent", "child", "owner", time.Now().UTC())

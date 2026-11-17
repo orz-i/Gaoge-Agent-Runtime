@@ -38,11 +38,6 @@
     },
     {
       "method": "post",
-      "path": "/harness/turns/{turnID}/invocations/{invocationID}/retry",
-      "operationId": "retryHarnessInvocation"
-    },
-    {
-      "method": "post",
       "path": "/harness/turns/{turnID}/subtasks",
       "operationId": "createHarnessSubtask"
     },
