@@ -565,9 +565,9 @@ type Dependencies struct {
 	Interactions InteractionResponseHandler
 	Budget       *BudgetMiddleware
 	Execution    ExecutionPolicy
-	// Applies only to direct manual subtask creation. The Agent Tool handler
-	// independently prepares durable tool intents with its existing policies.
-	ManualDelegationPolicy DelegationToolPolicy
+	// The Host's single named-Agent selection/authorization boundary. Every
+	// manual and model Tool request must pass it before child admission.
+	DelegationPolicy DelegationToolPolicy
 }
 
 // RunRelationSource is the complete indexed ownership capability required
@@ -583,21 +583,21 @@ type RunRelationSource interface {
 // Runner owns durable Harness Session/Turn/Invocation/Item lifecycle. Runtime
 // Feature execution is represented by durable Capability Invocations.
 type Runner struct {
-	runtime                *kernel.Runtime
-	agent                  AgentStarter
-	store                  Store
-	clock                  Clock
-	turnFeed               *TurnFeed
-	context                *runtimecontext.Manager
-	catalog                tools.Catalog
-	handoffs               HandoffStarter
-	relations              runrelation.Recorder
-	relationReader         RunRelationSource
-	cancellation           RuntimeCanceller
-	interactions           InteractionResponseHandler
-	budgets                *BudgetMiddleware
-	execution              ExecutionPolicy
-	manualDelegationPolicy DelegationToolPolicy
+	runtime          *kernel.Runtime
+	agent            AgentStarter
+	store            Store
+	clock            Clock
+	turnFeed         *TurnFeed
+	context          *runtimecontext.Manager
+	catalog          tools.Catalog
+	handoffs         HandoffStarter
+	relations        runrelation.Recorder
+	relationReader   RunRelationSource
+	cancellation     RuntimeCanceller
+	interactions     InteractionResponseHandler
+	budgets          *BudgetMiddleware
+	execution        ExecutionPolicy
+	delegationPolicy DelegationToolPolicy
 }
 
 // StartRequest starts or idempotently reloads one Harness Turn.
@@ -659,8 +659,8 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		context:  dependencies.Context, catalog: dependencies.Catalog,
 		handoffs: dependencies.Handoffs, relations: dependencies.Relations,
 		interactions: dependencies.Interactions, budgets: dependencies.Budget,
-		execution:              execution,
-		manualDelegationPolicy: dependencies.ManualDelegationPolicy,
+		execution:        execution,
+		delegationPolicy: dependencies.DelegationPolicy,
 	}
 	runner.relationReader = dependencies.Relations
 	return runner, nil

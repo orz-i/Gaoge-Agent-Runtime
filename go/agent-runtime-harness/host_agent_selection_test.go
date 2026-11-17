@@ -31,3 +31,18 @@ type hostDelegatePolicyFunc func(context.Context, tools.ExecutionRequest, harnes
 func (f hostDelegatePolicyFunc) PrepareDelegation(ctx context.Context, execution tools.ExecutionRequest, request harness.DelegateRequest) (harness.DelegateRequest, error) {
 	return f(ctx, execution, request)
 }
+
+// Test-only explicit Host allow policy for fixtures that test execution rather
+// than member selection. Production must supply its own authorization policy.
+type testDelegationPolicyChain []harness.DelegationToolPolicy
+
+func (policies testDelegationPolicyChain) PrepareDelegation(ctx context.Context, execution tools.ExecutionRequest, request harness.DelegateRequest) (harness.DelegateRequest, error) {
+	var err error
+	for _, policy := range policies {
+		request, err = policy.PrepareDelegation(ctx, execution, request)
+		if err != nil {
+			return harness.DelegateRequest{}, err
+		}
+	}
+	return request, nil
+}

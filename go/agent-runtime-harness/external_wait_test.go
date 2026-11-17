@@ -44,7 +44,8 @@ func TestLocalDelegationExternalWaitDoesNotPollAndResumesBothCalls(t *testing.T)
 	}
 	store := harness.NewMemoryStore()
 	client := &localExternalDelegationModel{}
-	handler := harness.NewDelegationToolHandler(hostSelectedAgentPolicy{MemberID: "researcher", Agent: agent.StartRequest{Model: "fixture", ToolKeys: []string{"test.local_external"}}})
+	hostDelegationPolicy0 := hostSelectedAgentPolicy{MemberID: "researcher", Agent: agent.StartRequest{Model: "fixture", ToolKeys: []string{"test.local_external"}}}
+	handler := harness.NewDelegationToolHandler()
 	ready, executions := false, 0
 	registry, err := tools.NewRegistry([]tools.Registration{harness.DelegationToolRegistration(handler), {
 		Definition: tools.Definition{Key: "test.local_external", Name: "local_external", InputSchema: json.RawMessage(`{"type":"object"}`), Terminal: true},
@@ -86,7 +87,9 @@ func TestLocalDelegationExternalWaitDoesNotPollAndResumesBothCalls(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner, err := harness.NewRunner(delegationHarnessDependencies(runtime, direct, store, registry, coordinator, relations, false))
+	composed := delegationHarnessDependencies(runtime, direct, store, registry, coordinator, relations, false)
+	composed.DelegationPolicy = hostDelegationPolicy0
+	runner, err := harness.NewRunner(composed)
 	if err != nil {
 		t.Fatal(err)
 	}

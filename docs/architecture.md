@@ -79,8 +79,12 @@ physical dispatch authority. The Runtime never resolves a Role catalog or
 selects an Agent on behalf of the Host.
 
 `harness.Runner.Delegate` and `DelegateByExecutionRefID` create or reload a
-stable SubAgent delegation. The `DelegationToolHandler` is the agent-facing
-Tool entry for eligible parent Runs. The child may execute on the original
+stable SubAgent delegation only after the shared Host-owned
+`Dependencies.DelegationPolicy` authorizes the selected member. The
+`DelegationToolHandler` is the agent-facing Tool entry for eligible parent Runs;
+model calls and manual/HTTP calls share one Host authorization boundary.
+The frozen Handoff envelope carries both Agent-local limits and full shared
+subtree ceilings for ledger admission. The child may execute on the original
 local Agent Runner or an explicitly verified routed ChildRunner. `a2a.remote`
 remains an optional **remote Agent shadow**, not a composite interpreter.
 

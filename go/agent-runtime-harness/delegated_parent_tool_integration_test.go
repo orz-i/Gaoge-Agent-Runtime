@@ -106,7 +106,7 @@ func runSelectedHostedParentToolWithFrozenContext(t *testing.T, childModel strin
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := harness.NewDelegationToolHandler(hostDelegatePolicyFunc(func(
+	hostDelegationPolicy0 := hostDelegatePolicyFunc(func(
 		_ context.Context, _ tools.ExecutionRequest, input harness.DelegateRequest,
 	) (harness.DelegateRequest, error) {
 		if input.MemberID != "researcher" {
@@ -126,7 +126,8 @@ func runSelectedHostedParentToolWithFrozenContext(t *testing.T, childModel strin
 			input.Agent.HostedToolGrants = []agent.HostedToolGrant{{Key: scopedSearchKey, DefinitionVersion: "role-web-version-1"}}
 		}
 		return input, nil
-	}))
+	})
+	handler := harness.NewDelegationToolHandler()
 	registry, err := tools.NewRegistry([]tools.Registration{harness.DelegationToolRegistration(handler)})
 	if err != nil {
 		t.Fatal(err)
@@ -173,6 +174,7 @@ func runSelectedHostedParentToolWithFrozenContext(t *testing.T, childModel strin
 		t.Fatal(err)
 	}
 	composed := delegationHarnessDependencies(runtime, direct, store, registry, handoffs, relations, false)
+	composed.DelegationPolicy = hostDelegationPolicy0
 	if frozen {
 		composed.Context = manager
 	}
@@ -281,9 +283,10 @@ func TestHostHostedToolUsesInheritedParentModelWithoutParentActivation(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := harness.NewDelegationToolHandler(hostSelectedAgentPolicy{MemberID: "researcher", Agent: agent.StartRequest{
+	hostDelegationPolicy1 := hostSelectedAgentPolicy{MemberID: "researcher", Agent: agent.StartRequest{
 		HostedToolGrants: []agent.HostedToolGrant{{Key: scopedSearchKey, DefinitionVersion: "role-web-version-1"}},
-	}})
+	}}
+	handler := harness.NewDelegationToolHandler()
 	registry, err := tools.NewRegistry([]tools.Registration{harness.DelegationToolRegistration(handler)})
 	if err != nil {
 		t.Fatal(err)
@@ -303,7 +306,9 @@ func TestHostHostedToolUsesInheritedParentModelWithoutParentActivation(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner, err := harness.NewRunner(delegationHarnessDependencies(runtime, direct, store, registry, handoffs, relations, false))
+	composed := delegationHarnessDependencies(runtime, direct, store, registry, handoffs, relations, false)
+	composed.DelegationPolicy = hostDelegationPolicy1
+	runner, err := harness.NewRunner(composed)
 	if err != nil {
 		t.Fatal(err)
 	}

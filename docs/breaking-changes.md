@@ -21,6 +21,21 @@ before local transfers, caps child limits, and preserves grant, budget,
 physical receipt, cancellation and wait-recovery fences. SharedBudget applies
 to MemberID-only delegations without a Role directory.
 
+**Follow-up authorization hard cut:** Compose exactly one Host policy through
+`harness.Dependencies.DelegationPolicy`. `NewDelegationToolHandler()` no longer
+accepts independent policy arguments, and `ManualDelegationPolicy` is removed.
+The policy authorizes model Tool, direct Go, and HTTP/manual member requests;
+without it new delegations are denied before any child effect. Durable Waiting
+and Started Tool intents reuse their original authorization on recovery.
+
+**Child budget enforcement:** The Host's `agent.StartRequest.Limits` is frozen
+as local Agent call/token limits plus `handoff.Delegation.SubtreeLimits` for the
+Turn-wide shared ledger. Its child-run, cost, state, concurrency and descendant
+ceilings are enforced by the latter, not discarded to satisfy Agent-local limit
+validation. Requesting those subtree-only limits without `SharedBudget` fails
+closed. Nested delegates inherit their *immediate* parent's frozen Model and
+ModelOptions unless the Host explicitly selects another Model.
+
 **Upgrade:** nonempty persisted Role catalogs change sealed Config identity;
 legacy Role-bearing Handoff Invocation inputs fail closed even if their stored
 Run and Member IDs match. Drain or explicitly retire those prior Turns and

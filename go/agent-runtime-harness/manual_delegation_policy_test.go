@@ -59,7 +59,7 @@ func TestManualDelegationPreflightRejectsUnarmedNewsBeforeAnyChildSideEffect(t *
 	}
 	policy := &denyingManualNewsPolicy{}
 	runner, err := harness.NewRunner(harness.Dependencies{Runtime: runtime, Agent: direct, Store: store, Clock: fixedClock{},
-		Handoffs: handoffs, Relations: relations, ManualDelegationPolicy: policy})
+		Handoffs: handoffs, Relations: relations, DelegationPolicy: policy})
 	if err != nil {
 		t.Fatal(err)
 	}

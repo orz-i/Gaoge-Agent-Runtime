@@ -13,6 +13,7 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
 type pr82HandoffClock struct{}
@@ -140,7 +141,7 @@ func newPR82HandoffFixture(t *testing.T) *pr82HandoffFixture {
 		t.Fatal(err)
 	}
 	counter := &pr82HandoffCounter{}
-	runner := &Runner{store: store, runtime: runtime, relations: relations, handoffs: counter, clock: pr82HandoffClock{}}
+	runner := &Runner{store: store, runtime: runtime, relations: relations, handoffs: counter, clock: pr82HandoffClock{}, delegationPolicy: allowDelegationTestPolicy{}}
 	return &pr82HandoffFixture{runner: runner, store: store, runtime: runtime, parent: root,
 		parentRun: run, turn: turn, startedItemID: started.ID, handoff: counter}
 }
@@ -275,4 +276,11 @@ func TestPR82RoleHandoffSettlesVerifiedOutcome(t *testing.T) {
 	if PendingExecutionDispatch(items, "") {
 		t.Fatal("verified Handoff outcome left grant open")
 	}
+}
+
+// Harness-internal execution fixtures opt into Host admission explicitly.
+type allowDelegationTestPolicy struct{}
+
+func (allowDelegationTestPolicy) PrepareDelegation(_ context.Context, _ tools.ExecutionRequest, request DelegateRequest) (DelegateRequest, error) {
+	return request, nil
 }

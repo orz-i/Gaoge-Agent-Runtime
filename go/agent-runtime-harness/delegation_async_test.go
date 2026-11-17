@@ -217,7 +217,8 @@ func reconcileDelegationRoot(t *testing.T, direct *agent.Runner, root kernel.Sna
 
 func (fixture *asyncDelegationFixture) compose(t *testing.T, canceller harness.RuntimeCanceller) (*harness.Runner, *agent.Runner) {
 	t.Helper()
-	handler := harness.NewDelegationToolHandler(fixture.policy)
+	hostDelegationPolicy0 := fixture.policy
+	handler := harness.NewDelegationToolHandler()
 	registry, err := tools.NewRegistry([]tools.Registration{harness.DelegationToolRegistration(handler)})
 	if err != nil {
 		t.Fatal(err)
@@ -242,6 +243,7 @@ func (fixture *asyncDelegationFixture) compose(t *testing.T, canceller harness.R
 		t.Fatal(err)
 	}
 	harnessDependencies := delegationHarnessDependencies(fixture.runtime, direct, fixture.store, registry, handoffs, fixture.relations, false)
+	harnessDependencies.DelegationPolicy = hostDelegationPolicy0
 	harnessDependencies.Cancellation = canceller
 	runner, err := harness.NewRunner(harnessDependencies)
 	if err != nil {

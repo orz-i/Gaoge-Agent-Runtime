@@ -33,6 +33,9 @@ type DelegateRequest struct {
 	// Preserve the first model Call identity even after Host policy prepares
 	// the final execution scope; recovery uses the original persisted receipt.
 	callHash string
+	// Set only by the Runtime after the Host policy accepts this exact
+	// request or a verified durable original Tool intent is recovered.
+	hostAuthorized bool
 }
 
 type DelegationResult struct {
@@ -108,28 +111,31 @@ func (runner *Runner) Delegate(ctx context.Context, turnID string, request Deleg
 	if !runner.canDelegate(invocation) {
 		return DelegationResult{}, ErrInvalidRequest
 	}
-	// Manual API must check the same frozen host capability policy as the
-	// model's Tool path, before any child topology/budget side effects.
-	if runner.manualDelegationPolicy != nil {
-		normalized, normalizeErr := normalizeDelegateRequest(request)
-		if normalizeErr != nil {
-			return DelegationResult{}, normalizeErr
-		}
-		callArguments, marshalErr := json.Marshal(normalized)
-		if marshalErr != nil {
-			return DelegationResult{}, marshalErr
-		}
-		request, err = runner.manualDelegationPolicy.PrepareDelegation(ctx, tools.ExecutionRequest{
-			RunID: invocation.ExecutionRefID, Call: tools.Call{
-				ID:      stableID("manual", turn.ID, normalized.MemberID, normalized.Goal),
-				ToolKey: DelegationToolKey, Arguments: callArguments,
-			},
-		}, normalized)
-		if err != nil {
-			return DelegationResult{}, err
-		}
-	}
 	return runner.delegate(ctx, turn, invocation, request)
+}
+
+// authorizeDelegation is the one Host-owned authorization boundary shared by
+// direct Go/HTTP and model Tool entry points. A missing Host policy denies
+// new members; only an already frozen Tool intent skips its second evaluation.
+func (runner *Runner) authorizeDelegation(ctx context.Context, execution tools.ExecutionRequest, request DelegateRequest) (DelegateRequest, error) {
+	if runner == nil || runner.delegationPolicy == nil {
+		return DelegateRequest{}, ErrInvalidRequest
+	}
+	var err error
+	request, err = normalizeDelegateRequest(request)
+	if err != nil {
+		return DelegateRequest{}, err
+	}
+	request, err = runner.delegationPolicy.PrepareDelegation(ctx, execution, request)
+	if err != nil {
+		return DelegateRequest{}, err
+	}
+	request, err = normalizeDelegateRequest(request)
+	if err != nil {
+		return DelegateRequest{}, err
+	}
+	request.hostAuthorized = true
+	return request, nil
 }
 
 // DelegateByExecutionRefID is the Tool-facing form used by an Agent capability
@@ -150,6 +156,24 @@ func (runner *Runner) delegate(ctx context.Context, turn Turn, invocation Invoca
 	request, err := normalizeDelegateRequest(request)
 	if err != nil || !runner.canDelegate(invocation) {
 		return DelegationResult{}, errors.Join(ErrInvalidRequest, err)
+	}
+	if !request.hostAuthorized {
+		// Direct Go/HTTP callers cannot bypass the policy used by the Tool.
+		// This is a trusted Host invocation, never a model-writable grant.
+		var arguments json.RawMessage
+		arguments, err = json.Marshal(request)
+		if err != nil {
+			return DelegationResult{}, err
+		}
+		request, err = runner.authorizeDelegation(ctx, tools.ExecutionRequest{
+			RunID: invocation.ExecutionRefID, Call: tools.Call{
+				ID:      stableID("manual", turn.ID, invocation.ID, request.MemberID, request.Goal),
+				ToolKey: DelegationToolKey, Arguments: arguments,
+			},
+		}, request)
+		if err != nil {
+			return DelegationResult{}, err
+		}
 	}
 	if err = runner.requireFrozenAdmission(ctx, turn); err != nil {
 		return DelegationResult{}, err
@@ -289,12 +313,19 @@ func (runner *Runner) prepareDelegation(
 	// names into an independent Role/Tool/Skill policy of its own.
 	a := request.Agent
 	delegation.MemberRevision = request.MemberRevision
-	delegation.Model = firstNonEmpty(a.Model, config.Model)
-	// Inherit frozen options only with the original Model. A Host-selected
-	// different Model must never accidentally reuse another provider's options.
-	// Routed members with no local Tool transfer need no Agent state inspection.
-	if a.Model == "" || a.Model == config.Model {
-		delegation.ModelOptions = append(json.RawMessage(nil), config.ModelOptions...)
+	// In a nested handoff the immediate parent may run a different Model from
+	// the Turn root. ModelOptions and local Tool visibility belong to that
+	// parent, not a second resolution of the root Config catalog.
+	parentModel, parentOptions, parentLimits := config.Model, config.ModelOptions, config.Limits
+	parentView, viewErr := agent.ViewState(parent)
+	if viewErr == nil {
+		parentModel, parentOptions, parentLimits = parentView.Model, parentView.ModelOptions, parentView.Budget.Limits
+	} else if invocation.ParentItemID != "" {
+		return handoff.Delegation{}, parent, ErrConflict
+	}
+	delegation.Model = firstNonEmpty(a.Model, parentModel)
+	if a.Model == "" || a.Model == parentModel {
+		delegation.ModelOptions = append(json.RawMessage(nil), parentOptions...)
 	} else {
 		delegation.ModelOptions = nil
 	}
@@ -304,11 +335,10 @@ func (runner *Runner) prepareDelegation(
 	delegation.Instructions = a.Instructions
 	var local []string
 	if len(a.ToolKeys) != 0 {
-		view, viewErr := agent.ViewState(parent)
 		if viewErr != nil {
 			return handoff.Delegation{}, parent, viewErr
 		}
-		local, err = authorizedDelegatedLocalTools(config, view, a.ToolKeys)
+		local, err = authorizedDelegatedLocalTools(config, parentView, a.ToolKeys)
 	}
 	if err != nil {
 		return handoff.Delegation{}, parent, tools.NewRecoverableCallError(
@@ -329,16 +359,27 @@ func (runner *Runner) prepareDelegation(
 			return handoff.Delegation{}, parent, ErrInvalidRequest
 		}
 	}
-	// A Child may tighten Root hard ceilings, never raise them. Descendant
-	// lifetime/concurrency accounting belongs to the Turn-wide budget ledger.
-	parentLimits, childLimits := config.Limits, a.Limits
-	parentLimits.MaxChildRuns, parentLimits.MaxConcurrentRuns, parentLimits.MaxCostUnits, parentLimits.MaxStateBytes = 0, 0, 0, 0
-	childLimits.MaxChildRuns, childLimits.MaxConcurrentRuns, childLimits.MaxCostUnits, childLimits.MaxStateBytes = 0, 0, 0, 0
-	parentLimits.MaxConcurrentDescendants, childLimits.MaxConcurrentDescendants = 0, 0
-	delegation.Limits, err = budget.TightenLimits(parentLimits, childLimits)
-	if err != nil {
+	// Shared descendant ceilings and local Agent call/token limits have
+	// distinct enforcers. Freeze the full Host-selected policy for the ledger
+	// before removing unsupported dimensions from the physical Agent request.
+	// The original parent subtree remains enforced by the ledger ancestry.
+	resolved, limitErr := budget.TightenLimits(parentLimits, a.Limits)
+	if limitErr != nil {
 		return handoff.Delegation{}, parent, ErrInvalidRequest
 	}
+	if config.SharedBudget != nil {
+		// Keep an independent frozen copy: the Agent-only projection below
+		// intentionally clears dimensions this runner cannot enforce.
+		subtreeLimits := resolved
+		delegation.SubtreeLimits = &subtreeLimits
+	} else if a.Limits.MaxChildRuns > 0 || a.Limits.MaxConcurrentRuns > 0 ||
+		a.Limits.MaxConcurrentDescendants > 0 || a.Limits.MaxCostUnits > 0 || a.Limits.MaxStateBytes > 0 {
+		// Without a shared ledger, Agent-local budget cannot enforce these.
+		return handoff.Delegation{}, parent, ErrInvalidRequest
+	}
+	resolved.MaxChildRuns, resolved.MaxConcurrentRuns, resolved.MaxCostUnits, resolved.MaxStateBytes = 0, 0, 0, 0
+	resolved.MaxConcurrentDescendants = 0
+	delegation.Limits = resolved
 	return delegation, parent, nil
 }
 

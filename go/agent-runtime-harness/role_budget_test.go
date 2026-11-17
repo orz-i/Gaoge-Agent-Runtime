@@ -66,11 +66,12 @@ func testRoleDelegationChildApproval(t *testing.T, wrongRoute bool, terminalPare
 	if err != nil {
 		t.Fatal(err)
 	}
-	delegation := harness.NewDelegationToolHandler(hostSelectedAgentPolicy{
+	hostDelegationPolicy0 := hostSelectedAgentPolicy{
 		MemberID: "researcher", MemberRevision: "v3",
 		Agent: agent.StartRequest{Model: "specialist-model", Instructions: "Use frozen evidence.\n\n## Evidence\nQuote the evidence.",
 			ToolKeys: []string{roleEvidenceTool}, Limits: budget.Limits{MaxLLMCalls: 2}},
-	})
+	}
+	delegation := harness.NewDelegationToolHandler()
 	registry, err := tools.NewRegistry([]tools.Registration{harness.DelegationToolRegistration(delegation), {
 		Definition: tools.Definition{Key: roleEvidenceTool, Name: "read_evidence", InputSchema: json.RawMessage(`{"type":"object"}`)}, Handler: roleEvidenceHandler{},
 	}})
@@ -106,7 +107,7 @@ func testRoleDelegationChildApproval(t *testing.T, wrongRoute bool, terminalPare
 		rootAgent = wrong
 	}
 	runner, err := harness.NewRunner(harness.Dependencies{Runtime: runtime, Agent: rootAgent, Store: store, Clock: fixedClock{},
-		Handoffs: handoffs, Relations: relations, Budget: shared})
+		Handoffs: handoffs, Relations: relations, Budget: shared, DelegationPolicy: hostDelegationPolicy0})
 	if err != nil {
 		t.Fatal(err)
 	}

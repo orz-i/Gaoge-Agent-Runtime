@@ -526,7 +526,7 @@ func newDelegationHarnessWithRuntime(
 	if err != nil {
 		t.Fatal(err)
 	}
-	delegationTool := harness.NewDelegationToolHandler(policies...)
+	delegationTool := harness.NewDelegationToolHandler()
 	registry, err := tools.NewRegistry([]tools.Registration{harness.DelegationToolRegistration(delegationTool)})
 	if err != nil {
 		t.Fatal(err)
@@ -545,6 +545,7 @@ func newDelegationHarnessWithRuntime(
 		t.Fatal(err)
 	}
 	harnessDependencies := delegationHarnessDependencies(runtime, agentRunner, store, registry, handoffs, relations, contextAware)
+	harnessDependencies.DelegationPolicy = testDelegationPolicyChain(policies)
 	runner, err := harness.NewRunner(harnessDependencies)
 	if err != nil {
 		t.Fatal(err)

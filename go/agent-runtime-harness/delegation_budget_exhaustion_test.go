@@ -39,7 +39,8 @@ func TestDelegationChildRunExhaustionBecomesRecoverableModelGuidance(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	delegation := harness.NewDelegationToolHandler(hostSelectedAgentPolicy{MemberID: "researcher", Agent: agent.StartRequest{Model: "specialist-model"}})
+	hostDelegationPolicy0 := hostSelectedAgentPolicy{MemberID: "researcher", Agent: agent.StartRequest{Model: "specialist-model"}}
+	delegation := harness.NewDelegationToolHandler()
 	registry, err := tools.NewRegistry([]tools.Registration{harness.DelegationToolRegistration(delegation)})
 	if err != nil {
 		t.Fatal(err)
@@ -61,7 +62,7 @@ func TestDelegationChildRunExhaustionBecomesRecoverableModelGuidance(t *testing.
 	}
 	runner, err := harness.NewRunner(harness.Dependencies{
 		Runtime: runtime, Agent: direct, Store: store, Clock: fixedClock{},
-		Handoffs: handoffs, Relations: relations, Budget: shared,
+		Handoffs: handoffs, Relations: relations, Budget: shared, DelegationPolicy: hostDelegationPolicy0,
 	})
 	if err != nil {
 		t.Fatal(err)

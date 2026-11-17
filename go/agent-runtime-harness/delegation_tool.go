@@ -29,19 +29,12 @@ type DelegationToolPolicy interface {
 // DelegationToolHandler is explicitly bound once by the composition root after Runner construction.
 // The Tool Registry remains immutable; this is not a dynamic capability registry.
 type DelegationToolHandler struct {
-	mu       sync.RWMutex
-	runner   *Runner
-	policies []DelegationToolPolicy
+	mu     sync.RWMutex
+	runner *Runner
 }
 
-func NewDelegationToolHandler(policies ...DelegationToolPolicy) *DelegationToolHandler {
-	bound := make([]DelegationToolPolicy, 0, len(policies))
-	for _, policy := range policies {
-		if policy != nil {
-			bound = append(bound, policy)
-		}
-	}
-	return &DelegationToolHandler{policies: bound}
+func NewDelegationToolHandler() *DelegationToolHandler {
+	return &DelegationToolHandler{}
 }
 
 func (handler *DelegationToolHandler) Bind(runner *Runner) error {
@@ -373,14 +366,18 @@ func (handler *DelegationToolHandler) prepareRequest(
 	input DelegateRequest,
 ) (DelegateRequest, error) {
 	prepared, found, err := runner.preparedDelegationToolRequest(ctx, request)
-	if err != nil || found {
-		return prepared, err
+	if err != nil {
+		return DelegateRequest{}, err
 	}
-	for _, policy := range handler.policies {
-		input, err = policy.PrepareDelegation(ctx, tools.CloneExecutionRequest(request), input)
-		if err != nil {
-			return DelegateRequest{}, err
-		}
+	if found {
+		// This frozen Tool intent was already authorized by the Host on its
+		// first dispatch. Recovery must not re-run Host policy.
+		prepared.hostAuthorized = true
+		return prepared, nil
+	}
+	input, err = runner.authorizeDelegation(ctx, tools.CloneExecutionRequest(request), input)
+	if err != nil {
+		return DelegateRequest{}, err
 	}
 	input.callID = request.Call.ID
 	input.callHash = hashInvocationBytes(request.Call.Arguments)

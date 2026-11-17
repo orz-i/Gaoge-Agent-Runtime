@@ -91,9 +91,10 @@ func runRoleScopedHostedTool(t *testing.T, discovery bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	delegation := harness.NewDelegationToolHandler(hostSelectedAgentPolicy{MemberID: "researcher", Agent: agent.StartRequest{
+	hostDelegationPolicy0 := hostSelectedAgentPolicy{MemberID: "researcher", Agent: agent.StartRequest{
 		Model: "specialist-model", HostedToolGrants: []agent.HostedToolGrant{{Key: scopedSearchKey, DefinitionVersion: "role-web-version-1"}},
-	}})
+	}}
+	delegation := harness.NewDelegationToolHandler()
 	registrations := []tools.Registration{harness.DelegationToolRegistration(delegation)}
 	keys := []string{harness.DelegationToolKey}
 	policies := []harness.ToolPolicySnapshot{harness.DelegationToolPolicySnapshot()}
@@ -134,7 +135,9 @@ func runRoleScopedHostedTool(t *testing.T, discovery bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner, err := harness.NewRunner(delegationHarnessDependencies(runtime, direct, store, registry, handoffs, relations, false))
+	composed := delegationHarnessDependencies(runtime, direct, store, registry, handoffs, relations, false)
+	composed.DelegationPolicy = hostDelegationPolicy0
+	runner, err := harness.NewRunner(composed)
 	if err != nil {
 		t.Fatal(err)
 	}

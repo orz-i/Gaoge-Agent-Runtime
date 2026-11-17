@@ -142,9 +142,13 @@ func (runner *Runner) admitDelegationChild(ctx context.Context, turn Turn, paren
 	}
 	// Admission happens before child topology facts are appended so a hard
 	// descendant ceiling cannot leave a phantom relation or child Invocation.
+	childLimits := delegation.Limits
+	if delegation.SubtreeLimits != nil {
+		childLimits = *delegation.SubtreeLimits
+	}
 	ledger, err = coordinator.RegisterRun(ctx, turn.ID, delegation.ChildRunID, budget.RunBudget{
 		ParentRunID: parent.ExecutionRefID,
-		Limits:      delegation.Limits,
+		Limits:      childLimits,
 	})
 	if err != nil {
 		return err

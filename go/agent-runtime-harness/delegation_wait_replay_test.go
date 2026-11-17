@@ -36,9 +36,9 @@ func TestPreparedDelegationReusesFrozenWaitingOrStartedIntent(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			runner := &Runner{store: store, clock: hostedBudgetClock{}}
 			policy := &countingFrozenDelegationPolicy{}
-			handler := NewDelegationToolHandler(policy)
+			runner := &Runner{store: store, clock: hostedBudgetClock{}, delegationPolicy: policy}
+			handler := NewDelegationToolHandler()
 			callID := "child-at-capacity"
 			execution := tools.ExecutionRequest{RunID: modelRequest.RunID, Call: tools.Call{
 				ID: callID, ToolKey: DelegationToolKey, Arguments: json.RawMessage(`{"memberID":"researcher","goal":"lookup"}`),
