@@ -13,7 +13,10 @@ Hosts build their own product detail, timeline and topology views from
 `GET /runs/{runID}/feed`, subject to existing Host authorization and public
 redaction requirements. The A2A Shadow state decoder remains on the real
 execution/identity-proof path; remote target binding and Handoff physical
-receipts are not changed. No persisted Run/Turn/Store data is migrated.
+receipts are not changed. Public Run snapshots retain Checkpoint identity,
+status and timestamps, but withhold opaque Checkpoint `payload` (`null`) and
+`response` (omitted); the original durable values remain unchanged. No
+persisted Run/Turn/Store data is migrated.
 
 ## 2026-11-17 — Remove Core Host Bootstrap / Compose / Feature metadata
 

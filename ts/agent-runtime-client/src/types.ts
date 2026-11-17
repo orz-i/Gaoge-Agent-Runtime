@@ -253,8 +253,7 @@ export type CheckpointDTO = {
   id: string;
   kind: string;
   status: string;
-  payload: unknown;
-  response?: unknown;
+  payload: null;
   createdAt: string;
   resolvedAt?: string | null;
 };

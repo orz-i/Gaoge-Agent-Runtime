@@ -706,8 +706,7 @@ components:
         id: {type: string}
         kind: {type: string}
         status: {type: string, enum: [pending, resolved]}
-        payload: {}
-        response: {}
+        payload: {description: 'Public Run snapshots always return null; original opaque checkpoint content and response remain in Kernel.'}
         createdAt: {type: string, format: date-time}
         resolvedAt: {type: string, format: date-time, nullable: true}
     Result:

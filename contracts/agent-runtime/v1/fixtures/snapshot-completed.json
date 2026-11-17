@@ -26,13 +26,8 @@
     "id": "checkpoint-1",
     "kind": "approval",
     "status": "resolved",
-    "payload": {
-      "prompt": "Approve"
-    },
+    "payload": null,
     "createdAt": "2026-09-21T00:00:00Z",
-    "response": {
-      "approved": true
-    },
     "resolvedAt": "2026-09-21T00:01:00Z"
   },
   "result": {

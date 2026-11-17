@@ -90,10 +90,27 @@ type RunEventPageResponse struct {
 func snapshotResponse(snapshot kernel.Snapshot) RunSnapshotResponse {
 	response := RunSnapshotResponse{
 		Run: PublicRun(snapshot.Run), State: PublicDiagnosticPayload(snapshot.State),
-		Checkpoint: snapshot.Checkpoint, Result: snapshot.Result,
+		Checkpoint: publicRunCheckpoint(snapshot.Checkpoint), Result: snapshot.Result,
 		EventHead: snapshot.EventHead,
 	}
 	return response
+}
+
+// Public Run reads expose checkpoint lifecycle and identity, not feature-owned
+// execution payloads or responses. The original checkpoint remains in Kernel
+// for approval verification, cancellation and recovery.
+func publicRunCheckpoint(checkpoint *kernel.Checkpoint) *kernel.Checkpoint {
+	if checkpoint == nil {
+		return nil
+	}
+	public := *checkpoint
+	if checkpoint.ResolvedAt != nil {
+		resolvedAt := *checkpoint.ResolvedAt
+		public.ResolvedAt = &resolvedAt
+	}
+	public.Payload = nil // Required wire field encodes as JSON null.
+	public.Response = nil
+	return &public
 }
 
 func bindStrictJSON(context *gin.Context, target interface{}) error {
