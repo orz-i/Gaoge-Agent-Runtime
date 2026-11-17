@@ -135,7 +135,7 @@ alternate Harness execution class.
 The HTTP/TypeScript surface exposes Agent Runs, generic Run inspect/cancel,
 Harness Turns, approvals and Subtask controls. Removed orchestrators have **no**
 HTTP mounts, TypeScript namespaces, compiled definitions, Store registration,
-Continuation resumers or topology providers. The Kernel remains extensible for
+Continuation resumers or SDK presentation providers. The Kernel remains extensible for
 Host-owned kinds; this does **not** restore the removed first-party execution
 semantics.
 

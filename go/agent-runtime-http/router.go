@@ -10,7 +10,6 @@ func (module *Module) RegisterRoutes(routes *gin.RouterGroup) {
 	routes.GET("/runs/:run_id/events", module.Handler.GetRunEvents)
 	routes.GET("/runs/:run_id/feed", module.Handler.StreamRunFeed)
 	routes.POST("/runs/:run_id/cancel", module.Handler.CancelRun)
-	routes.GET("/runs/:run_id/workbench", module.Handler.GetWorkbench)
 	for _, feature := range module.features {
 		if feature != nil {
 			feature.RegisterRoutes(routes)

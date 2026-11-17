@@ -4,11 +4,9 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runfeed"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workbench"
 )
 
 const privateDiagnosticFixture = "Bearer sk-PRIVATE-PROVIDER-REQUEST-BODY"
@@ -59,42 +57,15 @@ func TestPublicSDKFailureProjectionKeepsCodesWithoutDiagnosticBytes(t *testing.T
 	}
 }
 
-func TestPublicSDKWorkbenchAndFeedExcludeNestedProviderErrors(t *testing.T) {
+func TestPublicSDKFeedExcludesNestedProviderErrors(t *testing.T) {
 	t.Parallel()
 	secret := privateDiagnosticFixture
-	run := kernel.Run{ID: "run-1", Status: kernel.RunStatusFailed,
-		ErrorCode: "model.upstream_quota_exhausted", ErrorDetail: secret}
-	detail := workbench.Detail{
-		Overview: workbench.Overview{
-			RunID: run.ID, Status: run.Status, ErrorCode: run.ErrorCode, ErrorDetail: secret,
-		},
-		Run: run,
-		Sections: []workbench.Section{{Name: "model", Available: true,
-			Content: json.RawMessage(`{"safe":true,"providerResponse":{"body":"Bearer sk-PRIVATE-PROVIDER-REQUEST-BODY"}}`)}},
-		Diagnostics: []workbench.Diagnostic{{Provider: "model", Code: "provider_error", Message: secret}},
-		Timeline: []workbench.TimelineItem{{
-			ID: "t1", Kind: "agent.failed", Source: "kernel", Title: secret, Summary: secret,
-			CreatedAt: time.Now(), Data: json.RawMessage(`{"nested":{"errorDetail":"Bearer sk-PRIVATE-PROVIDER-REQUEST-BODY"},"valid":"keep"}`),
-		}},
-	}
-	public := workbenchResponse(detail)
-	encoded, err := json.Marshal(public)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(encoded), secret) || !strings.Contains(string(encoded), "model.upstream_quota_exhausted") ||
-		!strings.Contains(string(encoded), "keep") || !strings.Contains(string(encoded), "safe") {
-		t.Fatalf("workbench leaked internal diagnostics or removed valid facts: %s", encoded)
-	}
-	if detail.Overview.ErrorDetail != secret || detail.Diagnostics[0].Message != secret {
-		t.Fatal("HTTP projection mutated internal workbench detail")
-	}
 	event := runfeed.Event{
 		Type: runfeed.EventRunFailed, Status: "failed", Message: secret,
 		Data: json.RawMessage(`{"debug":{"requestBody":"Bearer sk-PRIVATE-PROVIDER-REQUEST-BODY"},"count":2}`),
 	}
 	projected := publicRunFeedEvent(event)
-	encoded, _ = json.Marshal(projected)
+	encoded, _ := json.Marshal(projected)
 	if strings.Contains(string(encoded), secret) || !strings.Contains(string(encoded), "count") {
 		t.Fatalf("public runfeed leaked Provider details: %s", encoded)
 	}

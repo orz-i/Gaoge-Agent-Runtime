@@ -8,7 +8,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runfeed"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workbench"
 )
 
 // PrincipalResolver maps the authenticated host principal to an opaque Kernel actor.
@@ -65,7 +64,6 @@ const (
 	RunOperationEventsRead      RunOperation = "run.events.read"
 	RunOperationCancel          RunOperation = "run.cancel"
 	RunOperationFeedRead        RunOperation = "run.feed.read"
-	RunOperationWorkbenchRead   RunOperation = "run.workbench.read"
 	RunOperationApprovalResolve RunOperation = "run.approval.resolve"
 	RunOperationWaitResolve     RunOperation = "run.wait.resolve"
 	RunOperationTraceRead       RunOperation = "run.trace.read"
@@ -146,7 +144,6 @@ func (shared *Shared) RequestID(context *gin.Context) string {
 // Dependencies are the feature-neutral Runtime capabilities mounted by the core HTTP adapter.
 type Dependencies struct {
 	Runtime              *kernel.Runtime
-	Workbench            *workbench.Query
 	Feed                 *runfeed.Feed
 	Cancellations        *CancellationRouter
 	Shared               *Shared
@@ -155,7 +152,6 @@ type Dependencies struct {
 
 type Handler struct {
 	runtime              *kernel.Runtime
-	workbench            *workbench.Query
 	feed                 *runfeed.Feed
 	cancellations        *CancellationRouter
 	shared               *Shared
@@ -164,8 +160,8 @@ type Handler struct {
 
 func NewHandler(dependencies Dependencies) *Handler {
 	return &Handler{
-		runtime: dependencies.Runtime, workbench: dependencies.Workbench,
-		feed: dependencies.Feed, cancellations: dependencies.Cancellations,
+		runtime: dependencies.Runtime,
+		feed:    dependencies.Feed, cancellations: dependencies.Cancellations,
 		shared:               dependencies.Shared,
 		pendingToolProjector: dependencies.PendingToolProjector,
 	}

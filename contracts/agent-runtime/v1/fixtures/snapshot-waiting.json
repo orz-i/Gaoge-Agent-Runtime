@@ -23,9 +23,7 @@
     "id": "checkpoint-1",
     "kind": "approval",
     "status": "pending",
-    "payload": {
-      "prompt": "Approve"
-    },
+    "payload": null,
     "createdAt": "2026-09-21T00:00:00Z"
   },
   "eventHead": 2

@@ -77,7 +77,6 @@ describe("RuntimeClient target API", () => {
     await client.runs.get("run/1");
     await client.runs.events("run/1", { afterSeq: 4, limit: 25 });
     await client.runs.cancel("run/1", { expectedRevision: 2, reason: "stop" });
-    await client.runs.workbench("run/1");
     for await (const event of client.runs.feed("run/1", { reconnectDelayMS: 0 })) {
       expect(event.terminal).toBe(true);
     }
@@ -86,7 +85,6 @@ describe("RuntimeClient target API", () => {
       "https://runtime.test/api/v1/runs/run%2F1",
       "https://runtime.test/api/v1/runs/run%2F1/events?afterSeq=4&limit=25",
       "https://runtime.test/api/v1/runs/run%2F1/cancel",
-      "https://runtime.test/api/v1/runs/run%2F1/workbench",
       "https://runtime.test/api/v1/runs/run%2F1/feed?afterSeq=0",
     ]);
   });

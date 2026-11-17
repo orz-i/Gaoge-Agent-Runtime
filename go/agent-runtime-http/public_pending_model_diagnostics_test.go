@@ -14,7 +14,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workbench"
 )
 
 type pendingDiagnosticModel struct{ calls int }
@@ -54,7 +53,7 @@ func TestPendingModelDiagnosticPrivateAcrossOwnerHTTPReads(t *testing.T) {
 	if invocation.Status != agent.ModelInvocationPending || invocation.DispatchAttempt != 1 || !strings.Contains(invocation.OutcomeErrorDetail, privateDiagnosticFixture) {
 		t.Fatalf("missing private durable pending evidence: %#v", invocation)
 	}
-	paths := []string{"/api/v1/runs/pending-private", "/api/v1/runs/pending-private/events", "/api/v1/runs/pending-private/workbench"}
+	paths := []string{"/api/v1/runs/pending-private", "/api/v1/runs/pending-private/events"}
 	for _, path := range paths {
 		response := performAuthorizationRequest(t, engine, stdhttp.MethodGet, path, nil)
 		if response.Code != stdhttp.StatusOK || strings.Contains(response.Body.String(), privateDiagnosticFixture) || strings.Contains(response.Body.String(), "outcomeErrorDetail") {
@@ -65,12 +64,8 @@ func TestPendingModelDiagnosticPrivateAcrossOwnerHTTPReads(t *testing.T) {
 	if !strings.Contains(response.Body.String(), "author-visible goal") || !strings.Contains(response.Body.String(), invocation.ID) || !strings.Contains(response.Body.String(), invocation.RequestHash) {
 		t.Fatalf("ordinary visible source facts lost: %s", response.Body.String())
 	}
-	query, err := workbench.NewQuery(runtime, runtime, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
 	foreign := gin.New()
-	NewModule(NewHandler(Dependencies{Runtime: runtime, Workbench: query, Shared: NewShared(authorizationPrincipal{actor: kernel.ActorRef{TenantID: "foreign", ActorID: actor.ActorID}}, nil, runtime, nil)})).RegisterRoutes(foreign.Group("/api/v1"))
+	NewModule(NewHandler(Dependencies{Runtime: runtime, Shared: NewShared(authorizationPrincipal{actor: kernel.ActorRef{TenantID: "foreign", ActorID: actor.ActorID}}, nil, runtime, nil)})).RegisterRoutes(foreign.Group("/api/v1"))
 	for _, path := range paths {
 		response := performAuthorizationRequest(t, foreign, stdhttp.MethodGet, path, nil)
 		if response.Code != stdhttp.StatusNotFound || strings.Contains(response.Body.String(), privateDiagnosticFixture) || strings.Contains(response.Body.String(), invocation.ID) {

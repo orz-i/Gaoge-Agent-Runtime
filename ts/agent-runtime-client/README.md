@@ -72,7 +72,7 @@ a replacement snapshot when the server reports an expired cursor.
 | Namespace | Methods |
 | --- | --- |
 | `agent` | `start` |
-| `runs` | `get`, `events`, `cancel`, `workbench`, `feed` |
+| `runs` | `get`, `events`, `cancel`, `feed` |
 | `harness.turns` | `get`, `feed`, `resolveApproval`, `resolveInteraction`, `cancelSubtask`, `resolveSubtaskApproval` |
 
 Use the exported request types for the supported Agent/Harness operations. Having a client method does not
@@ -81,7 +81,7 @@ to a caller. Generic `admin`, `agents`, `events`, and `interactions` namespaces,
 and generic run delegation/resume methods, are not part of this client.
 
 `RuntimeKind` is a feature-owned string. Handle unfamiliar kinds when reading
-Runs or Workbench snapshots; built-ins include `agent` and `a2a.remote`. Feature-specific start methods remain
+Runs; built-ins include `agent` and `a2a.remote`. Feature-specific start methods remain
 explicit. JSON payloads typed as `unknown` require their owning host schema.
 
 ## Harness input and approval

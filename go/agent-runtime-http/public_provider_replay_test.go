@@ -7,7 +7,6 @@ import (
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runfeed"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workbench"
 )
 
 const secretSignedThought = "PRIVATE_THINKING_HTTP_BOUNDARY_TEST"
@@ -59,27 +58,9 @@ func TestProviderReplayRemovedFromPublicStateAndNestedBusinessPayloads(t *testin
 	assertNoProviderReplay(t, PublicDiagnosticPayload(res.State))
 }
 
-func TestProviderReplayScrubbedFromAllPublicDiagnosticSurfaces(t *testing.T) {
+func TestProviderReplayScrubbedFromPublicRunFeed(t *testing.T) {
 	t.Parallel()
 	payload := json.RawMessage(replaySensitivePayload)
-	detail := workbench.Detail{
-		Run:      kernel.Run{Kind: "agent", ID: "provider-security-audit"},
-		Sections: []workbench.Section{{Name: "state", Available: true, Content: payload}},
-		Timeline: []workbench.TimelineItem{{ID: "t1", Kind: "event", Data: payload}},
-		Topology: &workbench.TopologyV1{
-			Nodes: []workbench.TopologyNode{{ID: "n1", Kind: "model", Data: payload}},
-			Edges: []workbench.TopologyEdge{{ID: "e1", Data: payload}},
-		},
-	}
-	projected := publicWorkbench(detail)
-	encoded, err := json.Marshal(projected)
-	if err != nil {
-		t.Fatal(err)
-	}
-	assertNoProviderReplay(t, encoded)
-	if !bytes.Equal(detail.Sections[0].Content, payload) || !bytes.Equal(detail.Timeline[0].Data, payload) {
-		t.Fatal("public Workbench scrubber mutated retained private diagnostic content")
-	}
 	event := runfeed.Event{RunID: "provider-security-audit", Type: runfeed.EventRunStarted, Data: payload}
 	output, err := json.Marshal(publicRunFeedEvent(event))
 	if err != nil {

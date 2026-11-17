@@ -86,28 +86,6 @@ func (handler *Handler) CancelRun(context *gin.Context) {
 	writeSuccess(context, CancelRunResponse{Run: PublicRun(snapshot.Run)})
 }
 
-func (handler *Handler) GetWorkbench(context *gin.Context) {
-	if handler == nil || handler.workbench == nil {
-		writeError(context, stdhttp.StatusServiceUnavailable, "workbench.unavailable", "workbench is unavailable")
-		return
-	}
-	runID, err := runIDParam(context)
-	if err != nil {
-		writeError(context, stdhttp.StatusBadRequest, "workbench.invalid_request", err.Error())
-		return
-	}
-	if _, err = handler.authorizedRun(context, runID, RunOperationWorkbenchRead); err != nil {
-		WriteRunAccessError(context, "workbench", err)
-		return
-	}
-	detail, err := handler.workbench.Get(context.Request.Context(), runID)
-	if err != nil {
-		WriteKernelError(context, "workbench", err)
-		return
-	}
-	writeSuccess(context, workbenchResponse(detail))
-}
-
 func (handler *Handler) releaseTerminalRunFeed(context *gin.Context, snapshot kernel.Snapshot) {
 	if handler == nil || handler.feed == nil || !terminalRunStatus(snapshot.Run.Status) {
 		return

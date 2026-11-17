@@ -10,7 +10,6 @@ import (
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runfeed"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/workbench"
 )
 
 const publicUnknownFailureCode = "execution.failed"
@@ -411,46 +410,4 @@ func publicRunFeedEvent(event runfeed.Event) runfeed.Event {
 		event.Data = PublicDiagnosticPayload(event.Data)
 	}
 	return event
-}
-
-func publicWorkbench(detail workbench.Detail) workbench.Detail {
-	detail.Overview.ErrorCode = PublicFailureCode(detail.Overview.ErrorCode)
-	detail.Overview.ErrorDetail = PublicFailureDetail(detail.Run.ErrorCode, detail.Overview.ErrorDetail)
-	detail.Run = PublicRun(detail.Run)
-	detail.Diagnostics = append([]workbench.Diagnostic(nil), detail.Diagnostics...)
-	for index := range detail.Diagnostics {
-		if detail.Diagnostics[index].Message != "" {
-			detail.Diagnostics[index].Message = "diagnostic unavailable"
-		}
-	}
-	if detail.Checkpoint != nil {
-		checkpoint := *detail.Checkpoint
-		checkpoint.Payload = PublicDiagnosticPayload(checkpoint.Payload)
-		checkpoint.Response = PublicDiagnosticPayload(checkpoint.Response)
-		detail.Checkpoint = &checkpoint
-	}
-	detail.Timeline = append([]workbench.TimelineItem(nil), detail.Timeline...)
-	for index := range detail.Timeline {
-		event := &detail.Timeline[index]
-		event.Title = PublicEventMessage(event.Kind, event.Status, event.Title)
-		event.Summary = PublicEventMessage(event.Kind, event.Status, event.Summary)
-		event.Data = PublicDiagnosticPayload(event.Data)
-	}
-	detail.Sections = append([]workbench.Section(nil), detail.Sections...)
-	for index := range detail.Sections {
-		detail.Sections[index].Content = PublicDiagnosticPayload(detail.Sections[index].Content)
-	}
-	if detail.Topology != nil {
-		topology := *detail.Topology
-		topology.Nodes = append([]workbench.TopologyNode(nil), topology.Nodes...)
-		for index := range topology.Nodes {
-			topology.Nodes[index].Data = PublicDiagnosticPayload(topology.Nodes[index].Data)
-		}
-		topology.Edges = append([]workbench.TopologyEdge(nil), topology.Edges...)
-		for index := range topology.Edges {
-			topology.Edges[index].Data = PublicDiagnosticPayload(topology.Edges[index].Data)
-		}
-		detail.Topology = &topology
-	}
-	return workbench.RehashProjection(detail)
 }
