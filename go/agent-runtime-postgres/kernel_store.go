@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"gorm.io/gorm"
@@ -34,6 +35,17 @@ func (store *KernelStore) kernelTransitionMissingOrConflict(db *gorm.DB, transit
 func isKernelUniqueConstraint(err error) bool {
 	if err == nil {
 		return false
+	}
+	// PostgreSQL error messages are localized. Never infer a durable
+	// idempotency conflict from English human-facing text when SQLSTATE
+	// is available. A non-unique SQLSTATE must not be reclassified even
+	// if its detail contains words like "duplicate key".
+	var postgres *pgconn.PgError
+	if errors.As(err, &postgres) {
+		return postgres.Code == "23505"
+	}
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return true
 	}
 	message := strings.ToLower(err.Error())
 	return strings.Contains(message, "unique constraint") ||
