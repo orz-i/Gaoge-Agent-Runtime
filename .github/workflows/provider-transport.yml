@@ -1,0 +1,38 @@
+name: Provider Transport module tag verification
+
+# An independent module tag is created only by an explicitly authorized release.
+# This workflow verifies that tag; it never creates Runtime tags or a release.
+on:
+  push:
+    tags:
+      - "go/provider-transport/v*"
+
+permissions:
+  contents: read
+
+jobs:
+  independent-module:
+    runs-on: ubuntu-26.04
+    env:
+      GOWORK: "off"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-go
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Verify independent tag version
+        env:
+          MODULE_TAG: ${{ github.ref_name }}
+        run: |
+          test "$MODULE_TAG" = "go/provider-transport/v$(cat go/provider-transport/VERSION)"
+      - name: Verify isolated module
+        working-directory: go/provider-transport
+        run: |
+          go mod verify
+          go test -race ./... -count=1
+          go vet ./...
+      - name: Verify dependency policy and published consumer
+        run: |
+          node --test scripts/provider-transport-policy.test.mjs
+          node scripts/check-provider-transport.mjs --published
