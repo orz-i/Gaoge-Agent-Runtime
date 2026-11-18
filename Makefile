@@ -88,6 +88,7 @@ unit: go-test ts-test
 coverage: go-coverage ts-coverage
 
 security: go-vuln
+	node --test scripts/picomatch-security.test.mjs
 	pnpm audit --audit-level high
 
 eval:

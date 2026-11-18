@@ -6,6 +6,8 @@ allowBuilds:
 
 overrides:
   vite: 7.3.7
+  # Temporary CVE-2026-112366 fix until upstream publishes a patched version.
+  picomatch: npm:@ryotsu/picomatch@4.0.7-a
 
 audit:
   level: high
