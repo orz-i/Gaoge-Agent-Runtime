@@ -88,7 +88,8 @@ unit: go-test ts-test
 coverage: go-coverage ts-coverage
 
 security: go-vuln
-	pnpm audit --audit-level high
+	node --test scripts/picomatch-security.test.mjs
+	pnpm audit --audit-level moderate
 
 eval:
 	cd go/agent-runtime && go test ./evaluation -run '^TestRuntimeScenarioCorpus$$' -count=1 -v
