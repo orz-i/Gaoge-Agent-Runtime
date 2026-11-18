@@ -145,6 +145,8 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 24
+      - name: Install dependencies for security regression tests
+        run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Scan Go and Node dependencies
         run: make security
 
