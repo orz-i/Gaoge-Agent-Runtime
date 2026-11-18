@@ -18,6 +18,8 @@ export const modules = [
   "go/agent-runtime-sqlite",
   "go/agent-runtime-redis",
   "go/agent-runtime-http",
+  // Independent module: checked here, but not part of the Runtime tag cohort.
+  "go/provider-transport",
 ];
 
 const mode = process.argv[2];
@@ -84,8 +86,9 @@ function checkTidy(cwd, modulePath) {
     // Every optional module, including SQLite, must build against the
     // coordinated *source* Core until the next immutable module tags exist.
     // A real no-replace consumer is verified separately by --published.
-    const replaceCore = modulePath !== "go/agent-runtime";
-    const replaceProvider = modulePath !== "go/agent-runtime" && modulePath !== "go/agent-runtime-provider";
+    const independentTransport = modulePath === "go/provider-transport";
+    const replaceCore = !independentTransport && modulePath !== "go/agent-runtime";
+    const replaceProvider = !independentTransport && modulePath !== "go/agent-runtime" && modulePath !== "go/agent-runtime-provider";
     const replaceHarness = ["go/agent-runtime-harness-postgres", "go/agent-runtime-http", "go/agent-runtime-harness/examples/task-agent"].includes(modulePath);
     // Harness integration tests exercise this same source cohort's three
     // Kernel Stores; tidy must not resolve unreleased adapters from old tags.

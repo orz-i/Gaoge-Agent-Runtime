@@ -5,6 +5,18 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- **Breaking package boundary (2026-11-17):** Physically move
+  `go/agent-runtime-provider/transport` into the independently versioned
+  `go/provider-transport` module. Preserve the original 103 Go source/test
+  files and 38 adapter identifiers; do not retain an alias, duplicate or
+  compatibility package at the old path. The new module has no Kernel,
+  Agent, Harness, Gaoge or Agent Server dependency and is not a member of
+  the Runtime release cohort. Existing transport consumers must change
+  imports and pin its separately reviewed revision. Runtime model.Client
+  adapters in `agent-runtime-provider` remain unchanged. The initial
+  transport `v0.1.0-beta.1` is a candidate, not a published release; see
+  `docs/adr/0019-independent-provider-transport.md`.
+
 - **Continuation/A2A projection isolation (2026-11-14):** The Worker no
   longer serializes its committed-transition outbox Projector behind a
   relation Reconciler that may poll remote A2A `GetTask`. Queue delivery,

@@ -1,5 +1,33 @@
 # Breaking changes (pre-stable Beta)
 
+## 2026-11-17 — Independently version Provider Transport
+
+**Breaking Go import/module boundary:** `agent-runtime-provider/transport`
+no longer exists. Import
+`github.com/orz-i/Gaoge-Agent-Runtime/go/provider-transport` instead and require
+that independent module at an explicitly reviewed commit or published version.
+There is no alias, forwarding package or second copy. The original encoders,
+stream parsers, media operations and their fixtures are moved without changing
+wire semantics. This is not a service endpoint change or a persisted schema
+migration.
+
+The independent module has its own `go/provider-transport/VERSION` and future
+`go/provider-transport/v<version>` tags; Runtime root/module tags do not release
+it. Its initial `v0.1.0-beta.1` is unreleased. The SDK's OpenAI/Anthropic
+`model.Client` adapters remain in `agent-runtime-provider`; they are distinct
+from this host-neutral transport. A Gateway consumer must remove its old SDK
+requirement after updating imports and validating its entire dependency graph.
+Pinning the old SDK indefinitely is not the extraction's completion condition.
+
+Use `make provider-transport-check` for isolated-source tests and a clean public
+consumer. After pushing a candidate, use
+`node scripts/check-provider-transport.mjs --revision=<full SHA>` to resolve the
+remote module without any filesystem replacement. `--published` requires the
+independent tag to exist; it is not a local build substitute. The separately
+versioned module still requires Host network policy, authorization, media
+materialization, billing and original-effect reconciliation. See
+[ADR 0019](adr/0019-independent-provider-transport.md).
+
 ## 2026-11-17 — Remove Runtime Role catalog and unify Host-selected Agent delegation
 
 **Breaking Go/HTTP/TypeScript and sealed Config contract:** Harness no longer
