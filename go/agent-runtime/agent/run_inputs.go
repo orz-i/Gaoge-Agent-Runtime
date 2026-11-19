@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"sync"
 
@@ -14,6 +15,9 @@ import (
 const runInputBatchLimit = 16
 const runInputTextLimit = 16 << 10
 const runInputBatchBytes = 64 << 10
+
+// ErrInputQueueFull describes Host queue capacity, not an exhausted Run budget.
+var ErrInputQueueFull = errors.New("agent Host input queue is full")
 
 // RunInput is authenticated Host user input, never a system instruction, Tool
 // result, approval, model selection or permission grant. Sequence is assigned
@@ -27,7 +31,8 @@ type RunInput struct {
 // RunInputSource is a trusted, read-only Host input log. ReadRunInputs must
 // honor ctx, return contiguous records after the cursor, respect both the count
 // and 64 KiB batch bounds, and never dispatch external effects. The Host owns
-// authentication, retention and durable storage. BindingID is immutable.
+// authentication, retention and durable storage. BindingID is immutable and
+// nonsecret; it is an identity label, not a credential.
 type RunInputSource interface {
 	BindingID() string
 	ReadRunInputs(context.Context, kernel.Run, uint64, int) ([]RunInput, error)
@@ -151,7 +156,7 @@ func (queue *MemoryRunInputs) Submit(ctx context.Context, run kernel.Run, id, te
 		}
 	}
 	if queue.bytes+len(text) > 1<<20 || len(queue.logs[scope]) >= 256 || len(queue.logs) >= 256 && len(queue.logs[scope]) == 0 {
-		return RunInput{}, ErrBudgetExceeded
+		return RunInput{}, ErrInputQueueFull
 	}
 	input.Sequence = uint64(len(queue.logs[scope])) + 1
 	queue.logs[scope] = append(queue.logs[scope], input)

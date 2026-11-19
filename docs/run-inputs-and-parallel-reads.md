@@ -41,7 +41,7 @@ carry it into a new Host Turn. Do not tell the UI that queue acceptance means th
 Agent acted on it. To stop currently executing work, use the existing Cancel
 operation; steering does not undo effects or interrupt an already admitted batch.
 
-The source binding ID is frozen into each new Run. A changed or missing source
+The nonsecret source binding ID is frozen into each new Run. A changed or missing source
 fails closed before a new model invocation. Old Runs without a binding do not
 silently enable a new input source at restart. A trusted source must keep IDs,
 text and contiguous sequence immutable, return at most 16 records/64 KiB per
@@ -49,6 +49,9 @@ read, honor cancellation and never issue external effects. Each text is at most
 16 KiB. The Memory example is scoped by Run/Actor/Thread, idempotent, capped at
 1 MiB of text and 256 records per scope; **it is not process-loss durable**.
 Losing already-consumed Memory history is an error, not an empty successful read.
+Capacity rejection is `ErrInputQueueFull`, not evidence that the Run's execution
+budget was consumed. Submission does not start a worker or wake an approval or
+budget pause; existing authorized continuation and approval controls still apply.
 
 For durable queue delivery, implement the same read-only port over Host storage
 and retain records for the Run's recovery lifetime. Preserve these new user

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -244,5 +245,24 @@ func TestRunInputCursorSurvivesRunnerRecreationWithoutRedelivery(t *testing.T) {
 	view, viewErr := agent.ViewState(completed)
 	if err != nil || viewErr != nil || completed.Run.Status != kernel.RunStatusCompleted || calls != 2 || view.InputCursor != 1 {
 		t.Fatalf("input recovery failed: %v viewErr=%v status=%s calls=%d cursor=%d", err, viewErr, completed.Run.Status, calls, view.InputCursor)
+	}
+}
+
+func TestRunInputQueueCapacityIsNotAConsumedRunBudget(t *testing.T) {
+	queue, _ := agent.NewMemoryRunInputs("inputs-v1")
+	run := kernel.Run{ID: "run", Kind: agent.RunKind, Status: kernel.RunStatusRunning,
+		Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "owner"}, Thread: kernel.ThreadRef{Kind: "chat", ID: "thread"}}
+	text := strings.Repeat("x", 16<<10)
+	for index := range 64 {
+		if _, err := queue.Submit(t.Context(), run, fmt.Sprintf("id-%d", index), text); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := queue.Submit(t.Context(), run, "overflow", "next"); !errors.Is(err, agent.ErrInputQueueFull) || errors.Is(err, agent.ErrBudgetExceeded) {
+		t.Fatalf("queue capacity was confused with Run usage: %v", err)
+	}
+	items, err := queue.ReadRunInputs(t.Context(), run, 0, 16)
+	if err != nil || len(items) != 4 {
+		t.Fatalf("source exceeded its 64 KiB batch bound: count=%d err=%v", len(items), err)
 	}
 }

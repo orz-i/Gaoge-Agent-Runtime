@@ -33,7 +33,8 @@ call; unchanged already-dispatched request; stale-final-answer continuation;
 scoped/idempotent queueing; terminal submission refusal; lost Memory history;
 hard model-limit preservation; unknown Tool outcome preservation; changed source
 binding; Runner reconstruction without duplicate delivery; malformed/gapped,
-duplicated and oversized batches; and the same behavior through bounded Harness
+duplicated and oversized batches; queue-capacity classification distinct from
+Run execution budgets; and the same behavior through bounded Harness
 Context without rereading the Host transcript or creating another Turn.
 
 The task gate also runs the existing three-child admission/restart/receipt test.
@@ -53,6 +54,9 @@ own per-call multi-in-flight receipt/unknown-outcome/cancellation fault matrix.
   it is not silently promoted into complete certification of this extension.
 - Long-history allocation results and the correction to the initial retention
   hypothesis are in the separate projection audit.
+- Provider adapter, Handoff, Context, MCP and A2A package tests also passed; the
+  original synthetic calibration still completed 40/40 with 160 fixture Model
+  and 120 Tool calls. This remains mechanics evidence, not a live quality score.
 
 Self-review only, not an independent audit. Final combined PR #131 heads and
 required PR Head CI must be revalidated; earlier merge-tree evidence is pinned
