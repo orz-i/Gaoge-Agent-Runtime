@@ -32,7 +32,7 @@ budget accounting and historical opaque custody are not discarded or upgraded.
    managed successor handoff. Unknown completion, active grants, source/owner
    mismatch and ambiguous historical frontiers still block. The original ACK
    identity remains replayable without authority over any later owner/state.
-4. **Native SQLite parity and schema v8**. SQLite implements both prepared and
+4. **Native SQLite parity and schema v8** (`d0a77aaa`). SQLite implements both prepared and
    owned Root settlement interfaces with the same predicate and transaction
    boundary as Memory/PostgreSQL. Ordinary and managed physical admission
    persist the last physical epoch separately from lease churn. The complete
@@ -77,5 +77,13 @@ RunRelations. Native SQLite cases always use actual private on-disk databases.
   iterations against isolated PostgreSQL 16.16 alongside Memory/native SQLite.
 - Workspace formatting, vet, golangci-lint and isolated-module tidy checks pass;
   the native SQLite test dependency and its transitive module sums are explicit.
-- Full quality, real PostgreSQL/Redis integration and new-commit CI remain the
-  final push gates. No product repository or SDK pin is changed by this work.
+- Full `make check-no-race` passes, including isolated-module tidy, release
+  consumers and examples. The dependent Provider/HTTP/A2A/Redis/MCP/OTel/
+  transport recursive race suites also pass.
+- `make integration-test` passes against private PostgreSQL 16.16 and Redis
+  8.10.3 instances, including the expanded lifecycle matrix and continuation
+  E2E suite. Both temporary service instances were shut down after validation.
+- All six re-audit scenarios (with a production-complete Waiting envelope)
+  pass with `-race -count=3` against real PostgreSQL, Memory and native SQLite.
+- New-commit CI is still the authoritative remote gate, not an inherited green
+  result from the reviewed baseline. No product repository or SDK pin is changed.

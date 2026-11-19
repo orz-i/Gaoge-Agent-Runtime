@@ -42,12 +42,18 @@ Attempts when a provider reuses the same Tool Call ID.
 - PostgreSQL `Migrate` adds callback-custody and physical-admission watermark
   columns with unknown/zero defaults. No historical custody is backfilled from
   a new Runner's configuration.
-- Native SQLite schema is now v7. Existing v6 databases require explicit
+- The initial governance introduced native SQLite schema v7. Existing v6 databases require explicit
   `MigrateV6ToV7` with old writers stopped and a retained backup. Older schemas
   complete the existing explicit migrations first. All original marks,
   callback hashes, retirement payloads and managed authority are preserved.
 - Empty legacy callback custody remains observable/recoverable under its old
   receipt contract, but is not newly certified as safe deferred-control custody.
+
+The subsequent re-audit governance upgrades SQLite to **v8**, implements its
+complete prepared/owned settlement capability, and closes additional Attempt
+admission, capacity-wait history and pre-ACK successor gaps. See
+[second-audit governance](2026-11-19-pr131-second-audit-governance.md) for the
+current contract, explicit `MigrateV7ToV8` boundary and final validation.
 - Root transitions use the existing append-only Harness Item ledger. Public
   Item append cannot mint the reserved transition namespace; only the original
   Store Retry transaction can create that ancestry authority.
