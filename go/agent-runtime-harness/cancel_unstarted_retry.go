@@ -67,7 +67,14 @@ func (runner *Runner) unstartedRetryNoEffect(
 	if err != nil {
 		return true, err
 	}
-	if len(invocations) != 1 || invocations[0].ID != original.ID {
+	children := make([]Invocation, 0, len(invocations))
+	for _, owner := range invocations {
+		if owner.ID != original.ID {
+			children = append(children, owner)
+		}
+	}
+	if RetryChildEffectFence(children, items, original) != nil ||
+		!validUnstartedRetryHistoricalChildren(original, children, items, ledger) {
 		return true, ErrConflict
 	}
 	if related, err := runner.relatedChildRunIDs(ctx, original.ExecutionRefID); err != nil {
@@ -75,11 +82,9 @@ func (runner *Runner) unstartedRetryNoEffect(
 	} else if len(related) != 0 {
 		return true, ErrConflict
 	}
-	if delegated, err := runner.delegatedRunIDs(ctx, turn.ID); err != nil {
-		return true, err
-	} else if len(delegated) != 0 {
-		return true, ErrConflict
-	}
+	// Historical Delegation Items are validated against immutable
+	// predecessor child Attempts above; a terminal predecessor is not a
+	// live descendant of this as-yet-unstarted replacement Run.
 	return true, nil
 }
 

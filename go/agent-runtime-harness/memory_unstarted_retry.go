@@ -42,13 +42,13 @@ func (store *MemoryStore) CancelUnstartedRootRetry(ctx context.Context, original
 			ledger = &loaded
 		}
 	}
-	descendants := 0
+	children := make([]Invocation, 0)
 	for _, candidate := range store.invocations {
 		if candidate.TurnID == turn.ID && candidate.ID != original.ID {
-			descendants++
+			children = append(children, candidate)
 		}
 	}
-	if !ValidUnstartedRetryCancellationEvidence(current, storedTurn, items, store.activeCancellationFenceLocked(turn.ID), ledger, descendants) {
+	if !ValidUnstartedRetryCancellationEvidence(current, storedTurn, items, store.activeCancellationFenceLocked(turn.ID), ledger, children) {
 		return Invocation{}, Turn{}, ErrConflict
 	}
 	now := time.Now().UTC()

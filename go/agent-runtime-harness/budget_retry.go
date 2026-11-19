@@ -53,12 +53,19 @@ func (runner *Runner) withAtomicRetryBudget(ctx context.Context, turn Turn, orig
 
 // AtomicRetryBudgetForStore returns true only for the exact original
 // Invocation/Attempt selected by the Harness Runner before its physical
-// terminal witness. Both Store implementations check this under their
-// original Turn lock and commit budget + Invocation together.
-func AtomicRetryBudgetForStore(ctx context.Context, original Invocation, nextRunID string) (bool, error) {
+// terminal witness. Both Store implementations recheck the original Turn's
+// immutable budget requirement and durable ledger under the same Turn lock:
+// a direct Store.RetryInvocation must not skip the accounting transaction.
+func AtomicRetryBudgetForStore(ctx context.Context, original Invocation, nextRunID string, budgetRequired bool) (bool, error) {
 	value, exists := ctx.Value(retryBudgetAdmissionKey{}).(retryBudgetAdmission)
 	if !exists {
+		if budgetRequired {
+			return false, ErrConflict
+		}
 		return false, nil
+	}
+	if !budgetRequired {
+		return false, ErrConflict
 	}
 	if value.turnID != original.TurnID || value.invocationID != original.ID ||
 		value.previousRunID != original.ExecutionRefID || value.nextRunID != nextRunID ||

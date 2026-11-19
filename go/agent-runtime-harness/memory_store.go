@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"slices"
 	"sort"
@@ -232,10 +233,28 @@ func (store *MemoryStore) RetryInvocation(
 	if owner := store.invocationExecutionRefs[nextExecutionRefID]; owner != "" && owner != current.ID {
 		return Invocation{}, ErrConflict
 	}
+	// The frozen Turn configuration and existing ledger are authoritative
+	// even when a privileged Store caller bypasses the Harness Runner.
+	// A direct Retry cannot rotate a budgeted Invocation without the
+	// original private admission and accounting in this same Store CAS.
+	budgetRequired := false
+	if config, exists := store.configs[rootTurn.ConfigSnapshotID]; exists {
+		if config.TurnID != current.TurnID {
+			return Invocation{}, ErrConflict
+		}
+		budgetRequired = config.SharedBudget != nil
+	}
+	if store.MemoryLedgerStore != nil {
+		if _, ledgerErr := store.LoadBudget(ctx, current.TurnID); ledgerErr == nil {
+			budgetRequired = true
+		} else if !errors.Is(ledgerErr, budget.ErrLedgerNotFound) {
+			return Invocation{}, ledgerErr
+		}
+	}
 	// This is the last fallible step under the original Turn lock. Budget
 	// admission and Attempt rotation must commit as one Memory operation;
 	// no external physical effect is authorized between the two writes.
-	atomicBudget, budgetErr := AtomicRetryBudgetForStore(ctx, current, nextExecutionRefID)
+	atomicBudget, budgetErr := AtomicRetryBudgetForStore(ctx, current, nextExecutionRefID, budgetRequired)
 	if budgetErr != nil {
 		return Invocation{}, budgetErr
 	}

@@ -45,8 +45,8 @@ func VerifiedUnstartedRetryCancellation(ctx context.Context, inv Invocation, tur
 // their original Turn lock. A physical grant on the new immutable execution
 // reference (even if a Host later claims it returned) forbids synthetic
 // no-effect cancellation. A prior-Run grant is historical and does not count.
-func ValidUnstartedRetryCancellationEvidence(inv Invocation, turn Turn, items []Item, hasActiveCancellation bool, ledger *budget.Ledger, descendants int) bool {
-	if !hasActiveCancellation || descendants != 0 ||
+func ValidUnstartedRetryCancellationEvidence(inv Invocation, turn Turn, items []Item, hasActiveCancellation bool, ledger *budget.Ledger, children []Invocation) bool {
+	if !hasActiveCancellation ||
 		inv.Status != InvocationAccepted || turn.Status != TurnRunning ||
 		inv.Attempt < 2 || inv.ID == "" || inv.ExecutionRefID == "" ||
 		inv.TurnID != turn.ID || inv.ParentItemID != "" || inv.ExecutionClass != ExecutionAgent {
@@ -59,11 +59,21 @@ func ValidUnstartedRetryCancellationEvidence(inv Invocation, turn Turn, items []
 			return false
 		}
 	}
+	// Retry and Cancel must use the same historical child proof. A child
+	// terminated under a prior immutable Attempt cannot block a new Root
+	// that never obtained physical execution; an active or ambiguous child
+	// still fences both operations.
+	if RetryChildEffectFence(children, items, inv) != nil {
+		return false
+	}
+	if !validUnstartedRetryHistoricalChildren(inv, children, items, ledger) {
+		return false
+	}
 	originalIntent := false
-	children := cancellationFenceReceipts(items)
+	fenceReceipts := cancellationFenceReceipts(items)
 	for _, item := range items {
 		if item.ParentItemID == CancellationFenceParentItemID && item.RunID == inv.ExecutionRefID &&
-			ValidCancellationFenceIntentAdmission(item) && !VerifiedCancellationFenceReceipt(item, children[item.ID]) {
+			ValidCancellationFenceIntentAdmission(item) && !VerifiedCancellationFenceReceipt(item, fenceReceipts[item.ID]) {
 			originalIntent = true
 		}
 		if item.ParentItemID == ExecutionDispatchParentItemID &&

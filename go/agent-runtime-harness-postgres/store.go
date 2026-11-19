@@ -302,10 +302,16 @@ func (store *Store) RetryInvocation(
 		if err := retryChildEffectFenceTx(tx, current.TurnID, current); err != nil {
 			return err
 		}
+		// Check BOTH the immutable frozen shared-budget request and the
+		// durable ledger under this original Turn lock. A Store caller with
+		// no Runner-bound budget witness cannot skip the accounting CAS.
+		budgetRequired, budgetErr := retryBudgetRequiredTx(ctx, tx, current.TurnID)
+		if budgetErr != nil {
+			return budgetErr
+		}
 		// Use the SAME original Turn transaction for shared budget admission
-		// and Attempt rotation. This also holds the SQL budget revision CAS;
-		// any later failure rolls both writes back, including lost responses.
-		atomicBudget, budgetErr := harness.AtomicRetryBudgetForStore(ctx, current, nextExecutionRefID)
+		// and Attempt rotation. Any later failure rolls both writes back.
+		atomicBudget, budgetErr := harness.AtomicRetryBudgetForStore(ctx, current, nextExecutionRefID, budgetRequired)
 		if budgetErr != nil {
 			return budgetErr
 		}

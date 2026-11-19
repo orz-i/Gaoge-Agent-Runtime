@@ -53,9 +53,17 @@ func (store *Store) CancelUnstartedRootRetry(ctx context.Context, original harne
 		if err != nil {
 			return err
 		}
-		var descendants int64
-		if err = tx.Model(&invocationRecord{}).Where("turn_id = ? AND id <> ?", turn.ID, original.ID).Count(&descendants).Error; err != nil {
+		var childRows []invocationRecord
+		if err = tx.Where("turn_id = ? AND id <> ?", turn.ID, original.ID).Find(&childRows).Error; err != nil {
 			return err
+		}
+		children := make([]harness.Invocation, 0, len(childRows))
+		for _, row := range childRows {
+			child, decodeErr := invocationFromRecord(row)
+			if decodeErr != nil {
+				return decodeErr
+			}
+			children = append(children, child)
 		}
 		// Include global receipt children so a contradictory foreign-Turn
 		// receipt can never make a physical dispatch appear absent.
@@ -106,7 +114,7 @@ func (store *Store) CancelUnstartedRootRetry(ctx context.Context, original harne
 		if readErr == nil {
 			ledger = &loaded
 		}
-		if !harness.ValidUnstartedRetryCancellationEvidence(current, actualTurn, items, active, ledger, int(descendants)) {
+		if !harness.ValidUnstartedRetryCancellationEvidence(current, actualTurn, items, active, ledger, children) {
 			return harness.ErrConflict
 		}
 		now := time.Now().UTC()

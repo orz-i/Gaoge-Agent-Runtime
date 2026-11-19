@@ -2,6 +2,8 @@ package harness_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"testing"
 	"time"
@@ -54,6 +56,15 @@ func (s *rootRetryLostACKStore) RetryInvocation(
 }
 
 func TestRootRetryCommittedAckLossCancelsUnstartedAttemptAndRecovers(t *testing.T) {
+	testRootRetryCommittedAckLoss(t, false)
+}
+
+func TestRootRetryCommittedAckLossWithHistoricalTerminalChild(t *testing.T) {
+	testRootRetryCommittedAckLoss(t, true)
+}
+
+func testRootRetryCommittedAckLoss(t *testing.T, historicalTerminalChild bool) {
+	t.Helper()
 	raw := harness.NewMemoryStore()
 	store := &rootRetryLostACKStore{Store: raw, LedgerStore: raw, failOnce: true}
 	rt, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
@@ -116,6 +127,26 @@ func TestRootRetryCommittedAckLossCancelsUnstartedAttemptAndRecovers(t *testing.
 	first, err := runner.StartAgentTurn(t.Context(), request)
 	if err != nil || first.Turn.Status != harness.TurnWaitingInput {
 		t.Fatalf("original input wait: %+v %v", first.Turn, err)
+	}
+	if historicalTerminalChild {
+		rootBefore, rootExists := harness.TopLevelInvocation(first)
+		if !rootExists {
+			t.Fatal("missing original root")
+		}
+		childInput := []byte(`{"goal":"finished during original Attempt"}`)
+		digest := sha256.Sum256(childInput)
+		now := fixedClock{}.Now()
+		child := harness.Invocation{
+			ID: "old-terminal-child", TurnID: rootBefore.TurnID,
+			ParentItemID: "original-parent-item", CapabilityKey: harness.CapabilityAgent,
+			ExecutionClass: harness.ExecutionAgent, ExecutionRefID: "old-child-run",
+			Input: childInput, InputHash: hex.EncodeToString(digest[:]),
+			Status: harness.InvocationCompleted, Attempt: 1, Revision: 1,
+			CreatedAt: now, UpdatedAt: now, OutputRefs: []harness.HostRef{},
+		}
+		if _, fresh, createErr := raw.CreateInvocation(t.Context(), child); createErr != nil || !fresh {
+			t.Fatalf("historical terminal child: %v fresh=%t", createErr, fresh)
+		}
 	}
 	cancelled, err := runner.Cancel(t.Context(), first.Turn.ID, "stop before tool")
 	if err != nil || cancelled.Turn.Status != harness.TurnCancelled {
