@@ -44,3 +44,23 @@ An administrator performs the cutover only after this PR is merged:
 Do not use top-level path filtering to skip required workflows, and do not
 rename existing required checks during this cutover. Rollback restores the old
 CI trigger/validator before removing the independent required check.
+
+## Static checks and the required quality gate
+
+`make check`, `make check-no-race`, and the release gate retain every pre-P0
+target. Their static targets now run before behavioral tests. CI exposes
+`make check-static` and `make check-execution-no-race` as separate steps on the
+same runner, so a lint/type error is visible without waiting for full unit tests.
+No additional Go cache or runner is introduced. Do not run tidy and tests
+concurrently in the same checkout: tidy temporarily edits module files.
+
+The existing **Unit, race, lint, and release consumers** required-check name is
+unchanged. Its `always()` aggregator now also requires coverage, vulnerability
+audit, Windows command safety, and real-engine integration to succeed. Collector
+E2E remains push-only: its skipped result is accepted only on a PR, and it must
+succeed on main pushes. Missing, failed, cancelled, unexpectedly skipped, or
+unrecognized dependencies fail closed. CodeQL, dependency review, and the
+independently required integration check are unchanged.
+
+CI jobs have explicit timeouts (3–30 minutes, depending on the job). These are
+hang bounds, not performance assertions or reasons to retry a failed test.

@@ -19,18 +19,23 @@ jobs:
   quality:
     name: Unit, race, lint, and release consumers
     if: ${{ always() }}
-    needs: [quality-main, race]
+    needs: [quality-main, race, release-commands-windows, coverage, security, integration, observability]
     runs-on: ubuntu-26.04
+    timeout-minutes: 3
     steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
       - name: Require all quality checks to pass
         env:
-          QUALITY_RESULT: ${{ needs.quality-main.result }}
-          RACE_RESULT: ${{ needs.race.result }}
-        run: test "$QUALITY_RESULT" = success && test "$RACE_RESULT" = success
+          CI_NEEDS_JSON: ${{ toJSON(needs) }}
+        run: node scripts/check-ci-results.mjs
 
   quality-main:
     name: Unit, lint, and release consumers
     runs-on: ubuntu-26.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
         with:
@@ -72,12 +77,16 @@ jobs:
       - name: Add Go linter to PATH
         run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      - name: Run release-quality gate
-        run: make check-no-race
+      - name: Run static checks before behavioral tests
+        run: make check-static
+
+      - name: Run unit and release-consumer checks
+        run: make check-execution-no-race
 
   race:
     name: Go race detector
     runs-on: ubuntu-26.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-go
@@ -92,6 +101,7 @@ jobs:
   release-commands-windows:
     name: Windows release command safety
     runs-on: windows-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -106,6 +116,7 @@ jobs:
   coverage:
     name: Coverage gates
     runs-on: ubuntu-26.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-go
@@ -136,6 +147,7 @@ jobs:
   security:
     name: Vulnerability audit
     runs-on: ubuntu-26.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-go
@@ -153,6 +165,7 @@ jobs:
   integration:
     name: PostgreSQL and Redis integration
     runs-on: ubuntu-26.04
+    timeout-minutes: 20
     services:
       postgres:
         image: postgres:16-alpine
@@ -191,6 +204,7 @@ jobs:
     name: OpenTelemetry Collector E2E
     if: github.event_name == 'push'
     runs-on: ubuntu-26.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
 
