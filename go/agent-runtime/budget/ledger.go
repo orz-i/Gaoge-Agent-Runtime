@@ -165,13 +165,18 @@ func (coordinator Coordinator) RegisterRun(ctx context.Context, scopeID, runID s
 			}
 			return nil
 		}
-		if ledger.cancelled(runID) || (binding.ParentRunID != "" && ledger.cancelled(binding.ParentRunID)) {
-			return ErrExhausted
-		}
 		if binding.ParentRunID != "" {
 			if _, ok := ledger.Runs[binding.ParentRunID]; !ok {
 				return ErrLedgerConflict
 			}
+		}
+		// Validate the prospective immutable ancestry BEFORE registering or
+		// charging it. An unregistered child cannot discover its Retry grant
+		// by following the old Runs map, nor may it skip its own revocation.
+		if ledger.runCancelled(runID, &binding) {
+			return ErrExhausted
+		}
+		if binding.ParentRunID != "" {
 			if ledger.FinishedRuns[binding.ParentRunID] {
 				return ErrExhausted
 			}
@@ -241,7 +246,7 @@ func (coordinator Coordinator) Reserve(ctx context.Context, scopeID string, requ
 			}
 			request = existing
 		}
-		if ledger.cancelled(request.RunID) {
+		if ledger.RunCancelled(request.RunID) {
 			return ErrExhausted
 		}
 		delete(ledger.Reservations, request.ID)
@@ -353,6 +358,16 @@ func (coordinator Coordinator) Release(ctx context.Context, scopeID, id string) 
 func (coordinator Coordinator) Cancel(ctx context.Context, scopeID string) (Ledger, error) {
 	return coordinator.update(ctx, scopeID, func(ledger *Ledger) error {
 		ledger.Cancelled = true
+		// The immutable global closure predates Root Retry generations. A
+		// scope Cancel must also revoke the CURRENT admitted generation.
+		for runID, grant := range ledger.RootRetries {
+			if grant.Active {
+				if ledger.CancelledRuns == nil {
+					ledger.CancelledRuns = map[string]bool{}
+				}
+				ledger.CancelledRuns[runID] = true
+			}
+		}
 		for id, value := range ledger.Reservations {
 			if !value.Dispatched && value.Status != ReservationSettled {
 				value.Status, value.Active = ReservationReleased, false
@@ -383,29 +398,59 @@ func (coordinator Coordinator) CancelRun(ctx context.Context, scopeID, runID str
 	})
 }
 
-func (ledger Ledger) cancelled(runID string) bool {
-	// Legacy whole-Turn Cancel remains an immutable closure of the original
-	// generation. A subsequent, CAS-confirmed Retry has a *different* Root
-	// Run ID; only that exact Root and its descendants may cross the closure.
-	if ledger.Cancelled {
-		authorized := false
-		for current := runID; current != ""; current = ledger.Runs[current].ParentRunID {
-			if grant, ok := ledger.RootRetries[current]; ok && grant.Active {
-				authorized = true
-				break
-			}
-		}
-		if !authorized {
+// RunCancelled is the single cancellation predicate for admission, cleanup,
+// recovery and projection. The empty ID observes the active Root generation;
+// Cancelled itself remains the immutable historical first-generation closure.
+func (ledger Ledger) RunCancelled(runID string) bool {
+	if runID == "" {
+		root, valid := ledger.activeRetryRoot()
+		if !valid {
 			return true
 		}
+		if root == "" {
+			return ledger.Cancelled
+		}
+		runID = root
 	}
-	for runID != "" {
-		if ledger.CancelledRuns[runID] {
+	return ledger.runCancelled(runID, nil)
+}
+
+func (ledger Ledger) activeRetryRoot() (string, bool) {
+	root := ""
+	for id, grant := range ledger.RootRetries {
+		if !grant.Active {
+			continue
+		}
+		if root != "" || id == "" || grant.InvocationID == "" || grant.Attempt < 2 {
+			return "", false
+		}
+		root = id
+	}
+	return root, true
+}
+
+func (ledger Ledger) runCancelled(runID string, proposed *RunBudget) bool {
+	activeRoot, valid := ledger.activeRetryRoot()
+	if !valid {
+		return true
+	}
+	authorized := false
+	seen := map[string]bool{}
+	for current := runID; current != ""; {
+		if seen[current] || ledger.CancelledRuns[current] {
 			return true
 		}
-		runID = ledger.Runs[runID].ParentRunID
+		seen[current] = true
+		if current == activeRoot {
+			authorized = true
+		}
+		binding := ledger.Runs[current]
+		if current == runID && proposed != nil {
+			binding = *proposed
+		}
+		current = binding.ParentRunID
 	}
-	return false
+	return ledger.Cancelled && !authorized
 }
 
 func (coordinator Coordinator) changeReservation(ctx context.Context, scopeID, id string, change func(*Reservation) error) (Ledger, error) {
@@ -479,23 +524,7 @@ func (ledger Ledger) admit(runID string, requested Usage, active bool) (Dimensio
 // View computes a projection from durable reservations, optionally restricted
 // to a role subtree. It never uses browser- or process-local counters.
 func (ledger Ledger) View(runID string) LedgerView {
-	scopeCancelled := ledger.cancelled(runID)
-	if runID == "" && ledger.Cancelled {
-		// The global historical closure remains immutable while the public
-		// Turn view reflects only its most recent explicitly admitted Root.
-		// Root-level views still independently fence old cancelled generations.
-		latest := RootRetryGrant{}
-		latestID := ""
-		for id, grant := range ledger.RootRetries {
-			if grant.Active && grant.Attempt > latest.Attempt {
-				latest, latestID = grant, id
-			}
-		}
-		if latestID != "" && !ledger.CancelledRuns[latestID] {
-			scopeCancelled = false
-		}
-	}
-	view := LedgerView{ScopeID: ledger.ID, Revision: ledger.Revision, Limits: ledger.Limits, Cancelled: scopeCancelled}
+	view := LedgerView{ScopeID: ledger.ID, Revision: ledger.Revision, Limits: ledger.Limits, Cancelled: ledger.RunCancelled(runID)}
 	if runID != "" {
 		view.Limits = ledger.Runs[runID].Limits
 	}

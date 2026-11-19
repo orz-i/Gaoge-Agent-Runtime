@@ -89,7 +89,7 @@ func (runner *Runner) resumeDeferredChildGrantCancellation(
 		return Item{}, ErrConflict
 	}
 	ledger, err := runner.loadTurnBudget(ctx, turn)
-	if err != nil || ledger != nil && !ledger.Cancelled {
+	if err != nil || ledger != nil && !ledger.RunCancelled(runID) {
 		return Item{}, errors.Join(ErrConflict, err)
 	}
 	var candidate Item
@@ -141,7 +141,7 @@ func (runner *Runner) cleanupReturnedRootChildren(ctx context.Context, turn Turn
 		return false, err
 	}
 	ledger, err := runner.loadTurnBudget(ctx, turn)
-	if err != nil || ledger != nil && !ledger.Cancelled {
+	if err != nil || ledger != nil && !ledger.RunCancelled(current.Run.ID) {
 		return false, errors.Join(ErrConflict, err)
 	}
 	scope, err := native.RootDeferredCleanupEligibility(ctx, current.Run.ID, current.Run.Revision)

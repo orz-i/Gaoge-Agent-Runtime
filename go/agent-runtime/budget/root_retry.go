@@ -15,6 +15,9 @@ func (coordinator Coordinator) CancelRoot(ctx context.Context, scopeID, rootRunI
 		return Ledger{}, ErrInvalidUsage
 	}
 	return coordinator.update(ctx, scopeID, func(l *Ledger) error {
+		if binding, exists := l.Runs[rootRunID]; exists && binding.ParentRunID != "" {
+			return ErrLedgerConflict
+		}
 		grant, retryRoot := l.RootRetries[rootRunID]
 		if _, ok := l.Runs[rootRunID]; !ok && (!retryRoot || !grant.Active) {
 			return ErrLedgerNotFound
