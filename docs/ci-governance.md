@@ -1,9 +1,11 @@
-# CI governance: P0 and P1
+# CI governance: P0, P1, and P2 shadow analysis
 
 Both phases preserve the complete validation scope. P0 established safe gates
 and timing; P1 below schedules full suites in three shards and reuses coverage
 execution as ordinary unit validation. Neither introduces affected-only tests,
 test-result caching, a new development branch, or weaker release gates.
+P2 adds an advisory impact report only; it deliberately does not enable
+affected-only execution or change any existing job's conditions.
 
 The pre-change sample (100 CI runs, November 13–19, 2026) contained 44 successful
 PR runs with a 14m50s median wall time. In ten recent successful PRs, median job
@@ -200,3 +202,94 @@ To roll back scheduling, restore P0's unsharded workflow and ordinary CI target
 invocations together. Do not drop the coverage union/required dependencies while
 leaving out ordinary tests. The staged description-check cutover above remains
 unchanged and is not activated by P1.
+
+## P2: impact analysis in shadow mode
+
+P1's accepted [run 44539358109](https://github.com/orz-i/Gaoge-Agent-Runtime/actions/runs/44539358109)
+completed in 6m42s versus P0's 16m51s. Accumulated CI runner time was 41m54s
+versus 46m32s. Both contained all 13 coverage/race modules and 45,193 statements
+in the Go coverage denominator. This is a two-run comparison, not a long-term
+performance guarantee. P2 does not claim additional savings while shadow-only.
+
+The **CI impact analysis (shadow)** job runs alongside, not ahead of, P1's full
+jobs. It needs only checkout, Node, and read-only repository access. It publishes
+`plan.json`, a Markdown summary, and a seven-day artifact. The existing required
+quality aggregator also requires this evidence job to succeed. Classification
+uncertainty produces an explicit full recommendation, not an empty successful
+selection; tests/report-upload failures are not ignored.
+
+### Advisory scope and conservative fallbacks
+
+`scripts/ci-impact-policy.mjs` reports candidate module/consumer boundaries:
+
+| Change | Shadow recommendation |
+| --- | --- |
+| Ordinary Markdown docs | Metadata and protected checks; no focused Go candidates |
+| TS source, packed-client README, Node lockfile | TS/static/packed-consumer candidates |
+| Provider Transport source | Independent module and its consumer |
+| Provider source | Provider plus the nested task-agent reverse consumer |
+| Harness source | Harness, task-agent, Harness-Postgres, HTTP, detached continuation E2E, TS wire consumers |
+| OTel adapter source | OTel plus detached OTel E2E |
+| Core/conformance, persistence, continuation E2E | Full |
+| Shared contracts, executable A2A docs, audit code fixtures | Full |
+| CI/actions/scripts/global tooling, dependency/release metadata | Full |
+| Unknown paths/statuses or unavailable/ambiguous analysis | Full |
+
+Module READMEs are assigned to their owning module, not generic docs. The
+packed-client README remains a TypeScript consumer input. Any mixed change
+containing a full-risk path recommends full. Main pushes always recommend full.
+This taxonomy is deliberately conservative and not a declaration that an
+unexecuted test would pass.
+
+The collector uses full commit SHAs from the event and verifies the actual
+checkout. It finds a unique merge base, then uses Git's NUL-delimited
+`--name-status --no-renames` diff with external diff/text conversion disabled.
+A rename is represented by both the old deletion and new addition. Deleted
+files stay in the analysis, and no GitHub API file-count/pagination cap can
+truncate the change set. Missing history, malformed paths, ambiguous bases,
+truncated diffs and unreadable module snapshots all fall back to full. Raw Git
+errors, PR bodies, source contents, environment values and credentials are not
+copied into the report.
+
+The dependency graph over-approximates internal `require`/`replace` identities
+from every workspace module plus **both detached E2E modules**. It unions graphs
+from the merge base, event base, head and actual checkout; removing an old edge
+cannot hide its reverse consumers. The longest module path owns a file, so the
+nested task-agent module is not mistaken for Harness itself. Unknown identities
+or incomplete graphs fall back to full. Existing full tidy/vet/contract checks
+remain authoritative; this declared-module graph is not a whole-program proof
+about dynamic behavior or future cross-language contracts.
+
+### Shadow is not an activation switch
+
+Every plan is explicitly `mode: shadow`, `execution: full`. The job exports **no
+workflow outputs**, no skip flags, and no matrix. No validation job consumes its
+report in an `if` or a dynamic matrix. The full 13-module coverage union, 70%
+floor, full race matrices, real-engine suites, security, CodeQL, dependency
+review, consumers and existing Collector trigger policy remain unchanged.
+
+In particular, focused candidates cannot be substituted for the global coverage
+denominator. The plan always states `complete-13-module-union-required`.
+There is no `--apply`, repository variable, label, or environment toggle that
+silently enables affected-only validation in this phase.
+
+Review shadow reports against actual full results across representative docs,
+TS, independent-module, Harness and high-risk changes before proposing a
+separate activation PR. Any failure outside a suggested scope is a potential
+false negative: retain full execution and fix the model, rather than waiving
+the failing check. Activation must separately define legal skips, mandatory
+fail-closed aggregation, contract ownership and complete coverage semantics.
+Current CI/tooling changes correctly recommend full and are not evidence that
+all low-risk classifications have been field-validated.
+
+Local reproduction requires the analyzed head to be checked out, plus full SHA
+arguments (not branch names). It only reads Git and writes ignored evidence:
+
+```bash
+node scripts/ci-impact.mjs --base <full-base-SHA> --head <full-head-SHA>
+node --test scripts/ci-impact.test.mjs
+```
+
+P2 shadow does not alter clocks, lease/deadline assertions, or cross-process
+store tests to manufacture faster results. Slow-test semantics and paid live
+Provider quality runs remain outside this change.

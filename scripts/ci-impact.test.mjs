@@ -169,7 +169,8 @@ test("event loading keeps only commit context and offers no skip/apply flag", ()
 
 test("real Git rename/deletion analysis includes both old and new owners", (t) => {
   const directory = temporary(t);
-  const git = (...args) => execFileSync("git", ["-c", "user.name=CI Fixture", "-c", "user.email=ci@example.invalid", ...args],
+  const git = (...args) => execFileSync("git", ["-c", "user.name=CI Fixture", "-c", "user.email=ci@example.invalid",
+    "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgSign=false", ...args],
     { cwd: directory, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
   git("init", "-q");
   for (const module of allGoModules) {
@@ -207,4 +208,21 @@ test("CLI persists an explicit full fallback on missing context, without reading
   assert.equal(plan.recommendation, "full");
   assert.doesNotMatch(output, /do-not-report-this/u);
   assert.match(readFileSync(path.join(directory, "job-summary.md"), "utf8"), /No job or test is skipped/u);
+});
+
+test("shadow CI publishes evidence but has no outputs or validation-job consumers; existing full matrices and coverage remain", () => {
+  const ci = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
+  const job = ci.split("\n  impact:\n")[1].split("\n  quality-main:\n")[0];
+  assert.match(job, /name: CI impact analysis \(shadow\)/u);
+  assert.match(job, /fetch-depth: 0/u);
+  assert.match(job, /run: node scripts\/ci-impact\.mjs/u);
+  assert.match(job, /retention-days: 7/u);
+  assert.match(job, /if-no-files-found: error/u);
+  assert.doesNotMatch(job, /outputs:|GITHUB_OUTPUT|continue-on-error|contents: write|pull_request_target|pnpm install|setup-go/u);
+  assert.doesNotMatch(ci, /needs\.impact\.outputs|fromJSON\([^\n]*impact|CI_IMPACT_MODE|paths-ignore:|\n\s+paths:/u);
+  assert.match(ci, /needs: \[impact, quality-main, race,/u);
+  assert.equal([...ci.matchAll(/shard: \[core, sqlite, adapters\]/gu)].length, 2);
+  assert.match(ci, /merge-go-coverage\.mjs coverage\/go-shards/u);
+  const makefile = readFileSync(new URL("../Makefile", import.meta.url), "utf8");
+  assert.match(makefile, /node --test[^\n]*scripts\/ci-impact\.test\.mjs/u);
 });

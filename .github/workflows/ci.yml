@@ -22,7 +22,7 @@ jobs:
   quality:
     name: Unit, race, lint, and release consumers
     if: ${{ always() }}
-    needs: [quality-main, race, release-commands-windows, coverage-go, coverage, security, integration, observability]
+    needs: [impact, quality-main, race, release-commands-windows, coverage-go, coverage, security, integration, observability]
     runs-on: ubuntu-26.04
     timeout-minutes: 3
     steps:
@@ -34,6 +34,34 @@ jobs:
         env:
           CI_NEEDS_JSON: ${{ toJSON(needs) }}
         run: node scripts/check-ci-results.mjs
+
+  impact:
+    name: CI impact analysis (shadow)
+    runs-on: ubuntu-26.04
+    timeout-minutes: 3
+    permissions:
+      contents: read
+    env:
+      CI_IMPACT_DIRECTORY: ${{ github.workspace }}/artifacts/ci-impact
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Test conservative impact policy
+        run: node --test scripts/ci-impact.test.mjs
+      - name: Report advisory scope without skipping any checks
+        run: node scripts/ci-impact.mjs
+      - name: Upload shadow impact evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-impact-shadow-${{ github.run_attempt }}
+          path: ${{ env.CI_IMPACT_DIRECTORY }}
+          retention-days: 7
+          if-no-files-found: error
 
   quality-main:
     name: Static, smoke, and release consumers
