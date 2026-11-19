@@ -9,7 +9,12 @@ import (
 var (
 	_ kernel.PreparedRootSettlementStore = (*Store)(nil)
 	_ kernel.OwnedRootSettlementStore    = (*Store)(nil)
+	_ kernel.ReturnedRootSettlementStore = (*Store)(nil)
 )
+
+func (s *Store) VerifyReturnedRootSettlement(ctx context.Context, expected kernel.Snapshot) error {
+	return s.verifyRootSettlement(ctx, expected, false, true)
+}
 
 func (s *Store) VerifyPreparedRootSettlement(ctx context.Context, expected kernel.Snapshot) error {
 	return s.verifyRootSettlement(ctx, expected, true)
@@ -22,7 +27,7 @@ func (s *Store) VerifyOwnedRootSettlement(ctx context.Context, expected kernel.S
 // SQLite's immediate writer transaction is the same authority boundary used by
 // physical admission, retirement, execution takeover and Cancel. TTL alone
 // never supplies a callback return or upgrades historical Host custody.
-func (s *Store) verifyRootSettlement(ctx context.Context, expected kernel.Snapshot, prepared bool) error {
+func (s *Store) verifyRootSettlement(ctx context.Context, expected kernel.Snapshot, prepared bool, returned ...bool) error {
 	if s == nil || s.db == nil || ctx == nil || expected.Run.ID == "" {
 		return kernel.ErrInvalidInput
 	}
@@ -46,6 +51,7 @@ func (s *Store) verifyRootSettlement(ctx context.Context, expected kernel.Snapsh
 		return kernel.ErrExecutionConflict
 	}
 	epoch := lease.Epoch
+	originalLease := lease
 	now, err := sqliteExecutionNow(ctx, tx)
 	if err != nil {
 		return err
@@ -82,6 +88,17 @@ func (s *Store) verifyRootSettlement(ctx context.Context, expected kernel.Snapsh
 			return err
 		}
 		receipts = append(receipts, r)
+	}
+	if len(returned) == 1 && returned[0] {
+		grant, _, err := loadPhysicalGrant(ctx, tx, expected.Run.ID)
+		if err != nil {
+			return err
+		}
+		completion, err := loadOwnedCallbackReturn(ctx, tx, grant)
+		if err != nil {
+			return err
+		}
+		return kernel.VerifyReturnedRootSettlementFacts(expected, current, epoch, physicalEpoch, originalLease, grant, completion, receipts)
 	}
 	var active int
 	if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM runtime_child_effect_grants WHERE parent_run_id=? OR child_run_id=?`, expected.Run.ID, expected.Run.ID).Scan(&active); err != nil {

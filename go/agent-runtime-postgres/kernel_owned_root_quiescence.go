@@ -9,6 +9,11 @@ import (
 )
 
 var _ kernel.OwnedRootSettlementStore = (*KernelStore)(nil)
+var _ kernel.ReturnedRootSettlementStore = (*KernelStore)(nil)
+
+func (s *KernelStore) VerifyReturnedRootSettlement(ctx context.Context, expected kernel.Snapshot) error {
+	return s.verifyRootSettlement(ctx, expected, false, true)
+}
 
 // VerifyOwnedRootSettlement locks the exact Kernel Run and observes *all*
 // physical grants and acknowledged retirements in one transaction. It never
@@ -17,7 +22,7 @@ func (s *KernelStore) VerifyOwnedRootSettlement(ctx context.Context, expected ke
 	return s.verifyRootSettlement(ctx, expected, false)
 }
 
-func (s *KernelStore) verifyRootSettlement(ctx context.Context, expected kernel.Snapshot, prepared bool) error {
+func (s *KernelStore) verifyRootSettlement(ctx context.Context, expected kernel.Snapshot, prepared bool, returned ...bool) error {
 	if s == nil || s.db == nil || ctx == nil || expected.Run.ID == "" {
 		return kernel.ErrInvalidInput
 	}
@@ -47,6 +52,17 @@ func (s *KernelStore) verifyRootSettlement(ctx context.Context, expected kernel.
 				return loadErr
 			}
 			receipts = append(receipts, receipt)
+		}
+		if len(returned) == 1 && returned[0] {
+			var roots []models.KernelChildEffectGrantRecord
+			if err = tx.Where("child_run_id = ?", expected.Run.ID).Limit(2).Find(&roots).Error; err != nil {
+				return translateKernelError(err)
+			}
+			if len(roots) != 1 || roots[0].ParentRunID != expected.Run.ID {
+				return kernel.ErrExecutionConflict
+			}
+			return kernel.VerifyReturnedRootSettlementFacts(expected, current, run.ExecutionEpoch, run.ExecutionPhysicalEpoch,
+				pgManagedLease(run), pgPhysicalGrant(roots[0]), pgCallbackCompletion(roots[0]), receipts)
 		}
 		var active int64
 		if err = tx.Model(&models.KernelChildEffectGrantRecord{}).

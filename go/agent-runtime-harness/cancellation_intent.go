@@ -161,17 +161,25 @@ func (runner *Runner) resumeCommittedCancellationFence(ctx context.Context, turn
 		return Item{}, err
 	}
 	receipts := cancellationFenceReceipts(items)
-	if !terminal && !runner.quiescentDelegationCancellationReady(ctx, runID, snapshot) {
+	if !terminal && !runner.quiescentDelegationCancellationReady(ctx, runID, snapshot) &&
+		!runner.nativeRootCancellationReady(ctx, turn, runID, snapshot) {
 		return runner.resumeDeferredChildGrantCancellation(ctx, turn, runID, snapshot, items, receipts)
 	}
+	var elected Item
 	for _, item := range items {
-		if item.Kind != ItemDiagnostic || item.Status != ItemStarted ||
-			item.ParentItemID != CancellationFenceParentItemID || item.RunID != runID {
+		if item.ParentItemID != CancellationFenceParentItemID {
 			continue
 		}
 		if !VerifiedCancellationFenceReceipt(item, receipts[item.ID]) {
-			return item, nil
+			if elected.ID != "" || !ValidCancellationFenceIntentAdmission(item) ||
+				item.TurnID != turn.ID || item.RunID != runID || item.Seq == 0 {
+				return Item{}, ErrConflict
+			}
+			elected = item
 		}
+	}
+	if elected.ID != "" {
+		return elected, nil
 	}
 	return Item{}, ErrConflict
 }

@@ -92,7 +92,7 @@ func newGenerationHarness(t *testing.T, sqlBackend bool, m *generationModel) (*h
 	return newGenerationHarnessBackend(t, backend, m)
 }
 
-func newGenerationHarnessBackend(t *testing.T, backend string, m *generationModel) (*harness.Runner, generationStore, *kernel.Runtime, *agent.Runner, harness.StartRequest) {
+func newGenerationHarnessBackend(t *testing.T, backend string, m *generationModel, wrappers ...func(generationStore) generationStore) (*harness.Runner, generationStore, *kernel.Runtime, *agent.Runner, harness.StartRequest) {
 	t.Helper()
 	var hs generationStore = harness.NewMemoryStore()
 	var ks kernel.Store = memory.NewStore()
@@ -109,6 +109,9 @@ func newGenerationHarnessBackend(t *testing.T, backend string, m *generationMode
 		s := generationNativeSQLite(t)
 		ks, relationStore = s, nativesqlite.NewRunRelationStore(s)
 	}
+	for _, wrap := range wrappers {
+		hs = wrap(hs)
+	}
 	rt, err := kernel.New(kernel.Dependencies{Store: ks})
 	if err != nil {
 		t.Fatal(err)
@@ -116,6 +119,9 @@ func newGenerationHarnessBackend(t *testing.T, backend string, m *generationMode
 	relations, err := runrelation.New(relationStore, nil)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if capture, ok := hs.(interface{ setGenerationRelations(*runrelation.Registry) }); ok {
+		capture.setGenerationRelations(relations)
 	}
 	deps := harness.BudgetMiddlewareDependencies{Store: hs, Relations: relations, Meter: m, Clock: generationClock{}}
 	shared, err := harness.NewBudgetMiddleware(deps)
@@ -202,6 +208,7 @@ func TestRealPostgresRootGenerationLifecycle(t *testing.T) {
 		{"historical-controls", TestHistoricalChildControlsRejectBeforeIntentAdmission},
 		{"waiting-history-retry", TestWaitingOnlyHistorySurvivesRetryAndNoRunCancellation},
 		{"retirement-frontier", TestRetiredCallbackClosurePrecedesEveryNewGeneration},
+		{"all-cancellation-phases", TestNativeRootCancellationReplaysEveryDurablePhase},
 	} {
 		t.Run(test.name, test.run)
 	}

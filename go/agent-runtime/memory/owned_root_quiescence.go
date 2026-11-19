@@ -7,6 +7,11 @@ import (
 )
 
 var _ kernel.OwnedRootSettlementStore = (*Store)(nil)
+var _ kernel.ReturnedRootSettlementStore = (*Store)(nil)
+
+func (s *Store) VerifyReturnedRootSettlement(ctx context.Context, expected kernel.Snapshot) error {
+	return s.verifyRootSettlement(ctx, expected, false, true)
+}
 
 // VerifyOwnedRootSettlement is read-only under the same Store lock that
 // serializes physical grants and Kernel control writes. No public Run metadata
@@ -15,7 +20,7 @@ func (s *Store) VerifyOwnedRootSettlement(ctx context.Context, expected kernel.S
 	return s.verifyRootSettlement(ctx, expected, false)
 }
 
-func (s *Store) verifyRootSettlement(ctx context.Context, expected kernel.Snapshot, prepared bool) error {
+func (s *Store) verifyRootSettlement(ctx context.Context, expected kernel.Snapshot, prepared bool, returned ...bool) error {
 	if s == nil || ctx == nil || expected.Run.ID == "" {
 		return kernel.ErrInvalidInput
 	}
@@ -57,6 +62,19 @@ func (s *Store) verifyRootSettlement(ctx context.Context, expected kernel.Snapsh
 			return kernel.ErrExecutionConflict
 		}
 		receipts = append(receipts, r)
+	}
+	if len(returned) == 1 && returned[0] {
+		var original memoryChildGrant
+		for _, candidate := range s.childGrants {
+			if candidate.grant.ChildRunID == expected.Run.ID {
+				if original.grant.ID != "" {
+					return kernel.ErrExecutionConflict
+				}
+				original = candidate
+			}
+		}
+		return kernel.VerifyReturnedRootSettlementFacts(expected, current, native.epoch, native.physicalEpoch,
+			native.lease, original.grant, original.completion, receipts)
 	}
 	if prepared {
 		return kernel.VerifyPreparedRootSettlementFacts(expected, current, native.epoch, native.physicalEpoch, lease, active, receipts)
