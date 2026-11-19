@@ -1,0 +1,27 @@
+name: Pull request description
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, edited, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-description-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  description:
+    name: Pull request Markdown description
+    runs-on: ubuntu-26.04
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Test the description validator
+        run: node --test scripts/check-pr-body-format.test.mjs
+      - name: Validate pull request Markdown description
+        run: node scripts/check-pr-body-format.mjs

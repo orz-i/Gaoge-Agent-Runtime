@@ -25,6 +25,17 @@ make security   # govulncheck + high/critical pnpm advisory gate
 npm advisory registry. A network failure is intentionally not treated as a
 successful security scan.
 
+CI reports static/consumer checks separately from complete Go coverage and race
+matrices. Ordinary CI unit validation is performed by coverage, without an extra
+plain test pass. Local/release `make check` and `make coverage` retain their full
+scope. Timed entry points include `make ci-static` and `make ci-consumers`;
+`node scripts/go-workspace.mjs race --shard=sqlite` reproduces one complete shard.
+See [CI governance](docs/ci-governance.md) for coverage-union validation, cache
+scope, timing evidence, and the staged PR-description cutover. Run coverage
+shards sequentially in one checkout: each owns the `coverage/go` report directory.
+CI also publishes a shadow impact report. It is advisory only: do not use its
+candidate scope to skip local/CI gates or replace the complete coverage union.
+
 ## Architecture rules
 
 Read [docs/architecture.md](docs/architecture.md) before changing package
