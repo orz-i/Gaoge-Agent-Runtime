@@ -346,6 +346,7 @@ func (runner *Runner) CancelInvocation(ctx context.Context, invocationID, reason
 		func(writeAttempted *bool) error {
 			return runner.fenceRelatedCancellation(ctx, turn, invocation.ExecutionRefID, writeAttempted)
 		},
+		invocation,
 	)
 	if err != nil {
 		return Snapshot{}, err

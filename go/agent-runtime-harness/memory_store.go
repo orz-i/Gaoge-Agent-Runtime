@@ -915,7 +915,7 @@ func (store *MemoryStore) GetConfigSnapshot(_ context.Context, id string) (Confi
 	return cloneConfigSnapshot(value), nil
 }
 
-func (store *MemoryStore) AppendItem(_ context.Context, value Item) (Item, bool, error) {
+func (store *MemoryStore) AppendItem(ctx context.Context, value Item) (Item, bool, error) {
 	if store == nil || !validItem(value) {
 		return Item{}, false, ErrInvalidRequest
 	}
@@ -945,6 +945,13 @@ func (store *MemoryStore) AppendItem(_ context.Context, value Item) (Item, bool,
 	if value.Kind == ItemDiagnostic && value.Status == ItemStarted {
 		switch value.ParentItemID {
 		case CancellationFenceParentItemID:
+			if expectedRoot, _, bound := CancellationAttemptForStore(ctx); bound {
+				root := store.invocations[expectedRoot.ID]
+				target := store.invocations[store.invocationExecutionRefs[value.RunID]]
+				if !ValidCancellationAttemptAdmission(ctx, value, root, target) {
+					return Item{}, false, ErrConflict
+				}
+			}
 			if store.managedReservedTurnLocked(value.TurnID) || store.activeCancellationFenceLocked(value.TurnID) {
 				return Item{}, false, ErrConflict
 			}

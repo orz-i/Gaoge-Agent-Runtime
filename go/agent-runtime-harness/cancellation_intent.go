@@ -86,10 +86,14 @@ func ActiveCancellationFence(items []Item) bool {
 	return false
 }
 
-func (runner *Runner) beginCancellationFence(ctx context.Context, turn Turn, runID string) (Item, bool, error) {
+func (runner *Runner) beginCancellationFence(ctx context.Context, turn Turn, runID string, original ...Invocation) (Item, bool, error) {
 	runID = strings.TrimSpace(runID)
 	if runID == "" {
 		return Item{}, false, ErrInvalidRequest
+	}
+	ctx, err := runner.bindCancellationAttempt(ctx, turn, runID, original...)
+	if err != nil {
+		return Item{}, false, err
 	}
 	id, err := runner.runtime.NewID("cancel")
 	if err != nil {
@@ -201,11 +205,12 @@ func (runner *Runner) finishCancellationFence(ctx context.Context, intent Item) 
 func (runner *Runner) cancelPreflightWithIntent(
 	ctx context.Context, turn Turn, rootRunID string,
 	inspect func() error, claim func(writeAttempted *bool) error,
+	original ...Invocation,
 ) (Item, error) {
 	if err := inspect(); err != nil {
 		return Item{}, err
 	}
-	intent, fresh, err := runner.beginCancellationFence(ctx, turn, rootRunID)
+	intent, fresh, err := runner.beginCancellationFence(ctx, turn, rootRunID, original...)
 	if err != nil {
 		return Item{}, err
 	}

@@ -1482,6 +1482,30 @@ func appendItemTx(tx *gorm.DB, value harness.Item, outcome *itemAppendOutcome) e
 	if value.Kind == harness.ItemDiagnostic && value.Status == harness.ItemStarted {
 		switch value.ParentItemID {
 		case harness.CancellationFenceParentItemID:
+			if expectedRoot, _, bound := harness.CancellationAttemptForStore(tx.Statement.Context); bound {
+				var rootRow invocationRecord
+				if err = tx.Where("id = ?", expectedRoot.ID).Take(&rootRow).Error; err != nil {
+					return harness.ErrConflict
+				}
+				root, decodeErr := invocationFromRecord(rootRow)
+				if decodeErr != nil {
+					return decodeErr
+				}
+				var targets []invocationRecord
+				if err = tx.Where("execution_ref_id = ?", value.RunID).Limit(1).Find(&targets).Error; err != nil {
+					return err
+				}
+				var target harness.Invocation
+				if len(targets) != 0 {
+					target, err = invocationFromRecord(targets[0])
+					if err != nil {
+						return err
+					}
+				}
+				if !harness.ValidCancellationAttemptAdmission(tx.Statement.Context, value, root, target) {
+					return harness.ErrConflict
+				}
+			}
 			if err = checkManagedReservationTx(tx, value.TurnID); err != nil {
 				return err
 			}

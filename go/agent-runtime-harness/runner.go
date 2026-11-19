@@ -993,6 +993,7 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 			}
 			return runner.fenceInteractionCancellation(ctx, turn, "", writeAttempted)
 		},
+		invocation,
 	)
 	if err != nil {
 		return Snapshot{}, err

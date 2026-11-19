@@ -168,6 +168,8 @@ func TestRealPostgresRootGenerationLifecycle(t *testing.T) {
 		{"historical-terminal", TestHistoricalHandoffDoesNotBlockReplacementTerminalLifecycle},
 		{"repeated-generations", TestRepeatedRetryCancellationPreservesPriorChildReceipts},
 		{"undispatched-leases", TestPreparedChildCancellationSurvivesLeaseOnlyEpochs},
+		{"cancel-attempt-CAS", TestCancellationAdmissionCompetesWithExactRetryAttempt},
+		{"historical-controls", TestHistoricalChildControlsRejectBeforeIntentAdmission},
 	} {
 		t.Run(test.name, test.run)
 	}

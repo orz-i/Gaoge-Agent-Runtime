@@ -124,6 +124,8 @@ type Store interface {
 	// active cancellation intents, terminal Turn/Invocation owners, and
 	// unfinished grants for the same Invocation. A cancellation-intent
 	// insertion MUST serialize against these grants on the same Turn lock.
+	// Runner-bound cancellation admission MUST also recheck its exact immutable
+	// Root/target Attempt in that same critical section (CancellationAttemptForStore).
 	// Custom Stores must implement the hard-cut semantics; a loose
 	// append-only implementation is no longer a safe execution Store.
 	AppendItem(context.Context, Item) (Item, bool, error)
