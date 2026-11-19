@@ -56,13 +56,21 @@ export function activateDescriptionCheck(repository, { apply = false, api = gith
   for (let page = 1; ; page++) {
     const pulls = api(`${base}/pulls?state=open&per_page=100&page=${page}`);
     for (const pull of pulls) {
-      // Strict protection evaluates the test-merge commit when it has checks.
+      // GitHub uses merge checks when any exist on the test-merge commit,
+      // otherwise it evaluates the head commit (the normal PR Actions case).
       if (!pull.merge_commit_sha) throw new Error(`PR #${pull.number}: no current test-merge commit; refresh the branch first`);
-      const result = api(`${base}/commits/${pull.merge_commit_sha}/check-runs?check_name=${encodeURIComponent(descriptionCheck)}&filter=latest&per_page=100`);
+      if (!pull.head?.sha) throw new Error(`PR #${pull.number}: missing head commit`);
+      const mergeChecks = api(`${base}/commits/${pull.merge_commit_sha}/check-runs?filter=latest&per_page=1`);
+      const mergeStatus = api(`${base}/commits/${pull.merge_commit_sha}/status?per_page=1`);
+      if (!Number.isSafeInteger(mergeChecks.total_count) || mergeChecks.total_count < 0 || !Array.isArray(mergeStatus.statuses)) {
+        throw new Error(`PR #${pull.number}: unrecognized status source; no changes made`);
+      }
+      const sha = mergeChecks.total_count > 0 || mergeStatus.statuses.length > 0 ? pull.merge_commit_sha : pull.head.sha;
+      const result = api(`${base}/commits/${sha}/check-runs?check_name=${encodeURIComponent(descriptionCheck)}&filter=latest&per_page=100`);
       const latest = result.check_runs.filter((check) => check.name === descriptionCheck && check.app?.id === appId)
         .sort((a, b) => b.id - a.id)[0];
       if (latest?.status !== "completed" || latest.conclusion !== "success") {
-        throw new Error(`PR #${pull.number}: description check must pass on the current test-merge commit before activation`);
+        throw new Error(`PR #${pull.number}: description check must pass on the current evaluated commit (${sha}) before activation`);
       }
       pullRequests++;
     }

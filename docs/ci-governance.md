@@ -26,8 +26,11 @@ Consequently, **editing a description still reruns heavy CI during this stage**.
 An administrator performs the cutover only after this PR is merged:
 
 1. Update existing open PRs to the accepted default branch and wait for the new
-   description check to succeed on their current test-merge commits. The script
-   does not modify PR branches or bodies for you.
+   description check to succeed on the commit evaluated by GitHub. Normally
+   Actions checks are attached to the PR head; if the test-merge commit has
+   checks or statuses, it takes precedence. The script inspects both sources
+   instead of requiring a nonexistent test-merge check or accepting stale head
+   evidence. It does not modify PR branches or bodies for you.
 2. Inspect a read-only readiness and branch-protection plan:
 
    ```bash

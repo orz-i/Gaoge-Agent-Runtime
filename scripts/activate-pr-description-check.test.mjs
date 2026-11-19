@@ -26,7 +26,7 @@ test("unknown or conflicting branch-protection configurations fail closed", () =
   assert.throws(() => requiredChecksWithDescription({ ...initial(), checks: [...initial().checks, { context: descriptionCheck, app_id: 7 }] }), /different app/u);
 });
 
-function fixture({ workflowMissing = false, conclusion = "success", mergeSha = "merge-sha", extraCheck = false, appChanged = false } = {}) {
+function fixture({ workflowMissing = false, conclusion = "success", mergeSha = "merge-sha", extraCheck = false, appChanged = false, mergeChecks = 0, mergeStatuses = [] } = {}) {
   const calls = [];
   const api = (endpoint, options = {}) => {
     calls.push({ endpoint, ...options });
@@ -36,6 +36,8 @@ function fixture({ workflowMissing = false, conclusion = "success", mergeSha = "
       return { encoding: "base64", content: Buffer.from(`on:\n  pull_request:\njobs:\n  description:\n    name: ${descriptionCheck}\n`).toString("base64") };
     }
     if (endpoint.includes("/pulls?")) return [{ number: 1, head: { sha: "head-sha" }, merge_commit_sha: mergeSha }];
+    if (endpoint.includes("/check-runs?filter=latest&per_page=1")) return { total_count: mergeChecks, check_runs: [] };
+    if (endpoint.includes("/status?")) return { statuses: mergeStatuses };
     if (endpoint.includes("/check-runs?")) return { check_runs: [
       { id: 1, name: descriptionCheck, status: "completed", conclusion: "success", app: { id: 15368 } },
       { id: 2, name: descriptionCheck, status: "completed", conclusion, app: { id: 15368 } },
@@ -59,7 +61,7 @@ test("dry run is read-only; apply writes only required status checks after all r
   const dry = fixture();
   assert.equal(activateDescriptionCheck("owner/repo", { api: dry.api }).apply, false);
   assert.ok(dry.calls.every((call) => !call.method));
-  assert.ok(dry.calls.some((call) => call.endpoint.includes("/commits/merge-sha/")));
+  assert.ok(dry.calls.some((call) => call.endpoint.includes("/commits/head-sha/check-runs?check_name=")));
   const live = fixture({ extraCheck: true });
   activateDescriptionCheck("owner/repo", { api: live.api, apply: true });
   const writes = live.calls.filter((call) => call.method);
@@ -67,6 +69,17 @@ test("dry run is read-only; apply writes only required status checks after all r
   assert.equal(writes[0].method, "PATCH");
   assert.ok(writes[0].endpoint.endsWith("/required_status_checks"));
   assert.ok(writes[0].body.checks.some((check) => check.context === "new concurrent check"));
+});
+
+test("test-merge checks/statuses take precedence over head checks when present", () => {
+  for (const options of [{ mergeChecks: 1 }, { mergeStatuses: [{ context: "external check" }] }]) {
+    const { api, calls } = fixture(options);
+    activateDescriptionCheck("owner/repo", { api });
+    assert.ok(calls.some((call) => call.endpoint.includes("/commits/merge-sha/check-runs?check_name=")));
+    assert.ok(!calls.some((call) => call.endpoint.includes("/commits/head-sha/")));
+  }
+  const { api } = fixture({ mergeChecks: null });
+  assert.throws(() => activateDescriptionCheck("owner/repo", { api, apply: true }), /unrecognized status source/u);
 });
 
 test("an unmerged workflow, a missing merge commit, or a newer failed check prevents every write", () => {
@@ -83,7 +96,7 @@ test("readiness paginates open PRs instead of checking only the first page", () 
   const api = (endpoint, options) => {
     if (endpoint.includes("/pulls?")) {
       pages.push(endpoint);
-      return endpoint.endsWith("page=1") ? Array.from({ length: 100 }, (_, i) => ({ number: i + 1, merge_commit_sha: "merge-sha" })) : [];
+      return endpoint.endsWith("page=1") ? Array.from({ length: 100 }, (_, i) => ({ number: i + 1, merge_commit_sha: "merge-sha", head: { sha: "head-sha" } })) : [];
     }
     return base(endpoint, options);
   };
