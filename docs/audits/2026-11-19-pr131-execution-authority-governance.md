@@ -67,6 +67,21 @@ run against isolated real PostgreSQL schemas; otherwise they use the existing
 SQLite-backed GORM test fixture. This prevents a separate positive-only
 PostgreSQL matrix from overlooking the negative lifecycle cases.
 
+### CI gate follow-up
+
+The first follow-up CI run exposed a missing direct test dependency on Kernel
+PostgreSQL in `go/agent-runtime-harness-postgres/go.mod`; workspace compilation
+and race tests alone do not validate isolated module metadata. The dependency
+is now declared at the coordinated cohort version and the workspace
+`tidy-check` passes without changing module files. No tidy gate is relaxed.
+
+The real-service runner selects only `TestRealPostgres*`. A dedicated
+`TestRealPostgresRootGenerationLifecycle` entry now runs the same custody,
+Retry/cancellation, history, repeated-generation and lease matrix under that
+selector. Merely supporting a DSN in an otherwise unselected unit test was not
+sufficient real-service coverage. Earlier integration success must not be
+mistaken for evidence that this new matrix was selected.
+
 ## Verification and remaining boundary
 
 - All original independent audit overlay regressions pass with
@@ -77,10 +92,12 @@ PostgreSQL matrix from overlooking the negative lifecycle cases.
   PostgreSQL, native SQLite and the dependent Provider/HTTP/A2A/Redis/MCP/OTel/
   transport modules; the task-agent example tests also pass.
 - Workspace formatting, vet and golangci-lint are checked before push.
-- Local Docker was unavailable, so this is not a claim that real PostgreSQL/
-  Redis integration or restart tests ran locally. The PR integration job is the
-  real-service gate for the new commit; historical green checks are not its
-  result.
+- The initial governance pass could not use Docker. During the CI follow-up,
+  private native PostgreSQL 16.16 and Redis 8.10.3 instances were created in an
+  isolated temporary directory, without changing existing services. The newly
+  selected `TestRealPostgresRootGenerationLifecycle` matrix passes against real
+  PostgreSQL with `-race -count=3`; the PR integration job remains the gate for
+  each pushed commit rather than inheriting historical green results.
 - Agent Server composition/pin and product Inspect/Control during an accepted
   but unstarted Retry remain the separately documented Host follow-up. No
   product repository or compatibility fallback is introduced here.

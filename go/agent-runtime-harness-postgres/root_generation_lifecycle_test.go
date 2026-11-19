@@ -153,6 +153,26 @@ func newGenerationSQLStore(t *testing.T) (*harnesspostgres.Store, *gorm.DB) {
 	return store, db
 }
 
+// scripts/run-integration.mjs deliberately selects TestRealPostgres*, so DSN
+// support in the fixture alone is insufficient to exercise this matrix in CI.
+func TestRealPostgresRootGenerationLifecycle(t *testing.T) {
+	if strings.TrimSpace(os.Getenv("TEST_POSTGRES_DSN")) == "" {
+		t.Skip("TEST_POSTGRES_DSN is not configured")
+	}
+	for _, test := range []struct {
+		name string
+		run  func(*testing.T)
+	}{
+		{"callback-custody", TestGenerationControlRejectsForeignCallbackCustody},
+		{"retry-cancellation", TestRetriedRootCancellationCleansItsDeferredChildren},
+		{"historical-terminal", TestHistoricalHandoffDoesNotBlockReplacementTerminalLifecycle},
+		{"repeated-generations", TestRepeatedRetryCancellationPreservesPriorChildReceipts},
+		{"undispatched-leases", TestPreparedChildCancellationSurvivesLeaseOnlyEpochs},
+	} {
+		t.Run(test.name, test.run)
+	}
+}
+
 type detachedGenerationCompletion struct {
 	release  <-chan struct{}
 	finished chan<- struct{}
