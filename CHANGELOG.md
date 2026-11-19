@@ -5,6 +5,14 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- **Required Tool data-shape correction (2026-11-19):** A successfully committed
+  Tool returning a valid JSON list or scalar now satisfies its required-call
+  obligation. Non-object business data is no longer mistaken for a rejected
+  call, which could waste the remaining Model budget. Explicit rejected,
+  retryable and `ok:false` envelopes, invalid JSON, dispatch receipts, approvals
+  and hard budgets retain their existing checks. Reproduced by the new document
+  outcome task and covered by direct Agent and result-shape regressions.
+
 - **Running-task user input and history allocation (2026-11-19):** Optional
   `agent.RunInputSource` admits authenticated Host user messages only at model
   boundaries, with a frozen source binding and a durable applied cursor. It does

@@ -1579,7 +1579,16 @@ func toolResultRejectedOrRetryable(content string) bool {
 		Retryable bool   `json:"retryable"`
 		Status    string `json:"status"`
 	}
-	if !json.Valid([]byte(content)) || json.Unmarshal([]byte(content), &payload) != nil {
+	if !json.Valid([]byte(content)) {
+		return true
+	}
+	// A committed read may legitimately return a JSON list or scalar. Only an
+	// object can carry the optional rejection envelope; do not invent failure
+	// merely because valid business data is not an object.
+	if !strings.HasPrefix(strings.TrimSpace(content), "{") {
+		return false
+	}
+	if json.Unmarshal([]byte(content), &payload) != nil {
 		return true
 	}
 	return strings.TrimSpace(payload.Status) == "rejected" ||
