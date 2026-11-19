@@ -1,7 +1,9 @@
-# CI governance: P0
+# CI governance: P0 and P1
 
-P0 preserves the complete validation scope. It does not introduce affected-only
-tests, race sharding, test-result reuse, or a new development branch.
+Both phases preserve the complete validation scope. P0 established safe gates
+and timing; P1 below schedules full suites in three shards and reuses coverage
+execution as ordinary unit validation. Neither introduces affected-only tests,
+test-result caching, a new development branch, or weaker release gates.
 
 The pre-change sample (100 CI runs, November 13–19, 2026) contained 44 successful
 PR runs with a 14m50s median wall time. In ten recent successful PRs, median job
@@ -61,11 +63,11 @@ CI trigger/validator before removing the independent required check.
 
 `make check`, `make check-no-race`, and the release gate retain every pre-P0
 target. Their static targets now run before behavioral tests. CI exposes the timed
-equivalents of `make check-static` and `make check-execution-no-race` as separate
-steps on the same runner, so a lint/type error is visible without waiting for full
-unit tests.
-No additional Go cache or runner is introduced. Do not run tidy and tests
-concurrently in the same checkout: tidy temporarily edits module files.
+equivalents of `make check-static` and the smoke/consumer subset as separate steps
+on the same runner, so a lint/type error is visible without waiting for full unit
+tests. Full ordinary unit validation now lives in the coverage jobs described
+below. Do not run tidy and tests concurrently in the same checkout: tidy
+temporarily edits module files.
 
 The existing **Unit, race, lint, and release consumers** required-check name is
 unchanged. Its `always()` aggregator now also requires coverage, vulnerability
@@ -80,7 +82,7 @@ hang bounds, not performance assertions or reasons to retry a failed test.
 
 ## System dependencies
 
-All four existing Linux CI users of SQLite and the release job share
+All Linux CI users of SQLite and the release job share
 `.github/actions/setup-sqlite`. A successful `dpkg-query` reporting
 `install ok installed` skips both `apt-get update` and installation. Missing or
 partially removed packages still require a successful update, install, and
@@ -116,6 +118,85 @@ CI_TIMING_DIRECTORY="$PWD/artifacts/ci-timings" make ci-static
 CI_TIMING_DIRECTORY="$PWD/artifacts/ci-timings" node scripts/ci-timings.mjs --summary
 ```
 
-P1 should use repeated comparable runner baselines to choose sharding or scope
-changes. P0 does not claim the previously proposed 3–8 minute feedback targets
-have been achieved.
+## P1: full-suite reuse and balanced scheduling
+
+P0's final [run 44533727890](https://github.com/orz-i/Gaoge-Agent-Runtime/actions/runs/44533727890)
+took 16m51s including queue time. Its race command took 937s, ordinary Go tests
+464s, and Go coverage 540s. P1 does **not** turn that single sample into a timing
+gate or a guaranteed speedup.
+
+The authoritative `scripts/go-workspace-layout.mjs` catalog partitions every
+`go.work` module exactly once for each of two independent matrices:
+
+| Shard | Modules | P0 race time (approximate) |
+| --- | --- | ---: |
+| core | Core, Postgres, Redis, MCP, OTel, A2A | 280s |
+| sqlite | Native SQLite | 330s |
+| adapters | Provider, Harness, task-agent, Harness-Postgres, HTTP, independent Transport | 328s |
+
+Both matrices use `fail-fast: false` and isolated runners. Every module still
+uses `./...`, `-count=1`, and the original race or atomic `-coverpkg=./...` flags.
+No test-name selection or ordinary-PR skip is introduced. The full Core module,
+nested task-agent module, and independent Transport module remain mandatory.
+Invalid shards and unknown CLI arguments are errors, not empty successful runs.
+
+`ci-consumers` removes only `go-test`, `go-race`, and `ts-test` from the ordinary
+CI phase. The first is now performed with coverage instrumentation, the second
+by the complete race matrix, and TypeScript tests by `vitest run --coverage`.
+Static checks, build, isolated/packed consumers, eval/benchmark smoke, A2A
+boundaries, detached E2E compile, real-engine integration and security remain.
+The packed TypeScript consumer still deliberately runs its own package tests.
+All existing local/release Make targets, including `make check`, `make coverage`
+and the full published-consumer release workflow, retain their old scope.
+
+### Complete coverage, not per-shard averages
+
+A successful Go coverage shard uploads its profiles and a manifest recording
+its exact module set and `GITHUB_SHA`. A failed shard produces no success
+manifest/artifact. `Coverage gates` runs only after all Go coverage shards pass,
+downloads artifacts **from this run**, and requires exactly the expected three
+directories and 13 profiles. Wrong commits, missing/extra files, changed module
+assignments, invalid profiles, and wrong coverage modes fail closed.
+
+Only then does it compute the existing source-block union and enforce the
+unchanged repository **70% statement floor**. Duplicate blocks are counted once,
+zero-execution blocks remain in the denominator, and percentages are never
+averaged across shards. TypeScript thresholds are unchanged. Coverage artifact
+upload is mandatory; timing publication alone remains best-effort.
+
+The stable required quality aggregator depends on both the coverage matrix and
+the final coverage gate, as well as the race matrix. A failed/cancelled/skipped
+matrix, skipped dependent gate, or missing artifact cannot turn the PR green.
+Artifact names include the shard; retries replace only that shard's report in
+the same workflow run. New run attempts cannot collide in timing artifact names.
+
+### Cache scope and measurement
+
+The setup action separates shared, content-addressed `GOMODCACHE` downloads
+(dependency hash, no per-commit suffix) from `GOCACHE` builds (toolchain,
+mode/shard scope, dependency hash, commit). Build restore fallback never crosses
+the mode/shard scope. Only trusted pushes to `main` refresh build snapshots;
+PRs restore them without uploading six new build snapshots on every commit.
+Download caches retain their normal branch isolation. No cache is test evidence,
+and no secret is cached. The first PR run after this cache migration may be
+colder; steady-state measurements require main to seed the new caches.
+
+P1 is accepted based on unchanged scope, failure-path tests, real CI results,
+and comparable target/module/job durations. Collect total runner time as well
+as wall time: more isolated runners can reduce waiting while increasing setup
+cost. Do not promise the earlier 3–8 minute target before measuring it.
+
+Local reproduction (run coverage shards sequentially in one checkout, or use
+separate worktrees; each shard owns `coverage/go`):
+
+```bash
+node scripts/go-workspace.mjs race --shard=sqlite
+node scripts/go-workspace.mjs coverage --shard=core
+make ci-static
+make ci-consumers
+```
+
+To roll back scheduling, restore P0's unsharded workflow and ordinary CI target
+invocations together. Do not drop the coverage union/required dependencies while
+leaving out ordinary tests. The staged description-check cutover above remains
+unchanged and is not activated by P1.

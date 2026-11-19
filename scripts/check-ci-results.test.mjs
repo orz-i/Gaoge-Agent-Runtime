@@ -57,6 +57,6 @@ test("static checks run first without dropping or duplicating any pre-P0 check t
   assert.match(makefile, /check-no-race: \$\(filter-out go-race,\$\(CHECK_TARGETS\)\)/u);
   const workflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
   const staticStep = workflow.indexOf("- name: Run static checks before behavioral tests");
-  const executionStep = workflow.indexOf("- name: Run unit and release-consumer checks");
+  const executionStep = workflow.indexOf("- name: Run smoke and release-consumer checks");
   assert.ok(staticStep >= 0 && staticStep < executionStep);
 });

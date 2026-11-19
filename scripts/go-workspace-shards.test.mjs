@@ -140,3 +140,39 @@ if (profile) fs.writeFileSync(profile.slice('-coverprofile='.length), 'mode: ato
   assert.equal(run("coverage").status, 0);
   assert.equal(JSON.parse(readFileSync(path.join(directory, "coverage/go/summary.json"), "utf8")).minimum, 70);
 });
+
+test("CI runs each full coverage/race shard, collects complete artifacts, and removes only redundant ordinary test invocations", () => {
+  const read = (name) => readFileSync(new URL(`../${name}`, import.meta.url), "utf8");
+  const ci = read(".github/workflows/ci.yml");
+  const makefile = read("Makefile");
+  const matrixes = [...ci.matchAll(/shard: \[([^\]]+)\]/gu)].map((match) => match[1].split(", "));
+  assert.deepEqual(matrixes, [Object.keys(shards), Object.keys(shards)]);
+  assert.equal([...ci.matchAll(/fail-fast: false/gu)].length, 2);
+  assert.match(ci, /coverage --shard=\$\{\{ matrix.shard \}\}/u);
+  assert.match(ci, /race --shard=\$\{\{ matrix.shard \}\}/u);
+  assert.match(ci, /cache-scope: race-\$\{\{ matrix.shard \}\}/u);
+  assert.match(ci, /cache-scope: coverage-\$\{\{ matrix.shard \}\}/u);
+  assert.match(ci, /name: go-coverage-\$\{\{ matrix.shard \}\}/u);
+  assert.match(ci, /pattern: go-coverage-\*/u);
+  assert.match(ci, /needs: \[coverage-go\]/u);
+  assert.match(ci, /merge-go-coverage\.mjs coverage\/go-shards/u);
+  assert.match(ci, /run-ci-targets\.mjs ts-coverage/u);
+  assert.doesNotMatch(ci, /make ci-execution-no-race|make ci-coverage|GO_COVERAGE_MIN|--run=|continue-on-error: \$\{/u);
+  assert.match(makefile, /ci-consumers:\n\tnode scripts\/run-ci-targets\.mjs \$\(filter-out go-test go-race ts-test,\$\(CHECK_EXECUTION_TARGETS\)\)/u);
+  assert.match(read("ts/agent-runtime-client/package.json"), /"coverage": "vitest run --coverage"/u);
+  assert.match(read(".github/workflows/release.yml"), /make check && make coverage && make security && make integration-test/u);
+});
+
+test("matrix artifact names are distinct and build caches cannot multiply per PR commit or cross mode/shard boundaries", () => {
+  const cache = readFileSync(new URL("../.github/actions/setup-go/action.yml", import.meta.url), "utf8");
+  const timing = readFileSync(new URL("../.github/actions/upload-ci-timings/action.yml", import.meta.url), "utf8");
+  assert.match(timing, /github.job \}\}\$\{\{ inputs.suffix \}\}/u);
+  assert.match(cache, /modules-key=\$base-modules-v2-\$DEPENDENCIES_HASH/u);
+  assert.doesNotMatch(cache, /modules-key=.*(?:SOURCE_SHA|CACHE_SCOPE)/u);
+  assert.match(cache, /build-key=\$base-build-\$CACHE_SCOPE-v2-\$DEPENDENCIES_HASH-\$SOURCE_SHA/u);
+  assert.match(cache, /build-fallback=\$base-build-\$CACHE_SCOPE-v2-/u);
+  assert.match(cache, /if: github.event_name == 'push' && github.ref == 'refs\/heads\/main'\n\s+uses: actions\/cache@v5/u);
+  assert.match(cache, /if: github.event_name != 'push' \|\| github.ref != 'refs\/heads\/main'\n\s+uses: actions\/cache\/restore@v5/u);
+  assert.equal([...cache.matchAll(/path: \$\{\{ steps.paths.outputs.build \}\}/gu)].length, 2);
+  assert.equal([...cache.matchAll(/path: \$\{\{ steps.paths.outputs.modules \}\}/gu)].length, 1);
+});

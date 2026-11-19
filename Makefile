@@ -1,4 +1,4 @@
-.PHONY: provider-transport-check bootstrap metadata agent-baseline agent-quality agent-quality-pilot agent-quality-distractor-pilot agent-quality-probe agent-quality-calibrate agent-baseline-test agent-quality-anchor-check benchmark-agent-policy fmt-check tidy-check go-test go-race go-vet go-lint go-coverage go-vuln ts-lint ts-typecheck ts-test ts-coverage ts-build unit coverage security eval eval-smoke benchmark benchmark-baseline benchmark-smoke benchmark-compare benchmark-integration benchmark-integration-smoke benchmark-integration-baseline benchmark-integration-compare benchmark-integration-test otel-e2e-smoke integration-compile integration integration-test integration-otel integration-otel-test a2a-product-check a2a-tck release-check check-static check-execution check-execution-no-race ci-static ci-execution-no-race ci-race ci-coverage check check-no-race beta
+.PHONY: provider-transport-check bootstrap metadata agent-baseline agent-quality agent-quality-pilot agent-quality-distractor-pilot agent-quality-probe agent-quality-calibrate agent-baseline-test agent-quality-anchor-check benchmark-agent-policy fmt-check tidy-check go-test go-race go-vet go-lint go-coverage go-vuln ts-lint ts-typecheck ts-test ts-coverage ts-build unit coverage security eval eval-smoke benchmark benchmark-baseline benchmark-smoke benchmark-compare benchmark-integration benchmark-integration-smoke benchmark-integration-baseline benchmark-integration-compare benchmark-integration-test otel-e2e-smoke integration-compile integration integration-test integration-otel integration-otel-test a2a-product-check a2a-tck release-check check-static check-execution check-execution-no-race ci-static ci-execution-no-race ci-consumers ci-race ci-coverage check check-no-race beta
 
 bootstrap:
 	pnpm install --frozen-lockfile
@@ -181,6 +181,11 @@ ci-static:
 
 ci-execution-no-race:
 	node scripts/run-ci-targets.mjs $(filter-out go-race,$(CHECK_EXECUTION_TARGETS))
+
+# Full ordinary tests now execute once in the coverage shards / Vitest coverage.
+# Isolated consumers, deterministic smoke, and packed archive validation remain.
+ci-consumers:
+	node scripts/run-ci-targets.mjs $(filter-out go-test go-race ts-test,$(CHECK_EXECUTION_TARGETS))
 
 ci-race:
 	node scripts/run-ci-targets.mjs go-race

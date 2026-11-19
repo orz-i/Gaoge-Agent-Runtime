@@ -141,7 +141,7 @@ test("CI target lists retain all checks and every measured job publishes even af
   assert.match(makefile, /ci-static:\n\tnode scripts\/run-ci-targets\.mjs \$\(CHECK_STATIC_TARGETS\)/u);
   assert.match(makefile, /ci-execution-no-race:\n\tnode scripts\/run-ci-targets\.mjs \$\(filter-out go-race,\$\(CHECK_EXECUTION_TARGETS\)\)/u);
   const ci = read(".github/workflows/ci.yml");
-  assert.equal([...ci.matchAll(/if: always\(\)\n\s+continue-on-error: true\n\s+uses: \.\/\.github\/actions\/upload-ci-timings/gu)].length, 7);
+  assert.equal([...ci.matchAll(/if: always\(\)\n\s+continue-on-error: true\n\s+uses: \.\/\.github\/actions\/upload-ci-timings/gu)].length, 8);
   const action = read(".github/actions/upload-ci-timings/action.yml");
   assert.match(action, /retention-days: 7/u);
   assert.match(action, /github\.run_attempt/u);

@@ -22,7 +22,7 @@ jobs:
   quality:
     name: Unit, race, lint, and release consumers
     if: ${{ always() }}
-    needs: [quality-main, race, release-commands-windows, coverage, security, integration, observability]
+    needs: [quality-main, race, release-commands-windows, coverage-go, coverage, security, integration, observability]
     runs-on: ubuntu-26.04
     timeout-minutes: 3
     steps:
@@ -36,7 +36,7 @@ jobs:
         run: node scripts/check-ci-results.mjs
 
   quality-main:
-    name: Unit, lint, and release consumers
+    name: Static, smoke, and release consumers
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
@@ -82,8 +82,8 @@ jobs:
       - name: Run static checks before behavioral tests
         run: make ci-static
 
-      - name: Run unit and release-consumer checks
-        run: make ci-execution-no-race
+      - name: Run smoke and release-consumer checks
+        run: make ci-consumers
 
       - name: Publish CI timing baseline
         if: always()
@@ -91,22 +91,30 @@ jobs:
         uses: ./.github/actions/upload-ci-timings
 
   race:
-    name: Go race detector
+    name: Go race detector (${{ matrix.shard }})
     runs-on: ubuntu-26.04
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [core, sqlite, adapters]
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-go
+        with:
+          cache-scope: race-${{ matrix.shard }}
       - uses: actions/setup-node@v7
         with:
           node-version: 24
       - uses: ./.github/actions/setup-sqlite
-      - name: Run all Go race tests
-        run: make ci-race
+      - name: Run complete Go race shard
+        run: node scripts/ci-timings.mjs --run go-race-${{ matrix.shard }} -- node scripts/go-workspace.mjs race --shard=${{ matrix.shard }}
       - name: Publish CI timing baseline
         if: always()
         continue-on-error: true
         uses: ./.github/actions/upload-ci-timings
+        with:
+          suffix: -${{ matrix.shard }}
 
   release-commands-windows:
     name: Windows release command safety
@@ -127,13 +135,47 @@ jobs:
         continue-on-error: true
         uses: ./.github/actions/upload-ci-timings
 
-  coverage:
-    name: Coverage gates
+  coverage-go:
+    name: Go unit and coverage (${{ matrix.shard }})
     runs-on: ubuntu-26.04
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [core, sqlite, adapters]
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-go
+        with:
+          cache-scope: coverage-${{ matrix.shard }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - uses: ./.github/actions/setup-sqlite
+      - name: Run complete Go unit suite with atomic coverage
+        run: node scripts/ci-timings.mjs --run go-coverage-${{ matrix.shard }} -- node scripts/go-workspace.mjs coverage --shard=${{ matrix.shard }}
+      - name: Upload successful shard profiles
+        uses: actions/upload-artifact@v7
+        with:
+          name: go-coverage-${{ matrix.shard }}
+          path: coverage/go
+          retention-days: 7
+          if-no-files-found: error
+          overwrite: true
+      - name: Publish CI timing baseline
+        if: always()
+        continue-on-error: true
+        uses: ./.github/actions/upload-ci-timings
+        with:
+          suffix: -${{ matrix.shard }}
+
+  coverage:
+    name: Coverage gates
+    needs: [coverage-go]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
         with:
           version: 11.22.0
@@ -142,11 +184,17 @@ jobs:
           node-version: 24
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
-      - uses: ./.github/actions/setup-sqlite
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
-      - name: Enforce coverage floors
-        run: make ci-coverage
+      - name: Download every Go shard from this workflow run
+        uses: actions/download-artifact@v8
+        with:
+          pattern: go-coverage-*
+          path: coverage/go-shards
+      - name: Enforce the complete Go coverage floor
+        run: node scripts/ci-timings.mjs --run go-coverage-union -- node scripts/merge-go-coverage.mjs coverage/go-shards
+      - name: Run TypeScript tests once with coverage floors
+        run: node scripts/run-ci-targets.mjs ts-coverage
       - name: Upload coverage reports
         if: always()
         uses: actions/upload-artifact@v7
