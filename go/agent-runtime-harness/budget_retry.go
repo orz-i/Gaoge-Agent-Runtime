@@ -2,52 +2,69 @@ package harness
 
 import (
 	"context"
-	"errors"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 )
 
-// prepareRootRetryBudget is the pre-Invocation-CAS half of a durable Retry.
-// It never opens a cancelled historical Run, releases a reservation or
-// authorizes a physical callback. A failed original-effect reconciliation
-// blocks Attempt rotation instead of leaving an Accepted phantom Attempt.
-func (runner *Runner) prepareRootRetryBudget(ctx context.Context, turn Turn, original Invocation) error {
-	ledger, err := runner.loadTurnBudget(ctx, turn)
-	if err != nil || ledger == nil {
-		return err
+// retryBudgetAdmission is private to the original Harness Runner. SQL and
+// Memory Stores may read its exact binding, but ordinary Store callers
+// cannot mint it from public Invocation fields or an existing ledger row.
+type retryBudgetAdmission struct {
+	turnID, invocationID, previousRunID, nextRunID string
+	attempt                                        int
+}
+type retryBudgetAdmissionKey struct{}
+
+// WithAtomicRetryBudget binds the original Store transaction to the same
+// Turn budget ledger. A foreign LedgerStore cannot be atomically committed:
+// reject before mutating Invocation, rather than attempting a two-store saga.
+func (runner *Runner) withAtomicRetryBudget(ctx context.Context, turn Turn, original Invocation, nextRunID string) (context.Context, error) {
+	if runner.budgets == nil {
+		return ctx, nil
 	}
-	nextAttempt := original.Attempt + 1
-	nextRunID := invocationExecutionRefID(original.ID, nextAttempt)
-	_, err = runner.budgets.coordinator().BeginRootRetry(
-		ctx, turn.ID, original.ID, original.ExecutionRefID, nextRunID, nextAttempt,
-	)
-	if errors.Is(err, budget.ErrLedgerConflict) || errors.Is(err, budget.ErrUnmetered) {
-		// Any unaccounted prior physical effect is an unknown Retry outcome,
-		// never a denial that permits an unrelated physical second attempt.
-		return errors.Join(ErrExecutionOutcomeUnknown, err)
+	l, err := runner.loadTurnBudget(ctx, turn)
+	if err != nil {
+		return ctx, err
 	}
-	return err
+	if l == nil {
+		// An original Turn whose frozen configuration required shared
+		// accounting cannot recreate a fresh ledger during Retry: that
+		// would erase historical charges/unknown provider dispatches.
+		// A genuinely unbudgeted Turn retains its existing Retry path.
+		config, configErr := loadSealedConfig(ctx, runner.store, turn.ConfigSnapshotID)
+		if configErr != nil {
+			return ctx, configErr
+		}
+		if config.SharedBudget != nil {
+			return ctx, ErrExecutionOutcomeUnknown
+		}
+		return ctx, nil
+	}
+	authoritative, ok := runner.store.(budget.LedgerStore)
+	if !ok || authoritative != runner.budgets.dependencies.Ledgers {
+		return ctx, ErrConflict
+	}
+	return context.WithValue(ctx, retryBudgetAdmissionKey{}, retryBudgetAdmission{
+		turnID: turn.ID, invocationID: original.ID,
+		previousRunID: original.ExecutionRefID, nextRunID: nextRunID,
+		attempt: original.Attempt + 1,
+	}), nil
 }
 
-// commitRootRetryBudget activates exactly the persisted original Attempt.
-// Crash between the Invocation CAS and this budget CAS is repaired by the
-// read-only replay entry before any physical Start grant can be admitted.
-func (runner *Runner) commitRootRetryBudget(ctx context.Context, turn Turn, retried Invocation) error {
-	ledger, err := runner.loadTurnBudget(ctx, turn)
-	if err != nil || ledger == nil {
-		return err
+// AtomicRetryBudgetForStore returns true only for the exact original
+// Invocation/Attempt selected by the Harness Runner before its physical
+// terminal witness. Both Store implementations check this under their
+// original Turn lock and commit budget + Invocation together.
+func AtomicRetryBudgetForStore(ctx context.Context, original Invocation, nextRunID string) (bool, error) {
+	value, exists := ctx.Value(retryBudgetAdmissionKey{}).(retryBudgetAdmission)
+	if !exists {
+		return false, nil
 	}
-	grant, ok := ledger.RootRetries[retried.ExecutionRefID]
-	if !ok || grant.InvocationID != retried.ID || grant.Attempt != retried.Attempt ||
-		grant.OriginalRunID == "" || retried.ParentItemID != "" ||
-		retried.ExecutionClass != ExecutionAgent {
-		return ErrExecutionOutcomeUnknown
+	if value.turnID != original.TurnID || value.invocationID != original.ID ||
+		value.previousRunID != original.ExecutionRefID || value.nextRunID != nextRunID ||
+		value.attempt != original.Attempt+1 || original.Attempt < 1 || original.ParentItemID != "" ||
+		original.ExecutionClass != ExecutionAgent {
+		return false, ErrConflict
 	}
-	_, err = runner.budgets.coordinator().CommitRootRetry(
-		ctx, turn.ID, retried.ID, grant.OriginalRunID, retried.ExecutionRefID, retried.Attempt,
-	)
-	if err != nil {
-		return errors.Join(ErrExecutionOutcomeUnknown, err)
-	}
-	return nil
+	return true, nil
 }

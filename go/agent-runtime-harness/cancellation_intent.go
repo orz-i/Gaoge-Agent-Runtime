@@ -6,6 +6,8 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
 // cancellationSettlementTimeout bounds cancellation receipt and failure
@@ -132,6 +134,21 @@ func (runner *Runner) beginCancellationFence(ctx context.Context, turn Turn, run
 func (runner *Runner) resumeCommittedCancellationFence(ctx context.Context, turn Turn, runID string) (Item, error) {
 	snapshot, err := runner.runtime.Load(ctx, runID)
 	terminal := err == nil && terminalRuntimeStatus(snapshot.Run.Status)
+	if errors.Is(err, kernel.ErrNotFound) {
+		// A replacement Attempt can have an original committed Invocation
+		// but no Kernel Run. Resume the SAME cancellation intent only after
+		// proving that no physical Start grant ever entered for this Run.
+		invocation, lookupErr := runner.store.GetInvocationByExecutionRefID(ctx, runID)
+		if lookupErr == nil {
+			proven, proofErr := runner.unstartedRetryNoEffect(ctx, turn, invocation, false)
+			if proofErr != nil {
+				return Item{}, proofErr
+			}
+			terminal = proven
+		} else if !errors.Is(lookupErr, ErrNotFound) {
+			return Item{}, lookupErr
+		}
+	}
 	if !terminal && err != nil {
 		return Item{}, errors.Join(ErrConflict, err)
 	}

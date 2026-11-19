@@ -14,7 +14,11 @@ import (
 // physical callback journal. The model/policy/Tool ports are invoked only
 // inside that bracket and still retain their separate receipt contracts.
 func trustedDeferredCallbackStack(d Dependencies) bool {
-	if d.PrepareModelRequest != nil || len(d.CompletionPolicies) != 0 {
+	// Arbitrary Host callbacks can detach asynchronous work after their
+	// synchronous return. An owned Agent callback receipt cannot account for
+	// those detached effects, regardless of the returned typed policy.
+	if d.PrepareModelRequest != nil || d.NormalizeModelPolicy != nil ||
+		len(d.CompletionPolicies) != 0 {
 		return false
 	}
 	for _, item := range d.RunMiddleware {

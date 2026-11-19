@@ -232,6 +232,20 @@ func (store *MemoryStore) RetryInvocation(
 	if owner := store.invocationExecutionRefs[nextExecutionRefID]; owner != "" && owner != current.ID {
 		return Invocation{}, ErrConflict
 	}
+	// This is the last fallible step under the original Turn lock. Budget
+	// admission and Attempt rotation must commit as one Memory operation;
+	// no external physical effect is authorized between the two writes.
+	atomicBudget, budgetErr := AtomicRetryBudgetForStore(ctx, current, nextExecutionRefID)
+	if budgetErr != nil {
+		return Invocation{}, budgetErr
+	}
+	if atomicBudget {
+		if _, budgetErr = (budget.Coordinator{Store: store.MemoryLedgerStore}).AdmitRootRetry(
+			ctx, current.TurnID, current.ID, current.ExecutionRefID, nextExecutionRefID, current.Attempt+1,
+		); budgetErr != nil {
+			return Invocation{}, budgetErr
+		}
+	}
 	delete(store.invocationExecutionRefs, current.ExecutionRefID)
 	current.Attempt++
 	current.ExecutionRefID = nextExecutionRefID

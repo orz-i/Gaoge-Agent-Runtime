@@ -9,6 +9,7 @@ import (
 	"time"
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"gorm.io/gorm"
@@ -300,6 +301,21 @@ func (store *Store) RetryInvocation(
 		// Accepted Handoff/native child with an effectful grant still fences retry.
 		if err := retryChildEffectFenceTx(tx, current.TurnID, current); err != nil {
 			return err
+		}
+		// Use the SAME original Turn transaction for shared budget admission
+		// and Attempt rotation. This also holds the SQL budget revision CAS;
+		// any later failure rolls both writes back, including lost responses.
+		atomicBudget, budgetErr := harness.AtomicRetryBudgetForStore(ctx, current, nextExecutionRefID)
+		if budgetErr != nil {
+			return budgetErr
+		}
+		if atomicBudget {
+			local := &Store{db: tx}
+			if _, budgetErr = (budget.Coordinator{Store: local}).AdmitRootRetry(
+				ctx, current.TurnID, current.ID, current.ExecutionRefID, nextExecutionRefID, current.Attempt+1,
+			); budgetErr != nil {
+				return budgetErr
+			}
 		}
 		if strings.TrimSpace(current.ParentItemID) == "" {
 			result := tx.Model(&turnRecord{}).

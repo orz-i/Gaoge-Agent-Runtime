@@ -187,17 +187,15 @@ func (runner *Runner) startNextInvocationAttempt(
 ) (Snapshot, error) {
 	nextAttempt := invocation.Attempt + 1
 	nextRef := invocationExecutionRefID(invocation.ID, nextAttempt)
-	// Prepare the next bounded Root generation before the Store rotates any
-	// Attempt or Turn status. This grant is inert until the original Store CAS
-	// succeeds, and survives crash/replay with its immutable identity.
-	if err := runner.prepareRootRetryBudget(ctx, turn, invocation); err != nil {
+	// The original Store CAS MUST atomically admit the replacement shared
+	// budget generation. A separate Prepare/Commit saga could survive a crash
+	// as an Accepted Invocation without any cancellable Kernel Run.
+	ctx, err := runner.withAtomicRetryBudget(ctx, turn, invocation, nextRef)
+	if err != nil {
 		return Snapshot{}, err
 	}
 	retried, err := runner.store.RetryInvocation(ctx, invocation.ID, invocation.Revision, nextRef, runner.clock.Now().UTC())
 	if err != nil {
-		return Snapshot{}, err
-	}
-	if err = runner.commitRootRetryBudget(ctx, turn, retried); err != nil {
 		return Snapshot{}, err
 	}
 	if err = runner.recordInvocationItem(ctx, retried); err != nil {
@@ -215,12 +213,9 @@ func (runner *Runner) replayRetriedInvocation(
 	turn Turn,
 	invocation Invocation,
 ) (Snapshot, error) {
-	// Retry can lose its ACK after rotating the Invocation but before
-	// committing the budget generation. Recover the exact prepared intent,
-	// never create an independent post-crash execution identity.
-	if err := runner.commitRootRetryBudget(ctx, turn, invocation); err != nil {
-		return Snapshot{}, err
-	}
+	// The Store's original Retry CAS has already atomically committed the
+	// replacement budget generation. Replay only the same frozen Invocation
+	// and exact physical dispatch identity; never mint another budget grant.
 	loaded, err := runner.runtime.Load(ctx, invocation.ExecutionRefID)
 	if err == nil {
 		return runner.syncRuntimeSnapshotWithRetry(ctx, turn, invocation, loaded)

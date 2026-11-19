@@ -1005,6 +1005,12 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 	if err = runner.cancelTurnBudget(ctx, turn, invocation.ExecutionRefID); err != nil {
 		return Snapshot{}, err
 	}
+	// An atomic Retry can commit its new Invocation before the first
+	// physical Start grant is admitted. Its cancellation is a proof-bound
+	// no-effect terminal transition, not a Kernel.Cancel on an absent Run.
+	if cancelled, recognized, cancelErr := runner.cancelUnstartedRootRetry(ctx, turn, invocation); recognized {
+		return cancelled, cancelErr
+	}
 	runtimeSnapshot, found, err := runner.cancelRuntimeRun(ctx, invocation.ExecutionRefID, reason, &invocation)
 	if err != nil {
 		if errors.Is(err, kernel.ErrChildExecutionBusy) && kernel.IsControlNoEffect(err) {

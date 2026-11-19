@@ -552,6 +552,16 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 			return nil, defaultErr
 		}
 	}
+	// A policy method belonging to the selected Model client is within the
+	// existing provider callback custody contract. An independent Host
+	// function is not: it may launch untracked effects after returning and
+	// cannot convey settled deferred cancellation authority.
+	policyNormalizer := dependencies.NormalizeModelPolicy
+	if policyNormalizer == nil {
+		if owned, ok := dependencies.Model.(SelectedModelPolicyClient); ok {
+			policyNormalizer = owned.NormalizeModelPolicy
+		}
+	}
 	return &Runner{
 		runtime: dependencies.Runtime, model: dependencies.Model, clock: dependencies.Clock, catalog: dependencies.Catalog,
 		executor: dependencies.Executor, approvals: dependencies.Approvals,
@@ -578,7 +588,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 			dependencies.PrepareModelRequest == nil && dependencies.ContextPreparation == nil && dependencies.NormalizeModelPolicy == nil,
 		prepareModelRequest:        dependencies.PrepareModelRequest,
 		trustedDeferredRootControl: trustedDeferredCallbackStack(dependencies),
-		modelPolicyNormalizer:      dependencies.NormalizeModelPolicy,
+		modelPolicyNormalizer:      policyNormalizer,
 		deferResume:                dependencies.DeferResumption,
 	}, nil
 }
