@@ -455,18 +455,17 @@ func ViewState(snapshot kernel.Snapshot) (View, error) {
 // Provider replay payloads contain opaque signed Model content. Retain them in
 // authoritative State, but do not expose them in ordinary public projections.
 func publicModelMessages(values []model.Message) []model.Message {
-	messages := model.CloneMessages(values)
-	for index := range messages {
-		messages[index].ProviderReplay = nil
-	}
-	return messages
+	return model.CloneMessagesWithoutProviderReplay(values)
 }
 
 func publicModelInvocations(values []ModelInvocation) []ModelInvocation {
-	invocations := cloneModelInvocations(values)
-	for index := range invocations {
-		invocations[index].Response.ProviderReplay = nil
-		invocations[index].Request.Messages = publicModelMessages(invocations[index].Request.Messages)
+	invocations := make([]ModelInvocation, len(values))
+	for index, invocation := range values {
+		messages := invocation.Request.Messages
+		invocation.Request.Messages = nil
+		invocation.Response.ProviderReplay = nil
+		invocations[index] = cloneModelInvocation(invocation)
+		invocations[index].Request.Messages = publicModelMessages(messages)
 	}
 	return invocations
 }

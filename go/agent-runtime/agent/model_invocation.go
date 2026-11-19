@@ -168,7 +168,10 @@ func consumeLastModelInvocation(state *runState, now time.Time) (ModelInvocation
 	// hash and receipt remain durable while duplicated transcript bytes are not.
 	invocation.Request = model.Request{}
 	invocation.CatalogFingerprints = nil
-	state.ModelInvocations[index] = cloneModelInvocation(invocation)
+	// The stored receipt already belongs to this state. The returned consumed
+	// value above is isolated, so copying this entire response again only
+	// duplicates opaque replay and Tool payloads without adding isolation.
+	state.ModelInvocations[index] = invocation
 	return consumed, true
 }
 
