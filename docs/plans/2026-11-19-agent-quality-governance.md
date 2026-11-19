@@ -44,3 +44,10 @@ algorithm, tool parallelism, steering, new provider, sandbox, schema migration,
 model catalog, or automatic completion-time evidence acquisition. These require
 separate evidence and scope. The first direction here addresses premature
 read-tool suppression, not every possible Agent solving failure.
+
+## Delivery status
+
+All three implementation stages and a scoped self-review hardening commit have
+been separately committed and pushed to PR #132. Local evidence, exact tested
+heads, the non-mutating PR #131 integration check and remaining limitations are
+recorded in [the delivery audit](../audits/2026-11-19-agent-quality-governance.md).

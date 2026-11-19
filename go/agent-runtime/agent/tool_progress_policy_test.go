@@ -117,9 +117,10 @@ func TestToolProgressExactRepeatsDoNotDispatchAndDifferentArgumentsRemainAvailab
 			return model.Response{Content: "No evidence found"}, nil
 		}
 		arguments := json.RawMessage(`{"query":"same","page":1}`)
-		if modelCalls == 3 {
+		switch modelCalls {
+		case 3:
 			arguments = json.RawMessage(`{ "page": 1, "query": "same" }`)
-		} else if modelCalls == 4 {
+		case 4:
 			arguments = json.RawMessage(`{"query":"different","page":2}`)
 		}
 		return model.Response{ToolCalls: []tools.Call{{ID: fmt.Sprintf("call-%d", modelCalls), ToolKey: "lookup", Arguments: arguments}}}, nil
