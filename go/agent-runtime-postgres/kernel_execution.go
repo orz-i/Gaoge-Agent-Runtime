@@ -98,6 +98,10 @@ func (store *KernelStore) AcquireExecution(ctx context.Context, request kernel.E
 		if scopeErr := pgRejectOwnedPhysical(tx, request.RunID); scopeErr != nil {
 			return scopeErr
 		}
+		current, _, err = pgSettleRetirementSuccessor(tx, current)
+		if err != nil {
+			return err
+		}
 		switch kernel.RunStatus(current.Status) {
 		case kernel.RunStatusCompleted, kernel.RunStatusFailed, kernel.RunStatusCancelled:
 			return kernel.ErrTerminal
@@ -218,6 +222,15 @@ func (store *KernelStore) ReleaseExecution(ctx context.Context, lease kernel.Exe
 		}
 		if scopeErr := pgRejectOwnedPhysical(tx, lease.RunID); scopeErr != nil {
 			return scopeErr
+		}
+		original := current
+		var released bool
+		current, released, err = pgSettleRetirementSuccessor(tx, current)
+		if err != nil {
+			return err
+		}
+		if released && original.ExecutionEpoch == lease.Epoch && original.ExecutionOwner == lease.OwnerID && original.ExecutionLeaseID == lease.LeaseID {
+			return nil
 		}
 		now, err := pgStoreNow(tx)
 		if err != nil {

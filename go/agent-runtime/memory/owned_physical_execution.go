@@ -36,6 +36,9 @@ func (s *Store) BeginOwnedPhysicalExecution(ctx context.Context, g kernel.ChildE
 	if !ok {
 		return kernel.ErrNotFound
 	}
+	if _, err := s.settleRetirementSuccessorLocked(g.ChildRunID); err != nil {
+		return err
+	}
 	if !p.Matches(g, current, l) || !activeMemoryLease(s.execution[g.ChildRunID], l, s.currentExecutionTime()) || s.execution[g.ChildRunID].quarantineRev != 0 {
 		return kernel.ErrExecutionConflict
 	}

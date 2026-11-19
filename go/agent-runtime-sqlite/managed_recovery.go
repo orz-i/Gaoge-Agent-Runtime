@@ -231,6 +231,9 @@ func (s *Store) EnableManagedRecovery(ctx context.Context, q kernel.ManagedEnabl
 		if duplicate != 0 {
 			return t, kernel.ErrExecutionConflict
 		}
+		if _, e = sqliteSettleRetirementSuccessor(ctx, tx, q.RunID); e != nil {
+			return t, e
+		}
 		n, e := kernel.ManagedEnabledTransfer(t, q, snap, l.Epoch, now)
 		if e != nil {
 			return t, e

@@ -198,6 +198,9 @@ func (s *KernelStore) EnableManagedRecovery(ctx context.Context, q kernel.Manage
 		if duplicate != 0 {
 			return t, kernel.ErrExecutionConflict
 		}
+		if _, _, e = pgSettleRetirementSuccessor(tx, r); e != nil {
+			return t, e
+		}
 		n, e := kernel.ManagedEnabledTransfer(t, q, snap, r.ExecutionEpoch, now)
 		if e != nil {
 			return t, e

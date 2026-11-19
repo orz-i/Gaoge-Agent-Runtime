@@ -92,6 +92,9 @@ func (store *Store) AcquireExecution(ctx context.Context, request kernel.Executi
 	if _, exists := store.ownedGrantLocked(request.RunID); exists {
 		return kernel.ExecutionLease{}, kernel.ErrChildExecutionBusy
 	}
+	if _, err := store.settleRetirementSuccessorLocked(request.RunID); err != nil {
+		return kernel.ExecutionLease{}, err
+	}
 	now := store.currentExecutionTime()
 	state := store.execution[request.RunID]
 	if state.quarantineRev != 0 {
@@ -157,6 +160,14 @@ func (store *Store) ReleaseExecution(ctx context.Context, lease kernel.Execution
 	if _, exists := store.ownedGrantLocked(lease.RunID); exists {
 		return kernel.ErrChildExecutionBusy
 	}
+	original := store.execution[lease.RunID].lease
+	released, err := store.settleRetirementSuccessorLocked(lease.RunID)
+	if err != nil {
+		return err
+	}
+	if released && original.OwnerID == lease.OwnerID && original.LeaseID == lease.LeaseID && original.Epoch == lease.Epoch {
+		return nil
+	}
 	state := store.execution[lease.RunID]
 	if !activeMemoryLease(state, lease, store.currentExecutionTime()) {
 		return kernel.ErrExecutionConflict
@@ -175,6 +186,9 @@ func (store *Store) ApplyExecution(ctx context.Context, lease kernel.ExecutionLe
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	if err := store.managedGateLocked(lease.RunID); err != nil {
+		return kernel.Snapshot{}, err
+	}
+	if _, err := store.settleRetirementSuccessorLocked(lease.RunID); err != nil {
 		return kernel.Snapshot{}, err
 	}
 	state := store.execution[lease.RunID]

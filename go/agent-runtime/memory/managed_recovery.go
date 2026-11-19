@@ -170,6 +170,9 @@ func (s *Store) EnableManagedRecovery(ctx context.Context, q kernel.ManagedEnabl
 	if _, exists := s.childGrants[q.GrantID]; exists {
 		return kernel.ManagedTransfer{}, kernel.ErrExecutionConflict
 	}
+	if _, err := s.settleRetirementSuccessorLocked(q.RunID); err != nil {
+		return kernel.ManagedTransfer{}, err
+	}
 	next, err := kernel.ManagedEnabledTransfer(t, q, snap, state.epoch, s.currentExecutionTime())
 	if err != nil {
 		return kernel.ManagedTransfer{}, err

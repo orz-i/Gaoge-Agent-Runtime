@@ -3,10 +3,34 @@ package kernel
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sort"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
 )
+
+// ErrOwnedRetirementPending preserves an original closure whose exact source,
+// owner or completion cannot be reconciled before a successor mutation.
+var ErrOwnedRetirementPending = errors.New("kernel original owned retirement must be acknowledged before successor")
+
+// ReduceOwnedRetirementSuccessor is a pure Store-transaction reducer. The
+// authoritative Store supplies its persisted retirement, current Run and owner
+// under the SAME Run lock as the proposed successor. It closes only a genuine
+// already-finished callback; it cannot retire an active grant, infer callback
+// completion from TTL, upgrade custody, or authorize physical dispatch.
+func ReduceOwnedRetirementSuccessor(r OwnedRetirementReceipt, current Snapshot, epoch uint64, lease ExecutionLease, hasGrants bool) (OwnedRetirementReceipt, bool, error) {
+	if !r.Valid() || r.Phase != "RETIRED" || r.Evidence.Completion.GrantID == "" {
+		return r, false, ErrOwnedRetirementPending
+	}
+	g := r.Evidence.Grant
+	p := OwnedRetirementAcknowledgement{proof: featurecontrol.Seal(g.ChildRunID, r.Evidence.Snapshot.Run.Revision,
+		"agent_owned_retirement_ack", g.ID, OwnedRetirementAcknowledgementPayload(r), nil)}
+	next, _, release, err := ReduceOwnedRetirementACK(r, g, p, current, epoch, lease, hasGrants)
+	if err != nil {
+		return r, false, errors.Join(ErrOwnedRetirementPending, err)
+	}
+	return next, release, nil
+}
 
 // These records are Store facts, not dispatch or acknowledgement capabilities.
 type OwnedSettlementEvidence struct {

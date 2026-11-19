@@ -57,6 +57,9 @@ func (s *Store) AcquireExecution(ctx context.Context, req kernel.ExecutionAcquir
 	if err = ownedGrantBlocks(ctx, tx, req.RunID, nil, true); err != nil {
 		return kernel.ExecutionLease{}, err
 	}
+	if _, err = sqliteSettleRetirementSuccessor(ctx, tx, req.RunID); err != nil {
+		return kernel.ExecutionLease{}, err
+	}
 	now, err := sqliteExecutionNow(ctx, tx)
 	if err != nil {
 		return kernel.ExecutionLease{}, err
@@ -158,6 +161,17 @@ func (s *Store) ReleaseExecution(ctx context.Context, lease kernel.ExecutionLeas
 	defer func() { _ = tx.Rollback() }()
 	if err = ownedGrantBlocks(ctx, tx, lease.RunID, nil, true); err != nil {
 		return err
+	}
+	original, _, err := sqliteManagedLease(ctx, tx, lease.RunID)
+	if err != nil {
+		return err
+	}
+	released, err := sqliteSettleRetirementSuccessor(ctx, tx, lease.RunID)
+	if err != nil {
+		return err
+	}
+	if released && original.Epoch == lease.Epoch && original.OwnerID == lease.OwnerID && original.LeaseID == lease.LeaseID {
+		return tx.Commit()
 	}
 	now, err := sqliteExecutionNow(ctx, tx)
 	if err != nil {

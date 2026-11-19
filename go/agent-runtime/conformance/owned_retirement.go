@@ -19,8 +19,11 @@ func RunOwnedRetirementStoreSuite(t *testing.T, factory func(*testing.T) Managed
 	for _, owned := range []bool{true, false} {
 		t.Run(map[bool]string{true: "owned", false: "borrowed"}[owned], func(t *testing.T) { runRetirementACKWindows(t, factory, owned) })
 	}
-	for _, variant := range []string{"nil-proof", "wrong-source", "foreign-grant", "foreign-owner", "foreign-lease", "foreign-epoch", "wrong-revision", "wrong-eventhead", "new-source", "new-epoch", "replacement-grant", "descendant-grant"} {
+	for _, variant := range []string{"nil-proof", "wrong-source", "foreign-grant", "foreign-owner", "foreign-lease", "foreign-epoch", "wrong-revision", "wrong-eventhead"} {
 		t.Run("first-ack/"+variant, func(t *testing.T) { runRetirementRejectedACK(t, factory, variant) })
+	}
+	for _, successor := range []string{"acquire", "release", "leased-apply", "cancel", "descendant-grant", "quarantine"} {
+		t.Run("successor-closure/"+successor, func(t *testing.T) { runRetirementSuccessorClosure(t, factory, successor) })
 	}
 	for _, kind := range []string{"active", "unknown-callback", "legacy-mark"} {
 		t.Run("no-release/"+kind, func(t *testing.T) { runRetirementNoRelease(t, factory, kind) })
