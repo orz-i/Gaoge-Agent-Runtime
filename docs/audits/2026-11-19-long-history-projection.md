@@ -48,3 +48,28 @@ Further storage optimization requires measured snapshot/write/recovery evidence
 and must preserve original request hashes, receipts, signed replay, privacy
 projection and crash recovery. No lossy compaction or extra archive authority is
 introduced here.
+
+## Follow-up: real SDK long-Run growth, not the public-view microbenchmark
+
+The executable `go/agent-runtime/examples/long-run` now measures aggregate state
+submission at the real fenced Store port and checks a committed-receipt ACK-loss
+recovery. Single local observations on Go 1.27.4, darwin/arm64, with 1,024 text
+bytes per read and zero synthetic replay:
+
+| Read steps | State writes | Final state bytes | Maximum state bytes | Cumulative submitted state bytes | Elapsed ms | First model after Resume, microseconds |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 100 | 706 | 176,525 | 301,806 | 87,817,179 | 667 | 4,704 |
+| 500 | 3,506 | 882,350 | 1,509,230 | 2,174,555,457 | 15,153 | 24,944 |
+
+Both completed exactly the requested Tool executions, retained zero consumed
+request transcripts and performed no committed call twice after reconstruction.
+This identifies the next investigation target: with five times the steps,
+final state grew about fivefold but cumulative full-state submission grew about
+25-fold in this unbounded-history fixture. That is **not** evidence that all
+historical request prefixes are retained, nor a 25-fold database WAL result.
+
+Process heap samples were 6,740,112 and 29,087,376 bytes respectively; sampling
+can miss the true peak. The fixture does not measure disk/WAL and does not
+survive Memory Store process exit. These single timing observations are not
+stable-runner statistics, a production SLO or a measured storage improvement.
+No new storage format is justified solely by the earlier public-view result.

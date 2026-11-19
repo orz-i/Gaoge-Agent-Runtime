@@ -44,6 +44,7 @@ agent-quality-regression:
 	go test -race ./go/agent-runtime/agent -run '^Test(ToolProgress|RunInput|PublicHistory|ConsumedInvocation|ChildBatchStartsAllChildren)' -count=1
 	go test -race ./go/agent-runtime-harness -run '^TestToolAgentSession' -count=1
 	go test -race ./go/agent-runtime-harness/examples/steering-session -count=1
+	go test -race ./go/agent-runtime/examples/long-run -count=1
 	python3 -m unittest discover -s scripts -p 'test_agent_outcome_review.py'
 
 # Report-only local projection microbenchmark, not a production latency gate.

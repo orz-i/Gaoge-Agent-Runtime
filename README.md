@@ -137,6 +137,10 @@ the first lookup is running. It uses only synthetic fixtures and Memory Stores.
 For replay-heavy public-history allocation measurements, use the report-only
 `make benchmark-agent-history` target; this does not change persisted history
 or claim production latency improvements.
+For actual multi-step execution/state growth and known-receipt recovery, run
+`go run ./go/agent-runtime/examples/long-run -steps=100 -payload-bytes=1024`;
+the [measurement guide](go/agent-runtime/examples/long-run/README.md) distinguishes
+logical submitted bytes, sampled heap, resume startup and remaining work.
 
 The [TypeScript client guide](ts/agent-runtime-client/README.md),
 [observability guidance](docs/observability.md), and
