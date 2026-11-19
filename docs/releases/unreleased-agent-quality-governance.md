@@ -47,3 +47,13 @@ wires bounded Context and its exact archive reader, and enables the above
 exploration only for Host-declared nonterminal read tools. It does not change
 `OpenTextAgentSession`, construct implicit Stores, or support approval/delegation
 by pretending those collaborators exist. See [the guide](../tool-agent-session.md).
+
+## Offline task-outcome review
+
+`make agent-quality-regression` checks the new real execution paths with fixture
+models. `review-quality REPORT.json` in the existing baseline launcher reviews
+strictly validated historical quality reports without launching another run.
+It separates task/Oracle success, demonstrated recovery, attempted/planned
+coverage, latency/calls and known Usage. It does not change schema-v1 reports,
+comparison eligibility or historical evidence. Pilots receive no full score;
+unknown Usage is not zero. See [task-outcome governance](../agent-quality-governance.md).

@@ -14,6 +14,9 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
   `harness.OpenToolAgentSession` adds an optional local-Tool/bounded-Context
   composition facade with explicit per-tool policy and exact archive retrieval;
   unsupported approval/delegation/shared-budget configuration fails closed.
+  The offline `agent-quality-regression` gate and baseline `review-quality`
+  command separate task/Oracle outcomes from recovery proof, sampling coverage,
+  latency and known Usage without new Provider calls or changed report schemas.
   See `docs/releases/unreleased-agent-quality-governance.md`.
 
 - **Breaking package boundary (2026-11-17):** Physically move

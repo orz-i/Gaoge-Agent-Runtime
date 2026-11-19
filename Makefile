@@ -38,6 +38,13 @@ agent-quality-distractor-pilot:
 agent-quality-calibrate:
 	@go run ./go/agent-runtime-harness/examples/task-agent -mode=quality-scripted
 
+# Offline task regressions only, not real-model quality or paid Provider sampling.
+.PHONY: agent-quality-regression
+agent-quality-regression:
+	go test -race ./go/agent-runtime/agent -run '^TestToolProgress' -count=1
+	go test -race ./go/agent-runtime-harness -run '^TestToolAgentSession' -count=1
+	python3 -m unittest discover -s scripts -p 'test_agent_outcome_review.py'
+
 # Optional, report-only policy benchmark on two opposing workload shapes.
 # Not an ordinary CI gate: timing is meaningful only on a stable runner.
 benchmark-agent-policy:

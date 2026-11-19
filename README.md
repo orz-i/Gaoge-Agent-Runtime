@@ -124,6 +124,11 @@ fixed tasks, repeatable reports, comparison and recovery limits. The optional
 Probe-only and single-pilot reports cannot be mistaken for complete task scores. The suite measures
 one evidence task family, not general Agent intelligence.
 
+For read-tool/session task regressions, use the offline
+`make agent-quality-regression` gate. To review a saved real-model report without
+another Provider call, use `review-quality PATH_TO_EXISTING_REPORT.json` with
+the baseline launcher; see [task-outcome governance](docs/agent-quality-governance.md).
+
 The [TypeScript client guide](ts/agent-runtime-client/README.md),
 [observability guidance](docs/observability.md), and
 [deployment boundary](docs/deployment.md) cover host integration.
