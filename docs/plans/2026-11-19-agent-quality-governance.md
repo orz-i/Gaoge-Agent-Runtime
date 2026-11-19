@@ -74,3 +74,34 @@ Extension code is pushed in `9a03d474` (projection allocation), `c53d0a7b`
 input-boundary audit. Ordinary native Tool parallelism remains **not implemented**
 in this delivery; the existing independent-child regression is not relabeled
 as a new native parallel executor.
+
+## Acceptance-driven correction after the completion reassessment
+
+- `c3c08b69`: executable Host steering/late-input example, including next-Turn
+  transcript preservation and duplicate-input detection; no new SDK interface.
+- `ceff0354`: actual 100/500-step state-submission/reconstruction measurement.
+  Final state grows about 5x while submitted aggregate JSON grows about 25x in
+  that Memory/unbounded-history fixture; this is not measured disk/WAL.
+- `48aede56`: fixed a real required-Tool bug discovered by the document task.
+  Two regressions were reproduced RED on unmodified `ceff0354`, then passed:
+  committed JSON lists/scalars were previously mistaken for failed calls.
+- `83082b4f`: three independently checked code/document/approval deliverables,
+  negative Oracles, actual artifacts, explicit profiles and a separately gated
+  Provider path. Default fixture passes are not real-model quality evidence.
+
+Pinned combination `83082b4f125e5b1b2b0421f7b9597cd37ab14270` + PR #131
+`5198b27d9afe5194c6d5aa2904e03e01caf5b634` produced temporary tree
+`574b2550b9acdfb24b63557fd871a64b9173920d` without textual conflict. Agent,
+Harness and HTTP race suites, the custody overlay assertion, and the new task
+acceptance tests passed from that temporary source. No branch was merged.
+
+Remaining: authorized actual-model repetitions/control-treatment comparison,
+broader held-out workloads, persistent-backend/WAL/process-crash measurement,
+and ordinary native Tool parallelism. No automatic completion claim is made.
+
+Latest local delivery checks: full task-agent package tests and race tests;
+focused artifact/negative-Oracle tests; full workspace lint; format/metadata;
+expanded `agent-quality-regression`; integration compile; external Go/TS
+consumers (46 TS tests); 159 Python report tests; unchanged scripted evidence
+calibration 40/40. These are separate measured gates, not a new uninterrupted
+whole-workspace or real-model effectiveness certification.

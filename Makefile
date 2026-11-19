@@ -41,7 +41,7 @@ agent-quality-calibrate:
 # Offline task regressions only, not real-model quality or paid Provider sampling.
 .PHONY: agent-quality-regression
 agent-quality-regression:
-	go test -race ./go/agent-runtime/agent -run '^Test(ToolProgress|RunInput|PublicHistory|ConsumedInvocation|ChildBatchStartsAllChildren)' -count=1
+	go test -race ./go/agent-runtime/agent -run '^Test(ToolProgress|RunInput|PublicHistory|ConsumedInvocation|ChildBatchStartsAllChildren|RequiredToolCompletion|RequiredListToolResult)' -count=1
 	go test -race ./go/agent-runtime-harness -run '^TestToolAgentSession' -count=1
 	go test -race ./go/agent-runtime-harness/examples/steering-session -count=1
 	go test -race ./go/agent-runtime/examples/long-run -count=1
