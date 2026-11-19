@@ -11,9 +11,24 @@ import (
 
 // Outcome is sealed together with the exact callback-return snapshot. It is
 // not authority on its own and cannot be inferred from terminal/clean state.
+// OwnedCallbackCustody describes the contract of the ACTUAL executing callback,
+// not the composition of a later observer. Empty legacy/opaque custody never
+// authorizes deferred control, even when the synchronous callback returned.
+type OwnedCallbackCustody string
+
+const (
+	OwnedCustodyPrepared OwnedCallbackCustody = "prepared-v1"
+	OwnedCustodyScoped   OwnedCallbackCustody = "scoped-v1"
+)
+
+func (c OwnedCallbackCustody) Valid() bool {
+	return c == "" || c == OwnedCustodyPrepared || c == OwnedCustodyScoped
+}
+
 type OwnedPhysicalCallbackOutcome struct {
-	HostCompleted bool
-	LeaseOwned    bool
+	HostCompleted  bool
+	LeaseOwned     bool
+	ControlCustody OwnedCallbackCustody `json:",omitempty"`
 }
 type OwnedPhysicalCallbackCompletion struct {
 	GrantID          string
@@ -21,6 +36,7 @@ type OwnedPhysicalCallbackCompletion struct {
 	ReturnSourceHash string
 	HostCompleted    bool
 	LeaseOwned       bool
+	ControlCustody   OwnedCallbackCustody `json:",omitempty"`
 }
 
 // OwnedPhysicalCallbackReturnPayload is a pure canonical proof payload.
@@ -40,7 +56,9 @@ func OwnedPhysicalCallbackReturnPayload(s Snapshot, o OwnedPhysicalCallbackOutco
 type OwnedPhysicalCallbackReturn struct{ proof *featurecontrol.Proof }
 
 func (p OwnedPhysicalCallbackReturn) Matches(g ChildExecutionGrant, s Snapshot, o OwnedPhysicalCallbackOutcome) bool {
-	return g.IsOwned() && g.ID != "" && g.ChildRunID == s.Run.ID &&
+	return o.ControlCustody.Valid() &&
+		(o.ControlCustody != OwnedCustodyPrepared || g.AdmissionOperation == "prepare") &&
+		g.IsOwned() && g.ID != "" && g.ChildRunID == s.Run.ID &&
 		s.Run.Kind == "agent" && s.Run.ParentRunID == "" && s.Run.Revision >= g.ExpectedRevision &&
 		p.proof.Matches(s.Run.ID, s.Run.Revision, "agent_owned_callback_return", g.ID, OwnedPhysicalCallbackReturnPayload(s, o), nil)
 }
@@ -49,7 +67,7 @@ func (p OwnedPhysicalCallbackReturn) Completion(g ChildExecutionGrant, s Snapsho
 		return OwnedPhysicalCallbackCompletion{}
 	}
 	hash := sha256.Sum256(OwnedPhysicalCallbackReturnPayload(s, o))
-	return OwnedPhysicalCallbackCompletion{GrantID: g.ID, ReturnRevision: s.Run.Revision, ReturnSourceHash: hex.EncodeToString(hash[:]), HostCompleted: o.HostCompleted, LeaseOwned: o.LeaseOwned}
+	return OwnedPhysicalCallbackCompletion{GrantID: g.ID, ReturnRevision: s.Run.Revision, ReturnSourceHash: hex.EncodeToString(hash[:]), HostCompleted: o.HostCompleted, LeaseOwned: o.LeaseOwned, ControlCustody: o.ControlCustody}
 }
 func (r *Runtime) RecordOwnedPhysicalCallbackReturn(ctx context.Context, g ChildExecutionGrant, revision uint64, o OwnedPhysicalCallbackOutcome, proof *featurecontrol.Proof) error {
 	if r == nil || ctx == nil || !g.IsOwned() || revision == 0 {

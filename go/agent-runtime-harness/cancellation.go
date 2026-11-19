@@ -228,6 +228,16 @@ func (runner *Runner) cancelRuntimeRun(
 			}
 			cancelled = verified
 		}
+		if delegatedChild != nil && err == nil && cancelled.Run.Kind == agent.RunKind {
+			// A callback may enter and return without changing Run.Revision
+			// between the read-side witness and Cancel CAS. Recheck the actual
+			// complete callback history on the now-terminal Run before closing
+			// the durable intent; a borrowed/opaque retirement stays unknown.
+			coordinator := runner.handoffs.(*handoff.Coordinator)
+			if !coordinator.VerifiedLocalDelegationControl(ctx, runner.runtime, delegation, cancelled) {
+				return kernel.Snapshot{}, true, ErrHandoffCancellationUnverified
+			}
+		}
 		if nativeKernel {
 			if kernel.IsControlNoEffect(err) {
 				if errors.Is(err, kernel.ErrConflict) {

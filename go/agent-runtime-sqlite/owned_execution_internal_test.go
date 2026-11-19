@@ -115,6 +115,12 @@ func TestOwnedSchemaMigrationPreservesOriginalGrants(t *testing.T) {
 	if err = MigrateV5ToV6(t.Context(), path); err != nil {
 		t.Fatalf("repeat V6 migration: %v", err)
 	}
+	if err = MigrateV6ToV7(t.Context(), path); err != nil {
+		t.Fatal(err)
+	}
+	if err = MigrateV6ToV7(t.Context(), path); err != nil {
+		t.Fatalf("repeat V7 migration: %v", err)
+	}
 	current, err := OpenExisting(t.Context(), path)
 	if err != nil {
 		t.Fatal(err)
@@ -127,8 +133,8 @@ func TestOwnedSchemaMigrationPreservesOriginalGrants(t *testing.T) {
 	if authority.Namespace != oldNamespace {
 		t.Fatal("migration replaced authority")
 	}
-	if e = current.db.QueryRow("PRAGMA user_version").Scan(&version); e != nil || version != 6 {
-		t.Fatalf("V5ToV6 destination: %d %v", version, e)
+	if e = current.db.QueryRow("PRAGMA user_version").Scan(&version); e != nil || version != schemaVersion {
+		t.Fatalf("V6ToV7 destination: %d %v", version, e)
 	}
 
 	var count int

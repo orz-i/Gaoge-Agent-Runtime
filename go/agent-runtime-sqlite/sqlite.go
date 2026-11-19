@@ -16,7 +16,7 @@ import (
 )
 
 // Schema v6 adds genuine Root-owned retirement receipts; older versions require explicit migration.
-const schemaVersion = 6
+const schemaVersion = 7
 
 var (
 	ErrUnsupportedSchema = errors.New("unsupported SQLite runtime schema")
@@ -207,6 +207,8 @@ func openStoreOptions(ctx context.Context, path string, create bool, migrate int
 		err = store.migrateV4ToV5(ctx)
 	case 6:
 		err = store.migrateV5ToV6(ctx)
+	case 7:
+		err = store.migrateV6ToV7(ctx)
 	default:
 		err = store.initialize(ctx, create)
 	}
@@ -327,7 +329,7 @@ func (s *Store) initialize(ctx context.Context, create bool) error {
 				return fmt.Errorf("create SQLite runtime schema: %w", err)
 			}
 		}
-		if _, err = tx.ExecContext(ctx, "PRAGMA user_version = 6"); err != nil {
+		if _, err = tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", schemaVersion)); err != nil {
 			return err
 		}
 		if err = initializeManagedAuthority(ctx, tx); err != nil {
@@ -379,6 +381,7 @@ var schemaDDL = append(append([]string{
 		callback_return_source_hash TEXT NOT NULL DEFAULT '',
 		callback_host_completed INTEGER NOT NULL DEFAULT 0,
 		callback_lease_owned INTEGER NOT NULL DEFAULT 0,
+		callback_control_custody TEXT NOT NULL DEFAULT '',
 		settlement_evidence_json BLOB,
 		PRIMARY KEY(grant_id,parent_run_id)
 	)`,

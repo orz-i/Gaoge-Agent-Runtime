@@ -312,3 +312,11 @@ receipts. Existing v5 files require explicit `MigrateV5ToV6` with old writers
 stopped and a retained backup. Opening a v5 file does not migrate it. Migration
 preserves original grants, marks, callback records and managed authority and
 does not fabricate retirement receipts or historical Mark provenance.
+
+### Executing callback custody schema (v7)
+
+Schema v7 seals the actual executing callback's control-custody classification
+with its immutable return and retirement evidence. Existing v6 files require
+explicit `MigrateV6ToV7` after stopping old writers and retaining a backup.
+Earlier databases must complete each prior migration first. Historical empty
+custody is preserved as unknown, never upgraded from a new Runner's composition.

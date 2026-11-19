@@ -12,7 +12,8 @@ var ownedRetirementSchemaDDL = []string{
 }
 
 func schemaV5DDL() []string {
-	out := append([]string(nil), schemaDDL[:len(schemaDDL)-len(ownedRetirementSchemaDDL)]...)
+	v6 := schemaV6DDL()
+	out := append([]string(nil), v6[:len(v6)-len(ownedRetirementSchemaDDL)]...)
 	for i, ddl := range out {
 		if strings.HasPrefix(ddl, "CREATE TABLE runtime_child_effect_grants ") {
 			out[i] = strings.Replace(ddl, "\n\t\tsettlement_evidence_json BLOB,", "", 1)
@@ -41,7 +42,7 @@ func (s *Store) migrateV5ToV6(ctx context.Context) error {
 		return e
 	}
 	if version == 6 {
-		return validateSchemaDDL(ctx, tx, schemaDDL)
+		return validateSchemaDDL(ctx, tx, schemaV6DDL())
 	}
 	if version != 5 {
 		return fmt.Errorf("%w: migration requires exact v5, got %d", ErrUnsupportedSchema, version)
@@ -52,7 +53,7 @@ func (s *Store) migrateV5ToV6(ctx context.Context) error {
 	if _, e = tx.ExecContext(ctx, `ALTER TABLE runtime_child_effect_grants RENAME TO runtime_child_effect_grants_v5`); e != nil {
 		return e
 	}
-	for _, ddl := range schemaDDL {
+	for _, ddl := range schemaV6DDL() {
 		if strings.HasPrefix(ddl, "CREATE TABLE runtime_child_effect_grants ") {
 			if _, e = tx.ExecContext(ctx, ddl); e != nil {
 				return e
@@ -66,7 +67,7 @@ func (s *Store) migrateV5ToV6(ctx context.Context) error {
 	if _, e = tx.ExecContext(ctx, `DROP TABLE runtime_child_effect_grants_v5`); e != nil {
 		return e
 	}
-	for _, ddl := range schemaDDL {
+	for _, ddl := range schemaV6DDL() {
 		if strings.HasPrefix(ddl, "CREATE INDEX runtime_child_grants_") {
 			if _, e = tx.ExecContext(ctx, ddl); e != nil {
 				return e
@@ -81,7 +82,7 @@ func (s *Store) migrateV5ToV6(ctx context.Context) error {
 	if _, e = tx.ExecContext(ctx, "PRAGMA user_version=6"); e != nil {
 		return e
 	}
-	if e = validateSchemaDDL(ctx, tx, schemaDDL); e != nil {
+	if e = validateSchemaDDL(ctx, tx, schemaV6DDL()); e != nil {
 		return e
 	}
 	return conflictOrDatabaseError(tx.Commit())

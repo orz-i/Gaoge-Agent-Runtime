@@ -100,6 +100,7 @@ type KernelChildEffectGrantRecord struct {
 	CallbackReturnSourceHash string `gorm:"not null;default:''"`
 	CallbackHostCompleted    bool   `gorm:"not null;default:false"`
 	CallbackLeaseOwned       bool   `gorm:"not null;default:false"`
+	CallbackControlCustody   string `gorm:"size:32;not null;default:''"`
 
 	GrantID         string `gorm:"size:128;primaryKey"`
 	ParentRunID     string `gorm:"size:64;primaryKey;index:idx_agent_kernel_child_grants_parent"`

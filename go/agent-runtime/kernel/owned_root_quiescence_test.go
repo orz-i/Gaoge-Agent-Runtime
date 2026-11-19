@@ -15,7 +15,7 @@ func settledRootFixture() (kernel.Snapshot, kernel.OwnedRetirementReceipt) {
 		ExecutionOwnerID: "owner", ExecutionLeaseID: "lease", ExecutionEpoch: 3,
 		AdmissionSourceHash: strings.Repeat("a", 64), AdmissionOperation: "prepare",
 	}
-	c := kernel.OwnedPhysicalCallbackCompletion{GrantID: g.ID, ReturnRevision: run.Run.Revision, ReturnSourceHash: strings.Repeat("b", 64), HostCompleted: true, LeaseOwned: true}
+	c := kernel.OwnedPhysicalCallbackCompletion{GrantID: g.ID, ReturnRevision: run.Run.Revision, ReturnSourceHash: strings.Repeat("b", 64), HostCompleted: true, LeaseOwned: true, ControlCustody: kernel.OwnedCustodyPrepared}
 	r := kernel.OwnedRetirementReceipt{Version: 1, Evidence: kernel.OwnedSettlementEvidence{Version: 1, Grant: g, Snapshot: run, Completion: c, MarkOrigin: "OWNER_RETURN"}, Closures: []kernel.ManagedTransfer{}, Phase: "ACKNOWLEDGED"}
 	r.ACKIdentity = r.Identity()
 	return run, r
@@ -58,6 +58,12 @@ func TestVerifiedOwnedRootQuiescenceRequiresExactRetiredCallback(t *testing.T) {
 		{"stale snapshot", original, func() kernel.Snapshot { s := original; s.Run.Revision++; return s }(), 3, kernel.ExecutionLease{}, false, []kernel.OwnedRetirementReceipt{receipt}},
 		{"wrong kind", original, func() kernel.Snapshot { s := original; s.Run.Kind = "a2a"; return s }(), 3, kernel.ExecutionLease{}, false, []kernel.OwnedRetirementReceipt{receipt}},
 		{"duplicate owned receipts", original, original, 3, kernel.ExecutionLease{}, false, []kernel.OwnedRetirementReceipt{receipt, receipt}},
+		{"legacy or opaque custody", original, original, 3, kernel.ExecutionLease{}, false, []kernel.OwnedRetirementReceipt{func() kernel.OwnedRetirementReceipt {
+			r := receipt
+			r.Evidence.Completion.ControlCustody = ""
+			r.ACKIdentity = r.Identity()
+			return r
+		}()}},
 		{"tampered callback proof", original, original, 3, kernel.ExecutionLease{}, false, []kernel.OwnedRetirementReceipt{func() kernel.OwnedRetirementReceipt {
 			r := receipt
 			r.Evidence.Completion.ReturnSourceHash = "bad"

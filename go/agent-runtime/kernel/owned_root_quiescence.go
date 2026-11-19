@@ -88,6 +88,9 @@ func VerifyPreparedRootSettlementFacts(
 			expected.Run.ErrorCode != "run.cancelled") {
 		return ErrExecutionConflict
 	}
+	if len(receipts) != 1 || receipts[0].Evidence.Completion.ControlCustody != OwnedCustodyPrepared {
+		return ErrExecutionConflict
+	}
 	return verifyOwnedRootSettlementFacts(expected, current, epoch, lease, hasActiveGrants, receipts, "prepare")
 }
 
@@ -113,10 +116,14 @@ func verifyOwnedRootSettlementFacts(
 		if !r.Valid() || r.Evidence.Grant.ChildRunID != current.Run.ID {
 			return ErrExecutionConflict
 		}
+		// ALL physical history matters. A later scoped callback cannot retire
+		// detached effects from an earlier opaque callback, or borrow its ACK.
 		if r.Phase != "ACKNOWLEDGED" || !r.Evidence.Completion.LeaseOwned ||
-			!r.Evidence.Completion.HostCompleted ||
-			(requiredOperation != "" && r.Evidence.Grant.AdmissionOperation != requiredOperation) {
-			continue
+			!r.Evidence.Completion.HostCompleted || r.Evidence.Completion.ControlCustody == "" {
+			return ErrExecutionConflict
+		}
+		if requiredOperation != "" && r.Evidence.Grant.AdmissionOperation != requiredOperation {
+			return ErrExecutionConflict
 		}
 		original := r.Evidence.Snapshot
 		same := r.Evidence.Grant.ExecutionEpoch == epoch && ManagedDigest(original) == ManagedDigest(current)
