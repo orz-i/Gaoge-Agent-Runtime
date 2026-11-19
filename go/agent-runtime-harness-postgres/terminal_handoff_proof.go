@@ -20,9 +20,6 @@ func terminalHandoffChildEvidenceTx(
 		startedIDs = append(startedIDs, owner.ParentItemID)
 		ownerIDs = append(ownerIDs, owner.ID)
 	}
-	if len(startedIDs) == 0 {
-		return nil, nil
-	}
 	var delegationRows, grants, receipts []itemRecord
 	// Load each original Delegation by exact ID, then up to two terminal
 	// Delegation children regardless of their Run/Turn (a second one is
@@ -67,6 +64,27 @@ func terminalHandoffChildEvidenceTx(
 		return nil, err
 	}
 	for _, row := range transitions {
+		item, err := itemFromRecord(row)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, item)
+	}
+	// Waiting-only observations deliberately have no child owner. Include
+	// every original Delegation fact as well, not just known Started owners,
+	// so SQL and Memory apply the same typed historical completeness rule.
+	var history []itemRecord
+	if err := tx.Where("turn_id = ? AND kind = ?", turnID, string(harness.ItemDelegation)).Find(&history).Error; err != nil {
+		return nil, err
+	}
+	seen := make(map[string]bool, len(all))
+	for _, item := range all {
+		seen[item.ID] = true
+	}
+	for _, row := range history {
+		if seen[row.ID] {
+			continue
+		}
 		item, err := itemFromRecord(row)
 		if err != nil {
 			return nil, err

@@ -170,6 +170,7 @@ func TestRealPostgresRootGenerationLifecycle(t *testing.T) {
 		{"undispatched-leases", TestPreparedChildCancellationSurvivesLeaseOnlyEpochs},
 		{"cancel-attempt-CAS", TestCancellationAdmissionCompetesWithExactRetryAttempt},
 		{"historical-controls", TestHistoricalChildControlsRejectBeforeIntentAdmission},
+		{"waiting-history-retry", TestWaitingOnlyHistorySurvivesRetryAndNoRunCancellation},
 	} {
 		t.Run(test.name, test.run)
 	}

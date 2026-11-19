@@ -58,22 +58,17 @@ func validUnstartedRetryHistoricalChildren(root Invocation, children []Invocatio
 		}
 	}
 	for _, item := range items {
-		if item.Kind != ItemDelegation {
+		if item.Kind != ItemDelegation || item.Status == ItemWaiting {
 			continue
 		}
-		// Every historical Delegation, including terminal result Items,
-		// must belong to a complete, frozen original child. Orphaned Items
-		// or a terminal child whose Input stopped decoding cannot authorize
-		// cancellation of the current Root's unstarted successor.
 		parentItemID := item.ParentItemID
 		if item.Status == ItemStarted {
 			parentItemID = item.ID
 		}
 		child, ok := byRun[item.RunID]
-		if !ok || !isHandoffDelegationInvocation(child) ||
-			child.ParentItemID != parentItemID || item.TurnID != root.TurnID {
+		if !ok || !isHandoffDelegationInvocation(child) || child.ParentItemID != parentItemID || item.TurnID != root.TurnID {
 			return false
 		}
 	}
-	return true
+	return validDelegationWaitingFacts(root, children, items, ledger)
 }

@@ -180,7 +180,7 @@ func ValidTurnTerminalDescendantsWithBudget(root Invocation, owners []Invocation
 			return false
 		}
 	}
-	return true
+	return validDelegationWaitingFacts(root, owners, items, ledger)
 }
 
 // ValidTurnTerminalTransition checks original immutable state, intended
