@@ -71,6 +71,9 @@ export function activateDescriptionCheck(repository, { apply = false, api = gith
   // Re-read immediately before a possible write so newly added checks survive.
   const current = api(endpoint);
   const body = requiredChecksWithDescription(current);
+  if (body.checks.find((check) => check.context === descriptionCheck).app_id !== appId) {
+    throw new Error("trusted check app changed during activation; re-run readiness checks");
+  }
   const changed = !current.checks.some((check) => check.context === descriptionCheck);
   if (apply && changed) api(endpoint, { method: "PATCH", body });
   return { repository, branch, apply, changed, pullRequests, ...body };

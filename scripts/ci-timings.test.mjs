@@ -33,6 +33,17 @@ test("successes and failures append monotonic timings without raw command argume
   assert.doesNotMatch(JSON.stringify(records()), /not-for-reporting|original failure/u);
 });
 
+test("timing storage failures cannot change success or replace the original test error", (t) => {
+  const { directory, env } = fixture(t);
+  const file = path.join(directory, "not-a-directory");
+  writeFileSync(file, "fixture");
+  const options = { env: { ...env, CI_TIMING_DIRECTORY: file } };
+  const label = { kind: "target", name: "go-test" };
+  assert.equal(measureCI(label, () => 42, options), 42);
+  const error = Object.assign(new Error("test failed"), { exitCode: 7 });
+  assert.throws(() => measureCI(label, () => { throw error; }, options), (actual) => actual === error);
+});
+
 test("target runner preserves order/argv and stops immediately on a failed target", () => {
   const calls = [];
   const labels = [];
@@ -44,7 +55,7 @@ test("target runner preserves order/argv and stops immediately on a failed targe
     { command: "make", args: ["--no-print-directory", "go-lint"] },
   ]);
   assert.deepEqual(labels.map((label) => label.name), ["metadata", "go-lint"]);
-  for (const targets of [[], ["--eval=unsafe"], ["go-test;echo unsafe"], ["go-test", "go-test"]]) {
+  for (const targets of [[], [null], ["--eval=unsafe"], ["go-test;echo unsafe"], ["go-test", "go-test"]]) {
     assert.throws(() => runCITargets(targets, options), /distinct Make target/u);
   }
 });
@@ -130,7 +141,7 @@ test("CI target lists retain all checks and every measured job publishes even af
   assert.match(makefile, /ci-static:\n\tnode scripts\/run-ci-targets\.mjs \$\(CHECK_STATIC_TARGETS\)/u);
   assert.match(makefile, /ci-execution-no-race:\n\tnode scripts\/run-ci-targets\.mjs \$\(filter-out go-race,\$\(CHECK_EXECUTION_TARGETS\)\)/u);
   const ci = read(".github/workflows/ci.yml");
-  assert.equal([...ci.matchAll(/if: always\(\)\n\s+uses: \.\/\.github\/actions\/upload-ci-timings/gu)].length, 7);
+  assert.equal([...ci.matchAll(/if: always\(\)\n\s+continue-on-error: true\n\s+uses: \.\/\.github\/actions\/upload-ci-timings/gu)].length, 7);
   const action = read(".github/actions/upload-ci-timings/action.yml");
   assert.match(action, /retention-days: 7/u);
   assert.match(action, /github\.run_attempt/u);

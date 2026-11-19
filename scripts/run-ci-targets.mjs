@@ -4,7 +4,7 @@ import { measureCI, runCICommand } from "./ci-timings.mjs";
 
 export function runCITargets(targets, { run = runCICommand, measure = measureCI } = {}) {
   if (!targets.length || new Set(targets).size !== targets.length ||
-      targets.some((target) => !/^[a-z][a-z0-9-]*$/u.test(target))) {
+      targets.some((target) => typeof target !== "string" || !/^[a-z][a-z0-9-]*$/u.test(target))) {
     throw new Error("provide distinct Make target names, not flags or shell commands");
   }
   for (const target of targets) {

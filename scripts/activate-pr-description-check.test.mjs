@@ -26,7 +26,7 @@ test("unknown or conflicting branch-protection configurations fail closed", () =
   assert.throws(() => requiredChecksWithDescription({ ...initial(), checks: [...initial().checks, { context: descriptionCheck, app_id: 7 }] }), /different app/u);
 });
 
-function fixture({ workflowMissing = false, conclusion = "success", mergeSha = "merge-sha", extraCheck = false } = {}) {
+function fixture({ workflowMissing = false, conclusion = "success", mergeSha = "merge-sha", extraCheck = false, appChanged = false } = {}) {
   const calls = [];
   const api = (endpoint, options = {}) => {
     calls.push({ endpoint, ...options });
@@ -43,6 +43,7 @@ function fixture({ workflowMissing = false, conclusion = "success", mergeSha = "
     if (endpoint.endsWith("/required_status_checks")) {
       if (options.method === "PATCH") return options.body;
       const current = initial();
+      if (appChanged && calls.filter((call) => call.endpoint === endpoint).length > 1) current.checks[0].app_id = 99;
       if (extraCheck && calls.filter((call) => call.endpoint === endpoint).length > 1) {
         current.checks.push({ context: "new concurrent check", app_id: 8 });
         current.contexts.push("new concurrent check");
@@ -69,11 +70,26 @@ test("dry run is read-only; apply writes only required status checks after all r
 });
 
 test("an unmerged workflow, a missing merge commit, or a newer failed check prevents every write", () => {
-  for (const options of [{ workflowMissing: true }, { mergeSha: null }, { conclusion: "failure" }, { conclusion: "skipped" }, { conclusion: "cancelled" }]) {
+  for (const options of [{ workflowMissing: true }, { mergeSha: null }, { conclusion: "failure" }, { conclusion: "skipped" }, { conclusion: "cancelled" }, { appChanged: true }]) {
     const { api, calls } = fixture(options);
     assert.throws(() => activateDescriptionCheck("owner/repo", { api, apply: true }));
     assert.ok(calls.every((call) => !call.method));
   }
+});
+
+test("readiness paginates open PRs instead of checking only the first page", () => {
+  const { api: base, calls } = fixture();
+  const pages = [];
+  const api = (endpoint, options) => {
+    if (endpoint.includes("/pulls?")) {
+      pages.push(endpoint);
+      return endpoint.endsWith("page=1") ? Array.from({ length: 100 }, (_, i) => ({ number: i + 1, merge_commit_sha: "merge-sha" })) : [];
+    }
+    return base(endpoint, options);
+  };
+  assert.equal(activateDescriptionCheck("owner/repo", { api }).pullRequests, 100);
+  assert.equal(pages.length, 2);
+  assert.ok(calls.every((call) => !call.method));
 });
 
 test("the standalone workflow is read-only and the old required gate remains during staged rollout", () => {

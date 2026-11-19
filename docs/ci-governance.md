@@ -57,9 +57,10 @@ CI trigger/validator before removing the independent required check.
 ## Static checks and the required quality gate
 
 `make check`, `make check-no-race`, and the release gate retain every pre-P0
-target. Their static targets now run before behavioral tests. CI exposes
-the timed equivalents of `make check-static` and `make check-execution-no-race` as separate steps on the
-same runner, so a lint/type error is visible without waiting for full unit tests.
+target. Their static targets now run before behavioral tests. CI exposes the timed
+equivalents of `make check-static` and `make check-execution-no-race` as separate
+steps on the same runner, so a lint/type error is visible without waiting for full
+unit tests.
 No additional Go cache or runner is introduced. Do not run tidy and tests
 concurrently in the same checkout: tidy temporarily edits module files.
 
@@ -97,6 +98,9 @@ failure, with seven-day retention and a distinct name per job/run attempt. An
 operation records its label, mode, start timestamp, monotonic duration, exit code,
 and signal; it does not copy raw argv, environment, logs, Provider content, or
 credentials. Failed operations remain visible and stop subsequent targets.
+Timing storage/publication is best-effort: a reporting outage cannot fail a
+successful check or replace/mask an actual test failure. The correctness and
+security steps themselves do not use `continue-on-error`.
 
 Target durations include nested module durations: **do not sum both levels**.
 The summary shows target/command times and the slowest 20 module operations;

@@ -23,9 +23,15 @@ export function measureCI(label, task, { env = process.env, clock = () => perfor
     const durationMs = Math.max(0, Math.round(clock() - start));
     const record = { schemaVersion: 1, job, kind: label.kind, name: label.name,
       ...(label.mode ? { mode: label.mode } : {}), startedAt, durationMs, exitCode, signal };
-    mkdirSync(env.CI_TIMING_DIRECTORY, { recursive: true });
-    appendFileSync(path.join(env.CI_TIMING_DIRECTORY, `${job}.jsonl`), `${JSON.stringify(record)}\n`);
-    console.log(`[ci-timing] ${label.kind} ${label.name}${label.mode ? ` (${label.mode})` : ""}: ${(durationMs / 1000).toFixed(3)}s, exit ${exitCode}${signal ? `, ${signal}` : ""}`);
+    try {
+      mkdirSync(env.CI_TIMING_DIRECTORY, { recursive: true });
+      appendFileSync(path.join(env.CI_TIMING_DIRECTORY, `${job}.jsonl`), `${JSON.stringify(record)}\n`);
+      console.log(`[ci-timing] ${label.kind} ${label.name}${label.mode ? ` (${label.mode})` : ""}: ${(durationMs / 1000).toFixed(3)}s, exit ${exitCode}${signal ? `, ${signal}` : ""}`);
+    } catch (error) {
+      // Reporting must neither replace the original test error nor create a new
+      // correctness dependency on timing storage.
+      console.warn(`[ci-timing] unable to save timing: ${error.message}`);
+    }
   }
 }
 
