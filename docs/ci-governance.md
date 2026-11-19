@@ -64,3 +64,12 @@ independently required integration check are unchanged.
 
 CI jobs have explicit timeouts (3–30 minutes, depending on the job). These are
 hang bounds, not performance assertions or reasons to retry a failed test.
+
+## System dependencies
+
+All four existing Linux CI users of SQLite and the release job share
+`.github/actions/setup-sqlite`. A successful `dpkg-query` reporting
+`install ok installed` skips both `apt-get update` and installation. Missing or
+partially removed packages still require a successful update, install, and
+post-install verification. Network/install failures are never converted into
+success. This does not change the dependency version policy or runner image.

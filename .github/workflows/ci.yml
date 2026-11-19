@@ -57,8 +57,7 @@ jobs:
         if: github.event_name == 'pull_request'
         run: node scripts/check-pr-body-format.mjs
 
-      - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libsqlite3-dev
+      - uses: ./.github/actions/setup-sqlite
 
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
@@ -93,8 +92,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 24
-      - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libsqlite3-dev
+      - uses: ./.github/actions/setup-sqlite
       - name: Run all Go race tests
         run: make go-race
 
@@ -128,8 +126,7 @@ jobs:
           node-version: 24
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
-      - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libsqlite3-dev
+      - uses: ./.github/actions/setup-sqlite
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
       - name: Enforce coverage floors
@@ -195,8 +192,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-go
-      - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libsqlite3-dev
+      - uses: ./.github/actions/setup-sqlite
       - name: Run real-engine suites
         run: make integration-test
 
