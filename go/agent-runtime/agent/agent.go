@@ -304,6 +304,8 @@ type Dependencies struct {
 	// ToolProgressPolicy is copied at composition and frozen in each new Run.
 	// It changes read/search strategy only, never grants or physical replay.
 	ToolProgressPolicy *ToolProgressPolicy
+	// Inputs is an optional trusted read-only Host user-input log.
+	Inputs RunInputSource
 }
 
 // StartRequest starts one explicitly selected Agent Run.
@@ -362,6 +364,8 @@ type Runner struct {
 	toolChain                 *plugin.ToolChain
 	completionPolicies        []CompletionPolicy
 	toolProgressPolicy        *ToolProgressPolicy
+	inputs                    RunInputSource
+	inputBinding              string
 	limits                    Limits
 	execution                 ExecutionPolicy
 	runExecution              *RunExecution
@@ -408,6 +412,8 @@ type runState struct {
 	ModelInvocations []ModelInvocation          `json:"modelInvocations,omitempty"`
 
 	ToolProgressPolicy *ToolProgressPolicy `json:"toolProgressPolicy,omitempty"`
+	InputBinding       string              `json:"inputBinding,omitempty"`
+	InputCursor        uint64              `json:"inputCursor,omitempty"`
 }
 
 // View is an isolated public projection of one persisted Agent Run. It exposes
@@ -427,6 +433,7 @@ type View struct {
 	PendingTool      *PendingToolView
 
 	ToolProgressPolicy *ToolProgressPolicy
+	InputCursor        uint64
 }
 
 // ViewState decodes an isolated public view from a Kernel Agent snapshot.
@@ -449,6 +456,7 @@ func ViewState(snapshot kernel.Snapshot) (View, error) {
 		PendingTool:      publicPendingTool(snapshot, state.ToolWait),
 
 		ToolProgressPolicy: cloneToolProgressPolicy(state.ToolProgressPolicy),
+		InputCursor:        state.InputCursor,
 	}, nil
 }
 
@@ -500,6 +508,13 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	progressPolicy, err := normalizeToolProgressPolicy(dependencies.ToolProgressPolicy, dependencies.Catalog)
 	if err != nil {
 		return nil, err
+	}
+	var inputBinding string
+	if dependencies.Inputs != nil {
+		inputBinding = dependencies.Inputs.BindingID()
+		if !validInputBinding(inputBinding) {
+			return nil, ErrInvalidRequest
+		}
 	}
 	runChain, err := plugin.NewRunChain(dependencies.RunMiddleware...)
 	if err != nil {
@@ -574,6 +589,8 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		hostedTools:               dependencies.HostedTools, discovery: dependencies.ToolDiscovery, observers: observers, telemetry: telemetry, approvalPolicies: approvalPolicies,
 		completionPolicies:   compactCompletionPolicies(dependencies.CompletionPolicies),
 		toolProgressPolicy:   progressPolicy,
+		inputs:               dependencies.Inputs,
+		inputBinding:         inputBinding,
 		limits:               dependencies.Limits,
 		execution:            execution,
 		runExecution:         runExecution,
@@ -601,7 +618,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 // may hand cancellation off to the Kernel CAS/Execution fence. A concrete
 // *Runner type alone does not prove the absence of unfenced Host effects.
 func (runner *Runner) NativeStartCancellationFencedByKernel(runtime *kernel.Runtime) bool {
-	return runner != nil && runner.runtime == runtime && runner.kernelOwnedStartCancellation
+	return runner != nil && runner.runtime == runtime && runner.kernelOwnedStartCancellation && runner.inputs == nil
 }
 
 // OwnsKernelRuntime certifies that a statically routed native child executes
@@ -727,6 +744,9 @@ func (runner *Runner) startRunWithMiddleware(ctx context.Context, request StartR
 // capability/catalog lookups are read-only by dependency contract. Failure
 // cannot create a Run, dispatch a Model/Tool, or execute Run Middleware.
 func (runner *Runner) prepareStartState(ctx context.Context, request StartRequest) (json.RawMessage, error) {
+	if request.ParentRunID != "" && runner.inputs != nil {
+		return nil, ErrInvalidRequest // root-scoped input is never inherited by a child
+	}
 	if (request.ParentRunID == "") != (request.OriginFingerprint == "") ||
 		(request.ParentRunID != "" && !validFrozenOriginFingerprint(request.OriginFingerprint)) {
 		return nil, ErrInvalidRequest
@@ -806,6 +826,7 @@ func (runner *Runner) prepareStartState(ctx context.Context, request StartReques
 		AutoAllowance:     automaticAllowance,
 
 		ToolProgressPolicy: freezeToolProgressPolicy(runner.toolProgressPolicy, toolKeys),
+		InputBinding:       runner.inputBinding,
 	}
 	if instructions := strings.TrimSpace(request.Instructions); instructions != "" {
 		state.Messages = append([]model.Message{{Role: model.RoleSystem, Content: model.TextParts(instructions)}}, state.Messages...)
@@ -1101,6 +1122,13 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 	if _, active := activeModelInvocation(state); !active && allowanceExhausted(state, "model") {
 		return runner.advanceCallAllowance(ctx, snapshot, state, "model")
 	}
+	if _, active := activeModelInvocation(state); !active {
+		var inputErr error
+		snapshot, state, _, inputErr = runner.admitRunInputs(ctx, snapshot, state, nil)
+		if inputErr != nil {
+			return snapshot, true, inputErr
+		}
+	}
 	snapshot, state, invocation, err := runner.ensureModelInvocation(ctx, snapshot, state)
 	if err != nil {
 		if errors.Is(err, ErrToolDiscoveryDenied) || errors.Is(err, ErrToolDiscoveryInvalid) {
@@ -1246,6 +1274,10 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 		return continued, true, continueErr
 	}
 	if len(response.ToolCalls) == 0 {
+		updated, _, changed, inputErr := runner.admitRunInputs(ctx, snapshot, state, &response)
+		if inputErr != nil || changed {
+			return updated, inputErr != nil, inputErr
+		}
 		if missing := missingRequiredToolKeys(state); len(missing) != 0 {
 			if state.CompletionRepair {
 				failed, failErr := runner.fail(ctx, snapshot, state, "agent.completion_repair_exhausted", ErrInvalidModelResponse)
@@ -2672,6 +2704,9 @@ func decodeState(encoded json.RawMessage) (runState, error) {
 		return runState{}, errors.Join(ErrInvalidRequest, err)
 	}
 	if !validFrozenToolProgressPolicy(state) {
+		return runState{}, ErrInvalidRequest
+	}
+	if state.InputBinding == "" && state.InputCursor != 0 || state.InputBinding != "" && !validInputBinding(state.InputBinding) {
 		return runState{}, ErrInvalidRequest
 	}
 	if state.OriginFingerprint != "" && !validFrozenOriginFingerprint(state.OriginFingerprint) {

@@ -44,7 +44,17 @@ type workerContract interface {
 	Close(context.Context) error
 }
 
+type runInputSourceContract interface {
+	BindingID() string
+	ReadRunInputs(context.Context, kernel.Run, uint64, int) ([]agent.RunInput, error)
+}
+
 var (
+	_ agent.RunInputSource                                = (runInputSourceContract)(nil)
+	_ runInputSourceContract                              = (agent.RunInputSource)(nil)
+	_ agent.RunInputSource                                = (*agent.MemoryRunInputs)(nil)
+	_ func(string) (*agent.MemoryRunInputs, error)        = agent.NewMemoryRunInputs
+	_ func([]model.Message) []model.Message               = model.CloneMessagesWithoutProviderReplay
 	_ kernel.Store                                        = (storeContract)(nil)
 	_ storeContract                                       = (kernel.Store)(nil)
 	_ model.Client                                        = (modelContract)(nil)

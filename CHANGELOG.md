@@ -5,6 +5,17 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- **Running-task user input and history allocation (2026-11-19):** Optional
+  `agent.RunInputSource` admits authenticated Host user messages only at model
+  boundaries, with a frozen source binding and a durable applied cursor. It does
+  not rewrite in-flight requests, interrupt admitted Tool batches or bypass
+  unknown outcomes/approvals/budgets. The bounded Memory source is explicitly
+  process-local; queue acceptance is not a terminal-delivery guarantee. The tool
+  Session facade can pass the same source through. Public history views now
+  exclude opaque replay before cloning instead of copying then discarding it;
+  original receipts and model continuation remain unchanged. See
+  `docs/run-inputs-and-parallel-reads.md` and the long-history projection audit.
+
 - **Opt-in read-tool exploration (2026-11-19):** A Host-certified
   `agent.ToolProgressPolicy` keeps selected local read/search tools available for
   different arguments instead of suppressing the entire tool after failed

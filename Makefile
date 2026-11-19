@@ -41,9 +41,14 @@ agent-quality-calibrate:
 # Offline task regressions only, not real-model quality or paid Provider sampling.
 .PHONY: agent-quality-regression
 agent-quality-regression:
-	go test -race ./go/agent-runtime/agent -run '^TestToolProgress' -count=1
+	go test -race ./go/agent-runtime/agent -run '^Test(ToolProgress|RunInput|PublicHistory|ConsumedInvocation|ChildBatchStartsAllChildren)' -count=1
 	go test -race ./go/agent-runtime-harness -run '^TestToolAgentSession' -count=1
 	python3 -m unittest discover -s scripts -p 'test_agent_outcome_review.py'
+
+# Report-only local projection microbenchmark, not a production latency gate.
+.PHONY: benchmark-agent-history
+benchmark-agent-history:
+	go test ./go/agent-runtime/agent -run '^Test(PublicHistory|ConsumedInvocation)' -bench '^BenchmarkPublicHistoryProjection$$' -benchmem -benchtime=100ms -count=2
 
 # Optional, report-only policy benchmark on two opposing workload shapes.
 # Not an ordinary CI gate: timing is meaningful only on a stable runner.

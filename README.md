@@ -129,6 +129,12 @@ For read-tool/session task regressions, use the offline
 another Provider call, use `review-quality PATH_TO_EXISTING_REPORT.json` with
 the baseline launcher; see [task-outcome governance](docs/agent-quality-governance.md).
 
+For optional running-task user input, see
+[safe-point inputs and independent reads](docs/run-inputs-and-parallel-reads.md).
+For replay-heavy public-history allocation measurements, use the report-only
+`make benchmark-agent-history` target; this does not change persisted history
+or claim production latency improvements.
+
 The [TypeScript client guide](ts/agent-runtime-client/README.md),
 [observability guidance](docs/observability.md), and
 [deployment boundary](docs/deployment.md) cover host integration.

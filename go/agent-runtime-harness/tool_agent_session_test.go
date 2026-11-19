@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
@@ -215,5 +216,47 @@ func TestToolAgentSessionArchivesAndRetrievesExactEvidence(t *testing.T) {
 	result, err := session.Prompt(t.Context(), "archive-turn", "Find the TRUTH value in the dossier")
 	if err != nil || result.Turn.Status != harness.TurnCompleted || modelCalls != 3 || result.Turn.ContextRef.Generation < 2 {
 		t.Fatalf("archive task failed: status=%s err=%v models=%d generation=%d", result.Turn.Status, err, modelCalls, result.Turn.ContextRef.Generation)
+	}
+}
+
+func TestToolAgentSessionAppliesQueuedUserInputWithoutAnotherHostTurn(t *testing.T) {
+	queue, err := agent.NewMemoryRunInputs("tool-session-inputs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var options harness.ToolAgentSessionOptions
+	calls, historyReads := 0, 0
+	client := toolSessionModelFunc(func(ctx context.Context, request model.Request) (model.Response, error) {
+		calls++
+		if calls == 1 {
+			snapshot, err := options.Runtime.Load(ctx, request.RunID)
+			if err != nil {
+				return model.Response{}, err
+			}
+			if _, err = queue.Submit(ctx, snapshot.Run, "change-1", "Summarize the second source instead"); err != nil {
+				return model.Response{}, err
+			}
+			return model.Response{Content: "first direction"}, nil
+		}
+		last := request.Messages[len(request.Messages)-1]
+		if last.Role != model.RoleUser || model.TextValue(last.Content) != "Summarize the second source instead" {
+			t.Errorf("bounded Context lost queued user input: %+v", request.Messages)
+		}
+		return model.Response{Content: "second source summary"}, nil
+	})
+	options = toolSessionOptions(t, client)
+	options.Inputs = queue
+	options.Session.Transcript = harness.TranscriptHistoryFunc(func(context.Context, harness.HostRef, harness.HostRef) ([]runtimecontext.Entry, error) {
+		historyReads++
+		return nil, nil
+	})
+	session, err := harness.OpenToolAgentSession(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := session.Prompt(t.Context(), "input-turn", "Summarize the first source")
+	if err != nil || result.Turn.Status != harness.TurnCompleted || calls != 2 || historyReads != 1 ||
+		result.Output == nil || string(result.Output.Content) != `"second source summary"` {
+		t.Fatalf("queued session input failed: status=%s err=%v calls=%d historyReads=%d", result.Turn.Status, err, calls, historyReads)
 	}
 }

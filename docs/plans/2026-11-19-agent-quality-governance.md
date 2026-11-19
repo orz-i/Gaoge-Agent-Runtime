@@ -51,3 +51,19 @@ All three implementation stages and a scoped self-review hardening commit have
 been separately committed and pushed to PR #132. Local evidence, exact tested
 heads, the non-mutating PR #131 integration check and remaining limitations are
 recorded in [the delivery audit](../audits/2026-11-19-agent-quality-governance.md).
+
+## User-authorized extension: directions 4 and 5
+
+The subsequent user request extends this same PR beyond the original non-goals:
+
+- Add root-Agent user input at model boundaries through an explicit Host log;
+  freeze its binding and applied cursor, preserve pending requests/Tool receipts,
+  and be explicit that queue acceptance is not atomic delivery at completion.
+- Include the existing independent-child admission/recovery regression in the
+  task gate. Ordinary native Tool parallelism remains serial until per-call
+  dispatch/receipt/cancellation proof is designed; do not fake it with unmetered
+  internal goroutines. See the dedicated input/parallel-read boundary guide.
+- Correct the initial request-retention inference: consumed requests are already
+  released. Optimize the verified discarded-replay copying in public history
+  and consumption, backed by equivalence/isolation tests and a same-process
+  replay-heavy microbenchmark. No new persistence format or inferred DB gain.

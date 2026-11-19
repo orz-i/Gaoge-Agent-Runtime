@@ -31,6 +31,7 @@ type ToolAgentSessionOptions struct {
 	ResolveModelWindow ModelWindowResolver
 	Counter            runtimecontext.TokenCounter // optional; conservative fallback otherwise
 	RunExecution       *agent.RunExecution
+	Inputs             agent.RunInputSource // optional; Host authenticates/persists queued input
 	Session            SessionOptions
 }
 
@@ -88,6 +89,7 @@ func OpenToolAgentSession(options ToolAgentSessionOptions) (*SessionClient, erro
 	loop, err := agent.NewRunner(agent.Dependencies{
 		Runtime: options.Runtime, Model: options.Model, Catalog: registry, Executor: registry,
 		RunExecution: options.RunExecution, Limits: config.Limits,
+		Inputs:              options.Inputs,
 		PrepareModelRequest: bounded.Prepare, RunMiddleware: []plugin.RunMiddleware{bounded},
 		ToolProgressPolicy: &agent.ToolProgressPolicy{ExplorationToolKeys: readKeys},
 	})

@@ -57,3 +57,19 @@ It separates task/Oracle success, demonstrated recovery, attempted/planned
 coverage, latency/calls and known Usage. It does not change schema-v1 reports,
 comparison eligibility or historical evidence. Pilots receive no full score;
 unknown Usage is not zero. See [task-outcome governance](../agent-quality-governance.md).
+
+## Running-task inputs and long-history projection
+
+`agent.Dependencies.Inputs` and the tool-session facade's optional `Inputs`
+accept a trusted read-only `RunInputSource`. Its binding and applied sequence
+are frozen in the Run. Inputs are ordinary user messages applied at model
+boundaries, never mutable in-flight requests or permission grants. Reopen with
+the original source for recovery. Old Runs stay disabled. Do not run older or
+mixed-version workers on input-enabled Runs. The Memory implementation does
+not survive process loss; queued-but-unapplied input at completion needs an
+explicit next Host Turn. See [the boundary guide](../run-inputs-and-parallel-reads.md).
+
+The public-history optimization preserves the existing persisted state and
+private replay, but stops cloning replay that public projection immediately
+removes. The report-only benchmark and limitations are recorded in
+[the allocation audit](../audits/2026-11-19-long-history-projection.md).
