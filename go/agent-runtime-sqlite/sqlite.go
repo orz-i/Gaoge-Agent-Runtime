@@ -16,7 +16,7 @@ import (
 )
 
 // Schema v6 adds genuine Root-owned retirement receipts; older versions require explicit migration.
-const schemaVersion = 7
+const schemaVersion = 8
 
 var (
 	ErrUnsupportedSchema = errors.New("unsupported SQLite runtime schema")
@@ -209,6 +209,8 @@ func openStoreOptions(ctx context.Context, path string, create bool, migrate int
 		err = store.migrateV5ToV6(ctx)
 	case 7:
 		err = store.migrateV6ToV7(ctx)
+	case 8:
+		err = store.migrateV7ToV8(ctx)
 	default:
 		err = store.initialize(ctx, create)
 	}
@@ -363,7 +365,7 @@ var schemaDDL = append(append([]string{
         execution_quarantine_revision INTEGER NOT NULL DEFAULT 0,
         execution_quarantine_generation INTEGER NOT NULL DEFAULT 0,
         execution_quarantine_code TEXT NOT NULL DEFAULT ''
-    )`,
+    , execution_physical_epoch INTEGER NOT NULL DEFAULT 0)`,
 	// A child Grant is persisted against every ancestor. Terminal parent CAS
 	// checks this table in the SAME SQLite writer transaction as its Run CAS.
 	`CREATE TABLE runtime_child_effect_grants (

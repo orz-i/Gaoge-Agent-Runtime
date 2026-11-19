@@ -245,7 +245,7 @@ func (s *Store) EnableManagedRecovery(ctx context.Context, q kernel.ManagedEnabl
 		if _, e = tx.ExecContext(ctx, `INSERT INTO runtime_child_effect_grants(grant_id,parent_run_id,child_run_id,start_revision,execution_owner_id,execution_lease_id,execution_epoch,admission_source_hash,admission_operation) VALUES(?,?,?,?,?,?,?,?,?)`, ng.ID, q.RunID, q.RunID, ng.ExpectedRevision, ng.ExecutionOwnerID, ng.ExecutionLeaseID, ng.ExecutionEpoch, ng.AdmissionSourceHash, ng.AdmissionOperation); e != nil {
 			return t, conflictOrDatabaseError(e)
 		}
-		if _, e = tx.ExecContext(ctx, `UPDATE runtime_runs SET execution_epoch=?,execution_owner=?,execution_lease_id=?,execution_expiry_ms=? WHERE run_id=?`, n.SuccessorLease.Epoch, n.SuccessorLease.OwnerID, n.SuccessorLease.LeaseID, n.SuccessorLease.ExpiresAt.UnixMilli(), q.RunID); e != nil {
+		if _, e = tx.ExecContext(ctx, `UPDATE runtime_runs SET execution_epoch=?,execution_physical_epoch=?,execution_owner=?,execution_lease_id=?,execution_expiry_ms=? WHERE run_id=?`, n.SuccessorLease.Epoch, n.SuccessorGrant.ExecutionEpoch, n.SuccessorLease.OwnerID, n.SuccessorLease.LeaseID, n.SuccessorLease.ExpiresAt.UnixMilli(), q.RunID); e != nil {
 			return t, e
 		}
 		return n, sqliteSaveManaged(ctx, tx, n)

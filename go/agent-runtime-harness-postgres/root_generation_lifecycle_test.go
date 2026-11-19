@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
 	harnesspostgres "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-postgres"
 	postgres "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres"
+	nativesqlite "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
@@ -28,6 +30,22 @@ type generationModel struct {
 	calls             int
 	failFirst         bool
 	delegateEveryRoot bool
+}
+
+var generationBackends = []string{"memory", "sql", "native-sqlite"}
+
+func generationNativeSQLite(t *testing.T) *nativesqlite.Store {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	s, err := nativesqlite.CreateNew(t.Context(), filepath.Join(dir, "kernel.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	return s
 }
 
 func (*generationModel) PlanTokenAdmission(context.Context, model.Request) (model.TokenAdmission, error) {
@@ -67,17 +85,29 @@ func (generationPolicy) PrepareDelegation(_ context.Context, _ tools.ExecutionRe
 }
 
 func newGenerationHarness(t *testing.T, sqlBackend bool, m *generationModel) (*harness.Runner, generationStore, *kernel.Runtime, *agent.Runner, harness.StartRequest) {
+	backend := "memory"
+	if sqlBackend {
+		backend = "sql"
+	}
+	return newGenerationHarnessBackend(t, backend, m)
+}
+
+func newGenerationHarnessBackend(t *testing.T, backend string, m *generationModel) (*harness.Runner, generationStore, *kernel.Runtime, *agent.Runner, harness.StartRequest) {
 	t.Helper()
 	var hs generationStore = harness.NewMemoryStore()
 	var ks kernel.Store = memory.NewStore()
 	var relationStore runrelation.Store = memory.NewRunRelationStore()
-	if sqlBackend {
+	if backend == "sql" {
 		store, db := newGenerationSQLStore(t)
 		if err := postgres.Migrate(db); err != nil {
 			t.Fatal(err)
 		}
 		hs, ks = store, postgres.NewKernelStore(db)
 		relationStore = postgres.NewRunRelationStore(db)
+	}
+	if backend == "native-sqlite" {
+		s := generationNativeSQLite(t)
+		ks, relationStore = s, nativesqlite.NewRunRelationStore(s)
 	}
 	rt, err := kernel.New(kernel.Dependencies{Store: ks})
 	if err != nil {
@@ -171,6 +201,7 @@ func TestRealPostgresRootGenerationLifecycle(t *testing.T) {
 		{"cancel-attempt-CAS", TestCancellationAdmissionCompetesWithExactRetryAttempt},
 		{"historical-controls", TestHistoricalChildControlsRejectBeforeIntentAdmission},
 		{"waiting-history-retry", TestWaitingOnlyHistorySurvivesRetryAndNoRunCancellation},
+		{"retirement-frontier", TestRetiredCallbackClosurePrecedesEveryNewGeneration},
 	} {
 		t.Run(test.name, test.run)
 	}
@@ -187,14 +218,10 @@ func (p detachedGenerationCompletion) ValidateCompletion(context.Context, kernel
 }
 
 func TestGenerationControlRejectsForeignCallbackCustody(t *testing.T) {
-	for _, sqlBackend := range []bool{false, true} {
-		name := "memory"
-		if sqlBackend {
-			name = "sql"
-		}
-		t.Run(name, func(t *testing.T) {
+	for _, backend := range generationBackends {
+		t.Run(backend, func(t *testing.T) {
 			m := &generationModel{}
-			r, hs, rt, original, req := newGenerationHarness(t, sqlBackend, m)
+			r, hs, rt, original, req := newGenerationHarnessBackend(t, backend, m)
 			first, err := r.StartAgentTurn(t.Context(), req)
 			if err != nil || len(first.Subtasks) != 1 {
 				t.Fatalf("delegation fixture: %+v %v", first.Turn, err)
@@ -228,17 +255,14 @@ func TestGenerationControlRejectsForeignCallbackCustody(t *testing.T) {
 }
 
 func TestRetriedRootCancellationCleansItsDeferredChildren(t *testing.T) {
-	for _, sqlBackend := range []bool{false, true} {
+	for _, backend := range generationBackends {
 		for _, closeOriginal := range []bool{false, true} {
-			name := "memory/failed"
-			if sqlBackend {
-				name = "sql/failed"
-			}
+			name := backend + "/failed"
 			if closeOriginal {
 				name += "/original-budget-closed"
 			}
 			t.Run(name, func(t *testing.T) {
-				r, hs, rt, _, req := newGenerationHarness(t, sqlBackend, &generationModel{failFirst: true, delegateEveryRoot: true})
+				r, hs, rt, _, req := newGenerationHarnessBackend(t, backend, &generationModel{failFirst: true, delegateEveryRoot: true})
 				first, err := r.StartAgentTurn(t.Context(), req)
 				if first.Turn.Status != harness.TurnFailed {
 					t.Fatalf("known original rejection: %s %v", first.Turn.Status, err)
@@ -278,19 +302,16 @@ func TestRetriedRootCancellationCleansItsDeferredChildren(t *testing.T) {
 }
 
 func TestHistoricalHandoffDoesNotBlockReplacementTerminalLifecycle(t *testing.T) {
-	for _, sqlBackend := range []bool{false, true} {
+	for _, backend := range generationBackends {
 		for _, sharedBudget := range []bool{false, true} {
-			name := "memory"
-			if sqlBackend {
-				name = "sql"
-			}
+			name := backend
 			if sharedBudget {
 				name += "/budgeted"
 			} else {
 				name += "/unbudgeted"
 			}
 			t.Run(name, func(t *testing.T) {
-				r, hs, rt, _, req := newGenerationHarness(t, sqlBackend, &generationModel{})
+				r, hs, rt, _, req := newGenerationHarnessBackend(t, backend, &generationModel{})
 				if !sharedBudget {
 					req.Config.SharedBudget = nil
 				}
@@ -332,13 +353,9 @@ func TestHistoricalHandoffDoesNotBlockReplacementTerminalLifecycle(t *testing.T)
 }
 
 func TestRepeatedRetryCancellationPreservesPriorChildReceipts(t *testing.T) {
-	for _, sqlBackend := range []bool{false, true} {
-		name := "memory"
-		if sqlBackend {
-			name = "sql"
-		}
-		t.Run(name, func(t *testing.T) {
-			r, hs, _, _, req := newGenerationHarness(t, sqlBackend, &generationModel{delegateEveryRoot: true})
+	for _, backend := range generationBackends {
+		t.Run(backend, func(t *testing.T) {
+			r, hs, _, _, req := newGenerationHarnessBackend(t, backend, &generationModel{delegateEveryRoot: true})
 			current, err := r.StartAgentTurn(t.Context(), req)
 			if err != nil {
 				t.Fatal(err)
@@ -395,19 +412,16 @@ func TestPublicItemAppendCannotForgeAttemptTransition(t *testing.T) {
 }
 
 func TestPreparedChildCancellationSurvivesLeaseOnlyEpochs(t *testing.T) {
-	for _, sqlBackend := range []bool{false, true} {
+	for _, backend := range generationBackends {
 		for _, cancelWhileHeld := range []bool{false, true} {
-			name := "memory"
-			if sqlBackend {
-				name = "sql"
-			}
+			name := backend
 			if cancelWhileHeld {
 				name += "/held-then-released"
 			} else {
 				name += "/lease-only-abort"
 			}
 			t.Run(name, func(t *testing.T) {
-				r, hs, rt, _, req := newGenerationHarness(t, sqlBackend, &generationModel{})
+				r, hs, rt, _, req := newGenerationHarnessBackend(t, backend, &generationModel{})
 				first, err := r.StartAgentTurn(t.Context(), req)
 				if err != nil || len(first.Subtasks) != 1 {
 					t.Fatalf("delegation fixture: %+v %v", first.Turn, err)

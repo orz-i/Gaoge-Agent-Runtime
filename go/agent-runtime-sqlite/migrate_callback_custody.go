@@ -7,7 +7,7 @@ import (
 )
 
 func schemaV6DDL() []string {
-	out := append([]string(nil), schemaDDL...)
+	out := schemaV7DDL()
 	for i, ddl := range out {
 		if strings.HasPrefix(ddl, "CREATE TABLE runtime_child_effect_grants ") {
 			out[i] = strings.Replace(ddl, "\n\t\tcallback_control_custody TEXT NOT NULL DEFAULT '',", "", 1)
@@ -38,7 +38,7 @@ func (s *Store) migrateV6ToV7(ctx context.Context) error {
 		return err
 	}
 	if version == 7 {
-		return validateSchemaDDL(ctx, tx, schemaDDL)
+		return validateSchemaDDL(ctx, tx, schemaV7DDL())
 	}
 	if version != 6 {
 		return fmt.Errorf("%w: migration requires exact v6, got %d", ErrUnsupportedSchema, version)
@@ -49,7 +49,7 @@ func (s *Store) migrateV6ToV7(ctx context.Context) error {
 	if _, err = tx.ExecContext(ctx, "ALTER TABLE runtime_child_effect_grants RENAME TO runtime_child_effect_grants_v6"); err != nil {
 		return err
 	}
-	for _, ddl := range schemaDDL {
+	for _, ddl := range schemaV7DDL() {
 		if strings.HasPrefix(ddl, "CREATE TABLE runtime_child_effect_grants ") {
 			if _, err = tx.ExecContext(ctx, ddl); err != nil {
 				return err
@@ -63,7 +63,7 @@ func (s *Store) migrateV6ToV7(ctx context.Context) error {
 	if _, err = tx.ExecContext(ctx, "DROP TABLE runtime_child_effect_grants_v6"); err != nil {
 		return err
 	}
-	for _, ddl := range schemaDDL {
+	for _, ddl := range schemaV7DDL() {
 		if strings.HasPrefix(ddl, "CREATE INDEX runtime_child_grants_") {
 			if _, err = tx.ExecContext(ctx, ddl); err != nil {
 				return err
@@ -73,7 +73,7 @@ func (s *Store) migrateV6ToV7(ctx context.Context) error {
 	if _, err = tx.ExecContext(ctx, "PRAGMA user_version=7"); err != nil {
 		return err
 	}
-	if err = validateSchemaDDL(ctx, tx, schemaDDL); err != nil {
+	if err = validateSchemaDDL(ctx, tx, schemaV7DDL()); err != nil {
 		return err
 	}
 	return conflictOrDatabaseError(tx.Commit())
