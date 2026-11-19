@@ -5,6 +5,11 @@ a recommended bounded tool session, and an offline task-outcome review. It is
 independent of PR #131's execution-authority fixes. Neither a scripted pass nor
 a successful review command is evidence of real-model quality improvement.
 
+The subsequent [deliverable-acceptance command](../go/agent-runtime-harness/examples/task-agent/ACCEPTANCE.md)
+adds one actual code, document and approval task each, with independent Oracles
+and an explicitly gated Provider path. Its default remains fixture-only; it is
+not a new 40-case score, controlled live A/B result or broad benchmark.
+
 ## One offline regression command
 
 ```sh
@@ -71,9 +76,9 @@ The next separately authorized effectiveness experiment should:
 
 - Pin source, workload, exact model/route, effort, tools and all hard budgets.
 - Run balanced repeated control/treatment samples and keep held-out tasks.
-- Add genuinely different workloads (code change plus executable tests,
-  document evidence, and approval/interruption tasks) with their own Oracles
-  before claiming broad Agent quality.
+- Expand the new bounded code/document/approval acceptance tasks into held-out
+  workload variants and collect actual-model observations before claiming broad
+  Agent quality. One fixture per family is not generalization evidence.
 - Keep a controlled same-model/tool track separate from native-product tracks
   using each harness's recommended environment. Never combine their scores.
 - Use independently anchored raw reports. A hash in a report is not a signature.

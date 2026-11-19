@@ -141,6 +141,10 @@ For actual multi-step execution/state growth and known-receipt recovery, run
 `go run ./go/agent-runtime/examples/long-run -steps=100 -payload-bytes=1024`;
 the [measurement guide](go/agent-runtime/examples/long-run/README.md) distinguishes
 logical submitted bytes, sampled heap, resume startup and remaining work.
+For independent delivery checks across code/document/approval tasks, run
+`go run ./go/agent-runtime-harness/examples/task-agent -mode=acceptance`.
+The [acceptance guide](go/agent-runtime-harness/examples/task-agent/ACCEPTANCE.md)
+separates fixture passes from the explicitly authorized actual-model pilot path.
 
 The [TypeScript client guide](ts/agent-runtime-client/README.md),
 [observability guidance](docs/observability.md), and

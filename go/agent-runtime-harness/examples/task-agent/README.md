@@ -1,5 +1,11 @@
 # Task Agent: evidence, Context and safe Session recovery
 
+For genuinely different deliverable checks (a bounded Go repair with held-out
+tests, conflicting-document extraction, and an approval-gated scratch record),
+run `go run ./go/agent-runtime-harness/examples/task-agent -mode=acceptance`.
+See [the separate acceptance guide](ACCEPTANCE.md). It does not relabel the old
+40-case evidence suite or claim real-model quality from scripted fixture passes.
+
 This example completes one synthetic release task through the public
 `SessionClient.Prompt` and `SessionClient.Resume` APIs. It looks up a release
 dossier, recovers a deep fact from an archived tool result, saves one local
