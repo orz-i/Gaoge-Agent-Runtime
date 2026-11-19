@@ -31,17 +31,30 @@ test("missing, unknown, and malformed dependency/event data fail closed", () => 
   assert.notDeepEqual(ciResultViolations(results("push"), "workflow_dispatch"), []);
 });
 
-test("the stable required check waits for and validates all CI jobs, including coverage and audit", () => {
+test("the stable required check validates all correctness jobs, excluding only the advisory shadow report", () => {
   const workflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
   const jobs = [...workflow.split("\njobs:\n")[1].matchAll(/^  ([a-z][a-z-]+):$/gmu)]
-    .map((match) => match[1]).filter((name) => name !== "quality");
+    .map((match) => match[1]).filter((name) => !["quality", "impact"].includes(name));
   assert.deepEqual(jobs.sort(), [...requiredJobs].sort());
   const needs = workflow.match(/needs: \[([^\]]+)\]/u)[1].split(",").map((name) => name.trim());
   assert.deepEqual(needs.sort(), [...requiredJobs].sort());
+  assert.ok(!needs.includes("impact"));
   assert.match(workflow, /name: Unit, race, lint, and release consumers/u);
   assert.match(workflow, /if: \$\{\{ always\(\) \}\}/u);
   assert.match(workflow, /CI_NEEDS_JSON: \$\{\{ toJSON\(needs\) \}\}/u);
   assert.match(workflow, /run: node scripts\/check-ci-results\.mjs/u);
+});
+
+test("a failed/cancelled/missing advisory report cannot block successful correctness checks", () => {
+  const workflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
+  const needs = workflow.match(/needs: \[([^\]]+)\]/u)[1].split(",").map((name) => name.trim());
+  for (const result of ["success", "failure", "cancelled", "skipped", undefined]) {
+    const jobs = { ...results("pull_request"), impact: { result } };
+    const dependencies = Object.fromEntries(needs.map((job) => [job, jobs[job]]));
+    assert.deepEqual(ciResultViolations(dependencies, "pull_request"), []);
+    dependencies.security = { result: "failure" };
+    assert.notDeepEqual(ciResultViolations(dependencies, "pull_request"), [], "real security failures remain blocking");
+  }
 });
 
 test("static checks run first without dropping or duplicating any pre-P0 check target", () => {

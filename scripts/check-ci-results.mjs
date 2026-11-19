@@ -2,7 +2,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const requiredJobs = [
-  "impact", "quality-main", "race", "release-commands-windows", "coverage-go", "coverage", "security", "integration", "observability",
+  "quality-main", "race", "release-commands-windows", "coverage-go", "coverage", "security", "integration", "observability",
 ];
 
 export function ciResultViolations(needs, event) {

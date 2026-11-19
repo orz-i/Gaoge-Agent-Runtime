@@ -217,10 +217,12 @@ test("shadow CI publishes evidence but has no outputs or validation-job consumer
   assert.match(job, /fetch-depth: 0/u);
   assert.match(job, /run: node scripts\/ci-impact\.mjs/u);
   assert.match(job, /retention-days: 7/u);
-  assert.match(job, /if-no-files-found: error/u);
-  assert.doesNotMatch(job, /outputs:|GITHUB_OUTPUT|continue-on-error|contents: write|pull_request_target|pnpm install|setup-go/u);
+  assert.match(job, /^    continue-on-error: true$/mu);
+  assert.match(job, /if-no-files-found: warn/u);
+  assert.doesNotMatch(job, /outputs:|GITHUB_OUTPUT|contents: write|pull_request_target|pnpm install|setup-go|node --test/u);
   assert.doesNotMatch(ci, /needs\.impact\.outputs|fromJSON\([^\n]*impact|CI_IMPACT_MODE|paths-ignore:|\n\s+paths:/u);
-  assert.match(ci, /needs: \[impact, quality-main, race,/u);
+  assert.match(ci, /needs: \[quality-main, race,/u);
+  assert.doesNotMatch(ci, /needs: \[[^\]]*\bimpact\b/u);
   assert.equal([...ci.matchAll(/shard: \[core, sqlite, adapters\]/gu)].length, 2);
   assert.match(ci, /merge-go-coverage\.mjs coverage\/go-shards/u);
   const makefile = readFileSync(new URL("../Makefile", import.meta.url), "utf8");
