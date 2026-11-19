@@ -15,6 +15,25 @@ type OwnedRootSettlementStore interface {
 	VerifyOwnedRootSettlement(context.Context, Snapshot) error
 }
 
+// PreparedRootSettlementStore proves that the entire first-party PREPARE
+// callback returned and was acknowledged, without ever entering Model, Tool
+// or Host approval/completion callbacks. The original Run lock serializes
+// this read with the next Resume/Start grant and native Kernel Cancel.
+type PreparedRootSettlementStore interface {
+	VerifyPreparedRootSettlement(context.Context, Snapshot) error
+}
+
+func (r *Runtime) VerifyPreparedRootSettlement(ctx context.Context, expected Snapshot) error {
+	if r == nil || ctx == nil || expected.Run.ID == "" {
+		return ErrInvalidInput
+	}
+	store, ok := r.store.(PreparedRootSettlementStore)
+	if !ok {
+		return ErrExecutionRequired
+	}
+	return store.VerifyPreparedRootSettlement(ctx, expected)
+}
+
 // VerifyOwnedRootSettlement never grants cancellation by matching a RunID or
 // lease expiration. A later Kernel.Cancel must still arbitrate its own CAS
 // against any new Start/Resume grant after this read.
@@ -56,9 +75,32 @@ func exactOwnedRootCancelSuccessor(previous, current Snapshot) bool {
 	return reflect.DeepEqual(before, after)
 }
 
+// VerifyPreparedRootSettlementFacts shares the exact owner/epoch/receipt
+// predicate with ordinary terminal settlement, but requires the SINGLE
+// acknowledged original operation to be "prepare". A later Model/approval
+// callback can NEVER inherit this pre-dispatch no-effect authorization.
+func VerifyPreparedRootSettlementFacts(
+	expected Snapshot, current Snapshot, epoch uint64, lease ExecutionLease,
+	hasActiveGrants bool, receipts []OwnedRetirementReceipt,
+) error {
+	if (expected.Run.Status != RunStatusRunning || expected.Run.Revision != 1) &&
+		(expected.Run.Status != RunStatusCancelled || expected.Run.Revision != 2 ||
+			expected.Run.ErrorCode != "run.cancelled") {
+		return ErrExecutionConflict
+	}
+	return verifyOwnedRootSettlementFacts(expected, current, epoch, lease, hasActiveGrants, receipts, "prepare")
+}
+
 func VerifyOwnedRootSettlementFacts(
 	expected Snapshot, current Snapshot, epoch uint64, lease ExecutionLease,
 	hasActiveGrants bool, receipts []OwnedRetirementReceipt,
+) error {
+	return verifyOwnedRootSettlementFacts(expected, current, epoch, lease, hasActiveGrants, receipts, "")
+}
+
+func verifyOwnedRootSettlementFacts(
+	expected Snapshot, current Snapshot, epoch uint64, lease ExecutionLease,
+	hasActiveGrants bool, receipts []OwnedRetirementReceipt, requiredOperation string,
 ) error {
 	if expected.Run.ID == "" || current.Run.ID != expected.Run.ID ||
 		current.Run.Kind != "agent" || current.Run.ParentRunID != "" ||
@@ -72,11 +114,10 @@ func VerifyOwnedRootSettlementFacts(
 			return ErrExecutionConflict
 		}
 		if r.Phase != "ACKNOWLEDGED" || !r.Evidence.Completion.LeaseOwned ||
-			!r.Evidence.Completion.HostCompleted {
+			!r.Evidence.Completion.HostCompleted ||
+			(requiredOperation != "" && r.Evidence.Grant.AdmissionOperation != requiredOperation) {
 			continue
 		}
-		// Direct observation retains the acknowledged original epoch. Native
-		// Cancel may revoke that epoch in the exact successor transaction.
 		original := r.Evidence.Snapshot
 		same := r.Evidence.Grant.ExecutionEpoch == epoch && ManagedDigest(original) == ManagedDigest(current)
 		cancelled := exactOwnedRootCancelSuccessor(original, current) &&

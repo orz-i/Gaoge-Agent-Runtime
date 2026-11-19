@@ -317,10 +317,18 @@ func (store *Store) RetryInvocation(
 		}
 		if atomicBudget {
 			local := &Store{db: tx}
-			if _, budgetErr = (budget.Coordinator{Store: local}).AdmitRootRetry(
-				ctx, current.TurnID, current.ID, current.ExecutionRefID, nextExecutionRefID, current.Attempt+1,
-			); budgetErr != nil {
-				return budgetErr
+			previous, loadErr := local.LoadBudget(ctx, current.TurnID)
+			if loadErr != nil {
+				return loadErr
+			}
+			planned, planErr := budget.PlanRootRetry(previous, current.ID, current.ExecutionRefID, nextExecutionRefID, current.Attempt+1)
+			if planErr != nil {
+				return planErr
+			}
+			if planned.Revision != previous.Revision {
+				if saveErr := local.SaveBudget(ctx, planned, previous.Revision); saveErr != nil {
+					return saveErr
+				}
 			}
 		}
 		if strings.TrimSpace(current.ParentItemID) == "" {

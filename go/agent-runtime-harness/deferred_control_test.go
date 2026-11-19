@@ -18,6 +18,15 @@ import (
 )
 
 func TestDeferredBoundedAgentObservationAndCancellationAcrossReconstruction(t *testing.T) {
+	testDeferredBoundedAgentCancellation(t, false)
+}
+
+func TestDeferredBoundedAgentHostApprovalPolicyMayCancelBeforePhysicalCallback(t *testing.T) {
+	testDeferredBoundedAgentCancellation(t, true)
+}
+
+func testDeferredBoundedAgentCancellation(t *testing.T, withHostApprovalPolicy bool) {
+	t.Helper()
 	hs := harness.NewMemoryStore()
 	ks := memory.NewStore()
 	rs := memory.NewRunRelationStore()
@@ -56,16 +65,20 @@ func TestDeferredBoundedAgentObservationAndCancellationAcrossReconstruction(t *t
 		if e != nil {
 			return nil, nil, e
 		}
-		frozenApproval, e := harness.NewFrozenApprovalPolicy(hs, relations)
-		if e != nil {
-			return nil, nil, e
+		var policyLayers []plugin.ApprovalPolicy
+		if withHostApprovalPolicy {
+			frozenApproval, policyErr := harness.NewFrozenApprovalPolicy(hs, relations)
+			if policyErr != nil {
+				return nil, nil, policyErr
+			}
+			policyLayers = []plugin.ApprovalPolicy{frozenApproval}
 		}
 		toolVerifier, e := shared.VerifiedToolOutcomeVerifier(d)
 		if e != nil {
 			return nil, nil, e
 		}
 		original, e := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: m, Catalog: registry, Executor: registry,
-			Approvals: interactionadapter.New(approvals), ApprovalPolicies: []plugin.ApprovalPolicy{frozenApproval},
+			Approvals: interactionadapter.New(approvals), ApprovalPolicies: policyLayers,
 			ToolOutcomeVerifier: toolVerifier,
 			RunMiddleware:       []plugin.RunMiddleware{bounded}, ModelMiddleware: []plugin.ModelMiddleware{bounded},
 			ToolMiddleware: []plugin.ToolMiddleware{bounded}})
@@ -128,7 +141,7 @@ func TestDeferredBoundedAgentObservationAndCancellationAcrossReconstruction(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if childBefore.Run.Status != kernel.RunStatusRunning {
+	if childBefore.Run.Status != kernel.RunStatusRunning || rt.VerifyPreparedRootSettlement(t.Context(), childBefore) != nil {
 		t.Fatalf("unexpected prior child status: %s", childBefore.Run.Status)
 	}
 	cancelled, err := second.CancelSubtask(t.Context(), started.Turn.ID, task.ID, "bounded original cancellation")

@@ -60,11 +60,11 @@ type RunBudget struct {
 	Limits      Limits `json:"limits"`
 }
 
-// RootRetryGrant is a durable, two-phase budget admission for one immutable
-// Harness Invocation Attempt. Preparing it authorizes no Model/Tool work;
-// only the original Harness RetryInvocation CAS may activate this exact Run.
-// Keeping the original Run ID also preserves the lineage after Invocation
-// rotates its execution reference. No previous reservations are discarded.
+// RootRetryGrant is the durable result of ONE original Harness Store Retry
+// CAS, which atomically rotates Invocation Attempt and shared-budget rights.
+// The Budget planner is pure and cannot activate a different future Run on
+// its own. OriginalRunID preserves the complete cross-Attempt lineage and
+// every historical Model/Tool reservation and receipt remains accounted for.
 type RootRetryGrant struct {
 	InvocationID  string `json:"invocationID"`
 	OriginalRunID string `json:"originalRunID"`

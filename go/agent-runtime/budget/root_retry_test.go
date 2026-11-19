@@ -1,6 +1,7 @@
 package budget_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sync"
@@ -8,6 +9,47 @@ import (
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 )
+
+// Test-only CAS driver for the pure planner. In production the authoritative
+// Harness Store alone commits the planned ledger together with Invocation
+// Attempt rotation under the original Turn lock.
+func testAdmitRootRetry(coordinator budget.Coordinator, ctx context.Context, scopeID, invocationID, priorRunID, nextRunID string, attempt int) (budget.Ledger, error) {
+	for try := 0; try < 64; try++ {
+		previous, err := coordinator.Store.LoadBudget(ctx, scopeID)
+		if err != nil {
+			return budget.Ledger{}, err
+		}
+		planned, err := budget.PlanRootRetry(previous, invocationID, priorRunID, nextRunID, attempt)
+		if err != nil {
+			return previous, err
+		}
+		if planned.Revision == previous.Revision {
+			return planned, nil
+		}
+		err = coordinator.Store.SaveBudget(ctx, planned, previous.Revision)
+		if errors.Is(err, budget.ErrLedgerConflict) {
+			continue
+		}
+		return planned, err
+	}
+	return budget.Ledger{}, budget.ErrLedgerConflict
+}
+
+func TestRootRetryPlannerDoesNotPersistExecutionAuthority(t *testing.T) {
+	c := newLedger(t, budget.Limits{MaxLLMCalls: 3})
+	original, err := c.Store.LoadBudget(t.Context(), "turn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	planned, err := budget.PlanRootRetry(original, "inv", "root", "new", 2)
+	if err != nil || !planned.RootRetries["new"].Active || planned.Revision != original.Revision+1 {
+		t.Fatalf("pure plan rejected known root: %+v %v", planned.RootRetries, err)
+	}
+	live, err := c.Store.LoadBudget(t.Context(), "turn")
+	if err != nil || live.Revision != original.Revision || len(live.RootRetries) != 0 || len(original.RootRetries) != 0 {
+		t.Fatalf("planner wrote execution authority outside Harness Store: %+v %v", live.RootRetries, err)
+	}
+}
 
 func TestRootRetryAtomicGenerationPreservesHistoryAndCancellation(t *testing.T) {
 	c := newLedger(t, budget.Limits{MaxLLMCalls: 3, MaxTotalTokens: 100})
@@ -24,11 +66,11 @@ func TestRootRetryAtomicGenerationPreservesHistoryAndCancellation(t *testing.T) 
 	if _, err := c.CancelRoot(t.Context(), "turn", "root"); err != nil {
 		t.Fatal(err)
 	}
-	active, err := c.AdmitRootRetry(t.Context(), "turn", "inv", "root", "root-2", 2)
+	active, err := testAdmitRootRetry(c, t.Context(), "turn", "inv", "root", "root-2", 2)
 	if err != nil || !active.RootRetries["root-2"].Active || active.View("root-2").Cancelled || active.View("").Cancelled || !active.View("root").Cancelled {
 		t.Fatalf("root Retry lost fenced accounting: %+v err=%v", active, err)
 	}
-	replay, err := c.AdmitRootRetry(t.Context(), "turn", "inv", "root", "root-2", 2)
+	replay, err := testAdmitRootRetry(c, t.Context(), "turn", "inv", "root", "root-2", 2)
 	if err != nil || replay.Revision != active.Revision {
 		t.Fatalf("idempotent grant was rewritten: %+v err=%v", replay, err)
 	}
@@ -56,7 +98,7 @@ func TestRootRetryAtomicGenerationPreservesHistoryAndCancellation(t *testing.T) 
 	if string(closed.Reservations["original"].Receipt) != "{\"receipt\":\"original\"}" || string(closed.Reservations["second"].Receipt) != "{\"receipt\":\"second\"}" {
 		t.Fatal("receipts lost")
 	}
-	final, err := restarted.AdmitRootRetry(t.Context(), "turn", "inv", "root-2", "root-3", 3)
+	final, err := testAdmitRootRetry(restarted, t.Context(), "turn", "inv", "root-2", "root-3", 3)
 	if err != nil || !final.RootRetries["root-3"].Active || final.RootRetries["root-2"].Active || final.View("root-3").Cancelled || final.View("").Cancelled {
 		t.Fatalf("third Retry not atomic: %+v err=%v", final.RootRetries, err)
 	}
@@ -85,14 +127,14 @@ func TestRootRetryAtomicUnknownAndExhaustionFailBeforeGrant(t *testing.T) {
 	if _, err := c.CancelRoot(t.Context(), "turn", "root"); err != nil {
 		t.Fatal(err)
 	}
-	l, err := c.AdmitRootRetry(t.Context(), "turn", "inv", "root", "new", 2)
+	l, err := testAdmitRootRetry(c, t.Context(), "turn", "inv", "root", "new", 2)
 	if !errors.Is(err, budget.ErrLedgerConflict) || !errors.Is(err, budget.ErrUnmetered) || len(l.RootRetries) != 0 {
 		t.Fatalf("unknown effect authorized Retry: %+v %v", l, err)
 	}
 	if _, err = c.Settle(t.Context(), "turn", "original", budget.Usage{LLMCalls: 1, InputTokens: 10, OutputTokens: 10, TotalTokens: 20}, []byte("{\"settled\":true}")); err != nil {
 		t.Fatal(err)
 	}
-	l, err = c.AdmitRootRetry(t.Context(), "turn", "inv", "root", "new", 2)
+	l, err = testAdmitRootRetry(c, t.Context(), "turn", "inv", "root", "new", 2)
 	if !errors.Is(err, budget.ErrExhausted) || len(l.RootRetries) != 0 {
 		t.Fatalf("exhausted grant entered ledger: %+v %v", l, err)
 	}
@@ -108,7 +150,7 @@ func TestRootRetryConcurrentAtomicAdmissionFencesLateOriginal(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			_, err := c.AdmitRootRetry(t.Context(), "turn", "inv", "root", "new", 2)
+			_, err := testAdmitRootRetry(c, t.Context(), "turn", "inv", "root", "new", 2)
 			out <- err
 		}()
 		go func() {

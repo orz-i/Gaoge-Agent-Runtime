@@ -14,6 +14,10 @@ var _ kernel.OwnedRootSettlementStore = (*KernelStore)(nil)
 // physical grants and acknowledged retirements in one transaction. It never
 // inserts a new lease or treats a historical same-ID terminal status as proof.
 func (s *KernelStore) VerifyOwnedRootSettlement(ctx context.Context, expected kernel.Snapshot) error {
+	return s.verifyRootSettlement(ctx, expected, false)
+}
+
+func (s *KernelStore) verifyRootSettlement(ctx context.Context, expected kernel.Snapshot, prepared bool) error {
 	if s == nil || s.db == nil || ctx == nil || expected.Run.ID == "" {
 		return kernel.ErrInvalidInput
 	}
@@ -49,6 +53,11 @@ func (s *KernelStore) VerifyOwnedRootSettlement(ctx context.Context, expected ke
 			Where("parent_run_id = ? OR child_run_id = ?", expected.Run.ID, expected.Run.ID).
 			Count(&active).Error; err != nil {
 			return translateKernelError(err)
+		}
+		if prepared {
+			return kernel.VerifyPreparedRootSettlementFacts(
+				expected, current, run.ExecutionEpoch, pgManagedLease(run), active != 0, receipts,
+			)
 		}
 		return kernel.VerifyOwnedRootSettlementFacts(
 			expected, current, run.ExecutionEpoch, pgManagedLease(run), active != 0, receipts,

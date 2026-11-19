@@ -239,10 +239,15 @@ func (store *MemoryStore) RetryInvocation(
 	// original private admission and accounting in this same Store CAS.
 	budgetRequired := false
 	if config, exists := store.configs[rootTurn.ConfigSnapshotID]; exists {
-		if config.TurnID != current.TurnID {
-			return Invocation{}, ErrConflict
+		var configErr error
+		budgetRequired, configErr = FrozenRetryBudgetRequirement(config, current.TurnID, rootTurn.ConfigSnapshotID)
+		if configErr != nil {
+			return Invocation{}, configErr
 		}
-		budgetRequired = config.SharedBudget != nil
+	} else if strings.HasPrefix(rootTurn.ConfigSnapshotID, "hcfg_") {
+		// A once-sealed configuration cannot silently become an
+		// unbudgeted legacy Turn after durable data loss.
+		return Invocation{}, ErrConflict
 	}
 	if store.MemoryLedgerStore != nil {
 		if _, ledgerErr := store.LoadBudget(ctx, current.TurnID); ledgerErr == nil {
@@ -259,10 +264,18 @@ func (store *MemoryStore) RetryInvocation(
 		return Invocation{}, budgetErr
 	}
 	if atomicBudget {
-		if _, budgetErr = (budget.Coordinator{Store: store.MemoryLedgerStore}).AdmitRootRetry(
-			ctx, current.TurnID, current.ID, current.ExecutionRefID, nextExecutionRefID, current.Attempt+1,
-		); budgetErr != nil {
-			return Invocation{}, budgetErr
+		previous, loadErr := store.LoadBudget(ctx, current.TurnID)
+		if loadErr != nil {
+			return Invocation{}, loadErr
+		}
+		planned, planErr := budget.PlanRootRetry(previous, current.ID, current.ExecutionRefID, nextExecutionRefID, current.Attempt+1)
+		if planErr != nil {
+			return Invocation{}, planErr
+		}
+		if planned.Revision != previous.Revision {
+			if saveErr := store.SaveBudget(ctx, planned, previous.Revision); saveErr != nil {
+				return Invocation{}, saveErr
+			}
 		}
 	}
 	delete(store.invocationExecutionRefs, current.ExecutionRefID)

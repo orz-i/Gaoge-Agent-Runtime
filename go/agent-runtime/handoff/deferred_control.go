@@ -52,12 +52,15 @@ func (c *Coordinator) VerifiedLocalDelegationControl(
 		child.Run.Kind != agent.RunKind {
 		return false
 	}
-	if c.OwnsLocalDelegation(rt, original) {
-		return true // Existing native static ownership without Host middleware.
-	}
+	// Static route identity cannot establish that a physical callback has
+	// retired. Every Deferred Root consumes the same owned Root settlement
+	// witness, including middleware-free/native Agent compositions. Preserve
+	// the legacy eager ChildRunner route's separate strict Kernel ownership.
 	if routed := c.localDeferredAgent(original); routed != nil {
 		return routed.VerifiedDeferredRootControl(ctx, rt, child)
 	}
-	return c.deferredAgent != nil &&
-		c.deferredAgent.VerifiedDeferredRootControl(ctx, rt, child)
+	if c.deferredAgent != nil {
+		return c.deferredAgent.VerifiedDeferredRootControl(ctx, rt, child)
+	}
+	return c.OwnsLocalDelegation(rt, original)
 }

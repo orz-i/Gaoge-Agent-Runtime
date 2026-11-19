@@ -155,12 +155,8 @@ func ValidTurnTerminalDescendants(root Invocation, owners []Invocation, items []
 			if !valid {
 				return false
 			}
-			for _, ancestor := range binding.Parents {
-				parent, found := byID[ancestor.InvocationID]
-				if !found || parent.ParentItemID == "" ||
-					parent.ID == owner.ID || invocationAttempt(parent) != ancestor {
-					return false
-				}
+			if !validTerminalHandoffAncestorBindings(owner, binding, byID) {
+				return false
 			}
 		}
 		if terminalInvocationStatus(owner.Status) {

@@ -12,6 +12,10 @@ var _ kernel.OwnedRootSettlementStore = (*Store)(nil)
 // serializes physical grants and Kernel control writes. No public Run metadata
 // can substitute for the exact acknowledged owner callback retirement.
 func (s *Store) VerifyOwnedRootSettlement(ctx context.Context, expected kernel.Snapshot) error {
+	return s.verifyRootSettlement(ctx, expected, false)
+}
+
+func (s *Store) verifyRootSettlement(ctx context.Context, expected kernel.Snapshot, prepared bool) error {
 	if s == nil || ctx == nil || expected.Run.ID == "" {
 		return kernel.ErrInvalidInput
 	}
@@ -46,6 +50,9 @@ func (s *Store) VerifyOwnedRootSettlement(ctx context.Context, expected kernel.S
 			return kernel.ErrExecutionConflict
 		}
 		receipts = append(receipts, r)
+	}
+	if prepared {
+		return kernel.VerifyPreparedRootSettlementFacts(expected, current, native.epoch, native.lease, active, receipts)
 	}
 	return kernel.VerifyOwnedRootSettlementFacts(expected, current, native.epoch, native.lease, active, receipts)
 }

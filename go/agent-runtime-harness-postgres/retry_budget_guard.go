@@ -3,6 +3,7 @@ package harnesspostgres
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
 	"gorm.io/gorm"
@@ -19,9 +20,10 @@ func retryBudgetRequiredTx(ctx context.Context, tx *gorm.DB, turnID string) (boo
 		Where("id = ?", turnID).Count(&bound).Error; err != nil {
 		return false, err
 	}
-	if bound != 0 {
-		return true, nil
-	}
+	// The ledger alone establishes an accounting obligation, but cannot
+	// replace verification of an existing frozen original Config. Check
+	// both sources under this Turn lock, even when the ledger exists.
+	budgetExists := bound != 0
 	var turns []turnRecord
 	if err := tx.WithContext(ctx).Where("id = ?", turnID).Limit(1).Find(&turns).Error; err != nil {
 		return false, err
@@ -38,12 +40,16 @@ func retryBudgetRequiredTx(ctx context.Context, tx *gorm.DB, turnID string) (boo
 	// Config IDs. Such unbudgeted pre-admission fixtures have no ledger to
 	// skip. A real sealed Turn must still be checked by the Harness Runner.
 	if len(configs) == 0 {
-		return false, nil
+		if strings.HasPrefix(turns[0].ConfigSnapshotID, "hcfg_") {
+			return false, harness.ErrConflict
+		}
+		return budgetExists, nil // explicit legacy/unsealed Store conformance
 	}
 	var config harness.ConfigSnapshot
 	if err := json.Unmarshal([]byte(configs[0].PayloadJSON), &config); err != nil ||
-		config.ID != turns[0].ConfigSnapshotID || config.TurnID != turnID {
+		config.ContentHash != configs[0].ContentHash {
 		return false, harness.ErrConflict
 	}
-	return config.SharedBudget != nil, nil
+	frozenRequired, verifyErr := harness.FrozenRetryBudgetRequirement(config, turnID, turns[0].ConfigSnapshotID)
+	return budgetExists || frozenRequired, verifyErr
 }
