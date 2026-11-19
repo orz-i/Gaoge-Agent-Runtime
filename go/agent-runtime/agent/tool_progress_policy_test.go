@@ -76,9 +76,12 @@ func TestToolProgressDistinctQueriesAndFrozenRestart(t *testing.T) {
 			if err != nil || optIn && (view.ToolProgressPolicy == nil || !slices.Equal(view.ToolProgressPolicy.ExplorationToolKeys, []string{"lookup"})) {
 				t.Fatalf("policy not frozen: %+v, %v", view.ToolProgressPolicy, err)
 			}
-			// A new process binding with no policy must use the Run's frozen policy,
-			// not silently switch solving behavior at recovery time.
+			// A new binding with different defaults in either direction must use
+			// the Run's frozen policy, including legacy Runs with no policy.
 			dependencies.ToolProgressPolicy = nil
+			if !optIn {
+				dependencies.ToolProgressPolicy = &agent.ToolProgressPolicy{ExplorationToolKeys: []string{"lookup"}}
+			}
 			reopened, err := agent.NewRunner(dependencies)
 			if err != nil {
 				t.Fatal(err)

@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
@@ -24,13 +25,16 @@ func normalizeToolProgressPolicy(policy *ToolProgressPolicy, catalog tools.Catal
 	if policy == nil || len(policy.ExplorationToolKeys) == 0 {
 		return nil, nil
 	}
+	if jsoncontract.ValidateCanonicalUTF8(policy) != nil {
+		return nil, ErrInvalidRequest
+	}
 	keys := normalizedToolKeys(policy.ExplorationToolKeys)
 	if len(keys) != len(policy.ExplorationToolKeys) || catalog == nil {
 		return nil, ErrInvalidRequest
 	}
 	for _, key := range keys {
 		definition, ok := catalog.Resolve(key)
-		if !ok || definition.Terminal || key == ToolDiscoveryKey || key == "harness.delegate_agent" ||
+		if !ok || definition.Key != key || definition.Terminal || key == ToolDiscoveryKey || key == "harness.delegate_agent" ||
 			tools.ValidateDefinition(definition) != nil {
 			return nil, ErrInvalidRequest
 		}
@@ -65,6 +69,9 @@ func validFrozenToolProgressPolicy(state runState) bool {
 	policy := state.ToolProgressPolicy
 	if policy == nil {
 		return true
+	}
+	if jsoncontract.ValidateCanonicalUTF8(policy) != nil {
+		return false
 	}
 	keys := policy.ExplorationToolKeys
 	if len(keys) == 0 || !slices.Equal(keys, normalizedToolKeys(keys)) {
