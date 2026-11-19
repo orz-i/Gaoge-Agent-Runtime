@@ -38,3 +38,12 @@ Tests cover unchanged default suppression, different-query completion after
 three failures, policy copy/restart, canonical exact-repeat refusal, preserved
 unknown outcomes and unchanged hard call limits. These are scripted mechanics,
 not a measured real-model quality improvement.
+
+## Recommended composition
+
+`harness.OpenToolAgentSession` adds an optional convenience facade over the same
+Agent and Harness runners. It pairs local registrations with explicit policies,
+wires bounded Context and its exact archive reader, and enables the above
+exploration only for Host-declared nonterminal read tools. It does not change
+`OpenTextAgentSession`, construct implicit Stores, or support approval/delegation
+by pretending those collaborators exist. See [the guide](../tool-agent-session.md).

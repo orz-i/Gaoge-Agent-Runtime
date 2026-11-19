@@ -96,6 +96,11 @@ For stable Host Turn IDs and a simple text conversation, run the separate
 go run ./go/agent-runtime-harness/examples/session
 ```
 
+For local Tools with bounded Context and exact archive retrieval, use the
+[recommended tool-session composition](docs/tool-agent-session.md),
+`harness.OpenToolAgentSession`. Each Tool is paired with its explicit Host policy;
+unsupported approval/delegation features fail closed instead of being ignored.
+
 It uses the **same** Agent Loop with optional Harness, a Host-owned transcript,
 and explicit Context projection; no additional orchestration engine or intent router
 is involved. For a text-only conversation, `harness.OpenTextAgentSession`

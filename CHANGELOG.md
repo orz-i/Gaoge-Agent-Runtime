@@ -11,6 +11,9 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
   searches. The policy is copied and frozen in each new Run; old/default Runs
   retain their behavior. Identical settled calls are bounded before dispatch.
   Unknown outcomes, approvals, explicit denials and hard budgets are unchanged.
+  `harness.OpenToolAgentSession` adds an optional local-Tool/bounded-Context
+  composition facade with explicit per-tool policy and exact archive retrieval;
+  unsupported approval/delegation/shared-budget configuration fails closed.
   See `docs/releases/unreleased-agent-quality-governance.md`.
 
 - **Breaking package boundary (2026-11-17):** Physically move

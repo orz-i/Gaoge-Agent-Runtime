@@ -50,6 +50,7 @@ type localKernelRunKindCancellerContract interface {
 }
 
 var (
+	_ func(harness.ToolAgentSessionOptions) (*harness.SessionClient, error)                  = harness.OpenToolAgentSession
 	_ harness.LocalKernelRunKindCanceller                                                    = (localKernelRunKindCancellerContract)(nil)
 	_ localKernelRunKindCancellerContract                                                    = (harness.LocalKernelRunKindCanceller)(nil)
 	_ func(context.Context, string, uint64, string) bool                                     = harness.VerifiedSubtaskApprovalDispatch
