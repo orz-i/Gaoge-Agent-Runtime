@@ -168,7 +168,7 @@ func (runner *Runner) cancelRuntimeRun(
 				switch current.Run.Kind {
 				case agent.RunKind:
 					if !coordinator.ObservesLocalDelegation(runner.runtime, delegation) ||
-						!coordinator.OwnsLocalDelegation(runner.runtime, delegation) ||
+						!coordinator.VerifiedLocalDelegationControl(ctx, runner.runtime, delegation, current) ||
 						!runner.localRelationCancellerOwnsKernel(agent.RunKind) {
 						err = ErrHandoffCancellationUnverified
 					}

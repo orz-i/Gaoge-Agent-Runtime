@@ -253,7 +253,9 @@ func (runner *Runner) localDelegationObservation(ctx context.Context, runID stri
 	if err != nil {
 		return kernel.Snapshot{}, handoff.Delegation{}, err
 	}
-	if (!coordinator.ObservesLocalKernelRunner(runner.runtime) && child.Run.Kind != agent.RunKind) || !coordinator.ObservesLocalDelegation(runner.runtime, frozen) {
+	if (!coordinator.ObservesLocalKernelRunner(runner.runtime) && child.Run.Kind != agent.RunKind) || !coordinator.ObservesLocalDelegation(runner.runtime, frozen) ||
+		(terminalRuntimeStatus(child.Run.Status) && coordinator.IsDeferredLocalDelegation(runner.runtime, frozen) &&
+			!coordinator.VerifiedLocalDelegationControl(ctx, runner.runtime, frozen, child)) {
 		return kernel.Snapshot{}, handoff.Delegation{}, ErrHandoffCancellationUnverified
 	}
 	return child, frozen, nil

@@ -117,7 +117,8 @@ func (runner *Runner) RefreshInvocation(ctx context.Context, invocationID string
 	// A remote/dynamic route needs its own ChildRunner-owned observation.
 	coordinator, ok := runner.handoffs.(*handoff.Coordinator)
 	if !ok || !coordinator.SupportsLocalDelegationObservation(runner.runtime) ||
-		(coordinator.ObservesLocalKernelRunner(runner.runtime) && !coordinator.OwnsLocalKernelRunner(runner.runtime)) {
+		(coordinator.ObservesLocalKernelRunner(runner.runtime) && !coordinator.OwnsLocalKernelRunner(runner.runtime) &&
+			!coordinator.SupportsDeferredAgent(runner.runtime)) {
 		return Snapshot{}, ErrHandoffCancellationUnverified
 	}
 	invocation, turn, runtimeSnapshot, err := runner.loadInvocationRuntime(ctx, invocationID)
@@ -128,7 +129,9 @@ func (runner *Runner) RefreshInvocation(ctx context.Context, invocationID string
 	if proofErr != nil {
 		return Snapshot{}, proofErr
 	}
-	if (!coordinator.ObservesLocalKernelRunner(runner.runtime) && runtimeSnapshot.Run.Kind != agent.RunKind) || !coordinator.OwnsLocalDelegation(runner.runtime, frozen) {
+	if (!coordinator.ObservesLocalKernelRunner(runner.runtime) && runtimeSnapshot.Run.Kind != agent.RunKind) || !coordinator.ObservesLocalDelegation(runner.runtime, frozen) ||
+		(terminalRuntimeStatus(runtimeSnapshot.Run.Status) && coordinator.IsDeferredLocalDelegation(runner.runtime, frozen) &&
+			!coordinator.VerifiedLocalDelegationControl(ctx, runner.runtime, frozen, runtimeSnapshot)) {
 		return Snapshot{}, ErrHandoffCancellationUnverified
 	}
 	pending, err := runner.resolvedInteractionClaimPending(ctx, turn.ID, "")
@@ -184,8 +187,17 @@ func (runner *Runner) startNextInvocationAttempt(
 ) (Snapshot, error) {
 	nextAttempt := invocation.Attempt + 1
 	nextRef := invocationExecutionRefID(invocation.ID, nextAttempt)
+	// Prepare the next bounded Root generation before the Store rotates any
+	// Attempt or Turn status. This grant is inert until the original Store CAS
+	// succeeds, and survives crash/replay with its immutable identity.
+	if err := runner.prepareRootRetryBudget(ctx, turn, invocation); err != nil {
+		return Snapshot{}, err
+	}
 	retried, err := runner.store.RetryInvocation(ctx, invocation.ID, invocation.Revision, nextRef, runner.clock.Now().UTC())
 	if err != nil {
+		return Snapshot{}, err
+	}
+	if err = runner.commitRootRetryBudget(ctx, turn, retried); err != nil {
 		return Snapshot{}, err
 	}
 	if err = runner.recordInvocationItem(ctx, retried); err != nil {
@@ -203,6 +215,12 @@ func (runner *Runner) replayRetriedInvocation(
 	turn Turn,
 	invocation Invocation,
 ) (Snapshot, error) {
+	// Retry can lose its ACK after rotating the Invocation but before
+	// committing the budget generation. Recover the exact prepared intent,
+	// never create an independent post-crash execution identity.
+	if err := runner.commitRootRetryBudget(ctx, turn, invocation); err != nil {
+		return Snapshot{}, err
+	}
 	loaded, err := runner.runtime.Load(ctx, invocation.ExecutionRefID)
 	if err == nil {
 		return runner.syncRuntimeSnapshotWithRetry(ctx, turn, invocation, loaded)

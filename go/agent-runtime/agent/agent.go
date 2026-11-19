@@ -373,6 +373,8 @@ type Runner struct {
 	// Frozen at composition: Host middleware/preparers may issue effects
 	// after Kernel Cancel, even when the native Run is already terminal.
 	kernelOwnedStartCancellation bool
+	// Per-Run custody still requires an exact acknowledged physical retirement.
+	trustedDeferredRootControl bool
 }
 
 type runState struct {
@@ -574,9 +576,10 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		kernelOwnedStartCancellation: len(dependencies.RunMiddleware) == 0 &&
 			len(dependencies.ModelMiddleware) == 0 && len(dependencies.ToolMiddleware) == 0 &&
 			dependencies.PrepareModelRequest == nil && dependencies.ContextPreparation == nil && dependencies.NormalizeModelPolicy == nil,
-		prepareModelRequest:   dependencies.PrepareModelRequest,
-		modelPolicyNormalizer: dependencies.NormalizeModelPolicy,
-		deferResume:           dependencies.DeferResumption,
+		prepareModelRequest:        dependencies.PrepareModelRequest,
+		trustedDeferredRootControl: trustedDeferredCallbackStack(dependencies),
+		modelPolicyNormalizer:      dependencies.NormalizeModelPolicy,
+		deferResume:                dependencies.DeferResumption,
 	}, nil
 }
 

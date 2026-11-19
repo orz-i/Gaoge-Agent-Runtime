@@ -1002,7 +1002,7 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 			err = runner.finishCancellationFenceAfterRequest(ctx, intent)
 		}
 	}()
-	if err = runner.cancelTurnBudget(ctx, turn); err != nil {
+	if err = runner.cancelTurnBudget(ctx, turn, invocation.ExecutionRefID); err != nil {
 		return Snapshot{}, err
 	}
 	runtimeSnapshot, found, err := runner.cancelRuntimeRun(ctx, invocation.ExecutionRefID, reason, &invocation)

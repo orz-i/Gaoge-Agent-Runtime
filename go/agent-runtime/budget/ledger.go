@@ -60,6 +60,18 @@ type RunBudget struct {
 	Limits      Limits `json:"limits"`
 }
 
+// RootRetryGrant is a durable, two-phase budget admission for one immutable
+// Harness Invocation Attempt. Preparing it authorizes no Model/Tool work;
+// only the original Harness RetryInvocation CAS may activate this exact Run.
+// Keeping the original Run ID also preserves the lineage after Invocation
+// rotates its execution reference. No previous reservations are discarded.
+type RootRetryGrant struct {
+	InvocationID  string `json:"invocationID"`
+	OriginalRunID string `json:"originalRunID"`
+	Attempt       int    `json:"attempt"`
+	Active        bool   `json:"active,omitempty"`
+}
+
 type ReservationStatus string
 
 const (
@@ -88,14 +100,15 @@ type Reservation struct {
 // Ledger is the authoritative persistent accounting state for one Harness Turn.
 // Existing Turns without a ledger retain their original feature-local semantics.
 type Ledger struct {
-	ID            string                 `json:"id"`
-	Revision      uint64                 `json:"revision"`
-	Limits        Limits                 `json:"limits"`
-	Runs          map[string]RunBudget   `json:"runs"`
-	Reservations  map[string]Reservation `json:"reservations"`
-	Cancelled     bool                   `json:"cancelled,omitempty"`
-	CancelledRuns map[string]bool        `json:"cancelledRuns,omitempty"`
-	FinishedRuns  map[string]bool        `json:"finishedRuns,omitempty"`
+	ID            string                    `json:"id"`
+	Revision      uint64                    `json:"revision"`
+	Limits        Limits                    `json:"limits"`
+	Runs          map[string]RunBudget      `json:"runs"`
+	Reservations  map[string]Reservation    `json:"reservations"`
+	Cancelled     bool                      `json:"cancelled,omitempty"`
+	CancelledRuns map[string]bool           `json:"cancelledRuns,omitempty"`
+	FinishedRuns  map[string]bool           `json:"finishedRuns,omitempty"`
+	RootRetries   map[string]RootRetryGrant `json:"rootRetries,omitempty"`
 }
 
 // LedgerView contains authoritative aggregate and per-subtree accounting. Zero
@@ -152,7 +165,7 @@ func (coordinator Coordinator) RegisterRun(ctx context.Context, scopeID, runID s
 			}
 			return nil
 		}
-		if ledger.cancelled(runID) || ledger.cancelled(binding.ParentRunID) {
+		if ledger.cancelled(runID) || (binding.ParentRunID != "" && ledger.cancelled(binding.ParentRunID)) {
 			return ErrExhausted
 		}
 		if binding.ParentRunID != "" {
@@ -371,8 +384,20 @@ func (coordinator Coordinator) CancelRun(ctx context.Context, scopeID, runID str
 }
 
 func (ledger Ledger) cancelled(runID string) bool {
+	// Legacy whole-Turn Cancel remains an immutable closure of the original
+	// generation. A subsequent, CAS-confirmed Retry has a *different* Root
+	// Run ID; only that exact Root and its descendants may cross the closure.
 	if ledger.Cancelled {
-		return true
+		authorized := false
+		for current := runID; current != ""; current = ledger.Runs[current].ParentRunID {
+			if grant, ok := ledger.RootRetries[current]; ok && grant.Active {
+				authorized = true
+				break
+			}
+		}
+		if !authorized {
+			return true
+		}
 	}
 	for runID != "" {
 		if ledger.CancelledRuns[runID] {
@@ -454,7 +479,23 @@ func (ledger Ledger) admit(runID string, requested Usage, active bool) (Dimensio
 // View computes a projection from durable reservations, optionally restricted
 // to a role subtree. It never uses browser- or process-local counters.
 func (ledger Ledger) View(runID string) LedgerView {
-	view := LedgerView{ScopeID: ledger.ID, Revision: ledger.Revision, Limits: ledger.Limits, Cancelled: ledger.cancelled(runID)}
+	scopeCancelled := ledger.cancelled(runID)
+	if runID == "" && ledger.Cancelled {
+		// The global historical closure remains immutable while the public
+		// Turn view reflects only its most recent explicitly admitted Root.
+		// Root-level views still independently fence old cancelled generations.
+		latest := RootRetryGrant{}
+		latestID := ""
+		for id, grant := range ledger.RootRetries {
+			if grant.Active && grant.Attempt > latest.Attempt {
+				latest, latestID = grant, id
+			}
+		}
+		if latestID != "" && !ledger.CancelledRuns[latestID] {
+			scopeCancelled = false
+		}
+	}
+	view := LedgerView{ScopeID: ledger.ID, Revision: ledger.Revision, Limits: ledger.Limits, Cancelled: scopeCancelled}
 	if runID != "" {
 		view.Limits = ledger.Runs[runID].Limits
 	}
@@ -525,6 +566,13 @@ func CloneLedger(value Ledger) Ledger {
 	}
 	if value.CancelledRuns != nil {
 		value.CancelledRuns = cancelled
+	}
+	retries := make(map[string]RootRetryGrant, len(value.RootRetries))
+	for runID, grant := range value.RootRetries {
+		retries[runID] = grant
+	}
+	if value.RootRetries != nil {
+		value.RootRetries = retries
 	}
 	runs := make(map[string]RunBudget, len(value.Runs))
 	for id, run := range value.Runs {
