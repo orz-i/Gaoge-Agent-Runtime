@@ -7,9 +7,11 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/callbackscope"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
 const runInputBatchLimit = 16
@@ -30,12 +32,27 @@ type RunInput struct {
 
 // RunInputSource is a trusted, read-only Host input log. ReadRunInputs must
 // honor ctx, return contiguous records after the cursor, respect both the count
-// and 64 KiB batch bounds, and never dispatch external effects. The Host owns
+// and 64 KiB total-text bounds, and never dispatch external effects. The Host owns
 // authentication, retention and durable storage. BindingID is immutable and
 // nonsecret; it is an identity label, not a credential.
 type RunInputSource interface {
 	BindingID() string
 	ReadRunInputs(context.Context, kernel.Run, uint64, int) ([]RunInput, error)
+}
+
+type runInputScopeKey struct{}
+type runInputBoundary struct{}
+
+func (*runInputBoundary) Name() string { return "agent.host_input_boundary" }
+func (boundary *runInputBoundary) Run(ctx context.Context, invocation plugin.RunInvocation, next plugin.RunNext) (kernel.Snapshot, error) {
+	// Keep Host input reads inside the original Run callback. This deliberately
+	// participates as a Host boundary, not a callback-free native/deferred
+	// authority shortcut.
+	result, err := next(context.WithValue(ctx, runInputScopeKey{}, invocation.RunID))
+	// This records only this concrete SDK frame's return after Next. Other
+	// middleware tickets and outstanding physical receipts remain independent.
+	callbackscope.Record(ctx, boundary, "input.boundary.returned", invocation.RunID)
+	return result, err
 }
 
 func validInputBinding(value string) bool {
@@ -51,6 +68,9 @@ func validRunInput(input RunInput) bool {
 func (runner *Runner) admitRunInputs(ctx context.Context, snapshot kernel.Snapshot, state runState, previous *model.Response) (kernel.Snapshot, runState, bool, error) {
 	if state.InputBinding == "" {
 		return snapshot, state, false, nil // old Runs never silently enable inputs
+	}
+	if snapshot.Run.ID == "" || ctx.Value(runInputScopeKey{}) != snapshot.Run.ID {
+		return snapshot, state, false, ErrInvalidRequest
 	}
 	if runner.inputs == nil || runner.inputBinding != state.InputBinding || runner.inputs.BindingID() != state.InputBinding {
 		return snapshot, state, false, ErrInvalidRequest

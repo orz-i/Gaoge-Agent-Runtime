@@ -6,12 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
@@ -83,7 +86,7 @@ func TestRunInputsDuringModelApplyBeforeFinalCompletion(t *testing.T) {
 		t.Fatal(ctx.Err())
 	}
 	view, viewErr := agent.ViewState(final.snapshot)
-	if final.err != nil || viewErr != nil || final.snapshot.Run.Status != kernel.RunStatusCompleted || calls != 2 || view.InputCursor != 1 ||
+	if final.err != nil || viewErr != nil || final.snapshot.Run.Status != kernel.RunStatusCompleted || calls != 2 || view.InputCursor != 1 || view.InputBinding != "test-inputs-v1" ||
 		final.snapshot.Result == nil || !strings.Contains(string(final.snapshot.Result.Content), "new direction completed") {
 		t.Fatalf("steering failed: status=%s err=%v viewErr=%v calls=%d cursor=%d", final.snapshot.Run.Status, final.err, viewErr, calls, view.InputCursor)
 	}
@@ -264,5 +267,112 @@ func TestRunInputQueueCapacityIsNotAConsumedRunBudget(t *testing.T) {
 	items, err := queue.ReadRunInputs(t.Context(), run, 0, 16)
 	if err != nil || len(items) != 4 {
 		t.Fatalf("source exceeded its 64 KiB batch bound: count=%d err=%v", len(items), err)
+	}
+}
+
+var errRunInputACKLost = errors.New("fixture input CAS ACK lost")
+
+type runInputACKLossStore struct {
+	*memory.Store
+	lost atomic.Bool
+}
+
+func (store *runInputACKLossStore) ApplyExecution(ctx context.Context, lease kernel.ExecutionLease, revision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
+	result, err := store.Store.ApplyExecution(ctx, lease, revision, mutation)
+	if err != nil {
+		return result, err
+	}
+	for _, event := range mutation.Events {
+		if event.Type == "agent.input_applied" && store.lost.CompareAndSwap(false, true) {
+			return kernel.Snapshot{}, errRunInputACKLost
+		}
+	}
+	return result, nil
+}
+
+func TestRunInputCommittedCursorACKLossDoesNotRedeliverOrDispatchEarly(t *testing.T) {
+	store := &runInputACKLossStore{Store: memory.NewStore()}
+	rt, err := kernel.New(kernel.Dependencies{Store: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	queue, _ := agent.NewMemoryRunInputs("inputs-v1")
+	calls := 0
+	client := progressModelFunc(func(_ context.Context, request model.Request) (model.Response, error) {
+		calls++
+		count := 0
+		for _, message := range request.Messages {
+			if model.TextValue(message.Content) == "one input" {
+				count++
+			}
+		}
+		if count != 1 {
+			t.Errorf("committed input delivered %d times", count)
+		}
+		return model.Response{Content: "done"}, nil
+	})
+	dependencies := agent.Dependencies{Runtime: rt, Model: client, Inputs: queue}
+	runner, err := agent.NewRunner(dependencies)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := runner.PrepareRun(t.Context(), startRequest("input-ack", "request", "start"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = queue.Submit(t.Context(), prepared.Run, "input-1", "one input"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = runner.Resume(t.Context(), prepared.Run.ID, prepared.Run.Revision); !store.lost.Load() || !errors.Is(err, errRunInputACKLost) || calls != 0 {
+		t.Fatalf("lost input ACK reached Model or was hidden: %v calls=%d", err, calls)
+	}
+	current, err := rt.Load(t.Context(), prepared.Run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := agent.ViewState(current)
+	if err != nil || view.InputCursor != 1 {
+		t.Fatalf("input cursor did not commit atomically: %v cursor=%d", err, view.InputCursor)
+	}
+	reopened, err := agent.NewRunner(dependencies)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed, err := reopened.Resume(t.Context(), current.Run.ID, current.Run.Revision)
+	if err != nil || completed.Run.Status != kernel.RunStatusCompleted || calls != 1 {
+		t.Fatalf("could not recover original input once: %v status=%s calls=%d", err, completed.Run.Status, calls)
+	}
+}
+
+var errRunInputHostTail = errors.New("fixture unknown Host middleware tail")
+
+type inputHostTailMiddleware struct{}
+
+func (inputHostTailMiddleware) Name() string { return "fixture.input-host-tail" }
+func (inputHostTailMiddleware) Run(ctx context.Context, _ plugin.RunInvocation, next plugin.RunNext) (kernel.Snapshot, error) {
+	result, err := next(ctx)
+	if err != nil {
+		return result, err
+	}
+	return result, errRunInputHostTail
+}
+
+func TestRunInputBoundaryCannotSettleUnrelatedHostCallbackFailure(t *testing.T) {
+	rt, _ := newTestRuntimeAndApprovals(t)
+	queue, _ := agent.NewMemoryRunInputs("inputs-v1")
+	client := progressModelFunc(func(context.Context, model.Request) (model.Response, error) {
+		return model.Response{Content: "done"}, nil
+	})
+	runner, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: client, Inputs: queue,
+		RunMiddleware: []plugin.RunMiddleware{inputHostTailMiddleware{}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runner.StartRun(t.Context(), startRequest("input-host-tail", "request", "start"))
+	if !errors.Is(err, errRunInputHostTail) || !errors.Is(err, agent.ErrRootOutcomeUnknown) {
+		t.Fatalf("input frame upgraded unrelated Host failure: %v", err)
+	}
+	if _, err = rt.LookupChildExecution(t.Context(), result.Run.ID); err != nil {
+		t.Fatalf("unsettled original callback grant was retired: %v", err)
 	}
 }

@@ -433,6 +433,7 @@ type View struct {
 	PendingTool      *PendingToolView
 
 	ToolProgressPolicy *ToolProgressPolicy
+	InputBinding       string
 	InputCursor        uint64
 }
 
@@ -456,6 +457,7 @@ func ViewState(snapshot kernel.Snapshot) (View, error) {
 		PendingTool:      publicPendingTool(snapshot, state.ToolWait),
 
 		ToolProgressPolicy: cloneToolProgressPolicy(state.ToolProgressPolicy),
+		InputBinding:       state.InputBinding,
 		InputCursor:        state.InputCursor,
 	}, nil
 }
@@ -480,6 +482,9 @@ func publicModelInvocations(values []ModelInvocation) []ModelInvocation {
 
 // NewRunner constructs the Agent loop; Host selection and task routing remain external.
 func NewRunner(dependencies Dependencies) (*Runner, error) {
+	if dependencies.Inputs != nil && dependencies.ManagedContextRecovery != nil {
+		return nil, ErrInvalidRequest // Host input is not a managed-transfer adapter
+	}
 	if a := dependencies.ContextPreparation; a != nil {
 		count := 0
 		for _, layer := range dependencies.RunMiddleware {
@@ -515,6 +520,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		if !validInputBinding(inputBinding) {
 			return nil, ErrInvalidRequest
 		}
+		dependencies.RunMiddleware = append([]plugin.RunMiddleware{&runInputBoundary{}}, dependencies.RunMiddleware...)
 	}
 	runChain, err := plugin.NewRunChain(dependencies.RunMiddleware...)
 	if err != nil {

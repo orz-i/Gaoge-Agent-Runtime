@@ -27,7 +27,10 @@ rewrite a pending ModelInvocation or change Tools, model selection, approvals or
 hard budgets. An input arriving during the last model request can trigger the
 next bounded model step rather than publishing the now-stale answer.
 
-`View.InputCursor` reports the last applied source sequence. Input while a Tool
+`View.InputBinding` exposes the nonsecret enabled source identity; an empty
+binding means input is disabled for that Run. Check it against the selected
+source before offering a Host queue operation. `View.InputCursor` reports the
+last applied source sequence. Input while a Tool
 or Model outcome is unknown does not bypass reconciliation. Inputs do not reset
 completion repair or exhausted budgets. The initial delivery supports root
 Agents only; a child must not inherit its supervisor's input log.
@@ -44,7 +47,7 @@ operation; steering does not undo effects or interrupt an already admitted batch
 The nonsecret source binding ID is frozen into each new Run. A changed or missing source
 fails closed before a new model invocation. Old Runs without a binding do not
 silently enable a new input source at restart. A trusted source must keep IDs,
-text and contiguous sequence immutable, return at most 16 records/64 KiB per
+text and contiguous sequence immutable, return at most 16 records/64 KiB of text per
 read, honor cancellation and never issue external effects. Each text is at most
 16 KiB. The Memory example is scoped by Run/Actor/Thread, idempotent, capped at
 1 MiB of text and 256 records per scope; **it is not process-loss durable**.
@@ -52,6 +55,11 @@ Losing already-consumed Memory history is an error, not an empty successful read
 Capacity rejection is `ErrInputQueueFull`, not evidence that the Run's execution
 budget was consumed. Submission does not start a worker or wake an approval or
 budget pause; existing authorized continuation and approval controls still apply.
+The source is a trusted input-storage port, not arbitrary effectful middleware.
+The SDK binds reads to the original Run callback and journals that concrete
+frame's return without granting callback-free/deferred-control custody. Inputs
+cannot be combined with the separately opted-in `ManagedContextRecovery` path
+in this delivery; the synchronous tool-session composition remains supported.
 
 For durable queue delivery, implement the same read-only port over Host storage
 and retain records for the Run's recovery lifetime. Preserve these new user

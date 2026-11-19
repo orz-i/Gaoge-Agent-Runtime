@@ -37,6 +37,15 @@ duplicated and oversized batches; queue-capacity classification distinct from
 Run execution budgets; and the same behavior through bounded Harness
 Context without rereading the Host transcript or creating another Turn.
 
+Additional fault coverage targets the actual fenced `ApplyExecution` port: after
+the input/cursor CAS commits but its ACK is lost, no Model is sent before the
+error returns; a reconstructed Runner consumes the original input exactly once.
+The SDK input frame journals only its concrete return after Next; an unrelated
+Host middleware failure still retains the original unknown callback grant.
+Constructor checks classify the source as a Host callback boundary and reject
+unsupported managed-transfer composition. This does not add that frame to the
+native callback-free/deferred-control authority allowlist.
+
 The task gate also runs the existing three-child admission/restart/receipt test.
 It proves existing independent child admission and receipt accounting, **not**
 new ordinary-Tool physical concurrency. That implementation still needs its

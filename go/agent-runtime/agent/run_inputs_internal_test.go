@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 )
 
 type invalidRunInputSource struct{ records []RunInput }
@@ -28,9 +30,34 @@ func TestRunInputAdmissionRejectsMalformedBatchBeforeStateMutation(t *testing.T)
 	for index, records := range cases {
 		runner := Runner{inputs: invalidRunInputSource{records}, inputBinding: "inputs-v1"}
 		original := runState{InputBinding: "inputs-v1"}
-		_, state, changed, err := runner.admitRunInputs(t.Context(), kernel.Snapshot{}, original, nil)
+		ctx := context.WithValue(t.Context(), runInputScopeKey{}, "run")
+		_, state, changed, err := runner.admitRunInputs(ctx, kernel.Snapshot{Run: kernel.Run{ID: "run"}}, original, nil)
 		if !errors.Is(err, ErrInvalidRequest) || changed || state.InputCursor != 0 || len(state.Messages) != 0 {
 			t.Fatalf("case %d changed state for invalid input: %v changed=%t", index, err, changed)
 		}
+	}
+}
+
+type inputBoundaryModel struct{}
+
+func (inputBoundaryModel) Generate(context.Context, model.Request) (model.Response, error) {
+	return model.Response{Content: "done"}, nil
+}
+
+func TestRunInputSourceIsClassifiedAsHostCallbackBoundary(t *testing.T) {
+	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inputs, _ := NewMemoryRunInputs("inputs-v1")
+	runner, err := NewRunner(Dependencies{Runtime: runtime, Model: inputBoundaryModel{}, Inputs: inputs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runner.kernelOwnedStartCancellation || !runner.runMiddlewareConfigured {
+		t.Fatal("Host input source was classified as native callback-free execution")
+	}
+	if _, err = NewRunner(Dependencies{Runtime: runtime, Model: inputBoundaryModel{}, Inputs: inputs, ManagedContextRecovery: &BoundedContextAdapter{}}); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("Host input bypassed the managed-transfer boundary: %v", err)
 	}
 }
