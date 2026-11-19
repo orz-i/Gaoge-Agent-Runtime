@@ -7,6 +7,10 @@ CI. This follow-up repairs the shared authority contracts rather than treating
 the six new audit scenarios as unrelated failures. Original physical receipts,
 budget accounting and historical opaque custody are not discarded or upgraded.
 
+The subsequent audit of `4b1090f3` identified additional cancellation phase and
+independent child-projection boundaries. See [third-audit governance](2026-11-19-pr131-third-audit-governance.md)
+for the current fixes and full durable-phase regression matrix; schema v8 is unchanged.
+
 ## Segmented changes
 
 1. **Cancellation Attempt admission** (`4d6d1c2e`). The original Runner freezes
