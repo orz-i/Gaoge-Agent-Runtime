@@ -67,3 +67,10 @@ The subsequent user request extends this same PR beyond the original non-goals:
   released. Optimize the verified discarded-replay copying in public history
   and consumption, backed by equivalence/isolation tests and a same-process
   replay-heavy microbenchmark. No new persistence format or inferred DB gain.
+
+Extension code is pushed in `9a03d474` (projection allocation), `c53d0a7b`
+(safe-point input), `bdf0d2ff` (queue capacity classification), and `6fa95dbf`
+(callback-frame/ACK-loss hardening). Exact parallel-PR assertions are in the
+input-boundary audit. Ordinary native Tool parallelism remains **not implemented**
+in this delivery; the existing independent-child regression is not relabeled
+as a new native parallel executor.

@@ -67,6 +67,19 @@ own per-call multi-in-flight receipt/unknown-outcome/cancellation fault matrix.
   original synthetic calibration still completed 40/40 with 160 fixture Model
   and 120 Tool calls. This remains mechanics evidence, not a live quality score.
 
-Self-review only, not an independent audit. Final combined PR #131 heads and
-required PR Head CI must be revalidated; earlier merge-tree evidence is pinned
-to the exact older heads named in the first delivery audit.
+## Pinned parallel-PR revalidation
+
+Feature code `6fa95dbf9db4a45079a92fa8d5fcddc059bfc0be` combined without textual
+conflict with PR #131 head `8095e4c1daae41909ba1ad10eec673602264d422`. Temporary
+merged tree: `ffd0e3d7e4e883dbbfa55575b6842029daeff0a7`.
+
+Full Agent, Model, Harness and HTTP race suites passed from an owned temporary
+archive of that tree. An additional temporary internal test,
+`TestPR131InputSourceCannotBorrowDeferredCustody`, asserts that the input-enabled
+runner cannot acquire #131's private deferred-control or callback-free native
+custody flags. That test belongs only to the combined source because #131's
+private fields do not exist on this independent main-based branch. The temporary
+directory was removed; no branch/ref was merged or rewritten.
+
+Self-review only, not an independent audit or whole combined real-engine
+certification. Later heads and required PR Head CI must still be revalidated.
