@@ -5,6 +5,7 @@ bootstrap:
 
 metadata:
 	node --test scripts/beta-release-policy.test.mjs scripts/check-pr-body-format.test.mjs scripts/release-command.test.mjs scripts/sqlite-release-policy.test.mjs scripts/go-coverage-summary.test.mjs scripts/provider-transport-policy.test.mjs
+	node --test scripts/activate-pr-description-check.test.mjs
 	node scripts/check-beta.mjs
 
 agent-baseline:
