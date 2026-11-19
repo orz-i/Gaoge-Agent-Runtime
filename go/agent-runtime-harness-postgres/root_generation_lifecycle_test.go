@@ -209,6 +209,7 @@ func TestRealPostgresRootGenerationLifecycle(t *testing.T) {
 		{"waiting-history-retry", TestWaitingOnlyHistorySurvivesRetryAndNoRunCancellation},
 		{"retirement-frontier", TestRetiredCallbackClosurePrecedesEveryNewGeneration},
 		{"all-cancellation-phases", TestNativeRootCancellationReplaysEveryDurablePhase},
+		{"terminal-independent-child-retry", TestFailedRootRetryPreservesIndependentTerminalChildProjection},
 	} {
 		t.Run(test.name, test.run)
 	}

@@ -219,7 +219,17 @@ func (store *MemoryStore) RetryInvocation(
 			children = append(children, child)
 		}
 	}
-	if err := RetryChildEffectFence(children, physicalItems, current); err != nil {
+	var retryLedger *budget.Ledger
+	if store.MemoryLedgerStore != nil {
+		loaded, loadErr := store.LoadBudget(ctx, current.TurnID)
+		if loadErr != nil && !errors.Is(loadErr, budget.ErrLedgerNotFound) {
+			return Invocation{}, loadErr
+		}
+		if loadErr == nil {
+			retryLedger = &loaded
+		}
+	}
+	if err := RetryChildEffectFenceWithBudget(children, physicalItems, current, retryLedger); err != nil {
 		return Invocation{}, err
 	}
 	var rootTurn Turn
@@ -256,12 +266,8 @@ func (store *MemoryStore) RetryInvocation(
 		// unbudgeted legacy Turn after durable data loss.
 		return Invocation{}, ErrConflict
 	}
-	if store.MemoryLedgerStore != nil {
-		if _, ledgerErr := store.LoadBudget(ctx, current.TurnID); ledgerErr == nil {
-			budgetRequired = true
-		} else if !errors.Is(ledgerErr, budget.ErrLedgerNotFound) {
-			return Invocation{}, ledgerErr
-		}
+	if retryLedger != nil {
+		budgetRequired = true
 	}
 	// This is the last fallible step under the original Turn lock. Budget
 	// admission and Attempt rotation must commit as one Memory operation;

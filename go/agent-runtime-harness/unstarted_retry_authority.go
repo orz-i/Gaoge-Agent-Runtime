@@ -63,7 +63,7 @@ func ValidUnstartedRetryCancellationEvidence(inv Invocation, turn Turn, items []
 	// terminated under a prior immutable Attempt cannot block a new Root
 	// that never obtained physical execution; an active or ambiguous child
 	// still fences both operations.
-	if RetryChildEffectFence(children, items, inv) != nil {
+	if RetryChildEffectFenceWithBudget(children, items, inv, ledger) != nil {
 		return false
 	}
 	if !validUnstartedRetryHistoricalChildren(inv, children, items, ledger) {

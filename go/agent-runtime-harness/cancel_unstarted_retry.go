@@ -73,7 +73,7 @@ func (runner *Runner) unstartedRetryNoEffect(
 			children = append(children, owner)
 		}
 	}
-	if RetryChildEffectFence(children, items, original) != nil ||
+	if RetryChildEffectFenceWithBudget(children, items, original, ledger) != nil ||
 		!validUnstartedRetryHistoricalChildren(original, children, items, ledger) {
 		return true, ErrConflict
 	}
