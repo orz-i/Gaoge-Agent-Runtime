@@ -35,6 +35,13 @@ func (s *Store) verifyRootSettlement(ctx context.Context, expected kernel.Snapsh
 	if native.quarantineRev != 0 {
 		return kernel.ErrExecutionConflict
 	}
+	lease := native.lease
+	// Expiry is NOT callback completion. It is safe to ignore a lease-only
+	// owner only because active grants and the exact last physical admission
+	// are independently checked below under this same Run lock.
+	if !lease.ExpiresAt.After(s.currentExecutionTime()) {
+		lease = kernel.ExecutionLease{}
+	}
 	active := len(s.childGrantOwners[expected.Run.ID]) != 0
 	for _, g := range s.childGrants {
 		if g.grant.ChildRunID == expected.Run.ID {
@@ -52,7 +59,7 @@ func (s *Store) verifyRootSettlement(ctx context.Context, expected kernel.Snapsh
 		receipts = append(receipts, r)
 	}
 	if prepared {
-		return kernel.VerifyPreparedRootSettlementFacts(expected, current, native.epoch, native.lease, active, receipts)
+		return kernel.VerifyPreparedRootSettlementFacts(expected, current, native.epoch, native.physicalEpoch, lease, active, receipts)
 	}
-	return kernel.VerifyOwnedRootSettlementFacts(expected, current, native.epoch, native.lease, active, receipts)
+	return kernel.VerifyOwnedRootSettlementFacts(expected, current, native.epoch, native.physicalEpoch, lease, active, receipts)
 }

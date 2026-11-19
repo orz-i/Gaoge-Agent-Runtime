@@ -211,7 +211,7 @@ func (s *KernelStore) EnableManagedRecovery(ctx context.Context, q kernel.Manage
 		}
 		// Authority-only handover must not invoke GORM UpdatedAt hooks or alter
 		// the sealed aggregate needed by same-call ACK replay and Leave.
-		if e = tx.Model(&models.KernelRunRecord{}).Where("run_id = ?", q.RunID).UpdateColumns(map[string]any{"execution_epoch": n.SuccessorLease.Epoch, "execution_owner": n.SuccessorLease.OwnerID, "execution_lease_id": n.SuccessorLease.LeaseID, "execution_expires_at": n.SuccessorLease.ExpiresAt}).Error; e != nil {
+		if e = tx.Model(&models.KernelRunRecord{}).Where("run_id = ?", q.RunID).UpdateColumns(map[string]any{"execution_epoch": n.SuccessorLease.Epoch, "execution_physical_epoch": n.SuccessorGrant.ExecutionEpoch, "execution_owner": n.SuccessorLease.OwnerID, "execution_lease_id": n.SuccessorLease.LeaseID, "execution_expires_at": n.SuccessorLease.ExpiresAt}).Error; e != nil {
 			return t, translateKernelError(e)
 		}
 		return n, pgSaveManaged(tx, n)

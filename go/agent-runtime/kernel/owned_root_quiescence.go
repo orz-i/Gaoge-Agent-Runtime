@@ -50,7 +50,8 @@ func (r *Runtime) VerifyOwnedRootSettlement(ctx context.Context, expected Snapsh
 
 // VerifyOwnedRootSettlementFacts is shared by Memory and PostgreSQL Stores.
 // The latest callback must have *returned*, committed a verified retirement
-// and acknowledged release of the very same owned execution epoch. Unknown,
+// and acknowledged release of the latest actual physical admission. Its
+// Store-owned watermark is distinct from later lease-only epochs. Unknown,
 // borrowed, pre-ACK, missing, duplicate and stale historical receipts cannot
 // establish that the original middleware and external callbacks are quiescent.
 // exactOwnedRootCancelSuccessor recognizes only one native ControlCancel CAS
@@ -80,7 +81,7 @@ func exactOwnedRootCancelSuccessor(previous, current Snapshot) bool {
 // acknowledged original operation to be "prepare". A later Model/approval
 // callback can NEVER inherit this pre-dispatch no-effect authorization.
 func VerifyPreparedRootSettlementFacts(
-	expected Snapshot, current Snapshot, epoch uint64, lease ExecutionLease,
+	expected Snapshot, current Snapshot, epoch, physicalEpoch uint64, lease ExecutionLease,
 	hasActiveGrants bool, receipts []OwnedRetirementReceipt,
 ) error {
 	if (expected.Run.Status != RunStatusRunning || expected.Run.Revision != 1) &&
@@ -91,31 +92,37 @@ func VerifyPreparedRootSettlementFacts(
 	if len(receipts) != 1 || receipts[0].Evidence.Completion.ControlCustody != OwnedCustodyPrepared {
 		return ErrExecutionConflict
 	}
-	return verifyOwnedRootSettlementFacts(expected, current, epoch, lease, hasActiveGrants, receipts, "prepare")
+	return verifyOwnedRootSettlementFacts(expected, current, epoch, physicalEpoch, lease, hasActiveGrants, receipts, "prepare")
 }
 
 func VerifyOwnedRootSettlementFacts(
-	expected Snapshot, current Snapshot, epoch uint64, lease ExecutionLease,
+	expected Snapshot, current Snapshot, epoch, physicalEpoch uint64, lease ExecutionLease,
 	hasActiveGrants bool, receipts []OwnedRetirementReceipt,
 ) error {
-	return verifyOwnedRootSettlementFacts(expected, current, epoch, lease, hasActiveGrants, receipts, "")
+	return verifyOwnedRootSettlementFacts(expected, current, epoch, physicalEpoch, lease, hasActiveGrants, receipts, "")
 }
 
 func verifyOwnedRootSettlementFacts(
-	expected Snapshot, current Snapshot, epoch uint64, lease ExecutionLease,
+	expected Snapshot, current Snapshot, epoch, physicalEpoch uint64, lease ExecutionLease,
 	hasActiveGrants bool, receipts []OwnedRetirementReceipt, requiredOperation string,
 ) error {
 	if expected.Run.ID == "" || current.Run.ID != expected.Run.ID ||
 		current.Run.Kind != "agent" || current.Run.ParentRunID != "" ||
 		ManagedDigest(current) != ManagedDigest(expected) ||
-		hasActiveGrants || lease.OwnerID != "" || lease.LeaseID != "" || epoch == 0 {
+		hasActiveGrants || lease.OwnerID != "" || lease.LeaseID != "" || physicalEpoch == 0 || epoch < physicalEpoch {
 		return ErrExecutionConflict
 	}
 	matches := 0
+	seenEpochs := map[uint64]bool{}
 	for _, r := range receipts {
 		if !r.Valid() || r.Evidence.Grant.ChildRunID != current.Run.ID {
 			return ErrExecutionConflict
 		}
+		callbackEpoch := r.Evidence.Grant.ExecutionEpoch
+		if callbackEpoch > physicalEpoch || seenEpochs[callbackEpoch] {
+			return ErrExecutionConflict
+		}
+		seenEpochs[callbackEpoch] = true
 		// ALL physical history matters. A later scoped callback cannot retire
 		// detached effects from an earlier opaque callback, or borrow its ACK.
 		if r.Phase != "ACKNOWLEDGED" || !r.Evidence.Completion.LeaseOwned ||
@@ -125,11 +132,13 @@ func verifyOwnedRootSettlementFacts(
 		if requiredOperation != "" && r.Evidence.Grant.AdmissionOperation != requiredOperation {
 			return ErrExecutionConflict
 		}
+		// The Store advances physicalEpoch ONLY with actual physical grant
+		// admission, under the Run lock. A newer lease-only epoch cannot erase
+		// the latest callback, and a missing latest receipt cannot fall back
+		// to an older same-state one. All history above still must be safe.
 		original := r.Evidence.Snapshot
-		same := r.Evidence.Grant.ExecutionEpoch == epoch && ManagedDigest(original) == ManagedDigest(current)
-		cancelled := exactOwnedRootCancelSuccessor(original, current) &&
-			(r.Evidence.Grant.ExecutionEpoch == epoch ||
-				(r.Evidence.Grant.ExecutionEpoch < math.MaxUint64 && r.Evidence.Grant.ExecutionEpoch+1 == epoch))
+		same := callbackEpoch == physicalEpoch && ManagedDigest(original) == ManagedDigest(current)
+		cancelled := callbackEpoch == physicalEpoch && exactOwnedRootCancelSuccessor(original, current)
 		if !same && !cancelled {
 			continue
 		}

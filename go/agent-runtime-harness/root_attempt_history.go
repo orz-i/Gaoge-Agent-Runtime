@@ -44,10 +44,14 @@ func historicalRetryRootBound(current Invocation, frozen childRootBinding, ledge
 	// Budget grants from the original atomic Store CAS are also immutable
 	// ancestry authority. They remain mandatory whenever accounting exists.
 	if ledger != nil {
+		if ledger.ID != current.TurnID || ledger.Revision == 0 {
+			return false
+		}
 		runID := current.ExecutionRefID
 		for attempt := current.Attempt; attempt > frozen.Attempt; attempt-- {
 			grant, ok := ledger.RootRetries[runID]
-			if !ok || grant.InvocationID != current.ID || grant.Attempt != attempt || grant.OriginalRunID == "" || grant.OriginalRunID == runID {
+			if !ok || grant.InvocationID != current.ID || grant.Attempt != attempt || grant.OriginalRunID == "" || grant.OriginalRunID == runID ||
+				grant.Active != (attempt == current.Attempt) || !ledger.CancelledRuns[grant.OriginalRunID] {
 				return false
 			}
 			runID = grant.OriginalRunID
@@ -61,7 +65,6 @@ func historicalRetryRootBound(current Invocation, frozen childRootBinding, ledge
 		items = facts[0]
 	}
 	bound := invocationAttempt(current)
-	foundAny := false
 	for bound.Attempt > frozen.Attempt {
 		id := stableID("hrootretry", current.ID, attemptString(bound.Attempt))
 		matches := 0
@@ -80,12 +83,19 @@ func historicalRetryRootBound(current Invocation, frozen childRootBinding, ledge
 			}
 		}
 		if matches == 0 {
-			return ledger != nil && !foundAny // pre-existing original atomic budget ancestry
+			if ledger == nil {
+				return false
+			}
+			// Pre-existing atomic budget grants remain original authority.
+			// Upgrading must not require backfilling historical Item facts;
+			// continue validating every other present/missing link as well.
+			grant := ledger.RootRetries[bound.ExecutionRefID]
+			bound = childAttemptBinding{InvocationID: current.ID, ExecutionRefID: grant.OriginalRunID, Attempt: bound.Attempt - 1}
+			continue
 		}
 		if matches != 1 {
 			return false
 		}
-		foundAny = true
 		bound = source.Previous
 	}
 	return bound == frozen.attempt()
@@ -113,6 +123,8 @@ func historicalHandoffRoot(current, child Invocation, items []Item, ledger *budg
 func historicalHandoffSettled(original, child Invocation, items []Item) bool {
 	switch child.Status {
 	case InvocationAccepted, InvocationCompleted, InvocationFailed, InvocationCancelled:
+	case InvocationRunning, InvocationWaitingInput, InvocationPausedBudget:
+		return false
 	default:
 		return false
 	}

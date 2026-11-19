@@ -49,6 +49,9 @@ func (s *Store) BeginOwnedPhysicalExecution(ctx context.Context, g kernel.ChildE
 	}
 	s.childGrants[g.ID] = memoryChildGrant{grant: g, ancestors: []string{g.ChildRunID}}
 	s.childGrantOwners[g.ChildRunID] = map[string]struct{}{g.ID: {}}
+	native := s.execution[g.ChildRunID]
+	native.physicalEpoch = g.ExecutionEpoch
+	s.execution[g.ChildRunID] = native
 	return nil
 }
 func (s *Store) ApplyOwnedPhysicalRecovery(ctx context.Context, g kernel.ChildExecutionGrant, revision uint64, m kernel.StoreMutation, p kernel.OwnedPhysicalRecovery) (kernel.Snapshot, error) {

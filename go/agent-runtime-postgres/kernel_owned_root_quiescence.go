@@ -54,13 +54,24 @@ func (s *KernelStore) verifyRootSettlement(ctx context.Context, expected kernel.
 			Count(&active).Error; err != nil {
 			return translateKernelError(err)
 		}
+		lease := pgManagedLease(run)
+		now, err := pgStoreNow(tx)
+		if err != nil {
+			return err
+		}
+		// Expired native ownership never clears a physical grant. The latest
+		// admission watermark plus its exact complete ACK history must still
+		// prove no callback entered during the intervening lease-only epochs.
+		if !lease.ExpiresAt.After(now) {
+			lease = kernel.ExecutionLease{}
+		}
 		if prepared {
 			return kernel.VerifyPreparedRootSettlementFacts(
-				expected, current, run.ExecutionEpoch, pgManagedLease(run), active != 0, receipts,
+				expected, current, run.ExecutionEpoch, run.ExecutionPhysicalEpoch, lease, active != 0, receipts,
 			)
 		}
 		return kernel.VerifyOwnedRootSettlementFacts(
-			expected, current, run.ExecutionEpoch, pgManagedLease(run), active != 0, receipts,
+			expected, current, run.ExecutionEpoch, run.ExecutionPhysicalEpoch, lease, active != 0, receipts,
 		)
 	})
 }

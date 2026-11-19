@@ -92,7 +92,11 @@ func (store *KernelStore) BeginOwnedPhysicalExecution(ctx context.Context, grant
 			return kernel.ErrChildExecutionBusy
 		}
 		row := pgPhysicalRecord(grant, grant.ChildRunID)
-		return translateKernelApplyError(tx.Create(&row).Error)
+		if err = tx.Create(&row).Error; err != nil {
+			return translateKernelApplyError(err)
+		}
+		return translateKernelApplyError(tx.Model(&models.KernelRunRecord{}).Where("run_id = ?", grant.ChildRunID).
+			UpdateColumn("execution_physical_epoch", grant.ExecutionEpoch).Error)
 	})
 }
 

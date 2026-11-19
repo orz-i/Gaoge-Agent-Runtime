@@ -13,6 +13,7 @@ import (
 
 type memoryExecutionState struct {
 	epoch          uint64
+	physicalEpoch  uint64 // Last actual owned callback admission, never lease churn.
 	lease          kernel.ExecutionLease
 	quarantineRev  uint64
 	quarantineGen  uint64

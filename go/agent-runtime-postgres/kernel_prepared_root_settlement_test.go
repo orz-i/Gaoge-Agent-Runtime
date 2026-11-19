@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
@@ -14,6 +15,37 @@ type preparedCallbackFixtureModel struct{}
 
 func (preparedCallbackFixtureModel) Generate(context.Context, model.Request) (model.Response, error) {
 	return model.Response{Content: "completed"}, nil
+}
+
+func TestSQLPreparedCustodySurvivesExpiredUndispatchedLease(t *testing.T) {
+	db := openKernelStoreTestDB(t)
+	rt, err := kernel.New(kernel.Dependencies{Store: NewKernelStore(db)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: preparedCallbackFixtureModel{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := r.PrepareRun(t.Context(), agent.StartRequest{ID: "expired-prepared", Actor: kernel.ActorRef{TenantID: "t", ActorID: "a"}, Thread: kernel.ThreadRef{Kind: "test", ID: "thread"}, RequestID: "start", Goal: "prepare"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = rt.AcquireExecution(t.Context(), kernel.ExecutionAcquireRequest{RunID: prepared.Run.ID, OwnerID: "crashed-before-physical", LeaseDuration: time.Minute}); err != nil {
+		t.Fatal(err)
+	}
+	if err = rt.VerifyPreparedRootSettlement(t.Context(), prepared); !errors.Is(err, kernel.ErrExecutionConflict) {
+		t.Fatalf("live owner was ignored: %v", err)
+	}
+	if err = db.Table("agent_kernel_runs").Where("run_id = ?", prepared.Run.ID).UpdateColumn("execution_expires_at", time.Now().UTC().Add(-time.Minute)).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err = rt.VerifyPreparedRootSettlement(t.Context(), prepared); err != nil {
+		t.Fatalf("expired undispatched owner lost physical proof: %v", err)
+	}
+	if _, err = rt.Cancel(t.Context(), prepared.Run.ID, prepared.Run.Revision, "stop"); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // SQL and Memory must share the same physical Root authority rule. Only the

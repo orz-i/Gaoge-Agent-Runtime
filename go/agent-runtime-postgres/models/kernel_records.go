@@ -18,10 +18,12 @@ type KernelRunRecord struct {
 	Revision    uint64 `gorm:"not null"`
 	// Stage 2 execution authority lives in the same Run row as Revision CAS.
 	// The fence bit is sticky once claimed: legacy Apply cannot bypass it.
-	ExecutionEpoch     uint64     `gorm:"not null;default:0"`
-	ExecutionOwner     string     `gorm:"size:128;not null;default:''"`
-	ExecutionLeaseID   string     `gorm:"size:128;not null;default:''"`
-	ExecutionExpiresAt *time.Time `gorm:"index:idx_agent_kernel_runs_exec_expiry"`
+	ExecutionEpoch uint64 `gorm:"not null;default:0"`
+	// Advances only with owned physical admission, not execution lease churn.
+	ExecutionPhysicalEpoch uint64     `gorm:"not null;default:0"`
+	ExecutionOwner         string     `gorm:"size:128;not null;default:''"`
+	ExecutionLeaseID       string     `gorm:"size:128;not null;default:''"`
+	ExecutionExpiresAt     *time.Time `gorm:"index:idx_agent_kernel_runs_exec_expiry"`
 	// The current work revision/generation is blocked without duplicating
 	// Feature state. A later authenticated control revision retires this guard.
 	ExecutionQuarantineRevision   uint64     `gorm:"not null;default:0"`

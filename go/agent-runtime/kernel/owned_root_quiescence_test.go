@@ -26,7 +26,7 @@ func TestVerifiedOwnedRootQuiescenceRequiresExactRetiredCallback(t *testing.T) {
 	if !receipt.Valid() {
 		t.Fatal("test requires a valid persisted retirement receipt")
 	}
-	if err := kernel.VerifyOwnedRootSettlementFacts(original, original, 3, kernel.ExecutionLease{}, false, []kernel.OwnedRetirementReceipt{receipt}); err != nil {
+	if err := kernel.VerifyOwnedRootSettlementFacts(original, original, 3, 3, kernel.ExecutionLease{}, false, []kernel.OwnedRetirementReceipt{receipt}); err != nil {
 		t.Fatalf("valid native callback retired with original identity: %v", err)
 	}
 	cancelled := original
@@ -34,12 +34,12 @@ func TestVerifiedOwnedRootQuiescenceRequiresExactRetiredCallback(t *testing.T) {
 	cancelled.Run.Status = kernel.RunStatusCancelled
 	cancelled.Run.ErrorCode = "run.cancelled"
 	cancelled.EventHead++
-	if err := kernel.VerifyOwnedRootSettlementFacts(cancelled, cancelled, 4, kernel.ExecutionLease{}, false, []kernel.OwnedRetirementReceipt{receipt}); err != nil {
+	if err := kernel.VerifyOwnedRootSettlementFacts(cancelled, cancelled, 4, 3, kernel.ExecutionLease{}, false, []kernel.OwnedRetirementReceipt{receipt}); err != nil {
 		t.Fatalf("exact atomic Cancel successor denied: %v", err)
 	}
 	mutated := cancelled
 	mutated.EventHead++
-	if err := kernel.VerifyOwnedRootSettlementFacts(mutated, mutated, 4, kernel.ExecutionLease{}, false, []kernel.OwnedRetirementReceipt{receipt}); !errors.Is(err, kernel.ErrExecutionConflict) {
+	if err := kernel.VerifyOwnedRootSettlementFacts(mutated, mutated, 4, 3, kernel.ExecutionLease{}, false, []kernel.OwnedRetirementReceipt{receipt}); !errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("unwitnessed second journal mutation impersonated Cancel: %v", err)
 	}
 	testcases := []struct {
@@ -73,9 +73,39 @@ func TestVerifiedOwnedRootQuiescenceRequiresExactRetiredCallback(t *testing.T) {
 	}
 	for _, tc := range testcases {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := kernel.VerifyOwnedRootSettlementFacts(tc.expected, tc.current, tc.epoch, tc.lease, tc.active, tc.receipts); !errors.Is(err, kernel.ErrExecutionConflict) {
+			if err := kernel.VerifyOwnedRootSettlementFacts(tc.expected, tc.current, tc.epoch, tc.epoch, tc.lease, tc.active, tc.receipts); !errors.Is(err, kernel.ErrExecutionConflict) {
 				t.Fatalf("invalid owned Root obtained cancellation custody: %v", err)
 			}
 		})
+	}
+}
+
+func TestOwnedSettlementRequiresLatestPhysicalAdmissionNotLatestLease(t *testing.T) {
+	snapshot, receipt := settledRootFixture()
+	// Store-proven lease-only generations may advance without dispatching.
+	if err := kernel.VerifyOwnedRootSettlementFacts(snapshot, snapshot, 8, 3, kernel.ExecutionLease{}, false, []kernel.OwnedRetirementReceipt{receipt}); err != nil {
+		t.Fatalf("undispatched lease churn lost physical custody: %v", err)
+	}
+	for _, physicalEpoch := range []uint64{0, 2, 4, 9} {
+		if err := kernel.VerifyOwnedRootSettlementFacts(snapshot, snapshot, 8, physicalEpoch, kernel.ExecutionLease{}, false, []kernel.OwnedRetirementReceipt{receipt}); !errors.Is(err, kernel.ErrExecutionConflict) {
+			t.Fatalf("missing/substituted latest physical admission %d borrowed old receipt: %v", physicalEpoch, err)
+		}
+	}
+	// A later no-op callback still owns the latest physical grant even when
+	// both callback return snapshots happen to have the same Run revision.
+	newer := receipt
+	newer.Evidence.Grant.ID = "new-grant"
+	newer.Evidence.Grant.ExecutionEpoch = 5
+	newer.Evidence.Grant.AdmissionOperation = "resume"
+	newer.Evidence.Completion.GrantID = "new-grant"
+	newer.Evidence.Completion.ControlCustody = kernel.OwnedCustodyScoped
+	newer.ACKIdentity = newer.Identity()
+	if err := kernel.VerifyOwnedRootSettlementFacts(snapshot, snapshot, 8, 5, kernel.ExecutionLease{}, false, []kernel.OwnedRetirementReceipt{receipt, newer}); err != nil {
+		t.Fatalf("complete safe latest callback history rejected: %v", err)
+	}
+	receipt.Evidence.Completion.ControlCustody = ""
+	receipt.ACKIdentity = receipt.Identity()
+	if err := kernel.VerifyOwnedRootSettlementFacts(snapshot, snapshot, 8, 5, kernel.ExecutionLease{}, false, []kernel.OwnedRetirementReceipt{receipt, newer}); !errors.Is(err, kernel.ErrExecutionConflict) {
+		t.Fatalf("latest safe callback erased earlier opaque effects: %v", err)
 	}
 }

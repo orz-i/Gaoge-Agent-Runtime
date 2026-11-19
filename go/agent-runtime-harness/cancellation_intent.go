@@ -157,7 +157,7 @@ func (runner *Runner) resumeCommittedCancellationFence(ctx context.Context, turn
 		return Item{}, err
 	}
 	receipts := cancellationFenceReceipts(items)
-	if !terminal {
+	if !terminal && !runner.quiescentDelegationCancellationReady(ctx, runID, snapshot) {
 		return runner.resumeDeferredChildGrantCancellation(ctx, turn, runID, snapshot, items, receipts)
 	}
 	for _, item := range items {

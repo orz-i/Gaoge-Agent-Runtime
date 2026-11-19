@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
+	harnesspostgres "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-postgres"
 	postgres "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
@@ -18,6 +21,7 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
+	"gorm.io/gorm"
 )
 
 type generationModel struct {
@@ -66,18 +70,20 @@ func newGenerationHarness(t *testing.T, sqlBackend bool, m *generationModel) (*h
 	t.Helper()
 	var hs generationStore = harness.NewMemoryStore()
 	var ks kernel.Store = memory.NewStore()
+	var relationStore runrelation.Store = memory.NewRunRelationStore()
 	if sqlBackend {
-		store, db := newStoreWithDB(t)
+		store, db := newGenerationSQLStore(t)
 		if err := postgres.Migrate(db); err != nil {
 			t.Fatal(err)
 		}
 		hs, ks = store, postgres.NewKernelStore(db)
+		relationStore = postgres.NewRunRelationStore(db)
 	}
 	rt, err := kernel.New(kernel.Dependencies{Store: ks})
 	if err != nil {
 		t.Fatal(err)
 	}
-	relations, err := runrelation.New(memory.NewRunRelationStore(), nil)
+	relations, err := runrelation.New(relationStore, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,6 +131,26 @@ func newGenerationHarness(t *testing.T, sqlBackend bool, m *generationModel) (*h
 			ToolPolicies: []harness.ToolPolicySnapshot{harness.DelegationToolPolicySnapshot()}},
 	}
 	return r, hs, rt, original, req
+}
+
+// CI's PostgreSQL/Redis integration job sets TEST_POSTGRES_DSN. The exact same
+// lifecycle matrix then exercises isolated real PostgreSQL transactions and
+// durable RunRelations, rather than a separate weaker positive-only scenario.
+func newGenerationSQLStore(t *testing.T) (*harnesspostgres.Store, *gorm.DB) {
+	t.Helper()
+	dsn := strings.TrimSpace(os.Getenv("TEST_POSTGRES_DSN"))
+	if dsn == "" {
+		return newStoreWithDB(t)
+	}
+	db, _ := openIsolatedHarnessPostgres(t, dsn)
+	if err := harnesspostgres.Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	store, err := harnesspostgres.New(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return store, db
 }
 
 type detachedGenerationCompletion struct {
@@ -342,5 +368,55 @@ func TestPublicItemAppendCannotForgeAttemptTransition(t *testing.T) {
 				t.Fatalf("public Item minted Store-owned retry authority: %v", err)
 			}
 		})
+	}
+}
+
+func TestPreparedChildCancellationSurvivesLeaseOnlyEpochs(t *testing.T) {
+	for _, sqlBackend := range []bool{false, true} {
+		for _, cancelWhileHeld := range []bool{false, true} {
+			name := "memory"
+			if sqlBackend {
+				name = "sql"
+			}
+			if cancelWhileHeld {
+				name += "/held-then-released"
+			} else {
+				name += "/lease-only-abort"
+			}
+			t.Run(name, func(t *testing.T) {
+				r, hs, rt, _, req := newGenerationHarness(t, sqlBackend, &generationModel{})
+				first, err := r.StartAgentTurn(t.Context(), req)
+				if err != nil || len(first.Subtasks) != 1 {
+					t.Fatalf("delegation fixture: %+v %v", first.Turn, err)
+				}
+				child, err := rt.Load(t.Context(), first.Subtasks[0].RunID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				lease, err := rt.AcquireExecution(t.Context(), kernel.ExecutionAcquireRequest{RunID: child.Run.ID, OwnerID: "worker-before-Begin", LeaseDuration: time.Minute})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if cancelWhileHeld {
+					if _, err = r.CancelSubtask(t.Context(), first.Turn.ID, first.Subtasks[0].ID, "compete with undispatched lease"); err == nil {
+						t.Fatal("live execution lease incorrectly claimed settled")
+					}
+				}
+				if err = rt.ReleaseExecution(t.Context(), lease); err != nil {
+					t.Fatal(err)
+				}
+				if err = rt.VerifyPreparedRootSettlement(t.Context(), child); err != nil {
+					t.Fatalf("lease-only epoch invalidated physical history: %v", err)
+				}
+				cancelled, err := r.CancelSubtask(t.Context(), first.Turn.ID, first.Subtasks[0].ID, "stop undispatched child")
+				if err != nil || len(cancelled.Subtasks) != 1 || cancelled.Subtasks[0].Status != "cancelled" {
+					t.Fatalf("original prepared cancellation/recovery: %+v %v", cancelled.Subtasks, err)
+				}
+				items, err := hs.ListItems(t.Context(), first.Turn.ID, 0, 500)
+				if err != nil || harness.ActiveCancellationFence(items) {
+					t.Fatalf("lease-only abort stranded the Turn intent: %v", err)
+				}
+			})
+		}
 	}
 }

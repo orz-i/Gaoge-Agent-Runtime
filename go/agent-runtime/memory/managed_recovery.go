@@ -176,6 +176,7 @@ func (s *Store) EnableManagedRecovery(ctx context.Context, q kernel.ManagedEnabl
 	}
 	s.removeManagedGrantLocked(old)
 	state.epoch = next.SuccessorLease.Epoch
+	state.physicalEpoch = next.SuccessorGrant.ExecutionEpoch
 	state.lease = next.SuccessorLease
 	s.execution[q.RunID] = state
 	s.childGrants[next.SuccessorGrant.ID] = memoryChildGrant{grant: next.SuccessorGrant, ancestors: []string{q.RunID}}
