@@ -1,5 +1,11 @@
 # Recommended bounded tool session
 
+For a complete executable Host, run
+`go run ./go/agent-runtime-harness/examples/steering-session`. Its optional
+`-interactive` mode accepts a correction while a real fixture lookup is
+blocked, then demonstrates applied feedback and an explicit late-input new
+Turn. See [the runnable example](../go/agent-runtime-harness/examples/steering-session/README.md).
+
 Use `harness.OpenToolAgentSession` for a single Agent with local Tools, bounded
 Context, exact archive retrieval and stable Host Turn IDs. It composes the
 existing runners; it is not another execution engine.

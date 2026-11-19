@@ -131,6 +131,9 @@ the baseline launcher; see [task-outcome governance](docs/agent-quality-governan
 
 For optional running-task user input, see
 [safe-point inputs and independent reads](docs/run-inputs-and-parallel-reads.md).
+Run `go run ./go/agent-runtime-harness/examples/steering-session` for the complete
+local Host path, or add `-interactive` to enter the displayed correction while
+the first lookup is running. It uses only synthetic fixtures and Memory Stores.
 For replay-heavy public-history allocation measurements, use the report-only
 `make benchmark-agent-history` target; this does not change persisted history
 or claim production latency improvements.
