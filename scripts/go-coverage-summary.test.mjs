@@ -78,10 +78,11 @@ test("CRLF profiles and mode-only zero-statement profiles retain existing empty 
 
 test("workspace gate instruments all local packages and preserves its 70 percent contract", () => {
   const workspace = readFileSync(new URL("./go-workspace.mjs", import.meta.url), "utf8");
+  const report = readFileSync(new URL("./go-coverage-report.mjs", import.meta.url), "utf8");
   assert.match(workspace, /"-coverpkg=\.\/\.\.\."/);
-  assert.match(workspace, /GO_COVERAGE_MIN \?\? "70"/);
-  assert.match(workspace, /if \(percent < minimum\)/);
-  assert.match(workspace, /summarizeGoCoverage\(profiles\.map/);
+  assert.match(report, /GO_COVERAGE_MIN \?\? "70"/);
+  assert.match(report, /if \(percent < minimum\)/);
+  assert.match(report, /summarizeGoCoverage\(profiles\)/);
   const makefile = readFileSync(new URL("../Makefile", import.meta.url), "utf8");
   assert.match(makefile, /metadata:\n\tnode --test[^\n]*scripts\/go-coverage-summary\.test\.mjs/);
 });

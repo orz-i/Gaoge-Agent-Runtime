@@ -2,26 +2,12 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { summarizeGoCoverage } from "./go-coverage-summary.mjs";
+import { writeGoCoverageReport } from "./go-coverage-report.mjs";
+import { coverageProfileName, modules, selectModules } from "./go-workspace-layout.mjs";
 import { measureCI } from "./ci-timings.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-export const modules = [
-  "go/agent-runtime",
-  "go/agent-runtime-provider",
-  "go/agent-runtime-harness",
-  "go/agent-runtime-harness/examples/task-agent",
-  "go/agent-runtime-harness-postgres",
-  "go/agent-runtime-mcp",
-  "go/agent-runtime-otel",
-  "go/agent-runtime-a2a",
-  "go/agent-runtime-postgres",
-  "go/agent-runtime-sqlite",
-  "go/agent-runtime-redis",
-  "go/agent-runtime-http",
-  // Independent module: checked here, but not part of the Runtime tag cohort.
-  "go/provider-transport",
-];
+export { modules };
 
 const mode = process.argv[2];
 const supported = new Set([
@@ -38,6 +24,7 @@ const supported = new Set([
 if (!supported.has(mode)) {
   throw new Error(`usage: node scripts/go-workspace.mjs <${[...supported].join("|")}>`);
 }
+const { selected, shard } = selectModules(mode, process.argv.slice(3));
 
 const coverageDirectory = path.join(root, "coverage", "go");
 const coverageProfiles = [];
@@ -46,7 +33,7 @@ if (mode === "coverage") {
   mkdirSync(coverageDirectory, { recursive: true });
 }
 
-for (const modulePath of modules) {
+for (const modulePath of selected) {
   measureCI({ kind: "go-module", name: modulePath, mode }, () => {
     const cwd = path.join(root, modulePath);
     console.log(`==> ${mode} ${modulePath}`);
@@ -58,7 +45,7 @@ for (const modulePath of modules) {
     if (mode === "vet") run("go", ["vet", "./..."], cwd);
     if (mode === "lint") run("golangci-lint", ["run", "./..."], cwd);
     if (mode === "coverage") {
-      const profile = path.join(coverageDirectory, `${path.basename(modulePath)}.out`);
+      const profile = path.join(coverageDirectory, coverageProfileName(modulePath));
       run("go", ["test", "./...", "-count=1", "-covermode=atomic", "-coverpkg=./...", `-coverprofile=${profile}`], cwd);
       coverageProfiles.push(profile);
     }
@@ -68,7 +55,16 @@ for (const modulePath of modules) {
   });
 }
 
-if (mode === "coverage") writeCoverageSummary(coverageProfiles);
+if (mode === "coverage") {
+  if (shard) {
+    // A shard never enforces a local floor: only the complete union is valid.
+    writeFileSync(path.join(coverageDirectory, "manifest.json"), `${JSON.stringify({
+      schemaVersion: 1, shard, commit: process.env.GITHUB_SHA ?? null, modules: selected,
+    }, null, 2)}\n`);
+  } else {
+    writeGoCoverageReport(coverageProfiles.map((name) => ({ name, contents: readFileSync(name, "utf8") })), coverageDirectory);
+  }
+}
 
 function checkFormatting(cwd) {
   const files = walk(cwd).filter((file) => file.endsWith(".go"));
@@ -149,31 +145,6 @@ function walk(directory) {
     const absolute = path.join(directory, entry.name);
     return entry.isDirectory() ? walk(absolute) : [absolute];
   });
-}
-
-function writeCoverageSummary(profiles) {
-  const { coveredStatements, totalStatements } = summarizeGoCoverage(profiles.map((profile) => ({
-    name: profile,
-    contents: readFileSync(profile, "utf8"),
-  })));
-
-  const percent = totalStatements === 0 ? 100 : (coveredStatements / totalStatements) * 100;
-  const minimum = Number(process.env.GO_COVERAGE_MIN ?? "70");
-  if (!Number.isFinite(minimum) || minimum < 0 || minimum > 100) {
-    throw new Error(`invalid GO_COVERAGE_MIN: ${process.env.GO_COVERAGE_MIN}`);
-  }
-
-  const summary = {
-    coveredStatements,
-    totalStatements,
-    percent: Number(percent.toFixed(2)),
-    minimum,
-  };
-  writeFileSync(path.join(coverageDirectory, "summary.json"), `${JSON.stringify(summary, null, 2)}\n`);
-  console.log(`Go statement coverage: ${percent.toFixed(2)}% (minimum ${minimum.toFixed(2)}%)`);
-  if (percent < minimum) {
-    throw new Error(`Go statement coverage ${percent.toFixed(2)}% is below ${minimum.toFixed(2)}%`);
-  }
 }
 
 function run(command, args, cwd, capture = false) {
