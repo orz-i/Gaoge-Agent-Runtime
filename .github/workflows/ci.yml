@@ -10,6 +10,9 @@ permissions:
   contents: read
   packages: read
 
+env:
+  CI_TIMING_DIRECTORY: ${{ github.workspace }}/artifacts/ci-timings
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -77,10 +80,14 @@ jobs:
         run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Run static checks before behavioral tests
-        run: make check-static
+        run: make ci-static
 
       - name: Run unit and release-consumer checks
-        run: make check-execution-no-race
+        run: make ci-execution-no-race
+
+      - name: Publish CI timing baseline
+        if: always()
+        uses: ./.github/actions/upload-ci-timings
 
   race:
     name: Go race detector
@@ -94,7 +101,10 @@ jobs:
           node-version: 24
       - uses: ./.github/actions/setup-sqlite
       - name: Run all Go race tests
-        run: make go-race
+        run: make ci-race
+      - name: Publish CI timing baseline
+        if: always()
+        uses: ./.github/actions/upload-ci-timings
 
   release-commands-windows:
     name: Windows release command safety
@@ -109,7 +119,10 @@ jobs:
         with:
           node-version: 24
       - name: Validate shell-free release commands
-        run: node --test scripts/release-command.test.mjs
+        run: node scripts/ci-timings.mjs --run windows-release-commands -- node --test scripts/release-command.test.mjs
+      - name: Publish CI timing baseline
+        if: always()
+        uses: ./.github/actions/upload-ci-timings
 
   coverage:
     name: Coverage gates
@@ -130,7 +143,7 @@ jobs:
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
       - name: Enforce coverage floors
-        run: make coverage
+        run: make ci-coverage
       - name: Upload coverage reports
         if: always()
         uses: actions/upload-artifact@v7
@@ -140,6 +153,9 @@ jobs:
             coverage/go
             ts/agent-runtime-client/coverage
           if-no-files-found: error
+      - name: Publish CI timing baseline
+        if: always()
+        uses: ./.github/actions/upload-ci-timings
 
   security:
     name: Vulnerability audit
@@ -157,7 +173,10 @@ jobs:
       - name: Install dependencies for security regression tests
         run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Scan Go and Node dependencies
-        run: make security
+        run: node scripts/run-ci-targets.mjs security
+      - name: Publish CI timing baseline
+        if: always()
+        uses: ./.github/actions/upload-ci-timings
 
   integration:
     name: PostgreSQL and Redis integration
@@ -194,7 +213,10 @@ jobs:
       - uses: ./.github/actions/setup-go
       - uses: ./.github/actions/setup-sqlite
       - name: Run real-engine suites
-        run: make integration-test
+        run: node scripts/run-ci-targets.mjs integration-test
+      - name: Publish CI timing baseline
+        if: always()
+        uses: ./.github/actions/upload-ci-timings
 
   observability:
     name: OpenTelemetry Collector E2E
@@ -217,4 +239,7 @@ jobs:
         run: echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
 
       - name: Run Collector trace and metric gate
-        run: make integration-otel
+        run: node scripts/run-ci-targets.mjs integration-otel
+      - name: Publish CI timing baseline
+        if: always()
+        uses: ./.github/actions/upload-ci-timings

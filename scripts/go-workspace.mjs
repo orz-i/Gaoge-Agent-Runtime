@@ -3,6 +3,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { summarizeGoCoverage } from "./go-coverage-summary.mjs";
+import { measureCI } from "./ci-timings.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const modules = [
@@ -46,23 +47,25 @@ if (mode === "coverage") {
 }
 
 for (const modulePath of modules) {
-  const cwd = path.join(root, modulePath);
-  console.log(`==> ${mode} ${modulePath}`);
-  if (mode === "fmt-check") checkFormatting(cwd);
-  if (mode === "tidy-check") checkTidy(cwd, modulePath);
-  if (mode === "build") run("go", ["build", "./..."], cwd);
-  if (mode === "test") run("go", ["test", "./...", "-count=1"], cwd);
-  if (mode === "race") run("go", ["test", "-race", "./...", "-count=1"], cwd);
-  if (mode === "vet") run("go", ["vet", "./..."], cwd);
-  if (mode === "lint") run("golangci-lint", ["run", "./..."], cwd);
-  if (mode === "coverage") {
-    const profile = path.join(coverageDirectory, `${path.basename(modulePath)}.out`);
-    run("go", ["test", "./...", "-count=1", "-covermode=atomic", "-coverpkg=./...", `-coverprofile=${profile}`], cwd);
-    coverageProfiles.push(profile);
-  }
-  if (mode === "vuln") {
-    run("go", ["run", "golang.org/x/vuln/cmd/govulncheck@v1.8.0", "./..."], cwd);
-  }
+  measureCI({ kind: "go-module", name: modulePath, mode }, () => {
+    const cwd = path.join(root, modulePath);
+    console.log(`==> ${mode} ${modulePath}`);
+    if (mode === "fmt-check") checkFormatting(cwd);
+    if (mode === "tidy-check") checkTidy(cwd, modulePath);
+    if (mode === "build") run("go", ["build", "./..."], cwd);
+    if (mode === "test") run("go", ["test", "./...", "-count=1"], cwd);
+    if (mode === "race") run("go", ["test", "-race", "./...", "-count=1"], cwd);
+    if (mode === "vet") run("go", ["vet", "./..."], cwd);
+    if (mode === "lint") run("golangci-lint", ["run", "./..."], cwd);
+    if (mode === "coverage") {
+      const profile = path.join(coverageDirectory, `${path.basename(modulePath)}.out`);
+      run("go", ["test", "./...", "-count=1", "-covermode=atomic", "-coverpkg=./...", `-coverprofile=${profile}`], cwd);
+      coverageProfiles.push(profile);
+    }
+    if (mode === "vuln") {
+      run("go", ["run", "golang.org/x/vuln/cmd/govulncheck@v1.8.0", "./..."], cwd);
+    }
+  });
 }
 
 if (mode === "coverage") writeCoverageSummary(coverageProfiles);
@@ -182,7 +185,10 @@ function run(command, args, cwd, capture = false) {
     maxBuffer: 100 * 1024 * 1024,
   });
   if (result.status !== 0) {
-    throw new Error(`${command} ${args.join(" ")} failed with exit code ${result.status ?? 1}`);
+    const error = new Error(`${command} ${args.join(" ")} failed with exit code ${result.status ?? 1}`);
+    error.exitCode = result.status ?? 1;
+    error.signal = result.signal;
+    throw error;
   }
   return capture ? result.stdout ?? "" : "";
 }

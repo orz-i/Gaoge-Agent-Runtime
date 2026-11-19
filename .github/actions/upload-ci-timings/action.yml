@@ -1,0 +1,16 @@
+name: Publish CI timing baseline
+description: Summarize target/module wall time and retain small, content-free records.
+runs:
+  using: composite
+  steps:
+    - name: Write timing summary
+      shell: bash
+      run: node scripts/ci-timings.mjs --summary
+    - name: Upload timing records
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: ci-timings-${{ github.job }}-${{ github.run_attempt }}
+        path: ${{ env.CI_TIMING_DIRECTORY }}
+        retention-days: 7
+        if-no-files-found: warn

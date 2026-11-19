@@ -25,6 +25,11 @@ make security   # govulncheck + high/critical pnpm advisory gate
 npm advisory registry. A network failure is intentionally not treated as a
 successful security scan.
 
+CI runs static checks before the unchanged full behavioral/consumer suite.
+For timed equivalents, use `make ci-static` and
+`make ci-execution-no-race`; see [CI governance](docs/ci-governance.md) for the
+baseline format, required-check behavior, and staged PR-description cutover.
+
 ## Architecture rules
 
 Read [docs/architecture.md](docs/architecture.md) before changing package
