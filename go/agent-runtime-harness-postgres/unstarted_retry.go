@@ -85,11 +85,16 @@ func (store *Store) CancelUnstartedRootRetry(ctx context.Context, original harne
 		for index := 0; index < originalItemCount; index++ {
 			originalItem := items[index]
 			if originalItem.ParentItemID != harness.ExecutionDispatchParentItemID &&
-				originalItem.ParentItemID != harness.CancellationFenceParentItemID {
+				originalItem.ParentItemID != harness.CancellationFenceParentItemID &&
+				(originalItem.Kind != harness.ItemDelegation || originalItem.Status != harness.ItemStarted) {
 				continue
 			}
 			var children []itemRecord
-			if err = tx.Where("parent_item_id = ?", originalItem.ID).Find(&children).Error; err != nil {
+			query := tx.Where("parent_item_id = ?", originalItem.ID)
+			if originalItem.Kind == harness.ItemDelegation {
+				query = query.Where("kind = ?", string(harness.ItemDelegation))
+			}
+			if err = query.Limit(3).Find(&children).Error; err != nil {
 				return err
 			}
 			if len(children) > 2 {

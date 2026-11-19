@@ -233,6 +233,13 @@ func (store *MemoryStore) RetryInvocation(
 	if owner := store.invocationExecutionRefs[nextExecutionRefID]; owner != "" && owner != current.ID {
 		return Invocation{}, ErrConflict
 	}
+	transition, transitionErr := RootRetryTransitionFact(current, nextExecutionRefID, now)
+	if transitionErr != nil {
+		return Invocation{}, transitionErr
+	}
+	if _, collision := store.itemIDs[transition.ID]; collision {
+		return Invocation{}, ErrConflict
+	}
 	// The frozen Turn configuration and existing ledger are authoritative
 	// even when a privileged Store caller bypasses the Harness Runner.
 	// A direct Retry cannot rotate a budgeted Invocation without the
@@ -279,6 +286,12 @@ func (store *MemoryStore) RetryInvocation(
 		}
 	}
 	delete(store.invocationExecutionRefs, current.ExecutionRefID)
+	// All fallible checks, including budget CAS, have completed. Persist the
+	// immutable transition and both mutable records under this same mutex.
+	transition.Seq = uint64(len(store.items[current.TurnID]) + 1)
+	store.items[current.TurnID] = append(store.items[current.TurnID], transition)
+	store.itemIDs[transition.ID] = transition
+	store.itemChildren[transition.ParentItemID] = append(store.itemChildren[transition.ParentItemID], transition)
 	current.Attempt++
 	current.ExecutionRefID = nextExecutionRefID
 	current.Status = InvocationAccepted
@@ -833,7 +846,17 @@ func (store *MemoryStore) UpdateTurn(ctx context.Context, value Turn, expectedRe
 				owners = append(owners, candidate)
 			}
 		}
-		if roots != 1 || !ValidTurnTerminalDescendants(root, owners, physicalItems) ||
+		var ledger *budget.Ledger
+		if store.MemoryLedgerStore != nil {
+			loaded, loadErr := store.LoadBudget(ctx, value.ID)
+			if loadErr != nil && !errors.Is(loadErr, budget.ErrLedgerNotFound) {
+				return Turn{}, loadErr
+			}
+			if loadErr == nil {
+				ledger = &loaded
+			}
+		}
+		if roots != 1 || !ValidTurnTerminalDescendantsWithBudget(root, owners, physicalItems, ledger) ||
 			!ValidTurnTerminalTransitionWithEvidence(
 				ctx, current, value, root, VerifiedOriginalStartNoEffect(physicalItems, root),
 			) {
@@ -1019,13 +1042,16 @@ func (store *MemoryStore) GetItem(_ context.Context, id string) (Item, error) {
 func (store *MemoryStore) ListItemChildren(_ context.Context, parentItemID string, scope ItemChildProofScope) ([]Item, error) {
 	parentItemID = strings.TrimSpace(parentItemID)
 	if store == nil || parentItemID == "" ||
-		(scope != ItemChildProofAll && scope != ItemChildProofHostAuthority) {
+		(scope != ItemChildProofAll && scope != ItemChildProofHostAuthority && scope != ItemChildProofDelegation) {
 		return nil, ErrInvalidRequest
 	}
 	store.mu.RLock()
 	defer store.mu.RUnlock()
 	result := make([]Item, 0, 2)
 	for _, value := range store.itemChildren[parentItemID] {
+		if scope == ItemChildProofDelegation && value.Kind != ItemDelegation {
+			continue
+		}
 		if scope == ItemChildProofHostAuthority && value.Kind != ItemDiagnostic &&
 			!strings.HasPrefix(value.ID, "hbizverified_") {
 			continue // ordinary application Artifact, not Host authority

@@ -293,6 +293,9 @@ func (runner *Runner) prepareDelegation(
 		return handoff.Delegation{}, kernel.Snapshot{}, errors.Join(ErrConflict, err)
 	}
 	delegationID := stableID("hd", turn.ID, request.MemberID, request.Goal)
+	if invocation.Attempt > 1 {
+		delegationID = stableID("hd", turn.ID, invocation.ExecutionRefID, request.MemberID, request.Goal)
+	}
 	if request.callID != "" {
 		delegationID = delegationToolID(invocation, request.callID)
 	}

@@ -436,6 +436,9 @@ func (runner *Runner) preparedDelegationToolRequest(
 }
 
 func delegationToolID(invocation Invocation, callID string) string {
+	if invocation.Attempt > 1 {
+		return stableID("hd", invocation.TurnID, invocation.ID, invocation.ExecutionRefID, callID)
+	}
 	return stableID("hd", invocation.TurnID, invocation.ID, callID)
 }
 

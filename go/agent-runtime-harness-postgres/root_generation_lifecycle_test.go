@@ -227,3 +227,120 @@ func TestRetriedRootCancellationCleansItsDeferredChildren(t *testing.T) {
 		}
 	}
 }
+
+func TestHistoricalHandoffDoesNotBlockReplacementTerminalLifecycle(t *testing.T) {
+	for _, sqlBackend := range []bool{false, true} {
+		for _, sharedBudget := range []bool{false, true} {
+			name := "memory"
+			if sqlBackend {
+				name = "sql"
+			}
+			if sharedBudget {
+				name += "/budgeted"
+			} else {
+				name += "/unbudgeted"
+			}
+			t.Run(name, func(t *testing.T) {
+				r, hs, rt, _, req := newGenerationHarness(t, sqlBackend, &generationModel{})
+				if !sharedBudget {
+					req.Config.SharedBudget = nil
+				}
+				first, err := r.StartAgentTurn(t.Context(), req)
+				if err != nil || len(first.Subtasks) != 1 {
+					t.Fatalf("original delegation: %+v %v", first.Turn, err)
+				}
+				stopped, err := r.Cancel(t.Context(), first.Turn.ID, "cancel original root and child")
+				if err != nil || stopped.Turn.Status != harness.TurnCancelled {
+					t.Fatalf("original Cancel: %+v %v", stopped.Turn, err)
+				}
+				root, _ := harness.TopLevelInvocation(stopped)
+				next, err := r.RetryInvocation(t.Context(), root.ID)
+				if err != nil || next.Turn.Status != harness.TurnCompleted {
+					t.Fatalf("historical child blocked replacement: %+v %v", next.Turn, err)
+				}
+				current, err := hs.GetInvocation(t.Context(), root.ID)
+				if err != nil || current.Attempt != 2 || current.Status != harness.InvocationCompleted {
+					t.Fatalf("replacement identity: %+v %v", current, err)
+				}
+				physical, err := rt.Load(t.Context(), current.ExecutionRefID)
+				if err != nil || physical.Run.Status != kernel.RunStatusCompleted {
+					t.Fatalf("physical replacement: %+v %v", physical.Run, err)
+				}
+				for _, observe := range []func() (harness.Snapshot, error){
+					func() (harness.Snapshot, error) { return r.Refresh(t.Context(), first.Turn.ID) },
+					func() (harness.Snapshot, error) {
+						return r.Cancel(t.Context(), first.Turn.ID, "observe completed replacement")
+					},
+				} {
+					got, err := observe()
+					if err != nil || got.Turn.Status != harness.TurnCompleted || len(got.Subtasks) != 1 || got.Subtasks[0].RunID != first.Subtasks[0].RunID {
+						t.Fatalf("historical observation/cleanup: %+v %v", got.Turn, err)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestRepeatedRetryCancellationPreservesPriorChildReceipts(t *testing.T) {
+	for _, sqlBackend := range []bool{false, true} {
+		name := "memory"
+		if sqlBackend {
+			name = "sql"
+		}
+		t.Run(name, func(t *testing.T) {
+			r, hs, _, _, req := newGenerationHarness(t, sqlBackend, &generationModel{delegateEveryRoot: true})
+			current, err := r.StartAgentTurn(t.Context(), req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			root, _ := harness.TopLevelInvocation(current)
+			var originalFacts []harness.Item
+			for attempt := 1; attempt <= 3; attempt++ {
+				current, err = r.Cancel(t.Context(), current.Turn.ID, "close current generation")
+				if err != nil || current.Turn.Status != harness.TurnCancelled {
+					t.Fatalf("Attempt %d cancellation: %+v %v", attempt, current.Turn, err)
+				}
+				if attempt == 1 {
+					originalFacts, err = hs.ListItems(t.Context(), current.Turn.ID, 0, 500)
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+				if attempt < 3 {
+					current, err = r.RetryInvocation(t.Context(), root.ID)
+					if err != nil || current.Turn.Status != harness.TurnRunning || len(current.Subtasks) != attempt+1 {
+						t.Fatalf("Attempt %d retry: %+v %v", attempt+1, current.Turn, err)
+					}
+				}
+			}
+			for _, fact := range originalFacts {
+				retained, err := hs.GetItem(t.Context(), fact.ID)
+				if err != nil || retained.Seq != fact.Seq || string(retained.Payload) != string(fact.Payload) {
+					t.Fatalf("original receipt changed: %s %v", fact.ID, err)
+				}
+			}
+		})
+	}
+}
+
+func TestPublicItemAppendCannotForgeAttemptTransition(t *testing.T) {
+	for name, create := range rootInvocationStores() {
+		t.Run(name, func(t *testing.T) {
+			store := create(t)
+			previous := rootInvocationFixture("transition-root", "transition-turn", "")
+			previous.Status = harness.InvocationCancelled
+			now := generationClock{}.Now()
+			if _, _, err := store.CreateTurn(t.Context(), harness.Turn{ID: previous.TurnID, SessionID: "session", HostTurn: harness.HostRef{Kind: "test", ID: "source"}, ConfigSnapshotID: "legacy-config", Status: harness.TurnCancelled, Revision: 1, CreatedAt: now, UpdatedAt: now}); err != nil {
+				t.Fatal(err)
+			}
+			fact, err := harness.RootRetryTransitionFact(previous, "new-root-run", generationClock{}.Now())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err = store.AppendItem(t.Context(), fact); !errors.Is(err, harness.ErrConflict) {
+				t.Fatalf("public Item minted Store-owned retry authority: %v", err)
+			}
+		})
+	}
+}

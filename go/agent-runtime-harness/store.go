@@ -67,6 +67,7 @@ type ItemChildProofScope uint8
 const (
 	ItemChildProofAll ItemChildProofScope = iota + 1
 	ItemChildProofHostAuthority
+	ItemChildProofDelegation
 )
 
 // Store is the trusted durable Harness execution-integrity boundary (ADR 0017),

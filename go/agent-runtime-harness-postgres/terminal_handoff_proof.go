@@ -14,10 +14,7 @@ func terminalHandoffChildEvidenceTx(
 ) ([]harness.Item, error) {
 	var ownerIDs, startedIDs []string
 	for _, owner := range owners {
-		if owner.TurnID != turnID || owner.ParentItemID == "" ||
-			owner.Status == harness.InvocationCompleted ||
-			owner.Status == harness.InvocationFailed ||
-			owner.Status == harness.InvocationCancelled {
+		if owner.TurnID != turnID || owner.ParentItemID == "" {
 			continue
 		}
 		startedIDs = append(startedIDs, owner.ParentItemID)
@@ -64,6 +61,17 @@ func terminalHandoffChildEvidenceTx(
 			}
 			all = append(all, item)
 		}
+	}
+	var transitions []itemRecord
+	if err := tx.Where("turn_id = ? AND parent_item_id = ?", turnID, harness.RootRetryTransitionParentItemID).Find(&transitions).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range transitions {
+		item, err := itemFromRecord(row)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, item)
 	}
 	return all, nil
 }

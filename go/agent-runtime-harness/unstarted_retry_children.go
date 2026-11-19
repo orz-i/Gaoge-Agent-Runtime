@@ -6,28 +6,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 )
 
-// historicalRetryRootBound follows the immutable budget-grant chain back
-// through predecessor Attempts. Unlike regenerating a RunID from an old
-// Invocation ID, it also preserves the original first Attempt's real Run
-// identity. A missing or substituted link cannot authorize child cleanup.
-func historicalRetryRootBound(current Invocation, frozen childRootBinding, ledger *budget.Ledger) bool {
-	if ledger == nil {
-		// Unbudgeted legacy Root Attempts retain their original frozen child
-		// owner and terminal Status; no separate budget chain was created.
-		return true
-	}
-	runID := current.ExecutionRefID
-	for attempt := current.Attempt; attempt > frozen.Attempt; attempt-- {
-		grant, ok := ledger.RootRetries[runID]
-		if !ok || grant.InvocationID != current.ID || grant.Attempt != attempt ||
-			grant.OriginalRunID == "" || grant.OriginalRunID == runID {
-			return false
-		}
-		runID = grant.OriginalRunID
-	}
-	return runID == frozen.ExecutionRefID
-}
-
 // validUnstartedRetryHistoricalChildren applies the original Retry child
 // effect fence to cancellation of an unstarted successor. The predecessor's
 // terminal children and their receipts remain historical facts; only a child
@@ -67,25 +45,15 @@ func validUnstartedRetryHistoricalChildren(root Invocation, children []Invocatio
 		if !handoff {
 			continue
 		}
-		binding, err := frozenChildRoot(child)
-		if err != nil || binding.InvocationID != root.ID ||
-			binding.Attempt < 1 || binding.Attempt >= root.Attempt ||
-			binding.ExecutionRefID == root.ExecutionRefID ||
-			!historicalRetryRootBound(root, binding, ledger) {
-			return false
-		}
-		historical := root
-		historical.Attempt = binding.Attempt
-		historical.ExecutionRefID = binding.ExecutionRefID
-		if _, _, valid := verifiedTerminalHandoffFrozenSource(historical, child); !valid ||
+		historical, binding, valid := historicalHandoffRoot(root, child, items, ledger)
+		if !valid || binding.Attempt >= root.Attempt ||
 			!validTerminalHandoffAncestorBindings(child, binding, byID) {
 			return false
 		}
 		// A previous physical Handoff Start must retain its exact original
 		// terminal Delegation and unique dispatch-return receipts. A
 		// never-dispatched old child is instead harmless to its successor.
-		if acceptedChildPhysicalEffectPossible(items, child) &&
-			!VerifiedTerminalHandoffChild(historical, child, items) {
+		if !historicalHandoffSettled(historical, child, items) {
 			return false
 		}
 	}

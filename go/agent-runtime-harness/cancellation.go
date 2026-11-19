@@ -453,6 +453,11 @@ func (runner *Runner) cancelOwnedDescendants(ctx context.Context, turn Turn, roo
 		}
 		seeds = append(seeds, invocation.ExecutionRefID)
 	}
+	selected, historicalRuns, err := runner.currentCancellationChildren(ctx, turn, rootInvocationID, selected)
+	if err != nil {
+		return nil, err
+	}
+	seeds = withoutHistoricalRuns(seeds, historicalRuns)
 	runs, err := runner.cancelRelatedRuns(ctx, rootRunID, seeds, reason)
 	if err != nil {
 		return nil, err
@@ -474,12 +479,21 @@ func (runner *Runner) cancelTurnDescendants(
 	if err != nil {
 		return nil, err
 	}
+	turn, err := loadVerifiedTurnIdentity(ctx, runner.store, turnID)
+	if err != nil {
+		return nil, err
+	}
+	invocations, historicalRuns, err := runner.currentCancellationChildren(ctx, turn, rootInvocationID, invocations)
+	if err != nil {
+		return nil, err
+	}
 	seeds := childInvocationRunIDs(invocations, rootInvocationID)
 	delegatedRunIDs, err := runner.delegatedRunIDs(ctx, turnID)
 	if err != nil {
 		return nil, err
 	}
 	seeds = append(seeds, delegatedRunIDs...)
+	seeds = withoutHistoricalRuns(seeds, historicalRuns)
 	runs, err := runner.cancelRelatedRuns(ctx, rootRunID, seeds, reason)
 	if err != nil {
 		return nil, err

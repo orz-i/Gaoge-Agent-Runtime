@@ -346,7 +346,24 @@ func (store *Store) RetryInvocation(
 				return harness.ErrConflict
 			}
 		}
-		return rotateInvocationAttempt(tx, current, expectedRevision, nextExecutionRefID, now)
+		if err := rotateInvocationAttempt(tx, current, expectedRevision, nextExecutionRefID, now); err != nil {
+			return err
+		}
+		transition, err := harness.RootRetryTransitionFact(current, nextExecutionRefID, now)
+		if err != nil {
+			return err
+		}
+		transition.Seq, err = nextItemSeq(tx, current.TurnID)
+		if err != nil {
+			return err
+		}
+		record, err := itemToRecord(transition)
+		if err != nil {
+			return err
+		}
+		// No public Append admission: this fact is minted ONLY with the
+		// original Attempt rotation and budget transition in this transaction.
+		return mapError(tx.Create(&record).Error)
 	})
 	if err != nil {
 		return harness.Invocation{}, err
@@ -917,7 +934,15 @@ func (store *Store) UpdateTurn(ctx context.Context, value harness.Turn, expected
 				if handoffErr != nil {
 					return handoffErr
 				}
-				if !harness.ValidTurnTerminalDescendants(root, owners, handoffFacts) {
+				var ledger *budget.Ledger
+				loaded, ledgerErr := (&Store{db: tx}).LoadBudget(ctx, value.ID)
+				if ledgerErr != nil && !errors.Is(ledgerErr, budget.ErrLedgerNotFound) {
+					return ledgerErr
+				}
+				if ledgerErr == nil {
+					ledger = &loaded
+				}
+				if !harness.ValidTurnTerminalDescendantsWithBudget(root, owners, handoffFacts, ledger) {
 					return harness.ErrConflict
 				}
 				noEffect, proofErr := originalNoEffectTerminalTx(tx, root)
@@ -1551,14 +1576,18 @@ func (store *Store) GetItem(ctx context.Context, id string) (harness.Item, error
 func (store *Store) ListItemChildren(ctx context.Context, parentItemID string, scope harness.ItemChildProofScope) ([]harness.Item, error) {
 	parentItemID = strings.TrimSpace(parentItemID)
 	if store == nil || store.db == nil || parentItemID == "" ||
-		(scope != harness.ItemChildProofAll && scope != harness.ItemChildProofHostAuthority) {
+		(scope != harness.ItemChildProofAll && scope != harness.ItemChildProofHostAuthority && scope != harness.ItemChildProofDelegation) {
 		return nil, harness.ErrInvalidRequest
 	}
 	// Share the identical bounded SQL predicate with terminal Host
 	// projection. Every lookup uses the existing global parent B-tree.
-	records, err := boundedInteractionAuthorityChildrenTx(
-		store.db.WithContext(ctx), parentItemID, scope == harness.ItemChildProofHostAuthority,
-	)
+	var records []itemRecord
+	var err error
+	if scope == harness.ItemChildProofDelegation {
+		err = store.db.WithContext(ctx).Where("parent_item_id = ? AND kind = ?", parentItemID, string(harness.ItemDelegation)).Limit(2).Find(&records).Error
+	} else {
+		records, err = boundedInteractionAuthorityChildrenTx(store.db.WithContext(ctx), parentItemID, scope == harness.ItemChildProofHostAuthority)
+	}
 	if err != nil {
 		return nil, err
 	}
