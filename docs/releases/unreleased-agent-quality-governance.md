@@ -1,0 +1,40 @@
+# Opt-in read-tool exploration and recommended composition
+
+Status: unreleased additive candidate. No Kernel/Store migration, physical
+execution grant, cancellation, Retry or shared-budget contract changes.
+
+## Read-tool exploration
+
+`agent.Dependencies.ToolProgressPolicy` accepts an explicit Host-certified
+allowlist of local read/search tools. With no policy, the existing whole-tool
+repeat/no-progress suppression is unchanged. The policy is copied at Runner
+construction, intersected with the new Run's selected Tools, and persisted in
+that Run's existing opaque Agent state. `Resume` uses the persisted selection,
+not the new Runner's current defaults. Existing Runs without the field retain
+their previous behavior. Do not use mixed-version workers for opted-in Runs.
+
+```go
+loop, err := agent.NewRunner(agent.Dependencies{
+    Runtime: runtime, Model: client, Catalog: registry, Executor: registry,
+    ToolProgressPolicy: &agent.ToolProgressPolicy{
+        ExplorationToolKeys: []string{"search_documents:v1"},
+    },
+})
+```
+
+The selected read tool remains visible after unsuccessful different queries.
+After two settled calls with the same JSON arguments, a further identical call
+receives a model-correctable refusal before dispatch. JSON whitespace and object
+key ordering do not defeat this guard. The model may choose different arguments
+or finish honestly; the policy does not create evidence or guarantee success.
+
+This is **not** a retry policy. A pending unknown external outcome is still
+blocked for reconciliation. All original Tools, approval rules, explicit
+capability denials and hard Model/Tool limits remain enforced. Do not allowlist
+writes, polling or delegation. The Host remains responsible for actual read
+semantics. Final-answer correction remains tools-free in this delivery.
+
+Tests cover unchanged default suppression, different-query completion after
+three failures, policy copy/restart, canonical exact-repeat refusal, preserved
+unknown outcomes and unchanged hard call limits. These are scripted mechanics,
+not a measured real-model quality improvement.

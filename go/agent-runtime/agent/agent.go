@@ -300,6 +300,10 @@ type Dependencies struct {
 	// DeferResumption leaves resolved approval transitions running for a composed
 	// continuation worker. The standalone SDK keeps synchronous behavior by default.
 	DeferResumption bool
+
+	// ToolProgressPolicy is copied at composition and frozen in each new Run.
+	// It changes read/search strategy only, never grants or physical replay.
+	ToolProgressPolicy *ToolProgressPolicy
 }
 
 // StartRequest starts one explicitly selected Agent Run.
@@ -357,6 +361,7 @@ type Runner struct {
 	modelPolicyNormalizer     ModelPolicyNormalizer
 	toolChain                 *plugin.ToolChain
 	completionPolicies        []CompletionPolicy
+	toolProgressPolicy        *ToolProgressPolicy
 	limits                    Limits
 	execution                 ExecutionPolicy
 	runExecution              *RunExecution
@@ -401,6 +406,8 @@ type runState struct {
 	ToolDispatchID   string                     `json:"toolDispatchID,omitempty"`
 	ExternalSignals  []ExternalToolResultSignal `json:"externalSignals,omitempty"`
 	ModelInvocations []ModelInvocation          `json:"modelInvocations,omitempty"`
+
+	ToolProgressPolicy *ToolProgressPolicy `json:"toolProgressPolicy,omitempty"`
 }
 
 // View is an isolated public projection of one persisted Agent Run. It exposes
@@ -418,6 +425,8 @@ type View struct {
 	AutoAllowance    *AutoAllowanceProgress
 	ModelInvocations []ModelInvocation
 	PendingTool      *PendingToolView
+
+	ToolProgressPolicy *ToolProgressPolicy
 }
 
 // ViewState decodes an isolated public view from a Kernel Agent snapshot.
@@ -438,6 +447,8 @@ func ViewState(snapshot kernel.Snapshot) (View, error) {
 		AutoAllowance:    autoAllowanceProgress(state.AutoAllowance),
 		ModelInvocations: publicModelInvocations(state.ModelInvocations),
 		PendingTool:      publicPendingTool(snapshot, state.ToolWait),
+
+		ToolProgressPolicy: cloneToolProgressPolicy(state.ToolProgressPolicy),
 	}, nil
 }
 
@@ -486,6 +497,10 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	if dependencies.Runtime == nil || dependencies.Model == nil ||
 		(dependencies.Catalog == nil) != (dependencies.Executor == nil) {
 		return nil, ErrInvalidRequest
+	}
+	progressPolicy, err := normalizeToolProgressPolicy(dependencies.ToolProgressPolicy, dependencies.Catalog)
+	if err != nil {
+		return nil, err
 	}
 	runChain, err := plugin.NewRunChain(dependencies.RunMiddleware...)
 	if err != nil {
@@ -559,6 +574,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		modelMiddlewareConfigured: len(dependencies.ModelMiddleware) > 0,
 		hostedTools:               dependencies.HostedTools, discovery: dependencies.ToolDiscovery, observers: observers, telemetry: telemetry, approvalPolicies: approvalPolicies,
 		completionPolicies:   compactCompletionPolicies(dependencies.CompletionPolicies),
+		toolProgressPolicy:   progressPolicy,
 		limits:               dependencies.Limits,
 		execution:            execution,
 		runExecution:         runExecution,
@@ -789,6 +805,8 @@ func (runner *Runner) prepareStartState(ctx context.Context, request StartReques
 		Budget:            runtimebudget.Snapshot{Limits: limits},
 		CallAllowance:     allowance,
 		AutoAllowance:     automaticAllowance,
+
+		ToolProgressPolicy: freezeToolProgressPolicy(runner.toolProgressPolicy, toolKeys),
 	}
 	if instructions := strings.TrimSpace(request.Instructions); instructions != "" {
 		state.Messages = append([]model.Message{{Role: model.RoleSystem, Content: model.TextParts(instructions)}}, state.Messages...)
@@ -1973,6 +1991,10 @@ func (runner *Runner) executePending(ctx context.Context, snapshot kernel.Snapsh
 	if execution.state.ToolDispatchID != "" {
 		return snapshot, true, ErrToolOutcomeUnknown
 	}
+	if repeatedExplorationCall(execution.state, execution.call) {
+		return runner.handlePendingToolExecutionError(ctx, snapshot, execution.state,
+			tools.NewRecoverableCallErrorAllowCompletion("tool.exploration_repeat", "This read/search call already has two settled results. Use different arguments or finish with the available evidence.", tools.ErrInvalidCall))
+	}
 	state := execution.state
 	state.ToolDispatchID = execution.call.ID
 	encoded, encodeErr := encodeState(state)
@@ -2649,6 +2671,9 @@ func decodeState(encoded json.RawMessage) (runState, error) {
 	var state runState
 	if err := json.Unmarshal(encoded, &state); err != nil {
 		return runState{}, errors.Join(ErrInvalidRequest, err)
+	}
+	if !validFrozenToolProgressPolicy(state) {
+		return runState{}, ErrInvalidRequest
 	}
 	if state.OriginFingerprint != "" && !validFrozenOriginFingerprint(state.OriginFingerprint) {
 		return runState{}, ErrInvalidRequest

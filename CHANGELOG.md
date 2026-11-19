@@ -5,6 +5,14 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- **Opt-in read-tool exploration (2026-11-19):** A Host-certified
+  `agent.ToolProgressPolicy` keeps selected local read/search tools available for
+  different arguments instead of suppressing the entire tool after failed
+  searches. The policy is copied and frozen in each new Run; old/default Runs
+  retain their behavior. Identical settled calls are bounded before dispatch.
+  Unknown outcomes, approvals, explicit denials and hard budgets are unchanged.
+  See `docs/releases/unreleased-agent-quality-governance.md`.
+
 - **Breaking package boundary (2026-11-17):** Physically move
   `go/agent-runtime-provider/transport` into the independently versioned
   `go/provider-transport` module. Preserve the original 103 Go source/test
