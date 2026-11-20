@@ -284,6 +284,13 @@ type Dependencies struct {
 	// ContextPreparation selects the concrete synchronous sampling algorithm.
 	// It grants no managed suspension/recovery authority.
 	ContextPreparation *BoundedContextAdapter
+	// ContextSummary selects native summary orchestration under this exact
+	// bounded adapter. Its business preparer is installed here; dedicated hard
+	// recovery requires the separate SummaryNativeRecovery selection below.
+	ContextSummary *ContextSummaryAdapter
+	// SummaryNativeRecovery freezes a separate, finite summary continuation
+	// capability. It never enables the older general Context managed mode.
+	SummaryNativeRecovery bool
 	// NormalizeModelPolicy selects and freezes Host options/route policy before preparation.
 	NormalizeModelPolicy ModelPolicyNormalizer
 	ToolMiddleware       []plugin.ToolMiddleware
@@ -323,7 +330,8 @@ type StartRequest struct {
 	OutputContract    *model.OutputContract
 	// MaxModelOutputTokens bounds each model sampling request. Zero leaves the
 	// per-request ceiling unspecified; Limits.MaxOutputTokens bounds Run usage.
-	MaxModelOutputTokens int64 `json:"maxModelOutputTokens,omitempty"`
+	MaxModelOutputTokens int64                      `json:"maxModelOutputTokens,omitempty"`
+	WorkingStateSummary  *WorkingStateSummaryPolicy `json:"workingStateSummary,omitempty"`
 	ToolKeys             []string
 	RequiredToolKeys     []string
 	// InitialToolKeys are already authorized local tools shown on the first
@@ -355,6 +363,9 @@ type Runner struct {
 	boundedCallbacks          []any
 	managedContextRecovery    *BoundedContextAdapter
 	contextPreparation        *BoundedContextAdapter
+	contextSummary            *ContextSummaryAdapter
+	contextSummaryBudget      bool
+	summaryNativeRecovery     bool
 	approvalPolicies          *plugin.ApprovalPolicySet
 	hostedTools               HostedToolCatalog
 	discovery                 ToolDiscovery
@@ -393,28 +404,30 @@ type Runner struct {
 }
 
 type runState struct {
-	RecoveredTools       []rootToolReceipt      `json:"recoveredTools,omitempty"`
-	OriginFingerprint    string                 `json:"originFingerprint,omitempty"`
-	Messages             []model.Message        `json:"messages"`
-	Model                string                 `json:"model,omitempty"`
-	ModelOptions         json.RawMessage        `json:"modelOptions,omitempty"`
-	OutputContract       *model.OutputContract  `json:"outputContract,omitempty"`
-	MaxModelOutputTokens int64                  `json:"maxModelOutputTokens,omitempty"`
-	ToolKeys             []string               `json:"toolKeys"`
-	RequiredToolKeys     []string               `json:"requiredToolKeys,omitempty"`
-	HostedToolGrants     []HostedToolGrant      `json:"hostedToolGrants,omitempty"`
-	Discovery            *discoveryState        `json:"discovery,omitempty"`
-	BlockedToolKeys      []string               `json:"blockedToolKeys,omitempty"`
-	RequireToolCall      bool                   `json:"requireToolCall,omitempty"`
-	CompletionRepair     bool                   `json:"completionRepair,omitempty"`
-	Budget               runtimebudget.Snapshot `json:"budget"`
-	CallAllowance        *CallAllowance         `json:"callAllowance,omitempty"`
-	AutoAllowance        *autoAllowanceState    `json:"autoAllowance,omitempty"`
-	PendingCalls         []tools.Call           `json:"pendingCalls,omitempty"`
-	PendingToolCatalog   map[string]string      `json:"pendingToolCatalog,omitempty"`
-	PendingApproval      *pendingToolApproval   `json:"pendingApproval,omitempty"`
-	ToolWait             *PendingTool           `json:"toolWait,omitempty"`
-	DeferredChildren     []deferredChildCall    `json:"deferredChildren,omitempty"`
+	RecoveredTools        []rootToolReceipt          `json:"recoveredTools,omitempty"`
+	OriginFingerprint     string                     `json:"originFingerprint,omitempty"`
+	Messages              []model.Message            `json:"messages"`
+	Model                 string                     `json:"model,omitempty"`
+	ModelOptions          json.RawMessage            `json:"modelOptions,omitempty"`
+	OutputContract        *model.OutputContract      `json:"outputContract,omitempty"`
+	MaxModelOutputTokens  int64                      `json:"maxModelOutputTokens,omitempty"`
+	WorkingStateSummary   *WorkingStateSummaryPolicy `json:"workingStateSummary,omitempty"`
+	SummaryNativeRecovery bool                       `json:"summaryNativeRecovery,omitempty"`
+	ToolKeys              []string                   `json:"toolKeys"`
+	RequiredToolKeys      []string                   `json:"requiredToolKeys,omitempty"`
+	HostedToolGrants      []HostedToolGrant          `json:"hostedToolGrants,omitempty"`
+	Discovery             *discoveryState            `json:"discovery,omitempty"`
+	BlockedToolKeys       []string                   `json:"blockedToolKeys,omitempty"`
+	RequireToolCall       bool                       `json:"requireToolCall,omitempty"`
+	CompletionRepair      bool                       `json:"completionRepair,omitempty"`
+	Budget                runtimebudget.Snapshot     `json:"budget"`
+	CallAllowance         *CallAllowance             `json:"callAllowance,omitempty"`
+	AutoAllowance         *autoAllowanceState        `json:"autoAllowance,omitempty"`
+	PendingCalls          []tools.Call               `json:"pendingCalls,omitempty"`
+	PendingToolCatalog    map[string]string          `json:"pendingToolCatalog,omitempty"`
+	PendingApproval       *pendingToolApproval       `json:"pendingApproval,omitempty"`
+	ToolWait              *PendingTool               `json:"toolWait,omitempty"`
+	DeferredChildren      []deferredChildCall        `json:"deferredChildren,omitempty"`
 	// A fenced Agent Run commits its Tool dispatch ID before invoking
 	// external effects. A missing receipt requires explicit reconciliation.
 	ToolDispatchID   string                     `json:"toolDispatchID,omitempty"`
@@ -430,18 +443,20 @@ type runState struct {
 // the durable transcript and bounded usage state without leaking the private
 // execution representation or allowing callers to mutate Kernel state.
 type View struct {
-	Messages             []model.Message
-	Model                string
-	ModelOptions         json.RawMessage
-	OutputContract       *model.OutputContract
-	MaxModelOutputTokens int64 `json:"maxModelOutputTokens,omitempty"`
-	ToolKeys             []string
-	RequiredToolKeys     []string
-	Budget               runtimebudget.Snapshot
-	CallAllowance        *CallAllowance
-	AutoAllowance        *AutoAllowanceProgress
-	ModelInvocations     []ModelInvocation
-	PendingTool          *PendingToolView
+	Messages              []model.Message
+	Model                 string
+	ModelOptions          json.RawMessage
+	OutputContract        *model.OutputContract
+	MaxModelOutputTokens  int64                      `json:"maxModelOutputTokens,omitempty"`
+	WorkingStateSummary   *WorkingStateSummaryPolicy `json:"workingStateSummary,omitempty"`
+	SummaryNativeRecovery bool                       `json:"summaryNativeRecovery,omitempty"`
+	ToolKeys              []string
+	RequiredToolKeys      []string
+	Budget                runtimebudget.Snapshot
+	CallAllowance         *CallAllowance
+	AutoAllowance         *AutoAllowanceProgress
+	ModelInvocations      []ModelInvocation
+	PendingTool           *PendingToolView
 
 	ToolProgressPolicy *ToolProgressPolicy
 	InputBinding       string
@@ -455,18 +470,20 @@ func ViewState(snapshot kernel.Snapshot) (View, error) {
 		return View{}, err
 	}
 	return View{
-		Messages:             publicModelMessages(state.Messages),
-		Model:                state.Model,
-		ModelOptions:         cloneRawJSON(state.ModelOptions),
-		OutputContract:       model.CloneOutputContract(state.OutputContract),
-		MaxModelOutputTokens: state.MaxModelOutputTokens,
-		ToolKeys:             append([]string(nil), state.ToolKeys...),
-		RequiredToolKeys:     append([]string(nil), state.RequiredToolKeys...),
-		Budget:               state.Budget,
-		CallAllowance:        cloneCallAllowance(state.CallAllowance),
-		AutoAllowance:        autoAllowanceProgress(state.AutoAllowance),
-		ModelInvocations:     publicModelInvocations(state.ModelInvocations),
-		PendingTool:          publicPendingTool(snapshot, state.ToolWait),
+		Messages:              publicModelMessages(state.Messages),
+		Model:                 state.Model,
+		ModelOptions:          cloneRawJSON(state.ModelOptions),
+		OutputContract:        model.CloneOutputContract(state.OutputContract),
+		MaxModelOutputTokens:  state.MaxModelOutputTokens,
+		WorkingStateSummary:   CloneWorkingStateSummaryPolicy(state.WorkingStateSummary),
+		SummaryNativeRecovery: state.SummaryNativeRecovery,
+		ToolKeys:              append([]string(nil), state.ToolKeys...),
+		RequiredToolKeys:      append([]string(nil), state.RequiredToolKeys...),
+		Budget:                state.Budget,
+		CallAllowance:         cloneCallAllowance(state.CallAllowance),
+		AutoAllowance:         autoAllowanceProgress(state.AutoAllowance),
+		ModelInvocations:      publicModelInvocations(state.ModelInvocations),
+		PendingTool:           publicPendingTool(snapshot, state.ToolWait),
 
 		ToolProgressPolicy: cloneToolProgressPolicy(state.ToolProgressPolicy),
 		InputBinding:       state.InputBinding,
@@ -494,8 +511,19 @@ func publicModelInvocations(values []ModelInvocation) []ModelInvocation {
 
 // NewRunner constructs the Agent loop; Host selection and task routing remain external.
 func NewRunner(dependencies Dependencies) (*Runner, error) {
-	if dependencies.Inputs != nil && dependencies.ManagedContextRecovery != nil {
+	if dependencies.Inputs != nil && (dependencies.ManagedContextRecovery != nil || dependencies.SummaryNativeRecovery) {
 		return nil, ErrInvalidRequest // Host input is not a managed-transfer adapter
+	}
+	if dependencies.SummaryNativeRecovery && !validSummaryNativeDependencies(dependencies) {
+		return nil, ErrInvalidRequest
+	}
+	if summary := dependencies.ContextSummary; summary != nil {
+		if summary.bounded == nil || summary.ports == nil || dependencies.ManagedContextRecovery != nil ||
+			dependencies.ContextPreparation != nil || dependencies.PrepareModelRequest != nil ||
+			len(dependencies.RunMiddleware) != 1 || dependencies.RunMiddleware[0] != summary.bounded {
+			return nil, ErrInvalidRequest
+		}
+		dependencies.PrepareModelRequest = summary.bounded.Prepare
 	}
 	if a := dependencies.ContextPreparation; a != nil {
 		count := 0
@@ -630,6 +658,9 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		runChain:             runChain, modelChain: modelChain, toolChain: toolChain,
 		managedContextRecovery: dependencies.ManagedContextRecovery,
 		contextPreparation:     dependencies.ContextPreparation,
+		contextSummary:         dependencies.ContextSummary,
+		contextSummaryBudget:   summaryBudgetConfigured(dependencies),
+		summaryNativeRecovery:  dependencies.SummaryNativeRecovery,
 		boundedCallbacks:       collectBoundedCallbacks(dependencies.RunMiddleware, dependencies.ModelMiddleware, dependencies.ToolMiddleware),
 		// Native pre-Start cancellation and deferred post-callback custody
 		// share the SAME Host-callback trust decision. Native Start remains
@@ -782,6 +813,15 @@ func (runner *Runner) prepareStartState(ctx context.Context, request StartReques
 	if request.ParentRunID != "" && runner.inputs != nil {
 		return nil, ErrInvalidRequest // root-scoped input is never inherited by a child
 	}
+	if ValidateWorkingStateSummaryPolicy(request.WorkingStateSummary) != nil ||
+		(request.WorkingStateSummary != nil && (runner.contextSummary == nil || runner.contextSummaryBudget || request.ParentRunID != "" || request.MaxModelOutputTokens <= 0)) {
+		return nil, ErrInvalidRequest
+	}
+	if request.WorkingStateSummary != nil {
+		if err := runner.validateOutputCapability(ctx, request.Model, workingStateSummaryContract()); err != nil {
+			return nil, err
+		}
+	}
 	if request.MaxModelOutputTokens < 0 || (request.ParentRunID == "") != (request.OriginFingerprint == "") ||
 		(request.ParentRunID != "" && !validFrozenOriginFingerprint(request.OriginFingerprint)) {
 		return nil, ErrInvalidRequest
@@ -847,19 +887,21 @@ func (runner *Runner) prepareStartState(ctx context.Context, request StartReques
 		return nil, ErrInvalidRequest
 	}
 	state := runState{
-		OriginFingerprint:    request.OriginFingerprint,
-		Messages:             []model.Message{{Role: model.RoleUser, Content: model.TextParts(strings.TrimSpace(request.Goal))}},
-		Model:                strings.TrimSpace(request.Model),
-		ModelOptions:         cloneRawJSON(request.ModelOptions),
-		OutputContract:       model.CloneOutputContract(request.OutputContract),
-		MaxModelOutputTokens: request.MaxModelOutputTokens,
-		ToolKeys:             toolKeys,
-		RequiredToolKeys:     requiredToolKeys,
-		HostedToolGrants:     grants,
-		Discovery:            discovery,
-		Budget:               runtimebudget.Snapshot{Limits: limits},
-		CallAllowance:        allowance,
-		AutoAllowance:        automaticAllowance,
+		OriginFingerprint:     request.OriginFingerprint,
+		Messages:              []model.Message{{Role: model.RoleUser, Content: model.TextParts(strings.TrimSpace(request.Goal))}},
+		Model:                 strings.TrimSpace(request.Model),
+		ModelOptions:          cloneRawJSON(request.ModelOptions),
+		OutputContract:        model.CloneOutputContract(request.OutputContract),
+		MaxModelOutputTokens:  request.MaxModelOutputTokens,
+		WorkingStateSummary:   CloneWorkingStateSummaryPolicy(request.WorkingStateSummary),
+		SummaryNativeRecovery: request.WorkingStateSummary != nil && runner.summaryNativeRecovery,
+		ToolKeys:              toolKeys,
+		RequiredToolKeys:      requiredToolKeys,
+		HostedToolGrants:      grants,
+		Discovery:             discovery,
+		Budget:                runtimebudget.Snapshot{Limits: limits},
+		CallAllowance:         allowance,
+		AutoAllowance:         automaticAllowance,
 
 		ToolProgressPolicy: freezeToolProgressPolicy(runner.toolProgressPolicy, toolKeys),
 		InputBinding:       runner.inputBinding,
@@ -992,6 +1034,9 @@ func (runner *Runner) Resume(ctx context.Context, runID string, expectedRevision
 	snapshot, state, err := runner.loadState(ctx, runID)
 	if err != nil {
 		return kernel.Snapshot{}, err
+	}
+	if state.WorkingStateSummary != nil && (!runner.SupportsContextSummary() || runner.contextSummaryBudget || state.SummaryNativeRecovery != runner.summaryNativeRecovery) {
+		return snapshot, ErrInvalidRequest
 	}
 	if snapshot.Run.Revision != expectedRevision {
 		return kernel.Snapshot{}, kernel.ErrConflict
@@ -1185,6 +1230,11 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 			return snapshot, true, leaveErr
 		}
 	}
+	if state.SummaryNativeRecovery && invocation.Purpose == ModelInvocationContextSummary && invocation.Status == ModelInvocationPending {
+		if _, leaveErr := runner.runtime.LeaveManagedSafePoint(ctx, snapshot.Run.ID); leaveErr != nil {
+			return snapshot, true, leaveErr
+		}
+	}
 	snapshot, state, invocation, err = runner.claimModelInvocationExecution(ctx, snapshot, state, invocation)
 	if err != nil {
 		return snapshot, true, err
@@ -1267,6 +1317,10 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 			return failed, true, failErr
 		}
 		return snapshot, true, err
+	}
+	if invocation.Purpose == ModelInvocationContextSummary {
+		next, summaryErr := runner.consumeContextSummary(ctx, snapshot, state)
+		return next, summaryErr != nil, summaryErr
 	}
 	consumed, ok := consumeLastModelInvocation(&state, runner.clock.Now())
 	if !ok {
@@ -1740,6 +1794,9 @@ func (runner *Runner) generateModel(
 	afterProvider ...*modelCompletionAuthority,
 ) (model.Response, error) {
 	emit := func(event model.StreamEvent) error {
+		if hidden, _ := ctx.Value(contextSummaryModelKey{}).(bool); hidden {
+			return nil
+		}
 		runner.publishValue(ctx, request.RunID, plugin.Event{
 			Type: EventModelDelta, Delta: event.Delta,
 		}, event)
@@ -2770,7 +2827,8 @@ func decodeState(encoded json.RawMessage) (runState, error) {
 	if state.OriginFingerprint != "" && !validFrozenOriginFingerprint(state.OriginFingerprint) {
 		return runState{}, ErrInvalidRequest
 	}
-	if state.MaxModelOutputTokens < 0 || !modelInvocationsMatchOutputCeiling(state.ModelInvocations, state.MaxModelOutputTokens) ||
+	if ValidateWorkingStateSummaryPolicy(state.WorkingStateSummary) != nil || !validContextSummaryState(state) ||
+		state.MaxModelOutputTokens < 0 || !modelInvocationsMatchOutputCeiling(state.ModelInvocations, state.MaxModelOutputTokens) ||
 		state.Budget.Limits.MaxLLMCalls <= 0 || state.Budget.Limits.MaxToolCalls <= 0 ||
 		!validAgentLimits(state.Budget.Limits) || !validAgentUsage(state.Budget.Usage) ||
 		!validCallAllowance(state.CallAllowance, state.Budget.Limits) ||

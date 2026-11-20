@@ -380,6 +380,11 @@ func normalizeContextSeed(seed *ContextSeed) (*ContextSeed, error) {
 	if seed == nil || jsoncontract.ValidateCanonicalUTF8(seed) != nil {
 		return nil, ErrInvalidRequest
 	}
+	// Runtime provenance is read from committed checkpoints, never imported
+	// through an explicit Host WorkingState update.
+	if seed.WorkingState != nil && seed.WorkingState.Derivation != nil {
+		return nil, ErrInvalidRequest
+	}
 	result := &ContextSeed{
 		SourcePath: append([]string(nil), seed.SourcePath...), Instructions: strings.TrimSpace(seed.Instructions),
 		Entries: runtimecontext.CloneEntries(seed.Entries), BaseCheckpointID: strings.TrimSpace(seed.BaseCheckpointID),

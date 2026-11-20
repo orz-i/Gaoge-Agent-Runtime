@@ -77,6 +77,16 @@ var (
 	_ continuation.ToolWaitResumer                        = (*agent.Runner)(nil)
 )
 
+var (
+	_                                                                                                     = agent.StartRequest{WorkingStateSummary: &agent.WorkingStateSummaryPolicy{MaxInputTokens: 8192, MaxSerializedBytes: 64 << 10}}
+	_ func(*agent.WorkingStateSummaryPolicy) error                                                        = agent.ValidateWorkingStateSummaryPolicy
+	_ func(*agent.WorkingStateSummaryPolicy) *agent.WorkingStateSummaryPolicy                             = agent.CloneWorkingStateSummaryPolicy
+	_ func(*agent.BoundedContextAdapter, agent.ContextSummaryPorts) (*agent.ContextSummaryAdapter, error) = agent.NewContextSummaryAdapter
+	_                                                                                                     = agent.ModelInvocationContextSummary
+	_                                                                                                     = agent.Dependencies{SummaryNativeRecovery: true}
+	_ func(*agent.Runner) bool                                                                            = (*agent.Runner).SupportsSummaryNativeRecovery
+)
+
 // A separately linked Host implements only the narrow, immutable first-party
 // AgentTask ownership proof. Missing methods must fail the external SDK build.
 // External clients can see a pending original child Grant but cannot create

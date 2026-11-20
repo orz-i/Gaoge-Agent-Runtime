@@ -121,6 +121,7 @@ func (runner *Runner) startAgentPhysical(
 			Model: config.Model, ModelOptions: append(json.RawMessage(nil), config.ModelOptions...),
 			OutputContract:       model.CloneOutputContract(config.OutputContract),
 			MaxModelOutputTokens: config.MaxModelOutputTokens,
+			WorkingStateSummary:  agent.CloneWorkingStateSummaryPolicy(config.WorkingStateSummary),
 			ToolKeys:             append([]string(nil), config.ToolKeys...),
 			RequiredToolKeys:     append([]string(nil), request.RequiredToolKeys...),
 			InitialToolKeys:      append([]string(nil), request.InitialToolKeys...),
@@ -649,7 +650,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	if dependencies.Runtime == nil || dependencies.Agent == nil || dependencies.Store == nil {
 		return nil, ErrInvalidRequest
 	}
-	if native, ok := dependencies.Agent.(*agent.Runner); ok && native.SupportsManagedContextRecovery() {
+	if native, ok := dependencies.Agent.(*agent.Runner); ok && (native.SupportsManagedContextRecovery() || native.SupportsSummaryNativeRecovery()) {
 		host, supported := dependencies.Store.(managedHostStore)
 		if !supported || !dependencies.Runtime.UsesManagedRecoveryHost(host) {
 			return nil, ErrInvalidRequest
@@ -1575,42 +1576,54 @@ func validateRootRuntimeOwnership(invocation Invocation, snapshot kernel.Snapsho
 	return nil
 }
 
-// A positive original Config ceiling must be attested by the native Agent
-// state, not just by another same-ID Run with the right presentation owner.
-// Legacy zero Configs retain their existing unspecified contract and do not
-// acquire a new Agent-state requirement during reads or recovery.
+// Frozen model policy must be attested by the native Agent state, not just a
+// same-ID Run with the right presentation owner. Legacy zero-cap, nil-summary
+// Configs keep their non-Agent compatibility; actual Agent state must still
+// agree on whether summary was originally enabled.
 func (runner *Runner) validateRootModelOutputCeiling(ctx context.Context, invocation Invocation, snapshot kernel.Snapshot) error {
-	ceiling, err := runner.frozenRootModelOutputCeiling(ctx, invocation)
+	config, err := runner.frozenRootModelPolicy(ctx, invocation)
 	if err != nil {
 		return err
 	}
-	return checkRootModelOutputCeiling(invocation, snapshot, ceiling)
+	return checkRootModelPolicy(invocation, snapshot, config)
 }
 
-func (runner *Runner) frozenRootModelOutputCeiling(ctx context.Context, invocation Invocation) (int64, error) {
+func (runner *Runner) frozenRootModelPolicy(ctx context.Context, invocation Invocation) (ConfigSnapshot, error) {
 	if invocation.ParentItemID != "" || invocation.ExecutionClass != ExecutionAgent {
-		return 0, ErrConflict
+		return ConfigSnapshot{}, ErrConflict
 	}
 	turn, err := loadVerifiedTurn(ctx, runner.store, invocation.TurnID)
 	if err != nil {
-		return 0, err
+		return ConfigSnapshot{}, err
 	}
 	config, err := loadSealedConfig(ctx, runner.store, turn.ConfigSnapshotID)
 	if err != nil {
-		return 0, err
+		return ConfigSnapshot{}, err
 	}
-	return config.MaxModelOutputTokens, nil
+	return config, nil
 }
 
-func checkRootModelOutputCeiling(invocation Invocation, snapshot kernel.Snapshot, ceiling int64) error {
-	if ceiling == 0 {
+func checkRootModelPolicy(invocation Invocation, snapshot kernel.Snapshot, config ConfigSnapshot) error {
+	legacy := config.MaxModelOutputTokens == 0 && config.WorkingStateSummary == nil
+	if legacy {
+		if snapshot.Run.Kind != agent.RunKind {
+			return nil
+		}
+		// Old Host AgentStarter implementations may have opaque feature state.
+		// Preserve that existing zero-cap contract; a real native Agent state
+		// still cannot introduce a summary policy absent from its Config.
+		view, viewErr := agent.ViewState(snapshot)
+		if viewErr == nil && view.WorkingStateSummary != nil {
+			return ErrConflict
+		}
 		return nil
 	}
 	if snapshot.Run.ID != invocation.ExecutionRefID || snapshot.Run.Kind != agent.RunKind {
 		return ErrConflict
 	}
 	view, err := agent.ViewState(snapshot)
-	if err != nil || view.MaxModelOutputTokens != ceiling {
+	if err != nil || (config.MaxModelOutputTokens > 0 && view.MaxModelOutputTokens != config.MaxModelOutputTokens) ||
+		!sameWorkingStateSummaryPolicy(config.WorkingStateSummary, view.WorkingStateSummary) {
 		return ErrConflict
 	}
 	return nil
@@ -1627,15 +1640,30 @@ func (runner *Runner) requireInvocationRootModelOutputCeiling(ctx context.Contex
 			return err
 		}
 	}
-	ceiling, err := runner.frozenRootModelOutputCeiling(ctx, root)
-	if err != nil || ceiling == 0 {
-		return err
-	}
-	current, err := runner.runtime.Load(ctx, root.ExecutionRefID)
+	config, err := runner.frozenRootModelPolicy(ctx, root)
 	if err != nil {
 		return err
 	}
-	return checkRootModelOutputCeiling(root, current, ceiling)
+	if config.MaxModelOutputTokens == 0 && config.WorkingStateSummary == nil {
+		if native, ok := runner.agent.(*agent.Runner); !ok || !native.SupportsContextSummary() {
+			return nil
+		}
+	}
+	current, err := runner.runtime.Load(ctx, root.ExecutionRefID)
+	if err != nil {
+		if config.MaxModelOutputTokens == 0 && config.WorkingStateSummary == nil && errors.Is(err, kernel.ErrNotFound) {
+			return nil
+		}
+		return err
+	}
+	if config.WorkingStateSummary != nil {
+		view, viewErr := agent.ViewState(current)
+		native, supported := runner.agent.(interface{ SupportsSummaryNativeRecovery() bool })
+		if viewErr != nil || !supported || view.SummaryNativeRecovery != native.SupportsSummaryNativeRecovery() {
+			return ErrInvalidRequest
+		}
+	}
+	return checkRootModelPolicy(root, current, config)
 }
 
 func runtimeSnapshotConflicts(invocation Invocation, snapshot kernel.Snapshot) bool {

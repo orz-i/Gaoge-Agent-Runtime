@@ -46,6 +46,8 @@ func (runner *Runner) VerifyFrozenStartRequest(snapshot kernel.Snapshot, request
 	if err != nil || state.OriginFingerprint != request.OriginFingerprint || state.Budget.Limits != limits ||
 		state.Model != strings.TrimSpace(request.Model) ||
 		state.MaxModelOutputTokens != request.MaxModelOutputTokens ||
+		!reflect.DeepEqual(state.WorkingStateSummary, request.WorkingStateSummary) ||
+		state.SummaryNativeRecovery != (request.WorkingStateSummary != nil && runner.summaryNativeRecovery) ||
 		!bytes.Equal(state.ModelOptions, request.ModelOptions) ||
 		!slices.Equal(state.ToolKeys, normalizedToolKeys(request.ToolKeys)) ||
 		len(state.RequiredToolKeys) != 0 || len(state.HostedToolGrants) != 0 ||

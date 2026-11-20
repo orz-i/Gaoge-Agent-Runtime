@@ -25,6 +25,10 @@ type AgentSessionContextOptions struct {
 	// The default uses ordinary bounded Context and its existing receipt-based
 	// recovery; arbitrary interrupted callbacks do not become safe to replay.
 	ManagedRecovery bool
+	// SummaryNativeRecovery explicitly enables the source-bound summary safe
+	// points. Runtime must use this exact Harness Store as ManagedRecoveryHost.
+	// It is separate from ordinary receipt recovery and ManagedRecovery.
+	SummaryNativeRecovery bool
 }
 
 // AgentSessionOptions composes a single tool-using Agent with bounded Harness
@@ -54,6 +58,9 @@ func OpenAgentSession(options AgentSessionOptions) (*SessionClient, error) {
 	if options.Runtime == nil || options.Store == nil || options.Model == nil || options.Context.ResolveWindow == nil {
 		return nil, ErrInvalidRequest
 	}
+	if options.Context.ManagedRecovery && options.Context.SummaryNativeRecovery {
+		return nil, ErrInvalidRequest
+	}
 	options.Session.Config = cloneConfigSnapshot(options.Session.Config)
 	config := &options.Session.Config
 	if config.DelegationPolicy.MaxDepth != 0 {
@@ -64,7 +71,10 @@ func OpenAgentSession(options AgentSessionOptions) (*SessionClient, error) {
 		return nil, err
 	}
 	*config = normalized
-	if options.Context.ManagedRecovery {
+	if options.Context.ManagedRecovery && config.WorkingStateSummary != nil {
+		return nil, ErrInvalidRequest
+	}
+	if options.Context.ManagedRecovery || options.Context.SummaryNativeRecovery {
 		host, ok := options.Store.(managedHostStore)
 		if !ok || !options.Runtime.SupportsManagedRecovery() || !options.Runtime.UsesManagedRecoveryHost(host) {
 			return nil, ErrInvalidRequest
@@ -76,7 +86,7 @@ func OpenAgentSession(options AgentSessionOptions) (*SessionClient, error) {
 	}
 	manager := runtimecontext.NewManager(runtimecontext.Dependencies{Counter: options.Context.Counter})
 	resolve := options.Context.ResolveWindow
-	bounded, err := NewBoundedContextAdapter(options.Store, manager, func(ctx context.Context, request model.Request) (runtimecontext.ModelWindow, error) {
+	resolveWindow := func(ctx context.Context, request model.Request) (runtimecontext.ModelWindow, error) {
 		window, resolveErr := resolve(ctx, model.CloneRequest(request))
 		if resolveErr != nil {
 			return runtimecontext.ModelWindow{}, resolveErr
@@ -89,7 +99,8 @@ func OpenAgentSession(options AgentSessionOptions) (*SessionClient, error) {
 			return runtimecontext.ModelWindow{}, ErrInvalidRequest
 		}
 		return window, nil
-	}, nil)
+	}
+	bounded, err := NewBoundedContextAdapter(options.Store, manager, resolveWindow, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -106,7 +117,11 @@ func OpenAgentSession(options AgentSessionOptions) (*SessionClient, error) {
 	if options.Context.ManagedRecovery {
 		dependencies.ManagedContextRecovery = bounded
 	} else {
-		dependencies.PrepareModelRequest = bounded.Prepare
+		dependencies.ContextSummary, err = NewContextSummaryAdapter(options.Store, options.Runtime, bounded, resolveWindow)
+		if err != nil {
+			return nil, err
+		}
+		dependencies.SummaryNativeRecovery = options.Context.SummaryNativeRecovery
 	}
 	loop, err := agent.NewRunner(dependencies)
 	if err != nil {
@@ -131,9 +146,11 @@ func OpenAgentSession(options AgentSessionOptions) (*SessionClient, error) {
 // require a delegation engine; selected delegation Tools and child facts do.
 func normalizeAgentSessionConfig(config ConfigSnapshot) (ConfigSnapshot, error) {
 	if jsoncontract.ValidateCanonicalUTF8(config) != nil || config.MaxModelOutputTokens <= 0 ||
-		len(config.Skills) != 0 || strings.TrimSpace(config.MemoryPolicy) != "" || config.SharedBudget != nil {
+		len(config.Skills) != 0 || strings.TrimSpace(config.MemoryPolicy) != "" || config.SharedBudget != nil ||
+		agent.ValidateWorkingStateSummaryPolicy(config.WorkingStateSummary) != nil {
 		return ConfigSnapshot{}, ErrInvalidRequest
 	}
+	config.WorkingStateSummary = agent.CloneWorkingStateSummaryPolicy(config.WorkingStateSummary)
 	config.ToolKeys = normalizeStrings(config.ToolKeys)
 	policies, err := normalizeToolPolicies(config.ToolPolicies)
 	if err != nil || len(policies) != len(config.ToolKeys) {
@@ -199,6 +216,30 @@ func (session *SessionClient) preflightAgentSessionResume(ctx context.Context, t
 	}
 	if _, err = normalizeAgentSessionConfig(config); err != nil {
 		return err
+	}
+	if config.WorkingStateSummary != nil {
+		if native, ok := session.runner.agent.(*agent.Runner); !ok || !native.SupportsContextSummary() || native.SupportsManagedContextRecovery() {
+			return ErrInvalidRequest
+		}
+		root, err := loadTopLevelInvocation(ctx, store, turn.ID)
+		if err != nil {
+			return err
+		}
+		snapshot, loadErr := session.runner.runtime.Load(ctx, root.ExecutionRefID)
+		if loadErr != nil && !errors.Is(loadErr, kernel.ErrNotFound) {
+			return loadErr
+		}
+		if loadErr == nil {
+			view, viewErr := agent.ViewState(snapshot)
+			native := session.runner.agent.(*agent.Runner)
+			if viewErr != nil || view.SummaryNativeRecovery != native.SupportsSummaryNativeRecovery() {
+				return ErrInvalidRequest
+			}
+		}
+		// An admitted Turn can lack a Run before native Start, or after a
+		// proven no-effect failure/cancellation. Resume owns its existing
+		// readable snapshot and ErrNotFound/terminal behavior; this preflight
+		// must not replace it or create execution to reconstruct a mode.
 	}
 	if session.runner.catalog == nil {
 		return ErrInvalidRequest

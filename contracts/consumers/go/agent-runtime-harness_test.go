@@ -5,6 +5,7 @@ import (
 	"time"
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
@@ -83,4 +84,10 @@ var (
 	_ func(*runtimecontext.WorkingState) *runtimecontext.WorkingState                                                = runtimecontext.CloneWorkingState
 	_ func(*runtimecontext.WorkingState) error                                                                       = runtimecontext.ValidateWorkingState
 	_ func(*harness.SessionClient, context.Context, string, string, []string) (harness.ContextSourceBoundary, error) = (*harness.SessionClient).ResolveContextSourceBoundaryForPath
+)
+
+var (
+	_ = harness.ConfigSnapshot{WorkingStateSummary: &agent.WorkingStateSummaryPolicy{MaxInputTokens: 8192, MaxSerializedBytes: 64 << 10}}
+	_ = runtimecontext.WorkingState{Derivation: &runtimecontext.WorkingStateDerivation{Kind: runtimecontext.WorkingStateDerivationSummary}}
+	_ = harness.AgentSessionContextOptions{SummaryNativeRecovery: true}
 )
