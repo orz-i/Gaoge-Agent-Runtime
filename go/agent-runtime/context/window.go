@@ -405,24 +405,31 @@ type Trace struct {
 	LastAssessment      *Assessment `json:"lastAssessment,omitempty"`
 }
 
+// CheckpointContentHashEncodingLosslessJSON identifies the lossless JSON
+// canonicalization used by newly written Context Checkpoints.
+const CheckpointContentHashEncodingLosslessJSON = "lossless-json-v1"
+
 // Checkpoint is one immutable active Context Window revision. Generation changes only on an
 // explicit reset/rollover; Revision advances while the stable prefix is append-only.
 type Checkpoint struct {
-	ID                     string   `json:"id"`
-	ScopeID                string   `json:"scopeID"`
-	CacheIdentity          string   `json:"cacheIdentity"`
-	Generation             int      `json:"generation"`
-	Revision               int      `json:"revision"`
-	ParentCheckpointID     string   `json:"parentCheckpointID,omitempty"`
-	LineageHash            string   `json:"lineageHash"`
-	CoveredThroughSourceID string   `json:"coveredThroughSourceID"`
-	CoveredPathHash        string   `json:"coveredPathHash"`
-	StaticFingerprint      string   `json:"staticFingerprint"`
-	ModelWindowFingerprint string   `json:"modelWindowFingerprint,omitempty"`
-	ContentHash            string   `json:"contentHash"`
-	Window                 Window   `json:"window"`
-	ArtifactIDs            []string `json:"artifactIDs,omitempty"`
-	Trace                  Trace    `json:"trace"`
+	ID                     string `json:"id"`
+	ScopeID                string `json:"scopeID"`
+	CacheIdentity          string `json:"cacheIdentity"`
+	Generation             int    `json:"generation"`
+	Revision               int    `json:"revision"`
+	ParentCheckpointID     string `json:"parentCheckpointID,omitempty"`
+	LineageHash            string `json:"lineageHash"`
+	CoveredThroughSourceID string `json:"coveredThroughSourceID"`
+	CoveredPathHash        string `json:"coveredPathHash"`
+	StaticFingerprint      string `json:"staticFingerprint"`
+	ModelWindowFingerprint string `json:"modelWindowFingerprint,omitempty"`
+	ContentHash            string `json:"contentHash"`
+	// ContentHashEncoding is empty for historical Checkpoints. New records use
+	// an explicit lossless JSON codec so JSON numbers never pass through float64.
+	ContentHashEncoding string   `json:"contentHashEncoding,omitempty"`
+	Window              Window   `json:"window"`
+	ArtifactIDs         []string `json:"artifactIDs,omitempty"`
+	Trace               Trace    `json:"trace"`
 }
 
 // OpenRequest advances a durable host transcript onto the active Context Window.
@@ -600,7 +607,7 @@ func (manager *Manager) Open(_ stdcontext.Context, request OpenRequest) (Checkpo
 		next.ArtifactIDs = sortedUniqueStrings(append(append([]string(nil), previous.ArtifactIDs...), next.ArtifactIDs...))
 		next.Trace.ArtifactCount = len(next.ArtifactIDs)
 	}
-	return applyOpenWorkingState(previous, next, state, normalized.WorkingState != nil), nil
+	return applyOpenWorkingState(previous, next, state, normalized.WorkingState != nil)
 }
 
 func (manager *Manager) openNormalized(normalized OpenRequest) (Checkpoint, error) {
@@ -608,7 +615,7 @@ func (manager *Manager) openNormalized(normalized OpenRequest) (Checkpoint, erro
 		if normalized.SourceDelta {
 			return Checkpoint{}, ErrInvalidInput
 		}
-		return newCheckpoint(normalized, 1, 1, "", normalized.Entries, "open", 0), nil
+		return newCheckpoint(normalized, 1, 1, "", normalized.Entries, "open", 0)
 	}
 	previous := CloneCheckpoint(*normalized.Previous)
 	if !ValidCheckpoint(previous) {
@@ -619,10 +626,13 @@ func (manager *Manager) openNormalized(normalized OpenRequest) (Checkpoint, erro
 	}
 	delta, reusable := sourceDelta(previous, normalized)
 	if normalized.ResetCacheIdentity || !reusable {
-		next := newCheckpoint(
+		next, err := newCheckpoint(
 			normalized, previous.Generation+1, 1, previous.ID,
 			normalized.Entries, "lineage_reset", 0,
 		)
+		if err != nil {
+			return Checkpoint{}, err
+		}
 		next.CacheIdentity = resetCacheIdentity(
 			previous, next.StaticFingerprint, next.LineageHash, next.Generation,
 		)
@@ -635,10 +645,13 @@ func (manager *Manager) openNormalized(normalized OpenRequest) (Checkpoint, erro
 		return previous, nil
 	}
 	entries := append(CloneEntries(previous.Window.Entries), CloneEntries(delta)...)
-	next := newCheckpoint(
+	next, err := newCheckpoint(
 		normalized, previous.Generation, previous.Revision+1, previous.ID,
 		entries, "append_source_delta", len(delta),
 	)
+	if err != nil {
+		return Checkpoint{}, err
+	}
 	next.CacheIdentity = previous.CacheIdentity
 	next.ModelWindowFingerprint = previous.ModelWindowFingerprint
 	next.ArtifactIDs = append([]string(nil), previous.ArtifactIDs...)
@@ -664,7 +677,10 @@ func openSourceDelta(previous Checkpoint, request OpenRequest) (Checkpoint, erro
 	next.LineageHash = lineageHash
 	next.CoveredPathHash = lineageHash
 	next.Window = normalizeWindow(Window{Instructions: request.Instructions, Entries: entries})
-	next.ContentHash = windowHash(next.Window)
+	next.ContentHashEncoding = CheckpointContentHashEncodingLosslessJSON
+	if err := sealCheckpointContentHash(&next); err != nil {
+		return Checkpoint{}, err
+	}
 	next.Trace = Trace{
 		Reason: "append_source_delta", SourceEntryCount: previous.Trace.SourceEntryCount + len(request.SourcePath),
 		ActiveEntryCount: len(next.Window.Entries), AppendedEntryCount: len(request.SourcePath),
@@ -729,6 +745,10 @@ func (manager *Manager) Capture(_ stdcontext.Context, request CaptureRequest) (C
 		next.Trace.Reason = "append_runtime_artifacts"
 		next.Trace.ArtifactCount = len(artifactIDs)
 		next.Trace.LastAssessment = cloneAssessment(request.Assessment)
+		next.ContentHashEncoding = CheckpointContentHashEncodingLosslessJSON
+		if err := sealCheckpointContentHash(&next); err != nil {
+			return Checkpoint{}, err
+		}
 		next.ID = checkpointID(next)
 		return next, nil
 	}
@@ -741,7 +761,10 @@ func (manager *Manager) Capture(_ stdcontext.Context, request CaptureRequest) (C
 	next.ParentCheckpointID = previous.ID
 	next.Window.Entries = entries
 	next.ArtifactIDs = artifactIDs
-	next.ContentHash = windowHash(next.Window)
+	next.ContentHashEncoding = CheckpointContentHashEncodingLosslessJSON
+	if err := sealCheckpointContentHash(&next); err != nil {
+		return Checkpoint{}, err
+	}
 	next.Trace = Trace{
 		Reason: "append_runtime_tail", SourceEntryCount: previous.Trace.SourceEntryCount,
 		ActiveEntryCount: len(entries), AppendedEntryCount: len(incoming) - len(current),
@@ -832,7 +855,8 @@ func (manager *Manager) Rollover(_ stdcontext.Context, request RolloverRequest) 
 		ParentCheckpointID: previous.ID, LineageHash: previous.LineageHash,
 		CoveredThroughSourceID: previous.CoveredThroughSourceID, CoveredPathHash: previous.CoveredPathHash,
 		StaticFingerprint: previous.StaticFingerprint, ModelWindowFingerprint: strings.TrimSpace(request.ModelWindowFingerprint),
-		Window: window, ArtifactIDs: artifactIDs,
+		ContentHashEncoding: CheckpointContentHashEncodingLosslessJSON,
+		Window:              window, ArtifactIDs: artifactIDs,
 		Trace: Trace{
 			Reason: reason, SourceEntryCount: previous.Trace.SourceEntryCount,
 			ActiveEntryCount: len(window.Entries), CompactedEntryCount: maxInt(len(previous.Window.Entries)-len(window.Entries), 0),
@@ -842,7 +866,9 @@ func (manager *Manager) Rollover(_ stdcontext.Context, request RolloverRequest) 
 	if !sameWorkingState(previous.Window.WorkingState, window.WorkingState) {
 		next.CacheIdentity = resetCacheIdentity(previous, next.StaticFingerprint, next.LineageHash, next.Generation)
 	}
-	next.ContentHash = windowHash(next.Window)
+	if err := sealCheckpointContentHash(&next); err != nil {
+		return Checkpoint{}, err
+	}
 	next.ID = checkpointID(next)
 	return next, nil
 }
@@ -875,6 +901,10 @@ func (manager *Manager) BindModelWindow(
 	next.ModelWindowFingerprint = fingerprint
 	next.Trace = previous.Trace
 	next.Trace.Reason = "model_window_bound"
+	next.ContentHashEncoding = CheckpointContentHashEncodingLosslessJSON
+	if err := sealCheckpointContentHash(&next); err != nil {
+		return Checkpoint{}, err
+	}
 	next.ID = checkpointID(next)
 	return next, nil
 }
@@ -1164,8 +1194,8 @@ func ValidCheckpoint(value Checkpoint) bool {
 		strings.TrimSpace(value.ContentHash) == "" || len(value.Window.Entries) == 0 {
 		return false
 	}
-	return ValidateWorkingState(value.Window.WorkingState) == nil &&
-		value.ContentHash == windowHash(value.Window) && value.ID == checkpointID(value)
+	wantHash, err := checkpointWindowHash(value.Window, value.ContentHashEncoding)
+	return err == nil && value.ContentHash == wantHash && value.ID == checkpointID(value)
 }
 
 func CloneCheckpoint(value Checkpoint) Checkpoint {
@@ -1268,7 +1298,7 @@ func sourceDelta(previous Checkpoint, request OpenRequest) ([]Entry, bool) {
 	return CloneEntries(request.Entries[coveredIndex+1:]), true
 }
 
-func newCheckpoint(request OpenRequest, generation int, revision int, parentID string, entries []Entry, reason string, appended int) Checkpoint {
+func newCheckpoint(request OpenRequest, generation int, revision int, parentID string, entries []Entry, reason string, appended int) (Checkpoint, error) {
 	covered := request.SourcePath[len(request.SourcePath)-1]
 	window := normalizeWindow(Window{Instructions: request.Instructions, Entries: entries})
 	checkpoint := Checkpoint{
@@ -1277,21 +1307,31 @@ func newCheckpoint(request OpenRequest, generation int, revision int, parentID s
 		Generation:    generation, Revision: revision, ParentCheckpointID: strings.TrimSpace(parentID),
 		LineageHash: LineageHash(request.SourcePath...), CoveredThroughSourceID: covered,
 		CoveredPathHash: LineageHash(request.SourcePath...), StaticFingerprint: request.StaticFingerprint,
-		Window: window,
-		Trace:  Trace{Reason: reason, SourceEntryCount: len(request.SourcePath), ActiveEntryCount: len(window.Entries), AppendedEntryCount: appended},
+		ContentHashEncoding: CheckpointContentHashEncodingLosslessJSON,
+		Window:              window,
+		Trace:               Trace{Reason: reason, SourceEntryCount: len(request.SourcePath), ActiveEntryCount: len(window.Entries), AppendedEntryCount: appended},
 	}
-	checkpoint.ContentHash = windowHash(window)
+	if err := sealCheckpointContentHash(&checkpoint); err != nil {
+		return Checkpoint{}, err
+	}
 	checkpoint.ID = checkpointID(checkpoint)
-	return checkpoint
+	return checkpoint, nil
 }
 
 func checkpointID(value Checkpoint) string {
-	return stableID(
-		"ctxc", value.ScopeID, strconv.Itoa(value.Generation), strconv.Itoa(value.Revision),
+	parts := []string{
+		value.ScopeID, strconv.Itoa(value.Generation), strconv.Itoa(value.Revision),
 		value.ParentCheckpointID, value.CacheIdentity, value.LineageHash,
 		value.CoveredThroughSourceID, value.CoveredPathHash, value.StaticFingerprint,
 		value.ModelWindowFingerprint, value.ContentHash, strings.Join(value.ArtifactIDs, ","),
-	)
+	}
+	// Preserve the exact legacy identity vector for records without an encoding.
+	// The explicit tag is part of every new ID, so the two hash schemes cannot
+	// accidentally share one checkpoint identity.
+	if value.ContentHashEncoding != "" {
+		parts = append(parts, value.ContentHashEncoding)
+	}
+	return stableID("ctxc", parts...)
 }
 
 func windowHash(window Window) string {
@@ -1303,6 +1343,51 @@ func windowHash(window Window) string {
 		return ""
 	}
 	return hashBytes(encoded)
+}
+
+func checkpointWindowHash(window Window, encoding string) (string, error) {
+	switch encoding {
+	case "":
+		return windowHash(window), nil
+	case CheckpointContentHashEncodingLosslessJSON:
+		if ValidateWorkingState(window.WorkingState) != nil {
+			return "", ErrInvalidInput
+		}
+		encoded, err := canonicalLosslessJSON(normalizeWindow(window))
+		if err != nil {
+			return "", err
+		}
+		// The explicit encoding on the Checkpoint and its ID provides the domain
+		// separation. Keeping the digest bytes unchanged for legacy-safe windows
+		// preserves the established hash vector while still making lossy windows
+		// distinguishable.
+		return hashBytes(encoded), nil
+	default:
+		return "", ErrInvalidInput
+	}
+}
+
+func canonicalLosslessJSON(value any) ([]byte, error) {
+	if jsoncontract.ValidateCanonicalUTF8(value) != nil {
+		return nil, ErrInvalidInput
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return nil, errors.Join(ErrInvalidInput, err)
+	}
+	return canonicalArchiveJSON(encoded)
+}
+
+func sealCheckpointContentHash(value *Checkpoint) error {
+	if value == nil {
+		return ErrInvalidInput
+	}
+	hash, err := checkpointWindowHash(value.Window, value.ContentHashEncoding)
+	if err != nil {
+		return err
+	}
+	value.ContentHash = hash
+	return nil
 }
 
 func runtimeEntry(runID string, previous Checkpoint, index int, message model.Message) Entry {

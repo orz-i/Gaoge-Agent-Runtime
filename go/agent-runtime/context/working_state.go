@@ -191,9 +191,12 @@ func openCanCarryWorkingState(previous Checkpoint, request OpenRequest) bool {
 	return reusable
 }
 
-func applyOpenWorkingState(previous Checkpoint, next Checkpoint, state *WorkingState, update bool) Checkpoint {
-	next.Window.WorkingState = CloneWorkingState(state)
+func applyOpenWorkingState(previous Checkpoint, next Checkpoint, state *WorkingState, update bool) (Checkpoint, error) {
 	changed := !sameWorkingState(previous.Window.WorkingState, state)
+	if !update && !changed && next.ID == previous.ID {
+		return next, nil // An unchanged legacy Checkpoint keeps its original identity.
+	}
+	next.Window.WorkingState = CloneWorkingState(state)
 	if update || changed {
 		appended := maxInt(len(next.Window.Entries)-len(previous.Window.Entries), 0)
 		next.Generation, next.Revision, next.ParentCheckpointID = previous.Generation+1, 1, previous.ID
@@ -208,7 +211,12 @@ func applyOpenWorkingState(previous Checkpoint, next Checkpoint, state *WorkingS
 			ArtifactCount: len(next.ArtifactIDs), LastAssessment: cloneAssessment(previous.Trace.LastAssessment),
 		}
 	}
-	next.ContentHash = windowHash(next.Window)
+	// A newly written revision upgrades any legacy parent to the explicit
+	// lossless Window codec. The previous Checkpoint itself remains immutable.
+	next.ContentHashEncoding = CheckpointContentHashEncodingLosslessJSON
+	if err := sealCheckpointContentHash(&next); err != nil {
+		return Checkpoint{}, err
+	}
 	next.ID = checkpointID(next)
-	return next
+	return next, nil
 }
