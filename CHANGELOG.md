@@ -5,6 +5,18 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- **Explicit WorkingState and frozen Context admission (2026-11-20):** Add
+  bounded Host-authored task state with exact checkpoint provenance, branch-local
+  versions and a separate user-role projection. Preserve it through Context
+  compaction and recovery. Freeze the selected Open plan, including absent state,
+  in optional sealed `ConfigSnapshot.ContextBase` metadata so an admitted retry
+  cannot inherit future state or roll back a newer active head. Existing absent
+  fields retain their hashes. An old Accepted full-path Turn without a checkpoint
+  or base binding fails closed if a newly selected base would supply WorkingState.
+  Upgrade readers before handling the new Config/checkpoint fields; no Store
+  method or SQL schema migration is required. See
+  `docs/releases/unreleased-working-state.md` for upgrade and validation limits.
+
 - **Agent Session and frozen per-call output ceilings (2026-11-20):** Add
   `harness.OpenAgentSession` for explicitly selected local Tools, bounded
   Context and the existing Session recovery API. Freeze optional

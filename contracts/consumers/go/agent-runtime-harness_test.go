@@ -77,3 +77,10 @@ var (
 	_ func(*harness.Runner, context.Context, string) (harness.Snapshot, error)               = (*harness.Runner).ResumeTurn
 	_ func(*harness.SessionClient, context.Context, string) (harness.Snapshot, error)        = (*harness.SessionClient).Resume
 )
+
+var (
+	_                                                                                                                = harness.ContextSeed{WorkingState: &runtimecontext.WorkingState{Version: 1, Goal: "Preserve the Host task state"}}
+	_ func(*runtimecontext.WorkingState) *runtimecontext.WorkingState                                                = runtimecontext.CloneWorkingState
+	_ func(*runtimecontext.WorkingState) error                                                                       = runtimecontext.ValidateWorkingState
+	_ func(*harness.SessionClient, context.Context, string, string, []string) (harness.ContextSourceBoundary, error) = (*harness.SessionClient).ResolveContextSourceBoundaryForPath
+)

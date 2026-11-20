@@ -63,12 +63,12 @@ func TestRealPostgresManagedAgentSessionRecoveryAcrossProcessCrash(t *testing.T)
 			name = "agent-session"
 		}
 		t.Run(name, func(t *testing.T) {
-			testManagedAgentSessionRecoveryAcrossProcessCrash(t, dsn, facade)
+			testManagedAgentSessionRecoveryAcrossProcessCrash(t, dsn, facade, false)
 		})
 	}
 }
 
-func testManagedAgentSessionRecoveryAcrossProcessCrash(t *testing.T, dsn string, facade bool) {
+func testManagedAgentSessionRecoveryAcrossProcessCrash(t *testing.T, dsn string, facade, workingState bool) {
 	t.Helper()
 	db, isolatedDSN := managedRecoveryDatabase(t, dsn)
 	if err := postgresadapter.Migrate(db); err != nil {
@@ -78,6 +78,10 @@ func testManagedAgentSessionRecoveryAcrossProcessCrash(t *testing.T, dsn string,
 		t.Fatal(err)
 	}
 	files := t.TempDir()
+	var expectedWorkingState *runtimecontext.WorkingState
+	if workingState {
+		expectedWorkingState = prepareManagedRecoveryWorkingState(t, db, files)
+	}
 	runManagedRecoveryProcess(t, isolatedDSN, files, "crash", managedRecoveryCrashExit, facade)
 
 	store, err := harnesspostgres.New(db)
@@ -93,6 +97,15 @@ func testManagedAgentSessionRecoveryAcrossProcessCrash(t *testing.T, dsn string,
 	checkpoint, err := store.GetContextCheckpoint(t.Context(), turn.ContextCheckpointID)
 	if err != nil || !runtimecontext.ValidCheckpoint(checkpoint) || len(checkpoint.ArtifactIDs) != 1 {
 		t.Fatalf("missing exact archive checkpoint: %+v err=%v", checkpoint, err)
+	}
+	assertManagedRecoveryWorkingState(t, store, checkpoint, expectedWorkingState)
+	if expectedWorkingState != nil {
+		// New Host-derived input must not replace an already-frozen pending
+		// request or the committed Context during nil-Transcript recovery.
+		changed := runtimecontext.CloneWorkingState(expectedWorkingState)
+		changed.Version++
+		changed.Goal = "unadmitted replacement working state"
+		writeManagedRecoveryWorkingState(t, files, changed)
 	}
 	archiveID := checkpoint.ArtifactIDs[0]
 	archive, err := store.GetContextArtifact(t.Context(), archiveID)
@@ -223,11 +236,33 @@ func testManagedAgentSessionRecoveryAcrossProcessCrash(t *testing.T, dsn string,
 		if index < 2 && strings.Contains(requestMessages(request), "shipping_cents=700") {
 			t.Fatalf("request %d bypassed the archive reader", index)
 		}
+		assertManagedRecoveryWorkingStateProjection(t, request, expectedWorkingState)
 	}
+	requestBytes := make([]int, len(calls))
+	totalRequestBytes := 0
+	for index, request := range calls {
+		raw, err := json.Marshal(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		requestBytes[index] = len(raw)
+		totalRequestBytes += len(raw)
+	}
+	t.Logf("workingState=%t facade=%t provider_calls=%d business_ledger_effects=%d request_bytes=%v total_request_bytes=%d",
+		workingState, facade, len(calls), len(effects), requestBytes, totalRequestBytes)
 	if !managedRecoveryHasToolResult(calls[2].Messages, managedRecoveryArchiveCall) ||
 		!strings.Contains(requestMessages(calls[2]), "shipping_cents=700") {
 		t.Fatal("resumed Agent did not retrieve the archived fact through its Tool")
 	}
+	latestTurn, err := reopenedStore.GetTurn(t.Context(), turnID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	latestCheckpoint, err := reopenedStore.GetContextCheckpoint(t.Context(), latestTurn.ContextCheckpointID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertManagedRecoveryWorkingState(t, reopenedStore, latestCheckpoint, expectedWorkingState)
 }
 
 // The helper is selected explicitly by the parent test and skips in normal runs.
@@ -402,29 +437,7 @@ func newManagedRecoverySessionWithComposition(t *testing.T, db *gorm.DB, files s
 	if err != nil {
 		t.Fatal(err)
 	}
-	registrations := []tools.Registration{
-		{
-			Definition: tools.Definition{
-				Key: managedRecoveryTool, Name: "record_subtotal", Description: "Calculate and record an invoice subtotal in cents.",
-				InputSchema: json.RawMessage(`{"type":"object","additionalProperties":false,"required":["units","unitPriceCents"],"properties":{"units":{"type":"integer","minimum":1},"unitPriceCents":{"type":"integer","minimum":0}}}`),
-			},
-			Handler: tools.HandlerFunc(func(_ context.Context, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
-				var input struct {
-					Units          int `json:"units"`
-					UnitPriceCents int `json:"unitPriceCents"`
-				}
-				if err := json.Unmarshal(request.Call.Arguments, &input); err != nil {
-					return tools.ExecutionResult{}, err
-				}
-				effect := managedRecoveryEffect{RunID: request.RunID, CallID: request.Call.ID, SubtotalCents: input.Units * input.UnitPriceCents}
-				if err := appendManagedRecoveryRecord(filepath.Join(files, "ledger.jsonl"), effect); err != nil {
-					return tools.ExecutionResult{}, err
-				}
-				content, err := json.Marshal(effect)
-				return tools.ExecutionResult{Content: content, Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: "committed"}}, err
-			}),
-		},
-	}
+	registrations := managedRecoveryToolRegistrations(files)
 	resolveWindow := func(_ context.Context, request model.Request) (runtimecontext.ModelWindow, error) {
 		if request.Model != "fixture-invoice" {
 			return runtimecontext.ModelWindow{}, runtimecontext.ErrModelWindowUnknown
@@ -443,6 +456,9 @@ func newManagedRecoverySessionWithComposition(t *testing.T, db *gorm.DB, files s
 	}
 	runExecution := &agent.RunExecution{OwnerID: owner, LeaseDuration: managedRecoveryLeaseDuration}
 	options := managedRecoveryConfiguredSessionOptions(crash)
+	if crash {
+		options.Transcript = managedRecoveryWorkingStateTranscript(t, files, options.Transcript)
+	}
 	if facade {
 		session, err := harness.OpenAgentSession(harness.AgentSessionOptions{
 			Runtime: runtime, Store: hostStore, Model: managedRecoveryModel{logPath: filepath.Join(files, "model.jsonl")},
@@ -500,6 +516,32 @@ func newManagedRecoverySessionWithComposition(t *testing.T, db *gorm.DB, files s
 		t.Fatal(err)
 	}
 	return session
+}
+
+func managedRecoveryToolRegistrations(files string) []tools.Registration {
+	return []tools.Registration{
+		{
+			Definition: tools.Definition{
+				Key: managedRecoveryTool, Name: "record_subtotal", Description: "Calculate and record an invoice subtotal in cents.",
+				InputSchema: json.RawMessage(`{"type":"object","additionalProperties":false,"required":["units","unitPriceCents"],"properties":{"units":{"type":"integer","minimum":1},"unitPriceCents":{"type":"integer","minimum":0}}}`),
+			},
+			Handler: tools.HandlerFunc(func(_ context.Context, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
+				var input struct {
+					Units          int `json:"units"`
+					UnitPriceCents int `json:"unitPriceCents"`
+				}
+				if err := json.Unmarshal(request.Call.Arguments, &input); err != nil {
+					return tools.ExecutionResult{}, err
+				}
+				effect := managedRecoveryEffect{RunID: request.RunID, CallID: request.Call.ID, SubtotalCents: input.Units * input.UnitPriceCents}
+				if err := appendManagedRecoveryRecord(filepath.Join(files, "ledger.jsonl"), effect); err != nil {
+					return tools.ExecutionResult{}, err
+				}
+				content, err := json.Marshal(effect)
+				return tools.ExecutionResult{Content: content, Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: "committed"}}, err
+			}),
+		},
+	}
 }
 
 func managedRecoveryConfiguredSessionOptions(crash bool) harness.SessionOptions {

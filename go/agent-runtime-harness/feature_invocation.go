@@ -25,6 +25,8 @@ func (runner *Runner) prepareTopLevelStartEnvelope(
 	request StartRequest,
 	root rootAdmission,
 ) (topLevelStartEnvelope, error) {
+	// This is derived execution input, not a Host-selected configuration knob.
+	request.Config.ContextBase = nil
 	request, sessionID, turnID, err := normalizeStartRequest(request)
 	if err != nil {
 		return topLevelStartEnvelope{}, err
@@ -38,7 +40,7 @@ func (runner *Runner) prepareTopLevelStartEnvelope(
 	if err != nil {
 		return topLevelStartEnvelope{}, err
 	}
-	config, err := SealConfigSnapshot(turnID, resolvedConfig, now)
+	config, err := runner.sealContextAdmission(ctx, sessionID, turnID, resolvedConfig, request.Context, now)
 	if err != nil {
 		return topLevelStartEnvelope{}, err
 	}

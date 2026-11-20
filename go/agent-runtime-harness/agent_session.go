@@ -50,6 +50,7 @@ type AgentSessionOptions struct {
 // Selecting ContextArtifactToolKey explicitly installs the standard scoped
 // reader. Its reserved registration cannot be overridden by Tools.
 func OpenAgentSession(options AgentSessionOptions) (*SessionClient, error) {
+	options.Session.Config.ContextBase = nil
 	if options.Runtime == nil || options.Store == nil || options.Model == nil || options.Context.ResolveWindow == nil {
 		return nil, ErrInvalidRequest
 	}

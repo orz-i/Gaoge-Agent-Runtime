@@ -3,6 +3,7 @@ package harness
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sort"
 	"strings"
 	"sync"
@@ -16,12 +17,13 @@ import (
 // ContextSeed is the complete host transcript ancestry for one Harness Turn.
 // SourcePath has no semantic message-count limit; repository paging is an I/O concern only.
 type ContextSeed struct {
-	SourcePath         []string               `json:"sourcePath"`
-	Instructions       string                 `json:"instructions,omitempty"`
-	Entries            []runtimecontext.Entry `json:"entries"`
-	BaseCheckpointID   string                 `json:"baseCheckpointID,omitempty"`
-	SourceDelta        bool                   `json:"sourceDelta,omitempty"`
-	ResetCacheIdentity bool                   `json:"resetCacheIdentity,omitempty"`
+	SourcePath         []string                     `json:"sourcePath"`
+	Instructions       string                       `json:"instructions,omitempty"`
+	Entries            []runtimecontext.Entry       `json:"entries"`
+	BaseCheckpointID   string                       `json:"baseCheckpointID,omitempty"`
+	SourceDelta        bool                         `json:"sourceDelta,omitempty"`
+	ResetCacheIdentity bool                         `json:"resetCacheIdentity,omitempty"`
+	WorkingState       *runtimecontext.WorkingState `json:"workingState,omitempty"`
 }
 
 // ContextSourceBoundary lets a host load only durable source facts appended after the currently
@@ -29,6 +31,8 @@ type ContextSeed struct {
 type ContextSourceBoundary struct {
 	CheckpointID           string
 	CoveredThroughSourceID string
+	ContentHash            string `json:"contentHash,omitempty"`
+	CoveredPathHash        string `json:"coveredPathHash,omitempty"`
 }
 
 // ContextCheckpointRef is the content-free durable reference stored on a Harness Turn.
@@ -380,6 +384,10 @@ func normalizeContextSeed(seed *ContextSeed) (*ContextSeed, error) {
 		SourcePath: append([]string(nil), seed.SourcePath...), Instructions: strings.TrimSpace(seed.Instructions),
 		Entries: runtimecontext.CloneEntries(seed.Entries), BaseCheckpointID: strings.TrimSpace(seed.BaseCheckpointID),
 		SourceDelta: seed.SourceDelta, ResetCacheIdentity: seed.ResetCacheIdentity,
+		WorkingState: runtimecontext.CloneWorkingState(seed.WorkingState),
+	}
+	if err := runtimecontext.ValidateWorkingState(result.WorkingState); err != nil {
+		return nil, errors.Join(ErrInvalidRequest, err)
 	}
 	for index := range result.SourcePath {
 		result.SourcePath[index] = strings.TrimSpace(result.SourcePath[index])

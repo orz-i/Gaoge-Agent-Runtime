@@ -143,6 +143,9 @@ type ConfigSnapshot struct {
 	AdmissionHash string   `json:"admissionHash,omitempty"`
 	InputMessage  *HostRef `json:"inputMessage,omitempty"`
 	OutputMessage *HostRef `json:"outputMessage,omitempty"`
+	// ContextBase is derived from the original Context admission, never accepted
+	// from Host configuration. A non-nil empty binding freezes no previous head.
+	ContextBase *ContextBaseBinding `json:"contextBase,omitempty"`
 }
 
 type configPayload struct {
@@ -165,6 +168,7 @@ type configPayload struct {
 	AdmissionHash         string                   `json:"admissionHash,omitempty"`
 	InputMessage          *HostRef                 `json:"inputMessage,omitempty"`
 	OutputMessage         *HostRef                 `json:"outputMessage,omitempty"`
+	ContextBase           *ContextBaseBinding      `json:"contextBase,omitempty"`
 }
 
 // SealConfigSnapshot normalizes, hashes and seals one immutable configuration for a Harness Turn.
@@ -213,6 +217,10 @@ func SealConfigSnapshot(turnID string, value ConfigSnapshot, now time.Time) (Con
 	if model.ValidateOutputContract(value.OutputContract) != nil || value.MaxModelOutputTokens < 0 {
 		return ConfigSnapshot{}, ErrInvalidRequest
 	}
+	if err := validateContextBaseBinding(value.ContextBase); err != nil {
+		return ConfigSnapshot{}, err
+	}
+	value.ContextBase = cloneContextBaseBinding(value.ContextBase)
 	value.OutputContract = model.CloneOutputContract(value.OutputContract)
 	value.ToolKeys = normalizeStrings(value.ToolKeys)
 	value.ToolPolicies, err = normalizeToolPolicies(value.ToolPolicies)
@@ -242,6 +250,7 @@ func SealConfigSnapshot(turnID string, value ConfigSnapshot, now time.Time) (Con
 		ContextPolicy: value.ContextPolicy, ApprovalPolicyVersion: value.ApprovalPolicyVersion, Limits: value.Limits,
 		SharedBudget: value.SharedBudget, DelegationPolicy: value.DelegationPolicy,
 		AdmissionHash: value.AdmissionHash, InputMessage: value.InputMessage, OutputMessage: value.OutputMessage,
+		ContextBase: value.ContextBase,
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
@@ -296,6 +305,7 @@ func enforceableHarnessBudgetLimits(value budget.Limits) bool {
 }
 
 func cloneConfigSnapshot(value ConfigSnapshot) ConfigSnapshot {
+	value.ContextBase = cloneContextBaseBinding(value.ContextBase)
 	if value.InputMessage != nil {
 		copied := *value.InputMessage
 		value.InputMessage = &copied

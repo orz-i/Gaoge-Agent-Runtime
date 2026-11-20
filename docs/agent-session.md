@@ -126,11 +126,17 @@ Stores plus the original provider/Tool bindings remain Host responsibilities.
 Selecting the flag does not make Memory durable or add a recovery authority.
 Unknown external outcomes continue to require trusted reconciliation.
 
+Hosts can now supply bounded, source-bound task data through
+`ContextSeed.WorkingState`. See [Explicit WorkingState](working-state.md) for
+source resolution, versioned rollover, branch behavior and acceptance. It uses
+the same Session and Context composition; it does not call a summarizer.
+
 ## Stage 0/1 baseline and acceptance
 
-The source baseline is `19151c9`. The change is limited to per-call output
-ceilings and the Session composition above. It introduces no WorkingState,
-semantic summarizer, new Context engine, provider compaction or new Store.
+The Stage 0/1 source baseline is `19151c9`. That change was limited to per-call
+output ceilings and the Session composition above. Explicit WorkingState is a
+separate Stage 3 addition; neither stage introduces a semantic summarizer, new
+Context engine, provider compaction or new Store.
 
 The deterministic acceptance profile compares the new constructor with explicit
 composition using the same normalized configuration, tools, fixture model and

@@ -60,6 +60,7 @@ func (runner *Runner) ResolveContextSourceBoundaryForPath(
 	}
 	return ContextSourceBoundary{
 		CheckpointID: checkpoint.ID, CoveredThroughSourceID: checkpoint.CoveredThroughSourceID,
+		ContentHash: checkpoint.ContentHash, CoveredPathHash: checkpoint.CoveredPathHash,
 	}, nil
 }
 
@@ -202,7 +203,7 @@ func (runner *Runner) restoreOrBuildContext(
 			return Turn{}, nil, err
 		}
 		ref := contextCheckpointRef(checkpoint)
-		if strings.TrimSpace(checkpoint.ScopeID) != strings.TrimSpace(turn.SessionID) || ref.ID != checkpointID || ref != turn.ContextRef {
+		if !validContextCheckpoint(checkpoint) || strings.TrimSpace(checkpoint.ScopeID) != strings.TrimSpace(turn.SessionID) || ref.ID != checkpointID || ref != turn.ContextRef {
 			return Turn{}, nil, ErrConflict
 		}
 		if err = runner.recordContextItem(ctx, turn); err != nil {
@@ -320,11 +321,12 @@ func (runner *Runner) ResolveContextSourceBoundary(
 	if err != nil {
 		return ContextSourceBoundary{}, err
 	}
-	if active.StaticFingerprint != staticFingerprint || !validContextCheckpoint(active) {
+	if active.ScopeID != scopeID || active.StaticFingerprint != staticFingerprint || !validContextCheckpoint(active) {
 		return ContextSourceBoundary{}, nil
 	}
 	return ContextSourceBoundary{
 		CheckpointID: active.ID, CoveredThroughSourceID: active.CoveredThroughSourceID,
+		ContentHash: active.ContentHash, CoveredPathHash: active.CoveredPathHash,
 	}, nil
 }
 
@@ -370,17 +372,34 @@ func (runner *Runner) buildContext(
 	if err != nil {
 		return contextBuildResult{}, err
 	}
-	active, expectedHeadID, err := runner.loadActiveContextHead(ctx, scopeID)
-	if err != nil {
-		return contextBuildResult{}, err
+	var openRequest runtimecontext.OpenRequest
+	var expectedHeadID string
+	if config.ContextBase != nil {
+		expectedHeadID = config.ContextBase.ExpectedHeadCheckpointID
+		openRequest, err = runner.boundContextOpenRequest(ctx, scopeID, staticFingerprint, config, normalized)
+	} else {
+		var active *runtimecontext.Checkpoint
+		active, expectedHeadID, err = runner.loadActiveContextHead(ctx, scopeID)
+		if err == nil {
+			if normalized.WorkingState != nil && !normalized.SourceDelta {
+				openRequest, err = runner.frozenWorkingStateOpenRequest(ctx, scopeID, staticFingerprint, config, normalized, active)
+			} else {
+				openRequest, err = runner.contextOpenRequest(ctx, scopeID, staticFingerprint, config, normalized, active)
+			}
+		}
 	}
-	openRequest, err := runner.contextOpenRequest(ctx, scopeID, staticFingerprint, config, normalized, active)
 	if err != nil {
 		return contextBuildResult{}, err
 	}
 	checkpoint, err := runner.context.Open(ctx, openRequest)
 	if err != nil {
 		return contextBuildResult{}, err
+	}
+	// Legacy Accepted Turns have no frozen open plan. Their explicit delta
+	// base remains usable, but a full-path nil update cannot safely distinguish
+	// original carried state from state that only appeared after admission.
+	if config.ContextBase == nil && !normalized.SourceDelta && normalized.WorkingState == nil && checkpoint.Window.WorkingState != nil {
+		return contextBuildResult{}, ErrConflict
 	}
 	if checkpoint.ScopeID != strings.TrimSpace(scopeID) || !validContextCheckpoint(checkpoint) {
 		return contextBuildResult{}, ErrConflict
@@ -437,6 +456,7 @@ func (runner *Runner) contextOpenRequest(
 		ScopeID: strings.TrimSpace(scopeID), StaticFingerprint: staticFingerprint,
 		SourcePath: append([]string(nil), seed.SourcePath...), Entries: runtimecontext.CloneEntries(seed.Entries),
 		Instructions: instructions, ResetCacheIdentity: seed.ResetCacheIdentity, Previous: active,
+		WorkingState: runtimecontext.CloneWorkingState(seed.WorkingState),
 	}, nil
 }
 
@@ -491,7 +511,7 @@ func (runner *Runner) loadContextDeltaBase(
 	if err != nil {
 		return nil, err
 	}
-	if base.ScopeID != strings.TrimSpace(scopeID) || base.StaticFingerprint != strings.TrimSpace(staticFingerprint) ||
+	if base.ID != strings.TrimSpace(checkpointID) || base.ScopeID != strings.TrimSpace(scopeID) || base.StaticFingerprint != strings.TrimSpace(staticFingerprint) ||
 		!validContextCheckpoint(base) {
 		return nil, ErrConflict
 	}
@@ -512,7 +532,7 @@ func (runner *Runner) findContextPathBase(
 		return nil, -1, err
 	}
 	index := runtimecontext.CheckpointSourceIndex(base, sourcePath)
-	if index < 0 {
+	if base.ScopeID != strings.TrimSpace(scopeID) || base.StaticFingerprint != strings.TrimSpace(staticFingerprint) || index < 0 {
 		return nil, -1, ErrConflict
 	}
 	return &base, index, nil
@@ -529,6 +549,7 @@ func contextDeltaOpenRequest(
 		ScopeID: strings.TrimSpace(scopeID), StaticFingerprint: strings.TrimSpace(staticFingerprint),
 		SourcePath: append([]string(nil), seed.SourcePath...), Entries: runtimecontext.CloneEntries(seed.Entries),
 		Instructions: instructions, SourceDelta: true, ResetCacheIdentity: seed.ResetCacheIdentity, Previous: base,
+		WorkingState: runtimecontext.CloneWorkingState(seed.WorkingState),
 	}
 }
 
@@ -538,6 +559,7 @@ func sliceContextSeedAfter(seed *ContextSeed, index int) *ContextSeed {
 		SourcePath:   append([]string(nil), seed.SourcePath[start:]...),
 		Instructions: seed.Instructions, Entries: runtimecontext.CloneEntries(seed.Entries[start:]),
 		SourceDelta: true, ResetCacheIdentity: seed.ResetCacheIdentity,
+		WorkingState: runtimecontext.CloneWorkingState(seed.WorkingState),
 	}
 }
 
