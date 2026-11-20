@@ -239,14 +239,15 @@ func composeContextMode(store kernel.Store, state *taskState, client model.Clien
 		Thread:     kernel.ThreadRef{Kind: "conversation", ID: "task-agent/local/" + state.sampleID},
 		Transcript: transcript,
 		Config: harness.ConfigSnapshot{
-			Model:          config.routedModel(),
-			ModelOptions:   config.modelOptions(),
-			Instructions:   taskInstructionsForTreatment(config.suite, config.qualityTreatment),
-			OutputContract: &model.OutputContract{Name: "task_answer", Schema: answerSchema},
-			ToolKeys:       []string{lookupKey, harness.ContextArtifactToolKey, draftKey},
-			ToolPolicies:   taskToolPoliciesForSuite(config.suite),
-			ContextPolicy:  taskContextPolicyForSuite(config.suite),
-			Limits:         taskLimits(),
+			Model:                config.routedModel(),
+			ModelOptions:         config.modelOptions(),
+			Instructions:         taskInstructionsForTreatment(config.suite, config.qualityTreatment),
+			OutputContract:       &model.OutputContract{Name: "task_answer", Schema: answerSchema},
+			MaxModelOutputTokens: config.outputTokens,
+			ToolKeys:             []string{lookupKey, harness.ContextArtifactToolKey, draftKey},
+			ToolPolicies:         taskToolPoliciesForSuite(config.suite),
+			ContextPolicy:        taskContextPolicyForSuite(config.suite),
+			Limits:               taskLimits(),
 		},
 	})
 }
@@ -259,8 +260,8 @@ type outputCeiling struct {
 func (outputCeiling) Name() string { return "task-agent.output-ceiling" }
 
 func (ceiling outputCeiling) Model(ctx context.Context, request model.Request, sink model.StreamSink, next plugin.ModelNext) (model.Response, error) {
-	// Reservation alone is not a provider output limit. This permitted
-	// dispatch-time restriction enforces the same ceiling at the adapter.
+	// The Config freezes the per-call ceiling before Context preparation.
+	// Keep this observation middleware's existing ability to tighten it.
 	if request.MaxOutputTokens == 0 || request.MaxOutputTokens > ceiling.tokens {
 		request.MaxOutputTokens = ceiling.tokens
 	}

@@ -76,18 +76,19 @@ type Delegation struct {
 	Limits         agent.Limits `json:"limits,omitempty"`
 	// Full Host-selected subtree ceilings belong to the shared ledger. The
 	// Agent runner accepts only local model/tool ceilings in Limits.
-	SubtreeLimits    *budget.Limits          `json:"subtreeLimits,omitempty"`
-	ChildRunID       string                  `json:"childRunID"`
-	Goal             string                  `json:"goal"`
-	Model            string                  `json:"model,omitempty"`
-	ModelOptions     json.RawMessage         `json:"modelOptions,omitempty"`
-	ToolKeys         []string                `json:"toolKeys,omitempty"`
-	InitialToolKeys  []string                `json:"initialToolKeys,omitempty"`
-	HostedToolGrants []agent.HostedToolGrant `json:"hostedToolGrants,omitempty"`
-	Status           Status                  `json:"status"`
-	Result           json.RawMessage         `json:"result,omitempty"`
-	ErrorCode        string                  `json:"errorCode,omitempty"`
-	Error            string                  `json:"error,omitempty"`
+	SubtreeLimits        *budget.Limits          `json:"subtreeLimits,omitempty"`
+	ChildRunID           string                  `json:"childRunID"`
+	Goal                 string                  `json:"goal"`
+	Model                string                  `json:"model,omitempty"`
+	ModelOptions         json.RawMessage         `json:"modelOptions,omitempty"`
+	MaxModelOutputTokens int64                   `json:"maxModelOutputTokens,omitempty"`
+	ToolKeys             []string                `json:"toolKeys,omitempty"`
+	InitialToolKeys      []string                `json:"initialToolKeys,omitempty"`
+	HostedToolGrants     []agent.HostedToolGrant `json:"hostedToolGrants,omitempty"`
+	Status               Status                  `json:"status"`
+	Result               json.RawMessage         `json:"result,omitempty"`
+	ErrorCode            string                  `json:"errorCode,omitempty"`
+	Error                string                  `json:"error,omitempty"`
 }
 
 // Join describes a deterministic fan-in contract over stable Delegation IDs.
@@ -264,6 +265,10 @@ func (coordinator *Coordinator) StartOrLoad(
 	if coordinator == nil || coordinator.resolver == nil || !validDelegation(delegation) || !validParentOrigin(parent.Run) {
 		return Delegation{}, ErrInvalidDelegation
 	}
+	delegation, err := boundDelegationModelOutput(parent, delegation)
+	if err != nil {
+		return Delegation{}, err
+	}
 	children, err := coordinator.resolveChild(ctx, delegation)
 	if err != nil {
 		return Delegation{}, err
@@ -283,19 +288,20 @@ func (coordinator *Coordinator) StartOrLoad(
 		start = coordinator.deferredAgent.PrepareRun
 	}
 	child, err = start(ctx, agent.StartRequest{
-		ID:               delegation.ChildRunID,
-		Actor:            parent.Run.Actor,
-		Thread:           parent.Run.Thread,
-		RequestID:        parent.Run.ID + ":" + delegation.ID,
-		Goal:             delegation.Goal,
-		DeadlineAt:       parent.Run.DeadlineAt,
-		Instructions:     delegation.Instructions,
-		Limits:           delegation.Limits,
-		Model:            delegation.Model,
-		ModelOptions:     append(json.RawMessage(nil), delegation.ModelOptions...),
-		ToolKeys:         append([]string(nil), delegation.ToolKeys...),
-		InitialToolKeys:  append([]string(nil), delegation.InitialToolKeys...),
-		HostedToolGrants: append([]agent.HostedToolGrant(nil), delegation.HostedToolGrants...),
+		ID:                   delegation.ChildRunID,
+		Actor:                parent.Run.Actor,
+		Thread:               parent.Run.Thread,
+		RequestID:            parent.Run.ID + ":" + delegation.ID,
+		Goal:                 delegation.Goal,
+		DeadlineAt:           parent.Run.DeadlineAt,
+		Instructions:         delegation.Instructions,
+		Limits:               delegation.Limits,
+		Model:                delegation.Model,
+		ModelOptions:         append(json.RawMessage(nil), delegation.ModelOptions...),
+		MaxModelOutputTokens: delegation.MaxModelOutputTokens,
+		ToolKeys:             append([]string(nil), delegation.ToolKeys...),
+		InitialToolKeys:      append([]string(nil), delegation.InitialToolKeys...),
+		HostedToolGrants:     append([]agent.HostedToolGrant(nil), delegation.HostedToolGrants...),
 	})
 	if child.Run.ID == "" && err != nil {
 		return Delegation{}, err
@@ -312,6 +318,10 @@ func (coordinator *Coordinator) StartOrLoad(
 func (coordinator *Coordinator) Refresh(ctx context.Context, parent kernel.Snapshot, delegation Delegation) (Delegation, error) {
 	if coordinator == nil || coordinator.resolver == nil || !validDelegation(delegation) || !validParentOrigin(parent.Run) {
 		return Delegation{}, ErrInvalidDelegation
+	}
+	delegation, err := boundDelegationModelOutput(parent, delegation)
+	if err != nil {
+		return Delegation{}, err
 	}
 	children, err := coordinator.resolveChild(ctx, delegation)
 	if err != nil {
@@ -350,6 +360,15 @@ func VerifiedChildRun(delegation Delegation, parent kernel.Run, child kernel.Sna
 		(child.Run.Kind != agent.RunKind && child.Run.Kind != RemoteAgentRunKind) {
 		return false
 	}
+	if child.Run.Kind == RemoteAgentRunKind && delegation.MaxModelOutputTokens != 0 {
+		return false // The remote protocol cannot attest a sampling ceiling.
+	}
+	if delegation.MaxModelOutputTokens > 0 && child.Run.Kind == agent.RunKind {
+		view, err := agent.ViewState(child)
+		if err != nil || view.MaxModelOutputTokens != delegation.MaxModelOutputTokens {
+			return false
+		}
+	}
 	switch child.Run.Status {
 	case kernel.RunStatusRunning, kernel.RunStatusWaitingInput, kernel.RunStatusPausedBudget,
 		kernel.RunStatusCompleted, kernel.RunStatusFailed, kernel.RunStatusCancelled:
@@ -357,6 +376,24 @@ func VerifiedChildRun(delegation Delegation, parent kernel.Run, child kernel.Sna
 	default:
 		return false
 	}
+}
+
+func boundDelegationModelOutput(parent kernel.Snapshot, delegation Delegation) (Delegation, error) {
+	if parent.Run.Kind != agent.RunKind {
+		return delegation, nil
+	}
+	view, err := agent.ViewState(parent)
+	if err != nil {
+		return Delegation{}, ErrInvalidDelegation
+	}
+	if view.MaxModelOutputTokens > 0 {
+		if delegation.MaxModelOutputTokens == 0 {
+			delegation.MaxModelOutputTokens = view.MaxModelOutputTokens
+		} else if delegation.MaxModelOutputTokens > view.MaxModelOutputTokens {
+			return Delegation{}, ErrInvalidDelegation
+		}
+	}
+	return delegation, nil
 }
 
 func (coordinator *Coordinator) resolveChild(ctx context.Context, delegation Delegation) (ChildRunner, error) {
@@ -502,7 +539,7 @@ func joinStateError(join Join) error {
 func validDelegation(delegation Delegation) bool {
 	validStatus := delegation.Status == StatusQueued || delegation.Status == StatusRunning ||
 		delegation.Status == StatusCompleted || delegation.Status == StatusFailed || delegation.Status == StatusCancelled
-	if strings.TrimSpace(delegation.ID) == "" || strings.TrimSpace(delegation.MemberID) == "" ||
+	if delegation.MaxModelOutputTokens < 0 || strings.TrimSpace(delegation.ID) == "" || strings.TrimSpace(delegation.MemberID) == "" ||
 		strings.TrimSpace(delegation.ChildRunID) == "" || strings.TrimSpace(delegation.Goal) == "" || !validStatus {
 		return false
 	}

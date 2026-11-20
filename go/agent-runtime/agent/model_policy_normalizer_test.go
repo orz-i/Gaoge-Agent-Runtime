@@ -28,7 +28,7 @@ func TestHostPolicyNormalizationIsTypedAndNotRepeatedOnRestart(t *testing.T) {
 			return model.PolicyBinding{ModelOptions: json.RawMessage(`{"temperature":0.3}`), BindingRef: "immutable-route"}, nil
 		},
 		PrepareModelRequest: func(_ context.Context, request model.Request) (model.Request, error) {
-			if request.Model == "not-authorized" || request.MaxOutputTokens != 0 || model.TextValue(request.Messages[0].Content) == "not-authorized" {
+			if request.Model == "not-authorized" || request.MaxOutputTokens != 128 || model.TextValue(request.Messages[0].Content) == "not-authorized" {
 				t.Fatal("normalizer mutated authority")
 			}
 			if request.BindingRef != "immutable-route" || string(request.ModelOptions) != `{"temperature":0.3}` {
@@ -40,7 +40,9 @@ func TestHostPolicyNormalizationIsTypedAndNotRepeatedOnRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = runner.StartRun(t.Context(), startRequest("normalized-pending", "normalized-request", "question"))
+	request := startRequest("normalized-pending", "normalized-request", "question")
+	request.MaxModelOutputTokens = 128
+	_, err = runner.StartRun(t.Context(), request)
 	if !errors.Is(err, errInjectedModelInvocationCrash) || count != 1 || len(provider.callsCopy()) != 0 {
 		t.Fatalf("fault=%v normalizations=%d", err, count)
 	}
@@ -68,7 +70,7 @@ func TestHostPolicyNormalizationIsTypedAndNotRepeatedOnRestart(t *testing.T) {
 		t.Fatalf("resume %v", err)
 	}
 	calls := provider.callsCopy()
-	if len(calls) != 1 || calls[0].BindingRef != "immutable-route" || string(calls[0].ModelOptions) != `{"temperature":0.3}` {
+	if len(calls) != 1 || calls[0].MaxOutputTokens != 128 || calls[0].BindingRef != "immutable-route" || string(calls[0].ModelOptions) != `{"temperature":0.3}` {
 		t.Fatal("frozen policy lost on restart")
 	}
 }

@@ -86,9 +86,12 @@ it does not deploy, publish, send a message or modify repository files.
 - Managed preparation is the last pre-intent projection. Rehydration middleware
   restores committed Context during execution recovery.
 - Native `RunExecution` sets an owner and lease, with bounded model/tool calls.
-- A named Model middleware tightens `Request.MaxOutputTokens` to the configured
-  ceiling. `ReservedOutputTokens` reserves context space; it does not set that
-  provider limit on its own.
+- `ConfigSnapshot.MaxModelOutputTokens` freezes the per-call output ceiling
+  before Context preparation. The named Model middleware observes calls and
+  can further tighten that ceiling. `ReservedOutputTokens` reserves context
+  space; it does not set the provider limit on its own. This advanced example
+  retains explicit composition for custom archive/navigation instrumentation;
+  ordinary tool sessions can use [OpenAgentSession](../../../../docs/agent-session.md).
 
 The service ceiling must still leave room for the selected model's Tool
 schemas, instructions and retrieved evidence. Making it too small can archive

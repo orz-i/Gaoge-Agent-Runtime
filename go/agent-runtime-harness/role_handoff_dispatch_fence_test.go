@@ -71,7 +71,7 @@ type pr82HandoffFixture struct {
 	handoff       *pr82HandoffCounter
 }
 
-func newPR82HandoffFixture(t *testing.T) *pr82HandoffFixture {
+func newPR82HandoffFixture(t *testing.T, parentOptions ...agent.StartRequest) *pr82HandoffFixture {
 	t.Helper()
 	ctx := t.Context()
 	now := pr82HandoffClock{}.Now()
@@ -82,9 +82,30 @@ func newPR82HandoffFixture(t *testing.T) *pr82HandoffFixture {
 	}
 	actor := kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}
 	thread := kernel.ThreadRef{Kind: "conversation", ID: "pr82-role-thread"}
+	stateRuntime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parentAgent, err := agent.NewRunner(agent.Dependencies{Runtime: stateRuntime, Model: nestedModelTestClient{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Generate verifiable Agent state without dispatch. The fixture retains
+	// its original unfenced Kernel record for explicit control-proof tests.
+	parentRequest := agent.StartRequest{
+		ID: "pr82-root-run", Actor: actor, Thread: thread, RequestID: "pr82-root",
+		Goal: "delegate",
+	}
+	if len(parentOptions) == 1 {
+		parentRequest.Model, parentRequest.ModelOptions = parentOptions[0].Model, parentOptions[0].ModelOptions
+	}
+	prepared, err := parentAgent.PrepareRun(ctx, parentRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
 	run, err := runtime.Create(ctx, kernel.CreateRequest{
 		ID: "pr82-root-run", Kind: agent.RunKind, Actor: actor, Thread: thread, RequestID: "pr82-root",
-		Goal: "delegate", State: []byte("{}"),
+		Goal: "delegate", State: prepared.State,
 	})
 	if err != nil {
 		t.Fatal(err)

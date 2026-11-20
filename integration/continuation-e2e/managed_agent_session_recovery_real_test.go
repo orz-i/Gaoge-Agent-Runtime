@@ -57,6 +57,19 @@ func TestRealPostgresManagedAgentSessionRecoveryAcrossProcessCrash(t *testing.T)
 	if dsn == "" {
 		t.Skip("TEST_POSTGRES_DSN is not configured")
 	}
+	for _, facade := range []bool{false, true} {
+		name := "explicit"
+		if facade {
+			name = "agent-session"
+		}
+		t.Run(name, func(t *testing.T) {
+			testManagedAgentSessionRecoveryAcrossProcessCrash(t, dsn, facade)
+		})
+	}
+}
+
+func testManagedAgentSessionRecoveryAcrossProcessCrash(t *testing.T, dsn string, facade bool) {
+	t.Helper()
 	db, isolatedDSN := managedRecoveryDatabase(t, dsn)
 	if err := postgresadapter.Migrate(db); err != nil {
 		t.Fatal(err)
@@ -65,7 +78,7 @@ func TestRealPostgresManagedAgentSessionRecoveryAcrossProcessCrash(t *testing.T)
 		t.Fatal(err)
 	}
 	files := t.TempDir()
-	runManagedRecoveryProcess(t, isolatedDSN, files, "crash", managedRecoveryCrashExit)
+	runManagedRecoveryProcess(t, isolatedDSN, files, "crash", managedRecoveryCrashExit, facade)
 
 	store, err := harnesspostgres.New(db)
 	if err != nil {
@@ -97,6 +110,9 @@ func TestRealPostgresManagedAgentSessionRecoveryAcrossProcessCrash(t *testing.T)
 		t.Fatalf("crash did not follow committed Tool and frozen model intent: %+v err=%v", before, err)
 	}
 	frozen := before.ModelInvocations[1]
+	if frozen.Request.MaxOutputTokens != 512 {
+		t.Fatal("pending post-Tool intent lost its frozen per-model output ceiling")
+	}
 	originalTransfer, transferErr := postgresadapter.NewKernelStore(db).LoadManagedRecovery(t.Context(), runID)
 	if transferErr != nil || originalTransfer.State != kernel.ManagedAvailable ||
 		originalTransfer.SafePoint.ModelInvocationID != frozen.ID || originalTransfer.SafePoint.ModelRequestHash != frozen.RequestHash ||
@@ -124,7 +140,7 @@ func TestRealPostgresManagedAgentSessionRecoveryAcrossProcessCrash(t *testing.T)
 	if err = sqlDB.Close(); err != nil {
 		t.Fatal(err)
 	}
-	runManagedRecoveryProcess(t, isolatedDSN, files, "resume", 0)
+	runManagedRecoveryProcess(t, isolatedDSN, files, "resume", 0, facade)
 
 	reopened := openManagedRecoveryDB(t, isolatedDSN)
 	reopenedStore, err := harnesspostgres.New(reopened)
@@ -198,6 +214,9 @@ func TestRealPostgresManagedAgentSessionRecoveryAcrossProcessCrash(t *testing.T)
 		t.Fatalf("pending request was re-prepared or redispatched: model calls=%d", len(calls))
 	}
 	for index, request := range calls {
+		if request.MaxOutputTokens != 512 {
+			t.Fatalf("request %d lost its frozen per-model output ceiling: %d", index, request.MaxOutputTokens)
+		}
 		if request.RunID != runID || strings.Contains(requestMessages(request), strings.Repeat("archived invoice discussion; ", 20)) {
 			t.Fatalf("request %d changed Run or re-expanded archived history", index)
 		}
@@ -222,7 +241,11 @@ func TestManagedAgentSessionRecoveryProcess(t *testing.T) {
 	}
 	db := openManagedRecoveryDB(t, os.Getenv("TEST_POSTGRES_DSN"))
 	files := os.Getenv("GAOGE_TEST_MANAGED_RECOVERY_FILES")
-	session := newManagedRecoverySession(t, db, files, phase != "resume", phase != "opaque-crash")
+	facade, err := strconv.ParseBool(os.Getenv("GAOGE_TEST_MANAGED_RECOVERY_FACADE"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := newManagedRecoverySessionWithComposition(t, db, files, phase != "resume", phase != "opaque-crash", facade)
 	if phase != "resume" {
 		_, err := session.Prompt(t.Context(), managedRecoveryTurn, managedRecoveryPrompt)
 		t.Fatalf("expected process exit after second model intent commit, got %v", err)
@@ -231,7 +254,7 @@ func TestManagedAgentSessionRecoveryProcess(t *testing.T) {
 	if completed.Turn.Status != harness.TurnCompleted || completed.Output == nil {
 		t.Fatalf("nil-Transcript Session.Resume: turn=%+v", completed.Turn)
 	}
-	if completed.Config.Model != "fixture-invoice" {
+	if completed.Config.Model != "fixture-invoice" || completed.Config.MaxModelOutputTokens != 512 {
 		t.Fatalf("resume lost the sealed configuration: %+v", completed.Config)
 	}
 	// The public recovery entry point is safe to call again on a terminal Turn.
@@ -362,6 +385,11 @@ func (managedRecoveryClock) Now() time.Time { return time.Now().UTC() }
 
 func newManagedRecoverySession(t *testing.T, db *gorm.DB, files string, crash bool, managed ...bool) *harness.SessionClient {
 	t.Helper()
+	return newManagedRecoverySessionWithComposition(t, db, files, crash, len(managed) == 0 || managed[0], false)
+}
+
+func newManagedRecoverySessionWithComposition(t *testing.T, db *gorm.DB, files string, crash, managed, facade bool) *harness.SessionClient {
+	t.Helper()
 	hostStore, err := harnesspostgres.New(db)
 	if err != nil {
 		t.Fatal(err)
@@ -374,9 +402,7 @@ func newManagedRecoverySession(t *testing.T, db *gorm.DB, files string, crash bo
 	if err != nil {
 		t.Fatal(err)
 	}
-	manager := runtimecontext.NewManager(runtimecontext.Dependencies{})
 	registrations := []tools.Registration{
-		harness.ContextArtifactToolRegistration(harness.NewContextArtifactToolHandler(hostStore, nil)),
 		{
 			Definition: tools.Definition{
 				Key: managedRecoveryTool, Name: "record_subtotal", Description: "Calculate and record an invoice subtotal in cents.",
@@ -399,36 +425,53 @@ func newManagedRecoverySession(t *testing.T, db *gorm.DB, files string, crash bo
 			}),
 		},
 	}
-	registry, err := tools.NewRegistry(registrations)
-	if err != nil {
-		t.Fatal(err)
-	}
-	bounded, err := harness.NewBoundedContextAdapter(hostStore, manager, func(_ context.Context, request model.Request) (runtimecontext.ModelWindow, error) {
+	resolveWindow := func(_ context.Context, request model.Request) (runtimecontext.ModelWindow, error) {
 		if request.Model != "fixture-invoice" {
 			return runtimecontext.ModelWindow{}, runtimecontext.ErrModelWindowUnknown
 		}
 		// Deliberately small fixture capacity forces history archival. This is
 		// not an asserted production model capacity or token-admission planner.
 		return runtimecontext.ModelWindow{ContextTokens: 12000, ReservedOutputTokens: 512}, nil
-	}, nil)
-	if err != nil {
-		t.Fatal(err)
 	}
 	owner := "managed-recovery-after"
 	if crash {
 		owner = "managed-recovery-before"
 	}
+	execution := agent.ExecutionPolicy{
+		Model: agent.CallPolicy{Timeout: time.Second, MaxAttempts: 1, MaxConcurrency: 1},
+		Tool:  agent.CallPolicy{Timeout: time.Second, MaxAttempts: 1, MaxConcurrency: 1},
+	}
+	runExecution := &agent.RunExecution{OwnerID: owner, LeaseDuration: managedRecoveryLeaseDuration}
+	options := managedRecoveryConfiguredSessionOptions(crash)
+	if facade {
+		session, err := harness.OpenAgentSession(harness.AgentSessionOptions{
+			Runtime: runtime, Store: hostStore, Model: managedRecoveryModel{logPath: filepath.Join(files, "model.jsonl")},
+			Tools: registrations, Session: options,
+			Context:   harness.AgentSessionContextOptions{ResolveWindow: resolveWindow, ManagedRecovery: managed},
+			Execution: execution, RunExecution: runExecution,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return session
+	}
+	manager := runtimecontext.NewManager(runtimecontext.Dependencies{})
+	registrations = append(registrations, harness.ContextArtifactToolRegistration(harness.NewContextArtifactToolHandler(hostStore, nil)))
+	registry, err := tools.NewRegistry(registrations)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bounded, err := harness.NewBoundedContextAdapter(hostStore, manager, resolveWindow, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	dependencies := agent.Dependencies{
 		Runtime: runtime, Model: managedRecoveryModel{logPath: filepath.Join(files, "model.jsonl")},
 		Catalog: registry, Executor: registry, ManagedContextRecovery: bounded,
 		RunMiddleware: []plugin.RunMiddleware{bounded},
-		RunExecution:  &agent.RunExecution{OwnerID: owner, LeaseDuration: managedRecoveryLeaseDuration},
-		Execution: agent.ExecutionPolicy{
-			Model: agent.CallPolicy{Timeout: time.Second, MaxAttempts: 1, MaxConcurrency: 1},
-			Tool:  agent.CallPolicy{Timeout: time.Second, MaxAttempts: 1, MaxConcurrency: 1},
-		},
+		RunExecution:  runExecution, Execution: execution,
 	}
-	if len(managed) == 1 && !managed[0] {
+	if !managed {
 		ordinary, ordinaryErr := harness.NewContextRunMiddleware(hostStore, nil)
 		if ordinaryErr != nil {
 			t.Fatal(ordinaryErr)
@@ -448,16 +491,29 @@ func newManagedRecoverySession(t *testing.T, db *gorm.DB, files string, crash bo
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The explicit recovery path also proves a handle needs no replacement Config.
+	if !crash {
+		options.Config = harness.ConfigSnapshot{}
+	}
+	session, err := host.OpenSession(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return session
+}
+
+func managedRecoveryConfiguredSessionOptions(crash bool) harness.SessionOptions {
 	options := managedRecoverySessionOptions()
+	options.Config = harness.ConfigSnapshot{
+		Model: "fixture-invoice", ToolKeys: []string{managedRecoveryTool, harness.ContextArtifactToolKey},
+		MaxModelOutputTokens: 512,
+		ToolPolicies: []harness.ToolPolicySnapshot{
+			{Key: managedRecoveryTool, DefinitionVersion: "fixture-v1", ApprovalMode: "never", SideEffectLevel: "write"},
+			harness.ContextArtifactToolPolicySnapshot(),
+		},
+		ContextPolicy: runtimecontext.Policy{PreserveRecentTurns: 1, MinimumRecentTurns: 1, MaxCompactionTokens: 128},
+	}
 	if crash {
-		options.Config = harness.ConfigSnapshot{
-			Model: "fixture-invoice", ToolKeys: []string{managedRecoveryTool, harness.ContextArtifactToolKey},
-			ToolPolicies: []harness.ToolPolicySnapshot{
-				{Key: managedRecoveryTool, DefinitionVersion: "fixture-v1", ApprovalMode: "never", SideEffectLevel: "write"},
-				harness.ContextArtifactToolPolicySnapshot(),
-			},
-			ContextPolicy: runtimecontext.Policy{PreserveRecentTurns: 1, MinimumRecentTurns: 1, MaxCompactionTokens: 128},
-		}
 		options.Transcript = harness.TranscriptSourceFunc(func(_ context.Context, _, _ harness.HostRef, prompt string) (*harness.ContextSeed, error) {
 			return &harness.ContextSeed{
 				SourcePath: []string{"old-user", "old-answer", "invoice-user"},
@@ -469,12 +525,7 @@ func newManagedRecoverySession(t *testing.T, db *gorm.DB, files string, crash bo
 			}, nil
 		})
 	}
-	// Recovery supplies neither TranscriptSource nor a replacement Config.
-	session, err := host.OpenSession(options)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return session
+	return options
 }
 
 func managedRecoverySessionOptions() harness.SessionOptions {
@@ -628,13 +679,14 @@ func readManagedRecoveryRecords[T any](t *testing.T, path string) []T {
 	}
 }
 
-func runManagedRecoveryProcess(t *testing.T, dsn, files, phase string, wantExit int) {
+func runManagedRecoveryProcess(t *testing.T, dsn, files, phase string, wantExit int, facade ...bool) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestManagedAgentSessionRecoveryProcess$", "-test.count=1")
 	command.Env = append(os.Environ(), "TEST_POSTGRES_DSN="+dsn,
-		"GAOGE_TEST_MANAGED_RECOVERY_PHASE="+phase, "GAOGE_TEST_MANAGED_RECOVERY_FILES="+files)
+		"GAOGE_TEST_MANAGED_RECOVERY_PHASE="+phase, "GAOGE_TEST_MANAGED_RECOVERY_FILES="+files,
+		"GAOGE_TEST_MANAGED_RECOVERY_FACADE="+strconv.FormatBool(len(facade) == 1 && facade[0]))
 	output, err := command.CombinedOutput()
 	if wantExit == 0 && err == nil {
 		return

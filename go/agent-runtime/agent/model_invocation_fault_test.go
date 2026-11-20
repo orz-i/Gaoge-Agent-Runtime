@@ -191,7 +191,9 @@ func TestModelInvocationRecoversCrashAfterPendingCommitBeforeProviderCall(t *tes
 	}
 	provider := &invocationRecordingModel{}
 	runner := newModelInvocationRunner(t, faults, provider)
-	_, err := runner.StartRun(t.Context(), startRequest("model-before-call", "req-before-call", "answer"))
+	request := startRequest("model-before-call", "req-before-call", "answer")
+	request.MaxModelOutputTokens = 64
+	_, err := runner.StartRun(t.Context(), request)
 	if !errors.Is(err, errInjectedModelInvocationCrash) {
 		t.Fatalf("start error = %v", err)
 	}
@@ -213,10 +215,13 @@ func TestModelInvocationRecoversCrashAfterPendingCommitBeforeProviderCall(t *tes
 		t.Fatalf("status = %s", completed.Run.Status)
 	}
 	calls := provider.callsCopy()
-	if len(calls) != 1 || calls[0].InvocationID == "" {
+	if len(calls) != 1 || calls[0].InvocationID == "" || calls[0].MaxOutputTokens != 64 {
 		t.Fatalf("recovered provider calls = %#v", calls)
 	}
 	view := mustModelInvocationView(t, completed)
+	if view.MaxModelOutputTokens != 64 {
+		t.Fatal("Run sampling ceiling lost on pending-intent recovery")
+	}
 	assertConsumedInvocation(t, view, calls[0].InvocationID)
 	if view.Budget.Usage.LLMCalls != 1 || view.Budget.Usage.InputTokens != 7 ||
 		view.Budget.Usage.OutputTokens != 3 || view.Budget.Usage.TotalTokens != 10 ||
@@ -300,7 +305,9 @@ func TestModelInvocationRecoversCrashAfterReceiptBeforeConsumption(t *testing.T)
 	}
 	provider := &invocationRecordingModel{}
 	runner := newModelInvocationRunner(t, faults, provider)
-	_, err := runner.StartRun(t.Context(), startRequest("model-after-receipt", "req-after-receipt", "answer"))
+	request := startRequest("model-after-receipt", "req-after-receipt", "answer")
+	request.MaxModelOutputTokens = 64
+	_, err := runner.StartRun(t.Context(), request)
 	if !errors.Is(err, errInjectedModelInvocationCrash) {
 		t.Fatalf("start error = %v", err)
 	}
@@ -323,6 +330,9 @@ func TestModelInvocationRecoversCrashAfterReceiptBeforeConsumption(t *testing.T)
 		t.Fatalf("durable receipt caused provider replay: calls=%d", got)
 	}
 	view := mustModelInvocationView(t, completed)
+	if view.MaxModelOutputTokens != 64 || calls[0].MaxOutputTokens != 64 {
+		t.Fatal("Run sampling ceiling lost on completed-receipt recovery")
+	}
 	assertConsumedInvocation(t, view, calls[0].InvocationID)
 }
 

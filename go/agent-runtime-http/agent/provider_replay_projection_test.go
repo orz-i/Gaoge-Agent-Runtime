@@ -23,12 +23,14 @@ const privateAnthropicSignature = "HTTP_AGENT_PRIVATE_SIGNATURE"
 const privateOpenAIReasoning = "HTTP_AGENT_PRIVATE_ENCRYPTED_REASONING"
 
 type replaySecurityModel struct {
-	provider string
-	calls    int
+	provider       string
+	calls          int
+	outputCeilings []int64
 }
 
-func (f *replaySecurityModel) Generate(_ context.Context, _ model.Request) (model.Response, error) {
+func (f *replaySecurityModel) Generate(_ context.Context, request model.Request) (model.Response, error) {
 	f.calls++
+	f.outputCeilings = append(f.outputCeilings, request.MaxOutputTokens)
 	if f.calls == 1 {
 		var replay *model.ProviderReplay
 		if f.provider == "anthropic" {
@@ -101,7 +103,7 @@ func TestAgentHTTPCreateAndAuthorizedReadRedactProviderEvidence(t *testing.T) {
 			NewModule(NewHandler(Dependencies{Runner: runner, Shared: shared})).RegisterRoutes(routes)
 
 			runID := "replay-" + vendor
-			body := fmt.Sprintf(`{"clientRunID":%q,"thread":{"kind":"conversation","id":"test"},"input":{"content":"Echo hello with the authorized Tool."},"model":"test-model","toolKeys":["echo:v1"]}`, runID)
+			body := fmt.Sprintf(`{"clientRunID":%q,"thread":{"kind":"conversation","id":"test"},"input":{"content":"Echo hello with the authorized Tool."},"model":"test-model","maxModelOutputTokens":1024,"toolKeys":["echo:v1"]}`, runID)
 			post := httptest.NewRecorder()
 			router.ServeHTTP(post, httptest.NewRequest(http.MethodPost, "/v1/agent-runs", bytes.NewBufferString(body)))
 			if post.Code != http.StatusAccepted {
@@ -109,6 +111,11 @@ func TestAgentHTTPCreateAndAuthorizedReadRedactProviderEvidence(t *testing.T) {
 			}
 			if modelClient.calls != 2 || executions != 1 {
 				t.Fatalf("real Agent run did not execute once: model_calls=%d tools=%d", modelClient.calls, executions)
+			}
+			for _, ceiling := range modelClient.outputCeilings {
+				if ceiling != 1024 {
+					t.Fatalf("tool continuation lost per-model output ceiling: %v", modelClient.outputCeilings)
+				}
 			}
 			internal, err := runtime.Load(t.Context(), runID)
 			if err != nil {

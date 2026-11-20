@@ -196,7 +196,13 @@ func (middleware *BudgetMiddleware) modelReservation(ctx context.Context, ledger
 		if existing.RequestHash != reservation.RequestHash {
 			return request, reservation, budget.ErrLedgerConflict
 		}
-		request.MaxOutputTokens = existing.Requested.OutputTokens
+		// Count-only reservations have no output-token allowance. They must
+		// not erase a positive ceiling already frozen in the model intent.
+		// A token reservation can only narrow that original ceiling.
+		if ceiling := existing.Requested.OutputTokens; ceiling > 0 &&
+			(request.MaxOutputTokens == 0 || ceiling < request.MaxOutputTokens) {
+			request.MaxOutputTokens = ceiling
+		}
 		request = applyHostedReservation(request, existing.Requested.HostedToolCalls, ledger, existing.RunID)
 		if existing.Status != budget.ReservationSettled && !existing.Dispatched && hasRunTokenLimits(ledger, request.RunID) {
 			if middleware.dependencies.Meter == nil {
@@ -227,6 +233,9 @@ func (middleware *BudgetMiddleware) modelReservation(ctx context.Context, ledger
 		return request, reservation, budget.ErrUnmetered
 	}
 	output := remainingOutputCeiling(ledger, request.RunID, admission.InputUpperBound, admission.MaxOutputTokens)
+	if request.MaxOutputTokens > 0 {
+		output = min(output, request.MaxOutputTokens)
+	}
 	if output <= 0 {
 		return request, reservation, budget.ErrExhausted
 	}

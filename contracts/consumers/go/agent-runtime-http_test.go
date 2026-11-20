@@ -24,6 +24,7 @@ type authorizerContract interface {
 }
 
 var (
+	_                                                                                                                                                = agenthttp.StartRunRequest{MaxModelOutputTokens: 1024}
 	_ runtimehttp.PrincipalResolver                                                                                                                  = hostPrincipal{}
 	_ runtimehttp.RunAuthorizer                                                                                                                      = (authorizerContract)(nil)
 	_ authorizerContract                                                                                                                             = (runtimehttp.RunAuthorizer)(nil)

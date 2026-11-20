@@ -96,6 +96,7 @@ func TestSessionResumeReusesFrozenIntentWithoutTranscriptOrPreparation(t *testin
 	firstProvider := &multiContextCaptureModel{}
 	first, _ := newResumeTurnHarness(t, faulty, store, firstProvider, clock, nil)
 	options := resumeTurnSessionOptions()
+	options.Config.MaxModelOutputTokens = 256
 	session := mustResumeSession(t, first, options)
 	_, err := session.Prompt(t.Context(), "turn", "finish the original task")
 	if !errors.Is(err, errResumeTurnInterrupted) || len(firstProvider.requests) != 0 {
@@ -119,6 +120,7 @@ func TestSessionResumeReusesFrozenIntentWithoutTranscriptOrPreparation(t *testin
 	})
 	options.Transcript = nil
 	options.Config.Instructions = "changed settings must not replace the frozen request"
+	options.Config.MaxModelOutputTokens = 4096
 	reopened := mustResumeSession(t, restarted, options)
 	done, err := reopened.Resume(t.Context(), "turn")
 	if err != nil || done.Turn.Status != harness.TurnCompleted || len(provider.requests) != 1 || preparationCalls != 0 {
@@ -132,6 +134,9 @@ func TestSessionResumeReusesFrozenIntentWithoutTranscriptOrPreparation(t *testin
 		t.Fatalf("missing root terminal output: %+v", done.Output)
 	}
 	assertPersistedModelHash(t, runtime, done, provider.requests[0])
+	if provider.requests[0].MaxOutputTokens != 256 || done.Config.MaxModelOutputTokens != 256 {
+		t.Fatalf("reopen replaced the frozen output ceiling: request=%d config=%d", provider.requests[0].MaxOutputTokens, done.Config.MaxModelOutputTokens)
+	}
 	again, err := reopened.Resume(t.Context(), "turn")
 	if err != nil || again.Turn.Revision != done.Turn.Revision || len(provider.requests) != 1 {
 		t.Fatalf("terminal resume was not idempotent: turn=%+v error=%v calls=%d", again.Turn, err, len(provider.requests))
@@ -146,6 +151,7 @@ func TestSessionResumeRestoresContextAndChecksOwnerWithoutTranscript(t *testing.
 		return model.Response{Content: "checkpoint reached", Continue: true}, nil
 	}), clock, nil)
 	options := resumeTurnSessionOptions()
+	options.Config.MaxModelOutputTokens = 192
 	pending, err := mustResumeSession(t, first, options).Prompt(t.Context(), "turn", "preserve the evidence")
 	if err != nil || pending.Turn.Status != harness.TurnRunning {
 		t.Fatalf("expected running pause: %+v error=%v", pending.Turn, err)
@@ -153,6 +159,7 @@ func TestSessionResumeRestoresContextAndChecksOwnerWithoutTranscript(t *testing.
 	provider := &multiContextCaptureModel{}
 	restarted, _ := newResumeTurnHarness(t, base, store, provider, clock, nil)
 	options.Transcript = nil
+	options.Config.MaxModelOutputTokens = 2048
 	for _, actor := range []kernel.ActorRef{{TenantID: "other", ActorID: "owner"}, {TenantID: "tenant", ActorID: "other"}} {
 		foreignOptions := options
 		foreignOptions.Actor = actor
@@ -176,6 +183,9 @@ func TestSessionResumeRestoresContextAndChecksOwnerWithoutTranscript(t *testing.
 		t.Fatalf("resume after pause: status=%s error=%v calls=%d", done.Turn.Status, err, len(provider.requests))
 	}
 	messages := provider.requests[0].Messages
+	if provider.requests[0].MaxOutputTokens != 192 {
+		t.Fatalf("next sampling lost the original output ceiling: %d", provider.requests[0].MaxOutputTokens)
+	}
 	if len(messages) < 2 || !strings.Contains(model.TextValue(messages[0].Content), "frozen session instructions") || !strings.Contains(model.TextValue(messages[0].Content), "frozen host evidence") {
 		t.Fatalf("persisted root Context was not restored: %+v", messages)
 	}

@@ -93,7 +93,20 @@ func TestDeferredApprovalRejectsMismatchedOrRejectedGrant(t *testing.T) {
 					if err := json.Unmarshal(fields["pendingCalls"], &pending); err != nil {
 						t.Fatal(err)
 					}
+					originalCallID := pending[0].ID
 					pending[0].ID = "forged-second-call"
+					// Keep the Catalog proof internally consistent so this case
+					// still tests the independent original approval binding.
+					var catalog map[string]string
+					if err := json.Unmarshal(fields["pendingToolCatalog"], &catalog); err != nil {
+						t.Fatal(err)
+					}
+					catalog[pending[0].ID] = catalog[originalCallID]
+					delete(catalog, originalCallID)
+					fields["pendingToolCatalog"], err = json.Marshal(catalog)
+					if err != nil {
+						t.Fatal(err)
+					}
 					fields["pendingCalls"], err = json.Marshal(pending)
 					if err != nil {
 						t.Fatal(err)

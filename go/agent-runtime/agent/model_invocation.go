@@ -448,8 +448,9 @@ func (runner *Runner) buildModelRequest(
 	}
 	request := model.Request{
 		RunID: snapshot.Run.ID, Model: state.Model, ModelOptions: cloneRawJSON(state.ModelOptions),
-		OutputContract: model.CloneOutputContract(state.OutputContract),
-		Messages:       messages, Tools: definitions, HostedTools: model.CloneHostedTools(hostedTools),
+		OutputContract:  model.CloneOutputContract(state.OutputContract),
+		MaxOutputTokens: state.MaxModelOutputTokens,
+		Messages:        messages, Tools: definitions, HostedTools: model.CloneHostedTools(hostedTools),
 		RequireToolCall: state.RequireToolCall && (len(definitions) != 0 || len(hostedTools) != 0),
 	}
 	if state.CompletionRepair {
@@ -613,6 +614,19 @@ func dispatchToolChoiceWithinIntent(frozen, candidate model.Request) bool {
 // bound may be added to an unbounded intent, but never removed or increased.
 func dispatchOutputCeilingWithinIntent(frozen, candidate int64) bool {
 	return frozen >= 0 && candidate >= 0 && (frozen == 0 || (candidate > 0 && candidate <= frozen))
+}
+
+// Active intents retain the Run's exact sampling ceiling across restart.
+// Dispatch-only narrowing never rewrites the intent, and consumed receipts
+// no longer retain their request.
+func modelInvocationsMatchOutputCeiling(invocations []ModelInvocation, ceiling int64) bool {
+	for _, invocation := range invocations {
+		if (invocation.Status == ModelInvocationPending || invocation.Status == ModelInvocationCompleted) &&
+			invocation.Request.MaxOutputTokens != ceiling {
+			return false
+		}
+	}
+	return true
 }
 
 // A nil native Tool limit is unlimited, while an explicit zero forbids NEW

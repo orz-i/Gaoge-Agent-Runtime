@@ -5,6 +5,19 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- **Agent Session and frozen per-call output ceilings (2026-11-20):** Add
+  `harness.OpenAgentSession` for explicitly selected local Tools, bounded
+  Context and the existing Session recovery API. Freeze optional
+  `MaxModelOutputTokens` through Config, Agent state, model intents, local
+  delegation and HTTP/TypeScript contracts. Separate it from cumulative
+  output usage and model-window reservation. Existing unspecified zero fields
+  remain omitted; the new constructor requires a positive ceiling. A2A shadows
+  reject nonzero ceilings they cannot enforce. See `docs/agent-session.md`.
+  Stage 0/1 review additionally binds positive Harness/Run ceilings, preserves
+  them through shared-budget reservation recovery, and retains original Catalog
+  fingerprints for pending Tool batches. Legacy zero-ceiling snapshots remain
+  supported with their original evidence boundary. See the 2026-11-20 review.
+
 - **Acceptance variants and report integrity (2026-11-20):** The developer-only
   task-agent acceptance suite now has seven bounded variants across code repair,
   document evidence and approval control. Ordered planned case identities and

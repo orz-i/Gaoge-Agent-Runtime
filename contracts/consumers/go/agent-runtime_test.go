@@ -129,7 +129,7 @@ type hostModel struct {
 
 func (host *hostModel) Generate(_ context.Context, request model.Request) (model.Response, error) {
 	host.calls++
-	if request.RunID != "consumer-run" || request.InvocationID == "" || len(request.Messages) == 0 {
+	if request.RunID != "consumer-run" || request.InvocationID == "" || len(request.Messages) == 0 || request.MaxOutputTokens != 1024 {
 		host.t.Fatalf("host did not receive durable model identity: %#v", request)
 	}
 	return model.Response{Content: "hello from the host"}, nil
@@ -149,6 +149,7 @@ func TestHostRunsAgentWithoutGaoge(t *testing.T) {
 	snapshot, err := runner.StartRun(ctx, agent.StartRequest{
 		ID: "consumer-run", Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"},
 		Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"}, Goal: "Say hello",
+		MaxModelOutputTokens: 1024,
 	})
 	if err != nil {
 		t.Fatal(err)

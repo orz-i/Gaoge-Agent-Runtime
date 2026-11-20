@@ -321,8 +321,11 @@ type StartRequest struct {
 	Model             string
 	ModelOptions      json.RawMessage
 	OutputContract    *model.OutputContract
-	ToolKeys          []string
-	RequiredToolKeys  []string
+	// MaxModelOutputTokens bounds each model sampling request. Zero leaves the
+	// per-request ceiling unspecified; Limits.MaxOutputTokens bounds Run usage.
+	MaxModelOutputTokens int64 `json:"maxModelOutputTokens,omitempty"`
+	ToolKeys             []string
+	RequiredToolKeys     []string
 	// InitialToolKeys are already authorized local tools shown on the first
 	// model request when discovery is active. Unlike RequiredToolKeys, they
 	// do NOT impose a mandatory invocation before completion.
@@ -390,26 +393,28 @@ type Runner struct {
 }
 
 type runState struct {
-	RecoveredTools    []rootToolReceipt      `json:"recoveredTools,omitempty"`
-	OriginFingerprint string                 `json:"originFingerprint,omitempty"`
-	Messages          []model.Message        `json:"messages"`
-	Model             string                 `json:"model,omitempty"`
-	ModelOptions      json.RawMessage        `json:"modelOptions,omitempty"`
-	OutputContract    *model.OutputContract  `json:"outputContract,omitempty"`
-	ToolKeys          []string               `json:"toolKeys"`
-	RequiredToolKeys  []string               `json:"requiredToolKeys,omitempty"`
-	HostedToolGrants  []HostedToolGrant      `json:"hostedToolGrants,omitempty"`
-	Discovery         *discoveryState        `json:"discovery,omitempty"`
-	BlockedToolKeys   []string               `json:"blockedToolKeys,omitempty"`
-	RequireToolCall   bool                   `json:"requireToolCall,omitempty"`
-	CompletionRepair  bool                   `json:"completionRepair,omitempty"`
-	Budget            runtimebudget.Snapshot `json:"budget"`
-	CallAllowance     *CallAllowance         `json:"callAllowance,omitempty"`
-	AutoAllowance     *autoAllowanceState    `json:"autoAllowance,omitempty"`
-	PendingCalls      []tools.Call           `json:"pendingCalls,omitempty"`
-	PendingApproval   *pendingToolApproval   `json:"pendingApproval,omitempty"`
-	ToolWait          *PendingTool           `json:"toolWait,omitempty"`
-	DeferredChildren  []deferredChildCall    `json:"deferredChildren,omitempty"`
+	RecoveredTools       []rootToolReceipt      `json:"recoveredTools,omitempty"`
+	OriginFingerprint    string                 `json:"originFingerprint,omitempty"`
+	Messages             []model.Message        `json:"messages"`
+	Model                string                 `json:"model,omitempty"`
+	ModelOptions         json.RawMessage        `json:"modelOptions,omitempty"`
+	OutputContract       *model.OutputContract  `json:"outputContract,omitempty"`
+	MaxModelOutputTokens int64                  `json:"maxModelOutputTokens,omitempty"`
+	ToolKeys             []string               `json:"toolKeys"`
+	RequiredToolKeys     []string               `json:"requiredToolKeys,omitempty"`
+	HostedToolGrants     []HostedToolGrant      `json:"hostedToolGrants,omitempty"`
+	Discovery            *discoveryState        `json:"discovery,omitempty"`
+	BlockedToolKeys      []string               `json:"blockedToolKeys,omitempty"`
+	RequireToolCall      bool                   `json:"requireToolCall,omitempty"`
+	CompletionRepair     bool                   `json:"completionRepair,omitempty"`
+	Budget               runtimebudget.Snapshot `json:"budget"`
+	CallAllowance        *CallAllowance         `json:"callAllowance,omitempty"`
+	AutoAllowance        *autoAllowanceState    `json:"autoAllowance,omitempty"`
+	PendingCalls         []tools.Call           `json:"pendingCalls,omitempty"`
+	PendingToolCatalog   map[string]string      `json:"pendingToolCatalog,omitempty"`
+	PendingApproval      *pendingToolApproval   `json:"pendingApproval,omitempty"`
+	ToolWait             *PendingTool           `json:"toolWait,omitempty"`
+	DeferredChildren     []deferredChildCall    `json:"deferredChildren,omitempty"`
 	// A fenced Agent Run commits its Tool dispatch ID before invoking
 	// external effects. A missing receipt requires explicit reconciliation.
 	ToolDispatchID   string                     `json:"toolDispatchID,omitempty"`
@@ -425,17 +430,18 @@ type runState struct {
 // the durable transcript and bounded usage state without leaking the private
 // execution representation or allowing callers to mutate Kernel state.
 type View struct {
-	Messages         []model.Message
-	Model            string
-	ModelOptions     json.RawMessage
-	OutputContract   *model.OutputContract
-	ToolKeys         []string
-	RequiredToolKeys []string
-	Budget           runtimebudget.Snapshot
-	CallAllowance    *CallAllowance
-	AutoAllowance    *AutoAllowanceProgress
-	ModelInvocations []ModelInvocation
-	PendingTool      *PendingToolView
+	Messages             []model.Message
+	Model                string
+	ModelOptions         json.RawMessage
+	OutputContract       *model.OutputContract
+	MaxModelOutputTokens int64 `json:"maxModelOutputTokens,omitempty"`
+	ToolKeys             []string
+	RequiredToolKeys     []string
+	Budget               runtimebudget.Snapshot
+	CallAllowance        *CallAllowance
+	AutoAllowance        *AutoAllowanceProgress
+	ModelInvocations     []ModelInvocation
+	PendingTool          *PendingToolView
 
 	ToolProgressPolicy *ToolProgressPolicy
 	InputBinding       string
@@ -449,17 +455,18 @@ func ViewState(snapshot kernel.Snapshot) (View, error) {
 		return View{}, err
 	}
 	return View{
-		Messages:         publicModelMessages(state.Messages),
-		Model:            state.Model,
-		ModelOptions:     cloneRawJSON(state.ModelOptions),
-		OutputContract:   model.CloneOutputContract(state.OutputContract),
-		ToolKeys:         append([]string(nil), state.ToolKeys...),
-		RequiredToolKeys: append([]string(nil), state.RequiredToolKeys...),
-		Budget:           state.Budget,
-		CallAllowance:    cloneCallAllowance(state.CallAllowance),
-		AutoAllowance:    autoAllowanceProgress(state.AutoAllowance),
-		ModelInvocations: publicModelInvocations(state.ModelInvocations),
-		PendingTool:      publicPendingTool(snapshot, state.ToolWait),
+		Messages:             publicModelMessages(state.Messages),
+		Model:                state.Model,
+		ModelOptions:         cloneRawJSON(state.ModelOptions),
+		OutputContract:       model.CloneOutputContract(state.OutputContract),
+		MaxModelOutputTokens: state.MaxModelOutputTokens,
+		ToolKeys:             append([]string(nil), state.ToolKeys...),
+		RequiredToolKeys:     append([]string(nil), state.RequiredToolKeys...),
+		Budget:               state.Budget,
+		CallAllowance:        cloneCallAllowance(state.CallAllowance),
+		AutoAllowance:        autoAllowanceProgress(state.AutoAllowance),
+		ModelInvocations:     publicModelInvocations(state.ModelInvocations),
+		PendingTool:          publicPendingTool(snapshot, state.ToolWait),
 
 		ToolProgressPolicy: cloneToolProgressPolicy(state.ToolProgressPolicy),
 		InputBinding:       state.InputBinding,
@@ -775,7 +782,7 @@ func (runner *Runner) prepareStartState(ctx context.Context, request StartReques
 	if request.ParentRunID != "" && runner.inputs != nil {
 		return nil, ErrInvalidRequest // root-scoped input is never inherited by a child
 	}
-	if (request.ParentRunID == "") != (request.OriginFingerprint == "") ||
+	if request.MaxModelOutputTokens < 0 || (request.ParentRunID == "") != (request.OriginFingerprint == "") ||
 		(request.ParentRunID != "" && !validFrozenOriginFingerprint(request.OriginFingerprint)) {
 		return nil, ErrInvalidRequest
 	}
@@ -840,18 +847,19 @@ func (runner *Runner) prepareStartState(ctx context.Context, request StartReques
 		return nil, ErrInvalidRequest
 	}
 	state := runState{
-		OriginFingerprint: request.OriginFingerprint,
-		Messages:          []model.Message{{Role: model.RoleUser, Content: model.TextParts(strings.TrimSpace(request.Goal))}},
-		Model:             strings.TrimSpace(request.Model),
-		ModelOptions:      cloneRawJSON(request.ModelOptions),
-		OutputContract:    model.CloneOutputContract(request.OutputContract),
-		ToolKeys:          toolKeys,
-		RequiredToolKeys:  requiredToolKeys,
-		HostedToolGrants:  grants,
-		Discovery:         discovery,
-		Budget:            runtimebudget.Snapshot{Limits: limits},
-		CallAllowance:     allowance,
-		AutoAllowance:     automaticAllowance,
+		OriginFingerprint:    request.OriginFingerprint,
+		Messages:             []model.Message{{Role: model.RoleUser, Content: model.TextParts(strings.TrimSpace(request.Goal))}},
+		Model:                strings.TrimSpace(request.Model),
+		ModelOptions:         cloneRawJSON(request.ModelOptions),
+		OutputContract:       model.CloneOutputContract(request.OutputContract),
+		MaxModelOutputTokens: request.MaxModelOutputTokens,
+		ToolKeys:             toolKeys,
+		RequiredToolKeys:     requiredToolKeys,
+		HostedToolGrants:     grants,
+		Discovery:            discovery,
+		Budget:               runtimebudget.Snapshot{Limits: limits},
+		CallAllowance:        allowance,
+		AutoAllowance:        automaticAllowance,
 
 		ToolProgressPolicy: freezeToolProgressPolicy(runner.toolProgressPolicy, toolKeys),
 		InputBinding:       runner.inputBinding,
@@ -1344,6 +1352,7 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 		snapshot,
 		state,
 		definitions,
+		consumed.CatalogFingerprints,
 		response.Content,
 		response.ToolCalls,
 		response.ProviderReplay,
@@ -1898,6 +1907,7 @@ func (runner *Runner) queueToolCalls(
 	snapshot kernel.Snapshot,
 	state runState,
 	definitions []tools.Definition,
+	catalogFingerprints []string,
 	content string,
 	calls []tools.Call,
 	providerReplay *model.ProviderReplay,
@@ -1936,11 +1946,16 @@ func (runner *Runner) queueToolCalls(
 		preparedCalls[index] = call
 		preparedCalls[index].Arguments = append(json.RawMessage(nil), call.Arguments...)
 	}
+	catalogProof, err := pendingToolCatalogFromInvocation(definitions, catalogFingerprints, preparedCalls)
+	if err != nil {
+		return runner.fail(ctx, snapshot, state, "agent.tool_invalid", err)
+	}
 	state.Messages = append(state.Messages, model.Message{
 		Role: model.RoleAssistant, Content: model.TextParts(strings.TrimSpace(content)),
 		ToolCalls: cloneToolCalls(preparedCalls), ProviderReplay: model.CloneProviderReplay(providerReplay),
 	})
 	state.PendingCalls = cloneToolCalls(preparedCalls)
+	state.PendingToolCatalog = catalogProof
 	state.RequireToolCall = false
 	encoded, err := encodeState(state)
 	if err != nil {
@@ -1979,6 +1994,9 @@ func (runner *Runner) preparePendingApproval(
 	}
 	if !ok {
 		return runner.fail(ctx, snapshot, state, "agent.tool_invalid", tools.ErrInvalidCall)
+	}
+	if err := validatePendingToolDefinition(state, call, definition); err != nil {
+		return runner.fail(ctx, snapshot, state, pendingToolCatalogErrorCode(state), err)
 	}
 	if err := tools.ValidateCall(definition, call); err != nil {
 		return snapshot, err
@@ -2160,6 +2178,9 @@ func (runner *Runner) preparePendingToolExecution(snapshot kernel.Snapshot) (pen
 		if err := validateLoadedDiscoveryExecution(state.Discovery, call.ToolKey, definition); err != nil {
 			return pendingToolExecution{state: state}, "agent.discovery_invalid", err
 		}
+	}
+	if err := validatePendingToolDefinition(state, call, definition); err != nil {
+		return pendingToolExecution{state: state}, pendingToolCatalogErrorCode(state), err
 	}
 	if err := tools.ValidateCall(definition, call); err != nil {
 		return pendingToolExecution{state: state, call: call, definition: definition}, "agent.tool_invalid", err
@@ -2749,7 +2770,8 @@ func decodeState(encoded json.RawMessage) (runState, error) {
 	if state.OriginFingerprint != "" && !validFrozenOriginFingerprint(state.OriginFingerprint) {
 		return runState{}, ErrInvalidRequest
 	}
-	if state.Budget.Limits.MaxLLMCalls <= 0 || state.Budget.Limits.MaxToolCalls <= 0 ||
+	if state.MaxModelOutputTokens < 0 || !modelInvocationsMatchOutputCeiling(state.ModelInvocations, state.MaxModelOutputTokens) ||
+		state.Budget.Limits.MaxLLMCalls <= 0 || state.Budget.Limits.MaxToolCalls <= 0 ||
 		!validAgentLimits(state.Budget.Limits) || !validAgentUsage(state.Budget.Usage) ||
 		!validCallAllowance(state.CallAllowance, state.Budget.Limits) ||
 		!validAutoAllowanceState(state.AutoAllowance, state.CallAllowance, state.Budget.Limits) ||
@@ -2759,6 +2781,7 @@ func decodeState(encoded json.RawMessage) (runState, error) {
 		model.ValidateOutputContract(state.OutputContract) != nil ||
 		!validToolWaitState(state) ||
 		!validDeferredChildren(state) ||
+		!validPendingToolCatalog(state) ||
 		!validModelInvocations(state.ModelInvocations) {
 		return runState{}, ErrInvalidRequest
 	}

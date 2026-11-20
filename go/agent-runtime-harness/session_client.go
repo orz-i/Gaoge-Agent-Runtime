@@ -50,6 +50,9 @@ type SessionClient struct {
 	thread     kernel.ThreadRef
 	config     ConfigSnapshot
 	transcript TranscriptSource
+	// agentSessionOnly restricts execution through OpenAgentSession to its
+	// supported composition, including when reopening older admitted Turns.
+	agentSessionOnly bool
 }
 
 // OpenSession prepares a short Prompt/Load/Refresh/Resume API for text conversations.
@@ -191,6 +194,11 @@ func (session *SessionClient) Resume(ctx context.Context, turnID string) (Snapsh
 	id, err := session.authorizedTurnID(ctx, turnID)
 	if err != nil {
 		return Snapshot{}, err
+	}
+	if session.agentSessionOnly {
+		if err := session.preflightAgentSessionResume(ctx, id); err != nil {
+			return Snapshot{}, err
+		}
 	}
 	value, resumeErr := session.runner.resumeTurnForSession(ctx, id, session.actor, session.thread)
 	return session.verifySnapshot(id, value, resumeErr)

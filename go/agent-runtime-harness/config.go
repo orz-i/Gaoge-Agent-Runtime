@@ -118,13 +118,15 @@ type DelegationPolicySnapshot struct {
 
 // ConfigSnapshot is one immutable execution configuration. It intentionally excludes secrets and transport endpoints.
 type ConfigSnapshot struct {
-	ID                    string                   `json:"id"`
-	TurnID                string                   `json:"turnID"`
-	Environment           VersionRef               `json:"environment"`
-	Instructions          string                   `json:"instructions,omitempty"`
-	Model                 string                   `json:"model,omitempty"`
-	ModelOptions          json.RawMessage          `json:"modelOptions,omitempty"`
-	OutputContract        *model.OutputContract    `json:"outputContract,omitempty"`
+	ID             string                `json:"id"`
+	TurnID         string                `json:"turnID"`
+	Environment    VersionRef            `json:"environment"`
+	Instructions   string                `json:"instructions,omitempty"`
+	Model          string                `json:"model,omitempty"`
+	ModelOptions   json.RawMessage       `json:"modelOptions,omitempty"`
+	OutputContract *model.OutputContract `json:"outputContract,omitempty"`
+	// MaxModelOutputTokens is the frozen per-model-call ceiling, distinct from Limits' cumulative output budget.
+	MaxModelOutputTokens  int64                    `json:"maxModelOutputTokens,omitempty"`
 	ToolKeys              []string                 `json:"toolKeys"`
 	ToolPolicies          []ToolPolicySnapshot     `json:"toolPolicies"`
 	Skills                []SkillSnapshot          `json:"skills"`
@@ -150,6 +152,7 @@ type configPayload struct {
 	Model                 string                   `json:"model,omitempty"`
 	ModelOptions          json.RawMessage          `json:"modelOptions,omitempty"`
 	OutputContract        *model.OutputContract    `json:"outputContract,omitempty"`
+	MaxModelOutputTokens  int64                    `json:"maxModelOutputTokens,omitempty"`
 	ToolKeys              []string                 `json:"toolKeys"`
 	ToolPolicies          []ToolPolicySnapshot     `json:"toolPolicies"`
 	Skills                []SkillSnapshot          `json:"skills"`
@@ -207,7 +210,7 @@ func SealConfigSnapshot(turnID string, value ConfigSnapshot, now time.Time) (Con
 	if err != nil {
 		return ConfigSnapshot{}, err
 	}
-	if model.ValidateOutputContract(value.OutputContract) != nil {
+	if model.ValidateOutputContract(value.OutputContract) != nil || value.MaxModelOutputTokens < 0 {
 		return ConfigSnapshot{}, ErrInvalidRequest
 	}
 	value.OutputContract = model.CloneOutputContract(value.OutputContract)
@@ -234,7 +237,8 @@ func SealConfigSnapshot(turnID string, value ConfigSnapshot, now time.Time) (Con
 	payload := configPayload{
 		TurnID: turnID, Environment: value.Environment, Instructions: value.Instructions,
 		Model: value.Model, ModelOptions: value.ModelOptions, OutputContract: value.OutputContract, ToolKeys: value.ToolKeys,
-		ToolPolicies: value.ToolPolicies, Skills: value.Skills, MemoryPolicy: value.MemoryPolicy,
+		MaxModelOutputTokens: value.MaxModelOutputTokens,
+		ToolPolicies:         value.ToolPolicies, Skills: value.Skills, MemoryPolicy: value.MemoryPolicy,
 		ContextPolicy: value.ContextPolicy, ApprovalPolicyVersion: value.ApprovalPolicyVersion, Limits: value.Limits,
 		SharedBudget: value.SharedBudget, DelegationPolicy: value.DelegationPolicy,
 		AdmissionHash: value.AdmissionHash, InputMessage: value.InputMessage, OutputMessage: value.OutputMessage,

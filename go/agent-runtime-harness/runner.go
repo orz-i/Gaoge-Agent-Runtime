@@ -118,11 +118,12 @@ func (runner *Runner) startAgentPhysical(
 			ID: invocation.ExecutionRefID, Actor: request.Actor, Thread: request.Thread,
 			RequestID: firstNonEmpty(strings.TrimSpace(request.RequestID), invocation.TurnID), Goal: request.Goal,
 			Model: config.Model, ModelOptions: append(json.RawMessage(nil), config.ModelOptions...),
-			OutputContract:   model.CloneOutputContract(config.OutputContract),
-			ToolKeys:         append([]string(nil), config.ToolKeys...),
-			RequiredToolKeys: append([]string(nil), request.RequiredToolKeys...),
-			InitialToolKeys:  append([]string(nil), request.InitialToolKeys...),
-			Limits:           config.Limits, CallAllowance: request.CallAllowance, AutoAllowance: request.AutoAllowance,
+			OutputContract:       model.CloneOutputContract(config.OutputContract),
+			MaxModelOutputTokens: config.MaxModelOutputTokens,
+			ToolKeys:             append([]string(nil), config.ToolKeys...),
+			RequiredToolKeys:     append([]string(nil), request.RequiredToolKeys...),
+			InitialToolKeys:      append([]string(nil), request.InitialToolKeys...),
+			Limits:               config.Limits, CallAllowance: request.CallAllowance, AutoAllowance: request.AutoAllowance,
 		})
 	})
 }
@@ -1202,6 +1203,13 @@ func (runner *Runner) syncRuntimeSnapshotWithCancellationProof(
 		if err := validateRootRuntimeOwnership(invocation, runtimeSnapshot); err != nil {
 			return Snapshot{}, err
 		}
+		// Protective cancellation must remain available independently of model
+		// policy, and an already terminal Turn needs only read-only projection.
+		if !verifiedCancellation && !terminalTurnStatus(turn.Status) {
+			if err := runner.validateRootModelOutputCeiling(ctx, invocation, runtimeSnapshot); err != nil {
+				return Snapshot{}, err
+			}
+		}
 	}
 	// A terminal same-ID Kernel Run is not proof that a separate Feature
 	// Start/Retry finished its remote effects. Keep unknown physical
@@ -1543,6 +1551,69 @@ func validateRootRuntimeOwnership(invocation Invocation, snapshot kernel.Snapsho
 		}
 	}
 	return nil
+}
+
+// A positive original Config ceiling must be attested by the native Agent
+// state, not just by another same-ID Run with the right presentation owner.
+// Legacy zero Configs retain their existing unspecified contract and do not
+// acquire a new Agent-state requirement during reads or recovery.
+func (runner *Runner) validateRootModelOutputCeiling(ctx context.Context, invocation Invocation, snapshot kernel.Snapshot) error {
+	ceiling, err := runner.frozenRootModelOutputCeiling(ctx, invocation)
+	if err != nil {
+		return err
+	}
+	return checkRootModelOutputCeiling(invocation, snapshot, ceiling)
+}
+
+func (runner *Runner) frozenRootModelOutputCeiling(ctx context.Context, invocation Invocation) (int64, error) {
+	if invocation.ParentItemID != "" || invocation.ExecutionClass != ExecutionAgent {
+		return 0, ErrConflict
+	}
+	turn, err := loadVerifiedTurn(ctx, runner.store, invocation.TurnID)
+	if err != nil {
+		return 0, err
+	}
+	config, err := loadSealedConfig(ctx, runner.store, turn.ConfigSnapshotID)
+	if err != nil {
+		return 0, err
+	}
+	return config.MaxModelOutputTokens, nil
+}
+
+func checkRootModelOutputCeiling(invocation Invocation, snapshot kernel.Snapshot, ceiling int64) error {
+	if ceiling == 0 {
+		return nil
+	}
+	if snapshot.Run.ID != invocation.ExecutionRefID || snapshot.Run.Kind != agent.RunKind {
+		return ErrConflict
+	}
+	view, err := agent.ViewState(snapshot)
+	if err != nil || view.MaxModelOutputTokens != ceiling {
+		return ErrConflict
+	}
+	return nil
+}
+
+// Controls and Handoff may physically execute a descendant, but their original
+// root still has to satisfy its own frozen ceiling before authorizing work.
+func (runner *Runner) requireInvocationRootModelOutputCeiling(ctx context.Context, invocation Invocation) error {
+	root := invocation
+	if invocation.ParentItemID != "" {
+		var err error
+		root, err = runner.loadFrozenChildRoot(ctx, invocation)
+		if err != nil {
+			return err
+		}
+	}
+	ceiling, err := runner.frozenRootModelOutputCeiling(ctx, root)
+	if err != nil || ceiling == 0 {
+		return err
+	}
+	current, err := runner.runtime.Load(ctx, root.ExecutionRefID)
+	if err != nil {
+		return err
+	}
+	return checkRootModelOutputCeiling(root, current, ceiling)
 }
 
 func runtimeSnapshotConflicts(invocation Invocation, snapshot kernel.Snapshot) bool {

@@ -77,6 +77,47 @@ func TestShadowRunnerSatisfiesHandoffWithoutA2AImportsInParent(t *testing.T) {
 	assertShadowDelegationCompleted(t, coordinator, parent, started)
 }
 
+func TestShadowRunnerRejectsUnnegotiatedModelOutputCeilingBeforeEffects(t *testing.T) {
+	t.Parallel()
+	for _, ceiling := range []int64{-1, 256} {
+		runtime := newShadowRuntime(t)
+		remote := &shadowRemote{task: workingTask()}
+		runner := newShadowRunner(t, runtime, remote)
+		_, err := runner.StartRun(t.Context(), agent.StartRequest{
+			ID: "unsupported-output-ceiling", Goal: "finish remotely", MaxModelOutputTokens: ceiling,
+			Actor:  kernel.ActorRef{TenantID: testShadowTenantID, ActorID: testShadowActorID},
+			Thread: kernel.ThreadRef{Kind: testShadowThreadKind, ID: testShadowThreadID},
+		})
+		if !errors.Is(err, ErrInvalidShadowRunner) || remote.sent.MessageID != "" {
+			t.Fatalf("unsupported ceiling dispatched: ceiling=%d sent=%+v err=%v", ceiling, remote.sent, err)
+		}
+		if _, loadErr := runtime.Load(t.Context(), "unsupported-output-ceiling"); !errors.Is(loadErr, kernel.ErrNotFound) {
+			t.Fatalf("unsupported ceiling created shadow: %v", loadErr)
+		}
+	}
+}
+
+func TestShadowRunnerExistingHandoffCannotAcquireModelOutputCeiling(t *testing.T) {
+	t.Parallel()
+	runtime := newShadowRuntime(t)
+	remote := &shadowRemote{task: workingTask()}
+	runner := newShadowRunner(t, runtime, remote)
+	coordinator := newShadowCoordinator(t, runner)
+	parent := newShadowParent(t, runtime)
+	delegation := handoff.Delegation{
+		ID: "existing-shadow", MemberID: "remote-member", ChildRunID: "existing-shadow-child",
+		Goal: "finish remotely", Status: handoff.StatusQueued,
+	}
+	started := startShadowDelegation(t, coordinator, parent, delegation)
+	started.MaxModelOutputTokens = 256
+	if projected, err := coordinator.StartOrLoad(t.Context(), parent, started); !errors.Is(err, handoff.ErrChildRunUnverified) || projected.ID != "" {
+		t.Fatalf("existing unbounded shadow acquired a ceiling through Load: %+v %v", projected, err)
+	}
+	if projected, err := coordinator.Refresh(t.Context(), parent, started); !errors.Is(err, handoff.ErrChildRunUnverified) || projected.ID != "" {
+		t.Fatalf("existing unbounded shadow acquired a ceiling through Refresh: %+v %v", projected, err)
+	}
+}
+
 func newShadowCoordinator(t *testing.T, runner *ShadowRunner) *handoff.Coordinator {
 	t.Helper()
 	coordinator, err := handoff.New(runner)
@@ -325,7 +366,8 @@ func newShadowRunner(t *testing.T, runtime *kernel.Runtime, remote *shadowRemote
 func newShadowParent(t *testing.T, runtime *kernel.Runtime) kernel.Snapshot {
 	t.Helper()
 	parent, err := runtime.Create(t.Context(), kernel.CreateRequest{
-		ID: "parent-1", Kind: agent.RunKind,
+		// This opaque fixture is a custom parent, not a first-party Agent state.
+		ID: "parent-1", Kind: "test.parent",
 		Actor:  kernel.ActorRef{TenantID: testShadowTenantID, ActorID: testShadowActorID},
 		Thread: kernel.ThreadRef{Kind: testShadowThreadKind, ID: testShadowThreadID},
 		Goal:   "parent", State: json.RawMessage(`{"state":"parent"}`),

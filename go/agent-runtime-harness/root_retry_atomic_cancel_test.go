@@ -118,6 +118,7 @@ func testRootRetryCommittedAckLoss(t *testing.T, historicalTerminalChild bool) {
 	}
 	request := testStartRequest()
 	request.Config.Model = "specialist-model"
+	request.Config.MaxModelOutputTokens = 256
 	request.Config.SharedBudget = &budget.Limits{MaxLLMCalls: 4, MaxTotalTokens: 3000}
 	request.Config.ToolKeys = []string{roleEvidenceTool}
 	request.Config.ToolPolicies = []harness.ToolPolicySnapshot{{
@@ -206,6 +207,19 @@ func testRootRetryCommittedAckLoss(t *testing.T, historicalTerminalChild bool) {
 	next, ok := harness.TopLevelInvocation(resumed)
 	if !ok || next.Attempt != 3 || len(client.requests) != 2 {
 		t.Fatalf("extra original physical dispatch: %+v modelCalls=%d", next, len(client.requests))
+	}
+	for _, request := range client.requests {
+		if request.MaxOutputTokens <= 0 || request.MaxOutputTokens > 256 {
+			t.Fatalf("root retry lost the original per-call output ceiling: %d", request.MaxOutputTokens)
+		}
+	}
+	retriedRun, err := rt.Load(t.Context(), next.ExecutionRefID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retriedView, err := agent.ViewState(retriedRun)
+	if err != nil || retriedView.MaxModelOutputTokens != 256 {
+		t.Fatalf("retry did not freeze the original ceiling: %d err=%v", retriedView.MaxModelOutputTokens, err)
 	}
 	if resumed.Budget == nil || resumed.Budget.Usage.LLMCalls != 2 || resumed.Budget.Cancelled {
 		t.Fatalf("Turn accounting lost or remained globally cancelled: %+v", resumed.Budget)

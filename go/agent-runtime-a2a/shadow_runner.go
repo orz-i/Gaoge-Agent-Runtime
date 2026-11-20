@@ -120,7 +120,7 @@ func NewShadowRunner(dependencies ShadowDependencies) (*ShadowRunner, error) {
 func (runner *ShadowRunner) ObservesFrozenRemoteShadow(
 	runtime *kernel.Runtime, delegation handoff.Delegation, child kernel.Snapshot,
 ) bool {
-	if runner == nil || runtime == nil || runner.runtime != runtime ||
+	if runner == nil || runtime == nil || runner.runtime != runtime || delegation.MaxModelOutputTokens != 0 ||
 		child.Run.Kind != RunKind || child.Run.ID != delegation.ChildRunID ||
 		child.Run.Goal != strings.TrimSpace(delegation.Goal) ||
 		delegation.MemberID != TargetPrefix+runner.targetID ||
@@ -138,7 +138,9 @@ func (runner *ShadowRunner) ObservesFrozenRemoteShadow(
 func (runner *ShadowRunner) StartRun(ctx context.Context, request agent.StartRequest) (kernel.Snapshot, error) {
 	runID := strings.TrimSpace(request.ID)
 	goal := strings.TrimSpace(request.Goal)
-	if runner == nil || runner.runtime == nil || runID == "" || goal == "" {
+	// A2A has no negotiated per-model-call ceiling. Never acknowledge a
+	// local execution limit that the remote Agent cannot enforce.
+	if runner == nil || runner.runtime == nil || runID == "" || goal == "" || request.MaxModelOutputTokens != 0 {
 		return kernel.Snapshot{}, ErrInvalidShadowRunner
 	}
 	state := runner.initialState(runID)

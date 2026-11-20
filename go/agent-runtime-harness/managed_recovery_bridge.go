@@ -74,6 +74,9 @@ func (r *Runner) recoverManagedInvocation(ctx context.Context, inv Invocation) (
 	if !ok || !native.SupportsManagedContextRecovery() || inv.ParentItemID != "" || inv.ExecutionClass != ExecutionAgent {
 		return kernel.Snapshot{}, false, nil
 	}
+	if err := r.requireInvocationRootModelOutputCeiling(ctx, inv); err != nil {
+		return kernel.Snapshot{}, true, err
+	}
 	transfer, err := r.runtime.LoadManagedRecovery(ctx, inv.ExecutionRefID)
 	if kernel.ManagedRecoveryAbsent(err) {
 		return kernel.Snapshot{}, false, nil

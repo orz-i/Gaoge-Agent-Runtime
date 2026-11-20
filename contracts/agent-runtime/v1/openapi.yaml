@@ -385,6 +385,11 @@ components:
         input: {$ref: '#/components/schemas/TextInputRequest'}
         clientRunID: {type: string, maxLength: 64}
         model: {type: string, maxLength: 128}
+        maxModelOutputTokens:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Per-model-response output token ceiling. Zero or omission leaves it unspecified; this is independent of cumulative Run output-token limits.
         toolKeys:
           type: array
           maxItems: 128
