@@ -11,12 +11,84 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
 type deferredProofModel struct{}
 
 func (deferredProofModel) Generate(context.Context, model.Request) (model.Response, error) {
 	return model.Response{Content: "done"}, nil
+}
+
+type unusedDelegationApproval struct{}
+
+func (unusedDelegationApproval) Name() string { return "host-approval" }
+func (unusedDelegationApproval) Approval(context.Context, plugin.ToolInvocation) (plugin.ApprovalRequirement, error) {
+	return "", errors.New("a model-only child entered Tool approval")
+}
+
+func TestDeferredToolReceiptWithUnusedHostApproval(t *testing.T) {
+	f := newPR82HandoffFixture(t)
+	call := tools.Call{ID: "receipt-call", ToolKey: DelegationToolKey, Arguments: []byte("{}")}
+	request := tools.ExecutionRequest{RunID: f.parent.ExecutionRefID, Call: call}
+	d := f.delegation()
+	d.ID = delegationToolID(f.parent, call.ID)
+	d.ChildRunID = stableID("hchild", request.RunID, d.ID)
+	d.Model = "test"
+	started, err := f.runner.recordDelegationItem(t.Context(), f.turn, f.parent, d, ItemStarted, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = f.runner.prepareHandoffChild(t.Context(), f.turn, f.parent, d, started); err != nil {
+		t.Fatal(err)
+	}
+	original, err := agent.NewRunner(agent.Dependencies{
+		Runtime: f.runtime, Model: deferredProofModel{},
+		ApprovalPolicies:         []plugin.ApprovalPolicy{unusedDelegationApproval{}},
+		StartControlPreflight:    func(context.Context, agent.StartRequest) error { return ErrConflict },
+		ApprovalControlPreflight: func(context.Context, kernel.Snapshot) error { return ErrConflict },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinator, err := handoff.NewDeferredAgent(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.runner.handoffs, f.runner.agent = coordinator, original
+	if _, err = coordinator.StartOrLoad(t.Context(), f.parentRun, d); !errors.Is(err, handoff.ErrChildPending) {
+		t.Fatal(err)
+	}
+	handler := NewDelegationToolHandler()
+	if err = handler.Bind(f.runner); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = handler.VerifyCommittedTool(t.Context(), request); !errors.Is(err, agent.ErrToolOutcomeUnknown) {
+		t.Fatalf("unfinished child supplied a Tool receipt: %v", err)
+	}
+	child, err := f.runtime.Load(t.Context(), d.ChildRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done, err := original.Resume(t.Context(), child.Run.ID, child.Run.Revision)
+	if err != nil || done.Run.Status != kernel.RunStatusCompleted {
+		t.Fatalf("child completion: %+v %v", done.Run, err)
+	}
+	if coordinator.VerifiedLocalDelegationControl(t.Context(), f.runtime, d, done) {
+		t.Fatal("result observation granted Host cancellation authority")
+	}
+	result, err := handler.VerifyCommittedTool(t.Context(), request)
+	if err != nil || result.Receipt.Disposition != "committed" || result.Receipt.ExecutionID != call.ID {
+		t.Fatalf("original completed child receipt: %+v %v", result, err)
+	}
+	var output struct {
+		ChildRunID string
+		Result     string
+	}
+	if err = json.Unmarshal(result.Content, &output); err != nil || output.ChildRunID != child.Run.ID || output.Result != "done" {
+		t.Fatalf("unexpected child output: %s %v", result.Content, err)
+	}
 }
 
 func TestDeferredRouteProofUsesOriginalFrozenDelegation(t *testing.T) {
