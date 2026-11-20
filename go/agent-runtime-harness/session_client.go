@@ -55,7 +55,8 @@ type SessionClient struct {
 	agentSessionOnly bool
 }
 
-// OpenSession prepares a short Prompt/Load/Refresh/Resume API for text conversations.
+// OpenSession binds a SessionClient to an already composed Harness Runner.
+// Use OpenAgentSession to also assemble the standard bounded Agent and Context.
 // Transcript may be omitted when reopening a Session only to read or resume
 // existing Turns. Prompt requires it; recovery uses committed Context instead.
 // Advanced Agent and SubAgent composition uses Runner.StartAgentTurn and Runner.Delegate explicitly.

@@ -58,11 +58,13 @@ func prepareManagedRecoveryWorkingState(t *testing.T, db *gorm.DB, files string)
 			}},
 		}, nil
 	})
+	options.Config.ToolKeys = nil
+	options.Config.ToolPolicies = nil
 	session, err := harness.OpenAgentSession(harness.AgentSessionOptions{
 		Runtime: runtime, Store: store, Model: managedWorkingStateWarmupModel{},
-		Tools: managedRecoveryToolRegistrations(files), Session: options,
+		LocalTools: managedRecoverySessionTools(files), Session: options,
 		Context: harness.AgentSessionContextOptions{
-			ManagedRecovery: true,
+			ManagedRecovery: true, ReadArtifacts: true,
 			ResolveWindow: func(context.Context, model.Request) (runtimecontext.ModelWindow, error) {
 				return runtimecontext.ModelWindow{ContextTokens: 12000, ReservedOutputTokens: 512}, nil
 			},

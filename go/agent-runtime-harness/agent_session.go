@@ -20,6 +20,9 @@ import (
 type AgentSessionContextOptions struct {
 	ResolveWindow ModelWindowResolver
 	Counter       runtimecontext.TokenCounter
+	// ReadArtifacts explicitly grants the built-in scoped archive reader.
+	// It cannot be combined with the legacy Config.ToolKeys/ToolPolicies form.
+	ReadArtifacts bool
 	// ManagedRecovery explicitly selects the existing concrete Context recovery
 	// lifecycle. Runtime must already be bound to this exact Harness Store.
 	// The default uses ordinary bounded Context and its existing receipt-based
@@ -31,15 +34,35 @@ type AgentSessionContextOptions struct {
 	SummaryNativeRecovery bool
 }
 
-// AgentSessionOptions composes a single tool-using Agent with bounded Harness
-// Context. The Host owns both Stores, authenticated identity, model binding and
-// transcript. Config.ToolKeys is the explicit authorization set; registering a
-// Tool does not authorize it. Only selected, versioned never-approval Tools are
-// supported by this facade. Advanced capabilities use the explicit runners.
+// SessionTool pairs one selected local Tool with its explicit Host policy.
+// Policy.Key may be omitted; when supplied it must match Definition.Key.
+type SessionTool struct {
+	Registration tools.Registration
+	Policy       ToolPolicySnapshot
+}
+
+// AgentSessionOptions composes a single Agent with bounded Harness Context.
+// The Host owns both Stores, authenticated identity, model binding and transcript.
+// Only explicitly selected, versioned local Tools that do not require approval
+// are supported; use the explicit runners for advanced capabilities.
 type AgentSessionOptions struct {
-	Runtime      *kernel.Runtime
-	Store        Store
-	Model        model.Client
+	Runtime *kernel.Runtime
+	Store   Store
+	Model   model.Client
+	// LocalTools supplies both the selected handlers and their policies. Leave
+	// Config.ToolKeys and Config.ToolPolicies unset when using this field.
+	LocalTools []SessionTool
+	// ExploreReads opts Host-certified nonterminal read tools (including an
+	// explicitly granted archive reader) into bounded exploration. It is only
+	// available with the paired LocalTools/ReadArtifacts selection.
+	ExploreReads bool
+	// Inputs optionally binds an authenticated, Host-owned user input log.
+	// It is not supported with either native managed recovery option.
+	Inputs agent.RunInputSource
+	// Tools retains the existing inventory + explicit Config selection form.
+	// Registering a tool here does not authorize it.
+	//
+	// Deprecated: Pair selected registrations and policies in LocalTools.
 	Tools        []tools.Registration
 	Session      SessionOptions
 	Context      AgentSessionContextOptions
@@ -48,22 +71,38 @@ type AgentSessionOptions struct {
 	RunExecution *agent.RunExecution
 }
 
-// OpenAgentSession builds the existing Agent, Context adapter and Harness; it
-// does not read history, write a Store or call a model. A nil Transcript permits
-// reopening for Load/Refresh/Resume, while Prompt still requires Host history.
-// Selecting ContextArtifactToolKey explicitly installs the standard scoped
-// reader. Its reserved registration cannot be overridden by Tools.
+// OpenAgentSession is the standard bounded Session constructor, with or without
+// local Tools. It does not read history, write a Store or call a model. A nil
+// Transcript permits reopening for Load/Refresh/Resume but not Prompt.
 func OpenAgentSession(options AgentSessionOptions) (*SessionClient, error) {
 	options.Session.Config.ContextBase = nil
 	if options.Runtime == nil || options.Store == nil || options.Model == nil || options.Context.ResolveWindow == nil {
 		return nil, ErrInvalidRequest
 	}
-	if options.Context.ManagedRecovery && options.Context.SummaryNativeRecovery {
+	if (options.Context.ManagedRecovery && options.Context.SummaryNativeRecovery) ||
+		(options.Inputs != nil && (options.Context.ManagedRecovery || options.Context.SummaryNativeRecovery)) {
 		return nil, ErrInvalidRequest
 	}
 	options.Session.Config = cloneConfigSnapshot(options.Session.Config)
 	config := &options.Session.Config
 	if config.DelegationPolicy.MaxDepth != 0 {
+		return nil, ErrInvalidRequest
+	}
+	registrations := options.Tools
+	var exploration []string
+	if len(options.LocalTools) != 0 || options.Context.ReadArtifacts {
+		if len(options.Tools) != 0 || len(config.ToolKeys) != 0 || len(config.ToolPolicies) != 0 {
+			return nil, ErrInvalidRequest // One authorization source, not a merge.
+		}
+		paired, reads, err := selectSessionTools(config, options.LocalTools, options.Context.ReadArtifacts)
+		if err != nil {
+			return nil, err
+		}
+		registrations = paired
+		if options.ExploreReads {
+			exploration = reads
+		}
+	} else if options.ExploreReads {
 		return nil, ErrInvalidRequest
 	}
 	normalized, err := normalizeAgentSessionConfig(*config)
@@ -80,9 +119,54 @@ func OpenAgentSession(options AgentSessionOptions) (*SessionClient, error) {
 			return nil, ErrInvalidRequest
 		}
 	}
-	registry, err := agentSessionRegistry(config, options.Tools, options.Store)
+	return openBoundedAgentSession(options, registrations, exploration, false)
+}
+
+func selectSessionTools(config *ConfigSnapshot, selectedTools []SessionTool, readArtifacts bool) ([]tools.Registration, []string, error) {
+	registrations := make([]tools.Registration, 0, len(selectedTools))
+	var reads []string
+	for _, selected := range selectedTools {
+		key := selected.Registration.Definition.Key
+		policy := selected.Policy
+		if policy.Key == "" {
+			policy.Key = key
+		}
+		policies, err := normalizeToolPolicies([]ToolPolicySnapshot{policy})
+		if err != nil {
+			return nil, nil, err
+		}
+		policy = policies[0]
+		if policy.Key != key || key == ContextArtifactToolKey || key == DelegationToolKey || key == agent.ToolDiscoveryKey ||
+			policy.ApprovalMode != approvalModeNever || policy.ApprovalCapability != "" ||
+			(policy.ExecutionMode != "" && policy.ExecutionMode != "local_dispatch") ||
+			(policy.SideEffectLevel != "read" && policy.SideEffectLevel != "write") {
+			return nil, nil, ErrInvalidRequest
+		}
+		if policy.SideEffectLevel == "read" && !selected.Registration.Definition.Terminal {
+			reads = append(reads, key)
+		}
+		registrations = append(registrations, selected.Registration)
+		config.ToolKeys = append(config.ToolKeys, key)
+		config.ToolPolicies = append(config.ToolPolicies, policy)
+	}
+	if readArtifacts {
+		config.ToolKeys = append(config.ToolKeys, ContextArtifactToolKey)
+		config.ToolPolicies = append(config.ToolPolicies, ContextArtifactToolPolicySnapshot())
+		reads = append(reads, ContextArtifactToolKey)
+	}
+	return registrations, reads, nil
+}
+
+// Both bounded facades use the same registry, Context and runner assembly.
+// The deprecated Tool facade retains its original callback stack, zero-cap
+// behavior and Resume handling until its source-level removal.
+func openBoundedAgentSession(options AgentSessionOptions, registrations []tools.Registration, exploration []string, legacyTool bool) (*SessionClient, error) {
+	registry, err := agentSessionRegistry(options.Session.Config.ToolKeys, registrations, options.Store)
 	if err != nil {
-		return nil, err
+		if legacyTool {
+			return nil, err
+		}
+		return nil, errors.Join(ErrInvalidRequest, err)
 	}
 	manager := runtimecontext.NewManager(runtimecontext.Dependencies{Counter: options.Context.Counter})
 	resolve := options.Context.ResolveWindow
@@ -91,11 +175,13 @@ func OpenAgentSession(options AgentSessionOptions) (*SessionClient, error) {
 		if resolveErr != nil {
 			return runtimecontext.ModelWindow{}, resolveErr
 		}
-		if _, windowErr := runtimecontext.EffectiveInputLimit(window, 0); windowErr != nil {
-			return runtimecontext.ModelWindow{}, windowErr
+		if !legacyTool {
+			if _, windowErr := runtimecontext.EffectiveInputLimit(window, 0); windowErr != nil {
+				return runtimecontext.ModelWindow{}, windowErr
+			}
 		}
 		// Use this invocation's frozen ceiling, not a reopened handle's Config.
-		if request.MaxOutputTokens <= 0 || window.ReservedOutputTokens < request.MaxOutputTokens {
+		if (!legacyTool && request.MaxOutputTokens <= 0) || (request.MaxOutputTokens > 0 && window.ReservedOutputTokens < request.MaxOutputTokens) {
 			return runtimecontext.ModelWindow{}, ErrInvalidRequest
 		}
 		return window, nil
@@ -104,41 +190,52 @@ func OpenAgentSession(options AgentSessionOptions) (*SessionClient, error) {
 	if err != nil {
 		return nil, err
 	}
-	approval, err := NewFrozenApprovalPolicy(options.Store)
+	dependencies := agent.Dependencies{
+		Runtime: options.Runtime, Model: options.Model, Catalog: registry, Executor: registry,
+		RunMiddleware: []plugin.RunMiddleware{bounded}, Inputs: options.Inputs,
+		Limits: options.Limits, Execution: options.Execution, RunExecution: options.RunExecution,
+	}
+	if len(exploration) != 0 {
+		dependencies.ToolProgressPolicy = &agent.ToolProgressPolicy{ExplorationToolKeys: exploration}
+	}
+	if legacyTool {
+		dependencies.PrepareModelRequest = bounded.Prepare
+	} else {
+		approval, approvalErr := NewFrozenApprovalPolicy(options.Store)
+		if approvalErr != nil {
+			return nil, approvalErr
+		}
+		dependencies.ApprovalPolicies = []plugin.ApprovalPolicy{approval}
+		if options.Context.ManagedRecovery {
+			dependencies.ManagedContextRecovery = bounded
+		} else {
+			dependencies.ContextSummary, err = NewContextSummaryAdapter(options.Store, options.Runtime, bounded, resolveWindow)
+			if err != nil {
+				return nil, err
+			}
+			dependencies.SummaryNativeRecovery = options.Context.SummaryNativeRecovery
+		}
+	}
+	session, err := openComposedSession(dependencies, options.Store, manager, options.Session)
 	if err != nil {
 		return nil, err
 	}
-	dependencies := agent.Dependencies{
-		Runtime: options.Runtime, Model: options.Model, Catalog: registry, Executor: registry,
-		ApprovalPolicies: []plugin.ApprovalPolicy{approval},
-		RunMiddleware:    []plugin.RunMiddleware{bounded},
-		Limits:           options.Limits, Execution: options.Execution, RunExecution: options.RunExecution,
-	}
-	if options.Context.ManagedRecovery {
-		dependencies.ManagedContextRecovery = bounded
-	} else {
-		dependencies.ContextSummary, err = NewContextSummaryAdapter(options.Store, options.Runtime, bounded, resolveWindow)
-		if err != nil {
-			return nil, err
-		}
-		dependencies.SummaryNativeRecovery = options.Context.SummaryNativeRecovery
-	}
+	session.agentSessionOnly = !legacyTool
+	return session, nil
+}
+
+func openComposedSession(dependencies agent.Dependencies, store Store, manager *runtimecontext.Manager, options SessionOptions) (*SessionClient, error) {
 	loop, err := agent.NewRunner(dependencies)
 	if err != nil {
 		return nil, err
 	}
 	host, err := NewRunner(Dependencies{
-		Runtime: options.Runtime, Agent: loop, Store: options.Store, Context: manager, Catalog: registry,
+		Runtime: dependencies.Runtime, Agent: loop, Store: store, Context: manager, Catalog: dependencies.Catalog,
 	})
 	if err != nil {
 		return nil, err
 	}
-	session, err := host.OpenSession(options.Session)
-	if err != nil {
-		return nil, err
-	}
-	session.agentSessionOnly = true
-	return session, nil
+	return host.OpenSession(options)
 }
 
 // normalizeAgentSessionConfig checks composition requirements, not a new
@@ -176,10 +273,10 @@ func normalizeAgentSessionConfig(config ConfigSnapshot) (ConfigSnapshot, error) 
 	return config, nil
 }
 
-func agentSessionRegistry(config *ConfigSnapshot, registrations []tools.Registration, store Store) (*tools.Registry, error) {
+func agentSessionRegistry(selected []string, registrations []tools.Registration, store Store) (*tools.Registry, error) {
 	owned := make([]tools.Registration, 0, len(registrations)+1)
 	archiveReader := false
-	for _, key := range config.ToolKeys {
+	for _, key := range selected {
 		archiveReader = archiveReader || key == ContextArtifactToolKey
 	}
 	for _, registration := range registrations {
@@ -193,10 +290,10 @@ func agentSessionRegistry(config *ConfigSnapshot, registrations []tools.Registra
 	}
 	registry, err := tools.NewRegistry(owned)
 	if err != nil {
-		return nil, errors.Join(ErrInvalidRequest, err)
+		return nil, err
 	}
-	if _, err = registry.List(config.ToolKeys); err != nil {
-		return nil, errors.Join(ErrInvalidRequest, err)
+	if _, err = registry.List(selected); err != nil {
+		return nil, err
 	}
 	return registry, nil
 }

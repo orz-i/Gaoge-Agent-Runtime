@@ -51,12 +51,14 @@ func run(ctx context.Context, input io.Reader, output io.Writer, interactive boo
 	var blocked atomic.Bool
 	var history []runtimecontext.Entry
 	client := &demoModel{}
-	options := harness.ToolAgentSessionOptions{
+	options := harness.AgentSessionOptions{
 		Runtime: rt, Store: harness.NewMemoryStore(), Model: client, Inputs: queue,
-		ResolveModelWindow: func(context.Context, model.Request) (runtimecontext.ModelWindow, error) {
-			return runtimecontext.ModelWindow{ContextTokens: 32768, ReservedOutputTokens: 1024}, nil
+		Context: harness.AgentSessionContextOptions{
+			ResolveWindow: func(context.Context, model.Request) (runtimecontext.ModelWindow, error) {
+				return runtimecontext.ModelWindow{ContextTokens: 32768, ReservedOutputTokens: 1024}, nil
+			},
 		},
-		Tools: []harness.SessionTool{{
+		LocalTools: []harness.SessionTool{{
 			Registration: tools.Registration{
 				Definition: tools.Definition{Key: "lookup", Name: "lookup", Description: "Read a fixture project schedule",
 					InputSchema: json.RawMessage(`{"type":"object","properties":{"project":{"type":"string","enum":["alpha","beta"]}},"required":["project"],"additionalProperties":false}`)},
@@ -84,13 +86,13 @@ func run(ctx context.Context, input io.Reader, output io.Writer, interactive boo
 			HostThread: harness.HostRef{Kind: "conversation", ID: "demo/tenant/chat"},
 			Actor:      kernel.ActorRef{TenantID: "demo-tenant", ActorID: "demo-user"},
 			Thread:     kernel.ThreadRef{Kind: "conversation", ID: "demo/tenant/chat"},
-			Config:     harness.ConfigSnapshot{Model: "fixture"},
+			Config:     harness.ConfigSnapshot{Model: "fixture", MaxModelOutputTokens: 1024},
 			Transcript: harness.TranscriptHistoryFunc(func(context.Context, harness.HostRef, harness.HostRef) ([]runtimecontext.Entry, error) {
 				return runtimecontext.CloneEntries(history), nil
 			}),
 		},
 	}
-	session, err := harness.OpenToolAgentSession(options)
+	session, err := harness.OpenAgentSession(options)
 	if err != nil {
 		return err
 	}

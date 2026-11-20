@@ -1,6 +1,4 @@
-// An optional Harness Session over the same single Agent loop.
-// Run with: go run ./go/agent-runtime-harness/examples/session
-// This uses Memory Stores: it does not survive process exit.
+// Compatibility fixture for the deprecated text Session constructor.
 package main
 
 import (
@@ -40,7 +38,7 @@ func run(ctx context.Context, output io.Writer) error {
 	// snapshots: after later Turns, use Session.Load for an earlier result.
 	var history []runtimecontext.Entry
 	threadID := "demo/tenant-a/conversation"
-	session, err := harness.OpenTextAgentSession(harness.TextAgentSessionOptions{
+	session, err := harness.OpenTextAgentSession(harness.TextAgentSessionOptions{ //nolint:staticcheck // Exercise the deprecated facade until its removal.
 		Runtime: runtime, Store: harness.NewMemoryStore(), Model: client,
 		Session: harness.SessionOptions{
 			HostThread: harness.HostRef{Kind: "conversation", ID: threadID},

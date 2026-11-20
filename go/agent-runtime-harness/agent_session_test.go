@@ -76,11 +76,8 @@ func addAgentSessionTool(options *harness.AgentSessionOptions, key string, calls
 
 func TestAgentSessionMatchesExplicitCompositionAndAuthorizesOnlySelectedTools(t *testing.T) {
 	var original []model.Request
-	for _, facade := range []bool{false, true} {
-		name := "explicit"
-		if facade {
-			name = "facade"
-		}
+	var originalIDs [6]string
+	for _, name := range []string{"explicit", "legacy-selection", "paired-selection"} {
 		t.Run(name, func(t *testing.T) {
 			toolCalls, unselectedCalls, historyCalls, windowCalls := 0, 0, 0, 0
 			client := &agentSessionModel{generate: func(request model.Request) (model.Response, error) {
@@ -107,9 +104,14 @@ func TestAgentSessionMatchesExplicitCompositionAndAuthorizesOnlySelectedTools(t 
 			}
 			var session *harness.SessionClient
 			var err error
-			if facade {
+			switch name {
+			case "paired-selection":
+				options.LocalTools = []harness.SessionTool{{Registration: options.Tools[0], Policy: options.Session.Config.ToolPolicies[0]}}
+				options.Tools, options.Session.Config.ToolKeys, options.Session.Config.ToolPolicies = nil, nil, nil
 				session, err = harness.OpenAgentSession(options)
-			} else {
+			case "legacy-selection":
+				session, err = harness.OpenAgentSession(options)
+			default:
 				registry, e := tools.NewRegistry(options.Tools)
 				if e != nil {
 					t.Fatal(e)
@@ -147,12 +149,58 @@ func TestAgentSessionMatchesExplicitCompositionAndAuthorizesOnlySelectedTools(t 
 			if _, err = session.Prompt(t.Context(), "first", "find the evidence"); err != nil || len(client.requests) != 2 || toolCalls != 1 || windowCalls != 2 {
 				t.Fatalf("replay redispatched: %v models=%d tools=%d", err, len(client.requests), toolCalls)
 			}
-			if facade {
-				if !reflect.DeepEqual(client.requests, original) {
-					t.Fatal("facade changed the explicit composition's model/Tool transcript")
-				}
-			} else {
+			root, ok := harness.TopLevelInvocation(result)
+			if !ok {
+				t.Fatal("missing root execution")
+			}
+			ids := [6]string{result.Session.ID, result.Turn.ID, result.Config.ID, result.Turn.ContextCheckpointID, root.ID, root.ExecutionRefID}
+			if name == "explicit" {
 				original = client.requests
+				originalIDs = ids
+			} else if !reflect.DeepEqual(client.requests, original) || ids != originalIDs {
+				t.Fatalf("facade changed explicit requests or durable identities: got %v, want %v", ids, originalIDs)
+			}
+		})
+	}
+}
+
+func TestAgentSessionPairedSelectionRejectsConflictingToolAuthority(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		edit func(*harness.AgentSessionOptions)
+	}{
+		{"legacy inventory", func(o *harness.AgentSessionOptions) { o.Tools = []tools.Registration{o.LocalTools[0].Registration} }},
+		{"legacy keys", func(o *harness.AgentSessionOptions) { o.Session.Config.ToolKeys = []string{"lookup"} }},
+		{"legacy policies", func(o *harness.AgentSessionOptions) {
+			o.Session.Config.ToolPolicies = []harness.ToolPolicySnapshot{o.LocalTools[0].Policy}
+		}},
+		{"duplicate grants", func(o *harness.AgentSessionOptions) { o.LocalTools = append(o.LocalTools, o.LocalTools[0]) }},
+		{"foreign policy", func(o *harness.AgentSessionOptions) { o.LocalTools[0].Policy.Key = "other" }},
+		{"unclassified tool", func(o *harness.AgentSessionOptions) { o.LocalTools[0].Policy.SideEffectLevel = "" }},
+		{"approval required", func(o *harness.AgentSessionOptions) { o.LocalTools[0].Policy.ApprovalMode = "always" }},
+		{"custom archive reader", func(o *harness.AgentSessionOptions) {
+			o.LocalTools[0].Registration.Definition.Key = harness.ContextArtifactToolKey
+		}},
+		{"inputs with managed recovery", func(o *harness.AgentSessionOptions) { o.Context.ManagedRecovery = true }},
+		{"inputs with native summary recovery", func(o *harness.AgentSessionOptions) { o.Context.SummaryNativeRecovery = true }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			client := &agentSessionModel{}
+			store := harness.NewMemoryStore()
+			options := agentSessionOptions(t, memory.NewStore(), store, client)
+			bound, err := kernel.New(kernel.Dependencies{Store: memory.NewStore(), ManagedRecoveryHost: store})
+			if err != nil {
+				t.Fatal(err)
+			}
+			options.Runtime = bound
+			options.Inputs = struct{ agent.RunInputSource }{} // Any BindingID/queue access would panic.
+			options.LocalTools = []harness.SessionTool{{Registration: agentSessionTool("lookup", &calls), Policy: harness.ToolPolicySnapshot{
+				DefinitionVersion: "v1", ApprovalMode: "never", SideEffectLevel: "read",
+			}}}
+			tc.edit(&options)
+			if _, err := harness.OpenAgentSession(options); !errors.Is(err, harness.ErrInvalidRequest) || len(client.requests) != 0 || calls != 0 {
+				t.Fatalf("invalid selection granted authority or called collaborators: %v", err)
 			}
 		})
 	}
@@ -238,11 +286,12 @@ func TestAgentSessionChecksModelWindowBeforeGeneration(t *testing.T) {
 
 func TestAgentSessionArchiveReaderCompactsAndReadsExactEvidence(t *testing.T) {
 	store := harness.NewMemoryStore()
-	old := strings.Repeat("old evidence ", 900) + " TARGET-EXACT-FACT"
+	old := strings.Repeat("old evidence ", 900)
+	const exactFact = `"id":9007199254740993`
 	client := &agentSessionModel{generate: func(request model.Request) (model.Response, error) {
 		for _, message := range request.Messages {
 			if message.Role == model.RoleTool {
-				if !strings.Contains(model.TextValue(message.Content), "TARGET-EXACT-FACT") {
+				if !strings.Contains(model.TextValue(message.Content), `\"id\":9007199254740993`) {
 					t.Fatalf("reader lost original evidence: %+v", message)
 				}
 				return model.Response{Content: "verified"}, nil
@@ -251,7 +300,7 @@ func TestAgentSessionArchiveReaderCompactsAndReadsExactEvidence(t *testing.T) {
 		for _, message := range request.Messages {
 			match := regexp.MustCompile(`artifact_id=([^\s>]+)`).FindStringSubmatch(model.TextValue(message.Content))
 			if len(match) == 2 {
-				args, _ := json.Marshal(map[string]string{"artifactID": match[1], "query": "TARGET-EXACT-FACT"})
+				args, _ := json.Marshal(map[string]string{"artifactID": match[1], "query": exactFact})
 				return model.Response{ToolCalls: []tools.Call{{ID: "archive-read", ToolKey: harness.ContextArtifactToolKey, Arguments: args}}}, nil
 			}
 		}
@@ -259,13 +308,17 @@ func TestAgentSessionArchiveReaderCompactsAndReadsExactEvidence(t *testing.T) {
 		return model.Response{}, nil
 	}}
 	options := agentSessionOptions(t, memory.NewStore(), store, client)
-	options.Session.Config.ToolKeys = []string{harness.ContextArtifactToolKey}
-	options.Session.Config.ToolPolicies = []harness.ToolPolicySnapshot{harness.ContextArtifactToolPolicySnapshot()}
+	options.Context.ReadArtifacts = true
 	options.Session.Config.ContextPolicy = runtimecontext.Policy{MaxInputTokens: 5000, PreserveRecentTurns: 1, MinimumRecentTurns: 1, MaxCompactionTokens: 80}
-	options.Session.Transcript = harness.TranscriptHistoryFunc(func(context.Context, harness.HostRef, harness.HostRef) ([]runtimecontext.Entry, error) {
-		return []runtimecontext.Entry{
-			contextEntry("old-user", "old", model.RoleUser, "previous question", false), contextEntry("old-answer", "old", model.RoleAssistant, old, false),
-		}, nil
+	options.Session.Transcript = harness.TranscriptSourceFunc(func(_ context.Context, _, turn harness.HostRef, prompt string) (*harness.ContextSeed, error) {
+		assistant := contextEntry("old-answer", "old", model.RoleAssistant, old, false)
+		assistant.Message.ToolCalls = []tools.Call{{ID: "historic-call", ToolKey: "lookup", Arguments: json.RawMessage(`{` + exactFact + `}`)}}
+		historic := contextEntry("old-tool", "old", model.RoleTool, "found", false)
+		historic.Message.ToolCallID = "historic-call"
+		current := contextEntry("current", turn.ID, model.RoleUser, prompt, true)
+		return &harness.ContextSeed{SourcePath: []string{"old-user", "old-answer", "old-tool", "current"}, Entries: []runtimecontext.Entry{
+			contextEntry("old-user", "old", model.RoleUser, "previous question", false), assistant, historic, current,
+		}}, nil
 	})
 	session, err := harness.OpenAgentSession(options)
 	if err != nil {
@@ -366,12 +419,14 @@ func TestAgentSessionConstructionDoesNotAccessStoreOrCallbacks(t *testing.T) {
 	}
 }
 
-func TestAgentSessionFreezesRegistrationsAndContinuesHostHistory(t *testing.T) {
+func TestAgentSessionFreezesPairedRegistrationsAndContinuesHostHistory(t *testing.T) {
 	runStore, store := memory.NewStore(), harness.NewMemoryStore()
 	client := &agentSessionModel{}
 	options := agentSessionOptions(t, runStore, store, client)
 	calls := 0
-	addAgentSessionTool(&options, "lookup", &calls)
+	options.LocalTools = []harness.SessionTool{{Registration: agentSessionTool("lookup", &calls), Policy: harness.ToolPolicySnapshot{
+		DefinitionVersion: "v1", ApprovalMode: "never", SideEffectLevel: "read",
+	}}}
 	history := []runtimecontext.Entry{}
 	options.Session.Transcript = harness.TranscriptHistoryFunc(func(context.Context, harness.HostRef, harness.HostRef) ([]runtimecontext.Entry, error) {
 		return history, nil
@@ -380,10 +435,12 @@ func TestAgentSessionFreezesRegistrationsAndContinuesHostHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	options.Tools[0].Definition.InputSchema[0] = '!'
-	options.Tools[0].Definition.Name = "changed"
-	options.Session.Config.ToolKeys[0] = "foreign"
-	options.Session.Config.ToolPolicies[0].ApprovalMode = "always"
+	if len(options.Session.Config.ToolKeys) != 0 || len(options.Session.Config.ToolPolicies) != 0 || options.LocalTools[0].Policy.Key != "" {
+		t.Fatal("constructor added private config or policy metadata to Host input")
+	}
+	options.LocalTools[0].Registration.Definition.InputSchema[0] = '!'
+	options.LocalTools[0].Registration.Definition.Name = "changed"
+	options.LocalTools[0].Policy.ApprovalMode = "always"
 	options.Session.Config.MaxModelOutputTokens = 512
 	first, err := session.Prompt(t.Context(), "first", "first prompt")
 	if err != nil || first.Turn.Status != harness.TurnCompleted || len(client.requests) != 1 || client.requests[0].MaxOutputTokens != 128 || client.requests[0].Tools[0].Name != "lookup" || string(client.requests[0].Tools[0].InputSchema) != `{"type":"object","additionalProperties":false}` {

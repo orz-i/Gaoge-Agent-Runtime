@@ -49,6 +49,12 @@ func toolSessionOptions(t *testing.T, client model.Client) harness.ToolAgentSess
 }
 
 func TestToolAgentSessionComposesExplorationAndTerminalRecovery(t *testing.T) {
+	t.Run("deprecated-facade", func(t *testing.T) { testSessionExplorationAndTerminalRecovery(t, false) })
+	t.Run("recommended-facade", func(t *testing.T) { testSessionExplorationAndTerminalRecovery(t, true) })
+}
+
+func testSessionExplorationAndTerminalRecovery(t *testing.T, paired bool) {
+	t.Helper()
 	modelCalls, toolCalls := 0, 0
 	client := toolSessionModelFunc(func(_ context.Context, request model.Request) (model.Response, error) {
 		modelCalls++
@@ -76,7 +82,18 @@ func TestToolAgentSessionComposesExplorationAndTerminalRecovery(t *testing.T) {
 		}
 		return original.Execute(ctx, request)
 	})
-	session, err := harness.OpenToolAgentSession(options)
+	open := func() (*harness.SessionClient, error) {
+		if !paired {
+			return harness.OpenToolAgentSession(options)
+		}
+		settings := options.Session
+		settings.Config.MaxModelOutputTokens = 128
+		return harness.OpenAgentSession(harness.AgentSessionOptions{
+			Runtime: options.Runtime, Store: options.Store, Model: client, Session: settings, LocalTools: options.Tools, ExploreReads: true,
+			Context: harness.AgentSessionContextOptions{ResolveWindow: options.ResolveModelWindow, ReadArtifacts: true},
+		})
+	}
+	session, err := open()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +108,7 @@ func TestToolAgentSessionComposesExplorationAndTerminalRecovery(t *testing.T) {
 		t.Fatalf("idempotent Prompt redispatched: %v models=%d tools=%d", err, modelCalls, toolCalls)
 	}
 	options.Session.Transcript = nil
-	reopened, err := harness.OpenToolAgentSession(options)
+	reopened, err := open()
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -6,7 +6,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"os"
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
@@ -19,43 +21,39 @@ import (
 const releaseTool = "release_checks:v1"
 
 func main() {
-	if err := run(context.Background()); err != nil {
+	if err := run(context.Background(), os.Stdout); err != nil {
 		log.Fatal(err)
 	}
 }
 
-func run(ctx context.Context) error {
+func run(ctx context.Context, output io.Writer) error {
 	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
 	if err != nil {
 		return err
 	}
+	// The Host is the only owner of conversation history. This demo keeps it
+	// in memory and runs one user Turn at a time.
+	var history []runtimecontext.Entry
 	session, err := harness.OpenAgentSession(harness.AgentSessionOptions{
 		Runtime: runtime, Store: harness.NewMemoryStore(), Model: fixtureModel{},
-		Tools: []tools.Registration{{
-			Definition: tools.Definition{Key: releaseTool, Name: "release_checks",
-				InputSchema: json.RawMessage(`{"type":"object","additionalProperties":false}`)},
-			Handler: tools.HandlerFunc(func(_ context.Context, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
-				return tools.ExecutionResult{Content: json.RawMessage(`{"passed":12,"failed":0}`),
-					Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: "read"}}, nil
-			}),
+		LocalTools: []harness.SessionTool{{
+			Registration: tools.Registration{
+				Definition: tools.Definition{Key: releaseTool, Name: "release_checks",
+					InputSchema: json.RawMessage(`{"type":"object","additionalProperties":false}`)},
+				Handler: tools.HandlerFunc(func(_ context.Context, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
+					return tools.ExecutionResult{Content: json.RawMessage(`{"passed":12,"failed":0}`),
+						Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: "read"}}, nil
+				}),
+			},
+			Policy: harness.ToolPolicySnapshot{DefinitionVersion: "v1", ApprovalMode: "never", SideEffectLevel: "read"},
 		}},
 		Session: harness.SessionOptions{
 			HostThread: harness.HostRef{Kind: "conversation", ID: "demo/release"},
 			Actor:      kernel.ActorRef{TenantID: "demo", ActorID: "operator"},
 			Thread:     kernel.ThreadRef{Kind: "conversation", ID: "demo/release"},
-			Config: harness.ConfigSnapshot{
-				Model: "fixture", MaxModelOutputTokens: 256,
-				ToolKeys: []string{releaseTool, harness.ContextArtifactToolKey},
-				ToolPolicies: []harness.ToolPolicySnapshot{
-					{Key: releaseTool, DefinitionVersion: "v1", ApprovalMode: "never", SideEffectLevel: "read"},
-					harness.ContextArtifactToolPolicySnapshot(),
-				},
-				ContextPolicy: runtimecontext.Policy{MaxInputTokens: 8192},
-			},
-			// The Host supplies prior User/Assistant history here. The adapter
-			// appends this turn's User prompt with stable source identities.
+			Config:     harness.ConfigSnapshot{Model: "fixture", MaxModelOutputTokens: 256},
 			Transcript: harness.TranscriptHistoryFunc(func(context.Context, harness.HostRef, harness.HostRef) ([]runtimecontext.Entry, error) {
-				return nil, nil
+				return history, nil
 			}),
 		},
 		Context: harness.AgentSessionContextOptions{ResolveWindow: func(context.Context, model.Request) (runtimecontext.ModelWindow, error) {
@@ -65,15 +63,32 @@ func run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	result, err := session.Prompt(ctx, "release-turn-1", "Check the release and summarize the result.")
-	if err != nil {
-		return err
+	for _, input := range []struct{ ID, Text string }{
+		{"release-1", "Check the release and summarize the result."},
+		{"release-2", "What were the earlier release results?"},
+	} {
+		result, err := session.Prompt(ctx, input.ID, input.Text)
+		if err != nil {
+			return err
+		}
+		if result.Turn.Status != harness.TurnCompleted || result.Output == nil {
+			return fmt.Errorf("%s did not complete: %s", input.ID, result.Turn.Status)
+		}
+		var answer string
+		if err := json.Unmarshal(result.Output.Content, &answer); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(output, "%s: %s\n", input.ID, answer); err != nil {
+			return err
+		}
+		history = append(history, entry(input.ID, model.RoleUser, input.Text), entry(input.ID, model.RoleAssistant, answer))
 	}
-	if result.Turn.Status != harness.TurnCompleted || result.Output == nil {
-		return fmt.Errorf("release turn did not complete: %s", result.Turn.Status)
-	}
-	fmt.Println(string(result.Output.Content))
 	return nil
+}
+
+func entry(turnID string, role model.Role, text string) runtimecontext.Entry {
+	id := turnID + "/" + string(role)
+	return runtimecontext.Entry{ID: id, SourceID: id, TurnID: turnID, Message: model.Message{Role: role, Content: model.TextParts(text)}}
 }
 
 type fixtureModel struct{}
@@ -83,8 +98,19 @@ func (fixtureModel) Generate(_ context.Context, request model.Request) (model.Re
 		return model.Response{}, fmt.Errorf("expected frozen output ceiling 256, got %d", request.MaxOutputTokens)
 	}
 	for _, message := range request.Messages {
-		if message.Role == model.RoleTool {
-			return model.Response{Content: "Release checks: 12 passed, 0 failed."}, nil
+		switch message.Role {
+		case model.RoleAssistant:
+			if text := model.TextValue(message.Content); text != "" {
+				return model.Response{Content: "Previous answer: " + text}, nil
+			}
+		case model.RoleTool:
+			var checks struct{ Passed, Failed int }
+			if err := json.Unmarshal([]byte(model.TextValue(message.Content)), &checks); err != nil {
+				return model.Response{}, err
+			}
+			return model.Response{Content: fmt.Sprintf("Release checks: %d passed, %d failed.", checks.Passed, checks.Failed)}, nil
+		case model.RoleSystem, model.RoleUser:
+			continue
 		}
 	}
 	return model.Response{ToolCalls: []tools.Call{{ID: "release-check-1", ToolKey: releaseTool, Arguments: json.RawMessage(`{}`)}}}, nil

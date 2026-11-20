@@ -460,10 +460,12 @@ func newManagedRecoverySessionWithComposition(t *testing.T, db *gorm.DB, files s
 		options.Transcript = managedRecoveryWorkingStateTranscript(t, files, options.Transcript)
 	}
 	if facade {
+		options.Config.ToolKeys = nil
+		options.Config.ToolPolicies = nil
 		session, err := harness.OpenAgentSession(harness.AgentSessionOptions{
 			Runtime: runtime, Store: hostStore, Model: managedRecoveryModel{logPath: filepath.Join(files, "model.jsonl")},
-			Tools: registrations, Session: options,
-			Context:   harness.AgentSessionContextOptions{ResolveWindow: resolveWindow, ManagedRecovery: managed},
+			LocalTools: managedRecoverySessionTools(files), Session: options,
+			Context:   harness.AgentSessionContextOptions{ResolveWindow: resolveWindow, ManagedRecovery: managed, ReadArtifacts: true},
 			Execution: execution, RunExecution: runExecution,
 		})
 		if err != nil {
@@ -542,6 +544,16 @@ func managedRecoveryToolRegistrations(files string) []tools.Registration {
 			}),
 		},
 	}
+}
+
+func managedRecoverySessionTools(files string) []harness.SessionTool {
+	registrations := managedRecoveryToolRegistrations(files)
+	return []harness.SessionTool{{
+		Registration: registrations[0],
+		Policy: harness.ToolPolicySnapshot{
+			DefinitionVersion: "fixture-v1", ApprovalMode: "never", SideEffectLevel: "write",
+		},
+	}}
 }
 
 func managedRecoveryConfiguredSessionOptions(crash bool) harness.SessionOptions {
