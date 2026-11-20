@@ -20,7 +20,10 @@ import (
 var ErrModelOutcomeUnknown = errors.New("agent external model result is uncertain")
 var ErrRootOutcomeUnknown = errors.New("agent original root callback result is uncertain")
 
-type rootCallbackState struct{ unknown atomic.Bool }
+type rootCallbackState struct {
+	unknown               atomic.Bool
+	approvalPolicyEntered atomic.Bool
+}
 
 func (runner *Runner) noteRootCallbackFailure(err error) {
 	if err != nil && runner.rootCallbacks != nil {
@@ -172,7 +175,7 @@ func (runner *Runner) executeOwnedRoot(ctx context.Context, current kernel.Snaps
 	// A reconstructed/same-Kernel observer cannot upgrade opaque Host effects.
 	if grant.AdmissionOperation == "prepare" && runner.trustedDeferredPreparedControl {
 		outcome.ControlCustody = kernel.OwnedCustodyPrepared
-	} else if runner.trustedDeferredRootControl {
+	} else if runner.scopedRootCallbacks && !scoped.rootCallbacks.approvalPolicyEntered.Load() {
 		outcome.ControlCustody = kernel.OwnedCustodyScoped
 	}
 	payload := kernel.OwnedPhysicalCallbackReturnPayload(latest, outcome)
