@@ -1151,10 +1151,10 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 		return runner.advanceCallAllowance(ctx, snapshot, state, "model")
 	}
 	if _, active := activeModelInvocation(state); !active {
-		var inputErr error
-		snapshot, state, _, inputErr = runner.admitRunInputs(ctx, snapshot, state, nil)
-		if inputErr != nil {
-			return snapshot, true, inputErr
+		updated, _, changed, inputErr := runner.admitRunInputs(ctx, snapshot, state, nil)
+		if inputErr != nil || changed {
+			// Recheck the lease and read the next page before freezing the request.
+			return updated, inputErr != nil, inputErr
 		}
 	}
 	snapshot, state, invocation, err := runner.ensureModelInvocation(ctx, snapshot, state)

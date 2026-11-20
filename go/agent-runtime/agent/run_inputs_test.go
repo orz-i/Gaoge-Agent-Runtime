@@ -125,6 +125,53 @@ func TestRunInputQueueIsScopedIdempotentAndDetectsLostHistory(t *testing.T) {
 	}
 }
 
+func TestRunInputsDrainQueuedPagesBeforeFirstModelCall(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		count int
+		text  string
+	}{
+		{"record limit", 16, "queued"},
+		{"byte limit", 4, strings.Repeat("x", 16<<10)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rt, _ := newTestRuntimeAndApprovals(t)
+			queue, _ := agent.NewMemoryRunInputs("inputs-v1")
+			calls := 0
+			client := progressModelFunc(func(_ context.Context, request model.Request) (model.Response, error) {
+				calls++
+				last := request.Messages[len(request.Messages)-1]
+				if last.Role != model.RoleUser || model.TextValue(last.Content) != "last update" {
+					t.Error("model did not receive the last queued update")
+				}
+				return model.Response{Content: "done"}, nil
+			})
+			runner, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: client, Inputs: queue,
+				Limits: agent.Limits{MaxLLMCalls: 1, MaxToolCalls: 1}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			prepared, err := runner.PrepareRun(t.Context(), startRequest("paged-run", "request", "start"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i := range tc.count {
+				if _, err := queue.Submit(t.Context(), prepared.Run, fmt.Sprint(i), tc.text); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := queue.Submit(t.Context(), prepared.Run, "last", "last update"); err != nil {
+				t.Fatal(err)
+			}
+			completed, err := runner.Resume(t.Context(), prepared.Run.ID, prepared.Run.Revision)
+			view, viewErr := agent.ViewState(completed)
+			if err != nil || viewErr != nil || completed.Run.Status != kernel.RunStatusCompleted || calls != 1 || view.InputCursor != uint64(tc.count+1) {
+				t.Fatalf("resume: %v view: %v status=%s calls=%d cursor=%d", err, viewErr, completed.Run.Status, calls, view.InputCursor)
+			}
+		})
+	}
+}
+
 func TestRunInputsDoNotRaiseModelBudget(t *testing.T) {
 	rt, _ := newTestRuntimeAndApprovals(t)
 	queue, _ := agent.NewMemoryRunInputs("inputs-v1")
