@@ -304,6 +304,9 @@ type Dependencies struct {
 	// for reconciling an uncertain native Tool dispatch. It does NOT retry.
 	ToolOutcomeVerifier  ToolOutcomeVerifier
 	ModelOutcomeVerifier ModelOutcomeVerifier
+	// DelegatedToolResults inspects original owner receipts for completed
+	// delegated results. It never executes a Tool or grants physical control.
+	DelegatedToolResults ToolOutcomeVerifier
 	// DeferResumption leaves resolved approval transitions running for a composed
 	// continuation worker. The standalone SDK keeps synchronous behavior by default.
 	DeferResumption bool
@@ -388,6 +391,7 @@ type Runner struct {
 	externalRunLease          bool
 	defaultRunOwner           bool
 	toolOutcomeVerifier       ToolOutcomeVerifier
+	delegatedToolResults      ToolOutcomeVerifier
 	modelOutcomeVerifier      ModelOutcomeVerifier
 	modelLimiter              *callLimiter
 	toolLimiter               *callLimiter
@@ -406,6 +410,7 @@ type Runner struct {
 }
 
 type runState struct {
+	DelegatedToolReceipts []delegatedToolReceipt     `json:"delegatedToolReceipts,omitempty"`
 	RecoveredTools        []rootToolReceipt          `json:"recoveredTools,omitempty"`
 	OriginFingerprint     string                     `json:"originFingerprint,omitempty"`
 	Messages              []model.Message            `json:"messages"`
@@ -657,6 +662,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		runExecution:         runExecution,
 		defaultRunOwner:      dependencies.RunExecution == nil,
 		toolOutcomeVerifier:  dependencies.ToolOutcomeVerifier,
+		delegatedToolResults: dependencies.DelegatedToolResults,
 		modelOutcomeVerifier: dependencies.ModelOutcomeVerifier,
 		modelLimiter:         newCallLimiter(execution.Model.MaxConcurrency),
 		toolLimiter:          newCallLimiter(execution.Tool.MaxConcurrency),
@@ -2078,6 +2084,9 @@ func (runner *Runner) preparePendingApproval(
 	}
 	if runner.rootCallbacks != nil && runner.hasApprovalPolicies {
 		runner.rootCallbacks.approvalPolicyEntered.Store(true)
+		if runner.delegatedToolResults != nil && runner.scopedRootCallbacks {
+			runner.rootCallbacks.toolApprovals.enter(call)
+		}
 	}
 	requiresApproval, err := runner.approvalPolicies.RequiresApproval(ctx, invocation)
 	if err != nil {
@@ -2389,6 +2398,11 @@ func (runner *Runner) persistCompletedToolCall(
 ) (kernel.Snapshot, bool, error) {
 	state := execution.state
 	state.ToolWait = nil
+	if runner.rootCallbacks != nil && runner.delegatedToolResults != nil && runner.scopedRootCallbacks {
+		if receipt, ok := runner.rootCallbacks.toolApprovals.committed(execution.call, result); ok {
+			state.DelegatedToolReceipts = append(state.DelegatedToolReceipts, receipt)
+		}
+	}
 	state.Messages = append(state.Messages, model.Message{
 		Role: model.RoleTool, Content: model.TextParts(string(result.Content)), ToolCallID: execution.call.ID,
 	})

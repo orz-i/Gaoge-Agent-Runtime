@@ -15,6 +15,26 @@ type OwnedRootSettlementStore interface {
 	VerifyOwnedRootSettlement(context.Context, Snapshot) error
 }
 
+// CompletedToolReturnStore verifies the original native callback history.
+// The consumer must independently verify every original Tool owner's receipt.
+type CompletedToolReturnStore interface {
+	VerifyCompletedToolReturn(context.Context, Snapshot) error
+}
+
+func (r *Runtime) VerifyCompletedToolReturn(ctx context.Context, expected Snapshot) error {
+	if r == nil || ctx == nil || expected.Run.ID == "" || expected.Run.Status != RunStatusCompleted {
+		return ErrInvalidInput
+	}
+	store, ok := r.store.(CompletedToolReturnStore)
+	if !ok {
+		return ErrExecutionRequired
+	}
+	return store.VerifyCompletedToolReturn(ctx, expected)
+}
+
+// RootSettlementCheck validates the facts gathered under a native Store's Run lock.
+type RootSettlementCheck func(Snapshot, Snapshot, uint64, uint64, ExecutionLease, bool, []OwnedRetirementReceipt) error
+
 // PreparedRootSettlementStore proves that the entire first-party PREPARE
 // callback returned and was acknowledged, without ever entering Model, Tool
 // or Host approval/completion callbacks. The original Run lock serializes
@@ -92,19 +112,28 @@ func VerifyPreparedRootSettlementFacts(
 	if len(receipts) != 1 || receipts[0].Evidence.Completion.ControlCustody != OwnedCustodyPrepared {
 		return ErrExecutionConflict
 	}
-	return verifyOwnedRootSettlementFacts(expected, current, epoch, physicalEpoch, lease, hasActiveGrants, receipts, "prepare")
+	return verifyOwnedRootSettlementFacts(expected, current, epoch, physicalEpoch, lease, hasActiveGrants, receipts, "prepare", false)
 }
 
 func VerifyOwnedRootSettlementFacts(
 	expected Snapshot, current Snapshot, epoch, physicalEpoch uint64, lease ExecutionLease,
 	hasActiveGrants bool, receipts []OwnedRetirementReceipt,
 ) error {
-	return verifyOwnedRootSettlementFacts(expected, current, epoch, physicalEpoch, lease, hasActiveGrants, receipts, "")
+	return verifyOwnedRootSettlementFacts(expected, current, epoch, physicalEpoch, lease, hasActiveGrants, receipts, "", false)
+}
+
+func VerifyCompletedToolReturnFacts(expected, current Snapshot, epoch, physicalEpoch uint64, lease ExecutionLease,
+	hasActiveGrants bool, receipts []OwnedRetirementReceipt,
+) error {
+	if expected.Run.Status != RunStatusCompleted {
+		return ErrExecutionConflict
+	}
+	return verifyOwnedRootSettlementFacts(expected, current, epoch, physicalEpoch, lease, hasActiveGrants, receipts, "", true)
 }
 
 func verifyOwnedRootSettlementFacts(
 	expected Snapshot, current Snapshot, epoch, physicalEpoch uint64, lease ExecutionLease,
-	hasActiveGrants bool, receipts []OwnedRetirementReceipt, requiredOperation string,
+	hasActiveGrants bool, receipts []OwnedRetirementReceipt, requiredOperation string, allowToolResult bool,
 ) error {
 	if expected.Run.ID == "" || current.Run.ID != expected.Run.ID ||
 		current.Run.Kind != "agent" || current.Run.ParentRunID != "" ||
@@ -125,8 +154,9 @@ func verifyOwnedRootSettlementFacts(
 		seenEpochs[callbackEpoch] = true
 		// ALL physical history matters. A later scoped callback cannot retire
 		// detached effects from an earlier opaque callback, or borrow its ACK.
+		custody := r.Evidence.Completion.ControlCustody
 		if r.Phase != "ACKNOWLEDGED" || !r.Evidence.Completion.LeaseOwned ||
-			!r.Evidence.Completion.HostCompleted || r.Evidence.Completion.ControlCustody == "" {
+			!r.Evidence.Completion.HostCompleted || !(custody.permitsControl() || allowToolResult && custody == OwnedToolResultReturn) {
 			return ErrExecutionConflict
 		}
 		if requiredOperation != "" && r.Evidence.Grant.AdmissionOperation != requiredOperation {

@@ -40,6 +40,19 @@ func (c *Coordinator) IsDeferredLocalDelegation(rt *kernel.Runtime, d Delegation
 	return false
 }
 
+// VerifiedLocalToolResult consults only the original fixed local route's
+// receipt reader. It cannot start, cancel or retire the child.
+func (c *Coordinator) VerifiedLocalToolResult(ctx context.Context, rt *kernel.Runtime, d Delegation, child kernel.Snapshot) bool {
+	if c == nil || !validDelegation(d) || child.Run.ID != d.ChildRunID {
+		return false
+	}
+	original := c.deferredAgent
+	if original == nil {
+		original = c.localDeferredAgent(d)
+	}
+	return original != nil && original.VerifyDeferredToolResults(ctx, rt, child)
+}
+
 // VerifiedLocalDelegationControl is a per-original-Delegation physical custody
 // proof, separate from global Kernel ownership and read-only observation.
 // The caller must first authenticate the original frozen Harness Delegation,

@@ -271,7 +271,8 @@ func (runner *Runner) observesLocalChild(ctx context.Context, coordinator *hando
 		return true
 	}
 	if child.Run.Status == kernel.RunStatusCompleted {
-		return agent.TerminalPhysicalEffectsSettled(child) && rt.VerifyOwnedRootSettlement(ctx, child) == nil
+		return agent.TerminalPhysicalEffectsSettled(child) && (rt.VerifyOwnedRootSettlement(ctx, child) == nil ||
+			coordinator.VerifiedLocalToolResult(ctx, rt, frozen, child))
 	}
 	return coordinator.VerifiedLocalDelegationControl(ctx, rt, frozen, child)
 }

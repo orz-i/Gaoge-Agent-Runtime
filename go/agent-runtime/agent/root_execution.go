@@ -23,6 +23,7 @@ var ErrRootOutcomeUnknown = errors.New("agent original root callback result is u
 type rootCallbackState struct {
 	unknown               atomic.Bool
 	approvalPolicyEntered atomic.Bool
+	toolApprovals         approvedToolCalls
 }
 
 func (runner *Runner) noteRootCallbackFailure(err error) {
@@ -177,6 +178,8 @@ func (runner *Runner) executeOwnedRoot(ctx context.Context, current kernel.Snaps
 		outcome.ControlCustody = kernel.OwnedCustodyPrepared
 	} else if runner.scopedRootCallbacks && !scoped.rootCallbacks.approvalPolicyEntered.Load() {
 		outcome.ControlCustody = kernel.OwnedCustodyScoped
+	} else if runner.scopedRootCallbacks && settled && scoped.rootCallbacks.toolApprovals.allCommitted() {
+		outcome.ControlCustody = kernel.OwnedToolResultReturn
 	}
 	payload := kernel.OwnedPhysicalCallbackReturnPayload(latest, outcome)
 	returned := featurecontrol.Seal(latest.Run.ID, latest.Run.Revision, "agent_owned_callback_return", grant.ID, payload, nil)

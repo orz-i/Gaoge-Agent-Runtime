@@ -10,17 +10,21 @@ var _ kernel.OwnedRootSettlementStore = (*Store)(nil)
 var _ kernel.ReturnedRootSettlementStore = (*Store)(nil)
 
 func (s *Store) VerifyReturnedRootSettlement(ctx context.Context, expected kernel.Snapshot) error {
-	return s.verifyRootSettlement(ctx, expected, false, true)
+	return s.verifyRootSettlement(ctx, expected, nil)
+}
+
+func (s *Store) VerifyCompletedToolReturn(ctx context.Context, expected kernel.Snapshot) error {
+	return s.verifyRootSettlement(ctx, expected, kernel.VerifyCompletedToolReturnFacts)
 }
 
 // VerifyOwnedRootSettlement is read-only under the same Store lock that
 // serializes physical grants and Kernel control writes. No public Run metadata
 // can substitute for the exact acknowledged owner callback retirement.
 func (s *Store) VerifyOwnedRootSettlement(ctx context.Context, expected kernel.Snapshot) error {
-	return s.verifyRootSettlement(ctx, expected, false)
+	return s.verifyRootSettlement(ctx, expected, kernel.VerifyOwnedRootSettlementFacts)
 }
 
-func (s *Store) verifyRootSettlement(ctx context.Context, expected kernel.Snapshot, prepared bool, returned ...bool) error {
+func (s *Store) verifyRootSettlement(ctx context.Context, expected kernel.Snapshot, check kernel.RootSettlementCheck) error {
 	if s == nil || ctx == nil || expected.Run.ID == "" {
 		return kernel.ErrInvalidInput
 	}
@@ -63,7 +67,7 @@ func (s *Store) verifyRootSettlement(ctx context.Context, expected kernel.Snapsh
 		}
 		receipts = append(receipts, r)
 	}
-	if len(returned) == 1 && returned[0] {
+	if check == nil {
 		var original memoryChildGrant
 		for _, candidate := range s.childGrants {
 			if candidate.grant.ChildRunID == expected.Run.ID {
@@ -76,8 +80,5 @@ func (s *Store) verifyRootSettlement(ctx context.Context, expected kernel.Snapsh
 		return kernel.VerifyReturnedRootSettlementFacts(expected, current, native.epoch, native.physicalEpoch,
 			native.lease, original.grant, original.completion, receipts)
 	}
-	if prepared {
-		return kernel.VerifyPreparedRootSettlementFacts(expected, current, native.epoch, native.physicalEpoch, lease, active, receipts)
-	}
-	return kernel.VerifyOwnedRootSettlementFacts(expected, current, native.epoch, native.physicalEpoch, lease, active, receipts)
+	return check(expected, current, native.epoch, native.physicalEpoch, lease, active, receipts)
 }
