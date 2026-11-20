@@ -1,10 +1,11 @@
-.PHONY: provider-transport-check bootstrap metadata agent-baseline agent-quality agent-quality-pilot agent-quality-distractor-pilot agent-quality-probe agent-quality-calibrate agent-baseline-test agent-quality-anchor-check benchmark-agent-policy fmt-check tidy-check go-test go-race go-vet go-lint go-coverage go-vuln ts-lint ts-typecheck ts-test ts-coverage ts-build unit coverage security eval eval-smoke benchmark benchmark-baseline benchmark-smoke benchmark-compare benchmark-integration benchmark-integration-smoke benchmark-integration-baseline benchmark-integration-compare benchmark-integration-test otel-e2e-smoke integration-compile integration integration-test integration-otel integration-otel-test a2a-product-check a2a-tck release-check check check-no-race beta
+.PHONY: provider-transport-check bootstrap metadata agent-baseline agent-quality agent-quality-pilot agent-quality-distractor-pilot agent-quality-probe agent-quality-calibrate agent-baseline-test agent-quality-anchor-check benchmark-agent-policy fmt-check tidy-check go-test go-race go-vet go-lint go-coverage go-vuln ts-lint ts-typecheck ts-test ts-coverage ts-build unit coverage security eval eval-smoke benchmark benchmark-baseline benchmark-smoke benchmark-compare benchmark-integration benchmark-integration-smoke benchmark-integration-baseline benchmark-integration-compare benchmark-integration-test otel-e2e-smoke integration-compile integration integration-test integration-otel integration-otel-test a2a-product-check a2a-tck release-check check-static check-execution check-execution-no-race ci-static ci-execution-no-race ci-consumers ci-race ci-coverage check check-no-race beta
 
 bootstrap:
 	pnpm install --frozen-lockfile
 
 metadata:
 	node --test scripts/beta-release-policy.test.mjs scripts/check-pr-body-format.test.mjs scripts/release-command.test.mjs scripts/sqlite-release-policy.test.mjs scripts/go-coverage-summary.test.mjs scripts/provider-transport-policy.test.mjs
+	node --test scripts/activate-pr-description-check.test.mjs scripts/check-ci-results.test.mjs scripts/setup-sqlite.test.mjs scripts/ci-timings.test.mjs scripts/go-workspace-shards.test.mjs scripts/ci-impact.test.mjs
 	node scripts/check-beta.mjs
 
 agent-baseline:
@@ -163,7 +164,34 @@ release-check:
 
 # CI runs race tests on an isolated runner, never alongside tidy-check in the
 # same checkout (tidy-check temporarily edits module files).
-CHECK_TARGETS := metadata provider-transport-check agent-baseline-test fmt-check tidy-check integration-compile go-vet go-test go-race go-lint ts-lint ts-typecheck ts-test ts-build eval-smoke benchmark-smoke otel-e2e-smoke a2a-product-check release-check
+CHECK_STATIC_TARGETS := metadata agent-baseline-test fmt-check tidy-check ts-lint ts-typecheck integration-compile go-vet go-lint
+CHECK_EXECUTION_TARGETS := provider-transport-check go-test go-race ts-test ts-build eval-smoke benchmark-smoke otel-e2e-smoke a2a-product-check release-check
+CHECK_TARGETS := $(CHECK_STATIC_TARGETS) $(CHECK_EXECUTION_TARGETS)
+
+check-static: $(CHECK_STATIC_TARGETS)
+
+check-execution: $(CHECK_EXECUTION_TARGETS)
+
+check-execution-no-race: $(filter-out go-race,$(CHECK_EXECUTION_TARGETS))
+
+# CI measures each existing target serially; local/release entry points retain
+# ordinary Make dependency semantics. Keep the target lists authoritative here.
+ci-static:
+	node scripts/run-ci-targets.mjs $(CHECK_STATIC_TARGETS)
+
+ci-execution-no-race:
+	node scripts/run-ci-targets.mjs $(filter-out go-race,$(CHECK_EXECUTION_TARGETS))
+
+# Full ordinary tests now execute once in the coverage shards / Vitest coverage.
+# Isolated consumers, deterministic smoke, and packed archive validation remain.
+ci-consumers:
+	node scripts/run-ci-targets.mjs $(filter-out go-test go-race ts-test,$(CHECK_EXECUTION_TARGETS))
+
+ci-race:
+	node scripts/run-ci-targets.mjs go-race
+
+ci-coverage:
+	node scripts/run-ci-targets.mjs go-coverage ts-coverage
 
 check: $(CHECK_TARGETS)
 
