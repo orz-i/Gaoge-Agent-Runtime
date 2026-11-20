@@ -92,6 +92,9 @@ func explorationTool(state runState, key string) bool {
 // Never relax an explicit unavailable-capability refusal. This deliberately
 // retains the existing denial boundary, even for an incorrectly opted-in tool.
 func progressBlocks(state runState, keys []string) []string {
+	if state.ToolProgressPolicy == nil || len(keys) == 0 {
+		return keys
+	}
 	var blocked []string
 	byID := toolCallKeysByID(state.Messages)
 	for _, key := range keys {

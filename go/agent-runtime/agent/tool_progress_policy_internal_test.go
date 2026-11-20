@@ -9,6 +9,28 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
+func TestToolProgressSkipsHistoryWithoutPolicyOrCandidates(t *testing.T) {
+	state := runState{Messages: uniqueToolPolicyTranscript(500)}
+	keys := []string{"lookup"}
+	for _, tc := range []struct {
+		name   string
+		policy *ToolProgressPolicy
+		keys   []string
+	}{
+		{"disabled", nil, keys},
+		{"no candidates", &ToolProgressPolicy{ExplorationToolKeys: keys}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			state.ToolProgressPolicy = tc.policy
+			var got []string
+			allocs := testing.AllocsPerRun(5, func() { got = progressBlocks(state, tc.keys) })
+			if !slices.Equal(got, tc.keys) || allocs != 0 {
+				t.Fatalf("blocked=%v allocations=%v", got, allocs)
+			}
+		})
+	}
+}
+
 func TestToolProgressKeepsExplicitDenialAndUnrelatedToolsBlocked(t *testing.T) {
 	state := runState{ToolProgressPolicy: &ToolProgressPolicy{ExplorationToolKeys: []string{"lookup"}},
 		Messages: unsettledToolHistory("lookup", `{"ok":false,"retryable":false,"error":{"code":"delegation.current_evidence_unavailable"}}`)}
