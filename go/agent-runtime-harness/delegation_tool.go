@@ -253,12 +253,27 @@ func (runner *Runner) localDelegationObservation(ctx context.Context, runID stri
 	if err != nil {
 		return kernel.Snapshot{}, handoff.Delegation{}, err
 	}
-	if (!coordinator.ObservesLocalKernelRunner(runner.runtime) && child.Run.Kind != agent.RunKind) || !coordinator.ObservesLocalDelegation(runner.runtime, frozen) ||
-		(terminalRuntimeStatus(child.Run.Status) && coordinator.IsDeferredLocalDelegation(runner.runtime, frozen) &&
-			!coordinator.VerifiedLocalDelegationControl(ctx, runner.runtime, frozen, child)) {
+	if !runner.observesLocalChild(ctx, coordinator, frozen, child) {
 		return kernel.Snapshot{}, handoff.Delegation{}, ErrHandoffCancellationUnverified
 	}
 	return child, frozen, nil
+}
+
+// The caller has authenticated the original frozen Handoff and child. A
+// completed result needs the executing callbacks' acknowledged custody even
+// when the reader has Host approval hooks and cannot take physical control.
+func (runner *Runner) observesLocalChild(ctx context.Context, coordinator *handoff.Coordinator, frozen handoff.Delegation, child kernel.Snapshot) bool {
+	rt := runner.runtime
+	if (!coordinator.ObservesLocalKernelRunner(rt) && child.Run.Kind != agent.RunKind) || !coordinator.ObservesLocalDelegation(rt, frozen) {
+		return false
+	}
+	if !terminalRuntimeStatus(child.Run.Status) || !coordinator.IsDeferredLocalDelegation(rt, frozen) {
+		return true
+	}
+	if child.Run.Status == kernel.RunStatusCompleted {
+		return agent.TerminalPhysicalEffectsSettled(child) && rt.VerifyOwnedRootSettlement(ctx, child) == nil
+	}
+	return coordinator.VerifiedLocalDelegationControl(ctx, rt, frozen, child)
 }
 
 // remoteDelegationObservation checks the frozen Harness authority, exact

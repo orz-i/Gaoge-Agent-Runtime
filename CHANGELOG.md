@@ -5,6 +5,12 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- A parent Agent can consume the completed result of a fixed local deferred
+  child when Host approval policies were registered and never entered. Harness
+  verifies the original child and its acknowledged callback history. Entering
+  a Host approval policy keeps that execution opaque. Existing opaque
+  receipts require their original evidence and cannot be upgraded on read.
+
 - **Optional native WorkingState summaries (2026-11-20):** Add an opt-in,
   first-business-call summary purpose to the original Agent ModelInvocation
   lifecycle. Freeze policy/source/recipe in its identity, archive original

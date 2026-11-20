@@ -131,9 +131,7 @@ func (runner *Runner) RefreshInvocation(ctx context.Context, invocationID string
 	if proofErr != nil {
 		return Snapshot{}, proofErr
 	}
-	if (!coordinator.ObservesLocalKernelRunner(runner.runtime) && runtimeSnapshot.Run.Kind != agent.RunKind) || !coordinator.ObservesLocalDelegation(runner.runtime, frozen) ||
-		(terminalRuntimeStatus(runtimeSnapshot.Run.Status) && coordinator.IsDeferredLocalDelegation(runner.runtime, frozen) &&
-			!coordinator.VerifiedLocalDelegationControl(ctx, runner.runtime, frozen, runtimeSnapshot)) {
+	if !runner.observesLocalChild(ctx, coordinator, frozen, runtimeSnapshot) {
 		return Snapshot{}, ErrHandoffCancellationUnverified
 	}
 	pending, err := runner.resolvedInteractionClaimPending(ctx, turn.ID, "")
