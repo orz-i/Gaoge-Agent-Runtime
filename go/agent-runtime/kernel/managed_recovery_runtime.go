@@ -258,6 +258,11 @@ func (r *Runtime) SupportsManagedRecovery() bool {
 	return ok
 }
 
+// HasManagedRecoveryHost reports immutable construction, not a recovery grant.
+func (r *Runtime) HasManagedRecoveryHost() bool {
+	return r != nil && r.managedHost != nil
+}
+
 // Registration is immutable trusted configuration, like the Kernel Store.
 // Reconstructing a Runtime with a malicious Store changes that trust boundary;
 // an existing Runtime cannot replace it during a recovery call.

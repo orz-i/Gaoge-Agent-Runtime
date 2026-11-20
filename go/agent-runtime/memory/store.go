@@ -175,7 +175,7 @@ func (store *Store) applyLocked(runID string, expectedRevision uint64, mutation 
 		g, ok := store.ownedGrantLocked(runID)
 		lease := store.execution[runID].lease
 		safe = mutation.ManagedSafePoint.Point()
-		if !ok || g.settledRevision != 0 || g.completion.GrantID != "" || store.execution[runID].quarantineRev != 0 || !activeMemoryLease(store.execution[runID], lease, store.currentExecutionTime()) || safe.Host.KernelAuthority != store.managedAuthority || !mutation.ManagedSafePoint.Matches(current, mutation.Record, lease, g.grant) || len(mutation.Events) != 1 || mutation.Events[0].Type != "agent.model_invocation.pending" {
+		if !ok || g.settledRevision != 0 || g.completion.GrantID != "" || store.execution[runID].quarantineRev != 0 || !activeMemoryLease(store.execution[runID], lease, store.currentExecutionTime()) || safe.Host.KernelAuthority != store.managedAuthority || !mutation.ManagedSafePoint.MatchesMutation(current, mutation.Record, lease, g.grant, mutation.Events) {
 			return kernel.Snapshot{}, kernel.ErrExecutionConflict
 		}
 		if _, exists := store.managedTransfers[safe.ID]; exists {

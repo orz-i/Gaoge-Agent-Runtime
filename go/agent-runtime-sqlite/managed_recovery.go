@@ -332,9 +332,6 @@ func sqliteManagedMutation(ctx context.Context, tx *sql.Tx, current kernel.Snaps
 	if !m.ManagedSafePoint.Present() {
 		return nil
 	}
-	if len(m.Events) != 1 || m.Events[0].Type != "agent.model_invocation.pending" {
-		return kernel.ErrExecutionConflict
-	}
 	if lease == nil {
 		return kernel.ErrExecutionConflict
 	}
@@ -347,7 +344,7 @@ func sqliteManagedMutation(ctx context.Context, tx *sql.Tx, current kernel.Snaps
 		return e
 	}
 	p := m.ManagedSafePoint.Point()
-	if p.Host.KernelAuthority != a || !m.ManagedSafePoint.Matches(current, m.Record, *lease, g) {
+	if p.Host.KernelAuthority != a || !m.ManagedSafePoint.MatchesMutation(current, m.Record, *lease, g, m.Events) {
 		return kernel.ErrExecutionConflict
 	}
 	var count int

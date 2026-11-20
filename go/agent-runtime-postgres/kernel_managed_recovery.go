@@ -281,9 +281,6 @@ func pgManagedMutation(tx *gorm.DB, current kernel.Snapshot, m kernel.StoreMutat
 	if !m.ManagedSafePoint.Present() {
 		return nil, nil
 	}
-	if len(m.Events) != 1 || m.Events[0].Type != "agent.model_invocation.pending" {
-		return nil, kernel.ErrExecutionConflict
-	}
 	if lease == nil {
 		return nil, kernel.ErrExecutionConflict
 	}
@@ -296,7 +293,7 @@ func pgManagedMutation(tx *gorm.DB, current kernel.Snapshot, m kernel.StoreMutat
 		return nil, e
 	}
 	p := m.ManagedSafePoint.Point()
-	if p.Host.KernelAuthority != a || !m.ManagedSafePoint.Matches(current, m.Record, *lease, g) {
+	if p.Host.KernelAuthority != a || !m.ManagedSafePoint.MatchesMutation(current, m.Record, *lease, g, m.Events) {
 		return nil, kernel.ErrExecutionConflict
 	}
 	var count int64
