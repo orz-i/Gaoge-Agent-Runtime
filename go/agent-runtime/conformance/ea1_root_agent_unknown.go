@@ -50,9 +50,12 @@ func RunEA1RootAgentUnknownSuite(t *testing.T, factory func(*testing.T) (kernel.
 				t.Fatal(err)
 			}
 			makeRunner := func(runtime *kernel.Runtime, owner string, offset time.Duration) *agent.Runner {
+				// The successful callback reads its durable intent from the Store.
+				// Allow race-instrumented I/O to reach the injected receipt failure;
+				// keep this below the native lease's one-second safety margin.
 				r, e := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: physical, Catalog: catalog, Executor: catalog,
 					Clock: ea1UnknownAgentClock{offset: offset}, RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: 2 * time.Second},
-					Execution: agent.ExecutionPolicy{Model: agent.CallPolicy{Timeout: 100 * time.Millisecond, MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}, Tool: agent.CallPolicy{Timeout: 100 * time.Millisecond, MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}}})
+					Execution: agent.ExecutionPolicy{Model: agent.CallPolicy{Timeout: 500 * time.Millisecond, MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}, Tool: agent.CallPolicy{Timeout: 500 * time.Millisecond, MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}}})
 				if e != nil {
 					t.Fatal(e)
 				}
