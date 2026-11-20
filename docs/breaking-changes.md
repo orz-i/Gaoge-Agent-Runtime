@@ -1,5 +1,53 @@
 # Breaking changes (pre-stable Beta)
 
+## 2026-11-20 — Separate cancellation elections, Host effects and no-dispatch settlement
+
+**Breaking Harness Store and recovery contract:** implement required
+`Store.CancelUndispatchedRoot` instead of the optional
+`CancelUnstartedRootRetry` capability. It atomically commits the original Root
+Invocation and Turn under the existing admission lock, covering both the first
+Accepted Root and accepted Retry generations. It must recheck the private
+original witness, full globally indexed physical receipts, immutable Attempt,
+active intent and budget closure. Do not synthesize a Kernel Run or silently
+register an unstarted first Root in the budget ledger.
+
+Custom Store `AppendItem` must also consume the private cancellation-effect
+admission capability under that Turn lock, using
+`ValidCancellationEffectAppend` and complete global receipt children. An active
+Host claim is exclusive across the original intent's cleanup scope; ordinary
+Artifacts/Diagnostics cannot mint or squat in claim/receipt IDs. Final fence
+completion must recheck `CancellationEffectsSettled`. A public same-ID terminal
+Run, current native Runner, Root busy witness or lease expiry cannot sign for
+unknown Host cleanup. Native control retains its separate original Kernel
+CAS/physical-grant protocol, rather than gaining a second cancellation owner.
+
+New intents contain the fixed `effects_v1` protocol and native/Host route class.
+An unresolved old intent without that source remains quarantined; the SDK never
+backfills authority from deployment configuration. **Stop old writers and drain
+or explicitly reconcile their original unknown operations before rollout.**
+Retain backups and unresolved historical receipts; do not reset an intent to
+restore admission. Closed historical receipts retain their original meaning.
+
+A custom `RuntimeCanceller` obtains `CancellationEffectFromContext` before
+dispatch. For crash/unknown recovery, explicitly implement optional
+`RuntimeCancellationReconciler` with a stable owner ID and read-only exact-effect
+outcome lookup. Ordinary retries never reissue an unknown Cancel operation.
+`NoEffect` must permanently exclude dispatch by delayed original callers, not
+merely report that a remote task is currently absent. Unknown cleanup is HTTP
+409 `harness.cancellation_outcome_unknown`. Explicit mixed RunKind cancellers
+may forward native child-busy no-effect only when that callback did no Host
+cleanup; that proof never covers subsequently dispatched child effects.
+
+Initial control and recovery now share typed no-dispatch proofs for Waiting,
+Started-before-Invocation and prepared Handoff targets. Opaque legacy Started
+records and remote missing Runs remain unknown, while genuine initial Accepted
+Roots can be cancelled without a separate physical Start or a synthetic Run.
+
+The new facts use the existing Harness Item ledger and payloads; no SQL DDL or
+native SQLite Kernel schema change is introduced (SQLite remains v8). This is a
+protocol hard cut, not an automatic data migration or a compatibility alias.
+See [cancellation protocol governance](audits/2026-11-20-pr131-cancellation-protocol-governance.md).
+
 ## 2026-11-17 — Independently version Provider Transport
 
 **Breaking Go import/module boundary:** `agent-runtime-provider/transport`

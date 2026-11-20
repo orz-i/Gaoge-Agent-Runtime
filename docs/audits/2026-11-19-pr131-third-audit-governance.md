@@ -1,5 +1,11 @@
 # PR #131 third-audit governance
 
+The final deep audit found that Agent return/Kernel status could not acknowledge
+independent Host cancellation effects, and identified additional no-dispatch
+lifecycle shapes. The [cancellation protocol governance](2026-11-20-pr131-cancellation-protocol-governance.md)
+supersedes this record's broad phase-recovery claim with original-effect claims,
+owner reconciliation and complete no-dispatch settlement requirements.
+
 ## Findings and segmented fixes
 
 The audit of `4b1090f3` confirmed one P1 cancellation recovery gap and one P2
