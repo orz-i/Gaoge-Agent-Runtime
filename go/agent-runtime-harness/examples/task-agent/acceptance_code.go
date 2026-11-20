@@ -74,7 +74,10 @@ func TestClampDegenerate(t *testing.T) {
 `, `package sample
 import "testing"
 func TestClampDegenerateHeldOut(t *testing.T) {
- for _, x := range []struct{v,l,h int}{{0,0,0},{10,10,10},{-10,-10,-10},{-2147483648,-100,100},{2147483647,-100,100}} {
+ for _, x := range []struct{v,l,h int}{
+  {0,0,0},{10,10,10},{-10,-10,-10},{-2147483648,-100,100},{2147483647,-100,100},
+  {-100,-100,100},{100,-100,100},{-99,-100,100},{5,0,10},{99,-100,100},
+ } {
   want := x.v; if want < x.l { want=x.l }; if want > x.h { want=x.h }; if got:=Clamp(x.v,x.l,x.h); got!=want { t.Fatal("degenerate held-out mismatch") }
  }
 }
@@ -218,9 +221,11 @@ func (task *acceptanceTask) testCode(ctx context.Context, compileOnly bool) (boo
 	command := exec.CommandContext(ctx, "go", args...)
 	command.Dir = task.directory
 	// Do not pass Provider keys, GOFLAGS, proxies or other Host secrets to Go.
+	tmp := task.artifactPath("tmp")
 	command.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + task.directory,
 		"GOCACHE=" + task.artifactPath("gocache"), "GOMODCACHE=" + task.artifactPath("module-cache"),
-		"TMPDIR=" + task.artifactPath("tmp"), "GOWORK=off", "GOTOOLCHAIN=local", "GOPROXY=off", "GOSUMDB=off", "CGO_ENABLED=0"}
+		"TMPDIR=" + tmp, "TMP=" + tmp, "TEMP=" + tmp,
+		"GOWORK=off", "GOTOOLCHAIN=local", "GOPROXY=off", "GOSUMDB=off", "CGO_ENABLED=0"}
 	output, err := command.CombinedOutput()
 	if len(output) > 8192 {
 		output = output[:8192]

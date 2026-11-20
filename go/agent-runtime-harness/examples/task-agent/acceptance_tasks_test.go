@@ -49,30 +49,35 @@ func TestAcceptanceCommandRunsDistinctArtifactOracles(t *testing.T) {
 }
 
 func TestAcceptanceCodeOracleRejectsPublicTestOverfit(t *testing.T) {
-	task := &acceptanceTask{name: "code", directory: t.TempDir()}
-	if _, err := task.prepareCode(); err != nil {
-		t.Fatal(err)
-	}
-	// This passes all three visible cases but is not a correct Clamp function.
-	overfit := "package sample\nfunc Clamp(value, low, high int) int { if value == 5 { return 5 }; if value == 20 { return 10 }; return 0 }"
-	content, err := normalizeAcceptanceCode(overfit)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = os.WriteFile(task.artifactPath("clamp.go"), content, 0600); err != nil {
-		t.Fatal(err)
-	}
-	passed, err := task.testCode(t.Context(), false)
-	if err != nil || !passed {
-		t.Fatalf("negative fixture must pass public tests first: passed=%t err=%v output=%s", passed, err, task.lastTestOutput)
-	}
-	task.publicTestsRan = true
-	checks := make(map[string]bool)
-	if _, err = task.verifyCode(t.Context(), checks); err != nil {
-		t.Fatal(err)
-	}
-	if checks["independent_held_out_tests_pass"] {
-		t.Fatal("a hardcoded public-test answer passed independent acceptance")
+	for _, tc := range []struct{ name, body, heldOutTest string }{
+		{"code", "if value == 5 { return 5 }; if value == 20 { return 10 }; return 0", "TestClampHeldOut"},
+		{"code-degenerate", "if value < low { return low }; return high", "TestClampDegenerateHeldOut"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			task := &acceptanceTask{name: tc.name, directory: t.TempDir()}
+			if _, err := task.prepareCode(); err != nil {
+				t.Fatal(err)
+			}
+			content, err := normalizeAcceptanceCode("package sample\nfunc Clamp(value, low, high int) int { " + tc.body + " }")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(task.artifactPath("clamp.go"), content, 0600); err != nil {
+				t.Fatal(err)
+			}
+			passed, err := task.testCode(t.Context(), false)
+			if err != nil || !passed {
+				t.Fatalf("negative fixture must pass public tests first: passed=%t err=%v output=%s", passed, err, task.lastTestOutput)
+			}
+			task.publicTestsRan = true
+			checks := make(map[string]bool)
+			if _, err := task.verifyCode(t.Context(), checks); err != nil {
+				t.Fatal(err)
+			}
+			if checks["independent_held_out_tests_pass"] || !strings.Contains(task.lastTestOutput, tc.heldOutTest) {
+				t.Fatalf("expected the held-out test to reject the public-test answer: %s", task.lastTestOutput)
+			}
+		})
 	}
 }
 
