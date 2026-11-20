@@ -2,9 +2,12 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -855,10 +858,40 @@ func summaryHistoryToolSource(t *testing.T, ports *summaryCorePorts, arguments s
 	ports.turn.ContextCheckpointID, ports.turn.ContextRef = source.ID, samplingRef(source)
 }
 
+func legacySummaryCheckpoint(t *testing.T, value runtimecontext.Checkpoint) runtimecontext.Checkpoint {
+	t.Helper()
+	encoded, err := json.Marshal(value.Window)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var normalized any
+	if err = json.Unmarshal(encoded, &normalized); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err = json.Marshal(normalized)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash := sha256.Sum256(encoded)
+	value.ContentHashEncoding = ""
+	value.ContentHash = hex.EncodeToString(hash[:])
+	parts := []string{
+		value.ScopeID, strconv.Itoa(value.Generation), strconv.Itoa(value.Revision), value.ParentCheckpointID,
+		value.CacheIdentity, value.LineageHash, value.CoveredThroughSourceID, value.CoveredPathHash,
+		value.StaticFingerprint, value.ModelWindowFingerprint, value.ContentHash, strings.Join(value.ArtifactIDs, ","),
+	}
+	idHash := sha256.Sum256([]byte(strings.Join(parts, "\x1f")))
+	value.ID = "ctxc_" + hex.EncodeToString(idHash[:])[:32]
+	return value
+}
+
 func TestContextSummaryCompletedReceiptRejectsLossyFrozenSource(t *testing.T) {
 	fault := &summaryCoreFaultStore{Store: memory.NewStore(), event: "agent.model_invocation.completed", after: true}
 	_, rt, ports, provider, clock, request := newSummaryCoreFixture(t, fault)
 	summaryHistoryToolSource(t, ports, `{"n":9007199254740992}`)
+	legacy := legacySummaryCheckpoint(t, ports.source)
+	ports.source, ports.current, ports.bound = legacy, legacy, legacy
+	ports.turn.ContextCheckpointID, ports.turn.ContextRef = legacy.ID, samplingRef(legacy)
 	runner := summaryCoreRunner(t, rt, ports, provider, clock, nil)
 	if _, err := runner.StartRun(t.Context(), request); !errors.Is(err, errSummaryCoreCrash) {
 		t.Fatalf("fixture missed the completed summary receipt: %v", err)
@@ -867,9 +900,9 @@ func TestContextSummaryCompletedReceiptRejectsLossyFrozenSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The existing codec hashes these two numbers identically. This models
-	// an older frozen source whose raw task value cannot survive archival,
-	// without changing the invocation, its receipt or any checkpoint identity.
+	// This models a pre-versioning frozen source whose raw task value cannot
+	// survive the historical float64 codec, without changing the invocation,
+	// its receipt or any checkpoint identity.
 	unsafe := runtimecontext.CloneCheckpoint(ports.source)
 	unsafe.Window.Entries[1].Message.ToolCalls[0].Arguments = json.RawMessage(`{"n":9007199254740993}`)
 	if !runtimecontext.ValidCheckpoint(unsafe) || unsafe.ID != ports.source.ID || summaryPreservesSourceValues(runtimecontext.Materialize(unsafe.Window)) {

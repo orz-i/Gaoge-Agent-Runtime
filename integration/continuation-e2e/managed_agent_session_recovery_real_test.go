@@ -95,7 +95,8 @@ func testManagedAgentSessionRecoveryAcrossProcessCrash(t *testing.T, dsn string,
 		t.Fatalf("compacted Turn did not survive child exit: %+v err=%v", turn, err)
 	}
 	checkpoint, err := store.GetContextCheckpoint(t.Context(), turn.ContextCheckpointID)
-	if err != nil || !runtimecontext.ValidCheckpoint(checkpoint) || len(checkpoint.ArtifactIDs) != 1 {
+	if err != nil || !runtimecontext.ValidCheckpoint(checkpoint) ||
+		checkpoint.ContentHashEncoding != runtimecontext.CheckpointContentHashEncodingLosslessJSON || len(checkpoint.ArtifactIDs) != 1 {
 		t.Fatalf("missing exact archive checkpoint: %+v err=%v", checkpoint, err)
 	}
 	assertManagedRecoveryWorkingState(t, store, checkpoint, expectedWorkingState)
@@ -259,8 +260,9 @@ func testManagedAgentSessionRecoveryAcrossProcessCrash(t *testing.T, dsn string,
 		t.Fatal(err)
 	}
 	latestCheckpoint, err := reopenedStore.GetContextCheckpoint(t.Context(), latestTurn.ContextCheckpointID)
-	if err != nil {
-		t.Fatal(err)
+	if err != nil || !runtimecontext.ValidCheckpoint(latestCheckpoint) ||
+		latestCheckpoint.ContentHashEncoding != runtimecontext.CheckpointContentHashEncodingLosslessJSON {
+		t.Fatalf("recovered Checkpoint lost its lossless content hash: %+v err=%v", latestCheckpoint, err)
 	}
 	assertManagedRecoveryWorkingState(t, reopenedStore, latestCheckpoint, expectedWorkingState)
 }
