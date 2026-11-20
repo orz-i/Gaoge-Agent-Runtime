@@ -28,7 +28,9 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
   boundaries, with a frozen source binding and a durable applied cursor. It does
   not rewrite in-flight requests, interrupt admitted Tool batches or bypass
   unknown outcomes/approvals/budgets. The bounded Memory source is explicitly
-  process-local; queue acceptance is not a terminal-delivery guarantee. The tool
+  process-local. Queued inputs can miss the final model boundary. Hosts can
+  reclaim a terminal Run's retained queue capacity with `MemoryRunInputs.ReleaseRun`
+  after handling outstanding inputs. The tool
   Session facade can pass the same source through. Public history views now
   exclude opaque replay before cloning instead of copying then discarding it;
   original receipts and model continuation remain unchanged. See

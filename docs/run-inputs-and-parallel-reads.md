@@ -49,8 +49,11 @@ fails closed before a new model invocation. Old Runs without a binding do not
 silently enable a new input source at restart. A trusted source must keep IDs,
 text and contiguous sequence immutable, return at most 16 records/64 KiB of text per
 read, honor cancellation and never issue external effects. Each text is at most
-16 KiB. The Memory example is scoped by Run/Actor/Thread, idempotent, capped at
-1 MiB of text and 256 records per scope; **it is not process-loss durable**.
+16 KiB. The idempotent Memory example limits total retained text to 1 MiB.
+It supports up to 256 Run/Actor/Thread scopes and 256 records per scope. For a terminal
+Run, stop and drain its submitters and finish any handoff of unapplied input.
+After the Host's retention period, call `inputs.ReleaseRun(ctx, final.Run)`
+to return that scope's slot and bytes to the queue. A process exit clears all scopes.
 Losing already-consumed Memory history is an error, not an empty successful read.
 Capacity rejection is `ErrInputQueueFull`, not evidence that the Run's execution
 budget was consumed. Submission does not start a worker or wake an approval or

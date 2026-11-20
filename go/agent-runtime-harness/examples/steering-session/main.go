@@ -180,6 +180,9 @@ func run(ctx context.Context, input io.Reader, output io.Writer, interactive boo
 	} {
 		history = append(history, runtimecontext.Entry{ID: entry.id, SourceID: entry.id, TurnID: "turn-1", Message: model.Message{Role: entry.role, Content: model.TextParts(entry.text)}})
 	}
+	if err := queue.ReleaseRun(ctx, current.Run); err != nil {
+		return err
+	}
 	late, err := session.Prompt(ctx, "turn-2", "Look up alpha again")
 	if err != nil || late.Output == nil || string(late.Output.Content) != `"alpha: 09:00"` || late.Turn.ID == result.value.Turn.ID {
 		return errors.New("explicit late-input fallback did not complete a distinct Turn")

@@ -184,6 +184,29 @@ func (queue *MemoryRunInputs) Submit(ctx context.Context, run kernel.Run, id, te
 	return input, nil
 }
 
+// ReleaseRun frees a terminal Run's retained inputs and queue capacity. The
+// Host calls it after draining submitters and finishing recovery or handoff of
+// unapplied inputs. Releasing the same scope again is safe.
+func (queue *MemoryRunInputs) ReleaseRun(ctx context.Context, run kernel.Run) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if run.Status != kernel.RunStatusCompleted && run.Status != kernel.RunStatusFailed && run.Status != kernel.RunStatusCancelled {
+		return ErrInvalidRequest
+	}
+	scope, err := runInputScope(run)
+	if err != nil {
+		return err
+	}
+	queue.mu.Lock()
+	defer queue.mu.Unlock()
+	for _, input := range queue.logs[scope] {
+		queue.bytes -= len(input.Text)
+	}
+	delete(queue.logs, scope)
+	return nil
+}
+
 func (queue *MemoryRunInputs) ReadRunInputs(ctx context.Context, run kernel.Run, after uint64, limit int) ([]RunInput, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

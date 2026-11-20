@@ -49,10 +49,16 @@ type runInputSourceContract interface {
 	ReadRunInputs(context.Context, kernel.Run, uint64, int) ([]agent.RunInput, error)
 }
 
+type memoryRunInputsContract interface {
+	agent.RunInputSource
+	Submit(context.Context, kernel.Run, string, string) (agent.RunInput, error)
+	ReleaseRun(context.Context, kernel.Run) error
+}
+
 var (
 	_ agent.RunInputSource                                = (runInputSourceContract)(nil)
 	_ runInputSourceContract                              = (agent.RunInputSource)(nil)
-	_ agent.RunInputSource                                = (*agent.MemoryRunInputs)(nil)
+	_ memoryRunInputsContract                             = (*agent.MemoryRunInputs)(nil)
 	_ func(string) (*agent.MemoryRunInputs, error)        = agent.NewMemoryRunInputs
 	_ func([]model.Message) []model.Message               = model.CloneMessagesWithoutProviderReplay
 	_ kernel.Store                                        = (storeContract)(nil)

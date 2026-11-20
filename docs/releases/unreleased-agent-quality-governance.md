@@ -67,7 +67,8 @@ boundaries, never mutable in-flight requests or permission grants. Reopen with
 the original source for recovery. Old Runs stay disabled. Do not run older or
 mixed-version workers on input-enabled Runs. The Memory implementation does
 not survive process loss; queued-but-unapplied input at completion needs an
-explicit next Host Turn. See [the boundary guide](../run-inputs-and-parallel-reads.md).
+explicit next Host Turn. After retention, the Host can release the terminal
+Run's capacity with `MemoryRunInputs.ReleaseRun`. See [the boundary guide](../run-inputs-and-parallel-reads.md).
 
 The public-history optimization preserves the existing persisted state and
 private replay, but stops cloning replay that public projection immediately

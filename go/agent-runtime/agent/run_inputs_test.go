@@ -315,6 +315,60 @@ func TestRunInputQueueCapacityIsNotAConsumedRunBudget(t *testing.T) {
 	if err != nil || len(items) != 4 {
 		t.Fatalf("source exceeded its 64 KiB batch bound: count=%d err=%v", len(items), err)
 	}
+	run.Status = kernel.RunStatusFailed
+	if err := queue.ReleaseRun(t.Context(), run); err != nil {
+		t.Fatal(err)
+	}
+	run.ID, run.Status = "next", kernel.RunStatusRunning
+	for index := range 64 {
+		if _, err := queue.Submit(t.Context(), run, fmt.Sprint(index), text); err != nil {
+			t.Fatalf("retired text still consumes capacity at record %d: %v", index, err)
+		}
+	}
+}
+
+func TestRunInputQueueReleasesOnlyTheTerminalScope(t *testing.T) {
+	queue, _ := agent.NewMemoryRunInputs("inputs-v1")
+	run := kernel.Run{Kind: agent.RunKind, Status: kernel.RunStatusRunning,
+		Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "owner"}, Thread: kernel.ThreadRef{Kind: "chat", ID: "thread"}}
+	for i := range 256 {
+		run.ID = fmt.Sprint(i)
+		if _, err := queue.Submit(t.Context(), run, "id", "queued"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	next := run
+	next.ID = "next"
+	for _, status := range []kernel.RunStatus{kernel.RunStatusRunning, kernel.RunStatusWaitingInput, kernel.RunStatusPausedBudget} {
+		run.Status = status
+		if err := queue.ReleaseRun(t.Context(), run); !errors.Is(err, agent.ErrInvalidRequest) {
+			t.Fatalf("release of %s run: %v", status, err)
+		}
+	}
+	run.Status = kernel.RunStatusCancelled
+	foreign := run
+	foreign.Actor.ActorID = "other"
+	if err := queue.ReleaseRun(t.Context(), foreign); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := queue.Submit(t.Context(), next, "id", "queued"); !errors.Is(err, agent.ErrInputQueueFull) {
+		t.Fatalf("release of another scope freed a slot: %v", err)
+	}
+	for range 2 {
+		if err := queue.ReleaseRun(t.Context(), run); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := queue.ReadRunInputs(t.Context(), run, 1, 16); !errors.Is(err, agent.ErrInvalidRequest) {
+		t.Fatalf("retired history accepted a previous cursor: %v", err)
+	}
+	if receipt, err := queue.Submit(t.Context(), next, "id", "queued"); err != nil || receipt.Sequence != 1 {
+		t.Fatalf("new run could not use released slot: %+v %v", receipt, err)
+	}
+	next.Status = kernel.RunStatusCompleted
+	if err := queue.ReleaseRun(t.Context(), next); err != nil {
+		t.Fatal(err)
+	}
 }
 
 var errRunInputACKLost = errors.New("fixture input CAS ACK lost")
