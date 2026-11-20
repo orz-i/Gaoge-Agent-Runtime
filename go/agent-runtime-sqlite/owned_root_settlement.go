@@ -13,21 +13,25 @@ var (
 )
 
 func (s *Store) VerifyReturnedRootSettlement(ctx context.Context, expected kernel.Snapshot) error {
-	return s.verifyRootSettlement(ctx, expected, false, true)
+	return s.verifyRootSettlement(ctx, expected, nil)
+}
+
+func (s *Store) VerifyCompletedToolReturn(ctx context.Context, expected kernel.Snapshot) error {
+	return s.verifyRootSettlement(ctx, expected, kernel.VerifyCompletedToolReturnFacts)
 }
 
 func (s *Store) VerifyPreparedRootSettlement(ctx context.Context, expected kernel.Snapshot) error {
-	return s.verifyRootSettlement(ctx, expected, true)
+	return s.verifyRootSettlement(ctx, expected, kernel.VerifyPreparedRootSettlementFacts)
 }
 
 func (s *Store) VerifyOwnedRootSettlement(ctx context.Context, expected kernel.Snapshot) error {
-	return s.verifyRootSettlement(ctx, expected, false)
+	return s.verifyRootSettlement(ctx, expected, kernel.VerifyOwnedRootSettlementFacts)
 }
 
 // SQLite's immediate writer transaction is the same authority boundary used by
 // physical admission, retirement, execution takeover and Cancel. TTL alone
 // never supplies a callback return or upgrades historical Host custody.
-func (s *Store) verifyRootSettlement(ctx context.Context, expected kernel.Snapshot, prepared bool, returned ...bool) error {
+func (s *Store) verifyRootSettlement(ctx context.Context, expected kernel.Snapshot, check kernel.RootSettlementCheck) error {
 	if s == nil || s.db == nil || ctx == nil || expected.Run.ID == "" {
 		return kernel.ErrInvalidInput
 	}
@@ -89,7 +93,7 @@ func (s *Store) verifyRootSettlement(ctx context.Context, expected kernel.Snapsh
 		}
 		receipts = append(receipts, r)
 	}
-	if len(returned) == 1 && returned[0] {
+	if check == nil {
 		grant, _, err := loadPhysicalGrant(ctx, tx, expected.Run.ID)
 		if err != nil {
 			return err
@@ -104,8 +108,5 @@ func (s *Store) verifyRootSettlement(ctx context.Context, expected kernel.Snapsh
 	if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM runtime_child_effect_grants WHERE parent_run_id=? OR child_run_id=?`, expected.Run.ID, expected.Run.ID).Scan(&active); err != nil {
 		return err
 	}
-	if prepared {
-		return kernel.VerifyPreparedRootSettlementFacts(expected, current, epoch, physicalEpoch, lease, active != 0, receipts)
-	}
-	return kernel.VerifyOwnedRootSettlementFacts(expected, current, epoch, physicalEpoch, lease, active != 0, receipts)
+	return check(expected, current, epoch, physicalEpoch, lease, active != 0, receipts)
 }

@@ -12,5 +12,5 @@ var _ kernel.PreparedRootSettlementStore = (*Store)(nil)
 // original first-party Prepare callback. This never borrows the retirement
 // of a later Model, Tool or Host Approval callback.
 func (s *Store) VerifyPreparedRootSettlement(ctx context.Context, expected kernel.Snapshot) error {
-	return s.verifyRootSettlement(ctx, expected, true)
+	return s.verifyRootSettlement(ctx, expected, kernel.VerifyPreparedRootSettlementFacts)
 }

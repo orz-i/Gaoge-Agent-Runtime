@@ -12,17 +12,21 @@ var _ kernel.OwnedRootSettlementStore = (*KernelStore)(nil)
 var _ kernel.ReturnedRootSettlementStore = (*KernelStore)(nil)
 
 func (s *KernelStore) VerifyReturnedRootSettlement(ctx context.Context, expected kernel.Snapshot) error {
-	return s.verifyRootSettlement(ctx, expected, false, true)
+	return s.verifyRootSettlement(ctx, expected, nil)
+}
+
+func (s *KernelStore) VerifyCompletedToolReturn(ctx context.Context, expected kernel.Snapshot) error {
+	return s.verifyRootSettlement(ctx, expected, kernel.VerifyCompletedToolReturnFacts)
 }
 
 // VerifyOwnedRootSettlement locks the exact Kernel Run and observes *all*
 // physical grants and acknowledged retirements in one transaction. It never
 // inserts a new lease or treats a historical same-ID terminal status as proof.
 func (s *KernelStore) VerifyOwnedRootSettlement(ctx context.Context, expected kernel.Snapshot) error {
-	return s.verifyRootSettlement(ctx, expected, false)
+	return s.verifyRootSettlement(ctx, expected, kernel.VerifyOwnedRootSettlementFacts)
 }
 
-func (s *KernelStore) verifyRootSettlement(ctx context.Context, expected kernel.Snapshot, prepared bool, returned ...bool) error {
+func (s *KernelStore) verifyRootSettlement(ctx context.Context, expected kernel.Snapshot, check kernel.RootSettlementCheck) error {
 	if s == nil || s.db == nil || ctx == nil || expected.Run.ID == "" {
 		return kernel.ErrInvalidInput
 	}
@@ -53,7 +57,7 @@ func (s *KernelStore) verifyRootSettlement(ctx context.Context, expected kernel.
 			}
 			receipts = append(receipts, receipt)
 		}
-		if len(returned) == 1 && returned[0] {
+		if check == nil {
 			var roots []models.KernelChildEffectGrantRecord
 			if err = tx.Where("child_run_id = ?", expected.Run.ID).Limit(2).Find(&roots).Error; err != nil {
 				return translateKernelError(err)
@@ -81,12 +85,7 @@ func (s *KernelStore) verifyRootSettlement(ctx context.Context, expected kernel.
 		if !lease.ExpiresAt.After(now) {
 			lease = kernel.ExecutionLease{}
 		}
-		if prepared {
-			return kernel.VerifyPreparedRootSettlementFacts(
-				expected, current, run.ExecutionEpoch, run.ExecutionPhysicalEpoch, lease, active != 0, receipts,
-			)
-		}
-		return kernel.VerifyOwnedRootSettlementFacts(
+		return check(
 			expected, current, run.ExecutionEpoch, run.ExecutionPhysicalEpoch, lease, active != 0, receipts,
 		)
 	})

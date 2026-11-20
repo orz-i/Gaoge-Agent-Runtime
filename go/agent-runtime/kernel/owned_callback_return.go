@@ -19,10 +19,16 @@ type OwnedCallbackCustody string
 const (
 	OwnedCustodyPrepared OwnedCallbackCustody = "prepared-v1"
 	OwnedCustodyScoped   OwnedCallbackCustody = "scoped-v1"
+	// OwnedToolResultReturn binds committed Tool results for observation only.
+	OwnedToolResultReturn OwnedCallbackCustody = "tool-result-v1"
 )
 
 func (c OwnedCallbackCustody) Valid() bool {
-	return c == "" || c == OwnedCustodyPrepared || c == OwnedCustodyScoped
+	return c == "" || c.permitsControl() || c == OwnedToolResultReturn
+}
+
+func (c OwnedCallbackCustody) permitsControl() bool {
+	return c == OwnedCustodyPrepared || c == OwnedCustodyScoped
 }
 
 type OwnedPhysicalCallbackOutcome struct {

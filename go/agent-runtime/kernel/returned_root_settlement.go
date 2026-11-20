@@ -42,7 +42,7 @@ func VerifyReturnedRootSettlementFacts(expected, current Snapshot, epoch, physic
 		previous := receipt.Evidence.Grant
 		if !receipt.Valid() || previous.ChildRunID != current.Run.ID || previous.ExecutionEpoch >= epoch || seen[previous.ExecutionEpoch] ||
 			receipt.Phase != "ACKNOWLEDGED" || !receipt.Evidence.Completion.HostCompleted ||
-			!receipt.Evidence.Completion.LeaseOwned || receipt.Evidence.Completion.ControlCustody == "" {
+			!receipt.Evidence.Completion.LeaseOwned || !receipt.Evidence.Completion.ControlCustody.permitsControl() {
 			return ErrExecutionConflict
 		}
 		seen[previous.ExecutionEpoch] = true

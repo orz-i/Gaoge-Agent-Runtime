@@ -294,6 +294,9 @@ type ExecutionRequest struct {
 type Receipt struct {
 	ExecutionID string `json:"executionID"`
 	Disposition string `json:"disposition"`
+	// OwnerReceiptDigest binds an optional immutable provider receipt without
+	// exposing its identifier in the native transcript.
+	OwnerReceiptDigest string `json:"ownerReceiptDigest,omitempty"`
 }
 
 // ReceiptDispositionPending keeps the current Agent Tool call durable without
@@ -511,6 +514,7 @@ func validExecutionResult(result ExecutionResult) bool {
 	if len(result.Content) > MaxExecutionResultContentBytes ||
 		!json.Valid(result.Content) ||
 		strings.TrimSpace(result.Receipt.ExecutionID) == "" ||
+		result.Receipt.OwnerReceiptDigest != "" && !validDigest(result.Receipt.OwnerReceiptDigest) ||
 		!ValidPending(result.Pending) {
 		return false
 	}
