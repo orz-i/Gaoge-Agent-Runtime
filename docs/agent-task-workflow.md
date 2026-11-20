@@ -1,42 +1,20 @@
-# A single Agent: create, use evidence, and recover
+# Advanced Agent composition: evidence and recovery
 
-The supported path is explicit host composition of an Agent, Tools and stores.
-This guide connects the existing execution and Context mechanisms through one
-Session API. It introduces no additional Session authority, scheduler or store.
+Start with the [Agent Session quickstart](agent-session.md). This guide is for
+Hosts that need custom approval, recovery, or Context wiring. It uses the same
+execution and Session API; there is no second scheduler or Store.
 
-## 1. Start with an Agent that executes
+## 1. Know what executes a Run
 
-From a source checkout:
-
-```sh
-go run ./go/agent-runtime/examples/quickstart
-```
-
-The offline fixture calls a real registered Tool through `agent.Runner` and
-produces a final answer from its returned data. It demonstrates execution without
-credentials; its deterministic model is not a language-model quality benchmark.
-Replace the fixture with a configured `model.Client` for model-backed work. The
+The [low-level Agent example](../go/agent-runtime/examples/quickstart/main.go)
+shows a single Run without Sessions. Replace its fixture with a configured
+`model.Client` for model-backed work. The
 [provider example](../go/agent-runtime-provider/examples/providers/main.go) shows OpenAI
 and Anthropic configuration.
 
 A bare `kernel.Create` only persists a Run record. The model/Tool loop belongs to
 `agent.Runner.StartRun`. Allocate a stable Run ID before a fenced Start, or use
 Harness's stable HostThread/HostTurn identities to derive the execution identity.
-
-For a conversation without archival/compaction policy, start with the
-[small Session example](../go/agent-runtime-harness/examples/session/README.md):
-
-```sh
-go run ./go/agent-runtime-harness/examples/session
-```
-
-It adds exactly one Harness Store and one pure Context Manager to the same
-Kernel/Agent. The Host supplies immutable source-message ancestry; the existing
-`MaterializeContextWindowRequest` injects it **before** the one frozen
-ModelInvocation. A basic Harness `Clock` is optional and defaults to the system
-clock, but a persistent Store's execution clock remains authoritative for
-leases. Neither Context nor the provider is selected implicitly. Memory-only
-examples do not survive a process exit.
 
 ## 2. Assemble bounded, retrievable Context
 
@@ -101,8 +79,8 @@ current history must reject the changed admission (`ErrConflict`), not rerun
 Model/Tool work. Use `session.Load(ctx, oldTurnID)` to read a committed
 historical result, `LoadState` for bounded status, or retain the *original*
 immutable ContextSeed if an exact `Prompt` submission retry is required.
-The [small Session example](../go/agent-runtime-harness/examples/session/README.md)
-checks this distinction after both Turns have completed.
+The [Session guide](agent-session.md#history-identity-and-recovery) shows the
+same separation for the recommended constructor.
 
 | Operation | Purpose | Advances model/Tool work? |
 | --- | --- | --- |

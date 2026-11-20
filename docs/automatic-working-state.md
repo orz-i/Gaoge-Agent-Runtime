@@ -11,22 +11,27 @@ token counter, and introduces no Kernel RunKind, Store method or SQL column.
 
 ## Configuration
 
-Set a positive frozen policy alongside the original per-call output ceiling:
+Set a frozen summary policy alongside the original per-call output ceiling in
+[OpenAgentSession](agent-session.md), with `Context.ReadArtifacts: true`:
 
 ```go
-Config: harness.ConfigSnapshot{
-    Model: selectedModel,
-    MaxModelOutputTokens: 1024,
-    WorkingStateSummary: &agent.WorkingStateSummaryPolicy{
-        MaxInputTokens: 8192,
-        MaxSerializedBytes: 64 << 10,
+session, err := harness.OpenAgentSession(harness.AgentSessionOptions{
+    Runtime: runtime, Store: harnessStore, Model: modelClient,
+    Session: harness.SessionOptions{Config: harness.ConfigSnapshot{
+        Model: selectedModel,
+        MaxModelOutputTokens: 1024,
+        WorkingStateSummary: &agent.WorkingStateSummaryPolicy{
+            MaxInputTokens: 8192,
+            MaxSerializedBytes: 64 << 10,
+        },
+        // Configure the original ContextPolicy here.
+    }},
+    // Pair business Tools and policies in LocalTools when required.
+    Context: harness.AgentSessionContextOptions{
+        ResolveWindow: resolveWindow,
+        ReadArtifacts: true,
     },
-    ToolKeys: []string{harness.ContextArtifactToolKey},
-    ToolPolicies: []harness.ToolPolicySnapshot{
-        harness.ContextArtifactToolPolicySnapshot(),
-    },
-    // Add other explicitly selected Tools and the original ContextPolicy here.
-},
+})
 ```
 
 The numeric input limits are examples of additional service bounds, not model
@@ -51,7 +56,7 @@ dependencies. Recovery may repeat these reads; they must not hide model
 generation, Tool execution or business mutations. The exact Store ports remain
 trusted storage with their original immutable-write/CAS contracts.
 Dedicated native summary recovery rejects Host `Inputs` before binding or
-reading an input source. Ordinary low-level composition may use queued inputs;
+reading an input source. Ordinary Session composition may use queued inputs;
 they enter before a later business intent is frozen and cannot rewrite an
 already pending intent or turn a summary into an assistant answer.
 
@@ -64,12 +69,11 @@ The Context must be owned by that root Run, source-aligned,
 and contain safely removable history. Eager Tool/runtime tails, read-only or
 Handoff contexts, unsupported replay/media, insufficient input/call allowance,
 and unrepresentable WorkingState provenance do not create a summary call.
-Historical structured values must also survive the existing archive projection
-unchanged. Unsafe Raw JSON numbers or ambiguous duplicate keys skip summary;
-older completed receipts with such a source cannot install derived state.
-The inherited non-summary/fallback archive still has a float64 canonicalization
-limit for structured numbers. This feature does not migrate that older format;
-see the [review record](audits/2026-11-20-automatic-working-state-stage4-review.md).
+The frozen v1 recipe requires legacy-compatible number literals and unambiguous
+JSON keys. Ineligible input skips summary; older completed receipts with such
+a source cannot install derived state. [New ordinary archives](releases/unreleased-context-archive-fidelity.md)
+now preserve number literals that the old codec would change. That does not
+change v1 summary eligibility or alter previously committed archives.
 
 Summary supports only portable `temperature`, `top_p` and `reasoning.effort`
 ModelOptions. Other Provider-native options may carry Tools, continuation or

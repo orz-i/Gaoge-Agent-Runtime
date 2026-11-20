@@ -5,6 +5,16 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- **Exact Context archive numbers:** Preserve original JSON number literals in
+  new archives and reject ambiguous JSON. Only archives that need the new
+  representation use a versioned encoding; compatible and previously stored
+  artifacts keep their IDs and hashes. See `docs/releases/unreleased-context-archive-fidelity.md`.
+- **One Session quickstart:** Recommend `harness.OpenAgentSession` with paired
+  `LocalTools`, an explicit archive grant, and optional queued inputs/read
+  exploration. `OpenToolAgentSession` and `OpenTextAgentSession` keep their
+  existing behavior but are deprecated pending the next breaking cleanup.
+  See `docs/agent-session.md` for migration.
+
 - A parent Agent can consume the completed result of a fixed local deferred
   child when Host approval policies were registered and never entered. Harness
   verifies the original child and its acknowledged callback history. Entering
@@ -22,10 +32,10 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
   Review fixes actual-ID/typed-input bounds, prospective business framing,
   commit-time reconciliation and missing-Run Resume compatibility.
   Integrate the run-input/history baseline without admitting Host Inputs to
-  dedicated native summary recovery. Keep both Session facades; optional
-  positive Tool Session output ceilings require matching window reservation.
-  Reject lossy source projections for automatic summaries while documenting
-  the inherited structured-number limitation of the old fallback archive.
+  dedicated native summary recovery. Preserve both old Session facades during
+  deprecation; optional positive Tool Session output ceilings require matching
+  window reservation.
+  Keep the v1 automatic summary recipe on legacy-compatible source values.
   Shared-budget and the older managed-Context combination remain rejected. See
   `docs/releases/unreleased-automatic-working-state.md`.
 
@@ -79,8 +89,8 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
   unknown outcomes/approvals/budgets. The bounded Memory source is explicitly
   process-local. Queued inputs can miss the final model boundary. Hosts can
   reclaim a terminal Run's retained queue capacity with `MemoryRunInputs.ReleaseRun`
-  after handling outstanding inputs. The tool
-  Session facade can pass the same source through. Public history views now
+  after handling outstanding inputs. The legacy Tool Session facade can pass
+  the same source through; new code should use `OpenAgentSession`. Public history views now
   exclude opaque replay before cloning instead of copying then discarding it;
   original receipts and model continuation remain unchanged. See
   `docs/run-inputs-and-parallel-reads.md` and the long-history projection audit.

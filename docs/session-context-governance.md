@@ -11,13 +11,11 @@ Status: opt-in Session/Context ownership unchanged. **The pre-stable Model Reque
 
 These concepts must **not** become competing sources of truth. A persistent Session is not a copy of the conversation's raw messages. A Context checkpoint is a model-visible projection, not a replacement for Host history.
 
-## Minimal text Session API
+## Session API and ownership
 
-For local Tools with bounded Context and exact archive retrieval, the optional
-[`OpenToolAgentSession` composition](tool-agent-session.md) wires the same
-Agent/Harness Session. The existing text-only facade and explicit advanced
-composition retain their separate supported scopes; no new Session authority
-is introduced.
+Use [`OpenAgentSession`](agent-session.md) for bounded Sessions with or without
+local Tools. It wires the same Agent/Harness components. `Runner.OpenSession`
+is the low-level binding when the Host explicitly composes its own runners.
 
 `Runner.OpenSession(SessionOptions)` returns a **stateless handle** offering `Prompt(ctx, stableTurnID, text)`, `Load(ctx, stableTurnID)`, bounded `LoadState(ctx, stableTurnID)`, paged `Timeline(ctx, stableTurnID, afterSeq, limit)`, `Refresh(ctx, stableTurnID)`, and `Resume(ctx, stableTurnID)`. It delegates to `Runner.StartAgentTurn`/Load/LoadState/ListTimeline/Refresh/ResumeTurn. The complete [single-Agent task guide](agent-task-workflow.md) connects these methods to Context assembly, Tool use and interruption recovery.
 
@@ -141,7 +139,7 @@ Compaction additionally requires:
 
 The Context tool must enforce its existing session scope and authorization. The host is responsible for additional tenant isolation, artifact access policy, and any external blob store.
 
-The former Context, Role and Capability model middleware bridges are **removed**, not deprecated. Compose `NewRoleModelRequestPreparer` and `NewCapabilityInvocationRequestPreparer` **before** `MaterializeContextWindowRequest` or `NewManagedContextPreparer` using `agent.ChainModelRequestPreparers`. Managed Context must run last to assess the complete model-visible messages and Tool schemas. Role specialist instructions are already persisted as child instructions before intent creation. There is no legacy late-injection fallback; unsupported old in-flight Beta Model Invocations must be drained or explicitly reconciled before deployment. See [Breaking Changes](breaking-changes.md).
+The former Context, Role and Capability model middleware bridges are **removed**. When composing request preparers explicitly, run bounded Context after earlier projections so it can assess the complete model-visible messages and Tool schemas. A delegated Agent's instructions are frozen before the child starts. There is no legacy late-injection fallback; unsupported old in-flight Beta Model Invocations must be drained or explicitly reconciled before deployment. See [Breaking Changes](breaking-changes.md).
 
 ## Known limits and follow-up work
 
@@ -153,9 +151,8 @@ The former Context, Role and Capability model middleware bridges are **removed**
 ## Verification
 
 ```sh
-cd go/agent-runtime && go test -count=1 ./agent ./context ./provider/... ./model
-cd ../agent-runtime-harness && go test -count=1 ./...
-make check
+go test -race ./go/agent-runtime/agent ./go/agent-runtime/context ./go/agent-runtime-harness/... -count=1
+make integration
 ```
 
 Regression suites include pre-intent commit-loss recovery, post-intent middleware mutation rejection, identity/tool authority validation, single pre-intent Context materialization, two-turn Session restart and replay, text-window rollover, exact artifact persistence, next-turn source-path reuse, crash between Context rollover and Agent intent commit, and fail-closed model window budget enforcement. The real PostgreSQL suite additionally exercises `OpenSession` with managed compaction, persisted artifacts, a fresh Store connection, and a subsequent turn without replaying archived history. A separate Harness regression covers role-specialist delegation with managed Context and scoped hosted-Tool grants.
