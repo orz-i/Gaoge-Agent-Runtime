@@ -26,6 +26,8 @@ func ValidateUniqueJSONKeys(data []byte) error {
 		return ErrAmbiguousJSON
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
+	// Key validation is structural; a valid JSON number need not fit float64.
+	decoder.UseNumber()
 	if err := readUniqueJSONValue(decoder, 0); err != nil {
 		return ErrAmbiguousJSON
 	}

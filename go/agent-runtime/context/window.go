@@ -2,12 +2,15 @@
 package context
 
 import (
+	"bytes"
 	stdcontext "context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"math/big"
 	"sort"
 	"strconv"
 	"strings"
@@ -391,19 +394,6 @@ type Assessment struct {
 	SerializedBytes       int64       `json:"serializedBytes"`
 }
 
-// Artifact seals durable content removed from the inline active window.
-type Artifact struct {
-	ID            string          `json:"id"`
-	Kind          ArtifactKind    `json:"kind"`
-	ScopeID       string          `json:"scopeID"`
-	Generation    int             `json:"generation"`
-	SourceID      string          `json:"sourceID,omitempty"`
-	Content       string          `json:"content,omitempty"`
-	ContentJSON   json.RawMessage `json:"contentJSON,omitempty"`
-	ContentHash   string          `json:"contentHash"`
-	TokenEstimate int64           `json:"tokenEstimate,omitempty"`
-}
-
 // Trace records content-free Context Window evolution facts.
 type Trace struct {
 	Reason              string      `json:"reason"`
@@ -764,7 +754,7 @@ func (manager *Manager) Capture(_ stdcontext.Context, request CaptureRequest) (C
 func captureArtifactIDs(previous Checkpoint, artifacts []Artifact) ([]string, error) {
 	ids := append([]string(nil), previous.ArtifactIDs...)
 	for _, artifact := range CloneArtifacts(artifacts) {
-		if err := normalizeArtifact(&artifact, previous.ScopeID, previous.Generation); err != nil {
+		if err := normalizeArtifact(&artifact, previous.ScopeID, previous.Generation, false); err != nil {
 			return nil, err
 		}
 		if artifact.ScopeID != previous.ScopeID || artifact.Generation != previous.Generation {
@@ -828,7 +818,7 @@ func (manager *Manager) Rollover(_ stdcontext.Context, request RolloverRequest) 
 	}
 	artifacts := CloneArtifacts(request.Artifacts)
 	for index := range artifacts {
-		if err := normalizeArtifact(&artifacts[index], previous.ScopeID, previous.Generation+1); err != nil {
+		if err := normalizeArtifact(&artifacts[index], previous.ScopeID, previous.Generation+1, false); err != nil {
 			return Checkpoint{}, err
 		}
 	}
@@ -1166,29 +1156,6 @@ func normalizeTokenCountContext(value TokenCountContext) TokenCountContext {
 	return value
 }
 
-func NewArtifact(kind ArtifactKind, scopeID string, generation int, sourceID string, content string, contentJSON json.RawMessage) (Artifact, error) {
-	artifact := Artifact{
-		Kind: kind, ScopeID: strings.TrimSpace(scopeID), Generation: generation,
-		SourceID: strings.TrimSpace(sourceID), Content: content, ContentJSON: cloneJSON(contentJSON),
-	}
-	if err := normalizeArtifact(&artifact, artifact.ScopeID, generation); err != nil {
-		return Artifact{}, err
-	}
-	return artifact, nil
-}
-
-func ValidArtifact(value Artifact) bool {
-	clone := CloneArtifacts([]Artifact{value})[0]
-	expectedID := strings.TrimSpace(clone.ID)
-	expectedHash := strings.TrimSpace(clone.ContentHash)
-	expectedTokens := clone.TokenEstimate
-	if normalizeArtifact(&clone, clone.ScopeID, clone.Generation) != nil {
-		return false
-	}
-	return expectedID != "" && expectedHash != "" && clone.ID == expectedID &&
-		clone.ContentHash == expectedHash && clone.TokenEstimate == expectedTokens
-}
-
 func ValidCheckpoint(value Checkpoint) bool {
 	if strings.TrimSpace(value.ID) == "" || strings.TrimSpace(value.ScopeID) == "" || strings.TrimSpace(value.CacheIdentity) == "" ||
 		value.Generation <= 0 || value.Revision <= 0 ||
@@ -1437,11 +1404,105 @@ func messagesPrefix(prefix, complete []model.Message) bool {
 }
 
 func sameMessage(left, right model.Message) bool {
-	left = canonicalMessage(left)
-	right = canonicalMessage(right)
-	leftJSON, leftErr := canonicalJSON(left)
-	rightJSON, rightErr := canonicalJSON(right)
-	return leftErr == nil && rightErr == nil && string(leftJSON) == string(rightJSON)
+	leftJSON, leftErr := json.Marshal(canonicalMessage(left))
+	rightJSON, rightErr := json.Marshal(canonicalMessage(right))
+	if leftErr != nil || rightErr != nil {
+		return false
+	}
+	if bytes.Equal(leftJSON, rightJSON) {
+		return true
+	}
+	// Preserve semantic JSON comparison for reordered keys and equivalent
+	// number spellings without letting float64 rounding equate distinct values.
+	if jsoncontract.ValidateUniqueJSONKeys(leftJSON) != nil || jsoncontract.ValidateUniqueJSONKeys(rightJSON) != nil {
+		return false
+	}
+	leftValue, leftErr := decodeJSONNumbers(leftJSON)
+	rightValue, rightErr := decodeJSONNumbers(rightJSON)
+	return leftErr == nil && rightErr == nil && equalJSONNumbers(leftValue, rightValue)
+}
+
+func decodeJSONNumbers(raw []byte) (any, error) {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return nil, err
+	}
+	if _, err := decoder.Token(); err != io.EOF {
+		return nil, ErrInvalidInput
+	}
+	return value, nil
+}
+
+func equalJSONNumbers(left, right any) bool {
+	switch left := left.(type) {
+	case json.Number:
+		right, ok := right.(json.Number)
+		return ok && equalDecimalNumbers(string(left), string(right))
+	case []any:
+		right, ok := right.([]any)
+		if !ok || len(left) != len(right) {
+			return false
+		}
+		for index := range left {
+			if !equalJSONNumbers(left[index], right[index]) {
+				return false
+			}
+		}
+		return true
+	case map[string]any:
+		right, ok := right.(map[string]any)
+		if !ok || len(left) != len(right) {
+			return false
+		}
+		for key, value := range left {
+			other, ok := right[key]
+			if !ok || !equalJSONNumbers(value, other) {
+				return false
+			}
+		}
+		return true
+	default:
+		return left == right
+	}
+}
+
+func equalDecimalNumbers(left, right string) bool {
+	leftNegative, leftDigits, leftExponent, leftOK := decimalNumberIdentity(left)
+	rightNegative, rightDigits, rightExponent, rightOK := decimalNumberIdentity(right)
+	return leftOK && rightOK && leftNegative == rightNegative && leftDigits == rightDigits && leftExponent.Cmp(rightExponent) == 0
+}
+
+// decimalNumberIdentity reduces a JSON decimal to sign, significant digits
+// and a base-10 exponent. It avoids both float64 collisions and constructing
+// enormous powers of ten for attacker-controlled exponent values.
+func decimalNumberIdentity(value string) (bool, string, *big.Int, bool) {
+	negative := strings.HasPrefix(value, "-")
+	if negative {
+		value = value[1:]
+	}
+	exponent := new(big.Int)
+	if index := strings.IndexAny(value, "eE"); index >= 0 {
+		if _, ok := exponent.SetString(value[index+1:], 10); !ok {
+			return false, "", nil, false
+		}
+		value = value[:index]
+	}
+	fractionDigits := 0
+	if index := strings.IndexByte(value, '.'); index >= 0 {
+		fractionDigits = len(value) - index - 1
+		value = value[:index] + value[index+1:]
+	}
+	digits := strings.TrimLeft(value, "0")
+	if digits == "" {
+		return false, "0", new(big.Int), true
+	}
+	exponent.Sub(exponent, big.NewInt(int64(fractionDigits)))
+	trimmed := strings.TrimRight(digits, "0")
+	trailingZeros := len(digits) - len(trimmed)
+	exponent.Add(exponent, big.NewInt(int64(trailingZeros)))
+	return negative, trimmed, exponent, true
 }
 
 func canonicalMessage(value model.Message) model.Message {
@@ -1452,41 +1513,6 @@ func canonicalMessage(value model.Message) model.Message {
 		value.ToolCalls = nil
 	}
 	return value
-}
-
-func normalizeArtifact(value *Artifact, scopeID string, generation int) error {
-	if value == nil {
-		return ErrInvalidInput
-	}
-	value.ScopeID = strings.TrimSpace(value.ScopeID)
-	value.SourceID = strings.TrimSpace(value.SourceID)
-	if value.ScopeID == "" {
-		value.ScopeID = strings.TrimSpace(scopeID)
-	}
-	if value.Generation <= 0 {
-		value.Generation = generation
-	}
-	if value.ScopeID == "" || value.Generation <= 0 || (value.Kind != ArtifactCompaction && value.Kind != ArtifactToolResult) {
-		return ErrInvalidInput
-	}
-	if len(value.Content) > MaxArtifactPayloadBytes || len(value.ContentJSON) > MaxArtifactPayloadBytes-len(value.Content) {
-		return &ArtifactPayloadLimitError{
-			PayloadBytes: int64(len(value.Content)) + int64(len(value.ContentJSON)),
-			LimitBytes:   MaxArtifactPayloadBytes,
-		}
-	}
-	value.ContentJSON = normalizeRawJSON(value.ContentJSON)
-	payload, err := canonicalJSON(struct {
-		Content     string          `json:"content,omitempty"`
-		ContentJSON json.RawMessage `json:"contentJSON,omitempty"`
-	}{value.Content, value.ContentJSON})
-	if err != nil {
-		return err
-	}
-	value.ContentHash = hashBytes(payload)
-	value.TokenEstimate = estimatedTokens(payload)
-	value.ID = stableID("ctxa", value.ScopeID, strconv.Itoa(value.Generation), string(value.Kind), value.SourceID, value.ContentHash)
-	return nil
 }
 
 func cloneMessage(value model.Message) model.Message {
@@ -1515,21 +1541,6 @@ func canonicalJSON(value any) ([]byte, error) {
 		return nil, errors.Join(ErrInvalidInput, err)
 	}
 	return encoded, nil
-}
-
-func normalizeRawJSON(value json.RawMessage) json.RawMessage {
-	if len(value) == 0 {
-		return nil
-	}
-	var normalized any
-	if err := json.Unmarshal(value, &normalized); err != nil {
-		return cloneJSON(value)
-	}
-	encoded, err := json.Marshal(normalized)
-	if err != nil {
-		return cloneJSON(value)
-	}
-	return encoded
 }
 
 func cloneJSON(value json.RawMessage) json.RawMessage { return append(json.RawMessage(nil), value...) }

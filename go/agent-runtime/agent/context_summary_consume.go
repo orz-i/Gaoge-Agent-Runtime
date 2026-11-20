@@ -34,9 +34,8 @@ func (runner *Runner) consumeContextSummary(ctx context.Context, snapshot kernel
 		!sameBoundedValue(read.Cursor.Turn.ContextRef, samplingRef(read.Cursor.Checkpoint)) {
 		return snapshot, ErrInvalidRequest
 	}
-	// Older admitted summary recipes may refer to a source whose structured
-	// values cannot survive the existing archive projection. Preserve its
-	// receipt, but do not install derived facts from that altered evidence.
+	// The v1 recipe can only install state from a legacy-compatible source.
+	// Never rebuild an older intent or its evidence with a different codec.
 	if !summaryPreservesSourceValues(runtimecontext.Materialize(read.SourceCheckpoint.Window)) {
 		return snapshot, ErrInvalidRequest
 	}

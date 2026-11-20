@@ -264,11 +264,10 @@ func summaryTextOnly(messages []model.Message) bool {
 	return true
 }
 
-// The existing archive codec normalizes JSON through float64. Do not spend a
-// new summary call when that projection would change historical task values.
-// UseNumber is local validation only: persisted hashes and the shared archive
-// codec retain their existing compatibility contract. Numeric spelling changes
-// are conservatively ineligible even when they denote the same value.
+// The frozen v1 summary recipe remains limited to sources whose number
+// literals are unchanged by the legacy codec. Ordinary archives can now seal
+// additional values, but this does not change v1 summary eligibility or how
+// recovery reconstructs the artifacts of an already admitted summary.
 func summaryPreservesSourceValues(messages []model.Message) bool {
 	raw, err := json.Marshal(messages)
 	if err != nil || jsoncontract.ValidateUniqueJSONKeys(raw) != nil {

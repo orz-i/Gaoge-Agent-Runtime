@@ -12,7 +12,7 @@ import (
 func TestContextArtifactToolReadsExactPayloadByDurableRunOwnership(t *testing.T) {
 	t.Parallel()
 	store, turn, checkpoint, root := contextRunMiddlewareFixture(t)
-	payload := json.RawMessage(`{"removed":[{"role":"user","content":"alpha beta gamma"}]}`)
+	payload := json.RawMessage(`{"removed":[{"amount":0.10000000000000001,"id":9007199254740993,"text":"alpha beta gamma 🌱"}]}`)
 	artifact, err := runtimecontext.NewArtifact(
 		runtimecontext.ArtifactCompaction, turn.SessionID, checkpoint.Generation,
 		checkpoint.CoveredThroughSourceID, "", payload,
@@ -23,7 +23,7 @@ func TestContextArtifactToolReadsExactPayloadByDurableRunOwnership(t *testing.T)
 	if _, _, err = store.PutContextArtifact(t.Context(), artifact); err != nil {
 		t.Fatal(err)
 	}
-	exactPayload := string(artifact.ContentJSON)
+	exactPayload := string(payload)
 	handler := NewContextArtifactToolHandler(store, nil)
 	first := executeContextArtifactRead(t, handler, root.ExecutionRefID, artifact.ID, 0, 12)
 	assertFirstContextArtifactPage(t, first, artifact, exactPayload)
