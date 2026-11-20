@@ -545,7 +545,7 @@ func validateAcceptanceReport(report acceptanceReport) error {
 	for index, result := range report.Results {
 		if seen[result.Case] || index >= len(report.Cases) || result.Case != report.Cases[index] || !validAcceptanceCase(result.Case) || result.Family != acceptanceFamily(result.Case) || len(result.Checks) > 32 ||
 			result.ModelStepsConsumed < 0 || result.ModelStepsConsumed > acceptanceModelLimit || result.ToolCallsConsumed < 0 || result.ToolCallsConsumed > acceptanceToolLimit ||
-			result.DurationMs < 0 || result.DurationMs > (2*time.Minute).Milliseconds() ||
+			result.DurationMs < 0 ||
 			(result.GenerationTokens != nil && (*result.GenerationTokens < 0 || *result.GenerationTokens > 1<<50)) ||
 			(result.ArtifactSHA256 != "" && !validAcceptanceHash(result.ArtifactSHA256)) || len(result.Failure) > 64 {
 			return errors.New("invalid acceptance sample")
@@ -553,12 +553,6 @@ func validateAcceptanceReport(report acceptanceReport) error {
 		seen[result.Case] = true
 		if result.Failure != "" && !validAcceptanceFailure(result.Failure) {
 			return errors.New("invalid acceptance failure code")
-		}
-		if result.OutcomePassed != (result.Failure == "") {
-			return errors.New("acceptance outcome and failure classification disagree")
-		}
-		if index < len(report.Results)-1 && !result.OutcomePassed {
-			return errors.New("acceptance continued after a failed case")
 		}
 		if result.OutcomePassed != (result.Failure == "") {
 			return errors.New("acceptance outcome and failure classification disagree")

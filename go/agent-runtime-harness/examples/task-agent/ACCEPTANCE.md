@@ -56,18 +56,20 @@ workspace.
 - Reports omit raw model answers, source bodies, endpoints, credentials, Run IDs
   and error bodies. Known consumed model steps are **not a bill or a count of
   every possible failed remote request**.
-- `durationMs` includes setup and the independent Oracle; it is not pure
-  inference latency. `completeGenerationTokens` is null unless every invocation
+- `durationMs` measures elapsed time through setup, the independent Oracle and
+  cleanup. Cancellation and cleanup can finish after the two-minute case deadline.
+  `completeGenerationTokens` is null unless every invocation
   has consumed known Usage. Missing Usage is never converted into zero or price.
 
 ## Optional actual-model pilot — may incur charges
 
-No live sampling is run by tests or default commands. After separate operator
-authorization, supply the existing Host-certified model profile catalog and
-secret environment variable, then choose one case:
+For an authorized live pilot, start in a clean Git checkout of the commit to
+measure. Supply the Host-certified model profile catalog and secret environment
+variable, then choose one case. The build flag embeds the revision and worktree
+status checked at startup.
 
 ```text
-go run ./go/agent-runtime-harness/examples/task-agent -mode=acceptance \
+go run -buildvcs=true ./go/agent-runtime-harness/examples/task-agent -mode=acceptance \
   -acceptance-case=documents -provider=openai -model=YOUR_EXACT_MODEL_ID \
   -context-tokens=YOUR_DOCUMENTED_CAPACITY -max-output-tokens=1024 \
   -allow-live-calls

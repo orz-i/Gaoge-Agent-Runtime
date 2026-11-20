@@ -239,9 +239,16 @@ func TestAcceptancePartialReportPreservesUnrunFamilies(t *testing.T) {
 		TaskFamilies:              []string{"code-repair", "document-evidence", "approval-control"},
 		TaskFamilyPlannedCounts:   map[string]int{"code-repair": 1, "document-evidence": 1, "approval-control": 1},
 		TaskFamilyProcessedCounts: count, Results: []acceptanceResult{{Case: "code", Family: "code-repair", Failure: "fixture_toolchain_unavailable"}}}
+	// Cancellation and fixture cleanup can finish after the case deadline.
+	report.Results[0].DurationMs = (2*time.Minute + time.Millisecond).Milliseconds()
 	if err := validateAcceptanceReport(report); err != nil {
 		t.Fatalf("honest partial report was rejected: %v", err)
 	}
+	report.Results[0].DurationMs = -1
+	if err := validateAcceptanceReport(report); err == nil {
+		t.Fatal("negative elapsed time was accepted")
+	}
+	report.Results[0].DurationMs = 0
 	report.Processed, report.Attempted = 3, 3
 	if err := validateAcceptanceReport(report); err == nil {
 		t.Fatal("unrun cases were counted as attempted")
