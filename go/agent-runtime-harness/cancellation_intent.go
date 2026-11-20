@@ -6,6 +6,8 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
 // cancellationSettlementTimeout bounds cancellation receipt and failure
@@ -38,6 +40,10 @@ func ValidCancellationFenceIntentAdmission(intent Item) bool {
 		return false
 	}
 	admission, ok := authorityStringFields(intent.Payload, "boundary", "runID")
+	if !ok {
+		admission, ok = authorityStringFields(intent.Payload, "boundary", "runID", "protocol", "canceller")
+		ok = ok && admission["protocol"] == cancellationEffectProtocol && (admission["canceller"] == "native" || admission["canceller"] == "host")
+	}
 	return ok && admission["boundary"] == "cancel_scope_pending" &&
 		admission["runID"] == intent.RunID
 }
@@ -75,7 +81,7 @@ func ActiveCancellationFence(items []Item) bool {
 	receipts := cancellationFenceReceipts(items)
 	for _, intent := range items {
 		if intent.ParentItemID == CancellationFenceParentItemID &&
-			!VerifiedCancellationFenceReceipt(intent, receipts[intent.ID]) {
+			(!VerifiedCancellationFenceReceipt(intent, receipts[intent.ID]) || !CancellationEffectsSettled(intent, items)) {
 			// Invalid original intent status/kind is not absence of an
 			// intent. Damaged historical rows retain the physical fence.
 			return true
@@ -84,19 +90,25 @@ func ActiveCancellationFence(items []Item) bool {
 	return false
 }
 
-func (runner *Runner) beginCancellationFence(ctx context.Context, turn Turn, runID string) (Item, bool, error) {
+func (runner *Runner) beginCancellationFence(ctx context.Context, turn Turn, runID string, original ...Invocation) (Item, bool, error) {
 	runID = strings.TrimSpace(runID)
 	if runID == "" {
 		return Item{}, false, ErrInvalidRequest
+	}
+	ctx, err := runner.bindCancellationAttempt(ctx, turn, runID, original...)
+	if err != nil {
+		return Item{}, false, err
 	}
 	id, err := runner.runtime.NewID("cancel")
 	if err != nil {
 		return Item{}, false, err
 	}
 	payload, err := json.Marshal(struct {
-		Boundary string `json:"boundary"`
-		RunID    string `json:"runID"`
-	}{"cancel_scope_pending", runID})
+		Boundary  string `json:"boundary"`
+		RunID     string `json:"runID"`
+		Protocol  string `json:"protocol"`
+		Canceller string `json:"canceller"`
+	}{"cancel_scope_pending", runID, cancellationEffectProtocol, cancellationSource(runner.cancellation)})
 	if err != nil {
 		return Item{}, false, err
 	}
@@ -130,27 +142,51 @@ func (runner *Runner) beginCancellationFence(ctx context.Context, turn Turn, run
 }
 
 func (runner *Runner) resumeCommittedCancellationFence(ctx context.Context, turn Turn, runID string) (Item, error) {
-	snapshot, err := runner.runtime.Load(ctx, runID)
-	terminal := err == nil && terminalRuntimeStatus(snapshot.Run.Status)
-	if !terminal && err != nil {
-		return Item{}, errors.Join(ErrConflict, err)
-	}
 	items, err := runner.loadGlobalPhysicalEvidence(ctx, turn.ID)
 	if err != nil {
 		return Item{}, err
 	}
 	receipts := cancellationFenceReceipts(items)
-	if !terminal {
-		return runner.resumeDeferredChildGrantCancellation(ctx, turn, runID, snapshot, items, receipts)
-	}
+	var elected Item
 	for _, item := range items {
-		if item.Kind != ItemDiagnostic || item.Status != ItemStarted ||
-			item.ParentItemID != CancellationFenceParentItemID || item.RunID != runID {
+		if item.ParentItemID != CancellationFenceParentItemID || VerifiedCancellationFenceReceipt(item, receipts[item.ID]) {
 			continue
 		}
-		if !VerifiedCancellationFenceReceipt(item, receipts[item.ID]) {
-			return item, nil
+		if elected.ID != "" || !ValidCancellationFenceIntentAdmission(item) || item.TurnID != turn.ID || item.RunID != runID || item.Seq == 0 {
+			return Item{}, ErrConflict
 		}
+		elected = item
+	}
+	source, protocol := cancellationProtocol(elected)
+	if elected.ID == "" || !protocol || source != cancellationSource(runner.cancellation) {
+		return Item{}, ErrCancellationOutcomeUnknown
+	}
+	if err = runner.reconcileCancellationEffects(ctx, elected, items); err != nil {
+		return Item{}, err
+	}
+	snapshot, err := runner.runtime.Load(ctx, runID)
+	terminal := err == nil && terminalRuntimeStatus(snapshot.Run.Status)
+	if errors.Is(err, kernel.ErrNotFound) {
+		var proofErr error
+		terminal, proofErr = runner.cancellationNoDispatchReady(ctx, turn, runID)
+		if proofErr != nil {
+			return Item{}, proofErr
+		}
+	}
+	if !terminal && err != nil {
+		return Item{}, errors.Join(ErrConflict, err)
+	}
+	items, err = runner.loadGlobalPhysicalEvidence(ctx, turn.ID)
+	if err != nil {
+		return Item{}, err
+	}
+	receipts = cancellationFenceReceipts(items)
+	if !terminal && source != "host" && !runner.quiescentDelegationCancellationReady(ctx, runID, snapshot) &&
+		!runner.nativeRootCancellationReady(ctx, turn, runID, snapshot) {
+		return runner.resumeDeferredChildGrantCancellation(ctx, turn, runID, snapshot, items, receipts)
+	}
+	if elected.ID != "" {
+		return elected, nil
 	}
 	return Item{}, ErrConflict
 }
@@ -166,9 +202,16 @@ func (runner *Runner) finishCancellationFenceAfterRequest(ctx context.Context, i
 }
 
 func (runner *Runner) finishCancellationFence(ctx context.Context, intent Item) error {
+	items, err := runner.loadGlobalPhysicalEvidence(ctx, intent.TurnID)
+	if err != nil {
+		return err
+	}
+	if !CancellationEffectsSettled(intent, items) {
+		return ErrCancellationOutcomeUnknown
+	}
 	now := runner.clock.Now().UTC()
 	payload := json.RawMessage(`{"boundary":"cancel_scope_settled"}`)
-	_, _, err := runner.store.AppendItem(ctx, Item{
+	_, _, err = runner.store.AppendItem(ctx, Item{
 		ID: stableID("hcancelclosed", intent.ID), TurnID: intent.TurnID,
 		Kind: ItemDiagnostic, Status: ItemCompleted,
 		RunID: intent.RunID, ParentItemID: intent.ID,
@@ -184,11 +227,12 @@ func (runner *Runner) finishCancellationFence(ctx context.Context, intent Item) 
 func (runner *Runner) cancelPreflightWithIntent(
 	ctx context.Context, turn Turn, rootRunID string,
 	inspect func() error, claim func(writeAttempted *bool) error,
+	original ...Invocation,
 ) (Item, error) {
 	if err := inspect(); err != nil {
 		return Item{}, err
 	}
-	intent, fresh, err := runner.beginCancellationFence(ctx, turn, rootRunID)
+	intent, fresh, err := runner.beginCancellationFence(ctx, turn, rootRunID, original...)
 	if err != nil {
 		return Item{}, err
 	}

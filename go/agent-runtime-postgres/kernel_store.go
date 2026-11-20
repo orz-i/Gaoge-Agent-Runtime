@@ -304,6 +304,10 @@ func (store *KernelStore) applyWithExecution(ctx context.Context, lease *kernel.
 		if lease == nil && guard == nil && lockedRun.ExecutionEpoch > 0 {
 			return kernel.ErrExecutionRequired
 		}
+		lockedRun, _, lockErr = pgSettleRetirementSuccessor(tx, lockedRun)
+		if lockErr != nil {
+			return lockErr
+		}
 		if e := pgManagedGate(tx, runID); e != nil {
 			return e
 		}

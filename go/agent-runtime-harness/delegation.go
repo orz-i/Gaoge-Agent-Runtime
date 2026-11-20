@@ -293,6 +293,9 @@ func (runner *Runner) prepareDelegation(
 		return handoff.Delegation{}, kernel.Snapshot{}, errors.Join(ErrConflict, err)
 	}
 	delegationID := stableID("hd", turn.ID, request.MemberID, request.Goal)
+	if invocation.Attempt > 1 {
+		delegationID = stableID("hd", turn.ID, invocation.ExecutionRefID, request.MemberID, request.Goal)
+	}
 	if request.callID != "" {
 		delegationID = delegationToolID(invocation, request.callID)
 	}
@@ -447,6 +450,18 @@ func (runner *Runner) reconcileLocalTerminalHandoffEvidence(
 			continue
 		}
 		owner, loadErr := runner.store.GetInvocationByExecutionRefID(ctx, item.RunID)
+		if errors.Is(loadErr, ErrNotFound) {
+			// A frozen Started admission can precede child Invocation creation.
+			// This same no-dispatch source is used by Cancel, Retry and Store
+			// terminal CAS; no child observation/terminal receipt is invented.
+			_, _, valid, proofErr := runner.readNoInvocationDelegationSource(ctx, turn, item.RunID, items)
+			if proofErr != nil {
+				return proofErr
+			}
+			if valid {
+				continue
+			}
+		}
 		if loadErr != nil || !isHandoffDelegationInvocation(owner) ||
 			owner.TurnID != turn.ID || owner.ParentItemID != item.ID {
 			return ErrConflict

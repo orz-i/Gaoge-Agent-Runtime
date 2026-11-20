@@ -38,7 +38,9 @@ func completeGlobalPhysicalReceiptFacts(
 	}
 	for _, grant := range items {
 		if grant.ParentItemID != ExecutionDispatchParentItemID &&
-			grant.ParentItemID != CancellationFenceParentItemID {
+			grant.ParentItemID != CancellationFenceParentItemID &&
+			grant.ParentItemID != CancellationEffectParentItemID &&
+			(grant.Kind != ItemDelegation || grant.Status != ItemStarted) {
 			continue
 		}
 		// Even a malformed grant is a physical claim; missing or
@@ -78,6 +80,18 @@ func (store *MemoryStore) globalPhysicalEvidenceLocked(turnID string) ([]Item, e
 	}
 	return completeGlobalPhysicalReceiptFacts(store.items[turnID], func(parentID string) ([]Item, error) {
 		all := store.itemChildren[parentID]
+		if parent := store.itemIDs[parentID]; parent.Kind == ItemDelegation && parent.Status == ItemStarted {
+			votes := make([]Item, 0, 2)
+			for _, item := range all {
+				if item.Kind == ItemDelegation {
+					votes = append(votes, item)
+					if len(votes) == 2 {
+						break
+					}
+				}
+			}
+			return votes, nil
+		}
 		return all[:min(len(all), 2)], nil
 	})
 }
@@ -102,7 +116,16 @@ func (runner *Runner) loadGlobalPhysicalEvidence(ctx context.Context, turnID str
 	if err != nil {
 		return nil, err
 	}
+	delegations := map[string]bool{}
+	for _, item := range items {
+		if item.Kind == ItemDelegation && item.Status == ItemStarted {
+			delegations[item.ID] = true
+		}
+	}
 	return completeGlobalPhysicalReceiptFacts(items, func(parentID string) ([]Item, error) {
+		if delegations[parentID] {
+			return runner.store.ListItemChildren(ctx, parentID, ItemChildProofDelegation)
+		}
 		return runner.store.ListItemChildren(ctx, parentID, ItemChildProofAll)
 	})
 }

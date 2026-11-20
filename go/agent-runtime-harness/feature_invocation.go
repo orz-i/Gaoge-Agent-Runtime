@@ -117,7 +117,8 @@ func (runner *Runner) RefreshInvocation(ctx context.Context, invocationID string
 	// A remote/dynamic route needs its own ChildRunner-owned observation.
 	coordinator, ok := runner.handoffs.(*handoff.Coordinator)
 	if !ok || !coordinator.SupportsLocalDelegationObservation(runner.runtime) ||
-		(coordinator.ObservesLocalKernelRunner(runner.runtime) && !coordinator.OwnsLocalKernelRunner(runner.runtime)) {
+		(coordinator.ObservesLocalKernelRunner(runner.runtime) && !coordinator.OwnsLocalKernelRunner(runner.runtime) &&
+			!coordinator.SupportsDeferredAgent(runner.runtime)) {
 		return Snapshot{}, ErrHandoffCancellationUnverified
 	}
 	invocation, turn, runtimeSnapshot, err := runner.loadInvocationRuntime(ctx, invocationID)
@@ -128,7 +129,9 @@ func (runner *Runner) RefreshInvocation(ctx context.Context, invocationID string
 	if proofErr != nil {
 		return Snapshot{}, proofErr
 	}
-	if (!coordinator.ObservesLocalKernelRunner(runner.runtime) && runtimeSnapshot.Run.Kind != agent.RunKind) || !coordinator.OwnsLocalDelegation(runner.runtime, frozen) {
+	if (!coordinator.ObservesLocalKernelRunner(runner.runtime) && runtimeSnapshot.Run.Kind != agent.RunKind) || !coordinator.ObservesLocalDelegation(runner.runtime, frozen) ||
+		(terminalRuntimeStatus(runtimeSnapshot.Run.Status) && coordinator.IsDeferredLocalDelegation(runner.runtime, frozen) &&
+			!coordinator.VerifiedLocalDelegationControl(ctx, runner.runtime, frozen, runtimeSnapshot)) {
 		return Snapshot{}, ErrHandoffCancellationUnverified
 	}
 	pending, err := runner.resolvedInteractionClaimPending(ctx, turn.ID, "")
@@ -184,6 +187,13 @@ func (runner *Runner) startNextInvocationAttempt(
 ) (Snapshot, error) {
 	nextAttempt := invocation.Attempt + 1
 	nextRef := invocationExecutionRefID(invocation.ID, nextAttempt)
+	// The original Store CAS MUST atomically admit the replacement shared
+	// budget generation. A separate Prepare/Commit saga could survive a crash
+	// as an Accepted Invocation without any cancellable Kernel Run.
+	ctx, err := runner.withAtomicRetryBudget(ctx, turn, invocation, nextRef)
+	if err != nil {
+		return Snapshot{}, err
+	}
 	retried, err := runner.store.RetryInvocation(ctx, invocation.ID, invocation.Revision, nextRef, runner.clock.Now().UTC())
 	if err != nil {
 		return Snapshot{}, err
@@ -203,6 +213,9 @@ func (runner *Runner) replayRetriedInvocation(
 	turn Turn,
 	invocation Invocation,
 ) (Snapshot, error) {
+	// The Store's original Retry CAS has already atomically committed the
+	// replacement budget generation. Replay only the same frozen Invocation
+	// and exact physical dispatch identity; never mint another budget grant.
 	loaded, err := runner.runtime.Load(ctx, invocation.ExecutionRefID)
 	if err == nil {
 		return runner.syncRuntimeSnapshotWithRetry(ctx, turn, invocation, loaded)
@@ -333,15 +346,18 @@ func (runner *Runner) CancelInvocation(ctx context.Context, invocationID, reason
 		func(writeAttempted *bool) error {
 			return runner.fenceRelatedCancellation(ctx, turn, invocation.ExecutionRefID, writeAttempted)
 		},
+		invocation,
 	)
 	if err != nil {
 		return Snapshot{}, err
 	}
+	settled := false
 	defer func() {
-		if err == nil {
+		if settled && err == nil {
 			err = runner.finishCancellationFenceAfterRequest(ctx, intent)
 		}
 	}()
+	ctx = withCancellationElection(ctx, intent)
 	runtimeSnapshot, found, err := runner.cancelRuntimeRun(ctx, invocation.ExecutionRefID, reason, nil)
 	if err != nil {
 		return Snapshot{}, runner.releaseNoEffectCancellation(ctx, turn, intent, invocation.ExecutionRefID, err)
@@ -368,7 +384,9 @@ func (runner *Runner) CancelInvocation(ctx context.Context, invocationID, reason
 	if err = runner.syncTerminalDelegations(ctx, turn, runs); err != nil {
 		return Snapshot{}, err
 	}
-	return runner.loadSnapshot(ctx, turn, nil)
+	snapshot, err = runner.loadSnapshot(ctx, turn, nil)
+	settled = err == nil
+	return snapshot, err
 }
 
 func (runner *Runner) validateParentItem(ctx context.Context, turnID, parentItemID string) error {

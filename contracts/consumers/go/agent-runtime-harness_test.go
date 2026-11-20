@@ -22,6 +22,9 @@ type harnessStoreContract interface {
 	GetInvocationByExecutionRefID(context.Context, string) (harness.Invocation, error)
 	UpdateInvocation(context.Context, harness.Invocation, uint64) (harness.Invocation, error)
 	RetryInvocation(context.Context, string, uint64, string, time.Time) (harness.Invocation, error)
+	// Reviewed hard cut: first Accepted and Retry Roots use the same original
+	// atomic no-dispatch terminalization capability, not an optional adapter.
+	CancelUndispatchedRoot(context.Context, harness.Invocation, harness.Turn) (harness.Invocation, harness.Turn, error)
 	ListInvocations(context.Context, string) ([]harness.Invocation, error)
 	CreateInteraction(context.Context, harness.Interaction, uint64, uint64) (harness.Interaction, bool, error)
 	GetInteraction(context.Context, string) (harness.Interaction, error)
@@ -49,7 +52,15 @@ type localKernelRunKindCancellerContract interface {
 	OwnsKernelRunKind(*kernel.Runtime, kernel.RunKind) bool
 }
 
+type cancellationReconcilerContract interface {
+	CancellationOwnerID() string
+	ReconcileCancellation(context.Context, harness.CancellationEffect) (kernel.Snapshot, harness.CancellationEffectOutcome, error)
+}
+
 var (
+	_ harness.RuntimeCancellationReconciler                                                  = (cancellationReconcilerContract)(nil)
+	_ cancellationReconcilerContract                                                         = (harness.RuntimeCancellationReconciler)(nil)
+	_ func(context.Context) (harness.CancellationEffect, bool)                               = harness.CancellationEffectFromContext
 	_ harness.LocalKernelRunKindCanceller                                                    = (localKernelRunKindCancellerContract)(nil)
 	_ localKernelRunKindCancellerContract                                                    = (harness.LocalKernelRunKindCanceller)(nil)
 	_ func(context.Context, string, uint64, string) bool                                     = harness.VerifiedSubtaskApprovalDispatch

@@ -384,11 +384,14 @@ func ea1StartSettlementJSONEqual(t *testing.T, label string, actual, expected an
 // either owner Mark or its recovered retry. Compare the entire immutable fact.
 func ea1AssertOriginalRootCompletion(t *testing.T, rt *kernel.Runtime, grant kernel.ChildExecutionGrant, source kernel.Snapshot, hostCompleted, leaseOwned bool) kernel.OwnedPhysicalCallbackCompletion {
 	t.Helper()
-	outcome := kernel.OwnedPhysicalCallbackOutcome{HostCompleted: hostCompleted, LeaseOwned: leaseOwned}
-	hash := sha256.Sum256(kernel.OwnedPhysicalCallbackReturnPayload(source, outcome))
-	want := kernel.OwnedPhysicalCallbackCompletion{GrantID: grant.ID, ReturnRevision: source.Run.Revision, ReturnSourceHash: hex.EncodeToString(hash[:]), HostCompleted: hostCompleted, LeaseOwned: leaseOwned}
 	got, e := rt.LookupOwnedPhysicalCallbackReturn(t.Context(), grant)
-	if e != nil || got != want {
+	if e != nil {
+		t.Fatal(e)
+	}
+	outcome := kernel.OwnedPhysicalCallbackOutcome{HostCompleted: hostCompleted, LeaseOwned: leaseOwned, ControlCustody: got.ControlCustody}
+	hash := sha256.Sum256(kernel.OwnedPhysicalCallbackReturnPayload(source, outcome))
+	want := kernel.OwnedPhysicalCallbackCompletion{GrantID: grant.ID, ReturnRevision: source.Run.Revision, ReturnSourceHash: hex.EncodeToString(hash[:]), HostCompleted: hostCompleted, LeaseOwned: leaseOwned, ControlCustody: got.ControlCustody}
+	if !got.ControlCustody.Valid() || got != want {
 		t.Fatalf("original whole callback binding: got=%+v want=%+v err=%v", got, want, e)
 	}
 	return got

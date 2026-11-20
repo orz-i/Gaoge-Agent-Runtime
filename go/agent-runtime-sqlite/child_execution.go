@@ -89,6 +89,11 @@ func (s *Store) BeginChildExecution(ctx context.Context, grant kernel.ChildExecu
 		return kernel.ErrChildExecutionBusy
 	}
 	for _, id := range ids {
+		if _, err = sqliteSettleRetirementSuccessor(ctx, tx, id); err != nil {
+			return err
+		}
+	}
+	for _, id := range ids {
 		_, err = tx.ExecContext(ctx, "INSERT INTO runtime_child_effect_grants(grant_id,parent_run_id,child_run_id,start_revision) VALUES(?,?,?,?)", grant.ID, id, grant.ChildRunID, grant.ExpectedRevision)
 		if err != nil {
 			return conflictOrDatabaseError(err)
@@ -362,6 +367,9 @@ func (s *Store) BeginOwnedPhysicalExecution(ctx context.Context, g kernel.ChildE
 		return conflictOrDatabaseError(err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if _, err = sqliteSettleRetirementSuccessor(ctx, tx, g.ChildRunID); err != nil {
+		return err
+	}
 	current, err := loadTx(ctx, tx, g.ChildRunID)
 	if err != nil {
 		return err
@@ -388,6 +396,9 @@ func (s *Store) BeginOwnedPhysicalExecution(ctx context.Context, g kernel.ChildE
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO runtime_child_effect_grants(grant_id,parent_run_id,child_run_id,start_revision,execution_owner_id,execution_lease_id,execution_epoch,admission_source_hash,admission_operation) VALUES(?,?,?,?,?,?,?,?,?)`, g.ID, g.ChildRunID, g.ChildRunID, g.ExpectedRevision, g.ExecutionOwnerID, g.ExecutionLeaseID, g.ExecutionEpoch, g.AdmissionSourceHash, g.AdmissionOperation)
 	if err != nil {
+		return conflictOrDatabaseError(err)
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE runtime_runs SET execution_physical_epoch=? WHERE run_id=?`, g.ExecutionEpoch, g.ChildRunID); err != nil {
 		return conflictOrDatabaseError(err)
 	}
 	return conflictOrDatabaseError(tx.Commit())

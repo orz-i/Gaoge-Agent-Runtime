@@ -99,7 +99,7 @@ func TestRealPostgresManagedHostReservationModesAfterProcessCrash(t *testing.T) 
 			var intent harness.Item
 			if mode == kernel.ManagedCancel {
 				now := time.Now().UTC()
-				payload, _ := json.Marshal(map[string]string{"boundary": "cancel_scope_pending", "runID": root.ExecutionRefID})
+				payload, _ := json.Marshal(map[string]string{"boundary": "cancel_scope_pending", "runID": root.ExecutionRefID, "protocol": "effects_v1", "canceller": "native"})
 				intent = harness.Item{ID: "actual-managed-cancel", TurnID: turnID, RunID: root.ExecutionRefID, Kind: harness.ItemDiagnostic, Status: harness.ItemStarted, ParentItemID: harness.CancellationFenceParentItemID, Payload: payload, CreatedAt: now, UpdatedAt: now}
 				var fresh bool
 				intent, fresh, e = host.AppendItem(t.Context(), intent)
@@ -216,7 +216,7 @@ func TestRealPostgresManagedHostReservationModesAfterProcessCrash(t *testing.T) 
 				}
 				assertNoSend()
 				// Selection is nonrevocable: a later cancellation cannot replace it.
-				payload, _ = json.Marshal(map[string]string{"boundary": "cancel_scope_pending", "runID": root.ExecutionRefID})
+				payload, _ = json.Marshal(map[string]string{"boundary": "cancel_scope_pending", "runID": root.ExecutionRefID, "protocol": "effects_v1", "canceller": "native"})
 				_, _, e = peer.AppendItem(t.Context(), harness.Item{ID: "late-managed-cancel", TurnID: turnID, RunID: root.ExecutionRefID, Kind: harness.ItemDiagnostic, Status: harness.ItemStarted, ParentItemID: harness.CancellationFenceParentItemID, Payload: payload, CreatedAt: now, UpdatedAt: now})
 				if !errors.Is(e, harness.ErrConflict) {
 					t.Fatalf("late cancel replaced selected RESUME: %v", e)

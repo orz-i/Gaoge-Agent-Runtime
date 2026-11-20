@@ -322,6 +322,12 @@ func publicItemPayload(kind harness.ItemKind, payload json.RawMessage) (json.Raw
 func stripDiagnosticRunRefs(value any) {
 	switch typed := value.(type) {
 	case map[string]any:
+		if id, ok := typed["id"].(string); ok && strings.HasPrefix(id, "hcanceleffect_") {
+			// The complete original Kernel origin is private cancellation
+			// evidence, not a public Snapshot nested in a diagnostic payload.
+			delete(typed, "before")
+			delete(typed, "ownerID")
+		}
 		for key, child := range typed {
 			switch strings.ToLower(strings.NewReplacer("_", "", "-", "").Replace(key)) {
 			case "runid", "physicalrunid", "executionrefid":
@@ -569,6 +575,9 @@ func writeHarnessError(context *gin.Context, err error) {
 	case errors.Is(err, harness.ErrInteractionOutcomeUnknown):
 		runtimehttp.WriteError(context, stdhttp.StatusConflict, "harness.interaction_outcome_unknown",
 			"Interaction business response outcome requires host reconciliation before retry")
+	case errors.Is(err, harness.ErrCancellationOutcomeUnknown):
+		runtimehttp.WriteError(context, stdhttp.StatusConflict, "harness.cancellation_outcome_unknown",
+			"Cancellation cleanup requires original-owner reconciliation before retry")
 	case errors.Is(err, harness.ErrConflict):
 		runtimehttp.WriteError(context, stdhttp.StatusConflict, "harness.conflict", "Harness Turn state conflicts")
 	default:

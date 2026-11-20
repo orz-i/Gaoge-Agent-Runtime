@@ -73,6 +73,10 @@ func (store *KernelStore) BeginOwnedPhysicalExecution(ctx context.Context, grant
 		if e := pgManagedGate(tx, grant.ChildRunID); e != nil {
 			return e
 		}
+		current, _, err = pgSettleRetirementSuccessor(tx, current)
+		if err != nil {
+			return err
+		}
 		snapshot, err := kernelSnapshotFrom(current)
 		if err != nil {
 			return err
@@ -92,7 +96,11 @@ func (store *KernelStore) BeginOwnedPhysicalExecution(ctx context.Context, grant
 			return kernel.ErrChildExecutionBusy
 		}
 		row := pgPhysicalRecord(grant, grant.ChildRunID)
-		return translateKernelApplyError(tx.Create(&row).Error)
+		if err = tx.Create(&row).Error; err != nil {
+			return translateKernelApplyError(err)
+		}
+		return translateKernelApplyError(tx.Model(&models.KernelRunRecord{}).Where("run_id = ?", grant.ChildRunID).
+			UpdateColumn("execution_physical_epoch", grant.ExecutionEpoch).Error)
 	})
 }
 
@@ -152,7 +160,7 @@ func pgCallbackCompletion(row models.KernelChildEffectGrantRecord) kernel.OwnedP
 	if row.CallbackReturnRevision == 0 {
 		return kernel.OwnedPhysicalCallbackCompletion{}
 	}
-	return kernel.OwnedPhysicalCallbackCompletion{GrantID: row.GrantID, ReturnRevision: row.CallbackReturnRevision, ReturnSourceHash: row.CallbackReturnSourceHash, HostCompleted: row.CallbackHostCompleted, LeaseOwned: row.CallbackLeaseOwned}
+	return kernel.OwnedPhysicalCallbackCompletion{GrantID: row.GrantID, ReturnRevision: row.CallbackReturnRevision, ReturnSourceHash: row.CallbackReturnSourceHash, HostCompleted: row.CallbackHostCompleted, LeaseOwned: row.CallbackLeaseOwned, ControlCustody: kernel.OwnedCallbackCustody(row.CallbackControlCustody)}
 }
 func (store *KernelStore) RecordOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, o kernel.OwnedPhysicalCallbackOutcome, p kernel.OwnedPhysicalCallbackReturn) error {
 	if store == nil || store.db == nil || ctx == nil || !g.IsOwned() {
@@ -187,7 +195,7 @@ func (store *KernelStore) RecordOwnedPhysicalCallbackReturn(ctx context.Context,
 		if rows[0].SettledRevision != 0 {
 			return kernel.ErrExecutionConflict
 		}
-		result := tx.Model(&models.KernelChildEffectGrantRecord{}).Where("grant_id = ? AND parent_run_id = ? AND callback_return_revision = 0 AND settled_revision = 0", g.ID, g.ChildRunID).UpdateColumns(map[string]any{"callback_return_revision": completion.ReturnRevision, "callback_return_source_hash": completion.ReturnSourceHash, "callback_host_completed": completion.HostCompleted, "callback_lease_owned": completion.LeaseOwned})
+		result := tx.Model(&models.KernelChildEffectGrantRecord{}).Where("grant_id = ? AND parent_run_id = ? AND callback_return_revision = 0 AND settled_revision = 0", g.ID, g.ChildRunID).UpdateColumns(map[string]any{"callback_return_revision": completion.ReturnRevision, "callback_return_source_hash": completion.ReturnSourceHash, "callback_host_completed": completion.HostCompleted, "callback_lease_owned": completion.LeaseOwned, "callback_control_custody": string(completion.ControlCustody)})
 		if result.Error != nil {
 			return translateKernelError(result.Error)
 		}

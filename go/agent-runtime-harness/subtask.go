@@ -337,11 +337,13 @@ func (runner *Runner) CancelSubtask(ctx context.Context, turnID, taskID, reason 
 	if err != nil {
 		return Snapshot{}, err
 	}
+	settled := false
 	defer func() {
-		if err == nil {
+		if settled && err == nil {
 			err = runner.finishCancellationFenceAfterRequest(ctx, intent)
 		}
 	}()
+	ctx = withCancellationElection(ctx, intent)
 	task.CancelStatus, task.CancelError = "requested", ""
 	task.CancelAttempt++
 	if err = runner.recordSubtaskItem(ctx, turn.ID, task); err != nil {
@@ -402,7 +404,9 @@ func (runner *Runner) CancelSubtask(ctx context.Context, turnID, taskID, reason 
 	if err = runner.syncSubtaskItems(ctx, turn); err != nil {
 		return Snapshot{}, err
 	}
-	return runner.loadSnapshot(ctx, turn, nil)
+	snapshot, err = runner.loadSnapshot(ctx, turn, nil)
+	settled = err == nil
+	return snapshot, err
 }
 
 // ResolveSubtaskApproval requires the exact checkpoint shown to the user, so an

@@ -103,6 +103,11 @@ func (store *Store) BeginChildExecution(ctx context.Context, grant kernel.ChildE
 			return kernel.ErrChildExecutionBusy
 		}
 	}
+	for _, id := range ancestors {
+		if _, err := store.settleRetirementSuccessorLocked(id); err != nil {
+			return err
+		}
+	}
 	store.childGrants[grant.ID] = memoryChildGrant{grant: grant, ancestors: ancestors}
 	for _, id := range ancestors {
 		if store.childGrantOwners[id] == nil {

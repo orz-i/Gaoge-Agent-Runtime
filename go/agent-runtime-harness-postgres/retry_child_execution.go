@@ -1,7 +1,10 @@
 package harnesspostgres
 
 import (
+	"errors"
+
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"gorm.io/gorm"
 )
 
@@ -16,46 +19,28 @@ func retryChildEffectFenceTx(tx *gorm.DB, turnID string, rotating harness.Invoca
 		return err
 	}
 	children := make([]harness.Invocation, 0, len(rows))
-	owners := []string{rotating.ID}
 	for _, row := range rows {
 		child, err := invocationFromRecord(row)
 		if err != nil {
 			return err
 		}
 		children = append(children, child)
-		owners = append(owners, child.ID)
 	}
-	// Resolve just the affected owners' grants, then ALL competing facts
-	// that claim those grant IDs, including foreign Invocation IDs. Filtering
-	// completions by owner would hide a contradictory cross-owner receipt and
-	// incorrectly turn one matching no-effect receipt into retry authority.
-	var grants []itemRecord
-	if err := tx.Where("turn_id = ? AND invocation_id IN ? AND parent_item_id = ?",
-		turnID, owners, harness.ExecutionDispatchParentItemID).Find(&grants).Error; err != nil {
+	// Use the SAME complete source as terminal CAS: original Started and
+	// globally indexed terminal siblings, grants/returns, immutable Attempt
+	// transitions and capacity Waiting observations. Dispatch-return alone
+	// neither proves child completion nor permits another physical execution.
+	items, err := terminalHandoffChildEvidenceTx(tx, turnID, children)
+	if err != nil {
 		return err
 	}
-	items := make([]harness.Item, 0, len(grants))
-	ids := make([]string, 0, len(grants))
-	for _, row := range grants {
-		item, err := itemFromRecord(row)
-		if err != nil {
-			return err
-		}
-		items = append(items, item)
-		ids = append(ids, item.ID)
+	var ledger *budget.Ledger
+	loaded, err := (&Store{db: tx}).LoadBudget(tx.Statement.Context, turnID)
+	if err != nil && !errors.Is(err, budget.ErrLedgerNotFound) {
+		return err
 	}
-	if len(ids) != 0 {
-		var receipts []itemRecord
-		if err := tx.Where("parent_item_id IN ?", ids).Find(&receipts).Error; err != nil {
-			return err
-		}
-		for _, row := range receipts {
-			item, err := itemFromRecord(row)
-			if err != nil {
-				return err
-			}
-			items = append(items, item)
-		}
+	if err == nil {
+		ledger = &loaded
 	}
-	return harness.RetryChildEffectFence(children, items, rotating)
+	return harness.RetryChildEffectFenceWithBudget(children, items, rotating, ledger)
 }

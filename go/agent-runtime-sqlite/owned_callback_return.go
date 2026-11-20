@@ -13,7 +13,7 @@ import (
 func loadOwnedCallbackReturn(ctx context.Context, q schemaQuery, g kernel.ChildExecutionGrant) (kernel.OwnedPhysicalCallbackCompletion, error) {
 	var c kernel.OwnedPhysicalCallbackCompletion
 	c.GrantID = g.ID
-	err := q.QueryRowContext(ctx, `SELECT callback_return_revision,callback_return_source_hash,callback_host_completed,callback_lease_owned FROM runtime_child_effect_grants WHERE grant_id=? AND parent_run_id=? AND child_run_id=?`, g.ID, g.ChildRunID, g.ChildRunID).Scan(&c.ReturnRevision, &c.ReturnSourceHash, &c.HostCompleted, &c.LeaseOwned)
+	err := q.QueryRowContext(ctx, `SELECT callback_return_revision,callback_return_source_hash,callback_host_completed,callback_lease_owned,callback_control_custody FROM runtime_child_effect_grants WHERE grant_id=? AND parent_run_id=? AND child_run_id=?`, g.ID, g.ChildRunID, g.ChildRunID).Scan(&c.ReturnRevision, &c.ReturnSourceHash, &c.HostCompleted, &c.LeaseOwned, &c.ControlCustody)
 	if errors.Is(err, sql.ErrNoRows) {
 		return kernel.OwnedPhysicalCallbackCompletion{}, kernel.ErrNotFound
 	}
@@ -85,7 +85,7 @@ func (s *Store) RecordOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.
 	if marked != 0 {
 		return kernel.ErrExecutionConflict
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE runtime_child_effect_grants SET callback_return_revision=?,callback_return_source_hash=?,callback_host_completed=?,callback_lease_owned=? WHERE grant_id=? AND parent_run_id=? AND child_run_id=? AND settled_revision=0 AND callback_return_revision=0`, completion.ReturnRevision, completion.ReturnSourceHash, completion.HostCompleted, completion.LeaseOwned, g.ID, g.ChildRunID, g.ChildRunID)
+	result, err := tx.ExecContext(ctx, `UPDATE runtime_child_effect_grants SET callback_return_revision=?,callback_return_source_hash=?,callback_host_completed=?,callback_lease_owned=?,callback_control_custody=? WHERE grant_id=? AND parent_run_id=? AND child_run_id=? AND settled_revision=0 AND callback_return_revision=0`, completion.ReturnRevision, completion.ReturnSourceHash, completion.HostCompleted, completion.LeaseOwned, string(completion.ControlCustody), g.ID, g.ChildRunID, g.ChildRunID)
 	if err != nil {
 		return conflictOrDatabaseError(err)
 	}

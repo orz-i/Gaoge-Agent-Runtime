@@ -167,8 +167,8 @@ func runRetirementTwoGenerations(t *testing.T, factory func(*testing.T) ManagedR
 		t.Fatalf("second receipt: %v", e)
 	}
 	unchanged, e := base.LoadOwnedRetirement(t.Context(), first.grant.ID)
-	if e != nil || kernel.ManagedDigest(unchanged) != kernel.ManagedDigest(r1) {
-		t.Fatal("first receipt changed before recovery")
+	if e != nil || unchanged.Phase != "ACKNOWLEDGED" || unchanged.Identity() != r1.Identity() {
+		t.Fatal("successor did not atomically acknowledge the exact prior callback before advancing")
 	}
 	if firstRequest.InvocationID == physical.request.InvocationID || kernel.ManagedDigest(firstResponse) != kernel.ManagedDigest(physical.response) {
 		t.Fatal("two original model calls not distinct, unchanged yields")
@@ -185,8 +185,8 @@ func runRetirementTwoGenerations(t *testing.T, factory func(*testing.T) ManagedR
 		t.Fatal("public recovery mutated source or sent model again")
 	}
 	old, e := freshRT.LoadOwnedRetirement(t.Context(), r1.Evidence.Grant.ID)
-	if e != nil || kernel.ManagedDigest(old) != kernel.ManagedDigest(r1) {
-		t.Fatal("historical unacknowledged retirement changed")
+	if e != nil || old.Phase != "ACKNOWLEDGED" || old.Identity() != r1.Identity() {
+		t.Fatal("historical acknowledged retirement identity changed")
 	}
 	ack, e := freshRT.LoadOwnedRetirement(t.Context(), r2.Evidence.Grant.ID)
 	if e != nil || ack.Phase != "ACKNOWLEDGED" || ack.Identity() != r2.Identity() {

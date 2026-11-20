@@ -312,3 +312,23 @@ receipts. Existing v5 files require explicit `MigrateV5ToV6` with old writers
 stopped and a retained backup. Opening a v5 file does not migrate it. Migration
 preserves original grants, marks, callback records and managed authority and
 does not fabricate retirement receipts or historical Mark provenance.
+
+### Executing callback custody schema (v7)
+
+Schema v7 seals the actual executing callback's control-custody classification
+with its immutable return and retirement evidence. Existing v6 files require
+explicit `MigrateV6ToV7` after stopping old writers and retaining a backup.
+Earlier databases must complete each prior migration first. Historical empty
+custody is preserved as unknown, never upgraded from a new Runner's composition.
+
+### Physical admission and deferred control schema (v8)
+
+Schema v8 implements the same prepared/owned Root settlement protocol as Memory
+and PostgreSQL, including complete ACK history and lease-only epochs. Existing
+v7 files require explicit `MigrateV7ToV8` with all old writers stopped and a
+retained backup; older files complete each prior migration first. Migration
+derives the last physical epoch only from original grant/retirement facts,
+never the current lease epoch, and does not rewrite original custody bytes.
+Successor execution/control transactions reconcile an exact genuinely retired
+callback ACK before advancing its owner or source. Unknown/stale/active effects
+remain fenced, and historical empty custody is never promoted to trusted.

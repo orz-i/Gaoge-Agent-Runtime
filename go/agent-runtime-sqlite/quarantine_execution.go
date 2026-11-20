@@ -59,6 +59,9 @@ FROM runtime_runs WHERE run_id=?`, value.RunID).
 	if epoch == math.MaxInt64 {
 		return kernel.ErrExecutionConflict
 	}
+	if _, err = sqliteSettleRetirementSuccessor(ctx, tx, value.RunID); err != nil {
+		return err
+	}
 	result, err := tx.ExecContext(ctx, `UPDATE runtime_runs SET
 execution_quarantine_revision=?,execution_quarantine_generation=?,execution_quarantine_code=?,
 execution_epoch=execution_epoch+1,execution_owner='',execution_lease_id='',execution_expiry_ms=0

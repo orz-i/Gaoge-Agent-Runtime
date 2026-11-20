@@ -993,16 +993,26 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 			}
 			return runner.fenceInteractionCancellation(ctx, turn, "", writeAttempted)
 		},
+		invocation,
 	)
 	if err != nil {
 		return Snapshot{}, err
 	}
+	settled := false
 	defer func() {
-		if err == nil {
+		if settled && err == nil {
 			err = runner.finishCancellationFenceAfterRequest(ctx, intent)
 		}
 	}()
-	if err = runner.cancelTurnBudget(ctx, turn); err != nil {
+	ctx = withCancellationElection(ctx, intent)
+	// Both initial Accepted and replacement Roots can be frozen before any
+	// physical Start. Their original Store atomically closes both records and
+	// budget generation; an absent Run is never a synthetic Kernel outcome.
+	if cancelled, recognized, cancelErr := runner.cancelUndispatchedRoot(ctx, turn, invocation); recognized {
+		settled = cancelErr == nil
+		return cancelled, cancelErr
+	}
+	if err = runner.cancelTurnBudget(ctx, turn, invocation.ExecutionRefID); err != nil {
 		return Snapshot{}, err
 	}
 	runtimeSnapshot, found, err := runner.cancelRuntimeRun(ctx, invocation.ExecutionRefID, reason, &invocation)
@@ -1056,7 +1066,9 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 	// The root may be Cancelled, Failed or Completed; preserve its actual
 	// Kernel status instead of fabricating a successful Cancelled outcome.
 	// Other callers (especially Refresh) cannot bypass unresolved cleanup.
-	return runner.syncRuntimeSnapshotWithRetryAfterCancellation(ctx, turn, invocation, runtimeSnapshot)
+	snapshot, err = runner.syncRuntimeSnapshotWithRetryAfterCancellation(ctx, turn, invocation, runtimeSnapshot)
+	settled = err == nil
+	return snapshot, err
 }
 
 func (runner *Runner) syncRuntimeSnapshotWithRetry(
@@ -1090,6 +1102,9 @@ func (runner *Runner) syncRuntimeSnapshotWithRetryProof(
 ) (Snapshot, error) {
 	for range maxRuntimeSyncRetryAttempts {
 		snapshot, err := runner.syncRuntimeSnapshotWithCancellationProof(ctx, turn, invocation, runtimeSnapshot, verifiedCancellation)
+		if errors.Is(err, ErrCancellationOutcomeUnknown) {
+			return snapshot, err
+		}
 		if !errors.Is(err, ErrConflict) {
 			return snapshot, err
 		}

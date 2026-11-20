@@ -9,6 +9,7 @@ import (
 	"time"
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"gorm.io/gorm"
@@ -202,6 +203,17 @@ func (store *Store) UpdateInvocation(ctx context.Context, value harness.Invocati
 				if existing.Status != string(value.Status) &&
 					(value.Status == harness.InvocationCompleted || value.Status == harness.InvocationFailed ||
 						value.Status == harness.InvocationCancelled) {
+					facts, effectErr := cancellationEffectFactsTx(tx, value.TurnID)
+					if effectErr != nil {
+						return effectErr
+					}
+					scope := value.ExecutionRefID
+					if value.ParentItemID == "" {
+						scope = ""
+					}
+					if !harness.CancellationEffectProjectionReady(facts, scope) {
+						return harness.ErrCancellationOutcomeUnknown
+					}
 					original, conversionErr := invocationFromRecord(existing)
 					if conversionErr != nil {
 						return conversionErr
@@ -301,6 +313,35 @@ func (store *Store) RetryInvocation(
 		if err := retryChildEffectFenceTx(tx, current.TurnID, current); err != nil {
 			return err
 		}
+		// Check BOTH the immutable frozen shared-budget request and the
+		// durable ledger under this original Turn lock. A Store caller with
+		// no Runner-bound budget witness cannot skip the accounting CAS.
+		budgetRequired, budgetErr := retryBudgetRequiredTx(ctx, tx, current.TurnID)
+		if budgetErr != nil {
+			return budgetErr
+		}
+		// Use the SAME original Turn transaction for shared budget admission
+		// and Attempt rotation. Any later failure rolls both writes back.
+		atomicBudget, budgetErr := harness.AtomicRetryBudgetForStore(ctx, current, nextExecutionRefID, budgetRequired)
+		if budgetErr != nil {
+			return budgetErr
+		}
+		if atomicBudget {
+			local := &Store{db: tx}
+			previous, loadErr := local.LoadBudget(ctx, current.TurnID)
+			if loadErr != nil {
+				return loadErr
+			}
+			planned, planErr := budget.PlanRootRetry(previous, current.ID, current.ExecutionRefID, nextExecutionRefID, current.Attempt+1)
+			if planErr != nil {
+				return planErr
+			}
+			if planned.Revision != previous.Revision {
+				if saveErr := local.SaveBudget(ctx, planned, previous.Revision); saveErr != nil {
+					return saveErr
+				}
+			}
+		}
 		if strings.TrimSpace(current.ParentItemID) == "" {
 			result := tx.Model(&turnRecord{}).
 				Where("id = ? AND status IN ?", current.TurnID,
@@ -316,7 +357,24 @@ func (store *Store) RetryInvocation(
 				return harness.ErrConflict
 			}
 		}
-		return rotateInvocationAttempt(tx, current, expectedRevision, nextExecutionRefID, now)
+		if err := rotateInvocationAttempt(tx, current, expectedRevision, nextExecutionRefID, now); err != nil {
+			return err
+		}
+		transition, err := harness.RootRetryTransitionFact(current, nextExecutionRefID, now)
+		if err != nil {
+			return err
+		}
+		transition.Seq, err = nextItemSeq(tx, current.TurnID)
+		if err != nil {
+			return err
+		}
+		record, err := itemToRecord(transition)
+		if err != nil {
+			return err
+		}
+		// No public Append admission: this fact is minted ONLY with the
+		// original Attempt rotation and budget transition in this transaction.
+		return mapError(tx.Create(&record).Error)
 	})
 	if err != nil {
 		return harness.Invocation{}, err
@@ -887,7 +945,15 @@ func (store *Store) UpdateTurn(ctx context.Context, value harness.Turn, expected
 				if handoffErr != nil {
 					return handoffErr
 				}
-				if !harness.ValidTurnTerminalDescendants(root, owners, handoffFacts) {
+				var ledger *budget.Ledger
+				loaded, ledgerErr := (&Store{db: tx}).LoadBudget(ctx, value.ID)
+				if ledgerErr != nil && !errors.Is(ledgerErr, budget.ErrLedgerNotFound) {
+					return ledgerErr
+				}
+				if ledgerErr == nil {
+					ledger = &loaded
+				}
+				if !harness.ValidTurnTerminalDescendantsWithBudget(root, owners, handoffFacts, ledger) {
 					return harness.ErrConflict
 				}
 				noEffect, proofErr := originalNoEffectTerminalTx(tx, root)
@@ -917,6 +983,13 @@ func (store *Store) UpdateTurn(ctx context.Context, value harness.Turn, expected
 				pending, pendingErr := pendingExecutionDispatchTx(tx, value.ID, "")
 				if pendingErr != nil {
 					return pendingErr
+				}
+				facts, effectErr := cancellationEffectFactsTx(tx, value.ID)
+				if effectErr != nil {
+					return effectErr
+				}
+				if !harness.CancellationEffectProjectionReady(facts, "") {
+					return harness.ErrCancellationOutcomeUnknown
 				}
 				if !harness.ValidTurnTerminalEffectProjection(
 					ctx, value.ID, value.Status, pending, active,
@@ -1427,6 +1500,30 @@ func appendItemTx(tx *gorm.DB, value harness.Item, outcome *itemAppendOutcome) e
 	if value.Kind == harness.ItemDiagnostic && value.Status == harness.ItemStarted {
 		switch value.ParentItemID {
 		case harness.CancellationFenceParentItemID:
+			if expectedRoot, _, bound := harness.CancellationAttemptForStore(tx.Statement.Context); bound {
+				var rootRow invocationRecord
+				if err = tx.Where("id = ?", expectedRoot.ID).Take(&rootRow).Error; err != nil {
+					return harness.ErrConflict
+				}
+				root, decodeErr := invocationFromRecord(rootRow)
+				if decodeErr != nil {
+					return decodeErr
+				}
+				var targets []invocationRecord
+				if err = tx.Where("execution_ref_id = ?", value.RunID).Limit(1).Find(&targets).Error; err != nil {
+					return err
+				}
+				var target harness.Invocation
+				if len(targets) != 0 {
+					target, err = invocationFromRecord(targets[0])
+					if err != nil {
+						return err
+					}
+				}
+				if !harness.ValidCancellationAttemptAdmission(tx.Statement.Context, value, root, target) {
+					return harness.ErrConflict
+				}
+			}
 			if err = checkManagedReservationTx(tx, value.TurnID); err != nil {
 				return err
 			}
@@ -1458,6 +1555,18 @@ func appendItemTx(tx *gorm.DB, value harness.Item, outcome *itemAppendOutcome) e
 		return err
 	}
 	value.Seq = seq
+	if value.Kind == harness.ItemSubtask {
+		facts, err := cancellationEffectFactsTx(tx, value.TurnID)
+		if err != nil {
+			return err
+		}
+		if !harness.CancellationConfirmationAppendReady(tx.Statement.Context, value, facts) {
+			return harness.ErrCancellationOutcomeUnknown
+		}
+	}
+	if err := checkCancellationEffectAppendTx(tx, value); err != nil {
+		return err
+	}
 	if err := checkExecutionDispatchCompletionTx(tx, value); err != nil {
 		return err
 	}
@@ -1521,14 +1630,18 @@ func (store *Store) GetItem(ctx context.Context, id string) (harness.Item, error
 func (store *Store) ListItemChildren(ctx context.Context, parentItemID string, scope harness.ItemChildProofScope) ([]harness.Item, error) {
 	parentItemID = strings.TrimSpace(parentItemID)
 	if store == nil || store.db == nil || parentItemID == "" ||
-		(scope != harness.ItemChildProofAll && scope != harness.ItemChildProofHostAuthority) {
+		(scope != harness.ItemChildProofAll && scope != harness.ItemChildProofHostAuthority && scope != harness.ItemChildProofDelegation) {
 		return nil, harness.ErrInvalidRequest
 	}
 	// Share the identical bounded SQL predicate with terminal Host
 	// projection. Every lookup uses the existing global parent B-tree.
-	records, err := boundedInteractionAuthorityChildrenTx(
-		store.db.WithContext(ctx), parentItemID, scope == harness.ItemChildProofHostAuthority,
-	)
+	var records []itemRecord
+	var err error
+	if scope == harness.ItemChildProofDelegation {
+		err = store.db.WithContext(ctx).Where("parent_item_id = ? AND kind = ?", parentItemID, string(harness.ItemDelegation)).Limit(2).Find(&records).Error
+	} else {
+		records, err = boundedInteractionAuthorityChildrenTx(store.db.WithContext(ctx), parentItemID, scope == harness.ItemChildProofHostAuthority)
+	}
 	if err != nil {
 		return nil, err
 	}

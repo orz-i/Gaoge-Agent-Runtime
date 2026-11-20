@@ -52,6 +52,13 @@ func pendingCancellationFenceTx(tx *gorm.DB, turnID string) (bool, error) {
 		if !harness.VerifiedCancellationFenceReceipt(intent, receipts) {
 			return true, nil
 		}
+		facts, effectErr := cancellationEffectFactsTx(tx, intent.TurnID)
+		if effectErr != nil {
+			return false, effectErr
+		}
+		if !harness.CancellationEffectsSettled(intent, facts) {
+			return true, nil
+		}
 	}
 	return false, nil
 }
@@ -74,6 +81,13 @@ func checkCancellationFenceCompletionTx(tx *gorm.DB, value harness.Item) error {
 	}
 	if !harness.VerifiedCancellationFenceReceipt(intent, []harness.Item{value}) {
 		return harness.ErrConflict
+	}
+	facts, err := cancellationEffectFactsTx(tx, intent.TurnID)
+	if err != nil {
+		return err
+	}
+	if !harness.CancellationEffectsSettled(intent, facts) {
+		return harness.ErrCancellationOutcomeUnknown
 	}
 	var existing int64
 	if err := tx.Model(&itemRecord{}).Where("parent_item_id = ?", intent.ID).Count(&existing).Error; err != nil {

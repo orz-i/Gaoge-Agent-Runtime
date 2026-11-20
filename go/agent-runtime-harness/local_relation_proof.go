@@ -164,7 +164,7 @@ func (runner *Runner) verifyLocalRelationChain(ctx context.Context, candidate ke
 			}
 		case agent.RunKind:
 			if !coordinator.ObservesLocalDelegation(runner.runtime, frozen) ||
-				(control && (!coordinator.OwnsLocalDelegation(runner.runtime, frozen) ||
+				(control && (!coordinator.VerifiedLocalDelegationControl(ctx, runner.runtime, frozen, candidate) ||
 					!runner.localRelationCancellerOwnsKernel(agent.RunKind))) {
 				return unverified()
 			}

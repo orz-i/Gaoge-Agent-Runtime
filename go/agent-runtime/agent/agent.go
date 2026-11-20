@@ -373,6 +373,11 @@ type Runner struct {
 	// Frozen at composition: Host middleware/preparers may issue effects
 	// after Kernel Cancel, even when the native Run is already terminal.
 	kernelOwnedStartCancellation bool
+	// Native/Deferred authority is classified once at composition. A
+	// never-dispatched prepared Root has its own Kernel-origin no-effect
+	// witness; it cannot upgrade later Host callback effects to settled.
+	trustedDeferredPreparedControl bool
+	trustedDeferredRootControl     bool
 }
 
 type runState struct {
@@ -550,6 +555,16 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 			return nil, defaultErr
 		}
 	}
+	// A policy method belonging to the selected Model client is within the
+	// existing provider callback custody contract. An independent Host
+	// function is not: it may launch untracked effects after returning and
+	// cannot convey settled deferred cancellation authority.
+	policyNormalizer := dependencies.NormalizeModelPolicy
+	if policyNormalizer == nil {
+		if owned, ok := dependencies.Model.(SelectedModelPolicyClient); ok {
+			policyNormalizer = owned.NormalizeModelPolicy
+		}
+	}
 	return &Runner{
 		runtime: dependencies.Runtime, model: dependencies.Model, clock: dependencies.Clock, catalog: dependencies.Catalog,
 		executor: dependencies.Executor, approvals: dependencies.Approvals,
@@ -571,12 +586,19 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		managedContextRecovery: dependencies.ManagedContextRecovery,
 		contextPreparation:     dependencies.ContextPreparation,
 		boundedCallbacks:       collectBoundedCallbacks(dependencies.RunMiddleware, dependencies.ModelMiddleware, dependencies.ToolMiddleware),
-		kernelOwnedStartCancellation: len(dependencies.RunMiddleware) == 0 &&
+		// Native pre-Start cancellation and deferred post-callback custody
+		// share the SAME Host-callback trust decision. Native Start remains
+		// strictly middleware-free while the deferred path may also accept
+		// the audited, callback-scoped first-party middleware below.
+		kernelOwnedStartCancellation: trustedDeferredCallbackStack(dependencies) &&
+			len(dependencies.RunMiddleware) == 0 &&
 			len(dependencies.ModelMiddleware) == 0 && len(dependencies.ToolMiddleware) == 0 &&
-			dependencies.PrepareModelRequest == nil && dependencies.ContextPreparation == nil && dependencies.NormalizeModelPolicy == nil,
-		prepareModelRequest:   dependencies.PrepareModelRequest,
-		modelPolicyNormalizer: dependencies.NormalizeModelPolicy,
-		deferResume:           dependencies.DeferResumption,
+			dependencies.ContextPreparation == nil && dependencies.ManagedContextRecovery == nil,
+		prepareModelRequest:            dependencies.PrepareModelRequest,
+		trustedDeferredPreparedControl: trustedDeferredPreparationStack(dependencies),
+		trustedDeferredRootControl:     trustedDeferredCallbackStack(dependencies),
+		modelPolicyNormalizer:          policyNormalizer,
+		deferResume:                    dependencies.DeferResumption,
 	}, nil
 }
 

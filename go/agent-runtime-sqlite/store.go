@@ -338,6 +338,9 @@ func (s *Store) applyWithAuthority(ctx context.Context, lease *kernel.ExecutionL
 	if readErr != nil {
 		return kernel.Snapshot{}, readErr
 	}
+	if _, err = sqliteSettleRetirementSuccessor(ctx, tx, runID); err != nil {
+		return kernel.Snapshot{}, err
+	}
 	// Read native authority in this same writer transaction before physical
 	// fence precedence; control and opaque recovery have distinct authority.
 	if lease == nil && guard == nil && recovery == nil {
