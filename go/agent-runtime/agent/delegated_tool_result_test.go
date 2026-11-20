@@ -6,6 +6,7 @@ import (
 	"errors"
 	"testing"
 
+	interactionadapter "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/interaction"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
@@ -21,11 +22,12 @@ func (readToolApproval) Approval(context.Context, plugin.ToolInvocation) (plugin
 
 func TestDeferredToolResultRequiresOriginalCallbackAndOwnerReceipt(t *testing.T) {
 	for _, tc := range []struct {
-		name    string
-		witness bool
-	}{{"original_receipt", true}, {"opaque_history", false}} {
+		name       string
+		witness    bool
+		checkpoint bool
+	}{{"original_receipt", true, false}, {"opaque_history", false, false}, {"approved_checkpoint", true, true}, {"opaque_checkpoint", false, true}} {
 		t.Run(tc.name, func(t *testing.T) {
-			rt, _ := newTestRuntimeAndApprovals(t)
+			rt, approvals := newTestRuntimeAndApprovals(t)
 			result := tools.ExecutionResult{Content: json.RawMessage(`{"answer":42}`), Receipt: tools.Receipt{ExecutionID: "call_publish", Disposition: "committed", OwnerReceiptDigest: kernel.ManagedDigest("original-owner-receipt")}}
 			executed := 0
 			registry := mustRegistry(t, []tools.Registration{{Definition: tools.Definition{Key: publishToolKey, Name: publishToolName, InputSchema: json.RawMessage(`{"type":"object"}`), Terminal: true}, Handler: tools.HandlerFunc(func(context.Context, tools.ExecutionRequest) (tools.ExecutionResult, error) {
@@ -46,6 +48,10 @@ func TestDeferredToolResultRequiresOriginalCallbackAndOwnerReceipt(t *testing.T)
 				return tools.CloneExecutionResult(readBack), nil
 			})
 			deps := agent.Dependencies{Runtime: rt, Model: &terminalToolModel{t: t}, Catalog: registry, Executor: registry, ApprovalPolicies: []plugin.ApprovalPolicy{readToolApproval{}}}
+			if tc.checkpoint {
+				deps.Approvals = interactionadapter.New(approvals)
+				deps.ApprovalPolicies = []plugin.ApprovalPolicy{requiredApprovalPolicy{name: "approve-original-call"}}
+			}
 			if tc.witness {
 				deps.DelegatedToolResults = reader
 			}
@@ -58,6 +64,27 @@ func TestDeferredToolResultRequiresOriginalCallbackAndOwnerReceipt(t *testing.T)
 				t.Fatal(err)
 			}
 			done, err := original.Resume(t.Context(), prepared.Run.ID, prepared.Run.Revision)
+			if tc.checkpoint {
+				if err != nil || done.Run.Status != kernel.RunStatusWaitingInput || done.Checkpoint == nil || executed != 0 {
+					t.Fatalf("before approval: status=%s executions=%d err=%v", done.Run.Status, executed, err)
+				}
+				// A replacement worker can consume only the exact persisted approval.
+				deps.DelegatedToolResults = reader
+				restarted, err := agent.NewRunner(deps)
+				if err != nil {
+					t.Fatal(err)
+				}
+				done, err = restarted.ResolveApproval(t.Context(), done.Run.ID, done.Run.Revision, plugin.ApprovalResponse{Decision: plugin.ApprovalApprove})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if done.Run.Status == kernel.RunStatusRunning {
+					done, err = restarted.Resume(t.Context(), done.Run.ID, done.Run.Revision)
+					if err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
 			if err != nil || done.Run.Status != kernel.RunStatusCompleted {
 				t.Fatalf("child %s: %v", done.Run.Status, err)
 			}

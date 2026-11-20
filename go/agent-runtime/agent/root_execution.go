@@ -178,7 +178,7 @@ func (runner *Runner) executeOwnedRoot(ctx context.Context, current kernel.Snaps
 		outcome.ControlCustody = kernel.OwnedCustodyPrepared
 	} else if runner.scopedRootCallbacks && !scoped.rootCallbacks.approvalPolicyEntered.Load() {
 		outcome.ControlCustody = kernel.OwnedCustodyScoped
-	} else if runner.scopedRootCallbacks && settled && scoped.rootCallbacks.toolApprovals.allCommitted() {
+	} else if runner.scopedRootCallbacks && settled && scoped.rootCallbacks.toolApprovals.allBound() {
 		outcome.ControlCustody = kernel.OwnedToolResultReturn
 	}
 	payload := kernel.OwnedPhysicalCallbackReturnPayload(latest, outcome)

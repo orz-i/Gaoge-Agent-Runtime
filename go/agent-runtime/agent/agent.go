@@ -2117,6 +2117,9 @@ func (runner *Runner) preparePendingApproval(
 		Events: []kernel.EventDraft{{Type: "interaction.created", Message: "Tool approval required"}},
 	})
 	if err == nil {
+		if runner.rootCallbacks != nil && runner.delegatedToolResults != nil && runner.scopedRootCallbacks {
+			runner.rootCallbacks.toolApprovals.bind(call)
+		}
 		runner.publishRunEvent(ctx, waiting, EventRunWaitingInput, false)
 		runner.publishValue(ctx, waiting.Run.ID, plugin.Event{
 			Type: EventInteractionRequired, Revision: waiting.Run.Revision, Status: string(waiting.Run.Status),
@@ -2399,7 +2402,7 @@ func (runner *Runner) persistCompletedToolCall(
 	state := execution.state
 	state.ToolWait = nil
 	if runner.rootCallbacks != nil && runner.delegatedToolResults != nil && runner.scopedRootCallbacks {
-		if receipt, ok := runner.rootCallbacks.toolApprovals.committed(execution.call, result); ok {
+		if receipt, ok := runner.rootCallbacks.toolApprovals.committed(execution.call, result, approvedPendingCall(snapshot, state)); ok {
 			state.DelegatedToolReceipts = append(state.DelegatedToolReceipts, receipt)
 		}
 	}
