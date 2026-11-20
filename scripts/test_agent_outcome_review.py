@@ -103,6 +103,19 @@ class TaskOutcomeReviewTests(unittest.TestCase):
             self.assertFalse(facts["baselineReviewReady"])
             self.assertTrue(facts["evidenceGaps"])
 
+    def test_checkpoint_without_start_ignores_unvalidated_runner_metadata(self):
+        report = baseline.new_report(quality.quality_config(), {})
+        report["runner"].update(requestedSamples=["private-checkpoint-text"],
+                                datasetHash="sha256:" + "a" * 64, pilotOnly=True)
+        pressure = baseline.quality_pressure_facts(report)
+        self.assertIsNone(pressure["datasetHash"])
+        self.assertIsNone(pressure["coverage"]["requested"])
+        self.assertFalse(pressure["coverage"]["pilotOnly"])
+        review = baseline.quality_outcome_facts(report)
+        self.assertIsNone(review["coverage"]["requested"])
+        self.assertNotIn("private-checkpoint-text", baseline.quality_outcome_markdown(review))
+        self.assertNotIn("private-checkpoint-text", baseline.quality_pressure_markdown(pressure))
+
     def test_review_output_is_content_free(self):
         report = quality.quality_report()
         secret = "private-untrusted-endpoint-or-payload"

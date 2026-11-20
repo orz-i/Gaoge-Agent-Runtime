@@ -907,7 +907,8 @@ def quality_pressure_facts(report):
     validate_report(report)
     if report["configuration"].get("suite") != QUALITY_SUITE:
         raise SafeFailure("quality_suite_required")
-    runner = report["runner"]
+    # Only a validated start event establishes Runner metadata for the report.
+    runner = report["runner"] if report["runner"].get("taskVersion") else {}
     summary = report["summary"] or {}
     samples = report["samples"]
     counts = {"contextBudgetRejected": 0, "agentToolLimit": 0, "otherOrUnknown": 0}
@@ -963,7 +964,6 @@ def quality_pressure_facts(report):
                 "serializedBytes", "maxSerializedBytes")} if pressure is not None else None),
             "compactionOutcome": pressure["reason"] if pressure is not None else None,
         })
-    requested = runner.get("requestedSamples") or summary.get("requested")
     original_hash = runner.get("datasetHash")
     safe_hash = (original_hash if type(original_hash) is str and
                  re.fullmatch(r"sha256:[0-9a-f]{64}", original_hash) else None)
@@ -974,7 +974,7 @@ def quality_pressure_facts(report):
         "datasetHash": safe_hash,
         "qualityTreatment": report["configuration"].get("qualityTreatment", "current/default"),
         "sourceClean": report["source"].get("dirty") is False,
-        "coverage": {"requested": requested, "attempted": len(samples),
+        "coverage": {"requested": runner.get("requestedSamples"), "attempted": len(samples),
                      "complete": complete, "pilotOnly": runner.get("pilotOnly") is True,
                      "preflightOnly": runner.get("preflightOnly") is True},
         "counts": counts,
