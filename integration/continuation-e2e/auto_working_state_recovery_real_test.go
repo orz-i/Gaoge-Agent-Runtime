@@ -485,12 +485,17 @@ func newAutoSummarySession(t *testing.T, db *gorm.DB, files, phase, mode string,
 	if phase == "resume" {
 		options.Transcript = nil
 	}
+	options.Config.ToolKeys = nil
+	options.Config.ToolPolicies = nil
 	session, err := harness.OpenAgentSession(harness.AgentSessionOptions{
 		Runtime: runtime, Store: store, Model: autoSummaryInvoiceModel{files: files, warmup: phase == "warmup", invalid: phase == "paired-invalid"},
-		Tools: managedRecoveryToolRegistrations(files), Session: options,
-		Context: harness.AgentSessionContextOptions{SummaryNativeRecovery: nativeRecovery, ResolveWindow: func(context.Context, model.Request) (runtimecontext.ModelWindow, error) {
-			return runtimecontext.ModelWindow{ContextTokens: 65536, ReservedOutputTokens: 512}, nil
-		}},
+		LocalTools: managedRecoverySessionTools(files), Session: options,
+		Context: harness.AgentSessionContextOptions{
+			SummaryNativeRecovery: nativeRecovery, ReadArtifacts: true,
+			ResolveWindow: func(context.Context, model.Request) (runtimecontext.ModelWindow, error) {
+				return runtimecontext.ModelWindow{ContextTokens: 65536, ReservedOutputTokens: 512}, nil
+			},
+		},
 		Execution: agent.ExecutionPolicy{
 			Model: agent.CallPolicy{Timeout: 3 * time.Second, MaxAttempts: 1, MaxConcurrency: 1},
 			Tool:  agent.CallPolicy{Timeout: time.Second, MaxAttempts: 1, MaxConcurrency: 1},
