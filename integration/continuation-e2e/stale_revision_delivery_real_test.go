@@ -43,17 +43,12 @@ func TestRealPostgresRedisStaleRevisionSelfWakeupNeverACKsWithoutProof(t *testin
 	if dsn == "" || addr == "" {
 		t.Skip("requires disposable PostgreSQL and Redis")
 	}
-	db, err := gorm.Open(gormpostgres.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		sqlDB, e := db.DB()
-		if e == nil {
-			_ = sqlDB.Close()
-		}
-	})
-	if err = postgresadapter.Migrate(db); err != nil {
+	// A Redis prefix isolates delivery keys, but Project claims from the whole
+	// PostgreSQL outbox. Keep both reconstructed DB clients in one fixture schema
+	// so another test's wakeup cannot become this Worker's first reported error.
+	db, isolatedDSN := managedRecoveryDatabase(t, dsn)
+	dsn = isolatedDSN
+	if err := postgresadapter.Migrate(db); err != nil {
 		t.Fatal(err)
 	}
 	store := postgresadapter.NewKernelStore(db)
@@ -111,9 +106,7 @@ func TestRealPostgresRedisStaleRevisionSelfWakeupNeverACKsWithoutProof(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	// This PostgreSQL projector may claim additional still-pending outbox
-	// facts from other tests in the shared disposable database. Select the
-	// exact Run and committed source Revision, not just the first Job.
+	// Select the exact Run and committed source Revision, not just the first Job.
 	var readyJob queuecore.Job
 	for _, job := range jobs {
 		var payload continuation.Payload
@@ -181,9 +174,14 @@ func TestRealPostgresRedisStaleRevisionSelfWakeupNeverACKsWithoutProof(t *testin
 		t.Fatal(err)
 	}
 	reported := make(chan error, 8)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
 	worker, err := continuation.NewWorker(secondQueue, dispatcher, continuation.WorkerOptions{
 		WorkerID: id + "-worker", ClaimLimit: 1, PollInterval: 10 * time.Millisecond,
 		Report: func(e error) {
+			// Freeze the first durable NACK before its backoff can elapse
+			// while the test observes the protected Job and owning Run.
+			cancel()
 			select {
 			case reported <- e:
 			default:
@@ -193,7 +191,6 @@ func TestRealPostgresRedisStaleRevisionSelfWakeupNeverACKsWithoutProof(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithCancel(t.Context())
 	if err = worker.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -208,6 +205,9 @@ func TestRealPostgresRedisStaleRevisionSelfWakeupNeverACKsWithoutProof(t *testin
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("unconsumed revision change was silently ACKed")
+	}
+	if err = worker.Close(context.Background()); err != nil {
+		t.Fatal(err)
 	}
 	job, err := secondQueue.Get(t.Context(), readyJob.ID)
 	if err != nil || job.Status != queuecore.StatusQueued || job.DeadLetterAt != nil ||
@@ -238,6 +238,20 @@ func TestRealPostgresRedisStaleRevisionSelfWakeupNeverACKsWithoutProof(t *testin
 	})
 	if err != nil || settled.Run.Revision != unrelated.Run.Revision+1 {
 		t.Fatalf("trusted Host recovery did not commit exactly once: %+v %v", settled.Run, err)
+	}
+	retirementWorker, err := continuation.NewWorker(secondQueue, dispatcher, continuation.WorkerOptions{
+		WorkerID: id + "-retirement-worker", ClaimLimit: 1, PollInterval: 10 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	retirementCtx, stopRetirement := context.WithCancel(t.Context())
+	defer func() {
+		stopRetirement()
+		_ = retirementWorker.Close(context.Background())
+	}()
+	if err = retirementWorker.Start(retirementCtx); err != nil {
+		t.Fatal(err)
 	}
 	// After the Nack's durable backoff the same Job may be ACKed because
 	// the authoritative Run is now terminal, not because Revision moved.
