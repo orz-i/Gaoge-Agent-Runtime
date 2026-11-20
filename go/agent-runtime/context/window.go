@@ -518,6 +518,8 @@ type TokenCountRequest struct {
 }
 
 // TokenCounter counts one complete routed model request with provider/model awareness.
+// It measures input only; it must not generate model output or perform business
+// effects. Recovery may repeat a count whose original callback did not return.
 type TokenCounter interface {
 	Count(stdcontext.Context, TokenCountRequest) (int64, error)
 }
@@ -569,6 +571,12 @@ func (manager *Manager) Open(_ stdcontext.Context, request OpenRequest) (Checkpo
 	normalized, err := normalizeOpenRequest(request)
 	if err != nil {
 		return Checkpoint{}, err
+	}
+	// Explicit Host updates cannot impersonate a Runtime-generated summary.
+	// Nil carry keeps the already-committed provenance; Runtime installation
+	// uses the explicit, validated rollover boundary.
+	if normalized.WorkingState != nil && normalized.WorkingState.Derivation != nil {
+		return Checkpoint{}, ErrInvalidInput
 	}
 	if normalized.Previous == nil {
 		if normalized.WorkingState != nil {
@@ -901,6 +909,16 @@ func (manager *Manager) AssessModelRequest(
 	if err != nil {
 		return Assessment{}, err
 	}
+	// Canonical JSON may shorten RawMessage numbers. Every counting mode,
+	// including an absent or unrouted counter, must bound the typed request
+	// that Generate sees rather than authorize those discarded bytes.
+	exactPayload, marshalErr := model.MarshalRequestForInputCount(request)
+	if marshalErr != nil {
+		return Assessment{}, errors.Join(ErrInvalidInput, marshalErr)
+	}
+	if len(exactPayload) > len(serialized) {
+		serialized = exactPayload
+	}
 	soft := hard * int64(policy.SoftLimitPercent) / 100
 	if soft < 1 {
 		soft = 1
@@ -919,18 +937,6 @@ func (manager *Manager) AssessModelRequest(
 		// with their original key order. Counting must preserve exactly the
 		// same typed request bytes that Generate sees, or a valid replay is
 		// spuriously rejected before the native endpoint is reached.
-		exactPayload, marshalErr := model.MarshalRequestForInputCount(request)
-		if marshalErr != nil {
-			return Assessment{}, errors.Join(ErrInvalidInput, marshalErr)
-		}
-		// If counting fails, the conservative text-only fallback must
-		// charge at least the original typed request size. Canonicalizing
-		// arbitrary JSON number spellings can shorten them drastically;
-		// never reduce the hard-byte bound by that normalization.
-		if len(exactPayload) > len(serialized) {
-			serialized = exactPayload
-			assessment.SerializedBytes = int64(len(exactPayload))
-		}
 		countRequest := TokenCountRequest{
 			Context: countContext,
 			Payload: exactPayload,

@@ -14,9 +14,21 @@ const (
 	MaxWorkingStateBytes     = 16 << 10
 	MaxWorkingStateItems     = 32
 	MaxWorkingStateTextBytes = 2 << 10
+	// WorkingStateDerivationSummary identifies a Runtime-produced semantic summary.
+	WorkingStateDerivationSummary = "model_summary"
 )
 
-// WorkingStateSource binds a Host-authored update to one exact previously
+// WorkingStateDerivation locates the native model receipt that produced this
+// state. It is hashed task provenance, never an execution or Tool permission.
+type WorkingStateDerivation struct {
+	Kind          string `json:"kind"`
+	RunID         string `json:"runID"`
+	InvocationID  string `json:"invocationID"`
+	RequestHash   string `json:"requestHash"`
+	PolicyVersion string `json:"policyVersion"`
+}
+
+// WorkingStateSource binds a task-state update to one exact previously
 // committed Context checkpoint. References are provenance, never permissions.
 type WorkingStateSource struct {
 	CheckpointID           string `json:"checkpointID"`
@@ -25,18 +37,19 @@ type WorkingStateSource struct {
 	CoveredPathHash        string `json:"coveredPathHash"`
 }
 
-// WorkingState is bounded Host-derived task data, not an instruction or a
-// replacement transcript. Version advances only on an explicit Host update.
+// WorkingState is bounded derived task data, not an instruction or a
+// replacement transcript. Version advances at a validated update boundary.
 // EvidenceRefs are inert text references; they grant no read or Tool authority.
 type WorkingState struct {
-	Version      int                `json:"version"`
-	Source       WorkingStateSource `json:"source"`
-	Goal         string             `json:"goal,omitempty"`
-	Constraints  []string           `json:"constraints,omitempty"`
-	Completed    []string           `json:"completed,omitempty"`
-	Pending      []string           `json:"pending,omitempty"`
-	Decisions    []string           `json:"decisions,omitempty"`
-	EvidenceRefs []string           `json:"evidenceRefs,omitempty"`
+	Version      int                     `json:"version"`
+	Source       WorkingStateSource      `json:"source"`
+	Goal         string                  `json:"goal,omitempty"`
+	Constraints  []string                `json:"constraints,omitempty"`
+	Completed    []string                `json:"completed,omitempty"`
+	Pending      []string                `json:"pending,omitempty"`
+	Decisions    []string                `json:"decisions,omitempty"`
+	EvidenceRefs []string                `json:"evidenceRefs,omitempty"`
+	Derivation   *WorkingStateDerivation `json:"derivation,omitempty"`
 }
 
 // ValidateWorkingState checks fixed payload bounds without normalizing the
@@ -66,6 +79,17 @@ func ValidateWorkingState(value *WorkingState) error {
 	if jsoncontract.ValidateCanonicalUTF8(value) != nil {
 		return ErrInvalidInput
 	}
+	if value.Derivation != nil {
+		derived := value.Derivation
+		if derived.Kind != WorkingStateDerivationSummary || derived.RunID == "" ||
+			derived.RunID != strings.TrimSpace(derived.RunID) || len(derived.RunID) > MaxWorkingStateTextBytes ||
+			!strings.HasPrefix(derived.InvocationID, "modelinv_") ||
+			!validWorkingStateHex(strings.TrimPrefix(derived.InvocationID, "modelinv_"), 32) ||
+			!validWorkingStateDigest(derived.RequestHash) || derived.PolicyVersion == "" ||
+			derived.PolicyVersion != strings.TrimSpace(derived.PolicyVersion) || len(derived.PolicyVersion) > 128 {
+			return ErrInvalidInput
+		}
+	}
 	encoded, err := json.Marshal(value)
 	if err != nil || len(encoded) > MaxWorkingStateBytes {
 		return ErrInvalidInput
@@ -83,11 +107,19 @@ func CloneWorkingState(value *WorkingState) *WorkingState {
 	copy.Pending = append([]string(nil), value.Pending...)
 	copy.Decisions = append([]string(nil), value.Decisions...)
 	copy.EvidenceRefs = append([]string(nil), value.EvidenceRefs...)
+	if value.Derivation != nil {
+		derived := *value.Derivation
+		copy.Derivation = &derived
+	}
 	return &copy
 }
 
 func validWorkingStateDigest(value string) bool {
-	if len(value) != 64 {
+	return validWorkingStateHex(value, 64)
+}
+
+func validWorkingStateHex(value string, size int) bool {
+	if len(value) != size {
 		return false
 	}
 	decoded, err := hex.DecodeString(value)

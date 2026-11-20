@@ -63,6 +63,19 @@ func cloneSamplingSnapshot(v kernel.Snapshot) kernel.Snapshot {
 	return v
 }
 func cloneSamplingCheckpoint(v runtimecontext.Checkpoint) runtimecontext.Checkpoint {
+	if state := v.Window.WorkingState; state != nil {
+		copy := *state
+		copy.Constraints = slices.Clone(state.Constraints)
+		copy.Completed = slices.Clone(state.Completed)
+		copy.Pending = slices.Clone(state.Pending)
+		copy.Decisions = slices.Clone(state.Decisions)
+		copy.EvidenceRefs = slices.Clone(state.EvidenceRefs)
+		if state.Derivation != nil {
+			derivation := *state.Derivation
+			copy.Derivation = &derivation
+		}
+		v.Window.WorkingState = &copy
+	}
 	v.Window.Entries = slices.Clone(v.Window.Entries)
 	for i := range v.Window.Entries {
 		v.Window.Entries[i].Message = cloneSamplingMessage(v.Window.Entries[i].Message)
