@@ -24,7 +24,7 @@ func TestUniqueObjectRejectsDuplicateAndFoldedMemberNames(t *testing.T) {
 			}
 		})
 	}
-	if err := jsoncontract.ValidateUniqueJSONObject(json.RawMessage(`{"effort":"high","nested":[{"x":1},{"x":2}]}`)); err != nil {
+	if err := jsoncontract.ValidateUniqueJSONObject(json.RawMessage(`{"effort":"high","nested":[{"x":1e400},{"x":9007199254740993}]}`)); err != nil {
 		t.Fatal(err)
 	}
 	deep := strings.Repeat("[", 260) + "1" + strings.Repeat("]", 260)

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 )
 
@@ -13,7 +14,14 @@ import (
 func portableTranscriptArtifacts(previous Checkpoint, messages []model.Message) ([]Artifact, error) {
 	encoded := make([]json.RawMessage, len(messages))
 	for index, message := range messages {
-		data, err := canonicalJSON(message)
+		if jsoncontract.ValidateCanonicalUTF8(message) != nil {
+			return nil, ErrInvalidInput
+		}
+		raw, err := json.Marshal(message)
+		if err != nil {
+			return nil, ErrInvalidInput
+		}
+		data, err := canonicalArchiveJSON(raw)
 		if err != nil {
 			return nil, err
 		}
@@ -38,7 +46,9 @@ func portableTranscriptArtifacts(previous Checkpoint, messages []model.Message) 
 			}
 			size, end = nextSize, end+1
 		}
-		payload, err := canonicalJSON(encoded[start:end])
+		// Packed messages are already canonical. Marshal the array of raw
+		// messages, rather than re-decoding it through the legacy codec.
+		payload, err := json.Marshal(encoded[start:end])
 		if err != nil {
 			return nil, err
 		}

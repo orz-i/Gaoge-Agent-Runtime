@@ -9,7 +9,96 @@ import (
 
 	runtimectx "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
+
+func TestPortableCompactionPreservesStructuredNumbers(t *testing.T) {
+	t.Parallel()
+	const original = `{"z":[0.10000000000000001,-0,1.00e+42], "n":9007199254740993}`
+	const canonical = `{"n":9007199254740993,"z":[0.10000000000000001,-0,1.00e+42]}`
+	manager := runtimectx.NewManager(runtimectx.Dependencies{})
+	seed := openRequest("u1", "a1", "u2")
+	seed.Entries[1].Message.ToolCalls = []tools.Call{{ID: "call", ToolKey: "lookup", Arguments: json.RawMessage(original)}}
+	seed.Entries = append(seed.Entries[:2:2], runtimectx.Entry{
+		ID: "tool", SourceID: "tool", TurnID: "u1",
+		Message: model.Message{Role: model.RoleTool, ToolCallID: "call", Content: model.TextParts(original)},
+	}, seed.Entries[2])
+	seed.SourcePath = []string{"u1", "a1", "tool", "u2"}
+	checkpoint, err := manager.Open(t.Context(), seed)
+	requireNoError(t, err)
+	request := runtimectx.PortableCompactionRequest{Previous: checkpoint, RunID: "run", Messages: runtimectx.Materialize(checkpoint.Window),
+		Policy: runtimectx.Policy{PreserveRecentTurns: 1}}
+	compacted, err := manager.CompactPortable(request)
+	requireNoError(t, err)
+	requireEqual(t, len(compacted.Artifacts), 1, "archive count")
+	artifact := compacted.Artifacts[0]
+	requireTrue(t, runtimectx.ValidArtifact(artifact), "archive did not validate")
+	requireEqual(t, artifact.Encoding, runtimectx.ArtifactEncodingLosslessJSON, "archive encoding")
+	var archived []model.Message
+	requireNoError(t, json.Unmarshal(artifact.ContentJSON, &archived))
+	requireEqual(t, string(archived[1].ToolCalls[0].Arguments), canonical, "exact structured Tool arguments")
+	requireEqual(t, model.TextValue(archived[2].Content), original, "unmodified Tool result text")
+	requireEqual(t, compacted.Window.Entries[len(compacted.Window.Entries)-1].SourceID, "u2", "protected tail")
+
+	for index := range request.Messages {
+		if call := request.Messages[index].ToolCalls; len(call) != 0 {
+			call[0].Arguments = json.RawMessage(strings.Replace(original, "9007199254740993", "9007199254740992", 1))
+		}
+	}
+	if _, err := manager.CompactPortable(request); !errors.Is(err, runtimectx.ErrLineageConflict) {
+		t.Fatalf("same-float replacement accepted as the original archive prefix: %v", err)
+	}
+}
+
+func TestArtifactPreservesLegacyIdentityAndSeparatesLosslessNumbers(t *testing.T) {
+	t.Parallel()
+	// Fixed pre-change artifact wire vector (the already-stored integer is .992).
+	const oldWire = `{"id":"ctxa_2f119ebde5b4c0251003ce55d788e38d","kind":"compaction","scopeID":"legacy-scope","generation":2,"sourceID":"legacy-source","contentJSON":{"n":9007199254740992,"z":[0.25,"🌱"]},"contentHash":"adcd04b4f9e62e8d30663de3b3fb2a987e5977c0f26a3bb6920e478ea8909560","tokenEstimate":14}`
+	var old runtimectx.Artifact
+	requireNoError(t, json.Unmarshal([]byte(oldWire), &old))
+	requireTrue(t, runtimectx.ValidArtifact(old), "legacy artifact did not validate")
+	reminted, err := runtimectx.NewArtifact(old.Kind, old.ScopeID, old.Generation, old.SourceID, "", json.RawMessage(`{"z":[0.25,"🌱"], "n":9007199254740992}`))
+	requireNoError(t, err)
+	wire, err := json.Marshal(reminted)
+	requireNoError(t, err)
+	requireEqual(t, string(wire), oldWire, "legacy wire, digest, and ID")
+
+	changed := json.RawMessage(strings.Replace(string(old.ContentJSON), "9007199254740992", "9007199254740993", 1))
+	forged := old
+	forged.ContentJSON = changed
+	requireTrue(t, !runtimectx.ValidArtifact(forged), "old digest authenticated a different rounded value")
+	newArtifact, err := runtimectx.NewArtifact(old.Kind, old.ScopeID, old.Generation, old.SourceID, "", changed)
+	requireNoError(t, err)
+	requireTrue(t, newArtifact.ID != old.ID && newArtifact.ContentHash != old.ContentHash, "legacy and lossless identities alias")
+	requireEqual(t, newArtifact.Encoding, runtimectx.ArtifactEncodingLosslessJSON, "lossless format")
+	serialized, err := json.Marshal(newArtifact)
+	requireNoError(t, err)
+	requireTrue(t, strings.Contains(string(serialized), `"encoding":"lossless-json-v1"`), "wire omitted canonical encoding marker")
+	var restored runtimectx.Artifact
+	requireNoError(t, json.Unmarshal(serialized, &restored))
+	requireTrue(t, reflect.DeepEqual(restored, newArtifact) && runtimectx.ValidArtifact(restored), "lossless artifact did not survive serialization")
+	for _, marker := range []string{"", "future-encoding"} {
+		changed := restored
+		changed.Encoding = marker
+		requireTrue(t, !runtimectx.ValidArtifact(changed), "missing/unknown format accepted")
+	}
+	unnecessary := reminted
+	unnecessary.Encoding = runtimectx.ArtifactEncodingLosslessJSON
+	requireTrue(t, !runtimectx.ValidArtifact(unnecessary), "legacy-safe content accepted a second encoding identity")
+	wide, err := runtimectx.NewArtifact(old.Kind, old.ScopeID, old.Generation, old.SourceID, "", json.RawMessage(`{"n":1e400}`))
+	requireNoError(t, err)
+	requireTrue(t, runtimectx.ValidArtifact(wide), "standalone archive unnecessarily parsed the value as float64")
+	requireEqual(t, string(wide.ContentJSON), `{"n":1e400}`, "original exponent")
+}
+
+func TestArtifactRejectsAmbiguousStructuredInput(t *testing.T) {
+	t.Parallel()
+	for _, payload := range []string{`[{"n":1,"n":2}]`, `{"a":1,"A":2}`, `{"s":"\ud800"}`, `{} {}`} {
+		if _, err := runtimectx.NewArtifact(runtimectx.ArtifactCompaction, "scope", 1, "source", "", json.RawMessage(payload)); !errors.Is(err, runtimectx.ErrInvalidInput) {
+			t.Errorf("accepted or misclassified invalid archive %q: %v", payload, err)
+		}
+	}
+}
 
 func TestPortableCompactionSealsMultipleUnicodeArchivesAndRollsOver(t *testing.T) {
 	t.Parallel()
