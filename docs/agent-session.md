@@ -10,6 +10,12 @@ go run ./go/agent-runtime-harness/examples/agent-session
 The example prints `Release checks: 12 passed, 0 failed.` as a JSON string.
 It uses Memory Stores and a fixture model; it does not survive process exit.
 
+This explicit-selection facade coexists with
+[OpenToolAgentSession](tool-agent-session.md). The latter pairs each local Tool
+with its policy, installs its archive reader and read-exploration defaults, and
+supports Host queued Inputs. The facades retain their own authorization models;
+automatic summaries and their dedicated native recovery use this entry point.
+
 ## Supported composition
 
 The Host supplies a Kernel Runtime, Harness Store, model client, Tool

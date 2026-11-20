@@ -134,6 +134,9 @@ func validContextSummaryState(state runState) bool {
 	if state.SummaryNativeRecovery && state.WorkingStateSummary == nil || state.WorkingStateSummary != nil && state.MaxModelOutputTokens <= 0 {
 		return false
 	}
+	if state.SummaryNativeRecovery && (state.InputBinding != "" || state.InputCursor != 0) {
+		return false // Host input boundaries are not part of the dedicated transfer proof.
+	}
 	for index, invocation := range state.ModelInvocations {
 		if invocation.Purpose == ModelInvocationContextSummary && (index != 0 || state.WorkingStateSummary == nil ||
 			invocation.ContextSummary == nil || !reflect.DeepEqual(*state.WorkingStateSummary, invocation.ContextSummary.Policy)) {

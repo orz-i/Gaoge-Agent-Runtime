@@ -37,7 +37,7 @@ func validSummaryNativeDependencies(dependencies Dependencies) bool {
 		dependencies.ContextPreparation == nil && dependencies.PrepareModelRequest == nil && len(dependencies.RunMiddleware) == 1 &&
 		dependencies.RunMiddleware[0] == adapter.bounded && len(dependencies.ModelMiddleware) == 0 && len(dependencies.ToolMiddleware) == 0 &&
 		len(dependencies.Observers) == 0 && len(dependencies.Telemetry) == 0 && len(dependencies.CompletionPolicies) == 0 &&
-		dependencies.NormalizeModelPolicy == nil && dependencies.ToolDiscovery == nil &&
+		dependencies.NormalizeModelPolicy == nil && dependencies.ToolDiscovery == nil && dependencies.Inputs == nil &&
 		summaryNativeBridge(adapter.ports, "contextSummaryPorts", dependencies.Runtime) &&
 		summaryNativeBridge(adapter.bounded.ports, "boundedContextPorts", dependencies.Runtime)
 }
@@ -55,7 +55,7 @@ type contextSummaryLifecycle struct {
 }
 
 func summaryNativePhase(state runState) (ModelInvocation, bool) {
-	if !state.SummaryNativeRecovery || state.WorkingStateSummary == nil || len(state.ModelInvocations) != 1 ||
+	if !state.SummaryNativeRecovery || state.WorkingStateSummary == nil || state.InputBinding != "" || state.InputCursor != 0 || len(state.ModelInvocations) != 1 ||
 		len(state.Messages) != 1 || len(state.PendingCalls) != 0 || state.PendingApproval != nil || state.ToolDispatchID != "" ||
 		state.ToolWait != nil || len(state.DeferredChildren) != 0 || len(state.RecoveredTools) != 0 {
 		return ModelInvocation{}, false

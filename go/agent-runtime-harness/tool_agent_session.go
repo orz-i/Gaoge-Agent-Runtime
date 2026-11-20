@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"context"
 	"strings"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
@@ -43,7 +44,8 @@ func OpenToolAgentSession(options ToolAgentSessionOptions) (*SessionClient, erro
 	config := cloneConfigSnapshot(options.Session.Config)
 	if options.Runtime == nil || options.Store == nil || options.Model == nil || options.ResolveModelWindow == nil ||
 		len(config.ToolKeys) != 0 || len(config.ToolPolicies) != 0 || len(config.Skills) != 0 ||
-		strings.TrimSpace(config.MemoryPolicy) != "" || config.SharedBudget != nil ||
+		strings.TrimSpace(config.MemoryPolicy) != "" || config.SharedBudget != nil || config.WorkingStateSummary != nil ||
+		config.MaxModelOutputTokens < 0 ||
 		config.DelegationPolicy.MaxDepth != 0 || config.ApprovalPolicyVersion != 0 || config.ContentHash != "" {
 		return nil, ErrInvalidRequest
 	}
@@ -82,7 +84,21 @@ func OpenToolAgentSession(options ToolAgentSessionOptions) (*SessionClient, erro
 		return nil, err
 	}
 	manager := runtimecontext.NewManager(runtimecontext.Dependencies{Counter: options.Counter})
-	bounded, err := NewBoundedContextAdapter(options.Store, manager, options.ResolveModelWindow, nil)
+	resolve := options.ResolveModelWindow
+	resolveWindow := func(ctx context.Context, request model.Request) (runtimecontext.ModelWindow, error) {
+		window, resolveErr := resolve(ctx, model.CloneRequest(request))
+		if resolveErr != nil {
+			return runtimecontext.ModelWindow{}, resolveErr
+		}
+		// Zero retains this facade's unspecified legacy output ceiling. A
+		// positive ceiling comes from the original frozen invocation, including
+		// recovery through a handle whose current Config supplies another value.
+		if request.MaxOutputTokens > 0 && window.ReservedOutputTokens < request.MaxOutputTokens {
+			return runtimecontext.ModelWindow{}, ErrInvalidRequest
+		}
+		return window, nil
+	}
+	bounded, err := NewBoundedContextAdapter(options.Store, manager, resolveWindow, nil)
 	if err != nil {
 		return nil, err
 	}

@@ -15,6 +15,9 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
   using the original Kernel PARK/ENABLE protocol for hard-crash takeover.
   Review fixes actual-ID/typed-input bounds, prospective business framing,
   commit-time reconciliation and missing-Run Resume compatibility.
+  Integrate the run-input/history baseline without admitting Host Inputs to
+  dedicated native summary recovery. Keep both Session facades; optional
+  positive Tool Session output ceilings require matching window reservation.
   Reject lossy source projections for automatic summaries while documenting
   the inherited structured-number limitation of the old fallback archive.
   Shared-budget and the older managed-Context combination remain rejected. See

@@ -120,6 +120,10 @@ func TestToolAgentSessionRejectsUncomposedOrConflictingCapabilities(t *testing.T
 		}},
 		{"memory", func(o *harness.ToolAgentSessionOptions) { o.Session.Config.MemoryPolicy = "external" }},
 		{"shared budget", func(o *harness.ToolAgentSessionOptions) { o.Session.Config.SharedBudget = &budget.Limits{} }},
+		{"automatic summary", func(o *harness.ToolAgentSessionOptions) {
+			o.Session.Config.WorkingStateSummary = &agent.WorkingStateSummaryPolicy{MaxInputTokens: 8192, MaxSerializedBytes: 65536}
+		}},
+		{"negative output ceiling", func(o *harness.ToolAgentSessionOptions) { o.Session.Config.MaxModelOutputTokens = -1 }},
 		{"delegation", func(o *harness.ToolAgentSessionOptions) { o.Session.Config.DelegationPolicy.MaxDepth = 2 }},
 		{"sealed config", func(o *harness.ToolAgentSessionOptions) { o.Session.Config.ContentHash = "already-sealed" }},
 		{"approval version", func(o *harness.ToolAgentSessionOptions) { o.Session.Config.ApprovalPolicyVersion = 1 }},

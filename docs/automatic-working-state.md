@@ -50,6 +50,10 @@ The selected window resolver and token counter remain read-only measurement
 dependencies. Recovery may repeat these reads; they must not hide model
 generation, Tool execution or business mutations. The exact Store ports remain
 trusted storage with their original immutable-write/CAS contracts.
+Dedicated native summary recovery rejects Host `Inputs` before binding or
+reading an input source. Ordinary low-level composition may use queued inputs;
+they enter before a later business intent is frozen and cannot rewrite an
+already pending intent or turn a summary into an assistant answer.
 
 ## Trigger and state ownership
 
