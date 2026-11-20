@@ -17,6 +17,7 @@ func TestPR72PrivatePhysicalIDsAreAbsentFromTimelineAndFeedProjections(t *testin
 	for _, raw := range []string{
 		`{"phase":"resolve-subtask-approval","physicalRunID":"secret-child-run","nested":{"run_id":"secret-nested-run"}}`,
 		`{"boundary":"cancel_scope_pending","runID":"secret-cancel-run","refs":[{"executionRefID":"secret-ref-run"}]}`,
+		`{"id":"hcanceleffect_example","intentID":"intent","runID":"secret-run","ownerID":"secret-owner","before":{"id":"secret-kernel-run","actor":{"actorID":"secret-actor"}}}`,
 	} {
 		item := harness.Item{
 			ID: "probe", TurnID: "probe-turn", Kind: harness.ItemDiagnostic, Status: harness.ItemStarted,
@@ -49,6 +50,16 @@ func TestPR72PrivatePhysicalIDsAreAbsentFromTimelineAndFeedProjections(t *testin
 		if err != nil || bytes.Contains(delta.Data, []byte("secret-")) {
 			t.Errorf("public diagnostic progress Feed leaked Kernel IDs: %s err=%v", delta.Data, err)
 		}
+	}
+}
+
+func TestCancellationUnknownUsesSafeConflictHTTP(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	writeHarnessError(ctx, errors.Join(harness.ErrCancellationOutcomeUnknown, errors.New("secret owner ledger detail")))
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "harness.cancellation_outcome_unknown") || strings.Contains(w.Body.String(), "secret") {
+		t.Fatalf("unsafe cancellation reconciliation error: %d %s", w.Code, w.Body.String())
 	}
 }
 

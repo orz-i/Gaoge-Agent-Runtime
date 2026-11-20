@@ -103,6 +103,10 @@ type Store interface {
 	// Attempt and its execution reference back into Accepted.
 	UpdateInvocation(context.Context, Invocation, uint64) (Invocation, error)
 	RetryInvocation(context.Context, string, uint64, string, time.Time) (Invocation, error)
+	// CancelUndispatchedRoot commits the original no-physical-admission Root
+	// Invocation AND Turn terminal revisions under their admission lock. Both
+	// first Accepted Roots and accepted Retry generations use this authority.
+	CancelUndispatchedRoot(context.Context, Invocation, Turn) (Invocation, Turn, error)
 	ListInvocations(context.Context, string) ([]Invocation, error)
 	CreateInteraction(context.Context, Interaction, uint64, uint64) (Interaction, bool, error)
 	GetInteraction(context.Context, string) (Interaction, error)

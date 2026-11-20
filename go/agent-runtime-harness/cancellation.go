@@ -36,6 +36,9 @@ type LocalKernelCanceller interface {
 // delegates to the same Kernel, without asserting that the entire canceller
 // owns remote A2A/Handoff effects. Harness still verifies the original
 // Feature/Agent route and the committed cancellation result independently.
+// Forwarding a DIRECT native child-busy no-effect result also certifies that
+// this callback performed no Host cleanup. If Host effects could have begun,
+// return an outcome-unknown error instead, never pass through that proof.
 type LocalKernelRunKindCanceller interface {
 	RuntimeCanceller
 	OwnsKernelRunKind(*kernel.Runtime, kernel.RunKind) bool
@@ -205,7 +208,16 @@ func (runner *Runner) cancelRuntimeRun(
 		if nativeKernel && current.Run.Kind == handoff.RemoteAgentRunKind {
 			return kernel.Snapshot{}, true, fmt.Errorf("A2A shadow Run %q: %w", runID, ErrHandoffCancellationUnverified)
 		}
-		cancelled, err := runner.cancellation.Cancel(ctx, runID, current.Run.Revision, strings.TrimSpace(reason))
+		callCtx := ctx
+		var effect Item
+		if !nativeKernel {
+			var claimErr error
+			callCtx, effect, claimErr = runner.beginHostCancellationEffect(ctx, current)
+			if claimErr != nil {
+				return kernel.Snapshot{}, true, claimErr
+			}
+		}
+		cancelled, err := runner.cancellation.Cancel(callCtx, runID, current.Run.Revision, strings.TrimSpace(reason))
 		if delegatedChild != nil && err == nil &&
 			(!handoff.VerifiedChildRun(delegation, parentRun, cancelled) ||
 				!terminalRuntimeStatus(cancelled.Run.Status)) {
@@ -251,6 +263,26 @@ func (runner *Runner) cancelRuntimeRun(
 			// Even a native Store ErrConflict can follow an uncertain
 			// write-capable CAS. Never retry or release its intent blindly.
 			return cancelled, true, err
+		}
+		outcome := CancellationEffectUnknown
+		if err == nil {
+			outcome = CancellationEffectSettled
+		}
+		if errors.Is(err, kernel.ErrConflict) {
+			outcome = CancellationEffectNoEffect
+		}
+		// The mixed Host's explicit RunKind delegation contract attests that
+		// this exact callback did only native control. This root-only proof
+		// settles ONLY its own claim, never a later child cleanup claim.
+		if kernel.IsControlNoEffect(err) && errors.Is(err, kernel.ErrChildExecutionBusy) {
+			if owner, ok := runner.cancellation.(LocalKernelRunKindCanceller); ok && owner.OwnsKernelRunKind(runner.runtime, current.Run.Kind) {
+				outcome = CancellationEffectNoEffect
+			}
+		}
+		if outcome != CancellationEffectUnknown {
+			if receiptErr := runner.finishHostCancellationEffect(ctx, effect, outcome); receiptErr != nil {
+				return cancelled, true, errors.Join(err, receiptErr)
+			}
 		}
 		if errors.Is(err, kernel.ErrConflict) {
 			// The custom RuntimeCanceller contract reserves this error
@@ -658,8 +690,21 @@ func (runner *Runner) cancelDescendantRun(
 
 // Apply the same missing-Run proof to direct targets and traversed children.
 func (runner *Runner) verifyMissingRelatedCancellation(ctx context.Context, runID string) error {
+	if intent, bound := ctx.Value(cancellationElectionKey{}).(Item); bound {
+		turn, err := loadVerifiedTurnIdentity(ctx, runner.store, intent.TurnID)
+		if err != nil {
+			return err
+		}
+		proven, err := runner.cancellationNoDispatchReady(ctx, turn, runID)
+		if err != nil {
+			return err
+		}
+		if proven {
+			return nil
+		}
+	}
 	if runner.relationReader == nil {
-		return nil
+		return ErrRuntimeCancellationUnverified
 	}
 	// An indexed RunRelation records execution ownership, not local Kernel
 	// residence. Delegated SubAgents can run on an independent
@@ -669,7 +714,7 @@ func (runner *Runner) verifyMissingRelatedCancellation(ctx context.Context, runI
 	// for the original execution owner to reconcile or quarantine.
 	relation, relationErr := runner.relationReader.GetByChild(ctx, runID)
 	if errors.Is(relationErr, runrelation.ErrNotFound) {
-		return nil // A non-relation seed uses its own admission proof.
+		return ErrRuntimeCancellationUnverified // Missing topology is not no-dispatch proof.
 	}
 	if relationErr != nil {
 		return relationErr
@@ -747,6 +792,9 @@ func (runner *Runner) syncChildInvocationWithRetry(
 			return nil
 		}
 		_, err = runner.syncChildInvocationSnapshot(ctx, turn, invocation, runtimeSnapshot, true)
+		if errors.Is(err, ErrCancellationOutcomeUnknown) {
+			return err
+		}
 		if !errors.Is(err, ErrConflict) {
 			return err
 		}

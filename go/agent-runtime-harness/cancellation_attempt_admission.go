@@ -72,6 +72,12 @@ func (runner *Runner) bindCancellationAttempt(ctx context.Context, turn Turn, ru
 					parent.TurnID != turn.ID || parent.ExecutionRefID != payload.ParentRunID {
 					return ctx, errors.Join(ErrHandoffCancellationUnverified, ErrConflict, loadErr)
 				}
+				// A pre-Invocation target inherits its parent's frozen Root
+				// Attempt, not merely the parent's unchanged physical Run ID.
+				// This recursive call always takes the existing-target branch.
+				if _, parentErr := runner.bindCancellationAttempt(ctx, turn, parent.ExecutionRefID, parent); parentErr != nil {
+					return ctx, parentErr
+				}
 			}
 		}
 	}

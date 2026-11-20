@@ -10,14 +10,14 @@ import (
 	"gorm.io/gorm"
 )
 
-// CancelUnstartedRootRetry atomically retires a truly unstarted Retry
+// CancelUndispatchedRoot atomically retires a truly undispatched Root
 // Invocation and its owning Turn under the same original row lock used
 // by Start grant and cancellation admission. There is no transient
 // cancelled Invocation / still-running Turn state after a lost ACK.
-func (store *Store) CancelUnstartedRootRetry(ctx context.Context, original harness.Invocation, turn harness.Turn) (
+func (store *Store) CancelUndispatchedRoot(ctx context.Context, original harness.Invocation, turn harness.Turn) (
 	harness.Invocation, harness.Turn, error,
 ) {
-	if store == nil || store.db == nil || ctx == nil || !harness.VerifiedUnstartedRetryCancellation(ctx, original, turn) {
+	if store == nil || store.db == nil || ctx == nil || !harness.VerifiedUndispatchedRootCancellation(ctx, original, turn) {
 		return harness.Invocation{}, harness.Turn{}, harness.ErrConflict
 	}
 	var finalInvocation harness.Invocation
@@ -32,7 +32,7 @@ func (store *Store) CancelUnstartedRootRetry(ctx context.Context, original harne
 		}
 		actualTurn := turnFromRecord(rawTurn)
 		if actualTurn.ID != turn.ID || actualTurn.Revision != turn.Revision ||
-			actualTurn.Status != harness.TurnRunning || actualTurn.SessionID != turn.SessionID ||
+			actualTurn.Status != turn.Status || actualTurn.SessionID != turn.SessionID ||
 			actualTurn.HostTurn != turn.HostTurn || actualTurn.ConfigSnapshotID != turn.ConfigSnapshotID {
 			return harness.ErrConflict
 		}
@@ -119,14 +119,14 @@ func (store *Store) CancelUnstartedRootRetry(ctx context.Context, original harne
 		if readErr == nil {
 			ledger = &loaded
 		}
-		if !harness.ValidUnstartedRetryCancellationEvidence(current, actualTurn, items, active, ledger, children) {
+		if !harness.ValidUndispatchedRootCancellationEvidence(current, actualTurn, items, active, ledger, children) {
 			return harness.ErrConflict
 		}
 		now := time.Now().UTC()
 		finalInvocation = current
 		finalInvocation.Status = harness.InvocationCancelled
 		finalInvocation.ErrorCode = "run.cancelled"
-		finalInvocation.ErrorDetail = "replacement Agent Run cancelled before physical admission"
+		finalInvocation.ErrorDetail = "Agent Run cancelled before physical admission"
 		finalInvocation.Revision++
 		finalInvocation.UpdatedAt = now
 		updateInv := tx.Model(&invocationRecord{}).
@@ -147,7 +147,7 @@ func (store *Store) CancelUnstartedRootRetry(ctx context.Context, original harne
 		finalTurn.Revision++
 		finalTurn.UpdatedAt = now
 		updateTurn := tx.Model(&turnRecord{}).Where("id = ? AND revision = ? AND status = ?",
-			turn.ID, turn.Revision, string(harness.TurnRunning)).
+			turn.ID, turn.Revision, string(turn.Status)).
 			Updates(map[string]any{"status": string(finalTurn.Status), "revision": finalTurn.Revision,
 				"error_code": finalTurn.ErrorCode, "error_detail": finalTurn.ErrorDetail, "updated_at": now})
 		if updateTurn.Error != nil {

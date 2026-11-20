@@ -35,8 +35,8 @@ type rootRetryLostACKStore struct {
 	cancelAckOnce bool
 }
 
-func (s *rootRetryLostACKStore) CancelUnstartedRootRetry(ctx context.Context, inv harness.Invocation, turn harness.Turn) (harness.Invocation, harness.Turn, error) {
-	updated, terminal, err := s.Store.(harness.UnstartedRootRetryStore).CancelUnstartedRootRetry(ctx, inv, turn)
+func (s *rootRetryLostACKStore) CancelUndispatchedRoot(ctx context.Context, inv harness.Invocation, turn harness.Turn) (harness.Invocation, harness.Turn, error) {
+	updated, terminal, err := s.Store.CancelUndispatchedRoot(ctx, inv, turn)
 	if err == nil && s.cancelAckOnce {
 		s.cancelAckOnce = false
 		return harness.Invocation{}, harness.Turn{}, errRootRetryCancelAckLost

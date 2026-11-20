@@ -90,6 +90,9 @@ func SelectManagedReservation(p kernel.ManagedParkedProof, b kernel.ManagedHostB
 			len(receipts[item.ID]) != 0 || out.Mode == kernel.ManagedCancel {
 			return kernel.ManagedHostReservation{}, ErrConflict
 		}
+		if source, valid := cancellationProtocol(item); !valid || source != "native" || !CancellationEffectsSettled(item, items) {
+			return kernel.ManagedHostReservation{}, ErrCancellationOutcomeUnknown
+		}
 		out.Mode = kernel.ManagedCancel
 		out.Cancellation = kernel.ManagedCancellation{IntentID: item.ID, Seq: item.Seq, Payload: append(json.RawMessage(nil), item.Payload...), PayloadDigest: kernel.ManagedDigest(item.Payload), Reason: ""}
 	}
@@ -181,6 +184,11 @@ func ValidateManagedReservationRows(r kernel.ManagedHostReservation, items []Ite
 			item.Seq != r.Cancellation.Seq || !bytes.Equal(item.Payload, r.Cancellation.Payload) ||
 			kernel.ManagedDigest(item.Payload) != r.Cancellation.PayloadDigest || r.Cancellation.Reason != "" {
 			return ErrConflict
+		}
+		if !closed {
+			if source, valid := cancellationProtocol(item); !valid || source != "native" || !CancellationEffectsSettled(item, items) {
+				return ErrCancellationOutcomeUnknown
+			}
 		}
 		found = true
 	}

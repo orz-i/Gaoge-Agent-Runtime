@@ -39,6 +39,7 @@ func completeGlobalPhysicalReceiptFacts(
 	for _, grant := range items {
 		if grant.ParentItemID != ExecutionDispatchParentItemID &&
 			grant.ParentItemID != CancellationFenceParentItemID &&
+			grant.ParentItemID != CancellationEffectParentItemID &&
 			(grant.Kind != ItemDelegation || grant.Status != ItemStarted) {
 			continue
 		}

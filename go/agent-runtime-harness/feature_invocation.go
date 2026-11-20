@@ -351,11 +351,13 @@ func (runner *Runner) CancelInvocation(ctx context.Context, invocationID, reason
 	if err != nil {
 		return Snapshot{}, err
 	}
+	settled := false
 	defer func() {
-		if err == nil {
+		if settled && err == nil {
 			err = runner.finishCancellationFenceAfterRequest(ctx, intent)
 		}
 	}()
+	ctx = withCancellationElection(ctx, intent)
 	runtimeSnapshot, found, err := runner.cancelRuntimeRun(ctx, invocation.ExecutionRefID, reason, nil)
 	if err != nil {
 		return Snapshot{}, runner.releaseNoEffectCancellation(ctx, turn, intent, invocation.ExecutionRefID, err)
@@ -382,7 +384,9 @@ func (runner *Runner) CancelInvocation(ctx context.Context, invocationID, reason
 	if err = runner.syncTerminalDelegations(ctx, turn, runs); err != nil {
 		return Snapshot{}, err
 	}
-	return runner.loadSnapshot(ctx, turn, nil)
+	snapshot, err = runner.loadSnapshot(ctx, turn, nil)
+	settled = err == nil
+	return snapshot, err
 }
 
 func (runner *Runner) validateParentItem(ctx context.Context, turnID, parentItemID string) error {

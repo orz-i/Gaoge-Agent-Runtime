@@ -210,6 +210,20 @@ func TestRealPostgresRootGenerationLifecycle(t *testing.T) {
 		{"retirement-frontier", TestRetiredCallbackClosurePrecedesEveryNewGeneration},
 		{"all-cancellation-phases", TestNativeRootCancellationReplaysEveryDurablePhase},
 		{"terminal-independent-child-retry", TestFailedRootRetryPreservesIndependentTerminalChildProjection},
+		{"cancel-effect-exclusivity", TestCancellationProtocolUnknownEffectsNeverReenterOrBorrowNativeProof},
+		{"cancel-effect-terminal-domain", TestCancellationProtocolKernelTerminalDoesNotSignHostReceipt},
+		{"cancel-effect-descendant-domain", TestCancellationProtocolRootBusyCannotRedispatchUnknownDescendant},
+		{"cancel-effect-owner-reconciliation", TestCancellationProtocolOriginalOwnerReconcilesWithoutRedispatch},
+		{"cancel-effect-durable-cuts", TestCancellationProtocolHostDurableCutRecovery},
+		{"cancel-waiting-durable-cuts", TestCancellationProtocolWaitingNoDispatchAllDurableCuts},
+		{"cancel-initial-root-durable-cuts", TestCancellationProtocolInitialRootNoDispatchAllDurableCuts},
+		{"cancel-prepared-child-controls", TestCancellationProtocolPreparedHandoffNoDispatchRecoversBothControls},
+		{"cancel-frozen-before-invocation", TestCancellationProtocolFrozenStartedBeforeInvocationIsNoDispatch},
+		{"cancel-effect-public-append-denied", TestCancellationProtocolPublicAppendCannotMintClaimsOrReceipts},
+		{"cancel-legacy-quarantine", TestCancellationProtocolLegacyIntentCannotInheritCurrentNativeCustody},
+		{"cancel-terminal-projection-race", TestCancellationProtocolTerminalProjectionCompetesWithLateEffectClaim},
+		{"cancel-waiting-started-admission-history", TestCancellationProtocolWaitingToStartedNoInvocationRetainsHistory},
+		{"cancel-nested-waiting-attempt", TestCancellationProtocolHistoricalNestedWaitingRejectsBeforeElection},
 	} {
 		t.Run(test.name, test.run)
 	}

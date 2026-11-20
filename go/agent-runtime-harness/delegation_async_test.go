@@ -124,7 +124,7 @@ func TestAsyncDelegationCancellationPreservesChildTerminalOutcome(t *testing.T) 
 	}
 }
 
-func TestAsyncDelegationCancellationRetriesExternalCleanup(t *testing.T) {
+func TestAsyncDelegationCancellationReconcilesOriginalExternalCleanup(t *testing.T) {
 	t.Parallel()
 	fixture := newAsyncDelegationFixture(t)
 	canceller := &asyncDelegationCanceller{runtime: fixture.runtime}
@@ -145,13 +145,22 @@ func TestAsyncDelegationCancellationRetriesExternalCleanup(t *testing.T) {
 		t.Fatalf("Refresh bypassed unresolved cancellation: %v", err)
 	}
 	runner, _ = fixture.compose(t, canceller)
+	if _, err = runner.Cancel(t.Context(), started.Turn.ID, "unknown must not redispatch"); !errors.Is(err, harness.ErrCancellationOutcomeUnknown) || canceller.childCalls != 1 {
+		t.Fatalf("unknown cleanup redispatched: calls=%d err=%v", canceller.childCalls, err)
+	}
+	// The original execution owner completes its previously dispatched cleanup
+	// out of band. ReconcileCancellation below only READS its exact receipt.
+	if _, err = fixture.runtime.Cancel(t.Context(), child.Run.ID, child.Run.Revision, "original remote operation acknowledged"); err != nil {
+		t.Fatal(err)
+	}
+	canceller.reconciled = true
 	for range 2 {
 		cancelled, cancelErr := runner.Cancel(t.Context(), started.Turn.ID, "stop")
 		if cancelErr != nil || cancelled.Turn.Status != harness.TurnCancelled {
 			t.Fatalf("retried cancellation = %#v, %v", cancelled.Turn, cancelErr)
 		}
 	}
-	if canceller.childCalls != 2 {
+	if canceller.childCalls != 1 {
 		t.Fatalf("remote cleanup calls = %d", canceller.childCalls)
 	}
 	fixture.assertTerminalItems(t, runner, started.Turn.ID, harness.ItemCancelled)
@@ -355,6 +364,22 @@ type asyncDelegationCanceller struct {
 	runtime    *kernel.Runtime
 	childRunID string
 	childCalls int
+	effectID   string
+	reconciled bool
+}
+
+func (canceller *asyncDelegationCanceller) OwnsKernelRunKind(runtime *kernel.Runtime, kind kernel.RunKind) bool {
+	return kind == agent.RunKind && canceller.OwnsKernelRuntime(runtime)
+}
+
+func (*asyncDelegationCanceller) CancellationOwnerID() string { return "async-delegation-owner" }
+
+func (canceller *asyncDelegationCanceller) ReconcileCancellation(ctx context.Context, effect harness.CancellationEffect) (kernel.Snapshot, harness.CancellationEffectOutcome, error) {
+	if !canceller.reconciled || effect.ID != canceller.effectID || effect.RunID != canceller.childRunID {
+		return kernel.Snapshot{}, harness.CancellationEffectUnknown, nil
+	}
+	snapshot, err := canceller.runtime.Load(ctx, effect.RunID)
+	return snapshot, harness.CancellationEffectSettled, err
 }
 
 func (canceller *asyncDelegationCanceller) OwnsKernelRuntime(runtime *kernel.Runtime) bool {
@@ -366,6 +391,9 @@ func (canceller *asyncDelegationCanceller) Cancel(ctx context.Context, runID str
 		return kernel.Snapshot{}, err
 	}
 	if runID == canceller.childRunID {
+		if effect, ok := harness.CancellationEffectFromContext(ctx); ok {
+			canceller.effectID = effect.ID
+		}
 		canceller.childCalls++
 		if canceller.childCalls == 1 {
 			return kernel.Snapshot{}, errAsyncCancelUnavailable

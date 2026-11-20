@@ -8,13 +8,13 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 )
 
-// CancelUnstartedRootRetry atomically commits both terminal records under
+// CancelUndispatchedRoot atomically commits both terminal records under
 // the same original Turn mutex that admits physical Dispatch grants.
 // It cannot turn an observed Kernel Run (checked by the original Runner)
 // into a fabricated no-Run result, and an unrelated Cancellation intent
 // cannot supply the exact owner proof.
-func (store *MemoryStore) CancelUnstartedRootRetry(ctx context.Context, original Invocation, turn Turn) (Invocation, Turn, error) {
-	if store == nil || !VerifiedUnstartedRetryCancellation(ctx, original, turn) {
+func (store *MemoryStore) CancelUndispatchedRoot(ctx context.Context, original Invocation, turn Turn) (Invocation, Turn, error) {
+	if store == nil || !VerifiedUndispatchedRootCancellation(ctx, original, turn) {
 		return Invocation{}, Turn{}, ErrConflict
 	}
 	store.mu.Lock()
@@ -25,7 +25,7 @@ func (store *MemoryStore) CancelUnstartedRootRetry(ctx context.Context, original
 		current.ExecutionRefID != original.ExecutionRefID ||
 		!sameInvocationIdentity(current, original) ||
 		current.Status != InvocationAccepted || storedTurn.Revision != turn.Revision ||
-		!sameTurnIdentity(storedTurn, turn) || storedTurn.Status != TurnRunning {
+		!sameTurnIdentity(storedTurn, turn) || !undispatchedRootTurn(current, storedTurn) {
 		return Invocation{}, Turn{}, ErrConflict
 	}
 	items, err := store.globalPhysicalEvidenceLocked(turn.ID)
@@ -48,13 +48,13 @@ func (store *MemoryStore) CancelUnstartedRootRetry(ctx context.Context, original
 			children = append(children, candidate)
 		}
 	}
-	if !ValidUnstartedRetryCancellationEvidence(current, storedTurn, items, store.activeCancellationFenceLocked(turn.ID), ledger, children) {
+	if !ValidUndispatchedRootCancellationEvidence(current, storedTurn, items, store.activeCancellationFenceLocked(turn.ID), ledger, children) {
 		return Invocation{}, Turn{}, ErrConflict
 	}
 	now := time.Now().UTC()
 	current.Status = InvocationCancelled
 	current.ErrorCode = "run.cancelled"
-	current.ErrorDetail = "replacement Agent Run cancelled before physical admission"
+	current.ErrorDetail = "Agent Run cancelled before physical admission"
 	current.Revision++
 	current.UpdatedAt = now
 	storedTurn.Status = TurnCancelled

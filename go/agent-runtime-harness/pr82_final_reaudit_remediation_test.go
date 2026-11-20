@@ -150,7 +150,7 @@ func TestAuditPR82CustomRootCancelForeignTerminalCannotSettle(t *testing.T) {
 	}
 }
 
-func TestAuditPR82CancelDuringAlreadyFailedNativeRootMustNotStrandTurn(t *testing.T) {
+func TestAuditPR82FailedNativeRootCannotSettleOpaqueStagedChild(t *testing.T) {
 	f := newPR82HandoffFixture(t)
 	f.runner.cancellation = f.runtime
 	original := f.parentRun
@@ -169,8 +169,8 @@ func TestAuditPR82CancelDuringAlreadyFailedNativeRootMustNotStrandTurn(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ActiveCancellationFence(items) || turn.Status == TurnRunning || secondErr != nil {
-		t.Fatalf("P1: terminal native root stranded by Cancel's own fence: firstErr=%v refreshErr=%v read=%s persisted=%s activeCancelFence=%v", firstErr, secondErr, read.Turn.Status, turn.Status, ActiveCancellationFence(items))
+	if !errors.Is(firstErr, ErrRuntimeCancellationUnverified) || !ActiveCancellationFence(items) || turn.Status != TurnRunning || !errors.Is(secondErr, ErrConflict) {
+		t.Fatalf("opaque legacy Started child was downgraded to no effect: firstErr=%v refreshErr=%v read=%s persisted=%s activeCancelFence=%v", firstErr, secondErr, read.Turn.Status, turn.Status, ActiveCancellationFence(items))
 	}
 }
 

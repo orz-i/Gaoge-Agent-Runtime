@@ -68,7 +68,7 @@ func TestUnstartedRetryRejectsMissingFrozenIntermediateHandoff(t *testing.T) {
 	evidence := append(facts, intent)
 	turn := Turn{ID: old.TurnID, Status: TurnRunning}
 	t.Logf("isHandoff=%t rootbind=%t terminal=%t effectFence=%v history=%t", isHandoffDelegationInvocation(child), historicalRetryRootBound(current, func() childRootBinding { b, _ := frozenChildRoot(child); return b }(), &l), VerifiedTerminalHandoffChild(old, child, facts), RetryChildEffectFence([]Invocation{child}, evidence, current), validUnstartedRetryHistoricalChildren(current, []Invocation{child}, evidence, &l))
-	result := ValidUnstartedRetryCancellationEvidence(current, turn, evidence, true, &l, []Invocation{child})
+	result := ValidUndispatchedRootCancellationEvidence(current, turn, evidence, true, &l, []Invocation{child})
 	t.Logf("original terminal Turn ancestry guard=false; new unstarted cancellation guard=%t despite missing nested parent Invocation", result)
 	if result {
 		t.Fatal("unstarted cancellation trusted missing intermediate Handoff parent")
@@ -112,7 +112,7 @@ func TestUnstartedRetryRejectsCorruptHandoffClassification(t *testing.T) {
 	if PendingExecutionDispatch(evidence, "") {
 		t.Fatal("physical grant fixture must be settled")
 	}
-	v := ValidUnstartedRetryCancellationEvidence(current, Turn{ID: old.TurnID, Status: TurnRunning}, evidence, true, &ledger, []Invocation{child})
+	v := ValidUndispatchedRootCancellationEvidence(current, Turn{ID: old.TurnID, Status: TurnRunning}, evidence, true, &ledger, []Invocation{child})
 	t.Logf("old root terminal guard rejects malformed frozen Handoff; new cancel-original-Run guard=%t with a previously dispatched child", v)
 	if v {
 		t.Fatal("corrupt Handoff was downgraded to ordinary completed child")

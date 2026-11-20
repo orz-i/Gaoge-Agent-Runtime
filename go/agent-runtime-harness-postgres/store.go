@@ -203,6 +203,17 @@ func (store *Store) UpdateInvocation(ctx context.Context, value harness.Invocati
 				if existing.Status != string(value.Status) &&
 					(value.Status == harness.InvocationCompleted || value.Status == harness.InvocationFailed ||
 						value.Status == harness.InvocationCancelled) {
+					facts, effectErr := cancellationEffectFactsTx(tx, value.TurnID)
+					if effectErr != nil {
+						return effectErr
+					}
+					scope := value.ExecutionRefID
+					if value.ParentItemID == "" {
+						scope = ""
+					}
+					if !harness.CancellationEffectProjectionReady(facts, scope) {
+						return harness.ErrCancellationOutcomeUnknown
+					}
 					original, conversionErr := invocationFromRecord(existing)
 					if conversionErr != nil {
 						return conversionErr
@@ -973,6 +984,13 @@ func (store *Store) UpdateTurn(ctx context.Context, value harness.Turn, expected
 				if pendingErr != nil {
 					return pendingErr
 				}
+				facts, effectErr := cancellationEffectFactsTx(tx, value.ID)
+				if effectErr != nil {
+					return effectErr
+				}
+				if !harness.CancellationEffectProjectionReady(facts, "") {
+					return harness.ErrCancellationOutcomeUnknown
+				}
 				if !harness.ValidTurnTerminalEffectProjection(
 					ctx, value.ID, value.Status, pending, active,
 				) {
@@ -1537,6 +1555,18 @@ func appendItemTx(tx *gorm.DB, value harness.Item, outcome *itemAppendOutcome) e
 		return err
 	}
 	value.Seq = seq
+	if value.Kind == harness.ItemSubtask {
+		facts, err := cancellationEffectFactsTx(tx, value.TurnID)
+		if err != nil {
+			return err
+		}
+		if !harness.CancellationConfirmationAppendReady(tx.Statement.Context, value, facts) {
+			return harness.ErrCancellationOutcomeUnknown
+		}
+	}
+	if err := checkCancellationEffectAppendTx(tx, value); err != nil {
+		return err
+	}
 	if err := checkExecutionDispatchCompletionTx(tx, value); err != nil {
 		return err
 	}

@@ -132,6 +132,15 @@ func (store *MemoryStore) UpdateInvocation(ctx context.Context, value Invocation
 		if proofErr != nil {
 			return Invocation{}, proofErr
 		}
+		if current.Status != value.Status {
+			scope := value.ExecutionRefID
+			if value.ParentItemID == "" {
+				scope = ""
+			}
+			if !CancellationEffectProjectionReady(physicalItems, scope) {
+				return Invocation{}, ErrCancellationOutcomeUnknown
+			}
+		}
 	}
 	// A terminal Invocation cannot return to an active state or switch to
 	// another terminal outcome within the same Attempt. RetryInvocation owns
@@ -871,6 +880,9 @@ func (store *MemoryStore) UpdateTurn(ctx context.Context, value Turn, expectedRe
 	}
 	if (value.Status == TurnCompleted || value.Status == TurnFailed ||
 		value.Status == TurnCancelled) && current.Status != value.Status {
+		if !CancellationEffectProjectionReady(physicalItems, "") {
+			return Turn{}, ErrCancellationOutcomeUnknown
+		}
 		// The original Host business continuation is not a generic Kernel
 		// terminal projection. This check is needed for Completed/Failed;
 		// Cancelled has its own native control and descendant proof.
@@ -982,6 +994,25 @@ func (store *MemoryStore) AppendItem(ctx context.Context, value Item) (Item, boo
 		}
 	}
 	value.Seq = uint64(len(store.items[value.TurnID]) + 1)
+	if value.Kind == ItemSubtask {
+		facts, err := store.globalPhysicalEvidenceLocked(value.TurnID)
+		if err != nil {
+			return Item{}, false, err
+		}
+		if !CancellationConfirmationAppendReady(ctx, value, facts) {
+			return Item{}, false, ErrCancellationOutcomeUnknown
+		}
+	}
+	if CancellationEffectAppendRelevant(value) {
+		facts, err := store.globalPhysicalEvidenceLocked(value.TurnID)
+		if err != nil {
+			return Item{}, false, err
+		}
+		expected, _, _ := CancellationAttemptForStore(ctx)
+		if !ValidCancellationEffectAppend(ctx, value, facts, store.invocations[expected.ID], store.invocations[store.invocationExecutionRefs[value.RunID]]) {
+			return Item{}, false, ErrConflict
+		}
+	}
 	if interactionID, reserved := InteractionAuthorityFactID(value); reserved {
 		interaction, interactionFound := store.interactions[interactionID]
 		owner, ownerFound := store.invocations[interaction.InvocationID]
@@ -1001,6 +1032,13 @@ func (store *MemoryStore) AppendItem(ctx context.Context, value Item) (Item, boo
 		// cancellation and authorize another Invocation/physical dispatch.
 		if !VerifiedCancellationFenceReceipt(intent, []Item{value}) {
 			return Item{}, false, ErrConflict
+		}
+		facts, err := store.globalPhysicalEvidenceLocked(value.TurnID)
+		if err != nil {
+			return Item{}, false, err
+		}
+		if !CancellationEffectsSettled(intent, facts) {
+			return Item{}, false, ErrCancellationOutcomeUnknown
 		}
 		// Cancellation settlement is a globally unique original intent.
 		// Its historically damaged foreign-Turn children cannot vanish
