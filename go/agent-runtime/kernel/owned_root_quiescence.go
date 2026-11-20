@@ -155,8 +155,9 @@ func verifyOwnedRootSettlementFacts(
 		// ALL physical history matters. A later scoped callback cannot retire
 		// detached effects from an earlier opaque callback, or borrow its ACK.
 		custody := r.Evidence.Completion.ControlCustody
+		observedTool := allowToolResult && custody == OwnedToolResultReturn
 		if r.Phase != "ACKNOWLEDGED" || !r.Evidence.Completion.LeaseOwned ||
-			!r.Evidence.Completion.HostCompleted || !(custody.permitsControl() || allowToolResult && custody == OwnedToolResultReturn) {
+			!r.Evidence.Completion.HostCompleted || !custody.permitsControl() && !observedTool {
 			return ErrExecutionConflict
 		}
 		if requiredOperation != "" && r.Evidence.Grant.AdmissionOperation != requiredOperation {

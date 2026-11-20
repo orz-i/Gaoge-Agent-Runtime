@@ -8,9 +8,8 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
-// Bind each approval invocation in this callback to the exact Tool call whose
-// committed result the SDK persisted. Missing, pending and rejected effects
-// leave the callback opaque, including when a checkpoint splits execution.
+// Account for each approval invocation with its exact committed Tool call or
+// the persisted checkpoint binding that the next execution must consume.
 type approvedToolCalls struct {
 	mu       sync.Mutex
 	pending  map[string]int
@@ -31,23 +30,27 @@ func (a *approvedToolCalls) enter(call tools.Call) {
 	a.pending[kernel.ManagedDigest(call)]++
 }
 
-func (a *approvedToolCalls) committed(call tools.Call, result tools.ExecutionResult) (delegatedToolReceipt, bool) {
-	if result.Receipt.ExecutionID != call.ID || result.Receipt.Disposition != "committed" || len(result.Receipt.OwnerReceiptDigest) != 64 ||
-		result.Pending != nil || tools.ValidateExecutionResult(result) != nil {
-		return delegatedToolReceipt{}, false
-	}
+func (a *approvedToolCalls) bind(call tools.Call) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	key := kernel.ManagedDigest(call)
 	if a.pending[key] != 1 {
-		return delegatedToolReceipt{}, false
+		return false
 	}
 	delete(a.pending, key)
 	a.recorded = true
+	return true
+}
+
+func (a *approvedToolCalls) committed(call tools.Call, result tools.ExecutionResult, approvedCheckpoint bool) (delegatedToolReceipt, bool) {
+	if result.Receipt.ExecutionID != call.ID || result.Receipt.Disposition != "committed" || len(result.Receipt.OwnerReceiptDigest) != 64 ||
+		result.Pending != nil || tools.ValidateExecutionResult(result) != nil || !a.bind(call) && !approvedCheckpoint {
+		return delegatedToolReceipt{}, false
+	}
 	return delegatedToolReceipt{Call: tools.CloneCall(call), ResultDigest: kernel.ManagedDigest(result)}, true
 }
 
-func (a *approvedToolCalls) allCommitted() bool {
+func (a *approvedToolCalls) allBound() bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.recorded && len(a.pending) == 0
