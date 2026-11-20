@@ -56,73 +56,35 @@ Prereleases are distributed through Go module tags and GitHub Release archives.
 The npm registry is reserved for stable releases; Beta publication does not
 require npm credentials.
 
-## Run a tool-using Agent
+## Quickstart: a tool-using Agent Session
 
 Run the offline quickstart from this source checkout:
-
-```bash
-go run ./go/agent-runtime/examples/quickstart
-```
-
-It creates an Agent, calls a registered release-check Tool, and completes with
-`Release checks: 12 passed, 0 failed.` The fixture model is deterministic and
-needs no credentials. The Memory Store lasts for the current process.
-
-The execution entry point is `agent.NewRunner` followed by `StartRun`:
-
-```go
-// runtime, modelClient and registry are explicit host dependencies.
-runner, err := agent.NewRunner(agent.Dependencies{
-    Runtime: runtime, Model: modelClient, Catalog: registry, Executor: registry,
-    RunExecution: &agent.RunExecution{OwnerID: "worker-1", LeaseDuration: 5 * time.Minute},
-})
-if err != nil { return err }
-snapshot, err := runner.StartRun(ctx, agent.StartRequest{
-    ID: stableRunID,
-    Actor: kernel.ActorRef{TenantID: "acme", ActorID: "user-1"},
-    Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread-1"},
-    Goal: "Prepare a release summary", Model: selectedModel,
-    ToolKeys: []string{"release_checks:v1"},
-})
-```
-
-A Kernel `Create` call only persists a Run; `agent.Runner` executes the model and
-Tool loop. See the [complete quickstart](go/agent-runtime/examples/quickstart/main.go).
-
-For local Tools, bounded Context and stable Host Turn IDs, use
-`harness.OpenAgentSession` and the [Agent Session guide](docs/agent-session.md):
 
 ```bash
 go run ./go/agent-runtime-harness/examples/agent-session
 ```
 
-It composes the existing loop and requires a frozen per-model-call output
-ceiling plus an explicit model-window resolver. Tools are selected by the
-frozen Config, and scoped archive reads require an explicit Tool grant.
-
-For stable Host Turn IDs and a simple text conversation, run the separate
-[small Session example](go/agent-runtime-harness/examples/session/README.md):
-
-```bash
-go run ./go/agent-runtime-harness/examples/session
+```text
+release-1: Release checks: 12 passed, 0 failed.
+release-2: Previous answer: Release checks: 12 passed, 0 failed.
 ```
 
-For local Tools with bounded Context and exact archive retrieval, use the
-[recommended tool-session composition](docs/tool-agent-session.md),
-`harness.OpenToolAgentSession`. Each Tool is paired with its explicit Host policy;
-unsupported approval/delegation features fail closed instead of being ignored.
+The first Turn calls one local Tool and the second uses the answer stored in the
+Host's transcript. The fixture model and Memory Stores need no credentials and
+do not survive process exit.
 
-It uses the **same** Agent Loop with optional Harness, a Host-owned transcript,
-and explicit Context projection; no additional orchestration engine or intent router
-is involved. For a text-only conversation, `harness.OpenTextAgentSession`
-composes the existing runners and `harness.TranscriptHistoryFunc` projects
-prior text-only User/Assistant messages with stable IDs, validates the history
-before Turn admission, and appends the current User message. The Host still
-persists its transcript and answers; advanced Tools, multimodal history,
-delegation and bounded Context require explicit composition. A basic Harness `Clock` defaults to the system clock. For bounded
-Context, retrievable archives and interrupted-execution recovery, follow the
-[single-Agent task guide](docs/agent-task-workflow.md) and
-[advanced task-agent example](go/agent-runtime-harness/examples/task-agent/README.md).
+Use `harness.OpenAgentSession` for both text-only and local-Tool Sessions. Pair
+each selected Tool with its Host policy in `LocalTools`, provide a verified
+model window and a positive per-call output cap, and explicitly grant archive
+reads only when needed. See the [Session guide](docs/agent-session.md) for
+setup, existing-Turn recovery, and migration from deprecated constructors.
+
+For custom approval, delegation or recovery wiring, see the
+[advanced task guide](docs/agent-task-workflow.md). For a single Run without
+Sessions, see the [low-level `agent.Runner` example](go/agent-runtime/examples/quickstart/main.go).
+
+### Task and recovery checks
+
 For an interactive real-model baseline, run
 `python3 scripts/run-agent-baseline.py`; enter the endpoint, model and hidden
 API key locally. The [baseline guide](docs/agent-model-baseline.md) explains
@@ -187,9 +149,8 @@ completion validation never downgrade to prompt-only JSON. See
 
 ### Session and Context governance
 
-For text conversations, the optional Harness `OpenSession` facade exposes
-`Prompt`, complete `Load`, bounded `LoadState`, paged `Timeline`, `Refresh`,
-and explicit `Resume` over the existing durable
+The [Session handle](docs/agent-session.md) exposes `Prompt`, complete `Load`,
+bounded `LoadState`, paged `Timeline`, `Refresh`, and explicit `Resume` over the existing durable
 Session/Turn Store. A reopened Session can resume its original Agent Turn from
 persisted state without reading the Host transcript again.
 A trusted pre-intent model request preparer can inject the Context Window

@@ -74,12 +74,11 @@ for byte/fallback-token bounds even without a routed counter. Oversized active
 summary requests fail closed on read. Source/target reconciliation also retains
 the original Turn timestamp floor when the Host clock is ahead or moves back.
 No existing request hash is rewritten.
-Summary source values must survive the inherited archive projection unchanged.
-Unsafe structured numbers or duplicate keys do not create a new summary, and
-older completed receipts with such a source cannot install derived state.
-The older non-summary/fallback codec still has its baseline numeric-precision
-limit; this change does not migrate that format or promise original Raw JSON
-spelling/key order. See the [independent review](../audits/2026-11-20-automatic-working-state-stage4-review.md).
+The v1 recipe still requires legacy-compatible number literals and unambiguous
+JSON keys. Older completed receipts with ineligible source data cannot install
+derived state. A subsequent [archive codec fix](unreleased-context-archive-fidelity.md)
+preserves structured numbers in new ordinary archives without rewriting old
+artifacts, summary recipes, or their identities.
 
 ## Validation boundary
 

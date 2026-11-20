@@ -3,7 +3,7 @@
 ## Add user input at the next model boundary
 
 `agent.Dependencies.Inputs` accepts a trusted, read-only `RunInputSource`.
-`harness.ToolAgentSessionOptions.Inputs` passes the same source to its existing
+`harness.AgentSessionOptions.Inputs` passes the same source to its existing
 Agent loop. The Host authenticates submissions and owns their durable log.
 
 ```go
@@ -62,7 +62,7 @@ The source is a trusted input-storage port, not arbitrary effectful middleware.
 The SDK binds reads to the original Run callback and journals that concrete
 frame's return without granting callback-free/deferred-control custody. Inputs
 cannot be combined with the separately opted-in `ManagedContextRecovery` path
-in this delivery; the synchronous tool-session composition remains supported.
+or `SummaryNativeRecovery`; ordinary bounded Session composition remains supported.
 
 For durable queue delivery, implement the same read-only port over Host storage
 and retain records for the Run's recovery lifetime. Preserve these new user
@@ -92,5 +92,5 @@ prove all of these in the same execution protocol:
   obligations; restart and partial-receipt-ACK fault tests.
 
 Use the full Harness/Handoff composition for existing independent SubAgents;
-`OpenToolAgentSession` intentionally does not add delegation authority. This
+`OpenAgentSession` intentionally does not add delegation authority. This
 boundary avoids colliding with PR #131's physical-execution settlement work.

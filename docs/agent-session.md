@@ -1,20 +1,16 @@
-# Tool-using Agent Sessions
+# Agent Sessions
 
-`harness.OpenAgentSession` composes the existing Agent loop, Harness Session,
-Tool registry and bounded Context adapter. Run its offline example:
+`harness.OpenAgentSession` is the recommended Go constructor for both text-only
+and local-Tool Sessions. It uses the existing Agent loop and Harness Store.
+Run the offline quickstart from the repository root:
 
 ```sh
 go run ./go/agent-runtime-harness/examples/agent-session
 ```
 
-The example prints `Release checks: 12 passed, 0 failed.` as a JSON string.
-It uses Memory Stores and a fixture model; it does not survive process exit.
-
-This explicit-selection facade coexists with
-[OpenToolAgentSession](tool-agent-session.md). The latter pairs each local Tool
-with its policy, installs its archive reader and read-exploration defaults, and
-supports Host queued Inputs. The facades retain their own authorization models;
-automatic summaries and their dedicated native recovery use this entry point.
+The first Turn calls one release-check Tool. The second recalls the previous
+answer through the Host's transcript. The [complete example](../go/agent-runtime-harness/examples/agent-session/main.go)
+uses Memory Stores and a fixture model; it does not survive process exit.
 
 ## Supported composition
 
@@ -26,7 +22,12 @@ session, err := harness.OpenAgentSession(harness.AgentSessionOptions{
     Runtime: runtime,
     Store: harnessStore,
     Model: modelClient,
-    Tools: registrations,
+    LocalTools: []harness.SessionTool{{
+        Registration: lookup,
+        Policy: harness.ToolPolicySnapshot{
+            DefinitionVersion: "v1", ApprovalMode: "never", SideEffectLevel: "read",
+        },
+    }}, // omit for text-only Sessions
     Session: harness.SessionOptions{
         HostThread: hostThread,
         Actor: actor,
@@ -35,9 +36,6 @@ session, err := harness.OpenAgentSession(harness.AgentSessionOptions{
         Config: harness.ConfigSnapshot{
             Model: selectedModel,
             MaxModelOutputTokens: 1024,
-            ToolKeys: selectedToolKeys,
-            ToolPolicies: selectedToolPolicies,
-            ContextPolicy: contextPolicy,
         },
     },
     Context: harness.AgentSessionContextOptions{
@@ -47,31 +45,30 @@ session, err := harness.OpenAgentSession(harness.AgentSessionOptions{
 })
 ```
 
-The first version supports text Prompts with explicitly selected local Tools,
-bounded Context and the existing `Prompt`, `Load`, `LoadState`, paged `Timeline`,
-`Refresh` and `Resume` operations. Each selected Tool needs a nonempty
-DefinitionVersion and `ApprovalMode: "never"` policy. ExecutionMode may be omitted
-or `local_dispatch`; hosted and unknown execution modes are rejected. Registering a Tool does
-not authorize it: only `Config.ToolKeys` is selected. The constructor freezes
-owned copies of definitions, schemas and configuration.
+`LocalTools` is the explicit allowlist. The constructor derives the sealed Tool
+keys and policies; do not also supply them in `Config`. Each Tool needs a
+version, `ApprovalMode: "never"`, and a Host-declared `SideEffectLevel` of `read`
+or `write`. `ExecutionMode` can be blank or `local_dispatch`; leave
+`ApprovalCapability` unset. The SDK copies
+definitions and schemas; the Host remains responsible for what handlers do.
 
-For automatic archival, explicitly select `harness.ContextArtifactToolKey`
-and include `harness.ContextArtifactToolPolicySnapshot()`. The constructor then
-installs its standard scoped reader. `Tools` cannot override this reserved Key.
-Without that grant, requests that fit may run, but unsafe history removal or
-hard-window overflow remains rejected. Model capacity is never guessed.
+Set `Context.ReadArtifacts: true` to grant the built-in scoped archive reader.
+Without that grant, in-budget requests can run, but the Session cannot drop
+history that the Agent would be unable to retrieve. This reserved Tool cannot
+be supplied through `LocalTools`. `ExploreReads: true` lets explicitly selected
+nonterminal read/search Tools try different arguments after unproductive calls;
+writes, identical-call limits, hard budgets and approval gates are unchanged.
 
 The constructor performs no Store writes, transcript reads, model calls or
-resolver calls. The resolver runs with the actual sampling request before its
-intent is committed. It must return a known effective model window and reserve
-at least that request's frozen output ceiling. Errors are returned before a
-generation request or business Tool effect.
+window-resolver calls. The resolver measures the actual routed request before
+its intent is committed; unknown capacity and insufficient output reservation
+are rejected before model dispatch. `Counter` is optional: nil uses conservative
+accounting, not an invented model capacity.
 
 Skills, MemoryPolicy, SharedBudget, Delegation and approval-required Tools are
 rejected by this entry point until their complete composition is provided.
-Use the explicit runners for those capabilities. `OpenTextAgentSession` keeps
-its original pure-text contract. The advanced task-agent example keeps explicit
-composition because it instruments custom archival and measurement policies.
+Use [explicit runner composition](agent-task-workflow.md) for these capabilities.
+The advanced task-agent example uses it for custom archive and measurement policies.
 
 ## Three separate token limits
 
@@ -81,7 +78,7 @@ composition because it instruments custom archival and measurement policies.
 | `Limits.MaxOutputTokens` | Cumulative output-token usage budget across the Run |
 | `ModelWindow.ReservedOutputTokens` | Space reserved when computing the model's admissible input window |
 
-The new Session constructor requires a positive per-call ceiling. Low-level
+The recommended constructor requires a positive per-call ceiling. Low-level
 Agent/Harness entry points accept zero as the existing unspecified behavior and
 reject negative values. Zero is omitted from stored JSON and config hash
 payloads; a regression vector preserves the previous zero-field config hash.
@@ -107,9 +104,18 @@ proof. Newly bounded outstanding batches with missing proof fail closed.
 
 The Host remains the transcript owner. `TranscriptHistoryFunc` appends the new
 user prompt to Host-supplied prior User/Assistant messages with stable IDs.
-Reuse the same Turn ID and admitted input for a retry. Changed admitted requests
-are rejected; a new request uses a new Turn ID. `LoadState` and paged `Timeline`
-remain bounded reads. Read/Refresh operations do not dispatch effects.
+Use `TranscriptSourceFunc` when the Host supplies richer history or a frozen
+source delta. Persist completed replies in the Host before the next Turn.
+
+| Operation | What it does |
+| --- | --- |
+| `Prompt(ctx, turnID, text)` | Starts a new Turn or replays admission with the **same** ID and original seed/config. Changed inputs are rejected. |
+| `LoadState` / `Timeline` | Bounded status / paged history reads. `Load` is the complete snapshot. |
+| `Refresh` | Repairs committed Harness projections; does not dispatch model or Tool effects. |
+| `Resume` | Continues the original Run of a running Turn; does not create a new attempt. Approvals and budget waits need their existing controls. |
+
+Use `Load` or `LoadState` for an old Turn after Host history advances, not a
+`Prompt` with today's transcript. A different request gets a new Turn ID.
 
 A reopened handle may omit Transcript for read/recovery. `Resume` uses the
 original Turn configuration, committed Context and frozen pending model intent;
@@ -132,6 +138,11 @@ Stores plus the original provider/Tool bindings remain Host responsibilities.
 Selecting the flag does not make Memory durable or add a recovery authority.
 Unknown external outcomes continue to require trusted reconciliation.
 
+For mid-task user input, pass the Host's authenticated log as `Inputs` and use
+the [steering guide](run-inputs-and-parallel-reads.md). Neither `ManagedRecovery`
+nor `SummaryNativeRecovery` accepts that log. A queued input is not an applied
+input and cannot rewrite an already frozen invocation.
+
 Hosts can now supply bounded, source-bound task data through
 `ContextSeed.WorkingState`. See [Explicit WorkingState](working-state.md) for
 source resolution, versioned rollover, branch behavior and acceptance. It uses
@@ -144,38 +155,39 @@ See [Automatic WorkingState](automatic-working-state.md) for input/call limits,
 Host-state priority, ordinary recovery and the separate, restricted
 `Context.SummaryNativeRecovery` hard-crash option.
 
-## Stage 0/1 baseline and acceptance
+## Deprecated entry points and migration
 
-The Stage 0/1 source baseline is `19151c9`. That change was limited to per-call
-output ceilings and the Session composition above. Explicit WorkingState is a
-separate Stage 3 addition; neither stage introduces a semantic summarizer, new
-Context engine, provider compaction or new Store.
+Both `OpenTextAgentSession` and `OpenToolAgentSession` and their option types
+are deprecated. They remain source-compatible for this release and keep their
+original behavior. New integrations should use `OpenAgentSession`:
 
-The deterministic acceptance profile compares the new constructor with explicit
-composition using the same normalized configuration, tools, fixture model and
-history. Compare exact model requests, Run/Turn/Invocation identity, checkpoint
-lineage, call counts and Tool effects; do not infer task-quality improvement
-from fewer constructor calls. Reuse the existing tests for pending-intent commit
-loss, Context rollover, frozen ownership, unknown Tool outcomes and gates.
+| Existing caller | For new Turns |
+| --- | --- |
+| `OpenTextAgentSession` | Omit `LocalTools`. Choose a verified window and a positive output cap. Unlike the old text facade, the new path enforces that window. |
+| `OpenToolAgentSession` | Move its `Tools` to `LocalTools` and `ResolveModelWindow`/`Counter` to `Context`. Explicitly set `ReadArtifacts` and `ExploreReads` to retain those old defaults. Choose a positive cap if the old configuration used zero. |
+| `OpenAgentSession` with separate registration inventory and Tool lists | Pair each **selected** registration and policy in `LocalTools`; omit unselected registrations. Move the standard reader to `Context.ReadArtifacts`. Remove the old `Tools`/`Config.ToolKeys`/`Config.ToolPolicies` inputs rather than merging them. |
 
-The real PostgreSQL crash fixture runs both constructors in isolated schemas,
-using the same business ledger and recovery oracle. Its crash occurs after a
-Tool receipt and the next model intent commit. It tests the original lease,
-frozen request/ceiling, Context lineage and non-repetition of the committed
-effect; it does not prove exactly-once execution for an effect whose receipt
-was never persisted. No paid model benchmark is needed for these stages.
+Do not change the config of an already admitted Turn. Finish or reconcile
+in-flight work using its original compatible runner composition. In particular,
+the bounded constructor does not retrofit a positive output cap onto a legacy
+zero-cap Turn. `Runner.OpenSession` remains the supported low-level binding for
+callers that compose their own runners.
 
-Focused validation from the repository root:
+**Next breaking cleanup:** after callers migrate and old in-flight work is
+drained or reconciled, remove the two deprecated constructors/options, the
+legacy registration-inventory form of `OpenAgentSession`, the corresponding
+private compatibility branches, and the legacy example/consumer coverage. Do
+not leave aliases or rewrite admitted Turn, request or receipt identities.
+
+## Verify locally
 
 ```sh
-go test ./go/agent-runtime/agent ./go/agent-runtime/handoff ./go/agent-runtime-harness ./go/agent-runtime-http/... ./go/agent-runtime-a2a -count=1
-go test ./go/agent-runtime-harness/examples/task-agent -count=1
-node scripts/check-release.mjs
-node scripts/run-integration.mjs
+go test -race ./go/agent-runtime-harness/... -count=1
+make agent-quality-regression
 ```
 
-The integration command starts isolated PostgreSQL/Redis test services and
-removes them after the existing suites finish. Before releasing, run the
-repository's usual format, race, lint and contract gates. New nonzero ceilings
-require upgraded workers throughout the processing pool; do not let older
-workers reinterpret new persisted state while ignoring the field.
+The fixture checks exact model requests, Turn/Run identities, Tool effects,
+and frozen-intent recovery. The persistent recovery boundary is covered by the
+[PostgreSQL crash fixture](../integration/continuation-e2e/managed_agent_session_recovery_real_test.go),
+not by the Memory quickstart. Neither is a live-model quality result or proof of
+physical exactly-once execution for an external effect without a receipt.

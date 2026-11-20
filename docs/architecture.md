@@ -135,9 +135,9 @@ is this document plus [ADR 0018](adr/0018-subagent-only-orchestration-hardcut.md
 ## Public API and compatibility boundary
 
 The built-in top-level Agent execution entry points are
-`agent.Runner.StartRun` and `harness.Runner.StartAgentTurn`. The optional
-`harness.OpenTextAgentSession` and `harness.OpenToolAgentSession` facades compose
-those same runners; neither creates another execution class or authority.
+`agent.Runner.StartRun` and `harness.Runner.StartAgentTurn`.
+[`harness.OpenAgentSession`](agent-session.md) composes those same runners for
+bounded text and local-Tool Sessions without another execution class or authority.
 The former Harness-native Application
 execution interpreter, its Command Catalog and `harness.invoke_capability`
 Tool are removed. Host business effects remain available as explicitly
