@@ -67,6 +67,7 @@ type ItemChildProofScope uint8
 const (
 	ItemChildProofAll ItemChildProofScope = iota + 1
 	ItemChildProofHostAuthority
+	ItemChildProofDelegation
 )
 
 // Store is the trusted durable Harness execution-integrity boundary (ADR 0017),
@@ -102,6 +103,10 @@ type Store interface {
 	// Attempt and its execution reference back into Accepted.
 	UpdateInvocation(context.Context, Invocation, uint64) (Invocation, error)
 	RetryInvocation(context.Context, string, uint64, string, time.Time) (Invocation, error)
+	// CancelUndispatchedRoot commits the original no-physical-admission Root
+	// Invocation AND Turn terminal revisions under their admission lock. Both
+	// first Accepted Roots and accepted Retry generations use this authority.
+	CancelUndispatchedRoot(context.Context, Invocation, Turn) (Invocation, Turn, error)
 	ListInvocations(context.Context, string) ([]Invocation, error)
 	CreateInteraction(context.Context, Interaction, uint64, uint64) (Interaction, bool, error)
 	GetInteraction(context.Context, string) (Interaction, error)
@@ -123,6 +128,8 @@ type Store interface {
 	// active cancellation intents, terminal Turn/Invocation owners, and
 	// unfinished grants for the same Invocation. A cancellation-intent
 	// insertion MUST serialize against these grants on the same Turn lock.
+	// Runner-bound cancellation admission MUST also recheck its exact immutable
+	// Root/target Attempt in that same critical section (CancellationAttemptForStore).
 	// Custom Stores must implement the hard-cut semantics; a loose
 	// append-only implementation is no longer a safe execution Store.
 	AppendItem(context.Context, Item) (Item, bool, error)

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"slices"
 	"sort"
@@ -131,6 +132,15 @@ func (store *MemoryStore) UpdateInvocation(ctx context.Context, value Invocation
 		if proofErr != nil {
 			return Invocation{}, proofErr
 		}
+		if current.Status != value.Status {
+			scope := value.ExecutionRefID
+			if value.ParentItemID == "" {
+				scope = ""
+			}
+			if !CancellationEffectProjectionReady(physicalItems, scope) {
+				return Invocation{}, ErrCancellationOutcomeUnknown
+			}
+		}
 	}
 	// A terminal Invocation cannot return to an active state or switch to
 	// another terminal outcome within the same Attempt. RetryInvocation owns
@@ -218,7 +228,17 @@ func (store *MemoryStore) RetryInvocation(
 			children = append(children, child)
 		}
 	}
-	if err := RetryChildEffectFence(children, physicalItems, current); err != nil {
+	var retryLedger *budget.Ledger
+	if store.MemoryLedgerStore != nil {
+		loaded, loadErr := store.LoadBudget(ctx, current.TurnID)
+		if loadErr != nil && !errors.Is(loadErr, budget.ErrLedgerNotFound) {
+			return Invocation{}, loadErr
+		}
+		if loadErr == nil {
+			retryLedger = &loaded
+		}
+	}
+	if err := RetryChildEffectFenceWithBudget(children, physicalItems, current, retryLedger); err != nil {
 		return Invocation{}, err
 	}
 	var rootTurn Turn
@@ -232,7 +252,61 @@ func (store *MemoryStore) RetryInvocation(
 	if owner := store.invocationExecutionRefs[nextExecutionRefID]; owner != "" && owner != current.ID {
 		return Invocation{}, ErrConflict
 	}
+	transition, transitionErr := RootRetryTransitionFact(current, nextExecutionRefID, now)
+	if transitionErr != nil {
+		return Invocation{}, transitionErr
+	}
+	if _, collision := store.itemIDs[transition.ID]; collision {
+		return Invocation{}, ErrConflict
+	}
+	// The frozen Turn configuration and existing ledger are authoritative
+	// even when a privileged Store caller bypasses the Harness Runner.
+	// A direct Retry cannot rotate a budgeted Invocation without the
+	// original private admission and accounting in this same Store CAS.
+	budgetRequired := false
+	if config, exists := store.configs[rootTurn.ConfigSnapshotID]; exists {
+		var configErr error
+		budgetRequired, configErr = FrozenRetryBudgetRequirement(config, current.TurnID, rootTurn.ConfigSnapshotID)
+		if configErr != nil {
+			return Invocation{}, configErr
+		}
+	} else if strings.HasPrefix(rootTurn.ConfigSnapshotID, "hcfg_") {
+		// A once-sealed configuration cannot silently become an
+		// unbudgeted legacy Turn after durable data loss.
+		return Invocation{}, ErrConflict
+	}
+	if retryLedger != nil {
+		budgetRequired = true
+	}
+	// This is the last fallible step under the original Turn lock. Budget
+	// admission and Attempt rotation must commit as one Memory operation;
+	// no external physical effect is authorized between the two writes.
+	atomicBudget, budgetErr := AtomicRetryBudgetForStore(ctx, current, nextExecutionRefID, budgetRequired)
+	if budgetErr != nil {
+		return Invocation{}, budgetErr
+	}
+	if atomicBudget {
+		previous, loadErr := store.LoadBudget(ctx, current.TurnID)
+		if loadErr != nil {
+			return Invocation{}, loadErr
+		}
+		planned, planErr := budget.PlanRootRetry(previous, current.ID, current.ExecutionRefID, nextExecutionRefID, current.Attempt+1)
+		if planErr != nil {
+			return Invocation{}, planErr
+		}
+		if planned.Revision != previous.Revision {
+			if saveErr := store.SaveBudget(ctx, planned, previous.Revision); saveErr != nil {
+				return Invocation{}, saveErr
+			}
+		}
+	}
 	delete(store.invocationExecutionRefs, current.ExecutionRefID)
+	// All fallible checks, including budget CAS, have completed. Persist the
+	// immutable transition and both mutable records under this same mutex.
+	transition.Seq = uint64(len(store.items[current.TurnID]) + 1)
+	store.items[current.TurnID] = append(store.items[current.TurnID], transition)
+	store.itemIDs[transition.ID] = transition
+	store.itemChildren[transition.ParentItemID] = append(store.itemChildren[transition.ParentItemID], transition)
 	current.Attempt++
 	current.ExecutionRefID = nextExecutionRefID
 	current.Status = InvocationAccepted
@@ -787,7 +861,17 @@ func (store *MemoryStore) UpdateTurn(ctx context.Context, value Turn, expectedRe
 				owners = append(owners, candidate)
 			}
 		}
-		if roots != 1 || !ValidTurnTerminalDescendants(root, owners, physicalItems) ||
+		var ledger *budget.Ledger
+		if store.MemoryLedgerStore != nil {
+			loaded, loadErr := store.LoadBudget(ctx, value.ID)
+			if loadErr != nil && !errors.Is(loadErr, budget.ErrLedgerNotFound) {
+				return Turn{}, loadErr
+			}
+			if loadErr == nil {
+				ledger = &loaded
+			}
+		}
+		if roots != 1 || !ValidTurnTerminalDescendantsWithBudget(root, owners, physicalItems, ledger) ||
 			!ValidTurnTerminalTransitionWithEvidence(
 				ctx, current, value, root, VerifiedOriginalStartNoEffect(physicalItems, root),
 			) {
@@ -796,6 +880,9 @@ func (store *MemoryStore) UpdateTurn(ctx context.Context, value Turn, expectedRe
 	}
 	if (value.Status == TurnCompleted || value.Status == TurnFailed ||
 		value.Status == TurnCancelled) && current.Status != value.Status {
+		if !CancellationEffectProjectionReady(physicalItems, "") {
+			return Turn{}, ErrCancellationOutcomeUnknown
+		}
 		// The original Host business continuation is not a generic Kernel
 		// terminal projection. This check is needed for Completed/Failed;
 		// Cancelled has its own native control and descendant proof.
@@ -846,7 +933,7 @@ func (store *MemoryStore) GetConfigSnapshot(_ context.Context, id string) (Confi
 	return cloneConfigSnapshot(value), nil
 }
 
-func (store *MemoryStore) AppendItem(_ context.Context, value Item) (Item, bool, error) {
+func (store *MemoryStore) AppendItem(ctx context.Context, value Item) (Item, bool, error) {
 	if store == nil || !validItem(value) {
 		return Item{}, false, ErrInvalidRequest
 	}
@@ -876,6 +963,13 @@ func (store *MemoryStore) AppendItem(_ context.Context, value Item) (Item, bool,
 	if value.Kind == ItemDiagnostic && value.Status == ItemStarted {
 		switch value.ParentItemID {
 		case CancellationFenceParentItemID:
+			if expectedRoot, _, bound := CancellationAttemptForStore(ctx); bound {
+				root := store.invocations[expectedRoot.ID]
+				target := store.invocations[store.invocationExecutionRefs[value.RunID]]
+				if !ValidCancellationAttemptAdmission(ctx, value, root, target) {
+					return Item{}, false, ErrConflict
+				}
+			}
 			if store.managedReservedTurnLocked(value.TurnID) || store.activeCancellationFenceLocked(value.TurnID) {
 				return Item{}, false, ErrConflict
 			}
@@ -900,6 +994,25 @@ func (store *MemoryStore) AppendItem(_ context.Context, value Item) (Item, bool,
 		}
 	}
 	value.Seq = uint64(len(store.items[value.TurnID]) + 1)
+	if value.Kind == ItemSubtask {
+		facts, err := store.globalPhysicalEvidenceLocked(value.TurnID)
+		if err != nil {
+			return Item{}, false, err
+		}
+		if !CancellationConfirmationAppendReady(ctx, value, facts) {
+			return Item{}, false, ErrCancellationOutcomeUnknown
+		}
+	}
+	if CancellationEffectAppendRelevant(value) {
+		facts, err := store.globalPhysicalEvidenceLocked(value.TurnID)
+		if err != nil {
+			return Item{}, false, err
+		}
+		expected, _, _ := CancellationAttemptForStore(ctx)
+		if !ValidCancellationEffectAppend(ctx, value, facts, store.invocations[expected.ID], store.invocations[store.invocationExecutionRefs[value.RunID]]) {
+			return Item{}, false, ErrConflict
+		}
+	}
 	if interactionID, reserved := InteractionAuthorityFactID(value); reserved {
 		interaction, interactionFound := store.interactions[interactionID]
 		owner, ownerFound := store.invocations[interaction.InvocationID]
@@ -919,6 +1032,13 @@ func (store *MemoryStore) AppendItem(_ context.Context, value Item) (Item, bool,
 		// cancellation and authorize another Invocation/physical dispatch.
 		if !VerifiedCancellationFenceReceipt(intent, []Item{value}) {
 			return Item{}, false, ErrConflict
+		}
+		facts, err := store.globalPhysicalEvidenceLocked(value.TurnID)
+		if err != nil {
+			return Item{}, false, err
+		}
+		if !CancellationEffectsSettled(intent, facts) {
+			return Item{}, false, ErrCancellationOutcomeUnknown
 		}
 		// Cancellation settlement is a globally unique original intent.
 		// Its historically damaged foreign-Turn children cannot vanish
@@ -973,13 +1093,16 @@ func (store *MemoryStore) GetItem(_ context.Context, id string) (Item, error) {
 func (store *MemoryStore) ListItemChildren(_ context.Context, parentItemID string, scope ItemChildProofScope) ([]Item, error) {
 	parentItemID = strings.TrimSpace(parentItemID)
 	if store == nil || parentItemID == "" ||
-		(scope != ItemChildProofAll && scope != ItemChildProofHostAuthority) {
+		(scope != ItemChildProofAll && scope != ItemChildProofHostAuthority && scope != ItemChildProofDelegation) {
 		return nil, ErrInvalidRequest
 	}
 	store.mu.RLock()
 	defer store.mu.RUnlock()
 	result := make([]Item, 0, 2)
 	for _, value := range store.itemChildren[parentItemID] {
+		if scope == ItemChildProofDelegation && value.Kind != ItemDelegation {
+			continue
+		}
 		if scope == ItemChildProofHostAuthority && value.Kind != ItemDiagnostic &&
 			!strings.HasPrefix(value.ID, "hbizverified_") {
 			continue // ordinary application Artifact, not Host authority

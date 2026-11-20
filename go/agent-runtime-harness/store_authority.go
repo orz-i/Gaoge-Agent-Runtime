@@ -112,6 +112,22 @@ func canonicalSealedConfig(value ConfigSnapshot) (ConfigSnapshot, error) {
 	return sealed, nil
 }
 
+// FrozenRetryBudgetRequirement is the Store's read-only, original Config
+// authority for an Attempt rotation. Even privileged Store callers cannot
+// turn an old shared-budget Turn into an unbudgeted one by retaining a
+// stale ContentHash while changing SharedBudget or another frozen field.
+// Call this under the same original Turn lock as RetryInvocation's CAS.
+func FrozenRetryBudgetRequirement(value ConfigSnapshot, turnID, configID string) (bool, error) {
+	if turnID == "" || configID == "" || value.ID != configID || value.TurnID != turnID {
+		return false, ErrConflict
+	}
+	original, err := canonicalSealedConfig(value)
+	if err != nil {
+		return false, ErrConflict
+	}
+	return original.SharedBudget != nil, nil
+}
+
 // loadSealedConfig is the one trusted Harness read boundary for a frozen
 // configuration, whether used for replay, Context, Budget or Host display.
 func loadSealedConfig(ctx context.Context, store Store, configID string) (ConfigSnapshot, error) {

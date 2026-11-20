@@ -142,6 +142,9 @@ func (store *Store) applyLocked(runID string, expectedRevision uint64, mutation 
 	if current.Run.Revision != expectedRevision {
 		return kernel.Snapshot{}, kernel.ErrConflict
 	}
+	if _, err := store.settleRetirementSuccessorLocked(runID); err != nil {
+		return kernel.Snapshot{}, err
+	}
 	if current.Run.ParentRunID != mutation.Record.Run.ParentRunID {
 		return kernel.Snapshot{}, kernel.ErrExecutionConflict
 	}

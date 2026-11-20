@@ -14,17 +14,11 @@ func terminalHandoffChildEvidenceTx(
 ) ([]harness.Item, error) {
 	var ownerIDs, startedIDs []string
 	for _, owner := range owners {
-		if owner.TurnID != turnID || owner.ParentItemID == "" ||
-			owner.Status == harness.InvocationCompleted ||
-			owner.Status == harness.InvocationFailed ||
-			owner.Status == harness.InvocationCancelled {
+		if owner.TurnID != turnID || owner.ParentItemID == "" {
 			continue
 		}
 		startedIDs = append(startedIDs, owner.ParentItemID)
 		ownerIDs = append(ownerIDs, owner.ID)
-	}
-	if len(startedIDs) == 0 {
-		return nil, nil
 	}
 	var delegationRows, grants, receipts []itemRecord
 	// Load each original Delegation by exact ID, then up to two terminal
@@ -64,6 +58,38 @@ func terminalHandoffChildEvidenceTx(
 			}
 			all = append(all, item)
 		}
+	}
+	var transitions []itemRecord
+	if err := tx.Where("turn_id = ? AND parent_item_id = ?", turnID, harness.RootRetryTransitionParentItemID).Find(&transitions).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range transitions {
+		item, err := itemFromRecord(row)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, item)
+	}
+	// Waiting-only observations deliberately have no child owner. Include
+	// every original Delegation fact as well, not just known Started owners,
+	// so SQL and Memory apply the same typed historical completeness rule.
+	var history []itemRecord
+	if err := tx.Where("turn_id = ? AND kind = ?", turnID, string(harness.ItemDelegation)).Find(&history).Error; err != nil {
+		return nil, err
+	}
+	seen := make(map[string]bool, len(all))
+	for _, item := range all {
+		seen[item.ID] = true
+	}
+	for _, row := range history {
+		if seen[row.ID] {
+			continue
+		}
+		item, err := itemFromRecord(row)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, item)
 	}
 	return all, nil
 }

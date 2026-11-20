@@ -1,0 +1,8 @@
+name: Ensure SQLite development dependencies
+description: Reuse installed Ubuntu headers without an unnecessary apt index update.
+runs:
+  using: composite
+  steps:
+    - name: Ensure libsqlite3-dev is installed
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/ensure-sqlite.sh"

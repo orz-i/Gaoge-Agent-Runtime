@@ -7,6 +7,9 @@ import "strings"
 // namespace unless it carries the complete first-party intent structure.
 // These predicates run BEFORE any future child/settlement can refer to them.
 func ValidReservedAuthorityOrigin(value Item) bool {
+	if value.ParentItemID == RootRetryTransitionParentItemID || strings.HasPrefix(value.ID, "hrootretry_") {
+		return false // Only the original Store Retry transaction may write this fact.
+	}
 	switch value.ParentItemID {
 	case CancellationFenceParentItemID:
 		return ValidCancellationFenceIntentAdmission(value)

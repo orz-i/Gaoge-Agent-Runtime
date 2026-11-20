@@ -72,7 +72,7 @@ func (runner *Runner) releaseNoEffectCancellation(
 		// witness and resume the SAME elected cancellation after the Tool
 		// result is reconciled. Only the original no-effect Kernel proof
 		// can mint this witness; generic Host failures remain quarantined.
-		if ledger.Cancelled && (nativeNoEffect || hostChildBusyNoEffect) &&
+		if ledger.RunCancelled(runID) && (nativeNoEffect || hostChildBusyNoEffect) &&
 			errors.Is(cause, kernel.ErrChildExecutionBusy) {
 			run, loadErr := runner.runtime.Load(recoveryCtx, runID)
 			if loadErr != nil || run.Run.ID != runID || terminalRuntimeStatus(run.Run.Status) {

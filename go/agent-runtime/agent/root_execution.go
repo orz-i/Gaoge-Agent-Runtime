@@ -168,12 +168,20 @@ func (runner *Runner) executeOwnedRoot(ctx context.Context, current kernel.Snaps
 	hostComplete := lifecycle.Complete() && !scoped.rootCallbacks.unknown.Load()
 	settled := hostComplete && knownRootPhysicalSettlement(latest)
 	outcome := kernel.OwnedPhysicalCallbackOutcome{HostCompleted: hostComplete, LeaseOwned: !external}
+	// Seal the executing stack's custody with the original callback return.
+	// A reconstructed/same-Kernel observer cannot upgrade opaque Host effects.
+	if grant.AdmissionOperation == "prepare" && runner.trustedDeferredPreparedControl {
+		outcome.ControlCustody = kernel.OwnedCustodyPrepared
+	} else if runner.trustedDeferredRootControl {
+		outcome.ControlCustody = kernel.OwnedCustodyScoped
+	}
 	payload := kernel.OwnedPhysicalCallbackReturnPayload(latest, outcome)
 	returned := featurecontrol.Seal(latest.Run.ID, latest.Run.Revision, "agent_owned_callback_return", grant.ID, payload, nil)
 	hash := sha256.Sum256(payload)
 	completion := kernel.OwnedPhysicalCallbackCompletion{
 		GrantID: grant.ID, ReturnRevision: latest.Run.Revision, ReturnSourceHash: hex.EncodeToString(hash[:]),
 		HostCompleted: hostComplete, LeaseOwned: !external,
+		ControlCustody: outcome.ControlCustody,
 	}
 	// The actual whole callback owns this fact, including the fast-known path.
 	// Persist it before Mark so any competing recovery retains the same original

@@ -55,6 +55,10 @@ func (store *Store) QuarantineExecution(ctx context.Context, value kernel.Execut
 	if state.epoch == math.MaxUint64 {
 		return kernel.ErrExecutionConflict
 	}
+	if _, err := store.settleRetirementSuccessorLocked(value.RunID); err != nil {
+		return err
+	}
+	state = store.execution[value.RunID]
 	state.epoch++
 	state.lease = kernel.ExecutionLease{}
 	state.quarantineRev, state.quarantineGen, state.quarantineCode =

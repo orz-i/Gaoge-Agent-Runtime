@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
@@ -115,6 +116,13 @@ func turnStatusFromInvocation(status InvocationStatus) TurnStatus {
 // while a separately claimed child is still Accepted, Running, Waiting or
 // Paused. Root Kernel snapshots do not prove descendant completion.
 func ValidTurnTerminalDescendants(root Invocation, owners []Invocation, items []Item) bool {
+	return ValidTurnTerminalDescendantsWithBudget(root, owners, items, nil)
+}
+
+// ValidTurnTerminalDescendantsWithBudget consumes the same immutable Attempt
+// ancestry as cancellation. The optional original ledger is read under the
+// owning Store Turn lock; historical children never bind to the new Root.
+func ValidTurnTerminalDescendantsWithBudget(root Invocation, owners []Invocation, items []Item, ledger *budget.Ledger) bool {
 	if root.ID == "" || root.TurnID == "" || root.ParentItemID != "" {
 		return false
 	}
@@ -151,16 +159,18 @@ func ValidTurnTerminalDescendants(root Invocation, owners []Invocation, items []
 				owner.CapabilityKey == CapabilityAgent &&
 				strings.HasPrefix(owner.ParentItemID, "hid_"))
 		if handoffCandidate {
-			_, binding, valid := verifiedTerminalHandoffFrozenSource(root, owner)
+			original, binding, valid := historicalHandoffRoot(root, owner, items, ledger)
 			if !valid {
 				return false
 			}
-			for _, ancestor := range binding.Parents {
-				parent, found := byID[ancestor.InvocationID]
-				if !found || parent.ParentItemID == "" ||
-					parent.ID == owner.ID || invocationAttempt(parent) != ancestor {
+			if !validTerminalHandoffAncestorBindings(owner, binding, byID) {
+				return false
+			}
+			if binding.Attempt < root.Attempt {
+				if !historicalHandoffSettled(original, owner, items) {
 					return false
 				}
+				continue
 			}
 		}
 		if terminalInvocationStatus(owner.Status) {
@@ -170,7 +180,7 @@ func ValidTurnTerminalDescendants(root Invocation, owners []Invocation, items []
 			return false
 		}
 	}
-	return true
+	return validDelegationWaitingFacts(root, owners, items, ledger)
 }
 
 // ValidTurnTerminalTransition checks original immutable state, intended

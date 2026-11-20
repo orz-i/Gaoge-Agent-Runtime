@@ -51,6 +51,10 @@ func (store *KernelStore) QuarantineExecution(ctx context.Context, value kernel.
 		if current.ExecutionEpoch == math.MaxInt64 {
 			return kernel.ErrExecutionConflict
 		}
+		current, _, err = pgSettleRetirementSuccessor(tx, current)
+		if err != nil {
+			return err
+		}
 		result := tx.Model(&models.KernelRunRecord{}).
 			Where("run_id = ? AND revision = ? AND execution_epoch = ?",
 				value.RunID, value.Revision, current.ExecutionEpoch).

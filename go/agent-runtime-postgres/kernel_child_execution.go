@@ -123,6 +123,15 @@ func (store *KernelStore) BeginChildExecution(ctx context.Context, grant kernel.
 		if active > 0 {
 			return kernel.ErrChildExecutionBusy
 		}
+		for _, id := range ids {
+			run, err := lockKernelRun(tx, id)
+			if err != nil {
+				return err
+			}
+			if _, _, err = pgSettleRetirementSuccessor(tx, run); err != nil {
+				return err
+			}
+		}
 		rows := make([]models.KernelChildEffectGrantRecord, 0, len(ids))
 		for _, id := range ids {
 			rows = append(rows, models.KernelChildEffectGrantRecord{GrantID: grant.ID, ParentRunID: id, ChildRunID: grant.ChildRunID, StartRevision: grant.ExpectedRevision})

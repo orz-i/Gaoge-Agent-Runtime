@@ -40,6 +40,9 @@ func (store *Store) ApplyControl(ctx context.Context, runID string, expectedRevi
 	if err := kernel.ValidateControl(current, guard, mutation, store.currentExecutionTime()); err != nil {
 		return kernel.Snapshot{}, false, err
 	}
+	if _, err := store.settleRetirementSuccessorLocked(runID); err != nil {
+		return kernel.Snapshot{}, false, err
+	}
 	authority := store.execution[runID]
 	if authority.quarantineRev != 0 && mutation.Record.Run.Status == kernel.RunStatusRunning {
 		// An unrelated validated control cannot age out a poisoned work

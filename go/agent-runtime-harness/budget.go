@@ -21,12 +21,15 @@ func (runner *Runner) loadTurnBudget(ctx context.Context, turn Turn) (*budget.Le
 	return &ledger, nil
 }
 
-func (runner *Runner) cancelTurnBudget(ctx context.Context, turn Turn) error {
+// Cancellation closes the original Root subtree, not the cumulative Turn
+// accounting ledger. A later explicit Retry has its own Root RunID while all
+// prior charged/unknown Model and Tool reservations remain on this same Turn.
+func (runner *Runner) cancelTurnBudget(ctx context.Context, turn Turn, rootRunID string) error {
 	ledger, err := runner.loadTurnBudget(ctx, turn)
 	if err != nil || ledger == nil {
 		return err
 	}
-	updated, err := runner.budgets.coordinator().Cancel(ctx, turn.ID)
+	updated, err := runner.budgets.coordinator().CancelRoot(ctx, turn.ID, rootRunID)
 	if err != nil {
 		return err
 	}
