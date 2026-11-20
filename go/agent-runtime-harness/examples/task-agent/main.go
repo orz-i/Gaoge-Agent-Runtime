@@ -51,7 +51,7 @@ func runCommand(ctx context.Context, args []string, input io.Reader, output io.W
 	flags.StringVar(&config.modelID, "model", "", "live only: exact provider model ID")
 	flags.Int64Var(&config.contextTokens, "context-tokens", 0, "live only: documented model capacity")
 	flags.Int64Var(&config.outputTokens, "max-output-tokens", 0, "live only: output ceiling")
-	flags.StringVar(&acceptanceCase, "acceptance-case", "", "acceptance mode only: all, code, documents or approval")
+	flags.StringVar(&acceptanceCase, "acceptance-case", "", "acceptance mode only: code, code-negative, code-degenerate, documents, documents-distractors, approval, or approval-denied; default all seven")
 	flags.BoolVar(&allowLive, "allow-live-calls", false, "acceptance mode only: explicitly permit bounded paid Provider calls")
 	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
 		return configurationError(output)

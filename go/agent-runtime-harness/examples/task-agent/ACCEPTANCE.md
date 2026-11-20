@@ -6,37 +6,50 @@ go run ./go/agent-runtime-harness/examples/task-agent -mode=acceptance
 
 This default is offline. It runs the **same Agent loop and Tools** used by the
 opt-in Provider path, with a scripted action fixture. It emits a distinct
-`task-outcome-acceptance-v1` report, never an `evidence-40-v1` quality score.
+`task-outcome-acceptance-v2` report (seven ordered variants in three task
+families), never an `evidence-40-v1` quality score. The actions are scripted;
+this measures the Executor/Context/receipt/approval/oracle wiring, not model
+tool selection or reasoning capability.
 
 | Case | Actual work | Independent acceptance |
 | --- | --- | --- |
-| `code` | Read a buggy Go function/tests, execute tests, save a changed source file, test again | After the Agent finishes, introduce held-out tests and run them against the actual saved source |
-| `documents` | Read a superseded draft and approved amendment; save an answer artifact | Check actual artifact facts and exact original paragraph reference; claiming completion is insufficient |
-| `approval` | Request a native approval before creating a fixed scratch record; reconstruct Runner at the wait | Zero writes before decision; exactly one approved artifact; terminal Resume cannot write again |
+| `code`, `code-negative`, `code-degenerate` | Repair Clamp under separate positive, negative-only and zero-width/boundary public cases | Each variant has separate held-out tests against the final saved source; re-editing after passing public tests invalidates that evidence |
+| `documents`, `documents-distractors` | Read the superseded draft and approved amendment; the second variant also has a conflicting unsigned vendor note and an irrelevant access note | Check actual artifact facts and original paragraph reference; distractor case inspects both decoys; a plausible wrong answer fails |
+| `approval`, `approval-denied` | Reopen a waiting Run in a new Runner; one variant approves and the other rejects | Zero writes before decision; approval writes once; rejection creates no artifact, preserves the rejected-call receipt and reports denial |
 
 The code task is deliberately narrow, **not a general code sandbox**. A model
 may write only one bounded pure integer function: no imports, calls, loops,
 globals, allocation or extra declarations. The AST is normalized without
 comments/directives before execution. The command runs only the fixed Go test
 invocation in its owned temporary module, disables network/module downloads and
-CGO, and does not pass Provider credentials to Go. A trusted-source compilation
+CGO, writes Go build/module caches only under that owned temporary workspace,
+and does not pass Provider credentials to Go. A trusted-source compilation
 preflight happens before any model request. Public and held-out tests are
 separate; a negative test proves that hardcoding public answers fails acceptance.
 
-The approval case uses an explicit **fixture operator approval** in both modes.
-It is not a human-interface rollout or authorization to perform real purchases,
-network calls or business writes. All effects stay in the disposable workspace.
+The approval cases use an explicit **simulated operator decision** in both
+modes; the suite does not assess a human approval UI. The approval variant
+approves; the denial variant checks the original rejected Tool receipt, truthful
+denial answer and absence of a file. This is not authorization for real
+purchases, network calls or business writes. All effects stay in the disposable
+workspace.
 
 ## Report interpretation
 
 - `agentCompleted` and `outcomePassed` are intentionally different. A regression
   completes all Agent actions but saves draft facts; the outcome must fail.
 - Actual artifact SHA-256 is recorded, not model self-reported correctness.
-- `taskHash` covers task/Tool definitions, fixture and Oracle content and the
-  execution ceilings. It is a declared identity, not a signature or source attestation.
+- `taskHash` covers the exact variant documents/source, Tool definitions,
+  Oracle/held-out tests, selected model/profile/endpoint identity, Go version,
+  input/output/model/tool/retry limits and approval-policy version. `sourceRevision`
+  and `sourceDirty` are separate report metadata. Hashes are declared identities,
+  not signatures, source attestations or outcome receipts.
+- The report names ordered planned case IDs and keeps planned family counts
+  separate from processed counts. On failure, it contains only the attempted
+  prefix; later cases are not counted as attempts.
 - At most eight logical model steps and eight Tools per case, one attempt per
-  call (no automatic retry), with a conservative model
-  window assessment, a 64 KiB serialized-input ceiling and explicit output cap.
+  call (no automatic retry), with a conservative model window assessment, a
+  64 KiB serialized-input ceiling and explicit output cap.
 - On failure, later cases are not started. Requested, processed (including setup
   failures), and actually started Agent-case counts stay separate. A missing Go
   toolchain is not reported as a model's failed code task.
@@ -67,7 +80,8 @@ existing example's explicit Host configuration contract. Do not put keys in
 argv or the report. Pin and record the source commit, model/route, profile,
 prompt/treatment and repeated/held-out workload when collecting real evidence.
 
-This delivery supplies one bounded task per family and executable Oracles. It
+This delivery supplies seven fixed variants across three bounded task families
+and executable Oracles. It
 does **not** claim statistical significance, full production realism, controlled
 A/B uplift or a broad coding/Agent benchmark. Fixture passes establish the
 acceptance harness; real-model usefulness remains unmeasured until authorized

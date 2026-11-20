@@ -5,6 +5,16 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- **Acceptance variants and report integrity (2026-11-20):** The developer-only
+  task-agent acceptance suite now has seven bounded variants across code repair,
+  document evidence and approval control. Ordered planned case identities and
+  planned/processed family counts are validated before report emission; partial
+  results retain the exact attempted prefix. The code Oracle checks public tests
+  against the exact final source before disclosing held-out tests. Live pilots
+  require one exact case, clean revision, model/endpoint capability identity and
+  explicit live opt-in; no provider was called for these fixture checks. This is
+  not the existing 40-case score, a live quality result or a broad Agent benchmark.
+
 - **Required Tool data-shape correction (2026-11-19):** A successfully committed
   Tool returning a valid JSON list or scalar now satisfies its required-call
   obligation. Non-object business data is no longer mistaken for a rejected

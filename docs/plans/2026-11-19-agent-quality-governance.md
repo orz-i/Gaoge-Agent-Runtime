@@ -89,6 +89,19 @@ as a new native parallel executor.
   negative Oracles, actual artifacts, explicit profiles and a separately gated
   Provider path. Default fixture passes are not real-model quality evidence.
 
+The acceptance follow-up expands the suite to seven
+fixed variants, adds strict ordered case/family-count report validation, and
+negative tests for stale public-test evidence, false denial claims, and
+plausible unsigned-document distractors. It remains fixture-only evidence; the
+real-model pilot remains explicitly deferred.
+
+The final handoff keeps the baseline `review-quality` schema unchanged.
+Acceptance validates its own JSON at the producer boundary and records ordered
+planned cases, source/build identity, model/endpoint/profile identity for the
+live path, and separate planned/processed family counts. Repeated fixture task
+identity is stable; changing model/profile/endpoint/budget rotates it. No
+general report-rendering framework was added.
+
 Pinned combination `83082b4f125e5b1b2b0421f7b9597cd37ab14270` + PR #131
 `5198b27d9afe5194c6d5aa2904e03e01caf5b634` produced temporary tree
 `574b2550b9acdfb24b63557fd871a64b9173920d` without textual conflict. Agent,

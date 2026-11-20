@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"go/ast"
@@ -11,10 +12,10 @@ import (
 	"go/token"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"time"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
@@ -37,6 +38,51 @@ func TestClampHeldOut(t *testing.T) {
  } } }
 }
 `
+
+type acceptanceCodeFixture struct {
+	initial  string
+	public   string
+	heldout  string
+	expected string
+}
+
+func acceptanceCodeCase(name string) (acceptanceCodeFixture, bool) {
+	switch name {
+	case "code":
+		return acceptanceCodeFixture{acceptanceBuggyCode, acceptancePublicTests, acceptanceHeldOutTests, acceptanceFixedCode}, true
+	case "code-negative":
+		return acceptanceCodeFixture{acceptanceBuggyCode, `package sample
+import "testing"
+func TestClampNegative(t *testing.T) {
+ if Clamp(-5,-10,-2) != -5 || Clamp(-20,-10,-2) != -10 { t.Fatal("negative interval") }
+}
+`, `package sample
+import "testing"
+func TestClampNegativeHeldOut(t *testing.T) {
+ for low := -30; low < -3; low++ { for high := low; high <= -2; high++ { for v := low-2; v <= high+2; v++ {
+  want := v; if want < low { want = low }; if want > high { want = high }
+  if got := Clamp(v,low,high); got != want { t.Fatal("negative held-out mismatch") }
+ } } }
+}
+`, "package sample\nfunc Clamp(value, low, high int) int { if value >= low && value <= high { return value }; if value < low { return low }; return high }\n"}, true
+	case "code-degenerate":
+		return acceptanceCodeFixture{acceptanceBuggyCode, `package sample
+import "testing"
+func TestClampDegenerate(t *testing.T) {
+ if Clamp(8,4,4) != 4 || Clamp(-1,-1,-1) != -1 { t.Fatal("zero-width interval") }
+}
+`, `package sample
+import "testing"
+func TestClampDegenerateHeldOut(t *testing.T) {
+ for _, x := range []struct{v,l,h int}{{0,0,0},{10,10,10},{-10,-10,-10},{-2147483648,-100,100},{2147483647,-100,100}} {
+  want := x.v; if want < x.l { want=x.l }; if want > x.h { want=x.h }; if got:=Clamp(x.v,x.l,x.h); got!=want { t.Fatal("degenerate held-out mismatch") }
+ }
+}
+`, "package sample\nfunc Clamp(value, low, high int) int { if value <= low { return low }; if value >= high { return high }; return value }\n"}, true
+	default:
+		return acceptanceCodeFixture{}, false
+	}
+}
 
 // This is not a general code sandbox. The model may edit only a finite, pure
 // integer function: no imports, calls, globals, loops, allocation or directives.
@@ -99,7 +145,12 @@ func normalizeAcceptanceCode(source string) ([]byte, error) {
 }
 
 func (task *acceptanceTask) prepareCode() ([]tools.Registration, error) {
-	for name, content := range map[string]string{"go.mod": "module acceptance.local/sample\n\ngo 1.26\n", "clamp.go": acceptanceBuggyCode, "clamp_test.go": acceptancePublicTests} {
+	fixture, ok := acceptanceCodeCase(task.name)
+	if !ok {
+		return nil, errors.New("unknown code acceptance variant")
+	}
+	task.codeFixture = fixture
+	for name, content := range map[string]string{"go.mod": "module acceptance.local/sample\n\ngo 1.26\n", "clamp.go": fixture.initial, "clamp_test.go": fixture.public} {
 		if err := os.WriteFile(task.artifactPath(name), []byte(content), 0600); err != nil {
 			return nil, err
 		}
@@ -114,9 +165,12 @@ func (task *acceptanceTask) prepareCode() ([]tools.Registration, error) {
 			return acceptanceReceipt(request, map[string]string{"source": string(content)})
 		}),
 		acceptanceRegistration("read_tests", "Read the trusted public unit tests", `{"type":"object","additionalProperties":false}`, func(_ context.Context, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
-			return acceptanceReceipt(request, map[string]string{"tests": acceptancePublicTests})
+			return acceptanceReceipt(request, map[string]string{"tests": fixture.public})
 		}),
 		acceptanceRegistration("write_code", "Replace only the bounded pure Clamp function", `{"type":"object","properties":{"source":{"type":"string","maxLength":8192}},"required":["source"],"additionalProperties":false}`, func(_ context.Context, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
+			if err := jsoncontract.ValidateUniqueJSONObject(request.Call.Arguments); err != nil {
+				return acceptanceRefusal(request, "code.arguments", "Provide one unambiguous source string")
+			}
 			var input struct{ Source string }
 			if json.Unmarshal(request.Call.Arguments, &input) != nil {
 				return acceptanceRefusal(request, "code.arguments", "Provide the complete pure fixture source")
@@ -128,6 +182,7 @@ func (task *acceptanceTask) prepareCode() ([]tools.Registration, error) {
 			if err := os.WriteFile(task.artifactPath("clamp.go"), content, 0600); err != nil {
 				return tools.ExecutionResult{}, err
 			}
+			task.publicTestsPassedCurrent = false
 			return acceptanceReceipt(request, map[string]bool{"saved": true})
 		}),
 		acceptanceRegistration("run_tests", "Run only the fixed Go unit-test command in the owned fixture workspace", `{"type":"object","additionalProperties":false}`, func(ctx context.Context, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
@@ -136,20 +191,24 @@ func (task *acceptanceTask) prepareCode() ([]tools.Registration, error) {
 				return tools.ExecutionResult{}, err
 			}
 			task.publicTestsRan = true
+			content, readErr := os.ReadFile(task.artifactPath("clamp.go"))
+			if readErr != nil {
+				return tools.ExecutionResult{}, readErr
+			}
+			task.publicTestsSourceHash = sha256.Sum256(content)
+			task.publicTestsPassedCurrent = passed
 			return acceptanceReceipt(request, map[string]bool{"testsPassed": passed})
 		}),
 	}, nil
 }
 
 func (task *acceptanceTask) testCode(ctx context.Context, compileOnly bool) (bool, error) {
-	cache, err := os.UserCacheDir()
-	if err != nil {
-		return false, err
-	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	if err := os.MkdirAll(task.artifactPath("tmp"), 0700); err != nil {
-		return false, err
+	for _, directory := range []string{"tmp", "gocache", "module-cache"} {
+		if err := os.MkdirAll(task.artifactPath(directory), 0700); err != nil {
+			return false, err
+		}
 	}
 	args := []string{"test", "-count=1"}
 	if compileOnly {
@@ -160,7 +219,7 @@ func (task *acceptanceTask) testCode(ctx context.Context, compileOnly bool) (boo
 	command.Dir = task.directory
 	// Do not pass Provider keys, GOFLAGS, proxies or other Host secrets to Go.
 	command.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + task.directory,
-		"GOCACHE=" + filepath.Join(cache, "go-build"), "GOMODCACHE=" + task.artifactPath("module-cache"),
+		"GOCACHE=" + task.artifactPath("gocache"), "GOMODCACHE=" + task.artifactPath("module-cache"),
 		"TMPDIR=" + task.artifactPath("tmp"), "GOWORK=off", "GOTOOLCHAIN=local", "GOPROXY=off", "GOSUMDB=off", "CGO_ENABLED=0"}
 	output, err := command.CombinedOutput()
 	if len(output) > 8192 {
@@ -182,15 +241,16 @@ func (task *acceptanceTask) verifyCode(ctx context.Context, checks map[string]bo
 	if err != nil {
 		return nil, err
 	}
-	checks["source_actually_changed"] = string(content) != acceptanceBuggyCode
+	checks["source_actually_changed"] = string(content) != task.codeFixture.initial
 	checks["public_tests_executed"] = task.publicTestsRan
+	checks["public_tests_passed_final_source"] = task.publicTestsPassedCurrent && task.publicTestsSourceHash == sha256.Sum256(content)
 	_, sourceErr := normalizeAcceptanceCode(string(content))
 	checks["pure_source_validated"] = sourceErr == nil
 	if !checks["pure_source_validated"] {
 		return content, nil
 	}
 	// Only after the Agent completes: never expose held-out outcomes to its loop.
-	if err := os.WriteFile(task.artifactPath("heldout_test.go"), []byte(acceptanceHeldOutTests), 0600); err != nil {
+	if err := os.WriteFile(task.artifactPath("heldout_test.go"), []byte(task.codeFixture.heldout), 0600); err != nil {
 		return nil, err
 	}
 	checks["independent_held_out_tests_pass"], err = task.testCode(ctx, false)
