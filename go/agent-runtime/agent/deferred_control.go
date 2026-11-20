@@ -27,25 +27,14 @@ func trustedDeferredPreparationStack(d Dependencies) bool {
 	return true
 }
 
-// trustedDeferredCallbackStack is restricted to first-party, scoped adapters.
-// An arbitrary Host Run/Model/Tool middleware can detach external work after
-// returning and cannot inherit the settled native Root's cancellation proof.
-// Context sampling and bounded accounting participate in the original owned
-// physical callback journal. The model/policy/Tool ports are invoked only
-// inside that bracket and still retain their separate receipt contracts.
-func trustedDeferredCallbackStack(d Dependencies) bool {
-	// Arbitrary Host callbacks can detach asynchronous work after their
-	// synchronous return. An owned Agent callback receipt cannot account for
-	// those detached effects, regardless of the returned typed policy.
-	// Host-owned policy/preflight/observer callbacks are executable code,
-	// not declarative proof. Even a correct synchronous result cannot
-	// certify that their detached work has retired. Keep them outside
-	// both native-cancellation and deferred-custody authority.
+// scopedDeferredRootCallbacks checks callbacks that can enter an owned Agent Root.
+// Start and approval preflights run only on Kernel-parented Runs. Tool approval
+// policies are checked at their actual entry inside the owned callback journal.
+// Every other unscoped Host callback keeps the stack opaque.
+func scopedDeferredRootCallbacks(d Dependencies) bool {
 	if !trustedDeferredPreparationStack(d) ||
 		d.PrepareModelRequest != nil || d.NormalizeModelPolicy != nil ||
-		d.StartControlPreflight != nil || d.ApprovalControlPreflight != nil ||
-		len(d.ApprovalPolicies) != 0 || len(d.CompletionPolicies) != 0 ||
-		len(d.Observers) != 0 || len(d.Telemetry) != 0 || d.ToolDiscovery != nil {
+		len(d.CompletionPolicies) != 0 || d.ToolDiscovery != nil {
 		return false
 	}
 	for _, item := range d.ModelMiddleware {

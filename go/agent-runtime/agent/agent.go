@@ -401,6 +401,8 @@ type Runner struct {
 	// witness; it cannot upgrade later Host callback effects to settled.
 	trustedDeferredPreparedControl bool
 	trustedDeferredRootControl     bool
+	scopedRootCallbacks            bool
+	hasApprovalPolicies            bool
 }
 
 type runState struct {
@@ -635,6 +637,9 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 			policyNormalizer = owned.NormalizeModelPolicy
 		}
 	}
+	scopedRoot := scopedDeferredRootCallbacks(dependencies)
+	control := scopedRoot && dependencies.StartControlPreflight == nil &&
+		dependencies.ApprovalControlPreflight == nil && len(dependencies.ApprovalPolicies) == 0
 	return &Runner{
 		runtime: dependencies.Runtime, model: dependencies.Model, clock: dependencies.Clock, catalog: dependencies.Catalog,
 		executor: dependencies.Executor, approvals: dependencies.Approvals,
@@ -666,13 +671,15 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		// share the SAME Host-callback trust decision. Native Start remains
 		// strictly middleware-free while the deferred path may also accept
 		// the audited, callback-scoped first-party middleware below.
-		kernelOwnedStartCancellation: trustedDeferredCallbackStack(dependencies) &&
+		kernelOwnedStartCancellation: control &&
 			len(dependencies.RunMiddleware) == 0 &&
 			len(dependencies.ModelMiddleware) == 0 && len(dependencies.ToolMiddleware) == 0 &&
 			dependencies.ContextPreparation == nil && dependencies.ManagedContextRecovery == nil,
 		prepareModelRequest:            dependencies.PrepareModelRequest,
 		trustedDeferredPreparedControl: trustedDeferredPreparationStack(dependencies),
-		trustedDeferredRootControl:     trustedDeferredCallbackStack(dependencies),
+		trustedDeferredRootControl:     control,
+		scopedRootCallbacks:            scopedRoot,
+		hasApprovalPolicies:            len(dependencies.ApprovalPolicies) != 0,
 		modelPolicyNormalizer:          policyNormalizer,
 		deferResume:                    dependencies.DeferResumption,
 	}, nil
@@ -2068,6 +2075,9 @@ func (runner *Runner) preparePendingApproval(
 			RunID: snapshot.Run.ID,
 			Call:  tools.CloneCall(call),
 		},
+	}
+	if runner.rootCallbacks != nil && runner.hasApprovalPolicies {
+		runner.rootCallbacks.approvalPolicyEntered.Store(true)
 	}
 	requiresApproval, err := runner.approvalPolicies.RequiresApproval(ctx, invocation)
 	if err != nil {

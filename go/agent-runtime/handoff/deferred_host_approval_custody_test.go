@@ -83,6 +83,9 @@ func TestDeferredHostApprovalCallbackNeverGrantsNativeCustody(t *testing.T) {
 		t.Fatalf("expected Tool approval waiting: status=%s err=%v", waiting.Run.Status, err)
 	}
 	claim := c.VerifiedLocalDelegationControl(t.Context(), rt, delegation, waiting)
+	if err := rt.VerifyOwnedRootSettlement(t.Context(), waiting); !errors.Is(err, kernel.ErrExecutionConflict) {
+		t.Fatalf("entered Host approval policy obtained scoped execution evidence: %v", err)
+	}
 	strict := r.VerifiedDeferredRootControl(t.Context(), rt, waiting)
 	t.Logf("Host ApprovalPolicy launched detached effect; NativeStartCancellationFencedByKernel=%t; VerifiedLocalDelegationControl=%t; effects before release=%d",
 		r.NativeStartCancellationFencedByKernel(rt), claim, effects.Load())
