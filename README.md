@@ -96,6 +96,11 @@ For stable Host Turn IDs and a simple text conversation, run the separate
 go run ./go/agent-runtime-harness/examples/session
 ```
 
+For local Tools with bounded Context and exact archive retrieval, use the
+[recommended tool-session composition](docs/tool-agent-session.md),
+`harness.OpenToolAgentSession`. Each Tool is paired with its explicit Host policy;
+unsupported approval/delegation features fail closed instead of being ignored.
+
 It uses the **same** Agent Loop with optional Harness, a Host-owned transcript,
 and explicit Context projection; no additional orchestration engine or intent router
 is involved. For a text-only conversation, `harness.OpenTextAgentSession`
@@ -118,6 +123,28 @@ fixed tasks, repeatable reports, comparison and recovery limits. The optional
 `make agent-quality` for separately authorized 40-case real-model sampling.
 Probe-only and single-pilot reports cannot be mistaken for complete task scores. The suite measures
 one evidence task family, not general Agent intelligence.
+
+For read-tool/session task regressions, use the offline
+`make agent-quality-regression` gate. To review a saved real-model report without
+another Provider call, use `review-quality PATH_TO_EXISTING_REPORT.json` with
+the baseline launcher; see [task-outcome governance](docs/agent-quality-governance.md).
+
+For optional running-task user input, see
+[safe-point inputs and independent reads](docs/run-inputs-and-parallel-reads.md).
+Run `go run ./go/agent-runtime-harness/examples/steering-session` for the complete
+local Host path, or add `-interactive` to enter the displayed correction while
+the first lookup is running. It uses only synthetic fixtures and Memory Stores.
+For replay-heavy public-history allocation measurements, use the report-only
+`make benchmark-agent-history` target; this does not change persisted history
+or claim production latency improvements.
+For actual multi-step execution/state growth and known-receipt recovery, run
+`go run ./go/agent-runtime/examples/long-run -steps=100 -payload-bytes=1024`;
+the [measurement guide](go/agent-runtime/examples/long-run/README.md) distinguishes
+logical submitted bytes, sampled heap, resume startup and remaining work.
+For independent delivery checks across code/document/approval tasks, run
+`go run ./go/agent-runtime-harness/examples/task-agent -mode=acceptance`.
+The [acceptance guide](go/agent-runtime-harness/examples/task-agent/ACCEPTANCE.md)
+separates fixture passes from the explicitly authorized actual-model pilot path.
 
 The [TypeScript client guide](ts/agent-runtime-client/README.md),
 [observability guidance](docs/observability.md), and

@@ -41,15 +41,25 @@ func main() {
 
 func runCommand(ctx context.Context, args []string, input io.Reader, output io.Writer) int {
 	var config settings
+	var acceptanceCase string
+	var allowLive bool
 	flags := flag.NewFlagSet("task-agent", flag.ContinueOnError)
 	// Flag errors may quote arbitrary argv. Emit only a bounded classification.
 	flags.SetOutput(io.Discard)
-	flags.StringVar(&config.mode, "mode", "scripted", "scripted, quality-scripted, live, baseline-stdin, baseline-preflight-stdin, baseline-pilot-stdin, or baseline-distractor-pilot-stdin")
+	flags.StringVar(&config.mode, "mode", "scripted", "scripted, quality-scripted, acceptance, live, baseline-stdin, baseline-preflight-stdin, baseline-pilot-stdin, or baseline-distractor-pilot-stdin")
 	flags.StringVar(&config.provider, "provider", "", "live only: openai or anthropic")
 	flags.StringVar(&config.modelID, "model", "", "live only: exact provider model ID")
 	flags.Int64Var(&config.contextTokens, "context-tokens", 0, "live only: documented model capacity")
 	flags.Int64Var(&config.outputTokens, "max-output-tokens", 0, "live only: output ceiling")
+	flags.StringVar(&acceptanceCase, "acceptance-case", "", "acceptance mode only: code, code-negative, code-degenerate, documents, documents-distractors, approval, or approval-denied; default all seven")
+	flags.BoolVar(&allowLive, "allow-live-calls", false, "acceptance mode only: explicitly permit bounded paid Provider calls")
 	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
+		return configurationError(output)
+	}
+	if config.mode == "acceptance" {
+		return runAcceptanceCommand(ctx, config, acceptanceCase, allowLive, output)
+	}
+	if acceptanceCase != "" || allowLive {
 		return configurationError(output)
 	}
 	if config.mode == "baseline-stdin" || config.mode == "baseline-preflight-stdin" || config.mode == "baseline-pilot-stdin" || config.mode == "baseline-distractor-pilot-stdin" {

@@ -1,0 +1,85 @@
+# Running-task inputs — scoped first delivery
+
+Scope: optional root-Agent Host input log and applied cursor, plus the existing
+independent-child regression. Part of PR #132; not a native ordinary-Tool
+parallel executor, a front-end feature rollout or a new execution authority.
+
+## Exact behavior
+
+- A new Run freezes a source binding. Missing/changed binding prevents new model
+  work; old Runs with no binding do not silently acquire one at restart.
+- A read-only trusted Host log supplies contiguous, immutable, authenticated user
+  records. The Kernel still persists the user messages and applied sequence in
+  one original revision CAS. A queued sequence is not an execution receipt.
+- Read points are before a new ModelInvocation and before an otherwise final
+  answer. A pending frozen request is never reprojected; pending Tool calls and
+  unknown effects must settle before a new model step can use input.
+- If input arrives while the final model request is running, its old answer can
+  become intermediate history and the new user message drives the next bounded
+  step. No budget, model, approval, tool scope or repair allowance is enlarged.
+- Already admitted tool batches are not interrupted. Late queue acceptance can
+  race completion/cancellation; the Host must compare the final applied cursor
+  and explicitly carry unused input into a new Turn.
+- The Memory log is bounded and process-local. It partitions by original
+  Run/Actor/Thread, enforces idempotent IDs and rejects a cursor beyond retained
+  history. It is not presented as durable external-message delivery.
+- The source is not inherited by delegated children. An input-enabled runner
+  does not claim the no-Host-callback native cancellation ownership shortcut.
+
+## Observed tests
+
+The new regressions cover concurrent input during a physically blocked model
+call; unchanged already-dispatched request; stale-final-answer continuation;
+scoped/idempotent queueing; terminal submission refusal; lost Memory history;
+hard model-limit preservation; unknown Tool outcome preservation; changed source
+binding; Runner reconstruction without duplicate delivery; malformed/gapped,
+duplicated and oversized batches; queue-capacity classification distinct from
+Run execution budgets; and the same behavior through bounded Harness
+Context without rereading the Host transcript or creating another Turn.
+
+Additional fault coverage targets the actual fenced `ApplyExecution` port: after
+the input/cursor CAS commits but its ACK is lost, no Model is sent before the
+error returns; a reconstructed Runner consumes the original input exactly once.
+The SDK input frame journals only its concrete return after Next; an unrelated
+Host middleware failure still retains the original unknown callback grant.
+Constructor checks classify the source as a Host callback boundary and reject
+unsupported managed-transfer composition. This does not add that frame to the
+native callback-free/deferred-control authority allowlist.
+
+The task gate also runs the existing three-child admission/restart/receipt test.
+It proves existing independent child admission and receipt accounting, **not**
+new ordinary-Tool physical concurrency. That implementation still needs its
+own per-call multi-in-flight receipt/unknown-outcome/cancellation fault matrix.
+
+## Validation at this delivery
+
+- Full Agent, Model and Harness suites, plus all HTTP packages, passed with race
+  detection after the source and projection changes.
+- `make agent-quality-regression agent-baseline-test` passed; Python protocol
+  suite remains **159 tests**. No live Provider run was launched.
+- Full workspace Go lint and the clean external Go/TypeScript consumer gate
+  passed, including new optional source-port and public helper contracts.
+- A previous whole-workspace test/race attempt belongs to the earlier code head;
+  it is not silently promoted into complete certification of this extension.
+- Long-history allocation results and the correction to the initial retention
+  hypothesis are in the separate projection audit.
+- Provider adapter, Handoff, Context, MCP and A2A package tests also passed; the
+  original synthetic calibration still completed 40/40 with 160 fixture Model
+  and 120 Tool calls. This remains mechanics evidence, not a live quality score.
+
+## Pinned parallel-PR revalidation
+
+Feature code `6fa95dbf9db4a45079a92fa8d5fcddc059bfc0be` combined without textual
+conflict with PR #131 head `8095e4c1daae41909ba1ad10eec673602264d422`. Temporary
+merged tree: `ffd0e3d7e4e883dbbfa55575b6842029daeff0a7`.
+
+Full Agent, Model, Harness and HTTP race suites passed from an owned temporary
+archive of that tree. An additional temporary internal test,
+`TestPR131InputSourceCannotBorrowDeferredCustody`, asserts that the input-enabled
+runner cannot acquire #131's private deferred-control or callback-free native
+custody flags. That test belongs only to the combined source because #131's
+private fields do not exist on this independent main-based branch. The temporary
+directory was removed; no branch/ref was merged or rewritten.
+
+Self-review only, not an independent audit or whole combined real-engine
+certification. Later heads and required PR Head CI must still be revalidated.

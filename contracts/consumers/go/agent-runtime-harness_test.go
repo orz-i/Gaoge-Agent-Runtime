@@ -58,6 +58,7 @@ type cancellationReconcilerContract interface {
 }
 
 var (
+	_ func(harness.ToolAgentSessionOptions) (*harness.SessionClient, error)                  = harness.OpenToolAgentSession
 	_ harness.RuntimeCancellationReconciler                                                  = (cancellationReconcilerContract)(nil)
 	_ cancellationReconcilerContract                                                         = (harness.RuntimeCancellationReconciler)(nil)
 	_ func(context.Context) (harness.CancellationEffect, bool)                               = harness.CancellationEffectFromContext

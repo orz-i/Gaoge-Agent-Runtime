@@ -300,6 +300,12 @@ type Dependencies struct {
 	// DeferResumption leaves resolved approval transitions running for a composed
 	// continuation worker. The standalone SDK keeps synchronous behavior by default.
 	DeferResumption bool
+
+	// ToolProgressPolicy is copied at composition and frozen in each new Run.
+	// It changes read/search strategy only, never grants or physical replay.
+	ToolProgressPolicy *ToolProgressPolicy
+	// Inputs is an optional trusted read-only Host user-input log.
+	Inputs RunInputSource
 }
 
 // StartRequest starts one explicitly selected Agent Run.
@@ -357,6 +363,9 @@ type Runner struct {
 	modelPolicyNormalizer     ModelPolicyNormalizer
 	toolChain                 *plugin.ToolChain
 	completionPolicies        []CompletionPolicy
+	toolProgressPolicy        *ToolProgressPolicy
+	inputs                    RunInputSource
+	inputBinding              string
 	limits                    Limits
 	execution                 ExecutionPolicy
 	runExecution              *RunExecution
@@ -406,6 +415,10 @@ type runState struct {
 	ToolDispatchID   string                     `json:"toolDispatchID,omitempty"`
 	ExternalSignals  []ExternalToolResultSignal `json:"externalSignals,omitempty"`
 	ModelInvocations []ModelInvocation          `json:"modelInvocations,omitempty"`
+
+	ToolProgressPolicy *ToolProgressPolicy `json:"toolProgressPolicy,omitempty"`
+	InputBinding       string              `json:"inputBinding,omitempty"`
+	InputCursor        uint64              `json:"inputCursor,omitempty"`
 }
 
 // View is an isolated public projection of one persisted Agent Run. It exposes
@@ -423,6 +436,10 @@ type View struct {
 	AutoAllowance    *AutoAllowanceProgress
 	ModelInvocations []ModelInvocation
 	PendingTool      *PendingToolView
+
+	ToolProgressPolicy *ToolProgressPolicy
+	InputBinding       string
+	InputCursor        uint64
 }
 
 // ViewState decodes an isolated public view from a Kernel Agent snapshot.
@@ -443,30 +460,36 @@ func ViewState(snapshot kernel.Snapshot) (View, error) {
 		AutoAllowance:    autoAllowanceProgress(state.AutoAllowance),
 		ModelInvocations: publicModelInvocations(state.ModelInvocations),
 		PendingTool:      publicPendingTool(snapshot, state.ToolWait),
+
+		ToolProgressPolicy: cloneToolProgressPolicy(state.ToolProgressPolicy),
+		InputBinding:       state.InputBinding,
+		InputCursor:        state.InputCursor,
 	}, nil
 }
 
 // Provider replay payloads contain opaque signed Model content. Retain them in
 // authoritative State, but do not expose them in ordinary public projections.
 func publicModelMessages(values []model.Message) []model.Message {
-	messages := model.CloneMessages(values)
-	for index := range messages {
-		messages[index].ProviderReplay = nil
-	}
-	return messages
+	return model.CloneMessagesWithoutProviderReplay(values)
 }
 
 func publicModelInvocations(values []ModelInvocation) []ModelInvocation {
-	invocations := cloneModelInvocations(values)
-	for index := range invocations {
-		invocations[index].Response.ProviderReplay = nil
-		invocations[index].Request.Messages = publicModelMessages(invocations[index].Request.Messages)
+	invocations := make([]ModelInvocation, len(values))
+	for index, invocation := range values {
+		messages := invocation.Request.Messages
+		invocation.Request.Messages = nil
+		invocation.Response.ProviderReplay = nil
+		invocations[index] = cloneModelInvocation(invocation)
+		invocations[index].Request.Messages = publicModelMessages(messages)
 	}
 	return invocations
 }
 
 // NewRunner constructs the Agent loop; Host selection and task routing remain external.
 func NewRunner(dependencies Dependencies) (*Runner, error) {
+	if dependencies.Inputs != nil && dependencies.ManagedContextRecovery != nil {
+		return nil, ErrInvalidRequest // Host input is not a managed-transfer adapter
+	}
 	if a := dependencies.ContextPreparation; a != nil {
 		count := 0
 		for _, layer := range dependencies.RunMiddleware {
@@ -491,6 +514,18 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	if dependencies.Runtime == nil || dependencies.Model == nil ||
 		(dependencies.Catalog == nil) != (dependencies.Executor == nil) {
 		return nil, ErrInvalidRequest
+	}
+	progressPolicy, err := normalizeToolProgressPolicy(dependencies.ToolProgressPolicy, dependencies.Catalog)
+	if err != nil {
+		return nil, err
+	}
+	var inputBinding string
+	if dependencies.Inputs != nil {
+		inputBinding = dependencies.Inputs.BindingID()
+		if !validInputBinding(inputBinding) {
+			return nil, ErrInvalidRequest
+		}
+		dependencies.RunMiddleware = append([]plugin.RunMiddleware{&runInputBoundary{}}, dependencies.RunMiddleware...)
 	}
 	runChain, err := plugin.NewRunChain(dependencies.RunMiddleware...)
 	if err != nil {
@@ -574,6 +609,9 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		modelMiddlewareConfigured: len(dependencies.ModelMiddleware) > 0,
 		hostedTools:               dependencies.HostedTools, discovery: dependencies.ToolDiscovery, observers: observers, telemetry: telemetry, approvalPolicies: approvalPolicies,
 		completionPolicies:   compactCompletionPolicies(dependencies.CompletionPolicies),
+		toolProgressPolicy:   progressPolicy,
+		inputs:               dependencies.Inputs,
+		inputBinding:         inputBinding,
 		limits:               dependencies.Limits,
 		execution:            execution,
 		runExecution:         runExecution,
@@ -608,7 +646,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 // may hand cancellation off to the Kernel CAS/Execution fence. A concrete
 // *Runner type alone does not prove the absence of unfenced Host effects.
 func (runner *Runner) NativeStartCancellationFencedByKernel(runtime *kernel.Runtime) bool {
-	return runner != nil && runner.runtime == runtime && runner.kernelOwnedStartCancellation
+	return runner != nil && runner.runtime == runtime && runner.kernelOwnedStartCancellation && runner.inputs == nil
 }
 
 // OwnsKernelRuntime certifies that a statically routed native child executes
@@ -734,6 +772,9 @@ func (runner *Runner) startRunWithMiddleware(ctx context.Context, request StartR
 // capability/catalog lookups are read-only by dependency contract. Failure
 // cannot create a Run, dispatch a Model/Tool, or execute Run Middleware.
 func (runner *Runner) prepareStartState(ctx context.Context, request StartRequest) (json.RawMessage, error) {
+	if request.ParentRunID != "" && runner.inputs != nil {
+		return nil, ErrInvalidRequest // root-scoped input is never inherited by a child
+	}
 	if (request.ParentRunID == "") != (request.OriginFingerprint == "") ||
 		(request.ParentRunID != "" && !validFrozenOriginFingerprint(request.OriginFingerprint)) {
 		return nil, ErrInvalidRequest
@@ -811,6 +852,9 @@ func (runner *Runner) prepareStartState(ctx context.Context, request StartReques
 		Budget:            runtimebudget.Snapshot{Limits: limits},
 		CallAllowance:     allowance,
 		AutoAllowance:     automaticAllowance,
+
+		ToolProgressPolicy: freezeToolProgressPolicy(runner.toolProgressPolicy, toolKeys),
+		InputBinding:       runner.inputBinding,
 	}
 	if instructions := strings.TrimSpace(request.Instructions); instructions != "" {
 		state.Messages = append([]model.Message{{Role: model.RoleSystem, Content: model.TextParts(instructions)}}, state.Messages...)
@@ -1106,6 +1150,13 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 	if _, active := activeModelInvocation(state); !active && allowanceExhausted(state, "model") {
 		return runner.advanceCallAllowance(ctx, snapshot, state, "model")
 	}
+	if _, active := activeModelInvocation(state); !active {
+		updated, _, changed, inputErr := runner.admitRunInputs(ctx, snapshot, state, nil)
+		if inputErr != nil || changed {
+			// Recheck the lease and read the next page before freezing the request.
+			return updated, inputErr != nil, inputErr
+		}
+	}
 	snapshot, state, invocation, err := runner.ensureModelInvocation(ctx, snapshot, state)
 	if err != nil {
 		if errors.Is(err, ErrToolDiscoveryDenied) || errors.Is(err, ErrToolDiscoveryInvalid) {
@@ -1251,6 +1302,10 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 		return continued, true, continueErr
 	}
 	if len(response.ToolCalls) == 0 {
+		updated, _, changed, inputErr := runner.admitRunInputs(ctx, snapshot, state, &response)
+		if inputErr != nil || changed {
+			return updated, inputErr != nil, inputErr
+		}
 		if missing := missingRequiredToolKeys(state); len(missing) != 0 {
 			if state.CompletionRepair {
 				failed, failErr := runner.fail(ctx, snapshot, state, "agent.completion_repair_exhausted", ErrInvalidModelResponse)
@@ -1546,7 +1601,16 @@ func toolResultRejectedOrRetryable(content string) bool {
 		Retryable bool   `json:"retryable"`
 		Status    string `json:"status"`
 	}
-	if !json.Valid([]byte(content)) || json.Unmarshal([]byte(content), &payload) != nil {
+	if !json.Valid([]byte(content)) {
+		return true
+	}
+	// A committed read may legitimately return a JSON list or scalar. Only an
+	// object can carry the optional rejection envelope; do not invent failure
+	// merely because valid business data is not an object.
+	if !strings.HasPrefix(strings.TrimSpace(content), "{") {
+		return false
+	}
+	if json.Unmarshal([]byte(content), &payload) != nil {
 		return true
 	}
 	return strings.TrimSpace(payload.Status) == "rejected" ||
@@ -1994,6 +2058,10 @@ func (runner *Runner) executePending(ctx context.Context, snapshot kernel.Snapsh
 	}
 	if execution.state.ToolDispatchID != "" {
 		return snapshot, true, ErrToolOutcomeUnknown
+	}
+	if repeatedExplorationCall(execution.state, execution.call) {
+		return runner.handlePendingToolExecutionError(ctx, snapshot, execution.state,
+			tools.NewRecoverableCallErrorAllowCompletion("tool.exploration_repeat", "This read/search call already has two settled results. Use different arguments or finish with the available evidence.", tools.ErrInvalidCall))
 	}
 	state := execution.state
 	state.ToolDispatchID = execution.call.ID
@@ -2671,6 +2739,12 @@ func decodeState(encoded json.RawMessage) (runState, error) {
 	var state runState
 	if err := json.Unmarshal(encoded, &state); err != nil {
 		return runState{}, errors.Join(ErrInvalidRequest, err)
+	}
+	if !validFrozenToolProgressPolicy(state) {
+		return runState{}, ErrInvalidRequest
+	}
+	if state.InputBinding == "" && state.InputCursor != 0 || state.InputBinding != "" && !validInputBinding(state.InputBinding) {
+		return runState{}, ErrInvalidRequest
 	}
 	if state.OriginFingerprint != "" && !validFrozenOriginFingerprint(state.OriginFingerprint) {
 		return runState{}, ErrInvalidRequest

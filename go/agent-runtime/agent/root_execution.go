@@ -401,6 +401,10 @@ func collectBoundedCallbacks(runs []plugin.RunMiddleware, models []plugin.ModelM
 			result = append(result, value)
 		case *BoundedBudgetAdapter:
 			result = append(result, value)
+		case *runInputBoundary:
+			// Journal this concrete frame's return only. It remains outside
+			// native callback-free/deferred-control authority classification.
+			result = append(result, value)
 		}
 	}
 	for _, m := range models {

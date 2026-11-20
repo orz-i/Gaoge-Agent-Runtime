@@ -907,7 +907,8 @@ def quality_pressure_facts(report):
     validate_report(report)
     if report["configuration"].get("suite") != QUALITY_SUITE:
         raise SafeFailure("quality_suite_required")
-    runner = report["runner"]
+    # Only a validated start event establishes Runner metadata for the report.
+    runner = report["runner"] if report["runner"].get("taskVersion") else {}
     summary = report["summary"] or {}
     samples = report["samples"]
     counts = {"contextBudgetRejected": 0, "agentToolLimit": 0, "otherOrUnknown": 0}
@@ -963,7 +964,6 @@ def quality_pressure_facts(report):
                 "serializedBytes", "maxSerializedBytes")} if pressure is not None else None),
             "compactionOutcome": pressure["reason"] if pressure is not None else None,
         })
-    requested = runner.get("requestedSamples") or summary.get("requested")
     original_hash = runner.get("datasetHash")
     safe_hash = (original_hash if type(original_hash) is str and
                  re.fullmatch(r"sha256:[0-9a-f]{64}", original_hash) else None)
@@ -974,7 +974,7 @@ def quality_pressure_facts(report):
         "datasetHash": safe_hash,
         "qualityTreatment": report["configuration"].get("qualityTreatment", "current/default"),
         "sourceClean": report["source"].get("dirty") is False,
-        "coverage": {"requested": requested, "attempted": len(samples),
+        "coverage": {"requested": runner.get("requestedSamples"), "attempted": len(samples),
                      "complete": complete, "pilotOnly": runner.get("pilotOnly") is True,
                      "preflightOnly": runner.get("preflightOnly") is True},
         "counts": counts,
@@ -2316,10 +2316,92 @@ def comparison_markdown(old, new, treatment=False):
     return "\n".join(lines), complete
 
 
+def quality_outcome_facts(report):
+    """Review existing task outcomes; never launch, re-score or rewrite a run."""
+    pressure = quality_pressure_facts(report)  # strict existing report protocol
+    samples = report["samples"]
+    coverage = pressure["coverage"]
+    source_revision = report["source"].get("revision")
+    source_identified = (type(source_revision) is str and
+                         re.fullmatch(r"[0-9a-f]{40,64}", source_revision) is not None)
+    gaps = []
+    if not coverage["complete"]:
+        gaps.append("incomplete_sampling")
+    if not pressure["sourceClean"]:
+        gaps.append("source_not_clean_or_unknown")
+    if not source_identified:
+        gaps.append("source_revision_unknown")
+    if pressure["datasetHash"] is None:
+        gaps.append("dataset_identity_unknown")
+    passed = sum(sample["status"] == "passed" for sample in samples)
+    durations = sorted(sample["durationMs"] for sample in samples)
+    calls = sum(sample["modelCalls"] for sample in samples)
+    usage_complete = bool(calls and all(
+        sample["usage"]["missingCalls"] == 0 and
+        sample["usage"]["knownCalls"] == sample["modelCalls"] for sample in samples))
+    tokens = (sum((sample["usage"].get("known") or {}).get("inputTokens", 0) +
+                  (sample["usage"].get("known") or {}).get("outputTokens", 0)
+                  for sample in samples) if usage_complete else None)
+    groups = []
+    for group in QUALITY_GROUPS:
+        observed = [sample for sample in samples if sample["caseID"].startswith(group + "-")]
+        groups.append({"group": group, "passed": sum(s["status"] == "passed" for s in observed),
+                       "attempted": len(observed), "planned": 8 * report["configuration"]["repetitions"]})
+    return {
+        "coverage": coverage, "sourceClean": pressure["sourceClean"],
+        "baselineReviewReady": not gaps, "evidenceGaps": gaps,
+        "passed": passed, "failed": len(samples) - passed,
+        "fullSuccessRate": passed / len(samples) if coverage["complete"] and samples else None,
+        "oraclePassed": sum(sample["oraclePassed"] for sample in samples),
+        # False checks on pre-interruption failures are NOT failed recovery
+        # attempts. Only report whether the complete evidence was demonstrated.
+        "recoveryProven": sum(all(sample["recoveryChecks"].values()) for sample in samples),
+        "modelCalls": calls, "toolCalls": sum(sample["toolCalls"] for sample in samples),
+        "knownTokens": tokens,
+        "p50Ms": durations[math.ceil(.5 * len(durations)) - 1] if durations else None,
+        "p95Ms": durations[math.ceil(.95 * len(durations)) - 1] if durations else None,
+        "failureCategories": pressure["counts"], "groups": groups,
+    }
+
+
+def quality_outcome_markdown(facts):
+    """Render only fixed labels and validated aggregate numbers, not payloads."""
+    coverage = facts["coverage"]
+    rate = facts["fullSuccessRate"]
+    categories = facts["failureCategories"]
+    lines = ["# Agent 任务效果复盘（离线，只读）", "",
+             "- 任务整体通过 / 已尝试 / 计划：%d / %d / %s。" %
+             (facts["passed"], coverage["attempted"], md_cell(coverage["requested"])),
+             "- 完整成功率：%s。" % ("%.1f%%" % (100 * rate) if rate is not None else
+                                     "不提供；Pilot、预检或不完整采样不是完整质量得分"),
+             "- 答案与草稿 Oracle 已通过：%d；完整恢复证据已证明：%d；恢复未完整证明：%d。" %
+             (facts["oraclePassed"], facts["recoveryProven"], coverage["attempted"] - facts["recoveryProven"]),
+             "- 已尝试样本耗时 p50 / p95：%s / %s ms；模型 / 工具调用：%d / %d。" %
+             (md_cell(facts["p50Ms"]), md_cell(facts["p95Ms"]), facts["modelCalls"], facts["toolCalls"]),
+             "- 任务生成 Token：%s；费用未记录，不能从缺失 Usage 或 Token 数直接推断账单。" %
+             (facts["knownTokens"] if facts["knownTokens"] is not None else "未知"),
+             "- 已观察失败：本地 Context 拒绝 %d；可信 Agent 工具上限 %d；其他或根因未知 %d。" %
+             (categories["contextBudgetRejected"], categories["agentToolLimit"], categories["otherOrUnknown"]),
+             "- 完整基线复核条件：%s；证据缺口：%s。" %
+             ("满足结构与干净源码标记条件" if facts["baselineReviewReady"] else "尚未满足",
+              ", ".join(facts["evidenceGaps"]) if facts["evidenceGaps"] else "无已识别结构缺口"),
+             "", "| 子组 | 任务通过 | 已尝试 | 计划 |", "| --- | ---: | ---: | ---: |"]
+    for group in facts["groups"]:
+        lines.append("| %s | %d | %d | %d |" %
+                     (group["group"], group["passed"], group["attempted"], group["planned"]))
+    lines += ["", "## 如何使用这份复盘", "",
+              "先看任务与 Oracle 是否通过，再分别看恢复证据、调用量和耗时；恢复未证明不等于恢复执行失败。",
+              "结构完整和源码干净标记不是报告真实性签名，更不是全部任务通过或质量提升的证明。",
+              "这 40 例仍是同一证据任务族；子组 code 也不是代码修改或测试通过率。",
+              "脚本与合成校准只能证明机制。真实模型效果需要另行授权的采样；本命令不联网、不调用模型、不修改报告。",
+              "比较仍使用 compare / compare-treatment 的原有匹配规则；本命令不放宽它们，也不生成跨项目排名。", ""]
+    return "\n".join(lines)
+
+
 def main(argv=None):
     args = list(sys.argv[1:] if argv is None else argv)
     usage = ("用法：python3 scripts/run-agent-baseline.py "
-             "[quality | quality-generic | pilot [report.json] | pilot-distractor [report.json] | pilot-distractor-generic | probe [report.json] | retry report.json [--repetitions 1..20] | compare old.json new.json | compare-treatment old.json new.json | diagnose-quality report.json]")
+             "[quality | quality-generic | pilot [report.json] | pilot-distractor [report.json] | pilot-distractor-generic | probe [report.json] | retry report.json [--repetitions 1..20] | compare old.json new.json | compare-treatment old.json new.json | diagnose-quality report.json | review-quality report.json]")
     try:
         if args in (["--help"], ["-h"]):
             print(usage + "\n无参数执行原两任务基线；quality 选择 40 个合成证据案例；"
@@ -2327,7 +2409,7 @@ def main(argv=None):
                   "quality-generic/pilot-distractor-generic 显式选择通用导航实验指令；"
                   "probe 只做付费前预检，绝不启动任务样本；"
                   "pilot/probe report.json 复用原配置并重新隐藏输入 key；"
-                  "retry 运行完整任务；compare/compare-treatment 与 diagnose-quality 离线读取报告，不会联网。")
+                  "retry 运行完整任务；compare/compare-treatment、diagnose-quality 与 review-quality 离线读取报告，不会联网。")
             return 0
         if len(args) == 3 and args[0] in ("compare", "compare-treatment"):
             rendered, complete = comparison_markdown(
@@ -2337,6 +2419,9 @@ def main(argv=None):
         if len(args) == 2 and args[0] == "diagnose-quality":
             print(quality_pressure_markdown(quality_pressure_facts(read_report(args[1]))))
             return 0  # Observational success never means the Agent task passed.
+        if len(args) == 2 and args[0] == "review-quality":
+            print(quality_outcome_markdown(quality_outcome_facts(read_report(args[1]))))
+            return 0  # Review completed, NOT a task pass, uplift or release gate.
         if args in (["quality"], ["quality-generic"]):
             if not sys.stdin.isatty() or not sys.stderr.isatty():
                 raise SafeFailure("interactive_tty_required")

@@ -5,6 +5,51 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- **Acceptance variants and report integrity (2026-11-20):** The developer-only
+  task-agent acceptance suite now has seven bounded variants across code repair,
+  document evidence and approval control. Ordered planned case identities and
+  planned/processed family counts are validated before report emission; partial
+  results retain the exact attempted prefix. The code Oracle checks public tests
+  against the exact final source before disclosing held-out tests. Live pilots
+  require one exact case, clean revision, model/endpoint capability identity and
+  explicit live opt-in; no provider was called for these fixture checks. This is
+  not the existing 40-case score, a live quality result or a broad Agent benchmark.
+
+- **Required Tool data-shape correction (2026-11-19):** A successfully committed
+  Tool returning a valid JSON list or scalar now satisfies its required-call
+  obligation. Non-object business data is no longer mistaken for a rejected
+  call, which could waste the remaining Model budget. Explicit rejected,
+  retryable and `ok:false` envelopes, invalid JSON, dispatch receipts, approvals
+  and hard budgets retain their existing checks. Reproduced by the new document
+  outcome task and covered by direct Agent and result-shape regressions.
+
+- **Running-task user input and history allocation (2026-11-19):** Optional
+  `agent.RunInputSource` admits authenticated Host user messages only at model
+  boundaries, with a frozen source binding and a durable applied cursor. It does
+  not rewrite in-flight requests, interrupt admitted Tool batches or bypass
+  unknown outcomes/approvals/budgets. The bounded Memory source is explicitly
+  process-local. Queued inputs can miss the final model boundary. Hosts can
+  reclaim a terminal Run's retained queue capacity with `MemoryRunInputs.ReleaseRun`
+  after handling outstanding inputs. The tool
+  Session facade can pass the same source through. Public history views now
+  exclude opaque replay before cloning instead of copying then discarding it;
+  original receipts and model continuation remain unchanged. See
+  `docs/run-inputs-and-parallel-reads.md` and the long-history projection audit.
+
+- **Opt-in read-tool exploration (2026-11-19):** A Host-certified
+  `agent.ToolProgressPolicy` keeps selected local read/search tools available for
+  different arguments instead of suppressing the entire tool after failed
+  searches. The policy is copied and frozen in each new Run; old/default Runs
+  retain their behavior. Identical settled calls are bounded before dispatch.
+  Unknown outcomes, approvals, explicit denials and hard budgets are unchanged.
+  `harness.OpenToolAgentSession` adds an optional local-Tool/bounded-Context
+  composition facade with explicit per-tool policy and exact archive retrieval;
+  unsupported approval/delegation/shared-budget configuration fails closed.
+  The offline `agent-quality-regression` gate and baseline `review-quality`
+  command separate task/Oracle outcomes from recovery proof, sampling coverage,
+  latency and known Usage without new Provider calls or changed report schemas.
+  See `docs/releases/unreleased-agent-quality-governance.md`.
+
 - **Breaking package boundary (2026-11-17):** Physically move
   `go/agent-runtime-provider/transport` into the independently versioned
   `go/provider-transport` module. Preserve the original 103 Go source/test

@@ -301,6 +301,17 @@ func CloneUsage(value *Usage) *Usage {
 
 // CloneMessages returns isolated message and Tool Call slices.
 func CloneMessages(values []Message) []Message {
+	return cloneMessages(values, true)
+}
+
+// CloneMessagesWithoutProviderReplay returns an isolated message copy without
+// first copying opaque Provider continuation payloads that will be discarded.
+// It does not remove ordinary user/Tool content or other sensitive application data.
+func CloneMessagesWithoutProviderReplay(values []Message) []Message {
+	return cloneMessages(values, false)
+}
+
+func cloneMessages(values []Message, includeReplay bool) []Message {
 	result := make([]Message, len(values))
 	for index, message := range values {
 		result[index] = message
@@ -311,7 +322,10 @@ func CloneMessages(values []Message) []Message {
 		}
 		result[index].Content = CloneContentParts(message.Content)
 		result[index].ToolCalls = cloneToolCalls(message.ToolCalls)
-		result[index].ProviderReplay = CloneProviderReplay(message.ProviderReplay)
+		result[index].ProviderReplay = nil
+		if includeReplay {
+			result[index].ProviderReplay = CloneProviderReplay(message.ProviderReplay)
+		}
 	}
 	return result
 }
