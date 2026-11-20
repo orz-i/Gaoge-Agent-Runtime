@@ -44,10 +44,14 @@ func (middleware *heldBudgetModelMiddleware) Model(ctx context.Context, request 
 	return next(ctx, request, emit)
 }
 
-type countedBudgetModel struct{ calls atomic.Int64 }
+type countedBudgetModel struct {
+	calls         atomic.Int64
+	outputCeiling atomic.Int64
+}
 
-func (client *countedBudgetModel) Generate(context.Context, model.Request) (model.Response, error) {
+func (client *countedBudgetModel) Generate(_ context.Context, request model.Request) (model.Response, error) {
 	client.calls.Add(1)
+	client.outputCeiling.Store(request.MaxOutputTokens)
 	return model.Response{Content: "successful recovery"}, nil
 }
 
@@ -56,12 +60,15 @@ func (client *countedBudgetModel) Generate(context.Context, model.Request) (mode
 // invoked, the budget must not leave an unknown charge that permanently
 // prevents a valid later Resume with the same durable invocation identity.
 func TestSharedBudgetReleasesProvenUnsentModelClaimAndAllowsRecovery(t *testing.T) {
-	testSharedBudgetUnsentClaim(t, true)
+	testSharedBudgetUnsentClaim(t, true, 0)
+}
+func TestSharedBudgetPreservesFrozenOutputLimitOnProvenUnsentRecovery(t *testing.T) {
+	testSharedBudgetUnsentClaim(t, true, 128)
 }
 func TestSharedBudgetOpaqueHeldCallbackRemainsUnknown(t *testing.T) {
-	testSharedBudgetUnsentClaim(t, false)
+	testSharedBudgetUnsentClaim(t, false, 0)
 }
-func testSharedBudgetUnsentClaim(t *testing.T, bounded bool) {
+func testSharedBudgetUnsentClaim(t *testing.T, bounded bool, outputCeiling int64) {
 	store, shared, _ := hostedBudgetFixture(t, budget.Limits{MaxLLMCalls: 2, MaxConcurrentRuns: 1})
 	clock := newBudgetClaimClock()
 	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore(), Clock: clock})
@@ -94,6 +101,7 @@ func testSharedBudgetUnsentClaim(t *testing.T, bounded bool) {
 		snapshot, e := runner.StartRun(context.Background(), agent.StartRequest{
 			ID: "hosted-run", Actor: kernel.ActorRef{TenantID: "audit", ActorID: "actor"},
 			Thread: kernel.ThreadRef{Kind: "conversation", ID: "budget-claim"}, Goal: "recover", Model: "audit-model",
+			MaxModelOutputTokens: outputCeiling,
 		})
 		outcomes <- runResult{snapshot, e}
 	}()
@@ -148,6 +156,9 @@ func testSharedBudgetUnsentClaim(t *testing.T, bounded bool) {
 	recovered, err := runner.Resume(t.Context(), pending.Run.ID, pending.Run.Revision)
 	if err != nil || recovered.Run.Status != kernel.RunStatusCompleted || provider.calls.Load() != 1 {
 		t.Fatalf("valid new Claim could not recover same request: %+v err=%v calls=%d", recovered.Run, err, provider.calls.Load())
+	}
+	if provider.outputCeiling.Load() != outputCeiling {
+		t.Fatalf("budget recovery changed the frozen output ceiling: got=%d want=%d", provider.outputCeiling.Load(), outputCeiling)
 	}
 	ledger, err = store.LoadBudget(t.Context(), "hosted-budget-turn")
 	if err != nil {

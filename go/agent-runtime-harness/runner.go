@@ -60,6 +60,7 @@ func (runner *Runner) ResolveContextSourceBoundaryForPath(
 	}
 	return ContextSourceBoundary{
 		CheckpointID: checkpoint.ID, CoveredThroughSourceID: checkpoint.CoveredThroughSourceID,
+		ContentHash: checkpoint.ContentHash, CoveredPathHash: checkpoint.CoveredPathHash,
 	}, nil
 }
 
@@ -118,11 +119,13 @@ func (runner *Runner) startAgentPhysical(
 			ID: invocation.ExecutionRefID, Actor: request.Actor, Thread: request.Thread,
 			RequestID: firstNonEmpty(strings.TrimSpace(request.RequestID), invocation.TurnID), Goal: request.Goal,
 			Model: config.Model, ModelOptions: append(json.RawMessage(nil), config.ModelOptions...),
-			OutputContract:   model.CloneOutputContract(config.OutputContract),
-			ToolKeys:         append([]string(nil), config.ToolKeys...),
-			RequiredToolKeys: append([]string(nil), request.RequiredToolKeys...),
-			InitialToolKeys:  append([]string(nil), request.InitialToolKeys...),
-			Limits:           config.Limits, CallAllowance: request.CallAllowance, AutoAllowance: request.AutoAllowance,
+			OutputContract:       model.CloneOutputContract(config.OutputContract),
+			MaxModelOutputTokens: config.MaxModelOutputTokens,
+			WorkingStateSummary:  agent.CloneWorkingStateSummaryPolicy(config.WorkingStateSummary),
+			ToolKeys:             append([]string(nil), config.ToolKeys...),
+			RequiredToolKeys:     append([]string(nil), request.RequiredToolKeys...),
+			InitialToolKeys:      append([]string(nil), request.InitialToolKeys...),
+			Limits:               config.Limits, CallAllowance: request.CallAllowance, AutoAllowance: request.AutoAllowance,
 		})
 	})
 }
@@ -201,7 +204,7 @@ func (runner *Runner) restoreOrBuildContext(
 			return Turn{}, nil, err
 		}
 		ref := contextCheckpointRef(checkpoint)
-		if strings.TrimSpace(checkpoint.ScopeID) != strings.TrimSpace(turn.SessionID) || ref.ID != checkpointID || ref != turn.ContextRef {
+		if !validContextCheckpoint(checkpoint) || strings.TrimSpace(checkpoint.ScopeID) != strings.TrimSpace(turn.SessionID) || ref.ID != checkpointID || ref != turn.ContextRef {
 			return Turn{}, nil, ErrConflict
 		}
 		if err = runner.recordContextItem(ctx, turn); err != nil {
@@ -319,11 +322,12 @@ func (runner *Runner) ResolveContextSourceBoundary(
 	if err != nil {
 		return ContextSourceBoundary{}, err
 	}
-	if active.StaticFingerprint != staticFingerprint || !validContextCheckpoint(active) {
+	if active.ScopeID != scopeID || active.StaticFingerprint != staticFingerprint || !validContextCheckpoint(active) {
 		return ContextSourceBoundary{}, nil
 	}
 	return ContextSourceBoundary{
 		CheckpointID: active.ID, CoveredThroughSourceID: active.CoveredThroughSourceID,
+		ContentHash: active.ContentHash, CoveredPathHash: active.CoveredPathHash,
 	}, nil
 }
 
@@ -369,17 +373,34 @@ func (runner *Runner) buildContext(
 	if err != nil {
 		return contextBuildResult{}, err
 	}
-	active, expectedHeadID, err := runner.loadActiveContextHead(ctx, scopeID)
-	if err != nil {
-		return contextBuildResult{}, err
+	var openRequest runtimecontext.OpenRequest
+	var expectedHeadID string
+	if config.ContextBase != nil {
+		expectedHeadID = config.ContextBase.ExpectedHeadCheckpointID
+		openRequest, err = runner.boundContextOpenRequest(ctx, scopeID, staticFingerprint, config, normalized)
+	} else {
+		var active *runtimecontext.Checkpoint
+		active, expectedHeadID, err = runner.loadActiveContextHead(ctx, scopeID)
+		if err == nil {
+			if normalized.WorkingState != nil && !normalized.SourceDelta {
+				openRequest, err = runner.frozenWorkingStateOpenRequest(ctx, scopeID, staticFingerprint, config, normalized, active)
+			} else {
+				openRequest, err = runner.contextOpenRequest(ctx, scopeID, staticFingerprint, config, normalized, active)
+			}
+		}
 	}
-	openRequest, err := runner.contextOpenRequest(ctx, scopeID, staticFingerprint, config, normalized, active)
 	if err != nil {
 		return contextBuildResult{}, err
 	}
 	checkpoint, err := runner.context.Open(ctx, openRequest)
 	if err != nil {
 		return contextBuildResult{}, err
+	}
+	// Legacy Accepted Turns have no frozen open plan. Their explicit delta
+	// base remains usable, but a full-path nil update cannot safely distinguish
+	// original carried state from state that only appeared after admission.
+	if config.ContextBase == nil && !normalized.SourceDelta && normalized.WorkingState == nil && checkpoint.Window.WorkingState != nil {
+		return contextBuildResult{}, ErrConflict
 	}
 	if checkpoint.ScopeID != strings.TrimSpace(scopeID) || !validContextCheckpoint(checkpoint) {
 		return contextBuildResult{}, ErrConflict
@@ -436,6 +457,7 @@ func (runner *Runner) contextOpenRequest(
 		ScopeID: strings.TrimSpace(scopeID), StaticFingerprint: staticFingerprint,
 		SourcePath: append([]string(nil), seed.SourcePath...), Entries: runtimecontext.CloneEntries(seed.Entries),
 		Instructions: instructions, ResetCacheIdentity: seed.ResetCacheIdentity, Previous: active,
+		WorkingState: runtimecontext.CloneWorkingState(seed.WorkingState),
 	}, nil
 }
 
@@ -490,7 +512,7 @@ func (runner *Runner) loadContextDeltaBase(
 	if err != nil {
 		return nil, err
 	}
-	if base.ScopeID != strings.TrimSpace(scopeID) || base.StaticFingerprint != strings.TrimSpace(staticFingerprint) ||
+	if base.ID != strings.TrimSpace(checkpointID) || base.ScopeID != strings.TrimSpace(scopeID) || base.StaticFingerprint != strings.TrimSpace(staticFingerprint) ||
 		!validContextCheckpoint(base) {
 		return nil, ErrConflict
 	}
@@ -511,7 +533,7 @@ func (runner *Runner) findContextPathBase(
 		return nil, -1, err
 	}
 	index := runtimecontext.CheckpointSourceIndex(base, sourcePath)
-	if index < 0 {
+	if base.ScopeID != strings.TrimSpace(scopeID) || base.StaticFingerprint != strings.TrimSpace(staticFingerprint) || index < 0 {
 		return nil, -1, ErrConflict
 	}
 	return &base, index, nil
@@ -528,6 +550,7 @@ func contextDeltaOpenRequest(
 		ScopeID: strings.TrimSpace(scopeID), StaticFingerprint: strings.TrimSpace(staticFingerprint),
 		SourcePath: append([]string(nil), seed.SourcePath...), Entries: runtimecontext.CloneEntries(seed.Entries),
 		Instructions: instructions, SourceDelta: true, ResetCacheIdentity: seed.ResetCacheIdentity, Previous: base,
+		WorkingState: runtimecontext.CloneWorkingState(seed.WorkingState),
 	}
 }
 
@@ -537,6 +560,7 @@ func sliceContextSeedAfter(seed *ContextSeed, index int) *ContextSeed {
 		SourcePath:   append([]string(nil), seed.SourcePath[start:]...),
 		Instructions: seed.Instructions, Entries: runtimecontext.CloneEntries(seed.Entries[start:]),
 		SourceDelta: true, ResetCacheIdentity: seed.ResetCacheIdentity,
+		WorkingState: runtimecontext.CloneWorkingState(seed.WorkingState),
 	}
 }
 
@@ -626,7 +650,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	if dependencies.Runtime == nil || dependencies.Agent == nil || dependencies.Store == nil {
 		return nil, ErrInvalidRequest
 	}
-	if native, ok := dependencies.Agent.(*agent.Runner); ok && native.SupportsManagedContextRecovery() {
+	if native, ok := dependencies.Agent.(*agent.Runner); ok && (native.SupportsManagedContextRecovery() || native.SupportsSummaryNativeRecovery()) {
 		host, supported := dependencies.Store.(managedHostStore)
 		if !supported || !dependencies.Runtime.UsesManagedRecoveryHost(host) {
 			return nil, ErrInvalidRequest
@@ -1202,6 +1226,13 @@ func (runner *Runner) syncRuntimeSnapshotWithCancellationProof(
 		if err := validateRootRuntimeOwnership(invocation, runtimeSnapshot); err != nil {
 			return Snapshot{}, err
 		}
+		// Protective cancellation must remain available independently of model
+		// policy, and an already terminal Turn needs only read-only projection.
+		if !verifiedCancellation && !terminalTurnStatus(turn.Status) {
+			if err := runner.validateRootModelOutputCeiling(ctx, invocation, runtimeSnapshot); err != nil {
+				return Snapshot{}, err
+			}
+		}
 	}
 	// A terminal same-ID Kernel Run is not proof that a separate Feature
 	// Start/Retry finished its remote effects. Keep unknown physical
@@ -1543,6 +1574,96 @@ func validateRootRuntimeOwnership(invocation Invocation, snapshot kernel.Snapsho
 		}
 	}
 	return nil
+}
+
+// Frozen model policy must be attested by the native Agent state, not just a
+// same-ID Run with the right presentation owner. Legacy zero-cap, nil-summary
+// Configs keep their non-Agent compatibility; actual Agent state must still
+// agree on whether summary was originally enabled.
+func (runner *Runner) validateRootModelOutputCeiling(ctx context.Context, invocation Invocation, snapshot kernel.Snapshot) error {
+	config, err := runner.frozenRootModelPolicy(ctx, invocation)
+	if err != nil {
+		return err
+	}
+	return checkRootModelPolicy(invocation, snapshot, config)
+}
+
+func (runner *Runner) frozenRootModelPolicy(ctx context.Context, invocation Invocation) (ConfigSnapshot, error) {
+	if invocation.ParentItemID != "" || invocation.ExecutionClass != ExecutionAgent {
+		return ConfigSnapshot{}, ErrConflict
+	}
+	turn, err := loadVerifiedTurn(ctx, runner.store, invocation.TurnID)
+	if err != nil {
+		return ConfigSnapshot{}, err
+	}
+	config, err := loadSealedConfig(ctx, runner.store, turn.ConfigSnapshotID)
+	if err != nil {
+		return ConfigSnapshot{}, err
+	}
+	return config, nil
+}
+
+func checkRootModelPolicy(invocation Invocation, snapshot kernel.Snapshot, config ConfigSnapshot) error {
+	legacy := config.MaxModelOutputTokens == 0 && config.WorkingStateSummary == nil
+	if legacy {
+		if snapshot.Run.Kind != agent.RunKind {
+			return nil
+		}
+		// Old Host AgentStarter implementations may have opaque feature state.
+		// Preserve that existing zero-cap contract; a real native Agent state
+		// still cannot introduce a summary policy absent from its Config.
+		view, viewErr := agent.ViewState(snapshot)
+		if viewErr == nil && view.WorkingStateSummary != nil {
+			return ErrConflict
+		}
+		return nil
+	}
+	if snapshot.Run.ID != invocation.ExecutionRefID || snapshot.Run.Kind != agent.RunKind {
+		return ErrConflict
+	}
+	view, err := agent.ViewState(snapshot)
+	if err != nil || (config.MaxModelOutputTokens > 0 && view.MaxModelOutputTokens != config.MaxModelOutputTokens) ||
+		!sameWorkingStateSummaryPolicy(config.WorkingStateSummary, view.WorkingStateSummary) {
+		return ErrConflict
+	}
+	return nil
+}
+
+// Controls and Handoff may physically execute a descendant, but their original
+// root still has to satisfy its own frozen ceiling before authorizing work.
+func (runner *Runner) requireInvocationRootModelOutputCeiling(ctx context.Context, invocation Invocation) error {
+	root := invocation
+	if invocation.ParentItemID != "" {
+		var err error
+		root, err = runner.loadFrozenChildRoot(ctx, invocation)
+		if err != nil {
+			return err
+		}
+	}
+	config, err := runner.frozenRootModelPolicy(ctx, root)
+	if err != nil {
+		return err
+	}
+	if config.MaxModelOutputTokens == 0 && config.WorkingStateSummary == nil {
+		if native, ok := runner.agent.(*agent.Runner); !ok || !native.SupportsContextSummary() {
+			return nil
+		}
+	}
+	current, err := runner.runtime.Load(ctx, root.ExecutionRefID)
+	if err != nil {
+		if config.MaxModelOutputTokens == 0 && config.WorkingStateSummary == nil && errors.Is(err, kernel.ErrNotFound) {
+			return nil
+		}
+		return err
+	}
+	if config.WorkingStateSummary != nil {
+		view, viewErr := agent.ViewState(current)
+		native, supported := runner.agent.(interface{ SupportsSummaryNativeRecovery() bool })
+		if viewErr != nil || !supported || view.SummaryNativeRecovery != native.SupportsSummaryNativeRecovery() {
+			return ErrInvalidRequest
+		}
+	}
+	return checkRootModelPolicy(root, current, config)
 }
 
 func runtimeSnapshotConflicts(invocation Invocation, snapshot kernel.Snapshot) bool {

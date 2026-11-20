@@ -19,6 +19,9 @@ func (r *Runner) SupportsManagedContextRecovery() bool {
 }
 
 func (r *Runner) commitManagedModelIntent(ctx context.Context, s kernel.Snapshot, state runState, inv ModelInvocation, m kernel.Mutation) (kernel.Snapshot, error) {
+	if state.SummaryNativeRecovery && inv.Purpose == ModelInvocationContextSummary {
+		return r.commitSummarySafePoint(ctx, s, state, m)
+	}
 	if r.managedContextRecovery == nil || r.activeRootGrant == nil || r.activeRunLease == nil || s.Run.ParentRunID != "" {
 		return r.runtime.Apply(ctx, s.Run.ID, s.Run.Revision, m)
 	}
@@ -46,12 +49,19 @@ func (r *Runner) commitManagedModelIntent(ctx context.Context, s kernel.Snapshot
 // PARK and committed Host mode selection. No configurable callback runs before
 // the new owner's explicit LeaveManagedSafePoint ACK.
 func (r *Runner) RecoverManagedContinuation(ctx context.Context, id string) (kernel.Snapshot, kernel.ManagedClosureProof, error) {
-	if !r.SupportsManagedContextRecovery() {
+	if !r.SupportsManagedContextRecovery() && !r.SupportsSummaryNativeRecovery() {
 		return kernel.Snapshot{}, kernel.ManagedClosureProof{}, ErrRootOutcomeUnknown
 	}
 	current, err := r.runtime.LoadManagedRecovery(ctx, id)
 	if err != nil {
 		return kernel.Snapshot{}, kernel.ManagedClosureProof{}, err
+	}
+	if current.SafePoint.LifecycleVersion == kernel.ManagedLifecycleWorkingStateSummary {
+		if err = r.preflightSummaryTransfer(ctx, current); err != nil {
+			return kernel.Snapshot{}, kernel.ManagedClosureProof{}, err
+		}
+	} else if !r.SupportsManagedContextRecovery() {
+		return kernel.Snapshot{}, kernel.ManagedClosureProof{}, ErrRootOutcomeUnknown
 	}
 	// Once a Host selection exists, later safe points may have moved the Run's
 	// current pointer. Reconstruct the ORIGINAL selected transfer from its ID.
@@ -116,9 +126,15 @@ func (r *Runner) RecoverManagedContinuation(ctx context.Context, id string) (ker
 	if err != nil {
 		return snapshot, kernel.ManagedClosureProof{}, err
 	}
-	inv, ok := activeModelInvocation(state)
-	if !ok || inv.ID != t.SafePoint.ModelInvocationID || inv.RequestHash != t.SafePoint.ModelRequestHash || inv.Status != ModelInvocationPending || inv.DispatchAttempt != 0 || !knownRootPhysicalSettlement(snapshot) {
-		return snapshot, kernel.ManagedClosureProof{}, ErrRootOutcomeUnknown
+	if t.SafePoint.LifecycleVersion == kernel.ManagedLifecycleWorkingStateSummary {
+		if err = r.validateSummarySafePoint(t.SafePoint); err != nil || !kernel.ManagedSourceMatches(t.SafePoint, snapshot) {
+			return snapshot, kernel.ManagedClosureProof{}, errors.Join(ErrRootOutcomeUnknown, err)
+		}
+	} else {
+		inv, ok := activeModelInvocation(state)
+		if !ok || inv.ID != t.SafePoint.ModelInvocationID || inv.RequestHash != t.SafePoint.ModelRequestHash || inv.Status != ModelInvocationPending || inv.DispatchAttempt != 0 || !knownRootPhysicalSettlement(snapshot) {
+			return snapshot, kernel.ManagedClosureProof{}, ErrRootOutcomeUnknown
+		}
 	}
 	ownerProof := featurecontrol.Seal(id, snapshot.Run.Revision, "agent_physical_owner", t.SuccessorGrant.ID, snapshot.State, snapshot.Checkpoint)
 	scoped, err := bound.WithPhysicalGrant(ctx, t.SuccessorGrant, ownerProof)

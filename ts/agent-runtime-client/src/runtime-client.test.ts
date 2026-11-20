@@ -97,6 +97,22 @@ describe("RuntimeClient target API", () => {
     }));
   });
 
+  it("preserves per-model output ceilings and rejects invalid values before fetching", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(() => Promise.resolve(json(snapshot)));
+    const client = new RuntimeClient({ baseURL: "https://runtime.test/api/v1", fetch: fetcher });
+    const payload = { thread: { kind: "conversation", id: "thread-1" }, input: { content: "Answer" } };
+    for (const ceiling of [undefined, 0, 1024]) {
+      await client.agent.start({ ...payload, maxModelOutputTokens: ceiling });
+      const body = JSON.parse(String(fetcher.mock.calls.at(-1)?.[1]?.body));
+      expect(body.maxModelOutputTokens).toBe(ceiling);
+      expect(body).not.toHaveProperty("maxOutputTokens");
+    }
+    for (const ceiling of [-1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(() => client.agent.start({ ...payload, maxModelOutputTokens: ceiling })).toThrow("maxModelOutputTokens");
+    }
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
+
   it("reconnects the Run Feed from the last sequence without duplicates", async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(new Response(

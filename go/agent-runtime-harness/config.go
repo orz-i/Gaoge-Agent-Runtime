@@ -118,13 +118,15 @@ type DelegationPolicySnapshot struct {
 
 // ConfigSnapshot is one immutable execution configuration. It intentionally excludes secrets and transport endpoints.
 type ConfigSnapshot struct {
-	ID                    string                   `json:"id"`
-	TurnID                string                   `json:"turnID"`
-	Environment           VersionRef               `json:"environment"`
-	Instructions          string                   `json:"instructions,omitempty"`
-	Model                 string                   `json:"model,omitempty"`
-	ModelOptions          json.RawMessage          `json:"modelOptions,omitempty"`
-	OutputContract        *model.OutputContract    `json:"outputContract,omitempty"`
+	ID             string                `json:"id"`
+	TurnID         string                `json:"turnID"`
+	Environment    VersionRef            `json:"environment"`
+	Instructions   string                `json:"instructions,omitempty"`
+	Model          string                `json:"model,omitempty"`
+	ModelOptions   json.RawMessage       `json:"modelOptions,omitempty"`
+	OutputContract *model.OutputContract `json:"outputContract,omitempty"`
+	// MaxModelOutputTokens is the frozen per-model-call ceiling, distinct from Limits' cumulative output budget.
+	MaxModelOutputTokens  int64                    `json:"maxModelOutputTokens,omitempty"`
 	ToolKeys              []string                 `json:"toolKeys"`
 	ToolPolicies          []ToolPolicySnapshot     `json:"toolPolicies"`
 	Skills                []SkillSnapshot          `json:"skills"`
@@ -141,27 +143,36 @@ type ConfigSnapshot struct {
 	AdmissionHash string   `json:"admissionHash,omitempty"`
 	InputMessage  *HostRef `json:"inputMessage,omitempty"`
 	OutputMessage *HostRef `json:"outputMessage,omitempty"`
+	// ContextBase is derived from the original Context admission, never accepted
+	// from Host configuration. A non-nil empty binding freezes no previous head.
+	ContextBase *ContextBaseBinding `json:"contextBase,omitempty"`
+	// WorkingStateSummary explicitly opts this Turn into the native, bounded
+	// summary lifecycle. Nil preserves ordinary Context behavior.
+	WorkingStateSummary *agent.WorkingStateSummaryPolicy `json:"workingStateSummary,omitempty"`
 }
 
 type configPayload struct {
-	TurnID                string                   `json:"turnID"`
-	Environment           VersionRef               `json:"environment"`
-	Instructions          string                   `json:"instructions,omitempty"`
-	Model                 string                   `json:"model,omitempty"`
-	ModelOptions          json.RawMessage          `json:"modelOptions,omitempty"`
-	OutputContract        *model.OutputContract    `json:"outputContract,omitempty"`
-	ToolKeys              []string                 `json:"toolKeys"`
-	ToolPolicies          []ToolPolicySnapshot     `json:"toolPolicies"`
-	Skills                []SkillSnapshot          `json:"skills"`
-	MemoryPolicy          string                   `json:"memoryPolicy,omitempty"`
-	ContextPolicy         runtimecontext.Policy    `json:"contextPolicy"`
-	ApprovalPolicyVersion uint64                   `json:"approvalPolicyVersion"`
-	Limits                agent.Limits             `json:"limits"`
-	SharedBudget          *budget.Limits           `json:"sharedBudget,omitempty"`
-	DelegationPolicy      DelegationPolicySnapshot `json:"delegationPolicy,omitempty"`
-	AdmissionHash         string                   `json:"admissionHash,omitempty"`
-	InputMessage          *HostRef                 `json:"inputMessage,omitempty"`
-	OutputMessage         *HostRef                 `json:"outputMessage,omitempty"`
+	TurnID                string                           `json:"turnID"`
+	Environment           VersionRef                       `json:"environment"`
+	Instructions          string                           `json:"instructions,omitempty"`
+	Model                 string                           `json:"model,omitempty"`
+	ModelOptions          json.RawMessage                  `json:"modelOptions,omitempty"`
+	OutputContract        *model.OutputContract            `json:"outputContract,omitempty"`
+	MaxModelOutputTokens  int64                            `json:"maxModelOutputTokens,omitempty"`
+	ToolKeys              []string                         `json:"toolKeys"`
+	ToolPolicies          []ToolPolicySnapshot             `json:"toolPolicies"`
+	Skills                []SkillSnapshot                  `json:"skills"`
+	MemoryPolicy          string                           `json:"memoryPolicy,omitempty"`
+	ContextPolicy         runtimecontext.Policy            `json:"contextPolicy"`
+	ApprovalPolicyVersion uint64                           `json:"approvalPolicyVersion"`
+	Limits                agent.Limits                     `json:"limits"`
+	SharedBudget          *budget.Limits                   `json:"sharedBudget,omitempty"`
+	DelegationPolicy      DelegationPolicySnapshot         `json:"delegationPolicy,omitempty"`
+	AdmissionHash         string                           `json:"admissionHash,omitempty"`
+	InputMessage          *HostRef                         `json:"inputMessage,omitempty"`
+	OutputMessage         *HostRef                         `json:"outputMessage,omitempty"`
+	ContextBase           *ContextBaseBinding              `json:"contextBase,omitempty"`
+	WorkingStateSummary   *agent.WorkingStateSummaryPolicy `json:"workingStateSummary,omitempty"`
 }
 
 // SealConfigSnapshot normalizes, hashes and seals one immutable configuration for a Harness Turn.
@@ -207,9 +218,18 @@ func SealConfigSnapshot(turnID string, value ConfigSnapshot, now time.Time) (Con
 	if err != nil {
 		return ConfigSnapshot{}, err
 	}
-	if model.ValidateOutputContract(value.OutputContract) != nil {
+	if model.ValidateOutputContract(value.OutputContract) != nil || value.MaxModelOutputTokens < 0 {
 		return ConfigSnapshot{}, ErrInvalidRequest
 	}
+	if agent.ValidateWorkingStateSummaryPolicy(value.WorkingStateSummary) != nil ||
+		(value.WorkingStateSummary != nil && (value.MaxModelOutputTokens <= 0 || value.SharedBudget != nil)) {
+		return ConfigSnapshot{}, ErrInvalidRequest
+	}
+	value.WorkingStateSummary = agent.CloneWorkingStateSummaryPolicy(value.WorkingStateSummary)
+	if err := validateContextBaseBinding(value.ContextBase); err != nil {
+		return ConfigSnapshot{}, err
+	}
+	value.ContextBase = cloneContextBaseBinding(value.ContextBase)
 	value.OutputContract = model.CloneOutputContract(value.OutputContract)
 	value.ToolKeys = normalizeStrings(value.ToolKeys)
 	value.ToolPolicies, err = normalizeToolPolicies(value.ToolPolicies)
@@ -234,10 +254,13 @@ func SealConfigSnapshot(turnID string, value ConfigSnapshot, now time.Time) (Con
 	payload := configPayload{
 		TurnID: turnID, Environment: value.Environment, Instructions: value.Instructions,
 		Model: value.Model, ModelOptions: value.ModelOptions, OutputContract: value.OutputContract, ToolKeys: value.ToolKeys,
-		ToolPolicies: value.ToolPolicies, Skills: value.Skills, MemoryPolicy: value.MemoryPolicy,
+		MaxModelOutputTokens: value.MaxModelOutputTokens,
+		ToolPolicies:         value.ToolPolicies, Skills: value.Skills, MemoryPolicy: value.MemoryPolicy,
 		ContextPolicy: value.ContextPolicy, ApprovalPolicyVersion: value.ApprovalPolicyVersion, Limits: value.Limits,
 		SharedBudget: value.SharedBudget, DelegationPolicy: value.DelegationPolicy,
 		AdmissionHash: value.AdmissionHash, InputMessage: value.InputMessage, OutputMessage: value.OutputMessage,
+		ContextBase:         value.ContextBase,
+		WorkingStateSummary: value.WorkingStateSummary,
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
@@ -292,6 +315,8 @@ func enforceableHarnessBudgetLimits(value budget.Limits) bool {
 }
 
 func cloneConfigSnapshot(value ConfigSnapshot) ConfigSnapshot {
+	value.ContextBase = cloneContextBaseBinding(value.ContextBase)
+	value.WorkingStateSummary = agent.CloneWorkingStateSummaryPolicy(value.WorkingStateSummary)
 	if value.InputMessage != nil {
 		copied := *value.InputMessage
 		value.InputMessage = &copied
@@ -310,6 +335,13 @@ func cloneConfigSnapshot(value ConfigSnapshot) ConfigSnapshot {
 	value.ToolPolicies = append([]ToolPolicySnapshot(nil), value.ToolPolicies...)
 	value.Skills = append([]SkillSnapshot(nil), value.Skills...)
 	return value
+}
+
+func sameWorkingStateSummaryPolicy(left, right *agent.WorkingStateSummaryPolicy) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return *left == *right
 }
 
 func defaultJSON(value json.RawMessage) json.RawMessage {

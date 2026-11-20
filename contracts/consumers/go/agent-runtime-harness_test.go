@@ -5,6 +5,7 @@ import (
 	"time"
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
@@ -59,6 +60,9 @@ type cancellationReconcilerContract interface {
 
 var (
 	_ func(harness.ToolAgentSessionOptions) (*harness.SessionClient, error)                  = harness.OpenToolAgentSession
+	_ func(harness.AgentSessionOptions) (*harness.SessionClient, error)                      = harness.OpenAgentSession
+	_                                                                                        = harness.AgentSessionContextOptions{ManagedRecovery: true}
+	_                                                                                        = harness.ConfigSnapshot{MaxModelOutputTokens: 1024}
 	_ harness.RuntimeCancellationReconciler                                                  = (cancellationReconcilerContract)(nil)
 	_ cancellationReconcilerContract                                                         = (harness.RuntimeCancellationReconciler)(nil)
 	_ func(context.Context) (harness.CancellationEffect, bool)                               = harness.CancellationEffectFromContext
@@ -73,4 +77,17 @@ var (
 	_ func(*harness.Runner, context.Context, harness.StartRequest) (harness.Snapshot, error) = (*harness.Runner).StartAgentTurn
 	_ func(*harness.Runner, context.Context, string) (harness.Snapshot, error)               = (*harness.Runner).ResumeTurn
 	_ func(*harness.SessionClient, context.Context, string) (harness.Snapshot, error)        = (*harness.SessionClient).Resume
+)
+
+var (
+	_                                                                                                                = harness.ContextSeed{WorkingState: &runtimecontext.WorkingState{Version: 1, Goal: "Preserve the Host task state"}}
+	_ func(*runtimecontext.WorkingState) *runtimecontext.WorkingState                                                = runtimecontext.CloneWorkingState
+	_ func(*runtimecontext.WorkingState) error                                                                       = runtimecontext.ValidateWorkingState
+	_ func(*harness.SessionClient, context.Context, string, string, []string) (harness.ContextSourceBoundary, error) = (*harness.SessionClient).ResolveContextSourceBoundaryForPath
+)
+
+var (
+	_ = harness.ConfigSnapshot{WorkingStateSummary: &agent.WorkingStateSummaryPolicy{MaxInputTokens: 8192, MaxSerializedBytes: 64 << 10}}
+	_ = runtimecontext.WorkingState{Derivation: &runtimecontext.WorkingStateDerivation{Kind: runtimecontext.WorkingStateDerivationSummary}}
+	_ = harness.AgentSessionContextOptions{SummaryNativeRecovery: true}
 )

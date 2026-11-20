@@ -59,10 +59,16 @@ the configuration and leaves the caller's options unchanged.
   arbitrary middleware. Unsupported features are not silently ignored.
 - Agent call limits come from `Session.Config.Limits` and otherwise retain the
   existing bounded defaults. No budget is automatically raised.
-- Model-window `ReservedOutputTokens` reserves input headroom; it is not a
-  Provider output-token ceiling. If the Host requires an explicit per-request
-  output ceiling or custom model-option policy, use the existing full
-  composition rather than assuming this facade enforces one.
+- `Config.MaxModelOutputTokens` may select a frozen per-request output ceiling.
+  Zero retains this facade's existing unspecified default; negative values are
+  rejected. For a positive ceiling, the actual request's model window must
+  reserve at least that amount before Provider dispatch. Window reservation
+  and cumulative output usage remain separate limits.
+- Automatic `WorkingStateSummary` and dedicated native summary recovery use
+  [OpenAgentSession](agent-session.md), which requires explicitly selected
+  Config Tool keys/policies and a positive output ceiling. This facade keeps
+  its paired `SessionTool` selection, read exploration and optional queued
+  Inputs; unsupported summary policy is rejected during construction.
 - The facade uses synchronous bounded Context preparation, **not** the separately
   opted-in managed Host-transfer recovery protocol. It does not bind or replace
   the caller's Kernel or claim additional callback settlement authority.

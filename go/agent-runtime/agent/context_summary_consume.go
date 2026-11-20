@@ -1,0 +1,192 @@
+package agent
+
+import (
+	"context"
+	"fmt"
+
+	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/callbackscope"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
+)
+
+func (runner *Runner) consumeContextSummary(ctx context.Context, snapshot kernel.Snapshot, state runState) (kernel.Snapshot, error) {
+	adapter := runner.contextSummary
+	if adapter == nil {
+		return snapshot, ErrInvalidRequest
+	}
+	last, ok := activeModelInvocation(state)
+	if !ok || last.Status != ModelInvocationCompleted || last.Purpose != ModelInvocationContextSummary || !validContextSummaryInvocation(*last) {
+		return snapshot, ErrInvalidRequest
+	}
+	invocation := cloneModelInvocation(*last)
+	binding := invocation.ContextSummary
+	read, err := adapter.ports.ReadSummary(ctx, *cloneContextSummaryBinding(binding))
+	if err != nil {
+		return snapshot, err
+	}
+	read.SourceCheckpoint = cloneSamplingCheckpoint(read.SourceCheckpoint)
+	read.Cursor = cloneSamplingCursor(read.Cursor)
+	if !callbackscope.Operation(ctx, adapter.bounded, "context.summary.read", read) || read.Root != binding.Root ||
+		!summarySourceMatches(binding.Source, read.SourceCheckpoint) || read.SourceCheckpoint.ScopeID != binding.Cursor.Turn.SessionID ||
+		read.Cursor.ExpectedHeadCheckpointID != binding.Cursor.ExpectedHeadCheckpointID ||
+		!runtimecontext.ValidCheckpoint(read.Cursor.Checkpoint) || read.Cursor.Turn.ContextCheckpointID != read.Cursor.Checkpoint.ID ||
+		!sameBoundedValue(read.Cursor.Turn.ContextRef, samplingRef(read.Cursor.Checkpoint)) {
+		return snapshot, ErrInvalidRequest
+	}
+	// Older admitted summary recipes may refer to a source whose structured
+	// values cannot survive the existing archive projection. Preserve its
+	// receipt, but do not install derived facts from that altered evidence.
+	if !summaryPreservesSourceValues(runtimecontext.Materialize(read.SourceCheckpoint.Window)) {
+		return snapshot, ErrInvalidRequest
+	}
+	working, parseErr := WorkingStateFromSummaryInvocation(invocation)
+	var target *runtimecontext.Checkpoint
+	var artifacts []runtimecontext.Artifact
+	if parseErr == nil {
+		candidate, candidateErr := adapter.bounded.manager.CompactPortable(runtimecontext.PortableCompactionRequest{
+			Previous: read.SourceCheckpoint, RunID: snapshot.Run.ID, Messages: runtimecontext.Materialize(read.SourceCheckpoint.Window),
+			Policy: binding.ContextPolicy, OmitExtract: true,
+		})
+		if candidateErr != nil || candidate.RemovedMessages != binding.RemovedMessages || !summarySameArtifacts(binding.Artifacts, candidate.Artifacts) {
+			return snapshot, ErrInvalidRequest
+		}
+		candidate.Window.WorkingState = working
+		next, rolloverErr := adapter.bounded.manager.Rollover(ctx, runtimecontext.RolloverRequest{
+			Previous: read.SourceCheckpoint, Window: candidate.Window, Artifacts: candidate.Artifacts,
+			Reason: "working_state_summary", ModelWindowFingerprint: binding.ModelWindowFingerprint,
+		})
+		if rolloverErr != nil {
+			return snapshot, rolloverErr
+		}
+		trial := model.CloneRequest(binding.BusinessRequest)
+		trial.Messages = runtimecontext.Materialize(next.Window)
+		guard := runtimecontext.NewManager(runtimecontext.Dependencies{})
+		assessment, assessErr := guard.AssessModelRequest(ctx, summaryBusinessAssessmentRequest(trial), binding.ModelWindow, binding.ContextPolicy)
+		if assessErr != nil {
+			return snapshot, assessErr
+		}
+		if runtimecontext.WithinHardBudget(assessment, binding.ContextPolicy) && assessment.SerializedBytes < binding.OriginalAssessment.SerializedBytes &&
+			assessment.HardTokenEstimate < binding.OriginalAssessment.HardTokenEstimate {
+			target, artifacts = &next, candidate.Artifacts
+		}
+	}
+	cursor, alreadyApplied, err := reconcileSummaryCursor(*binding, read, target)
+	if err != nil {
+		return snapshot, err
+	}
+	// Compute the same native usage mutation before any additional Host write.
+	// An exhausted budget consumes the known bill but never starts business work.
+	consumed, consumedOK := consumeLastModelInvocation(&state, runner.clock.Now())
+	if !consumedOK {
+		return snapshot, ErrInvalidRequest
+	}
+	dimension, usageErr := chargeConsumedModelUsage(&state, consumed)
+	if usageErr != nil {
+		return runner.fail(ctx, snapshot, state, "agent.usage_invalid", usageErr)
+	}
+	if dimension != "" {
+		return runner.fail(ctx, snapshot, state, "agent."+string(dimension)+"_budget", fmt.Errorf("%w: %s", ErrBudgetExceeded, dimension))
+	}
+	if target != nil {
+		if err = runner.runtime.RequireExecution(ctx, snapshot.Run.ID); err != nil {
+			return snapshot, err
+		}
+		for _, artifact := range artifacts {
+			saved, putErr := adapter.bounded.ports.PutArtifact(ctx, runtimecontext.CloneArtifacts([]runtimecontext.Artifact{artifact})[0])
+			if putErr != nil {
+				return snapshot, putErr
+			}
+			if !sameBoundedValue(saved, artifact) || !callbackscope.Operation(ctx, adapter.bounded, "context.summary.artifact:"+artifact.ID, artifact) {
+				return snapshot, ErrInvalidRequest
+			}
+		}
+		if !alreadyApplied {
+			if err = runner.runtime.RequireExecution(ctx, snapshot.Run.ID); err != nil {
+				return snapshot, err
+			}
+			receipt, commitErr := adapter.ports.CommitSummary(ctx, cloneSamplingCursor(cursor), runtimecontext.CloneCheckpoint(*target))
+			if commitErr != nil {
+				return snapshot, commitErr
+			}
+			expected := cursor.Turn
+			expected.ContextCheckpointID, expected.ContextRef = target.ID, samplingRef(*target)
+			expected.Revision++
+			expected.UpdatedAt = cursor.UpdatedAt
+			if !sameBoundedValue(receipt.Turn, expected) || !sameBoundedValue(receipt.Checkpoint, *target) ||
+				receipt.ExpectedTurnCheckpointID != cursor.ExpectedTurnCheckpointID || receipt.ExpectedHeadCheckpointID != cursor.ExpectedHeadCheckpointID ||
+				!callbackscope.Operation(ctx, adapter.bounded, "context.summary.commit:"+target.ID, receipt) {
+				return snapshot, ErrInvalidRequest
+			}
+		}
+		if err = runner.runtime.RequireExecution(ctx, snapshot.Run.ID); err != nil {
+			return snapshot, err
+		}
+		bound, bindErr := adapter.ports.BindSummary(ctx, cloneSamplingCursor(cursor), runtimecontext.CloneCheckpoint(*target))
+		if bindErr != nil {
+			return snapshot, bindErr
+		}
+		if bound.TurnID != cursor.Turn.ID || bound.Access != "owner" || !sameBoundedValue(bound.Previous, cursor.Checkpoint) ||
+			!sameBoundedValue(bound.Current, *target) || !callbackscope.Operation(ctx, adapter.bounded, "context.summary.bind:"+target.ID, bound) {
+			return snapshot, ErrInvalidRequest
+		}
+		state.ModelInvocations[len(state.ModelInvocations)-1].SummaryTargetHash = workingStateFingerprint(working)
+	}
+	encoded, err := encodeState(state)
+	if err != nil {
+		return snapshot, err
+	}
+	mutation := kernel.Mutation{
+		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
+		Events: []kernel.EventDraft{{Type: EventContextSummaryConsumed, Message: invocation.ID, Wakeup: true}},
+	}
+	next, err := runner.commitSummarySafePoint(ctx, snapshot, state, mutation)
+	if err != nil && next.Run.ID == "" {
+		return snapshot, err
+	}
+	return next, err
+}
+
+func reconcileSummaryCursor(binding ContextSummaryBinding, read ContextSummaryRead, target *runtimecontext.Checkpoint) (SamplingCursor, bool, error) {
+	cursor := cloneSamplingCursor(read.Cursor)
+	if cursor.Turn.ID != binding.Cursor.Turn.ID || cursor.Turn.SessionID != binding.Cursor.Turn.SessionID ||
+		cursor.Turn.ConfigSnapshotID != binding.Cursor.Turn.ConfigSnapshotID || cursor.ExpectedTurnCheckpointID != cursor.Checkpoint.ID {
+		return SamplingCursor{}, false, ErrInvalidRequest
+	}
+	if cursor.Checkpoint.ID == binding.Source.CheckpointID {
+		if !sameBoundedValue(cursor.Checkpoint, read.SourceCheckpoint) || !summaryTurnProjection(binding.Cursor.Turn, cursor.Turn) {
+			return SamplingCursor{}, false, ErrInvalidRequest
+		}
+		cursor.ExpectedHeadCheckpointID = binding.Cursor.ExpectedHeadCheckpointID
+		cursor.UpdatedAt = binding.Cursor.UpdatedAt
+		if cursor.UpdatedAt.Before(cursor.Turn.UpdatedAt) {
+			cursor.UpdatedAt = cursor.Turn.UpdatedAt
+		}
+		return cursor, false, nil
+	}
+	if target == nil || !sameBoundedValue(cursor.Checkpoint, *target) {
+		return SamplingCursor{}, false, ErrInvalidRequest
+	}
+	expected := binding.Cursor.Turn
+	expected.ContextCheckpointID, expected.ContextRef = target.ID, samplingRef(*target)
+	expected.Revision++
+	expected.UpdatedAt = binding.Cursor.UpdatedAt
+	// The source path clamps its write time to the original Turn. Rebuild the
+	// same value after an applied commit, including older frozen recipes whose
+	// Host clock preceded that Turn's timestamp.
+	if expected.UpdatedAt.Before(binding.Cursor.Turn.UpdatedAt) {
+		expected.UpdatedAt = binding.Cursor.Turn.UpdatedAt
+	}
+	if summaryTurnProjection(expected, cursor.Turn) {
+		return cursor, true, nil
+	}
+	// The same one Accepted->Running projection may precede the Context CAS.
+	if binding.Cursor.Turn.Status == "accepted" && cursor.Turn.Status == "running" &&
+		cursor.Turn.Revision == binding.Cursor.Turn.Revision+2 && !cursor.Turn.UpdatedAt.Before(expected.UpdatedAt) {
+		expected.Status, expected.Revision, expected.UpdatedAt = cursor.Turn.Status, cursor.Turn.Revision, cursor.Turn.UpdatedAt
+		if sameBoundedValue(expected, cursor.Turn) {
+			return cursor, true, nil
+		}
+	}
+	return SamplingCursor{}, false, ErrInvalidRequest
+}

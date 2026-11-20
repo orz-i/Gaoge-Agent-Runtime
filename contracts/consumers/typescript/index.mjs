@@ -24,6 +24,11 @@ const client = new RuntimeClient({
     calls.push(route);
     assert.equal(new Headers(init.headers).get("Authorization"), "Bearer consumer-token");
     switch (route) {
+      case "POST /api/v1/agent-runs":
+        assert.deepEqual(JSON.parse(init.body), {
+          thread: { kind: "conversation", id: "thread-1" }, input: { content: "hello" }, maxModelOutputTokens: 1024,
+        });
+        return Response.json(snapshot);
       case "GET /api/v1/runs/run-1":
         return Response.json(snapshot);
       case "GET /api/v1/runs/extension":
@@ -49,6 +54,9 @@ const client = new RuntimeClient({
   },
 });
 
+assert.deepEqual(await client.agent.start({
+  thread: { kind: "conversation", id: "thread-1" }, input: { content: "hello" }, maxModelOutputTokens: 1024,
+}), snapshot);
 assert.deepEqual(await client.runs.get("run-1"), snapshot);
 assert.deepEqual(await client.runs.get("extension"), extension);
 assert.equal(toolWaitPhase(await client.runs.get("external-wait")), "waiting_external_result");
@@ -66,4 +74,4 @@ await assert.rejects(client.runs.get("conflict"), (failure) => {
   assert.equal(failure.requestID, error.error.requestID);
   return true;
 });
-assert.equal(calls.length, 8);
+assert.equal(calls.length, 9);

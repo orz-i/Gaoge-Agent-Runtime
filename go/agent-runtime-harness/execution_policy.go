@@ -1,6 +1,9 @@
 package harness
 
-import "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
+import (
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
+)
 
 const (
 	defaultMaxChildRuns       = 32
@@ -52,6 +55,13 @@ func (policy ExecutionPolicy) Resolve() (ExecutionPolicy, error) {
 func (runner *Runner) resolveConfigExecutionPolicy(value ConfigSnapshot) (ConfigSnapshot, error) {
 	if runner == nil {
 		return ConfigSnapshot{}, ErrInvalidRequest
+	}
+	if value.WorkingStateSummary != nil {
+		native, ok := runner.agent.(interface{ SupportsContextSummary() bool })
+		if !ok || !native.SupportsContextSummary() || runner.budgets != nil || value.SharedBudget != nil ||
+			value.MaxModelOutputTokens <= 0 || agent.ValidateWorkingStateSummaryPolicy(value.WorkingStateSummary) != nil {
+			return ConfigSnapshot{}, ErrInvalidRequest
+		}
 	}
 	requestedDepth := value.DelegationPolicy.MaxDepth
 	if requestedDepth < 0 || requestedDepth > maxDelegationDepth {

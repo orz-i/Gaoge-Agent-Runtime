@@ -17,6 +17,7 @@ const request: StartAgentRunRequest = {
   thread: { kind: "conversation", id: "thread-1" },
   input: { content: "hello" },
   clientRunID: "client-run-1",
+  maxModelOutputTokens: 1024,
 };
 const started: Promise<RunSnapshotDTO> = client.agent.start(request);
 const snapshot: Promise<RunSnapshotDTO> = client.runs.get("run-1");

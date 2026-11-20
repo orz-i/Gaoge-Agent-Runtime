@@ -34,6 +34,10 @@ const (
 
 type ManagedRecoveryState string
 
+// ManagedLifecycleWorkingStateSummary admits only the dedicated native Agent
+// summary phases. Feature-owned validation is required before any PARK.
+const ManagedLifecycleWorkingStateSummary = "working-state-summary-v1"
+
 const (
 	ManagedAvailable   ManagedRecoveryState = "AVAILABLE"
 	ManagedInvalidated ManagedRecoveryState = "INVALIDATED"
@@ -112,7 +116,7 @@ type ManagedSafePoint struct {
 }
 
 func (p ManagedSafePoint) Valid() bool {
-	return p.ID != "" && p.RecoveryID == ManagedRecoveryID(p.ID, p.Host) && p.Host.Valid() && p.Source.Run.ID == p.Host.RunID && p.Source.Run.Kind == "agent" && p.Source.Run.ParentRunID == "" && p.Source.Run.Status == RunStatusRunning && p.Source.Run.Revision > 0 && json.Valid(p.Source.State) && p.OriginalGrant.ChildRunID == p.Host.RunID && p.OriginalGrant.MatchesExecution(p.OriginalLease) && p.ModelInvocationID != "" && len(p.ModelRequestHash) == 64 && p.LifecycleVersion == "managed-context-v1" && json.Valid(p.LifecycleSource)
+	return p.ID != "" && p.RecoveryID == ManagedRecoveryID(p.ID, p.Host) && p.Host.Valid() && p.Source.Run.ID == p.Host.RunID && p.Source.Run.Kind == "agent" && p.Source.Run.ParentRunID == "" && p.Source.Run.Status == RunStatusRunning && p.Source.Run.Revision > 0 && json.Valid(p.Source.State) && p.OriginalGrant.ChildRunID == p.Host.RunID && p.OriginalGrant.MatchesExecution(p.OriginalLease) && p.ModelInvocationID != "" && len(p.ModelRequestHash) == 64 && (p.LifecycleVersion == "managed-context-v1" || p.LifecycleVersion == ManagedLifecycleWorkingStateSummary) && json.Valid(p.LifecycleSource)
 }
 
 // ManagedTransfer retains one immutable original recovery identity. Selection
@@ -187,6 +191,48 @@ func (p ManagedSafePointProof) Present() bool           { return p.proof != nil 
 func (p ManagedSafePointProof) Point() ManagedSafePoint { return managedClone(p.point) }
 func (p ManagedSafePointProof) Matches(previous Snapshot, next Record, lease ExecutionLease, grant ChildExecutionGrant) bool {
 	return p.point.Valid() && p.point.Source.EventHead == previous.EventHead+1 && reflect.DeepEqual(p.point.OriginalGrant, grant) && sameManagedLease(p.point.OriginalLease, lease) && reflect.DeepEqual(p.point.Source.Run, next.Run) && reflect.DeepEqual(p.point.Source.State, next.State) && reflect.DeepEqual(p.point.Source.Checkpoint, next.Checkpoint) && reflect.DeepEqual(p.point.Source.Result, next.Result) && p.proof.Matches(previous.Run.ID, previous.Run.Revision, "managed_safe_point", grant.ID, previous.State, p.point)
+}
+
+// MatchesMutation adds the closed lifecycle/event profile to the opaque native
+// source proof. Stores share this check instead of independently widening T0.
+func (p ManagedSafePointProof) MatchesMutation(previous Snapshot, next Record, lease ExecutionLease, grant ChildExecutionGrant, events []EventDraft) bool {
+	return p.Matches(previous, next, lease, grant) && managedSafePointEventMatches(p.point, events)
+}
+
+func managedSafePointEventMatches(point ManagedSafePoint, events []EventDraft) bool {
+	if len(events) != 1 {
+		return false
+	}
+	if point.LifecycleVersion == "managed-context-v1" {
+		return events[0].Type == "agent.model_invocation.pending"
+	}
+	if point.LifecycleVersion != ManagedLifecycleWorkingStateSummary {
+		return false
+	}
+	var source struct {
+		Phase          string `json:"phase"`
+		SourceRevision uint64 `json:"sourceRevision"`
+		InvocationID   string `json:"invocationID"`
+		RequestHash    string `json:"requestHash"`
+		BindingDigest  string `json:"bindingDigest"`
+	}
+	if json.Unmarshal(point.LifecycleSource, &source) != nil || source.SourceRevision != point.Source.Run.Revision ||
+		source.InvocationID != point.ModelInvocationID || source.RequestHash != point.ModelRequestHash {
+		return false
+	}
+	digest, err := hex.DecodeString(source.BindingDigest)
+	if err != nil || len(digest) != sha256.Size || hex.EncodeToString(digest) != source.BindingDigest {
+		return false
+	}
+	switch source.Phase {
+	case "pending":
+		return events[0].Type == "agent.model_invocation.pending"
+	case "completed":
+		return events[0].Type == "agent.model_invocation.completed"
+	case "consumed":
+		return events[0].Type == "agent.context_summary.consumed"
+	}
+	return false
 }
 
 type ManagedParkRequest struct {

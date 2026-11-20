@@ -8,7 +8,67 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
 )
+
+func TestManagedSummarySafePointClosedEventProfileNeedsNativeProof(t *testing.T) {
+	initial, source, lease, grant, _, _ := managedReducerFixture()
+	previous := source
+	previous.Run.Revision--
+	previous.EventHead--
+	next := Record{Run: source.Run, State: source.State, Checkpoint: source.Checkpoint, Result: source.Result}
+	for phase, event := range map[string]string{"pending": "agent.model_invocation.pending", "completed": "agent.model_invocation.completed", "consumed": "agent.context_summary.consumed"} {
+		t.Run(phase, func(t *testing.T) {
+			point := initial.SafePoint
+			point.LifecycleVersion = ManagedLifecycleWorkingStateSummary
+			raw, err := json.Marshal(struct {
+				Phase          string `json:"phase"`
+				SourceRevision uint64 `json:"sourceRevision"`
+				InvocationID   string `json:"invocationID"`
+				RequestHash    string `json:"requestHash"`
+				BindingDigest  string `json:"bindingDigest"`
+			}{phase, source.Run.Revision, point.ModelInvocationID, point.ModelRequestHash, strings.Repeat("c", 64)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			point.LifecycleSource = raw
+			if !point.Valid() {
+				t.Fatal("known dedicated lifecycle rejected")
+			}
+			proof := ManagedSafePointProof{point: point, proof: featurecontrol.Seal(previous.Run.ID, previous.Run.Revision, "managed_safe_point", grant.ID, previous.State, point)}
+			if !proof.MatchesMutation(previous, next, lease, grant, []EventDraft{{Type: event}}) {
+				t.Fatal("native exact phase/proof rejected")
+			}
+			if (ManagedSafePointProof{point: point}).MatchesMutation(previous, next, lease, grant, []EventDraft{{Type: event}}) {
+				t.Fatal("public phase metadata forged a native source proof")
+			}
+			for _, wrong := range []string{"run.completed", "agent.model_invocation.pending", "agent.model_invocation.completed", "agent.context_summary.consumed"} {
+				if wrong != event && proof.MatchesMutation(previous, next, lease, grant, []EventDraft{{Type: wrong}}) {
+					t.Fatal("event did not match its dedicated phase")
+				}
+			}
+			if proof.MatchesMutation(previous, next, lease, grant, []EventDraft{{Type: event}, {Type: event}}) {
+				t.Fatal("extra mutation events bypassed the phase boundary")
+			}
+			point.LifecycleSource = json.RawMessage(strings.Replace(string(raw), `"sourceRevision":3`, `"sourceRevision":4`, 1))
+			mismatched := ManagedSafePointProof{point: point, proof: featurecontrol.Seal(previous.Run.ID, previous.Run.Revision, "managed_safe_point", grant.ID, previous.State, point)}
+			if mismatched.MatchesMutation(previous, next, lease, grant, []EventDraft{{Type: event}}) {
+				t.Fatal("phase source revision was not bound")
+			}
+		})
+	}
+	unknown := initial.SafePoint
+	unknown.LifecycleVersion = "working-state-summary-v2"
+	if unknown.Valid() {
+		t.Fatal("unknown lifecycle version was accepted")
+	}
+	old := ManagedSafePointProof{point: initial.SafePoint, proof: featurecontrol.Seal(previous.Run.ID, previous.Run.Revision, "managed_safe_point", grant.ID, previous.State, initial.SafePoint)}
+	if !old.MatchesMutation(previous, next, lease, grant, []EventDraft{{Type: "agent.model_invocation.pending"}}) ||
+		old.MatchesMutation(previous, next, lease, grant, []EventDraft{{Type: "agent.model_invocation.completed"}}) {
+		t.Fatal("older managed Context profile was widened")
+	}
+}
 
 func managedReducerFixture() (ManagedTransfer, Snapshot, ExecutionLease, ChildExecutionGrant, ManagedAuthority, time.Time) {
 	now := time.Date(2026, 11, 13, 0, 0, 0, 0, time.UTC)

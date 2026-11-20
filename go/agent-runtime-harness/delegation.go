@@ -70,7 +70,7 @@ func normalizeDelegateRequest(request DelegateRequest) (DelegateRequest, error) 
 	if a.ID != "" || a.RequestID != "" || a.ParentRunID != "" || a.OriginFingerprint != "" ||
 		a.Actor != (kernel.ActorRef{}) || a.Thread != (kernel.ThreadRef{}) || a.Goal != "" ||
 		a.DeadlineAt != nil || a.CallAllowance != nil || a.AutoAllowance != nil ||
-		len(a.RequiredToolKeys) != 0 || a.OutputContract != nil || !enforceableHarnessBudgetLimits(a.Limits) {
+		len(a.RequiredToolKeys) != 0 || a.OutputContract != nil || a.MaxModelOutputTokens < 0 || !enforceableHarnessBudgetLimits(a.Limits) {
 		return DelegateRequest{}, ErrInvalidRequest
 	}
 	a.Instructions = strings.TrimSpace(a.Instructions)
@@ -316,13 +316,22 @@ func (runner *Runner) prepareDelegation(
 	// the Turn root. ModelOptions and local Tool visibility belong to that
 	// parent, not a second resolution of the root Config catalog.
 	parentModel, parentOptions, parentLimits := config.Model, config.ModelOptions, config.Limits
+	parentOutputCeiling := config.MaxModelOutputTokens
 	parentView, viewErr := agent.ViewState(parent)
 	if viewErr == nil {
 		parentModel, parentOptions, parentLimits = parentView.Model, parentView.ModelOptions, parentView.Budget.Limits
+		parentOutputCeiling = parentView.MaxModelOutputTokens
 	} else if invocation.ParentItemID != "" {
 		return handoff.Delegation{}, parent, ErrConflict
 	}
 	delegation.Model = firstNonEmpty(a.Model, parentModel)
+	delegation.MaxModelOutputTokens = parentOutputCeiling
+	if a.MaxModelOutputTokens > 0 {
+		if parentOutputCeiling > 0 && a.MaxModelOutputTokens > parentOutputCeiling {
+			return handoff.Delegation{}, parent, ErrInvalidRequest
+		}
+		delegation.MaxModelOutputTokens = a.MaxModelOutputTokens
+	}
 	if a.Model == "" || a.Model == parentModel {
 		delegation.ModelOptions = append(json.RawMessage(nil), parentOptions...)
 	} else {

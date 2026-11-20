@@ -473,6 +473,12 @@ func (runner *Runner) beginPhysicalInvocationDispatch(
 		invocation.ExecutionRefID == "" || strings.TrimSpace(physicalRunID) == "" {
 		return Item{}, ErrInvalidRequest
 	}
+	switch phase {
+	case "resume", "resolve-approval", "resolve-subtask-approval", "grant-call-allowance", "handoff-start":
+		if err := runner.requireInvocationRootModelOutputCeiling(ctx, invocation); err != nil {
+			return Item{}, err
+		}
+	}
 	identifier, err := runner.runtime.NewID("dispatch")
 	if err != nil {
 		return Item{}, err

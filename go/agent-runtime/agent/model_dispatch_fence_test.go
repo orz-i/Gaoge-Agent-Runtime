@@ -53,6 +53,8 @@ func TestModelDispatchRejectsPostIntentIdentityOrAuthorityMutation(t *testing.T)
 		}},
 		{name: "require_tool_escalation", change: func(r *model.Request) { r.RequireToolCall = true }},
 		{name: "negative_output_budget", change: func(r *model.Request) { r.MaxOutputTokens = -1 }},
+		{name: "increase_frozen_output_budget", change: func(r *model.Request) { r.MaxOutputTokens = 81 }},
+		{name: "remove_frozen_output_budget", change: func(r *model.Request) { r.MaxOutputTokens = 0 }},
 		{name: "message_rewrite_without_preparer", change: func(r *model.Request) { r.Messages[0].Content = model.TextParts("new message") }},
 		{name: "tool_presentation_post_intent", change: func(r *model.Request) { r.Tools[0].Description = "not frozen" }},
 	} {
@@ -76,6 +78,7 @@ func TestModelDispatchRejectsPostIntentIdentityOrAuthorityMutation(t *testing.T)
 			}
 			request := startRequest("dispatch-guard-"+test.name, "request-"+test.name, "complete", manifestToolKey)
 			request.Model = "sealed-model"
+			request.MaxModelOutputTokens = 80
 			request.ModelOptions = json.RawMessage(`{"temperature":0.3}`)
 			finished, err := runner.StartRun(t.Context(), request)
 			if !errors.Is(err, agent.ErrInvalidRequest) || len(provider.callsCopy()) != 0 {
@@ -109,6 +112,7 @@ func TestModelDispatchAllowsOnlyBoundedBudgetAdjustments(t *testing.T) {
 	}
 	request := startRequest("dispatch-allow-budget", "request-allow-budget", "complete", manifestToolKey)
 	request.Model = "sealed-model"
+	request.MaxModelOutputTokens = 64
 	completed, err := runner.StartRun(t.Context(), request)
 	calls := provider.callsCopy()
 	if err != nil || len(calls) != 1 || calls[0].Model != request.Model || calls[0].MaxOutputTokens != 32 || calls[0].HostedToolCallLimit == nil || *calls[0].HostedToolCallLimit != 0 || completed.Run.ID == "" {

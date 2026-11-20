@@ -27,7 +27,12 @@ func samplingCloneFixture() SamplingPlan {
 		ToolCalls:      []tools.Call{{ID: "call", ToolKey: "tool", Arguments: raw()}},
 	}
 	message.Content = append(message.Content, model.ContentPart{Kind: model.ContentImage, Source: &model.MediaSource{Kind: model.MediaSourceURL, URL: "https://example.invalid/original"}, CacheControl: &model.CacheControl{Type: "ephemeral"}})
-	checkpoint := runtimecontext.Checkpoint{Window: runtimecontext.Window{Entries: []runtimecontext.Entry{{ID: "entry", Message: message}}},
+	checkpoint := runtimecontext.Checkpoint{Window: runtimecontext.Window{Entries: []runtimecontext.Entry{{ID: "entry", Message: message}}, WorkingState: &runtimecontext.WorkingState{
+		Version: 1, Source: runtimecontext.WorkingStateSource{CheckpointID: "source-checkpoint"}, Goal: "original goal",
+		Constraints: []string{"constraint"}, Completed: []string{"completed"}, Pending: []string{"pending"},
+		Decisions: []string{"decision"}, EvidenceRefs: []string{"evidence"},
+		Derivation: &runtimecontext.WorkingStateDerivation{Kind: "model_summary", RunID: "original-run"},
+	}},
 		ArtifactIDs: []string{"artifact"}, Trace: runtimecontext.Trace{LastAssessment: &runtimecontext.Assessment{HardInputTokens: 100}}}
 	return SamplingPlan{
 		Source: kernel.Snapshot{Run: kernel.Run{ID: "run", DeadlineAt: &now, EndedAt: &now}, State: raw(),
@@ -79,10 +84,33 @@ func TestSamplingTypedCopiesPreserveFactsAndIsolate(t *testing.T) {
 			p.Checkpoint.Trace.LastAssessment.HardInputTokens = 0
 		}},
 		{"cursor", func(p *SamplingPlan) { p.Cursor.Checkpoint.Window.Entries[0].Message.ProviderReplay.Data[0] = '!' }},
+		{"checkpoint working-state identity", func(p *SamplingPlan) {
+			p.Checkpoint.Window.WorkingState.Version = 2
+			p.Checkpoint.Window.WorkingState.Source.CheckpointID = "foreign"
+			p.Checkpoint.Window.WorkingState.Goal = "foreign"
+		}},
+		{"checkpoint working-state constraints", func(p *SamplingPlan) { p.Checkpoint.Window.WorkingState.Constraints[0] = "foreign" }},
+		{"checkpoint working-state completed", func(p *SamplingPlan) { p.Checkpoint.Window.WorkingState.Completed[0] = "foreign" }},
+		{"checkpoint working-state pending", func(p *SamplingPlan) { p.Checkpoint.Window.WorkingState.Pending[0] = "foreign" }},
+		{"checkpoint working-state decisions", func(p *SamplingPlan) { p.Checkpoint.Window.WorkingState.Decisions[0] = "foreign" }},
+		{"checkpoint working-state evidence", func(p *SamplingPlan) { p.Checkpoint.Window.WorkingState.EvidenceRefs[0] = "foreign" }},
+		{"cursor working-state identity", func(p *SamplingPlan) {
+			p.Cursor.Checkpoint.Window.WorkingState.Version = 2
+			p.Cursor.Checkpoint.Window.WorkingState.Source.CheckpointID = "foreign"
+			p.Cursor.Checkpoint.Window.WorkingState.Goal = "foreign"
+		}},
+		{"cursor working-state constraints", func(p *SamplingPlan) { p.Cursor.Checkpoint.Window.WorkingState.Constraints[0] = "foreign" }},
+		{"cursor working-state completed", func(p *SamplingPlan) { p.Cursor.Checkpoint.Window.WorkingState.Completed[0] = "foreign" }},
+		{"cursor working-state pending", func(p *SamplingPlan) { p.Cursor.Checkpoint.Window.WorkingState.Pending[0] = "foreign" }},
+		{"cursor working-state decisions", func(p *SamplingPlan) { p.Cursor.Checkpoint.Window.WorkingState.Decisions[0] = "foreign" }},
+		{"cursor working-state evidence", func(p *SamplingPlan) { p.Cursor.Checkpoint.Window.WorkingState.EvidenceRefs[0] = "foreign" }},
+		{"checkpoint working-state derivation", func(p *SamplingPlan) { p.Checkpoint.Window.WorkingState.Derivation.RunID = "foreign" }},
+		{"cursor working-state derivation", func(p *SamplingPlan) { p.Cursor.Checkpoint.Window.WorkingState.Derivation.RunID = "foreign" }},
 		{"guidance", func(p *SamplingPlan) { p.Guidance[0].Content[0].Text = "changed" }},
 		{"data", func(p *SamplingPlan) { p.Data[0] = '!' }},
 	} {
 		t.Run(mutate.name, func(t *testing.T) {
+			original := samplingCloneFixture()
 			before := samplingCloneFixture()
 			got := cloneSamplingPlan(original)
 			if !reflect.DeepEqual(got, original) {
@@ -108,6 +136,9 @@ func TestSamplingTypedCopiesPreserveFactsAndIsolate(t *testing.T) {
 			plan.Guidance = []model.Message{}
 			plan.Cursor.Checkpoint.ArtifactIDs = []string{}
 			plan.Cursor.Checkpoint.Window.Entries = []runtimecontext.Entry{}
+			plan.Cursor.Checkpoint.Window.WorkingState = &runtimecontext.WorkingState{
+				Constraints: []string{}, Completed: []string{}, Pending: []string{}, Decisions: []string{}, EvidenceRefs: []string{},
+			}
 			result.Artifacts = []runtimecontext.Artifact{}
 		}
 		plan.Request = request
@@ -125,6 +156,86 @@ func TestSamplingTypedCopiesPreserveFactsAndIsolate(t *testing.T) {
 	copied.Artifacts[0].ContentJSON[0] = '!'
 	if result.Request.HostedTools[0].Target[0] != '{' || result.Artifacts[0].ContentJSON[0] != '{' {
 		t.Fatal("evaluation aliases port result")
+	}
+}
+
+type samplingWorkingStateMutationPorts struct {
+	samplingTestPorts
+	retained SamplingPlan
+}
+
+func (p *samplingWorkingStateMutationPorts) PlanSampling(_ context.Context, r model.Request, source kernel.Snapshot) (SamplingPlan, error) {
+	plan := *p.plan // Deliberately return retained pointers; Runtime must own its copies.
+	plan.Source, plan.Request = source, r
+	p.retained = plan
+	return plan, nil
+}
+
+func (p *samplingWorkingStateMutationPorts) EvaluateSampling(_ context.Context, plan SamplingPlan, r model.Request, w runtimecontext.Window, _ bool) (SamplingEvaluation, error) {
+	plan.Checkpoint.Window.WorkingState.Pending[0] = "mutated evaluation plan"
+	plan.Cursor.Checkpoint.Window.WorkingState.Decisions[0] = "mutated evaluation cursor"
+	w.WorkingState.EvidenceRefs[0] = "mutated evaluation window"
+	// A port may also retain and later mutate its own PlanSampling return value.
+	p.retained.Checkpoint.Window.WorkingState.Goal = "mutated retained result"
+	p.retained.Cursor.Checkpoint.Window.WorkingState.Constraints[0] = "mutated retained cursor"
+	return SamplingEvaluation{Request: r, Assessment: runtimecontext.Assessment{
+		HardInputTokens: 100, SoftInputTokens: 80, AdjustedTokenEstimate: 10, HardTokenEstimate: 10, SerializedBytes: 10,
+	}}, nil
+}
+
+func TestSamplingPreparationOwnsWorkingStateAcrossPortReturns(t *testing.T) {
+	manager := runtimecontext.NewManager(runtimecontext.Dependencies{})
+	open := runtimecontext.OpenRequest{ScopeID: "scope", StaticFingerprint: "static", SourcePath: []string{"source"}, Entries: []runtimecontext.Entry{{
+		ID: "entry", SourceID: "source", Message: model.Message{Role: model.RoleUser, Content: model.TextParts("current request")},
+	}}}
+	previous, err := manager.Open(t.Context(), open)
+	if err != nil {
+		t.Fatal(err)
+	}
+	open.Previous, open.WorkingState = &previous, &runtimecontext.WorkingState{
+		Version: 1, Source: runtimecontext.WorkingStateSource{CheckpointID: previous.ID, ContentHash: previous.ContentHash,
+			CoveredThroughSourceID: previous.CoveredThroughSourceID, CoveredPathHash: previous.CoveredPathHash},
+		Goal: "original goal", Constraints: []string{"constraint"}, Completed: []string{"completed"}, Pending: []string{"pending"},
+		Decisions: []string{"decision"}, EvidenceRefs: []string{"evidence"},
+	}
+	previous, err = manager.Open(t.Context(), open)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous, err = manager.BindModelWindow(t.Context(), previous, "window")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 11, 20, 0, 0, 0, 0, time.UTC)
+	plan := SamplingPlan{Checkpoint: &previous, Owner: true, WindowFingerprint: "window", Cursor: SamplingCursor{
+		Checkpoint: previous, ExpectedTurnCheckpointID: previous.ID, ExpectedHeadCheckpointID: previous.ID, UpdatedAt: now,
+		Turn: SamplingTurn{ID: "turn", Revision: 1, ContextCheckpointID: previous.ID, ContextRef: samplingRef(previous)},
+	}}
+	ports := &samplingWorkingStateMutationPorts{samplingTestPorts: samplingTestPorts{plan: &plan}}
+	adapter, err := NewSamplingBoundedContextAdapter(manager, ports)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chain, err := plugin.NewRunChain(adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := callbackscope.New(callbackscope.Binding{RunID: "run", GrantID: "original"}, []any{adapter})
+	runner := &Runner{contextPreparation: adapter, rootCallbacks: &rootCallbackState{}}
+	request := model.CloneRequest(model.Request{RunID: "run", Messages: runtimecontext.Materialize(previous.Window)})
+	source := kernel.Snapshot{Run: kernel.Run{ID: "run", Revision: 1}}
+	_, err = chain.Invoke(callbackscope.Bind(t.Context(), scope), plugin.RunInvocation{RunID: "run", Operation: plugin.RunStart}, func(ctx context.Context) (kernel.Snapshot, error) {
+		got, prepareErr := runner.prepareSelectedContext(ctx, source, request)
+		if prepareErr == nil && !reflect.DeepEqual(got, request) {
+			t.Fatal("port mutation changed the frozen model-visible WorkingState")
+		}
+		return source, prepareErr
+	})
+	if err != nil || !scope.Complete() || runner.rootCallbacks.unknown.Load() {
+		t.Fatalf("port-owned WorkingState aliased the Runtime plan: %v", err)
+	}
+	if ports.retained.Checkpoint.Window.WorkingState.Goal != "mutated retained result" || len(ports.commits) != 0 {
+		t.Fatal("test did not mutate its retained plan or Capture rebuilt the original checkpoint")
 	}
 }
 

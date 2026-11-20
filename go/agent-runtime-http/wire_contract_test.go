@@ -106,6 +106,29 @@ func TestOpenAPIRunSnapshotAllowsHostKind(t *testing.T) {
 	}
 }
 
+func TestOpenAPIStartAgentRunOutputCeiling(t *testing.T) {
+	validator := wireSchema(t, "StartAgentRunRequest")
+	for _, test := range []struct {
+		name  string
+		field string
+		valid bool
+	}{
+		{name: "omitted", valid: true},
+		{name: "zero", field: `,"maxModelOutputTokens":0`, valid: true},
+		{name: "bounded", field: `,"maxModelOutputTokens":1024`, valid: true},
+		{name: "negative", field: `,"maxModelOutputTokens":-1`},
+		{name: "fractional", field: `,"maxModelOutputTokens":1.5`},
+		{name: "cumulative field is not a response ceiling", field: `,"maxOutputTokens":1024`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			raw := []byte(`{"thread":{"kind":"conversation","id":"thread"},"input":{"content":"Answer"}` + test.field + `}`)
+			if err := validator.Validate(raw); (err == nil) != test.valid {
+				t.Fatalf("valid=%v err=%v", test.valid, err)
+			}
+		})
+	}
+}
+
 func wireFixtureBodies(t *testing.T) map[string]any {
 	t.Helper()
 	created := time.Date(2026, time.September, 21, 0, 0, 0, 0, time.UTC)

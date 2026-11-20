@@ -50,6 +50,9 @@ type SessionClient struct {
 	thread     kernel.ThreadRef
 	config     ConfigSnapshot
 	transcript TranscriptSource
+	// agentSessionOnly restricts execution through OpenAgentSession to its
+	// supported composition, including when reopening older admitted Turns.
+	agentSessionOnly bool
 }
 
 // OpenSession prepares a short Prompt/Load/Refresh/Resume API for text conversations.
@@ -57,6 +60,7 @@ type SessionClient struct {
 // existing Turns. Prompt requires it; recovery uses committed Context instead.
 // Advanced Agent and SubAgent composition uses Runner.StartAgentTurn and Runner.Delegate explicitly.
 func (runner *Runner) OpenSession(options SessionOptions) (*SessionClient, error) {
+	options.Config.ContextBase = nil
 	if runner == nil || runner.store == nil || runner.context == nil ||
 		!validActor(options.Actor) || strings.TrimSpace(options.Thread.Kind) == "" ||
 		strings.TrimSpace(options.Thread.ID) == "" {
@@ -156,6 +160,28 @@ func (session *SessionClient) LoadState(ctx context.Context, turnID string) (Sta
 	return state, nil
 }
 
+// ResolveContextSourceBoundaryForPath obtains the exact source-aligned base
+// that a complete Host ancestry would select. ExistingTurnID supplies this
+// Session's frozen Actor/Thread proof; it need not be the selected source Turn.
+// This read does not load Host message bodies, mutate Context or execute a model.
+func (session *SessionClient) ResolveContextSourceBoundaryForPath(ctx context.Context, existingTurnID, instructions string, sourcePath []string) (ContextSourceBoundary, error) {
+	if !utf8.ValidString(instructions) || jsoncontract.ValidateCanonicalUTF8(sourcePath) != nil {
+		return ContextSourceBoundary{}, ErrInvalidRequest
+	}
+	id, err := session.authorizedTurnID(ctx, existingTurnID)
+	if err != nil {
+		return ContextSourceBoundary{}, err
+	}
+	boundary, err := session.runner.ResolveContextSourceBoundaryForPath(ctx, session.hostThread, session.config, instructions, sourcePath)
+	if err != nil {
+		return ContextSourceBoundary{}, err
+	}
+	if err := session.requireFrozenTurnOwner(ctx, id); err != nil {
+		return ContextSourceBoundary{}, err
+	}
+	return boundary, nil
+}
+
 // Timeline reads one page of the committed Turn Item history.
 func (session *SessionClient) Timeline(ctx context.Context, turnID string, afterSeq uint64, limit int) ([]Item, error) {
 	id, err := session.authorizedTurnID(ctx, turnID)
@@ -191,6 +217,11 @@ func (session *SessionClient) Resume(ctx context.Context, turnID string) (Snapsh
 	id, err := session.authorizedTurnID(ctx, turnID)
 	if err != nil {
 		return Snapshot{}, err
+	}
+	if session.agentSessionOnly {
+		if err := session.preflightAgentSessionResume(ctx, id); err != nil {
+			return Snapshot{}, err
+		}
 	}
 	value, resumeErr := session.runner.resumeTurnForSession(ctx, id, session.actor, session.thread)
 	return session.verifySnapshot(id, value, resumeErr)

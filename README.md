@@ -89,6 +89,17 @@ snapshot, err := runner.StartRun(ctx, agent.StartRequest{
 A Kernel `Create` call only persists a Run; `agent.Runner` executes the model and
 Tool loop. See the [complete quickstart](go/agent-runtime/examples/quickstart/main.go).
 
+For local Tools, bounded Context and stable Host Turn IDs, use
+`harness.OpenAgentSession` and the [Agent Session guide](docs/agent-session.md):
+
+```bash
+go run ./go/agent-runtime-harness/examples/agent-session
+```
+
+It composes the existing loop and requires a frozen per-model-call output
+ceiling plus an explicit model-window resolver. Tools are selected by the
+frozen Config, and scoped archive reads require an explicit Tool grant.
+
 For stable Host Turn IDs and a simple text conversation, run the separate
 [small Session example](go/agent-runtime-harness/examples/session/README.md):
 

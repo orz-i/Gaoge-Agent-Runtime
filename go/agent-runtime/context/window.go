@@ -102,7 +102,7 @@ func (manager *Manager) CompactToolPressure(
 		return ToolPressureCompaction{}, ErrBudgetExceeded
 	}
 
-	instructions, body := splitWindowInstructions(previous.Window.Instructions, messages)
+	instructions, body := splitWindowProjection(previous.Window, messages)
 	if !validToolTranscriptMessages(body) {
 		return ToolPressureCompaction{}, ErrLineageConflict
 	}
@@ -121,7 +121,7 @@ func (manager *Manager) CompactToolPressure(
 		})
 	}
 	return ToolPressureCompaction{
-		Window:    Window{Instructions: instructions, Entries: entries},
+		Window:    Window{Instructions: instructions, Entries: entries, WorkingState: CloneWorkingState(previous.Window.WorkingState)},
 		Artifacts: CloneArtifacts(artifacts), CompactedResults: len(artifacts),
 	}, nil
 }
@@ -341,8 +341,9 @@ func validUTF8Suffix(value string, maxBytes int) string {
 // Window is the exact active model history for one checkpoint generation.
 // Instructions are materialized as the first system message and remain stable until an explicit rollover.
 type Window struct {
-	Instructions string  `json:"instructions,omitempty"`
-	Entries      []Entry `json:"entries"`
+	Instructions string        `json:"instructions,omitempty"`
+	Entries      []Entry       `json:"entries"`
+	WorkingState *WorkingState `json:"workingState,omitempty"`
 }
 
 // Policy is server-owned Context Window policy. MaxInputTokens is an optional service ceiling;
@@ -445,6 +446,7 @@ type OpenRequest struct {
 	SourceDelta        bool
 	ResetCacheIdentity bool
 	Previous           *Checkpoint
+	WorkingState       *WorkingState
 }
 
 // CaptureRequest seals one actual model request after verifying that it extends the current
@@ -516,6 +518,8 @@ type TokenCountRequest struct {
 }
 
 // TokenCounter counts one complete routed model request with provider/model awareness.
+// It measures input only; it must not generate model output or perform business
+// effects. Recovery may repeat a count whose original callback did not return.
 type TokenCounter interface {
 	Count(stdcontext.Context, TokenCountRequest) (int64, error)
 }
@@ -568,6 +572,48 @@ func (manager *Manager) Open(_ stdcontext.Context, request OpenRequest) (Checkpo
 	if err != nil {
 		return Checkpoint{}, err
 	}
+	// Explicit Host updates cannot impersonate a Runtime-generated summary.
+	// Nil carry keeps the already-committed provenance; Runtime installation
+	// uses the explicit, validated rollover boundary.
+	if normalized.WorkingState != nil && normalized.WorkingState.Derivation != nil {
+		return Checkpoint{}, ErrInvalidInput
+	}
+	if normalized.Previous == nil {
+		if normalized.WorkingState != nil {
+			return Checkpoint{}, ErrLineageConflict
+		}
+		return manager.openNormalized(normalized)
+	}
+	previous := CloneCheckpoint(*normalized.Previous)
+	if !ValidCheckpoint(previous) {
+		return Checkpoint{}, ErrInvalidInput
+	}
+	canCarry := openCanCarryWorkingState(previous, normalized)
+	state := (*WorkingState)(nil)
+	if canCarry {
+		state = CloneWorkingState(previous.Window.WorkingState)
+	}
+	if normalized.WorkingState != nil {
+		if !canCarry {
+			return Checkpoint{}, ErrLineageConflict
+		}
+		if err := validateWorkingStateUpdate(normalized.WorkingState, previous); err != nil {
+			return Checkpoint{}, err
+		}
+		state = normalized.WorkingState
+	}
+	next, err := manager.openNormalized(normalized)
+	if err != nil {
+		return Checkpoint{}, err
+	}
+	if canCarry && (state != nil || previous.Window.WorkingState != nil) {
+		next.ArtifactIDs = sortedUniqueStrings(append(append([]string(nil), previous.ArtifactIDs...), next.ArtifactIDs...))
+		next.Trace.ArtifactCount = len(next.ArtifactIDs)
+	}
+	return applyOpenWorkingState(previous, next, state, normalized.WorkingState != nil), nil
+}
+
+func (manager *Manager) openNormalized(normalized OpenRequest) (Checkpoint, error) {
 	if normalized.Previous == nil {
 		if normalized.SourceDelta {
 			return Checkpoint{}, ErrInvalidInput
@@ -766,6 +812,20 @@ func (manager *Manager) Rollover(_ stdcontext.Context, request RolloverRequest) 
 	if !ValidCheckpoint(previous) || reason == "" || len(window.Entries) == 0 {
 		return Checkpoint{}, ErrInvalidInput
 	}
+	if err := ValidateWorkingState(window.WorkingState); err != nil {
+		return Checkpoint{}, err
+	}
+	if window.WorkingState == nil {
+		if window.Instructions == previous.Window.Instructions {
+			window.WorkingState = CloneWorkingState(previous.Window.WorkingState)
+		}
+	} else if window.Instructions != previous.Window.Instructions {
+		return Checkpoint{}, ErrLineageConflict
+	} else if !sameWorkingState(window.WorkingState, previous.Window.WorkingState) {
+		if err := validateWorkingStateUpdate(window.WorkingState, previous); err != nil {
+			return Checkpoint{}, err
+		}
+	}
 	artifacts := CloneArtifacts(request.Artifacts)
 	for index := range artifacts {
 		if err := normalizeArtifact(&artifacts[index], previous.ScopeID, previous.Generation+1); err != nil {
@@ -788,6 +848,9 @@ func (manager *Manager) Rollover(_ stdcontext.Context, request RolloverRequest) 
 			ActiveEntryCount: len(window.Entries), CompactedEntryCount: maxInt(len(previous.Window.Entries)-len(window.Entries), 0),
 			ArtifactCount: len(artifactIDs), LastAssessment: cloneAssessment(request.Assessment),
 		},
+	}
+	if !sameWorkingState(previous.Window.WorkingState, window.WorkingState) {
+		next.CacheIdentity = resetCacheIdentity(previous, next.StaticFingerprint, next.LineageHash, next.Generation)
 	}
 	next.ContentHash = windowHash(next.Window)
 	next.ID = checkpointID(next)
@@ -846,6 +909,16 @@ func (manager *Manager) AssessModelRequest(
 	if err != nil {
 		return Assessment{}, err
 	}
+	// Canonical JSON may shorten RawMessage numbers. Every counting mode,
+	// including an absent or unrouted counter, must bound the typed request
+	// that Generate sees rather than authorize those discarded bytes.
+	exactPayload, marshalErr := model.MarshalRequestForInputCount(request)
+	if marshalErr != nil {
+		return Assessment{}, errors.Join(ErrInvalidInput, marshalErr)
+	}
+	if len(exactPayload) > len(serialized) {
+		serialized = exactPayload
+	}
 	soft := hard * int64(policy.SoftLimitPercent) / 100
 	if soft < 1 {
 		soft = 1
@@ -864,18 +937,6 @@ func (manager *Manager) AssessModelRequest(
 		// with their original key order. Counting must preserve exactly the
 		// same typed request bytes that Generate sees, or a valid replay is
 		// spuriously rejected before the native endpoint is reached.
-		exactPayload, marshalErr := model.MarshalRequestForInputCount(request)
-		if marshalErr != nil {
-			return Assessment{}, errors.Join(ErrInvalidInput, marshalErr)
-		}
-		// If counting fails, the conservative text-only fallback must
-		// charge at least the original typed request size. Canonicalizing
-		// arbitrary JSON number spellings can shorten them drastically;
-		// never reduce the hard-byte bound by that normalization.
-		if len(exactPayload) > len(serialized) {
-			serialized = exactPayload
-			assessment.SerializedBytes = int64(len(exactPayload))
-		}
 		countRequest := TokenCountRequest{
 			Context: countContext,
 			Payload: exactPayload,
@@ -927,7 +988,7 @@ func (manager *Manager) CompactPortable(request PortableCompactionRequest) (Port
 		return PortableCompaction{}, ErrLineageConflict
 	}
 
-	instructions, body := splitWindowInstructions(previous.Window.Instructions, messages)
+	instructions, body := splitWindowProjection(previous.Window, messages)
 	split := portableCompactionSplit(body, policy.PreserveRecentTurns)
 	if split <= 0 || split >= len(body) {
 		return PortableCompaction{}, ErrBudgetExceeded
@@ -983,7 +1044,7 @@ func (manager *Manager) CompactPortable(request PortableCompactionRequest) (Port
 		entries = append(entries, entry)
 	}
 	return PortableCompaction{
-		Window:    Window{Instructions: instructions, Entries: entries},
+		Window:    Window{Instructions: instructions, Entries: entries, WorkingState: CloneWorkingState(previous.Window.WorkingState)},
 		Artifacts: artifacts, RemovedMessages: len(removed),
 	}, nil
 }
@@ -1022,9 +1083,15 @@ func WithinHardBudget(assessment Assessment, policy Policy) bool {
 
 func Materialize(window Window) []model.Message {
 	window = normalizeWindow(window)
+	if ValidateWorkingState(window.WorkingState) != nil {
+		return nil
+	}
 	result := make([]model.Message, 0, len(window.Entries)+1)
 	if window.Instructions != "" {
 		result = append(result, model.Message{Role: model.RoleSystem, Content: model.TextParts(window.Instructions)})
+	}
+	if window.WorkingState != nil {
+		result = append(result, workingStateMessage(window.WorkingState))
 	}
 	for _, entry := range window.Entries {
 		result = append(result, cloneMessage(entry.Message))
@@ -1130,7 +1197,8 @@ func ValidCheckpoint(value Checkpoint) bool {
 		strings.TrimSpace(value.ContentHash) == "" || len(value.Window.Entries) == 0 {
 		return false
 	}
-	return value.ContentHash == windowHash(value.Window) && value.ID == checkpointID(value)
+	return ValidateWorkingState(value.Window.WorkingState) == nil &&
+		value.ContentHash == windowHash(value.Window) && value.ID == checkpointID(value)
 }
 
 func CloneCheckpoint(value Checkpoint) Checkpoint {
@@ -1142,6 +1210,7 @@ func CloneCheckpoint(value Checkpoint) Checkpoint {
 
 func CloneWindow(value Window) Window {
 	value.Entries = CloneEntries(value.Entries)
+	value.WorkingState = CloneWorkingState(value.WorkingState)
 	return value
 }
 
@@ -1166,6 +1235,10 @@ func normalizeOpenRequest(request OpenRequest) (OpenRequest, error) {
 	if jsoncontract.ValidateCanonicalUTF8(request) != nil {
 		return OpenRequest{}, ErrInvalidInput
 	}
+	if err := ValidateWorkingState(request.WorkingState); err != nil {
+		return OpenRequest{}, err
+	}
+	request.WorkingState = CloneWorkingState(request.WorkingState)
 	request.ScopeID = strings.TrimSpace(request.ScopeID)
 	request.StaticFingerprint = strings.TrimSpace(request.StaticFingerprint)
 	request.Instructions = strings.TrimSpace(request.Instructions)
@@ -1255,6 +1328,9 @@ func checkpointID(value Checkpoint) string {
 }
 
 func windowHash(window Window) string {
+	if ValidateWorkingState(window.WorkingState) != nil {
+		return ""
+	}
 	encoded, err := canonicalJSON(normalizeWindow(window))
 	if err != nil {
 		return ""
@@ -1281,6 +1357,7 @@ func normalizeEntry(value Entry) Entry {
 func normalizeWindow(value Window) Window {
 	value.Instructions = strings.TrimSpace(value.Instructions)
 	value.Entries = CloneEntries(value.Entries)
+	value.WorkingState = CloneWorkingState(value.WorkingState)
 	for index := range value.Entries {
 		value.Entries[index] = normalizeEntry(value.Entries[index])
 	}

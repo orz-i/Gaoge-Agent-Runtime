@@ -127,7 +127,9 @@ func TestRealPostgresRedisOrphanRunLoadKeepsProtectedJobUntilRecovery(t *testing
 		Queue: continuation.QueueName, ClientJobID: "orphan:" + id,
 		Kind: continuation.JobKind, Payload: encoded,
 		Policy: queuecore.Policy{RequireTerminalFence: true, MaxAttempts: 1,
-			VisibilityTimeout: 250 * time.Millisecond, InitialBackoff: 30 * time.Millisecond,
+			// This fixture exercises a missing-Run NACK and reconstruction, not
+			// lease expiry. Leave enough time for real PostgreSQL work under race.
+			VisibilityTimeout: 5 * time.Second, InitialBackoff: 30 * time.Millisecond,
 			MaxBackoff: 30 * time.Millisecond},
 	})
 	if err != nil {
@@ -140,9 +142,14 @@ func TestRealPostgresRedisOrphanRunLoadKeepsProtectedJobUntilRecovery(t *testing
 		t.Fatal(err)
 	}
 	workerError := make(chan error, 8)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
 	firstWorker, err := continuation.NewWorker(queue, dispatcher, continuation.WorkerOptions{
 		WorkerID: "first-hosted-worker", ClaimLimit: 1, PollInterval: 30 * time.Millisecond,
 		Report: func(e error) {
+			// Reporting follows the committed NACK. Stop this worker before
+			// its next poll so reconstruction owns the second delivery.
+			cancel()
 			select {
 			case workerError <- e:
 			default:
@@ -152,7 +159,6 @@ func TestRealPostgresRedisOrphanRunLoadKeepsProtectedJobUntilRecovery(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithCancel(t.Context())
 	if err = firstWorker.Start(ctx); err != nil {
 		t.Fatal(err)
 	}

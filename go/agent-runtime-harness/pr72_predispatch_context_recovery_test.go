@@ -21,11 +21,15 @@ var errPR72TransientContextRead = errors.New("audit: transient Context Store rea
 type pr72ReplayContextReadStore struct {
 	harness.Store
 	reads   atomic.Int32
+	armed   atomic.Bool
 	entered chan struct{}
 	release chan struct{}
 }
 
-func (s *pr72ReplayContextReadStore) GetActiveContextCheckpoint(ctx context.Context, scope string) (runtimecontext.Checkpoint, error) {
+func (s *pr72ReplayContextReadStore) GetContextCheckpoint(ctx context.Context, id string) (runtimecontext.Checkpoint, error) {
+	if !s.armed.Load() {
+		return s.Store.GetContextCheckpoint(ctx, id)
+	}
 	switch s.reads.Add(1) {
 	case 1:
 		close(s.entered)
@@ -33,7 +37,7 @@ func (s *pr72ReplayContextReadStore) GetActiveContextCheckpoint(ctx context.Cont
 	case 2:
 		return runtimecontext.Checkpoint{}, errPR72TransientContextRead
 	}
-	return s.Store.GetActiveContextCheckpoint(ctx, scope)
+	return s.Store.GetContextCheckpoint(ctx, id)
 }
 func TestPR72DirectStartContextReplayReadFailureCannotTerminalizeOriginal(t *testing.T) {
 	rt, err := kernel.New(kernel.Dependencies{Store: memory.NewStore(), Clock: fixedClock{}})
@@ -55,7 +59,9 @@ func TestPR72DirectStartContextReplayReadFailureCannotTerminalizeOriginal(t *tes
 		t.Fatal(err)
 	}
 	request := testStartRequest()
-	request.Context = contextSeed("frozen instructions", contextEntry("pr72-current", "pr72-turn", model.RoleUser, "answer directly", true))
+	base := pr72PrepareContextSource(t, runner, request, "frozen instructions")
+	store.armed.Store(true)
+	request.Context = contextSeed("frozen instructions", base, contextEntry("pr72-current", "pr72-turn", model.RoleUser, "answer directly", true))
 	type outcome struct {
 		snapshot harness.Snapshot
 		err      error
@@ -68,7 +74,7 @@ func TestPR72DirectStartContextReplayReadFailureCannotTerminalizeOriginal(t *tes
 	select {
 	case <-store.entered:
 	case <-time.After(5 * time.Second):
-		t.Fatal("original Start never reached Context preflight")
+		t.Fatal("original Start never reached its frozen Context base read")
 	}
 	_, replayErr := runner.StartAgentTurn(t.Context(), request)
 	if !errors.Is(replayErr, errPR72TransientContextRead) {
@@ -102,14 +108,15 @@ func TestPR72DirectStartContextReplayReadFailureCannotTerminalizeOriginal(t *tes
 
 type pr72FirstContextReadFailsStore struct {
 	harness.Store
-	once atomic.Bool
+	once  atomic.Bool
+	armed atomic.Bool
 }
 
-func (s *pr72FirstContextReadFailsStore) GetActiveContextCheckpoint(ctx context.Context, scope string) (runtimecontext.Checkpoint, error) {
-	if s.once.CompareAndSwap(false, true) {
+func (s *pr72FirstContextReadFailsStore) GetContextCheckpoint(ctx context.Context, id string) (runtimecontext.Checkpoint, error) {
+	if s.armed.Load() && s.once.CompareAndSwap(false, true) {
 		return runtimecontext.Checkpoint{}, errPR72TransientContextRead
 	}
-	return s.Store.GetActiveContextCheckpoint(ctx, scope)
+	return s.Store.GetContextCheckpoint(ctx, id)
 }
 func TestPR72OriginalContextReadFailureLeavesRetryableAdmission(t *testing.T) {
 	rt, err := kernel.New(kernel.Dependencies{Store: memory.NewStore(), Clock: fixedClock{}})
@@ -121,12 +128,15 @@ func TestPR72OriginalContextReadFailureLeavesRetryableAdmission(t *testing.T) {
 		t.Fatal(err)
 	}
 	backing := harness.NewMemoryStore()
-	runner, err := harness.NewRunner(harness.Dependencies{Runtime: rt, Agent: direct, Store: &pr72FirstContextReadFailsStore{Store: backing}, Clock: fixedClock{}, Context: runtimecontext.NewManager(runtimecontext.Dependencies{})})
+	store := &pr72FirstContextReadFailsStore{Store: backing}
+	runner, err := harness.NewRunner(harness.Dependencies{Runtime: rt, Agent: direct, Store: store, Clock: fixedClock{}, Context: runtimecontext.NewManager(runtimecontext.Dependencies{})})
 	if err != nil {
 		t.Fatal(err)
 	}
 	request := testStartRequest()
-	request.Context = contextSeed("instructions", contextEntry("pr72-newcurrent", "pr72-newturn", model.RoleUser, "answer directly", true))
+	base := pr72PrepareContextSource(t, runner, request, "instructions")
+	store.armed.Store(true)
+	request.Context = contextSeed("instructions", base, contextEntry("pr72-newcurrent", "pr72-newturn", model.RoleUser, "answer directly", true))
 	_, err = runner.StartAgentTurn(t.Context(), request)
 	if !errors.Is(err, errPR72TransientContextRead) {
 		t.Fatalf("failed to inject first Context read: %v", err)
@@ -147,4 +157,20 @@ func TestPR72OriginalContextReadFailureLeavesRetryableAdmission(t *testing.T) {
 	if err != nil || recovered.Turn.Status != harness.TurnCompleted {
 		t.Fatalf("idempotent new Start recovery failed: status=%s err=%v", recovered.Turn.Status, err)
 	}
+}
+
+// Context selection now precedes admission. Inject the original post-admission
+// fault at the frozen base read, keeping these recovery/terminalization tests
+// at their original physical boundary instead of failing an earlier preflight.
+func pr72PrepareContextSource(t *testing.T, runner *harness.Runner, request harness.StartRequest, instructions string) runtimecontext.Entry {
+	t.Helper()
+	base := contextEntry("pr72-source", "pr72-source", model.RoleUser, "prior source", false)
+	prior := request
+	prior.HostTurn.ID += "-source"
+	prior.Goal = "prior source"
+	prior.Context = contextSeed(instructions, base)
+	if result, err := runner.StartAgentTurn(t.Context(), prior); err != nil || result.Turn.Status != harness.TurnCompleted {
+		t.Fatalf("Context source setup failed: %v", err)
+	}
+	return base
 }

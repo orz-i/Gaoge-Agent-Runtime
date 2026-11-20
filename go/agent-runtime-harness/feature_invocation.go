@@ -25,6 +25,8 @@ func (runner *Runner) prepareTopLevelStartEnvelope(
 	request StartRequest,
 	root rootAdmission,
 ) (topLevelStartEnvelope, error) {
+	// This is derived execution input, not a Host-selected configuration knob.
+	request.Config.ContextBase = nil
 	request, sessionID, turnID, err := normalizeStartRequest(request)
 	if err != nil {
 		return topLevelStartEnvelope{}, err
@@ -38,7 +40,7 @@ func (runner *Runner) prepareTopLevelStartEnvelope(
 	if err != nil {
 		return topLevelStartEnvelope{}, err
 	}
-	config, err := SealConfigSnapshot(turnID, resolvedConfig, now)
+	config, err := runner.sealContextAdmission(ctx, sessionID, turnID, resolvedConfig, request.Context, now)
 	if err != nil {
 		return topLevelStartEnvelope{}, err
 	}
@@ -310,8 +312,10 @@ func (runner *Runner) startInvocationAttempt(
 			ID: invocation.ExecutionRefID, Actor: actor, Thread: thread,
 			RequestID: requestID, Goal: input.Goal, Model: config.Model,
 			ModelOptions: append(json.RawMessage(nil), config.ModelOptions...), ToolKeys: append([]string(nil), config.ToolKeys...),
-			RequiredToolKeys: append([]string(nil), input.RequiredToolKeys...),
-			InitialToolKeys:  append([]string(nil), input.InitialToolKeys...), Limits: config.Limits,
+			MaxModelOutputTokens: config.MaxModelOutputTokens,
+			WorkingStateSummary:  agent.CloneWorkingStateSummaryPolicy(config.WorkingStateSummary),
+			RequiredToolKeys:     append([]string(nil), input.RequiredToolKeys...),
+			InitialToolKeys:      append([]string(nil), input.InitialToolKeys...), Limits: config.Limits,
 		})
 	})
 }
@@ -446,6 +450,9 @@ func (runner *Runner) resumeInvocationExecution(
 		return kernel.Snapshot{}, err
 	}
 	if err = runner.requireFrozenAdmission(ctx, turn); err != nil {
+		return kernel.Snapshot{}, err
+	}
+	if err = runner.requireInvocationRootModelOutputCeiling(ctx, invocation); err != nil {
 		return kernel.Snapshot{}, err
 	}
 	scopeID := invocation.ID

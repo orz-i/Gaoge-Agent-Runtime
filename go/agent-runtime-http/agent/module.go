@@ -41,6 +41,8 @@ type StartRunRequest struct {
 	ClientRunID string                       `json:"clientRunID" binding:"omitempty,max=64"`
 	Model       string                       `json:"model" binding:"omitempty,max=128"`
 	ToolKeys    []string                     `json:"toolKeys" binding:"omitempty,max=128,dive,max=255"`
+	// MaxModelOutputTokens limits each model response, independently of Run usage.
+	MaxModelOutputTokens int64 `json:"maxModelOutputTokens,omitempty" binding:"gte=0"`
 }
 
 func (handler *Handler) StartRun(context *gin.Context) {
@@ -62,6 +64,7 @@ func (handler *Handler) StartRun(context *gin.Context) {
 		ID: strings.TrimSpace(request.ClientRunID), Actor: actor, Thread: runtimehttp.NormalizeThread(request.Thread),
 		RequestID: handler.shared.RequestID(context), Goal: strings.TrimSpace(request.Input.Content),
 		Model: strings.TrimSpace(request.Model), ToolKeys: append([]string(nil), request.ToolKeys...),
+		MaxModelOutputTokens: request.MaxModelOutputTokens,
 	})
 	if err != nil {
 		if errors.Is(err, agent.ErrInvalidRequest) {

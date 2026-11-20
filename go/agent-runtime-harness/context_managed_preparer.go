@@ -13,6 +13,8 @@ import (
 
 // ModelWindowResolver supplies the routed model's real window for an exact
 // sampling request. It must not invent a default; an unknown limit fails closed.
+// This is a read-only measurement dependency: it must not generate model output
+// or perform business effects. Recovery may repeat an unreturned resolution.
 type ModelWindowResolver func(context.Context, model.Request) (runtimecontext.ModelWindow, error)
 
 // NewManagedContextPreparer builds a pre-intent Context projection with

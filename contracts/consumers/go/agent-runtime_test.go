@@ -77,6 +77,16 @@ var (
 	_ continuation.ToolWaitResumer                        = (*agent.Runner)(nil)
 )
 
+var (
+	_                                                                                                     = agent.StartRequest{WorkingStateSummary: &agent.WorkingStateSummaryPolicy{MaxInputTokens: 8192, MaxSerializedBytes: 64 << 10}}
+	_ func(*agent.WorkingStateSummaryPolicy) error                                                        = agent.ValidateWorkingStateSummaryPolicy
+	_ func(*agent.WorkingStateSummaryPolicy) *agent.WorkingStateSummaryPolicy                             = agent.CloneWorkingStateSummaryPolicy
+	_ func(*agent.BoundedContextAdapter, agent.ContextSummaryPorts) (*agent.ContextSummaryAdapter, error) = agent.NewContextSummaryAdapter
+	_                                                                                                     = agent.ModelInvocationContextSummary
+	_                                                                                                     = agent.Dependencies{SummaryNativeRecovery: true}
+	_ func(*agent.Runner) bool                                                                            = (*agent.Runner).SupportsSummaryNativeRecovery
+)
+
 // A separately linked Host implements only the narrow, immutable first-party
 // AgentTask ownership proof. Missing methods must fail the external SDK build.
 // External clients can see a pending original child Grant but cannot create
@@ -129,7 +139,7 @@ type hostModel struct {
 
 func (host *hostModel) Generate(_ context.Context, request model.Request) (model.Response, error) {
 	host.calls++
-	if request.RunID != "consumer-run" || request.InvocationID == "" || len(request.Messages) == 0 {
+	if request.RunID != "consumer-run" || request.InvocationID == "" || len(request.Messages) == 0 || request.MaxOutputTokens != 1024 {
 		host.t.Fatalf("host did not receive durable model identity: %#v", request)
 	}
 	return model.Response{Content: "hello from the host"}, nil
@@ -149,6 +159,7 @@ func TestHostRunsAgentWithoutGaoge(t *testing.T) {
 	snapshot, err := runner.StartRun(ctx, agent.StartRequest{
 		ID: "consumer-run", Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"},
 		Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"}, Goal: "Say hello",
+		MaxModelOutputTokens: 1024,
 	})
 	if err != nil {
 		t.Fatal(err)

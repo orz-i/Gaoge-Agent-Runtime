@@ -7,6 +7,7 @@ import (
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
@@ -25,6 +26,13 @@ type boundedContextPorts struct {
 	store     Store
 	resolve   ModelWindowResolver
 	relations ContextRunRelationSource
+}
+
+// The native selector checks this private bridge's exact Go type before
+// reading its actual Store. A public marker alone grants no recovery proof.
+func (p boundedContextPorts) ContextSummaryRecoveryHost() kernel.ManagedRecoveryHostStore {
+	host, _ := p.store.(kernel.ManagedRecoveryHostStore)
+	return host
 }
 
 func (p boundedContextPorts) Hydrate(ctx context.Context, invocation plugin.RunInvocation) (context.Context, agent.BoundedContextHydration, error) {

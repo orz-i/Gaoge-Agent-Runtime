@@ -37,10 +37,14 @@ const rejectedModelResponseCode = "agent.model_response_rejected"
 // ErrorCode marks a known completed but unusable response; its usage is still
 // consumed exactly once, without executing any local Tools from that response.
 type ModelInvocation struct {
-	ID             string `json:"id"`
-	RunID          string `json:"runID"`
-	SourceRevision uint64 `json:"sourceRevision"`
-	RequestHash    string `json:"requestHash"`
+	ID             string                 `json:"id"`
+	RunID          string                 `json:"runID"`
+	SourceRevision uint64                 `json:"sourceRevision"`
+	RequestHash    string                 `json:"requestHash"`
+	Purpose        string                 `json:"purpose,omitempty"`
+	ContextSummary *ContextSummaryBinding `json:"contextSummary,omitempty"`
+	// SummaryTargetHash records the installed state, never a second receipt.
+	SummaryTargetHash string `json:"summaryTargetHash,omitempty"`
 	// CatalogFingerprints bind each model-visible Tool to its original Catalog
 	// definition. Request.Tools may have a narrower Host projection, but replay
 	// still rejects Catalog changes. Entry order matches Request.Tools.
@@ -113,17 +117,23 @@ func newModelInvocation(
 }
 
 func modelRequestHash(request model.Request, fingerprints []string, provider, bindingFingerprint string) (string, error) {
+	return modelInvocationRequestHash(request, fingerprints, provider, bindingFingerprint, "", nil)
+}
+
+func modelInvocationRequestHash(request model.Request, fingerprints []string, provider, bindingFingerprint, purpose string, summary *ContextSummaryBinding) (string, error) {
 	if err := model.ValidateRequestBinding(request); err != nil {
 		return "", errors.Join(ErrInvalidRequest, err)
 	}
 	request.InvocationID = ""
 	encoded, err := json.Marshal(struct {
-		Request             model.Request `json:"request"`
-		CatalogFingerprints []string      `json:"catalogFingerprints"`
-		Provider            string        `json:"provider"`
-		BindingFingerprint  string        `json:"bindingFingerprint"`
+		Request             model.Request          `json:"request"`
+		CatalogFingerprints []string               `json:"catalogFingerprints"`
+		Provider            string                 `json:"provider"`
+		BindingFingerprint  string                 `json:"bindingFingerprint"`
+		Purpose             string                 `json:"purpose,omitempty"`
+		ContextSummary      *ContextSummaryBinding `json:"contextSummary,omitempty"`
 	}{Request: model.CloneRequest(request), CatalogFingerprints: fingerprints,
-		Provider: provider, BindingFingerprint: bindingFingerprint})
+		Provider: provider, BindingFingerprint: bindingFingerprint, Purpose: purpose, ContextSummary: summary})
 	if err != nil {
 		return "", errors.Join(ErrInvalidRequest, err)
 	}
@@ -184,6 +194,7 @@ func cloneModelInvocations(values []ModelInvocation) []ModelInvocation {
 }
 
 func cloneModelInvocation(value ModelInvocation) ModelInvocation {
+	value.ContextSummary = cloneContextSummaryBinding(value.ContextSummary)
 	value.Request = model.CloneRequest(value.Request)
 	value.CatalogFingerprints = append([]string(nil), value.CatalogFingerprints...)
 	value.Response = model.CloneResponse(value.Response)
@@ -211,6 +222,9 @@ func validModelInvocations(values []ModelInvocation) bool {
 	active := 0
 	seenPhysical := make(map[[3]string]struct{})
 	for index, invocation := range values {
+		if !validContextSummaryInvocation(invocation) || !contextSummaryInputBytesWithinPolicy(invocation) {
+			return false
+		}
 		if strings.TrimSpace(invocation.ID) == "" || strings.TrimSpace(invocation.RunID) == "" ||
 			invocation.SourceRevision == 0 || len(invocation.RequestHash) != sha256.Size*2 ||
 			invocation.CreatedAt.IsZero() {
@@ -240,7 +254,7 @@ func validModelInvocations(values []ModelInvocation) bool {
 			if !validCatalogFingerprints(invocation.Request.Tools, invocation.CatalogFingerprints) {
 				return false
 			}
-			hash, err := modelRequestHash(invocation.Request, invocation.CatalogFingerprints, invocation.Provider, invocation.BindingFingerprint)
+			hash, err := modelInvocationRequestHash(invocation.Request, invocation.CatalogFingerprints, invocation.Provider, invocation.BindingFingerprint, invocation.Purpose, invocation.ContextSummary)
 			if err != nil || hash != invocation.RequestHash {
 				return false
 			}
@@ -260,7 +274,7 @@ func validModelInvocations(values []ModelInvocation) bool {
 			if !validCatalogFingerprints(invocation.Request.Tools, invocation.CatalogFingerprints) {
 				return false
 			}
-			hash, err := modelRequestHash(invocation.Request, invocation.CatalogFingerprints, invocation.Provider, invocation.BindingFingerprint)
+			hash, err := modelInvocationRequestHash(invocation.Request, invocation.CatalogFingerprints, invocation.Provider, invocation.BindingFingerprint, invocation.Purpose, invocation.ContextSummary)
 			if err != nil || hash != invocation.RequestHash {
 				return false
 			}
@@ -383,7 +397,7 @@ func (runner *Runner) ensureModelInvocation(
 		}
 		return snapshot, state, cloneModelInvocation(*invocation), nil
 	}
-	request, fingerprints, err := runner.buildModelRequest(ctx, snapshot, state)
+	request, fingerprints, purpose, summary, err := runner.buildInvocationRequest(ctx, snapshot, state)
 	if err != nil {
 		// Caller needs the original committed aggregate to fail a stale
 		// discovery grant through Kernel CAS. Returning a zero snapshot here
@@ -398,9 +412,17 @@ func (runner *Runner) ensureModelInvocation(
 		(provider != "" || bindingFingerprint != "") && !validBindingFingerprint(bindingFingerprint) {
 		return snapshot, state, ModelInvocation{}, ErrInvalidRequest
 	}
-	invocation, err := newModelInvocation(snapshot.Run, request, fingerprints, provider, bindingFingerprint, runner.clock.Now())
-	if err != nil {
-		return kernel.Snapshot{}, runState{}, ModelInvocation{}, err
+	var invocation ModelInvocation
+	if summary != nil {
+		invocation, err = newContextSummaryInvocation(snapshot.Run, request, provider, bindingFingerprint, purpose, summary, runner.clock.Now())
+		if err != nil {
+			return snapshot, state, ModelInvocation{}, err
+		}
+	} else {
+		invocation, err = newModelInvocation(snapshot.Run, request, fingerprints, provider, bindingFingerprint, runner.clock.Now())
+		if err != nil {
+			return kernel.Snapshot{}, runState{}, ModelInvocation{}, err
+		}
 	}
 	state.ModelInvocations = append(state.ModelInvocations, cloneModelInvocation(invocation))
 	encoded, err := encodeState(state)
@@ -422,6 +444,14 @@ func (runner *Runner) buildModelRequest(
 	snapshot kernel.Snapshot,
 	state runState,
 ) (model.Request, []string, error) {
+	request, originalTools, err := runner.buildUnpreparedModelRequest(ctx, snapshot, state)
+	if err != nil {
+		return model.Request{}, nil, err
+	}
+	return runner.prepareBusinessModelRequest(ctx, snapshot, request, originalTools)
+}
+
+func (runner *Runner) buildUnpreparedModelRequest(ctx context.Context, snapshot kernel.Snapshot, state runState) (model.Request, []tools.Definition, error) {
 	definitions, hostedTools, err := runner.resolveSelectedTools(ctx, state.ToolKeys, state.Model, snapshot.Run.DeadlineAt)
 	if err != nil {
 		return model.Request{}, nil, err
@@ -448,8 +478,9 @@ func (runner *Runner) buildModelRequest(
 	}
 	request := model.Request{
 		RunID: snapshot.Run.ID, Model: state.Model, ModelOptions: cloneRawJSON(state.ModelOptions),
-		OutputContract: model.CloneOutputContract(state.OutputContract),
-		Messages:       messages, Tools: definitions, HostedTools: model.CloneHostedTools(hostedTools),
+		OutputContract:  model.CloneOutputContract(state.OutputContract),
+		MaxOutputTokens: state.MaxModelOutputTokens,
+		Messages:        messages, Tools: definitions, HostedTools: model.CloneHostedTools(hostedTools),
 		RequireToolCall: state.RequireToolCall && (len(definitions) != 0 || len(hostedTools) != 0),
 	}
 	if state.CompletionRepair {
@@ -463,7 +494,10 @@ func (runner *Runner) buildModelRequest(
 	// Capture Catalog authority before Host-owned, model-facing projection.
 	// The final Request and original Catalog fingerprints are both hashed into
 	// the same durable ModelInvocation, never recomputed on resume.
-	originalTools := append([]tools.Definition(nil), request.Tools...)
+	return request, append([]tools.Definition(nil), request.Tools...), nil
+}
+
+func (runner *Runner) prepareBusinessModelRequest(ctx context.Context, snapshot kernel.Snapshot, request model.Request, originalTools []tools.Definition) (model.Request, []string, error) {
 	if runner.contextPreparation != nil {
 		prepared, prepareErr := runner.prepareSelectedContext(ctx, snapshot, request)
 		if prepareErr != nil {
@@ -615,6 +649,19 @@ func dispatchOutputCeilingWithinIntent(frozen, candidate int64) bool {
 	return frozen >= 0 && candidate >= 0 && (frozen == 0 || (candidate > 0 && candidate <= frozen))
 }
 
+// Active intents retain the Run's exact sampling ceiling across restart.
+// Dispatch-only narrowing never rewrites the intent, and consumed receipts
+// no longer retain their request.
+func modelInvocationsMatchOutputCeiling(invocations []ModelInvocation, ceiling int64) bool {
+	for _, invocation := range invocations {
+		if (invocation.Status == ModelInvocationPending || invocation.Status == ModelInvocationCompleted) &&
+			invocation.Request.MaxOutputTokens != ceiling {
+			return false
+		}
+	}
+	return true
+}
+
 // A nil native Tool limit is unlimited, while an explicit zero forbids NEW
 // calls but still permits previously dispatched completions and provider replay.
 func dispatchHostedToolCeilingWithinIntent(frozen, candidate *int) bool {
@@ -743,7 +790,11 @@ func (runner *Runner) executeModelInvocation(
 			return duplicatePhysicalProviderResponseID(state, invocation, id)
 		},
 	}
-	response, err := runner.generateModelWithPolicyGuarded(ctx, model.CloneRequest(invocation.Request), snapshot.Run.DeadlineAt,
+	generateCtx := ctx
+	if invocation.Purpose == ModelInvocationContextSummary {
+		generateCtx = context.WithValue(ctx, contextSummaryModelKey{}, true)
+	}
+	response, err := runner.generateModelWithPolicyGuarded(generateCtx, model.CloneRequest(invocation.Request), snapshot.Run.DeadlineAt,
 		func(dispatchCtx context.Context) error {
 			// Resolve and revalidate Catalog authority first: a slow external
 			// Hosted Tool resolver can also outlive the claim lease. The
@@ -869,12 +920,18 @@ func (runner *Runner) executeModelInvocation(
 	if err != nil {
 		return kernel.Snapshot{}, runState{}, err
 	}
-	next, err := runner.runtime.Apply(context.WithoutCancel(ctx), snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
+	mutation := kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
 		Events: []kernel.EventDraft{{
 			Type: "agent.model_invocation.completed", Message: invocation.ID, Wakeup: true,
 		}},
-	})
+	}
+	var next kernel.Snapshot
+	if invocation.Purpose == ModelInvocationContextSummary && state.SummaryNativeRecovery {
+		next, err = runner.commitSummarySafePoint(context.WithoutCancel(ctx), snapshot, state, mutation)
+	} else {
+		next, err = runner.runtime.Apply(context.WithoutCancel(ctx), snapshot.Run.ID, snapshot.Run.Revision, mutation)
+	}
 	if err != nil {
 		endedAt := runner.clock.Now().UTC()
 		runner.recordTelemetry(ctx, observability.Event{
@@ -899,7 +956,9 @@ func (runner *Runner) executeModelInvocation(
 	runner.publish(ctx, next.Run.ID, plugin.Event{
 		Type: EventModelCompleted, Revision: next.Run.Revision, Status: string(next.Run.Status),
 	})
-	runner.publishHostedToolReceipts(ctx, next, response.HostedToolCalls)
+	if invocation.Purpose != ModelInvocationContextSummary {
+		runner.publishHostedToolReceipts(ctx, next, response.HostedToolCalls)
+	}
 	if late {
 		return next, state, ErrModelLateResult
 	}

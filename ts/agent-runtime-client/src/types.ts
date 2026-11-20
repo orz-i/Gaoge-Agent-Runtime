@@ -280,6 +280,8 @@ export type StartAgentRunRequest = {
   input: { content: string };
   clientRunID?: string;
   model?: string;
+  /** Per-model-response output ceiling; zero or omission leaves it unspecified. */
+  maxModelOutputTokens?: number;
   toolKeys?: string[];
 };
 

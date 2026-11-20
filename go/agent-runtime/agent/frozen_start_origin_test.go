@@ -28,9 +28,10 @@ func TestIssue107FrozenAgentStartRequestIdentityAndLimits(t *testing.T) {
 	request := StartRequest{
 		ID: "issue107-frozen", RequestID: "original-effect", Goal: "precisely bounded task",
 		Model: "host-model", ModelOptions: json.RawMessage(`{"temperature":0.1}`),
-		Actor:  kernel.ActorRef{TenantID: "tenant", ActorID: "actor"},
-		Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"},
-		Limits: Limits{MaxLLMCalls: 2, MaxToolCalls: 3},
+		MaxModelOutputTokens: 64,
+		Actor:                kernel.ActorRef{TenantID: "tenant", ActorID: "actor"},
+		Thread:               kernel.ThreadRef{Kind: "conversation", ID: "thread"},
+		Limits:               Limits{MaxLLMCalls: 2, MaxToolCalls: 3},
 	}
 	child, err := runner.PrepareRun(t.Context(), request)
 	if err != nil || !runner.VerifyFrozenStartRequest(child, request) {
@@ -39,6 +40,8 @@ func TestIssue107FrozenAgentStartRequestIdentityAndLimits(t *testing.T) {
 	for name, change := range map[string]func(*StartRequest){
 		"widen LLM bound":            func(r *StartRequest) { r.Limits.MaxLLMCalls = 8 },
 		"widen Tool bound":           func(r *StartRequest) { r.Limits.MaxToolCalls = 20 },
+		"widen sampling output":      func(r *StartRequest) { r.MaxModelOutputTokens = 65 },
+		"remove sampling output":     func(r *StartRequest) { r.MaxModelOutputTokens = 0 },
 		"change effective model":     func(r *StartRequest) { r.Model = "foreign-model" },
 		"change model options":       func(r *StartRequest) { r.ModelOptions = json.RawMessage(`{"temperature":0.2}`) },
 		"change requested tool keys": func(r *StartRequest) { r.ToolKeys = []string{"foreign-tool"} },

@@ -41,7 +41,7 @@ func TestHostSelectedSubtreeCeilingsAreFrozenSeparatelyFromAgentLimits(t *testin
 	}
 	turn := f.turn
 	turn.ConfigSnapshotID = config.ID
-	limits := budget.Limits{MaxLLMCalls: 2, MaxChildRuns: 1, MaxConcurrentDescendants: 1, MaxConcurrentRuns: 1}
+	limits := budget.Limits{MaxLLMCalls: 2, MaxToolCalls: 3, MaxChildRuns: 1, MaxConcurrentDescendants: 1, MaxConcurrentRuns: 1}
 	frozen, _, err := f.runner.prepareDelegation(t.Context(), turn, f.parent, DelegateRequest{
 		MemberID: "authorized", Goal: "inspect", Agent: agent.StartRequest{Limits: limits},
 	})

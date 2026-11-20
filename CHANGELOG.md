@@ -5,6 +5,49 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- **Optional native WorkingState summaries (2026-11-20):** Add an opt-in,
+  first-business-call summary purpose to the original Agent ModelInvocation
+  lifecycle. Freeze policy/source/recipe in its identity, archive original
+  evidence and reconcile exact Context targets before consuming summary usage.
+  Summary output is untrusted task data, not a business answer or Tool grant.
+  Preserve old absent-field hashes and Host-state priority. Support ordinary
+  callback-return recovery and explicitly selected native summary safe points
+  using the original Kernel PARK/ENABLE protocol for hard-crash takeover.
+  Review fixes actual-ID/typed-input bounds, prospective business framing,
+  commit-time reconciliation and missing-Run Resume compatibility.
+  Integrate the run-input/history baseline without admitting Host Inputs to
+  dedicated native summary recovery. Keep both Session facades; optional
+  positive Tool Session output ceilings require matching window reservation.
+  Reject lossy source projections for automatic summaries while documenting
+  the inherited structured-number limitation of the old fallback archive.
+  Shared-budget and the older managed-Context combination remain rejected. See
+  `docs/releases/unreleased-automatic-working-state.md`.
+
+- **Explicit WorkingState and frozen Context admission (2026-11-20):** Add
+  bounded Host-authored task state with exact checkpoint provenance, branch-local
+  versions and a separate user-role projection. Preserve it through Context
+  compaction and recovery. Freeze the selected Open plan, including absent state,
+  in optional sealed `ConfigSnapshot.ContextBase` metadata so an admitted retry
+  cannot inherit future state or roll back a newer active head. Existing absent
+  fields retain their hashes. An old Accepted full-path Turn without a checkpoint
+  or base binding fails closed if a newly selected base would supply WorkingState.
+  Upgrade readers before handling the new Config/checkpoint fields; no Store
+  method or SQL schema migration is required. See
+  `docs/releases/unreleased-working-state.md` for upgrade and validation limits.
+
+- **Agent Session and frozen per-call output ceilings (2026-11-20):** Add
+  `harness.OpenAgentSession` for explicitly selected local Tools, bounded
+  Context and the existing Session recovery API. Freeze optional
+  `MaxModelOutputTokens` through Config, Agent state, model intents, local
+  delegation and HTTP/TypeScript contracts. Separate it from cumulative
+  output usage and model-window reservation. Existing unspecified zero fields
+  remain omitted; the new constructor requires a positive ceiling. A2A shadows
+  reject nonzero ceilings they cannot enforce. See `docs/agent-session.md`.
+  Stage 0/1 review additionally binds positive Harness/Run ceilings, preserves
+  them through shared-budget reservation recovery, and retains original Catalog
+  fingerprints for pending Tool batches. Legacy zero-ceiling snapshots remain
+  supported with their original evidence boundary. See the 2026-11-20 review.
+
 - **Acceptance variants and report integrity (2026-11-20):** The developer-only
   task-agent acceptance suite now has seven bounded variants across code repair,
   document evidence and approval control. Ordered planned case identities and
