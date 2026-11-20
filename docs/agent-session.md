@@ -131,6 +131,13 @@ Hosts can now supply bounded, source-bound task data through
 source resolution, versioned rollover, branch behavior and acceptance. It uses
 the same Session and Context composition; it does not call a summarizer.
 
+Optional native automatic summaries are configured separately through the
+frozen `WorkingStateSummary` policy. They add a model invocation inside the
+original Run, before the first business call, and preserve exact raw Artifacts.
+See [Automatic WorkingState](automatic-working-state.md) for input/call limits,
+Host-state priority, ordinary recovery and the separate, restricted
+`Context.SummaryNativeRecovery` hard-crash option.
+
 ## Stage 0/1 baseline and acceptance
 
 The Stage 0/1 source baseline is `19151c9`. That change was limited to per-call

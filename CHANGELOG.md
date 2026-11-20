@@ -5,6 +5,21 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- **Optional native WorkingState summaries (2026-11-20):** Add an opt-in,
+  first-business-call summary purpose to the original Agent ModelInvocation
+  lifecycle. Freeze policy/source/recipe in its identity, archive original
+  evidence and reconcile exact Context targets before consuming summary usage.
+  Summary output is untrusted task data, not a business answer or Tool grant.
+  Preserve old absent-field hashes and Host-state priority. Support ordinary
+  callback-return recovery and explicitly selected native summary safe points
+  using the original Kernel PARK/ENABLE protocol for hard-crash takeover.
+  Review fixes actual-ID/typed-input bounds, prospective business framing,
+  commit-time reconciliation and missing-Run Resume compatibility.
+  Reject lossy source projections for automatic summaries while documenting
+  the inherited structured-number limitation of the old fallback archive.
+  Shared-budget and the older managed-Context combination remain rejected. See
+  `docs/releases/unreleased-automatic-working-state.md`.
+
 - **Explicit WorkingState and frozen Context admission (2026-11-20):** Add
   bounded Host-authored task state with exact checkpoint provenance, branch-local
   versions and a separate user-role projection. Preserve it through Context

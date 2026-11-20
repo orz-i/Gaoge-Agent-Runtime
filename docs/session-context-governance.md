@@ -51,6 +51,12 @@ Only an existing running Agent Run is advanced. Completed, failed and cancelled 
 
 ## Pre-intent Context projection
 
+[Automatic WorkingState](automatic-working-state.md) adds an explicitly
+configured native model-invocation purpose before ordinary business request
+preparation. It does not call the Provider from this projection boundary.
+The summary intent/receipt and exact Context target are frozen separately;
+the existing business intent still follows the contract below.
+
 For explicit, versioned task data supplied by the Host, see
 [WorkingState](working-state.md). It binds the selected checkpoint/source path,
 freezes through existing admission and Context persistence, and materializes as

@@ -139,5 +139,6 @@ fixtures. It checks exact source binding, version and size rejection, one state
 block across Turns, branch isolation, preserved raw Artifacts, pending-intent
 recovery and unchanged Tool authority/output ceilings. Deterministic fixtures
 establish these invariants; they do not claim a task-quality improvement or an
-automatic reduction in model input. Automatic semantic summarization remains a
-separate later stage.
+automatic reduction in model input. [Automatic semantic summaries](automatic-working-state.md)
+are a separate, explicitly configured Stage 4 feature; explicit Host updates
+keep their original priority and do not invoke that path.
