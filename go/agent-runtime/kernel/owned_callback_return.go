@@ -21,10 +21,13 @@ const (
 	OwnedCustodyScoped   OwnedCallbackCustody = "scoped-v1"
 	// OwnedToolResultReturn binds committed Tool results for observation only.
 	OwnedToolResultReturn OwnedCallbackCustody = "tool-result-v1"
+	// OwnedToolBudgetReturn binds an unresolved Tool to its suspended reservation.
+	OwnedToolBudgetReturn      OwnedCallbackCustody = "tool-budget-return-v1"
+	OwnedBoundedApprovalReturn OwnedCallbackCustody = "bounded-approval-v1"
 )
 
 func (c OwnedCallbackCustody) Valid() bool {
-	return c == "" || c.permitsControl() || c == OwnedToolResultReturn
+	return c == "" || c.permitsControl() || c == OwnedToolResultReturn || c == OwnedToolBudgetReturn || c == OwnedBoundedApprovalReturn
 }
 
 func (c OwnedCallbackCustody) permitsControl() bool {
@@ -32,9 +35,11 @@ func (c OwnedCallbackCustody) permitsControl() bool {
 }
 
 type OwnedPhysicalCallbackOutcome struct {
-	HostCompleted  bool
-	LeaseOwned     bool
-	ControlCustody OwnedCallbackCustody `json:",omitempty"`
+	// The original return hash seals the ledger identity while the Tool is unresolved.
+	ToolBudgetScope string `json:",omitempty"`
+	HostCompleted   bool
+	LeaseOwned      bool
+	ControlCustody  OwnedCallbackCustody `json:",omitempty"`
 }
 type OwnedPhysicalCallbackCompletion struct {
 	GrantID          string
@@ -62,7 +67,7 @@ func OwnedPhysicalCallbackReturnPayload(s Snapshot, o OwnedPhysicalCallbackOutco
 type OwnedPhysicalCallbackReturn struct{ proof *featurecontrol.Proof }
 
 func (p OwnedPhysicalCallbackReturn) Matches(g ChildExecutionGrant, s Snapshot, o OwnedPhysicalCallbackOutcome) bool {
-	return o.ControlCustody.Valid() &&
+	return o.ControlCustody.Valid() && (o.ControlCustody == OwnedToolBudgetReturn) == (o.ToolBudgetScope != "") &&
 		(o.ControlCustody != OwnedCustodyPrepared || g.AdmissionOperation == "prepare") &&
 		g.IsOwned() && g.ID != "" && g.ChildRunID == s.Run.ID &&
 		s.Run.Kind == "agent" && s.Run.ParentRunID == "" && s.Run.Revision >= g.ExpectedRevision &&

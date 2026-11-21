@@ -21,6 +21,46 @@ func settledRootFixture() (kernel.Snapshot, kernel.OwnedRetirementReceipt) {
 	return run, r
 }
 
+func TestOwnedCancelSuccessorClearsOriginalApproval(t *testing.T) {
+	run, receipt := settledRootFixture()
+	run.Checkpoint = &kernel.Checkpoint{ID: "original-approval", Status: kernel.CheckpointPending}
+	receipt.Evidence.Snapshot = run
+	receipt.ACKIdentity = receipt.Identity()
+	next := run
+	next.Run.Status, next.Run.ErrorCode = kernel.RunStatusCancelled, "run.cancelled"
+	next.Run.Revision++
+	next.EventHead++
+	next.Checkpoint = nil
+	check := func(s kernel.Snapshot) error {
+		return kernel.VerifyBoundedToolControlFacts(s, s, 3, 3, kernel.ExecutionLease{}, false, []kernel.OwnedRetirementReceipt{receipt})
+	}
+	if err := check(next); err != nil {
+		t.Fatal(err)
+	}
+	next.Checkpoint = run.Checkpoint
+	if !errors.Is(check(next), kernel.ErrExecutionConflict) {
+		t.Fatal("accepted a checkpoint surviving native Cancel")
+	}
+}
+
+func TestBoundedToolControlRejectsObservationOnlyCustody(t *testing.T) {
+	run, receipt := settledRootFixture()
+	receipt.Evidence.Grant.AdmissionOperation = "resume"
+	for _, tc := range []struct {
+		custody  kernel.OwnedCallbackCustody
+		accepted bool
+	}{
+		{kernel.OwnedBoundedApprovalReturn, true}, {kernel.OwnedToolResultReturn, false}, {kernel.OwnedToolBudgetReturn, false}, {"", false},
+	} {
+		receipt.Evidence.Completion.ControlCustody = tc.custody
+		receipt.ACKIdentity = receipt.Identity()
+		err := kernel.VerifyBoundedToolControlFacts(run, run, 3, 3, kernel.ExecutionLease{}, false, []kernel.OwnedRetirementReceipt{receipt})
+		if (err == nil) != tc.accepted {
+			t.Fatalf("custody %q: %v", tc.custody, err)
+		}
+	}
+}
+
 func TestVerifiedOwnedRootQuiescenceRequiresExactRetiredCallback(t *testing.T) {
 	original, receipt := settledRootFixture()
 	if !receipt.Valid() {

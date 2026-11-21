@@ -407,9 +407,11 @@ type Runner struct {
 	trustedDeferredRootControl     bool
 	scopedRootCallbacks            bool
 	hasApprovalPolicies            bool
+	boundedApproval                bool
 }
 
 type runState struct {
+	ExternalToolHold      *externalToolHold          `json:"externalToolHold,omitempty"`
 	DelegatedToolReceipts []delegatedToolReceipt     `json:"delegatedToolReceipts,omitempty"`
 	RecoveredTools        []rootToolReceipt          `json:"recoveredTools,omitempty"`
 	OriginFingerprint     string                     `json:"originFingerprint,omitempty"`
@@ -643,6 +645,10 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		}
 	}
 	scopedRoot := scopedDeferredRootCallbacks(dependencies)
+	var boundedApproval bool
+	if len(dependencies.ApprovalPolicies) == 1 {
+		_, boundedApproval = dependencies.ApprovalPolicies[0].(*boundedApprovalPolicy)
+	}
 	control := scopedRoot && dependencies.StartControlPreflight == nil &&
 		dependencies.ApprovalControlPreflight == nil && len(dependencies.ApprovalPolicies) == 0
 	return &Runner{
@@ -686,6 +692,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		trustedDeferredRootControl:     control,
 		scopedRootCallbacks:            scopedRoot,
 		hasApprovalPolicies:            len(dependencies.ApprovalPolicies) != 0,
+		boundedApproval:                boundedApproval,
 		modelPolicyNormalizer:          policyNormalizer,
 		deferResume:                    dependencies.DeferResumption,
 	}, nil

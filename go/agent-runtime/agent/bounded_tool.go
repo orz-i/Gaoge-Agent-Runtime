@@ -97,8 +97,15 @@ func (a *BoundedBudgetAdapter) Tool(ctx context.Context, inv plugin.ToolInvocati
 		}
 	}
 	if !validBoundedToolReceipt(result, callErr, inv.Request.Call.ID) {
-		updated, e := a.coordinator.Suspend(accounting, l.ID, id)
-		return result, errors.Join(callErr, e, a.ports.Project(accounting, updated))
+		updated, suspendErr := a.coordinator.Suspend(accounting, l.ID, id)
+		projectErr := a.ports.Project(accounting, updated)
+		frame, _ := ctx.Value(toolReturnGrantKey{}).(*originalToolFrame)
+		externalWait := callErr == nil && result.Pending != nil && result.Pending.Kind == tools.PendingExternalResult
+		if frame != nil && suspendErr == nil && projectErr == nil && (errors.Is(callErr, ErrToolOutcomeUnknown) || externalWait) {
+			frame.holds.Store(res.RequestHash, l.ID)
+			record("budget.tool.suspended", updated)
+		}
+		return result, errors.Join(callErr, suspendErr, projectErr)
 	}
 	code, message, _ := tools.RecoverableCallErrorInfo(callErr)
 	raw, err = json.Marshal(boundedBudgetToolReceipt{Result: result, ErrorCode: code, ErrorMessage: message, BlockedTools: tools.RecoverableCallErrorBlockedToolKeys(callErr)})

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"math"
-	"reflect"
 )
 
 // OwnedRootSettlementStore is an OPTIONAL read-only custody proof. It is not
@@ -30,6 +29,21 @@ func (r *Runtime) VerifyCompletedToolReturn(ctx context.Context, expected Snapsh
 		return ErrExecutionRequired
 	}
 	return store.VerifyCompletedToolReturn(ctx, expected)
+}
+
+// VerifyBoundedToolControl verifies the original read-only approval frames.
+// The fixed local Agent separately checks each consumed Tool owner's receipt.
+func (r *Runtime) VerifyBoundedToolControl(ctx context.Context, expected Snapshot) error {
+	if r == nil || ctx == nil || expected.Run.ID == "" {
+		return ErrInvalidInput
+	}
+	store, ok := r.store.(interface {
+		VerifyBoundedToolControl(context.Context, Snapshot) error
+	})
+	if !ok {
+		return ErrExecutionRequired
+	}
+	return store.VerifyBoundedToolControl(ctx, expected)
 }
 
 // RootSettlementCheck validates the facts gathered under a native Store's Run lock.
@@ -85,15 +99,14 @@ func exactOwnedRootCancelSuccessor(previous, current Snapshot) bool {
 		current.EventHead != previous.EventHead+1 ||
 		current.Run.Status != RunStatusCancelled || current.Run.ErrorCode != "run.cancelled" ||
 		!bytes.Equal(previous.State, current.State) ||
-		!reflect.DeepEqual(previous.Checkpoint, current.Checkpoint) ||
-		!reflect.DeepEqual(previous.Result, current.Result) {
+		current.Checkpoint != nil || current.Result != nil || previous.Result != nil {
 		return false
 	}
 	before, after := previous.Run, current.Run
 	before.Status, before.Revision = after.Status, after.Revision
 	before.ErrorCode, before.ErrorDetail = after.ErrorCode, after.ErrorDetail
 	before.EndedAt, before.UpdatedAt = after.EndedAt, after.UpdatedAt
-	return reflect.DeepEqual(before, after)
+	return ManagedDigest(before) == ManagedDigest(after)
 }
 
 // VerifyPreparedRootSettlementFacts shares the exact owner/epoch/receipt
@@ -112,14 +125,14 @@ func VerifyPreparedRootSettlementFacts(
 	if len(receipts) != 1 || receipts[0].Evidence.Completion.ControlCustody != OwnedCustodyPrepared {
 		return ErrExecutionConflict
 	}
-	return verifyOwnedRootSettlementFacts(expected, current, epoch, physicalEpoch, lease, hasActiveGrants, receipts, "prepare", false)
+	return verifyOwnedRootSettlementFacts(expected, current, epoch, physicalEpoch, lease, hasActiveGrants, receipts, "prepare", "")
 }
 
 func VerifyOwnedRootSettlementFacts(
 	expected Snapshot, current Snapshot, epoch, physicalEpoch uint64, lease ExecutionLease,
 	hasActiveGrants bool, receipts []OwnedRetirementReceipt,
 ) error {
-	return verifyOwnedRootSettlementFacts(expected, current, epoch, physicalEpoch, lease, hasActiveGrants, receipts, "", false)
+	return verifyOwnedRootSettlementFacts(expected, current, epoch, physicalEpoch, lease, hasActiveGrants, receipts, "", "")
 }
 
 func VerifyCompletedToolReturnFacts(expected, current Snapshot, epoch, physicalEpoch uint64, lease ExecutionLease,
@@ -128,12 +141,17 @@ func VerifyCompletedToolReturnFacts(expected, current Snapshot, epoch, physicalE
 	if expected.Run.Status != RunStatusCompleted {
 		return ErrExecutionConflict
 	}
-	return verifyOwnedRootSettlementFacts(expected, current, epoch, physicalEpoch, lease, hasActiveGrants, receipts, "", true)
+	return verifyOwnedRootSettlementFacts(expected, current, epoch, physicalEpoch, lease, hasActiveGrants, receipts, "", OwnedToolResultReturn)
+}
+
+func VerifyBoundedToolControlFacts(expected, current Snapshot, epoch, physicalEpoch uint64, lease ExecutionLease,
+	hasActiveGrants bool, receipts []OwnedRetirementReceipt) error {
+	return verifyOwnedRootSettlementFacts(expected, current, epoch, physicalEpoch, lease, hasActiveGrants, receipts, "", OwnedBoundedApprovalReturn)
 }
 
 func verifyOwnedRootSettlementFacts(
 	expected Snapshot, current Snapshot, epoch, physicalEpoch uint64, lease ExecutionLease,
-	hasActiveGrants bool, receipts []OwnedRetirementReceipt, requiredOperation string, allowToolResult bool,
+	hasActiveGrants bool, receipts []OwnedRetirementReceipt, requiredOperation string, toolCustody OwnedCallbackCustody,
 ) error {
 	if expected.Run.ID == "" || current.Run.ID != expected.Run.ID ||
 		current.Run.Kind != "agent" || current.Run.ParentRunID != "" ||
@@ -155,7 +173,7 @@ func verifyOwnedRootSettlementFacts(
 		// ALL physical history matters. A later scoped callback cannot retire
 		// detached effects from an earlier opaque callback, or borrow its ACK.
 		custody := r.Evidence.Completion.ControlCustody
-		observedTool := allowToolResult && custody == OwnedToolResultReturn
+		observedTool := toolCustody != "" && (custody == toolCustody || custody == OwnedBoundedApprovalReturn)
 		if r.Phase != "ACKNOWLEDGED" || !r.Evidence.Completion.LeaseOwned ||
 			!r.Evidence.Completion.HostCompleted || !custody.permitsControl() && !observedTool {
 			return ErrExecutionConflict
