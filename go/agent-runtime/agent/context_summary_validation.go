@@ -72,7 +72,6 @@ func validSummaryBinding(value *ContextSummaryBinding) bool {
 	if value == nil || jsoncontract.ValidateCanonicalUTF8(value) != nil || value.RunID == "" ||
 		len(value.RunID) > runtimecontext.MaxWorkingStateTextBytes || strings.TrimSpace(value.RunID) != value.RunID ||
 		!validSummaryRoot(value.Root) || value.RecipeVersion != WorkingStateSummaryVersion ||
-		(value.TargetCheckpointWriteProfile != "" && !runtimecontext.ValidCheckpointWriteProfile(value.TargetCheckpointWriteProfile)) ||
 		ValidateWorkingStateSummaryPolicy(&value.Policy) != nil || value.PriorVersion < 0 ||
 		value.NextVersion != value.PriorVersion+1 || value.NextVersion > runtimecontext.MaxWorkingStateVersion ||
 		value.RemovedMessages <= 0 || len(value.Artifacts) == 0 || len(value.Artifacts) > runtimecontext.MaxWorkingStateItems ||

@@ -61,12 +61,11 @@ func TestRetryInvocationCannotBuyAnotherSummaryForSameTurn(t *testing.T) {
 				Model: "fixture", MaxModelOutputTokens: 128,
 				WorkingStateSummary: &agent.WorkingStateSummaryPolicy{MaxInputTokens: 60000, MaxSerializedBytes: 100000},
 				ContextPolicy:       runtimecontext.Policy{SoftLimitPercent: 10, MaxSerializedBytes: 100000, PreserveRecentTurns: 1, MinimumRecentTurns: 1, MaxCompactionTokens: 128},
-				ToolKeys:            []string{ContextArtifactToolKey}, ToolPolicies: []ToolPolicySnapshot{ContextArtifactToolPolicySnapshot()},
-				Limits: agent.Limits{MaxTotalTokens: 5},
+				Limits:              agent.Limits{MaxTotalTokens: 5},
 			},
 			Transcript: TranscriptSourceFunc(func(context.Context, HostRef, HostRef, string) (*ContextSeed, error) { return seed, nil }),
 		},
-		Context: AgentSessionContextOptions{ResolveWindow: func(context.Context, model.Request) (runtimecontext.ModelWindow, error) {
+		Context: AgentSessionContextOptions{ReadArtifacts: true, ResolveWindow: func(context.Context, model.Request) (runtimecontext.ModelWindow, error) {
 			return runtimecontext.ModelWindow{ContextTokens: 65536, ReservedOutputTokens: 128}, nil
 		}},
 	})

@@ -1,58 +1,54 @@
 package context
 
-// CheckpointWriteProfile selects the algorithms for a newly made decision.
-// A durable recipe must fix this selection independently of the current writer.
-// The on-disk empty ContentHashEncoding still denotes the historical codec.
-type CheckpointWriteProfile string
+import (
+	"encoding/json"
+	"errors"
+	"strconv"
+	"strings"
 
-const (
-	CheckpointWriteLegacy       CheckpointWriteProfile = "legacy-json-v0"
-	CheckpointWriteLosslessJSON CheckpointWriteProfile = "lossless-json-v1"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract"
 )
 
-func ValidCheckpointWriteProfile(profile CheckpointWriteProfile) bool {
-	return profile == CheckpointWriteLegacy || profile == CheckpointWriteLosslessJSON
-}
-
-// CheckpointWriteProfile returns the concrete selection for new decisions,
-// never an empty/latest alias that could change meaning during recovery.
-func (manager *Manager) CheckpointWriteProfile() CheckpointWriteProfile {
-	if manager == nil || manager.checkpointWriteProfile == "" {
-		return CheckpointWriteLegacy
+// sealCheckpoint assigns the content hash and ID after the revision is complete.
+func sealCheckpoint(value Checkpoint) (Checkpoint, error) {
+	hash, err := checkpointWindowHash(value.Window)
+	if err != nil {
+		return Checkpoint{}, err
 	}
-	return manager.checkpointWriteProfile
-}
-
-// WithCheckpointWriteProfile scopes pure construction to one frozen profile.
-// Unlike Dependencies, an empty profile here is invalid: recovery must resolve
-// old missing recipe metadata explicitly, not inherit the current writer default.
-func (manager *Manager) WithCheckpointWriteProfile(profile CheckpointWriteProfile) (*Manager, error) {
-	if !ValidCheckpointWriteProfile(profile) {
-		return nil, ErrInvalidInput
-	}
-	copy := Manager{checkpointWriteProfile: profile}
-	if manager != nil {
-		copy.counter = manager.counter
-	}
-	return &copy, nil
-}
-
-// sealCheckpoint is the sole writer of a new revision's encoding, hash and ID.
-// No-op operations return the existing record without entering this boundary.
-func (manager *Manager) sealCheckpoint(value Checkpoint) (Checkpoint, error) {
-	switch manager.CheckpointWriteProfile() {
-	case CheckpointWriteLegacy:
-		value.ContentHashEncoding = ""
-	case CheckpointWriteLosslessJSON:
-		value.ContentHashEncoding = CheckpointContentHashEncodingLosslessJSON
-	default:
-		return Checkpoint{}, ErrInvalidInput
-	}
-	hash, err := checkpointWindowHash(value.Window, value.ContentHashEncoding)
-	if err != nil || hash == "" {
-		return Checkpoint{}, ErrInvalidInput
-	}
+	value.ContentHashEncoding = CheckpointContentHashEncodingLosslessJSON
 	value.ContentHash = hash
 	value.ID = checkpointID(value)
 	return value, nil
+}
+
+func checkpointID(value Checkpoint) string {
+	return stableID("ctxc",
+		value.ScopeID, strconv.Itoa(value.Generation), strconv.Itoa(value.Revision),
+		value.ParentCheckpointID, value.CacheIdentity, value.LineageHash,
+		value.CoveredThroughSourceID, value.CoveredPathHash, value.StaticFingerprint,
+		value.ModelWindowFingerprint, value.ContentHash, strings.Join(value.ArtifactIDs, ","),
+		value.ContentHashEncoding,
+	)
+}
+
+func checkpointWindowHash(window Window) (string, error) {
+	if ValidateWorkingState(window.WorkingState) != nil {
+		return "", ErrInvalidInput
+	}
+	encoded, err := canonicalLosslessJSON(normalizeWindow(window))
+	if err != nil {
+		return "", err
+	}
+	return hashBytes(encoded), nil
+}
+
+func canonicalLosslessJSON(value any) ([]byte, error) {
+	if jsoncontract.ValidateCanonicalUTF8(value) != nil {
+		return nil, ErrInvalidInput
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return nil, errors.Join(ErrInvalidInput, err)
+	}
+	return canonicalArchiveJSON(encoded)
 }

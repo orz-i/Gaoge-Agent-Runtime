@@ -34,11 +34,6 @@ func (runner *Runner) consumeContextSummary(ctx context.Context, snapshot kernel
 		!sameBoundedValue(read.Cursor.Turn.ContextRef, samplingRef(read.Cursor.Checkpoint)) {
 		return snapshot, ErrInvalidRequest
 	}
-	// The v1 recipe can only install state from a legacy-compatible source.
-	// Never rebuild an older intent or its evidence with a different codec.
-	if !summaryPreservesSourceValues(runtimecontext.Materialize(read.SourceCheckpoint.Window)) {
-		return snapshot, ErrInvalidRequest
-	}
 	working, parseErr := WorkingStateFromSummaryInvocation(invocation)
 	var target *runtimecontext.Checkpoint
 	var artifacts []runtimecontext.Artifact
@@ -50,16 +45,8 @@ func (runner *Runner) consumeContextSummary(ctx context.Context, snapshot kernel
 		if candidateErr != nil || candidate.RemovedMessages != binding.RemovedMessages || !summarySameArtifacts(binding.Artifacts, candidate.Artifacts) {
 			return snapshot, ErrInvalidRequest
 		}
-		profile := binding.TargetCheckpointWriteProfile
-		if profile == "" {
-			profile = runtimecontext.CheckpointWriteLegacy
-		}
-		writer, profileErr := adapter.bounded.manager.WithCheckpointWriteProfile(profile)
-		if profileErr != nil {
-			return snapshot, ErrInvalidRequest
-		}
 		candidate.Window.WorkingState = working
-		next, rolloverErr := writer.Rollover(ctx, runtimecontext.RolloverRequest{
+		next, rolloverErr := adapter.bounded.manager.Rollover(ctx, runtimecontext.RolloverRequest{
 			Previous: read.SourceCheckpoint, Window: candidate.Window, Artifacts: candidate.Artifacts,
 			Reason: "working_state_summary", ModelWindowFingerprint: binding.ModelWindowFingerprint,
 		})

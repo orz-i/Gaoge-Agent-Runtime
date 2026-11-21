@@ -3,7 +3,6 @@ package harness_test
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"regexp"
 	"slices"
@@ -12,7 +11,6 @@ import (
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
@@ -25,36 +23,27 @@ func (fn toolSessionModelFunc) Generate(ctx context.Context, request model.Reque
 	return fn(ctx, request)
 }
 
-func toolSessionOptions(t *testing.T, client model.Client) harness.ToolAgentSessionOptions {
+func toolSessionOptions(t *testing.T, client model.Client) harness.AgentSessionOptions {
 	t.Helper()
 	base := textSessionOptions(mustTextRuntime(t, memory.NewStore()), harness.NewMemoryStore(), client,
 		harness.TranscriptHistoryFunc(func(context.Context, harness.HostRef, harness.HostRef) ([]runtimecontext.Entry, error) {
 			return nil, nil
 		}))
-	return harness.ToolAgentSessionOptions{
-		Runtime: base.Runtime, Store: base.Store, Model: base.Model, Session: base.Session,
-		ResolveModelWindow: func(context.Context, model.Request) (runtimecontext.ModelWindow, error) {
-			return runtimecontext.ModelWindow{ContextTokens: 32768, ReservedOutputTokens: 1024}, nil
+	base.Context.ReadArtifacts = true
+	base.ExploreReads = true
+	base.LocalTools = []harness.SessionTool{{
+		Registration: tools.Registration{
+			Definition: tools.Definition{Key: "lookup", Name: "lookup", InputSchema: json.RawMessage(`{"type":"object"}`)},
+			Handler: tools.HandlerFunc(func(_ context.Context, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
+				return tools.ExecutionResult{Content: json.RawMessage(`{"code":"RELEASE-42"}`), Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: "committed"}}, nil
+			}),
 		},
-		Tools: []harness.SessionTool{{
-			Registration: tools.Registration{
-				Definition: tools.Definition{Key: "lookup", Name: "lookup", InputSchema: json.RawMessage(`{"type":"object"}`)},
-				Handler: tools.HandlerFunc(func(_ context.Context, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
-					return tools.ExecutionResult{Content: json.RawMessage(`{"code":"RELEASE-42"}`), Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: "committed"}}, nil
-				}),
-			},
-			Policy: harness.ToolPolicySnapshot{DefinitionVersion: "v1", ApprovalMode: "never", SideEffectLevel: "read"},
-		}},
-	}
+		Policy: harness.ToolPolicySnapshot{DefinitionVersion: "v1", ApprovalMode: "never", SideEffectLevel: "read"},
+	}}
+	return base
 }
 
-func TestToolAgentSessionComposesExplorationAndTerminalRecovery(t *testing.T) {
-	t.Run("deprecated-facade", func(t *testing.T) { testSessionExplorationAndTerminalRecovery(t, false) })
-	t.Run("recommended-facade", func(t *testing.T) { testSessionExplorationAndTerminalRecovery(t, true) })
-}
-
-func testSessionExplorationAndTerminalRecovery(t *testing.T, paired bool) {
-	t.Helper()
+func TestAgentSessionComposesExplorationAndTerminalRecovery(t *testing.T) {
 	modelCalls, toolCalls := 0, 0
 	client := toolSessionModelFunc(func(_ context.Context, request model.Request) (model.Response, error) {
 		modelCalls++
@@ -74,30 +63,19 @@ func testSessionExplorationAndTerminalRecovery(t *testing.T, paired bool) {
 		return model.Response{Content: "Verified RELEASE-42"}, nil
 	})
 	options := toolSessionOptions(t, client)
-	original := options.Tools[0].Registration.Handler
-	options.Tools[0].Registration.Handler = tools.HandlerFunc(func(ctx context.Context, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
+	original := options.LocalTools[0].Registration.Handler
+	options.LocalTools[0].Registration.Handler = tools.HandlerFunc(func(ctx context.Context, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
 		toolCalls++
 		if toolCalls <= 3 {
 			return tools.RecoverableNoEffectResult(request.Call.ID, tools.NewRecoverableCallError("lookup.no_match", "Choose a different source", tools.ErrInvalidCall))
 		}
 		return original.Execute(ctx, request)
 	})
-	open := func() (*harness.SessionClient, error) {
-		if !paired {
-			return harness.OpenToolAgentSession(options)
-		}
-		settings := options.Session
-		settings.Config.MaxModelOutputTokens = 128
-		return harness.OpenAgentSession(harness.AgentSessionOptions{
-			Runtime: options.Runtime, Store: options.Store, Model: client, Session: settings, LocalTools: options.Tools, ExploreReads: true,
-			Context: harness.AgentSessionContextOptions{ResolveWindow: options.ResolveModelWindow, ReadArtifacts: true},
-		})
-	}
-	session, err := open()
+	session, err := harness.OpenAgentSession(options)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(options.Session.Config.ToolKeys) != 0 || options.Tools[0].Policy.Key != "" {
+	if len(options.Session.Config.ToolKeys) != 0 || options.LocalTools[0].Policy.Key != "" {
 		t.Fatal("facade mutated Host options")
 	}
 	result, err := session.Prompt(t.Context(), "tool-turn", "Find the verified release code")
@@ -108,7 +86,7 @@ func testSessionExplorationAndTerminalRecovery(t *testing.T, paired bool) {
 		t.Fatalf("idempotent Prompt redispatched: %v models=%d tools=%d", err, modelCalls, toolCalls)
 	}
 	options.Session.Transcript = nil
-	reopened, err := open()
+	reopened, err := harness.OpenAgentSession(options)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,75 +96,7 @@ func testSessionExplorationAndTerminalRecovery(t *testing.T, paired bool) {
 	}
 }
 
-func TestToolAgentSessionRejectsUncomposedOrConflictingCapabilities(t *testing.T) {
-	client := &textSessionModel{}
-	cases := []struct {
-		name string
-		edit func(*harness.ToolAgentSessionOptions)
-	}{
-		{"missing runtime", func(o *harness.ToolAgentSessionOptions) { o.Runtime = nil }},
-		{"missing store", func(o *harness.ToolAgentSessionOptions) { o.Store = nil }},
-		{"missing model", func(o *harness.ToolAgentSessionOptions) { o.Model = nil }},
-		{"unknown window", func(o *harness.ToolAgentSessionOptions) { o.ResolveModelWindow = nil }},
-		{"preselected tools", func(o *harness.ToolAgentSessionOptions) { o.Session.Config.ToolKeys = []string{"unregistered"} }},
-		{"preselected policies", func(o *harness.ToolAgentSessionOptions) {
-			o.Session.Config.ToolPolicies = []harness.ToolPolicySnapshot{{Key: "other"}}
-		}},
-		{"skills", func(o *harness.ToolAgentSessionOptions) {
-			o.Session.Config.Skills = []harness.SkillSnapshot{{ID: "unloaded"}}
-		}},
-		{"memory", func(o *harness.ToolAgentSessionOptions) { o.Session.Config.MemoryPolicy = "external" }},
-		{"shared budget", func(o *harness.ToolAgentSessionOptions) { o.Session.Config.SharedBudget = &budget.Limits{} }},
-		{"automatic summary", func(o *harness.ToolAgentSessionOptions) {
-			o.Session.Config.WorkingStateSummary = &agent.WorkingStateSummaryPolicy{MaxInputTokens: 8192, MaxSerializedBytes: 65536}
-		}},
-		{"negative output ceiling", func(o *harness.ToolAgentSessionOptions) { o.Session.Config.MaxModelOutputTokens = -1 }},
-		{"delegation", func(o *harness.ToolAgentSessionOptions) { o.Session.Config.DelegationPolicy.MaxDepth = 2 }},
-		{"sealed config", func(o *harness.ToolAgentSessionOptions) { o.Session.Config.ContentHash = "already-sealed" }},
-		{"approval version", func(o *harness.ToolAgentSessionOptions) { o.Session.Config.ApprovalPolicyVersion = 1 }},
-		{"approval needed", func(o *harness.ToolAgentSessionOptions) { o.Tools[0].Policy.ApprovalMode = "always" }},
-		{"approval capability", func(o *harness.ToolAgentSessionOptions) { o.Tools[0].Policy.ApprovalCapability = "per_call" }},
-		{"hosted tool", func(o *harness.ToolAgentSessionOptions) { o.Tools[0].Policy.ExecutionMode = "provider_hosted" }},
-		{"unknown effect", func(o *harness.ToolAgentSessionOptions) { o.Tools[0].Policy.SideEffectLevel = "" }},
-		{"mismatched key", func(o *harness.ToolAgentSessionOptions) { o.Tools[0].Policy.Key = "other" }},
-		{"missing version", func(o *harness.ToolAgentSessionOptions) { o.Tools[0].Policy.DefinitionVersion = "" }},
-		{"reserved reader", func(o *harness.ToolAgentSessionOptions) {
-			o.Tools[0].Registration.Definition.Key = harness.ContextArtifactToolKey
-		}},
-		{"reserved delegate", func(o *harness.ToolAgentSessionOptions) {
-			o.Tools[0].Registration.Definition.Key = harness.DelegationToolKey
-		}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			options := toolSessionOptions(t, client)
-			tc.edit(&options)
-			if _, err := harness.OpenToolAgentSession(options); !errors.Is(err, harness.ErrInvalidRequest) {
-				t.Fatalf("expected fail-closed: %v", err)
-			}
-		})
-	}
-	if len(client.requests) != 0 {
-		t.Fatal("invalid composition called the model")
-	}
-}
-
-func TestToolAgentSessionDoesNotInventModelCapacity(t *testing.T) {
-	client := &textSessionModel{}
-	options := toolSessionOptions(t, client)
-	options.ResolveModelWindow = func(context.Context, model.Request) (runtimecontext.ModelWindow, error) {
-		return runtimecontext.ModelWindow{}, errors.New("Host has not verified this model")
-	}
-	session, err := harness.OpenToolAgentSession(options)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = session.Prompt(t.Context(), "unknown-window", "Find evidence"); err == nil || len(client.requests) != 0 {
-		t.Fatalf("unverified model reached dispatch: err=%v calls=%d", err, len(client.requests))
-	}
-}
-
-func TestToolAgentSessionArchivesAndRetrievesExactEvidence(t *testing.T) {
+func TestAgentSessionArchivesLargeToolResultsAndRetrievesExactEvidence(t *testing.T) {
 	modelCalls := 0
 	marker := regexp.MustCompile(`\[tool_result_compacted artifact_id=([^\s]+)`)
 	client := toolSessionModelFunc(func(_ context.Context, request model.Request) (model.Response, error) {
@@ -226,11 +136,11 @@ func TestToolAgentSessionArchivesAndRetrievesExactEvidence(t *testing.T) {
 		MaxInputTokens: 8192, MaxToolResultBytes: 512, MaxCompactionTokens: 80,
 		PreserveRecentTurns: 1, MinimumRecentTurns: 1,
 	}
-	options.Tools[0].Registration.Handler = tools.HandlerFunc(func(_ context.Context, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
+	options.LocalTools[0].Registration.Handler = tools.HandlerFunc(func(_ context.Context, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
 		content, _ := json.Marshal(map[string]string{"dossier": strings.Repeat("padding ", 2000) + "TRUTH=42;" + strings.Repeat("padding ", 2000)})
 		return tools.ExecutionResult{Content: content, Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: "committed"}}, nil
 	})
-	session, err := harness.OpenToolAgentSession(options)
+	session, err := harness.OpenAgentSession(options)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,12 +150,12 @@ func TestToolAgentSessionArchivesAndRetrievesExactEvidence(t *testing.T) {
 	}
 }
 
-func TestToolAgentSessionAppliesQueuedUserInputWithoutAnotherHostTurn(t *testing.T) {
+func TestAgentSessionAppliesQueuedUserInputWithoutAnotherHostTurn(t *testing.T) {
 	queue, err := agent.NewMemoryRunInputs("tool-session-inputs")
 	if err != nil {
 		t.Fatal(err)
 	}
-	var options harness.ToolAgentSessionOptions
+	var options harness.AgentSessionOptions
 	calls, historyReads := 0, 0
 	client := toolSessionModelFunc(func(ctx context.Context, request model.Request) (model.Response, error) {
 		calls++
@@ -271,7 +181,7 @@ func TestToolAgentSessionAppliesQueuedUserInputWithoutAnotherHostTurn(t *testing
 		historyReads++
 		return nil, nil
 	})
-	session, err := harness.OpenToolAgentSession(options)
+	session, err := harness.OpenAgentSession(options)
 	if err != nil {
 		t.Fatal(err)
 	}

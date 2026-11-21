@@ -27,7 +27,7 @@ func TestRealPostgresContextCheckpointPreservesLosslessWindowHash(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	manager := runtimecontext.NewManager(runtimecontext.Dependencies{CheckpointWriteProfile: runtimecontext.CheckpointWriteLosslessJSON})
+	manager := runtimecontext.NewManager(runtimecontext.Dependencies{})
 	open := func(number string) runtimecontext.Checkpoint {
 		t.Helper()
 		checkpoint, err := manager.Open(t.Context(), runtimecontext.OpenRequest{

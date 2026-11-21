@@ -9,11 +9,12 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
   new archives and reject ambiguous JSON. Only archives that need the new
   representation use a versioned encoding; compatible and previously stored
   artifacts keep their IDs and hashes. See `docs/releases/unreleased-context-archive-fidelity.md`.
-- **One Session quickstart:** Recommend `harness.OpenAgentSession` with paired
-  `LocalTools`, an explicit archive grant, and optional queued inputs/read
-  exploration. `OpenToolAgentSession` and `OpenTextAgentSession` keep their
-  existing behavior but are deprecated pending the next breaking cleanup.
-  See `docs/agent-session.md` for migration.
+- **Breaking Session and Checkpoint cut:** Use `harness.OpenAgentSession` with
+  paired `LocalTools`, a verified model window, and a positive output cap.
+  Remove `OpenToolAgentSession`, `OpenTextAgentSession`, their options, and the
+  separate registration-inventory path. Context Checkpoints use the required
+  `lossless-json-v1` encoding, and automatic summaries use `working-state-summary-v2`.
+  Start with fresh Checkpoint and summary state. See `docs/agent-session.md`.
 
 - A parent Agent can consume the completed result of a fixed local deferred
   child when Host approval policies were registered and never entered. Harness
@@ -26,16 +27,14 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
   lifecycle. Freeze policy/source/recipe in its identity, archive original
   evidence and reconcile exact Context targets before consuming summary usage.
   Summary output is untrusted task data, not a business answer or Tool grant.
-  Preserve old absent-field hashes and Host-state priority. Support ordinary
+  Keep Host-state priority and frozen intent identity. Support ordinary
   callback-return recovery and explicitly selected native summary safe points
   using the original Kernel PARK/ENABLE protocol for hard-crash takeover.
   Review fixes actual-ID/typed-input bounds, prospective business framing,
   commit-time reconciliation and missing-Run Resume compatibility.
   Integrate the run-input/history baseline without admitting Host Inputs to
-  dedicated native summary recovery. Preserve both old Session facades during
-  deprecation; optional positive Tool Session output ceilings require matching
-  window reservation.
-  Keep the v1 automatic summary recipe on legacy-compatible source values.
+  dedicated native summary recovery. The v2 automatic summary recipe preserves
+  exact JSON number literals from its source through archive and recovery.
   Shared-budget and the older managed-Context combination remain rejected. See
   `docs/releases/unreleased-automatic-working-state.md`.
 
@@ -89,8 +88,8 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
   unknown outcomes/approvals/budgets. The bounded Memory source is explicitly
   process-local. Queued inputs can miss the final model boundary. Hosts can
   reclaim a terminal Run's retained queue capacity with `MemoryRunInputs.ReleaseRun`
-  after handling outstanding inputs. The legacy Tool Session facade can pass
-  the same source through; new code should use `OpenAgentSession`. Public history views now
+  after handling outstanding inputs. Pass the source to `OpenAgentSession` via
+  `Inputs`. Public history views now
   exclude opaque replay before cloning instead of copying then discarding it;
   original receipts and model continuation remain unchanged. See
   `docs/run-inputs-and-parallel-reads.md` and the long-history projection audit.
@@ -101,9 +100,9 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
   searches. The policy is copied and frozen in each new Run; old/default Runs
   retain their behavior. Identical settled calls are bounded before dispatch.
   Unknown outcomes, approvals, explicit denials and hard budgets are unchanged.
-  `harness.OpenToolAgentSession` adds an optional local-Tool/bounded-Context
-  composition facade with explicit per-tool policy and exact archive retrieval;
-  unsupported approval/delegation/shared-budget configuration fails closed.
+  `harness.OpenAgentSession` supports explicit per-Tool policy with optional
+  read exploration and exact archive retrieval. Unsupported approval,
+  delegation and shared-budget configuration fails closed.
   The offline `agent-quality-regression` gate and baseline `review-quality`
   command separate task/Oracle outcomes from recovery proof, sampling coverage,
   latency and known Usage without new Provider calls or changed report schemas.

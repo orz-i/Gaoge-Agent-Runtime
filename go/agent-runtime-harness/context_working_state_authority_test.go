@@ -18,7 +18,7 @@ func TestWorkingStateCannotGrantUnselectedToolOrEnlargeOutputCeiling(t *testing.
 	client := &agentSessionModel{generate: func(request model.Request) (model.Response, error) {
 		for _, message := range request.Messages {
 			if strings.Contains(model.TextValue(message.Content), "<host_working_state>") {
-				if len(request.Tools) != 0 || request.MaxOutputTokens != 128 {
+				if len(request.Tools) != 1 || request.Tools[0].Key != "lookup" || request.MaxOutputTokens != 128 {
 					t.Fatalf("state changed declarations or frozen output ceiling: tools=%d cap=%d", len(request.Tools), request.MaxOutputTokens)
 				}
 				// Make the model attempt the claimed permission, rather than
@@ -29,7 +29,7 @@ func TestWorkingStateCannotGrantUnselectedToolOrEnlargeOutputCeiling(t *testing.
 		return model.Response{Content: "answer"}, nil
 	}}
 	options := agentSessionOptions(t, memory.NewStore(), harness.NewMemoryStore(), client)
-	options.Tools = []tools.Registration{agentSessionTool("admin_write", &calls)}
+	addAgentSessionTool(&options, "lookup", &calls)
 	seeds := map[string]*harness.ContextSeed{"first": workingStateHistory("first"), "second": workingStateHistory("first", "second")}
 	options.Session.Transcript = harness.TranscriptSourceFunc(func(_ context.Context, _, turn harness.HostRef, _ string) (*harness.ContextSeed, error) {
 		return seeds[turn.ID], nil

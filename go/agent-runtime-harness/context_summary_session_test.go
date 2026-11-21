@@ -67,8 +67,7 @@ func TestAgentSessionSummaryProducesNativeStateAndVerifiesPriorOrigin(t *testing
 			options.Context.ResolveWindow = func(context.Context, model.Request) (runtimecontext.ModelWindow, error) {
 				return runtimecontext.ModelWindow{ContextTokens: 65536, ReservedOutputTokens: 128}, nil
 			}
-			options.Session.Config.ToolKeys = []string{harness.ContextArtifactToolKey}
-			options.Session.Config.ToolPolicies = []harness.ToolPolicySnapshot{harness.ContextArtifactToolPolicySnapshot()}
+			options.Context.ReadArtifacts = true
 			options.Session.Config.ContextPolicy = runtimecontext.Policy{SoftLimitPercent: 10, MaxSerializedBytes: 100000, PreserveRecentTurns: 1, MinimumRecentTurns: 1, MaxCompactionTokens: 128}
 			firstText := "first prompt " + strings.Repeat("ORIGINAL_EVIDENCE_", 700)
 			secondText := "second prompt " + strings.Repeat("CURRENT_EVIDENCE_", 700)

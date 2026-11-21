@@ -77,7 +77,7 @@ func (adapter *ContextSummaryAdapter) plan(ctx context.Context, runner *Runner, 
 		return model.Request{}, nil, false, ErrInvalidRequest
 	}
 	sourceMessages := runtimecontext.Materialize(previous.Window)
-	if !summaryTextOnly(sourceMessages) || !summaryPreservesSourceValues(sourceMessages) {
+	if !summaryTextOnly(sourceMessages) {
 		return model.Request{}, nil, false, nil
 	}
 	if len(previous.Window.Entries) == 0 || !sameBoundedValue(previous.Window.Entries[len(previous.Window.Entries)-1].Message, state.Messages[0]) {
@@ -122,9 +122,6 @@ func (adapter *ContextSummaryAdapter) plan(ctx context.Context, runner *Runner, 
 		Policy: *state.WorkingStateSummary, ContextPolicy: policy, ModelWindow: plan.ModelWindow,
 		ModelWindowFingerprint: runtimecontext.ModelWindowFingerprint(plan.ModelWindow), RecipeVersion: WorkingStateSummaryVersion,
 		RemovedMessages: candidate.RemovedMessages, PreviousEvidenceRefs: oldEvidence, BusinessRequest: base}
-	if profile := adapter.bounded.manager.CheckpointWriteProfile(); profile != runtimecontext.CheckpointWriteLegacy {
-		binding.TargetCheckpointWriteProfile = profile
-	}
 	for _, artifact := range candidate.Artifacts {
 		binding.Artifacts = append(binding.Artifacts, ContextSummaryArtifactRef{ID: artifact.ID, ContentHash: artifact.ContentHash})
 	}
@@ -265,26 +262,6 @@ func summaryTextOnly(messages []model.Message) bool {
 		}
 	}
 	return true
-}
-
-// The frozen v1 summary recipe remains limited to sources whose number
-// literals are unchanged by the legacy codec. Ordinary archives can now seal
-// additional values, but this does not change v1 summary eligibility or how
-// recovery reconstructs the artifacts of an already admitted summary.
-func summaryPreservesSourceValues(messages []model.Message) bool {
-	raw, err := json.Marshal(messages)
-	if err != nil || jsoncontract.ValidateUniqueJSONKeys(raw) != nil {
-		return false
-	}
-	var original, projected any
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.UseNumber()
-	if decoder.Decode(&original) != nil || json.Unmarshal(raw, &projected) != nil {
-		return false
-	}
-	lossless, losslessErr := json.Marshal(original)
-	canonical, canonicalErr := json.Marshal(projected)
-	return losslessErr == nil && canonicalErr == nil && bytes.Equal(lossless, canonical)
 }
 
 func summaryArtifactTextOnly(artifacts []runtimecontext.Artifact) bool {

@@ -69,11 +69,10 @@ The Context must be owned by that root Run, source-aligned,
 and contain safely removable history. Eager Tool/runtime tails, read-only or
 Handoff contexts, unsupported replay/media, insufficient input/call allowance,
 and unrepresentable WorkingState provenance do not create a summary call.
-The frozen v1 recipe requires legacy-compatible number literals and unambiguous
-JSON keys. Ineligible input skips summary; older completed receipts with such
-a source cannot install derived state. [New ordinary archives](releases/unreleased-context-archive-fidelity.md)
-now preserve number literals that the old codec would change. That does not
-change v1 summary eligibility or alter previously committed archives.
+The v2 recipe requires a lossless source Checkpoint and preserves JSON number
+literals in its [archives](releases/unreleased-context-archive-fidelity.md).
+The same recipe and Checkpoint encoding are used when recovery reconstructs
+an already admitted summary.
 
 Summary supports only portable `temperature`, `top_p` and `reasoning.effort`
 ModelOptions. Other Provider-native options may carry Tools, continuation or

@@ -191,10 +191,10 @@ func openCanCarryWorkingState(previous Checkpoint, request OpenRequest) bool {
 	return reusable
 }
 
-func (manager *Manager) applyOpenWorkingState(previous Checkpoint, next Checkpoint, state *WorkingState, update bool) (Checkpoint, error) {
+func applyOpenWorkingState(previous Checkpoint, next Checkpoint, state *WorkingState, update bool) (Checkpoint, error) {
 	changed := !sameWorkingState(previous.Window.WorkingState, state)
 	if !update && !changed && next.ID == previous.ID {
-		return next, nil // An unchanged legacy Checkpoint keeps its original identity.
+		return next, nil
 	}
 	next.Window.WorkingState = CloneWorkingState(state)
 	if update || changed {
@@ -211,5 +211,5 @@ func (manager *Manager) applyOpenWorkingState(previous Checkpoint, next Checkpoi
 			ArtifactCount: len(next.ArtifactIDs), LastAssessment: cloneAssessment(previous.Trace.LastAssessment),
 		}
 	}
-	return manager.sealCheckpoint(next)
+	return sealCheckpoint(next)
 }

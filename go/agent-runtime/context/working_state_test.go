@@ -54,8 +54,8 @@ func assertOneWorkingStateProjection(t *testing.T, window runtimectx.Window) {
 	}
 }
 
-func TestWorkingStateNilPreservesLegacyWindowHashVector(t *testing.T) {
-	manager := runtimectx.NewManager(runtimectx.Dependencies{CheckpointWriteProfile: runtimectx.CheckpointWriteLosslessJSON})
+func TestWorkingStateNilPreservesWindowHashVector(t *testing.T) {
+	manager := runtimectx.NewManager(runtimectx.Dependencies{})
 	checkpoint, err := manager.Open(t.Context(), openRequest("u1"))
 	requireNoError(t, err)
 	// SHA-256 of the pre-WorkingState canonical Window JSON for this fixture.
@@ -71,7 +71,7 @@ func TestWorkingStateNilPreservesLegacyWindowHashVector(t *testing.T) {
 }
 
 func TestWorkingStateExplicitUpdateIsVersionedAndIsolatedFromHistory(t *testing.T) {
-	manager := runtimectx.NewManager(runtimectx.Dependencies{CheckpointWriteProfile: runtimectx.CheckpointWriteLosslessJSON})
+	manager := runtimectx.NewManager(runtimectx.Dependencies{})
 	request := openRequest("u1", "a1", "u2")
 	previous, err := manager.Open(t.Context(), request)
 	requireNoError(t, err)

@@ -74,11 +74,9 @@ for byte/fallback-token bounds even without a routed counter. Oversized active
 summary requests fail closed on read. Source/target reconciliation also retains
 the original Turn timestamp floor when the Host clock is ahead or moves back.
 No existing request hash is rewritten.
-The v1 recipe still requires legacy-compatible number literals and unambiguous
-JSON keys. Older completed receipts with ineligible source data cannot install
-derived state. A subsequent [archive codec fix](unreleased-context-archive-fidelity.md)
-preserves structured numbers in new ordinary archives without rewriting old
-artifacts, summary recipes, or their identities.
+The v2 recipe requires lossless Checkpoint hashes and preserves structured
+numbers in [summary archives](unreleased-context-archive-fidelity.md). This cut
+requires fresh Checkpoint and summary state.
 
 ## Validation boundary
 

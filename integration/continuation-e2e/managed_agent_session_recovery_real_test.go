@@ -467,10 +467,7 @@ func newManagedRecoverySessionWithComposition(t *testing.T, db *gorm.DB, files s
 		session, err := harness.OpenAgentSession(harness.AgentSessionOptions{
 			Runtime: runtime, Store: hostStore, Model: managedRecoveryModel{logPath: filepath.Join(files, "model.jsonl")},
 			LocalTools: managedRecoverySessionTools(files), Session: options,
-			Context: harness.AgentSessionContextOptions{
-				ResolveWindow: resolveWindow, ManagedRecovery: managed, ReadArtifacts: true,
-				CheckpointWriteProfile: runtimecontext.CheckpointWriteLosslessJSON,
-			},
+			Context:   harness.AgentSessionContextOptions{ResolveWindow: resolveWindow, ManagedRecovery: managed, ReadArtifacts: true},
 			Execution: execution, RunExecution: runExecution,
 		})
 		if err != nil {
@@ -478,7 +475,7 @@ func newManagedRecoverySessionWithComposition(t *testing.T, db *gorm.DB, files s
 		}
 		return session
 	}
-	manager := runtimecontext.NewManager(runtimecontext.Dependencies{CheckpointWriteProfile: runtimecontext.CheckpointWriteLosslessJSON})
+	manager := runtimecontext.NewManager(runtimecontext.Dependencies{})
 	registrations = append(registrations, harness.ContextArtifactToolRegistration(harness.NewContextArtifactToolHandler(hostStore, nil)))
 	registry, err := tools.NewRegistry(registrations)
 	if err != nil {

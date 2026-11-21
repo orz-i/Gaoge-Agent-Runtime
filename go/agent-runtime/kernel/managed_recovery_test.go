@@ -58,10 +58,10 @@ func TestManagedSummarySafePointClosedEventProfileNeedsNativeProof(t *testing.T)
 			}
 		})
 	}
-	unknown := initial.SafePoint
-	unknown.LifecycleVersion = "working-state-summary-v2"
-	if unknown.Valid() {
-		t.Fatal("unknown lifecycle version was accepted")
+	retired := initial.SafePoint
+	retired.LifecycleVersion = "working-state-summary-v1"
+	if retired.Valid() {
+		t.Fatal("retired lifecycle version was accepted")
 	}
 	old := ManagedSafePointProof{point: initial.SafePoint, proof: featurecontrol.Seal(previous.Run.ID, previous.Run.Revision, "managed_safe_point", grant.ID, previous.State, initial.SafePoint)}
 	if !old.MatchesMutation(previous, next, lease, grant, []EventDraft{{Type: "agent.model_invocation.pending"}}) ||

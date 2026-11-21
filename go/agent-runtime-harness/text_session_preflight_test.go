@@ -53,7 +53,7 @@ func TestTextSessionHistoryPreflightRejectsInvalidContentBeforeAdmission(t *test
 				return history, nil
 			})
 			options := textSessionOptions(mustTextRuntime(t, kstore), hstore, client, source)
-			session, err := harness.OpenTextAgentSession(options)
+			session, err := harness.OpenAgentSession(options)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -115,7 +115,7 @@ func TestTextSessionInvalidUTF8PromptNeverCreatesTurnOrModelEffect(t *testing.T)
 				return nil, nil
 			})
 			options := textSessionOptions(mustTextRuntime(t, kstore), hstore, client, transcript)
-			session, err := harness.OpenTextAgentSession(options)
+			session, err := harness.OpenAgentSession(options)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -161,7 +161,7 @@ func TestSessionCustomTranscriptInvalidUTF8HistoryPreflight(t *testing.T) {
 		return &harness.ContextSeed{SourcePath: []string{prior.SourceID, current.SourceID}, Entries: []runtimecontext.Entry{prior, current}}, nil
 	})
 	options := textSessionOptions(mustTextRuntime(t, kstore), hstore, client, source)
-	session, err := harness.OpenTextAgentSession(options)
+	session, err := harness.OpenAgentSession(options)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +204,7 @@ func TestTextSessionHistoryPreflightRetainsMultiPartTextAndRejectsOversizedConte
 	})
 	modelClient := &textSessionModel{}
 	options := textSessionOptions(mustTextRuntime(t, memory.NewStore()), harness.NewMemoryStore(), modelClient, source)
-	session, err := harness.OpenTextAgentSession(options)
+	session, err := harness.OpenAgentSession(options)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +225,7 @@ func TestTextSessionHistoryPreflightRetainsMultiPartTextAndRejectsOversizedConte
 		return []runtimecontext.Entry{{ID: "prior/u", SourceID: "prior/u", Message: model.Message{Role: model.RoleUser, Content: parts}}}, nil
 	})
 	badOptions := textSessionOptions(mustTextRuntime(t, memory.NewStore()), harness.NewMemoryStore(), &textSessionModel{}, bad)
-	badSession, err := harness.OpenTextAgentSession(badOptions)
+	badSession, err := harness.OpenAgentSession(badOptions)
 	if err != nil {
 		t.Fatal(err)
 	}

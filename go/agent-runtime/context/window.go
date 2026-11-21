@@ -114,7 +114,10 @@ func (manager *Manager) CompactToolPressure(
 		if !validMessage(message) {
 			return ToolPressureCompaction{}, ErrLineageConflict
 		}
-		encoded, _ := canonicalJSON(message)
+		encoded, err := canonicalLosslessJSON(message)
+		if err != nil {
+			return ToolPressureCompaction{}, err
+		}
 		entries = append(entries, Entry{
 			ID: stableID(
 				"ctxe", previous.ScopeID, strconv.Itoa(previous.Generation+1), runID,
@@ -406,7 +409,7 @@ type Trace struct {
 }
 
 // CheckpointContentHashEncodingLosslessJSON identifies the lossless JSON
-// canonicalization used by Context Checkpoints written with the lossless profile.
+// canonicalization required by all Context Checkpoints.
 const CheckpointContentHashEncodingLosslessJSON = "lossless-json-v1"
 
 // Checkpoint is one immutable active Context Window revision. Generation changes only on an
@@ -424,9 +427,8 @@ type Checkpoint struct {
 	StaticFingerprint      string `json:"staticFingerprint"`
 	ModelWindowFingerprint string `json:"modelWindowFingerprint,omitempty"`
 	ContentHash            string `json:"contentHash"`
-	// ContentHashEncoding is empty for Checkpoints sealed with the legacy codec.
-	// The lossless codec preserves JSON number literals without using float64.
-	ContentHashEncoding string   `json:"contentHashEncoding,omitempty"`
+	// ContentHashEncoding identifies the required, number-preserving hash codec.
+	ContentHashEncoding string   `json:"contentHashEncoding"`
 	Window              Window   `json:"window"`
 	ArtifactIDs         []string `json:"artifactIDs,omitempty"`
 	Trace               Trace    `json:"trace"`
@@ -524,19 +526,15 @@ type TokenCounter interface {
 // Dependencies are optional Context Window capabilities.
 type Dependencies struct {
 	Counter TokenCounter
-	// CheckpointWriteProfile affects new decisions only. Empty retains legacy
-	// writes so readers can be upgraded before enabling lossless writes.
-	CheckpointWriteProfile CheckpointWriteProfile
 }
 
 // Manager owns pure Context Window evolution and request budget accounting.
 type Manager struct {
-	counter                TokenCounter
-	checkpointWriteProfile CheckpointWriteProfile
+	counter TokenCounter
 }
 
 func NewManager(dependencies Dependencies) *Manager {
-	return &Manager{counter: dependencies.Counter, checkpointWriteProfile: dependencies.CheckpointWriteProfile}
+	return &Manager{counter: dependencies.Counter}
 }
 
 // NormalizePolicy applies non-model defaults only. It intentionally never invents a model token limit.
@@ -589,7 +587,7 @@ func (manager *Manager) Open(_ stdcontext.Context, request OpenRequest) (Checkpo
 		if openErr != nil {
 			return Checkpoint{}, openErr
 		}
-		return manager.sealCheckpoint(next)
+		return sealCheckpoint(next)
 	}
 	previous := CloneCheckpoint(*normalized.Previous)
 	if !ValidCheckpoint(previous) {
@@ -617,7 +615,7 @@ func (manager *Manager) Open(_ stdcontext.Context, request OpenRequest) (Checkpo
 		next.ArtifactIDs = sortedUniqueStrings(append(append([]string(nil), previous.ArtifactIDs...), next.ArtifactIDs...))
 		next.Trace.ArtifactCount = len(next.ArtifactIDs)
 	}
-	return manager.applyOpenWorkingState(previous, next, state, normalized.WorkingState != nil)
+	return applyOpenWorkingState(previous, next, state, normalized.WorkingState != nil)
 }
 
 func (manager *Manager) openNormalized(normalized OpenRequest) (Checkpoint, error) {
@@ -743,11 +741,15 @@ func (manager *Manager) Capture(_ stdcontext.Context, request CaptureRequest) (C
 		next.Trace.Reason = "append_runtime_artifacts"
 		next.Trace.ArtifactCount = len(artifactIDs)
 		next.Trace.LastAssessment = cloneAssessment(request.Assessment)
-		return manager.sealCheckpoint(next)
+		return sealCheckpoint(next)
 	}
 	entries := CloneEntries(previous.Window.Entries)
 	for index, message := range incoming[len(current):] {
-		entries = append(entries, runtimeEntry(request.RunID, previous, len(entries)+index, message))
+		entry, err := runtimeEntry(request.RunID, previous, len(entries)+index, message)
+		if err != nil {
+			return Checkpoint{}, err
+		}
+		entries = append(entries, entry)
 	}
 	next := previous
 	next.Revision++
@@ -759,7 +761,7 @@ func (manager *Manager) Capture(_ stdcontext.Context, request CaptureRequest) (C
 		ActiveEntryCount: len(entries), AppendedEntryCount: len(incoming) - len(current),
 		ArtifactCount: len(artifactIDs), LastAssessment: cloneAssessment(request.Assessment),
 	}
-	return manager.sealCheckpoint(next)
+	return sealCheckpoint(next)
 }
 
 func captureArtifactIDs(previous Checkpoint, artifacts []Artifact) ([]string, error) {
@@ -853,7 +855,7 @@ func (manager *Manager) Rollover(_ stdcontext.Context, request RolloverRequest) 
 	if !sameWorkingState(previous.Window.WorkingState, window.WorkingState) {
 		next.CacheIdentity = resetCacheIdentity(previous, next.StaticFingerprint, next.LineageHash, next.Generation)
 	}
-	return manager.sealCheckpoint(next)
+	return sealCheckpoint(next)
 }
 
 // BindModelWindow records the routed model-window fingerprint without rewriting the active prompt.
@@ -884,7 +886,7 @@ func (manager *Manager) BindModelWindow(
 	next.ModelWindowFingerprint = fingerprint
 	next.Trace = previous.Trace
 	next.Trace.Reason = "model_window_bound"
-	return manager.sealCheckpoint(next)
+	return sealCheckpoint(next)
 }
 
 // AssessModelRequest accounts the final provider-neutral request at a model
@@ -907,18 +909,11 @@ func (manager *Manager) AssessModelRequest(
 	if err != nil {
 		return Assessment{}, errors.Join(ErrInvalidInput, err)
 	}
-	// The typed payload bounds all counting modes and accepts JSON numbers
-	// outside float64's range. Keep the extra legacy sizing bound where that
-	// projection succeeds so existing summary assessments stay reproducible.
-	serialized := exactPayload
-	if legacy, legacyErr := canonicalJSON(request); legacyErr == nil && len(legacy) > len(serialized) {
-		serialized = legacy
-	}
 	soft := hard * int64(policy.SoftLimitPercent) / 100
 	if soft < 1 {
 		soft = 1
 	}
-	assessment := Assessment{HardInputTokens: hard, SoftInputTokens: soft, SerializedBytes: int64(len(serialized))}
+	assessment := Assessment{HardInputTokens: hard, SoftInputTokens: soft, SerializedBytes: int64(len(exactPayload))}
 	countContext := normalizeTokenCountContext(modelWindow.TokenCountContext)
 	// A media URL/file reference is only a few serialized bytes, while
 	// decoded image/document/audio tokens are not bounded by those bytes.
@@ -926,12 +921,8 @@ func (manager *Manager) AssessModelRequest(
 	// hard context limit; require an exact Provider-aware token counter.
 	requiresExact := requestContainsMedia(request)
 	if manager != nil && manager.counter != nil && countContext.Protocol != "" && countContext.Model != "" {
-		// The generic canonicalJSON projection is suitable for stable
-		// Context sizing, but sorts keys *inside* json.RawMessage fields.
-		// Function-call arguments are signed against opaque ProviderReplay
-		// with their original key order. Counting must preserve exactly the
-		// same typed request bytes that Generate sees, or a valid replay is
-		// spuriously rejected before the native endpoint is reached.
+		// Provider replay may bind the exact spelling and key order of RawMessage
+		// arguments. The counter receives the typed request's original encoding.
 		countRequest := TokenCountRequest{
 			Context: countContext,
 			Payload: exactPayload,
@@ -949,9 +940,9 @@ func (manager *Manager) AssessModelRequest(
 	if requiresExact {
 		return Assessment{}, ErrModelWindowUnknown
 	}
-	assessment.RawTokenEstimate = estimatedTokens(serialized)
+	assessment.RawTokenEstimate = estimatedTokens(exactPayload)
 	assessment.AdjustedTokenEstimate = applySafetyMargin(assessment.RawTokenEstimate, policy.EstimateSafetyPercent)
-	assessment.HardTokenEstimate = hardTokenUpperBound(serialized, policy.EstimateSafetyPercent)
+	assessment.HardTokenEstimate = hardTokenUpperBound(exactPayload, policy.EstimateSafetyPercent)
 	assessment.TokenCountSource = CountEstimated
 	return assessment, nil
 }
@@ -1022,7 +1013,10 @@ func (manager *Manager) CompactPortable(request PortableCompactionRequest) (Port
 		})
 	}
 	for index, message := range retained {
-		encoded, _ := canonicalJSON(message)
+		encoded, err := canonicalLosslessJSON(message)
+		if err != nil {
+			return PortableCompaction{}, err
+		}
 		entry := Entry{
 			ID: stableID(
 				"ctxe", previous.ScopeID, strconv.Itoa(previous.Generation+1), runID,
@@ -1166,10 +1160,11 @@ func ValidCheckpoint(value Checkpoint) bool {
 		value.Generation <= 0 || value.Revision <= 0 ||
 		strings.TrimSpace(value.LineageHash) == "" || strings.TrimSpace(value.CoveredThroughSourceID) == "" ||
 		strings.TrimSpace(value.CoveredPathHash) == "" || strings.TrimSpace(value.StaticFingerprint) == "" ||
-		strings.TrimSpace(value.ContentHash) == "" || len(value.Window.Entries) == 0 {
+		strings.TrimSpace(value.ContentHash) == "" || len(value.Window.Entries) == 0 ||
+		value.ContentHashEncoding != CheckpointContentHashEncodingLosslessJSON {
 		return false
 	}
-	wantHash, err := checkpointWindowHash(value.Window, value.ContentHashEncoding)
+	wantHash, err := checkpointWindowHash(value.Window)
 	return err == nil && value.ContentHash == wantHash && value.ID == checkpointID(value)
 }
 
@@ -1273,8 +1268,7 @@ func sourceDelta(previous Checkpoint, request OpenRequest) ([]Entry, bool) {
 	return CloneEntries(request.Entries[coveredIndex+1:]), true
 }
 
-// newCheckpoint assembles a draft. Open seals it only after state and lineage
-// metadata are final, using the selected writer/recipe profile.
+// newCheckpoint assembles a draft. Open seals it after state and lineage metadata are final.
 func newCheckpoint(request OpenRequest, generation int, revision int, parentID string, entries []Entry, reason string, appended int) Checkpoint {
 	covered := request.SourcePath[len(request.SourcePath)-1]
 	window := normalizeWindow(Window{Instructions: request.Instructions, Entries: entries})
@@ -1290,70 +1284,13 @@ func newCheckpoint(request OpenRequest, generation int, revision int, parentID s
 	return checkpoint
 }
 
-func checkpointID(value Checkpoint) string {
-	parts := []string{
-		value.ScopeID, strconv.Itoa(value.Generation), strconv.Itoa(value.Revision),
-		value.ParentCheckpointID, value.CacheIdentity, value.LineageHash,
-		value.CoveredThroughSourceID, value.CoveredPathHash, value.StaticFingerprint,
-		value.ModelWindowFingerprint, value.ContentHash, strings.Join(value.ArtifactIDs, ","),
-	}
-	// Preserve the exact legacy identity vector for records without an encoding.
-	// The explicit tag is part of every new ID, so the two hash schemes cannot
-	// accidentally share one checkpoint identity.
-	if value.ContentHashEncoding != "" {
-		parts = append(parts, value.ContentHashEncoding)
-	}
-	return stableID("ctxc", parts...)
-}
-
-func windowHash(window Window) string {
-	if ValidateWorkingState(window.WorkingState) != nil {
-		return ""
-	}
-	encoded, err := canonicalJSON(normalizeWindow(window))
+func runtimeEntry(runID string, previous Checkpoint, index int, message model.Message) (Entry, error) {
+	encoded, err := canonicalLosslessJSON(message)
 	if err != nil {
-		return ""
+		return Entry{}, err
 	}
-	return hashBytes(encoded)
-}
-
-func checkpointWindowHash(window Window, encoding string) (string, error) {
-	switch encoding {
-	case "":
-		return windowHash(window), nil
-	case CheckpointContentHashEncodingLosslessJSON:
-		if ValidateWorkingState(window.WorkingState) != nil {
-			return "", ErrInvalidInput
-		}
-		encoded, err := canonicalLosslessJSON(normalizeWindow(window))
-		if err != nil {
-			return "", err
-		}
-		// The explicit encoding on the Checkpoint and its ID provides the domain
-		// separation. Keeping the digest bytes unchanged for legacy-safe windows
-		// preserves the established hash vector while still making lossy windows
-		// distinguishable.
-		return hashBytes(encoded), nil
-	default:
-		return "", ErrInvalidInput
-	}
-}
-
-func canonicalLosslessJSON(value any) ([]byte, error) {
-	if jsoncontract.ValidateCanonicalUTF8(value) != nil {
-		return nil, ErrInvalidInput
-	}
-	encoded, err := json.Marshal(value)
-	if err != nil {
-		return nil, errors.Join(ErrInvalidInput, err)
-	}
-	return canonicalArchiveJSON(encoded)
-}
-
-func runtimeEntry(runID string, previous Checkpoint, index int, message model.Message) Entry {
-	encoded, _ := canonicalJSON(message)
 	id := stableID("ctxe", previous.ScopeID, strconv.Itoa(previous.Generation), runID, strconv.Itoa(index), hashBytes(encoded))
-	return Entry{ID: id, TurnID: strings.TrimSpace(runID), Message: cloneMessage(message)}
+	return Entry{ID: id, TurnID: strings.TrimSpace(runID), Message: cloneMessage(message)}, nil
 }
 
 func normalizeEntry(value Entry) Entry {

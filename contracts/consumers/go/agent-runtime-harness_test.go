@@ -63,8 +63,6 @@ var (
 	_                                                                                        = harness.AgentSessionContextOptions{ReadArtifacts: true}
 	_                                                                                        = runtimecontext.Artifact{Encoding: runtimecontext.ArtifactEncodingLosslessJSON}
 	_                                                                                        = runtimecontext.Checkpoint{ContentHashEncoding: runtimecontext.CheckpointContentHashEncodingLosslessJSON}
-	_ func(harness.TextAgentSessionOptions) (*harness.SessionClient, error)                  = harness.OpenTextAgentSession
-	_ func(harness.ToolAgentSessionOptions) (*harness.SessionClient, error)                  = harness.OpenToolAgentSession
 	_ func(harness.AgentSessionOptions) (*harness.SessionClient, error)                      = harness.OpenAgentSession
 	_                                                                                        = harness.AgentSessionContextOptions{ManagedRecovery: true}
 	_                                                                                        = harness.ConfigSnapshot{MaxModelOutputTokens: 1024}

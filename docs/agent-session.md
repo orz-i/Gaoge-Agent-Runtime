@@ -1,7 +1,7 @@
 # Agent Sessions
 
-`harness.OpenAgentSession` is the recommended Go constructor for both text-only
-and local-Tool Sessions. It uses the existing Agent loop and Harness Store.
+`harness.OpenAgentSession` composes both text-only
+and local-Tool Sessions with the Agent loop and Harness Store.
 Run the offline quickstart from the repository root:
 
 ```sh
@@ -129,11 +129,9 @@ Unsupported original Turns remain available through the read/Refresh APIs;
 continue execution with their original explicit composition. The ordinary
 Harness default delegation depth alone does not require a delegation engine.
 
-Context Checkpoint writes default to the legacy format. Upgrade all readers of
-shared Context storage with this default, then set `Context.CheckpointWriteProfile`
-to `runtimecontext.CheckpointWriteLosslessJSON` on writers that share the Store.
-The updated reader accepts both Checkpoint formats. Existing summary invocations
-keep their original target format during recovery.
+Context Checkpoints use the required `lossless-json-v1` content hash encoding.
+Automatic summaries use the `working-state-summary-v2` recipe. Deploy this cut
+with fresh Checkpoint and summary state.
 
 Ordinary bounded composition is the default. Explicit
 `Context.ManagedRecovery: true` selects the existing Runtime-owned Context
@@ -161,29 +159,18 @@ See [Automatic WorkingState](automatic-working-state.md) for input/call limits,
 Host-state priority, ordinary recovery and the separate, restricted
 `Context.SummaryNativeRecovery` hard-crash option.
 
-## Deprecated entry points and migration
+## Migrating Session callers
 
-Both `OpenTextAgentSession` and `OpenToolAgentSession` and their option types
-are deprecated. They remain source-compatible for this release and keep their
-original behavior. New integrations should use `OpenAgentSession`:
+Use `OpenAgentSession` and `AgentSessionOptions` in place of the removed
+Session constructors and their option types.
 
-| Existing caller | For new Turns |
+| Previous caller | `OpenAgentSession` configuration |
 | --- | --- |
-| `OpenTextAgentSession` | Omit `LocalTools`. Choose a verified window and a positive output cap. Unlike the old text facade, the new path enforces that window. |
-| `OpenToolAgentSession` | Move its `Tools` to `LocalTools` and `ResolveModelWindow`/`Counter` to `Context`. Explicitly set `ReadArtifacts` and `ExploreReads` to retain those old defaults. Choose a positive cap if the old configuration used zero. |
-| `OpenAgentSession` with separate registration inventory and Tool lists | Pair each **selected** registration and policy in `LocalTools`; omit unselected registrations. Move the standard reader to `Context.ReadArtifacts`. Remove the old `Tools`/`Config.ToolKeys`/`Config.ToolPolicies` inputs rather than merging them. |
+| `OpenTextAgentSession` | Omit `LocalTools`. Supply `Context.ResolveWindow` and a positive `Config.MaxModelOutputTokens`. |
+| `OpenToolAgentSession` | Pass selected Tools as `LocalTools` with their policies. Move `ResolveModelWindow` and `Counter` to `Context.ResolveWindow` and `Context.Counter`. Explicitly enable `ReadArtifacts` and `ExploreReads` when needed. |
+| Separate Tool inventory and selection | Supply paired `LocalTools`. The constructor derives `Config.ToolKeys` and `Config.ToolPolicies`. |
 
-Do not change the config of an already admitted Turn. Finish or reconcile
-in-flight work using its original compatible runner composition. In particular,
-the bounded constructor does not retrofit a positive output cap onto a legacy
-zero-cap Turn. `Runner.OpenSession` remains the supported low-level binding for
-callers that compose their own runners.
-
-**Next breaking cleanup:** after callers migrate and old in-flight work is
-drained or reconciled, remove the two deprecated constructors/options, the
-legacy registration-inventory form of `OpenAgentSession`, the corresponding
-private compatibility branches, and the legacy example/consumer coverage. Do
-not leave aliases or rewrite admitted Turn, request or receipt identities.
+Use `Runner.OpenSession` for explicitly composed runners.
 
 ## Verify locally
 

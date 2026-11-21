@@ -13,7 +13,7 @@ func summaryDerivation() *runtimectx.WorkingStateDerivation {
 	return &runtimectx.WorkingStateDerivation{
 		Kind: runtimectx.WorkingStateDerivationSummary, RunID: "summary-source-run",
 		InvocationID: "modelinv_" + strings.Repeat("a", 32), RequestHash: strings.Repeat("b", 64),
-		PolicyVersion: "working-state-summary-v1",
+		PolicyVersion: "working-state-summary-v2",
 	}
 }
 

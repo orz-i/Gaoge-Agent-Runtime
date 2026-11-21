@@ -9,7 +9,6 @@ import (
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
@@ -31,20 +30,23 @@ func (client *textSessionModel) Generate(_ context.Context, request model.Reques
 	return model.Response{Content: fmt.Sprintf("saw-%d-users", users)}, nil
 }
 
-func textSessionOptions(rt *kernel.Runtime, store harness.Store, client model.Client, transcript harness.TranscriptSource) harness.TextAgentSessionOptions {
+func textSessionOptions(rt *kernel.Runtime, store harness.Store, client model.Client, transcript harness.TranscriptSource) harness.AgentSessionOptions {
 	const thread = "tenant-a/chat-1"
-	return harness.TextAgentSessionOptions{
+	return harness.AgentSessionOptions{
 		Runtime: rt, Store: store, Model: client,
 		Session: harness.SessionOptions{
 			HostThread: harness.HostRef{Kind: "conversation", ID: thread},
 			Actor:      kernel.ActorRef{TenantID: "tenant-a", ActorID: "user-a"},
 			Thread:     kernel.ThreadRef{Kind: "conversation", ID: thread},
-			Config:     harness.ConfigSnapshot{Model: "local"}, Transcript: transcript,
+			Config:     harness.ConfigSnapshot{Model: "local", MaxModelOutputTokens: 128}, Transcript: transcript,
 		},
+		Context: harness.AgentSessionContextOptions{ResolveWindow: func(context.Context, model.Request) (runtimecontext.ModelWindow, error) {
+			return runtimecontext.ModelWindow{ContextTokens: 32768, ReservedOutputTokens: 128}, nil
+		}},
 	}
 }
 
-func TestTextAgentSessionComposesOneLoopWithImmutableHistoryAndRecovery(t *testing.T) {
+func TestAgentSessionTextComposesOneLoopWithImmutableHistoryAndRecovery(t *testing.T) {
 	kernelStore, harnessStore := memory.NewStore(), harness.NewMemoryStore()
 	var history []runtimecontext.Entry
 	var historyReads int
@@ -68,7 +70,7 @@ func TestTextAgentSessionComposesOneLoopWithImmutableHistoryAndRecovery(t *testi
 		if own {
 			options.RunExecution = &agent.RunExecution{OwnerID: "worker-a", LeaseDuration: 5 * time.Minute}
 		}
-		session, err := harness.OpenTextAgentSession(options)
+		session, err := harness.OpenAgentSession(options)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -131,7 +133,7 @@ func TestTextAgentSessionComposesOneLoopWithImmutableHistoryAndRecovery(t *testi
 	// A reopened read-only session needs no Host transcript, but its frozen
 	// Actor cannot be changed to read another tenant's history.
 	readOpts := textSessionOptions(mustTextRuntime(t, kernelStore), harnessStore, client, nil)
-	reader, err := harness.OpenTextAgentSession(readOpts)
+	reader, err := harness.OpenAgentSession(readOpts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +141,7 @@ func TestTextAgentSessionComposesOneLoopWithImmutableHistoryAndRecovery(t *testi
 		t.Fatalf("reopened read without transcript: %v", err)
 	}
 	readOpts.Session.Actor.ActorID = "foreign-user"
-	foreign, err := harness.OpenTextAgentSession(readOpts)
+	foreign, err := harness.OpenAgentSession(readOpts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +155,7 @@ func TestTextAgentSessionComposesOneLoopWithImmutableHistoryAndRecovery(t *testi
 		t.Fatal("foreign Prompt read private transcript")
 		return nil, nil
 	})
-	foreign, err = harness.OpenTextAgentSession(foreignOptions)
+	foreign, err = harness.OpenAgentSession(foreignOptions)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,45 +171,4 @@ func mustTextRuntime(t *testing.T, store kernel.Store) *kernel.Runtime {
 		t.Fatal(err)
 	}
 	return rt
-}
-
-func TestTextAgentSessionRejectsUncomposedFeatures(t *testing.T) {
-	store := harness.NewMemoryStore()
-	client := &textSessionModel{}
-	base := textSessionOptions(mustTextRuntime(t, memory.NewStore()), store, client, nil)
-	cases := []struct {
-		name   string
-		mutate func(*harness.TextAgentSessionOptions)
-	}{
-		{"missing runtime", func(o *harness.TextAgentSessionOptions) { o.Runtime = nil }},
-		{"missing store", func(o *harness.TextAgentSessionOptions) { o.Store = nil }},
-		{"missing model", func(o *harness.TextAgentSessionOptions) { o.Model = nil }},
-		{"tool without registry", func(o *harness.TextAgentSessionOptions) { o.Session.Config.ToolKeys = []string{"some-tool"} }},
-		{"policy without registry", func(o *harness.TextAgentSessionOptions) {
-			o.Session.Config.ToolPolicies = []harness.ToolPolicySnapshot{{Key: "some-tool"}}
-		}},
-		{"skills without loader", func(o *harness.TextAgentSessionOptions) {
-			o.Session.Config.Skills = []harness.SkillSnapshot{{ID: "skill"}}
-		}},
-		{"memory policy without manager", func(o *harness.TextAgentSessionOptions) {
-			o.Session.Config.MemoryPolicy = "custom"
-		}},
-		{"bounded context without model window", func(o *harness.TextAgentSessionOptions) {
-			o.Session.Config.ContextPolicy.MaxInputTokens = 512
-		}},
-		{"shared budget without coordinator", func(o *harness.TextAgentSessionOptions) {
-			o.Session.Config.SharedBudget = &budget.Limits{}
-		}},
-		{"delegation without runner", func(o *harness.TextAgentSessionOptions) { o.Session.Config.DelegationPolicy.MaxDepth = 1 }},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			opts := base
-			opts.Session = base.Session
-			tc.mutate(&opts)
-			if _, err := harness.OpenTextAgentSession(opts); !errors.Is(err, harness.ErrInvalidRequest) {
-				t.Fatalf("expected fail-closed, got %v", err)
-			}
-		})
-	}
 }

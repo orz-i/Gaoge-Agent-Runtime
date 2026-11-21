@@ -33,7 +33,7 @@ func TestSameMessageComparesExactJSONNumbersWithoutFloatRounding(t *testing.T) {
 }
 
 func TestCheckpointLosslessEncodingSeparatesLargeNumbersAndOpaqueReplay(t *testing.T) {
-	manager := NewManager(Dependencies{CheckpointWriteProfile: CheckpointWriteLosslessJSON})
+	manager := NewManager(Dependencies{})
 	open := func(number string) Checkpoint {
 		t.Helper()
 		checkpoint, err := manager.Open(t.Context(), OpenRequest{
@@ -84,8 +84,33 @@ func TestCheckpointLosslessEncodingSeparatesLargeNumbersAndOpaqueReplay(t *testi
 	}
 }
 
-func TestLegacyCheckpointValidationRemainsLegacy(t *testing.T) {
-	manager := NewManager(Dependencies{CheckpointWriteProfile: CheckpointWriteLosslessJSON})
+func TestCheckpointRuntimeEntryIDsPreserveNumbers(t *testing.T) {
+	manager := NewManager(Dependencies{})
+	base, err := manager.Open(t.Context(), OpenRequest{
+		ScopeID: "scope", StaticFingerprint: StaticFingerprint("numeric-entry"), SourcePath: []string{"user"},
+		Entries: []Entry{{ID: "user", SourceID: "user", Message: model.Message{Role: model.RoleUser, Content: model.TextParts("question")}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	capture := func(number string) Entry {
+		t.Helper()
+		messages := append(Materialize(base.Window), model.Message{Role: model.RoleAssistant, ToolCalls: []tools.Call{{
+			ID: "call", ToolKey: "lookup", Arguments: json.RawMessage(`{"n":` + number + `}`),
+		}}}, model.Message{Role: model.RoleTool, ToolCallID: "call", Content: model.TextParts("answer")})
+		next, err := manager.Capture(t.Context(), CaptureRequest{Previous: base, StaticFingerprint: base.StaticFingerprint, RunID: "run", Messages: messages})
+		if err != nil || !ValidCheckpoint(next) {
+			t.Fatalf("capture failed for %s: %v", number, err)
+		}
+		return next.Window.Entries[len(base.Window.Entries)]
+	}
+	if capture("9007199254740992").ID == capture("9007199254740993").ID {
+		t.Fatal("adjacent argument values shared a runtime entry ID")
+	}
+}
+
+func TestCheckpointRejectsMissingOrUnknownHashEncoding(t *testing.T) {
+	manager := NewManager(Dependencies{})
 	request := OpenRequest{
 		ScopeID: "scope-legacy", StaticFingerprint: StaticFingerprint("legacy"), Instructions: "instructions",
 		SourcePath: []string{"user", "assistant", "tool"}, Entries: []Entry{
@@ -97,59 +122,29 @@ func TestLegacyCheckpointValidationRemainsLegacy(t *testing.T) {
 		},
 	}
 	checkpoint, err := manager.Open(t.Context(), request)
-	if err != nil {
-		t.Fatal(err)
+	if err != nil || !ValidCheckpoint(checkpoint) {
+		t.Fatalf("failed to create a lossless Checkpoint: %v", err)
 	}
-	losslessID := checkpoint.ID
-	checkpoint.ContentHashEncoding = ""
-	checkpoint.ContentHash = windowHash(checkpoint.Window)
-	checkpoint.ID = checkpointID(checkpoint)
-	if checkpoint.ID != "ctxc_ff1a2bec25e4c89cafc46c460e98295e" ||
-		checkpoint.ContentHash != "c28117f476b510b734b9e5948f6866925411934297826737698423fa726773e3" {
-		t.Fatalf("legacy Checkpoint ID/hash vector changed: id=%s hash=%s", checkpoint.ID, checkpoint.ContentHash)
-	}
-	if !ValidCheckpoint(checkpoint) {
-		t.Fatal("legacy checkpoint was not accepted by the legacy verifier")
-	}
-	if checkpoint.ID == losslessID {
-		t.Fatal("checkpoint ID did not seal the content-hash encoding")
-	}
-	encoded, err := json.Marshal(checkpoint)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var restored Checkpoint
-	if err = json.Unmarshal(encoded, &restored); err != nil || !ValidCheckpoint(restored) || restored.ContentHashEncoding != "" {
-		t.Fatalf("legacy checkpoint did not survive JSON compatibility read: restored=%+v err=%v", restored, err)
-	}
-	legacyID, legacyHash := checkpoint.ID, checkpoint.ContentHash
-	messages := append(Materialize(checkpoint.Window),
-		model.Message{Role: model.RoleAssistant, ToolCalls: []tools.Call{{
-			ID: "new-call", ToolKey: "lookup", Arguments: json.RawMessage(`{"n":9007199254740993}`),
-		}}},
-		model.Message{Role: model.RoleTool, ToolCallID: "new-call", Content: model.TextParts("new result")},
-	)
-	upgraded, err := manager.Capture(t.Context(), CaptureRequest{
-		Previous: checkpoint, StaticFingerprint: checkpoint.StaticFingerprint, RunID: "legacy-upgrade", Messages: messages,
-	})
-	if err != nil || upgraded.ContentHashEncoding != CheckpointContentHashEncodingLosslessJSON ||
-		upgraded.ParentCheckpointID != legacyID || !ValidCheckpoint(upgraded) ||
-		checkpoint.ID != legacyID || checkpoint.ContentHash != legacyHash || checkpoint.ContentHashEncoding != "" {
-		t.Fatalf("new revision did not upgrade without mutating legacy parent: upgraded=%+v parent=%+v err=%v", upgraded, checkpoint, err)
-	}
-	request.Previous = &checkpoint
-	unchanged, err := manager.Open(t.Context(), request)
-	if err != nil || unchanged.ID != checkpoint.ID || unchanged.ContentHash != checkpoint.ContentHash || unchanged.ContentHashEncoding != "" {
-		t.Fatalf("unchanged Open rewrote legacy checkpoint identity: unchanged=%+v err=%v", unchanged, err)
-	}
-	checkpoint.Window.Entries[1].Message.ToolCalls[0].Arguments = json.RawMessage(`{"n":9007199254740993}`)
-	if !ValidCheckpoint(checkpoint) {
-		t.Fatal("legacy checkpoint no longer accepts its historical collision vector")
+	legacy := checkpoint
+	legacy.ContentHashEncoding = ""
+	legacy.ID = "ctxc_ff1a2bec25e4c89cafc46c460e98295e"
+	legacy.ContentHash = "c28117f476b510b734b9e5948f6866925411934297826737698423fa726773e3"
+	unknown := checkpoint
+	unknown.ContentHashEncoding = "unknown"
+	unknown.ID = checkpointID(unknown)
+	for _, value := range []Checkpoint{legacy, unknown} {
+		if ValidCheckpoint(value) {
+			t.Fatalf("accepted unsupported Checkpoint encoding %q", value.ContentHashEncoding)
+		}
+		request.Previous = &value
+		if _, err := manager.Open(t.Context(), request); err == nil {
+			t.Fatalf("reused unsupported Checkpoint encoding %q", value.ContentHashEncoding)
+		}
 	}
 }
 
 func TestCheckpointLosslessEncodingRejectsAmbiguousRawJSON(t *testing.T) {
-	manager := NewManager(Dependencies{CheckpointWriteProfile: CheckpointWriteLosslessJSON})
+	manager := NewManager(Dependencies{})
 	for _, test := range []struct {
 		name, arguments, replay string
 	}{

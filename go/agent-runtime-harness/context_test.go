@@ -24,7 +24,7 @@ const (
 
 func TestMemoryStoreRoundTripsLosslessContextCheckpointEncoding(t *testing.T) {
 	t.Parallel()
-	manager := runtimecontext.NewManager(runtimecontext.Dependencies{CheckpointWriteProfile: runtimecontext.CheckpointWriteLosslessJSON})
+	manager := runtimecontext.NewManager(runtimecontext.Dependencies{})
 	checkpoint, err := manager.Open(t.Context(), runtimecontext.OpenRequest{
 		ScopeID: "memory-lossless", StaticFingerprint: runtimecontext.StaticFingerprint("test"),
 		Instructions: "instructions", SourcePath: []string{"user"},

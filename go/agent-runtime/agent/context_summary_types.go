@@ -11,7 +11,7 @@ import (
 
 const (
 	ModelInvocationContextSummary = "context_summary"
-	WorkingStateSummaryVersion    = "working-state-summary-v1"
+	WorkingStateSummaryVersion    = "working-state-summary-v2"
 	EventContextSummaryConsumed   = "agent.context_summary.consumed"
 )
 
@@ -78,9 +78,6 @@ type ContextSummaryBinding struct {
 	PreviousEvidenceRefs   []string                          `json:"previousEvidenceRefs,omitempty"`
 	BusinessRequest        model.Request                     `json:"businessRequest"`
 	OriginalAssessment     runtimecontext.Assessment         `json:"originalAssessment"`
-
-	// Omission freezes legacy target sealing and retains the original wire recipe.
-	TargetCheckpointWriteProfile runtimecontext.CheckpointWriteProfile `json:"targetCheckpointWriteProfile,omitempty"`
 }
 
 // ContextSummaryPlan is a read-only Host projection. The native algorithm
