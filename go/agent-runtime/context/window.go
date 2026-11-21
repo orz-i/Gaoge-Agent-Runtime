@@ -524,14 +524,20 @@ type TokenCounter interface {
 // Dependencies are optional Context Window capabilities.
 type Dependencies struct {
 	Counter TokenCounter
+	// CheckpointWriteProfile affects new decisions only. Empty selects the
+	// current writer; reader-only deployments can explicitly retain legacy writes.
+	CheckpointWriteProfile CheckpointWriteProfile
 }
 
 // Manager owns pure Context Window evolution and request budget accounting.
 type Manager struct {
-	counter TokenCounter
+	counter                TokenCounter
+	checkpointWriteProfile CheckpointWriteProfile
 }
 
-func NewManager(dependencies Dependencies) *Manager { return &Manager{counter: dependencies.Counter} }
+func NewManager(dependencies Dependencies) *Manager {
+	return &Manager{counter: dependencies.Counter, checkpointWriteProfile: dependencies.CheckpointWriteProfile}
+}
 
 // NormalizePolicy applies non-model defaults only. It intentionally never invents a model token limit.
 func NormalizePolicy(value Policy) Policy {
@@ -579,7 +585,11 @@ func (manager *Manager) Open(_ stdcontext.Context, request OpenRequest) (Checkpo
 		if normalized.WorkingState != nil {
 			return Checkpoint{}, ErrLineageConflict
 		}
-		return manager.openNormalized(normalized)
+		next, openErr := manager.openNormalized(normalized)
+		if openErr != nil {
+			return Checkpoint{}, openErr
+		}
+		return manager.sealCheckpoint(next)
 	}
 	previous := CloneCheckpoint(*normalized.Previous)
 	if !ValidCheckpoint(previous) {
@@ -607,7 +617,7 @@ func (manager *Manager) Open(_ stdcontext.Context, request OpenRequest) (Checkpo
 		next.ArtifactIDs = sortedUniqueStrings(append(append([]string(nil), previous.ArtifactIDs...), next.ArtifactIDs...))
 		next.Trace.ArtifactCount = len(next.ArtifactIDs)
 	}
-	return applyOpenWorkingState(previous, next, state, normalized.WorkingState != nil)
+	return manager.applyOpenWorkingState(previous, next, state, normalized.WorkingState != nil)
 }
 
 func (manager *Manager) openNormalized(normalized OpenRequest) (Checkpoint, error) {
@@ -615,7 +625,7 @@ func (manager *Manager) openNormalized(normalized OpenRequest) (Checkpoint, erro
 		if normalized.SourceDelta {
 			return Checkpoint{}, ErrInvalidInput
 		}
-		return newCheckpoint(normalized, 1, 1, "", normalized.Entries, "open", 0)
+		return newCheckpoint(normalized, 1, 1, "", normalized.Entries, "open", 0), nil
 	}
 	previous := CloneCheckpoint(*normalized.Previous)
 	if !ValidCheckpoint(previous) {
@@ -626,17 +636,13 @@ func (manager *Manager) openNormalized(normalized OpenRequest) (Checkpoint, erro
 	}
 	delta, reusable := sourceDelta(previous, normalized)
 	if normalized.ResetCacheIdentity || !reusable {
-		next, err := newCheckpoint(
+		next := newCheckpoint(
 			normalized, previous.Generation+1, 1, previous.ID,
 			normalized.Entries, "lineage_reset", 0,
 		)
-		if err != nil {
-			return Checkpoint{}, err
-		}
 		next.CacheIdentity = resetCacheIdentity(
 			previous, next.StaticFingerprint, next.LineageHash, next.Generation,
 		)
-		next.ID = checkpointID(next)
 		return next, nil
 	}
 	if len(delta) == 0 && normalized.Instructions == previous.Window.Instructions &&
@@ -645,19 +651,15 @@ func (manager *Manager) openNormalized(normalized OpenRequest) (Checkpoint, erro
 		return previous, nil
 	}
 	entries := append(CloneEntries(previous.Window.Entries), CloneEntries(delta)...)
-	next, err := newCheckpoint(
+	next := newCheckpoint(
 		normalized, previous.Generation, previous.Revision+1, previous.ID,
 		entries, "append_source_delta", len(delta),
 	)
-	if err != nil {
-		return Checkpoint{}, err
-	}
 	next.CacheIdentity = previous.CacheIdentity
 	next.ModelWindowFingerprint = previous.ModelWindowFingerprint
 	next.ArtifactIDs = append([]string(nil), previous.ArtifactIDs...)
 	next.Trace.ArtifactCount = len(next.ArtifactIDs)
 	next.Trace.LastAssessment = cloneAssessment(previous.Trace.LastAssessment)
-	next.ID = checkpointID(next)
 	return next, nil
 }
 
@@ -672,15 +674,12 @@ func openSourceDelta(previous Checkpoint, request OpenRequest) (Checkpoint, erro
 	lineageHash := ExtendLineageHash(previous.CoveredPathHash, request.SourcePath...)
 	entries := append(CloneEntries(previous.Window.Entries), CloneEntries(request.Entries)...)
 	next := previous
+	next.ID = "" // A draft is not the unchanged previous revision.
 	next.Revision++
 	next.ParentCheckpointID = previous.ID
 	next.LineageHash = lineageHash
 	next.CoveredPathHash = lineageHash
 	next.Window = normalizeWindow(Window{Instructions: request.Instructions, Entries: entries})
-	next.ContentHashEncoding = CheckpointContentHashEncodingLosslessJSON
-	if err := sealCheckpointContentHash(&next); err != nil {
-		return Checkpoint{}, err
-	}
 	next.Trace = Trace{
 		Reason: "append_source_delta", SourceEntryCount: previous.Trace.SourceEntryCount + len(request.SourcePath),
 		ActiveEntryCount: len(next.Window.Entries), AppendedEntryCount: len(request.SourcePath),
@@ -697,7 +696,6 @@ func openSourceDelta(previous Checkpoint, request OpenRequest) (Checkpoint, erro
 			previous, request.StaticFingerprint, lineageHash, next.Generation,
 		)
 	}
-	next.ID = checkpointID(next)
 	return next, nil
 }
 
@@ -745,12 +743,7 @@ func (manager *Manager) Capture(_ stdcontext.Context, request CaptureRequest) (C
 		next.Trace.Reason = "append_runtime_artifacts"
 		next.Trace.ArtifactCount = len(artifactIDs)
 		next.Trace.LastAssessment = cloneAssessment(request.Assessment)
-		next.ContentHashEncoding = CheckpointContentHashEncodingLosslessJSON
-		if err := sealCheckpointContentHash(&next); err != nil {
-			return Checkpoint{}, err
-		}
-		next.ID = checkpointID(next)
-		return next, nil
+		return manager.sealCheckpoint(next)
 	}
 	entries := CloneEntries(previous.Window.Entries)
 	for index, message := range incoming[len(current):] {
@@ -761,17 +754,12 @@ func (manager *Manager) Capture(_ stdcontext.Context, request CaptureRequest) (C
 	next.ParentCheckpointID = previous.ID
 	next.Window.Entries = entries
 	next.ArtifactIDs = artifactIDs
-	next.ContentHashEncoding = CheckpointContentHashEncodingLosslessJSON
-	if err := sealCheckpointContentHash(&next); err != nil {
-		return Checkpoint{}, err
-	}
 	next.Trace = Trace{
 		Reason: "append_runtime_tail", SourceEntryCount: previous.Trace.SourceEntryCount,
 		ActiveEntryCount: len(entries), AppendedEntryCount: len(incoming) - len(current),
 		ArtifactCount: len(artifactIDs), LastAssessment: cloneAssessment(request.Assessment),
 	}
-	next.ID = checkpointID(next)
-	return next, nil
+	return manager.sealCheckpoint(next)
 }
 
 func captureArtifactIDs(previous Checkpoint, artifacts []Artifact) ([]string, error) {
@@ -855,8 +843,7 @@ func (manager *Manager) Rollover(_ stdcontext.Context, request RolloverRequest) 
 		ParentCheckpointID: previous.ID, LineageHash: previous.LineageHash,
 		CoveredThroughSourceID: previous.CoveredThroughSourceID, CoveredPathHash: previous.CoveredPathHash,
 		StaticFingerprint: previous.StaticFingerprint, ModelWindowFingerprint: strings.TrimSpace(request.ModelWindowFingerprint),
-		ContentHashEncoding: CheckpointContentHashEncodingLosslessJSON,
-		Window:              window, ArtifactIDs: artifactIDs,
+		Window: window, ArtifactIDs: artifactIDs,
 		Trace: Trace{
 			Reason: reason, SourceEntryCount: previous.Trace.SourceEntryCount,
 			ActiveEntryCount: len(window.Entries), CompactedEntryCount: maxInt(len(previous.Window.Entries)-len(window.Entries), 0),
@@ -866,11 +853,7 @@ func (manager *Manager) Rollover(_ stdcontext.Context, request RolloverRequest) 
 	if !sameWorkingState(previous.Window.WorkingState, window.WorkingState) {
 		next.CacheIdentity = resetCacheIdentity(previous, next.StaticFingerprint, next.LineageHash, next.Generation)
 	}
-	if err := sealCheckpointContentHash(&next); err != nil {
-		return Checkpoint{}, err
-	}
-	next.ID = checkpointID(next)
-	return next, nil
+	return manager.sealCheckpoint(next)
 }
 
 // BindModelWindow records the routed model-window fingerprint without rewriting the active prompt.
@@ -901,12 +884,7 @@ func (manager *Manager) BindModelWindow(
 	next.ModelWindowFingerprint = fingerprint
 	next.Trace = previous.Trace
 	next.Trace.Reason = "model_window_bound"
-	next.ContentHashEncoding = CheckpointContentHashEncodingLosslessJSON
-	if err := sealCheckpointContentHash(&next); err != nil {
-		return Checkpoint{}, err
-	}
-	next.ID = checkpointID(next)
-	return next, nil
+	return manager.sealCheckpoint(next)
 }
 
 // AssessModelRequest accounts the final provider-neutral request at a model
@@ -1298,7 +1276,9 @@ func sourceDelta(previous Checkpoint, request OpenRequest) ([]Entry, bool) {
 	return CloneEntries(request.Entries[coveredIndex+1:]), true
 }
 
-func newCheckpoint(request OpenRequest, generation int, revision int, parentID string, entries []Entry, reason string, appended int) (Checkpoint, error) {
+// newCheckpoint assembles a draft. Open seals it only after state and lineage
+// metadata are final, using the selected writer/recipe profile.
+func newCheckpoint(request OpenRequest, generation int, revision int, parentID string, entries []Entry, reason string, appended int) Checkpoint {
 	covered := request.SourcePath[len(request.SourcePath)-1]
 	window := normalizeWindow(Window{Instructions: request.Instructions, Entries: entries})
 	checkpoint := Checkpoint{
@@ -1307,15 +1287,10 @@ func newCheckpoint(request OpenRequest, generation int, revision int, parentID s
 		Generation:    generation, Revision: revision, ParentCheckpointID: strings.TrimSpace(parentID),
 		LineageHash: LineageHash(request.SourcePath...), CoveredThroughSourceID: covered,
 		CoveredPathHash: LineageHash(request.SourcePath...), StaticFingerprint: request.StaticFingerprint,
-		ContentHashEncoding: CheckpointContentHashEncodingLosslessJSON,
-		Window:              window,
-		Trace:               Trace{Reason: reason, SourceEntryCount: len(request.SourcePath), ActiveEntryCount: len(window.Entries), AppendedEntryCount: appended},
+		Window: window,
+		Trace:  Trace{Reason: reason, SourceEntryCount: len(request.SourcePath), ActiveEntryCount: len(window.Entries), AppendedEntryCount: appended},
 	}
-	if err := sealCheckpointContentHash(&checkpoint); err != nil {
-		return Checkpoint{}, err
-	}
-	checkpoint.ID = checkpointID(checkpoint)
-	return checkpoint, nil
+	return checkpoint
 }
 
 func checkpointID(value Checkpoint) string {
@@ -1376,18 +1351,6 @@ func canonicalLosslessJSON(value any) ([]byte, error) {
 		return nil, errors.Join(ErrInvalidInput, err)
 	}
 	return canonicalArchiveJSON(encoded)
-}
-
-func sealCheckpointContentHash(value *Checkpoint) error {
-	if value == nil {
-		return ErrInvalidInput
-	}
-	hash, err := checkpointWindowHash(value.Window, value.ContentHashEncoding)
-	if err != nil {
-		return err
-	}
-	value.ContentHash = hash
-	return nil
 }
 
 func runtimeEntry(runID string, previous Checkpoint, index int, message model.Message) Entry {
