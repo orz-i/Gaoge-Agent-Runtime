@@ -54,14 +54,14 @@ func assertOneWorkingStateProjection(t *testing.T, window runtimectx.Window) {
 	}
 }
 
-func TestWorkingStateNilPreservesLegacyWindowHashVector(t *testing.T) {
+func TestWorkingStateNilPreservesWindowHashVector(t *testing.T) {
 	manager := runtimectx.NewManager(runtimectx.Dependencies{})
 	checkpoint, err := manager.Open(t.Context(), openRequest("u1"))
 	requireNoError(t, err)
 	// SHA-256 of the pre-WorkingState canonical Window JSON for this fixture.
 	const originalHash = "f24a47851b9adee648d4f1a0f31e8a858c7b360bad7f3a44d01eaf8ab7eaadfe"
-	if checkpoint.ContentHash != originalHash {
-		t.Fatalf("nil WorkingState changed the legacy Window fingerprint: %s", checkpoint.ContentHash)
+	if checkpoint.ContentHash != originalHash || checkpoint.ContentHashEncoding != runtimectx.CheckpointContentHashEncodingLosslessJSON {
+		t.Fatalf("nil WorkingState changed the lossless-safe Window fingerprint or encoding: %#v", checkpoint)
 	}
 	encoded, err := json.Marshal(checkpoint.Window)
 	requireNoError(t, err)
@@ -81,7 +81,8 @@ func TestWorkingStateExplicitUpdateIsVersionedAndIsolatedFromHistory(t *testing.
 	requireNoError(t, err)
 	if next.Generation != previous.Generation+1 || next.Revision != 1 || next.ParentCheckpointID != previous.ID ||
 		next.CacheIdentity == previous.CacheIdentity || next.ContentHash == previous.ContentHash ||
-		next.Trace.Reason != "working_state_updated" || !runtimectx.ValidCheckpoint(next) {
+		next.Trace.Reason != "working_state_updated" ||
+		next.ContentHashEncoding != runtimectx.CheckpointContentHashEncodingLosslessJSON || !runtimectx.ValidCheckpoint(next) {
 		t.Fatalf("WorkingState update did not create a legal immutable boundary: %+v", next)
 	}
 	if !reflect.DeepEqual(next.Window.Entries, previous.Window.Entries) || next.Trace.SourceEntryCount != len(request.SourcePath) ||

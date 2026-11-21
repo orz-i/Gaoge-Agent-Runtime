@@ -67,17 +67,16 @@ func agentSessionTool(key string, calls *int) tools.Registration {
 }
 
 func addAgentSessionTool(options *harness.AgentSessionOptions, key string, calls *int) {
-	options.Tools = append(options.Tools, agentSessionTool(key, calls))
-	options.Session.Config.ToolKeys = append(options.Session.Config.ToolKeys, key)
-	options.Session.Config.ToolPolicies = append(options.Session.Config.ToolPolicies, harness.ToolPolicySnapshot{
-		Key: key, DefinitionVersion: "fixture-v1", ApprovalMode: "never", SideEffectLevel: "read",
+	options.LocalTools = append(options.LocalTools, harness.SessionTool{
+		Registration: agentSessionTool(key, calls),
+		Policy:       harness.ToolPolicySnapshot{Key: key, DefinitionVersion: "fixture-v1", ApprovalMode: "never", SideEffectLevel: "read"},
 	})
 }
 
 func TestAgentSessionMatchesExplicitCompositionAndAuthorizesOnlySelectedTools(t *testing.T) {
 	var original []model.Request
 	var originalIDs [6]string
-	for _, name := range []string{"explicit", "legacy-selection", "paired-selection"} {
+	for _, name := range []string{"explicit", "session"} {
 		t.Run(name, func(t *testing.T) {
 			toolCalls, unselectedCalls, historyCalls, windowCalls := 0, 0, 0, 0
 			client := &agentSessionModel{generate: func(request model.Request) (model.Response, error) {
@@ -93,7 +92,6 @@ func TestAgentSessionMatchesExplicitCompositionAndAuthorizesOnlySelectedTools(t 
 			}}
 			options := agentSessionOptions(t, memory.NewStore(), harness.NewMemoryStore(), client)
 			addAgentSessionTool(&options, "lookup", &toolCalls)
-			options.Tools = append(options.Tools, agentSessionTool("unselected", &unselectedCalls))
 			options.Session.Transcript = harness.TranscriptHistoryFunc(func(context.Context, harness.HostRef, harness.HostRef) ([]runtimecontext.Entry, error) {
 				historyCalls++
 				return nil, nil
@@ -104,15 +102,13 @@ func TestAgentSessionMatchesExplicitCompositionAndAuthorizesOnlySelectedTools(t 
 			}
 			var session *harness.SessionClient
 			var err error
-			switch name {
-			case "paired-selection":
-				options.LocalTools = []harness.SessionTool{{Registration: options.Tools[0], Policy: options.Session.Config.ToolPolicies[0]}}
-				options.Tools, options.Session.Config.ToolKeys, options.Session.Config.ToolPolicies = nil, nil, nil
+			if name == "session" {
 				session, err = harness.OpenAgentSession(options)
-			case "legacy-selection":
-				session, err = harness.OpenAgentSession(options)
-			default:
-				registry, e := tools.NewRegistry(options.Tools)
+			} else {
+				selected := options.LocalTools[0]
+				options.Session.Config.ToolKeys = []string{selected.Registration.Definition.Key}
+				options.Session.Config.ToolPolicies = []harness.ToolPolicySnapshot{selected.Policy}
+				registry, e := tools.NewRegistry([]tools.Registration{selected.Registration, agentSessionTool("unselected", &unselectedCalls)})
 				if e != nil {
 					t.Fatal(e)
 				}
@@ -169,15 +165,18 @@ func TestAgentSessionPairedSelectionRejectsConflictingToolAuthority(t *testing.T
 		name string
 		edit func(*harness.AgentSessionOptions)
 	}{
-		{"legacy inventory", func(o *harness.AgentSessionOptions) { o.Tools = []tools.Registration{o.LocalTools[0].Registration} }},
-		{"legacy keys", func(o *harness.AgentSessionOptions) { o.Session.Config.ToolKeys = []string{"lookup"} }},
-		{"legacy policies", func(o *harness.AgentSessionOptions) {
+		{"preselected keys", func(o *harness.AgentSessionOptions) { o.Session.Config.ToolKeys = []string{"lookup"} }},
+		{"preselected policies", func(o *harness.AgentSessionOptions) {
 			o.Session.Config.ToolPolicies = []harness.ToolPolicySnapshot{o.LocalTools[0].Policy}
 		}},
 		{"duplicate grants", func(o *harness.AgentSessionOptions) { o.LocalTools = append(o.LocalTools, o.LocalTools[0]) }},
 		{"foreign policy", func(o *harness.AgentSessionOptions) { o.LocalTools[0].Policy.Key = "other" }},
 		{"unclassified tool", func(o *harness.AgentSessionOptions) { o.LocalTools[0].Policy.SideEffectLevel = "" }},
 		{"approval required", func(o *harness.AgentSessionOptions) { o.LocalTools[0].Policy.ApprovalMode = "always" }},
+		{"approval capability", func(o *harness.AgentSessionOptions) { o.LocalTools[0].Policy.ApprovalCapability = "per_call" }},
+		{"reserved delegate", func(o *harness.AgentSessionOptions) {
+			o.LocalTools[0].Registration.Definition.Key = harness.DelegationToolKey
+		}},
 		{"custom archive reader", func(o *harness.AgentSessionOptions) {
 			o.LocalTools[0].Registration.Definition.Key = harness.ContextArtifactToolKey
 		}},
@@ -216,25 +215,34 @@ func TestAgentSessionRejectsUncomposedOrUnselectedConfiguration(t *testing.T) {
 		{"missing model", func(o *harness.AgentSessionOptions) { o.Model = nil }},
 		{"missing window resolver", func(o *harness.AgentSessionOptions) { o.Context.ResolveWindow = nil }},
 		{"missing output ceiling", func(o *harness.AgentSessionOptions) { o.Session.Config.MaxModelOutputTokens = 0 }},
-		{"unregistered selected tool", func(o *harness.AgentSessionOptions) { o.Tools = nil }},
-		{"missing policy", func(o *harness.AgentSessionOptions) { o.Session.Config.ToolPolicies = nil }},
-		{"unknown version", func(o *harness.AgentSessionOptions) { o.Session.Config.ToolPolicies[0].DefinitionVersion = "" }},
-		{"approval needed", func(o *harness.AgentSessionOptions) { o.Session.Config.ToolPolicies[0].ApprovalMode = "always" }},
-		{"unknown approval", func(o *harness.AgentSessionOptions) { o.Session.Config.ToolPolicies[0].ApprovalMode = "unknown" }},
-		{"provider hosted tool", func(o *harness.AgentSessionOptions) {
-			o.Session.Config.ToolPolicies[0].ExecutionMode = "provider_hosted"
+		{"preselected keys without local tools", func(o *harness.AgentSessionOptions) {
+			o.LocalTools = nil
+			o.Session.Config.ToolKeys = []string{"lookup"}
 		}},
-		{"unknown execution mode", func(o *harness.AgentSessionOptions) { o.Session.Config.ToolPolicies[0].ExecutionMode = "unknown" }},
-		{"foreign policy", func(o *harness.AgentSessionOptions) { o.Session.Config.ToolPolicies[0].Key = "foreign" }},
+		{"preselected policies without local tools", func(o *harness.AgentSessionOptions) {
+			o.Session.Config.ToolPolicies = []harness.ToolPolicySnapshot{o.LocalTools[0].Policy}
+			o.LocalTools = nil
+		}},
+		{"missing policy", func(o *harness.AgentSessionOptions) { o.LocalTools[0].Policy = harness.ToolPolicySnapshot{} }},
+		{"unknown version", func(o *harness.AgentSessionOptions) { o.LocalTools[0].Policy.DefinitionVersion = "" }},
+		{"approval needed", func(o *harness.AgentSessionOptions) { o.LocalTools[0].Policy.ApprovalMode = "always" }},
+		{"unknown approval", func(o *harness.AgentSessionOptions) { o.LocalTools[0].Policy.ApprovalMode = "unknown" }},
+		{"provider hosted tool", func(o *harness.AgentSessionOptions) {
+			o.LocalTools[0].Policy.ExecutionMode = "provider_hosted"
+		}},
+		{"unknown execution mode", func(o *harness.AgentSessionOptions) { o.LocalTools[0].Policy.ExecutionMode = "unknown" }},
+		{"foreign policy", func(o *harness.AgentSessionOptions) { o.LocalTools[0].Policy.Key = "foreign" }},
 		{"skills", func(o *harness.AgentSessionOptions) { o.Session.Config.Skills = []harness.SkillSnapshot{{ID: "skill"}} }},
 		{"memory", func(o *harness.AgentSessionOptions) { o.Session.Config.MemoryPolicy = "host-memory" }},
 		{"shared budget", func(o *harness.AgentSessionOptions) { o.Session.Config.SharedBudget = &budget.Limits{} }},
 		{"delegation", func(o *harness.AgentSessionOptions) { o.Session.Config.DelegationPolicy.MaxDepth = 1 }},
-		{"override reader", func(o *harness.AgentSessionOptions) { o.Tools[0].Definition.Key = harness.ContextArtifactToolKey }},
-		{"invalid schema", func(o *harness.AgentSessionOptions) {
-			o.Tools[0].Definition.InputSchema = json.RawMessage(`{"type":"unknown"}`)
+		{"override reader", func(o *harness.AgentSessionOptions) {
+			o.LocalTools[0].Registration.Definition.Key = harness.ContextArtifactToolKey
 		}},
-		{"missing handler", func(o *harness.AgentSessionOptions) { o.Tools[0].Handler = nil }},
+		{"invalid schema", func(o *harness.AgentSessionOptions) {
+			o.LocalTools[0].Registration.Definition.InputSchema = json.RawMessage(`{"type":"unknown"}`)
+		}},
+		{"missing handler", func(o *harness.AgentSessionOptions) { o.LocalTools[0].Registration.Handler = nil }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -412,8 +420,7 @@ func TestAgentSessionConstructionDoesNotAccessStoreOrCallbacks(t *testing.T) {
 		t.Fatal("constructor resolved a model request")
 		return runtimecontext.ModelWindow{}, nil
 	}
-	options.Session.Config.ToolKeys = []string{harness.ContextArtifactToolKey}
-	options.Session.Config.ToolPolicies = []harness.ToolPolicySnapshot{harness.ContextArtifactToolPolicySnapshot()}
+	options.Context.ReadArtifacts = true
 	if _, err := harness.OpenAgentSession(options); err != nil {
 		t.Fatal(err)
 	}
@@ -598,7 +605,7 @@ func TestAgentSessionResumeRejectsOriginalUnsupportedCompositionBeforeGeneration
 			}
 			freshModel := &agentSessionModel{}
 			freshOptions := agentSessionOptions(t, base, store, freshModel)
-			freshOptions.Tools = []tools.Registration{agentSessionTool("lookup", &toolCalls)}
+			addAgentSessionTool(&freshOptions, "lookup", &toolCalls)
 			freshOptions.Session.Actor = originalOptions.Actor
 			freshOptions.Session.Thread = originalOptions.Thread
 			freshOptions.Session.HostThread = originalOptions.HostThread
@@ -660,5 +667,58 @@ func TestAgentSessionResumeRejectsDelegationFactsDespiteOrdinaryDefaultDepth(t *
 				t.Fatalf("existing child evidence was ignored: %v models=%d", err, len(client.requests))
 			}
 		})
+	}
+}
+
+type largeNumberSessionCounter struct {
+	payload []byte
+}
+
+func (counter *largeNumberSessionCounter) Count(_ context.Context, request runtimecontext.TokenCountRequest) (int64, error) {
+	counter.payload = request.Payload
+	return 17, nil
+}
+
+func TestAgentSessionCountsLosslessHistoryOutsideFloat64(t *testing.T) {
+	const arguments = `{"limit":1e1000,"id":9007199254740993}`
+	const replay = `{"value":-1e999}`
+	store := harness.NewMemoryStore()
+	modelClient := &agentSessionModel{}
+	counter := &largeNumberSessionCounter{}
+	options := agentSessionOptions(t, memory.NewStore(), store, modelClient)
+	options.Context.Counter = counter
+	// The typed request exceeds this byte-based fallback, so proceeding requires the exact count.
+	options.Session.Config.ContextPolicy.MaxInputTokens = 25
+	options.Context.ResolveWindow = func(context.Context, model.Request) (runtimecontext.ModelWindow, error) {
+		return runtimecontext.ModelWindow{ContextTokens: 16384, ReservedOutputTokens: 128,
+			TokenCountContext: runtimecontext.TokenCountContext{Protocol: "fixture", Model: "fixture"}}, nil
+	}
+	options.Session.Transcript = harness.TranscriptSourceFunc(func(_ context.Context, _, turn harness.HostRef, prompt string) (*harness.ContextSeed, error) {
+		prior := contextEntry("old-user", "old", model.RoleUser, "prior prompt", false)
+		assistant := contextEntry("old-answer", "old", model.RoleAssistant, "prior answer", false)
+		assistant.Message.ToolCalls = []tools.Call{{ID: "historic", ToolKey: "lookup", Arguments: json.RawMessage(arguments)}}
+		assistant.Message.ProviderReplay = &model.ProviderReplay{Provider: "fixture", Format: "opaque", Data: json.RawMessage(replay)}
+		result := contextEntry("old-result", "old", model.RoleTool, "tool result", false)
+		result.Message.ToolCallID = "historic"
+		current := contextEntry("current", turn.ID, model.RoleUser, prompt, true)
+		return &harness.ContextSeed{SourcePath: []string{"old-user", "old-answer", "old-result", "current"},
+			Entries: []runtimecontext.Entry{prior, assistant, result, current}}, nil
+	})
+	session, err := harness.OpenAgentSession(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done, err := session.Prompt(t.Context(), "first", "question")
+	if err != nil || done.Turn.Status != harness.TurnCompleted || len(modelClient.requests) != 1 {
+		t.Fatalf("sampling with large JSON numbers: %s, %v", done.Turn.Status, err)
+	}
+	counted := string(counter.payload)
+	if !strings.Contains(counted, "\"arguments\":"+arguments) || !strings.Contains(counted, "\"data\":"+replay) {
+		t.Fatalf("exact counter lost a JSON number: %s", counted)
+	}
+	checkpoint, err := store.GetContextCheckpoint(t.Context(), done.Turn.ContextCheckpointID)
+	if err != nil || !runtimecontext.ValidCheckpoint(checkpoint) ||
+		checkpoint.ContentHashEncoding != runtimecontext.CheckpointContentHashEncodingLosslessJSON {
+		t.Fatalf("sampling did not retain a valid lossless Checkpoint: %v", err)
 	}
 }

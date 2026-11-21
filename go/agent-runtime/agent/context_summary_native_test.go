@@ -228,7 +228,7 @@ func TestContextSummaryNativeRejectsInvalidSourceBeforePark(t *testing.T) {
 			case "wrong handle":
 				runner.summaryNativeRecovery = false
 			case "unknown lifecycle":
-				trap.transfer.SafePoint.LifecycleVersion = "working-state-summary-v2"
+				trap.transfer.SafePoint.LifecycleVersion = "working-state-summary-v1"
 			case "wrong phase":
 				var source contextSummaryLifecycle
 				if err := json.Unmarshal(trap.transfer.SafePoint.LifecycleSource, &source); err != nil {

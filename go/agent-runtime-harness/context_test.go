@@ -22,6 +22,49 @@ const (
 	testCommittedDisposition = "committed"
 )
 
+func TestMemoryStoreRoundTripsLosslessContextCheckpointEncoding(t *testing.T) {
+	t.Parallel()
+	manager := runtimecontext.NewManager(runtimecontext.Dependencies{})
+	checkpoint, err := manager.Open(t.Context(), runtimecontext.OpenRequest{
+		ScopeID: "memory-lossless", StaticFingerprint: runtimecontext.StaticFingerprint("test"),
+		Instructions: "instructions", SourcePath: []string{"user"},
+		Entries: []runtimecontext.Entry{{ID: "user", SourceID: "user", Message: model.Message{
+			Role: model.RoleUser, Content: model.TextParts("question"),
+		}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := harness.NewMemoryStore()
+	if _, fresh, putErr := store.PutContextCheckpoint(t.Context(), checkpoint); putErr != nil || !fresh {
+		t.Fatalf("persist base checkpoint fresh=%v err=%v", fresh, putErr)
+	}
+	messages := append(runtimecontext.Materialize(checkpoint.Window),
+		model.Message{Role: model.RoleAssistant, ToolCalls: []tools.Call{{
+			ID: "large-call", ToolKey: "lookup", Arguments: json.RawMessage(`{"n":9007199254740993}`),
+		}}, ProviderReplay: &model.ProviderReplay{
+			Provider: "test", Format: "opaque", Data: json.RawMessage(`{"n":9007199254740993}`),
+		}},
+		model.Message{Role: model.RoleTool, ToolCallID: "large-call", Content: model.TextParts("result")},
+	)
+	next, err := manager.Capture(t.Context(), runtimecontext.CaptureRequest{
+		Previous: checkpoint, StaticFingerprint: checkpoint.StaticFingerprint, RunID: "memory-run", Messages: messages,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, fresh, err := store.PutContextCheckpoint(t.Context(), next); err != nil || !fresh {
+		t.Fatalf("persist lossless checkpoint fresh=%v err=%v", fresh, err)
+	}
+	restored, err := store.GetContextCheckpoint(t.Context(), next.ID)
+	if err != nil || !runtimecontext.ValidCheckpoint(restored) ||
+		restored.ContentHashEncoding != runtimecontext.CheckpointContentHashEncodingLosslessJSON ||
+		string(restored.Window.Entries[len(restored.Window.Entries)-2].Message.ToolCalls[0].Arguments) != `{"n":9007199254740993}` ||
+		string(restored.Window.Entries[len(restored.Window.Entries)-2].Message.ProviderReplay.Data) != `{"n":9007199254740993}` {
+		t.Fatalf("memory store changed checkpoint encoding or replay: restored=%+v err=%v", restored, err)
+	}
+}
+
 func TestHarnessBuildsAndInjectsContextCheckpoint(t *testing.T) {
 	t.Parallel()
 	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})

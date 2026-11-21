@@ -22,6 +22,5 @@ the encoding and canonical payload, without decoding numbers as floats. The
 built-in PostgreSQL adapter already uses a text payload; no schema migration is
 needed. Do not re-encode old records: a previously rounded value cannot be
 recovered from its old archive. Consult the original Host transcript or Tool
-record for such evidence. Existing checkpoint hash formats and frozen v1
-summary recipes are unchanged; this is an archive fix, not a migration of all
-Runtime JSON formats.
+record for such evidence. For the Checkpoint and summary hard cut, see the
+[Agent Session guide](../agent-session.md).

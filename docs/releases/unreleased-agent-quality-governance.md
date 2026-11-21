@@ -42,10 +42,8 @@ not a measured real-model quality improvement.
 ## Recommended composition
 
 Use [`OpenAgentSession`](../agent-session.md) with paired `LocalTools`,
-`Context.ReadArtifacts` and `ExploreReads` for the behavior originally added by
-`OpenToolAgentSession`. It does not construct implicit Stores or grant approval
-or delegation authority. The legacy constructor is deprecated and keeps its
-original defaults during migration.
+`Context.ReadArtifacts` and `ExploreReads` for bounded local-Tool Sessions.
+The Host supplies the Stores and Tool policies explicitly.
 
 ## Offline task-outcome review
 

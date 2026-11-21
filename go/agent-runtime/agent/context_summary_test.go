@@ -539,6 +539,7 @@ func TestContextSummaryContextAndNativeConsumeACKLossRecoverWithoutNewSummary(t 
 			if err != nil {
 				t.Fatal(err)
 			}
+			targetBeforeResume := ports.current.ID
 			clock.Advance(3 * time.Minute)
 			restarted := summaryCoreRunner(t, rt, ports, provider, clock, nil)
 			completed, err := restarted.Resume(t.Context(), pending.Run.ID, pending.Run.Revision)
@@ -548,6 +549,15 @@ func TestContextSummaryContextAndNativeConsumeACKLossRecoverWithoutNewSummary(t 
 			view, err := ViewState(completed)
 			if err != nil || completed.Run.Status != kernel.RunStatusCompleted || len(provider.calls()) != 2 || len(view.ModelInvocations) != 2 || view.Budget.Usage.LLMCalls != 2 || view.Budget.Usage.TotalTokens != 20 {
 				t.Fatalf("recovery changed the logical summary or usage: err=%v calls=%d view=%+v", err, len(provider.calls()), view.Budget.Usage)
+			}
+			if !runtimecontext.ValidCheckpoint(ports.current) || ports.current.ParentCheckpointID != ports.source.ID ||
+				(cut == "after-context" && ports.current.ID != targetBeforeResume) {
+				t.Fatalf("recovery used an unexpected summary target: %s", ports.current.ID)
+			}
+			legacy := cloneModelInvocation(view.ModelInvocations[0])
+			legacy.ContextSummary.RecipeVersion = "working-state-summary-v1"
+			if validContextSummaryInvocation(legacy) {
+				t.Fatal("accepted a v1 summary recipe")
 			}
 		})
 	}
@@ -784,55 +794,23 @@ func TestContextSummaryDoesNotInstallTargetMissingBusinessIdentityBudget(t *test
 	}
 }
 
-func TestContextSummarySourceValueProjectionRejectsLossyRawNumbers(t *testing.T) {
-	for _, test := range []struct {
-		name, arguments string
-		want            bool
-	}{
-		{name: "ordinary decimal and key order", arguments: `{"z":1,"a":0.25}`, want: true},
-		{name: "large integer text", arguments: `{"text":"9007199254740993"}`, want: true},
-		{name: "exact boundary integer", arguments: `{"n":9007199254740992}`, want: true},
-		{name: "inexact large integer", arguments: `{"n":9007199254740993}`},
-		{name: "overflow", arguments: `{"n":1e1000}`},
-		{name: "inexact decimal", arguments: `{"n":0.10000000000000001}`},
-		{name: "numeric spelling", arguments: `{"n":1.00}`},
-		{name: "duplicate members", arguments: `{"n":1,"n":2}`},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			messages := []model.Message{{Role: model.RoleAssistant, ToolCalls: []tools.Call{{
-				ID: "historical", ToolKey: "historic", Arguments: json.RawMessage(test.arguments),
-			}}}, {Role: model.RoleTool, ToolCallID: "historical", Content: model.TextParts(`{"n":9007199254740993}`)}}
-			if got := summaryPreservesSourceValues(messages); got != test.want {
-				t.Fatalf("source value preservation=%v want=%v", got, test.want)
-			}
-		})
-	}
-}
-
-func TestContextSummarySkipsSourceWhoseArchiveChangesToolArgumentValue(t *testing.T) {
-	for _, test := range []struct {
-		name, arguments string
-		wantSummary     bool
-	}{
-		{name: "ordinary decimal and key order", arguments: `{"z":1,"a":0.25}`, wantSummary: true},
-		{name: "large integer remains text", arguments: `{"n":"9007199254740993"}`, wantSummary: true},
-		{name: "large raw integer", arguments: `{"n":9007199254740993}`},
-	} {
-		t.Run(test.name, func(t *testing.T) {
+func TestContextSummaryPreservesArchivedToolArgumentNumbers(t *testing.T) {
+	for _, number := range []string{"9007199254740993", "1e1000", "0.10000000000000001", "1.00"} {
+		t.Run(number, func(t *testing.T) {
+			arguments := `{"n":` + number + `}`
 			_, rt, ports, provider, clock, request := newSummaryCoreFixture(t, nil)
-			summaryHistoryToolSource(t, ports, test.arguments)
+			summaryHistoryToolSource(t, ports, arguments)
 			runner := summaryCoreRunner(t, rt, ports, provider, clock, nil)
-			if _, err := runner.StartRun(t.Context(), request); err != nil {
-				t.Fatal(err)
+			completed, err := runner.StartRun(t.Context(), request)
+			if err != nil || completed.Run.Status != kernel.RunStatusCompleted ||
+				len(provider.calls()) != 2 || ports.current.Window.WorkingState == nil || len(ports.artifacts) != 1 {
+				t.Fatalf("lossless history did not install summary state: status=%s err=%v", completed.Run.Status, err)
 			}
-			summaries := 0
-			for _, call := range provider.calls() {
-				if call.OutputContract != nil && call.OutputContract.Name == "working_state_summary" {
-					summaries++
+			for _, artifact := range ports.artifacts {
+				if artifact.Encoding != runtimecontext.ArtifactEncodingLosslessJSON ||
+					!strings.Contains(string(artifact.ContentJSON), `"arguments":`+arguments) {
+					t.Fatalf("summary archive changed Tool arguments: %s", artifact.ContentJSON)
 				}
-			}
-			if (summaries == 1) != test.wantSummary || (ports.current.Window.WorkingState != nil) != test.wantSummary {
-				t.Fatalf("unsafe archive entered new summary: summaries=%d state=%v", summaries, ports.current.Window.WorkingState != nil)
 			}
 		})
 	}
@@ -855,7 +833,7 @@ func summaryHistoryToolSource(t *testing.T, ports *summaryCorePorts, arguments s
 	ports.turn.ContextCheckpointID, ports.turn.ContextRef = source.ID, samplingRef(source)
 }
 
-func TestContextSummaryCompletedReceiptRejectsLossyFrozenSource(t *testing.T) {
+func TestContextSummaryCompletedReceiptRejectsChangedFrozenSource(t *testing.T) {
 	fault := &summaryCoreFaultStore{Store: memory.NewStore(), event: "agent.model_invocation.completed", after: true}
 	_, rt, ports, provider, clock, request := newSummaryCoreFixture(t, fault)
 	summaryHistoryToolSource(t, ports, `{"n":9007199254740992}`)
@@ -867,19 +845,17 @@ func TestContextSummaryCompletedReceiptRejectsLossyFrozenSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The existing codec hashes these two numbers identically. This models
-	// an older frozen source whose raw task value cannot survive archival,
-	// without changing the invocation, its receipt or any checkpoint identity.
+	// Replace one number while retaining the frozen receipt and Checkpoint ID.
 	unsafe := runtimecontext.CloneCheckpoint(ports.source)
 	unsafe.Window.Entries[1].Message.ToolCalls[0].Arguments = json.RawMessage(`{"n":9007199254740993}`)
-	if !runtimecontext.ValidCheckpoint(unsafe) || unsafe.ID != ports.source.ID || summaryPreservesSourceValues(runtimecontext.Materialize(unsafe.Window)) {
-		t.Fatal("fixture did not expose the inherited numeric hash collision")
+	if runtimecontext.ValidCheckpoint(unsafe) {
+		t.Fatal("changed number passed Checkpoint validation")
 	}
 	ports.source, ports.current, ports.bound = unsafe, unsafe, unsafe
 	clock.Advance(3 * time.Minute)
 	restarted := summaryCoreRunner(t, rt, ports, provider, clock, nil)
 	if _, err = restarted.Resume(t.Context(), before.Run.ID, before.Run.Revision); !errors.Is(err, ErrInvalidRequest) {
-		t.Fatalf("completed summary accepted a lossy original source: %v", err)
+		t.Fatalf("completed summary accepted a changed original source: %v", err)
 	}
 	after, err := rt.Load(t.Context(), request.ID)
 	if err != nil {

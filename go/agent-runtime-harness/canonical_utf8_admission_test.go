@@ -106,7 +106,7 @@ func TestCanonicalUTF8SessionAdmissionBeforeAnyModelEffect(t *testing.T) {
 				case "config-model":
 					opts.Session.Config.Model = raw
 				}
-				return harness.OpenTextAgentSession(opts)
+				return harness.OpenAgentSession(opts)
 			}
 			session, err := newSession()
 			if err == nil {

@@ -57,3 +57,20 @@ func TestAssessModelRequestBoundsTypedNumbersWithoutExactCounter(t *testing.T) {
 		})
 	}
 }
+
+func TestAssessModelRequestBoundsNumbersOutsideFloat64(t *testing.T) {
+	t.Parallel()
+	request := model.Request{RunID: "budget", Model: "model", ModelOptions: json.RawMessage(`{"limit":1e1000}`),
+		Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("count the actual request")}},
+	}
+	typed, err := model.MarshalRequestForInputCount(request)
+	requireNoError(t, err)
+	manager := runtimectx.NewManager(runtimectx.Dependencies{})
+	policy := runtimectx.Policy{MaxSerializedBytes: int64(len(typed) - 1)}
+	assessment, err := manager.AssessModelRequest(t.Context(), request, runtimectx.ModelWindow{ContextTokens: 100000}, policy)
+	requireNoError(t, err)
+	if assessment.TokenCountSource != runtimectx.CountEstimated || assessment.SerializedBytes != int64(len(typed)) ||
+		assessment.HardTokenEstimate < int64(len(typed)) || runtimectx.WithinHardBudget(assessment, policy) {
+		t.Fatalf("overflowing JSON number escaped the fallback budget: actual=%d assessment=%+v", len(typed), assessment)
+	}
+}
