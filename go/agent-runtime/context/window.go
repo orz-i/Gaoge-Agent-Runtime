@@ -406,7 +406,7 @@ type Trace struct {
 }
 
 // CheckpointContentHashEncodingLosslessJSON identifies the lossless JSON
-// canonicalization used by newly written Context Checkpoints.
+// canonicalization used by Context Checkpoints written with the lossless profile.
 const CheckpointContentHashEncodingLosslessJSON = "lossless-json-v1"
 
 // Checkpoint is one immutable active Context Window revision. Generation changes only on an
@@ -424,8 +424,8 @@ type Checkpoint struct {
 	StaticFingerprint      string `json:"staticFingerprint"`
 	ModelWindowFingerprint string `json:"modelWindowFingerprint,omitempty"`
 	ContentHash            string `json:"contentHash"`
-	// ContentHashEncoding is empty for historical Checkpoints. New records use
-	// an explicit lossless JSON codec so JSON numbers never pass through float64.
+	// ContentHashEncoding is empty for Checkpoints sealed with the legacy codec.
+	// The lossless codec preserves JSON number literals without using float64.
 	ContentHashEncoding string   `json:"contentHashEncoding,omitempty"`
 	Window              Window   `json:"window"`
 	ArtifactIDs         []string `json:"artifactIDs,omitempty"`
@@ -524,8 +524,8 @@ type TokenCounter interface {
 // Dependencies are optional Context Window capabilities.
 type Dependencies struct {
 	Counter TokenCounter
-	// CheckpointWriteProfile affects new decisions only. Empty selects the
-	// current writer; reader-only deployments can explicitly retain legacy writes.
+	// CheckpointWriteProfile affects new decisions only. Empty retains legacy
+	// writes so readers can be upgraded before enabling lossless writes.
 	CheckpointWriteProfile CheckpointWriteProfile
 }
 
@@ -903,19 +903,16 @@ func (manager *Manager) AssessModelRequest(
 	if err != nil {
 		return Assessment{}, err
 	}
-	serialized, err := canonicalJSON(request)
+	exactPayload, err := model.MarshalRequestForInputCount(request)
 	if err != nil {
-		return Assessment{}, err
+		return Assessment{}, errors.Join(ErrInvalidInput, err)
 	}
-	// Canonical JSON may shorten RawMessage numbers. Every counting mode,
-	// including an absent or unrouted counter, must bound the typed request
-	// that Generate sees rather than authorize those discarded bytes.
-	exactPayload, marshalErr := model.MarshalRequestForInputCount(request)
-	if marshalErr != nil {
-		return Assessment{}, errors.Join(ErrInvalidInput, marshalErr)
-	}
-	if len(exactPayload) > len(serialized) {
-		serialized = exactPayload
+	// The typed payload bounds all counting modes and accepts JSON numbers
+	// outside float64's range. Keep the extra legacy sizing bound where that
+	// projection succeeds so existing summary assessments stay reproducible.
+	serialized := exactPayload
+	if legacy, legacyErr := canonicalJSON(request); legacyErr == nil && len(legacy) > len(serialized) {
+		serialized = legacy
 	}
 	soft := hard * int64(policy.SoftLimitPercent) / 100
 	if soft < 1 {

@@ -129,6 +129,12 @@ Unsupported original Turns remain available through the read/Refresh APIs;
 continue execution with their original explicit composition. The ordinary
 Harness default delegation depth alone does not require a delegation engine.
 
+Context Checkpoint writes default to the legacy format. Upgrade all readers of
+shared Context storage with this default, then set `Context.CheckpointWriteProfile`
+to `runtimecontext.CheckpointWriteLosslessJSON` on writers that share the Store.
+The updated reader accepts both Checkpoint formats. Existing summary invocations
+keep their original target format during recovery.
+
 Ordinary bounded composition is the default. Explicit
 `Context.ManagedRecovery: true` selects the existing Runtime-owned Context
 recovery lifecycle. Before opening, construct the Runtime with its original

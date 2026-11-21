@@ -78,6 +78,9 @@ type ContextSummaryBinding struct {
 	PreviousEvidenceRefs   []string                          `json:"previousEvidenceRefs,omitempty"`
 	BusinessRequest        model.Request                     `json:"businessRequest"`
 	OriginalAssessment     runtimecontext.Assessment         `json:"originalAssessment"`
+
+	// Omission freezes legacy target sealing and retains the original wire recipe.
+	TargetCheckpointWriteProfile runtimecontext.CheckpointWriteProfile `json:"targetCheckpointWriteProfile,omitempty"`
 }
 
 // ContextSummaryPlan is a read-only Host projection. The native algorithm

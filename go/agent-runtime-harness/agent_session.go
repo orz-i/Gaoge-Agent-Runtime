@@ -20,6 +20,9 @@ import (
 type AgentSessionContextOptions struct {
 	ResolveWindow ModelWindowResolver
 	Counter       runtimecontext.TokenCounter
+	// CheckpointWriteProfile defaults to legacy writes. Enable lossless writes
+	// after upgrading every reader of the shared Context Store.
+	CheckpointWriteProfile runtimecontext.CheckpointWriteProfile
 	// ReadArtifacts explicitly grants the built-in scoped archive reader.
 	// It cannot be combined with the legacy Config.ToolKeys/ToolPolicies form.
 	ReadArtifacts bool
@@ -77,6 +80,9 @@ type AgentSessionOptions struct {
 func OpenAgentSession(options AgentSessionOptions) (*SessionClient, error) {
 	options.Session.Config.ContextBase = nil
 	if options.Runtime == nil || options.Store == nil || options.Model == nil || options.Context.ResolveWindow == nil {
+		return nil, ErrInvalidRequest
+	}
+	if profile := options.Context.CheckpointWriteProfile; profile != "" && !runtimecontext.ValidCheckpointWriteProfile(profile) {
 		return nil, ErrInvalidRequest
 	}
 	if (options.Context.ManagedRecovery && options.Context.SummaryNativeRecovery) ||
@@ -168,7 +174,9 @@ func openBoundedAgentSession(options AgentSessionOptions, registrations []tools.
 		}
 		return nil, errors.Join(ErrInvalidRequest, err)
 	}
-	manager := runtimecontext.NewManager(runtimecontext.Dependencies{Counter: options.Context.Counter})
+	manager := runtimecontext.NewManager(runtimecontext.Dependencies{
+		Counter: options.Context.Counter, CheckpointWriteProfile: options.Context.CheckpointWriteProfile,
+	})
 	resolve := options.Context.ResolveWindow
 	resolveWindow := func(ctx context.Context, request model.Request) (runtimecontext.ModelWindow, error) {
 		window, resolveErr := resolve(ctx, model.CloneRequest(request))

@@ -215,6 +215,7 @@ func TestAgentSessionRejectsUncomposedOrUnselectedConfiguration(t *testing.T) {
 		{"missing store", func(o *harness.AgentSessionOptions) { o.Store = nil }},
 		{"missing model", func(o *harness.AgentSessionOptions) { o.Model = nil }},
 		{"missing window resolver", func(o *harness.AgentSessionOptions) { o.Context.ResolveWindow = nil }},
+		{"unknown Checkpoint write profile", func(o *harness.AgentSessionOptions) { o.Context.CheckpointWriteProfile = "future" }},
 		{"missing output ceiling", func(o *harness.AgentSessionOptions) { o.Session.Config.MaxModelOutputTokens = 0 }},
 		{"unregistered selected tool", func(o *harness.AgentSessionOptions) { o.Tools = nil }},
 		{"missing policy", func(o *harness.AgentSessionOptions) { o.Session.Config.ToolPolicies = nil }},
@@ -660,5 +661,99 @@ func TestAgentSessionResumeRejectsDelegationFactsDespiteOrdinaryDefaultDepth(t *
 				t.Fatalf("existing child evidence was ignored: %v models=%d", err, len(client.requests))
 			}
 		})
+	}
+}
+
+func TestAgentSessionStagesCheckpointWrites(t *testing.T) {
+	store := harness.NewMemoryStore()
+	options := agentSessionOptions(t, memory.NewStore(), store, &agentSessionModel{})
+	reader, err := harness.OpenAgentSession(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := reader.Prompt(t.Context(), "first", "legacy turn")
+	if err != nil || first.Turn.Status != harness.TurnCompleted {
+		t.Fatalf("legacy turn: %s, %v", first.Turn.Status, err)
+	}
+	legacy, err := store.GetContextCheckpoint(t.Context(), first.Turn.ContextCheckpointID)
+	if err != nil || !runtimecontext.ValidCheckpoint(legacy) || legacy.ContentHashEncoding != "" {
+		t.Fatalf("default session did not write a legacy Checkpoint: %v", err)
+	}
+
+	options.Context.CheckpointWriteProfile = runtimecontext.CheckpointWriteLosslessJSON
+	writer, err := harness.OpenAgentSession(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := writer.Load(t.Context(), "first"); err != nil || got.Turn.ContextCheckpointID != legacy.ID {
+		t.Fatalf("enabling the writer lost the legacy Turn: %v", err)
+	}
+	second, err := writer.Prompt(t.Context(), "second", "lossless turn")
+	if err != nil || second.Turn.Status != harness.TurnCompleted {
+		t.Fatalf("lossless turn: %s, %v", second.Turn.Status, err)
+	}
+
+	loaded, err := reader.Load(t.Context(), "second")
+	if err != nil || loaded.Turn.ContextCheckpointID != second.Turn.ContextCheckpointID {
+		t.Fatalf("upgraded reader could not load a lossless Turn: %v", err)
+	}
+	lossless, err := store.GetContextCheckpoint(t.Context(), loaded.Turn.ContextCheckpointID)
+	if err != nil || !runtimecontext.ValidCheckpoint(lossless) ||
+		lossless.ContentHashEncoding != runtimecontext.CheckpointContentHashEncodingLosslessJSON {
+		t.Fatalf("opt-in session did not write a valid lossless Checkpoint: %v", err)
+	}
+}
+
+type largeNumberSessionCounter struct {
+	payload []byte
+}
+
+func (counter *largeNumberSessionCounter) Count(_ context.Context, request runtimecontext.TokenCountRequest) (int64, error) {
+	counter.payload = request.Payload
+	return 17, nil
+}
+
+func TestAgentSessionCountsLosslessHistoryOutsideFloat64(t *testing.T) {
+	const arguments = `{"limit":1e1000,"id":9007199254740993}`
+	const replay = `{"value":-1e999}`
+	store := harness.NewMemoryStore()
+	modelClient := &agentSessionModel{}
+	counter := &largeNumberSessionCounter{}
+	options := agentSessionOptions(t, memory.NewStore(), store, modelClient)
+	options.Context.CheckpointWriteProfile = runtimecontext.CheckpointWriteLosslessJSON
+	options.Context.Counter = counter
+	// The typed request exceeds this byte-based fallback, so proceeding requires the exact count.
+	options.Session.Config.ContextPolicy.MaxInputTokens = 25
+	options.Context.ResolveWindow = func(context.Context, model.Request) (runtimecontext.ModelWindow, error) {
+		return runtimecontext.ModelWindow{ContextTokens: 16384, ReservedOutputTokens: 128,
+			TokenCountContext: runtimecontext.TokenCountContext{Protocol: "fixture", Model: "fixture"}}, nil
+	}
+	options.Session.Transcript = harness.TranscriptSourceFunc(func(_ context.Context, _, turn harness.HostRef, prompt string) (*harness.ContextSeed, error) {
+		prior := contextEntry("old-user", "old", model.RoleUser, "prior prompt", false)
+		assistant := contextEntry("old-answer", "old", model.RoleAssistant, "prior answer", false)
+		assistant.Message.ToolCalls = []tools.Call{{ID: "historic", ToolKey: "lookup", Arguments: json.RawMessage(arguments)}}
+		assistant.Message.ProviderReplay = &model.ProviderReplay{Provider: "fixture", Format: "opaque", Data: json.RawMessage(replay)}
+		result := contextEntry("old-result", "old", model.RoleTool, "tool result", false)
+		result.Message.ToolCallID = "historic"
+		current := contextEntry("current", turn.ID, model.RoleUser, prompt, true)
+		return &harness.ContextSeed{SourcePath: []string{"old-user", "old-answer", "old-result", "current"},
+			Entries: []runtimecontext.Entry{prior, assistant, result, current}}, nil
+	})
+	session, err := harness.OpenAgentSession(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done, err := session.Prompt(t.Context(), "first", "question")
+	if err != nil || done.Turn.Status != harness.TurnCompleted || len(modelClient.requests) != 1 {
+		t.Fatalf("sampling with large JSON numbers: %s, %v", done.Turn.Status, err)
+	}
+	counted := string(counter.payload)
+	if !strings.Contains(counted, "\"arguments\":"+arguments) || !strings.Contains(counted, "\"data\":"+replay) {
+		t.Fatalf("exact counter lost a JSON number: %s", counted)
+	}
+	checkpoint, err := store.GetContextCheckpoint(t.Context(), done.Turn.ContextCheckpointID)
+	if err != nil || !runtimecontext.ValidCheckpoint(checkpoint) ||
+		checkpoint.ContentHashEncoding != runtimecontext.CheckpointContentHashEncodingLosslessJSON {
+		t.Fatalf("sampling did not retain a valid lossless Checkpoint: %v", err)
 	}
 }

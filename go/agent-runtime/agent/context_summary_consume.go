@@ -50,8 +50,16 @@ func (runner *Runner) consumeContextSummary(ctx context.Context, snapshot kernel
 		if candidateErr != nil || candidate.RemovedMessages != binding.RemovedMessages || !summarySameArtifacts(binding.Artifacts, candidate.Artifacts) {
 			return snapshot, ErrInvalidRequest
 		}
+		profile := binding.TargetCheckpointWriteProfile
+		if profile == "" {
+			profile = runtimecontext.CheckpointWriteLegacy
+		}
+		writer, profileErr := adapter.bounded.manager.WithCheckpointWriteProfile(profile)
+		if profileErr != nil {
+			return snapshot, ErrInvalidRequest
+		}
 		candidate.Window.WorkingState = working
-		next, rolloverErr := adapter.bounded.manager.Rollover(ctx, runtimecontext.RolloverRequest{
+		next, rolloverErr := writer.Rollover(ctx, runtimecontext.RolloverRequest{
 			Previous: read.SourceCheckpoint, Window: candidate.Window, Artifacts: candidate.Artifacts,
 			Reason: "working_state_summary", ModelWindowFingerprint: binding.ModelWindowFingerprint,
 		})

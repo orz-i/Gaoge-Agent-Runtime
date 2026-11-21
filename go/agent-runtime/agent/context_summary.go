@@ -122,6 +122,9 @@ func (adapter *ContextSummaryAdapter) plan(ctx context.Context, runner *Runner, 
 		Policy: *state.WorkingStateSummary, ContextPolicy: policy, ModelWindow: plan.ModelWindow,
 		ModelWindowFingerprint: runtimecontext.ModelWindowFingerprint(plan.ModelWindow), RecipeVersion: WorkingStateSummaryVersion,
 		RemovedMessages: candidate.RemovedMessages, PreviousEvidenceRefs: oldEvidence, BusinessRequest: base}
+	if profile := adapter.bounded.manager.CheckpointWriteProfile(); profile != runtimecontext.CheckpointWriteLegacy {
+		binding.TargetCheckpointWriteProfile = profile
+	}
 	for _, artifact := range candidate.Artifacts {
 		binding.Artifacts = append(binding.Artifacts, ContextSummaryArtifactRef{ID: artifact.ID, ContentHash: artifact.ContentHash})
 	}

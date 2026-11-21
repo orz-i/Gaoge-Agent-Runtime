@@ -33,7 +33,7 @@ func TestSameMessageComparesExactJSONNumbersWithoutFloatRounding(t *testing.T) {
 }
 
 func TestCheckpointLosslessEncodingSeparatesLargeNumbersAndOpaqueReplay(t *testing.T) {
-	manager := NewManager(Dependencies{})
+	manager := NewManager(Dependencies{CheckpointWriteProfile: CheckpointWriteLosslessJSON})
 	open := func(number string) Checkpoint {
 		t.Helper()
 		checkpoint, err := manager.Open(t.Context(), OpenRequest{
@@ -85,7 +85,7 @@ func TestCheckpointLosslessEncodingSeparatesLargeNumbersAndOpaqueReplay(t *testi
 }
 
 func TestLegacyCheckpointValidationRemainsLegacy(t *testing.T) {
-	manager := NewManager(Dependencies{})
+	manager := NewManager(Dependencies{CheckpointWriteProfile: CheckpointWriteLosslessJSON})
 	request := OpenRequest{
 		ScopeID: "scope-legacy", StaticFingerprint: StaticFingerprint("legacy"), Instructions: "instructions",
 		SourcePath: []string{"user", "assistant", "tool"}, Entries: []Entry{
@@ -149,7 +149,7 @@ func TestLegacyCheckpointValidationRemainsLegacy(t *testing.T) {
 }
 
 func TestCheckpointLosslessEncodingRejectsAmbiguousRawJSON(t *testing.T) {
-	manager := NewManager(Dependencies{})
+	manager := NewManager(Dependencies{CheckpointWriteProfile: CheckpointWriteLosslessJSON})
 	for _, test := range []struct {
 		name, arguments, replay string
 	}{

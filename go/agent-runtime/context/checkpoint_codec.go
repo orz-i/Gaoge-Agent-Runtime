@@ -1,7 +1,7 @@
 package context
 
 // CheckpointWriteProfile selects the algorithms for a newly made decision.
-// Persist the selected (non-empty) profile in recipes that must be rebuilt.
+// A durable recipe must fix this selection independently of the current writer.
 // The on-disk empty ContentHashEncoding still denotes the historical codec.
 type CheckpointWriteProfile string
 
@@ -18,7 +18,7 @@ func ValidCheckpointWriteProfile(profile CheckpointWriteProfile) bool {
 // never an empty/latest alias that could change meaning during recovery.
 func (manager *Manager) CheckpointWriteProfile() CheckpointWriteProfile {
 	if manager == nil || manager.checkpointWriteProfile == "" {
-		return CheckpointWriteLosslessJSON
+		return CheckpointWriteLegacy
 	}
 	return manager.checkpointWriteProfile
 }
