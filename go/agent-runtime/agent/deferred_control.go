@@ -76,7 +76,8 @@ func (runner *Runner) VerifiedDeferredRootControl(ctx context.Context, rt *kerne
 	if runner.trustedDeferredPreparedControl && rt.VerifyPreparedRootSettlement(ctx, child) == nil {
 		return true
 	}
-	if !runner.trustedDeferredRootControl {
+	boundedToolControl := runner.boundedApproval && runner.scopedRootCallbacks && runner.delegatedToolResults != nil
+	if !runner.trustedDeferredRootControl && !boundedToolControl {
 		return false
 	}
 	switch child.Run.Status {
@@ -90,6 +91,10 @@ func (runner *Runner) VerifiedDeferredRootControl(ctx context.Context, rt *kerne
 		}
 	default:
 		return false
+	}
+	if boundedToolControl {
+		state, err := decodeState(child.State)
+		return err == nil && rt.VerifyBoundedToolControl(ctx, child) == nil && runner.verifyToolHistory(ctx, child.Run.ID, state)
 	}
 	return rt.VerifyOwnedRootSettlement(ctx, child) == nil
 }

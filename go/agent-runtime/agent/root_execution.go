@@ -185,6 +185,9 @@ func (runner *Runner) executeOwnedRoot(ctx context.Context, current kernel.Snaps
 		outcome.ControlCustody = kernel.OwnedCustodyScoped
 	} else if runner.scopedRootCallbacks && settled && scoped.rootCallbacks.toolApprovals.allBound() {
 		outcome.ControlCustody = kernel.OwnedToolResultReturn
+		if runner.boundedApproval {
+			outcome.ControlCustody = kernel.OwnedBoundedApprovalReturn
+		}
 	}
 	pendingCall, pending, _ := FrozenPendingDispatch(latest)
 	var suspended *suspendedToolReturn

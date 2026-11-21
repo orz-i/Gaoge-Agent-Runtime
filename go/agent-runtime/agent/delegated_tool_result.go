@@ -67,7 +67,11 @@ func (r *Runner) VerifyDeferredToolResults(ctx context.Context, rt *kernel.Runti
 		return false
 	}
 	state, err := decodeState(child.State)
-	if err != nil || len(state.DelegatedToolReceipts) == 0 || len(state.DelegatedToolReceipts) != state.Budget.Usage.ToolCalls {
+	return err == nil && len(state.DelegatedToolReceipts) > 0 && r.verifyToolHistory(ctx, child.Run.ID, state)
+}
+
+func (r *Runner) verifyToolHistory(ctx context.Context, runID string, state runState) bool {
+	if r.delegatedToolResults == nil || len(state.DelegatedToolReceipts) != state.Budget.Usage.ToolCalls {
 		return false
 	}
 	seen := make(map[string]bool, len(state.DelegatedToolReceipts))
@@ -76,7 +80,7 @@ func (r *Runner) VerifyDeferredToolResults(ctx context.Context, rt *kernel.Runti
 			return false
 		}
 		seen[receipt.Call.ID] = true
-		result, err := r.delegatedToolResults.VerifyCommittedTool(ctx, tools.ExecutionRequest{RunID: child.Run.ID, Call: tools.CloneCall(receipt.Call)})
+		result, err := r.delegatedToolResults.VerifyCommittedTool(ctx, tools.ExecutionRequest{RunID: runID, Call: tools.CloneCall(receipt.Call)})
 		if err != nil || result.Receipt.ExecutionID != receipt.Call.ID || result.Receipt.Disposition != "committed" ||
 			result.Pending != nil || tools.ValidateExecutionResult(result) != nil || kernel.ManagedDigest(result) != receipt.ResultDigest {
 			return false

@@ -16,6 +16,10 @@ func (s *Store) VerifyReturnedRootSettlement(ctx context.Context, expected kerne
 	return s.verifyRootSettlement(ctx, expected, nil)
 }
 
+func (s *Store) VerifyBoundedToolControl(ctx context.Context, expected kernel.Snapshot) error {
+	return s.verifyRootSettlement(ctx, expected, kernel.VerifyBoundedToolControlFacts)
+}
+
 func (s *Store) VerifyCompletedToolReturn(ctx context.Context, expected kernel.Snapshot) error {
 	return s.verifyRootSettlement(ctx, expected, kernel.VerifyCompletedToolReturnFacts)
 }

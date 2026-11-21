@@ -22,11 +22,12 @@ const (
 	// OwnedToolResultReturn binds committed Tool results for observation only.
 	OwnedToolResultReturn OwnedCallbackCustody = "tool-result-v1"
 	// OwnedToolBudgetReturn binds an unresolved Tool to its suspended reservation.
-	OwnedToolBudgetReturn OwnedCallbackCustody = "tool-budget-return-v1"
+	OwnedToolBudgetReturn      OwnedCallbackCustody = "tool-budget-return-v1"
+	OwnedBoundedApprovalReturn OwnedCallbackCustody = "bounded-approval-v1"
 )
 
 func (c OwnedCallbackCustody) Valid() bool {
-	return c == "" || c.permitsControl() || c == OwnedToolResultReturn || c == OwnedToolBudgetReturn
+	return c == "" || c.permitsControl() || c == OwnedToolResultReturn || c == OwnedToolBudgetReturn || c == OwnedBoundedApprovalReturn
 }
 
 func (c OwnedCallbackCustody) permitsControl() bool {
