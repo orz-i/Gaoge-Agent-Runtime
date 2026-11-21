@@ -149,6 +149,37 @@ func TestPhysicalObservationCannotBeReusedForSecondCall(t *testing.T) {
 	}
 }
 
+func TestStaleResumeProofBelongsToOneNativePreflight(t *testing.T) {
+	rt, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := &nativeLeaseFixtureModel{}
+	runner, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: provider})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := startRequest("stale-resume", "original-request", "finish")
+	current, err := runner.StartRun(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := func(ctx context.Context) (kernel.Snapshot, error) {
+		return runner.Resume(ctx, current.Run.ID, current.Run.Revision-1)
+	}
+	_, rejected, err := runner.ObservePhysicalCall(t.Context(), request.ID, plugin.RunResume, stale)
+	if !errors.Is(err, kernel.ErrConflict) || !rejected.RejectedStaleResume(request.ID) ||
+		rejected.RejectedStaleResume("other") || rejected.Matches(request.ID, plugin.RunResume) {
+		t.Fatalf("incorrect stale resume proof: kind=%v err=%v", rejected.Kind(), err)
+	}
+	_, replayed, _ := runner.ObservePhysicalCall(t.Context(), request.ID, plugin.RunResume, func(context.Context) (kernel.Snapshot, error) {
+		return kernel.Snapshot{}, err
+	})
+	if replayed.RejectedStaleResume(request.ID) || provider.calls != 1 {
+		t.Fatalf("reused error produced a physical receipt: kind=%v sends=%d", replayed.Kind(), provider.calls)
+	}
+}
+
 type rootCountingRunMiddleware struct{ calls atomic.Int32 }
 
 func (m *rootCountingRunMiddleware) Name() string { return "count-root-entry" }

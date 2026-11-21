@@ -1059,6 +1059,7 @@ func (runner *Runner) Resume(ctx context.Context, runID string, expectedRevision
 		return snapshot, ErrInvalidRequest
 	}
 	if snapshot.Run.Revision != expectedRevision {
+		recordPhysicalObservation(ctx, runID, physicalCallStaleResume)
 		return kernel.Snapshot{}, kernel.ErrConflict
 	}
 	if snapshot.Run.Status == kernel.RunStatusWaitingInput {

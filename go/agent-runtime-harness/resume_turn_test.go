@@ -383,6 +383,83 @@ func TestResumeTurnDoesNotReplayRetryableErrorAfterModelDispatch(t *testing.T) {
 		}
 	}
 }
+
+type interleavedResumeStore struct {
+	*harness.MemoryStore
+	onResume func()
+}
+
+func (s *interleavedResumeStore) AppendItem(ctx context.Context, item harness.Item) (harness.Item, bool, error) {
+	grant, fresh, err := s.MemoryStore.AppendItem(ctx, item)
+	if phase, ok := harness.VerifiedExecutionDispatchGrant(grant); err == nil && fresh && ok && phase == "resume" && s.onResume != nil {
+		s.onResume()
+	}
+	return grant, fresh, err
+}
+
+// A Ready delivery may finish the original Agent after Harness admits a competing
+// resume but before the losing native call validates its expected revision.
+func TestResumeTurnRejectsStaleDispatchWithoutHidingOriginalResult(t *testing.T) {
+	clock := newResumeTurnClock()
+	store := &interleavedResumeStore{MemoryStore: harness.NewMemoryStore()}
+	calls := 0
+	provider := resumeTurnModelFunc(func(context.Context, model.Request) (model.Response, error) {
+		calls++
+		return model.Response{Content: "original result", Continue: calls == 1}, nil
+	})
+	var deps agent.Dependencies
+	host, rt := newResumeTurnHarness(t, memory.NewStoreWithExecutionClock(clock), store, provider, clock, func(d *agent.Dependencies) { deps = *d })
+	start, err := host.StartAgentTurn(t.Context(), testStartRequest())
+	if err != nil || start.Turn.Status != harness.TurnRunning {
+		t.Fatalf("initial yield: %s %v", start.Turn.Status, err)
+	}
+	root, _ := harness.TopLevelInvocation(start)
+	ready, err := agent.NewRunner(deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := rt.Load(t.Context(), root.ExecutionRefID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, wakeup := range []struct {
+		run      string
+		revision uint64
+	}{
+		{root.ExecutionRefID, current.Run.Revision + 1},
+		{"different-root", current.Run.Revision},
+	} {
+		if _, staleErr := host.ResumeTurnAtRevision(t.Context(), start.Turn.ID, wakeup.run, wakeup.revision); !errors.Is(staleErr, kernel.ErrConflict) {
+			t.Fatalf("obsolete wakeup entered the current root: %v", staleErr)
+		}
+	}
+	store.onResume = func() {
+		current, loadErr := rt.Load(t.Context(), root.ExecutionRefID)
+		if loadErr != nil {
+			t.Fatal(loadErr)
+		}
+		result, resumeErr := ready.Resume(t.Context(), root.ExecutionRefID, current.Run.Revision)
+		if resumeErr != nil || result.Run.Status != kernel.RunStatusCompleted {
+			t.Fatalf("original Agent continuation: %s %v", result.Run.Status, resumeErr)
+		}
+	}
+	if _, err = host.ResumeTurnAtRevision(t.Context(), start.Turn.ID, root.ExecutionRefID, current.Run.Revision); !errors.Is(err, kernel.ErrConflict) || errors.Is(err, harness.ErrExecutionOutcomeUnknown) {
+		t.Fatalf("unexpected competing resume outcome: %v", err)
+	}
+	final, err := host.Refresh(t.Context(), start.Turn.ID)
+	if err != nil || final.Turn.Status != harness.TurnCompleted || calls != 2 {
+		t.Fatalf("original result hidden: turn=%s modelCalls=%d err=%v", final.Turn.Status, calls, err)
+	}
+	for _, item := range final.Items {
+		if phase, ok := harness.VerifiedExecutionDispatchGrant(item); ok && phase == "resume" {
+			if boundary, ok := harness.VerifiedExecutionDispatchReceipt(item, final.Items); ok && boundary == "physical_dispatch_rejected" {
+				return
+			}
+		}
+	}
+	t.Fatal("missing original rejected resume receipt")
+}
+
 func TestResumeTurnDoesNotReplayUnknownNativeToolOutcome(t *testing.T) {
 	t.Parallel()
 	clock := newResumeTurnClock()

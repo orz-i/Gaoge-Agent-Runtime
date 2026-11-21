@@ -407,6 +407,13 @@ func (runner *Runner) withPhysicalInvocationDispatchForContext(
 		snapshot, physicalErr = physical(physicalCtx)
 	}
 	if snapshot.Run.ID == "" {
+		if observe && phase == "resume" && outcome.RejectedStaleResume(resultRunID) {
+			receiptErr := runner.finishPhysicalDispatchGrant(ctx, grant, "physical_dispatch_rejected")
+			if receiptErr != nil {
+				return snapshot, errors.Join(ErrExecutionOutcomeUnknown, physicalErr, receiptErr)
+			}
+			return snapshot, physicalErr
+		}
 		// An arbitrary Feature may have dispatched remote side effects
 		// before returning a generic error, including a Kernel CAS conflict.
 		// Only the concrete first-party Agent control can certify that its

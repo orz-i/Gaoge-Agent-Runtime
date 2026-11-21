@@ -15,6 +15,7 @@ const (
 	PhysicalCallSettled
 	PhysicalCallDurableYield
 	PhysicalCallCreated
+	physicalCallStaleResume
 )
 
 // PhysicalCallOutcome is an observation of one actual first-party call, not a
@@ -26,8 +27,15 @@ type PhysicalCallOutcome struct {
 }
 
 func (o PhysicalCallOutcome) Matches(id string, operation plugin.RunOperation) bool {
-	return o.kind != PhysicalCallUnknown && o.runID == id && o.operation == operation
+	return o.kind != PhysicalCallUnknown && o.kind != physicalCallStaleResume && o.runID == id && o.operation == operation
 }
+
+// RejectedStaleResume identifies the original native Resume revision check,
+// before any middleware, verifier, execution lease or physical callback.
+func (o PhysicalCallOutcome) RejectedStaleResume(runID string) bool {
+	return o.kind == physicalCallStaleResume && o.operation == plugin.RunResume && o.runID == runID
+}
+
 func (o PhysicalCallOutcome) Kind() PhysicalCallOutcomeKind { return o.kind }
 
 type physicalObservationKey struct{}
