@@ -13,6 +13,7 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
 // ErrModelOutcomeUnknown retains the original dispatched invocation until an
@@ -162,7 +163,11 @@ func (runner *Runner) executeOwnedRoot(ctx context.Context, current kernel.Snaps
 	scoped.externalRunLease = external
 	lifecycle := callbackscope.New(callbackscope.Binding{RunID: grant.ChildRunID, GrantID: grant.ID, OwnerID: grant.ExecutionOwnerID, LeaseID: grant.ExecutionLeaseID, Epoch: grant.ExecutionEpoch, SourceHash: grant.AdmissionSourceHash, Operation: grant.AdmissionOperation}, runner.boundedCallbacks)
 	defer lifecycle.Close()
-	result, callErr := execute(callbackscope.Bind(ctx, lifecycle), &scoped, current)
+	physicalCtx := callbackscope.Bind(ctx, lifecycle)
+	if runner.scopedRootCallbacks && runner.toolOutcomeVerifier != nil && (grant.AdmissionOperation == "resume" || grant.AdmissionOperation == "start") {
+		physicalCtx = context.WithValue(physicalCtx, toolReturnGrantKey{}, grant.ID)
+	}
+	result, callErr := execute(physicalCtx, &scoped, current)
 	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 	defer cancel()
 	latest, loadErr := scopedRT.Load(cleanup, current.Run.ID)
@@ -180,6 +185,13 @@ func (runner *Runner) executeOwnedRoot(ctx context.Context, current kernel.Snaps
 		outcome.ControlCustody = kernel.OwnedCustodyScoped
 	} else if runner.scopedRootCallbacks && settled && scoped.rootCallbacks.toolApprovals.allBound() {
 		outcome.ControlCustody = kernel.OwnedToolResultReturn
+	}
+	pendingCall, pending, _ := FrozenPendingDispatch(latest)
+	var suspended *suspendedToolReturn
+	if errors.As(callErr, &suspended) && suspended.grantID == grant.ID && pending &&
+		suspended.requestHash == kernel.ManagedDigest(tools.ExecutionRequest{RunID: latest.Run.ID, Call: pendingCall}) && hostComplete {
+		outcome.ControlCustody = kernel.OwnedToolBudgetReturn
+		outcome.ToolBudgetScope = suspended.ledgerID
 	}
 	payload := kernel.OwnedPhysicalCallbackReturnPayload(latest, outcome)
 	returned := featurecontrol.Seal(latest.Run.ID, latest.Run.Revision, "agent_owned_callback_return", grant.ID, payload, nil)
@@ -210,6 +222,11 @@ func (runner *Runner) executeOwnedRoot(ctx context.Context, current kernel.Snaps
 		}
 	}
 	if !settled {
+		// The enclosing native call has really returned. The Kernel grant still
+		// fences the Tool until an independent receipt settles the original intent.
+		if hostComplete && pending && runner.scopedRootCallbacks && runner.toolOutcomeVerifier != nil {
+			recordPhysicalObservation(ctx, latest.Run.ID, PhysicalCallDurableYield)
+		}
 		state, stateErr := decodeState(latest.State)
 		if callErr == nil && hostComplete && stateErr == nil && (state.ToolDispatchID != "" || len(state.DeferredChildren) != 0) {
 			recordPhysicalObservation(ctx, latest.Run.ID, PhysicalCallDurableYield)

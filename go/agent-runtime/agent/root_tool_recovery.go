@@ -47,6 +47,11 @@ func (runner *Runner) reconcileRootToolReceipt(ctx context.Context, snapshot ker
 	if tools.ValidateExecutionResult(verified) != nil || verified.Receipt.ExecutionID != callID || verified.Receipt.Disposition != "committed" || verified.Pending != nil {
 		return snapshot, ErrToolReceiptMismatch
 	}
+	if completion.ControlCustody == kernel.OwnedToolBudgetReturn {
+		if err := runner.settleOriginalToolBudget(ctx, snapshot, completion, tools.ExecutionRequest{RunID: snapshot.Run.ID, Call: call}, verified); err != nil {
+			return snapshot, errors.Join(ErrToolOutcomeUnknown, err)
+		}
+	}
 	for _, old := range state.RecoveredTools {
 		if old.Call.ID == callID {
 			return snapshot, ErrToolReceiptMismatch
