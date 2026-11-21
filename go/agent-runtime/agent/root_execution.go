@@ -164,8 +164,10 @@ func (runner *Runner) executeOwnedRoot(ctx context.Context, current kernel.Snaps
 	lifecycle := callbackscope.New(callbackscope.Binding{RunID: grant.ChildRunID, GrantID: grant.ID, OwnerID: grant.ExecutionOwnerID, LeaseID: grant.ExecutionLeaseID, Epoch: grant.ExecutionEpoch, SourceHash: grant.AdmissionSourceHash, Operation: grant.AdmissionOperation}, runner.boundedCallbacks)
 	defer lifecycle.Close()
 	physicalCtx := callbackscope.Bind(ctx, lifecycle)
+	var toolFrame *originalToolFrame
 	if runner.scopedRootCallbacks && runner.toolOutcomeVerifier != nil && (grant.AdmissionOperation == "resume" || grant.AdmissionOperation == "start") {
-		physicalCtx = context.WithValue(physicalCtx, toolReturnGrantKey{}, grant.ID)
+		toolFrame = &originalToolFrame{grantID: grant.ID}
+		physicalCtx = context.WithValue(physicalCtx, toolReturnGrantKey{}, toolFrame)
 	}
 	result, callErr := execute(physicalCtx, &scoped, current)
 	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
@@ -190,11 +192,10 @@ func (runner *Runner) executeOwnedRoot(ctx context.Context, current kernel.Snaps
 		}
 	}
 	pendingCall, pending, _ := FrozenPendingDispatch(latest)
-	var suspended *suspendedToolReturn
-	if errors.As(callErr, &suspended) && suspended.grantID == grant.ID && pending &&
-		suspended.requestHash == kernel.ManagedDigest(tools.ExecutionRequest{RunID: latest.Run.ID, Call: pendingCall}) && hostComplete {
-		outcome.ControlCustody = kernel.OwnedToolBudgetReturn
-		outcome.ToolBudgetScope = suspended.ledgerID
+	if pending && hostComplete {
+		if hold := toolFrame.hold(tools.ExecutionRequest{RunID: latest.Run.ID, Call: pendingCall}); hold != nil {
+			outcome.ControlCustody, outcome.ToolBudgetScope = kernel.OwnedToolBudgetReturn, hold.LedgerID
+		}
 	}
 	payload := kernel.OwnedPhysicalCallbackReturnPayload(latest, outcome)
 	returned := featurecontrol.Seal(latest.Run.ID, latest.Run.Revision, "agent_owned_callback_return", grant.ID, payload, nil)

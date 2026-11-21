@@ -411,6 +411,7 @@ type Runner struct {
 }
 
 type runState struct {
+	ExternalToolHold      *externalToolHold          `json:"externalToolHold,omitempty"`
 	DelegatedToolReceipts []delegatedToolReceipt     `json:"delegatedToolReceipts,omitempty"`
 	RecoveredTools        []rootToolReceipt          `json:"recoveredTools,omitempty"`
 	OriginFingerprint     string                     `json:"originFingerprint,omitempty"`

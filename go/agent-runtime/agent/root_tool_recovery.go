@@ -16,6 +16,30 @@ type rootToolReceipt struct {
 	Result tools.ExecutionResult `json:"result"`
 }
 
+// ReconcileExternalToolForControl verifies the original external wait without
+// continuing the Agent loop, including when the Tool is terminal.
+func (runner *Runner) ReconcileExternalToolForControl(ctx context.Context, runID string, revision uint64, callID string) (kernel.Snapshot, error) {
+	if runner == nil || runner.toolOutcomeVerifier == nil || ctx == nil || callID == "" {
+		return kernel.Snapshot{}, ErrInvalidRequest
+	}
+	s, state, err := runner.loadState(ctx, runID)
+	if err != nil {
+		return s, err
+	}
+	if s.Run.Revision != revision {
+		return s, kernel.ErrConflict
+	}
+	call, waiting, err := FrozenExternalToolCall(s)
+	if err != nil || !waiting || call.ID != callID || s.Run.ParentRunID != "" {
+		return s, errors.Join(ErrToolOutcomeUnknown, err)
+	}
+	grant, err := runner.runtime.LookupChildExecution(ctx, runID)
+	if err != nil {
+		return s, err
+	}
+	return runner.reconcileRootToolReceipt(ctx, s, state, grant, call.ID, false)
+}
+
 func sameRecoveredCall(a, b tools.Call) bool {
 	x, e := json.Marshal(a)
 	y, f := json.Marshal(b)
@@ -46,6 +70,16 @@ func (runner *Runner) reconcileRootToolReceipt(ctx context.Context, snapshot ker
 	}
 	if tools.ValidateExecutionResult(verified) != nil || verified.Receipt.ExecutionID != callID || verified.Receipt.Disposition != "committed" || verified.Pending != nil {
 		return snapshot, ErrToolReceiptMismatch
+	}
+	if hold := state.ExternalToolHold; hold != nil {
+		request := tools.ExecutionRequest{RunID: snapshot.Run.ID, Call: call}
+		if state.ToolWait == nil || state.ToolWait.Kind != tools.PendingExternalResult || hold.GrantID != grant.ID || hold.RequestHash != kernel.ManagedDigest(request) {
+			return snapshot, ErrToolReceiptMismatch
+		}
+		if err := runner.settleToolHold(ctx, request, verified, func(id string) bool { return id == hold.LedgerID }); err != nil {
+			return snapshot, errors.Join(ErrToolOutcomeUnknown, err)
+		}
+		state.ExternalToolHold = nil
 	}
 	if completion.ControlCustody == kernel.OwnedToolBudgetReturn {
 		if err := runner.settleOriginalToolBudget(ctx, snapshot, completion, tools.ExecutionRequest{RunID: snapshot.Run.ID, Call: call}, verified); err != nil {

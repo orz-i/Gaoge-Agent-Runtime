@@ -223,6 +223,10 @@ func (runner *Runner) persistToolWait(ctx context.Context, snapshot kernel.Snaps
 	if !ok {
 		return snapshot, true, ErrInvalidRequest
 	}
+	if descriptor.Kind == tools.PendingExternalResult {
+		frame, _ := ctx.Value(toolReturnGrantKey{}).(*originalToolFrame)
+		state.ExternalToolHold = frame.hold(tools.ExecutionRequest{RunID: snapshot.Run.ID, Call: call})
+	}
 	pending := tools.ClonePending(descriptor)
 	if snapshot.Run.DeadlineAt != nil && (pending.DeadlineAt == nil || snapshot.Run.DeadlineAt.Before(*pending.DeadlineAt)) {
 		pending.DeadlineAt = timePointer(*snapshot.Run.DeadlineAt)

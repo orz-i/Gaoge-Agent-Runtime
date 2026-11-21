@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"math"
-	"reflect"
 )
 
 // OwnedRootSettlementStore is an OPTIONAL read-only custody proof. It is not
@@ -100,15 +99,14 @@ func exactOwnedRootCancelSuccessor(previous, current Snapshot) bool {
 		current.EventHead != previous.EventHead+1 ||
 		current.Run.Status != RunStatusCancelled || current.Run.ErrorCode != "run.cancelled" ||
 		!bytes.Equal(previous.State, current.State) ||
-		!reflect.DeepEqual(previous.Checkpoint, current.Checkpoint) ||
-		!reflect.DeepEqual(previous.Result, current.Result) {
+		current.Checkpoint != nil || current.Result != nil || previous.Result != nil {
 		return false
 	}
 	before, after := previous.Run, current.Run
 	before.Status, before.Revision = after.Status, after.Revision
 	before.ErrorCode, before.ErrorDetail = after.ErrorCode, after.ErrorDetail
 	before.EndedAt, before.UpdatedAt = after.EndedAt, after.UpdatedAt
-	return reflect.DeepEqual(before, after)
+	return ManagedDigest(before) == ManagedDigest(after)
 }
 
 // VerifyPreparedRootSettlementFacts shares the exact owner/epoch/receipt

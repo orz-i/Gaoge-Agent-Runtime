@@ -21,6 +21,28 @@ func settledRootFixture() (kernel.Snapshot, kernel.OwnedRetirementReceipt) {
 	return run, r
 }
 
+func TestOwnedCancelSuccessorClearsOriginalApproval(t *testing.T) {
+	run, receipt := settledRootFixture()
+	run.Checkpoint = &kernel.Checkpoint{ID: "original-approval", Status: kernel.CheckpointPending}
+	receipt.Evidence.Snapshot = run
+	receipt.ACKIdentity = receipt.Identity()
+	next := run
+	next.Run.Status, next.Run.ErrorCode = kernel.RunStatusCancelled, "run.cancelled"
+	next.Run.Revision++
+	next.EventHead++
+	next.Checkpoint = nil
+	check := func(s kernel.Snapshot) error {
+		return kernel.VerifyBoundedToolControlFacts(s, s, 3, 3, kernel.ExecutionLease{}, false, []kernel.OwnedRetirementReceipt{receipt})
+	}
+	if err := check(next); err != nil {
+		t.Fatal(err)
+	}
+	next.Checkpoint = run.Checkpoint
+	if !errors.Is(check(next), kernel.ErrExecutionConflict) {
+		t.Fatal("accepted a checkpoint surviving native Cancel")
+	}
+}
+
 func TestBoundedToolControlRejectsObservationOnlyCustody(t *testing.T) {
 	run, receipt := settledRootFixture()
 	receipt.Evidence.Grant.AdmissionOperation = "resume"
