@@ -18,16 +18,25 @@ import (
 // original Start or Prompt to repair admission, including its original Context
 // and allowances. Resume never reconstructs those inputs from current settings.
 func (runner *Runner) ResumeTurn(ctx context.Context, turnID string) (Snapshot, error) {
-	return runner.resumeTurn(ctx, turnID, nil)
+	return runner.resumeTurn(ctx, turnID, nil, "", 0)
+}
+
+// ResumeTurnAtRevision continues the original root and revision selected by a
+// durable scheduler. An obsolete wakeup cannot attach to a newer root or phase.
+func (runner *Runner) ResumeTurnAtRevision(ctx context.Context, turnID, runID string, revision uint64) (Snapshot, error) {
+	if strings.TrimSpace(runID) == "" || revision == 0 {
+		return Snapshot{}, ErrInvalidRequest
+	}
+	return runner.resumeTurn(ctx, turnID, nil, runID, revision)
 }
 
 // The Session facade carries its Host-authorized Actor/Thread to the native
 // physical continuation gate. Direct Runner callers keep their own Host auth.
 func (runner *Runner) resumeTurnForSession(ctx context.Context, turnID string, actor kernel.ActorRef, thread kernel.ThreadRef) (Snapshot, error) {
-	return runner.resumeTurn(ctx, turnID, &sessionBoundOwner{actor: actor, thread: thread})
+	return runner.resumeTurn(ctx, turnID, &sessionBoundOwner{actor: actor, thread: thread}, "", 0)
 }
 
-func (runner *Runner) resumeTurn(ctx context.Context, turnID string, expected *sessionBoundOwner) (Snapshot, error) {
+func (runner *Runner) resumeTurn(ctx context.Context, turnID string, expected *sessionBoundOwner, runID string, revision uint64) (Snapshot, error) {
 	if runner == nil || runner.runtime == nil || runner.store == nil || runner.agent == nil || strings.TrimSpace(turnID) == "" {
 		return Snapshot{}, ErrInvalidRequest
 	}
@@ -41,6 +50,9 @@ func (runner *Runner) resumeTurn(ctx context.Context, turnID string, expected *s
 	}
 	if invocation.ExecutionClass != ExecutionAgent {
 		return runner.resumeTurnError(ctx, turn, nil, ErrInvalidRequest)
+	}
+	if runID != "" && invocation.ExecutionRefID != runID {
+		return Snapshot{}, kernel.ErrConflict
 	}
 	if expected != nil && requireSessionRootOwner(turn, invocation, *expected) != nil {
 		return Snapshot{}, ErrConflict
@@ -68,6 +80,9 @@ func (runner *Runner) resumeTurn(ctx context.Context, turnID string, expected *s
 			err = errors.Join(ErrNotFound, err)
 		}
 		return runner.resumeTurnError(ctx, turn, nil, err)
+	}
+	if revision != 0 && runtimeSnapshot.Run.Revision != revision {
+		return Snapshot{}, kernel.ErrConflict
 	}
 	if runtimeSnapshotConflicts(invocation, runtimeSnapshot) || runtimeSnapshot.Run.Kind != agent.RunKind || runtimeSnapshot.Run.Actor != session.Actor {
 		return Snapshot{}, ErrConflict

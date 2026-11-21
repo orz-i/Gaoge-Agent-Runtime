@@ -418,6 +418,21 @@ func TestResumeTurnRejectsStaleDispatchWithoutHidingOriginalResult(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
+	current, err := rt.Load(t.Context(), root.ExecutionRefID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, wakeup := range []struct {
+		run      string
+		revision uint64
+	}{
+		{root.ExecutionRefID, current.Run.Revision + 1},
+		{"different-root", current.Run.Revision},
+	} {
+		if _, staleErr := host.ResumeTurnAtRevision(t.Context(), start.Turn.ID, wakeup.run, wakeup.revision); !errors.Is(staleErr, kernel.ErrConflict) {
+			t.Fatalf("obsolete wakeup entered the current root: %v", staleErr)
+		}
+	}
 	store.onResume = func() {
 		current, loadErr := rt.Load(t.Context(), root.ExecutionRefID)
 		if loadErr != nil {
@@ -428,7 +443,7 @@ func TestResumeTurnRejectsStaleDispatchWithoutHidingOriginalResult(t *testing.T)
 			t.Fatalf("original Agent continuation: %s %v", result.Run.Status, resumeErr)
 		}
 	}
-	if _, err = host.ResumeTurn(t.Context(), start.Turn.ID); !errors.Is(err, kernel.ErrConflict) || errors.Is(err, harness.ErrExecutionOutcomeUnknown) {
+	if _, err = host.ResumeTurnAtRevision(t.Context(), start.Turn.ID, root.ExecutionRefID, current.Run.Revision); !errors.Is(err, kernel.ErrConflict) || errors.Is(err, harness.ErrExecutionOutcomeUnknown) {
 		t.Fatalf("unexpected competing resume outcome: %v", err)
 	}
 	final, err := host.Refresh(t.Context(), start.Turn.ID)
