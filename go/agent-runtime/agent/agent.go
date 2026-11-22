@@ -304,6 +304,8 @@ type Dependencies struct {
 	// for reconciling an uncertain native Tool dispatch. It does NOT retry.
 	ToolOutcomeVerifier  ToolOutcomeVerifier
 	ModelOutcomeVerifier ModelOutcomeVerifier
+	// ExternalToolNoEffectVerifier reads receipts for withdrawals before execution.
+	ExternalToolNoEffectVerifier ExternalToolNoEffectVerifier
 	// DelegatedToolResults inspects original owner receipts for completed
 	// delegated results. It never executes a Tool or grants physical control.
 	DelegatedToolResults ToolOutcomeVerifier
@@ -391,6 +393,7 @@ type Runner struct {
 	externalRunLease          bool
 	defaultRunOwner           bool
 	toolOutcomeVerifier       ToolOutcomeVerifier
+	externalNoEffectVerifier  ExternalToolNoEffectVerifier
 	delegatedToolResults      ToolOutcomeVerifier
 	modelOutcomeVerifier      ModelOutcomeVerifier
 	modelLimiter              *callLimiter
@@ -411,6 +414,8 @@ type Runner struct {
 }
 
 type runState struct {
+	ExternalToolCancellation *externalToolCancellation `json:"externalToolCancellation,omitempty"`
+
 	ExternalToolHold      *externalToolHold          `json:"externalToolHold,omitempty"`
 	DelegatedToolReceipts []delegatedToolReceipt     `json:"delegatedToolReceipts,omitempty"`
 	RecoveredTools        []rootToolReceipt          `json:"recoveredTools,omitempty"`
@@ -695,6 +700,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		boundedApproval:                boundedApproval,
 		modelPolicyNormalizer:          policyNormalizer,
 		deferResume:                    dependencies.DeferResumption,
+		externalNoEffectVerifier:       dependencies.ExternalToolNoEffectVerifier,
 	}, nil
 }
 
@@ -1068,6 +1074,10 @@ func (runner *Runner) Resume(ctx context.Context, runID string, expectedRevision
 	if snapshot.Run.Status != kernel.RunStatusRunning {
 		return snapshot, ErrRunTerminal
 	}
+	if state.ExternalToolCancellation != nil {
+		recordPhysicalObservation(ctx, runID, PhysicalCallDurableYield)
+		return snapshot, nil
+	}
 	if invocation, active := activeModelInvocation(state); active && invocation.Status == ModelInvocationPending && invocation.DispatchAttempt != 0 {
 		if runner.modelOutcomeVerifier == nil {
 			return snapshot, ErrModelOutcomeUnknown
@@ -1156,6 +1166,9 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 	if err != nil {
 		failed, failErr := runner.fail(ctx, snapshot, runState{}, "agent.state_invalid", err)
 		return failed, true, failErr
+	}
+	if state.ExternalToolCancellation != nil {
+		return snapshot, true, nil
 	}
 	if len(state.PendingCalls) == 0 && len(state.DeferredChildren) != 0 {
 		return runner.activateDeferredChild(ctx, snapshot, state)

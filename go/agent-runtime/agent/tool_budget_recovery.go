@@ -50,6 +50,14 @@ func (r *Runner) settleToolHold(ctx context.Context, request tools.ExecutionRequ
 	if len(result.Receipt.OwnerReceiptDigest) != 64 {
 		return ErrToolReceiptMismatch
 	}
+	raw, err := json.Marshal(boundedBudgetToolReceipt{Result: result})
+	if err != nil {
+		return err
+	}
+	return r.settleVerifiedToolReservation(ctx, request, original, budget.Usage{ToolCalls: 1}, raw)
+}
+
+func (r *Runner) settleVerifiedToolReservation(ctx context.Context, request tools.ExecutionRequest, original func(string) bool, usage budget.Usage, receipt json.RawMessage) error {
 	for _, layer := range r.boundedCallbacks {
 		a, ok := layer.(*BoundedBudgetAdapter)
 		if !ok {
@@ -60,13 +68,13 @@ func (r *Runner) settleToolHold(ctx context.Context, request tools.ExecutionRequ
 			return err
 		}
 		if scope.LedgerID != "" && original(scope.LedgerID) {
-			return a.settleSuspendedTool(ctx, scope.LedgerID, request, result)
+			return a.settleSuspendedTool(ctx, scope.LedgerID, request, usage, receipt)
 		}
 	}
 	return ErrToolReceiptMismatch
 }
 
-func (a *BoundedBudgetAdapter) settleSuspendedTool(ctx context.Context, ledgerID string, request tools.ExecutionRequest, result tools.ExecutionResult) error {
+func (a *BoundedBudgetAdapter) settleSuspendedTool(ctx context.Context, ledgerID string, request tools.ExecutionRequest, usage budget.Usage, receipt json.RawMessage) error {
 	ledger, err := a.coordinator.Store.LoadBudget(ctx, ledgerID)
 	if err != nil {
 		return err
@@ -76,11 +84,7 @@ func (a *BoundedBudgetAdapter) settleSuspendedTool(ctx context.Context, ledgerID
 	if res.ID != id || res.RunID != request.RunID || res.RequestHash != kernel.ManagedDigest(request) || !res.Dispatched || res.Active {
 		return ErrToolReceiptMismatch
 	}
-	raw, err := json.Marshal(boundedBudgetToolReceipt{Result: result})
-	if err != nil {
-		return err
-	}
-	updated, err := a.coordinator.Settle(ctx, ledger.ID, id, budget.Usage{ToolCalls: 1}, raw)
+	updated, err := a.coordinator.Settle(ctx, ledger.ID, id, usage, receipt)
 	if err != nil {
 		return err
 	}

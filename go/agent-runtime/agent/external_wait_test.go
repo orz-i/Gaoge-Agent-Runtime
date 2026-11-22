@@ -29,6 +29,8 @@ func (model *externalModel) Generate(context.Context, runtimemodel.Request) (run
 }
 
 type externalFixture struct {
+	controlOwner agent.ExternalToolNoEffectVerifier
+
 	store      *memory.Store
 	runtime    *kernel.Runtime
 	runner     *agent.Runner
@@ -69,7 +71,8 @@ func (fixture *externalFixture) restart(t *testing.T, store kernel.Store) {
 		t.Fatal(err)
 	}
 	fixture.runner, err = agent.NewRunner(agent.Dependencies{
-		Runtime: fixture.runtime, Model: fixture.model, Catalog: fixture.registry, Executor: fixture.registry, Clock: fixture.clock,
+		ExternalToolNoEffectVerifier: fixture.controlOwner,
+		Runtime:                      fixture.runtime, Model: fixture.model, Catalog: fixture.registry, Executor: fixture.registry, Clock: fixture.clock,
 		ToolOutcomeVerifier: agent.ToolOutcomeVerifierFunc(func(_ context.Context, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
 			fixture.lookups++
 			if !fixture.ready || request.Call.ID != "external-call" || request.RunID != "external-run" {

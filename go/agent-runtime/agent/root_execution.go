@@ -185,6 +185,15 @@ func (runner *Runner) executeOwnedRoot(ctx context.Context, current kernel.Snaps
 		outcome.ControlCustody = kernel.OwnedCustodyPrepared
 	} else if runner.scopedRootCallbacks && !scoped.rootCallbacks.approvalPolicyEntered.Load() {
 		outcome.ControlCustody = kernel.OwnedCustodyScoped
+	} else if runner.boundedApproval && runner.scopedRootCallbacks && runner.externalNoEffectVerifier != nil && hostComplete {
+		// A returned async tool has not produced a result. Bind only its
+		// original read-only approval to the exact stored wait. The kernel
+		// keeps this grant active until a separate owner receipt is verified.
+		pending, waiting, _ := FrozenExternalToolCall(latest)
+		boundWait := waiting && scoped.rootCallbacks.toolApprovals.bind(pending)
+		if (settled || boundWait) && scoped.rootCallbacks.toolApprovals.allBound() {
+			outcome.ControlCustody = kernel.OwnedBoundedApprovalReturn
+		}
 	} else if runner.scopedRootCallbacks && settled && scoped.rootCallbacks.toolApprovals.allBound() {
 		outcome.ControlCustody = kernel.OwnedToolResultReturn
 		if runner.boundedApproval {
