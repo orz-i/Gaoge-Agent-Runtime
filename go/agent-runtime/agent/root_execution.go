@@ -165,7 +165,7 @@ func (runner *Runner) executeOwnedRoot(ctx context.Context, current kernel.Snaps
 	defer lifecycle.Close()
 	physicalCtx := callbackscope.Bind(ctx, lifecycle)
 	var toolFrame *originalToolFrame
-	if runner.scopedRootCallbacks && runner.toolOutcomeVerifier != nil && (grant.AdmissionOperation == "resume" || grant.AdmissionOperation == "start") {
+	if runner.scopedRootCallbacks && (runner.toolOutcomeVerifier != nil || runner.externalNoEffectVerifier != nil) && (grant.AdmissionOperation == "resume" || grant.AdmissionOperation == "start") {
 		toolFrame = &originalToolFrame{grantID: grant.ID}
 		physicalCtx = context.WithValue(physicalCtx, toolReturnGrantKey{}, toolFrame)
 	}

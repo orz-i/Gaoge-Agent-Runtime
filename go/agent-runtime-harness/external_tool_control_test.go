@@ -45,7 +45,7 @@ type memberExternalCase struct {
 	owner  *pendingMemberOwner
 }
 
-func newMemberExternalCase(t *testing.T) memberExternalCase {
+func newMemberExternalCase(t *testing.T, withCommittedReader bool) memberExternalCase {
 	t.Helper()
 	fail := func(err error) {
 		t.Helper()
@@ -73,8 +73,13 @@ func newMemberExternalCase(t *testing.T) memberExternalCase {
 		return plugin.ApprovalNotRequired, nil
 	})
 	fail(err)
+	// A no-effect-only host must retain the same original budget reservation.
+	var committed agent.ToolOutcomeVerifier
+	if withCommittedReader {
+		committed = reader
+	}
 	c.native, err = agent.NewRunner(agent.Dependencies{Runtime: rt, Model: c.model, Catalog: registry, Executor: registry, ApprovalPolicies: []plugin.ApprovalPolicy{approval},
-		ToolOutcomeVerifier: reader, DelegatedToolResults: reader, ExternalToolNoEffectVerifier: c.owner, RunMiddleware: []plugin.RunMiddleware{bounded},
+		ToolOutcomeVerifier: committed, DelegatedToolResults: reader, ExternalToolNoEffectVerifier: c.owner, RunMiddleware: []plugin.RunMiddleware{bounded},
 		ModelMiddleware: []plugin.ModelMiddleware{bounded}, ToolMiddleware: []plugin.ToolMiddleware{bounded}})
 	fail(err)
 	route, err := handoff.NewDeferredAgent(c.native)
@@ -89,7 +94,7 @@ func newMemberExternalCase(t *testing.T) memberExternalCase {
 func TestExternalWaitOnMemberOnlyToolUsesExactElectedSubtree(t *testing.T) {
 	for _, target := range []string{"root", "member"} {
 		t.Run(target, func(t *testing.T) {
-			c := newMemberExternalCase(t)
+			c := newMemberExternalCase(t, target == "root")
 			ctx := t.Context()
 			req := testStartRequest()
 			req.Config.SharedBudget = &budget.Limits{MaxLLMCalls: 8, MaxToolCalls: 16, MaxTotalTokens: 5000, MaxChildRuns: 3, MaxConcurrentRuns: 1}
