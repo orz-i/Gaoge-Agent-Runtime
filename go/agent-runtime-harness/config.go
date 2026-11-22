@@ -114,6 +114,15 @@ type SkillSnapshot struct {
 // Turns created before runtime-owned delegation defaults.
 type DelegationPolicySnapshot struct {
 	MaxDepth int `json:"maxDepth,omitempty"`
+	// LocalToolGrants authorize a named, versioned member to receive a tool
+	// outside the root's callable set. They share the immutable ToolPolicies.
+	LocalToolGrants []DelegatedLocalToolGrant `json:"localToolGrants,omitempty"`
+}
+
+type DelegatedLocalToolGrant struct {
+	MemberID       string `json:"memberID"`
+	MemberRevision string `json:"memberRevision"`
+	ToolKey        string `json:"toolKey"`
 }
 
 // ConfigSnapshot is one immutable execution configuration. It intentionally excludes secrets and transport endpoints.
@@ -236,6 +245,10 @@ func SealConfigSnapshot(turnID string, value ConfigSnapshot, now time.Time) (Con
 	if err != nil {
 		return ConfigSnapshot{}, err
 	}
+	value.DelegationPolicy.LocalToolGrants, err = normalizeDelegatedLocalToolGrants(value)
+	if err != nil {
+		return ConfigSnapshot{}, err
+	}
 	value.Skills, err = normalizeSkillSnapshots(value.Skills)
 	if err != nil {
 		return ConfigSnapshot{}, err
@@ -334,6 +347,7 @@ func cloneConfigSnapshot(value ConfigSnapshot) ConfigSnapshot {
 	value.ToolKeys = append([]string(nil), value.ToolKeys...)
 	value.ToolPolicies = append([]ToolPolicySnapshot(nil), value.ToolPolicies...)
 	value.Skills = append([]SkillSnapshot(nil), value.Skills...)
+	value.DelegationPolicy.LocalToolGrants = slices.Clone(value.DelegationPolicy.LocalToolGrants)
 	return value
 }
 

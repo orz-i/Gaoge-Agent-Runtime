@@ -117,7 +117,8 @@ func testRoleDelegationChildApproval(t *testing.T, wrongRoute bool, terminalPare
 	request := testStartRequest()
 	request.Config.SharedBudget = &budget.Limits{MaxLLMCalls: 8, MaxToolCalls: 16, MaxTotalTokens: 5000, MaxChildRuns: 3, MaxConcurrentRuns: 1}
 	request.Config.DelegationPolicy = harness.DelegationPolicySnapshot{MaxDepth: 1}
-	request.Config.ToolKeys = []string{harness.DelegationToolKey, roleEvidenceTool}
+	request.Config.ToolKeys = []string{harness.DelegationToolKey}
+	request.Config.DelegationPolicy.LocalToolGrants = []harness.DelegatedLocalToolGrant{{MemberID: "researcher", MemberRevision: "v3", ToolKey: roleEvidenceTool}}
 	request.Config.ToolPolicies = []harness.ToolPolicySnapshot{harness.DelegationToolPolicySnapshot(), {
 		Key: roleEvidenceTool, DefinitionVersion: "v1", ExecutionMode: "local_dispatch", ApprovalCapability: "per_call", ApprovalMode: "always",
 	}}
@@ -127,6 +128,26 @@ func testRoleDelegationChildApproval(t *testing.T, wrongRoute bool, terminalPare
 	}
 	if len(started.Subtasks) != 1 || started.Subtasks[0].Approval == nil {
 		t.Fatalf("subtasks=%+v", started.Subtasks)
+	}
+	rootSeen, childSeen := false, false
+	for _, req := range meteredModel.requests {
+		offered := false
+		for _, tool := range req.Tools {
+			if tool.Key == roleEvidenceTool {
+				offered = true
+			}
+		}
+		if req.Model == "specialist-model" {
+			childSeen = childSeen || offered
+		} else {
+			rootSeen = true
+			if offered {
+				t.Fatal("the original root model received a member-only tool")
+			}
+		}
+	}
+	if !rootSeen || !childSeen {
+		t.Fatal("missing original root or authorized child request")
 	}
 	task := started.Subtasks[0]
 	if task.Model != "specialist-model" || task.MemberRevision != "v3" || task.Status != "waiting_input" {
