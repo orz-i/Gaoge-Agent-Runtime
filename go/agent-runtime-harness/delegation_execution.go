@@ -81,7 +81,8 @@ func authorizedDelegatedLocalTools(config ConfigSnapshot, parent agent.View, roo
 				selected = true
 			}
 		}
-		if scoped && !selected || !inherited && !(root && selected) {
+		canAssign := inherited || root && selected
+		if !canAssign || scoped && !selected {
 			return nil, ErrInvalidRequest
 		}
 	}
