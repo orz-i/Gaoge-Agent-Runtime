@@ -8,7 +8,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
@@ -235,11 +234,7 @@ func validatePrivateDirectory(path string) error {
 	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
 		return fmt.Errorf("%w: Profile directory is not a real directory", ErrInsecurePath)
 	}
-	// ACL validation differs on Windows; it is not an approved Stage 1 target.
-	if runtime.GOOS != "windows" && info.Mode().Perm()&0077 != 0 {
-		return fmt.Errorf("%w: Profile directory must be private (0700): %s", ErrInsecurePath, path)
-	}
-	return nil
+	return validateProfilePermissions(path, info)
 }
 func validatePrivateFile(path string) error {
 	info, err := os.Lstat(path)
@@ -249,10 +244,7 @@ func validatePrivateFile(path string) error {
 	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
 		return fmt.Errorf("%w: SQLite file is not a regular file: %s", ErrInsecurePath, path)
 	}
-	if runtime.GOOS != "windows" && info.Mode().Perm()&0077 != 0 {
-		return fmt.Errorf("%w: SQLite file must be private (0600): %s", ErrInsecurePath, path)
-	}
-	return nil
+	return validateProfilePermissions(path, info)
 }
 func validateOptionalPrivateFile(path string) error {
 	if err := validatePrivateFile(path); err != nil && !errors.Is(err, os.ErrNotExist) {

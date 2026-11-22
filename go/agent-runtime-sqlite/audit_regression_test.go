@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
 	sqlite "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/internal/testprofile"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
@@ -32,7 +34,7 @@ func TestPrivateCreateAndFailClosedReopen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0600 {
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0600 {
 		t.Fatalf("created DB must be private: %04o", info.Mode().Perm())
 	}
 	if _, err := sqlite.CreateNew(ctx, path); !errors.Is(err, os.ErrExist) {
@@ -46,7 +48,7 @@ func TestPrivateCreateAndFailClosedReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, sidecar := range []string{"-wal", "-shm"} {
-		if side, err := os.Stat(path + sidecar); err == nil && side.Mode().Perm()&0077 != 0 {
+		if side, err := os.Stat(path + sidecar); err == nil && runtime.GOOS != "windows" && side.Mode().Perm()&0077 != 0 {
 			t.Fatalf("sidecar %s exposed: %04o", sidecar, side.Mode().Perm())
 		}
 	}
@@ -89,22 +91,22 @@ func TestPrivatePathAndSymlinkRequirements(t *testing.T) {
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(path, 0644); err != nil {
+	if err := testprofile.Chmod(path, 0644); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := sqlite.Open(t.Context(), path); !errors.Is(err, sqlite.ErrInsecurePath) {
 		t.Fatalf("insecure SQLite file accepted: %v", err)
 	}
-	if err := os.Chmod(path, 0600); err != nil {
+	if err := testprofile.Chmod(path, 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(dir, 0755); err != nil {
+	if err := testprofile.Chmod(dir, 0755); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := sqlite.Open(t.Context(), path); !errors.Is(err, sqlite.ErrInsecurePath) {
 		t.Fatalf("insecure Profile directory accepted: %v", err)
 	}
-	if err := os.Chmod(dir, 0700); err != nil {
+	if err := testprofile.Chmod(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
 	link := filepath.Join(dir, "alias.sqlite")
@@ -119,6 +121,9 @@ func TestPrivatePathAndSymlinkRequirements(t *testing.T) {
 	}
 	publicDir := filepath.Join(t.TempDir(), "public")
 	if err := os.Mkdir(publicDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := testprofile.Chmod(publicDir, 0755); err != nil {
 		t.Fatal(err)
 	}
 	public := filepath.Join(publicDir, "private.sqlite")

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	sqlite "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/internal/testprofile"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
@@ -202,11 +203,7 @@ func TestRejectUnknownSchemaWithoutDataLoss(t *testing.T) {
 }
 func privateDir(tb testing.TB) string {
 	tb.Helper()
-	path := filepath.Join(tb.TempDir(), "private-profile")
-	if err := os.Mkdir(path, 0700); err != nil {
-		tb.Fatal(err)
-	}
-	return path
+	return testprofile.Dir(tb)
 }
 func TestIssue107SQLiteChildExecutionConformance(t *testing.T) {
 	conformance.RunChildExecutionSuite(t, func(child *testing.T) kernel.Store {

@@ -3,21 +3,18 @@ package sqlite
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/internal/testprofile"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
 // Even a matching row fingerprint cannot turn a nonterminal Run transition
 // without a wakeup into a legitimate continuation projection.
 func TestInvalidProjectionIsIsolatedEvenWithRecomputedFingerprint(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "private")
-	if err := os.Mkdir(dir, 0700); err != nil {
-		t.Fatal(err)
-	}
+	dir := testprofile.Dir(t)
 	store, err := CreateNew(context.Background(), filepath.Join(dir, "run.sqlite"))
 	if err != nil {
 		t.Fatal(err)
