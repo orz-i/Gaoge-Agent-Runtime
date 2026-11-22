@@ -110,7 +110,7 @@ func CreateNew(ctx context.Context, path string) (*Store, error) {
 	// The link is already a complete database. If syncing the parent fails,
 	// report uncertain publication durability; callers must inspect/reopen
 	// the target, NEVER delete/replace it or silently call CreateNew again.
-	dir, err := os.Open(filepath.Dir(abs))
+	dir, err := openProfileDirectoryForSync(filepath.Dir(abs))
 	if err != nil {
 		return nil, fmt.Errorf("published SQLite directory cannot be synced: %w", err)
 	}
