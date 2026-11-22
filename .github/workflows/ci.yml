@@ -22,7 +22,7 @@ jobs:
   quality:
     name: Unit, race, lint, and release consumers
     if: ${{ always() }}
-    needs: [quality-main, race, release-commands-windows, coverage-go, coverage, security, integration, observability]
+    needs: [quality-main, race, release-commands-windows, sqlite-windows, coverage-go, coverage, security, integration, observability]
     runs-on: ubuntu-26.04
     timeout-minutes: 3
     steps:
@@ -163,6 +163,19 @@ jobs:
         if: always()
         continue-on-error: true
         uses: ./.github/actions/upload-ci-timings
+
+  sqlite-windows:
+    name: Windows SQLite profiles
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.work
+          cache: false
+      - name: Run native SQLite Store and profile tests
+        run: go test -count=1 ./go/agent-runtime-sqlite/...
 
   coverage-go:
     name: Go unit and coverage (${{ matrix.shard }})
