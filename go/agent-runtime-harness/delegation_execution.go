@@ -18,46 +18,75 @@ func nonAssignableRuntimeTool(key string) bool {
 		strings.HasPrefix(key, "runtime.")
 }
 
-func assignableParentToolPolicies(config ConfigSnapshot, parent agent.View) []ToolPolicySnapshot {
-	policies := make([]ToolPolicySnapshot, 0, len(config.ToolPolicies))
-	for _, policy := range config.ToolPolicies {
-		if !slices.Contains(parent.ToolKeys, policy.Key) || nonAssignableRuntimeTool(policy.Key) {
-			continue
-		}
-		if policy.ExecutionMode != "local_dispatch" && policy.ExecutionMode != "provider_hosted" {
-			continue
-		}
-		if policy.DefinitionVersion == "" {
-			continue
-		}
-		policies = append(policies, policy)
-	}
-	return policies
-}
-
-// authorizedDelegatedLocalTools verifies the Host-selected Child local Tool
-// set against the original immutable parent Run and sealed Tool policies.
-// No model Tool argument or dynamic member name can expand local authority.
-// Provider-hosted capabilities use explicit Host grants rather than being
-// silently copied from the parent's model and credential binding.
-func authorizedDelegatedLocalTools(config ConfigSnapshot, parent agent.View, keys []string) ([]string, error) {
-	if len(keys) == 0 {
+// normalizeDelegatedLocalToolGrants seals only non-root, locally dispatched
+// tools with an existing immutable definition version. Old configs encode no grants.
+func normalizeDelegatedLocalToolGrants(config ConfigSnapshot) ([]DelegatedLocalToolGrant, error) {
+	if len(config.DelegationPolicy.LocalToolGrants) == 0 {
 		return nil, nil
 	}
-	policies := assignableParentToolPolicies(config, parent)
-	for _, key := range keys {
-		permitted := false
-		for _, policy := range policies {
-			if policy.Key == key && policy.ExecutionMode == "local_dispatch" {
-				permitted = true
-				break
+	grants := slices.Clone(config.DelegationPolicy.LocalToolGrants)
+	policies := make(map[string]ToolPolicySnapshot, len(config.ToolPolicies))
+	for _, policy := range config.ToolPolicies {
+		policies[policy.Key] = policy
+	}
+	for i, grant := range grants {
+		grant.MemberID = strings.TrimSpace(grant.MemberID)
+		grant.MemberRevision = strings.TrimSpace(grant.MemberRevision)
+		grant.ToolKey = strings.TrimSpace(grant.ToolKey)
+		policy, ok := policies[grant.ToolKey]
+		if !ok || policy.ExecutionMode != "local_dispatch" || policy.DefinitionVersion == "" ||
+			grant.MemberID == "" || grant.MemberRevision == "" || nonAssignableRuntimeTool(grant.ToolKey) ||
+			slices.Contains(config.ToolKeys, grant.ToolKey) {
+			return nil, ErrInvalidRequest
+		}
+		grants[i] = grant
+	}
+	slices.SortFunc(grants, func(a, b DelegatedLocalToolGrant) int {
+		if a.MemberID != b.MemberID {
+			return strings.Compare(a.MemberID, b.MemberID)
+		}
+		if a.MemberRevision != b.MemberRevision {
+			return strings.Compare(a.MemberRevision, b.MemberRevision)
+		}
+		return strings.Compare(a.ToolKey, b.ToolKey)
+	})
+	if len(slices.Compact(grants)) != len(grants) {
+		return nil, ErrInvalidRequest
+	}
+	return grants, nil
+}
+
+// The frozen root may assign a delegation-only tool to its exact member
+// revision. A nested request must also inherit it from the immediate parent.
+// Ordinary callable tools retain the parent's original narrowing rule.
+func authorizedDelegatedLocalTools(config ConfigSnapshot, parent agent.View, root bool, request DelegateRequest) ([]string, error) {
+	policies := make(map[string]ToolPolicySnapshot, len(config.ToolPolicies))
+	for _, policy := range config.ToolPolicies {
+		policies[policy.Key] = policy
+	}
+	for _, key := range request.Agent.ToolKeys {
+		policy, ok := policies[key]
+		if !ok || nonAssignableRuntimeTool(key) || policy.ExecutionMode != "local_dispatch" || policy.DefinitionVersion == "" {
+			return nil, ErrInvalidRequest
+		}
+		inherited := slices.Contains(parent.ToolKeys, key)
+		scoped := false
+		selected := false
+		for _, grant := range config.DelegationPolicy.LocalToolGrants {
+			if grant.ToolKey != key {
+				continue
+			}
+			scoped = true
+			if grant.MemberID == request.MemberID && grant.MemberRevision == request.MemberRevision {
+				selected = true
 			}
 		}
-		if !permitted {
+		canAssign := inherited || root && selected
+		if !canAssign || scoped && !selected {
 			return nil, ErrInvalidRequest
 		}
 	}
-	return normalizeStrings(keys), nil
+	return normalizeStrings(request.Agent.ToolKeys), nil
 }
 
 func frozenDelegationExecution(value handoff.Delegation) *handoff.Delegation {

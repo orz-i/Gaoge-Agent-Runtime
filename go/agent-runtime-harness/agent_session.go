@@ -78,7 +78,7 @@ func OpenAgentSession(options AgentSessionOptions) (*SessionClient, error) {
 	}
 	options.Session.Config = cloneConfigSnapshot(options.Session.Config)
 	config := &options.Session.Config
-	if config.DelegationPolicy.MaxDepth != 0 || len(config.ToolKeys) != 0 || len(config.ToolPolicies) != 0 {
+	if config.DelegationPolicy.MaxDepth != 0 || len(config.DelegationPolicy.LocalToolGrants) != 0 || len(config.ToolKeys) != 0 || len(config.ToolPolicies) != 0 {
 		return nil, ErrInvalidRequest
 	}
 	if options.ExploreReads && len(options.LocalTools) == 0 && !options.Context.ReadArtifacts {

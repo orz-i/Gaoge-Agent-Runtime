@@ -346,7 +346,18 @@ func (runner *Runner) prepareDelegation(
 		if viewErr != nil {
 			return handoff.Delegation{}, parent, viewErr
 		}
-		local, err = authorizedDelegatedLocalTools(config, parentView, a.ToolKeys)
+		root := invocation.ParentItemID == ""
+		if len(config.DelegationPolicy.LocalToolGrants) != 0 {
+			if root {
+				err = validateRootRuntimeOwnership(invocation, parent)
+			} else {
+				_, _, err = runner.localDelegationObservation(ctx, invocation.ExecutionRefID)
+			}
+			if err != nil {
+				return handoff.Delegation{}, parent, err
+			}
+		}
+		local, err = authorizedDelegatedLocalTools(config, parentView, root, request)
 	}
 	if err != nil {
 		return handoff.Delegation{}, parent, tools.NewRecoverableCallError(
