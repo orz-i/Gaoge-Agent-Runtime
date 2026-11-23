@@ -86,7 +86,11 @@ func (h *Host) NewSession(ctx context.Context, req wire.NewSessionRequest) (wire
 		return wire.NewSessionResponse{}, errors.Join(ErrInvalidBinding, err)
 	}
 	if h.authorize(ctx, "session/created", string(resp.SessionId)) != nil {
-		return wire.NewSessionResponse{}, ErrInvalidBinding
+		// The Host's NewSession has already produced an effect. A late
+		// identity/revocation failure is not a no-effect authorization
+		// refusal: callers must reconcile the original session, not
+		// assume retrying session/new is safe.
+		return wire.NewSessionResponse{}, ErrOutcomeUnknown
 	}
 	return resp, nil
 }
@@ -100,19 +104,9 @@ func (h *Host) Prompt(ctx context.Context, req wire.PromptRequest) (wire.PromptR
 			return wire.PromptResponse{}, ErrInvalidBinding
 		}
 	}
-	var streamErr error
-	resp, err := h.backend.Prompt(ctx, req, func(update wire.SessionUpdate) error {
-		h.mu.Lock()
-		conn := h.connection
-		h.mu.Unlock()
-		if conn == nil {
-			streamErr = ErrInvalidBinding
-			return streamErr
-		}
-		streamErr = conn.SessionUpdate(ctx, wire.SessionNotification{SessionId: req.SessionId, Update: update})
-		return streamErr
-	})
-	if streamErr != nil {
+	stream := h.newStream(ctx, req.SessionId)
+	resp, err := h.backend.Prompt(ctx, req, stream.send)
+	if streamErr := stream.finish(); streamErr != nil {
 		return wire.PromptResponse{}, streamErr
 	}
 	if err != nil {
@@ -140,15 +134,12 @@ func (h *Host) LoadSession(ctx context.Context, req wire.LoadSessionRequest) (wi
 		len(req.AdditionalDirectories) != 0 || req.SystemPrompt != nil {
 		return wire.LoadSessionResponse{}, ErrInvalidBinding
 	}
-	return loader.LoadSession(ctx, req, func(update wire.SessionUpdate) error {
-		h.mu.Lock()
-		conn := h.connection
-		h.mu.Unlock()
-		if conn == nil {
-			return ErrInvalidBinding
-		}
-		return conn.SessionUpdate(ctx, wire.SessionNotification{SessionId: req.SessionId, Update: update})
-	})
+	stream := h.newStream(ctx, req.SessionId)
+	response, err := loader.LoadSession(ctx, req, stream.send)
+	if streamErr := stream.finish(); streamErr != nil {
+		return wire.LoadSessionResponse{}, streamErr
+	}
+	return response, err
 }
 func (h *Host) ResumeSession(ctx context.Context, req wire.ResumeSessionRequest) (wire.ResumeSessionResponse, error) {
 	resumer, ok := h.backend.(HostedResumer)
@@ -158,6 +149,52 @@ func (h *Host) ResumeSession(ctx context.Context, req wire.ResumeSessionRequest)
 		return wire.ResumeSessionResponse{}, ErrInvalidBinding
 	}
 	return resumer.ResumeSession(ctx, req)
+}
+
+// sessionStream is a scoped physical notification lease. The Host backend
+// may call emit concurrently, but updates are sent in original call order
+// and must not escape after Prompt or LoadSession has returned. A late
+// callback can never append to an already acknowledged ACP turn.
+type sessionStream struct {
+	mu         sync.Mutex
+	ctx        context.Context
+	session    wire.SessionId
+	connection *wire.AgentSideConnection
+	closed     bool
+	firstErr   error
+}
+
+func (h *Host) newStream(ctx context.Context, session wire.SessionId) *sessionStream {
+	h.mu.Lock()
+	connection := h.connection
+	h.mu.Unlock()
+	return &sessionStream{ctx: ctx, session: session, connection: connection}
+}
+
+func (s *sessionStream) send(update wire.SessionUpdate) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return ErrOutcomeUnknown
+	}
+	if s.firstErr != nil {
+		return s.firstErr
+	}
+	if s.connection == nil {
+		s.firstErr = ErrInvalidBinding
+	} else {
+		s.firstErr = s.connection.SessionUpdate(s.ctx, wire.SessionNotification{
+			SessionId: s.session, Update: update,
+		})
+	}
+	return s.firstErr
+}
+
+func (s *sessionStream) finish() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.closed = true
+	return s.firstErr
 }
 
 var _ wire.Agent = (*Host)(nil)

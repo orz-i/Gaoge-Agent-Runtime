@@ -112,8 +112,11 @@ func (c *StdioClient) OpenSession(ctx context.Context, runID, cwd string) (strin
 		c.mu.Lock()
 		delete(c.runs, runID)
 		c.mu.Unlock()
-		if run.process != nil {
-			shutdown(run.process)
+		run.mu.Lock()
+		process := run.process
+		run.mu.Unlock()
+		if process != nil {
+			shutdown(process)
 		}
 	}
 	callbacks := &stdioCallbacks{runID: runID, run: run, decision: c.config.Permission}
@@ -122,7 +125,9 @@ func (c *StdioClient) OpenSession(ctx context.Context, runID, cwd string) (strin
 		cleanup()
 		return "", err
 	}
+	run.mu.Lock()
 	run.process = process
+	run.mu.Unlock()
 	init, err := process.Connection.Initialize(ctx, wire.InitializeRequest{
 		ProtocolVersion: wire.ProtocolVersion(wire.WireProtocolVersion),
 		ClientInfo:      &wire.Implementation{Name: "gaoge-agent-runtime", Version: "1.0.0"},
@@ -151,9 +156,10 @@ func (c *StdioClient) Prompt(ctx context.Context, runID, sessionID, goal string,
 	}
 	run.mu.Lock()
 	run.onChunk = onChunk
+	process := run.process
 	run.mu.Unlock()
 	defer c.closeRun(runID, run)
-	resp, err := run.process.Connection.Prompt(ctx, wire.PromptRequest{
+	resp, err := process.Connection.Prompt(ctx, wire.PromptRequest{
 		SessionId: wire.SessionId(sessionID),
 		Prompt:    []wire.ContentBlock{wire.TextBlock(goal)},
 	})
@@ -173,7 +179,10 @@ func (c *StdioClient) CancelSession(ctx context.Context, runID, sessionID string
 	if err != nil {
 		return err
 	}
-	return run.process.Connection.Cancel(ctx, wire.CancelNotification{SessionId: wire.SessionId(sessionID)})
+	run.mu.Lock()
+	process := run.process
+	run.mu.Unlock()
+	return process.Connection.Cancel(ctx, wire.CancelNotification{SessionId: wire.SessionId(sessionID)})
 }
 func (c *StdioClient) requireRun(runID, sessionID string) (*stdioRun, error) {
 	if c == nil || runID == "" || sessionID == "" {

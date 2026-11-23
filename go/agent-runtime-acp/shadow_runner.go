@@ -284,7 +284,13 @@ func (r *ShadowRunner) CancelRun(ctx context.Context, id string, expectedRevisio
 	if snap.Run.Status != kernel.RunStatusRunning {
 		return snap, nil
 	}
-	if state.SessionID == "" || state.CancelPending {
+	// A committed Prompt may still be delayed before its physical RPC.
+	// Sending cancel before that original callback returns could permit
+	// the Prompt to start after cancellation transport acknowledged.
+	// Match the A2A physical-send fence: no independent control may pass
+	// while a non-idempotent Prompt effect is still in flight.
+	if state.SessionID == "" || state.CancelPending ||
+		(state.PromptPending && !state.PromptReturned) {
 		return snap, ErrOutcomeUnknown
 	}
 	state.CancelPending = true

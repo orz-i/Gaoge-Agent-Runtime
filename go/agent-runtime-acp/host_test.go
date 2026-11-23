@@ -171,3 +171,107 @@ func TestACPHostFailsClosedOnUnsupportedMethodsBeforeHost(t *testing.T) {
 		t.Fatal("untrusted request reached Host")
 	}
 }
+
+// concurrentHostedFake deliberately calls the Host's one Prompt emitter from
+// multiple goroutines, then retains it past the terminal response.
+type concurrentHostedFake struct {
+	hostedFake
+	mu   sync.Mutex
+	late func(wire.SessionUpdate) error
+}
+
+func (h *concurrentHostedFake) Prompt(_ context.Context, _ wire.PromptRequest, emit func(wire.SessionUpdate) error) (wire.PromptResponse, error) {
+	h.mu.Lock()
+	h.late = emit
+	h.mu.Unlock()
+	var wg sync.WaitGroup
+	errs := make(chan error, 8)
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- emit(wire.UpdateAgentMessageText("x"))
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			return wire.PromptResponse{}, err
+		}
+	}
+	return wire.PromptResponse{StopReason: wire.StopReasonEndTurn}, nil
+}
+
+func TestACPHostStreamLeaseClosesAfterTerminalAndSerializesConcurrentChunks(t *testing.T) {
+	backend := &concurrentHostedFake{}
+	host, err := NewHost(HostDependencies{Backend: backend,
+		Authorize: func(context.Context, string, string) error { return nil }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	peer, clientConn := net.Pipe()
+	defer func() { _ = peer.Close() }()
+	defer func() { _ = clientConn.Close() }()
+	server, err := host.NewConnection(peer, peer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = server.Close() }()
+	callbacks := &acpTestClient{}
+	client := wire.NewClientSideConnection(callbacks, clientConn, clientConn)
+	defer func() { _ = client.Close() }()
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	if _, err = client.Initialize(ctx, wire.InitializeRequest{ProtocolVersion: wire.ProtocolVersion(wire.WireProtocolVersion)}); err != nil {
+		t.Fatal(err)
+	}
+	session, err := client.NewSession(ctx, wire.NewSessionRequest{Cwd: t.TempDir(), McpServers: []wire.McpServer{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ending, err := client.Prompt(ctx, wire.PromptRequest{SessionId: session.SessionId,
+		Prompt: []wire.ContentBlock{wire.TextBlock("hello")}})
+	if err != nil || ending.StopReason != wire.StopReasonEndTurn {
+		t.Fatalf("terminal stream failed %+v %v", ending, err)
+	}
+	backend.mu.Lock()
+	late := backend.late
+	backend.mu.Unlock()
+	if late == nil || !errors.Is(late(wire.UpdateAgentMessageText("AFTER")), ErrOutcomeUnknown) {
+		t.Fatal("an ACP session/update escaped after terminal Prompt return")
+	}
+	callbacks.mu.Lock()
+	defer callbacks.mu.Unlock()
+	if len(callbacks.chunks) != 8 {
+		t.Fatalf("concurrent chunks lost or late chunk emitted: %#v", callbacks.chunks)
+	}
+	for _, chunk := range callbacks.chunks {
+		if chunk != "x" {
+			t.Fatalf("foreign chunk %q", chunk)
+		}
+	}
+}
+
+func TestACPHostPostCreationRevocationCannotClaimNoEffect(t *testing.T) {
+	backend := &hostedFake{}
+	host, err := NewHost(HostDependencies{Backend: backend,
+		Authorize: func(_ context.Context, method, session string) error {
+			if method == "session/created" {
+				return ErrInvalidBinding
+			}
+			return nil
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := host.NewSession(t.Context(), wire.NewSessionRequest{Cwd: t.TempDir(), McpServers: []wire.McpServer{}})
+	if !errors.Is(err, ErrOutcomeUnknown) || created.SessionId != "" {
+		t.Fatalf("post-effect refusal masqueraded as no-effect: %+v %v", created, err)
+	}
+	backend.mu.Lock()
+	defer backend.mu.Unlock()
+	if backend.news != 1 {
+		t.Fatalf("session was not created: %d", backend.news)
+	}
+}

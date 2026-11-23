@@ -230,8 +230,8 @@ func TestACPCancelCannotAcknowledgeOriginalInFlightPrompt(t *testing.T) {
 		t.Fatalf("original prompt did not settle cancellation %+v %v", finished.snap.Run, finished.err)
 	}
 	_, _, cancelCount := fake.counts()
-	if cancelCount != 1 {
-		t.Fatalf("multiple cancel effects: %d", cancelCount)
+	if cancelCount != 0 {
+		t.Fatalf("cancel raced an unreturned physical Prompt: %d", cancelCount)
 	}
 }
 func TestACPChangedSessionStateOrSameIDForgeryDenied(t *testing.T) {
@@ -254,5 +254,84 @@ func TestACPChangedSessionStateOrSameIDForgeryDenied(t *testing.T) {
 	}
 	if _, err = runner.LoadRun(t.Context(), "proof"); !errors.Is(err, ErrBindingChanged) {
 		t.Fatalf("forged terminal accepted %v", err)
+	}
+}
+
+// sessionApplyFenceStore delays the response for one ALREADY COMMITTED
+// session/new receipt. It exposes the exact original CAS gap without a
+// scheduler-dependent sleep or a mock Kernel that weakens admission checks.
+type sessionApplyFenceStore struct {
+	kernel.Store
+	committed chan kernel.Snapshot
+	release   chan struct{}
+}
+
+func (s *sessionApplyFenceStore) Apply(ctx context.Context, id string, revision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
+	snap, err := s.Store.Apply(ctx, id, revision, mutation)
+	if err == nil && revision == 1 && strings.Contains(string(mutation.Record.State), `"sessionID":"session-1"`) {
+		s.committed <- snap
+		<-s.release
+	}
+	return snap, err
+}
+
+func TestACPCancelBeatsPromptAdmissionWithoutLatePhysicalSend(t *testing.T) {
+	fake := &fakeClient{}
+	store := &sessionApplyFenceStore{Store: memory.NewStore(), committed: make(chan kernel.Snapshot, 1), release: make(chan struct{})}
+	rt, err := kernel.New(kernel.Dependencies{Store: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, err := NewShadowRunner(ShadowDependencies{Runtime: rt, AttestationKey: []byte(strings.Repeat("K", 32)), Binding: Binding{
+		TargetID: "remote", Revision: "r1", Cwd: "/workspace", Client: fake,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	type ret struct {
+		snap kernel.Snapshot
+		err  error
+	}
+	done := make(chan ret, 1)
+	go func() { s, e := runner.StartRun(context.Background(), startRequest("early-cancel")); done <- ret{s, e} }()
+	committed := <-store.committed
+	if committed.Run.Revision != 2 {
+		t.Fatalf("wrong committed session revision %d", committed.Run.Revision)
+	}
+	cancelled, cancelErr := runner.CancelRun(t.Context(), committed.Run.ID, committed.Run.Revision)
+	if !errors.Is(cancelErr, ErrOutcomeUnknown) || cancelled.Run.Status != kernel.RunStatusRunning {
+		t.Fatalf("cancel invented a terminal receipt: %+v %v", cancelled.Run, cancelErr)
+	}
+	close(store.release)
+	started := <-done
+	if !errors.Is(started.err, kernel.ErrConflict) && !errors.Is(started.err, ErrOutcomeUnknown) {
+		t.Fatalf("stale Prompt CAS still admitted: %+v %v", started.snap.Run, started.err)
+	}
+	opens, prompts, cancels := fake.counts()
+	if opens != 1 || prompts != 0 || cancels != 1 {
+		t.Fatalf("external call escaped the original CAS: open=%d prompt=%d cancel=%d", opens, prompts, cancels)
+	}
+	if _, err = runner.LoadRun(t.Context(), "early-cancel"); !errors.Is(err, ErrOutcomeUnknown) {
+		t.Fatalf("unknown cancellation projected as terminal: %v", err)
+	}
+}
+
+func TestACPCancelAfterOriginalPromptCallbackReturnedDoesNotRetryPrompt(t *testing.T) {
+	fake := &fakeClient{promptErr: errors.New("lost prompt reply")}
+	_, runner := fixture(t, fake)
+	original, err := runner.StartRun(t.Context(), startRequest("late-cancel"))
+	if !errors.Is(err, ErrOutcomeUnknown) || original.Run.Status != kernel.RunStatusRunning {
+		t.Fatalf("lost prompt was settled %+v %v", original.Run, err)
+	}
+	changed, err := runner.CancelRun(t.Context(), original.Run.ID, original.Run.Revision)
+	if !errors.Is(err, ErrOutcomeUnknown) || changed.Run.Status != kernel.RunStatusRunning {
+		t.Fatalf("cancel notification claimed terminal: %+v %v", changed.Run, err)
+	}
+	if _, err = runner.CancelRun(t.Context(), changed.Run.ID, changed.Run.Revision); !errors.Is(err, ErrOutcomeUnknown) {
+		t.Fatalf("duplicate Cancel was accepted: %v", err)
+	}
+	opens, prompts, cancels := fake.counts()
+	if opens != 1 || prompts != 1 || cancels != 1 {
+		t.Fatalf("duplicate remote effect: open=%d prompt=%d cancel=%d", opens, prompts, cancels)
 	}
 }
