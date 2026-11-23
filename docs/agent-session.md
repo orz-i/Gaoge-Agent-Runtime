@@ -86,10 +86,47 @@ the **actual returned page is further narrowed** to fit the frozen Context
 Use the returned `nextOffset`, not the requested limit, for subsequent reads.
 A large Skill therefore needs no extra permission to read unrelated archived
 Context artifacts. An explicit `offset: 0` is valid; ambiguous duplicate keys,
-unknown fields and numeric overflow are rejected. The handler verifies the
-original Run's root Invocation and persisted Config; unknown or unselected IDs
-cannot retrieve content. The original frozen source survives restart; changing
+unknown fields and numeric overflow are rejected. The handler verifies
+the original Run's exact Root Invocation **or** a frozen child Handoff, its
+parent Invocation, globally indexed started Item, original RunRelation and
+member revision. Root and named-child Skill allowlists remain independent;
+unknown, forged or another member's Skill IDs cannot retrieve content. The original frozen source survives restart; changing
 a Skill revision requires a new Turn.
+
+For the recommended **Named Agent** path, the Host sets
+`AgentSessionOptions.NamedAgents` to its finite, preselected roster. Each
+`NamedAgent` supplies `MemberID`, `MemberRevision`, `Model`, optional
+`ModelOptions`/`Instructions`, its own `Tools` (each with a `SessionTool`
+policy), `ToolKeys` from other already-selected Root/Member registrations,
+`Skills`, `HostedToolGrants`, `Limits` and `MaxModelOutputTokens`. Supply a
+`Relations` registry and `Config.DelegationPolicy.MaxDepth > 0`. No separate
+Role or Skill Runner is constructed: the single native Agent Loop executes the
+original child Handoff. The model-facing `harness.delegate_agent` arguments
+contain **only** member ID and goal; the model cannot supply its own tool,
+model or version. The Host's frozen roster determines them.
+
+A child's Skill manifest is included only in **that child's** Instructions;
+Markdown remains in the original sealed Host Config and is read on demand
+through the child-scoped `harness.read_skill` Tool. Root-only and other-member
+Markdown do not enter the child's Context. A member with no Skills gets no
+Skill reader. The original frozen Model, Tool approval, Skill revision/hash
+and member version are checked again when reopening; a changed member cannot
+continue another member's old physical work. Child Tools marked `ApprovalMode:
+"always"` use the original per-call operator approval and immutable Tool
+receipt; changing the approval policy or replaying an approved call is denied.
+SharedBudget accounts Root and selected children on the single native adapter.
+
+`AgentSessionOptions.HostedTools` supplies the existing provider-hosted Tool
+catalog, and `ToolDiscovery` the existing read-only search port; neither
+adds grants. A member must explicitly freeze `HostedToolGrants` with an exact
+provider `DefinitionVersion`. A stale catalog fails before Provider dispatch.
+To share one already-selected local Tool across multiple members, register it
+once as a Host-selected `MemberTools` registration and explicitly include its
+key in each named member's `ToolKeys` (or select an inherited Root Tool). The
+same Tool key must not be registered with conflicting handlers. The standard
+Named Agent roster cannot be combined with an independent `Handoffs` runner
+or a second custom `DelegationPolicy`; the advanced explicit composition path
+remains available when a Host requires a separate routing/authorization port.
 
 For SubAgents, the Host supplies `Relations`, `DelegationPolicy` and
 `Config.DelegationPolicy.MaxDepth > 0`. `OpenAgentSession` registers the existing

@@ -1,5 +1,28 @@
 # Breaking changes (pre-stable Beta)
 
+## PR #146 — Named Agent capability selection and child Skill isolation
+
+The recommended `OpenAgentSession` now supports a finite
+`AgentSessionOptions.NamedAgents` roster. The Host freezes each member's
+original Model, Version, Tool/HostedTool grants, Skill snapshots, per-call
+approval policy and limits in `Config.DelegationPolicy.NamedAgents`.
+The child `harness.read_skill` is authorized from the **original Handoff
+Invocation and relation**, not from root Config.Skills or a mutable Host Skill
+catalog. Already admitted child Runs cannot inherit a subsequently changed
+roster or privately selected Skills. Config hashes and child Handoff
+Instructions intentionally change for new Named Agent selections; do not
+reinterpret or silently resume a preselection Turn with newly added grants.
+`HostedTools` and `ToolDiscovery` in the standard Session only compose existing
+native ports; they cannot mint a provider capability or evade the frozen
+catalog version. This is not a Role interpreter, generic Feature executor or
+compatibility bridge. Existing Sessions without a named roster retain their
+original Root/explicit-Handoff behavior and frozen identities.
+
+The PR branch also merges already-landed main PR #148 for optional encrypted
+SQLite Kernel/Harness files. The two original authorities, strict Harness
+Schema v3 and no-auto-migration rule stay unchanged; encryption keys are Host
+owned and must not be persisted in the Named Agent Config or Tool metadata.
+
 ## PR #146 — Agent-only Invocation identity hard cut
 
 **Breaking pre-stable Go, SQL, HTTP, TypeScript and persisted event schema:**

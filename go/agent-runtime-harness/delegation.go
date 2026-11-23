@@ -341,6 +341,19 @@ func (runner *Runner) prepareDelegation(
 		delegation.ModelOptions = append(json.RawMessage(nil), a.ModelOptions...)
 	}
 	delegation.Instructions = a.Instructions
+	if len(config.DelegationPolicy.NamedAgents) != 0 {
+		named, found := namedAgentForMember(config, request.MemberID, request.MemberRevision)
+		if !found || a.Model != named.Model || !slices.Equal(normalizeStrings(a.ToolKeys), named.ToolKeys) ||
+			!slices.Equal(normalizeStrings(a.InitialToolKeys), named.InitialToolKeys) ||
+			!slices.Equal(a.HostedToolGrants, named.HostedToolGrants) || a.Instructions != named.Instructions ||
+			a.MaxModelOutputTokens != named.MaxModelOutputTokens || a.Limits != named.Limits ||
+			!reflect.DeepEqual(a.ModelOptions, named.ModelOptions) {
+			return handoff.Delegation{}, parent, ErrInvalidRequest
+		}
+		if manifest := selectedSkillManifest(named.Skills); manifest != "" {
+			delegation.Instructions = strings.TrimSpace(delegation.Instructions + "\n\n" + manifest)
+		}
+	}
 	var local []string
 	if len(a.ToolKeys) != 0 {
 		if viewErr != nil {
@@ -364,6 +377,11 @@ func (runner *Runner) prepareDelegation(
 			"delegation.tool_selection_denied", "The requested child tools are not authorized by the original parent Run.", err)
 	}
 	delegation.ToolKeys = normalizeStrings(append(delegation.ToolKeys, local...))
+	if named, found := namedAgentForMember(config, request.MemberID, request.MemberRevision); found && len(named.Skills) != 0 {
+		// This reserved Tool is not an ordinary local grant and never belongs
+		// to the parent merely because its child is authorized to read Skills.
+		delegation.ToolKeys = append(delegation.ToolKeys, SkillReadToolKey)
+	}
 	delegation.HostedToolGrants = append([]agent.HostedToolGrant(nil), a.HostedToolGrants...)
 	if len(delegation.HostedToolGrants) > 0 && delegation.Model == "" {
 		return handoff.Delegation{}, parent, ErrInvalidRequest

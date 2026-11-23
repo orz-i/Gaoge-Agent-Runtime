@@ -5,6 +5,21 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- **Named Agent full capability composition (PR #146, after #148 main merge):**
+  `OpenAgentSession` now accepts a finite Host-authorized `NamedAgents` roster.
+  Each member/revision selects its own Model, Instructions, local and hosted
+  Tools, per-call approvals, independent frozen Skills and output/budget limits
+  while reusing the original `agent.Runner`, Handoff and RunRelation.
+  `harness.read_skill` authenticates the exact child Invocation, frozen Handoff
+  Item, parent Run, immutable delegation relation and member Skill hash; neither
+  Root nor another member can borrow its Skill ID. Reopen rejects changed
+  member policy, Model, Tool version/approval or Skill content before physical
+  continuation. The standard Session also passes through the existing Hosted
+  Tool catalog and read-only ToolDiscovery ports. No Role/Skill executor,
+  generic Capability classifier or new storage tables are introduced.
+  This branch incorporates main's PR #148 encrypted SQLite profile support;
+  the independently selected member Skills survive encrypted Schema v3 reopen.
+
 - **Capability identity shell hard cut (PR #146):** remove the one-valued
   `CapabilityKey`/`RuntimeCapabilityVersion` from Harness Invocation, generic
   ID constructor, admission hash, managed host source, SQL, HTTP/OpenAPI and

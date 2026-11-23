@@ -100,6 +100,21 @@ must be explicitly retired and their effects reconciled before manual
 PostgreSQL DDL or new Harness SQLite Schema v3 enrollment. New storage never
 promotes old non-Agent data into native Agent authority.
 
+## Host-selected Named Agent capabilities
+
+The recommended Session freezes one finite `NamedAgents` roster in the
+original Host `ConfigSnapshot`. Each named member/version has its own selected
+Model, Instructions, local/hosted Tool grants, Skills, limits and approval
+policy. The model may request a member/goal only through the original
+`harness.delegate_agent` Tool; the Host selection policy and immutable
+Handoff convert this to the same native Agent execution request.
+No Role/Skill/Team interpreter exists. Root-only Tools/Skills are not inferred
+as child grants. A child reading `harness.read_skill` must match the original
+child Handoff Invocation, globally indexed Handoff Item, parent Agent and
+immutable RunRelation before accessing its frozen member-only Markdown.
+The original Kernel lease/receipt and Host approval/Context boundaries
+continue to authorize all external effects and recovery.
+
 ## Shared Budget execution and Host ownership
 
 The sole first-party budget **execution** driver is

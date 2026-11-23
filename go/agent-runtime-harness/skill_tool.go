@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
@@ -19,7 +20,10 @@ const (
 	skillReadMaxRunes     = 8000
 )
 
-type skillReadTool struct{ store Store }
+type skillReadTool struct {
+	store     Store
+	relations RunRelationSource
+}
 
 type skillReadInput struct {
 	ID     string `json:"id"`
@@ -76,7 +80,7 @@ func (handler skillReadTool) Execute(ctx context.Context, request tools.Executio
 	if err != nil {
 		return tools.ExecutionResult{}, err
 	}
-	if owner.ExecutionRefID != request.RunID || owner.ParentItemID != "" || !validInvocation(owner) {
+	if owner.ExecutionRefID != request.RunID || !validInvocation(owner) {
 		return tools.ExecutionResult{}, ErrConflict
 	}
 	turn, err := loadVerifiedTurn(ctx, handler.store, owner.TurnID)
@@ -87,10 +91,11 @@ func (handler skillReadTool) Execute(ctx context.Context, request tools.Executio
 	if err != nil {
 		return tools.ExecutionResult{}, err
 	}
-	if !slices.Contains(config.ToolKeys, SkillReadToolKey) {
-		return tools.ExecutionResult{}, ErrConflict
+	skills, err := authorizedSkillsForRun(ctx, handler.store, handler.relations, owner, config)
+	if err != nil {
+		return tools.ExecutionResult{}, err
 	}
-	for _, skill := range config.Skills {
+	for _, skill := range skills {
 		if skill.ID != input.ID {
 			continue
 		}
@@ -149,13 +154,78 @@ func (handler skillReadTool) Execute(ctx context.Context, request tools.Executio
 		tools.NewRecoverableCallError("skill.not_selected", "Skill was not selected for this Agent", tools.ErrInvalidCall))
 }
 
-func skillReadToolRegistration(store Store) tools.Registration {
+// authorizedSkillsForRun resolves the original physical Agent -> Handoff
+// parent -> frozen NamedAgent version. Unlike a display/manifest lookup, this
+// check must reject a forged child with a matching Skill ID or a valid root
+// Config but no original started Handoff ownership. No delegation is started,
+// canceled or resumed during this read-only proof.
+func authorizedSkillsForRun(ctx context.Context, store Store, relations RunRelationSource, owner Invocation, config ConfigSnapshot) ([]SkillSnapshot, error) {
+	if owner.ParentItemID == "" {
+		if !slices.Contains(config.ToolKeys, SkillReadToolKey) {
+			return nil, ErrConflict
+		}
+		return config.Skills, nil
+	}
+	if relations == nil || !isHandoffDelegationInvocation(owner) {
+		return nil, ErrConflict
+	}
+	selected, err := decodeFrozenHandoffDelegation(owner.Input)
+	if err != nil || selected.ChildRunID != owner.ExecutionRefID ||
+		!slices.Contains(selected.ToolKeys, SkillReadToolKey) {
+		return nil, ErrConflict
+	}
+	named, found := namedAgentForMember(config, selected.MemberID, selected.MemberRevision)
+	if !found || len(named.Skills) == 0 || selected.Model != named.Model ||
+		!strings.Contains(selected.Instructions, strings.TrimSpace(selectedSkillManifest(named.Skills))) {
+		return nil, ErrConflict
+	}
+	parent, err := store.GetItem(ctx, owner.ParentItemID)
+	if err != nil {
+		return nil, err
+	}
+	if parent.ID != owner.ParentItemID || parent.Kind != ItemDelegation || parent.Status != ItemStarted ||
+		parent.RunID != owner.ExecutionRefID || parent.TurnID != owner.TurnID || parent.InvocationID == owner.ID ||
+		parent.ParentItemID != "" || parent.Seq == 0 {
+		return nil, ErrConflict
+	}
+	var source delegationItemPayload
+	if !decodeTypedAuthorityJSON(parent.Payload, &source) || source.Execution == nil ||
+		parent.ID != stableID("hid", owner.TurnID, selected.ID, string(ItemStarted)) ||
+		source.ParentRunID == "" || source.DelegationID != selected.ID ||
+		source.MemberID != selected.MemberID || source.MemberRevision != selected.MemberRevision ||
+		source.ChildRunID != selected.ChildRunID || source.Status != "queued" ||
+		!sameHandoffFrozenExecution(*source.Execution, selected) {
+		return nil, ErrConflict
+	}
+	parentOwner, err := store.GetInvocationByExecutionRefID(ctx, source.ParentRunID)
+	if err != nil {
+		return nil, err
+	}
+	if !validInvocation(parentOwner) || parentOwner.TurnID != owner.TurnID ||
+		parentOwner.ExecutionRefID != source.ParentRunID || parentOwner.ID != parent.InvocationID {
+		return nil, ErrConflict
+	}
+	// Handoff Item and Invocation are Host-authorized facts; the immutable
+	// RunRelation is the independent physical-child ancestry. Neither a
+	// guessed RunID nor an unrelated same-ID Store may authorize a Skill read.
+	link, err := relations.GetByChild(ctx, owner.ExecutionRefID)
+	if err != nil {
+		return nil, err
+	}
+	if link.ChildRunID != owner.ExecutionRefID || link.ParentRunID != source.ParentRunID ||
+		link.Kind != runrelation.KindDelegation || link.OwnerNodeID != selected.ID {
+		return nil, ErrConflict
+	}
+	return named.Skills, nil
+}
+
+func skillReadToolRegistration(store Store, relations RunRelationSource) tools.Registration {
 	return tools.Registration{
 		Definition: tools.Definition{
 			Key: SkillReadToolKey, Name: "read_selected_skill",
 			Description: "Read exact instructions from a selected Skill by its frozen ID, in bounded pages. Only use a Skill when its manifest is relevant to the task.",
 			InputSchema: json.RawMessage(`{"type":"object","additionalProperties":false,"required":["id"],"properties":{"id":{"type":"string","minLength":1},"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":8000}}}`),
-		}, Handler: skillReadTool{store: store},
+		}, Handler: skillReadTool{store: store, relations: relations},
 	}
 }
 

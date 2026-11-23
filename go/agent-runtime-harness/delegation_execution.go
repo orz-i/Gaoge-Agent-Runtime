@@ -66,7 +66,7 @@ func authorizedDelegatedLocalTools(config ConfigSnapshot, parent agent.View, roo
 	}
 	for _, key := range request.Agent.ToolKeys {
 		policy, ok := policies[key]
-		if !ok || nonAssignableRuntimeTool(key) || policy.ExecutionMode != "local_dispatch" || policy.DefinitionVersion == "" {
+		if !ok || nonAssignableRuntimeTool(key) || (policy.ExecutionMode != "" && policy.ExecutionMode != "local_dispatch") || policy.DefinitionVersion == "" {
 			return nil, ErrInvalidRequest
 		}
 		inherited := slices.Contains(parent.ToolKeys, key)
