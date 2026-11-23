@@ -4,6 +4,7 @@ export const modules = [
   "go/agent-runtime-harness",
   "go/agent-runtime-harness/examples/task-agent",
   "go/agent-runtime-harness-postgres",
+  "go/agent-runtime-harness-sqlite",
   "go/agent-runtime-mcp",
   "go/agent-runtime-otel",
   "go/agent-runtime-a2a",
@@ -20,7 +21,7 @@ export const modules = [
 export const shards = {
   core: ["go/agent-runtime", "go/agent-runtime-mcp", "go/agent-runtime-otel",
     "go/agent-runtime-a2a", "go/agent-runtime-postgres", "go/agent-runtime-redis"],
-  sqlite: ["go/agent-runtime-sqlite"],
+  sqlite: ["go/agent-runtime-harness-sqlite", "go/agent-runtime-sqlite"],
   adapters: ["go/agent-runtime-provider", "go/agent-runtime-harness",
     "go/agent-runtime-harness/examples/task-agent", "go/agent-runtime-harness-postgres",
     "go/agent-runtime-http", "go/provider-transport"],

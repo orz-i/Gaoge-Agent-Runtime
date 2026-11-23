@@ -10,7 +10,7 @@ import (
 // never migrates implicitly. Callers must stop old writers and retain a backup;
 // no outstanding physical grant is removed or guessed into an owned binding.
 func MigrateV3ToV4(ctx context.Context, path string) error {
-	store, err := openStoreMode(ctx, path, false, true)
+	store, err := openKernel(ctx, path, kernelSetup((*Store).migrateV3ToV4))
 	if err != nil {
 		return err
 	}

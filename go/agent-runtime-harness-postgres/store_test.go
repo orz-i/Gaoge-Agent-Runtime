@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -705,11 +706,18 @@ func newStore(t *testing.T) *harnesspostgres.Store {
 }
 func newStoreWithDB(t *testing.T) (*harnesspostgres.Store, *gorm.DB) {
 	t.Helper()
-	dsn := fmt.Sprintf("file:harness-%d?mode=memory&cache=shared", time.Now().UnixNano())
+	// SQLite shared-cache memory tables return SQLITE_LOCKED without waiting
+	// for another writer. Use the file-backed transaction mode exercised by hosts.
+	dsn := filepath.Join(t.TempDir(), "harness.sqlite") + "?_journal_mode=WAL&_txlock=immediate&_busy_timeout=5000"
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	pool, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = pool.Close() })
 	if err = harnesspostgres.Migrate(db); err != nil {
 		t.Fatalf("migrate harness: %v", err)
 	}

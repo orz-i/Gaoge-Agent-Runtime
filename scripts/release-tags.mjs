@@ -15,6 +15,7 @@ const moduleDirectories = [
   "go/agent-runtime-provider",
   "go/agent-runtime-harness",
   "go/agent-runtime-harness-postgres",
+  "go/agent-runtime-harness-sqlite",
   "go/agent-runtime-mcp",
   "go/agent-runtime-otel",
   "go/agent-runtime-a2a",

@@ -5,6 +5,12 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- **Desktop Harness SQLite Store.** Hosts can persist Sessions, Turns,
+  Invocations, Context, approvals, Handoffs and budget receipts in a private
+  SQLite file. The adapter reopens the original recovery authority and shares
+  the relational Store's admission and settlement checks.
+  [Initialization and recovery](go/agent-runtime-harness-sqlite/README.md).
+
 - **Windows SQLite profiles.** `CreateNew` flushes the publication directory
   through a writable native handle. Create and reopen verify the owner and
   private access rules for the directory, database and WAL/SHM. See the

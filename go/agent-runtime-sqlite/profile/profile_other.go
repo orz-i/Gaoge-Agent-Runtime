@@ -1,6 +1,6 @@
 //go:build !windows
 
-package sqlite
+package profile
 
 import (
 	"fmt"

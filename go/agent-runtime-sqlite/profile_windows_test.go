@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	sqlite "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/internal/testprofile"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/profile/testprofile"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"golang.org/x/sys/windows"
 )

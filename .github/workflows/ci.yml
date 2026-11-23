@@ -175,7 +175,9 @@ jobs:
           go-version-file: go.work
           cache: false
       - name: Run native SQLite Store and profile tests
-        run: go test -count=1 ./go/agent-runtime-sqlite/...
+        env:
+          CGO_ENABLED: "0"
+        run: go test -count=1 ./go/agent-runtime-sqlite/... ./go/agent-runtime-harness-sqlite/...
 
   coverage-go:
     name: Go unit and coverage (${{ matrix.shard }})

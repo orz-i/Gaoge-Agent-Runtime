@@ -6,6 +6,7 @@ updates:
       - /go/agent-runtime-provider
       - /go/agent-runtime-harness
       - /go/agent-runtime-harness-postgres
+      - /go/agent-runtime-harness-sqlite
       - /go/agent-runtime-http
       - /go/agent-runtime-mcp
       - /go/agent-runtime-otel

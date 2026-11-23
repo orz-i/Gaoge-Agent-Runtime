@@ -12,6 +12,7 @@ const expectedModules = [
   "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-provider",
   "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness",
   "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-postgres",
+  "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-sqlite",
   "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-mcp",
   "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-otel",
   "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-a2a",

@@ -104,14 +104,14 @@ CI_TIMING_DIRECTORY="$PWD/artifacts/ci-timings" node scripts/ci-timings.mjs --su
 
 ## P1: complete suites and coverage
 
-`scripts/go-workspace-layout.mjs` partitions all 13 workspace modules exactly
+`scripts/go-workspace-layout.mjs` partitions all 14 workspace modules exactly
 once in each full coverage/race matrix, with `fail-fast: false` and isolated
 runners. Core, nested task-agent, and independent Transport remain mandatory.
 
 | Shard | Modules |
 | --- | --- |
 | core | Core, Postgres, Redis, MCP, OTel, A2A |
-| sqlite | Native SQLite |
+| sqlite | Kernel SQLite, Harness SQLite |
 | adapters | Provider, Harness, task-agent, Harness-Postgres, HTTP, Transport |
 
 All use `./... -count=1`, plus the original race or atomic `-coverpkg=./...`
@@ -122,7 +122,7 @@ security, and local/release `make check`/`make coverage` scope is unchanged.
 Never run tidy alongside tests in one checkout: it edits module files temporarily.
 
 Successful coverage shards upload exact module/commit manifests. The final gate
-requires this run's three artifacts and 13 profiles, rejects stale/incomplete/
+requires this run's three artifacts and 14 profiles, rejects stale/incomplete/
 unexpected/malformed data, then computes the existing source-block union and
 **70% statement floor**. Duplicate blocks count once; zero-execution statements
 stay in the denominator; shard percentages are never averaged. TS floors are
@@ -152,7 +152,7 @@ never just remove the coverage union/required dependencies.
 The optional read-only shadow job publishes `plan.json` and a Markdown summary
 with seven-day retention. It exports **no outputs, skip flags or matrix**. Plans
 are always `mode: shadow`, `execution: full`, with
-`complete-13-module-union-required`. No existing validation consumes this report.
+`complete-14-module-union-required`. No existing validation consumes this report.
 
 Candidate scopes include ordinary docs, TS/packed-client README, independent
 Transport, Provider plus task-agent, Harness reverse consumers (including HTTP,

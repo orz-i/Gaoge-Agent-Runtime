@@ -20,7 +20,7 @@ func schemaV6DDL() []string {
 // must be stopped and a backup retained. Unknown old custody stays unknown;
 // migration cannot manufacture the actual executor's first-party attestation.
 func MigrateV6ToV7(ctx context.Context, path string) error {
-	s, err := openStoreMigration(ctx, path, 7)
+	s, err := openKernel(ctx, path, kernelSetup((*Store).migrateV6ToV7))
 	if err != nil {
 		return err
 	}
