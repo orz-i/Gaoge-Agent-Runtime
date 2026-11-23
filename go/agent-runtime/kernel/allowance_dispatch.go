@@ -54,7 +54,7 @@ func (r *Runtime) CommittedAllowanceDispatch(ctx context.Context, run, id string
 	}
 	head, err := strconv.ParseInt(id[split+1:], 10, 64)
 	if err != nil || head < 0 || head == math.MaxInt64 {
-		return false, nil
+		return false, ErrApplyOutcomeUnknown
 	}
 	current, err := r.Load(ctx, run)
 	if err != nil || current.EventHead <= head {
