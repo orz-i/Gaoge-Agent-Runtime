@@ -9,6 +9,7 @@ import (
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
@@ -20,30 +21,55 @@ import (
 // The standard Session must exercise the same frozen Skill Context as an
 // explicitly assembled Runner, including after a repeated admission.
 func TestAgentSessionProjectsSelectedSkillInstructions(t *testing.T) {
+	const needed = "Check signed release artifacts"
+	const other = "Sensitive alternate selected skill content"
 	client := &agentSessionModel{generate: func(request model.Request) (model.Response, error) {
-		seen := false
 		for _, message := range request.Messages {
-			if message.Role == model.RoleSystem && strings.Contains(model.TextValue(message.Content), "Check signed release artifacts") {
-				seen = true
+			if strings.Contains(model.TextValue(message.Content), other) {
+				t.Fatal("unread Skill content leaked into the model prompt")
 			}
 		}
-		if !seen {
-			t.Fatal("frozen selected Skill was not presented to model")
+		for _, message := range request.Messages {
+			if message.Role == model.RoleTool {
+				if !strings.Contains(model.TextValue(message.Content), needed) {
+					t.Fatalf("exact frozen Skill content was not returned: %+v", message)
+				}
+				return model.Response{Content: "release verified"}, nil
+			}
 		}
-		return model.Response{Content: "release verified"}, nil
+		foundManifest, foundReader := false, false
+		for _, message := range request.Messages {
+			if message.Role == model.RoleSystem && strings.Contains(model.TextValue(message.Content), "release-review") &&
+				!strings.Contains(model.TextValue(message.Content), needed) {
+				foundManifest = true
+			}
+		}
+		for _, definition := range request.Tools {
+			if definition.Key == harness.SkillReadToolKey {
+				foundReader = true
+			}
+		}
+		if !foundManifest || !foundReader {
+			t.Fatalf("Skill manifest and read Tool were not frozen into model request: manifest=%t reader=%t", foundManifest, foundReader)
+		}
+		return model.Response{ToolCalls: []tools.Call{{ID: "skill-read-1", ToolKey: harness.SkillReadToolKey,
+			Arguments: json.RawMessage(`{"id":"release-review"}`)}}}, nil
 	}}
 	options := agentSessionOptions(t, memory.NewStore(), harness.NewMemoryStore(), client)
-	options.Session.Config.Skills = []harness.SkillSnapshot{{ID: "release-review", Revision: 2, Title: "Release review", Markdown: "Check signed release artifacts"}}
+	options.Session.Config.Skills = []harness.SkillSnapshot{
+		{ID: "release-review", Revision: 2, Title: "Release review", Markdown: needed},
+		{ID: "unrequested", Revision: 1, Title: "Unrequested instructions", Markdown: other},
+	}
 	session, err := harness.OpenAgentSession(options)
 	if err != nil {
 		t.Fatal(err)
 	}
 	completed, err := session.Prompt(t.Context(), "release-1", "Review the release")
-	if err != nil || completed.Turn.Status != harness.TurnCompleted || len(client.requests) != 1 {
+	if err != nil || completed.Turn.Status != harness.TurnCompleted || len(client.requests) != 2 {
 		t.Fatalf("selected Skill execution: status=%s err=%v requests=%d", completed.Turn.Status, err, len(client.requests))
 	}
-	if _, err := session.Prompt(t.Context(), "release-1", "Review the release"); err != nil || len(client.requests) != 1 {
-		t.Fatalf("idempotent Skill replay caused a second model effect: %v", err)
+	if _, err := session.Prompt(t.Context(), "release-1", "Review the release"); err != nil || len(client.requests) != 2 {
+		t.Fatalf("idempotent Skill replay caused a new model effect: %v", err)
 	}
 }
 
@@ -189,5 +215,290 @@ func TestAgentSessionDelegatesAuthorizedSubAgentWithoutAnotherInterpreter(t *tes
 	}
 	if _, err := bare.Resume(t.Context(), "delegate-1"); !errors.Is(err, harness.ErrInvalidRequest) {
 		t.Fatalf("minimal handle resumed original delegated Turn: %v", err)
+	}
+}
+
+// Standard Session uses the same original Harness ledger as an explicitly
+// composed Runner. The local Tool and both Model turns charge it exactly once.
+func TestAgentSessionSharedBudgetAccountsOriginalModelAndToolEffects(t *testing.T) {
+	runStore := memory.NewStore()
+	store := harness.NewMemoryStore()
+	calls := 0
+	client := &agentSessionModel{generate: func(request model.Request) (model.Response, error) {
+		for _, message := range request.Messages {
+			if message.Role == model.RoleTool {
+				return model.Response{Content: "budgeted result"}, nil
+			}
+		}
+		return model.Response{ToolCalls: []tools.Call{{ID: "read-1", ToolKey: "lookup", Arguments: json.RawMessage(`{}`)}}}, nil
+	}}
+	options := agentSessionOptions(t, runStore, store, client)
+	addAgentSessionTool(&options, "lookup", &calls)
+	options.Session.Config.SharedBudget = &budget.Limits{MaxLLMCalls: 2, MaxToolCalls: 1}
+	session, err := harness.OpenAgentSession(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done, err := session.Prompt(t.Context(), "budget-1", "Read one fact")
+	if err != nil || done.Turn.Status != harness.TurnCompleted || calls != 1 || len(client.requests) != 2 {
+		t.Fatalf("standard shared budget: status=%s err=%v tool=%d model=%d", done.Turn.Status, err, calls, len(client.requests))
+	}
+	ledger, err := store.LoadBudget(t.Context(), done.Turn.ID)
+	if err != nil || ledger.View("").Usage.LLMCalls != 2 || ledger.View("").Usage.ToolCalls != 1 {
+		t.Fatalf("accounting was not durable: %+v err=%v", ledger.View("").Usage, err)
+	}
+	options.Session.Transcript = nil
+	reopened, err := harness.OpenAgentSession(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := reopened.Resume(t.Context(), "budget-1")
+	if err != nil || again.Turn.Status != harness.TurnCompleted || calls != 1 || len(client.requests) != 2 {
+		t.Fatalf("reopen charged effects again: status=%s err=%v", again.Turn.Status, err)
+	}
+	withoutBudget := options
+	withoutBudget.Session.Config.SharedBudget = nil
+	unsafe, err := harness.OpenAgentSession(withoutBudget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := unsafe.Resume(t.Context(), "budget-1"); !errors.Is(err, harness.ErrInvalidRequest) {
+		t.Fatalf("unmetered handle resumed metered original: %v", err)
+	}
+}
+
+// A specialist's selected Tool is available to exactly that Host-authorized
+// Agent revision, not to its supervisor or another named Agent. The physical
+// Tool handler and definition are the same concrete Tool instance.
+func TestAgentSessionMemberOnlyToolsAreNotOfferedToRoot(t *testing.T) {
+	const privateKey = "specialist.private_read"
+	runStore, store := memory.NewStore(), harness.NewMemoryStore()
+	options := agentSessionOptions(t, runStore, store, &agentSessionModel{})
+	calls := 0
+	registration := agentSessionTool(privateKey, &calls)
+	private := harness.SessionTool{Registration: registration, Policy: harness.ToolPolicySnapshot{
+		DefinitionVersion: "v1", ExecutionMode: "local_dispatch", ApprovalMode: "never", SideEffectLevel: "read",
+	}}
+	memberRegistry, err := tools.NewRegistry([]tools.Registration{registration})
+	if err != nil {
+		t.Fatal(err)
+	}
+	childCalls := 0
+	childModel := &agentSessionModel{generate: func(request model.Request) (model.Response, error) {
+		childCalls++
+		if request.Model != "specialist-model" || len(request.Tools) != 1 || request.Tools[0].Key != privateKey {
+			t.Fatalf("specialist received wrong model/tool grant: model=%q tools=%+v", request.Model, request.Tools)
+		}
+		for _, m := range request.Messages {
+			if m.Role == model.RoleTool {
+				return model.Response{Content: "private evidence verified"}, nil
+			}
+		}
+		return model.Response{ToolCalls: []tools.Call{{ID: "private-tool-1", ToolKey: privateKey, Arguments: json.RawMessage(`{}`)}}}, nil
+	}}
+	child, err := agent.NewRunner(agent.Dependencies{Runtime: options.Runtime, Model: childModel, Catalog: memberRegistry, Executor: memberRegistry})
+	if err != nil {
+		t.Fatal(err)
+	}
+	routes, err := handoff.New(child)
+	if err != nil {
+		t.Fatal(err)
+	}
+	relations, err := runrelation.New(memory.NewRunRelationStore(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	options.Model = &agentSessionModel{generate: func(request model.Request) (model.Response, error) {
+		if len(request.Tools) != 1 || request.Tools[0].Key != harness.DelegationToolKey {
+			t.Fatalf("root inherited specialist-private Tool: %+v", request.Tools)
+		}
+		for _, m := range request.Messages {
+			if m.Role == model.RoleTool {
+				return model.Response{Content: "review complete"}, nil
+			}
+		}
+		return model.Response{ToolCalls: []tools.Call{{ID: "delegate-specialist", ToolKey: harness.DelegationToolKey, Arguments: json.RawMessage(`{"memberID":"specialist","goal":"Read the secret evidence"}`)}}}, nil
+	}}
+	options.Handoffs, options.Relations = routes, relations
+	options.DelegationPolicy = hostSelectedAgentPolicy{MemberID: "specialist", MemberRevision: "v3", Agent: agent.StartRequest{Model: "specialist-model", ToolKeys: []string{privateKey}}}
+	options.MemberTools = []harness.SessionTool{private}
+	options.Session.Config.DelegationPolicy = harness.DelegationPolicySnapshot{MaxDepth: 1, LocalToolGrants: []harness.DelegatedLocalToolGrant{{MemberID: "specialist", MemberRevision: "v3", ToolKey: privateKey}}}
+	session, err := harness.OpenAgentSession(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed, err := session.Prompt(t.Context(), "member-1", "Ask the specialist")
+	if err != nil || completed.Turn.Status != harness.TurnCompleted || calls != 1 || childCalls != 2 {
+		t.Fatalf("member Tool task: status=%s err=%v calls=%d childSteps=%d", completed.Turn.Status, err, calls, childCalls)
+	}
+	options.Session.Transcript = nil
+	reopened, err := harness.OpenAgentSession(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done, err := reopened.Resume(t.Context(), "member-1")
+	if err != nil || done.Turn.Status != harness.TurnCompleted || calls != 1 {
+		t.Fatalf("member Tool recovery replayed effects: status=%s err=%v calls=%d", done.Turn.Status, err, calls)
+	}
+	withoutPrivateTool := options
+	withoutPrivateTool.MemberTools = nil
+	if _, err := harness.OpenAgentSession(withoutPrivateTool); !errors.Is(err, harness.ErrInvalidRequest) {
+		t.Fatalf("member grant without registered Tool was admitted: %v", err)
+	}
+}
+
+// No separate child Runner can escape the root's shared Ledger. The standard
+// Session builds one native Agent for root and local specialists, with the
+// same scoped Budget adapter and original Run relation authority.
+func TestAgentSessionSharedBudgetCoversSelectedSubAgent(t *testing.T) {
+	store := harness.NewMemoryStore()
+	runs := memory.NewStore()
+	options := agentSessionOptions(t, runs, store, &agentSessionModel{})
+	relations, err := runrelation.New(memory.NewRunRelationStore(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	steps, children, privateCalls := 0, 0, 0
+	const privateKey = "private.budgeted_read"
+	options.MemberTools = []harness.SessionTool{{Registration: agentSessionTool(privateKey, &privateCalls), Policy: harness.ToolPolicySnapshot{
+		DefinitionVersion: "v1", ExecutionMode: "local_dispatch", ApprovalMode: "never", SideEffectLevel: "read",
+	}}}
+	options.Model = &agentSessionModel{generate: func(request model.Request) (model.Response, error) {
+		steps++
+		if request.Model == "specialist-model" {
+			children++
+			if children == 1 && (len(request.Tools) != 1 || request.Tools[0].Key != privateKey) {
+				t.Fatalf("budgeted specialist's original Tool grant was wrong: %+v", request.Tools)
+			}
+			for _, m := range request.Messages {
+				if m.Role == model.RoleTool {
+					return model.Response{Content: "specialist proof"}, nil
+				}
+			}
+			return model.Response{ToolCalls: []tools.Call{{ID: "specialist-read-1", ToolKey: privateKey, Arguments: json.RawMessage(`{}`)}}}, nil
+		}
+		for _, m := range request.Messages {
+			if m.Role == model.RoleTool {
+				return model.Response{Content: "collected specialist proof"}, nil
+			}
+		}
+		return model.Response{ToolCalls: []tools.Call{{ID: "delegate-1", ToolKey: harness.DelegationToolKey, Arguments: json.RawMessage(`{"memberID":"specialist","goal":"Find a fact"}`)}}}, nil
+	}}
+	options.Relations = relations
+	options.DelegationPolicy = hostSelectedAgentPolicy{MemberID: "specialist", MemberRevision: "v1", Agent: agent.StartRequest{Model: "specialist-model", ToolKeys: []string{privateKey}}}
+	options.Session.Config.DelegationPolicy = harness.DelegationPolicySnapshot{MaxDepth: 1, LocalToolGrants: []harness.DelegatedLocalToolGrant{{MemberID: "specialist", MemberRevision: "v1", ToolKey: privateKey}}}
+	options.Session.Config.SharedBudget = &budget.Limits{MaxLLMCalls: 4, MaxToolCalls: 2, MaxChildRuns: 1, MaxConcurrentRuns: 2}
+	session, err := harness.OpenAgentSession(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done, err := session.Prompt(t.Context(), "budget-child-1", "Ask the specialist")
+	if err != nil || done.Turn.Status != harness.TurnCompleted || steps != 4 || children != 2 || privateCalls != 1 {
+		t.Fatalf("budgeted subagent: status=%s err=%v modelSteps=%d children=%d", done.Turn.Status, err, steps, children)
+	}
+	ledger, err := store.LoadBudget(t.Context(), done.Turn.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	usage := ledger.View("").Usage
+	if usage.LLMCalls != 4 || usage.ToolCalls != 2 || usage.ChildRuns != 1 {
+		t.Fatalf("specialist model/tool effects did not join root ledger: %+v", usage)
+	}
+	options.Session.Transcript = nil
+	reopened, err := harness.OpenAgentSession(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := reopened.Resume(t.Context(), "budget-child-1")
+	if err != nil || again.Turn.Status != harness.TurnCompleted || steps != 4 || privateCalls != 1 {
+		t.Fatalf("budgeted child restart changed physical execution: status=%s err=%v steps=%d", again.Turn.Status, err, steps)
+	}
+	foreign := options
+	foreign.Handoffs, _ = handoff.New(&unmeteredTestChild{runtime: options.Runtime})
+	if _, err := harness.OpenAgentSession(foreign); !errors.Is(err, harness.ErrInvalidRequest) {
+		t.Fatalf("unmetered foreign child route admitted: %v", err)
+	}
+}
+
+type unmeteredTestChild struct{ runtime *kernel.Runtime }
+
+func (child *unmeteredTestChild) StartRun(_ context.Context, _ agent.StartRequest) (kernel.Snapshot, error) {
+	return kernel.Snapshot{}, nil
+}
+func (child *unmeteredTestChild) LoadRun(_ context.Context, _ string) (kernel.Snapshot, error) {
+	return kernel.Snapshot{}, nil
+}
+
+func TestAgentSessionLifecycleControlsRequireOriginalActor(t *testing.T) {
+	store := harness.NewMemoryStore()
+	toolCalls := 0
+	options := agentSessionOptions(t, memory.NewStore(), store, &agentSessionModel{generate: func(model.Request) (model.Response, error) {
+		return model.Response{ToolCalls: []tools.Call{{ID: "control-tool", ToolKey: "requires-approval", Arguments: json.RawMessage(`{}`)}}}, nil
+	}})
+	options.LocalTools = []harness.SessionTool{{Registration: agentSessionTool("requires-approval", &toolCalls), Policy: harness.ToolPolicySnapshot{
+		DefinitionVersion: "v1", ApprovalMode: "always", ApprovalCapability: "per_call", SideEffectLevel: "write",
+	}}}
+	owner, err := harness.OpenAgentSession(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wait, err := owner.Prompt(t.Context(), "control-turn", "Approve one local action")
+	if err != nil || wait.Turn.Status != harness.TurnWaitingInput || toolCalls != 0 {
+		t.Fatalf("original wait: status=%s err=%v", wait.Turn.Status, err)
+	}
+	foreignOptions := options
+	foreignOptions.Session.Actor.ActorID = "impostor"
+	foreign, err := harness.OpenAgentSession(foreignOptions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// These would otherwise call the underlying Runner with a valid persisted
+	// Turn ID. The Session must deny them before a physical effect/transition.
+	actions := []struct {
+		name   string
+		invoke func() (harness.Snapshot, error)
+	}{
+		{"cancel", func() (harness.Snapshot, error) { return foreign.Cancel(t.Context(), "control-turn", "impostor") }},
+		{"retry", func() (harness.Snapshot, error) { return foreign.Retry(t.Context(), "control-turn") }},
+		{"allowance", func() (harness.Snapshot, error) {
+			return foreign.GrantCallAllowance(t.Context(), "control-turn", wait.Turn.Revision, agent.CallAllowance{LLMCalls: 1})
+		}},
+		{"child-approval", func() (harness.Snapshot, error) {
+			return foreign.ResolveSubtaskApproval(t.Context(), "control-turn", "child", "checkpoint", harness.ResolveApprovalRequest{})
+		}},
+		{"child-cancel", func() (harness.Snapshot, error) {
+			return foreign.CancelSubtask(t.Context(), "control-turn", "child", "impostor")
+		}},
+	}
+	for _, test := range actions {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := test.invoke(); !errors.Is(err, harness.ErrConflict) || toolCalls != 0 {
+				t.Fatalf("foreign control crossed owner proof: err=%v tools=%d", err, toolCalls)
+			}
+		})
+	}
+	done, err := owner.Cancel(t.Context(), "control-turn", "original owner stop")
+	if err != nil || done.Turn.Status != harness.TurnCancelled || toolCalls != 0 {
+		t.Fatalf("original protective stop: status=%s err=%v calls=%d", done.Turn.Status, err, toolCalls)
+	}
+	retried, err := owner.Retry(t.Context(), "control-turn")
+	if err != nil || retried.Turn.Status != harness.TurnWaitingInput || toolCalls != 0 {
+		t.Fatalf("original owner retry: status=%s err=%v calls=%d", retried.Turn.Status, err, toolCalls)
+	}
+}
+
+// Token ceilings require a selected, authoritative planner; the standard
+// Session must never fall through to a metering-free physical Model request.
+func TestAgentSessionTokenBudgetWithoutMeterDoesNotDispatch(t *testing.T) {
+	client := &agentSessionModel{}
+	options := agentSessionOptions(t, memory.NewStore(), harness.NewMemoryStore(), client)
+	options.Session.Config.SharedBudget = &budget.Limits{MaxLLMCalls: 2, MaxInputTokens: 128, MaxOutputTokens: 128}
+	session, err := harness.OpenAgentSession(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = session.Prompt(t.Context(), "unmetered-1", "Request a token-priced operation")
+	if err == nil || len(client.requests) != 0 {
+		t.Fatalf("token-priced task entered Provider without certified metering: err=%v calls=%d", err, len(client.requests))
 	}
 }

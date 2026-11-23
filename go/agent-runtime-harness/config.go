@@ -139,7 +139,6 @@ type ConfigSnapshot struct {
 	ToolKeys              []string                 `json:"toolKeys"`
 	ToolPolicies          []ToolPolicySnapshot     `json:"toolPolicies"`
 	Skills                []SkillSnapshot          `json:"skills"`
-	MemoryPolicy          string                   `json:"memoryPolicy,omitempty"`
 	ContextPolicy         runtimecontext.Policy    `json:"contextPolicy"`
 	ApprovalPolicyVersion uint64                   `json:"approvalPolicyVersion"`
 	Limits                agent.Limits             `json:"limits"`
@@ -171,7 +170,6 @@ type configPayload struct {
 	ToolKeys              []string                         `json:"toolKeys"`
 	ToolPolicies          []ToolPolicySnapshot             `json:"toolPolicies"`
 	Skills                []SkillSnapshot                  `json:"skills"`
-	MemoryPolicy          string                           `json:"memoryPolicy,omitempty"`
 	ContextPolicy         runtimecontext.Policy            `json:"contextPolicy"`
 	ApprovalPolicyVersion uint64                           `json:"approvalPolicyVersion"`
 	Limits                agent.Limits                     `json:"limits"`
@@ -199,7 +197,6 @@ func SealConfigSnapshot(turnID string, value ConfigSnapshot, now time.Time) (Con
 	value.Environment.ID = strings.TrimSpace(value.Environment.ID)
 	value.Instructions = strings.TrimSpace(value.Instructions)
 	value.Model = strings.TrimSpace(value.Model)
-	value.MemoryPolicy = strings.TrimSpace(value.MemoryPolicy)
 	value.ContextPolicy = runtimecontext.NormalizePolicy(value.ContextPolicy)
 	value.AdmissionHash = strings.TrimSpace(value.AdmissionHash)
 	if value.AdmissionHash != "" {
@@ -268,7 +265,7 @@ func SealConfigSnapshot(turnID string, value ConfigSnapshot, now time.Time) (Con
 		TurnID: turnID, Environment: value.Environment, Instructions: value.Instructions,
 		Model: value.Model, ModelOptions: value.ModelOptions, OutputContract: value.OutputContract, ToolKeys: value.ToolKeys,
 		MaxModelOutputTokens: value.MaxModelOutputTokens,
-		ToolPolicies:         value.ToolPolicies, Skills: value.Skills, MemoryPolicy: value.MemoryPolicy,
+		ToolPolicies:         value.ToolPolicies, Skills: value.Skills,
 		ContextPolicy: value.ContextPolicy, ApprovalPolicyVersion: value.ApprovalPolicyVersion, Limits: value.Limits,
 		SharedBudget: value.SharedBudget, DelegationPolicy: value.DelegationPolicy,
 		AdmissionHash: value.AdmissionHash, InputMessage: value.InputMessage, OutputMessage: value.OutputMessage,

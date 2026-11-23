@@ -233,8 +233,10 @@ func TestAgentSessionRejectsUncomposedOrUnselectedConfiguration(t *testing.T) {
 		{"unknown execution mode", func(o *harness.AgentSessionOptions) { o.LocalTools[0].Policy.ExecutionMode = "unknown" }},
 		{"foreign policy", func(o *harness.AgentSessionOptions) { o.LocalTools[0].Policy.Key = "foreign" }},
 		{"skills", func(o *harness.AgentSessionOptions) { o.Session.Config.Skills = []harness.SkillSnapshot{{ID: "skill"}} }},
-		{"memory", func(o *harness.AgentSessionOptions) { o.Session.Config.MemoryPolicy = "host-memory" }},
-		{"shared budget", func(o *harness.AgentSessionOptions) { o.Session.Config.SharedBudget = &budget.Limits{} }},
+		{"shared budget and managed recovery", func(o *harness.AgentSessionOptions) {
+			o.Session.Config.SharedBudget = &budget.Limits{MaxLLMCalls: 1}
+			o.Context.ManagedRecovery = true
+		}},
 		{"delegation", func(o *harness.AgentSessionOptions) { o.Session.Config.DelegationPolicy.MaxDepth = 1 }},
 		{"override reader", func(o *harness.AgentSessionOptions) {
 			o.LocalTools[0].Registration.Definition.Key = harness.ContextArtifactToolKey
@@ -523,7 +525,6 @@ func TestAgentSessionResumeRejectsOriginalUnsupportedCompositionBeforeGeneration
 	}{
 		{"legacy unbounded output", func(c *harness.ConfigSnapshot) { c.MaxModelOutputTokens = 0 }},
 		{"shared budget", func(c *harness.ConfigSnapshot) { c.SharedBudget = &budget.Limits{MaxLLMCalls: 2} }},
-		{"memory", func(c *harness.ConfigSnapshot) { c.MemoryPolicy = "host-memory" }},
 		{"hosted execution", func(c *harness.ConfigSnapshot) {
 			c.ToolKeys = []string{"lookup"}
 			c.ToolPolicies = []harness.ToolPolicySnapshot{{Key: "lookup", DefinitionVersion: "v1", ApprovalMode: "never", ExecutionMode: "provider_hosted"}}

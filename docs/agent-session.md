@@ -68,19 +68,56 @@ its intent is committed; unknown capacity and insufficient output reservation
 are rejected before model dispatch. `Counter` is optional: nil uses conservative
 accounting, not an invented model capacity.
 
-Frozen `Config.Skills` are supported directly: the exact selected revision and
-Markdown are sealed and included in the model-visible Context. For SubAgents,
-the Host supplies `Handoffs`, `Relations` and `DelegationPolicy` together with
-`Config.DelegationPolicy.MaxDepth > 0`. The constructor registers the existing
-`harness.delegate_agent` Tool; Host policy still selects and authorizes the
-named child Agent, and each child uses its original fixed ChildRunner.
-Unconfigured or incomplete routes are rejected before Tool dispatch.
+## Full Agent composition without a second Runner recipe
 
-`MemoryPolicy`, `SharedBudget` and member-specific child-only Tool grants still
-require [explicit runner composition](agent-task-workflow.md), not a fallback
-execution mode. This simple constructor cannot silently expose child-only
-Tools to the parent. The advanced task-agent example covers custom archive and
-measurement policies.
+`Config.Skills` freezes a selected revision and exact content hash, but **does
+not** inline every Skill's Markdown into the model prompt. The Context includes
+only the immutable Skill ID, revision, title, trigger and description. The SDK
+registers `harness.read_skill` to retrieve one selected Skill on demand, with
+Unicode-codepoint pagination (default 4,000, maximum 8,000 per call). Its
+handler verifies the original Run's root Invocation and persisted Config;
+unknown or unselected IDs cannot retrieve content. The original frozen source
+is retained across restart; changing a Skill revision requires a new Turn.
+
+For SubAgents, the Host supplies `Relations`, `DelegationPolicy` and
+`Config.DelegationPolicy.MaxDepth > 0`. `OpenAgentSession` registers the existing
+`harness.delegate_agent` Tool and selects one local Agent Runner by default for
+root and children. `Handoffs` can instead be supplied for an explicitly
+selected independent ChildRunner **only without a shared budget**. The Host
+still authorizes the named child via `DelegationToolPolicy`; the model does not
+choose its own tools, credentials or route.
+
+Register tools callable by the root in `LocalTools`. For specialist-only tools,
+use separate `MemberTools` with `ExecutionMode: "local_dispatch"`, and freeze
+`Config.DelegationPolicy.LocalToolGrants` specifying each exact `MemberID`,
+`MemberRevision` and `ToolKey`. These definitions are registered for child
+execution but **never appear in the root Agent's Tool list**. Missing, orphaned,
+invalid or changed grants fail closed. The original child Runner and RunRelation
+remain the execution and recovery authority.
+
+The standard Session now accepts `Config.SharedBudget`. Supply a supported
+Harness Store implementing the existing budget ledger. Count-only limits
+(e.g. `MaxLLMCalls`, `MaxToolCalls`, `MaxChildRuns`) require no token meter;
+for hard input/output/total token limits supply `BudgetMeter` implementing
+`model.TokenAdmissionPlanner`, or a model client implementing that interface.
+Missing authoritative metering is rejected before Provider dispatch. The
+built-in first-party `BoundedBudgetAdapter` accounts the root, local specialist
+and Tools against **one frozen Ledger**; an external Handoff runner is rejected
+with SharedBudget because it cannot prove shared token/tool accounting.
+`SharedBudget` remains incompatible with `Context.ManagedRecovery`,
+`Context.SummaryNativeRecovery` and the optional WorkingStateSummary lifecycle
+until they share one original-effect settlement protocol.
+
+The unused `MemoryPolicy` configuration field has been removed. Host memory
+can be supplied through selected Context history, Skills or authorized Tools;
+there is no separate Runtime memory interpreter. A pre-cut configuration with
+nonempty `memoryPolicy` is not a valid new execution identity and must be
+drained or retired before updating workers. No compatibility bridge is added.
+
+The advanced [explicit runner composition](agent-task-workflow.md) is still
+available for independent, fully metered external children, custom Host
+callbacks and currently unsupported managed-recovery combinations. It does not
+run another Agent Loop.
 
 ## Three separate token limits
 
@@ -124,7 +161,11 @@ source delta. Persist completed replies in the Host before the next Turn.
 | `Prompt(ctx, turnID, text)` | Starts a new Turn or replays admission with the **same** ID and original seed/config. Changed inputs are rejected. |
 | `LoadState` / `Timeline` | Bounded status / paged history reads. `Load` is the complete snapshot. |
 | `Refresh` | Repairs committed Harness projections; does not dispatch model or Tool effects. |
-| `Resume` | Continues the original Run of a running Turn; does not create a new attempt. Approvals and budget waits need their existing controls. |
+| `Resume` | Continues the original Run of a running Turn; does not create a new attempt. Approvals and budget waits need their original controls. |
+| `ResolveApproval` / `ResolveSubtaskApproval` | Resolves the exact original Tool or Child checkpoint after checking the Session Actor. |
+| `GrantCallAllowance` | Grants an explicit bounded allowance to the original paused Run, with expected Turn revision. |
+| `Cancel` / `CancelSubtask` | Protective cancellation; retains original physical-effect and descendant fences even if optional execution components are unavailable. |
+| `Retry` | Retries only the frozen root Agent in a new Attempt after validating its original Turn, Actor and recovery composition. |
 
 Use `Load` or `LoadState` for an old Turn after Host history advances, not a
 `Prompt` with today's transcript. A different request gets a new Turn ID.
@@ -136,8 +177,8 @@ configuration. It does not approve pending Tools or grant budget.
 
 Before resuming through this constructor, the original sealed Turn must also
 fit the supported composition. A new simple handle cannot bypass a previously
-required shared-budget meter, approved Tool policy, Skills, memory or
-original delegation route.
+required shared-budget ledger/meter, selected Tools or original delegation
+route.
 Unsupported original Turns remain available through the read/Refresh APIs;
 continue execution with their original explicit composition. The ordinary
 Harness default delegation depth alone does not require a delegation engine.

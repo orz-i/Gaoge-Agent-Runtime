@@ -1,5 +1,29 @@
 # Breaking changes (pre-stable Beta)
 
+## PR #146 continuation — one Agent Session and lazy Skills
+
+**Breaking pre-stable Config/Context and Go Session contract:** remove the
+inert `ConfigSnapshot.MemoryPolicy`/`memoryPolicy` metadata. Nonempty old
+values change the Config hash and cannot be silently reinterpreted after
+reopening. Stop old workers, drain or explicitly reconcile the original
+execution and back up its evidence before upgrading. No memory executor,
+compatibility reader or migration bridge is introduced.
+
+`Config.Skills` now freezes the same revision, content and hash but presents only
+a bounded manifest in the model's Context. Models access selected Markdown
+via the new, original-Run-authorized `harness.read_skill` Tool; this changes
+model-visible Context fingerprints/requests and requires fresh authorized
+admission for pending old Skill execution. The full Markdown remains durable
+in the original Config and is never read from a mutable Host directory.
+
+The standard `OpenAgentSession` supports `SharedBudget`, `MemberTools` with
+exact per-member-version grants, local same-Runner SubAgent routing, `Cancel`,
+`Retry`, `CancelSubtask`, `ResolveSubtaskApproval` and `GrantCallAllowance`.
+A shared-budget Agent cannot use an unmetered independent ChildRunner. The
+same original Kernel lease/receipt, Harness ledger and Host Actor checks remain
+mandatory. These changes add no new SQL columns or run states; the prior
+Harness SQLite Schema v2 and checked PostgreSQL cutover still apply.
+
 ## 2026-11-23 — Agent-only Harness Invocation / unified Session
 
 **Breaking Go, HTTP, TypeScript, PostgreSQL and desktop SQLite contract:**

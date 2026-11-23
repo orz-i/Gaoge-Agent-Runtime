@@ -168,8 +168,8 @@ func TestCanonicalUTF8DirectHarnessStartFailsBeforeDurableAdmission(t *testing.T
 		{"input-reference", func(r *harness.StartRequest) {
 			r.InputMessage = &harness.HostRef{Kind: "message", ID: "bad-\xe2\x82"}
 		}},
-		{"config-memory-policy", func(r *harness.StartRequest) {
-			r.Config.MemoryPolicy = "bad-\xff"
+		{"config-model", func(r *harness.StartRequest) {
+			r.Config.Model = "bad-\xff"
 		}},
 		{"context-instructions", func(r *harness.StartRequest) {
 			r.Context.Instructions = "bad-\xfe"

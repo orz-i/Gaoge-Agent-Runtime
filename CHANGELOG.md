@@ -5,6 +5,16 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- **Agent convergence Q1–Q5 follow-up (PR #146):** The recommended
+  `OpenAgentSession` now supports durable SharedBudget (with original trusted
+  bounded Budget callbacks), Host-authorized member-only specialist tools,
+  default same-Runner local SubAgent execution and complete Session lifecycle
+  controls. Skills use frozen manifest + bounded `harness.read_skill` reads, not
+  eagerly injected Markdown. Delete the inert `ConfigSnapshot.MemoryPolicy`
+  field rather than adding a second memory subsystem. No new execution
+  interpreter, Kernel Run status or retry authority was introduced. Existing
+  managed-recovery/summary + shared-budget combinations remain fail-closed.
+
 - **Agent-only Session/Invocation convergence.** Frozen Skills, per-call Tool
   approval and explicitly Host-authorized SubAgent routing use one standard
   `OpenAgentSession` path. Remove the redundant `ExecutionClass` Go/HTTP/TS/SQL

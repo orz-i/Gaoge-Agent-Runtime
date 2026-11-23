@@ -19,7 +19,11 @@ func NewBoundedBudgetAdapter(dependencies BudgetMiddlewareDependencies) (*agent.
 	if err != nil {
 		return nil, err
 	}
-	return agent.NewBoundedBudgetAdapter(shared.dependencies.Ledgers, boundedBudgetPorts{shared: shared})
+	return shared.boundedAdapter()
+}
+
+func (middleware *BudgetMiddleware) boundedAdapter() (*agent.BoundedBudgetAdapter, error) {
+	return agent.NewBoundedBudgetAdapter(middleware.dependencies.Ledgers, boundedBudgetPorts{shared: middleware})
 }
 
 type boundedBudgetPorts struct{ shared *BudgetMiddleware }

@@ -266,8 +266,12 @@ func ReplaceContextCheckpoint(ctx context.Context, expectedCheckpointID string, 
 // ConfigSnapshot; neither a model response nor a resume can load new Skills.
 func selectedContextInstructions(config ConfigSnapshot, seedInstructions string) string {
 	parts := []string{config.Instructions}
+	if len(config.Skills) != 0 {
+		parts = append(parts, "Selected Skill manifest (load relevant instructions with harness.read_skill using its frozen ID):")
+	}
 	for _, skill := range config.Skills {
-		parts = append(parts, "Selected skill: "+skill.Title+" ("+skill.ID+")\n"+skill.Markdown)
+		parts = append(parts, "- "+skill.ID+" (revision "+uintString(skill.Revision)+"): "+skill.Title+
+			"; trigger: "+skill.Trigger+"; description: "+skill.Description)
 	}
 	parts = append(parts, seedInstructions)
 	return strings.TrimSpace(strings.Join(parts, "\n\n"))
@@ -288,13 +292,11 @@ func contextStaticFingerprint(config ConfigSnapshot, seed *ContextSeed, catalog 
 		OutputContract *model.OutputContract    `json:"outputContract,omitempty"`
 		Tools          []contextToolFingerprint `json:"tools"`
 		Skills         []SkillSnapshot          `json:"skills"`
-		MemoryPolicy   string                   `json:"memoryPolicy,omitempty"`
 	}{
 		Environment:  config.Environment,
 		Instructions: selectedContextInstructions(config, seed.Instructions),
 		Model:        strings.TrimSpace(config.Model), OutputContract: model.CloneOutputContract(config.OutputContract), Tools: definitions,
-		Skills:       append([]SkillSnapshot(nil), config.Skills...),
-		MemoryPolicy: strings.TrimSpace(config.MemoryPolicy),
+		Skills: append([]SkillSnapshot(nil), config.Skills...),
 	})
 	if err != nil {
 		return "", err

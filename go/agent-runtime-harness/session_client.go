@@ -6,6 +6,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
@@ -215,14 +216,9 @@ func (session *SessionClient) Refresh(ctx context.Context, turnID string) (Snaps
 // It neither reads TranscriptSource nor creates a new execution attempt. A
 // waiting or terminal Turn is returned without resolving approval or budget.
 func (session *SessionClient) Resume(ctx context.Context, turnID string) (Snapshot, error) {
-	id, err := session.authorizedTurnID(ctx, turnID)
+	id, err := session.authorizedExecutionTurn(ctx, turnID)
 	if err != nil {
 		return Snapshot{}, err
-	}
-	if session.agentSessionOnly {
-		if err := session.preflightAgentSessionResume(ctx, id); err != nil {
-			return Snapshot{}, err
-		}
 	}
 	value, resumeErr := session.runner.resumeTurnForSession(ctx, id, session.actor, session.thread)
 	return session.verifySnapshot(id, value, resumeErr)
@@ -232,17 +228,83 @@ func (session *SessionClient) Resume(ctx context.Context, turnID string) (Snapsh
 // The frozen Session/Turn/Invocation owner is checked before any physical
 // Agent control. A resumed or reopened handle cannot approve another Actor's Run.
 func (session *SessionClient) ResolveApproval(ctx context.Context, turnID string, request ResolveApprovalRequest) (Snapshot, error) {
+	id, err := session.authorizedExecutionTurn(ctx, turnID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	value, resolveErr := session.runner.ResolveApproval(ctx, id, request)
+	return session.verifySnapshot(id, value, resolveErr)
+}
+
+// authorizedExecutionTurn also ensures the original Turn's required
+// composition remains available before allowing any new physical continuation.
+func (session *SessionClient) authorizedExecutionTurn(ctx context.Context, turnID string) (string, error) {
+	id, err := session.authorizedTurnID(ctx, turnID)
+	if err != nil {
+		return "", err
+	}
+	if session.agentSessionOnly {
+		if err := session.preflightAgentSessionResume(ctx, id); err != nil {
+			return "", err
+		}
+	}
+	return id, nil
+}
+
+// Cancel is a protective stop. A missing optional execution composition must
+// never block its original Kernel cancellation/fencing path.
+func (session *SessionClient) Cancel(ctx context.Context, turnID, reason string) (Snapshot, error) {
 	id, err := session.authorizedTurnID(ctx, turnID)
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if session.agentSessionOnly {
-		if err := session.preflightAgentSessionResume(ctx, id); err != nil {
-			return Snapshot{}, err
-		}
+	result, cancelErr := session.runner.Cancel(ctx, id, reason)
+	return session.verifySnapshot(id, result, cancelErr)
+}
+
+// Retry creates a new physical Attempt of the original root only. The caller
+// selects a Host Turn, never an arbitrary Invocation/Run identity.
+func (session *SessionClient) Retry(ctx context.Context, turnID string) (Snapshot, error) {
+	id, err := session.authorizedExecutionTurn(ctx, turnID)
+	if err != nil {
+		return Snapshot{}, err
 	}
-	value, resolveErr := session.runner.ResolveApproval(ctx, id, request)
-	return session.verifySnapshot(id, value, resolveErr)
+	root, err := loadTopLevelInvocation(ctx, session.runner.store, id)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	result, retryErr := session.runner.RetryInvocation(ctx, root.ID)
+	return session.verifySnapshot(id, result, retryErr)
+}
+
+// GrantCallAllowance renews the same paused Agent, never a new physical Run.
+func (session *SessionClient) GrantCallAllowance(ctx context.Context, turnID string, expectedRevision uint64, increment agent.CallAllowance) (Snapshot, error) {
+	id, err := session.authorizedExecutionTurn(ctx, turnID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	result, grantErr := session.runner.GrantCallAllowance(ctx, id, expectedRevision, increment)
+	return session.verifySnapshot(id, result, grantErr)
+}
+
+// ResolveSubtaskApproval resumes only a frozen, originally authorized Child.
+func (session *SessionClient) ResolveSubtaskApproval(ctx context.Context, turnID, taskID, checkpointID string, request ResolveApprovalRequest) (Snapshot, error) {
+	id, err := session.authorizedExecutionTurn(ctx, turnID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	result, resolveErr := session.runner.ResolveSubtaskApproval(ctx, id, taskID, checkpointID, request)
+	return session.verifySnapshot(id, result, resolveErr)
+}
+
+// CancelSubtask remains a protective stop of a specific original Child.
+func (session *SessionClient) CancelSubtask(ctx context.Context, turnID, taskID, reason string) (Snapshot, error) {
+	id, err := session.authorizedTurnID(ctx, turnID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	result, cancelErr := session.runner.CancelSubtask(ctx, id, taskID, reason)
+	return session.verifySnapshot(id, result, cancelErr)
 }
 
 // authorizedTurnID is the single read/recovery trust boundary for all
