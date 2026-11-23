@@ -140,8 +140,8 @@ func testRootRetryCommittedAckLoss(t *testing.T, historicalTerminalChild bool) {
 		child := harness.Invocation{
 			ID: "old-terminal-child", TurnID: rootBefore.TurnID,
 			ParentItemID: "original-parent-item", CapabilityKey: harness.CapabilityAgent,
-			ExecutionClass: harness.ExecutionAgent, ExecutionRefID: "old-child-run",
-			Input: childInput, InputHash: hex.EncodeToString(digest[:]),
+			ExecutionRefID: "old-child-run",
+			Input:          childInput, InputHash: hex.EncodeToString(digest[:]),
 			Status: harness.InvocationCompleted, Attempt: 1, Revision: 1,
 			CreatedAt: now, UpdatedAt: now, OutputRefs: []harness.HostRef{},
 		}

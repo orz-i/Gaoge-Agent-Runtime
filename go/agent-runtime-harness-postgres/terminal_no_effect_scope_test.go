@@ -41,9 +41,9 @@ func TestTerminalNoEffectMustBeOriginalStartNotControlOrResume(t *testing.T) {
 					ID: "root-" + name + "-" + tc.phase, TurnID: turn.ID,
 					CapabilityKey:     harness.CapabilityAgent,
 					DefinitionVersion: harness.RuntimeCapabilityVersion,
-					ExecutionClass:    harness.ExecutionAgent,
-					ExecutionRefID:    "original-active-run-" + name,
-					Input:             input, InputHash: hex.EncodeToString(hash[:]),
+
+					ExecutionRefID: "original-active-run-" + name,
+					Input:          input, InputHash: hex.EncodeToString(hash[:]),
 					Status: harness.InvocationRunning, Attempt: 1, Revision: 1,
 					CreatedAt: now, UpdatedAt: now, OutputRefs: []harness.HostRef{},
 				}
@@ -114,7 +114,7 @@ func TestTerminalNoEffectStartBoundariesRemainPositive(t *testing.T) {
 					t.Fatalf("turn: fresh=%t err=%v", fresh, err)
 				}
 				owner := harness.Invocation{ID: "root-" + turn.ID, TurnID: turn.ID,
-					CapabilityKey: harness.CapabilityAgent, ExecutionClass: harness.ExecutionAgent,
+					CapabilityKey:  harness.CapabilityAgent,
 					ExecutionRefID: "original-start-" + name, Status: harness.InvocationRunning,
 					Attempt: 1, Revision: 1, CreatedAt: now, UpdatedAt: now}
 				if tc.phase == "start-retry" {

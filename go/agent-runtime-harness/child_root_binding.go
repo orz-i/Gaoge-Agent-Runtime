@@ -51,7 +51,7 @@ func validChildAttempt(value childAttemptBinding) bool {
 func sealChildRootInput(input json.RawMessage, inputHash string, root Invocation, parents ...childAttemptBinding) (json.RawMessage, string, error) {
 	if len(input) == 0 || hashInvocationBytes(input) != inputHash ||
 		!validChildAttempt(invocationAttempt(root)) || strings.TrimSpace(root.ParentItemID) != "" ||
-		!validExecutionClass(root.ExecutionClass) || !validInvocationStatus(root.Status) ||
+		!validInvocationStatus(root.Status) ||
 		terminalInvocationStatus(root.Status) {
 		return nil, "", ErrConflict
 	}
@@ -130,7 +130,7 @@ func (runner *Runner) loadFrozenChildRoot(ctx context.Context, child Invocation)
 	if root.ID != binding.InvocationID || root.ID == child.ID ||
 		root.TurnID != child.TurnID || strings.TrimSpace(root.ParentItemID) != "" ||
 		invocationAttempt(root) != binding.attempt() ||
-		!validExecutionClass(root.ExecutionClass) || !validInvocationStatus(root.Status) ||
+		!validInvocationStatus(root.Status) ||
 		terminalInvocationStatus(root.Status) {
 		return Invocation{}, ErrConflict
 	}
@@ -145,32 +145,29 @@ func (runner *Runner) requireLiveParentAttempt(ctx context.Context, turnID strin
 		return errors.Join(ErrConflict, err)
 	}
 	if parent.TurnID != turnID || strings.TrimSpace(parent.ParentItemID) == "" ||
-		invocationAttempt(parent) != bound || !validExecutionClass(parent.ExecutionClass) ||
-		!validInvocationStatus(parent.Status) || terminalInvocationStatus(parent.Status) {
+		invocationAttempt(parent) != bound || !validInvocationStatus(parent.Status) || terminalInvocationStatus(parent.Status) {
 		return ErrConflict
 	}
-	if parent.ExecutionClass == ExecutionAgent {
-		if runner.runtime == nil {
-			return ErrConflict
-		}
-		var snapshot kernel.Snapshot
-		var loadErr error
-		if isHandoffDelegationInvocation(parent) {
-			// A frozen Attempt does not prove that its physical child lives
-			// in this Kernel. A remote parent's same-ID local twin cannot
-			// authorize nested effects at admission or the final claim fence.
-			snapshot, _, loadErr = runner.localDelegationObservation(ctx, parent.ExecutionRefID)
-		} else {
-			snapshot, loadErr = runner.runtime.Load(ctx, parent.ExecutionRefID)
-		}
-		if loadErr != nil || snapshot.Run.ID != parent.ExecutionRefID ||
-			terminalRuntimeStatus(snapshot.Run.Status) {
-			return errors.Join(ErrConflict, loadErr)
-		}
-		if !isHandoffDelegationInvocation(parent) {
-			if err := runner.validateChildRuntimeOwnership(ctx, parent, snapshot); err != nil {
-				return err
-			}
+	if runner.runtime == nil {
+		return ErrConflict
+	}
+	var snapshot kernel.Snapshot
+	var loadErr error
+	if isHandoffDelegationInvocation(parent) {
+		// A frozen Attempt does not prove that its physical child lives
+		// in this Kernel. A remote parent's same-ID local twin cannot
+		// authorize nested effects at admission or the final claim fence.
+		snapshot, _, loadErr = runner.localDelegationObservation(ctx, parent.ExecutionRefID)
+	} else {
+		snapshot, loadErr = runner.runtime.Load(ctx, parent.ExecutionRefID)
+	}
+	if loadErr != nil || snapshot.Run.ID != parent.ExecutionRefID ||
+		terminalRuntimeStatus(snapshot.Run.Status) {
+		return errors.Join(ErrConflict, loadErr)
+	}
+	if !isHandoffDelegationInvocation(parent) {
+		if err := runner.validateChildRuntimeOwnership(ctx, parent, snapshot); err != nil {
+			return err
 		}
 	}
 	return nil

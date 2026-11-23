@@ -83,8 +83,8 @@ func TestGlobalOriginalCancellationEvidenceFencesMemoryAdmission(t *testing.T) {
 		_, created, err = fx.store.CreateInvocation(t.Context(), Invocation{
 			ID: "new-child-after-invalid-cancel", TurnID: fx.root.TurnID,
 			ParentItemID: "original-parent-item", CapabilityKey: CapabilityAgent,
-			DefinitionVersion: "v1", ExecutionClass: ExecutionAgent,
-			Input: input, InputHash: hashInvocationBytes(input),
+			DefinitionVersion: "v1",
+			Input:             input, InputHash: hashInvocationBytes(input),
 			ExecutionRefID: "new-child-effect", Status: InvocationAccepted,
 			Attempt: 1, Revision: 1, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 		})

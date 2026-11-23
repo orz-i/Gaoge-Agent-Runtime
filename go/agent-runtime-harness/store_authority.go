@@ -152,7 +152,6 @@ func sameFrozenInvocationAuthority(candidate, returned Invocation) bool {
 		returned.ParentItemID == candidate.ParentItemID &&
 		returned.CapabilityKey == candidate.CapabilityKey &&
 		returned.DefinitionVersion == candidate.DefinitionVersion &&
-		returned.ExecutionClass == candidate.ExecutionClass &&
 		bytes.Equal(returned.Input, candidate.Input) &&
 		returned.InputHash == candidate.InputHash &&
 		returned.ExecutionRefID == candidate.ExecutionRefID &&

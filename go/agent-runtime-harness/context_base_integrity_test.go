@@ -28,7 +28,7 @@ func TestContextBaseLegacyNilSeedAdmissionAndConfigGolden(t *testing.T) {
 	}
 	config := ConfigSnapshot{Model: "fixture", Instructions: "static instructions", DelegationPolicy: DelegationPolicySnapshot{MaxDepth: 4}}
 	normalized, err := sealStartAdmission(request, &config, rootAdmission{
-		ExecutionClass: ExecutionAgent, CapabilityKey: CapabilityAgent, DefinitionVersion: RuntimeCapabilityVersion,
+		CapabilityKey: CapabilityAgent, DefinitionVersion: RuntimeCapabilityVersion,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -41,11 +41,11 @@ func TestContextBaseLegacyNilSeedAdmissionAndConfigGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// These bytes and digests were independently obtained from the pre-Stage 3
-	// HEAD 5c34b2f, rather than computed from the current payload implementation.
+	// This golden locks the current Agent-only admission hash after the
+	// breaking removal of the generic ExecutionClass field.
 	const oldSeedJSON = `{"sourcePath":["source-1"],"instructions":"history instructions","entries":[{"id":"entry-1","turnID":"source-turn","sourceID":"source-1","required":true,"message":{"role":"user","content":[{"kind":"text","text":"hello"}]}}]}`
-	if string(seedJSON) != oldSeedJSON || sealed.AdmissionHash != "7aa9f0d6177dfc178f26f7e2d0ed23fcd8d7298b6e8429a70bd824aafa7083bd" ||
-		sealed.ContentHash != "70325c06acad5e02a683484e9701863a4add40ea13941b7ccf8326ab873f12c1" || sealed.ID != "hcfg_70325c06acad5e02a683484e" {
+	if string(seedJSON) != oldSeedJSON || sealed.AdmissionHash != "2ce17cb0e673da32e79fdee4626dc09db3ba3e44b8e463d40216d590c20b4e26" ||
+		sealed.ContentHash != "b28ede0ffaca089cff50743c949ace08b4ffd3d2b49b8d060790b5eff89975d9" || sealed.ID != "hcfg_b28ede0ffaca089cff50743c" {
 		t.Fatalf("legacy nil fields changed admission or Config identity: seed=%s admission=%s config=%s id=%s", seedJSON, sealed.AdmissionHash, sealed.ContentHash, sealed.ID)
 	}
 	raw, err := json.Marshal(sealed)

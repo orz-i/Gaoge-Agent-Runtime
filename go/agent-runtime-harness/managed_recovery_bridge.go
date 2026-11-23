@@ -18,7 +18,7 @@ type managedHostStore interface {
 // admission. The source is read back, then revalidated under the Host Turn lock.
 func (r *Runner) bindManagedOriginalDispatch(ctx context.Context, inv Invocation, dispatch Item) (context.Context, error) {
 	native, ok := r.agent.(*agent.Runner)
-	if !ok || (!native.SupportsManagedContextRecovery() && !native.SupportsSummaryNativeRecovery()) || inv.ParentItemID != "" || inv.ExecutionClass != ExecutionAgent {
+	if !ok || (!native.SupportsManagedContextRecovery() && !native.SupportsSummaryNativeRecovery()) || inv.ParentItemID != "" {
 		return ctx, nil
 	}
 	phase, ok := ValidExecutionDispatchGrantAdmission(dispatch)
@@ -71,7 +71,7 @@ func (r *Runner) bindManagedOriginalDispatch(ctx context.Context, inv Invocation
 // entry performs Kernel PARK, immutable Host reservation and unique ENABLE.
 func (r *Runner) recoverManagedInvocation(ctx context.Context, inv Invocation) (kernel.Snapshot, bool, error) {
 	native, ok := r.agent.(*agent.Runner)
-	if !ok || (!native.SupportsManagedContextRecovery() && !native.SupportsSummaryNativeRecovery()) || inv.ParentItemID != "" || inv.ExecutionClass != ExecutionAgent {
+	if !ok || (!native.SupportsManagedContextRecovery() && !native.SupportsSummaryNativeRecovery()) || inv.ParentItemID != "" {
 		return kernel.Snapshot{}, false, nil
 	}
 	if err := r.requireInvocationRootModelOutputCeiling(ctx, inv); err != nil {

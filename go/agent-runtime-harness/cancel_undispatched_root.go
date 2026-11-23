@@ -16,7 +16,7 @@ func (runner *Runner) undispatchedRootNoEffect(
 	ctx context.Context, turn Turn, original Invocation, requireBudgetCancelled bool,
 ) (bool, error) {
 	if runner == nil || runner.runtime == nil || original.Attempt < 1 ||
-		original.ExecutionClass != ExecutionAgent || original.ParentItemID != "" ||
+		original.ParentItemID != "" ||
 		(original.Status != InvocationAccepted && original.Status != InvocationCancelled) ||
 		(!undispatchedRootTurn(original, turn) && (turn.Status != TurnCancelled || original.Status != InvocationCancelled)) ||
 		original.ExecutionRefID == "" || original.TurnID != turn.ID {

@@ -59,7 +59,7 @@ func TestAuditMatrixForeignTurnIdentityNeverAuthorizesDifferentSession(t *testin
 	for _, operation := range []plugin.RunOperation{plugin.RunStart, plugin.RunResume, plugin.RunResolveApproval} {
 		t.Run(string(operation), func(t *testing.T) {
 			called := false
-			_, err = mw.Run(t.Context(), plugin.RunInvocation{Operation: operation, Kind: kernel.RunKind(ExecutionAgent), RunID: root.ExecutionRefID}, func(ctx context.Context) (kernel.Snapshot, error) {
+			_, err = mw.Run(t.Context(), plugin.RunInvocation{Operation: operation, Kind: kernel.RunKind("agent"), RunID: root.ExecutionRefID}, func(ctx context.Context) (kernel.Snapshot, error) {
 				called = true
 				if got, ok := CurrentContextCheckpoint(ctx); ok {
 					t.Errorf("FOREIGN SESSION CHECKPOINT ACCEPTED: scope=%s content=%q", got.ScopeID, model.TextValue(got.Window.Entries[0].Message.Content))
@@ -133,7 +133,7 @@ func TestAuditMatrixExcludedContextCannotCarryReboundCheckpoint(t *testing.T) {
 				id = "unrelated-turn"
 			}
 			ctx := withContextWindowBinding(withContextCheckpoint(WithoutContextWindow(t.Context()), checkpoint), id, ContextWindowOwner)
-			_, err = mw.Run(ctx, plugin.RunInvocation{Operation: plugin.RunResume, Kind: kernel.RunKind(ExecutionAgent), RunID: root.ExecutionRefID}, func(got context.Context) (kernel.Snapshot, error) {
+			_, err = mw.Run(ctx, plugin.RunInvocation{Operation: plugin.RunResume, Kind: kernel.RunKind("agent"), RunID: root.ExecutionRefID}, func(got context.Context) (kernel.Snapshot, error) {
 				if cp, ok := CurrentContextCheckpoint(got); ok {
 					t.Errorf("explicitly EXCLUDED Context was forwarded: %s", cp.ID)
 				}
@@ -211,7 +211,7 @@ func TestAuditPropertyContextAuthorityTransitions(t *testing.T) {
 			wantAccess = ContextWindowReadOnly
 		}
 		calls := 0
-		_, err = mw.Run(ctx, plugin.RunInvocation{Operation: op, Kind: kernel.RunKind(ExecutionAgent), RunID: runIDs[class]}, func(nextCtx context.Context) (kernel.Snapshot, error) {
+		_, err = mw.Run(ctx, plugin.RunInvocation{Operation: op, Kind: kernel.RunKind("agent"), RunID: runIDs[class]}, func(nextCtx context.Context) (kernel.Snapshot, error) {
 			calls++
 			got, has := CurrentContextCheckpoint(nextCtx)
 			binding, hasBinding := CurrentContextWindowBinding(nextCtx)
@@ -285,7 +285,7 @@ func TestAuditPropertyInvalidRelationFieldsCannotGrantContext(t *testing.T) {
 			return false
 		}
 		called := false
-		_, err = mw.Run(t.Context(), plugin.RunInvocation{Operation: plugin.RunResume, Kind: kernel.RunKind(ExecutionAgent), RunID: "prop-child"}, func(ctx context.Context) (kernel.Snapshot, error) {
+		_, err = mw.Run(t.Context(), plugin.RunInvocation{Operation: plugin.RunResume, Kind: kernel.RunKind("agent"), RunID: "prop-child"}, func(ctx context.Context) (kernel.Snapshot, error) {
 			called = true
 			return kernel.Snapshot{}, nil
 		})
@@ -341,7 +341,7 @@ func TestAuditMatrixRootProvenanceMutationNeverGrantsOwner(t *testing.T) {
 				t.Fatal(err)
 			}
 			calls := 0
-			_, err = mw.Run(t.Context(), plugin.RunInvocation{Operation: plugin.RunResume, Kind: kernel.RunKind(ExecutionAgent), RunID: root.ExecutionRefID}, func(ctx context.Context) (kernel.Snapshot, error) {
+			_, err = mw.Run(t.Context(), plugin.RunInvocation{Operation: plugin.RunResume, Kind: kernel.RunKind("agent"), RunID: root.ExecutionRefID}, func(ctx context.Context) (kernel.Snapshot, error) {
 				calls++
 				if cp, ok := CurrentContextCheckpoint(ctx); ok {
 					t.Errorf("unproven Agent Root retained Checkpoint %s; original scope=%s", cp.ID, checkpoint.ScopeID)

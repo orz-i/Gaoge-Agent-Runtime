@@ -248,8 +248,7 @@ func (runner *Runner) nativeAgentStartOwnedByKernel(ctx context.Context, grant I
 	}
 	owner, err := runner.store.GetInvocation(ctx, grant.InvocationID)
 	if err != nil || owner.ID != grant.InvocationID || owner.TurnID != grant.TurnID ||
-		owner.ParentItemID != "" || owner.ExecutionClass != ExecutionAgent ||
-		owner.ExecutionRefID != grant.RunID {
+		owner.ParentItemID != "" || owner.ExecutionRefID != grant.RunID {
 		return false
 	}
 	started, err := runner.runtime.Load(ctx, grant.RunID)
@@ -364,7 +363,7 @@ func (runner *Runner) withPhysicalInvocationDispatchForContext(
 	}
 	native, nativeAgent := runner.agent.(*agent.Runner)
 	var operation plugin.RunOperation
-	observe := nativeAgent && invocation.ExecutionClass == ExecutionAgent
+	observe := nativeAgent
 	switch phase {
 	case "start", "start-retry":
 		operation = plugin.RunStart

@@ -21,7 +21,7 @@ func TestRetiredRoleHandoffInputsCannotAuthorizeMemberDelegation(t *testing.T) {
 		}
 		inv := Invocation{
 			ID: id, TurnID: "turn", ParentItemID: "parent-item",
-			CapabilityKey: CapabilityAgent, ExecutionClass: ExecutionAgent,
+			CapabilityKey:  CapabilityAgent,
 			ExecutionRefID: "child", Input: json.RawMessage(raw),
 			InputHash: hashInvocationBytes(json.RawMessage(raw)),
 		}

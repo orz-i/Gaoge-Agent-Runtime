@@ -10,11 +10,8 @@ import (
 // A pre-stable composite Invocation must not become executable through an
 // old deserializer, a command alias, or the generic physical control path.
 func TestRemovedCompositeExecutionClassesAreNotAdmitted(t *testing.T) {
-	for _, name := range []ExecutionClass{"team", "group_chat", "workflow", "application"} {
-		if validExecutionClass(name) {
-			t.Fatalf("removed execution class %q accepted", name)
-		}
-
+	if _, exists := reflect.TypeOf(Invocation{}).FieldByName("ExecutionClass"); exists {
+		t.Fatal("removed multi-execution class was reintroduced into Agent Invocation")
 	}
 	api := reflect.TypeOf((*Runner)(nil))
 	for _, method := range []string{"StartTeamTurn", "StartGroupChatTurn", "StartWorkflowTurn", "StartTeamInvocation", "StartWorkflowInvocation", "ResumeInvocation"} {
@@ -39,8 +36,8 @@ func TestRetiredApplicationStoreRetryCannotRotateIntoAgent(t *testing.T) {
 	input := []byte(`{"goal":"legacy host operation"}`)
 	old := Invocation{
 		ID: "old-application", TurnID: "old-turn", CapabilityKey: "app.legacy",
-		ExecutionClass: ExecutionClass("application"), ExecutionRefID: "hcr-old-application",
-		Input: input, InputHash: hashInvocationBytes(input), Status: InvocationFailed,
+		ExecutionRefID: "hcr-old-application",
+		Input:          input, InputHash: hashInvocationBytes(input), Status: InvocationFailed,
 		Attempt: 1, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	store.invocations[old.ID] = old // Historical persisted row, not new admission.
@@ -66,7 +63,7 @@ func TestRetiredApplicationStoreRetryCannotRotateIntoAgent(t *testing.T) {
 	// starter or resumer, even when its execution class says Agent.
 	child := old
 	child.ID = "legacy-native-child"
-	child.ExecutionClass = ExecutionAgent
+
 	child.ParentItemID = "parent-item"
 	child.ExecutionRefID = "old-native-child-run"
 	child.CapabilityKey = CapabilityAgent

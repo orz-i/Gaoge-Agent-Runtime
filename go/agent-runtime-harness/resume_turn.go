@@ -48,9 +48,6 @@ func (runner *Runner) resumeTurn(ctx context.Context, turnID string, expected *s
 	if err != nil {
 		return runner.resumeTurnError(ctx, turn, nil, err)
 	}
-	if invocation.ExecutionClass != ExecutionAgent {
-		return runner.resumeTurnError(ctx, turn, nil, ErrInvalidRequest)
-	}
 	if runID != "" && invocation.ExecutionRefID != runID {
 		return Snapshot{}, kernel.ErrConflict
 	}

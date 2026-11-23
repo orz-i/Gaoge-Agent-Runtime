@@ -87,8 +87,8 @@ func pr103SQLSeedRootAgent(t *testing.T, store harness.Store, runtime *kernel.Ru
 	}
 	parent := harness.Invocation{
 		ID: parentID, TurnID: tid, CapabilityKey: harness.CapabilityAgent,
-		DefinitionVersion: "v1", ExecutionClass: harness.ExecutionAgent,
-		Input: input, InputHash: fmt.Sprintf("%x", sum), ExecutionRefID: parentRunID,
+		DefinitionVersion: "v1",
+		Input:             input, InputHash: fmt.Sprintf("%x", sum), ExecutionRefID: parentRunID,
 		Status: harness.InvocationRunning, Attempt: 1, OutputRefs: []harness.HostRef{},
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}

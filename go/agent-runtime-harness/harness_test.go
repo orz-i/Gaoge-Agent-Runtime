@@ -232,7 +232,7 @@ func assertCompletedHarnessSnapshot(t *testing.T, snapshot harness.Snapshot, err
 	if decodeErr := json.Unmarshal(snapshot.Output.Content, &output); decodeErr != nil || output != "direct answer" {
 		t.Fatalf("unexpected harness output: %#v err=%v", snapshot.Output, decodeErr)
 	}
-	if len(snapshot.Invocations) != 1 || snapshot.Invocations[0].ExecutionClass != harness.ExecutionAgent || snapshot.Invocations[0].Status != harness.InvocationCompleted || snapshot.Invocations[0].ExecutionRefID == "" {
+	if len(snapshot.Invocations) != 1 || snapshot.Invocations[0].Status != harness.InvocationCompleted || snapshot.Invocations[0].ExecutionRefID == "" {
 		t.Fatalf("unexpected capability invocations: %#v", snapshot.Invocations)
 	}
 	productItems := make([]harness.Item, 0, 3)

@@ -24,7 +24,7 @@ func benchmarkPreparedDelegationStore(b *testing.B, size int) (*Runner, tools.Ex
 			b.Fatal(err)
 		}
 	}
-	inv := Invocation{ID: parentInvocationID, TurnID: turnID, ExecutionRefID: parentRunID, ExecutionClass: ExecutionAgent}
+	inv := Invocation{ID: parentInvocationID, TurnID: turnID, ExecutionRefID: parentRunID}
 	store.invocations[inv.ID] = inv
 	store.invocationExecutionRefs[parentRunID] = inv.ID
 	id := delegationToolID(inv, callID)

@@ -1,5 +1,24 @@
 # Breaking changes (pre-stable Beta)
 
+## 2026-11-23 — Agent-only Harness Invocation / unified Session
+
+**Breaking Go, HTTP, TypeScript, PostgreSQL and desktop SQLite contract:**
+`Invocation.ExecutionClass` and `HarnessExecutionClass`/`executionClass` no
+longer exist. Only original `runtime.agent` Root Invocations may rotate an
+Attempt. Legacy Application/Workflow/Team invocations must be drained or
+retired; old executors must stop. No legacy deserializer or Feature no-effect
+compatibility shim can authorize new effects. The native Agent pre-dispatch
+proof, original receipts, physical grants, approvals and cancellation fences
+are preserved. PostgreSQL upgrades require the explicit checked SQL cutover in
+`docs/migrations/retire-harness-execution-class.sql`; Harness SQLite is now
+Schema v2 and rejects prior development profiles rather than silently upgrading.
+
+`OpenAgentSession` supports frozen selected Skills, Host policy-enforced
+per-call Tool approvals and a Host-authorized SubAgent ChildRunner with original
+RunRelation. Shared budgets and member-specific private Tool delegation still
+require explicit advanced composition. This is one Agent/Child Agent Loop,
+not a new Harness interpreter.
+
 ## 2026-11-20 — Separate cancellation elections, Host effects and no-dispatch settlement
 
 **Breaking Harness Store and recovery contract:** implement required

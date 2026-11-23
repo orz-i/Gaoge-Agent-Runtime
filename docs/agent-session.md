@@ -47,10 +47,13 @@ session, err := harness.OpenAgentSession(harness.AgentSessionOptions{
 
 `LocalTools` is the explicit allowlist. The constructor derives the sealed Tool
 keys and policies; do not also supply them in `Config`. Each Tool needs a
-version, `ApprovalMode: "never"`, and a Host-declared `SideEffectLevel` of `read`
-or `write`. `ExecutionMode` can be blank or `local_dispatch`; leave
-`ApprovalCapability` unset. The SDK copies
-definitions and schemas; the Host remains responsible for what handlers do.
+version and a Host-declared `SideEffectLevel` of `read` or `write`.
+`ApprovalMode: "never"` uses no approval, while `ApprovalMode: "always"` with
+`ApprovalCapability: "per_call"` pauses the original Kernel Run before the
+Tool effect. The Host responds using `session.ResolveApproval(ctx, turnID, request)`;
+reopened Sessions use the original frozen approval policy, checkpoint and Actor.
+`ExecutionMode` can be blank or `local_dispatch`. The SDK copies definitions
+and schemas; the Host remains responsible for what handlers do.
 
 Set `Context.ReadArtifacts: true` to grant the built-in scoped archive reader.
 Without that grant, in-budget requests can run, but the Session cannot drop
@@ -65,10 +68,19 @@ its intent is committed; unknown capacity and insufficient output reservation
 are rejected before model dispatch. `Counter` is optional: nil uses conservative
 accounting, not an invented model capacity.
 
-Skills, MemoryPolicy, SharedBudget, Delegation and approval-required Tools are
-rejected by this entry point until their complete composition is provided.
-Use [explicit runner composition](agent-task-workflow.md) for these capabilities.
-The advanced task-agent example uses it for custom archive and measurement policies.
+Frozen `Config.Skills` are supported directly: the exact selected revision and
+Markdown are sealed and included in the model-visible Context. For SubAgents,
+the Host supplies `Handoffs`, `Relations` and `DelegationPolicy` together with
+`Config.DelegationPolicy.MaxDepth > 0`. The constructor registers the existing
+`harness.delegate_agent` Tool; Host policy still selects and authorizes the
+named child Agent, and each child uses its original fixed ChildRunner.
+Unconfigured or incomplete routes are rejected before Tool dispatch.
+
+`MemoryPolicy`, `SharedBudget` and member-specific child-only Tool grants still
+require [explicit runner composition](agent-task-workflow.md), not a fallback
+execution mode. This simple constructor cannot silently expose child-only
+Tools to the parent. The advanced task-agent example covers custom archive and
+measurement policies.
 
 ## Three separate token limits
 
@@ -124,7 +136,8 @@ configuration. It does not approve pending Tools or grant budget.
 
 Before resuming through this constructor, the original sealed Turn must also
 fit the supported composition. A new simple handle cannot bypass a previously
-required shared-budget meter, approval, Skills, memory or delegation setup.
+required shared-budget meter, approved Tool policy, Skills, memory or
+original delegation route.
 Unsupported original Turns remain available through the read/Refresh APIs;
 continue execution with their original explicit composition. The ordinary
 Harness default delegation depth alone does not require a delegation engine.

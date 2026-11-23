@@ -52,7 +52,7 @@ func TestManualDelegationPreflightRejectsUnarmedNewsBeforeAnyChildSideEffect(t *
 		t.Fatal(err)
 	}
 	parent := harness.Invocation{ID: "manual-parent", TurnID: turn.ID, CapabilityKey: harness.CapabilityAgent,
-		ExecutionClass: harness.ExecutionAgent, ExecutionRefID: "manual-root", Status: harness.InvocationRunning,
+		ExecutionRefID: "manual-root", Status: harness.InvocationRunning,
 		Attempt: 1, Revision: 1, CreatedAt: now, UpdatedAt: now}
 	if _, _, err = store.CreateInvocation(t.Context(), parent); err != nil {
 		t.Fatal(err)

@@ -55,8 +55,8 @@ func newAcceptedStartupGapRunner(t *testing.T) *Runner {
 	}
 	if _, _, err = store.CreateInvocation(t.Context(), Invocation{
 		ID: "hiv_startup_gap", TurnID: turnID, CapabilityKey: CapabilityAgent,
-		DefinitionVersion: RuntimeCapabilityVersion, ExecutionClass: ExecutionAgent,
-		ExecutionRefID: "hr_startup_gap", Status: InvocationAccepted,
+		DefinitionVersion: RuntimeCapabilityVersion,
+		ExecutionRefID:    "hr_startup_gap", Status: InvocationAccepted,
 		Attempt: 1, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)

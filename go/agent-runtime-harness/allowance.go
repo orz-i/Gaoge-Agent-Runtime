@@ -50,7 +50,7 @@ func (runner *Runner) GrantCallAllowance(
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if invocation.ExecutionClass != ExecutionAgent || invocation.ParentItemID != "" ||
+	if invocation.ParentItemID != "" ||
 		invocation.Status != InvocationPausedBudget || invocation.ExecutionRefID == "" {
 		return Snapshot{}, ErrConflict
 	}

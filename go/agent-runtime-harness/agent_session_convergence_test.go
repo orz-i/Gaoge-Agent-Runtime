@@ -8,9 +8,12 @@ import (
 	"testing"
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
@@ -90,5 +93,101 @@ func TestAgentSessionToolApprovalAndOwnerBoundResolution(t *testing.T) {
 	}
 	if _, err := session.ResolveApproval(context.Background(), "write-1", request); err == nil || calls != 1 {
 		t.Fatalf("replayed approval dispatched an effect: %v tools=%d", err, calls)
+	}
+}
+
+// A named specialist is still an Agent, not a second execution class. The
+// Host explicitly supplies its child runner, indexed relations and policy;
+// only the standard Session composition is implicit.
+func TestAgentSessionDelegatesAuthorizedSubAgentWithoutAnotherInterpreter(t *testing.T) {
+	runs := memory.NewStore()
+	store := harness.NewMemoryStore()
+	options := agentSessionOptions(t, runs, store, &agentSessionModel{})
+	childCalls := 0
+	childModel := &agentSessionModel{generate: func(request model.Request) (model.Response, error) {
+		childCalls++
+		if request.Model != "specialist-model" {
+			t.Fatalf("foreign model selected for child: %q", request.Model)
+		}
+		return model.Response{Content: "specialist evidence"}, nil
+	}}
+	child, err := agent.NewRunner(agent.Dependencies{Runtime: options.Runtime, Model: childModel})
+	if err != nil {
+		t.Fatal(err)
+	}
+	routes, err := handoff.New(child)
+	if err != nil {
+		t.Fatal(err)
+	}
+	relations, err := runrelation.New(memory.NewRunRelationStore(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parentCalls := 0
+	options.Model = &agentSessionModel{generate: func(request model.Request) (model.Response, error) {
+		parentCalls++
+		for _, message := range request.Messages {
+			if message.Role == model.RoleTool {
+				if !strings.Contains(model.TextValue(message.Content), "specialist evidence") {
+					t.Fatalf("parent did not receive child receipt: %+v", message)
+				}
+				return model.Response{Content: "combined specialist evidence"}, nil
+			}
+		}
+		found := false
+		for _, definition := range request.Tools {
+			if definition.Key == harness.DelegationToolKey {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatal("explicit delegation Tool not available in parent Agent")
+		}
+		return model.Response{ToolCalls: []tools.Call{{ID: "delegate-1", ToolKey: harness.DelegationToolKey, Arguments: json.RawMessage(`{"memberID":"specialist","goal":"Find evidence"}`)}}}, nil
+	}}
+	options.Handoffs = routes
+	options.Relations = relations
+	options.DelegationPolicy = hostSelectedAgentPolicy{MemberID: "specialist", MemberRevision: "v1", Agent: agent.StartRequest{Model: "specialist-model"}}
+	options.Session.Config.DelegationPolicy = harness.DelegationPolicySnapshot{MaxDepth: 1}
+	session, err := harness.OpenAgentSession(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done, err := session.Prompt(t.Context(), "delegate-1", "Collect specialist evidence")
+	if err != nil || done.Turn.Status != harness.TurnCompleted || childCalls != 1 || parentCalls != 2 || len(done.Subtasks) != 1 {
+		t.Fatalf("subagent session: status=%s err=%v childCalls=%d parentCalls=%d subtasks=%v", done.Turn.Status, err, childCalls, parentCalls, done.Subtasks)
+	}
+	inv, ok := harness.TopLevelInvocation(done)
+	if !ok {
+		t.Fatal("missing root")
+	}
+	children, err := relations.ListChildren(t.Context(), inv.ExecutionRefID)
+	if err != nil || len(children) != 1 {
+		t.Fatalf("missing original delegated relation: %+v err=%v", children, err)
+	}
+	// A reopened Session must resume against the original Host-selected route.
+	options.Session.Transcript = nil
+	reopened, err := harness.OpenAgentSession(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := reopened.Resume(t.Context(), "delegate-1")
+	if err != nil || again.Turn.Status != harness.TurnCompleted || childCalls != 1 {
+		t.Fatalf("delegated recovery: status=%s err=%v childCalls=%d", again.Turn.Status, err, childCalls)
+	}
+	withoutRoute := options
+	withoutRoute.Handoffs, withoutRoute.Relations, withoutRoute.DelegationPolicy = nil, nil, nil
+	if _, err := harness.OpenAgentSession(withoutRoute); !errors.Is(err, harness.ErrInvalidRequest) {
+		t.Fatalf("unconfigured delegate accepted: %v", err)
+	}
+	// A newly constructed minimal handle cannot resume a delegated original
+	// Turn after losing the original Host route and delegation policy.
+	withoutRoute.Session.Config.DelegationPolicy = harness.DelegationPolicySnapshot{}
+	bare, err := harness.OpenAgentSession(withoutRoute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := bare.Resume(t.Context(), "delegate-1"); !errors.Is(err, harness.ErrInvalidRequest) {
+		t.Fatalf("minimal handle resumed original delegated Turn: %v", err)
 	}
 }

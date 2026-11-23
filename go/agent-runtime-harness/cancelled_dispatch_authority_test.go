@@ -14,7 +14,7 @@ func TestMemoryCancelledInvocationRequiresSettledPhysicalDispatch(t *testing.T) 
 	store, interaction, owner, _, _, _ := newAuthorityMemoryStore()
 	now := time.Date(2026, 11, 10, 0, 0, 0, 0, time.UTC)
 	owner.CapabilityKey = CapabilityAgent
-	owner.ExecutionClass = ExecutionAgent
+
 	owner.Attempt, owner.Revision = 1, 1
 	owner.CreatedAt, owner.UpdatedAt = now, now
 	store.invocations[owner.ID] = owner

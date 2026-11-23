@@ -78,10 +78,10 @@ func (s *Store) Close() error { return s.db.Close() }
 // The application ID "GAHS" distinguishes Harness from Kernel and third-party
 // databases. Each schema version pins all persisted table and index definitions.
 const applicationID = 0x47414853
-const schemaVersion = 1
+const schemaVersion = 2
 
-//go:embed schema_v1.sql
-var schemaV1 string
+//go:embed schema_v2.sql
+var schemaV2 string
 
 const schemaObjects = `SELECT sql FROM sqlite_schema
 	WHERE substr(name,1,7) <> 'sqlite_' ORDER BY type,name`
@@ -152,7 +152,7 @@ func checkSchema(tx *gorm.DB) error {
 		return err
 	}
 	defer func() { _ = rows.Close() }()
-	for definition := range strings.Lines(schemaV1) {
+	for definition := range strings.Lines(schemaV2) {
 		if !rows.Next() {
 			if err := rows.Err(); err != nil {
 				return err

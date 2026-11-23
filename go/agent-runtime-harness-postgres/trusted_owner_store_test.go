@@ -129,8 +129,8 @@ func assertTrustedHarnessStoreOwners(t *testing.T, store harness.Store, prefix s
 	}
 	root := harness.Invocation{
 		ID: rootID, TurnID: tid, CapabilityKey: harness.CapabilityAgent,
-		DefinitionVersion: harness.RuntimeCapabilityVersion, ExecutionClass: harness.ExecutionAgent,
-		Input: input, InputHash: hash, ExecutionRefID: harness.AgentExecutionRefID(rootID),
+		DefinitionVersion: harness.RuntimeCapabilityVersion,
+		Input:             input, InputHash: hash, ExecutionRefID: harness.AgentExecutionRefID(rootID),
 		Status: harness.InvocationAccepted, Attempt: 1, Revision: 1,
 		OutputRefs: []harness.HostRef{}, CreatedAt: now, UpdatedAt: now,
 	}

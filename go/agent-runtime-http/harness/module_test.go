@@ -94,11 +94,11 @@ func TestSnapshotResponseProjectsInvocationWithoutRuntimeExecutionIdentity(t *te
 	now := time.Date(2026, time.August, 17, 0, 0, 0, 0, time.UTC)
 	invocation := harness.Invocation{
 		ID: testHarnessInvocationID, TurnID: testHarnessTurnID, CapabilityKey: "runtime.agent", DefinitionVersion: "v1",
-		ExecutionClass: harness.ExecutionAgent, InputHash: strings.Repeat("a", 64), ExecutionRefID: "private-run-1",
+		InputHash: strings.Repeat("a", 64), ExecutionRefID: "private-run-1",
 		Status: harness.InvocationRunning, Attempt: 1, OutputRefs: []harness.HostRef{}, Revision: 2,
 		CreatedAt: now, UpdatedAt: now,
 	}
-	payload := json.RawMessage(`{"capabilityKey":"runtime.agent","executionClass":"agent","executionRefID":"private-run-1","attempt":1}`)
+	payload := json.RawMessage(`{"capabilityKey":"runtime.agent","executionRefID":"private-run-1","attempt":1}`)
 	snapshot := harness.Snapshot{
 		Turn: harness.Turn{
 			ID: testHarnessTurnID, HostTurn: harness.HostRef{Kind: "conversation_turn", ID: "client-1"},

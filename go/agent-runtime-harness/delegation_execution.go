@@ -221,7 +221,7 @@ func (runner *Runner) prepareHandoffChild(ctx context.Context, turn Turn, parent
 	}
 	invocation, _, err := runner.createVerifiedInvocation(ctx, Invocation{
 		ID: id, TurnID: turn.ID, ParentItemID: parentItemID, CapabilityKey: CapabilityAgent, DefinitionVersion: RuntimeCapabilityVersion,
-		ExecutionClass: ExecutionAgent, Input: input, InputHash: inputHash, ExecutionRefID: delegation.ChildRunID,
+		Input: input, InputHash: inputHash, ExecutionRefID: delegation.ChildRunID,
 		Status: InvocationAccepted, Attempt: 1, Revision: 1, OutputRefs: []HostRef{}, CreatedAt: now, UpdatedAt: now,
 	})
 	if err != nil {
@@ -255,8 +255,7 @@ func decodeFrozenHandoffDelegation(raw json.RawMessage) (handoff.Delegation, err
 // admission by its frozen child identity. Every member delegation belongs to
 // its originally routed ChildRunner, never the Harness native Agent starter.
 func isHandoffDelegationInvocation(invocation Invocation) bool {
-	if invocation.ParentItemID == "" || invocation.ExecutionClass != ExecutionAgent ||
-		invocation.CapabilityKey != CapabilityAgent || len(invocation.Input) == 0 ||
+	if invocation.ParentItemID == "" || invocation.CapabilityKey != CapabilityAgent || len(invocation.Input) == 0 ||
 		hashInvocationBytes(invocation.Input) != invocation.InputHash {
 		return false
 	}

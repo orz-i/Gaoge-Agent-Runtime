@@ -442,8 +442,7 @@ func (runner *Runner) ResolveSubtaskApproval(ctx context.Context, turnID, taskID
 	// Child Invocation. Missing child ownership is an invalid pre-stable
 	// execution, not permission to route physical approval through the root.
 	invocation, err := runner.store.GetInvocationByExecutionRefID(ctx, task.RunID)
-	if err != nil || invocation.ParentItemID == "" || invocation.ExecutionClass != ExecutionAgent ||
-		invocation.ExecutionRefID != task.RunID || invocation.TurnID != turn.ID {
+	if err != nil || invocation.ParentItemID == "" || invocation.ExecutionRefID != task.RunID || invocation.TurnID != turn.ID {
 		return Snapshot{}, errors.Join(ErrConflict, err)
 	}
 	resolved, resolveErr := runner.withPhysicalSubtaskApprovalDispatch(

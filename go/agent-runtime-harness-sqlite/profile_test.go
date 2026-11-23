@@ -74,7 +74,8 @@ func TestProfileRequiresItsOriginalSchemaAndAuthority(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, damage := range map[string]string{
-		"schema-version":     "PRAGMA user_version=2",
+		"schema-version":     "PRAGMA user_version=3",
+		"old-schema-version": "PRAGMA user_version=1",
 		"profile-kind":       "PRAGMA application_id=123",
 		"missing-root-index": "DROP INDEX uk_harness_invocation_root",
 		"extra-trigger":      "CREATE TRIGGER extra AFTER INSERT ON agent_harness_turns BEGIN SELECT 1; END",

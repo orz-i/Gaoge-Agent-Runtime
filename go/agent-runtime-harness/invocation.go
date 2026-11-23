@@ -17,16 +17,7 @@ const (
 	RuntimeCapabilityVersion = "v1"
 )
 
-// ExecutionClass identifies one already-selected execution implementation.
-// It is never an automatic routing mode; selection happens before the
-// Invocation is created.
-type ExecutionClass string
-
-const (
-	ExecutionAgent ExecutionClass = "agent"
-)
-
-// InvocationStatus is the durable lifecycle of one capability invocation.
+// InvocationStatus is the durable lifecycle of one Agent invocation.
 type InvocationStatus string
 
 const (
@@ -42,23 +33,23 @@ const (
 // Invocation is the durable Harness envelope around one Agent execution.
 // Original Run identity and lifecycle facts remain bound to ExecutionRefID.
 type Invocation struct {
-	ID                string           `json:"id"`
-	TurnID            string           `json:"turnID"`
-	ParentItemID      string           `json:"parentItemID,omitempty"`
-	CapabilityKey     string           `json:"capabilityKey"`
-	DefinitionVersion string           `json:"definitionVersion,omitempty"`
-	ExecutionClass    ExecutionClass   `json:"executionClass"`
-	Input             json.RawMessage  `json:"input,omitempty"`
-	InputHash         string           `json:"inputHash,omitempty"`
-	ExecutionRefID    string           `json:"executionRefID,omitempty"`
-	Status            InvocationStatus `json:"status"`
-	Attempt           int              `json:"attempt"`
-	OutputRefs        []HostRef        `json:"outputRefs"`
-	ErrorCode         string           `json:"errorCode,omitempty"`
-	ErrorDetail       string           `json:"errorDetail,omitempty"`
-	Revision          uint64           `json:"revision"`
-	CreatedAt         time.Time        `json:"createdAt"`
-	UpdatedAt         time.Time        `json:"updatedAt"`
+	ID                string `json:"id"`
+	TurnID            string `json:"turnID"`
+	ParentItemID      string `json:"parentItemID,omitempty"`
+	CapabilityKey     string `json:"capabilityKey"`
+	DefinitionVersion string `json:"definitionVersion,omitempty"`
+
+	Input          json.RawMessage  `json:"input,omitempty"`
+	InputHash      string           `json:"inputHash,omitempty"`
+	ExecutionRefID string           `json:"executionRefID,omitempty"`
+	Status         InvocationStatus `json:"status"`
+	Attempt        int              `json:"attempt"`
+	OutputRefs     []HostRef        `json:"outputRefs"`
+	ErrorCode      string           `json:"errorCode,omitempty"`
+	ErrorDetail    string           `json:"errorDetail,omitempty"`
+	Revision       uint64           `json:"revision"`
+	CreatedAt      time.Time        `json:"createdAt"`
+	UpdatedAt      time.Time        `json:"updatedAt"`
 }
 
 // AgentExecutionRefID deterministically derives the Agent Runtime Run
@@ -142,8 +133,8 @@ func newAgentInvocation(
 	}
 	return Invocation{
 		ID: id, TurnID: strings.TrimSpace(turnID), CapabilityKey: CapabilityAgent,
-		DefinitionVersion: RuntimeCapabilityVersion, ExecutionClass: ExecutionAgent,
-		Input: input, InputHash: inputHash, ExecutionRefID: AgentExecutionRefID(id),
+		DefinitionVersion: RuntimeCapabilityVersion,
+		Input:             input, InputHash: inputHash, ExecutionRefID: AgentExecutionRefID(id),
 		Status: InvocationAccepted, Attempt: 1, OutputRefs: []HostRef{}, Revision: 1,
 		CreatedAt: now, UpdatedAt: now,
 	}, nil
@@ -187,15 +178,6 @@ func InvocationID(turnID, parentItemID, capabilityKey, requestID string) (string
 	return stableID("hiv", turnID, parentItemID, capabilityKey, requestID), nil
 }
 
-func validExecutionClass(value ExecutionClass) bool {
-	switch value {
-	case ExecutionAgent:
-		return true
-	default:
-		return false
-	}
-}
-
 func validInvocationStatus(value InvocationStatus) bool {
 	switch value {
 	case InvocationAccepted, InvocationRunning, InvocationWaitingInput, InvocationPausedBudget, InvocationCompleted, InvocationFailed, InvocationCancelled:
@@ -225,7 +207,7 @@ func validInvocationExecutionAuthority(value Invocation) bool {
 	// is an incomplete ownership record. In particular, dropping a Handoff
 	// child's payload must never turn its isolated Run into an ordinary child.
 	if len(value.Input) == 0 {
-		if value.InputHash != "" || (value.ParentItemID != "" && value.ExecutionClass == ExecutionAgent && value.CapabilityKey == CapabilityAgent) {
+		if value.InputHash != "" || (value.ParentItemID != "" && value.CapabilityKey == CapabilityAgent) {
 			return false
 		}
 	} else if !json.Valid(value.Input) || hashInvocationBytes(value.Input) != value.InputHash {
@@ -245,7 +227,7 @@ func validInvocationIdentity(value Invocation) bool {
 }
 
 func validInvocationLifecycle(value Invocation) bool {
-	if !validExecutionClass(value.ExecutionClass) || !validInvocationStatus(value.Status) {
+	if !validInvocationStatus(value.Status) {
 		return false
 	}
 	if value.Attempt <= 0 || value.Revision == 0 {
@@ -304,16 +286,16 @@ func terminalInvocationStatus(status InvocationStatus) bool {
 
 func invocationItemPayload(value Invocation) (json.RawMessage, error) {
 	return json.Marshal(struct {
-		CapabilityKey     string         `json:"capabilityKey"`
-		DefinitionVersion string         `json:"definitionVersion,omitempty"`
-		ExecutionClass    ExecutionClass `json:"executionClass"`
-		ExecutionRefID    string         `json:"executionRefID,omitempty"`
-		Attempt           int            `json:"attempt"`
-		InputHash         string         `json:"inputHash,omitempty"`
-		OutputRefs        []HostRef      `json:"outputRefs"`
+		CapabilityKey     string `json:"capabilityKey"`
+		DefinitionVersion string `json:"definitionVersion,omitempty"`
+
+		ExecutionRefID string    `json:"executionRefID,omitempty"`
+		Attempt        int       `json:"attempt"`
+		InputHash      string    `json:"inputHash,omitempty"`
+		OutputRefs     []HostRef `json:"outputRefs"`
 	}{
 		CapabilityKey: value.CapabilityKey, DefinitionVersion: value.DefinitionVersion,
-		ExecutionClass: value.ExecutionClass, ExecutionRefID: value.ExecutionRefID,
-		Attempt: value.Attempt, InputHash: value.InputHash, OutputRefs: append([]HostRef(nil), value.OutputRefs...),
+		ExecutionRefID: value.ExecutionRefID,
+		Attempt:        value.Attempt, InputHash: value.InputHash, OutputRefs: append([]HostRef(nil), value.OutputRefs...),
 	})
 }

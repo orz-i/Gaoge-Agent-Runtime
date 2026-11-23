@@ -33,8 +33,6 @@ func (s *forgedInvocationReceiptStore) CreateInvocation(ctx context.Context, val
 		original.ID = "hiv_unrelated"
 	case "run-id":
 		original.ExecutionRefID = "hr_unrelated"
-	case "class":
-		original.ExecutionClass = harness.ExecutionClass("removed-composite")
 	case "capability":
 		original.CapabilityKey = "runtime.alternate"
 	case "definition":
@@ -72,7 +70,7 @@ func (s *forgedInvocationReceiptStore) CreateInvocation(ctx context.Context, val
 			return harness.Invocation{}, false, getErr
 		}
 		foreign.CapabilityKey = harness.CapabilityAgent
-		foreign.ExecutionClass = harness.ExecutionAgent
+
 		foreign.ExecutionRefID = harness.AgentExecutionRefID(foreign.ID)
 		returnValue, _, getErr := s.Store.CreateInvocation(ctx, foreign)
 		return returnValue, fresh, getErr
@@ -81,7 +79,7 @@ func (s *forgedInvocationReceiptStore) CreateInvocation(ctx context.Context, val
 }
 
 func TestHardcutCreateInvocationReceiptCannotSubstituteExecutionAuthority(t *testing.T) {
-	for _, kind := range []string{"turn-id", "invocation-id", "run-id", "class", "capability", "definition", "input", "input-hash", "attempt", "parent", "fresh-status", "fresh-revision", "foreign-persisted"} {
+	for _, kind := range []string{"turn-id", "invocation-id", "run-id", "capability", "definition", "input", "input-hash", "attempt", "parent", "fresh-status", "fresh-revision", "foreign-persisted"} {
 		t.Run(kind, func(t *testing.T) {
 			runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
 			if err != nil {

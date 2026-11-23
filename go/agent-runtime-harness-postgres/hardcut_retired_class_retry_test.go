@@ -10,8 +10,8 @@ import (
 // rotate an old persisted Application's execution reference into an Agent.
 func TestRetiredApplicationRejectedBySQLRetryAdmission(t *testing.T) {
 	original := harness.Invocation{
-		ExecutionClass: harness.ExecutionAgent,
-		Revision:       1, Status: harness.InvocationFailed,
+
+		Revision: 1, Status: harness.InvocationFailed, CapabilityKey: harness.CapabilityAgent,
 		Input: []byte(`{"goal":"original Agent"}`),
 	}
 	if !validStoredInvocationRetry(original, 1) {
@@ -22,7 +22,7 @@ func TestRetiredApplicationRejectedBySQLRetryAdmission(t *testing.T) {
 		t.Fatal("retired Native Child retry admitted by SQL")
 	}
 	original.ParentItemID = ""
-	original.ExecutionClass = harness.ExecutionClass("application")
+	original.CapabilityKey = "app.legacy"
 	if validStoredInvocationRetry(original, 1) {
 		t.Fatal("retired Application row can rotate its SQL execution identity")
 	}

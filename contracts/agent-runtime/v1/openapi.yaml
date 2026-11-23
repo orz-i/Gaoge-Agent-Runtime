@@ -531,14 +531,13 @@ components:
     HarnessCapabilityInvocation:
       type: object
       additionalProperties: false
-      required: [id, turnID, capabilityKey, executionClass, status, attempt, outputRefs, revision, createdAt, updatedAt]
+      required: [id, turnID, capabilityKey, status, attempt, outputRefs, revision, createdAt, updatedAt]
       properties:
         id: {type: string}
         turnID: {type: string}
         parentItemID: {type: string}
         capabilityKey: {type: string}
         definitionVersion: {type: string}
-        executionClass: {type: string, enum: [agent, application]}
         inputHash: {type: string}
         status: {type: string, enum: [accepted, running, waiting_input, paused_budget, completed, failed, cancelled]}
         attempt: {type: integer, minimum: 1}

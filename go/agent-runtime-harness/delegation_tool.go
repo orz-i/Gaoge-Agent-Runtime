@@ -162,8 +162,7 @@ func (handler *DelegationToolHandler) VerifyCommittedTool(
 		return tools.ExecutionResult{}, ErrDelegationToolUnbound
 	}
 	invocation, err := runner.store.GetInvocationByExecutionRefID(ctx, request.RunID)
-	if err != nil || invocation.ExecutionClass != ExecutionAgent ||
-		invocation.ExecutionRefID != request.RunID {
+	if err != nil || invocation.ExecutionRefID != request.RunID {
 		return tools.ExecutionResult{}, errors.Join(agent.ErrToolOutcomeUnknown, err)
 	}
 	delegationID := delegationToolID(invocation, request.Call.ID)

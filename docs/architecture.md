@@ -160,3 +160,15 @@ external effects before deploying this candidate. Existing PostgreSQL workflow
 definition tables are not automatically dropped by `AutoMigrate`; see the
 [explicit retirement SQL](migrations/retire-obsolete-orchestration.sql) and
 [upgrade protocol](breaking-changes.md).
+
+## Agent-only Invocation contract (Q1–Q5 governance candidate)
+
+The unreleased Harness Invocation carries one immutable Agent capability and its
+original execution Run ID/Attempt, not a redundant `ExecutionClass` selector.
+The unique physical execution status and callback receipt authority remain in
+Kernel; Harness status is a durable Host projection, not a substitute for a
+Kernel lease or a terminal Tool/Model receipt. Root Retry requires the original
+`runtime.agent` capability key; historical Application/Team/Workflow rows are
+never reinterpreted or re-executed. `OpenAgentSession` now projects frozen Skills,
+per-call approval and explicitly Host-authorized SubAgent routing using the
+existing Agent Runner. This does not enable an intent router or second loop.

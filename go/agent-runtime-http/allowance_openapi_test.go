@@ -26,7 +26,7 @@ func TestOpenAPIAllowanceGrantAndPausedStatuses(t *testing.T) {
 	}
 	pausedRun := map[string]any{"id": "run-1", "kind": "agent", "actor": map[string]any{"tenantID": "tenant", "actorID": "user"}, "thread": map[string]any{"kind": "conversation", "id": "thread-1"}, "goal": "continue", "status": "paused_budget", "revision": float64(5), "errorCode": "agent.model_allowance_exhausted", "createdAt": "2026-10-09T00:00:00Z", "updatedAt": "2026-10-09T00:00:05Z"}
 	pausedTurn := map[string]any{"id": "ht-1", "hostTurn": map[string]any{"kind": "conversation_turn", "id": "turn-1"}, "status": "paused_budget", "revision": float64(3), "createdAt": "2026-10-09T00:00:00Z", "updatedAt": "2026-10-09T00:00:05Z"}
-	pausedInvocation := map[string]any{"id": "inv-1", "turnID": "ht-1", "capabilityKey": "runtime.agent", "executionClass": "agent", "status": "paused_budget", "attempt": float64(1), "outputRefs": []any{}, "revision": float64(3), "createdAt": "2026-10-09T00:00:00Z", "updatedAt": "2026-10-09T00:00:05Z"}
+	pausedInvocation := map[string]any{"id": "inv-1", "turnID": "ht-1", "capabilityKey": "runtime.agent", "status": "paused_budget", "attempt": float64(1), "outputRefs": []any{}, "revision": float64(3), "createdAt": "2026-10-09T00:00:00Z", "updatedAt": "2026-10-09T00:00:05Z"}
 	pausedFeed := map[string]any{"seq": float64(3), "turnID": "ht-1", "type": "turn.paused_budget", "status": "paused_budget", "createdAt": "2026-10-09T00:00:05Z"}
 	for _, check := range []struct {
 		schema string

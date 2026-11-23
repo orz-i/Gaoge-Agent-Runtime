@@ -236,6 +236,11 @@ func (session *SessionClient) ResolveApproval(ctx context.Context, turnID string
 	if err != nil {
 		return Snapshot{}, err
 	}
+	if session.agentSessionOnly {
+		if err := session.preflightAgentSessionResume(ctx, id); err != nil {
+			return Snapshot{}, err
+		}
+	}
 	value, resolveErr := session.runner.ResolveApproval(ctx, id, request)
 	return session.verifySnapshot(id, value, resolveErr)
 }
@@ -308,8 +313,7 @@ type sessionBoundOwner struct {
 func requireSessionRootOwner(turn Turn, invocation Invocation, owner sessionBoundOwner) error {
 	rootID, err := AgentInvocationID(turn.ID, turn.HostTurn.ID)
 	if err != nil || invocation.ID != rootID || invocation.TurnID != turn.ID ||
-		invocation.ParentItemID != "" || invocation.ExecutionClass != ExecutionAgent ||
-		invocation.CapabilityKey != CapabilityAgent || !validInvocation(invocation) {
+		invocation.ParentItemID != "" || invocation.CapabilityKey != CapabilityAgent || !validInvocation(invocation) {
 		return ErrConflict
 	}
 	actor, thread, err := frozenTopLevelInvocationIdentity(invocation)

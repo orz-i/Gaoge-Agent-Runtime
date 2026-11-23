@@ -23,13 +23,7 @@ func (runner *Runner) validateChildRuntimeOwnership(
 		strings.TrimSpace(child.ParentItemID) == "" || isHandoffDelegationInvocation(child) {
 		return ErrConflict
 	}
-	var expectedKind kernel.RunKind
-	switch child.ExecutionClass {
-	case ExecutionAgent:
-		expectedKind = agent.RunKind
-	default:
-		return ErrConflict
-	}
+	expectedKind := agent.RunKind
 	binding, err := frozenChildRoot(child)
 	if err != nil {
 		return err
@@ -37,7 +31,7 @@ func (runner *Runner) validateChildRuntimeOwnership(
 	root, err := runner.store.GetInvocation(ctx, binding.InvocationID)
 	if err != nil || root.ID == child.ID || root.ID != binding.InvocationID ||
 		root.TurnID != child.TurnID || root.ParentItemID != "" ||
-		invocationAttempt(root) != binding.attempt() || root.ExecutionClass != ExecutionAgent {
+		invocationAttempt(root) != binding.attempt() {
 		return ErrConflict
 	}
 	actor, thread, err := frozenTopLevelInvocationIdentity(root)

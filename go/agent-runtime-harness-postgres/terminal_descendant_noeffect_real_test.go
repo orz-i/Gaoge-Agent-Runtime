@@ -20,7 +20,7 @@ func TestRealPostgresControlNoEffectCannotGrantSecondPhysicalAttempt(t *testing.
 	}
 	input := json.RawMessage(`{"goal":"original Kernel may still run"}`)
 	digest := sha256.Sum256(input)
-	owner := harness.Invocation{ID: "pg-control-root", TurnID: turn.ID, CapabilityKey: harness.CapabilityAgent, DefinitionVersion: harness.RuntimeCapabilityVersion, ExecutionClass: harness.ExecutionAgent, ExecutionRefID: "pg-original-running-kernel", Input: input, InputHash: hex.EncodeToString(digest[:]), Status: harness.InvocationRunning, Attempt: 1, Revision: 1, OutputRefs: []harness.HostRef{}, CreatedAt: now, UpdatedAt: now}
+	owner := harness.Invocation{ID: "pg-control-root", TurnID: turn.ID, CapabilityKey: harness.CapabilityAgent, DefinitionVersion: harness.RuntimeCapabilityVersion, ExecutionRefID: "pg-original-running-kernel", Input: input, InputHash: hex.EncodeToString(digest[:]), Status: harness.InvocationRunning, Attempt: 1, Revision: 1, OutputRefs: []harness.HostRef{}, CreatedAt: now, UpdatedAt: now}
 	if _, fresh, err := first.CreateInvocation(t.Context(), owner); err != nil || !fresh {
 		t.Fatalf("Invocation: fresh=%t err=%v", fresh, err)
 	}
@@ -70,7 +70,7 @@ func TestRealPostgresEffectfulOriginalStartAndControlNoEffectCannotGrantRetry(t 
 	}
 	input := json.RawMessage(`{"goal":"an original, possibly running Agent"}`)
 	digest := sha256.Sum256(input)
-	owner := harness.Invocation{ID: "pg-effectful-original", TurnID: turn.ID, CapabilityKey: harness.CapabilityAgent, DefinitionVersion: harness.RuntimeCapabilityVersion, ExecutionClass: harness.ExecutionAgent, Input: input, InputHash: hex.EncodeToString(digest[:]), ExecutionRefID: "original-effectful-running-run", Status: harness.InvocationRunning, Revision: 1, Attempt: 1, OutputRefs: []harness.HostRef{}, CreatedAt: now, UpdatedAt: now}
+	owner := harness.Invocation{ID: "pg-effectful-original", TurnID: turn.ID, CapabilityKey: harness.CapabilityAgent, DefinitionVersion: harness.RuntimeCapabilityVersion, Input: input, InputHash: hex.EncodeToString(digest[:]), ExecutionRefID: "original-effectful-running-run", Status: harness.InvocationRunning, Revision: 1, Attempt: 1, OutputRefs: []harness.HostRef{}, CreatedAt: now, UpdatedAt: now}
 	if _, fresh, err := first.CreateInvocation(t.Context(), owner); err != nil || !fresh {
 		t.Fatalf("Invocation: fresh=%t err=%v", fresh, err)
 	}

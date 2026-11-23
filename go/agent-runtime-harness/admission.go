@@ -24,25 +24,20 @@ import (
 // together with the host request. It must be sealed before CreateTurn: a
 // crash before CreateInvocation must not permit another capability or plan.
 type rootAdmission struct {
-	ExecutionClass    ExecutionClass `json:"executionClass"`
-	CapabilityKey     string         `json:"capabilityKey"`
-	DefinitionVersion string         `json:"definitionVersion"`
-	InputHash         string         `json:"inputHash"`
+	CapabilityKey     string `json:"capabilityKey"`
+	DefinitionVersion string `json:"definitionVersion"`
+	InputHash         string `json:"inputHash"`
 }
 
 func sealStartAdmission(request StartRequest, config *ConfigSnapshot, root rootAdmission) (StartRequest, error) {
 	if config == nil || jsoncontract.ValidateCanonicalUTF8(request) != nil ||
 		jsoncontract.ValidateCanonicalUTF8(*config) != nil || jsoncontract.ValidateCanonicalUTF8(root) != nil ||
-		strings.TrimSpace(root.CapabilityKey) == "" || strings.TrimSpace(root.DefinitionVersion) == "" ||
-		strings.TrimSpace(string(root.ExecutionClass)) == "" {
+		strings.TrimSpace(root.CapabilityKey) == "" || strings.TrimSpace(root.DefinitionVersion) == "" {
 		return StartRequest{}, ErrInvalidRequest
 	}
 	root.CapabilityKey = strings.TrimSpace(root.CapabilityKey)
 	root.DefinitionVersion = strings.TrimSpace(root.DefinitionVersion)
 	root.InputHash = strings.TrimSpace(root.InputHash)
-	if root.ExecutionClass != ExecutionAgent && root.InputHash == "" {
-		return StartRequest{}, ErrInvalidRequest
-	}
 	var contextSeed *ContextSeed
 	if request.Context != nil {
 		normalized, err := normalizeContextSeed(request.Context)

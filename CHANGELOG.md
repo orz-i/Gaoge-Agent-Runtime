@@ -5,6 +5,14 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- **Agent-only Session/Invocation convergence.** Frozen Skills, per-call Tool
+  approval and explicitly Host-authorized SubAgent routing use one standard
+  `OpenAgentSession` path. Remove the redundant `ExecutionClass` Go/HTTP/TS/SQL
+  discriminator and retired generic Host Feature no-effect escape hatch.
+  Preserve Agent Run/Attempt/receipt authorization; require explicit PG
+  cutover SQL and strict Harness SQLite Schema v2. See
+  [migration guidance](docs/migrations/retire-harness-execution-class.sql).
+
 - **Desktop Harness SQLite Store.** Hosts can persist Sessions, Turns,
   Invocations, Context, approvals, Handoffs and budget receipts in a private
   SQLite file. The adapter reopens the original recovery authority and shares

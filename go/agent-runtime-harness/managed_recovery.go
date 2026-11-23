@@ -31,14 +31,14 @@ func ManagedHostSource(session Session, turn Turn, invocation Invocation, config
 		HostTurn                                                     HostRef
 		Config                                                       ConfigSnapshot
 		InvocationID, ParentItemID, CapabilityKey, DefinitionVersion string
-		ExecutionClass                                               ExecutionClass
-		Input                                                        json.RawMessage
-		InputHash, ExecutionRefID                                    string
-		Attempt                                                      int
-		Dispatch                                                     Item
+
+		Input                     json.RawMessage
+		InputHash, ExecutionRefID string
+		Attempt                   int
+		Dispatch                  Item
 	}{session.ID, session.HostThread, session.Actor, turn.ID, turn.HostTurn, config,
 		invocation.ID, invocation.ParentItemID, invocation.CapabilityKey, invocation.DefinitionVersion,
-		invocation.ExecutionClass, invocation.Input, invocation.InputHash, invocation.ExecutionRefID, invocation.Attempt, dispatch})
+		invocation.Input, invocation.InputHash, invocation.ExecutionRefID, invocation.Attempt, dispatch})
 }
 
 // ValidateManagedOriginalRows is shared by concrete storage transactions. It
@@ -47,7 +47,7 @@ func ValidateManagedOriginalRows(authority kernel.ManagedAuthority, b kernel.Man
 	if !b.Valid() || b.HostAuthority != authority || session.ID == "" || turn.SessionID != session.ID ||
 		turn.ID != b.TurnID || config.ID != turn.ConfigSnapshotID || config.TurnID != turn.ID ||
 		invocation.ID != b.InvocationID || invocation.TurnID != turn.ID || invocation.ParentItemID != "" ||
-		invocation.ExecutionClass != ExecutionAgent || invocation.Attempt <= 0 || uint64(invocation.Attempt) != uint64(b.Attempt) ||
+		invocation.Attempt <= 0 || uint64(invocation.Attempt) != uint64(b.Attempt) ||
 		invocation.ExecutionRefID != b.RunID || dispatch.ID != b.DispatchID || dispatch.InvocationID != invocation.ID ||
 		dispatch.TurnID != turn.ID || dispatch.RunID != b.RunID {
 		return ErrConflict

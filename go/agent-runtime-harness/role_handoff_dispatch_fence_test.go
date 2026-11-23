@@ -140,7 +140,7 @@ func newPR82HandoffFixture(t *testing.T, parentOptions ...agent.StartRequest) *p
 		t.Fatal(err)
 	}
 	root := Invocation{ID: rootID, TurnID: turn.ID, CapabilityKey: CapabilityAgent,
-		ExecutionClass: ExecutionAgent, Input: input, InputHash: inputHash,
+		Input: input, InputHash: inputHash,
 		ExecutionRefID: run.Run.ID, Status: InvocationRunning, Attempt: 1,
 		Revision: 1, OutputRefs: []HostRef{}, CreatedAt: now, UpdatedAt: now}
 	if _, _, err = store.CreateInvocation(ctx, root); err != nil {

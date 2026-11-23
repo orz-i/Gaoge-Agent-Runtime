@@ -55,7 +55,6 @@ export type HarnessInteractionDTO = {
   updatedAt: string;
 };
 
-export type HarnessExecutionClass = "agent";
 export type HarnessInvocationStatus = "accepted" | RunStatus;
 
 export type HarnessCapabilityInvocationDTO = {
@@ -64,7 +63,6 @@ export type HarnessCapabilityInvocationDTO = {
   parentItemID?: string;
   capabilityKey: string;
   definitionVersion?: string;
-  executionClass: HarnessExecutionClass;
   inputHash?: string;
   status: HarnessInvocationStatus;
   attempt: number;

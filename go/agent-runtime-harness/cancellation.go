@@ -408,8 +408,7 @@ func (runner *Runner) localHandoffCancellationAuthority(
 		return unverified(err)
 	}
 	if parent.ID != item.InvocationID || parent.ID == child.ID ||
-		parent.TurnID != child.TurnID || parent.ExecutionClass != ExecutionAgent ||
-		parent.ExecutionRefID != payload.ParentRunID {
+		parent.TurnID != child.TurnID || parent.ExecutionRefID != payload.ParentRunID {
 		return unverified(ErrConflict)
 	}
 	parentSnapshot, err := runner.runtime.Load(ctx, payload.ParentRunID)

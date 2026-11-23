@@ -213,7 +213,7 @@ func invocationResponse(value harness.Invocation) InvocationResponse {
 	return InvocationResponse{
 		ID: value.ID, TurnID: value.TurnID, ParentItemID: value.ParentItemID,
 		CapabilityKey: value.CapabilityKey, DefinitionVersion: value.DefinitionVersion,
-		ExecutionClass: value.ExecutionClass, InputHash: value.InputHash, Status: value.Status,
+		InputHash: value.InputHash, Status: value.Status,
 		Attempt: value.Attempt, OutputRefs: append([]harness.HostRef(nil), value.OutputRefs...),
 		ErrorCode:   runtimehttp.PublicFailureCode(value.ErrorCode),
 		ErrorDetail: runtimehttp.PublicFailureDetail(value.ErrorCode, value.ErrorDetail), Revision: value.Revision,
@@ -427,21 +427,21 @@ type ItemResponse struct {
 // are internal topology; Conversation clients recover the Harness invocation
 // lifecycle by invocation identity instead.
 type InvocationResponse struct {
-	ID                string                   `json:"id"`
-	TurnID            string                   `json:"turnID"`
-	ParentItemID      string                   `json:"parentItemID,omitempty"`
-	CapabilityKey     string                   `json:"capabilityKey"`
-	DefinitionVersion string                   `json:"definitionVersion,omitempty"`
-	ExecutionClass    harness.ExecutionClass   `json:"executionClass"`
-	InputHash         string                   `json:"inputHash,omitempty"`
-	Status            harness.InvocationStatus `json:"status"`
-	Attempt           int                      `json:"attempt"`
-	OutputRefs        []harness.HostRef        `json:"outputRefs"`
-	ErrorCode         string                   `json:"errorCode,omitempty"`
-	ErrorDetail       string                   `json:"errorDetail,omitempty"`
-	Revision          uint64                   `json:"revision"`
-	CreatedAt         time.Time                `json:"createdAt"`
-	UpdatedAt         time.Time                `json:"updatedAt"`
+	ID                string `json:"id"`
+	TurnID            string `json:"turnID"`
+	ParentItemID      string `json:"parentItemID,omitempty"`
+	CapabilityKey     string `json:"capabilityKey"`
+	DefinitionVersion string `json:"definitionVersion,omitempty"`
+
+	InputHash   string                   `json:"inputHash,omitempty"`
+	Status      harness.InvocationStatus `json:"status"`
+	Attempt     int                      `json:"attempt"`
+	OutputRefs  []harness.HostRef        `json:"outputRefs"`
+	ErrorCode   string                   `json:"errorCode,omitempty"`
+	ErrorDetail string                   `json:"errorDetail,omitempty"`
+	Revision    uint64                   `json:"revision"`
+	CreatedAt   time.Time                `json:"createdAt"`
+	UpdatedAt   time.Time                `json:"updatedAt"`
 }
 
 type SnapshotResponse struct {

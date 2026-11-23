@@ -46,18 +46,17 @@ func assertRetryChildExecutionFenceScenarios(t *testing.T, store harness.Store, 
 	t.Helper()
 	scenarios := []struct {
 		name    string
-		class   harness.ExecutionClass
 		status  harness.InvocationStatus
 		receipt string
 	}{
-		{"native-running", harness.ExecutionAgent, harness.InvocationRunning, "physical_dispatch_returned"},
-		{"native-waiting", harness.ExecutionAgent, harness.InvocationWaitingInput, "physical_dispatch_returned"},
-		{"native-paused", harness.ExecutionAgent, harness.InvocationPausedBudget, "physical_dispatch_returned"},
-		{"accepted-native-start", harness.ExecutionAgent, harness.InvocationAccepted, "physical_dispatch_returned"},
-		{"accepted-remote-handoff", harness.ExecutionAgent, harness.InvocationAccepted, "handoff_start_returned"},
-		{"accepted-unknown-outcome", harness.ExecutionAgent, harness.InvocationAccepted, "none"},
-		{"accepted-never-dispatched", harness.ExecutionAgent, harness.InvocationAccepted, ""},
-		{"accepted-definitive-no-effect", harness.ExecutionAgent, harness.InvocationAccepted, "physical_dispatch_rejected"},
+		{"native-running", harness.InvocationRunning, "physical_dispatch_returned"},
+		{"native-waiting", harness.InvocationWaitingInput, "physical_dispatch_returned"},
+		{"native-paused", harness.InvocationPausedBudget, "physical_dispatch_returned"},
+		{"accepted-native-start", harness.InvocationAccepted, "physical_dispatch_returned"},
+		{"accepted-remote-handoff", harness.InvocationAccepted, "handoff_start_returned"},
+		{"accepted-unknown-outcome", harness.InvocationAccepted, "none"},
+		{"accepted-never-dispatched", harness.InvocationAccepted, ""},
+		{"accepted-definitive-no-effect", harness.InvocationAccepted, "physical_dispatch_rejected"},
 	}
 	for _, scenario := range scenarios {
 		t.Run(scenario.name, func(t *testing.T) {
@@ -78,8 +77,8 @@ func assertRetryChildExecutionFenceScenarios(t *testing.T, store harness.Store, 
 			hash := hex.EncodeToString(sum[:])
 			root := harness.Invocation{
 				ID: "root-" + turnID, TurnID: turnID, CapabilityKey: "runtime.agent",
-				ExecutionClass: harness.ExecutionAgent, ExecutionRefID: "r1-" + turnID,
-				Input: input, InputHash: hash, Status: harness.InvocationRunning,
+				ExecutionRefID: "r1-" + turnID,
+				Input:          input, InputHash: hash, Status: harness.InvocationRunning,
 				Attempt: 1, Revision: 1, OutputRefs: []harness.HostRef{}, CreatedAt: now, UpdatedAt: now,
 			}
 			if _, _, err := store.CreateInvocation(ctx, root); err != nil {
@@ -87,7 +86,7 @@ func assertRetryChildExecutionFenceScenarios(t *testing.T, store harness.Store, 
 			}
 			child := harness.Invocation{
 				ID: "child-" + turnID, TurnID: turnID, ParentItemID: "parent-item",
-				CapabilityKey: "feature.child", ExecutionClass: scenario.class,
+				CapabilityKey:  "feature.child",
 				ExecutionRefID: "c1-" + turnID, Input: input, InputHash: hash,
 				Status: scenario.status, Attempt: 1, Revision: 1,
 				OutputRefs: []harness.HostRef{}, CreatedAt: now, UpdatedAt: now,

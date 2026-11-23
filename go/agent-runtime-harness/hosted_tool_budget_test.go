@@ -31,7 +31,7 @@ func hostedBudgetFixture(t *testing.T, limits budget.Limits) (*MemoryStore, *Bud
 	if _, _, err = store.CreateTurn(t.Context(), Turn{ID: config.TurnID, SessionID: "session", HostTurn: HostRef{Kind: "test", ID: "turn"}, ConfigSnapshotID: config.ID, Status: TurnRunning, Revision: 1, CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err = store.CreateInvocation(t.Context(), Invocation{ID: "hosted-invocation", TurnID: config.TurnID, ExecutionClass: ExecutionAgent, ExecutionRefID: "hosted-run", CapabilityKey: CapabilityAgent, Status: InvocationRunning, Revision: 1, Attempt: 1, CreatedAt: now, UpdatedAt: now}); err != nil {
+	if _, _, err = store.CreateInvocation(t.Context(), Invocation{ID: "hosted-invocation", TurnID: config.TurnID, ExecutionRefID: "hosted-run", CapabilityKey: CapabilityAgent, Status: InvocationRunning, Revision: 1, Attempt: 1, CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	shared, err := NewBudgetMiddleware(BudgetMiddlewareDependencies{Store: store, Clock: hostedBudgetClock{}})

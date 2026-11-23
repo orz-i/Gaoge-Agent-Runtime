@@ -46,7 +46,7 @@ func TestNestedMemberInheritsImmediateParentsFrozenModel(t *testing.T) {
 		t.Fatal(err)
 	}
 	invocation := Invocation{ID: "nested-invocation", TurnID: turn.ID, ParentItemID: f.startedItemID,
-		ExecutionClass: ExecutionAgent, ExecutionRefID: parent.Run.ID}
+		ExecutionRefID: parent.Run.ID}
 	for _, tc := range []struct {
 		name, requested, wantModel, wantOptions string
 		requestedCeiling, wantCeiling           int64

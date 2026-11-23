@@ -237,8 +237,7 @@ func (runner *Runner) ResolveApproval(
 		return Snapshot{}, err
 	}
 	invocation, err := loadTopLevelInvocation(ctx, runner.store, turn.ID)
-	if err != nil || turn.Status != TurnWaitingInput || invocation.ExecutionClass != ExecutionAgent ||
-		strings.TrimSpace(invocation.ExecutionRefID) == "" {
+	if err != nil || turn.Status != TurnWaitingInput || strings.TrimSpace(invocation.ExecutionRefID) == "" {
 		return Snapshot{}, ErrConflict
 	}
 	runtimeSnapshot, err := runner.runtime.Load(ctx, invocation.ExecutionRefID)
@@ -291,11 +290,7 @@ func (runner *Runner) restoreInvocationContext(
 	if err != nil {
 		return nil, err
 	}
-	access := ContextWindowReadOnly
-	if invocation.ExecutionClass == ExecutionAgent {
-		access = ContextWindowOwner
-	}
-	return withContextWindowBinding(runCtx, updated.ID, access), nil
+	return withContextWindowBinding(runCtx, updated.ID, ContextWindowOwner), nil
 }
 
 type contextBuildResult struct {
@@ -695,7 +690,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 // this entry point; Harness never classifies a user intent or routes implicitly.
 func (runner *Runner) StartAgentTurn(ctx context.Context, request StartRequest) (Snapshot, error) {
 	envelope, err := runner.prepareTopLevelStartEnvelope(ctx, request, rootAdmission{
-		ExecutionClass: ExecutionAgent, CapabilityKey: CapabilityAgent,
+		CapabilityKey:     CapabilityAgent,
 		DefinitionVersion: RuntimeCapabilityVersion,
 	})
 	if err != nil {
@@ -884,9 +879,6 @@ func (runner *Runner) refreshTurn(ctx context.Context, turnID string, expected *
 	invocation, err := loadTopLevelInvocation(ctx, runner.store, turn.ID)
 	if expected != nil && (err != nil || requireSessionRootOwner(turn, invocation, *expected) != nil) {
 		return Snapshot{}, errors.Join(ErrConflict, err)
-	}
-	if err == nil && invocation.ExecutionClass != ExecutionAgent {
-		return Snapshot{}, ErrConflict
 	}
 	if err != nil || strings.TrimSpace(invocation.ExecutionRefID) == "" {
 		if terminalTurnStatus(turn.Status) {
@@ -1378,9 +1370,6 @@ func (runner *Runner) recordRuntimeSnapshotItems(
 	invocation Invocation,
 	runtimeSnapshot kernel.Snapshot,
 ) error {
-	if invocation.ExecutionClass != ExecutionAgent {
-		return runner.projectChildInvocationOutcome(ctx, invocation, runtimeSnapshot)
-	}
 	if err := runner.recordAgentRunItem(ctx, turn, invocation, runtimeSnapshot); err != nil {
 		return err
 	}
@@ -1535,9 +1524,6 @@ func (runner *Runner) recordTerminalAgentMessageItem(
 // an unrelated Kernel Run can occupy that ID before an admitted Agent
 // has created its original physical Run.
 func validateRootRuntimeOwnership(invocation Invocation, snapshot kernel.Snapshot) error {
-	if invocation.ExecutionClass != ExecutionAgent {
-		return ErrConflict
-	}
 	kind := agent.RunKind
 	actor, thread, err := frozenTopLevelInvocationIdentity(invocation)
 	if err != nil {
@@ -1589,7 +1575,7 @@ func (runner *Runner) validateRootModelOutputCeiling(ctx context.Context, invoca
 }
 
 func (runner *Runner) frozenRootModelPolicy(ctx context.Context, invocation Invocation) (ConfigSnapshot, error) {
-	if invocation.ParentItemID != "" || invocation.ExecutionClass != ExecutionAgent {
+	if invocation.ParentItemID != "" {
 		return ConfigSnapshot{}, ErrConflict
 	}
 	turn, err := loadVerifiedTurn(ctx, runner.store, invocation.TurnID)

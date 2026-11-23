@@ -272,7 +272,7 @@ func (runner *Runner) verifiedTerminalDelegationReplay(
 
 func (runner *Runner) canDelegate(invocation Invocation) bool {
 	return runner != nil && runner.handoffs != nil && runner.relations != nil &&
-		invocation.ExecutionClass == ExecutionAgent && strings.TrimSpace(invocation.ExecutionRefID) != ""
+		strings.TrimSpace(invocation.ExecutionRefID) != ""
 }
 
 func (runner *Runner) prepareDelegation(
@@ -512,7 +512,7 @@ func (runner *Runner) dispatchHandoff(
 ) (handoff.Delegation, error) {
 	child, err := runner.store.GetInvocationByExecutionRefID(ctx, delegation.ChildRunID)
 	if err != nil || child.TurnID != turn.ID || child.ParentItemID != parentItemID ||
-		child.ExecutionClass != ExecutionAgent || child.ExecutionRefID != delegation.ChildRunID ||
+		child.ExecutionRefID != delegation.ChildRunID ||
 		child.CapabilityKey != CapabilityAgent || !isHandoffDelegationInvocation(child) {
 		return handoff.Delegation{}, errors.Join(ErrConflict, err)
 	}

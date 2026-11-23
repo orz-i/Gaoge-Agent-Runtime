@@ -39,23 +39,23 @@ type turnRecord struct {
 func (turnRecord) TableName() string { return "agent_harness_turns" }
 
 type invocationRecord struct {
-	ID                string    `gorm:"primaryKey;size:64"`
-	TurnID            string    `gorm:"size:64;not null;index:idx_harness_invocation_turn;uniqueIndex:uk_harness_invocation_root,where:parent_item_id = ''"`
-	ParentItemID      string    `gorm:"size:64;not null;default:''"`
-	CapabilityKey     string    `gorm:"size:128;not null"`
-	DefinitionVersion string    `gorm:"size:128;not null;default:''"`
-	ExecutionClass    string    `gorm:"size:32;not null"`
-	InputJSON         string    `gorm:"type:text;not null;default:''"`
-	InputHash         string    `gorm:"size:64;not null;default:''"`
-	ExecutionRefID    string    `gorm:"size:128;not null;default:'';uniqueIndex:uk_harness_invocation_execution,where:execution_ref_id <> ''"`
-	Status            string    `gorm:"size:32;not null;index:idx_harness_invocation_status"`
-	Attempt           int       `gorm:"not null"`
-	OutputRefsJSON    string    `gorm:"type:text;not null;default:'[]'"`
-	ErrorCode         string    `gorm:"size:128;not null;default:''"`
-	ErrorDetail       string    `gorm:"type:text;not null;default:''"`
-	Revision          uint64    `gorm:"not null"`
-	CreatedAt         time.Time `gorm:"not null"`
-	UpdatedAt         time.Time `gorm:"not null"`
+	ID                string `gorm:"primaryKey;size:64"`
+	TurnID            string `gorm:"size:64;not null;index:idx_harness_invocation_turn;uniqueIndex:uk_harness_invocation_root,where:parent_item_id = ''"`
+	ParentItemID      string `gorm:"size:64;not null;default:''"`
+	CapabilityKey     string `gorm:"size:128;not null"`
+	DefinitionVersion string `gorm:"size:128;not null;default:''"`
+
+	InputJSON      string    `gorm:"type:text;not null;default:''"`
+	InputHash      string    `gorm:"size:64;not null;default:''"`
+	ExecutionRefID string    `gorm:"size:128;not null;default:'';uniqueIndex:uk_harness_invocation_execution,where:execution_ref_id <> ''"`
+	Status         string    `gorm:"size:32;not null;index:idx_harness_invocation_status"`
+	Attempt        int       `gorm:"not null"`
+	OutputRefsJSON string    `gorm:"type:text;not null;default:'[]'"`
+	ErrorCode      string    `gorm:"size:128;not null;default:''"`
+	ErrorDetail    string    `gorm:"type:text;not null;default:''"`
+	Revision       uint64    `gorm:"not null"`
+	CreatedAt      time.Time `gorm:"not null"`
+	UpdatedAt      time.Time `gorm:"not null"`
 }
 
 func (invocationRecord) TableName() string { return "agent_harness_invocations" }

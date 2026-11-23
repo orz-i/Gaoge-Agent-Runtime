@@ -22,8 +22,7 @@ type rootRetryTransition struct {
 // RootRetryTransitionFact constructs data only. Stores persist it exclusively
 // under the same Turn lock/transaction as the original Attempt rotation.
 func RootRetryTransitionFact(previous Invocation, nextRunID string, now time.Time) (Item, error) {
-	if previous.ParentItemID != "" || previous.ExecutionClass != ExecutionAgent ||
-		!validChildAttempt(invocationAttempt(previous)) || !retryableInvocationStatus(previous.Status) ||
+	if previous.ParentItemID != "" || !validChildAttempt(invocationAttempt(previous)) || !retryableInvocationStatus(previous.Status) ||
 		nextRunID == "" || nextRunID == previous.ExecutionRefID || now.IsZero() || previous.Attempt+1 <= previous.Attempt {
 		return Item{}, ErrConflict
 	}

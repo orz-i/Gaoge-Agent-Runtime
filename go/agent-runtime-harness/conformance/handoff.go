@@ -84,7 +84,7 @@ func RemoteHandoffCancellation(t *testing.T, store harness.Store, c RemoteCancel
 	}
 	rootDigest := sha256.Sum256(rootInput)
 	root := harness.Invocation{ID: rootID, TurnID: turnID, CapabilityKey: harness.CapabilityAgent,
-		ExecutionClass: harness.ExecutionAgent, Input: rootInput, InputHash: hex.EncodeToString(rootDigest[:]),
+		Input: rootInput, InputHash: hex.EncodeToString(rootDigest[:]),
 		ExecutionRefID: rootRunID, Status: harness.InvocationRunning,
 		Attempt: 1, Revision: 1, OutputRefs: []harness.HostRef{}, CreatedAt: now, UpdatedAt: now}
 	if _, _, err := store.CreateInvocation(ctx, root); err != nil {
@@ -116,7 +116,7 @@ func RemoteHandoffCancellation(t *testing.T, store harness.Store, c RemoteCancel
 	digest := sha256.Sum256(input)
 	child := harness.Invocation{ID: invocationID, TurnID: turnID, ParentItemID: parentItemID,
 		CapabilityKey: harness.CapabilityAgent, DefinitionVersion: harness.RuntimeCapabilityVersion,
-		ExecutionClass: harness.ExecutionAgent, ExecutionRefID: childRunID, Input: input, InputHash: hex.EncodeToString(digest[:]),
+		ExecutionRefID: childRunID, Input: input, InputHash: hex.EncodeToString(digest[:]),
 		Status: harness.InvocationAccepted, Attempt: 1, Revision: 1, OutputRefs: []harness.HostRef{},
 		CreatedAt: now, UpdatedAt: now}
 	if _, _, err := store.CreateInvocation(ctx, child); err != nil {

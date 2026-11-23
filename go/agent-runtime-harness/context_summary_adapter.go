@@ -70,7 +70,7 @@ func (p contextSummaryPorts) indexedRoot(ctx context.Context, runID string) (Tur
 	if err != nil {
 		return Turn{}, Invocation{}, Session{}, err
 	}
-	if invocation.ExecutionRefID != runID || invocation.ParentItemID != "" || invocation.ExecutionClass != ExecutionAgent || !validInvocationExecutionAuthority(invocation) {
+	if invocation.ExecutionRefID != runID || invocation.ParentItemID != "" || !validInvocationExecutionAuthority(invocation) {
 		return Turn{}, Invocation{}, Session{}, ErrConflict
 	}
 	turn, err := loadVerifiedTurn(ctx, p.store, invocation.TurnID)

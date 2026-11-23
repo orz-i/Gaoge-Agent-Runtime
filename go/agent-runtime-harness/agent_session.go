@@ -53,6 +53,12 @@ type AgentSessionOptions struct {
 	// LocalTools supplies both the selected handlers and their policies. Leave
 	// Config.ToolKeys and Config.ToolPolicies unset when using this field.
 	LocalTools []SessionTool
+	// Handoffs, Relations and DelegationPolicy are the Host's already-authorized
+	// SubAgent route, original owner index and policy. All three are required
+	// when Config.DelegationPolicy enables the built-in delegation Tool.
+	Handoffs         HandoffStarter
+	Relations        RunRelationSource
+	DelegationPolicy DelegationToolPolicy
 	// ExploreReads opts Host-certified nonterminal read tools (including an
 	// explicitly granted archive reader) into bounded exploration.
 	ExploreReads bool
@@ -80,8 +86,18 @@ func OpenAgentSession(options AgentSessionOptions) (*SessionClient, error) {
 	}
 	options.Session.Config = cloneConfigSnapshot(options.Session.Config)
 	config := &options.Session.Config
-	if config.DelegationPolicy.MaxDepth != 0 || len(config.DelegationPolicy.LocalToolGrants) != 0 || len(config.ToolKeys) != 0 || len(config.ToolPolicies) != 0 {
+	if len(config.ToolKeys) != 0 || len(config.ToolPolicies) != 0 {
 		return nil, ErrInvalidRequest
+	}
+	delegated := options.Handoffs != nil || options.Relations != nil || options.DelegationPolicy != nil ||
+		config.DelegationPolicy.MaxDepth != 0 || len(config.DelegationPolicy.LocalToolGrants) != 0
+	if delegated {
+		if options.Handoffs == nil || options.Relations == nil || options.DelegationPolicy == nil ||
+			config.DelegationPolicy.MaxDepth <= 0 || len(config.DelegationPolicy.LocalToolGrants) != 0 {
+			// Member-specific Tool grants need the advanced Host composition;
+			// never expose a Child-only Tool to the root to make wiring easier.
+			return nil, ErrInvalidRequest
+		}
 	}
 	if options.ExploreReads && len(options.LocalTools) == 0 && !options.Context.ReadArtifacts {
 		return nil, ErrInvalidRequest
@@ -89,6 +105,10 @@ func OpenAgentSession(options AgentSessionOptions) (*SessionClient, error) {
 	registrations, exploration, err := selectSessionTools(config, options.LocalTools, options.Context.ReadArtifacts)
 	if err != nil {
 		return nil, err
+	}
+	if delegated {
+		config.ToolKeys = append(config.ToolKeys, DelegationToolKey)
+		config.ToolPolicies = append(config.ToolPolicies, DelegationToolPolicySnapshot())
 	}
 	if !options.ExploreReads {
 		exploration = nil
@@ -147,6 +167,11 @@ func selectSessionTools(config *ConfigSnapshot, selectedTools []SessionTool, rea
 }
 
 func openBoundedAgentSession(options AgentSessionOptions, registrations []tools.Registration, exploration []string) (*SessionClient, error) {
+	var delegation *DelegationToolHandler
+	if options.DelegationPolicy != nil {
+		delegation = NewDelegationToolHandler()
+		registrations = append(registrations, DelegationToolRegistration(delegation))
+	}
 	if options.Context.ReadArtifacts {
 		registrations = append(registrations, ContextArtifactToolRegistration(NewContextArtifactToolHandler(options.Store, nil)))
 	}
@@ -192,6 +217,9 @@ func openBoundedAgentSession(options AgentSessionOptions, registrations []tools.
 		return nil, err
 	}
 	dependencies.ApprovalPolicies = []plugin.ApprovalPolicy{approval}
+	if delegation != nil {
+		dependencies.ToolOutcomeVerifier = delegation
+	}
 	if options.Context.ManagedRecovery {
 		dependencies.ManagedContextRecovery = bounded
 	} else {
@@ -207,9 +235,15 @@ func openBoundedAgentSession(options AgentSessionOptions, registrations []tools.
 	}
 	host, err := NewRunner(Dependencies{
 		Runtime: options.Runtime, Agent: loop, Store: options.Store, Context: manager, Catalog: registry,
+		Handoffs: options.Handoffs, Relations: options.Relations, DelegationPolicy: options.DelegationPolicy,
 	})
 	if err != nil {
 		return nil, err
+	}
+	if delegation != nil {
+		if err := delegation.Bind(host); err != nil {
+			return nil, err
+		}
 	}
 	session, err := host.OpenSession(options.Session)
 	if err != nil {
@@ -242,9 +276,6 @@ func normalizeAgentSessionConfig(config ConfigSnapshot) (ConfigSnapshot, error) 
 	config.ToolPolicies = policies
 	selected := make(map[string]bool, len(config.ToolKeys))
 	for _, key := range config.ToolKeys {
-		if key == DelegationToolKey {
-			return ConfigSnapshot{}, ErrInvalidRequest
-		}
 		selected[key] = true
 	}
 	for _, policy := range policies {
@@ -253,7 +284,10 @@ func normalizeAgentSessionConfig(config ConfigSnapshot) (ConfigSnapshot, error) 
 			return ConfigSnapshot{}, ErrInvalidRequest
 		}
 		if _, err := frozenApprovalRequirement(config, policy.Key); err != nil ||
-			(policy.ApprovalMode == approvalModeNever && policy.ApprovalCapability != "" && policy.Key != ContextArtifactToolKey) {
+			(policy.ApprovalMode == approvalModeNever && policy.ApprovalCapability != "" && policy.Key != ContextArtifactToolKey && policy.Key != DelegationToolKey) {
+			return ConfigSnapshot{}, ErrInvalidRequest
+		}
+		if policy.Key == DelegationToolKey && (policy != DelegationToolPolicySnapshot() || config.DelegationPolicy.MaxDepth <= 0) {
 			return ConfigSnapshot{}, ErrInvalidRequest
 		}
 		if policy.Key == ContextArtifactToolKey && policy != ContextArtifactToolPolicySnapshot() {
@@ -309,6 +343,15 @@ func (session *SessionClient) preflightAgentSessionResume(ctx context.Context, t
 	if _, err = session.runner.catalog.List(config.ToolKeys); err != nil {
 		return errors.Join(ErrInvalidRequest, err)
 	}
+	allowedSubAgents := false
+	for _, key := range config.ToolKeys {
+		if key == DelegationToolKey {
+			if session.runner.handoffs == nil || session.runner.relationReader == nil || session.runner.delegationPolicy == nil {
+				return ErrInvalidRequest
+			}
+			allowedSubAgents = true
+		}
+	}
 	owners, err := store.ListInvocations(ctx, turnID)
 	if err != nil {
 		return err
@@ -317,7 +360,7 @@ func (session *SessionClient) preflightAgentSessionResume(ctx context.Context, t
 		if owner.TurnID != turnID {
 			return ErrConflict
 		}
-		if owner.ParentItemID != "" {
+		if owner.ParentItemID != "" && !allowedSubAgents {
 			return ErrInvalidRequest
 		}
 	}
@@ -329,7 +372,7 @@ func (session *SessionClient) preflightAgentSessionResume(ctx context.Context, t
 		if item.TurnID != turnID {
 			return ErrConflict
 		}
-		if item.Kind == ItemDelegation || item.Kind == ItemSubtask ||
+		if (item.Kind == ItemDelegation || item.Kind == ItemSubtask) && !allowedSubAgents ||
 			item.Kind == ItemInteraction || item.Kind == ItemBudget {
 			return ErrInvalidRequest
 		}
