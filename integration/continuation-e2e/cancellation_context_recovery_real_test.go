@@ -105,7 +105,7 @@ func TestRealPostgresCancelledRequestNoEffectRecoveryAcrossConnections(t *testin
 					Actor:         kernel.ActorRef{TenantID: "test", ActorID: "agent"},
 					Thread:        kernel.ThreadRef{Kind: "conversation", ID: "cancel-request-disconnected"},
 					Goal:          "continue after a disconnected cancellation",
-					Config:        harness.ConfigSnapshot{Model: "fixture-control"},
+					Config:        harness.ConfigSnapshot{AgentSpec: harness.AgentSpec{Model: "fixture-control"}},
 					CallAllowance: &agent.CallAllowance{LLMCalls: 1},
 				}
 				paused, err := first.StartAgentTurn(t.Context(), request)
