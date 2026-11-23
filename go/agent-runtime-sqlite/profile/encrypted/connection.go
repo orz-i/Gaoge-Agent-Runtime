@@ -32,7 +32,7 @@ func WithKey(key *[32]byte) profile.OpenConnection {
 		params.Del("_pragma")
 		params.Del("_timezone")
 		params.Del("_time_format")
-		params.Set("vfs", "adiantum")
+		params.Set("vfs", privateVFSName)
 		params.Set("_timefmt", "2006-01-02 15:04:05.000000000")
 		uri.RawQuery = params.Encode()
 		if runtime.GOOS == "windows" && len(uri.Path) > 3 && uri.Path[0] == '/' && uri.Path[2] == ':' {
@@ -123,8 +123,17 @@ type nativeStatement interface {
 type utcStatement struct{ nativeStatement }
 
 func (s utcStatement) CheckNamedValue(v *driver.NamedValue) error {
+	err := s.nativeStatement.CheckNamedValue(v)
+	if errors.Is(err, driver.ErrSkip) {
+		// Apply the same conversions as database/sql before normalizing values
+		// returned by pointers and driver.Valuers such as sql.NullTime.
+		v.Value, err = driver.DefaultParameterConverter.ConvertValue(v.Value)
+	}
+	if err != nil {
+		return err
+	}
 	utcValue(v)
-	return s.nativeStatement.CheckNamedValue(v)
+	return nil
 }
 
 func utcValue(v *driver.NamedValue) {

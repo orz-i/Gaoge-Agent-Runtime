@@ -101,6 +101,13 @@ func TestEncryptedStagingReopenAndDiskTemp(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer conn.Close()
+	for _, value := range []any{&when, sql.NullTime{Time: when, Valid: true}} {
+		row := conn.QueryRowContext(ctx, "SELECT count(*) FROM records WHERE at=?", value)
+		var matched int
+		if err := row.Scan(&matched); err != nil || matched != 1 {
+			t.Fatalf("UTC binding for %T: rows=%d err=%v", value, matched, err)
+		}
+	}
 	if _, err = conn.ExecContext(ctx, "PRAGMA temp_store=FILE; PRAGMA temp.cache_size=5; CREATE TEMP TABLE spill(v BLOB)"); err != nil {
 		t.Fatal(err)
 	}
