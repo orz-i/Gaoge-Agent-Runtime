@@ -101,7 +101,6 @@ func TestTerminalNoEffectStartBoundariesRemainPositive(t *testing.T) {
 	for name, create := range rootInvocationStores() {
 		for _, tc := range []struct{ phase, boundary string }{
 			{"start", "physical_dispatch_rejected"},
-			{"start", "feature_start_no_effect"},
 			{"start-retry", "native_agent_start_no_effect"},
 		} {
 			t.Run(name+"/"+tc.phase+"/"+tc.boundary, func(t *testing.T) {

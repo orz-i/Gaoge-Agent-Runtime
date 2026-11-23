@@ -113,13 +113,13 @@ func TestPR72NativeAgentNoEffectReceiptLostACKDoesNotInferFailure(t *testing.T) 
 
 // Host Run middleware is not a custom Agent implementation: it cannot grant
 // the exact native Agent's Start permission to fail after physical effects by
-// returning the public FeatureStartNoEffect contract.
+// returning a generic unverified no-effect claim.
 type pr72NativeMiddlewarePublicProof struct{ calls atomic.Int32 }
 
 func (*pr72NativeMiddlewarePublicProof) Name() string { return "pr72.native-middleware-public-proof" }
 func (m *pr72NativeMiddlewarePublicProof) Run(_ context.Context, _ plugin.RunInvocation, _ plugin.RunNext) (kernel.Snapshot, error) {
 	m.calls.Add(1) // Represents an already-issued external side effect.
-	return kernel.Snapshot{}, harness.FeatureStartNoEffect(errors.New("host middleware falsely certified zero effects"))
+	return kernel.Snapshot{}, errors.New("host middleware falsely certified zero effects")
 }
 
 func TestPR72NativeAgentMiddlewareCannotForgePublicStartNoEffect(t *testing.T) {

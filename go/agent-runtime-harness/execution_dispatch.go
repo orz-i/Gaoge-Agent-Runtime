@@ -12,29 +12,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
-// ErrExecutionNoEffect may be returned by a host Feature StartRun ONLY when
-// the Feature can certify it issued no external effect and created no Kernel
-// Run. A generic error (including kernel.ErrConflict) is never such proof.
-// It permits a failed Invocation only after the Harness persists the grant's
-// no-effect completion receipt, so an uncertain receipt remains fenced.
-var ErrExecutionNoEffect = errors.New("harness feature start definitively performed no effect")
-
-// FeatureStartNoEffect preserves the original, host-visible failure while
-// explicitly certifying that StartRun did not create a Run or dispatch an
-// external effect. Hosts must never use it for timeouts or unknown outcomes.
-func FeatureStartNoEffect(cause error) error {
-	if cause == nil {
-		return ErrExecutionNoEffect
-	}
-	return featureStartNoEffect{cause: cause}
-}
-
-type featureStartNoEffect struct{ cause error }
-
-func (e featureStartNoEffect) Error() string      { return e.cause.Error() }
-func (e featureStartNoEffect) Unwrap() error      { return e.cause }
-func (featureStartNoEffect) Is(target error) bool { return target == ErrExecutionNoEffect }
-
 // ErrExecutionOutcomeUnknown means a Feature Start returned no authoritative
 // Kernel Run snapshot without a proven no-effect outcome. The original Run ID
 // and grant must be retained for reconciliation; Retry cannot rotate them.
@@ -165,7 +142,7 @@ func VerifiedExecutionDispatchReceipt(grant Item, receipts []Item) (string, bool
 		if phase != "handoff-start" {
 			return payload["boundary"], true
 		}
-	case "feature_start_no_effect", "native_agent_start_no_effect", "native_kernel_epoch_recovered":
+	case "native_agent_start_no_effect", "native_kernel_epoch_recovered":
 		if phase == "start" || phase == "start-retry" {
 			return payload["boundary"], true
 		}
@@ -433,19 +410,6 @@ func (runner *Runner) withPhysicalInvocationDispatchForContext(
 		// Every other no-snapshot Agent error remains outcome-unknown.
 		if nativeAgent && (phase == "start" || phase == "start-retry") && agent.IsNativeStartNoEffect(physicalErr) {
 			if receiptErr := runner.finishPhysicalDispatchGrant(ctx, grant, "native_agent_start_no_effect"); receiptErr == nil {
-				return snapshot, dispatchProvenNoEffect{cause: physicalErr}
-			} else {
-				return snapshot, errors.Join(ErrExecutionOutcomeUnknown, physicalErr, receiptErr)
-			}
-		}
-		// The public Host Feature no-effect contract applies to custom
-		// Features/Agents, never to an exact native *agent.Runner Start. A
-		// native Run Middleware can perform effects and return that public
-		// marker; only the private direct pre-middleware proof above may
-		// discharge the native Agent's physical grant.
-		customFeatureNoEffect := !nativeAgent || invocation.ExecutionClass != ExecutionAgent
-		if customFeatureNoEffect && (phase == "start" || phase == "start-retry") && errors.Is(physicalErr, ErrExecutionNoEffect) {
-			if receiptErr := runner.finishPhysicalDispatchGrant(ctx, grant, "feature_start_no_effect"); receiptErr == nil {
 				return snapshot, dispatchProvenNoEffect{cause: physicalErr}
 			} else {
 				return snapshot, errors.Join(ErrExecutionOutcomeUnknown, physicalErr, receiptErr)

@@ -240,7 +240,7 @@ func VerifiedOriginalStartNoEffect(items []Item, owner Invocation) bool {
 			return false
 		}
 		switch boundary {
-		case "physical_dispatch_rejected", "feature_start_no_effect", "native_agent_start_no_effect":
+		case "physical_dispatch_rejected", "native_agent_start_no_effect":
 			originals++
 		default:
 			return false
