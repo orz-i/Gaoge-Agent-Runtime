@@ -153,7 +153,9 @@ func walkStateRaw(value reflect.Value, path string, restore bool, visit func(str
 	if value.Type() == rawMessageType {
 		return visit(path, value)
 	}
-	switch value.Kind() {
+	// Leaf scalar kinds are not omitted accidentally: by definition they
+	// cannot hold typed json.RawMessage evidence.
+	switch value.Kind() { //nolint:exhaustive // All scalar reflect kinds are intentional leaves.
 	case reflect.Interface:
 		if value.IsNil() {
 			return nil
@@ -209,6 +211,10 @@ func walkStateRaw(value reflect.Value, path string, restore bool, visit func(str
 				value.SetMapIndex(key, copy)
 			}
 		}
+	default:
+		// Scalar values never contain opaque JSON; no physical evidence to
+		// restore. Explicitly exclude them from this type-domain traversal.
+		return nil
 	}
 	return nil
 }
