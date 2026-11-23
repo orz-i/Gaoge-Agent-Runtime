@@ -411,6 +411,24 @@ func (coordinator *Coordinator) resolveChild(ctx context.Context, delegation Del
 	if children == nil {
 		return nil, ErrChildUnavailable
 	}
+	// Strict JSON output is a native Agent model contract. Non-native child
+	// routes (including remote shadows) have no proof they can enforce it;
+	// deny before LoadRun/StartRun can dispatch external work. This keeps
+	// protocol-specific capabilities out of this Handoff boundary.
+	if delegation.OutputContract != nil {
+		switch child := children.(type) {
+		case *agent.Runner:
+			if child == nil {
+				return nil, ErrInvalidDelegation
+			}
+		case deferredAgentChild:
+			if child.original == nil {
+				return nil, ErrInvalidDelegation
+			}
+		default:
+			return nil, ErrInvalidDelegation
+		}
+	}
 	return children, nil
 }
 

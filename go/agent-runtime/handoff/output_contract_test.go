@@ -86,3 +86,77 @@ func TestHandoffFreezesAndVerifiesIndependentChildOutputContract(t *testing.T) {
 		t.Fatalf("terminal typed child replayed the Model: err=%v calls=%d", err, modelClient.calls)
 	}
 }
+
+// A non-native child may have performed remote work even when its returned
+// Run snapshot cannot later prove an enforced strict output contract. Prevent
+// dispatch at the existing Handoff child-resolution boundary, not after Send.
+func TestHandoffRejectsUnattestableStrictOutputBeforeRemoteEffects(t *testing.T) {
+	const schema = `{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}`
+	delegation := handoff.Delegation{
+		ID: "strict", MemberID: "remote", MemberRevision: "r1",
+		ChildRunID: "remote-child", Goal: "return typed output", Status: handoff.StatusQueued,
+		OutputContract: &model.OutputContract{Name: "answer", Schema: json.RawMessage(schema)},
+	}
+	parent := verifiedHandoffParent()
+	for _, routed := range []bool{false, true} {
+		t.Run(map[bool]string{true: "routed", false: "static"}[routed], func(t *testing.T) {
+			remote := &unverifiedChildRunner{loadErr: kernel.ErrNotFound}
+			var coordinator *handoff.Coordinator
+			var err error
+			if routed {
+				coordinator, err = handoff.NewRouted(handoff.ChildRunnerResolverFunc(func(context.Context, handoff.Delegation) (handoff.ChildRunner, error) {
+					return remote, nil
+				}))
+			} else {
+				coordinator, err = handoff.New(remote)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result, startErr := coordinator.StartOrLoad(t.Context(), parent, delegation); !errors.Is(startErr, handoff.ErrInvalidDelegation) ||
+				result.ID != "" || remote.starts != 0 {
+				t.Fatalf("unsupported strict child reached external StartRun: result=%+v err=%v starts=%d", result, startErr, remote.starts)
+			}
+			if result, refreshErr := coordinator.Refresh(t.Context(), parent, delegation); !errors.Is(refreshErr, handoff.ErrInvalidDelegation) ||
+				result.ID != "" || remote.starts != 0 {
+				t.Fatalf("unsupported strict child could observe foreign Run: result=%+v err=%v starts=%d", result, refreshErr, remote.starts)
+			}
+		})
+	}
+}
+
+func TestHandoffRoutedNativeAgentRetainsStrictOutput(t *testing.T) {
+	store := memory.NewStore()
+	runtime, err := kernel.New(kernel.Dependencies{Store: store})
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := &deferredStructuredModel{}
+	native, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: provider})
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinator, err := handoff.NewDeferredAgentWithRouting(native, func(handoff.Delegation) (handoff.DelegationRoute, error) {
+		return handoff.DelegationRouteLocal, nil
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	delegation := handoff.Delegation{
+		ID: "strict-routed", MemberID: "local", ChildRunID: "strict-routed-run", Goal: "typed output",
+		Model: "typed-child", Status: handoff.StatusQueued,
+		OutputContract: &model.OutputContract{Name: "named_answer", Schema: json.RawMessage(`{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}`)},
+	}
+	got, startErr := coordinator.StartOrLoad(t.Context(), verifiedHandoffParent(), delegation)
+	if !errors.Is(startErr, handoff.ErrChildPending) || got.Status != handoff.StatusRunning || provider.calls != 0 {
+		t.Fatalf("routed native strict child was denied: status=%s err=%v provider_calls=%d", got.Status, startErr, provider.calls)
+	}
+	persisted, loadErr := runtime.Load(t.Context(), delegation.ChildRunID)
+	if loadErr != nil {
+		t.Fatal(loadErr)
+	}
+	view, viewErr := agent.ViewState(persisted)
+	if viewErr != nil || !reflect.DeepEqual(view.OutputContract, delegation.OutputContract) {
+		t.Fatalf("strict output not frozen: %+v err=%v", view.OutputContract, viewErr)
+	}
+}
