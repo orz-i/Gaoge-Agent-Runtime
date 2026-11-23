@@ -3,6 +3,7 @@ package harness
 import (
 	"context"
 	"errors"
+	"slices"
 
 	interactionadapter "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/interaction"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
@@ -199,7 +200,10 @@ func selectSessionTools(config *ConfigSnapshot, selectedTools []SessionTool, rea
 		if err != nil {
 			return nil, nil, err
 		}
-		if policy.SideEffectLevel == "read" && !selected.Registration.Definition.Terminal {
+		// Exploration may change read arguments to find new evidence, but
+		// cannot classify a Tool requiring per-call Host approval as autonomous.
+		if policy.SideEffectLevel == "read" && policy.ApprovalMode == approvalModeNever &&
+			policy.ApprovalCapability == "" && !selected.Registration.Definition.Terminal {
 			reads = append(reads, policy.Key)
 		}
 		registrations = append(registrations, selected.Registration)
@@ -421,6 +425,15 @@ func (session *SessionClient) preflightAgentSessionResume(ctx context.Context, t
 	}
 	if _, err = normalizeAgentSessionConfig(config); err != nil {
 		return err
+	}
+	// A reopened handle may provide new Tools for FUTURE Turns, but it cannot
+	// run an old checkpoint with changed approval, side-effect, or version
+	// semantics. This includes private member Tool grants, not only root Tools.
+	// Read-only Session operations remain available for safe inspection.
+	if !slices.Equal(config.ToolKeys, session.config.ToolKeys) ||
+		!slices.Equal(config.ToolPolicies, session.config.ToolPolicies) ||
+		!slices.Equal(config.DelegationPolicy.LocalToolGrants, session.config.DelegationPolicy.LocalToolGrants) {
+		return ErrInvalidRequest
 	}
 	if config.SharedBudget != nil && (session.runner.budgets == nil ||
 		config.WorkingStateSummary != nil ||

@@ -51,7 +51,11 @@ version and a Host-declared `SideEffectLevel` of `read` or `write`.
 `ApprovalMode: "never"` uses no approval, while `ApprovalMode: "always"` with
 `ApprovalCapability: "per_call"` pauses the original Kernel Run before the
 Tool effect. The Host responds using `session.ResolveApproval(ctx, turnID, request)`;
-reopened Sessions use the original frozen approval policy, checkpoint and Actor.
+reopened Sessions must use the original frozen Tool keys, definition versions,
+approval/side-effect policies, member grants and Actor. Read-only history remains
+available after configuration drift, but no execution can silently adopt a
+changed Tool policy. A changed Tool definition is also fenced by the Agent's
+original pending catalog fingerprint, rather than reusing an old approval.
 `ExecutionMode` can be blank or `local_dispatch`. The SDK copies definitions
 and schemas; the Host remains responsible for what handlers do.
 
@@ -59,8 +63,10 @@ Set `Context.ReadArtifacts: true` to grant the built-in scoped archive reader.
 Without that grant, in-budget requests can run, but the Session cannot drop
 history that the Agent would be unable to retrieve. This reserved Tool cannot
 be supplied through `LocalTools`. `ExploreReads: true` lets explicitly selected
-nonterminal read/search Tools try different arguments after unproductive calls;
-writes, identical-call limits, hard budgets and approval gates are unchanged.
+nonterminal, approval-free read/search Tools try different arguments after
+unproductive calls. Reads requiring per-call approval never receive this
+exploration exemption; writes, identical-call limits, hard budgets and approval
+gates are unchanged.
 
 The constructor performs no Store writes, transcript reads, model calls or
 window-resolver calls. The resolver measures the actual routed request before
@@ -73,11 +79,17 @@ accounting, not an invented model capacity.
 `Config.Skills` freezes a selected revision and exact content hash, but **does
 not** inline every Skill's Markdown into the model prompt. The Context includes
 only the immutable Skill ID, revision, title, trigger and description. The SDK
-registers `harness.read_skill` to retrieve one selected Skill on demand, with
-Unicode-codepoint pagination (default 4,000, maximum 8,000 per call). Its
-handler verifies the original Run's root Invocation and persisted Config;
-unknown or unselected IDs cannot retrieve content. The original frozen source
-is retained across restart; changing a Skill revision requires a new Turn.
+registers `harness.read_skill` to retrieve one selected Skill on demand. The
+requested Unicode-codepoint limit defaults to 4,000 and is capped at 8,000;
+the **actual returned page is further narrowed** to fit the frozen Context
+`MaxToolResultBytes` policy (default 2,048 bytes, including JSON metadata).
+Use the returned `nextOffset`, not the requested limit, for subsequent reads.
+A large Skill therefore needs no extra permission to read unrelated archived
+Context artifacts. An explicit `offset: 0` is valid; ambiguous duplicate keys,
+unknown fields and numeric overflow are rejected. The handler verifies the
+original Run's root Invocation and persisted Config; unknown or unselected IDs
+cannot retrieve content. The original frozen source survives restart; changing
+a Skill revision requires a new Turn.
 
 For SubAgents, the Host supplies `Relations`, `DelegationPolicy` and
 `Config.DelegationPolicy.MaxDepth > 0`. `OpenAgentSession` registers the existing

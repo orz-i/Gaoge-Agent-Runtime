@@ -345,6 +345,30 @@ func TestAgentSessionMemberOnlyToolsAreNotOfferedToRoot(t *testing.T) {
 	if _, err := harness.OpenAgentSession(withoutPrivateTool); !errors.Is(err, harness.ErrInvalidRequest) {
 		t.Fatalf("member grant without registered Tool was admitted: %v", err)
 	}
+	for _, tc := range []struct {
+		name   string
+		change func(*harness.AgentSessionOptions)
+	}{
+		{"private definition changed", func(o *harness.AgentSessionOptions) { o.MemberTools[0].Policy.DefinitionVersion = "v2" }},
+		{"original member revision changed", func(o *harness.AgentSessionOptions) {
+			o.Session.Config.DelegationPolicy.LocalToolGrants[0].MemberRevision = "v4"
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			updated := options
+			updated.MemberTools = append([]harness.SessionTool(nil), options.MemberTools...)
+			updated.Session.Config = options.Session.Config
+			updated.Session.Config.DelegationPolicy.LocalToolGrants = append([]harness.DelegatedLocalToolGrant(nil), options.Session.Config.DelegationPolicy.LocalToolGrants...)
+			tc.change(&updated)
+			changed, err := harness.OpenAgentSession(updated)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := changed.Resume(t.Context(), "member-1"); !errors.Is(err, harness.ErrInvalidRequest) || calls != 1 {
+				t.Fatalf("changed member Tool policy resumed original physical task: err=%v tools=%d", err, calls)
+			}
+		})
+	}
 }
 
 // No separate child Runner can escape the root's shared Ledger. The standard

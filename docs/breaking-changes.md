@@ -21,7 +21,15 @@ exact per-member-version grants, local same-Runner SubAgent routing, `Cancel`,
 `Retry`, `CancelSubtask`, `ResolveSubtaskApproval` and `GrantCallAllowance`.
 A shared-budget Agent cannot use an unmetered independent ChildRunner. The
 same original Kernel lease/receipt, Harness ledger and Host Actor checks remain
-mandatory. These changes add no new SQL columns or run states; the prior
+mandatory.
+
+Q1 closure also makes the original Tool policy a pre-dispatch Resume/Approval
+binding: matching Tool keys with changed definition version, approval,
+side-effect policy or member grant cannot run the old Attempt. The Agent's
+pending Tool catalog fingerprint separately fences in-place schema/name drift.
+Selected Skills use the frozen Context `MaxToolResultBytes` for actual page size
+and accept explicit zero offsets without granting a general archive reader.
+Approval-gated read Tools cannot join autonomous exploration. These changes add no new SQL columns or run states; the prior
 Harness SQLite Schema v2 and checked PostgreSQL cutover still apply.
 
 ## 2026-11-23 — Agent-only Harness Invocation / unified Session

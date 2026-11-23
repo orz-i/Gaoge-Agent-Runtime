@@ -14,6 +14,10 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
   field rather than adding a second memory subsystem. No new execution
   interpreter, Kernel Run status or retry authority was introduced. Existing
   managed-recovery/summary + shared-budget combinations remain fail-closed.
+  Q1 closure additionally seals reopened Tool policies/grants before physical
+  continuation, excludes approval-required reads from exploration, and bounds
+  `read_skill` output to the original Context tool-result byte limit with exact
+  Unicode pagination and strict, zero-offset-friendly input validation.
 
 - **Agent-only Session/Invocation convergence.** Frozen Skills, per-call Tool
   approval and explicitly Host-authorized SubAgent routing use one standard
