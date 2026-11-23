@@ -228,6 +228,18 @@ func (session *SessionClient) Resume(ctx context.Context, turnID string) (Snapsh
 	return session.verifySnapshot(id, value, resumeErr)
 }
 
+// ResolveApproval resolves an original pending Tool approval in this Session.
+// The frozen Session/Turn/Invocation owner is checked before any physical
+// Agent control. A resumed or reopened handle cannot approve another Actor's Run.
+func (session *SessionClient) ResolveApproval(ctx context.Context, turnID string, request ResolveApprovalRequest) (Snapshot, error) {
+	id, err := session.authorizedTurnID(ctx, turnID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	value, resolveErr := session.runner.ResolveApproval(ctx, id, request)
+	return session.verifySnapshot(id, value, resolveErr)
+}
+
 // authorizedTurnID is the single read/recovery trust boundary for all
 // SessionClient operations. The identity proof must precede any Turn load,
 // projection or native Run continuation; Prompt independently checks ownership

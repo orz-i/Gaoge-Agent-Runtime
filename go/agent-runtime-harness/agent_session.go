@@ -5,8 +5,10 @@ import (
 	"errors"
 	"strings"
 
+	interactionadapter "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/interaction"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/interaction"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
@@ -42,8 +44,8 @@ type SessionTool struct {
 
 // AgentSessionOptions composes a single Agent with bounded Harness Context.
 // The Host owns both Stores, authenticated identity, model binding and transcript.
-// Only explicitly selected, versioned local Tools that do not require approval
-// are supported; use the explicit runners for advanced capabilities.
+// Selected local Tools may request durable per-call approval. The standard
+// Session uses the same Kernel approval checkpoint and Harness Turn policy.
 type AgentSessionOptions struct {
 	Runtime *kernel.Runtime
 	Store   Store
@@ -123,7 +125,8 @@ func selectSessionTools(config *ConfigSnapshot, selectedTools []SessionTool, rea
 		}
 		policy = policies[0]
 		if policy.Key != key || key == ContextArtifactToolKey || key == DelegationToolKey || key == agent.ToolDiscoveryKey ||
-			policy.ApprovalMode != approvalModeNever || policy.ApprovalCapability != "" ||
+			!(policy.ApprovalMode == approvalModeNever && policy.ApprovalCapability == "" ||
+				policy.ApprovalMode == approvalModeAlways && policy.ApprovalCapability == approvalCapabilityPerCall) ||
 			(policy.ExecutionMode != "" && policy.ExecutionMode != "local_dispatch") ||
 			(policy.SideEffectLevel != "read" && policy.SideEffectLevel != "write") {
 			return nil, nil, ErrInvalidRequest
@@ -171,8 +174,13 @@ func openBoundedAgentSession(options AgentSessionOptions, registrations []tools.
 	if err != nil {
 		return nil, err
 	}
+	approvals, err := interaction.New(options.Runtime)
+	if err != nil {
+		return nil, err
+	}
 	dependencies := agent.Dependencies{
 		Runtime: options.Runtime, Model: options.Model, Catalog: registry, Executor: registry,
+		Approvals:     interactionadapter.New(approvals),
 		RunMiddleware: []plugin.RunMiddleware{bounded}, Inputs: options.Inputs,
 		Limits: options.Limits, Execution: options.Execution, RunExecution: options.RunExecution,
 	}
@@ -216,8 +224,13 @@ func openBoundedAgentSession(options AgentSessionOptions, registrations []tools.
 // require a delegation engine; selected delegation Tools and child facts do.
 func normalizeAgentSessionConfig(config ConfigSnapshot) (ConfigSnapshot, error) {
 	if jsoncontract.ValidateCanonicalUTF8(config) != nil || config.MaxModelOutputTokens <= 0 ||
-		len(config.Skills) != 0 || strings.TrimSpace(config.MemoryPolicy) != "" || config.SharedBudget != nil ||
+		strings.TrimSpace(config.MemoryPolicy) != "" || config.SharedBudget != nil ||
 		agent.ValidateWorkingStateSummaryPolicy(config.WorkingStateSummary) != nil {
+		return ConfigSnapshot{}, ErrInvalidRequest
+	}
+	var skillErr error
+	config.Skills, skillErr = normalizeSkillSnapshots(config.Skills)
+	if skillErr != nil {
 		return ConfigSnapshot{}, ErrInvalidRequest
 	}
 	config.WorkingStateSummary = agent.CloneWorkingStateSummaryPolicy(config.WorkingStateSummary)
@@ -235,8 +248,12 @@ func normalizeAgentSessionConfig(config ConfigSnapshot) (ConfigSnapshot, error) 
 		selected[key] = true
 	}
 	for _, policy := range policies {
-		if !selected[policy.Key] || !strings.EqualFold(policy.ApprovalMode, approvalModeNever) ||
+		if !selected[policy.Key] ||
 			(policy.ExecutionMode != "" && policy.ExecutionMode != "local_dispatch") {
+			return ConfigSnapshot{}, ErrInvalidRequest
+		}
+		if _, err := frozenApprovalRequirement(config, policy.Key); err != nil ||
+			(policy.ApprovalMode == approvalModeNever && policy.ApprovalCapability != "" && policy.Key != ContextArtifactToolKey) {
 			return ConfigSnapshot{}, ErrInvalidRequest
 		}
 		if policy.Key == ContextArtifactToolKey && policy != ContextArtifactToolPolicySnapshot() {
@@ -312,7 +329,7 @@ func (session *SessionClient) preflightAgentSessionResume(ctx context.Context, t
 		if item.TurnID != turnID {
 			return ErrConflict
 		}
-		if item.Kind == ItemDelegation || item.Kind == ItemSubtask || item.Kind == ItemApproval ||
+		if item.Kind == ItemDelegation || item.Kind == ItemSubtask ||
 			item.Kind == ItemInteraction || item.Kind == ItemBudget {
 			return ErrInvalidRequest
 		}

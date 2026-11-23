@@ -430,7 +430,7 @@ func (runner *Runner) contextOpenRequest(
 	seed *ContextSeed,
 	active *runtimecontext.Checkpoint,
 ) (runtimecontext.OpenRequest, error) {
-	instructions := strings.TrimSpace(strings.Join([]string{config.Instructions, seed.Instructions}, "\n\n"))
+	instructions := selectedContextInstructions(config, seed.Instructions)
 	if seed.SourceDelta {
 		base, err := runner.loadContextDeltaBase(ctx, scopeID, staticFingerprint, seed.BaseCheckpointID)
 		if err != nil {

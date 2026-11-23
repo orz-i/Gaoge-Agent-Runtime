@@ -261,6 +261,18 @@ func ReplaceContextCheckpoint(ctx context.Context, expectedCheckpointID string, 
 	return nil
 }
 
+// selectedContextInstructions is the single immutable model-visible projection
+// of Host-selected Skills. Selection and content were already sealed in the
+// ConfigSnapshot; neither a model response nor a resume can load new Skills.
+func selectedContextInstructions(config ConfigSnapshot, seedInstructions string) string {
+	parts := []string{config.Instructions}
+	for _, skill := range config.Skills {
+		parts = append(parts, "Selected skill: "+skill.Title+" ("+skill.ID+")\n"+skill.Markdown)
+	}
+	parts = append(parts, seedInstructions)
+	return strings.TrimSpace(strings.Join(parts, "\n\n"))
+}
+
 func contextStaticFingerprint(config ConfigSnapshot, seed *ContextSeed, catalog tools.Catalog) (string, error) {
 	if seed == nil {
 		return "", ErrInvalidRequest
@@ -279,7 +291,7 @@ func contextStaticFingerprint(config ConfigSnapshot, seed *ContextSeed, catalog 
 		MemoryPolicy   string                   `json:"memoryPolicy,omitempty"`
 	}{
 		Environment:  config.Environment,
-		Instructions: strings.TrimSpace(strings.Join([]string{config.Instructions, seed.Instructions}, "\n\n")),
+		Instructions: selectedContextInstructions(config, seed.Instructions),
 		Model:        strings.TrimSpace(config.Model), OutputContract: model.CloneOutputContract(config.OutputContract), Tools: definitions,
 		Skills:       append([]SkillSnapshot(nil), config.Skills...),
 		MemoryPolicy: strings.TrimSpace(config.MemoryPolicy),

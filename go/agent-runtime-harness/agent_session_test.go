@@ -523,14 +523,7 @@ func TestAgentSessionResumeRejectsOriginalUnsupportedCompositionBeforeGeneration
 	}{
 		{"legacy unbounded output", func(c *harness.ConfigSnapshot) { c.MaxModelOutputTokens = 0 }},
 		{"shared budget", func(c *harness.ConfigSnapshot) { c.SharedBudget = &budget.Limits{MaxLLMCalls: 2} }},
-		{"skills", func(c *harness.ConfigSnapshot) {
-			c.Skills = []harness.SkillSnapshot{{ID: "host-skill", Revision: 1, Title: "Skill", Markdown: "Host-selected instructions"}}
-		}},
 		{"memory", func(c *harness.ConfigSnapshot) { c.MemoryPolicy = "host-memory" }},
-		{"approval", func(c *harness.ConfigSnapshot) {
-			c.ToolKeys = []string{"lookup"}
-			c.ToolPolicies = []harness.ToolPolicySnapshot{{Key: "lookup", DefinitionVersion: "v1", ApprovalMode: "always", ApprovalCapability: "per_call"}}
-		}},
 		{"hosted execution", func(c *harness.ConfigSnapshot) {
 			c.ToolKeys = []string{"lookup"}
 			c.ToolPolicies = []harness.ToolPolicySnapshot{{Key: "lookup", DefinitionVersion: "v1", ApprovalMode: "never", ExecutionMode: "provider_hosted"}}
