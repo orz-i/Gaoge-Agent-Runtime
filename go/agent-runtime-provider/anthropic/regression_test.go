@@ -89,6 +89,10 @@ func TestForcedToolChoiceIsRejectedBeforeRequestOnUnsupportedModels(t *testing.T
 }
 
 func TestThinkingSSERecoveryAcrossRealAgentRun(t *testing.T) {
+	// Anthropic's signed SSE adapter normalizes the completed Tool block and
+	// signed replay together before handing either to the Agent loop.
+	const originalArguments = `{"html":"<>&","n":1}`
+	const adapterArguments = `{"html":"\u003c\u003e\u0026","n":1}`
 	attempts := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		attempts++
@@ -119,7 +123,7 @@ func TestThinkingSSERecoveryAcrossRealAgentRun(t *testing.T) {
 			emit("content_block_stop", `{"type":"content_block_stop","index":0}`)
 			emit("future_optional_event", `{"type":"future_optional_event","metadata":"ignored"}`)
 			emit("content_block_start", `{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu-1","name":"lookup","input":{}}}`)
-			emit("content_block_delta", `{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"x\":1}"}}`)
+			emit("content_block_delta", fmt.Sprintf(`{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":%q}}`, originalArguments))
 			emit("content_block_stop", `{"type":"content_block_stop","index":1}`)
 			emit("message_delta", `{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":7}}`)
 		} else {
@@ -138,6 +142,9 @@ func TestThinkingSSERecoveryAcrossRealAgentRun(t *testing.T) {
 	registry, err := tools.NewRegistry([]tools.Registration{{
 		Definition: definition,
 		Handler: tools.HandlerFunc(func(_ context.Context, call tools.ExecutionRequest) (tools.ExecutionResult, error) {
+			if string(call.Call.Arguments) != adapterArguments {
+				t.Fatalf("signed Anthropic Tool/Replay identity changed after durable State: %s", call.Call.Arguments)
+			}
 			return tools.ExecutionResult{Content: json.RawMessage(`{"ok":true}`), Receipt: tools.Receipt{ExecutionID: call.Call.ID, Disposition: "committed"}}, nil
 		}),
 	}})

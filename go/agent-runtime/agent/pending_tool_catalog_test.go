@@ -110,7 +110,7 @@ func TestPendingToolCatalogRechecksAfterApprovalPolicy(t *testing.T) {
 	}
 }
 
-func TestPendingToolCatalogMissingProofPreservesOnlyLegacyZeroCeilingState(t *testing.T) {
+func TestPendingToolCatalogMissingProofRejectsEveryCeiling(t *testing.T) {
 	for _, ceiling := range []int64{0, 128} {
 		base := memory.NewStore()
 		fault := &modelInvocationFaultStore{Store: base, eventType: "tool.batch_requested", afterCommit: true}
@@ -136,16 +136,13 @@ func TestPendingToolCatalogMissingProofPreservesOnlyLegacyZeroCeilingState(t *te
 			t.Fatal(err)
 		}
 		_, err = agent.ViewState(pending)
-		if ceiling == 0 && err != nil {
-			t.Fatalf("legacy unproven zero-ceiling state became unreadable: %v", err)
-		}
-		if ceiling > 0 && !errors.Is(err, agent.ErrInvalidRequest) {
-			t.Fatalf("bounded batch downgraded to unproven legacy state: %v", err)
+		if !errors.Is(err, agent.ErrInvalidRequest) {
+			t.Fatalf("missing original Tool Catalog proof was accepted at ceiling=%d: %v", ceiling, err)
 		}
 	}
 }
 
-func TestPendingToolCatalogLegacyZeroCeilingApprovalStillResumes(t *testing.T) {
+func TestPendingToolCatalogMissingProofCannotAuthorizeOldApproval(t *testing.T) {
 	runner, runtime, approvals, waiting, executions := newApprovalRecoveryRun(t)
 	legacy := approvalStateEdit(t, waiting.State, func(fields map[string]json.RawMessage) {
 		delete(fields, "pendingToolCatalog")
@@ -161,7 +158,7 @@ func TestPendingToolCatalogLegacyZeroCeilingApprovalStillResumes(t *testing.T) {
 		t.Fatal(err)
 	}
 	done, err := runner.Resume(t.Context(), admitted.Run.ID, admitted.Run.Revision)
-	if err != nil || done.Run.Status != kernel.RunStatusCompleted || *executions != 1 {
-		t.Fatalf("legacy zero-ceiling approval recovery changed: %v tools=%d status=%s", err, *executions, done.Run.Status)
+	if !errors.Is(err, agent.ErrInvalidRequest) || *executions != 0 {
+		t.Fatalf("unsealed zero-ceiling approval created a Tool effect: %v tools=%d status=%s", err, *executions, done.Run.Status)
 	}
 }

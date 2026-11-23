@@ -5,15 +5,19 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
-- **Checkpoint opaque-evidence fidelity:** The shared PostgreSQL/SQLite Harness
-  Store now preserves exact Tool-call argument and Provider Replay bytes through
-  Checkpoint Put/Get/reopen, including HTML, whitespace, key order, escaped
-  strings and lossless numbers. A single versioned private payload carries raw
-  evidence without transforming it through `json.Marshal`; corrupt/mismatched
-  provenance is rejected, and identical Checkpoints can be replayed idempotently.
-  Memory retains its existing byte-preserving clone. The public Context hash,
-  Agent execution/approval/receipt authority and Artifact canonicalization do
-  not change. No historical data migration is provided for this pre-stable cut.
+- **Checkpoint and native Agent original evidence fidelity (PR #149):** The
+  shared PostgreSQL/SQLite Harness Store preserves exact Tool-call argument and
+  Provider Replay bytes through Checkpoint Put/Get/reopen. The native Agent's
+  single Run-State encoder now also retains all original nested RawMessage
+  fields that JSON serialization would rewrite; the `agent-state-opaque-v1`
+  private seal binds each original field/position to the durable typed State.
+  OpenAI stateless reasoning survives a real approval/restart/Tool/Provider
+  continuation; Anthropic signed Tool replay remains valid. Memory/PG/SQLite
+  original Checkpoints reject changed/missing evidence and same-ID conflicting
+  replay; no second execution path or relaxed Provider verifier is introduced.
+  The public Context hash, Kernel CAS and Artifact canonicalization do not
+  change. With no historical data, there is no old Agent State or Harness
+  Checkpoint compatibility decoder; prior in-flight Runs must not be reused.
 
 - **Named Agent full capability composition (PR #146, after #148 main merge):**
   `OpenAgentSession` now accepts a finite Host-authorized `NamedAgents` roster.

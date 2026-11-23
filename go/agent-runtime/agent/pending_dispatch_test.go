@@ -17,7 +17,7 @@ func TestFrozenPendingDispatchReadsOriginalCallWithoutGrantingReplay(t *testing.
 		PendingCalls:   []tools.Call{{ID: "delegate-1", ToolKey: "harness.delegate_agent", Arguments: json.RawMessage(arguments)}},
 		ToolDispatchID: "delegate-1",
 	}
-	raw, err := json.Marshal(state)
+	raw, err := encodeState(state)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +41,7 @@ func TestFrozenPendingDispatchReadsOriginalCallWithoutGrantingReplay(t *testing.
 		t.Fatalf("foreign RunKind authorized a Tool: %v %v", found, err)
 	}
 	state.ToolDispatchID = "unrelated"
-	snapshot.State, err = json.Marshal(state)
+	snapshot.State, err = encodeState(state)
 	if err != nil {
 		t.Fatal(err)
 	}

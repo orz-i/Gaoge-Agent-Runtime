@@ -2841,16 +2841,12 @@ func cloneRawJSON(value json.RawMessage) json.RawMessage {
 }
 
 func encodeState(state runState) (json.RawMessage, error) {
-	encoded, err := json.Marshal(state)
-	if err != nil {
-		return nil, errors.Join(ErrInvalidRequest, err)
-	}
-	return encoded, nil
+	return encodeOriginalRunState(state)
 }
 
 func decodeState(encoded json.RawMessage) (runState, error) {
-	var state runState
-	if err := json.Unmarshal(encoded, &state); err != nil {
+	state, err := decodeOriginalRunState(encoded)
+	if err != nil {
 		return runState{}, errors.Join(ErrInvalidRequest, err)
 	}
 	if !validFrozenToolProgressPolicy(state) {

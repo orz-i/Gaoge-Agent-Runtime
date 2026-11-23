@@ -49,8 +49,8 @@ func newApprovalRecoveryRun(t *testing.T) (*agent.Runner, *kernel.Runtime, *inte
 	return runner, runtime, approvals, waiting, executions
 }
 
-// A pre-upgrade checkpoint without a persisted Tool approval binding must
-// NEVER authorize a Tool even if its resolved payload matches the pending call.
+// Removing the original approval binding also breaks the sealed State. The
+// native reader must fail closed before an already-granted Tool can execute.
 func TestDeferredApprovalMissingBindingCannotRecoverGrantedTool(t *testing.T) {
 	runner, runtime, approvals, waiting, executions := newApprovalRecoveryRun(t)
 	legacyState := approvalStateEdit(t, waiting.State, func(state map[string]json.RawMessage) {
@@ -67,9 +67,8 @@ func TestDeferredApprovalMissingBindingCannotRecoverGrantedTool(t *testing.T) {
 		t.Fatal(err)
 	}
 	done, err := runner.Resume(t.Context(), running.Run.ID, running.Run.Revision)
-	if err != nil || done.Run.Status != kernel.RunStatusWaitingInput || *executions != 0 ||
-		done.Checkpoint == nil || done.Checkpoint.Status != kernel.CheckpointPending {
-		t.Fatalf("missing binding authorized Tool instead of failing closed: %+v, checkpoint=%+v executions=%d err=%v",
+	if !errors.Is(err, agent.ErrInvalidRequest) || *executions != 0 {
+		t.Fatalf("missing binding escaped original State seal or executed Tool: %+v, checkpoint=%+v executions=%d err=%v",
 			done.Run, done.Checkpoint, *executions, err)
 	}
 }
@@ -133,6 +132,12 @@ func TestDeferredApprovalRejectsMismatchedOrRejectedGrant(t *testing.T) {
 				t.Fatal(err)
 			}
 			result, err := runner.Resume(t.Context(), running.Run.ID, running.Run.Revision)
+			if testcase == "call-changed" {
+				if !errors.Is(err, agent.ErrInvalidRequest) || *executions != 0 {
+					t.Fatalf("changed original Tool passed State binding: %+v toolCalls=%d err=%v", result.Run, *executions, err)
+				}
+				return
+			}
 			if !errors.Is(err, agent.ErrApprovalRequired) || result.Run.Status != kernel.RunStatusFailed || *executions != 0 {
 				t.Fatalf("%s unexpectedly authorized tool: run=%+v executions=%d err=%v",
 					testcase, result.Run, *executions, err)
@@ -185,12 +190,12 @@ func TestDeferredApprovalMissingBindingCannotBeReused(t *testing.T) {
 		t.Fatal(err)
 	}
 	next, err := runner.Resume(t.Context(), running.Run.ID, running.Run.Revision)
-	if err != nil || next.Run.Status != kernel.RunStatusWaitingInput || *executions != 0 {
-		t.Fatalf("stale legacy grant reused: run=%+v executions=%d err=%v", next.Run, *executions, err)
+	if !errors.Is(err, agent.ErrInvalidRequest) || *executions != 0 {
+		t.Fatalf("stale unsealed grant reused: run=%+v executions=%d err=%v", next.Run, *executions, err)
 	}
 }
 
-// Inject a trusted pre-upgrade checkpoint fixture through the fenced control
+// Inject a deliberately damaged checkpoint fixture through the fenced control
 // seam; a public unbound Apply must not bypass native execution authority.
 func seedApprovalRecoveryFixture(ctx context.Context, rt *kernel.Runtime, source kernel.Snapshot, m kernel.Mutation) (kernel.Snapshot, error) {
 	proof := featurecontrol.Seal(source.Run.ID, source.Run.Revision, string(kernel.ControlApproval), source.Checkpoint.ID, m.State, m.Checkpoint)

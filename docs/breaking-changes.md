@@ -1,5 +1,24 @@
 # Breaking changes (pre-stable Beta)
 
+## PR #149 — Checkpoint and native Agent State physical evidence hard cut
+
+`agent.Runner` now seals the original Tool/Provider JSON RawMessage bytes at its
+single `runState` persistence boundary. The private `_originalStateEvidence`
+field (`agent-state-opaque-v1`) binds bytes to their exact original nested
+field positions and typed State digest. A missing or contradictory seal is
+not an authority for Agent Model/Tool resume. The PostgreSQL/SQLite Harness
+Checkpoint payload similarly uses `checkpoint-opaque-v1` to retain raw evidence
+that ordinary JSON serialization would silently rewrite.
+
+This is a pre-stable **persisted payload** breaking change, not a new Runtime
+execution or permission protocol. There is no history to migrate: use fresh
+Kernel and Harness state, and never mix old/new binary workers for the same
+pending Run. No fallback to unsealed old State, no replay-data guessing and no
+loosening of Provider signed reasoning/Tool argument verification. Existing
+Kernel lease/CAS, original execution receipts, cancellation and budget grants
+remain authoritative. Artifact JSON keeps its already-defined canonical
+content protocol.
+
 ## PR #146 — Named Agent capability selection and child Skill isolation
 
 The recommended `OpenAgentSession` now supports a finite
