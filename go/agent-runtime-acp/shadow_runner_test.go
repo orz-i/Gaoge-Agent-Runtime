@@ -17,8 +17,11 @@ import (
 type fakeClient struct {
 	mu                      sync.Mutex
 	opens, prompts, cancels int
+	abandons                int
 	openErr, promptErr      error
 	stop                    string
+	openStarted             chan struct{}
+	openRelease             chan struct{}
 	started                 chan struct{}
 	release                 chan struct{}
 	cancelStarted           chan struct{}
@@ -29,11 +32,23 @@ func (f *fakeClient) OpenSession(context.Context, string, string) (string, error
 	f.mu.Lock()
 	f.opens++
 	err := f.openErr
+	started, release := f.openStarted, f.openRelease
 	f.mu.Unlock()
+	if started != nil {
+		close(started)
+	}
+	if release != nil {
+		<-release
+	}
 	if err != nil {
 		return "", err
 	}
 	return "session-1", nil
+}
+func (f *fakeClient) AbandonRun(string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.abandons++
 }
 func (f *fakeClient) Prompt(_ context.Context, runID, sessionID, goal string, onChunk func(string) error) (string, error) {
 	f.mu.Lock()

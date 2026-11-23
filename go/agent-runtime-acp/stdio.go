@@ -223,6 +223,22 @@ func (c *StdioClient) requireRun(runID, sessionID string) (*stdioRun, error) {
 	}
 	return run, nil
 }
+
+// AbandonRun releases a locally owned ACP subprocess when the Kernel denies
+// a delayed session/new result. It does not send a new prompt or cancel RPC;
+// the original remote effect remains outcome-unknown in durable evidence.
+func (c *StdioClient) AbandonRun(id string) {
+	if c == nil || id == "" {
+		return
+	}
+	c.mu.Lock()
+	run := c.runs[id]
+	c.mu.Unlock()
+	if run != nil {
+		c.closeRun(id, run)
+	}
+}
+
 func (c *StdioClient) closeRun(id string, run *stdioRun) {
 	c.mu.Lock()
 	if c.runs[id] == run {

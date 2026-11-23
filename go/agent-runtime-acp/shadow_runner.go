@@ -168,6 +168,13 @@ func (r *ShadowRunner) StartRun(ctx context.Context, req agent.StartRequest) (ke
 	snap, err = r.apply(ctx, snap, state, kernel.Mutation{Status: kernel.RunStatusRunning,
 		Events: []kernel.EventDraft{{Type: "acp.remote_session", Message: "ACP session identity frozen"}}})
 	if err != nil {
+		// Cancellation may have won while session/new was in flight.
+		// Its committed CAS denies this original Start's later Prompt.
+		// Stdio runs may now release their local process without sending
+		// another protocol effect or pretending the remote session vanished.
+		if abandoned, ok := r.binding.Client.(interface{ AbandonRun(string) }); ok {
+			abandoned.AbandonRun(id)
+		}
 		return snap, errors.Join(ErrOutcomeUnknown, err)
 	}
 	// The prompt is the second physical effect. Its admission must be durable
@@ -316,14 +323,21 @@ func (r *ShadowRunner) CancelRun(ctx context.Context, id string, expectedRevisio
 	// notification, not a no-effect or terminal receipt. Both physical
 	// callbacks must durably return before a terminal Prompt can be signed.
 	// Earlier cancelled session admission fences a later Prompt CAS.
-	if state.SessionID == "" || state.CancelPending {
+	if state.CancelPending {
 		return snap, ErrOutcomeUnknown
 	}
+	// Even before session/new returns a SessionID, the original cancellation
+	// must win a durable CAS. Otherwise the delayed OpenSession callback
+	// could initiate Prompt *after* cancellation had already returned.
+	noSession := state.SessionID == ""
 	state.CancelPending = true
 	snap, err = r.apply(ctx, snap, state, kernel.Mutation{Status: kernel.RunStatusRunning,
 		Events: []kernel.EventDraft{{Type: "acp.remote_cancel_intent", Message: "ACP cancel admitted"}}})
 	if err != nil {
 		return snap, err
+	}
+	if noSession {
+		return snap, ErrOutcomeUnknown // no remote cancel RPC can yet be addressed
 	}
 	sendErr := r.binding.Client.CancelSession(ctx, id, state.SessionID)
 	// The SDK cancel notification only acknowledges transport send, not
