@@ -39,7 +39,7 @@ func rootOutputOwnedNativeFixture(t *testing.T) (*Runner, *MemoryStore, Turn, In
 	if _, _, err = store.CreateTurn(t.Context(), turn); err != nil {
 		t.Fatal(err)
 	}
-	root, err := newAgentInvocation(turnID, "native-owned", "answer", actor, thread, nil, nil, now)
+	root, err := newAgentInvocation(turnID, "native-owned", "answer", actor, thread, nil, nil, nil, nil, now)
 	if err != nil {
 		t.Fatal(err)
 	}

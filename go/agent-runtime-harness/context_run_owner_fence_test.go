@@ -49,7 +49,7 @@ func TestIndependentContextMiddlewareRebindsForeignRunToItsOwnDurableTurn(t *tes
 	}
 	foreignInvocation, err := newAgentInvocation(foreignTurn.ID, "foreign-context-run-request", "foreign private goal",
 		kernel.ActorRef{TenantID: "other-tenant", ActorID: "other-actor"},
-		kernel.ThreadRef{Kind: "conversation", ID: "other-thread"}, nil, nil, now.Add(2*time.Second))
+		kernel.ThreadRef{Kind: "conversation", ID: "other-thread"}, nil, nil, nil, nil, now.Add(2*time.Second))
 	if err != nil {
 		t.Fatal(err)
 	}

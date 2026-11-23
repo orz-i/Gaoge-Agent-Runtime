@@ -715,7 +715,8 @@ func (runner *Runner) StartAgentTurn(ctx context.Context, request StartRequest) 
 	request, createdTurn, config := envelope.request, envelope.turn, envelope.config
 	invocation, err := newAgentInvocation(
 		createdTurn.ID, firstNonEmpty(strings.TrimSpace(request.RequestID), createdTurn.ID), request.Goal,
-		request.Actor, request.Thread, request.RequiredToolKeys, request.InitialToolKeys, envelope.now,
+		request.Actor, request.Thread, request.RequiredToolKeys, request.InitialToolKeys,
+		request.CallAllowance, request.AutoAllowance, envelope.now,
 	)
 	if err != nil {
 		return Snapshot{}, err

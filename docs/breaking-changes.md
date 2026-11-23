@@ -19,6 +19,9 @@ hard cut. Root Hosted Tools require original explicit version grants and a
 matching provider-owned catalog; Named Agents may request independent strict
 JSON Schema output only when their selected Model positively attests support.
 Cancellation, approval, budget and physical receipt authorization are unchanged.
+The separate per-Invocation `CallAllowance` and `AutoAllowance` are bound to
+its original immutable Invocation input and reused by RetryInvocation; absent
+spending grants must not be inferred from a newly selected Host configuration.
 
 ## PR #149 — Checkpoint and native Agent State physical evidence hard cut
 

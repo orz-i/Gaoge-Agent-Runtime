@@ -53,7 +53,7 @@ func TestSummaryOriginAuthorizesScopeAndOwnerBeforeNativeRead(t *testing.T) {
 			if _, _, err := store.CreateTurn(t.Context(), turn); err != nil {
 				t.Fatal(err)
 			}
-			root, err := newAgentInvocation(turnID, hostTurn.ID, "original goal", actor, thread, nil, nil, now)
+			root, err := newAgentInvocation(turnID, hostTurn.ID, "original goal", actor, thread, nil, nil, nil, nil, now)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -10,7 +10,9 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
   Hosted Tool grant, Skill and limits bundle for Root and named child Agents.
   `ConfigSnapshot` and `NamedAgentSnapshot` embed the same type; separate
   duplicated member normalization and request constructors are removed.
-  Root first Start and Retry use the same frozen Spec mapping; Named Agents
+  Root first Start and Retry use the same frozen Spec mapping, while the
+  original Invocation InputHash additionally seals per-Run CallAllowance and
+  AutoAllowance so retry cannot silently widen spending authority. Named Agents
   can now enforce independent provider-backed structured output, and Root
   supports versioned native Hosted Tool grants. The existing Handoff carries
   and verifies the child output schema without inventing another agent loop.

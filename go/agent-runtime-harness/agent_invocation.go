@@ -306,6 +306,10 @@ func (runner *Runner) startInvocationAttempt(
 		}
 		start := rootAgentStartRequest(config, invocation.ExecutionRefID, actor, thread,
 			requestID, input.Goal, input.InitialToolKeys, input.RequiredToolKeys)
+		// The original invocation's admission hash already bound these
+		// per-run spending grants; without freezing them in Invocation Input,
+		// retry silently changes bounded execution into unbounded execution.
+		start.CallAllowance, start.AutoAllowance = input.CallAllowance, input.AutoAllowance
 		return runner.agent.StartRun(physicalCtx, start)
 	})
 }
