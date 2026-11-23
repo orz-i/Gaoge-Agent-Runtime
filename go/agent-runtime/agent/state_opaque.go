@@ -131,14 +131,16 @@ func sealOriginalState(canonical []byte, fields []originalStateRawField) (origin
 	if err != nil {
 		return originalStateEvidence{}, err
 	}
-	content := make([]byte, 0, len(originalStateEvidenceVersion)+len(canonical)+len(encoded)+2)
-	content = append(content, originalStateEvidenceVersion...)
-	content = append(content, 0)
-	content = append(content, canonical...)
-	content = append(content, 0)
-	content = append(content, encoded...)
-	sum := sha256.Sum256(content)
-	return originalStateEvidence{Version: originalStateEvidenceVersion, Fields: fields, Digest: hex.EncodeToString(sum[:])}, nil
+	// Hash the exact same framed bytes incrementally. A combined-size
+	// allocation can overflow for large original Run histories and needlessly
+	// duplicate all already allocated State/sidecar bytes in memory.
+	h := sha256.New()
+	_, _ = h.Write([]byte(originalStateEvidenceVersion))
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write(canonical)
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write(encoded)
+	return originalStateEvidence{Version: originalStateEvidenceVersion, Fields: fields, Digest: hex.EncodeToString(h.Sum(nil))}, nil
 }
 
 // walkStateRaw walks the *actual* typed Run state, not a JSON-value copy which

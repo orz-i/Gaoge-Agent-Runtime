@@ -2,6 +2,8 @@ package agent
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"reflect"
@@ -177,4 +179,27 @@ func FuzzAgentOriginalEvidenceStateRoundTrip(f *testing.F) {
 			t.Fatalf("original physical bytes changed on Run State replay: err=%v input=%q", err, raw)
 		}
 	})
+}
+
+// The streaming SHA-256 computation must preserve the already frozen private
+// State-evidence protocol digest exactly; only the overflow-prone combined
+// allocation is retired.
+func TestOriginalStateEvidenceStreamingHashMatchesFrozenFrame(t *testing.T) {
+	canonical := []byte(`{"state":"<>&","steps":12}`)
+	fields := []originalStateRawField{{Path: ".Messages[0].ToolCalls[0].Arguments", Raw: []byte(`{ "html": "<>&" }`)}}
+	actual, err := sealOriginalState(canonical, fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	framed := append([]byte(originalStateEvidenceVersion+"\x00"), canonical...)
+	framed = append(framed, 0)
+	framed = append(framed, encoded...)
+	original := sha256.Sum256(framed)
+	if actual.Digest != hex.EncodeToString(original[:]) {
+		t.Fatalf("streaming State signature changed the original byte frame: got=%s want=%x", actual.Digest, original)
+	}
 }
