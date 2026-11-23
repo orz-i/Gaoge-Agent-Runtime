@@ -109,7 +109,7 @@ func assertTrustedHarnessStoreOwners(t *testing.T, store harness.Store, prefix s
 	if err != nil {
 		t.Fatal(err)
 	}
-	config, err := harness.SealConfigSnapshot(tid, harness.ConfigSnapshot{Model: "fixture"}, now)
+	config, err := harness.SealConfigSnapshot(tid, harness.ConfigSnapshot{AgentSpec: harness.AgentSpec{Model: "fixture"}}, now)
 	if err != nil {
 		t.Fatal(err)
 	}

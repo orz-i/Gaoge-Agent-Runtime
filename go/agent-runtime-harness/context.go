@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
@@ -301,12 +303,14 @@ func contextStaticFingerprint(config ConfigSnapshot, seed *ContextSeed, catalog 
 		Instructions   string                   `json:"instructions"`
 		Model          string                   `json:"model"`
 		OutputContract *model.OutputContract    `json:"outputContract,omitempty"`
+		HostedGrants   []agent.HostedToolGrant  `json:"hostedToolGrants,omitempty"`
 		Tools          []contextToolFingerprint `json:"tools"`
 		Skills         []SkillSnapshot          `json:"skills"`
 	}{
 		Environment:  config.Environment,
 		Instructions: selectedContextInstructions(config, seed.Instructions),
-		Model:        strings.TrimSpace(config.Model), OutputContract: model.CloneOutputContract(config.OutputContract), Tools: definitions,
+		Model:        strings.TrimSpace(config.Model), OutputContract: model.CloneOutputContract(config.OutputContract),
+		HostedGrants: slices.Clone(config.HostedToolGrants), Tools: definitions,
 		Skills: append([]SkillSnapshot(nil), config.Skills...),
 	})
 	if err != nil {

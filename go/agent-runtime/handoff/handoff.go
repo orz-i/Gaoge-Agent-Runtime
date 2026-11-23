@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"slices"
 	"strings"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 )
 
 // RemoteAgentRunKind is the A2A remote-Agent shadow RunKind. Handoff may
@@ -81,6 +83,7 @@ type Delegation struct {
 	Goal                 string                  `json:"goal"`
 	Model                string                  `json:"model,omitempty"`
 	ModelOptions         json.RawMessage         `json:"modelOptions,omitempty"`
+	OutputContract       *model.OutputContract   `json:"outputContract,omitempty"`
 	MaxModelOutputTokens int64                   `json:"maxModelOutputTokens,omitempty"`
 	ToolKeys             []string                `json:"toolKeys,omitempty"`
 	InitialToolKeys      []string                `json:"initialToolKeys,omitempty"`
@@ -298,6 +301,7 @@ func (coordinator *Coordinator) StartOrLoad(
 		Limits:               delegation.Limits,
 		Model:                delegation.Model,
 		ModelOptions:         append(json.RawMessage(nil), delegation.ModelOptions...),
+		OutputContract:       model.CloneOutputContract(delegation.OutputContract),
 		MaxModelOutputTokens: delegation.MaxModelOutputTokens,
 		ToolKeys:             append([]string(nil), delegation.ToolKeys...),
 		InitialToolKeys:      append([]string(nil), delegation.InitialToolKeys...),
@@ -360,12 +364,15 @@ func VerifiedChildRun(delegation Delegation, parent kernel.Run, child kernel.Sna
 		(child.Run.Kind != agent.RunKind && child.Run.Kind != RemoteAgentRunKind) {
 		return false
 	}
-	if child.Run.Kind == RemoteAgentRunKind && delegation.MaxModelOutputTokens != 0 {
-		return false // The remote protocol cannot attest a sampling ceiling.
+	if child.Run.Kind == RemoteAgentRunKind &&
+		(delegation.MaxModelOutputTokens != 0 || delegation.OutputContract != nil) {
+		return false // Remote protocol cannot attest local sampling or structured output.
 	}
-	if delegation.MaxModelOutputTokens > 0 && child.Run.Kind == agent.RunKind {
+	if child.Run.Kind == agent.RunKind &&
+		(delegation.MaxModelOutputTokens > 0 || delegation.OutputContract != nil) {
 		view, err := agent.ViewState(child)
-		if err != nil || view.MaxModelOutputTokens != delegation.MaxModelOutputTokens {
+		if err != nil || delegation.MaxModelOutputTokens > 0 && view.MaxModelOutputTokens != delegation.MaxModelOutputTokens ||
+			!reflect.DeepEqual(view.OutputContract, delegation.OutputContract) {
 			return false
 		}
 	}
@@ -539,7 +546,7 @@ func joinStateError(join Join) error {
 func validDelegation(delegation Delegation) bool {
 	validStatus := delegation.Status == StatusQueued || delegation.Status == StatusRunning ||
 		delegation.Status == StatusCompleted || delegation.Status == StatusFailed || delegation.Status == StatusCancelled
-	if delegation.MaxModelOutputTokens < 0 || strings.TrimSpace(delegation.ID) == "" || strings.TrimSpace(delegation.MemberID) == "" ||
+	if delegation.MaxModelOutputTokens < 0 || model.ValidateOutputContract(delegation.OutputContract) != nil || strings.TrimSpace(delegation.ID) == "" || strings.TrimSpace(delegation.MemberID) == "" ||
 		strings.TrimSpace(delegation.ChildRunID) == "" || strings.TrimSpace(delegation.Goal) == "" || !validStatus {
 		return false
 	}
@@ -572,6 +579,7 @@ func cloneDelegation(delegation Delegation) Delegation {
 		delegation.SubtreeLimits = &copy
 	}
 	delegation.ModelOptions = append(json.RawMessage(nil), delegation.ModelOptions...)
+	delegation.OutputContract = model.CloneOutputContract(delegation.OutputContract)
 	delegation.ToolKeys = append([]string(nil), delegation.ToolKeys...)
 	delegation.InitialToolKeys = append([]string(nil), delegation.InitialToolKeys...)
 	delegation.HostedToolGrants = append([]agent.HostedToolGrant(nil), delegation.HostedToolGrants...)

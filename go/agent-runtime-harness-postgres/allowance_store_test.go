@@ -22,9 +22,7 @@ func TestPausedAllowanceLifecyclePersistsAcrossHarnessStoreReload(t *testing.T) 
 	if _, fresh, err := store.CreateSession(t.Context(), session); err != nil || !fresh {
 		t.Fatalf("session fresh=%v err=%v", fresh, err)
 	}
-	config, err := harness.SealConfigSnapshot("turn-paused", harness.ConfigSnapshot{
-		Model: "model",
-	}, now)
+	config, err := harness.SealConfigSnapshot("turn-paused", harness.ConfigSnapshot{AgentSpec: harness.AgentSpec{Model: "model"}}, now)
 	if err != nil {
 		t.Fatal(err)
 	}

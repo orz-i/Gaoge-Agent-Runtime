@@ -100,7 +100,7 @@ func TestLocalDelegationExternalWaitDoesNotPollAndResumesBothCalls(t *testing.T)
 		HostThread: harness.HostRef{Kind: testThreadKind, ID: "local-external-thread"}, HostTurn: harness.HostRef{Kind: testContextHostKind, ID: "local-external-turn"},
 		Actor: kernel.ActorRef{TenantID: testTenant, ActorID: testActor}, Thread: kernel.ThreadRef{Kind: testThreadKind, ID: "local-external-thread"}, Goal: "delegate calculation",
 		Config: harness.ConfigSnapshot{
-			Model: "fixture", ToolKeys: []string{harness.DelegationToolKey, "test.local_external"}, ToolPolicies: []harness.ToolPolicySnapshot{harness.DelegationToolPolicySnapshot(), {Key: "test.local_external", DefinitionVersion: "v1", ExecutionMode: "local_dispatch"}},
+			ToolPolicies: []harness.ToolPolicySnapshot{harness.DelegationToolPolicySnapshot(), {Key: "test.local_external", DefinitionVersion: "v1", ExecutionMode: "local_dispatch"}}, AgentSpec: harness.AgentSpec{Model: "fixture", ToolKeys: []string{harness.DelegationToolKey, "test.local_external"}},
 		},
 	})
 	if err != nil {

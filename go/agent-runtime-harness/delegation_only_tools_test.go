@@ -85,8 +85,8 @@ func TestInvalidDelegatedLocalToolGrantsCannotBeSealed(t *testing.T) {
 func TestNamedAgentMayInheritAuthorizedRootToolWithDefaultLocalPolicy(t *testing.T) {
 	const key = "root.lookup"
 	config, err := SealConfigSnapshot("root-turn", ConfigSnapshot{
-		ToolKeys: []string{key}, ToolPolicies: []ToolPolicySnapshot{{Key: key, DefinitionVersion: "v1", SideEffectLevel: "read", ApprovalMode: "never"}},
-		DelegationPolicy: DelegationPolicySnapshot{MaxDepth: 1},
+		ToolPolicies:     []ToolPolicySnapshot{{Key: key, DefinitionVersion: "v1", SideEffectLevel: "read", ApprovalMode: "never"}},
+		DelegationPolicy: DelegationPolicySnapshot{MaxDepth: 1}, AgentSpec: AgentSpec{ToolKeys: []string{key}},
 	}, time.Now().UTC())
 	if err != nil {
 		t.Fatal(err)

@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
@@ -305,15 +304,9 @@ func (runner *Runner) startInvocationAttempt(
 		if err != nil {
 			return kernel.Snapshot{}, err
 		}
-		return runner.agent.StartRun(physicalCtx, agent.StartRequest{
-			ID: invocation.ExecutionRefID, Actor: actor, Thread: thread,
-			RequestID: requestID, Goal: input.Goal, Model: config.Model,
-			ModelOptions: append(json.RawMessage(nil), config.ModelOptions...), ToolKeys: append([]string(nil), config.ToolKeys...),
-			MaxModelOutputTokens: config.MaxModelOutputTokens,
-			WorkingStateSummary:  agent.CloneWorkingStateSummaryPolicy(config.WorkingStateSummary),
-			RequiredToolKeys:     append([]string(nil), input.RequiredToolKeys...),
-			InitialToolKeys:      append([]string(nil), input.InitialToolKeys...), Limits: config.Limits,
-		})
+		start := rootAgentStartRequest(config, invocation.ExecutionRefID, actor, thread,
+			requestID, input.Goal, input.InitialToolKeys, input.RequiredToolKeys)
+		return runner.agent.StartRun(physicalCtx, start)
 	})
 }
 

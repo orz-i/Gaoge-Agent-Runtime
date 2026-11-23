@@ -10,11 +10,12 @@ import (
 
 func TestNamedAgentSnapshotRemainsFrozenAcrossIndependentSQLStoreHandles(t *testing.T) {
 	original, db := newStoreWithDB(t)
-	selected := harness.ConfigSnapshot{Model: "root-model", DelegationPolicy: harness.DelegationPolicySnapshot{
-		MaxDepth: 1, NamedAgents: []harness.NamedAgentSnapshot{{MemberID: "writer", MemberRevision: "v9", Model: "private-model",
+	selected := harness.ConfigSnapshot{DelegationPolicy: harness.DelegationPolicySnapshot{
+		MaxDepth: 1, NamedAgents: []harness.NamedAgentSnapshot{{MemberID: "writer", MemberRevision: "v9", AgentSpec: harness.AgentSpec{Model: "private-model",
 			Instructions: "original approved instructions", Skills: []harness.SkillSnapshot{{ID: "private-write", Revision: 9,
-				Title: "Private write", Markdown: "Do not execute unapproved writes"}}}},
-	}}
+				Title: "Private write", Markdown: "Do not execute unapproved writes"}}}}},
+	}, AgentSpec: harness.AgentSpec{Model: "root-model"},
+	}
 	config, err := harness.SealConfigSnapshot("named-agent-pg-turn", selected, time.Now().UTC())
 	if err != nil {
 		t.Fatal(err)

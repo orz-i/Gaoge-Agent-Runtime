@@ -42,7 +42,7 @@ func TestSessionFacadeRestartsAcrossTurnsWithFrozenContextProjection(t *testing.
 		HostThread: harness.HostRef{Kind: "conversation", ID: "session-conversation"},
 		Actor:      kernel.ActorRef{TenantID: "tenant", ActorID: "operator"},
 		Thread:     kernel.ThreadRef{Kind: "conversation", ID: "session-conversation"},
-		Config:     harness.ConfigSnapshot{Model: "fixture", Instructions: "answer accurately"},
+		Config:     harness.ConfigSnapshot{AgentSpec: harness.AgentSpec{Model: "fixture", Instructions: "answer accurately"}},
 		Transcript: transcript,
 	}
 	makeSession := func(provider *multiContextCaptureModel) (*harness.SessionClient, *kernel.Runtime) {

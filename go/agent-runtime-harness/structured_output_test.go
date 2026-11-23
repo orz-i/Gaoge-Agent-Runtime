@@ -61,8 +61,8 @@ func TestSessionCarriesFrozenStructuredOutputAcrossTurns(t *testing.T) {
 		HostThread: harness.HostRef{Kind: "conversation", ID: "schema-session"},
 		Actor:      kernel.ActorRef{TenantID: "tenant", ActorID: "actor"},
 		Thread:     kernel.ThreadRef{Kind: "conversation", ID: "schema-session"},
-		Config: harness.ConfigSnapshot{Model: "fixture-structured",
-			OutputContract: &model.OutputContract{Name: "answer", Schema: json.RawMessage(`{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}`)},
+		Config: harness.ConfigSnapshot{AgentSpec: harness.AgentSpec{Model: "fixture-structured",
+			OutputContract: &model.OutputContract{Name: "answer", Schema: json.RawMessage(`{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}`)}},
 		},
 		Transcript: transcript,
 	}

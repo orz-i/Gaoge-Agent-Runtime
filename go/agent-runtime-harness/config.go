@@ -123,21 +123,101 @@ type DelegationPolicySnapshot struct {
 	NamedAgents []NamedAgentSnapshot `json:"namedAgents,omitempty"`
 }
 
-// NamedAgentSnapshot is the immutable capability selection for one named Agent.
-// Executable Tool handlers and credentials never enter the persisted Config.
-// The Host selects the name; the existing Agent Runner executes it.
-type NamedAgentSnapshot struct {
-	MemberID             string                  `json:"memberID"`
-	MemberRevision       string                  `json:"memberRevision"`
-	Model                string                  `json:"model"`
+// AgentSpec is the sole immutable Host-selected execution capability for both
+// the Root Agent and each named child. The Host owns selection and grants;
+// the native Agent Runtime owns execution and recovery. ConfigSnapshot carries
+// Turn/Context/approval identity; member snapshots carry member identity only.
+// Registered Tool handlers/credentials never enter this durable value.
+type AgentSpec struct {
+	Model                string                  `json:"model,omitempty"`
 	ModelOptions         json.RawMessage         `json:"modelOptions,omitempty"`
 	Instructions         string                  `json:"instructions,omitempty"`
+	OutputContract       *model.OutputContract   `json:"outputContract,omitempty"`
+	MaxModelOutputTokens int64                   `json:"maxModelOutputTokens,omitempty"`
 	ToolKeys             []string                `json:"toolKeys,omitempty"`
 	InitialToolKeys      []string                `json:"initialToolKeys,omitempty"`
 	HostedToolGrants     []agent.HostedToolGrant `json:"hostedToolGrants,omitempty"`
 	Skills               []SkillSnapshot         `json:"skills,omitempty"`
 	Limits               agent.Limits            `json:"limits,omitempty"`
-	MaxModelOutputTokens int64                   `json:"maxModelOutputTokens,omitempty"`
+}
+
+// NamedAgentSnapshot freezes one member identity and the same executable
+// AgentSpec used by Root. There is no second definition of Agent capabilities.
+type NamedAgentSnapshot struct {
+	MemberID       string `json:"memberID"`
+	MemberRevision string `json:"memberRevision"`
+	AgentSpec
+}
+
+// normalizeAgentSpec is the sole capability normalization/authorization-shape
+// boundary for Root, child selection, frozen Handoff and resumed execution.
+// Callers still enforce their own Host-specific registration/grant constraints.
+func normalizeAgentSpec(value AgentSpec) (AgentSpec, error) {
+	value.Model = strings.TrimSpace(value.Model)
+	value.Instructions = strings.TrimSpace(value.Instructions)
+	if value.MaxModelOutputTokens < 0 || !enforceableHarnessBudgetLimits(value.Limits) ||
+		model.ValidateOutputContract(value.OutputContract) != nil {
+		return AgentSpec{}, ErrInvalidRequest
+	}
+	var err error
+	value.ModelOptions, err = canonicalJSON(value.ModelOptions)
+	if err != nil {
+		return AgentSpec{}, err
+	}
+	value.OutputContract = model.CloneOutputContract(value.OutputContract)
+	value.ToolKeys = normalizeStrings(value.ToolKeys)
+	value.InitialToolKeys = normalizeStrings(value.InitialToolKeys)
+	value.HostedToolGrants, err = agent.NormalizeHostedToolGrantsForRole(value.HostedToolGrants)
+	if err != nil {
+		return AgentSpec{}, ErrInvalidRequest
+	}
+	for _, grant := range value.HostedToolGrants {
+		if slices.Contains(value.ToolKeys, grant.Key) {
+			return AgentSpec{}, ErrInvalidRequest
+		}
+	}
+	for _, key := range value.InitialToolKeys {
+		if !slices.Contains(value.ToolKeys, key) && !containsHostedGrant(value.HostedToolGrants, key) {
+			return AgentSpec{}, ErrInvalidRequest
+		}
+	}
+	value.Skills, err = normalizeSkillSnapshots(value.Skills)
+	if err != nil {
+		return AgentSpec{}, err
+	}
+	return value, nil
+}
+
+func containsHostedGrant(grants []agent.HostedToolGrant, key string) bool {
+	for _, grant := range grants {
+		if grant.Key == key {
+			return true
+		}
+	}
+	return false
+}
+
+func cloneAgentSpec(value AgentSpec) AgentSpec {
+	value.ModelOptions = append(json.RawMessage(nil), value.ModelOptions...)
+	value.OutputContract = model.CloneOutputContract(value.OutputContract)
+	value.ToolKeys = slices.Clone(value.ToolKeys)
+	value.InitialToolKeys = slices.Clone(value.InitialToolKeys)
+	value.HostedToolGrants = slices.Clone(value.HostedToolGrants)
+	value.Skills = slices.Clone(value.Skills)
+	return value
+}
+
+// startRequest maps one frozen Host AgentSpec into the native Agent Runtime.
+// Runtime-owned Run identity, authorization and original execution allowances
+// are filled only by the caller at its original protected admission boundary.
+func (value AgentSpec) startRequest() agent.StartRequest {
+	return agent.StartRequest{
+		Model: value.Model, ModelOptions: append(json.RawMessage(nil), value.ModelOptions...),
+		Instructions: value.Instructions, OutputContract: model.CloneOutputContract(value.OutputContract),
+		MaxModelOutputTokens: value.MaxModelOutputTokens,
+		ToolKeys:             slices.Clone(value.ToolKeys), InitialToolKeys: slices.Clone(value.InitialToolKeys),
+		HostedToolGrants: slices.Clone(value.HostedToolGrants), Limits: value.Limits,
+	}
 }
 
 func normalizeNamedAgentSnapshots(values []NamedAgentSnapshot) ([]NamedAgentSnapshot, error) {
@@ -146,46 +226,23 @@ func normalizeNamedAgentSnapshots(values []NamedAgentSnapshot) ([]NamedAgentSnap
 	}
 	normalized := make([]NamedAgentSnapshot, len(values))
 	seen := make(map[string]struct{}, len(values))
-	for i, v := range values {
-		v.MemberID = strings.TrimSpace(v.MemberID)
-		v.MemberRevision = strings.TrimSpace(v.MemberRevision)
-		v.Model = strings.TrimSpace(v.Model)
-		v.Instructions = strings.TrimSpace(v.Instructions)
-		if v.MemberID == "" || v.MemberRevision == "" || v.Model == "" ||
-			len(v.MemberID) > 160 || len(v.MemberRevision) > 256 || v.MaxModelOutputTokens < 0 ||
-			!enforceableHarnessBudgetLimits(v.Limits) {
+	for i, value := range values {
+		value.MemberID = strings.TrimSpace(value.MemberID)
+		value.MemberRevision = strings.TrimSpace(value.MemberRevision)
+		if value.MemberID == "" || value.MemberRevision == "" || len(value.MemberID) > 160 ||
+			len(value.MemberRevision) > 256 || strings.TrimSpace(value.Model) == "" {
 			return nil, ErrInvalidRequest
 		}
-		if _, present := seen[v.MemberID]; present {
+		if _, duplicate := seen[value.MemberID]; duplicate {
 			return nil, ErrInvalidRequest
 		}
-		seen[v.MemberID] = struct{}{}
+		seen[value.MemberID] = struct{}{}
 		var err error
-		v.ModelOptions, err = canonicalJSON(v.ModelOptions)
+		value.AgentSpec, err = normalizeAgentSpec(value.AgentSpec)
 		if err != nil {
 			return nil, err
 		}
-		v.ToolKeys = normalizeStrings(v.ToolKeys)
-		v.InitialToolKeys = normalizeStrings(v.InitialToolKeys)
-		for _, key := range v.InitialToolKeys {
-			if !slices.Contains(v.ToolKeys, key) {
-				return nil, ErrInvalidRequest
-			}
-		}
-		v.HostedToolGrants, err = agent.NormalizeHostedToolGrantsForRole(v.HostedToolGrants)
-		if err != nil {
-			return nil, ErrInvalidRequest
-		}
-		for _, grant := range v.HostedToolGrants {
-			if slices.Contains(v.ToolKeys, grant.Key) {
-				return nil, ErrInvalidRequest
-			}
-		}
-		v.Skills, err = normalizeSkillSnapshots(v.Skills)
-		if err != nil {
-			return nil, err
-		}
-		normalized[i] = v
+		normalized[i] = value
 	}
 	slices.SortFunc(normalized, func(a, b NamedAgentSnapshot) int { return strings.Compare(a.MemberID, b.MemberID) })
 	return normalized, nil
@@ -196,13 +253,9 @@ func cloneNamedAgentSnapshots(values []NamedAgentSnapshot) []NamedAgentSnapshot 
 		return nil
 	}
 	copied := make([]NamedAgentSnapshot, len(values))
-	for i, v := range values {
-		v.ModelOptions = append(json.RawMessage(nil), v.ModelOptions...)
-		v.ToolKeys = append([]string(nil), v.ToolKeys...)
-		v.InitialToolKeys = append([]string(nil), v.InitialToolKeys...)
-		v.HostedToolGrants = append([]agent.HostedToolGrant(nil), v.HostedToolGrants...)
-		v.Skills = append([]SkillSnapshot(nil), v.Skills...)
-		copied[i] = v
+	for i, value := range values {
+		value.AgentSpec = cloneAgentSpec(value.AgentSpec)
+		copied[i] = value
 	}
 	return copied
 }
@@ -224,52 +277,32 @@ type DelegatedLocalToolGrant struct {
 
 // ConfigSnapshot is one immutable execution configuration. It intentionally excludes secrets and transport endpoints.
 type ConfigSnapshot struct {
-	ID             string                `json:"id"`
-	TurnID         string                `json:"turnID"`
-	Environment    VersionRef            `json:"environment"`
-	Instructions   string                `json:"instructions,omitempty"`
-	Model          string                `json:"model,omitempty"`
-	ModelOptions   json.RawMessage       `json:"modelOptions,omitempty"`
-	OutputContract *model.OutputContract `json:"outputContract,omitempty"`
-	// MaxModelOutputTokens is the frozen per-model-call ceiling, distinct from Limits' cumulative output budget.
-	MaxModelOutputTokens  int64                    `json:"maxModelOutputTokens,omitempty"`
-	ToolKeys              []string                 `json:"toolKeys"`
-	ToolPolicies          []ToolPolicySnapshot     `json:"toolPolicies"`
-	Skills                []SkillSnapshot          `json:"skills"`
-	ContextPolicy         runtimecontext.Policy    `json:"contextPolicy"`
-	ApprovalPolicyVersion uint64                   `json:"approvalPolicyVersion"`
-	Limits                agent.Limits             `json:"limits"`
-	SharedBudget          *budget.Limits           `json:"sharedBudget,omitempty"`
-	DelegationPolicy      DelegationPolicySnapshot `json:"delegationPolicy,omitempty"`
-	ContentHash           string                   `json:"contentHash"`
-	CreatedAt             time.Time                `json:"createdAt"`
-	// AdmissionHash binds the immutable start request (including Context and
-	// execution allowances) to the Config ID before any Turn is persisted.
-	AdmissionHash string   `json:"admissionHash,omitempty"`
-	InputMessage  *HostRef `json:"inputMessage,omitempty"`
-	OutputMessage *HostRef `json:"outputMessage,omitempty"`
-	// ContextBase is derived from the original Context admission, never accepted
-	// from Host configuration. A non-nil empty binding freezes no previous head.
-	ContextBase *ContextBaseBinding `json:"contextBase,omitempty"`
-	// WorkingStateSummary explicitly opts this Turn into the native, bounded
-	// summary lifecycle. Nil preserves ordinary Context behavior.
-	WorkingStateSummary *agent.WorkingStateSummaryPolicy `json:"workingStateSummary,omitempty"`
+	ID          string     `json:"id"`
+	TurnID      string     `json:"turnID"`
+	Environment VersionRef `json:"environment"`
+	AgentSpec
+	// Turn/Host authority is not a second Agent capability definition.
+	ToolPolicies          []ToolPolicySnapshot             `json:"toolPolicies"`
+	ContextPolicy         runtimecontext.Policy            `json:"contextPolicy"`
+	ApprovalPolicyVersion uint64                           `json:"approvalPolicyVersion"`
+	SharedBudget          *budget.Limits                   `json:"sharedBudget,omitempty"`
+	DelegationPolicy      DelegationPolicySnapshot         `json:"delegationPolicy,omitempty"`
+	ContentHash           string                           `json:"contentHash"`
+	CreatedAt             time.Time                        `json:"createdAt"`
+	AdmissionHash         string                           `json:"admissionHash,omitempty"`
+	InputMessage          *HostRef                         `json:"inputMessage,omitempty"`
+	OutputMessage         *HostRef                         `json:"outputMessage,omitempty"`
+	ContextBase           *ContextBaseBinding              `json:"contextBase,omitempty"`
+	WorkingStateSummary   *agent.WorkingStateSummaryPolicy `json:"workingStateSummary,omitempty"`
 }
 
 type configPayload struct {
-	TurnID                string                           `json:"turnID"`
-	Environment           VersionRef                       `json:"environment"`
-	Instructions          string                           `json:"instructions,omitempty"`
-	Model                 string                           `json:"model,omitempty"`
-	ModelOptions          json.RawMessage                  `json:"modelOptions,omitempty"`
-	OutputContract        *model.OutputContract            `json:"outputContract,omitempty"`
-	MaxModelOutputTokens  int64                            `json:"maxModelOutputTokens,omitempty"`
-	ToolKeys              []string                         `json:"toolKeys"`
+	TurnID      string     `json:"turnID"`
+	Environment VersionRef `json:"environment"`
+	AgentSpec
 	ToolPolicies          []ToolPolicySnapshot             `json:"toolPolicies"`
-	Skills                []SkillSnapshot                  `json:"skills"`
 	ContextPolicy         runtimecontext.Policy            `json:"contextPolicy"`
 	ApprovalPolicyVersion uint64                           `json:"approvalPolicyVersion"`
-	Limits                agent.Limits                     `json:"limits"`
 	SharedBudget          *budget.Limits                   `json:"sharedBudget,omitempty"`
 	DelegationPolicy      DelegationPolicySnapshot         `json:"delegationPolicy,omitempty"`
 	AdmissionHash         string                           `json:"admissionHash,omitempty"`
@@ -292,8 +325,6 @@ func SealConfigSnapshot(turnID string, value ConfigSnapshot, now time.Time) (Con
 	}
 	value.TurnID = turnID
 	value.Environment.ID = strings.TrimSpace(value.Environment.ID)
-	value.Instructions = strings.TrimSpace(value.Instructions)
-	value.Model = strings.TrimSpace(value.Model)
 	value.ContextPolicy = runtimecontext.NormalizePolicy(value.ContextPolicy)
 	value.AdmissionHash = strings.TrimSpace(value.AdmissionHash)
 	if value.AdmissionHash != "" {
@@ -317,12 +348,9 @@ func SealConfigSnapshot(turnID string, value ConfigSnapshot, now time.Time) (Con
 		return ConfigSnapshot{}, ErrInvalidRequest
 	}
 	var err error
-	value.ModelOptions, err = canonicalJSON(value.ModelOptions)
+	value.AgentSpec, err = normalizeAgentSpec(value.AgentSpec)
 	if err != nil {
 		return ConfigSnapshot{}, err
-	}
-	if model.ValidateOutputContract(value.OutputContract) != nil || value.MaxModelOutputTokens < 0 {
-		return ConfigSnapshot{}, ErrInvalidRequest
 	}
 	if agent.ValidateWorkingStateSummaryPolicy(value.WorkingStateSummary) != nil ||
 		(value.WorkingStateSummary != nil && (value.MaxModelOutputTokens <= 0 || value.SharedBudget != nil)) {
@@ -333,8 +361,6 @@ func SealConfigSnapshot(turnID string, value ConfigSnapshot, now time.Time) (Con
 		return ConfigSnapshot{}, err
 	}
 	value.ContextBase = cloneContextBaseBinding(value.ContextBase)
-	value.OutputContract = model.CloneOutputContract(value.OutputContract)
-	value.ToolKeys = normalizeStrings(value.ToolKeys)
 	value.ToolPolicies, err = normalizeToolPolicies(value.ToolPolicies)
 	if err != nil {
 		return ConfigSnapshot{}, err
@@ -346,10 +372,6 @@ func SealConfigSnapshot(turnID string, value ConfigSnapshot, now time.Time) (Con
 	value.DelegationPolicy.NamedAgents, err = normalizeNamedAgentSnapshots(value.DelegationPolicy.NamedAgents)
 	if err != nil || (len(value.DelegationPolicy.NamedAgents) != 0 && value.DelegationPolicy.MaxDepth <= 0) {
 		return ConfigSnapshot{}, ErrInvalidRequest
-	}
-	value.Skills, err = normalizeSkillSnapshots(value.Skills)
-	if err != nil {
-		return ConfigSnapshot{}, err
 	}
 	if value.SharedBudget != nil {
 		if !enforceableHarnessBudgetLimits(*value.SharedBudget) {
@@ -363,15 +385,12 @@ func SealConfigSnapshot(turnID string, value ConfigSnapshot, now time.Time) (Con
 		return ConfigSnapshot{}, ErrInvalidRequest
 	}
 	payload := configPayload{
-		TurnID: turnID, Environment: value.Environment, Instructions: value.Instructions,
-		Model: value.Model, ModelOptions: value.ModelOptions, OutputContract: value.OutputContract, ToolKeys: value.ToolKeys,
-		MaxModelOutputTokens: value.MaxModelOutputTokens,
-		ToolPolicies:         value.ToolPolicies, Skills: value.Skills,
-		ContextPolicy: value.ContextPolicy, ApprovalPolicyVersion: value.ApprovalPolicyVersion, Limits: value.Limits,
-		SharedBudget: value.SharedBudget, DelegationPolicy: value.DelegationPolicy,
-		AdmissionHash: value.AdmissionHash, InputMessage: value.InputMessage, OutputMessage: value.OutputMessage,
-		ContextBase:         value.ContextBase,
-		WorkingStateSummary: value.WorkingStateSummary,
+		TurnID: turnID, Environment: value.Environment, AgentSpec: value.AgentSpec,
+		ToolPolicies: value.ToolPolicies, ContextPolicy: value.ContextPolicy,
+		ApprovalPolicyVersion: value.ApprovalPolicyVersion, SharedBudget: value.SharedBudget,
+		DelegationPolicy: value.DelegationPolicy, AdmissionHash: value.AdmissionHash,
+		InputMessage: value.InputMessage, OutputMessage: value.OutputMessage,
+		ContextBase: value.ContextBase, WorkingStateSummary: value.WorkingStateSummary,
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
@@ -440,11 +459,8 @@ func cloneConfigSnapshot(value ConfigSnapshot) ConfigSnapshot {
 		copied := *value.SharedBudget
 		value.SharedBudget = &copied
 	}
-	value.ModelOptions = append(json.RawMessage(nil), value.ModelOptions...)
-	value.OutputContract = model.CloneOutputContract(value.OutputContract)
-	value.ToolKeys = append([]string(nil), value.ToolKeys...)
+	value.AgentSpec = cloneAgentSpec(value.AgentSpec)
 	value.ToolPolicies = append([]ToolPolicySnapshot(nil), value.ToolPolicies...)
-	value.Skills = append([]SkillSnapshot(nil), value.Skills...)
 	value.DelegationPolicy.LocalToolGrants = slices.Clone(value.DelegationPolicy.LocalToolGrants)
 	value.DelegationPolicy.NamedAgents = cloneNamedAgentSnapshots(value.DelegationPolicy.NamedAgents)
 	return value

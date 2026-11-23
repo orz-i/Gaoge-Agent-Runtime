@@ -58,10 +58,11 @@ func TestRetryInvocationCannotBuyAnotherSummaryForSameTurn(t *testing.T) {
 			HostThread: HostRef{Kind: "conversation", ID: "summary-retry"}, Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "owner"},
 			Thread: kernel.ThreadRef{Kind: "conversation", ID: "summary-retry"},
 			Config: ConfigSnapshot{
-				Model: "fixture", MaxModelOutputTokens: 128,
+
 				WorkingStateSummary: &agent.WorkingStateSummaryPolicy{MaxInputTokens: 60000, MaxSerializedBytes: 100000},
-				ContextPolicy:       runtimecontext.Policy{SoftLimitPercent: 10, MaxSerializedBytes: 100000, PreserveRecentTurns: 1, MinimumRecentTurns: 1, MaxCompactionTokens: 128},
-				Limits:              agent.Limits{MaxTotalTokens: 5},
+				ContextPolicy:       runtimecontext.Policy{SoftLimitPercent: 10, MaxSerializedBytes: 100000, PreserveRecentTurns: 1, MinimumRecentTurns: 1, MaxCompactionTokens: 128}, AgentSpec: AgentSpec{Model: "fixture", MaxModelOutputTokens: 128,
+
+					Limits: agent.Limits{MaxTotalTokens: 5}},
 			},
 			Transcript: TranscriptSourceFunc(func(context.Context, HostRef, HostRef, string) (*ContextSeed, error) { return seed, nil }),
 		},

@@ -59,7 +59,7 @@ func TestSessionFacadeFrozenOwnerRejectsInconsistentSessionReads(t *testing.T) {
 		t.Fatal(err)
 	}
 	opts := harness.SessionOptions{HostThread: hostThread, Actor: foreign,
-		Thread: kernel.ThreadRef{Kind: "conversation", ID: hostThread.ID}, Config: harness.ConfigSnapshot{Model: "fixture"},
+		Thread: kernel.ThreadRef{Kind: "conversation", ID: hostThread.ID}, Config: harness.ConfigSnapshot{AgentSpec: harness.AgentSpec{Model: "fixture"}},
 		Transcript: harness.TranscriptSourceFunc(func(_ context.Context, _, _ harness.HostRef, prompt string) (*harness.ContextSeed, error) {
 			return contextSeed("", contextEntry("m1", "first", model.RoleUser, prompt, true)), nil
 		}),

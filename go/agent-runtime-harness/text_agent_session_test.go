@@ -38,7 +38,7 @@ func textSessionOptions(rt *kernel.Runtime, store harness.Store, client model.Cl
 			HostThread: harness.HostRef{Kind: "conversation", ID: thread},
 			Actor:      kernel.ActorRef{TenantID: "tenant-a", ActorID: "user-a"},
 			Thread:     kernel.ThreadRef{Kind: "conversation", ID: thread},
-			Config:     harness.ConfigSnapshot{Model: "local", MaxModelOutputTokens: 128}, Transcript: transcript,
+			Config:     harness.ConfigSnapshot{AgentSpec: harness.AgentSpec{Model: "local", MaxModelOutputTokens: 128}}, Transcript: transcript,
 		},
 		Context: harness.AgentSessionContextOptions{ResolveWindow: func(context.Context, model.Request) (runtimecontext.ModelWindow, error) {
 			return runtimecontext.ModelWindow{ContextTokens: 32768, ReservedOutputTokens: 128}, nil

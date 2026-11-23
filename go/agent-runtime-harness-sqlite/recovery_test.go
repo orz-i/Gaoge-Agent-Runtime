@@ -29,7 +29,7 @@ func request() harness.StartRequest {
 	return harness.StartRequest{
 		HostThread: harness.HostRef{Kind: "conversation", ID: "thread"}, HostTurn: harness.HostRef{Kind: "turn", ID: "first"},
 		Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"},
-		Goal: "answer", Config: harness.ConfigSnapshot{Model: "fixture", Environment: harness.VersionRef{ID: "desktop", Revision: 1}},
+		Goal: "answer", Config: harness.ConfigSnapshot{Environment: harness.VersionRef{ID: "desktop", Revision: 1}, AgentSpec: harness.AgentSpec{Model: "fixture"}},
 	}
 }
 

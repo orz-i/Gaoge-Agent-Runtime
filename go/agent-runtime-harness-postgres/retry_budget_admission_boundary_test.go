@@ -30,7 +30,7 @@ func TestRootRetryDirectStoreCannotBypassOriginalBudgetCAS(t *testing.T) {
 				configID := "legacy-unbudgeted-fixture"
 				if mode == "frozen-budget-without-ledger" {
 					sealed, err := harness.SealConfigSnapshot(scope, harness.ConfigSnapshot{
-						Model: "test", SharedBudget: &budget.Limits{MaxLLMCalls: 2, MaxTotalTokens: 300},
+						SharedBudget: &budget.Limits{MaxLLMCalls: 2, MaxTotalTokens: 300}, AgentSpec: harness.AgentSpec{Model: "test"},
 					}, now)
 					if err != nil {
 						t.Fatal(err)

@@ -70,7 +70,7 @@ func newAllowanceHTTPFixture(t *testing.T) (*harness.Runner, *kernel.Runtime, ha
 		HostTurn:   harness.HostRef{Kind: "conversation_turn", ID: "private-turn"},
 		Actor:      actor, Thread: kernel.ThreadRef{Kind: "conversation", ID: "private-thread"},
 		Goal: "complete private task", CallAllowance: &agent.CallAllowance{LLMCalls: 1},
-		Config: harness.ConfigSnapshot{Model: "model"},
+		Config: harness.ConfigSnapshot{AgentSpec: harness.AgentSpec{Model: "model"}},
 	})
 	if err != nil || paused.Turn.Status != harness.TurnPausedBudget {
 		t.Fatalf("pause %#v err=%v", paused.Turn, err)

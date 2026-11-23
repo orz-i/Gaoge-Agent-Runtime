@@ -28,12 +28,11 @@ func TestNamedAgentPrivateSkillsSurviveEncryptedHarnessSchemaV3Reopen(t *testing
 		t.Fatal(err)
 	}
 	selected := harness.ConfigSnapshot{
-		Model: "root-model", Instructions: "root instructions",
-		DelegationPolicy: harness.DelegationPolicySnapshot{MaxDepth: 2, NamedAgents: []harness.NamedAgentSnapshot{
-			{MemberID: "auditor", MemberRevision: "2026-11-23", Model: "private-model",
-				ToolKeys: []string{"audit.read"},
-				Skills:   []harness.SkillSnapshot{{ID: "sensitive", Revision: 11, Title: "Audit", Markdown: "Private audit instructions stored only in the encrypted Host database"}}},
-		}},
+
+		DelegationPolicy: harness.DelegationPolicySnapshot{MaxDepth: 2, NamedAgents: []harness.NamedAgentSnapshot{{MemberID: "auditor", MemberRevision: "2026-11-23", AgentSpec: harness.AgentSpec{Model: "private-model",
+			ToolKeys: []string{"audit.read"},
+			Skills:   []harness.SkillSnapshot{{ID: "sensitive", Revision: 11, Title: "Audit", Markdown: "Private audit instructions stored only in the encrypted Host database"}}}},
+		}}, AgentSpec: harness.AgentSpec{Model: "root-model", Instructions: "root instructions"},
 	}
 	original, err := harness.SealConfigSnapshot("encrypted-turn", selected, time.Now().UTC())
 	if err != nil {

@@ -42,7 +42,7 @@ func TestSummaryOriginAuthorizesScopeAndOwnerBeforeNativeRead(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			config, err := SealConfigSnapshot(turnID, ConfigSnapshot{MaxModelOutputTokens: 128, WorkingStateSummary: &agent.WorkingStateSummaryPolicy{MaxInputTokens: 4096, MaxSerializedBytes: 16384}}, now)
+			config, err := SealConfigSnapshot(turnID, ConfigSnapshot{WorkingStateSummary: &agent.WorkingStateSummaryPolicy{MaxInputTokens: 4096, MaxSerializedBytes: 16384}, AgentSpec: AgentSpec{MaxModelOutputTokens: 128}}, now)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -22,9 +22,9 @@ func TestHardcutAdmissionMetadataSurvivesSQLJSONAndFencesChangedTurn(t *testing.
 		t.Fatal(err)
 	}
 	initial := harness.ConfigSnapshot{
-		Model: "fixture", AdmissionHash: strings.Repeat("a", 64),
+		AdmissionHash: strings.Repeat("a", 64),
 		InputMessage:  &harness.HostRef{Kind: "message", ID: "user-admission"},
-		OutputMessage: &harness.HostRef{Kind: "message", ID: "assistant-admission"},
+		OutputMessage: &harness.HostRef{Kind: "message", ID: "assistant-admission"}, AgentSpec: harness.AgentSpec{Model: "fixture"},
 	}
 	config, err := harness.SealConfigSnapshot("admission-turn", initial, now)
 	if err != nil {
