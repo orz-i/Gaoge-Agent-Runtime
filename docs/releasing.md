@@ -74,10 +74,10 @@ node scripts/release-tags.mjs --version "$(cat VERSION)" --create
 # NEVER move existing immutable tags.
 ```
 
-The next candidate cohort includes eleven Go modules, including the standalone Provider and experimental SQLite.
+The next candidate cohort includes twelve Go modules, including the standalone Provider and separate Kernel and Harness SQLite adapters.
 `make check` validates local source consumers under `GOWORK=off` with
 *temporary test-module replacements*, not an independently published version.
-Once the root and all eleven Go module tags have been pushed, the release
+Once the root and all twelve Go module tags have been pushed, the release
 workflow runs `node scripts/check-release.mjs --published` against the real
 tagged modules with **no replace directives**, before creating a GitHub Release.
 The SQLite adapter's `go.mod` must depend on the *same* Core release version;

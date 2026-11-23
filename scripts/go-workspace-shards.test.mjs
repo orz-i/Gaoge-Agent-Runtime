@@ -14,13 +14,13 @@ const temporary = (t) => {
   return directory;
 };
 
-test("shards partition all 13 go.work modules exactly once, including the nested example and independent Transport", () => {
+test("shards partition all 14 go.work modules exactly once, including the nested example and independent Transport", () => {
   validateLayout();
   const work = readFileSync(new URL("../go.work", import.meta.url), "utf8");
   const listed = [...work.matchAll(/^\s+\.\/(go\/\S+)$/gmu)].map((match) => match[1]);
   assert.deepEqual([...modules].sort(), listed.sort());
-  assert.equal(modules.length, 13);
-  assert.equal(new Set(modules.map(coverageProfileName)).size, 13);
+  assert.equal(modules.length, 14);
+  assert.equal(new Set(modules.map(coverageProfileName)).size, 14);
   assert.throws(() => validateLayout({ ...shards, extra: [modules[0]] }), /exactly once/u);
   assert.throws(() => validateLayout({ ...shards, sqlite: [] }), /exactly once/u);
   assert.throws(() => validateLayout({ ...shards, sqlite: ["go/unknown"] }), /exactly once/u);
@@ -51,18 +51,18 @@ function coverageFixture(t) {
 test("complete coverage uses the original statement union rather than averaging shard percentages", (t) => {
   const f = coverageFixture(t);
   const result = f.merge();
-  assert.deepEqual(result, { coveredStatements: 13, totalStatements: 13, percent: 100, minimum: 70 });
+  assert.deepEqual(result, { coveredStatements: 14, totalStatements: 14, percent: 100, minimum: 70 });
   writeFileSync(path.join(f.sqlite, "agent-runtime-sqlite.out"), "mode: atomic\ngo/sqlite/a.go:1.1,2.1 10 1\ngo/sqlite/b.go:1.1,2.1 90 0\n");
   assert.throws(() => f.merge(), /below 70/u);
   const summary = JSON.parse(readFileSync(path.join(f.output, "summary.json"), "utf8"));
-  assert.deepEqual(summary, { coveredStatements: 22, totalStatements: 112, percent: 19.64, minimum: 70 });
+  assert.deepEqual(summary, { coveredStatements: 23, totalStatements: 113, percent: 20.35, minimum: 70 });
 });
 
 test("blocks repeated across shards are unioned and zero-execution statements remain in the denominator", (t) => {
   const f = coverageFixture(t);
   writeFileSync(path.join(f.core, "agent-runtime.out"), "mode: atomic\nshared.go:1.1,2.1 3 0\nzero.go:1.1,2.1 2 0\n");
   writeFileSync(path.join(f.sqlite, "agent-runtime-sqlite.out"), "mode: atomic\nshared.go:1.1,2.1 3 5\n");
-  assert.deepEqual(f.merge(), { coveredStatements: 14, totalStatements: 16, percent: 87.5, minimum: 70 });
+  assert.deepEqual(f.merge(), { coveredStatements: 15, totalStatements: 17, percent: 88.24, minimum: 70 });
 });
 
 test("missing, extra, stale, wrongly assigned, or partial shards cannot pass the aggregate floor", (t) => {
@@ -109,6 +109,15 @@ if (process.env.FAIL_MODULE === path.basename(process.cwd())) process.exit(9);
 const profile = args.find(arg => arg.startsWith('-coverprofile='));
 if (profile) fs.writeFileSync(profile.slice('-coverprofile='.length), 'mode: atomic\\nfixture/' + path.basename(process.cwd()) + '.go:1.1,2.1 1 1\\n');
 `, { mode: 0o755 });
+  if (process.platform === "win32") {
+    // CreateProcess resolves go.exe, while Unix executes the fixture shebang.
+    // Node receives "test" as its script path and forwards the remaining Go arguments.
+    copyFileSync(process.execPath, path.join(bin, "go.exe"));
+    for (const module of modules) {
+      writeFileSync(path.join(directory, module, "test"),
+        `process.argv.splice(2, 0, "test"); require(${JSON.stringify(path.join(bin, "go"))});`);
+    }
+  }
   const calls = path.join(directory, "calls");
   const run = (mode, args = [], fail = "") => {
     writeFileSync(calls, "");
@@ -122,7 +131,7 @@ if (profile) fs.writeFileSync(profile.slice('-coverprofile='.length), 'mode: ato
       const result = run(mode, [`--shard=${shard}`]);
       assert.equal(result.status, 0, result.stderr);
       const commands = readFileSync(calls, "utf8").trim().split("\n").map(JSON.parse);
-      assert.deepEqual(commands.map((command) => path.relative(directory, command.cwd)), shards[shard]);
+      assert.deepEqual(commands.map((command) => path.relative(directory, command.cwd).split(path.sep).join("/")), shards[shard]);
       for (const { args } of commands) {
         if (mode === "race") assert.deepEqual(args, ["test", "-race", "./...", "-count=1"]);
         else assert.deepEqual(args.slice(0, -1), ["test", "./...", "-count=1", "-covermode=atomic", "-coverpkg=./..."]);

@@ -55,16 +55,18 @@ its Tool/Model loop.
 feature layer**, not a SQL backend. Kernel Run and grant/outbox authority live
 behind `kernel.Store` (Memory, PostgreSQL or experimental SQLite); Harness
 Session/Turn/Invocation/Timeline/Context facts live behind the distinct
-`harness.Store` (Memory or PostgreSQL). The `runrelation.Store` owner index
+`harness.Store` (Memory, PostgreSQL or desktop SQLite). The `runrelation.Store` owner index
 has Memory, PostgreSQL and experimental SQLite adapters. No general file-based
 Store exists; SQLite is itself a transactional file database.
 
-The PostgreSQL Kernel and Harness adapters may use the same physical database,
-but separate API calls are **not automatically one atomic transaction**.
-Continue to use the existing original grant, receipt and managed-recovery
-proofs across their execution boundary. The SQLite Kernel backend is **not**
-full durable Harness Session/Context persistence. See the [C1/C2 storage
-responsibility matrix](audits/2026-11-16-complexity-c1-c2-storage-and-single-dispatch.md).
+The desktop Host creates separate Kernel and Harness files in one private profile
+directory. The Harness adapter shares the PostgreSQL adapter's relational
+admission and receipt implementation and runs it on a native SQLite pool.
+SQLite acquires its writer lock before validating a mutation. The Kernel owns
+physical execution and the Harness owns the original dispatch and return
+records. Recovery across the two files uses these records. A PostgreSQL Host
+can place both schemas in one database and uses the same recovery protocol.
+[Desktop Harness SQLite](../go/agent-runtime-harness-sqlite/README.md).
 
 ## SubAgent composition
 

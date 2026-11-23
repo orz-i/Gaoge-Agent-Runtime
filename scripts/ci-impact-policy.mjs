@@ -6,7 +6,7 @@ const prefix = "github.com/orz-i/Gaoge-Agent-Runtime/";
 const identities = new Map(allGoModules.map((module) => [module.startsWith("go/") ? prefix + module :
   `example.com/agent-runtime-${module.split("/").at(-1)}`, module]));
 const persistent = new Set(["go/agent-runtime", "go/agent-runtime-postgres", "go/agent-runtime-sqlite",
-  "go/agent-runtime-redis", "go/agent-runtime-harness-postgres", "integration/continuation-e2e"]);
+  "go/agent-runtime-redis", "go/agent-runtime-harness-postgres", "go/agent-runtime-harness-sqlite", "integration/continuation-e2e"]);
 const ownerOf = (file) => [...allGoModules].sort((a, b) => b.length - a.length).find((module) => file.startsWith(`${module}/`));
 
 export function validChangedPath(file) {
@@ -63,7 +63,7 @@ export function fullImpact(reason, changes = [], context = {}) {
     affectedShards: Object.keys(shards), typescript: true,
     checks: ["metadata", "static", "go-unit-and-race", "go-consumers", "typescript-and-packed-consumer",
       "real-engine-integration", "collector-policy-unchanged", "security", "codeql", "dependency-review", "description"],
-    coveragePolicy: "complete-13-module-union-required",
+    coveragePolicy: "complete-14-module-union-required",
   };
 }
 
@@ -130,7 +130,7 @@ export function analyzeImpact(changes, graphs, context = {}) {
     reasons: ["advisory-only-not-a-skip-decision"], directGoModules: allGoModules.filter((module) => direct.has(module)),
     affectedGoModules, detachedGoModules,
     affectedShards: Object.keys(shards).filter((shard) => shards[shard].some((module) => affectedGoModules.includes(module))),
-    typescript, checks: [...checks], coveragePolicy: "complete-13-module-union-required",
+    typescript, checks: [...checks], coveragePolicy: "complete-14-module-union-required",
   };
 }
 
@@ -143,7 +143,7 @@ export function impactSummary(plan) {
     `Advisory category: ${escape(plan.recommendation)}. Reasons: ${plan.reasons.map(escape).join(", ")}.\n\n` +
     `Focused Go candidates: ${plan.affectedGoModules.map(escape).join(", ") || "none"}.\n\n` +
     `Detached E2E candidates: ${plan.detachedGoModules.map(escape).join(", ") || "none"}.\n\n` +
-    `TypeScript candidate: ${plan.typescript ? "yes" : "no"}. Coverage still requires the complete 13-module union.\n\n` +
+    `TypeScript candidate: ${plan.typescript ? "yes" : "no"}. Coverage still requires the complete 14-module union.\n\n` +
     `| Changed path (up to 60) | Status |\n| --- | --- |\n` +
     plan.changes.slice(0, 60).map((change) => `| ${escape(change.path)} | ${escape(change.status)} |\n`).join("") +
     `\nChanged files: ${plan.changes.length}. Full plan is in the JSON artifact; this is not a performance/skip guarantee.\n`;

@@ -30,7 +30,7 @@ test("documentation/TypeScript/Transport suggestions never change actual full ex
     assert.equal(result.recommendation, recommendation);
     assert.equal(result.mode, "shadow");
     assert.equal(result.execution, "full");
-    assert.equal(result.coveragePolicy, "complete-13-module-union-required");
+    assert.equal(result.coveragePolicy, "complete-14-module-union-required");
     assert.ok(!Object.hasOwn(result, "skip") && !Object.hasOwn(result, "runJobs"));
     assert.ok(result.checks.includes("security") && result.checks.includes("codeql"));
   }
