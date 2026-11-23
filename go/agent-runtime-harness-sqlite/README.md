@@ -7,6 +7,8 @@ same ownership and receipt checks as the relational PostgreSQL adapter.
 
 ## Create and reopen a profile
 
+For encrypted storage, supply the same `encrypted.WithKey(&key)` connection to `harnesssqlite.CreateNewWith` and `harnesssqlite.OpenExistingWith`. The host keeps its Harness key separate from the Kernel key. [Encrypted desktop profiles](../agent-runtime-sqlite/README.md#encrypted-desktop-profiles)
+
 Provision a private profile directory using the [Kernel SQLite profile
 instructions](../agent-runtime-sqlite/README.md#minimal-desktop-example).
 On first enrollment call `harnesssqlite.CreateNew(ctx, harnessPath)`. Keep the
