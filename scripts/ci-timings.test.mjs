@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { modules } from "./go-workspace-layout.mjs";
 import { measureCI, timingSummary } from "./ci-timings.mjs";
 import { runCITargets } from "./run-ci-targets.mjs";
 
@@ -121,7 +122,7 @@ exit 0
       });
       assert.equal(result.status, fail ? 1 : 0, result.stderr);
       const rows = records();
-      assert.equal(rows.length, fail ? 2 : 13);
+      assert.equal(rows.length, fail ? 2 : modules.length);
       assert.ok(rows.every((row) => row.kind === "go-module" && row.mode === mode));
       assert.equal(rows.at(-1).exitCode, fail ? 9 : 0);
       if (!fail) {
