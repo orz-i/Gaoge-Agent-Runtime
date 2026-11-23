@@ -151,6 +151,10 @@ func VerifiedExecutionDispatchReceipt(grant Item, receipts []Item) (string, bool
 			phase == "grant-call-allowance" {
 			return payload["boundary"], true
 		}
+	case "native_allowance_committed":
+		if phase == "grant-call-allowance" {
+			return payload["boundary"], true
+		}
 	case "handoff_start_returned":
 		if phase == "handoff-start" {
 			return payload["boundary"], true
@@ -427,7 +431,11 @@ func (runner *Runner) withPhysicalInvocationDispatchForContext(
 		// durable known yield still protected by its original Kernel scope.
 		return snapshot, errors.Join(ErrExecutionOutcomeUnknown, physicalErr)
 	}
-	return snapshot, errors.Join(physicalErr, runner.finishPhysicalDispatchGrant(ctx, grant, "physical_dispatch_returned"))
+	boundary := "physical_dispatch_returned"
+	if phase == "grant-call-allowance" && nativeAgent && physicalErr == nil {
+		boundary = "native_allowance_committed"
+	}
+	return snapshot, errors.Join(physicalErr, runner.finishPhysicalDispatchGrant(ctx, grant, boundary))
 }
 
 // beginPhysicalInvocationDispatch is shared by Kernel Feature operations and
@@ -468,7 +476,22 @@ func (runner *Runner) beginPhysicalInvocationDispatch(
 		ParentItemID: ExecutionDispatchParentItemID, Payload: payload,
 		CreatedAt: now, UpdatedAt: now,
 	}
-	if _, fresh, appendErr := runner.store.AppendItem(ctx, grant); appendErr != nil || !fresh {
+	if phase == "grant-call-allowance" {
+		if original, ok := ctx.Value(allowanceGrantKey{}).(string); ok {
+			grant.ID = original
+		}
+	}
+	_, fresh, appendErr := runner.store.AppendItem(ctx, grant)
+	if phase == "resume" && errors.Is(appendErr, ErrConflict) {
+		repaired, repairErr := runner.recoverAllowanceDispatch(ctx, invocation)
+		if repairErr != nil {
+			return Item{}, errors.Join(ErrConflict, repairErr)
+		}
+		if repaired {
+			_, fresh, appendErr = runner.store.AppendItem(ctx, grant)
+		}
+	}
+	if appendErr != nil || !fresh {
 		return Item{}, errors.Join(ErrConflict, appendErr)
 	}
 	if parentErr := runner.requireLiveInvocationParents(ctx, invocation); parentErr != nil {
