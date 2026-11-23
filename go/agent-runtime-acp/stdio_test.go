@@ -66,7 +66,7 @@ func TestACPStdioSDKV1ExternalAgentAndSessionBinding(t *testing.T) {
 }
 func TestACPStdioPermissionDenyAndSelection(t *testing.T) {
 	calls := 0
-	run := &stdioRun{sessionID: "bound"}
+	run := &stdioRun{sessionID: "bound", promptActive: true}
 	cb := &stdioCallbacks{runID: "run", run: run}
 	query := wire.RequestPermissionRequest{SessionId: "bound", Options: []wire.PermissionOption{
 		{OptionId: "allow-once", Name: "Allow once", Kind: "allow_once"},
@@ -89,5 +89,87 @@ func TestACPStdioPermissionDenyAndSelection(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Fatalf("unauthorized Host callback invoked %d", calls)
+	}
+}
+
+// A remote Agent has no permission authority merely because session/new
+// returned a SessionID. Cancelling an admitted Prompt revokes pending
+// permission choices, even when Host approval is still in flight.
+func TestACPStdioPermissionRequiresOriginalActivePrompt(t *testing.T) {
+	run := &stdioRun{sessionID: "bound"}
+	called := 0
+	cb := &stdioCallbacks{runID: "run", run: run,
+		decision: func(context.Context, string, wire.RequestPermissionRequest) (wire.PermissionOptionId, bool) {
+			called++
+			return "approve", true
+		}}
+	q := wire.RequestPermissionRequest{SessionId: "bound", Options: []wire.PermissionOption{
+		{OptionId: "approve", Name: "Approve", Kind: "allow_once"},
+	}}
+	assertDenied := func(why string) {
+		t.Helper()
+		result, err := cb.RequestPermission(t.Context(), q)
+		if err != nil || result.Outcome.Cancelled == nil {
+			t.Fatalf("%s: unexpected grant %+v err=%v", why, result, err)
+		}
+	}
+	assertDenied("before Prompt admission")
+	if called != 0 {
+		t.Fatal("Host was asked to approve an unadmitted external effect")
+	}
+	run.mu.Lock()
+	run.promptActive = true
+	run.mu.Unlock()
+	result, err := cb.RequestPermission(t.Context(), q)
+	if err != nil || result.Outcome.Selected == nil || called != 1 {
+		t.Fatalf("admitted approval rejected: %+v %v", result, err)
+	}
+	run.mu.Lock()
+	run.cancelRequested = true
+	run.mu.Unlock()
+	assertDenied("after cancellation intent")
+	if called != 1 {
+		t.Fatal("Host approval invoked after cancellation")
+	}
+	run.mu.Lock()
+	run.cancelRequested = false
+	run.promptActive = false
+	run.mu.Unlock()
+	assertDenied("after Prompt returned")
+	if called != 1 {
+		t.Fatal("Host approval invoked after completion")
+	}
+}
+
+func TestACPStdioPermissionCancelWhileHostDecisionPending(t *testing.T) {
+	run := &stdioRun{sessionID: "bound", promptActive: true}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	cb := &stdioCallbacks{runID: "run", run: run,
+		decision: func(context.Context, string, wire.RequestPermissionRequest) (wire.PermissionOptionId, bool) {
+			close(entered)
+			<-release
+			return "approve", true
+		}}
+	q := wire.RequestPermissionRequest{SessionId: "bound", Options: []wire.PermissionOption{
+		{OptionId: "approve", Name: "Approve", Kind: "allow_once"},
+	}}
+	type outcome struct {
+		result wire.RequestPermissionResponse
+		err    error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		result, err := cb.RequestPermission(context.Background(), q)
+		done <- outcome{result, err}
+	}()
+	<-entered
+	run.mu.Lock()
+	run.cancelRequested = true
+	run.mu.Unlock()
+	close(release)
+	got := <-done
+	if got.err != nil || got.result.Outcome.Cancelled == nil {
+		t.Fatalf("permission outlived cancellation: %+v %v", got.result, got.err)
 	}
 }

@@ -30,11 +30,13 @@ type StdioClient struct {
 	runs   map[string]*stdioRun
 }
 type stdioRun struct {
-	mu        sync.Mutex
-	process   *stdio.ClientProcess
-	sessionID string
-	onChunk   func(string) error
-	invalid   bool
+	mu              sync.Mutex
+	process         *stdio.ClientProcess
+	sessionID       string
+	onChunk         func(string) error
+	promptActive    bool
+	cancelRequested bool
+	invalid         bool
 }
 
 func NewStdioClient(config StdioConfig) (*StdioClient, error) {
@@ -57,18 +59,23 @@ type stdioCallbacks struct {
 
 func (cb *stdioCallbacks) SessionUpdate(_ context.Context, n wire.SessionNotification) error {
 	cb.run.mu.Lock()
+	defer cb.run.mu.Unlock()
 	if cb.run.sessionID == "" || string(n.SessionId) != cb.run.sessionID {
 		cb.run.invalid = true
-		cb.run.mu.Unlock()
 		return ErrSessionMismatch
 	}
-	deliver := cb.run.onChunk
-	cb.run.mu.Unlock()
-	if n.Update.AgentMessageChunk != nil && n.Update.AgentMessageChunk.Content.Text != nil &&
-		deliver != nil {
-		return deliver(n.Update.AgentMessageChunk.Content.Text.Text)
+	if n.Update.AgentMessageChunk == nil || n.Update.AgentMessageChunk.Content.Text == nil {
+		return nil
 	}
-	return nil
+	if !cb.run.promptActive || cb.run.onChunk == nil {
+		// No original Prompt owns this agent output. Refuse unsolicited
+		// chunks rather than letting another logical turn inherit them.
+		cb.run.invalid = true
+		return ErrOutcomeUnknown
+	}
+	// Serialize original notifications with Prompt return. The original
+	// prompt cannot be terminally signed while a stream callback is active.
+	return cb.run.onChunk(n.Update.AgentMessageChunk.Content.Text.Text)
 }
 func (cb *stdioCallbacks) RequestPermission(ctx context.Context, q wire.RequestPermissionRequest) (wire.RequestPermissionResponse, error) {
 	deny := wire.RequestPermissionResponse{Outcome: wire.NewRequestPermissionOutcomeCancelled()}
@@ -77,16 +84,26 @@ func (cb *stdioCallbacks) RequestPermission(ctx context.Context, q wire.RequestP
 	if !same {
 		cb.run.invalid = true
 	}
+	admitted := cb.run.promptActive && !cb.run.cancelRequested && !cb.run.invalid
 	cb.run.mu.Unlock()
 	if !same {
 		return deny, ErrSessionMismatch
 	}
-	if cb.decision == nil {
+	// A session/new acknowledgement is not a Host authorization to run
+	// tools. Permission requests require an already admitted physical Prompt
+	// and are revoked when its cancellation begins or it returns.
+	if !admitted || cb.decision == nil {
 		return deny, nil
 	}
 	option, approved := cb.decision(ctx, cb.runID, q)
 	if !approved {
 		return deny, nil
+	}
+	cb.run.mu.Lock()
+	stillAdmitted := cb.run.promptActive && !cb.run.cancelRequested && !cb.run.invalid && cb.run.sessionID == string(q.SessionId)
+	cb.run.mu.Unlock()
+	if !stillAdmitted {
+		return deny, nil // Host may have cancelled while permission was being decided.
 	}
 	for _, offered := range q.Options {
 		if offered.OptionId == option && option != "" {
@@ -156,6 +173,7 @@ func (c *StdioClient) Prompt(ctx context.Context, runID, sessionID, goal string,
 	}
 	run.mu.Lock()
 	run.onChunk = onChunk
+	run.promptActive = true
 	process := run.process
 	run.mu.Unlock()
 	defer c.closeRun(runID, run)
@@ -164,6 +182,8 @@ func (c *StdioClient) Prompt(ctx context.Context, runID, sessionID, goal string,
 		Prompt:    []wire.ContentBlock{wire.TextBlock(goal)},
 	})
 	run.mu.Lock()
+	run.promptActive = false
+	run.onChunk = nil
 	invalid := run.invalid
 	run.mu.Unlock()
 	if invalid {
@@ -180,6 +200,7 @@ func (c *StdioClient) CancelSession(ctx context.Context, runID, sessionID string
 		return err
 	}
 	run.mu.Lock()
+	run.cancelRequested = true // The original Cancel intent revokes future permission grants.
 	process := run.process
 	run.mu.Unlock()
 	return process.Connection.Cancel(ctx, wire.CancelNotification{SessionId: wire.SessionId(sessionID)})

@@ -2,7 +2,6 @@ package acp
 
 import (
 	"context"
-	"errors"
 	"io"
 	"path/filepath"
 	"strings"
@@ -83,7 +82,10 @@ func (h *Host) NewSession(ctx context.Context, req wire.NewSessionRequest) (wire
 	}
 	resp, err := h.backend.NewSession(ctx, req)
 	if err != nil || strings.TrimSpace(string(resp.SessionId)) == "" {
-		return wire.NewSessionResponse{}, errors.Join(ErrInvalidBinding, err)
+		// Backend NewSession may have created a remote-visible session
+		// before its reply was lost. Never return an upstream error string
+		// (which may contain credentials) to the ACP peer.
+		return wire.NewSessionResponse{}, ErrOutcomeUnknown
 	}
 	if h.authorize(ctx, "session/created", string(resp.SessionId)) != nil {
 		// The Host's NewSession has already produced an effect. A late
@@ -107,10 +109,12 @@ func (h *Host) Prompt(ctx context.Context, req wire.PromptRequest) (wire.PromptR
 	stream := h.newStream(ctx, req.SessionId)
 	resp, err := h.backend.Prompt(ctx, req, stream.send)
 	if streamErr := stream.finish(); streamErr != nil {
-		return wire.PromptResponse{}, streamErr
+		return wire.PromptResponse{}, ErrOutcomeUnknown
 	}
 	if err != nil {
-		return wire.PromptResponse{}, err
+		// Provider/Tool errors belong to the Host's original execution
+		// evidence, not the untrusted Client-facing ACP error channel.
+		return wire.PromptResponse{}, ErrOutcomeUnknown
 	}
 	switch resp.StopReason {
 	case wire.StopReasonEndTurn, wire.StopReasonCancelled, wire.StopReasonMaxTokens,
@@ -125,9 +129,15 @@ func (h *Host) Cancel(ctx context.Context, n wire.CancelNotification) error {
 		h.authorize(ctx, "session/cancel", string(n.SessionId)) != nil {
 		return ErrInvalidBinding
 	}
-	return h.backend.Cancel(ctx, n)
+	if err := h.backend.Cancel(ctx, n); err != nil {
+		return ErrOutcomeUnknown // notification may already have taken effect
+	}
+	return nil
 }
 func (h *Host) LoadSession(ctx context.Context, req wire.LoadSessionRequest) (wire.LoadSessionResponse, error) {
+	if h == nil {
+		return wire.LoadSessionResponse{}, ErrInvalidBinding
+	}
 	loader, ok := h.backend.(HostedLoader)
 	if !ok || h.authorize(ctx, "session/load", string(req.SessionId)) != nil ||
 		!filepath.IsAbs(req.Cwd) || len(req.McpServers) != 0 ||
@@ -136,19 +146,26 @@ func (h *Host) LoadSession(ctx context.Context, req wire.LoadSessionRequest) (wi
 	}
 	stream := h.newStream(ctx, req.SessionId)
 	response, err := loader.LoadSession(ctx, req, stream.send)
-	if streamErr := stream.finish(); streamErr != nil {
-		return wire.LoadSessionResponse{}, streamErr
+	if streamErr := stream.finish(); streamErr != nil || err != nil {
+		return wire.LoadSessionResponse{}, ErrOutcomeUnknown
 	}
-	return response, err
+	return response, nil
 }
 func (h *Host) ResumeSession(ctx context.Context, req wire.ResumeSessionRequest) (wire.ResumeSessionResponse, error) {
+	if h == nil {
+		return wire.ResumeSessionResponse{}, ErrInvalidBinding
+	}
 	resumer, ok := h.backend.(HostedResumer)
 	if !ok || h.authorize(ctx, "session/resume", string(req.SessionId)) != nil ||
 		!filepath.IsAbs(req.Cwd) || len(req.McpServers) != 0 ||
 		len(req.AdditionalDirectories) != 0 || req.SystemPrompt != nil {
 		return wire.ResumeSessionResponse{}, ErrInvalidBinding
 	}
-	return resumer.ResumeSession(ctx, req)
+	response, err := resumer.ResumeSession(ctx, req)
+	if err != nil {
+		return wire.ResumeSessionResponse{}, ErrOutcomeUnknown
+	}
+	return response, nil
 }
 
 // sessionStream is a scoped physical notification lease. The Host backend
