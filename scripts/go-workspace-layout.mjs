@@ -8,6 +8,7 @@ export const modules = [
   "go/agent-runtime-mcp",
   "go/agent-runtime-otel",
   "go/agent-runtime-a2a",
+  "go/agent-runtime-acp",
   "go/agent-runtime-postgres",
   "go/agent-runtime-sqlite",
   "go/agent-runtime-redis",
@@ -20,7 +21,7 @@ export const modules = [
 // 280/330/328-second groups. These are scheduling hints, never test filters.
 export const shards = {
   core: ["go/agent-runtime", "go/agent-runtime-mcp", "go/agent-runtime-otel",
-    "go/agent-runtime-a2a", "go/agent-runtime-postgres", "go/agent-runtime-redis"],
+    "go/agent-runtime-a2a", "go/agent-runtime-acp", "go/agent-runtime-postgres", "go/agent-runtime-redis"],
   sqlite: ["go/agent-runtime-harness-sqlite", "go/agent-runtime-sqlite"],
   adapters: ["go/agent-runtime-provider", "go/agent-runtime-harness",
     "go/agent-runtime-harness/examples/task-agent", "go/agent-runtime-harness-postgres",

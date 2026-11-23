@@ -3,6 +3,7 @@ go 1.27.4
 use (
 	./go/agent-runtime
 	./go/agent-runtime-a2a
+	./go/agent-runtime-acp
 	./go/agent-runtime-harness
 	./go/agent-runtime-harness-postgres
 	./go/agent-runtime-harness-sqlite
