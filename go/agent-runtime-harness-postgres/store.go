@@ -77,18 +77,6 @@ func (store *Store) CreateInvocation(ctx context.Context, value harness.Invocati
 	if err != nil {
 		return harness.Invocation{}, false, err
 	}
-	// Standalone persistence conformance permits an Invocation record before
-	// its Turn envelope exists. With no Turn there can be no cancellation
-	// intent; retain the direct root-unique INSERT in that isolated case.
-	var existingTurn turnRecord
-	loadTurnErr := store.db.WithContext(ctx).Select("id").Where("id = ?", value.TurnID).Take(&existingTurn).Error
-	if errors.Is(loadTurnErr, gorm.ErrRecordNotFound) {
-		return createOrReplay(ctx, store.db, &record, value,
-			func() (harness.Invocation, error) { return store.GetInvocation(ctx, value.ID) }, sameInvocation)
-	}
-	if loadTurnErr != nil {
-		return harness.Invocation{}, false, loadTurnErr
-	}
 	var saved harness.Invocation
 	fresh := false
 	err = store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -114,17 +102,16 @@ func (store *Store) CreateInvocation(ctx context.Context, value harness.Invocati
 		if checkErr := checkCancellationFenceTx(tx, value.TurnID); checkErr != nil {
 			return checkErr
 		}
-		result := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&record)
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected != 1 {
-			return harness.ErrConflict
-		}
-		saved, fresh = value, true
-		return nil
+		// A standalone Invocation may precede its Turn. The unique insert and
+		// any replay still share the same transaction as the admission check.
+		saved, fresh, err = createOrReplay(ctx, tx, &record, value,
+			func() (harness.Invocation, error) { return (&Store{db: tx}).GetInvocation(ctx, value.ID) }, sameInvocation)
+		return err
 	})
-	return saved, fresh, err
+	if err != nil {
+		return harness.Invocation{}, false, err
+	}
+	return saved, fresh, nil
 }
 
 func (store *Store) GetInvocation(ctx context.Context, id string) (harness.Invocation, error) {
@@ -769,12 +756,19 @@ func createOrReplay[T any](
 	load func() (T, error),
 	same func(T, T) bool,
 ) (T, bool, error) {
-	if err := db.WithContext(ctx).Create(record).Error; err == nil {
+	var zero T
+	result := db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(record)
+	if result.Error != nil {
+		return zero, false, result.Error
+	}
+	if result.RowsAffected == 1 {
 		return value, true, nil
 	}
 	existing, err := load()
+	if err != nil && !errors.Is(err, harness.ErrNotFound) {
+		return zero, false, err
+	}
 	if err != nil || !same(existing, value) {
-		var zero T
 		return zero, false, harness.ErrConflict
 	}
 	return existing, false, nil
@@ -1013,14 +1007,11 @@ func (store *Store) PutConfigSnapshot(ctx context.Context, value harness.ConfigS
 	if err != nil {
 		return harness.ConfigSnapshot{}, false, err
 	}
-	if err = store.db.WithContext(ctx).Create(&record).Error; err == nil {
-		return value, true, nil
-	}
-	existing, loadErr := store.GetConfigSnapshot(ctx, value.ID)
-	if loadErr != nil || existing.TurnID != value.TurnID || existing.ContentHash != value.ContentHash {
-		return harness.ConfigSnapshot{}, false, harness.ErrConflict
-	}
-	return existing, false, nil
+	return createOrReplay(ctx, store.db, &record, value,
+		func() (harness.ConfigSnapshot, error) { return store.GetConfigSnapshot(ctx, value.ID) },
+		func(left, right harness.ConfigSnapshot) bool {
+			return left.TurnID == right.TurnID && left.ContentHash == right.ContentHash
+		})
 }
 
 func (store *Store) GetConfigSnapshot(ctx context.Context, id string) (harness.ConfigSnapshot, error) {

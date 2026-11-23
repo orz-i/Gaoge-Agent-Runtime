@@ -14,6 +14,7 @@ import (
 	harnesspostgres "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-postgres"
 	postgres "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres"
 	nativesqlite "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/profile/testprofile"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
@@ -36,10 +37,7 @@ var generationBackends = []string{"memory", "sql", "native-sqlite"}
 
 func generationNativeSQLite(t *testing.T) *nativesqlite.Store {
 	t.Helper()
-	dir := t.TempDir()
-	if err := os.Chmod(dir, 0700); err != nil {
-		t.Fatal(err)
-	}
+	dir := testprofile.Dir(t)
 	s, err := nativesqlite.CreateNew(t.Context(), filepath.Join(dir, "kernel.sqlite"))
 	if err != nil {
 		t.Fatal(err)
