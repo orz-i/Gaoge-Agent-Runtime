@@ -228,7 +228,7 @@ func runSelectedHostedParentToolWithFrozenContext(t *testing.T, childModel strin
 
 // Host-selected Agent instructions and Context preparation seal one
 // original Model request without a second Role schema interpreter.
-func TestHostSelectedAgentCompatibleWithFrozenContextPreparation(t *testing.T) {
+func TestHostSelectedAgentCompatibleWithFrozenContextRequest(t *testing.T) {
 	for _, selected := range [][]string{nil, {scopedSearchKey}} {
 		runSelectedHostedParentToolWithFrozenContext(t, "specialist-model", selected, true, true)
 	}

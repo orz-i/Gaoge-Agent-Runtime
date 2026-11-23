@@ -1,5 +1,32 @@
 # Breaking changes (pre-stable Beta)
 
+## Context Sampling hard cut — one active bounded Context execution path
+
+**Breaking Go SDK surface (pre-stable):** remove the previously exported
+`agent.NewSamplingBoundedContextAdapter`, `agent.SamplingContextPorts`, the
+`SamplingPlan` / `SamplingEvaluation` family and
+`agent.Dependencies.ContextPreparation`. The synchronous Sampling planner had
+no production Host implementer or call site in this repository; it was a
+second, independently checked model-preparation/callback path that could never
+be selected by the supported Harness Session. Its private `prepareSelectedContext`
+branch and unused tests have been deleted, not redirected through a bridge.
+
+**WorkingState Summary remains supported.** Native summary orchestration,
+`ContextSummaryPorts`, `ManagedContextRecovery`, `SummaryNativeRecovery`,
+normal bounded Context compaction and original physical-effect/Context commit
+proofs are unchanged. Shared Cursor/Turn/receipt types formerly named
+`SamplingTurn`, `SamplingCheckpointRef`, `SamplingCursor`,
+`SamplingCommitReceipt` and `SamplingBindingReceipt` are now Summary-owned
+`SummaryTurn`, `SummaryCheckpointRef`, `SummaryCursor`,
+`SummaryCommitReceipt` and `SummaryBindingReceipt`. Their persisted JSON
+fields, frozen identity and original commit/ACK behavior are unchanged.
+
+If an external pre-stable Host uses the removed Sampling-only API, stop its
+workers and reconcile all outstanding original callbacks before upgrading;
+select the existing bounded Context/summary APIs for new Starts. Do not
+pretend an unknown Sampling callback completed, alter frozen metadata or
+retrofit an outstanding Run. There is no SQL migration or legacy decoder.
+
 ## PR #146 continuation — one Agent Session and lazy Skills
 
 **Breaking pre-stable Config/Context and Go Session contract:** remove the

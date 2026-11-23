@@ -25,13 +25,13 @@ func (runner *Runner) consumeContextSummary(ctx context.Context, snapshot kernel
 	if err != nil {
 		return snapshot, err
 	}
-	read.SourceCheckpoint = cloneSamplingCheckpoint(read.SourceCheckpoint)
-	read.Cursor = cloneSamplingCursor(read.Cursor)
+	read.SourceCheckpoint = cloneSummaryCheckpoint(read.SourceCheckpoint)
+	read.Cursor = cloneSummaryCursor(read.Cursor)
 	if !callbackscope.Operation(ctx, adapter.bounded, "context.summary.read", read) || read.Root != binding.Root ||
 		!summarySourceMatches(binding.Source, read.SourceCheckpoint) || read.SourceCheckpoint.ScopeID != binding.Cursor.Turn.SessionID ||
 		read.Cursor.ExpectedHeadCheckpointID != binding.Cursor.ExpectedHeadCheckpointID ||
 		!runtimecontext.ValidCheckpoint(read.Cursor.Checkpoint) || read.Cursor.Turn.ContextCheckpointID != read.Cursor.Checkpoint.ID ||
-		!sameBoundedValue(read.Cursor.Turn.ContextRef, samplingRef(read.Cursor.Checkpoint)) {
+		!sameBoundedValue(read.Cursor.Turn.ContextRef, summaryRef(read.Cursor.Checkpoint)) {
 		return snapshot, ErrInvalidRequest
 	}
 	working, parseErr := WorkingStateFromSummaryInvocation(invocation)
@@ -99,12 +99,12 @@ func (runner *Runner) consumeContextSummary(ctx context.Context, snapshot kernel
 			if err = runner.runtime.RequireExecution(ctx, snapshot.Run.ID); err != nil {
 				return snapshot, err
 			}
-			receipt, commitErr := adapter.ports.CommitSummary(ctx, cloneSamplingCursor(cursor), runtimecontext.CloneCheckpoint(*target))
+			receipt, commitErr := adapter.ports.CommitSummary(ctx, cloneSummaryCursor(cursor), runtimecontext.CloneCheckpoint(*target))
 			if commitErr != nil {
 				return snapshot, commitErr
 			}
 			expected := cursor.Turn
-			expected.ContextCheckpointID, expected.ContextRef = target.ID, samplingRef(*target)
+			expected.ContextCheckpointID, expected.ContextRef = target.ID, summaryRef(*target)
 			expected.Revision++
 			expected.UpdatedAt = cursor.UpdatedAt
 			if !sameBoundedValue(receipt.Turn, expected) || !sameBoundedValue(receipt.Checkpoint, *target) ||
@@ -116,7 +116,7 @@ func (runner *Runner) consumeContextSummary(ctx context.Context, snapshot kernel
 		if err = runner.runtime.RequireExecution(ctx, snapshot.Run.ID); err != nil {
 			return snapshot, err
 		}
-		bound, bindErr := adapter.ports.BindSummary(ctx, cloneSamplingCursor(cursor), runtimecontext.CloneCheckpoint(*target))
+		bound, bindErr := adapter.ports.BindSummary(ctx, cloneSummaryCursor(cursor), runtimecontext.CloneCheckpoint(*target))
 		if bindErr != nil {
 			return snapshot, bindErr
 		}
@@ -141,15 +141,15 @@ func (runner *Runner) consumeContextSummary(ctx context.Context, snapshot kernel
 	return next, err
 }
 
-func reconcileSummaryCursor(binding ContextSummaryBinding, read ContextSummaryRead, target *runtimecontext.Checkpoint) (SamplingCursor, bool, error) {
-	cursor := cloneSamplingCursor(read.Cursor)
+func reconcileSummaryCursor(binding ContextSummaryBinding, read ContextSummaryRead, target *runtimecontext.Checkpoint) (SummaryCursor, bool, error) {
+	cursor := cloneSummaryCursor(read.Cursor)
 	if cursor.Turn.ID != binding.Cursor.Turn.ID || cursor.Turn.SessionID != binding.Cursor.Turn.SessionID ||
 		cursor.Turn.ConfigSnapshotID != binding.Cursor.Turn.ConfigSnapshotID || cursor.ExpectedTurnCheckpointID != cursor.Checkpoint.ID {
-		return SamplingCursor{}, false, ErrInvalidRequest
+		return SummaryCursor{}, false, ErrInvalidRequest
 	}
 	if cursor.Checkpoint.ID == binding.Source.CheckpointID {
 		if !sameBoundedValue(cursor.Checkpoint, read.SourceCheckpoint) || !summaryTurnProjection(binding.Cursor.Turn, cursor.Turn) {
-			return SamplingCursor{}, false, ErrInvalidRequest
+			return SummaryCursor{}, false, ErrInvalidRequest
 		}
 		cursor.ExpectedHeadCheckpointID = binding.Cursor.ExpectedHeadCheckpointID
 		cursor.UpdatedAt = binding.Cursor.UpdatedAt
@@ -159,10 +159,10 @@ func reconcileSummaryCursor(binding ContextSummaryBinding, read ContextSummaryRe
 		return cursor, false, nil
 	}
 	if target == nil || !sameBoundedValue(cursor.Checkpoint, *target) {
-		return SamplingCursor{}, false, ErrInvalidRequest
+		return SummaryCursor{}, false, ErrInvalidRequest
 	}
 	expected := binding.Cursor.Turn
-	expected.ContextCheckpointID, expected.ContextRef = target.ID, samplingRef(*target)
+	expected.ContextCheckpointID, expected.ContextRef = target.ID, summaryRef(*target)
 	expected.Revision++
 	expected.UpdatedAt = binding.Cursor.UpdatedAt
 	// The source path clamps its write time to the original Turn. Rebuild the
@@ -182,5 +182,5 @@ func reconcileSummaryCursor(binding ContextSummaryBinding, read ContextSummaryRe
 			return cursor, true, nil
 		}
 	}
-	return SamplingCursor{}, false, ErrInvalidRequest
+	return SummaryCursor{}, false, ErrInvalidRequest
 }

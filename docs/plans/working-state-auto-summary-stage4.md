@@ -18,9 +18,10 @@ inline 历史；被替换的原文仍完整保存在现有 Artifacts。摘要是
 `PrepareModelRequest`、`TranscriptSource` 或 TokenCounter 内调用 Provider，
 不增加 Kernel RunKind、Store 接口、调度器、执行权或摘要账本。
 
-当前 `SamplingContextPorts` 是请求准备、计量、归档和 checkpoint CAS 的
-有限算法端口，并不是已有的 durable summary/Sampler。Harness 目前也没有
-`PlanSampling` / `EvaluateSampling` 接线，不能把它当现成摘要引擎。
+历史调研时 `SamplingContextPorts` 曾作为另一套请求准备、计量、归档和
+checkpoint CAS 算法端口，但 Harness 未接入 `PlanSampling` / `EvaluateSampling`。
+该试验分支已在 PR #146 整体删除；当前 WorkingState Summary 使用原生
+`ContextSummaryPorts`，不依赖已退役的 Sampling 协议。
 
 ## 第一版边界
 

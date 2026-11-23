@@ -5,6 +5,15 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- **Context Sampling hard cut (PR #146, Q4 scope):** delete the unused,
+  never-wired `SamplingContextPorts` / `NewSamplingBoundedContextAdapter`
+  interpreter, `Dependencies.ContextPreparation` selector and their alternate
+  sampling callback/commit path. Ordinary Bounded Context and the original
+  WorkingState Summary/ManagedRecovery execution and native recovery remain
+  intact; summary-owned Cursor, receipt and lossless copies are housed in the
+  Summary code rather than retaining an obsolete Sampling API. No replacement
+  executor, compatibility shim, Store table or new execution status.
+
 - **Agent convergence Q1–Q5 follow-up (PR #146):** The recommended
   `OpenAgentSession` now supports durable SharedBudget (with original trusted
   bounded Budget callbacks), Host-authorized member-only specialist tools,

@@ -33,11 +33,11 @@ func (p contextSummaryPorts) ContextSummaryRecoveryHost() kernel.ManagedRecovery
 	return host
 }
 
-func summarySamplingTurn(turn Turn) agent.SamplingTurn {
-	value := agent.SamplingTurn{
+func summaryTurn(turn Turn) agent.SummaryTurn {
+	value := agent.SummaryTurn{
 		ID: turn.ID, SessionID: turn.SessionID, ConfigSnapshotID: turn.ConfigSnapshotID,
 		ContextCheckpointID: turn.ContextCheckpointID,
-		ContextRef: agent.SamplingCheckpointRef{
+		ContextRef: agent.SummaryCheckpointRef{
 			ID: turn.ContextRef.ID, Generation: turn.ContextRef.Generation, Revision: turn.ContextRef.Revision,
 			LineageHash: turn.ContextRef.LineageHash, CoveredThroughSourceID: turn.ContextRef.CoveredThroughSourceID, ContentHash: turn.ContextRef.ContentHash,
 		},
@@ -145,8 +145,8 @@ func (p contextSummaryPorts) PlanSummary(ctx context.Context, incoming model.Req
 		return agent.ContextSummaryPlan{}, ErrInvalidRequest
 	}
 	result.Root = summaryRoot(invocation)
-	result.Cursor = agent.SamplingCursor{
-		Turn: summarySamplingTurn(turn), Checkpoint: runtimecontext.CloneCheckpoint(*plan.Checkpoint),
+	result.Cursor = agent.SummaryCursor{
+		Turn: summaryTurn(turn), Checkpoint: runtimecontext.CloneCheckpoint(*plan.Checkpoint),
 		// PostgreSQL persists Turn timestamps at microsecond precision. Freeze
 		// those exact representable bytes before hashing the summary recipe;
 		// an ACK-loss replay must not widen equality to accept a changed time.
@@ -229,42 +229,42 @@ func (p contextSummaryPorts) ReadSummary(ctx context.Context, binding agent.Cont
 	}
 	return agent.ContextSummaryRead{
 		SourceCheckpoint: source, Root: summaryRoot(invocation),
-		Cursor: agent.SamplingCursor{Turn: summarySamplingTurn(turn), Checkpoint: checkpoint,
+		Cursor: agent.SummaryCursor{Turn: summaryTurn(turn), Checkpoint: checkpoint,
 			ExpectedTurnCheckpointID: checkpoint.ID, ExpectedHeadCheckpointID: binding.Cursor.ExpectedHeadCheckpointID, UpdatedAt: binding.Cursor.UpdatedAt},
 	}, nil
 }
 
-func (p contextSummaryPorts) CommitSummary(ctx context.Context, cursor agent.SamplingCursor, next runtimecontext.Checkpoint) (agent.SamplingCommitReceipt, error) {
+func (p contextSummaryPorts) CommitSummary(ctx context.Context, cursor agent.SummaryCursor, next runtimecontext.Checkpoint) (agent.SummaryCommitReceipt, error) {
 	turn, err := p.store.CommitContextCheckpoint(ctx, ContextCheckpointCommit{
 		TurnID: cursor.Turn.ID, ExpectedTurnRevision: cursor.Turn.Revision,
 		ExpectedTurnCheckpointID: cursor.ExpectedTurnCheckpointID, ExpectedHeadCheckpointID: cursor.ExpectedHeadCheckpointID,
 		Checkpoint: next, UpdatedAt: cursor.UpdatedAt,
 	})
 	if err != nil {
-		return agent.SamplingCommitReceipt{}, err
+		return agent.SummaryCommitReceipt{}, err
 	}
 	checkpoint, err := p.store.GetContextCheckpoint(ctx, next.ID)
 	if err != nil {
-		return agent.SamplingCommitReceipt{}, err
+		return agent.SummaryCommitReceipt{}, err
 	}
-	return agent.SamplingCommitReceipt{Turn: summarySamplingTurn(turn), Checkpoint: checkpoint,
+	return agent.SummaryCommitReceipt{Turn: summaryTurn(turn), Checkpoint: checkpoint,
 		ExpectedTurnCheckpointID: cursor.ExpectedTurnCheckpointID, ExpectedHeadCheckpointID: cursor.ExpectedHeadCheckpointID}, nil
 }
 
-func (p contextSummaryPorts) BindSummary(ctx context.Context, cursor agent.SamplingCursor, next runtimecontext.Checkpoint) (agent.SamplingBindingReceipt, error) {
+func (p contextSummaryPorts) BindSummary(ctx context.Context, cursor agent.SummaryCursor, next runtimecontext.Checkpoint) (agent.SummaryBindingReceipt, error) {
 	previous, found := CurrentContextCheckpoint(ctx)
 	binding, bound := CurrentContextWindowBinding(ctx)
 	if !found || !bound || binding.TurnID != cursor.Turn.ID || binding.Access != ContextWindowOwner || !reflect.DeepEqual(previous, cursor.Checkpoint) {
-		return agent.SamplingBindingReceipt{}, ErrConflict
+		return agent.SummaryBindingReceipt{}, ErrConflict
 	}
 	if previous.ID != next.ID {
 		if err := ReplaceContextCheckpoint(ctx, previous.ID, next); err != nil {
-			return agent.SamplingBindingReceipt{}, err
+			return agent.SummaryBindingReceipt{}, err
 		}
 	}
 	current, found := CurrentContextCheckpoint(ctx)
 	if !found {
-		return agent.SamplingBindingReceipt{}, ErrConflict
+		return agent.SummaryBindingReceipt{}, ErrConflict
 	}
-	return agent.SamplingBindingReceipt{TurnID: binding.TurnID, Access: string(binding.Access), Previous: previous, Current: current}, nil
+	return agent.SummaryBindingReceipt{TurnID: binding.TurnID, Access: string(binding.Access), Previous: previous, Current: current}, nil
 }

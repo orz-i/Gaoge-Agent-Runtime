@@ -43,7 +43,7 @@ func cloneContextSummaryBinding(value *ContextSummaryBinding) *ContextSummaryBin
 	copy := *value
 	copy.Artifacts = slices.Clone(value.Artifacts)
 	copy.PreviousEvidenceRefs = slices.Clone(value.PreviousEvidenceRefs)
-	copy.BusinessRequest = cloneSamplingRequest(value.BusinessRequest)
+	copy.BusinessRequest = cloneSummaryRequest(value.BusinessRequest)
 	return &copy
 }
 
@@ -58,7 +58,7 @@ func summarySourceMatches(source runtimecontext.WorkingStateSource, checkpoint r
 	return source == summarySource(checkpoint) && runtimecontext.ValidCheckpoint(checkpoint)
 }
 
-func summaryCursor(value SamplingCursor) ContextSummaryCursor {
+func summaryCursor(value SummaryCursor) ContextSummaryCursor {
 	return ContextSummaryCursor{Turn: value.Turn, ExpectedTurnCheckpointID: value.ExpectedTurnCheckpointID,
 		ExpectedHeadCheckpointID: value.ExpectedHeadCheckpointID, UpdatedAt: value.UpdatedAt}
 }
@@ -222,7 +222,7 @@ func VerifyWorkingStateSummaryOrigin(snapshot kernel.Snapshot, state *runtimecon
 
 // summaryTurnProjection permits only the one original Accepted-to-Running
 // projection. It never treats arbitrary revisions or status changes as retries.
-func summaryTurnProjection(original, current SamplingTurn) bool {
+func summaryTurnProjection(original, current SummaryTurn) bool {
 	if sameBoundedValue(original, current) {
 		return true
 	}

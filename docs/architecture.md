@@ -68,6 +68,19 @@ records. Recovery across the two files uses these records. A PostgreSQL Host
 can place both schemas in one database and uses the same recovery protocol.
 [Desktop Harness SQLite](../go/agent-runtime-harness-sqlite/README.md).
 
+## Context execution path
+
+The supported SDK composes one concrete `agent.NewBoundedContextAdapter` for
+Context hydration, bounded model-request preparation and exact artifact/
+checkpoint CAS. `ContextSummary` optionally performs a separate, frozen
+summary-purpose ModelInvocation under that same bounded lifecycle;
+`SummaryNativeRecovery` and managed Context recovery retain their own original
+Kernel proofs. The never-connected `SamplingContextPorts` alternative and
+`ContextPreparation` selector were retired before beta.24 instead of
+maintaining a second generic context executor. A Context receipt is not proof
+of an unknown Provider effect, and an unrelated Store ACK cannot authorize
+replaying a pending request.
+
 ## SubAgent composition
 
 A host may execute a standalone Agent without Harness. For durable specialist
