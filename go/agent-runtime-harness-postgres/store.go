@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"time"
@@ -28,18 +29,20 @@ func New(db *gorm.DB) (*Store, error) {
 	if db == nil {
 		return nil, ErrNilDatabase
 	}
+	if err := rejectLegacyInvocationColumns(db); err != nil {
+		return nil, err
+	}
 	return &Store{db: db}, nil
 }
 
 func sameInvocation(left, right harness.Invocation) bool {
 	return left.ID == right.ID && left.TurnID == right.TurnID && left.ParentItemID == right.ParentItemID &&
-		left.CapabilityKey == right.CapabilityKey && left.DefinitionVersion == right.DefinitionVersion &&
 		string(left.Input) == string(right.Input) &&
 		left.InputHash == right.InputHash && left.Attempt == right.Attempt
 }
 
 func invocationToRecord(value harness.Invocation) (invocationRecord, error) {
-	if value.ID == "" || value.TurnID == "" || value.CapabilityKey != harness.CapabilityAgent || value.Attempt <= 0 || value.Revision == 0 {
+	if !harness.ValidAgentInvocationForStore(value) {
 		return invocationRecord{}, harness.ErrInvalidRequest
 	}
 	outputRefs, err := json.Marshal(value.OutputRefs)
@@ -48,7 +51,6 @@ func invocationToRecord(value harness.Invocation) (invocationRecord, error) {
 	}
 	return invocationRecord{
 		ID: value.ID, TurnID: value.TurnID, ParentItemID: value.ParentItemID,
-		CapabilityKey: value.CapabilityKey, DefinitionVersion: value.DefinitionVersion,
 		InputJSON: string(value.Input), InputHash: value.InputHash, ExecutionRefID: value.ExecutionRefID,
 		Status: string(value.Status), Attempt: value.Attempt, OutputRefsJSON: string(outputRefs),
 		ErrorCode: value.ErrorCode, ErrorDetail: value.ErrorDetail, Revision: value.Revision,
@@ -57,16 +59,12 @@ func invocationToRecord(value harness.Invocation) (invocationRecord, error) {
 }
 
 func invocationFromRecord(value invocationRecord) (harness.Invocation, error) {
-	if value.CapabilityKey != harness.CapabilityAgent {
-		return harness.Invocation{}, harness.ErrConflict
-	}
 	var outputRefs []harness.HostRef
 	if err := json.Unmarshal([]byte(value.OutputRefsJSON), &outputRefs); err != nil {
 		return harness.Invocation{}, harness.ErrConflict
 	}
 	return harness.Invocation{
 		ID: value.ID, TurnID: value.TurnID, ParentItemID: value.ParentItemID,
-		CapabilityKey: value.CapabilityKey, DefinitionVersion: value.DefinitionVersion,
 		Input: json.RawMessage(value.InputJSON), InputHash: value.InputHash,
 		ExecutionRefID: value.ExecutionRefID, Status: harness.InvocationStatus(value.Status), Attempt: value.Attempt,
 		OutputRefs: outputRefs, ErrorCode: value.ErrorCode, ErrorDetail: value.ErrorDetail, Revision: value.Revision,
@@ -224,8 +222,8 @@ func (store *Store) UpdateInvocation(ctx context.Context, value harness.Invocati
 			}
 		}
 		result := tx.Model(&invocationRecord{}).
-			Where("id = ? AND revision = ? AND turn_id = ? AND parent_item_id = ? AND capability_key = ? AND definition_version = ? AND input_json = ? AND input_hash = ? AND attempt = ? AND execution_ref_id = ?",
-				value.ID, expectedRevision, value.TurnID, value.ParentItemID, value.CapabilityKey, value.DefinitionVersion,
+			Where("id = ? AND revision = ? AND turn_id = ? AND parent_item_id = ? AND input_json = ? AND input_hash = ? AND attempt = ? AND execution_ref_id = ?",
+				value.ID, expectedRevision, value.TurnID, value.ParentItemID,
 				record.InputJSON, value.InputHash, value.Attempt, value.ExecutionRefID).
 			// Enforce terminal immutability in the SAME atomic CAS as the state
 			// update, including across independent SQL connections. Explicit
@@ -382,7 +380,7 @@ func invalidInvocationRetryRequest(
 }
 
 func validStoredInvocationRetry(current harness.Invocation, expectedRevision uint64) bool {
-	return current.CapabilityKey == harness.CapabilityAgent && current.ParentItemID == "" &&
+	return harness.ValidAgentInvocationForStore(current) && current.ParentItemID == "" &&
 		current.Revision == expectedRevision && retryableInvocationStatus(current.Status) && len(current.Input) > 0
 }
 
@@ -791,6 +789,9 @@ func Migrate(db *gorm.DB) error {
 	if db == nil {
 		return ErrNilDatabase
 	}
+	if err := rejectLegacyInvocationColumns(db); err != nil {
+		return err
+	}
 	if err := checkInvocationRootMigration(db); err != nil {
 		return err
 	}
@@ -800,6 +801,23 @@ func Migrate(db *gorm.DB) error {
 		}
 		return initializeManagedAuthority(tx)
 	})
+}
+
+// The old Capability/Version columns can no longer certify an executable
+// first-party Agent. Stop instead of silently projecting a legacy row through
+// GORM's permissive AutoMigrate or New() and thereby elevating it to Agent.
+// A deliberate, verified, empty-Store SQL cutover is required before workers
+// may use the new schema; no compatibility decoder or guessing is permitted.
+func rejectLegacyInvocationColumns(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&invocationRecord{}) {
+		return nil
+	}
+	for _, column := range []string{"capability_key", "definition_version"} {
+		if db.Migrator().HasColumn(&invocationRecord{}, column) {
+			return fmt.Errorf("%w: obsolete invocation column %s; retire original Turns and Invocations, then apply the explicit Agent-only migration", harness.ErrConflict, column)
+		}
+	}
+	return nil
 }
 
 func checkInvocationRootMigration(db *gorm.DB) error {

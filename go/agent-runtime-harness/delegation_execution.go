@@ -215,12 +215,12 @@ func (runner *Runner) prepareHandoffChild(ctx context.Context, turn Turn, parent
 		return err
 	}
 	now := runner.clock.Now().UTC()
-	id, err := InvocationID(turn.ID, parentItemID, CapabilityAgent, delegation.ID)
+	id, err := AgentInvocationID(turn.ID, parentItemID, delegation.ID)
 	if err != nil {
 		return err
 	}
 	invocation, _, err := runner.createVerifiedInvocation(ctx, Invocation{
-		ID: id, TurnID: turn.ID, ParentItemID: parentItemID, CapabilityKey: CapabilityAgent, DefinitionVersion: RuntimeCapabilityVersion,
+		ID: id, TurnID: turn.ID, ParentItemID: parentItemID,
 		Input: input, InputHash: inputHash, ExecutionRefID: delegation.ChildRunID,
 		Status: InvocationAccepted, Attempt: 1, Revision: 1, OutputRefs: []HostRef{}, CreatedAt: now, UpdatedAt: now,
 	})
@@ -255,7 +255,7 @@ func decodeFrozenHandoffDelegation(raw json.RawMessage) (handoff.Delegation, err
 // admission by its frozen child identity. Every member delegation belongs to
 // its originally routed ChildRunner, never the Harness native Agent starter.
 func isHandoffDelegationInvocation(invocation Invocation) bool {
-	if invocation.ParentItemID == "" || invocation.CapabilityKey != CapabilityAgent || len(invocation.Input) == 0 ||
+	if invocation.ParentItemID == "" || !validInvocationIdentity(invocation) || len(invocation.Input) == 0 ||
 		hashInvocationBytes(invocation.Input) != invocation.InputHash {
 		return false
 	}
@@ -264,6 +264,6 @@ func isHandoffDelegationInvocation(invocation Invocation) bool {
 		strings.TrimSpace(delegation.ChildRunID) == "" || strings.TrimSpace(delegation.Goal) == "" {
 		return false
 	}
-	id, err := InvocationID(invocation.TurnID, invocation.ParentItemID, CapabilityAgent, delegation.ID)
+	id, err := AgentInvocationID(invocation.TurnID, invocation.ParentItemID, delegation.ID)
 	return err == nil && id == invocation.ID
 }

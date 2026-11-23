@@ -25,7 +25,7 @@ func BenchmarkChildParentAdmissionIndexed(b *testing.B) {
 			}
 			if _, _, err := backing.AppendItem(context.Background(), Item{
 				ID: "actual-parent", TurnID: turnID,
-				Kind: ItemInvocation, Status: ItemStarted,
+				Kind: ItemAgentInvocation, Status: ItemStarted,
 			}); err != nil {
 				b.Fatal(err)
 			}

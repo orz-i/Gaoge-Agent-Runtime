@@ -10,14 +10,13 @@ import (
 func originalTerminalHandoffFixture(t *testing.T) (Invocation, Invocation, []Item) {
 	t.Helper()
 	root := Invocation{ID: "root-invocation", TurnID: "turn-1", ExecutionRefID: "root-run",
-		CapabilityKey: CapabilityAgent,
-		Attempt:       1, Status: InvocationCompleted}
+		Attempt: 1, Status: InvocationCompleted}
 	delegation := handoff.Delegation{
 		ID: "original-delegation", ChildRunID: "original-child-run",
 		Goal: "investigate", MemberID: "original-member", Status: handoff.StatusQueued,
 	}
 	startID := stableID("hid", root.TurnID, delegation.ID, string(ItemStarted))
-	childID, err := InvocationID(root.TurnID, startID, CapabilityAgent, delegation.ID)
+	childID, err := AgentInvocationID(root.TurnID, startID, delegation.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,9 +34,8 @@ func originalTerminalHandoffFixture(t *testing.T) (Invocation, Invocation, []Ite
 		t.Fatal(err)
 	}
 	child := Invocation{ID: childID, TurnID: root.TurnID,
-		ParentItemID: startID, CapabilityKey: CapabilityAgent,
-		ExecutionRefID: delegation.ChildRunID,
-		Input:          input, InputHash: hash, Status: InvocationAccepted}
+		ParentItemID: startID, ExecutionRefID: delegation.ChildRunID,
+		Input: input, InputHash: hash, Status: InvocationAccepted}
 	startPayload, err := json.Marshal(delegationItemPayload{
 		DelegationID: delegation.ID, MemberID: delegation.MemberID,
 		ChildRunID: delegation.ChildRunID, Goal: delegation.Goal,

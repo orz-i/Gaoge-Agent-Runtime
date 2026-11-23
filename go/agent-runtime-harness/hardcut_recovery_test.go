@@ -67,7 +67,7 @@ type auditInvocationFaultOnce struct {
 }
 
 func (store *auditInvocationFaultOnce) AppendItem(ctx context.Context, item harness.Item) (harness.Item, bool, error) {
-	if item.Kind == harness.ItemInvocation && !store.failed {
+	if item.Kind == harness.ItemAgentInvocation && !store.failed {
 		store.failed = true
 		return harness.Item{}, false, errors.New("audit: crashed after invocation was created but before Agent Run")
 	}

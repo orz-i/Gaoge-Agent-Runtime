@@ -25,14 +25,15 @@ runner, err := harness.NewRunner(harness.Dependencies{
 })
 ```
 
-The Host supplies its configured Kernel and Agent to this constructor. It may
-also pass the Store to the Harness budget middleware. The Kernel file owns the
+The Host supplies its configured Kernel and Agent to this constructor. If a
+SharedBudget is authorized, the Host provides a single `BudgetAuthority` and
+uses its native `Adapter()` for Run/Model/Tool execution. The Kernel file owns the
 physical Run and executor authority. The Harness file owns the Session, Turn,
 Invocation, original dispatch, response receipts and budget reservations.
 
 ## Persistence and recovery
 
-Schema v2 uses application ID `GAHS`. Creation initializes and checkpoints a
+Schema v3 uses application ID `GAHS`. Creation initializes and checkpoints a
 temporary database before atomically publishing it without overwrite. Reopen
 checks the application ID, version, WAL mode, exact table and index definitions,
 and the original managed recovery authority. A missing or damaged profile
@@ -47,8 +48,9 @@ Retry the original operation with its original identity and expected revision.
 Resume the original Turn after a process exits. A committed dispatch return
 can finish projection. An outstanding external call stays pending until the
 Runtime receives its original evidence. The two databases commit independently.
-The current pre-stable Schema v2 deletes the obsolete `execution_class` column
-from Agent Invocations. Older Harness SQLite files are rejected on reopen;
+The current pre-stable Schema v3 deletes obsolete `execution_class`,
+`capability_key` and `definition_version` columns from Agent Invocations.
+Older Harness SQLite v1/v2 files are rejected on reopen;
 there is no implicit migration or fallback to the legacy execution interpreter.
 For a consistent backup of a desktop profile, stop its executors, close both
 Stores, and retain both databases together.

@@ -190,7 +190,7 @@ func (runner *Runner) requireItemOwnerAttempt(
 		}
 		return runner.requireRunDescendsFrom(ctx, payload.ParentRunID, owner.ExecutionRefID)
 	}
-	if item.Kind == ItemInvocation && item.RunID != "" && item.RunID != owner.ExecutionRefID {
+	if item.Kind == ItemAgentInvocation && item.RunID != "" && item.RunID != owner.ExecutionRefID {
 		return ErrConflict
 	}
 	if item.RunID == "" {
@@ -202,7 +202,7 @@ func (runner *Runner) requireItemOwnerAttempt(
 	return runner.requireRunDescendsFrom(ctx, item.RunID, owner.ExecutionRefID)
 }
 
-// Delegation/Capability Items can reference a legitimate nested Runtime
+// Delegation/Agent Invocation Items can reference a legitimate nested Runtime
 // Run instead of their owning Invocation's top-level Run. The immutable
 // child->parent RunRelation index proves the exact originating Attempt;
 // a missing index/edge may never silently turn a foreign Run into authority.

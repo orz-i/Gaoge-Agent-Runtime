@@ -69,7 +69,7 @@ func (runner *Runner) validateChildRuntimeOwnership(
 		return ErrConflict
 	}
 	if child.Attempt == 1 {
-		id, idErr := InvocationID(child.TurnID, child.ParentItemID, child.CapabilityKey, physical.Run.RequestID)
+		id, idErr := AgentInvocationID(child.TurnID, child.ParentItemID, physical.Run.RequestID)
 		if idErr != nil || id != child.ID {
 			return ErrConflict
 		}

@@ -35,7 +35,6 @@ func TestPR72RetryCASPreservesPendingPhysicalExecutionInMemoryAndSQL(t *testing.
 			digest := sha256.Sum256(input)
 			child := harness.Invocation{
 				ID: "retry-unsettled-child", TurnID: turn.ID, ParentItemID: "some-parent-item",
-				CapabilityKey: harness.CapabilityAgent, DefinitionVersion: harness.RuntimeCapabilityVersion,
 				ExecutionRefID: "old-in-doubt-run",
 				Input:          input, InputHash: hex.EncodeToString(digest[:]),
 				Status: harness.InvocationAccepted, Attempt: 1, Revision: 1,
@@ -135,7 +134,6 @@ func TestRealPostgresPR72PendingGrantPreventsFailureAndRetryAcrossConnections(t 
 	digest := sha256.Sum256(input)
 	inv := harness.Invocation{
 		ID: "pr72-real-fence-inv", TurnID: turn.ID, ParentItemID: "pr72-parent",
-		CapabilityKey: harness.CapabilityAgent, DefinitionVersion: harness.RuntimeCapabilityVersion,
 		Input: input, InputHash: hex.EncodeToString(digest[:]),
 		ExecutionRefID: "pr72-original-effect", Status: harness.InvocationAccepted,
 		Attempt: 1, Revision: 1, OutputRefs: []harness.HostRef{}, CreatedAt: now, UpdatedAt: now,

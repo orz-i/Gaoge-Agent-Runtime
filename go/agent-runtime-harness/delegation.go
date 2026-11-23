@@ -138,7 +138,7 @@ func (runner *Runner) authorizeDelegation(ctx context.Context, execution tools.E
 	return request, nil
 }
 
-// DelegateByExecutionRefID is the Tool-facing form used by an Agent capability
+// DelegateByExecutionRefID is the Tool-facing form used by an Agent
 // without exposing Harness Turn or Invocation IDs to the model.
 func (runner *Runner) DelegateByExecutionRefID(ctx context.Context, executionRefID string, request DelegateRequest) (DelegationResult, error) {
 	invocation, err := runner.store.GetInvocationByExecutionRefID(ctx, strings.TrimSpace(executionRefID))
@@ -513,7 +513,7 @@ func (runner *Runner) dispatchHandoff(
 	child, err := runner.store.GetInvocationByExecutionRefID(ctx, delegation.ChildRunID)
 	if err != nil || child.TurnID != turn.ID || child.ParentItemID != parentItemID ||
 		child.ExecutionRefID != delegation.ChildRunID ||
-		child.CapabilityKey != CapabilityAgent || !isHandoffDelegationInvocation(child) {
+		!validInvocationExecutionAuthority(child) || !isHandoffDelegationInvocation(child) {
 		return handoff.Delegation{}, errors.Join(ErrConflict, err)
 	}
 	// The hashed child Input, not the caller's slice-backed Delegation, is

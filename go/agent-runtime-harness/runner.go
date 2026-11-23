@@ -19,7 +19,7 @@ import (
 const (
 	defaultItemListLimit        = 500
 	maxRuntimeSyncRetryAttempts = 8
-	capabilityStartFailedCode   = "harness.capability_start_failed"
+	agentStartFailedCode        = "harness.agent_start_failed"
 )
 
 // Clock supplies Harness orchestration timestamps. A nil Dependencies.Clock
@@ -100,7 +100,7 @@ func (runner *Runner) recordInvocationItem(ctx context.Context, invocation Invoc
 	}
 	_, err = appendItemFact(ctx, runner.store, runner.turnFeed, Item{
 		ID:     invocationLifecycleItemID(invocation, invocation.Status, invocation.Revision),
-		TurnID: invocation.TurnID, Kind: ItemInvocation, Status: invocationItemStatus(invocation.Status),
+		TurnID: invocation.TurnID, Kind: ItemAgentInvocation, Status: invocationItemStatus(invocation.Status),
 		RunID: invocation.ExecutionRefID, InvocationID: invocation.ID, ParentItemID: parentItemID,
 		Payload: payload, CreatedAt: now, UpdatedAt: now,
 	})
@@ -599,8 +599,8 @@ type RunRelationSource interface {
 	GetByChild(context.Context, string) (runrelation.Relation, error)
 }
 
-// Runner owns durable Harness Session/Turn/Invocation/Item lifecycle. Runtime
-// Feature execution is represented by durable Capability Invocations.
+// Runner owns durable Harness Session/Turn/Agent Invocation/Item lifecycle.
+// Native Agent and delegated Agent attempts share one original Host authority.
 type Runner struct {
 	runtime          *kernel.Runtime
 	agent            AgentStarter
@@ -685,14 +685,11 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	return runner, nil
 }
 
-// StartAgentTurn executes the explicitly selected Agent capability as a durable
+// StartAgentTurn executes the explicitly selected Agent as a durable
 // top-level Invocation after Session/Turn/Config creation. Host code chooses
 // this entry point; Harness never classifies a user intent or routes implicitly.
 func (runner *Runner) StartAgentTurn(ctx context.Context, request StartRequest) (Snapshot, error) {
-	envelope, err := runner.prepareTopLevelStartEnvelope(ctx, request, rootAdmission{
-		CapabilityKey:     CapabilityAgent,
-		DefinitionVersion: RuntimeCapabilityVersion,
-	})
+	envelope, err := runner.prepareTopLevelStartEnvelope(ctx, request, rootAdmission{})
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -1549,7 +1546,7 @@ func validateRootRuntimeOwnership(invocation Invocation, snapshot kernel.Snapsho
 	// use the existing hretry derivation instead. No new persisted request
 	// field, inferred first-attempt ID or compatibility bypass is needed.
 	if invocation.Attempt == 1 {
-		invocationID, err := InvocationID(invocation.TurnID, "", invocation.CapabilityKey, snapshot.Run.RequestID)
+		invocationID, err := AgentInvocationID(invocation.TurnID, "", snapshot.Run.RequestID)
 		if err != nil || invocationID != invocation.ID {
 			return ErrConflict
 		}
@@ -1743,10 +1740,10 @@ func (runner *Runner) failTopLevelInvocationAndTurn(ctx context.Context, turn Tu
 		return Snapshot{}, proofErr
 	}
 	invocation.Status = InvocationFailed
-	invocation.ErrorCode = capabilityStartFailedCode
-	invocation.ErrorDetail = "capability execution did not start"
+	invocation.ErrorCode = agentStartFailedCode
+	invocation.ErrorDetail = "Agent execution did not start"
 	if cause == nil {
-		invocation.ErrorDetail = "capability returned no execution identity"
+		invocation.ErrorDetail = "Agent returned no execution identity"
 	} else {
 		invocation.ErrorDetail = cause.Error()
 	}
@@ -1760,10 +1757,10 @@ func (runner *Runner) failTopLevelInvocationAndTurn(ctx context.Context, turn Tu
 		return Snapshot{}, err
 	}
 	turn.Status = TurnFailed
-	turn.ErrorCode = capabilityStartFailedCode
-	turn.ErrorDetail = "top-level capability execution did not start"
+	turn.ErrorCode = agentStartFailedCode
+	turn.ErrorDetail = "top-level Agent execution did not start"
 	if cause == nil {
-		turn.ErrorDetail = "top-level capability returned no execution identity"
+		turn.ErrorDetail = "top-level Agent returned no execution identity"
 	} else {
 		turn.ErrorDetail = cause.Error()
 	}

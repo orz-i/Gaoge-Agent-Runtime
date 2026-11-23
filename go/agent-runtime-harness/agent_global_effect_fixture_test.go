@@ -24,9 +24,8 @@ func newFrozenAgentEffectFixture(t *testing.T) frozenAgentEffectFixture {
 	const turnID = "frozen-turn"
 	input := json.RawMessage(`{"goal":"original agent"}`)
 	root := Invocation{
-		ID: "frozen-root", TurnID: turnID, CapabilityKey: CapabilityAgent,
-		ExecutionRefID: "original-agent-run",
-		Input:          input, InputHash: hashInvocationBytes(input),
+		ID: "frozen-root", TurnID: turnID, ExecutionRefID: "original-agent-run",
+		Input: input, InputHash: hashInvocationBytes(input),
 		Status: InvocationFailed, Attempt: 1, Revision: 3,
 		CreatedAt: now, UpdatedAt: now,
 	}

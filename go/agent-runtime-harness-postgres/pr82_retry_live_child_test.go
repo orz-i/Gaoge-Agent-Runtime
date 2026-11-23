@@ -76,9 +76,8 @@ func assertRetryChildExecutionFenceScenarios(t *testing.T, store harness.Store, 
 			sum := sha256.Sum256(input)
 			hash := hex.EncodeToString(sum[:])
 			root := harness.Invocation{
-				ID: "root-" + turnID, TurnID: turnID, CapabilityKey: "runtime.agent",
-				ExecutionRefID: "r1-" + turnID,
-				Input:          input, InputHash: hash, Status: harness.InvocationRunning,
+				ID: "root-" + turnID, TurnID: turnID, ExecutionRefID: "r1-" + turnID,
+				Input: input, InputHash: hash, Status: harness.InvocationRunning,
 				Attempt: 1, Revision: 1, OutputRefs: []harness.HostRef{}, CreatedAt: now, UpdatedAt: now,
 			}
 			if _, _, err := store.CreateInvocation(ctx, root); err != nil {
@@ -86,7 +85,6 @@ func assertRetryChildExecutionFenceScenarios(t *testing.T, store harness.Store, 
 			}
 			child := harness.Invocation{
 				ID: "child-" + turnID, TurnID: turnID, ParentItemID: "parent-item",
-				CapabilityKey:  harness.CapabilityAgent,
 				ExecutionRefID: "c1-" + turnID, Input: input, InputHash: hash,
 				Status: scenario.status, Attempt: 1, Revision: 1,
 				OutputRefs: []harness.HostRef{}, CreatedAt: now, UpdatedAt: now,

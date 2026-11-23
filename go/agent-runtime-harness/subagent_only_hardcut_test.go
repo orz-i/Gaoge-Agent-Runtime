@@ -27,21 +27,21 @@ func TestRemovedCompositeExecutionClassesAreNotAdmitted(t *testing.T) {
 	}
 }
 
-// A pre-cut SQL/Memory row can still exist after its Application executor has
-// been removed. RetryInvocation is a direct Store CAS, not just a Runner API:
-// it must never rotate that historical non-Agent record to a new physical ID.
-func TestRetiredApplicationStoreRetryCannotRotateIntoAgent(t *testing.T) {
+// A memory Store has no cross-process legacy decoder; after the hard cut it
+// refuses rows with mismatched immutable Agent input evidence. A corrupted
+// injected row cannot rotate a physical Attempt through Store or Runner CAS.
+// Historical SQL rows are rejected before schema migration and opening.
+func TestCorruptOriginalInvocationCannotRotateIntoAgent(t *testing.T) {
 	now := time.Now().UTC()
 	store := NewMemoryStore()
 	input := []byte(`{"goal":"legacy host operation"}`)
 	old := Invocation{
-		ID: "old-application", TurnID: "old-turn", CapabilityKey: "app.legacy",
-		ExecutionRefID: "hcr-old-application",
-		Input:          input, InputHash: hashInvocationBytes(input), Status: InvocationFailed,
+		ID: "old-application", TurnID: "old-turn", ExecutionRefID: "hcr-old-application",
+		Input: input, InputHash: "unverified-old-execution-input", Status: InvocationFailed,
 		Attempt: 1, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	if _, _, err := store.CreateInvocation(t.Context(), old); !errors.Is(err, ErrInvalidRequest) {
-		t.Fatalf("new non-Agent Invocation admitted: %v", err)
+		t.Fatalf("untrusted original InputHash admitted: %v", err)
 	}
 	store.invocations[old.ID] = old // Historical persisted row, not new admission.
 	store.invocationExecutionRefs[old.ExecutionRefID] = old.ID
@@ -62,14 +62,12 @@ func TestRetiredApplicationStoreRetryCannotRotateIntoAgent(t *testing.T) {
 	if _, err := runner.RefreshInvocation(t.Context(), old.ID); !errors.Is(err, ErrConflict) {
 		t.Fatalf("Runner refreshed retired Application as Agent: %v", err)
 	}
-	// A historical arbitrary Native Child has no first-party physical
-	// starter or resumer, even when its execution class says Agent.
+	// An injected arbitrary Native Child has no verified parent/owner chain.
 	child := old
 	child.ID = "legacy-native-child"
 
 	child.ParentItemID = "parent-item"
 	child.ExecutionRefID = "old-native-child-run"
-	child.CapabilityKey = CapabilityAgent
 	store.invocations[child.ID] = child
 	store.invocationExecutionRefs[child.ExecutionRefID] = child.ID
 	if _, err := store.RetryInvocation(t.Context(), child.ID, child.Revision, "hr-next-child", now.Add(time.Second)); !errors.Is(err, ErrConflict) {

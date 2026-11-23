@@ -163,7 +163,7 @@ func TestAuditPropertyContextAuthorityTransitions(t *testing.T) {
 			t.Error(err)
 			return false
 		}
-		id, err := InvocationID(turn.ID, "state-parent", CapabilityAgent, delegation.ID)
+		id, err := AgentInvocationID(turn.ID, "state-parent", delegation.ID)
 		if err != nil {
 			t.Error(err)
 			return false
@@ -320,15 +320,15 @@ func (s matrixCorruptRootInvocationStore) GetInvocationByExecutionRefID(ctx cont
 			val.InputHash = ""
 		case "rewrite_invocation_identity":
 			val.ID = "different-unrelated-invocation-id"
-		case "rewrite_capability_key":
-			val.CapabilityKey = "runtime.removed"
+		case "rewrite_frozen_input_hash":
+			val.InputHash = "unrelated-source-hash"
 		}
 	}
 	return val, err
 }
 func TestAuditMatrixRootProvenanceMutationNeverGrantsOwner(t *testing.T) {
 	store, turn, checkpoint, root := contextRunMiddlewareFixture(t)
-	for _, mode := range []string{"erase_input_and_hash", "rewrite_invocation_identity", "rewrite_capability_key"} {
+	for _, mode := range []string{"erase_input_and_hash", "rewrite_invocation_identity", "rewrite_frozen_input_hash"} {
 		t.Run(mode, func(t *testing.T) {
 			corrupted := matrixCorruptRootInvocationStore{Store: store, target: root.ExecutionRefID, mode: mode}
 			val, err := corrupted.GetInvocationByExecutionRefID(t.Context(), root.ExecutionRefID)

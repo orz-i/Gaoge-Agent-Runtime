@@ -9,7 +9,7 @@ export type HarnessItemKind =
   | "tool"
   | "approval"
   | "delegation"
-  | "capability_invocation"
+  | "agent_invocation"
   | "interaction"
   | "artifact"
   | "context"
@@ -57,12 +57,10 @@ export type HarnessInteractionDTO = {
 
 export type HarnessInvocationStatus = "accepted" | RunStatus;
 
-export type HarnessCapabilityInvocationDTO = {
+export type HarnessAgentInvocationDTO = {
   id: string;
   turnID: string;
   parentItemID?: string;
-  capabilityKey: string;
-  definitionVersion?: string;
   inputHash?: string;
   status: HarnessInvocationStatus;
   attempt: number;
@@ -92,7 +90,7 @@ export type HarnessTimelinePageDTO = { items: HarnessItemDTO[]; nextAfterSeq: nu
 
 export type HarnessTurnSnapshotDTO = {
   turn: HarnessTurnDTO;
-  invocations: HarnessCapabilityInvocationDTO[];
+  invocations: HarnessAgentInvocationDTO[];
   interactions: HarnessInteractionDTO[];
   items: HarnessItemDTO[];
   output?: ResultDTO | null;

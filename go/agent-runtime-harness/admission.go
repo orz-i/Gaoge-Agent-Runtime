@@ -20,23 +20,17 @@ import (
 // Context bodies are hashed, never stored in ConfigSnapshot. Host message
 // identities are stored separately because a crashed Item projection must be
 // reconstructible without consulting a mutable Host transcript.
-// rootAdmission is the already-normalized, concrete root capability frozen
-// together with the host request. It must be sealed before CreateTurn: a
-// crash before CreateInvocation must not permit another capability or plan.
+// rootAdmission binds the immutable root Agent input before CreateTurn.
+// The Host never chooses a runtime capability interpreter.
 type rootAdmission struct {
-	CapabilityKey     string `json:"capabilityKey"`
-	DefinitionVersion string `json:"definitionVersion"`
-	InputHash         string `json:"inputHash"`
+	InputHash string `json:"inputHash"`
 }
 
 func sealStartAdmission(request StartRequest, config *ConfigSnapshot, root rootAdmission) (StartRequest, error) {
 	if config == nil || jsoncontract.ValidateCanonicalUTF8(request) != nil ||
-		jsoncontract.ValidateCanonicalUTF8(*config) != nil || jsoncontract.ValidateCanonicalUTF8(root) != nil ||
-		strings.TrimSpace(root.CapabilityKey) == "" || strings.TrimSpace(root.DefinitionVersion) == "" {
+		jsoncontract.ValidateCanonicalUTF8(*config) != nil || jsoncontract.ValidateCanonicalUTF8(root) != nil {
 		return StartRequest{}, ErrInvalidRequest
 	}
-	root.CapabilityKey = strings.TrimSpace(root.CapabilityKey)
-	root.DefinitionVersion = strings.TrimSpace(root.DefinitionVersion)
 	root.InputHash = strings.TrimSpace(root.InputHash)
 	var contextSeed *ContextSeed
 	if request.Context != nil {

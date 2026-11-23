@@ -212,7 +212,7 @@ func snapshotResponse(snapshot harness.Snapshot) (SnapshotResponse, error) {
 func invocationResponse(value harness.Invocation) InvocationResponse {
 	return InvocationResponse{
 		ID: value.ID, TurnID: value.TurnID, ParentItemID: value.ParentItemID,
-		CapabilityKey: value.CapabilityKey, DefinitionVersion: value.DefinitionVersion,
+
 		InputHash: value.InputHash, Status: value.Status,
 		Attempt: value.Attempt, OutputRefs: append([]harness.HostRef(nil), value.OutputRefs...),
 		ErrorCode:   runtimehttp.PublicFailureCode(value.ErrorCode),
@@ -294,7 +294,7 @@ func publicItemPayload(kind harness.ItemKind, payload json.RawMessage) (json.Raw
 		}
 		return runtimehttp.PublicDiagnosticPayload(projected), nil
 	}
-	if kind != harness.ItemDelegation && kind != harness.ItemInvocation {
+	if kind != harness.ItemDelegation && kind != harness.ItemAgentInvocation {
 		return runtimehttp.PublicDiagnosticPayload(payload), nil
 	}
 	var value map[string]any
@@ -306,7 +306,7 @@ func publicItemPayload(kind harness.ItemKind, payload json.RawMessage) (json.Raw
 		delete(value, "parentRunID")
 		delete(value, "execution")
 	}
-	if kind == harness.ItemInvocation {
+	if kind == harness.ItemAgentInvocation {
 		delete(value, "executionRefID")
 	}
 	encoded, err := json.Marshal(value)
@@ -427,11 +427,9 @@ type ItemResponse struct {
 // are internal topology; Conversation clients recover the Harness invocation
 // lifecycle by invocation identity instead.
 type InvocationResponse struct {
-	ID                string `json:"id"`
-	TurnID            string `json:"turnID"`
-	ParentItemID      string `json:"parentItemID,omitempty"`
-	CapabilityKey     string `json:"capabilityKey"`
-	DefinitionVersion string `json:"definitionVersion,omitempty"`
+	ID           string `json:"id"`
+	TurnID       string `json:"turnID"`
+	ParentItemID string `json:"parentItemID,omitempty"`
 
 	InputHash   string                   `json:"inputHash,omitempty"`
 	Status      harness.InvocationStatus `json:"status"`

@@ -123,14 +123,12 @@ func assertTrustedHarnessStoreOwners(t *testing.T, store harness.Store, prefix s
 		t.Fatal(err)
 	}
 	input, hash := trustedRootIdentityInput(t, actor, thread, "complete original work")
-	rootID, err := harness.AgentInvocationID(tid, turn.ID)
+	rootID, err := harness.AgentInvocationID(tid, "", turn.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	root := harness.Invocation{
-		ID: rootID, TurnID: tid, CapabilityKey: harness.CapabilityAgent,
-		DefinitionVersion: harness.RuntimeCapabilityVersion,
-		Input:             input, InputHash: hash, ExecutionRefID: harness.AgentExecutionRefID(rootID),
+		ID: rootID, TurnID: tid, Input: input, InputHash: hash, ExecutionRefID: harness.AgentExecutionRefID(rootID),
 		Status: harness.InvocationAccepted, Attempt: 1, Revision: 1,
 		OutputRefs: []harness.HostRef{}, CreatedAt: now, UpdatedAt: now,
 	}
@@ -158,16 +156,16 @@ func assertTrustedHarnessStoreOwners(t *testing.T, store harness.Store, prefix s
 		case 3:
 			nextThread.ID = fmt.Sprintf("other-thread-%d", n)
 		case 4:
-			changed.DefinitionVersion = fmt.Sprintf("version-%d", n)
+			changed.ID = fmt.Sprintf("hiv_foreign_original_%d", n)
 		}
 		changed.Input, changed.InputHash = trustedRootIdentityInput(t, nextActor, nextThread, "complete original work")
-		if changed.DefinitionVersion == root.DefinitionVersion && string(changed.Input) == string(root.Input) {
+		if changed.ID == root.ID && string(changed.Input) == string(root.Input) {
 			t.Fatalf("test mutation did not change frozen identity: %d", n)
 		}
 		if _, fresh, err := store.CreateInvocation(t.Context(), changed); !errors.Is(err, harness.ErrConflict) || fresh {
 			t.Fatalf("seeded root replay retargeting accepted n=%d err=%v fresh=%t", n, err, fresh)
 		}
-		if _, err := store.UpdateInvocation(t.Context(), changed, original.Revision); !errors.Is(err, harness.ErrConflict) {
+		if _, err := store.UpdateInvocation(t.Context(), changed, original.Revision); !errors.Is(err, harness.ErrConflict) && !errors.Is(err, harness.ErrNotFound) {
 			t.Fatalf("seeded root CAS retargeting accepted n=%d err=%v", n, err)
 		}
 	}

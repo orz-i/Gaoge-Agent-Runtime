@@ -500,7 +500,7 @@ components:
         seq: {type: integer, minimum: 1}
         kind:
           type: string
-          enum: [user_message, agent_run, agent_message, tool, approval, delegation, capability_invocation, interaction, artifact, context, diagnostic, budget, subtask]
+          enum: [user_message, agent_run, agent_message, tool, approval, delegation, agent_invocation, interaction, artifact, context, diagnostic, budget, subtask]
         status: {type: string, enum: [started, waiting, completed, failed, cancelled]}
         hostRef: {$ref: '#/components/schemas/HostRef'}
         invocationID: {type: string}
@@ -521,23 +521,21 @@ components:
         itemID: {type: string}
         itemKind:
           type: string
-          enum: [user_message, agent_run, agent_message, tool, approval, delegation, capability_invocation, interaction, artifact, context, diagnostic, budget, subtask]
+          enum: [user_message, agent_run, agent_message, tool, approval, delegation, agent_invocation, interaction, artifact, context, diagnostic, budget, subtask]
         delta: {type: string}
         message: {type: string}
         data: {}
         status: {type: string}
         terminal: {type: boolean}
         createdAt: {type: string, format: date-time}
-    HarnessCapabilityInvocation:
+    HarnessAgentInvocation:
       type: object
       additionalProperties: false
-      required: [id, turnID, capabilityKey, status, attempt, outputRefs, revision, createdAt, updatedAt]
+      required: [id, turnID, status, attempt, outputRefs, revision, createdAt, updatedAt]
       properties:
         id: {type: string}
         turnID: {type: string}
         parentItemID: {type: string}
-        capabilityKey: {type: string}
-        definitionVersion: {type: string}
         inputHash: {type: string}
         status: {type: string, enum: [accepted, running, waiting_input, paused_budget, completed, failed, cancelled]}
         attempt: {type: integer, minimum: 1}
@@ -590,7 +588,7 @@ components:
         turn: {$ref: '#/components/schemas/HarnessTurn'}
         invocations:
           type: array
-          items: {$ref: '#/components/schemas/HarnessCapabilityInvocation'}
+          items: {$ref: '#/components/schemas/HarnessAgentInvocation'}
         interactions:
           type: array
           items: {$ref: '#/components/schemas/HarnessInteraction'}

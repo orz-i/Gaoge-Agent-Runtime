@@ -190,7 +190,7 @@ describe("RuntimeClient target API", () => {
         createdAt: "2026-08-17T00:00:00Z", updatedAt: "2026-08-17T00:00:01Z",
       },
       invocations: [{
-        id: "hiv-1", turnID: "ht/1", capabilityKey: "runtime.agent",
+        id: "hiv-1", turnID: "ht/1",
         status: "completed", attempt: 1, outputRefs: [], revision: 2,
         createdAt: "2026-08-17T00:00:00Z", updatedAt: "2026-08-17T00:00:01Z",
       }],
@@ -242,7 +242,7 @@ describe("RuntimeClient target API", () => {
         createdAt: "2026-08-17T00:00:00Z", updatedAt: "2026-08-17T00:16:00Z",
       },
       invocations: [{
-        id: "hiv-1", turnID: "ht-1", capabilityKey: "runtime.agent",
+        id: "hiv-1", turnID: "ht-1",
         status: "waiting_input", attempt: 1, outputRefs: [], revision: 2,
         createdAt: "2026-08-17T00:00:00Z", updatedAt: "2026-08-17T00:16:00Z",
       }],

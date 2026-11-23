@@ -81,6 +81,25 @@ maintaining a second generic context executor. A Context receipt is not proof
 of an unknown Provider effect, and an unrelated Store ACK cannot authorize
 replaying a pending request.
 
+## First-party Agent Invocation identity
+
+Harness persists only one original `AgentInvocation` execution type, with
+`AgentInvocationID(turnID, parentItemID, requestID)`. The ID hash retains an
+internal immutable Agent namespace to avoid altering already issued Agent Run
+identities; it does not expose a selectable `CapabilityKey` or definition
+version. Host selection and authorization are recorded in the original Actor,
+Config admission hash, Tool policy/grants, frozen InputHash, Attempt, Kernel
+Run lease and external receipt chain. Every Start/Retry/Handoff/Cancel/Resume
+uses those concrete ownership facts, not a generic capability interpreter.
+
+The fixed Capability-category columns have been removed from the Harness SQL
+model, HTTP/OpenAPI and TypeScript. The persisted event is
+`agent_invocation`; Tool definition versions remain independent Tool proofs.
+Because removal changes Start admission hashes, legacy pre-stable Host Turns
+must be explicitly retired and their effects reconciled before manual
+PostgreSQL DDL or new Harness SQLite Schema v3 enrollment. New storage never
+promotes old non-Agent data into native Agent authority.
+
 ## Shared Budget execution and Host ownership
 
 The sole first-party budget **execution** driver is

@@ -71,7 +71,7 @@ func TestLifecycleProjectionReplaysSameTerminalChildWithoutAnotherRevision(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 1 || items[0].Kind != ItemInvocation || items[0].Status != ItemCompleted {
+	if len(items) != 1 || items[0].Kind != ItemAgentInvocation || items[0].Status != ItemCompleted {
 		t.Fatalf("terminal replay must repair exactly one durable lifecycle Item: %+v", items)
 	}
 }

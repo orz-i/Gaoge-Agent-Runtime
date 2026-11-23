@@ -27,9 +27,7 @@ func TestSQLRetryRejectsHistoricalControlOnlyFailedWithoutOriginalStart(t *testi
 	digest := sha256.Sum256(input)
 	owner := harness.Invocation{
 		ID: "legacy-control-root", TurnID: turn.ID,
-		CapabilityKey:     harness.CapabilityAgent,
-		DefinitionVersion: harness.RuntimeCapabilityVersion,
-		Input:             input, InputHash: hex.EncodeToString(digest[:]),
+		Input: input, InputHash: hex.EncodeToString(digest[:]),
 		ExecutionRefID: "possibly-running-kernel", Status: harness.InvocationRunning,
 		Revision: 1, Attempt: 1, OutputRefs: []harness.HostRef{},
 		CreatedAt: now, UpdatedAt: now,
@@ -100,9 +98,7 @@ func TestSQLRetryRejectsHistoricalEffectfulStartPlusHarmlessControl(t *testing.T
 	digest := sha256.Sum256(input)
 	owner := harness.Invocation{
 		ID: "legacy-effectful-control-root", TurnID: turn.ID,
-		CapabilityKey:     harness.CapabilityAgent,
-		DefinitionVersion: harness.RuntimeCapabilityVersion,
-		Input:             input, InputHash: hex.EncodeToString(digest[:]),
+		Input: input, InputHash: hex.EncodeToString(digest[:]),
 		ExecutionRefID: "legacy-potentially-active-run",
 		Status:         harness.InvocationRunning,
 		Revision:       1, Attempt: 1, OutputRefs: []harness.HostRef{},

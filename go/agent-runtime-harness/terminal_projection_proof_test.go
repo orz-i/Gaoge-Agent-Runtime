@@ -12,7 +12,6 @@ import (
 func TestMemoryTerminalProjectionCASRequiresOriginalContinuationProof(t *testing.T) {
 	store, interaction, owner, response, claim, completed := newAuthorityMemoryStore()
 	now := time.Date(2026, 11, 10, 0, 0, 0, 0, time.UTC)
-	owner.CapabilityKey = CapabilityAgent
 
 	owner.Attempt, owner.Revision = 1, 1
 	owner.CreatedAt, owner.UpdatedAt = now, now

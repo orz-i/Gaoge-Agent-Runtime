@@ -30,7 +30,7 @@ func TestDispatchReceiptRequiresOriginalRecognizedPhaseAndBoundary(t *testing.T)
 func TestPR82OwnedRunlessItemCannotGrantNewPhysicalAttempt(t *testing.T) {
 	runner := &Runner{}
 	owner := childAttemptBinding{InvocationID: "root", ExecutionRefID: "root-attempt-two", Attempt: 2}
-	for _, kind := range []ItemKind{ItemTool, ItemArtifact, ItemInteraction, ItemContext, ItemDiagnostic, ItemInvocation} {
+	for _, kind := range []ItemKind{ItemTool, ItemArtifact, ItemInteraction, ItemContext, ItemDiagnostic, ItemAgentInvocation} {
 		item := Item{ID: "old-" + string(kind), InvocationID: owner.InvocationID, Kind: kind}
 		if err := runner.requireItemOwnerAttempt(t.Context(), item, owner); !errors.Is(err, ErrConflict) {
 			t.Fatalf("owner-stamped %s without RunID crossed Attempt: %v", kind, err)

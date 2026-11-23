@@ -82,7 +82,6 @@ func TestRealPostgresAnonymousHostedTerminalStaysHeldAfterRestart(t *testing.T) 
 	}
 	if _, _, err = first.CreateInvocation(t.Context(), harness.Invocation{
 		ID: "hosted-anonymous-real-invocation", TurnID: turnID,
-		CapabilityKey:  harness.CapabilityAgent,
 		ExecutionRefID: runID, Status: harness.InvocationRunning, Attempt: 1,
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}); err != nil {

@@ -175,7 +175,7 @@ func ea1RunCancelHostCut(t *testing.T, persistent bool, phase string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	iid, err := harness.InvocationID(tid, "", harness.CapabilityAgent, "parent")
+	iid, err := harness.AgentInvocationID(tid, "", "parent")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,7 +208,7 @@ func ea1RunCancelHostCut(t *testing.T, persistent bool, phase string) {
 		t.Fatal(err)
 	}
 	hash := sha256.Sum256(input)
-	owner := harness.Invocation{ID: iid, TurnID: tid, CapabilityKey: harness.CapabilityAgent, DefinitionVersion: harness.RuntimeCapabilityVersion, Input: input, InputHash: fmt.Sprintf("%x", hash), ExecutionRefID: rid, Status: harness.InvocationRunning, Attempt: 1, Revision: 1, OutputRefs: []harness.HostRef{}, CreatedAt: now, UpdatedAt: now}
+	owner := harness.Invocation{ID: iid, TurnID: tid, Input: input, InputHash: fmt.Sprintf("%x", hash), ExecutionRefID: rid, Status: harness.InvocationRunning, Attempt: 1, Revision: 1, OutputRefs: []harness.HostRef{}, CreatedAt: now, UpdatedAt: now}
 	savedOwner, freshOwner, err := f.host.CreateInvocation(t.Context(), owner)
 	if err != nil || !freshOwner {
 		t.Fatalf("seed original Invocation: fresh=%t err=%v", freshOwner, err)
@@ -225,7 +225,7 @@ func ea1RunCancelHostCut(t *testing.T, persistent bool, phase string) {
 		t.Fatalf("seed changed frozen owner or initial state: want=%+v got=%+v", owner, savedOwner)
 	}
 	owner = savedOwner
-	if _, _, err = f.host.AppendItem(t.Context(), harness.Item{ID: "ea1-root-invocation-item", TurnID: tid, Kind: harness.ItemInvocation, Status: harness.ItemStarted, RunID: rid, InvocationID: iid, Payload: json.RawMessage(`{"capabilityKey":"runtime.agent"}`), CreatedAt: now, UpdatedAt: now}); err != nil {
+	if _, _, err = f.host.AppendItem(t.Context(), harness.Item{ID: "ea1-root-invocation-item", TurnID: tid, Kind: harness.ItemAgentInvocation, Status: harness.ItemStarted, RunID: rid, InvocationID: iid, Payload: json.RawMessage(`{"attempt":1,"outputRefs":[]}`), CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	c := budget.Coordinator{Store: f.ledgers}
@@ -382,7 +382,7 @@ func ea1RunCancelHostCut(t *testing.T, persistent bool, phase string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if terminalOwner.TurnID != owner.TurnID || terminalOwner.ParentItemID != owner.ParentItemID || terminalOwner.CapabilityKey != owner.CapabilityKey || terminalOwner.DefinitionVersion != owner.DefinitionVersion || terminalOwner.ID != owner.ID || terminalOwner.ExecutionRefID != owner.ExecutionRefID || terminalOwner.InputHash != owner.InputHash || !reflect.DeepEqual(terminalOwner.Input, owner.Input) || terminalOwner.Attempt != owner.Attempt || terminalOwner.Status != harness.InvocationCancelled {
+	if terminalOwner.TurnID != owner.TurnID || terminalOwner.ParentItemID != owner.ParentItemID || terminalOwner.ID != owner.ID || terminalOwner.ExecutionRefID != owner.ExecutionRefID || terminalOwner.InputHash != owner.InputHash || !reflect.DeepEqual(terminalOwner.Input, owner.Input) || terminalOwner.Attempt != owner.Attempt || terminalOwner.Status != harness.InvocationCancelled {
 		t.Fatal("terminal projection lost original Invocation source/route")
 	}
 	ledger, err := f.ledgers.LoadBudget(t.Context(), tid)

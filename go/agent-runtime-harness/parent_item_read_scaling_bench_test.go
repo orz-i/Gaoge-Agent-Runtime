@@ -22,7 +22,7 @@ func seededParentItemBenchmark(b *testing.B, size int) (*Runner, Invocation) {
 	}
 	if _, _, err := store.AppendItem(context.Background(), Item{
 		ID: parentItemID, TurnID: turnID, InvocationID: parentInvocationID,
-		Kind: ItemInvocation, Status: ItemStarted,
+		Kind: ItemAgentInvocation, Status: ItemStarted,
 	}); err != nil {
 		b.Fatal(err)
 	}

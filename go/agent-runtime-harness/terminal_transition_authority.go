@@ -155,8 +155,7 @@ func ValidTurnTerminalDescendantsWithBudget(root Invocation, owners []Invocation
 		// must still force strict source verification, not fall through
 		// as an ordinary terminal Agent child.
 		handoffCandidate := isHandoffDelegationInvocation(owner) ||
-			(owner.CapabilityKey == CapabilityAgent &&
-				strings.HasPrefix(owner.ParentItemID, "hid_"))
+			strings.HasPrefix(owner.ParentItemID, "hid_")
 		if handoffCandidate {
 			original, binding, valid := historicalHandoffRoot(root, owner, items, ledger)
 			if !valid {

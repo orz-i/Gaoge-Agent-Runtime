@@ -33,8 +33,7 @@ func testMemoryRetryStoreConfigIntegrity(t *testing.T, missing bool) {
 		t.Fatal(err)
 	}
 	input := json.RawMessage("{\"goal\":\"cancelled original\"}")
-	root := Invocation{ID: "root", TurnID: turn.ID, CapabilityKey: CapabilityAgent,
-		Input: input, InputHash: hashInvocationBytes(input), ExecutionRefID: "old-run",
+	root := Invocation{ID: "root", TurnID: turn.ID, Input: input, InputHash: hashInvocationBytes(input), ExecutionRefID: "old-run",
 		Attempt: 1, Status: InvocationCancelled, Revision: 1, OutputRefs: []HostRef{}, CreatedAt: now, UpdatedAt: now}
 	if _, _, err = store.CreateInvocation(ctx, root); err != nil {
 		t.Fatal(err)

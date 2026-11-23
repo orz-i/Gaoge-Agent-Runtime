@@ -55,7 +55,7 @@ func TestRealPostgresTrustedSessionRootOwnerAcrossConnections(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rootID, err := harness.AgentInvocationID(tid, turn.ID)
+	rootID, err := harness.AgentInvocationID(tid, "", turn.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

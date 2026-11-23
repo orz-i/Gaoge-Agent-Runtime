@@ -327,7 +327,7 @@ func (session *SessionClient) authorizedProtectiveTurn(ctx context.Context, turn
 	if err != nil || turn.SessionID != sid {
 		return "", ErrConflict
 	}
-	rootID, err := AgentInvocationID(id, turn.HostTurn.ID)
+	rootID, err := AgentInvocationID(id, "", turn.HostTurn.ID)
 	if err != nil {
 		return "", ErrConflict
 	}
@@ -385,7 +385,7 @@ func (session *SessionClient) requireFrozenTurnOwner(ctx context.Context, id str
 	// Prompt freezes its root Invocation ID from the stable Host Turn ID.
 	// Use this exact indexed record rather than scanning child Invocations
 	// on each bounded status/history read or trusting a returned list order.
-	rootID, err := AgentInvocationID(id, turn.HostTurn.ID)
+	rootID, err := AgentInvocationID(id, "", turn.HostTurn.ID)
 	if err != nil {
 		return ErrConflict
 	}
@@ -409,9 +409,9 @@ type sessionBoundOwner struct {
 // pre-Refresh repair and pre-Resume physical continuation. Inconsistent
 // Store reads must not choose different rules at different boundaries.
 func requireSessionRootOwner(turn Turn, invocation Invocation, owner sessionBoundOwner) error {
-	rootID, err := AgentInvocationID(turn.ID, turn.HostTurn.ID)
+	rootID, err := AgentInvocationID(turn.ID, "", turn.HostTurn.ID)
 	if err != nil || invocation.ID != rootID || invocation.TurnID != turn.ID ||
-		invocation.ParentItemID != "" || invocation.CapabilityKey != CapabilityAgent || !validInvocation(invocation) {
+		invocation.ParentItemID != "" || !validInvocationExecutionAuthority(invocation) || !validInvocation(invocation) {
 		return ErrConflict
 	}
 	actor, thread, err := frozenTopLevelInvocationIdentity(invocation)

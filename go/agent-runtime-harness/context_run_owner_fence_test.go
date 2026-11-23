@@ -183,7 +183,7 @@ func TestContextRunMiddlewareHandoffIgnoresInheritedSupervisorContext(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	id, err := InvocationID(turn.ID, "delegated-parent", CapabilityAgent, delegation.ID)
+	id, err := AgentInvocationID(turn.ID, "delegated-parent", delegation.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -260,7 +260,7 @@ func TestIndependentContextRunHandoffDescendantsNeverInheritSupervisorContext(t 
 			if err != nil {
 				t.Fatal(err)
 			}
-			id, err := InvocationID(turn.ID, "specialist-parent-item", CapabilityAgent, delegation.ID)
+			id, err := AgentInvocationID(turn.ID, "specialist-parent-item", delegation.ID)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -360,7 +360,7 @@ func TestIndependentHandoffFirstOwnershipReadErrorMustNotExposeSupervisor(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	id, err := InvocationID(turn.ID, "lookup-failure-parent", CapabilityAgent, delegation.ID)
+	id, err := AgentInvocationID(turn.ID, "lookup-failure-parent", delegation.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -484,7 +484,7 @@ func TestIndependentContextRunFirstMissingThenPresentHandoffRelationNeverExposes
 			if err != nil {
 				t.Fatal(err)
 			}
-			id, err := InvocationID(turn.ID, "late-relation-parent", CapabilityAgent, delegation.ID)
+			id, err := AgentInvocationID(turn.ID, "late-relation-parent", delegation.ID)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -545,7 +545,7 @@ func TestIndependentHandoffArtifactReadNeverLeaksSupervisorArchive(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	id, err := InvocationID(turn.ID, "archive-parent-item", CapabilityAgent, delegation.ID)
+	id, err := AgentInvocationID(turn.ID, "archive-parent-item", delegation.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -649,7 +649,7 @@ func TestIndependentContextRunInvalidHandoffInvocationInputHashMustFailClosed(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	id, err := InvocationID(turn.ID, "corrupt-parent-item", CapabilityAgent, delegation.ID)
+	id, err := AgentInvocationID(turn.ID, "corrupt-parent-item", delegation.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -754,7 +754,7 @@ func TestIndependentAuditMissingHandoffInputMustNotBecomeOrdinaryChild(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	id, err := InvocationID(turn.ID, "audit-parent-item", CapabilityAgent, delegation.ID)
+	id, err := AgentInvocationID(turn.ID, "audit-parent-item", delegation.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

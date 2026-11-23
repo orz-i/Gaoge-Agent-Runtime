@@ -93,12 +93,11 @@ func TestSnapshotResponseProjectsGenericInteraction(t *testing.T) {
 func TestSnapshotResponseProjectsInvocationWithoutRuntimeExecutionIdentity(t *testing.T) {
 	now := time.Date(2026, time.August, 17, 0, 0, 0, 0, time.UTC)
 	invocation := harness.Invocation{
-		ID: testHarnessInvocationID, TurnID: testHarnessTurnID, CapabilityKey: "runtime.agent", DefinitionVersion: "v1",
-		InputHash: strings.Repeat("a", 64), ExecutionRefID: "private-run-1",
+		ID: testHarnessInvocationID, TurnID: testHarnessTurnID, InputHash: strings.Repeat("a", 64), ExecutionRefID: "private-run-1",
 		Status: harness.InvocationRunning, Attempt: 1, OutputRefs: []harness.HostRef{}, Revision: 2,
 		CreatedAt: now, UpdatedAt: now,
 	}
-	payload := json.RawMessage(`{"capabilityKey":"runtime.agent","executionRefID":"private-run-1","attempt":1}`)
+	payload := json.RawMessage(`{"executionRefID":"private-run-1","attempt":1}`)
 	snapshot := harness.Snapshot{
 		Turn: harness.Turn{
 			ID: testHarnessTurnID, HostTurn: harness.HostRef{Kind: "conversation_turn", ID: "client-1"},
@@ -106,7 +105,7 @@ func TestSnapshotResponseProjectsInvocationWithoutRuntimeExecutionIdentity(t *te
 		},
 		Invocations: []harness.Invocation{invocation},
 		Items: []harness.Item{{
-			ID: "hiv-item-1", TurnID: testHarnessTurnID, Seq: 1, Kind: harness.ItemInvocation,
+			ID: "hiv-item-1", TurnID: testHarnessTurnID, Seq: 1, Kind: harness.ItemAgentInvocation,
 			Status: harness.ItemStarted, RunID: "private-run-1", InvocationID: invocation.ID,
 			Payload: payload, CreatedAt: now, UpdatedAt: now,
 		}},

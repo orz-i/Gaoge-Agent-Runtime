@@ -150,8 +150,6 @@ func loadSealedConfig(ctx context.Context, store Store, configID string) (Config
 func sameFrozenInvocationAuthority(candidate, returned Invocation) bool {
 	return returned.ID == candidate.ID && returned.TurnID == candidate.TurnID &&
 		returned.ParentItemID == candidate.ParentItemID &&
-		returned.CapabilityKey == candidate.CapabilityKey &&
-		returned.DefinitionVersion == candidate.DefinitionVersion &&
 		bytes.Equal(returned.Input, candidate.Input) &&
 		returned.InputHash == candidate.InputHash &&
 		returned.ExecutionRefID == candidate.ExecutionRefID &&

@@ -112,12 +112,11 @@ func TestPR82UnsealedHandoffCannotClaimNoExternalEffect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	id, err := InvocationID(f.turn.ID, f.startedItemID, CapabilityAgent, d.ID)
+	id, err := AgentInvocationID(f.turn.ID, f.startedItemID, d.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	child := Invocation{ID: id, TurnID: f.turn.ID, ParentItemID: f.startedItemID,
-		CapabilityKey:  CapabilityAgent,
 		ExecutionRefID: d.ChildRunID, Input: input, InputHash: hash,
 		Status: InvocationAccepted, Attempt: 1, Revision: 1,
 		OutputRefs: []HostRef{}, CreatedAt: f.parent.CreatedAt, UpdatedAt: f.parent.UpdatedAt}

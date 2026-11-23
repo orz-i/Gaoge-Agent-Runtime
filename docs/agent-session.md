@@ -107,6 +107,13 @@ execution but **never appear in the root Agent's Tool list**. Missing, orphaned,
 invalid or changed grants fail closed. The original child Runner and RunRelation
 remain the execution and recovery authority.
 
+All standard Session Invocations are native Agents. The original
+`AgentInvocationID(turn, parent, request)` uses a fixed internal hash namespace,
+not selectable Capability metadata. Start admission fingerprints, Host Actor,
+Attempt and Tool permissions remain immutable. Harness SQLite Schema v3 or
+explicit PostgreSQL Capability-shell migration is required to reopen after
+this pre-stable hard cut; old Host Turns must be retired, not reclassified.
+
 The standard Session now accepts `Config.SharedBudget`. Supply a supported
 Harness Store implementing the existing budget ledger. Count-only limits
 (e.g. `MaxLLMCalls`, `MaxToolCalls`, `MaxChildRuns`) require no token meter;

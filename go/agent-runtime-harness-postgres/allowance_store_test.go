@@ -39,9 +39,8 @@ func TestPausedAllowanceLifecyclePersistsAcrossHarnessStoreReload(t *testing.T) 
 		t.Fatalf("turn fresh=%v err=%v", fresh, err)
 	}
 	invocation := harness.Invocation{
-		ID: "invocation-paused", TurnID: turn.ID, CapabilityKey: harness.CapabilityAgent,
-		ExecutionRefID: "private-agent-run",
-		Status:         harness.InvocationRunning, Attempt: 1, OutputRefs: []harness.HostRef{}, Revision: 1,
+		ID: "invocation-paused", TurnID: turn.ID, ExecutionRefID: "private-agent-run",
+		Status: harness.InvocationRunning, Attempt: 1, OutputRefs: []harness.HostRef{}, Revision: 1,
 		CreatedAt: now, UpdatedAt: now,
 	}
 	if _, fresh, err := store.CreateInvocation(t.Context(), invocation); err != nil || !fresh {

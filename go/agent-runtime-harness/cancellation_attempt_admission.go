@@ -62,7 +62,7 @@ func (runner *Runner) bindCancellationAttempt(ctx context.Context, turn Turn, ru
 			if item.RunID != runID {
 				continue
 			}
-			if item.Kind == ItemInvocation && item.InvocationID == root.ID && runID != root.ExecutionRefID {
+			if item.Kind == ItemAgentInvocation && item.InvocationID == root.ID && runID != root.ExecutionRefID {
 				return ctx, ErrConflict
 			}
 			if item.Kind == ItemDelegation {

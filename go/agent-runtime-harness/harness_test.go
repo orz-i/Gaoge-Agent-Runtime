@@ -237,11 +237,11 @@ func assertCompletedHarnessSnapshot(t *testing.T, snapshot harness.Snapshot, err
 	}
 	productItems := make([]harness.Item, 0, 3)
 	for _, item := range snapshot.Items {
-		if item.Kind == harness.ItemInvocation || item.Kind == harness.ItemAgentRun {
+		if item.Kind == harness.ItemAgentInvocation || item.Kind == harness.ItemAgentRun {
 			productItems = append(productItems, item)
 		}
 	}
-	if len(productItems) != 3 || productItems[0].Kind != harness.ItemInvocation || productItems[1].Kind != harness.ItemInvocation || productItems[1].Status != harness.ItemCompleted || productItems[2].Kind != harness.ItemAgentRun || productItems[2].Status != harness.ItemCompleted {
+	if len(productItems) != 3 || productItems[0].Kind != harness.ItemAgentInvocation || productItems[1].Kind != harness.ItemAgentInvocation || productItems[1].Status != harness.ItemCompleted || productItems[2].Kind != harness.ItemAgentRun || productItems[2].Status != harness.ItemCompleted {
 		t.Fatalf("unexpected lifecycle items: %#v", snapshot.Items)
 	}
 }

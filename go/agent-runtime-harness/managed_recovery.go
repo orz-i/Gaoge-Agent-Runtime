@@ -24,20 +24,20 @@ func NewManagedHostAuthority() (kernel.ManagedAuthority, error) {
 // capability: the storage transaction must read and validate all original rows.
 func ManagedHostSource(session Session, turn Turn, invocation Invocation, config ConfigSnapshot, dispatch Item) (json.RawMessage, error) {
 	return json.Marshal(struct {
-		SessionID                                                    string
-		HostThread                                                   HostRef
-		Actor                                                        kernel.ActorRef
-		TurnID                                                       string
-		HostTurn                                                     HostRef
-		Config                                                       ConfigSnapshot
-		InvocationID, ParentItemID, CapabilityKey, DefinitionVersion string
+		SessionID                  string
+		HostThread                 HostRef
+		Actor                      kernel.ActorRef
+		TurnID                     string
+		HostTurn                   HostRef
+		Config                     ConfigSnapshot
+		InvocationID, ParentItemID string
 
 		Input                     json.RawMessage
 		InputHash, ExecutionRefID string
 		Attempt                   int
 		Dispatch                  Item
 	}{session.ID, session.HostThread, session.Actor, turn.ID, turn.HostTurn, config,
-		invocation.ID, invocation.ParentItemID, invocation.CapabilityKey, invocation.DefinitionVersion,
+		invocation.ID, invocation.ParentItemID,
 		invocation.Input, invocation.InputHash, invocation.ExecutionRefID, invocation.Attempt, dispatch})
 }
 

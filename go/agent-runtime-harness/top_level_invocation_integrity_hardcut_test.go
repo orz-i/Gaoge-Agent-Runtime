@@ -33,10 +33,6 @@ func (s *forgedInvocationReceiptStore) CreateInvocation(ctx context.Context, val
 		original.ID = "hiv_unrelated"
 	case "run-id":
 		original.ExecutionRefID = "hr_unrelated"
-	case "capability":
-		original.CapabilityKey = "runtime.alternate"
-	case "definition":
-		original.DefinitionVersion = "different"
 	case "input":
 		original.Input = []byte(`{"goal":"different"}`)
 	case "input-hash":
@@ -65,11 +61,10 @@ func (s *forgedInvocationReceiptStore) CreateInvocation(ctx context.Context, val
 		}
 		foreign := value
 		foreign.TurnID = foreignTurn.ID
-		foreign.ID, getErr = harness.AgentInvocationID(foreign.TurnID, foreign.TurnID)
+		foreign.ID, getErr = harness.AgentInvocationID(foreign.TurnID, "", foreign.TurnID)
 		if getErr != nil {
 			return harness.Invocation{}, false, getErr
 		}
-		foreign.CapabilityKey = harness.CapabilityAgent
 
 		foreign.ExecutionRefID = harness.AgentExecutionRefID(foreign.ID)
 		returnValue, _, getErr := s.Store.CreateInvocation(ctx, foreign)
@@ -79,7 +74,7 @@ func (s *forgedInvocationReceiptStore) CreateInvocation(ctx context.Context, val
 }
 
 func TestHardcutCreateInvocationReceiptCannotSubstituteExecutionAuthority(t *testing.T) {
-	for _, kind := range []string{"turn-id", "invocation-id", "run-id", "capability", "definition", "input", "input-hash", "attempt", "parent", "fresh-status", "fresh-revision", "foreign-persisted"} {
+	for _, kind := range []string{"turn-id", "invocation-id", "run-id", "input", "input-hash", "attempt", "parent", "fresh-status", "fresh-revision", "foreign-persisted"} {
 		t.Run(kind, func(t *testing.T) {
 			runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
 			if err != nil {

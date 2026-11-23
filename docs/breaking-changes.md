@@ -1,5 +1,54 @@
 # Breaking changes (pre-stable Beta)
 
+## PR #146 — Agent-only Invocation identity hard cut
+
+**Breaking pre-stable Go, SQL, HTTP, TypeScript and persisted event schema:**
+there is no selectable Runtime Capability anymore. Delete
+`Invocation.CapabilityKey`, `Invocation.DefinitionVersion`, the generic
+`InvocationID(turn, parent, capability, request)` helper,
+`CapabilityAgent`/`RuntimeCapabilityVersion`, and the corresponding
+`capability_key`/`definition_version` SQL columns, JSON fields and client
+`HarnessCapabilityInvocationDTO`. The sole typed identity constructor is
+`AgentInvocationID(turnID, parentItemID, requestID)`, and the public DTO/schema
+is `HarnessAgentInvocationDTO` / `HarnessAgentInvocation`. The persisted
+Timeline Item kind changes from `capability_invocation` to `agent_invocation`.
+This is a **hard cut without a compatibility adapter or legacy reader**.
+The fixed original Start failure code also changes from
+`harness.capability_start_failed` to `harness.agent_start_failed` (no alias);
+callers must use the native Agent error code and the unchanged physical
+no-effect evidence, never classify arbitrary Model errors as safe failure.
+Actual Tool definition versions, HostedTool grants and their approval/recovery
+fingerprints remain necessary and are **not** deleted.
+
+**Identity integrity:** Agent Invocation IDs deliberately retain the immutable
+private `runtime.agent` **hash-domain separator** so already issued Agent
+Invocation and physical Run IDs remain stable. It is not a selectable Host
+Capability or a persisted interpretation field. The Root `AdmissionHash` and
+Config ID **do change** because the obsolete generic Capability descriptor is
+no longer hashed into newly admitted Starts. Never resume an old Turn with a
+new Start Config or substitute a new `AdmissionHash`; require the original
+Actor, frozen InputHash, Attempt, ownership chain, Kernel lease/receipt,
+Handoff root bindings, cancellation and no-effect proofs as before.
+
+**PostgreSQL migration is manual and destructive.** Stop all writers, safely
+settle or quarantine pending Provider/Tool/remote outcomes, retain a matching
+Kernel + Harness backup and explicitly retire all pre-cut Turn/Invocation,
+Item, Budget and ManagedRecovery execution records. Then apply
+[`docs/migrations/retire-harness-capability-shell.sql`](migrations/retire-harness-capability-shell.sql)
+under exclusive locks. It rejects any historical non-Agent row, unknown
+Invocation definition version or unretired execution evidence before dropping
+both columns. `harnesspostgres.New` and `Migrate` explicitly reject an old
+schema even when existing rows claim `runtime.agent`. Never rewrite the old
+Capability value into Agent, drop original receipts or convert an outstanding
+Application/Feature execution into a fresh Agent.
+
+**Harness SQLite uses strict Schema v3** with the two obsolete Invocation
+columns removed. It refuses v2 and older profiles on reopen; create a new
+profile after retiring or separately preserving the old profile and its Kernel
+store. There is no automatic SQLite file rewrite, on-open migration or
+cross-file replay. The original Kernel/Harness backups and unknown physical
+effects remain the Host's responsibility.
+
 ## PR #146 — one Budget execution and settlement protocol
 
 **Breaking Go SDK hard cut:** the old
@@ -39,8 +88,6 @@ against their original evidence before deploying the new adapter. Never
 blindly repeat a Provider call, reinterpret a receipt, rotate a frozen
 reservation ID, or silently run a legacy second executor. No new budget table,
 Kernel state, implicit migration or wire status is introduced.
-
-# Breaking changes (pre-stable Beta)
 
 ## Context Sampling hard cut — one active bounded Context execution path
 

@@ -5,6 +5,17 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- **Capability identity shell hard cut (PR #146):** remove the one-valued
+  `CapabilityKey`/`RuntimeCapabilityVersion` from Harness Invocation, generic
+  ID constructor, admission hash, managed host source, SQL, HTTP/OpenAPI and
+  TypeScript; rename first-party Timeline kind to `agent_invocation` and DTO
+  to `HarnessAgentInvocation`. Agent stable IDs keep only a fixed private hash
+  namespace, not a Host-selected capability. A changed Root admission hash
+  requires explicit retirement of old Host execution evidence, checked
+  PostgreSQL cutover DDL and strict Harness SQLite Schema v3; old
+  The single first-party Start failure code is now `harness.agent_start_failed`
+  rather than an obsolete Capability status (no compatibility alias).
+
 - **One trusted Budget execution protocol (PR #146):** delete the old
   `BudgetMiddleware.Run/Model/Tool` and parallel settlement driver, hard-cut
   the corresponding pre-stable public constructor/type, and retain only
@@ -49,8 +60,9 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
   `OpenAgentSession` path. Remove the redundant `ExecutionClass` Go/HTTP/TS/SQL
   discriminator and retired generic Host Feature no-effect escape hatch.
   Preserve Agent Run/Attempt/receipt authorization; require explicit PG
-  cutover SQL and strict Harness SQLite Schema v2. See
-  [migration guidance](docs/migrations/retire-harness-execution-class.sql).
+  cutover SQL and strict Harness SQLite Schema v3. See
+  [Capability shell migration](docs/migrations/retire-harness-capability-shell.sql)
+  after [retiring the execution class](docs/migrations/retire-harness-execution-class.sql).
 
 - **Desktop Harness SQLite Store.** Hosts can persist Sessions, Turns,
   Invocations, Context, approvals, Handoffs and budget receipts in a private

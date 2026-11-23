@@ -12,10 +12,10 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
-const (
-	CapabilityAgent          = "runtime.agent"
-	RuntimeCapabilityVersion = "v1"
-)
+// The Agent ID's immutable namespace is a domain separator, not a
+// selectable capability. Keep its bytes to preserve already-frozen Run /
+// Invocation identity across the pre-stable schema cut.
+const agentInvocationDomain = "runtime.agent"
 
 // InvocationStatus is the durable lifecycle of one Agent invocation.
 type InvocationStatus string
@@ -33,11 +33,9 @@ const (
 // Invocation is the durable Harness envelope around one Agent execution.
 // Original Run identity and lifecycle facts remain bound to ExecutionRefID.
 type Invocation struct {
-	ID                string `json:"id"`
-	TurnID            string `json:"turnID"`
-	ParentItemID      string `json:"parentItemID,omitempty"`
-	CapabilityKey     string `json:"capabilityKey"`
-	DefinitionVersion string `json:"definitionVersion,omitempty"`
+	ID           string `json:"id"`
+	TurnID       string `json:"turnID"`
+	ParentItemID string `json:"parentItemID,omitempty"`
 
 	Input          json.RawMessage  `json:"input,omitempty"`
 	InputHash      string           `json:"inputHash,omitempty"`
@@ -92,16 +90,22 @@ func loadTopLevelInvocation(ctx context.Context, store Store, turnID string) (In
 	return value, nil
 }
 
-// TopLevelInvocation returns the top-level capability invocation from one
+// TopLevelInvocation returns the top-level Agent invocation from one
 // durable Harness Snapshot.
 func TopLevelInvocation(snapshot Snapshot) (Invocation, bool) {
 	return topLevelInvocation(snapshot.Invocations)
 }
 
-// AgentInvocationID derives the first-party Agent Invocation identity
-// without exposing the Harness-owned capability key to host code.
-func AgentInvocationID(turnID, requestID string) (string, error) {
-	return InvocationID(turnID, "", CapabilityAgent, requestID)
+// AgentInvocationID derives the only allowed physical Agent Invocation
+// identity. The fixed domain separator cannot be selected by Host callers.
+func AgentInvocationID(turnID, parentItemID, requestID string) (string, error) {
+	turnID = strings.TrimSpace(turnID)
+	parentItemID = strings.TrimSpace(parentItemID)
+	requestID = strings.TrimSpace(requestID)
+	if turnID == "" || requestID == "" {
+		return "", ErrInvalidRequest
+	}
+	return stableID("hiv", turnID, parentItemID, agentInvocationDomain, requestID), nil
 }
 
 type agentInvocationInput struct {
@@ -119,7 +123,7 @@ func newAgentInvocation(
 	requiredToolKeys, initialToolKeys []string,
 	now time.Time,
 ) (Invocation, error) {
-	id, err := AgentInvocationID(turnID, requestID)
+	id, err := AgentInvocationID(turnID, "", requestID)
 	if err != nil {
 		return Invocation{}, err
 	}
@@ -132,9 +136,8 @@ func newAgentInvocation(
 		return Invocation{}, err
 	}
 	return Invocation{
-		ID: id, TurnID: strings.TrimSpace(turnID), CapabilityKey: CapabilityAgent,
-		DefinitionVersion: RuntimeCapabilityVersion,
-		Input:             input, InputHash: inputHash, ExecutionRefID: AgentExecutionRefID(id),
+		ID: id, TurnID: strings.TrimSpace(turnID),
+		Input: input, InputHash: inputHash, ExecutionRefID: AgentExecutionRefID(id),
 		Status: InvocationAccepted, Attempt: 1, OutputRefs: []HostRef{}, Revision: 1,
 		CreatedAt: now, UpdatedAt: now,
 	}, nil
@@ -166,18 +169,6 @@ func topLevelInvocation(values []Invocation) (Invocation, bool) {
 	return Invocation{}, false
 }
 
-// InvocationID derives a stable invocation identity from its durable parent,
-// capability descriptor and caller request identity.
-func InvocationID(turnID, parentItemID, capabilityKey, requestID string) (string, error) {
-	turnID = strings.TrimSpace(turnID)
-	capabilityKey = strings.TrimSpace(capabilityKey)
-	requestID = strings.TrimSpace(requestID)
-	if turnID == "" || capabilityKey == "" || requestID == "" {
-		return "", ErrInvalidRequest
-	}
-	return stableID("hiv", turnID, parentItemID, capabilityKey, requestID), nil
-}
-
 func validInvocationStatus(value InvocationStatus) bool {
 	switch value {
 	case InvocationAccepted, InvocationRunning, InvocationWaitingInput, InvocationPausedBudget, InvocationCompleted, InvocationFailed, InvocationCancelled:
@@ -190,6 +181,11 @@ func validInvocationStatus(value InvocationStatus) bool {
 func validInvocation(value Invocation) bool {
 	return validInvocationExecutionAuthority(value) && validInvocationOutputRefs(value.OutputRefs)
 }
+
+// ValidAgentInvocationForStore validates the complete first-party Agent record
+// before either relational or in-memory storage can admit it. The caller may
+// not select a different executor by supplying a legacy capability marker.
+func ValidAgentInvocationForStore(value Invocation) bool { return validInvocation(value) }
 
 // validInvocationExecutionAuthority validates the frozen execution identity,
 // lifecycle and InputHash without treating Host-visible OutputRefs as a
@@ -223,9 +219,10 @@ func validInvocationIdentity(value Invocation) bool {
 	if strings.TrimSpace(value.TurnID) == "" {
 		return false
 	}
-	// One first-party Agent Invocation identity. Historical Application and
-	// custom Feature rows fail closed instead of borrowing a native Runner.
-	return value.CapabilityKey == CapabilityAgent
+	// The only persisted Invocation type is Agent. Historical non-Agent rows
+	// must be rejected at the pre-stable SQL schema boundary, never promoted
+	// by dropping an untrusted mutable category field.
+	return strings.TrimSpace(value.ID) == value.ID && strings.TrimSpace(value.TurnID) == value.TurnID
 }
 
 func validInvocationLifecycle(value Invocation) bool {
@@ -288,16 +285,9 @@ func terminalInvocationStatus(status InvocationStatus) bool {
 
 func invocationItemPayload(value Invocation) (json.RawMessage, error) {
 	return json.Marshal(struct {
-		CapabilityKey     string `json:"capabilityKey"`
-		DefinitionVersion string `json:"definitionVersion,omitempty"`
-
 		ExecutionRefID string    `json:"executionRefID,omitempty"`
 		Attempt        int       `json:"attempt"`
 		InputHash      string    `json:"inputHash,omitempty"`
 		OutputRefs     []HostRef `json:"outputRefs"`
-	}{
-		CapabilityKey: value.CapabilityKey, DefinitionVersion: value.DefinitionVersion,
-		ExecutionRefID: value.ExecutionRefID,
-		Attempt:        value.Attempt, InputHash: value.InputHash, OutputRefs: append([]HostRef(nil), value.OutputRefs...),
-	})
+	}{value.ExecutionRefID, value.Attempt, value.InputHash, append([]HostRef(nil), value.OutputRefs...)})
 }

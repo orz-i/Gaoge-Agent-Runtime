@@ -170,7 +170,7 @@ func TestPR82HandoffResumedMemberAndRoleExcludeSupervisorContext(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			childID, err := InvocationID(turn.ID, "parent-delegation", CapabilityAgent, delegation.ID)
+			childID, err := AgentInvocationID(turn.ID, "parent-delegation", delegation.ID)
 			if err != nil {
 				t.Fatal(err)
 			}

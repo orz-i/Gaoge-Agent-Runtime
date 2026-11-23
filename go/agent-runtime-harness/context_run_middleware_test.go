@@ -29,7 +29,7 @@ func TestDelegatedSpecialistResumeDoesNotRehydrateSupervisorContext(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	id, err := InvocationID(turn.ID, "parent-delegation", CapabilityAgent, delegation.ID)
+	id, err := AgentInvocationID(turn.ID, "parent-delegation", delegation.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
