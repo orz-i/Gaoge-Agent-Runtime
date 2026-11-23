@@ -502,3 +502,71 @@ func TestAgentSessionTokenBudgetWithoutMeterDoesNotDispatch(t *testing.T) {
 		t.Fatalf("token-priced task entered Provider without certified metering: err=%v calls=%d", err, len(client.requests))
 	}
 }
+
+// Session protective controls must authenticate the frozen Actor without
+// treating auxiliary presentation metadata as a prerequisite to Kernel stop.
+type damagedSessionOutputStore struct {
+	harness.Store
+	fail bool
+}
+
+func (store *damagedSessionOutputStore) GetInvocation(ctx context.Context, id string) (harness.Invocation, error) {
+	value, err := store.Store.GetInvocation(ctx, id)
+	if err == nil && store.fail && value.ParentItemID == "" {
+		value.OutputRefs = []harness.HostRef{{Kind: "", ID: ""}}
+	}
+	return value, err
+}
+func (store *damagedSessionOutputStore) ListInvocations(ctx context.Context, turnID string) ([]harness.Invocation, error) {
+	values, err := store.Store.ListInvocations(ctx, turnID)
+	if err == nil && store.fail {
+		for i := range values {
+			if values[i].ParentItemID == "" {
+				values[i].OutputRefs = []harness.HostRef{{Kind: "", ID: ""}}
+			}
+		}
+	}
+	return values, err
+}
+
+func TestAgentSessionProtectiveCancelIgnoresOutputMetadataButNotActor(t *testing.T) {
+	store := &damagedSessionOutputStore{Store: harness.NewMemoryStore()}
+	calls := 0
+	options := agentSessionOptions(t, memory.NewStore(), store, &agentSessionModel{generate: func(model.Request) (model.Response, error) {
+		return model.Response{ToolCalls: []tools.Call{{ID: "never-write", ToolKey: "write", Arguments: json.RawMessage(`{}`)}}}, nil
+	}})
+	options.LocalTools = []harness.SessionTool{{Registration: agentSessionTool("write", &calls), Policy: harness.ToolPolicySnapshot{
+		DefinitionVersion: "v1", ApprovalMode: "always", ApprovalCapability: "per_call", SideEffectLevel: "write",
+	}}}
+	original, err := harness.OpenAgentSession(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waiting, err := original.Prompt(t.Context(), "damaged-1", "Approve the write")
+	if err != nil || waiting.Turn.Status != harness.TurnWaitingInput {
+		t.Fatalf("wait: status=%s err=%v", waiting.Turn.Status, err)
+	}
+	root, ok := harness.TopLevelInvocation(waiting)
+	if !ok {
+		t.Fatal("no original Run")
+	}
+	store.fail = true
+	foreignOptions := options
+	foreignOptions.Session.Actor.ActorID = "foreign"
+	foreign, err := harness.OpenAgentSession(foreignOptions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := foreign.Cancel(t.Context(), "damaged-1", "foreign stop"); !errors.Is(err, harness.ErrConflict) {
+		t.Fatalf("foreign Actor could control corrupted original: %v", err)
+	}
+	before, err := options.Runtime.Load(t.Context(), root.ExecutionRefID)
+	if err != nil || before.Run.Status != kernel.RunStatusWaitingInput {
+		t.Fatalf("foreign control changed Run: status=%s err=%v", before.Run.Status, err)
+	}
+	_, cancelErr := original.Cancel(t.Context(), "damaged-1", "authorized protective stop")
+	after, err := options.Runtime.Load(t.Context(), root.ExecutionRefID)
+	if err != nil || after.Run.Status != kernel.RunStatusCancelled || calls != 0 {
+		t.Fatalf("presentation metadata blocked original Kernel stop: cancelErr=%v physical=%s err=%v calls=%d", cancelErr, after.Run.Status, err, calls)
+	}
+}

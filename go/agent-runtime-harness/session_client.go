@@ -254,7 +254,7 @@ func (session *SessionClient) authorizedExecutionTurn(ctx context.Context, turnI
 // Cancel is a protective stop. A missing optional execution composition must
 // never block its original Kernel cancellation/fencing path.
 func (session *SessionClient) Cancel(ctx context.Context, turnID, reason string) (Snapshot, error) {
-	id, err := session.authorizedTurnID(ctx, turnID)
+	id, err := session.authorizedProtectiveTurn(ctx, turnID)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -299,12 +299,48 @@ func (session *SessionClient) ResolveSubtaskApproval(ctx context.Context, turnID
 
 // CancelSubtask remains a protective stop of a specific original Child.
 func (session *SessionClient) CancelSubtask(ctx context.Context, turnID, taskID, reason string) (Snapshot, error) {
-	id, err := session.authorizedTurnID(ctx, turnID)
+	id, err := session.authorizedProtectiveTurn(ctx, turnID)
 	if err != nil {
 		return Snapshot{}, err
 	}
 	result, cancelErr := session.runner.CancelSubtask(ctx, id, taskID, reason)
 	return session.verifySnapshot(id, result, cancelErr)
+}
+
+// authorizedProtectiveTurn proves the exact Session Actor and original root
+// execution identity without requiring mutable presentation OutputRefs or a
+// readable Config. A degraded Host view must never block a protective stop;
+// the selected Run and cancellation effects remain fenced by Runner.Cancel.
+func (session *SessionClient) authorizedProtectiveTurn(ctx context.Context, turnID string) (string, error) {
+	id, err := session.turnID(turnID)
+	if err != nil {
+		return "", err
+	}
+	if err := session.requireIdentity(ctx); err != nil {
+		return "", err
+	}
+	turn, err := loadVerifiedTurnIdentity(ctx, session.runner.store, id)
+	if err != nil {
+		return "", err
+	}
+	sid, err := SessionID(session.hostThread)
+	if err != nil || turn.SessionID != sid {
+		return "", ErrConflict
+	}
+	rootID, err := AgentInvocationID(id, turn.HostTurn.ID)
+	if err != nil {
+		return "", ErrConflict
+	}
+	root, err := session.runner.store.GetInvocation(ctx, rootID)
+	if err != nil || root.ID != rootID || root.TurnID != id || root.ParentItemID != "" ||
+		!validInvocationExecutionAuthority(root) {
+		return "", errors.Join(ErrConflict, err)
+	}
+	actor, thread, err := frozenTopLevelInvocationIdentity(root)
+	if err != nil || actor != session.actor || thread != session.thread {
+		return "", ErrConflict
+	}
+	return id, nil
 }
 
 // authorizedTurnID is the single read/recovery trust boundary for all
