@@ -13,7 +13,7 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 )
 
-func TestContextBaseLegacyNilSeedAdmissionAndConfigGolden(t *testing.T) {
+func TestContextBaseAgentOnlyNilSeedAdmissionAndConfigGolden(t *testing.T) {
 	seed := &ContextSeed{
 		SourcePath: []string{"source-1"}, Instructions: "history instructions",
 		Entries: []runtimecontext.Entry{{ID: "entry-1", TurnID: "source-turn", SourceID: "source-1", Required: true,
@@ -27,9 +27,7 @@ func TestContextBaseLegacyNilSeedAdmissionAndConfigGolden(t *testing.T) {
 		RequestID:  "legacy-request", Goal: "hello", Context: seed,
 	}
 	config := ConfigSnapshot{Model: "fixture", Instructions: "static instructions", DelegationPolicy: DelegationPolicySnapshot{MaxDepth: 4}}
-	normalized, err := sealStartAdmission(request, &config, rootAdmission{
-		ExecutionClass: ExecutionAgent, CapabilityKey: CapabilityAgent, DefinitionVersion: RuntimeCapabilityVersion,
-	})
+	normalized, err := sealStartAdmission(request, &config, rootAdmission{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,11 +39,11 @@ func TestContextBaseLegacyNilSeedAdmissionAndConfigGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// These bytes and digests were independently obtained from the pre-Stage 3
-	// HEAD 5c34b2f, rather than computed from the current payload implementation.
+	// This golden locks the current Agent-only admission hash after the
+	// breaking removal of the generic ExecutionClass field.
 	const oldSeedJSON = `{"sourcePath":["source-1"],"instructions":"history instructions","entries":[{"id":"entry-1","turnID":"source-turn","sourceID":"source-1","required":true,"message":{"role":"user","content":[{"kind":"text","text":"hello"}]}}]}`
-	if string(seedJSON) != oldSeedJSON || sealed.AdmissionHash != "7aa9f0d6177dfc178f26f7e2d0ed23fcd8d7298b6e8429a70bd824aafa7083bd" ||
-		sealed.ContentHash != "70325c06acad5e02a683484e9701863a4add40ea13941b7ccf8326ab873f12c1" || sealed.ID != "hcfg_70325c06acad5e02a683484e" {
+	if string(seedJSON) != oldSeedJSON || sealed.AdmissionHash != "a7c7328824eb2ed3fe7cc9243f6464560db74da600595c875fb7aa426be6368c" ||
+		sealed.ContentHash != "c92c3e939132a2a1a7fac427826295acd2debfa14bc4de75496c8392f2d0e37c" || sealed.ID != "hcfg_c92c3e939132a2a1a7fac427" {
 		t.Fatalf("legacy nil fields changed admission or Config identity: seed=%s admission=%s config=%s id=%s", seedJSON, sealed.AdmissionHash, sealed.ContentHash, sealed.ID)
 	}
 	raw, err := json.Marshal(sealed)

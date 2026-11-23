@@ -145,7 +145,7 @@ func resolveContextRunAuthority(
 			}
 			if turnID == "" {
 				turnID = invocation.TurnID
-				if current == runID && invocation.ParentItemID == "" && invocation.ExecutionClass == ExecutionAgent {
+				if current == runID && invocation.ParentItemID == "" {
 					access = ContextWindowOwner
 				}
 			}

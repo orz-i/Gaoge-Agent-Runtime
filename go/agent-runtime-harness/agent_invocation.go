@@ -65,7 +65,7 @@ func (runner *Runner) finishTopLevelStart(
 		// Only the original first-attempt Agent can reconcile a cancelled
 		// Run after a pre-dispatch conflict, with no unknown-effect receipt
 		// and no outstanding dispatch grant.
-		if invocation.ExecutionClass == ExecutionAgent && invocation.Attempt == 1 &&
+		if invocation.Attempt == 1 &&
 			errors.Is(startErr, kernel.ErrConflict) && !errors.Is(startErr, ErrExecutionOutcomeUnknown) {
 			pending, checkErr := runner.pendingExecutionDispatch(ctx, turn.ID, nil, nil)
 			if checkErr != nil {
@@ -95,11 +95,10 @@ func (runner *Runner) finishTopLevelStart(
 	return snapshot, errors.Join(startErr, syncErr)
 }
 
-// The original Agent Start caller may observe a committed cancellation instead
-// of a competing Kernel CAS error. Retried Agent Attempts and composite Feature
-// starts must retain their errors; this is not a general retry exception.
+// A first-attempt Agent may observe a committed cancellation instead of a
+// competing Kernel CAS error. Retried Attempts do not inherit this exception.
 func initialAgentCancelledStartConflict(invocation Invocation, status TurnStatus, startErr error) bool {
-	return invocation.ExecutionClass == ExecutionAgent && invocation.Attempt == 1 &&
+	return invocation.Attempt == 1 &&
 		status == TurnCancelled && errors.Is(startErr, kernel.ErrConflict)
 }
 
@@ -110,7 +109,7 @@ func (runner *Runner) RefreshInvocation(ctx context.Context, invocationID string
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if invocation.ExecutionClass != ExecutionAgent || !isHandoffDelegationInvocation(invocation) {
+	if !isHandoffDelegationInvocation(invocation) {
 		return Snapshot{}, ErrConflict
 	}
 	// A routed Handoff belongs to its original ChildRunner, not an arbitrary
@@ -152,7 +151,7 @@ func (runner *Runner) RetryInvocation(ctx context.Context, invocationID string) 
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if invocation.ExecutionClass != ExecutionAgent || invocation.ParentItemID != "" || len(invocation.Input) == 0 {
+	if invocation.ParentItemID != "" || len(invocation.Input) == 0 {
 		return Snapshot{}, ErrConflict
 	}
 	turn, err := loadVerifiedTurn(ctx, runner.store, invocation.TurnID)
@@ -234,7 +233,7 @@ func (runner *Runner) startRetriedTopLevelInvocation(
 	turn Turn,
 	invocation Invocation,
 ) (Snapshot, error) {
-	if invocation.ParentItemID != "" || invocation.ExecutionClass != ExecutionAgent {
+	if invocation.ParentItemID != "" {
 		return Snapshot{}, ErrConflict
 	}
 	actor, thread, err := frozenTopLevelInvocationIdentity(invocation)
@@ -293,7 +292,7 @@ func (runner *Runner) startInvocationAttempt(
 	actor kernel.ActorRef,
 	thread kernel.ThreadRef,
 ) (kernel.Snapshot, error) {
-	if invocation.ParentItemID != "" || invocation.ExecutionClass != ExecutionAgent {
+	if invocation.ParentItemID != "" {
 		return kernel.Snapshot{}, ErrConflict
 	}
 	requestID := stableID("hretry", invocation.ID, attemptString(invocation.Attempt))
@@ -438,7 +437,7 @@ func (runner *Runner) resumeInvocationExecution(
 	invocation Invocation,
 	expectedRevision uint64,
 ) (kernel.Snapshot, error) {
-	if invocation.ExecutionClass != ExecutionAgent || invocation.ParentItemID != "" {
+	if invocation.ParentItemID != "" {
 		// Only Root Agent continuation is local. Handoff children retain
 		// the original ChildRunner-owned physical continuation.
 		return kernel.Snapshot{}, ErrInvalidRequest
@@ -453,45 +452,28 @@ func (runner *Runner) resumeInvocationExecution(
 	if err = runner.requireInvocationRootModelOutputCeiling(ctx, invocation); err != nil {
 		return kernel.Snapshot{}, err
 	}
-	scopeID := invocation.ID
-	if invocation.ParentItemID == "" {
-		scopeID = "" // Root resume must also respect pending child continuations.
-	}
-	if err = runner.requireUnclaimedInteractionContinuation(ctx, turn.ID, scopeID); err != nil {
+	// Root continuation also respects pending child continuations.
+	if err = runner.requireUnclaimedInteractionContinuation(ctx, turn.ID, ""); err != nil {
 		return kernel.Snapshot{}, err
 	}
-	if invocation.ExecutionClass == ExecutionAgent {
-		resumer, ok := runner.agent.(agentResumer)
-		if !ok {
-			return kernel.Snapshot{}, ErrInvalidRequest
-		}
-		if invocation.ParentItemID != "" {
-			// Verified Host callback continuations also resume native Agent
-			// children. Prove the original child before any physical effect.
-			observed, loadErr := runner.runtime.Load(ctx, invocation.ExecutionRefID)
-			if loadErr != nil {
-				return kernel.Snapshot{}, loadErr
-			}
-			if err := runner.validateChildRuntimeOwnership(ctx, invocation, observed); err != nil {
-				return kernel.Snapshot{}, err
-			}
-		}
-		if snapshot, managed, managedErr := runner.recoverManagedInvocation(ctx, invocation); managed {
-			return snapshot, managedErr
-		}
-		resumed, resumeErr := runner.withPhysicalInvocationDispatch(ctx, invocation, "resume", func(physicalCtx context.Context) (kernel.Snapshot, error) {
-			return resumer.Resume(physicalCtx, invocation.ExecutionRefID, expectedRevision)
-		})
-		if errors.Is(resumeErr, ErrConflict) && resumed.Run.ID == "" {
-			// A crashed native Agent Start may retain a Harness grant even
-			// after its Kernel Run acquired a sticky execution Epoch. Let
-			// only the first-party Kernel lease arbitrate that recovery.
-			return runner.resumeNativeFencedAgentAfterInterruptedStart(
-				ctx, invocation, expectedRevision, resumer, resumeErr)
-		}
-		return resumed, resumeErr
+	resumer, ok := runner.agent.(agentResumer)
+	if !ok {
+		return kernel.Snapshot{}, ErrInvalidRequest
 	}
-	return kernel.Snapshot{}, ErrInvalidRequest
+	if snapshot, managed, managedErr := runner.recoverManagedInvocation(ctx, invocation); managed {
+		return snapshot, managedErr
+	}
+	resumed, resumeErr := runner.withPhysicalInvocationDispatch(ctx, invocation, "resume", func(physicalCtx context.Context) (kernel.Snapshot, error) {
+		return resumer.Resume(physicalCtx, invocation.ExecutionRefID, expectedRevision)
+	})
+	if errors.Is(resumeErr, ErrConflict) && resumed.Run.ID == "" {
+		// A crashed native Agent Start may retain a Harness grant even
+		// after its Kernel Run acquired a sticky execution Epoch. Let
+		// only the first-party Kernel lease arbitrate that recovery.
+		return runner.resumeNativeFencedAgentAfterInterruptedStart(
+			ctx, invocation, expectedRevision, resumer, resumeErr)
+	}
+	return resumed, resumeErr
 }
 
 func (runner *Runner) syncChildInvocationSnapshot(
@@ -563,10 +545,8 @@ func (runner *Runner) syncChildInvocationSnapshot(
 	if err = runner.projectChildInvocationOutcome(ctx, invocation, runtimeSnapshot); err != nil {
 		return Snapshot{}, err
 	}
-	if invocation.ExecutionClass == ExecutionAgent {
-		if err = runner.recordApprovalRequestItem(ctx, turn, invocation, runtimeSnapshot); err != nil {
-			return Snapshot{}, err
-		}
+	if err = runner.recordApprovalRequestItem(ctx, turn, invocation, runtimeSnapshot); err != nil {
+		return Snapshot{}, err
 	}
 	if err = runner.syncSubtaskItems(ctx, turn); err != nil {
 		return Snapshot{}, err

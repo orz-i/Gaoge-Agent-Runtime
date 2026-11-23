@@ -42,8 +42,7 @@ type MemoryStore struct {
 
 func sameInvocationIdentity(left, right Invocation) bool {
 	return left.ID == right.ID && left.TurnID == right.TurnID && left.ParentItemID == right.ParentItemID &&
-		left.CapabilityKey == right.CapabilityKey && left.DefinitionVersion == right.DefinitionVersion &&
-		left.ExecutionClass == right.ExecutionClass && bytes.Equal(left.Input, right.Input) &&
+		bytes.Equal(left.Input, right.Input) &&
 		left.InputHash == right.InputHash && left.Attempt == right.Attempt
 }
 
@@ -211,7 +210,7 @@ func (store *MemoryStore) RetryInvocation(
 	// Retrying even an intermediate parent cannot outlive a descendant's
 	// pre-effect dispatch grant. Take the conservative Turn-wide barrier:
 	// grants do not encode a transactional transitive ownership snapshot.
-	if !validExecutionClass(current.ExecutionClass) || current.ParentItemID != "" ||
+	if !validInvocationExecutionAuthority(current) || current.ParentItemID != "" ||
 		current.Revision != expectedRevision || !retryableInvocationStatus(current.Status) || len(current.Input) == 0 ||
 		store.activeCancellationFenceLocked(current.TurnID) ||
 		PendingExecutionDispatch(physicalItems, "") ||

@@ -281,9 +281,6 @@ type Dependencies struct {
 	// ManagedContextRecovery explicitly selects only the concrete Context lifecycle.
 	// PrepareModelRequest must be nil; Runtime installs this adapter preparation.
 	ManagedContextRecovery *BoundedContextAdapter
-	// ContextPreparation selects the concrete synchronous sampling algorithm.
-	// It grants no managed suspension/recovery authority.
-	ContextPreparation *BoundedContextAdapter
 	// ContextSummary selects native summary orchestration under this exact
 	// bounded adapter. Its business preparer is installed here; dedicated hard
 	// recovery requires the separate SummaryNativeRecovery selection below.
@@ -367,7 +364,6 @@ type Runner struct {
 	rootCallbacks             *rootCallbackState
 	boundedCallbacks          []any
 	managedContextRecovery    *BoundedContextAdapter
-	contextPreparation        *BoundedContextAdapter
 	contextSummary            *ContextSummaryAdapter
 	contextSummaryBudget      bool
 	summaryNativeRecovery     bool
@@ -525,6 +521,9 @@ func publicModelInvocations(values []ModelInvocation) []ModelInvocation {
 
 // NewRunner constructs the Agent loop; Host selection and task routing remain external.
 func NewRunner(dependencies Dependencies) (*Runner, error) {
+	if !validBoundedBudgetComposition(dependencies) {
+		return nil, ErrInvalidRequest
+	}
 	if dependencies.Inputs != nil && (dependencies.ManagedContextRecovery != nil || dependencies.SummaryNativeRecovery) {
 		return nil, ErrInvalidRequest // Host input is not a managed-transfer adapter
 	}
@@ -533,22 +532,11 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	}
 	if summary := dependencies.ContextSummary; summary != nil {
 		if summary.bounded == nil || summary.ports == nil || dependencies.ManagedContextRecovery != nil ||
-			dependencies.ContextPreparation != nil || dependencies.PrepareModelRequest != nil ||
+			dependencies.PrepareModelRequest != nil ||
 			len(dependencies.RunMiddleware) != 1 || dependencies.RunMiddleware[0] != summary.bounded {
 			return nil, ErrInvalidRequest
 		}
 		dependencies.PrepareModelRequest = summary.bounded.Prepare
-	}
-	if a := dependencies.ContextPreparation; a != nil {
-		count := 0
-		for _, layer := range dependencies.RunMiddleware {
-			if layer == a {
-				count++
-			}
-		}
-		if a.sampling == nil || count != 1 || dependencies.PrepareModelRequest != nil || dependencies.ManagedContextRecovery != nil {
-			return nil, ErrInvalidRequest
-		}
 	}
 	if a := dependencies.ManagedContextRecovery; a != nil {
 		if !dependencies.Runtime.SupportsManagedRecovery() {
@@ -679,7 +667,6 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		toolLimiter:          newCallLimiter(execution.Tool.MaxConcurrency),
 		runChain:             runChain, modelChain: modelChain, toolChain: toolChain,
 		managedContextRecovery: dependencies.ManagedContextRecovery,
-		contextPreparation:     dependencies.ContextPreparation,
 		contextSummary:         dependencies.ContextSummary,
 		contextSummaryBudget:   summaryBudgetConfigured(dependencies),
 		summaryNativeRecovery:  dependencies.SummaryNativeRecovery,
@@ -691,7 +678,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		kernelOwnedStartCancellation: control &&
 			len(dependencies.RunMiddleware) == 0 &&
 			len(dependencies.ModelMiddleware) == 0 && len(dependencies.ToolMiddleware) == 0 &&
-			dependencies.ContextPreparation == nil && dependencies.ManagedContextRecovery == nil,
+			dependencies.ManagedContextRecovery == nil,
 		prepareModelRequest:            dependencies.PrepareModelRequest,
 		trustedDeferredPreparedControl: trustedDeferredPreparationStack(dependencies),
 		trustedDeferredRootControl:     control,
@@ -1844,7 +1831,7 @@ func (runner *Runner) generateModel(
 	ctx = context.WithValue(ctx, modelDenialKey{}, denialScope)
 	terminal := func(callCtx context.Context, candidate model.Request, sink model.StreamSink) (model.Response, error) {
 		if !validDispatchModelRequest(frozen, candidate) {
-			return model.Response{}, modelPreDispatchDenied{cause: ErrInvalidRequest, scope: denialScope, request: model.CloneRequest(candidate)}
+			return model.Response{}, modelPreDispatchDenied{cause: ErrInvalidRequest, scope: denialScope, original: model.CloneRequest(frozen), candidate: model.CloneRequest(candidate)}
 		}
 		if beforeProvider != nil {
 			// The final chance to reject an expired or stolen invocation claim
@@ -1852,7 +1839,7 @@ func (runner *Runner) generateModel(
 			if err := beforeProvider(callCtx); err != nil {
 				// This is an execution admission rejection, not a Provider
 				// failure. The caller must not terminalize a recoverable Run.
-				return model.Response{}, modelPreDispatchDenied{cause: err, scope: denialScope, request: model.CloneRequest(candidate)}
+				return model.Response{}, modelPreDispatchDenied{cause: err, scope: denialScope, original: model.CloneRequest(frozen), candidate: model.CloneRequest(candidate)}
 			}
 		}
 		response, err := runner.generateProviderModel(callCtx, candidate, sink)

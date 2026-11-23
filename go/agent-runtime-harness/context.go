@@ -261,6 +261,33 @@ func ReplaceContextCheckpoint(ctx context.Context, expectedCheckpointID string, 
 	return nil
 }
 
+// selectedSkillManifest exposes only the selected Skill metadata. Markdown is
+// read under the original Run through harness.read_skill and never inserted
+// into another Agent's model-visible Context or delegated instructions.
+func selectedSkillManifest(skills []SkillSnapshot) string {
+	if len(skills) == 0 {
+		return ""
+	}
+	parts := []string{"Selected Skill manifest (load relevant instructions with harness.read_skill using its frozen ID):"}
+	for _, skill := range skills {
+		parts = append(parts, "- "+skill.ID+" (revision "+uintString(skill.Revision)+"): "+skill.Title+
+			"; trigger: "+skill.Trigger+"; description: "+skill.Description)
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+// selectedContextInstructions is the single immutable model-visible projection
+// of Host-selected Skills. Selection and content were already sealed in the
+// ConfigSnapshot; neither a model response nor a resume can load new Skills.
+func selectedContextInstructions(config ConfigSnapshot, seedInstructions string) string {
+	parts := []string{config.Instructions}
+	if manifest := selectedSkillManifest(config.Skills); manifest != "" {
+		parts = append(parts, manifest)
+	}
+	parts = append(parts, seedInstructions)
+	return strings.TrimSpace(strings.Join(parts, "\n\n"))
+}
+
 func contextStaticFingerprint(config ConfigSnapshot, seed *ContextSeed, catalog tools.Catalog) (string, error) {
 	if seed == nil {
 		return "", ErrInvalidRequest
@@ -276,13 +303,11 @@ func contextStaticFingerprint(config ConfigSnapshot, seed *ContextSeed, catalog 
 		OutputContract *model.OutputContract    `json:"outputContract,omitempty"`
 		Tools          []contextToolFingerprint `json:"tools"`
 		Skills         []SkillSnapshot          `json:"skills"`
-		MemoryPolicy   string                   `json:"memoryPolicy,omitempty"`
 	}{
 		Environment:  config.Environment,
-		Instructions: strings.TrimSpace(strings.Join([]string{config.Instructions, seed.Instructions}, "\n\n")),
+		Instructions: selectedContextInstructions(config, seed.Instructions),
 		Model:        strings.TrimSpace(config.Model), OutputContract: model.CloneOutputContract(config.OutputContract), Tools: definitions,
-		Skills:       append([]SkillSnapshot(nil), config.Skills...),
-		MemoryPolicy: strings.TrimSpace(config.MemoryPolicy),
+		Skills: append([]SkillSnapshot(nil), config.Skills...),
 	})
 	if err != nil {
 		return "", err

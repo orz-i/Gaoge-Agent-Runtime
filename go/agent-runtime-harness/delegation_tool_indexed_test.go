@@ -16,7 +16,7 @@ func indexedDelegationToolFixture(t *testing.T) (*MemoryStore, Invocation, tools
 	t.Helper()
 	store := NewMemoryStore()
 	invocation := Invocation{
-		ID: "root-inv", TurnID: "original-turn", ExecutionClass: ExecutionAgent,
+		ID: "root-inv", TurnID: "original-turn",
 		ExecutionRefID: "root-run",
 	}
 	store.invocations[invocation.ID] = invocation

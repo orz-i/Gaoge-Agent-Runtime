@@ -157,7 +157,7 @@ type summaryNativeParkTrap struct {
 }
 
 func (s *summaryNativeParkTrap) Load(context.Context, string) (kernel.Snapshot, error) {
-	return cloneSamplingSnapshot(s.current), nil
+	return cloneSummarySnapshot(s.current), nil
 }
 func (s *summaryNativeParkTrap) LoadManagedRecovery(context.Context, string) (kernel.ManagedTransfer, error) {
 	return s.transfer, nil
@@ -280,7 +280,7 @@ func TestContextSummaryNativeUnknownDispatchAndSecondPhaseStayFenced(t *testing.
 		}
 		trap.current.Run.Revision++
 		trap.current.EventHead++
-		before := cloneSamplingSnapshot(trap.current)
+		before := cloneSummarySnapshot(trap.current)
 		_, _, recoveryErr := runner.RecoverManagedContinuation(t.Context(), trap.current.Run.ID)
 		if secondPhase && !errors.Is(recoveryErr, kernel.ErrExecutionConflict) || !secondPhase && !errors.Is(recoveryErr, ErrModelOutcomeUnknown) ||
 			trap.parks != 0 || !reflect.DeepEqual(before, trap.current) {

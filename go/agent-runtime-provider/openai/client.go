@@ -417,8 +417,9 @@ var _ model.InputTokenCounter = (*Client)(nil)
 // PlanTokenAdmission is an optional explicit Host budget capability. It requires
 // an already enforced positive output ceiling and the same native input count;
 // it never guesses tokens on an unavailable counting endpoint. The existing
-// BudgetMiddleware still handles missing usage and unknown settlement as
-// suspended, not zero-charge success.
+// The native BoundedBudgetAdapter conservatively suspends physically
+// dispatched requests with unknown authoritative Usage or settlement;
+// missing Usage is not proof of a zero-charge completion.
 func (c *Client) PlanTokenAdmission(ctx context.Context, request model.Request) (model.TokenAdmission, error) {
 	if request.MaxOutputTokens <= 0 {
 		return model.TokenAdmission{}, ErrUnsupported

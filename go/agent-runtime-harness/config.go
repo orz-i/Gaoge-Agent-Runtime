@@ -117,6 +117,103 @@ type DelegationPolicySnapshot struct {
 	// LocalToolGrants authorize a named, versioned member to receive a tool
 	// outside the root's callable set. They share the immutable ToolPolicies.
 	LocalToolGrants []DelegatedLocalToolGrant `json:"localToolGrants,omitempty"`
+	// NamedAgents are Host-selected Agent execution inputs, not another
+	// executable Role/Feature interpreter. Their model, local/hosted Tools,
+	// private Skills and per-call limits are frozen with the original Turn.
+	NamedAgents []NamedAgentSnapshot `json:"namedAgents,omitempty"`
+}
+
+// NamedAgentSnapshot is the immutable capability selection for one named Agent.
+// Executable Tool handlers and credentials never enter the persisted Config.
+// The Host selects the name; the existing Agent Runner executes it.
+type NamedAgentSnapshot struct {
+	MemberID             string                  `json:"memberID"`
+	MemberRevision       string                  `json:"memberRevision"`
+	Model                string                  `json:"model"`
+	ModelOptions         json.RawMessage         `json:"modelOptions,omitempty"`
+	Instructions         string                  `json:"instructions,omitempty"`
+	ToolKeys             []string                `json:"toolKeys,omitempty"`
+	InitialToolKeys      []string                `json:"initialToolKeys,omitempty"`
+	HostedToolGrants     []agent.HostedToolGrant `json:"hostedToolGrants,omitempty"`
+	Skills               []SkillSnapshot         `json:"skills,omitempty"`
+	Limits               agent.Limits            `json:"limits,omitempty"`
+	MaxModelOutputTokens int64                   `json:"maxModelOutputTokens,omitempty"`
+}
+
+func normalizeNamedAgentSnapshots(values []NamedAgentSnapshot) ([]NamedAgentSnapshot, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+	normalized := make([]NamedAgentSnapshot, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for i, v := range values {
+		v.MemberID = strings.TrimSpace(v.MemberID)
+		v.MemberRevision = strings.TrimSpace(v.MemberRevision)
+		v.Model = strings.TrimSpace(v.Model)
+		v.Instructions = strings.TrimSpace(v.Instructions)
+		if v.MemberID == "" || v.MemberRevision == "" || v.Model == "" ||
+			len(v.MemberID) > 160 || len(v.MemberRevision) > 256 || v.MaxModelOutputTokens < 0 ||
+			!enforceableHarnessBudgetLimits(v.Limits) {
+			return nil, ErrInvalidRequest
+		}
+		if _, present := seen[v.MemberID]; present {
+			return nil, ErrInvalidRequest
+		}
+		seen[v.MemberID] = struct{}{}
+		var err error
+		v.ModelOptions, err = canonicalJSON(v.ModelOptions)
+		if err != nil {
+			return nil, err
+		}
+		v.ToolKeys = normalizeStrings(v.ToolKeys)
+		v.InitialToolKeys = normalizeStrings(v.InitialToolKeys)
+		for _, key := range v.InitialToolKeys {
+			if !slices.Contains(v.ToolKeys, key) {
+				return nil, ErrInvalidRequest
+			}
+		}
+		v.HostedToolGrants, err = agent.NormalizeHostedToolGrantsForRole(v.HostedToolGrants)
+		if err != nil {
+			return nil, ErrInvalidRequest
+		}
+		for _, grant := range v.HostedToolGrants {
+			if slices.Contains(v.ToolKeys, grant.Key) {
+				return nil, ErrInvalidRequest
+			}
+		}
+		v.Skills, err = normalizeSkillSnapshots(v.Skills)
+		if err != nil {
+			return nil, err
+		}
+		normalized[i] = v
+	}
+	slices.SortFunc(normalized, func(a, b NamedAgentSnapshot) int { return strings.Compare(a.MemberID, b.MemberID) })
+	return normalized, nil
+}
+
+func cloneNamedAgentSnapshots(values []NamedAgentSnapshot) []NamedAgentSnapshot {
+	if len(values) == 0 {
+		return nil
+	}
+	copied := make([]NamedAgentSnapshot, len(values))
+	for i, v := range values {
+		v.ModelOptions = append(json.RawMessage(nil), v.ModelOptions...)
+		v.ToolKeys = append([]string(nil), v.ToolKeys...)
+		v.InitialToolKeys = append([]string(nil), v.InitialToolKeys...)
+		v.HostedToolGrants = append([]agent.HostedToolGrant(nil), v.HostedToolGrants...)
+		v.Skills = append([]SkillSnapshot(nil), v.Skills...)
+		copied[i] = v
+	}
+	return copied
+}
+
+func namedAgentForMember(config ConfigSnapshot, memberID, revision string) (NamedAgentSnapshot, bool) {
+	for _, selected := range config.DelegationPolicy.NamedAgents {
+		if selected.MemberID == memberID && selected.MemberRevision == revision {
+			return selected, true
+		}
+	}
+	return NamedAgentSnapshot{}, false
 }
 
 type DelegatedLocalToolGrant struct {
@@ -139,7 +236,6 @@ type ConfigSnapshot struct {
 	ToolKeys              []string                 `json:"toolKeys"`
 	ToolPolicies          []ToolPolicySnapshot     `json:"toolPolicies"`
 	Skills                []SkillSnapshot          `json:"skills"`
-	MemoryPolicy          string                   `json:"memoryPolicy,omitempty"`
 	ContextPolicy         runtimecontext.Policy    `json:"contextPolicy"`
 	ApprovalPolicyVersion uint64                   `json:"approvalPolicyVersion"`
 	Limits                agent.Limits             `json:"limits"`
@@ -171,7 +267,6 @@ type configPayload struct {
 	ToolKeys              []string                         `json:"toolKeys"`
 	ToolPolicies          []ToolPolicySnapshot             `json:"toolPolicies"`
 	Skills                []SkillSnapshot                  `json:"skills"`
-	MemoryPolicy          string                           `json:"memoryPolicy,omitempty"`
 	ContextPolicy         runtimecontext.Policy            `json:"contextPolicy"`
 	ApprovalPolicyVersion uint64                           `json:"approvalPolicyVersion"`
 	Limits                agent.Limits                     `json:"limits"`
@@ -199,7 +294,6 @@ func SealConfigSnapshot(turnID string, value ConfigSnapshot, now time.Time) (Con
 	value.Environment.ID = strings.TrimSpace(value.Environment.ID)
 	value.Instructions = strings.TrimSpace(value.Instructions)
 	value.Model = strings.TrimSpace(value.Model)
-	value.MemoryPolicy = strings.TrimSpace(value.MemoryPolicy)
 	value.ContextPolicy = runtimecontext.NormalizePolicy(value.ContextPolicy)
 	value.AdmissionHash = strings.TrimSpace(value.AdmissionHash)
 	if value.AdmissionHash != "" {
@@ -249,6 +343,10 @@ func SealConfigSnapshot(turnID string, value ConfigSnapshot, now time.Time) (Con
 	if err != nil {
 		return ConfigSnapshot{}, err
 	}
+	value.DelegationPolicy.NamedAgents, err = normalizeNamedAgentSnapshots(value.DelegationPolicy.NamedAgents)
+	if err != nil || (len(value.DelegationPolicy.NamedAgents) != 0 && value.DelegationPolicy.MaxDepth <= 0) {
+		return ConfigSnapshot{}, ErrInvalidRequest
+	}
 	value.Skills, err = normalizeSkillSnapshots(value.Skills)
 	if err != nil {
 		return ConfigSnapshot{}, err
@@ -268,7 +366,7 @@ func SealConfigSnapshot(turnID string, value ConfigSnapshot, now time.Time) (Con
 		TurnID: turnID, Environment: value.Environment, Instructions: value.Instructions,
 		Model: value.Model, ModelOptions: value.ModelOptions, OutputContract: value.OutputContract, ToolKeys: value.ToolKeys,
 		MaxModelOutputTokens: value.MaxModelOutputTokens,
-		ToolPolicies:         value.ToolPolicies, Skills: value.Skills, MemoryPolicy: value.MemoryPolicy,
+		ToolPolicies:         value.ToolPolicies, Skills: value.Skills,
 		ContextPolicy: value.ContextPolicy, ApprovalPolicyVersion: value.ApprovalPolicyVersion, Limits: value.Limits,
 		SharedBudget: value.SharedBudget, DelegationPolicy: value.DelegationPolicy,
 		AdmissionHash: value.AdmissionHash, InputMessage: value.InputMessage, OutputMessage: value.OutputMessage,
@@ -348,6 +446,7 @@ func cloneConfigSnapshot(value ConfigSnapshot) ConfigSnapshot {
 	value.ToolPolicies = append([]ToolPolicySnapshot(nil), value.ToolPolicies...)
 	value.Skills = append([]SkillSnapshot(nil), value.Skills...)
 	value.DelegationPolicy.LocalToolGrants = slices.Clone(value.DelegationPolicy.LocalToolGrants)
+	value.DelegationPolicy.NamedAgents = cloneNamedAgentSnapshots(value.DelegationPolicy.NamedAgents)
 	return value
 }
 

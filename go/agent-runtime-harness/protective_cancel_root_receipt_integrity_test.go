@@ -44,8 +44,6 @@ func (s *protectiveRootReadFaultStore) ListInvocations(ctx context.Context, turn
 				items[i].ID = "hiv_foreign"
 			case "bad-parent":
 				items[i].ParentItemID = "foreign-parent"
-			case "bad-class":
-				items[i].ExecutionClass = harness.ExecutionClass("removed")
 			case "bad-lifecycle":
 				items[i].Revision = 0
 			}
@@ -100,7 +98,7 @@ func TestProtectiveRootStopUsesFrozenIdentityNotOutputMetadata(t *testing.T) {
 }
 
 func TestProtectiveRootStopRejectsBrokenFrozenExecutionIdentity(t *testing.T) {
-	for _, mutation := range []string{"bad-input-hash", "bad-input", "bad-turn", "bad-attempt", "bad-run", "bad-id", "bad-parent", "bad-class", "bad-lifecycle"} {
+	for _, mutation := range []string{"bad-input-hash", "bad-input", "bad-turn", "bad-attempt", "bad-run", "bad-id", "bad-parent", "bad-lifecycle"} {
 		t.Run(mutation, func(t *testing.T) {
 			runtime := newFeatureInvocationRuntime(t)
 			store := &protectiveRootReadFaultStore{Store: harness.NewMemoryStore(), mutation: mutation}

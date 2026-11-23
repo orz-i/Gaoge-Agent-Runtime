@@ -56,7 +56,7 @@ func (f protocolFixture) controller(t *testing.T, c harness.RuntimeCanceller) *h
 	if err != nil {
 		t.Fatal(err)
 	}
-	shared, err := harness.NewBudgetMiddleware(harness.BudgetMiddlewareDependencies{Store: f.store, Ledgers: f.store, Relations: f.relations, Clock: generationClock{}})
+	shared, err := harness.NewBudgetAuthority(harness.BudgetAuthorityDependencies{Store: f.store, Ledgers: f.store, Relations: f.relations, Clock: generationClock{}})
 	if err != nil {
 		t.Fatal(err)
 	}

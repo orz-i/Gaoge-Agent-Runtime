@@ -36,7 +36,7 @@ func TestHostedEmptyStatusWithIdentityKeepsQuotaUntilExplicitTerminal(t *testing
 	store, shared, request := hostedBudgetFixture(t, budget.Limits{
 		MaxHostedToolCalls: 1, MaxToolCalls: 1, MaxLLMCalls: 3,
 	})
-	_, err := shared.Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
+	_, err := mustBudgetAdapter(t, shared).Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
 		if bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != 1 {
 			t.Fatalf("initial native allowance was not fenced: %+v", bounded)
 		}
@@ -56,12 +56,12 @@ func TestHostedEmptyStatusWithIdentityKeepsQuotaUntilExplicitTerminal(t *testing
 		!view.UnknownUsage || !toolUsageFromLedger(ledger).Incomplete {
 		t.Fatalf("empty status was incorrectly paid or released: %+v", view)
 	}
-	restarted, err := NewBudgetMiddleware(BudgetMiddlewareDependencies{Store: store, Clock: hostedBudgetClock{}})
+	restarted, err := NewBudgetAuthority(BudgetAuthorityDependencies{Store: store, Clock: hostedBudgetClock{}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	request.InvocationID = "reconcile-native"
-	_, err = restarted.Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
+	_, err = mustBudgetAdapter(t, restarted).Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
 		if bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != 0 {
 			t.Fatalf("restart turned unknown native effect into new authorization: %+v", bounded)
 		}
@@ -90,7 +90,7 @@ func TestHostedAnonymousUnfinishedStatusKeepsDispatchedModelReservation(t *testi
 				MaxHostedToolCalls: 1, MaxToolCalls: 1, MaxLLMCalls: 2,
 			})
 			calls := 0
-			_, err := shared.Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
+			_, err := mustBudgetAdapter(t, shared).Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
 				calls++
 				if bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != 1 {
 					t.Fatalf("initial native allowance missing: %+v", bounded)
@@ -111,11 +111,11 @@ func TestHostedAnonymousUnfinishedStatusKeepsDispatchedModelReservation(t *testi
 				!view.UnknownUsage || !toolUsageFromLedger(ledger).Incomplete {
 				t.Fatalf("unidentified effect silently refunded native quota: %+v", view)
 			}
-			restarted, err := NewBudgetMiddleware(BudgetMiddlewareDependencies{Store: store, Clock: hostedBudgetClock{}})
+			restarted, err := NewBudgetAuthority(BudgetAuthorityDependencies{Store: store, Clock: hostedBudgetClock{}})
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = restarted.Model(t.Context(), request, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
+			_, err = mustBudgetAdapter(t, restarted).Model(t.Context(), request, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
 				calls++
 				return model.Response{Content: "unsafe replay"}, nil
 			})
@@ -133,12 +133,12 @@ func TestHostedPauseReceiptsHoldAndReconcileAcrossRestart(t *testing.T) {
 		request.InvocationID = string(rune('a' + step))
 		if step == 1 {
 			var err error
-			shared, err = NewBudgetMiddleware(BudgetMiddlewareDependencies{Store: store, Clock: hostedBudgetClock{}})
+			shared, err = NewBudgetAuthority(BudgetAuthorityDependencies{Store: store, Clock: hostedBudgetClock{}})
 			if err != nil {
 				t.Fatal(err)
 			}
 		}
-		_, err := shared.Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
+		_, err := mustBudgetAdapter(t, shared).Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
 			// The in-progress receipt holds the only slot until settled.
 			// Continuation of that old execution is not a new allowance.
 			want := 0
@@ -176,7 +176,7 @@ func TestHostedPauseReceiptsHoldAndReconcileAcrossRestart(t *testing.T) {
 			t.Fatalf("known model tokens were not settled: %+v", view)
 		}
 		// Reusing a logical invocation returns its durable receipt without dispatch.
-		_, err = shared.Model(t.Context(), request, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
+		_, err = mustBudgetAdapter(t, shared).Model(t.Context(), request, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
 			t.Fatal("receipt redispatched")
 			return model.Response{}, nil
 		})
@@ -188,7 +188,7 @@ func TestHostedPauseReceiptsHoldAndReconcileAcrossRestart(t *testing.T) {
 
 func TestHostedUnfinishedReceiptSurvivesTerminalRun(t *testing.T) {
 	store, shared, request := hostedBudgetFixture(t, budget.Limits{MaxHostedToolCalls: 1, MaxToolCalls: 1})
-	_, err := shared.Model(t.Context(), request, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
+	_, err := mustBudgetAdapter(t, shared).Model(t.Context(), request, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
 		return model.Response{Content: "partial answer", HostedToolCalls: []model.HostedToolCall{{ID: "unresolved", ToolKey: "native.search", Status: "in_progress"}}}, nil
 	})
 	if err != nil {
@@ -197,7 +197,7 @@ func TestHostedUnfinishedReceiptSurvivesTerminalRun(t *testing.T) {
 	request.InvocationID = "final-only"
 	zero := 0
 	request.HostedToolCallLimit = &zero
-	_, err = shared.Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
+	_, err = mustBudgetAdapter(t, shared).Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
 		if bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != 0 {
 			t.Fatal("final-only sampling resumed uncertain native work")
 		}
@@ -224,7 +224,7 @@ func TestHostedUnfinishedReceiptSurvivesTerminalRun(t *testing.T) {
 // not another allowance for new provider executions on the next model step.
 func TestHostedContinuationHeldReceiptCannotGrantNewNativeCall(t *testing.T) {
 	store, shared, request := hostedBudgetFixture(t, budget.Limits{MaxHostedToolCalls: 1, MaxToolCalls: 1, MaxLLMCalls: 3})
-	_, err := shared.Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
+	_, err := mustBudgetAdapter(t, shared).Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
 		if bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != 1 {
 			t.Fatalf("initial new-call allowance: %v", bounded.HostedToolCallLimit)
 		}
@@ -234,7 +234,7 @@ func TestHostedContinuationHeldReceiptCannotGrantNewNativeCall(t *testing.T) {
 		t.Fatal(err)
 	}
 	request.InvocationID = "finish-old"
-	_, err = shared.Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
+	_, err = mustBudgetAdapter(t, shared).Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
 		if bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != 0 {
 			t.Fatalf("held receipt became a fresh call permit: %v", bounded.HostedToolCallLimit)
 		}
@@ -260,7 +260,7 @@ func TestHostedContinuationHeldReceiptCannotGrantNewNativeCall(t *testing.T) {
 // quota may be delegated for NEW native executions.
 func TestHostedContinuationReservesOnlyFreshCalls(t *testing.T) {
 	_, shared, request := hostedBudgetFixture(t, budget.Limits{MaxHostedToolCalls: 3, MaxToolCalls: 3})
-	_, err := shared.Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
+	_, err := mustBudgetAdapter(t, shared).Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
 		return model.Response{Continue: true, HostedToolCalls: []model.HostedToolCall{
 			{ID: "old-1", ToolKey: "native.search", Status: "in_progress"},
 			{ID: "old-2", ToolKey: "native.search", Status: "in_progress"},
@@ -270,7 +270,7 @@ func TestHostedContinuationReservesOnlyFreshCalls(t *testing.T) {
 		t.Fatal(err)
 	}
 	request.InvocationID = "fresh-only"
-	_, err = shared.Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
+	_, err = mustBudgetAdapter(t, shared).Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
 		if bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != 1 {
 			t.Fatalf("held calls inflated the new-execution limit: %v", bounded.HostedToolCallLimit)
 		}
@@ -298,7 +298,7 @@ func TestHostedSameResponseTerminalWinsAndReplaysExactlyOnce(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store, shared, request := hostedBudgetFixture(t, budget.Limits{MaxHostedToolCalls: 1, MaxToolCalls: 1, MaxLLMCalls: 3})
-			_, err := shared.Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
+			_, err := mustBudgetAdapter(t, shared).Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
 				if bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != 1 {
 					t.Fatalf("missing bounded initial dispatch: %v", bounded.HostedToolCallLimit)
 				}
@@ -322,7 +322,7 @@ func TestHostedSameResponseTerminalWinsAndReplaysExactlyOnce(t *testing.T) {
 			if usage.Incomplete || usage.HostedCalls != 1 || usage.HostedCallsByKey["native.search"] != 1 {
 				t.Fatalf("host projection disagrees with settled receipt: %+v", usage)
 			}
-			_, err = shared.Model(t.Context(), request, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
+			_, err = mustBudgetAdapter(t, shared).Model(t.Context(), request, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
 				t.Fatal("replayed model invocation dispatched a second time")
 				return model.Response{}, nil
 			})
@@ -330,7 +330,7 @@ func TestHostedSameResponseTerminalWinsAndReplaysExactlyOnce(t *testing.T) {
 				t.Fatal(err)
 			}
 			request.InvocationID = "after-terminal"
-			_, err = shared.Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
+			_, err = mustBudgetAdapter(t, shared).Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
 				if bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != 0 {
 					t.Fatalf("already-charged tool has gained new authorization: %v", bounded.HostedToolCallLimit)
 				}
@@ -349,7 +349,7 @@ func TestHostedNonterminalStatusesPreserveUncertainCharges(t *testing.T) {
 	for _, status := range []string{"requested", "pending", "in_progress", "running", "queued", "unknown_vendor_state"} {
 		t.Run(status, func(t *testing.T) {
 			store, shared, request := hostedBudgetFixture(t, budget.Limits{MaxHostedToolCalls: 1, MaxToolCalls: 1})
-			_, err := shared.Model(t.Context(), request, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
+			_, err := mustBudgetAdapter(t, shared).Model(t.Context(), request, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
 				return model.Response{Content: "still pending", HostedToolCalls: []model.HostedToolCall{
 					{ID: "unresolved", ToolKey: "native.search", Status: status},
 				}}, nil

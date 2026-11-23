@@ -39,11 +39,8 @@ func TestTerminalNoEffectMustBeOriginalStartNotControlOrResume(t *testing.T) {
 				hash := sha256.Sum256(input)
 				owner := harness.Invocation{
 					ID: "root-" + name + "-" + tc.phase, TurnID: turn.ID,
-					CapabilityKey:     harness.CapabilityAgent,
-					DefinitionVersion: harness.RuntimeCapabilityVersion,
-					ExecutionClass:    harness.ExecutionAgent,
-					ExecutionRefID:    "original-active-run-" + name,
-					Input:             input, InputHash: hex.EncodeToString(hash[:]),
+					ExecutionRefID: "original-active-run-" + name,
+					Input:          input, InputHash: hex.EncodeToString(hash[:]),
 					Status: harness.InvocationRunning, Attempt: 1, Revision: 1,
 					CreatedAt: now, UpdatedAt: now, OutputRefs: []harness.HostRef{},
 				}
@@ -101,7 +98,6 @@ func TestTerminalNoEffectStartBoundariesRemainPositive(t *testing.T) {
 	for name, create := range rootInvocationStores() {
 		for _, tc := range []struct{ phase, boundary string }{
 			{"start", "physical_dispatch_rejected"},
-			{"start", "feature_start_no_effect"},
 			{"start-retry", "native_agent_start_no_effect"},
 		} {
 			t.Run(name+"/"+tc.phase+"/"+tc.boundary, func(t *testing.T) {
@@ -115,7 +111,6 @@ func TestTerminalNoEffectStartBoundariesRemainPositive(t *testing.T) {
 					t.Fatalf("turn: fresh=%t err=%v", fresh, err)
 				}
 				owner := harness.Invocation{ID: "root-" + turn.ID, TurnID: turn.ID,
-					CapabilityKey: harness.CapabilityAgent, ExecutionClass: harness.ExecutionAgent,
 					ExecutionRefID: "original-start-" + name, Status: harness.InvocationRunning,
 					Attempt: 1, Revision: 1, CreatedAt: now, UpdatedAt: now}
 				if tc.phase == "start-retry" {

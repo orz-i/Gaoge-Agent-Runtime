@@ -39,8 +39,7 @@ func testSQLRetryStoreConfigIntegrity(t *testing.T, missing bool) {
 	}
 	input := []byte("{\"goal\":\"cancelled run\"}")
 	digest := sha256.Sum256(input)
-	root := harness.Invocation{ID: "root", TurnID: turn.ID, CapabilityKey: harness.CapabilityAgent,
-		ExecutionClass: harness.ExecutionAgent, Input: input, InputHash: hex.EncodeToString(digest[:]),
+	root := harness.Invocation{ID: "root", TurnID: turn.ID, Input: input, InputHash: hex.EncodeToString(digest[:]),
 		ExecutionRefID: "original-run", Status: harness.InvocationCancelled,
 		Attempt: 1, Revision: 1, CreatedAt: now, UpdatedAt: now, OutputRefs: []harness.HostRef{}}
 	if _, _, err = s.CreateInvocation(ctx, root); err != nil {

@@ -27,8 +27,7 @@ func VerifiedUndispatchedRootCancellation(ctx context.Context, inv Invocation, t
 	return ok && proof.turnID == turn.ID && proof.turnID == inv.TurnID && proof.turnID != "" &&
 		proof.invocationID == inv.ID && proof.invocationID != "" &&
 		proof.runID == inv.ExecutionRefID && proof.runID != "" && proof.attempt == inv.Attempt &&
-		inv.Attempt > 0 && inv.ParentItemID == "" && inv.ExecutionClass == ExecutionAgent &&
-		proof.invocationRevision == inv.Revision && proof.turnRevision == turn.Revision &&
+		inv.Attempt > 0 && inv.ParentItemID == "" && proof.invocationRevision == inv.Revision && proof.turnRevision == turn.Revision &&
 		inv.Status == InvocationAccepted && undispatchedRootTurn(inv, turn)
 }
 
@@ -44,7 +43,7 @@ func ValidUndispatchedRootCancellationEvidence(inv Invocation, turn Turn, items 
 	if !hasActiveCancellation ||
 		inv.Status != InvocationAccepted || !undispatchedRootTurn(inv, turn) ||
 		inv.Attempt < 1 || inv.ID == "" || inv.ExecutionRefID == "" ||
-		inv.TurnID != turn.ID || inv.ParentItemID != "" || inv.ExecutionClass != ExecutionAgent {
+		inv.TurnID != turn.ID || inv.ParentItemID != "" {
 		return false
 	}
 	if ledger != nil {

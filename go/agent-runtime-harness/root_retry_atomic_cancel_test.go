@@ -76,15 +76,13 @@ func testRootRetryCommittedAckLoss(t *testing.T, historicalTerminalChild bool) {
 		t.Fatal(err)
 	}
 	client := &roleBudgetModel{}
-	shared, err := harness.NewBudgetMiddleware(harness.BudgetMiddlewareDependencies{
+	shared, err := harness.NewBudgetAuthority(harness.BudgetAuthorityDependencies{
 		Store: store, Ledgers: store, Relations: relations, Meter: client, Clock: fixedClock{},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	bounded, err := harness.NewBoundedBudgetAdapter(harness.BudgetMiddlewareDependencies{
-		Store: store, Ledgers: store, Relations: relations, Meter: client, Clock: fixedClock{},
-	})
+	bounded, err := shared.Adapter()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,8 +137,7 @@ func testRootRetryCommittedAckLoss(t *testing.T, historicalTerminalChild bool) {
 		now := fixedClock{}.Now()
 		child := harness.Invocation{
 			ID: "old-terminal-child", TurnID: rootBefore.TurnID,
-			ParentItemID: "original-parent-item", CapabilityKey: harness.CapabilityAgent,
-			ExecutionClass: harness.ExecutionAgent, ExecutionRefID: "old-child-run",
+			ParentItemID: "original-parent-item", ExecutionRefID: "old-child-run",
 			Input: childInput, InputHash: hex.EncodeToString(digest[:]),
 			Status: harness.InvocationCompleted, Attempt: 1, Revision: 1,
 			CreatedAt: now, UpdatedAt: now, OutputRefs: []harness.HostRef{},

@@ -65,7 +65,7 @@ func TestIndependentContextMiddlewareRebindsForeignRunToItsOwnDurableTurn(t *tes
 	// root Invocation instead of trusting the inherited owner binding.
 	inherited := withContextWindowBinding(withContextCheckpoint(t.Context(), firstCheckpoint), firstTurn.ID, ContextWindowOwner)
 	_, err = middleware.Run(inherited, plugin.RunInvocation{
-		Operation: plugin.RunResume, Kind: kernel.RunKind(ExecutionAgent), RunID: foreignInvocation.ExecutionRefID,
+		Operation: plugin.RunResume, Kind: kernel.RunKind("agent"), RunID: foreignInvocation.ExecutionRefID,
 	}, func(ctx context.Context) (kernel.Snapshot, error) {
 		binding, ok := CurrentContextWindowBinding(ctx)
 		if !ok || binding.TurnID != foreignTurn.ID || binding.Access != ContextWindowOwner {
@@ -84,7 +84,7 @@ func TestIndependentContextMiddlewareRebindsForeignRunToItsOwnDurableTurn(t *tes
 	// foreign Run's authority. Rehydrate from the durable foreign Turn.
 	unbound := withContextCheckpoint(t.Context(), firstCheckpoint)
 	_, err = middleware.Run(unbound, plugin.RunInvocation{
-		Operation: plugin.RunResume, Kind: kernel.RunKind(ExecutionAgent), RunID: foreignInvocation.ExecutionRefID,
+		Operation: plugin.RunResume, Kind: kernel.RunKind("agent"), RunID: foreignInvocation.ExecutionRefID,
 	}, func(ctx context.Context) (kernel.Snapshot, error) {
 		assertContextRunHydration(t, ctx, foreignTurn.ID, ContextWindowOwner, secondCheckpoint)
 		return kernel.Snapshot{}, nil
@@ -107,7 +107,7 @@ func TestContextRunMiddlewareDowngradesInheritedOwnerForDescendant(t *testing.T)
 		t.Fatal(err)
 	}
 	inherited := withContextWindowBinding(withContextCheckpoint(t.Context(), checkpoint), turn.ID, ContextWindowOwner)
-	_, err = middleware.Run(inherited, plugin.RunInvocation{Operation: plugin.RunResume, Kind: kernel.RunKind(ExecutionAgent), RunID: childRunID}, func(ctx context.Context) (kernel.Snapshot, error) {
+	_, err = middleware.Run(inherited, plugin.RunInvocation{Operation: plugin.RunResume, Kind: kernel.RunKind("agent"), RunID: childRunID}, func(ctx context.Context) (kernel.Snapshot, error) {
 		binding, ok := CurrentContextWindowBinding(ctx)
 		if !ok || binding.TurnID != turn.ID || binding.Access != ContextWindowReadOnly {
 			t.Errorf("DESCENDANT INHERITED OWNER PRIVILEGES: binding=%+v ok=%v", binding, ok)
@@ -133,7 +133,7 @@ func TestContextRunMiddlewareUnresolvedRunDropsInheritedContext(t *testing.T) {
 		t.Fatal(err)
 	}
 	inherited := withContextWindowBinding(withContextCheckpoint(t.Context(), checkpoint), turn.ID, ContextWindowOwner)
-	_, err = middleware.Run(inherited, plugin.RunInvocation{Operation: plugin.RunResume, Kind: kernel.RunKind(ExecutionAgent), RunID: "unrelated-standalone-agent"}, func(ctx context.Context) (kernel.Snapshot, error) {
+	_, err = middleware.Run(inherited, plugin.RunInvocation{Operation: plugin.RunResume, Kind: kernel.RunKind("agent"), RunID: "unrelated-standalone-agent"}, func(ctx context.Context) (kernel.Snapshot, error) {
 		binding, hasBinding := CurrentContextWindowBinding(ctx)
 		got, hasCheckpoint := CurrentContextCheckpoint(ctx)
 		if hasBinding || hasCheckpoint {
@@ -155,7 +155,7 @@ func TestContextRunMiddlewareRetainsExplicitReadOnlyOnSameRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	readOnly := withContextWindowBinding(withContextCheckpoint(t.Context(), checkpoint), turn.ID, ContextWindowReadOnly)
-	_, err = middleware.Run(readOnly, plugin.RunInvocation{Operation: plugin.RunResume, Kind: kernel.RunKind(ExecutionAgent), RunID: root.ExecutionRefID}, func(ctx context.Context) (kernel.Snapshot, error) {
+	_, err = middleware.Run(readOnly, plugin.RunInvocation{Operation: plugin.RunResume, Kind: kernel.RunKind("agent"), RunID: root.ExecutionRefID}, func(ctx context.Context) (kernel.Snapshot, error) {
 		binding, ok := CurrentContextWindowBinding(ctx)
 		if !ok || binding.TurnID != turn.ID || binding.Access != ContextWindowReadOnly {
 			t.Errorf("explicit read-only binding was upgraded: %+v ok=%v", binding, ok)
@@ -183,7 +183,7 @@ func TestContextRunMiddlewareHandoffIgnoresInheritedSupervisorContext(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	id, err := InvocationID(turn.ID, "delegated-parent", CapabilityAgent, delegation.ID)
+	id, err := AgentInvocationID(turn.ID, "delegated-parent", delegation.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +197,7 @@ func TestContextRunMiddlewareHandoffIgnoresInheritedSupervisorContext(t *testing
 		t.Fatal(err)
 	}
 	inherited := withContextWindowBinding(withContextCheckpoint(t.Context(), checkpoint), turn.ID, ContextWindowOwner)
-	_, err = middleware.Run(inherited, plugin.RunInvocation{Operation: plugin.RunResume, Kind: kernel.RunKind(ExecutionAgent), RunID: child.ExecutionRefID}, func(ctx context.Context) (kernel.Snapshot, error) {
+	_, err = middleware.Run(inherited, plugin.RunInvocation{Operation: plugin.RunResume, Kind: kernel.RunKind("agent"), RunID: child.ExecutionRefID}, func(ctx context.Context) (kernel.Snapshot, error) {
 		binding, hasBinding := CurrentContextWindowBinding(ctx)
 		got, hasCheckpoint := CurrentContextCheckpoint(ctx)
 		if hasBinding || hasCheckpoint {
@@ -221,7 +221,7 @@ func TestContextRunMiddlewareUnboundCheckpointCannotLeakWithoutDurableRun(t *tes
 	inherited := withContextCheckpoint(t.Context(), checkpoint)
 	for _, runID := range []string{"unrelated-standalone-agent", ""} {
 		t.Run(runID, func(t *testing.T) {
-			_, err = middleware.Run(inherited, plugin.RunInvocation{Operation: plugin.RunResume, Kind: kernel.RunKind(ExecutionAgent), RunID: runID}, func(ctx context.Context) (kernel.Snapshot, error) {
+			_, err = middleware.Run(inherited, plugin.RunInvocation{Operation: plugin.RunResume, Kind: kernel.RunKind("agent"), RunID: runID}, func(ctx context.Context) (kernel.Snapshot, error) {
 				if b, ok := CurrentContextWindowBinding(ctx); ok {
 					t.Errorf("unowned binding leaked: %+v", b)
 				}
@@ -260,7 +260,7 @@ func TestIndependentContextRunHandoffDescendantsNeverInheritSupervisorContext(t 
 			if err != nil {
 				t.Fatal(err)
 			}
-			id, err := InvocationID(turn.ID, "specialist-parent-item", CapabilityAgent, delegation.ID)
+			id, err := AgentInvocationID(turn.ID, "specialist-parent-item", delegation.ID)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -285,7 +285,7 @@ func TestIndependentContextRunHandoffDescendantsNeverInheritSupervisorContext(t 
 			if inherited {
 				ctx = withContextWindowBinding(withContextCheckpoint(ctx, checkpoint), turn.ID, ContextWindowOwner)
 			}
-			_, err = middleware.Run(ctx, plugin.RunInvocation{Operation: plugin.RunResume, Kind: kernel.RunKind(ExecutionAgent), RunID: descendantID}, func(got context.Context) (kernel.Snapshot, error) {
+			_, err = middleware.Run(ctx, plugin.RunInvocation{Operation: plugin.RunResume, Kind: kernel.RunKind("agent"), RunID: descendantID}, func(got context.Context) (kernel.Snapshot, error) {
 				binding, hasBinding := CurrentContextWindowBinding(got)
 				window, hasWindow := CurrentContextCheckpoint(got)
 				if hasBinding || hasWindow {
@@ -313,7 +313,7 @@ func TestIndependentContextRunRejectsRelationWhoseChildDoesNotMatchLookup(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = middleware.Run(t.Context(), plugin.RunInvocation{Operation: plugin.RunResume, Kind: kernel.RunKind(ExecutionAgent), RunID: unrelated}, func(ctx context.Context) (kernel.Snapshot, error) {
+	_, err = middleware.Run(t.Context(), plugin.RunInvocation{Operation: plugin.RunResume, Kind: kernel.RunKind("agent"), RunID: unrelated}, func(ctx context.Context) (kernel.Snapshot, error) {
 		if binding, ok := CurrentContextWindowBinding(ctx); ok {
 			t.Errorf("INVALID RELATION ADMITTED FOREIGN CONTEXT: Turn=%s access=%s expected none", binding.TurnID, binding.Access)
 		}
@@ -360,7 +360,7 @@ func TestIndependentHandoffFirstOwnershipReadErrorMustNotExposeSupervisor(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	id, err := InvocationID(turn.ID, "lookup-failure-parent", CapabilityAgent, delegation.ID)
+	id, err := AgentInvocationID(turn.ID, "lookup-failure-parent", delegation.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -375,7 +375,7 @@ func TestIndependentHandoffFirstOwnershipReadErrorMustNotExposeSupervisor(t *tes
 		t.Fatal(err)
 	}
 	inherited := withContextWindowBinding(withContextCheckpoint(t.Context(), checkpoint), turn.ID, ContextWindowOwner)
-	_, err = middleware.Run(inherited, plugin.RunInvocation{Operation: plugin.RunResume, Kind: kernel.RunKind(ExecutionAgent), RunID: child.ExecutionRefID}, func(ctx context.Context) (kernel.Snapshot, error) {
+	_, err = middleware.Run(inherited, plugin.RunInvocation{Operation: plugin.RunResume, Kind: kernel.RunKind("agent"), RunID: child.ExecutionRefID}, func(ctx context.Context) (kernel.Snapshot, error) {
 		if binding, ok := CurrentContextWindowBinding(ctx); ok {
 			t.Errorf("TRANSIENT OWNER LOOKUP FAILURE EXPOSED SUPERVISOR TURN: %+v", binding)
 		}
@@ -413,7 +413,7 @@ func TestContextRunRelationRejectsMalformedOwnerLinks(t *testing.T) {
 				t.Fatal(err)
 			}
 			called := false
-			_, err = middleware.Run(t.Context(), plugin.RunInvocation{Operation: plugin.RunResume, Kind: kernel.RunKind(ExecutionAgent), RunID: "foreign-run"}, func(ctx context.Context) (kernel.Snapshot, error) {
+			_, err = middleware.Run(t.Context(), plugin.RunInvocation{Operation: plugin.RunResume, Kind: kernel.RunKind("agent"), RunID: "foreign-run"}, func(ctx context.Context) (kernel.Snapshot, error) {
 				called = true
 				return kernel.Snapshot{}, nil
 			})
@@ -435,7 +435,7 @@ func TestContextRunRelationCycleFailsClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 	called := false
-	_, err = middleware.Run(t.Context(), plugin.RunInvocation{Operation: plugin.RunResume, Kind: kernel.RunKind(ExecutionAgent), RunID: "a"}, func(context.Context) (kernel.Snapshot, error) {
+	_, err = middleware.Run(t.Context(), plugin.RunInvocation{Operation: plugin.RunResume, Kind: kernel.RunKind("agent"), RunID: "a"}, func(context.Context) (kernel.Snapshot, error) {
 		called = true
 		return kernel.Snapshot{}, nil
 	})
@@ -484,7 +484,7 @@ func TestIndependentContextRunFirstMissingThenPresentHandoffRelationNeverExposes
 			if err != nil {
 				t.Fatal(err)
 			}
-			id, err := InvocationID(turn.ID, "late-relation-parent", CapabilityAgent, delegation.ID)
+			id, err := AgentInvocationID(turn.ID, "late-relation-parent", delegation.ID)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -504,7 +504,7 @@ func TestIndependentContextRunFirstMissingThenPresentHandoffRelationNeverExposes
 				ctx = withContextWindowBinding(withContextCheckpoint(ctx, checkpoint), turn.ID, ContextWindowOwner)
 			}
 			invoked := false
-			_, err = middleware.Run(ctx, plugin.RunInvocation{Operation: plugin.RunResume, Kind: kernel.RunKind(ExecutionAgent), RunID: descendant}, func(got context.Context) (kernel.Snapshot, error) {
+			_, err = middleware.Run(ctx, plugin.RunInvocation{Operation: plugin.RunResume, Kind: kernel.RunKind("agent"), RunID: descendant}, func(got context.Context) (kernel.Snapshot, error) {
 				invoked = true
 				if binding, ok := CurrentContextWindowBinding(got); ok {
 					t.Errorf("TOCTOU ALLOWED SUPERVISOR TURN: %+v", binding)
@@ -545,7 +545,7 @@ func TestIndependentHandoffArtifactReadNeverLeaksSupervisorArchive(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	id, err := InvocationID(turn.ID, "archive-parent-item", CapabilityAgent, delegation.ID)
+	id, err := AgentInvocationID(turn.ID, "archive-parent-item", delegation.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -601,7 +601,7 @@ func TestIndependentContextRunSameTurnTamperedCheckpointPayloadCannotBypassDurab
 	for _, access := range []ContextWindowAccess{ContextWindowOwner, ContextWindowReadOnly} {
 		t.Run(string(access), func(t *testing.T) {
 			injected := withContextWindowBinding(withContextCheckpoint(t.Context(), altered), turn.ID, access)
-			_, err = middleware.Run(injected, plugin.RunInvocation{Operation: plugin.RunResume, Kind: kernel.RunKind(ExecutionAgent), RunID: root.ExecutionRefID}, func(ctx context.Context) (kernel.Snapshot, error) {
+			_, err = middleware.Run(injected, plugin.RunInvocation{Operation: plugin.RunResume, Kind: kernel.RunKind("agent"), RunID: root.ExecutionRefID}, func(ctx context.Context) (kernel.Snapshot, error) {
 				materialized, ok := CurrentContextCheckpoint(ctx)
 				if !ok {
 					t.Fatal("trusted Turn Context was unexpectedly discarded")
@@ -649,7 +649,7 @@ func TestIndependentContextRunInvalidHandoffInvocationInputHashMustFailClosed(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	id, err := InvocationID(turn.ID, "corrupt-parent-item", CapabilityAgent, delegation.ID)
+	id, err := AgentInvocationID(turn.ID, "corrupt-parent-item", delegation.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -669,7 +669,7 @@ func TestIndependentContextRunInvalidHandoffInvocationInputHashMustFailClosed(t 
 	}
 	inherited := withContextWindowBinding(withContextCheckpoint(t.Context(), checkpoint), turn.ID, ContextWindowOwner)
 	invoked := false
-	_, err = middleware.Run(inherited, plugin.RunInvocation{Operation: plugin.RunResume, Kind: kernel.RunKind(ExecutionAgent), RunID: child.ExecutionRefID}, func(ctx context.Context) (kernel.Snapshot, error) {
+	_, err = middleware.Run(inherited, plugin.RunInvocation{Operation: plugin.RunResume, Kind: kernel.RunKind("agent"), RunID: child.ExecutionRefID}, func(ctx context.Context) (kernel.Snapshot, error) {
 		invoked = true
 		if binding, has := CurrentContextWindowBinding(ctx); has {
 			t.Errorf("CORRUPT HANDOFF CANNOT GRANT SUPERVISOR CONTEXT: %+v", binding)
@@ -710,7 +710,7 @@ func TestIndependentAuditDurableCheckpointCorruptionMustFailClosed(t *testing.T)
 		t.Fatal(err)
 	}
 	invoked := false
-	_, err = middleware.Run(t.Context(), plugin.RunInvocation{Operation: plugin.RunResume, Kind: kernel.RunKind(ExecutionAgent), RunID: root.ExecutionRefID}, func(ctx context.Context) (kernel.Snapshot, error) {
+	_, err = middleware.Run(t.Context(), plugin.RunInvocation{Operation: plugin.RunResume, Kind: kernel.RunKind("agent"), RunID: root.ExecutionRefID}, func(ctx context.Context) (kernel.Snapshot, error) {
 		invoked = true
 		got, ok := CurrentContextCheckpoint(ctx)
 		if ok && !runtimecontext.ValidCheckpoint(got) {
@@ -754,7 +754,7 @@ func TestIndependentAuditMissingHandoffInputMustNotBecomeOrdinaryChild(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	id, err := InvocationID(turn.ID, "audit-parent-item", CapabilityAgent, delegation.ID)
+	id, err := AgentInvocationID(turn.ID, "audit-parent-item", delegation.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -782,7 +782,7 @@ func TestIndependentAuditMissingHandoffInputMustNotBecomeOrdinaryChild(t *testin
 			}
 			inherited := withContextWindowBinding(withContextCheckpoint(t.Context(), checkpoint), turn.ID, ContextWindowOwner)
 			invoked := false
-			_, runErr := middleware.Run(inherited, plugin.RunInvocation{Operation: plugin.RunResume, Kind: kernel.RunKind(ExecutionAgent), RunID: child.ExecutionRefID}, func(ctx context.Context) (kernel.Snapshot, error) {
+			_, runErr := middleware.Run(inherited, plugin.RunInvocation{Operation: plugin.RunResume, Kind: kernel.RunKind("agent"), RunID: child.ExecutionRefID}, func(ctx context.Context) (kernel.Snapshot, error) {
 				invoked = true
 				if binding, has := CurrentContextWindowBinding(ctx); has {
 					t.Errorf("invalid Handoff exposed Supervisor Context: %+v", binding)
@@ -828,7 +828,7 @@ func TestIndependentAuditMalformedRelationMetadataCannotGrantContext(t *testing.
 				t.Fatal(err)
 			}
 			invoked := false
-			_, err = middleware.Run(t.Context(), plugin.RunInvocation{Operation: plugin.RunResume, Kind: kernel.RunKind(ExecutionAgent), RunID: childID}, func(ctx context.Context) (kernel.Snapshot, error) {
+			_, err = middleware.Run(t.Context(), plugin.RunInvocation{Operation: plugin.RunResume, Kind: kernel.RunKind("agent"), RunID: childID}, func(ctx context.Context) (kernel.Snapshot, error) {
 				invoked = true
 				if b, ok := CurrentContextWindowBinding(ctx); ok {
 					t.Errorf("invalid relation authorized Context: %+v, turn=%s", b, turn.ID)

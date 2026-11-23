@@ -171,7 +171,7 @@ func (runner *Runner) boundContextOpenRequest(ctx context.Context, scopeID, fing
 		}
 		previous = &loaded
 	}
-	instructions := strings.TrimSpace(strings.Join([]string{config.Instructions, seed.Instructions}, "\n\n"))
+	instructions := selectedContextInstructions(config, seed.Instructions)
 	if binding.SourceDelta {
 		if seed.SourceDelta {
 			if seed.BaseCheckpointID != previous.ID {
@@ -219,6 +219,6 @@ func (runner *Runner) frozenWorkingStateOpenRequest(ctx context.Context, scopeID
 		}
 		delta.ResetCacheIdentity = diverged
 	}
-	instructions := strings.TrimSpace(strings.Join([]string{config.Instructions, seed.Instructions}, "\n\n"))
+	instructions := selectedContextInstructions(config, seed.Instructions)
 	return contextDeltaOpenRequest(scopeID, fingerprint, instructions, delta, base), nil
 }

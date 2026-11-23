@@ -38,7 +38,7 @@ func TestAnonymousHostedTerminalDoesNotSettleModelOrReleaseNativeQuota(t *testin
 				MaxHostedToolCalls: 2, MaxToolCalls: 2, MaxLLMCalls: 3,
 			})
 			physical := 0
-			_, err := shared.Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
+			_, err := mustBudgetAdapter(t, shared).Model(t.Context(), request, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
 				physical++
 				if bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != 2 {
 					t.Fatalf("unexpected original native allowance: %+v", bounded)
@@ -67,11 +67,11 @@ func TestAnonymousHostedTerminalDoesNotSettleModelOrReleaseNativeQuota(t *testin
 					t.Fatalf("mixed anonymous/identified response produced a partial hosted receipt: %s", id)
 				}
 			}
-			restarted, err := NewBudgetMiddleware(BudgetMiddlewareDependencies{Store: store, Clock: hostedBudgetClock{}})
+			restarted, err := NewBudgetAuthority(BudgetAuthorityDependencies{Store: store, Clock: hostedBudgetClock{}})
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = restarted.Model(t.Context(), request, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
+			_, err = mustBudgetAdapter(t, restarted).Model(t.Context(), request, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
 				physical++
 				return model.Response{Content: "invalid duplicate physical send"}, nil
 			})
@@ -87,7 +87,7 @@ func TestAnonymousHostedTerminalDoesNotSettleModelOrReleaseNativeQuota(t *testin
 			// all available NEW native execution allowance.
 			finalOnly := model.CloneRequest(request)
 			finalOnly.InvocationID = "final-only-after-unknown"
-			_, err = restarted.Model(t.Context(), finalOnly, nil,
+			_, err = mustBudgetAdapter(t, restarted).Model(t.Context(), finalOnly, nil,
 				func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
 					physical++
 					if bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != 0 ||

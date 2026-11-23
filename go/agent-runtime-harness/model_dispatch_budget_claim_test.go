@@ -80,7 +80,7 @@ func testSharedBudgetUnsentClaim(t *testing.T, bounded bool, outputCeiling int64
 	unblock := func() { once.Do(func() { close(held.release) }) }
 	t.Cleanup(unblock)
 	provider := &countedBudgetModel{}
-	boundedBudget, err := NewBoundedBudgetAdapter(shared.dependencies)
+	boundedBudget, err := shared.Adapter()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +173,7 @@ func TestSharedBudgetCannotTreatProviderErrorAsUnsentProof(t *testing.T) {
 	store, shared, request := hostedBudgetFixture(t, budget.Limits{MaxLLMCalls: 1})
 	// A remote Provider error may happen to be identical to an Agent claim
 	// rejection. Only the Agent's private terminal-boundary proof can refund.
-	_, err := shared.Model(t.Context(), request, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
+	_, err := mustBudgetAdapter(t, shared).Model(t.Context(), request, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
 		return model.Response{}, agent.ErrModelInvocationBusy
 	})
 	if !errors.Is(err, agent.ErrModelInvocationBusy) || agent.IsModelPreDispatchDenied(err) {
@@ -183,7 +183,7 @@ func TestSharedBudgetCannotTreatProviderErrorAsUnsentProof(t *testing.T) {
 	if err != nil || !ledger.View("").UnknownUsage || !ledger.Reservations["model:"+request.InvocationID].Dispatched {
 		t.Fatalf("uncertain physical Provider result was refunded: ledger=%+v, err=%v", ledger, err)
 	}
-	_, err = shared.Model(t.Context(), request, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
+	_, err = mustBudgetAdapter(t, shared).Model(t.Context(), request, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
 		t.Fatal("unknown Provider result was sent again")
 		return model.Response{}, nil
 	})
@@ -205,7 +205,7 @@ func TestPreIntentFailureDoesNotReserveSharedModelBudget(t *testing.T) {
 	}
 	provider := &countedBudgetModel{}
 	runner, err := agent.NewRunner(agent.Dependencies{
-		Runtime: rt, Model: provider, ModelMiddleware: []plugin.ModelMiddleware{shared},
+		Runtime: rt, Model: provider, ModelMiddleware: []plugin.ModelMiddleware{mustBudgetAdapter(t, shared)},
 		PrepareModelRequest: func(context.Context, model.Request) (model.Request, error) {
 			return model.Request{}, errors.New("pre-intent context admission rejected")
 		},
@@ -231,7 +231,7 @@ func TestPreIntentFailureDoesNotReserveSharedModelBudget(t *testing.T) {
 	// A separate pre-approved model step may consume the still-available
 	// hosted Tool allowance in exactly one budget receipt.
 	parent.InvocationID = "parent-uses-unsent-budget"
-	_, err = shared.Model(t.Context(), parent, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
+	_, err = mustBudgetAdapter(t, shared).Model(t.Context(), parent, nil, func(_ context.Context, bounded model.Request, _ model.StreamSink) (model.Response, error) {
 		if bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != 1 {
 			t.Fatalf("preparation failure reserved the hosted budget: %+v", bounded)
 		}
@@ -268,7 +268,7 @@ func TestPermanentModelDispatchViolationTerminatesAndReleasesUnsentBudget(t *tes
 	provider := &countedBudgetModel{}
 	runner, err := agent.NewRunner(agent.Dependencies{
 		Runtime: runtime, Model: provider,
-		ModelMiddleware: []plugin.ModelMiddleware{shared, corruptFrozenModelRequest{}},
+		ModelMiddleware: []plugin.ModelMiddleware{mustBudgetAdapter(t, shared), corruptFrozenModelRequest{}},
 	})
 	if err != nil {
 		t.Fatal(err)

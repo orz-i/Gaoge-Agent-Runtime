@@ -75,7 +75,7 @@ func newRootOutputBindingFixture(t *testing.T, frozen, actual int64, pending boo
 	if err != nil {
 		t.Fatal(err)
 	}
-	invocationID, err := harness.AgentInvocationID(turnID, "original")
+	invocationID, err := harness.AgentInvocationID(turnID, "", "original")
 	if err != nil {
 		t.Fatal(err)
 	}

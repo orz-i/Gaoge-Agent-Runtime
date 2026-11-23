@@ -358,7 +358,7 @@ func TestRootSummaryPolicyMatchesOriginalConfigBeforeProjectionAndResume(t *test
 			if err != nil || state.Turn.Status != harness.TurnAccepted {
 				t.Fatalf("mismatched original admission changed: %+v err=%v", state.Turn, err)
 			}
-			rootID, err := harness.AgentInvocationID(state.Turn.ID, "original")
+			rootID, err := harness.AgentInvocationID(state.Turn.ID, "", "original")
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -48,7 +48,7 @@ func TestDelegatedAgentDoesNotInheritSupervisorContextArtifactTool(t *testing.T)
 					t.Fatal(err)
 				}
 				owner = Invocation{ID: "nested-invocation", TurnID: turn.ID, ParentItemID: f.startedItemID,
-					ExecutionClass: ExecutionAgent, ExecutionRefID: parent.Run.ID}
+					ExecutionRefID: parent.Run.ID}
 			}
 			scope, _, err := f.runner.prepareDelegation(t.Context(), turn, owner, DelegateRequest{MemberID: "child", Goal: "inspect"})
 			if err != nil {

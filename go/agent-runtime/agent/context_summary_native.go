@@ -34,7 +34,7 @@ func validSummaryNativeDependencies(dependencies Dependencies) bool {
 	adapter := dependencies.ContextSummary
 	return dependencies.Runtime != nil && dependencies.Runtime.SupportsManagedRecovery() && dependencies.Runtime.HasManagedRecoveryHost() &&
 		adapter != nil && adapter.bounded != nil && adapter.ports != nil && dependencies.ManagedContextRecovery == nil &&
-		dependencies.ContextPreparation == nil && dependencies.PrepareModelRequest == nil && len(dependencies.RunMiddleware) == 1 &&
+		dependencies.PrepareModelRequest == nil && len(dependencies.RunMiddleware) == 1 &&
 		dependencies.RunMiddleware[0] == adapter.bounded && len(dependencies.ModelMiddleware) == 0 && len(dependencies.ToolMiddleware) == 0 &&
 		len(dependencies.Observers) == 0 && len(dependencies.Telemetry) == 0 && len(dependencies.CompletionPolicies) == 0 &&
 		dependencies.NormalizeModelPolicy == nil && dependencies.ToolDiscovery == nil && dependencies.Inputs == nil &&

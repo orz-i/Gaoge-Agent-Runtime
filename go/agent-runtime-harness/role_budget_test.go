@@ -62,7 +62,7 @@ func testRoleDelegationChildApproval(t *testing.T, wrongRoute bool, terminalPare
 		t.Fatal(err)
 	}
 	meteredModel := &roleBudgetModel{}
-	shared, err := harness.NewBudgetMiddleware(harness.BudgetMiddlewareDependencies{Store: store, Relations: relations, Meter: meteredModel, Clock: fixedClock{}})
+	shared, err := harness.NewBudgetAuthority(harness.BudgetAuthorityDependencies{Store: store, Relations: relations, Meter: meteredModel, Clock: fixedClock{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func testRoleDelegationChildApproval(t *testing.T, wrongRoute bool, terminalPare
 	direct, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: meteredModel, Catalog: registry, Executor: registry,
 		Approvals: interactionadapter.New(approvals), ApprovalPolicies: []plugin.ApprovalPolicy{policy},
 		ToolOutcomeVerifier: verifiedTool,
-		RunMiddleware:       []plugin.RunMiddleware{shared}, ModelMiddleware: []plugin.ModelMiddleware{shared}, ToolMiddleware: []plugin.ToolMiddleware{shared}})
+		RunMiddleware:       []plugin.RunMiddleware{mustBudgetAdapter(t, shared)}, ModelMiddleware: []plugin.ModelMiddleware{mustBudgetAdapter(t, shared)}, ToolMiddleware: []plugin.ToolMiddleware{mustBudgetAdapter(t, shared)}})
 	if err != nil {
 		t.Fatal(err)
 	}

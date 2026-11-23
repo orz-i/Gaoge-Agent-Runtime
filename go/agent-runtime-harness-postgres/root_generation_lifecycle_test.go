@@ -121,12 +121,12 @@ func newGenerationHarnessBackend(t *testing.T, backend string, m *generationMode
 	if capture, ok := hs.(interface{ setGenerationRelations(*runrelation.Registry) }); ok {
 		capture.setGenerationRelations(relations)
 	}
-	deps := harness.BudgetMiddlewareDependencies{Store: hs, Relations: relations, Meter: m, Clock: generationClock{}}
-	shared, err := harness.NewBudgetMiddleware(deps)
+	deps := harness.BudgetAuthorityDependencies{Store: hs, Relations: relations, Meter: m, Clock: generationClock{}}
+	shared, err := harness.NewBudgetAuthority(deps)
 	if err != nil {
 		t.Fatal(err)
 	}
-	bounded, err := harness.NewBoundedBudgetAdapter(deps)
+	bounded, err := shared.Adapter()
 	if err != nil {
 		t.Fatal(err)
 	}

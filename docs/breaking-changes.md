@@ -1,5 +1,198 @@
 # Breaking changes (pre-stable Beta)
 
+## PR #146 — Named Agent capability selection and child Skill isolation
+
+The recommended `OpenAgentSession` now supports a finite
+`AgentSessionOptions.NamedAgents` roster. The Host freezes each member's
+original Model, Version, Tool/HostedTool grants, Skill snapshots, per-call
+approval policy and limits in `Config.DelegationPolicy.NamedAgents`.
+The child `harness.read_skill` is authorized from the **original Handoff
+Invocation and relation**, not from root Config.Skills or a mutable Host Skill
+catalog. Already admitted child Runs cannot inherit a subsequently changed
+roster or privately selected Skills. Config hashes and child Handoff
+Instructions intentionally change for new Named Agent selections; do not
+reinterpret or silently resume a preselection Turn with newly added grants.
+`HostedTools` and `ToolDiscovery` in the standard Session only compose existing
+native ports; they cannot mint a provider capability or evade the frozen
+catalog version. This is not a Role interpreter, generic Feature executor or
+compatibility bridge. Existing Sessions without a named roster retain their
+original Root/explicit-Handoff behavior and frozen identities.
+
+The PR branch also merges already-landed main PR #148 for optional encrypted
+SQLite Kernel/Harness files. The two original authorities, strict Harness
+Schema v3 and no-auto-migration rule stay unchanged; encryption keys are Host
+owned and must not be persisted in the Named Agent Config or Tool metadata.
+
+## PR #146 — Agent-only Invocation identity hard cut
+
+**Breaking pre-stable Go, SQL, HTTP, TypeScript and persisted event schema:**
+there is no selectable Runtime Capability anymore. Delete
+`Invocation.CapabilityKey`, `Invocation.DefinitionVersion`, the generic
+`InvocationID(turn, parent, capability, request)` helper,
+`CapabilityAgent`/`RuntimeCapabilityVersion`, and the corresponding
+`capability_key`/`definition_version` SQL columns, JSON fields and client
+`HarnessCapabilityInvocationDTO`. The sole typed identity constructor is
+`AgentInvocationID(turnID, parentItemID, requestID)`, and the public DTO/schema
+is `HarnessAgentInvocationDTO` / `HarnessAgentInvocation`. The persisted
+Timeline Item kind changes from `capability_invocation` to `agent_invocation`.
+This is a **hard cut without a compatibility adapter or legacy reader**.
+The fixed original Start failure code also changes from
+`harness.capability_start_failed` to `harness.agent_start_failed` (no alias);
+callers must use the native Agent error code and the unchanged physical
+no-effect evidence, never classify arbitrary Model errors as safe failure.
+Actual Tool definition versions, HostedTool grants and their approval/recovery
+fingerprints remain necessary and are **not** deleted.
+
+**Identity integrity:** Agent Invocation IDs deliberately retain the immutable
+private `runtime.agent` **hash-domain separator** so already issued Agent
+Invocation and physical Run IDs remain stable. It is not a selectable Host
+Capability or a persisted interpretation field. The Root `AdmissionHash` and
+Config ID **do change** because the obsolete generic Capability descriptor is
+no longer hashed into newly admitted Starts. Never resume an old Turn with a
+new Start Config or substitute a new `AdmissionHash`; require the original
+Actor, frozen InputHash, Attempt, ownership chain, Kernel lease/receipt,
+Handoff root bindings, cancellation and no-effect proofs as before.
+
+**PostgreSQL migration is manual and destructive.** Stop all writers, safely
+settle or quarantine pending Provider/Tool/remote outcomes, retain a matching
+Kernel + Harness backup and explicitly retire all pre-cut Turn/Invocation,
+Item, Budget and ManagedRecovery execution records. Then apply
+[`docs/migrations/retire-harness-capability-shell.sql`](migrations/retire-harness-capability-shell.sql)
+under exclusive locks. It rejects any historical non-Agent row, unknown
+Invocation definition version or unretired execution evidence before dropping
+both columns. `harnesspostgres.New` and `Migrate` explicitly reject an old
+schema even when existing rows claim `runtime.agent`. Never rewrite the old
+Capability value into Agent, drop original receipts or convert an outstanding
+Application/Feature execution into a fresh Agent.
+
+**Harness SQLite uses strict Schema v3** with the two obsolete Invocation
+columns removed. It refuses v2 and older profiles on reopen; create a new
+profile after retiring or separately preserving the old profile and its Kernel
+store. There is no automatic SQLite file rewrite, on-open migration or
+cross-file replay. The original Kernel/Harness backups and unknown physical
+effects remain the Host's responsibility.
+
+## PR #146 — one Budget execution and settlement protocol
+
+**Breaking Go SDK hard cut:** the old
+`harness.BudgetMiddleware` / `harness.NewBudgetMiddleware`,
+`BudgetMiddlewareDependencies`, and its executable `.Run`, `.Model`, `.Tool`
+and `.Name` methods are removed. The former separate convenience
+`harness.NewBoundedBudgetAdapter` is also removed; no alias, implicit wrapper,
+second reservation engine or plugin adapter is retained. A Host must construct
+one `harness.NewBudgetAuthority(harness.BudgetAuthorityDependencies{...})`,
+obtain `adapter, err := authority.Adapter()`, and install that **same** native
+`*agent.BoundedBudgetAdapter` in the selected Run, Model and Tool middleware
+chains. Supply `authority` to `harness.Dependencies.Budget` for original
+Child/remote capacity admission and trusted Tool/model receipt verification.
+The recommended `OpenAgentSession` constructor applies this composition
+without a second manual recipe.
+
+`BudgetAuthority` is **not a Middleware**; it owns the ledger Store, frozen
+scope/ancestry, token-admission planning, HostedTool limits, durable receipt
+read/repair and projection. The sole native Agent Adapter controls physical
+Model and Tool reservations, dispatch, completion, and scoped callback proof.
+`agent.NewRunner` now rejects mixed native Budget Adapters or duplicated
+Budget middleware entries on the same callback chain, while allowing the
+same exact instance in selected Run/Model/Tool chains. This is a pre-Start
+configuration rejection; no old Run can be resumed by reinterpreting its
+original callback identity.
+Unknown physical outcomes remain held, cancelled/rejected Tools cannot create
+charges without original receipts, and pre-Provider denied requests release
+only their own matching original reservation. Callback-scoped, originally
+frozen pre-send denials bind the original request and candidate in the native
+Agent; an arbitrary Provider error, forged marker or changed caller request
+cannot refund a dispatched operation. Untrusted Host Run middleware keeps its
+own unresolved callback proof and cannot inherit this Budget settlement.
+
+A pre-stable worker that still executes the old Budget middleware must be
+stopped; reconcile unknown physical Model/Tool calls and durable reservations
+against their original evidence before deploying the new adapter. Never
+blindly repeat a Provider call, reinterpret a receipt, rotate a frozen
+reservation ID, or silently run a legacy second executor. No new budget table,
+Kernel state, implicit migration or wire status is introduced.
+
+## Context Sampling hard cut — one active bounded Context execution path
+
+**Breaking Go SDK surface (pre-stable):** remove the previously exported
+`agent.NewSamplingBoundedContextAdapter`, `agent.SamplingContextPorts`, the
+`SamplingPlan` / `SamplingEvaluation` family and
+`agent.Dependencies.ContextPreparation`. The synchronous Sampling planner had
+no production Host implementer or call site in this repository; it was a
+second, independently checked model-preparation/callback path that could never
+be selected by the supported Harness Session. Its private `prepareSelectedContext`
+branch and unused tests have been deleted, not redirected through a bridge.
+
+**WorkingState Summary remains supported.** Native summary orchestration,
+`ContextSummaryPorts`, `ManagedContextRecovery`, `SummaryNativeRecovery`,
+normal bounded Context compaction and original physical-effect/Context commit
+proofs are unchanged. Shared Cursor/Turn/receipt types formerly named
+`SamplingTurn`, `SamplingCheckpointRef`, `SamplingCursor`,
+`SamplingCommitReceipt` and `SamplingBindingReceipt` are now Summary-owned
+`SummaryTurn`, `SummaryCheckpointRef`, `SummaryCursor`,
+`SummaryCommitReceipt` and `SummaryBindingReceipt`. Their persisted JSON
+fields, frozen identity and original commit/ACK behavior are unchanged.
+
+If an external pre-stable Host uses the removed Sampling-only API, stop its
+workers and reconcile all outstanding original callbacks before upgrading;
+select the existing bounded Context/summary APIs for new Starts. Do not
+pretend an unknown Sampling callback completed, alter frozen metadata or
+retrofit an outstanding Run. There is no SQL migration or legacy decoder.
+
+## PR #146 continuation — one Agent Session and lazy Skills
+
+**Breaking pre-stable Config/Context and Go Session contract:** remove the
+inert `ConfigSnapshot.MemoryPolicy`/`memoryPolicy` metadata. Nonempty old
+values change the Config hash and cannot be silently reinterpreted after
+reopening. Stop old workers, drain or explicitly reconcile the original
+execution and back up its evidence before upgrading. No memory executor,
+compatibility reader or migration bridge is introduced.
+
+`Config.Skills` now freezes the same revision, content and hash but presents only
+a bounded manifest in the model's Context. Models access selected Markdown
+via the new, original-Run-authorized `harness.read_skill` Tool; this changes
+model-visible Context fingerprints/requests and requires fresh authorized
+admission for pending old Skill execution. The full Markdown remains durable
+in the original Config and is never read from a mutable Host directory.
+
+The standard `OpenAgentSession` supports `SharedBudget`, `MemberTools` with
+exact per-member-version grants, local same-Runner SubAgent routing, `Cancel`,
+`Retry`, `CancelSubtask`, `ResolveSubtaskApproval` and `GrantCallAllowance`.
+A shared-budget Agent cannot use an unmetered independent ChildRunner. The
+same original Kernel lease/receipt, Harness ledger and Host Actor checks remain
+mandatory.
+
+Q1 closure also makes the original Tool policy a pre-dispatch Resume/Approval
+binding: matching Tool keys with changed definition version, approval,
+side-effect policy or member grant cannot run the old Attempt. The Agent's
+pending Tool catalog fingerprint separately fences in-place schema/name drift.
+Selected Skills use the frozen Context `MaxToolResultBytes` for actual page size
+and accept explicit zero offsets without granting a general archive reader.
+Approval-gated read Tools cannot join autonomous exploration. The original
+resolved SharedBudget presence/limits and delegation depth are also checked
+against each reopened Session, reusing Harness's original pure execution-policy
+resolver. These changes add no new SQL columns or run states; Harness SQLite
+Schema v2 and the checked PostgreSQL cutover still apply.
+
+## 2026-11-23 — Agent-only Harness Invocation / unified Session
+
+**Breaking Go, HTTP, TypeScript, PostgreSQL and desktop SQLite contract:**
+`Invocation.ExecutionClass` and `HarnessExecutionClass`/`executionClass` no
+longer exist. Only original `runtime.agent` Root Invocations may rotate an
+Attempt. Legacy Application/Workflow/Team invocations must be drained or
+retired; old executors must stop. No legacy deserializer or Feature no-effect
+compatibility shim can authorize new effects. The native Agent pre-dispatch
+proof, original receipts, physical grants, approvals and cancellation fences
+are preserved. PostgreSQL upgrades require the explicit checked SQL cutover in
+`docs/migrations/retire-harness-execution-class.sql`; Harness SQLite is now
+Schema v2 and rejects prior development profiles rather than silently upgrading.
+
+`OpenAgentSession` supports frozen selected Skills, Host policy-enforced
+per-call Tool approvals and a Host-authorized SubAgent ChildRunner with original
+RunRelation. Shared budgets and member-specific private Tool delegation still
+require explicit advanced composition. This is one Agent/Child Agent Loop,
+not a new Harness interpreter.
+
 ## 2026-11-20 — Separate cancellation elections, Host effects and no-dispatch settlement
 
 **Breaking Harness Store and recovery contract:** implement required

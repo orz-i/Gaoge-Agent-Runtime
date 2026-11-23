@@ -11,7 +11,7 @@ type allowanceGrantKey struct{}
 // A receipt lost between the native gate and the Harness store can only close
 // the one original allowance dispatch. Other pending phases retain their fence.
 func (r *Runner) recoverAllowanceDispatch(ctx context.Context, inv Invocation) (bool, error) {
-	if _, native := r.agent.(*agent.Runner); !native || inv.ExecutionClass != ExecutionAgent || inv.ParentItemID != "" {
+	if _, native := r.agent.(*agent.Runner); !native || !validInvocationExecutionAuthority(inv) || inv.ParentItemID != "" {
 		return false, nil
 	}
 	items, err := r.loadGlobalPhysicalEvidence(ctx, inv.TurnID)

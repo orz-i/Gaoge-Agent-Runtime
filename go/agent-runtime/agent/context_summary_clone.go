@@ -8,34 +8,13 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 )
 
-// These copies are deliberately finite and lossless, not wire round trips.
-// In particular ModelWindow.TokenCountContext is process-local (json:"-"),
-// while signed/raw provider data and nil versus empty collections are facts.
-func cloneSamplingPlan(v SamplingPlan) SamplingPlan {
-	v.Source = cloneSamplingSnapshot(v.Source)
-	v.Request = cloneSamplingRequest(v.Request)
-	if v.Checkpoint != nil {
-		c := cloneSamplingCheckpoint(*v.Checkpoint)
-		v.Checkpoint = &c
-	}
-	v.Cursor = cloneSamplingCursor(v.Cursor)
-	v.Guidance = cloneSamplingMessages(v.Guidance)
-	v.Data = slices.Clone(v.Data)
+// Isolated, byte-preserving copies at native Context Summary Host boundaries.
+// A copied Provider replay or Cursor is never a new execution authority.
+func cloneSummaryCursor(v SummaryCursor) SummaryCursor {
+	v.Checkpoint = cloneSummaryCheckpoint(v.Checkpoint)
 	return v
 }
-func cloneSamplingCursor(v SamplingCursor) SamplingCursor {
-	v.Checkpoint = cloneSamplingCheckpoint(v.Checkpoint)
-	return v
-}
-func cloneSamplingEvaluation(v SamplingEvaluation) SamplingEvaluation {
-	v.Request = cloneSamplingRequest(v.Request)
-	v.Artifacts = slices.Clone(v.Artifacts)
-	for i := range v.Artifacts {
-		v.Artifacts[i].ContentJSON = slices.Clone(v.Artifacts[i].ContentJSON)
-	}
-	return v
-}
-func cloneSamplingSnapshot(v kernel.Snapshot) kernel.Snapshot {
+func cloneSummarySnapshot(v kernel.Snapshot) kernel.Snapshot {
 	if v.Run.DeadlineAt != nil {
 		t := *v.Run.DeadlineAt
 		v.Run.DeadlineAt = &t
@@ -62,7 +41,7 @@ func cloneSamplingSnapshot(v kernel.Snapshot) kernel.Snapshot {
 	}
 	return v
 }
-func cloneSamplingCheckpoint(v runtimecontext.Checkpoint) runtimecontext.Checkpoint {
+func cloneSummaryCheckpoint(v runtimecontext.Checkpoint) runtimecontext.Checkpoint {
 	if state := v.Window.WorkingState; state != nil {
 		copy := *state
 		copy.Constraints = slices.Clone(state.Constraints)
@@ -78,7 +57,7 @@ func cloneSamplingCheckpoint(v runtimecontext.Checkpoint) runtimecontext.Checkpo
 	}
 	v.Window.Entries = slices.Clone(v.Window.Entries)
 	for i := range v.Window.Entries {
-		v.Window.Entries[i].Message = cloneSamplingMessage(v.Window.Entries[i].Message)
+		v.Window.Entries[i].Message = cloneSummaryMessage(v.Window.Entries[i].Message)
 	}
 	v.ArtifactIDs = slices.Clone(v.ArtifactIDs)
 	if v.Trace.LastAssessment != nil {
@@ -87,7 +66,7 @@ func cloneSamplingCheckpoint(v runtimecontext.Checkpoint) runtimecontext.Checkpo
 	}
 	return v
 }
-func cloneSamplingRequest(v model.Request) model.Request {
+func cloneSummaryRequest(v model.Request) model.Request {
 	v.ModelOptions = slices.Clone(v.ModelOptions)
 	if v.HostedToolCallLimit != nil {
 		n := *v.HostedToolCallLimit
@@ -98,7 +77,7 @@ func cloneSamplingRequest(v model.Request) model.Request {
 		c.Schema = slices.Clone(c.Schema)
 		v.OutputContract = &c
 	}
-	v.Messages = cloneSamplingMessages(v.Messages)
+	v.Messages = cloneSummaryMessages(v.Messages)
 	v.Tools = slices.Clone(v.Tools)
 	for i := range v.Tools {
 		v.Tools[i].InputSchema = slices.Clone(v.Tools[i].InputSchema)
@@ -109,14 +88,14 @@ func cloneSamplingRequest(v model.Request) model.Request {
 	}
 	return v
 }
-func cloneSamplingMessages(v []model.Message) []model.Message {
+func cloneSummaryMessages(v []model.Message) []model.Message {
 	v = slices.Clone(v)
 	for i := range v {
-		v[i] = cloneSamplingMessage(v[i])
+		v[i] = cloneSummaryMessage(v[i])
 	}
 	return v
 }
-func cloneSamplingMessage(v model.Message) model.Message {
+func cloneSummaryMessage(v model.Message) model.Message {
 	v.CacheControl = model.CloneCacheControl(v.CacheControl)
 	v.Content = model.CloneContentParts(v.Content)
 	if v.ToolResult != nil {

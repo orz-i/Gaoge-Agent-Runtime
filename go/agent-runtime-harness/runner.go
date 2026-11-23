@@ -19,7 +19,7 @@ import (
 const (
 	defaultItemListLimit        = 500
 	maxRuntimeSyncRetryAttempts = 8
-	capabilityStartFailedCode   = "harness.capability_start_failed"
+	agentStartFailedCode        = "harness.agent_start_failed"
 )
 
 // Clock supplies Harness orchestration timestamps. A nil Dependencies.Clock
@@ -100,7 +100,7 @@ func (runner *Runner) recordInvocationItem(ctx context.Context, invocation Invoc
 	}
 	_, err = appendItemFact(ctx, runner.store, runner.turnFeed, Item{
 		ID:     invocationLifecycleItemID(invocation, invocation.Status, invocation.Revision),
-		TurnID: invocation.TurnID, Kind: ItemInvocation, Status: invocationItemStatus(invocation.Status),
+		TurnID: invocation.TurnID, Kind: ItemAgentInvocation, Status: invocationItemStatus(invocation.Status),
 		RunID: invocation.ExecutionRefID, InvocationID: invocation.ID, ParentItemID: parentItemID,
 		Payload: payload, CreatedAt: now, UpdatedAt: now,
 	})
@@ -237,8 +237,7 @@ func (runner *Runner) ResolveApproval(
 		return Snapshot{}, err
 	}
 	invocation, err := loadTopLevelInvocation(ctx, runner.store, turn.ID)
-	if err != nil || turn.Status != TurnWaitingInput || invocation.ExecutionClass != ExecutionAgent ||
-		strings.TrimSpace(invocation.ExecutionRefID) == "" {
+	if err != nil || turn.Status != TurnWaitingInput || strings.TrimSpace(invocation.ExecutionRefID) == "" {
 		return Snapshot{}, ErrConflict
 	}
 	runtimeSnapshot, err := runner.runtime.Load(ctx, invocation.ExecutionRefID)
@@ -291,11 +290,7 @@ func (runner *Runner) restoreInvocationContext(
 	if err != nil {
 		return nil, err
 	}
-	access := ContextWindowReadOnly
-	if invocation.ExecutionClass == ExecutionAgent {
-		access = ContextWindowOwner
-	}
-	return withContextWindowBinding(runCtx, updated.ID, access), nil
+	return withContextWindowBinding(runCtx, updated.ID, ContextWindowOwner), nil
 }
 
 type contextBuildResult struct {
@@ -430,7 +425,7 @@ func (runner *Runner) contextOpenRequest(
 	seed *ContextSeed,
 	active *runtimecontext.Checkpoint,
 ) (runtimecontext.OpenRequest, error) {
-	instructions := strings.TrimSpace(strings.Join([]string{config.Instructions, seed.Instructions}, "\n\n"))
+	instructions := selectedContextInstructions(config, seed.Instructions)
 	if seed.SourceDelta {
 		base, err := runner.loadContextDeltaBase(ctx, scopeID, staticFingerprint, seed.BaseCheckpointID)
 		if err != nil {
@@ -587,7 +582,7 @@ type Dependencies struct {
 	Relations    RunRelationSource
 	Cancellation RuntimeCanceller
 	Interactions InteractionResponseHandler
-	Budget       *BudgetMiddleware
+	Budget       *BudgetAuthority
 	Execution    ExecutionPolicy
 	// The Host's single named-Agent selection/authorization boundary. Every
 	// manual and model Tool request must pass it before child admission.
@@ -604,8 +599,8 @@ type RunRelationSource interface {
 	GetByChild(context.Context, string) (runrelation.Relation, error)
 }
 
-// Runner owns durable Harness Session/Turn/Invocation/Item lifecycle. Runtime
-// Feature execution is represented by durable Capability Invocations.
+// Runner owns durable Harness Session/Turn/Agent Invocation/Item lifecycle.
+// Native Agent and delegated Agent attempts share one original Host authority.
 type Runner struct {
 	runtime          *kernel.Runtime
 	agent            AgentStarter
@@ -619,7 +614,7 @@ type Runner struct {
 	relationReader   RunRelationSource
 	cancellation     RuntimeCanceller
 	interactions     InteractionResponseHandler
-	budgets          *BudgetMiddleware
+	budgets          *BudgetAuthority
 	execution        ExecutionPolicy
 	delegationPolicy DelegationToolPolicy
 }
@@ -690,14 +685,11 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	return runner, nil
 }
 
-// StartAgentTurn executes the explicitly selected Agent capability as a durable
+// StartAgentTurn executes the explicitly selected Agent as a durable
 // top-level Invocation after Session/Turn/Config creation. Host code chooses
 // this entry point; Harness never classifies a user intent or routes implicitly.
 func (runner *Runner) StartAgentTurn(ctx context.Context, request StartRequest) (Snapshot, error) {
-	envelope, err := runner.prepareTopLevelStartEnvelope(ctx, request, rootAdmission{
-		ExecutionClass: ExecutionAgent, CapabilityKey: CapabilityAgent,
-		DefinitionVersion: RuntimeCapabilityVersion,
-	})
+	envelope, err := runner.prepareTopLevelStartEnvelope(ctx, request, rootAdmission{})
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -884,9 +876,6 @@ func (runner *Runner) refreshTurn(ctx context.Context, turnID string, expected *
 	invocation, err := loadTopLevelInvocation(ctx, runner.store, turn.ID)
 	if expected != nil && (err != nil || requireSessionRootOwner(turn, invocation, *expected) != nil) {
 		return Snapshot{}, errors.Join(ErrConflict, err)
-	}
-	if err == nil && invocation.ExecutionClass != ExecutionAgent {
-		return Snapshot{}, ErrConflict
 	}
 	if err != nil || strings.TrimSpace(invocation.ExecutionRefID) == "" {
 		if terminalTurnStatus(turn.Status) {
@@ -1378,9 +1367,6 @@ func (runner *Runner) recordRuntimeSnapshotItems(
 	invocation Invocation,
 	runtimeSnapshot kernel.Snapshot,
 ) error {
-	if invocation.ExecutionClass != ExecutionAgent {
-		return runner.projectChildInvocationOutcome(ctx, invocation, runtimeSnapshot)
-	}
 	if err := runner.recordAgentRunItem(ctx, turn, invocation, runtimeSnapshot); err != nil {
 		return err
 	}
@@ -1535,9 +1521,6 @@ func (runner *Runner) recordTerminalAgentMessageItem(
 // an unrelated Kernel Run can occupy that ID before an admitted Agent
 // has created its original physical Run.
 func validateRootRuntimeOwnership(invocation Invocation, snapshot kernel.Snapshot) error {
-	if invocation.ExecutionClass != ExecutionAgent {
-		return ErrConflict
-	}
 	kind := agent.RunKind
 	actor, thread, err := frozenTopLevelInvocationIdentity(invocation)
 	if err != nil {
@@ -1563,7 +1546,7 @@ func validateRootRuntimeOwnership(invocation Invocation, snapshot kernel.Snapsho
 	// use the existing hretry derivation instead. No new persisted request
 	// field, inferred first-attempt ID or compatibility bypass is needed.
 	if invocation.Attempt == 1 {
-		invocationID, err := InvocationID(invocation.TurnID, "", invocation.CapabilityKey, snapshot.Run.RequestID)
+		invocationID, err := AgentInvocationID(invocation.TurnID, "", snapshot.Run.RequestID)
 		if err != nil || invocationID != invocation.ID {
 			return ErrConflict
 		}
@@ -1589,7 +1572,7 @@ func (runner *Runner) validateRootModelOutputCeiling(ctx context.Context, invoca
 }
 
 func (runner *Runner) frozenRootModelPolicy(ctx context.Context, invocation Invocation) (ConfigSnapshot, error) {
-	if invocation.ParentItemID != "" || invocation.ExecutionClass != ExecutionAgent {
+	if invocation.ParentItemID != "" {
 		return ConfigSnapshot{}, ErrConflict
 	}
 	turn, err := loadVerifiedTurn(ctx, runner.store, invocation.TurnID)
@@ -1757,10 +1740,10 @@ func (runner *Runner) failTopLevelInvocationAndTurn(ctx context.Context, turn Tu
 		return Snapshot{}, proofErr
 	}
 	invocation.Status = InvocationFailed
-	invocation.ErrorCode = capabilityStartFailedCode
-	invocation.ErrorDetail = "capability execution did not start"
+	invocation.ErrorCode = agentStartFailedCode
+	invocation.ErrorDetail = "Agent execution did not start"
 	if cause == nil {
-		invocation.ErrorDetail = "capability returned no execution identity"
+		invocation.ErrorDetail = "Agent returned no execution identity"
 	} else {
 		invocation.ErrorDetail = cause.Error()
 	}
@@ -1774,10 +1757,10 @@ func (runner *Runner) failTopLevelInvocationAndTurn(ctx context.Context, turn Tu
 		return Snapshot{}, err
 	}
 	turn.Status = TurnFailed
-	turn.ErrorCode = capabilityStartFailedCode
-	turn.ErrorDetail = "top-level capability execution did not start"
+	turn.ErrorCode = agentStartFailedCode
+	turn.ErrorDetail = "top-level Agent execution did not start"
 	if cause == nil {
-		turn.ErrorDetail = "top-level capability returned no execution identity"
+		turn.ErrorDetail = "top-level Agent returned no execution identity"
 	} else {
 		turn.ErrorDetail = cause.Error()
 	}

@@ -15,13 +15,12 @@ func TestRetiredRoleHandoffInputsCannotAuthorizeMemberDelegation(t *testing.T) {
 		if _, err := decodeFrozenHandoffDelegation(json.RawMessage(raw)); !errors.Is(err, ErrConflict) {
 			t.Fatalf("retired Role authority accepted: %s, err=%v", raw, err)
 		}
-		id, err := InvocationID("turn", "parent-item", CapabilityAgent, "d")
+		id, err := AgentInvocationID("turn", "parent-item", "d")
 		if err != nil {
 			t.Fatal(err)
 		}
 		inv := Invocation{
 			ID: id, TurnID: "turn", ParentItemID: "parent-item",
-			CapabilityKey: CapabilityAgent, ExecutionClass: ExecutionAgent,
 			ExecutionRefID: "child", Input: json.RawMessage(raw),
 			InputHash: hashInvocationBytes(json.RawMessage(raw)),
 		}

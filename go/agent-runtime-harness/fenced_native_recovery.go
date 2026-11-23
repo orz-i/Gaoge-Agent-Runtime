@@ -21,7 +21,7 @@ func (runner *Runner) resumeNativeFencedAgentAfterInterruptedStart(
 	resumer agentResumer, grantErr error,
 ) (kernel.Snapshot, error) {
 	if !errors.Is(grantErr, ErrConflict) || invocation.ParentItemID != "" ||
-		invocation.ExecutionClass != ExecutionAgent || !runner.runtime.SupportsExecution() {
+		!runner.runtime.SupportsExecution() {
 		return kernel.Snapshot{}, grantErr
 	}
 	if _, native := runner.agent.(*agent.Runner); !native {

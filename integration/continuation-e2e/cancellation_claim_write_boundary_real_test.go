@@ -69,7 +69,7 @@ func TestRealPostgresCancellationClaimCommittedLostReplyStaysFenced(t *testing.T
 	}
 	parentItemID := ""
 	for _, item := range resumed.Items {
-		if item.InvocationID == owner.ID && item.Kind == harness.ItemInvocation {
+		if item.InvocationID == owner.ID && item.Kind == harness.ItemAgentInvocation {
 			parentItemID = item.ID
 			break
 		}

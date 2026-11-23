@@ -155,9 +155,7 @@ func ValidTurnTerminalDescendantsWithBudget(root Invocation, owners []Invocation
 		// must still force strict source verification, not fall through
 		// as an ordinary terminal Agent child.
 		handoffCandidate := isHandoffDelegationInvocation(owner) ||
-			(owner.ExecutionClass == ExecutionAgent &&
-				owner.CapabilityKey == CapabilityAgent &&
-				strings.HasPrefix(owner.ParentItemID, "hid_"))
+			strings.HasPrefix(owner.ParentItemID, "hid_")
 		if handoffCandidate {
 			original, binding, valid := historicalHandoffRoot(root, owner, items, ledger)
 			if !valid {
@@ -240,7 +238,7 @@ func VerifiedOriginalStartNoEffect(items []Item, owner Invocation) bool {
 			return false
 		}
 		switch boundary {
-		case "physical_dispatch_rejected", "feature_start_no_effect", "native_agent_start_no_effect":
+		case "physical_dispatch_rejected", "native_agent_start_no_effect":
 			originals++
 		default:
 			return false

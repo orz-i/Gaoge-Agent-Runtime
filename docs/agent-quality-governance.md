@@ -25,7 +25,7 @@ models, without a Provider endpoint or credentials:
 | Stop repeating a settled query, then try a different source | Third identical query is refused before execution; changed arguments can complete | JSON key order/whitespace cannot hide the repeat; hard budgets still stop the loop |
 | Recover deep evidence from an oversized tool result | Evidence disappears from inline context, is recovered by the scoped original archive reader, then appears in the answer | No fabricated summary or extra read authority |
 | Reload/resume a completed tool session | Original Turn/output is returned without new Model/Tool calls | No second transcript or execution loop |
-| Refuse invalid composition and unknown outcomes | Unverified model capacity never reaches dispatch; unknown Tool result is not retried | Unsupported approvals, delegation and shared budgets fail closed |
+| Refuse invalid composition and unknown outcomes | Unverified model capacity never reaches dispatch; unknown Tool result is not retried | Missing member-only Tool grants, unknown token-metering and foreign Actor controls fail closed |
 
 The named tests are in `agent/tool_progress_policy*_test.go` and
 `agent-runtime-harness/tool_agent_session_test.go`. Their purpose is regression

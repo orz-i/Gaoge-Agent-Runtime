@@ -138,7 +138,7 @@ func (runner *Runner) authorizeDelegation(ctx context.Context, execution tools.E
 	return request, nil
 }
 
-// DelegateByExecutionRefID is the Tool-facing form used by an Agent capability
+// DelegateByExecutionRefID is the Tool-facing form used by an Agent
 // without exposing Harness Turn or Invocation IDs to the model.
 func (runner *Runner) DelegateByExecutionRefID(ctx context.Context, executionRefID string, request DelegateRequest) (DelegationResult, error) {
 	invocation, err := runner.store.GetInvocationByExecutionRefID(ctx, strings.TrimSpace(executionRefID))
@@ -272,7 +272,7 @@ func (runner *Runner) verifiedTerminalDelegationReplay(
 
 func (runner *Runner) canDelegate(invocation Invocation) bool {
 	return runner != nil && runner.handoffs != nil && runner.relations != nil &&
-		invocation.ExecutionClass == ExecutionAgent && strings.TrimSpace(invocation.ExecutionRefID) != ""
+		strings.TrimSpace(invocation.ExecutionRefID) != ""
 }
 
 func (runner *Runner) prepareDelegation(
@@ -341,6 +341,19 @@ func (runner *Runner) prepareDelegation(
 		delegation.ModelOptions = append(json.RawMessage(nil), a.ModelOptions...)
 	}
 	delegation.Instructions = a.Instructions
+	if len(config.DelegationPolicy.NamedAgents) != 0 {
+		named, found := namedAgentForMember(config, request.MemberID, request.MemberRevision)
+		if !found || a.Model != named.Model || !slices.Equal(normalizeStrings(a.ToolKeys), named.ToolKeys) ||
+			!slices.Equal(normalizeStrings(a.InitialToolKeys), named.InitialToolKeys) ||
+			!slices.Equal(a.HostedToolGrants, named.HostedToolGrants) || a.Instructions != named.Instructions ||
+			a.MaxModelOutputTokens != named.MaxModelOutputTokens || a.Limits != named.Limits ||
+			!reflect.DeepEqual(a.ModelOptions, named.ModelOptions) {
+			return handoff.Delegation{}, parent, ErrInvalidRequest
+		}
+		if manifest := selectedSkillManifest(named.Skills); manifest != "" {
+			delegation.Instructions = strings.TrimSpace(delegation.Instructions + "\n\n" + manifest)
+		}
+	}
 	var local []string
 	if len(a.ToolKeys) != 0 {
 		if viewErr != nil {
@@ -364,6 +377,11 @@ func (runner *Runner) prepareDelegation(
 			"delegation.tool_selection_denied", "The requested child tools are not authorized by the original parent Run.", err)
 	}
 	delegation.ToolKeys = normalizeStrings(append(delegation.ToolKeys, local...))
+	if named, found := namedAgentForMember(config, request.MemberID, request.MemberRevision); found && len(named.Skills) != 0 {
+		// This reserved Tool is not an ordinary local grant and never belongs
+		// to the parent merely because its child is authorized to read Skills.
+		delegation.ToolKeys = append(delegation.ToolKeys, SkillReadToolKey)
+	}
 	delegation.HostedToolGrants = append([]agent.HostedToolGrant(nil), a.HostedToolGrants...)
 	if len(delegation.HostedToolGrants) > 0 && delegation.Model == "" {
 		return handoff.Delegation{}, parent, ErrInvalidRequest
@@ -512,8 +530,8 @@ func (runner *Runner) dispatchHandoff(
 ) (handoff.Delegation, error) {
 	child, err := runner.store.GetInvocationByExecutionRefID(ctx, delegation.ChildRunID)
 	if err != nil || child.TurnID != turn.ID || child.ParentItemID != parentItemID ||
-		child.ExecutionClass != ExecutionAgent || child.ExecutionRefID != delegation.ChildRunID ||
-		child.CapabilityKey != CapabilityAgent || !isHandoffDelegationInvocation(child) {
+		child.ExecutionRefID != delegation.ChildRunID ||
+		!validInvocationExecutionAuthority(child) || !isHandoffDelegationInvocation(child) {
 		return handoff.Delegation{}, errors.Join(ErrConflict, err)
 	}
 	// The hashed child Input, not the caller's slice-backed Delegation, is

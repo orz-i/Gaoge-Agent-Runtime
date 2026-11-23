@@ -14,7 +14,7 @@ func TestDispatchReceiptRequiresOriginalRecognizedPhaseAndBoundary(t *testing.T)
 		phase    string
 		boundary string
 		want     bool
-	}{{"valid-start", "start", "physical_dispatch_returned", true}, {"valid-retry", "start-retry", "feature_start_no_effect", true}, {"valid-control", "resolve-subtask-approval", "native_agent_control_no_effect", true}, {"valid-handoff", "handoff-start", "handoff_start_returned", true}, {"valid-native-recovery", "start", "native_kernel_epoch_recovered", true}, {"unknown-stage", "unrecognized", "physical_dispatch_returned", false}, {"blank-stage", "", "physical_dispatch_returned", false}, {"control-no-effect-on-start", "start", "native_agent_control_no_effect", false}, {"start-no-effect-on-resume", "resume", "native_agent_start_no_effect", false}, {"handoff-completed-by-control", "grant-call-allowance", "handoff_start_returned", false}, {"handoff-completed-as-kernel-snapshot", "handoff-start", "physical_dispatch_returned", false}, {"native-recovery-on-resume", "resume", "native_kernel_epoch_recovered", false}} {
+	}{{"valid-start", "start", "physical_dispatch_returned", true}, {"retired-feature-retry", "start-retry", "feature_start_no_effect", false}, {"valid-control", "resolve-subtask-approval", "native_agent_control_no_effect", true}, {"valid-handoff", "handoff-start", "handoff_start_returned", true}, {"valid-native-recovery", "start", "native_kernel_epoch_recovered", true}, {"unknown-stage", "unrecognized", "physical_dispatch_returned", false}, {"blank-stage", "", "physical_dispatch_returned", false}, {"control-no-effect-on-start", "start", "native_agent_control_no_effect", false}, {"start-no-effect-on-resume", "resume", "native_agent_start_no_effect", false}, {"handoff-completed-by-control", "grant-call-allowance", "handoff_start_returned", false}, {"handoff-completed-as-kernel-snapshot", "handoff-start", "physical_dispatch_returned", false}, {"native-recovery-on-resume", "resume", "native_kernel_epoch_recovered", false}} {
 		t.Run(tc.name, func(t *testing.T) {
 			g := grant
 			r := receipt
@@ -30,7 +30,7 @@ func TestDispatchReceiptRequiresOriginalRecognizedPhaseAndBoundary(t *testing.T)
 func TestPR82OwnedRunlessItemCannotGrantNewPhysicalAttempt(t *testing.T) {
 	runner := &Runner{}
 	owner := childAttemptBinding{InvocationID: "root", ExecutionRefID: "root-attempt-two", Attempt: 2}
-	for _, kind := range []ItemKind{ItemTool, ItemArtifact, ItemInteraction, ItemContext, ItemDiagnostic, ItemInvocation} {
+	for _, kind := range []ItemKind{ItemTool, ItemArtifact, ItemInteraction, ItemContext, ItemDiagnostic, ItemAgentInvocation} {
 		item := Item{ID: "old-" + string(kind), InvocationID: owner.InvocationID, Kind: kind}
 		if err := runner.requireItemOwnerAttempt(t.Context(), item, owner); !errors.Is(err, ErrConflict) {
 			t.Fatalf("owner-stamped %s without RunID crossed Attempt: %v", kind, err)

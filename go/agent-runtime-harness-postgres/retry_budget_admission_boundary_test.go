@@ -51,8 +51,7 @@ func TestRootRetryDirectStoreCannotBypassOriginalBudgetCAS(t *testing.T) {
 				input := []byte(`{"goal":"original cancelled, no external retry"}`)
 				digest := sha256.Sum256(input)
 				root := harness.Invocation{
-					ID: "root-" + scope, TurnID: turn.ID, CapabilityKey: harness.CapabilityAgent,
-					ExecutionClass: harness.ExecutionAgent, ExecutionRefID: "original-" + scope,
+					ID: "root-" + scope, TurnID: turn.ID, ExecutionRefID: "original-" + scope,
 					Input: input, InputHash: hex.EncodeToString(digest[:]),
 					Status: harness.InvocationCancelled, Attempt: 1, Revision: 1,
 					CreatedAt: now, UpdatedAt: now, OutputRefs: []harness.HostRef{},

@@ -33,11 +33,8 @@ func TestOriginalNoEffectParentAndChildAllowLegitimateRetryAcrossStores(t *testi
 			hash := sha256.Sum256(input)
 			root := harness.Invocation{
 				ID: "root-no-effect-" + name, TurnID: turn.ID,
-				CapabilityKey:     harness.CapabilityAgent,
-				DefinitionVersion: harness.RuntimeCapabilityVersion,
-				ExecutionClass:    harness.ExecutionAgent,
-				ExecutionRefID:    "original-root-run-" + name,
-				Input:             input, InputHash: hex.EncodeToString(hash[:]),
+				ExecutionRefID: "original-root-run-" + name,
+				Input:          input, InputHash: hex.EncodeToString(hash[:]),
 				Status: harness.InvocationRunning, Attempt: 1, Revision: 1,
 				CreatedAt: now, UpdatedAt: now, OutputRefs: []harness.HostRef{},
 			}
@@ -47,8 +44,7 @@ func TestOriginalNoEffectParentAndChildAllowLegitimateRetryAcrossStores(t *testi
 			child := root
 			child.ID = "child-no-effect-" + name
 			child.ParentItemID = "original-parent-item"
-			child.ExecutionClass = harness.ExecutionAgent
-			child.CapabilityKey = harness.CapabilityAgent
+
 			child.ExecutionRefID = "original-child-run-" + name
 			child.Status = harness.InvocationAccepted
 			// Preserve the native child Agent's original frozen root Attempt.

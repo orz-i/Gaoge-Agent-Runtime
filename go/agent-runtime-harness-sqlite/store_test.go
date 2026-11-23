@@ -1,6 +1,8 @@
 package harnesssqlite_test
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"testing"
@@ -153,7 +155,12 @@ func TestInvocationOrderUsesInstantsAcrossTimeZones(t *testing.T) {
 	}{
 		{"later", base.Add(time.Nanosecond).In(west)}, {"tie-b", base.In(east)}, {"tie-a", base.In(west)},
 	} {
-		inv := harness.Invocation{ID: stamp.id, TurnID: "ordered", ParentItemID: "parent", CapabilityKey: harness.CapabilityAgent, ExecutionClass: harness.ExecutionAgent, ExecutionRefID: "run-" + stamp.id, Status: harness.InvocationAccepted, Attempt: 1, Revision: 1, CreatedAt: stamp.at, UpdatedAt: stamp.at}
+		input := json.RawMessage(`{"goal":"ordered child"}`)
+		digest := sha256.Sum256(input)
+		inv := harness.Invocation{ID: stamp.id, TurnID: "ordered", ParentItemID: "parent",
+			Input: input, InputHash: hex.EncodeToString(digest[:]),
+			ExecutionRefID: "run-" + stamp.id, Status: harness.InvocationAccepted,
+			Attempt: 1, Revision: 1, CreatedAt: stamp.at, UpdatedAt: stamp.at}
 		if _, _, err := host.CreateInvocation(t.Context(), inv); err != nil {
 			t.Fatal(err)
 		}

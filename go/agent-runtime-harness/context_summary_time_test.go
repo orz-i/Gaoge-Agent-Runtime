@@ -13,11 +13,11 @@ func TestSummaryCursorUsesOneStorageTimestampRepresentation(t *testing.T) {
 	stored := original
 	stored.CreatedAt = stored.CreatedAt.In(time.FixedZone("database session", 8*60*60))
 	stored.UpdatedAt = stored.UpdatedAt.In(time.FixedZone("database session", 8*60*60))
-	before, err := json.Marshal(summarySamplingTurn(original))
+	before, err := json.Marshal(summaryTurn(original))
 	if err != nil {
 		t.Fatal(err)
 	}
-	after, err := json.Marshal(summarySamplingTurn(stored))
+	after, err := json.Marshal(summaryTurn(stored))
 	if err != nil || !bytes.Equal(before, after) {
 		t.Fatalf("equivalent stored time changed exact summary cursor bytes: before=%s after=%s err=%v", before, after, err)
 	}

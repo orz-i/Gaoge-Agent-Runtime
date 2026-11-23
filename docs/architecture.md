@@ -68,6 +68,85 @@ records. Recovery across the two files uses these records. A PostgreSQL Host
 can place both schemas in one database and uses the same recovery protocol.
 [Desktop Harness SQLite](../go/agent-runtime-harness-sqlite/README.md).
 
+## Context execution path
+
+The supported SDK composes one concrete `agent.NewBoundedContextAdapter` for
+Context hydration, bounded model-request preparation and exact artifact/
+checkpoint CAS. `ContextSummary` optionally performs a separate, frozen
+summary-purpose ModelInvocation under that same bounded lifecycle;
+`SummaryNativeRecovery` and managed Context recovery retain their own original
+Kernel proofs. The never-connected `SamplingContextPorts` alternative and
+`ContextPreparation` selector were retired before beta.24 instead of
+maintaining a second generic context executor. A Context receipt is not proof
+of an unknown Provider effect, and an unrelated Store ACK cannot authorize
+replaying a pending request.
+
+## First-party Agent Invocation identity
+
+Harness persists only one original `AgentInvocation` execution type, with
+`AgentInvocationID(turnID, parentItemID, requestID)`. The ID hash retains an
+internal immutable Agent namespace to avoid altering already issued Agent Run
+identities; it does not expose a selectable `CapabilityKey` or definition
+version. Host selection and authorization are recorded in the original Actor,
+Config admission hash, Tool policy/grants, frozen InputHash, Attempt, Kernel
+Run lease and external receipt chain. Every Start/Retry/Handoff/Cancel/Resume
+uses those concrete ownership facts, not a generic capability interpreter.
+
+The fixed Capability-category columns have been removed from the Harness SQL
+model, HTTP/OpenAPI and TypeScript. The persisted event is
+`agent_invocation`; Tool definition versions remain independent Tool proofs.
+Because removal changes Start admission hashes, legacy pre-stable Host Turns
+must be explicitly retired and their effects reconciled before manual
+PostgreSQL DDL or new Harness SQLite Schema v3 enrollment. New storage never
+promotes old non-Agent data into native Agent authority.
+
+## Host-selected Named Agent capabilities
+
+The recommended Session freezes one finite `NamedAgents` roster in the
+original Host `ConfigSnapshot`. Each named member/version has its own selected
+Model, Instructions, local/hosted Tool grants, Skills, limits and approval
+policy. The model may request a member/goal only through the original
+`harness.delegate_agent` Tool; the Host selection policy and immutable
+Handoff convert this to the same native Agent execution request.
+No Role/Skill/Team interpreter exists. Root-only Tools/Skills are not inferred
+as child grants. A child reading `harness.read_skill` must match the original
+child Handoff Invocation, globally indexed Handoff Item, parent Agent and
+immutable RunRelation before accessing its frozen member-only Markdown.
+The original Kernel lease/receipt and Host approval/Context boundaries
+continue to authorize all external effects and recovery.
+
+## Shared Budget execution and Host ownership
+
+The sole first-party budget **execution** driver is
+`agent.BoundedBudgetAdapter` in the Agent Run/Model/Tool chains. When composing
+an explicit Harness Runner, the Host constructs a single
+`harness.BudgetAuthority` with its selected ledger Store, relation index,
+token-admission planner and clock. `authority.Adapter()` returns the same
+native adapter pointer for each middleware chain; the Host passes `authority`
+separately into `harness.Dependencies.Budget` and may use its receipt-only
+verifiers. The Host `BudgetAuthority` does **not** implement any executable
+Run, Model or Tool Middleware: it cannot launch Provider or Tool effects.
+The recommended `OpenAgentSession` performs this exact composition itself.
+`agent.NewRunner` rejects two different native Budget Adapter instances or a
+duplicate adapter in any one chain; it does not require optional budgeted
+chains on an unbudgeted Agent. This binds the trusted original callback scope
+without creating a second execution path.
+
+The native Adapter alone performs the original reservation/dispatch, trusted
+Provider and Tool return observation, settlement and cancellation-aware
+accounting. The Host authority owns frozen Run/ancestor Ledger scope,
+Host-selected meter/limits and budget Timeline projection. An uncertain
+Provider or Tool result retains its original quota; a proven Agent terminal
+pre-dispatch denial can release only the matching original request's reserved
+quota. Other Host middleware may not borrow the native Adapter's callback
+return proof. A verified external Tool result may settle a held original Call
+without re-execution, but it never grants a second physical dispatch.
+
+The old `harness.BudgetMiddleware` executable interface and
+`harness.NewBoundedBudgetAdapter` convenience constructor are deleted in this
+pre-stable release rather than wrapped for compatibility. See
+[breaking changes](breaking-changes.md).
+
 ## SubAgent composition
 
 A host may execute a standalone Agent without Harness. For durable specialist
@@ -160,3 +239,15 @@ external effects before deploying this candidate. Existing PostgreSQL workflow
 definition tables are not automatically dropped by `AutoMigrate`; see the
 [explicit retirement SQL](migrations/retire-obsolete-orchestration.sql) and
 [upgrade protocol](breaking-changes.md).
+
+## Agent-only Invocation contract (Q1–Q5 governance candidate)
+
+The unreleased Harness Invocation carries one immutable Agent capability and its
+original execution Run ID/Attempt, not a redundant `ExecutionClass` selector.
+The unique physical execution status and callback receipt authority remain in
+Kernel; Harness status is a durable Host projection, not a substitute for a
+Kernel lease or a terminal Tool/Model receipt. Root Retry requires the original
+`runtime.agent` capability key; historical Application/Team/Workflow rows are
+never reinterpreted or re-executed. `OpenAgentSession` now projects frozen Skills,
+per-call approval and explicitly Host-authorized SubAgent routing using the
+existing Agent Runner. This does not enable an intent router or second loop.

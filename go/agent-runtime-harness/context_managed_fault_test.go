@@ -139,7 +139,7 @@ func testManagedContextResume(t *testing.T, bounded bool) {
 		t.Fatalf("compaction checkpoint not committed: %+v err=%v", turn, err)
 	}
 	firstCheckpoint := turn.ContextCheckpointID
-	invocationID, err := harness.AgentInvocationID(turnID, turnID)
+	invocationID, err := harness.AgentInvocationID(turnID, "", turnID)
 	if err != nil {
 		t.Fatal(err)
 	}

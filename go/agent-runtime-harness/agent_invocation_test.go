@@ -43,7 +43,7 @@ func seedFeatureInvocationEnvelope(t *testing.T, store *harness.MemoryStore, ses
 }
 
 func featureParentInvocationID(turnID string) string {
-	id, err := harness.InvocationID(turnID, "", harness.CapabilityAgent, "parent")
+	id, err := harness.AgentInvocationID(turnID, "", "parent")
 	if err != nil {
 		panic(err)
 	}
@@ -64,12 +64,12 @@ func seedFeatureInvocationParent(t *testing.T, runtime *kernel.Runtime, store *h
 		t.Fatal(err)
 	}
 	parentHash := sha256.Sum256(parentInput)
-	parent := harness.Invocation{ID: featureParentInvocationID(turnID), TurnID: turnID, CapabilityKey: "runtime.agent", DefinitionVersion: "v1", ExecutionClass: harness.ExecutionAgent, Input: parentInput, InputHash: fmt.Sprintf("%x", parentHash), ExecutionRefID: parentRunID, Status: harness.InvocationRunning, Attempt: 1, OutputRefs: []harness.HostRef{}, Revision: 1, CreatedAt: now, UpdatedAt: now}
+	parent := harness.Invocation{ID: featureParentInvocationID(turnID), TurnID: turnID, Input: parentInput, InputHash: fmt.Sprintf("%x", parentHash), ExecutionRefID: parentRunID, Status: harness.InvocationRunning, Attempt: 1, OutputRefs: []harness.HostRef{}, Revision: 1, CreatedAt: now, UpdatedAt: now}
 	if _, _, err := store.CreateInvocation(t.Context(), parent); err != nil {
 		t.Fatal(err)
 	}
 	parentItemID := "parent-invocation-item"
-	if _, _, err := store.AppendItem(t.Context(), harness.Item{ID: parentItemID, TurnID: turnID, Kind: harness.ItemInvocation, Status: harness.ItemStarted, RunID: parentRunID, InvocationID: parent.ID, Payload: json.RawMessage(`{"executionClass":"agent"}`), CreatedAt: now, UpdatedAt: now}); err != nil {
+	if _, _, err := store.AppendItem(t.Context(), harness.Item{ID: parentItemID, TurnID: turnID, Kind: harness.ItemAgentInvocation, Status: harness.ItemStarted, RunID: parentRunID, InvocationID: parent.ID, Payload: json.RawMessage(`{"attempt":1,"outputRefs":[]}`), CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	return parentRunID, parentItemID

@@ -29,9 +29,9 @@ func DispatchSettlement(t *testing.T, store harness.Store, prefix string) {
 	input := json.RawMessage(`{"goal":"frozen"}`)
 	digest := sha256.Sum256(input)
 	root := harness.Invocation{
-		ID: "root-" + turnID, TurnID: turnID, CapabilityKey: harness.CapabilityAgent,
-		ExecutionClass: harness.ExecutionAgent, ExecutionRefID: "agent-" + turnID,
-		Input: input, InputHash: hex.EncodeToString(digest[:]),
+		ID: "root-" + turnID, TurnID: turnID,
+		ExecutionRefID: "agent-" + turnID,
+		Input:          input, InputHash: hex.EncodeToString(digest[:]),
 		Status: harness.InvocationRunning, Attempt: 1, Revision: 1,
 		OutputRefs: []harness.HostRef{}, CreatedAt: now, UpdatedAt: now,
 	}

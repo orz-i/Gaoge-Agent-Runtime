@@ -54,11 +54,11 @@ func TestBudgetCompletionAuthorityRejectsMutationInEitherOrder(t *testing.T) {
 				}
 				client := &reusedBudgetModel{}
 				mutator := relabelBudgetReceiptMiddleware{usage: usage}
-				chain := []plugin.ModelMiddleware{shared, mutator}
+				chain := []plugin.ModelMiddleware{mustBudgetAdapter(t, shared), mutator}
 				if outer {
-					chain = []plugin.ModelMiddleware{mutator, shared}
+					chain = []plugin.ModelMiddleware{mutator, mustBudgetAdapter(t, shared)}
 				}
-				runner, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: client, Catalog: registry, Executor: registry, ModelMiddleware: chain, RunMiddleware: []plugin.RunMiddleware{shared}})
+				runner, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: client, Catalog: registry, Executor: registry, ModelMiddleware: chain, RunMiddleware: []plugin.RunMiddleware{opaqueBudgetHostRun{}, mustBudgetAdapter(t, shared)}})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -116,7 +116,7 @@ func TestNamedBudgetCompletionReplayDoesNotRedispatchProvider(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				runner, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: client, ModelOutcomeVerifier: shared, Clock: durabilityTestClock{now: at}, ModelMiddleware: []plugin.ModelMiddleware{shared}, RunMiddleware: []plugin.RunMiddleware{shared}})
+				runner, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: client, ModelOutcomeVerifier: shared, Clock: durabilityTestClock{now: at}, ModelMiddleware: []plugin.ModelMiddleware{mustBudgetAdapter(t, shared)}, RunMiddleware: []plugin.RunMiddleware{opaqueBudgetHostRun{}, mustBudgetAdapter(t, shared)}})
 				if err != nil {
 					t.Fatal(err)
 				}

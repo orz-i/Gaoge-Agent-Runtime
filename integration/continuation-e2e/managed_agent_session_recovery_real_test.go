@@ -604,7 +604,7 @@ func managedRecoveryRoot(t *testing.T, store harness.Store) (string, harness.Inv
 	}
 	invocations, err := store.ListInvocations(t.Context(), turnID)
 	if err != nil || len(invocations) != 1 || invocations[0].ParentItemID != "" ||
-		invocations[0].ExecutionClass != harness.ExecutionAgent || invocations[0].ExecutionRefID == "" {
+		invocations[0].ExecutionRefID == "" {
 		t.Fatalf("expected one durable direct Agent root: %+v err=%v", invocations, err)
 	}
 	// The stored root is authoritative. Session.Prompt supplies the host-stable

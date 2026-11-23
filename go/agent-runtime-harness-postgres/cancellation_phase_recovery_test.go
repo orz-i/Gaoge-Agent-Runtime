@@ -98,7 +98,7 @@ func TestNativeRootCancellationReplaysEveryDurablePhase(t *testing.T) {
 					}
 					// Reconstruct the Harness/controller over the persisted original
 					// route and Store. No remembered phase or fresh intent is used.
-					shared, err := harness.NewBudgetMiddleware(harness.BudgetMiddlewareDependencies{Store: store, Ledgers: store, Relations: cut.relations, Clock: generationClock{}})
+					shared, err := harness.NewBudgetAuthority(harness.BudgetAuthorityDependencies{Store: store, Ledgers: store, Relations: cut.relations, Clock: generationClock{}})
 					if err != nil {
 						t.Fatal(err)
 					}

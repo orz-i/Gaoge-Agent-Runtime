@@ -69,8 +69,7 @@ func AtomicRetryBudgetForStore(ctx context.Context, original Invocation, nextRun
 	}
 	if value.turnID != original.TurnID || value.invocationID != original.ID ||
 		value.previousRunID != original.ExecutionRefID || value.nextRunID != nextRunID ||
-		value.attempt != original.Attempt+1 || original.Attempt < 1 || original.ParentItemID != "" ||
-		original.ExecutionClass != ExecutionAgent {
+		value.attempt != original.Attempt+1 || original.Attempt < 1 || original.ParentItemID != "" {
 		return false, ErrConflict
 	}
 	return true, nil

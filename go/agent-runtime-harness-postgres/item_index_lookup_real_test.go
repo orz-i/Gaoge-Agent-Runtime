@@ -54,7 +54,7 @@ func TestRealPostgresIndexedItemLookupAcrossConnections(t *testing.T) {
 		t.Fatalf("create turn created=%v err=%v", created, err)
 	}
 	for _, item := range []harness.Item{
-		{ID: "indexed-parent", TurnID: turnID, Kind: harness.ItemInvocation, Status: harness.ItemStarted,
+		{ID: "indexed-parent", TurnID: turnID, Kind: harness.ItemAgentInvocation, Status: harness.ItemStarted,
 			ParentItemID: "", Payload: []byte(`{"parent":true}`), CreatedAt: now, UpdatedAt: now},
 		{ID: "indexed-other", TurnID: turnID, Kind: harness.ItemArtifact, Status: harness.ItemCompleted,
 			Payload: []byte(`{"unrelated":true}`), CreatedAt: now, UpdatedAt: now},

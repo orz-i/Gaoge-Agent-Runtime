@@ -1,5 +1,11 @@
 # Hosted Context synchronous sampling adaptation
 
+**Retired pre-stable design (PR #146):** this draft describes an experimental
+Sampling Context callback protocol with no production Host implementer. The
+`SamplingContextPorts` and `ContextPreparation` execution branch have been
+removed. Do not treat this archived design as a supported SDK interface;
+consult [current Context ownership](../architecture.md#context-execution-path).
+
 This is a limited extension of the existing concrete BoundedContextAdapter, not
 a managed suspension, policy-normalization, Store or schema protocol.
 
