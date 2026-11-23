@@ -207,7 +207,7 @@ func validInvocationExecutionAuthority(value Invocation) bool {
 	// is an incomplete ownership record. In particular, dropping a Handoff
 	// child's payload must never turn its isolated Run into an ordinary child.
 	if len(value.Input) == 0 {
-		if value.InputHash != "" || (value.ParentItemID != "" && value.CapabilityKey == CapabilityAgent) {
+		if value.InputHash != "" || value.ParentItemID != "" {
 			return false
 		}
 	} else if !json.Valid(value.Input) || hashInvocationBytes(value.Input) != value.InputHash {
@@ -223,7 +223,9 @@ func validInvocationIdentity(value Invocation) bool {
 	if strings.TrimSpace(value.TurnID) == "" {
 		return false
 	}
-	return strings.TrimSpace(value.CapabilityKey) != ""
+	// One first-party Agent Invocation identity. Historical Application and
+	// custom Feature rows fail closed instead of borrowing a native Runner.
+	return value.CapabilityKey == CapabilityAgent
 }
 
 func validInvocationLifecycle(value Invocation) bool {

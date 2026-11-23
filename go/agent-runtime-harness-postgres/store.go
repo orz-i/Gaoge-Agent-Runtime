@@ -39,7 +39,7 @@ func sameInvocation(left, right harness.Invocation) bool {
 }
 
 func invocationToRecord(value harness.Invocation) (invocationRecord, error) {
-	if value.ID == "" || value.TurnID == "" || value.CapabilityKey == "" || value.Attempt <= 0 || value.Revision == 0 {
+	if value.ID == "" || value.TurnID == "" || value.CapabilityKey != harness.CapabilityAgent || value.Attempt <= 0 || value.Revision == 0 {
 		return invocationRecord{}, harness.ErrInvalidRequest
 	}
 	outputRefs, err := json.Marshal(value.OutputRefs)
@@ -57,6 +57,9 @@ func invocationToRecord(value harness.Invocation) (invocationRecord, error) {
 }
 
 func invocationFromRecord(value invocationRecord) (harness.Invocation, error) {
+	if value.CapabilityKey != harness.CapabilityAgent {
+		return harness.Invocation{}, harness.ErrConflict
+	}
 	var outputRefs []harness.HostRef
 	if err := json.Unmarshal([]byte(value.OutputRefsJSON), &outputRefs); err != nil {
 		return harness.Invocation{}, harness.ErrConflict

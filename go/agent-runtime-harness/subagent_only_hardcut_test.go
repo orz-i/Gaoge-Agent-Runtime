@@ -40,6 +40,9 @@ func TestRetiredApplicationStoreRetryCannotRotateIntoAgent(t *testing.T) {
 		Input:          input, InputHash: hashInvocationBytes(input), Status: InvocationFailed,
 		Attempt: 1, Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
+	if _, _, err := store.CreateInvocation(t.Context(), old); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("new non-Agent Invocation admitted: %v", err)
+	}
 	store.invocations[old.ID] = old // Historical persisted row, not new admission.
 	store.invocationExecutionRefs[old.ExecutionRefID] = old.ID
 	store.turns[old.TurnID] = Turn{ID: old.TurnID, Status: TurnFailed, Revision: 1}

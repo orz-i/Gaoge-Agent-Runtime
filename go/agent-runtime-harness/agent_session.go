@@ -144,9 +144,10 @@ func selectSessionTools(config *ConfigSnapshot, selectedTools []SessionTool, rea
 			return nil, nil, err
 		}
 		policy = policies[0]
+		validApproval := policy.ApprovalMode == approvalModeNever && policy.ApprovalCapability == "" ||
+			policy.ApprovalMode == approvalModeAlways && policy.ApprovalCapability == approvalCapabilityPerCall
 		if policy.Key != key || key == ContextArtifactToolKey || key == DelegationToolKey || key == agent.ToolDiscoveryKey ||
-			!(policy.ApprovalMode == approvalModeNever && policy.ApprovalCapability == "" ||
-				policy.ApprovalMode == approvalModeAlways && policy.ApprovalCapability == approvalCapabilityPerCall) ||
+			!validApproval ||
 			(policy.ExecutionMode != "" && policy.ExecutionMode != "local_dispatch") ||
 			(policy.SideEffectLevel != "read" && policy.SideEffectLevel != "write") {
 			return nil, nil, ErrInvalidRequest

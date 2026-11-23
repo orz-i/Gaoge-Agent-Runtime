@@ -86,7 +86,7 @@ func assertRetryChildExecutionFenceScenarios(t *testing.T, store harness.Store, 
 			}
 			child := harness.Invocation{
 				ID: "child-" + turnID, TurnID: turnID, ParentItemID: "parent-item",
-				CapabilityKey:  "feature.child",
+				CapabilityKey:  harness.CapabilityAgent,
 				ExecutionRefID: "c1-" + turnID, Input: input, InputHash: hash,
 				Status: scenario.status, Attempt: 1, Revision: 1,
 				OutputRefs: []harness.HostRef{}, CreatedAt: now, UpdatedAt: now,

@@ -23,6 +23,9 @@ func TestRetiredApplicationRejectedBySQLRetryAdmission(t *testing.T) {
 	}
 	original.ParentItemID = ""
 	original.CapabilityKey = "app.legacy"
+	if _, err := invocationToRecord(original); err == nil {
+		t.Fatal("legacy Application accepted for new SQL persistence")
+	}
 	if validStoredInvocationRetry(original, 1) {
 		t.Fatal("retired Application row can rotate its SQL execution identity")
 	}
