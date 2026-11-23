@@ -94,7 +94,10 @@ func RunKernelExecutionSuite(t *testing.T, factory ExecutionStoreFactory) {
 			}
 			return lease
 		}
-		first := acquire("owner-A", 300*time.Millisecond)
+		// Positive writes exercise live authority across multiple durable commits.
+		// Give them a live lease independent of filesystem and CI scheduling latency.
+		const liveLease = 30 * time.Second
+		first := acquire("owner-A", liveLease)
 		if first.Epoch != 2 || first.LeaseID == "" {
 			t.Fatalf("initial lease invalid: %+v", first)
 		}
@@ -122,7 +125,7 @@ func RunKernelExecutionSuite(t *testing.T, factory ExecutionStoreFactory) {
 			t.Fatalf("multi-CAS run=%+v", current.Run)
 		}
 		// Renew rotates the expiry in the exact token while retaining Epoch.
-		renewed, err := runtime.RenewExecution(ctx, kernel.ExecutionRenewRequest{Lease: first, LeaseDuration: 50 * time.Millisecond})
+		renewed, err := runtime.RenewExecution(ctx, kernel.ExecutionRenewRequest{Lease: first, LeaseDuration: 2 * liveLease})
 		if err != nil || renewed.Epoch != first.Epoch || renewed.ExpiresAt.Equal(first.ExpiresAt) {
 			t.Fatalf("renewed segment epoch/expiry error: %+v %v", renewed, err)
 		}
@@ -133,13 +136,18 @@ func RunKernelExecutionSuite(t *testing.T, factory ExecutionStoreFactory) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		// Expired A cannot write even before B reclaims the lease.
-		time.Sleep(90 * time.Millisecond)
+		// Start the short expiry window only after the last positive write.
+		// Expired A must be fenced even before B reclaims the lease.
+		const expiryLease = 50 * time.Millisecond
+		if _, err = runtime.RenewExecution(ctx, kernel.ExecutionRenewRequest{Lease: renewed, LeaseDuration: expiryLease}); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(expiryLease + 40*time.Millisecond)
 		if _, err = bound.Apply(ctx, created.Run.ID, current.Run.Revision, mutation(current, "expired")); !errors.Is(err, kernel.ErrExecutionConflict) {
 			t.Fatalf("expired owner without B committed: %v", err)
 		}
 		revisionAtTakeover := current.Run.Revision
-		second := acquire("owner-B", time.Second)
+		second := acquire("owner-B", liveLease)
 		if second.Epoch != first.Epoch+1 || second.OwnerID != "owner-B" {
 			t.Fatalf("takeover did not bump epoch: %+v", second)
 		}
@@ -170,7 +178,7 @@ func RunKernelExecutionSuite(t *testing.T, factory ExecutionStoreFactory) {
 		if _, err = runtime.Apply(ctx, created.Run.ID, current.Run.Revision, mutation(current, "released-unfenced")); !errors.Is(err, kernel.ErrExecutionRequired) {
 			t.Fatalf("release disabled the sticky execution fence: %v", err)
 		}
-		third := acquire("owner-C", time.Second)
+		third := acquire("owner-C", liveLease)
 		if third.Epoch != second.Epoch+1 {
 			t.Fatalf("epoch not monotonic after release: %+v", third)
 		}
