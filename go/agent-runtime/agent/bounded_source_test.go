@@ -14,13 +14,22 @@ func TestBoundedBudgetDenialRequiresOriginalRequestAndInvocationNonce(t *testing
 	request := model.Request{RunID: "run", InvocationID: "invocation", Model: "original"}
 	scope := &modelDenialScope{marker: 1}
 	ctx := context.WithValue(t.Context(), modelDenialKey{}, scope)
-	denied := modelPreDispatchDenied{cause: ErrInvalidRequest, scope: scope, request: model.CloneRequest(request)}
+	denied := modelPreDispatchDenied{cause: ErrInvalidRequest, scope: scope, original: model.CloneRequest(request), candidate: model.CloneRequest(request)}
 	if !modelDeniedForRequest(ctx, request, denied) {
 		t.Fatal("original private denial rejected")
 	}
 	normalized := model.CloneRequest(request)
 	if !modelDeniedForRequest(ctx, normalized, denied) {
 		t.Fatal("nil/empty normalized request rejected")
+	}
+	// A Host middleware may alter the final candidate without ever reaching a
+	// Provider. Only the Agent terminal's private proof of the ORIGINAL frozen
+	// request can restore its reservation, not the altered candidate by itself.
+	mutated := denied
+	mutated.candidate = model.CloneRequest(request)
+	mutated.candidate.Model = "unapproved-model"
+	if !modelDeniedForRequest(ctx, request, mutated) || modelDeniedForRequest(ctx, mutated.candidate, mutated) {
+		t.Fatal("candidate drift was mistaken for original dispatch authority")
 	}
 	for _, field := range []string{"run", "invocation", "model"} {
 		candidate := model.CloneRequest(request)

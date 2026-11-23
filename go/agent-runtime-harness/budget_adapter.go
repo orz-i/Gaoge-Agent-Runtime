@@ -3,7 +3,6 @@ package harness
 import (
 	"context"
 	"encoding/json"
-	"errors"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
@@ -11,75 +10,31 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
-// NewBoundedBudgetAdapter explicitly delegates Run/Model orchestration to
-// Runtime. Host configuration, routing, accounting storage and projection
-// remain Host-owned. The ordinary BudgetMiddleware constructor is unchanged.
-func NewBoundedBudgetAdapter(dependencies BudgetMiddlewareDependencies) (*agent.BoundedBudgetAdapter, error) {
-	shared, err := NewBudgetMiddleware(dependencies)
-	if err != nil {
-		return nil, err
+// Adapter composes one native, trusted execution/settlement path around this
+// Host-owned BudgetAuthority. Host code installs the same native adapter in
+// each selected Run/Model/Tool middleware slot; the authority cannot dispatch.
+func (authority *BudgetAuthority) Adapter() (*agent.BoundedBudgetAdapter, error) {
+	if authority == nil {
+		return nil, ErrInvalidRequest
 	}
-	return shared.boundedAdapter()
+	// A single Host authority has one native execution driver. Its Run, Model
+	// and Tool callbacks must share original ticket identity across layers.
+	authority.adapterOnce.Do(func() {
+		authority.adapter, authority.adapterErr = agent.NewBoundedBudgetAdapter(authority.dependencies.Ledgers, boundedBudgetPorts{authority: authority})
+	})
+	return authority.adapter, authority.adapterErr
 }
 
-func (middleware *BudgetMiddleware) boundedAdapter() (*agent.BoundedBudgetAdapter, error) {
-	return agent.NewBoundedBudgetAdapter(middleware.dependencies.Ledgers, boundedBudgetPorts{shared: middleware})
-}
-
-type boundedBudgetPorts struct{ shared *BudgetMiddleware }
+type boundedBudgetPorts struct{ authority *BudgetAuthority }
 
 func (p boundedBudgetPorts) ResolveScope(ctx context.Context, runID string) (agent.BoundedBudgetScope, error) {
-	d := p.shared.dependencies
-	turn, _, err := resolveContextTurnForRun(ctx, d.Store, d.Relations, runID)
-	if errors.Is(err, ErrNotFound) {
-		return agent.BoundedBudgetScope{}, nil
-	}
-	if err != nil {
-		return agent.BoundedBudgetScope{}, err
-	}
-	config, err := loadSealedConfig(ctx, d.Store, turn.ConfigSnapshotID)
-	if err != nil || config.SharedBudget == nil {
-		return agent.BoundedBudgetScope{}, err
-	}
-	scope := agent.BoundedBudgetScope{LedgerID: turn.ID, Limits: *config.SharedBudget}
-	existing, err := d.Ledgers.LoadBudget(ctx, turn.ID)
-	if err != nil && !errors.Is(err, budget.ErrLedgerNotFound) {
-		return scope, err
-	}
-	seen := map[string]bool{}
-	var visit func(string) error
-	visit = func(id string) error {
-		if seen[id] {
-			return ErrConflict
-		}
-		seen[id] = true
-		if binding, ok := existing.Runs[id]; ok {
-			// Existing bindings already carry their admitted ancestry and limits.
-			scope.Runs = append(scope.Runs, agent.BoundedBudgetRunBinding{RunID: id, Binding: binding})
-			return nil
-		}
-		parent, found, err := contextParentRunID(ctx, d.Relations, id)
-		if err != nil {
-			return err
-		}
-		if found {
-			if err = visit(parent); err != nil {
-				return err
-			}
-		}
-		scope.Runs = append(scope.Runs, agent.BoundedBudgetRunBinding{RunID: id, Binding: budget.RunBudget{ParentRunID: parent}})
-		return nil
-	}
-	if err = visit(runID); err != nil {
-		return scope, err
-	}
-	return scope, nil
+	return p.authority.resolveScope(ctx, runID)
 }
 func (p boundedBudgetPorts) Project(ctx context.Context, ledger budget.Ledger) error {
-	return p.shared.project(ctx, ledger)
+	return p.authority.project(ctx, ledger)
 }
 func (p boundedBudgetPorts) PlanModel(ctx context.Context, l budget.Ledger, r model.Request) (model.Request, budget.Reservation, error) {
-	return p.shared.modelReservation(ctx, l, r)
+	return p.authority.modelReservation(ctx, l, r)
 }
 func (p boundedBudgetPorts) ApplyLocalToolBudget(r model.Request, l budget.Ledger) model.Request {
 	return applyLocalToolBudget(r, l, r.RunID)

@@ -1,5 +1,11 @@
 # Issue 107: explicit bounded first-party Tool composition
 
+**Historical note (superseded by PR #146 Budget hard cut):** This audit records
+an earlier migration period when the legacy `BudgetMiddleware` remained
+executable. The current SDK uses only `BudgetAuthority.Adapter()` for native
+Run/Model/Tool execution; old middleware and second adapter factory no longer
+exist. Preserve the original observations here as history, not current API.
+
 This source change is not a passing test or matrix acceptance record.
 
 ## Opt-in migration

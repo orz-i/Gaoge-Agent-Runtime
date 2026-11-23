@@ -24,7 +24,7 @@ func TestVerifiedToolOutcomeSettlementIsIdempotentAndFrozen(t *testing.T) {
 		Definition: tools.Definition{Key: "local.read", Name: "read", InputSchema: json.RawMessage("{}")},
 		Request:    request}
 	effects, verifications := 0, 0
-	initial, err := shared.Tool(t.Context(), invocation, func(context.Context) (tools.ExecutionResult, error) {
+	initial, err := mustBudgetAdapter(t, shared).Tool(t.Context(), invocation, func(context.Context) (tools.ExecutionResult, error) {
 		effects++
 		return tools.ExecutionResult{Content: json.RawMessage("{}"),
 			Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: tools.ReceiptDispositionPending}}, nil

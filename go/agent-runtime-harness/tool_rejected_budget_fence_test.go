@@ -28,7 +28,7 @@ func TestToolRecoverableErrorWithoutRejectedProofPreservesBudget(t *testing.T) {
 			}
 			physical := 0
 			cause := tools.NewRecoverableCallError("tool.read_failed", "reply lost after effect", errors.New("remote side effect may have occurred"))
-			_, err := shared.Tool(t.Context(), invocation, func(context.Context) (tools.ExecutionResult, error) {
+			_, err := mustBudgetAdapter(t, shared).Tool(t.Context(), invocation, func(context.Context) (tools.ExecutionResult, error) {
 				physical++
 				if variant == "wrong-id" {
 					return tools.RecoverableNoEffectResult("other-call", cause)
@@ -42,7 +42,7 @@ func TestToolRecoverableErrorWithoutRejectedProofPreservesBudget(t *testing.T) {
 			if err != nil || ledger.View("").Reserved.ToolCalls != 1 || ledger.View("").Usage.ToolCalls != 0 {
 				t.Fatalf("ambiguous error released Tool quota: view=%+v err=%v", ledger.View(""), err)
 			}
-			_, err = shared.Tool(t.Context(), invocation, func(context.Context) (tools.ExecutionResult, error) {
+			_, err = mustBudgetAdapter(t, shared).Tool(t.Context(), invocation, func(context.Context) (tools.ExecutionResult, error) {
 				physical++
 				return tools.ExecutionResult{Content: json.RawMessage(`{}`),
 					Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: "committed"}}, nil
@@ -63,7 +63,7 @@ func TestToolExactRejectedNoEffectReceiptSettlesBudgetOnce(t *testing.T) {
 		Request:    request}
 	cause := tools.NewRecoverableCallError("tool.invalid_input", "invalid", errors.New("pre-effect"))
 	physical := 0
-	receipt, err := shared.Tool(t.Context(), invocation, func(context.Context) (tools.ExecutionResult, error) {
+	receipt, err := mustBudgetAdapter(t, shared).Tool(t.Context(), invocation, func(context.Context) (tools.ExecutionResult, error) {
 		physical++
 		return tools.RecoverableNoEffectResult(request.Call.ID, cause)
 	})
@@ -92,7 +92,7 @@ func TestUnknownSuccessfulToolDispositionPreservesHeldBudget(t *testing.T) {
 				Request:    request,
 			}
 			physical := 0
-			_, err := shared.Tool(t.Context(), invocation, func(context.Context) (tools.ExecutionResult, error) {
+			_, err := mustBudgetAdapter(t, shared).Tool(t.Context(), invocation, func(context.Context) (tools.ExecutionResult, error) {
 				physical++
 				return tools.ExecutionResult{Content: json.RawMessage(`{}`),
 					Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: disposition}}, nil
@@ -104,7 +104,7 @@ func TestUnknownSuccessfulToolDispositionPreservesHeldBudget(t *testing.T) {
 			if err != nil || ledger.View("").Reserved.ToolCalls != 1 || ledger.View("").Usage.ToolCalls != 0 {
 				t.Fatalf("invalid disposition consumed quota as terminal receipt: %+v err=%v", ledger.View(""), err)
 			}
-			_, err = shared.Tool(t.Context(), invocation, func(context.Context) (tools.ExecutionResult, error) {
+			_, err = mustBudgetAdapter(t, shared).Tool(t.Context(), invocation, func(context.Context) (tools.ExecutionResult, error) {
 				physical++
 				return tools.ExecutionResult{Content: json.RawMessage(`{}`),
 					Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: "committed"}}, nil

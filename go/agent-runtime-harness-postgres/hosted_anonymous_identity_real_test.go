@@ -89,7 +89,7 @@ func TestRealPostgresAnonymousHostedTerminalStaysHeldAfterRestart(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	shared, err := harness.NewBudgetMiddleware(harness.BudgetMiddlewareDependencies{
+	shared, err := harness.NewBudgetAuthority(harness.BudgetAuthorityDependencies{
 		Store: first, Clock: hostedAnonymousRealClock{},
 	})
 	if err != nil {
@@ -101,7 +101,7 @@ func TestRealPostgresAnonymousHostedTerminalStaysHeldAfterRestart(t *testing.T) 
 		HostedTools: []model.HostedTool{{Key: "native.search"}},
 	}
 	providerCalls := 0
-	_, err = shared.Model(t.Context(), request, nil, func(_ context.Context, actual model.Request, _ model.StreamSink) (model.Response, error) {
+	_, err = mustBudgetAdapter(t, shared).Model(t.Context(), request, nil, func(_ context.Context, actual model.Request, _ model.StreamSink) (model.Response, error) {
 		providerCalls++
 		if actual.HostedToolCallLimit == nil || *actual.HostedToolCallLimit != 2 {
 			t.Fatalf("physical provider was not bounded: %+v", actual)
@@ -131,13 +131,13 @@ func TestRealPostgresAnonymousHostedTerminalStaysHeldAfterRestart(t *testing.T) 
 			t.Fatalf("anonymous physical results manufactured an individual hosted receipt: %s", id)
 		}
 	}
-	restarted, err := harness.NewBudgetMiddleware(harness.BudgetMiddlewareDependencies{
+	restarted, err := harness.NewBudgetAuthority(harness.BudgetAuthorityDependencies{
 		Store: second, Clock: hostedAnonymousRealClock{},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = restarted.Model(t.Context(), request, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
+	_, err = mustBudgetAdapter(t, restarted).Model(t.Context(), request, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
 		providerCalls++
 		return model.Response{Content: "unsafe repeat"}, nil
 	})

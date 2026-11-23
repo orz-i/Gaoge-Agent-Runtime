@@ -253,7 +253,7 @@ func ea1RunCancelHostCut(t *testing.T, persistent bool, phase string) {
 		if e != nil {
 			t.Fatal(e)
 		}
-		b, e := harness.NewBudgetMiddleware(harness.BudgetMiddlewareDependencies{Store: h, Ledgers: l, Clock: ea1CancelClock{}})
+		b, e := harness.NewBudgetAuthority(harness.BudgetAuthorityDependencies{Store: h, Ledgers: l, Clock: ea1CancelClock{}})
 		if e != nil {
 			t.Fatal(e)
 		}

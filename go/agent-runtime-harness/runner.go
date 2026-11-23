@@ -582,7 +582,7 @@ type Dependencies struct {
 	Relations    RunRelationSource
 	Cancellation RuntimeCanceller
 	Interactions InteractionResponseHandler
-	Budget       *BudgetMiddleware
+	Budget       *BudgetAuthority
 	Execution    ExecutionPolicy
 	// The Host's single named-Agent selection/authorization boundary. Every
 	// manual and model Tool request must pass it before child admission.
@@ -614,7 +614,7 @@ type Runner struct {
 	relationReader   RunRelationSource
 	cancellation     RuntimeCanceller
 	interactions     InteractionResponseHandler
-	budgets          *BudgetMiddleware
+	budgets          *BudgetAuthority
 	execution        ExecutionPolicy
 	delegationPolicy DelegationToolPolicy
 }

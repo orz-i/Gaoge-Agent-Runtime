@@ -21,15 +21,17 @@ import (
 type modelDenialKey struct{}
 type modelDenialScope struct{ marker byte }
 type modelPreDispatchDenied struct {
-	cause   error
-	scope   *modelDenialScope
-	request model.Request
+	cause     error
+	scope     *modelDenialScope
+	original  model.Request // exact request admitted before any Model middleware
+	candidate model.Request // actual downstream request that failed at the final gate
 }
 
-func modelDeniedForRequest(ctx context.Context, request model.Request, err error) bool {
+func modelDeniedForRequest(ctx context.Context, original model.Request, err error) bool {
 	var denied modelPreDispatchDenied
 	scope, _ := ctx.Value(modelDenialKey{}).(*modelDenialScope)
-	return scope != nil && errors.As(err, &denied) && denied.scope == scope && sameBoundedValue(model.CloneRequest(denied.request), model.CloneRequest(request))
+	return scope != nil && errors.As(err, &denied) && denied.scope == scope &&
+		sameBoundedValue(model.CloneRequest(denied.original), model.CloneRequest(original))
 }
 
 func (denied modelPreDispatchDenied) Error() string { return denied.cause.Error() }

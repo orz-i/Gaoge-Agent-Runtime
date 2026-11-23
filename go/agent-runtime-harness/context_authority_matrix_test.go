@@ -385,7 +385,7 @@ func TestAuditMatrixBudgetCannotBillAnotherSessionOnForgedInvocationTurn(t *test
 		t.Fatal(err)
 	}
 	swapped := matrixBudgetOwnerSwapStore{Store: store, target: request.RunID, forgedTurn: foreignConf.TurnID}
-	shared, err := NewBudgetMiddleware(BudgetMiddlewareDependencies{Store: swapped, Ledgers: store, Clock: hostedBudgetClock{}})
+	shared, err := NewBudgetAuthority(BudgetAuthorityDependencies{Store: swapped, Ledgers: store, Clock: hostedBudgetClock{}})
 	if err != nil {
 		t.Fatal(err)
 	}

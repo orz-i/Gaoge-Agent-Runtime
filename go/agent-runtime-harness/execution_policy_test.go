@@ -75,7 +75,7 @@ func TestHarnessWithoutSharedLedgerStillFreezesDelegationSafety(t *testing.T) {
 	request = testStartRequest()
 	request.Config.SharedBudget = &budget.Limits{MaxChildRuns: 1}
 	if _, err = runner.StartAgentTurn(t.Context(), request); err == nil {
-		t.Fatal("shared budget was accepted without BudgetMiddleware")
+		t.Fatal("shared budget was accepted without BudgetAuthority")
 	}
 }
 
@@ -94,7 +94,7 @@ func newExecutionPolicyHarness(t *testing.T, execution harness.ExecutionPolicy, 
 		Runtime: runtime, Agent: direct, Store: store, Clock: fixedClock{}, Execution: execution,
 	}
 	if withBudget {
-		shared, budgetErr := harness.NewBudgetMiddleware(harness.BudgetMiddlewareDependencies{
+		shared, budgetErr := harness.NewBudgetAuthority(harness.BudgetAuthorityDependencies{
 			Store: store, Clock: fixedClock{},
 		})
 		if budgetErr != nil {

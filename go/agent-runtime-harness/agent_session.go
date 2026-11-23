@@ -272,19 +272,19 @@ func openBoundedAgentSession(options AgentSessionOptions, registrations []tools.
 		return nil, err
 	}
 	dependencies.ApprovalPolicies = []plugin.ApprovalPolicy{approval}
-	var shared *BudgetMiddleware
+	var shared *BudgetAuthority
 	if options.Session.Config.SharedBudget != nil {
 		meter := options.BudgetMeter
 		if meter == nil {
 			meter, _ = options.Model.(model.TokenAdmissionPlanner)
 		}
-		shared, err = NewBudgetMiddleware(BudgetMiddlewareDependencies{
+		shared, err = NewBudgetAuthority(BudgetAuthorityDependencies{
 			Store: options.Store, Relations: options.Relations, Meter: meter, Clock: systemClock{},
 		})
 		if err != nil {
 			return nil, err
 		}
-		adapter, adapterErr := shared.boundedAdapter()
+		adapter, adapterErr := shared.Adapter()
 		if adapterErr != nil {
 			return nil, adapterErr
 		}

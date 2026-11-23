@@ -20,18 +20,6 @@ type budgetRejectedResponse struct {
 	Code string `json:"code,omitempty"`
 }
 
-// Once the authoritative ledger receipt is committed, projection/validation
-// errors must preserve its final usage and cannot authorize another generation.
-func settledModelResult(response model.Response, callErr, localErr error) (model.Response, error) {
-	if localErr != nil {
-		callErr = model.NewClassifiedError(errors.Join(callErr, localErr), "model.post_generation_failed")
-		if response.Usage != nil {
-			callErr = model.NewResponseRejectedError(callErr)
-		}
-	}
-	return response, callErr
-}
-
 func encodeBudgetModelReceipt(response model.Response, callErr error) ([]byte, error) {
 	receipt := budgetModelReceipt{Response: response}
 	if callErr != nil {

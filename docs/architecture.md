@@ -81,6 +81,38 @@ maintaining a second generic context executor. A Context receipt is not proof
 of an unknown Provider effect, and an unrelated Store ACK cannot authorize
 replaying a pending request.
 
+## Shared Budget execution and Host ownership
+
+The sole first-party budget **execution** driver is
+`agent.BoundedBudgetAdapter` in the Agent Run/Model/Tool chains. When composing
+an explicit Harness Runner, the Host constructs a single
+`harness.BudgetAuthority` with its selected ledger Store, relation index,
+token-admission planner and clock. `authority.Adapter()` returns the same
+native adapter pointer for each middleware chain; the Host passes `authority`
+separately into `harness.Dependencies.Budget` and may use its receipt-only
+verifiers. The Host `BudgetAuthority` does **not** implement any executable
+Run, Model or Tool Middleware: it cannot launch Provider or Tool effects.
+The recommended `OpenAgentSession` performs this exact composition itself.
+`agent.NewRunner` rejects two different native Budget Adapter instances or a
+duplicate adapter in any one chain; it does not require optional budgeted
+chains on an unbudgeted Agent. This binds the trusted original callback scope
+without creating a second execution path.
+
+The native Adapter alone performs the original reservation/dispatch, trusted
+Provider and Tool return observation, settlement and cancellation-aware
+accounting. The Host authority owns frozen Run/ancestor Ledger scope,
+Host-selected meter/limits and budget Timeline projection. An uncertain
+Provider or Tool result retains its original quota; a proven Agent terminal
+pre-dispatch denial can release only the matching original request's reserved
+quota. Other Host middleware may not borrow the native Adapter's callback
+return proof. A verified external Tool result may settle a held original Call
+without re-execution, but it never grants a second physical dispatch.
+
+The old `harness.BudgetMiddleware` executable interface and
+`harness.NewBoundedBudgetAdapter` convenience constructor are deleted in this
+pre-stable release rather than wrapped for compatibility. See
+[breaking changes](breaking-changes.md).
+
 ## SubAgent composition
 
 A host may execute a standalone Agent without Harness. For durable specialist

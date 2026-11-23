@@ -17,6 +17,15 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
+// An opaque Host callback has no trusted completion ticket. Native Budget
+// receipts cannot certify another layer's unreturned physical effects.
+type opaqueBudgetHostRun struct{}
+
+func (opaqueBudgetHostRun) Name() string { return "test.opaque-host-budget-layer" }
+func (opaqueBudgetHostRun) Run(ctx context.Context, _ plugin.RunInvocation, next plugin.RunNext) (kernel.Snapshot, error) {
+	return next(ctx)
+}
+
 type rejectedReceiptModel struct {
 	calls      int
 	code       string
@@ -57,7 +66,7 @@ func TestBudgetProjectionFailureCannotEraseSettledModelReceipt(t *testing.T) {
 		t.Run(map[bool]string{false: "initial_return", true: "receipt_replay"}[replay], func(t *testing.T) {
 			store, _, request := hostedBudgetFixture(t, budget.Limits{MaxLLMCalls: 1})
 			projection := &receiptProjectionFaultStore{MemoryStore: store}
-			shared, err := NewBudgetMiddleware(BudgetMiddlewareDependencies{Store: projection, Clock: hostedBudgetClock{}})
+			shared, err := NewBudgetAuthority(BudgetAuthorityDependencies{Store: projection, Clock: hostedBudgetClock{}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -69,7 +78,7 @@ func TestBudgetProjectionFailureCannotEraseSettledModelReceipt(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			runner, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: client, ModelOutcomeVerifier: shared, Clock: durabilityTestClock{now: now}, ModelMiddleware: []plugin.ModelMiddleware{shared}, RunMiddleware: []plugin.RunMiddleware{shared}})
+			runner, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: client, ModelOutcomeVerifier: shared, Clock: durabilityTestClock{now: now}, ModelMiddleware: []plugin.ModelMiddleware{mustBudgetAdapter(t, shared)}, RunMiddleware: []plugin.RunMiddleware{opaqueBudgetHostRun{}, mustBudgetAdapter(t, shared)}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -95,7 +104,7 @@ func TestBudgetProjectionFailureCannotEraseSettledModelReceipt(t *testing.T) {
 			}
 			if replay {
 				projection.fail = true // Pure receipt recovery must never call this projection.
-				runner, err = agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: client, ModelOutcomeVerifier: shared, Clock: durabilityTestClock{now: now.Add(3 * time.Minute)}, ModelMiddleware: []plugin.ModelMiddleware{shared}, RunMiddleware: []plugin.RunMiddleware{shared}})
+				runner, err = agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: client, ModelOutcomeVerifier: shared, Clock: durabilityTestClock{now: now.Add(3 * time.Minute)}, ModelMiddleware: []plugin.ModelMiddleware{mustBudgetAdapter(t, shared)}, RunMiddleware: []plugin.RunMiddleware{opaqueBudgetHostRun{}, mustBudgetAdapter(t, shared)}})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -169,7 +178,7 @@ func TestSettledRejectionRecoversSDKReceiptWithoutRegeneration(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					runner, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: client, ModelOutcomeVerifier: shared, Clock: durabilityTestClock{now: at}, ModelMiddleware: []plugin.ModelMiddleware{shared}, RunMiddleware: []plugin.RunMiddleware{shared}})
+					runner, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: client, ModelOutcomeVerifier: shared, Clock: durabilityTestClock{now: at}, ModelMiddleware: []plugin.ModelMiddleware{mustBudgetAdapter(t, shared)}, RunMiddleware: []plugin.RunMiddleware{opaqueBudgetHostRun{}, mustBudgetAdapter(t, shared)}})
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -218,7 +227,7 @@ func TestRejectedCompletedResponseSettlesUsageAndReplaysFailureAfterRestart(t *t
 	cause := errors.New("private invalid output detail")
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	response, err := shared.Model(ctx, request, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
+	response, err := mustBudgetAdapter(t, shared).Model(ctx, request, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
 		cancel() // Known final receipts must survive caller cancellation.
 		return model.Response{
 			ResponseID:      "provider-complete",
@@ -243,11 +252,11 @@ func TestRejectedCompletedResponseSettlesUsageAndReplaysFailureAfterRestart(t *t
 	if strings.Contains(string(ledger.Reservations["model:"+request.InvocationID].Receipt), cause.Error()) {
 		t.Fatal("private rejection detail leaked into accounting receipt")
 	}
-	restarted, err := NewBudgetMiddleware(BudgetMiddlewareDependencies{Store: store, Clock: hostedBudgetClock{}})
+	restarted, err := NewBudgetAuthority(BudgetAuthorityDependencies{Store: store, Clock: hostedBudgetClock{}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, err = restarted.Model(t.Context(), request, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
+	response, err = mustBudgetAdapter(t, restarted).Model(t.Context(), request, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
 		t.Fatal("completed rejected generation was dispatched again")
 		return model.Response{}, nil
 	})
@@ -260,7 +269,7 @@ func TestRejectedResponseCannotTurnPartialUsageIntoKnownCompletion(t *testing.T)
 	for _, marked := range []bool{false, true} {
 		t.Run(map[bool]string{false: "partial_stream", true: "missing_usage"}[marked], func(t *testing.T) {
 			store, shared, request := hostedBudgetFixture(t, budget.Limits{MaxLLMCalls: 2, MaxToolCalls: 1})
-			_, err := shared.Model(t.Context(), request, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
+			_, err := mustBudgetAdapter(t, shared).Model(t.Context(), request, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
 				if marked {
 					return model.Response{}, model.NewResponseRejectedError(errors.New("missing final receipt"))
 				}

@@ -76,15 +76,13 @@ func testRootRetryCommittedAckLoss(t *testing.T, historicalTerminalChild bool) {
 		t.Fatal(err)
 	}
 	client := &roleBudgetModel{}
-	shared, err := harness.NewBudgetMiddleware(harness.BudgetMiddlewareDependencies{
+	shared, err := harness.NewBudgetAuthority(harness.BudgetAuthorityDependencies{
 		Store: store, Ledgers: store, Relations: relations, Meter: client, Clock: fixedClock{},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	bounded, err := harness.NewBoundedBudgetAdapter(harness.BudgetMiddlewareDependencies{
-		Store: store, Ledgers: store, Relations: relations, Meter: client, Clock: fixedClock{},
-	})
+	bounded, err := shared.Adapter()
 	if err != nil {
 		t.Fatal(err)
 	}

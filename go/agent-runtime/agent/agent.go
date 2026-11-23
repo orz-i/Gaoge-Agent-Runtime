@@ -521,6 +521,9 @@ func publicModelInvocations(values []ModelInvocation) []ModelInvocation {
 
 // NewRunner constructs the Agent loop; Host selection and task routing remain external.
 func NewRunner(dependencies Dependencies) (*Runner, error) {
+	if !validBoundedBudgetComposition(dependencies) {
+		return nil, ErrInvalidRequest
+	}
 	if dependencies.Inputs != nil && (dependencies.ManagedContextRecovery != nil || dependencies.SummaryNativeRecovery) {
 		return nil, ErrInvalidRequest // Host input is not a managed-transfer adapter
 	}
@@ -1828,7 +1831,7 @@ func (runner *Runner) generateModel(
 	ctx = context.WithValue(ctx, modelDenialKey{}, denialScope)
 	terminal := func(callCtx context.Context, candidate model.Request, sink model.StreamSink) (model.Response, error) {
 		if !validDispatchModelRequest(frozen, candidate) {
-			return model.Response{}, modelPreDispatchDenied{cause: ErrInvalidRequest, scope: denialScope, request: model.CloneRequest(candidate)}
+			return model.Response{}, modelPreDispatchDenied{cause: ErrInvalidRequest, scope: denialScope, original: model.CloneRequest(frozen), candidate: model.CloneRequest(candidate)}
 		}
 		if beforeProvider != nil {
 			// The final chance to reject an expired or stolen invocation claim
@@ -1836,7 +1839,7 @@ func (runner *Runner) generateModel(
 			if err := beforeProvider(callCtx); err != nil {
 				// This is an execution admission rejection, not a Provider
 				// failure. The caller must not terminalize a recoverable Run.
-				return model.Response{}, modelPreDispatchDenied{cause: err, scope: denialScope, request: model.CloneRequest(candidate)}
+				return model.Response{}, modelPreDispatchDenied{cause: err, scope: denialScope, original: model.CloneRequest(frozen), candidate: model.CloneRequest(candidate)}
 			}
 		}
 		response, err := runner.generateProviderModel(callCtx, candidate, sink)

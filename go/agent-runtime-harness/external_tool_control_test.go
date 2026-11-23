@@ -62,10 +62,10 @@ func newMemberExternalCase(t *testing.T, withCommittedReader bool) memberExterna
 	registry, err := tools.NewRegistry([]tools.Registration{harness.DelegationToolRegistration(delegate),
 		{Definition: tools.Definition{Key: roleEvidenceTool, Name: "prepare_browser", InputSchema: []byte(`{"type":"object"}`)}, Handler: c.owner}})
 	fail(err)
-	d := harness.BudgetMiddlewareDependencies{Store: c.store, Relations: edges, Meter: c.model, Clock: fixedClock{}}
-	shared, err := harness.NewBudgetMiddleware(d)
+	d := harness.BudgetAuthorityDependencies{Store: c.store, Relations: edges, Meter: c.model, Clock: fixedClock{}}
+	shared, err := harness.NewBudgetAuthority(d)
 	fail(err)
-	bounded, err := harness.NewBoundedBudgetAdapter(d)
+	bounded, err := shared.Adapter()
 	fail(err)
 	reader, err := shared.VerifiedToolOutcomeVerifier(delegate)
 	fail(err)

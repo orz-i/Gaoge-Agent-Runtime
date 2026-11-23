@@ -568,14 +568,14 @@ func TestAgentSessionResumeRejectsOriginalUnsupportedCompositionBeforeGeneration
 				if err != nil {
 					t.Fatal(err)
 				}
-				shared, err := harness.NewBudgetMiddleware(harness.BudgetMiddlewareDependencies{Store: store, Clock: clock})
+				shared, err := harness.NewBudgetAuthority(harness.BudgetAuthorityDependencies{Store: store, Clock: clock})
 				if err != nil {
 					t.Fatal(err)
 				}
 				loop, err := agent.NewRunner(agent.Dependencies{
 					Runtime: rt, Model: originalModel, Clock: clock, PrepareModelRequest: harness.MaterializeContextWindowRequest,
 					Catalog: registry, Executor: registry,
-					RunMiddleware: []plugin.RunMiddleware{shared}, ModelMiddleware: []plugin.ModelMiddleware{shared}, ToolMiddleware: []plugin.ToolMiddleware{shared},
+					RunMiddleware: []plugin.RunMiddleware{mustBudgetAdapter(t, shared)}, ModelMiddleware: []plugin.ModelMiddleware{mustBudgetAdapter(t, shared)}, ToolMiddleware: []plugin.ToolMiddleware{mustBudgetAdapter(t, shared)},
 				})
 				if err != nil {
 					t.Fatal(err)

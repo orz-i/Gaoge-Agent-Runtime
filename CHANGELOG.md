@@ -5,6 +5,20 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- **One trusted Budget execution protocol (PR #146):** delete the old
+  `BudgetMiddleware.Run/Model/Tool` and parallel settlement driver, hard-cut
+  the corresponding pre-stable public constructor/type, and retain only
+  `BudgetAuthority` (Host Ledger, original receipt lookup, model admission and
+  projection) plus its memoized `Adapter()` returning ONE native
+  `agent.BoundedBudgetAdapter` for Run/Model/Tool. Move all Host composition
+  and safety regression tests to that single physical driver. The native
+  Agent's private pre-Provider rejection now binds the original frozen request
+  as well as the rejected candidate, allowing exact no-send budget refund
+  without accepting a foreign Provider error or a changed original request.
+  `agent.NewRunner` now rejects distinct or duplicated Budget Adapters in the
+  same Agent composition, ensuring a single original callback authority.
+  No new Store schema, lease, budget dimension, or compatibility bridge.
+
 - **Context Sampling hard cut (PR #146, Q4 scope):** delete the unused,
   never-wired `SamplingContextPorts` / `NewSamplingBoundedContextAdapter`
   interpreter, `Dependencies.ContextPreparation` selector and their alternate

@@ -1,5 +1,47 @@
 # Breaking changes (pre-stable Beta)
 
+## PR #146 — one Budget execution and settlement protocol
+
+**Breaking Go SDK hard cut:** the old
+`harness.BudgetMiddleware` / `harness.NewBudgetMiddleware`,
+`BudgetMiddlewareDependencies`, and its executable `.Run`, `.Model`, `.Tool`
+and `.Name` methods are removed. The former separate convenience
+`harness.NewBoundedBudgetAdapter` is also removed; no alias, implicit wrapper,
+second reservation engine or plugin adapter is retained. A Host must construct
+one `harness.NewBudgetAuthority(harness.BudgetAuthorityDependencies{...})`,
+obtain `adapter, err := authority.Adapter()`, and install that **same** native
+`*agent.BoundedBudgetAdapter` in the selected Run, Model and Tool middleware
+chains. Supply `authority` to `harness.Dependencies.Budget` for original
+Child/remote capacity admission and trusted Tool/model receipt verification.
+The recommended `OpenAgentSession` constructor applies this composition
+without a second manual recipe.
+
+`BudgetAuthority` is **not a Middleware**; it owns the ledger Store, frozen
+scope/ancestry, token-admission planning, HostedTool limits, durable receipt
+read/repair and projection. The sole native Agent Adapter controls physical
+Model and Tool reservations, dispatch, completion, and scoped callback proof.
+`agent.NewRunner` now rejects mixed native Budget Adapters or duplicated
+Budget middleware entries on the same callback chain, while allowing the
+same exact instance in selected Run/Model/Tool chains. This is a pre-Start
+configuration rejection; no old Run can be resumed by reinterpreting its
+original callback identity.
+Unknown physical outcomes remain held, cancelled/rejected Tools cannot create
+charges without original receipts, and pre-Provider denied requests release
+only their own matching original reservation. Callback-scoped, originally
+frozen pre-send denials bind the original request and candidate in the native
+Agent; an arbitrary Provider error, forged marker or changed caller request
+cannot refund a dispatched operation. Untrusted Host Run middleware keeps its
+own unresolved callback proof and cannot inherit this Budget settlement.
+
+A pre-stable worker that still executes the old Budget middleware must be
+stopped; reconcile unknown physical Model/Tool calls and durable reservations
+against their original evidence before deploying the new adapter. Never
+blindly repeat a Provider call, reinterpret a receipt, rotate a frozen
+reservation ID, or silently run a legacy second executor. No new budget table,
+Kernel state, implicit migration or wire status is introduced.
+
+# Breaking changes (pre-stable Beta)
+
 ## Context Sampling hard cut — one active bounded Context execution path
 
 **Breaking Go SDK surface (pre-stable):** remove the previously exported

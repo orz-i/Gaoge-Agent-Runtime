@@ -30,18 +30,18 @@ func (client *ledgerTestModel) Generate(_ context.Context, request model.Request
 	}
 	return model.Response{Content: "receipt", Usage: &model.Usage{InputTokens: 20, OutputTokens: 10, CacheReadTokens: 15, ReasoningTokens: 5}}, nil
 }
-func newLedgerHarness(t *testing.T, client *ledgerTestModel) (*harness.MemoryStore, *harness.BudgetMiddleware, harness.Snapshot) {
+func newLedgerHarness(t *testing.T, client *ledgerTestModel) (*harness.MemoryStore, *harness.BudgetAuthority, harness.Snapshot) {
 	t.Helper()
 	store := harness.NewMemoryStore()
 	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore(), Clock: fixedClock{}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	shared, err := harness.NewBudgetMiddleware(harness.BudgetMiddlewareDependencies{Store: store, Clock: fixedClock{}, Meter: client})
+	shared, err := harness.NewBudgetAuthority(harness.BudgetAuthorityDependencies{Store: store, Clock: fixedClock{}, Meter: client})
 	if err != nil {
 		t.Fatal(err)
 	}
-	direct, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: client, ModelMiddleware: []plugin.ModelMiddleware{shared}})
+	direct, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: client, ModelMiddleware: []plugin.ModelMiddleware{mustBudgetAdapter(t, shared)}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,13 +60,13 @@ func newLedgerHarness(t *testing.T, client *ledgerTestModel) (*harness.MemorySto
 func TestSharedBudgetUnknownReceiptSurvivesRestartWithoutRedispatch(t *testing.T) {
 	client := &ledgerTestModel{missing: true}
 	store, _, snapshot := newLedgerHarness(t, client)
-	shared, err := harness.NewBudgetMiddleware(harness.BudgetMiddlewareDependencies{Store: store, Clock: fixedClock{}, Meter: client})
+	shared, err := harness.NewBudgetAuthority(harness.BudgetAuthorityDependencies{Store: store, Clock: fixedClock{}, Meter: client})
 	if err != nil {
 		t.Fatal(err)
 	}
 	request := client.request
 	request.MaxOutputTokens = 0
-	_, err = shared.Model(t.Context(), request, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
+	_, err = mustBudgetAdapter(t, shared).Model(t.Context(), request, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
 		t.Fatal("unknown dispatched request was sent twice")
 		return model.Response{}, nil
 	})
@@ -87,7 +87,7 @@ func TestSharedBudgetReplaysSettledReceiptAndRejectsUnmeteredRemote(t *testing.T
 	store, shared, snapshot := newLedgerHarness(t, client)
 	request := client.request
 	request.MaxOutputTokens = 0
-	response, err := shared.Model(t.Context(), request, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
+	response, err := mustBudgetAdapter(t, shared).Model(t.Context(), request, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
 		t.Fatal("settled request was sent twice")
 		return model.Response{}, nil
 	})
@@ -106,7 +106,7 @@ func TestSharedBudgetReplaysSettledReceiptAndRejectsUnmeteredRemote(t *testing.T
 		t.Fatalf("remote=%v", err)
 	}
 	request.Model = "different-model"
-	if _, err = shared.Model(t.Context(), request, nil, nil); !errors.Is(err, budget.ErrLedgerConflict) {
+	if _, err = mustBudgetAdapter(t, shared).Model(t.Context(), request, nil, nil); !errors.Is(err, budget.ErrLedgerConflict) {
 		t.Fatalf("changed request=%v", err)
 	}
 }

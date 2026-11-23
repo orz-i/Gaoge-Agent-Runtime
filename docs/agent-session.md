@@ -120,6 +120,13 @@ On reopen, Runtime compares the **resolved original** shared-budget and
 Host deployment topology policy to the current handle, rather than only
 checking whether a ledger exists. Adding a meter to an originally unmetered
 Run, removing one, or changing frozen limits cannot silently resume it.
+For advanced manually composed Sessions, create one `BudgetAuthority` from
+`BudgetAuthorityDependencies` and use its memoized `Adapter()` as the **same**
+Run/Model/Tool middleware. Pass the Host authority separately as
+`harness.Dependencies.Budget`. Never place `BudgetAuthority` itself in a
+middleware chain; the previous `BudgetMiddleware` execution engine no longer
+exists. Only the native Adapter may dispatch and settle physical effects.
+
 `SharedBudget` remains incompatible with `Context.ManagedRecovery`,
 `Context.SummaryNativeRecovery` and the optional WorkingStateSummary lifecycle
 until they share one original-effect settlement protocol.
