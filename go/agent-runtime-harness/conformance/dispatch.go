@@ -1,0 +1,122 @@
+package conformance
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"testing"
+	"time"
+
+	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
+)
+
+// DispatchSettlement checks original receipt ownership, replay and conflicting outcomes.
+func DispatchSettlement(t *testing.T, store harness.Store, prefix string) {
+	t.Helper()
+	now := time.Now().UTC()
+	ctx := t.Context()
+	turnID := "receipt-fence-" + prefix
+	turn := harness.Turn{
+		ID: turnID, SessionID: "session-" + turnID,
+		HostTurn:         harness.HostRef{Kind: "turn", ID: turnID},
+		ConfigSnapshotID: "config-" + turnID,
+		Status:           harness.TurnRunning, Revision: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	if _, _, err := store.CreateTurn(ctx, turn); err != nil {
+		t.Fatal(err)
+	}
+	input := json.RawMessage(`{"goal":"frozen"}`)
+	digest := sha256.Sum256(input)
+	root := harness.Invocation{
+		ID: "root-" + turnID, TurnID: turnID, CapabilityKey: harness.CapabilityAgent,
+		ExecutionClass: harness.ExecutionAgent, ExecutionRefID: "agent-" + turnID,
+		Input: input, InputHash: hex.EncodeToString(digest[:]),
+		Status: harness.InvocationRunning, Attempt: 1, Revision: 1,
+		OutputRefs: []harness.HostRef{}, CreatedAt: now, UpdatedAt: now,
+	}
+	if _, _, err := store.CreateInvocation(ctx, root); err != nil {
+		t.Fatal(err)
+	}
+	grant := harness.Item{
+		ID: "grant-" + turnID, TurnID: turnID, InvocationID: root.ID, RunID: root.ExecutionRefID,
+		Kind: harness.ItemDiagnostic, Status: harness.ItemStarted,
+		ParentItemID: harness.ExecutionDispatchParentItemID,
+		Payload:      json.RawMessage(`{"phase":"start","physicalRunID":"` + root.ExecutionRefID + `"}`),
+		CreatedAt:    now, UpdatedAt: now,
+	}
+	if _, _, err := store.AppendItem(ctx, grant); err != nil {
+		t.Fatal(err)
+	}
+	receipt := harness.Item{
+		ID: proofFactID("hdispatchdone", grant.ID), TurnID: turnID, InvocationID: root.ID, RunID: root.ExecutionRefID,
+		Kind: harness.ItemDiagnostic, Status: harness.ItemCompleted,
+		ParentItemID: grant.ID, Payload: json.RawMessage(`{"boundary":"physical_dispatch_returned"}`),
+		CreatedAt: now, UpdatedAt: now,
+	}
+	for _, tc := range []struct {
+		name   string
+		mutate func(*harness.Item)
+	}{
+		{"wrong-invocation", func(item *harness.Item) { item.InvocationID = "some-other-invocation" }},
+		{"wrong-run", func(item *harness.Item) { item.RunID = "another-run" }},
+		{"wrong-boundary", func(item *harness.Item) { item.Payload = json.RawMessage(`{"boundary":"invalid"}`) }},
+		{"wrong-status", func(item *harness.Item) { item.Status = harness.ItemFailed }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			invalid := receipt
+			// Keep the canonical ID so each negative case tests its actual invalid field.
+			tc.mutate(&invalid)
+			if _, _, err := store.AppendItem(ctx, invalid); !errors.Is(err, harness.ErrConflict) {
+				t.Fatalf("invalid receipt allowed grant settlement: %v", err)
+			}
+			items, err := store.ListItems(ctx, turnID, 0, 500)
+			if err != nil || !harness.PendingExecutionDispatch(items, root.ID) {
+				t.Fatalf("foreign receipt closed an unresolved grant: %v", err)
+			}
+			failed := root
+			failed.Status = harness.InvocationFailed
+			if _, err := store.UpdateInvocation(ctx, failed, root.Revision); !errors.Is(err, harness.ErrConflict) {
+				t.Fatalf("unknown physical dispatch allowed Failed CAS: %v", err)
+			}
+		})
+	}
+	if _, created, err := store.AppendItem(ctx, receipt); err != nil || !created {
+		t.Fatalf("first authoritative settlement rejected: created=%t err=%v", created, err)
+	}
+	for _, tc := range []struct {
+		name     string
+		boundary string
+	}{
+		{"contradictory-rejected", "physical_dispatch_rejected"},
+		{"duplicate-returned", "physical_dispatch_returned"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			conflicting := receipt
+			conflicting.ID = tc.name + "-" + turnID
+			conflicting.Payload = json.RawMessage(`{"boundary":"` + tc.boundary + `"}`)
+			if _, _, err := store.AppendItem(ctx, conflicting); !errors.Is(err, harness.ErrConflict) {
+				t.Fatalf("second physical outcome appended to the same grant: %v", err)
+			}
+		})
+	}
+	items, err := store.ListItems(ctx, turnID, 0, 500)
+	if err != nil || harness.PendingExecutionDispatch(items, "") {
+		t.Fatalf("sole authoritative outcome did not settle grant: %v", err)
+	}
+	// A physical Start callback returning is not a Kernel terminal
+	// result. This effectful receipt must NOT authorize even the initial
+	// Failed status, let alone a Retry/Attempt rotation.
+	failed := root
+	failed.Status = harness.InvocationFailed
+	if _, err := store.UpdateInvocation(ctx, failed, root.Revision); !errors.Is(err, harness.ErrConflict) {
+		t.Fatalf("effectful Start was mistaken for terminal failure: %v", err)
+	}
+	turn.Status = harness.TurnFailed
+	if _, err := store.UpdateTurn(ctx, turn, turn.Revision); !errors.Is(err, harness.ErrConflict) {
+		t.Fatalf("effectful Start was mistaken for terminal Turn failure: %v", err)
+	}
+	if rotated, retryErr := store.RetryInvocation(ctx, failed.ID, root.Revision, "next-agent-"+turnID, now.Add(time.Second)); !errors.Is(retryErr, harness.ErrConflict) {
+		t.Fatalf("effectful Agent start allowed another Attempt: %+v %v", rotated, retryErr)
+	}
+}
