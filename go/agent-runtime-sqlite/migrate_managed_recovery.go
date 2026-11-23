@@ -27,7 +27,7 @@ func schemaV4DDL() []string { v5 := schemaV5DDL(); return v5[:len(v5)-len(manage
 // MigrateV4ToV5 is explicit. Stop old writers and retain a backup first.
 // No existing Run receives a suspension proof from this schema migration.
 func MigrateV4ToV5(ctx context.Context, path string) error {
-	s, err := openStoreMigration(ctx, path, 5)
+	s, err := openKernel(ctx, path, kernelSetup((*Store).migrateV4ToV5))
 	if err != nil {
 		return err
 	}

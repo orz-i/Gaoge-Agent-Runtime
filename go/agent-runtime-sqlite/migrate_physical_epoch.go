@@ -21,7 +21,7 @@ func schemaV7DDL() []string {
 // the watermark is derived ONLY from original admission/retirement records,
 // never a native lease epoch or the new observer Runner's configuration.
 func MigrateV7ToV8(ctx context.Context, path string) error {
-	s, err := openStoreMigration(ctx, path, 8)
+	s, err := openKernel(ctx, path, kernelSetup((*Store).migrateV7ToV8))
 	if err != nil {
 		return err
 	}

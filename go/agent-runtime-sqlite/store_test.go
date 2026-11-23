@@ -11,7 +11,7 @@ import (
 	"time"
 
 	sqlite "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/internal/testprofile"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/profile/testprofile"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )

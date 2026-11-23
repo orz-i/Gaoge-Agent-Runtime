@@ -5,11 +5,9 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/profile"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	sqlite3 "modernc.org/sqlite"
 )
@@ -18,10 +16,10 @@ import (
 const schemaVersion = 8
 
 var (
-	ErrUnsupportedSchema = errors.New("unsupported SQLite runtime schema")
+	ErrUnsupportedSchema = profile.ErrUnsupportedSchema
 	ErrInvalidRecord     = errors.New("invalid SQLite kernel record")
 	ErrBusy              = errors.New("SQLite database temporarily busy")
-	ErrInsecurePath      = errors.New("SQLite path permissions or file type are insecure")
+	ErrInsecurePath      = profile.ErrInsecurePath
 	ErrInvalidTime       = errors.New("SQLite time outside representable nanosecond range")
 )
 
@@ -38,219 +36,35 @@ func Open(ctx context.Context, path string) (*Store, error) { return OpenExistin
 
 // OpenExisting opens a previously initialized, private database only.
 func OpenExisting(ctx context.Context, path string) (*Store, error) {
-	return openStore(ctx, path, false)
+	return openKernel(ctx, path, validateExisting)
 }
 
-// CreateNew initializes an unpublished temporary database in the private
-// Profile directory and publishes its completed main DB file atomically via
-// a no-overwrite hard link. An interrupted initial initialization therefore
-// never leaves a version-0 database at the requested path. Hard-link support
-// is required for this opt-in desktop prototype; fail closed otherwise.
+// CreateNew atomically publishes a fully initialized, private Kernel database.
 func CreateNew(ctx context.Context, path string) (*Store, error) {
-	if ctx == nil || strings.TrimSpace(path) == "" || path == ":memory:" {
-		return nil, kernel.ErrInvalidInput
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	abs, err := filepath.Abs(path)
+	db, err := profile.CreateNew(ctx, path, initializeNew, validateExisting)
 	if err != nil {
 		return nil, err
 	}
-	if err = validatePrivateDirectory(filepath.Dir(abs)); err != nil {
-		return nil, err
-	}
-	if err = checkNewDestination(abs); err != nil {
-		return nil, err
-	}
-
-	tmp, err := os.CreateTemp(filepath.Dir(abs), "."+filepath.Base(abs)+".init-*")
-	if err != nil {
-		return nil, err
-	}
-	staged := tmp.Name()
-	// Only files created under this unique name in this invocation may be
-	// removed on error. Never remove the requested destination or its WAL.
-	defer func() {
-		_ = os.Remove(staged)
-		_ = os.Remove(staged + "-wal")
-		_ = os.Remove(staged + "-shm")
-	}()
-	if err = tmp.Close(); err != nil {
-		return nil, err
-	}
-	stagedStore, err := openStore(ctx, staged, true)
-	if err != nil {
-		return nil, err
-	}
-	if err = stagedStore.Close(); err != nil {
-		return nil, err
-	}
-	// Do not publish a DB requiring an uncommitted sidecar. The final close
-	// checkpoints WAL into the main file; unexpected sidecars fail closed.
-	for _, suffix := range []string{"-wal", "-shm"} {
-		if _, statErr := os.Lstat(staged + suffix); statErr == nil {
-			return nil, fmt.Errorf("%w: unpublished SQLite sidecar remains", ErrUnsupportedSchema)
-		} else if !errors.Is(statErr, os.ErrNotExist) {
-			return nil, statErr
-		}
-	}
-	if err = ctx.Err(); err != nil {
-		return nil, err
-	}
-	if err = checkNewDestination(abs); err != nil {
-		return nil, err
-	}
-	// Unlike Rename, Link never replaces an existing DB and publishes only
-	// the fully initialized, checkpointed main file on the same filesystem.
-	if err = os.Link(staged, abs); err != nil {
-		return nil, err
-	}
-	// The link is already a complete database. If syncing the parent fails,
-	// report uncertain publication durability; callers must inspect/reopen
-	// the target, NEVER delete/replace it or silently call CreateNew again.
-	dir, err := openProfileDirectoryForSync(filepath.Dir(abs))
-	if err != nil {
-		return nil, fmt.Errorf("published SQLite directory cannot be synced: %w", err)
-	}
-	syncErr := dir.Sync()
-	closeErr := dir.Close()
-	if syncErr != nil {
-		return nil, fmt.Errorf("published SQLite directory sync failed: %w", syncErr)
-	}
-	if closeErr != nil {
-		return nil, fmt.Errorf("published SQLite directory close failed: %w", closeErr)
-	}
-	return OpenExisting(ctx, abs)
+	return &Store{db: db}, nil
 }
 
-func checkNewDestination(abs string) error {
-	if _, statErr := os.Lstat(abs); statErr == nil {
-		return os.ErrExist
-	} else if !errors.Is(statErr, os.ErrNotExist) {
-		return statErr
-	}
-	for _, suffix := range []string{"-wal", "-shm"} {
-		if _, statErr := os.Lstat(abs + suffix); statErr == nil {
-			return fmt.Errorf("%w: orphan SQLite sidecar exists: %s", ErrInsecurePath, abs+suffix)
-		} else if !errors.Is(statErr, os.ErrNotExist) {
-			return statErr
-		}
-	}
-	return nil
+func initializeNew(ctx context.Context, db *sql.DB) error {
+	return (&Store{db: db}).initialize(ctx, true)
+}
+func validateExisting(ctx context.Context, db *sql.DB) error {
+	return (&Store{db: db}).initialize(ctx, false)
 }
 
-// The caller owns the app Profile directory and platform credentials. Stage 1
-// supports a single executor, NOT multi-worker execution epoch isolation.
-func openStore(ctx context.Context, path string, create bool) (*Store, error) {
-	return openStoreMode(ctx, path, create, false)
+func kernelSetup(method func(*Store, context.Context) error) profile.Setup {
+	return func(ctx context.Context, db *sql.DB) error { return method(&Store{db: db}, ctx) }
 }
 
-func openStoreMode(ctx context.Context, path string, create, migrate bool) (*Store, error) {
-	target := 0
-	if migrate {
-		target = 4
-	}
-	return openStoreOptions(ctx, path, create, target)
-}
-func openStoreMigration(ctx context.Context, path string, target int) (*Store, error) {
-	return openStoreOptions(ctx, path, false, target)
-}
-func openStoreOptions(ctx context.Context, path string, create bool, migrate int) (*Store, error) {
-	if ctx == nil || strings.TrimSpace(path) == "" || path == ":memory:" {
-		return nil, kernel.ErrInvalidInput
-	}
-	abs, err := filepath.Abs(path)
+func openKernel(ctx context.Context, path string, setup profile.Setup) (*Store, error) {
+	db, err := profile.OpenExisting(ctx, path, setup)
 	if err != nil {
 		return nil, err
 	}
-	if err = validatePrivateDirectory(filepath.Dir(abs)); err != nil {
-		return nil, err
-	}
-	if !create {
-		// Existing sidecars must be private before SQLite reads them.
-		for _, suffix := range []string{"-wal", "-shm"} {
-			if err = validateOptionalPrivateFile(abs + suffix); err != nil {
-				return nil, err
-			}
-		}
-	}
-	if err = validatePrivateFile(abs); err != nil {
-		return nil, err
-	}
-	// mode=rw prevents SQLite's normal implicit file creation on reopen.
-	uriPath := filepath.ToSlash(abs)
-	if !strings.HasPrefix(uriPath, "/") {
-		// Windows drive letters belong to the URI path, not its authority.
-		uriPath = "/" + uriPath
-	}
-	u := url.URL{Scheme: "file", Path: uriPath}
-	params := url.Values{}
-	params.Set("mode", "rw")
-	params.Add("_pragma", "foreign_keys(ON)")
-	// A native busy handler may outlive cancellation; bound lock waiting.
-	params.Add("_pragma", "busy_timeout(500)")
-	params.Add("_pragma", "synchronous(FULL)")
-	params.Set("_txlock", "immediate")
-	u.RawQuery = params.Encode()
-	db, err := sql.Open("sqlite", u.String())
-	if err != nil {
-		return nil, err
-	}
-	db.SetMaxOpenConns(1)
-	store := &Store{db: db}
-	switch migrate {
-	case 4:
-		err = store.migrateV3ToV4(ctx)
-	case 5:
-		err = store.migrateV4ToV5(ctx)
-	case 6:
-		err = store.migrateV5ToV6(ctx)
-	case 7:
-		err = store.migrateV6ToV7(ctx)
-	case 8:
-		err = store.migrateV7ToV8(ctx)
-	default:
-		err = store.initialize(ctx, create)
-	}
-	if err != nil {
-		_ = db.Close()
-		return nil, err
-	}
-	for _, suffix := range []string{"-wal", "-shm"} {
-		if err = validateOptionalPrivateFile(abs + suffix); err != nil {
-			_ = db.Close()
-			return nil, err
-		}
-	}
-	return store, nil
-}
-
-func validatePrivateDirectory(path string) error {
-	info, err := os.Lstat(path)
-	if err != nil {
-		return fmt.Errorf("SQLite Profile directory: %w", err)
-	}
-	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("%w: Profile directory is not a real directory", ErrInsecurePath)
-	}
-	return validateProfilePermissions(path, info)
-}
-func validatePrivateFile(path string) error {
-	info, err := os.Lstat(path)
-	if err != nil {
-		return err
-	}
-	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("%w: SQLite file is not a regular file: %s", ErrInsecurePath, path)
-	}
-	return validateProfilePermissions(path, info)
-}
-func validateOptionalPrivateFile(path string) error {
-	if err := validatePrivateFile(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	return nil
+	return &Store{db: db}, nil
 }
 
 // Close releases this adapter's database connection; the OS owns checkpoint

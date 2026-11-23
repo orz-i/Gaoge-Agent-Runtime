@@ -25,7 +25,7 @@ func schemaV5DDL() []string {
 // MigrateV5ToV6 is explicit: stop old writers and retain a backup first.
 // It preserves all original marks/completions and creates no retirement fact.
 func MigrateV5ToV6(ctx context.Context, path string) error {
-	s, e := openStoreMigration(ctx, path, 6)
+	s, e := openKernel(ctx, path, kernelSetup((*Store).migrateV5ToV6))
 	if e != nil {
 		return e
 	}

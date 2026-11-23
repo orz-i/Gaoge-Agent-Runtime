@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/internal/testprofile"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/profile/testprofile"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
@@ -20,7 +20,7 @@ func TestOpenStoreEscapedAbsolutePath(t *testing.T) {
 	}
 	// Initialize an unpublished staging database, as CreateNew does. This
 	// isolates URI handling from its separate directory-fsync requirement.
-	store, err := openStore(t.Context(), path, true)
+	store, err := openKernel(t.Context(), path, initializeNew)
 	if err != nil {
 		t.Fatal(err)
 	}
