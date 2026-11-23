@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	ncruces "github.com/ncruces/go-sqlite3"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/profile"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	sqlite3 "modernc.org/sqlite"
@@ -36,16 +37,22 @@ func Open(ctx context.Context, path string) (*Store, error) { return OpenExistin
 
 // OpenExisting opens a previously initialized, private database only.
 func OpenExisting(ctx context.Context, path string) (*Store, error) {
-	return openKernel(ctx, path, validateExisting)
+	return OpenExistingWith(ctx, path, nil)
+}
+
+// OpenExistingWith validates a Kernel database through the chosen connection.
+func OpenExistingWith(ctx context.Context, path string, open profile.OpenConnection) (*Store, error) {
+	return kernelStore(open.OpenExisting(ctx, path, validateExisting))
 }
 
 // CreateNew atomically publishes a fully initialized, private Kernel database.
 func CreateNew(ctx context.Context, path string) (*Store, error) {
-	db, err := profile.CreateNew(ctx, path, initializeNew, validateExisting)
-	if err != nil {
-		return nil, err
-	}
-	return &Store{db: db}, nil
+	return CreateNewWith(ctx, path, nil)
+}
+
+// CreateNewWith enrolls a Kernel database through the chosen connection.
+func CreateNewWith(ctx context.Context, path string, open profile.OpenConnection) (*Store, error) {
+	return kernelStore(open.CreateNew(ctx, path, initializeNew, validateExisting))
 }
 
 func initializeNew(ctx context.Context, db *sql.DB) error {
@@ -60,7 +67,10 @@ func kernelSetup(method func(*Store, context.Context) error) profile.Setup {
 }
 
 func openKernel(ctx context.Context, path string, setup profile.Setup) (*Store, error) {
-	db, err := profile.OpenExisting(ctx, path, setup)
+	return kernelStore(profile.OpenExisting(ctx, path, setup))
+}
+
+func kernelStore(db *sql.DB, err error) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
@@ -249,6 +259,14 @@ func errorCode(err error) int {
 	var se *sqlite3.Error
 	if errors.As(err, &se) {
 		return se.Code()
+	}
+	var extended ncruces.ExtendedErrorCode
+	if errors.As(err, &extended) {
+		return int(extended)
+	}
+	var code ncruces.ErrorCode
+	if errors.As(err, &code) {
+		return int(code)
 	}
 	return 0
 }
