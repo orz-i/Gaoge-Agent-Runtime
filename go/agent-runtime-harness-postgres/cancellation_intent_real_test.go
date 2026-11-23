@@ -1,6 +1,8 @@
 package harnesspostgres_test
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/url"
@@ -59,11 +61,21 @@ func TestRealPostgresCancellationFenceAcrossConnections(t *testing.T) {
 	if _, fresh, err := first.AppendItem(t.Context(), intent); err != nil || !fresh {
 		t.Fatalf("persist intent: fresh=%v err=%v", fresh, err)
 	}
+	// The cancellation fence must reject a structurally valid original Agent
+	// admission. An absent Input/InputHash now fails earlier at the shared
+	// Store identity gate and would not exercise the cross-process fence at all.
+	input := json.RawMessage(`{"goal":"original late child"}`)
+	digest := sha256.Sum256(input)
 	late := harness.Invocation{
 		ID: "pg_fence_late_child", TurnID: turn.ID, ParentItemID: "parent_item",
-		ExecutionRefID: "pg_fence_child",
-		Status:         harness.InvocationAccepted, Attempt: 1, Revision: 1, OutputRefs: []harness.HostRef{},
+		Input: input, InputHash: hex.EncodeToString(digest[:]), ExecutionRefID: "pg_fence_child",
+		Status: harness.InvocationAccepted, Attempt: 1, Revision: 1, OutputRefs: []harness.HostRef{},
 		CreatedAt: now, UpdatedAt: now,
+	}
+	invalid := late
+	invalid.Input, invalid.InputHash = nil, ""
+	if _, _, err = second.CreateInvocation(t.Context(), invalid); !errors.Is(err, harness.ErrInvalidRequest) {
+		t.Fatalf("invalid original Input passed strict Agent admission: %v", err)
 	}
 	if _, _, err = second.CreateInvocation(t.Context(), late); !errors.Is(err, harness.ErrConflict) {
 		t.Fatalf("remote admission crossed committed cancellation fence: %v", err)
