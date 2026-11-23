@@ -9,6 +9,7 @@ import (
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
@@ -28,6 +29,9 @@ func TestAgentSessionReopenCannotChangeOriginalToolPolicyBeforeApproval(t *testi
 			o.LocalTools[0].Policy.ApprovalCapability = ""
 		}, false},
 		{"side-effect-drift", func(o *harness.AgentSessionOptions) { o.LocalTools[0].Policy.SideEffectLevel = "read" }, false},
+		{"budget-added-on-reopen", func(o *harness.AgentSessionOptions) {
+			o.Session.Config.SharedBudget = &budget.Limits{MaxLLMCalls: 3}
+		}, false},
 		{"definition-fingerprint", func(o *harness.AgentSessionOptions) {
 			o.LocalTools[0].Registration.Definition.Name = "new_tool_definition"
 		}, true},

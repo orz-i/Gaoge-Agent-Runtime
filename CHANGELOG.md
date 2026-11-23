@@ -18,6 +18,8 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
   continuation, excludes approval-required reads from exploration, and bounds
   `read_skill` output to the original Context tool-result byte limit with exact
   Unicode pagination and strict, zero-offset-friendly input validation.
+  Reopened Sessions also compare the resolved original Budget/topology policy;
+  inserting an extra Budget middleware cannot change an admitted Run.
 
 - **Agent-only Session/Invocation convergence.** Frozen Skills, per-call Tool
   approval and explicitly Host-authorized SubAgent routing use one standard

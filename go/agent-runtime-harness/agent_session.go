@@ -430,6 +430,18 @@ func (session *SessionClient) preflightAgentSessionResume(ctx context.Context, t
 	// run an old checkpoint with changed approval, side-effect, or version
 	// semantics. This includes private member Tool grants, not only root Tools.
 	// Read-only Session operations remain available for safe inspection.
+	// Reconstruct the same pure Host execution-policy resolution used at
+	// original Turn admission. A reopened handle cannot silently change a
+	// physical Budget participant, its resolved ceilings or delegation depth.
+	current, err := session.runner.resolveConfigExecutionPolicy(session.config)
+	if err != nil {
+		return err
+	}
+	if (config.SharedBudget == nil) != (current.SharedBudget == nil) ||
+		(config.SharedBudget != nil && *config.SharedBudget != *current.SharedBudget) ||
+		config.DelegationPolicy.MaxDepth != current.DelegationPolicy.MaxDepth {
+		return ErrInvalidRequest
+	}
 	if !slices.Equal(config.ToolKeys, session.config.ToolKeys) ||
 		!slices.Equal(config.ToolPolicies, session.config.ToolPolicies) ||
 		!slices.Equal(config.DelegationPolicy.LocalToolGrants, session.config.DelegationPolicy.LocalToolGrants) {

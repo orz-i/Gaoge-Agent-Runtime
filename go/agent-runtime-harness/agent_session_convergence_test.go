@@ -265,6 +265,28 @@ func TestAgentSessionSharedBudgetAccountsOriginalModelAndToolEffects(t *testing.
 	if _, err := unsafe.Resume(t.Context(), "budget-1"); !errors.Is(err, harness.ErrInvalidRequest) {
 		t.Fatalf("unmetered handle resumed metered original: %v", err)
 	}
+	for _, tc := range []struct {
+		name   string
+		mutate func(*harness.AgentSessionOptions)
+	}{
+		{"original shared limit changed", func(o *harness.AgentSessionOptions) {
+			copy := *o.Session.Config.SharedBudget
+			copy.MaxLLMCalls++
+			o.Session.Config.SharedBudget = &copy
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			changed := options
+			tc.mutate(&changed)
+			other, err := harness.OpenAgentSession(changed)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := other.Resume(t.Context(), "budget-1"); !errors.Is(err, harness.ErrInvalidRequest) || calls != 1 || len(client.requests) != 2 {
+				t.Fatalf("changed physical Budget topology continued original Run: err=%v tools=%d models=%d", err, calls, len(client.requests))
+			}
+		})
+	}
 }
 
 // A specialist's selected Tool is available to exactly that Host-authorized

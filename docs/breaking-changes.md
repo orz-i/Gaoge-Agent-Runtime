@@ -29,8 +29,11 @@ side-effect policy or member grant cannot run the old Attempt. The Agent's
 pending Tool catalog fingerprint separately fences in-place schema/name drift.
 Selected Skills use the frozen Context `MaxToolResultBytes` for actual page size
 and accept explicit zero offsets without granting a general archive reader.
-Approval-gated read Tools cannot join autonomous exploration. These changes add no new SQL columns or run states; the prior
-Harness SQLite Schema v2 and checked PostgreSQL cutover still apply.
+Approval-gated read Tools cannot join autonomous exploration. The original
+resolved SharedBudget presence/limits and delegation depth are also checked
+against each reopened Session, reusing Harness's original pure execution-policy
+resolver. These changes add no new SQL columns or run states; Harness SQLite
+Schema v2 and the checked PostgreSQL cutover still apply.
 
 ## 2026-11-23 — Agent-only Harness Invocation / unified Session
 

@@ -116,6 +116,10 @@ Missing authoritative metering is rejected before Provider dispatch. The
 built-in first-party `BoundedBudgetAdapter` accounts the root, local specialist
 and Tools against **one frozen Ledger**; an external Handoff runner is rejected
 with SharedBudget because it cannot prove shared token/tool accounting.
+On reopen, Runtime compares the **resolved original** shared-budget and
+Host deployment topology policy to the current handle, rather than only
+checking whether a ledger exists. Adding a meter to an originally unmetered
+Run, removing one, or changing frozen limits cannot silently resume it.
 `SharedBudget` remains incompatible with `Context.ManagedRecovery`,
 `Context.SummaryNativeRecovery` and the optional WorkingStateSummary lifecycle
 until they share one original-effect settlement protocol.
