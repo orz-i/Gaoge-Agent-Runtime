@@ -11,16 +11,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/internal/testprofile"
+
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
 func ownedPrivatePath(t *testing.T, name string) string {
 	t.Helper()
-	dir := t.TempDir()
-	if err := os.Chmod(dir, 0700); err != nil {
-		t.Fatal(err)
-	}
-	return filepath.Join(dir, name)
+	return filepath.Join(testprofile.Dir(t), name)
 }
 func TestOwnedSchemaMigrationPreservesOriginalGrants(t *testing.T) {
 	path := ownedPrivatePath(t, "legacy.sqlite")

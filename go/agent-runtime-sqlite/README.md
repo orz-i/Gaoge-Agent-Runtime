@@ -28,6 +28,20 @@ go run ./examples/embedded -init -db /tmp/gaoge-stage1-profile/runtime.sqlite
 go run ./examples/embedded -db /tmp/gaoge-stage1-profile/runtime.sqlite
 ```
 
+On Windows, run the example from the repository root using PowerShell 7.
+Choose a new directory on local NTFS under the current user's profile.
+
+```powershell
+$dir = Join-Path $env:LOCALAPPDATA 'GaogeRuntimeProfile'
+$sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+$acl = [Security.AccessControl.DirectorySecurity]::new()
+$acl.SetSecurityDescriptorSddlForm("D:P(A;OICI;FA;;;$sid)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)")
+[IO.FileSystemAclExtensions]::Create([IO.DirectoryInfo]::new($dir), $acl)
+$db = Join-Path $dir 'runtime.sqlite'
+go run ./go/agent-runtime-sqlite/examples/embedded -init -db $db
+go run ./go/agent-runtime-sqlite/examples/embedded -db $db
+```
+
 The example uses a deterministic fixture Model, persists an Agent Run and
 opens the same SQLite database from a new Store connection. `-init` fails
 if the database path already exists; without it, missing databases fail
@@ -104,31 +118,28 @@ SQLite transaction**. The adapter uses `WAL`, `foreign_keys=ON`,
 `synchronous=FULL`, a bounded 500 ms `busy_timeout`, a single open DB
 connection and `_txlock=immediate` for Store transactions.
 
-**File safety:** the direct parent Profile directory must be an actual
-private `0700` directory, and the database and any WAL/SHM files must
-be regular, private `0600` files on Unix-like systems; directory/file
-symlinks, orphan destination WAL/SHM, and permissive modes fail closed.
-Windows ACL support is not certified by these POSIX checks. Hosts must
-provide encryption and OS-protected secrets where required; POSIX
-permissions are not database encryption.
-
-File URI construction handles Windows drive letters and escaped filename
-characters, but Windows is still not a certified publication target.
-`CreateNew` requires parent-directory sync after publication; a platform that
-cannot sync directories returns the existing uncertain-publication error.
-Do not bypass that error or replace the published database to claim Windows
-durability support.
+**File safety.** Use a profile in an account-controlled location. On Unix-like
+systems the direct parent is a private `0700` directory and the database and
+its WAL/SHM are regular private `0600` files. On Windows the directory and
+these files must have a trusted owner and a DACL that limits grants to the
+effective user, LocalSystem and local Administrators. Owner-relative rules
+are accepted for the trusted owner. The directory must pass private access
+to new files so future WAL/SHM files inherit it. The adapter rejects
+unrecognized ACE types, reparse points and orphan destination WAL/SHM.
+The host provisions the directory and owns encryption and OS-protected secrets.
 
 `CreateNew` initializes a uniquely named private temporary database,
 closes/checkpoints it, then publishes the completed main file via a
 **no-overwrite hard link** in the same directory. A failed or cancelled
 initialization cannot publish a version-0 database at the requested
 path. Hard-link support is required for this desktop prototype.
+On Windows the adapter flushes the parent using a writable directory handle
+after linking. A flush error reports uncertain publication.
 Unexpected process termination during initialization may leave private
 `.init-*` staging files; these are not published databases and do not
 block a subsequent explicit CreateNew. Do not delete unknown files
-indiscriminately. If an error occurs *after* successful publication,
-inspect/reopen the existing path rather than attempting to overwrite it.
+indiscriminately. If publication is uncertain, keep the original file and
+use `OpenExisting` to recover it.
 
 **Schema (unreleased beta.24 hard cut):** the current experimental
 Profile database is **Schema v3** (`PRAGMA user_version=3`). Earlier

@@ -5,6 +5,11 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- **Windows SQLite profiles.** `CreateNew` flushes the publication directory
+  through a writable native handle. Create and reopen verify the owner and
+  private access rules for the directory, database and WAL/SHM. See the
+  [Windows enrollment example](go/agent-runtime-sqlite/README.md#minimal-desktop-example).
+
 - **Exact Context archive numbers:** Preserve original JSON number literals in
   new archives and reject ambiguous JSON. Only archives that need the new
   representation use a versioned encoding; compatible and previously stored

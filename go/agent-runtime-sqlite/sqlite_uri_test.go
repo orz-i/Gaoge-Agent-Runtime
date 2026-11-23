@@ -6,16 +6,14 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/internal/testprofile"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
 func TestOpenStoreEscapedAbsolutePath(t *testing.T) {
 	// On Windows this absolute path includes a drive letter. Spaces, # and %
 	// must remain filename characters rather than changing the SQLite URI.
-	dir := t.TempDir()
-	if err := os.Chmod(dir, 0700); err != nil {
-		t.Fatal(err)
-	}
+	dir := testprofile.Dir(t)
 	path := filepath.Join(dir, "runtime #100%.sqlite")
 	if err := os.WriteFile(path, nil, 0600); err != nil {
 		t.Fatal(err)

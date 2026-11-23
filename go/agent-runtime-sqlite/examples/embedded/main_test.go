@@ -3,18 +3,15 @@ package main
 import (
 	"context"
 	"database/sql"
-	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/internal/testprofile"
 	_ "modernc.org/sqlite"
 )
 
 func TestEmbeddedExamplePersistsAndReopens(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "private-profile")
-	if err := os.Mkdir(dir, 0700); err != nil {
-		t.Fatal(err)
-	}
+	dir := testprofile.Dir(t)
 	path := filepath.Join(dir, "example.sqlite")
 	if err := run(context.Background(), path, true); err != nil {
 		t.Fatal(err)
