@@ -75,6 +75,12 @@ The SQLite `Store` owns closing the shared connection. It preserves the existing
 Checkpoint semantics. The existing Agent `StartRun` emits an initial
 durable wakeup, which is stored atomically with the Run.
 
+## Encrypted desktop profiles
+
+For a keyed database, pass `encrypted.WithKey(&key)` to `CreateNewWith` and `OpenExistingWith`. Import `go/agent-runtime-sqlite/profile/encrypted` from this module cohort. The host supplies a distinct 32-byte key for each database and keeps it available until the pool closes. The same connection opens the unpublished file, checkpointed database and subsequent pooled connections. The SQLite VFS encrypts database pages, rollback journals, WAL and disk-backed temporary data. The shared-memory WAL index contains coordination metadata. [Adiantum VFS](https://github.com/ncruces/go-sqlite3/tree/v0.38.0/vfs/adiantum)
+
+A key for another database fails on the first schema read. Use explicit enrollment in a new private directory when switching from the plain format. Run `go test -count=1 -v ./go/agent-runtime-sqlite/profile/encrypted` from the checkout to exercise staging, recovery, and a file-backed temporary table with a read below the encryption layer.
+
 ## What is stored
 
 The database is a **dedicated application Profile file**. The caller
