@@ -69,6 +69,14 @@ func (runner *Runner) GrantCallAllowance(
 	if err = runner.requireFrozenAdmission(ctx, turn); err != nil {
 		return Snapshot{}, err
 	}
+	if _, native := runner.agent.(*agent.Runner); native {
+		var grantID string
+		ctx, grantID, err = kernel.NewAllowanceDispatch(ctx, current)
+		if err != nil {
+			return Snapshot{}, err
+		}
+		ctx = context.WithValue(ctx, allowanceGrantKey{}, grantID)
+	}
 	resumed, err := runner.withPhysicalInvocationDispatch(ctx, invocation, "grant-call-allowance", func(physicalCtx context.Context) (kernel.Snapshot, error) {
 		return grant.GrantCallAllowance(physicalCtx, current.Run.ID, current.Run.Revision, increment)
 	})
