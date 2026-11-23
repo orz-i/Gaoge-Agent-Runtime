@@ -161,6 +161,10 @@ func OpenExisting(ctx context.Context, path string, validate Setup) (*sql.DB, er
 	u := url.URL{Scheme: "file", Path: uriPath}
 	params := url.Values{}
 	params.Set("mode", "rw")
+	// Harness orders DATETIME columns by instant, then ID. A canonical UTC
+	// encoding also reads back times supplied with arbitrary host zone names.
+	params.Set("_timezone", "UTC")
+	params.Set("_time_format", "sqlite")
 	params.Add("_pragma", "foreign_keys(ON)")
 	// A native busy handler may outlive cancellation; bound lock waiting.
 	params.Add("_pragma", "busy_timeout(500)")

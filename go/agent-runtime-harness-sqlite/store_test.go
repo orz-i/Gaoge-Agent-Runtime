@@ -141,3 +141,34 @@ func TestBudgetReplaysOriginalSettlementAfterReopen(t *testing.T) {
 		t.Fatalf("durable settlement: %+v %v", ledger, err)
 	}
 }
+
+func TestInvocationOrderUsesInstantsAcrossTimeZones(t *testing.T) {
+	path, host := newHost(t)
+	base := time.Date(2026, 11, 23, 8, 0, 0, 0, time.UTC)
+	east := time.FixedZone("east", 8*3600)
+	west := time.FixedZone("west", -8*3600)
+	for _, stamp := range []struct {
+		id string
+		at time.Time
+	}{
+		{"later", base.Add(time.Nanosecond).In(west)}, {"tie-b", base.In(east)}, {"tie-a", base.In(west)},
+	} {
+		inv := harness.Invocation{ID: stamp.id, TurnID: "ordered", ParentItemID: "parent", CapabilityKey: harness.CapabilityAgent, ExecutionClass: harness.ExecutionAgent, ExecutionRefID: "run-" + stamp.id, Status: harness.InvocationAccepted, Attempt: 1, Revision: 1, CreatedAt: stamp.at, UpdatedAt: stamp.at}
+		if _, _, err := host.CreateInvocation(t.Context(), inv); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := host.Close(); err != nil {
+		t.Fatal(err)
+	}
+	host = reopenHost(t, path)
+	items, err := host.ListInvocations(t.Context(), "ordered")
+	if err != nil || len(items) != 3 {
+		t.Fatalf("ordered invocations: %+v %v", items, err)
+	}
+	for index, want := range []string{"tie-a", "tie-b", "later"} {
+		if items[index].ID != want {
+			t.Fatalf("position %d got %s, want %s", index, items[index].ID, want)
+		}
+	}
+}
