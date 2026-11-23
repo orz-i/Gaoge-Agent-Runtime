@@ -14,7 +14,7 @@ func TestIssue107TerminalPhysicalSettlementStateMatrix(t *testing.T) {
 	}}}
 	makeSnapshot := func(status kernel.RunStatus, state runState) kernel.Snapshot {
 		t.Helper()
-		encoded, err := json.Marshal(state)
+		encoded, err := encodeState(state)
 		if err != nil {
 			t.Fatal(err)
 		}

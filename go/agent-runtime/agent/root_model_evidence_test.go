@@ -78,6 +78,10 @@ func TestRootUnknownHostRetainsExactModelEvidenceWithoutConsumption(t *testing.T
 	}
 	delete(oldState, "modelInvocations")
 	delete(newState, "modelInvocations")
+	// This private seal correctly changes when the completed Model receipt
+	// changes; compare the remaining domain State separately from its seal.
+	delete(oldState, "_originalStateEvidence")
+	delete(newState, "_originalStateEvidence")
 	if !reflect.DeepEqual(oldState, newState) {
 		t.Fatal("evidence changed messages/budget/tools/deferred/approval")
 	}

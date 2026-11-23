@@ -317,6 +317,11 @@ func assertRootReceiptEvidenceOnly(t *testing.T, runtime *kernel.Runtime, before
 	}
 	delete(left, "modelInvocations")
 	delete(right, "modelInvocations")
+	// The immutable State-evidence seal follows the completed original Model
+	// receipt and must change with that receipt. Its distinct authenticity
+	// checks remain in Agent; all unrelated execution fields are compared.
+	delete(left, "_originalStateEvidence")
+	delete(right, "_originalStateEvidence")
 	if !reflect.DeepEqual(left, right) || !reflect.DeepEqual(before.Checkpoint, after.Checkpoint) || !reflect.DeepEqual(before.Result, after.Result) {
 		t.Fatal("receipt-only changed messages/budget/tool/deferred/control state")
 	}

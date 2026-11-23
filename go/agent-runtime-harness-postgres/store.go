@@ -1104,7 +1104,7 @@ func validateContextCheckpointReferencesTx(tx *gorm.DB, value runtimecontext.Che
 }
 
 func contextCheckpointToRecord(value runtimecontext.Checkpoint) (contextCheckpointRecord, error) {
-	payload, err := json.Marshal(value)
+	payload, err := marshalCheckpointStorage(value)
 	if err != nil {
 		return contextCheckpointRecord{}, err
 	}
@@ -1112,7 +1112,7 @@ func contextCheckpointToRecord(value runtimecontext.Checkpoint) (contextCheckpoi
 		ID: value.ID, ScopeID: value.ScopeID, Generation: value.Generation, Revision: value.Revision,
 		StaticFingerprint: value.StaticFingerprint, CoveredThroughSourceID: value.CoveredThroughSourceID,
 		CoveredPathHash: value.CoveredPathHash, SourceAligned: runtimecontext.SourceAlignedCheckpoint(value),
-		PayloadJSON: string(payload),
+		PayloadJSON: payload,
 	}, nil
 }
 
@@ -1404,9 +1404,8 @@ func commitContextTurnTx(
 }
 
 func contextCheckpointFromRecord(record contextCheckpointRecord) (runtimecontext.Checkpoint, error) {
-	var value runtimecontext.Checkpoint
-	if err := json.Unmarshal([]byte(record.PayloadJSON), &value); err != nil ||
-		value.ID != record.ID || value.ScopeID != record.ScopeID || value.Generation != record.Generation ||
+	value, err := unmarshalCheckpointStorage(record.PayloadJSON)
+	if err != nil || value.ID != record.ID || value.ScopeID != record.ScopeID || value.Generation != record.Generation ||
 		value.Revision != record.Revision || value.StaticFingerprint != record.StaticFingerprint ||
 		value.CoveredThroughSourceID != record.CoveredThroughSourceID || value.CoveredPathHash != record.CoveredPathHash ||
 		runtimecontext.SourceAlignedCheckpoint(value) != record.SourceAligned || !runtimecontext.ValidCheckpoint(value) {

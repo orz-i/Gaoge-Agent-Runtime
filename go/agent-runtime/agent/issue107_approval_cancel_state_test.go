@@ -28,7 +28,7 @@ func TestIssue107ApprovalCancellationProofStateMatrix(t *testing.T) {
 	base := runState{PendingCalls: []tools.Call{call}, PendingApproval: binding, Budget: budget.Snapshot{Limits: budget.Limits{MaxLLMCalls: 4, MaxToolCalls: 4}}}
 	makeSnapshot := func(state runState) kernel.Snapshot {
 		t.Helper()
-		encoded, err := json.Marshal(state)
+		encoded, err := encodeState(state)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -56,7 +56,7 @@ func TestIssue107ApprovalCancellationProofStateMatrix(t *testing.T) {
 				t.Fatal(err)
 			}
 			st.ModelInvocations = []ModelInvocation{{ID: "model", Status: ModelInvocationPending}}
-			s.State, _ = json.Marshal(st)
+			s.State, _ = encodeState(st)
 		},
 		"completed but unconsumed Model": func(s *kernel.Snapshot) {
 			var st runState
@@ -64,7 +64,7 @@ func TestIssue107ApprovalCancellationProofStateMatrix(t *testing.T) {
 				t.Fatal(err)
 			}
 			st.ModelInvocations = []ModelInvocation{{ID: "model", Status: ModelInvocationCompleted}}
-			s.State, _ = json.Marshal(st)
+			s.State, _ = encodeState(st)
 		},
 		"unresolved Tool dispatch": func(s *kernel.Snapshot) {
 			var st runState
@@ -72,7 +72,7 @@ func TestIssue107ApprovalCancellationProofStateMatrix(t *testing.T) {
 				t.Fatal(err)
 			}
 			st.ToolDispatchID = "committed-external-effect"
-			s.State, _ = json.Marshal(st)
+			s.State, _ = encodeState(st)
 		},
 		"pending remote Tool": func(s *kernel.Snapshot) {
 			var st runState
@@ -80,7 +80,7 @@ func TestIssue107ApprovalCancellationProofStateMatrix(t *testing.T) {
 				t.Fatal(err)
 			}
 			st.ToolWait = &PendingTool{}
-			s.State, _ = json.Marshal(st)
+			s.State, _ = encodeState(st)
 		},
 		"no approval binding": func(s *kernel.Snapshot) {
 			var st runState
@@ -88,7 +88,7 @@ func TestIssue107ApprovalCancellationProofStateMatrix(t *testing.T) {
 				t.Fatal(err)
 			}
 			st.PendingApproval = nil
-			s.State, _ = json.Marshal(st)
+			s.State, _ = encodeState(st)
 		},
 		"no pending call": func(s *kernel.Snapshot) {
 			var st runState
@@ -96,7 +96,7 @@ func TestIssue107ApprovalCancellationProofStateMatrix(t *testing.T) {
 				t.Fatal(err)
 			}
 			st.PendingCalls = nil
-			s.State, _ = json.Marshal(st)
+			s.State, _ = encodeState(st)
 		},
 		"replaced Tool args": func(s *kernel.Snapshot) {
 			var st runState
@@ -104,7 +104,7 @@ func TestIssue107ApprovalCancellationProofStateMatrix(t *testing.T) {
 				t.Fatal(err)
 			}
 			st.PendingCalls[0].Arguments = json.RawMessage(`{"changed":true}`)
-			s.State, _ = json.Marshal(st)
+			s.State, _ = encodeState(st)
 		},
 		"invalid state": func(s *kernel.Snapshot) { s.State = json.RawMessage(`{`) },
 	}

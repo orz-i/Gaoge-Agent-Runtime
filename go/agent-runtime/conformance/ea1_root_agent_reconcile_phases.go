@@ -234,6 +234,11 @@ func ea1RootReconcilePhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 		}
 		delete(oldState, "modelInvocations")
 		delete(newState, "modelInvocations")
+		// The private State seal must follow the original ModelInvocation
+		// receipt. Compare the remaining Agent fields without treating that
+		// expected seal revision as unrelated execution state.
+		delete(oldState, "_originalStateEvidence")
+		delete(newState, "_originalStateEvidence")
 		if !ea1RecoveryJSONEqual(oldState, newState) || !ea1RecoveryJSONEqual(evidence.Checkpoint, before.Checkpoint) || evidence.Run.Status != before.Run.Status || evidence.Run.ErrorCode != before.Run.ErrorCode || evidence.Run.ErrorDetail != before.Run.ErrorDetail {
 			t.Fatal("evidence consumed or changed other state")
 		}

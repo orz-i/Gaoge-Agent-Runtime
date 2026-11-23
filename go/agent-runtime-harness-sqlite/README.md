@@ -35,7 +35,12 @@ Invocation, original dispatch, response receipts and budget reservations.
 
 ## Persistence and recovery
 
-Schema v3 uses application ID `GAHS`. Creation initializes and checkpoints a
+Schema v3 uses application ID `GAHS`. The new pre-stable Harness Store
+Checkpoint payload is `checkpoint-opaque-v1`, preserving original Tool-call
+arguments and Provider Replay bytes across close/reopen and duplicate writes.
+It cannot interpret older Checkpoint payloads; start with a fresh profile and
+do not mix writers from different beta.24 source revisions. The SQL table and
+index definitions remain unchanged. Creation initializes and checkpoints a
 temporary database before atomically publishing it without overwrite. Reopen
 checks the application ID, version, WAL mode, exact table and index definitions,
 and the original managed recovery authority. A missing or damaged profile
