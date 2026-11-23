@@ -53,7 +53,7 @@ func validApplyOperation(id string, expectedRevision uint64) bool {
 
 func hasReservedApplyEvidence(events []EventDraft) bool {
 	for _, event := range events {
-		if event.Type == identifiedApplyEventType {
+		if event.Type == identifiedApplyEventType || event.Type == allowanceDispatchEvent {
 			return true
 		}
 	}
@@ -65,7 +65,7 @@ func digestApplyMutation(m Mutation) (string, error) {
 	// affects durable delivery. Include it in the signature explicitly.
 	flags := make([]bool, len(m.Events))
 	for i := range m.Events {
-		if m.Events[i].Type == identifiedApplyEventType {
+		if m.Events[i].Type == identifiedApplyEventType || m.Events[i].Type == allowanceDispatchEvent {
 			return "", ErrInvalidInput
 		}
 		flags[i] = m.Events[i].Wakeup
