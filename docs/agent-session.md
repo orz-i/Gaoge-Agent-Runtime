@@ -33,10 +33,10 @@ session, err := harness.OpenAgentSession(harness.AgentSessionOptions{
         Actor: actor,
         Thread: thread,
         Transcript: transcript,
-        Config: harness.ConfigSnapshot{
+        Config: harness.ConfigSnapshot{AgentSpec: harness.AgentSpec{
             Model: selectedModel,
             MaxModelOutputTokens: 1024,
-        },
+        }},
     },
     Context: harness.AgentSessionContextOptions{
         ResolveWindow: resolveWindow,
@@ -44,6 +44,14 @@ session, err := harness.OpenAgentSession(harness.AgentSessionOptions{
     },
 })
 ```
+
+The Root and each Named Agent share one `AgentSpec`: Model, options,
+Instructions, strict output contract, selected Skills, local/hosted Tools and
+limits. A Root can select a provider Hosted Tool by giving a versioned
+`HostedToolGrants` in `Config.AgentSpec` and the matching `HostedTools` catalog
+in `AgentSessionOptions`; a Named Agent selects its own independent grants
+and `OutputContract`. Handoff freezes each member's output schema and verifies
+its original child Run on recovery. No new Runtime executor is introduced.
 
 `LocalTools` is the explicit allowlist. The constructor derives the sealed Tool
 keys and policies; do not also supply them in `Config`. Each Tool needs a

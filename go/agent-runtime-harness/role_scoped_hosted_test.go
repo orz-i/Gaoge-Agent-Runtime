@@ -156,9 +156,9 @@ func runRoleScopedHostedTool(t *testing.T, discovery bool) {
 		Thread:          kernel.ThreadRef{Kind: "conversation", ID: "thread-scoped-hosted"},
 		Goal:            "delegate research then summarize",
 		Config: harness.ConfigSnapshot{
-			Model:        "root-model",
-			ToolKeys:     keys,
-			ToolPolicies: policies,
+
+			ToolPolicies: policies, AgentSpec: harness.AgentSpec{Model: "root-model",
+				ToolKeys: keys},
 		},
 	})
 	if err != nil {

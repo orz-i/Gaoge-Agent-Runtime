@@ -86,7 +86,7 @@ func run(ctx context.Context, input io.Reader, output io.Writer, interactive boo
 			HostThread: harness.HostRef{Kind: "conversation", ID: "demo/tenant/chat"},
 			Actor:      kernel.ActorRef{TenantID: "demo-tenant", ActorID: "demo-user"},
 			Thread:     kernel.ThreadRef{Kind: "conversation", ID: "demo/tenant/chat"},
-			Config:     harness.ConfigSnapshot{Model: "fixture", MaxModelOutputTokens: 1024},
+			Config:     harness.ConfigSnapshot{AgentSpec: harness.AgentSpec{Model: "fixture", MaxModelOutputTokens: 1024}},
 			Transcript: harness.TranscriptHistoryFunc(func(context.Context, harness.HostRef, harness.HostRef) ([]runtimecontext.Entry, error) {
 				return runtimecontext.CloneEntries(history), nil
 			}),

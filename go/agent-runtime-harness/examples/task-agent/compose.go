@@ -239,15 +239,16 @@ func composeContextMode(store kernel.Store, state *taskState, client model.Clien
 		Thread:     kernel.ThreadRef{Kind: "conversation", ID: "task-agent/local/" + state.sampleID},
 		Transcript: transcript,
 		Config: harness.ConfigSnapshot{
-			Model:                config.routedModel(),
-			ModelOptions:         config.modelOptions(),
-			Instructions:         taskInstructionsForTreatment(config.suite, config.qualityTreatment),
-			OutputContract:       &model.OutputContract{Name: "task_answer", Schema: answerSchema},
-			MaxModelOutputTokens: config.outputTokens,
-			ToolKeys:             []string{lookupKey, harness.ContextArtifactToolKey, draftKey},
-			ToolPolicies:         taskToolPoliciesForSuite(config.suite),
-			ContextPolicy:        taskContextPolicyForSuite(config.suite),
-			Limits:               taskLimits(),
+
+			ToolPolicies:  taskToolPoliciesForSuite(config.suite),
+			ContextPolicy: taskContextPolicyForSuite(config.suite), AgentSpec: harness.AgentSpec{Model: config.routedModel(),
+				ModelOptions:         config.modelOptions(),
+				Instructions:         taskInstructionsForTreatment(config.suite, config.qualityTreatment),
+				OutputContract:       &model.OutputContract{Name: "task_answer", Schema: answerSchema},
+				MaxModelOutputTokens: config.outputTokens,
+				ToolKeys:             []string{lookupKey, harness.ContextArtifactToolKey, draftKey},
+
+				Limits: taskLimits()},
 		},
 	})
 }

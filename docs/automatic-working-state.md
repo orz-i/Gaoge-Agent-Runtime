@@ -18,8 +18,10 @@ Set a frozen summary policy alongside the original per-call output ceiling in
 session, err := harness.OpenAgentSession(harness.AgentSessionOptions{
     Runtime: runtime, Store: harnessStore, Model: modelClient,
     Session: harness.SessionOptions{Config: harness.ConfigSnapshot{
-        Model: selectedModel,
-        MaxModelOutputTokens: 1024,
+        AgentSpec: harness.AgentSpec{
+            Model: selectedModel,
+            MaxModelOutputTokens: 1024,
+        },
         WorkingStateSummary: &agent.WorkingStateSummaryPolicy{
             MaxInputTokens: 8192,
             MaxSerializedBytes: 64 << 10,

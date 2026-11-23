@@ -50,12 +50,12 @@ func TestContextV2BetaAcceptanceSurvivesApprovalCompactionAndRestart(t *testing.
 		Thread:     kernel.ThreadRef{Kind: "conversation", ID: "beta-thread"},
 		Goal:       "Use the approved lookup.",
 		Config: harness.ConfigSnapshot{
-			Instructions: "Answer from verified Tool output.", Model: "deterministic-beta-model",
-			ToolKeys: []string{betaAcceptanceToolKey},
+
 			ToolPolicies: []harness.ToolPolicySnapshot{{
 				Key: betaAcceptanceToolKey, DefinitionVersion: "v1",
 				ApprovalCapability: "per_call", ApprovalMode: "always",
-			}},
+			}}, AgentSpec: harness.AgentSpec{Instructions: "Answer from verified Tool output.", Model: "deterministic-beta-model",
+				ToolKeys: []string{betaAcceptanceToolKey}},
 		},
 		Context: seed,
 	})

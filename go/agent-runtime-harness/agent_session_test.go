@@ -45,7 +45,7 @@ func agentSessionOptions(t *testing.T, runStore kernel.Store, store harness.Stor
 			HostThread: harness.HostRef{Kind: "conversation", ID: "tenant/tool-session"},
 			Actor:      kernel.ActorRef{TenantID: "tenant", ActorID: "operator"},
 			Thread:     kernel.ThreadRef{Kind: "conversation", ID: "tenant/tool-session"},
-			Config:     harness.ConfigSnapshot{Model: "fixture", Instructions: "answer accurately", MaxModelOutputTokens: 128},
+			Config:     harness.ConfigSnapshot{AgentSpec: harness.AgentSpec{Model: "fixture", Instructions: "answer accurately", MaxModelOutputTokens: 128}},
 			Transcript: harness.TranscriptHistoryFunc(func(context.Context, harness.HostRef, harness.HostRef) ([]runtimecontext.Entry, error) {
 				return nil, nil
 			}),

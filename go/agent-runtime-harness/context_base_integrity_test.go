@@ -26,7 +26,7 @@ func TestContextBaseAgentOnlyNilSeedAdmissionAndConfigGolden(t *testing.T) {
 		Thread:     kernel.ThreadRef{Kind: "conversation", ID: "legacy-thread"},
 		RequestID:  "legacy-request", Goal: "hello", Context: seed,
 	}
-	config := ConfigSnapshot{Model: "fixture", Instructions: "static instructions", DelegationPolicy: DelegationPolicySnapshot{MaxDepth: 4}}
+	config := ConfigSnapshot{DelegationPolicy: DelegationPolicySnapshot{MaxDepth: 4}, AgentSpec: AgentSpec{Model: "fixture", Instructions: "static instructions"}}
 	normalized, err := sealStartAdmission(request, &config, rootAdmission{})
 	if err != nil {
 		t.Fatal(err)
@@ -39,11 +39,11 @@ func TestContextBaseAgentOnlyNilSeedAdmissionAndConfigGolden(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// This golden locks the current Agent-only admission hash after the
-	// breaking removal of the generic ExecutionClass field.
+	// The AgentSpec hard cut deliberately changes the private Config hash,
+	// but original Turn/Invocation admission identity remains unchanged.
 	const oldSeedJSON = `{"sourcePath":["source-1"],"instructions":"history instructions","entries":[{"id":"entry-1","turnID":"source-turn","sourceID":"source-1","required":true,"message":{"role":"user","content":[{"kind":"text","text":"hello"}]}}]}`
 	if string(seedJSON) != oldSeedJSON || sealed.AdmissionHash != "a7c7328824eb2ed3fe7cc9243f6464560db74da600595c875fb7aa426be6368c" ||
-		sealed.ContentHash != "c92c3e939132a2a1a7fac427826295acd2debfa14bc4de75496c8392f2d0e37c" || sealed.ID != "hcfg_c92c3e939132a2a1a7fac427" {
+		sealed.ContentHash != "2c13df1482a95bde1565fa901559177d2e534e8de0b4ebfacc4c5a41a80570f5" || sealed.ID != "hcfg_2c13df1482a95bde1565fa90" {
 		t.Fatalf("legacy nil fields changed admission or Config identity: seed=%s admission=%s config=%s id=%s", seedJSON, sealed.AdmissionHash, sealed.ContentHash, sealed.ID)
 	}
 	raw, err := json.Marshal(sealed)

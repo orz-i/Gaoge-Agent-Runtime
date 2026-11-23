@@ -108,11 +108,11 @@ func newReadFaultApprovalHarness(t *testing.T) (*harness.Runner, *harness.Memory
 		t.Fatal(err)
 	}
 	config := harness.ConfigSnapshot{
-		ToolKeys: []string{approvalTestToolKey},
+
 		ToolPolicies: []harness.ToolPolicySnapshot{{
 			Key: approvalTestToolKey, DefinitionVersion: "v1",
 			ApprovalCapability: approvalTestCapabilityPerCall, ApprovalMode: "always",
-		}},
+		}}, AgentSpec: harness.AgentSpec{ToolKeys: []string{approvalTestToolKey}},
 	}
 	waiting := startApprovalHarness(t, runner, config)
 	return runner, store, runtime, fault, waiting
@@ -372,11 +372,11 @@ func TestNativeAgentRunMiddlewareCannotForgeControlNoEffectProof(t *testing.T) {
 				t.Fatal(err)
 			}
 			config := harness.ConfigSnapshot{
-				ToolKeys: []string{approvalTestToolKey},
+
 				ToolPolicies: []harness.ToolPolicySnapshot{{
 					Key: approvalTestToolKey, DefinitionVersion: "v1",
 					ApprovalCapability: approvalTestCapabilityPerCall, ApprovalMode: "always",
-				}},
+				}}, AgentSpec: harness.AgentSpec{ToolKeys: []string{approvalTestToolKey}},
 			}
 			waiting := startApprovalHarness(t, runner, config)
 			owner, _ := harness.TopLevelInvocation(waiting)

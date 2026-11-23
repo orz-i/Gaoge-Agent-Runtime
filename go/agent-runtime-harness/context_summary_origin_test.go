@@ -42,7 +42,7 @@ func TestSummaryOriginAuthorizesScopeAndOwnerBeforeNativeRead(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			config, err := SealConfigSnapshot(turnID, ConfigSnapshot{MaxModelOutputTokens: 128, WorkingStateSummary: &agent.WorkingStateSummaryPolicy{MaxInputTokens: 4096, MaxSerializedBytes: 16384}}, now)
+			config, err := SealConfigSnapshot(turnID, ConfigSnapshot{WorkingStateSummary: &agent.WorkingStateSummaryPolicy{MaxInputTokens: 4096, MaxSerializedBytes: 16384}, AgentSpec: AgentSpec{MaxModelOutputTokens: 128}}, now)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -53,7 +53,7 @@ func TestSummaryOriginAuthorizesScopeAndOwnerBeforeNativeRead(t *testing.T) {
 			if _, _, err := store.CreateTurn(t.Context(), turn); err != nil {
 				t.Fatal(err)
 			}
-			root, err := newAgentInvocation(turnID, hostTurn.ID, "original goal", actor, thread, nil, nil, now)
+			root, err := newAgentInvocation(turnID, hostTurn.ID, "original goal", actor, thread, nil, nil, nil, nil, now)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -130,7 +130,7 @@ func newApprovalHarness(t *testing.T) (*harness.Runner, harness.ConfigSnapshot) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	return harnessRunner, harness.ConfigSnapshot{ToolKeys: []string{approvalTestToolKey}, ToolPolicies: []harness.ToolPolicySnapshot{{Key: approvalTestToolKey, DefinitionVersion: "v1", ApprovalCapability: approvalTestCapabilityPerCall, ApprovalMode: "always"}}}
+	return harnessRunner, harness.ConfigSnapshot{ToolPolicies: []harness.ToolPolicySnapshot{{Key: approvalTestToolKey, DefinitionVersion: "v1", ApprovalCapability: approvalTestCapabilityPerCall, ApprovalMode: "always"}}, AgentSpec: harness.AgentSpec{ToolKeys: []string{approvalTestToolKey}}}
 }
 func startApprovalHarness(t *testing.T, runner *harness.Runner, config harness.ConfigSnapshot) harness.Snapshot {
 	t.Helper()

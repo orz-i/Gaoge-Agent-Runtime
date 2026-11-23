@@ -12,7 +12,7 @@ import (
 
 func TestWorkingStateSummaryConfigSealsPolicyAndOwnsItsStorage(t *testing.T) {
 	now := time.Date(2026, 11, 20, 0, 0, 0, 0, time.UTC)
-	input := ConfigSnapshot{MaxModelOutputTokens: 128, WorkingStateSummary: &agent.WorkingStateSummaryPolicy{MaxInputTokens: 4096, MaxSerializedBytes: 16384}}
+	input := ConfigSnapshot{WorkingStateSummary: &agent.WorkingStateSummaryPolicy{MaxInputTokens: 4096, MaxSerializedBytes: 16384}, AgentSpec: AgentSpec{MaxModelOutputTokens: 128}}
 	sealed, err := SealConfigSnapshot("summary-turn", input, now)
 	if err != nil {
 		t.Fatal(err)
@@ -76,7 +76,7 @@ func TestWorkingStateSummaryConfigRejectsUnboundedAndUnsupportedCombinations(t *
 		{"shared budget", func(c *ConfigSnapshot) { c.SharedBudget = &budget.Limits{MaxLLMCalls: 4} }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			config := ConfigSnapshot{MaxModelOutputTokens: 128, WorkingStateSummary: &agent.WorkingStateSummaryPolicy{MaxInputTokens: 4096, MaxSerializedBytes: 16384}}
+			config := ConfigSnapshot{WorkingStateSummary: &agent.WorkingStateSummaryPolicy{MaxInputTokens: 4096, MaxSerializedBytes: 16384}, AgentSpec: AgentSpec{MaxModelOutputTokens: 128}}
 			tc.edit(&config)
 			if _, err := SealConfigSnapshot("summary-turn", config, time.Now()); !errors.Is(err, ErrInvalidRequest) {
 				t.Fatalf("invalid summary admission accepted: %v", err)

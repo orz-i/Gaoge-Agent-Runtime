@@ -86,12 +86,12 @@ func TestNamedAgentCarriesOwnModelToolsSkillsAndFrozenAuthorization(t *testing.T
 			addAgentSessionTool(&options, "root-only-tool", &rootOnlyCalls)
 			options.Session.Config.DelegationPolicy = harness.DelegationPolicySnapshot{MaxDepth: 1}
 			options.Session.Config.Skills = []harness.SkillSnapshot{{ID: "shared-skill", Revision: 1, Title: "root-skill", Markdown: rootSecret}}
-			options.NamedAgents = []harness.NamedAgent{
-				{MemberID: "specialist", MemberRevision: "r7", Model: "specialist-model", Instructions: "Inspect only exact evidence",
-					Skills: []harness.SkillSnapshot{{ID: "shared-skill", Revision: 7, Title: "child-skill", Markdown: childSecret}},
-					Tools: []harness.SessionTool{{Registration: agentSessionTool(privateKey, &privateCalls),
-						Policy: harness.ToolPolicySnapshot{DefinitionVersion: "v1", SideEffectLevel: "read", ApprovalMode: "never"}}}},
-				{MemberID: "other", MemberRevision: "r1", Model: "other-model", Skills: []harness.SkillSnapshot{{ID: "other-id", Revision: 1, Title: "other-skill", Markdown: otherSecret}}},
+			options.NamedAgents = []harness.NamedAgent{{MemberID: "specialist", MemberRevision: "r7",
+
+				Tools: []harness.SessionTool{{Registration: agentSessionTool(privateKey, &privateCalls),
+					Policy: harness.ToolPolicySnapshot{DefinitionVersion: "v1", SideEffectLevel: "read", ApprovalMode: "never"}}}, AgentSpec: harness.AgentSpec{Model: "specialist-model", Instructions: "Inspect only exact evidence",
+					Skills: []harness.SkillSnapshot{{ID: "shared-skill", Revision: 7, Title: "child-skill", Markdown: childSecret}}},
+			}, {MemberID: "other", MemberRevision: "r1", AgentSpec: harness.AgentSpec{Model: "other-model", Skills: []harness.SkillSnapshot{{ID: "other-id", Revision: 1, Title: "other-skill", Markdown: otherSecret}}}},
 			}
 			if shared {
 				options.Session.Config.SharedBudget = &budget.Limits{MaxLLMCalls: 8, MaxToolCalls: 4, MaxChildRuns: 1, MaxConcurrentRuns: 2}
@@ -186,10 +186,7 @@ func TestNamedAgentSkillReaderDeniesOtherMemberWithoutRootGrant(t *testing.T) {
 	}
 	options.Relations = relations
 	options.Session.Config.DelegationPolicy = harness.DelegationPolicySnapshot{MaxDepth: 1}
-	options.NamedAgents = []harness.NamedAgent{
-		{MemberID: "worker", MemberRevision: "r1", Model: "worker-model", Skills: []harness.SkillSnapshot{{ID: "worker-only", Revision: 1, Title: "worker instructions", Markdown: "permitted worker facts"}}},
-		{MemberID: "other", MemberRevision: "r1", Model: "other-model", Skills: []harness.SkillSnapshot{{ID: "other-only", Revision: 1, Title: "other instructions", Markdown: otherSecret}}},
-	}
+	options.NamedAgents = []harness.NamedAgent{{MemberID: "worker", MemberRevision: "r1", AgentSpec: harness.AgentSpec{Model: "worker-model", Skills: []harness.SkillSnapshot{{ID: "worker-only", Revision: 1, Title: "worker instructions", Markdown: "permitted worker facts"}}}}, {MemberID: "other", MemberRevision: "r1", AgentSpec: harness.AgentSpec{Model: "other-model", Skills: []harness.SkillSnapshot{{ID: "other-only", Revision: 1, Title: "other instructions", Markdown: otherSecret}}}}}
 	session, err := harness.OpenAgentSession(options)
 	if err != nil {
 		t.Fatal(err)
@@ -244,8 +241,8 @@ func TestNamedAgentHostedToolGrantUsesNativeCatalogAndModelVersion(t *testing.T)
 			options.Relations = rel
 			options.Session.Config.DelegationPolicy = harness.DelegationPolicySnapshot{MaxDepth: 1}
 			options.HostedTools = selectedNamedHostedCatalog{version: tc.actual}
-			options.NamedAgents = []harness.NamedAgent{{MemberID: "hosted", MemberRevision: "r1", Model: "hosted-specialist",
-				HostedToolGrants: []agent.HostedToolGrant{{Key: "provider.search", DefinitionVersion: "v3"}}}}
+			options.NamedAgents = []harness.NamedAgent{{MemberID: "hosted", MemberRevision: "r1", AgentSpec: harness.AgentSpec{Model: "hosted-specialist",
+				HostedToolGrants: []agent.HostedToolGrant{{Key: "provider.search", DefinitionVersion: "v3"}}}}}
 			session, err := harness.OpenAgentSession(options)
 			if err != nil {
 				t.Fatal(err)
@@ -289,8 +286,8 @@ func TestNamedAgentHostSelectionRejectsIncompleteOrConflictingAuthority(t *testi
 			}
 			options.Relations = relations
 			options.Session.Config.DelegationPolicy = harness.DelegationPolicySnapshot{MaxDepth: 1}
-			options.NamedAgents = []harness.NamedAgent{{MemberID: "worker", MemberRevision: "r1", Model: "worker-model",
-				Skills: []harness.SkillSnapshot{{ID: "worker", Revision: 1, Title: "Worker", Markdown: "original"}}}}
+			options.NamedAgents = []harness.NamedAgent{{MemberID: "worker", MemberRevision: "r1", AgentSpec: harness.AgentSpec{Model: "worker-model",
+				Skills: []harness.SkillSnapshot{{ID: "worker", Revision: 1, Title: "Worker", Markdown: "original"}}}}}
 			tc.mutate(&options)
 			if _, err := harness.OpenAgentSession(options); !errors.Is(err, harness.ErrInvalidRequest) {
 				t.Fatalf("invalid Host Agent composition admitted: %v", err)
@@ -343,9 +340,10 @@ func TestNamedAgentPrivateWriteRequiresExactChildApprovalAndOriginalHost(t *test
 	}
 	options.Relations = relations
 	options.Session.Config.DelegationPolicy = harness.DelegationPolicySnapshot{MaxDepth: 1}
-	options.NamedAgents = []harness.NamedAgent{{MemberID: "writer", MemberRevision: "r1", Model: "writer-model",
+	options.NamedAgents = []harness.NamedAgent{{MemberID: "writer", MemberRevision: "r1",
 		Tools: []harness.SessionTool{{Registration: agentSessionTool(privateWrite, &writeCalls),
-			Policy: harness.ToolPolicySnapshot{DefinitionVersion: "v1", SideEffectLevel: "write", ApprovalMode: "always", ApprovalCapability: "per_call"}}}}}
+			Policy: harness.ToolPolicySnapshot{DefinitionVersion: "v1", SideEffectLevel: "write", ApprovalMode: "always", ApprovalCapability: "per_call"}}}, AgentSpec: harness.AgentSpec{Model: "writer-model"},
+	}}
 	owner, err := harness.OpenAgentSession(options)
 	if err != nil {
 		t.Fatal(err)
@@ -465,7 +463,7 @@ func TestNamedAgentToolDiscoveryIsLimitedToItsFrozenToolSet(t *testing.T) {
 	options.Relations = rel
 	options.ToolDiscovery = search
 	options.Session.Config.DelegationPolicy = harness.DelegationPolicySnapshot{MaxDepth: 1}
-	member := harness.NamedAgent{MemberID: "researcher", MemberRevision: "v1", Model: "discovery-model"}
+	member := harness.NamedAgent{MemberID: "researcher", MemberRevision: "v1", AgentSpec: harness.AgentSpec{Model: "discovery-model"}}
 	for i := 0; i < 16; i++ {
 		key := fmt.Sprintf("specialist.read.%02d", i)
 		member.Tools = append(member.Tools, harness.SessionTool{Registration: agentSessionTool(key, &executions),

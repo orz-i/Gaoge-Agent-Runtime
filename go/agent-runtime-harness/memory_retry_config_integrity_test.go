@@ -20,7 +20,7 @@ func testMemoryRetryStoreConfigIntegrity(t *testing.T, missing bool) {
 	ctx := t.Context()
 	store := NewMemoryStore()
 	now := time.Date(2026, 11, 19, 12, 0, 0, 0, time.UTC)
-	frozen, err := SealConfigSnapshot("turn", ConfigSnapshot{Model: "specialist", SharedBudget: &budget.Limits{MaxLLMCalls: 2}}, now)
+	frozen, err := SealConfigSnapshot("turn", ConfigSnapshot{SharedBudget: &budget.Limits{MaxLLMCalls: 2}, AgentSpec: AgentSpec{Model: "specialist"}}, now)
 	if err != nil {
 		t.Fatal(err)
 	}

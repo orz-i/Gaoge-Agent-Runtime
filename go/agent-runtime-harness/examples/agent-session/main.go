@@ -51,7 +51,7 @@ func run(ctx context.Context, output io.Writer) error {
 			HostThread: harness.HostRef{Kind: "conversation", ID: "demo/release"},
 			Actor:      kernel.ActorRef{TenantID: "demo", ActorID: "operator"},
 			Thread:     kernel.ThreadRef{Kind: "conversation", ID: "demo/release"},
-			Config:     harness.ConfigSnapshot{Model: "fixture", MaxModelOutputTokens: 256},
+			Config:     harness.ConfigSnapshot{AgentSpec: harness.AgentSpec{Model: "fixture", MaxModelOutputTokens: 256}},
 			Transcript: harness.TranscriptHistoryFunc(func(context.Context, harness.HostRef, harness.HostRef) ([]runtimecontext.Entry, error) {
 				return history, nil
 			}),

@@ -338,7 +338,7 @@ func newHarnessRunnerWithModel(t *testing.T, agentModel model.Client) *harness.R
 	return runner
 }
 func testStartRequest() harness.StartRequest {
-	return harness.StartRequest{HostThread: harness.HostRef{Kind: testThreadKind, ID: testThreadID}, HostTurn: harness.HostRef{Kind: "conversation_turn", ID: testTurnID}, Actor: kernel.ActorRef{TenantID: testTenant, ActorID: testActor}, Thread: kernel.ThreadRef{Kind: testThreadKind, ID: testThreadID}, Goal: "answer directly", Config: harness.ConfigSnapshot{Environment: harness.VersionRef{ID: testEnvironment, Revision: 1}, Model: "model"}}
+	return harness.StartRequest{HostThread: harness.HostRef{Kind: testThreadKind, ID: testThreadID}, HostTurn: harness.HostRef{Kind: "conversation_turn", ID: testTurnID}, Actor: kernel.ActorRef{TenantID: testTenant, ActorID: testActor}, Thread: kernel.ThreadRef{Kind: testThreadKind, ID: testThreadID}, Goal: "answer directly", Config: harness.ConfigSnapshot{Environment: harness.VersionRef{ID: testEnvironment, Revision: 1}, AgentSpec: harness.AgentSpec{Model: "model"}}}
 }
 
 type directModel struct{}

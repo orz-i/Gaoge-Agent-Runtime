@@ -54,7 +54,7 @@ func TestRealPostgresCustomCancellerPreflightReadRecoveryAcrossConnections(t *te
 				Actor:         kernel.ActorRef{TenantID: "test", ActorID: "agent"},
 				Thread:        kernel.ThreadRef{Kind: "conversation", ID: "custom-cancel-preflight"},
 				Goal:          "pause then cancel without custom dispatch",
-				Config:        harness.ConfigSnapshot{Model: "fixture-control"},
+				Config:        harness.ConfigSnapshot{AgentSpec: harness.AgentSpec{Model: "fixture-control"}},
 				CallAllowance: &agent.CallAllowance{LLMCalls: 1},
 			}
 			paused, err := first.StartAgentTurn(t.Context(), request)

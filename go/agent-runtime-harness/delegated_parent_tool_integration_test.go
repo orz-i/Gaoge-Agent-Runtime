@@ -191,11 +191,11 @@ func runSelectedHostedParentToolWithFrozenContext(t *testing.T, childModel strin
 		Actor:      kernel.ActorRef{TenantID: "test", ActorID: "parent"},
 		Thread:     kernel.ThreadRef{Kind: "conversation", ID: "tool-selection-thread"},
 		Goal:       "delegate researched news to specialist", Config: harness.ConfigSnapshot{
-			Model: "specialist-model", ToolKeys: []string{harness.DelegationToolKey, scopedSearchKey},
+
 			ToolPolicies: []harness.ToolPolicySnapshot{
 				harness.DelegationToolPolicySnapshot(),
 				{Key: scopedSearchKey, DefinitionVersion: "role-web-version-1", ExecutionMode: "provider_hosted"},
-			},
+			}, AgentSpec: harness.AgentSpec{Model: "specialist-model", ToolKeys: []string{harness.DelegationToolKey, scopedSearchKey}},
 		},
 	}
 	if frozen {
@@ -319,8 +319,8 @@ func TestHostHostedToolUsesInheritedParentModelWithoutParentActivation(t *testin
 		HostThread: harness.HostRef{Kind: "conversation", ID: "inherit-hosted-tool-thread"}, HostTurn: harness.HostRef{Kind: "message", ID: "inherit-hosted-tool-message"},
 		Actor: kernel.ActorRef{TenantID: "test", ActorID: "parent"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "inherit-hosted-tool-thread"},
 		Goal: "ask inheriting model role to research", Config: harness.ConfigSnapshot{
-			Model: "specialist-model", ToolKeys: []string{harness.DelegationToolKey},
-			ToolPolicies: []harness.ToolPolicySnapshot{harness.DelegationToolPolicySnapshot()},
+
+			ToolPolicies: []harness.ToolPolicySnapshot{harness.DelegationToolPolicySnapshot()}, AgentSpec: harness.AgentSpec{Model: "specialist-model", ToolKeys: []string{harness.DelegationToolKey}},
 		},
 	})
 	if err != nil || snapshot.Turn.Status != harness.TurnCompleted || capture.rootCalls != 2 || capture.childCalls != 1 {

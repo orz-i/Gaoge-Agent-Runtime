@@ -32,7 +32,7 @@ func TestIndependentAuditLegacyInteractionCannotApplyHostEffect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := harness.SealConfigSnapshot(tid, harness.ConfigSnapshot{Model: "fixture"}, now)
+	cfg, err := harness.SealConfigSnapshot(tid, harness.ConfigSnapshot{AgentSpec: harness.AgentSpec{Model: "fixture"}}, now)
 	if err != nil {
 		t.Fatal(err)
 	}

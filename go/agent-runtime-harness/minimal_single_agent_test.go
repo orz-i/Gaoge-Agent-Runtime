@@ -44,7 +44,7 @@ func TestMinimalAgentHarnessConstructionAndStableTurnAdmission(t *testing.T) {
 		HostTurn:   harness.HostRef{Kind: "conversation_turn", ID: "one"},
 		Actor:      kernel.ActorRef{TenantID: "tenant", ActorID: "actor"},
 		Thread:     kernel.ThreadRef{Kind: "conversation", ID: "tenant/one"},
-		Goal:       "One Agent task", Config: harness.ConfigSnapshot{Model: "fixture"},
+		Goal:       "One Agent task", Config: harness.ConfigSnapshot{AgentSpec: harness.AgentSpec{Model: "fixture"}},
 	}
 	first, err := host.StartAgentTurn(t.Context(), request)
 	if err != nil || first.Turn.Status != harness.TurnCompleted || first.Turn.CreatedAt.IsZero() || client.calls != 1 {

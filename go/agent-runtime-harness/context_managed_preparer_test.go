@@ -71,8 +71,9 @@ func TestManagedContextCompactsLongSessionAndPersistsExactArtifacts(t *testing.T
 		Actor:      kernel.ActorRef{TenantID: "tenant", ActorID: "operator"},
 		Thread:     kernel.ThreadRef{Kind: "conversation", ID: "managed-long"},
 		Goal:       "current question",
-		Config: harness.ConfigSnapshot{Model: "fixture", ToolKeys: []string{harness.ContextArtifactToolKey},
-			ContextPolicy: runtimecontext.Policy{PreserveRecentTurns: 1, MinimumRecentTurns: 1, MaxCompactionTokens: 80}},
+		Config: harness.ConfigSnapshot{
+			ContextPolicy: runtimecontext.Policy{PreserveRecentTurns: 1, MinimumRecentTurns: 1, MaxCompactionTokens: 80}, AgentSpec: harness.AgentSpec{Model: "fixture", ToolKeys: []string{harness.ContextArtifactToolKey}},
+		},
 		Context: contextSeed("session policy", entries...),
 	}
 	snapshot, err := runner.StartAgentTurn(t.Context(), request)
@@ -174,7 +175,7 @@ func TestManagedContextRefusesLossyCompactionWithoutArtifactReader(t *testing.T)
 		HostTurn:   harness.HostRef{Kind: "conversation_turn", ID: "current"},
 		Actor:      kernel.ActorRef{TenantID: "tenant", ActorID: "actor"},
 		Thread:     kernel.ThreadRef{Kind: "conversation", ID: "no-reader"},
-		Goal:       "current question", Config: harness.ConfigSnapshot{Model: "fixture"},
+		Goal:       "current question", Config: harness.ConfigSnapshot{AgentSpec: harness.AgentSpec{Model: "fixture"}},
 		Context: contextSeed("", contextEntry("m1", "old", model.RoleAssistant, strings.Repeat("large evidence", 500), false),
 			contextEntry("m2", "current", model.RoleUser, "current question", true)),
 	})

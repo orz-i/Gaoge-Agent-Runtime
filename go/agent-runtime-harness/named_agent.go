@@ -2,9 +2,7 @@ package harness
 
 import (
 	"context"
-	"slices"
 
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
@@ -31,12 +29,11 @@ func selectNamedAgents(options *AgentSessionOptions) error {
 			}
 			options.MemberTools = append(options.MemberTools, t)
 		}
+		spec := cloneAgentSpec(n.AgentSpec)
+		spec.ToolKeys = keys
 		names = append(names, NamedAgentSnapshot{
 			MemberID: n.MemberID, MemberRevision: n.MemberRevision,
-			Model: n.Model, ModelOptions: n.ModelOptions, Instructions: n.Instructions,
-			ToolKeys: keys, InitialToolKeys: n.InitialToolKeys,
-			HostedToolGrants: n.HostedToolGrants, Skills: n.Skills,
-			Limits: n.Limits, MaxModelOutputTokens: n.MaxModelOutputTokens,
+			AgentSpec: spec,
 		})
 	}
 	normalized, err := normalizeNamedAgentSnapshots(names)
@@ -70,13 +67,7 @@ func (p namedAgentPolicy) PrepareDelegation(_ context.Context, _ tools.Execution
 			return DelegateRequest{}, ErrInvalidRequest
 		}
 		request.MemberRevision = selected.MemberRevision
-		request.Agent = agent.StartRequest{
-			Model: selected.Model, ModelOptions: append([]byte(nil), selected.ModelOptions...),
-			Instructions: selected.Instructions, ToolKeys: slices.Clone(selected.ToolKeys),
-			InitialToolKeys:  slices.Clone(selected.InitialToolKeys),
-			HostedToolGrants: slices.Clone(selected.HostedToolGrants),
-			Limits:           selected.Limits, MaxModelOutputTokens: selected.MaxModelOutputTokens,
-		}
+		request.Agent = selected.startRequest()
 		return request, nil
 	}
 	return DelegateRequest{}, ErrInvalidRequest

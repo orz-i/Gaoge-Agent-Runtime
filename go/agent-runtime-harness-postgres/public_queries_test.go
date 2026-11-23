@@ -70,7 +70,7 @@ func TestPublicTurnConfigTenantAndActorScope(t *testing.T) {
 		if id == "foreign-actor" {
 			actor = "other"
 		}
-		raw, err := json.Marshal(harness.ConfigSnapshot{ID: "config-" + id, TurnID: "turn-" + id, Model: "model-" + id})
+		raw, err := json.Marshal(harness.ConfigSnapshot{ID: "config-" + id, TurnID: "turn-" + id, AgentSpec: harness.AgentSpec{Model: "model-" + id}})
 		if err != nil {
 			t.Fatal(err)
 		}

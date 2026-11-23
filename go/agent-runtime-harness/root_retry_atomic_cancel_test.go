@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -117,6 +118,9 @@ func testRootRetryCommittedAckLoss(t *testing.T, historicalTerminalChild bool) {
 	request := testStartRequest()
 	request.Config.Model = "specialist-model"
 	request.Config.MaxModelOutputTokens = 256
+	// The first and every retried native Run must receive the original
+	// per-Invocation allowance, not a nil (unbounded) grant.
+	request.CallAllowance = &agent.CallAllowance{LLMCalls: 4, ToolCalls: 4}
 	request.Config.SharedBudget = &budget.Limits{MaxLLMCalls: 4, MaxTotalTokens: 3000}
 	request.Config.ToolKeys = []string{roleEvidenceTool}
 	request.Config.ToolPolicies = []harness.ToolPolicySnapshot{{
@@ -217,6 +221,9 @@ func testRootRetryCommittedAckLoss(t *testing.T, historicalTerminalChild bool) {
 	retriedView, err := agent.ViewState(retriedRun)
 	if err != nil || retriedView.MaxModelOutputTokens != 256 {
 		t.Fatalf("retry did not freeze the original ceiling: %d err=%v", retriedView.MaxModelOutputTokens, err)
+	}
+	if !reflect.DeepEqual(retriedView.CallAllowance, &agent.CallAllowance{LLMCalls: 4, ToolCalls: 4}) {
+		t.Fatalf("retry widened/forgot the original per-Run authorization: %+v", retriedView.CallAllowance)
 	}
 	if resumed.Budget == nil || resumed.Budget.Usage.LLMCalls != 2 || resumed.Budget.Cancelled {
 		t.Fatalf("Turn accounting lost or remained globally cancelled: %+v", resumed.Budget)

@@ -35,7 +35,7 @@ func TestStorePersistsHarnessLifecycleAndCAS(t *testing.T) {
 	}
 	assertSessionLifecycle(t, store, session)
 	config, err := harness.SealConfigSnapshot("ht_pg", harness.ConfigSnapshot{
-		Environment: harness.VersionRef{ID: "general", Revision: 7}, Model: "model",
+		Environment: harness.VersionRef{ID: "general", Revision: 7}, AgentSpec: harness.AgentSpec{Model: "model"},
 	}, now)
 	if err != nil {
 		t.Fatalf("seal config: %v", err)

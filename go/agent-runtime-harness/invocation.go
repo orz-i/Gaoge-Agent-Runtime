@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
@@ -114,6 +115,10 @@ type agentInvocationInput struct {
 	Thread           kernel.ThreadRef `json:"thread"`
 	RequiredToolKeys []string         `json:"requiredToolKeys,omitempty"`
 	InitialToolKeys  []string         `json:"initialToolKeys,omitempty"`
+	// Per-Invocation original spend authority; nil is not equivalent to a
+	// bounded request. Explicit RetryInvocation must preserve this exact grant.
+	CallAllowance *agent.CallAllowance       `json:"callAllowance,omitempty"`
+	AutoAllowance *agent.AutoAllowancePolicy `json:"autoAllowance,omitempty"`
 }
 
 func newAgentInvocation(
@@ -121,16 +126,28 @@ func newAgentInvocation(
 	actor kernel.ActorRef,
 	thread kernel.ThreadRef,
 	requiredToolKeys, initialToolKeys []string,
+	callAllowance *agent.CallAllowance, autoAllowance *agent.AutoAllowancePolicy,
 	now time.Time,
 ) (Invocation, error) {
 	id, err := AgentInvocationID(turnID, "", requestID)
 	if err != nil {
 		return Invocation{}, err
 	}
+	var frozenCall *agent.CallAllowance
+	if callAllowance != nil {
+		value := *callAllowance
+		frozenCall = &value
+	}
+	var frozenAuto *agent.AutoAllowancePolicy
+	if autoAllowance != nil {
+		value := *autoAllowance
+		frozenAuto = &value
+	}
 	input, inputHash, err := marshalInvocationValue(agentInvocationInput{
 		Goal: strings.TrimSpace(goal), Actor: actor, Thread: thread,
 		RequiredToolKeys: normalizeStrings(requiredToolKeys),
 		InitialToolKeys:  normalizeStrings(initialToolKeys),
+		CallAllowance:    frozenCall, AutoAllowance: frozenAuto,
 	})
 	if err != nil {
 		return Invocation{}, err

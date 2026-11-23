@@ -24,7 +24,7 @@ func testSQLRetryStoreConfigIntegrity(t *testing.T, missing bool) {
 	ctx := t.Context()
 	now := time.Date(2026, 11, 19, 12, 0, 0, 0, time.UTC)
 	config, err := harness.SealConfigSnapshot("turn-budget-authority", harness.ConfigSnapshot{
-		Model: "specialist", SharedBudget: &budget.Limits{MaxLLMCalls: 1, MaxTotalTokens: 100},
+		SharedBudget: &budget.Limits{MaxLLMCalls: 1, MaxTotalTokens: 100}, AgentSpec: harness.AgentSpec{Model: "specialist"},
 	}, now)
 	if err != nil {
 		t.Fatal(err)

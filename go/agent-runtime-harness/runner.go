@@ -4,13 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
@@ -111,22 +111,41 @@ func (runner *Runner) recordInvocationItem(ctx context.Context, invocation Invoc
 // physical dispatch path, shared by first admission and pre-Run recovery.
 // The durable Invocation owns the Turn identity; the Host still owns the
 // sealed request/config and cannot introduce a new execution mode on replay.
+// rootAgentStartRequest is shared by first admission and retry of the original
+// immutable Root. It compiles the same AgentSpec used by named children; only
+// Run identity, per-Turn Tool requirements and original execution allowances
+// belong to the top-level invocation. The root's Instructions are already
+// injected by its immutable Context Window, not by the initial Agent message.
+func rootAgentStartRequest(
+	config ConfigSnapshot, executionID string, actor kernel.ActorRef, thread kernel.ThreadRef,
+	requestID, goal string, initialToolKeys, requiredToolKeys []string,
+) agent.StartRequest {
+	start := config.startRequest()
+	start.ID, start.Actor, start.Thread = executionID, actor, thread
+	start.RequestID, start.Goal = requestID, goal
+	start.Instructions = ""
+	// A Config's ToolKeys name locally registered Tools; Hosted grants are
+	// separate Host capability selections. Add them only at the native Start,
+	// after local policy verification, matching Handoff's child projection.
+	for _, grant := range start.HostedToolGrants {
+		start.ToolKeys = append(start.ToolKeys, grant.Key)
+	}
+	start.ToolKeys = normalizeStrings(start.ToolKeys)
+	start.WorkingStateSummary = agent.CloneWorkingStateSummaryPolicy(config.WorkingStateSummary)
+	start.RequiredToolKeys = slices.Clone(requiredToolKeys)
+	start.InitialToolKeys = normalizeStrings(append(start.InitialToolKeys, initialToolKeys...))
+	return start
+}
+
 func (runner *Runner) startAgentPhysical(
 	ctx context.Context, invocation Invocation, request StartRequest, config ConfigSnapshot,
 ) (kernel.Snapshot, error) {
 	return runner.withPhysicalInvocationDispatch(ctx, invocation, "start", func(physicalCtx context.Context) (kernel.Snapshot, error) {
-		return runner.agent.StartRun(physicalCtx, agent.StartRequest{
-			ID: invocation.ExecutionRefID, Actor: request.Actor, Thread: request.Thread,
-			RequestID: firstNonEmpty(strings.TrimSpace(request.RequestID), invocation.TurnID), Goal: request.Goal,
-			Model: config.Model, ModelOptions: append(json.RawMessage(nil), config.ModelOptions...),
-			OutputContract:       model.CloneOutputContract(config.OutputContract),
-			MaxModelOutputTokens: config.MaxModelOutputTokens,
-			WorkingStateSummary:  agent.CloneWorkingStateSummaryPolicy(config.WorkingStateSummary),
-			ToolKeys:             append([]string(nil), config.ToolKeys...),
-			RequiredToolKeys:     append([]string(nil), request.RequiredToolKeys...),
-			InitialToolKeys:      append([]string(nil), request.InitialToolKeys...),
-			Limits:               config.Limits, CallAllowance: request.CallAllowance, AutoAllowance: request.AutoAllowance,
-		})
+		start := rootAgentStartRequest(config, invocation.ExecutionRefID, request.Actor, request.Thread,
+			firstNonEmpty(strings.TrimSpace(request.RequestID), invocation.TurnID), request.Goal,
+			request.InitialToolKeys, request.RequiredToolKeys)
+		start.CallAllowance, start.AutoAllowance = request.CallAllowance, request.AutoAllowance
+		return runner.agent.StartRun(physicalCtx, start)
 	})
 }
 
@@ -696,7 +715,8 @@ func (runner *Runner) StartAgentTurn(ctx context.Context, request StartRequest) 
 	request, createdTurn, config := envelope.request, envelope.turn, envelope.config
 	invocation, err := newAgentInvocation(
 		createdTurn.ID, firstNonEmpty(strings.TrimSpace(request.RequestID), createdTurn.ID), request.Goal,
-		request.Actor, request.Thread, request.RequiredToolKeys, request.InitialToolKeys, envelope.now,
+		request.Actor, request.Thread, request.RequiredToolKeys, request.InitialToolKeys,
+		request.CallAllowance, request.AutoAllowance, envelope.now,
 	)
 	if err != nil {
 		return Snapshot{}, err

@@ -1,5 +1,28 @@
 # Breaking changes (pre-stable Beta)
 
+## Root / Named AgentSpec: one execution capability shape
+
+`ConfigSnapshot` and `NamedAgentSnapshot` now embed the same `AgentSpec` for
+Model, ModelOptions, Instructions, output schema, local/hosted Tool grants,
+InitialToolKeys, selected Skills and enforceable limits. `NamedAgent` embeds
+that same spec and adds only member identity and Host-only Tool registrations.
+**Go composite literals must use `AgentSpec: AgentSpec{...}`**; duplicated old
+fields are not retained as compatibility aliases. Root and child requests
+share one validation and native mapping; the original Runtime and Handoff
+continue to execute, fence and recover Runs without another executor.
+
+The private frozen Config hash/ID changes for new Starts. New hosted grants
+and named output contracts also change the original immutable Context/Handoff
+identity. Existing in-flight Turns must not be reinterpreted using new Host
+configuration; no historical data migration is needed for this pre-stable
+hard cut. Root Hosted Tools require original explicit version grants and a
+matching provider-owned catalog; Named Agents may request independent strict
+JSON Schema output only when their selected Model positively attests support.
+Cancellation, approval, budget and physical receipt authorization are unchanged.
+The separate per-Invocation `CallAllowance` and `AutoAllowance` are bound to
+its original immutable Invocation input and reused by RetryInvocation; absent
+spending grants must not be inferred from a newly selected Host configuration.
+
 ## PR #149 — Checkpoint and native Agent State physical evidence hard cut
 
 `agent.Runner` now seals the original Tool/Provider JSON RawMessage bytes at its

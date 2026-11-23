@@ -113,8 +113,8 @@ func testManagedContextResume(t *testing.T, bounded bool) {
 		Thread:     kernel.ThreadRef{Kind: "conversation", ID: "fault-rollover"},
 		Goal:       "current question",
 		Config: harness.ConfigSnapshot{
-			Model: "fixture", ToolKeys: []string{harness.ContextArtifactToolKey},
-			ContextPolicy: runtimecontext.Policy{PreserveRecentTurns: 1, MaxCompactionTokens: 80},
+
+			ContextPolicy: runtimecontext.Policy{PreserveRecentTurns: 1, MaxCompactionTokens: 80}, AgentSpec: harness.AgentSpec{Model: "fixture", ToolKeys: []string{harness.ContextArtifactToolKey}},
 		},
 		Context: contextSeed("durable guidance",
 			contextEntry("m1", "old", model.RoleUser, "old question", false),

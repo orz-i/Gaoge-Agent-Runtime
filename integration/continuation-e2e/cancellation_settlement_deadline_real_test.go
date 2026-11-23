@@ -75,7 +75,7 @@ func TestRealPostgresCancellationSettlementReceiptHasBoundedRowLockWait(t *testi
 				Actor:         kernel.ActorRef{TenantID: "test", ActorID: "agent"},
 				Thread:        kernel.ThreadRef{Kind: "conversation", ID: "bounded-cancel-row-lock"},
 				Goal:          "recover after post-intent read-only outage",
-				Config:        harness.ConfigSnapshot{Model: "fixture-control"},
+				Config:        harness.ConfigSnapshot{AgentSpec: harness.AgentSpec{Model: "fixture-control"}},
 				CallAllowance: &agent.CallAllowance{LLMCalls: 1},
 			})
 			if err != nil || started.Turn.Status != harness.TurnPausedBudget {

@@ -2,7 +2,6 @@ package harness
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"reflect"
 	"slices"
@@ -52,18 +51,10 @@ type SessionTool struct {
 // ToolKeys can refer to previously selected root or member Tools. The model
 // sees only MemberID and Goal in the delegation Tool input, never this bundle.
 type NamedAgent struct {
-	MemberID             string
-	MemberRevision       string
-	Model                string
-	ModelOptions         json.RawMessage
-	Instructions         string
-	ToolKeys             []string
-	Tools                []SessionTool
-	InitialToolKeys      []string
-	HostedToolGrants     []agent.HostedToolGrant
-	Skills               []SkillSnapshot
-	Limits               agent.Limits
-	MaxModelOutputTokens int64
+	MemberID       string
+	MemberRevision string
+	AgentSpec
+	Tools []SessionTool
 }
 
 // AgentSessionOptions composes a single Agent with bounded Harness Context.
@@ -416,9 +407,9 @@ func normalizeAgentSessionConfig(config ConfigSnapshot) (ConfigSnapshot, error) 
 		agent.ValidateWorkingStateSummaryPolicy(config.WorkingStateSummary) != nil {
 		return ConfigSnapshot{}, ErrInvalidRequest
 	}
-	var skillErr error
-	config.Skills, skillErr = normalizeSkillSnapshots(config.Skills)
-	if skillErr != nil {
+	var err error
+	config.AgentSpec, err = normalizeAgentSpec(config.AgentSpec)
+	if err != nil || (len(config.HostedToolGrants) != 0 && config.Model == "") {
 		return ConfigSnapshot{}, ErrInvalidRequest
 	}
 	config.WorkingStateSummary = agent.CloneWorkingStateSummaryPolicy(config.WorkingStateSummary)
@@ -427,7 +418,6 @@ func normalizeAgentSessionConfig(config ConfigSnapshot) (ConfigSnapshot, error) 
 	if namedErr != nil || (len(config.DelegationPolicy.NamedAgents) != 0 && config.DelegationPolicy.MaxDepth <= 0) {
 		return ConfigSnapshot{}, ErrInvalidRequest
 	}
-	config.ToolKeys = normalizeStrings(config.ToolKeys)
 	policies, err := normalizeToolPolicies(config.ToolPolicies)
 	if err != nil {
 		return ConfigSnapshot{}, ErrInvalidRequest
@@ -541,7 +531,12 @@ func (session *SessionClient) preflightAgentSessionResume(ctx context.Context, t
 	if namedErr != nil {
 		return namedErr
 	}
+	// The paused Root always uses its original sealed AgentSpec. Current
+	// handle instructions, Model and ceiling may describe future Turns, but
+	// existing native Hosted Tool resolver/grants may not silently diverge:
+	// the model might otherwise invoke a different provider-owned capability.
 	if !slices.Equal(config.ToolKeys, session.config.ToolKeys) ||
+		!slices.Equal(config.HostedToolGrants, current.HostedToolGrants) ||
 		!slices.Equal(config.ToolPolicies, session.config.ToolPolicies) ||
 		!slices.Equal(config.DelegationPolicy.LocalToolGrants, session.config.DelegationPolicy.LocalToolGrants) ||
 		!reflect.DeepEqual(originalNamed, currentNamed) {

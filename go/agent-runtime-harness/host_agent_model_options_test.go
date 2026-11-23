@@ -14,8 +14,7 @@ func TestHostSelectedMemberModelOptionsAreNotInheritedAcrossModels(t *testing.T)
 	f := newPR82HandoffFixture(t, agent.StartRequest{Model: "parent-model", ModelOptions: options})
 	now := pr82HandoffClock{}.Now()
 	config, err := SealConfigSnapshot(f.turn.ID, ConfigSnapshot{
-		AdmissionHash: strings.Repeat("a", 64),
-		Model:         "parent-model", ModelOptions: options,
+		AdmissionHash: strings.Repeat("a", 64), AgentSpec: AgentSpec{Model: "parent-model", ModelOptions: options},
 	}, now)
 	if err != nil {
 		t.Fatal(err)
