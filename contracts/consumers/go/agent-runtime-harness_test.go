@@ -65,7 +65,7 @@ var (
 	_                                                                                        = runtimecontext.Checkpoint{ContentHashEncoding: runtimecontext.CheckpointContentHashEncodingLosslessJSON}
 	_ func(harness.AgentSessionOptions) (*harness.SessionClient, error)                      = harness.OpenAgentSession
 	_                                                                                        = harness.AgentSessionContextOptions{ManagedRecovery: true}
-	_                                                                                        = harness.ConfigSnapshot{MaxModelOutputTokens: 1024}
+	_                                                                                        = harness.ConfigSnapshot{AgentSpec: harness.AgentSpec{MaxModelOutputTokens: 1024}}
 	_ harness.RuntimeCancellationReconciler                                                  = (cancellationReconcilerContract)(nil)
 	_ cancellationReconcilerContract                                                         = (harness.RuntimeCancellationReconciler)(nil)
 	_ func(context.Context) (harness.CancellationEffect, bool)                               = harness.CancellationEffectFromContext

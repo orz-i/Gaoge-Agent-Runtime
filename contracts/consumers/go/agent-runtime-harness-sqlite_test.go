@@ -31,7 +31,7 @@ func TestStandaloneHarnessSQLiteConsumerReopensSession(t *testing.T) {
 	if _, fresh, err := store.CreateSession(ctx, session); err != nil || !fresh {
 		t.Fatalf("create session: %t %v", fresh, err)
 	}
-	config, err := harness.SealConfigSnapshot("turn", harness.ConfigSnapshot{Model: "local"}, now)
+	config, err := harness.SealConfigSnapshot("turn", harness.ConfigSnapshot{AgentSpec: harness.AgentSpec{Model: "local"}}, now)
 	if err != nil {
 		t.Fatal(err)
 	}
