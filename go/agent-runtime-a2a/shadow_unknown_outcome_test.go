@@ -65,7 +65,7 @@ func TestPR113UnknownFirstSendRemainsUnresolvedAcrossHandoffAndRestart(t *testin
 				}
 				return shadow
 			}
-			d := handoff.Delegation{ID: "delegation", MemberID: "remote", ChildRunID: "unresolved-child", Goal: "remote goal", Status: handoff.StatusQueued}
+			d := handoff.Delegation{Remote: true, ID: "delegation", MemberID: "remote", ChildRunID: "unresolved-child", Goal: "remote goal", Status: handoff.StatusQueued}
 			coordinator, err := handoff.New(newChild())
 			if err != nil {
 				t.Fatal(err)
@@ -166,7 +166,7 @@ func TestPR113CancelledFirstPartyShadowRemainsReadableWithoutRemoteCleanup(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	d := handoff.Delegation{ID: "delegate", MemberID: "a2a:remote", MemberRevision: "revision-1", ChildRunID: "completed-shadow", Goal: "remote goal", Status: handoff.StatusQueued}
+	d := handoff.Delegation{Remote: true, ID: "delegate", MemberID: "a2a:remote", MemberRevision: "revision-1", ChildRunID: "completed-shadow", Goal: "remote goal", Status: handoff.StatusQueued}
 	child, err := plugin.ResolveChild(t.Context(), d)
 	if err != nil {
 		t.Fatal(err)

@@ -60,6 +60,21 @@ func (r *deferredAgentRoutes) ResolveChild(ctx context.Context, d Delegation) (C
 	return r.remote.ResolveChild(ctx, cloneDelegation(d))
 }
 
+// NewDeferredAgentWithRemote routes the Host-frozen Remote bit through the
+// same prepared local Agent and remote ChildRunner. No additional mutable
+// product selector can override an admitted member's physical ownership.
+func NewDeferredAgentWithRemote(original *agent.Runner, remote ChildRunnerResolver) (*Coordinator, error) {
+	if remote == nil {
+		return nil, ErrInvalidDelegation
+	}
+	return NewDeferredAgentWithRouting(original, func(delegation Delegation) (DelegationRoute, error) {
+		if delegation.Remote {
+			return DelegationRouteRemote, nil
+		}
+		return DelegationRouteLocal, nil
+	}, remote)
+}
+
 // NewDeferredAgentWithRouting retains one concrete local Agent and an explicit
 // remote resolver. All three global ownership queries remain false. Only the
 // per-Delegation queries may prove a local route; the remote resolver is never

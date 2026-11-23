@@ -230,6 +230,19 @@ func (plugin *Plugin) frozenRevision(ctx context.Context, runID, targetID string
 	return state.TargetRevision, nil
 }
 
+// OwnsRemoteDelegation proves exact A2A original Task ownership for the
+// Host RuntimeCanceller. A same-ID Kernel twin or binding revision cannot
+// authorize remote cancellation.
+func (plugin *Plugin) OwnsRemoteDelegation(
+	ctx context.Context, rt *kernel.Runtime, d handoff.Delegation, snapshot kernel.Snapshot,
+) bool {
+	if plugin == nil || plugin.runtime != rt || !handoff.RemoteGoalOnly(d) {
+		return false
+	}
+	child, err := plugin.resolveChild(ctx, d)
+	return err == nil && child.ObservesFrozenRemoteShadow(rt, d, snapshot)
+}
+
 // TargetMemberID creates the only product routing identity owned by this edge.
 func TargetMemberID(targetID string) (string, error) {
 	targetID = strings.TrimSpace(targetID)

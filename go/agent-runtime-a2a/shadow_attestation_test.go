@@ -59,7 +59,7 @@ func TestShadowRunnerAttestationRequiresExactFrozenBinding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	frozen := handoff.Delegation{
+	frozen := handoff.Delegation{Remote: true,
 		ID: "delegate", MemberID: "a2a:remote", MemberRevision: "revision-1",
 		ChildRunID: "child", Goal: "finish remotely", Status: handoff.StatusRunning,
 	}

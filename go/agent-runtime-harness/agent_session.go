@@ -53,6 +53,7 @@ type SessionTool struct {
 type NamedAgent struct {
 	MemberID       string
 	MemberRevision string
+	Remote         bool // External goal-only execution; not native Model/Tool permissions.
 	AgentSpec
 	Tools []SessionTool
 }
@@ -75,11 +76,11 @@ type AgentSessionOptions struct {
 	// MemberTools are registered but never offered to the root Agent. Their
 	// explicit member/revision grants are frozen in Session.Config.DelegationPolicy.
 	MemberTools []SessionTool
-	// NamedAgents is the standard finite Host-selected roster. It binds model,
-	// versioned local/hosted Tools and independent selected Skills per child.
-	// A named roster uses the local Agent loop; a custom DelegationPolicy or
-	// independent Handoff stays in the explicit advanced composition path.
-	NamedAgents []NamedAgent
+	// NamedAgents selects a finite Host-owned local/remote Agent roster.
+	// Local execution uses one Agent loop; remote members have goal-only
+	// capabilities, fixed identity/revision and explicit RemoteChildren.
+	NamedAgents    []NamedAgent
+	RemoteChildren handoff.ChildRunnerResolver
 	// The original native Hosted Tool resolver and local Tool discovery are
 	// still Host-owned. Discovery can only reveal already frozen Tool grants.
 	HostedTools   agent.HostedToolCatalog
@@ -203,9 +204,8 @@ func OpenAgentSession(options AgentSessionOptions) (*SessionClient, error) {
 		if _, ok := options.Store.(budget.LedgerStore); !ok {
 			return nil, ErrInvalidRequest
 		}
-		if delegated && options.Handoffs != nil {
-			// A generic external ChildRunner cannot prove that its Model and Tool
-			// calls join this original Ledger. Use the local bounded Agent route.
+		if delegated && (options.Handoffs != nil || options.RemoteChildren != nil) {
+			// External Agents cannot prove their Model/Tool calls join this ledger.
 			return nil, ErrInvalidRequest
 		}
 	}
@@ -371,9 +371,13 @@ func openBoundedAgentSession(options AgentSessionOptions, registrations []tools.
 	}
 	routes := options.Handoffs
 	if routes == nil && options.DelegationPolicy != nil {
-		// Root and selected children share the identical Model/Tool loop,
-		// Budget adapter, original Store and execution-fencing protocol.
-		routes, err = handoff.New(loop)
+		// Native children use this exact Agent loop. RemoteChildren are
+		// resolved only for explicitly frozen remote NamedAgent members.
+		if options.RemoteChildren != nil {
+			routes, err = handoff.NewDeferredAgentWithRemote(loop, options.RemoteChildren)
+		} else {
+			routes, err = handoff.New(loop)
+		}
 		if err != nil {
 			return nil, err
 		}

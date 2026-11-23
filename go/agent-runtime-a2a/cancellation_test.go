@@ -74,7 +74,7 @@ func TestPluginCancellationPreservesUncertainPhysicalIntentWithoutRetry(t *testi
 			fixture.remote.task.State = "TASK_STATE_CANCELED"
 			fixture.remote.task.Terminal = true
 			fixture.remote.task.Raw = json.RawMessage(`{"id":"remote-1","contextId":"context-1","status":{"state":"TASK_STATE_CANCELED"}}`)
-			child, err := fixture.plugin.resolveChild(t.Context(), handoff.Delegation{MemberID: "a2a:remote-agent", MemberRevision: "revision-1", ChildRunID: current.Run.ID})
+			child, err := fixture.plugin.resolveChild(t.Context(), handoff.Delegation{Remote: true, MemberID: "a2a:remote-agent", MemberRevision: "revision-1", ChildRunID: current.Run.ID})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -119,7 +119,7 @@ func newPluginCancellationFixture(t *testing.T) *pluginCancellationFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	child, err := fixture.plugin.ResolveChild(t.Context(), handoff.Delegation{MemberID: "a2a:remote-agent", ChildRunID: "cancel-plugin-child"})
+	child, err := fixture.plugin.ResolveChild(t.Context(), handoff.Delegation{Remote: true, MemberID: "a2a:remote-agent", ChildRunID: "cancel-plugin-child"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -325,7 +325,7 @@ func TestPR113PublicResumeControlExposesOriginalPendingOutcome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	delegation := handoff.Delegation{ID: "delegate", MemberID: "a2a:remote", MemberRevision: "revision-1",
+	delegation := handoff.Delegation{Remote: true, ID: "delegate", MemberID: "a2a:remote", MemberRevision: "revision-1",
 		ChildRunID: "pr113-control-resume", Goal: "remote goal", Status: handoff.StatusQueued}
 	child, err := plugin.ResolveChild(t.Context(), delegation)
 	if err != nil {

@@ -32,13 +32,22 @@ func selectNamedAgents(options *AgentSessionOptions) error {
 		spec := cloneAgentSpec(n.AgentSpec)
 		spec.ToolKeys = keys
 		names = append(names, NamedAgentSnapshot{
-			MemberID: n.MemberID, MemberRevision: n.MemberRevision,
+			MemberID: n.MemberID, MemberRevision: n.MemberRevision, Remote: n.Remote,
 			AgentSpec: spec,
 		})
 	}
 	normalized, err := normalizeNamedAgentSnapshots(names)
 	if err != nil {
 		return err
+	}
+	// The Host binds an explicit remote route only when a remote member is
+	// selected; local-only rosters retain the original native loop.
+	remote := false
+	for _, selected := range normalized {
+		remote = remote || selected.Remote
+	}
+	if remote != (options.RemoteChildren != nil) {
+		return ErrInvalidRequest
 	}
 	cfg.DelegationPolicy.NamedAgents = normalized
 	options.DelegationPolicy = namedAgentPolicy{selected: cloneNamedAgentSnapshots(normalized)}
@@ -68,6 +77,7 @@ func (p namedAgentPolicy) PrepareDelegation(_ context.Context, _ tools.Execution
 		}
 		request.MemberRevision = selected.MemberRevision
 		request.Agent = selected.startRequest()
+		request.Remote = selected.Remote
 		return request, nil
 	}
 	return DelegateRequest{}, ErrInvalidRequest

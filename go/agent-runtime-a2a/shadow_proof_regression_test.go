@@ -49,7 +49,7 @@ func proofShadowFixture(t *testing.T, remote RemoteClient) (*kernel.Runtime, ker
 }
 
 func testRemoteDelegationForProof(id string) handoff.Delegation {
-	return handoff.Delegation{ID: "delegation-" + id, ChildRunID: id,
+	return handoff.Delegation{Remote: true, ID: "delegation-" + id, ChildRunID: id,
 		MemberID: "a2a:remote", MemberRevision: "revision-1", Goal: "remote goal", Status: handoff.StatusQueued}
 }
 

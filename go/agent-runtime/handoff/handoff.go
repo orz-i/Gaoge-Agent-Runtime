@@ -14,10 +14,10 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 )
 
-// RemoteAgentRunKind is the A2A remote-Agent shadow RunKind. Handoff may
+// RemoteAgentRunKind is the protocol-neutral remote-Agent shadow RunKind. Handoff may
 // consume an Agent Run or this explicitly bound remote Agent proxy, but never
 // an unrelated custom Kernel state machine.
-const RemoteAgentRunKind kernel.RunKind = "a2a.remote"
+const RemoteAgentRunKind kernel.RunKind = "agent.remote"
 
 var (
 	ErrInvalidDelegation = errors.New("invalid handoff delegation")
@@ -74,6 +74,7 @@ type Delegation struct {
 	ID             string       `json:"id"`
 	MemberID       string       `json:"memberID"`
 	MemberRevision string       `json:"memberRevision,omitempty"`
+	Remote         bool         `json:"remote,omitempty"`
 	Instructions   string       `json:"instructions,omitempty"`
 	Limits         agent.Limits `json:"limits,omitempty"`
 	// Full Host-selected subtree ceilings belong to the shared ledger. The
@@ -364,9 +365,11 @@ func VerifiedChildRun(delegation Delegation, parent kernel.Run, child kernel.Sna
 		(child.Run.Kind != agent.RunKind && child.Run.Kind != RemoteAgentRunKind) {
 		return false
 	}
-	if child.Run.Kind == RemoteAgentRunKind &&
-		(delegation.MaxModelOutputTokens != 0 || delegation.OutputContract != nil) {
+	if child.Run.Kind == RemoteAgentRunKind && !RemoteGoalOnly(delegation) {
 		return false // Remote protocol cannot attest local sampling or structured output.
+	}
+	if child.Run.Kind == agent.RunKind && delegation.Remote {
+		return false // A native Run can never prove a Host-selected remote effect.
 	}
 	if child.Run.Kind == agent.RunKind &&
 		(delegation.MaxModelOutputTokens > 0 || delegation.OutputContract != nil) {
@@ -386,7 +389,7 @@ func VerifiedChildRun(delegation Delegation, parent kernel.Run, child kernel.Sna
 }
 
 func boundDelegationModelOutput(parent kernel.Snapshot, delegation Delegation) (Delegation, error) {
-	if parent.Run.Kind != agent.RunKind {
+	if parent.Run.Kind != agent.RunKind || delegation.Remote {
 		return delegation, nil
 	}
 	view, err := agent.ViewState(parent)
@@ -415,6 +418,13 @@ func (coordinator *Coordinator) resolveChild(ctx context.Context, delegation Del
 	// routes (including remote shadows) have no proof they can enforce it;
 	// deny before LoadRun/StartRun can dispatch external work. This keeps
 	// protocol-specific capabilities out of this Handoff boundary.
+	_, isRemote := children.(RemoteShadowObserver)
+	if isRemote != delegation.Remote || (delegation.Remote && !RemoteGoalOnly(delegation)) {
+		// A remote route must prove original protocol identity and local
+		// receipt before ANY StartRun/LoadRun. An ordinary ChildRunner must
+		// never impersonate either a remote shadow or a native Agent.
+		return nil, ErrInvalidDelegation
+	}
 	if delegation.OutputContract != nil {
 		switch child := children.(type) {
 		case *agent.Runner:
@@ -559,6 +569,17 @@ func joinStateError(join Join) error {
 	default:
 		return ErrJoinPending
 	}
+}
+
+// RemoteGoalOnly is the durable boundary of what an unextended external
+// protocol can prove. A local AgentSpec is not a negotiated remote capability.
+func RemoteGoalOnly(delegation Delegation) bool {
+	return delegation.Remote && delegation.Model == "" &&
+		len(delegation.ModelOptions) == 0 && delegation.Instructions == "" &&
+		delegation.OutputContract == nil && delegation.MaxModelOutputTokens == 0 &&
+		delegation.Limits == (agent.Limits{}) && delegation.SubtreeLimits == nil &&
+		len(delegation.ToolKeys) == 0 && len(delegation.InitialToolKeys) == 0 &&
+		len(delegation.HostedToolGrants) == 0
 }
 
 func validDelegation(delegation Delegation) bool {
