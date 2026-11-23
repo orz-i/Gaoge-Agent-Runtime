@@ -10,12 +10,12 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/libtnb/sqlite"
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
 	harnessdb "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-postgres"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/profile"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
-	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -41,17 +41,26 @@ var (
 
 // CreateNew publishes a fully initialized database without replacing any file.
 func CreateNew(ctx context.Context, path string) (*Store, error) {
-	return openStore(profile.CreateNew(ctx, path, initialize, validate))
+	return CreateNewWith(ctx, path, nil)
+}
+
+// CreateNewWith enrolls a Harness database through the chosen connection.
+func CreateNewWith(ctx context.Context, path string, open profile.OpenConnection) (*Store, error) {
+	return openStore(open.CreateNew(ctx, path, initialize, validate))
 }
 
 // OpenExisting verifies the schema and original recovery authority before use.
 func OpenExisting(ctx context.Context, path string) (*Store, error) {
-	return openStore(profile.OpenExisting(ctx, path, validate))
+	return OpenExistingWith(ctx, path, nil)
+}
+
+// OpenExistingWith checks a Harness database through the chosen connection.
+func OpenExistingWith(ctx context.Context, path string, open profile.OpenConnection) (*Store, error) {
+	return openStore(open.OpenExisting(ctx, path, validate))
 }
 
 func orm(pool *sql.DB) (*gorm.DB, error) {
-	// The supplied pool uses modernc.org/sqlite on every platform, including
-	// CGO_ENABLED=0 builds. GORM only supplies the SQL dialect.
+	// GORM uses the supplied pool and supplies only the SQL dialect.
 	return gorm.Open(sqlite.Dialector{Conn: pool, DriverName: "sqlite"}, &gorm.Config{Logger: logger.Discard})
 }
 

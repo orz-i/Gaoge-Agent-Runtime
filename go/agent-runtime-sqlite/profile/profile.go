@@ -20,6 +20,11 @@ import (
 // The pool is owned by the caller only after CreateNew or OpenExisting succeeds.
 type Setup func(context.Context, *sql.DB) error
 
+// OpenConnection selects a database/sql connection for an SDK-validated file URI.
+// The opener must honor mode=rw, immediate writes, UTC timestamps and all supplied
+// pragmas on every physical connection. A nil opener uses the built-in SQLite driver.
+type OpenConnection func(url.URL) (*sql.DB, error)
+
 var (
 	ErrUnsupportedSchema = errors.New("unsupported SQLite runtime schema")
 	ErrInsecurePath      = errors.New("SQLite path permissions or file type are insecure")
@@ -31,6 +36,11 @@ var (
 // never leaves a version-0 database at the requested path. Hard-link support
 // is required for this opt-in desktop prototype; fail closed otherwise.
 func CreateNew(ctx context.Context, path string, initialize, validate Setup) (*sql.DB, error) {
+	return OpenConnection(nil).CreateNew(ctx, path, initialize, validate)
+}
+
+// CreateNew uses the selected connection for staging, validation and final reopen.
+func (open OpenConnection) CreateNew(ctx context.Context, path string, initialize, validate Setup) (*sql.DB, error) {
 	if initialize == nil || validate == nil || ctx == nil || strings.TrimSpace(path) == "" || path == ":memory:" {
 		return nil, kernel.ErrInvalidInput
 	}
@@ -63,7 +73,7 @@ func CreateNew(ctx context.Context, path string, initialize, validate Setup) (*s
 	if err = tmp.Close(); err != nil {
 		return nil, err
 	}
-	stagedStore, err := OpenExisting(ctx, staged, initialize)
+	stagedStore, err := open.OpenExisting(ctx, staged, initialize)
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +121,7 @@ func CreateNew(ctx context.Context, path string, initialize, validate Setup) (*s
 	if closeErr != nil {
 		return nil, fmt.Errorf("published SQLite directory close failed: %w", closeErr)
 	}
-	return OpenExisting(ctx, abs, validate)
+	return open.OpenExisting(ctx, abs, validate)
 }
 
 func checkNewDestination(abs string) error {
@@ -133,6 +143,11 @@ func checkNewDestination(abs string) error {
 // OpenExisting checks the private file and its sidecars, then runs validate on
 // the same connection pool returned to the caller. It never creates a file.
 func OpenExisting(ctx context.Context, path string, validate Setup) (*sql.DB, error) {
+	return OpenConnection(nil).OpenExisting(ctx, path, validate)
+}
+
+// OpenExisting checks the file and its sidecars before passing the URI to the opener.
+func (open OpenConnection) OpenExisting(ctx context.Context, path string, validate Setup) (*sql.DB, error) {
 	if validate == nil || ctx == nil || strings.TrimSpace(path) == "" || path == ":memory:" {
 		return nil, kernel.ErrInvalidInput
 	}
@@ -171,7 +186,10 @@ func OpenExisting(ctx context.Context, path string, validate Setup) (*sql.DB, er
 	params.Add("_pragma", "synchronous(FULL)")
 	params.Set("_txlock", "immediate")
 	u.RawQuery = params.Encode()
-	db, err := sql.Open("sqlite", u.String())
+	if open == nil {
+		open = func(uri url.URL) (*sql.DB, error) { return sql.Open("sqlite", uri.String()) }
+	}
+	db, err := open(u)
 	if err != nil {
 		return nil, err
 	}
