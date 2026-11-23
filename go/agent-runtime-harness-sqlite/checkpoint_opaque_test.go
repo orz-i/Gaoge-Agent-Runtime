@@ -1,12 +1,17 @@
 package harnesssqlite_test
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"path/filepath"
 	"testing"
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
+	harnesssqlite "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-sqlite"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness/conformance"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/profile/encrypted"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/profile/testprofile"
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
@@ -54,4 +59,33 @@ func TestSQLiteCheckpointCorruptOpaqueEvidenceFailsAfterRestart(t *testing.T) {
 	if _, _, err = reopened.PutContextCheckpoint(t.Context(), original); !errors.Is(err, harness.ErrConflict) {
 		t.Fatalf("original Store replay overwrote corrupt evidence: %v", err)
 	}
+}
+
+func TestEncryptedSQLiteCheckpointOpaqueEvidenceReopen(t *testing.T) {
+	var key [32]byte
+	if _, err := rand.Read(key[:]); err != nil {
+		t.Fatal(err)
+	}
+	defer clear(key[:])
+	path := filepath.Join(testprofile.Dir(t), "Checkpoint-Original-Encrypted.sqlite")
+	open := encrypted.WithKey(&key)
+	store, err := harnesssqlite.CreateNewWith(t.Context(), path, open)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	conformance.CheckpointOpaqueEvidence(t, store, func() harness.Store {
+		if err := store.Close(); err != nil {
+			t.Fatal(err)
+		}
+		store, err = harnesssqlite.OpenExistingWith(t.Context(), path, open)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return store
+	})
 }
