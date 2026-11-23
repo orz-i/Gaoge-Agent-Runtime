@@ -21,6 +21,8 @@ type fakeClient struct {
 	stop                    string
 	started                 chan struct{}
 	release                 chan struct{}
+	cancelStarted           chan struct{}
+	cancelRelease           chan struct{}
 }
 
 func (f *fakeClient) OpenSession(context.Context, string, string) (string, error) {
@@ -63,7 +65,14 @@ func (f *fakeClient) Prompt(_ context.Context, runID, sessionID, goal string, on
 func (f *fakeClient) CancelSession(context.Context, string, string) error {
 	f.mu.Lock()
 	f.cancels++
+	started, release := f.cancelStarted, f.cancelRelease
 	f.mu.Unlock()
+	if started != nil {
+		close(started)
+	}
+	if release != nil {
+		<-release
+	}
 	return nil
 }
 func (f *fakeClient) counts() (int, int, int) {
@@ -230,8 +239,8 @@ func TestACPCancelCannotAcknowledgeOriginalInFlightPrompt(t *testing.T) {
 		t.Fatalf("original prompt did not settle cancellation %+v %v", finished.snap.Run, finished.err)
 	}
 	_, _, cancelCount := fake.counts()
-	if cancelCount != 0 {
-		t.Fatalf("cancel raced an unreturned physical Prompt: %d", cancelCount)
+	if cancelCount != 1 {
+		t.Fatalf("original ACP cancel notification was not sent once: %d", cancelCount)
 	}
 }
 func TestACPChangedSessionStateOrSameIDForgeryDenied(t *testing.T) {
@@ -333,5 +342,66 @@ func TestACPCancelAfterOriginalPromptCallbackReturnedDoesNotRetryPrompt(t *testi
 	opens, prompts, cancels := fake.counts()
 	if opens != 1 || prompts != 1 || cancels != 1 {
 		t.Fatalf("duplicate remote effect: open=%d prompt=%d cancel=%d", opens, prompts, cancels)
+	}
+}
+
+// The Prompt response is not a terminal receipt while the separately
+// admitted cancel notification may still dispatch/return. The original Prompt
+// result is sealed as running evidence; only after BOTH original callbacks
+// return may the terminal status be projected.
+func TestACPPromptReturnsBeforeCancelCallbackCannotPrematurelySettle(t *testing.T) {
+	fake := &fakeClient{
+		started: make(chan struct{}), release: make(chan struct{}),
+		cancelStarted: make(chan struct{}), cancelRelease: make(chan struct{}),
+	}
+	rt, runner := fixture(t, fake)
+	type ret struct {
+		snap kernel.Snapshot
+		err  error
+	}
+	promptDone := make(chan ret, 1)
+	go func() {
+		s, e := runner.StartRun(context.Background(), startRequest("dual-effects"))
+		promptDone <- ret{s, e}
+	}()
+	<-fake.started
+	snap, err := rt.Load(t.Context(), "dual-effects")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancelDone := make(chan ret, 1)
+	go func() {
+		s, e := runner.CancelRun(context.Background(), snap.Run.ID, snap.Run.Revision)
+		cancelDone <- ret{s, e}
+	}()
+	<-fake.cancelStarted
+	close(fake.release)
+	prompt := <-promptDone
+	if !errors.Is(prompt.err, ErrOutcomeUnknown) || prompt.snap.Run.Status != kernel.RunStatusRunning {
+		t.Fatalf("Prompt settled while Cancel callback was live: %+v %v", prompt.snap.Run, prompt.err)
+	}
+	state, err := runner.decodeState(prompt.snap)
+	if err != nil || !state.PromptReturned || state.CancelReturned || state.PromptOutput != "first reply" {
+		t.Fatalf("original Prompt result was not sealed as pending evidence: %+v %v", state, err)
+	}
+	if observed, loadErr := runner.LoadRun(t.Context(), "dual-effects"); !errors.Is(loadErr, ErrOutcomeUnknown) ||
+		observed.Run.Status != kernel.RunStatusRunning {
+		t.Fatalf("prematurely settled while Cancel was live: %+v %v", observed.Run, loadErr)
+	}
+	close(fake.cancelRelease)
+	cancelResult := <-cancelDone
+	if cancelResult.err != nil || cancelResult.snap.Run.Status != kernel.RunStatusCompleted {
+		t.Fatalf("returned Prompt receipt was not finalized after both returns: %+v %v", cancelResult.snap.Run, cancelResult.err)
+	}
+	var result struct{ Text, StopReason string }
+	if json.Unmarshal(cancelResult.snap.Result.Content, &result) != nil || result.Text != "first reply" || result.StopReason != "end_turn" {
+		t.Fatalf("lost original output: %s", cancelResult.snap.Result.Content)
+	}
+	if _, err = runner.LoadRun(t.Context(), "dual-effects"); err != nil {
+		t.Fatalf("verified terminal lost on reload: %v", err)
+	}
+	opens, prompts, cancels := fake.counts()
+	if opens != 1 || prompts != 1 || cancels != 1 {
+		t.Fatalf("duplicated external effects: %d %d %d", opens, prompts, cancels)
 	}
 }

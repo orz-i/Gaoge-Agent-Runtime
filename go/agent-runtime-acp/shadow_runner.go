@@ -33,7 +33,11 @@ type remoteState struct {
 	CancelPending  bool   `json:"cancelPending,omitempty"`
 	CancelReturned bool   `json:"cancelReturned,omitempty"`
 	StopReason     string `json:"stopReason,omitempty"`
-	Proof          string `json:"proof"`
+	// PromptOutput is held ONLY while an earlier admitted Cancel callback
+	// is still in flight. It is never a second physical execution receipt.
+	PromptOutput  string `json:"promptOutput,omitempty"`
+	PromptUnknown bool   `json:"promptUnknown,omitempty"`
+	Proof         string `json:"proof"`
 }
 
 func decodeRemoteState(raw json.RawMessage, state *remoteState) error {
@@ -41,7 +45,9 @@ func decodeRemoteState(raw json.RawMessage, state *remoteState) error {
 		state.Revision == "" || state.Cwd == "" || state.Version != ProtocolVersion ||
 		!state.OpenPending || state.PromptPending && state.SessionID == "" ||
 		state.PromptReturned && !state.PromptPending ||
-		state.CancelReturned && !state.CancelPending {
+		state.CancelReturned && !state.CancelPending ||
+		state.PromptUnknown && !state.PromptReturned ||
+		state.PromptOutput != "" && (!state.PromptReturned || state.StopReason != "end_turn") {
 		return ErrBindingChanged
 	}
 	return nil
@@ -85,7 +91,9 @@ func (r *ShadowRunner) decodeState(snap kernel.Snapshot) (remoteState, error) {
 	state.Proof = proof
 	if snap.Run.Status == kernel.RunStatusCompleted && (!state.PromptReturned || state.StopReason != "end_turn") ||
 		snap.Run.Status == kernel.RunStatusCancelled && (!state.PromptReturned || state.StopReason != "cancelled") ||
-		snap.Run.Status == kernel.RunStatusFailed && !state.PromptReturned {
+		snap.Run.Status == kernel.RunStatusFailed && !state.PromptReturned ||
+		(snap.Run.Status != kernel.RunStatusRunning && (state.PromptUnknown ||
+			(state.CancelPending && !state.CancelReturned))) {
 		return remoteState{}, ErrBindingChanged
 	}
 	return state, nil
@@ -195,6 +203,41 @@ func (r *ShadowRunner) StartRun(ctx context.Context, req agent.StartRequest) (ke
 	return r.finishPrompt(ctx, id, sessionID, stop, answer, promptErr)
 }
 
+// settledPromptMutation projects only an already returned original ACP Prompt,
+// after any concurrently admitted cancel callback has ALSO returned. A
+// session/cancel transport return alone is never a terminal remote receipt.
+func settledPromptMutation(state *remoteState) (kernel.Mutation, bool) {
+	mutation := kernel.Mutation{Status: kernel.RunStatusRunning}
+	if !state.PromptReturned || state.PromptUnknown ||
+		(state.CancelPending && !state.CancelReturned) {
+		return mutation, false
+	}
+	switch state.StopReason {
+	case "end_turn":
+		result, err := json.Marshal(struct {
+			Text       string `json:"text"`
+			StopReason string `json:"stopReason"`
+		}{Text: state.PromptOutput, StopReason: state.StopReason})
+		if err != nil {
+			return mutation, false
+		}
+		mutation.Status = kernel.RunStatusCompleted
+		mutation.Result = &kernel.Result{ContentType: "application/json", Content: result}
+	case "cancelled":
+		mutation.Status = kernel.RunStatusCancelled
+		mutation.ErrorCode = "acp.remote_cancelled"
+	case "max_tokens", "max_turn_requests", "refusal":
+		mutation.Status = kernel.RunStatusFailed
+		mutation.ErrorCode = "acp.remote_incomplete"
+	default:
+		return mutation, false
+	}
+	// Do not duplicate potentially large answer text in the sealed state
+	// once the Kernel terminal Result owns that exact content.
+	state.PromptOutput = ""
+	return mutation, true
+}
+
 func (r *ShadowRunner) finishPrompt(ctx context.Context, id, sessionID, stop, answer string, promptErr error) (kernel.Snapshot, error) {
 	// A concurrent Cancel may advance the original Kernel CAS while Prompt
 	// remains in flight. Only the original admitted Prompt may finish it.
@@ -210,27 +253,12 @@ func (r *ShadowRunner) finishPrompt(ctx context.Context, id, sessionID, stop, an
 		}
 		state.PromptReturned = true
 		state.StopReason = stop
-		mutation := kernel.Mutation{Status: kernel.RunStatusRunning,
-			Events: []kernel.EventDraft{{Type: "acp.remote_prompt_returned", Message: "ACP prompt callback returned"}}}
-		if promptErr == nil {
-			switch stop {
-			case "end_turn":
-				result, _ := json.Marshal(struct {
-					Text       string `json:"text"`
-					StopReason string `json:"stopReason"`
-				}{answer, stop})
-				mutation.Status = kernel.RunStatusCompleted
-				mutation.Result = &kernel.Result{ContentType: "application/json", Content: result}
-			case "cancelled":
-				mutation.Status = kernel.RunStatusCancelled
-				mutation.ErrorCode = "acp.remote_cancelled"
-			case "max_tokens", "max_turn_requests", "refusal":
-				mutation.Status = kernel.RunStatusFailed
-				mutation.ErrorCode = "acp.remote_incomplete"
-			default:
-				promptErr = ErrOutcomeUnknown
-			}
+		state.PromptUnknown = promptErr != nil
+		if !state.PromptUnknown && stop == "end_turn" {
+			state.PromptOutput = answer
 		}
+		mutation, settled := settledPromptMutation(&state)
+		mutation.Events = []kernel.EventDraft{{Type: "acp.remote_prompt_returned", Message: "ACP prompt callback returned"}}
 		next, applyErr := r.apply(ctx, snap, state, mutation)
 		if errors.Is(applyErr, kernel.ErrConflict) {
 			continue
@@ -238,7 +266,7 @@ func (r *ShadowRunner) finishPrompt(ctx context.Context, id, sessionID, stop, an
 		if applyErr != nil {
 			return next, errors.Join(ErrOutcomeUnknown, applyErr)
 		}
-		if promptErr != nil {
+		if !settled {
 			return next, ErrOutcomeUnknown
 		}
 		return next, nil
@@ -284,13 +312,11 @@ func (r *ShadowRunner) CancelRun(ctx context.Context, id string, expectedRevisio
 	if snap.Run.Status != kernel.RunStatusRunning {
 		return snap, nil
 	}
-	// A committed Prompt may still be delayed before its physical RPC.
-	// Sending cancel before that original callback returns could permit
-	// the Prompt to start after cancellation transport acknowledged.
-	// Match the A2A physical-send fence: no independent control may pass
-	// while a non-idempotent Prompt effect is still in flight.
-	if state.SessionID == "" || state.CancelPending ||
-		(state.PromptPending && !state.PromptReturned) {
+	// A committed Prompt may be in flight. ACP session/cancel is a best-effort
+	// notification, not a no-effect or terminal receipt. Both physical
+	// callbacks must durably return before a terminal Prompt can be signed.
+	// Earlier cancelled session admission fences a later Prompt CAS.
+	if state.SessionID == "" || state.CancelPending {
 		return snap, ErrOutcomeUnknown
 	}
 	state.CancelPending = true
@@ -318,16 +344,21 @@ func (r *ShadowRunner) CancelRun(ctx context.Context, id string, expectedRevisio
 			return current, ErrBindingChanged
 		}
 		frozen.CancelReturned = true
-		next, applyErr := r.apply(ctx, current, frozen, kernel.Mutation{Status: kernel.RunStatusRunning,
-			Events: []kernel.EventDraft{{Type: "acp.remote_cancel_returned", Message: "ACP cancel callback returned"}}})
+		mutation, settled := settledPromptMutation(&frozen)
+		mutation.Events = []kernel.EventDraft{{Type: "acp.remote_cancel_returned", Message: "ACP cancel callback returned"}}
+		next, applyErr := r.apply(ctx, current, frozen, mutation)
 		if errors.Is(applyErr, kernel.ErrConflict) {
 			continue
 		}
 		if applyErr != nil {
 			return next, errors.Join(ErrOutcomeUnknown, applyErr)
 		}
-		_ = sendErr // even nil is not a terminal remote acknowledgement
-		return next, ErrOutcomeUnknown
+		// Only the original returned Prompt can settle the Run. The cancel
+		// transport return is not independently sufficient, even if nil.
+		if sendErr != nil || !settled {
+			return next, ErrOutcomeUnknown
+		}
+		return next, nil
 	}
 	return snap, ErrOutcomeUnknown
 }
