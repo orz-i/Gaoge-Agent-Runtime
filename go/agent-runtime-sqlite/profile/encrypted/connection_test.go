@@ -86,7 +86,7 @@ func TestEncryptedStagingReopenAndDiskTemp(t *testing.T) {
 	var wrong [32]byte
 	for _, other := range []profile.OpenConnection{nil, encrypted.WithKey(&wrong), encrypted.WithKey(nil)} {
 		if pool, err := other.OpenExisting(ctx, path, check); err == nil {
-			pool.Close()
+			_ = pool.Close()
 			t.Fatal("opened without the enrolled key")
 		}
 	}
@@ -94,13 +94,19 @@ func TestEncryptedStagingReopenAndDiskTemp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	closeChecked := func(c io.Closer) {
+		t.Helper()
+		if err := c.Close(); err != nil {
+			t.Error(err)
+		}
+	}
+	defer closeChecked(db)
 	db.SetMaxIdleConns(0)
 	conn, err := db.Conn(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
+	defer closeChecked(conn)
 	for _, value := range []any{&when, sql.NullTime{Time: when, Valid: true}} {
 		row := conn.QueryRowContext(ctx, "SELECT count(*) FROM records WHERE at=?", value)
 		var matched int

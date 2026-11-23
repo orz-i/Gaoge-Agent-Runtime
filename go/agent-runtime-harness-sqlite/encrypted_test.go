@@ -58,7 +58,11 @@ func TestEncryptedStoresRetainOriginalAuthorities(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer s.Close()
+			defer func() {
+				if err := s.Close(); err != nil {
+					t.Error(err)
+				}
+			}()
 			after, err := s.ManagedRecoveryAuthority(ctx)
 			if err != nil || before != after {
 				t.Fatalf("reopen changed authority: %v", err)
