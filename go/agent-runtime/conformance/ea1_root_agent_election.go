@@ -2,8 +2,6 @@ package conformance
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"reflect"
@@ -230,14 +228,8 @@ func (f *ea1ElectionFixture) originalReceipt(s kernel.Snapshot, completed bool) 
 	req := model.CloneRequest(p.requests[0])
 	ea1StartSettlementJSONEqual(t, "original request", inv.Request, req)
 	req.InvocationID = ""
-	encoded, e := json.Marshal(struct {
-		Request             model.Request `json:"request"`
-		CatalogFingerprints []string      `json:"catalogFingerprints"`
-		Provider            string        `json:"provider"`
-		BindingFingerprint  string        `json:"bindingFingerprint"`
-	}{req, inv.CatalogFingerprints, inv.Provider, inv.BindingFingerprint})
-	sum := sha256.Sum256(encoded)
-	if e != nil || inv.RequestHash != hex.EncodeToString(sum[:]) || inv.Provider != p.ProviderName() || inv.BindingFingerprint != strings.Repeat("b", 64) || inv.ExecutionAttempt != 1 || inv.DispatchAttempt != 1 {
+	sum, e := ea1ModelIntentEvidenceHash(req, inv.CatalogFingerprints, inv.Provider, inv.BindingFingerprint)
+	if e != nil || inv.RequestHash != sum || inv.Provider != p.ProviderName() || inv.BindingFingerprint != strings.Repeat("b", 64) || inv.ExecutionAttempt != 1 || inv.DispatchAttempt != 1 {
 		t.Fatal("original request/provider/attempt tuple changed")
 	}
 	v, e := agent.ViewState(s)

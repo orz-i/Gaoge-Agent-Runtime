@@ -3,7 +3,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { writeGoCoverageReport } from "./go-coverage-report.mjs";
-import { coverageProfileName, modules, selectModules } from "./go-workspace-layout.mjs";
+import { coverageProfileName, detachedModules, modules, selectModules } from "./go-workspace-layout.mjs";
 import { measureCI } from "./ci-timings.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -86,8 +86,13 @@ function checkTidy(cwd, modulePath) {
     // coordinated *source* Core until the next immutable module tags exist.
     // A real no-replace consumer is verified separately by --published.
     const independentTransport = modulePath === "go/provider-transport";
-    const replaceCore = !independentTransport && modulePath !== "go/agent-runtime";
-    const replaceProvider = !independentTransport && modulePath !== "go/agent-runtime" && modulePath !== "go/agent-runtime-provider";
+    const detached = detachedModules.includes(modulePath);
+    // Detached consumers already carry their source replacements. Keep those
+    // declarations intact and verify exactly the isolated graph CI will use.
+    const temporaryReplaces = !independentTransport && !detached;
+    const replaceCore = temporaryReplaces && modulePath !== "go/agent-runtime";
+    const replaceProvider = temporaryReplaces && modulePath !== "go/agent-runtime" && modulePath !== "go/agent-runtime-provider";
+    const tidyEnv = detached ? { ...process.env, GOWORK: "off" } : process.env;
     const replaceHarness = ["go/agent-runtime-harness-sqlite", "go/agent-runtime-harness-postgres", "go/agent-runtime-http", "go/agent-runtime-acp", "go/agent-runtime-harness/examples/task-agent"].includes(modulePath);
     // Harness integration tests exercise this same source cohort's three
     // Kernel Stores; tidy must not resolve unreleased adapters from old tags.
@@ -117,14 +122,14 @@ function checkTidy(cwd, modulePath) {
     for (const name of adapterReplaces) {
       run("go", ["mod", "edit", `-replace=${name}=${path.relative(cwd, path.join(root, "go", name.split("/").at(-1)))}`], cwd);
     }
-    run("go", ["mod", "tidy"], cwd);
+    run("go", ["mod", "tidy"], cwd, false, tidyEnv);
     for (const name of adapterReplaces) run("go", ["mod", "edit", `-dropreplace=${name}`], cwd);
     if (replaceCore) run("go", ["mod", "edit", `-dropreplace=${core}`], cwd);
     if (replaceProvider) run("go", ["mod", "edit", `-dropreplace=${provider}`], cwd);
     if (replaceHarness) {
       run("go", ["mod", "edit", `-dropreplace=${harness}`], cwd);
     }
-    run("go", ["mod", "edit", "-fmt"], cwd);
+    run("go", ["mod", "edit", "-fmt"], cwd, false, tidyEnv);
     const changed = [...snapshots].filter(([file, before]) => {
       const after = existsSync(file) ? readFileSync(file) : null;
       if (before === null || after === null) return before !== after;
@@ -149,9 +154,10 @@ function walk(directory) {
   });
 }
 
-function run(command, args, cwd, capture = false) {
+function run(command, args, cwd, capture = false, env = process.env) {
   const result = spawnSync(command, args, {
     cwd,
+    env,
     encoding: "utf8",
     shell: false,
     stdio: capture ? "pipe" : "inherit",

@@ -312,14 +312,8 @@ func ea1AssertStartSettlementReceipt(t *testing.T, p *ea1StartSettlementPhysical
 	actual := p.requests[0]
 	canonical := model.CloneRequest(actual)
 	canonical.InvocationID = ""
-	encoded, e := json.Marshal(struct {
-		Request             model.Request `json:"request"`
-		CatalogFingerprints []string      `json:"catalogFingerprints"`
-		Provider            string        `json:"provider"`
-		BindingFingerprint  string        `json:"bindingFingerprint"`
-	}{canonical, inv.CatalogFingerprints, inv.Provider, inv.BindingFingerprint})
-	digest := sha256.Sum256(encoded)
-	if e != nil || inv.RequestHash != hex.EncodeToString(digest[:]) || !reflect.DeepEqual(inv.Request, actual) || actual.RunID != req.ID || actual.Model != req.Model || !reflect.DeepEqual(actual.ModelOptions, req.ModelOptions) || inv.ID != actual.InvocationID || inv.Provider != p.ProviderName() || inv.BindingFingerprint != strings.Repeat("b", 64) || inv.SourceRevision == 0 || inv.ExecutionAttempt != 1 || inv.DispatchAttempt != 1 {
+	digest, e := ea1ModelIntentEvidenceHash(canonical, inv.CatalogFingerprints, inv.Provider, inv.BindingFingerprint)
+	if e != nil || inv.RequestHash != digest || !reflect.DeepEqual(inv.Request, actual) || actual.RunID != req.ID || actual.Model != req.Model || !reflect.DeepEqual(actual.ModelOptions, req.ModelOptions) || inv.ID != actual.InvocationID || inv.Provider != p.ProviderName() || inv.BindingFingerprint != strings.Repeat("b", 64) || inv.SourceRevision == 0 || inv.ExecutionAttempt != 1 || inv.DispatchAttempt != 1 {
 		t.Fatal("full original Model request/hash/provider/attempt mismatch")
 	}
 	view, e := agent.ViewState(s)

@@ -17,6 +17,12 @@ export const modules = [
   "go/provider-transport",
 ];
 
+// Detached source consumers intentionally use GOWORK=off and permanent
+// local replaces. They share static dependency validation, not coverage
+// shards or the published Runtime cohort.
+export const detachedModules = ["integration/continuation-e2e", "integration/otel-e2e"];
+export const allGoModules = [...modules, ...detachedModules];
+
 // P0 run 44533727890: split the 938-second race suite into approximately
 // 280/330/328-second groups. These are scheduling hints, never test filters.
 export const shards = {
@@ -39,7 +45,7 @@ export function validateLayout(groups = shards) {
 
 export function selectModules(mode, args) {
   validateLayout();
-  if (!args.length) return { selected: modules, shard: null };
+  if (!args.length) return { selected: mode === "tidy-check" ? allGoModules : modules, shard: null };
   const match = args.length === 1 && /^--shard=([a-z]+)$/u.exec(args[0]);
   const shard = match?.[1];
   if (!["test", "race", "coverage"].includes(mode) || !Object.hasOwn(shards, shard ?? "")) {

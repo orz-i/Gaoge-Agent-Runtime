@@ -1,5 +1,26 @@
 # Breaking changes (pre-stable Beta)
 
+## PR #154 — Model original evidence and settlement qualification hard cut
+
+Model intent, logical budget reservation and physical sampling hashes now bind
+versioned original-byte evidence, rather than compacted JSON. The shared v2
+codec distinguishes missing RawMessage fields from explicit JSON null and
+preserves their original bytes across Agent State, Model identity and
+SharedBudget receipt persistence. Required missing fields carry a sealed
+absence marker; omitted optional fields remain absent. The Agent State and
+Model identity/receipt evidence domains advance to v2. Old v1 State, active
+Model intents and unsealed or v1 Model receipts are not migrated or rehashed. Drain or quarantine
+in-flight runs before switching all writers to the new SDK cohort; do not mix
+old/new workers or infer new execution authority from old receipts.
+
+`agent.BoundedBudgetPorts` no longer delegates Model usage settlement,
+qualification validation or receipt decoding to Host callbacks. Hosts retain
+scope, pure planning and projection. The Runtime commits original Model
+receipt qualification and actual charges in one ledger CAS; accepted response
+evidence is lossless, rejected response evidence remains billing-only. Native
+settled qualification takes precedence over external Provider evidence during
+recovery.
+
 ## Root / Named AgentSpec: one execution capability shape
 
 `ConfigSnapshot` and `NamedAgentSnapshot` now embed the same `AgentSpec` for

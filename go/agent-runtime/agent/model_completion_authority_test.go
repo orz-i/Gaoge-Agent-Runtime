@@ -10,8 +10,13 @@ import (
 )
 
 func completionAuthorityFixture() (*modelCompletionAuthority, model.Response) {
+	request := model.Request{RunID: "run", InvocationID: "inv", Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("frozen")}}}
+	plan, err := newPhysicalSamplingPlan(request, request)
+	if err != nil {
+		panic(err)
+	}
 	return &modelCompletionAuthority{
-		named: true, request: model.Request{RunID: "run", InvocationID: "inv", Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("frozen")}}},
+		named: true, request: request, plan: plan,
 		duplicate: func(string) bool { return false },
 	}, model.Response{ResponseID: "physical", Usage: &model.Usage{InputTokens: 17, OutputTokens: 5}}
 }
@@ -26,6 +31,17 @@ func TestModelCompletionAuthoritySourceAndReplay(t *testing.T) {
 			_, err := a.replay(a.request, r, nil)
 			return err
 		}, true},
+		{"unfrozen_replay", func(a *modelCompletionAuthority, r model.Response) error {
+			a.plan = nil
+			_, err := a.replay(a.request, r, nil)
+			return err
+		}, false},
+		{"changed_sampling_replay", func(a *modelCompletionAuthority, r model.Response) error {
+			q := model.CloneRequest(a.request)
+			q.MaxOutputTokens = 64
+			_, err := a.replay(q, r, nil)
+			return err
+		}, false},
 		{"wrong_invocation_replay", func(a *modelCompletionAuthority, r model.Response) error {
 			q := model.CloneRequest(a.request)
 			q.InvocationID = "other"
@@ -170,5 +186,43 @@ func TestConcurrentModelStreamIdentityAndClosedSink(t *testing.T) {
 		if err := client.late(model.StreamEvent{Delta: "late"}); !errors.Is(err, ErrInvalidModelResponse) || emitted != count {
 			t.Fatalf("closed callback accepted: %v %d/%d", err, emitted, count)
 		}
+	}
+}
+
+func TestModelCompletionAuthoritySettlementCannotBePromotedOrRelabeled(t *testing.T) {
+	for _, name := range []string{"unsettled", "promoted", "relabeled", "retained"} {
+		t.Run(name, func(t *testing.T) {
+			a, r := completionAuthorityFixture()
+			a.plan.LedgerID = "ledger"
+			r.Content = "original"
+			if _, err := a.record(r, nil); err != nil {
+				t.Fatal(err)
+			}
+			if name == "unsettled" {
+				if _, err := a.validateFinal(r, nil); !errors.Is(err, ErrInvalidModelResponse) {
+					t.Fatal("physical receipt bypassed required settlement")
+				}
+				return
+			}
+			rejected := model.NewResponseRejectedError(model.NewClassifiedError(errors.New("overrun"), "model.post_generation_failed"))
+			billing := model.BillingOnlyResponse(r)
+			if _, err := a.settle(billing, rejected); !model.IsResponseRejectedError(err) {
+				t.Fatal(err)
+			}
+			switch name {
+			case "promoted":
+				if _, err := a.validateFinal(r, nil); !errors.Is(err, ErrInvalidModelResponse) {
+					t.Fatal("settlement rejection promoted")
+				}
+			case "relabeled":
+				if _, err := a.validateFinal(billing, model.NewResponseRejectedError(errors.New("other"))); !errors.Is(err, ErrInvalidModelResponse) {
+					t.Fatal("settlement rejection relabeled")
+				}
+			case "retained":
+				if _, err := a.validateFinal(billing, rejected); !model.IsResponseRejectedError(err) || model.ClassifiedErrorCode(err) != "model.post_generation_failed" {
+					t.Fatal("original settlement lost")
+				}
+			}
+		})
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	runtimebudget "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/observability"
@@ -136,7 +137,7 @@ func modelInvocationRequestHash(request model.Request, fingerprints []string, pr
 		return "", errors.Join(ErrInvalidRequest, err)
 	}
 	request.InvocationID = ""
-	encoded, err := json.Marshal(struct {
+	proof, err := jsoncontract.SealOpaque("agent-model-intent-opaque-v2", struct {
 		Request             model.Request          `json:"request"`
 		CatalogFingerprints []string               `json:"catalogFingerprints"`
 		Provider            string                 `json:"provider"`
@@ -148,8 +149,7 @@ func modelInvocationRequestHash(request model.Request, fingerprints []string, pr
 	if err != nil {
 		return "", errors.Join(ErrInvalidRequest, err)
 	}
-	digest := sha256.Sum256(encoded)
-	return hex.EncodeToString(digest[:]), nil
+	return proof.Digest, nil
 }
 
 func activeModelInvocation(state runState) (*ModelInvocation, bool) {
@@ -237,7 +237,7 @@ func validModelInvocations(values []ModelInvocation) bool {
 	for index, invocation := range values {
 		if !validContextSummaryInvocation(invocation) || !contextSummaryInputBytesWithinPolicy(invocation) ||
 			(invocation.SamplingPlan != nil && (invocation.Status == ModelInvocationConsumed ||
-				invocation.Purpose != "" || !invocation.SamplingPlan.valid(invocation.Request))) {
+				(invocation.Purpose != "" && invocation.SamplingPlan.LedgerID != "") || !invocation.SamplingPlan.valid(invocation.Request))) {
 			return false
 		}
 		if strings.TrimSpace(invocation.ID) == "" || strings.TrimSpace(invocation.RunID) == "" ||
@@ -346,9 +346,9 @@ func validModelInvocationReceipt(invocation ModelInvocation) bool {
 	}
 	if invocation.ErrorCode != "" {
 		return invocation.Usage != nil && invocation.Response.Usage != nil &&
-			validModelUsage(invocation.Usage) && *invocation.Usage == *invocation.Response.Usage
+			model.ValidUsage(invocation.Usage) && *invocation.Usage == *invocation.Response.Usage
 	}
-	return validModelResponse(invocation.Response)
+	return model.ValidResponse(invocation.Response)
 }
 
 func validBindingFingerprint(value string) bool {
@@ -388,17 +388,24 @@ func providerName(client model.Client, request model.Request) string {
 // pending intent as well as at physical dispatch. A changed Host binding must
 // not acquire another durable Model execution attempt simply to be rejected.
 func matchesFrozenProviderBinding(client model.Client, invocation ModelInvocation) bool {
+	if !matchesProviderBindingForRequest(client, invocation, invocation.Request) {
+		return false
+	}
+	return invocation.SamplingPlan == nil || matchesProviderBindingForRequest(client, invocation, invocation.SamplingPlan.request(invocation.Request))
+}
+
+func matchesProviderBindingForRequest(client model.Client, invocation ModelInvocation, request model.Request) bool {
 	if invocation.Provider == "" && declaresProviderIdentity(client) {
 		return false
 	}
-	if providerName(client, invocation.Request) != invocation.Provider {
+	if providerName(client, request) != invocation.Provider {
 		return false
 	}
 	if invocation.Provider == "" && invocation.BindingFingerprint == "" {
 		return true // No external Provider identity was declared by this Client.
 	}
 	return validBindingFingerprint(invocation.BindingFingerprint) &&
-		modelBindingFingerprint(client, invocation.Request) == invocation.BindingFingerprint
+		modelBindingFingerprint(client, request) == invocation.BindingFingerprint
 }
 
 func (runner *Runner) ensureModelInvocation(
@@ -502,7 +509,7 @@ func (runner *Runner) prepareBusinessInvocation(ctx context.Context, snapshot ke
 		}
 		request = model.CloneRequest(prepared)
 	}
-	return preparation.finish(request)
+	return preparation.finish(ctx, request)
 }
 
 // PrepareModelRequest may project messages and visible Tool schemas before the
@@ -738,7 +745,7 @@ func (runner *Runner) executeModelInvocation(
 	invocation ModelInvocation,
 ) (kernel.Snapshot, runState, error) {
 	if invocation.Status == ModelInvocationCompleted {
-		return snapshot, state, nil
+		return snapshot, state, runner.requireSettledModelQualification(ctx, invocation)
 	}
 	if invocation.Status != ModelInvocationPending {
 		return kernel.Snapshot{}, runState{}, ErrInvalidRequest
@@ -769,22 +776,22 @@ func (runner *Runner) executeModelInvocation(
 	authority := modelCompletionAuthority{
 		named:   invocation.Provider != "" && invocation.BindingFingerprint != "",
 		request: model.CloneRequest(invocation.Request),
+		plan:    cloneSamplingPlan(invocation.SamplingPlan),
 		duplicate: func(id string) bool {
 			return duplicatePhysicalProviderResponseID(state, invocation, id)
 		},
 	}
 	generateCtx := ctx
 	if invocation.SamplingPlan != nil {
-		if runner.samplingBudget == nil || !invocation.SamplingPlan.valid(invocation.Request) {
+		if (invocation.SamplingPlan.LedgerID != "" && runner.samplingBudget == nil) || !invocation.SamplingPlan.valid(invocation.Request) {
 			return snapshot, state, ErrInvalidRequest
 		}
-		generateCtx = context.WithValue(generateCtx, samplingPlanKey{}, cloneSamplingPlan(invocation.SamplingPlan))
 	}
 	if invocation.Purpose == ModelInvocationContextSummary {
 		generateCtx = context.WithValue(ctx, contextSummaryModelKey{}, true)
 	}
 	response, err := runner.generateModelWithPolicyGuarded(generateCtx, model.CloneRequest(invocation.Request), snapshot.Run.DeadlineAt,
-		func(dispatchCtx context.Context) error {
+		func(dispatchCtx context.Context, candidate model.Request) error {
 			// Resolve and revalidate Catalog authority first: a slow external
 			// Hosted Tool resolver can also outlive the claim lease. The
 			// committed Revision/lease and Store epoch checks MUST be last,
@@ -796,7 +803,7 @@ func (runner *Runner) executeModelInvocation(
 			// discovery or the shared concurrency limiter holds this call.
 			// Recheck after every such wait, before the final claim/epoch
 			// guards and physical Provider dispatch.
-			if !matchesFrozenProviderBinding(runner.model, invocation) {
+			if !matchesProviderBindingForRequest(runner.model, invocation, candidate) {
 				return ErrProviderBindingMismatch
 			}
 			if err := runner.validateModelInvocationClaim(dispatchCtx, snapshot, invocation); err != nil {
@@ -807,6 +814,13 @@ func (runner *Runner) executeModelInvocation(
 			}
 			if invocation.DispatchAttempt != 0 {
 				return ErrModelOutcomeUnknown
+			}
+			if invocation.SamplingPlan == nil {
+				plan, err := newPhysicalSamplingPlan(invocation.Request, candidate)
+				if err != nil {
+					return err
+				}
+				invocation.SamplingPlan = plan
 			}
 			invocation.DispatchAttempt = invocation.ExecutionAttempt
 			if !replaceLastModelInvocation(&state, invocation) {
@@ -828,21 +842,20 @@ func (runner *Runner) executeModelInvocation(
 		},
 		&authority,
 	)
-	response.Content = strings.TrimSpace(response.Content)
-	if err == nil && response.Usage != nil && validModelUsage(response.Usage) && !validModelResponse(response) {
+	if err == nil && response.Usage != nil && model.ValidUsage(response.Usage) && !model.ValidResponse(response) {
 		err = model.NewResponseRejectedError(ErrInvalidModelResponse)
 	}
 	// Validate against the original receipt, not just another syntactically
 	// valid ID. The same authority also fences downstream shared settlement.
-	response, err = authority.validate(response, err)
+	response, err = authority.validateFinal(response, err)
 	late := errors.Is(err, ErrModelLateResult)
-	knownRejection := model.IsResponseRejectedError(err) && response.Usage != nil && validModelUsage(response.Usage)
+	knownRejection := model.IsResponseRejectedError(err) && response.Usage != nil && model.ValidUsage(response.Usage)
 	if knownRejection {
 		// The rejected assistant reply is NOT an authorized transcript or
 		// executable Tool payload. Persist only the verified billing receipt
 		// even for custom named clients and Model middleware that return
 		// an unsanitized rejected Response.
-		response = model.Response{ResponseID: response.ResponseID, Usage: model.CloneUsage(response.Usage)}
+		response = model.BillingOnlyResponse(response)
 	}
 	var denied modelPreDispatchDenied
 	if errors.As(err, &denied) {
@@ -877,7 +890,7 @@ func (runner *Runner) executeModelInvocation(
 		})
 		return snapshot, state, cause
 	}
-	if !knownRejection && !validModelResponse(response) {
+	if !knownRejection && !model.ValidResponse(response) {
 		endedAt := runner.clock.Now().UTC()
 		runner.recordTelemetry(ctx, observability.Event{
 			Scope: observability.ScopeModelInvocation, Phase: observability.PhaseFailed,
@@ -1056,15 +1069,26 @@ func (runner *Runner) releaseModelInvocationExecution(
 	})
 }
 
-func modelDefinitions(invocation ModelInvocation) []tools.Definition {
-	if invocation.SamplingPlan != nil && invocation.SamplingPlan.OmitLocalTools {
-		return nil
+// The physical Tool subset and its original Catalog fingerprints travel
+// together. A narrowed or reordered plan cannot misbind a logical index.
+func modelDefinitions(invocation ModelInvocation) ([]tools.Definition, []string) {
+	definitions := invocation.Request.Tools
+	if p := invocation.SamplingPlan; p != nil {
+		definitions = samplingTools(definitions, p.LocalToolKeys, p.OmitLocalTools, localSamplingKey)
 	}
-	result := make([]tools.Definition, len(invocation.Request.Tools))
-	for index, definition := range invocation.Request.Tools {
-		result[index] = tools.CloneDefinition(definition)
+	byKey := make(map[string]string, len(invocation.Request.Tools))
+	for i, d := range invocation.Request.Tools {
+		if i < len(invocation.CatalogFingerprints) {
+			byKey[d.Key] = invocation.CatalogFingerprints[i]
+		}
 	}
-	return result
+	result := make([]tools.Definition, len(definitions))
+	fingerprints := make([]string, len(definitions))
+	for i, d := range definitions {
+		result[i] = tools.CloneDefinition(d)
+		fingerprints[i] = byKey[d.Key]
+	}
+	return result, fingerprints
 }
 
 type agentClock struct{}

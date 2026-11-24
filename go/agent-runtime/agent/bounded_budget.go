@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"strings"
 
@@ -22,13 +21,6 @@ type BoundedBudgetRunBinding struct {
 	RunID   string
 	Binding budget.RunBudget
 }
-type BoundedBudgetSettlement struct {
-	SuspendOnError bool
-	Response       model.Response
-	Usage          budget.Usage
-	Receipt        json.RawMessage
-	Related        []budget.Reservation
-}
 
 // Ports retain Host authorization, policy and persistence projections. None
 // receives Next; Runtime alone owns dispatch/accounting orchestration.
@@ -37,10 +29,6 @@ type BoundedBudgetPorts interface {
 	Project(context.Context, budget.Ledger) error
 	PlanModel(context.Context, budget.Ledger, model.Request) (model.Request, budget.Reservation, error)
 	PreviewModel(budget.Ledger, model.Request) (model.Request, budget.Reservation, error)
-	RequiresTokenUsage(budget.Ledger, string) bool
-	PlanSettlement(budget.Ledger, budget.Reservation, model.Response, error) (BoundedBudgetSettlement, error)
-	ValidateSettlement(budget.Ledger, budget.Ledger, budget.Reservation, budget.Usage) error
-	DecodeReceipt(json.RawMessage) (model.Response, error)
 }
 type BoundedBudgetAdapter struct {
 	coordinator budget.Coordinator
@@ -154,18 +142,24 @@ func (a *BoundedBudgetAdapter) Run(ctx context.Context, inv plugin.RunInvocation
 }
 func (a *BoundedBudgetAdapter) Model(ctx context.Context, request model.Request, emit model.StreamSink, next plugin.ModelNext) (model.Response, error) {
 	original := model.CloneRequest(request)
-	frozen := samplingPlanFrom(ctx)
+	call := modelCallFrom(ctx)
+	frozen := call.samplingPlan()
 	l, err := a.bind(ctx, request.RunID)
 	if err != nil {
 		return model.Response{}, err
 	}
 	if l.ID == "" {
-		if frozen != nil {
+		if frozen != nil && frozen.LedgerID != "" {
 			return model.Response{}, budget.ErrLedgerConflict
 		}
 		out, e := next(ctx, request, emit)
 		callbackscope.Record(ctx, a, "budget.unconfigured.returned", original)
 		return out, e
+	}
+	// A Runtime invocation may not acquire a new ledger or re-plan after its
+	// original intent was committed. Standalone calls have no such intent.
+	if call != nil && (frozen == nil || frozen.LedgerID == "") {
+		return model.Response{}, budget.ErrLedgerConflict
 	}
 	if strings.TrimSpace(request.InvocationID) == "" {
 		return model.Response{}, ErrInvalidRequest
@@ -194,12 +188,12 @@ func (a *BoundedBudgetAdapter) Model(ctx context.Context, request model.Request,
 	}
 	projectErr := a.ports.Project(ctx, l)
 	if value := l.Reservations[res.ID]; err == nil && value.Status == budget.ReservationSettled {
-		out, callErr := a.ports.DecodeReceipt(value.Receipt)
+		out, callErr := budget.DecodeModelReceipt(value)
 		out, callErr = ReplayModelResponseAuthority(ctx, request, out, callErr)
 		if projectErr == nil {
 			a.record(ctx, "budget.model.replayed", original, l, res.ID)
 		}
-		return boundedSettledModelResult(out, callErr, projectErr)
+		return a.settledModelResult(ctx, out, callErr, projectErr)
 	}
 	if projectErr != nil {
 		return model.Response{}, projectErr
@@ -229,31 +223,29 @@ func (a *BoundedBudgetAdapter) Model(ctx context.Context, request model.Request,
 		return model.Response{}, errors.Join(callErr, e)
 	}
 	knownRejection := model.IsResponseRejectedError(callErr) && out.Usage != nil
-	if (callErr != nil && !knownRejection) || (a.ports.RequiresTokenUsage(l, res.RunID) && out.Usage == nil) {
+	if (callErr != nil && !knownRejection) || (l.HasRunTokenLimits(res.RunID) && out.Usage == nil) {
 		updated, e := a.coordinator.Suspend(accounting, l.ID, res.ID)
 		if callErr == nil {
 			callErr = budget.ErrUnmetered
 		}
 		return out, errors.Join(callErr, e, a.ports.Project(accounting, updated))
 	}
-	plan, e := a.ports.PlanSettlement(l, res, out, callErr)
+	updated, e := a.coordinator.SettleModel(accounting, l.ID, request, out, callErr)
 	if e != nil {
-		if !plan.SuspendOnError {
-			return out, e
+		if errors.Is(e, budget.ErrInvalidUsage) {
+			suspended, suspendErr := a.coordinator.Suspend(accounting, l.ID, res.ID)
+			return out, errors.Join(e, suspendErr, a.ports.Project(accounting, suspended))
 		}
-		updated, suspendErr := a.coordinator.Suspend(accounting, l.ID, res.ID)
-		return out, errors.Join(e, suspendErr, a.ports.Project(accounting, updated))
+		return out, e
 	}
-	updated, e := a.coordinator.SettleWithReceipts(accounting, l.ID, res.ID, plan.Usage, plan.Receipt, plan.Related)
-	if e != nil {
-		return plan.Response, e
-	}
-	validationErr := a.ports.ValidateSettlement(l, updated, res, plan.Usage)
+	// Both live delivery and read-only recovery interpret the same sealed
+	// execution qualification. Projection failure is local, not a quota fact.
+	settled, receiptErr := budget.DecodeModelReceipt(updated.Reservations[res.ID])
 	projectErr = a.ports.Project(accounting, updated)
 	if projectErr == nil {
 		a.record(ctx, "budget.model.settled", original, updated, res.ID)
 	}
-	return boundedSettledModelResult(plan.Response, callErr, errors.Join(validationErr, projectErr))
+	return a.settledModelResult(ctx, settled, errors.Join(receiptErr, callErr), projectErr)
 }
 
 // samplingReservation either reconstructs the previously admitted physical
@@ -262,18 +254,39 @@ func (a *BoundedBudgetAdapter) Model(ctx context.Context, request model.Request,
 func (a *BoundedBudgetAdapter) samplingReservation(ctx context.Context, ledger budget.Ledger, original model.Request, frozen *SamplingPlan) (model.Request, budget.Reservation, error) {
 	if frozen == nil {
 		request, res, err := a.ports.PlanModel(ctx, ledger, model.CloneRequest(original))
-		if err == nil && (res.RunID != original.RunID || res.ID == "" || !validDispatchModelRequest(original, request)) {
-			err = ErrInvalidRequest
+		if err != nil {
+			return request, res, err
 		}
-		return request, res, err
+		if res.RunID != original.RunID || res.ID == "" || !validDispatchModelRequest(original, request) {
+			return request, res, ErrInvalidRequest
+		}
+		// Standalone Adapter calls have no durable Agent intent. Their ledger
+		// still binds the physical receipt before dispatch. Existing settled
+		// reservations can be replayed by their original logical admission ID.
+		if res.Status == budget.ReservationSettled || res.Dispatched {
+			return request, res, nil
+		}
+		hash, err := model.PhysicalRequestHash(request)
+		if err != nil {
+			return request, res, err
+		}
+		if res.PhysicalRequestHash != "" && res.PhysicalRequestHash != hash {
+			return request, res, budget.ErrLedgerConflict
+		}
+		res.PhysicalRequestHash = hash
+		return request, res, nil
 	}
 	if frozen.LedgerID != ledger.ID || !frozen.valid(original) ||
-		a.ports.RequiresTokenUsage(ledger, original.RunID) != (frozen.Requested.InputTokens > 0) {
+		ledger.HasRunTokenLimits(original.RunID) != (frozen.Requested.InputTokens > 0) {
 		return model.Request{}, budget.Reservation{}, budget.ErrLedgerConflict
 	}
-	request, res := frozen.request(original), frozen.reservation(original)
+	request := frozen.request(original)
+	res, err := frozen.reservation(original)
+	if err != nil {
+		return model.Request{}, budget.Reservation{}, err
+	}
 	if existing, found := ledger.Reservations[res.ID]; found {
-		if existing.RunID != res.RunID || existing.RequestHash != res.RequestHash || existing.Requested != res.Requested {
+		if existing.RunID != res.RunID || existing.RequestHash != res.RequestHash || existing.PhysicalRequestHash != res.PhysicalRequestHash || existing.Requested != res.Requested {
 			return model.Request{}, res, budget.ErrLedgerConflict
 		}
 		res = existing
@@ -344,12 +357,19 @@ func (a *BoundedBudgetAdapter) record(ctx context.Context, op string, request mo
 		Reservation budget.Reservation
 	}{request, l.ID, l.Revision, l.Reservations[id]})
 }
-func boundedSettledModelResult(out model.Response, callErr, localErr error) (model.Response, error) {
+func (a *BoundedBudgetAdapter) settledModelResult(ctx context.Context, out model.Response, callErr, localErr error) (model.Response, error) {
 	if localErr != nil {
-		callErr = model.NewClassifiedError(errors.Join(callErr, localErr), "model.post_generation_failed")
-		if out.Usage != nil {
-			callErr = model.NewResponseRejectedError(callErr)
+		if model.IsResponseRejectedError(callErr) {
+			callErr = errors.Join(callErr, localErr)
+		} else {
+			callErr = model.NewClassifiedError(errors.Join(callErr, localErr), "model.post_generation_failed")
+			if out.Usage != nil {
+				callErr = model.NewResponseRejectedError(callErr)
+			}
 		}
+	}
+	if call := modelCallFrom(ctx); call != nil && call.completion != nil {
+		return call.completion.settle(out, callErr)
 	}
 	return out, callErr
 }

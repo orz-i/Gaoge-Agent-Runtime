@@ -85,16 +85,18 @@ const (
 // worker attempt. Receipt allows a caller to recover after settlement but before
 // its own state transition commits. An unknown dispatched result remains held.
 type Reservation struct {
-	ID          string            `json:"id"`
-	RunID       string            `json:"runID"`
-	RequestHash string            `json:"requestHash"`
-	Requested   Usage             `json:"requested"`
-	Usage       Usage             `json:"usage"`
-	Status      ReservationStatus `json:"status"`
-	Active      bool              `json:"active,omitempty"`
-	Dispatched  bool              `json:"dispatched,omitempty"`
-	Receipt     json.RawMessage   `json:"receipt,omitempty"`
-	Dimension   Dimension         `json:"dimension,omitempty"`
+	ID          string `json:"id"`
+	RunID       string `json:"runID"`
+	RequestHash string `json:"requestHash"`
+	// PhysicalRequestHash binds a Model reservation to its exact dispatch shape.
+	PhysicalRequestHash string            `json:"physicalRequestHash,omitempty"`
+	Requested           Usage             `json:"requested"`
+	Usage               Usage             `json:"usage"`
+	Status              ReservationStatus `json:"status"`
+	Active              bool              `json:"active,omitempty"`
+	Dispatched          bool              `json:"dispatched,omitempty"`
+	Receipt             json.RawMessage   `json:"receipt,omitempty"`
+	Dimension           Dimension         `json:"dimension,omitempty"`
 }
 
 // Ledger is the authoritative persistent accounting state for one Harness Turn.
@@ -278,7 +280,7 @@ func (ledger *Ledger) applyReservation(request Reservation, active bool) (error,
 	}
 	existing, found := ledger.Reservations[request.ID]
 	if found {
-		if existing.RunID != request.RunID || existing.RequestHash != request.RequestHash {
+		if existing.RunID != request.RunID || existing.RequestHash != request.RequestHash || existing.PhysicalRequestHash != request.PhysicalRequestHash {
 			return nil, ErrLedgerConflict
 		}
 		if existing.Status == ReservationSettled {

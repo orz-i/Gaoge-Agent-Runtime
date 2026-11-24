@@ -53,7 +53,7 @@ func (authority *BudgetAuthority) AdmitRemote(ctx context.Context, runID string)
 	if err != nil || ledger.ID == "" {
 		return err
 	}
-	if hasRunTokenLimits(ledger, runID) {
+	if ledger.HasRunTokenLimits(runID) {
 		return budget.ErrUnmetered
 	}
 	return authority.project(ctx, ledger)
@@ -138,11 +138,11 @@ func (authority *BudgetAuthority) bindRun(ctx context.Context, runID string) (bu
 // previewModelReservation computes all Tool visibility restrictions against the
 // ledger that would hold this reservation. It does not meter or write quota.
 func (authority *BudgetAuthority) previewModelReservation(ledger budget.Ledger, request model.Request) (model.Request, budget.Reservation, error) {
-	raw, err := json.Marshal(request)
+	hash, err := model.PhysicalRequestHash(request)
 	if err != nil {
 		return request, budget.Reservation{}, err
 	}
-	reservation := budget.Reservation{ID: "model:" + request.InvocationID, RunID: request.RunID, RequestHash: hashInvocationBytes(raw), Requested: budget.Usage{LLMCalls: 1}}
+	reservation := budget.Reservation{ID: "model:" + request.InvocationID, RunID: request.RunID, RequestHash: hash, Requested: budget.Usage{LLMCalls: 1}}
 	if existing, found := ledger.Reservations[reservation.ID]; found {
 		if existing.RequestHash != reservation.RequestHash || existing.RunID != reservation.RunID {
 			return request, reservation, budget.ErrLedgerConflict
@@ -155,7 +155,7 @@ func (authority *BudgetAuthority) previewModelReservation(ledger budget.Ledger, 
 		request = applyHostedReservation(request, existing.Requested.HostedToolCalls, ledger, existing.RunID)
 	} else {
 		request, reservation = reserveHostedModelTools(request, reservation, ledger)
-		if hasRunTokenLimits(ledger, request.RunID) {
+		if ledger.HasRunTokenLimits(request.RunID) {
 			// A known output-only limit can be applied even before input is
 			// measured. The total-token ceiling is finalized after counting.
 			ceiling := request.MaxOutputTokens
@@ -185,7 +185,7 @@ func (authority *BudgetAuthority) previewModelReservation(ledger budget.Ledger, 
 
 func (authority *BudgetAuthority) modelReservation(ctx context.Context, ledger budget.Ledger, original model.Request) (model.Request, budget.Reservation, error) {
 	request, reservation, err := authority.previewModelReservation(ledger, original)
-	if err != nil || !hasRunTokenLimits(ledger, original.RunID) {
+	if err != nil || !ledger.HasRunTokenLimits(original.RunID) {
 		return request, reservation, err
 	}
 	if reservation.Status == budget.ReservationSettled || reservation.Dispatched {
@@ -328,20 +328,6 @@ func projectBudgetItem(ctx context.Context, store Store, feed *TurnFeed, clock C
 	_, err = appendItemFact(ctx, store, feed, Item{ID: stableID("hbudget", ledger.ID, uintString(ledger.Revision)), TurnID: ledger.ID,
 		Kind: ItemBudget, Status: ItemCompleted, Payload: payload, CreatedAt: now, UpdatedAt: now})
 	return err
-}
-
-func hasRunTokenLimits(ledger budget.Ledger, runID string) bool {
-	if budget.HasTokenLimits(ledger.Limits) {
-		return true
-	}
-	for runID != "" {
-		binding := ledger.Runs[runID]
-		if budget.HasTokenLimits(binding.Limits) {
-			return true
-		}
-		runID = binding.ParentRunID
-	}
-	return false
 }
 
 func remainingOutputCeiling(ledger budget.Ledger, runID string, input, output int64) int64 {

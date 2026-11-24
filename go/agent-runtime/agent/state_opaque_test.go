@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
@@ -122,7 +123,7 @@ func TestAgentStateMissingOrContradictoryOriginalEvidenceFailsClosed(t *testing.
 			if err != nil {
 				t.Fatal(err)
 			}
-			seal, err := sealOriginalState(canonical, mutated.OriginalStateEvidence.Fields)
+			seal, err := jsoncontract.SealOpaqueFields(originalStateEvidenceVersion, canonical, mutated.OriginalStateEvidence.Fields)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -187,7 +188,7 @@ func FuzzAgentOriginalEvidenceStateRoundTrip(f *testing.F) {
 func TestOriginalStateEvidenceStreamingHashMatchesFrozenFrame(t *testing.T) {
 	canonical := []byte(`{"state":"<>&","steps":12}`)
 	fields := []originalStateRawField{{Path: ".Messages[0].ToolCalls[0].Arguments", Raw: []byte(`{ "html": "<>&" }`)}}
-	actual, err := sealOriginalState(canonical, fields)
+	actual, err := jsoncontract.SealOpaqueFields(originalStateEvidenceVersion, canonical, fields)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,5 +202,34 @@ func TestOriginalStateEvidenceStreamingHashMatchesFrozenFrame(t *testing.T) {
 	original := sha256.Sum256(framed)
 	if actual.Digest != hex.EncodeToString(original[:]) {
 		t.Fatalf("streaming State signature changed the original byte frame: got=%s want=%x", actual.Digest, original)
+	}
+}
+
+func TestAgentStateV2RejectsAmbiguousV1Evidence(t *testing.T) {
+	state := runState{Messages: []model.Message{{Role: model.RoleAssistant, ToolCalls: []tools.Call{{ID: "call", ToolKey: "lookup", Arguments: nil}}}}}
+	// v1 omitted the missing marker, making this a valid old digest for the
+	// projected null arguments. The hard cut must not admit it as v2 State.
+	projected, err := json.Marshal(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy, err := jsoncontract.SealOpaqueFields("agent-state-opaque-v1", projected, []jsoncontract.OpaqueField{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(persistedRunState{runState: state, OriginalStateEvidence: &legacy})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = decodeOriginalRunState(raw); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("ambiguous v1 State accepted: %v", err)
+	}
+	raw, err = encodeOriginalRunState(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := decodeOriginalRunState(raw)
+	if err != nil || !reflect.DeepEqual(decoded, state) {
+		t.Fatalf("v2 State changed missing arguments: %v", err)
 	}
 }

@@ -2,8 +2,6 @@ package conformance
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"testing"
@@ -338,14 +336,8 @@ func ea1RootResumeUnknown(t *testing.T, factory func(*testing.T) (kernel.Store, 
 		original := f.physical.intents[0]
 		canonical := model.CloneRequest(original.Request)
 		canonical.InvocationID = ""
-		sourceBytes, sourceErr := json.Marshal(struct {
-			Request             model.Request `json:"request"`
-			CatalogFingerprints []string      `json:"catalogFingerprints"`
-			Provider            string        `json:"provider"`
-			BindingFingerprint  string        `json:"bindingFingerprint"`
-		}{canonical, original.CatalogFingerprints, original.Provider, original.BindingFingerprint})
-		hash := sha256.Sum256(sourceBytes)
-		if sourceErr != nil || original.RequestHash != hex.EncodeToString(hash[:]) || inv.RequestHash != original.RequestHash || inv.ID != original.ID || inv.ExecutionAttempt != original.ExecutionAttempt || inv.DispatchAttempt != original.DispatchAttempt || inv.Provider != original.Provider || inv.BindingFingerprint != original.BindingFingerprint || inv.SourceRevision != original.SourceRevision || inv.SourceRevision < f.prepared.Run.Revision {
+		hash, sourceErr := ea1ModelIntentEvidenceHash(canonical, original.CatalogFingerprints, original.Provider, original.BindingFingerprint)
+		if sourceErr != nil || original.RequestHash != hash || inv.RequestHash != original.RequestHash || inv.ID != original.ID || inv.ExecutionAttempt != original.ExecutionAttempt || inv.DispatchAttempt != original.DispatchAttempt || inv.Provider != original.Provider || inv.BindingFingerprint != original.BindingFingerprint || inv.SourceRevision != original.SourceRevision || inv.SourceRevision < f.prepared.Run.Revision {
 			t.Fatal("Resume invocation not exact original source hash")
 		}
 		if kind == "model" && (inv.Status != agent.ModelInvocationPending || inv.CompletedAt != nil || !ea1RecoveryJSONEqual(inv.Response, model.Response{})) {

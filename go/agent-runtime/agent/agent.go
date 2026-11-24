@@ -5,13 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"reflect"
 	"strings"
 	"sync"
 	"time"
 
 	runtimebudget "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/callbackscope"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
@@ -1076,9 +1076,6 @@ func (runner *Runner) Resume(ctx context.Context, runID string, expectedRevision
 		return snapshot, nil
 	}
 	if invocation, active := activeModelInvocation(state); active && invocation.Status == ModelInvocationPending && invocation.DispatchAttempt != 0 {
-		if runner.modelOutcomeVerifier == nil {
-			return snapshot, ErrModelOutcomeUnknown
-		}
 		repaired, recoveryErr := runner.ReconcileModelOutcome(ctx, runID, expectedRevision)
 		if recoveryErr != nil {
 			if repaired.Run.ID != "" {
@@ -1365,8 +1362,11 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 		failed, failErr := runner.fail(ctx, snapshot, state, "agent.model_invocation_invalid", ErrInvalidRequest)
 		return failed, true, failErr
 	}
-	definitions := modelDefinitions(consumed)
+	definitions, catalogFingerprints := modelDefinitions(consumed)
 	response := model.CloneResponse(consumed.Response)
+	// User-visible consumption retains the existing whitespace normalization;
+	// the original durable receipt itself is never rewritten.
+	response.Content = strings.TrimSpace(response.Content)
 	budgetDimension, budgetErr := chargeConsumedModelUsage(&state, consumed)
 	if budgetErr != nil {
 		failed, failErr := runner.fail(ctx, snapshot, state, "agent.usage_invalid", budgetErr)
@@ -1444,7 +1444,7 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 		snapshot,
 		state,
 		definitions,
-		consumed.CatalogFingerprints,
+		catalogFingerprints,
 		response.Content,
 		response.ToolCalls,
 		response.ProviderReplay,
@@ -1801,34 +1801,32 @@ func withBlockedToolGuidance(messages []model.Message, toolKeys []string) []mode
 // ValidateModelResponseAuthority lets accounting middleware apply the Agent's
 // frozen invocation authority before persisting a downstream model receipt.
 // Contexts outside an Agent invocation have no additional authority guard.
-type modelResponseAuthorityKey struct{}
-
 func ValidateModelResponseAuthority(ctx context.Context, response model.Response, err error) (model.Response, error) {
-	guard, _ := ctx.Value(modelResponseAuthorityKey{}).(*modelCompletionAuthority)
-	if guard != nil {
-		return guard.validate(response, err)
+	call := modelCallFrom(ctx)
+	if call != nil && call.completion != nil {
+		return call.completion.validate(response, err)
 	}
 	return response, err
 }
 
 // ReplayModelResponseAuthority registers a trusted accounting receipt without
 // re-dispatching its Provider. Accounting middleware must first verify that the
-// settled reservation and receipt belong to this InvocationID and RequestHash.
-// Agent additionally checks its frozen request. This is a trusted Host
+// settled reservation and receipt belong to this InvocationID and physical request hash.
+// Agent additionally checks the original frozen SamplingPlan. This is a trusted Host
 // attestation API, not a sandbox for malicious in-process plugins: matching
 // request fields alone cannot prove that a caller read a settled ledger.
 // Ordinary middleware must use
 // ValidateModelResponseAuthority, which cannot manufacture a trusted source.
 func ReplayModelResponseAuthority(ctx context.Context, request model.Request, response model.Response, err error) (model.Response, error) {
-	guard, _ := ctx.Value(modelResponseAuthorityKey{}).(*modelCompletionAuthority)
-	if guard != nil {
-		return guard.replay(request, response, err)
+	call := modelCallFrom(ctx)
+	if call != nil && call.completion != nil {
+		return call.completion.replay(request, response, err)
 	}
 	return response, err
 }
 
 func (runner *Runner) generateModel(
-	ctx context.Context, request model.Request, beforeProvider func(context.Context) error,
+	ctx context.Context, request model.Request, beforeProvider func(context.Context, model.Request) error,
 	afterProvider ...*modelCompletionAuthority,
 ) (model.Response, error) {
 	emit := func(event model.StreamEvent) error {
@@ -1845,30 +1843,32 @@ func (runner *Runner) generateModel(
 	// budget-narrowing: no late message/schema compatibility injection.
 	frozen := model.CloneRequest(request)
 	denialScope := &modelDenialScope{}
-	ctx = context.WithValue(ctx, modelDenialKey{}, denialScope)
+	call := &modelCallScope{denial: denialScope}
+	if len(afterProvider) != 0 {
+		call.completion = afterProvider[0]
+	}
+	ctx = callbackscope.BindModelCall(ctx, call)
 	terminal := func(callCtx context.Context, candidate model.Request, sink model.StreamSink) (model.Response, error) {
-		plan := samplingPlanFrom(ctx)
+		candidate = model.CloneRequest(candidate)
+		plan := call.samplingPlan()
 		if !validDispatchModelRequest(frozen, candidate) ||
-			(plan != nil && !reflect.DeepEqual(plan.request(frozen), model.CloneRequest(candidate))) {
+			(plan != nil && !reflect.DeepEqual(plan.request(frozen), candidate)) {
 			return model.Response{}, modelPreDispatchDenied{cause: ErrInvalidRequest, scope: denialScope, original: model.CloneRequest(frozen), candidate: model.CloneRequest(candidate)}
 		}
 		if beforeProvider != nil {
 			// The final chance to reject an expired or stolen invocation claim
 			// is AFTER ModelMiddleware, before physical Provider dispatch.
-			if err := beforeProvider(callCtx); err != nil {
+			if err := beforeProvider(callCtx, candidate); err != nil {
 				// This is an execution admission rejection, not a Provider
 				// failure. The caller must not terminalize a recoverable Run.
 				return model.Response{}, modelPreDispatchDenied{cause: err, scope: denialScope, original: model.CloneRequest(frozen), candidate: model.CloneRequest(candidate)}
 			}
 		}
 		response, err := runner.generateProviderModel(callCtx, candidate, sink)
-		if len(afterProvider) != 0 && afterProvider[0] != nil {
-			return afterProvider[0].record(response, err)
+		if call.completion != nil {
+			return call.completion.record(response, err)
 		}
 		return response, err
-	}
-	if len(afterProvider) != 0 && afterProvider[0] != nil {
-		ctx = context.WithValue(ctx, modelResponseAuthorityKey{}, afterProvider[0])
 	}
 	response, err := runner.modelChain.Invoke(ctx, request, emit, terminal)
 	// Model layer completion is tracked by the actual chain lifecycle; only
@@ -2821,24 +2821,6 @@ func selectedDefinition(definitions []tools.Definition, key string) (tools.Defin
 		}
 	}
 	return tools.Definition{}, false
-}
-
-func validModelResponse(response model.Response) bool {
-	return validModelUsage(response.Usage) &&
-		(!response.Continue || len(response.ToolCalls) == 0) &&
-		(response.Continue || len(response.ToolCalls) > 0 || response.Content != "" || len(response.HostedToolCalls) > 0 || len(response.Artifacts) > 0)
-}
-
-func validModelUsage(usage *model.Usage) bool {
-	if usage == nil {
-		return true
-	}
-	if usage.InputTokens < 0 || usage.OutputTokens < 0 || usage.CacheReadTokens < 0 ||
-		usage.CacheWriteTokens < 0 || usage.CacheWrite5mTokens < 0 || usage.CacheWrite1hTokens < 0 ||
-		usage.ReasoningTokens < 0 {
-		return false
-	}
-	return usage.InputTokens <= math.MaxInt64-usage.OutputTokens
 }
 
 func nextPendingCall(state runState) (tools.Call, bool) {

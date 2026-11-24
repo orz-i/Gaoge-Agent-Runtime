@@ -52,6 +52,19 @@ func Inherit(ctx, original context.Context) context.Context {
 	t, _ := original.Value(ticketKey{}).(*Ticket)
 	return context.WithValue(Bind(ctx, s), ticketKey{}, t)
 }
+
+// Model-call authority is Runtime-owned and travels with the actual Next
+// chain, even when a Host middleware supplies a replacement Context.
+type modelCallKey struct{}
+
+func BindModelCall(ctx context.Context, authority any) context.Context {
+	return context.WithValue(ctx, modelCallKey{}, authority)
+}
+func ModelCall(ctx context.Context) any { return ctx.Value(modelCallKey{}) }
+func InheritModel(ctx, original context.Context) context.Context {
+	return BindModelCall(Inherit(ctx, original), ModelCall(original))
+}
+
 func Enter(ctx context.Context, runID string, adapter any, input any) (context.Context, *Ticket) {
 	s, _ := ctx.Value(scopeKey{}).(*Scope)
 	if s == nil {

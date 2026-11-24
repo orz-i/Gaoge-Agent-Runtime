@@ -281,6 +281,9 @@ func (runner *Runner) ReconcileRootPhysicalExecution(ctx context.Context, runID 
 		if !knownRootPhysicalSettlement(snapshot) || !receipt.Evidence.Completion.HostCompleted || receipt.Evidence.Completion.GrantID == "" {
 			return ErrRootOutcomeUnknown
 		}
+		if err := runner.requireRootModelQualification(ctx, snapshot); err != nil {
+			return err
+		}
 		found, ackErr := acknowledgeExactOwnedRetirement(ctx, runner.runtime, receipt.Evidence.Grant, snapshot, &receipt.Evidence.Completion)
 		if ackErr != nil {
 			return errors.Join(ErrRootOutcomeUnknown, ackErr)
@@ -307,8 +310,22 @@ func (runner *Runner) ReconcileRootPhysicalExecution(ctx context.Context, runID 
 		}
 		original = &completion
 	}
+	if err := runner.requireRootModelQualification(ctx, snapshot); err != nil {
+		return err
+	}
 	if err := settleOwnedRoot(ctx, runner.runtime, grant, snapshot, original, false); err != nil {
 		return errors.Join(ErrRootOutcomeUnknown, err)
+	}
+	return nil
+}
+
+func (runner *Runner) requireRootModelQualification(ctx context.Context, snapshot kernel.Snapshot) error {
+	state, err := decodeState(snapshot.State)
+	if err != nil {
+		return err
+	}
+	if inv, ok := activeModelInvocation(state); ok {
+		return runner.requireSettledModelQualification(ctx, *inv)
 	}
 	return nil
 }

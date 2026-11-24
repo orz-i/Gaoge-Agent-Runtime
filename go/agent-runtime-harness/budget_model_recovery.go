@@ -2,7 +2,6 @@ package harness
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"strings"
 
@@ -13,7 +12,7 @@ import (
 // VerifyModelOutcome is an explicitly composed, read-only source of the
 // original ledger receipt. It neither registers ancestry nor reserves, bills,
 // projects, dispatches, or invokes a middleware chain. The request is the
-// frozen input to Model middleware, before reservation output-limit changes.
+// exact frozen physical input to the Provider, after all sampling restrictions.
 func (authority *BudgetAuthority) VerifyModelOutcome(ctx context.Context, request model.Request) (model.Response, error) {
 	if authority == nil || strings.TrimSpace(request.RunID) == "" || strings.TrimSpace(request.InvocationID) == "" {
 		return model.Response{}, ErrInvalidRequest
@@ -36,14 +35,14 @@ func (authority *BudgetAuthority) VerifyModelOutcome(ctx context.Context, reques
 	if _, ok := ledger.Runs[request.RunID]; !ok {
 		return model.Response{}, ErrConflict
 	}
-	raw, err := json.Marshal(request)
+	hash, err := model.PhysicalRequestHash(request)
 	if err != nil {
 		return model.Response{}, err
 	}
 	id := "model:" + request.InvocationID
 	receipt, ok := ledger.Reservations[id]
-	if !ok || receipt.ID != id || receipt.RunID != request.RunID || receipt.RequestHash != hashInvocationBytes(raw) || receipt.Status != budget.ReservationSettled || !receipt.Dispatched || len(receipt.Receipt) == 0 {
+	if !ok || receipt.ID != id || receipt.RunID != request.RunID || receipt.PhysicalRequestHash != hash || receipt.Status != budget.ReservationSettled || !receipt.Dispatched || len(receipt.Receipt) == 0 {
 		return model.Response{}, ErrConflict
 	}
-	return decodeBudgetModelReceipt(receipt.Receipt)
+	return budget.DecodeModelReceipt(receipt)
 }

@@ -2,8 +2,6 @@ package conformance
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"testing"
@@ -406,19 +404,13 @@ func ea1ChildCancelUnknownSource(t *testing.T, f *ea1ChildCancelFixture, s kerne
 	actual := p.requests[0]
 	canonical := model.CloneRequest(captured.Request)
 	canonical.InvocationID = ""
-	raw, e := json.Marshal(struct {
-		Request             model.Request `json:"request"`
-		CatalogFingerprints []string      `json:"catalogFingerprints"`
-		Provider            string        `json:"provider"`
-		BindingFingerprint  string        `json:"bindingFingerprint"`
-	}{canonical, captured.CatalogFingerprints, captured.Provider, captured.BindingFingerprint})
-	hash := sha256.Sum256(raw)
+	hash, e := ea1ModelIntentEvidenceHash(canonical, captured.CatalogFingerprints, captured.Provider, captured.BindingFingerprint)
 	view, viewErr := agent.ViewState(s)
 	if e != nil || viewErr != nil || len(view.ModelInvocations) != 1 {
 		t.Fatal("original pending source missing")
 	}
 	inv := view.ModelInvocations[0]
-	if captured.RequestHash != hex.EncodeToString(hash[:]) || !ea1RecoveryJSONEqual(actual, captured.Request) || inv.ID != captured.ID || inv.RequestHash != captured.RequestHash || inv.Provider != captured.Provider || inv.BindingFingerprint != captured.BindingFingerprint || inv.ExecutionAttempt != captured.ExecutionAttempt || inv.DispatchAttempt != captured.DispatchAttempt || inv.ExecutionAttempt != 1 || inv.DispatchAttempt != 1 || inv.SourceRevision != captured.SourceRevision || inv.SourceRevision < f.prepared.Run.Revision {
+	if captured.RequestHash != hash || !ea1RecoveryJSONEqual(actual, captured.Request) || inv.ID != captured.ID || inv.RequestHash != captured.RequestHash || inv.Provider != captured.Provider || inv.BindingFingerprint != captured.BindingFingerprint || inv.ExecutionAttempt != captured.ExecutionAttempt || inv.DispatchAttempt != captured.DispatchAttempt || inv.ExecutionAttempt != 1 || inv.DispatchAttempt != 1 || inv.SourceRevision != captured.SourceRevision || inv.SourceRevision < f.prepared.Run.Revision {
 		t.Fatal("unknown source tuple/attempt changed")
 	}
 	var state struct {

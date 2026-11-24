@@ -172,6 +172,19 @@ func assessModelCandidate(ctx context.Context, adapter *BoundedContextAdapter, r
 	}
 	candidate.assessment = assessment
 	candidate.decide(policy)
+	// A Context-only admission has the same exact physical shape contract.
+	// No later middleware may narrow or otherwise invalidate its measured header.
+	if candidate.selectable() && candidate.invocation != nil {
+		plan, err := newPhysicalSamplingPlan(candidate.invocation.Request, measured)
+		if err != nil {
+			return modelCandidate{}, err
+		}
+		plan.bindContext(window, policy, frame, assessment)
+		if !plan.valid(candidate.invocation.Request) {
+			return modelCandidate{}, ErrInvalidRequest
+		}
+		candidate.invocation.SamplingPlan = plan
+	}
 	return candidate, nil
 }
 
@@ -233,12 +246,16 @@ func (p *modelPreparation) assessSamplingRequest(ctx context.Context, adapter *B
 func (p *modelPreparation) assessBudgetCandidate(ctx context.Context, adapter *BoundedContextAdapter, candidate modelCandidate, ledger budget.Ledger,
 	window runtimecontext.ModelWindow, policy runtimecontext.Policy, frame runtimecontext.FrozenAccounting) (modelCandidate, error) {
 	original := candidate.invocation.Request
+	hash, err := model.PhysicalRequestHash(original)
+	if err != nil {
+		return modelCandidate{}, err
+	}
 	minimum := budget.Reservation{ID: "model:" + original.InvocationID, RunID: original.RunID,
-		RequestHash: kernel.ManagedDigest(original), Requested: budget.Usage{LLMCalls: 1}}
+		RequestHash: hash, Requested: budget.Usage{LLMCalls: 1}}
 	if _, exists := ledger.Reservations[minimum.ID]; exists {
 		return modelCandidate{}, budget.ErrLedgerConflict
 	}
-	tokenLimited := p.budget.ports.RequiresTokenUsage(ledger, original.RunID)
+	tokenLimited := ledger.HasRunTokenLimits(original.RunID)
 	if tokenLimited {
 		minimum.Requested.InputTokens, minimum.Requested.OutputTokens, minimum.Requested.TotalTokens = 1, 1, 2
 	}
@@ -332,14 +349,33 @@ func (candidate modelCandidate) selectForIntent(ctx context.Context) (model.Requ
 
 // finish consumes the selected candidate rather than constructing a second
 // intent. An ordinary Host-only preparer without a Context assessment still
-// uses the same identity constructor, without claiming budget evidence.
-func (p *modelPreparation) finish(request model.Request) (ModelInvocation, error) {
+// uses the same identity constructor. A selected SharedBudget freezes its
+// physical sampling restrictions even without a Context assessment.
+func (p *modelPreparation) finish(ctx context.Context, request model.Request) (ModelInvocation, error) {
 	p.mu.Lock()
 	p.closed = true
 	chosen := p.selected
 	p.mu.Unlock()
 	if chosen == nil {
-		return p.candidate(request)
+		invocation, err := p.candidate(request)
+		if err != nil || p.budget == nil {
+			return invocation, err
+		}
+		ledger, err := p.samplingLedger(ctx)
+		if err != nil || ledger.ID == "" {
+			return invocation, err
+		}
+		original := invocation.Request
+		physical, reservation, err := p.budget.ports.PlanModel(ctx, budget.CloneLedger(ledger), model.CloneRequest(original))
+		if err != nil {
+			return ModelInvocation{}, err
+		}
+		if ledger.HasRunTokenLimits(original.RunID) != (reservation.Requested.InputTokens > 0) {
+			return ModelInvocation{}, ErrInvalidRequest
+		}
+		invocation.SamplingPlan, err = newSamplingPlan(ledger, original, physical, reservation,
+			runtimecontext.ModelWindow{}, runtimecontext.Policy{}, runtimecontext.FrozenAccounting{}, runtimecontext.Assessment{})
+		return invocation, err
 	}
 	selected := *chosen
 	projected := model.CloneRequest(selected.Request)

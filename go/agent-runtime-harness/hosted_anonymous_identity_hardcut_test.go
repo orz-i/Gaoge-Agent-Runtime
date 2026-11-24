@@ -63,7 +63,7 @@ func TestAnonymousHostedTerminalDoesNotSettleModelOrReleaseNativeQuota(t *testin
 				t.Fatalf("anonymous terminal changed an already-dispatched model into a charge or released quota: held=%+v view=%+v", held, view)
 			}
 			for id := range ledger.Reservations {
-				if strings.HasPrefix(id, hostedReceiptPrefix) {
+				if strings.HasPrefix(id, "hosted:") {
 					t.Fatalf("mixed anonymous/identified response produced a partial hosted receipt: %s", id)
 				}
 			}

@@ -278,7 +278,7 @@ func (chain *ModelChain) Invoke(
 						return model.Response{}, ErrNextAlreadyCalled
 					}
 					defer lifetime.leave()
-					return downstream(callbackscope.Inherit(nextCtx, layerCtx), nextRequest, nextEmit)
+					return downstream(callbackscope.InheritModel(nextCtx, layerCtx), nextRequest, nextEmit)
 				}))
 		}
 	}

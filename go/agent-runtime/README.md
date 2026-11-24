@@ -70,8 +70,30 @@ original grant-bound callback-returned completion record with all physical inten
 A clean snapshot alone is insufficient. A Run status alone never proves callback completion; the original opaque
 completion record or durable settlement marker is required. This is not production multi-worker certification.
 
-An explicitly configured `ModelOutcomeVerifier` may read the original settled
-Model receipt without invoking middleware or generating another response. If
+Every dispatched Model invocation durably binds the exact physical SDK request
+through its `SamplingPlan`. Context and SharedBudget admission freeze that plan
+before the invocation is committed; otherwise the final dispatch boundary freezes
+it. A budget reservation retains its logical admission identity and separately
+binds the same `model.PhysicalRequestHash` as the sampling plan. Once frozen,
+late middleware cannot alter the physical request. The versioned digest binds typed SDK request evidence, including exact original
+Tool/Provider JSON bytes and the distinction between missing RawMessage values
+and explicit JSON null; it is not the provider-native wire payload or a token-count
+serialization.
+
+The Runtime's native budget coordinator atomically commits observed usage, hosted
+Tool receipts and the Model response's execution qualification. A rejected
+completion is charged but retains only billing identity and its rejection code,
+never executable assistant content. Accepted receipt bytes are losslessly sealed.
+Native replay and read-only recovery interpret the same sealed qualification.
+
+An explicitly configured `ModelOutcomeVerifier` receives the reconstructed
+physical request, not the logical intent. For a frozen SharedBudget reservation,
+its settled native receipt is authoritative; an external Provider receipt cannot
+override a rejection. While the original reservation is still held and the Host
+return is unknown, external evidence may be retained without granting consumption.
+Recovery never invokes generation or replans settlement. A
+previously dispatched record without the required physical identity remains
+unknown; recovery never guesses a hash, replans or falls back to logical lookup. If
 the original Host callback completed, receipt recovery can retire its scope.
 If that Host callback remains unknown, complete authoritative response evidence
 may be saved without consuming it: the original scope, errors, messages, Tool
