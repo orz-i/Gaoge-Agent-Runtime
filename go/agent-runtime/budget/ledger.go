@@ -224,52 +224,91 @@ func (coordinator Coordinator) FinishRuns(ctx context.Context, scopeID string, r
 // Reserve also acquires an execution slot when active is true. Waiting attempts
 // are persisted without consuming quota. Replays retain the original estimate.
 func (coordinator Coordinator) Reserve(ctx context.Context, scopeID string, request Reservation, active bool) (Ledger, error) {
-	if request.ID == "" || request.RunID == "" || request.RequestHash == "" || !ValidUsage(request.Requested) {
+	return coordinator.reserve(ctx, scopeID, request, active, 0)
+}
+
+// ReserveAtRevision commits a sampling plan only against the ledger revision
+// from which its request restrictions were derived. It cannot silently replan.
+func (coordinator Coordinator) ReserveAtRevision(ctx context.Context, scopeID string, request Reservation, active bool, revision uint64) (Ledger, error) {
+	if revision == 0 {
+		return Ledger{}, ErrLedgerConflict
+	}
+	return coordinator.reserve(ctx, scopeID, request, active, revision)
+}
+
+// PreviewReservation evaluates the exact same reservation transition as Reserve
+// against an isolated snapshot. It never writes, acquires capacity or grants
+// dispatch authority; live admission still requires the revision CAS.
+func (ledger Ledger) PreviewReservation(request Reservation, active bool) error {
+	if !validReservationRequest(request) {
+		return ErrInvalidUsage
+	}
+	next := CloneLedger(ledger)
+	admissionErr, err := next.applyReservation(request, active)
+	return errors.Join(err, admissionErr)
+}
+
+func validReservationRequest(request Reservation) bool {
+	return request.ID != "" && request.RunID != "" && request.RequestHash != "" && ValidUsage(request.Requested)
+}
+
+func (coordinator Coordinator) reserve(ctx context.Context, scopeID string, request Reservation, active bool, revision uint64) (Ledger, error) {
+	if !validReservationRequest(request) {
 		return Ledger{}, ErrInvalidUsage
 	}
 	var admissionErr error
 	ledger, err := coordinator.update(ctx, scopeID, func(ledger *Ledger) error {
 		admissionErr = nil
-		if _, ok := ledger.Runs[request.RunID]; !ok {
+		if revision != 0 && ledger.Revision != revision {
 			return ErrLedgerConflict
 		}
-		existing, found := ledger.Reservations[request.ID]
-		if found {
-			if existing.RunID != request.RunID || existing.RequestHash != request.RequestHash {
-				return ErrLedgerConflict
-			}
-			if existing.Status == ReservationSettled {
-				return nil
-			}
-			if existing.Status == ReservationReleased {
-				return ErrLedgerConflict
-			}
-			request = existing
-		}
-		if ledger.RunCancelled(request.RunID) {
-			return ErrExhausted
-		}
-		delete(ledger.Reservations, request.ID)
-		dimension, denied := ledger.admit(request.RunID, request.Requested, active)
-		if denied != nil {
-			if found && existing.Status == ReservationHeld {
-				ledger.Reservations[request.ID] = existing
-				admissionErr = denied
-				return nil
-			}
-			if !errors.Is(denied, ErrWaiting) {
-				return denied
-			}
-			request.Status, request.Active, request.Dimension = ReservationWaiting, false, dimension
-			ledger.Reservations[request.ID] = request
-			admissionErr = denied
-			return nil
-		}
-		request.Status, request.Active, request.Dimension = ReservationHeld, active, ""
-		ledger.Reservations[request.ID] = request
-		return nil
+		var changeErr error
+		admissionErr, changeErr = ledger.applyReservation(request, active)
+		return changeErr
 	})
 	return ledger, errors.Join(err, admissionErr)
+}
+
+// The same pure transition serves preview and durable CAS. The first error
+// is a disposition which can retain a waiting/held record; the second aborts
+// the transition entirely. The caller owns an isolated ledger copy.
+func (ledger *Ledger) applyReservation(request Reservation, active bool) (error, error) {
+	if _, ok := ledger.Runs[request.RunID]; !ok {
+		return nil, ErrLedgerConflict
+	}
+	existing, found := ledger.Reservations[request.ID]
+	if found {
+		if existing.RunID != request.RunID || existing.RequestHash != request.RequestHash {
+			return nil, ErrLedgerConflict
+		}
+		if existing.Status == ReservationSettled {
+			return nil, nil
+		}
+		if existing.Status == ReservationReleased {
+			return nil, ErrLedgerConflict
+		}
+		request = existing
+	}
+	if ledger.RunCancelled(request.RunID) {
+		return nil, ErrExhausted
+	}
+	delete(ledger.Reservations, request.ID)
+	dimension, denied := ledger.admit(request.RunID, request.Requested, active)
+	if denied != nil {
+		if found && existing.Status == ReservationHeld {
+			ledger.Reservations[request.ID] = existing
+			return denied, nil
+		}
+		if !errors.Is(denied, ErrWaiting) {
+			return nil, denied
+		}
+		request.Status, request.Active, request.Dimension = ReservationWaiting, false, dimension
+		ledger.Reservations[request.ID] = request
+		return denied, nil
+	}
+	request.Status, request.Active, request.Dimension = ReservationHeld, active, ""
+	ledger.Reservations[request.ID] = request
+	return nil, nil
 }
 
 // Dispatch marks the point after which timeouts and cancellation cannot refund
@@ -496,6 +535,7 @@ func (coordinator Coordinator) update(ctx context.Context, scopeID string, chang
 }
 
 func (ledger Ledger) admit(runID string, requested Usage, active bool) (Dimension, error) {
+	var waiting Dimension
 	for current := runID; ; current = ledger.Runs[current].ParentRunID {
 		view := ledger.View(current)
 		used, err := AddUsage(view.Usage, requested)
@@ -509,13 +549,16 @@ func (ledger Ledger) admit(runID string, requested Usage, active bool) (Dimensio
 		if err != nil {
 			return "", err
 		}
-		if dimension := Exceeded(view.Limits, occupied); dimension != "" {
-			return dimension, deny(ErrWaiting, dimension)
-		}
-		if active && view.Limits.MaxConcurrentRuns > 0 && !ledger.active(runID, current) && view.ActiveRuns >= view.Limits.MaxConcurrentRuns {
-			return DimensionConcurrentRuns, deny(ErrWaiting, DimensionConcurrentRuns)
+		if waiting == "" {
+			waiting = Exceeded(view.Limits, occupied)
+			if waiting == "" && active && view.Limits.MaxConcurrentRuns > 0 && !ledger.active(runID, current) && view.ActiveRuns >= view.Limits.MaxConcurrentRuns {
+				waiting = DimensionConcurrentRuns
+			}
 		}
 		if current == "" {
+			if waiting != "" {
+				return waiting, deny(ErrWaiting, waiting)
+			}
 			return "", nil
 		}
 	}

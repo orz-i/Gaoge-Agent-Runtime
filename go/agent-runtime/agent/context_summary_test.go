@@ -87,6 +87,9 @@ func (p *summaryCorePorts) Hydrate(ctx context.Context, inv plugin.RunInvocation
 	p.bound = runtimecontext.CloneCheckpoint(p.current)
 	return ctx, BoundedContextHydration{RunID: inv.RunID, Checkpoint: &p.bound, SourceBinding: json.RawMessage(`{"owner":true}`)}, nil
 }
+func (p *summaryCorePorts) ResolveWindow(ctx context.Context, request model.Request) (runtimecontext.ModelWindow, error) {
+	return p.window, nil
+}
 func (p *summaryCorePorts) Plan(_ context.Context, request model.Request) (BoundedContextPlan, error) {
 	request.PreviousResponseID = p.continuation
 	runtimeMessages := model.CloneMessages(request.Messages)
@@ -555,9 +558,9 @@ func TestContextSummaryContextAndNativeConsumeACKLossRecoverWithoutNewSummary(t 
 				t.Fatalf("recovery used an unexpected summary target: %s", ports.current.ID)
 			}
 			legacy := cloneModelInvocation(view.ModelInvocations[0])
-			legacy.ContextSummary.RecipeVersion = "working-state-summary-v1"
+			legacy.ContextSummary.RecipeVersion = "working-state-summary-v2"
 			if validContextSummaryInvocation(legacy) {
-				t.Fatal("accepted a v1 summary recipe")
+				t.Fatal("accepted a v2 summary recipe")
 			}
 		})
 	}
@@ -718,7 +721,7 @@ func TestContextSummaryActiveInputBytesAreCheckedOnRead(t *testing.T) {
 			sourceRun.Revision = invocation.SourceRevision
 			input := model.CloneRequest(invocation.Request)
 			input.InvocationID = ""
-			derived, deriveErr := newContextSummaryInvocation(sourceRun, input, invocation.Provider, invocation.BindingFingerprint,
+			derived, deriveErr := newInvocation(sourceRun, input, nil, invocation.Provider, invocation.BindingFingerprint,
 				invocation.Purpose, invocation.ContextSummary, invocation.CreatedAt)
 			if deriveErr != nil {
 				t.Fatal(deriveErr)

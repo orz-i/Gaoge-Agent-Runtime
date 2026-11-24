@@ -55,8 +55,7 @@ func (runner *Runner) consumeContextSummary(ctx context.Context, snapshot kernel
 		}
 		trial := model.CloneRequest(binding.BusinessRequest)
 		trial.Messages = runtimecontext.Materialize(next.Window)
-		guard := runtimecontext.NewManager(runtimecontext.Dependencies{})
-		assessment, assessErr := guard.AssessModelRequest(ctx, summaryBusinessAssessmentRequest(trial), binding.ModelWindow, binding.ContextPolicy)
+		assessment, assessErr := binding.BusinessAccounting.AssessModelRequest(summaryBusinessAssessmentRequest(trial), binding.ModelWindow, binding.ContextPolicy)
 		if assessErr != nil {
 			return snapshot, assessErr
 		}

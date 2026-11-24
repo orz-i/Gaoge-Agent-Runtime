@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -369,6 +370,7 @@ type Runner struct {
 	rootCallbacks             *rootCallbackState
 	boundedCallbacks          []any
 	boundedContext            *BoundedContextAdapter
+	samplingBudget            *BoundedBudgetAdapter
 	managedContextRecovery    *BoundedContextAdapter
 	contextSummary            *ContextSummaryAdapter
 	contextSummaryBudget      bool
@@ -673,6 +675,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		toolLimiter:          newCallLimiter(execution.Tool.MaxConcurrency),
 		runChain:             runChain, modelChain: modelChain, toolChain: toolChain,
 		boundedContext:         dependencies.BoundedContext,
+		samplingBudget:         selectedSamplingBudget(dependencies),
 		managedContextRecovery: dependencies.ManagedContextRecovery,
 		contextSummary:         dependencies.ContextSummary,
 		contextSummaryBudget:   summaryBudgetConfigured(dependencies),
@@ -1240,6 +1243,13 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 	}
 	snapshot, state, invocation, err := runner.ensureModelInvocation(ctx, snapshot, state)
 	if err != nil {
+		var rejection provenCandidateRejection
+		if errors.As(err, &rejection) && runner.boundedContext != nil &&
+			rejection.runID == snapshot.Run.ID && rejection.revision == snapshot.Run.Revision &&
+			errors.Is(rejection.cause, runtimebudget.ErrExhausted) && rejection.code == sharedBudgetErrorCode(rejection.cause) {
+			failed, failErr := runner.fail(ctx, snapshot, state, rejection.code, err)
+			return failed, true, failErr
+		}
 		if errors.Is(err, ErrToolDiscoveryDenied) || errors.Is(err, ErrToolDiscoveryInvalid) {
 			failed, failErr := runner.fail(ctx, snapshot, state, "agent.discovery_invalid", err)
 			return failed, true, failErr
@@ -1837,7 +1847,9 @@ func (runner *Runner) generateModel(
 	denialScope := &modelDenialScope{}
 	ctx = context.WithValue(ctx, modelDenialKey{}, denialScope)
 	terminal := func(callCtx context.Context, candidate model.Request, sink model.StreamSink) (model.Response, error) {
-		if !validDispatchModelRequest(frozen, candidate) {
+		plan := samplingPlanFrom(ctx)
+		if !validDispatchModelRequest(frozen, candidate) ||
+			(plan != nil && !reflect.DeepEqual(plan.request(frozen), model.CloneRequest(candidate))) {
 			return model.Response{}, modelPreDispatchDenied{cause: ErrInvalidRequest, scope: denialScope, original: model.CloneRequest(frozen), candidate: model.CloneRequest(candidate)}
 		}
 		if beforeProvider != nil {

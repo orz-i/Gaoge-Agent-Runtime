@@ -59,7 +59,7 @@ func TestManagedSummarySafePointClosedEventProfileNeedsNativeProof(t *testing.T)
 		})
 	}
 	retired := initial.SafePoint
-	retired.LifecycleVersion = "working-state-summary-v1"
+	retired.LifecycleVersion = "working-state-summary-v2"
 	if retired.Valid() {
 		t.Fatal("retired lifecycle version was accepted")
 	}

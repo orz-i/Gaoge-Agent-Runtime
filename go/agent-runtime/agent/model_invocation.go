@@ -57,6 +57,7 @@ type ModelInvocation struct {
 	Model               string                `json:"model,omitempty"`
 	Status              ModelInvocationStatus `json:"status"`
 	Request             model.Request         `json:"request,omitempty"`
+	SamplingPlan        *SamplingPlan         `json:"samplingPlan,omitempty"`
 	ProviderResponseID  string                `json:"providerResponseID,omitempty"`
 	Response            model.Response        `json:"response,omitempty"`
 	Usage               *model.Usage          `json:"usage,omitempty"`
@@ -89,31 +90,41 @@ func telemetryModelUsage(value *model.Usage) runtimebudget.Usage {
 	}
 }
 
-func newModelInvocation(
+func newInvocation(
 	run kernel.Run,
 	request model.Request,
 	catalogFingerprints []string,
-	provider, bindingFingerprint string,
+	provider, bindingFingerprint, purpose string,
+	summary *ContextSummaryBinding,
 	now time.Time,
 ) (ModelInvocation, error) {
 	if err := model.ValidateRequestBinding(request); err != nil {
 		return ModelInvocation{}, errors.Join(ErrInvalidRequest, err)
 	}
+	plannedID := request.InvocationID
 	request.InvocationID = ""
-	hash, err := modelRequestHash(request, catalogFingerprints, provider, bindingFingerprint)
+	hash, err := modelInvocationRequestHash(request, catalogFingerprints, provider, bindingFingerprint, purpose, summary)
 	if err != nil {
 		return ModelInvocation{}, err
 	}
 	idSource := run.ID + "\x00" + strconv.FormatUint(run.Revision, 10) + "\x00" + hash
 	idDigest := sha256.Sum256([]byte(idSource))
 	id := "modelinv_" + hex.EncodeToString(idDigest[:16])
+	if plannedID != "" && plannedID != id {
+		return ModelInvocation{}, ErrInvalidRequest
+	}
 	request.InvocationID = id
-	return ModelInvocation{
+	result := ModelInvocation{
 		ID: id, RunID: run.ID, SourceRevision: run.Revision, RequestHash: hash,
+		Purpose: purpose, ContextSummary: cloneContextSummaryBinding(summary),
 		Provider: strings.TrimSpace(provider), BindingFingerprint: bindingFingerprint,
 		Model: strings.TrimSpace(request.Model), Status: ModelInvocationPending, Request: model.CloneRequest(request),
 		CatalogFingerprints: append([]string(nil), catalogFingerprints...), CreatedAt: now.UTC(),
-	}, nil
+	}
+	if !validContextSummaryInvocation(result) {
+		return ModelInvocation{}, ErrInvalidRequest
+	}
+	return result, nil
 }
 
 func modelRequestHash(request model.Request, fingerprints []string, provider, bindingFingerprint string) (string, error) {
@@ -178,6 +189,7 @@ func consumeLastModelInvocation(state *runState, now time.Time) (ModelInvocation
 	// hash and receipt remain durable while duplicated transcript bytes are not.
 	invocation.Request = model.Request{}
 	invocation.CatalogFingerprints = nil
+	invocation.SamplingPlan = nil
 	// The stored receipt already belongs to this state. The returned consumed
 	// value above is isolated, so copying this entire response again only
 	// duplicates opaque replay and Tool payloads without adding isolation.
@@ -195,6 +207,7 @@ func cloneModelInvocations(values []ModelInvocation) []ModelInvocation {
 
 func cloneModelInvocation(value ModelInvocation) ModelInvocation {
 	value.ContextSummary = cloneContextSummaryBinding(value.ContextSummary)
+	value.SamplingPlan = cloneSamplingPlan(value.SamplingPlan)
 	value.Request = model.CloneRequest(value.Request)
 	value.CatalogFingerprints = append([]string(nil), value.CatalogFingerprints...)
 	value.Response = model.CloneResponse(value.Response)
@@ -222,7 +235,9 @@ func validModelInvocations(values []ModelInvocation) bool {
 	active := 0
 	seenPhysical := make(map[[3]string]struct{})
 	for index, invocation := range values {
-		if !validContextSummaryInvocation(invocation) || !contextSummaryInputBytesWithinPolicy(invocation) {
+		if !validContextSummaryInvocation(invocation) || !contextSummaryInputBytesWithinPolicy(invocation) ||
+			(invocation.SamplingPlan != nil && (invocation.Status == ModelInvocationConsumed ||
+				invocation.Purpose != "" || !invocation.SamplingPlan.valid(invocation.Request))) {
 			return false
 		}
 		if strings.TrimSpace(invocation.ID) == "" || strings.TrimSpace(invocation.RunID) == "" ||
@@ -397,32 +412,12 @@ func (runner *Runner) ensureModelInvocation(
 		}
 		return snapshot, state, cloneModelInvocation(*invocation), nil
 	}
-	request, fingerprints, purpose, summary, err := runner.buildInvocationRequest(ctx, snapshot, state)
+	invocation, err := runner.buildInvocation(ctx, snapshot, state)
 	if err != nil {
-		// Caller needs the original committed aggregate to fail a stale
-		// discovery grant through Kernel CAS. Returning a zero snapshot here
-		// obscures policy revocation as invalid Kernel input.
 		return snapshot, state, ModelInvocation{}, err
 	}
-	provider := providerName(runner.model, request)
-	bindingFingerprint := modelBindingFingerprint(runner.model, request)
-	// A model that claims to be a Provider may not erase its name on an
-	// unsupported route. Every named external binding needs exact proof.
-	if provider == "" && declaresProviderIdentity(runner.model) ||
-		(provider != "" || bindingFingerprint != "") && !validBindingFingerprint(bindingFingerprint) {
+	if !matchesFrozenProviderBinding(runner.model, invocation) {
 		return snapshot, state, ModelInvocation{}, ErrInvalidRequest
-	}
-	var invocation ModelInvocation
-	if summary != nil {
-		invocation, err = newContextSummaryInvocation(snapshot.Run, request, provider, bindingFingerprint, purpose, summary, runner.clock.Now())
-		if err != nil {
-			return snapshot, state, ModelInvocation{}, err
-		}
-	} else {
-		invocation, err = newModelInvocation(snapshot.Run, request, fingerprints, provider, bindingFingerprint, runner.clock.Now())
-		if err != nil {
-			return kernel.Snapshot{}, runState{}, ModelInvocation{}, err
-		}
 	}
 	state.ModelInvocations = append(state.ModelInvocations, cloneModelInvocation(invocation))
 	encoded, err := encodeState(state)
@@ -437,18 +432,6 @@ func (runner *Runner) ensureModelInvocation(
 		return kernel.Snapshot{}, runState{}, ModelInvocation{}, err
 	}
 	return next, state, invocation, nil
-}
-
-func (runner *Runner) buildModelRequest(
-	ctx context.Context,
-	snapshot kernel.Snapshot,
-	state runState,
-) (model.Request, []string, error) {
-	request, originalTools, err := runner.buildUnpreparedModelRequest(ctx, snapshot, state)
-	if err != nil {
-		return model.Request{}, nil, err
-	}
-	return runner.prepareBusinessModelRequest(ctx, snapshot, request, originalTools)
 }
 
 func (runner *Runner) buildUnpreparedModelRequest(ctx context.Context, snapshot kernel.Snapshot, state runState) (model.Request, []tools.Definition, error) {
@@ -497,29 +480,29 @@ func (runner *Runner) buildUnpreparedModelRequest(ctx context.Context, snapshot 
 	return request, append([]tools.Definition(nil), request.Tools...), nil
 }
 
-func (runner *Runner) prepareBusinessModelRequest(ctx context.Context, snapshot kernel.Snapshot, request model.Request, originalTools []tools.Definition) (model.Request, []string, error) {
+func (runner *Runner) prepareBusinessInvocation(ctx context.Context, snapshot kernel.Snapshot, request model.Request, originalTools []tools.Definition) (ModelInvocation, error) {
+	preparation := &modelPreparation{run: snapshot.Run, client: runner.model, now: runner.clock.Now(),
+		original: model.CloneRequest(request), catalog: originalTools, budget: runner.samplingBudget}
+	ctx = context.WithValue(ctx, modelPreparationKey{}, preparation)
+	defer preparation.close()
 	if runner.boundedContext != nil {
 		prepared, err := runner.prepareBoundedContext(ctx, snapshot, request)
 		if err != nil {
-			return model.Request{}, nil, err
+			return ModelInvocation{}, err
 		}
 		request = prepared
 	} else if runner.prepareModelRequest != nil {
 		prepared, prepareErr := runner.prepareModelRequest(ctx, model.CloneRequest(request))
 		runner.noteRootCallbackFailure(prepareErr)
 		if prepareErr != nil {
-			return model.Request{}, nil, prepareErr
+			return ModelInvocation{}, prepareErr
 		}
 		if !validPreparedModelRequest(request, prepared) {
-			return model.Request{}, nil, ErrInvalidRequest
+			return ModelInvocation{}, ErrInvalidRequest
 		}
 		request = model.CloneRequest(prepared)
 	}
-	fingerprints, err := catalogFingerprintsForRequest(originalTools, request.Tools)
-	if err != nil {
-		return model.Request{}, nil, err
-	}
-	return request, fingerprints, nil
+	return preparation.finish(request)
 }
 
 // PrepareModelRequest may project messages and visible Tool schemas before the
@@ -791,6 +774,12 @@ func (runner *Runner) executeModelInvocation(
 		},
 	}
 	generateCtx := ctx
+	if invocation.SamplingPlan != nil {
+		if runner.samplingBudget == nil || !invocation.SamplingPlan.valid(invocation.Request) {
+			return snapshot, state, ErrInvalidRequest
+		}
+		generateCtx = context.WithValue(generateCtx, samplingPlanKey{}, cloneSamplingPlan(invocation.SamplingPlan))
+	}
 	if invocation.Purpose == ModelInvocationContextSummary {
 		generateCtx = context.WithValue(ctx, contextSummaryModelKey{}, true)
 	}
@@ -1068,6 +1057,9 @@ func (runner *Runner) releaseModelInvocationExecution(
 }
 
 func modelDefinitions(invocation ModelInvocation) []tools.Definition {
+	if invocation.SamplingPlan != nil && invocation.SamplingPlan.OmitLocalTools {
+		return nil
+	}
 	result := make([]tools.Definition, len(invocation.Request.Tools))
 	for index, definition := range invocation.Request.Tools {
 		result[index] = tools.CloneDefinition(definition)

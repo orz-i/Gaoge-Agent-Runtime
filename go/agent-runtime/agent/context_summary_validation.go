@@ -6,14 +6,11 @@ import (
 	"encoding/json"
 	"reflect"
 	"slices"
-	"strconv"
 	"strings"
-	"time"
 
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 )
 
 func (runner *Runner) SupportsContextSummary() bool {
@@ -78,7 +75,10 @@ func validSummaryBinding(value *ContextSummaryBinding) bool {
 		value.Cursor.Turn.ID == "" || value.Cursor.Turn.SessionID == "" || value.Cursor.Turn.ConfigSnapshotID == "" ||
 		value.Cursor.Turn.Revision == 0 || value.Cursor.Turn.ContextCheckpointID != value.Source.CheckpointID ||
 		value.Cursor.ExpectedTurnCheckpointID != value.Source.CheckpointID || value.Cursor.UpdatedAt.IsZero() ||
-		value.ModelWindowFingerprint == "" || len(value.BusinessRequest.Messages) != 0 || value.BusinessRequest.RunID != value.RunID {
+		value.ModelWindowFingerprint != runtimecontext.ModelWindowFingerprint(value.ModelWindow) ||
+		!value.BusinessAccounting.MatchesWindow(value.ModelWindow) || !value.BusinessAccounting.MatchesRequest(value.BusinessRequest) ||
+		!value.SummaryAccounting.Valid() || !value.SummaryAccounting.MatchesWindow(value.ModelWindow) ||
+		len(value.BusinessRequest.Messages) != 0 || value.BusinessRequest.RunID != value.RunID {
 		return false
 	}
 	seen := map[string]bool{}
@@ -103,7 +103,8 @@ func validContextSummaryInvocation(invocation ModelInvocation) bool {
 	}
 	if invocation.Status == ModelInvocationPending || invocation.Status == ModelInvocationCompleted {
 		request := invocation.Request
-		return len(request.Tools) == 0 && len(request.HostedTools) == 0 && !request.RequireToolCall &&
+		return invocation.ContextSummary.SummaryAccounting.MatchesRequest(request) &&
+			len(request.Tools) == 0 && len(request.HostedTools) == 0 && !request.RequireToolCall &&
 			request.HostedToolCallLimit != nil && *request.HostedToolCallLimit == 0 &&
 			request.PreviousResponseID == "" && request.PromptCacheKey == "" &&
 			sameFrozenOutputContract(request.OutputContract, workingStateSummaryContract())
@@ -126,8 +127,8 @@ func contextSummaryInputBytesWithinPolicy(invocation ModelInvocation) bool {
 	// Active intents retain their complete original request. A restarted
 	// reader can enforce the real serialized input bound without invoking a
 	// tokenizer or trusting a planning-time assessment from another process.
-	raw, err := model.MarshalRequestForInputCount(invocation.Request)
-	return err == nil && int64(len(raw)) <= limit
+	size, err := invocation.ContextSummary.SummaryAccounting.SerializedBytes(invocation.Request)
+	return err == nil && size <= limit
 }
 
 func validContextSummaryState(state runState) bool {
@@ -144,31 +145,6 @@ func validContextSummaryState(state runState) bool {
 		}
 	}
 	return true
-}
-
-func newContextSummaryInvocation(run kernel.Run, request model.Request, provider, bindingFingerprint, purpose string, binding *ContextSummaryBinding, now time.Time) (ModelInvocation, error) {
-	plannedID := request.InvocationID
-	request.InvocationID = ""
-	hash, err := modelInvocationRequestHash(request, nil, provider, bindingFingerprint, purpose, binding)
-	if err != nil {
-		return ModelInvocation{}, err
-	}
-	idSource := run.ID + "\x00" + strconv.FormatUint(run.Revision, 10) + "\x00" + hash
-	idDigest := sha256.Sum256([]byte(idSource))
-	id := "modelinv_" + hex.EncodeToString(idDigest[:16])
-	if plannedID != "" && plannedID != id {
-		// A summary counted before intent admission must retain that exact
-		// identity, including its Provider binding, when the intent is sealed.
-		return ModelInvocation{}, ErrInvalidRequest
-	}
-	request.InvocationID = id
-	result := ModelInvocation{ID: id, RunID: run.ID, SourceRevision: run.Revision, RequestHash: hash,
-		Purpose: purpose, ContextSummary: cloneContextSummaryBinding(binding), Provider: provider, BindingFingerprint: bindingFingerprint,
-		Model: request.Model, Status: ModelInvocationPending, Request: model.CloneRequest(request), CreatedAt: now.UTC()}
-	if !validContextSummaryInvocation(result) {
-		return ModelInvocation{}, ErrInvalidRequest
-	}
-	return result, nil
 }
 
 func summaryEvidenceRefs(binding *ContextSummaryBinding) []string {

@@ -36,7 +36,7 @@ type BoundedBudgetPorts interface {
 	ResolveScope(context.Context, string) (BoundedBudgetScope, error)
 	Project(context.Context, budget.Ledger) error
 	PlanModel(context.Context, budget.Ledger, model.Request) (model.Request, budget.Reservation, error)
-	ApplyLocalToolBudget(model.Request, budget.Ledger) model.Request
+	PreviewModel(budget.Ledger, model.Request) (model.Request, budget.Reservation, error)
 	RequiresTokenUsage(budget.Ledger, string) bool
 	PlanSettlement(budget.Ledger, budget.Reservation, model.Response, error) (BoundedBudgetSettlement, error)
 	ValidateSettlement(budget.Ledger, budget.Ledger, budget.Reservation, budget.Usage) error
@@ -154,11 +154,15 @@ func (a *BoundedBudgetAdapter) Run(ctx context.Context, inv plugin.RunInvocation
 }
 func (a *BoundedBudgetAdapter) Model(ctx context.Context, request model.Request, emit model.StreamSink, next plugin.ModelNext) (model.Response, error) {
 	original := model.CloneRequest(request)
+	frozen := samplingPlanFrom(ctx)
 	l, err := a.bind(ctx, request.RunID)
 	if err != nil {
 		return model.Response{}, err
 	}
 	if l.ID == "" {
+		if frozen != nil {
+			return model.Response{}, budget.ErrLedgerConflict
+		}
 		out, e := next(ctx, request, emit)
 		callbackscope.Record(ctx, a, "budget.unconfigured.returned", original)
 		return out, e
@@ -166,17 +170,28 @@ func (a *BoundedBudgetAdapter) Model(ctx context.Context, request model.Request,
 	if strings.TrimSpace(request.InvocationID) == "" {
 		return model.Response{}, ErrInvalidRequest
 	}
-	request, res, err := a.ports.PlanModel(ctx, l, request)
-	if err != nil {
-		return model.Response{}, err
+	var res budget.Reservation
+	for {
+		revision := l.Revision
+		request, res, err = a.samplingReservation(ctx, l, original, frozen)
+		if err != nil {
+			var denial samplingQuotaDenial
+			if errors.As(err, &denial) {
+				return model.Response{}, a.samplingDenial(ctx, original, l, res, denial.cause)
+			}
+			return model.Response{}, err
+		}
+		if res.Dispatched && res.Status != budget.ReservationSettled {
+			return model.Response{}, model.NewRetryableError(budget.ErrWaiting)
+		}
+		l, err = a.coordinator.ReserveAtRevision(ctx, l.ID, res, true, revision)
+		if errors.Is(err, budget.ErrLedgerConflict) && l.Revision != revision && l.ID != "" {
+			// A concurrent reservation changed the ledger. Recheck the
+			// same frozen physical request against the new revision.
+			continue
+		}
+		break
 	}
-	if res.RunID != original.RunID || res.ID == "" || request.InvocationID != original.InvocationID || request.RunID != original.RunID {
-		return model.Response{}, ErrInvalidRequest
-	}
-	if res.Dispatched && res.Status != budget.ReservationSettled {
-		return model.Response{}, model.NewRetryableError(budget.ErrWaiting)
-	}
-	l, err = a.coordinator.Reserve(ctx, l.ID, res, true)
 	projectErr := a.ports.Project(ctx, l)
 	if value := l.Reservations[res.ID]; err == nil && value.Status == budget.ReservationSettled {
 		out, callErr := a.ports.DecodeReceipt(value.Receipt)
@@ -189,13 +204,9 @@ func (a *BoundedBudgetAdapter) Model(ctx context.Context, request model.Request,
 	if projectErr != nil {
 		return model.Response{}, projectErr
 	}
-	if errors.Is(err, budget.ErrWaiting) {
-		return model.Response{}, model.NewRetryableError(err)
-	}
 	if err != nil {
-		return model.Response{}, err
+		return model.Response{}, a.samplingDenial(ctx, original, l, res, err)
 	}
-	request = a.ports.ApplyLocalToolBudget(request, l)
 	dispatched, err := a.coordinator.Dispatch(ctx, l.ID, res.ID)
 	if err != nil {
 		if errors.Is(err, budget.ErrWaiting) {
@@ -206,7 +217,7 @@ func (a *BoundedBudgetAdapter) Model(ctx context.Context, request model.Request,
 	out, callErr := next(ctx, request, emit)
 	out, callErr = ValidateModelResponseAuthority(ctx, out, callErr)
 	accounting := context.WithoutCancel(ctx)
-	if modelDeniedForRequest(ctx, request, callErr) {
+	if modelDeniedForRequest(ctx, original, callErr) {
 		updated, e := a.coordinator.RequeueProvenUnsent(accounting, l.ID, res.ID, dispatched.Revision)
 		if e != nil {
 			return model.Response{}, errors.Join(callErr, e)
@@ -244,6 +255,87 @@ func (a *BoundedBudgetAdapter) Model(ctx context.Context, request model.Request,
 	}
 	return boundedSettledModelResult(plan.Response, callErr, errors.Join(validationErr, projectErr))
 }
+
+// samplingReservation either reconstructs the previously admitted physical
+// request or plans a legacy standalone Budget call. A live ledger may refuse
+// the frozen plan; it must never rewrite it after Context admission.
+func (a *BoundedBudgetAdapter) samplingReservation(ctx context.Context, ledger budget.Ledger, original model.Request, frozen *SamplingPlan) (model.Request, budget.Reservation, error) {
+	if frozen == nil {
+		request, res, err := a.ports.PlanModel(ctx, ledger, model.CloneRequest(original))
+		if err == nil && (res.RunID != original.RunID || res.ID == "" || !validDispatchModelRequest(original, request)) {
+			err = ErrInvalidRequest
+		}
+		return request, res, err
+	}
+	if frozen.LedgerID != ledger.ID || !frozen.valid(original) ||
+		a.ports.RequiresTokenUsage(ledger, original.RunID) != (frozen.Requested.InputTokens > 0) {
+		return model.Request{}, budget.Reservation{}, budget.ErrLedgerConflict
+	}
+	request, res := frozen.request(original), frozen.reservation(original)
+	if existing, found := ledger.Reservations[res.ID]; found {
+		if existing.RunID != res.RunID || existing.RequestHash != res.RequestHash || existing.Requested != res.Requested {
+			return model.Request{}, res, budget.ErrLedgerConflict
+		}
+		res = existing
+		if res.Dispatched || res.Status == budget.ReservationSettled || res.Status == budget.ReservationReleased {
+			return request, res, nil
+		}
+	}
+	// Preview the restrictions with this exact reservation in place, not
+	// a new reservation that could consume a different hosted-tool quota.
+	projected := budget.CloneLedger(ledger)
+	held := res
+	held.Status = budget.ReservationHeld
+	projected.Reservations[res.ID] = held
+	allowed, _, err := a.ports.PreviewModel(projected, model.CloneRequest(original))
+	if err != nil {
+		return model.Request{}, res, err
+	}
+	if !validDispatchModelRequest(allowed, request) {
+		// A concurrent use of local-tool slots cannot remove declarations
+		// from an already measured request. Wait for transient holds; a
+		// permanent shortage is an explicit shared-budget denial.
+		if len(allowed.Tools) == 0 && len(request.Tools) > 0 && validDispatchModelRequest(original, allowed) {
+			for current := original.RunID; ; current = ledger.Runs[current].ParentRunID {
+				view := ledger.View(current)
+				if view.Limits.MaxToolCalls > 0 && res.Requested.ToolCalls >= view.Limits.MaxToolCalls-view.Usage.ToolCalls {
+					return model.Request{}, res, samplingQuotaDenial{budget.ErrExhausted}
+				}
+				if current == "" {
+					break
+				}
+			}
+			return model.Request{}, res, samplingQuotaDenial{budget.ErrWaiting}
+		}
+		return model.Request{}, res, budget.ErrLedgerConflict
+	}
+	return request, res, nil
+}
+
+// Only the Runtime's live quota check can certify a planning-time denial.
+type samplingQuotaDenial struct{ cause error }
+
+func (e samplingQuotaDenial) Error() string { return e.cause.Error() }
+func (e samplingQuotaDenial) Unwrap() error { return e.cause }
+
+// Only the concrete budget adapter can prove that reservation admission
+// failed before a provider dispatch. An already-dispatched reservation is
+// never converted into a known no-effect outcome.
+func (a *BoundedBudgetAdapter) samplingDenial(ctx context.Context, original model.Request, ledger budget.Ledger, res budget.Reservation, err error) error {
+	if !errors.Is(err, budget.ErrWaiting) && !errors.Is(err, budget.ErrExhausted) {
+		return err
+	}
+	existing := ledger.Reservations[res.ID]
+	if ledger.ID != "" && res.ID == "model:"+original.InvocationID && res.RunID == original.RunID &&
+		!res.Dispatched && !existing.Dispatched && res.Status != budget.ReservationSettled && existing.Status != budget.ReservationSettled {
+		a.record(ctx, "budget.model.admission_denied", original, ledger, res.ID)
+	}
+	if errors.Is(err, budget.ErrWaiting) {
+		return model.NewRetryableError(err)
+	}
+	return err
+}
+
 func (a *BoundedBudgetAdapter) record(ctx context.Context, op string, request model.Request, l budget.Ledger, id string) {
 	callbackscope.Record(ctx, a, op, struct {
 		Request     model.Request

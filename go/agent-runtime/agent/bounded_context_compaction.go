@@ -5,20 +5,21 @@ import (
 	"encoding/json"
 	"errors"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 )
 
 type boundedContextCandidate struct {
-	window     runtimecontext.Window
-	artifacts  []runtimecontext.Artifact
-	assessment runtimecontext.Assessment
+	window    runtimecontext.Window
+	artifacts []runtimecontext.Artifact
+	modelCandidate
 }
 
 func (adapter *BoundedContextAdapter) selectCompaction(
 	ctx context.Context, previous runtimecontext.Checkpoint, request model.Request,
 	window runtimecontext.ModelWindow, policy runtimecontext.Policy,
-	original runtimecontext.Assessment, originalWithinHard bool,
+	frame runtimecontext.FrozenAccounting, original modelCandidate,
 ) (boundedContextCandidate, bool, error) {
 	var best boundedContextCandidate
 	bestFound := false
@@ -26,20 +27,33 @@ func (adapter *BoundedContextAdapter) selectCompaction(
 	consider := func(candidateWindow runtimecontext.Window, artifacts []runtimecontext.Artifact) (bool, error) {
 		trial := model.CloneRequest(request)
 		trial.Messages = runtimecontext.Materialize(candidateWindow)
-		assessment, err := adapter.manager.AssessModelRequest(ctx, trial, window, policy)
+		candidate, err := assessModelCandidate(ctx, adapter, trial, window, policy, frame)
 		if err != nil {
 			return false, err
 		}
-		if !runtimecontext.WithinHardBudget(assessment, policy) ||
-			assessment.SerializedBytes >= original.SerializedBytes || assessment.HardTokenEstimate >= original.HardTokenEstimate {
+		assessment := candidate.assessment
+		if candidate.omitLocalTools || !candidate.selectable() ||
+			(original.disposition == candidateAdmitted && candidate.disposition == candidateWaiting) {
 			return false, nil
 		}
-		soft := assessment.HardTokenEstimate <= assessment.SoftInputTokens
-		if !bestFound || (soft && !bestSoft) || (soft == bestSoft && assessment.HardTokenEstimate < best.assessment.HardTokenEstimate) {
-			best = boundedContextCandidate{window: candidateWindow, artifacts: artifacts, assessment: assessment}
+		// Ordinary soft/Context pressure must actually shrink the request.
+		// Under SharedBudget pressure, joint feasibility is the improvement:
+		// the independently measured quota dimension can shrink even when
+		// the Context counter uses a different bound.
+		if !errors.Is(original.quota.err, budget.ErrExhausted) && (assessment.SerializedBytes >= original.assessment.SerializedBytes ||
+			assessment.HardTokenEstimate >= original.assessment.HardTokenEstimate) {
+			return false, nil
+		}
+		soft := candidate.soft()
+		better := !bestFound || (candidate.disposition == candidateAdmitted && best.disposition == candidateWaiting)
+		if bestFound && candidate.disposition == best.disposition {
+			better = (soft && !bestSoft) || (soft == bestSoft && assessment.HardTokenEstimate < best.assessment.HardTokenEstimate)
+		}
+		if better {
+			best = boundedContextCandidate{window: candidateWindow, artifacts: artifacts, modelCandidate: candidate}
 			bestFound, bestSoft = true, soft
 		}
-		return soft, nil
+		return soft && candidate.disposition == candidateAdmitted, nil
 	}
 	tryPortable := func(recent int) error {
 		limited := policy
@@ -86,12 +100,12 @@ func (adapter *BoundedContextAdapter) selectCompaction(
 	}
 	// Only under hard pressure may the protected tail shrink below the
 	// preferred recent-turn policy.
-	if !originalWithinHard && policy.MinimumRecentTurns < policy.PreserveRecentTurns && !bestSoft {
+	if !original.selectable() && policy.MinimumRecentTurns < policy.PreserveRecentTurns && !bestSoft {
 		if err = tryPortable(policy.MinimumRecentTurns); err != nil {
 			return boundedContextCandidate{}, false, err
 		}
 	}
-	if !bestFound || (originalWithinHard && !bestSoft) {
+	if !bestFound || (original.selectable() && !bestSoft) {
 		return boundedContextCandidate{}, false, nil
 	}
 	return best, true, nil

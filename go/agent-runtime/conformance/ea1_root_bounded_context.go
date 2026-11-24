@@ -119,6 +119,10 @@ func (p *ea1BoundedContextPorts) Hydrate(ctx context.Context, inv plugin.RunInvo
 	}
 	return ctx, agent.BoundedContextHydration{RunID: id, SourceBinding: source}, err
 }
+func (p *ea1BoundedContextPorts) ResolveWindow(ctx context.Context, request model.Request) (runtimecontext.ModelWindow, error) {
+	plan, err := p.Plan(ctx, request)
+	return plan.ModelWindow, err
+}
 func (p *ea1BoundedContextPorts) Plan(context.Context, model.Request) (agent.BoundedContextPlan, error) {
 	p.unexpected++
 	return agent.BoundedContextPlan{}, errors.New("unexpected preparation")

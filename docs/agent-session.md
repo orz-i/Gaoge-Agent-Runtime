@@ -259,8 +259,44 @@ continue execution with their original explicit composition. The ordinary
 Harness default delegation depth alone does not require a delegation engine.
 
 Context Checkpoints use the required `lossless-json-v1` content hash encoding.
-Automatic summaries use the `working-state-summary-v2` recipe. Deploy this cut
+Automatic summaries use the `working-state-summary-v3` recipe. Deploy this cut
 with fresh Checkpoint and summary state.
+
+For hosts whose physical model adapter adds provider defaults, configure
+`Context.Accounting` (or `context.Dependencies.Accounting` when composing the
+bounded adapter directly). The callback receives the immutable request header
+without messages or invocation ID and the resolved model window. It returns
+`context.AccountingProjection`: the complete accounting options, the route's
+leading System prompt (even if already present), and the resolved reserved
+output ceiling. It must not derive the projection from transcript content or
+perform generation. The Runtime derives and freezes the serialized size facts;
+all candidates share that frame. Exact counters still receive the original
+typed request. Summary recovery reuses its sealed frames rather than calling
+the projection or a tokenizer again. No provider prompt or accounting options
+are written into the product Context or summary recipe.
+
+When ordinary bounded Context and SharedBudget are composed, the Runtime
+first previews the shared-ledger restrictions for each Context candidate:
+provider-hosted call limits, local Tool visibility and output-token ceiling.
+It meters the actual narrowed request, remeasuring if admission tightens the
+output ceiling, and freezes a compact `SamplingPlan` in the selected
+ModelInvocation. The plan contains the physical request digest, restrictions,
+numeric accounting evidence and requested quota, not a second transcript or
+provider prompt. Candidates do not reserve quota. The same pure reservation
+transition used by the live ledger CAS also evaluates candidate feasibility.
+Context-window pressure or insufficient settled input/total-token allowance
+triggers a search of authorized compaction alternatives. Only a candidate
+that fits both boundaries after transient holds are released can be frozen.
+A temporary hold alone is not a reason to compact; the existing reservation
+wait and recovery path retains the selected plan. Permanent exhaustion,
+including when no positive input/output allowance remains, is a concrete
+Runtime-owned pre-intent rejection, not an uncertain Host failure. A Host
+meter's error cannot establish that rejection. Before physical dispatch the
+ledger reserves the same plan under its current revision CAS; concurrent
+changes may make the plan wait or fail, but cannot silently replace its Tool
+declarations or token ceiling. New invocations use the latest ledger limits.
+Recovery reuses the committed plan without rerunning Context preparation or
+the admission meter.
 
 Ordinary bounded composition is the default. Explicit
 `Context.ManagedRecovery: true` selects the existing Runtime-owned Context

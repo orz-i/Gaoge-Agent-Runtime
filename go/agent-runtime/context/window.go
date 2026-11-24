@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"math/big"
 	"sort"
 	"strconv"
@@ -525,16 +526,18 @@ type TokenCounter interface {
 
 // Dependencies are optional Context Window capabilities.
 type Dependencies struct {
-	Counter TokenCounter
+	Counter    TokenCounter
+	Accounting RequestAccounting
 }
 
 // Manager owns pure Context Window evolution and request budget accounting.
 type Manager struct {
-	counter TokenCounter
+	counter    TokenCounter
+	accounting RequestAccounting
 }
 
 func NewManager(dependencies Dependencies) *Manager {
-	return &Manager{counter: dependencies.Counter}
+	return &Manager{counter: dependencies.Counter, accounting: dependencies.Accounting}
 }
 
 // NormalizePolicy applies non-model defaults only. It intentionally never invents a model token limit.
@@ -899,6 +902,23 @@ func (manager *Manager) AssessModelRequest(
 	modelWindow ModelWindow,
 	policy Policy,
 ) (Assessment, error) {
+	frame, err := manager.FreezeRequestAccounting(ctx, request, modelWindow)
+	if err != nil {
+		return Assessment{}, err
+	}
+	return manager.AssessModelRequestWithAccounting(ctx, request, modelWindow, policy, frame)
+}
+
+// AssessModelRequestWithAccounting applies a previously resolved header
+// projection to this candidate. An exact counter still receives only the
+// original typed request; fallback and byte ceilings share the frozen frame.
+func (manager *Manager) AssessModelRequestWithAccounting(
+	ctx stdcontext.Context,
+	request model.Request,
+	modelWindow ModelWindow,
+	policy Policy,
+	frame FrozenAccounting,
+) (Assessment, error) {
 	request = model.CloneRequest(request)
 	policy = NormalizePolicy(policy)
 	hard, err := EffectiveInputLimit(modelWindow, policy.MaxInputTokens)
@@ -909,11 +929,18 @@ func (manager *Manager) AssessModelRequest(
 	if err != nil {
 		return Assessment{}, errors.Join(ErrInvalidInput, err)
 	}
+	if !frame.MatchesWindow(modelWindow) {
+		return Assessment{}, ErrInvalidInput
+	}
+	canonicalBytes, err := frame.canonicalBytes(request, int64(len(exactPayload)))
+	if err != nil {
+		return Assessment{}, err
+	}
 	soft := hard * int64(policy.SoftLimitPercent) / 100
 	if soft < 1 {
 		soft = 1
 	}
-	assessment := Assessment{HardInputTokens: hard, SoftInputTokens: soft, SerializedBytes: int64(len(exactPayload))}
+	assessment := Assessment{HardInputTokens: hard, SoftInputTokens: soft, SerializedBytes: max(int64(len(exactPayload)), canonicalBytes)}
 	countContext := normalizeTokenCountContext(modelWindow.TokenCountContext)
 	// A media URL/file reference is only a few serialized bytes, while
 	// decoded image/document/audio tokens are not bounded by those bytes.
@@ -940,9 +967,14 @@ func (manager *Manager) AssessModelRequest(
 	if requiresExact {
 		return Assessment{}, ErrModelWindowUnknown
 	}
-	assessment.RawTokenEstimate = estimatedTokens(exactPayload)
+	assessment.RawTokenEstimate = canonicalBytes / 4
+	if canonicalBytes%4 != 0 {
+		assessment.RawTokenEstimate++
+	}
 	assessment.AdjustedTokenEstimate = applySafetyMargin(assessment.RawTokenEstimate, policy.EstimateSafetyPercent)
-	assessment.HardTokenEstimate = hardTokenUpperBound(exactPayload, policy.EstimateSafetyPercent)
+	// Preserve the existing conservative bound on the original typed bytes,
+	// even if the canonical accounting options happen to serialize smaller.
+	assessment.HardTokenEstimate = hardTokenUpperBound(assessment.SerializedBytes, policy.EstimateSafetyPercent)
 	assessment.TokenCountSource = CountEstimated
 	return assessment, nil
 }
@@ -1564,15 +1596,23 @@ func estimatedTokens(serialized []byte) int64 {
 //
 // This intentionally sacrifices usable window capacity until a host supplies an exact
 // TokenCounter; soft-limit decisions continue to use the less conservative bytes/4 estimate.
-func hardTokenUpperBound(serialized []byte, safetyPercent int) int64 {
-	return applySafetyMargin(int64(len(serialized)), safetyPercent)
+func hardTokenUpperBound(serializedBytes int64, safetyPercent int) int64 {
+	return applySafetyMargin(serializedBytes, safetyPercent)
 }
 
 func applySafetyMargin(tokens int64, percent int) int64 {
 	if tokens <= 0 || percent <= 0 {
 		return tokens
 	}
-	return (tokens*int64(100+percent) + 99) / 100
+	// Compute ceil(tokens * (100 + percent) / 100) without overflow.
+	if int64(percent) > math.MaxInt64-100 {
+		return math.MaxInt64
+	}
+	factor := int64(percent) + 100
+	if tokens > (math.MaxInt64-99)/factor {
+		return math.MaxInt64
+	}
+	return (tokens*factor + 99) / 100
 }
 
 func maxInt(left, right int) int {

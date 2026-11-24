@@ -3,7 +3,9 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/callbackscope"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
@@ -32,6 +34,7 @@ type BoundedContextPlan struct {
 type BoundedContextPorts interface {
 	Hydrate(context.Context, plugin.RunInvocation) (context.Context, BoundedContextHydration, error)
 	Plan(context.Context, model.Request) (BoundedContextPlan, error)
+	ResolveWindow(context.Context, model.Request) (runtimecontext.ModelWindow, error)
 	PutArtifact(context.Context, runtimecontext.Artifact) (runtimecontext.Artifact, error)
 	CommitCheckpoint(context.Context, BoundedContextPlan, runtimecontext.Checkpoint) (runtimecontext.Checkpoint, error)
 	BindCheckpoint(context.Context, string, runtimecontext.Checkpoint) error
@@ -52,6 +55,29 @@ func (*BoundedContextBudgetError) Unwrap() error { return runtimecontext.ErrBudg
 
 func rejectedContextBudget(a runtimecontext.Assessment, policy runtimecontext.Policy, reason string) error {
 	return &BoundedContextBudgetError{Assessment: a, MaxSerializedBytes: policy.MaxSerializedBytes, Reason: reason}
+}
+
+// candidateRejection is a Runtime-owned no-dispatch decision. It is set
+// only after joint candidate assessment/search, never by a Host port error.
+// The numeric facts also bind the original owned preparation receipt.
+type candidateRejection struct {
+	Code       string
+	Reason     string
+	Assessment runtimecontext.Assessment
+	Quota      candidateQuota
+	cause      error
+}
+
+func (c modelCandidate) reject(policy runtimecontext.Policy, reason string, rejected *candidateRejection) error {
+	decision := candidateRejection{Code: "context.input_budget_exceeded", Reason: reason, Assessment: c.assessment,
+		Quota: c.quota, cause: rejectedContextBudget(c.assessment, policy, reason)}
+	if errors.Is(c.quota.err, budget.ErrExhausted) {
+		decision.Code, decision.cause = sharedBudgetErrorCode(c.quota.err), c.quota.err
+	}
+	if rejected != nil {
+		*rejected = decision
+	}
+	return decision.cause
 }
 
 type BoundedContextAdapter struct {
@@ -84,13 +110,20 @@ func (a *BoundedContextAdapter) Run(ctx context.Context, inv plugin.RunInvocatio
 func (a *BoundedContextAdapter) Prepare(ctx context.Context, incoming model.Request) (prepared model.Request, prepareErr error) {
 	callbackscope.ManagedPrepareEntered(ctx, a)
 	defer func() { callbackscope.ManagedPrepareReturned(ctx, a, prepared, prepareErr) }()
-	return a.prepare(ctx, incoming, nil)
+	return a.prepare(ctx, incoming, nil, true)
+}
+
+// PrepareRequest is the ordinary Host request-preparer composition. It uses
+// the same candidate selection and Context writes but cannot record a native
+// managed recovery receipt on the surrounding Host callback ticket.
+func (a *BoundedContextAdapter) PrepareRequest(ctx context.Context, incoming model.Request) (model.Request, error) {
+	return a.prepare(ctx, incoming, nil, false)
 }
 
 // prepare owns the only Context preparation algorithm. Only a rejection
 // computed by this concrete adapter can set rejected, never an error supplied
 // by a Host port. Managed transfer and ordinary owned execution share it.
-func (a *BoundedContextAdapter) prepare(ctx context.Context, incoming model.Request, rejected *bool) (model.Request, error) {
+func (a *BoundedContextAdapter) prepare(ctx context.Context, incoming model.Request, rejected *candidateRejection, journal bool) (model.Request, error) {
 	plan, err := a.ports.Plan(ctx, model.CloneRequest(incoming))
 	if err != nil {
 		return model.Request{}, err
@@ -106,41 +139,48 @@ func (a *BoundedContextAdapter) prepare(ctx context.Context, incoming model.Requ
 		return model.Request{}, ErrInvalidRequest
 	}
 	policy := runtimecontext.NormalizePolicy(plan.Policy)
-	assessment, err := a.manager.AssessModelRequest(ctx, request, plan.ModelWindow, policy)
+	frame, err := a.manager.FreezeRequestAccounting(ctx, request, plan.ModelWindow)
 	if err != nil {
 		return model.Request{}, err
 	}
-	withinHard := runtimecontext.WithinHardBudget(assessment, policy)
-	if withinHard && assessment.HardTokenEstimate <= assessment.SoftInputTokens {
-		return request, nil
+	original, err := assessModelCandidate(ctx, a, request, plan.ModelWindow, policy, frame)
+	if err != nil {
+		return model.Request{}, err
 	}
-	if !plan.ArtifactReader || !plan.Owner {
-		if withinHard {
-			return request, nil
+	if original.disposition == candidateExhausted {
+		return model.Request{}, original.reject(policy, "shared_budget_exhausted", rejected)
+	}
+	if original.soft() {
+		return original.selectForIntent(ctx)
+	}
+	if !plan.ArtifactReader || original.omitLocalTools || !plan.Owner {
+		if original.selectable() {
+			return original.selectForIntent(ctx)
 		}
 		reason := "no_artifact_reader"
-		if plan.ArtifactReader {
+		if plan.ArtifactReader && !original.omitLocalTools {
 			reason = "not_owner"
 		}
-		if rejected != nil {
-			*rejected = true
-		}
-		return model.Request{}, rejectedContextBudget(assessment, policy, reason)
+		return model.Request{}, original.reject(policy, reason, rejected)
 	}
-	choice, ok, err := a.selectCompaction(ctx, *plan.Checkpoint, request, plan.ModelWindow, policy, assessment, withinHard)
+	choice, ok, err := a.selectCompaction(ctx, *plan.Checkpoint, request, plan.ModelWindow, policy, frame, original)
 	if err != nil {
 		return model.Request{}, err
 	}
 	if !ok {
-		if withinHard {
-			return request, nil
+		if original.selectable() {
+			return original.selectForIntent(ctx)
 		}
-		if rejected != nil {
-			*rejected = true
-		}
-		return model.Request{}, rejectedContextBudget(assessment, policy, "no_safe_compaction")
+		return model.Request{}, original.reject(policy, "no_safe_compaction", rejected)
 	}
-	next, err := a.manager.Rollover(ctx, runtimecontext.RolloverRequest{Previous: *plan.Checkpoint, Window: choice.window, Artifacts: choice.artifacts, Reason: "model_window_pressure", ModelWindowFingerprint: runtimecontext.ModelWindowFingerprint(plan.ModelWindow), Assessment: &choice.assessment})
+	next, err := a.manager.Rollover(ctx, runtimecontext.RolloverRequest{Previous: *plan.Checkpoint, Window: choice.window, Artifacts: choice.artifacts, Reason: "model_window_pressure", ModelWindowFingerprint: runtimecontext.ModelWindowFingerprint(choice.modelWindow), Assessment: &choice.assessment})
+	if err != nil {
+		return model.Request{}, err
+	}
+	if !sameFrozenModelMessages(choice.request.Messages, model.CloneMessages(runtimecontext.Materialize(next.Window))) {
+		return model.Request{}, ErrInvalidRequest
+	}
+	request, err = choice.selectForIntent(ctx)
 	if err != nil {
 		return model.Request{}, err
 	}
@@ -163,14 +203,15 @@ func (a *BoundedContextAdapter) prepare(ctx context.Context, incoming model.Requ
 	if err = a.ports.BindCheckpoint(ctx, plan.Checkpoint.ID, saved); err != nil {
 		return model.Request{}, err
 	}
-	callbackscope.Operation(ctx, a, "context.checkpoint:"+saved.ID, struct {
-		RunID, TurnID       string
-		TurnRevision        uint64
-		Source              json.RawMessage
-		Previous, Committed runtimecontext.Checkpoint
-		Artifacts           []runtimecontext.Artifact
-	}{incoming.RunID, plan.TurnID, plan.TurnRevision, plan.SourceBinding, *plan.Checkpoint, saved, choice.artifacts})
-	request.Messages = runtimecontext.Materialize(saved.Window)
+	if journal {
+		callbackscope.Operation(ctx, a, "context.checkpoint:"+saved.ID, struct {
+			RunID, TurnID       string
+			TurnRevision        uint64
+			Source              json.RawMessage
+			Previous, Committed runtimecontext.Checkpoint
+			Artifacts           []runtimecontext.Artifact
+		}{incoming.RunID, plan.TurnID, plan.TurnRevision, plan.SourceBinding, *plan.Checkpoint, saved, choice.artifacts})
+	}
 	return request, nil
 }
 func sameBoundedValue(a, b any) bool {

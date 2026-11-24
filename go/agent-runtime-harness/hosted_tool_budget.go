@@ -57,14 +57,16 @@ func applyHostedReservation(request model.Request, maximum int, ledger budget.Le
 	return request
 }
 
-// Run after the atomic reservation: its native calls occupy shared tool slots
-// even though they have not executed yet. Local calls cannot spend those slots.
+// Evaluate against the projected held reservation: its native calls occupy
+// shared Tool slots before dispatch. Local calls cannot spend those slots.
 func applyLocalToolBudget(request model.Request, ledger budget.Ledger, runID string) model.Request {
 	for current := runID; ; current = ledger.Runs[current].ParentRunID {
 		view := ledger.View(current)
 		if view.Limits.MaxToolCalls > 0 && view.Usage.ToolCalls+view.Reserved.ToolCalls >= view.Limits.MaxToolCalls {
 			request.Tools = nil
-			request.RequireToolCall = false
+			if len(request.HostedTools) == 0 || (request.HostedToolCallLimit != nil && *request.HostedToolCallLimit == 0) {
+				request.RequireToolCall = false
+			}
 			break
 		}
 		if current == "" {
