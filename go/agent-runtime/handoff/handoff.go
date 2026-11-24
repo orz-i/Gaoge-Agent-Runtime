@@ -122,7 +122,12 @@ type ChildRunner interface {
 // frozen target revision and persisted remote discovery before accepting it.
 type RemoteShadowObserver interface {
 	ChildRunner
+	// A single original executor owns the frozen binding, its Kernel, and
+	// control. Merely returning a remote-kind Run cannot satisfy this port.
+	RemoteRuntime() *kernel.Runtime
+	MatchesRemoteDelegation(Delegation) bool
 	ObservesFrozenRemoteShadow(*kernel.Runtime, Delegation, kernel.Snapshot) bool
+	CancelRemote(context.Context, string, uint64) (kernel.Snapshot, error)
 }
 
 // LocalKernelChildRunner is an explicit Host contract that its ChildRunner
@@ -277,9 +282,12 @@ func (coordinator *Coordinator) StartOrLoad(
 	if err != nil {
 		return Delegation{}, err
 	}
+	if err = verifyRemoteBeforeObservation(ctx, children, delegation, parent.Run); err != nil {
+		return Delegation{}, err
+	}
 	child, err := children.LoadRun(ctx, delegation.ChildRunID)
 	if err == nil {
-		if !VerifiedChildRun(delegation, parent.Run, child) {
+		if !verifiedRoutedChild(children, delegation, parent.Run, child) {
 			return Delegation{}, ErrChildRunUnverified
 		}
 		return projectChild(delegation, child), childStateError(child)
@@ -311,7 +319,7 @@ func (coordinator *Coordinator) StartOrLoad(
 	if child.Run.ID == "" && err != nil {
 		return Delegation{}, err
 	}
-	if !VerifiedChildRun(delegation, parent.Run, child) {
+	if !verifiedRoutedChild(children, delegation, parent.Run, child) {
 		return Delegation{}, errors.Join(ErrChildRunUnverified, err)
 	}
 	return projectChild(delegation, child), errors.Join(childStateError(child), err)
@@ -332,11 +340,14 @@ func (coordinator *Coordinator) Refresh(ctx context.Context, parent kernel.Snaps
 	if err != nil {
 		return Delegation{}, err
 	}
+	if err = verifyRemoteBeforeObservation(ctx, children, delegation, parent.Run); err != nil {
+		return Delegation{}, err
+	}
 	child, err := children.LoadRun(ctx, delegation.ChildRunID)
 	if err != nil {
 		return Delegation{}, err
 	}
-	if !VerifiedChildRun(delegation, parent.Run, child) {
+	if !verifiedRoutedChild(children, delegation, parent.Run, child) {
 		return Delegation{}, ErrChildRunUnverified
 	}
 	return projectChild(delegation, child), childStateError(child)
@@ -388,6 +399,42 @@ func VerifiedChildRun(delegation Delegation, parent kernel.Run, child kernel.Sna
 	}
 }
 
+// verifiedRoutedChild is the common execution/observation receipt boundary.
+func verifiedRoutedChild(children ChildRunner, d Delegation, parent kernel.Run, child kernel.Snapshot) bool {
+	if !VerifiedChildRun(d, parent, child) {
+		return false
+	}
+	if !d.Remote {
+		return true
+	}
+	remote, ok := children.(RemoteShadowObserver)
+	return ok && remote.MatchesRemoteDelegation(d) &&
+		remote.ObservesFrozenRemoteShadow(remote.RemoteRuntime(), d, child)
+}
+
+// An existing remote shadow must be authenticated against the original
+// delegation BEFORE LoadRun is allowed to perform a protocol observation.
+func verifyRemoteBeforeObservation(ctx context.Context, children ChildRunner, d Delegation, parent kernel.Run) error {
+	if !d.Remote {
+		return nil
+	}
+	remote, ok := children.(RemoteShadowObserver)
+	if !ok || remote.RemoteRuntime() == nil || !remote.MatchesRemoteDelegation(d) {
+		return ErrChildRunUnverified
+	}
+	snapshot, err := remote.RemoteRuntime().Load(ctx, d.ChildRunID)
+	if errors.Is(err, kernel.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !verifiedRoutedChild(children, d, parent, snapshot) {
+		return ErrChildRunUnverified
+	}
+	return nil
+}
+
 func boundDelegationModelOutput(parent kernel.Snapshot, delegation Delegation) (Delegation, error) {
 	if parent.Run.Kind != agent.RunKind || delegation.Remote {
 		return delegation, nil
@@ -418,8 +465,9 @@ func (coordinator *Coordinator) resolveChild(ctx context.Context, delegation Del
 	// routes (including remote shadows) have no proof they can enforce it;
 	// deny before LoadRun/StartRun can dispatch external work. This keeps
 	// protocol-specific capabilities out of this Handoff boundary.
-	_, isRemote := children.(RemoteShadowObserver)
-	if isRemote != delegation.Remote || (delegation.Remote && !RemoteGoalOnly(delegation)) {
+	remote, isRemote := children.(RemoteShadowObserver)
+	if isRemote != delegation.Remote || (delegation.Remote &&
+		(!RemoteGoalOnly(delegation) || remote.RemoteRuntime() == nil || !remote.MatchesRemoteDelegation(delegation))) {
 		// A remote route must prove original protocol identity and local
 		// receipt before ANY StartRun/LoadRun. An ordinary ChildRunner must
 		// never impersonate either a remote shadow or a native Agent.

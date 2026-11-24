@@ -34,6 +34,7 @@ type deferredAgentRoutes struct {
 	original *agent.Runner
 	classify DelegationRouteSelector
 	remote   ChildRunnerResolver
+	eager    bool // standard Session preserves native eager execution
 }
 
 func (r *deferredAgentRoutes) route(d Delegation) (DelegationRoute, error) {
@@ -52,12 +53,47 @@ func (r *deferredAgentRoutes) ResolveChild(ctx context.Context, d Delegation) (C
 		return nil, err
 	}
 	if kind == DelegationRouteLocal {
+		if r.eager {
+			return r.original, nil
+		}
 		return deferredAgentChild{original: r.original}, nil
 	}
 	if r.remote == nil {
 		return nil, ErrChildUnavailable
 	}
-	return r.remote.ResolveChild(ctx, cloneDelegation(d))
+	child, err := r.remote.ResolveChild(ctx, cloneDelegation(d))
+	if err != nil {
+		return nil, err
+	}
+	if r.eager {
+		remote, ok := child.(RemoteShadowObserver)
+		if !ok || !r.original.ObservesKernelRuntime(remote.RemoteRuntime()) {
+			return nil, ErrChildRunUnverified
+		}
+	}
+	return child, nil
+}
+
+// NewAgentWithRemote is the standard AgentSession route: native children
+// use the original eager Agent loop, and remote children use the same frozen
+// executor for Start, Observe and Cancel. It requires no continuation worker.
+func NewAgentWithRemote(original *agent.Runner, remote ChildRunnerResolver) (*Coordinator, error) {
+	c, err := NewDeferredAgentWithRemote(original, remote)
+	if err != nil {
+		return nil, err
+	}
+	c.resolver.(*deferredAgentRoutes).eager = true
+	return c, nil
+}
+
+// OwnsStandardRemoteRoutes distinguishes the standard, same-Kernel
+// lifecycle from advanced Host-routed/deferred compositions.
+func (c *Coordinator) OwnsStandardRemoteRoutes(rt *kernel.Runtime) bool {
+	if c == nil || rt == nil {
+		return false
+	}
+	r, ok := c.resolver.(*deferredAgentRoutes)
+	return ok && r.eager && r.original.ObservesKernelRuntime(rt)
 }
 
 // NewDeferredAgentWithRemote routes the Host-frozen Remote bit through the
@@ -146,12 +182,38 @@ func (c *Coordinator) ObservesRemoteShadow(
 	if !ok || r.remote == nil {
 		return false
 	}
-	resolved, err := r.remote.ResolveChild(ctx, cloneDelegation(d))
+	resolved, err := r.ResolveChild(ctx, cloneDelegation(d))
 	if err != nil {
 		return false
 	}
 	observer, ok := resolved.(RemoteShadowObserver)
-	return ok && observer.ObservesFrozenRemoteShadow(rt, cloneDelegation(d), child)
+	return ok && observer.RemoteRuntime() == rt && observer.MatchesRemoteDelegation(d) &&
+		observer.ObservesFrozenRemoteShadow(rt, cloneDelegation(d), child)
+}
+
+// CancelRemoteDelegation controls only the exact standard route and committed
+// original shadow. The same executor that owns Start and Observe owns Cancel.
+func (c *Coordinator) CancelRemoteDelegation(ctx context.Context, rt *kernel.Runtime,
+	d Delegation, parent kernel.Run, current kernel.Snapshot) (kernel.Snapshot, error) {
+	if !c.OwnsStandardRemoteRoutes(rt) || !VerifiedChildRun(d, parent, current) {
+		return kernel.Snapshot{}, ErrChildRunUnverified
+	}
+	child, err := c.resolveChild(ctx, d)
+	if err != nil {
+		return kernel.Snapshot{}, err
+	}
+	remote, ok := child.(RemoteShadowObserver)
+	if !ok || remote.RemoteRuntime() != rt || !remote.ObservesFrozenRemoteShadow(rt, d, current) {
+		return kernel.Snapshot{}, ErrChildRunUnverified
+	}
+	next, err := remote.CancelRemote(ctx, current.Run.ID, current.Run.Revision)
+	if err != nil {
+		return next, err
+	}
+	if !verifiedRoutedChild(remote, d, parent, next) {
+		return kernel.Snapshot{}, ErrChildRunUnverified
+	}
+	return next, nil
 }
 
 // ObservesRemoteDelegation attests only that this statically composed deferred

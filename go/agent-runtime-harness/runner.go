@@ -890,6 +890,9 @@ func (runner *Runner) refreshTurn(ctx context.Context, turnID string, expected *
 	if ActiveCancellationFence(physicalEvidence) {
 		return Snapshot{}, ErrConflict
 	}
+	if err = runner.refreshStandardRemoteChildren(ctx, turn); err != nil {
+		return Snapshot{}, err
+	}
 	if err = runner.syncSubtaskItems(ctx, turn); err != nil {
 		return Snapshot{}, err
 	}

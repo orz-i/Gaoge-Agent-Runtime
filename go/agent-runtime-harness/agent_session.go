@@ -374,7 +374,7 @@ func openBoundedAgentSession(options AgentSessionOptions, registrations []tools.
 		// Native children use this exact Agent loop. RemoteChildren are
 		// resolved only for explicitly frozen remote NamedAgent members.
 		if options.RemoteChildren != nil {
-			routes, err = handoff.NewDeferredAgentWithRemote(loop, options.RemoteChildren)
+			routes, err = handoff.NewAgentWithRemote(loop, options.RemoteChildren)
 		} else {
 			routes, err = handoff.New(loop)
 		}

@@ -37,6 +37,13 @@ func (r *fixtureRemote) StartRun(ctx context.Context, req agent.StartRequest) (k
 func (r *fixtureRemote) LoadRun(ctx context.Context, id string) (kernel.Snapshot, error) {
 	return r.rt.Load(ctx, id)
 }
+func (r *fixtureRemote) RemoteRuntime() *kernel.Runtime { return r.rt }
+func (r *fixtureRemote) MatchesRemoteDelegation(d handoff.Delegation) bool {
+	return handoff.RemoteGoalOnly(d) && d.MemberID == "acp:research" && d.MemberRevision == "rev-1"
+}
+func (r *fixtureRemote) CancelRemote(context.Context, string, uint64) (kernel.Snapshot, error) {
+	return kernel.Snapshot{}, errors.New("test remote not cancellable")
+}
 func (r *fixtureRemote) ObservesFrozenRemoteShadow(rt *kernel.Runtime, d handoff.Delegation, s kernel.Snapshot) bool {
 	return rt == r.rt && d.Remote && d.MemberID == "acp:research" && d.MemberRevision == "rev-1" &&
 		s.Run.Kind == handoff.RemoteAgentRunKind && s.Run.ID == d.ChildRunID &&
@@ -126,6 +133,58 @@ func TestNamedAgentRemoteNativeCapabilitiesRejectBeforeAnyEffect(t *testing.T) {
 			tc.mutate(&opts.NamedAgents[0])
 			if _, err = harness.OpenAgentSession(opts); !errors.Is(err, harness.ErrInvalidRequest) {
 				t.Fatalf("remote member accepted unproved capability: %v", err)
+			}
+		})
+	}
+}
+
+func TestPR151MixedRosterKeepsNativeExecution(t *testing.T) {
+	for _, mixed := range []bool{false, true} {
+		t.Run(map[bool]string{false: "native-only", true: "mixed"}[mixed], func(t *testing.T) {
+			var childCalls, rootCalls int
+			m := &agentSessionModel{generate: func(r model.Request) (model.Response, error) {
+				if r.Model == "worker" {
+					childCalls++
+					return model.Response{Content: "local result"}, nil
+				}
+				rootCalls++
+				for _, entry := range r.Messages {
+					if entry.Role == model.RoleTool {
+						return model.Response{Content: "done"}, nil
+					}
+				}
+				return model.Response{ToolCalls: []tools.Call{{ID: "delegate-local", ToolKey: harness.DelegationToolKey, Arguments: json.RawMessage("{\"memberID\":\"local-worker\",\"goal\":\"local goal\"}")}}}, nil
+			}}
+			opts := agentSessionOptions(t, memory.NewStore(), harness.NewMemoryStore(), m)
+			rel, err := runrelation.New(memory.NewRunRelationStore(), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			opts.Relations = rel
+			opts.Session.Config.DelegationPolicy = harness.DelegationPolicySnapshot{MaxDepth: 1}
+			opts.NamedAgents = []harness.NamedAgent{{MemberID: "local-worker", MemberRevision: "r1", AgentSpec: harness.AgentSpec{Model: "worker"}}}
+			if mixed {
+				opts.NamedAgents = append(opts.NamedAgents, harness.NamedAgent{MemberID: "a2a:remote", MemberRevision: "r1", Remote: true})
+				opts.RemoteChildren = handoff.ChildRunnerResolverFunc(func(context.Context, handoff.Delegation) (handoff.ChildRunner, error) {
+					t.Fatal("local delegation misrouted")
+					return nil, nil
+				})
+			}
+			sess, err := harness.OpenAgentSession(opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			snap, err := sess.Prompt(t.Context(), "mixed-audit", "Use local")
+			t.Logf("initial mixed=%t turn=%s childCalls=%d rootCalls=%d err=%v", mixed, snap.Turn.Status, childCalls, rootCalls, err)
+			for range 3 {
+				if snap.Turn.Status == harness.TurnCompleted {
+					break
+				}
+				snap, err = sess.Resume(t.Context(), "mixed-audit")
+				t.Logf("resume mixed=%t turn=%s childCalls=%d rootCalls=%d err=%v", mixed, snap.Turn.Status, childCalls, rootCalls, err)
+			}
+			if snap.Turn.Status != harness.TurnCompleted || childCalls != 1 || rootCalls != 2 {
+				t.Fatal("native child lifecycle changed by unused remote roster")
 			}
 		})
 	}

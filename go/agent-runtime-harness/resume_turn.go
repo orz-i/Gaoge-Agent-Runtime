@@ -126,6 +126,30 @@ func (runner *Runner) resumeTurn(ctx context.Context, turnID string, expected *s
 	if err = runner.requireFrozenAdmission(ctx, turn); err != nil {
 		return runner.resumeTurnError(ctx, turn, &runtimeSnapshot, err)
 	}
+	if err = runner.refreshStandardRemoteChildren(ctx, turn); err != nil {
+		return runner.resumeTurnError(ctx, turn, &runtimeSnapshot, err)
+	}
+	if runner.standardRemoteCoordinator() != nil {
+		// The original Agent owns the retained physical Tool grant. Recover
+		// its exact terminal child receipts before issuing another Resume
+		// grant; never re-enter a still-dispatched delegation Tool.
+		original, ok := runner.agent.(*agent.Runner)
+		if !ok {
+			return Snapshot{}, ErrConflict
+		}
+		if scope, scopeErr := original.RootDeferredCleanupEligibility(ctx, runtimeSnapshot.Run.ID, runtimeSnapshot.Run.Revision); scopeErr == nil && scope.Valid() {
+			repaired, receiptErr := original.ReconcileRootDeferredChildren(ctx, runtimeSnapshot.Run.ID, runtimeSnapshot.Run.Revision)
+			if errors.Is(receiptErr, agent.ErrToolOutcomeUnknown) {
+				// The peer has not reached terminal evidence yet. No new
+				// physical execution is admitted just to poll a child.
+				return runner.loadSnapshot(ctx, turn, &repaired)
+			}
+			if receiptErr != nil {
+				return runner.resumeTurnError(ctx, turn, &repaired, receiptErr)
+			}
+			runtimeSnapshot = repaired
+		}
+	}
 	runCtx, err := runner.restoreInvocationContext(ctx, turn, invocation)
 	if err != nil {
 		return runner.resumeTurnError(ctx, turn, &runtimeSnapshot, err)

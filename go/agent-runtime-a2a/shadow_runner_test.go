@@ -67,7 +67,7 @@ func TestShadowRunnerSatisfiesHandoffWithoutA2AImportsInParent(t *testing.T) {
 	coordinator := newShadowCoordinator(t, runner)
 	parent := newShadowParent(t, runtime)
 	delegation := handoff.Delegation{Remote: true,
-		ID: "delegation-1", MemberID: "remote-member", ChildRunID: "a2a-child-1",
+		ID: "delegation-1", MemberID: "a2a:remote-member", MemberRevision: "fixture-v1", ChildRunID: "a2a-child-1",
 		Goal: "finish remotely", Status: handoff.StatusQueued,
 	}
 	started := startShadowDelegation(t, coordinator, parent, delegation)
@@ -105,7 +105,7 @@ func TestShadowRunnerExistingHandoffCannotAcquireModelOutputCeiling(t *testing.T
 	coordinator := newShadowCoordinator(t, runner)
 	parent := newShadowParent(t, runtime)
 	delegation := handoff.Delegation{Remote: true,
-		ID: "existing-shadow", MemberID: "remote-member", ChildRunID: "existing-shadow-child",
+		ID: "existing-shadow", MemberID: "a2a:remote-member", MemberRevision: "fixture-v1", ChildRunID: "existing-shadow-child",
 		Goal: "finish remotely", Status: handoff.StatusQueued,
 	}
 	started := startShadowDelegation(t, coordinator, parent, delegation)
@@ -120,6 +120,7 @@ func TestShadowRunnerExistingHandoffCannotAcquireModelOutputCeiling(t *testing.T
 
 func newShadowCoordinator(t *testing.T, runner *ShadowRunner) *handoff.Coordinator {
 	t.Helper()
+	runner.targetID, runner.revision = "remote-member", "fixture-v1"
 	coordinator, err := handoff.New(runner)
 	if err != nil {
 		t.Fatal(err)

@@ -30,13 +30,16 @@ type StdioClient struct {
 	runs   map[string]*stdioRun
 }
 type stdioRun struct {
-	mu              sync.Mutex
-	process         *stdio.ClientProcess
-	sessionID       string
-	onChunk         func(string) error
-	promptActive    bool
-	cancelRequested bool
-	invalid         bool
+	mu               sync.Mutex
+	sendMu           sync.Mutex // serialize original Prompt frame and Cancel notification
+	process          *stdio.ClientProcess
+	sessionID        string
+	onChunk          func(string) error
+	promptActive     bool
+	cancelRequested  bool
+	promptDispatched bool
+	closed           bool
+	invalid          bool
 }
 
 func NewStdioClient(config StdioConfig) (*StdioClient, error) {
@@ -44,10 +47,19 @@ func NewStdioClient(config StdioConfig) (*StdioClient, error) {
 		!filepath.IsAbs(config.Cwd) || filepath.Clean(config.Cwd) != config.Cwd {
 		return nil, ErrInvalidBinding
 	}
-	// The executable and environment are an explicit Host grant, never
-	// synthesized from model text or the Agent's advertised name.
+	// The executable, working directory and environment are explicit Host
+	// grants. Neither nil nor an empty allowlist inherits ambient credentials.
+	// The upstream SDK collapses a zero-length Env into nil a second time;
+	// a fixed non-secret marker keeps the child environment explicit.
+	if config.Command.Dir != "" && config.Command.Dir != config.Cwd {
+		return nil, ErrInvalidBinding
+	}
+	config.Command.Dir = config.Cwd
 	config.Command.Args = append([]string(nil), config.Command.Args...)
 	config.Command.Env = append([]string(nil), config.Command.Env...)
+	if len(config.Command.Env) == 0 {
+		config.Command.Env = []string{"GAOGE_ACP_ENV_ISOLATED=1"}
+	}
 	return &StdioClient{config: config, runs: make(map[string]*stdioRun)}, nil
 }
 
@@ -171,16 +183,48 @@ func (c *StdioClient) Prompt(ctx context.Context, runID, sessionID, goal string,
 	if err != nil {
 		return "", err
 	}
+	// The original session owns exactly one physical Prompt. Dispatch waits
+	// only for the complete frame to be written, not for the response.
+	// A Cancel that wins this lock revokes any later Prompt; otherwise the
+	// notification is sent strictly after the submitted Prompt frame.
+	run.sendMu.Lock()
 	run.mu.Lock()
-	run.onChunk = onChunk
-	run.promptActive = true
+	if run.closed || run.cancelRequested || run.promptDispatched || run.invalid {
+		revoked := run.cancelRequested && !run.promptDispatched && !run.closed
+		run.mu.Unlock()
+		run.sendMu.Unlock()
+		if revoked {
+			c.closeRun(runID, run)
+		}
+		return "", ErrOutcomeUnknown
+	}
 	process := run.process
-	run.mu.Unlock()
-	defer c.closeRun(runID, run)
-	resp, err := process.Connection.Prompt(ctx, wire.PromptRequest{
+	request, err := wire.PrepareClientRequest[wire.PromptResponse](process.Connection, wire.AgentMethodSessionPrompt, wire.PromptRequest{
 		SessionId: wire.SessionId(sessionID),
 		Prompt:    []wire.ContentBlock{wire.TextBlock(goal)},
 	})
+	if err != nil {
+		run.mu.Unlock()
+		run.sendMu.Unlock()
+		c.closeRun(runID, run)
+		return "", err
+	}
+	defer request.Abandon()
+	defer c.closeRun(runID, run)
+	run.promptDispatched = true
+	// Hold the callback state lock until the SDK writer returns. A peer
+	// callback cannot borrow an unsent Prompt's permission or output lease.
+	err = request.Dispatch(ctx, wire.DispatchOptions{Abort: func(error) error { return process.Connection.Close() }})
+	if err == nil {
+		run.onChunk = onChunk
+		run.promptActive = true
+	}
+	run.mu.Unlock()
+	run.sendMu.Unlock()
+	if err != nil {
+		return "", err
+	}
+	resp, err := request.Wait(ctx)
 	run.mu.Lock()
 	run.promptActive = false
 	run.onChunk = nil
@@ -199,8 +243,14 @@ func (c *StdioClient) CancelSession(ctx context.Context, runID, sessionID string
 	if err != nil {
 		return err
 	}
+	run.sendMu.Lock()
+	defer run.sendMu.Unlock()
 	run.mu.Lock()
-	run.cancelRequested = true // The original Cancel intent revokes future permission grants.
+	if run.closed || run.cancelRequested {
+		run.mu.Unlock()
+		return ErrOutcomeUnknown
+	}
+	run.cancelRequested = true // Also irrevocably denies a not-yet-sent Prompt.
 	process := run.process
 	run.mu.Unlock()
 	return process.Connection.Cancel(ctx, wire.CancelNotification{SessionId: wire.SessionId(sessionID)})
@@ -216,7 +266,7 @@ func (c *StdioClient) requireRun(runID, sessionID string) (*stdioRun, error) {
 		return nil, ErrOutcomeUnknown
 	}
 	run.mu.Lock()
-	same := run.sessionID == sessionID && !run.invalid && run.process != nil
+	same := run.sessionID == sessionID && !run.invalid && !run.closed && run.process != nil
 	run.mu.Unlock()
 	if !same {
 		return nil, ErrSessionMismatch
@@ -245,7 +295,18 @@ func (c *StdioClient) closeRun(id string, run *stdioRun) {
 		delete(c.runs, id)
 	}
 	c.mu.Unlock()
-	shutdown(run.process)
+	run.sendMu.Lock()
+	run.mu.Lock()
+	if run.closed {
+		run.mu.Unlock()
+		run.sendMu.Unlock()
+		return
+	}
+	run.closed = true
+	process := run.process
+	run.mu.Unlock()
+	run.sendMu.Unlock()
+	shutdown(process)
 }
 func shutdown(process *stdio.ClientProcess) {
 	if process == nil {

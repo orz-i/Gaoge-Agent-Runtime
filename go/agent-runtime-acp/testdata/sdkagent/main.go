@@ -36,6 +36,9 @@ func (a *agent) Prompt(ctx context.Context, req wire.PromptRequest) (wire.Prompt
 }
 func (*agent) Cancel(context.Context, wire.CancelNotification) error { return nil }
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "--require-audit-marker" && os.Getenv("GAOGE_PR151_SYNTHETIC_SECRET") != "host-only-audit-marker" {
+		os.Exit(77)
+	}
 	a := &agent{}
 	conn, err := stdio.NewAgentConnection(a, wire.ConnectionOptions{})
 	if err != nil {

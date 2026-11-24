@@ -55,7 +55,7 @@ func TestPR113UnknownFirstSendRemainsUnresolvedAcrossHandoffAndRestart(t *testin
 			newChild := func() *ShadowRunner {
 				t.Helper()
 				shadow, err := NewShadowRunner(ShadowDependencies{
-					Runtime: rt, Client: remote, AttestationKey: testA2AShadowKey(),
+					Runtime: rt, Client: remote, AttestationKey: testA2AShadowKey(), TargetID: "remote", TargetRevision: "r1",
 					Discovery: Discovery{Descriptor: RemoteAgentDescriptor{
 						Name: "remote-agent", PreferredURL: testShadowRemoteURL, ProtocolVersion: ProtocolVersion,
 					}},
@@ -65,7 +65,7 @@ func TestPR113UnknownFirstSendRemainsUnresolvedAcrossHandoffAndRestart(t *testin
 				}
 				return shadow
 			}
-			d := handoff.Delegation{Remote: true, ID: "delegation", MemberID: "remote", ChildRunID: "unresolved-child", Goal: "remote goal", Status: handoff.StatusQueued}
+			d := handoff.Delegation{Remote: true, ID: "delegation", MemberID: "a2a:remote", MemberRevision: "r1", ChildRunID: "unresolved-child", Goal: "remote goal", Status: handoff.StatusQueued}
 			coordinator, err := handoff.New(newChild())
 			if err != nil {
 				t.Fatal(err)

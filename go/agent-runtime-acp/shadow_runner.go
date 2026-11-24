@@ -115,13 +115,29 @@ func (r *ShadowRunner) apply(ctx context.Context, snap kernel.Snapshot, state re
 	return r.runtime.Apply(ctx, snap.Run.ID, snap.Run.Revision, mutation)
 }
 
+func (r *ShadowRunner) RemoteRuntime() *kernel.Runtime {
+	if r == nil {
+		return nil
+	}
+	return r.runtime
+}
+
+func (r *ShadowRunner) MatchesRemoteDelegation(d handoff.Delegation) bool {
+	return r != nil && handoff.RemoteGoalOnly(d) &&
+		d.MemberID == TargetPrefix+r.binding.TargetID && d.MemberRevision == r.binding.Revision
+}
+
+func (r *ShadowRunner) CancelRemote(ctx context.Context, id string, revision uint64) (kernel.Snapshot, error) {
+	return r.CancelRun(ctx, id, revision)
+}
+
 // ObservesFrozenRemoteShadow provides the same read-only proof used by A2A.
 // It never accepts a same-ID native Run, a forged ACP Session or stale binding.
 func (r *ShadowRunner) ObservesFrozenRemoteShadow(rt *kernel.Runtime, d handoff.Delegation, child kernel.Snapshot) bool {
 	if r == nil || rt == nil || rt != r.runtime || !handoff.RemoteGoalOnly(d) ||
 		child.Run.Kind != RunKind || child.Run.ID != d.ChildRunID ||
 		child.Run.Goal != strings.TrimSpace(d.Goal) ||
-		d.MemberID != TargetPrefix+r.binding.TargetID || d.MemberRevision != r.binding.Revision {
+		!r.MatchesRemoteDelegation(d) {
 		return false
 	}
 	_, err := r.decodeState(child)
@@ -172,9 +188,7 @@ func (r *ShadowRunner) StartRun(ctx context.Context, req agent.StartRequest) (ke
 		// Its committed CAS denies this original Start's later Prompt.
 		// Stdio runs may now release their local process without sending
 		// another protocol effect or pretending the remote session vanished.
-		if abandoned, ok := r.binding.Client.(interface{ AbandonRun(string) }); ok {
-			abandoned.AbandonRun(id)
-		}
+		r.abandonLocalRun(id)
 		return snap, errors.Join(ErrOutcomeUnknown, err)
 	}
 	// The prompt is the second physical effect. Its admission must be durable
@@ -183,7 +197,17 @@ func (r *ShadowRunner) StartRun(ctx context.Context, req agent.StartRequest) (ke
 	snap, err = r.apply(ctx, snap, state, kernel.Mutation{Status: kernel.RunStatusRunning,
 		Events: []kernel.EventDraft{{Type: "acp.remote_prompt_intent", Message: "ACP prompt effect admitted"}}})
 	if err != nil {
+		r.abandonLocalRun(id)
 		return snap, errors.Join(ErrOutcomeUnknown, err)
+	}
+	// A delayed Store acknowledgement is not fresh permission to send. The
+	// physical client also serializes Prompt dispatch with Cancel, covering
+	// the race AFTER this read and BEFORE the actual protocol frame.
+	current, loadErr := r.runtime.Load(ctx, id)
+	frozen, verifyErr := r.decodeState(current)
+	if loadErr != nil || verifyErr != nil || frozen.CancelPending || current.Run.Revision != snap.Run.Revision {
+		r.abandonLocalRun(id)
+		return current, ErrOutcomeUnknown
 	}
 	var chunks strings.Builder
 	var streamErr error
@@ -208,6 +232,12 @@ func (r *ShadowRunner) StartRun(ctx context.Context, req agent.StartRequest) (ke
 		promptErr = overflow
 	}
 	return r.finishPrompt(ctx, id, sessionID, stop, answer, promptErr)
+}
+
+func (r *ShadowRunner) abandonLocalRun(id string) {
+	if abandoned, ok := r.binding.Client.(interface{ AbandonRun(string) }); ok {
+		abandoned.AbandonRun(id)
+	}
 }
 
 // settledPromptMutation projects only an already returned original ACP Prompt,

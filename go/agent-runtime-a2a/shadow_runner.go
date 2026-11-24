@@ -113,6 +113,24 @@ func NewShadowRunner(dependencies ShadowDependencies) (*ShadowRunner, error) {
 	}, nil
 }
 
+// RemoteRuntime and MatchesRemoteDelegation expose the original executor's
+// immutable composition, never a dynamically inferred Run kind.
+func (runner *ShadowRunner) RemoteRuntime() *kernel.Runtime {
+	if runner == nil {
+		return nil
+	}
+	return runner.runtime
+}
+
+func (runner *ShadowRunner) MatchesRemoteDelegation(d handoff.Delegation) bool {
+	return runner != nil && handoff.RemoteGoalOnly(d) && runner.targetID != "" &&
+		runner.revision != "" && d.MemberID == TargetPrefix+runner.targetID && d.MemberRevision == runner.revision
+}
+
+func (runner *ShadowRunner) CancelRemote(ctx context.Context, id string, revision uint64) (kernel.Snapshot, error) {
+	return runner.cancelRunAtRevision(ctx, id, revision)
+}
+
 // ObservesFrozenRemoteShadow is the first-party, read-only ownership
 // attestation used by Harness receipt and cancellation checks. It makes no
 // network call and never applies a Kernel mutation. Frozen origin/Invocation
@@ -123,15 +141,20 @@ func (runner *ShadowRunner) ObservesFrozenRemoteShadow(
 	if runner == nil || runtime == nil || runner.runtime != runtime || !handoff.RemoteGoalOnly(delegation) ||
 		child.Run.Kind != RunKind || child.Run.ID != delegation.ChildRunID ||
 		child.Run.Goal != strings.TrimSpace(delegation.Goal) ||
-		delegation.MemberID != TargetPrefix+runner.targetID ||
-		delegation.MemberRevision == "" || delegation.MemberRevision != runner.revision {
+		!runner.MatchesRemoteDelegation(delegation) {
 		return false
 	}
 	state, err := runner.decodeState(child)
-	return err == nil && state.TargetID == runner.targetID &&
-		state.TargetRevision == runner.revision &&
-		((state.RemoteTaskID != "" && state.RemoteContextID != "") ||
-			(state.RemoteTaskID == "" && state.RemoteMessageID != ""))
+	if err != nil || state.TargetID != runner.targetID || state.TargetRevision != runner.revision {
+		return false
+	}
+	// A valid signed *running* first-send intent is still the original
+	// executor's unresolved evidence. It authorizes no Task query/cancel
+	// without a peer identity; LoadRun/CancelRemote enforce that separately.
+	return (state.RemoteTaskID != "" && state.RemoteContextID != "") ||
+		(state.RemoteTaskID == "" && state.RemoteMessageID != "") ||
+		(child.Run.Status == kernel.RunStatusRunning && state.RemoteTaskID == "" &&
+			state.RemoteContextID == "" && state.RemoteMessageID == "" && state.MessageID == child.Run.ID+":message")
 }
 
 // StartRun creates the durable local shadow before sending the remote A2A message.

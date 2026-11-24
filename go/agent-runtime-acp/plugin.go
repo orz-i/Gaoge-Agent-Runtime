@@ -26,7 +26,10 @@ var (
 
 // RemoteClient is supplied by the Host and talks ACP v1. A returned SessionID
 // is the remote protocol identity, not a local Run ID or an A2A Task ID.
-// Implementations MUST bind every method to the same original run/session.
+// Implementations MUST bind every method to the same original run/session,
+// and atomically order Prompt frame submission with CancelSession: an earlier
+// Cancel irrevocably denies any later Prompt, or the Cancel frame follows the
+// admitted Prompt frame. A blocked response waiter must not block Cancel.
 type RemoteClient interface {
 	OpenSession(context.Context, string, string) (string, error)
 	Prompt(context.Context, string, string, string, func(string) error) (string, error)
@@ -92,7 +95,9 @@ func (p *Plugin) ResolveChild(ctx context.Context, d handoff.Delegation) (handof
 			state.TargetID != id || state.Revision == "" {
 			return nil, ErrBindingChanged
 		}
-		revision = state.Revision
+		if revision != state.Revision {
+			return nil, ErrBindingChanged
+		}
 	} else if !errors.Is(err, kernel.ErrNotFound) {
 		return nil, err
 	}
