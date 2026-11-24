@@ -47,7 +47,7 @@ func TestOwnedBoundedContextReceiptsRequireConcretePreparation(t *testing.T) {
 				_, err := runner.prepareBoundedContext(ctx, kernel.Snapshot{}, request)
 				return kernel.Snapshot{}, err
 			})
-			if errors.Is(err, runtimecontext.ErrBudgetExceeded) != tc.rejected || scope.Complete() != tc.complete || runner.rootCallbacks.unknown.Load() == tc.complete {
+			if (model.ClassifiedErrorCode(err) == "context.input_budget_exceeded") != (tc.complete && tc.rejected) || errors.Is(err, runtimecontext.ErrBudgetExceeded) != tc.rejected || scope.Complete() != tc.complete || runner.rootCallbacks.unknown.Load() == tc.complete {
 				t.Fatalf("incorrect receipt: complete=%v unknown=%v err=%v", scope.Complete(), runner.rootCallbacks.unknown.Load(), err)
 			}
 		})

@@ -60,6 +60,9 @@ func (r *Runner) prepareBoundedContext(ctx context.Context, source kernel.Snapsh
 		}{source, request, prepared, rejected})
 		if !proved {
 			err = ErrInvalidRequest
+		} else if rejected {
+			// Only the concrete no-dispatch decision can enter the terminal failure path.
+			err = model.NewClassifiedError(err, "context.input_budget_exceeded")
 		}
 	}
 	callbackscope.Returned(ticket, err)

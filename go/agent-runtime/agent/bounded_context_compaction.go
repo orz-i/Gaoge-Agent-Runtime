@@ -44,22 +44,31 @@ func (adapter *BoundedContextAdapter) selectCompaction(
 	tryPortable := func(recent int) error {
 		limited := policy
 		limited.PreserveRecentTurns = recent
-		result, err := adapter.manager.CompactPortable(runtimecontext.PortableCompactionRequest{
-			Previous: previous, RunID: request.RunID, Messages: request.Messages, Policy: limited,
-		})
-		if errors.Is(err, runtimecontext.ErrBudgetExceeded) {
-			return nil
+		// Prefer a readable extract; when it cannot fit, the exact archive and
+		// marker remain sufficient. Never drop the protected current turn.
+		for _, omitExtract := range []bool{false, true} {
+			result, err := adapter.manager.CompactPortable(runtimecontext.PortableCompactionRequest{
+				Previous: previous, RunID: request.RunID, Messages: request.Messages, Policy: limited, OmitExtract: omitExtract,
+			})
+			if errors.Is(err, runtimecontext.ErrBudgetExceeded) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			// An Agent-readable archive must never reveal provider-owned signed
+			// replay evidence as plain JSON.
+			if boundedArchivesContainProviderReplay(result.Artifacts) {
+				return nil
+			}
+			if err := consider(result.Window, result.Artifacts); err != nil {
+				return err
+			}
+			if bestFound {
+				return nil
+			}
 		}
-		if err != nil {
-			return err
-		}
-		// An Agent-readable archive must never reveal provider-owned signed
-		// replay evidence as plain JSON. Retain that history if no private
-		// archival projection is available.
-		if boundedArchivesContainProviderReplay(result.Artifacts) {
-			return nil
-		}
-		return consider(result.Window, result.Artifacts)
+		return nil
 	}
 	if err := tryPortable(policy.PreserveRecentTurns); err != nil {
 		return boundedContextCandidate{}, false, err
