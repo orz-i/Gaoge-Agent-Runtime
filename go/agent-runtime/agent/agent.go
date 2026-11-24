@@ -110,6 +110,7 @@ func (runner *Runner) validateCompletion(
 ) (CompletionCorrection, error) {
 	for _, policy := range runner.completionPolicies {
 		correction, err := policy.ValidateCompletion(ctx, run, response)
+		runner.noteRootCallbackFailure(err)
 		if err != nil {
 			return CompletionCorrection{}, err
 		}
@@ -2103,6 +2104,7 @@ func (runner *Runner) preparePendingApproval(
 		}
 	}
 	requiresApproval, err := runner.approvalPolicies.RequiresApproval(ctx, invocation)
+	runner.noteRootCallbackFailure(err)
 	if err != nil {
 		return runner.fail(ctx, snapshot, state, "agent.approval_policy_failed", err)
 	}
@@ -2676,10 +2678,18 @@ func (runner *Runner) fail(
 		ErrorCode: code, ErrorDetail: cause.Error(),
 		Events: []kernel.EventDraft{{Type: "agent.failed", Message: code}},
 	})
+	outcomeErr := errors.Join(cause, transitionErr)
 	if transitionErr == nil {
+		// Only this original execution, after the terminal CAS ACK, can
+		// attest that its returned error is a committed business failure.
+		if runner.rootCallbacks != nil {
+			runner.rootCallbacks.terminalFailure.Store(&committedAgentFailure{
+				runID: failed.Run.ID, revision: failed.Run.Revision, cause: outcomeErr,
+			})
+		}
 		runner.publishRunEvent(ctx, failed, EventRunFailed, true)
 	}
-	return failed, errors.Join(cause, transitionErr)
+	return failed, outcomeErr
 }
 
 func (runner *Runner) publishRunEvent(ctx context.Context, snapshot kernel.Snapshot, eventType string, terminal bool) {
