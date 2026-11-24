@@ -181,8 +181,13 @@ func (r *ShadowRunner) StartRun(ctx context.Context, req agent.StartRequest) (ke
 	}
 	state.OpenReturned = true
 	state.SessionID = sessionID
-	snap, err = r.apply(ctx, snap, state, kernel.Mutation{Status: kernel.RunStatusRunning,
+	// session/new physically returned with its original Session identity.
+	// Commit that receipt even if the caller disconnected while it was in
+	// flight; this settlement grants NO permission for another physical RPC.
+	settleCtx, stopSettlement := handoff.RemoteCallbackSettlementContext(ctx)
+	snap, err = r.apply(settleCtx, snap, state, kernel.Mutation{Status: kernel.RunStatusRunning,
 		Events: []kernel.EventDraft{{Type: "acp.remote_session", Message: "ACP session identity frozen"}}})
+	stopSettlement()
 	if err != nil {
 		// Cancellation may have won while session/new was in flight.
 		// Its committed CAS denies this original Start's later Prompt.
@@ -190,6 +195,13 @@ func (r *ShadowRunner) StartRun(ctx context.Context, req agent.StartRequest) (ke
 		// another protocol effect or pretending the remote session vanished.
 		r.abandonLocalRun(id)
 		return snap, errors.Join(ErrOutcomeUnknown, err)
+	}
+	// Receipt settlement is NOT authorization to send another physical RPC.
+	// A caller cancelled during session/new must not start its Prompt after
+	// the original request has ended, even if the Store accepted the identity.
+	if ctx.Err() != nil {
+		r.abandonLocalRun(id)
+		return snap, ErrOutcomeUnknown
 	}
 	// The prompt is the second physical effect. Its admission must be durable
 	// and exclusive; restarting a process cannot repeat an unknown Prompt.
@@ -276,10 +288,15 @@ func settledPromptMutation(state *remoteState) (kernel.Mutation, bool) {
 }
 
 func (r *ShadowRunner) finishPrompt(ctx context.Context, id, sessionID, stop, answer string, promptErr error) (kernel.Snapshot, error) {
+	// This method is called only after the original Prompt returned. Preserve
+	// the signed return fact under an independent, bounded Store settlement;
+	// caller cancellation never authorizes another Prompt or Cancel.
+	settleCtx, stopSettlement := handoff.RemoteCallbackSettlementContext(ctx)
+	defer stopSettlement()
 	// A concurrent Cancel may advance the original Kernel CAS while Prompt
 	// remains in flight. Only the original admitted Prompt may finish it.
 	for attempt := 0; attempt < 16; attempt++ {
-		snap, err := r.runtime.Load(ctx, id)
+		snap, err := r.runtime.Load(settleCtx, id)
 		if err != nil {
 			return snap, errors.Join(ErrOutcomeUnknown, err)
 		}
@@ -296,7 +313,7 @@ func (r *ShadowRunner) finishPrompt(ctx context.Context, id, sessionID, stop, an
 		}
 		mutation, settled := settledPromptMutation(&state)
 		mutation.Events = []kernel.EventDraft{{Type: "acp.remote_prompt_returned", Message: "ACP prompt callback returned"}}
-		next, applyErr := r.apply(ctx, snap, state, mutation)
+		next, applyErr := r.apply(settleCtx, snap, state, mutation)
 		if errors.Is(applyErr, kernel.ErrConflict) {
 			continue
 		}
@@ -370,10 +387,12 @@ func (r *ShadowRunner) CancelRun(ctx context.Context, id string, expectedRevisio
 		return snap, ErrOutcomeUnknown // no remote cancel RPC can yet be addressed
 	}
 	sendErr := r.binding.Client.CancelSession(ctx, id, state.SessionID)
+	settleCtx, stopSettlement := handoff.RemoteCallbackSettlementContext(ctx)
+	defer stopSettlement()
 	// The SDK cancel notification only acknowledges transport send, not
 	// completion. Never convert it into a signed terminal cancellation.
 	for attempt := 0; attempt < 16; attempt++ {
-		current, loadErr := r.runtime.Load(ctx, id)
+		current, loadErr := r.runtime.Load(settleCtx, id)
 		if loadErr != nil {
 			return snap, errors.Join(ErrOutcomeUnknown, loadErr)
 		}
@@ -390,7 +409,7 @@ func (r *ShadowRunner) CancelRun(ctx context.Context, id string, expectedRevisio
 		frozen.CancelReturned = true
 		mutation, settled := settledPromptMutation(&frozen)
 		mutation.Events = []kernel.EventDraft{{Type: "acp.remote_cancel_returned", Message: "ACP cancel callback returned"}}
-		next, applyErr := r.apply(ctx, current, frozen, mutation)
+		next, applyErr := r.apply(settleCtx, current, frozen, mutation)
 		if errors.Is(applyErr, kernel.ErrConflict) {
 			continue
 		}
