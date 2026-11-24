@@ -343,6 +343,7 @@ func openBoundedAgentSession(options AgentSessionOptions, registrations []tools.
 		// original trusted Context ticket, not inside the Budget Run ticket.
 		dependencies.RunMiddleware = append([]plugin.RunMiddleware{adapter}, dependencies.RunMiddleware...)
 		dependencies.ModelMiddleware = []plugin.ModelMiddleware{adapter}
+		dependencies.ModelOutcomeVerifier = shared
 		dependencies.ToolMiddleware = []plugin.ToolMiddleware{adapter}
 		// Keep the same Context preparer without a competing summary lifecycle.
 		dependencies.BoundedContext = bounded

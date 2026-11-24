@@ -18,7 +18,6 @@ import (
 // modelPreDispatchDenied distinguishes a failed ownership/authorization
 // preflight from an actual Provider error. No physical send occurred, so it
 // must not be charged, retried as a Provider failure, or terminalize the Run.
-type modelDenialKey struct{}
 type modelDenialScope struct{ marker byte }
 type modelPreDispatchDenied struct {
 	cause     error
@@ -29,8 +28,8 @@ type modelPreDispatchDenied struct {
 
 func modelDeniedForRequest(ctx context.Context, original model.Request, err error) bool {
 	var denied modelPreDispatchDenied
-	scope, _ := ctx.Value(modelDenialKey{}).(*modelDenialScope)
-	return scope != nil && errors.As(err, &denied) && denied.scope == scope &&
+	call := modelCallFrom(ctx)
+	return call != nil && call.denial != nil && errors.As(err, &denied) && denied.scope == call.denial &&
 		sameBoundedValue(model.CloneRequest(denied.original), model.CloneRequest(original))
 }
 
@@ -335,7 +334,7 @@ func (runner *Runner) generateModelWithPolicyGuarded(
 	ctx context.Context,
 	request model.Request,
 	deadlineAt *time.Time,
-	beforeDispatch func(context.Context) error,
+	beforeDispatch func(context.Context, model.Request) error,
 	afterProvider ...*modelCompletionAuthority,
 ) (model.Response, error) {
 	release, err := runner.acquireCallPermit(ctx, runner.modelLimiter, deadlineAt)

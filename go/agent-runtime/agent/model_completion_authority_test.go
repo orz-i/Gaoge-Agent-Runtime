@@ -10,8 +10,13 @@ import (
 )
 
 func completionAuthorityFixture() (*modelCompletionAuthority, model.Response) {
+	request := model.Request{RunID: "run", InvocationID: "inv", Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("frozen")}}}
+	plan, err := newPhysicalSamplingPlan(request, request)
+	if err != nil {
+		panic(err)
+	}
 	return &modelCompletionAuthority{
-		named: true, request: model.Request{RunID: "run", InvocationID: "inv", Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("frozen")}}},
+		named: true, request: request, plan: plan,
 		duplicate: func(string) bool { return false },
 	}, model.Response{ResponseID: "physical", Usage: &model.Usage{InputTokens: 17, OutputTokens: 5}}
 }
@@ -26,6 +31,17 @@ func TestModelCompletionAuthoritySourceAndReplay(t *testing.T) {
 			_, err := a.replay(a.request, r, nil)
 			return err
 		}, true},
+		{"unfrozen_replay", func(a *modelCompletionAuthority, r model.Response) error {
+			a.plan = nil
+			_, err := a.replay(a.request, r, nil)
+			return err
+		}, false},
+		{"changed_sampling_replay", func(a *modelCompletionAuthority, r model.Response) error {
+			q := model.CloneRequest(a.request)
+			q.MaxOutputTokens = 64
+			_, err := a.replay(q, r, nil)
+			return err
+		}, false},
 		{"wrong_invocation_replay", func(a *modelCompletionAuthority, r model.Response) error {
 			q := model.CloneRequest(a.request)
 			q.InvocationID = "other"

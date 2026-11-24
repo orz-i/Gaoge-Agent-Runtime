@@ -154,18 +154,24 @@ func (a *BoundedBudgetAdapter) Run(ctx context.Context, inv plugin.RunInvocation
 }
 func (a *BoundedBudgetAdapter) Model(ctx context.Context, request model.Request, emit model.StreamSink, next plugin.ModelNext) (model.Response, error) {
 	original := model.CloneRequest(request)
-	frozen := samplingPlanFrom(ctx)
+	call := modelCallFrom(ctx)
+	frozen := call.samplingPlan()
 	l, err := a.bind(ctx, request.RunID)
 	if err != nil {
 		return model.Response{}, err
 	}
 	if l.ID == "" {
-		if frozen != nil {
+		if frozen != nil && frozen.LedgerID != "" {
 			return model.Response{}, budget.ErrLedgerConflict
 		}
 		out, e := next(ctx, request, emit)
 		callbackscope.Record(ctx, a, "budget.unconfigured.returned", original)
 		return out, e
+	}
+	// A Runtime invocation may not acquire a new ledger or re-plan after its
+	// original intent was committed. Standalone calls have no such intent.
+	if call != nil && (frozen == nil || frozen.LedgerID == "") {
+		return model.Response{}, budget.ErrLedgerConflict
 	}
 	if strings.TrimSpace(request.InvocationID) == "" {
 		return model.Response{}, ErrInvalidRequest
@@ -262,10 +268,27 @@ func (a *BoundedBudgetAdapter) Model(ctx context.Context, request model.Request,
 func (a *BoundedBudgetAdapter) samplingReservation(ctx context.Context, ledger budget.Ledger, original model.Request, frozen *SamplingPlan) (model.Request, budget.Reservation, error) {
 	if frozen == nil {
 		request, res, err := a.ports.PlanModel(ctx, ledger, model.CloneRequest(original))
-		if err == nil && (res.RunID != original.RunID || res.ID == "" || !validDispatchModelRequest(original, request)) {
-			err = ErrInvalidRequest
+		if err != nil {
+			return request, res, err
 		}
-		return request, res, err
+		if res.RunID != original.RunID || res.ID == "" || !validDispatchModelRequest(original, request) {
+			return request, res, ErrInvalidRequest
+		}
+		// Standalone Adapter calls have no durable Agent intent. Their ledger
+		// still binds the physical receipt before dispatch. Existing settled
+		// reservations can be replayed by their original logical admission ID.
+		if res.Status == budget.ReservationSettled || res.Dispatched {
+			return request, res, nil
+		}
+		hash, err := model.PhysicalRequestHash(request)
+		if err != nil {
+			return request, res, err
+		}
+		if res.PhysicalRequestHash != "" && res.PhysicalRequestHash != hash {
+			return request, res, budget.ErrLedgerConflict
+		}
+		res.PhysicalRequestHash = hash
+		return request, res, nil
 	}
 	if frozen.LedgerID != ledger.ID || !frozen.valid(original) ||
 		a.ports.RequiresTokenUsage(ledger, original.RunID) != (frozen.Requested.InputTokens > 0) {
@@ -273,7 +296,7 @@ func (a *BoundedBudgetAdapter) samplingReservation(ctx context.Context, ledger b
 	}
 	request, res := frozen.request(original), frozen.reservation(original)
 	if existing, found := ledger.Reservations[res.ID]; found {
-		if existing.RunID != res.RunID || existing.RequestHash != res.RequestHash || existing.Requested != res.Requested {
+		if existing.RunID != res.RunID || existing.RequestHash != res.RequestHash || existing.PhysicalRequestHash != res.PhysicalRequestHash || existing.Requested != res.Requested {
 			return model.Request{}, res, budget.ErrLedgerConflict
 		}
 		res = existing

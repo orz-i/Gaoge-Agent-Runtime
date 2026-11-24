@@ -237,7 +237,7 @@ func validModelInvocations(values []ModelInvocation) bool {
 	for index, invocation := range values {
 		if !validContextSummaryInvocation(invocation) || !contextSummaryInputBytesWithinPolicy(invocation) ||
 			(invocation.SamplingPlan != nil && (invocation.Status == ModelInvocationConsumed ||
-				invocation.Purpose != "" || !invocation.SamplingPlan.valid(invocation.Request))) {
+				(invocation.Purpose != "" && invocation.SamplingPlan.LedgerID != "") || !invocation.SamplingPlan.valid(invocation.Request))) {
 			return false
 		}
 		if strings.TrimSpace(invocation.ID) == "" || strings.TrimSpace(invocation.RunID) == "" ||
@@ -388,17 +388,24 @@ func providerName(client model.Client, request model.Request) string {
 // pending intent as well as at physical dispatch. A changed Host binding must
 // not acquire another durable Model execution attempt simply to be rejected.
 func matchesFrozenProviderBinding(client model.Client, invocation ModelInvocation) bool {
+	if !matchesProviderBindingForRequest(client, invocation, invocation.Request) {
+		return false
+	}
+	return invocation.SamplingPlan == nil || matchesProviderBindingForRequest(client, invocation, invocation.SamplingPlan.request(invocation.Request))
+}
+
+func matchesProviderBindingForRequest(client model.Client, invocation ModelInvocation, request model.Request) bool {
 	if invocation.Provider == "" && declaresProviderIdentity(client) {
 		return false
 	}
-	if providerName(client, invocation.Request) != invocation.Provider {
+	if providerName(client, request) != invocation.Provider {
 		return false
 	}
 	if invocation.Provider == "" && invocation.BindingFingerprint == "" {
 		return true // No external Provider identity was declared by this Client.
 	}
 	return validBindingFingerprint(invocation.BindingFingerprint) &&
-		modelBindingFingerprint(client, invocation.Request) == invocation.BindingFingerprint
+		modelBindingFingerprint(client, request) == invocation.BindingFingerprint
 }
 
 func (runner *Runner) ensureModelInvocation(
@@ -502,7 +509,7 @@ func (runner *Runner) prepareBusinessInvocation(ctx context.Context, snapshot ke
 		}
 		request = model.CloneRequest(prepared)
 	}
-	return preparation.finish(request)
+	return preparation.finish(ctx, request)
 }
 
 // PrepareModelRequest may project messages and visible Tool schemas before the
@@ -769,22 +776,22 @@ func (runner *Runner) executeModelInvocation(
 	authority := modelCompletionAuthority{
 		named:   invocation.Provider != "" && invocation.BindingFingerprint != "",
 		request: model.CloneRequest(invocation.Request),
+		plan:    cloneSamplingPlan(invocation.SamplingPlan),
 		duplicate: func(id string) bool {
 			return duplicatePhysicalProviderResponseID(state, invocation, id)
 		},
 	}
 	generateCtx := ctx
 	if invocation.SamplingPlan != nil {
-		if runner.samplingBudget == nil || !invocation.SamplingPlan.valid(invocation.Request) {
+		if (invocation.SamplingPlan.LedgerID != "" && runner.samplingBudget == nil) || !invocation.SamplingPlan.valid(invocation.Request) {
 			return snapshot, state, ErrInvalidRequest
 		}
-		generateCtx = context.WithValue(generateCtx, samplingPlanKey{}, cloneSamplingPlan(invocation.SamplingPlan))
 	}
 	if invocation.Purpose == ModelInvocationContextSummary {
 		generateCtx = context.WithValue(ctx, contextSummaryModelKey{}, true)
 	}
 	response, err := runner.generateModelWithPolicyGuarded(generateCtx, model.CloneRequest(invocation.Request), snapshot.Run.DeadlineAt,
-		func(dispatchCtx context.Context) error {
+		func(dispatchCtx context.Context, candidate model.Request) error {
 			// Resolve and revalidate Catalog authority first: a slow external
 			// Hosted Tool resolver can also outlive the claim lease. The
 			// committed Revision/lease and Store epoch checks MUST be last,
@@ -796,7 +803,7 @@ func (runner *Runner) executeModelInvocation(
 			// discovery or the shared concurrency limiter holds this call.
 			// Recheck after every such wait, before the final claim/epoch
 			// guards and physical Provider dispatch.
-			if !matchesFrozenProviderBinding(runner.model, invocation) {
+			if !matchesProviderBindingForRequest(runner.model, invocation, candidate) {
 				return ErrProviderBindingMismatch
 			}
 			if err := runner.validateModelInvocationClaim(dispatchCtx, snapshot, invocation); err != nil {
@@ -807,6 +814,13 @@ func (runner *Runner) executeModelInvocation(
 			}
 			if invocation.DispatchAttempt != 0 {
 				return ErrModelOutcomeUnknown
+			}
+			if invocation.SamplingPlan == nil {
+				plan, err := newPhysicalSamplingPlan(invocation.Request, candidate)
+				if err != nil {
+					return err
+				}
+				invocation.SamplingPlan = plan
 			}
 			invocation.DispatchAttempt = invocation.ExecutionAttempt
 			if !replaceLastModelInvocation(&state, invocation) {
@@ -1057,11 +1071,12 @@ func (runner *Runner) releaseModelInvocationExecution(
 }
 
 func modelDefinitions(invocation ModelInvocation) []tools.Definition {
-	if invocation.SamplingPlan != nil && invocation.SamplingPlan.OmitLocalTools {
-		return nil
+	definitions := invocation.Request.Tools
+	if p := invocation.SamplingPlan; p != nil {
+		definitions = samplingTools(definitions, p.LocalToolKeys, p.OmitLocalTools, localSamplingKey)
 	}
-	result := make([]tools.Definition, len(invocation.Request.Tools))
-	for index, definition := range invocation.Request.Tools {
+	result := make([]tools.Definition, len(definitions))
+	for index, definition := range definitions {
 		result[index] = tools.CloneDefinition(definition)
 	}
 	return result

@@ -1,10 +1,13 @@
 package agent
 
 import (
+	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"sync"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/callbackscope"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 )
 
@@ -14,6 +17,7 @@ type modelCompletionAuthority struct {
 	mu        sync.Mutex
 	named     bool
 	request   model.Request
+	plan      *SamplingPlan
 	duplicate func(string) bool
 	observed  bool
 	verified  bool
@@ -21,6 +25,24 @@ type modelCompletionAuthority struct {
 	id        string
 	usage     *model.Usage
 	rejected  bool
+}
+
+// One invocation-scoped carrier keeps the plan, receipt authority and
+// no-send nonce together across every Model middleware boundary.
+type modelCallScope struct {
+	completion *modelCompletionAuthority
+	denial     *modelDenialScope
+}
+
+func modelCallFrom(ctx context.Context) *modelCallScope {
+	call, _ := callbackscope.ModelCall(ctx).(*modelCallScope)
+	return call
+}
+func (call *modelCallScope) samplingPlan() *SamplingPlan {
+	if call == nil || call.completion == nil {
+		return nil
+	}
+	return call.completion.plan
 }
 
 func hasModelCompletionReceipt(response model.Response, err error) bool {
@@ -71,8 +93,7 @@ func (authority *modelCompletionAuthority) recordLocked(response model.Response,
 func (authority *modelCompletionAuthority) replay(request model.Request, response model.Response, err error) (model.Response, error) {
 	authority.mu.Lock()
 	defer authority.mu.Unlock()
-	if request.RunID != authority.request.RunID || request.InvocationID != authority.request.InvocationID ||
-		!validDispatchModelRequest(authority.request, request) {
+	if authority.plan == nil || !reflect.DeepEqual(authority.plan.request(authority.request), model.CloneRequest(request)) {
 		return authority.reject()
 	}
 	return authority.recordLocked(response, err)

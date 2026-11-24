@@ -38,7 +38,7 @@ func TestModelDispatchGuardRechecksAfterConcurrencyWait(t *testing.T) {
 		close(started)
 		_, callErr := runner.generateModelWithPolicyGuarded(
 			ctx, model.Request{RunID: "pending_dispatch"}, nil,
-			func(context.Context) error {
+			func(context.Context, model.Request) error {
 				if revoked.Load() {
 					return ErrToolDiscoveryDenied
 				}

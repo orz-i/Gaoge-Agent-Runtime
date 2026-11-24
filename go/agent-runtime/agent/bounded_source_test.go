@@ -13,7 +13,7 @@ import (
 func TestBoundedBudgetDenialRequiresOriginalRequestAndInvocationNonce(t *testing.T) {
 	request := model.Request{RunID: "run", InvocationID: "invocation", Model: "original"}
 	scope := &modelDenialScope{marker: 1}
-	ctx := context.WithValue(t.Context(), modelDenialKey{}, scope)
+	ctx := callbackscope.BindModelCall(t.Context(), &modelCallScope{denial: scope})
 	denied := modelPreDispatchDenied{cause: ErrInvalidRequest, scope: scope, original: model.CloneRequest(request), candidate: model.CloneRequest(request)}
 	if !modelDeniedForRequest(ctx, request, denied) {
 		t.Fatal("original private denial rejected")
@@ -45,7 +45,7 @@ func TestBoundedBudgetDenialRequiresOriginalRequestAndInvocationNonce(t *testing
 			t.Fatalf("foreign %s accepted", field)
 		}
 	}
-	if modelDeniedForRequest(context.WithValue(ctx, modelDenialKey{}, &modelDenialScope{marker: 1}), request, denied) {
+	if modelDeniedForRequest(callbackscope.BindModelCall(ctx, &modelCallScope{denial: &modelDenialScope{marker: 1}}), request, denied) {
 		t.Fatal("old call nonce replayed")
 	}
 	if modelDeniedForRequest(ctx, request, errors.New(denied.Error())) {

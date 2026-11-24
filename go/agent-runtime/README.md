@@ -70,8 +70,19 @@ original grant-bound callback-returned completion record with all physical inten
 A clean snapshot alone is insufficient. A Run status alone never proves callback completion; the original opaque
 completion record or durable settlement marker is required. This is not production multi-worker certification.
 
-An explicitly configured `ModelOutcomeVerifier` may read the original settled
-Model receipt without invoking middleware or generating another response. If
+Every dispatched Model invocation durably binds the exact physical SDK request
+through its `SamplingPlan`. Context and SharedBudget admission freeze that plan
+before the invocation is committed; otherwise the final dispatch boundary freezes
+it. A budget reservation retains its logical admission identity and separately
+binds the same `model.PhysicalRequestHash` as the sampling plan. Once frozen,
+late middleware cannot alter the physical request. This hash describes the typed
+SDK request serialization, not the provider-native wire payload.
+
+An explicitly configured `ModelOutcomeVerifier` receives that reconstructed
+physical request, not the logical intent, and may read the original settled
+Model receipt without invoking middleware or generating another response. A
+previously dispatched record without the required physical identity remains
+unknown; recovery never guesses a hash, replans or falls back to logical lookup. If
 the original Host callback completed, receipt recovery can retire its scope.
 If that Host callback remains unknown, complete authoritative response evidence
 may be saved without consuming it: the original scope, errors, messages, Tool

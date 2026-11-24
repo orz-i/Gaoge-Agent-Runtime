@@ -110,11 +110,10 @@ func TestSharedBudgetReplaysSettledReceiptAndRejectsUnmeteredRemote(t *testing.T
 		t.Fatalf("changed request=%v", err)
 	}
 }
-func TestBudgetModelOutcomeVerifierOnlyReadsOriginalSettledReceipt(t *testing.T) {
+func TestBudgetModelOutcomeVerifierOnlyReadsOriginalPhysicalSettledReceipt(t *testing.T) {
 	client := &ledgerTestModel{}
 	store, shared, snapshot := newLedgerHarness(t, client)
 	request := model.CloneRequest(client.request)
-	request.MaxOutputTokens = 0
 	before, err := store.LoadBudget(t.Context(), snapshot.Turn.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -131,6 +130,8 @@ func TestBudgetModelOutcomeVerifierOnlyReadsOriginalSettledReceipt(t *testing.T)
 		r.Model = "foreign-model"
 	}, func(r *model.Request) {
 		r.MaxOutputTokens++
+	}, func(r *model.Request) {
+		r.MaxOutputTokens = 0 // The original logical reservation is not the physical receipt.
 	}} {
 		wrong := model.CloneRequest(request)
 		mutate(&wrong)

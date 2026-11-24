@@ -14,7 +14,7 @@ import (
 )
 
 // ModelOutcomeVerifier is a construction-time trusted, read-only lookup of an
-// exact previously dispatched request's settled receipt. It must not reserve,
+// exact previously dispatched physical SDK request's settled receipt. It must not reserve,
 // generate, retry, project another effect, or infer completion from TTL.
 type ModelOutcomeVerifier interface {
 	VerifyModelOutcome(context.Context, model.Request) (model.Response, error)
@@ -55,22 +55,18 @@ func (runner *Runner) ReconcileModelOutcome(ctx context.Context, runID string, r
 	if !matchesFrozenProviderBinding(runner.model, inv) {
 		return snapshot, ErrProviderBindingMismatch
 	}
-	// The verifier looks up the physical receipt, not the logical intent.
-	// A committed SamplingPlan owns every dispatch-only restriction. Recover
-	// it without calling the meter, resolving policy, or touching the ledger.
-	request := model.CloneRequest(inv.Request)
-	if inv.SamplingPlan != nil {
-		if !inv.SamplingPlan.valid(inv.Request) {
-			return snapshot, ErrInvalidRequest
-		}
-		request = inv.SamplingPlan.request(inv.Request)
+	// The verifier only sees the exact committed physical request. A missing
+	// plan after dispatch is not evidence that logical and physical were equal.
+	if inv.SamplingPlan == nil || !inv.SamplingPlan.valid(inv.Request) {
+		return snapshot, ErrModelOutcomeUnknown
 	}
+	request := inv.SamplingPlan.request(inv.Request)
 	response, receiptErr := runner.modelOutcomeVerifier.VerifyModelOutcome(ctx, request)
 	authorityState := state
 	if inv.Status == ModelInvocationCompleted {
 		authorityState.ModelInvocations = state.ModelInvocations[:len(state.ModelInvocations)-1]
 	}
-	authority := modelCompletionAuthority{named: inv.Provider != "" && inv.BindingFingerprint != "", request: model.CloneRequest(inv.Request), duplicate: func(id string) bool { return duplicatePhysicalProviderResponseID(authorityState, inv, id) }}
+	authority := modelCompletionAuthority{named: inv.Provider != "" && inv.BindingFingerprint != "", request: model.CloneRequest(inv.Request), plan: inv.SamplingPlan, duplicate: func(id string) bool { return duplicatePhysicalProviderResponseID(authorityState, inv, id) }}
 	response, receiptErr = authority.replay(request, response, receiptErr)
 	response, receiptErr = authority.validate(response, receiptErr)
 	rejected := model.IsResponseRejectedError(receiptErr) && response.Usage != nil && validModelUsage(response.Usage)

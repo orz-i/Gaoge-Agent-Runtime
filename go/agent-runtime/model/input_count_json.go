@@ -2,6 +2,8 @@ package model
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 )
 
@@ -25,4 +27,16 @@ func MarshalRequestForInputCount(request Request) ([]byte, error) {
 	// counter bridge enforces an exact typed round trip with the same function.
 	encoded := output.Bytes()
 	return append([]byte(nil), encoded[:len(encoded)-1]...), nil
+}
+
+// PhysicalRequestHash identifies the exact typed Model request at the SDK
+// dispatch boundary, including every sampling restriction and invocation ID.
+// It is not a hash of a provider-native HTTP payload or a logical reservation.
+func PhysicalRequestHash(request Request) (string, error) {
+	raw, err := MarshalRequestForInputCount(CloneRequest(request))
+	if err != nil {
+		return "", err
+	}
+	hash := sha256.Sum256(raw)
+	return hex.EncodeToString(hash[:]), nil
 }

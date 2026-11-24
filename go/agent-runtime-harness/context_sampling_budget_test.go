@@ -67,6 +67,7 @@ func TestContextSharedBudgetAdmitsExactFinalSamplingPlan(t *testing.T) {
 				return runtimecontext.AccountingProjection{ModelOptions: raw, SystemPrompt: "private route prompt", ReservedOutputTokens: w.ReservedOutputTokens}, nil
 			}
 			toolCalls := 0
+			var logical model.Request
 			addAgentSessionTool(&options, "lookup", &toolCalls)
 			client.generate = func(r model.Request) (model.Response, error) {
 				if r.HostedToolCallLimit == nil || *r.HostedToolCallLimit != 1 || len(r.Tools) != 0 || r.MaxOutputTokens != 48 {
@@ -84,6 +85,7 @@ func TestContextSharedBudgetAdmitsExactFinalSamplingPlan(t *testing.T) {
 					t.Fatalf("durable intent: %+v %v", view, err)
 				}
 				inv := view.ModelInvocations[0]
+				logical = model.CloneRequest(inv.Request)
 				p := inv.SamplingPlan
 				if p == nil || !p.OmitLocalTools || p.Assessment.HardTokenEstimate != 100 ||
 					inv.Request.InvocationID != r.InvocationID || len(inv.Request.Tools) != 1 ||
@@ -134,6 +136,29 @@ func TestContextSharedBudgetAdmitsExactFinalSamplingPlan(t *testing.T) {
 			if err != nil || res.Status != budget.ReservationSettled || res.Usage.InputTokens != 20 || res.Usage.OutputTokens != 5 {
 				t.Fatalf("final settlement was not conserved: %+v %v", res, err)
 			}
+			shared, err := harness.NewBudgetAuthority(harness.BudgetAuthorityDependencies{Store: store, Clock: fixedClock{}, Meter: meter})
+			if err != nil {
+				t.Fatal(err)
+			}
+			physical := client.requests[0]
+			digest, err := model.PhysicalRequestHash(physical)
+			if err != nil || res.PhysicalRequestHash != digest {
+				t.Fatal("ledger physical identity differs from Provider")
+			}
+			receipt, err := shared.VerifyModelOutcome(t.Context(), physical)
+			if err != nil || receipt.Content != "done" {
+				t.Fatalf("real SDK physical receipt: %v", err)
+			}
+			for _, wrong := range []model.Request{logical, func() model.Request { r := model.CloneRequest(physical); r.MaxOutputTokens++; return r }(), func() model.Request { r := model.CloneRequest(physical); n := 0; r.HostedToolCallLimit = &n; return r }(), func() model.Request { r := model.CloneRequest(physical); r.Tools = logical.Tools; return r }()} {
+				if _, err := shared.VerifyModelOutcome(t.Context(), wrong); !errors.Is(err, harness.ErrConflict) {
+					t.Fatalf("accepted nonphysical receipt identity: %v", err)
+				}
+			}
+			unchanged, err := store.LoadBudget(t.Context(), result.Turn.ID)
+			if err != nil || !reflect.DeepEqual(ledger, unchanged) {
+				t.Fatal("receipt lookup modified ledger")
+			}
+
 		})
 	}
 }
