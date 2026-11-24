@@ -31,7 +31,8 @@ type StdioClient struct {
 }
 type stdioRun struct {
 	mu               sync.Mutex
-	sendMu           sync.Mutex // serialize original Prompt frame and Cancel notification
+	sendGate         chan struct{} // Context-aware exclusive physical frame sender.
+	frameReady       chan struct{} // A peer callback waits for the original Prompt frame to finish sending.
 	process          *stdio.ClientProcess
 	sessionID        string
 	onChunk          func(string) error
@@ -69,7 +70,10 @@ type stdioCallbacks struct {
 	decision PermissionDecision
 }
 
-func (cb *stdioCallbacks) SessionUpdate(_ context.Context, n wire.SessionNotification) error {
+func (cb *stdioCallbacks) SessionUpdate(ctx context.Context, n wire.SessionNotification) error {
+	if err := cb.run.awaitOriginalFrame(ctx); err != nil {
+		return ErrOutcomeUnknown
+	}
 	cb.run.mu.Lock()
 	defer cb.run.mu.Unlock()
 	if cb.run.sessionID == "" || string(n.SessionId) != cb.run.sessionID {
@@ -91,6 +95,9 @@ func (cb *stdioCallbacks) SessionUpdate(_ context.Context, n wire.SessionNotific
 }
 func (cb *stdioCallbacks) RequestPermission(ctx context.Context, q wire.RequestPermissionRequest) (wire.RequestPermissionResponse, error) {
 	deny := wire.RequestPermissionResponse{Outcome: wire.NewRequestPermissionOutcomeCancelled()}
+	if err := cb.run.awaitOriginalFrame(ctx); err != nil {
+		return deny, ErrOutcomeUnknown
+	}
 	cb.run.mu.Lock()
 	same := cb.run.sessionID != "" && cb.run.sessionID == string(q.SessionId)
 	if !same {
@@ -129,7 +136,8 @@ func (c *StdioClient) OpenSession(ctx context.Context, runID, cwd string) (strin
 	if c == nil || strings.TrimSpace(runID) == "" || cwd != c.config.Cwd {
 		return "", ErrInvalidBinding
 	}
-	run := &stdioRun{}
+	run := &stdioRun{sendGate: make(chan struct{}, 1)}
+	run.sendGate <- struct{}{}
 	c.mu.Lock()
 	if _, exists := c.runs[runID]; exists {
 		c.mu.Unlock()
@@ -137,17 +145,7 @@ func (c *StdioClient) OpenSession(ctx context.Context, runID, cwd string) (strin
 	}
 	c.runs[runID] = run
 	c.mu.Unlock()
-	cleanup := func() {
-		c.mu.Lock()
-		delete(c.runs, runID)
-		c.mu.Unlock()
-		run.mu.Lock()
-		process := run.process
-		run.mu.Unlock()
-		if process != nil {
-			shutdown(process)
-		}
-	}
+	cleanup := func() { c.closeRun(runID, run) }
 	callbacks := &stdioCallbacks{runID: runID, run: run, decision: c.config.Permission}
 	process, err := stdio.StartClient(ctx, callbacks, c.config.Command, wire.ConnectionOptions{})
 	if err != nil {
@@ -155,6 +153,11 @@ func (c *StdioClient) OpenSession(ctx context.Context, runID, cwd string) (strin
 		return "", err
 	}
 	run.mu.Lock()
+	if run.closed {
+		run.mu.Unlock()
+		shutdown(process)
+		return "", ErrOutcomeUnknown
+	}
 	run.process = process
 	run.mu.Unlock()
 	init, err := process.Connection.Initialize(ctx, wire.InitializeRequest{
@@ -173,9 +176,52 @@ func (c *StdioClient) OpenSession(ctx context.Context, runID, cwd string) (strin
 		return "", errors.Join(ErrSessionMismatch, err)
 	}
 	run.mu.Lock()
+	if run.closed {
+		run.mu.Unlock()
+		return "", ErrOutcomeUnknown
+	}
 	run.sessionID = string(newSession.SessionId)
 	run.mu.Unlock()
-	return run.sessionID, nil
+	return string(newSession.SessionId), nil
+}
+
+// acquireSend waits only for original frame order, never for the peer's
+// response. Cancellation and AbandonRun must not depend on an unresponsive
+// writer releasing a process-local mutex.
+func (r *stdioRun) acquireSend(ctx context.Context) error {
+	if ctx == nil {
+		return ErrInvalidBinding
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-r.sendGate:
+		if err := ctx.Err(); err != nil {
+			r.releaseSend()
+			return err
+		}
+		return nil
+	}
+}
+
+func (r *stdioRun) releaseSend() { r.sendGate <- struct{}{} }
+
+// awaitOriginalFrame prevents unsolicited peer updates and permission grants
+// before the first Prompt frame has been fully submitted. The transport callback
+// may race the writer's return, so it waits without holding the control mutex.
+func (r *stdioRun) awaitOriginalFrame(ctx context.Context) error {
+	r.mu.Lock()
+	ready := r.frameReady
+	r.mu.Unlock()
+	if ready == nil {
+		return nil
+	}
+	select {
+	case <-ready:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (c *StdioClient) Prompt(ctx context.Context, runID, sessionID, goal string, onChunk func(string) error) (string, error) {
@@ -183,16 +229,17 @@ func (c *StdioClient) Prompt(ctx context.Context, runID, sessionID, goal string,
 	if err != nil {
 		return "", err
 	}
-	// The original session owns exactly one physical Prompt. Dispatch waits
-	// only for the complete frame to be written, not for the response.
-	// A Cancel that wins this lock revokes any later Prompt; otherwise the
-	// notification is sent strictly after the submitted Prompt frame.
-	run.sendMu.Lock()
+	// A Cancel arriving before this grant must irrevocably deny Prompt.
+	// If Prompt already owns the sender, Cancel waits only until its own
+	// deadline; it never grants a post-cancel retry.
+	if err = run.acquireSend(ctx); err != nil {
+		return "", err
+	}
 	run.mu.Lock()
 	if run.closed || run.cancelRequested || run.promptDispatched || run.invalid {
 		revoked := run.cancelRequested && !run.promptDispatched && !run.closed
 		run.mu.Unlock()
-		run.sendMu.Unlock()
+		run.releaseSend()
 		if revoked {
 			c.closeRun(runID, run)
 		}
@@ -205,22 +252,30 @@ func (c *StdioClient) Prompt(ctx context.Context, runID, sessionID, goal string,
 	})
 	if err != nil {
 		run.mu.Unlock()
-		run.sendMu.Unlock()
+		run.releaseSend()
 		c.closeRun(runID, run)
 		return "", err
 	}
 	defer request.Abandon()
 	defer c.closeRun(runID, run)
 	run.promptDispatched = true
-	// Hold the callback state lock until the SDK writer returns. A peer
-	// callback cannot borrow an unsent Prompt's permission or output lease.
+	run.frameReady = make(chan struct{})
+	run.mu.Unlock()
+
+	// Never hold the control mutex while waiting for the SDK writer.
+	// The frameReady barrier still prevents callbacks from using an unsent
+	// Prompt, and sendGate preserves Prompt-before-Cancel physical order.
 	err = request.Dispatch(ctx, wire.DispatchOptions{Abort: func(error) error { return process.Connection.Close() }})
-	if err == nil {
+	run.mu.Lock()
+	if err == nil && !run.closed {
 		run.onChunk = onChunk
 		run.promptActive = true
+	} else if run.closed {
+		err = ErrOutcomeUnknown
 	}
+	close(run.frameReady)
 	run.mu.Unlock()
-	run.sendMu.Unlock()
+	run.releaseSend()
 	if err != nil {
 		return "", err
 	}
@@ -228,7 +283,7 @@ func (c *StdioClient) Prompt(ctx context.Context, runID, sessionID, goal string,
 	run.mu.Lock()
 	run.promptActive = false
 	run.onChunk = nil
-	invalid := run.invalid
+	invalid := run.invalid || run.closed
 	run.mu.Unlock()
 	if invalid {
 		return "", ErrSessionMismatch
@@ -238,19 +293,33 @@ func (c *StdioClient) Prompt(ctx context.Context, runID, sessionID, goal string,
 	}
 	return string(resp.StopReason), nil
 }
+
 func (c *StdioClient) CancelSession(ctx context.Context, runID, sessionID string) error {
 	run, err := c.requireRun(runID, sessionID)
 	if err != nil {
 		return err
 	}
-	run.sendMu.Lock()
-	defer run.sendMu.Unlock()
+	// Revoke all future Prompt admissions and permission callbacks *before*
+	// waiting for the peer's writer. A blocked partial frame never extends
+	// the caller's cancellation deadline or reopens execution authority.
 	run.mu.Lock()
 	if run.closed || run.cancelRequested {
 		run.mu.Unlock()
 		return ErrOutcomeUnknown
 	}
-	run.cancelRequested = true // Also irrevocably denies a not-yet-sent Prompt.
+	run.cancelRequested = true
+	run.mu.Unlock()
+	if err := run.acquireSend(ctx); err != nil {
+		// The original Cancel intent remains unknown in durable Shadow state.
+		// No later caller may repeat this physical notification.
+		return err
+	}
+	defer run.releaseSend()
+	run.mu.Lock()
+	if run.closed {
+		run.mu.Unlock()
+		return ErrOutcomeUnknown
+	}
 	process := run.process
 	run.mu.Unlock()
 	return process.Connection.Cancel(ctx, wire.CancelNotification{SessionId: wire.SessionId(sessionID)})
@@ -295,17 +364,18 @@ func (c *StdioClient) closeRun(id string, run *stdioRun) {
 		delete(c.runs, id)
 	}
 	c.mu.Unlock()
-	run.sendMu.Lock()
+	// A dead peer may hold the writer indefinitely. Closing must revoke the
+	// session without joining sendGate, then terminate its owned process.
+	// A concurrent send either observes closed or is aborted by shutdown.
 	run.mu.Lock()
 	if run.closed {
 		run.mu.Unlock()
-		run.sendMu.Unlock()
 		return
 	}
 	run.closed = true
+	run.cancelRequested = true
 	process := run.process
 	run.mu.Unlock()
-	run.sendMu.Unlock()
 	shutdown(process)
 }
 func shutdown(process *stdio.ClientProcess) {
