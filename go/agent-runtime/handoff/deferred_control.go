@@ -19,7 +19,7 @@ func (c *Coordinator) SupportsDeferredAgent(rt *kernel.Runtime) bool {
 		return c.deferredAgent.ObservesKernelRuntime(rt)
 	}
 	if r, ok := c.resolver.(*deferredAgentRoutes); ok {
-		return r.original.ObservesKernelRuntime(rt)
+		return !r.eager && r.original.ObservesKernelRuntime(rt)
 	}
 	return false
 }
@@ -35,7 +35,7 @@ func (c *Coordinator) IsDeferredLocalDelegation(rt *kernel.Runtime, d Delegation
 		return c.deferredAgent.ObservesKernelRuntime(rt)
 	}
 	if bound := c.localDeferredAgent(d); bound != nil {
-		return bound.ObservesKernelRuntime(rt)
+		return !c.OwnsStandardRemoteRoutes(rt) && bound.ObservesKernelRuntime(rt)
 	}
 	return false
 }
@@ -70,6 +70,9 @@ func (c *Coordinator) VerifiedLocalDelegationControl(
 	// witness, including middleware-free/native Agent compositions. Preserve
 	// the legacy eager ChildRunner route's separate strict Kernel ownership.
 	if routed := c.localDeferredAgent(original); routed != nil {
+		if c.OwnsStandardRemoteRoutes(rt) {
+			return routed.OwnsKernelRuntime(rt)
+		}
 		return routed.VerifiedDeferredRootControl(ctx, rt, child)
 	}
 	if c.deferredAgent != nil {

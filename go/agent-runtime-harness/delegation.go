@@ -29,6 +29,7 @@ type DelegateRequest struct {
 	MemberID       string             `json:"memberID"`
 	Goal           string             `json:"goal"`
 	MemberRevision string             `json:"-"`
+	Remote         bool               `json:"-"`
 	Agent          agent.StartRequest `json:"-"`
 	callID         string
 	// Preserve the first model Call identity even after Host policy prepares
@@ -87,6 +88,9 @@ func normalizeDelegateRequest(request DelegateRequest) (DelegateRequest, error) 
 		return DelegateRequest{}, err
 	}
 	request.Agent = spec.startRequest()
+	if request.Remote && !agent.SupportsRemoteGoalOnly(request.Agent) {
+		return DelegateRequest{}, ErrInvalidRequest
+	}
 	return request, nil
 }
 
@@ -303,6 +307,17 @@ func (runner *Runner) prepareDelegation(
 	// names into an independent Role/Tool/Skill policy of its own.
 	a := request.Agent
 	delegation.MemberRevision = request.MemberRevision
+	delegation.Remote = request.Remote
+	if delegation.Remote {
+		// The selected remote member has its own identity/revision but none
+		// of the parent's native Model, Tool, sampling or budget capabilities.
+		named, selected := namedAgentForMember(config, request.MemberID, request.MemberRevision)
+		if !selected || !named.Remote || !agent.SupportsRemoteGoalOnly(a) ||
+			config.SharedBudget != nil {
+			return handoff.Delegation{}, parent, ErrInvalidRequest
+		}
+		return delegation, parent, nil
+	}
 	// In a nested handoff the immediate parent may run a different Model from
 	// the Turn root. ModelOptions and local Tool visibility belong to that
 	// parent, not a second resolution of the root Config catalog.

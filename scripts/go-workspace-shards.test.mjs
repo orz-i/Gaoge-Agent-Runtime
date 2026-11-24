@@ -14,13 +14,13 @@ const temporary = (t) => {
   return directory;
 };
 
-test("shards partition all 14 go.work modules exactly once, including the nested example and independent Transport", () => {
+test("shards partition all 15 go.work modules exactly once, including the nested example and independent Transport", () => {
   validateLayout();
   const work = readFileSync(new URL("../go.work", import.meta.url), "utf8");
   const listed = [...work.matchAll(/^\s+\.\/(go\/\S+)$/gmu)].map((match) => match[1]);
   assert.deepEqual([...modules].sort(), listed.sort());
-  assert.equal(modules.length, 14);
-  assert.equal(new Set(modules.map(coverageProfileName)).size, 14);
+  assert.equal(modules.length, 15);
+  assert.equal(new Set(modules.map(coverageProfileName)).size, 15);
   assert.throws(() => validateLayout({ ...shards, extra: [modules[0]] }), /exactly once/u);
   assert.throws(() => validateLayout({ ...shards, sqlite: [] }), /exactly once/u);
   assert.throws(() => validateLayout({ ...shards, sqlite: ["go/unknown"] }), /exactly once/u);
@@ -51,18 +51,18 @@ function coverageFixture(t) {
 test("complete coverage uses the original statement union rather than averaging shard percentages", (t) => {
   const f = coverageFixture(t);
   const result = f.merge();
-  assert.deepEqual(result, { coveredStatements: 14, totalStatements: 14, percent: 100, minimum: 70 });
+  assert.deepEqual(result, { coveredStatements: 15, totalStatements: 15, percent: 100, minimum: 70 });
   writeFileSync(path.join(f.sqlite, "agent-runtime-sqlite.out"), "mode: atomic\ngo/sqlite/a.go:1.1,2.1 10 1\ngo/sqlite/b.go:1.1,2.1 90 0\n");
   assert.throws(() => f.merge(), /below 70/u);
   const summary = JSON.parse(readFileSync(path.join(f.output, "summary.json"), "utf8"));
-  assert.deepEqual(summary, { coveredStatements: 23, totalStatements: 113, percent: 20.35, minimum: 70 });
+  assert.deepEqual(summary, { coveredStatements: 24, totalStatements: 114, percent: 21.05, minimum: 70 });
 });
 
 test("blocks repeated across shards are unioned and zero-execution statements remain in the denominator", (t) => {
   const f = coverageFixture(t);
   writeFileSync(path.join(f.core, "agent-runtime.out"), "mode: atomic\nshared.go:1.1,2.1 3 0\nzero.go:1.1,2.1 2 0\n");
   writeFileSync(path.join(f.sqlite, "agent-runtime-sqlite.out"), "mode: atomic\nshared.go:1.1,2.1 3 5\n");
-  assert.deepEqual(f.merge(), { coveredStatements: 15, totalStatements: 17, percent: 88.24, minimum: 70 });
+  assert.deepEqual(f.merge(), { coveredStatements: 16, totalStatements: 18, percent: 88.89, minimum: 70 });
 });
 
 test("missing, extra, stale, wrongly assigned, or partial shards cannot pass the aggregate floor", (t) => {

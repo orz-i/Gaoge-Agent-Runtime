@@ -88,7 +88,7 @@ function checkTidy(cwd, modulePath) {
     const independentTransport = modulePath === "go/provider-transport";
     const replaceCore = !independentTransport && modulePath !== "go/agent-runtime";
     const replaceProvider = !independentTransport && modulePath !== "go/agent-runtime" && modulePath !== "go/agent-runtime-provider";
-    const replaceHarness = ["go/agent-runtime-harness-sqlite", "go/agent-runtime-harness-postgres", "go/agent-runtime-http", "go/agent-runtime-harness/examples/task-agent"].includes(modulePath);
+    const replaceHarness = ["go/agent-runtime-harness-sqlite", "go/agent-runtime-harness-postgres", "go/agent-runtime-http", "go/agent-runtime-acp", "go/agent-runtime-harness/examples/task-agent"].includes(modulePath);
     // Harness integration tests exercise this same source cohort's three
     // Kernel Stores; tidy must not resolve unreleased adapters from old tags.
     const sourceAdapters = {

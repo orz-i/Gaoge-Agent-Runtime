@@ -9,6 +9,7 @@
     "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-mcp",
     "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-otel",
     "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-a2a",
+    "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-acp",
     "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres",
     "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite",
     "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-redis",

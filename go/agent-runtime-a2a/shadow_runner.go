@@ -113,6 +113,24 @@ func NewShadowRunner(dependencies ShadowDependencies) (*ShadowRunner, error) {
 	}, nil
 }
 
+// RemoteRuntime and MatchesRemoteDelegation expose the original executor's
+// immutable composition, never a dynamically inferred Run kind.
+func (runner *ShadowRunner) RemoteRuntime() *kernel.Runtime {
+	if runner == nil {
+		return nil
+	}
+	return runner.runtime
+}
+
+func (runner *ShadowRunner) MatchesRemoteDelegation(d handoff.Delegation) bool {
+	return runner != nil && handoff.RemoteGoalOnly(d) && runner.targetID != "" &&
+		runner.revision != "" && d.MemberID == TargetPrefix+runner.targetID && d.MemberRevision == runner.revision
+}
+
+func (runner *ShadowRunner) CancelRemote(ctx context.Context, id string, revision uint64) (kernel.Snapshot, error) {
+	return runner.cancelRunAtRevision(ctx, id, revision)
+}
+
 // ObservesFrozenRemoteShadow is the first-party, read-only ownership
 // attestation used by Harness receipt and cancellation checks. It makes no
 // network call and never applies a Kernel mutation. Frozen origin/Invocation
@@ -120,18 +138,23 @@ func NewShadowRunner(dependencies ShadowDependencies) (*ShadowRunner, error) {
 func (runner *ShadowRunner) ObservesFrozenRemoteShadow(
 	runtime *kernel.Runtime, delegation handoff.Delegation, child kernel.Snapshot,
 ) bool {
-	if runner == nil || runtime == nil || runner.runtime != runtime || delegation.MaxModelOutputTokens != 0 ||
+	if runner == nil || runtime == nil || runner.runtime != runtime || !handoff.RemoteGoalOnly(delegation) ||
 		child.Run.Kind != RunKind || child.Run.ID != delegation.ChildRunID ||
 		child.Run.Goal != strings.TrimSpace(delegation.Goal) ||
-		delegation.MemberID != TargetPrefix+runner.targetID ||
-		delegation.MemberRevision == "" || delegation.MemberRevision != runner.revision {
+		!runner.MatchesRemoteDelegation(delegation) {
 		return false
 	}
 	state, err := runner.decodeState(child)
-	return err == nil && state.TargetID == runner.targetID &&
-		state.TargetRevision == runner.revision &&
-		((state.RemoteTaskID != "" && state.RemoteContextID != "") ||
-			(state.RemoteTaskID == "" && state.RemoteMessageID != ""))
+	if err != nil || state.TargetID != runner.targetID || state.TargetRevision != runner.revision {
+		return false
+	}
+	// A valid signed *running* first-send intent is still the original
+	// executor's unresolved evidence. It authorizes no Task query/cancel
+	// without a peer identity; LoadRun/CancelRemote enforce that separately.
+	return (state.RemoteTaskID != "" && state.RemoteContextID != "") ||
+		(state.RemoteTaskID == "" && state.RemoteMessageID != "") ||
+		(child.Run.Status == kernel.RunStatusRunning && state.RemoteTaskID == "" &&
+			state.RemoteContextID == "" && state.RemoteMessageID == "" && state.MessageID == child.Run.ID+":message")
 }
 
 // StartRun creates the durable local shadow before sending the remote A2A message.
@@ -140,7 +163,7 @@ func (runner *ShadowRunner) StartRun(ctx context.Context, request agent.StartReq
 	goal := strings.TrimSpace(request.Goal)
 	// A2A has no negotiated per-model-call ceiling. Never acknowledge a
 	// local execution limit that the remote Agent cannot enforce.
-	if runner == nil || runner.runtime == nil || runID == "" || goal == "" || request.MaxModelOutputTokens != 0 {
+	if runner == nil || runner.runtime == nil || runID == "" || goal == "" || !agent.SupportsRemoteGoalOnly(request) {
 		return kernel.Snapshot{}, ErrInvalidShadowRunner
 	}
 	state := runner.initialState(runID)
@@ -173,6 +196,24 @@ func (runner *ShadowRunner) StartRun(ctx context.Context, request agent.StartReq
 	if _, err = runner.decodeState(snapshot); err != nil {
 		return snapshot, err // No external call on a substituted Create result.
 	}
+	// A delayed Create success cannot authorize a physical Send after caller
+	// cancellation. The original signed CAS elects the first dispatch; its
+	// reservation is never re-sent during read-only recovery.
+	snapshot, err = handoff.AdmitRemoteFirstDispatch(ctx, runner.runtime, snapshot,
+		func(candidate kernel.Snapshot) bool {
+			candidateState, decodeErr := runner.decodeState(candidate)
+			return decodeErr == nil && candidateState.RemoteTaskID == "" &&
+				candidateState.RemoteMessageID == "" && candidateState.PendingMessageID == "" &&
+				!candidateState.PendingCancel && candidateState.MessageID == state.MessageID
+		},
+		func(callCtx context.Context, current kernel.Snapshot) (kernel.Snapshot, error) {
+			return runner.applyAttested(callCtx, current, state, kernel.Mutation{Status: kernel.RunStatusRunning,
+				Events: []kernel.EventDraft{{Type: "a2a.remote_first_dispatch_admitted",
+					Message: "Original A2A SendMessage dispatch claimed"}}})
+		})
+	if err != nil {
+		return snapshot, errors.Join(ErrRemoteOutcomeUnknown, err)
+	}
 	interaction, sendErr := runner.client.SendMessage(ctx, runner.discovery, SendRequest{
 		MessageID: state.MessageID, Text: goal,
 	})
@@ -183,7 +224,12 @@ func (runner *ShadowRunner) StartRun(ctx context.Context, request agent.StartReq
 		// (which may contain credentials), nor issue another physical send.
 		return snapshot, ErrRemoteOutcomeUnknown
 	}
-	return runner.applyInteraction(ctx, snapshot, state, interaction)
+	// The original SendMessage has already returned with a verifiable Task or
+	// Message. The caller may have disconnected after the peer replied, but
+	// losing this identity would make later read-only reconciliation impossible.
+	settleCtx, stopSettlement := handoff.RemoteCallbackSettlementContext(ctx)
+	defer stopSettlement()
+	return runner.applyInteraction(settleCtx, snapshot, state, interaction)
 }
 
 // LoadRun loads the local shadow and refreshes a non-terminal remote Task when present.
@@ -312,11 +358,13 @@ func (runner *ShadowRunner) cancelRunAtRevision(
 		return admitted, err
 	}
 	remote, cancelErr := runner.client.CancelTask(ctx, runner.discovery, state.RemoteTaskID)
+	settleCtx, stopSettlement := handoff.RemoteCallbackSettlementContext(ctx)
+	defer stopSettlement()
 	// Physical callback has now returned, including transport failures. Seal
 	// the release BEFORE a GET may declare a terminal result. If this Store
 	// write is lost, retain a conservative unresolved physical intent.
 	state.PendingCancelReturned = true
-	returned, returnErr := runner.applyAttested(ctx, admitted, state, kernel.Mutation{
+	returned, returnErr := runner.applyAttested(settleCtx, admitted, state, kernel.Mutation{
 		Status: kernel.RunStatusRunning,
 		Events: []kernel.EventDraft{{Type: "a2a.remote_cancel_returned", Message: "A2A cancellation callback returned"}},
 	})
@@ -332,7 +380,7 @@ func (runner *ShadowRunner) cancelRunAtRevision(
 		}
 		return returned, ErrRemoteCancellationPending
 	}
-	return runner.applyTask(ctx, returned, state, remote)
+	return runner.applyTask(settleCtx, returned, state, remote)
 }
 
 // ResumeRun continues a remote input-required or auth-required task with one
@@ -397,11 +445,13 @@ func (runner *ShadowRunner) resumeRunAtRevision(
 		MessageID: state.PendingMessageID, ContextID: state.RemoteContextID,
 		TaskID: state.RemoteTaskID, Text: text,
 	})
+	settleCtx, stopSettlement := handoff.RemoteCallbackSettlementContext(ctx)
+	defer stopSettlement()
 	// This original physical Send has now *returned*. Persist that fact
 	// independently of response validation or transport errors; until it is
 	// committed, an observer must NOT acknowledge a remote terminal result.
 	state.PendingMessageReturned = true
-	returned, returnErr := runner.applyAttested(ctx, snapshot, state, kernel.Mutation{
+	returned, returnErr := runner.applyAttested(settleCtx, snapshot, state, kernel.Mutation{
 		Status: kernel.RunStatusRunning,
 		Events: []kernel.EventDraft{{Type: "a2a.remote_resume_returned", Message: "A2A input callback returned"}},
 	})
@@ -417,7 +467,7 @@ func (runner *ShadowRunner) resumeRunAtRevision(
 	state.PendingMessageID = ""
 	state.PendingInputHash = ""
 	state.PendingMessageReturned = false
-	return runner.applyInteraction(ctx, returned, state, interaction)
+	return runner.applyInteraction(settleCtx, returned, state, interaction)
 }
 
 func (runner *ShadowRunner) initialState(runID string) shadowState {
