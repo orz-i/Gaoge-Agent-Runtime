@@ -11,9 +11,9 @@ const version = read("VERSION").trim();
 const boundary = JSON.parse(read("agent-runtime-boundary.json"));
 const sqlite = "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite";
 
-test("SQLite joins one coordinated twelve-module Beta cohort", () => {
+test("SQLite joins the coordinated Beta module cohort", () => {
   assert.equal(boundary.version, version);
-  assert.equal(boundary.goModules.length, 12);
+  assert.equal(boundary.goModules.length, 13);
   assert.ok(boundary.goModules.includes(sqlite));
   assert.ok(boundary.goModules.includes("github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-sqlite"));
   for (const name of boundary.goModules) {
@@ -40,7 +40,7 @@ test("release tag set includes SQLite at precisely the same version", () => {
   });
   const lines = output.split("\n");
   const tags = lines.filter((line) => line === "v" + version || line.startsWith("go/") && line.endsWith("/v" + version));
-  assert.equal(tags.length, 13); // one root + twelve modules
+  assert.equal(tags.length, 1 + boundary.goModules.length); // root + coordinated Go modules
   assert.ok(tags.includes("go/agent-runtime-sqlite/v" + version));
   assert.ok(tags.includes("go/agent-runtime-harness-sqlite/v" + version));
 });

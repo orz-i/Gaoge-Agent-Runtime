@@ -146,6 +146,9 @@ type AgentSpec struct {
 type NamedAgentSnapshot struct {
 	MemberID       string `json:"memberID"`
 	MemberRevision string `json:"memberRevision"`
+	// Remote selects an external, goal-only Agent. Its identity/revision is
+	// still Host-frozen here; no native AgentSpec capability is implied.
+	Remote bool `json:"remote,omitempty"`
 	AgentSpec
 }
 
@@ -230,7 +233,7 @@ func normalizeNamedAgentSnapshots(values []NamedAgentSnapshot) ([]NamedAgentSnap
 		value.MemberID = strings.TrimSpace(value.MemberID)
 		value.MemberRevision = strings.TrimSpace(value.MemberRevision)
 		if value.MemberID == "" || value.MemberRevision == "" || len(value.MemberID) > 160 ||
-			len(value.MemberRevision) > 256 || strings.TrimSpace(value.Model) == "" {
+			len(value.MemberRevision) > 256 || (!value.Remote && strings.TrimSpace(value.Model) == "") {
 			return nil, ErrInvalidRequest
 		}
 		if _, duplicate := seen[value.MemberID]; duplicate {
@@ -241,6 +244,10 @@ func normalizeNamedAgentSnapshots(values []NamedAgentSnapshot) ([]NamedAgentSnap
 		value.AgentSpec, err = normalizeAgentSpec(value.AgentSpec)
 		if err != nil {
 			return nil, err
+		}
+		if value.Remote &&
+			(!agent.SupportsRemoteGoalOnly(value.startRequest()) || len(value.Skills) != 0) {
+			return nil, ErrInvalidRequest
 		}
 		normalized[i] = value
 	}

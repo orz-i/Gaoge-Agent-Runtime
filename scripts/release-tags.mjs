@@ -19,6 +19,7 @@ const moduleDirectories = [
   "go/agent-runtime-mcp",
   "go/agent-runtime-otel",
   "go/agent-runtime-a2a",
+  "go/agent-runtime-acp",
   "go/agent-runtime-postgres",
   "go/agent-runtime-sqlite",
   "go/agent-runtime-redis",
