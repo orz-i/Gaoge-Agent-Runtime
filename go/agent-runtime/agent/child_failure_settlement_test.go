@@ -25,6 +25,10 @@ type childFailurePorts struct {
 	forge bool
 }
 
+func (p *childFailurePorts) ResolveWindow(ctx context.Context, request model.Request) (runtimecontext.ModelWindow, error) {
+	plan, err := p.Plan(ctx, request)
+	return plan.ModelWindow, err
+}
 func (p *childFailurePorts) Plan(ctx context.Context, request model.Request) (BoundedContextPlan, error) {
 	if p.forge {
 		return BoundedContextPlan{}, model.NewClassifiedError(errChildFailureFixture, "context.input_budget_exceeded")

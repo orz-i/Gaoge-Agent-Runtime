@@ -57,6 +57,7 @@ type ModelInvocation struct {
 	Model               string                `json:"model,omitempty"`
 	Status              ModelInvocationStatus `json:"status"`
 	Request             model.Request         `json:"request,omitempty"`
+	SamplingPlan        *SamplingPlan         `json:"samplingPlan,omitempty"`
 	ProviderResponseID  string                `json:"providerResponseID,omitempty"`
 	Response            model.Response        `json:"response,omitempty"`
 	Usage               *model.Usage          `json:"usage,omitempty"`
@@ -188,6 +189,7 @@ func consumeLastModelInvocation(state *runState, now time.Time) (ModelInvocation
 	// hash and receipt remain durable while duplicated transcript bytes are not.
 	invocation.Request = model.Request{}
 	invocation.CatalogFingerprints = nil
+	invocation.SamplingPlan = nil
 	// The stored receipt already belongs to this state. The returned consumed
 	// value above is isolated, so copying this entire response again only
 	// duplicates opaque replay and Tool payloads without adding isolation.
@@ -205,6 +207,7 @@ func cloneModelInvocations(values []ModelInvocation) []ModelInvocation {
 
 func cloneModelInvocation(value ModelInvocation) ModelInvocation {
 	value.ContextSummary = cloneContextSummaryBinding(value.ContextSummary)
+	value.SamplingPlan = cloneSamplingPlan(value.SamplingPlan)
 	value.Request = model.CloneRequest(value.Request)
 	value.CatalogFingerprints = append([]string(nil), value.CatalogFingerprints...)
 	value.Response = model.CloneResponse(value.Response)
@@ -232,7 +235,9 @@ func validModelInvocations(values []ModelInvocation) bool {
 	active := 0
 	seenPhysical := make(map[[3]string]struct{})
 	for index, invocation := range values {
-		if !validContextSummaryInvocation(invocation) || !contextSummaryInputBytesWithinPolicy(invocation) {
+		if !validContextSummaryInvocation(invocation) || !contextSummaryInputBytesWithinPolicy(invocation) ||
+			(invocation.SamplingPlan != nil && (invocation.Status == ModelInvocationConsumed ||
+				invocation.Purpose != "" || !invocation.SamplingPlan.valid(invocation.Request))) {
 			return false
 		}
 		if strings.TrimSpace(invocation.ID) == "" || strings.TrimSpace(invocation.RunID) == "" ||
@@ -477,7 +482,7 @@ func (runner *Runner) buildUnpreparedModelRequest(ctx context.Context, snapshot 
 
 func (runner *Runner) prepareBusinessInvocation(ctx context.Context, snapshot kernel.Snapshot, request model.Request, originalTools []tools.Definition) (ModelInvocation, error) {
 	preparation := &modelPreparation{run: snapshot.Run, client: runner.model, now: runner.clock.Now(),
-		original: model.CloneRequest(request), catalog: originalTools}
+		original: model.CloneRequest(request), catalog: originalTools, budget: runner.samplingBudget}
 	ctx = context.WithValue(ctx, modelPreparationKey{}, preparation)
 	defer preparation.close()
 	if runner.boundedContext != nil {
@@ -769,6 +774,12 @@ func (runner *Runner) executeModelInvocation(
 		},
 	}
 	generateCtx := ctx
+	if invocation.SamplingPlan != nil {
+		if runner.samplingBudget == nil || !invocation.SamplingPlan.valid(invocation.Request) {
+			return snapshot, state, ErrInvalidRequest
+		}
+		generateCtx = context.WithValue(generateCtx, samplingPlanKey{}, cloneSamplingPlan(invocation.SamplingPlan))
+	}
 	if invocation.Purpose == ModelInvocationContextSummary {
 		generateCtx = context.WithValue(ctx, contextSummaryModelKey{}, true)
 	}
@@ -1046,6 +1057,9 @@ func (runner *Runner) releaseModelInvocationExecution(
 }
 
 func modelDefinitions(invocation ModelInvocation) []tools.Definition {
+	if invocation.SamplingPlan != nil && invocation.SamplingPlan.OmitLocalTools {
+		return nil
+	}
 	result := make([]tools.Definition, len(invocation.Request.Tools))
 	for index, definition := range invocation.Request.Tools {
 		result[index] = tools.CloneDefinition(definition)

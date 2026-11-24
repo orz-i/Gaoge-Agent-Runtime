@@ -32,6 +32,7 @@ type BoundedContextPlan struct {
 type BoundedContextPorts interface {
 	Hydrate(context.Context, plugin.RunInvocation) (context.Context, BoundedContextHydration, error)
 	Plan(context.Context, model.Request) (BoundedContextPlan, error)
+	ResolveWindow(context.Context, model.Request) (runtimecontext.ModelWindow, error)
 	PutArtifact(context.Context, runtimecontext.Artifact) (runtimecontext.Artifact, error)
 	CommitCheckpoint(context.Context, BoundedContextPlan, runtimecontext.Checkpoint) (runtimecontext.Checkpoint, error)
 	BindCheckpoint(context.Context, string, runtimecontext.Checkpoint) error
@@ -117,7 +118,7 @@ func (a *BoundedContextAdapter) prepare(ctx context.Context, incoming model.Requ
 	if err != nil {
 		return model.Request{}, err
 	}
-	original, err := assessModelCandidate(ctx, a.manager, request, plan.ModelWindow, policy, frame)
+	original, err := assessModelCandidate(ctx, a, request, plan.ModelWindow, policy, frame)
 	if err != nil {
 		return model.Request{}, err
 	}
@@ -126,12 +127,12 @@ func (a *BoundedContextAdapter) prepare(ctx context.Context, incoming model.Requ
 	if withinHard && assessment.HardTokenEstimate <= assessment.SoftInputTokens {
 		return original.selectForIntent(ctx)
 	}
-	if !plan.ArtifactReader || !plan.Owner {
+	if !plan.ArtifactReader || original.omitLocalTools || !plan.Owner {
 		if withinHard {
 			return original.selectForIntent(ctx)
 		}
 		reason := "no_artifact_reader"
-		if plan.ArtifactReader {
+		if plan.ArtifactReader && !original.omitLocalTools {
 			reason = "not_owner"
 		}
 		if rejected != nil {
@@ -152,7 +153,7 @@ func (a *BoundedContextAdapter) prepare(ctx context.Context, incoming model.Requ
 		}
 		return model.Request{}, rejectedContextBudget(assessment, policy, "no_safe_compaction")
 	}
-	next, err := a.manager.Rollover(ctx, runtimecontext.RolloverRequest{Previous: *plan.Checkpoint, Window: choice.window, Artifacts: choice.artifacts, Reason: "model_window_pressure", ModelWindowFingerprint: runtimecontext.ModelWindowFingerprint(plan.ModelWindow), Assessment: &choice.assessment})
+	next, err := a.manager.Rollover(ctx, runtimecontext.RolloverRequest{Previous: *plan.Checkpoint, Window: choice.window, Artifacts: choice.artifacts, Reason: "model_window_pressure", ModelWindowFingerprint: runtimecontext.ModelWindowFingerprint(choice.modelWindow), Assessment: &choice.assessment})
 	if err != nil {
 		return model.Request{}, err
 	}

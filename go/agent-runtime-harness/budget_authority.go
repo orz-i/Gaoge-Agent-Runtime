@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"sync"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
@@ -134,67 +135,112 @@ func (authority *BudgetAuthority) bindRun(ctx context.Context, runID string) (bu
 	return ledger, nil
 }
 
-func (authority *BudgetAuthority) modelReservation(ctx context.Context, ledger budget.Ledger, request model.Request) (model.Request, budget.Reservation, error) {
+// previewModelReservation computes all Tool visibility restrictions against the
+// ledger that would hold this reservation. It does not meter or write quota.
+func (authority *BudgetAuthority) previewModelReservation(ledger budget.Ledger, request model.Request) (model.Request, budget.Reservation, error) {
 	raw, err := json.Marshal(request)
 	if err != nil {
 		return request, budget.Reservation{}, err
 	}
 	reservation := budget.Reservation{ID: "model:" + request.InvocationID, RunID: request.RunID, RequestHash: hashInvocationBytes(raw), Requested: budget.Usage{LLMCalls: 1}}
 	if existing, found := ledger.Reservations[reservation.ID]; found {
-		if existing.RequestHash != reservation.RequestHash {
+		if existing.RequestHash != reservation.RequestHash || existing.RunID != reservation.RunID {
 			return request, reservation, budget.ErrLedgerConflict
 		}
-		// Count-only reservations have no output-token allowance. They must
-		// not erase a positive ceiling already frozen in the model intent.
-		// A token reservation can only narrow that original ceiling.
+		reservation = existing
 		if ceiling := existing.Requested.OutputTokens; ceiling > 0 &&
 			(request.MaxOutputTokens == 0 || ceiling < request.MaxOutputTokens) {
 			request.MaxOutputTokens = ceiling
 		}
 		request = applyHostedReservation(request, existing.Requested.HostedToolCalls, ledger, existing.RunID)
-		if existing.Status != budget.ReservationSettled && !existing.Dispatched && hasRunTokenLimits(ledger, request.RunID) {
-			if authority.dependencies.Meter == nil {
-				return request, existing, budget.ErrUnmetered
+	} else {
+		request, reservation = reserveHostedModelTools(request, reservation, ledger)
+		if hasRunTokenLimits(ledger, request.RunID) {
+			// A known output-only limit can be applied even before input is
+			// measured. The total-token ceiling is finalized after counting.
+			ceiling := request.MaxOutputTokens
+			if ceiling == 0 {
+				ceiling = math.MaxInt64
 			}
-			admission, admissionErr := authority.dependencies.Meter.PlanTokenAdmission(ctx, model.CloneRequest(request))
-			if admissionErr != nil {
-				return request, existing, admissionErr
+			ceiling = remainingOutputCeiling(ledger, request.RunID, 0, ceiling)
+			if ceiling <= 0 {
+				return request, reservation, budget.ErrExhausted
 			}
-			if admission.InputUpperBound <= 0 || admission.InputUpperBound > existing.Requested.InputTokens || admission.MaxOutputTokens <= 0 {
-				return request, existing, budget.ErrUnmetered
+			if ceiling != math.MaxInt64 {
+				request.MaxOutputTokens = ceiling
 			}
 		}
-		return request, existing, nil
 	}
-	request, reservation = reserveHostedModelTools(request, reservation, ledger)
-	if !hasRunTokenLimits(ledger, request.RunID) {
+	// Measure exactly the Tool set that would be visible after this atomic
+	// reservation, never an intermediate request followed by a late filter.
+	if reservation.Status != budget.ReservationSettled && reservation.Status != budget.ReservationReleased {
+		projected := budget.CloneLedger(ledger)
+		held := reservation
+		held.Status, held.Active = budget.ReservationHeld, true
+		projected.Reservations[held.ID] = held
+		request = applyLocalToolBudget(request, projected, request.RunID)
+	}
+	return request, reservation, nil
+}
+
+func (authority *BudgetAuthority) modelReservation(ctx context.Context, ledger budget.Ledger, original model.Request) (model.Request, budget.Reservation, error) {
+	request, reservation, err := authority.previewModelReservation(ledger, original)
+	if err != nil || !hasRunTokenLimits(ledger, original.RunID) {
+		return request, reservation, err
+	}
+	if reservation.Status == budget.ReservationSettled || reservation.Dispatched {
 		return request, reservation, nil
 	}
 	if authority.dependencies.Meter == nil {
 		return request, reservation, budget.ErrUnmetered
 	}
-	admission, err := authority.dependencies.Meter.PlanTokenAdmission(ctx, model.CloneRequest(request))
-	if err != nil {
-		return request, reservation, err
+	// Existing reservations are immutable. A fresh reservation may tighten
+	// the output ceiling, but its final request is measured again if it did.
+	if reservation.Status != "" {
+		admission, admissionErr := authority.dependencies.Meter.PlanTokenAdmission(ctx, model.CloneRequest(request))
+		if admissionErr != nil {
+			return request, reservation, admissionErr
+		}
+		if admission.InputUpperBound <= 0 || admission.InputUpperBound > reservation.Requested.InputTokens ||
+			admission.MaxOutputTokens < reservation.Requested.OutputTokens {
+			return request, reservation, budget.ErrUnmetered
+		}
+		return request, reservation, nil
 	}
-	if admission.InputUpperBound <= 0 || admission.MaxOutputTokens <= 0 {
-		return request, reservation, budget.ErrUnmetered
+	for attempt := 0; attempt < 16; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return request, reservation, err
+		}
+		admission, err := authority.dependencies.Meter.PlanTokenAdmission(ctx, model.CloneRequest(request))
+		if err != nil {
+			return request, reservation, err
+		}
+		if admission.InputUpperBound <= 0 || admission.MaxOutputTokens <= 0 {
+			return request, reservation, budget.ErrUnmetered
+		}
+		output := remainingOutputCeiling(ledger, original.RunID, admission.InputUpperBound, admission.MaxOutputTokens)
+		if request.MaxOutputTokens > 0 {
+			output = min(output, request.MaxOutputTokens)
+		}
+		if output <= 0 {
+			return request, reservation, budget.ErrExhausted
+		}
+		if request.MaxOutputTokens != output {
+			request.MaxOutputTokens = output
+			continue
+		}
+		if admission.InputUpperBound > math.MaxInt64-output {
+			return request, reservation, budget.ErrInvalidUsage
+		}
+		reservation.Requested.InputTokens = admission.InputUpperBound
+		reservation.Requested.OutputTokens = output
+		reservation.Requested.TotalTokens = admission.InputUpperBound + output
+		if !budget.ValidUsage(reservation.Requested) {
+			return request, reservation, budget.ErrInvalidUsage
+		}
+		return request, reservation, nil
 	}
-	output := remainingOutputCeiling(ledger, request.RunID, admission.InputUpperBound, admission.MaxOutputTokens)
-	if request.MaxOutputTokens > 0 {
-		output = min(output, request.MaxOutputTokens)
-	}
-	if output <= 0 {
-		return request, reservation, budget.ErrExhausted
-	}
-	request.MaxOutputTokens = output
-	reservation.Requested.InputTokens = admission.InputUpperBound
-	reservation.Requested.OutputTokens = output
-	reservation.Requested.TotalTokens = admission.InputUpperBound + output
-	if !budget.ValidUsage(reservation.Requested) {
-		return request, reservation, budget.ErrInvalidUsage
-	}
-	return request, reservation, nil
+	return request, reservation, budget.ErrUnmetered
 }
 
 // VerifiedToolOutcomeVerifier composes an already trusted, read-only Tool

@@ -275,6 +275,21 @@ typed request. Summary recovery reuses its sealed frames rather than calling
 the projection or a tokenizer again. No provider prompt or accounting options
 are written into the product Context or summary recipe.
 
+
+When ordinary bounded Context and SharedBudget are composed, the Runtime
+first previews the shared-ledger restrictions for each Context candidate:
+provider-hosted call limits, local Tool visibility and output-token ceiling.
+It meters the actual narrowed request, remeasuring if admission tightens the
+output ceiling, and freezes a compact `SamplingPlan` in the selected
+ModelInvocation. The plan contains the physical request digest, restrictions,
+numeric accounting evidence and requested quota, not a second transcript or
+provider prompt. Candidates do not reserve quota. The ledger reserves the
+same plan under its current revision CAS before physical dispatch. A competing
+reservation may make a frozen plan wait or fail; it cannot silently replace
+its sampled Tool declarations or token ceiling. New invocations still use
+the latest ledger limits. Pending admitted plans are reused on recovery
+without rerunning Context preparation or the admission meter.
+
 Ordinary bounded composition is the default. Explicit
 `Context.ManagedRecovery: true` selects the existing Runtime-owned Context
 recovery lifecycle. Before opening, construct the Runtime with its original

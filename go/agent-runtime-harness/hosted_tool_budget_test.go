@@ -194,8 +194,8 @@ func TestHostedSharedToolLimitBoundsNativeCallsWithoutHostedLimit(t *testing.T) 
 			if bounded.HostedToolCallLimit == nil || *bounded.HostedToolCallLimit != want {
 				t.Fatalf("step %d failed to bound native dispatch under shared tool limit: %v", step, bounded.HostedToolCallLimit)
 			}
-			if len(bounded.Tools) != 0 || bounded.RequireToolCall {
-				t.Fatalf("step %d exposes local calls competing for native budget: %+v", step, bounded)
+			if len(bounded.Tools) != 0 || bounded.RequireToolCall != (want > 0) {
+				t.Fatalf("step %d changed tool visibility or required native call: %+v", step, bounded)
 			}
 			answer := model.Response{Content: "done"}
 			if step == 0 {

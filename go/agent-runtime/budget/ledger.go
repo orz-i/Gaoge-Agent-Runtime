@@ -224,12 +224,28 @@ func (coordinator Coordinator) FinishRuns(ctx context.Context, scopeID string, r
 // Reserve also acquires an execution slot when active is true. Waiting attempts
 // are persisted without consuming quota. Replays retain the original estimate.
 func (coordinator Coordinator) Reserve(ctx context.Context, scopeID string, request Reservation, active bool) (Ledger, error) {
+	return coordinator.reserve(ctx, scopeID, request, active, 0)
+}
+
+// ReserveAtRevision commits a sampling plan only against the ledger revision
+// from which its request restrictions were derived. It cannot silently replan.
+func (coordinator Coordinator) ReserveAtRevision(ctx context.Context, scopeID string, request Reservation, active bool, revision uint64) (Ledger, error) {
+	if revision == 0 {
+		return Ledger{}, ErrLedgerConflict
+	}
+	return coordinator.reserve(ctx, scopeID, request, active, revision)
+}
+
+func (coordinator Coordinator) reserve(ctx context.Context, scopeID string, request Reservation, active bool, revision uint64) (Ledger, error) {
 	if request.ID == "" || request.RunID == "" || request.RequestHash == "" || !ValidUsage(request.Requested) {
 		return Ledger{}, ErrInvalidUsage
 	}
 	var admissionErr error
 	ledger, err := coordinator.update(ctx, scopeID, func(ledger *Ledger) error {
 		admissionErr = nil
+		if revision != 0 && ledger.Revision != revision {
+			return ErrLedgerConflict
+		}
 		if _, ok := ledger.Runs[request.RunID]; !ok {
 			return ErrLedgerConflict
 		}

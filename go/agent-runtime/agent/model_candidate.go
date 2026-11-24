@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
@@ -17,14 +18,17 @@ import (
 // scope, not a dispatch capability. The chosen invocation, if any, is used
 // directly by the single durable intent commit.
 type modelPreparation struct {
-	run      kernel.Run
-	client   model.Client
-	now      time.Time
-	original model.Request
-	catalog  []tools.Definition
-	mu       sync.Mutex
-	selected *ModelInvocation
-	closed   bool
+	run         kernel.Run
+	client      model.Client
+	now         time.Time
+	original    model.Request
+	catalog     []tools.Definition
+	budget      *BoundedBudgetAdapter
+	mu          sync.Mutex
+	ledger      *budget.Ledger
+	accountings []candidateAccounting
+	selected    *ModelInvocation
+	closed      bool
 }
 type modelPreparationKey struct{}
 
@@ -67,18 +71,20 @@ func planModelInvocation(run kernel.Run, client model.Client, request model.Requ
 // Runtime, including its final InvocationID. Its fields granting selection are
 // private; assessing a candidate neither writes state nor authorizes dispatch.
 type modelCandidate struct {
-	assessment  runtimecontext.Assessment
-	request     model.Request
-	invocation  *ModelInvocation
-	preparation *modelPreparation
+	assessment     runtimecontext.Assessment
+	modelWindow    runtimecontext.ModelWindow
+	omitLocalTools bool
+	request        model.Request
+	invocation     *ModelInvocation
+	preparation    *modelPreparation
 }
 
 // assessModelCandidate is used at the pre-intent Context boundary by the
 // concrete adapter, including its low-level Harness composition. In an Agent
 // preparation scope it derives the actual invocation for this candidate
 // before any counter sees it. Standalone use measures the literal request.
-func assessModelCandidate(ctx context.Context, manager *runtimecontext.Manager, request model.Request, window runtimecontext.ModelWindow, policy runtimecontext.Policy, frame runtimecontext.FrozenAccounting) (modelCandidate, error) {
-	candidate := modelCandidate{request: model.CloneRequest(request)}
+func assessModelCandidate(ctx context.Context, adapter *BoundedContextAdapter, request model.Request, window runtimecontext.ModelWindow, policy runtimecontext.Policy, frame runtimecontext.FrozenAccounting) (modelCandidate, error) {
+	candidate := modelCandidate{request: model.CloneRequest(request), modelWindow: window}
 	measured := candidate.request
 	if preparation, ok := ctx.Value(modelPreparationKey{}).(*modelPreparation); ok {
 		preparation.mu.Lock()
@@ -93,12 +99,125 @@ func assessModelCandidate(ctx context.Context, manager *runtimecontext.Manager, 
 		}
 		candidate.preparation, candidate.invocation = preparation, &invocation
 		measured = invocation.Request
+		if preparation.budget != nil {
+			ledger, err := preparation.samplingLedger(ctx)
+			if err != nil {
+				return modelCandidate{}, err
+			}
+			if ledger.ID != "" {
+				return preparation.assessBudgetCandidate(ctx, adapter, candidate, ledger, window, policy, frame)
+			}
+		}
 	}
-	assessment, err := manager.AssessModelRequestWithAccounting(ctx, measured, window, policy, frame)
+	assessment, err := adapter.manager.AssessModelRequestWithAccounting(ctx, measured, window, policy, frame)
 	if err != nil {
 		return modelCandidate{}, err
 	}
 	candidate.assessment = assessment
+	return candidate, nil
+}
+
+// All candidates of one Context search observe the same ledger snapshot.
+// This is only a planning view; the actual reserve later uses the live CAS.
+func (p *modelPreparation) samplingLedger(ctx context.Context) (budget.Ledger, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.ledger == nil {
+		l, err := p.budget.bind(ctx, p.run.ID)
+		if err != nil {
+			return budget.Ledger{}, err
+		}
+		p.ledger = &l
+	}
+	return budget.CloneLedger(*p.ledger), nil
+}
+
+type candidateAccounting struct {
+	window runtimecontext.ModelWindow
+	frame  runtimecontext.FrozenAccounting
+}
+
+func (p *modelPreparation) assessSamplingRequest(ctx context.Context, adapter *BoundedContextAdapter, request model.Request,
+	window runtimecontext.ModelWindow, policy runtimecontext.Policy, frame runtimecontext.FrozenAccounting) (runtimecontext.Assessment, candidateAccounting, error) {
+	accounting := candidateAccounting{window: window, frame: frame}
+	if !frame.MatchesRequest(request) {
+		p.mu.Lock()
+		found := false
+		for _, cached := range p.accountings {
+			if cached.frame.MatchesRequest(request) {
+				accounting, found = cached, true
+				break
+			}
+		}
+		p.mu.Unlock()
+		if !found {
+			resolved, err := adapter.ports.ResolveWindow(ctx, model.CloneRequest(request))
+			if err != nil {
+				return runtimecontext.Assessment{}, candidateAccounting{}, err
+			}
+			frozen, err := adapter.manager.FreezeRequestAccounting(ctx, request, resolved)
+			if err != nil {
+				return runtimecontext.Assessment{}, candidateAccounting{}, err
+			}
+			accounting = candidateAccounting{window: resolved, frame: frozen}
+			p.mu.Lock()
+			p.accountings = append(p.accountings, accounting)
+			p.mu.Unlock()
+		}
+	}
+	assessment, err := adapter.manager.AssessModelRequestWithAccounting(ctx, request, accounting.window, policy, accounting.frame)
+	return assessment, accounting, err
+}
+
+// Preview and final planning are the same SharedBudget algorithm. The
+// preliminary measurement permits ordinary Context pressure/compaction even
+// when a provider's admission planner refuses an oversized sample outright.
+// Only the completed, exactly measured physical plan may be selected.
+func (p *modelPreparation) assessBudgetCandidate(ctx context.Context, adapter *BoundedContextAdapter, candidate modelCandidate, ledger budget.Ledger,
+	window runtimecontext.ModelWindow, policy runtimecontext.Policy, frame runtimecontext.FrozenAccounting) (modelCandidate, error) {
+	original := candidate.invocation.Request
+	preview, _, err := p.budget.ports.PreviewModel(budget.CloneLedger(ledger), model.CloneRequest(original))
+	if err != nil {
+		return modelCandidate{}, err
+	}
+	if !validDispatchModelRequest(original, preview) {
+		return modelCandidate{}, ErrInvalidRequest
+	}
+	assessment, accounting, err := p.assessSamplingRequest(ctx, adapter, preview, window, policy, frame)
+	if err != nil {
+		return modelCandidate{}, err
+	}
+	candidate.assessment, candidate.modelWindow = assessment, accounting.window
+	candidate.omitLocalTools = len(original.Tools) > 0 && len(preview.Tools) == 0
+	physical, reservation, err := p.budget.ports.PlanModel(ctx, budget.CloneLedger(ledger), model.CloneRequest(original))
+	if err != nil && !errors.Is(err, runtimecontext.ErrBudgetExceeded) {
+		return modelCandidate{}, err
+	}
+	admissionErr := err
+	if !validDispatchModelRequest(original, physical) {
+		return modelCandidate{}, ErrInvalidRequest
+	}
+	if !reflect.DeepEqual(model.CloneRequest(preview), model.CloneRequest(physical)) {
+		assessment, accounting, err = p.assessSamplingRequest(ctx, adapter, physical, window, policy, frame)
+		if err != nil {
+			return modelCandidate{}, err
+		}
+	}
+	candidate.assessment, candidate.modelWindow = assessment, accounting.window
+	candidate.omitLocalTools = len(original.Tools) > 0 && len(physical.Tools) == 0
+	if admissionErr != nil {
+		if !runtimecontext.WithinHardBudget(assessment, policy) {
+			return candidate, nil
+		}
+		return modelCandidate{}, admissionErr
+	}
+	if runtimecontext.WithinHardBudget(assessment, policy) {
+		plan, err := newSamplingPlan(ledger, original, physical, reservation, accounting.window, policy, accounting.frame, assessment)
+		if err != nil {
+			return modelCandidate{}, err
+		}
+		candidate.invocation.SamplingPlan = plan
+	}
 	return candidate, nil
 }
 

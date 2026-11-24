@@ -21,6 +21,9 @@ type managedScopePorts struct {
 func (p *managedScopePorts) Hydrate(ctx context.Context, i plugin.RunInvocation) (context.Context, BoundedContextHydration, error) {
 	return ctx, BoundedContextHydration{RunID: i.RunID, SourceBinding: json.RawMessage(`{"original":"source"}`)}, nil
 }
+func (p *managedScopePorts) ResolveWindow(ctx context.Context, request model.Request) (runtimecontext.ModelWindow, error) {
+	return runtimecontext.ModelWindow{}, runtimecontext.ErrModelWindowUnknown
+}
 func (p *managedScopePorts) Plan(_ context.Context, r model.Request) (BoundedContextPlan, error) {
 	p.prepareCalls++
 	if p.fail {

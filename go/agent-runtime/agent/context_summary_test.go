@@ -87,6 +87,9 @@ func (p *summaryCorePorts) Hydrate(ctx context.Context, inv plugin.RunInvocation
 	p.bound = runtimecontext.CloneCheckpoint(p.current)
 	return ctx, BoundedContextHydration{RunID: inv.RunID, Checkpoint: &p.bound, SourceBinding: json.RawMessage(`{"owner":true}`)}, nil
 }
+func (p *summaryCorePorts) ResolveWindow(ctx context.Context, request model.Request) (runtimecontext.ModelWindow, error) {
+	return p.window, nil
+}
 func (p *summaryCorePorts) Plan(_ context.Context, request model.Request) (BoundedContextPlan, error) {
 	request.PreviousResponseID = p.continuation
 	runtimeMessages := model.CloneMessages(request.Messages)

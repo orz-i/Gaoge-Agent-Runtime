@@ -268,3 +268,23 @@ func TestProvenUnsentRequeueNeverRefundsPhysicalToolDispatch(t *testing.T) {
 		t.Fatalf("physical Tool reservation was refunded: %+v err=%v", latest, err)
 	}
 }
+
+func TestReserveAtRevisionRejectsStaleSamplingView(t *testing.T) {
+	c := newLedger(t, budget.Limits{MaxTotalTokens: 100})
+	before, err := c.Store.LoadBudget(t.Context(), "turn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	held, err := c.Reserve(t.Context(), "turn", reservation("other", 30, 30), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale, err := c.ReserveAtRevision(t.Context(), "turn", reservation("candidate", 25, 25), true, before.Revision)
+	if !errors.Is(err, budget.ErrLedgerConflict) || stale.Revision != held.Revision || len(stale.Reservations) != 1 {
+		t.Fatalf("stale sampling view changed live ledger: %+v %v", stale, err)
+	}
+	next, err := c.ReserveAtRevision(t.Context(), "turn", reservation("candidate", 25, 25), true, stale.Revision)
+	if !errors.Is(err, budget.ErrWaiting) || next.Reservations["candidate"].Status != budget.ReservationWaiting {
+		t.Fatalf("concurrent quota did not fence final sampling: %+v %v", next, err)
+	}
+}

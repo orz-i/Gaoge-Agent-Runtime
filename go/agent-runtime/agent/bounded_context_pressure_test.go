@@ -19,6 +19,10 @@ type pressureTestPorts struct{ owner, reader, exact bool }
 func (p pressureTestPorts) Hydrate(ctx context.Context, invocation plugin.RunInvocation) (context.Context, BoundedContextHydration, error) {
 	return ctx, BoundedContextHydration{RunID: invocation.RunID, SourceBinding: json.RawMessage(`{}`)}, nil
 }
+func (p pressureTestPorts) ResolveWindow(ctx context.Context, request model.Request) (runtimecontext.ModelWindow, error) {
+	plan, err := p.Plan(ctx, request)
+	return plan.ModelWindow, err
+}
 func (p pressureTestPorts) Plan(_ context.Context, request model.Request) (BoundedContextPlan, error) {
 	window := runtimecontext.ModelWindow{ContextTokens: 1024, ReservedOutputTokens: 128}
 	if p.exact {

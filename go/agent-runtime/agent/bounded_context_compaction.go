@@ -26,12 +26,12 @@ func (adapter *BoundedContextAdapter) selectCompaction(
 	consider := func(candidateWindow runtimecontext.Window, artifacts []runtimecontext.Artifact) (bool, error) {
 		trial := model.CloneRequest(request)
 		trial.Messages = runtimecontext.Materialize(candidateWindow)
-		candidate, err := assessModelCandidate(ctx, adapter.manager, trial, window, policy, frame)
+		candidate, err := assessModelCandidate(ctx, adapter, trial, window, policy, frame)
 		if err != nil {
 			return false, err
 		}
 		assessment := candidate.assessment
-		if !runtimecontext.WithinHardBudget(assessment, policy) ||
+		if candidate.omitLocalTools || !runtimecontext.WithinHardBudget(assessment, policy) ||
 			assessment.SerializedBytes >= original.SerializedBytes || assessment.HardTokenEstimate >= original.HardTokenEstimate {
 			return false, nil
 		}

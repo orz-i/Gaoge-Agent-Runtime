@@ -36,8 +36,8 @@ func (p boundedBudgetPorts) Project(ctx context.Context, ledger budget.Ledger) e
 func (p boundedBudgetPorts) PlanModel(ctx context.Context, l budget.Ledger, r model.Request) (model.Request, budget.Reservation, error) {
 	return p.authority.modelReservation(ctx, l, r)
 }
-func (p boundedBudgetPorts) ApplyLocalToolBudget(r model.Request, l budget.Ledger) model.Request {
-	return applyLocalToolBudget(r, l, r.RunID)
+func (p boundedBudgetPorts) PreviewModel(l budget.Ledger, r model.Request) (model.Request, budget.Reservation, error) {
+	return p.authority.previewModelReservation(l, r)
 }
 func (p boundedBudgetPorts) RequiresTokenUsage(l budget.Ledger, id string) bool {
 	return hasRunTokenLimits(l, id)

@@ -55,6 +55,9 @@ func (p boundedContextPorts) Hydrate(ctx context.Context, invocation plugin.RunI
 	}
 	return hydrated, facts, nil
 }
+func (p boundedContextPorts) ResolveWindow(ctx context.Context, request model.Request) (runtimecontext.ModelWindow, error) {
+	return p.resolve(ctx, model.CloneRequest(request))
+}
 func (p boundedContextPorts) Plan(ctx context.Context, incoming model.Request) (agent.BoundedContextPlan, error) {
 	request, err := MaterializeContextWindowRequest(ctx, incoming)
 	if err != nil {
@@ -80,7 +83,7 @@ func (p boundedContextPorts) Plan(ctx context.Context, incoming model.Request) (
 	if err != nil {
 		return plan, err
 	}
-	window, err := p.resolve(ctx, model.CloneRequest(request))
+	window, err := p.ResolveWindow(ctx, request)
 	if err != nil {
 		return plan, err
 	}

@@ -132,6 +132,11 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
   governs ordinary compaction, Summary planning/consumption, and recovery.
   Host projections return only options, the leading System prompt, and the
   reserved output ceiling; exact counters keep the original typed request.
+- **Unified Context/SharedBudget sampling admission:** Resolve hosted-call,
+  local Tool and output restrictions before candidate accounting. Persist the
+  selected physical sampling plan alongside the original logical ModelInvocation,
+  reserve against the live ledger revision and reuse the same plan on recovery.
+  Remove dispatch-time re-filtering after metering.
 
 - A parent Agent can consume the completed result of a fixed local deferred
   child when Host approval policies were registered and never entered. Harness
