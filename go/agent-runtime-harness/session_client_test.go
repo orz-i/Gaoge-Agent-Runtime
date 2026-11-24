@@ -223,7 +223,7 @@ func assertPersistedModelHash(t *testing.T, runtime *kernel.Runtime, snapshot ha
 		digest := sha256.Sum256(raw)
 		catalogFingerprints = append(catalogFingerprints, hex.EncodeToString(digest[:]))
 	}
-	proof, err := jsoncontract.SealOpaque("agent-model-intent-opaque-v1", struct {
+	proof, err := jsoncontract.SealOpaque("agent-model-intent-opaque-v2", struct {
 		Request             model.Request `json:"request"`
 		CatalogFingerprints []string      `json:"catalogFingerprints"`
 		Provider            string        `json:"provider"`

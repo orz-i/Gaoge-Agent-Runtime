@@ -261,3 +261,143 @@ func TestRecoveredAcceptedReceiptRetainsOriginalToolAndReplayBytes(t *testing.T)
 	}
 	t.Fatal("next physical request lost original provider replay")
 }
+
+func TestModelReceiptPresenceDoesNotChangeToolExecutionAuthority(t *testing.T) {
+	for _, mode := range []string{"native", "shared_budget"} {
+		for _, fault := range []string{"ordinary", "before_receipt_commit", "after_receipt_commit"} {
+			for _, missing := range []bool{true, false} {
+				label := map[bool]string{true: "missing", false: "explicit_null"}[missing]
+				t.Run(mode+"/"+fault+"/"+label, func(t *testing.T) {
+					store, shared, req := hostedBudgetFixture(t, budget.Limits{MaxLLMCalls: 3, MaxToolCalls: 2})
+					args := json.RawMessage("null")
+					if missing {
+						args = nil
+					}
+					first := model.Response{ResponseID: "original", Usage: &model.Usage{InputTokens: 1, OutputTokens: 1}, ToolCalls: []tools.Call{{ID: "call", ToolKey: "lookup", Name: "lookup", Arguments: args}}}
+					client := &governanceReceiptModel{responses: []model.Response{first, {ResponseID: "done", Content: "done", Usage: &model.Usage{InputTokens: 1, OutputTokens: 1}}}}
+					var backing kernel.Store = memory.NewStore()
+					if fault != "ordinary" {
+						backing = &receiptFaultStore{Store: backing, afterCommit: fault == "after_receipt_commit"}
+					}
+					rt, err := kernel.New(kernel.Dependencies{Store: backing})
+					if err != nil {
+						t.Fatal(err)
+					}
+					effects := 0
+					registry, err := tools.NewRegistry([]tools.Registration{{Definition: tools.Definition{Key: "lookup", Name: "lookup", InputSchema: json.RawMessage(`{}`)}, Handler: tools.HandlerFunc(func(_ context.Context, r tools.ExecutionRequest) (tools.ExecutionResult, error) {
+						effects++
+						if missing || !reflect.DeepEqual(r.Call.Arguments, args) {
+							t.Errorf("original argument authority changed: %q", r.Call.Arguments)
+						}
+						return tools.ExecutionResult{Content: json.RawMessage(`{"ok":true}`), Receipt: tools.Receipt{ExecutionID: r.Call.ID, Disposition: "committed"}}, nil
+					})}})
+					if err != nil {
+						t.Fatal(err)
+					}
+					deps := agent.Dependencies{Runtime: rt, Model: client, Catalog: registry, Executor: registry,
+						ModelOutcomeVerifier: agent.ModelOutcomeVerifierFunc(func(_ context.Context, r model.Request) (model.Response, error) {
+							if len(client.requests) != 1 || !reflect.DeepEqual(r, client.requests[0]) {
+								return model.Response{}, agent.ErrInvalidRequest
+							}
+							return model.CloneResponse(first), nil
+						})}
+					if mode == "shared_budget" {
+						adapter := mustBudgetAdapter(t, shared)
+						deps.ModelMiddleware = []plugin.ModelMiddleware{adapter}
+						deps.RunMiddleware = []plugin.RunMiddleware{adapter}
+						deps.ToolMiddleware = []plugin.ToolMiddleware{adapter}
+						deps.ModelOutcomeVerifier = shared
+					}
+					runner, err := agent.NewRunner(deps)
+					if err != nil {
+						t.Fatal(err)
+					}
+					final, callErr := runner.StartRun(t.Context(), agent.StartRequest{ID: req.RunID, Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "owner"}, Thread: kernel.ThreadRef{Kind: "test", ID: "presence"}, Goal: "finish", ToolKeys: []string{"lookup"}})
+					if fault != "ordinary" {
+						current, e := rt.Load(t.Context(), req.RunID)
+						if e != nil {
+							t.Fatal(e)
+						}
+						if callErr == nil || current.Run.Status != kernel.RunStatusRunning || effects != 0 || len(client.requests) != 1 {
+							t.Fatalf("fault not reached: status=%s err=%v effects=%d calls=%d", current.Run.Status, callErr, effects, len(client.requests))
+						}
+						if fault == "after_receipt_commit" {
+							v, e := agent.ViewState(current)
+							if e != nil {
+								t.Fatal(e)
+							}
+							if v.ModelInvocations[0].Status != agent.ModelInvocationCompleted || !reflect.DeepEqual(v.ModelInvocations[0].Response.ToolCalls[0].Arguments, args) {
+								t.Fatal("persisted invocation changed arguments")
+							}
+						}
+						restarted, e := agent.NewRunner(deps)
+						if e != nil {
+							t.Fatal(e)
+						}
+						final, callErr = restarted.Resume(t.Context(), req.RunID, current.Run.Revision)
+					}
+					if missing {
+						if effects != 0 || len(client.requests) != 1 || final.Run.Status != kernel.RunStatusFailed || final.Run.ErrorCode != "agent.tool_invalid" || callErr == nil {
+							t.Fatalf("missing argument gained authority: status=%s code=%s err=%v effects=%d calls=%d", final.Run.Status, final.Run.ErrorCode, callErr, effects, len(client.requests))
+						}
+					} else if effects != 1 || len(client.requests) != 2 || final.Run.Status != kernel.RunStatusCompleted || callErr != nil {
+						t.Fatalf("explicit null did not retain valid schema authority: status=%s err=%v effects=%d calls=%d", final.Run.Status, callErr, effects, len(client.requests))
+					}
+					if mode == "shared_budget" {
+						ledger, e := store.LoadBudget(t.Context(), "hosted-budget-turn")
+						if e != nil {
+							t.Fatal(e)
+						}
+						receipt, e := budget.DecodeModelReceipt(ledger.Reservations["model:"+client.requests[0].InvocationID])
+						if e != nil || !reflect.DeepEqual(receipt.ToolCalls[0].Arguments, args) {
+							t.Fatalf("settled receipt changed argument presence: %+v %v", receipt.ToolCalls, e)
+						}
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestPhysicalReceiptRejectsMissingAndExplicitNullSubstitution(t *testing.T) {
+	for _, missing := range []bool{true, false} {
+		t.Run(map[bool]string{true: "missing", false: "explicit_null"}[missing], func(t *testing.T) {
+			store, shared, request := hostedBudgetFixture(t, budget.Limits{MaxLLMCalls: 2})
+			original, alternate := json.RawMessage(nil), json.RawMessage("null")
+			if !missing {
+				original, alternate = alternate, original
+			}
+			request.Messages = append(request.Messages, model.Message{Role: model.RoleAssistant, ToolCalls: []tools.Call{{ID: "call", ToolKey: "local.read", Arguments: original}}})
+			var physical model.Request
+			_, err := mustBudgetAdapter(t, shared).Model(t.Context(), request, nil, func(_ context.Context, r model.Request, _ model.StreamSink) (model.Response, error) {
+				physical = model.CloneRequest(r)
+				return model.Response{Content: "effect", ResponseID: "original", Usage: &model.Usage{InputTokens: 1, OutputTokens: 1}}, nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			before, err := store.LoadBudget(t.Context(), "hosted-budget-turn")
+			if err != nil {
+				t.Fatal(err)
+			}
+			changed := model.CloneRequest(physical)
+			changed.Messages[len(changed.Messages)-1].ToolCalls[0].Arguments = alternate
+			if receipt, err := shared.VerifyModelOutcome(t.Context(), physical); err != nil || receipt.Content != "effect" {
+				t.Fatalf("original receipt lost: %+v %v", receipt, err)
+			}
+			if _, err := shared.VerifyModelOutcome(t.Context(), changed); !errors.Is(err, ErrConflict) {
+				t.Fatalf("substituted receipt identity accepted: %v", err)
+			}
+			if _, err = mustBudgetAdapter(t, shared).Model(t.Context(), changed, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
+				t.Fatal("changed invocation dispatched")
+				return model.Response{}, nil
+			}); !errors.Is(err, budget.ErrLedgerConflict) {
+				t.Fatalf("substituted logical identity accepted: %v", err)
+			}
+			after, err := store.LoadBudget(t.Context(), "hosted-budget-turn")
+			if err != nil || !reflect.DeepEqual(before, after) {
+				t.Fatal("substituted lookup mutated original ledger")
+			}
+		})
+	}
+}

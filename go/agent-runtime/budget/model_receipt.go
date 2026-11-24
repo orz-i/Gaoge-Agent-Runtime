@@ -9,7 +9,7 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 )
 
-const modelReceiptEvidenceVersion = "budget-model-receipt-opaque-v1"
+const modelReceiptEvidenceVersion = "budget-model-receipt-opaque-v2"
 
 var errModelResponseRejected = errors.New("completed model response was rejected")
 

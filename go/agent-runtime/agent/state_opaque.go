@@ -7,9 +7,9 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract"
 )
 
-// Retain the original Agent State evidence representation and version. The
-// lossless field walk and digest are shared by Model identity and receipts.
-const originalStateEvidenceVersion = "agent-state-opaque-v1"
+// The v2 seal also preserves missing RawMessage values at required JSON
+// positions. Model identity and receipts share the same lossless codec.
+const originalStateEvidenceVersion = "agent-state-opaque-v2"
 
 type originalStateEvidence = jsoncontract.OpaqueEvidence
 type originalStateRawField = jsoncontract.OpaqueField

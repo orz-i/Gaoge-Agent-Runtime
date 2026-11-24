@@ -204,3 +204,32 @@ func TestOriginalStateEvidenceStreamingHashMatchesFrozenFrame(t *testing.T) {
 		t.Fatalf("streaming State signature changed the original byte frame: got=%s want=%x", actual.Digest, original)
 	}
 }
+
+func TestAgentStateV2RejectsAmbiguousV1Evidence(t *testing.T) {
+	state := runState{Messages: []model.Message{{Role: model.RoleAssistant, ToolCalls: []tools.Call{{ID: "call", ToolKey: "lookup", Arguments: nil}}}}}
+	// v1 omitted the missing marker, making this a valid old digest for the
+	// projected null arguments. The hard cut must not admit it as v2 State.
+	projected, err := json.Marshal(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy, err := jsoncontract.SealOpaqueFields("agent-state-opaque-v1", projected, []jsoncontract.OpaqueField{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(persistedRunState{runState: state, OriginalStateEvidence: &legacy})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = decodeOriginalRunState(raw); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("ambiguous v1 State accepted: %v", err)
+	}
+	raw, err = encodeOriginalRunState(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := decodeOriginalRunState(raw)
+	if err != nil || !reflect.DeepEqual(decoded, state) {
+		t.Fatalf("v2 State changed missing arguments: %v", err)
+	}
+}

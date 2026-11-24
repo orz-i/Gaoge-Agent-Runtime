@@ -76,7 +76,8 @@ before the invocation is committed; otherwise the final dispatch boundary freeze
 it. A budget reservation retains its logical admission identity and separately
 binds the same `model.PhysicalRequestHash` as the sampling plan. Once frozen,
 late middleware cannot alter the physical request. The versioned digest binds typed SDK request evidence, including exact original
-Tool/Provider JSON bytes; it is not the provider-native wire payload or a token-count
+Tool/Provider JSON bytes and the distinction between missing RawMessage values
+and explicit JSON null; it is not the provider-native wire payload or a token-count
 serialization.
 
 The Runtime's native budget coordinator atomically commits observed usage, hosted

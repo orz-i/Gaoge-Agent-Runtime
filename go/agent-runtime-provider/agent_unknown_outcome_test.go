@@ -115,7 +115,7 @@ func assertProviderPendingSource(t *testing.T, runID string, pending agent.Model
 	}
 	request := model.CloneRequest(pending.Request)
 	request.InvocationID = ""
-	proof, err := jsoncontract.SealOpaque("agent-model-intent-opaque-v1", struct {
+	proof, err := jsoncontract.SealOpaque("agent-model-intent-opaque-v2", struct {
 		Request             model.Request `json:"request"`
 		CatalogFingerprints []string      `json:"catalogFingerprints"`
 		Provider            string        `json:"provider"`

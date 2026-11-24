@@ -36,7 +36,11 @@ func TestOriginalModelQualificationAndOpaqueReceiptAcrossSQLiteReopen(t *testing
 				t.Fatal(err)
 			}
 			response := model.Response{ResponseID: "response", Content: "  original  ", Usage: &model.Usage{InputTokens: 10, OutputTokens: 3},
-				ToolCalls:      []tools.Call{{ID: "call", ToolKey: "lookup", Arguments: json.RawMessage(`{"n": 9007199254740993, "x":"<>&"}`)}},
+				ToolCalls: []tools.Call{
+					{ID: "call", ToolKey: "lookup", Arguments: json.RawMessage(`{"n": 9007199254740993, "x":"<>&"}`)},
+					{ID: "missing", ToolKey: "lookup"},
+					{ID: "explicit-null", ToolKey: "lookup", Arguments: json.RawMessage("null")},
+				},
 				ProviderReplay: &model.ProviderReplay{Provider: "fixture", Format: "signed", Data: json.RawMessage(`{"original": "<>&", "signature":"opaque"}`)}}
 			if reject {
 				response.Usage.OutputTokens = 11

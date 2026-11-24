@@ -68,3 +68,50 @@ func TestResponseEvidenceHashPreservesAllOpaqueReceiptFields(t *testing.T) {
 		t.Fatal("isolated original response changed identity")
 	}
 }
+
+func TestModelEvidenceDistinguishesMissingFromExplicitNull(t *testing.T) {
+	request := model.Request{RunID: "run", InvocationID: "inv", Messages: []model.Message{{Role: model.RoleAssistant, ToolCalls: []tools.Call{{ID: "call", ToolKey: "lookup"}}, ProviderReplay: &model.ProviderReplay{Provider: "fixture"}}}, Tools: []tools.Definition{{Key: "lookup"}}, OutputContract: &model.OutputContract{Name: "schema"}, HostedTools: []model.HostedTool{{Key: "native"}}}
+	original, err := model.PhysicalRequestHash(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, change := range map[string]func(*model.Request){
+		"arguments":     func(r *model.Request) { r.Messages[0].ToolCalls[0].Arguments = json.RawMessage("null") },
+		"provider_data": func(r *model.Request) { r.Messages[0].ProviderReplay.Data = json.RawMessage("null") },
+		"tool_schema":   func(r *model.Request) { r.Tools[0].InputSchema = json.RawMessage("null") },
+		"output_schema": func(r *model.Request) { r.OutputContract.Schema = json.RawMessage("null") },
+		"options":       func(r *model.Request) { r.ModelOptions = json.RawMessage("null") },
+		"hosted_target": func(r *model.Request) { r.HostedTools[0].Target = json.RawMessage("null") },
+	} {
+		t.Run("request/"+name, func(t *testing.T) {
+			r := model.CloneRequest(request)
+			change(&r)
+			hash, err := model.PhysicalRequestHash(r)
+			if err != nil || hash == original {
+				t.Fatalf("request presence collision: %v", err)
+			}
+		})
+	}
+	response := model.Response{ResponseID: "response", ToolCalls: []tools.Call{{ID: "call"}}, ProviderReplay: &model.ProviderReplay{Provider: "fixture"}, HostedToolCalls: []model.HostedToolCall{{ID: "hosted"}}, Artifacts: []model.ArtifactRef{{ID: "artifact"}}}
+	original, err = model.ResponseEvidenceHash(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, change := range map[string]func(*model.Response){
+		"arguments":         func(r *model.Response) { r.ToolCalls[0].Arguments = json.RawMessage("null") },
+		"provider_data":     func(r *model.Response) { r.ProviderReplay.Data = json.RawMessage("null") },
+		"hosted_input":      func(r *model.Response) { r.HostedToolCalls[0].Input = json.RawMessage("null") },
+		"hosted_output":     func(r *model.Response) { r.HostedToolCalls[0].Output = json.RawMessage("null") },
+		"hosted_error":      func(r *model.Response) { r.HostedToolCalls[0].Error = json.RawMessage("null") },
+		"artifact_metadata": func(r *model.Response) { r.Artifacts[0].Metadata = json.RawMessage("null") },
+	} {
+		t.Run("response/"+name, func(t *testing.T) {
+			r := model.CloneResponse(response)
+			change(&r)
+			hash, err := model.ResponseEvidenceHash(r)
+			if err != nil || hash == original {
+				t.Fatalf("response presence collision: %v", err)
+			}
+		})
+	}
+}

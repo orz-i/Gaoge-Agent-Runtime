@@ -3,10 +3,13 @@
 ## PR #154 — Model original evidence and settlement qualification hard cut
 
 Model intent, logical budget reservation and physical sampling hashes now bind
-versioned original-byte evidence, rather than compacted JSON. The native
-Agent State seal retains its existing format; SharedBudget Model receipts now
-require their own reservation-bound lossless seal. Old active Model intents
-and unsealed Model receipts are not migrated or rehashed. Drain or quarantine
+versioned original-byte evidence, rather than compacted JSON. The shared v2
+codec distinguishes missing RawMessage fields from explicit JSON null and
+preserves their original bytes across Agent State, Model identity and
+SharedBudget receipt persistence. Required missing fields carry a sealed
+absence marker; omitted optional fields remain absent. The Agent State and
+Model identity/receipt evidence domains advance to v2. Old v1 State, active
+Model intents and unsealed or v1 Model receipts are not migrated or rehashed. Drain or quarantine
 in-flight runs before switching all writers to the new SDK cohort; do not mix
 old/new workers or infer new execution authority from old receipts.
 

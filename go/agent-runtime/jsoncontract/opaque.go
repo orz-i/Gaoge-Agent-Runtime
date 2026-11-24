@@ -24,7 +24,9 @@ type OpaqueEvidence struct {
 	Digest  string        `json:"digest"`
 }
 
-// OpaqueField identifies one changed RawMessage by its typed owner path.
+// OpaqueField identifies one original RawMessage by its typed owner path.
+// A nil Raw explicitly records a missing value at a position which JSON
+// would otherwise write as null. Non-nil Raw always contains valid JSON.
 type OpaqueField struct {
 	Path string `json:"path"`
 	Raw  []byte `json:"raw"`
@@ -32,6 +34,7 @@ type OpaqueField struct {
 
 // SealOpaque is the single original-byte identity and persistence codec.
 // Only RawMessage fields changed by the ordinary JSON encoder need a sidecar.
+// In particular, missing non-omitted fields must not acquire JSON null bytes.
 func SealOpaque(version string, value any) (OpaqueEvidence, error) {
 	if version == "" {
 		return OpaqueEvidence{}, ErrOpaqueEvidence
@@ -44,9 +47,12 @@ func SealOpaque(version string, value any) (OpaqueEvidence, error) {
 		return OpaqueEvidence{}, err
 	}
 	fields := make([]OpaqueField, 0)
-	err = walkOpaqueRaw(reflect.ValueOf(value), "", false, func(path string, value reflect.Value) error {
+	err = walkOpaqueRaw(reflect.ValueOf(value), "", false, false, func(path string, value reflect.Value, omitNil bool) error {
 		original := value.Interface().(json.RawMessage)
-		if len(original) == 0 {
+		if original == nil {
+			if !omitNil {
+				fields = append(fields, OpaqueField{Path: path})
+			}
 			return nil
 		}
 		encoded, e := json.Marshal(original)
@@ -81,7 +87,7 @@ func RestoreOpaque(version string, target any, recorded *OpaqueEvidence) error {
 	}
 	byPath := make(map[string][]byte, len(recorded.Fields))
 	for _, field := range recorded.Fields {
-		if field.Path == "" || len(field.Raw) == 0 || !json.Valid(field.Raw) {
+		if field.Raw != nil && !json.Valid(field.Raw) {
 			return ErrOpaqueEvidence
 		}
 		if _, duplicate := byPath[field.Path]; duplicate {
@@ -90,7 +96,7 @@ func RestoreOpaque(version string, target any, recorded *OpaqueEvidence) error {
 		byPath[field.Path] = field.Raw
 	}
 	consumed := 0
-	err = walkOpaqueRaw(value.Elem(), "", true, func(path string, value reflect.Value) error {
+	err = walkOpaqueRaw(value.Elem(), "", true, false, func(path string, value reflect.Value, omitNil bool) error {
 		original, present := byPath[path]
 		if !present {
 			return nil
@@ -98,11 +104,21 @@ func RestoreOpaque(version string, target any, recorded *OpaqueEvidence) error {
 		if !value.CanSet() {
 			return ErrOpaqueEvidence
 		}
-		normalized, e := json.Marshal(json.RawMessage(original))
-		if e != nil || bytes.Equal(normalized, original) || !bytes.Equal(normalized, value.Interface().(json.RawMessage)) {
-			return ErrOpaqueEvidence
+		if original == nil {
+			// Only a required null placeholder can represent missing bytes.
+			// For an omittable leaf, explicit null and absence already have
+			// different canonical JSON, so an absence marker is contradictory.
+			if omitNil || !bytes.Equal(value.Bytes(), []byte("null")) {
+				return ErrOpaqueEvidence
+			}
+			value.SetZero()
+		} else {
+			normalized, e := json.Marshal(json.RawMessage(original))
+			if e != nil || bytes.Equal(normalized, original) || !bytes.Equal(normalized, value.Bytes()) {
+				return ErrOpaqueEvidence
+			}
+			value.Set(reflect.ValueOf(json.RawMessage(bytes.Clone(original))))
 		}
-		value.Set(reflect.ValueOf(json.RawMessage(bytes.Clone(original))))
 		consumed++
 		return nil
 	})
@@ -112,8 +128,8 @@ func RestoreOpaque(version string, target any, recorded *OpaqueEvidence) error {
 	return ValidateCanonicalUTF8(target)
 }
 
-// SealOpaqueFields seals an already collected representation. This also
-// preserves the existing Agent State format across the shared-codec move.
+// SealOpaqueFields seals an already collected representation using the
+// versioned, length-independent original-evidence hash frame.
 func SealOpaqueFields(version string, canonical []byte, fields []OpaqueField) (OpaqueEvidence, error) {
 	encoded, err := json.Marshal(fields)
 	if err != nil {
@@ -136,12 +152,12 @@ func SealOpaqueFields(version string, canonical []byte, fields []OpaqueField) (O
 // nested ModelInvocations, approvals, receipts and future typed fields, crosses
 // the same path; map keys are sorted for deterministic persistence. The caller
 // owns the mutable state and does not share it across parallel decoders.
-func walkOpaqueRaw(value reflect.Value, path string, restore bool, visit func(string, reflect.Value) error) error {
+func walkOpaqueRaw(value reflect.Value, path string, restore, omitNil bool, visit func(string, reflect.Value, bool) error) error {
 	if !value.IsValid() {
 		return nil
 	}
 	if value.Type() == rawMessageType {
-		return visit(path, value)
+		return visit(path, value, omitNil)
 	}
 	// Leaf scalar kinds are not omitted accidentally: by definition they
 	// cannot hold typed json.RawMessage evidence.
@@ -151,34 +167,44 @@ func walkOpaqueRaw(value reflect.Value, path string, restore bool, visit func(st
 			return nil
 		}
 		if !restore {
-			return walkOpaqueRaw(value.Elem(), path, false, visit)
+			return walkOpaqueRaw(value.Elem(), path, false, false, visit)
 		}
 		if !value.CanSet() {
 			return ErrOpaqueEvidence
 		}
 		copy := reflect.New(value.Elem().Type()).Elem()
 		copy.Set(value.Elem())
-		if err := walkOpaqueRaw(copy, path, true, visit); err != nil {
+		if err := walkOpaqueRaw(copy, path, true, false, visit); err != nil {
 			return err
 		}
 		value.Set(copy)
 	case reflect.Pointer:
 		if !value.IsNil() {
-			return walkOpaqueRaw(value.Elem(), path, restore, visit)
+			return walkOpaqueRaw(value.Elem(), path, restore, false, visit)
 		}
 	case reflect.Struct:
 		typ := value.Type()
 		for i := 0; i < value.NumField(); i++ {
-			if typ.Field(i).PkgPath != "" || typ.Field(i).Tag.Get("json") == "-" { // Never traverse hidden or non-JSON fields.
+			field := typ.Field(i)
+			tag := field.Tag.Get("json")
+			if field.PkgPath != "" || tag == "-" { // Never traverse hidden or non-JSON fields.
 				continue
 			}
-			if err := walkOpaqueRaw(value.Field(i), path+"."+typ.Field(i).Name, restore, visit); err != nil {
+			// A nil direct RawMessage is omitted only by these JSON options.
+			// Elements of slices/maps and required struct fields serialize null.
+			omit := false
+			if field.Type == rawMessageType {
+				_, options, _ := strings.Cut(tag, ",")
+				flags := strings.Split(options, ",")
+				omit = slices.Contains(flags, "omitempty") || slices.Contains(flags, "omitzero")
+			}
+			if err := walkOpaqueRaw(value.Field(i), path+"."+field.Name, restore, omit, visit); err != nil {
 				return err
 			}
 		}
 	case reflect.Array, reflect.Slice:
 		for i := 0; i < value.Len(); i++ {
-			if err := walkOpaqueRaw(value.Index(i), path+"["+strconv.Itoa(i)+"]", restore, visit); err != nil {
+			if err := walkOpaqueRaw(value.Index(i), path+"["+strconv.Itoa(i)+"]", restore, false, visit); err != nil {
 				return err
 			}
 		}
@@ -194,7 +220,7 @@ func walkOpaqueRaw(value reflect.Value, path string, restore bool, visit func(st
 			// value which may have restored raw evidence.
 			copy := reflect.New(next.Type()).Elem()
 			copy.Set(next)
-			if err := walkOpaqueRaw(copy, path+"{"+strconv.Quote(key.String())+"}", restore, visit); err != nil {
+			if err := walkOpaqueRaw(copy, path+"{"+strconv.Quote(key.String())+"}", restore, false, visit); err != nil {
 				return err
 			}
 			if restore {
