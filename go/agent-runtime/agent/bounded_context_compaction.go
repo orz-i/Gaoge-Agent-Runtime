@@ -23,29 +23,31 @@ func (adapter *BoundedContextAdapter) selectCompaction(
 	var best boundedContextCandidate
 	bestFound := false
 	bestSoft := false
-	consider := func(candidateWindow runtimecontext.Window, artifacts []runtimecontext.Artifact) error {
+	consider := func(candidateWindow runtimecontext.Window, artifacts []runtimecontext.Artifact) (bool, error) {
 		trial := model.CloneRequest(request)
 		trial.Messages = runtimecontext.Materialize(candidateWindow)
 		assessment, err := adapter.manager.AssessModelRequest(ctx, trial, window, policy)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if !runtimecontext.WithinHardBudget(assessment, policy) ||
 			assessment.SerializedBytes >= original.SerializedBytes || assessment.HardTokenEstimate >= original.HardTokenEstimate {
-			return nil
+			return false, nil
 		}
 		soft := assessment.HardTokenEstimate <= assessment.SoftInputTokens
 		if !bestFound || (soft && !bestSoft) || (soft == bestSoft && assessment.HardTokenEstimate < best.assessment.HardTokenEstimate) {
 			best = boundedContextCandidate{window: candidateWindow, artifacts: artifacts, assessment: assessment}
 			bestFound, bestSoft = true, soft
 		}
-		return nil
+		return soft, nil
 	}
 	tryPortable := func(recent int) error {
 		limited := policy
 		limited.PreserveRecentTurns = recent
-		// Prefer a readable extract; when it cannot fit, the exact archive and
-		// marker remain sufficient. Never drop the protected current turn.
+		// Keep the readable extract when this candidate meets the soft target.
+		// A hard-admissible candidate alone does not satisfy that target, and
+		// a candidate from a different strategy/tail cannot stop this search.
+		// The exact archive and marker remain the fallback for this same tail.
 		for _, omitExtract := range []bool{false, true} {
 			result, err := adapter.manager.CompactPortable(runtimecontext.PortableCompactionRequest{
 				Previous: previous, RunID: request.RunID, Messages: request.Messages, Policy: limited, OmitExtract: omitExtract,
@@ -61,10 +63,11 @@ func (adapter *BoundedContextAdapter) selectCompaction(
 			if boundedArchivesContainProviderReplay(result.Artifacts) {
 				return nil
 			}
-			if err := consider(result.Window, result.Artifacts); err != nil {
+			meetsSoft, err := consider(result.Window, result.Artifacts)
+			if err != nil {
 				return err
 			}
-			if bestFound {
+			if meetsSoft {
 				return nil
 			}
 		}
@@ -75,7 +78,7 @@ func (adapter *BoundedContextAdapter) selectCompaction(
 	}
 	toolResult, err := adapter.manager.CompactToolPressure(previous, request.RunID, request.Messages)
 	if err == nil {
-		if err = consider(toolResult.Window, toolResult.Artifacts); err != nil {
+		if _, err = consider(toolResult.Window, toolResult.Artifacts); err != nil {
 			return boundedContextCandidate{}, false, err
 		}
 	} else if !errors.Is(err, runtimecontext.ErrBudgetExceeded) {
