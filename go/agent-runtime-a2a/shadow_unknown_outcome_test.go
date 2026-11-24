@@ -75,7 +75,7 @@ func TestPR113UnknownFirstSendRemainsUnresolvedAcrossHandoffAndRestart(t *testin
 				t.Fatalf("unknown external result was incorrectly settled: %+v err=%v", initial, startErr)
 			}
 			snapshot, err := rt.Load(t.Context(), d.ChildRunID)
-			if err != nil || snapshot.Run.Status != kernel.RunStatusRunning || snapshot.Run.Revision != 1 {
+			if err != nil || snapshot.Run.Status != kernel.RunStatusRunning || snapshot.Run.Revision != 2 {
 				t.Fatalf("initial submitted Run did not preserve its intent: %+v err=%v", snapshot.Run, err)
 			}
 			state, err := newChild().decodeState(snapshot)

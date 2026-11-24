@@ -196,6 +196,24 @@ func (runner *ShadowRunner) StartRun(ctx context.Context, request agent.StartReq
 	if _, err = runner.decodeState(snapshot); err != nil {
 		return snapshot, err // No external call on a substituted Create result.
 	}
+	// A delayed Create success cannot authorize a physical Send after caller
+	// cancellation. The original signed CAS elects the first dispatch; its
+	// reservation is never re-sent during read-only recovery.
+	snapshot, err = handoff.AdmitRemoteFirstDispatch(ctx, runner.runtime, snapshot,
+		func(candidate kernel.Snapshot) bool {
+			candidateState, decodeErr := runner.decodeState(candidate)
+			return decodeErr == nil && candidateState.RemoteTaskID == "" &&
+				candidateState.RemoteMessageID == "" && candidateState.PendingMessageID == "" &&
+				!candidateState.PendingCancel && candidateState.MessageID == state.MessageID
+		},
+		func(callCtx context.Context, current kernel.Snapshot) (kernel.Snapshot, error) {
+			return runner.applyAttested(callCtx, current, state, kernel.Mutation{Status: kernel.RunStatusRunning,
+				Events: []kernel.EventDraft{{Type: "a2a.remote_first_dispatch_admitted",
+					Message: "Original A2A SendMessage dispatch claimed"}}})
+		})
+	if err != nil {
+		return snapshot, errors.Join(ErrRemoteOutcomeUnknown, err)
+	}
 	interaction, sendErr := runner.client.SendMessage(ctx, runner.discovery, SendRequest{
 		MessageID: state.MessageID, Text: goal,
 	})
