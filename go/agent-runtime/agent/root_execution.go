@@ -25,6 +25,7 @@ type rootCallbackState struct {
 	unknown               atomic.Bool
 	approvalPolicyEntered atomic.Bool
 	toolApprovals         approvedToolCalls
+	terminalFailure       atomic.Pointer[committedAgentFailure]
 }
 
 func (runner *Runner) noteRootCallbackFailure(err error) {
