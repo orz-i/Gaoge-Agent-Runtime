@@ -299,13 +299,29 @@ func (coordinator *Coordinator) StartOrLoad(
 	if coordinator.deferredAgent != nil {
 		start = coordinator.deferredAgent.PrepareRun
 	}
-	child, err = start(ctx, agent.StartRequest{
+	childCtx := ctx
+	childDeadline := parent.Run.DeadlineAt
+	if delegation.Remote {
+		// A remote Agent cannot prove that it enforces a native Kernel
+		// DeadlineAt. Preserve the parent's physical-dispatch deadline on
+		// the local transport context, without claiming remote capability.
+		childDeadline = nil
+		if parent.Run.DeadlineAt != nil {
+			var cancel context.CancelFunc
+			childCtx, cancel = context.WithDeadline(ctx, *parent.Run.DeadlineAt)
+			defer cancel()
+		}
+		if err := childCtx.Err(); err != nil {
+			return Delegation{}, err // No new remote execution after expiry/revocation.
+		}
+	}
+	child, err = start(childCtx, agent.StartRequest{
 		ID:                   delegation.ChildRunID,
 		Actor:                parent.Run.Actor,
 		Thread:               parent.Run.Thread,
 		RequestID:            parent.Run.ID + ":" + delegation.ID,
 		Goal:                 delegation.Goal,
-		DeadlineAt:           parent.Run.DeadlineAt,
+		DeadlineAt:           childDeadline,
 		Instructions:         delegation.Instructions,
 		Limits:               delegation.Limits,
 		Model:                delegation.Model,
