@@ -117,7 +117,7 @@ func (f *committedAgentFailure) matches(result, latest kernel.Snapshot, returned
 	// Bounded middleware may join the original error with nil. Do not
 	// acknowledge another error or an additional failed operation.
 	for returned != nil {
-		if returned == f.cause {
+		if returned == f.cause { //nolint:errorlint // Exact original error identity; errors.Is can accept unrelated joined or forged causes.
 			return true
 		}
 		if joined, ok := returned.(interface{ Unwrap() []error }); ok {

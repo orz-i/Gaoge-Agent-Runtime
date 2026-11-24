@@ -188,12 +188,13 @@ func TestChildPhysicalFailureSettlement(t *testing.T) {
 				t.Fatal(err)
 			}
 			var result kernel.Snapshot
-			if tc.operation == "resume" {
+			switch tc.operation {
+			case "resume":
 				result, err = runner.PrepareRun(t.Context(), request)
 				if err != nil {
 					t.Fatal(err)
 				}
-			} else if tc.operation == "approve" || tc.operation == "reject" {
+			case "approve", "reject":
 				result, err = runner.StartRun(t.Context(), request)
 				if err != nil || result.Run.Status != kernel.RunStatusWaitingInput {
 					t.Fatalf("approval setup: %s %v", result.Run.Status, err)
