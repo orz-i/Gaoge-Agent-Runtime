@@ -75,23 +75,31 @@ func (cb *stdioCallbacks) SessionUpdate(ctx context.Context, n wire.SessionNotif
 		return ErrOutcomeUnknown
 	}
 	cb.run.mu.Lock()
-	defer cb.run.mu.Unlock()
-	if cb.run.sessionID == "" || string(n.SessionId) != cb.run.sessionID {
+	if cb.run.closed || cb.run.sessionID == "" || string(n.SessionId) != cb.run.sessionID {
 		cb.run.invalid = true
+		cb.run.mu.Unlock()
 		return ErrSessionMismatch
 	}
 	if n.Update.AgentMessageChunk == nil || n.Update.AgentMessageChunk.Content.Text == nil {
+		cb.run.mu.Unlock()
 		return nil
 	}
 	if !cb.run.promptActive || cb.run.onChunk == nil {
 		// No original Prompt owns this agent output. Refuse unsolicited
 		// chunks rather than letting another logical turn inherit them.
 		cb.run.invalid = true
+		cb.run.mu.Unlock()
 		return ErrOutcomeUnknown
 	}
-	// Serialize original notifications with Prompt return. The original
-	// prompt cannot be terminally signed while a stream callback is active.
-	return cb.run.onChunk(n.Update.AgentMessageChunk.Content.Text.Text)
+	// The SDK serializes notifications and Wait does not return a successful
+	// Prompt response until all preceding notifications have been handled.
+	// Capture the original stream callback under the session lock, but invoke
+	// Host code OUTSIDE it. An unresponsive output consumer must never hold
+	// the cancellation, permission-revocation or process-teardown mutex.
+	onChunk := cb.run.onChunk
+	text := n.Update.AgentMessageChunk.Content.Text.Text
+	cb.run.mu.Unlock()
+	return onChunk(text)
 }
 func (cb *stdioCallbacks) RequestPermission(ctx context.Context, q wire.RequestPermissionRequest) (wire.RequestPermissionResponse, error) {
 	deny := wire.RequestPermissionResponse{Outcome: wire.NewRequestPermissionOutcomeCancelled()}
@@ -384,7 +392,17 @@ func shutdown(process *stdio.ClientProcess) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	_ = process.Shutdown(ctx)
+	// ClientProcess.Shutdown uses Connection.Wait(context.WithoutCancel(ctx)):
+	// an uncooperative Host stream/permission callback can therefore make
+	// its 5-second process deadline meaningless. This client owns a separate
+	// subprocess per Run, so after closeRun revokes its session we terminate
+	// that process tree directly instead of waiting for an external callback
+	// to permit graceful shutdown. The SDK's process waiter still reaps it.
+	// A blocked Host callback cannot be forcibly stopped in Go, but its late
+	// return cannot revive a closed session or authorize more physical work.
+	_ = process.Connection.Close()
+	_ = process.Process.Close()
+	_ = process.Process.Wait(ctx)
 }
 
 var _ RemoteClient = (*StdioClient)(nil)

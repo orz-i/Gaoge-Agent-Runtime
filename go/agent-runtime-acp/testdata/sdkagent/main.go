@@ -20,6 +20,20 @@ func (*agent) NewSession(context.Context, wire.NewSessionRequest) (wire.NewSessi
 	return wire.NewSessionResponse{SessionId: wire.SessionId("sdk-session")}, nil
 }
 func (a *agent) Prompt(ctx context.Context, req wire.PromptRequest) (wire.PromptResponse, error) {
+	if len(req.Prompt) == 1 && req.Prompt[0].Text != nil &&
+		req.Prompt[0].Text.Text == "request-permission" {
+		_, err := a.conn.RequestPermission(ctx, wire.RequestPermissionRequest{
+			SessionId: req.SessionId,
+			ToolCall:  wire.ToolCallUpdate{ToolCallId: "original-tool-1"},
+			Options: []wire.PermissionOption{
+				{OptionId: "allow-once", Name: "Allow once", Kind: wire.PermissionOptionKindAllowOnce},
+			},
+		})
+		if err != nil {
+			return wire.PromptResponse{}, err
+		}
+		return wire.PromptResponse{StopReason: wire.StopReasonEndTurn}, nil
+	}
 	session := req.SessionId
 	if len(req.Prompt) == 1 && req.Prompt[0].Text != nil && req.Prompt[0].Text.Text == "wrong-session" {
 		session = wire.SessionId("forged-session")
