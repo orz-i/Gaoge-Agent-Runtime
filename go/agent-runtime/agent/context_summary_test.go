@@ -718,7 +718,7 @@ func TestContextSummaryActiveInputBytesAreCheckedOnRead(t *testing.T) {
 			sourceRun.Revision = invocation.SourceRevision
 			input := model.CloneRequest(invocation.Request)
 			input.InvocationID = ""
-			derived, deriveErr := newContextSummaryInvocation(sourceRun, input, invocation.Provider, invocation.BindingFingerprint,
+			derived, deriveErr := newInvocation(sourceRun, input, nil, invocation.Provider, invocation.BindingFingerprint,
 				invocation.Purpose, invocation.ContextSummary, invocation.CreatedAt)
 			if deriveErr != nil {
 				t.Fatal(deriveErr)

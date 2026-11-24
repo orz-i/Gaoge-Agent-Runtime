@@ -10,9 +10,9 @@ import (
 )
 
 type boundedContextCandidate struct {
-	window     runtimecontext.Window
-	artifacts  []runtimecontext.Artifact
-	assessment runtimecontext.Assessment
+	window    runtimecontext.Window
+	artifacts []runtimecontext.Artifact
+	modelCandidate
 }
 
 func (adapter *BoundedContextAdapter) selectCompaction(
@@ -26,17 +26,18 @@ func (adapter *BoundedContextAdapter) selectCompaction(
 	consider := func(candidateWindow runtimecontext.Window, artifacts []runtimecontext.Artifact) (bool, error) {
 		trial := model.CloneRequest(request)
 		trial.Messages = runtimecontext.Materialize(candidateWindow)
-		assessment, err := adapter.manager.AssessModelRequestWithAccounting(ctx, trial, window, policy, frame)
+		candidate, err := assessModelCandidate(ctx, adapter.manager, trial, window, policy, frame)
 		if err != nil {
 			return false, err
 		}
+		assessment := candidate.assessment
 		if !runtimecontext.WithinHardBudget(assessment, policy) ||
 			assessment.SerializedBytes >= original.SerializedBytes || assessment.HardTokenEstimate >= original.HardTokenEstimate {
 			return false, nil
 		}
 		soft := assessment.HardTokenEstimate <= assessment.SoftInputTokens
 		if !bestFound || (soft && !bestSoft) || (soft == bestSoft && assessment.HardTokenEstimate < best.assessment.HardTokenEstimate) {
-			best = boundedContextCandidate{window: candidateWindow, artifacts: artifacts, assessment: assessment}
+			best = boundedContextCandidate{window: candidateWindow, artifacts: artifacts, modelCandidate: candidate}
 			bestFound, bestSoft = true, soft
 		}
 		return soft, nil

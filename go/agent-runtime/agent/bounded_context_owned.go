@@ -47,7 +47,7 @@ func (r *Runner) prepareBoundedContext(ctx context.Context, source kernel.Snapsh
 		}
 	}()
 	rejected := false
-	prepared, err := a.prepare(callCtx, model.CloneRequest(request), &rejected)
+	prepared, err := a.prepare(callCtx, model.CloneRequest(request), &rejected, true)
 	proved := false
 	if err == nil && !validPreparedModelRequest(request, prepared) {
 		err = ErrInvalidRequest

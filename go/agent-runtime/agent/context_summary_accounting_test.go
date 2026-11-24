@@ -188,7 +188,7 @@ func TestCanonicalSummaryRecoveryReadChecksProjectedByteLimit(t *testing.T) {
 	sourceRun.Revision = invocation.SourceRevision
 	input := model.CloneRequest(invocation.Request)
 	input.InvocationID = ""
-	derived, err := newContextSummaryInvocation(sourceRun, input, invocation.Provider, invocation.BindingFingerprint,
+	derived, err := newInvocation(sourceRun, input, nil, invocation.Provider, invocation.BindingFingerprint,
 		invocation.Purpose, invocation.ContextSummary, invocation.CreatedAt)
 	if err != nil {
 		t.Fatal(err)

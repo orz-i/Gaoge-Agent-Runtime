@@ -6,14 +6,11 @@ import (
 	"encoding/json"
 	"reflect"
 	"slices"
-	"strconv"
 	"strings"
-	"time"
 
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 )
 
 func (runner *Runner) SupportsContextSummary() bool {
@@ -148,31 +145,6 @@ func validContextSummaryState(state runState) bool {
 		}
 	}
 	return true
-}
-
-func newContextSummaryInvocation(run kernel.Run, request model.Request, provider, bindingFingerprint, purpose string, binding *ContextSummaryBinding, now time.Time) (ModelInvocation, error) {
-	plannedID := request.InvocationID
-	request.InvocationID = ""
-	hash, err := modelInvocationRequestHash(request, nil, provider, bindingFingerprint, purpose, binding)
-	if err != nil {
-		return ModelInvocation{}, err
-	}
-	idSource := run.ID + "\x00" + strconv.FormatUint(run.Revision, 10) + "\x00" + hash
-	idDigest := sha256.Sum256([]byte(idSource))
-	id := "modelinv_" + hex.EncodeToString(idDigest[:16])
-	if plannedID != "" && plannedID != id {
-		// A summary counted before intent admission must retain that exact
-		// identity, including its Provider binding, when the intent is sealed.
-		return ModelInvocation{}, ErrInvalidRequest
-	}
-	request.InvocationID = id
-	result := ModelInvocation{ID: id, RunID: run.ID, SourceRevision: run.Revision, RequestHash: hash,
-		Purpose: purpose, ContextSummary: cloneContextSummaryBinding(binding), Provider: provider, BindingFingerprint: bindingFingerprint,
-		Model: request.Model, Status: ModelInvocationPending, Request: model.CloneRequest(request), CreatedAt: now.UTC()}
-	if !validContextSummaryInvocation(result) {
-		return ModelInvocation{}, ErrInvalidRequest
-	}
-	return result, nil
 }
 
 func summaryEvidenceRefs(binding *ContextSummaryBinding) []string {
