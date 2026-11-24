@@ -76,25 +76,61 @@ func (runner *Runner) withChildPhysicalGrant(ctx context.Context, runID string, 
 	// mutation authority. A direct unbound Kernel Cancel/Apply cannot
 	// mutate this Run until trusted physical settlement.
 	result, physicalErr := physical(callbackscope.Bind(ctx, lifecycle), &scoped)
-	if physicalErr != nil || !lifecycle.Complete() || scoped.rootCallbacks.unknown.Load() {
+	if !lifecycle.Complete() || scoped.rootCallbacks.unknown.Load() {
 		return result, errors.Join(physicalErr, kernel.ErrChildExecutionBusy)
 	}
 	settlementCtx, stop := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 	defer stop()
 	latest, loadErr := executionRuntime.Load(settlementCtx, runID)
-	if loadErr != nil || !knownAgentPhysicalSettlement(latest) {
+	if loadErr != nil || !knownAgentPhysicalSettlement(latest) ||
+		(physicalErr != nil && !scoped.rootCallbacks.terminalFailure.Load().matches(result, latest, physicalErr)) {
 		return result, errors.Join(physicalErr, kernel.ErrChildExecutionBusy, loadErr)
 	}
 	settledProof := featurecontrol.Seal(latest.Run.ID, latest.Run.Revision,
 		"agent_child_physical_settled", grant.ID, latest.State, latest.Checkpoint)
 	if markErr := executionRuntime.MarkChildExecutionSettled(settlementCtx, grant, settledProof); markErr != nil {
-		return result, errors.Join(kernel.ErrChildExecutionBusy, markErr)
+		return result, errors.Join(physicalErr, kernel.ErrChildExecutionBusy, markErr)
 	}
 	if finishErr := executionRuntime.FinishChildExecution(settlementCtx, grant, settledProof); finishErr != nil {
-		return result, errors.Join(kernel.ErrChildExecutionBusy, finishErr)
+		return result, errors.Join(physicalErr, kernel.ErrChildExecutionBusy, finishErr)
 	}
 	recordPhysicalObservation(ctx, runID, PhysicalCallSettled)
 	return result, physicalErr
+}
+
+// committedAgentFailure is an in-process fact from the original terminal CAS,
+// not a Host-supplied error classification or a new recovery credential.
+// A failed status alone does not prove that the original callback returned.
+type committedAgentFailure struct {
+	runID    string
+	revision uint64
+	cause    error
+}
+
+func (f *committedAgentFailure) matches(result, latest kernel.Snapshot, returned error) bool {
+	if f == nil || f.cause == nil || f.runID == "" || f.revision == 0 ||
+		result.Run.ID != f.runID || latest.Run.ID != f.runID ||
+		result.Run.Revision != f.revision || latest.Run.Revision != f.revision ||
+		result.Run.Status != kernel.RunStatusFailed || latest.Run.Status != kernel.RunStatusFailed {
+		return false
+	}
+	// Bounded middleware may join the original error with nil. Do not
+	// acknowledge another error or an additional failed operation.
+	for returned != nil {
+		if returned == f.cause { //nolint:errorlint // Exact original error identity; errors.Is can accept unrelated joined or forged causes.
+			return true
+		}
+		if joined, ok := returned.(interface{ Unwrap() []error }); ok {
+			causes := joined.Unwrap()
+			if len(causes) != 1 {
+				return false
+			}
+			returned = causes[0]
+		} else {
+			returned = errors.Unwrap(returned)
+		}
+	}
+	return false
 }
 
 // knownAgentPhysicalSettlement validates a persisted Feature state, including

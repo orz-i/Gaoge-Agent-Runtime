@@ -122,11 +122,14 @@ func TestRealPostgresPR72ConcurrentStartContextFailureDoesNotTerminalizeOriginal
 		Actor:      kernel.ActorRef{TenantID: "tenant", ActorID: "actor"},
 		Thread:     kernel.ThreadRef{Kind: "conversation", ID: "pr72-postgres-context-thread"},
 		Goal:       "answer directly",
-		Config:     harness.ConfigSnapshot{Model: "model", Environment: harness.VersionRef{ID: "general", Revision: 1}},
+		Config:     harness.ConfigSnapshot{Environment: harness.VersionRef{ID: "general", Revision: 1}, AgentSpec:
+
+		// Active Context selection now precedes admission. Establish a source and
+		// inject at its frozen read instead, preserving the original post-admission,
+		// pre-dispatch race tested by both SQL connections.
+		harness.AgentSpec{Model: "model"}},
 	}
-	// Active Context selection now precedes admission. Establish a source and
-	// inject at its frozen read instead, preserving the original post-admission,
-	// pre-dispatch race tested by both SQL connections.
+
 	source := req
 	source.HostTurn.ID += "-source"
 	source.Goal = "prior source"

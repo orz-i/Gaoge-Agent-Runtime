@@ -33,7 +33,7 @@ func RetryChildEffectFenceWithBudget(invocations []Invocation, items []Item, rot
 			continue
 		}
 		handoff := isHandoffDelegationInvocation(child) ||
-			(child.ExecutionClass == ExecutionAgent && child.CapabilityKey == CapabilityAgent && strings.HasPrefix(child.ParentItemID, "hid_"))
+			(strings.HasPrefix(child.ParentItemID, "hid_"))
 		switch child.Status {
 		case InvocationRunning:
 			return ErrConflict

@@ -40,11 +40,11 @@ func TestHarnessTimelinePersistsTerminalFactsWithoutStreamingOrBodies(t *testing
 		Thread:     kernel.ThreadRef{Kind: testThreadKind, ID: "thread-timeline"},
 		Goal:       "look up the evidence",
 		Config: harness.ConfigSnapshot{
-			Model: timelineModelName, ToolKeys: []string{timelineToolKey},
+
 			ToolPolicies: []harness.ToolPolicySnapshot{{
 				Key: timelineToolKey, DefinitionVersion: "v1",
 				ApprovalCapability: "per_call", ApprovalMode: "never",
-			}},
+			}}, AgentSpec: harness.AgentSpec{Model: timelineModelName, ToolKeys: []string{timelineToolKey}},
 		},
 	})
 	if err != nil {

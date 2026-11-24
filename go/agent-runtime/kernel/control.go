@@ -222,6 +222,11 @@ func (runtime *Runtime) ApplyControl(ctx context.Context, runID string, expected
 	if err = ValidateControl(current, guard, next, runtime.Now()); err != nil {
 		return Snapshot{}, false, controlNoEffectBeforeStore(err)
 	}
+	if guard.Kind == ControlAllowance {
+		if err := stampAllowanceDispatch(ctx, current, &next); err != nil {
+			return Snapshot{}, false, controlNoEffectBeforeStore(err)
+		}
+	}
 	// Write-capable Store code begins here. Never certify a Store-returned
 	// error as no-effect: even a failed CAS response can be outcome-unknown.
 	if store, ok := runtime.store.(ControlStore); ok {

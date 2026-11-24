@@ -4,18 +4,20 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"slices"
 	"strings"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 )
 
-// RemoteAgentRunKind is the A2A remote-Agent shadow RunKind. Handoff may
+// RemoteAgentRunKind is the protocol-neutral remote-Agent shadow RunKind. Handoff may
 // consume an Agent Run or this explicitly bound remote Agent proxy, but never
 // an unrelated custom Kernel state machine.
-const RemoteAgentRunKind kernel.RunKind = "a2a.remote"
+const RemoteAgentRunKind kernel.RunKind = "agent.remote"
 
 var (
 	ErrInvalidDelegation = errors.New("invalid handoff delegation")
@@ -72,6 +74,7 @@ type Delegation struct {
 	ID             string       `json:"id"`
 	MemberID       string       `json:"memberID"`
 	MemberRevision string       `json:"memberRevision,omitempty"`
+	Remote         bool         `json:"remote,omitempty"`
 	Instructions   string       `json:"instructions,omitempty"`
 	Limits         agent.Limits `json:"limits,omitempty"`
 	// Full Host-selected subtree ceilings belong to the shared ledger. The
@@ -81,6 +84,7 @@ type Delegation struct {
 	Goal                 string                  `json:"goal"`
 	Model                string                  `json:"model,omitempty"`
 	ModelOptions         json.RawMessage         `json:"modelOptions,omitempty"`
+	OutputContract       *model.OutputContract   `json:"outputContract,omitempty"`
 	MaxModelOutputTokens int64                   `json:"maxModelOutputTokens,omitempty"`
 	ToolKeys             []string                `json:"toolKeys,omitempty"`
 	InitialToolKeys      []string                `json:"initialToolKeys,omitempty"`
@@ -118,7 +122,12 @@ type ChildRunner interface {
 // frozen target revision and persisted remote discovery before accepting it.
 type RemoteShadowObserver interface {
 	ChildRunner
+	// A single original executor owns the frozen binding, its Kernel, and
+	// control. Merely returning a remote-kind Run cannot satisfy this port.
+	RemoteRuntime() *kernel.Runtime
+	MatchesRemoteDelegation(Delegation) bool
 	ObservesFrozenRemoteShadow(*kernel.Runtime, Delegation, kernel.Snapshot) bool
+	CancelRemote(context.Context, string, uint64) (kernel.Snapshot, error)
 }
 
 // LocalKernelChildRunner is an explicit Host contract that its ChildRunner
@@ -273,9 +282,12 @@ func (coordinator *Coordinator) StartOrLoad(
 	if err != nil {
 		return Delegation{}, err
 	}
+	if err = verifyRemoteBeforeObservation(ctx, children, delegation, parent.Run); err != nil {
+		return Delegation{}, err
+	}
 	child, err := children.LoadRun(ctx, delegation.ChildRunID)
 	if err == nil {
-		if !VerifiedChildRun(delegation, parent.Run, child) {
+		if !verifiedRoutedChild(children, delegation, parent.Run, child) {
 			return Delegation{}, ErrChildRunUnverified
 		}
 		return projectChild(delegation, child), childStateError(child)
@@ -287,17 +299,34 @@ func (coordinator *Coordinator) StartOrLoad(
 	if coordinator.deferredAgent != nil {
 		start = coordinator.deferredAgent.PrepareRun
 	}
-	child, err = start(ctx, agent.StartRequest{
+	childCtx := ctx
+	childDeadline := parent.Run.DeadlineAt
+	if delegation.Remote {
+		// A remote Agent cannot prove that it enforces a native Kernel
+		// DeadlineAt. Preserve the parent's physical-dispatch deadline on
+		// the local transport context, without claiming remote capability.
+		childDeadline = nil
+		if parent.Run.DeadlineAt != nil {
+			var cancel context.CancelFunc
+			childCtx, cancel = context.WithDeadline(ctx, *parent.Run.DeadlineAt)
+			defer cancel()
+		}
+		if err := childCtx.Err(); err != nil {
+			return Delegation{}, err // No new remote execution after expiry/revocation.
+		}
+	}
+	child, err = start(childCtx, agent.StartRequest{
 		ID:                   delegation.ChildRunID,
 		Actor:                parent.Run.Actor,
 		Thread:               parent.Run.Thread,
 		RequestID:            parent.Run.ID + ":" + delegation.ID,
 		Goal:                 delegation.Goal,
-		DeadlineAt:           parent.Run.DeadlineAt,
+		DeadlineAt:           childDeadline,
 		Instructions:         delegation.Instructions,
 		Limits:               delegation.Limits,
 		Model:                delegation.Model,
 		ModelOptions:         append(json.RawMessage(nil), delegation.ModelOptions...),
+		OutputContract:       model.CloneOutputContract(delegation.OutputContract),
 		MaxModelOutputTokens: delegation.MaxModelOutputTokens,
 		ToolKeys:             append([]string(nil), delegation.ToolKeys...),
 		InitialToolKeys:      append([]string(nil), delegation.InitialToolKeys...),
@@ -306,7 +335,7 @@ func (coordinator *Coordinator) StartOrLoad(
 	if child.Run.ID == "" && err != nil {
 		return Delegation{}, err
 	}
-	if !VerifiedChildRun(delegation, parent.Run, child) {
+	if !verifiedRoutedChild(children, delegation, parent.Run, child) {
 		return Delegation{}, errors.Join(ErrChildRunUnverified, err)
 	}
 	return projectChild(delegation, child), errors.Join(childStateError(child), err)
@@ -327,11 +356,14 @@ func (coordinator *Coordinator) Refresh(ctx context.Context, parent kernel.Snaps
 	if err != nil {
 		return Delegation{}, err
 	}
+	if err = verifyRemoteBeforeObservation(ctx, children, delegation, parent.Run); err != nil {
+		return Delegation{}, err
+	}
 	child, err := children.LoadRun(ctx, delegation.ChildRunID)
 	if err != nil {
 		return Delegation{}, err
 	}
-	if !VerifiedChildRun(delegation, parent.Run, child) {
+	if !verifiedRoutedChild(children, delegation, parent.Run, child) {
 		return Delegation{}, ErrChildRunUnverified
 	}
 	return projectChild(delegation, child), childStateError(child)
@@ -360,12 +392,17 @@ func VerifiedChildRun(delegation Delegation, parent kernel.Run, child kernel.Sna
 		(child.Run.Kind != agent.RunKind && child.Run.Kind != RemoteAgentRunKind) {
 		return false
 	}
-	if child.Run.Kind == RemoteAgentRunKind && delegation.MaxModelOutputTokens != 0 {
-		return false // The remote protocol cannot attest a sampling ceiling.
+	if child.Run.Kind == RemoteAgentRunKind && !RemoteGoalOnly(delegation) {
+		return false // Remote protocol cannot attest local sampling or structured output.
 	}
-	if delegation.MaxModelOutputTokens > 0 && child.Run.Kind == agent.RunKind {
+	if child.Run.Kind == agent.RunKind && delegation.Remote {
+		return false // A native Run can never prove a Host-selected remote effect.
+	}
+	if child.Run.Kind == agent.RunKind &&
+		(delegation.MaxModelOutputTokens > 0 || delegation.OutputContract != nil) {
 		view, err := agent.ViewState(child)
-		if err != nil || view.MaxModelOutputTokens != delegation.MaxModelOutputTokens {
+		if err != nil || delegation.MaxModelOutputTokens > 0 && view.MaxModelOutputTokens != delegation.MaxModelOutputTokens ||
+			!reflect.DeepEqual(view.OutputContract, delegation.OutputContract) {
 			return false
 		}
 	}
@@ -378,8 +415,44 @@ func VerifiedChildRun(delegation Delegation, parent kernel.Run, child kernel.Sna
 	}
 }
 
+// verifiedRoutedChild is the common execution/observation receipt boundary.
+func verifiedRoutedChild(children ChildRunner, d Delegation, parent kernel.Run, child kernel.Snapshot) bool {
+	if !VerifiedChildRun(d, parent, child) {
+		return false
+	}
+	if !d.Remote {
+		return true
+	}
+	remote, ok := children.(RemoteShadowObserver)
+	return ok && remote.MatchesRemoteDelegation(d) &&
+		remote.ObservesFrozenRemoteShadow(remote.RemoteRuntime(), d, child)
+}
+
+// An existing remote shadow must be authenticated against the original
+// delegation BEFORE LoadRun is allowed to perform a protocol observation.
+func verifyRemoteBeforeObservation(ctx context.Context, children ChildRunner, d Delegation, parent kernel.Run) error {
+	if !d.Remote {
+		return nil
+	}
+	remote, ok := children.(RemoteShadowObserver)
+	if !ok || remote.RemoteRuntime() == nil || !remote.MatchesRemoteDelegation(d) {
+		return ErrChildRunUnverified
+	}
+	snapshot, err := remote.RemoteRuntime().Load(ctx, d.ChildRunID)
+	if errors.Is(err, kernel.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !verifiedRoutedChild(children, d, parent, snapshot) {
+		return ErrChildRunUnverified
+	}
+	return nil
+}
+
 func boundDelegationModelOutput(parent kernel.Snapshot, delegation Delegation) (Delegation, error) {
-	if parent.Run.Kind != agent.RunKind {
+	if parent.Run.Kind != agent.RunKind || delegation.Remote {
 		return delegation, nil
 	}
 	view, err := agent.ViewState(parent)
@@ -403,6 +476,32 @@ func (coordinator *Coordinator) resolveChild(ctx context.Context, delegation Del
 	}
 	if children == nil {
 		return nil, ErrChildUnavailable
+	}
+	// Strict JSON output is a native Agent model contract. Non-native child
+	// routes (including remote shadows) have no proof they can enforce it;
+	// deny before LoadRun/StartRun can dispatch external work. This keeps
+	// protocol-specific capabilities out of this Handoff boundary.
+	remote, isRemote := children.(RemoteShadowObserver)
+	if isRemote != delegation.Remote || (delegation.Remote &&
+		(!RemoteGoalOnly(delegation) || remote.RemoteRuntime() == nil || !remote.MatchesRemoteDelegation(delegation))) {
+		// A remote route must prove original protocol identity and local
+		// receipt before ANY StartRun/LoadRun. An ordinary ChildRunner must
+		// never impersonate either a remote shadow or a native Agent.
+		return nil, ErrInvalidDelegation
+	}
+	if delegation.OutputContract != nil {
+		switch child := children.(type) {
+		case *agent.Runner:
+			if child == nil {
+				return nil, ErrInvalidDelegation
+			}
+		case deferredAgentChild:
+			if child.original == nil {
+				return nil, ErrInvalidDelegation
+			}
+		default:
+			return nil, ErrInvalidDelegation
+		}
 	}
 	return children, nil
 }
@@ -536,10 +635,21 @@ func joinStateError(join Join) error {
 	}
 }
 
+// RemoteGoalOnly is the durable boundary of what an unextended external
+// protocol can prove. A local AgentSpec is not a negotiated remote capability.
+func RemoteGoalOnly(delegation Delegation) bool {
+	return delegation.Remote && delegation.Model == "" &&
+		len(delegation.ModelOptions) == 0 && delegation.Instructions == "" &&
+		delegation.OutputContract == nil && delegation.MaxModelOutputTokens == 0 &&
+		delegation.Limits == (agent.Limits{}) && delegation.SubtreeLimits == nil &&
+		len(delegation.ToolKeys) == 0 && len(delegation.InitialToolKeys) == 0 &&
+		len(delegation.HostedToolGrants) == 0
+}
+
 func validDelegation(delegation Delegation) bool {
 	validStatus := delegation.Status == StatusQueued || delegation.Status == StatusRunning ||
 		delegation.Status == StatusCompleted || delegation.Status == StatusFailed || delegation.Status == StatusCancelled
-	if delegation.MaxModelOutputTokens < 0 || strings.TrimSpace(delegation.ID) == "" || strings.TrimSpace(delegation.MemberID) == "" ||
+	if delegation.MaxModelOutputTokens < 0 || model.ValidateOutputContract(delegation.OutputContract) != nil || strings.TrimSpace(delegation.ID) == "" || strings.TrimSpace(delegation.MemberID) == "" ||
 		strings.TrimSpace(delegation.ChildRunID) == "" || strings.TrimSpace(delegation.Goal) == "" || !validStatus {
 		return false
 	}
@@ -572,6 +682,7 @@ func cloneDelegation(delegation Delegation) Delegation {
 		delegation.SubtreeLimits = &copy
 	}
 	delegation.ModelOptions = append(json.RawMessage(nil), delegation.ModelOptions...)
+	delegation.OutputContract = model.CloneOutputContract(delegation.OutputContract)
 	delegation.ToolKeys = append([]string(nil), delegation.ToolKeys...)
 	delegation.InitialToolKeys = append([]string(nil), delegation.InitialToolKeys...)
 	delegation.HostedToolGrants = append([]agent.HostedToolGrant(nil), delegation.HostedToolGrants...)

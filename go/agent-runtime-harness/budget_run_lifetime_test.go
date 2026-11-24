@@ -18,7 +18,7 @@ func TestRunBudgetLifetimeEndsOnlyOnCommittedTerminalSnapshot(t *testing.T) {
 		t.Run(string(status), func(t *testing.T) {
 			store, shared, request := hostedBudgetFixture(t, budget.Limits{MaxConcurrentDescendants: 3})
 			invocation := plugin.RunInvocation{RunID: request.RunID}
-			_, err := shared.Run(t.Context(), invocation, func(context.Context) (kernel.Snapshot, error) {
+			_, err := mustBudgetAdapter(t, shared).Run(t.Context(), invocation, func(context.Context) (kernel.Snapshot, error) {
 				return kernel.Snapshot{Run: kernel.Run{ID: request.RunID, Status: status}}, nil
 			})
 			if err != nil {

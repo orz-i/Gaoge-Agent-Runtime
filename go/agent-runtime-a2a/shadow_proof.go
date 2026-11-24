@@ -2,12 +2,11 @@ package a2a
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"strings"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
@@ -19,57 +18,23 @@ import (
 // substitute a fabricated Task ID or a terminal status without that proof.
 const shadowProofDomain = "a2a.shadow.lifecycle.v1"
 
-type shadowProofInput struct {
-	Domain      string
-	RunID       string
-	Kind        kernel.RunKind
-	Actor       kernel.ActorRef
-	Thread      kernel.ThreadRef
-	RequestID   string
-	Goal        string
-	ParentRunID string
-	Revision    uint64
-	Status      kernel.RunStatus
-	State       shadowState
-	Result      *kernel.Result
-	Checkpoint  *kernel.Checkpoint
-	ErrorCode   string
-	ErrorDetail string
-}
-
 func (runner *ShadowRunner) proofMAC(
 	snapshot kernel.Snapshot, state shadowState, revision uint64,
 	status kernel.RunStatus, result *kernel.Result, checkpoint *kernel.Checkpoint, errorCode, errorDetail string,
 ) ([]byte, error) {
 	state.Proof = ""
-	wire, err := json.Marshal(shadowProofInput{
-		Domain: shadowProofDomain, RunID: snapshot.Run.ID, Kind: snapshot.Run.Kind,
-		Actor: snapshot.Run.Actor, Thread: snapshot.Run.Thread,
-		RequestID: snapshot.Run.RequestID, Goal: snapshot.Run.Goal,
-		ParentRunID: snapshot.Run.ParentRunID,
-		Revision:    revision, Status: status, State: state,
-		Result: result, Checkpoint: checkpoint, ErrorCode: errorCode, ErrorDetail: errorDetail,
-	})
-	if err != nil {
-		return nil, err
-	}
-	mac := hmac.New(sha256.New, runner.attestationKey)
-	_, _ = mac.Write(wire)
-	return mac.Sum(nil), nil
+	return handoff.RemoteProofMAC(runner.attestationKey, shadowProofDomain, snapshot,
+		state, revision, status, result, checkpoint, errorCode, errorDetail)
 }
 
 func (runner *ShadowRunner) verifiedProof(snapshot kernel.Snapshot, state shadowState) bool {
-	if runner == nil || len(runner.attestationKey) < 32 || len(state.Proof) != sha256.Size*2 ||
-		snapshot.Run.Kind != RunKind {
+	if runner == nil || snapshot.Run.Kind != RunKind {
 		return false
 	}
-	actual, err := hex.DecodeString(state.Proof)
-	if err != nil {
-		return false
-	}
-	expected, err := runner.proofMAC(snapshot, state, snapshot.Run.Revision,
-		snapshot.Run.Status, snapshot.Result, snapshot.Checkpoint, snapshot.Run.ErrorCode, snapshot.Run.ErrorDetail)
-	return err == nil && hmac.Equal(actual, expected)
+	proof := state.Proof
+	state.Proof = ""
+	return handoff.VerifyRemoteProof(runner.attestationKey, shadowProofDomain,
+		snapshot, state, proof)
 }
 
 // Only first-party ShadowRunner transitions may create new attested snapshots.

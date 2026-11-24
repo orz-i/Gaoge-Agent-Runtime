@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
@@ -15,6 +16,7 @@ import (
 // exclusive, durable claim under the same Turn lock, before callback entry.
 const CancellationEffectParentItemID = "harness.cancel.effect"
 const cancellationEffectProtocol = "effects_v1"
+const standardRemoteCancellationOwner = "original_remote_agent_v1"
 
 var ErrCancellationOutcomeUnknown = fmt.Errorf("harness cancellation effect requires original-owner reconciliation: %w", ErrConflict)
 
@@ -183,7 +185,9 @@ func ValidCancellationEffectAppend(ctx context.Context, value Item, items []Item
 		e, valid := cancellationEffect(value)
 		intent := byID[e.IntentID]
 		source, protocol := cancellationProtocol(intent)
-		if !valid || !protocol || source != "host" || intent.TurnID != value.TurnID || intent.Seq == 0 ||
+		remote := source == "native" && e.OwnerID == standardRemoteCancellationOwner &&
+			e.Before.Kind == handoff.RemoteAgentRunKind && target.ID != "" && target.ParentItemID != ""
+		if !valid || !protocol || (source != "host" && !remote) || intent.TurnID != value.TurnID || intent.Seq == 0 ||
 			!ValidCancellationFenceIntentAdmission(intent) || !CancellationEffectsSettled(intent, items) ||
 			!ValidCancellationAttemptAdmission(ctx, value, root, target) || target.ID != "" && terminalInvocationStatus(target.Status) {
 			return false
@@ -217,7 +221,9 @@ func (runner *Runner) appendCancellationEffect(ctx context.Context, item Item) (
 func (runner *Runner) beginHostCancellationEffect(ctx context.Context, current kernel.Snapshot) (context.Context, Item, error) {
 	intent, ok := ctx.Value(cancellationElectionKey{}).(Item)
 	source, protocol := cancellationProtocol(intent)
-	if !ok || !protocol || source != "host" {
+	remote := source == "native" && current.Run.Kind == handoff.RemoteAgentRunKind &&
+		runner.standardRemoteCoordinator() != nil
+	if !ok || !protocol || (source != "host" && !remote) {
 		return ctx, Item{}, ErrCancellationOutcomeUnknown
 	}
 	turn, err := loadVerifiedTurnIdentity(ctx, runner.store, intent.TurnID)
@@ -233,7 +239,9 @@ func (runner *Runner) beginHostCancellationEffect(ctx context.Context, current k
 		return ctx, Item{}, err
 	}
 	owner := "opaque"
-	if r, ok := runner.cancellation.(RuntimeCancellationReconciler); ok {
+	if remote {
+		owner = standardRemoteCancellationOwner
+	} else if r, ok := runner.cancellation.(RuntimeCancellationReconciler); ok {
 		owner = strings.TrimSpace(r.CancellationOwnerID())
 		if owner == "" || owner == "opaque" {
 			return ctx, Item{}, ErrInvalidRequest
@@ -304,6 +312,22 @@ func (runner *Runner) reconcileCancellationEffects(ctx context.Context, intent I
 			}
 		}
 		if _, settled := cancellationEffectReceipt(grant, receipts); settled {
+			continue
+		}
+		if e.OwnerID == standardRemoteCancellationOwner && e.Before.Kind == handoff.RemoteAgentRunKind {
+			// Recover ONLY the original signed protocol receipt. A2A may
+			// read its Task; ACP may observe its original returned Prompt.
+			// Neither route may replay the admitted Cancel callback.
+			snapshot, proofErr := runner.observeStandardRemoteCancellation(ctx, e)
+			if proofErr != nil || len(receipts) != 0 {
+				return ErrCancellationOutcomeUnknown
+			}
+			if _, proofErr = runner.verifiedCustomCancellationOutcome(ctx, kernel.Snapshot{Run: e.Before}, snapshot); proofErr != nil {
+				return ErrCancellationOutcomeUnknown
+			}
+			if proofErr = runner.finishHostCancellationEffect(ctx, grant, CancellationEffectSettled); proofErr != nil {
+				return proofErr
+			}
 			continue
 		}
 		r, ok := runner.cancellation.(RuntimeCancellationReconciler)

@@ -23,7 +23,7 @@ const (
 )
 
 // Turn is the durable root of one Harness execution tree. Child execution
-// identities live in Capability Invocations rather than on the Turn itself.
+// identities live in Agent Invocations rather than on the Turn itself.
 type Turn struct {
 	ID                  string               `json:"id"`
 	SessionID           string               `json:"sessionID"`

@@ -5,6 +5,108 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- **One Root/Named Agent capability definition:** `AgentSpec` is the sole
+  Host-selected immutable Model, Instructions, output contract, local Tool,
+  Hosted Tool grant, Skill and limits bundle for Root and named child Agents.
+  `ConfigSnapshot` and `NamedAgentSnapshot` embed the same type; separate
+  duplicated member normalization and request constructors are removed.
+  Root first Start and Retry use the same frozen Spec mapping, while the
+  original Invocation InputHash additionally seals per-Run CallAllowance and
+  AutoAllowance so retry cannot silently widen spending authority. Named Agents
+  can now enforce independent provider-backed structured output, and Root
+  supports versioned native Hosted Tool grants. The existing Handoff carries
+  and verifies the child output schema without inventing another agent loop.
+  This intentionally hard-cuts pre-stable Go composite literals and Config
+  hashes. No old data or compatibility translator is required.
+
+- **Checkpoint and native Agent original evidence fidelity (PR #149):** The
+  shared PostgreSQL/SQLite Harness Store preserves exact Tool-call argument and
+  Provider Replay bytes through Checkpoint Put/Get/reopen. The native Agent's
+  single Run-State encoder now also retains all original nested RawMessage
+  fields that JSON serialization would rewrite; the `agent-state-opaque-v1`
+  private seal binds each original field/position to the durable typed State.
+  OpenAI stateless reasoning survives a real approval/restart/Tool/Provider
+  continuation; Anthropic signed Tool replay remains valid. Memory/PG/SQLite
+  original Checkpoints reject changed/missing evidence and same-ID conflicting
+  replay; no second execution path or relaxed Provider verifier is introduced.
+  The public Context hash, Kernel CAS and Artifact canonicalization do not
+  change. With no historical data, there is no old Agent State or Harness
+  Checkpoint compatibility decoder; prior in-flight Runs must not be reused.
+
+- **Named Agent full capability composition (PR #146, after #148 main merge):**
+  `OpenAgentSession` now accepts a finite Host-authorized `NamedAgents` roster.
+  Each member/revision selects its own Model, Instructions, local and hosted
+  Tools, per-call approvals, independent frozen Skills and output/budget limits
+  while reusing the original `agent.Runner`, Handoff and RunRelation.
+  `harness.read_skill` authenticates the exact child Invocation, frozen Handoff
+  Item, parent Run, immutable delegation relation and member Skill hash; neither
+  Root nor another member can borrow its Skill ID. Reopen rejects changed
+  member policy, Model, Tool version/approval or Skill content before physical
+  continuation. The standard Session also passes through the existing Hosted
+  Tool catalog and read-only ToolDiscovery ports. No Role/Skill executor,
+  generic Capability classifier or new storage tables are introduced.
+  This branch incorporates main's PR #148 encrypted SQLite profile support;
+  the independently selected member Skills survive encrypted Schema v3 reopen.
+
+- **Capability identity shell hard cut (PR #146):** remove the one-valued
+  `CapabilityKey`/`RuntimeCapabilityVersion` from Harness Invocation, generic
+  ID constructor, admission hash, managed host source, SQL, HTTP/OpenAPI and
+  TypeScript; rename first-party Timeline kind to `agent_invocation` and DTO
+  to `HarnessAgentInvocation`. Agent stable IDs keep only a fixed private hash
+  namespace, not a Host-selected capability. A changed Root admission hash
+  requires explicit retirement of old Host execution evidence, checked
+  PostgreSQL cutover DDL and strict Harness SQLite Schema v3; old
+  The single first-party Start failure code is now `harness.agent_start_failed`
+  rather than an obsolete Capability status (no compatibility alias).
+
+- **One trusted Budget execution protocol (PR #146):** delete the old
+  `BudgetMiddleware.Run/Model/Tool` and parallel settlement driver, hard-cut
+  the corresponding pre-stable public constructor/type, and retain only
+  `BudgetAuthority` (Host Ledger, original receipt lookup, model admission and
+  projection) plus its memoized `Adapter()` returning ONE native
+  `agent.BoundedBudgetAdapter` for Run/Model/Tool. Move all Host composition
+  and safety regression tests to that single physical driver. The native
+  Agent's private pre-Provider rejection now binds the original frozen request
+  as well as the rejected candidate, allowing exact no-send budget refund
+  without accepting a foreign Provider error or a changed original request.
+  `agent.NewRunner` now rejects distinct or duplicated Budget Adapters in the
+  same Agent composition, ensuring a single original callback authority.
+  No new Store schema, lease, budget dimension, or compatibility bridge.
+
+- **Context Sampling hard cut (PR #146, Q4 scope):** delete the unused,
+  never-wired `SamplingContextPorts` / `NewSamplingBoundedContextAdapter`
+  interpreter, `Dependencies.ContextPreparation` selector and their alternate
+  sampling callback/commit path. Ordinary Bounded Context and the original
+  WorkingState Summary/ManagedRecovery execution and native recovery remain
+  intact; summary-owned Cursor, receipt and lossless copies are housed in the
+  Summary code rather than retaining an obsolete Sampling API. No replacement
+  executor, compatibility shim, Store table or new execution status.
+
+- **Agent convergence Q1–Q5 follow-up (PR #146):** The recommended
+  `OpenAgentSession` now supports durable SharedBudget (with original trusted
+  bounded Budget callbacks), Host-authorized member-only specialist tools,
+  default same-Runner local SubAgent execution and complete Session lifecycle
+  controls. Skills use frozen manifest + bounded `harness.read_skill` reads, not
+  eagerly injected Markdown. Delete the inert `ConfigSnapshot.MemoryPolicy`
+  field rather than adding a second memory subsystem. No new execution
+  interpreter, Kernel Run status or retry authority was introduced. Existing
+  managed-recovery/summary + shared-budget combinations remain fail-closed.
+  Q1 closure additionally seals reopened Tool policies/grants before physical
+  continuation, excludes approval-required reads from exploration, and bounds
+  `read_skill` output to the original Context tool-result byte limit with exact
+  Unicode pagination and strict, zero-offset-friendly input validation.
+  Reopened Sessions also compare the resolved original Budget/topology policy;
+  inserting an extra Budget middleware cannot change an admitted Run.
+
+- **Agent-only Session/Invocation convergence.** Frozen Skills, per-call Tool
+  approval and explicitly Host-authorized SubAgent routing use one standard
+  `OpenAgentSession` path. Remove the redundant `ExecutionClass` Go/HTTP/TS/SQL
+  discriminator and retired generic Host Feature no-effect escape hatch.
+  Preserve Agent Run/Attempt/receipt authorization; require explicit PG
+  cutover SQL and strict Harness SQLite Schema v3. See
+  [Capability shell migration](docs/migrations/retire-harness-capability-shell.sql)
+  after [retiring the execution class](docs/migrations/retire-harness-execution-class.sql).
+
 - **Desktop Harness SQLite Store.** Hosts can persist Sessions, Turns,
   Invocations, Context, approvals, Handoffs and budget receipts in a private
   SQLite file. The adapter reopens the original recovery authority and shares

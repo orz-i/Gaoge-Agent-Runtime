@@ -75,7 +75,7 @@ func newResumeTurnHarness(t *testing.T, store kernel.Store, sessionStore harness
 	return host, runtime
 }
 func resumeTurnSessionOptions() harness.SessionOptions {
-	return harness.SessionOptions{HostThread: harness.HostRef{Kind: "conversation", ID: "resume-session"}, Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "owner"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "resume-session"}, Config: harness.ConfigSnapshot{Model: "fixture", Instructions: "frozen session instructions"}, Transcript: harness.TranscriptSourceFunc(func(_ context.Context, _, turn harness.HostRef, prompt string) (*harness.ContextSeed, error) {
+	return harness.SessionOptions{HostThread: harness.HostRef{Kind: "conversation", ID: "resume-session"}, Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "owner"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "resume-session"}, Config: harness.ConfigSnapshot{AgentSpec: harness.AgentSpec{Model: "fixture", Instructions: "frozen session instructions"}}, Transcript: harness.TranscriptSourceFunc(func(_ context.Context, _, turn harness.HostRef, prompt string) (*harness.ContextSeed, error) {
 		return contextSeed("frozen host evidence", contextEntry("source-"+turn.ID, turn.ID, model.RoleUser, prompt, true)), nil
 	})}
 }
@@ -293,7 +293,7 @@ func TestResumeTurnDrivesCommittedControlDespiteStaleProjection(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
-		waiting := startApprovalHarness(t, host, harness.ConfigSnapshot{ToolKeys: []string{approvalTestToolKey}, ToolPolicies: []harness.ToolPolicySnapshot{{Key: approvalTestToolKey, DefinitionVersion: "v1", ApprovalCapability: approvalTestCapabilityPerCall, ApprovalMode: "always"}}})
+		waiting := startApprovalHarness(t, host, harness.ConfigSnapshot{ToolPolicies: []harness.ToolPolicySnapshot{{Key: approvalTestToolKey, DefinitionVersion: "v1", ApprovalCapability: approvalTestCapabilityPerCall, ApprovalMode: "always"}}, AgentSpec: harness.AgentSpec{ToolKeys: []string{approvalTestToolKey}}})
 		checkpoint := latestApprovalCheckpoint(t, waiting)
 		root, _ := harness.TopLevelInvocation(waiting)
 		current, err := runtime.Load(t.Context(), root.ExecutionRefID)

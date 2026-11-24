@@ -22,13 +22,13 @@ func TestChildParentValidationUsesExactIndexedItem(t *testing.T) {
 	}
 	if _, _, err := backing.AppendItem(t.Context(), Item{
 		ID: "actual-parent", TurnID: turnID,
-		Kind: ItemInvocation, Status: ItemStarted,
+		Kind: ItemAgentInvocation, Status: ItemStarted,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := backing.AppendItem(t.Context(), Item{
 		ID: "foreign-parent", TurnID: "another-turn",
-		Kind: ItemInvocation, Status: ItemStarted,
+		Kind: ItemAgentInvocation, Status: ItemStarted,
 	}); err != nil {
 		t.Fatal(err)
 	}

@@ -66,8 +66,8 @@ func TestShadowRunnerSatisfiesHandoffWithoutA2AImportsInParent(t *testing.T) {
 	var _ handoff.ChildRunner = runner
 	coordinator := newShadowCoordinator(t, runner)
 	parent := newShadowParent(t, runtime)
-	delegation := handoff.Delegation{
-		ID: "delegation-1", MemberID: "remote-member", ChildRunID: "a2a-child-1",
+	delegation := handoff.Delegation{Remote: true,
+		ID: "delegation-1", MemberID: "a2a:remote-member", MemberRevision: "fixture-v1", ChildRunID: "a2a-child-1",
 		Goal: "finish remotely", Status: handoff.StatusQueued,
 	}
 	started := startShadowDelegation(t, coordinator, parent, delegation)
@@ -104,22 +104,23 @@ func TestShadowRunnerExistingHandoffCannotAcquireModelOutputCeiling(t *testing.T
 	runner := newShadowRunner(t, runtime, remote)
 	coordinator := newShadowCoordinator(t, runner)
 	parent := newShadowParent(t, runtime)
-	delegation := handoff.Delegation{
-		ID: "existing-shadow", MemberID: "remote-member", ChildRunID: "existing-shadow-child",
+	delegation := handoff.Delegation{Remote: true,
+		ID: "existing-shadow", MemberID: "a2a:remote-member", MemberRevision: "fixture-v1", ChildRunID: "existing-shadow-child",
 		Goal: "finish remotely", Status: handoff.StatusQueued,
 	}
 	started := startShadowDelegation(t, coordinator, parent, delegation)
 	started.MaxModelOutputTokens = 256
-	if projected, err := coordinator.StartOrLoad(t.Context(), parent, started); !errors.Is(err, handoff.ErrChildRunUnverified) || projected.ID != "" {
+	if projected, err := coordinator.StartOrLoad(t.Context(), parent, started); !errors.Is(err, handoff.ErrInvalidDelegation) || projected.ID != "" {
 		t.Fatalf("existing unbounded shadow acquired a ceiling through Load: %+v %v", projected, err)
 	}
-	if projected, err := coordinator.Refresh(t.Context(), parent, started); !errors.Is(err, handoff.ErrChildRunUnverified) || projected.ID != "" {
+	if projected, err := coordinator.Refresh(t.Context(), parent, started); !errors.Is(err, handoff.ErrInvalidDelegation) || projected.ID != "" {
 		t.Fatalf("existing unbounded shadow acquired a ceiling through Refresh: %+v %v", projected, err)
 	}
 }
 
 func newShadowCoordinator(t *testing.T, runner *ShadowRunner) *handoff.Coordinator {
 	t.Helper()
+	runner.targetID, runner.revision = "remote-member", "fixture-v1"
 	coordinator, err := handoff.New(runner)
 	if err != nil {
 		t.Fatal(err)

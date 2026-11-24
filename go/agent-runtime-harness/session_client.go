@@ -6,6 +6,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
@@ -215,17 +216,131 @@ func (session *SessionClient) Refresh(ctx context.Context, turnID string) (Snaps
 // It neither reads TranscriptSource nor creates a new execution attempt. A
 // waiting or terminal Turn is returned without resolving approval or budget.
 func (session *SessionClient) Resume(ctx context.Context, turnID string) (Snapshot, error) {
-	id, err := session.authorizedTurnID(ctx, turnID)
+	id, err := session.authorizedExecutionTurn(ctx, turnID)
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if session.agentSessionOnly {
-		if err := session.preflightAgentSessionResume(ctx, id); err != nil {
-			return Snapshot{}, err
-		}
-	}
 	value, resumeErr := session.runner.resumeTurnForSession(ctx, id, session.actor, session.thread)
 	return session.verifySnapshot(id, value, resumeErr)
+}
+
+// ResolveApproval resolves an original pending Tool approval in this Session.
+// The frozen Session/Turn/Invocation owner is checked before any physical
+// Agent control. A resumed or reopened handle cannot approve another Actor's Run.
+func (session *SessionClient) ResolveApproval(ctx context.Context, turnID string, request ResolveApprovalRequest) (Snapshot, error) {
+	id, err := session.authorizedExecutionTurn(ctx, turnID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	value, resolveErr := session.runner.ResolveApproval(ctx, id, request)
+	return session.verifySnapshot(id, value, resolveErr)
+}
+
+// authorizedExecutionTurn also ensures the original Turn's required
+// composition remains available before allowing any new physical continuation.
+func (session *SessionClient) authorizedExecutionTurn(ctx context.Context, turnID string) (string, error) {
+	id, err := session.authorizedTurnID(ctx, turnID)
+	if err != nil {
+		return "", err
+	}
+	if session.agentSessionOnly {
+		if err := session.preflightAgentSessionResume(ctx, id); err != nil {
+			return "", err
+		}
+	}
+	return id, nil
+}
+
+// Cancel is a protective stop. A missing optional execution composition must
+// never block its original Kernel cancellation/fencing path.
+func (session *SessionClient) Cancel(ctx context.Context, turnID, reason string) (Snapshot, error) {
+	id, err := session.authorizedProtectiveTurn(ctx, turnID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	result, cancelErr := session.runner.Cancel(ctx, id, reason)
+	return session.verifySnapshot(id, result, cancelErr)
+}
+
+// Retry creates a new physical Attempt of the original root only. The caller
+// selects a Host Turn, never an arbitrary Invocation/Run identity.
+func (session *SessionClient) Retry(ctx context.Context, turnID string) (Snapshot, error) {
+	id, err := session.authorizedExecutionTurn(ctx, turnID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	root, err := loadTopLevelInvocation(ctx, session.runner.store, id)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	result, retryErr := session.runner.RetryInvocation(ctx, root.ID)
+	return session.verifySnapshot(id, result, retryErr)
+}
+
+// GrantCallAllowance renews the same paused Agent, never a new physical Run.
+func (session *SessionClient) GrantCallAllowance(ctx context.Context, turnID string, expectedRevision uint64, increment agent.CallAllowance) (Snapshot, error) {
+	id, err := session.authorizedExecutionTurn(ctx, turnID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	result, grantErr := session.runner.GrantCallAllowance(ctx, id, expectedRevision, increment)
+	return session.verifySnapshot(id, result, grantErr)
+}
+
+// ResolveSubtaskApproval resumes only a frozen, originally authorized Child.
+func (session *SessionClient) ResolveSubtaskApproval(ctx context.Context, turnID, taskID, checkpointID string, request ResolveApprovalRequest) (Snapshot, error) {
+	id, err := session.authorizedExecutionTurn(ctx, turnID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	result, resolveErr := session.runner.ResolveSubtaskApproval(ctx, id, taskID, checkpointID, request)
+	return session.verifySnapshot(id, result, resolveErr)
+}
+
+// CancelSubtask remains a protective stop of a specific original Child.
+func (session *SessionClient) CancelSubtask(ctx context.Context, turnID, taskID, reason string) (Snapshot, error) {
+	id, err := session.authorizedProtectiveTurn(ctx, turnID)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	result, cancelErr := session.runner.CancelSubtask(ctx, id, taskID, reason)
+	return session.verifySnapshot(id, result, cancelErr)
+}
+
+// authorizedProtectiveTurn proves the exact Session Actor and original root
+// execution identity without requiring mutable presentation OutputRefs or a
+// readable Config. A degraded Host view must never block a protective stop;
+// the selected Run and cancellation effects remain fenced by Runner.Cancel.
+func (session *SessionClient) authorizedProtectiveTurn(ctx context.Context, turnID string) (string, error) {
+	id, err := session.turnID(turnID)
+	if err != nil {
+		return "", err
+	}
+	if err := session.requireIdentity(ctx); err != nil {
+		return "", err
+	}
+	turn, err := loadVerifiedTurnIdentity(ctx, session.runner.store, id)
+	if err != nil {
+		return "", err
+	}
+	sid, err := SessionID(session.hostThread)
+	if err != nil || turn.SessionID != sid {
+		return "", ErrConflict
+	}
+	rootID, err := AgentInvocationID(id, "", turn.HostTurn.ID)
+	if err != nil {
+		return "", ErrConflict
+	}
+	root, err := session.runner.store.GetInvocation(ctx, rootID)
+	if err != nil || root.ID != rootID || root.TurnID != id || root.ParentItemID != "" ||
+		!validInvocationExecutionAuthority(root) {
+		return "", errors.Join(ErrConflict, err)
+	}
+	actor, thread, err := frozenTopLevelInvocationIdentity(root)
+	if err != nil || actor != session.actor || thread != session.thread {
+		return "", ErrConflict
+	}
+	return id, nil
 }
 
 // authorizedTurnID is the single read/recovery trust boundary for all
@@ -270,7 +385,7 @@ func (session *SessionClient) requireFrozenTurnOwner(ctx context.Context, id str
 	// Prompt freezes its root Invocation ID from the stable Host Turn ID.
 	// Use this exact indexed record rather than scanning child Invocations
 	// on each bounded status/history read or trusting a returned list order.
-	rootID, err := AgentInvocationID(id, turn.HostTurn.ID)
+	rootID, err := AgentInvocationID(id, "", turn.HostTurn.ID)
 	if err != nil {
 		return ErrConflict
 	}
@@ -294,10 +409,9 @@ type sessionBoundOwner struct {
 // pre-Refresh repair and pre-Resume physical continuation. Inconsistent
 // Store reads must not choose different rules at different boundaries.
 func requireSessionRootOwner(turn Turn, invocation Invocation, owner sessionBoundOwner) error {
-	rootID, err := AgentInvocationID(turn.ID, turn.HostTurn.ID)
+	rootID, err := AgentInvocationID(turn.ID, "", turn.HostTurn.ID)
 	if err != nil || invocation.ID != rootID || invocation.TurnID != turn.ID ||
-		invocation.ParentItemID != "" || invocation.ExecutionClass != ExecutionAgent ||
-		invocation.CapabilityKey != CapabilityAgent || !validInvocation(invocation) {
+		invocation.ParentItemID != "" || !validInvocationExecutionAuthority(invocation) || !validInvocation(invocation) {
 		return ErrConflict
 	}
 	actor, thread, err := frozenTopLevelInvocationIdentity(invocation)

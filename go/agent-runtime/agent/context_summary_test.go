@@ -68,7 +68,7 @@ type summaryCorePorts struct {
 	source       runtimecontext.Checkpoint
 	current      runtimecontext.Checkpoint
 	bound        runtimecontext.Checkpoint
-	turn         SamplingTurn
+	turn         SummaryTurn
 	root         ContextSummaryRoot
 	policy       runtimecontext.Policy
 	window       runtimecontext.ModelWindow
@@ -114,7 +114,7 @@ func (p *summaryCorePorts) CommitCheckpoint(_ context.Context, plan BoundedConte
 		return runtimecontext.Checkpoint{}, kernel.ErrConflict
 	}
 	p.current = runtimecontext.CloneCheckpoint(target)
-	p.turn.ContextCheckpointID, p.turn.ContextRef = target.ID, samplingRef(target)
+	p.turn.ContextCheckpointID, p.turn.ContextRef = target.ID, summaryRef(target)
 	p.turn.Revision++
 	return target, nil
 }
@@ -128,7 +128,7 @@ func (p *summaryCorePorts) BindCheckpoint(_ context.Context, previous string, ta
 func (p *summaryCorePorts) PlanSummary(_ context.Context, request model.Request, _ kernel.Snapshot) (ContextSummaryPlan, error) {
 	request.PreviousResponseID = p.continuation
 	request.Messages = runtimecontext.Materialize(p.current.Window)
-	return ContextSummaryPlan{Request: request, Cursor: SamplingCursor{Turn: p.turn, Checkpoint: runtimecontext.CloneCheckpoint(p.current),
+	return ContextSummaryPlan{Request: request, Cursor: SummaryCursor{Turn: p.turn, Checkpoint: runtimecontext.CloneCheckpoint(p.current),
 		ExpectedTurnCheckpointID: p.current.ID, ExpectedHeadCheckpointID: p.current.ID, UpdatedAt: p.turn.UpdatedAt.Add(time.Second)},
 		ModelWindow: p.window, Policy: p.policy, Owner: p.owner, ArtifactReader: p.reader, ExplicitWorkingState: p.explicit, Root: p.root, PriorSummaryRun: p.priorRun}, nil
 }
@@ -140,34 +140,34 @@ func (p *summaryCorePorts) ReadSummary(_ context.Context, binding ContextSummary
 		p.project = false
 	}
 	return ContextSummaryRead{SourceCheckpoint: runtimecontext.CloneCheckpoint(p.source), Root: p.root,
-		Cursor: SamplingCursor{Turn: p.turn, Checkpoint: runtimecontext.CloneCheckpoint(p.current), ExpectedTurnCheckpointID: p.current.ID,
+		Cursor: SummaryCursor{Turn: p.turn, Checkpoint: runtimecontext.CloneCheckpoint(p.current), ExpectedTurnCheckpointID: p.current.ID,
 			ExpectedHeadCheckpointID: binding.Cursor.ExpectedHeadCheckpointID, UpdatedAt: binding.Cursor.UpdatedAt}}, nil
 }
-func (p *summaryCorePorts) CommitSummary(_ context.Context, cursor SamplingCursor, target runtimecontext.Checkpoint) (SamplingCommitReceipt, error) {
+func (p *summaryCorePorts) CommitSummary(_ context.Context, cursor SummaryCursor, target runtimecontext.Checkpoint) (SummaryCommitReceipt, error) {
 	if p.commitCut == "before" {
 		p.commitCut = ""
-		return SamplingCommitReceipt{}, errSummaryCoreCrash
+		return SummaryCommitReceipt{}, errSummaryCoreCrash
 	}
 	if cursor.Turn.Revision != p.turn.Revision || cursor.Checkpoint.ID != p.current.ID || cursor.ExpectedTurnCheckpointID != p.current.ID {
-		return SamplingCommitReceipt{}, kernel.ErrConflict
+		return SummaryCommitReceipt{}, kernel.ErrConflict
 	}
 	p.current = runtimecontext.CloneCheckpoint(target)
-	p.turn.ContextCheckpointID, p.turn.ContextRef = target.ID, samplingRef(target)
+	p.turn.ContextCheckpointID, p.turn.ContextRef = target.ID, summaryRef(target)
 	p.turn.Revision++
 	p.turn.UpdatedAt = cursor.UpdatedAt
 	if p.commitCut == "after" {
 		p.commitCut = ""
-		return SamplingCommitReceipt{}, errSummaryCoreCrash
+		return SummaryCommitReceipt{}, errSummaryCoreCrash
 	}
-	return SamplingCommitReceipt{Turn: p.turn, Checkpoint: target, ExpectedTurnCheckpointID: cursor.ExpectedTurnCheckpointID, ExpectedHeadCheckpointID: cursor.ExpectedHeadCheckpointID}, nil
+	return SummaryCommitReceipt{Turn: p.turn, Checkpoint: target, ExpectedTurnCheckpointID: cursor.ExpectedTurnCheckpointID, ExpectedHeadCheckpointID: cursor.ExpectedHeadCheckpointID}, nil
 }
-func (p *summaryCorePorts) BindSummary(_ context.Context, cursor SamplingCursor, target runtimecontext.Checkpoint) (SamplingBindingReceipt, error) {
+func (p *summaryCorePorts) BindSummary(_ context.Context, cursor SummaryCursor, target runtimecontext.Checkpoint) (SummaryBindingReceipt, error) {
 	if !sameBoundedValue(p.bound, cursor.Checkpoint) {
-		return SamplingBindingReceipt{}, kernel.ErrConflict
+		return SummaryBindingReceipt{}, kernel.ErrConflict
 	}
 	previous := runtimecontext.CloneCheckpoint(p.bound)
 	p.bound = runtimecontext.CloneCheckpoint(target)
-	return SamplingBindingReceipt{TurnID: p.turn.ID, Access: "owner", Previous: previous, Current: p.bound}, nil
+	return SummaryBindingReceipt{TurnID: p.turn.ID, Access: "owner", Previous: previous, Current: p.bound}, nil
 }
 
 type summaryCoreFaultStore struct {
@@ -236,7 +236,7 @@ func newSummaryCoreFixture(t *testing.T, store kernel.Store) (*Runner, *kernel.R
 		root:   ContextSummaryRoot{InvocationID: "root", InputHash: strings.Repeat("b", 64), Attempt: 1},
 		policy: runtimecontext.Policy{SoftLimitPercent: 10, PreserveRecentTurns: 1, MaxCompactionTokens: 512},
 		window: runtimecontext.ModelWindow{ContextTokens: 30000, ReservedOutputTokens: 512}, artifacts: map[string]runtimecontext.Artifact{}}
-	ports.turn = SamplingTurn{ID: "turn", SessionID: "session", ConfigSnapshotID: "config", ContextCheckpointID: cp.ID, ContextRef: samplingRef(cp),
+	ports.turn = SummaryTurn{ID: "turn", SessionID: "session", ConfigSnapshotID: "config", ContextCheckpointID: cp.ID, ContextRef: summaryRef(cp),
 		Status: "accepted", Revision: 2, CreatedAt: clock.Now(), UpdatedAt: clock.Now()}
 	provider := &summaryCoreModel{}
 	runner := summaryCoreRunner(t, rt, ports, provider, clock, nil)
@@ -444,7 +444,7 @@ func TestContextSummaryEligibilityAndProtectedTailRequireNoExtraCall(t *testing.
 					t.Fatal(err)
 				}
 				ports.source, ports.current, ports.bound = cp, cp, cp
-				ports.turn.ContextCheckpointID, ports.turn.ContextRef = cp.ID, samplingRef(cp)
+				ports.turn.ContextCheckpointID, ports.turn.ContextRef = cp.ID, summaryRef(cp)
 			}
 			_, _ = runner.StartRun(t.Context(), request)
 			for _, call := range provider.calls() {
@@ -481,11 +481,11 @@ func TestContextSummaryNextTurnUpdatesOnlyVerifiedAutomaticState(t *testing.T) {
 			}
 			ports.source, ports.current, ports.bound, ports.priorRun = nextSource, nextSource, nextSource, &first
 			ports.turn.ID, ports.turn.ConfigSnapshotID, ports.turn.Revision = "turn-next", "config-next", 2
-			ports.turn.ContextCheckpointID, ports.turn.ContextRef = nextSource.ID, samplingRef(nextSource)
+			ports.turn.ContextCheckpointID, ports.turn.ContextRef = nextSource.ID, summaryRef(nextSource)
 			ports.turn.Status, ports.turn.UpdatedAt = "accepted", clock.Now()
 			ports.root.InvocationID, ports.root.InputHash = "root-next", strings.Repeat("c", 64)
 			if corruptOrigin {
-				copy := cloneSamplingSnapshot(first)
+				copy := cloneSummarySnapshot(first)
 				copy.Run.Actor.ActorID = "foreign"
 				ports.priorRun = &copy
 			}
@@ -830,7 +830,7 @@ func summaryHistoryToolSource(t *testing.T, ports *summaryCorePorts, arguments s
 		t.Fatal(err)
 	}
 	ports.source, ports.current, ports.bound = source, source, source
-	ports.turn.ContextCheckpointID, ports.turn.ContextRef = source.ID, samplingRef(source)
+	ports.turn.ContextCheckpointID, ports.turn.ContextRef = source.ID, summaryRef(source)
 }
 
 func TestContextSummaryCompletedReceiptRejectsChangedFrozenSource(t *testing.T) {

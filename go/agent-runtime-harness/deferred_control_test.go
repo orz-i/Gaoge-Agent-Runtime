@@ -53,11 +53,11 @@ func testDeferredBoundedAgentCancellation(t *testing.T, withHostApprovalPolicy b
 		if e != nil {
 			return nil, nil, e
 		}
-		shared, e := harness.NewBudgetMiddleware(harness.BudgetMiddlewareDependencies{Store: hs, Relations: relations, Meter: m, Clock: fixedClock{}})
+		shared, e := harness.NewBudgetAuthority(harness.BudgetAuthorityDependencies{Store: hs, Relations: relations, Meter: m, Clock: fixedClock{}})
 		if e != nil {
 			return nil, nil, e
 		}
-		bounded, e := harness.NewBoundedBudgetAdapter(harness.BudgetMiddlewareDependencies{Store: hs, Relations: relations, Meter: m, Clock: fixedClock{}})
+		bounded, e := shared.Adapter()
 		if e != nil {
 			return nil, nil, e
 		}

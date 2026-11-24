@@ -24,21 +24,21 @@ func NewManagedHostAuthority() (kernel.ManagedAuthority, error) {
 // capability: the storage transaction must read and validate all original rows.
 func ManagedHostSource(session Session, turn Turn, invocation Invocation, config ConfigSnapshot, dispatch Item) (json.RawMessage, error) {
 	return json.Marshal(struct {
-		SessionID                                                    string
-		HostThread                                                   HostRef
-		Actor                                                        kernel.ActorRef
-		TurnID                                                       string
-		HostTurn                                                     HostRef
-		Config                                                       ConfigSnapshot
-		InvocationID, ParentItemID, CapabilityKey, DefinitionVersion string
-		ExecutionClass                                               ExecutionClass
-		Input                                                        json.RawMessage
-		InputHash, ExecutionRefID                                    string
-		Attempt                                                      int
-		Dispatch                                                     Item
+		SessionID                  string
+		HostThread                 HostRef
+		Actor                      kernel.ActorRef
+		TurnID                     string
+		HostTurn                   HostRef
+		Config                     ConfigSnapshot
+		InvocationID, ParentItemID string
+
+		Input                     json.RawMessage
+		InputHash, ExecutionRefID string
+		Attempt                   int
+		Dispatch                  Item
 	}{session.ID, session.HostThread, session.Actor, turn.ID, turn.HostTurn, config,
-		invocation.ID, invocation.ParentItemID, invocation.CapabilityKey, invocation.DefinitionVersion,
-		invocation.ExecutionClass, invocation.Input, invocation.InputHash, invocation.ExecutionRefID, invocation.Attempt, dispatch})
+		invocation.ID, invocation.ParentItemID,
+		invocation.Input, invocation.InputHash, invocation.ExecutionRefID, invocation.Attempt, dispatch})
 }
 
 // ValidateManagedOriginalRows is shared by concrete storage transactions. It
@@ -47,7 +47,7 @@ func ValidateManagedOriginalRows(authority kernel.ManagedAuthority, b kernel.Man
 	if !b.Valid() || b.HostAuthority != authority || session.ID == "" || turn.SessionID != session.ID ||
 		turn.ID != b.TurnID || config.ID != turn.ConfigSnapshotID || config.TurnID != turn.ID ||
 		invocation.ID != b.InvocationID || invocation.TurnID != turn.ID || invocation.ParentItemID != "" ||
-		invocation.ExecutionClass != ExecutionAgent || invocation.Attempt <= 0 || uint64(invocation.Attempt) != uint64(b.Attempt) ||
+		invocation.Attempt <= 0 || uint64(invocation.Attempt) != uint64(b.Attempt) ||
 		invocation.ExecutionRefID != b.RunID || dispatch.ID != b.DispatchID || dispatch.InvocationID != invocation.ID ||
 		dispatch.TurnID != turn.ID || dispatch.RunID != b.RunID {
 		return ErrConflict

@@ -18,9 +18,7 @@ func TestModelOptionsAreUniqueBeforeFrozenConfigHash(t *testing.T) {
 		`{"reasoning":{"effort":"high"},"reasoning":[{"effort":"low","effort":"high"}]}`,
 	} {
 		t.Run(options, func(t *testing.T) {
-			_, err := harness.SealConfigSnapshot("audit-turn", harness.ConfigSnapshot{
-				Model: "gpt-6-sol", ModelOptions: json.RawMessage(options),
-			}, time.Now().UTC())
+			_, err := harness.SealConfigSnapshot("audit-turn", harness.ConfigSnapshot{AgentSpec: harness.AgentSpec{Model: "gpt-6-sol", ModelOptions: json.RawMessage(options)}}, time.Now().UTC())
 			if err == nil {
 				t.Fatal("ambiguous ModelOptions were normalized before freezing")
 			}
@@ -28,9 +26,7 @@ func TestModelOptionsAreUniqueBeforeFrozenConfigHash(t *testing.T) {
 		})
 	}
 	accepted := json.RawMessage(`{"reasoning":{"effort":"high"},"temperature":0.25}`)
-	sealed, err := harness.SealConfigSnapshot("audit-turn", harness.ConfigSnapshot{
-		Model: "gpt-6-sol", ModelOptions: accepted,
-	}, time.Now().UTC())
+	sealed, err := harness.SealConfigSnapshot("audit-turn", harness.ConfigSnapshot{AgentSpec: harness.AgentSpec{Model: "gpt-6-sol", ModelOptions: accepted}}, time.Now().UTC())
 	if err != nil || len(sealed.ContentHash) != 64 || !json.Valid(sealed.ModelOptions) {
 		t.Fatalf("valid canonical ModelOptions failed to seal: %+v %v", sealed, err)
 	}
@@ -39,9 +35,7 @@ func TestModelOptionsAreUniqueBeforeFrozenConfigHash(t *testing.T) {
 func TestModelOptionsRequireObjectBeforeSealing(t *testing.T) {
 	for _, options := range []string{`null`, `[]`, `1`, `"text"`, `true`} {
 		t.Run(options, func(t *testing.T) {
-			_, err := harness.SealConfigSnapshot("audit-turn", harness.ConfigSnapshot{
-				Model: "gpt-6-sol", ModelOptions: json.RawMessage(options),
-			}, time.Now().UTC())
+			_, err := harness.SealConfigSnapshot("audit-turn", harness.ConfigSnapshot{AgentSpec: harness.AgentSpec{Model: "gpt-6-sol", ModelOptions: json.RawMessage(options)}}, time.Now().UTC())
 			if err == nil {
 				t.Fatal("non-object model options accepted as sealed authority")
 			}

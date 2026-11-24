@@ -52,7 +52,7 @@ func TestRealPostgresCancellationClaimCommittedLostReplyStaysFenced(t *testing.T
 		HostTurn:   harness.HostRef{Kind: "conversation_turn", ID: "partial-cancel-claim"},
 		Actor:      kernel.ActorRef{TenantID: "test", ActorID: "agent"},
 		Thread:     kernel.ThreadRef{Kind: "conversation", ID: "partial-cancel-claim"},
-		Goal:       "pause then wait for Host interaction", Config: harness.ConfigSnapshot{Model: "fixture-control"},
+		Goal:       "pause then wait for Host interaction", Config: harness.ConfigSnapshot{AgentSpec: harness.AgentSpec{Model: "fixture-control"}},
 		CallAllowance: &agent.CallAllowance{LLMCalls: 1},
 	}
 	paused, err := first.StartAgentTurn(t.Context(), req)
@@ -69,7 +69,7 @@ func TestRealPostgresCancellationClaimCommittedLostReplyStaysFenced(t *testing.T
 	}
 	parentItemID := ""
 	for _, item := range resumed.Items {
-		if item.InvocationID == owner.ID && item.Kind == harness.ItemInvocation {
+		if item.InvocationID == owner.ID && item.Kind == harness.ItemAgentInvocation {
 			parentItemID = item.ID
 			break
 		}

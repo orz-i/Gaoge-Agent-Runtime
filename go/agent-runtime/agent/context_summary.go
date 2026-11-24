@@ -53,14 +53,14 @@ func (adapter *ContextSummaryAdapter) plan(ctx context.Context, runner *Runner, 
 	if !summaryStatelessOptions(incoming.ModelOptions) {
 		return model.Request{}, nil, false, nil
 	}
-	plan, err := adapter.ports.PlanSummary(ctx, model.CloneRequest(incoming), cloneSamplingSnapshot(snapshot))
+	plan, err := adapter.ports.PlanSummary(ctx, model.CloneRequest(incoming), cloneSummarySnapshot(snapshot))
 	if err != nil {
 		return model.Request{}, nil, false, err
 	}
-	plan.Request = cloneSamplingRequest(plan.Request)
-	plan.Cursor = cloneSamplingCursor(plan.Cursor)
+	plan.Request = cloneSummaryRequest(plan.Request)
+	plan.Cursor = cloneSummaryCursor(plan.Cursor)
 	if plan.PriorSummaryRun != nil {
-		copy := cloneSamplingSnapshot(*plan.PriorSummaryRun)
+		copy := cloneSummarySnapshot(*plan.PriorSummaryRun)
 		plan.PriorSummaryRun = &copy
 	}
 	if !callbackscope.Operation(ctx, adapter.bounded, "context.summary.plan", plan) {
@@ -71,7 +71,7 @@ func (adapter *ContextSummaryAdapter) plan(ctx context.Context, runner *Runner, 
 	}
 	previous := plan.Cursor.Checkpoint
 	if plan.Cursor.Turn.ID == "" || plan.Cursor.Turn.SessionID != previous.ScopeID || plan.Cursor.Turn.ContextCheckpointID != previous.ID ||
-		plan.Cursor.Turn.Revision == 0 || !sameBoundedValue(plan.Cursor.Turn.ContextRef, samplingRef(previous)) ||
+		plan.Cursor.Turn.Revision == 0 || !sameBoundedValue(plan.Cursor.Turn.ContextRef, summaryRef(previous)) ||
 		plan.Cursor.ExpectedTurnCheckpointID != previous.ID || plan.Cursor.UpdatedAt.IsZero() || !validSummaryRoot(plan.Root) ||
 		!validPreparedModelRequest(incoming, plan.Request) {
 		return model.Request{}, nil, false, ErrInvalidRequest

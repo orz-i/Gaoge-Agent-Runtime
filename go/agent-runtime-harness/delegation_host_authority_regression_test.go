@@ -30,8 +30,8 @@ func TestUnconfiguredHostDelegationCannotDispatchDirectOrManual(t *testing.T) {
 func TestHostSelectedSubtreeCeilingsAreFrozenSeparatelyFromAgentLimits(t *testing.T) {
 	f := newPR82HandoffFixture(t)
 	config, err := SealConfigSnapshot(f.turn.ID, ConfigSnapshot{
-		AdmissionHash: strings.Repeat("a", 64), Model: "root-model",
-		SharedBudget: &budget.Limits{MaxChildRuns: 20, MaxConcurrentDescendants: 20},
+		AdmissionHash: strings.Repeat("a", 64),
+		SharedBudget:  &budget.Limits{MaxChildRuns: 20, MaxConcurrentDescendants: 20}, AgentSpec: AgentSpec{Model: "root-model"},
 	}, pr82HandoffClock{}.Now())
 	if err != nil {
 		t.Fatal(err)

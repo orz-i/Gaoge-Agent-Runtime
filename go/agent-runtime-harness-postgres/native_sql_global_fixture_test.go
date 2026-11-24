@@ -81,14 +81,12 @@ func pr103SQLSeedRootAgent(t *testing.T, store harness.Store, runtime *kernel.Ru
 		t.Fatal(err)
 	}
 	sum := sha256.Sum256(input)
-	parentID, err := harness.InvocationID(tid, "", harness.CapabilityAgent, "parent")
+	parentID, err := harness.AgentInvocationID(tid, "", "parent")
 	if err != nil {
 		t.Fatal(err)
 	}
 	parent := harness.Invocation{
-		ID: parentID, TurnID: tid, CapabilityKey: harness.CapabilityAgent,
-		DefinitionVersion: "v1", ExecutionClass: harness.ExecutionAgent,
-		Input: input, InputHash: fmt.Sprintf("%x", sum), ExecutionRefID: parentRunID,
+		ID: parentID, TurnID: tid, Input: input, InputHash: fmt.Sprintf("%x", sum), ExecutionRefID: parentRunID,
 		Status: harness.InvocationRunning, Attempt: 1, OutputRefs: []harness.HostRef{},
 		Revision: 1, CreatedAt: now, UpdatedAt: now,
 	}
@@ -96,7 +94,7 @@ func pr103SQLSeedRootAgent(t *testing.T, store harness.Store, runtime *kernel.Ru
 		t.Fatal(err)
 	}
 	if _, _, err = store.AppendItem(t.Context(), harness.Item{
-		ID: "parent-invocation-item", TurnID: tid, Kind: harness.ItemInvocation,
+		ID: "parent-invocation-item", TurnID: tid, Kind: harness.ItemAgentInvocation,
 		Status: harness.ItemStarted, RunID: parentRunID, InvocationID: parent.ID,
 		Payload:   json.RawMessage("{}"),
 		CreatedAt: now, UpdatedAt: now,
@@ -108,7 +106,7 @@ func pr103SQLSeedRootAgent(t *testing.T, store harness.Store, runtime *kernel.Ru
 
 func nativeSQLRootID(t *testing.T, store harness.Store, turnID string) string {
 	t.Helper()
-	id, err := harness.InvocationID(turnID, "", harness.CapabilityAgent, "parent")
+	id, err := harness.AgentInvocationID(turnID, "", "parent")
 	if err != nil {
 		t.Fatal(err)
 	}

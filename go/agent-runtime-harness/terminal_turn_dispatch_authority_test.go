@@ -23,8 +23,8 @@ func TestMemoryTerminalTurnCASRequiresOriginalPhysicalGrantSettlement(t *testing
 			store.turns[turn.ID] = turn
 			owner := Invocation{
 				ID: "owner-direct", TurnID: turn.ID, ExecutionRefID: "run-direct",
-				Status: InvocationRunning, ExecutionClass: ExecutionAgent,
-				CapabilityKey: CapabilityAgent, Revision: 1, Attempt: 1,
+				Status:   InvocationRunning,
+				Revision: 1, Attempt: 1,
 				CreatedAt: now, UpdatedAt: now,
 			}
 			store.invocations[owner.ID] = owner

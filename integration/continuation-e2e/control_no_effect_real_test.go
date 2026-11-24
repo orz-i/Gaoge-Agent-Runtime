@@ -116,7 +116,7 @@ func TestRealPostgresNativeControlNoEffectRecoveryAcrossConnections(t *testing.T
 				HostTurn:   harness.HostRef{Kind: "conversation_turn", ID: "preflight-run"},
 				Actor:      kernel.ActorRef{TenantID: "test", ActorID: "agent"},
 				Thread:     kernel.ThreadRef{Kind: "conversation", ID: "control-preflight-recovery"},
-				Goal:       "produce a second answer", Config: harness.ConfigSnapshot{Model: "fixture-control"},
+				Goal:       "produce a second answer", Config: harness.ConfigSnapshot{AgentSpec: harness.AgentSpec{Model: "fixture-control"}},
 				CallAllowance: &agent.CallAllowance{LLMCalls: 1},
 			}
 			paused, err := first.StartAgentTurn(t.Context(), request)
@@ -254,7 +254,7 @@ func testRealPostgresNativeControlNoEffectSurvivesProcessCrash(t *testing.T, fai
 		HostTurn:   harness.HostRef{Kind: "conversation_turn", ID: "recover-after-exit"},
 		Actor:      kernel.ActorRef{TenantID: "test", ActorID: "agent"},
 		Thread:     kernel.ThreadRef{Kind: "conversation", ID: "control-process-exit"},
-		Goal:       "continue after process termination", Config: harness.ConfigSnapshot{Model: "fixture-control"},
+		Goal:       "continue after process termination", Config: harness.ConfigSnapshot{AgentSpec: harness.AgentSpec{Model: "fixture-control"}},
 		CallAllowance: &agent.CallAllowance{LLMCalls: 1},
 	}
 	paused, err := first.StartAgentTurn(t.Context(), request)

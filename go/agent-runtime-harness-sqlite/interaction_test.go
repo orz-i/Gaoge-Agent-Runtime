@@ -23,7 +23,7 @@ func waitingInteraction(t *testing.T, host *harnesssqlite.Store) harness.Interac
 	if _, _, err := host.CreateTurn(ctx, turn); err != nil {
 		t.Fatal(err)
 	}
-	inv := harness.Invocation{ID: "invocation", TurnID: turn.ID, CapabilityKey: harness.CapabilityAgent, ExecutionClass: harness.ExecutionAgent, ExecutionRefID: "run", Status: harness.InvocationRunning, Attempt: 1, Revision: 1, CreatedAt: now, UpdatedAt: now}
+	inv := harness.Invocation{ID: "invocation", TurnID: turn.ID, ExecutionRefID: "run", Status: harness.InvocationRunning, Attempt: 1, Revision: 1, CreatedAt: now, UpdatedAt: now}
 	if _, _, err := host.CreateInvocation(ctx, inv); err != nil {
 		t.Fatal(err)
 	}

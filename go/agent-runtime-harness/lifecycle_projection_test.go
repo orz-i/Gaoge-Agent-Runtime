@@ -71,7 +71,7 @@ func TestLifecycleProjectionReplaysSameTerminalChildWithoutAnotherRevision(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 1 || items[0].Kind != ItemInvocation || items[0].Status != ItemCompleted {
+	if len(items) != 1 || items[0].Kind != ItemAgentInvocation || items[0].Status != ItemCompleted {
 		t.Fatalf("terminal replay must repair exactly one durable lifecycle Item: %+v", items)
 	}
 }
@@ -83,7 +83,7 @@ func seededTerminalProjectionChild(t *testing.T, status InvocationStatus) (*Runn
 		"turn-projection", "request", "child goal",
 		kernel.ActorRef{TenantID: "tenant", ActorID: "actor"},
 		kernel.ThreadRef{Kind: "conversation", ID: "thread"},
-		nil, nil, time.Now().UTC(),
+		nil, nil, nil, nil, time.Now().UTC(),
 	)
 	if err != nil {
 		t.Fatal(err)

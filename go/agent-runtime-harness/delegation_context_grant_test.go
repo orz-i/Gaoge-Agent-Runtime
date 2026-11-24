@@ -22,7 +22,7 @@ func TestDelegatedAgentDoesNotInheritSupervisorContextArtifactTool(t *testing.T)
 		t.Run(map[bool]string{false: "root", true: "nested"}[nested], func(t *testing.T) {
 			f := newPR82HandoffFixture(t)
 			config, err := SealConfigSnapshot(f.turn.ID, ConfigSnapshot{
-				AdmissionHash: strings.Repeat("a", 64), Model: "supervisor", ToolKeys: []string{ContextArtifactToolKey},
+				AdmissionHash: strings.Repeat("a", 64), AgentSpec: AgentSpec{Model: "supervisor", ToolKeys: []string{ContextArtifactToolKey}},
 			}, pr82HandoffClock{}.Now())
 			if err != nil {
 				t.Fatal(err)
@@ -48,7 +48,7 @@ func TestDelegatedAgentDoesNotInheritSupervisorContextArtifactTool(t *testing.T)
 					t.Fatal(err)
 				}
 				owner = Invocation{ID: "nested-invocation", TurnID: turn.ID, ParentItemID: f.startedItemID,
-					ExecutionClass: ExecutionAgent, ExecutionRefID: parent.Run.ID}
+					ExecutionRefID: parent.Run.ID}
 			}
 			scope, _, err := f.runner.prepareDelegation(t.Context(), turn, owner, DelegateRequest{MemberID: "child", Goal: "inspect"})
 			if err != nil {

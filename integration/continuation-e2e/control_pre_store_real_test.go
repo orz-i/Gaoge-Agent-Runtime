@@ -40,7 +40,7 @@ func TestRealPostgresKernelControlPreStoreReadRecoveryAcrossConnections(t *testi
 				Actor:         kernel.ActorRef{TenantID: "test", ActorID: "agent"},
 				Thread:        kernel.ThreadRef{Kind: "conversation", ID: "kernel-control-pre-store"},
 				Goal:          "continue after Kernel read failure",
-				Config:        harness.ConfigSnapshot{Model: "fixture-control"},
+				Config:        harness.ConfigSnapshot{AgentSpec: harness.AgentSpec{Model: "fixture-control"}},
 				CallAllowance: &agent.CallAllowance{LLMCalls: 1},
 			}
 			paused, err := first.StartAgentTurn(t.Context(), request)

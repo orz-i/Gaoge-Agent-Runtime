@@ -49,7 +49,7 @@ func proofShadowFixture(t *testing.T, remote RemoteClient) (*kernel.Runtime, ker
 }
 
 func testRemoteDelegationForProof(id string) handoff.Delegation {
-	return handoff.Delegation{ID: "delegation-" + id, ChildRunID: id,
+	return handoff.Delegation{Remote: true, ID: "delegation-" + id, ChildRunID: id,
 		MemberID: "a2a:remote", MemberRevision: "revision-1", Goal: "remote goal", Status: handoff.StatusQueued}
 }
 
@@ -93,7 +93,7 @@ func TestPR113ForgedSameKernelShadowCannotImpersonateRemoteTerminal(t *testing.T
 			if coordinator.ObservesRemoteShadow(t.Context(), rt, d, forged) {
 				t.Fatal("local same-ID twin acquired first-party remote ownership")
 			}
-			if got, err := coordinator.StartOrLoad(t.Context(), parent, d); !errors.Is(err, ErrRemoteBindingChanged) || got.Status == handoff.StatusCompleted {
+			if got, err := coordinator.StartOrLoad(t.Context(), parent, d); !errors.Is(err, handoff.ErrChildRunUnverified) || got.Status == handoff.StatusCompleted {
 				t.Fatalf("unsent task finalized a Handoff: %+v %v", got, err)
 			}
 		})

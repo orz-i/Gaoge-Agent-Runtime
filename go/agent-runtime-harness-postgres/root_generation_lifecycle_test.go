@@ -121,12 +121,12 @@ func newGenerationHarnessBackend(t *testing.T, backend string, m *generationMode
 	if capture, ok := hs.(interface{ setGenerationRelations(*runrelation.Registry) }); ok {
 		capture.setGenerationRelations(relations)
 	}
-	deps := harness.BudgetMiddlewareDependencies{Store: hs, Relations: relations, Meter: m, Clock: generationClock{}}
-	shared, err := harness.NewBudgetMiddleware(deps)
+	deps := harness.BudgetAuthorityDependencies{Store: hs, Relations: relations, Meter: m, Clock: generationClock{}}
+	shared, err := harness.NewBudgetAuthority(deps)
 	if err != nil {
 		t.Fatal(err)
 	}
-	bounded, err := harness.NewBoundedBudgetAdapter(deps)
+	bounded, err := shared.Adapter()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,10 +159,13 @@ func newGenerationHarnessBackend(t *testing.T, backend string, m *generationMode
 	req := harness.StartRequest{
 		HostThread: harness.HostRef{Kind: "conversation", ID: "generation-thread"}, HostTurn: harness.HostRef{Kind: "conversation_turn", ID: "generation-turn"},
 		Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "generation-thread"}, Goal: "answer",
-		Config: harness.ConfigSnapshot{Environment: harness.VersionRef{ID: "test", Revision: 1}, Model: "model",
+		Config: harness.ConfigSnapshot{Environment: harness.VersionRef{ID: "test", Revision: 1},
 			SharedBudget:     &budget.Limits{MaxLLMCalls: 8, MaxToolCalls: 16, MaxTotalTokens: 5000, MaxChildRuns: 3, MaxConcurrentRuns: 1},
-			DelegationPolicy: harness.DelegationPolicySnapshot{MaxDepth: 1}, ToolKeys: []string{harness.DelegationToolKey},
-			ToolPolicies: []harness.ToolPolicySnapshot{harness.DelegationToolPolicySnapshot()}},
+			DelegationPolicy: harness.DelegationPolicySnapshot{MaxDepth: 1},
+			ToolPolicies:     []harness.ToolPolicySnapshot{harness.DelegationToolPolicySnapshot()}, AgentSpec: harness.AgentSpec{Model: "model",
+
+				ToolKeys: []string{harness.DelegationToolKey}},
+		},
 	}
 	return r, hs, rt, original, req
 }

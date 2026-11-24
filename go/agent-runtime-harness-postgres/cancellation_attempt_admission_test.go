@@ -26,7 +26,7 @@ func (s *cancellationAdmissionCut) AppendItem(ctx context.Context, item harness.
 
 func generationRunnerForStore(t *testing.T, store generationStore, rt *kernel.Runtime, native *agent.Runner) *harness.Runner {
 	t.Helper()
-	shared, err := harness.NewBudgetMiddleware(harness.BudgetMiddlewareDependencies{Store: store, Ledgers: store, Clock: generationClock{}})
+	shared, err := harness.NewBudgetAuthority(harness.BudgetAuthorityDependencies{Store: store, Ledgers: store, Clock: generationClock{}})
 	if err != nil {
 		t.Fatal(err)
 	}

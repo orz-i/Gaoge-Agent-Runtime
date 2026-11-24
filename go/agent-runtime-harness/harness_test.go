@@ -232,16 +232,16 @@ func assertCompletedHarnessSnapshot(t *testing.T, snapshot harness.Snapshot, err
 	if decodeErr := json.Unmarshal(snapshot.Output.Content, &output); decodeErr != nil || output != "direct answer" {
 		t.Fatalf("unexpected harness output: %#v err=%v", snapshot.Output, decodeErr)
 	}
-	if len(snapshot.Invocations) != 1 || snapshot.Invocations[0].ExecutionClass != harness.ExecutionAgent || snapshot.Invocations[0].Status != harness.InvocationCompleted || snapshot.Invocations[0].ExecutionRefID == "" {
+	if len(snapshot.Invocations) != 1 || snapshot.Invocations[0].Status != harness.InvocationCompleted || snapshot.Invocations[0].ExecutionRefID == "" {
 		t.Fatalf("unexpected capability invocations: %#v", snapshot.Invocations)
 	}
 	productItems := make([]harness.Item, 0, 3)
 	for _, item := range snapshot.Items {
-		if item.Kind == harness.ItemInvocation || item.Kind == harness.ItemAgentRun {
+		if item.Kind == harness.ItemAgentInvocation || item.Kind == harness.ItemAgentRun {
 			productItems = append(productItems, item)
 		}
 	}
-	if len(productItems) != 3 || productItems[0].Kind != harness.ItemInvocation || productItems[1].Kind != harness.ItemInvocation || productItems[1].Status != harness.ItemCompleted || productItems[2].Kind != harness.ItemAgentRun || productItems[2].Status != harness.ItemCompleted {
+	if len(productItems) != 3 || productItems[0].Kind != harness.ItemAgentInvocation || productItems[1].Kind != harness.ItemAgentInvocation || productItems[1].Status != harness.ItemCompleted || productItems[2].Kind != harness.ItemAgentRun || productItems[2].Status != harness.ItemCompleted {
 		t.Fatalf("unexpected lifecycle items: %#v", snapshot.Items)
 	}
 }
@@ -338,7 +338,7 @@ func newHarnessRunnerWithModel(t *testing.T, agentModel model.Client) *harness.R
 	return runner
 }
 func testStartRequest() harness.StartRequest {
-	return harness.StartRequest{HostThread: harness.HostRef{Kind: testThreadKind, ID: testThreadID}, HostTurn: harness.HostRef{Kind: "conversation_turn", ID: testTurnID}, Actor: kernel.ActorRef{TenantID: testTenant, ActorID: testActor}, Thread: kernel.ThreadRef{Kind: testThreadKind, ID: testThreadID}, Goal: "answer directly", Config: harness.ConfigSnapshot{Environment: harness.VersionRef{ID: testEnvironment, Revision: 1}, Model: "model"}}
+	return harness.StartRequest{HostThread: harness.HostRef{Kind: testThreadKind, ID: testThreadID}, HostTurn: harness.HostRef{Kind: "conversation_turn", ID: testTurnID}, Actor: kernel.ActorRef{TenantID: testTenant, ActorID: testActor}, Thread: kernel.ThreadRef{Kind: testThreadKind, ID: testThreadID}, Goal: "answer directly", Config: harness.ConfigSnapshot{Environment: harness.VersionRef{ID: testEnvironment, Revision: 1}, AgentSpec: harness.AgentSpec{Model: "model"}}}
 }
 
 type directModel struct{}

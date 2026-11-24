@@ -183,7 +183,7 @@ func benchmarkHarnessStartRequest() harness.StartRequest {
 		Thread:     kernel.ThreadRef{Kind: "conversation", ID: "thread"},
 		RequestID:  "benchmark-request", Goal: "answer deterministically",
 		Config: harness.ConfigSnapshot{
-			Environment: harness.VersionRef{ID: "benchmark", Revision: 1}, Model: "fixture",
+			Environment: harness.VersionRef{ID: "benchmark", Revision: 1}, AgentSpec: harness.AgentSpec{Model: "fixture"},
 		},
 	}
 }

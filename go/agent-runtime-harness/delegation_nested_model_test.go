@@ -21,8 +21,8 @@ func (nestedModelTestClient) Generate(context.Context, model.Request) (model.Res
 func TestNestedMemberInheritsImmediateParentsFrozenModel(t *testing.T) {
 	f := newPR82HandoffFixture(t)
 	config, err := SealConfigSnapshot(f.turn.ID, ConfigSnapshot{
-		AdmissionHash: strings.Repeat("a", 64), Model: "root-model", ModelOptions: json.RawMessage(`{"temperature":0.8}`),
-		MaxModelOutputTokens: 512,
+		AdmissionHash: strings.Repeat("a", 64), AgentSpec: AgentSpec{Model: "root-model", ModelOptions: json.RawMessage(`{"temperature":0.8}`),
+			MaxModelOutputTokens: 512},
 	}, pr82HandoffClock{}.Now())
 	if err != nil {
 		t.Fatal(err)
@@ -46,7 +46,7 @@ func TestNestedMemberInheritsImmediateParentsFrozenModel(t *testing.T) {
 		t.Fatal(err)
 	}
 	invocation := Invocation{ID: "nested-invocation", TurnID: turn.ID, ParentItemID: f.startedItemID,
-		ExecutionClass: ExecutionAgent, ExecutionRefID: parent.Run.ID}
+		ExecutionRefID: parent.Run.ID}
 	for _, tc := range []struct {
 		name, requested, wantModel, wantOptions string
 		requestedCeiling, wantCeiling           int64

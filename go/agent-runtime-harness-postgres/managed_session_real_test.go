@@ -91,8 +91,8 @@ func TestRealPostgresManagedSessionCompactionAcrossStoreRestart(t *testing.T) {
 		Actor:      kernel.ActorRef{TenantID: "tenant", ActorID: "actor"},
 		Thread:     kernel.ThreadRef{Kind: "conversation", ID: thread},
 		Config: harness.ConfigSnapshot{
-			Model: "fixture-model", ToolKeys: []string{harness.ContextArtifactToolKey},
-			ContextPolicy: runtimecontext.Policy{PreserveRecentTurns: 1, MinimumRecentTurns: 1, MaxCompactionTokens: 80},
+
+			ContextPolicy: runtimecontext.Policy{PreserveRecentTurns: 1, MinimumRecentTurns: 1, MaxCompactionTokens: 80}, AgentSpec: harness.AgentSpec{Model: "fixture-model", ToolKeys: []string{harness.ContextArtifactToolKey}},
 		},
 		Transcript: harness.TranscriptSourceFunc(seed),
 	}

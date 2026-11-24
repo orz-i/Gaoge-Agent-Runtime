@@ -58,9 +58,9 @@ func TestHarnessDelegationChildDoesNotInheritParentContextCheckpoint(t *testing.
 		Thread:     kernel.ThreadRef{Kind: testThreadKind, ID: "thread-delegation-context"},
 		Goal:       goal,
 		Config: harness.ConfigSnapshot{
-			Model:        delegationTestModelName,
-			ToolKeys:     []string{harness.DelegationToolKey},
-			ToolPolicies: []harness.ToolPolicySnapshot{harness.DelegationToolPolicySnapshot()},
+
+			ToolPolicies: []harness.ToolPolicySnapshot{harness.DelegationToolPolicySnapshot()}, AgentSpec: harness.AgentSpec{Model: delegationTestModelName,
+				ToolKeys: []string{harness.DelegationToolKey}},
 		},
 		Context: &harness.ContextSeed{
 			SourcePath: []string{"message-delegation-context"},
@@ -90,9 +90,9 @@ func TestHarnessDelegationToolStartsStableChildAndRecordsRelation(t *testing.T) 
 		Thread:     kernel.ThreadRef{Kind: testThreadKind, ID: "thread-delegation"},
 		Goal:       delegationTestRootGoal,
 		Config: harness.ConfigSnapshot{
-			Model:        delegationTestModelName,
-			ToolKeys:     []string{harness.DelegationToolKey},
-			ToolPolicies: []harness.ToolPolicySnapshot{harness.DelegationToolPolicySnapshot()},
+
+			ToolPolicies: []harness.ToolPolicySnapshot{harness.DelegationToolPolicySnapshot()}, AgentSpec: harness.AgentSpec{Model: delegationTestModelName,
+				ToolKeys: []string{harness.DelegationToolKey}},
 		},
 	})
 	if err != nil {
@@ -123,9 +123,9 @@ func TestHarnessDelegationPolicyPreparesActualChildGoal(t *testing.T) {
 		Thread:     kernel.ThreadRef{Kind: testThreadKind, ID: "thread-delegation-policy"},
 		Goal:       delegationTestRootGoal,
 		Config: harness.ConfigSnapshot{
-			Model:        delegationTestModelName,
-			ToolKeys:     []string{harness.DelegationToolKey},
-			ToolPolicies: []harness.ToolPolicySnapshot{harness.DelegationToolPolicySnapshot()},
+
+			ToolPolicies: []harness.ToolPolicySnapshot{harness.DelegationToolPolicySnapshot()}, AgentSpec: harness.AgentSpec{Model: delegationTestModelName,
+				ToolKeys: []string{harness.DelegationToolKey}},
 		},
 	})
 	if err != nil {
@@ -217,9 +217,9 @@ func TestHarnessDelegatesDifferentGoalsToSameMember(t *testing.T) {
 		Thread:     kernel.ThreadRef{Kind: testThreadKind, ID: "thread-delegation-same-member"},
 		Goal:       "delegate two goals to the same specialist and synthesize them",
 		Config: harness.ConfigSnapshot{
-			Model:        delegationTestModelName,
-			ToolKeys:     []string{harness.DelegationToolKey},
-			ToolPolicies: []harness.ToolPolicySnapshot{harness.DelegationToolPolicySnapshot()},
+
+			ToolPolicies: []harness.ToolPolicySnapshot{harness.DelegationToolPolicySnapshot()}, AgentSpec: harness.AgentSpec{Model: delegationTestModelName,
+				ToolKeys: []string{harness.DelegationToolKey}},
 		},
 	})
 	if err != nil || completed.Turn.Status != harness.TurnCompleted {
@@ -247,9 +247,11 @@ func TestHarnessIndependentDelegationsCollectMixedTerminalResults(t *testing.T) 
 		Actor:      kernel.ActorRef{TenantID: testTenant, ActorID: testActor},
 		Thread:     kernel.ThreadRef{Kind: testThreadKind, ID: "mixed-delegation-thread"},
 		Goal:       "Synthesize successful specialist evidence even if another specialist fails",
-		Config: harness.ConfigSnapshot{Model: delegationTestModelName,
-			ToolKeys:     []string{harness.DelegationToolKey},
-			ToolPolicies: []harness.ToolPolicySnapshot{harness.DelegationToolPolicySnapshot()}},
+		Config: harness.ConfigSnapshot{
+
+			ToolPolicies: []harness.ToolPolicySnapshot{harness.DelegationToolPolicySnapshot()}, AgentSpec: harness.AgentSpec{Model: delegationTestModelName,
+				ToolKeys: []string{harness.DelegationToolKey}},
+		},
 	})
 	if err != nil || snapshot.Turn.Status != harness.TurnCompleted || string(snapshot.Output.Content) == "" {
 		t.Fatalf("mixed delegation root did not complete: %#v, err=%v", snapshot.Turn, err)
@@ -387,9 +389,9 @@ func TestHarnessDelegationGuardRemovesBlockedToolFromLaterTurns(t *testing.T) {
 		Thread:     kernel.ThreadRef{Kind: testThreadKind, ID: "thread-delegation-guard"},
 		Goal:       "respect the product delegation budget",
 		Config: harness.ConfigSnapshot{
-			Model:        delegationTestModelName,
-			ToolKeys:     []string{harness.DelegationToolKey},
-			ToolPolicies: []harness.ToolPolicySnapshot{harness.DelegationToolPolicySnapshot()},
+
+			ToolPolicies: []harness.ToolPolicySnapshot{harness.DelegationToolPolicySnapshot()}, AgentSpec: harness.AgentSpec{Model: delegationTestModelName,
+				ToolKeys: []string{harness.DelegationToolKey}},
 		},
 	})
 	if err != nil || completed.Turn.Status != harness.TurnCompleted || policy.calls != 1 {
@@ -435,9 +437,9 @@ func startBlockingDelegationHarness(
 			Thread:     kernel.ThreadRef{Kind: testThreadKind, ID: "thread-delegation-terminal"},
 			Goal:       "delegate two analyses and synthesize them",
 			Config: harness.ConfigSnapshot{
-				Model:        delegationTestModelName,
-				ToolKeys:     []string{harness.DelegationToolKey},
-				ToolPolicies: []harness.ToolPolicySnapshot{harness.DelegationToolPolicySnapshot()},
+
+				ToolPolicies: []harness.ToolPolicySnapshot{harness.DelegationToolPolicySnapshot()}, AgentSpec: harness.AgentSpec{Model: delegationTestModelName,
+					ToolKeys: []string{harness.DelegationToolKey}},
 			},
 		})
 		result <- delegationStartResult{snapshot: snapshot, err: err}

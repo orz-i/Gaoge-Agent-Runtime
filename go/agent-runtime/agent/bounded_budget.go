@@ -54,6 +54,49 @@ func NewBoundedBudgetAdapter(store budget.LedgerStore, ports BoundedBudgetPorts)
 	return &BoundedBudgetAdapter{budget.Coordinator{Store: store}, ports}, nil
 }
 func (*BoundedBudgetAdapter) Name() string { return "runtime.bounded_budget.v1" }
+
+// One Agent execution has ONE original Budget ticket owner. Different
+// adapters in Run/Model/Tool chains would split the scope and allow a callback
+// to be charged or certified by an unrelated budget authority.
+func validBoundedBudgetComposition(dependencies Dependencies) bool {
+	var original *BoundedBudgetAdapter
+	accept := func(candidate *BoundedBudgetAdapter) bool {
+		if candidate == nil {
+			return false
+		}
+		if original == nil {
+			original = candidate
+			return true
+		}
+		return original == candidate
+	}
+	run, modelSelected, tool := false, false, false
+	for _, layer := range dependencies.RunMiddleware {
+		if b, ok := layer.(*BoundedBudgetAdapter); ok {
+			if run || !accept(b) {
+				return false
+			}
+			run = true
+		}
+	}
+	for _, layer := range dependencies.ModelMiddleware {
+		if b, ok := layer.(*BoundedBudgetAdapter); ok {
+			if modelSelected || !accept(b) {
+				return false
+			}
+			modelSelected = true
+		}
+	}
+	for _, layer := range dependencies.ToolMiddleware {
+		if b, ok := layer.(*BoundedBudgetAdapter); ok {
+			if tool || !accept(b) {
+				return false
+			}
+			tool = true
+		}
+	}
+	return true
+}
 func (a *BoundedBudgetAdapter) bind(ctx context.Context, id string) (budget.Ledger, error) {
 	scope, err := a.ports.ResolveScope(ctx, id)
 	if err != nil || scope.LedgerID == "" {

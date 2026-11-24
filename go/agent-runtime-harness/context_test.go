@@ -98,7 +98,7 @@ func TestHarnessBuildsAndInjectsContextCheckpoint(t *testing.T) {
 		HostTurn:   harness.HostRef{Kind: testContextHostKind, ID: "turn-context"},
 		Actor:      kernel.ActorRef{TenantID: "tenant", ActorID: "actor"},
 		Thread:     kernel.ThreadRef{Kind: "conversation", ID: "thread-context"},
-		Goal:       testContextQuestion, Config: harness.ConfigSnapshot{Instructions: "environment instructions"},
+		Goal:       testContextQuestion, Config: harness.ConfigSnapshot{AgentSpec: harness.AgentSpec{Instructions: "environment instructions"}},
 		Context: seed,
 	})
 	if err != nil {
@@ -437,8 +437,8 @@ func runToolResultContextHarness(t *testing.T) (harness.Snapshot, *toolResultCap
 		Thread:     kernel.ThreadRef{Kind: "conversation", ID: "thread-tool-context"},
 		Goal:       testContextQuestion,
 		Config: harness.ConfigSnapshot{
-			Instructions: "environment instructions", Model: "model", ToolKeys: []string{testStoryListUnitsKey},
-			ToolPolicies: []harness.ToolPolicySnapshot{{Key: testStoryListUnitsKey, DefinitionVersion: "v1"}},
+
+			ToolPolicies: []harness.ToolPolicySnapshot{{Key: testStoryListUnitsKey, DefinitionVersion: "v1"}}, AgentSpec: harness.AgentSpec{Instructions: "environment instructions", Model: "model", ToolKeys: []string{testStoryListUnitsKey}},
 		},
 		Context: seed,
 	})

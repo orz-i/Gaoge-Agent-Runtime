@@ -74,8 +74,8 @@ func TestContextStaticFingerprintIgnoresSamplingOnlyModelOptions(t *testing.T) {
 		}},
 	}
 	base := ConfigSnapshot{
-		Environment: VersionRef{ID: "general", Revision: 7}, Instructions: "stable system instructions",
-		Model: "model-a", ModelOptions: json.RawMessage(`{"temperature":0.2,"reasoning":{"effort":"medium"}}`),
+		Environment: VersionRef{ID: "general", Revision: 7}, AgentSpec: AgentSpec{Instructions: "stable system instructions",
+			Model: "model-a", ModelOptions: json.RawMessage(`{"temperature":0.2,"reasoning":{"effort":"medium"}}`)},
 	}
 	first, err := contextStaticFingerprint(base, seed, nil)
 	if err != nil {
@@ -109,7 +109,7 @@ func TestContextStaticFingerprintIncludesProviderVisibleToolName(t *testing.T) {
 			Message: model.Message{Role: model.RoleUser, Content: model.TextParts("use the configured tool")},
 		}},
 	}
-	config := ConfigSnapshot{Model: "model-a", ToolKeys: []string{"lookup"}}
+	config := ConfigSnapshot{AgentSpec: AgentSpec{Model: "model-a", ToolKeys: []string{"lookup"}}}
 	definition := tools.Definition{
 		Key: "lookup", Name: "lookup_v1", Description: "lookup data", InputSchema: json.RawMessage(`{"type":"object"}`),
 	}
@@ -136,10 +136,10 @@ func TestContextStaticFingerprintUsesFrozenDefinitionVersionForHostedTool(t *tes
 		}},
 	}
 	base := ConfigSnapshot{
-		Model: "model-a", ToolKeys: []string{hostedContextFingerprintToolKey},
+
 		ToolPolicies: []ToolPolicySnapshot{{
 			Key: hostedContextFingerprintToolKey, DefinitionVersion: "hosted-definition-v1",
-		}},
+		}}, AgentSpec: AgentSpec{Model: "model-a", ToolKeys: []string{hostedContextFingerprintToolKey}},
 	}
 	first, err := contextStaticFingerprint(base, seed, contextFingerprintCatalog{})
 	if err != nil {
@@ -167,7 +167,7 @@ func TestContextStaticFingerprintRejectsUnknownToolWithoutFrozenDefinition(t *te
 		}},
 	}
 	_, err := contextStaticFingerprint(
-		ConfigSnapshot{Model: "model-a", ToolKeys: []string{"missing.tool"}},
+		ConfigSnapshot{AgentSpec: AgentSpec{Model: "model-a", ToolKeys: []string{"missing.tool"}}},
 		seed,
 		contextFingerprintCatalog{},
 	)

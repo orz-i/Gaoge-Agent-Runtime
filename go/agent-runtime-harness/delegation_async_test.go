@@ -271,8 +271,9 @@ func (fixture *asyncDelegationFixture) start(t *testing.T, runner *harness.Runne
 		HostTurn:   harness.HostRef{Kind: testContextHostKind, ID: "async-turn"},
 		Actor:      kernel.ActorRef{TenantID: testTenant, ActorID: testActor},
 		Thread:     kernel.ThreadRef{Kind: testThreadKind, ID: "async-thread"}, Goal: delegationTestRootGoal,
-		Config: harness.ConfigSnapshot{Model: delegationTestModelName, ToolKeys: []string{harness.DelegationToolKey},
-			ToolPolicies: []harness.ToolPolicySnapshot{harness.DelegationToolPolicySnapshot()}},
+		Config: harness.ConfigSnapshot{
+			ToolPolicies: []harness.ToolPolicySnapshot{harness.DelegationToolPolicySnapshot()}, AgentSpec: harness.AgentSpec{Model: delegationTestModelName, ToolKeys: []string{harness.DelegationToolKey}},
+		},
 	})
 	if err != nil || snapshot.Turn.Status != harness.TurnRunning {
 		t.Fatalf("async delegation start = %#v, %v", snapshot.Turn, err)

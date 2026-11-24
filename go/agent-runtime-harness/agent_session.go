@@ -3,10 +3,15 @@ package harness
 import (
 	"context"
 	"errors"
-	"strings"
+	"reflect"
+	"slices"
 
+	interactionadapter "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/interaction"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/interaction"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
@@ -40,17 +45,52 @@ type SessionTool struct {
 	Policy       ToolPolicySnapshot
 }
 
+// NamedAgent is one complete Host-selected Agent: its model, instructions,
+// Tools, private Skills and limits are frozen into the original Turn. Tools
+// contains registered child-only handlers and per-call authorization policy;
+// ToolKeys can refer to previously selected root or member Tools. The model
+// sees only MemberID and Goal in the delegation Tool input, never this bundle.
+type NamedAgent struct {
+	MemberID       string
+	MemberRevision string
+	Remote         bool // External goal-only execution; not native Model/Tool permissions.
+	AgentSpec
+	Tools []SessionTool
+}
+
 // AgentSessionOptions composes a single Agent with bounded Harness Context.
 // The Host owns both Stores, authenticated identity, model binding and transcript.
-// Only explicitly selected, versioned local Tools that do not require approval
-// are supported; use the explicit runners for advanced capabilities.
+// Selected local Tools may request durable per-call approval. The standard
+// Session uses the same Kernel approval checkpoint and Harness Turn policy.
 type AgentSessionOptions struct {
 	Runtime *kernel.Runtime
 	Store   Store
 	Model   model.Client
+	// BudgetMeter certifies model token reservations and authoritative usage.
+	// Count-only SharedBudget does not require a token meter. A selected model
+	// that implements TokenAdmissionPlanner is used by default.
+	BudgetMeter model.TokenAdmissionPlanner
 	// LocalTools supplies both the selected handlers and their policies. Leave
 	// Config.ToolKeys and Config.ToolPolicies unset when using this field.
 	LocalTools []SessionTool
+	// MemberTools are registered but never offered to the root Agent. Their
+	// explicit member/revision grants are frozen in Session.Config.DelegationPolicy.
+	MemberTools []SessionTool
+	// NamedAgents selects a finite Host-owned local/remote Agent roster.
+	// Local execution uses one Agent loop; remote members have goal-only
+	// capabilities, fixed identity/revision and explicit RemoteChildren.
+	NamedAgents    []NamedAgent
+	RemoteChildren handoff.ChildRunnerResolver
+	// The original native Hosted Tool resolver and local Tool discovery are
+	// still Host-owned. Discovery can only reveal already frozen Tool grants.
+	HostedTools   agent.HostedToolCatalog
+	ToolDiscovery agent.ToolDiscovery
+	// Relations and DelegationPolicy select and authorize named SubAgents.
+	// Handoffs may explicitly supply a child route when no SharedBudget is used;
+	// otherwise one original Agent loop is shared across root and children.
+	Handoffs         HandoffStarter
+	Relations        RunRelationSource
+	DelegationPolicy DelegationToolPolicy
 	// ExploreReads opts Host-certified nonterminal read tools (including an
 	// explicitly granted archive reader) into bounded exploration.
 	ExploreReads bool
@@ -78,7 +118,24 @@ func OpenAgentSession(options AgentSessionOptions) (*SessionClient, error) {
 	}
 	options.Session.Config = cloneConfigSnapshot(options.Session.Config)
 	config := &options.Session.Config
-	if config.DelegationPolicy.MaxDepth != 0 || len(config.DelegationPolicy.LocalToolGrants) != 0 || len(config.ToolKeys) != 0 || len(config.ToolPolicies) != 0 {
+	if err := selectNamedAgents(&options); err != nil {
+		return nil, err
+	}
+	if len(config.ToolKeys) != 0 || len(config.ToolPolicies) != 0 {
+		return nil, ErrInvalidRequest
+	}
+	delegated := options.Handoffs != nil || options.Relations != nil || options.DelegationPolicy != nil ||
+		config.DelegationPolicy.MaxDepth != 0 || len(config.DelegationPolicy.LocalToolGrants) != 0
+	if delegated {
+		if options.Relations == nil || options.DelegationPolicy == nil ||
+			config.DelegationPolicy.MaxDepth <= 0 ||
+			(len(config.DelegationPolicy.LocalToolGrants) != 0 && len(options.MemberTools) == 0) {
+			// Member-specific Tool grants need the advanced Host composition;
+			// never expose a Child-only Tool to the root to make wiring easier.
+			return nil, ErrInvalidRequest
+		}
+	}
+	if len(options.MemberTools) != 0 && !delegated {
 		return nil, ErrInvalidRequest
 	}
 	if options.ExploreReads && len(options.LocalTools) == 0 && !options.Context.ReadArtifacts {
@@ -87,6 +144,46 @@ func OpenAgentSession(options AgentSessionOptions) (*SessionClient, error) {
 	registrations, exploration, err := selectSessionTools(config, options.LocalTools, options.Context.ReadArtifacts)
 	if err != nil {
 		return nil, err
+	}
+	for _, selected := range options.MemberTools {
+		policy, policyErr := normalizedSessionTool(selected)
+		if policyErr != nil || policy.ExecutionMode != "local_dispatch" {
+			return nil, ErrInvalidRequest
+		}
+		config.ToolPolicies = append(config.ToolPolicies, policy)
+		registrations = append(registrations, selected.Registration)
+	}
+	if len(config.DelegationPolicy.NamedAgents) != 0 {
+		root := make(map[string]bool, len(config.ToolKeys))
+		for _, key := range config.ToolKeys {
+			root[key] = true
+		}
+		member := make(map[string]bool, len(options.MemberTools))
+		for _, tool := range options.MemberTools {
+			member[tool.Registration.Definition.Key] = true
+		}
+		for _, named := range config.DelegationPolicy.NamedAgents {
+			for _, key := range named.ToolKeys {
+				if root[key] {
+					continue
+				}
+				if !member[key] || nonAssignableRuntimeTool(key) {
+					return nil, ErrInvalidRequest
+				}
+				config.DelegationPolicy.LocalToolGrants = append(config.DelegationPolicy.LocalToolGrants,
+					DelegatedLocalToolGrant{MemberID: named.MemberID, MemberRevision: named.MemberRevision, ToolKey: key})
+			}
+		}
+	}
+	if delegated {
+		config.ToolKeys = append(config.ToolKeys, DelegationToolKey)
+		config.ToolPolicies = append(config.ToolPolicies, DelegationToolPolicySnapshot())
+	}
+	if len(config.Skills) != 0 {
+		config.ToolKeys = append(config.ToolKeys, SkillReadToolKey)
+	}
+	if len(config.Skills) != 0 || namedAgentHasSkills(config.DelegationPolicy.NamedAgents) {
+		config.ToolPolicies = append(config.ToolPolicies, skillReadToolPolicySnapshot())
 	}
 	if !options.ExploreReads {
 		exploration = nil
@@ -99,6 +196,19 @@ func OpenAgentSession(options AgentSessionOptions) (*SessionClient, error) {
 	if options.Context.ManagedRecovery && config.WorkingStateSummary != nil {
 		return nil, ErrInvalidRequest
 	}
+	if config.SharedBudget != nil {
+		if !enforceableHarnessBudgetLimits(*config.SharedBudget) || options.Context.ManagedRecovery ||
+			options.Context.SummaryNativeRecovery || config.WorkingStateSummary != nil {
+			return nil, ErrInvalidRequest
+		}
+		if _, ok := options.Store.(budget.LedgerStore); !ok {
+			return nil, ErrInvalidRequest
+		}
+		if delegated && (options.Handoffs != nil || options.RemoteChildren != nil) {
+			// External Agents cannot prove their Model/Tool calls join this ledger.
+			return nil, ErrInvalidRequest
+		}
+	}
 	if options.Context.ManagedRecovery || options.Context.SummaryNativeRecovery {
 		host, ok := options.Store.(managedHostStore)
 		if !ok || !options.Runtime.SupportsManagedRecovery() || !options.Runtime.UsesManagedRecoveryHost(host) {
@@ -108,31 +218,45 @@ func OpenAgentSession(options AgentSessionOptions) (*SessionClient, error) {
 	return openBoundedAgentSession(options, registrations, exploration)
 }
 
+// normalizedSessionTool is shared by root and member-only registrations. It
+// never grants a Tool to an Agent; the frozen allowlist/grant is separate.
+func normalizedSessionTool(selected SessionTool) (ToolPolicySnapshot, error) {
+	key := selected.Registration.Definition.Key
+	policy := selected.Policy
+	if policy.Key == "" {
+		policy.Key = key
+	}
+	policies, err := normalizeToolPolicies([]ToolPolicySnapshot{policy})
+	if err != nil {
+		return ToolPolicySnapshot{}, ErrInvalidRequest
+	}
+	policy = policies[0]
+	validApproval := policy.ApprovalMode == approvalModeNever && policy.ApprovalCapability == "" ||
+		policy.ApprovalMode == approvalModeAlways && policy.ApprovalCapability == approvalCapabilityPerCall
+	if policy.Key != key || nonAssignableRuntimeTool(key) || !validApproval ||
+		(policy.ExecutionMode != "" && policy.ExecutionMode != "local_dispatch") ||
+		(policy.SideEffectLevel != "read" && policy.SideEffectLevel != "write") {
+		return ToolPolicySnapshot{}, ErrInvalidRequest
+	}
+	return policy, nil
+}
+
 func selectSessionTools(config *ConfigSnapshot, selectedTools []SessionTool, readArtifacts bool) ([]tools.Registration, []string, error) {
 	registrations := make([]tools.Registration, 0, len(selectedTools))
 	var reads []string
 	for _, selected := range selectedTools {
-		key := selected.Registration.Definition.Key
-		policy := selected.Policy
-		if policy.Key == "" {
-			policy.Key = key
-		}
-		policies, err := normalizeToolPolicies([]ToolPolicySnapshot{policy})
+		policy, err := normalizedSessionTool(selected)
 		if err != nil {
 			return nil, nil, err
 		}
-		policy = policies[0]
-		if policy.Key != key || key == ContextArtifactToolKey || key == DelegationToolKey || key == agent.ToolDiscoveryKey ||
-			policy.ApprovalMode != approvalModeNever || policy.ApprovalCapability != "" ||
-			(policy.ExecutionMode != "" && policy.ExecutionMode != "local_dispatch") ||
-			(policy.SideEffectLevel != "read" && policy.SideEffectLevel != "write") {
-			return nil, nil, ErrInvalidRequest
-		}
-		if policy.SideEffectLevel == "read" && !selected.Registration.Definition.Terminal {
-			reads = append(reads, key)
+		// Exploration may change read arguments to find new evidence, but
+		// cannot classify a Tool requiring per-call Host approval as autonomous.
+		if policy.SideEffectLevel == "read" && policy.ApprovalMode == approvalModeNever &&
+			policy.ApprovalCapability == "" && !selected.Registration.Definition.Terminal {
+			reads = append(reads, policy.Key)
 		}
 		registrations = append(registrations, selected.Registration)
-		config.ToolKeys = append(config.ToolKeys, key)
+		config.ToolKeys = append(config.ToolKeys, policy.Key)
 		config.ToolPolicies = append(config.ToolPolicies, policy)
 	}
 	if readArtifacts {
@@ -144,8 +268,16 @@ func selectSessionTools(config *ConfigSnapshot, selectedTools []SessionTool, rea
 }
 
 func openBoundedAgentSession(options AgentSessionOptions, registrations []tools.Registration, exploration []string) (*SessionClient, error) {
+	var delegation *DelegationToolHandler
+	if options.DelegationPolicy != nil {
+		delegation = NewDelegationToolHandler()
+		registrations = append(registrations, DelegationToolRegistration(delegation))
+	}
 	if options.Context.ReadArtifacts {
 		registrations = append(registrations, ContextArtifactToolRegistration(NewContextArtifactToolHandler(options.Store, nil)))
+	}
+	if len(options.Session.Config.Skills) != 0 || namedAgentHasSkills(options.Session.Config.DelegationPolicy.NamedAgents) {
+		registrations = append(registrations, skillReadToolRegistration(options.Store, options.Relations))
 	}
 	registry, err := tools.NewRegistry(registrations)
 	if err != nil {
@@ -171,8 +303,14 @@ func openBoundedAgentSession(options AgentSessionOptions, registrations []tools.
 	if err != nil {
 		return nil, err
 	}
+	approvals, err := interaction.New(options.Runtime)
+	if err != nil {
+		return nil, err
+	}
 	dependencies := agent.Dependencies{
 		Runtime: options.Runtime, Model: options.Model, Catalog: registry, Executor: registry,
+		HostedTools: options.HostedTools, ToolDiscovery: options.ToolDiscovery,
+		Approvals:     interactionadapter.New(approvals),
 		RunMiddleware: []plugin.RunMiddleware{bounded}, Inputs: options.Inputs,
 		Limits: options.Limits, Execution: options.Execution, RunExecution: options.RunExecution,
 	}
@@ -184,9 +322,43 @@ func openBoundedAgentSession(options AgentSessionOptions, registrations []tools.
 		return nil, err
 	}
 	dependencies.ApprovalPolicies = []plugin.ApprovalPolicy{approval}
+	var shared *BudgetAuthority
+	if options.Session.Config.SharedBudget != nil {
+		meter := options.BudgetMeter
+		if meter == nil {
+			meter, _ = options.Model.(model.TokenAdmissionPlanner)
+		}
+		shared, err = NewBudgetAuthority(BudgetAuthorityDependencies{
+			Store: options.Store, Relations: options.Relations, Meter: meter, Clock: systemClock{},
+		})
+		if err != nil {
+			return nil, err
+		}
+		adapter, adapterErr := shared.Adapter()
+		if adapterErr != nil {
+			return nil, adapterErr
+		}
+		// Budget wraps Context: Context preparation must run in its own
+		// original trusted Context ticket, not inside the Budget Run ticket.
+		dependencies.RunMiddleware = append([]plugin.RunMiddleware{adapter}, dependencies.RunMiddleware...)
+		dependencies.ModelMiddleware = []plugin.ModelMiddleware{adapter}
+		dependencies.ToolMiddleware = []plugin.ToolMiddleware{adapter}
+		// Keep the same Context preparer without a competing summary lifecycle.
+		dependencies.BoundedContext = bounded
+	}
+	if delegation != nil {
+		if shared != nil {
+			dependencies.ToolOutcomeVerifier, err = shared.VerifiedToolOutcomeVerifier(delegation)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			dependencies.ToolOutcomeVerifier = delegation
+		}
+	}
 	if options.Context.ManagedRecovery {
 		dependencies.ManagedContextRecovery = bounded
-	} else {
+	} else if shared == nil {
 		dependencies.ContextSummary, err = NewContextSummaryAdapter(options.Store, options.Runtime, bounded, resolveWindow)
 		if err != nil {
 			return nil, err
@@ -197,11 +369,31 @@ func openBoundedAgentSession(options AgentSessionOptions, registrations []tools.
 	if err != nil {
 		return nil, err
 	}
+	routes := options.Handoffs
+	if routes == nil && options.DelegationPolicy != nil {
+		// Native children use this exact Agent loop. RemoteChildren are
+		// resolved only for explicitly frozen remote NamedAgent members.
+		if options.RemoteChildren != nil {
+			routes, err = handoff.NewAgentWithRemote(loop, options.RemoteChildren)
+		} else {
+			routes, err = handoff.New(loop)
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
 	host, err := NewRunner(Dependencies{
 		Runtime: options.Runtime, Agent: loop, Store: options.Store, Context: manager, Catalog: registry,
+		Handoffs: routes, Relations: options.Relations, DelegationPolicy: options.DelegationPolicy,
+		Budget: shared,
 	})
 	if err != nil {
 		return nil, err
+	}
+	if delegation != nil {
+		if err := delegation.Bind(host); err != nil {
+			return nil, err
+		}
 	}
 	session, err := host.OpenSession(options.Session)
 	if err != nil {
@@ -216,30 +408,84 @@ func openBoundedAgentSession(options AgentSessionOptions, registrations []tools.
 // require a delegation engine; selected delegation Tools and child facts do.
 func normalizeAgentSessionConfig(config ConfigSnapshot) (ConfigSnapshot, error) {
 	if jsoncontract.ValidateCanonicalUTF8(config) != nil || config.MaxModelOutputTokens <= 0 ||
-		len(config.Skills) != 0 || strings.TrimSpace(config.MemoryPolicy) != "" || config.SharedBudget != nil ||
 		agent.ValidateWorkingStateSummaryPolicy(config.WorkingStateSummary) != nil {
 		return ConfigSnapshot{}, ErrInvalidRequest
 	}
+	var err error
+	config.AgentSpec, err = normalizeAgentSpec(config.AgentSpec)
+	if err != nil || (len(config.HostedToolGrants) != 0 && config.Model == "") {
+		return ConfigSnapshot{}, ErrInvalidRequest
+	}
 	config.WorkingStateSummary = agent.CloneWorkingStateSummaryPolicy(config.WorkingStateSummary)
-	config.ToolKeys = normalizeStrings(config.ToolKeys)
+	var namedErr error
+	config.DelegationPolicy.NamedAgents, namedErr = normalizeNamedAgentSnapshots(config.DelegationPolicy.NamedAgents)
+	if namedErr != nil || (len(config.DelegationPolicy.NamedAgents) != 0 && config.DelegationPolicy.MaxDepth <= 0) {
+		return ConfigSnapshot{}, ErrInvalidRequest
+	}
 	policies, err := normalizeToolPolicies(config.ToolPolicies)
-	if err != nil || len(policies) != len(config.ToolKeys) {
+	if err != nil {
 		return ConfigSnapshot{}, ErrInvalidRequest
 	}
 	config.ToolPolicies = policies
+	grants, err := normalizeDelegatedLocalToolGrants(config)
+	if err != nil || (len(grants) != 0 && config.DelegationPolicy.MaxDepth <= 0) {
+		return ConfigSnapshot{}, ErrInvalidRequest
+	}
+	config.DelegationPolicy.LocalToolGrants = grants
+	memberOnly := make(map[string]bool, len(grants))
+	for _, grant := range grants {
+		memberOnly[grant.ToolKey] = true
+	}
+	if namedAgentHasSkills(config.DelegationPolicy.NamedAgents) && len(config.Skills) == 0 {
+		memberOnly[SkillReadToolKey] = true
+	}
 	selected := make(map[string]bool, len(config.ToolKeys))
 	for _, key := range config.ToolKeys {
-		if key == DelegationToolKey {
-			return ConfigSnapshot{}, ErrInvalidRequest
-		}
 		selected[key] = true
 	}
+	// Every callable or member-only grant must have exactly one immutable
+	// Tool policy. A partial policy set cannot defer approval/dispatch checks
+	// until after a Model has already selected the ungoverned Tool.
+	if len(policies) != len(selected)+len(memberOnly) {
+		return ConfigSnapshot{}, ErrInvalidRequest
+	}
+	for _, named := range config.DelegationPolicy.NamedAgents {
+		for _, key := range named.ToolKeys {
+			if nonAssignableRuntimeTool(key) {
+				return ConfigSnapshot{}, ErrInvalidRequest
+			}
+			if selected[key] {
+				continue
+			}
+			found := false
+			for _, grant := range grants {
+				if grant.MemberID == named.MemberID && grant.MemberRevision == named.MemberRevision && grant.ToolKey == key {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return ConfigSnapshot{}, ErrInvalidRequest
+			}
+		}
+	}
 	for _, policy := range policies {
-		if !selected[policy.Key] || !strings.EqualFold(policy.ApprovalMode, approvalModeNever) ||
+		if (!selected[policy.Key] && !memberOnly[policy.Key]) ||
 			(policy.ExecutionMode != "" && policy.ExecutionMode != "local_dispatch") {
 			return ConfigSnapshot{}, ErrInvalidRequest
 		}
+		if _, err := frozenApprovalRequirement(config, policy.Key); err != nil ||
+			(policy.ApprovalMode == approvalModeNever && policy.ApprovalCapability != "" && policy.Key != ContextArtifactToolKey && policy.Key != DelegationToolKey && policy.Key != SkillReadToolKey) {
+			return ConfigSnapshot{}, ErrInvalidRequest
+		}
+		if policy.Key == DelegationToolKey && (policy != DelegationToolPolicySnapshot() || config.DelegationPolicy.MaxDepth <= 0) {
+			return ConfigSnapshot{}, ErrInvalidRequest
+		}
 		if policy.Key == ContextArtifactToolKey && policy != ContextArtifactToolPolicySnapshot() {
+			return ConfigSnapshot{}, ErrInvalidRequest
+		}
+		if policy.Key == SkillReadToolKey && (policy != skillReadToolPolicySnapshot() ||
+			(len(config.Skills) == 0 && !namedAgentHasSkills(config.DelegationPolicy.NamedAgents))) {
 			return ConfigSnapshot{}, ErrInvalidRequest
 		}
 	}
@@ -261,6 +507,50 @@ func (session *SessionClient) preflightAgentSessionResume(ctx context.Context, t
 	}
 	if _, err = normalizeAgentSessionConfig(config); err != nil {
 		return err
+	}
+	// A reopened handle may provide new Tools for FUTURE Turns, but it cannot
+	// run an old checkpoint with changed approval, side-effect, or version
+	// semantics. This includes private member Tool grants, not only root Tools.
+	// Read-only Session operations remain available for safe inspection.
+	// Reconstruct the same pure Host execution-policy resolution used at
+	// original Turn admission. A reopened handle cannot silently change a
+	// physical Budget participant, its resolved ceilings or delegation depth.
+	current, err := session.runner.resolveConfigExecutionPolicy(session.config)
+	if err != nil {
+		return err
+	}
+	if (config.SharedBudget == nil) != (current.SharedBudget == nil) ||
+		(config.SharedBudget != nil && *config.SharedBudget != *current.SharedBudget) ||
+		config.DelegationPolicy.MaxDepth != current.DelegationPolicy.MaxDepth {
+		return ErrInvalidRequest
+	}
+	// Persisted JSON omits optional empty ToolKey lists. Compare the two
+	// independently normalized immutable Named Agent snapshots, never their
+	// raw nil/empty slices or a mutable current Host selection.
+	originalNamed, namedErr := normalizeNamedAgentSnapshots(config.DelegationPolicy.NamedAgents)
+	if namedErr != nil {
+		return namedErr
+	}
+	currentNamed, namedErr := normalizeNamedAgentSnapshots(session.config.DelegationPolicy.NamedAgents)
+	if namedErr != nil {
+		return namedErr
+	}
+	// The paused Root always uses its original sealed AgentSpec. Current
+	// handle instructions, Model and ceiling may describe future Turns, but
+	// existing native Hosted Tool resolver/grants may not silently diverge:
+	// the model might otherwise invoke a different provider-owned capability.
+	if !slices.Equal(config.ToolKeys, session.config.ToolKeys) ||
+		!slices.Equal(config.HostedToolGrants, current.HostedToolGrants) ||
+		!slices.Equal(config.ToolPolicies, session.config.ToolPolicies) ||
+		!slices.Equal(config.DelegationPolicy.LocalToolGrants, session.config.DelegationPolicy.LocalToolGrants) ||
+		!reflect.DeepEqual(originalNamed, currentNamed) {
+		return ErrInvalidRequest
+	}
+	if config.SharedBudget != nil && (session.runner.budgets == nil ||
+		config.WorkingStateSummary != nil ||
+		session.runner.agent.(*agent.Runner).SupportsManagedContextRecovery() ||
+		session.runner.agent.(*agent.Runner).SupportsSummaryNativeRecovery()) {
+		return ErrInvalidRequest
 	}
 	if config.WorkingStateSummary != nil {
 		if native, ok := session.runner.agent.(*agent.Runner); !ok || !native.SupportsContextSummary() || native.SupportsManagedContextRecovery() {
@@ -289,8 +579,21 @@ func (session *SessionClient) preflightAgentSessionResume(ctx context.Context, t
 	if session.runner.catalog == nil {
 		return ErrInvalidRequest
 	}
-	if _, err = session.runner.catalog.List(config.ToolKeys); err != nil {
+	toolKeys := append([]string(nil), config.ToolKeys...)
+	for _, grant := range config.DelegationPolicy.LocalToolGrants {
+		toolKeys = append(toolKeys, grant.ToolKey)
+	}
+	if _, err = session.runner.catalog.List(normalizeStrings(toolKeys)); err != nil {
 		return errors.Join(ErrInvalidRequest, err)
+	}
+	allowedSubAgents := false
+	for _, key := range config.ToolKeys {
+		if key == DelegationToolKey {
+			if session.runner.handoffs == nil || session.runner.relationReader == nil || session.runner.delegationPolicy == nil {
+				return ErrInvalidRequest
+			}
+			allowedSubAgents = true
+		}
 	}
 	owners, err := store.ListInvocations(ctx, turnID)
 	if err != nil {
@@ -300,7 +603,7 @@ func (session *SessionClient) preflightAgentSessionResume(ctx context.Context, t
 		if owner.TurnID != turnID {
 			return ErrConflict
 		}
-		if owner.ParentItemID != "" {
+		if owner.ParentItemID != "" && !allowedSubAgents {
 			return ErrInvalidRequest
 		}
 	}
@@ -312,8 +615,8 @@ func (session *SessionClient) preflightAgentSessionResume(ctx context.Context, t
 		if item.TurnID != turnID {
 			return ErrConflict
 		}
-		if item.Kind == ItemDelegation || item.Kind == ItemSubtask || item.Kind == ItemApproval ||
-			item.Kind == ItemInteraction || item.Kind == ItemBudget {
+		if (item.Kind == ItemDelegation || item.Kind == ItemSubtask) && !allowedSubAgents ||
+			item.Kind == ItemInteraction || (item.Kind == ItemBudget && config.SharedBudget == nil) {
 			return ErrInvalidRequest
 		}
 	}

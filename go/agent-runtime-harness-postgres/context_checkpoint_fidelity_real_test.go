@@ -6,7 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
 	harnesspostgres "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-postgres"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness/conformance"
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
@@ -82,4 +84,37 @@ func TestRealPostgresContextCheckpointPreservesLosslessWindowHash(t *testing.T) 
 			t.Fatalf("PostgreSQL changed lossless checkpoint: got=%+v want=%+v err=%v", got, want, err)
 		}
 	}
+}
+
+// PostgreSQL and desktop SQLite must share the same exact-JSON durability
+// contract, including across an independent Store handle and replayed Put.
+func TestRealPostgresCheckpointOpaqueEvidenceReopen(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("TEST_POSTGRES_DSN"))
+	if dsn == "" {
+		t.Skip("TEST_POSTGRES_DSN is not configured")
+	}
+	db, isolatedDSN := openIsolatedHarnessPostgres(t, dsn)
+	if err := harnesspostgres.Migrate(db); err != nil {
+		t.Fatal(err)
+	}
+	writer, err := harnesspostgres.New(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conformance.CheckpointOpaqueEvidence(t, writer, func() harness.Store {
+		reopenedDB, err := gorm.Open(postgres.Open(isolatedDSN), realHarnessPostgresTestConfig())
+		if err != nil {
+			t.Fatal(err)
+		}
+		sqlDB, err := reopenedDB.DB()
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = sqlDB.Close() })
+		reader, err := harnesspostgres.New(reopenedDB)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return reader
+	})
 }

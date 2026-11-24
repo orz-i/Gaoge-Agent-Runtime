@@ -30,7 +30,7 @@ func TestRootRetryDirectStoreCannotBypassOriginalBudgetCAS(t *testing.T) {
 				configID := "legacy-unbudgeted-fixture"
 				if mode == "frozen-budget-without-ledger" {
 					sealed, err := harness.SealConfigSnapshot(scope, harness.ConfigSnapshot{
-						Model: "test", SharedBudget: &budget.Limits{MaxLLMCalls: 2, MaxTotalTokens: 300},
+						SharedBudget: &budget.Limits{MaxLLMCalls: 2, MaxTotalTokens: 300}, AgentSpec: harness.AgentSpec{Model: "test"},
 					}, now)
 					if err != nil {
 						t.Fatal(err)
@@ -51,8 +51,7 @@ func TestRootRetryDirectStoreCannotBypassOriginalBudgetCAS(t *testing.T) {
 				input := []byte(`{"goal":"original cancelled, no external retry"}`)
 				digest := sha256.Sum256(input)
 				root := harness.Invocation{
-					ID: "root-" + scope, TurnID: turn.ID, CapabilityKey: harness.CapabilityAgent,
-					ExecutionClass: harness.ExecutionAgent, ExecutionRefID: "original-" + scope,
+					ID: "root-" + scope, TurnID: turn.ID, ExecutionRefID: "original-" + scope,
 					Input: input, InputHash: hex.EncodeToString(digest[:]),
 					Status: harness.InvocationCancelled, Attempt: 1, Revision: 1,
 					CreatedAt: now, UpdatedAt: now, OutputRefs: []harness.HostRef{},

@@ -54,14 +54,14 @@ func (policy *FrozenApprovalPolicy) Approval(
 		strings.TrimSpace(invocation.Definition.Key) == "" {
 		return plugin.ApprovalNotRequired, ErrInvalidRequest
 	}
-	capabilityInvocation, err := policy.resolveCapabilityInvocation(ctx, invocation.Run.ID)
+	agentInvocation, err := policy.resolveAgentInvocation(ctx, invocation.Run.ID)
 	if errors.Is(err, ErrNotFound) {
 		return plugin.ApprovalNotRequired, nil
 	}
 	if err != nil {
 		return plugin.ApprovalNotRequired, err
 	}
-	turn, err := loadVerifiedTurn(ctx, policy.store, capabilityInvocation.TurnID)
+	turn, err := loadVerifiedTurn(ctx, policy.store, agentInvocation.TurnID)
 	if err != nil {
 		return plugin.ApprovalNotRequired, err
 	}
@@ -72,7 +72,7 @@ func (policy *FrozenApprovalPolicy) Approval(
 	return frozenApprovalRequirement(config, invocation.Definition.Key)
 }
 
-func (policy *FrozenApprovalPolicy) resolveCapabilityInvocation(
+func (policy *FrozenApprovalPolicy) resolveAgentInvocation(
 	ctx context.Context,
 	runID string,
 ) (Invocation, error) {

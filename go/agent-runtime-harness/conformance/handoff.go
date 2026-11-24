@@ -53,7 +53,7 @@ func RemoteHandoffCancellation(t *testing.T, store harness.Store, c RemoteCancel
 	}
 	turnID := "pr82-remote-cancel"
 	rootRunID := "pr82-local-root-run"
-	rootID, err := harness.InvocationID(turnID, "", harness.CapabilityAgent, "root")
+	rootID, err := harness.AgentInvocationID(turnID, "", "root")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,8 +83,8 @@ func RemoteHandoffCancellation(t *testing.T, store harness.Store, c RemoteCancel
 		t.Fatal(err)
 	}
 	rootDigest := sha256.Sum256(rootInput)
-	root := harness.Invocation{ID: rootID, TurnID: turnID, CapabilityKey: harness.CapabilityAgent,
-		ExecutionClass: harness.ExecutionAgent, Input: rootInput, InputHash: hex.EncodeToString(rootDigest[:]),
+	root := harness.Invocation{ID: rootID, TurnID: turnID,
+		Input: rootInput, InputHash: hex.EncodeToString(rootDigest[:]),
 		ExecutionRefID: rootRunID, Status: harness.InvocationRunning,
 		Attempt: 1, Revision: 1, OutputRefs: []harness.HostRef{}, CreatedAt: now, UpdatedAt: now}
 	if _, _, err := store.CreateInvocation(ctx, root); err != nil {
@@ -94,7 +94,7 @@ func RemoteHandoffCancellation(t *testing.T, store harness.Store, c RemoteCancel
 	if c.MemberRevision {
 		delegation.MemberRevision = "specialist-v1"
 	}
-	invocationID, err := harness.InvocationID(turnID, parentItemID, harness.CapabilityAgent, delegation.ID)
+	invocationID, err := harness.AgentInvocationID(turnID, parentItemID, delegation.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,8 +115,8 @@ func RemoteHandoffCancellation(t *testing.T, store harness.Store, c RemoteCancel
 	}
 	digest := sha256.Sum256(input)
 	child := harness.Invocation{ID: invocationID, TurnID: turnID, ParentItemID: parentItemID,
-		CapabilityKey: harness.CapabilityAgent, DefinitionVersion: harness.RuntimeCapabilityVersion,
-		ExecutionClass: harness.ExecutionAgent, ExecutionRefID: childRunID, Input: input, InputHash: hex.EncodeToString(digest[:]),
+
+		ExecutionRefID: childRunID, Input: input, InputHash: hex.EncodeToString(digest[:]),
 		Status: harness.InvocationAccepted, Attempt: 1, Revision: 1, OutputRefs: []harness.HostRef{},
 		CreatedAt: now, UpdatedAt: now}
 	if _, _, err := store.CreateInvocation(ctx, child); err != nil {

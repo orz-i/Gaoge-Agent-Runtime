@@ -12,29 +12,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
-// ErrExecutionNoEffect may be returned by a host Feature StartRun ONLY when
-// the Feature can certify it issued no external effect and created no Kernel
-// Run. A generic error (including kernel.ErrConflict) is never such proof.
-// It permits a failed Invocation only after the Harness persists the grant's
-// no-effect completion receipt, so an uncertain receipt remains fenced.
-var ErrExecutionNoEffect = errors.New("harness feature start definitively performed no effect")
-
-// FeatureStartNoEffect preserves the original, host-visible failure while
-// explicitly certifying that StartRun did not create a Run or dispatch an
-// external effect. Hosts must never use it for timeouts or unknown outcomes.
-func FeatureStartNoEffect(cause error) error {
-	if cause == nil {
-		return ErrExecutionNoEffect
-	}
-	return featureStartNoEffect{cause: cause}
-}
-
-type featureStartNoEffect struct{ cause error }
-
-func (e featureStartNoEffect) Error() string      { return e.cause.Error() }
-func (e featureStartNoEffect) Unwrap() error      { return e.cause }
-func (featureStartNoEffect) Is(target error) bool { return target == ErrExecutionNoEffect }
-
 // ErrExecutionOutcomeUnknown means a Feature Start returned no authoritative
 // Kernel Run snapshot without a proven no-effect outcome. The original Run ID
 // and grant must be retained for reconciliation; Retry cannot rotate them.
@@ -165,13 +142,17 @@ func VerifiedExecutionDispatchReceipt(grant Item, receipts []Item) (string, bool
 		if phase != "handoff-start" {
 			return payload["boundary"], true
 		}
-	case "feature_start_no_effect", "native_agent_start_no_effect", "native_kernel_epoch_recovered":
+	case "native_agent_start_no_effect", "native_kernel_epoch_recovered":
 		if phase == "start" || phase == "start-retry" {
 			return payload["boundary"], true
 		}
 	case "native_agent_control_no_effect":
 		if phase == "resolve-approval" || phase == "resolve-subtask-approval" ||
 			phase == "grant-call-allowance" {
+			return payload["boundary"], true
+		}
+	case "native_allowance_committed":
+		if phase == "grant-call-allowance" {
 			return payload["boundary"], true
 		}
 	case "handoff_start_returned":
@@ -271,8 +252,7 @@ func (runner *Runner) nativeAgentStartOwnedByKernel(ctx context.Context, grant I
 	}
 	owner, err := runner.store.GetInvocation(ctx, grant.InvocationID)
 	if err != nil || owner.ID != grant.InvocationID || owner.TurnID != grant.TurnID ||
-		owner.ParentItemID != "" || owner.ExecutionClass != ExecutionAgent ||
-		owner.ExecutionRefID != grant.RunID {
+		owner.ParentItemID != "" || owner.ExecutionRefID != grant.RunID {
 		return false
 	}
 	started, err := runner.runtime.Load(ctx, grant.RunID)
@@ -387,7 +367,7 @@ func (runner *Runner) withPhysicalInvocationDispatchForContext(
 	}
 	native, nativeAgent := runner.agent.(*agent.Runner)
 	var operation plugin.RunOperation
-	observe := nativeAgent && invocation.ExecutionClass == ExecutionAgent
+	observe := nativeAgent
 	switch phase {
 	case "start", "start-retry":
 		operation = plugin.RunStart
@@ -438,19 +418,6 @@ func (runner *Runner) withPhysicalInvocationDispatchForContext(
 				return snapshot, errors.Join(ErrExecutionOutcomeUnknown, physicalErr, receiptErr)
 			}
 		}
-		// The public Host Feature no-effect contract applies to custom
-		// Features/Agents, never to an exact native *agent.Runner Start. A
-		// native Run Middleware can perform effects and return that public
-		// marker; only the private direct pre-middleware proof above may
-		// discharge the native Agent's physical grant.
-		customFeatureNoEffect := !nativeAgent || invocation.ExecutionClass != ExecutionAgent
-		if customFeatureNoEffect && (phase == "start" || phase == "start-retry") && errors.Is(physicalErr, ErrExecutionNoEffect) {
-			if receiptErr := runner.finishPhysicalDispatchGrant(ctx, grant, "feature_start_no_effect"); receiptErr == nil {
-				return snapshot, dispatchProvenNoEffect{cause: physicalErr}
-			} else {
-				return snapshot, errors.Join(ErrExecutionOutcomeUnknown, physicalErr, receiptErr)
-			}
-		}
 		// Unknown effects retain the grant and its exact execution identity
 		// for explicit reconciliation, including errors without a snapshot.
 		return snapshot, errors.Join(ErrExecutionOutcomeUnknown, physicalErr)
@@ -464,7 +431,11 @@ func (runner *Runner) withPhysicalInvocationDispatchForContext(
 		// durable known yield still protected by its original Kernel scope.
 		return snapshot, errors.Join(ErrExecutionOutcomeUnknown, physicalErr)
 	}
-	return snapshot, errors.Join(physicalErr, runner.finishPhysicalDispatchGrant(ctx, grant, "physical_dispatch_returned"))
+	boundary := "physical_dispatch_returned"
+	if phase == "grant-call-allowance" && nativeAgent && physicalErr == nil {
+		boundary = "native_allowance_committed"
+	}
+	return snapshot, errors.Join(physicalErr, runner.finishPhysicalDispatchGrant(ctx, grant, boundary))
 }
 
 // beginPhysicalInvocationDispatch is shared by Kernel Feature operations and
@@ -505,7 +476,22 @@ func (runner *Runner) beginPhysicalInvocationDispatch(
 		ParentItemID: ExecutionDispatchParentItemID, Payload: payload,
 		CreatedAt: now, UpdatedAt: now,
 	}
-	if _, fresh, appendErr := runner.store.AppendItem(ctx, grant); appendErr != nil || !fresh {
+	if phase == "grant-call-allowance" {
+		if original, ok := ctx.Value(allowanceGrantKey{}).(string); ok {
+			grant.ID = original
+		}
+	}
+	_, fresh, appendErr := runner.store.AppendItem(ctx, grant)
+	if phase == "resume" && errors.Is(appendErr, ErrConflict) {
+		repaired, repairErr := runner.recoverAllowanceDispatch(ctx, invocation)
+		if repairErr != nil {
+			return Item{}, errors.Join(ErrConflict, repairErr)
+		}
+		if repaired {
+			_, fresh, appendErr = runner.store.AppendItem(ctx, grant)
+		}
+	}
+	if appendErr != nil || !fresh {
 		return Item{}, errors.Join(ErrConflict, appendErr)
 	}
 	if parentErr := runner.requireLiveInvocationParents(ctx, invocation); parentErr != nil {

@@ -36,7 +36,7 @@ func TestIndependentApprovalRequiresCancellationDispatchAuthority(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	config := harness.ConfigSnapshot{ToolKeys: []string{approvalTestToolKey}, ToolPolicies: []harness.ToolPolicySnapshot{{Key: approvalTestToolKey, DefinitionVersion: "v1", ApprovalCapability: approvalTestCapabilityPerCall, ApprovalMode: "always"}}}
+	config := harness.ConfigSnapshot{ToolPolicies: []harness.ToolPolicySnapshot{{Key: approvalTestToolKey, DefinitionVersion: "v1", ApprovalCapability: approvalTestCapabilityPerCall, ApprovalMode: "always"}}, AgentSpec: harness.AgentSpec{ToolKeys: []string{approvalTestToolKey}}}
 	waiting := startApprovalHarness(t, runner, config)
 	checkpoint := latestApprovalCheckpoint(t, waiting)
 	root, ok := harness.TopLevelInvocation(waiting)

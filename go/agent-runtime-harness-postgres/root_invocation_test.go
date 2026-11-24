@@ -70,9 +70,7 @@ func rootInvocationFixture(id, turnID, parentItemID string) harness.Invocation {
 	input := json.RawMessage(`{"goal":"invocation fixture"}`)
 	hash := sha256.Sum256(input)
 	return harness.Invocation{
-		ID: id, TurnID: turnID, ParentItemID: parentItemID, CapabilityKey: harness.CapabilityAgent,
-		DefinitionVersion: harness.RuntimeCapabilityVersion, ExecutionClass: harness.ExecutionAgent,
-		Input: input, InputHash: fmt.Sprintf("%x", hash),
+		ID: id, TurnID: turnID, ParentItemID: parentItemID, Input: input, InputHash: fmt.Sprintf("%x", hash),
 		ExecutionRefID: "run-" + id, Status: harness.InvocationAccepted, Attempt: 1, Revision: 1,
 		OutputRefs: []harness.HostRef{}, CreatedAt: now, UpdatedAt: now,
 	}

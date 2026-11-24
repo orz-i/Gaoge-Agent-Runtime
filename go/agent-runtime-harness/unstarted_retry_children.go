@@ -37,9 +37,7 @@ func validUnstartedRetryHistoricalChildren(root Invocation, children []Invocatio
 		// Keep EXACTLY the same reserved-Handoff hard cut as normal
 		// ValidTurnTerminalDescendants: corrupting its frozen Input must
 		// never downgrade a physical ChildRunner to an ordinary child.
-		if !handoff && child.ExecutionClass == ExecutionAgent &&
-			child.CapabilityKey == CapabilityAgent &&
-			strings.HasPrefix(child.ParentItemID, "hid_") {
+		if !handoff && strings.HasPrefix(child.ParentItemID, "hid_") {
 			return false
 		}
 		if !handoff {

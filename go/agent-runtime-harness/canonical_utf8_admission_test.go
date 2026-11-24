@@ -44,14 +44,14 @@ func TestCanonicalUTF8ConfigIdentityMatrixRejectsBeforeHash(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			for n := 0x80; n <= 0xff; n++ {
-				config := harness.ConfigSnapshot{Model: "fixture"}
+				config := harness.ConfigSnapshot{AgentSpec: harness.AgentSpec{Model: "fixture"}}
 				tc.mutate(&config, string([]byte{byte(n)}))
 				if _, err := harness.SealConfigSnapshot("turn", config, time.Unix(1000, 0)); !errors.Is(err, harness.ErrInvalidRequest) {
 					t.Fatalf("invalid byte %02x accepted in %s: %v", n, tc.name, err)
 				}
 			}
 			// Real replacement rune is not itself an invalid UTF-8 sequence.
-			valid := harness.ConfigSnapshot{Model: "fixture"}
+			valid := harness.ConfigSnapshot{AgentSpec: harness.AgentSpec{Model: "fixture"}}
 			tc.mutate(&valid, "�")
 			if _, err := harness.SealConfigSnapshot("turn", valid, time.Unix(1000, 0)); err != nil {
 				t.Fatalf("valid replacement rune rejected in %s: %v", tc.name, err)
@@ -66,14 +66,13 @@ func TestCanonicalUTF8ConfigJSONEscapesNeverAliasAtSeal(t *testing.T) {
 		"{\"route\":\"\\udc00\"}",
 		"{\"route\":\"\\ud800\\ud800\"}",
 	} {
-		config := harness.ConfigSnapshot{Model: "fixture", ModelOptions: json.RawMessage(bad)}
+		config := harness.ConfigSnapshot{AgentSpec: harness.AgentSpec{Model: "fixture", ModelOptions: json.RawMessage(bad)}}
 		if _, err := harness.SealConfigSnapshot("turn", config, time.Unix(1000, 0)); !errors.Is(err, harness.ErrInvalidRequest) {
 			t.Fatalf("unpaired JSON Unicode escape sealed: %s err=%v", bad, err)
 		}
 	}
-	valid := harness.ConfigSnapshot{
-		Model:        "fixture",
-		ModelOptions: json.RawMessage("{\"route\":\"\\ud83e\\udde9\"}"),
+	valid := harness.ConfigSnapshot{AgentSpec: harness.AgentSpec{Model: "fixture",
+		ModelOptions: json.RawMessage("{\"route\":\"\\ud83e\\udde9\"}")},
 	}
 	if _, err := harness.SealConfigSnapshot("turn", valid, time.Unix(1000, 0)); err != nil {
 		t.Fatalf("valid surrogate pair rejected: %v", err)
@@ -168,8 +167,8 @@ func TestCanonicalUTF8DirectHarnessStartFailsBeforeDurableAdmission(t *testing.T
 		{"input-reference", func(r *harness.StartRequest) {
 			r.InputMessage = &harness.HostRef{Kind: "message", ID: "bad-\xe2\x82"}
 		}},
-		{"config-memory-policy", func(r *harness.StartRequest) {
-			r.Config.MemoryPolicy = "bad-\xff"
+		{"config-model", func(r *harness.StartRequest) {
+			r.Config.Model = "bad-\xff"
 		}},
 		{"context-instructions", func(r *harness.StartRequest) {
 			r.Context.Instructions = "bad-\xfe"

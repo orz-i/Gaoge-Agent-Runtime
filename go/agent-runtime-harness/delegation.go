@@ -12,6 +12,7 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
@@ -28,6 +29,7 @@ type DelegateRequest struct {
 	MemberID       string             `json:"memberID"`
 	Goal           string             `json:"goal"`
 	MemberRevision string             `json:"-"`
+	Remote         bool               `json:"-"`
 	Agent          agent.StartRequest `json:"-"`
 	callID         string
 	// Preserve the first model Call identity even after Host policy prepares
@@ -70,31 +72,24 @@ func normalizeDelegateRequest(request DelegateRequest) (DelegateRequest, error) 
 	if a.ID != "" || a.RequestID != "" || a.ParentRunID != "" || a.OriginFingerprint != "" ||
 		a.Actor != (kernel.ActorRef{}) || a.Thread != (kernel.ThreadRef{}) || a.Goal != "" ||
 		a.DeadlineAt != nil || a.CallAllowance != nil || a.AutoAllowance != nil ||
-		len(a.RequiredToolKeys) != 0 || a.OutputContract != nil || a.MaxModelOutputTokens < 0 || !enforceableHarnessBudgetLimits(a.Limits) {
+		len(a.RequiredToolKeys) != 0 || model.ValidateOutputContract(a.OutputContract) != nil || a.MaxModelOutputTokens < 0 || !enforceableHarnessBudgetLimits(a.Limits) {
 		return DelegateRequest{}, ErrInvalidRequest
 	}
-	a.Instructions = strings.TrimSpace(a.Instructions)
-	a.Model = strings.TrimSpace(a.Model)
-	var err error
-	a.ModelOptions, err = canonicalJSON(a.ModelOptions)
+	// Advanced Host-selected child routes and the standard NamedAgent roster
+	// have exactly the same capability validation and native mapping. Only
+	// physical identity, authorization and allowance fields are not AgentSpec.
+	spec, err := normalizeAgentSpec(AgentSpec{
+		Model: a.Model, ModelOptions: a.ModelOptions, Instructions: a.Instructions,
+		OutputContract: a.OutputContract, MaxModelOutputTokens: a.MaxModelOutputTokens,
+		ToolKeys: a.ToolKeys, InitialToolKeys: a.InitialToolKeys,
+		HostedToolGrants: a.HostedToolGrants, Limits: a.Limits,
+	})
 	if err != nil {
 		return DelegateRequest{}, err
 	}
-	a.ToolKeys = normalizeStrings(a.ToolKeys)
-	a.InitialToolKeys = normalizeStrings(a.InitialToolKeys)
-	for _, key := range a.InitialToolKeys {
-		if !slices.Contains(a.ToolKeys, key) {
-			return DelegateRequest{}, ErrInvalidRequest
-		}
-	}
-	a.HostedToolGrants, err = agent.NormalizeHostedToolGrantsForRole(a.HostedToolGrants)
-	if err != nil {
+	request.Agent = spec.startRequest()
+	if request.Remote && !agent.SupportsRemoteGoalOnly(request.Agent) {
 		return DelegateRequest{}, ErrInvalidRequest
-	}
-	for _, grant := range a.HostedToolGrants {
-		if slices.Contains(a.ToolKeys, grant.Key) {
-			return DelegateRequest{}, ErrInvalidRequest
-		}
 	}
 	return request, nil
 }
@@ -138,7 +133,7 @@ func (runner *Runner) authorizeDelegation(ctx context.Context, execution tools.E
 	return request, nil
 }
 
-// DelegateByExecutionRefID is the Tool-facing form used by an Agent capability
+// DelegateByExecutionRefID is the Tool-facing form used by an Agent
 // without exposing Harness Turn or Invocation IDs to the model.
 func (runner *Runner) DelegateByExecutionRefID(ctx context.Context, executionRefID string, request DelegateRequest) (DelegationResult, error) {
 	invocation, err := runner.store.GetInvocationByExecutionRefID(ctx, strings.TrimSpace(executionRefID))
@@ -272,7 +267,7 @@ func (runner *Runner) verifiedTerminalDelegationReplay(
 
 func (runner *Runner) canDelegate(invocation Invocation) bool {
 	return runner != nil && runner.handoffs != nil && runner.relations != nil &&
-		invocation.ExecutionClass == ExecutionAgent && strings.TrimSpace(invocation.ExecutionRefID) != ""
+		strings.TrimSpace(invocation.ExecutionRefID) != ""
 }
 
 func (runner *Runner) prepareDelegation(
@@ -312,6 +307,17 @@ func (runner *Runner) prepareDelegation(
 	// names into an independent Role/Tool/Skill policy of its own.
 	a := request.Agent
 	delegation.MemberRevision = request.MemberRevision
+	delegation.Remote = request.Remote
+	if delegation.Remote {
+		// The selected remote member has its own identity/revision but none
+		// of the parent's native Model, Tool, sampling or budget capabilities.
+		named, selected := namedAgentForMember(config, request.MemberID, request.MemberRevision)
+		if !selected || !named.Remote || !agent.SupportsRemoteGoalOnly(a) ||
+			config.SharedBudget != nil {
+			return handoff.Delegation{}, parent, ErrInvalidRequest
+		}
+		return delegation, parent, nil
+	}
 	// In a nested handoff the immediate parent may run a different Model from
 	// the Turn root. ModelOptions and local Tool visibility belong to that
 	// parent, not a second resolution of the root Config catalog.
@@ -341,6 +347,21 @@ func (runner *Runner) prepareDelegation(
 		delegation.ModelOptions = append(json.RawMessage(nil), a.ModelOptions...)
 	}
 	delegation.Instructions = a.Instructions
+	delegation.OutputContract = model.CloneOutputContract(a.OutputContract)
+	if len(config.DelegationPolicy.NamedAgents) != 0 {
+		named, found := namedAgentForMember(config, request.MemberID, request.MemberRevision)
+		if !found || a.Model != named.Model || !slices.Equal(normalizeStrings(a.ToolKeys), named.ToolKeys) ||
+			!slices.Equal(normalizeStrings(a.InitialToolKeys), named.InitialToolKeys) ||
+			!slices.Equal(a.HostedToolGrants, named.HostedToolGrants) || a.Instructions != named.Instructions ||
+			a.MaxModelOutputTokens != named.MaxModelOutputTokens || a.Limits != named.Limits ||
+			!reflect.DeepEqual(a.OutputContract, named.OutputContract) ||
+			!reflect.DeepEqual(a.ModelOptions, named.ModelOptions) {
+			return handoff.Delegation{}, parent, ErrInvalidRequest
+		}
+		if manifest := selectedSkillManifest(named.Skills); manifest != "" {
+			delegation.Instructions = strings.TrimSpace(delegation.Instructions + "\n\n" + manifest)
+		}
+	}
 	var local []string
 	if len(a.ToolKeys) != 0 {
 		if viewErr != nil {
@@ -364,6 +385,11 @@ func (runner *Runner) prepareDelegation(
 			"delegation.tool_selection_denied", "The requested child tools are not authorized by the original parent Run.", err)
 	}
 	delegation.ToolKeys = normalizeStrings(append(delegation.ToolKeys, local...))
+	if named, found := namedAgentForMember(config, request.MemberID, request.MemberRevision); found && len(named.Skills) != 0 {
+		// This reserved Tool is not an ordinary local grant and never belongs
+		// to the parent merely because its child is authorized to read Skills.
+		delegation.ToolKeys = append(delegation.ToolKeys, SkillReadToolKey)
+	}
 	delegation.HostedToolGrants = append([]agent.HostedToolGrant(nil), a.HostedToolGrants...)
 	if len(delegation.HostedToolGrants) > 0 && delegation.Model == "" {
 		return handoff.Delegation{}, parent, ErrInvalidRequest
@@ -512,8 +538,8 @@ func (runner *Runner) dispatchHandoff(
 ) (handoff.Delegation, error) {
 	child, err := runner.store.GetInvocationByExecutionRefID(ctx, delegation.ChildRunID)
 	if err != nil || child.TurnID != turn.ID || child.ParentItemID != parentItemID ||
-		child.ExecutionClass != ExecutionAgent || child.ExecutionRefID != delegation.ChildRunID ||
-		child.CapabilityKey != CapabilityAgent || !isHandoffDelegationInvocation(child) {
+		child.ExecutionRefID != delegation.ChildRunID ||
+		!validInvocationExecutionAuthority(child) || !isHandoffDelegationInvocation(child) {
 		return handoff.Delegation{}, errors.Join(ErrConflict, err)
 	}
 	// The hashed child Input, not the caller's slice-backed Delegation, is
@@ -564,6 +590,16 @@ func sameHandoffFrozenExecution(expected, returned handoff.Delegation) bool {
 }
 
 func normalizeHandoffForComparison(value *handoff.Delegation) bool {
+	if value.OutputContract != nil {
+		// Frozen Handoff JSON has normalized the nested schema at admission;
+		// compare equivalent immutable bytes, not caller-owned input spacing.
+		encoded, err := json.Marshal(value.OutputContract.Schema)
+		if err != nil {
+			return false
+		}
+		value.OutputContract = model.CloneOutputContract(value.OutputContract)
+		value.OutputContract.Schema = encoded
+	}
 	if len(value.ModelOptions) == 0 {
 		value.ModelOptions = nil
 	} else {

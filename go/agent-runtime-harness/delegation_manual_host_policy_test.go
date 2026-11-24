@@ -24,7 +24,7 @@ func TestManualDelegationUsesExactHostNamedAgentPolicy(t *testing.T) {
 			Actor:  kernel.ActorRef{TenantID: testTenant, ActorID: testActor},
 			Thread: kernel.ThreadRef{Kind: testThreadKind, ID: hostThread.ID},
 			Goal:   "keep parent active for Host manual delegation",
-			Config: harness.ConfigSnapshot{Model: delegationTestModelName, ToolKeys: []string{harness.DelegationToolKey}, ToolPolicies: []harness.ToolPolicySnapshot{harness.DelegationToolPolicySnapshot()}},
+			Config: harness.ConfigSnapshot{ToolPolicies: []harness.ToolPolicySnapshot{harness.DelegationToolPolicySnapshot()}, AgentSpec: harness.AgentSpec{Model: delegationTestModelName, ToolKeys: []string{harness.DelegationToolKey}}},
 		})
 		rootDone <- err
 	}()

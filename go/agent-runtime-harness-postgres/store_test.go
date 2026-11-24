@@ -35,7 +35,7 @@ func TestStorePersistsHarnessLifecycleAndCAS(t *testing.T) {
 	}
 	assertSessionLifecycle(t, store, session)
 	config, err := harness.SealConfigSnapshot("ht_pg", harness.ConfigSnapshot{
-		Environment: harness.VersionRef{ID: "general", Revision: 7}, Model: "model",
+		Environment: harness.VersionRef{ID: "general", Revision: 7}, AgentSpec: harness.AgentSpec{Model: "model"},
 	}, now)
 	if err != nil {
 		t.Fatalf("seal config: %v", err)
@@ -437,7 +437,7 @@ func createWaitingInteractionFixture(t *testing.T, store *harnesspostgres.Store,
 	if _, fresh, err := store.CreateTurn(t.Context(), turn); err != nil || !fresh {
 		t.Fatalf("create interaction turn fresh=%v err=%v", fresh, err)
 	}
-	invocation := harness.Invocation{ID: "invocation_interaction_" + suffix, TurnID: turn.ID, CapabilityKey: "runtime.agent", DefinitionVersion: "v1", ExecutionClass: harness.ExecutionAgent, ExecutionRefID: "run_interaction_" + suffix, Status: harness.InvocationRunning, Attempt: 1, OutputRefs: []harness.HostRef{}, Revision: 1, CreatedAt: now, UpdatedAt: now}
+	invocation := harness.Invocation{ID: "invocation_interaction_" + suffix, TurnID: turn.ID, ExecutionRefID: "run_interaction_" + suffix, Status: harness.InvocationRunning, Attempt: 1, OutputRefs: []harness.HostRef{}, Revision: 1, CreatedAt: now, UpdatedAt: now}
 	if _, fresh, err := store.CreateInvocation(t.Context(), invocation); err != nil || !fresh {
 		t.Fatalf("create interaction invocation fresh=%v err=%v", fresh, err)
 	}
@@ -468,7 +468,7 @@ func createTopLevelRetryFixture(t *testing.T, store *harnesspostgres.Store, now 
 	}
 	input := json.RawMessage(`{"goal":"retry root"}`)
 	hash := sha256.Sum256(input)
-	invocation := harness.Invocation{ID: "hiv_retry_root_pg", TurnID: turn.ID, CapabilityKey: harness.CapabilityAgent, DefinitionVersion: harness.RuntimeCapabilityVersion, ExecutionClass: harness.ExecutionAgent, Input: input, InputHash: fmt.Sprintf("%x", hash[:]), ExecutionRefID: "run_retry_root_pg_1", Status: harness.InvocationFailed, Attempt: 1, OutputRefs: []harness.HostRef{}, Revision: 1, CreatedAt: now, UpdatedAt: now}
+	invocation := harness.Invocation{ID: "hiv_retry_root_pg", TurnID: turn.ID, Input: input, InputHash: fmt.Sprintf("%x", hash[:]), ExecutionRefID: "run_retry_root_pg_1", Status: harness.InvocationFailed, Attempt: 1, OutputRefs: []harness.HostRef{}, Revision: 1, CreatedAt: now, UpdatedAt: now}
 	if _, fresh, err := store.CreateInvocation(t.Context(), invocation); err != nil || !fresh {
 		t.Fatalf("create root retry invocation fresh=%v err=%v", fresh, err)
 	}
@@ -491,7 +491,7 @@ func createRetryInvocationFixture(t *testing.T, store *harnesspostgres.Store, no
 	t.Helper()
 	input := json.RawMessage(`{"goal":"retry"}`)
 	hash := sha256.Sum256(input)
-	value := harness.Invocation{ID: "hiv_retry_pg", TurnID: "turn_retry_pg", ParentItemID: "parent-item", CapabilityKey: harness.CapabilityAgent, DefinitionVersion: harness.RuntimeCapabilityVersion, ExecutionClass: harness.ExecutionAgent, Input: input, InputHash: fmt.Sprintf("%x", hash[:]), ExecutionRefID: "run_retry_pg_1", Status: harness.InvocationFailed, Attempt: 1, OutputRefs: []harness.HostRef{}, Revision: 1, CreatedAt: now, UpdatedAt: now}
+	value := harness.Invocation{ID: "hiv_retry_pg", TurnID: "turn_retry_pg", ParentItemID: "parent-item", Input: input, InputHash: fmt.Sprintf("%x", hash[:]), ExecutionRefID: "run_retry_pg_1", Status: harness.InvocationFailed, Attempt: 1, OutputRefs: []harness.HostRef{}, Revision: 1, CreatedAt: now, UpdatedAt: now}
 	if _, fresh, err := store.CreateInvocation(t.Context(), value); err != nil || !fresh {
 		t.Fatalf("create retry fixture fresh=%v err=%v", fresh, err)
 	}
@@ -574,7 +574,7 @@ func assertInvocationLifecycle(t *testing.T, store *harnesspostgres.Store, turnI
 }
 func createInvocationFixture(t *testing.T, store *harnesspostgres.Store, turnID string, now time.Time) harness.Invocation {
 	t.Helper()
-	value := harness.Invocation{ID: "hiv_pg", TurnID: turnID, CapabilityKey: "runtime.agent", DefinitionVersion: "v1", ExecutionClass: harness.ExecutionAgent, InputHash: strings.Repeat("a", 64), ExecutionRefID: testHarnessExecutionRefID, Status: harness.InvocationAccepted, Attempt: 1, OutputRefs: []harness.HostRef{}, Revision: 1, CreatedAt: now, UpdatedAt: now}
+	value := harness.Invocation{ID: "hiv_pg", TurnID: turnID, ExecutionRefID: testHarnessExecutionRefID, Status: harness.InvocationAccepted, Attempt: 1, OutputRefs: []harness.HostRef{}, Revision: 1, CreatedAt: now, UpdatedAt: now}
 	created, fresh, err := store.CreateInvocation(t.Context(), value)
 	if err != nil || !fresh || created.ExecutionRefID != testHarnessExecutionRefID {
 		t.Fatalf("create invocation: %#v fresh=%v err=%v", created, fresh, err)

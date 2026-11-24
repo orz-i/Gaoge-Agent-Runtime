@@ -180,7 +180,7 @@ func (middleware *ToolTimelineMiddleware) Tool(
 	invocation plugin.ToolInvocation,
 	next plugin.ToolNext,
 ) (tools.ExecutionResult, error) {
-	turn, capabilityInvocation, harnessRun, err := timelineTurn(ctx, middleware.store, invocation.Run.ID)
+	turn, agentInvocation, harnessRun, err := timelineTurn(ctx, middleware.store, invocation.Run.ID)
 	if err != nil {
 		return tools.ExecutionResult{}, err
 	}
@@ -188,7 +188,7 @@ func (middleware *ToolTimelineMiddleware) Tool(
 		return next(ctx)
 	}
 	startedID, err := appendToolTimelineItem(
-		ctx, middleware.store, middleware.clock, middleware.feed, turn, capabilityInvocation, invocation, tools.ExecutionResult{}, ItemStarted, "",
+		ctx, middleware.store, middleware.clock, middleware.feed, turn, agentInvocation, invocation, tools.ExecutionResult{}, ItemStarted, "",
 	)
 	if err != nil {
 		return tools.ExecutionResult{}, err
@@ -202,7 +202,7 @@ func (middleware *ToolTimelineMiddleware) Tool(
 		status = ItemFailed
 	}
 	_, itemErr := appendToolTimelineItem(
-		ctx, middleware.store, middleware.clock, middleware.feed, turn, capabilityInvocation, invocation, result, status, startedID,
+		ctx, middleware.store, middleware.clock, middleware.feed, turn, agentInvocation, invocation, result, status, startedID,
 	)
 	return result, errors.Join(executeErr, itemErr)
 }
@@ -332,7 +332,7 @@ func appendToolTimelineItem(
 	clock Clock,
 	feed *TurnFeed,
 	turn Turn,
-	capabilityInvocation Invocation,
+	agentInvocation Invocation,
 	invocation plugin.ToolInvocation,
 	result tools.ExecutionResult,
 	status ItemStatus,
@@ -350,7 +350,7 @@ func appendToolTimelineItem(
 	itemID := stableID("hit", turn.ID, invocation.Request.Call.ID, string(status))
 	now := clock.Now().UTC()
 	_, err = appendItemFact(ctx, store, feed, Item{
-		ID: itemID, TurnID: turn.ID, Kind: ItemTool, Status: status, RunID: invocation.Run.ID, InvocationID: capabilityInvocation.ID,
+		ID: itemID, TurnID: turn.ID, Kind: ItemTool, Status: status, RunID: invocation.Run.ID, InvocationID: agentInvocation.ID,
 		ParentItemID: parentItemID, Payload: payload, CreatedAt: now, UpdatedAt: now,
 	})
 	return itemID, err

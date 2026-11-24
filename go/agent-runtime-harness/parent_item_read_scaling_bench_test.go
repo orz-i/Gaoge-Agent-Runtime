@@ -22,7 +22,7 @@ func seededParentItemBenchmark(b *testing.B, size int) (*Runner, Invocation) {
 	}
 	if _, _, err := store.AppendItem(context.Background(), Item{
 		ID: parentItemID, TurnID: turnID, InvocationID: parentInvocationID,
-		Kind: ItemInvocation, Status: ItemStarted,
+		Kind: ItemAgentInvocation, Status: ItemStarted,
 	}); err != nil {
 		b.Fatal(err)
 	}
@@ -30,10 +30,10 @@ func seededParentItemBenchmark(b *testing.B, size int) (*Runner, Invocation) {
 	// its Invocation status is still required by the ancestry fence.
 	store.invocations[parentInvocationID] = Invocation{
 		ID: parentInvocationID, TurnID: turnID,
-		ExecutionClass: ExecutionAgent, Status: InvocationRunning,
+		Status: InvocationRunning,
 	}
 	child := Invocation{ID: "child-application", TurnID: turnID, ParentItemID: parentItemID,
-		ExecutionClass: ExecutionAgent, Status: InvocationAccepted}
+		Status: InvocationAccepted}
 	return &Runner{store: store}, child
 }
 

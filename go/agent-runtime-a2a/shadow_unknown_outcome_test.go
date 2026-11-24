@@ -55,7 +55,7 @@ func TestPR113UnknownFirstSendRemainsUnresolvedAcrossHandoffAndRestart(t *testin
 			newChild := func() *ShadowRunner {
 				t.Helper()
 				shadow, err := NewShadowRunner(ShadowDependencies{
-					Runtime: rt, Client: remote, AttestationKey: testA2AShadowKey(),
+					Runtime: rt, Client: remote, AttestationKey: testA2AShadowKey(), TargetID: "remote", TargetRevision: "r1",
 					Discovery: Discovery{Descriptor: RemoteAgentDescriptor{
 						Name: "remote-agent", PreferredURL: testShadowRemoteURL, ProtocolVersion: ProtocolVersion,
 					}},
@@ -65,7 +65,7 @@ func TestPR113UnknownFirstSendRemainsUnresolvedAcrossHandoffAndRestart(t *testin
 				}
 				return shadow
 			}
-			d := handoff.Delegation{ID: "delegation", MemberID: "remote", ChildRunID: "unresolved-child", Goal: "remote goal", Status: handoff.StatusQueued}
+			d := handoff.Delegation{Remote: true, ID: "delegation", MemberID: "a2a:remote", MemberRevision: "r1", ChildRunID: "unresolved-child", Goal: "remote goal", Status: handoff.StatusQueued}
 			coordinator, err := handoff.New(newChild())
 			if err != nil {
 				t.Fatal(err)
@@ -75,7 +75,7 @@ func TestPR113UnknownFirstSendRemainsUnresolvedAcrossHandoffAndRestart(t *testin
 				t.Fatalf("unknown external result was incorrectly settled: %+v err=%v", initial, startErr)
 			}
 			snapshot, err := rt.Load(t.Context(), d.ChildRunID)
-			if err != nil || snapshot.Run.Status != kernel.RunStatusRunning || snapshot.Run.Revision != 1 {
+			if err != nil || snapshot.Run.Status != kernel.RunStatusRunning || snapshot.Run.Revision != 2 {
 				t.Fatalf("initial submitted Run did not preserve its intent: %+v err=%v", snapshot.Run, err)
 			}
 			state, err := newChild().decodeState(snapshot)
@@ -166,7 +166,7 @@ func TestPR113CancelledFirstPartyShadowRemainsReadableWithoutRemoteCleanup(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	d := handoff.Delegation{ID: "delegate", MemberID: "a2a:remote", MemberRevision: "revision-1", ChildRunID: "completed-shadow", Goal: "remote goal", Status: handoff.StatusQueued}
+	d := handoff.Delegation{Remote: true, ID: "delegate", MemberID: "a2a:remote", MemberRevision: "revision-1", ChildRunID: "completed-shadow", Goal: "remote goal", Status: handoff.StatusQueued}
 	child, err := plugin.ResolveChild(t.Context(), d)
 	if err != nil {
 		t.Fatal(err)

@@ -37,6 +37,43 @@ func CloneWorkingStateSummaryPolicy(value *WorkingStateSummaryPolicy) *WorkingSt
 	return &copy
 }
 
+// SummaryTurn is the complete durable Turn projection needed by a checkpoint
+// CAS. Core deliberately does not depend on the Harness package.
+type SummaryTurn struct {
+	ID, SessionID                         string
+	HostTurn                              struct{ Kind, ID string }
+	ConfigSnapshotID, ContextCheckpointID string
+	ContextRef                            SummaryCheckpointRef
+	Status                                string
+	Revision                              uint64
+	ErrorCode, ErrorDetail                string
+	CreatedAt, UpdatedAt                  time.Time
+}
+type SummaryCheckpointRef struct {
+	ID                                               string
+	Generation, Revision                             int
+	LineageHash, CoveredThroughSourceID, ContentHash string
+}
+type SummaryCursor struct {
+	Turn                                               SummaryTurn
+	Checkpoint                                         runtimecontext.Checkpoint
+	ExpectedTurnCheckpointID, ExpectedHeadCheckpointID string
+	UpdatedAt                                          time.Time
+}
+type SummaryCommitReceipt struct {
+	Turn                                               SummaryTurn
+	Checkpoint                                         runtimecontext.Checkpoint
+	ExpectedTurnCheckpointID, ExpectedHeadCheckpointID string
+}
+type SummaryBindingReceipt struct {
+	TurnID, Access    string
+	Previous, Current runtimecontext.Checkpoint
+}
+
+func summaryRef(c runtimecontext.Checkpoint) SummaryCheckpointRef {
+	return SummaryCheckpointRef{ID: c.ID, Generation: c.Generation, Revision: c.Revision, LineageHash: c.LineageHash, CoveredThroughSourceID: c.CoveredThroughSourceID, ContentHash: c.ContentHash}
+}
+
 // ContextSummaryRoot identifies the original indexed Host root. Ports must
 // authenticate it against their existing immutable Invocation, not a new owner.
 type ContextSummaryRoot struct {
@@ -48,10 +85,10 @@ type ContextSummaryRoot struct {
 // ContextSummaryCursor persists only the source cursor's bounded identity.
 // The source Window remains in its original Context checkpoint Store.
 type ContextSummaryCursor struct {
-	Turn                     SamplingTurn `json:"turn"`
-	ExpectedTurnCheckpointID string       `json:"expectedTurnCheckpointID"`
-	ExpectedHeadCheckpointID string       `json:"expectedHeadCheckpointID"`
-	UpdatedAt                time.Time    `json:"updatedAt"`
+	Turn                     SummaryTurn `json:"turn"`
+	ExpectedTurnCheckpointID string      `json:"expectedTurnCheckpointID"`
+	ExpectedHeadCheckpointID string      `json:"expectedHeadCheckpointID"`
+	UpdatedAt                time.Time   `json:"updatedAt"`
 }
 
 type ContextSummaryArtifactRef struct {
@@ -84,7 +121,7 @@ type ContextSummaryBinding struct {
 // chooses the safe removal boundary, request, artifacts and receipt handling.
 type ContextSummaryPlan struct {
 	Request              model.Request
-	Cursor               SamplingCursor
+	Cursor               SummaryCursor
 	ModelWindow          runtimecontext.ModelWindow
 	Policy               runtimecontext.Policy
 	Owner                bool
@@ -96,7 +133,7 @@ type ContextSummaryPlan struct {
 
 type ContextSummaryRead struct {
 	SourceCheckpoint runtimecontext.Checkpoint
-	Cursor           SamplingCursor
+	Cursor           SummaryCursor
 	Root             ContextSummaryRoot
 }
 
@@ -105,8 +142,8 @@ type ContextSummaryRead struct {
 type ContextSummaryPorts interface {
 	PlanSummary(context.Context, model.Request, kernel.Snapshot) (ContextSummaryPlan, error)
 	ReadSummary(context.Context, ContextSummaryBinding) (ContextSummaryRead, error)
-	CommitSummary(context.Context, SamplingCursor, runtimecontext.Checkpoint) (SamplingCommitReceipt, error)
-	BindSummary(context.Context, SamplingCursor, runtimecontext.Checkpoint) (SamplingBindingReceipt, error)
+	CommitSummary(context.Context, SummaryCursor, runtimecontext.Checkpoint) (SummaryCommitReceipt, error)
+	BindSummary(context.Context, SummaryCursor, runtimecontext.Checkpoint) (SummaryBindingReceipt, error)
 }
 
 // ContextSummaryAdapter is native orchestration under the existing concrete
@@ -117,7 +154,7 @@ type ContextSummaryAdapter struct {
 }
 
 func NewContextSummaryAdapter(bounded *BoundedContextAdapter, ports ContextSummaryPorts) (*ContextSummaryAdapter, error) {
-	if bounded == nil || bounded.manager == nil || bounded.ports == nil || bounded.sampling != nil || ports == nil {
+	if bounded == nil || bounded.manager == nil || bounded.ports == nil || ports == nil {
 		return nil, ErrInvalidRequest
 	}
 	return &ContextSummaryAdapter{bounded: bounded, ports: ports}, nil

@@ -14,19 +14,19 @@ import (
 // original ledger receipt. It neither registers ancestry nor reserves, bills,
 // projects, dispatches, or invokes a middleware chain. The request is the
 // frozen input to Model middleware, before reservation output-limit changes.
-func (middleware *BudgetMiddleware) VerifyModelOutcome(ctx context.Context, request model.Request) (model.Response, error) {
-	if middleware == nil || strings.TrimSpace(request.RunID) == "" || strings.TrimSpace(request.InvocationID) == "" {
+func (authority *BudgetAuthority) VerifyModelOutcome(ctx context.Context, request model.Request) (model.Response, error) {
+	if authority == nil || strings.TrimSpace(request.RunID) == "" || strings.TrimSpace(request.InvocationID) == "" {
 		return model.Response{}, ErrInvalidRequest
 	}
-	turn, _, err := resolveContextTurnForRun(ctx, middleware.dependencies.Store, middleware.dependencies.Relations, request.RunID)
+	turn, _, err := resolveContextTurnForRun(ctx, authority.dependencies.Store, authority.dependencies.Relations, request.RunID)
 	if err != nil {
 		return model.Response{}, err
 	}
-	config, err := loadSealedConfig(ctx, middleware.dependencies.Store, turn.ConfigSnapshotID)
+	config, err := loadSealedConfig(ctx, authority.dependencies.Store, turn.ConfigSnapshotID)
 	if err != nil || config.SharedBudget == nil {
 		return model.Response{}, errors.Join(ErrConflict, err)
 	}
-	ledger, err := middleware.dependencies.Ledgers.LoadBudget(ctx, turn.ID)
+	ledger, err := authority.dependencies.Ledgers.LoadBudget(ctx, turn.ID)
 	if err != nil {
 		return model.Response{}, err
 	}

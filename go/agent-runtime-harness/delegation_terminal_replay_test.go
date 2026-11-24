@@ -51,8 +51,9 @@ func TestPR113VerifiedTerminalManualDelegationIsIdempotentReadOnly(t *testing.T)
 			Actor:  kernel.ActorRef{TenantID: testTenant, ActorID: testActor},
 			Thread: kernel.ThreadRef{Kind: testThreadKind, ID: "terminal-read-thread"},
 			Goal:   "keep root active while manual child completes",
-			Config: harness.ConfigSnapshot{Model: delegationTestModelName, ToolKeys: []string{harness.DelegationToolKey},
-				ToolPolicies: []harness.ToolPolicySnapshot{harness.DelegationToolPolicySnapshot()}},
+			Config: harness.ConfigSnapshot{
+				ToolPolicies: []harness.ToolPolicySnapshot{harness.DelegationToolPolicySnapshot()}, AgentSpec: harness.AgentSpec{Model: delegationTestModelName, ToolKeys: []string{harness.DelegationToolKey}},
+			},
 		})
 		outcome <- err
 	}()

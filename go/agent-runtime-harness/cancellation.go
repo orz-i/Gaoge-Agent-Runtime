@@ -205,19 +205,32 @@ func (runner *Runner) cancelRuntimeRun(
 		// task itself. The default native Kernel Cancel has no A2A RPC;
 		// only an explicitly composed RuntimeCanceller can own remote
 		// cleanup and its verified terminal outcome.
-		if nativeKernel && current.Run.Kind == handoff.RemoteAgentRunKind {
-			return kernel.Snapshot{}, true, fmt.Errorf("A2A shadow Run %q: %w", runID, ErrHandoffCancellationUnverified)
+		remoteRoute := nativeKernel && current.Run.Kind == handoff.RemoteAgentRunKind &&
+			delegatedChild != nil && runner.standardRemoteCoordinator() != nil
+		if nativeKernel && current.Run.Kind == handoff.RemoteAgentRunKind && !remoteRoute {
+			return kernel.Snapshot{}, true, fmt.Errorf("remote Agent Run %q: %w", runID, ErrHandoffCancellationUnverified)
 		}
+		nativeCall := nativeKernel && !remoteRoute
 		callCtx := ctx
 		var effect Item
-		if !nativeKernel {
+		if !nativeCall {
 			var claimErr error
 			callCtx, effect, claimErr = runner.beginHostCancellationEffect(ctx, current)
 			if claimErr != nil {
 				return kernel.Snapshot{}, true, claimErr
 			}
 		}
-		cancelled, err := runner.cancellation.Cancel(callCtx, runID, current.Run.Revision, strings.TrimSpace(reason))
+		var cancelled kernel.Snapshot
+		if remoteRoute {
+			cancelled, err = runner.standardRemoteCoordinator().CancelRemoteDelegation(callCtx, runner.runtime, delegation, parentRun, current)
+			if err != nil {
+				// A protocol error or a post-effect Store conflict is NOT
+				// the custom callback's pre-dispatch no-effect proof.
+				return cancelled, true, ErrCancellationOutcomeUnknown
+			}
+		} else {
+			cancelled, err = runner.cancellation.Cancel(callCtx, runID, current.Run.Revision, strings.TrimSpace(reason))
+		}
 		if delegatedChild != nil && err == nil &&
 			(!handoff.VerifiedChildRun(delegation, parentRun, cancelled) ||
 				!terminalRuntimeStatus(cancelled.Run.Status)) {
@@ -225,7 +238,7 @@ func (runner *Runner) cancelRuntimeRun(
 			// Running has not confirmed cancellation. Do not close the intent.
 			return kernel.Snapshot{}, true, ErrHandoffCancellationUnverified
 		}
-		if !nativeKernel && err == nil {
+		if !nativeCall && err == nil {
 			// A Host's returned Snapshot is not a Kernel control receipt merely
 			// because Cancel returned nil. Require the exact original Run and
 			// a matching, locally committed terminal fact before any Turn or
@@ -239,6 +252,9 @@ func (runner *Runner) cancelRuntimeRun(
 				return kernel.Snapshot{}, true, ErrRuntimeCancellationUnverified
 			}
 			cancelled = verified
+			if remoteRoute && !runner.standardRemoteCoordinator().ObservesRemoteShadow(ctx, runner.runtime, delegation, cancelled) {
+				return kernel.Snapshot{}, true, ErrCancellationOutcomeUnknown
+			}
 		}
 		if delegatedChild != nil && err == nil && cancelled.Run.Kind == agent.RunKind {
 			// A callback may enter and return without changing Run.Revision
@@ -250,7 +266,7 @@ func (runner *Runner) cancelRuntimeRun(
 				return kernel.Snapshot{}, true, ErrHandoffCancellationUnverified
 			}
 		}
-		if nativeKernel {
+		if nativeCall {
 			if kernel.IsControlNoEffect(err) {
 				if errors.Is(err, kernel.ErrConflict) {
 					// A pre-Store CAS revision mismatch is safe to retry,
@@ -357,6 +373,9 @@ func (runner *Runner) remoteHandoffCancellerOwnsDelegation(
 	if runner == nil || runner.runtime == nil {
 		return false
 	}
+	if coordinator := runner.standardRemoteCoordinator(); coordinator != nil {
+		return coordinator.ObservesRemoteShadow(ctx, runner.runtime, frozen, child)
+	}
 	owner, ok := runner.cancellation.(RemoteDelegationCanceller)
 	return ok && owner.OwnsRemoteDelegation(ctx, runner.runtime, frozen, child)
 }
@@ -408,8 +427,7 @@ func (runner *Runner) localHandoffCancellationAuthority(
 		return unverified(err)
 	}
 	if parent.ID != item.InvocationID || parent.ID == child.ID ||
-		parent.TurnID != child.TurnID || parent.ExecutionClass != ExecutionAgent ||
-		parent.ExecutionRefID != payload.ParentRunID {
+		parent.TurnID != child.TurnID || parent.ExecutionRefID != payload.ParentRunID {
 		return unverified(ErrConflict)
 	}
 	parentSnapshot, err := runner.runtime.Load(ctx, payload.ParentRunID)

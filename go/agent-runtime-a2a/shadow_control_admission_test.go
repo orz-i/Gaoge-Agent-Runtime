@@ -67,7 +67,7 @@ func a2aControlFixture(t *testing.T, store kernel.Store, client RemoteClient, re
 	if err != nil {
 		t.Fatal(err)
 	}
-	delegation := handoff.Delegation{MemberID: "a2a:remote", MemberRevision: "revision-1", ChildRunID: "control-admission-child"}
+	delegation := handoff.Delegation{Remote: true, MemberID: "a2a:remote", MemberRevision: "revision-1", ChildRunID: "control-admission-child"}
 	childInterface, err := plugin.ResolveChild(t.Context(), delegation)
 	if err != nil {
 		t.Fatal(err)
@@ -126,7 +126,7 @@ func TestPR113ControlResumeIntentFencesCancelACKAcrossRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	recoveredChild, err := recoveredPlugin.ResolveChild(t.Context(), handoff.Delegation{
+	recoveredChild, err := recoveredPlugin.ResolveChild(t.Context(), handoff.Delegation{Remote: true,
 		MemberID: "a2a:remote", MemberRevision: "revision-1", ChildRunID: original.Run.ID,
 	})
 	if err != nil {

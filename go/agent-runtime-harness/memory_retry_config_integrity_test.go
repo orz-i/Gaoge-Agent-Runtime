@@ -20,7 +20,7 @@ func testMemoryRetryStoreConfigIntegrity(t *testing.T, missing bool) {
 	ctx := t.Context()
 	store := NewMemoryStore()
 	now := time.Date(2026, 11, 19, 12, 0, 0, 0, time.UTC)
-	frozen, err := SealConfigSnapshot("turn", ConfigSnapshot{Model: "specialist", SharedBudget: &budget.Limits{MaxLLMCalls: 2}}, now)
+	frozen, err := SealConfigSnapshot("turn", ConfigSnapshot{SharedBudget: &budget.Limits{MaxLLMCalls: 2}, AgentSpec: AgentSpec{Model: "specialist"}}, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,8 +33,7 @@ func testMemoryRetryStoreConfigIntegrity(t *testing.T, missing bool) {
 		t.Fatal(err)
 	}
 	input := json.RawMessage("{\"goal\":\"cancelled original\"}")
-	root := Invocation{ID: "root", TurnID: turn.ID, CapabilityKey: CapabilityAgent, ExecutionClass: ExecutionAgent,
-		Input: input, InputHash: hashInvocationBytes(input), ExecutionRefID: "old-run",
+	root := Invocation{ID: "root", TurnID: turn.ID, Input: input, InputHash: hashInvocationBytes(input), ExecutionRefID: "old-run",
 		Attempt: 1, Status: InvocationCancelled, Revision: 1, OutputRefs: []HostRef{}, CreatedAt: now, UpdatedAt: now}
 	if _, _, err = store.CreateInvocation(ctx, root); err != nil {
 		t.Fatal(err)

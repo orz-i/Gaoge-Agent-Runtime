@@ -78,3 +78,26 @@ func TestInvalidDelegatedLocalToolGrantsCannotBeSealed(t *testing.T) {
 		})
 	}
 }
+
+// Root LocalTools with an omitted ExecutionMode still mean local_dispatch;
+// selecting the same existing Root tool for a Named Agent is an explicit
+// narrowing of the parent's frozen allowlist, not a new member-only grant.
+func TestNamedAgentMayInheritAuthorizedRootToolWithDefaultLocalPolicy(t *testing.T) {
+	const key = "root.lookup"
+	config, err := SealConfigSnapshot("root-turn", ConfigSnapshot{
+		ToolPolicies:     []ToolPolicySnapshot{{Key: key, DefinitionVersion: "v1", SideEffectLevel: "read", ApprovalMode: "never"}},
+		DelegationPolicy: DelegationPolicySnapshot{MaxDepth: 1}, AgentSpec: AgentSpec{ToolKeys: []string{key}},
+	}, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := agent.View{ToolKeys: []string{key}}
+	request := DelegateRequest{MemberID: "specialist", MemberRevision: "r1", Agent: agent.StartRequest{ToolKeys: []string{key}}}
+	allowed, err := authorizedDelegatedLocalTools(config, original, true, request)
+	if err != nil || len(allowed) != 1 || allowed[0] != key {
+		t.Fatalf("Root-authorized Tool unexpectedly denied to selected child: %v keys=%+v", err, allowed)
+	}
+	if _, err = authorizedDelegatedLocalTools(config, agent.View{}, false, request); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("unbound nested child inherited an unrelated Root Tool: %v", err)
+	}
+}

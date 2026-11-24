@@ -561,13 +561,13 @@ func managedRecoverySessionTools(files string) []harness.SessionTool {
 func managedRecoveryConfiguredSessionOptions(crash bool) harness.SessionOptions {
 	options := managedRecoverySessionOptions()
 	options.Config = harness.ConfigSnapshot{
-		Model: "fixture-invoice", ToolKeys: []string{managedRecoveryTool, harness.ContextArtifactToolKey},
-		MaxModelOutputTokens: 512,
+
 		ToolPolicies: []harness.ToolPolicySnapshot{
 			{Key: managedRecoveryTool, DefinitionVersion: "fixture-v1", ApprovalMode: "never", SideEffectLevel: "write"},
 			harness.ContextArtifactToolPolicySnapshot(),
 		},
-		ContextPolicy: runtimecontext.Policy{PreserveRecentTurns: 1, MinimumRecentTurns: 1, MaxCompactionTokens: 128},
+		ContextPolicy: runtimecontext.Policy{PreserveRecentTurns: 1, MinimumRecentTurns: 1, MaxCompactionTokens: 128}, AgentSpec: harness.AgentSpec{Model: "fixture-invoice", ToolKeys: []string{managedRecoveryTool, harness.ContextArtifactToolKey},
+			MaxModelOutputTokens: 512},
 	}
 	if crash {
 		options.Transcript = harness.TranscriptSourceFunc(func(_ context.Context, _, _ harness.HostRef, prompt string) (*harness.ContextSeed, error) {
@@ -604,7 +604,7 @@ func managedRecoveryRoot(t *testing.T, store harness.Store) (string, harness.Inv
 	}
 	invocations, err := store.ListInvocations(t.Context(), turnID)
 	if err != nil || len(invocations) != 1 || invocations[0].ParentItemID != "" ||
-		invocations[0].ExecutionClass != harness.ExecutionAgent || invocations[0].ExecutionRefID == "" {
+		invocations[0].ExecutionRefID == "" {
 		t.Fatalf("expected one durable direct Agent root: %+v err=%v", invocations, err)
 	}
 	// The stored root is authoritative. Session.Prompt supplies the host-stable

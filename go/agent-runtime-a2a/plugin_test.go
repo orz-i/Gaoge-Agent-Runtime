@@ -29,7 +29,7 @@ func TestPluginResolvesAndFreezesRemoteBindingRevision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	delegation := handoff.Delegation{
+	delegation := handoff.Delegation{Remote: true,
 		ID: "delegation", MemberID: "a2a:remote-agent", ChildRunID: "a2a-plugin-child",
 		Goal: "remote goal", Status: handoff.StatusQueued,
 	}
@@ -68,7 +68,7 @@ func TestPluginRejectsChangedFrozenBinding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	delegation := handoff.Delegation{
+	delegation := handoff.Delegation{Remote: true,
 		ID: "delegation", MemberID: "a2a:remote-agent", ChildRunID: "a2a-plugin-revision",
 		Goal: "remote goal", Status: handoff.StatusQueued,
 	}

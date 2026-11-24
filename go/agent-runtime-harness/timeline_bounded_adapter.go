@@ -29,7 +29,7 @@ type boundedToolTimelineSource struct {
 }
 
 func (p boundedToolTimelinePorts) ResolveToolTimeline(ctx context.Context, inv plugin.ToolInvocation) (agent.BoundedToolTimelineScope, error) {
-	turn, capability, active, err := timelineTurn(ctx, p.store, inv.Run.ID)
+	turn, owner, active, err := timelineTurn(ctx, p.store, inv.Run.ID)
 	if err != nil {
 		return agent.BoundedToolTimelineScope{}, err
 	}
@@ -37,12 +37,12 @@ func (p boundedToolTimelinePorts) ResolveToolTimeline(ctx context.Context, inv p
 	if !active {
 		return scope, nil
 	}
-	source, err := json.Marshal(boundedToolTimelineSource{Turn: turn, Invocation: capability})
+	source, err := json.Marshal(boundedToolTimelineSource{Turn: turn, Invocation: owner})
 	if err != nil {
 		return scope, err
 	}
 	scope.TurnID = turn.ID
-	scope.InvocationID = capability.ID
+	scope.InvocationID = owner.ID
 	scope.SourceBinding = source
 	return scope, nil
 }

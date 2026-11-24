@@ -130,7 +130,7 @@ func (runner *Runner) resumeDeferredChildGrantCancellation(
 // budget supply that authority. Unknown or still-running Host callbacks cannot enter this path.
 func (runner *Runner) cleanupReturnedRootChildren(ctx context.Context, turn Turn, intent Item, invocation Invocation, reason string) (attempted bool, outcome error) {
 	native, ok := runner.agent.(*agent.Runner)
-	if !ok || invocation.ParentItemID != "" || invocation.ExecutionClass != ExecutionAgent {
+	if !ok || invocation.ParentItemID != "" {
 		return false, nil
 	}
 	current, err := runner.runtime.Load(ctx, invocation.ExecutionRefID)
