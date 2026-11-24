@@ -2,9 +2,9 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
@@ -12,6 +12,7 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
 type frozenReceiptBudgetPorts struct {
@@ -23,30 +24,19 @@ func (*frozenReceiptBudgetPorts) ResolveScope(_ context.Context, runID string) (
 	return BoundedBudgetScope{LedgerID: "turn", Limits: budget.Limits{MaxLLMCalls: 2, MaxInputTokens: 60000, MaxOutputTokens: 512},
 		Runs: []BoundedBudgetRunBinding{{RunID: runID, Binding: budget.RunBudget{}}}}, nil
 }
-func (*frozenReceiptBudgetPorts) Project(context.Context, budget.Ledger) error  { return nil }
-func (*frozenReceiptBudgetPorts) RequiresTokenUsage(budget.Ledger, string) bool { return true }
+func (*frozenReceiptBudgetPorts) Project(context.Context, budget.Ledger) error { return nil }
 func (*frozenReceiptBudgetPorts) PreviewModel(_ budget.Ledger, r model.Request) (model.Request, budget.Reservation, error) {
 	original := model.CloneRequest(r)
+	hash, err := model.PhysicalRequestHash(original)
+	if err != nil {
+		return r, budget.Reservation{}, err
+	}
 	r.MaxOutputTokens = 64
-	return r, budget.Reservation{ID: "model:" + r.InvocationID, RunID: r.RunID, RequestHash: kernel.ManagedDigest(original), Requested: budget.Usage{LLMCalls: 1, InputTokens: 20000, OutputTokens: 64, TotalTokens: 20064}}, nil
+	return r, budget.Reservation{ID: "model:" + r.InvocationID, RunID: r.RunID, RequestHash: hash, Requested: budget.Usage{LLMCalls: 1, InputTokens: 20000, OutputTokens: 64, TotalTokens: 20064}}, nil
 }
 func (p *frozenReceiptBudgetPorts) PlanModel(_ context.Context, l budget.Ledger, r model.Request) (model.Request, budget.Reservation, error) {
 	p.plans++
 	return p.PreviewModel(l, r)
-}
-func (*frozenReceiptBudgetPorts) PlanSettlement(_ budget.Ledger, _ budget.Reservation, r model.Response, err error) (BoundedBudgetSettlement, error) {
-	if err != nil {
-		return BoundedBudgetSettlement{}, err
-	}
-	raw, e := json.Marshal(r)
-	return BoundedBudgetSettlement{Response: r, Usage: budget.Usage{LLMCalls: 1, InputTokens: r.Usage.InputTokens, OutputTokens: r.Usage.OutputTokens, TotalTokens: r.Usage.InputTokens + r.Usage.OutputTokens, CacheReadTokens: r.Usage.CacheReadTokens, ReasoningTokens: r.Usage.ReasoningTokens}, Receipt: raw}, e
-}
-func (*frozenReceiptBudgetPorts) ValidateSettlement(budget.Ledger, budget.Ledger, budget.Reservation, budget.Usage) error {
-	return nil
-}
-func (*frozenReceiptBudgetPorts) DecodeReceipt(raw json.RawMessage) (r model.Response, err error) {
-	err = json.Unmarshal(raw, &r)
-	return
 }
 
 type lostFrozenReceiptModel struct{ *summaryCoreModel }
@@ -207,7 +197,7 @@ func TestRootFrozenSamplingRecoveryUsesOriginalPhysicalReceipt(t *testing.T) {
 					t.Fatalf("repeat recovery mutated persisted state: %v", err)
 				}
 				current, err := ledgerStore.LoadBudget(t.Context(), "turn")
-				if (mode.budget && (err != nil || !reflect.DeepEqual(current, ledger))) || (!mode.budget && !errors.Is(err, budget.ErrLedgerNotFound)) || budgetPorts.plans != plans || len(provider.calls()) != 1 || (unknown && verified != 2) || (!unknown && verified != 1) {
+				if (mode.budget && (err != nil || !reflect.DeepEqual(current, ledger))) || (!mode.budget && !errors.Is(err, budget.ErrLedgerNotFound)) || budgetPorts.plans != plans || len(provider.calls()) != 1 || (unknown && verified != 2) || (!unknown && !mode.budget && verified != 1) || (!unknown && mode.budget && verified != 0) {
 					t.Fatal("read-only receipt recovery replanned or changed the original ledger")
 				}
 			})
@@ -240,5 +230,23 @@ func TestContextOnlySamplingRejectsLateNarrowing(t *testing.T) {
 	inv := view.ModelInvocations[0]
 	if inv.SamplingPlan == nil || inv.SamplingPlan.MaxOutputTokens != 512 || inv.DispatchAttempt != 0 {
 		t.Fatalf("late mutation changed measured intent: %+v", inv)
+	}
+}
+
+func TestSamplingToolSubsetRetainsOriginalCatalogFingerprints(t *testing.T) {
+	original := model.Request{RunID: "run", InvocationID: "call", Tools: []tools.Definition{{Key: "a", Name: "a"}, {Key: "b", Name: "b"}, {Key: "c", Name: "c"}}}
+	for _, keys := range [][]string{{"b"}, {"c", "a"}} {
+		physical := model.CloneRequest(original)
+		physical.Tools = samplingTools(physical.Tools, keys, false, localSamplingKey)
+		plan, err := newPhysicalSamplingPlan(original, physical)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defs, proofs := modelDefinitions(ModelInvocation{Request: original, SamplingPlan: plan, CatalogFingerprints: []string{strings.Repeat("a", 64), strings.Repeat("b", 64), strings.Repeat("c", 64)}})
+		for i, key := range keys {
+			if defs[i].Key != key || proofs[i] != strings.Repeat(key, 64) {
+				t.Fatal("filtered Catalog authority changed")
+			}
+		}
 	}
 }

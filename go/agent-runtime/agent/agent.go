@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"reflect"
 	"strings"
 	"sync"
@@ -1077,9 +1076,6 @@ func (runner *Runner) Resume(ctx context.Context, runID string, expectedRevision
 		return snapshot, nil
 	}
 	if invocation, active := activeModelInvocation(state); active && invocation.Status == ModelInvocationPending && invocation.DispatchAttempt != 0 {
-		if runner.modelOutcomeVerifier == nil {
-			return snapshot, ErrModelOutcomeUnknown
-		}
 		repaired, recoveryErr := runner.ReconcileModelOutcome(ctx, runID, expectedRevision)
 		if recoveryErr != nil {
 			if repaired.Run.ID != "" {
@@ -1366,8 +1362,11 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 		failed, failErr := runner.fail(ctx, snapshot, state, "agent.model_invocation_invalid", ErrInvalidRequest)
 		return failed, true, failErr
 	}
-	definitions := modelDefinitions(consumed)
+	definitions, catalogFingerprints := modelDefinitions(consumed)
 	response := model.CloneResponse(consumed.Response)
+	// User-visible consumption retains the existing whitespace normalization;
+	// the original durable receipt itself is never rewritten.
+	response.Content = strings.TrimSpace(response.Content)
 	budgetDimension, budgetErr := chargeConsumedModelUsage(&state, consumed)
 	if budgetErr != nil {
 		failed, failErr := runner.fail(ctx, snapshot, state, "agent.usage_invalid", budgetErr)
@@ -1445,7 +1444,7 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 		snapshot,
 		state,
 		definitions,
-		consumed.CatalogFingerprints,
+		catalogFingerprints,
 		response.Content,
 		response.ToolCalls,
 		response.ProviderReplay,
@@ -2822,24 +2821,6 @@ func selectedDefinition(definitions []tools.Definition, key string) (tools.Defin
 		}
 	}
 	return tools.Definition{}, false
-}
-
-func validModelResponse(response model.Response) bool {
-	return validModelUsage(response.Usage) &&
-		(!response.Continue || len(response.ToolCalls) == 0) &&
-		(response.Continue || len(response.ToolCalls) > 0 || response.Content != "" || len(response.HostedToolCalls) > 0 || len(response.Artifacts) > 0)
-}
-
-func validModelUsage(usage *model.Usage) bool {
-	if usage == nil {
-		return true
-	}
-	if usage.InputTokens < 0 || usage.OutputTokens < 0 || usage.CacheReadTokens < 0 ||
-		usage.CacheWriteTokens < 0 || usage.CacheWrite5mTokens < 0 || usage.CacheWrite1hTokens < 0 ||
-		usage.ReasoningTokens < 0 {
-		return false
-	}
-	return usage.InputTokens <= math.MaxInt64-usage.OutputTokens
 }
 
 func nextPendingCall(state runState) (tools.Call, bool) {

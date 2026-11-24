@@ -2,15 +2,13 @@ package provider_test
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"reflect"
 	"testing"
 	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
@@ -117,7 +115,7 @@ func assertProviderPendingSource(t *testing.T, runID string, pending agent.Model
 	}
 	request := model.CloneRequest(pending.Request)
 	request.InvocationID = ""
-	encoded, err := json.Marshal(struct {
+	proof, err := jsoncontract.SealOpaque("agent-model-intent-opaque-v1", struct {
 		Request             model.Request `json:"request"`
 		CatalogFingerprints []string      `json:"catalogFingerprints"`
 		Provider            string        `json:"provider"`
@@ -126,8 +124,7 @@ func assertProviderPendingSource(t *testing.T, runID string, pending agent.Model
 	if err != nil {
 		t.Fatal(err)
 	}
-	digest := sha256.Sum256(encoded)
-	if pending.RequestHash != hex.EncodeToString(digest[:]) {
+	if pending.RequestHash != proof.Digest {
 		t.Fatal("original full request/catalog/provider/binding hash differs")
 	}
 }

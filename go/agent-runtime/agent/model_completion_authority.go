@@ -14,17 +14,20 @@ import (
 // modelCompletionAuthority binds one invocation to its first trusted physical
 // or settled-replay receipt. Ordinary validation never registers a source.
 type modelCompletionAuthority struct {
-	mu        sync.Mutex
-	named     bool
-	request   model.Request
-	plan      *SamplingPlan
-	duplicate func(string) bool
-	observed  bool
-	verified  bool
-	invalid   bool
-	id        string
-	usage     *model.Usage
-	rejected  bool
+	mu            sync.Mutex
+	named         bool
+	request       model.Request
+	plan          *SamplingPlan
+	duplicate     func(string) bool
+	observed      bool
+	verified      bool
+	invalid       bool
+	id            string
+	responseHash  string
+	billingHash   string
+	rejected      bool
+	rejectionCode string
+	settled       bool
 }
 
 // One invocation-scoped carrier keeps the plan, receipt authority and
@@ -47,14 +50,7 @@ func (call *modelCallScope) samplingPlan() *SamplingPlan {
 
 func hasModelCompletionReceipt(response model.Response, err error) bool {
 	return err == nil || errors.Is(err, ErrModelLateResult) ||
-		model.IsResponseRejectedError(err) && response.Usage != nil && validModelUsage(response.Usage)
-}
-
-func sameModelCompletionUsage(left, right *model.Usage) bool {
-	if left == nil || right == nil {
-		return left == nil && right == nil
-	}
-	return *left == *right
+		model.IsResponseRejectedError(err) && response.Usage != nil && model.ValidUsage(response.Usage)
 }
 
 func (authority *modelCompletionAuthority) reject() (model.Response, error) {
@@ -69,9 +65,6 @@ func (authority *modelCompletionAuthority) record(response model.Response, err e
 }
 
 func (authority *modelCompletionAuthority) recordLocked(response model.Response, err error) (model.Response, error) {
-	if !authority.named {
-		return response, err
-	}
 	if authority.invalid || authority.observed {
 		return authority.reject()
 	}
@@ -79,14 +72,21 @@ func (authority *modelCompletionAuthority) recordLocked(response model.Response,
 	if !hasModelCompletionReceipt(response, err) {
 		return response, err
 	}
-	if response.ResponseID == "" || strings.TrimSpace(response.ResponseID) != response.ResponseID ||
-		authority.duplicate(response.ResponseID) {
+	if authority.named && (response.ResponseID == "" || strings.TrimSpace(response.ResponseID) != response.ResponseID || authority.duplicate(response.ResponseID)) {
+		return authority.reject()
+	}
+	digest, digestErr := model.ResponseEvidenceHash(response)
+	billing, billingErr := model.ResponseEvidenceHash(model.BillingOnlyResponse(response))
+	if digestErr != nil || billingErr != nil {
 		return authority.reject()
 	}
 	authority.verified = true
 	authority.id = response.ResponseID
-	authority.usage = model.CloneUsage(response.Usage)
+	authority.responseHash, authority.billingHash = digest, billing
 	authority.rejected = model.IsResponseRejectedError(err)
+	if authority.rejected {
+		authority.rejectionCode = model.ClassifiedErrorCode(err)
+	}
 	return response, err
 }
 
@@ -102,21 +102,46 @@ func (authority *modelCompletionAuthority) replay(request model.Request, respons
 func (authority *modelCompletionAuthority) validate(response model.Response, err error) (model.Response, error) {
 	authority.mu.Lock()
 	defer authority.mu.Unlock()
-	if !authority.named {
-		return response, err
+	return authority.validateLocked(response, err, false)
+}
+
+// The native budget driver alone may latch the result of its committed
+// settlement, including a new rejection. Outer layers can neither promote
+// that result nor supply a successful result without the required settlement.
+func (authority *modelCompletionAuthority) settle(response model.Response, err error) (model.Response, error) {
+	authority.mu.Lock()
+	defer authority.mu.Unlock()
+	response, err = authority.validateLocked(response, err, true)
+	if !authority.invalid && hasModelCompletionReceipt(response, err) {
+		authority.settled = true
+		if model.IsResponseRejectedError(err) {
+			authority.rejected = true
+			authority.rejectionCode = model.ClassifiedErrorCode(err)
+		}
 	}
-	// Once identity or receipt evidence conflicts, swallowing/reclassifying
-	// the error cannot restore completion authority.
+	return response, err
+}
+func (authority *modelCompletionAuthority) validateFinal(response model.Response, err error) (model.Response, error) {
+	authority.mu.Lock()
+	defer authority.mu.Unlock()
+	if authority.plan != nil && authority.plan.LedgerID != "" && !authority.settled && hasModelCompletionReceipt(response, err) {
+		return authority.reject()
+	}
+	return authority.validateLocked(response, err, false)
+}
+func (authority *modelCompletionAuthority) validateLocked(response model.Response, err error, settlement bool) (model.Response, error) {
 	if authority.invalid {
 		return model.Response{}, ErrInvalidModelResponse
 	}
 	if !hasModelCompletionReceipt(response, err) {
 		return response, err
 	}
-	if !authority.verified || response.ResponseID != authority.id ||
-		!sameModelCompletionUsage(response.Usage, authority.usage) ||
-		authority.rejected && !model.IsResponseRejectedError(err) ||
-		authority.duplicate(response.ResponseID) {
+	rejected := model.IsResponseRejectedError(err)
+	digest, digestErr := model.ResponseEvidenceHash(response)
+	if !authority.verified || response.ResponseID != authority.id || digestErr != nil ||
+		(digest != authority.responseHash && (!rejected || digest != authority.billingHash)) ||
+		(authority.rejected && (!rejected || (!settlement && model.ClassifiedErrorCode(err) != authority.rejectionCode))) ||
+		(authority.named && authority.duplicate(response.ResponseID)) {
 		return authority.reject()
 	}
 	return response, err

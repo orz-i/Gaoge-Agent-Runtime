@@ -1,72 +1,25 @@
 package agent
 
 import (
-	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"reflect"
-	"slices"
-	"strconv"
-	"strings"
+
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract"
 )
 
-// An Agent Run state is the original authority for Model intents, Tool calls,
-// signed Provider replay, and their receipts. encoding/json compacts and HTML-
-// escapes json.RawMessage even when the logical value is unchanged. Original
-// physical bytes cannot be recovered from that normalized value on resume.
-//
-// Keep the existing typed State JSON and store *only* the RawMessage fields
-// which the standard encoder would rewrite in one authenticated-by-structure
-// sidecar. The internal digest detects accidental corruption; it is NOT a
-// signature against a privileged database writer. Paths bind each original
-// byte sequence to its exact durable field and position. No new execution or
-// provider replay policy is introduced.
+// Retain the original Agent State evidence representation and version. The
+// lossless field walk and digest are shared by Model identity and receipts.
 const originalStateEvidenceVersion = "agent-state-opaque-v1"
 
-type originalStateEvidence struct {
-	Version string                  `json:"version"`
-	Fields  []originalStateRawField `json:"fields"`
-	Digest  string                  `json:"digest"`
-}
-
-type originalStateRawField struct {
-	Path string `json:"path"`
-	Raw  []byte `json:"raw"`
-}
-
+type originalStateEvidence = jsoncontract.OpaqueEvidence
+type originalStateRawField = jsoncontract.OpaqueField
 type persistedRunState struct {
 	runState
 	OriginalStateEvidence *originalStateEvidence `json:"_originalStateEvidence"`
 }
 
-var rawMessageType = reflect.TypeFor[json.RawMessage]()
-
 func encodeOriginalRunState(state runState) (json.RawMessage, error) {
-	canonical, err := json.Marshal(state)
-	if err != nil {
-		return nil, errors.Join(ErrInvalidRequest, err)
-	}
-	fields := make([]originalStateRawField, 0)
-	err = walkStateRaw(reflect.ValueOf(&state).Elem(), "", false, func(path string, value reflect.Value) error {
-		original := value.Interface().(json.RawMessage)
-		if len(original) == 0 {
-			return nil
-		}
-		encoded, e := json.Marshal(original)
-		if e != nil {
-			return e
-		}
-		if !bytes.Equal(original, encoded) {
-			fields = append(fields, originalStateRawField{Path: path, Raw: bytes.Clone(original)})
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, errors.Join(ErrInvalidRequest, err)
-	}
-	seal, err := sealOriginalState(canonical, fields)
+	seal, err := jsoncontract.SealOpaque(originalStateEvidenceVersion, state)
 	if err != nil {
 		return nil, errors.Join(ErrInvalidRequest, err)
 	}
@@ -76,147 +29,13 @@ func encodeOriginalRunState(state runState) (json.RawMessage, error) {
 	}
 	return encoded, nil
 }
-
 func decodeOriginalRunState(encoded json.RawMessage) (runState, error) {
 	var saved persistedRunState
-	if err := json.Unmarshal(encoded, &saved); err != nil || saved.OriginalStateEvidence == nil ||
-		saved.OriginalStateEvidence.Version != originalStateEvidenceVersion {
-		return runState{}, ErrInvalidRequest
+	if err := json.Unmarshal(encoded, &saved); err != nil {
+		return runState{}, errors.Join(ErrInvalidRequest, err)
 	}
-	canonical, err := json.Marshal(saved.runState)
-	if err != nil {
-		return runState{}, ErrInvalidRequest
-	}
-	recorded := saved.OriginalStateEvidence
-	seal, err := sealOriginalState(canonical, recorded.Fields)
-	if err != nil || seal.Digest != recorded.Digest {
-		return runState{}, ErrInvalidRequest
-	}
-	byPath := make(map[string][]byte, len(recorded.Fields))
-	for _, field := range recorded.Fields {
-		if field.Path == "" || len(field.Raw) == 0 || !json.Valid(field.Raw) {
-			return runState{}, ErrInvalidRequest
-		}
-		if _, duplicate := byPath[field.Path]; duplicate {
-			return runState{}, ErrInvalidRequest
-		}
-		byPath[field.Path] = field.Raw
-	}
-	consumed := 0
-	err = walkStateRaw(reflect.ValueOf(&saved.runState).Elem(), "", true, func(path string, value reflect.Value) error {
-		original, present := byPath[path]
-		if !present {
-			return nil
-		}
-		if !value.CanSet() {
-			return ErrInvalidRequest
-		}
-		normalized, e := json.Marshal(json.RawMessage(original))
-		if e != nil || bytes.Equal(normalized, original) ||
-			!bytes.Equal(normalized, value.Interface().(json.RawMessage)) {
-			return ErrInvalidRequest
-		}
-		value.Set(reflect.ValueOf(json.RawMessage(bytes.Clone(original))))
-		consumed++
-		return nil
-	})
-	if err != nil || consumed != len(recorded.Fields) {
-		return runState{}, ErrInvalidRequest
+	if err := jsoncontract.RestoreOpaque(originalStateEvidenceVersion, &saved.runState, saved.OriginalStateEvidence); err != nil {
+		return runState{}, errors.Join(ErrInvalidRequest, err)
 	}
 	return saved.runState, nil
-}
-
-func sealOriginalState(canonical []byte, fields []originalStateRawField) (originalStateEvidence, error) {
-	encoded, err := json.Marshal(fields)
-	if err != nil {
-		return originalStateEvidence{}, err
-	}
-	// Hash the exact same framed bytes incrementally. A combined-size
-	// allocation can overflow for large original Run histories and needlessly
-	// duplicate all already allocated State/sidecar bytes in memory.
-	h := sha256.New()
-	_, _ = h.Write([]byte(originalStateEvidenceVersion))
-	_, _ = h.Write([]byte{0})
-	_, _ = h.Write(canonical)
-	_, _ = h.Write([]byte{0})
-	_, _ = h.Write(encoded)
-	return originalStateEvidence{Version: originalStateEvidenceVersion, Fields: fields, Digest: hex.EncodeToString(h.Sum(nil))}, nil
-}
-
-// walkStateRaw walks the *actual* typed Run state, not a JSON-value copy which
-// would already have lost opaque bytes. Every raw field, including those inside
-// nested ModelInvocations, approvals, receipts and future typed fields, crosses
-// the same path; map keys are sorted for deterministic persistence. The caller
-// owns the mutable state and does not share it across parallel decoders.
-func walkStateRaw(value reflect.Value, path string, restore bool, visit func(string, reflect.Value) error) error {
-	if !value.IsValid() {
-		return nil
-	}
-	if value.Type() == rawMessageType {
-		return visit(path, value)
-	}
-	// Leaf scalar kinds are not omitted accidentally: by definition they
-	// cannot hold typed json.RawMessage evidence.
-	switch value.Kind() { //nolint:exhaustive // All scalar reflect kinds are intentional leaves.
-	case reflect.Interface:
-		if value.IsNil() {
-			return nil
-		}
-		if !restore {
-			return walkStateRaw(value.Elem(), path, false, visit)
-		}
-		if !value.CanSet() {
-			return ErrInvalidRequest
-		}
-		copy := reflect.New(value.Elem().Type()).Elem()
-		copy.Set(value.Elem())
-		if err := walkStateRaw(copy, path, true, visit); err != nil {
-			return err
-		}
-		value.Set(copy)
-	case reflect.Pointer:
-		if !value.IsNil() {
-			return walkStateRaw(value.Elem(), path, restore, visit)
-		}
-	case reflect.Struct:
-		typ := value.Type()
-		for i := 0; i < value.NumField(); i++ {
-			if typ.Field(i).PkgPath != "" { // Never traverse unexported foreign internals (e.g. time.Time).
-				continue
-			}
-			if err := walkStateRaw(value.Field(i), path+"."+typ.Field(i).Name, restore, visit); err != nil {
-				return err
-			}
-		}
-	case reflect.Array, reflect.Slice:
-		for i := 0; i < value.Len(); i++ {
-			if err := walkStateRaw(value.Index(i), path+"["+strconv.Itoa(i)+"]", restore, visit); err != nil {
-				return err
-			}
-		}
-	case reflect.Map:
-		if value.Type().Key().Kind() != reflect.String {
-			return ErrInvalidRequest
-		}
-		keys := value.MapKeys()
-		slices.SortFunc(keys, func(a, b reflect.Value) int { return strings.Compare(a.String(), b.String()) })
-		for _, key := range keys {
-			next := value.MapIndex(key)
-			// Map values are never directly addressable. Copy back only a
-			// value which may have restored raw evidence.
-			copy := reflect.New(next.Type()).Elem()
-			copy.Set(next)
-			if err := walkStateRaw(copy, path+"{"+strconv.Quote(key.String())+"}", restore, visit); err != nil {
-				return err
-			}
-			if restore {
-				value.SetMapIndex(key, copy)
-			}
-		}
-	default:
-		// Scalar values never contain opaque JSON; no physical evidence to
-		// restore. Explicitly exclude them from this type-domain traversal.
-		return nil
-	}
-	return nil
 }

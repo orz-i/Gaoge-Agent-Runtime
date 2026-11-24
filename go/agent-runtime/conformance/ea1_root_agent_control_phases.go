@@ -2,8 +2,6 @@ package conformance
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -192,14 +190,8 @@ func ea1NewControlFixture(t *testing.T, factory func(*testing.T) (kernel.Store, 
 	current := view.ModelInvocations[0]
 	canonical := model.CloneRequest(original.Request)
 	canonical.InvocationID = ""
-	raw, marshalErr := json.Marshal(struct {
-		Request             model.Request `json:"request"`
-		CatalogFingerprints []string      `json:"catalogFingerprints"`
-		Provider            string        `json:"provider"`
-		BindingFingerprint  string        `json:"bindingFingerprint"`
-	}{canonical, original.CatalogFingerprints, original.Provider, original.BindingFingerprint})
-	hash := sha256.Sum256(raw)
-	if marshalErr != nil || original.RequestHash != hex.EncodeToString(hash[:]) || current.RequestHash != original.RequestHash || current.ID != original.ID || current.Provider != original.Provider || current.BindingFingerprint != original.BindingFingerprint || current.ExecutionAttempt != 1 || current.DispatchAttempt != 1 || current.Status != agent.ModelInvocationConsumed || !ea1RecoveryJSONEqual(model.CloneRequest(original.Request), model.CloneRequest(f.physical.models[0])) {
+	hash, marshalErr := ea1ModelIntentEvidenceHash(canonical, original.CatalogFingerprints, original.Provider, original.BindingFingerprint)
+	if marshalErr != nil || original.RequestHash != hash || current.RequestHash != original.RequestHash || current.ID != original.ID || current.Provider != original.Provider || current.BindingFingerprint != original.BindingFingerprint || current.ExecutionAttempt != 1 || current.DispatchAttempt != 1 || current.Status != agent.ModelInvocationConsumed || !ea1RecoveryJSONEqual(model.CloneRequest(original.Request), model.CloneRequest(f.physical.models[0])) {
 		t.Fatal("original full Model source/attempt mismatch")
 	}
 	if external {

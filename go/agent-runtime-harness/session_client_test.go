@@ -11,6 +11,7 @@ import (
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
@@ -222,7 +223,7 @@ func assertPersistedModelHash(t *testing.T, runtime *kernel.Runtime, snapshot ha
 		digest := sha256.Sum256(raw)
 		catalogFingerprints = append(catalogFingerprints, hex.EncodeToString(digest[:]))
 	}
-	encoded, err := json.Marshal(struct {
+	proof, err := jsoncontract.SealOpaque("agent-model-intent-opaque-v1", struct {
 		Request             model.Request `json:"request"`
 		CatalogFingerprints []string      `json:"catalogFingerprints"`
 		Provider            string        `json:"provider"`
@@ -232,8 +233,7 @@ func assertPersistedModelHash(t *testing.T, runtime *kernel.Runtime, snapshot ha
 	if err != nil {
 		t.Fatal(err)
 	}
-	digest := sha256.Sum256(encoded)
-	if view.ModelInvocations[0].RequestHash != hex.EncodeToString(digest[:]) {
-		t.Fatalf("model saw a request different from frozen intent: received=%s frozen=%s", hex.EncodeToString(digest[:]), view.ModelInvocations[0].RequestHash)
+	if view.ModelInvocations[0].RequestHash != proof.Digest {
+		t.Fatalf("model saw a request different from frozen intent: received=%s frozen=%s", proof.Digest, view.ModelInvocations[0].RequestHash)
 	}
 }

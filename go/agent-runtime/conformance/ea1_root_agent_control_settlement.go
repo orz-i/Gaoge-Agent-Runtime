@@ -2,8 +2,6 @@ package conformance
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"reflect"
@@ -168,14 +166,8 @@ func ea1ControlSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, 
 	ea1StartSettlementJSONEqual(t, "original Model request", originalIntent.Request, physical.requests[0])
 	canonical := model.CloneRequest(physical.requests[0])
 	canonical.InvocationID = ""
-	encoded, e := json.Marshal(struct {
-		Request             model.Request `json:"request"`
-		CatalogFingerprints []string      `json:"catalogFingerprints"`
-		Provider            string        `json:"provider"`
-		BindingFingerprint  string        `json:"bindingFingerprint"`
-	}{canonical, originalIntent.CatalogFingerprints, originalIntent.Provider, originalIntent.BindingFingerprint})
-	digest := sha256.Sum256(encoded)
-	if e != nil || originalIntent.RequestHash != hex.EncodeToString(digest[:]) || intent.ID != originalIntent.ID || intent.RunID != originalIntent.RunID || intent.SourceRevision != originalIntent.SourceRevision || intent.Model != originalIntent.Model || intent.Provider != originalIntent.Provider || intent.BindingFingerprint != originalIntent.BindingFingerprint || intent.ExecutionAttempt != originalIntent.ExecutionAttempt || intent.DispatchAttempt != originalIntent.DispatchAttempt {
+	digest, e := ea1ModelIntentEvidenceHash(canonical, originalIntent.CatalogFingerprints, originalIntent.Provider, originalIntent.BindingFingerprint)
+	if e != nil || originalIntent.RequestHash != digest || intent.ID != originalIntent.ID || intent.RunID != originalIntent.RunID || intent.SourceRevision != originalIntent.SourceRevision || intent.Model != originalIntent.Model || intent.Provider != originalIntent.Provider || intent.BindingFingerprint != originalIntent.BindingFingerprint || intent.ExecutionAttempt != originalIntent.ExecutionAttempt || intent.DispatchAttempt != originalIntent.DispatchAttempt {
 		t.Fatal("durable invocation lost original full source tuple")
 	}
 	// CatalogFingerprints is pruned with Request; the original tuple is sealed by the retained hash above.

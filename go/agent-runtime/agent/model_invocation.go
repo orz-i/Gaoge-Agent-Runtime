@@ -12,6 +12,7 @@ import (
 	"time"
 
 	runtimebudget "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/observability"
@@ -136,7 +137,7 @@ func modelInvocationRequestHash(request model.Request, fingerprints []string, pr
 		return "", errors.Join(ErrInvalidRequest, err)
 	}
 	request.InvocationID = ""
-	encoded, err := json.Marshal(struct {
+	proof, err := jsoncontract.SealOpaque("agent-model-intent-opaque-v1", struct {
 		Request             model.Request          `json:"request"`
 		CatalogFingerprints []string               `json:"catalogFingerprints"`
 		Provider            string                 `json:"provider"`
@@ -148,8 +149,7 @@ func modelInvocationRequestHash(request model.Request, fingerprints []string, pr
 	if err != nil {
 		return "", errors.Join(ErrInvalidRequest, err)
 	}
-	digest := sha256.Sum256(encoded)
-	return hex.EncodeToString(digest[:]), nil
+	return proof.Digest, nil
 }
 
 func activeModelInvocation(state runState) (*ModelInvocation, bool) {
@@ -346,9 +346,9 @@ func validModelInvocationReceipt(invocation ModelInvocation) bool {
 	}
 	if invocation.ErrorCode != "" {
 		return invocation.Usage != nil && invocation.Response.Usage != nil &&
-			validModelUsage(invocation.Usage) && *invocation.Usage == *invocation.Response.Usage
+			model.ValidUsage(invocation.Usage) && *invocation.Usage == *invocation.Response.Usage
 	}
-	return validModelResponse(invocation.Response)
+	return model.ValidResponse(invocation.Response)
 }
 
 func validBindingFingerprint(value string) bool {
@@ -745,7 +745,7 @@ func (runner *Runner) executeModelInvocation(
 	invocation ModelInvocation,
 ) (kernel.Snapshot, runState, error) {
 	if invocation.Status == ModelInvocationCompleted {
-		return snapshot, state, nil
+		return snapshot, state, runner.requireSettledModelQualification(ctx, invocation)
 	}
 	if invocation.Status != ModelInvocationPending {
 		return kernel.Snapshot{}, runState{}, ErrInvalidRequest
@@ -842,21 +842,20 @@ func (runner *Runner) executeModelInvocation(
 		},
 		&authority,
 	)
-	response.Content = strings.TrimSpace(response.Content)
-	if err == nil && response.Usage != nil && validModelUsage(response.Usage) && !validModelResponse(response) {
+	if err == nil && response.Usage != nil && model.ValidUsage(response.Usage) && !model.ValidResponse(response) {
 		err = model.NewResponseRejectedError(ErrInvalidModelResponse)
 	}
 	// Validate against the original receipt, not just another syntactically
 	// valid ID. The same authority also fences downstream shared settlement.
-	response, err = authority.validate(response, err)
+	response, err = authority.validateFinal(response, err)
 	late := errors.Is(err, ErrModelLateResult)
-	knownRejection := model.IsResponseRejectedError(err) && response.Usage != nil && validModelUsage(response.Usage)
+	knownRejection := model.IsResponseRejectedError(err) && response.Usage != nil && model.ValidUsage(response.Usage)
 	if knownRejection {
 		// The rejected assistant reply is NOT an authorized transcript or
 		// executable Tool payload. Persist only the verified billing receipt
 		// even for custom named clients and Model middleware that return
 		// an unsanitized rejected Response.
-		response = model.Response{ResponseID: response.ResponseID, Usage: model.CloneUsage(response.Usage)}
+		response = model.BillingOnlyResponse(response)
 	}
 	var denied modelPreDispatchDenied
 	if errors.As(err, &denied) {
@@ -891,7 +890,7 @@ func (runner *Runner) executeModelInvocation(
 		})
 		return snapshot, state, cause
 	}
-	if !knownRejection && !validModelResponse(response) {
+	if !knownRejection && !model.ValidResponse(response) {
 		endedAt := runner.clock.Now().UTC()
 		runner.recordTelemetry(ctx, observability.Event{
 			Scope: observability.ScopeModelInvocation, Phase: observability.PhaseFailed,
@@ -1070,16 +1069,26 @@ func (runner *Runner) releaseModelInvocationExecution(
 	})
 }
 
-func modelDefinitions(invocation ModelInvocation) []tools.Definition {
+// The physical Tool subset and its original Catalog fingerprints travel
+// together. A narrowed or reordered plan cannot misbind a logical index.
+func modelDefinitions(invocation ModelInvocation) ([]tools.Definition, []string) {
 	definitions := invocation.Request.Tools
 	if p := invocation.SamplingPlan; p != nil {
 		definitions = samplingTools(definitions, p.LocalToolKeys, p.OmitLocalTools, localSamplingKey)
 	}
-	result := make([]tools.Definition, len(definitions))
-	for index, definition := range definitions {
-		result[index] = tools.CloneDefinition(definition)
+	byKey := make(map[string]string, len(invocation.Request.Tools))
+	for i, d := range invocation.Request.Tools {
+		if i < len(invocation.CatalogFingerprints) {
+			byKey[d.Key] = invocation.CatalogFingerprints[i]
+		}
 	}
-	return result
+	result := make([]tools.Definition, len(definitions))
+	fingerprints := make([]string, len(definitions))
+	for i, d := range definitions {
+		result[i] = tools.CloneDefinition(d)
+		fingerprints[i] = byKey[d.Key]
+	}
+	return result, fingerprints
 }
 
 type agentClock struct{}

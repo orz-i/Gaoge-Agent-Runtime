@@ -44,5 +44,5 @@ func (authority *BudgetAuthority) VerifyModelOutcome(ctx context.Context, reques
 	if !ok || receipt.ID != id || receipt.RunID != request.RunID || receipt.PhysicalRequestHash != hash || receipt.Status != budget.ReservationSettled || !receipt.Dispatched || len(receipt.Receipt) == 0 {
 		return model.Response{}, ErrConflict
 	}
-	return decodeBudgetModelReceipt(receipt.Receipt)
+	return budget.DecodeModelReceipt(receipt)
 }

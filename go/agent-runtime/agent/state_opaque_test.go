@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
@@ -122,7 +123,7 @@ func TestAgentStateMissingOrContradictoryOriginalEvidenceFailsClosed(t *testing.
 			if err != nil {
 				t.Fatal(err)
 			}
-			seal, err := sealOriginalState(canonical, mutated.OriginalStateEvidence.Fields)
+			seal, err := jsoncontract.SealOpaqueFields(originalStateEvidenceVersion, canonical, mutated.OriginalStateEvidence.Fields)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -187,7 +188,7 @@ func FuzzAgentOriginalEvidenceStateRoundTrip(f *testing.F) {
 func TestOriginalStateEvidenceStreamingHashMatchesFrozenFrame(t *testing.T) {
 	canonical := []byte(`{"state":"<>&","steps":12}`)
 	fields := []originalStateRawField{{Path: ".Messages[0].ToolCalls[0].Arguments", Raw: []byte(`{ "html": "<>&" }`)}}
-	actual, err := sealOriginalState(canonical, fields)
+	actual, err := jsoncontract.SealOpaqueFields(originalStateEvidenceVersion, canonical, fields)
 	if err != nil {
 		t.Fatal(err)
 	}

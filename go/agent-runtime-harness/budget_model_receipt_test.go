@@ -17,6 +17,8 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
+var errBudgetResponseRejected = errors.New("completed model response was rejected")
+
 // An opaque Host callback has no trusted completion ticket. Native Budget
 // receipts cannot certify another layer's unreturned physical effects.
 type opaqueBudgetHostRun struct{}

@@ -9,7 +9,7 @@ import (
 // cost atomically with the model invocation, before any upstream dispatch.
 // This is opt-in per Turn/subtree; it does not change deployment defaults.
 func reserveHostedModelTools(request model.Request, reservation budget.Reservation, ledger budget.Ledger) (model.Request, budget.Reservation) {
-	maximum, limited := remainingHostedCalls(ledger, request.RunID)
+	maximum, limited := ledger.RemainingHostedCalls(request.RunID)
 	if !limited || len(request.HostedTools) == 0 {
 		return request, reservation
 	}
@@ -21,28 +21,8 @@ func reserveHostedModelTools(request model.Request, reservation budget.Reservati
 	return applyHostedReservation(request, maximum, ledger, request.RunID), reservation
 }
 
-func remainingHostedCalls(ledger budget.Ledger, runID string) (int, bool) {
-	maximum, limited := int(^uint(0)>>1), false
-	for current := runID; ; current = ledger.Runs[current].ParentRunID {
-		view := ledger.View(current)
-		if view.Limits.MaxHostedToolCalls > 0 {
-			limited = true
-			maximum = min(maximum, max(0, view.Limits.MaxHostedToolCalls-view.Usage.HostedToolCalls-view.Reserved.HostedToolCalls))
-		}
-		if view.Limits.MaxToolCalls > 0 {
-			// The shared Tool ceiling also covers provider-hosted executions.
-			// A deployment need not configure a separate hosted-only limit.
-			limited = true
-			maximum = min(maximum, max(0, view.Limits.MaxToolCalls-view.Usage.ToolCalls-view.Reserved.ToolCalls))
-		}
-		if current == "" {
-			return maximum, limited
-		}
-	}
-}
-
 func applyHostedReservation(request model.Request, maximum int, ledger budget.Ledger, runID string) model.Request {
-	_, limited := remainingHostedCalls(ledger, runID)
+	_, limited := ledger.RemainingHostedCalls(runID)
 	if !limited || len(request.HostedTools) == 0 {
 		return request
 	}

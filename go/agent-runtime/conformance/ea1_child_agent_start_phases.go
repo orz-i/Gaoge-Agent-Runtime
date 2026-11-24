@@ -2,8 +2,6 @@ package conformance
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"reflect"
@@ -259,19 +257,13 @@ func (f *ea1ChildStartFixture) receipts(s kernel.Snapshot, modelCommitted bool) 
 	ea1StartSettlementJSONEqual(t, "original child full request", original.Request, p.requests[0])
 	req := model.CloneRequest(p.requests[0])
 	req.InvocationID = ""
-	raw, e := json.Marshal(struct {
-		Request             model.Request `json:"request"`
-		CatalogFingerprints []string      `json:"catalogFingerprints"`
-		Provider            string        `json:"provider"`
-		BindingFingerprint  string        `json:"bindingFingerprint"`
-	}{req, original.CatalogFingerprints, original.Provider, original.BindingFingerprint})
-	sum := sha256.Sum256(raw)
+	sum, e := ea1ModelIntentEvidenceHash(req, original.CatalogFingerprints, original.Provider, original.BindingFingerprint)
 	v, e2 := agent.ViewState(s)
 	if e != nil || e2 != nil || len(v.ModelInvocations) != 1 {
 		t.Fatal("original durable child invocation absent")
 	}
 	got := v.ModelInvocations[0]
-	if original.RequestHash != hex.EncodeToString(sum[:]) || got.ID != original.ID || got.RequestHash != original.RequestHash || got.SourceRevision != original.SourceRevision || got.ExecutionAttempt != 1 || got.DispatchAttempt != 1 || got.Provider != p.ProviderName() || got.BindingFingerprint != strings.Repeat("b", 64) {
+	if original.RequestHash != sum || got.ID != original.ID || got.RequestHash != original.RequestHash || got.SourceRevision != original.SourceRevision || got.ExecutionAttempt != 1 || got.DispatchAttempt != 1 || got.Provider != p.ProviderName() || got.BindingFingerprint != strings.Repeat("b", 64) {
 		t.Fatal("child provider/source/attempt changed")
 	}
 	if modelCommitted {

@@ -6,7 +6,6 @@ import (
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
@@ -111,9 +110,12 @@ func newPhysicalSamplingPlan(original, request model.Request) (*SamplingPlan, er
 	return cloneSamplingPlan(plan), nil
 }
 
-func (plan SamplingPlan) reservation(original model.Request) budget.Reservation {
-	return budget.Reservation{ID: "model:" + original.InvocationID, RunID: original.RunID,
-		RequestHash: kernel.ManagedDigest(original), PhysicalRequestHash: plan.RequestHash, Requested: plan.Requested}
+func (plan SamplingPlan) reservation(original model.Request) (budget.Reservation, error) {
+	hash, err := model.PhysicalRequestHash(original)
+	if err != nil {
+		return budget.Reservation{}, err
+	}
+	return budget.Reservation{ID: "model:" + original.InvocationID, RunID: original.RunID, RequestHash: hash, PhysicalRequestHash: plan.RequestHash, Requested: plan.Requested}, nil
 }
 
 func (plan SamplingPlan) valid(original model.Request) bool {
@@ -154,8 +156,9 @@ func (plan SamplingPlan) valid(original model.Request) bool {
 }
 
 func validFreshSamplingReservation(original model.Request, reservation budget.Reservation) bool {
-	return reservation.ID == "model:"+original.InvocationID && reservation.RunID == original.RunID &&
-		reservation.RequestHash == kernel.ManagedDigest(original) && reservation.PhysicalRequestHash == "" && reservation.Status == "" &&
+	hash, err := model.PhysicalRequestHash(original)
+	return err == nil && reservation.ID == "model:"+original.InvocationID && reservation.RunID == original.RunID &&
+		reservation.RequestHash == hash && reservation.PhysicalRequestHash == "" && reservation.Status == "" &&
 		!reservation.Active && !reservation.Dispatched && reservation.Dimension == "" &&
 		reservation.Usage == (budget.Usage{}) && len(reservation.Receipt) == 0 &&
 		reservation.Requested.LLMCalls == 1 && budget.ValidUsage(reservation.Requested)

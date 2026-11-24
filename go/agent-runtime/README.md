@@ -75,12 +75,22 @@ through its `SamplingPlan`. Context and SharedBudget admission freeze that plan
 before the invocation is committed; otherwise the final dispatch boundary freezes
 it. A budget reservation retains its logical admission identity and separately
 binds the same `model.PhysicalRequestHash` as the sampling plan. Once frozen,
-late middleware cannot alter the physical request. This hash describes the typed
-SDK request serialization, not the provider-native wire payload.
+late middleware cannot alter the physical request. The versioned digest binds typed SDK request evidence, including exact original
+Tool/Provider JSON bytes; it is not the provider-native wire payload or a token-count
+serialization.
 
-An explicitly configured `ModelOutcomeVerifier` receives that reconstructed
-physical request, not the logical intent, and may read the original settled
-Model receipt without invoking middleware or generating another response. A
+The Runtime's native budget coordinator atomically commits observed usage, hosted
+Tool receipts and the Model response's execution qualification. A rejected
+completion is charged but retains only billing identity and its rejection code,
+never executable assistant content. Accepted receipt bytes are losslessly sealed.
+Native replay and read-only recovery interpret the same sealed qualification.
+
+An explicitly configured `ModelOutcomeVerifier` receives the reconstructed
+physical request, not the logical intent. For a frozen SharedBudget reservation,
+its settled native receipt is authoritative; an external Provider receipt cannot
+override a rejection. While the original reservation is still held and the Host
+return is unknown, external evidence may be retained without granting consumption.
+Recovery never invokes generation or replans settlement. A
 previously dispatched record without the required physical identity remains
 unknown; recovery never guesses a hash, replans or falls back to logical lookup. If
 the original Host callback completed, receipt recovery can retire its scope.

@@ -246,12 +246,16 @@ func (p *modelPreparation) assessSamplingRequest(ctx context.Context, adapter *B
 func (p *modelPreparation) assessBudgetCandidate(ctx context.Context, adapter *BoundedContextAdapter, candidate modelCandidate, ledger budget.Ledger,
 	window runtimecontext.ModelWindow, policy runtimecontext.Policy, frame runtimecontext.FrozenAccounting) (modelCandidate, error) {
 	original := candidate.invocation.Request
+	hash, err := model.PhysicalRequestHash(original)
+	if err != nil {
+		return modelCandidate{}, err
+	}
 	minimum := budget.Reservation{ID: "model:" + original.InvocationID, RunID: original.RunID,
-		RequestHash: kernel.ManagedDigest(original), Requested: budget.Usage{LLMCalls: 1}}
+		RequestHash: hash, Requested: budget.Usage{LLMCalls: 1}}
 	if _, exists := ledger.Reservations[minimum.ID]; exists {
 		return modelCandidate{}, budget.ErrLedgerConflict
 	}
-	tokenLimited := p.budget.ports.RequiresTokenUsage(ledger, original.RunID)
+	tokenLimited := ledger.HasRunTokenLimits(original.RunID)
 	if tokenLimited {
 		minimum.Requested.InputTokens, minimum.Requested.OutputTokens, minimum.Requested.TotalTokens = 1, 1, 2
 	}
@@ -366,7 +370,7 @@ func (p *modelPreparation) finish(ctx context.Context, request model.Request) (M
 		if err != nil {
 			return ModelInvocation{}, err
 		}
-		if p.budget.ports.RequiresTokenUsage(ledger, original.RunID) != (reservation.Requested.InputTokens > 0) {
+		if ledger.HasRunTokenLimits(original.RunID) != (reservation.Requested.InputTokens > 0) {
 			return ModelInvocation{}, ErrInvalidRequest
 		}
 		invocation.SamplingPlan, err = newSamplingPlan(ledger, original, physical, reservation,

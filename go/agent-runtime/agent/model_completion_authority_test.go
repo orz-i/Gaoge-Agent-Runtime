@@ -188,3 +188,41 @@ func TestConcurrentModelStreamIdentityAndClosedSink(t *testing.T) {
 		}
 	}
 }
+
+func TestModelCompletionAuthoritySettlementCannotBePromotedOrRelabeled(t *testing.T) {
+	for _, name := range []string{"unsettled", "promoted", "relabeled", "retained"} {
+		t.Run(name, func(t *testing.T) {
+			a, r := completionAuthorityFixture()
+			a.plan.LedgerID = "ledger"
+			r.Content = "original"
+			if _, err := a.record(r, nil); err != nil {
+				t.Fatal(err)
+			}
+			if name == "unsettled" {
+				if _, err := a.validateFinal(r, nil); !errors.Is(err, ErrInvalidModelResponse) {
+					t.Fatal("physical receipt bypassed required settlement")
+				}
+				return
+			}
+			rejected := model.NewResponseRejectedError(model.NewClassifiedError(errors.New("overrun"), "model.post_generation_failed"))
+			billing := model.BillingOnlyResponse(r)
+			if _, err := a.settle(billing, rejected); !model.IsResponseRejectedError(err) {
+				t.Fatal(err)
+			}
+			switch name {
+			case "promoted":
+				if _, err := a.validateFinal(r, nil); !errors.Is(err, ErrInvalidModelResponse) {
+					t.Fatal("settlement rejection promoted")
+				}
+			case "relabeled":
+				if _, err := a.validateFinal(billing, model.NewResponseRejectedError(errors.New("other"))); !errors.Is(err, ErrInvalidModelResponse) {
+					t.Fatal("settlement rejection relabeled")
+				}
+			case "retained":
+				if _, err := a.validateFinal(billing, rejected); !model.IsResponseRejectedError(err) || model.ClassifiedErrorCode(err) != "model.post_generation_failed" {
+					t.Fatal("original settlement lost")
+				}
+			}
+		})
+	}
+}
