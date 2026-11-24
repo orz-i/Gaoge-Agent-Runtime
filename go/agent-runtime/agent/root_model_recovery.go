@@ -55,7 +55,16 @@ func (runner *Runner) ReconcileModelOutcome(ctx context.Context, runID string, r
 	if !matchesFrozenProviderBinding(runner.model, inv) {
 		return snapshot, ErrProviderBindingMismatch
 	}
+	// The verifier looks up the physical receipt, not the logical intent.
+	// A committed SamplingPlan owns every dispatch-only restriction. Recover
+	// it without calling the meter, resolving policy, or touching the ledger.
 	request := model.CloneRequest(inv.Request)
+	if inv.SamplingPlan != nil {
+		if !inv.SamplingPlan.valid(inv.Request) {
+			return snapshot, ErrInvalidRequest
+		}
+		request = inv.SamplingPlan.request(inv.Request)
+	}
 	response, receiptErr := runner.modelOutcomeVerifier.VerifyModelOutcome(ctx, request)
 	authorityState := state
 	if inv.Status == ModelInvocationCompleted {
