@@ -523,18 +523,28 @@ type TokenCounter interface {
 	Count(stdcontext.Context, TokenCountRequest) (int64, error)
 }
 
+// RequestAccounting projects one original Model request into the Host's
+// provider-neutral accounting form. This is a read-only operation, not a
+// replacement executable request, a token counter, or an admission decision.
+// The Manager accepts only accounting options, the reserved output ceiling
+// and an optional leading provider System prompt; the original transcript,
+// Tool definitions, replay and routing identity must remain byte-equivalent.
+type RequestAccounting func(stdcontext.Context, model.Request, ModelWindow) (model.Request, error)
+
 // Dependencies are optional Context Window capabilities.
 type Dependencies struct {
-	Counter TokenCounter
+	Counter    TokenCounter
+	Accounting RequestAccounting
 }
 
 // Manager owns pure Context Window evolution and request budget accounting.
 type Manager struct {
-	counter TokenCounter
+	counter    TokenCounter
+	accounting RequestAccounting
 }
 
 func NewManager(dependencies Dependencies) *Manager {
-	return &Manager{counter: dependencies.Counter}
+	return &Manager{counter: dependencies.Counter, accounting: dependencies.Accounting}
 }
 
 // NormalizePolicy applies non-model defaults only. It intentionally never invents a model token limit.
@@ -909,11 +919,15 @@ func (manager *Manager) AssessModelRequest(
 	if err != nil {
 		return Assessment{}, errors.Join(ErrInvalidInput, err)
 	}
+	accountingPayload, err := manager.accountingPayload(ctx, request, modelWindow, exactPayload)
+	if err != nil {
+		return Assessment{}, err
+	}
 	soft := hard * int64(policy.SoftLimitPercent) / 100
 	if soft < 1 {
 		soft = 1
 	}
-	assessment := Assessment{HardInputTokens: hard, SoftInputTokens: soft, SerializedBytes: int64(len(exactPayload))}
+	assessment := Assessment{HardInputTokens: hard, SoftInputTokens: soft, SerializedBytes: int64(max(len(exactPayload), len(accountingPayload)))}
 	countContext := normalizeTokenCountContext(modelWindow.TokenCountContext)
 	// A media URL/file reference is only a few serialized bytes, while
 	// decoded image/document/audio tokens are not bounded by those bytes.
@@ -940,9 +954,11 @@ func (manager *Manager) AssessModelRequest(
 	if requiresExact {
 		return Assessment{}, ErrModelWindowUnknown
 	}
-	assessment.RawTokenEstimate = estimatedTokens(exactPayload)
+	assessment.RawTokenEstimate = estimatedTokens(accountingPayload)
 	assessment.AdjustedTokenEstimate = applySafetyMargin(assessment.RawTokenEstimate, policy.EstimateSafetyPercent)
-	assessment.HardTokenEstimate = hardTokenUpperBound(exactPayload, policy.EstimateSafetyPercent)
+	// Preserve the existing conservative bound on the original typed bytes,
+	// even if the canonical accounting options happen to serialize smaller.
+	assessment.HardTokenEstimate = max(hardTokenUpperBound(exactPayload, policy.EstimateSafetyPercent), hardTokenUpperBound(accountingPayload, policy.EstimateSafetyPercent))
 	assessment.TokenCountSource = CountEstimated
 	return assessment, nil
 }
