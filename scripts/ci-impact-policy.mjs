@@ -1,7 +1,6 @@
-import { modules, shards } from "./go-workspace-layout.mjs";
+import { allGoModules, detachedModules, modules, shards } from "./go-workspace-layout.mjs";
 
-export const detachedModules = ["integration/continuation-e2e", "integration/otel-e2e"];
-export const allGoModules = [...modules, ...detachedModules];
+export { allGoModules, detachedModules };
 const prefix = "github.com/orz-i/Gaoge-Agent-Runtime/";
 const identities = new Map(allGoModules.map((module) => [module.startsWith("go/") ? prefix + module :
   `example.com/agent-runtime-${module.split("/").at(-1)}`, module]));
