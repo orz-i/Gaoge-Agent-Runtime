@@ -174,6 +174,23 @@ func (r *ShadowRunner) StartRun(ctx context.Context, req agent.StartRequest) (ke
 	if _, err = r.decodeState(snap); err != nil {
 		return snap, err
 	}
+	// The original Create intent is NOT a physical send grant. Another
+	// controller may have cancelled it while its Create ACK was delayed.
+	// Election and cancellation compete in one signed Kernel revision CAS.
+	snap, err = handoff.AdmitRemoteFirstDispatch(ctx, r.runtime, snap,
+		func(candidate kernel.Snapshot) bool {
+			state, decodeErr := r.decodeState(candidate)
+			return decodeErr == nil && state.OpenPending && !state.OpenReturned &&
+				!state.PromptPending && !state.CancelPending
+		},
+		func(callCtx context.Context, current kernel.Snapshot) (kernel.Snapshot, error) {
+			return r.apply(callCtx, current, state, kernel.Mutation{Status: kernel.RunStatusRunning,
+				Events: []kernel.EventDraft{{Type: "acp.remote_open_dispatch_admitted",
+					Message: "Original ACP session/new dispatch claimed"}}})
+		})
+	if err != nil {
+		return snap, errors.Join(ErrOutcomeUnknown, err)
+	}
 	// session/new is not a deduplicated RPC. A lost response is unknown.
 	sessionID, openErr := r.binding.Client.OpenSession(ctx, id, r.binding.Cwd)
 	if openErr != nil || strings.TrimSpace(sessionID) == "" {

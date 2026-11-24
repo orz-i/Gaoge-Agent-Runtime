@@ -292,7 +292,7 @@ type sessionApplyFenceStore struct {
 
 func (s *sessionApplyFenceStore) Apply(ctx context.Context, id string, revision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
 	snap, err := s.Store.Apply(ctx, id, revision, mutation)
-	if err == nil && revision == 1 && strings.Contains(string(mutation.Record.State), `"sessionID":"session-1"`) {
+	if err == nil && revision == 2 && strings.Contains(string(mutation.Record.State), `"sessionID":"session-1"`) {
 		s.committed <- snap
 		<-s.release
 	}
@@ -319,7 +319,7 @@ func TestACPCancelBeatsPromptAdmissionWithoutLatePhysicalSend(t *testing.T) {
 	done := make(chan ret, 1)
 	go func() { s, e := runner.StartRun(context.Background(), startRequest("early-cancel")); done <- ret{s, e} }()
 	committed := <-store.committed
-	if committed.Run.Revision != 2 {
+	if committed.Run.Revision != 3 {
 		t.Fatalf("wrong committed session revision %d", committed.Run.Revision)
 	}
 	cancelled, cancelErr := runner.CancelRun(t.Context(), committed.Run.ID, committed.Run.Revision)

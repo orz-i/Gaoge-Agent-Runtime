@@ -72,7 +72,7 @@ type auditPromptCommitFence struct {
 
 func (s *auditPromptCommitFence) Apply(ctx context.Context, id string, rev uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
 	snap, err := s.Store.Apply(ctx, id, rev, m)
-	if err == nil && rev == 2 && strings.Contains(string(m.Record.State), "\"promptPending\":true") {
+	if err == nil && rev == 3 && strings.Contains(string(m.Record.State), "\"promptPending\":true") {
 		s.committed <- snap
 		<-s.release
 	}
