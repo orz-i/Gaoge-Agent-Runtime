@@ -59,7 +59,7 @@ func TestPR151A2ACancelCtxRetainsPhysicalReturn(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("original CancelTask callback returned: CancelPending=%t CancelReturned=%t, rev=%d", state.PendingCancel, state.PendingCancelReturned, pending.Run.Revision)
-	remote.shadowRemote.task = completedTask()
+	remote.task = completedTask()
 	after, obsErr := runner.LoadRun(t.Context(), snap.Run.ID)
 	t.Logf("read-only task recovery status=%s error=%v remote GET count=%d", after.Run.Status, obsErr, 0)
 	if !errors.Is(cancelErr, ErrRemoteOutcomeUnknown) || !state.PendingCancel || !state.PendingCancelReturned ||
