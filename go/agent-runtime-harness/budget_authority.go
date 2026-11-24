@@ -163,10 +163,10 @@ func (authority *BudgetAuthority) previewModelReservation(ledger budget.Ledger, 
 				ceiling = math.MaxInt64
 			}
 			ceiling = remainingOutputCeiling(ledger, request.RunID, 0, ceiling)
-			if ceiling <= 0 {
-				return request, reservation, budget.ErrExhausted
-			}
-			if ceiling != math.MaxInt64 {
+			// A zero remaining quota is a ledger admission fact, not a
+			// malformed request or failed Host callback. Keep a valid shape
+			// for the Runtime's pure reservation decision.
+			if ceiling > 0 && ceiling != math.MaxInt64 {
 				request.MaxOutputTokens = ceiling
 			}
 		}
@@ -218,12 +218,15 @@ func (authority *BudgetAuthority) modelReservation(ctx context.Context, ledger b
 		if admission.InputUpperBound <= 0 || admission.MaxOutputTokens <= 0 {
 			return request, reservation, budget.ErrUnmetered
 		}
-		output := remainingOutputCeiling(ledger, original.RunID, admission.InputUpperBound, admission.MaxOutputTokens)
+		output := admission.MaxOutputTokens
 		if request.MaxOutputTokens > 0 {
 			output = min(output, request.MaxOutputTokens)
 		}
-		if output <= 0 {
-			return request, reservation, budget.ErrExhausted
+		// Tighten only to an executable positive ceiling. If even that
+		// cannot fit, return a fully measured candidate; the same ledger
+		// admission rule used at Reserve determines its disposition.
+		if affordable := remainingOutputCeiling(ledger, original.RunID, admission.InputUpperBound, output); affordable > 0 {
+			output = affordable
 		}
 		if request.MaxOutputTokens != output {
 			request.MaxOutputTokens = output

@@ -96,6 +96,14 @@ func (plan SamplingPlan) valid(original model.Request) bool {
 	return err == nil && hardErr == nil && size == plan.Assessment.SerializedBytes && hard == plan.Assessment.HardInputTokens
 }
 
+func validFreshSamplingReservation(original model.Request, reservation budget.Reservation) bool {
+	return reservation.ID == "model:"+original.InvocationID && reservation.RunID == original.RunID &&
+		reservation.RequestHash == kernel.ManagedDigest(original) && reservation.Status == "" &&
+		!reservation.Active && !reservation.Dispatched && reservation.Dimension == "" &&
+		reservation.Usage == (budget.Usage{}) && len(reservation.Receipt) == 0 &&
+		reservation.Requested.LLMCalls == 1 && budget.ValidUsage(reservation.Requested)
+}
+
 func newSamplingPlan(ledger budget.Ledger, original, request model.Request, reservation budget.Reservation,
 	window runtimecontext.ModelWindow, policy runtimecontext.Policy, frame runtimecontext.FrozenAccounting, assessment runtimecontext.Assessment) (*SamplingPlan, error) {
 	hash, err := samplingRequestHash(request)
@@ -106,9 +114,7 @@ func newSamplingPlan(ledger budget.Ledger, original, request model.Request, rese
 		MaxOutputTokens: request.MaxOutputTokens, HostedToolCallLimit: request.HostedToolCallLimit,
 		OmitLocalTools: len(original.Tools) > 0 && len(request.Tools) == 0, RequireToolCall: request.RequireToolCall,
 		Window: window, Policy: runtimecontext.NormalizePolicy(policy), Accounting: frame, Assessment: assessment}
-	want := plan.reservation(original)
-	if reservation.ID != want.ID || reservation.RunID != want.RunID || reservation.RequestHash != want.RequestHash ||
-		reservation.Status != "" || reservation.Active || reservation.Dispatched || !plan.valid(original) ||
+	if !validFreshSamplingReservation(original, reservation) || !plan.valid(original) ||
 		!reflect.DeepEqual(plan.request(original), model.CloneRequest(request)) {
 		return nil, ErrInvalidRequest
 	}

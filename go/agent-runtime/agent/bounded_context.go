@@ -3,7 +3,9 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/callbackscope"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
@@ -55,6 +57,29 @@ func rejectedContextBudget(a runtimecontext.Assessment, policy runtimecontext.Po
 	return &BoundedContextBudgetError{Assessment: a, MaxSerializedBytes: policy.MaxSerializedBytes, Reason: reason}
 }
 
+// candidateRejection is a Runtime-owned no-dispatch decision. It is set
+// only after joint candidate assessment/search, never by a Host port error.
+// The numeric facts also bind the original owned preparation receipt.
+type candidateRejection struct {
+	Code       string
+	Reason     string
+	Assessment runtimecontext.Assessment
+	Quota      candidateQuota
+	cause      error
+}
+
+func (c modelCandidate) reject(policy runtimecontext.Policy, reason string, rejected *candidateRejection) error {
+	decision := candidateRejection{Code: "context.input_budget_exceeded", Reason: reason, Assessment: c.assessment,
+		Quota: c.quota, cause: rejectedContextBudget(c.assessment, policy, reason)}
+	if errors.Is(c.quota.err, budget.ErrExhausted) {
+		decision.Code, decision.cause = sharedBudgetErrorCode(c.quota.err), c.quota.err
+	}
+	if rejected != nil {
+		*rejected = decision
+	}
+	return decision.cause
+}
+
 type BoundedContextAdapter struct {
 	manager *runtimecontext.Manager
 	ports   BoundedContextPorts
@@ -98,7 +123,7 @@ func (a *BoundedContextAdapter) PrepareRequest(ctx context.Context, incoming mod
 // prepare owns the only Context preparation algorithm. Only a rejection
 // computed by this concrete adapter can set rejected, never an error supplied
 // by a Host port. Managed transfer and ordinary owned execution share it.
-func (a *BoundedContextAdapter) prepare(ctx context.Context, incoming model.Request, rejected *bool, journal bool) (model.Request, error) {
+func (a *BoundedContextAdapter) prepare(ctx context.Context, incoming model.Request, rejected *candidateRejection, journal bool) (model.Request, error) {
 	plan, err := a.ports.Plan(ctx, model.CloneRequest(incoming))
 	if err != nil {
 		return model.Request{}, err
@@ -122,36 +147,31 @@ func (a *BoundedContextAdapter) prepare(ctx context.Context, incoming model.Requ
 	if err != nil {
 		return model.Request{}, err
 	}
-	assessment := original.assessment
-	withinHard := runtimecontext.WithinHardBudget(assessment, policy)
-	if withinHard && assessment.HardTokenEstimate <= assessment.SoftInputTokens {
+	if original.disposition == candidateExhausted {
+		return model.Request{}, original.reject(policy, "shared_budget_exhausted", rejected)
+	}
+	if original.soft() {
 		return original.selectForIntent(ctx)
 	}
 	if !plan.ArtifactReader || original.omitLocalTools || !plan.Owner {
-		if withinHard {
+		if original.selectable() {
 			return original.selectForIntent(ctx)
 		}
 		reason := "no_artifact_reader"
 		if plan.ArtifactReader && !original.omitLocalTools {
 			reason = "not_owner"
 		}
-		if rejected != nil {
-			*rejected = true
-		}
-		return model.Request{}, rejectedContextBudget(assessment, policy, reason)
+		return model.Request{}, original.reject(policy, reason, rejected)
 	}
-	choice, ok, err := a.selectCompaction(ctx, *plan.Checkpoint, request, plan.ModelWindow, policy, frame, assessment, withinHard)
+	choice, ok, err := a.selectCompaction(ctx, *plan.Checkpoint, request, plan.ModelWindow, policy, frame, original)
 	if err != nil {
 		return model.Request{}, err
 	}
 	if !ok {
-		if withinHard {
+		if original.selectable() {
 			return original.selectForIntent(ctx)
 		}
-		if rejected != nil {
-			*rejected = true
-		}
-		return model.Request{}, rejectedContextBudget(assessment, policy, "no_safe_compaction")
+		return model.Request{}, original.reject(policy, "no_safe_compaction", rejected)
 	}
 	next, err := a.manager.Rollover(ctx, runtimecontext.RolloverRequest{Previous: *plan.Checkpoint, Window: choice.window, Artifacts: choice.artifacts, Reason: "model_window_pressure", ModelWindowFingerprint: runtimecontext.ModelWindowFingerprint(choice.modelWindow), Assessment: &choice.assessment})
 	if err != nil {

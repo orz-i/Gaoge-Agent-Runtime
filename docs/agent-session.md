@@ -275,7 +275,6 @@ typed request. Summary recovery reuses its sealed frames rather than calling
 the projection or a tokenizer again. No provider prompt or accounting options
 are written into the product Context or summary recipe.
 
-
 When ordinary bounded Context and SharedBudget are composed, the Runtime
 first previews the shared-ledger restrictions for each Context candidate:
 provider-hosted call limits, local Tool visibility and output-token ceiling.
@@ -283,12 +282,21 @@ It meters the actual narrowed request, remeasuring if admission tightens the
 output ceiling, and freezes a compact `SamplingPlan` in the selected
 ModelInvocation. The plan contains the physical request digest, restrictions,
 numeric accounting evidence and requested quota, not a second transcript or
-provider prompt. Candidates do not reserve quota. The ledger reserves the
-same plan under its current revision CAS before physical dispatch. A competing
-reservation may make a frozen plan wait or fail; it cannot silently replace
-its sampled Tool declarations or token ceiling. New invocations still use
-the latest ledger limits. Pending admitted plans are reused on recovery
-without rerunning Context preparation or the admission meter.
+provider prompt. Candidates do not reserve quota. The same pure reservation
+transition used by the live ledger CAS also evaluates candidate feasibility.
+Context-window pressure or insufficient settled input/total-token allowance
+triggers a search of authorized compaction alternatives. Only a candidate
+that fits both boundaries after transient holds are released can be frozen.
+A temporary hold alone is not a reason to compact; the existing reservation
+wait and recovery path retains the selected plan. Permanent exhaustion,
+including when no positive input/output allowance remains, is a concrete
+Runtime-owned pre-intent rejection, not an uncertain Host failure. A Host
+meter's error cannot establish that rejection. Before physical dispatch the
+ledger reserves the same plan under its current revision CAS; concurrent
+changes may make the plan wait or fail, but cannot silently replace its Tool
+declarations or token ceiling. New invocations use the latest ledger limits.
+Recovery reuses the committed plan without rerunning Context preparation or
+the admission meter.
 
 Ordinary bounded composition is the default. Explicit
 `Context.ManagedRecovery: true` selects the existing Runtime-owned Context

@@ -74,7 +74,9 @@ func TestBoundedContextCompactionCandidateBudgetMatrix(t *testing.T) {
 				t.Fatalf("fixture has no pressure: %+v", original)
 			}
 			adapter := &BoundedContextAdapter{manager: manager}
-			selected, found, err := adapter.selectCompaction(t.Context(), previous, request, window, policy, frame, original, runtimecontext.WithinHardBudget(original, policy))
+			candidate := modelCandidate{assessment: original}
+			candidate.decide(policy)
+			selected, found, err := adapter.selectCompaction(t.Context(), previous, request, window, policy, frame, candidate)
 			if err != nil || found != tc.wantFound {
 				t.Fatalf("found=%v want=%v original=%+v err=%v", found, tc.wantFound, original, err)
 			}

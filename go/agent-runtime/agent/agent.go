@@ -1243,6 +1243,13 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 	}
 	snapshot, state, invocation, err := runner.ensureModelInvocation(ctx, snapshot, state)
 	if err != nil {
+		var rejection provenCandidateRejection
+		if errors.As(err, &rejection) && runner.boundedContext != nil &&
+			rejection.runID == snapshot.Run.ID && rejection.revision == snapshot.Run.Revision &&
+			errors.Is(rejection.cause, runtimebudget.ErrExhausted) && rejection.code == sharedBudgetErrorCode(rejection.cause) {
+			failed, failErr := runner.fail(ctx, snapshot, state, rejection.code, err)
+			return failed, true, failErr
+		}
 		if errors.Is(err, ErrToolDiscoveryDenied) || errors.Is(err, ErrToolDiscoveryInvalid) {
 			failed, failErr := runner.fail(ctx, snapshot, state, "agent.discovery_invalid", err)
 			return failed, true, failErr

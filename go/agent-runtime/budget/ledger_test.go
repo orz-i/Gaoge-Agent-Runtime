@@ -3,6 +3,7 @@ package budget_test
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"sync"
 	"testing"
 
@@ -286,5 +287,86 @@ func TestReserveAtRevisionRejectsStaleSamplingView(t *testing.T) {
 	next, err := c.ReserveAtRevision(t.Context(), "turn", reservation("candidate", 25, 25), true, stale.Revision)
 	if !errors.Is(err, budget.ErrWaiting) || next.Reservations["candidate"].Status != budget.ReservationWaiting {
 		t.Fatalf("concurrent quota did not fence final sampling: %+v %v", next, err)
+	}
+}
+
+func TestPreviewReservationMatchesCommitWithoutMutatingLedger(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		held, requested int64
+		cancelled       bool
+		want            error
+	}{
+		{"admitted", 10, 20, false, nil},
+		{"waiting", 80, 30, false, budget.ErrWaiting},
+		{"exhausted", 10, 101, false, budget.ErrExhausted},
+		{"cancelled", 0, 20, true, budget.ErrExhausted},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newLedger(t, budget.Limits{MaxTotalTokens: 100})
+			if tc.held > 0 {
+				if _, err := c.Reserve(t.Context(), "turn", reservation("held", tc.held, 0), true); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.cancelled {
+				if _, err := c.Cancel(t.Context(), "turn"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			before, err := c.Store.LoadBudget(t.Context(), "turn")
+			if err != nil {
+				t.Fatal(err)
+			}
+			copy := budget.CloneLedger(before)
+			req := reservation("candidate", tc.requested, 0)
+			preview := before.PreviewReservation(req, true)
+			if !errors.Is(preview, tc.want) || !reflect.DeepEqual(before, copy) {
+				t.Fatalf("preview changed source or disposition: %v", preview)
+			}
+			saved, err := c.Store.LoadBudget(t.Context(), "turn")
+			if err != nil || !reflect.DeepEqual(saved, copy) {
+				t.Fatalf("preview wrote durable ledger: %v", err)
+			}
+			_, actual := c.ReserveAtRevision(t.Context(), "turn", req, true, before.Revision)
+			pd, pok := budget.DeniedDimension(preview)
+			ad, aok := budget.DeniedDimension(actual)
+			if !errors.Is(actual, tc.want) || pd != ad || pok != aok {
+				t.Fatalf("preview=%v actual=%v", preview, actual)
+			}
+		})
+	}
+}
+
+func TestReservationPermanentAncestorExhaustionDominatesTemporaryChildHold(t *testing.T) {
+	c := newLedger(t, budget.Limits{MaxTotalTokens: 100})
+	if _, err := c.RegisterRun(t.Context(), "turn", "child", budget.RunBudget{ParentRunID: "root", Limits: budget.Limits{MaxTotalTokens: 50}}); err != nil {
+		t.Fatal(err)
+	}
+	spent := reservation("spent", 60, 0)
+	if _, err := c.Reserve(t.Context(), "turn", spent, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Dispatch(t.Context(), "turn", spent.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Settle(t.Context(), "turn", spent.ID, spent.Requested, nil); err != nil {
+		t.Fatal(err)
+	}
+	held := reservation("held", 20, 0)
+	held.RunID = "child"
+	if _, err := c.Reserve(t.Context(), "turn", held, true); err != nil {
+		t.Fatal(err)
+	}
+	ledger, err := c.Store.LoadBudget(t.Context(), "turn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := reservation("candidate", 45, 0)
+	req.RunID = "child"
+	preview := ledger.PreviewReservation(req, true)
+	_, err = c.ReserveAtRevision(t.Context(), "turn", req, true, ledger.Revision)
+	if !errors.Is(preview, budget.ErrExhausted) || !errors.Is(err, budget.ErrExhausted) {
+		t.Fatalf("permanent parent exhaustion hidden by child hold: preview=%v reserve=%v", preview, err)
 	}
 }

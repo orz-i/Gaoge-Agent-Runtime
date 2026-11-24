@@ -28,6 +28,18 @@ func validBoundedContextComposition(d Dependencies) bool {
 	return count == 1
 }
 
+// A private, source-bound preparation rejection is not a provider
+// classification. Host callbacks cannot certify shared ledger exhaustion.
+type provenCandidateRejection struct {
+	runID    string
+	revision uint64
+	code     string
+	cause    error
+}
+
+func (e provenCandidateRejection) Error() string { return e.cause.Error() }
+func (e provenCandidateRejection) Unwrap() error { return e.cause }
+
 // An ordinary owned Run gets a separate concrete preparation ticket. This
 // neither claims managed suspension nor grants trust to generic Host callbacks.
 func (r *Runner) prepareBoundedContext(ctx context.Context, source kernel.Snapshot, request model.Request) (model.Request, error) {
@@ -46,23 +58,28 @@ func (r *Runner) prepareBoundedContext(ctx context.Context, source kernel.Snapsh
 			callbackscope.Aborted(ticket)
 		}
 	}()
-	rejected := false
+	var rejected candidateRejection
 	prepared, err := a.prepare(callCtx, model.CloneRequest(request), &rejected, true)
 	proved := false
 	if err == nil && !validPreparedModelRequest(request, prepared) {
 		err = ErrInvalidRequest
 	}
-	if err == nil || rejected {
+	if err == nil || rejected.cause != nil {
 		proved = callbackscope.Record(callCtx, a, "context.preparation.returned", struct {
 			Source            kernel.Snapshot
 			Request, Prepared model.Request
-			Rejected          bool
+			Rejection         candidateRejection
 		}{source, request, prepared, rejected})
 		if !proved {
 			err = ErrInvalidRequest
-		} else if rejected {
+		} else if rejected.cause != nil {
 			// Only the concrete no-dispatch decision can enter the terminal failure path.
-			err = model.NewClassifiedError(err, "context.input_budget_exceeded")
+			if rejected.Code == "context.input_budget_exceeded" {
+				err = model.NewClassifiedError(rejected.cause, rejected.Code)
+			} else {
+				err = provenCandidateRejection{runID: source.Run.ID, revision: source.Run.Revision,
+					code: rejected.Code, cause: rejected.cause}
+			}
 		}
 	}
 	callbackscope.Returned(ticket, err)

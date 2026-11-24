@@ -137,6 +137,10 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
   selected physical sampling plan alongside the original logical ModelInvocation,
   reserve against the live ledger revision and reuse the same plan on recovery.
   Remove dispatch-time re-filtering after metering.
+  Use the same pure ledger transition for candidate feasibility and live
+  reservation. Search authorized compaction under shared input/total-token
+  pressure; distinguish permanent pre-intent exhaustion from transient waits
+  and unproven Host failures, including across ancestor budgets.
 
 - A parent Agent can consume the completed result of a fixed local deferred
   child when Host approval policies were registered and never entered. Harness

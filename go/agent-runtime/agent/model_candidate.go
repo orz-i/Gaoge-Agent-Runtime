@@ -67,16 +67,73 @@ func planModelInvocation(run kernel.Run, client model.Client, request model.Requ
 	return invocation, nil
 }
 
-// modelCandidate couples the budget result to the exact request measured by
-// Runtime, including its final InvocationID. Its fields granting selection are
-// private; assessing a candidate neither writes state nor authorizes dispatch.
+// A candidate disposition joins Context and SharedBudget feasibility.
+// Pressure may be relieved by another transcript candidate; a permanent
+// minimum-quota denial cannot. Waiting is permanently feasible but not yet
+// executable; the original ledger CAS owns that wait and its recovery.
+type candidateDisposition uint8
+
+const (
+	candidateAdmitted candidateDisposition = iota + 1
+	candidateWaiting
+	candidatePressure
+	candidateExhausted
+)
+
+type candidateQuota struct {
+	LedgerID  string
+	Revision  uint64
+	Requested budget.Usage
+	Dimension budget.Dimension
+	err       error
+}
+
+func previewCandidateQuota(ledger budget.Ledger, reservation budget.Reservation) (candidateQuota, error) {
+	err := ledger.PreviewReservation(reservation, true)
+	if err != nil && !errors.Is(err, budget.ErrExhausted) && !errors.Is(err, budget.ErrWaiting) {
+		return candidateQuota{}, err
+	}
+	dimension, _ := budget.DeniedDimension(err)
+	return candidateQuota{LedgerID: ledger.ID, Revision: ledger.Revision, Requested: reservation.Requested, Dimension: dimension, err: err}, nil
+}
+
+// modelCandidate couples the decision to the exact request measured by
+// Runtime, including its final InvocationID. Assessing a candidate neither
+// reserves quota nor writes Context or authorizes dispatch.
 type modelCandidate struct {
+	disposition    candidateDisposition
+	quota          candidateQuota
 	assessment     runtimecontext.Assessment
 	modelWindow    runtimecontext.ModelWindow
 	omitLocalTools bool
 	request        model.Request
 	invocation     *ModelInvocation
 	preparation    *modelPreparation
+}
+
+func (c modelCandidate) selectable() bool {
+	return c.disposition == candidateAdmitted || c.disposition == candidateWaiting
+}
+
+func (c modelCandidate) soft() bool {
+	return c.selectable() && c.assessment.HardTokenEstimate <= c.assessment.SoftInputTokens
+}
+
+func (c *modelCandidate) decide(policy runtimecontext.Policy) {
+	switch {
+	case errors.Is(c.quota.err, budget.ErrExhausted):
+		if c.quota.Dimension == budget.DimensionInputTokens || c.quota.Dimension == budget.DimensionTotalTokens {
+			c.disposition = candidatePressure
+		} else {
+			c.disposition = candidateExhausted
+		}
+	case !runtimecontext.WithinHardBudget(c.assessment, policy):
+		c.disposition = candidatePressure
+	case errors.Is(c.quota.err, budget.ErrWaiting):
+		c.disposition = candidateWaiting
+	default:
+		c.disposition = candidateAdmitted
+	}
 }
 
 // assessModelCandidate is used at the pre-intent Context boundary by the
@@ -114,6 +171,7 @@ func assessModelCandidate(ctx context.Context, adapter *BoundedContextAdapter, r
 		return modelCandidate{}, err
 	}
 	candidate.assessment = assessment
+	candidate.decide(policy)
 	return candidate, nil
 }
 
@@ -169,13 +227,30 @@ func (p *modelPreparation) assessSamplingRequest(ctx context.Context, adapter *B
 	return assessment, accounting, err
 }
 
-// Preview and final planning are the same SharedBudget algorithm. The
-// preliminary measurement permits ordinary Context pressure/compaction even
-// when a provider's admission planner refuses an oversized sample outright.
-// Only the completed, exactly measured physical plan may be selected.
+// Preview and final planning are the same SharedBudget algorithm. A pure
+// reservation check distinguishes permanent minimum exhaustion, candidate
+// pressure, and transient contention before any Context or intent write.
 func (p *modelPreparation) assessBudgetCandidate(ctx context.Context, adapter *BoundedContextAdapter, candidate modelCandidate, ledger budget.Ledger,
 	window runtimecontext.ModelWindow, policy runtimecontext.Policy, frame runtimecontext.FrozenAccounting) (modelCandidate, error) {
 	original := candidate.invocation.Request
+	minimum := budget.Reservation{ID: "model:" + original.InvocationID, RunID: original.RunID,
+		RequestHash: kernel.ManagedDigest(original), Requested: budget.Usage{LLMCalls: 1}}
+	if _, exists := ledger.Reservations[minimum.ID]; exists {
+		return modelCandidate{}, budget.ErrLedgerConflict
+	}
+	tokenLimited := p.budget.ports.RequiresTokenUsage(ledger, original.RunID)
+	if tokenLimited {
+		minimum.Requested.InputTokens, minimum.Requested.OutputTokens, minimum.Requested.TotalTokens = 1, 1, 2
+	}
+	quota, err := previewCandidateQuota(ledger, minimum)
+	if err != nil {
+		return modelCandidate{}, err
+	}
+	if errors.Is(quota.err, budget.ErrExhausted) {
+		candidate.quota, candidate.disposition = quota, candidateExhausted
+		return candidate, nil
+	}
+
 	preview, _, err := p.budget.ports.PreviewModel(budget.CloneLedger(ledger), model.CloneRequest(original))
 	if err != nil {
 		return modelCandidate{}, err
@@ -187,8 +262,6 @@ func (p *modelPreparation) assessBudgetCandidate(ctx context.Context, adapter *B
 	if err != nil {
 		return modelCandidate{}, err
 	}
-	candidate.assessment, candidate.modelWindow = assessment, accounting.window
-	candidate.omitLocalTools = len(original.Tools) > 0 && len(preview.Tools) == 0
 	physical, reservation, err := p.budget.ports.PlanModel(ctx, budget.CloneLedger(ledger), model.CloneRequest(original))
 	if err != nil && !errors.Is(err, runtimecontext.ErrBudgetExceeded) {
 		return modelCandidate{}, err
@@ -206,12 +279,25 @@ func (p *modelPreparation) assessBudgetCandidate(ctx context.Context, adapter *B
 	candidate.assessment, candidate.modelWindow = assessment, accounting.window
 	candidate.omitLocalTools = len(original.Tools) > 0 && len(physical.Tools) == 0
 	if admissionErr != nil {
+		// A Host failure by itself is not a Runtime admission decision.
+		// Only a separately measured hard Context rejection can certify it.
 		if !runtimecontext.WithinHardBudget(assessment, policy) {
+			candidate.disposition = candidatePressure
 			return candidate, nil
 		}
 		return modelCandidate{}, admissionErr
 	}
-	if runtimecontext.WithinHardBudget(assessment, policy) {
+	if !validFreshSamplingReservation(original, reservation) ||
+		tokenLimited != (reservation.Requested.InputTokens > 0) {
+		return modelCandidate{}, ErrInvalidRequest
+	}
+	quota, err = previewCandidateQuota(ledger, reservation)
+	if err != nil {
+		return modelCandidate{}, err
+	}
+	candidate.quota = quota
+	candidate.decide(policy)
+	if candidate.selectable() {
 		plan, err := newSamplingPlan(ledger, original, physical, reservation, accounting.window, policy, accounting.frame, assessment)
 		if err != nil {
 			return modelCandidate{}, err
@@ -225,6 +311,9 @@ func (p *modelPreparation) assessBudgetCandidate(ctx context.Context, adapter *B
 // returns the unchanged pre-intent projection for existing Host callback
 // receipts; the actual invocation remains owned by Runtime.
 func (candidate modelCandidate) selectForIntent(ctx context.Context) (model.Request, error) {
+	if !candidate.selectable() {
+		return model.Request{}, ErrInvalidRequest
+	}
 	if candidate.invocation != nil {
 		p, ok := ctx.Value(modelPreparationKey{}).(*modelPreparation)
 		if !ok || p != candidate.preparation || !matchesFrozenProviderBinding(p.client, *candidate.invocation) {
