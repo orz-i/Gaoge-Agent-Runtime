@@ -259,8 +259,21 @@ continue execution with their original explicit composition. The ordinary
 Harness default delegation depth alone does not require a delegation engine.
 
 Context Checkpoints use the required `lossless-json-v1` content hash encoding.
-Automatic summaries use the `working-state-summary-v2` recipe. Deploy this cut
+Automatic summaries use the `working-state-summary-v3` recipe. Deploy this cut
 with fresh Checkpoint and summary state.
+
+For hosts whose physical model adapter adds provider defaults, configure
+`Context.Accounting` (or `context.Dependencies.Accounting` when composing the
+bounded adapter directly). The callback receives the immutable request header
+without messages or invocation ID and the resolved model window. It returns
+`context.AccountingProjection`: the complete accounting options, the route's
+leading System prompt (even if already present), and the resolved reserved
+output ceiling. It must not derive the projection from transcript content or
+perform generation. The Runtime derives and freezes the serialized size facts;
+all candidates share that frame. Exact counters still receive the original
+typed request. Summary recovery reuses its sealed frames rather than calling
+the projection or a tokenizer again. No provider prompt or accounting options
+are written into the product Context or summary recipe.
 
 Ordinary bounded composition is the default. Explicit
 `Context.ManagedRecovery: true` selects the existing Runtime-owned Context

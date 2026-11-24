@@ -11,7 +11,7 @@ import (
 
 const (
 	ModelInvocationContextSummary = "context_summary"
-	WorkingStateSummaryVersion    = "working-state-summary-v2"
+	WorkingStateSummaryVersion    = kernel.ManagedLifecycleWorkingStateSummary
 	EventContextSummaryConsumed   = "agent.context_summary.consumed"
 )
 
@@ -114,6 +114,8 @@ type ContextSummaryBinding struct {
 	Artifacts              []ContextSummaryArtifactRef       `json:"artifacts"`
 	PreviousEvidenceRefs   []string                          `json:"previousEvidenceRefs,omitempty"`
 	BusinessRequest        model.Request                     `json:"businessRequest"`
+	BusinessAccounting     runtimecontext.FrozenAccounting   `json:"businessAccounting"`
+	SummaryAccounting      runtimecontext.FrozenAccounting   `json:"summaryAccounting"`
 	OriginalAssessment     runtimecontext.Assessment         `json:"originalAssessment"`
 }
 

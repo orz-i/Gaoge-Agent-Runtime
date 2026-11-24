@@ -78,7 +78,10 @@ func validSummaryBinding(value *ContextSummaryBinding) bool {
 		value.Cursor.Turn.ID == "" || value.Cursor.Turn.SessionID == "" || value.Cursor.Turn.ConfigSnapshotID == "" ||
 		value.Cursor.Turn.Revision == 0 || value.Cursor.Turn.ContextCheckpointID != value.Source.CheckpointID ||
 		value.Cursor.ExpectedTurnCheckpointID != value.Source.CheckpointID || value.Cursor.UpdatedAt.IsZero() ||
-		value.ModelWindowFingerprint == "" || len(value.BusinessRequest.Messages) != 0 || value.BusinessRequest.RunID != value.RunID {
+		value.ModelWindowFingerprint != runtimecontext.ModelWindowFingerprint(value.ModelWindow) ||
+		!value.BusinessAccounting.MatchesWindow(value.ModelWindow) || !value.BusinessAccounting.MatchesRequest(value.BusinessRequest) ||
+		!value.SummaryAccounting.Valid() || !value.SummaryAccounting.MatchesWindow(value.ModelWindow) ||
+		len(value.BusinessRequest.Messages) != 0 || value.BusinessRequest.RunID != value.RunID {
 		return false
 	}
 	seen := map[string]bool{}
@@ -103,7 +106,8 @@ func validContextSummaryInvocation(invocation ModelInvocation) bool {
 	}
 	if invocation.Status == ModelInvocationPending || invocation.Status == ModelInvocationCompleted {
 		request := invocation.Request
-		return len(request.Tools) == 0 && len(request.HostedTools) == 0 && !request.RequireToolCall &&
+		return invocation.ContextSummary.SummaryAccounting.MatchesRequest(request) &&
+			len(request.Tools) == 0 && len(request.HostedTools) == 0 && !request.RequireToolCall &&
 			request.HostedToolCallLimit != nil && *request.HostedToolCallLimit == 0 &&
 			request.PreviousResponseID == "" && request.PromptCacheKey == "" &&
 			sameFrozenOutputContract(request.OutputContract, workingStateSummaryContract())
@@ -126,8 +130,8 @@ func contextSummaryInputBytesWithinPolicy(invocation ModelInvocation) bool {
 	// Active intents retain their complete original request. A restarted
 	// reader can enforce the real serialized input bound without invoking a
 	// tokenizer or trusting a planning-time assessment from another process.
-	raw, err := model.MarshalRequestForInputCount(invocation.Request)
-	return err == nil && int64(len(raw)) <= limit
+	size, err := invocation.ContextSummary.SummaryAccounting.SerializedBytes(invocation.Request)
+	return err == nil && size <= limit
 }
 
 func validContextSummaryState(state runState) bool {

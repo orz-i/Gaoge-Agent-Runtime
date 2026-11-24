@@ -106,7 +106,11 @@ func (a *BoundedContextAdapter) prepare(ctx context.Context, incoming model.Requ
 		return model.Request{}, ErrInvalidRequest
 	}
 	policy := runtimecontext.NormalizePolicy(plan.Policy)
-	assessment, err := a.manager.AssessModelRequest(ctx, request, plan.ModelWindow, policy)
+	frame, err := a.manager.FreezeRequestAccounting(ctx, request, plan.ModelWindow)
+	if err != nil {
+		return model.Request{}, err
+	}
+	assessment, err := a.manager.AssessModelRequestWithAccounting(ctx, request, plan.ModelWindow, policy, frame)
 	if err != nil {
 		return model.Request{}, err
 	}
@@ -127,7 +131,7 @@ func (a *BoundedContextAdapter) prepare(ctx context.Context, incoming model.Requ
 		}
 		return model.Request{}, rejectedContextBudget(assessment, policy, reason)
 	}
-	choice, ok, err := a.selectCompaction(ctx, *plan.Checkpoint, request, plan.ModelWindow, policy, assessment, withinHard)
+	choice, ok, err := a.selectCompaction(ctx, *plan.Checkpoint, request, plan.ModelWindow, policy, frame, assessment, withinHard)
 	if err != nil {
 		return model.Request{}, err
 	}

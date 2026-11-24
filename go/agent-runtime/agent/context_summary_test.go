@@ -555,9 +555,9 @@ func TestContextSummaryContextAndNativeConsumeACKLossRecoverWithoutNewSummary(t 
 				t.Fatalf("recovery used an unexpected summary target: %s", ports.current.ID)
 			}
 			legacy := cloneModelInvocation(view.ModelInvocations[0])
-			legacy.ContextSummary.RecipeVersion = "working-state-summary-v1"
+			legacy.ContextSummary.RecipeVersion = "working-state-summary-v2"
 			if validContextSummaryInvocation(legacy) {
-				t.Fatal("accepted a v1 summary recipe")
+				t.Fatal("accepted a v2 summary recipe")
 			}
 		})
 	}

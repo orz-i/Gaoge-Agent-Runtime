@@ -96,7 +96,11 @@ func (adapter *ContextSummaryAdapter) plan(ctx context.Context, runner *Runner, 
 		return model.Request{}, nil, false, nil
 	}
 	policy := runtimecontext.NormalizePolicy(plan.Policy)
-	initial, err := adapter.bounded.manager.AssessModelRequest(ctx, plan.Request, plan.ModelWindow, policy)
+	businessAccounting, err := adapter.bounded.manager.FreezeRequestAccounting(ctx, plan.Request, plan.ModelWindow)
+	if err != nil {
+		return model.Request{}, nil, false, err
+	}
+	initial, err := adapter.bounded.manager.AssessModelRequestWithAccounting(ctx, plan.Request, plan.ModelWindow, policy, businessAccounting)
 	if err != nil {
 		return model.Request{}, nil, false, err
 	}
@@ -121,19 +125,15 @@ func (adapter *ContextSummaryAdapter) plan(ctx context.Context, runner *Runner, 
 		Source: summarySource(previous), PriorVersion: priorVersion, NextVersion: priorVersion + 1,
 		Policy: *state.WorkingStateSummary, ContextPolicy: policy, ModelWindow: plan.ModelWindow,
 		ModelWindowFingerprint: runtimecontext.ModelWindowFingerprint(plan.ModelWindow), RecipeVersion: WorkingStateSummaryVersion,
-		RemovedMessages: candidate.RemovedMessages, PreviousEvidenceRefs: oldEvidence, BusinessRequest: base}
+		RemovedMessages: candidate.RemovedMessages, PreviousEvidenceRefs: oldEvidence, BusinessRequest: base, BusinessAccounting: businessAccounting}
 	for _, artifact := range candidate.Artifacts {
 		binding.Artifacts = append(binding.Artifacts, ContextSummaryArtifactRef{ID: artifact.ID, ContentHash: artifact.ContentHash})
 	}
-	// Use the pure text byte upper bound for the frozen target recipe. This
-	// result does not change when a restarted Host installs another tokenizer.
-	guard := runtimecontext.NewManager(runtimecontext.Dependencies{})
-	binding.OriginalAssessment, err = guard.AssessModelRequest(ctx, summaryBusinessAssessmentRequest(plan.Request), binding.ModelWindow, binding.ContextPolicy)
+	// Use the same frozen canonical frame without the counter for target
+	// selection. Host/tokenizer changes cannot change the recovered decision.
+	binding.OriginalAssessment, err = binding.BusinessAccounting.AssessModelRequest(summaryBusinessAssessmentRequest(plan.Request), binding.ModelWindow, binding.ContextPolicy)
 	if err != nil {
 		return model.Request{}, nil, false, err
-	}
-	if !validSummaryBinding(binding) {
-		return model.Request{}, nil, false, nil
 	}
 	minimum := &runtimecontext.WorkingState{Version: binding.NextVersion, Source: binding.Source, EvidenceRefs: summaryEvidenceRefs(binding),
 		Derivation: &runtimecontext.WorkingStateDerivation{Kind: runtimecontext.WorkingStateDerivationSummary, RunID: snapshot.Run.ID,
@@ -147,7 +147,7 @@ func (adapter *ContextSummaryAdapter) plan(ctx context.Context, runner *Runner, 
 	minimumWindow.WorkingState = minimum
 	minimumRequest := model.CloneRequest(base)
 	minimumRequest.Messages = runtimecontext.Materialize(minimumWindow)
-	minimumBudget, err := guard.AssessModelRequest(ctx, summaryBusinessAssessmentRequest(minimumRequest), binding.ModelWindow, binding.ContextPolicy)
+	minimumBudget, err := binding.BusinessAccounting.AssessModelRequest(summaryBusinessAssessmentRequest(minimumRequest), binding.ModelWindow, binding.ContextPolicy)
 	if err != nil {
 		return model.Request{}, nil, false, err
 	}
@@ -184,6 +184,15 @@ func (adapter *ContextSummaryAdapter) plan(ctx context.Context, runner *Runner, 
 	if binding.Policy.MaxSerializedBytes < inputPolicy.MaxSerializedBytes {
 		inputPolicy.MaxSerializedBytes = binding.Policy.MaxSerializedBytes
 	}
+	// The summary has a distinct tool-free header and output contract.
+	// Freeze its own frame before deriving the durable invocation identity.
+	binding.SummaryAccounting, err = adapter.bounded.manager.FreezeRequestAccounting(ctx, request, plan.ModelWindow)
+	if err != nil {
+		return model.Request{}, nil, false, err
+	}
+	if !validSummaryBinding(binding) {
+		return model.Request{}, nil, false, nil
+	}
 	// The invocation ID is excluded from its own request hash, so its actual
 	// value can be derived before admission without creating a durable intent.
 	// Equal-length placeholders prove byte size but not an exact token count.
@@ -192,7 +201,7 @@ func (adapter *ContextSummaryAdapter) plan(ctx context.Context, runner *Runner, 
 	if err != nil {
 		return model.Request{}, nil, false, err
 	}
-	inputBudget, err := adapter.bounded.manager.AssessModelRequest(ctx, planned.Request, plan.ModelWindow, inputPolicy)
+	inputBudget, err := adapter.bounded.manager.AssessModelRequestWithAccounting(ctx, planned.Request, plan.ModelWindow, inputPolicy, binding.SummaryAccounting)
 	if err != nil {
 		return model.Request{}, nil, false, err
 	}

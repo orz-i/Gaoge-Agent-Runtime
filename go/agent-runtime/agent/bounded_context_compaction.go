@@ -18,7 +18,7 @@ type boundedContextCandidate struct {
 func (adapter *BoundedContextAdapter) selectCompaction(
 	ctx context.Context, previous runtimecontext.Checkpoint, request model.Request,
 	window runtimecontext.ModelWindow, policy runtimecontext.Policy,
-	original runtimecontext.Assessment, originalWithinHard bool,
+	frame runtimecontext.FrozenAccounting, original runtimecontext.Assessment, originalWithinHard bool,
 ) (boundedContextCandidate, bool, error) {
 	var best boundedContextCandidate
 	bestFound := false
@@ -26,7 +26,7 @@ func (adapter *BoundedContextAdapter) selectCompaction(
 	consider := func(candidateWindow runtimecontext.Window, artifacts []runtimecontext.Artifact) (bool, error) {
 		trial := model.CloneRequest(request)
 		trial.Messages = runtimecontext.Materialize(candidateWindow)
-		assessment, err := adapter.manager.AssessModelRequest(ctx, trial, window, policy)
+		assessment, err := adapter.manager.AssessModelRequestWithAccounting(ctx, trial, window, policy, frame)
 		if err != nil {
 			return false, err
 		}

@@ -20,11 +20,12 @@ import (
 )
 
 // AgentSessionContextOptions supplies the routed model's actual window and an
-// optional exact counter. ResolveWindow runs at the existing pre-intent Context
+// optional exact counter and route accounting projection. ResolveWindow runs at the existing pre-intent Context
 // boundary, never while OpenAgentSession constructs the session.
 type AgentSessionContextOptions struct {
 	ResolveWindow ModelWindowResolver
 	Counter       runtimecontext.TokenCounter
+	Accounting    runtimecontext.RequestAccounting
 	// ReadArtifacts explicitly grants the built-in scoped archive reader.
 	ReadArtifacts bool
 	// ManagedRecovery explicitly selects the existing concrete Context recovery
@@ -283,7 +284,7 @@ func openBoundedAgentSession(options AgentSessionOptions, registrations []tools.
 	if err != nil {
 		return nil, errors.Join(ErrInvalidRequest, err)
 	}
-	manager := runtimecontext.NewManager(runtimecontext.Dependencies{Counter: options.Context.Counter})
+	manager := runtimecontext.NewManager(runtimecontext.Dependencies{Counter: options.Context.Counter, Accounting: options.Context.Accounting})
 	resolve := options.Context.ResolveWindow
 	resolveWindow := func(ctx context.Context, request model.Request) (runtimecontext.ModelWindow, error) {
 		window, resolveErr := resolve(ctx, model.CloneRequest(request))

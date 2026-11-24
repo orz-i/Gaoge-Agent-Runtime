@@ -77,7 +77,11 @@ func (preparer managedContextPreparer) prepare(ctx context.Context, incoming mod
 	if err != nil {
 		return model.Request{}, err
 	}
-	assessment, err := preparer.manager.AssessModelRequest(ctx, request, window, policy)
+	frame, err := preparer.manager.FreezeRequestAccounting(ctx, request, window)
+	if err != nil {
+		return model.Request{}, err
+	}
+	assessment, err := preparer.manager.AssessModelRequestWithAccounting(ctx, request, window, policy, frame)
 	if err != nil {
 		return model.Request{}, err
 	}
@@ -99,7 +103,7 @@ func (preparer managedContextPreparer) prepare(ctx context.Context, incoming mod
 		}
 		return model.Request{}, runtimecontext.ErrBudgetExceeded
 	}
-	choice, ok, err := preparer.selectCompaction(ctx, checkpoint, request, window, policy, assessment, withinHard)
+	choice, ok, err := preparer.selectCompaction(ctx, checkpoint, request, window, policy, frame, assessment, withinHard)
 	if err != nil {
 		return model.Request{}, err
 	}
@@ -142,7 +146,7 @@ func (preparer managedContextPreparer) prepare(ctx context.Context, incoming mod
 func (preparer managedContextPreparer) selectCompaction(
 	ctx context.Context, previous runtimecontext.Checkpoint, request model.Request,
 	window runtimecontext.ModelWindow, policy runtimecontext.Policy,
-	original runtimecontext.Assessment, originalWithinHard bool,
+	frame runtimecontext.FrozenAccounting, original runtimecontext.Assessment, originalWithinHard bool,
 ) (managedContextCandidate, bool, error) {
 	var best managedContextCandidate
 	bestFound := false
@@ -150,7 +154,7 @@ func (preparer managedContextPreparer) selectCompaction(
 	consider := func(candidateWindow runtimecontext.Window, artifacts []runtimecontext.Artifact) error {
 		trial := model.CloneRequest(request)
 		trial.Messages = runtimecontext.Materialize(candidateWindow)
-		assessment, err := preparer.manager.AssessModelRequest(ctx, trial, window, policy)
+		assessment, err := preparer.manager.AssessModelRequestWithAccounting(ctx, trial, window, policy, frame)
 		if err != nil {
 			return err
 		}

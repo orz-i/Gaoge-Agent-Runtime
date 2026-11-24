@@ -36,7 +36,7 @@ type ManagedRecoveryState string
 
 // ManagedLifecycleWorkingStateSummary admits only the dedicated native Agent
 // summary phases. Feature-owned validation is required before any PARK.
-const ManagedLifecycleWorkingStateSummary = "working-state-summary-v2"
+const ManagedLifecycleWorkingStateSummary = "working-state-summary-v3"
 
 const (
 	ManagedAvailable   ManagedRecoveryState = "AVAILABLE"

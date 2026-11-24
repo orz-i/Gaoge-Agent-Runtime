@@ -126,8 +126,12 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
   paired `LocalTools`, a verified model window, and a positive output cap.
   Remove `OpenToolAgentSession`, `OpenTextAgentSession`, their options, and the
   separate registration-inventory path. Context Checkpoints use the required
-  `lossless-json-v1` encoding, and automatic summaries use `working-state-summary-v2`.
+  `lossless-json-v1` encoding, and automatic summaries use `working-state-summary-v3`.
   Start with fresh Checkpoint and summary state. See `docs/agent-session.md`.
+- **Canonical Context accounting:** One frozen request-header accounting frame
+  governs ordinary compaction, Summary planning/consumption, and recovery.
+  Host projections return only options, the leading System prompt, and the
+  reserved output ceiling; exact counters keep the original typed request.
 
 - A parent Agent can consume the completed result of a fixed local deferred
   child when Host approval policies were registered and never entered. Harness
