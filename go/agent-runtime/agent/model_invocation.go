@@ -498,7 +498,13 @@ func (runner *Runner) buildUnpreparedModelRequest(ctx context.Context, snapshot 
 }
 
 func (runner *Runner) prepareBusinessModelRequest(ctx context.Context, snapshot kernel.Snapshot, request model.Request, originalTools []tools.Definition) (model.Request, []string, error) {
-	if runner.prepareModelRequest != nil {
+	if runner.boundedContext != nil {
+		prepared, err := runner.prepareBoundedContext(ctx, snapshot, request)
+		if err != nil {
+			return model.Request{}, nil, err
+		}
+		request = prepared
+	} else if runner.prepareModelRequest != nil {
 		prepared, prepareErr := runner.prepareModelRequest(ctx, model.CloneRequest(request))
 		runner.noteRootCallbackFailure(prepareErr)
 		if prepareErr != nil {

@@ -344,7 +344,7 @@ func openBoundedAgentSession(options AgentSessionOptions, registrations []tools.
 		dependencies.ModelMiddleware = []plugin.ModelMiddleware{adapter}
 		dependencies.ToolMiddleware = []plugin.ToolMiddleware{adapter}
 		// Keep the same Context preparer without a competing summary lifecycle.
-		dependencies.PrepareModelRequest = bounded.Prepare
+		dependencies.BoundedContext = bounded
 	}
 	if delegation != nil {
 		if shared != nil {

@@ -84,6 +84,13 @@ func (a *BoundedContextAdapter) Run(ctx context.Context, inv plugin.RunInvocatio
 func (a *BoundedContextAdapter) Prepare(ctx context.Context, incoming model.Request) (prepared model.Request, prepareErr error) {
 	callbackscope.ManagedPrepareEntered(ctx, a)
 	defer func() { callbackscope.ManagedPrepareReturned(ctx, a, prepared, prepareErr) }()
+	return a.prepare(ctx, incoming, nil)
+}
+
+// prepare owns the only Context preparation algorithm. Only a rejection
+// computed by this concrete adapter can set rejected, never an error supplied
+// by a Host port. Managed transfer and ordinary owned execution share it.
+func (a *BoundedContextAdapter) prepare(ctx context.Context, incoming model.Request, rejected *bool) (model.Request, error) {
 	plan, err := a.ports.Plan(ctx, model.CloneRequest(incoming))
 	if err != nil {
 		return model.Request{}, err
@@ -115,6 +122,9 @@ func (a *BoundedContextAdapter) Prepare(ctx context.Context, incoming model.Requ
 		if plan.ArtifactReader {
 			reason = "not_owner"
 		}
+		if rejected != nil {
+			*rejected = true
+		}
 		return model.Request{}, rejectedContextBudget(assessment, policy, reason)
 	}
 	choice, ok, err := a.selectCompaction(ctx, *plan.Checkpoint, request, plan.ModelWindow, policy, assessment, withinHard)
@@ -124,6 +134,9 @@ func (a *BoundedContextAdapter) Prepare(ctx context.Context, incoming model.Requ
 	if !ok {
 		if withinHard {
 			return request, nil
+		}
+		if rejected != nil {
+			*rejected = true
 		}
 		return model.Request{}, rejectedContextBudget(assessment, policy, "no_safe_compaction")
 	}

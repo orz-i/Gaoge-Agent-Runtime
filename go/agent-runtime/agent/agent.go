@@ -278,6 +278,10 @@ type Dependencies struct {
 	// PrepareModelRequest is the only pre-commit message/Tool schema projection.
 	// It does not choose an Agent mode. ModelMiddleware cannot rewrite frozen input.
 	PrepareModelRequest ModelRequestPreparer
+	// BoundedContext selects the concrete Context adapter for ordinary owned
+	// execution with other bounded middleware (including Budget). It must
+	// occur exactly once in RunMiddleware and excludes other preparation modes.
+	BoundedContext *BoundedContextAdapter
 	// ManagedContextRecovery explicitly selects only the concrete Context lifecycle.
 	// PrepareModelRequest must be nil; Runtime installs this adapter preparation.
 	ManagedContextRecovery *BoundedContextAdapter
@@ -363,6 +367,7 @@ type Runner struct {
 	modelMiddlewareConfigured bool
 	rootCallbacks             *rootCallbackState
 	boundedCallbacks          []any
+	boundedContext            *BoundedContextAdapter
 	managedContextRecovery    *BoundedContextAdapter
 	contextSummary            *ContextSummaryAdapter
 	contextSummaryBudget      bool
@@ -521,7 +526,7 @@ func publicModelInvocations(values []ModelInvocation) []ModelInvocation {
 
 // NewRunner constructs the Agent loop; Host selection and task routing remain external.
 func NewRunner(dependencies Dependencies) (*Runner, error) {
-	if !validBoundedBudgetComposition(dependencies) {
+	if !validBoundedBudgetComposition(dependencies) || !validBoundedContextComposition(dependencies) {
 		return nil, ErrInvalidRequest
 	}
 	if dependencies.Inputs != nil && (dependencies.ManagedContextRecovery != nil || dependencies.SummaryNativeRecovery) {
@@ -666,6 +671,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		modelLimiter:         newCallLimiter(execution.Model.MaxConcurrency),
 		toolLimiter:          newCallLimiter(execution.Tool.MaxConcurrency),
 		runChain:             runChain, modelChain: modelChain, toolChain: toolChain,
+		boundedContext:         dependencies.BoundedContext,
 		managedContextRecovery: dependencies.ManagedContextRecovery,
 		contextSummary:         dependencies.ContextSummary,
 		contextSummaryBudget:   summaryBudgetConfigured(dependencies),
