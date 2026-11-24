@@ -206,7 +206,12 @@ func (runner *ShadowRunner) StartRun(ctx context.Context, request agent.StartReq
 		// (which may contain credentials), nor issue another physical send.
 		return snapshot, ErrRemoteOutcomeUnknown
 	}
-	return runner.applyInteraction(ctx, snapshot, state, interaction)
+	// The original SendMessage has already returned with a verifiable Task or
+	// Message. The caller may have disconnected after the peer replied, but
+	// losing this identity would make later read-only reconciliation impossible.
+	settleCtx, stopSettlement := handoff.RemoteCallbackSettlementContext(ctx)
+	defer stopSettlement()
+	return runner.applyInteraction(settleCtx, snapshot, state, interaction)
 }
 
 // LoadRun loads the local shadow and refreshes a non-terminal remote Task when present.
@@ -335,11 +340,13 @@ func (runner *ShadowRunner) cancelRunAtRevision(
 		return admitted, err
 	}
 	remote, cancelErr := runner.client.CancelTask(ctx, runner.discovery, state.RemoteTaskID)
+	settleCtx, stopSettlement := handoff.RemoteCallbackSettlementContext(ctx)
+	defer stopSettlement()
 	// Physical callback has now returned, including transport failures. Seal
 	// the release BEFORE a GET may declare a terminal result. If this Store
 	// write is lost, retain a conservative unresolved physical intent.
 	state.PendingCancelReturned = true
-	returned, returnErr := runner.applyAttested(ctx, admitted, state, kernel.Mutation{
+	returned, returnErr := runner.applyAttested(settleCtx, admitted, state, kernel.Mutation{
 		Status: kernel.RunStatusRunning,
 		Events: []kernel.EventDraft{{Type: "a2a.remote_cancel_returned", Message: "A2A cancellation callback returned"}},
 	})
@@ -355,7 +362,7 @@ func (runner *ShadowRunner) cancelRunAtRevision(
 		}
 		return returned, ErrRemoteCancellationPending
 	}
-	return runner.applyTask(ctx, returned, state, remote)
+	return runner.applyTask(settleCtx, returned, state, remote)
 }
 
 // ResumeRun continues a remote input-required or auth-required task with one
@@ -420,11 +427,13 @@ func (runner *ShadowRunner) resumeRunAtRevision(
 		MessageID: state.PendingMessageID, ContextID: state.RemoteContextID,
 		TaskID: state.RemoteTaskID, Text: text,
 	})
+	settleCtx, stopSettlement := handoff.RemoteCallbackSettlementContext(ctx)
+	defer stopSettlement()
 	// This original physical Send has now *returned*. Persist that fact
 	// independently of response validation or transport errors; until it is
 	// committed, an observer must NOT acknowledge a remote terminal result.
 	state.PendingMessageReturned = true
-	returned, returnErr := runner.applyAttested(ctx, snapshot, state, kernel.Mutation{
+	returned, returnErr := runner.applyAttested(settleCtx, snapshot, state, kernel.Mutation{
 		Status: kernel.RunStatusRunning,
 		Events: []kernel.EventDraft{{Type: "a2a.remote_resume_returned", Message: "A2A input callback returned"}},
 	})
@@ -440,7 +449,7 @@ func (runner *ShadowRunner) resumeRunAtRevision(
 	state.PendingMessageID = ""
 	state.PendingInputHash = ""
 	state.PendingMessageReturned = false
-	return runner.applyInteraction(ctx, returned, state, interaction)
+	return runner.applyInteraction(settleCtx, returned, state, interaction)
 }
 
 func (runner *ShadowRunner) initialState(runID string) shadowState {
