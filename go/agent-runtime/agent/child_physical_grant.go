@@ -114,8 +114,8 @@ func (f *committedAgentReturn) matches(result, latest kernel.Snapshot, returned 
 		result.Run.Status == f.status && latest.Run.Status == f.status && sameOriginalToolError(f.cause, returned)
 }
 
-func (r *Runner) noteUnsentReturn(s kernel.Snapshot, cause error) {
-	if r.rootCallbacks != nil && cause != nil && s.Run.Status == kernel.RunStatusRunning && knownAgentPhysicalSettlement(s) {
+func (r *Runner) noteNativeAdmissionReturn(s kernel.Snapshot, cause error) {
+	if r.rootCallbacks != nil && cause != nil && (s.Run.Status == kernel.RunStatusRunning || s.Run.Status == kernel.RunStatusWaitingInput || s.Run.Status == kernel.RunStatusPausedBudget) && knownAgentPhysicalSettlement(s) {
 		r.rootCallbacks.knownReturn.Store(&committedAgentReturn{runID: s.Run.ID, revision: s.Run.Revision, status: s.Run.Status, cause: cause})
 	}
 }

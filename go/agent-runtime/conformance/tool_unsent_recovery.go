@@ -16,11 +16,14 @@ import (
 
 type unsentRecoveryFault struct {
 	*ea1AgentReceiptFault
-	beforeEvent string
-	beforeCount int
-	ackDispatch bool
-	readCuts    int
-	hits        int
+	beforeEvent  string
+	beforeCount  int
+	ackDispatch  bool
+	ackAction    func()
+	checkCut     error
+	checkPending bool
+	readCuts     int
+	hits         int
 }
 
 func (f *unsentRecoveryFault) Load(ctx context.Context, id string) (kernel.Snapshot, error) {
@@ -31,12 +34,30 @@ func (f *unsentRecoveryFault) Load(ctx context.Context, id string) (kernel.Snaps
 	return f.Store.Load(ctx, id)
 }
 
+func (f *unsentRecoveryFault) CheckExecution(ctx context.Context, id string, lease *kernel.ExecutionLease) error {
+	if f.checkPending {
+		f.checkPending = false
+		return f.checkCut
+	}
+	return f.ExecutionStore.CheckExecution(ctx, id, lease)
+}
+
 func (f *unsentRecoveryFault) ApplyExecution(ctx context.Context, l kernel.ExecutionLease, rev uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
 	for _, ev := range m.Events {
 		if f.beforeCount > 0 && ev.Type == f.beforeEvent {
 			f.beforeCount--
 			f.hits++
 			return kernel.Snapshot{}, f.injected
+		}
+		if f.ackAction != nil && ev.Type == "tool.dispatch_intent" {
+			action := f.ackAction
+			f.ackAction = nil
+			next, err := f.ExecutionStore.ApplyExecution(ctx, l, rev, m)
+			if err == nil {
+				f.hits++
+				action()
+			}
+			return next, err
 		}
 		if f.ackDispatch && ev.Type == "tool.dispatch_intent" {
 			f.ackDispatch = false
@@ -112,7 +133,7 @@ func (p unsentProjectionPorts) Project(_ context.Context, l budget.Ledger) error
 }
 
 func toolUnsentRecovery(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store), ledgerFactory func(*testing.T) (budget.LedgerStore, func() budget.LedgerStore)) {
-	for _, mode := range []string{"terminal-cas", "release-before", "release-ack", "cancel-before-chain", "park-cas", "dispatch-before", "dispatch-ack-unknown", "unmetered-dispatch-ack", "reserve-projection", "cancel-after-chain-entry"} {
+	for _, mode := range []string{"terminal-cas", "release-before", "release-ack", "cancel-before-chain", "park-cas", "dispatch-before", "dispatch-ack-unknown", "unmetered-dispatch-ack", "reserve-projection", "cancel-after-chain-entry", "cancel-intent-ack", "unmetered-cancel-intent-ack", "owner-intent-ack", "ledger-cancel-intent-ack"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx := t.Context()
 			base, peer, reopen := factory(t)
@@ -122,7 +143,8 @@ func toolUnsentRecovery(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 			const root = "unsent-root"
 			const id = "tool:unsent-root:original-call"
 			terminal := mode == "terminal-cas" || mode == "release-before" || mode == "release-ack"
-			unmetered := mode == "unmetered-dispatch-ack"
+			unmetered := mode == "unmetered-dispatch-ack" || mode == "unmetered-cancel-intent-ack"
+			ledgerCancelled := mode == "ledger-cancel-intent-ack"
 			limits := budget.Limits{MaxToolCalls: 1, MaxConcurrentRuns: 1}
 			coord := budget.Coordinator{Store: ledger}
 			cut := errors.New("original unsent protocol fault")
@@ -205,7 +227,7 @@ func toolUnsentRecovery(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 			var ledgerFault *unsentLedgerFault
 			if !terminal {
 				switch mode {
-				case "park-cas", "dispatch-before", "dispatch-ack-unknown", "unmetered-dispatch-ack":
+				case "park-cas", "dispatch-before", "dispatch-ack-unknown", "unmetered-dispatch-ack", "cancel-intent-ack", "unmetered-cancel-intent-ack", "owner-intent-ack", "ledger-cancel-intent-ack":
 					fault = faultFor(base)
 					ks = fault
 					switch mode {
@@ -215,8 +237,21 @@ func toolUnsentRecovery(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 					case "dispatch-before":
 						fault.beforeEvent = "tool.dispatch_intent"
 						fault.beforeCount = 2
-					default:
+					case "dispatch-ack-unknown", "unmetered-dispatch-ack":
 						fault.ackDispatch = true
+					case "owner-intent-ack":
+						fault.checkCut = kernel.ErrExecutionConflict
+						fault.ackAction = func() { fault.checkPending = true }
+					case "ledger-cancel-intent-ack":
+						fault.ackAction = func() {
+							if _, err := coord.CancelRoot(ctx, scope, root); err != nil {
+								t.Fatal(err)
+							}
+						}
+					case "cancel-intent-ack", "unmetered-cancel-intent-ack":
+						// Set the cancel action below, after creating the Context.
+					default:
+						t.Fatal("unexpected fault mode", mode)
 					}
 				}
 			}
@@ -229,6 +264,12 @@ func toolUnsentRecovery(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 				defer cancel()
 				o = &unsentCancelObserver{cancel: cancel}
 				observation = o
+			}
+			if mode == "cancel-intent-ack" || mode == "unmetered-cancel-intent-ack" {
+				var cancel context.CancelFunc
+				callCtx, cancel = context.WithCancel(ctx)
+				defer cancel()
+				fault.ackAction = cancel
 			}
 			r := makeRunner(ea1StartRuntime(t, ks), useLedger, observation, true, mode == "reserve-projection")
 			initial, e := r.StartRun(callCtx, req)
@@ -256,6 +297,27 @@ func toolUnsentRecovery(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 				}
 				r = makeRunner(ea1StartRuntime(t, ks), useLedger, nil, false, false)
 				_, e = r.Resume(ctx, root, initial.Run.Revision)
+			}
+			if ledgerCancelled {
+				if !errors.Is(e, budget.ErrExhausted) || fault.hits != 1 || physical != 0 || track.starts != 0 || reads != 0 || len(m.calls) != 1 || policies != 1 {
+					t.Fatal("ledger cancellation crossed chain boundary", e, physical, track.starts)
+				}
+				cur, e := observer.Load(ctx, root)
+				if e != nil || cur.Run.Status != kernel.RunStatusFailed {
+					t.Fatal("elected original denial was not consumed", e, cur.Run)
+				}
+				if _, e = observer.LookupChildExecution(ctx, root); !errors.Is(e, kernel.ErrNotFound) {
+					t.Fatal("ledger cancellation retained physical grant", e)
+				}
+				l, e := ledger.LoadBudget(ctx, scope)
+				if e != nil {
+					t.Fatal(e)
+				}
+				res := l.Reservations[id]
+				if res.Status != budget.ReservationReleased || res.Active || res.Dispatched || res.Usage != (budget.Usage{}) {
+					t.Fatal("elected cancel altered original accounting", res)
+				}
+				return
 			}
 			if mode == "cancel-after-chain-entry" {
 				if e == nil || physical != 1 || track.starts != 1 {

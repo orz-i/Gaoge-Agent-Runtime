@@ -129,7 +129,16 @@ func (a *BoundedBudgetAdapter) Run(ctx context.Context, inv plugin.RunInvocation
 	var ownErr error
 	if l.ID != "" {
 		ownErr = a.ports.Project(ctx, l)
-		if l.View(inv.RunID).Cancelled {
+		if l.RunCancelled(inv.RunID) {
+			// No Next has entered. Only the actual bounded frame, after
+			// native ledger and projection acknowledgement, can return a
+			// qualified original admission denial. Do not mint a Tool or
+			// model receipt, or certify a failed Host projection.
+			if ownErr == nil {
+				if denial := recordBudgetRunDenial(ctx, a, inv, l); denial != nil {
+					return kernel.Snapshot{}, denial
+				}
+			}
 			return kernel.Snapshot{}, errors.Join(budget.ErrExhausted, ownErr)
 		}
 	}

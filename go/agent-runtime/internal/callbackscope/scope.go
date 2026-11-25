@@ -50,7 +50,20 @@ func Inherit(ctx, original context.Context) context.Context {
 	}
 	s, _ := original.Value(scopeKey{}).(*Scope)
 	t, _ := original.Value(ticketKey{}).(*Ticket)
-	return BindRootToolFrame(context.WithValue(Bind(ctx, s), ticketKey{}, t), RootToolFrame(original))
+	return BindRunCall(BindRootToolFrame(context.WithValue(Bind(ctx, s), ticketKey{}, t), RootToolFrame(original)), RunCall(original))
+}
+
+// Run-call authority belongs to the exact original native RunChain
+// invocation. Context replacement cannot substitute a different source.
+type runCallKey struct{}
+type runCallValue struct{ authority any }
+
+func BindRunCall(ctx context.Context, authority any) context.Context {
+	return context.WithValue(ctx, runCallKey{}, runCallValue{authority})
+}
+func RunCall(ctx context.Context) any {
+	value, _ := ctx.Value(runCallKey{}).(runCallValue)
+	return value.authority
 }
 
 type rootToolFrameKey struct{}

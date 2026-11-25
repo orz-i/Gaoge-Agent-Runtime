@@ -790,6 +790,7 @@ func (runner *Runner) startRunWithMiddleware(ctx context.Context, request StartR
 	}
 	invocation.RunID = created.Run.ID
 	var continuationReached, middlewareEntered bool
+	var admissionReturn *committedAgentReturn
 	operation := "start"
 	if deferred {
 		operation = "prepare"
@@ -798,10 +799,14 @@ func (runner *Runner) startRunWithMiddleware(ctx context.Context, request StartR
 		return root.withChildPhysicalGrant(rootCtx, admitted.Run.ID, admitted.Run.Revision, operation,
 			func(childCtx context.Context, scoped *Runner) (kernel.Snapshot, error) {
 				middlewareEntered = true
-				return scoped.runChain.Invoke(childCtx, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
+				result, err := scoped.invokeNativeRun(childCtx, admitted, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
 					continuationReached = true
 					return scoped.continuePreparedRun(nextCtx, admitted, deferred)
 				})
+				if !continuationReached && scoped.rootCallbacks != nil {
+					admissionReturn = scoped.rootCallbacks.knownReturn.Load()
+				}
+				return result, err
 			})
 	})
 	if invokeErr != nil && snapshot.Run.ID == "" {
@@ -816,7 +821,7 @@ func (runner *Runner) startRunWithMiddleware(ctx context.Context, request StartR
 	if IsNativeStartNoEffect(invokeErr) {
 		invokeErr = fmt.Errorf("agent Run Middleware outcome is not preflight proof: %w", invokeErr)
 	}
-	if invokeErr != nil && middlewareEntered && !continuationReached {
+	if invokeErr != nil && middlewareEntered && !continuationReached && !admissionReturn.matches(snapshot, snapshot, invokeErr) {
 		// A middleware may return a custom/public NoEffect marker after
 		// issuing external work without calling Next. The existing Root
 		// Create is NOT a physical effect receipt. Do not let Harness see
@@ -1013,7 +1018,7 @@ func (runner *Runner) ResolveApproval(
 				if decodeErr != nil {
 					return admitted, decodeErr
 				}
-				return scoped.runChain.Invoke(childCtx, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
+				return scoped.invokeNativeRun(childCtx, admitted, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
 					return scoped.resolveApproval(nextCtx, admitted, freshState, response)
 				})
 			})
@@ -1146,7 +1151,7 @@ func (runner *Runner) Resume(ctx context.Context, runID string, expectedRevision
 				return physical.withRunOwner(childCtx, admitted.Run.ID, admitted.Run.Revision,
 					func(driveCtx context.Context, scoped *Runner) (kernel.Snapshot, error) {
 						invocation := runInvocation(plugin.RunResume, admitted)
-						return scoped.runChain.Invoke(driveCtx, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
+						return scoped.invokeNativeRun(driveCtx, admitted, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
 							return scoped.resumeRunning(nextCtx, admitted, state)
 						})
 					})
@@ -1194,7 +1199,7 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 	if len(state.PendingCalls) > 0 {
 		if call, ok := nextPendingCall(state); ok && state.ToolAdmission != nil && state.ToolAdmission.Phase == toolAdmissionUnsent && state.ToolAdmission.matches(call) {
 			next, closeErr := runner.finishUnsentTool(ctx, snapshot, state, call)
-			runner.noteUnsentReturn(next, closeErr)
+			runner.noteNativeAdmissionReturn(next, closeErr)
 			return next, true, closeErr
 		}
 		if state.ToolWait != nil {
@@ -2309,25 +2314,25 @@ func (runner *Runner) executePending(ctx context.Context, snapshot kernel.Snapsh
 	// durable dispatch marker or while occupying shared capacity.
 	permit, permitErr := runner.acquireCallPermit(ctx, runner.toolLimiter, snapshot.Run.DeadlineAt)
 	if permitErr != nil {
-		runner.noteUnsentReturn(snapshot, permitErr)
+		runner.noteNativeAdmissionReturn(snapshot, permitErr)
 		return snapshot, true, permitErr
 	}
 	release := sync.OnceFunc(permit)
 	defer release()
 	// A long local queue wait must not admit capacity with a stale owner.
 	if err := runner.keepRunLeaseAlive(ctx); err != nil {
-		runner.noteUnsentReturn(snapshot, err)
+		runner.noteNativeAdmissionReturn(snapshot, err)
 		return snapshot, true, err
 	}
-	if err := runner.runtime.RequireExecution(ctx, snapshot.Run.ID); err != nil {
-		runner.noteUnsentReturn(snapshot, err)
+	if err := runner.requireNativeAdmission(ctx, snapshot.Run); err != nil {
+		runner.noteNativeAdmissionReturn(snapshot, err)
 		return snapshot, true, err
 	}
 	// Reserve capacity before entering Tool middleware or persisting a
 	// physical dispatch intent. A waiting reservation has no Tool receipt.
 	snapshot, execution, ticket, denied, err := runner.admitPendingToolBudget(ctx, snapshot, execution)
 	if err != nil {
-		runner.noteUnsentReturn(snapshot, err)
+		runner.noteNativeAdmissionReturn(snapshot, err)
 		return snapshot, true, err
 	}
 	if denied {
@@ -2357,11 +2362,8 @@ func (runner *Runner) executePending(ctx context.Context, snapshot kernel.Snapsh
 		}
 		snapshot = staged
 		execution.state = state
-		// An acknowledged intent is immediately followed by actual
-		// middleware entry. No pre-dispatch proof survives that entry.
-		frame.clearUnsent(q)
 		return staged, nil
-	})
+	}, func() { frame.clearUnsent(q) })
 	if !entered {
 		var next kernel.Snapshot
 		var done bool
@@ -2370,7 +2372,7 @@ func (runner *Runner) executePending(ctx context.Context, snapshot kernel.Snapsh
 		} else {
 			next, done, err = runner.parkOriginalUnsentTool(ctx, source, execution.state, execution.call, ticket, err)
 		}
-		runner.noteUnsentReturn(next, err)
+		runner.noteNativeAdmissionReturn(next, err)
 		return next, done, err
 	}
 	late := errors.Is(err, ErrToolLateResult)
@@ -2474,6 +2476,7 @@ func (runner *Runner) invokePendingTool(
 	ticket *toolBudgetAdmission,
 	permit func(),
 	dispatch func(context.Context) (kernel.Snapshot, error),
+	enter func(),
 ) (tools.ExecutionResult, bool, error) {
 	startedAt := runner.clock.Now().UTC()
 	runner.recordTelemetry(ctx, observability.Event{
@@ -2502,9 +2505,22 @@ func (runner *Runner) invokePendingTool(
 			snapshot = staged
 			invocation.Run = staged.Run
 		}
+		// The intent CAS can block, lose permission, or return after
+		// caller cancellation. Qualify the actual entry, not its ACK.
+		if !entered {
+			if err := ticket.requireEntry(callCtx); err != nil {
+				return tools.ExecutionResult{}, err
+			}
+		}
+		if err := runner.requireNativeAdmission(callCtx, snapshot.Run); err != nil {
+			return tools.ExecutionResult{}, err
+		}
+		if !entered {
+			enter()
+			entered = true
+		}
 		// From this point onward middleware may have caused external
 		// effects; an error is never proof that the Tool was unsent.
-		entered = true
 		authority := &toolCallAuthority{id: call.ID, budget: ticket}
 		callCtx = callbackscope.BindToolCall(callCtx, authority)
 		out, chainErr := runner.toolChain.Invoke(callCtx, invocation, func(nextCtx context.Context) (tools.ExecutionResult, error) {
