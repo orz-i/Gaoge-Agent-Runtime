@@ -87,8 +87,15 @@ func validBoundedBudgetComposition(dependencies Dependencies) bool {
 }
 func (a *BoundedBudgetAdapter) bind(ctx context.Context, id string) (budget.Ledger, error) {
 	scope, err := a.ports.ResolveScope(ctx, id)
-	if err != nil || scope.LedgerID == "" {
+	if err != nil {
 		return budget.Ledger{}, err
+	}
+	return a.bindScope(ctx, id, scope)
+}
+
+func (a *BoundedBudgetAdapter) bindScope(ctx context.Context, id string, scope BoundedBudgetScope) (budget.Ledger, error) {
+	if scope.LedgerID == "" {
+		return budget.Ledger{}, nil
 	}
 	l, err := a.coordinator.Ensure(ctx, scope.LedgerID, scope.Limits)
 	if err != nil {
@@ -122,7 +129,16 @@ func (a *BoundedBudgetAdapter) Run(ctx context.Context, inv plugin.RunInvocation
 	var ownErr error
 	if l.ID != "" {
 		ownErr = a.ports.Project(ctx, l)
-		if l.View(inv.RunID).Cancelled {
+		if l.RunCancelled(inv.RunID) {
+			// No Next has entered. Only the actual bounded frame, after
+			// native ledger and projection acknowledgement, can return a
+			// qualified original admission denial. Do not mint a Tool or
+			// model receipt, or certify a failed Host projection.
+			if ownErr == nil {
+				if denial := recordBudgetRunDenial(ctx, a, inv, l); denial != nil {
+					return kernel.Snapshot{}, denial
+				}
+			}
 			return kernel.Snapshot{}, errors.Join(budget.ErrExhausted, ownErr)
 		}
 	}

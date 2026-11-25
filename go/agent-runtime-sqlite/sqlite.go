@@ -13,8 +13,8 @@ import (
 	sqlite3 "modernc.org/sqlite"
 )
 
-// Schema v6 adds genuine Root-owned retirement receipts; older versions require explicit migration.
-const schemaVersion = 8
+// Schema v9 adds durable child-terminal delivery watermarks. Open never migrates.
+const schemaVersion = 9
 
 var (
 	ErrUnsupportedSchema = profile.ErrUnsupportedSchema
@@ -161,8 +161,23 @@ func (s *Store) initialize(ctx context.Context, create bool) error {
 	return nil
 }
 
-var schemaDDL = append(append([]string{
-	`CREATE TABLE runtime_runs (
+const callbackToolReturnsColumn = "callback_tool_returns TEXT NOT NULL DEFAULT ''"
+
+var schemaDDL = schemaV9DDL()
+
+func schemaV9DDL() []string {
+	out := schemaV8DDL()
+	for i, ddl := range out {
+		if strings.HasPrefix(ddl, "CREATE TABLE runtime_child_effect_grants ") {
+			out[i] = strings.Replace(ddl, "settlement_evidence_json BLOB,", "settlement_evidence_json BLOB, "+callbackToolReturnsColumn+",", 1)
+		}
+	}
+	return append(out, relationProgressDDL)
+}
+
+func schemaV8DDL() []string {
+	return append(append([]string{
+		`CREATE TABLE runtime_runs (
 		run_id TEXT PRIMARY KEY,
 		scope_id TEXT NOT NULL,
 		kind TEXT NOT NULL,
@@ -182,9 +197,9 @@ var schemaDDL = append(append([]string{
         execution_quarantine_generation INTEGER NOT NULL DEFAULT 0,
         execution_quarantine_code TEXT NOT NULL DEFAULT ''
     , execution_physical_epoch INTEGER NOT NULL DEFAULT 0)`,
-	// A child Grant is persisted against every ancestor. Terminal parent CAS
-	// checks this table in the SAME SQLite writer transaction as its Run CAS.
-	`CREATE TABLE runtime_child_effect_grants (
+		// A child Grant is persisted against every ancestor. Terminal parent CAS
+		// checks this table in the SAME SQLite writer transaction as its Run CAS.
+		`CREATE TABLE runtime_child_effect_grants (
 		grant_id TEXT NOT NULL,
 		parent_run_id TEXT NOT NULL REFERENCES runtime_runs(run_id),
 		child_run_id TEXT NOT NULL REFERENCES runtime_runs(run_id),
@@ -203,9 +218,9 @@ var schemaDDL = append(append([]string{
 		settlement_evidence_json BLOB,
 		PRIMARY KEY(grant_id,parent_run_id)
 	)`,
-	`CREATE INDEX runtime_child_grants_parent ON runtime_child_effect_grants(parent_run_id,grant_id)`,
-	`CREATE INDEX runtime_child_grants_child ON runtime_child_effect_grants(child_run_id)`,
-	`CREATE TABLE runtime_events (
+		`CREATE INDEX runtime_child_grants_parent ON runtime_child_effect_grants(parent_run_id,grant_id)`,
+		`CREATE INDEX runtime_child_grants_child ON runtime_child_effect_grants(child_run_id)`,
+		`CREATE TABLE runtime_events (
 		run_id TEXT NOT NULL REFERENCES runtime_runs(run_id),
 		seq INTEGER NOT NULL,
 		event_type TEXT NOT NULL,
@@ -214,10 +229,10 @@ var schemaDDL = append(append([]string{
 		created_ns INTEGER NOT NULL,
 		PRIMARY KEY(run_id, seq)
 	)`,
-	`CREATE INDEX runtime_events_type ON runtime_events(event_type, run_id, seq)`,
-	// This is the Kernel transition outbox materialized directly into the
-	// local ready-work ledger. It is NOT an independent job queue.
-	`CREATE TABLE runtime_ready_work (
+		`CREATE INDEX runtime_events_type ON runtime_events(event_type, run_id, seq)`,
+		// This is the Kernel transition outbox materialized directly into the
+		// local ready-work ledger. It is NOT an independent job queue.
+		`CREATE TABLE runtime_ready_work (
 		work_id TEXT PRIMARY KEY,
 		run_id TEXT NOT NULL REFERENCES runtime_runs(run_id),
 		kind TEXT NOT NULL,
@@ -234,17 +249,17 @@ var schemaDDL = append(append([]string{
         quarantine_code TEXT NOT NULL DEFAULT '',
         quarantined_ns INTEGER NOT NULL DEFAULT 0
     )`,
-	`CREATE INDEX runtime_ready_due ON runtime_ready_work(quarantine_code, available_ns, committed_ns, work_id)`,
-	`CREATE TABLE runtime_commit_proofs (
+		`CREATE INDEX runtime_ready_due ON runtime_ready_work(quarantine_code, available_ns, committed_ns, work_id)`,
+		`CREATE TABLE runtime_commit_proofs (
 		run_id TEXT NOT NULL REFERENCES runtime_runs(run_id),
 		revision INTEGER NOT NULL,
 		fingerprint TEXT NOT NULL,
 		committed_ns INTEGER NOT NULL,
 		PRIMARY KEY(run_id, revision)
 	)`,
-	// Immutable Feature-neutral child ownership; Run records need not exist
-	// in this Store (matching Memory/PostgreSQL runrelation.Store semantics).
-	`CREATE TABLE runtime_run_relations (
+		// Immutable Feature-neutral child ownership; Run records need not exist
+		// in this Store (matching Memory/PostgreSQL runrelation.Store semantics).
+		`CREATE TABLE runtime_run_relations (
 		child_run_id TEXT PRIMARY KEY,
 		parent_run_id TEXT NOT NULL,
 		kind TEXT NOT NULL,
@@ -252,8 +267,9 @@ var schemaDDL = append(append([]string{
 		created_ns INTEGER NOT NULL,
 		UNIQUE(parent_run_id, kind, owner_node_id)
 	)`,
-	`CREATE INDEX runtime_run_relations_parent_order ON runtime_run_relations(parent_run_id, created_ns, kind, owner_node_id, child_run_id)`,
-}, managedSchemaDDL...), ownedRetirementSchemaDDL...)
+		`CREATE INDEX runtime_run_relations_parent_order ON runtime_run_relations(parent_run_id, created_ns, kind, owner_node_id, child_run_id)`,
+	}, managedSchemaDDL...), ownedRetirementSchemaDDL...)
+}
 
 func errorCode(err error) int {
 	var se *sqlite3.Error

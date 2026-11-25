@@ -1,5 +1,112 @@
 # Breaking changes (pre-stable Beta)
 
+## SQLite bounded child-terminal recovery (v9)
+
+Existing exact v8 Kernel databases require a stopped-writer, backed-up, explicit
+`MigrateV8ToV9` (or `MigrateV8ToV9With` using the original encrypted connection).
+Open never migrates and old/new writers must not mix. This adds an empty durable
+relation delivery watermark table and an empty `callback_tool_returns` field
+on existing physical Grant rows; no original execution or receipt is rewritten.
+Earlier unpublished v9 trial schemas fail closed. Use the original v8 backup
+or recreate trial databases.
+Short-lived Hosts may retain the returned `Scheduler.ReconcilePage` cursor as
+scheduling bookkeeping, not dispatch authority. Volatile queue acceptance is
+not durable delivery evidence.
+
+Tool outcome qualification is Call-scoped. The original executor or native
+ledger replay must attest the actual result; middleware cannot replace its
+receipt, rejection metadata or error identity, or qualify a persistence failure
+by joining it to a recoverable refusal. A Grant retains its original control
+custody; outstanding Call bindings independently identify held reservations
+and settled receipts. Recovery must resolve every original obligation before
+retiring the Grant. Historical empty bindings grant no new authority.
+
+`harness.BudgetAuthority.VerifiedToolOutcomeVerifier` is removed. Compose the
+original read-only `agent.ToolOutcomeVerifier` directly and retain the native
+`BoundedBudgetAdapter` in the Tool chain; only Runtime settles a new held
+reservation and encodes its original receipt. Newly admitted Call bindings
+never accept old unsealed verifier-owned receipt bytes. The original approved
+checkpoint or completed approval-policy decision and exact independent owner
+result are bound to the original Call return; successor consumption does not
+repeat approval. Staged original results qualify observation/control against
+the same independent owner before local usage is incremented. Existing
+opaque/legacy custody is not upgraded. Drain or quarantine old in-flight
+executions before switching this unreleased cohort; no new SQL schema version.
+
+Tool authorization is now committed before physical dispatch. The Agent's
+private `toolAdmission` replaces the prerelease `requiredApproval` state:
+evaluating, required, authorized, awaiting_capacity, or unsent. Evaluation intent
+must be durable before an original policy callback; an unresolved decision
+cannot be retired or replaced by a successor policy. A committed restriction
+does not authorize dispatch. SharedBudget binds and reserves the original
+scope before Tool middleware and physical dispatch intent. Capacity denial
+does not mint a Tool receipt; a standalone bounded Tool adapter now returns
+the native budget error instead of a synthetic pending result. Waiting
+reservations can be re-admitted without re-evaluating committed approval,
+but a missing, foreign, or already-dispatched original reservation cannot
+be replaced. Earlier dispatched Children drain before any later approval
+or capacity pause. Existing prerelease `requiredApproval` snapshots and
+legacy WaitingInput states with unresolved physical Children are not
+automatically migrated or granted recovery authority.
+
+Local Tool permits now precede SharedBudget reservation. Physical intent is
+committed at the first actual ToolChain entry rather than before waiting for
+a permit or delivering a live observer event. The original no-entry witness
+survives intent ACK and the final original-ledger, deadline, Context and
+execution-owner checks; actual chain entry discards that witness unless a
+complete original first-party denial subsequently proves no dispatch. A native no-send disposition
+is persisted before releasing a permanently denied reservation or parking a
+retryable one. `Coordinator.ResolveUnsentTool` checks the exact original
+reservation and ledger revision, requires zero usage/no dispatch, and cannot
+refund physical work or park a successor reservation. The original
+`OwnedToolReturn.Unsent` flag can recover a committed marker whose ACK and
+immediate cleanup reads were lost, but only under the exact original returned
+Root Grant and snapshot. It is neither a provider receipt nor new control
+custody. Caller cancellation before entry is a resumable no-send yield, not a
+business cancellation of the Run. A live ToolStarted observation alone is
+not a durable physical dispatch or receipt. Old unresolved markers without
+original no-entry proof are not reinterpreted as unsent.
+
+All native RunChain entrypoints (including managed continuation) now consume
+the same invocation-bound admission return. A bounded Run Budget frame that
+observes an elected cancellation and acknowledges its original projection
+without entering Next records the actual native denial; only the exact
+returned error from that invocation qualifies the existing original snapshot.
+The existing whole-callback and native state checks remain mandatory for
+Root/parented Grant retirement. This leaves the business Run and checkpoint
+unchanged for the elected Kernel cancellation. Opaque errors, masked or
+augmented denial returns, and failed projections remain unqualified.
+
+The actual native Tool Budget Dispatch now checks exact original reservation
+identity and elected Ledger cancellation in its CAS transition, not a second
+read-before-send guard. A definitive native denial before Next records the
+same private admission return identity as the Run Budget frame. The original
+Tool attempt must return that exact error, no Tool result and acknowledged
+receipts for every entered first-party layer. Only then can the existing
+unsent disposition and `OwnedToolReturn.Unsent` close or recover the original
+physical marker. An outer bounded Timeline may record the entered attempt's
+Started/Failed observations, but no physical result or charge. Elected
+Harness cancellation can consume sealed no-send proof through existing
+deferred cleanup without new execution or provider verification, including
+when earlier original child receipts still need to drain. Unknown Dispatch
+write outcomes, opaque entered layers and failed projections remain fenced.
+
+Original receipt consumption and owned retirement are now one resumable
+cleanup contract. `RootDeferredCleanupEligibility` observes either the
+active returned Grant (including when every physical obligation has already
+been consumed) or the exact unique current RETIRED row awaiting ACK.
+`ReconcileRootDeferredChildren` reuses the existing retirement protocol for
+the retirement-only phase and accepts an optional original cleanup scope to
+bind an earlier observation to the same Grant and callback completion.
+Ordinary three-argument calls still work; method values/interfaces with the
+old fixed signature must be updated. The shared Kernel returned-root facts
+checker receives the active-grant predicate from its Store and validates a
+pending RETIRED row with the existing exact selector and unchanged custody
+requirements. No historical ACK becomes a current retirement candidate.
+The elected Harness cancellation consumes the same original evidence after
+a lost recovery CAS ACK, Mark, Finish or ACK, including before terminal
+projection of an already committed business failure.
+
 ## PR #154 — Model original evidence and settlement qualification hard cut
 
 Model intent, logical budget reservation and physical sampling hashes now bind

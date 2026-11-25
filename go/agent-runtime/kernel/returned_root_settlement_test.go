@@ -16,7 +16,7 @@ func TestReturnedRootCustodyRequiresActualCallbackAndCompleteHistory(t *testing.
 	completion := previous.Evidence.Completion
 	completion.GrantID, completion.ControlCustody = grant.ID, kernel.OwnedCustodyScoped
 	lease := kernel.ExecutionLease{RunID: current.Run.ID, OwnerID: grant.ExecutionOwnerID, LeaseID: grant.ExecutionLeaseID, Epoch: grant.ExecutionEpoch}
-	if err := kernel.VerifyReturnedRootSettlementFacts(current, current, 4, 4, lease, grant, completion, []kernel.OwnedRetirementReceipt{previous}); err != nil {
+	if err := kernel.VerifyReturnedRootSettlementFacts(current, current, 4, 4, lease, grant, completion, []kernel.OwnedRetirementReceipt{previous}, true); err != nil {
 		t.Fatalf("actual returned callback and safe history rejected: %v", err)
 	}
 	for _, tc := range []struct {
@@ -61,8 +61,64 @@ func TestReturnedRootCustodyRequiresActualCallbackAndCompleteHistory(t *testing.
 		t.Run(tc.name, func(t *testing.T) {
 			s, l, g, c, rows := current, lease, grant, completion, []kernel.OwnedRetirementReceipt{previous}
 			tc.change(&s, &l, &g, &c, &rows)
-			if err := kernel.VerifyReturnedRootSettlementFacts(current, s, 4, 4, l, g, c, rows); !errors.Is(err, kernel.ErrExecutionConflict) {
+			if err := kernel.VerifyReturnedRootSettlementFacts(current, s, 4, 4, l, g, c, rows, true); !errors.Is(err, kernel.ErrExecutionConflict) {
 				t.Fatalf("uncertain callback obtained cancellation recovery custody: %v", err)
+			}
+		})
+	}
+}
+
+// The same returned-root custody can survive Finish before ACK, but only for
+// the unique exact current retirement selected by the existing Store rules.
+func TestReturnedRootCustodyAcrossPendingRetirement(t *testing.T) {
+	current, previous := settledRootFixture()
+	current.Run.Status = kernel.RunStatusRunning
+	g := previous.Evidence.Grant
+	g.ID, g.ExecutionLeaseID, g.ExecutionEpoch = "current-grant", "new-lease", 4
+	g.AdmissionOperation, g.ExpectedRevision = "resume", current.Run.Revision
+	c := previous.Evidence.Completion
+	c.GrantID, c.ControlCustody = g.ID, kernel.OwnedCustodyScoped
+	c.ReturnRevision = current.Run.Revision
+	l := kernel.ExecutionLease{RunID: current.Run.ID, OwnerID: g.ExecutionOwnerID, LeaseID: g.ExecutionLeaseID, Epoch: g.ExecutionEpoch}
+	pending := kernel.OwnedRetirementReceipt{Version: 1, Evidence: kernel.OwnedSettlementEvidence{Version: 1, Grant: g, Snapshot: current, Completion: c, MarkOrigin: "RECOVERED_RETURN"}, Closures: []kernel.ManagedTransfer{}, Phase: "RETIRED"}
+	if !pending.Valid() {
+		t.Fatal("invalid retirement fixture")
+	}
+	for _, mode := range []string{"exact", "foreign-owner", "stale-source", "active-other-grant", "old-unacknowledged", "duplicate", "opaque", "borrowed", "historical-ack", "missing-current"} {
+		t.Run(mode, func(t *testing.T) {
+			s, lease, old, row := current, l, previous, pending
+			active := false
+			switch mode {
+			case "foreign-owner":
+				lease.LeaseID = "other"
+			case "stale-source":
+				s.EventHead++
+			case "active-other-grant":
+				active = true
+			case "old-unacknowledged":
+				old.Phase, old.ACKIdentity = "RETIRED", ""
+			case "opaque":
+				row.Evidence.Completion.ControlCustody = ""
+			case "borrowed":
+				row.Evidence.Completion.LeaseOwned = false
+			case "historical-ack":
+				row.Phase = "ACKNOWLEDGED"
+				row.ACKIdentity = row.Identity()
+			}
+			rows := []kernel.OwnedRetirementReceipt{old, row}
+			if mode == "duplicate" {
+				rows = append(rows, row)
+			}
+			if mode == "missing-current" {
+				rows = rows[:1]
+			}
+			err := kernel.VerifyReturnedRootSettlementFacts(s, s, 4, 4, lease, kernel.ChildExecutionGrant{}, kernel.OwnedPhysicalCallbackCompletion{}, rows, active)
+			if mode == "exact" {
+				if err != nil {
+					t.Fatal(err)
+				}
+			} else if !errors.Is(err, kernel.ErrExecutionConflict) {
+				t.Fatal("unqualified pending retirement accepted", err)
 			}
 		})
 	}

@@ -148,7 +148,7 @@ func (r *Runner) RecoverManagedContinuation(ctx context.Context, id string) (ker
 		return snapshot, kernel.ManagedClosureProof{}, err
 	}
 	result, runErr := r.executeOwnedRoot(ctx, snapshot, bound, scoped, t.SuccessorGrant, t.SuccessorLease, false, func(next context.Context, owner *Runner, source kernel.Snapshot) (kernel.Snapshot, error) {
-		return owner.runChain.Invoke(next, runInvocation(plugin.RunResume, source), func(drive context.Context) (kernel.Snapshot, error) { return owner.resumeRunning(drive, source, state) })
+		return owner.invokeNativeRun(next, source, runInvocation(plugin.RunResume, source), func(drive context.Context) (kernel.Snapshot, error) { return owner.resumeRunning(drive, source, state) })
 	})
 	closure, closureErr := r.runtime.ManagedRecoveryClosure(context.WithoutCancel(ctx), t.SafePoint.ID)
 	if closureErr != nil {

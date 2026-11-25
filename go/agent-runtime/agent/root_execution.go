@@ -13,7 +13,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
 // ErrModelOutcomeUnknown retains the original dispatched invocation until an
@@ -25,7 +24,7 @@ type rootCallbackState struct {
 	unknown               atomic.Bool
 	approvalPolicyEntered atomic.Bool
 	toolApprovals         approvedToolCalls
-	terminalFailure       atomic.Pointer[committedAgentFailure]
+	knownReturn           atomic.Pointer[committedAgentReturn]
 }
 
 func (runner *Runner) noteRootCallbackFailure(err error) {
@@ -74,7 +73,7 @@ func defaultRunExecution(rt *kernel.Runtime, policy ExecutionPolicy) (*RunExecut
 
 func knownRootPhysicalSettlement(snapshot kernel.Snapshot) bool {
 	state, err := decodeState(snapshot.State)
-	if err != nil || state.ToolDispatchID != "" || state.ToolWait != nil || len(state.DeferredChildren) != 0 {
+	if err != nil || state.ToolDispatchID != "" || state.ToolWait != nil || len(state.DeferredChildren) != 0 || (state.ToolAdmission != nil && state.ToolAdmission.Phase == toolAdmissionEvaluating) {
 		return false
 	}
 	for _, inv := range state.ModelInvocations {
@@ -166,9 +165,9 @@ func (runner *Runner) executeOwnedRoot(ctx context.Context, current kernel.Snaps
 	defer lifecycle.Close()
 	physicalCtx := callbackscope.Bind(ctx, lifecycle)
 	var toolFrame *originalToolFrame
-	if runner.scopedRootCallbacks && (runner.toolOutcomeVerifier != nil || runner.externalNoEffectVerifier != nil) && (grant.AdmissionOperation == "resume" || grant.AdmissionOperation == "start") {
-		toolFrame = &originalToolFrame{grantID: grant.ID}
-		physicalCtx = context.WithValue(physicalCtx, toolReturnGrantKey{}, toolFrame)
+	if grant.AdmissionOperation == "resume" || grant.AdmissionOperation == "start" || grant.AdmissionOperation == "approval" {
+		toolFrame = &originalToolFrame{grantID: grant.ID, runID: grant.ChildRunID}
+		physicalCtx = callbackscope.BindRootToolFrame(physicalCtx, toolFrame)
 	}
 	result, callErr := execute(physicalCtx, &scoped, current)
 	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
@@ -177,34 +176,37 @@ func (runner *Runner) executeOwnedRoot(ctx context.Context, current kernel.Snaps
 	if loadErr != nil {
 		return result, errors.Join(callErr, ErrRootOutcomeUnknown, loadErr)
 	}
-	hostComplete := lifecycle.Complete() && !scoped.rootCallbacks.unknown.Load()
+	state, stateErr := decodeState(latest.State)
+	hostComplete := lifecycle.Complete() && !scoped.rootCallbacks.unknown.Load() && stateErr == nil &&
+		(state.ToolAdmission == nil || state.ToolAdmission.Phase != toolAdmissionEvaluating)
 	settled := hostComplete && knownRootPhysicalSettlement(latest)
 	outcome := kernel.OwnedPhysicalCallbackOutcome{HostCompleted: hostComplete, LeaseOwned: !external}
-	// Seal the executing stack's custody with the original callback return.
-	// A reconstructed/same-Kernel observer cannot upgrade opaque Host effects.
+	pendingCall, pending, _ := FrozenPendingDispatch(latest)
+	returnedCall := false
+	allApproved := false
+	if hostComplete {
+		// Approval is captured at the actual Call return, not inferred
+		// from a later wait representation or an observer's composition.
+		bindings, approved, evidenceErr := toolFrame.outstanding(latest, &scoped.rootCallbacks.toolApprovals)
+		if evidenceErr != nil {
+			return latest, errors.Join(callErr, ErrRootOutcomeUnknown, evidenceErr)
+		}
+		outcome.ToolReturns = bindings
+		allApproved = approved
+		if b, found, _ := bindings.Find(pendingCall.ID); pending && found && (b.ReceiptDigest != "" || b.Unsent) {
+			returnedCall = true
+		}
+	}
+	// Control custody describes the actual whole executing callback. Original
+	// outstanding approval evidence is sealed independently of the business CAS.
 	if grant.AdmissionOperation == "prepare" && runner.trustedDeferredPreparedControl {
 		outcome.ControlCustody = kernel.OwnedCustodyPrepared
 	} else if runner.scopedRootCallbacks && !scoped.rootCallbacks.approvalPolicyEntered.Load() {
 		outcome.ControlCustody = kernel.OwnedCustodyScoped
-	} else if runner.boundedApproval && runner.scopedRootCallbacks && runner.externalNoEffectVerifier != nil && hostComplete {
-		// A returned async tool has not produced a result. Bind only its
-		// original read-only approval to the exact stored wait. The kernel
-		// keeps this grant active until a separate owner receipt is verified.
-		pending, waiting, _ := FrozenExternalToolCall(latest)
-		boundWait := waiting && scoped.rootCallbacks.toolApprovals.bind(pending)
-		if (settled || boundWait) && scoped.rootCallbacks.toolApprovals.allBound() {
-			outcome.ControlCustody = kernel.OwnedBoundedApprovalReturn
-		}
-	} else if runner.scopedRootCallbacks && settled && scoped.rootCallbacks.toolApprovals.allBound() {
+	} else if hostComplete && runner.scopedRootCallbacks && (settled || allApproved) && scoped.rootCallbacks.toolApprovals.allBound() {
 		outcome.ControlCustody = kernel.OwnedToolResultReturn
 		if runner.boundedApproval {
 			outcome.ControlCustody = kernel.OwnedBoundedApprovalReturn
-		}
-	}
-	pendingCall, pending, _ := FrozenPendingDispatch(latest)
-	if pending && hostComplete {
-		if hold := toolFrame.hold(tools.ExecutionRequest{RunID: latest.Run.ID, Call: pendingCall}); hold != nil {
-			outcome.ControlCustody, outcome.ToolBudgetScope = kernel.OwnedToolBudgetReturn, hold.LedgerID
 		}
 	}
 	payload := kernel.OwnedPhysicalCallbackReturnPayload(latest, outcome)
@@ -213,7 +215,7 @@ func (runner *Runner) executeOwnedRoot(ctx context.Context, current kernel.Snaps
 	completion := kernel.OwnedPhysicalCallbackCompletion{
 		GrantID: grant.ID, ReturnRevision: latest.Run.Revision, ReturnSourceHash: hex.EncodeToString(hash[:]),
 		HostCompleted: hostComplete, LeaseOwned: !external,
-		ControlCustody: outcome.ControlCustody,
+		ControlCustody: outcome.ControlCustody, ToolReturns: outcome.ToolReturns,
 	}
 	// The actual whole callback owns this fact, including the fast-known path.
 	// Persist it before Mark so any competing recovery retains the same original
@@ -238,7 +240,7 @@ func (runner *Runner) executeOwnedRoot(ctx context.Context, current kernel.Snaps
 	if !settled {
 		// The enclosing native call has really returned. The Kernel grant still
 		// fences the Tool until an independent receipt settles the original intent.
-		if hostComplete && pending && runner.scopedRootCallbacks && runner.toolOutcomeVerifier != nil {
+		if hostComplete && pending && runner.scopedRootCallbacks && (runner.toolOutcomeVerifier != nil || returnedCall) {
 			recordPhysicalObservation(ctx, latest.Run.ID, PhysicalCallDurableYield)
 		}
 		state, stateErr := decodeState(latest.State)
@@ -255,8 +257,9 @@ func (runner *Runner) executeOwnedRoot(ctx context.Context, current kernel.Snaps
 	return latest, callErr
 }
 
-// ReconcileRootPhysicalExecution retires only an already marked whole callback;
-// clean receipts alone never manufacture a missing Host completion marker.
+// ReconcileRootPhysicalExecution consumes the existing native retirement
+// protocol after every original physical obligation has been settled. A
+// clean feature state alone never manufactures a callback completion.
 func (runner *Runner) ReconcileRootPhysicalExecution(ctx context.Context, runID string) error {
 	if runner == nil || runner.runtime == nil {
 		return ErrInvalidRequest
@@ -268,52 +271,60 @@ func (runner *Runner) ReconcileRootPhysicalExecution(ctx context.Context, runID 
 	if snapshot.Run.Kind != RunKind || snapshot.Run.ParentRunID != "" {
 		return ErrInvalidRequest
 	}
-	grant, err := runner.runtime.LookupChildExecution(ctx, runID)
-	if errors.Is(err, kernel.ErrNotFound) {
-		// A process may die after genuine Finish but before ACK. This narrow
-		// current-run index returns only a unique RETIRED receipt still matching
-		// the complete source/native owner and with no replacement grants. It
-		// never selects a historical ACK or grants dispatch permission.
-		receipt, lookupErr := runner.runtime.LookupOwnedRetirementForRun(ctx, runID)
-		if lookupErr != nil {
-			return lookupErr
-		}
-		if !knownRootPhysicalSettlement(snapshot) || !receipt.Evidence.Completion.HostCompleted || receipt.Evidence.Completion.GrantID == "" {
-			return ErrRootOutcomeUnknown
-		}
-		if err := runner.requireRootModelQualification(ctx, snapshot); err != nil {
-			return err
-		}
-		found, ackErr := acknowledgeExactOwnedRetirement(ctx, runner.runtime, receipt.Evidence.Grant, snapshot, &receipt.Evidence.Completion)
-		if ackErr != nil {
-			return errors.Join(ErrRootOutcomeUnknown, ackErr)
-		}
-		if !found {
-			return errors.Join(ErrRootOutcomeUnknown, kernel.ErrExecutionConflict)
-		}
-		return nil
-	}
+	grant, completion, err := runner.originalRootReturn(ctx, snapshot)
 	if err != nil {
 		return err
 	}
-	if grant.ExecutionLeaseID == "" || !knownRootPhysicalSettlement(snapshot) {
-		return ErrRootOutcomeUnknown
+	return runner.reconcileRootRetirement(ctx, snapshot, grant, completion)
+}
+
+// Select the actual active original return or the unique pending retirement
+// at the exact current source. Never fall back to historical acknowledged
+// rows or infer completion from an absent physical marker. The legacy nil
+// completion is supported only by the existing genuine marked Store path.
+func (runner *Runner) originalRootReturn(ctx context.Context, snapshot kernel.Snapshot) (kernel.ChildExecutionGrant, *kernel.OwnedPhysicalCallbackCompletion, error) {
+	grant, err := runner.runtime.LookupChildExecution(ctx, snapshot.Run.ID)
+	if errors.Is(err, kernel.ErrNotFound) {
+		receipt, lookupErr := runner.runtime.LookupOwnedRetirementForRun(ctx, snapshot.Run.ID)
+		if lookupErr != nil {
+			return grant, nil, lookupErr
+		}
+		if kernel.ManagedDigest(receipt.Evidence.Snapshot) != kernel.ManagedDigest(snapshot) || !receipt.Evidence.Completion.HostCompleted || receipt.Evidence.Completion.GrantID == "" {
+			return grant, nil, ErrRootOutcomeUnknown
+		}
+		return receipt.Evidence.Grant, &receipt.Evidence.Completion, nil
+	}
+	if err != nil {
+		return grant, nil, err
+	}
+	if !grant.IsOwned() || grant.ExecutionLeaseID == "" || grant.ChildRunID != snapshot.Run.ID {
+		return grant, nil, ErrRootOutcomeUnknown
 	}
 	completion, completionErr := runner.runtime.LookupOwnedPhysicalCallbackReturn(ctx, grant)
-	if completionErr != nil && !errors.Is(completionErr, kernel.ErrNotFound) {
-		return completionErr
+	if errors.Is(completionErr, kernel.ErrNotFound) {
+		return grant, nil, nil
 	}
-	var original *kernel.OwnedPhysicalCallbackCompletion
-	if completionErr == nil {
-		if !completion.HostCompleted {
-			return ErrRootOutcomeUnknown
-		}
-		original = &completion
+	if completionErr != nil {
+		return grant, nil, completionErr
+	}
+	if !completion.HostCompleted || completion.GrantID != grant.ID || completion.ReturnRevision < grant.ExpectedRevision || completion.ReturnRevision > snapshot.Run.Revision {
+		return grant, nil, ErrRootOutcomeUnknown
+	}
+	return grant, &completion, nil
+}
+
+// Every receipt-only consumer uses the same original grant and exact
+// settlement source for Mark/T4/Finish/ACK. Re-resolving by RunID here
+// could select a successor grant admitted after a concurrent retirement.
+func (runner *Runner) reconcileRootRetirement(ctx context.Context, snapshot kernel.Snapshot, grant kernel.ChildExecutionGrant, completion *kernel.OwnedPhysicalCallbackCompletion) error {
+	if !grant.IsOwned() || grant.ChildRunID != snapshot.Run.ID || !knownRootPhysicalSettlement(snapshot) ||
+		(completion != nil && (!completion.HostCompleted || completion.GrantID != grant.ID)) {
+		return ErrRootOutcomeUnknown
 	}
 	if err := runner.requireRootModelQualification(ctx, snapshot); err != nil {
 		return err
 	}
-	if err := settleOwnedRoot(ctx, runner.runtime, grant, snapshot, original, false); err != nil {
+	if err := settleOwnedRoot(ctx, runner.runtime, grant, snapshot, completion, false); err != nil {
 		return errors.Join(ErrRootOutcomeUnknown, err)
 	}
 	return nil

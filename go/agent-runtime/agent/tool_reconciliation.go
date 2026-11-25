@@ -13,7 +13,8 @@ import (
 // ToolOutcomeVerifier is a trusted host/provider lookup, NOT an executor.
 // It must verify the durable external disposition for the exact RunID/CallID
 // using a provider-owned idempotency record or receipt. It must never
-// dispatch/retry the Tool or derive "committed" from untrusted user input.
+// dispatch/retry the Tool, write its shared Budget settlement, or derive
+// "committed" from untrusted user input. Native Runtime owns settlement.
 // Register it with the Runner at construction; no arbitrary result supplied
 // to ReconcileToolOutcome can bypass this provider verification.
 type ToolOutcomeVerifier interface {
@@ -27,8 +28,9 @@ func (fn ToolOutcomeVerifierFunc) VerifyCommittedTool(ctx context.Context, reque
 	return fn(ctx, request)
 }
 
-// ReconcileToolOutcome persists a provider-verified external COMMIT without
-// invoking Executor.Execute. The host authenticates the caller and supplies
+// ReconcileToolOutcome consumes an original sealed no-send/terminal return
+// or a provider-verified external COMMIT without invoking Executor.Execute.
+// A no-send return reconciles admission only; it never mints a Tool result. The host authenticates the caller and supplies
 // a trusted ToolOutcomeVerifier in Runner dependencies; this method does
 // not accept an arbitrary result or "committed" flag from a client.
 func (runner *Runner) ReconcileToolOutcome(ctx context.Context, runID string,
@@ -37,15 +39,20 @@ func (runner *Runner) ReconcileToolOutcome(ctx context.Context, runID string,
 		strings.TrimSpace(callID) == "" || expectedRevision == 0 {
 		return kernel.Snapshot{}, ErrInvalidRequest
 	}
-	if runner.toolOutcomeVerifier == nil {
-		return kernel.Snapshot{}, ErrToolVerificationRequired
-	}
 	snapshot, state, err := runner.loadState(ctx, runID)
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
 	if snapshot.Run.Revision != expectedRevision {
 		return snapshot, kernel.ErrConflict
+	}
+	if state.ToolDispatchID == callID {
+		if repaired, handled, recoveryErr := runner.reconcileOriginalToolReturnIfPresent(ctx, snapshot, state); handled {
+			return repaired, recoveryErr
+		}
+	}
+	if runner.toolOutcomeVerifier == nil {
+		return snapshot, ErrToolVerificationRequired
 	}
 	if snapshot.Run.ParentRunID == "" && state.ToolDispatchID == "" && len(state.DeferredChildren) > 0 && state.DeferredChildren[0].Call.ID == callID {
 		grant, grantErr := runner.runtime.LookupChildExecution(ctx, runID)
@@ -73,6 +80,11 @@ func (runner *Runner) ReconcileToolOutcome(ctx context.Context, runID string,
 		if !errors.Is(lookupErr, kernel.ErrNotFound) {
 			return snapshot, lookupErr
 		}
+	}
+	// Non-owned or legacy recovery has no original native budget-return
+	// proof. Never consume a metered call through a verifier-only path.
+	if err := runner.requireUnmeteredToolRecovery(ctx, runID); err != nil {
+		return snapshot, errors.Join(ErrToolOutcomeUnknown, err)
 	}
 	return runner.withRunOwner(ctx, runID, expectedRevision,
 		func(nextCtx context.Context, scoped *Runner) (out kernel.Snapshot, callbackErr error) {

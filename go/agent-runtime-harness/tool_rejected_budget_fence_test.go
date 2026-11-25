@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
@@ -111,6 +112,40 @@ func TestUnknownSuccessfulToolDispositionPreservesHeldBudget(t *testing.T) {
 			})
 			if !errors.Is(err, budget.ErrWaiting) || physical != 1 {
 				t.Fatalf("unrecognized disposition allowed second external Tool call: err=%v physical=%d", err, physical)
+			}
+		})
+	}
+}
+
+// A permanent denial is not a request for a replacement Tool call. Reopening
+// the original budget receipt must preserve both the blocked keys and the
+// exact permission to finish, without invoking the physical executor again.
+func TestToolRejectedReplayPreservesCompletionAndBlockedKeys(t *testing.T) {
+	for _, allow := range []bool{false, true} {
+		t.Run(map[bool]string{false: "required-correction", true: "allow-completion"}[allow], func(t *testing.T) {
+			store, shared, _ := hostedBudgetFixture(t, budget.Limits{MaxToolCalls: 1})
+			request := tools.ExecutionRequest{RunID: "hosted-run", Call: tools.Call{ID: "original-denial", ToolKey: "local.read", Arguments: json.RawMessage(`{}`)}}
+			invocation := plugin.ToolInvocation{Run: kernel.Run{ID: request.RunID}, Definition: tools.Definition{Key: "local.read", Name: "read", InputSchema: json.RawMessage(`{}`)}, Request: request}
+			cause := tools.NewRecoverableCallErrorWithBlockedTools("tool.authorization_denied", "not authorized", nil, "local.read", "local.related")
+			var classified *tools.RecoverableCallError
+			if !errors.As(cause, &classified) {
+				t.Fatal("missing classification")
+			}
+			classified.AllowCompletion = allow
+			physical := 0
+			for i := 0; i < 2; i++ {
+				result, err := mustBudgetAdapter(t, shared).Tool(t.Context(), invocation, func(context.Context) (tools.ExecutionResult, error) {
+					physical++
+					return tools.RecoverableNoEffectResult(request.Call.ID, cause)
+				})
+				code, _, _ := tools.RecoverableCallErrorInfo(err)
+				if !tools.ValidRecoverableNoEffectReceipt(result, err, request.Call.ID) || code != "tool.authorization_denied" || tools.RecoverableCallErrorAllowsCompletion(err) != allow || !slices.Equal(tools.RecoverableCallErrorBlockedToolKeys(err), []string{"local.read", "local.related"}) || physical != 1 {
+					t.Fatalf("original denial semantics lost (pass=%d physical=%d): %+v %v", i, physical, result, err)
+				}
+			}
+			ledger, err := store.LoadBudget(t.Context(), "hosted-budget-turn")
+			if err != nil || ledger.View("").Usage.ToolCalls != 1 || ledger.View("").Reserved.ToolCalls != 0 {
+				t.Fatal("replayed budget changed", err)
 			}
 		})
 	}

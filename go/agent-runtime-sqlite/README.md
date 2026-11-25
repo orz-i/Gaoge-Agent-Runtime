@@ -68,8 +68,13 @@ The adapter implements `kernel.Store` including `EventJournal` and
 `TransitionOutbox`. `sqlite.NewRunRelationStore(store)` separately implements
 the existing four-method `runrelation.Store` against the **same** SQLite
 Profile and its existing connection. Compose it with `runrelation.New` when
-needed; it does not implement optional `runrelation.ReconciliationPager`,
-automatically wake parent Runs or persist Team/Workflow definitions.
+needed. The adapter implements optional `runrelation.ReconciliationPager`
+with at most 128 scanned relation keys per page and persistent delivery
+watermarks. It does not itself execute parent Runs or persist Team/Workflow
+definitions. A long-lived Scheduler may use `Reconcile`; a short-lived host
+uses `ReconcilePage(ctx, cursor)`, stores the returned cursor in its scheduling
+bookkeeping, and retries failed candidates after wrap. A queue must preserve
+original job identity across restart; the pager does not replace a durable queue.
 The SQLite `Store` owns closing the shared connection. It preserves the existing transition IDs
 `runID:revision`, wakeup timestamps/generations and approval
 Checkpoint semantics. The existing Agent `StartRun` emits an initial
@@ -349,3 +354,27 @@ never the current lease epoch, and does not rewrite original custody bytes.
 Successor execution/control transactions reconcile an exact genuinely retired
 callback ACK before advancing its owner or source. Unknown/stale/active effects
 remain fenced, and historical empty custody is never promoted to trusted.
+
+
+### Bounded child-terminal reconciliation and Call-qualified recovery schema (v9)
+
+The new `runtime_run_relation_progress` table records monotonic native parent
+and child revisions only after durable queue acceptance or feature-verified
+consumption. Volatile queue acceptance cannot advance delivery progress.
+It is not a second execution record. Missing/nonterminal Runs do not prevent
+the indexed scan from progressing. A failure to enqueue or record progress
+is retried on a later scan with the original wakeup identity.
+
+Existing exact v8 files require the explicit `MigrateV8ToV9` (or
+`MigrateV8ToV9With` with the original encrypted connection), all old writers
+stopped, and a retained backup. Open fails closed until the migration succeeds.
+The migration creates an empty watermark table and adds an empty
+`callback_tool_returns` field to the existing physical Grant record. It does
+not rewrite original Runs, relations, custody, native authority, or receipts.
+New callback returns bind outstanding Calls individually to their original
+request and ledger evidence; retirement still requires the original whole
+callback return and resolution of every physical obligation.
+Do not infer physical completion from a watermark or missing legacy evidence.
+Earlier unpublished v9 trial files do not match this final schema and fail
+closed; recreate trial files or migrate from the original v8 backup. Do not
+mix old and new readers or writers.

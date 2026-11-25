@@ -445,11 +445,25 @@ func (runner *Runner) executeToolWithPolicy(
 	deadlineAt *time.Time,
 	call func(context.Context) (tools.ExecutionResult, error),
 ) (tools.ExecutionResult, int, error) {
+	return runner.executeToolWithPermit(ctx, identity, deadlineAt, nil, call)
+}
+
+func (runner *Runner) executeToolWithPermit(ctx context.Context, identity string, deadlineAt *time.Time, firstPermit func(), call func(context.Context) (tools.ExecutionResult, error)) (tools.ExecutionResult, int, error) {
 	policy := runner.execution.Tool
 	for attempt := 1; attempt <= policy.MaxAttempts; attempt++ {
-		release, err := runner.acquireCallPermit(ctx, runner.toolLimiter, deadlineAt)
-		if err != nil {
-			return tools.ExecutionResult{}, attempt, err
+		var release func()
+		var err error
+		if attempt == 1 && firstPermit != nil {
+			release = firstPermit
+			if err = ctx.Err(); err != nil {
+				release()
+				return tools.ExecutionResult{}, attempt, err
+			}
+		} else {
+			release, err = runner.acquireCallPermit(ctx, runner.toolLimiter, deadlineAt)
+			if err != nil {
+				return tools.ExecutionResult{}, attempt, err
+			}
 		}
 		timeout, runBound := runner.boundedCallTimeout(deadlineAt, policy.Timeout)
 		if runBound && timeout <= 0 {

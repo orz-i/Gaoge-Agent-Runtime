@@ -82,7 +82,7 @@ func (s *Store) verifyRootSettlement(ctx context.Context, expected kernel.Snapsh
 			}
 		}
 		return kernel.VerifyReturnedRootSettlementFacts(expected, current, native.epoch, native.physicalEpoch,
-			native.lease, original.grant, original.completion, receipts)
+			native.lease, original.grant, original.completion, receipts, active)
 	}
 	return check(expected, current, native.epoch, native.physicalEpoch, lease, active, receipts)
 }

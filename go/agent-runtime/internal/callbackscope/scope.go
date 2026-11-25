@@ -25,6 +25,7 @@ type Scope struct {
 type Ticket struct {
 	scope                              *Scope
 	adapter                            any
+	toolCall                           any
 	nonce                              uint64
 	input                              [32]byte
 	returned, failed, receipt, invalid bool
@@ -50,7 +51,31 @@ func Inherit(ctx, original context.Context) context.Context {
 	}
 	s, _ := original.Value(scopeKey{}).(*Scope)
 	t, _ := original.Value(ticketKey{}).(*Ticket)
-	return context.WithValue(Bind(ctx, s), ticketKey{}, t)
+	return BindRunCall(BindRootToolFrame(context.WithValue(Bind(ctx, s), ticketKey{}, t), RootToolFrame(original)), RunCall(original))
+}
+
+// Run-call authority belongs to the exact original native RunChain
+// invocation. Context replacement cannot substitute a different source.
+type runCallKey struct{}
+type runCallValue struct{ authority any }
+
+func BindRunCall(ctx context.Context, authority any) context.Context {
+	return context.WithValue(ctx, runCallKey{}, runCallValue{authority})
+}
+func RunCall(ctx context.Context) any {
+	value, _ := ctx.Value(runCallKey{}).(runCallValue)
+	return value.authority
+}
+
+type rootToolFrameKey struct{}
+type rootToolFrameValue struct{ frame any }
+
+func BindRootToolFrame(ctx context.Context, frame any) context.Context {
+	return context.WithValue(ctx, rootToolFrameKey{}, rootToolFrameValue{frame})
+}
+func RootToolFrame(ctx context.Context) any {
+	value, _ := ctx.Value(rootToolFrameKey{}).(rootToolFrameValue)
+	return value.frame
 }
 
 // Model-call authority is Runtime-owned and travels with the actual Next
@@ -65,7 +90,28 @@ func InheritModel(ctx, original context.Context) context.Context {
 	return BindModelCall(Inherit(ctx, original), ModelCall(original))
 }
 
+// Tool-call authority follows the actual Next chain even if middleware
+// supplies an unrelated Context. It is independent of the whole Grant journal.
+type toolCallKey struct{}
+
+func BindToolCall(ctx context.Context, authority any) context.Context {
+	return context.WithValue(ctx, toolCallKey{}, authority)
+}
+func ToolCall(ctx context.Context) any { return ctx.Value(toolCallKey{}) }
+func InheritTool(ctx, original context.Context) context.Context {
+	return BindToolCall(Inherit(ctx, original), ToolCall(original))
+}
+
 func Enter(ctx context.Context, runID string, adapter any, input any) (context.Context, *Ticket) {
+	return enter(ctx, runID, adapter, input, nil)
+}
+
+// EnterTool binds only actual ToolChain layers to the original per-attempt
+// authority, not active enclosing Run layers or nested foreign callbacks.
+func EnterTool(ctx context.Context, runID string, adapter any, input any) (context.Context, *Ticket) {
+	return enter(ctx, runID, adapter, input, ToolCall(ctx))
+}
+func enter(ctx context.Context, runID string, adapter any, input, toolCall any) (context.Context, *Ticket) {
 	s, _ := ctx.Value(scopeKey{}).(*Scope)
 	if s == nil {
 		return ctx, nil
@@ -76,9 +122,37 @@ func Enter(ctx context.Context, runID string, adapter any, input any) (context.C
 		return context.WithValue(Bind(ctx, nil), ticketKey{}, (*Ticket)(nil)), nil
 	}
 	raw, err := json.Marshal(input)
-	t := &Ticket{scope: s, adapter: adapter, nonce: uint64(len(s.tickets) + 1), input: sha256.Sum256(raw), invalid: err != nil}
+	t := &Ticket{scope: s, adapter: adapter, toolCall: toolCall, nonce: uint64(len(s.tickets) + 1), input: sha256.Sum256(raw), invalid: err != nil}
 	s.tickets = append(s.tickets, t)
 	return context.WithValue(ctx, ticketKey{}, t), t
+}
+
+// QualifiedToolReturn requires every actually entered layer of this exact
+// Tool attempt to have returned its own trusted concrete receipt. A successful
+// opaque layer is not a no-effect witness. The enclosing Run remains live;
+// its whole-callback completion is still required for Grant retirement.
+func QualifiedToolReturn(ctx context.Context) bool {
+	s, _ := ctx.Value(scopeKey{}).(*Scope)
+	call := ToolCall(ctx)
+	if s == nil || call == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return false
+	}
+	found := false
+	for _, t := range s.tickets {
+		if t.toolCall != call {
+			continue
+		}
+		found = true
+		if t.invalid || !t.returned || !t.receipt || !s.trusted[t.adapter] {
+			return false
+		}
+	}
+	return found
 }
 
 // Record is callable only by audited Runtime implementations, at the end of

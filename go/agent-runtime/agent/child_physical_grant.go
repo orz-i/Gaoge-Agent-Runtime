@@ -83,7 +83,7 @@ func (runner *Runner) withChildPhysicalGrant(ctx context.Context, runID string, 
 	defer stop()
 	latest, loadErr := executionRuntime.Load(settlementCtx, runID)
 	if loadErr != nil || !knownAgentPhysicalSettlement(latest) ||
-		(physicalErr != nil && !scoped.rootCallbacks.terminalFailure.Load().matches(result, latest, physicalErr)) {
+		(physicalErr != nil && !scoped.rootCallbacks.knownReturn.Load().matches(result, latest, physicalErr)) {
 		return result, errors.Join(physicalErr, kernel.ErrChildExecutionBusy, loadErr)
 	}
 	settledProof := featurecontrol.Seal(latest.Run.ID, latest.Run.Revision,
@@ -98,39 +98,26 @@ func (runner *Runner) withChildPhysicalGrant(ctx context.Context, runID string, 
 	return result, physicalErr
 }
 
-// committedAgentFailure is an in-process fact from the original terminal CAS,
-// not a Host-supplied error classification or a new recovery credential.
-// A failed status alone does not prove that the original callback returned.
-type committedAgentFailure struct {
+// committedAgentReturn qualifies only an exact native business failure
+// or no-send yield from the original callback. Neither a Host-supplied error
+// classification nor a clean-looking snapshot supplies this evidence.
+type committedAgentReturn struct {
 	runID    string
 	revision uint64
+	status   kernel.RunStatus
 	cause    error
 }
 
-func (f *committedAgentFailure) matches(result, latest kernel.Snapshot, returned error) bool {
-	if f == nil || f.cause == nil || f.runID == "" || f.revision == 0 ||
-		result.Run.ID != f.runID || latest.Run.ID != f.runID ||
-		result.Run.Revision != f.revision || latest.Run.Revision != f.revision ||
-		result.Run.Status != kernel.RunStatusFailed || latest.Run.Status != kernel.RunStatusFailed {
-		return false
+func (f *committedAgentReturn) matches(result, latest kernel.Snapshot, returned error) bool {
+	return f != nil && f.cause != nil && f.runID != "" && f.revision != 0 &&
+		result.Run.ID == f.runID && latest.Run.ID == f.runID && result.Run.Revision == f.revision && latest.Run.Revision == f.revision &&
+		result.Run.Status == f.status && latest.Run.Status == f.status && sameOriginalToolError(f.cause, returned)
+}
+
+func (r *Runner) noteNativeAdmissionReturn(s kernel.Snapshot, cause error) {
+	if r.rootCallbacks != nil && cause != nil && (s.Run.Status == kernel.RunStatusRunning || s.Run.Status == kernel.RunStatusWaitingInput || s.Run.Status == kernel.RunStatusPausedBudget) && knownAgentPhysicalSettlement(s) {
+		r.rootCallbacks.knownReturn.Store(&committedAgentReturn{runID: s.Run.ID, revision: s.Run.Revision, status: s.Run.Status, cause: cause})
 	}
-	// Bounded middleware may join the original error with nil. Do not
-	// acknowledge another error or an additional failed operation.
-	for returned != nil {
-		if returned == f.cause { //nolint:errorlint // Exact original error identity; errors.Is can accept unrelated joined or forged causes.
-			return true
-		}
-		if joined, ok := returned.(interface{ Unwrap() []error }); ok {
-			causes := joined.Unwrap()
-			if len(causes) != 1 {
-				return false
-			}
-			returned = causes[0]
-		} else {
-			returned = errors.Unwrap(returned)
-		}
-	}
-	return false
 }
 
 // knownAgentPhysicalSettlement validates a persisted Feature state, including
@@ -139,7 +126,7 @@ func (f *committedAgentFailure) matches(result, latest kernel.Snapshot, returned
 func knownAgentPhysicalSettlement(snapshot kernel.Snapshot) bool {
 	state, err := decodeState(snapshot.State)
 	if err != nil || state.ToolDispatchID != "" || state.ToolWait != nil ||
-		len(state.ExternalSignals) != 0 || len(state.DeferredChildren) != 0 {
+		len(state.ExternalSignals) != 0 || len(state.DeferredChildren) != 0 || (state.ToolAdmission != nil && state.ToolAdmission.Phase == toolAdmissionEvaluating) {
 		return false
 	}
 	for _, invocation := range state.ModelInvocations {

@@ -135,12 +135,8 @@ func newGenerationHarnessBackend(t *testing.T, backend string, m *generationMode
 	if err != nil {
 		t.Fatal(err)
 	}
-	verifier, err := shared.VerifiedToolOutcomeVerifier(d)
-	if err != nil {
-		t.Fatal(err)
-	}
 	original, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: m, Catalog: registry, Executor: registry,
-		ToolOutcomeVerifier: verifier,
+		ToolOutcomeVerifier: d,
 		RunMiddleware:       []plugin.RunMiddleware{bounded}, ModelMiddleware: []plugin.ModelMiddleware{bounded}, ToolMiddleware: []plugin.ToolMiddleware{bounded}})
 	if err != nil {
 		t.Fatal(err)

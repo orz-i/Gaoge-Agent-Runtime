@@ -125,12 +125,12 @@ func (runner *Runner) resumeDeferredChildGrantCancellation(
 }
 
 // cleanupReturnedRootChildren uses the already elected cancellation and frozen
-// child routes. Eligibility is an observation, never authority to dispatch:
+// native no-send/child return evidence. Eligibility is an observation, never authority to dispatch:
 // the original cancellation intent and, when configured, cancelled shared
 // budget supply that authority. Unknown or still-running Host callbacks cannot enter this path.
 func (runner *Runner) cleanupReturnedRootChildren(ctx context.Context, turn Turn, intent Item, invocation Invocation, reason string) (attempted bool, outcome error) {
 	native, ok := runner.agent.(*agent.Runner)
-	if !ok || invocation.ParentItemID != "" {
+	if !ok || !native.ObservesKernelRuntime(runner.runtime) || invocation.ParentItemID != "" {
 		return false, nil
 	}
 	current, err := runner.runtime.Load(ctx, invocation.ExecutionRefID)
@@ -152,6 +152,13 @@ func (runner *Runner) cleanupReturnedRootChildren(ctx context.Context, turn Turn
 	if err = runner.recordDeferredChildGrantCancellation(ctx, turn, intent, current.Run.ID); err != nil {
 		return true, err
 	}
+	if scope.RetirementOnly() {
+		// No remaining physical Tool/Child receipt to obtain. Retire the
+		// exact original return first; the existing Cancel successor owns
+		// all ordinary descendant cleanup after its Kernel CAS.
+		_, err = native.ReconcileRootDeferredChildren(ctx, current.Run.ID, current.Run.Revision, scope)
+		return true, err
+	}
 	if _, err = runner.cancelTurnDescendants(ctx, turn.ID, invocation.ID, current.Run.ID, reason); err != nil {
 		return true, err
 	}
@@ -163,6 +170,36 @@ func (runner *Runner) cleanupReturnedRootChildren(ctx context.Context, turn Turn
 	if err != nil || !scope.Matches(after) {
 		return true, errors.Join(ErrConflict, err)
 	}
-	_, err = native.ReconcileRootDeferredChildren(ctx, latest.Run.ID, latest.Run.Revision)
+	_, err = native.ReconcileRootDeferredChildren(ctx, latest.Run.ID, latest.Run.Revision, after)
 	return true, err
+}
+
+// reconcileTerminalRootCancellation closes only an existing exact original
+// native retirement before the elected cancellation projects a terminal Run.
+// Terminal status is not a callback return. A legacy terminal Run without
+// any native grant/retirement keeps its existing projection semantics.
+func (runner *Runner) reconcileTerminalRootCancellation(ctx context.Context, current kernel.Snapshot) error {
+	native, ok := runner.agent.(*agent.Runner)
+	rt, nativeKernel := runner.cancellation.(*kernel.Runtime)
+	if !ok || !nativeKernel || rt != runner.runtime || !native.ObservesKernelRuntime(rt) || current.Run.Kind != agent.RunKind || current.Run.ParentRunID != "" {
+		return nil
+	}
+	if _, err := rt.LookupChildExecution(ctx, current.Run.ID); errors.Is(err, kernel.ErrNotFound) {
+		if _, err = rt.LookupOwnedRetirementForRun(ctx, current.Run.ID); errors.Is(err, kernel.ErrNotFound) {
+			return nil
+		} else if err != nil {
+			return err
+		}
+	} else if err != nil {
+		return err
+	}
+	// Use the same native retirement predicate even on a committed
+	// business failure; a merely pending undispatched Model intent
+	// must not create a different settlement contract for Cancel.
+	scope, err := native.RootDeferredCleanupEligibility(ctx, current.Run.ID, current.Run.Revision)
+	if err != nil || !scope.RetirementOnly() {
+		return errors.Join(agent.ErrRootOutcomeUnknown, err)
+	}
+	_, err = native.ReconcileRootDeferredChildren(ctx, current.Run.ID, current.Run.Revision, scope)
+	return err
 }

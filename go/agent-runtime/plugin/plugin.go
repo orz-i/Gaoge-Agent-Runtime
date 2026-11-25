@@ -310,7 +310,7 @@ func (chain *ToolChain) Invoke(
 		current := chain.middleware[index]
 		downstream := next
 		next = func(callCtx context.Context) (out tools.ExecutionResult, callbackErr error) {
-			layerCtx, ticket := callbackscope.Enter(callCtx, invocation.Run.ID, current, invocation)
+			layerCtx, ticket := callbackscope.EnterTool(callCtx, invocation.Run.ID, current, invocation)
 			lifetime := newNextLifetime()
 			defer func() {
 				lifetime.finish()
@@ -325,7 +325,7 @@ func (chain *ToolChain) Invoke(
 					return tools.ExecutionResult{}, ErrNextAlreadyCalled
 				}
 				defer lifetime.leave()
-				return downstream(callbackscope.Inherit(nextCtx, layerCtx))
+				return downstream(callbackscope.InheritTool(nextCtx, layerCtx))
 			}))
 		}
 	}

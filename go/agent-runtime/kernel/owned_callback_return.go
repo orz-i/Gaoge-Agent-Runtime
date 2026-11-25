@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"sort"
+	"strings"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
 )
@@ -37,9 +39,12 @@ func (c OwnedCallbackCustody) permitsControl() bool {
 type OwnedPhysicalCallbackOutcome struct {
 	// The original return hash seals the ledger identity while the Tool is unresolved.
 	ToolBudgetScope string `json:",omitempty"`
-	HostCompleted   bool
-	LeaseOwned      bool
-	ControlCustody  OwnedCallbackCustody `json:",omitempty"`
+	// ToolReturns identifies the outstanding Call obligations of this
+	// original callback independently of its control/approval custody.
+	ToolReturns    OwnedToolReturns `json:",omitempty"`
+	HostCompleted  bool
+	LeaseOwned     bool
+	ControlCustody OwnedCallbackCustody `json:",omitempty"`
 }
 type OwnedPhysicalCallbackCompletion struct {
 	GrantID          string
@@ -48,6 +53,7 @@ type OwnedPhysicalCallbackCompletion struct {
 	HostCompleted    bool
 	LeaseOwned       bool
 	ControlCustody   OwnedCallbackCustody `json:",omitempty"`
+	ToolReturns      OwnedToolReturns     `json:",omitempty"`
 }
 
 // OwnedPhysicalCallbackReturnPayload is a pure canonical proof payload.
@@ -66,8 +72,107 @@ func OwnedPhysicalCallbackReturnPayload(s Snapshot, o OwnedPhysicalCallbackOutco
 
 type OwnedPhysicalCallbackReturn struct{ proof *featurecontrol.Proof }
 
+// OwnedToolReturn binds one outstanding Call to its original reservation
+// and/or approval. ReceiptDigest identifies a settled ledger outcome;
+// OwnerResultDigest identifies a qualified committed owner result from the
+// original callback, independently of whether a shared ledger was selected.
+type OwnedToolReturn struct {
+	CallID            string
+	RequestDigest     string
+	LedgerID          string
+	ReceiptDigest     string `json:",omitempty"`
+	ApprovalDigest    string `json:",omitempty"`
+	OwnerResultDigest string `json:",omitempty"`
+	// PendingKind records an actual returned pending disposition, not an
+	// inferred external outcome. Empty means no qualified pending return.
+	PendingKind string `json:",omitempty"`
+	// Unsent attests that the original native callback proved no physical
+	// Tool dispatch: either no chain entry or an exact returned first-party
+	// dispatch denial before Next. It is not a Tool result receipt.
+	Unsent bool `json:",omitempty"`
+}
+
+// OwnedToolReturns is a canonical, comparable encoding of a bounded ordered
+// collection. It travels with the original callback return and retirement,
+// not a new execution authority or a second ledger of business results.
+type OwnedToolReturns string
+
+func validToolReceiptDigest(value string) bool {
+	raw, err := hex.DecodeString(value)
+	return err == nil && len(raw) == sha256.Size && hex.EncodeToString(raw) == value
+}
+
+func NewOwnedToolReturns(bindings []OwnedToolReturn) (OwnedToolReturns, error) {
+	if len(bindings) == 0 {
+		return "", nil
+	}
+	bindings = append([]OwnedToolReturn(nil), bindings...)
+	sort.Slice(bindings, func(i, j int) bool { return bindings[i].CallID < bindings[j].CallID })
+	for i, b := range bindings {
+		if strings.TrimSpace(b.CallID) == "" || b.CallID != strings.TrimSpace(b.CallID) ||
+			b.LedgerID != strings.TrimSpace(b.LedgerID) || (b.LedgerID == "" && b.ApprovalDigest == "" && !b.Unsent) ||
+			!validToolReceiptDigest(b.RequestDigest) ||
+			(b.ReceiptDigest != "" && (b.LedgerID == "" || !validToolReceiptDigest(b.ReceiptDigest))) ||
+			(b.ApprovalDigest != "" && !validToolReceiptDigest(b.ApprovalDigest)) ||
+			(b.OwnerResultDigest != "" && (b.ApprovalDigest == "" || !validToolReceiptDigest(b.OwnerResultDigest))) ||
+			(b.Unsent && (b.ReceiptDigest != "" || b.OwnerResultDigest != "" || b.PendingKind != "")) ||
+			(b.PendingKind != "" && (b.ReceiptDigest != "" || b.OwnerResultDigest != "" || (b.PendingKind != "pending" && b.PendingKind != "scheduled" && b.PendingKind != "child_terminal" && b.PendingKind != "external_result"))) ||
+			(i > 0 && bindings[i-1].CallID == b.CallID) {
+			return "", ErrInvalidInput
+		}
+	}
+	raw, err := json.Marshal(bindings)
+	return OwnedToolReturns(raw), err
+}
+
+func (r OwnedToolReturns) Bindings() ([]OwnedToolReturn, error) {
+	if r == "" {
+		return nil, nil
+	}
+	var bindings []OwnedToolReturn
+	if err := json.Unmarshal([]byte(r), &bindings); err != nil {
+		return nil, err
+	}
+	canonical, err := NewOwnedToolReturns(bindings)
+	if err != nil || canonical != r {
+		return nil, ErrInvalidInput
+	}
+	return bindings, nil
+}
+
+func (r OwnedToolReturns) Valid() bool {
+	_, err := r.Bindings()
+	return err == nil
+}
+
+func (r OwnedToolReturns) Find(callID string) (OwnedToolReturn, bool, error) {
+	bindings, err := r.Bindings()
+	if err != nil {
+		return OwnedToolReturn{}, false, err
+	}
+	for _, b := range bindings {
+		if b.CallID == callID {
+			return b, true, nil
+		}
+	}
+	return OwnedToolReturn{}, false, nil
+}
+
+// MatchesReturnSnapshot verifies the immutable whole-return evidence at its
+// original revision. Later recovery CASes retain the same Store-owned
+// completion, with independently matched Call bindings.
+func (c OwnedPhysicalCallbackCompletion) MatchesReturnSnapshot(s Snapshot) bool {
+	if !c.HostCompleted || c.ReturnRevision != s.Run.Revision || !c.ToolReturns.Valid() ||
+		c.ControlCustody == OwnedToolBudgetReturn {
+		return false
+	}
+	o := OwnedPhysicalCallbackOutcome{HostCompleted: c.HostCompleted, LeaseOwned: c.LeaseOwned, ControlCustody: c.ControlCustody, ToolReturns: c.ToolReturns}
+	return ManagedDigest(OwnedPhysicalCallbackReturnPayload(s, o)) == c.ReturnSourceHash
+}
+
 func (p OwnedPhysicalCallbackReturn) Matches(g ChildExecutionGrant, s Snapshot, o OwnedPhysicalCallbackOutcome) bool {
 	return o.ControlCustody.Valid() && (o.ControlCustody == OwnedToolBudgetReturn) == (o.ToolBudgetScope != "") &&
+		o.ToolReturns.Valid() && (o.ToolReturns == "" || (o.HostCompleted && o.ToolBudgetScope == "" && o.ControlCustody != OwnedCustodyPrepared)) &&
 		(o.ControlCustody != OwnedCustodyPrepared || g.AdmissionOperation == "prepare") &&
 		g.IsOwned() && g.ID != "" && g.ChildRunID == s.Run.ID &&
 		s.Run.Kind == "agent" && s.Run.ParentRunID == "" && s.Run.Revision >= g.ExpectedRevision &&
@@ -78,7 +183,7 @@ func (p OwnedPhysicalCallbackReturn) Completion(g ChildExecutionGrant, s Snapsho
 		return OwnedPhysicalCallbackCompletion{}
 	}
 	hash := sha256.Sum256(OwnedPhysicalCallbackReturnPayload(s, o))
-	return OwnedPhysicalCallbackCompletion{GrantID: g.ID, ReturnRevision: s.Run.Revision, ReturnSourceHash: hex.EncodeToString(hash[:]), HostCompleted: o.HostCompleted, LeaseOwned: o.LeaseOwned, ControlCustody: o.ControlCustody}
+	return OwnedPhysicalCallbackCompletion{GrantID: g.ID, ReturnRevision: s.Run.Revision, ReturnSourceHash: hex.EncodeToString(hash[:]), HostCompleted: o.HostCompleted, LeaseOwned: o.LeaseOwned, ControlCustody: o.ControlCustody, ToolReturns: o.ToolReturns}
 }
 func (r *Runtime) RecordOwnedPhysicalCallbackReturn(ctx context.Context, g ChildExecutionGrant, revision uint64, o OwnedPhysicalCallbackOutcome, proof *featurecontrol.Proof) error {
 	if r == nil || ctx == nil || !g.IsOwned() || revision == 0 {

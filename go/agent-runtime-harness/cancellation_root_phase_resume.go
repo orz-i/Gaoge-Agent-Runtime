@@ -28,7 +28,8 @@ func (runner *Runner) nativeRootCancellationReady(ctx context.Context, turn Turn
 	if owner.VerifiedDeferredRootControl(ctx, runner.runtime, current) {
 		return true
 	}
-	// A retained child-terminal grant proves no descendant outcome by itself.
+	// The same returned-root proof covers outstanding receipts, already
+	// consumed obligations awaiting retirement, and exact pending ACK.
 	// Only its actual returned original callback, safe complete history, and
 	// first-party typed receipt-recovery eligibility may re-enter the native
 	// Cancel/cleanup CAS. It may still reject an unsettled child below.

@@ -7,7 +7,7 @@ import (
 )
 
 func schemaV7DDL() []string {
-	out := append([]string(nil), schemaDDL...)
+	out := schemaV8DDL()
 	for i, ddl := range out {
 		if strings.HasPrefix(ddl, "CREATE TABLE runtime_runs ") {
 			out[i] = strings.Replace(ddl, ", execution_physical_epoch INTEGER NOT NULL DEFAULT 0)", ")", 1)
@@ -39,7 +39,7 @@ func (s *Store) migrateV7ToV8(ctx context.Context) error {
 		return err
 	}
 	if version == 8 {
-		return validateSchemaDDL(ctx, tx, schemaDDL)
+		return validateSchemaDDL(ctx, tx, schemaV8DDL())
 	}
 	if version != 7 {
 		return fmt.Errorf("%w: migration requires exact v7, got %d", ErrUnsupportedSchema, version)
@@ -64,7 +64,7 @@ func (s *Store) migrateV7ToV8(ctx context.Context) error {
 	if _, err = tx.ExecContext(ctx, "PRAGMA user_version=8"); err != nil {
 		return err
 	}
-	if err = validateSchemaDDL(ctx, tx, schemaDDL); err != nil {
+	if err = validateSchemaDDL(ctx, tx, schemaV8DDL()); err != nil {
 		return err
 	}
 	return conflictOrDatabaseError(tx.Commit())

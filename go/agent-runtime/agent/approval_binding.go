@@ -21,6 +21,84 @@ type pendingToolApproval struct {
 	PayloadDigest   string `json:"payloadDigest"`
 }
 
+// toolAdmission is the durable pre-dispatch authority for exactly one
+// unsent/current Call. Evaluating is a fence, required is a restriction,
+// and authorized is the committed decision (not physical permission).
+type toolAdmission struct {
+	CallID          string                 `json:"callID"`
+	CallDigest      string                 `json:"callDigest"`
+	Phase           string                 `json:"phase"`
+	ApprovalDigest  string                 `json:"approvalDigest,omitempty"`
+	ApprovalBounded bool                   `json:"approvalBounded,omitempty"`
+	BudgetBound     bool                   `json:"budgetBound,omitempty"`
+	LedgerID        string                 `json:"ledgerID,omitempty"`
+	Unsent          *unsentToolDisposition `json:"unsent,omitempty"`
+}
+
+const (
+	toolAdmissionEvaluating = "evaluating"
+	toolAdmissionRequired   = "required"
+	toolAdmissionAuthorized = "authorized"
+	toolAdmissionCapacity   = "awaiting_capacity"
+	toolAdmissionUnsent     = "unsent"
+)
+
+func newToolAdmission(call tools.Call, phase string) *toolAdmission {
+	return &toolAdmission{CallID: call.ID, CallDigest: approvalCallKey(call), Phase: phase}
+}
+func (a *toolAdmission) matches(call tools.Call) bool {
+	return a != nil && a.CallID != "" && a.CallID == call.ID && validBindingFingerprint(a.CallDigest) && a.CallDigest == approvalCallKey(call)
+}
+func (a *toolAdmission) authorized(call tools.Call) bool {
+	return a.matches(call) && (a.Phase == toolAdmissionAuthorized || a.Phase == toolAdmissionCapacity)
+}
+func validToolAdmission(state runState) bool {
+	a := state.ToolAdmission
+	if a == nil {
+		return true
+	}
+	positive := a.Phase == toolAdmissionAuthorized || a.Phase == toolAdmissionCapacity
+	unsent := a.Phase == toolAdmissionUnsent
+	if (!positive && !unsent && a.Phase != toolAdmissionEvaluating && a.Phase != toolAdmissionRequired) ||
+		(!positive && !unsent && (a.ApprovalDigest != "" || a.ApprovalBounded || a.BudgetBound || state.ToolDispatchID == a.CallID)) ||
+		(unsent != (a.Unsent != nil)) || (unsent && (!a.Unsent.valid(a) || state.ToolDispatchID == a.CallID)) ||
+		(a.Phase == toolAdmissionCapacity && (!a.BudgetBound || a.LedgerID == "" || state.ToolDispatchID == a.CallID)) ||
+		(a.ApprovalDigest != "" && !validBindingFingerprint(a.ApprovalDigest)) || (a.ApprovalBounded && a.ApprovalDigest == "") ||
+		(!a.BudgetBound && a.LedgerID != "") || a.LedgerID != strings.TrimSpace(a.LedgerID) {
+		return false
+	}
+
+	if state.PendingApproval != nil && ((!positive && !unsent) || state.PendingApproval.CallID != a.CallID) {
+		return false
+	}
+	matches := 0
+	for _, call := range state.PendingCalls {
+		if call.ID == a.CallID {
+			if !a.matches(call) {
+				return false
+			}
+			matches++
+		}
+	}
+	for _, child := range state.DeferredChildren {
+		if child.Call.ID == a.CallID {
+			return false
+		}
+	}
+	for _, receipt := range state.RecoveredTools {
+		if receipt.Call.ID == a.CallID {
+			return false
+		}
+	}
+	return matches == 1
+}
+
+func (s *runState) clearToolAdmission(callID string) {
+	if s.ToolAdmission != nil && s.ToolAdmission.CallID == callID {
+		s.ToolAdmission = nil
+	}
+}
+
 func newPendingToolApproval(checkpoint *kernel.Checkpoint, call tools.Call) (*pendingToolApproval, error) {
 	if checkpoint == nil || strings.TrimSpace(checkpoint.ID) == "" ||
 		strings.TrimSpace(call.ID) == "" || strings.TrimSpace(call.ToolKey) == "" ||

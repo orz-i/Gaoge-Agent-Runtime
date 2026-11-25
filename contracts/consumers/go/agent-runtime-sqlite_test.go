@@ -19,10 +19,11 @@ import (
 // GOWORK=off, first against the local coordinated cohort and then against
 // immutable published module tags with NO filesystem replace directives.
 var (
-	_ kernel.Store          = (*sqlite.Store)(nil)
-	_ kernel.ExecutionStore = (*sqlite.Store)(nil)
-	_ kernel.ControlStore   = (*sqlite.Store)(nil)
-	_ runrelation.Store     = (*sqlite.RunRelationStore)(nil)
+	_ kernel.Store                    = (*sqlite.Store)(nil)
+	_ kernel.ExecutionStore           = (*sqlite.Store)(nil)
+	_ kernel.ControlStore             = (*sqlite.Store)(nil)
+	_ runrelation.Store               = (*sqlite.RunRelationStore)(nil)
+	_ runrelation.ReconciliationPager = (*sqlite.RunRelationStore)(nil)
 )
 
 func TestStandaloneSQLiteConsumerPersistsSnapshotAndRelation(t *testing.T) {
@@ -73,6 +74,10 @@ func TestStandaloneSQLiteConsumerPersistsSnapshotAndRelation(t *testing.T) {
 		t.Fatalf("standalone reopened Run: %+v err=%v", loaded, err)
 	}
 	storeRelations := sqlite.NewRunRelationStore(store)
+	page, err := storeRelations.ListReconcilePage(ctx, "", 1)
+	if err != nil || page.NextCursor != relation.ChildRunID || len(page.Candidates) != 0 {
+		t.Fatal("public bounded relation pager", page, err)
+	}
 	got, err := storeRelations.GetByChild(ctx, relation.ChildRunID)
 	if err != nil || !runrelation.EqualIdentity(got, first) || !got.CreatedAt.Equal(first.CreatedAt) {
 		t.Fatalf("standalone reopened relation: %+v err=%v", got, err)

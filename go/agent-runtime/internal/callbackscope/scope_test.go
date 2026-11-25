@@ -146,3 +146,31 @@ func TestCompletedScopeProofBindsFullOriginalSource(t *testing.T) {
 		}
 	}
 }
+
+func TestQualifiedToolReturnIsExactAttemptAndRequiresEveryEnteredReceipt(t *testing.T) {
+	trusted, opaque := &adapter{1}, &adapter{2}
+	s := testScope(trusted)
+	root := Bind(t.Context(), s)
+	_, runTicket := Enter(root, "run", trusted, "run")
+	first := BindToolCall(root, &adapter{3})
+	layer, ticket := EnterTool(first, "run", trusted, "original")
+	if !Record(layer, trusted, "budget.tool.admission_denied", "original native fact") || QualifiedToolReturn(first) {
+		t.Fatal("live layer treated as returned")
+	}
+	Returned(ticket, errors.New("original denial"))
+	if !QualifiedToolReturn(first) || s.Complete() {
+		t.Fatal("exact tool attempt and enclosing lifetime confused")
+	}
+	second := BindToolCall(root, &adapter{4})
+	_, unknown := EnterTool(second, "run", opaque, "second")
+	Returned(unknown, nil)
+	if QualifiedToolReturn(second) || !QualifiedToolReturn(first) {
+		t.Fatal("opaque or foreign tool attempt borrowed receipt")
+	}
+	_, missing := EnterTool(first, "run", opaque, "another entered layer")
+	Returned(missing, nil)
+	if QualifiedToolReturn(first) {
+		t.Fatal("successful opaque tool layer qualified no-send")
+	}
+	Returned(runTicket, nil)
+}

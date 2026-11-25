@@ -61,22 +61,24 @@ func (s *KernelStore) verifyRootSettlement(ctx context.Context, expected kernel.
 			}
 			receipts = append(receipts, receipt)
 		}
+		var active int64
+		if err = tx.Model(&models.KernelChildEffectGrantRecord{}).
+			Where("parent_run_id = ? OR child_run_id = ?", expected.Run.ID, expected.Run.ID).Count(&active).Error; err != nil {
+			return translateKernelError(err)
+		}
 		if check == nil {
 			var roots []models.KernelChildEffectGrantRecord
 			if err = tx.Where("child_run_id = ?", expected.Run.ID).Limit(2).Find(&roots).Error; err != nil {
 				return translateKernelError(err)
 			}
-			if len(roots) != 1 || roots[0].ParentRunID != expected.Run.ID {
+			var grant kernel.ChildExecutionGrant
+			var completion kernel.OwnedPhysicalCallbackCompletion
+			if len(roots) == 1 && roots[0].ParentRunID == expected.Run.ID {
+				grant, completion = pgPhysicalGrant(roots[0]), pgCallbackCompletion(roots[0])
+			} else if len(roots) != 0 {
 				return kernel.ErrExecutionConflict
 			}
-			return kernel.VerifyReturnedRootSettlementFacts(expected, current, run.ExecutionEpoch, run.ExecutionPhysicalEpoch,
-				pgManagedLease(run), pgPhysicalGrant(roots[0]), pgCallbackCompletion(roots[0]), receipts)
-		}
-		var active int64
-		if err = tx.Model(&models.KernelChildEffectGrantRecord{}).
-			Where("parent_run_id = ? OR child_run_id = ?", expected.Run.ID, expected.Run.ID).
-			Count(&active).Error; err != nil {
-			return translateKernelError(err)
+			return kernel.VerifyReturnedRootSettlementFacts(expected, current, run.ExecutionEpoch, run.ExecutionPhysicalEpoch, pgManagedLease(run), grant, completion, receipts, active != 0)
 		}
 		lease := pgManagedLease(run)
 		now, err := pgStoreNow(tx)

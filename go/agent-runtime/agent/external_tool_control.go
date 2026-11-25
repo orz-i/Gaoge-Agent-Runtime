@@ -119,7 +119,14 @@ func (r *Runner) externalControlWait(ctx context.Context, revision uint64, c Ext
 	if completion.ControlCustody != kernel.OwnedCustodyScoped && completion.ControlCustody != kernel.OwnedBoundedApprovalReturn {
 		return out, ErrRootOutcomeUnknown
 	}
-	outcome := kernel.OwnedPhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: completion.LeaseOwned, ControlCustody: completion.ControlCustody}
+	outcome := kernel.OwnedPhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: completion.LeaseOwned, ControlCustody: completion.ControlCustody, ToolReturns: completion.ToolReturns}
+	if binding, found, bindingErr := originalCallReturn(s, completion, out.request); bindingErr != nil {
+		return out, errors.Join(ErrRootOutcomeUnknown, bindingErr)
+	} else if found && (binding.ReceiptDigest != "" ||
+		(binding.LedgerID != "" && (state.ExternalToolHold == nil || state.ExternalToolHold.LedgerID != binding.LedgerID)) ||
+		(binding.LedgerID == "" && state.ExternalToolHold != nil)) {
+		return out, ErrToolReceiptMismatch
+	}
 	out.returnHash = kernel.ManagedDigest(kernel.OwnedPhysicalCallbackReturnPayload(s, outcome))
 	if out.returnHash != completion.ReturnSourceHash {
 		return out, ErrRootOutcomeUnknown
@@ -163,6 +170,7 @@ func (r *Runner) ReconcileExternalToolNoEffectForControl(ctx context.Context, re
 	}
 	state.ToolWait, state.ExternalToolHold = nil, nil
 	state.ToolDispatchID = ""
+	state.clearToolAdmission(original.request.Call.ID)
 	state.PendingCalls = remainingPendingCalls(state)
 	state.ExternalToolCancellation = &externalToolCancellation{Receipt: receipt, Call: tools.CloneCall(original.request.Call), GrantID: original.grant.ID, SourceRevision: revision, SourceHash: original.returnHash}
 	next, err := r.applyExternalControlState(ctx, original.snapshot, original.grant, state)

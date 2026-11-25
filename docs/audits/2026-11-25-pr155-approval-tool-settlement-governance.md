@@ -1,0 +1,23 @@
+# PR 155 — Original Approval evidence and single Tool settlement owner
+
+Base: fixed PR HEAD `3c6c1173` after the independent audit. Local governance evidence, not merge approval.
+
+## Protocol and ownership
+
+- The actual approval-policy return or already resolved, exactly bound checkpoint supplies one original Call approval digest. The executing callback records the exact independent committed owner result digest before attempting the Agent result CAS. The existing Call return collection retains these proofs for unresolved Calls, even without a shared ledger. The same grant-bound evidence is staged by receipt-only recovery and used for the normal consumption reducer; a replacement policy is not consulted to reconstruct authority.
+- Scoped, observation-only and bounded-approval Grant custody retain their original distinctions. A typed wait proves only its original approval, not owner COMMIT. Independent owner verification covers staged original results as well as already-consumed results: zero local Tool usage cannot certify a staged physical result. An opaque approval or missing owner receipt does not acquire bounded control.
+- The standard Harness Session now passes the original read-only Tool verifier directly. Remove `BudgetAuthority.VerifiedToolOutcomeVerifier` and its duplicate receipt type. The selected native Tool Budget adapter alone resolves, validates, settles and projects the original reservation. Its actual ledger scope is recorded before reservation/dispatch, so an observer cannot remove the original Tool accounting adapter or pretend a budget wait was unmetered.
+- Newly returned held bindings use the exact original-byte native outcome codec. A changed original result after settlement and before Agent CAS is rejected even if the JSON value is identical. A newly bound Call cannot adopt an unsealed verifier-owned receipt. Historical explicit held-custody reads remain conservative; they cannot upgrade old evidence. External no-effect control remains an independently verified zero-charge native settlement.
+- Use the existing `callback_tool_returns` field in SQLite v9 and PostgreSQL; no additional table, column, schema version, or custody enum. Older in-flight draft/legacy executions must not be promoted by the new reader.
+
+## Local evidence
+
+- Seven shared approval modes: normal, bounded approval + Tool result CAS cut, explicit approved checkpoint + Tool result CAS cut, observation-only policy, unmetered approval recovery, held approved child, and recovery CAS acknowledgement loss. Exact owner evidence is independently observed at the staged and consumed boundaries; altered original bytes fail. Original approval and Tool execute once, successor Model receives the original bytes.
+- Actual Harness held recovery with native ledger CAS committed and Agent receipt CAS cut: typed child wait, scheduled wait and pending without descriptor. Changed original bytes and removal of the original settlement adapter are refused; exact receipt replay completes with one charge and one physical Tool.
+- Actual Harness deferred Named Agent with bounded approval: original child result CAS cut, native recovery and retirement, independent owner verification, actual child RefreshInvocation, parent receipt consumption, completed Turn. One original approval and child Tool.
+- Shared receipt/approval matrix passed against Memory, native SQLite, GORM, independently reopened encrypted SQLite Kernel and Harness ledger, and independent real PostgreSQL Kernel and Harness ledger schemas/pools (new `TestRealPostgresToolApprovalAndLedgerReopen`, 23 leaf cases). The latter closes the previous real-PG-plus-Memory-ledger limitation for this matrix.
+- Agent, Kernel, Plugin, CallbackScope, Continuation, Harness and Harness PostgreSQL package tests; targeted Race and v8-to-v9 migration/reconciliation; workspace fmt/tidy checks. Independent final audit and required CI remain mandatory.
+
+## Boundaries
+
+This batch removes a public pre-stable Harness API; downstream callers must use the direct verifier and selected native adapter. No production database migration or downstream code modification. Historical or incomplete whole callback returns remain fenced, and approval checkpoint creation/decision acknowledgement-loss permutations beyond the tested approved Tool result and recovery CAS cuts are not newly certified. A rejected/no-effect Tool under an approval policy is not promoted into independent committed-owner observation/control. Queue namespace replacement/AOF crash and complete Gaoge integration are outside this batch. No commit, push, or merge was performed.
