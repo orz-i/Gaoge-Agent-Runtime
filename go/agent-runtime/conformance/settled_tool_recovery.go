@@ -53,6 +53,7 @@ func RunSettledToolRecovery(t *testing.T, factory func(*testing.T) (kernel.Store
 	t.Run("timeline-consumption", func(t *testing.T) { toolTimelineConsumption(t, factory, ledgerFactory) })
 	t.Run("approval-recovery", func(t *testing.T) { originalToolApprovalRecovery(t, factory, ledgerFactory) })
 	t.Run("batch-boundary", func(t *testing.T) { toolBatchBoundary(t, factory, ledgerFactory) })
+	t.Run("capacity-admission", func(t *testing.T) { toolCapacityAdmission(t, factory, ledgerFactory) })
 	for _, variant := range []string{"committed", "strict-rejection", "allow-completion", "foreign-ledger", "changed-receipt", "opaque-callback", "lost-recovery-ack"} {
 		t.Run(variant, func(t *testing.T) {
 			ctx := t.Context()

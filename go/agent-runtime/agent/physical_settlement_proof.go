@@ -31,7 +31,7 @@ func TerminalPhysicalEffectsSettled(snapshot kernel.Snapshot) bool {
 	}
 	state, err := decodeState(snapshot.State)
 	if err != nil || state.ToolDispatchID != "" || state.ToolWait != nil ||
-		len(state.ExternalSignals) != 0 || len(state.DeferredChildren) != 0 {
+		len(state.ExternalSignals) != 0 || len(state.DeferredChildren) != 0 || (state.ToolAdmission != nil && state.ToolAdmission.Phase == toolAdmissionEvaluating) {
 		return false
 	}
 	for _, invocation := range state.ModelInvocations {

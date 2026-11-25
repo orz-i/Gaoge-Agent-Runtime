@@ -35,12 +35,13 @@ func (m *batchBoundaryModel) Generate(_ context.Context, q model.Request) (model
 
 type batchBoundaryFault struct {
 	*ea1AgentReceiptFault
-	after bool
-	hits  int
+	after      bool
+	persistent bool
+	hits       int
 }
 
 func (s *batchBoundaryFault) ApplyExecution(ctx context.Context, l kernel.ExecutionLease, r uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
-	if s.hits == 0 && bytes.Contains(m.Record.State, []byte(`"requiredApproval":`)) {
+	if (s.hits == 0 || s.persistent) && bytes.Contains(m.Record.State, []byte(`"phase":"required"`)) {
 		for _, ev := range m.Events {
 			if ev.Type == agent.EventToolPending && ev.Message == "child_batch" {
 				s.hits++
@@ -60,7 +61,7 @@ func (s *batchBoundaryFault) ApplyExecution(ctx context.Context, l kernel.Execut
 // local allowance pause. With no boundary, independent children retain their
 // original parallel admission. These are real store/reopen paths.
 func toolBatchBoundary(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store), ledgerFactory func(*testing.T) (budget.LedgerStore, func() budget.LedgerStore)) {
-	for _, mode := range []string{"approval-approve", "approval-reject", "approval-frontier-before", "approval-frontier-ack", "allowance", "parallel"} {
+	for _, mode := range []string{"approval-approve", "approval-reject", "approval-frontier-before", "approval-frontier-ack", "approval-frontier-persistent", "allowance", "parallel"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx := t.Context()
 			backing, peer, reopen := factory(t)
@@ -135,8 +136,8 @@ func toolBatchBoundary(t *testing.T, factory func(*testing.T) (kernel.Store, ker
 			}
 			var fault *batchBoundaryFault
 			initial := backing
-			if mode == "approval-frontier-before" || mode == "approval-frontier-ack" {
-				fault = &batchBoundaryFault{ea1AgentReceiptFault: &ea1AgentReceiptFault{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ControlStore: backing.(kernel.ControlStore), ChildExecutionStore: backing.(kernel.ChildExecutionStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), OwnedPhysicalExecutionStore: backing.(kernel.OwnedPhysicalExecutionStore), injected: errors.New("batch frontier commit fault")}, after: mode == "approval-frontier-ack"}
+			if mode == "approval-frontier-before" || mode == "approval-frontier-ack" || mode == "approval-frontier-persistent" {
+				fault = &batchBoundaryFault{ea1AgentReceiptFault: &ea1AgentReceiptFault{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ControlStore: backing.(kernel.ControlStore), ChildExecutionStore: backing.(kernel.ChildExecutionStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), OwnedPhysicalExecutionStore: backing.(kernel.OwnedPhysicalExecutionStore), injected: errors.New("batch frontier commit fault")}, after: mode == "approval-frontier-ack", persistent: mode == "approval-frontier-persistent"}
 				initial = fault
 			}
 			rt := ea1StartRuntime(t, initial)
@@ -146,6 +147,45 @@ func toolBatchBoundary(t *testing.T, factory func(*testing.T) (kernel.Store, ker
 				req.CallAllowance = &agent.CallAllowance{ToolCalls: 2}
 			}
 			started, e := r.StartRun(ctx, req)
+			if mode == "approval-frontier-persistent" {
+				if !errors.Is(e, fault.injected) || fault.hits != 2 || physical["child-a"] != 1 || physical["child-b"] != 1 || physical["next-call"] != 0 || policies["next-call"] != 1 {
+					t.Fatal("persistent write fault not reached", e, fault.hits, physical, policies)
+				}
+				before, e := observer.Load(ctx, req.ID)
+				if e != nil {
+					t.Fatal(e)
+				}
+				g, e := observer.LookupChildExecution(ctx, req.ID)
+				if e != nil {
+					t.Fatal(e)
+				}
+				c, e := observer.LookupOwnedPhysicalCallbackReturn(ctx, g)
+				if e != nil || c.HostCompleted || !bytes.Contains(before.State, []byte(`"phase":"evaluating"`)) {
+					t.Fatal("uncommitted policy obtained completed custody", c, e)
+				}
+				for _, child := range children {
+					if _, e = observer.Apply(ctx, child.Run.ID, child.Run.Revision, kernel.Mutation{Status: kernel.RunStatusCompleted, State: child.State, Result: &kernel.Result{ContentType: "application/json", Content: json.RawMessage("true")}}); e != nil {
+						t.Fatal(e)
+					}
+				}
+				rt = ea1StartRuntime(t, reopen())
+				l := reopenLedger()
+				r = makeRunner(rt, l, false)
+				if _, e = r.ReconcileRootDeferredChildren(ctx, req.ID, before.Run.Revision); !errors.Is(e, agent.ErrRootOutcomeUnknown) {
+					t.Fatal("unknown original authorization allowed child cleanup", e)
+				}
+				if _, e = r.Resume(ctx, req.ID, before.Run.Revision); !errors.Is(e, agent.ErrApprovalRequired) {
+					t.Fatal("unknown original authorization was bypassed", e)
+				}
+				if e = r.ReconcileRootPhysicalExecution(ctx, req.ID); !errors.Is(e, agent.ErrRootOutcomeUnknown) {
+					t.Fatal("unknown authorization retired", e)
+				}
+				after, e := rt.Load(ctx, req.ID)
+				if e != nil || !reflect.DeepEqual(after, before) || physical["next-call"] != 0 || len(m.requests) != 1 || len(reads) != 0 {
+					t.Fatal("replacement changed original unresolved authority", e, physical, reads)
+				}
+				return
+			}
 			if e != nil || started.Run.Status != kernel.RunStatusRunning || started.Checkpoint != nil || physical["child-a"] != 1 || physical["child-b"] != 1 || len(m.requests) != 1 {
 				t.Fatal("batch did not reach original physical frontier", e, started.Run.Status, physical)
 			}

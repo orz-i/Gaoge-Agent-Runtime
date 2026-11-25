@@ -2,14 +2,13 @@ package agent
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"strings"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/callbackscope"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
@@ -30,17 +29,62 @@ type BoundedBudgetToolPorts interface {
 	ToolReservationActive(plugin.ToolInvocation) bool
 }
 
+// toolBudgetAdmission is an in-process ticket for one already reserved Call.
+// The durable Agent admission and ledger are the authorities; the ticket
+// merely prevents the middleware from resolving or reserving a second scope.
+type toolBudgetAdmission struct {
+	adapter *BoundedBudgetAdapter
+	request tools.ExecutionRequest
+	ledger  budget.Ledger
+}
+
+// A native capacity denial is not a provider result or a projection error.
+type toolCapacityDenial struct{ cause error }
+
+func (e toolCapacityDenial) Error() string { return e.cause.Error() }
+func (e toolCapacityDenial) Unwrap() error { return e.cause }
+
+func (a *BoundedBudgetAdapter) reserveTool(ctx context.Context, inv plugin.ToolInvocation, l budget.Ledger) (budget.Ledger, error) {
+	ports, ok := a.ports.(BoundedBudgetToolPorts)
+	if !ok {
+		return l, ErrInvalidRequest
+	}
+	if l.ID == "" {
+		return l, nil
+	}
+	res := budget.Reservation{ID: "tool:" + inv.Run.ID + ":" + inv.Request.Call.ID, RunID: inv.Run.ID, RequestHash: kernel.ManagedDigest(inv.Request), Requested: budget.Usage{ToolCalls: 1}}
+	l, err := a.coordinator.Reserve(ctx, l.ID, res, ports.ToolReservationActive(inv))
+	if projectErr := a.ports.Project(ctx, l); projectErr != nil {
+		return l, projectErr
+	}
+	if errors.Is(err, budget.ErrWaiting) || errors.Is(err, budget.ErrExhausted) {
+		return l, toolCapacityDenial{cause: err}
+	}
+	return l, err
+}
+
 func (a *BoundedBudgetAdapter) Tool(ctx context.Context, inv plugin.ToolInvocation, next plugin.ToolNext) (tools.ExecutionResult, error) {
 	if inv.Run.ID == "" || inv.Request.RunID != inv.Run.ID || inv.Request.Call.ID == "" {
 		return tools.ExecutionResult{}, ErrInvalidRequest
 	}
-	ports, ok := a.ports.(BoundedBudgetToolPorts)
-	if !ok {
-		return tools.ExecutionResult{}, ErrInvalidRequest
-	}
-	l, err := a.bind(ctx, inv.Run.ID)
-	if err != nil {
-		return tools.ExecutionResult{}, err
+	var l budget.Ledger
+	var err error
+	authority := toolAuthority(ctx)
+	if authority != nil {
+		ticket := authority.budget
+		if ticket == nil || ticket.adapter != a || !sameRecoveredCall(ticket.request.Call, inv.Request.Call) || ticket.request.RunID != inv.Request.RunID {
+			return tools.ExecutionResult{}, ErrToolReceiptMismatch
+		}
+		l = ticket.ledger
+	} else {
+		// Standalone direct use shares the exact same reservation primitive.
+		l, err = a.bind(ctx, inv.Run.ID)
+		if err == nil {
+			l, err = a.reserveTool(ctx, inv, l)
+		}
+		if err != nil {
+			return tools.ExecutionResult{}, err
+		}
 	}
 	record := func(op string, ledger budget.Ledger) bool {
 		return callbackscope.Record(ctx, a, op, struct {
@@ -53,27 +97,10 @@ func (a *BoundedBudgetAdapter) Tool(ctx context.Context, inv plugin.ToolInvocati
 		record("budget.tool.unconfigured.returned", l)
 		return out, e
 	}
-	// Freeze the actual ledger selection before reservation or dispatch.
-	// A pre-send budget wait must not look unmetered to a replacement Runner.
 	frame, _ := callbackscope.RootToolFrame(ctx).(*originalToolFrame)
 	frame.recordHold(inv.Request, l.ID, "")
-	raw, err := json.Marshal(inv.Request)
-	if err != nil {
-		return tools.ExecutionResult{}, err
-	}
-	hash := sha256.Sum256(raw)
 	id := "tool:" + inv.Run.ID + ":" + inv.Request.Call.ID
-	res := budget.Reservation{ID: id, RunID: inv.Run.ID, RequestHash: hex.EncodeToString(hash[:]), Requested: budget.Usage{ToolCalls: 1}}
-	l, err = a.coordinator.Reserve(ctx, l.ID, res, ports.ToolReservationActive(inv))
-	if e := a.ports.Project(ctx, l); e != nil {
-		return tools.ExecutionResult{}, e
-	}
-	if errors.Is(err, budget.ErrWaiting) {
-		return toolAuthority(ctx).record(tools.ExecutionResult{Content: json.RawMessage(`{"status":"waiting_budget"}`), Receipt: tools.Receipt{ExecutionID: inv.Request.Call.ID, Disposition: tools.ReceiptDispositionPending}}, nil)
-	}
-	if err != nil {
-		return tools.ExecutionResult{}, err
-	}
+	var raw json.RawMessage
 	current := l.Reservations[id]
 	if current.Status == budget.ReservationSettled {
 		reservation, invalid := originalSettledToolReservation(l, inv.Request)
@@ -93,6 +120,9 @@ func (a *BoundedBudgetAdapter) Tool(ctx context.Context, inv plugin.ToolInvocati
 	}
 	if current.Dispatched {
 		return tools.ExecutionResult{}, budget.ErrWaiting
+	}
+	if current.ID != id || current.RunID != inv.Run.ID || current.RequestHash != kernel.ManagedDigest(inv.Request) || current.Requested != (budget.Usage{ToolCalls: 1}) || current.Status != budget.ReservationHeld {
+		return tools.ExecutionResult{}, ErrToolReceiptMismatch
 	}
 	if _, err = a.coordinator.Dispatch(ctx, l.ID, id); err != nil {
 		return tools.ExecutionResult{}, err

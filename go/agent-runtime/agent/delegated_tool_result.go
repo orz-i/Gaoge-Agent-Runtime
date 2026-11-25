@@ -14,7 +14,6 @@ import (
 type approvedToolCalls struct {
 	mu       sync.Mutex
 	pending  map[string]int
-	allowed  map[string]string
 	returns  map[string]approvalReturn
 	recorded bool
 }
@@ -87,49 +86,34 @@ func (a *approvedToolCalls) bind(call tools.Call) bool {
 		return false
 	}
 	delete(a.pending, key)
-	delete(a.allowed, key)
 	a.recorded = true
 	return true
 }
 
-// allowed is populated only after the actual policy set has returned a
-// successful not-required decision for this invocation.
-func (a *approvedToolCalls) authorize(q tools.ExecutionRequest) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	key := approvalCallKey(q.Call)
-	if key == "" || a.pending[key] != 1 {
-		return
-	}
-	if a.allowed == nil {
-		a.allowed = make(map[string]string)
-	}
-	a.allowed[key] = approvalSourceDigest(q, nil)
-}
-
-func (a *approvedToolCalls) source(s kernel.Snapshot, state runState, call tools.Call) string {
+func durableApprovalSource(s kernel.Snapshot, state runState, call tools.Call) string {
 	if approvedPendingCall(s, state) {
 		pending, ok := nextPendingCall(state)
 		if ok && approvalCallKey(pending) == approvalCallKey(call) {
 			return approvalSourceDigest(tools.ExecutionRequest{RunID: s.Run.ID, Call: call}, s.Checkpoint)
 		}
 	}
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return a.allowed[approvalCallKey(call)]
+	if a := state.ToolAdmission; a.authorized(call) && a.ApprovalDigest == approvalSourceDigest(tools.ExecutionRequest{RunID: s.Run.ID, Call: call}, nil) {
+		return a.ApprovalDigest
+	}
+	return ""
 }
 
-func (a *approvedToolCalls) recordReturn(call tools.Call, proof approvalReturn, approvedCheckpoint bool) bool {
+func (a *approvedToolCalls) recordReturn(call tools.Call, proof approvalReturn) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	key := approvalCallKey(call)
 	if key == "" || !validBindingFingerprint(proof.ApprovalDigest) {
 		return false
 	}
-	if a.pending[key] != 1 && !approvedCheckpoint {
-		return false
-	}
-	if !approvedCheckpoint && a.allowed[key] != proof.ApprovalDigest {
+	// The caller supplies only the exact persisted authorization. A
+	// reconstructed frame has no live policy entry; duplicate live calls
+	// still cannot be collapsed into one receipt.
+	if a.pending[key] > 1 {
 		return false
 	}
 	if a.returns == nil {
@@ -140,14 +124,13 @@ func (a *approvedToolCalls) recordReturn(call tools.Call, proof approvalReturn, 
 	}
 	a.returns[key] = proof
 	delete(a.pending, key)
-	delete(a.allowed, key)
 	a.recorded = true
 	return true
 }
 
 func (a *approvedToolCalls) committed(s kernel.Snapshot, state runState, call tools.Call, result tools.ExecutionResult) (delegatedToolReceipt, bool) {
-	receipt, ok := qualifiedOwnerToolReceipt(call, result, a.source(s, state, call))
-	if !ok || !a.recordReturn(call, approvalReturn{ApprovalDigest: receipt.ApprovalDigest, OwnerResultDigest: receipt.ResultDigest}, approvedPendingCall(s, state)) {
+	receipt, ok := qualifiedOwnerToolReceipt(call, result, durableApprovalSource(s, state, call))
+	if !ok || !a.recordReturn(call, approvalReturn{ApprovalDigest: receipt.ApprovalDigest, OwnerResultDigest: receipt.ResultDigest}) {
 		return delegatedToolReceipt{}, false
 	}
 	return receipt, true
@@ -160,8 +143,8 @@ func (a *approvedToolCalls) pendingReturn(s kernel.Snapshot, state runState, cal
 	if kind == "" {
 		return
 	}
-	proof := approvalReturn{ApprovalDigest: a.source(s, state, call), PendingKind: kind}
-	a.recordReturn(call, proof, approvedPendingCall(s, state))
+	proof := approvalReturn{ApprovalDigest: durableApprovalSource(s, state, call), PendingKind: kind}
+	a.recordReturn(call, proof)
 }
 
 func (a *approvedToolCalls) returned(call tools.Call) (approvalReturn, bool) {

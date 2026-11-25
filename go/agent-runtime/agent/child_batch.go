@@ -33,6 +33,7 @@ func (runner *Runner) deferChildCall(ctx context.Context, snapshot kernel.Snapsh
 	// Transfer the active dispatch marker atomically with that record so
 	// independent children may start without re-executing earlier handlers.
 	state.DeferredChildren = append(state.DeferredChildren, deferredChildCall{Call: tools.CloneCall(call), Wait: *clonePendingTool(state.ToolWait)})
+	state.clearToolAdmission(call.ID)
 	state.PendingCalls = remainingPendingCalls(state)
 	state.ToolWait = nil
 	state.ToolDispatchID = ""
@@ -74,45 +75,46 @@ func (state *runState) activateDeferredChild() error {
 }
 
 func (runner *Runner) persistChildBatch(ctx context.Context, snapshot kernel.Snapshot, state runState) (kernel.Snapshot, bool, error) {
+	next, err := runner.commitToolTransition(ctx, snapshot, state, snapshot.Checkpoint, kernel.RunStatusRunning, kernel.EventDraft{Type: EventToolPending, Message: "child_batch", Wakeup: true, WakeupAt: agentWakeupAt(runner.clock.Now())})
+	return next, err != nil, err
+}
+
+// One native transition for authorization, capacity waiting, dispatch intent
+// and batch frontier. A retry is only the same pure CAS under the same
+// physical owner, never an approval callback or physical Tool retry.
+func (runner *Runner) commitToolTransition(ctx context.Context, snapshot kernel.Snapshot, state runState, checkpoint *kernel.Checkpoint, status kernel.RunStatus, event kernel.EventDraft) (kernel.Snapshot, error) {
 	encoded, err := encodeState(state)
 	if err != nil {
-		return snapshot, true, err
+		return snapshot, err
 	}
-	mutation := kernel.Mutation{
-		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
-		Events: []kernel.EventDraft{{Type: EventToolPending, Message: "child_batch", Wakeup: true, WakeupAt: agentWakeupAt(runner.clock.Now())}},
-	}
-	// This is a pure native state handoff, not another execution attempt.
-	// An ACK loss may already have committed the exact frontier/requirement.
-	// Retry at most once only on the unchanged original source under the
-	// same owned lease. Never repeat the approval policy or a Tool handler.
-	var next kernel.Snapshot
+	mutation := kernel.Mutation{Status: status, State: encoded, Checkpoint: checkpoint, Events: []kernel.EventDraft{event}}
 	for attempt := 0; attempt < 2; attempt++ {
-		next, err = runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, mutation)
+		next, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, mutation)
 		if err == nil {
-			return next, false, nil
+			return next, nil
 		}
 		readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 		latest, loadErr := runner.runtime.Load(readCtx, snapshot.Run.ID)
 		cancel()
 		if loadErr != nil {
-			return snapshot, true, errors.Join(err, loadErr)
+			return snapshot, errors.Join(err, loadErr)
 		}
 		expected := snapshot.Run
 		expected.Revision++
-		expected.Status = kernel.RunStatusRunning
+		expected.Status = status
 		expected.ErrorCode, expected.ErrorDetail = "", ""
 		expected.UpdatedAt = latest.Run.UpdatedAt
-		if reflect.DeepEqual(latest.Run, expected) && latest.EventHead == snapshot.EventHead+1 &&
-			bytes.Equal(latest.State, encoded) && reflect.DeepEqual(latest.Checkpoint, snapshot.Checkpoint) &&
-			reflect.DeepEqual(latest.Result, snapshot.Result) {
-			return latest, false, nil
+		if reflect.DeepEqual(latest.Run, expected) && latest.EventHead == snapshot.EventHead+1 && bytes.Equal(latest.State, encoded) && reflect.DeepEqual(latest.Checkpoint, checkpoint) && reflect.DeepEqual(latest.Result, snapshot.Result) {
+			return latest, nil
 		}
 		if !reflect.DeepEqual(latest, snapshot) || ctx.Err() != nil {
-			return snapshot, true, err
+			return snapshot, err
+		}
+		if attempt == 1 {
+			return snapshot, err
 		}
 	}
-	return snapshot, true, err
+	return snapshot, kernel.ErrConflict
 }
 
 func validDeferredChildren(state runState) bool {

@@ -17,6 +17,7 @@ import (
 type toolCallAuthority struct {
 	mu                sync.Mutex
 	id                string
+	budget            *toolBudgetAdmission
 	observed, invalid bool
 	original          toolOutcomeReceipt
 	cause             error

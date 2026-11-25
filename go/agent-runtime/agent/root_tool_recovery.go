@@ -117,6 +117,9 @@ func (runner *Runner) reconcileRootToolReceipt(ctx context.Context, snapshot ker
 	if err != nil {
 		return snapshot, errors.Join(ErrToolOutcomeUnknown, err)
 	}
+	if a := state.ToolAdmission; a.authorized(call) && a.BudgetBound && a.LedgerID != "" && (!bound || binding.LedgerID != a.LedgerID) {
+		return snapshot, errors.Join(ErrToolOutcomeUnknown, ErrToolReceiptMismatch)
+	}
 	var outcome toolOutcomeReceipt
 	if bound && binding.ReceiptDigest != "" {
 		if state.ToolWait != nil || state.ExternalToolHold != nil {
@@ -195,6 +198,7 @@ func (runner *Runner) reconcileRootToolReceipt(ctx context.Context, snapshot ker
 	}
 	state.RecoveredTools = append(state.RecoveredTools, rootToolReceipt{Call: tools.CloneCall(call), Wait: clonePendingTool(state.ToolWait), Result: outcome.Result, Rejection: outcome.rejection(), ApprovalDigest: approvalDigest})
 	state.ToolDispatchID = ""
+	state.clearToolAdmission(callID)
 	state.ToolWait = nil
 	state.PendingCalls = remainingPendingCalls(state)
 	if len(state.DeferredChildren) > 0 {

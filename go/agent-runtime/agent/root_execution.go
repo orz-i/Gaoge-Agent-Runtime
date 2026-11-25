@@ -73,7 +73,7 @@ func defaultRunExecution(rt *kernel.Runtime, policy ExecutionPolicy) (*RunExecut
 
 func knownRootPhysicalSettlement(snapshot kernel.Snapshot) bool {
 	state, err := decodeState(snapshot.State)
-	if err != nil || state.ToolDispatchID != "" || state.ToolWait != nil || len(state.DeferredChildren) != 0 {
+	if err != nil || state.ToolDispatchID != "" || state.ToolWait != nil || len(state.DeferredChildren) != 0 || (state.ToolAdmission != nil && state.ToolAdmission.Phase == toolAdmissionEvaluating) {
 		return false
 	}
 	for _, inv := range state.ModelInvocations {
@@ -176,7 +176,9 @@ func (runner *Runner) executeOwnedRoot(ctx context.Context, current kernel.Snaps
 	if loadErr != nil {
 		return result, errors.Join(callErr, ErrRootOutcomeUnknown, loadErr)
 	}
-	hostComplete := lifecycle.Complete() && !scoped.rootCallbacks.unknown.Load()
+	state, stateErr := decodeState(latest.State)
+	hostComplete := lifecycle.Complete() && !scoped.rootCallbacks.unknown.Load() && stateErr == nil &&
+		(state.ToolAdmission == nil || state.ToolAdmission.Phase != toolAdmissionEvaluating)
 	settled := hostComplete && knownRootPhysicalSettlement(latest)
 	outcome := kernel.OwnedPhysicalCallbackOutcome{HostCompleted: hostComplete, LeaseOwned: !external}
 	pendingCall, pending, _ := FrozenPendingDispatch(latest)

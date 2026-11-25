@@ -87,8 +87,15 @@ func validBoundedBudgetComposition(dependencies Dependencies) bool {
 }
 func (a *BoundedBudgetAdapter) bind(ctx context.Context, id string) (budget.Ledger, error) {
 	scope, err := a.ports.ResolveScope(ctx, id)
-	if err != nil || scope.LedgerID == "" {
+	if err != nil {
 		return budget.Ledger{}, err
+	}
+	return a.bindScope(ctx, id, scope)
+}
+
+func (a *BoundedBudgetAdapter) bindScope(ctx context.Context, id string, scope BoundedBudgetScope) (budget.Ledger, error) {
+	if scope.LedgerID == "" {
+		return budget.Ledger{}, nil
 	}
 	l, err := a.coordinator.Ensure(ctx, scope.LedgerID, scope.Limits)
 	if err != nil {
