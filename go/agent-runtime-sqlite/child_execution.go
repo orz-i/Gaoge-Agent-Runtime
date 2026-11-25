@@ -160,6 +160,12 @@ func (s *Store) MarkChildExecutionSettled(ctx context.Context, grant kernel.Chil
 		if total != 1 {
 			return kernel.ErrExecutionConflict
 		}
+		if _, ownedErr := loadOwnedPhysicalGrant(ctx, tx, grant); ownedErr != nil {
+			if errors.Is(ownedErr, kernel.ErrNotFound) {
+				return kernel.ErrExecutionConflict
+			}
+			return ownedErr
+		}
 		evidence, evidenceErr := sqliteOwnedMarkEvidence(ctx, tx, grant, child, marked, permit)
 		if evidenceErr != nil {
 			return evidenceErr
@@ -225,6 +231,12 @@ func (s *Store) FinishChildExecution(ctx context.Context, grant kernel.ChildExec
 	if grant.IsOwned() {
 		if correct != 1 {
 			return kernel.ErrExecutionConflict
+		}
+		if _, ownedErr := loadOwnedPhysicalGrant(ctx, tx, grant); ownedErr != nil {
+			if errors.Is(ownedErr, kernel.ErrNotFound) {
+				return kernel.ErrExecutionConflict
+			}
+			return ownedErr
 		}
 		native, _, e := sqliteManagedLease(ctx, tx, grant.ChildRunID)
 		if e != nil {

@@ -357,3 +357,86 @@ func TestOwnedBarrierRejectsUnboundControlAndExpiredTakeover(t *testing.T) {
 		t.Fatalf("binding did not survive reopen: %+v %v", loaded, err)
 	}
 }
+
+func TestOwnedRecoveryPropagatesNonNotFoundAndRejectsCorruptSelfScope(t *testing.T) {
+	ctx := t.Context()
+	s, err := CreateNew(ctx, ownedPrivatePath(t, "owned-errors.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	rt, err := kernel.New(kernel.Dependencies{Store: s})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := rt.Create(ctx, kernel.CreateRequest{
+		ID: "root", Kind: "agent",
+		Actor:  kernel.ActorRef{TenantID: "t", ActorID: "a"},
+		Thread: kernel.ThreadRef{Kind: "conversation", ID: "th"},
+		Goal:   "errors", State: json.RawMessage("{}"), ExecutionRequired: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := rt.Create(ctx, kernel.CreateRequest{
+		ID: "other", Kind: "agent",
+		Actor:  kernel.ActorRef{TenantID: "t", ActorID: "a"},
+		Thread: kernel.ThreadRef{Kind: "conversation", ID: "th2"},
+		Goal:   "other", State: json.RawMessage("{}"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, err := s.AcquireExecution(ctx, kernel.ExecutionAcquireRequest{RunID: "root", OwnerID: "owner", LeaseDuration: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := kernel.ChildExecutionGrant{
+		ID: "owned-err", ChildRunID: "root", ExpectedRevision: before.Run.Revision,
+		ExecutionOwnerID: lease.OwnerID, ExecutionLeaseID: lease.LeaseID, ExecutionEpoch: lease.Epoch,
+		AdmissionSourceHash: strings.Repeat("a", 64), AdmissionOperation: "start",
+	}
+	if _, err = s.db.Exec(
+		`INSERT INTO runtime_child_effect_grants(grant_id,parent_run_id,child_run_id,start_revision,execution_owner_id,execution_lease_id,execution_epoch,admission_source_hash,admission_operation) VALUES(?,?,?,?,?,?,?,?,?)`,
+		g.ID, g.ChildRunID, g.ChildRunID, g.ExpectedRevision, g.ExecutionOwnerID, g.ExecutionLeaseID, g.ExecutionEpoch, g.AdmissionSourceHash, g.AdmissionOperation,
+	); err != nil {
+		t.Fatal(err)
+	}
+	record := kernel.Record{Run: before.Run, State: before.State, Checkpoint: before.Checkpoint, Result: before.Result}
+	record.Run.Revision++
+	mutation := kernel.StoreMutation{Record: record}
+
+	// Missing callback return (callback_return_revision = 0) yields ErrExecutionConflict.
+	if _, err = s.ApplyOwnedPhysicalRecovery(ctx, g, before.Run.Revision, mutation, kernel.OwnedPhysicalRecovery{}); !errors.Is(err, kernel.ErrExecutionConflict) {
+		t.Fatalf("missing callback return got %v, want ErrExecutionConflict", err)
+	}
+
+	// Corrupt callback_return_revision triggers a scan failure that must not be
+	// masked as ErrExecutionConflict.
+	if _, err = s.db.Exec(`UPDATE runtime_child_effect_grants SET callback_return_revision='corrupt' WHERE grant_id=?`, g.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.ApplyOwnedPhysicalRecovery(ctx, g, before.Run.Revision, mutation, kernel.OwnedPhysicalRecovery{}); err == nil || errors.Is(err, kernel.ErrExecutionConflict) {
+		t.Fatalf("corrupt callback return scan error was masked: %v", err)
+	}
+
+	// Corrupt owned grant whose parent_run_id != child_run_id must fail with
+	// ErrExecutionConflict rather than leaking sql.ErrNoRows.
+	if _, err = s.db.Exec(`UPDATE runtime_child_effect_grants SET parent_run_id=?,callback_return_revision=0,settled_revision=? WHERE grant_id=?`, other.Run.ID, before.Run.Revision, g.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.FinishChildExecution(ctx, g); !errors.Is(err, kernel.ErrExecutionConflict) || errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("FinishChildExecution on non-self-scoped grant got %v, want ErrExecutionConflict", err)
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err = sqliteOwnedMarkEvidence(ctx, tx, g, before, before.Run.Revision, kernel.ChildExecutionSettlement{}); !errors.Is(err, kernel.ErrExecutionConflict) || errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("sqliteOwnedMarkEvidence on non-self-scoped grant got %v, want ErrExecutionConflict", err)
+	}
+	if err = sqlitePersistOwnedRetirement(ctx, tx, g, before, lease); !errors.Is(err, kernel.ErrExecutionConflict) || errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("sqlitePersistOwnedRetirement on non-self-scoped grant got %v, want ErrExecutionConflict", err)
+	}
+}

@@ -92,6 +92,7 @@ func RunEA1OwnedCallbackReturn(t *testing.T, factory func(*testing.T) (kernel.St
 			// owner to read the original active return.
 			for _, foreign := range []kernel.ChildExecutionGrant{
 				func() kernel.ChildExecutionGrant { v := g; v.ID += "-foreign"; return v }(),
+				func() kernel.ChildExecutionGrant { v := g; v.ChildRunID = "absent-foreign-run"; return v }(),
 				func() kernel.ChildExecutionGrant { v := g; v.ExecutionOwnerID += "-foreign"; return v }(),
 				func() kernel.ChildExecutionGrant { v := g; v.ExecutionEpoch++; return v }(),
 			} {

@@ -17,7 +17,7 @@ func loadOwnedCallbackReturn(ctx context.Context, q schemaQuery, g kernel.ChildE
 		return kernel.OwnedPhysicalCallbackCompletion{}, kernel.ErrNotFound
 	}
 	if err != nil {
-		return kernel.OwnedPhysicalCallbackCompletion{}, err
+		return kernel.OwnedPhysicalCallbackCompletion{}, conflictOrDatabaseError(err)
 	}
 	if c != (kernel.OwnedPhysicalCallbackCompletion{}) {
 		c.GrantID = g.ID

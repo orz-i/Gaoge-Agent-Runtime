@@ -22,7 +22,10 @@ func sqliteOwnedCompletion(ctx context.Context, q schemaQuery, g kernel.ChildExe
 func sqliteOwnedMarkEvidence(ctx context.Context, tx *sql.Tx, g kernel.ChildExecutionGrant, s kernel.Snapshot, mark uint64, p kernel.ChildExecutionSettlement) ([]byte, error) {
 	var raw []byte
 	if e := tx.QueryRowContext(ctx, `SELECT settlement_evidence_json FROM runtime_child_effect_grants WHERE grant_id=? AND parent_run_id=? AND child_run_id=?`, g.ID, g.ChildRunID, g.ChildRunID).Scan(&raw); e != nil {
-		return nil, e
+		if errors.Is(e, sql.ErrNoRows) {
+			return nil, kernel.ErrExecutionConflict
+		}
+		return nil, conflictOrDatabaseError(e)
 	}
 	c, e := sqliteOwnedCompletion(ctx, tx, g)
 	if e != nil {
@@ -85,7 +88,10 @@ func sqlitePersistOwnedRetirement(ctx context.Context, tx *sql.Tx, g kernel.Chil
 	var raw []byte
 	var mark uint64
 	if e := tx.QueryRowContext(ctx, `SELECT settled_revision,settlement_evidence_json FROM runtime_child_effect_grants WHERE grant_id=? AND parent_run_id=? AND child_run_id=?`, g.ID, g.ChildRunID, g.ChildRunID).Scan(&mark, &raw); e != nil {
-		return e
+		if errors.Is(e, sql.ErrNoRows) {
+			return kernel.ErrExecutionConflict
+		}
+		return conflictOrDatabaseError(e)
 	}
 	c, e := sqliteOwnedCompletion(ctx, tx, g)
 	if e != nil {

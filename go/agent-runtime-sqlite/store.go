@@ -399,8 +399,11 @@ func (s *Store) applyWithAuthority(ctx context.Context, lease *kernel.ExecutionL
 			return kernel.Snapshot{}, e
 		}
 		completion, completionErr := loadOwnedCallbackReturn(ctx, tx, recovery.grant)
-		if completionErr != nil {
+		if errors.Is(completionErr, kernel.ErrNotFound) {
 			return kernel.Snapshot{}, kernel.ErrExecutionConflict
+		}
+		if completionErr != nil {
+			return kernel.Snapshot{}, completionErr
 		}
 		native, _, e := sqliteManagedLease(ctx, tx, runID)
 		if e != nil {

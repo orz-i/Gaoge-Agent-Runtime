@@ -233,6 +233,11 @@ func (store *KernelStore) LookupOwnedPhysicalCallbackReturn(ctx context.Context,
 	var result kernel.OwnedPhysicalCallbackCompletion
 	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if _, e := lockKernelRun(tx, g.ChildRunID); e != nil {
+			if errors.Is(e, kernel.ErrNotFound) {
+				if _, grantErr := pgLoadOwnedPhysicalGrant(tx, g); !errors.Is(grantErr, kernel.ErrNotFound) {
+					return grantErr
+				}
+			}
 			return e
 		}
 		row, e := pgLoadOwnedPhysicalGrant(tx, g)
