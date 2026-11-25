@@ -231,7 +231,7 @@ func (runner *Runner) reconcileRootToolReceipt(ctx context.Context, snapshot ker
 	if !knownRootPhysicalSettlement(repaired) {
 		return repaired, nil
 	}
-	if err = runner.ReconcileRootPhysicalExecution(ctx, repaired.Run.ID); err != nil {
+	if err = runner.reconcileRootRetirement(ctx, repaired, grant, &completion); err != nil {
 		return repaired, err
 	}
 	if continueTerminal && execution.definition.Terminal {

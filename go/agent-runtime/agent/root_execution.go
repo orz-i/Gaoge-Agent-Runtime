@@ -257,8 +257,9 @@ func (runner *Runner) executeOwnedRoot(ctx context.Context, current kernel.Snaps
 	return latest, callErr
 }
 
-// ReconcileRootPhysicalExecution retires only an already marked whole callback;
-// clean receipts alone never manufacture a missing Host completion marker.
+// ReconcileRootPhysicalExecution consumes the existing native retirement
+// protocol after every original physical obligation has been settled. A
+// clean feature state alone never manufactures a callback completion.
 func (runner *Runner) ReconcileRootPhysicalExecution(ctx context.Context, runID string) error {
 	if runner == nil || runner.runtime == nil {
 		return ErrInvalidRequest
@@ -270,52 +271,60 @@ func (runner *Runner) ReconcileRootPhysicalExecution(ctx context.Context, runID 
 	if snapshot.Run.Kind != RunKind || snapshot.Run.ParentRunID != "" {
 		return ErrInvalidRequest
 	}
-	grant, err := runner.runtime.LookupChildExecution(ctx, runID)
-	if errors.Is(err, kernel.ErrNotFound) {
-		// A process may die after genuine Finish but before ACK. This narrow
-		// current-run index returns only a unique RETIRED receipt still matching
-		// the complete source/native owner and with no replacement grants. It
-		// never selects a historical ACK or grants dispatch permission.
-		receipt, lookupErr := runner.runtime.LookupOwnedRetirementForRun(ctx, runID)
-		if lookupErr != nil {
-			return lookupErr
-		}
-		if !knownRootPhysicalSettlement(snapshot) || !receipt.Evidence.Completion.HostCompleted || receipt.Evidence.Completion.GrantID == "" {
-			return ErrRootOutcomeUnknown
-		}
-		if err := runner.requireRootModelQualification(ctx, snapshot); err != nil {
-			return err
-		}
-		found, ackErr := acknowledgeExactOwnedRetirement(ctx, runner.runtime, receipt.Evidence.Grant, snapshot, &receipt.Evidence.Completion)
-		if ackErr != nil {
-			return errors.Join(ErrRootOutcomeUnknown, ackErr)
-		}
-		if !found {
-			return errors.Join(ErrRootOutcomeUnknown, kernel.ErrExecutionConflict)
-		}
-		return nil
-	}
+	grant, completion, err := runner.originalRootReturn(ctx, snapshot)
 	if err != nil {
 		return err
 	}
-	if grant.ExecutionLeaseID == "" || !knownRootPhysicalSettlement(snapshot) {
-		return ErrRootOutcomeUnknown
+	return runner.reconcileRootRetirement(ctx, snapshot, grant, completion)
+}
+
+// Select the actual active original return or the unique pending retirement
+// at the exact current source. Never fall back to historical acknowledged
+// rows or infer completion from an absent physical marker. The legacy nil
+// completion is supported only by the existing genuine marked Store path.
+func (runner *Runner) originalRootReturn(ctx context.Context, snapshot kernel.Snapshot) (kernel.ChildExecutionGrant, *kernel.OwnedPhysicalCallbackCompletion, error) {
+	grant, err := runner.runtime.LookupChildExecution(ctx, snapshot.Run.ID)
+	if errors.Is(err, kernel.ErrNotFound) {
+		receipt, lookupErr := runner.runtime.LookupOwnedRetirementForRun(ctx, snapshot.Run.ID)
+		if lookupErr != nil {
+			return grant, nil, lookupErr
+		}
+		if kernel.ManagedDigest(receipt.Evidence.Snapshot) != kernel.ManagedDigest(snapshot) || !receipt.Evidence.Completion.HostCompleted || receipt.Evidence.Completion.GrantID == "" {
+			return grant, nil, ErrRootOutcomeUnknown
+		}
+		return receipt.Evidence.Grant, &receipt.Evidence.Completion, nil
+	}
+	if err != nil {
+		return grant, nil, err
+	}
+	if !grant.IsOwned() || grant.ExecutionLeaseID == "" || grant.ChildRunID != snapshot.Run.ID {
+		return grant, nil, ErrRootOutcomeUnknown
 	}
 	completion, completionErr := runner.runtime.LookupOwnedPhysicalCallbackReturn(ctx, grant)
-	if completionErr != nil && !errors.Is(completionErr, kernel.ErrNotFound) {
-		return completionErr
+	if errors.Is(completionErr, kernel.ErrNotFound) {
+		return grant, nil, nil
 	}
-	var original *kernel.OwnedPhysicalCallbackCompletion
-	if completionErr == nil {
-		if !completion.HostCompleted {
-			return ErrRootOutcomeUnknown
-		}
-		original = &completion
+	if completionErr != nil {
+		return grant, nil, completionErr
+	}
+	if !completion.HostCompleted || completion.GrantID != grant.ID || completion.ReturnRevision < grant.ExpectedRevision || completion.ReturnRevision > snapshot.Run.Revision {
+		return grant, nil, ErrRootOutcomeUnknown
+	}
+	return grant, &completion, nil
+}
+
+// Every receipt-only consumer uses the same original grant and exact
+// settlement source for Mark/T4/Finish/ACK. Re-resolving by RunID here
+// could select a successor grant admitted after a concurrent retirement.
+func (runner *Runner) reconcileRootRetirement(ctx context.Context, snapshot kernel.Snapshot, grant kernel.ChildExecutionGrant, completion *kernel.OwnedPhysicalCallbackCompletion) error {
+	if !grant.IsOwned() || grant.ChildRunID != snapshot.Run.ID || !knownRootPhysicalSettlement(snapshot) ||
+		(completion != nil && (!completion.HostCompleted || completion.GrantID != grant.ID)) {
+		return ErrRootOutcomeUnknown
 	}
 	if err := runner.requireRootModelQualification(ctx, snapshot); err != nil {
 		return err
 	}
-	if err := settleOwnedRoot(ctx, runner.runtime, grant, snapshot, original, false); err != nil {
+	if err := settleOwnedRoot(ctx, runner.runtime, grant, snapshot, completion, false); err != nil {
 		return errors.Join(ErrRootOutcomeUnknown, err)
 	}
 	return nil

@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"errors"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
@@ -97,20 +98,22 @@ func (s *Store) verifyRootSettlement(ctx context.Context, expected kernel.Snapsh
 		}
 		receipts = append(receipts, r)
 	}
-	if check == nil {
-		grant, _, err := loadPhysicalGrant(ctx, tx, expected.Run.ID)
-		if err != nil {
-			return err
-		}
-		completion, err := loadOwnedCallbackReturn(ctx, tx, grant)
-		if err != nil {
-			return err
-		}
-		return kernel.VerifyReturnedRootSettlementFacts(expected, current, epoch, physicalEpoch, originalLease, grant, completion, receipts)
-	}
 	var active int
 	if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM runtime_child_effect_grants WHERE parent_run_id=? OR child_run_id=?`, expected.Run.ID, expected.Run.ID).Scan(&active); err != nil {
 		return err
+	}
+	if check == nil {
+		grant, _, err := loadPhysicalGrant(ctx, tx, expected.Run.ID)
+		var completion kernel.OwnedPhysicalCallbackCompletion
+		if err == nil {
+			completion, err = loadOwnedCallbackReturn(ctx, tx, grant)
+			if err != nil {
+				return err
+			}
+		} else if !errors.Is(err, kernel.ErrNotFound) {
+			return err
+		}
+		return kernel.VerifyReturnedRootSettlementFacts(expected, current, epoch, physicalEpoch, originalLease, grant, completion, receipts, active != 0)
 	}
 	return check(expected, current, epoch, physicalEpoch, lease, active != 0, receipts)
 }

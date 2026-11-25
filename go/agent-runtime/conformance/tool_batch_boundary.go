@@ -76,7 +76,7 @@ func (p batchUnsentCancelPorts) Project(_ context.Context, l budget.Ledger) erro
 // local allowance pause. With no boundary, independent children retain their
 // original parallel admission. These are real store/reopen paths.
 func toolBatchBoundary(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store), ledgerFactory func(*testing.T) (budget.LedgerStore, func() budget.LedgerStore)) {
-	for _, mode := range []string{"approval-approve", "approval-reject", "approval-frontier-before", "approval-frontier-ack", "approval-frontier-persistent", "allowance", "parallel", "unsent-before-chain", "actual-dispatch-denial", "actual-dispatch-denial-closure-cas"} {
+	for _, mode := range []string{"approval-approve", "approval-reject", "approval-frontier-before", "approval-frontier-ack", "approval-frontier-persistent", "allowance", "parallel", "unsent-before-chain", "actual-dispatch-denial", "actual-dispatch-denial-closure-cas", "actual-dispatch-denial-final-child-ack"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx := t.Context()
 			backing, peer, reopen := factory(t)
@@ -105,7 +105,7 @@ func toolBatchBoundary(t *testing.T, factory func(*testing.T) (kernel.Store, ker
 			if e != nil {
 				t.Fatal(e)
 			}
-			actualDenial := mode == "actual-dispatch-denial" || mode == "actual-dispatch-denial-closure-cas"
+			actualDenial := mode == "actual-dispatch-denial" || mode == "actual-dispatch-denial-closure-cas" || mode == "actual-dispatch-denial-final-child-ack"
 			approvalMode := mode != "allowance" && mode != "parallel" && mode != "unsent-before-chain" && !actualDenial
 			var cancelBeforeChain context.CancelFunc
 			cancelHits := 0
@@ -274,6 +274,47 @@ func toolBatchBoundary(t *testing.T, factory func(*testing.T) (kernel.Store, ker
 					if _, err = observer.Apply(ctx, child.Run.ID, child.Run.Revision, kernel.Mutation{Status: kernel.RunStatusCompleted, State: child.State, Result: &kernel.Result{ContentType: "application/json", Content: json.RawMessage("true")}}); err != nil {
 						t.Fatal(err)
 					}
+				}
+				if mode == "actual-dispatch-denial-final-child-ack" {
+					// Last physical child receipt commits, but its response
+					// is lost before the original Grant can retire.
+					fault := &returnedRootRetirementFault{managedStorePorts: backing.(managedStorePorts), mode: "recovery-ack", recoveryCallID: "child-b"}
+					r = makeRunner(ea1StartRuntime(t, fault), ledger, false)
+					original, err := r.RootDeferredCleanupEligibility(ctx, req.ID, started.Run.Revision)
+					if err != nil || original.RetirementOnly() {
+						t.Fatal("original child scope missing", err)
+					}
+					_, err = r.ReconcileRootDeferredChildren(ctx, req.ID, started.Run.Revision, original)
+					if !errors.Is(err, errReturnedRootRetirementCut) || fault.hits != 1 || fault.grant != g || reads["child-a"] != 1 || reads["child-b"] != 1 {
+						t.Fatal("last original child ACK cut missing", err, reads)
+					}
+					rt = ea1StartRuntime(t, reopen())
+					l := reopenLedger()
+					r = makeRunner(rt, l, false)
+					after, err := rt.Load(ctx, req.ID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					ready, err := r.RootDeferredCleanupEligibility(ctx, req.ID, after.Run.Revision)
+					if err != nil || !ready.RetirementOnly() || !original.Matches(ready) {
+						t.Fatal("last child receipt did not yield same original retirement", err)
+					}
+					after, err = r.ReconcileRootDeferredChildren(ctx, req.ID, after.Run.Revision, original)
+					if err != nil || reads["child-a"] != 1 || reads["child-b"] != 1 || reads["next-call"] != 0 || len(m.requests) != 1 {
+						t.Fatal("retirement re-read original child effects", err, reads)
+					}
+					if _, err = rt.LookupChildExecution(ctx, req.ID); !errors.Is(err, kernel.ErrNotFound) {
+						t.Fatal("retirement retained batch grant", err)
+					}
+					final, err := rt.Cancel(ctx, req.ID, after.Run.Revision, "finish original elected cancellation")
+					if err != nil || final.Run.Status != kernel.RunStatusCancelled {
+						t.Fatal("elected cancellation blocked after last receipt", err, final.Run)
+					}
+					charged, err := l.LoadBudget(ctx, "original-ledger")
+					if err != nil || charged.View("").Usage.ToolCalls != 2 || charged.View("").Reserved.ToolCalls != 0 || physical["next-call"] != 0 {
+						t.Fatal("retirement changed original accounting", err, charged.View(""), physical)
+					}
+					return
 				}
 				rt = ea1StartRuntime(t, reopen())
 				l := reopenLedger()

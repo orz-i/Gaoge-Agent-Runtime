@@ -342,8 +342,8 @@ func (r *Runner) reconcileOriginalUnsentTool(ctx context.Context, s kernel.Snaps
 	// before this CAS. No ledger mutation may follow grant retirement.
 	// Retire only if every other original physical obligation drained.
 	if knownRootPhysicalSettlement(next) {
-		if err = settleOwnedRoot(ctx, r.runtime, g, next, &c, false); err != nil {
-			return next, errors.Join(ErrRootOutcomeUnknown, err)
+		if err = r.reconcileRootRetirement(ctx, next, g, &c); err != nil {
+			return next, err
 		}
 	}
 	return next, nil

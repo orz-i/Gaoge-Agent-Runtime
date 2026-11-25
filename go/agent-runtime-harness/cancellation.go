@@ -194,6 +194,11 @@ func (runner *Runner) cancelRuntimeRun(
 			return kernel.Snapshot{}, true, err
 		}
 		if terminalRuntimeStatus(current.Run.Status) {
+			if root != nil {
+				if err := runner.reconcileTerminalRootCancellation(ctx, current); err != nil {
+					return current, true, err
+				}
+			}
 			// The original route-specific ownership proof above owns
 			// physical settlement semantics. Native Agent checks
 			// unresolved Tool/Model intents before reaching here;

@@ -138,7 +138,7 @@ func (runner *Runner) resumeTurn(ctx context.Context, turnID string, expected *s
 			return Snapshot{}, ErrConflict
 		}
 		if scope, scopeErr := original.RootDeferredCleanupEligibility(ctx, runtimeSnapshot.Run.ID, runtimeSnapshot.Run.Revision); scopeErr == nil && scope.Valid() {
-			repaired, receiptErr := original.ReconcileRootDeferredChildren(ctx, runtimeSnapshot.Run.ID, runtimeSnapshot.Run.Revision)
+			repaired, receiptErr := original.ReconcileRootDeferredChildren(ctx, runtimeSnapshot.Run.ID, runtimeSnapshot.Run.Revision, scope)
 			if errors.Is(receiptErr, agent.ErrToolOutcomeUnknown) {
 				// The peer has not reached terminal evidence yet. No new
 				// physical execution is admitted just to poll a child.

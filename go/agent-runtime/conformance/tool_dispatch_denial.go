@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
@@ -132,9 +133,10 @@ func (m dispatchDenialOpaqueLayer) Tool(ctx context.Context, _ plugin.ToolInvoca
 }
 
 func toolDispatchDenial(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store), ledgerFactory func(*testing.T) (budget.LedgerStore, func() budget.LedgerStore)) {
-	for _, mode := range []string{"budget-only", "timeline-outer", "timeline-inner", "parented", "cleanup-cas", "projection-failure", "timeline-failure", "opaque-before", "opaque-pass", "opaque-mask", "opaque-augment", "opaque-forged-result", "opaque-inner-unentered", "dispatch-write-before", "dispatch-write-ack", "actual-handler-error"} {
+	for _, mode := range []string{"budget-only", "timeline-outer", "timeline-inner", "parented", "cleanup-cas", "projection-failure", "timeline-failure", "opaque-before", "opaque-pass", "opaque-mask", "opaque-augment", "opaque-forged-result", "opaque-inner-unentered", "dispatch-write-before", "dispatch-write-ack", "actual-handler-error", "retirement-recovery-before", "retirement-recovery-ack", "retirement-mark-before", "retirement-mark-ack", "retirement-t4-before", "retirement-t4-ack", "retirement-finish-before", "retirement-finish-ack", "retirement-ack-before", "retirement-ack-ack"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx := t.Context()
+			retirementMode := strings.HasPrefix(mode, "retirement-")
 			base, peer, reopen := factory(t)
 			observer := ea1StartRuntime(t, peer)
 			ledger, reopenLedger := newToolTestLedger(t, ledgerFactory)
@@ -155,7 +157,7 @@ func toolDispatchDenial(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 					}
 				}
 			}
-			if mode == "cleanup-cas" {
+			if mode == "cleanup-cas" || retirementMode {
 				store.closureCuts = 2
 			}
 			useLedger := ledger
@@ -219,7 +221,7 @@ func toolDispatchDenial(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 					return tools.ExecutionResult{}, agent.ErrToolOutcomeUnknown
 				})
 				d := agent.Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, RunMiddleware: []plugin.RunMiddleware{b}, ToolMiddleware: layers, ToolOutcomeVerifier: reader, DelegatedToolResults: reader, StartControlPreflight: func(context.Context, agent.StartRequest) error { return nil }}
-				if original {
+				if original && !retirementMode {
 					d.ApprovalPolicies = []plugin.ApprovalPolicy{p}
 				}
 				r, err := agent.NewRunner(d)
@@ -258,7 +260,11 @@ func toolDispatchDenial(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 			if mode == "actual-handler-error" {
 				wantPhysical = 1
 			}
-			if physical != wantPhysical || policies != 1 || reads != 0 || len(m.calls) != 1 || len(res.Receipt) != 0 || res.Usage != (budget.Usage{}) {
+			wantPolicies := 1
+			if retirementMode {
+				wantPolicies = 0
+			}
+			if physical != wantPhysical || policies != wantPolicies || reads != 0 || len(m.calls) != 1 || len(res.Receipt) != 0 || res.Usage != (budget.Usage{}) {
 				t.Fatal("original no-send/unknown effect identity changed", physical, policies, reads, len(m.calls), res)
 			}
 			positive := mode == "budget-only" || mode == "timeline-outer" || mode == "timeline-inner" || mode == "parented" || mode == "opaque-inner-unentered"
@@ -289,6 +295,86 @@ func toolDispatchDenial(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 			b, found, err := c.ToolReturns.Find("original-call")
 			if err != nil {
 				t.Fatal(err)
+			}
+			if retirementMode {
+				if store.cuts != 2 || !errors.Is(runErr, cut) || !c.HostCompleted || !found || !b.Unsent || c.ControlCustody != kernel.OwnedCustodyScoped {
+					t.Fatal("original no-send proof missing", runErr, c, b)
+				}
+				stage := strings.TrimPrefix(mode, "retirement-")
+				fault := &returnedRootRetirementFault{managedStorePorts: base.(managedStorePorts), mode: stage}
+				r = mk(ea1StartRuntime(t, fault), ledger, false)
+				original, err := r.RootDeferredCleanupEligibility(ctx, root, cur.Run.Revision)
+				if err != nil || !original.Valid() || original.RetirementOnly() {
+					t.Fatal("original receipt scope missing", err)
+				}
+				_, err = r.ReconcileRootDeferredChildren(ctx, root, cur.Run.Revision, original)
+				if !errors.Is(err, errReturnedRootRetirementCut) || fault.hits != 1 || fault.grant != g {
+					t.Fatal("receipt/retirement cut not reached", err, fault.hits, fault.grant)
+				}
+				rt := ea1StartRuntime(t, reopen())
+				l := reopenLedger()
+				r = mk(rt, l, false)
+				before, err := rt.Load(ctx, root)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, marked, err := agent.FrozenPendingDispatch(before)
+				if err != nil || marked != (stage == "recovery-before") {
+					t.Fatal("unexpected persisted marker", stage, marked, err)
+				}
+				receipt, receiptErr := rt.LoadOwnedRetirement(ctx, g.ID)
+				switch stage {
+				case "finish-ack", "ack-before", "ack-ack":
+					if receiptErr != nil {
+						t.Fatal(receiptErr)
+					}
+					want := "RETIRED"
+					if stage == "ack-ack" {
+						want = "ACKNOWLEDGED"
+					}
+					if receipt.Phase != want || receipt.Evidence.Grant != g || receipt.Evidence.Completion != c {
+						t.Fatal("wrong original retirement", receipt)
+					}
+				default:
+					if !errors.Is(receiptErr, kernel.ErrNotFound) {
+						t.Fatal("premature retirement", receiptErr)
+					}
+				}
+				if stage == "ack-ack" {
+					if _, err = r.RootDeferredCleanupEligibility(ctx, root, before.Run.Revision); !errors.Is(err, kernel.ErrNotFound) {
+						t.Fatal("historical ACK selected as current scope", err)
+					}
+					if err = rt.VerifyOwnedRootSettlement(ctx, before); err != nil {
+						t.Fatal("actual acknowledged retirement not observable", err)
+					}
+				} else {
+					if err = rt.VerifyReturnedRootSettlement(ctx, before); err != nil {
+						t.Fatal("exact returned original scope not observable", stage, err)
+					}
+					next, err := r.RootDeferredCleanupEligibility(ctx, root, before.Run.Revision)
+					if err != nil || !original.Matches(next) || next.RetirementOnly() == marked {
+						t.Fatal("same original retirement scope not selected", stage, err)
+					}
+					if _, err = r.ReconcileRootDeferredChildren(ctx, root, before.Run.Revision, agent.RootDeferredCleanupScope{}); !errors.Is(err, kernel.ErrExecutionConflict) {
+						t.Fatal("foreign cleanup scope accepted", err)
+					}
+					before, err = r.ReconcileRootDeferredChildren(ctx, root, before.Run.Revision, original)
+					if err != nil {
+						t.Fatal("receipt-only retirement did not converge", stage, err)
+					}
+				}
+				final, err := rt.Cancel(ctx, root, before.Run.Revision, "finish original elected cancellation")
+				if err != nil || final.Run.Status != kernel.RunStatusCancelled || physical != 0 || policies != 0 || reads != 0 || len(m.calls) != 1 {
+					t.Fatal("original retirement did not permit elected control", err, final.Run, physical, reads)
+				}
+				acked, err := rt.LoadOwnedRetirement(ctx, g.ID)
+				if err != nil || acked.Phase != "ACKNOWLEDGED" || acked.Evidence.Grant != g || acked.Evidence.Completion != c || (receiptErr == nil && acked.Identity() != receipt.Identity()) {
+					t.Fatal("original retirement identity changed", err, acked)
+				}
+				if _, err = rt.LookupChildExecution(ctx, root); !errors.Is(err, kernel.ErrNotFound) {
+					t.Fatal("original grant retained", err)
+				}
+				return
 			}
 			if mode == "cleanup-cas" {
 				if store.cuts != 2 || !errors.Is(runErr, cut) || !c.HostCompleted || !found || !b.Unsent || b.ReceiptDigest != "" || b.PendingKind != "" {
