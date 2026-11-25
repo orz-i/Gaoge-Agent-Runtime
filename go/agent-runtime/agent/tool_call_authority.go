@@ -33,6 +33,19 @@ func toolReceiptCandidate(result tools.ExecutionResult, err error, id string) bo
 			tools.ValidRetryableNoEffectReceipt(result, err, id))
 }
 
+// qualifiedPendingKind is the original Call return classification shared by
+// accounting and approval. No descriptor is a valid pending return too.
+func qualifiedPendingKind(result tools.ExecutionResult, err error, id string) string {
+	if err != nil || result.Receipt.ExecutionID != id || result.Receipt.Disposition != tools.ReceiptDispositionPending ||
+		tools.ValidateExecutionResult(result) != nil {
+		return ""
+	}
+	if result.Pending == nil {
+		return "pending"
+	}
+	return string(result.Pending.Kind)
+}
+
 // Only a single chain of wrappers may carry the actual original error.
 // errors.As alone would also accept an unrelated persistence failure joined
 // with the original refusal; a multi-cause wrapper is not the same result.

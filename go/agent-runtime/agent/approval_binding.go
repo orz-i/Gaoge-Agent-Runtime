@@ -21,6 +21,47 @@ type pendingToolApproval struct {
 	PayloadDigest   string `json:"payloadDigest"`
 }
 
+// requiredToolApproval is a parked restrictive decision, not an approval
+// checkpoint and never a positive authorization. It can survive receipt-only
+// reconciliation of earlier calls, without re-invoking the original policy.
+type requiredToolApproval struct {
+	CallID     string `json:"callID"`
+	CallDigest string `json:"callDigest"`
+}
+
+func (a *requiredToolApproval) matches(call tools.Call) bool {
+	return a != nil && a.CallID != "" && a.CallID == call.ID && validBindingFingerprint(a.CallDigest) && a.CallDigest == approvalCallKey(call)
+}
+func validRequiredToolApproval(state runState) bool {
+	a := state.RequiredApproval
+	if a == nil {
+		return true
+	}
+	if state.PendingApproval != nil || state.ToolDispatchID == a.CallID {
+		return false
+	}
+	matches := 0
+	for _, call := range state.PendingCalls {
+		if call.ID == a.CallID {
+			if !a.matches(call) {
+				return false
+			}
+			matches++
+		}
+	}
+	for _, child := range state.DeferredChildren {
+		if child.Call.ID == a.CallID {
+			return false
+		}
+	}
+	for _, receipt := range state.RecoveredTools {
+		if receipt.Call.ID == a.CallID {
+			return false
+		}
+	}
+	return matches == 1
+}
+
 func newPendingToolApproval(checkpoint *kernel.Checkpoint, call tools.Call) (*pendingToolApproval, error) {
 	if checkpoint == nil || strings.TrimSpace(checkpoint.ID) == "" ||
 		strings.TrimSpace(call.ID) == "" || strings.TrimSpace(call.ToolKey) == "" ||

@@ -445,6 +445,7 @@ type runState struct {
 	PendingCalls          []tools.Call               `json:"pendingCalls,omitempty"`
 	PendingToolCatalog    map[string]string          `json:"pendingToolCatalog,omitempty"`
 	PendingApproval       *pendingToolApproval       `json:"pendingApproval,omitempty"`
+	RequiredApproval      *requiredToolApproval      `json:"requiredApproval,omitempty"`
 	ToolWait              *PendingTool               `json:"toolWait,omitempty"`
 	DeferredChildren      []deferredChildCall        `json:"deferredChildren,omitempty"`
 	// A fenced Agent Run commits its Tool dispatch ID before invoking
@@ -1181,7 +1182,7 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 	if state.ExternalToolCancellation != nil {
 		return snapshot, true, nil
 	}
-	if len(state.PendingCalls) == 0 && len(state.DeferredChildren) != 0 {
+	if len(state.DeferredChildren) != 0 && (len(state.PendingCalls) == 0 || state.RequiredApproval != nil || toolBatchAllowanceFull(state)) {
 		return runner.activateDeferredChild(ctx, snapshot, state)
 	}
 	if len(state.PendingCalls) > 0 {
@@ -1192,6 +1193,9 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 			}
 		}
 		if state.Discovery != nil && state.Discovery.RunID != snapshot.Run.ID {
+			if len(state.DeferredChildren) != 0 {
+				return runner.activateDeferredChild(ctx, snapshot, state)
+			}
 			failed, failErr := runner.fail(ctx, snapshot, state, "agent.discovery_invalid", ErrToolDiscoveryInvalid)
 			return failed, true, failErr
 		}
@@ -1200,6 +1204,9 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 			catalogErr = validateDiscoveryCatalog(state.Discovery, definitions)
 		}
 		if catalogErr != nil {
+			if len(state.DeferredChildren) != 0 {
+				return runner.activateDeferredChild(ctx, snapshot, state)
+			}
 			code := "agent.tool_invalid"
 			if state.Discovery != nil {
 				code = "agent.discovery_invalid"
@@ -1219,9 +1226,19 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 			executed, yielded, executeErr := runner.executePending(ctx, snapshot)
 			return executed, yielded || executeErr != nil, executeErr
 		}
+		if len(state.DeferredChildren) != 0 {
+			if _, _, err := runner.preparePendingToolExecution(snapshot); err != nil {
+				return runner.activateDeferredChild(ctx, snapshot, state)
+			}
+		}
 		if state.PendingApproval != nil {
 			failed, failErr := runner.fail(ctx, snapshot, state, "agent.approval_invalid", ErrApprovalRequired)
 			return failed, true, failErr
+		}
+		// A new Call cannot enter its approval policy before local admission.
+		// Recovered or already approved Calls above retain their original path.
+		if allowanceExhausted(state, "tool") {
+			return runner.advanceCallAllowance(ctx, snapshot, state, "tool")
 		}
 		prepared, prepareErr := runner.preparePendingApproval(ctx, snapshot, state, definitions)
 		if prepareErr != nil {
@@ -1233,7 +1250,9 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 			}
 			return prepared, true, prepareErr
 		}
-		if prepared.Run.Status != kernel.RunStatusRunning {
+		// Approval admission may yield to the original physical frontier
+		// without exposing a Checkpoint or sending the next Call.
+		if prepared.Run.Status != kernel.RunStatusRunning || prepared.Run.Revision != snapshot.Run.Revision {
 			return prepared, true, prepareErr
 		}
 		executed, yielded, executeErr := runner.executePending(ctx, prepared)
@@ -2126,22 +2145,41 @@ func (runner *Runner) preparePendingApproval(
 			Call:  tools.CloneCall(call),
 		},
 	}
-	if runner.rootCallbacks != nil && runner.hasApprovalPolicies {
-		runner.rootCallbacks.approvalPolicyEntered.Store(true)
-		if runner.delegatedToolResults != nil && runner.scopedRootCallbacks {
-			runner.rootCallbacks.toolApprovals.enter(call)
+	if required := state.RequiredApproval; required != nil {
+		if !required.matches(call) || len(state.DeferredChildren) != 0 || state.ToolDispatchID != "" || state.ToolWait != nil {
+			return snapshot, ErrApprovalRequired
 		}
-	}
-	requiresApproval, err := runner.approvalPolicies.RequiresApproval(ctx, invocation)
-	runner.noteRootCallbackFailure(err)
-	if err != nil {
-		return runner.fail(ctx, snapshot, state, "agent.approval_policy_failed", err)
-	}
-	if !requiresApproval {
-		if runner.rootCallbacks != nil && runner.delegatedToolResults != nil && runner.scopedRootCallbacks {
-			runner.rootCallbacks.toolApprovals.authorize(invocation.Request)
+		// Only an earlier negative/restrictive policy decision is carried.
+		// It never supplies the positive authority to execute the Tool.
+	} else {
+		if runner.rootCallbacks != nil && runner.hasApprovalPolicies {
+			runner.rootCallbacks.approvalPolicyEntered.Store(true)
+			if runner.delegatedToolResults != nil && runner.scopedRootCallbacks {
+				runner.rootCallbacks.toolApprovals.enter(call)
+			}
 		}
-		return snapshot, nil
+		requiresApproval, err := runner.approvalPolicies.RequiresApproval(ctx, invocation)
+		runner.noteRootCallbackFailure(err)
+		if err != nil {
+			return runner.fail(ctx, snapshot, state, "agent.approval_policy_failed", err)
+		}
+		if !requiresApproval {
+			if runner.rootCallbacks != nil && runner.delegatedToolResults != nil && runner.scopedRootCallbacks {
+				runner.rootCallbacks.toolApprovals.authorize(invocation.Request)
+			}
+			return snapshot, nil
+		}
+		if len(state.DeferredChildren) != 0 {
+			// The actual policy returned a restriction, not an authorization.
+			// Commit the restriction together with the original Child frontier;
+			// do not create or publish a checkpoint while a Grant is unresolved.
+			state.RequiredApproval = &requiredToolApproval{CallID: call.ID, CallDigest: approvalCallKey(call)}
+			yielded, _, err := runner.activateDeferredChild(ctx, snapshot, state)
+			if err == nil && runner.rootCallbacks != nil && runner.delegatedToolResults != nil && runner.scopedRootCallbacks {
+				runner.rootCallbacks.toolApprovals.bind(call)
+			}
+			return yielded, err
+		}
 	}
 	if runner.approvals == nil {
 		return runner.fail(ctx, snapshot, state, "agent.approval_unavailable", ErrApprovalRequired)
@@ -2156,6 +2194,7 @@ func (runner *Runner) preparePendingApproval(
 		return runner.fail(ctx, snapshot, state, "agent.approval_invalid", ErrApprovalRequired)
 	}
 	state.PendingApproval = binding
+	state.RequiredApproval = nil
 	encoded, err := encodeState(state)
 	if err != nil {
 		return kernel.Snapshot{}, err
@@ -2416,6 +2455,13 @@ func (runner *Runner) handlePendingToolExecutionError(
 func (runner *Runner) persistPendingToolResult(
 	ctx context.Context, snapshot kernel.Snapshot, execution pendingToolExecution,
 	result tools.ExecutionResult) (kernel.Snapshot, bool, error) {
+	// The actual qualified Call return is the only source of pending
+	// approval evidence. Scheduled, descriptor-less and typed waits use the
+	// same lifecycle; no later Run state can invent a return.
+	if runner.rootCallbacks != nil && runner.delegatedToolResults != nil && runner.scopedRootCallbacks &&
+		(runner.boundedApproval || approvedPendingCall(snapshot, execution.state)) {
+		runner.rootCallbacks.toolApprovals.pendingReturn(snapshot, execution.state, execution.call, result)
+	}
 	if strings.TrimSpace(result.Receipt.Disposition) == tools.ReceiptDispositionPending {
 		// A Pending result is never proof of terminal execution. Preserve
 		// the same committed Tool dispatch identity in every execution mode
@@ -2480,7 +2526,7 @@ func (runner *Runner) persistCompletedToolCall(
 	snapshot.Checkpoint = nil // Consumed approval cannot authorize a later call.
 	state.Budget.Usage.ToolCalls++
 	if execution.definition.Terminal {
-		if len(state.PendingCalls) != 0 {
+		if len(state.PendingCalls) != 0 || len(state.DeferredChildren) != 0 {
 			failed, failErr := runner.fail(ctx, snapshot, state, "agent.state_invalid", ErrInvalidRequest)
 			return failed, false, failErr
 		}
@@ -2719,6 +2765,11 @@ func (runner *Runner) fail(
 	code string,
 	cause error,
 ) (kernel.Snapshot, error) {
+	// A business failure is not settlement of already dispatched siblings.
+	// Never publish a terminal Run while the original batch is unresolved.
+	if len(state.DeferredChildren) != 0 {
+		return snapshot, errors.Join(ErrToolOutcomeUnknown, cause)
+	}
 	encoded, err := encodeState(state)
 	if err != nil {
 		return kernel.Snapshot{}, errors.Join(cause, err)
@@ -2918,6 +2969,7 @@ func decodeState(encoded json.RawMessage) (runState, error) {
 		model.ValidateOutputContract(state.OutputContract) != nil ||
 		!validToolWaitState(state) ||
 		!validDeferredChildren(state) ||
+		!validRequiredToolApproval(state) ||
 		!validPendingToolCatalog(state) ||
 		!validModelInvocations(state.ModelInvocations) {
 		return runState{}, ErrInvalidRequest

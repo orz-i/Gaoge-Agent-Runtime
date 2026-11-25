@@ -103,17 +103,12 @@ func (runner *Runner) ReconcileRootDeferredChildren(ctx context.Context, runID s
 // stageRootDeferredReceipt only moves an already-dispatched identity back to
 // the active receipt slot. Pending unsent calls remain pending and untouched.
 func (runner *Runner) stageRootDeferredReceipt(ctx context.Context, snapshot kernel.Snapshot, state runState, grant kernel.ChildExecutionGrant) (kernel.Snapshot, runState, error) {
-	if state.ToolDispatchID != "" || len(state.DeferredChildren) == 0 {
+	if snapshot.Run.Status != kernel.RunStatusRunning {
 		return snapshot, state, ErrToolOutcomeUnknown
 	}
-	original := state.DeferredChildren[0]
-	if original.Wait.Kind != tools.PendingChildTerminal || original.Call.ID != original.Wait.CallID {
-		return snapshot, state, ErrToolOutcomeUnknown
+	if err := state.activateDeferredChild(); err != nil {
+		return snapshot, state, err
 	}
-	state.DeferredChildren = state.DeferredChildren[1:]
-	state.PendingCalls = append([]tools.Call{tools.CloneCall(original.Call)}, state.PendingCalls...)
-	state.ToolWait = clonePendingTool(&original.Wait)
-	state.ToolDispatchID = original.Call.ID
 	encoded, err := encodeState(state)
 	if err != nil {
 		return snapshot, state, err

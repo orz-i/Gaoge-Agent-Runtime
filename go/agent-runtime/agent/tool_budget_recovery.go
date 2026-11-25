@@ -77,29 +77,40 @@ func (f *originalToolFrame) outstanding(s kernel.Snapshot, approvals *approvedTo
 	}
 	var bindings []kernel.OwnedToolReturn
 	allApproved := true
-	add := func(call tools.Call) {
+	add := func(call tools.Call) error {
 		q := tools.ExecutionRequest{RunID: s.Run.ID, Call: call}
 		b, ok := f.binding(q)
 		proof, approved := approvals.returned(call)
 		allApproved = allApproved && approved
 		if !ok && !approved {
-			return
+			return nil
 		}
 		if !ok {
 			b = kernel.OwnedToolReturn{CallID: call.ID, RequestDigest: kernel.ManagedDigest(q)}
 		}
 		b.ApprovalDigest, b.OwnerResultDigest = proof.ApprovalDigest, proof.OwnerResultDigest
+		if approved && proof.PendingKind != "" {
+			if b.ReceiptDigest != "" || (b.PendingKind != "" && b.PendingKind != proof.PendingKind) {
+				return ErrToolReceiptMismatch
+			}
+			b.PendingKind = proof.PendingKind
+		}
 		bindings = append(bindings, b)
+		return nil
 	}
 	if state.ToolDispatchID != "" {
 		call, ok := nextPendingCall(state)
 		if !ok || call.ID != state.ToolDispatchID {
 			return "", false, ErrToolReceiptMismatch
 		}
-		add(call)
+		if err := add(call); err != nil {
+			return "", false, err
+		}
 	}
 	for _, child := range state.DeferredChildren {
-		add(child.Call)
+		if err := add(child.Call); err != nil {
+			return "", false, err
+		}
 	}
 	out, err := kernel.NewOwnedToolReturns(bindings)
 	return out, allApproved && len(bindings) > 0, err

@@ -30,6 +30,7 @@ type delegatedToolReceipt struct {
 type approvalReturn struct {
 	ApprovalDigest    string
 	OwnerResultDigest string
+	PendingKind       string
 }
 
 func approvalCallKey(call tools.Call) string {
@@ -152,10 +153,14 @@ func (a *approvedToolCalls) committed(s kernel.Snapshot, state runState, call to
 	return receipt, true
 }
 
-// The original bounded policy returned and the exact typed wait was stored.
-// This binds approval, not an external commit or a permission to dispatch.
-func (a *approvedToolCalls) wait(s kernel.Snapshot, state runState, call tools.Call) {
-	proof := approvalReturn{ApprovalDigest: a.source(s, state, call)}
+// pendingReturn captures the actual qualified return before its state CAS.
+// The descriptor selects only the wait transport, never approval custody.
+func (a *approvedToolCalls) pendingReturn(s kernel.Snapshot, state runState, call tools.Call, result tools.ExecutionResult) {
+	kind := qualifiedPendingKind(result, nil, call.ID)
+	if kind == "" {
+		return
+	}
+	proof := approvalReturn{ApprovalDigest: a.source(s, state, call), PendingKind: kind}
 	a.recordReturn(call, proof, approvedPendingCall(s, state))
 }
 

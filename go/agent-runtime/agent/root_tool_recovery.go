@@ -198,13 +198,9 @@ func (runner *Runner) reconcileRootToolReceipt(ctx context.Context, snapshot ker
 	state.ToolWait = nil
 	state.PendingCalls = remainingPendingCalls(state)
 	if len(state.DeferredChildren) > 0 {
-		// This exact identity was already dispatched. Merely expose its original
-		// receipt obligation; never run its handler again.
-		next := state.DeferredChildren[0]
-		state.DeferredChildren = state.DeferredChildren[1:]
-		state.PendingCalls = append([]tools.Call{tools.CloneCall(next.Call)}, state.PendingCalls...)
-		state.ToolWait = clonePendingTool(&next.Wait)
-		state.ToolDispatchID = next.Call.ID
+		if err := state.activateDeferredChild(); err != nil {
+			return snapshot, err
+		}
 	} else {
 		// Replay of these *receipts*, not of their physical calls, occurs only
 		// after every original obligation has settled and a new owner is admitted.

@@ -111,7 +111,7 @@ func NewOwnedToolReturns(bindings []OwnedToolReturn) (OwnedToolReturns, error) {
 			(b.ReceiptDigest != "" && (b.LedgerID == "" || !validToolReceiptDigest(b.ReceiptDigest))) ||
 			(b.ApprovalDigest != "" && !validToolReceiptDigest(b.ApprovalDigest)) ||
 			(b.OwnerResultDigest != "" && (b.ApprovalDigest == "" || !validToolReceiptDigest(b.OwnerResultDigest))) ||
-			(b.PendingKind != "" && (b.LedgerID == "" || b.ReceiptDigest != "" || b.OwnerResultDigest != "" || (b.PendingKind != "pending" && b.PendingKind != "scheduled" && b.PendingKind != "child_terminal" && b.PendingKind != "external_result"))) ||
+			(b.PendingKind != "" && (b.ReceiptDigest != "" || b.OwnerResultDigest != "" || (b.PendingKind != "pending" && b.PendingKind != "scheduled" && b.PendingKind != "child_terminal" && b.PendingKind != "external_result"))) ||
 			(i > 0 && bindings[i-1].CallID == b.CallID) {
 			return "", ErrInvalidInput
 		}

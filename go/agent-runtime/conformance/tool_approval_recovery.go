@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
+	"time"
 
 	interactionadapter "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/interaction"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
@@ -27,15 +29,16 @@ func (p originalApprovalPolicy) Approval(context.Context, plugin.ToolInvocation)
 // Original approval/owner evidence follows the physical Call across receipt
 // CAS cuts. A successor cannot borrow its own (or another Call's) approval.
 func originalToolApprovalRecovery(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store), ledgerFactory func(*testing.T) (budget.LedgerStore, func() budget.LedgerStore)) {
-	for _, mode := range []string{"normal", "bounded-recovery", "checkpoint-recovery", "result-only-policy", "unmetered-recovery", "held-approved-child", "lost-recovery-ack"} {
+	for _, mode := range []string{"normal", "bounded-recovery", "checkpoint-recovery", "result-only-policy", "unmetered-recovery", "held-approved-child", "held-approved-scheduled", "held-approved-pending", "held-approved-external", "unmetered-approved-pending", "lost-recovery-ack"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx := t.Context()
 			backing, peer, reopen := factory(t)
 			observer := ea1StartRuntime(t, peer)
 			ledger, reopenLedger := newToolTestLedger(t, ledgerFactory)
 			fault := &ea1AgentReceiptFault{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ControlStore: backing.(kernel.ControlStore), ChildExecutionStore: backing.(kernel.ChildExecutionStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), OwnedPhysicalExecutionStore: backing.(kernel.OwnedPhysicalExecutionStore), event: "tool.completed", injected: errors.New("original approved Tool CAS cut")}
+			held := strings.HasPrefix(mode, "held-approved-") || mode == "unmetered-approved-pending"
 			initial := backing
-			if mode != "normal" && mode != "held-approved-child" {
+			if mode != "normal" && !held {
 				initial = fault
 			}
 			m := &settledToolModel{}
@@ -48,8 +51,18 @@ func originalToolApprovalRecovery(t *testing.T, factory func(*testing.T) (kernel
 				if q.Call.ID != owner.Receipt.ExecutionID {
 					t.Fatal("wrong original Call")
 				}
-				if mode == "held-approved-child" {
-					return tools.ExecutionResult{Content: json.RawMessage("{}"), Receipt: tools.Receipt{ExecutionID: q.Call.ID, Disposition: "pending"}, Pending: &tools.PendingExecution{Kind: tools.PendingChildTerminal, OperationID: q.Call.ID, ChildRunID: "original-child"}}, nil
+				if held {
+					result := tools.ExecutionResult{Content: json.RawMessage("{}"), Receipt: tools.Receipt{ExecutionID: q.Call.ID, Disposition: "pending"}}
+					switch mode {
+					case "held-approved-child":
+						result.Pending = &tools.PendingExecution{Kind: tools.PendingChildTerminal, OperationID: q.Call.ID, ChildRunID: "original-child"}
+					case "held-approved-scheduled":
+						result.Pending = &tools.PendingExecution{Kind: tools.PendingScheduled}
+					case "held-approved-external":
+						deadline := time.Now().Add(time.Hour)
+						result.Pending = &tools.PendingExecution{Kind: tools.PendingExternalResult, OperationID: "external-original", InputDigest: kernel.ManagedDigest("external input"), DeadlineAt: &deadline}
+					}
+					return result, nil
 				}
 				return tools.CloneExecutionResult(owner), nil
 			})}})
@@ -87,7 +100,7 @@ func originalToolApprovalRecovery(t *testing.T, factory func(*testing.T) (kernel
 					t.Fatal(err)
 				}
 				d := agent.Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, Approvals: interactionadapter.New(interactions), DelegatedToolResults: reader, ToolOutcomeVerifier: reader, DeferResumption: true}
-				if mode != "unmetered-recovery" {
+				if mode != "unmetered-recovery" && mode != "unmetered-approved-pending" {
 					d.ToolMiddleware = []plugin.ToolMiddleware{b}
 				}
 				if withPolicy {
@@ -117,7 +130,7 @@ func originalToolApprovalRecovery(t *testing.T, factory func(*testing.T) (kernel
 					t.Fatal(err)
 				}
 			} else {
-				if mode == "held-approved-child" {
+				if held {
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -153,9 +166,10 @@ func originalToolApprovalRecovery(t *testing.T, factory func(*testing.T) (kernel
 				if c.ControlCustody != wantCustody {
 					t.Fatal("wrong original custody", c.ControlCustody, wantCustody)
 				}
-				if mode == "held-approved-child" {
-					if b.OwnerResultDigest != "" || b.ReceiptDigest != "" {
-						t.Fatal("pending call borrowed commit", b)
+				if held {
+					wantKind := map[string]string{"held-approved-child": "child_terminal", "held-approved-scheduled": "scheduled", "held-approved-pending": "pending", "held-approved-external": "external_result", "unmetered-approved-pending": "pending"}[mode]
+					if b.OwnerResultDigest != "" || b.ReceiptDigest != "" || b.PendingKind != wantKind {
+						t.Fatal("pending call borrowed commit or lost original kind", b, wantKind)
 					}
 				} else if b.OwnerResultDigest == "" {
 					t.Fatal("known owner result not sealed", b)

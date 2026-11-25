@@ -112,17 +112,9 @@ func (a *BoundedBudgetAdapter) Tool(ctx context.Context, inv plugin.ToolInvocati
 		if suspendErr != nil || projectErr != nil {
 			return toolAuthority(ctx).reject(errors.Join(callErr, suspendErr, projectErr))
 		}
-		pending := callErr == nil && result.Receipt.ExecutionID == inv.Request.Call.ID &&
-			result.Receipt.Disposition == tools.ReceiptDispositionPending && tools.ValidateExecutionResult(result) == nil
-		if frame != nil && (errors.Is(callErr, ErrToolOutcomeUnknown) || pending) {
+		kind := qualifiedPendingKind(result, callErr, inv.Request.Call.ID)
+		if frame != nil && (errors.Is(callErr, ErrToolOutcomeUnknown) || kind != "") {
 			if record("budget.tool.suspended", updated) {
-				kind := ""
-				if pending {
-					kind = "pending"
-					if result.Pending != nil {
-						kind = string(result.Pending.Kind)
-					}
-				}
 				frame.recordHold(inv.Request, l.ID, kind)
 			}
 		}

@@ -183,23 +183,8 @@ func (runner *Runner) executeOwnedRoot(ctx context.Context, current kernel.Snaps
 	settledCall := false
 	allApproved := false
 	if hostComplete {
-		// A bounded policy may bind its original typed wait. This attests
-		// authorization only; the independent owner must still prove COMMIT
-		// or the elected no-effect control before retirement.
-		if runner.boundedApproval && runner.scopedRootCallbacks && runner.delegatedToolResults != nil {
-			state, e := decodeState(latest.State)
-			if e != nil {
-				return latest, errors.Join(callErr, ErrRootOutcomeUnknown, e)
-			}
-			if state.ToolWait != nil {
-				if call, ok := nextPendingCall(state); ok && call.ID == state.ToolWait.CallID {
-					scoped.rootCallbacks.toolApprovals.wait(latest, state, call)
-				}
-			}
-			for _, child := range state.DeferredChildren {
-				scoped.rootCallbacks.toolApprovals.wait(latest, state, child.Call)
-			}
-		}
+		// Approval is captured at the actual Call return, not inferred
+		// from a later wait representation or an observer's composition.
 		bindings, approved, evidenceErr := toolFrame.outstanding(latest, &scoped.rootCallbacks.toolApprovals)
 		if evidenceErr != nil {
 			return latest, errors.Join(callErr, ErrRootOutcomeUnknown, evidenceErr)

@@ -24,7 +24,7 @@ func (runner *Runner) QuiescentApprovalCancellation(runtime *kernel.Runtime, sna
 	}
 	state, err := decodeState(snapshot.State)
 	if err != nil || len(state.PendingCalls) == 0 ||
-		state.ToolDispatchID != "" || state.ToolWait != nil {
+		state.ToolDispatchID != "" || state.ToolWait != nil || len(state.DeferredChildren) != 0 || len(state.RecoveredTools) != 0 || state.RequiredApproval != nil {
 		return false
 	}
 	if _, active := activeModelInvocation(state); active {
