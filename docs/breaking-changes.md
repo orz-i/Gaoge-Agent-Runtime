@@ -91,6 +91,22 @@ deferred cleanup without new execution or provider verification, including
 when earlier original child receipts still need to drain. Unknown Dispatch
 write outcomes, opaque entered layers and failed projections remain fenced.
 
+Original receipt consumption and owned retirement are now one resumable
+cleanup contract. `RootDeferredCleanupEligibility` observes either the
+active returned Grant (including when every physical obligation has already
+been consumed) or the exact unique current RETIRED row awaiting ACK.
+`ReconcileRootDeferredChildren` reuses the existing retirement protocol for
+the retirement-only phase and accepts an optional original cleanup scope to
+bind an earlier observation to the same Grant and callback completion.
+Ordinary three-argument calls still work; method values/interfaces with the
+old fixed signature must be updated. The shared Kernel returned-root facts
+checker receives the active-grant predicate from its Store and validates a
+pending RETIRED row with the existing exact selector and unchanged custody
+requirements. No historical ACK becomes a current retirement candidate.
+The elected Harness cancellation consumes the same original evidence after
+a lost recovery CAS ACK, Mark, Finish or ACK, including before terminal
+projection of an already committed business failure.
+
 ## PR #154 — Model original evidence and settlement qualification hard cut
 
 Model intent, logical budget reservation and physical sampling hashes now bind

@@ -137,6 +137,19 @@ cancellation can reconcile that sealed return with earlier physical child
 obligations without entering a new Agent invocation or querying a result
 verifier for the unsent Call.
 
+Receipt consumption and Grant retirement are separate durable transitions
+but one original recovery scope. Once all original physical obligations
+have drained, the same original callback completion and exact current
+source drive the existing Mark / managed T4 / Finish / Retirement ACK
+protocol, even if a receipt CAS acknowledgement was lost. A current
+RETIRED row is selected only by the original owner/source and Store lock;
+historical ACKs never authorize a successor. `RootDeferredCleanupEligibility`
+includes the retirement-only phase, and its observed scope may be passed
+to `ReconcileRootDeferredChildren` to prevent reselecting a different
+Grant. Elected Harness cancellation resumes this same scope without a
+business Resume or repeated result lookup; an already committed Failed
+or Completed status is preserved while its exact retirement finishes.
+
 Every dispatched Model invocation durably binds the exact physical SDK request
 through its `SamplingPlan`. Context and SharedBudget admission freeze that plan
 before the invocation is committed; otherwise the final dispatch boundary freezes
