@@ -70,6 +70,15 @@ original grant-bound callback-returned completion record with all physical inten
 A clean snapshot alone is insufficient. A Run status alone never proves callback completion; the original opaque
 completion record or durable settlement marker is required. This is not production multi-worker certification.
 
+Tool consumption is independently qualified against the actual executor or
+native settled ledger replay. Middleware must preserve the original result,
+Call identity, and original error, and first-party persistence failures fence
+consumption before the next Model call. A returned physical Grant may bind
+multiple outstanding Tool Calls, each to its own original ledger and request
+(and receipt digest when settled). Recover held and settled Calls independently;
+only the original whole callback and all resolved obligations qualify Grant
+retirement. Result classification is not a new Grant control custody.
+
 Every dispatched Model invocation durably binds the exact physical SDK request
 through its `SamplingPlan`. Context and SharedBudget admission freeze that plan
 before the invocation is committed; otherwise the final dispatch boundary freezes

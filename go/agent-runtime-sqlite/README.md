@@ -356,10 +356,11 @@ callback ACK before advancing its owner or source. Unknown/stale/active effects
 remain fenced, and historical empty custody is never promoted to trusted.
 
 
-### Bounded child-terminal reconciliation schema (v9)
+### Bounded child-terminal reconciliation and Call-qualified recovery schema (v9)
 
 The new `runtime_run_relation_progress` table records monotonic native parent
-and child revisions only after queue acceptance or feature-verified consumption.
+and child revisions only after durable queue acceptance or feature-verified
+consumption. Volatile queue acceptance cannot advance delivery progress.
 It is not a second execution record. Missing/nonterminal Runs do not prevent
 the indexed scan from progressing. A failure to enqueue or record progress
 is retried on a later scan with the original wakeup identity.
@@ -367,6 +368,13 @@ is retried on a later scan with the original wakeup identity.
 Existing exact v8 files require the explicit `MigrateV8ToV9` (or
 `MigrateV8ToV9With` with the original encrypted connection), all old writers
 stopped, and a retained backup. Open fails closed until the migration succeeds.
-The migration creates an empty watermark table without rewriting original Runs,
-relations, native authority, or effects. Do not interpret an empty watermark
-as proof of physical execution or use mixed v8/v9 readers.
+The migration creates an empty watermark table and adds an empty
+`callback_tool_returns` field to the existing physical Grant record. It does
+not rewrite original Runs, relations, custody, native authority, or receipts.
+New callback returns bind outstanding Calls individually to their original
+request and ledger evidence; retirement still requires the original whole
+callback return and resolution of every physical obligation.
+Do not infer physical completion from a watermark or missing legacy evidence.
+Earlier unpublished v9 trial files do not match this final schema and fail
+closed; recreate trial files or migrate from the original v8 backup. Do not
+mix old and new readers or writers.

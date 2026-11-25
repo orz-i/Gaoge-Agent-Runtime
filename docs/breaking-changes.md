@@ -5,9 +5,21 @@
 Existing exact v8 Kernel databases require a stopped-writer, backed-up, explicit
 `MigrateV8ToV9` (or `MigrateV8ToV9With` using the original encrypted connection).
 Open never migrates and old/new writers must not mix. This adds an empty durable
-relation delivery watermark table; no original execution or receipt is rewritten.
+relation delivery watermark table and an empty `callback_tool_returns` field
+on existing physical Grant rows; no original execution or receipt is rewritten.
+Earlier unpublished v9 trial schemas fail closed. Use the original v8 backup
+or recreate trial databases.
 Short-lived Hosts may retain the returned `Scheduler.ReconcilePage` cursor as
-scheduling bookkeeping, not dispatch authority.
+scheduling bookkeeping, not dispatch authority. Volatile queue acceptance is
+not durable delivery evidence.
+
+Tool outcome qualification is Call-scoped. The original executor or native
+ledger replay must attest the actual result; middleware cannot replace its
+receipt, rejection metadata or error identity, or qualify a persistence failure
+by joining it to a recoverable refusal. A Grant retains its original control
+custody; outstanding Call bindings independently identify held reservations
+and settled receipts. Recovery must resolve every original obligation before
+retiring the Grant. Historical empty bindings grant no new authority.
 
 ## PR #154 — Model original evidence and settlement qualification hard cut
 
