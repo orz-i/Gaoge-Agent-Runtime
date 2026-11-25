@@ -20,10 +20,11 @@ type BoundedBudgetToolPorts interface {
 	ToolReservationActive(plugin.ToolInvocation) bool
 }
 type boundedBudgetToolReceipt struct {
-	Result       tools.ExecutionResult `json:"result"`
-	ErrorCode    string                `json:"errorCode,omitempty"`
-	ErrorMessage string                `json:"errorMessage,omitempty"`
-	BlockedTools []string              `json:"blockedTools,omitempty"`
+	Result          tools.ExecutionResult `json:"result"`
+	ErrorCode       string                `json:"errorCode,omitempty"`
+	ErrorMessage    string                `json:"errorMessage,omitempty"`
+	BlockedTools    []string              `json:"blockedTools,omitempty"`
+	AllowCompletion bool                  `json:"allowCompletion,omitempty"`
 }
 
 func (a *BoundedBudgetAdapter) Tool(ctx context.Context, inv plugin.ToolInvocation, next plugin.ToolNext) (tools.ExecutionResult, error) {
@@ -75,6 +76,10 @@ func (a *BoundedBudgetAdapter) Tool(ctx context.Context, inv plugin.ToolInvocati
 		var callErr error
 		if receipt.ErrorCode != "" {
 			callErr = tools.NewRecoverableCallErrorWithBlockedTools(receipt.ErrorCode, receipt.ErrorMessage, nil, receipt.BlockedTools...)
+			var rejection *tools.RecoverableCallError
+			if errors.As(callErr, &rejection) {
+				rejection.AllowCompletion = receipt.AllowCompletion
+			}
 		}
 		if !validBoundedToolReceipt(receipt.Result, callErr, inv.Request.Call.ID) {
 			return tools.ExecutionResult{}, ErrToolReceiptMismatch
@@ -108,7 +113,7 @@ func (a *BoundedBudgetAdapter) Tool(ctx context.Context, inv plugin.ToolInvocati
 		return result, errors.Join(callErr, suspendErr, projectErr)
 	}
 	code, message, _ := tools.RecoverableCallErrorInfo(callErr)
-	raw, err = json.Marshal(boundedBudgetToolReceipt{Result: result, ErrorCode: code, ErrorMessage: message, BlockedTools: tools.RecoverableCallErrorBlockedToolKeys(callErr)})
+	raw, err = json.Marshal(boundedBudgetToolReceipt{Result: result, ErrorCode: code, ErrorMessage: message, BlockedTools: tools.RecoverableCallErrorBlockedToolKeys(callErr), AllowCompletion: tools.RecoverableCallErrorAllowsCompletion(callErr)})
 	if err != nil {
 		return result, err
 	}
