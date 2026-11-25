@@ -33,14 +33,21 @@ the same independent owner before local usage is incremented. Existing
 opaque/legacy custody is not upgraded. Drain or quarantine old in-flight
 executions before switching this unreleased cohort; no new SQL schema version.
 
-Tool approval is captured from the original returned Call, not its wait
-projection. Batch approval and local allowance pauses now drain outstanding
-Child calls first. The Agent State may contain a restrictive
-`requiredApproval` binding for an unsent Call; it is not a Checkpoint or
-permission to execute. Earlier already-dispatched Calls are reconciled and
-retired before publication of the original approval requirement. Legacy
-WaitingInput snapshots that already contain unresolved physical children
-are not automatically rewritten or granted recovery authority.
+Tool authorization is now committed before physical dispatch. The Agent's
+private `toolAdmission` replaces the prerelease `requiredApproval` state:
+evaluating, required, authorized, or awaiting_capacity. Evaluation intent
+must be durable before an original policy callback; an unresolved decision
+cannot be retired or replaced by a successor policy. A committed restriction
+does not authorize dispatch. SharedBudget binds and reserves the original
+scope before Tool middleware and physical dispatch intent. Capacity denial
+does not mint a Tool receipt; a standalone bounded Tool adapter now returns
+the native budget error instead of a synthetic pending result. Waiting
+reservations can be re-admitted without re-evaluating committed approval,
+but a missing, foreign, or already-dispatched original reservation cannot
+be replaced. Earlier dispatched Children drain before any later approval
+or capacity pause. Existing prerelease `requiredApproval` snapshots and
+legacy WaitingInput states with unresolved physical Children are not
+automatically migrated or granted recovery authority.
 
 ## PR #154 — Model original evidence and settlement qualification hard cut
 

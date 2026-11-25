@@ -97,6 +97,16 @@ owner may create and publish its approval Checkpoint. Local Tool allowance
 counts deferred physical obligations before new Call admission. An exhausted
 allowance cannot pause a batch with unresolved children.
 
+The native Tool admission state separates authorization evaluation, committed
+restriction, committed authorization and capacity waiting. The policy is
+invoked only after evaluation intent is durable; uncommitted decisions keep
+the original physical Grant fenced. Capacity is reserved against the original
+ledger before entering Tool middleware or writing a dispatch intent. An
+unsent wait is not a provider Pending receipt, and a later owner can retry
+admission only with the same Call, committed authorization and bound ledger.
+Pending physical effects and their settlement continue to use the existing
+Call-return proof.
+
 Every dispatched Model invocation durably binds the exact physical SDK request
 through its `SamplingPlan`. Context and SharedBudget admission freeze that plan
 before the invocation is committed; otherwise the final dispatch boundary freezes
