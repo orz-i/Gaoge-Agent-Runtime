@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/profile/encrypted"
@@ -102,5 +103,43 @@ func TestEncryptedV8RelationMigrationPreservesOriginalAuthority(t *testing.T) {
 	var count int
 	if err = s.db.QueryRowContext(ctx, "SELECT count(*) FROM runtime_run_relation_progress").Scan(&count); err != nil || count != 0 {
 		t.Fatal("migration invented progress", err)
+	}
+}
+
+// Confirm the actual SQLite planner selects an indexed bounded key range
+// before joining Runs and progress. Never scan all historical relations
+// merely to discover one page of eligible terminal children.
+func TestSQLiteRelationPagerUsesIndexedRange(t *testing.T) {
+	s, err := CreateNew(t.Context(), ownedPrivatePath(t, "indexed-page.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	rows, err := s.db.QueryContext(t.Context(), "EXPLAIN QUERY PLAN "+relationPageSQL, "child-100", 128)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var indexed bool
+	var details []string
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err = rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		details = append(details, detail)
+		if strings.Contains(detail, "SEARCH runtime_run_relations USING INDEX") && strings.Contains(detail, "child_run_id>?") {
+			indexed = true
+		}
+		if strings.HasPrefix(detail, "SCAN runtime_run_relations") {
+			t.Fatal("unbounded relation scan", detail)
+		}
+	}
+	if err = rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if !indexed {
+		t.Fatal("missing indexed key range", details)
 	}
 }

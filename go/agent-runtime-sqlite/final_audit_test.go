@@ -35,7 +35,7 @@ func TestCancelledCreateDoesNotPublishAndCanRetry(t *testing.T) {
 	}
 	recovered, err := sqlite.OpenExisting(t.Context(), path)
 	if err != nil {
-		t.Fatalf("retry did not publish a complete v1 schema: %v", err)
+		t.Fatalf("retry did not publish a complete current schema: %v", err)
 	}
 	if err := recovered.Close(); err != nil {
 		t.Fatal(err)
@@ -47,7 +47,7 @@ func TestCancelledCreateDoesNotPublishAndCanRetry(t *testing.T) {
 	defer func() { _ = db.Close() }()
 	var version int
 	if err = db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 9 {
-		t.Fatalf("owned retirement schema should be v6: version=%d err=%v", version, err)
+		t.Fatalf("bounded relation progress schema should be v9: version=%d err=%v", version, err)
 	}
 	entries, err := os.ReadDir(filepath.Dir(path))
 	if err != nil {

@@ -1,5 +1,14 @@
 # Breaking changes (pre-stable Beta)
 
+## SQLite bounded child-terminal recovery (v9)
+
+Existing exact v8 Kernel databases require a stopped-writer, backed-up, explicit
+`MigrateV8ToV9` (or `MigrateV8ToV9With` using the original encrypted connection).
+Open never migrates and old/new writers must not mix. This adds an empty durable
+relation delivery watermark table; no original execution or receipt is rewritten.
+Short-lived Hosts may retain the returned `Scheduler.ReconcilePage` cursor as
+scheduling bookkeeping, not dispatch authority.
+
 ## PR #154 — Model original evidence and settlement qualification hard cut
 
 Model intent, logical budget reservation and physical sampling hashes now bind
