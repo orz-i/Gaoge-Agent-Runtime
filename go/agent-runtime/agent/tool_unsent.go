@@ -50,9 +50,9 @@ func exactUnsentToolReservation(actual, expected budget.Reservation) bool {
 }
 
 // commitUnsentTool records the original no-send disposition before any
-// cross-store release or park. Only the live native admission boundary calls
-// it, before entering the ToolChain. It may clear its own speculative marker,
-// never one left by a callback that entered middleware.
+// cross-store release or park. Only the native admission boundary or its
+// qualified actual Dispatch denial can close the original speculative marker,
+// never an unknown callback or provider effect.
 func (r *Runner) commitUnsentTool(ctx context.Context, s kernel.Snapshot, state runState, call tools.Call, disposition unsentToolDisposition) (kernel.Snapshot, error) {
 	if err := state.markUnsentTool(call, disposition); err != nil {
 		return s, err
@@ -246,18 +246,30 @@ func (r *Runner) settleUnsentTool(ctx context.Context, s kernel.Snapshot, state 
 	return r.finishUnsentTool(ctx, next, decoded, call)
 }
 
-// Called only when no ToolChain entry occurred. Caller cancellation cannot
+// Called only when no ToolChain entry occurred or its complete original
+// first-party return proved no dispatch. Caller cancellation cannot
 // interrupt the bounded no-send accounting/CAS handoff.
 func (r *Runner) parkOriginalUnsentTool(ctx context.Context, s kernel.Snapshot, state runState, call tools.Call, ticket *toolBudgetAdmission, cause error) (kernel.Snapshot, bool, error) {
 	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 	defer cancel()
 	reserved := ticket != nil && ticket.ledger.ID != ""
 	next, err := r.settleUnsentTool(cleanup, s, state, call, unsentToolDisposition{Reservation: reserved})
-	return next, true, errors.Join(cause, err)
+	returned := errors.Join(cause, err)
+	// A terminal closure may already have committed its native business
+	// failure. Bind the exact composed return here, while both original
+	// causes are known. A successor or an outer callback cannot do so.
+	if r.rootCallbacks != nil {
+		if original := r.rootCallbacks.knownReturn.Load(); original.matches(next, next, err) {
+			qualified := *original
+			qualified.cause = returned
+			r.rootCallbacks.knownReturn.Store(&qualified)
+		}
+	}
+	return next, true, returned
 }
 
-// A failed dispatch-intent CAS did not enter the ToolChain. The original
-// owner can close an unchanged source or its exact committed successor;
+// Original no-send admission (before entry or an exact returned native
+// denial) can close the unchanged source or its exact committed successor;
 // never rebase onto unrelated state or another call's marker.
 func (r *Runner) parkUnsentAfterDispatchCAS(ctx context.Context, source kernel.Snapshot, e pendingToolExecution, intended runState, ticket *toolBudgetAdmission, cause error) (kernel.Snapshot, bool, error) {
 	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
@@ -275,7 +287,7 @@ func (r *Runner) parkUnsentAfterDispatchCAS(ctx context.Context, source kernel.S
 	return source, true, errors.Join(cause, ErrToolOutcomeUnknown)
 }
 
-// reconcileOriginalUnsentTool consumes only the original native no-entry
+// reconcileOriginalUnsentTool consumes only the original native no-send
 // proof. A successor cannot create this proof from an undispatched ledger,
 // a context error, or a missing provider receipt.
 func (r *Runner) reconcileOriginalUnsentTool(ctx context.Context, s kernel.Snapshot, state runState, g kernel.ChildExecutionGrant, c kernel.OwnedPhysicalCallbackCompletion, q tools.ExecutionRequest, b kernel.OwnedToolReturn) (kernel.Snapshot, error) {
@@ -298,7 +310,7 @@ func (r *Runner) reconcileOriginalUnsentTool(ctx context.Context, s kernel.Snaps
 		return s, err
 	}
 	// The immutable original callback return is itself the durable
-	// no-entry disposition. Confirm its active marker AFTER the ledger
+	// no-send disposition. Confirm its active marker AFTER the ledger
 	// read, then resolve only at that ledger revision. A competing peer
 	// may retire the original grant, but cannot let this stale operation
 	// park a successor's new capacity reservation.
@@ -326,7 +338,7 @@ func (r *Runner) reconcileOriginalUnsentTool(ctx context.Context, s kernel.Snaps
 	if err != nil {
 		return s, err
 	}
-	// Only the original immutable no-entry proof could resolve the ledger
+	// Only the original immutable no-send proof could resolve the ledger
 	// before this CAS. No ledger mutation may follow grant retirement.
 	// Retire only if every other original physical obligation drained.
 	if knownRootPhysicalSettlement(next) {

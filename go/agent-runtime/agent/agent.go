@@ -2353,7 +2353,7 @@ func (runner *Runner) executePending(ctx context.Context, snapshot kernel.Snapsh
 	if ticket != nil {
 		ledgerID = ticket.ledger.ID
 	}
-	result, entered, err := runner.invokePendingTool(ctx, source, execution.call, execution.definition, ticket, release, func(callCtx context.Context) (kernel.Snapshot, error) {
+	result, entered, nativeDenied, err := runner.invokePendingTool(ctx, source, execution.call, execution.definition, ticket, release, func(callCtx context.Context) (kernel.Snapshot, error) {
 		stageAttempted = true
 		frame.recordUnsent(q, ledgerID)
 		staged, stageErr := runner.commitToolTransition(callCtx, source, state, source.Checkpoint, kernel.RunStatusRunning, kernel.EventDraft{Type: "tool.dispatch_intent", Message: execution.call.ID, Wakeup: true})
@@ -2364,7 +2364,13 @@ func (runner *Runner) executePending(ctx context.Context, snapshot kernel.Snapsh
 		execution.state = state
 		return staged, nil
 	}, func() { frame.clearUnsent(q) })
-	if !entered {
+	if !entered || nativeDenied {
+		if nativeDenied {
+			// All actually entered Tool layers returned their exact native
+			// receipts; no downstream Tool was dispatched. Seal the same
+			// no-send witness if the following native closure CAS is lost.
+			frame.recordUnsent(q, ledgerID)
+		}
 		var next kernel.Snapshot
 		var done bool
 		if stageAttempted {
@@ -2477,7 +2483,7 @@ func (runner *Runner) invokePendingTool(
 	permit func(),
 	dispatch func(context.Context) (kernel.Snapshot, error),
 	enter func(),
-) (tools.ExecutionResult, bool, error) {
+) (tools.ExecutionResult, bool, bool, error) {
 	startedAt := runner.clock.Now().UTC()
 	runner.recordTelemetry(ctx, observability.Event{
 		Scope: observability.ScopeToolInvocation, Phase: observability.PhaseStarted,
@@ -2493,6 +2499,7 @@ func (runner *Runner) invokePendingTool(
 		Run: snapshot.Run, Definition: tools.CloneDefinition(definition), Request: executionRequest,
 	}
 	entered := false
+	var nativeDenied *nativeAdmissionDenied
 	result, attempt, err := runner.executeToolWithPermit(ctx, call.ID, snapshot.Run.DeadlineAt, permit, func(callCtx context.Context) (tools.ExecutionResult, error) {
 		if err := callCtx.Err(); err != nil {
 			return tools.ExecutionResult{}, err
@@ -2533,8 +2540,21 @@ func (runner *Runner) invokePendingTool(
 			result, err := runner.executor.Execute(nextCtx, executionRequest)
 			return authority.record(result, err)
 		})
-		return authority.validate(out, chainErr)
+		out, chainErr = authority.validate(out, chainErr)
+		if denial, claimed := authority.admissionReturn(callCtx, out, chainErr); claimed {
+			if denial == nil {
+				runner.noteRootCallbackFailure(ErrToolOutcomeUnknown)
+				return unqualifiedToolOutcome(chainErr)
+			}
+			nativeDenied = denial
+		}
+		return out, chainErr
 	})
+	if nativeDenied != nil {
+		// A caller cancellation or timeout after this exact returned
+		// native denial cannot turn it into an unknown provider effect.
+		result, err = tools.ExecutionResult{}, nativeDenied
+	}
 	endedAt := runner.clock.Now().UTC()
 	phase := observability.PhaseCompleted
 	errorCode := ""
@@ -2559,7 +2579,7 @@ func (runner *Runner) invokePendingTool(
 		Status: string(snapshot.Run.Status), OperationID: call.ID, Operation: definition.Key,
 		Attempt: attempt, ErrorCode: errorCode, ObservedAt: endedAt, Duration: endedAt.Sub(startedAt),
 	})
-	return result, entered, err
+	return result, entered, nativeDenied != nil, err
 }
 
 func (runner *Runner) handlePendingToolExecutionError(

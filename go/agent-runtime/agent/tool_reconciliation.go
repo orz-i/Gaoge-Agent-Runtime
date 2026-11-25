@@ -28,9 +28,9 @@ func (fn ToolOutcomeVerifierFunc) VerifyCommittedTool(ctx context.Context, reque
 	return fn(ctx, request)
 }
 
-// ReconcileToolOutcome consumes an original sealed no-entry/terminal return
+// ReconcileToolOutcome consumes an original sealed no-send/terminal return
 // or a provider-verified external COMMIT without invoking Executor.Execute.
-// A no-entry return reconciles admission only; it never mints a Tool result. The host authenticates the caller and supplies
+// A no-send return reconciles admission only; it never mints a Tool result. The host authenticates the caller and supplies
 // a trusted ToolOutcomeVerifier in Runner dependencies; this method does
 // not accept an arbitrary result or "committed" flag from a client.
 func (runner *Runner) ReconcileToolOutcome(ctx context.Context, runID string,

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/callbackscope"
@@ -124,7 +125,25 @@ func (a *BoundedBudgetAdapter) Tool(ctx context.Context, inv plugin.ToolInvocati
 	if current.ID != id || current.RunID != inv.Run.ID || current.RequestHash != kernel.ManagedDigest(inv.Request) || current.Requested != (budget.Usage{ToolCalls: 1}) || current.Status != budget.ReservationHeld {
 		return tools.ExecutionResult{}, ErrToolReceiptMismatch
 	}
-	if _, err = a.coordinator.Dispatch(ctx, l.ID, id); err != nil {
+	dispatched, err := a.coordinator.DispatchTool(ctx, l.ID, originalToolReservation(inv.Request))
+	if err != nil {
+		// Actual, definitive denial before Next. A Store error after a
+		// possible Dispatch commit is not a native no-send return.
+		if authority != nil && authority.budget.cancelledDispatch(dispatched, err) {
+			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+			projectErr := a.ports.Project(cleanup, dispatched)
+			cancel()
+			if projectErr != nil {
+				return tools.ExecutionResult{}, errors.Join(err, projectErr)
+			}
+			denial := authority.recordAdmissionDenied(ctx, a, struct {
+				Invocation plugin.ToolInvocation
+				Ledger     budget.Ledger
+			}{inv, dispatched}, err)
+			if denial != nil {
+				return tools.ExecutionResult{}, denial
+			}
+		}
 		return tools.ExecutionResult{}, err
 	}
 	result, callErr := next(ctx)

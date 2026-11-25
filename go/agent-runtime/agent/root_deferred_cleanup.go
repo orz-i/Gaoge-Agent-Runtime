@@ -45,8 +45,25 @@ func (runner *Runner) RootDeferredCleanupEligibility(ctx context.Context, runID 
 	if inv, ok := activeModelInvocation(state); ok && inv.Status == ModelInvocationPending && inv.DispatchAttempt != 0 {
 		return RootDeferredCleanupScope{}, ErrModelOutcomeUnknown
 	}
-	if (state.ToolDispatchID == "" && len(state.DeferredChildren) == 0) || (state.ToolDispatchID != "" && (state.ToolWait == nil || state.ToolWait.Kind != tools.PendingChildTerminal || state.ToolWait.CallID != state.ToolDispatchID)) {
+	if state.ToolDispatchID == "" && len(state.DeferredChildren) == 0 {
 		return RootDeferredCleanupScope{}, ErrToolOutcomeUnknown
+	}
+	if state.ToolDispatchID != "" {
+		if state.ToolWait == nil {
+			// An already-returned native no-send denial is an original
+			// admission obligation, not a provider result. Elected control
+			// must be able to consume it without another business Resume.
+			call, ok := nextPendingCall(state)
+			if !ok || call.ID != state.ToolDispatchID || !completion.MatchesReturnSnapshot(snapshot) {
+				return RootDeferredCleanupScope{}, ErrToolOutcomeUnknown
+			}
+			b, found, err := originalCallReturn(snapshot, completion, tools.ExecutionRequest{RunID: runID, Call: call})
+			if err != nil || !found || !b.Unsent {
+				return RootDeferredCleanupScope{}, errors.Join(ErrToolOutcomeUnknown, err)
+			}
+		} else if state.ToolWait.Kind != tools.PendingChildTerminal || state.ToolWait.CallID != state.ToolDispatchID {
+			return RootDeferredCleanupScope{}, ErrToolOutcomeUnknown
+		}
 	}
 	for _, child := range state.DeferredChildren {
 		if child.Wait.Kind != tools.PendingChildTerminal || child.Call.ID != child.Wait.CallID {
@@ -56,11 +73,12 @@ func (runner *Runner) RootDeferredCleanupEligibility(ctx context.Context, runID 
 	return RootDeferredCleanupScope{grant: grant, valid: true}, nil
 }
 
-// ReconcileRootDeferredChildren makes only trusted read-only receipt lookups.
+// ReconcileRootDeferredChildren consumes the exact original no-send return
+// and/or read-only child receipts. It never enters a new Agent callback.
 // Active remote cancellation belongs to the caller's separate elected protocol.
 func (runner *Runner) ReconcileRootDeferredChildren(ctx context.Context, runID string, revision uint64) (kernel.Snapshot, error) {
-	if runner == nil || runner.toolOutcomeVerifier == nil {
-		return kernel.Snapshot{}, ErrToolVerificationRequired
+	if runner == nil {
+		return kernel.Snapshot{}, ErrInvalidRequest
 	}
 	scope, err := runner.RootDeferredCleanupEligibility(ctx, runID, revision)
 	if err != nil {
@@ -72,6 +90,24 @@ func (runner *Runner) ReconcileRootDeferredChildren(ctx context.Context, runID s
 	}
 	if snapshot.Run.Revision != revision {
 		return snapshot, kernel.ErrConflict
+	}
+	if state.ToolDispatchID != "" && state.ToolWait == nil {
+		// Eligibility proved this exact original sealed no-send return.
+		// Reuse the native receipt-only CAS, not a new dispatch/lookup.
+		snapshot, err = runner.reconcileRootToolReceipt(ctx, snapshot, state, scope.grant, state.ToolDispatchID, false)
+		if err != nil {
+			return snapshot, err
+		}
+		state, err = decodeState(snapshot.State)
+		if err != nil {
+			return snapshot, err
+		}
+		if state.ToolDispatchID == "" && len(state.DeferredChildren) == 0 {
+			return snapshot, nil
+		}
+	}
+	if runner.toolOutcomeVerifier == nil {
+		return snapshot, ErrToolVerificationRequired
 	}
 	if state.ToolDispatchID == "" && len(state.DeferredChildren) > 0 {
 		snapshot, state, err = runner.stageRootDeferredReceipt(ctx, snapshot, state, scope.grant)

@@ -148,3 +148,220 @@ func TestHarnessElectedCancellationSurvivesNativeRunAdmissionDenial(t *testing.T
 		t.Fatal("original cancellation election retained fence")
 	}
 }
+
+type nativeDispatchCancelKernelStore struct {
+	*memory.Store
+	action      func()
+	pending     bool
+	hits        int
+	closureCuts int
+	cuts        int
+}
+
+func (s *nativeDispatchCancelKernelStore) ApplyExecution(ctx context.Context, l kernel.ExecutionLease, rev uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
+	for _, event := range m.Events {
+		if event.Type == "tool.admission_unsent" && s.closureCuts > 0 {
+			s.closureCuts--
+			s.cuts++
+			return kernel.Snapshot{}, errors.New("native unsent closure cut")
+		}
+	}
+	next, err := s.Store.ApplyExecution(ctx, l, rev, m)
+	if err == nil && s.action != nil {
+		for _, e := range m.Events {
+			if e.Type == "tool.dispatch_intent" {
+				s.pending = true
+			}
+		}
+	}
+	return next, err
+}
+func (s *nativeDispatchCancelKernelStore) CheckExecution(ctx context.Context, id string, l *kernel.ExecutionLease) error {
+	err := s.Store.CheckExecution(ctx, id, l)
+	if err == nil && s.pending && s.action != nil {
+		action := s.action
+		s.action = nil
+		s.pending = false
+		s.hits++
+		action()
+	}
+	return err
+}
+
+func TestHarnessElectedCancellationAtActualToolDispatch(t *testing.T) {
+	for _, order := range []string{"none", "outer", "inner", "closure-cas"} {
+		t.Run(order, func(t *testing.T) { testHarnessCancelAtActualToolDispatch(t, order) })
+	}
+}
+func testHarnessCancelAtActualToolDispatch(t *testing.T, timelineOrder string) {
+	ctx := t.Context()
+	store := &nativeAdmissionCancelStore{MemoryStore: NewMemoryStore()}
+	ks := &nativeDispatchCancelKernelStore{Store: memory.NewStore()}
+	rt, err := kernel.New(kernel.Dependencies{Store: ks})
+	if err != nil {
+		t.Fatal(err)
+	}
+	shared, err := NewBudgetAuthority(BudgetAuthorityDependencies{Store: store, Clock: hostedBudgetClock{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := shared.Adapter()
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := &nativeAdmissionCancelModel{store: store}
+	physical := 0
+	reg, err := tools.NewRegistry([]tools.Registration{{Definition: tools.Definition{Key: "local.read", Name: "read", InputSchema: json.RawMessage(`{"type":"object"}`)}, Handler: tools.HandlerFunc(func(_ context.Context, q tools.ExecutionRequest) (tools.ExecutionResult, error) {
+		physical++
+		return tools.ExecutionResult{Content: json.RawMessage("{}"), Receipt: tools.Receipt{ExecutionID: q.Call.ID, Disposition: "committed"}}, nil
+	})}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	layers := []plugin.ToolMiddleware{b}
+	if timelineOrder != "none" && timelineOrder != "closure-cas" {
+		timeline, e := NewBoundedToolTimelineAdapter(store, hostedBudgetClock{}, nil)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if timelineOrder == "outer" {
+			layers = []plugin.ToolMiddleware{timeline, b}
+		} else {
+			layers = append(layers, timeline)
+		}
+	}
+	native, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, RunMiddleware: []plugin.RunMiddleware{b}, ModelMiddleware: []plugin.ModelMiddleware{b}, ToolMiddleware: layers})
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, err := NewRunner(Dependencies{Runtime: rt, Agent: native, Store: store, Clock: hostedBudgetClock{}, Budget: shared, Catalog: reg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := StartRequest{HostThread: HostRef{Kind: "conversation", ID: "native-admission-thread"}, HostTurn: HostRef{Kind: "conversation_turn", ID: "native-admission-turn"}, Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "native-admission-thread"}, Goal: "read", Config: ConfigSnapshot{AgentSpec: AgentSpec{Model: "fixture", ToolKeys: []string{"local.read"}}, ToolPolicies: []ToolPolicySnapshot{{Key: "local.read", DefinitionVersion: "v1", ExecutionMode: "local_dispatch", ApprovalMode: "never"}}, SharedBudget: &budget.Limits{MaxLLMCalls: 2, MaxToolCalls: 1}}}
+	started, err := host.StartAgentTurn(ctx, req)
+	if err != nil || started.Turn.Status != TurnRunning || m.calls != 1 || physical != 0 {
+		t.Fatal("capacity wait setup", err, started.Turn.Status, m.calls, physical)
+	}
+	inv, ok := TopLevelInvocation(started)
+	if !ok {
+		t.Fatal("missing root invocation")
+	}
+	before, err := rt.Load(ctx, inv.ExecutionRefID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ledger, err := store.LoadBudget(ctx, started.Turn.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := "tool:" + inv.ExecutionRefID + ":held-call"
+	if ledger.Reservations[id].Status != budget.ReservationWaiting {
+		t.Fatal("missing original capacity wait", ledger.Reservations[id])
+	}
+
+	// Release peer capacity, then make the elected cancellation race AFTER
+	// the last Ledger read and successful native Store check, before actual
+	// Budget Dispatch. No extra guard read can repair this interleaving.
+	c := budget.Coordinator{Store: store}
+	if _, err = c.Release(ctx, started.Turn.ID, "peer-slot"); err != nil {
+		t.Fatal(err)
+	}
+	var initialCancelErr error
+	if timelineOrder == "closure-cas" {
+		ks.closureCuts = 2
+	}
+	ks.action = func() {
+		_, initialCancelErr = host.Cancel(ctx, started.Turn.ID, "cancel at actual native dispatch")
+	}
+	got, obs, resumeErr := native.ObservePhysicalCall(ctx, inv.ExecutionRefID, plugin.RunResume, func(c context.Context) (kernel.Snapshot, error) {
+		return native.Resume(c, inv.ExecutionRefID, before.Run.Revision)
+	})
+	if ks.hits != 1 || !errors.Is(initialCancelErr, kernel.ErrChildExecutionBusy) {
+		t.Fatal("original elected cancellation cut missing", ks.hits, initialCancelErr)
+	}
+	if !errors.Is(resumeErr, budget.ErrExhausted) || physical != 0 || m.calls != 1 {
+		t.Fatal("actual native dispatch denial was not returned", resumeErr, got.Run, obs.Kind(), physical, m.calls)
+	}
+	if timelineOrder == "closure-cas" {
+		if ks.cuts != 2 || !errors.Is(resumeErr, agent.ErrRootOutcomeUnknown) || obs.Kind() != agent.PhysicalCallDurableYield {
+			t.Fatal("original native no-send return missing at cleanup cut", resumeErr, obs.Kind(), ks.cuts)
+		}
+		g, e := rt.LookupChildExecution(ctx, inv.ExecutionRefID)
+		if e != nil {
+			t.Fatal(e)
+		}
+		c, e := rt.LookupOwnedPhysicalCallbackReturn(ctx, g)
+		b, found, bErr := c.ToolReturns.Find("held-call")
+		if e != nil || bErr != nil || !c.HostCompleted || !found || !b.Unsent {
+			t.Fatal("original no-send return not sealed", c, e, b, bErr)
+		}
+	} else {
+		if errors.Is(resumeErr, agent.ErrRootOutcomeUnknown) || obs.Kind() != agent.PhysicalCallSettled {
+			t.Fatal("actual native dispatch denial did not close its original grant", resumeErr, got.Run, obs.Kind())
+		}
+		if _, err = rt.LookupChildExecution(ctx, inv.ExecutionRefID); !errors.Is(err, kernel.ErrNotFound) {
+			t.Fatal("actual native dispatch denial retained grant", err)
+		}
+		if _, marked, err := agent.FrozenPendingDispatch(got); err != nil || marked {
+			t.Fatal("native denial retained marker", err)
+		}
+	}
+	stopped, err := host.Cancel(ctx, started.Turn.ID, "finish original elected cancellation")
+	if err != nil || !terminalTurnStatus(stopped.Turn.Status) {
+		t.Fatal("original cancellation could not finish", err, stopped.Turn.Status)
+	}
+	final, err := rt.Load(ctx, inv.ExecutionRefID)
+	if timelineOrder == "closure-cas" {
+		if err != nil || final.Run.Status != kernel.RunStatusCancelled {
+			t.Fatal("elected cancellation could not consume original no-send return", err, final.Run)
+		}
+	} else if err != nil || final.Run.Status != kernel.RunStatusFailed || final.Run.ErrorCode != "agent.shared_budget_exhausted" {
+		t.Fatal("original terminal denial was not preserved", err, final.Run)
+	}
+	if _, err = rt.LookupChildExecution(ctx, inv.ExecutionRefID); !errors.Is(err, kernel.ErrNotFound) {
+		t.Fatal("elected cancellation retained original grant", err)
+	}
+	ledger, err = store.LoadBudget(ctx, started.Turn.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := ledger.Reservations[id]
+	if !ledger.Cancelled || r.Status != budget.ReservationReleased || r.Dispatched || r.Active || r.Usage != (budget.Usage{}) || len(r.Receipt) != 0 {
+		t.Fatal("cancelled reservation acquired effects", r)
+	}
+	items, err := store.ListItems(ctx, started.Turn.ID, 0, 500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ActiveCancellationFence(items) {
+		t.Fatal("elected cancellation retained fence")
+	}
+	startedItems, failedItems := 0, 0
+	for _, item := range items {
+		if item.Kind != ItemTool {
+			continue
+		}
+		var p toolTimelinePayload
+		if err = json.Unmarshal(item.Payload, &p); err != nil || p.ExecutionID != "" || p.Disposition != "" {
+			t.Fatal("invented physical Tool result", item, err)
+		}
+		switch item.Status {
+		case ItemStarted:
+			startedItems++
+		case ItemFailed:
+			failedItems++
+		case ItemWaiting, ItemCompleted, ItemCancelled:
+			t.Fatal("incorrect Tool timeline", item)
+		default:
+			t.Fatal("unknown Tool item status", item)
+		}
+	}
+	want := 0
+	if timelineOrder == "outer" {
+		want = 1
+	}
+	if startedItems != want || failedItems != want {
+		t.Fatal("outer timeline did not close exact admission attempt", startedItems, failedItems, want)
+	}
+}

@@ -57,7 +57,7 @@ func sameRecoveredCall(a, b tools.Call) bool {
 
 // reconcileOriginalToolReturnIfPresent never consults a provider or dispatches
 // work. Only a fully returned original Root callback with sealed settlement
-// or native no-entry proof can select this path. Missing/opaque completion
+// or native no-send proof can select this path. Missing/opaque completion
 // remains unresolved.
 func (runner *Runner) reconcileOriginalToolReturnIfPresent(ctx context.Context, s kernel.Snapshot, state runState) (kernel.Snapshot, bool, error) {
 	if s.Run.Status != kernel.RunStatusRunning || s.Run.ParentRunID != "" || state.ToolWait != nil || state.ToolDispatchID == "" {

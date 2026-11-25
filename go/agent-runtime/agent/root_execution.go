@@ -182,7 +182,7 @@ func (runner *Runner) executeOwnedRoot(ctx context.Context, current kernel.Snaps
 	settled := hostComplete && knownRootPhysicalSettlement(latest)
 	outcome := kernel.OwnedPhysicalCallbackOutcome{HostCompleted: hostComplete, LeaseOwned: !external}
 	pendingCall, pending, _ := FrozenPendingDispatch(latest)
-	settledCall := false
+	returnedCall := false
 	allApproved := false
 	if hostComplete {
 		// Approval is captured at the actual Call return, not inferred
@@ -193,8 +193,8 @@ func (runner *Runner) executeOwnedRoot(ctx context.Context, current kernel.Snaps
 		}
 		outcome.ToolReturns = bindings
 		allApproved = approved
-		if b, found, _ := bindings.Find(pendingCall.ID); pending && found && b.ReceiptDigest != "" {
-			settledCall = true
+		if b, found, _ := bindings.Find(pendingCall.ID); pending && found && (b.ReceiptDigest != "" || b.Unsent) {
+			returnedCall = true
 		}
 	}
 	// Control custody describes the actual whole executing callback. Original
@@ -240,7 +240,7 @@ func (runner *Runner) executeOwnedRoot(ctx context.Context, current kernel.Snaps
 	if !settled {
 		// The enclosing native call has really returned. The Kernel grant still
 		// fences the Tool until an independent receipt settles the original intent.
-		if hostComplete && pending && runner.scopedRootCallbacks && (runner.toolOutcomeVerifier != nil || settledCall) {
+		if hostComplete && pending && runner.scopedRootCallbacks && (runner.toolOutcomeVerifier != nil || returnedCall) {
 			recordPhysicalObservation(ctx, latest.Run.ID, PhysicalCallDurableYield)
 		}
 		state, stateErr := decodeState(latest.State)

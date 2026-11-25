@@ -125,7 +125,7 @@ func (runner *Runner) resumeDeferredChildGrantCancellation(
 }
 
 // cleanupReturnedRootChildren uses the already elected cancellation and frozen
-// child routes. Eligibility is an observation, never authority to dispatch:
+// native no-send/child return evidence. Eligibility is an observation, never authority to dispatch:
 // the original cancellation intent and, when configured, cancelled shared
 // budget supply that authority. Unknown or still-running Host callbacks cannot enter this path.
 func (runner *Runner) cleanupReturnedRootChildren(ctx context.Context, turn Turn, intent Item, invocation Invocation, reason string) (attempted bool, outcome error) {

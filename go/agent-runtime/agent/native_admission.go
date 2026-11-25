@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"sync/atomic"
 
@@ -76,6 +77,18 @@ type nativeAdmissionDenied struct{ cause error }
 
 func (e *nativeAdmissionDenied) Error() string { return e.cause.Error() }
 func (e *nativeAdmissionDenied) Unwrap() error { return e.cause }
+func (e *nativeAdmissionDenied) matches(err error) bool {
+	return e != nil && sameOriginalToolError(e, err)
+}
+
+// Shared native refusal identity: only an actual trusted adapter receipt can
+// mint it. The exact original invocation must independently consume it.
+func recordNativeAdmissionDenial(ctx context.Context, adapter *BoundedBudgetAdapter, operation string, source any, cause error) *nativeAdmissionDenied {
+	if cause == nil || !callbackscope.Record(ctx, adapter, operation, source) {
+		return nil
+	}
+	return &nativeAdmissionDenied{cause: cause}
+}
 
 func recordBudgetRunDenial(ctx context.Context, adapter *BoundedBudgetAdapter, inv plugin.RunInvocation, l budget.Ledger) error {
 	frame, _ := callbackscope.RunCall(ctx).(*nativeRunAdmission)
@@ -87,14 +100,11 @@ func recordBudgetRunDenial(ctx context.Context, adapter *BoundedBudgetAdapter, i
 	}
 	// The real native adapter owns this receipt. A typed budget error
 	// returned by a Host port or an unrelated callback cannot set it.
-	if !callbackscope.Record(ctx, adapter, "budget.run.admission_denied", struct {
+	denial := recordNativeAdmissionDenial(ctx, adapter, "budget.run.admission_denied", struct {
 		Invocation plugin.RunInvocation
 		Ledger     budget.Ledger
-	}{inv, l}) {
-		return nil
-	}
-	denial := &nativeAdmissionDenied{cause: budget.ErrExhausted}
-	if !frame.denial.CompareAndSwap(nil, denial) {
+	}{inv, l}, budget.ErrExhausted)
+	if denial == nil || !frame.denial.CompareAndSwap(nil, denial) {
 		return nil
 	}
 	return denial
@@ -110,7 +120,7 @@ func (r *Runner) invokeNativeRun(ctx context.Context, source kernel.Snapshot, in
 		return next(c)
 	})
 	if denial := frame.denial.Load(); denial != nil {
-		if frame.entered.Load() || !reflect.DeepEqual(result, kernel.Snapshot{}) || !sameOriginalToolError(denial, err) {
+		if frame.entered.Load() || !reflect.DeepEqual(result, kernel.Snapshot{}) || !denial.matches(err) {
 			r.noteRootCallbackFailure(ErrRootOutcomeUnknown)
 			return result, err
 		}
@@ -120,4 +130,23 @@ func (r *Runner) invokeNativeRun(ctx context.Context, source kernel.Snapshot, in
 		return source, err
 	}
 	return result, err
+}
+
+// The actual DispatchTool return, not the earlier admission read, decides
+// whether native ledger cancellation refused this exact original Tool.
+// A speculative dispatched candidate, missing/foreign reservation, or
+// unknown storage failure cannot qualify this return.
+func (t *toolBudgetAdmission) cancelledDispatch(l budget.Ledger, err error) bool {
+	if t == nil || !errors.Is(err, budget.ErrExhausted) || l.ID == "" || l.ID != t.ledger.ID || l.Limits != t.ledger.Limits || l.Revision < t.ledger.Revision {
+		return false
+	}
+	old, ok := t.ledger.Runs[t.request.RunID]
+	actual, registered := l.Runs[t.request.RunID]
+	if !ok || !registered || old != actual || !l.RunCancelled(t.request.RunID) {
+		return false
+	}
+	expected := originalToolReservation(t.request)
+	res, found := l.Reservations[expected.ID]
+	return found && exactUnsentToolReservation(res, expected) &&
+		(res.Status == budget.ReservationHeld || res.Status == budget.ReservationWaiting || res.Status == budget.ReservationReleased)
 }

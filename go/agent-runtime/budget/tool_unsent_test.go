@@ -72,3 +72,52 @@ func TestResolveUnsentToolPreservesOriginalReservationAndRevision(t *testing.T) 
 		})
 	}
 }
+
+// The actual CAS, not an earlier preview, owns physical admission. Native
+// cancellation denies only the exact original undispatched reservation.
+func TestDispatchToolExactIdentityAndElectedCancellation(t *testing.T) {
+	for _, mode := range []string{"cancel-before-dispatch", "dispatch-before-cancel"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx := t.Context()
+			c := budget.Coordinator{Store: budget.NewMemoryLedgerStore()}
+			if _, err := c.Ensure(ctx, "scope", budget.Limits{MaxToolCalls: 1}); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := c.RegisterRun(ctx, "scope", "run", budget.RunBudget{}); err != nil {
+				t.Fatal(err)
+			}
+			q := budget.Reservation{ID: "tool:run:call", RunID: "run", RequestHash: "original", Requested: budget.Usage{ToolCalls: 1}}
+			held, err := c.Reserve(ctx, "scope", q, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			foreign := q
+			foreign.RequestHash = "foreign"
+			if rejected, err := c.DispatchTool(ctx, "scope", foreign); !errors.Is(err, budget.ErrLedgerConflict) || rejected.Revision != held.Revision {
+				t.Fatal("foreign dispatch acquired authority", err, rejected.Revision)
+			}
+			if mode == "dispatch-before-cancel" {
+				dispatched, err := c.DispatchTool(ctx, "scope", q)
+				if err != nil || !dispatched.Reservations[q.ID].Dispatched {
+					t.Fatal("original dispatch failed", err)
+				}
+			}
+			cancelled, err := c.CancelRoot(ctx, "scope", "run")
+			if err != nil {
+				t.Fatal(err)
+			}
+			rejected, err := c.DispatchTool(ctx, "scope", q)
+			if rejected.Revision != cancelled.Revision {
+				t.Fatal("denied dispatch mutated ledger", rejected.Revision, cancelled.Revision)
+			}
+			res := rejected.Reservations[q.ID]
+			if mode == "cancel-before-dispatch" {
+				if !errors.Is(err, budget.ErrExhausted) || res.Status != budget.ReservationReleased || res.Active || res.Dispatched || res.Usage != (budget.Usage{}) {
+					t.Fatal("original unsent denial not returned", err, res)
+				}
+			} else if !errors.Is(err, budget.ErrWaiting) || res.Status != budget.ReservationHeld || !res.Dispatched {
+				t.Fatal("previous physical dispatch incorrectly certified unsent", err, res)
+			}
+		})
+	}
+}

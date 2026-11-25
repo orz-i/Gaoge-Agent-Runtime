@@ -51,8 +51,9 @@ func (f *originalToolFrame) recordHold(q tools.ExecutionRequest, ledgerID, pendi
 	}
 }
 
-// Only the native pre-entry boundary sets/clears this flag. It survives an
-// uncertain intent or cleanup CAS, but never an actual ToolChain invocation.
+// Only the native pre-entry boundary or the complete original native Tool
+// admission denial sets this flag. It never survives an unknown or actual
+// physical Tool effect.
 func (f *originalToolFrame) recordUnsent(q tools.ExecutionRequest, ledgerID string) {
 	if f != nil && f.runID == q.RunID {
 		f.returns.Store(q.Call.ID, kernel.OwnedToolReturn{CallID: q.Call.ID, RequestDigest: kernel.ManagedDigest(q), LedgerID: ledgerID, Unsent: true})

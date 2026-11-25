@@ -86,8 +86,9 @@ type OwnedToolReturn struct {
 	// PendingKind records an actual returned pending disposition, not an
 	// inferred external outcome. Empty means no qualified pending return.
 	PendingKind string `json:",omitempty"`
-	// Unsent attests that the original native callback never entered the
-	// ToolChain after preparing its dispatch intent. It is not a receipt.
+	// Unsent attests that the original native callback proved no physical
+	// Tool dispatch: either no chain entry or an exact returned first-party
+	// dispatch denial before Next. It is not a Tool result receipt.
 	Unsent bool `json:",omitempty"`
 }
 
