@@ -113,9 +113,14 @@ or park; both operations verify the original undispatched, zero-usage
 reservation at its exact ledger revision. The original returned Root Grant
 can also seal no-entry proof for an uncertain dispatch-intent ACK. That
 proof reconciles the original marker without a provider lookup, and never
-qualifies a Tool result. Once ToolChain entry occurs, neither a cancellation
-nor a typed error can grant no-send recovery. Pending physical effects and
-their settlement continue to use the existing Call-return proof.
+qualifies a Tool result. ToolChain entry alone cannot prove no-send, but
+the actual native Budget Dispatch CAS can definitively refuse the exact
+original reservation under elected ledger cancellation. If that frame has
+not called Next and every entered Tool layer returns its own trusted receipt
+and the exact original denial, Runtime consumes the same native no-send
+disposition. A speculative dispatched candidate, arbitrary error or opaque
+entered layer does not qualify. Pending physical effects and their settlement
+continue to use the existing Call-return proof.
 
 Native Run admission uses the same exact-return qualification for all
 Start/Prepare/Resume/Approval and managed continuation invocations. The
@@ -125,6 +130,12 @@ and completed callback lifetime, together with the unchanged original
 state, qualify retirement. The elected Kernel control retains authority
 over business cancellation. Host projection failure, opaque error
 classification, and unresolved original effects are not native returns.
+The actual Tool denial uses the same return identity, with a per-attempt
+callback qualification before no-send consumption and the existing whole
+Grant return qualification before retirement. The original elected Harness
+cancellation can reconcile that sealed return with earlier physical child
+obligations without entering a new Agent invocation or querying a result
+verifier for the unsent Call.
 
 Every dispatched Model invocation durably binds the exact physical SDK request
 through its `SamplingPlan`. Context and SharedBudget admission freeze that plan

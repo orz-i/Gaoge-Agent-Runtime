@@ -53,7 +53,8 @@ Local Tool permits now precede SharedBudget reservation. Physical intent is
 committed at the first actual ToolChain entry rather than before waiting for
 a permit or delivering a live observer event. The original no-entry witness
 survives intent ACK and the final original-ledger, deadline, Context and
-execution-owner checks; only actual chain entry discards it. A native no-entry disposition
+execution-owner checks; actual chain entry discards that witness unless a
+complete original first-party denial subsequently proves no dispatch. A native no-send disposition
 is persisted before releasing a permanently denied reservation or parking a
 retryable one. `Coordinator.ResolveUnsentTool` checks the exact original
 reservation and ledger revision, requires zero usage/no dispatch, and cannot
@@ -75,6 +76,20 @@ The existing whole-callback and native state checks remain mandatory for
 Root/parented Grant retirement. This leaves the business Run and checkpoint
 unchanged for the elected Kernel cancellation. Opaque errors, masked or
 augmented denial returns, and failed projections remain unqualified.
+
+The actual native Tool Budget Dispatch now checks exact original reservation
+identity and elected Ledger cancellation in its CAS transition, not a second
+read-before-send guard. A definitive native denial before Next records the
+same private admission return identity as the Run Budget frame. The original
+Tool attempt must return that exact error, no Tool result and acknowledged
+receipts for every entered first-party layer. Only then can the existing
+unsent disposition and `OwnedToolReturn.Unsent` close or recover the original
+physical marker. An outer bounded Timeline may record the entered attempt's
+Started/Failed observations, but no physical result or charge. Elected
+Harness cancellation can consume sealed no-send proof through existing
+deferred cleanup without new execution or provider verification, including
+when earlier original child receipts still need to drain. Unknown Dispatch
+write outcomes, opaque entered layers and failed projections remain fenced.
 
 ## PR #154 — Model original evidence and settlement qualification hard cut
 
