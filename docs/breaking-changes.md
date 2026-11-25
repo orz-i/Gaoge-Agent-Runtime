@@ -51,7 +51,9 @@ automatically migrated or granted recovery authority.
 
 Local Tool permits now precede SharedBudget reservation. Physical intent is
 committed at the first actual ToolChain entry rather than before waiting for
-a permit or delivering a live observer event. A native no-entry disposition
+a permit or delivering a live observer event. The original no-entry witness
+survives intent ACK and the final original-ledger, deadline, Context and
+execution-owner checks; only actual chain entry discards it. A native no-entry disposition
 is persisted before releasing a permanently denied reservation or parking a
 retryable one. `Coordinator.ResolveUnsentTool` checks the exact original
 reservation and ledger revision, requires zero usage/no dispatch, and cannot
@@ -63,6 +65,16 @@ custody. Caller cancellation before entry is a resumable no-send yield, not a
 business cancellation of the Run. A live ToolStarted observation alone is
 not a durable physical dispatch or receipt. Old unresolved markers without
 original no-entry proof are not reinterpreted as unsent.
+
+All native RunChain entrypoints (including managed continuation) now consume
+the same invocation-bound admission return. A bounded Run Budget frame that
+observes an elected cancellation and acknowledges its original projection
+without entering Next records the actual native denial; only the exact
+returned error from that invocation qualifies the existing original snapshot.
+The existing whole-callback and native state checks remain mandatory for
+Root/parented Grant retirement. This leaves the business Run and checkpoint
+unchanged for the elected Kernel cancellation. Opaque errors, masked or
+augmented denial returns, and failed projections remain unqualified.
 
 ## PR #154 — Model original evidence and settlement qualification hard cut
 

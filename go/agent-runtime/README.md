@@ -105,8 +105,9 @@ ledger before entering Tool middleware or writing a dispatch intent. An
 unsent wait is not a provider Pending receipt, and a later owner can retry
 admission only with the same Call, committed authorization and bound ledger.
 A local Tool permit is acquired before shared capacity, and the physical
-intent is written immediately before the first ToolChain entry. Before
-entry, a native no-send disposition distinguishes terminal admission denial
+intent is written immediately before the first ToolChain entry. The no-entry
+witness survives the intent acknowledgement and the final local and original
+ledger admission checks. Before entry, a native no-send disposition distinguishes terminal admission denial
 from resumable interruption. The disposition commits before ledger release
 or park; both operations verify the original undispatched, zero-usage
 reservation at its exact ledger revision. The original returned Root Grant
@@ -115,6 +116,15 @@ proof reconciles the original marker without a provider lookup, and never
 qualifies a Tool result. Once ToolChain entry occurs, neither a cancellation
 nor a typed error can grant no-send recovery. Pending physical effects and
 their settlement continue to use the existing Call-return proof.
+
+Native Run admission uses the same exact-return qualification for all
+Start/Prepare/Resume/Approval and managed continuation invocations. The
+actual bounded Budget Run frame can record an acknowledged original
+cancellation denial before entering Next. Only its invocation-bound return
+and completed callback lifetime, together with the unchanged original
+state, qualify retirement. The elected Kernel control retains authority
+over business cancellation. Host projection failure, opaque error
+classification, and unresolved original effects are not native returns.
 
 Every dispatched Model invocation durably binds the exact physical SDK request
 through its `SamplingPlan`. Context and SharedBudget admission freeze that plan
