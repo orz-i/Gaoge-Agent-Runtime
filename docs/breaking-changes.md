@@ -21,6 +21,18 @@ custody; outstanding Call bindings independently identify held reservations
 and settled receipts. Recovery must resolve every original obligation before
 retiring the Grant. Historical empty bindings grant no new authority.
 
+`harness.BudgetAuthority.VerifiedToolOutcomeVerifier` is removed. Compose the
+original read-only `agent.ToolOutcomeVerifier` directly and retain the native
+`BoundedBudgetAdapter` in the Tool chain; only Runtime settles a new held
+reservation and encodes its original receipt. Newly admitted Call bindings
+never accept old unsealed verifier-owned receipt bytes. The original approved
+checkpoint or completed approval-policy decision and exact independent owner
+result are bound to the original Call return; successor consumption does not
+repeat approval. Staged original results qualify observation/control against
+the same independent owner before local usage is incremented. Existing
+opaque/legacy custody is not upgraded. Drain or quarantine old in-flight
+executions before switching this unreleased cohort; no new SQL schema version.
+
 ## PR #154 — Model original evidence and settlement qualification hard cut
 
 Model intent, logical budget reservation and physical sampling hashes now bind

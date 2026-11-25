@@ -79,6 +79,15 @@ multiple outstanding Tool Calls, each to its own original ledger and request
 only the original whole callback and all resolved obligations qualify Grant
 retirement. Result classification is not a new Grant control custody.
 
+The original Call return also binds the actual completed approval policy or
+approved checkpoint and (when available) the exact independent owner result.
+A recovered Tool consumes that proof without a new approval callback. The
+read-only owner check includes staged recovered results as well as consumed
+receipts; neither zero local usage nor a successor callback upgrades original
+custody. Only the native Tool Budget adapter settles the original ledger
+reservation. Host outcome verifiers read evidence and must not write Budget
+settlements. Newly bound Calls reject unsealed legacy receipts.
+
 Every dispatched Model invocation durably binds the exact physical SDK request
 through its `SamplingPlan`. Context and SharedBudget admission freeze that plan
 before the invocation is committed; otherwise the final dispatch boundary freezes
