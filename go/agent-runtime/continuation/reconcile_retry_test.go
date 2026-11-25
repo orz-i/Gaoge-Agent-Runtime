@@ -34,7 +34,7 @@ func TestSchedulerReconcileRetriesEarlierError(t *testing.T) {
 	pager, _ := f.relations.ReconciliationPager()
 	failing := &retryPager{ReconciliationPager: pager, id: "retry-child-000"}
 	relations := &pagingOnlyRelations{Registry: f.relations, pager: failing}
-	scheduler, err := continuation.NewScheduler(continuation.SchedulerDependencies{Outbox: f.store, Queue: f.delivery, Relations: relations, Runs: f.runtime, Clock: fixedClock{}, ProjectorID: "retry-test"})
+	scheduler, err := continuation.NewScheduler(continuation.SchedulerDependencies{Outbox: f.store, Queue: &declaredDurableQueue{Memory: f.delivery}, Relations: relations, Runs: f.runtime, Clock: fixedClock{}, ProjectorID: "retry-test"})
 	if err != nil {
 		t.Fatal(err)
 	}

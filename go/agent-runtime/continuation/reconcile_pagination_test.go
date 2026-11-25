@@ -45,7 +45,7 @@ func TestSchedulerReconcileUsesBoundedPagesWithoutHistoricalDuplicateJobs(t *tes
 	relations := &pagingOnlyRelations{Registry: fixture.relations, pager: pager}
 	loader := &countedRunLoader{loader: fixture.runtime}
 	scheduler, err := continuation.NewScheduler(continuation.SchedulerDependencies{
-		Outbox: fixture.store, Queue: fixture.delivery, Relations: relations,
+		Outbox: fixture.store, Queue: &declaredDurableQueue{Memory: fixture.delivery}, Relations: relations,
 		Runs: loader, Clock: fixedClock{}, ProjectorID: "paged-test",
 	})
 	if err != nil {
@@ -162,7 +162,7 @@ func TestSchedulerReconcileRetriesAfterEnqueueBeforeWatermarkFailure(t *testing.
 		pager:    &failOnceReconcilePager{ReconciliationPager: pager, fail: true},
 	}
 	scheduler, err := continuation.NewScheduler(continuation.SchedulerDependencies{
-		Outbox: fixture.store, Queue: fixture.delivery, Relations: relations,
+		Outbox: fixture.store, Queue: &declaredDurableQueue{Memory: fixture.delivery}, Relations: relations,
 		Runs: fixture.runtime, Clock: fixedClock{}, ProjectorID: "fault-paged",
 	})
 	if err != nil {
@@ -198,7 +198,7 @@ func TestSchedulerExplicitPageReplaysOriginalWakeupAfterWatermarkFailure(t *test
 	relations := &pagingOnlyRelations{Registry: fixture.relations, pager: &failOnceReconcilePager{ReconciliationPager: pager, fail: true}}
 	newScheduler := func() *continuation.Scheduler {
 		t.Helper()
-		s, err := continuation.NewScheduler(continuation.SchedulerDependencies{Outbox: fixture.store, Queue: fixture.delivery, Relations: relations, Runs: fixture.runtime, Clock: fixedClock{}, ProjectorID: "explicit-fault"})
+		s, err := continuation.NewScheduler(continuation.SchedulerDependencies{Outbox: fixture.store, Queue: &declaredDurableQueue{Memory: fixture.delivery}, Relations: relations, Runs: fixture.runtime, Clock: fixedClock{}, ProjectorID: "explicit-fault"})
 		if err != nil {
 			t.Fatal(err)
 		}

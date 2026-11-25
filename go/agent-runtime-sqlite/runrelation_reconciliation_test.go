@@ -284,3 +284,100 @@ func TestSQLiteReconciliationNoCrossTenantOrTerminalParent(t *testing.T) {
 		t.Fatal("cancel", err)
 	}
 }
+
+// The durable relation Store may outlive a volatile or undeclared queue.
+// Neither scheduler API is allowed to suppress a fact after volatile acceptance.
+func TestSQLiteReconciliationRediscoverAfterVolatileQueueRestart(t *testing.T) {
+	for _, explicit := range []bool{false, true} {
+		for _, declared := range []bool{false, true} {
+			t.Run(fmt.Sprintf("explicit=%v/declared=%v", explicit, declared), func(t *testing.T) {
+				ctx := t.Context()
+				path := filepath.Join(privateDir(t), "volatile-restart.sqlite")
+				s, err := sqlite.CreateNew(ctx, path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer func() { _ = s.Close() }()
+				rt, err := kernel.New(kernel.Dependencies{Store: s})
+				if err != nil {
+					t.Fatal(err)
+				}
+				p, err := rt.Create(ctx, sampleCreate("parent"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				c, err := rt.Create(ctx, sampleCreate("child"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				reg, err := runrelation.New(sqlite.NewRunRelationStore(s), nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err = reg.Ensure(ctx, runrelation.Draft{ParentRunID: p.Run.ID, ChildRunID: c.Run.ID, OwnerNodeID: "owner", Kind: runrelation.KindDelegation}); err != nil {
+					t.Fatal(err)
+				}
+				c, err = rt.Apply(ctx, c.Run.ID, c.Run.Revision, kernel.Mutation{Status: kernel.RunStatusCompleted, State: c.State, Result: &kernel.Result{ContentType: "text", Content: []byte(`"done"`)}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				scan := func(q *queue.Memory) *continuation.Scheduler {
+					t.Helper()
+					reg, e := runrelation.New(sqlite.NewRunRelationStore(s), nil)
+					if e != nil {
+						t.Fatal(e)
+					}
+					r, e := kernel.New(kernel.Dependencies{Store: s})
+					if e != nil {
+						t.Fatal(e)
+					}
+					var enqueue continuation.Enqueuer = q
+					if !declared {
+						enqueue = struct{ continuation.Enqueuer }{q}
+					}
+					d := continuation.SchedulerDependencies{Outbox: s, Queue: enqueue, Relations: reg, Runs: r}
+					scheduler, e := continuation.NewScheduler(d)
+					if e != nil {
+						t.Fatal(e)
+					}
+					if e = scheduler.Project(ctx); e != nil {
+						t.Fatal(e)
+					}
+					if explicit {
+						_, e = scheduler.ReconcilePage(ctx, "")
+					} else {
+						e = scheduler.Reconcile(ctx)
+					}
+					if e != nil {
+						t.Fatal(e)
+					}
+					return scheduler
+				}
+				q := queue.NewMemory(queue.Dependencies{})
+				scan(q)
+				jobs, err := q.List(ctx, continuation.QueueName, queue.StatusQueued)
+				if err != nil || len(jobs) != 1 {
+					t.Fatal("original job", jobs, err)
+				}
+				first := jobs[0]
+				if err = s.Close(); err != nil {
+					t.Fatal(err)
+				}
+				s, err = sqlite.OpenExisting(ctx, path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				page, err := sqlite.NewRunRelationStore(s).ListReconcilePage(ctx, "", 128)
+				if err != nil || len(page.Candidates) != 1 || page.Candidates[0].LastParentRevision != 0 || page.Candidates[0].LastChildRevision != 0 {
+					t.Fatal("volatile acceptance wrote durable delivery progress", page, err)
+				}
+				fresh := queue.NewMemory(queue.Dependencies{})
+				scan(fresh)
+				jobs, err = fresh.List(ctx, continuation.QueueName, queue.StatusQueued)
+				if err != nil || len(jobs) != 1 || jobs[0].ID != first.ID || jobs[0].Fingerprint != first.Fingerprint {
+					t.Fatal("lost original wakeup after restart", jobs, err)
+				}
+			})
+		}
+	}
+}

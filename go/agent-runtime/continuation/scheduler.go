@@ -41,6 +41,7 @@ type Scheduler struct {
 	// The optional pager bounds recovery work per tick. Cursor state is local
 	// and disposable; durable per-relation handoff watermarks live in the Store.
 	reconcilePager    runrelation.ReconciliationPager
+	durableDelivery   bool
 	reconcileMu       sync.Mutex
 	reconcileCursor   string
 	reconcileFailures map[string]runrelation.ReconciliationCandidate
@@ -72,8 +73,8 @@ const (
 var errReconcileRetryBacklogFull = errors.New("continuation reconciliation retry backlog is full")
 
 // Reconcile repairs terminal child handoffs. Built-in adapters use bounded
-// keyset pages. Progress advances after queue acceptance or feature-verified
-// consumption; unknown kinds are conservatively enqueued.
+// keyset pages. Progress advances after durable queue acceptance or
+// feature-verified consumption; unknown kinds are conservatively enqueued.
 // Legacy host-defined relation adapters without a pager retain ListAll fallback.
 func (scheduler *Scheduler) Reconcile(ctx context.Context) error {
 	if scheduler == nil {
@@ -141,7 +142,8 @@ func (scheduler *Scheduler) Reconcile(ctx context.Context) error {
 // Persist the returned cursor in the host's own scheduling bookkeeping even
 // when individual candidates fail. Failed candidates remain unmarked and
 // are reconsidered on the next wrap; a crash before cursor persistence is
-// safe because queue identity and per-relation progress are durable. On
+// safe: a volatile queue never advances an enqueue watermark, and a durable
+// queue preserves the original job identity. On
 // cancellation, return the last processed position. Empty next means wrap.
 // Unlike Reconcile, this API never uses an unbounded legacy scan or retains
 // an in-memory retry backlog; it is suitable for re-created schedulers.
@@ -251,6 +253,12 @@ func (scheduler *Scheduler) reconcileCandidate(
 	}); err != nil {
 		return err
 	}
+	// A volatile (or undeclared) queue can lose accepted work independently
+	// of the relation Store. Leave the original fact discoverable on wrap.
+	// Only the verified-consumed guard above can mark it without durable delivery.
+	if !scheduler.durableDelivery {
+		return nil
+	}
 	return scheduler.reconcilePager.MarkEnqueued(
 		ctx, child.Run.ID, parent.Run.Revision, child.Run.Revision,
 	)
@@ -314,11 +322,10 @@ func NewScheduler(dependencies SchedulerDependencies, registrations ...TriggerRe
 	if dependencies.Outbox == nil || dependencies.Queue == nil || dependencies.Relations == nil || dependencies.Runs == nil {
 		return nil, ErrInvalidInput
 	}
-	if dependencies.RequireDurableQueue {
-		durable, ok := dependencies.Queue.(interface{ DurableQueue() bool })
-		if !ok || !durable.DurableQueue() {
-			return nil, ErrDurableQueueRequired
-		}
+	durable, ok := dependencies.Queue.(interface{ DurableQueue() bool })
+	durableDelivery := ok && durable.DurableQueue()
+	if dependencies.RequireDurableQueue && !durableDelivery {
+		return nil, ErrDurableQueueRequired
 	}
 	if dependencies.Clock == nil {
 		dependencies.Clock = schedulerClock{}
@@ -344,7 +351,7 @@ func NewScheduler(dependencies SchedulerDependencies, registrations ...TriggerRe
 		outbox: dependencies.Outbox, queue: dependencies.Queue, relations: dependencies.Relations, runs: dependencies.Runs,
 		clock: dependencies.Clock, workerID: strings.TrimSpace(dependencies.ProjectorID), triggers: triggers,
 		guard:          dependencies.ReconcileGuard,
-		reconcilePager: pager,
+		reconcilePager: pager, durableDelivery: durableDelivery,
 		jobPolicy: queuecore.Policy{
 			MaxAttempts: 12, VisibilityTimeout: 2 * time.Minute,
 			InitialBackoff: 250 * time.Millisecond, MaxBackoff: 30 * time.Second, BackoffMultiplier: 2,
