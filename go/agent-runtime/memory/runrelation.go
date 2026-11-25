@@ -170,8 +170,8 @@ func (store *RunRelationStore) MarkObserved(
 func (store *RunRelationStore) MarkEnqueued(
 	_ context.Context, childRunID string, parentRevision, childRevision uint64,
 ) error {
-	childRunID = strings.TrimSpace(childRunID)
-	if store == nil || childRunID == "" || parentRevision == 0 || childRevision == 0 {
+	childRunID, err := runrelation.PrepareReconciliationProgress(childRunID, parentRevision, childRevision)
+	if store == nil || err != nil {
 		return runrelation.ErrInvalidInput
 	}
 	store.mu.Lock()

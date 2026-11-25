@@ -88,6 +88,18 @@ func RunEA1OwnedCallbackReturn(t *testing.T, factory func(*testing.T) (kernel.St
 			if e = observer.RecordOwnedPhysicalCallbackReturn(t.Context(), g, initial.Run.Revision, outcome, proof); e != nil {
 				t.Fatalf("same completion retry: %v", e)
 			}
+			// The same opaque Run identity does not allow a different Grant or
+			// owner to read the original active return.
+			for _, foreign := range []kernel.ChildExecutionGrant{
+				func() kernel.ChildExecutionGrant { v := g; v.ID += "-foreign"; return v }(),
+				func() kernel.ChildExecutionGrant { v := g; v.ExecutionOwnerID += "-foreign"; return v }(),
+				func() kernel.ChildExecutionGrant { v := g; v.ExecutionEpoch++; return v }(),
+			} {
+				c, lookupErr := observer.LookupOwnedPhysicalCallbackReturn(t.Context(), foreign)
+				if !errors.Is(lookupErr, kernel.ErrExecutionConflict) || c != (kernel.OwnedPhysicalCallbackCompletion{}) {
+					t.Fatalf("foreign lookup leaked original evidence: %+v %v", c, lookupErr)
+				}
+			}
 			changed := outcome
 			changed.HostCompleted = !known
 			forged := featurecontrol.Seal(initial.Run.ID, initial.Run.Revision, "agent_owned_callback_return", g.ID, kernel.OwnedPhysicalCallbackReturnPayload(initial, changed), nil)

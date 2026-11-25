@@ -184,26 +184,13 @@ func (store *KernelStore) MarkChildExecutionSettled(ctx context.Context, grant k
 		if grant.IsOwned() && (len(records) != 1 || records[0].ParentRunID != grant.ChildRunID) {
 			return kernel.ErrExecutionConflict
 		}
-		// Recovery and repeated Mark tolerate expiry, not a replaced native owner.
-		if grant.IsOwned() && (child.ExecutionOwner != grant.ExecutionOwnerID || child.ExecutionLeaseID != grant.ExecutionLeaseID || child.ExecutionEpoch != grant.ExecutionEpoch) {
-			return kernel.ErrExecutionConflict
-		}
-		if grant.IsOwned() && permit.IsRecovery() && (records[0].CallbackReturnRevision == 0 || !records[0].CallbackHostCompleted) {
-			return kernel.ErrExecutionConflict
-		}
-		if grant.IsOwned() && records[0].SettledRevision == 0 && !permit.IsRecovery() {
-			lease, ok := permit.ExecutionLease()
+		updates := map[string]any{"settled_revision": revision}
+		if grant.IsOwned() {
 			now, timeErr := pgStoreNow(tx)
 			if timeErr != nil {
 				return timeErr
 			}
-			if !ok || !grant.MatchesExecution(lease) || !pgLeaseMatches(child, lease, now) {
-				return kernel.ErrExecutionConflict
-			}
-		}
-		updates := map[string]any{"settled_revision": revision}
-		if grant.IsOwned() {
-			evidence, evidenceErr := pgOwnedMarkEvidence(records[0], grant, snapshot, permit)
+			evidence, evidenceErr := pgOwnedMarkEvidence(records[0], grant, snapshot, pgManagedLease(child), now, permit)
 			if evidenceErr != nil {
 				return evidenceErr
 			}
@@ -263,14 +250,11 @@ func (store *KernelStore) FinishChildExecution(ctx context.Context, grant kernel
 			return kernel.ErrExecutionConflict
 		}
 		if grant.IsOwned() {
-			if !grant.MatchesExecution(pgManagedLease(child)) {
-				return kernel.ErrExecutionConflict
-			}
 			snapshot, e := kernelSnapshotFrom(child)
 			if e != nil {
 				return e
 			}
-			if e = pgPersistOwnedRetirement(tx, records[0], grant, snapshot); e != nil {
+			if e = pgPersistOwnedRetirement(tx, records[0], grant, snapshot, pgManagedLease(child)); e != nil {
 				return e
 			}
 		}

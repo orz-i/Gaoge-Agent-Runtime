@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 	"gorm.io/gorm"
 )
@@ -121,53 +120,40 @@ func (store *RunRelationStore) ListAll(ctx context.Context) ([]runrelation.Relat
 	return result, nil
 }
 
-// ListReconcilePage scans a bounded, primary-key-indexed relation ID page
-// before joining current Run statuses. Filtering after the keyset page avoids
-// a full-history SQL join when no eligible terminal children remain.
-func (store *RunRelationStore) ListReconcilePage(
-	ctx context.Context, afterChildRunID string, limit int,
-) (runrelation.ReconciliationPage, error) {
-	if store == nil || store.db == nil || limit <= 0 || limit > runrelation.MaxReconcilePageSize {
+// ListReconcilePage loads a bounded relation range and its joined facts in
+// one statement. The shared reducer owns eligibility and cursor advancement.
+func (store *RunRelationStore) ListReconcilePage(ctx context.Context, after string, limit int) (runrelation.ReconciliationPage, error) {
+	if store == nil || store.db == nil || ctx == nil || limit < 1 || limit > runrelation.MaxReconcilePageSize {
 		return runrelation.ReconciliationPage{}, runrelation.ErrInvalidInput
 	}
-	var ids []string
-	err := store.db.WithContext(ctx).Model(&models.RunRelationRecord{}).
-		Where("child_run_id > ?", afterChildRunID).
-		Order("child_run_id ASC").Limit(limit).Pluck("child_run_id", &ids).Error
+	rows, err := store.db.WithContext(ctx).Raw(`WITH scanned AS MATERIALIZED (
+		SELECT child_run_id,parent_run_id,kind,owner_node_id,created_at,last_parent_revision,last_child_revision
+		FROM agent_run_relations WHERE child_run_id > ? ORDER BY child_run_id LIMIT ?
+	)
+	SELECT s.child_run_id,s.parent_run_id,s.kind,s.owner_node_id,s.created_at,s.last_parent_revision,s.last_child_revision,
+		COALESCE(parent.status,''),COALESCE(child.status,''),COALESCE(parent.revision,0),COALESCE(child.revision,0)
+	FROM scanned s
+	LEFT JOIN agent_kernel_runs child ON child.run_id=s.child_run_id
+	LEFT JOIN agent_kernel_runs parent ON parent.run_id=s.parent_run_id
+	ORDER BY s.child_run_id`, after, limit).Rows()
 	if err != nil {
 		return runrelation.ReconciliationPage{}, err
 	}
-	page := runrelation.ReconciliationPage{
-		NextCursor: afterChildRunID,
-		HasMore:    len(ids) == limit,
+	defer func() { _ = rows.Close() }()
+	scan := make([]runrelation.ReconciliationScanRow, 0, limit)
+	for rows.Next() {
+		var row runrelation.ReconciliationScanRow
+		r := &row.Relation
+		if err = rows.Scan(&r.ChildRunID, &r.ParentRunID, &r.Kind, &r.OwnerNodeID, &r.CreatedAt, &row.LastParentRevision, &row.LastChildRevision,
+			&row.ParentStatus, &row.ChildStatus, &row.ParentRevision, &row.ChildRevision); err != nil {
+			return runrelation.ReconciliationPage{}, err
+		}
+		scan = append(scan, row)
 	}
-	if len(ids) == 0 {
-		return page, nil
-	}
-	page.NextCursor = ids[len(ids)-1]
-	var records []models.RunRelationRecord
-	err = store.db.WithContext(ctx).Table("agent_run_relations AS relation").
-		Select("relation.*").
-		Joins("JOIN agent_kernel_runs AS child ON child.run_id = relation.child_run_id").
-		Joins("JOIN agent_kernel_runs AS parent ON parent.run_id = relation.parent_run_id").
-		Where("relation.child_run_id IN ?", ids).
-		Where("child.status IN ?", []string{
-			string(kernel.RunStatusCompleted), string(kernel.RunStatusFailed), string(kernel.RunStatusCancelled),
-		}).
-		Where("parent.status = ?", string(kernel.RunStatusRunning)).
-		Where("(relation.last_parent_revision < parent.revision OR relation.last_child_revision < child.revision)").
-		Order("relation.child_run_id ASC").Scan(&records).Error
-	if err != nil {
+	if err = rows.Err(); err != nil {
 		return runrelation.ReconciliationPage{}, err
 	}
-	page.Candidates = make([]runrelation.ReconciliationCandidate, 0, len(records))
-	for _, record := range records {
-		page.Candidates = append(page.Candidates, runrelation.ReconciliationCandidate{
-			Relation:           runRelationFromRecord(record),
-			LastParentRevision: record.LastParentRevision, LastChildRevision: record.LastChildRevision,
-		})
-	}
-	return page, nil
+	return runrelation.ReconciliationPageFromScan(after, limit, scan)
 }
 
 // ListReconcileCandidates preserves the previous convenience surface. Use
@@ -193,8 +179,8 @@ func (store *RunRelationStore) MarkObserved(
 func (store *RunRelationStore) MarkEnqueued(
 	ctx context.Context, childRunID string, parentRevision, childRevision uint64,
 ) error {
-	childRunID = strings.TrimSpace(childRunID)
-	if store == nil || store.db == nil || childRunID == "" || parentRevision == 0 || childRevision == 0 {
+	childRunID, err := runrelation.PrepareReconciliationProgress(childRunID, parentRevision, childRevision)
+	if store == nil || store.db == nil || ctx == nil || err != nil {
 		return runrelation.ErrInvalidInput
 	}
 	result := store.db.WithContext(ctx).Model(&models.RunRelationRecord{}).
@@ -213,6 +199,9 @@ func (store *RunRelationStore) MarkEnqueued(
 	}
 	if result.RowsAffected == 0 {
 		return runrelation.ErrNotFound
+	}
+	if result.RowsAffected != 1 {
+		return runrelation.ErrConflict
 	}
 	return nil
 }

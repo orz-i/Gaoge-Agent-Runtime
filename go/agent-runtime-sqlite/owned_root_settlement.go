@@ -107,7 +107,7 @@ func (s *Store) verifyRootSettlement(ctx context.Context, expected kernel.Snapsh
 		var completion kernel.OwnedPhysicalCallbackCompletion
 		if err == nil {
 			completion, err = loadOwnedCallbackReturn(ctx, tx, grant)
-			if err != nil {
+			if err != nil && !errors.Is(err, kernel.ErrNotFound) {
 				return err
 			}
 		} else if !errors.Is(err, kernel.ErrNotFound) {

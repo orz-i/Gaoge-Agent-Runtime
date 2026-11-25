@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"errors"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
@@ -62,7 +63,7 @@ func pgMatchOwnedPhysical(tx *gorm.DB, runID string, lease *kernel.ExecutionLeas
 }
 
 func (store *KernelStore) BeginOwnedPhysicalExecution(ctx context.Context, grant kernel.ChildExecutionGrant, lease kernel.ExecutionLease, admission kernel.OwnedPhysicalAdmission) error {
-	if store == nil || store.db == nil || ctx == nil || !grant.IsOwned() || !pgExecutionLeaseValid(lease) || !grant.MatchesExecution(lease) {
+	if store == nil || store.db == nil || ctx == nil || kernel.ValidateOwnedPhysicalAdmissionRequest(grant, lease) != nil {
 		return kernel.ErrInvalidInput
 	}
 	return store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -85,15 +86,12 @@ func (store *KernelStore) BeginOwnedPhysicalExecution(ctx context.Context, grant
 		if err != nil {
 			return err
 		}
-		if current.Kind != "agent" || current.ParentRunID != "" || (current.Status != string(kernel.RunStatusRunning) && current.Status != string(kernel.RunStatusWaitingInput)) || current.Revision != grant.ExpectedRevision || current.ExecutionQuarantineRevision != 0 || !pgLeaseMatches(current, lease, now) || !admission.Matches(grant, snapshot, lease) {
-			return kernel.ErrExecutionConflict
-		}
 		var active int64
 		if err = tx.Model(&models.KernelChildEffectGrantRecord{}).Where("parent_run_id = ? OR child_run_id = ?", grant.ChildRunID, grant.ChildRunID).Count(&active).Error; err != nil {
 			return translateKernelError(err)
 		}
-		if active != 0 {
-			return kernel.ErrChildExecutionBusy
+		if err = kernel.ValidateOwnedPhysicalAdmission(grant, snapshot, lease, pgManagedLease(current), now, current.ExecutionQuarantineRevision != 0, active != 0, admission); err != nil {
+			return err
 		}
 		row := pgPhysicalRecord(grant, grant.ChildRunID)
 		if err = tx.Create(&row).Error; err != nil {
@@ -107,7 +105,7 @@ func (store *KernelStore) BeginOwnedPhysicalExecution(ctx context.Context, grant
 // ApplyOwnedPhysicalRecovery is a receipt-only exact-CAS capability. It cannot
 // mint an epoch, renew the original lease, enter middleware or authorize send.
 func (store *KernelStore) ApplyOwnedPhysicalRecovery(ctx context.Context, grant kernel.ChildExecutionGrant, expectedRevision uint64, mutation kernel.StoreMutation, permit kernel.OwnedPhysicalRecovery) (kernel.Snapshot, error) {
-	if store == nil || store.db == nil || ctx == nil || !grant.IsOwned() || expectedRevision == 0 || mutation.Record.Run.ID != grant.ChildRunID || mutation.Record.Run.Revision != expectedRevision+1 {
+	if store == nil || store.db == nil || ctx == nil || kernel.ValidateOwnedPhysicalRecoveryRequest(grant, expectedRevision, mutation) != nil {
 		return kernel.Snapshot{}, kernel.ErrInvalidInput
 	}
 	var result kernel.Snapshot
@@ -123,25 +121,22 @@ func (store *KernelStore) ApplyOwnedPhysicalRecovery(ctx context.Context, grant 
 		if err != nil {
 			return err
 		}
-		if current.Kind != "agent" || current.ParentRunID != "" || current.Status != string(kernel.RunStatusRunning) {
+		row, err := pgLoadOwnedPhysicalGrant(tx, grant)
+		if errors.Is(err, kernel.ErrNotFound) {
 			return kernel.ErrExecutionConflict
 		}
-		// Receipt recovery may outlive TTL, but never the original native identity.
-		if current.ExecutionOwner != grant.ExecutionOwnerID || current.ExecutionLeaseID != grant.ExecutionLeaseID || current.ExecutionEpoch != grant.ExecutionEpoch {
-			return kernel.ErrExecutionConflict
+		if err != nil {
+			return err
 		}
-		var rows []models.KernelChildEffectGrantRecord
-		if err = tx.Where("grant_id = ? OR parent_run_id = ?", grant.ID, grant.ChildRunID).Find(&rows).Error; err != nil {
+		if err = kernel.ValidateOwnedPhysicalRecovery(grant, snapshot, pgManagedLease(current), expectedRevision, mutation, permit, pgCallbackCompletion(row), row.SettledRevision); err != nil {
+			return err
+		}
+		var active int64
+		if err = tx.Model(&models.KernelChildEffectGrantRecord{}).Where("parent_run_id = ?", grant.ChildRunID).Count(&active).Error; err != nil {
 			return translateKernelError(err)
 		}
-		if len(rows) != 1 || pgPhysicalGrant(rows[0]) != grant || rows[0].ParentRunID != grant.ChildRunID || rows[0].SettledRevision != 0 || rows[0].CallbackReturnRevision == 0 || rows[0].CallbackHostCompleted == permit.IsModelEvidence() {
-			return kernel.ErrExecutionConflict
-		}
-		if current.Revision != expectedRevision {
-			return kernel.ErrConflict
-		}
-		if !permit.Matches(grant, snapshot, mutation) {
-			return kernel.ErrExecutionConflict
+		if active != 1 {
+			return kernel.ErrChildExecutionBusy
 		}
 		updated, err := kernelRunRecordFrom(mutation.Record, 0)
 		if err != nil {
@@ -157,13 +152,31 @@ func (store *KernelStore) ApplyOwnedPhysicalRecovery(ctx context.Context, grant 
 }
 
 func pgCallbackCompletion(row models.KernelChildEffectGrantRecord) kernel.OwnedPhysicalCallbackCompletion {
-	if row.CallbackReturnRevision == 0 {
-		return kernel.OwnedPhysicalCallbackCompletion{}
+	c := kernel.OwnedPhysicalCallbackCompletion{ReturnRevision: row.CallbackReturnRevision, ReturnSourceHash: row.CallbackReturnSourceHash, HostCompleted: row.CallbackHostCompleted, LeaseOwned: row.CallbackLeaseOwned, ControlCustody: kernel.OwnedCallbackCustody(row.CallbackControlCustody), ToolReturns: kernel.OwnedToolReturns(row.CallbackToolReturns)}
+	if c != (kernel.OwnedPhysicalCallbackCompletion{}) {
+		c.GrantID = row.GrantID
 	}
-	return kernel.OwnedPhysicalCallbackCompletion{GrantID: row.GrantID, ReturnRevision: row.CallbackReturnRevision, ReturnSourceHash: row.CallbackReturnSourceHash, HostCompleted: row.CallbackHostCompleted, LeaseOwned: row.CallbackLeaseOwned, ControlCustody: kernel.OwnedCallbackCustody(row.CallbackControlCustody), ToolReturns: kernel.OwnedToolReturns(row.CallbackToolReturns)}
+	return c
 }
+
+// An owned root has exactly one self-scoped row. Do not silently collapse
+// duplicate physical records or adopt another grant for the same Run.
+func pgLoadOwnedPhysicalGrant(tx *gorm.DB, g kernel.ChildExecutionGrant) (models.KernelChildEffectGrantRecord, error) {
+	var rows []models.KernelChildEffectGrantRecord
+	if err := tx.Where("grant_id = ? OR child_run_id = ?", g.ID, g.ChildRunID).Limit(2).Find(&rows).Error; err != nil {
+		return models.KernelChildEffectGrantRecord{}, translateKernelError(err)
+	}
+	if len(rows) == 0 {
+		return models.KernelChildEffectGrantRecord{}, kernel.ErrNotFound
+	}
+	if len(rows) != 1 || pgPhysicalGrant(rows[0]) != g || rows[0].ParentRunID != g.ChildRunID {
+		return models.KernelChildEffectGrantRecord{}, kernel.ErrExecutionConflict
+	}
+	return rows[0], nil
+}
+
 func (store *KernelStore) RecordOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, o kernel.OwnedPhysicalCallbackOutcome, p kernel.OwnedPhysicalCallbackReturn) error {
-	if store == nil || store.db == nil || ctx == nil || !g.IsOwned() {
+	if store == nil || store.db == nil || ctx == nil || !g.IsOwned() || rev == 0 {
 		return kernel.ErrInvalidInput
 	}
 	return store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -178,22 +191,16 @@ func (store *KernelStore) RecordOwnedPhysicalCallbackReturn(ctx context.Context,
 		if e != nil {
 			return e
 		}
-		var rows []models.KernelChildEffectGrantRecord
-		if e = tx.Where("grant_id = ?", g.ID).Find(&rows).Error; e != nil {
-			return translateKernelError(e)
-		}
-		if len(rows) != 1 || pgPhysicalGrant(rows[0]) != g || rows[0].ParentRunID != g.ChildRunID || current.Revision != rev || current.ExecutionOwner != g.ExecutionOwnerID || current.ExecutionLeaseID != g.ExecutionLeaseID || current.ExecutionEpoch != g.ExecutionEpoch || !p.Matches(g, snap, o) {
+		row, e := pgLoadOwnedPhysicalGrant(tx, g)
+		if errors.Is(e, kernel.ErrNotFound) {
 			return kernel.ErrExecutionConflict
 		}
-		completion := p.Completion(g, snap, o)
-		if rows[0].CallbackReturnRevision != 0 {
-			if pgCallbackCompletion(rows[0]) != completion {
-				return kernel.ErrExecutionConflict
-			}
-			return nil
+		if e != nil {
+			return e
 		}
-		if rows[0].SettledRevision != 0 {
-			return kernel.ErrExecutionConflict
+		completion, write, e := kernel.ReduceOwnedPhysicalCallbackReturn(g, snap, pgManagedLease(current), rev, o, p, pgCallbackCompletion(row), row.SettledRevision)
+		if e != nil || !write {
+			return e
 		}
 		result := tx.Model(&models.KernelChildEffectGrantRecord{}).Where("grant_id = ? AND parent_run_id = ? AND callback_return_revision = 0 AND settled_revision = 0", g.ID, g.ChildRunID).UpdateColumns(map[string]any{"callback_return_revision": completion.ReturnRevision, "callback_return_source_hash": completion.ReturnSourceHash, "callback_host_completed": completion.HostCompleted, "callback_lease_owned": completion.LeaseOwned, "callback_control_custody": string(completion.ControlCustody), "callback_tool_returns": string(completion.ToolReturns)})
 		if result.Error != nil {
@@ -214,24 +221,15 @@ func (store *KernelStore) LookupOwnedPhysicalCallbackReturn(ctx context.Context,
 		if _, e := lockKernelRun(tx, g.ChildRunID); e != nil {
 			return e
 		}
-		var rows []models.KernelChildEffectGrantRecord
-		if e := tx.Where("grant_id = ?", g.ID).Find(&rows).Error; e != nil {
-			return translateKernelError(e)
+		row, e := pgLoadOwnedPhysicalGrant(tx, g)
+		if e != nil {
+			return e
 		}
-		if len(rows) == 0 {
-			return kernel.ErrNotFound
-		}
-		if len(rows) != 1 || pgPhysicalGrant(rows[0]) != g || rows[0].ParentRunID != g.ChildRunID {
-			return kernel.ErrExecutionConflict
-		}
-		result = pgCallbackCompletion(rows[0])
-		if result.GrantID == "" {
-			return kernel.ErrNotFound
-		}
-		if !result.ToolReturns.Valid() {
-			return kernel.ErrExecutionConflict
-		}
-		return nil
+		result = pgCallbackCompletion(row)
+		return kernel.ValidateOwnedPhysicalCompletion(g, result)
 	})
-	return result, err
+	if err != nil {
+		return kernel.OwnedPhysicalCallbackCompletion{}, err
+	}
+	return result, nil
 }

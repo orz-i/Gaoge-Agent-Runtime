@@ -142,29 +142,11 @@ func (store *Store) MarkChildExecutionSettled(ctx context.Context, grant kernel.
 		(original.settledRevision != 0 && original.settledRevision != child.Run.Revision) {
 		return kernel.ErrExecutionConflict
 	}
-	if grant.IsOwned() && original.settledRevision == 0 && !permit.IsRecovery() {
-		lease, ok := permit.ExecutionLease()
-		if !ok || !grant.MatchesExecution(lease) || !activeMemoryLease(store.execution[grant.ChildRunID], lease, store.currentExecutionTime()) {
-			return kernel.ErrExecutionConflict
-		}
-	}
-	if grant.IsOwned() && !grant.MatchesExecution(store.execution[grant.ChildRunID].lease) {
-		return kernel.ErrExecutionConflict
-	}
-	if grant.IsOwned() && permit.IsRecovery() && (original.completion.GrantID != grant.ID || !original.completion.HostCompleted) {
-		return kernel.ErrExecutionConflict
-	}
-	if grant.IsOwned() && original.settlement == nil {
-		origin := "LEGACY_UNKNOWN"
-		if original.completion.GrantID != "" {
-			origin = "OWNER_RETURN"
-			if permit.IsRecovery() {
-				origin = "RECOVERED_RETURN"
-			}
-		}
-		evidence := kernel.OwnedSettlementEvidence{Version: 1, Grant: grant, Snapshot: cloneSnapshot(child), Completion: original.completion, MarkOrigin: origin}
-		if !evidence.Valid() {
-			return kernel.ErrExecutionConflict
+	if grant.IsOwned() {
+		evidence, err := kernel.ReduceOwnedPhysicalSettlement(grant, cloneSnapshot(child), store.execution[grant.ChildRunID].lease,
+			store.currentExecutionTime(), original.settledRevision, original.completion, original.settlement, permit)
+		if err != nil {
+			return err
 		}
 		original.settlement = &evidence
 	}
