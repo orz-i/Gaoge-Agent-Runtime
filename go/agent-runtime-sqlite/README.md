@@ -68,8 +68,13 @@ The adapter implements `kernel.Store` including `EventJournal` and
 `TransitionOutbox`. `sqlite.NewRunRelationStore(store)` separately implements
 the existing four-method `runrelation.Store` against the **same** SQLite
 Profile and its existing connection. Compose it with `runrelation.New` when
-needed; it does not implement optional `runrelation.ReconciliationPager`,
-automatically wake parent Runs or persist Team/Workflow definitions.
+needed. The adapter implements optional `runrelation.ReconciliationPager`
+with at most 128 scanned relation keys per page and persistent delivery
+watermarks. It does not itself execute parent Runs or persist Team/Workflow
+definitions. A long-lived Scheduler may use `Reconcile`; a short-lived host
+uses `ReconcilePage(ctx, cursor)`, stores the returned cursor in its scheduling
+bookkeeping, and retries failed candidates after wrap. A queue must preserve
+original job identity across restart; the pager does not replace a durable queue.
 The SQLite `Store` owns closing the shared connection. It preserves the existing transition IDs
 `runID:revision`, wakeup timestamps/generations and approval
 Checkpoint semantics. The existing Agent `StartRun` emits an initial
@@ -349,3 +354,19 @@ never the current lease epoch, and does not rewrite original custody bytes.
 Successor execution/control transactions reconcile an exact genuinely retired
 callback ACK before advancing its owner or source. Unknown/stale/active effects
 remain fenced, and historical empty custody is never promoted to trusted.
+
+
+### Bounded child-terminal reconciliation schema (v9)
+
+The new `runtime_run_relation_progress` table records monotonic native parent
+and child revisions only after queue acceptance or feature-verified consumption.
+It is not a second execution record. Missing/nonterminal Runs do not prevent
+the indexed scan from progressing. A failure to enqueue or record progress
+is retried on a later scan with the original wakeup identity.
+
+Existing exact v8 files require the explicit `MigrateV8ToV9` (or
+`MigrateV8ToV9With` with the original encrypted connection), all old writers
+stopped, and a retained backup. Open fails closed until the migration succeeds.
+The migration creates an empty watermark table without rewriting original Runs,
+relations, native authority, or effects. Do not interpret an empty watermark
+as proof of physical execution or use mixed v8/v9 readers.

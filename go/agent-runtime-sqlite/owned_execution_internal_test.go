@@ -125,6 +125,9 @@ func TestOwnedSchemaMigrationPreservesOriginalGrants(t *testing.T) {
 	if err = MigrateV7ToV8(t.Context(), path); err != nil {
 		t.Fatalf("repeat V8 migration: %v", err)
 	}
+	if err = MigrateV8ToV9(t.Context(), path); err != nil {
+		t.Fatal(err)
+	}
 	current, err := OpenExisting(t.Context(), path)
 	if err != nil {
 		t.Fatal(err)

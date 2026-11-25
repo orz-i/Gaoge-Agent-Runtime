@@ -184,3 +184,36 @@ func TestSchedulerReconcileRetriesAfterEnqueueBeforeWatermarkFailure(t *testing.
 		t.Fatalf("legacy full scan invoked: %d", relations.allCalls)
 	}
 }
+
+func TestSchedulerExplicitPageReplaysOriginalWakeupAfterWatermarkFailure(t *testing.T) {
+	fixture := newSchedulerFixture(t)
+	parent := createRun(t, fixture.runtime, "explicit-fault-parent", "paged.parent")
+	child := createRun(t, fixture.runtime, "explicit-fault-child", "paged.child")
+	ensureRelation(t, fixture.relations, runrelation.Draft{ParentRunID: parent.Run.ID, ChildRunID: child.Run.ID, Kind: runrelation.KindDelegation, OwnerNodeID: "member"})
+	completeRun(t, fixture.runtime, child)
+	pager, ok := fixture.relations.ReconciliationPager()
+	if !ok {
+		t.Fatal("missing pager")
+	}
+	relations := &pagingOnlyRelations{Registry: fixture.relations, pager: &failOnceReconcilePager{ReconciliationPager: pager, fail: true}}
+	newScheduler := func() *continuation.Scheduler {
+		t.Helper()
+		s, err := continuation.NewScheduler(continuation.SchedulerDependencies{Outbox: fixture.store, Queue: fixture.delivery, Relations: relations, Runs: fixture.runtime, Clock: fixedClock{}, ProjectorID: "explicit-fault"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	next, err := newScheduler().ReconcilePage(t.Context(), "")
+	if err == nil || next != "" {
+		t.Fatal("watermark failure must report and wrap", next, err)
+	}
+	queuedJobs(t, fixture.delivery, 1)
+	if next, err = newScheduler().ReconcilePage(t.Context(), next); err != nil || next != "" {
+		t.Fatal("restart did not retry original wakeup", next, err)
+	}
+	queuedJobs(t, fixture.delivery, 1)
+	if relations.allCalls != 0 {
+		t.Fatal("legacy full scan invoked")
+	}
+}

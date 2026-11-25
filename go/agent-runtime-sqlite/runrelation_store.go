@@ -12,13 +12,14 @@ import (
 )
 
 // RunRelationStore persists immutable parent/child ownership in the same
-// private SQLite Profile as the Kernel. It does not provide automatic
-// child-terminal reconciliation or implement ReconciliationPager.
+// private SQLite Profile as the Kernel. The optional pager scans bounded
+// relation pages; progress records delivery, never effect completion.
 type RunRelationStore struct {
 	db *sql.DB
 }
 
 var _ runrelation.Store = (*RunRelationStore)(nil)
+var _ runrelation.ReconciliationPager = (*RunRelationStore)(nil)
 
 // NewRunRelationStore uses an existing SQLite Store and its DB connection.
 // The caller owns the Store's lifecycle; this adapter has no separate Close.
@@ -145,6 +146,10 @@ func scanRunRelation(scanner runRelationScanner) (runrelation.Relation, error) {
 	if err != nil {
 		return runrelation.Relation{}, conflictOrDatabaseError(err)
 	}
+	return normalizeStoredRunRelation(relation, kind, createdNS)
+}
+
+func normalizeStoredRunRelation(relation runrelation.Relation, kind string, createdNS int64) (runrelation.Relation, error) {
 	relation.Kind = runrelation.Kind(kind)
 	relation.CreatedAt = time.Unix(0, createdNS).UTC()
 	normalized, err := runrelation.Prepare(relation)

@@ -137,6 +137,49 @@ func (scheduler *Scheduler) Reconcile(ctx context.Context) error {
 	return result
 }
 
+// ReconcilePage processes one bounded scan range for a short-lived host.
+// Persist the returned cursor in the host's own scheduling bookkeeping even
+// when individual candidates fail. Failed candidates remain unmarked and
+// are reconsidered on the next wrap; a crash before cursor persistence is
+// safe because queue identity and per-relation progress are durable. On
+// cancellation, return the last processed position. Empty next means wrap.
+// Unlike Reconcile, this API never uses an unbounded legacy scan or retains
+// an in-memory retry backlog; it is suitable for re-created schedulers.
+func (scheduler *Scheduler) ReconcilePage(ctx context.Context, after string) (next string, err error) {
+	if scheduler == nil || ctx == nil || scheduler.reconcilePager == nil {
+		return after, ErrInvalidInput
+	}
+	scheduler.reconcileMu.Lock()
+	defer scheduler.reconcileMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return after, err
+	}
+	page, err := scheduler.reconcilePager.ListReconcilePage(ctx, after, runrelation.MaxReconcilePageSize)
+	if err != nil {
+		return after, err
+	}
+	var result error
+	next = after
+	for _, candidate := range page.Candidates {
+		if err = ctx.Err(); err != nil {
+			return next, errors.Join(result, err)
+		}
+		e := scheduler.reconcileCandidate(ctx, candidate)
+		if err = ctx.Err(); err != nil {
+			return next, errors.Join(result, e, err)
+		}
+		result = errors.Join(result, e)
+		next = candidate.Relation.ChildRunID
+	}
+	if err = ctx.Err(); err != nil {
+		return next, errors.Join(result, err)
+	}
+	if page.HasMore {
+		return page.NextCursor, result
+	}
+	return "", result
+}
+
 // retryReconcileFailures rotates a bounded, in-memory retry queue so a single
 // failing relation does not block all later pages. Missing watermarks remain
 // durable; on process restart the cursor resets and old failures are rescanned.

@@ -74,6 +74,9 @@ func TestPhysicalEpochMigrationPreservesOriginalCustodyAndLeaseHistory(t *testin
 			t.Fatal(err)
 		}
 	}
+	if err = MigrateV8ToV9(t.Context(), path); err != nil {
+		t.Fatal(err)
+	}
 	s, err := OpenExisting(t.Context(), path)
 	if err != nil {
 		t.Fatal(err)

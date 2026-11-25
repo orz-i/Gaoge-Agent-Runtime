@@ -1,6 +1,7 @@
 package continuation_test
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/continuation"
@@ -37,6 +38,10 @@ func TestSchedulerReconcileLegacyStoreCompatibility(t *testing.T) {
 		Kind: runrelation.KindDelegation, OwnerNodeID: "member",
 	})
 	completeRun(t, runtime, child)
+	if next, err := scheduler.ReconcilePage(t.Context(), "original-cursor"); next != "original-cursor" || !errors.Is(err, continuation.ErrInvalidInput) {
+		t.Fatal("explicit page must reject legacy full scan", next, err)
+	}
+	queuedJobs(t, queue, 0)
 	if err := scheduler.Reconcile(t.Context()); err != nil {
 		t.Fatal(err)
 	}
