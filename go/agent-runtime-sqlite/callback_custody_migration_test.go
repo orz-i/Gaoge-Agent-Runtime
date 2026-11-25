@@ -63,11 +63,11 @@ func TestCallbackCustodyMigrationPreservesUnknownHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = s.Close() }()
-	var custody, hash, evidence string
-	if err = s.db.QueryRow(`SELECT callback_control_custody,callback_return_source_hash,settlement_evidence_json FROM runtime_child_effect_grants WHERE grant_id='old'`).Scan(&custody, &hash, &evidence); err != nil {
+	var custody, hash, evidence, toolReturns string
+	if err = s.db.QueryRow(`SELECT callback_control_custody,callback_return_source_hash,settlement_evidence_json,callback_tool_returns FROM runtime_child_effect_grants WHERE grant_id='old'`).Scan(&custody, &hash, &evidence, &toolReturns); err != nil {
 		t.Fatal(err)
 	}
-	if custody != "" || hash != "original-hash" || evidence != "original-evidence" {
-		t.Fatalf("migration upgraded or rewrote original custody: %q %q %q", custody, hash, evidence)
+	if custody != "" || hash != "original-hash" || evidence != "original-evidence" || toolReturns != "" {
+		t.Fatalf("migration upgraded or rewrote original custody: %q %q %q %q", custody, hash, evidence, toolReturns)
 	}
 }

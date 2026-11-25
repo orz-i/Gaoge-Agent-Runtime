@@ -13,7 +13,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
 // ErrModelOutcomeUnknown retains the original dispatched invocation until an
@@ -202,14 +201,15 @@ func (runner *Runner) executeOwnedRoot(ctx context.Context, current kernel.Snaps
 		}
 	}
 	pendingCall, pending, _ := FrozenPendingDispatch(latest)
-	if pending && hostComplete {
-		request := tools.ExecutionRequest{RunID: latest.Run.ID, Call: pendingCall}
-		if binding, ok := toolFrame.settlement(request); ok {
-			outcome.ControlCustody, outcome.ToolBudgetScope, outcome.ToolReceiptDigest = kernel.OwnedToolSettledReturn, binding.LedgerID, binding.ReceiptHash
-		} else if runner.toolOutcomeVerifier != nil || runner.externalNoEffectVerifier != nil {
-			if hold := toolFrame.hold(request); hold != nil {
-				outcome.ControlCustody, outcome.ToolBudgetScope = kernel.OwnedToolBudgetReturn, hold.LedgerID
-			}
+	settledCall := false
+	if hostComplete {
+		bindings, evidenceErr := toolFrame.outstanding(latest)
+		if evidenceErr != nil {
+			return latest, errors.Join(callErr, ErrRootOutcomeUnknown, evidenceErr)
+		}
+		outcome.ToolReturns = bindings
+		if b, found, _ := bindings.Find(pendingCall.ID); pending && found && b.ReceiptDigest != "" {
+			settledCall = true
 		}
 	}
 	payload := kernel.OwnedPhysicalCallbackReturnPayload(latest, outcome)
@@ -218,7 +218,7 @@ func (runner *Runner) executeOwnedRoot(ctx context.Context, current kernel.Snaps
 	completion := kernel.OwnedPhysicalCallbackCompletion{
 		GrantID: grant.ID, ReturnRevision: latest.Run.Revision, ReturnSourceHash: hex.EncodeToString(hash[:]),
 		HostCompleted: hostComplete, LeaseOwned: !external,
-		ControlCustody: outcome.ControlCustody,
+		ControlCustody: outcome.ControlCustody, ToolReturns: outcome.ToolReturns,
 	}
 	// The actual whole callback owns this fact, including the fast-known path.
 	// Persist it before Mark so any competing recovery retains the same original
@@ -243,7 +243,7 @@ func (runner *Runner) executeOwnedRoot(ctx context.Context, current kernel.Snaps
 	if !settled {
 		// The enclosing native call has really returned. The Kernel grant still
 		// fences the Tool until an independent receipt settles the original intent.
-		if hostComplete && pending && runner.scopedRootCallbacks && (runner.toolOutcomeVerifier != nil || outcome.ControlCustody == kernel.OwnedToolSettledReturn) {
+		if hostComplete && pending && runner.scopedRootCallbacks && (runner.toolOutcomeVerifier != nil || settledCall) {
 			recordPhysicalObservation(ctx, latest.Run.ID, PhysicalCallDurableYield)
 		}
 		state, stateErr := decodeState(latest.State)

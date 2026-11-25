@@ -135,3 +135,34 @@ func TestToolRejectionCannotAdvanceWithoutAccountingAcknowledgement(t *testing.T
 		})
 	}
 }
+
+func TestOriginalHeldToolReplayPreservesNativeReceiptBytes(t *testing.T) {
+	ctx := t.Context()
+	store := budget.NewMemoryLedgerStore()
+	a, err := NewBoundedBudgetAdapter(store, &receiptBudgetPorts{scope: "turn"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &Runner{boundedCallbacks: []any{a}}
+	q := tools.ExecutionRequest{RunID: "run", Call: tools.Call{ID: "call", ToolKey: "read", Arguments: []byte("{}")}}
+	id := "tool:run:call"
+	b := kernel.OwnedToolReturn{CallID: q.Call.ID, LedgerID: "turn", RequestDigest: kernel.ManagedDigest(q)}
+	res := budget.Reservation{ID: id, RunID: q.RunID, RequestHash: b.RequestDigest, Requested: budget.Usage{ToolCalls: 1}, Status: budget.ReservationHeld, Dispatched: true}
+	if err = store.SaveBudget(ctx, budget.Ledger{ID: "turn", Revision: 1, Runs: map[string]budget.RunBudget{"run": {}}, Reservations: map[string]budget.Reservation{id: res}}, 0); err != nil {
+		t.Fatal(err)
+	}
+	result := tools.ExecutionResult{Content: []byte(`{ "a": 1 }`), Receipt: tools.Receipt{ExecutionID: q.Call.ID, Disposition: "committed"}}
+	for range 2 {
+		if err = r.settleOriginalHeldTool(ctx, q, b, result, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	result.Content = []byte(`{"a":1}`)
+	if err = r.settleOriginalHeldTool(ctx, q, b, result, true); !errors.Is(err, ErrToolReceiptMismatch) {
+		t.Fatal("accepted changed original receipt bytes", err)
+	}
+	l, err := store.LoadBudget(ctx, "turn")
+	if err != nil || l.View(q.RunID).Usage.ToolCalls != 1 {
+		t.Fatal("native receipt replay charged twice", err, l)
+	}
+}

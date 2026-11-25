@@ -65,6 +65,18 @@ func InheritModel(ctx, original context.Context) context.Context {
 	return BindModelCall(Inherit(ctx, original), ModelCall(original))
 }
 
+// Tool-call authority follows the actual Next chain even if middleware
+// supplies an unrelated Context. It is independent of the whole Grant journal.
+type toolCallKey struct{}
+
+func BindToolCall(ctx context.Context, authority any) context.Context {
+	return context.WithValue(ctx, toolCallKey{}, authority)
+}
+func ToolCall(ctx context.Context) any { return ctx.Value(toolCallKey{}) }
+func InheritTool(ctx, original context.Context) context.Context {
+	return BindToolCall(Inherit(ctx, original), ToolCall(original))
+}
+
 func Enter(ctx context.Context, runID string, adapter any, input any) (context.Context, *Ticket) {
 	s, _ := ctx.Value(scopeKey{}).(*Scope)
 	if s == nil {

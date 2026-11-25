@@ -119,7 +119,12 @@ func (r *Runner) externalControlWait(ctx context.Context, revision uint64, c Ext
 	if completion.ControlCustody != kernel.OwnedCustodyScoped && completion.ControlCustody != kernel.OwnedBoundedApprovalReturn {
 		return out, ErrRootOutcomeUnknown
 	}
-	outcome := kernel.OwnedPhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: completion.LeaseOwned, ControlCustody: completion.ControlCustody}
+	outcome := kernel.OwnedPhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: completion.LeaseOwned, ControlCustody: completion.ControlCustody, ToolReturns: completion.ToolReturns}
+	if binding, found, bindingErr := originalCallReturn(s, completion, out.request); bindingErr != nil {
+		return out, errors.Join(ErrRootOutcomeUnknown, bindingErr)
+	} else if found && (binding.ReceiptDigest != "" || state.ExternalToolHold == nil || state.ExternalToolHold.LedgerID != binding.LedgerID) {
+		return out, ErrToolReceiptMismatch
+	}
 	out.returnHash = kernel.ManagedDigest(kernel.OwnedPhysicalCallbackReturnPayload(s, outcome))
 	if out.returnHash != completion.ReturnSourceHash {
 		return out, ErrRootOutcomeUnknown

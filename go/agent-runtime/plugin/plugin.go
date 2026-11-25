@@ -325,7 +325,7 @@ func (chain *ToolChain) Invoke(
 					return tools.ExecutionResult{}, ErrNextAlreadyCalled
 				}
 				defer lifetime.leave()
-				return downstream(callbackscope.Inherit(nextCtx, layerCtx))
+				return downstream(callbackscope.InheritTool(nextCtx, layerCtx))
 			}))
 		}
 	}

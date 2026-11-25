@@ -49,6 +49,8 @@ func (m *settledToolModel) Generate(_ context.Context, q model.Request) (model.R
 // receipt-only CAS -> successor Agent consumption path with real Kernel adapters.
 // The ledger factory can independently reopen the Host's own store.
 func RunSettledToolRecovery(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store), ledgerFactory func(*testing.T) (budget.LedgerStore, func() budget.LedgerStore)) {
+	t.Run("mixed-original-batch", func(t *testing.T) { mixedOriginalToolConsumption(t, factory, ledgerFactory) })
+	t.Run("timeline-consumption", func(t *testing.T) { toolTimelineConsumption(t, factory, ledgerFactory) })
 	for _, variant := range []string{"committed", "strict-rejection", "allow-completion", "foreign-ledger", "changed-receipt", "opaque-callback", "lost-recovery-ack"} {
 		t.Run(variant, func(t *testing.T) {
 			ctx := t.Context()
@@ -139,7 +141,8 @@ func RunSettledToolRecovery(t *testing.T, factory func(*testing.T) (kernel.Store
 			if err != nil {
 				t.Fatal(err)
 			}
-			if variant != "opaque-callback" && (!completion.HostCompleted || completion.ControlCustody != kernel.OwnedToolSettledReturn) {
+			binding, found, bindErr := completion.ToolReturns.Find(original.Call.ID)
+			if variant != "opaque-callback" && (!completion.HostCompleted || completion.ControlCustody != kernel.OwnedCustodyScoped || bindErr != nil || !found || binding.ReceiptDigest == "") {
 				t.Fatalf("original completion not sealed: %+v", completion)
 			}
 			saved, err := ledger.LoadBudget(ctx, "original-ledger")
@@ -241,6 +244,12 @@ func RunSettledToolRecovery(t *testing.T, factory func(*testing.T) (kernel.Store
 			}
 			if _, e := freshRT.LookupChildExecution(ctx, request.ID); !errors.Is(e, kernel.ErrNotFound) {
 				t.Fatal("original grant not retired", e)
+			}
+			if err := freshRT.VerifyOwnedRootSettlement(ctx, final); err != nil {
+				t.Fatal("terminal original callback history not observable", err)
+			}
+			if !r.VerifiedDeferredRootControl(ctx, freshRT, final) {
+				t.Fatal("qualified native Root control not observable")
 			}
 			after, err := freshLedger.LoadBudget(ctx, "original-ledger")
 			if err != nil || after.Reservations[id].Status != budget.ReservationSettled || !reflect.DeepEqual(after.Reservations[id], saved.Reservations[id]) {

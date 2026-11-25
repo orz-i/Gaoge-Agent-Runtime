@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"sync"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
@@ -12,12 +13,12 @@ import (
 
 type toolReturnGrantKey struct{}
 
-// Only the executing SDK Tool frame can record an acknowledged suspension.
+// Only the executing SDK Tool frame records acknowledged Call obligations.
+// A whole callback returns one set of these independent original identities.
 type originalToolFrame struct {
 	grantID string
 	runID   string
-	settled sync.Map // request digest to immutable original ledger receipt binding
-	holds   sync.Map // immutable request digest to ledger ID
+	returns sync.Map // CallID -> kernel.OwnedToolReturn
 }
 
 type externalToolHold struct {
@@ -26,28 +27,29 @@ type externalToolHold struct {
 	RequestHash string `json:"requestHash"`
 }
 
-func (f *originalToolFrame) hold(q tools.ExecutionRequest) *externalToolHold {
+func (f *originalToolFrame) binding(q tools.ExecutionRequest) (kernel.OwnedToolReturn, bool) {
 	if f == nil || f.runID != q.RunID {
-		return nil
+		return kernel.OwnedToolReturn{}, false
 	}
-	hash := kernel.ManagedDigest(q)
-	id, ok := f.holds.Load(hash)
+	b, ok := f.returns.Load(q.Call.ID)
 	if !ok {
-		return nil
+		return kernel.OwnedToolReturn{}, false
 	}
-	return &externalToolHold{GrantID: f.grantID, LedgerID: id.(string), RequestHash: hash}
+	value := b.(kernel.OwnedToolReturn)
+	return value, value.RequestDigest == kernel.ManagedDigest(q)
 }
 
-// The executing callback records the exact settled receipt, not a later
-// observer's choice of ledger. The Root completion hash seals this binding.
-type settledToolBinding struct {
-	LedgerID    string
-	ReceiptHash string
+func (f *originalToolFrame) hold(q tools.ExecutionRequest) *externalToolHold {
+	b, ok := f.binding(q)
+	if !ok || b.ReceiptDigest != "" {
+		return nil
+	}
+	return &externalToolHold{GrantID: f.grantID, LedgerID: b.LedgerID, RequestHash: b.RequestDigest}
 }
 
 func (f *originalToolFrame) recordHold(q tools.ExecutionRequest, ledgerID string) {
 	if f != nil && f.runID == q.RunID {
-		f.holds.Store(kernel.ManagedDigest(q), ledgerID)
+		f.returns.Store(q.Call.ID, kernel.OwnedToolReturn{CallID: q.Call.ID, RequestDigest: kernel.ManagedDigest(q), LedgerID: ledgerID})
 	}
 }
 
@@ -59,18 +61,39 @@ func (f *originalToolFrame) recordSettled(q tools.ExecutionRequest, ledger budge
 	if err != nil {
 		return
 	}
-	f.settled.Store(kernel.ManagedDigest(q), settledToolBinding{LedgerID: ledger.ID, ReceiptHash: kernel.ManagedDigest(res.Receipt)})
+	if _, err = decodeToolOutcome(res.Receipt, q.Call.ID, true); err != nil {
+		return
+	}
+	f.returns.Store(q.Call.ID, kernel.OwnedToolReturn{CallID: q.Call.ID, RequestDigest: res.RequestHash, LedgerID: ledger.ID, ReceiptDigest: kernel.ManagedDigest(res.Receipt)})
 }
 
-func (f *originalToolFrame) settlement(q tools.ExecutionRequest) (settledToolBinding, bool) {
-	if f == nil || f.runID != q.RunID {
-		return settledToolBinding{}, false
+// Keep only the original callback's unresolved physical Calls. Already
+// consumed outcomes do not become a second durable receipt history.
+func (f *originalToolFrame) outstanding(s kernel.Snapshot) (kernel.OwnedToolReturns, error) {
+	if f == nil {
+		return "", nil
 	}
-	value, ok := f.settled.Load(kernel.ManagedDigest(q))
-	if !ok {
-		return settledToolBinding{}, false
+	state, err := decodeState(s.State)
+	if err != nil {
+		return "", err
 	}
-	return value.(settledToolBinding), true
+	var bindings []kernel.OwnedToolReturn
+	add := func(call tools.Call) {
+		if b, ok := f.binding(tools.ExecutionRequest{RunID: s.Run.ID, Call: call}); ok {
+			bindings = append(bindings, b)
+		}
+	}
+	if state.ToolDispatchID != "" {
+		call, ok := nextPendingCall(state)
+		if !ok || call.ID != state.ToolDispatchID {
+			return "", ErrToolReceiptMismatch
+		}
+		add(call)
+	}
+	for _, child := range state.DeferredChildren {
+		add(child.Call)
+	}
+	return kernel.NewOwnedToolReturns(bindings)
 }
 
 func originalSettledToolReservation(ledger budget.Ledger, q tools.ExecutionRequest) (budget.Reservation, error) {
@@ -85,13 +108,26 @@ func originalSettledToolReservation(ledger budget.Ledger, q tools.ExecutionReque
 	return res, nil
 }
 
-// readOriginalSettledTool never re-enters Tool middleware or re-settles a
-// reservation. The original whole callback proves both the exact Run snapshot
-// and the receipt bytes in the selected original Budget scope.
-func (r *Runner) readOriginalSettledTool(ctx context.Context, s kernel.Snapshot, c kernel.OwnedPhysicalCallbackCompletion, q tools.ExecutionRequest) (toolOutcomeReceipt, error) {
-	if c.ControlCustody != kernel.OwnedToolSettledReturn || !c.HostCompleted || c.ReturnRevision != s.Run.Revision || q.RunID != s.Run.ID {
-		return toolOutcomeReceipt{}, ErrToolReceiptMismatch
+// originalCallReturn selects by the current Call rather than by the whole
+// grant's control classification. A sibling cannot borrow another binding.
+func originalCallReturn(s kernel.Snapshot, c kernel.OwnedPhysicalCallbackCompletion, q tools.ExecutionRequest) (kernel.OwnedToolReturn, bool, error) {
+	if !c.HostCompleted || c.ReturnRevision > s.Run.Revision || q.RunID != s.Run.ID {
+		return kernel.OwnedToolReturn{}, false, ErrToolReceiptMismatch
 	}
+	b, ok, err := c.ToolReturns.Find(q.Call.ID)
+	if err != nil {
+		return b, false, err
+	}
+	if c.ToolReturns != "" && c.ReturnRevision == s.Run.Revision && !c.MatchesReturnSnapshot(s) {
+		return b, false, ErrToolReceiptMismatch
+	}
+	if ok && b.RequestDigest != kernel.ManagedDigest(q) {
+		return b, false, ErrToolReceiptMismatch
+	}
+	return b, ok, nil
+}
+
+func (r *Runner) originalToolLedger(ctx context.Context, q tools.ExecutionRequest, b kernel.OwnedToolReturn) (*BoundedBudgetAdapter, budget.Ledger, error) {
 	for _, layer := range r.boundedCallbacks {
 		a, ok := layer.(*BoundedBudgetAdapter)
 		if !ok {
@@ -99,27 +135,96 @@ func (r *Runner) readOriginalSettledTool(ctx context.Context, s kernel.Snapshot,
 		}
 		scope, err := a.ports.ResolveScope(ctx, q.RunID)
 		if err != nil {
-			return toolOutcomeReceipt{}, err
+			return nil, budget.Ledger{}, err
 		}
-		if scope.LedgerID == "" {
-			return toolOutcomeReceipt{}, ErrToolReceiptMismatch
+		if scope.LedgerID != b.LedgerID {
+			return nil, budget.Ledger{}, ErrToolReceiptMismatch
 		}
-		ledger, err := a.coordinator.Store.LoadBudget(ctx, scope.LedgerID)
+		l, err := a.coordinator.Store.LoadBudget(ctx, b.LedgerID)
 		if err != nil {
-			return toolOutcomeReceipt{}, err
+			return nil, budget.Ledger{}, err
 		}
-		res, err := originalSettledToolReservation(ledger, q)
-		if err != nil || ledger.ID != scope.LedgerID {
-			return toolOutcomeReceipt{}, ErrToolReceiptMismatch
+		if l.ID != b.LedgerID {
+			return nil, budget.Ledger{}, ErrToolReceiptMismatch
 		}
-		out := kernel.OwnedPhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: c.LeaseOwned, ControlCustody: c.ControlCustody,
-			ToolBudgetScope: ledger.ID, ToolReceiptDigest: kernel.ManagedDigest(res.Receipt)}
-		if kernel.ManagedDigest(kernel.OwnedPhysicalCallbackReturnPayload(s, out)) != c.ReturnSourceHash {
-			return toolOutcomeReceipt{}, ErrToolReceiptMismatch
-		}
-		return decodeToolOutcome(res.Receipt, q.Call.ID, true)
+		return a, l, nil
 	}
-	return toolOutcomeReceipt{}, ErrToolReceiptMismatch
+	return nil, budget.Ledger{}, ErrToolReceiptMismatch
+}
+
+// The immutable original callback's Call binding selects the ledger and
+// terminal receipt, even if another sibling has advanced the Run revision.
+func (r *Runner) readOriginalSettledTool(ctx context.Context, q tools.ExecutionRequest, b kernel.OwnedToolReturn) (toolOutcomeReceipt, error) {
+	_, l, err := r.originalToolLedger(ctx, q, b)
+	if err != nil {
+		return toolOutcomeReceipt{}, err
+	}
+	res, err := originalSettledToolReservation(l, q)
+	if err != nil || b.ReceiptDigest == "" || kernel.ManagedDigest(res.Receipt) != b.ReceiptDigest {
+		return toolOutcomeReceipt{}, ErrToolReceiptMismatch
+	}
+	return decodeToolOutcome(res.Receipt, q.Call.ID, true)
+}
+
+// The original held reservation must match before the Host verifier is
+// consulted, and again when the verified result is accepted.
+func (r *Runner) originalHeldTool(ctx context.Context, q tools.ExecutionRequest, b kernel.OwnedToolReturn) (*BoundedBudgetAdapter, budget.Ledger, budget.Reservation, error) {
+	a, l, err := r.originalToolLedger(ctx, q, b)
+	if err != nil {
+		return nil, budget.Ledger{}, budget.Reservation{}, err
+	}
+	id := "tool:" + q.RunID + ":" + q.Call.ID
+	res := l.Reservations[id]
+	_, registered := l.Runs[q.RunID]
+	if !registered || b.ReceiptDigest != "" || res.ID != id || res.RunID != q.RunID || res.RequestHash != b.RequestDigest ||
+		res.Requested != (budget.Usage{ToolCalls: 1}) || !res.Dispatched || res.Active ||
+		(res.Status != budget.ReservationHeld && res.Status != budget.ReservationSettled) {
+		return nil, budget.Ledger{}, budget.Reservation{}, ErrToolReceiptMismatch
+	}
+	return a, l, res, nil
+}
+
+// A held Call may settle through the original verifier or the existing
+// native Budget owner. A legacy Harness verifier may have already committed
+// the identical receipt; use that immutable receipt rather than charge again.
+func (r *Runner) settleOriginalHeldTool(ctx context.Context, q tools.ExecutionRequest, b kernel.OwnedToolReturn, result tools.ExecutionResult, childWait bool) error {
+	if !childWait && len(result.Receipt.OwnerReceiptDigest) != 64 {
+		return ErrToolReceiptMismatch
+	}
+	a, l, res, err := r.originalHeldTool(ctx, q, b)
+	if err != nil {
+		return err
+	}
+	if res.Status == budget.ReservationSettled {
+		known, err := originalSettledToolReservation(l, q)
+		if err != nil {
+			return err
+		}
+		var persisted persistedToolOutcome
+		if err := json.Unmarshal(known.Receipt, &persisted); err != nil {
+			return ErrToolReceiptMismatch
+		}
+		outcome, err := decodeToolOutcome(known.Receipt, q.Call.ID, false)
+		if err != nil || outcome.ErrorCode != "" {
+			return ErrToolReceiptMismatch
+		}
+		// Native settlement retains exact original bytes. Only the historical
+		// verifier-owned receipt format lacks this evidence and uses its
+		// original canonical comparison contract.
+		if persisted.Evidence != nil {
+			if !reflect.DeepEqual(outcome.Result, tools.CloneExecutionResult(result)) {
+				return ErrToolReceiptMismatch
+			}
+		} else if kernel.ManagedDigest(outcome.Result) != kernel.ManagedDigest(result) {
+			return ErrToolReceiptMismatch
+		}
+		return a.ports.Project(ctx, l)
+	}
+	raw, err := encodeToolOutcome(newToolOutcomeReceipt(result, nil))
+	if err != nil {
+		return err
+	}
+	return a.settleSuspendedTool(ctx, b.LedgerID, q, budget.Usage{ToolCalls: 1}, raw)
 }
 
 func (r *Runner) settleOriginalToolBudget(ctx context.Context, s kernel.Snapshot, c kernel.OwnedPhysicalCallbackCompletion, request tools.ExecutionRequest, result tools.ExecutionResult) error {

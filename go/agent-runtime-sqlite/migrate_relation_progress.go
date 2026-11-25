@@ -7,8 +7,7 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/profile"
 )
 
-// MigrateV8ToV9 explicitly adds an initially empty relation delivery
-// progress table. Stop all old writers and retain a backup before invoking.
+// MigrateV8ToV9 adds initially empty relation progress and Call return evidence. Stop all old writers and retain a backup before invoking.
 // No original effect, callback or queue acknowledgement is inferred.
 func MigrateV8ToV9(ctx context.Context, path string) error {
 	return MigrateV8ToV9With(ctx, path, nil)
@@ -50,6 +49,9 @@ func (s *Store) migrateV8ToV9(ctx context.Context) error {
 	}
 	if version == 9 {
 		return nil
+	}
+	if _, err = tx.ExecContext(ctx, "ALTER TABLE runtime_child_effect_grants ADD COLUMN "+callbackToolReturnsColumn); err != nil {
+		return err
 	}
 	if _, err = tx.ExecContext(ctx, relationProgressDDL); err != nil {
 		return err

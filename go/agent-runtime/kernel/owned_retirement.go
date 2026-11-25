@@ -67,7 +67,7 @@ func (e OwnedSettlementEvidence) Valid() bool {
 	if c.GrantID == "" {
 		return c == (OwnedPhysicalCallbackCompletion{}) && e.MarkOrigin == "LEGACY_UNKNOWN"
 	}
-	return c.ControlCustody.Valid() && (c.ControlCustody != OwnedCustodyPrepared || g.AdmissionOperation == "prepare") &&
+	return c.ControlCustody.Valid() && c.ToolReturns.Valid() && (c.ToolReturns == "" || c.ControlCustody != OwnedToolBudgetReturn && c.ControlCustody != OwnedCustodyPrepared) && (c.ControlCustody != OwnedCustodyPrepared || g.AdmissionOperation == "prepare") &&
 		c.GrantID == g.ID && c.HostCompleted && c.ReturnRevision >= g.ExpectedRevision && c.ReturnRevision <= s.Run.Revision && len(c.ReturnSourceHash) == 64 && (e.MarkOrigin == "OWNER_RETURN" || e.MarkOrigin == "RECOVERED_RETURN" || e.MarkOrigin == "LEGACY_UNKNOWN")
 }
 

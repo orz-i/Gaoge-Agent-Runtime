@@ -80,7 +80,15 @@ func (runner *Runner) reconcileSettledToolIfPresent(ctx context.Context, s kerne
 	if err != nil {
 		return s, true, err
 	}
-	if completion.ControlCustody != kernel.OwnedToolSettledReturn {
+	call, ok := nextPendingCall(state)
+	if !ok || call.ID != state.ToolDispatchID {
+		return s, true, ErrToolReceiptMismatch
+	}
+	binding, found, err := originalCallReturn(s, completion, tools.ExecutionRequest{RunID: s.Run.ID, Call: call})
+	if err != nil {
+		return s, true, errors.Join(ErrToolOutcomeUnknown, err)
+	}
+	if !found || binding.ReceiptDigest == "" {
 		return s, false, nil
 	}
 	repaired, err := runner.reconcileRootToolReceipt(ctx, s, state, grant, state.ToolDispatchID, false)
@@ -106,18 +114,27 @@ func (runner *Runner) reconcileRootToolReceipt(ctx context.Context, snapshot ker
 		return snapshot, ErrToolOutcomeUnknown
 	}
 	request := tools.ExecutionRequest{RunID: snapshot.Run.ID, Call: tools.CloneCall(call)}
+	binding, bound, err := originalCallReturn(snapshot, completion, request)
+	if err != nil {
+		return snapshot, errors.Join(ErrToolOutcomeUnknown, err)
+	}
 	var outcome toolOutcomeReceipt
-	if completion.ControlCustody == kernel.OwnedToolSettledReturn {
+	if bound && binding.ReceiptDigest != "" {
 		if state.ToolWait != nil || state.ExternalToolHold != nil {
 			return snapshot, ErrToolReceiptMismatch
 		}
-		outcome, err = runner.readOriginalSettledTool(ctx, snapshot, completion, request)
+		outcome, err = runner.readOriginalSettledTool(ctx, request, binding)
 		if err != nil {
 			return snapshot, errors.Join(ErrToolOutcomeUnknown, err)
 		}
 	} else {
 		if runner.toolOutcomeVerifier == nil {
 			return snapshot, ErrToolVerificationRequired
+		}
+		if bound {
+			if _, _, _, err := runner.originalHeldTool(ctx, request, binding); err != nil {
+				return snapshot, errors.Join(ErrToolOutcomeUnknown, err)
+			}
 		}
 		verified, verifyErr := runner.toolOutcomeVerifier.VerifyCommittedTool(ctx, request)
 		if verifyErr != nil {
@@ -128,13 +145,22 @@ func (runner *Runner) reconcileRootToolReceipt(ctx context.Context, snapshot ker
 		}
 		outcome = newToolOutcomeReceipt(verified, nil)
 		if hold := state.ExternalToolHold; hold != nil {
-			if state.ToolWait == nil || state.ToolWait.Kind != tools.PendingExternalResult || hold.GrantID != grant.ID || hold.RequestHash != kernel.ManagedDigest(request) {
+			if state.ToolWait == nil || state.ToolWait.Kind != tools.PendingExternalResult || hold.GrantID != grant.ID || hold.RequestHash != kernel.ManagedDigest(request) ||
+				(bound && hold.LedgerID != binding.LedgerID) {
 				return snapshot, ErrToolReceiptMismatch
 			}
-			if err := runner.settleToolHold(ctx, request, verified, func(id string) bool { return id == hold.LedgerID }); err != nil {
-				return snapshot, errors.Join(ErrToolOutcomeUnknown, err)
+			if !bound {
+				if err := runner.settleToolHold(ctx, request, verified, func(id string) bool { return id == hold.LedgerID }); err != nil {
+					return snapshot, errors.Join(ErrToolOutcomeUnknown, err)
+				}
 			}
 			state.ExternalToolHold = nil
+		}
+		if bound {
+			childWait := state.ToolWait != nil && state.ToolWait.Kind == tools.PendingChildTerminal
+			if err := runner.settleOriginalHeldTool(ctx, request, binding, verified, childWait); err != nil {
+				return snapshot, errors.Join(ErrToolOutcomeUnknown, err)
+			}
 		}
 		if completion.ControlCustody == kernel.OwnedToolBudgetReturn {
 			if err := runner.settleOriginalToolBudget(ctx, snapshot, completion, request, verified); err != nil {

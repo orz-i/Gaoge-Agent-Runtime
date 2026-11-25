@@ -55,7 +55,7 @@ func (a *BoundedBudgetAdapter) Tool(ctx context.Context, inv plugin.ToolInvocati
 		return tools.ExecutionResult{}, e
 	}
 	if errors.Is(err, budget.ErrWaiting) {
-		return tools.ExecutionResult{Content: json.RawMessage(`{"status":"waiting_budget"}`), Receipt: tools.Receipt{ExecutionID: inv.Request.Call.ID, Disposition: tools.ReceiptDispositionPending}}, nil
+		return toolAuthority(ctx).record(tools.ExecutionResult{Content: json.RawMessage(`{"status":"waiting_budget"}`), Receipt: tools.Receipt{ExecutionID: inv.Request.Call.ID, Disposition: tools.ReceiptDispositionPending}}, nil)
 	}
 	if err != nil {
 		return tools.ExecutionResult{}, err
@@ -71,8 +71,12 @@ func (a *BoundedBudgetAdapter) Tool(ctx context.Context, inv plugin.ToolInvocati
 			return tools.ExecutionResult{}, invalid
 		}
 		callErr, _ := receipt.terminalError(inv.Request.Call.ID)
-		record("budget.tool.replayed", l)
-		return receipt.Result, callErr
+		result, callErr := toolAuthority(ctx).record(receipt.Result, callErr)
+		if record("budget.tool.replayed", l) {
+			frame, _ := ctx.Value(toolReturnGrantKey{}).(*originalToolFrame)
+			frame.recordSettled(inv.Request, l)
+		}
+		return result, callErr
 	}
 	if current.Dispatched {
 		return tools.ExecutionResult{}, budget.ErrWaiting
@@ -81,6 +85,7 @@ func (a *BoundedBudgetAdapter) Tool(ctx context.Context, inv plugin.ToolInvocati
 		return tools.ExecutionResult{}, err
 	}
 	result, callErr := next(ctx)
+	result, callErr = toolAuthority(ctx).validate(result, callErr)
 	accounting := context.WithoutCancel(ctx)
 	if callErr == nil {
 		if e := tools.ValidateExecutionResult(result); e != nil {
@@ -92,24 +97,29 @@ func (a *BoundedBudgetAdapter) Tool(ctx context.Context, inv plugin.ToolInvocati
 		updated, suspendErr := a.coordinator.Suspend(accounting, l.ID, id)
 		projectErr := a.ports.Project(accounting, updated)
 		frame, _ := ctx.Value(toolReturnGrantKey{}).(*originalToolFrame)
-		externalWait := callErr == nil && result.Pending != nil && result.Pending.Kind == tools.PendingExternalResult
-		if frame != nil && suspendErr == nil && projectErr == nil && (errors.Is(callErr, ErrToolOutcomeUnknown) || externalWait) {
-			frame.recordHold(inv.Request, l.ID)
-			record("budget.tool.suspended", updated)
+		if suspendErr != nil || projectErr != nil {
+			return toolAuthority(ctx).reject(errors.Join(callErr, suspendErr, projectErr))
 		}
-		return result, errors.Join(callErr, suspendErr, projectErr)
+		pending := callErr == nil && result.Receipt.ExecutionID == inv.Request.Call.ID &&
+			result.Receipt.Disposition == tools.ReceiptDispositionPending && tools.ValidateExecutionResult(result) == nil
+		if frame != nil && (errors.Is(callErr, ErrToolOutcomeUnknown) || pending) {
+			if record("budget.tool.suspended", updated) {
+				frame.recordHold(inv.Request, l.ID)
+			}
+		}
+		return result, callErr
 	}
 	raw, err = encodeToolOutcome(newToolOutcomeReceipt(result, callErr))
 	if err != nil {
 		updated, suspendErr := a.coordinator.Suspend(accounting, l.ID, id)
-		return tools.ExecutionResult{}, errors.Join(ErrToolOutcomeUnknown, err, suspendErr, a.ports.Project(accounting, updated))
+		return toolAuthority(ctx).reject(errors.Join(err, suspendErr, a.ports.Project(accounting, updated)))
 	}
 	updated, err := a.coordinator.Settle(accounting, l.ID, id, budget.Usage{ToolCalls: 1}, raw)
 	projectionErr := a.ports.Project(accounting, updated)
 	if err != nil || projectionErr != nil {
 		// A typed refusal joined with an accounting error must not be
 		// mistaken for a qualified rejection receipt at the Agent boundary.
-		return tools.ExecutionResult{}, errors.Join(ErrToolOutcomeUnknown, callErr, err, projectionErr)
+		return toolAuthority(ctx).reject(errors.Join(callErr, err, projectionErr))
 	}
 	if record("budget.tool.settled", updated) {
 		frame, _ := ctx.Value(toolReturnGrantKey{}).(*originalToolFrame)
@@ -169,6 +179,7 @@ func (a *BoundedToolTimelineAdapter) Tool(ctx context.Context, inv plugin.ToolIn
 		return tools.ExecutionResult{}, ErrInvalidRequest
 	}
 	result, callErr := next(ctx)
+	result, callErr = toolAuthority(ctx).validate(result, callErr)
 	if callErr == nil && strings.TrimSpace(result.Receipt.Disposition) == tools.ReceiptDispositionPending {
 		return result, nil
 	}
@@ -180,13 +191,14 @@ func (a *BoundedToolTimelineAdapter) Tool(ctx context.Context, inv plugin.ToolIn
 	if itemErr == nil && ended == "" {
 		itemErr = ErrInvalidRequest
 	}
-	if itemErr == nil {
-		callbackscope.Record(ctx, a, "timeline.tool.returned", struct {
-			Scope                  BoundedToolTimelineScope
-			Invocation             plugin.ToolInvocation
-			Started, Ended, Status string
-			Result                 tools.ExecutionResult
-		}{scope, inv, started, ended, status, result})
+	if itemErr != nil {
+		return toolAuthority(ctx).reject(errors.Join(callErr, itemErr))
 	}
-	return result, errors.Join(callErr, itemErr)
+	callbackscope.Record(ctx, a, "timeline.tool.returned", struct {
+		Scope                  BoundedToolTimelineScope
+		Invocation             plugin.ToolInvocation
+		Started, Ended, Status string
+		Result                 tools.ExecutionResult
+	}{scope, inv, started, ended, status, result})
+	return result, callErr
 }

@@ -2341,6 +2341,8 @@ func (runner *Runner) invokePendingTool(
 		Run: snapshot.Run, Definition: tools.CloneDefinition(definition), Request: executionRequest,
 	}
 	result, attempt, err := runner.executeToolWithPolicy(ctx, call.ID, snapshot.Run.DeadlineAt, func(callCtx context.Context) (tools.ExecutionResult, error) {
+		authority := &toolCallAuthority{id: call.ID}
+		callCtx = callbackscope.BindToolCall(callCtx, authority)
 		out, chainErr := runner.toolChain.Invoke(callCtx, invocation, func(nextCtx context.Context) (tools.ExecutionResult, error) {
 			// Recheck after middleware/limiter delays, immediately before the
 			// executor call. A Store gate cannot itself make external effects
@@ -2348,9 +2350,10 @@ func (runner *Runner) invokePendingTool(
 			if err := runner.runtime.RequireExecution(nextCtx, snapshot.Run.ID); err != nil {
 				return tools.ExecutionResult{}, err
 			}
-			return runner.executor.Execute(nextCtx, executionRequest)
+			result, err := runner.executor.Execute(nextCtx, executionRequest)
+			return authority.record(result, err)
 		})
-		return out, chainErr
+		return authority.validate(out, chainErr)
 	})
 	endedAt := runner.clock.Now().UTC()
 	phase := observability.PhaseCompleted

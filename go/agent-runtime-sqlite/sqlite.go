@@ -161,7 +161,19 @@ func (s *Store) initialize(ctx context.Context, create bool) error {
 	return nil
 }
 
-var schemaDDL = append(schemaV8DDL(), relationProgressDDL)
+const callbackToolReturnsColumn = "callback_tool_returns TEXT NOT NULL DEFAULT ''"
+
+var schemaDDL = schemaV9DDL()
+
+func schemaV9DDL() []string {
+	out := schemaV8DDL()
+	for i, ddl := range out {
+		if strings.HasPrefix(ddl, "CREATE TABLE runtime_child_effect_grants ") {
+			out[i] = strings.Replace(ddl, "settlement_evidence_json BLOB,", "settlement_evidence_json BLOB, "+callbackToolReturnsColumn+",", 1)
+		}
+	}
+	return append(out, relationProgressDDL)
+}
 
 func schemaV8DDL() []string {
 	return append(append([]string{
