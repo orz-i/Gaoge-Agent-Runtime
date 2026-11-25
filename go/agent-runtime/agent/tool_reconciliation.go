@@ -27,8 +27,8 @@ func (fn ToolOutcomeVerifierFunc) VerifyCommittedTool(ctx context.Context, reque
 	return fn(ctx, request)
 }
 
-// ReconcileToolOutcome persists a provider-verified external COMMIT without
-// invoking Executor.Execute. The host authenticates the caller and supplies
+// ReconcileToolOutcome persists an original sealed terminal outcome or a
+// provider-verified external COMMIT without invoking Executor.Execute. The host authenticates the caller and supplies
 // a trusted ToolOutcomeVerifier in Runner dependencies; this method does
 // not accept an arbitrary result or "committed" flag from a client.
 func (runner *Runner) ReconcileToolOutcome(ctx context.Context, runID string,
@@ -37,15 +37,20 @@ func (runner *Runner) ReconcileToolOutcome(ctx context.Context, runID string,
 		strings.TrimSpace(callID) == "" || expectedRevision == 0 {
 		return kernel.Snapshot{}, ErrInvalidRequest
 	}
-	if runner.toolOutcomeVerifier == nil {
-		return kernel.Snapshot{}, ErrToolVerificationRequired
-	}
 	snapshot, state, err := runner.loadState(ctx, runID)
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
 	if snapshot.Run.Revision != expectedRevision {
 		return snapshot, kernel.ErrConflict
+	}
+	if state.ToolDispatchID == callID {
+		if repaired, handled, recoveryErr := runner.reconcileSettledToolIfPresent(ctx, snapshot, state); handled {
+			return repaired, recoveryErr
+		}
+	}
+	if runner.toolOutcomeVerifier == nil {
+		return snapshot, ErrToolVerificationRequired
 	}
 	if snapshot.Run.ParentRunID == "" && state.ToolDispatchID == "" && len(state.DeferredChildren) > 0 && state.DeferredChildren[0].Call.ID == callID {
 		grant, grantErr := runner.runtime.LookupChildExecution(ctx, runID)

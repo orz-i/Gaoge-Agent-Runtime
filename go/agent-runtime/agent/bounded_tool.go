@@ -19,13 +19,6 @@ import (
 type BoundedBudgetToolPorts interface {
 	ToolReservationActive(plugin.ToolInvocation) bool
 }
-type boundedBudgetToolReceipt struct {
-	Result          tools.ExecutionResult `json:"result"`
-	ErrorCode       string                `json:"errorCode,omitempty"`
-	ErrorMessage    string                `json:"errorMessage,omitempty"`
-	BlockedTools    []string              `json:"blockedTools,omitempty"`
-	AllowCompletion bool                  `json:"allowCompletion,omitempty"`
-}
 
 func (a *BoundedBudgetAdapter) Tool(ctx context.Context, inv plugin.ToolInvocation, next plugin.ToolNext) (tools.ExecutionResult, error) {
 	if inv.Run.ID == "" || inv.Request.RunID != inv.Run.ID || inv.Request.Call.ID == "" {
@@ -39,8 +32,8 @@ func (a *BoundedBudgetAdapter) Tool(ctx context.Context, inv plugin.ToolInvocati
 	if err != nil {
 		return tools.ExecutionResult{}, err
 	}
-	record := func(op string, ledger budget.Ledger) {
-		callbackscope.Record(ctx, a, op, struct {
+	record := func(op string, ledger budget.Ledger) bool {
+		return callbackscope.Record(ctx, a, op, struct {
 			Invocation plugin.ToolInvocation
 			Ledger     budget.Ledger
 		}{inv, ledger})
@@ -69,21 +62,15 @@ func (a *BoundedBudgetAdapter) Tool(ctx context.Context, inv plugin.ToolInvocati
 	}
 	current := l.Reservations[id]
 	if current.Status == budget.ReservationSettled {
-		var receipt boundedBudgetToolReceipt
-		if e := json.Unmarshal(current.Receipt, &receipt); e != nil {
-			return tools.ExecutionResult{}, e
+		reservation, invalid := originalSettledToolReservation(l, inv.Request)
+		if invalid != nil {
+			return tools.ExecutionResult{}, invalid
 		}
-		var callErr error
-		if receipt.ErrorCode != "" {
-			callErr = tools.NewRecoverableCallErrorWithBlockedTools(receipt.ErrorCode, receipt.ErrorMessage, nil, receipt.BlockedTools...)
-			var rejection *tools.RecoverableCallError
-			if errors.As(callErr, &rejection) {
-				rejection.AllowCompletion = receipt.AllowCompletion
-			}
+		receipt, invalid := decodeToolOutcome(reservation.Receipt, inv.Request.Call.ID, false)
+		if invalid != nil {
+			return tools.ExecutionResult{}, invalid
 		}
-		if !validBoundedToolReceipt(receipt.Result, callErr, inv.Request.Call.ID) {
-			return tools.ExecutionResult{}, ErrToolReceiptMismatch
-		}
+		callErr, _ := receipt.terminalError(inv.Request.Call.ID)
 		record("budget.tool.replayed", l)
 		return receipt.Result, callErr
 	}
@@ -107,22 +94,28 @@ func (a *BoundedBudgetAdapter) Tool(ctx context.Context, inv plugin.ToolInvocati
 		frame, _ := ctx.Value(toolReturnGrantKey{}).(*originalToolFrame)
 		externalWait := callErr == nil && result.Pending != nil && result.Pending.Kind == tools.PendingExternalResult
 		if frame != nil && suspendErr == nil && projectErr == nil && (errors.Is(callErr, ErrToolOutcomeUnknown) || externalWait) {
-			frame.holds.Store(res.RequestHash, l.ID)
+			frame.recordHold(inv.Request, l.ID)
 			record("budget.tool.suspended", updated)
 		}
 		return result, errors.Join(callErr, suspendErr, projectErr)
 	}
-	code, message, _ := tools.RecoverableCallErrorInfo(callErr)
-	raw, err = json.Marshal(boundedBudgetToolReceipt{Result: result, ErrorCode: code, ErrorMessage: message, BlockedTools: tools.RecoverableCallErrorBlockedToolKeys(callErr), AllowCompletion: tools.RecoverableCallErrorAllowsCompletion(callErr)})
+	raw, err = encodeToolOutcome(newToolOutcomeReceipt(result, callErr))
 	if err != nil {
-		return result, err
+		updated, suspendErr := a.coordinator.Suspend(accounting, l.ID, id)
+		return tools.ExecutionResult{}, errors.Join(ErrToolOutcomeUnknown, err, suspendErr, a.ports.Project(accounting, updated))
 	}
 	updated, err := a.coordinator.Settle(accounting, l.ID, id, budget.Usage{ToolCalls: 1}, raw)
 	projectionErr := a.ports.Project(accounting, updated)
-	if err == nil && projectionErr == nil {
-		record("budget.tool.settled", updated)
+	if err != nil || projectionErr != nil {
+		// A typed refusal joined with an accounting error must not be
+		// mistaken for a qualified rejection receipt at the Agent boundary.
+		return tools.ExecutionResult{}, errors.Join(ErrToolOutcomeUnknown, callErr, err, projectionErr)
 	}
-	return result, errors.Join(callErr, err, projectionErr)
+	if record("budget.tool.settled", updated) {
+		frame, _ := ctx.Value(toolReturnGrantKey{}).(*originalToolFrame)
+		frame.recordSettled(inv.Request, updated)
+	}
+	return result, callErr
 }
 func validBoundedToolReceipt(result tools.ExecutionResult, err error, id string) bool {
 	if result.Receipt.ExecutionID != id || result.Receipt.Disposition == tools.ReceiptDispositionPending {

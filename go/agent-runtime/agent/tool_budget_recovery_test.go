@@ -8,6 +8,7 @@ import (
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
@@ -62,5 +63,75 @@ func TestSuspendedToolSettlementRequiresOriginalCallbackAndReservation(t *testin
 	result.Content = []byte(`"different"`)
 	if !errors.Is(r.settleOriginalToolBudget(ctx, s, c, q, result), budget.ErrLedgerConflict) {
 		t.Fatal("changed a settled owner receipt")
+	}
+}
+
+// A definitive Tool refusal does not qualify Agent correction if accounting
+// itself has not acknowledged the same outcome.
+type unacknowledgedToolLedger struct {
+	budget.LedgerStore
+	fail error
+}
+
+func (s unacknowledgedToolLedger) SaveBudget(ctx context.Context, ledger budget.Ledger, revision uint64) error {
+	for _, res := range ledger.Reservations {
+		if res.Status == budget.ReservationSettled {
+			return s.fail
+		}
+	}
+	return s.LedgerStore.SaveBudget(ctx, ledger, revision)
+}
+
+type toolAccountingPorts struct {
+	BoundedBudgetPorts
+	fail error
+}
+
+func (p toolAccountingPorts) ResolveScope(_ context.Context, run string) (BoundedBudgetScope, error) {
+	return BoundedBudgetScope{LedgerID: "turn", Limits: budget.Limits{MaxToolCalls: 2}, Runs: []BoundedBudgetRunBinding{{RunID: run}}}, nil
+}
+func (p toolAccountingPorts) Project(_ context.Context, ledger budget.Ledger) error {
+	for _, res := range ledger.Reservations {
+		if res.Status == budget.ReservationSettled {
+			return p.fail
+		}
+	}
+	return nil
+}
+func (toolAccountingPorts) ToolReservationActive(plugin.ToolInvocation) bool { return true }
+func TestToolRejectionCannotAdvanceWithoutAccountingAcknowledgement(t *testing.T) {
+	for _, cut := range []string{"settle", "project"} {
+		t.Run(cut, func(t *testing.T) {
+			failure := errors.New("accounting not acknowledged")
+			backing := budget.NewMemoryLedgerStore()
+			var store budget.LedgerStore = backing
+			ports := toolAccountingPorts{}
+			if cut == "settle" {
+				store = unacknowledgedToolLedger{backing, failure}
+			} else {
+				ports.fail = failure
+			}
+			a, err := NewBoundedBudgetAdapter(store, ports)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := tools.ExecutionRequest{RunID: "run", Call: tools.Call{ID: "original", ToolKey: "read", Arguments: []byte("{}")}}
+			count := 0
+			result, err := a.Tool(t.Context(), plugin.ToolInvocation{Run: kernel.Run{ID: "run"}, Request: request}, func(context.Context) (tools.ExecutionResult, error) {
+				count++
+				return tools.RecoverableNoEffectResult(request.Call.ID, tools.NewRecoverableCallErrorAllowCompletion("tool.unavailable", "unavailable", nil))
+			})
+			if !errors.Is(err, failure) || !errors.Is(err, ErrToolOutcomeUnknown) || tools.ValidRecoverableNoEffectReceipt(result, err, request.Call.ID) || count != 1 {
+				t.Fatalf("unqualified result accepted: %+v %v count=%d", result, err, count)
+			}
+			saved, e := backing.LoadBudget(t.Context(), "turn")
+			if e != nil {
+				t.Fatal(e)
+			}
+			res := saved.Reservations["tool:run:original"]
+			if !res.Dispatched || (cut == "settle" && res.Status != budget.ReservationHeld) || (cut == "project" && res.Status != budget.ReservationSettled) {
+				t.Fatalf("original reservation changed: %+v", res)
+			}
+		})
 	}
 }

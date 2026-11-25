@@ -166,8 +166,8 @@ func (runner *Runner) executeOwnedRoot(ctx context.Context, current kernel.Snaps
 	defer lifecycle.Close()
 	physicalCtx := callbackscope.Bind(ctx, lifecycle)
 	var toolFrame *originalToolFrame
-	if runner.scopedRootCallbacks && (runner.toolOutcomeVerifier != nil || runner.externalNoEffectVerifier != nil) && (grant.AdmissionOperation == "resume" || grant.AdmissionOperation == "start") {
-		toolFrame = &originalToolFrame{grantID: grant.ID}
+	if runner.scopedRootCallbacks && (grant.AdmissionOperation == "resume" || grant.AdmissionOperation == "start" || grant.AdmissionOperation == "approval") {
+		toolFrame = &originalToolFrame{grantID: grant.ID, runID: grant.ChildRunID}
 		physicalCtx = context.WithValue(physicalCtx, toolReturnGrantKey{}, toolFrame)
 	}
 	result, callErr := execute(physicalCtx, &scoped, current)
@@ -203,8 +203,13 @@ func (runner *Runner) executeOwnedRoot(ctx context.Context, current kernel.Snaps
 	}
 	pendingCall, pending, _ := FrozenPendingDispatch(latest)
 	if pending && hostComplete {
-		if hold := toolFrame.hold(tools.ExecutionRequest{RunID: latest.Run.ID, Call: pendingCall}); hold != nil {
-			outcome.ControlCustody, outcome.ToolBudgetScope = kernel.OwnedToolBudgetReturn, hold.LedgerID
+		request := tools.ExecutionRequest{RunID: latest.Run.ID, Call: pendingCall}
+		if binding, ok := toolFrame.settlement(request); ok {
+			outcome.ControlCustody, outcome.ToolBudgetScope, outcome.ToolReceiptDigest = kernel.OwnedToolSettledReturn, binding.LedgerID, binding.ReceiptHash
+		} else if runner.toolOutcomeVerifier != nil || runner.externalNoEffectVerifier != nil {
+			if hold := toolFrame.hold(request); hold != nil {
+				outcome.ControlCustody, outcome.ToolBudgetScope = kernel.OwnedToolBudgetReturn, hold.LedgerID
+			}
 		}
 	}
 	payload := kernel.OwnedPhysicalCallbackReturnPayload(latest, outcome)
@@ -238,7 +243,7 @@ func (runner *Runner) executeOwnedRoot(ctx context.Context, current kernel.Snaps
 	if !settled {
 		// The enclosing native call has really returned. The Kernel grant still
 		// fences the Tool until an independent receipt settles the original intent.
-		if hostComplete && pending && runner.scopedRootCallbacks && runner.toolOutcomeVerifier != nil {
+		if hostComplete && pending && runner.scopedRootCallbacks && (runner.toolOutcomeVerifier != nil || outcome.ControlCustody == kernel.OwnedToolSettledReturn) {
 			recordPhysicalObservation(ctx, latest.Run.ID, PhysicalCallDurableYield)
 		}
 		state, stateErr := decodeState(latest.State)

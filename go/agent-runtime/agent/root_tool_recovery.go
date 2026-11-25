@@ -14,6 +14,8 @@ type rootToolReceipt struct {
 	Call   tools.Call            `json:"call"`
 	Wait   *PendingTool          `json:"wait,omitempty"`
 	Result tools.ExecutionResult `json:"result"`
+	// Keep the original Result field and its opaque-evidence typed path.
+	Rejection *toolRejection `json:"rejection,omitempty"`
 }
 
 // ReconcileExternalToolForControl verifies the original external wait without
@@ -40,10 +42,49 @@ func (runner *Runner) ReconcileExternalToolForControl(ctx context.Context, runID
 	return runner.reconcileRootToolReceipt(ctx, s, state, grant, call.ID, false)
 }
 
+func (r rootToolReceipt) outcome() toolOutcomeReceipt {
+	outcome := toolOutcomeReceipt{Result: r.Result}
+	if r.Rejection != nil {
+		outcome.toolRejection = *r.Rejection
+	}
+	return outcome
+}
+
 func sameRecoveredCall(a, b tools.Call) bool {
 	x, e := json.Marshal(a)
 	y, f := json.Marshal(b)
 	return e == nil && f == nil && string(x) == string(y)
+}
+
+// reconcileSettledToolIfPresent never consults a provider or dispatches work.
+// Only an original, fully returned Root callback with sealed Budget bytes
+// can select this path. A missing/opaque completion remains unresolved.
+func (runner *Runner) reconcileSettledToolIfPresent(ctx context.Context, s kernel.Snapshot, state runState) (kernel.Snapshot, bool, error) {
+	if s.Run.Status != kernel.RunStatusRunning || s.Run.ParentRunID != "" || state.ToolWait != nil || state.ToolDispatchID == "" {
+		return s, false, nil
+	}
+	grant, err := runner.runtime.LookupChildExecution(ctx, s.Run.ID)
+	if errors.Is(err, kernel.ErrNotFound) {
+		return s, false, nil
+	}
+	if err != nil {
+		return s, true, err
+	}
+	if !grant.IsOwned() {
+		return s, false, nil
+	}
+	completion, err := runner.runtime.LookupOwnedPhysicalCallbackReturn(ctx, grant)
+	if errors.Is(err, kernel.ErrNotFound) {
+		return s, false, nil
+	}
+	if err != nil {
+		return s, true, err
+	}
+	if completion.ControlCustody != kernel.OwnedToolSettledReturn {
+		return s, false, nil
+	}
+	repaired, err := runner.reconcileRootToolReceipt(ctx, s, state, grant, state.ToolDispatchID, false)
+	return repaired, true, err
 }
 
 // reconcileRootTool is receipt-only: no drive, Model, Executor, child Start or
@@ -53,7 +94,7 @@ func (runner *Runner) reconcileRootTool(ctx context.Context, snapshot kernel.Sna
 }
 func (runner *Runner) reconcileRootToolReceipt(ctx context.Context, snapshot kernel.Snapshot, state runState, grant kernel.ChildExecutionGrant, callID string, continueTerminal bool) (kernel.Snapshot, error) {
 	completion, err := runner.runtime.LookupOwnedPhysicalCallbackReturn(ctx, grant)
-	if err != nil || !completion.HostCompleted {
+	if err != nil || !completion.HostCompleted || completion.GrantID != grant.ID {
 		return snapshot, errors.Join(ErrToolOutcomeUnknown, ErrRootOutcomeUnknown, err)
 	}
 	execution, _, err := runner.preparePendingToolExecution(snapshot)
@@ -64,26 +105,41 @@ func (runner *Runner) reconcileRootToolReceipt(ctx context.Context, snapshot ker
 	if state.ToolDispatchID != callID || call.ID != callID {
 		return snapshot, ErrToolOutcomeUnknown
 	}
-	verified, err := runner.toolOutcomeVerifier.VerifyCommittedTool(ctx, tools.ExecutionRequest{RunID: snapshot.Run.ID, Call: tools.CloneCall(call)})
-	if err != nil {
-		return snapshot, errors.Join(ErrToolOutcomeUnknown, err)
-	}
-	if tools.ValidateExecutionResult(verified) != nil || verified.Receipt.ExecutionID != callID || verified.Receipt.Disposition != "committed" || verified.Pending != nil {
-		return snapshot, ErrToolReceiptMismatch
-	}
-	if hold := state.ExternalToolHold; hold != nil {
-		request := tools.ExecutionRequest{RunID: snapshot.Run.ID, Call: call}
-		if state.ToolWait == nil || state.ToolWait.Kind != tools.PendingExternalResult || hold.GrantID != grant.ID || hold.RequestHash != kernel.ManagedDigest(request) {
+	request := tools.ExecutionRequest{RunID: snapshot.Run.ID, Call: tools.CloneCall(call)}
+	var outcome toolOutcomeReceipt
+	if completion.ControlCustody == kernel.OwnedToolSettledReturn {
+		if state.ToolWait != nil || state.ExternalToolHold != nil {
 			return snapshot, ErrToolReceiptMismatch
 		}
-		if err := runner.settleToolHold(ctx, request, verified, func(id string) bool { return id == hold.LedgerID }); err != nil {
+		outcome, err = runner.readOriginalSettledTool(ctx, snapshot, completion, request)
+		if err != nil {
 			return snapshot, errors.Join(ErrToolOutcomeUnknown, err)
 		}
-		state.ExternalToolHold = nil
-	}
-	if completion.ControlCustody == kernel.OwnedToolBudgetReturn {
-		if err := runner.settleOriginalToolBudget(ctx, snapshot, completion, tools.ExecutionRequest{RunID: snapshot.Run.ID, Call: call}, verified); err != nil {
-			return snapshot, errors.Join(ErrToolOutcomeUnknown, err)
+	} else {
+		if runner.toolOutcomeVerifier == nil {
+			return snapshot, ErrToolVerificationRequired
+		}
+		verified, verifyErr := runner.toolOutcomeVerifier.VerifyCommittedTool(ctx, request)
+		if verifyErr != nil {
+			return snapshot, errors.Join(ErrToolOutcomeUnknown, verifyErr)
+		}
+		if tools.ValidateExecutionResult(verified) != nil || verified.Receipt.ExecutionID != callID || verified.Receipt.Disposition != "committed" || verified.Pending != nil {
+			return snapshot, ErrToolReceiptMismatch
+		}
+		outcome = newToolOutcomeReceipt(verified, nil)
+		if hold := state.ExternalToolHold; hold != nil {
+			if state.ToolWait == nil || state.ToolWait.Kind != tools.PendingExternalResult || hold.GrantID != grant.ID || hold.RequestHash != kernel.ManagedDigest(request) {
+				return snapshot, ErrToolReceiptMismatch
+			}
+			if err := runner.settleToolHold(ctx, request, verified, func(id string) bool { return id == hold.LedgerID }); err != nil {
+				return snapshot, errors.Join(ErrToolOutcomeUnknown, err)
+			}
+			state.ExternalToolHold = nil
+		}
+		if completion.ControlCustody == kernel.OwnedToolBudgetReturn {
+			if err := runner.settleOriginalToolBudget(ctx, snapshot, completion, request, verified); err != nil {
+				return snapshot, errors.Join(ErrToolOutcomeUnknown, err)
+			}
 		}
 	}
 	for _, old := range state.RecoveredTools {
@@ -91,7 +147,7 @@ func (runner *Runner) reconcileRootToolReceipt(ctx context.Context, snapshot ker
 			return snapshot, ErrToolReceiptMismatch
 		}
 	}
-	state.RecoveredTools = append(state.RecoveredTools, rootToolReceipt{Call: tools.CloneCall(call), Wait: clonePendingTool(state.ToolWait), Result: tools.CloneExecutionResult(verified)})
+	state.RecoveredTools = append(state.RecoveredTools, rootToolReceipt{Call: tools.CloneCall(call), Wait: clonePendingTool(state.ToolWait), Result: outcome.Result, Rejection: outcome.rejection()})
 	state.ToolDispatchID = ""
 	state.ToolWait = nil
 	state.PendingCalls = remainingPendingCalls(state)

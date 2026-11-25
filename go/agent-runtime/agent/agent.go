@@ -1096,6 +1096,21 @@ func (runner *Runner) Resume(ctx context.Context, runID string, expectedRevision
 		return snapshot, ErrModelInvocationBusy
 	}
 	if state.ToolDispatchID != "" {
+		repaired, handled, recoveryErr := runner.reconcileSettledToolIfPresent(ctx, snapshot, state)
+		if handled {
+			// Receipt recovery is a separate native CAS/retirement, not a
+			// physical admission. A later normal Resume consumes staged facts.
+			if recoveryErr == nil {
+				// No new physical callback entered during recovery. This exact
+				// native result can close the observing Harness dispatch.
+				kind := PhysicalCallDurableYield
+				if knownRootPhysicalSettlement(repaired) {
+					kind = PhysicalCallSettled
+				}
+				recordPhysicalObservation(ctx, runID, kind)
+			}
+			return repaired, recoveryErr
+		}
 		// Every Agent execution mode preserves unresolved physical effects.
 		// A stored Tool dispatch identity is never permission to execute it
 		// again, including on Agent Runs without a Kernel execution lease.
@@ -2172,7 +2187,14 @@ func (runner *Runner) executePending(ctx context.Context, snapshot kernel.Snapsh
 		if !sameRecoveredCall(receipt.Call, execution.call) {
 			return snapshot, true, ErrToolReceiptMismatch
 		}
+		refusal, invalid := receipt.outcome().terminalError(execution.call.ID)
+		if invalid != nil {
+			return snapshot, true, invalid
+		}
 		execution.state.RecoveredTools = append(execution.state.RecoveredTools[:index], execution.state.RecoveredTools[index+1:]...)
+		if refusal != nil {
+			return runner.handlePendingToolExecutionError(ctx, snapshot, execution.state, refusal)
+		}
 		return runner.persistPendingToolResult(ctx, snapshot, execution, tools.CloneExecutionResult(receipt.Result))
 	}
 	if allowanceExhausted(execution.state, "tool") {
