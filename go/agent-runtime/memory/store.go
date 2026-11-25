@@ -21,6 +21,7 @@ type Store struct {
 	transitionOrder  []string
 	execution        map[string]memoryExecutionState
 	childGrants      map[string]memoryChildGrant
+	grantIdentities  map[string]string
 	ownedRetirements map[string]kernel.OwnedRetirementReceipt
 	childGrantOwners map[string]map[string]struct{}
 	executionClock   func() time.Time
@@ -56,6 +57,7 @@ func NewStore() *Store {
 		transitions:      make(map[string]transitionState),
 		execution:        make(map[string]memoryExecutionState),
 		childGrants:      make(map[string]memoryChildGrant),
+		grantIdentities:  make(map[string]string),
 		childGrantOwners: make(map[string]map[string]struct{}),
 		executionClock:   time.Now,
 		managedAuthority: newMemoryManagedAuthority(),

@@ -74,6 +74,9 @@ func (store *KernelStore) BeginOwnedPhysicalExecution(ctx context.Context, grant
 		if e := pgManagedGate(tx, grant.ChildRunID); e != nil {
 			return e
 		}
+		if err = pgReserveGrantIdentity(tx, grant); err != nil {
+			return err
+		}
 		current, _, err = pgSettleRetirementSuccessor(tx, current)
 		if err != nil {
 			return err

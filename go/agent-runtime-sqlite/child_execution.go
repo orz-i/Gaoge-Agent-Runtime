@@ -51,7 +51,7 @@ func sqliteLiveChildAncestors(ctx context.Context, tx *sql.Tx, child kernel.Run)
 }
 
 func (s *Store) BeginChildExecution(ctx context.Context, grant kernel.ChildExecutionGrant) error {
-	if s == nil || s.db == nil || ctx == nil || grant.ID == "" || grant.ChildRunID == "" || grant.ExpectedRevision == 0 || grant.IsOwned() {
+	if s == nil || s.db == nil || ctx == nil || !grant.Identity().Valid() || grant.ExpectedRevision == 0 || grant.IsOwned() {
 		return kernel.ErrInvalidInput
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -82,6 +82,9 @@ func (s *Store) BeginChildExecution(ctx context.Context, grant kernel.ChildExecu
 	}
 	// Self + ancestor execution fencing is atomic in the SQLite writer.
 	ids = append(ids, child.Run.ID)
+	if err = sqliteReserveGrantIdentity(ctx, tx, grant); err != nil {
+		return err
+	}
 	var count int
 	if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM runtime_child_effect_grants WHERE child_run_id=?", grant.ChildRunID).Scan(&count); err != nil {
 		return err
@@ -338,14 +341,17 @@ func (s *Store) BeginOwnedPhysicalExecution(ctx context.Context, g kernel.ChildE
 		return conflictOrDatabaseError(err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err = sqliteSettleRetirementSuccessor(ctx, tx, g.ChildRunID); err != nil {
-		return err
-	}
 	current, err := loadTx(ctx, tx, g.ChildRunID)
 	if err != nil {
 		return err
 	}
 	if err = sqliteManagedGate(ctx, tx, g.ChildRunID); err != nil {
+		return err
+	}
+	if err = sqliteReserveGrantIdentity(ctx, tx, g); err != nil {
+		return err
+	}
+	if _, err = sqliteSettleRetirementSuccessor(ctx, tx, g.ChildRunID); err != nil {
 		return err
 	}
 	native, quarantine, err := sqliteManagedLease(ctx, tx, g.ChildRunID)

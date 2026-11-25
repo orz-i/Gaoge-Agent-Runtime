@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"strings"
 	"sync"
@@ -155,7 +156,7 @@ func (store *RunRelationStore) ListReconcileCandidates(
 	ctx context.Context, afterChildRunID string, limit int,
 ) ([]runrelation.ReconciliationCandidate, error) {
 	page, err := store.ListReconcilePage(ctx, afterChildRunID, limit)
-	return page.Candidates, err
+	return page.Candidates, errors.Join(err, page.RejectionError())
 }
 
 // MarkObserved records that a feature-owned guard verified this child was

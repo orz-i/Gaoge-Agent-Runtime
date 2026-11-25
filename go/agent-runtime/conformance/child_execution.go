@@ -87,6 +87,9 @@ func RunChildExecutionSuite(t *testing.T, create func(*testing.T) kernel.Store) 
 		if err = store.FinishChildExecution(t.Context(), grant); !errors.Is(err, kernel.ErrExecutionConflict) {
 			t.Fatalf("replayed Grant retirement succeeded: %v", err)
 		}
+		if err = store.BeginChildExecution(t.Context(), grant); !errors.Is(err, kernel.ErrExecutionConflict) {
+			t.Fatalf("finished borrowed identity became available again: %v", err)
+		}
 		cancelled, err := rt.Cancel(t.Context(), root.Run.ID, root.Run.Revision, "after physical receipt")
 		if err != nil || cancelled.Run.Status != kernel.RunStatusCancelled {
 			t.Fatalf("verified completion failed: %+v err=%v", cancelled.Run, err)

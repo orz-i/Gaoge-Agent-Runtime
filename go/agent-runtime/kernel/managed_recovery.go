@@ -344,7 +344,7 @@ func ManagedSourceMatches(p ManagedSafePoint, s Snapshot) bool {
 // authoritative native epoch and time INSIDE its lock/transaction. Persist its
 // lease and active child-grant index together with the returned transfer.
 func ManagedEnabledTransfer(t ManagedTransfer, q ManagedEnableRequest, s Snapshot, epoch uint64, now time.Time) (ManagedTransfer, error) {
-	if q.RunID != s.Run.ID || q.SuspensionID != t.SafePoint.ID || q.ExpectedTransferRevision != t.Revision || q.Generation != t.Generation || q.ClaimantID == "" || q.OwnerID == "" || q.LeaseID == "" || q.GrantID == "" || !validExecutionDuration(q.LeaseDuration) || epoch == ^uint64(0) || !ManagedSourceMatches(t.SafePoint, s) || !q.Selection.Matches(t, ManagedResume) {
+	if q.RunID != s.Run.ID || q.SuspensionID != t.SafePoint.ID || q.ExpectedTransferRevision != t.Revision || q.Generation != t.Generation || q.ClaimantID == "" || q.OwnerID == "" || q.LeaseID == "" || !(GrantIdentity{GrantID: q.GrantID, RunID: q.RunID}).Valid() || !validExecutionDuration(q.LeaseDuration) || epoch == ^uint64(0) || !ManagedSourceMatches(t.SafePoint, s) || !q.Selection.Matches(t, ManagedResume) {
 		return ManagedTransfer{}, ErrExecutionConflict
 	}
 	lease := ExecutionLease{RunID: q.RunID, OwnerID: q.OwnerID, LeaseID: q.LeaseID, Epoch: epoch + 1, ExpiresAt: now.UTC().Add(q.LeaseDuration)}

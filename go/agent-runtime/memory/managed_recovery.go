@@ -167,16 +167,21 @@ func (s *Store) EnableManagedRecovery(ctx context.Context, q kernel.ManagedEnabl
 	if !ok || !s.managedSoleGrantLocked(q.RunID, expected.ID) || old.grant != expected || old.settledRevision != 0 || old.completion.GrantID != "" || !expected.MatchesExecution(state.lease) || state.epoch != expectedLease.Epoch || state.quarantineRev != 0 || t.SafePoint.Host.KernelAuthority != s.managedAuthority {
 		return kernel.ManagedTransfer{}, kernel.ErrExecutionConflict
 	}
-	if _, exists := s.childGrants[q.GrantID]; exists {
+	if s.grantIdentityUsedLocked(q.GrantID) {
 		return kernel.ManagedTransfer{}, kernel.ErrExecutionConflict
 	}
-	if _, err := s.settleRetirementSuccessorLocked(q.RunID); err != nil {
+	closure, err := s.planRetirementSuccessorLocked(q.RunID)
+	if err != nil {
 		return kernel.ManagedTransfer{}, err
 	}
 	next, err := kernel.ManagedEnabledTransfer(t, q, snap, state.epoch, s.currentExecutionTime())
 	if err != nil {
 		return kernel.ManagedTransfer{}, err
 	}
+	if err := s.reserveGrantIdentityLocked(next.SuccessorGrant); err != nil {
+		return kernel.ManagedTransfer{}, err
+	}
+	s.commitRetirementSuccessorLocked(q.RunID, closure)
 	s.removeManagedGrantLocked(old)
 	state.epoch = next.SuccessorLease.Epoch
 	state.physicalEpoch = next.SuccessorGrant.ExecutionEpoch

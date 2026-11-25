@@ -68,3 +68,14 @@ Harness persistence has its own
 Run the public Core conformance kit for custom store integrations. Follow the
 [integration and upgrade contract](../../docs/integration-contract.md) when
 pinning modules, coordinating migrations, and recovering an interrupted upgrade.
+
+
+### Physical Grant identity
+
+Run `Migrate` with old writers stopped before serving this schema. The permanent
+`agent_kernel_grant_identities` primary key serializes admissions across
+independent Run locks and pools. Multiple ancestor fence rows share one
+reservation. Managed Resume/Cancel consume exactly one original self-scoped
+grant; neither consumption nor retirement releases the ID. Migration reserves
+known active, retained retirement and managed-history identities and rejects
+ambiguous retained ownership. It does not recreate discarded history.

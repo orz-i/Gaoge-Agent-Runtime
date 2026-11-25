@@ -9,7 +9,7 @@ import (
 // ValidateOwnedPhysicalAdmissionRequest rejects malformed native identities
 // before acquiring any Store lock. The claimed expiry remains informational.
 func ValidateOwnedPhysicalAdmissionRequest(g ChildExecutionGrant, claimed ExecutionLease) error {
-	if g.ID == "" || g.ExpectedRevision == 0 || !validExecutionLease(claimed) || claimed.Epoch > math.MaxInt64 || !g.MatchesExecution(claimed) {
+	if !g.Identity().Valid() || g.ExpectedRevision == 0 || !validExecutionLease(claimed) || claimed.Epoch > math.MaxInt64 || !g.MatchesExecution(claimed) {
 		return ErrInvalidInput
 	}
 	return nil

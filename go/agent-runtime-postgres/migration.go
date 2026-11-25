@@ -15,7 +15,7 @@ var ErrNilDatabase = errors.New("postgres kernel store database is nil")
 func Models() []interface{} {
 	return []interface{}{
 		&models.KernelRunRecord{}, &models.KernelEventRecord{}, &models.KernelTransitionOutboxRecord{},
-		&models.KernelChildEffectGrantRecord{},
+		&models.KernelChildEffectGrantRecord{}, &models.KernelGrantIdentityRecord{},
 		&models.KernelOwnedRetirementRecord{},
 		&models.KernelManagedAuthorityRecord{}, &models.KernelManagedTransferRecord{}, &models.KernelManagedHistoryRecord{},
 		&models.RunRelationRecord{},
@@ -27,8 +27,14 @@ func Migrate(db *gorm.DB) error {
 		return ErrNilDatabase
 	}
 	return db.Transaction(func(tx *gorm.DB) error {
+		hadIdentities := tx.Migrator().HasTable(&models.KernelGrantIdentityRecord{})
 		if err := tx.AutoMigrate(Models()...); err != nil {
 			return err
+		}
+		if !hadIdentities {
+			if err := pgBackfillGrantIdentities(tx); err != nil {
+				return err
+			}
 		}
 		var namespace [32]byte
 		if _, err := rand.Read(namespace[:]); err != nil {

@@ -68,8 +68,11 @@ type ReconciliationCandidate struct {
 // without starving matches behind nonterminal or already-processed relations.
 type ReconciliationPage struct {
 	Candidates []ReconciliationCandidate
-	NextCursor string
-	HasMore    bool
+	// RejectedChildIDs are scanned, eligible but invalid persisted relations.
+	// They have no delivery authority and no watermark is advanced for them.
+	RejectedChildIDs []string
+	NextCursor       string
+	HasMore          bool
 }
 
 // ReconciliationPager is an optional recovery capability. Adapters may

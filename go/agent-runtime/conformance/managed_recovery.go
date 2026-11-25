@@ -34,6 +34,9 @@ type managedStorePorts interface {
 
 func RunManagedRecoveryStoreSuite(t *testing.T, factory func(*testing.T) ManagedRecoveryStoreFixture) {
 	t.Helper()
+	t.Run("identity-retired-successor", func(t *testing.T) { runRetiredManagedSuccessor(t, factory) })
+	t.Run("identity-collision-resume", func(t *testing.T) { runForeignGrantErasure(t, factory, kernel.ManagedResume) })
+	t.Run("identity-collision-cancel", func(t *testing.T) { runForeignGrantErasure(t, factory, kernel.ManagedCancel) })
 	t.Run("owner-park-competition", func(t *testing.T) { runManagedStoreOwnerParkCompetition(t, factory) })
 	t.Run("owner-and-leave", func(t *testing.T) { runManagedStoreLiveOwnerAndLeaveCompetition(t, factory) })
 	t.Run("parked-ancestor", func(t *testing.T) { runManagedStoreAncestorGate(t, factory) })
@@ -774,4 +777,87 @@ func runManagedStoreOwnerParkCompetition(t *testing.T, factory func(*testing.T) 
 			})
 		}
 	}
+}
+
+// Independent audit: a fault-injected ID source, never seeded SQL rows.
+type fixedGrantIDs struct{ grant string }
+
+func (s fixedGrantIDs) NewID(prefix string) (string, error) {
+	if prefix == "ownedgrant" || prefix == "childgrant" {
+		return s.grant, nil
+	}
+	return prefix + "-identity-fixture", nil
+}
+
+func runForeignGrantErasure(t *testing.T, factory func(*testing.T) ManagedRecoveryStoreFixture, mode kernel.ManagedRecoveryMode) {
+	f := managedStoreSetup(t, factory)
+	selection, parked := managedStoreSelection(t, f, mode)
+	ctx := t.Context()
+	rt, e := kernel.New(kernel.Dependencies{Store: f.backend.Peer, IDs: fixedGrantIDs{f.grant.ID}})
+	if e != nil {
+		t.Fatal(e)
+	}
+	v, e := rt.Create(ctx, kernel.CreateRequest{ID: "foreign-root", Kind: "agent", Actor: kernel.ActorRef{TenantID: "foreign-tenant", ActorID: "foreign-actor"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "foreign-thread"}, Goal: "foreign physical callback", State: []byte(`{}`), ExecutionRequired: true})
+	if e != nil {
+		t.Fatal(e)
+	}
+	l, e := rt.AcquireExecution(ctx, kernel.ExecutionAcquireRequest{RunID: v.Run.ID, OwnerID: "foreign-worker", LeaseDuration: time.Minute})
+	if e != nil {
+		t.Fatal(e)
+	}
+	b, e := rt.WithExecution(l)
+	if e != nil {
+		t.Fatal(e)
+	}
+	other, e := b.BeginOwnedPhysicalExecution(ctx, v.Run.ID, v.Run.Revision, featurecontrol.Seal(v.Run.ID, v.Run.Revision, "agent_owned_physical_admission", l.LeaseID, v.State, v.Checkpoint), "start")
+	if !errors.Is(e, kernel.ErrExecutionConflict) || other != (kernel.ChildExecutionGrant{}) {
+		t.Fatalf("foreign duplicate identity admitted: %+v %v", other, e)
+	}
+	if g, e := rt.LookupChildExecution(ctx, f.source.Run.ID); e != nil || g != f.grant {
+		t.Fatalf("collision changed original grant: %+v %v", g, e)
+	}
+	if _, e = rt.LookupChildExecution(ctx, v.Run.ID); !errors.Is(e, kernel.ErrNotFound) {
+		t.Fatalf("rejected admission created foreign fence: %v", e)
+	}
+	switch mode {
+	case kernel.ManagedResume:
+		out, err := f.store.EnableManagedRecovery(ctx, kernel.ManagedEnableRequest{RunID: f.source.Run.ID, SuspensionID: f.point.ID, ClaimantID: "claimant", OwnerID: "owner", LeaseID: "lease", GrantID: "identity-valid-successor", ExpectedTransferRevision: parked.Revision, Generation: parked.Generation, LeaseDuration: time.Minute, Selection: selection})
+		if err != nil || out.State != kernel.ManagedEnabled {
+			t.Fatalf("valid transfer failed: %v", err)
+		}
+	case kernel.ManagedCancel:
+		out, err := f.store.CancelParkedManagedContinuation(ctx, kernel.ManagedCancelRequest{RunID: f.source.Run.ID, SuspensionID: f.point.ID, ExpectedTransferRevision: parked.Revision, Generation: parked.Generation, Selection: selection})
+		if err != nil || out.State != kernel.ManagedCancelled {
+			t.Fatalf("valid cancellation failed: %v", err)
+		}
+	}
+	// Neither successful transfer nor cancellation releases the original ID.
+	if _, e = b.BeginOwnedPhysicalExecution(ctx, v.Run.ID, v.Run.Revision, featurecontrol.Seal(v.Run.ID, v.Run.Revision, "agent_owned_physical_admission", l.LeaseID, v.State, v.Checkpoint), "start"); !errors.Is(e, kernel.ErrExecutionConflict) {
+		t.Fatalf("managed consumption released original identity: %v", e)
+	}
+	if _, e = rt.LookupChildExecution(ctx, v.Run.ID); !errors.Is(e, kernel.ErrNotFound) {
+		t.Fatalf("managed transfer changed unrelated Run fence: %v", e)
+	}
+	if current, e := rt.Load(ctx, v.Run.ID); e != nil || kernel.ManagedDigest(current) != kernel.ManagedDigest(v) {
+		t.Fatalf("managed transfer changed unrelated Run: %v", e)
+	}
+}
+
+func runRetiredManagedSuccessor(t *testing.T, factory func(*testing.T) ManagedRecoveryStoreFixture) {
+	b := factory(t)
+	reuse := func(*testing.T) ManagedRecoveryStoreFixture { return b }
+	r := retirementSetup(t, reuse)
+	retirementCallback(t, r, true, true)
+	retirementMark(t, r)
+	receipt := retirementFinish(t, r)
+	if _, e := r.rt.AcknowledgeOwnedRetirement(t.Context(), r.grant, retirementACKProof(receipt)); e != nil {
+		t.Fatal(e)
+	}
+	f := managedStoreSetup(t, reuse)
+	p, parked := managedStoreSelection(t, f, kernel.ManagedResume)
+	enabled, e := f.store.EnableManagedRecovery(t.Context(), kernel.ManagedEnableRequest{RunID: f.source.Run.ID, SuspensionID: f.point.ID, ClaimantID: "claimant", OwnerID: "new-owner", LeaseID: "new-lease", GrantID: r.grant.ID, ExpectedTransferRevision: parked.Revision, Generation: parked.Generation, LeaseDuration: time.Minute, Selection: p})
+	if !errors.Is(e, kernel.ErrExecutionConflict) {
+		t.Fatalf("Managed Enable recreated retired identity: %+v %v", enabled, e)
+	}
+	managedStoreSame(t, f, parked)
 }

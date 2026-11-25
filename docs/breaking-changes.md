@@ -1,5 +1,17 @@
 # Breaking changes (pre-stable Beta)
 
+## Permanent physical Grant identity (SQLite v10)
+
+Stop old writers before initializing the new identity constraint. Existing
+exact v9 SQLite files require explicit `MigrateV9ToV10` (or
+`MigrateV9ToV10With` with the original encrypted connection); PostgreSQL hosts
+run `postgres.Migrate` before serving the new Store. A physical Grant ID is
+reserved atomically for the Store lifetime, across Owned, Borrowed and Managed
+admissions. Retirement or transfer never makes it reusable. Existing retained
+identities are reserved without inventing new authority; already-discarded
+pre-v10 history cannot be reconstructed. Ambiguous retained identities abort
+migration rather than being merged. No mixed-version writers.
+
 ## SQLite bounded child-terminal recovery (v9)
 
 Existing exact v8 Kernel databases require a stopped-writer, backed-up, explicit

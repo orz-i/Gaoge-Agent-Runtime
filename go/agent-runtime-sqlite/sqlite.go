@@ -13,8 +13,8 @@ import (
 	sqlite3 "modernc.org/sqlite"
 )
 
-// Schema v9 adds durable child-terminal delivery watermarks. Open never migrates.
-const schemaVersion = 9
+// Schema v10 reserves every physical Grant identity. Open never migrates.
+const schemaVersion = 10
 
 var (
 	ErrUnsupportedSchema = profile.ErrUnsupportedSchema
@@ -163,7 +163,7 @@ func (s *Store) initialize(ctx context.Context, create bool) error {
 
 const callbackToolReturnsColumn = "callback_tool_returns TEXT NOT NULL DEFAULT ''"
 
-var schemaDDL = schemaV9DDL()
+var schemaDDL = append(schemaV9DDL(), grantIdentityDDL)
 
 func schemaV9DDL() []string {
 	out := schemaV8DDL()

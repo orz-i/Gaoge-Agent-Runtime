@@ -68,7 +68,7 @@ func (store *KernelStore) lockLiveChildAncestors(tx *gorm.DB, parentID, tenant, 
 }
 
 func (store *KernelStore) BeginChildExecution(ctx context.Context, grant kernel.ChildExecutionGrant) error {
-	if store == nil || store.db == nil || ctx == nil || grant.ID == "" || grant.ChildRunID == "" || grant.ExpectedRevision == 0 || grant.IsOwned() {
+	if store == nil || store.db == nil || ctx == nil || !grant.Identity().Valid() || grant.ExpectedRevision == 0 || grant.IsOwned() {
 		return kernel.ErrInvalidInput
 	}
 	return store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -116,6 +116,9 @@ func (store *KernelStore) BeginChildExecution(ctx context.Context, grant kernel.
 		}
 		// Ancestor and child locks serialize contenders; never trust a
 		// pre-lock observation or a uniqueness check as the sole guard.
+		if err := pgReserveGrantIdentity(tx, grant); err != nil {
+			return err
+		}
 		var active int64
 		if err := tx.Model(&models.KernelChildEffectGrantRecord{}).Where("child_run_id = ?", grant.ChildRunID).Count(&active).Error; err != nil {
 			return translateKernelError(err)

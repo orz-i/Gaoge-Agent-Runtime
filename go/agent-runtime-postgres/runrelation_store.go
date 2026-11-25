@@ -162,7 +162,7 @@ func (store *RunRelationStore) ListReconcileCandidates(
 	ctx context.Context, afterChildRunID string, limit int,
 ) ([]runrelation.ReconciliationCandidate, error) {
 	page, err := store.ListReconcilePage(ctx, afterChildRunID, limit)
-	return page.Candidates, err
+	return page.Candidates, errors.Join(err, page.RejectionError())
 }
 
 // MarkObserved records a feature-verified consumed child without enqueuing

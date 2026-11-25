@@ -29,26 +29,34 @@ func (s *Store) BeginOwnedPhysicalExecution(ctx context.Context, g kernel.ChildE
 	if err := s.managedGateLocked(g.ChildRunID); err != nil {
 		return err
 	}
-	if _, retired := s.ownedRetirements[g.ID]; retired {
-		return kernel.ErrExecutionConflict
-	}
 	current, ok := s.records[g.ChildRunID]
 	if !ok {
 		return kernel.ErrNotFound
 	}
-	if _, err := s.settleRetirementSuccessorLocked(g.ChildRunID); err != nil {
+	if s.grantIdentityUsedLocked(g.ID) {
+		return kernel.ErrExecutionConflict
+	}
+	closure, err := s.planRetirementSuccessorLocked(g.ChildRunID)
+	if err != nil {
 		return err
 	}
 	native := s.execution[g.ChildRunID]
+	if closure.release {
+		native.lease = kernel.ExecutionLease{}
+	}
 	hasGrants := len(s.childGrantOwners[g.ChildRunID]) != 0
 	for _, old := range s.childGrants {
-		if old.grant.ID == g.ID || old.grant.ChildRunID == g.ChildRunID {
+		if old.grant.ChildRunID == g.ChildRunID {
 			hasGrants = true
 		}
 	}
 	if err := kernel.ValidateOwnedPhysicalAdmission(g, current, l, native.lease, s.currentExecutionTime(), native.quarantineRev != 0, hasGrants, p); err != nil {
 		return err
 	}
+	if err := s.reserveGrantIdentityLocked(g); err != nil {
+		return err
+	}
+	s.commitRetirementSuccessorLocked(g.ChildRunID, closure)
 	s.childGrants[g.ID] = memoryChildGrant{grant: g, ancestors: []string{g.ChildRunID}}
 	s.childGrantOwners[g.ChildRunID] = map[string]struct{}{g.ID: {}}
 	native.physicalEpoch = g.ExecutionEpoch

@@ -109,6 +109,9 @@ func sqliteManagedGrant(ctx context.Context, tx *sql.Tx, id string) (kernel.Chil
 	if g.ChildRunID != id || !g.IsOwned() || mark != 0 {
 		return g, kernel.ErrExecutionConflict
 	}
+	if _, e = loadOwnedPhysicalGrant(ctx, tx, g); e != nil {
+		return g, e
+	}
 	_, e = loadOwnedCallbackReturn(ctx, tx, g)
 	if !errors.Is(e, kernel.ErrNotFound) {
 		if e != nil {
@@ -224,13 +227,6 @@ func (s *Store) EnableManagedRecovery(ctx context.Context, q kernel.ManagedEnabl
 		if !g.MatchesExecution(l) {
 			return t, kernel.ErrExecutionConflict
 		}
-		var duplicate int
-		if e = tx.QueryRowContext(ctx, `SELECT count(*) FROM runtime_child_effect_grants WHERE grant_id=?`, q.GrantID).Scan(&duplicate); e != nil {
-			return t, e
-		}
-		if duplicate != 0 {
-			return t, kernel.ErrExecutionConflict
-		}
 		if _, e = sqliteSettleRetirementSuccessor(ctx, tx, q.RunID); e != nil {
 			return t, e
 		}
@@ -238,7 +234,10 @@ func (s *Store) EnableManagedRecovery(ctx context.Context, q kernel.ManagedEnabl
 		if e != nil {
 			return t, e
 		}
-		if _, e = tx.ExecContext(ctx, `DELETE FROM runtime_child_effect_grants WHERE grant_id=?`, g.ID); e != nil {
+		if e = sqliteReserveGrantIdentity(ctx, tx, n.SuccessorGrant); e != nil {
+			return t, e
+		}
+		if e = sqliteConsumeManagedGrant(ctx, tx, g); e != nil {
 			return t, e
 		}
 		ng := n.SuccessorGrant
@@ -307,7 +306,7 @@ func (s *Store) CancelParkedManagedContinuation(ctx context.Context, q kernel.Ma
 			return t, e
 		}
 		n.Terminal = &terminal
-		if _, e = tx.ExecContext(ctx, `DELETE FROM runtime_child_effect_grants WHERE grant_id=?`, g.ID); e != nil {
+		if e = sqliteConsumeManagedGrant(ctx, tx, g); e != nil {
 			return t, e
 		}
 		return n, sqliteSaveManaged(ctx, tx, n)

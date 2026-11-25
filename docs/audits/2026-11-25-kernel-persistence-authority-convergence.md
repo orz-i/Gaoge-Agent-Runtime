@@ -30,3 +30,35 @@ Future first-party Store changes to these decisions must modify the shared owner
 ## Boundary of this PR
 
 This is convergence of the owned physical lifecycle and relational recovery paging, not a wholesale rewrite of the Store. General execution lease acquire/renew/release, generic Apply/control CAS, ancestry and managed recovery orchestration still retain adapter-specific code. Their decision ownership must be evaluated separately; no claim is made that all persistence duplication is eliminated. No historical data rewriting or compatibility migration is performed.
+
+
+## Independent audit follow-up: identity and recovery isolation
+
+F1/F2 exposed the missing permanent Grant identity domain: a physical grant
+has one ID even when represented by multiple ancestor fences, and that ID
+cannot be issued again after Finish, transfer, cancellation or retirement.
+The Memory mutex and SQL identity primary key now implement the same
+transactional reservation, including cross-Run contenders. Managed transfers
+load the exact original self-scoped record and consume one matching row; any
+ambiguous/missing original aborts the entire transaction. Memory stages
+retirement successor acknowledgements before committing admissions to avoid
+partial closure on rejection.
+
+F3 exposed an entire-page abort on malformed eligible relation. The shared
+scan reducer now returns valid candidates separately from rejected child IDs,
+advances the original bounded cursor, and both scheduler APIs report
+rejections while continuing valid handoffs. No rejected relation is queued or
+marked as delivered. The shared tests exercise both isolated and mixed pages.
+
+This follow-up intentionally introduces a minimal identity table (SQLite v10,
+explicit v9-to-v10 migration; PostgreSQL Migrate). The original statement
+above that no schema change was needed applies only to the first commit.
+Retained active/retired/managed history can reserve known old IDs, but already
+discarded pre-cutover identities cannot be reconstructed. No historic
+production data migration was requested. Stop all old writers at cutover.
+
+The Windows approval test uses real database reads within a callback deadline.
+The shared fault-injection fixture now uses a 750 ms callback allowance
+(previously 100 ms in the measured control path), below the existing 2 s
+lease and 1 s safety margin. It tests explicit fault boundaries, not timeout
+behavior. Production deadlines and ownership rules are unchanged.

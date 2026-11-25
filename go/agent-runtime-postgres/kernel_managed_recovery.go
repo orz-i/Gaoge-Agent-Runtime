@@ -86,10 +86,14 @@ func pgManagedGrant(tx *gorm.DB, id string) (kernel.ChildExecutionGrant, error) 
 	if e := tx.Where("parent_run_id = ? OR child_run_id = ?", id, id).Find(&rows).Error; e != nil {
 		return kernel.ChildExecutionGrant{}, translateKernelError(e)
 	}
-	if len(rows) != 1 || rows[0].ParentRunID != id || rows[0].ChildRunID != id || rows[0].SettledRevision != 0 || rows[0].CallbackReturnRevision != 0 {
+	if len(rows) != 1 || rows[0].ParentRunID != id || rows[0].ChildRunID != id || rows[0].SettledRevision != 0 || pgCallbackCompletion(rows[0]) != (kernel.OwnedPhysicalCallbackCompletion{}) {
 		return kernel.ChildExecutionGrant{}, kernel.ErrExecutionConflict
 	}
-	return pgPhysicalGrant(rows[0]), nil
+	g := pgPhysicalGrant(rows[0])
+	if _, err := pgLoadOwnedPhysicalGrant(tx, g); err != nil {
+		return kernel.ChildExecutionGrant{}, err
+	}
+	return g, nil
 }
 func (s *KernelStore) managedTx(ctx context.Context, id string, f func(*gorm.DB, models.KernelRunRecord, kernel.Snapshot, kernel.ManagedTransfer, time.Time) (kernel.ManagedTransfer, error)) (kernel.ManagedTransfer, error) {
 	if s == nil || s.db == nil || ctx == nil || id == "" {
@@ -191,13 +195,6 @@ func (s *KernelStore) EnableManagedRecovery(ctx context.Context, q kernel.Manage
 		if !g.MatchesExecution(pgManagedLease(r)) {
 			return t, kernel.ErrExecutionConflict
 		}
-		var duplicate int64
-		if e = tx.Model(&models.KernelChildEffectGrantRecord{}).Where("grant_id = ?", q.GrantID).Count(&duplicate).Error; e != nil {
-			return t, translateKernelError(e)
-		}
-		if duplicate != 0 {
-			return t, kernel.ErrExecutionConflict
-		}
 		if _, _, e = pgSettleRetirementSuccessor(tx, r); e != nil {
 			return t, e
 		}
@@ -205,8 +202,11 @@ func (s *KernelStore) EnableManagedRecovery(ctx context.Context, q kernel.Manage
 		if e != nil {
 			return t, e
 		}
-		if e = tx.Where("grant_id = ?", g.ID).Delete(&models.KernelChildEffectGrantRecord{}).Error; e != nil {
-			return t, translateKernelError(e)
+		if e = pgReserveGrantIdentity(tx, n.SuccessorGrant); e != nil {
+			return t, e
+		}
+		if e = pgConsumeManagedGrant(tx, g); e != nil {
+			return t, e
 		}
 		row := pgPhysicalRecord(n.SuccessorGrant, q.RunID)
 		if e = tx.Create(&row).Error; e != nil {
@@ -252,8 +252,8 @@ func (s *KernelStore) CancelParkedManagedContinuation(ctx context.Context, q ker
 			return t, e
 		}
 		n.Terminal = &terminal
-		if e = tx.Where("grant_id = ?", g.ID).Delete(&models.KernelChildEffectGrantRecord{}).Error; e != nil {
-			return t, translateKernelError(e)
+		if e = pgConsumeManagedGrant(tx, g); e != nil {
+			return t, e
 		}
 		return n, pgSaveManaged(tx, n)
 	})

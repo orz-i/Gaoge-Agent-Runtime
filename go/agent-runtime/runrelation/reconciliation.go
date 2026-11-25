@@ -1,6 +1,8 @@
 package runrelation
 
 import (
+	"errors"
+	"fmt"
 	"math"
 	"strings"
 
@@ -41,7 +43,8 @@ func ReconciliationPageFromScan(after string, limit int, rows []ReconciliationSc
 		}
 		normalized, err := Prepare(c.Relation)
 		if err != nil || !EqualIdentity(c.Relation, normalized) {
-			return ReconciliationPage{}, ErrConflict
+			page.RejectedChildIDs = append(page.RejectedChildIDs, c.Relation.ChildRunID)
+			continue
 		}
 		c.Relation = normalized
 		page.Candidates = append(page.Candidates, c)
@@ -57,4 +60,15 @@ func PrepareReconciliationProgress(child string, parentRevision, childRevision u
 		return "", ErrInvalidInput
 	}
 	return child, nil
+}
+
+// RejectionError reports row-local validation failures separately from an
+// unreadable scan. A scheduler must process valid candidates and advance the
+// scanned cursor even when this error is non-nil.
+func (p ReconciliationPage) RejectionError() error {
+	var result error
+	for _, id := range p.RejectedChildIDs {
+		result = errors.Join(result, fmt.Errorf("%w: invalid persisted RunRelation for child %q", ErrConflict, id))
+	}
+	return result
 }
