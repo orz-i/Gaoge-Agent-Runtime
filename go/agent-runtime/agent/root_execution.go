@@ -128,7 +128,11 @@ func (runner *Runner) withRootSegment(ctx context.Context, snapshot kernel.Snaps
 	}
 	abort := func(cause error) (kernel.Snapshot, error) {
 		if !external {
-			cause = errors.Join(cause, runner.runtime.ReleaseExecution(context.WithoutCancel(ctx), lease))
+			// Release still competes atomically with any committed Grant.
+			// A failed admission ACK must never free a retained barrier.
+			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+			defer cancel()
+			cause = errors.Join(cause, runner.runtime.ReleaseExecution(cleanup, lease))
 		}
 		return snapshot, cause
 	}
@@ -143,6 +147,11 @@ func (runner *Runner) withRootSegment(ctx context.Context, snapshot kernel.Snaps
 	proof := featurecontrol.Seal(current.Run.ID, current.Run.Revision, "agent_owned_physical_admission", lease.LeaseID, current.State, current.Checkpoint)
 	grant, err := bound.BeginOwnedPhysicalExecution(ctx, current.Run.ID, current.Run.Revision, proof, operation)
 	if err != nil {
+		if errors.Is(err, kernel.ErrPhysicalAdmissionCommitUnknown) {
+			// No effect-capable callback has entered, but an unresolved
+			// durable Grant may exist. Never synthesize a return or retire it.
+			err = errors.Join(ErrRootOutcomeUnknown, err)
+		}
 		return abort(err)
 	}
 

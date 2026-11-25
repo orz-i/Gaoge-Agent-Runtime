@@ -9,8 +9,14 @@ import (
 )
 
 func TestEA1RootAgentResumePhasesMemory(t *testing.T) {
-	conformance.RunEA1RootAgentResumePhases(t, func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store) {
-		s := memory.NewStore()
-		return s, s, func() kernel.Store { return s }
-	})
+	conformance.RunEA1RootAgentResumePhases(t, memoryRootResumeFixture)
+}
+
+func TestPhysicalAdmissionACKMemory(t *testing.T) {
+	conformance.RunPhysicalAdmissionACKSuite(t, memoryRootResumeFixture)
+}
+
+func memoryRootResumeFixture(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store) {
+	s := memory.NewStore()
+	return s, s, func() kernel.Store { return s }
 }

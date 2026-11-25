@@ -8,8 +8,14 @@ import (
 )
 
 func TestEA1RootAgentResumePhasesGORM(t *testing.T) {
-	conformance.RunEA1RootAgentResumePhases(t, func(t *testing.T) (kernel.Store, kernel.Store, func() kernel.Store) {
-		db := openKernelStoreTestDB(t)
-		return NewKernelStore(db), NewKernelStore(db), func() kernel.Store { return NewKernelStore(db) }
-	})
+	conformance.RunEA1RootAgentResumePhases(t, gormRootResumeFixture)
+}
+
+func TestPhysicalAdmissionACKGORM(t *testing.T) {
+	conformance.RunPhysicalAdmissionACKSuite(t, gormRootResumeFixture)
+}
+
+func gormRootResumeFixture(t *testing.T) (kernel.Store, kernel.Store, func() kernel.Store) {
+	db := openKernelStoreTestDB(t)
+	return NewKernelStore(db), NewKernelStore(db), func() kernel.Store { return NewKernelStore(db) }
 }

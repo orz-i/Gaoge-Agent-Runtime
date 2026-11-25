@@ -62,3 +62,56 @@ The shared fault-injection fixture now uses a 750 ms callback allowance
 (previously 100 ms in the measured control path), below the existing 2 s
 lease and 1 s safety margin. It tests explicit fault boundaries, not timeout
 behavior. Production deadlines and ownership rules are unchanged.
+
+## Independent audit follow-up: original admission ACK (F4)
+
+The Grant registry prevents duplicate admission, but Runtime previously
+converted **any** failed Begin into success when an observed Grant equaled
+its caller-generated candidate. The same Run, revision, external lease and
+public ID could therefore allow two real Runners to enter Host callbacks and
+one to falsely retire the other's unfinished Grant. This was reproduced on
+the PR #155 baseline and the first identity-registry commit.
+
+The new single admission protocol separates three results:
+
+- A direct acknowledged admission can proceed with its exact original Grant.
+- A definite refusal or ordinary error cannot authorize a callback, even
+  when an identical public identity is already stored.
+- Only a direct attempt-bound `OwnedPhysicalAdmission.CommitOutcome` from
+  the actual uncertain native COMMIT can qualify for a bounded readback.
+  The original in-flight Runtime verifies the exact retained Grant before
+  continuing. A generic marker, mixed/wrapped error, foreign outcome,
+  absent/mismatched record or canceled caller cannot authorize execution.
+
+Each ordinary owned admission uses private internal entropy, not Host IDSource,
+and commits that attempt together with the frozen source, operation, lease
+and public Grant ID in the existing `AdmissionSourceHash` field. This is
+an immutable attribution fact, not an additional execution capability or
+new schema field. PostgreSQL marks only failures at the transaction COMMIT
+boundary; SQLite marks only Commit failures; Memory has an unambiguous local
+commit. No pending Grant or retirement record is created by readback.
+Borrowed admission already fails closed on non-nil Begin results; Managed
+Enable retains its separate existing exact internally generated claimant
+and Leave protocol. No new dispatch/recovery path is introduced there.
+
+If a committed admission cannot be qualified while its original invocation
+is live, retain the existing fence and report uncertainty. Restart and
+receipt-only reconciliation cannot invent a returned Host callback from
+admission evidence. This deliberately favors safety over transparent
+recovery for custom Stores that return untyped/ambiguous errors. Existing
+Grant hashes remain opaque historical facts; no additional schema migration
+or historical hash rewriting is required.
+
+The shared real Runner acceptance suite covers Start/Prepare/Resume/Approval,
+actual committed ACK loss, refusal even with a committed record, unqualified
+and mixed uncertainty, cancellation, unreadable/absent readback, and concurrent
+same-public-ID contenders (including a falsely classified uncertain result).
+The loser must enter no Host/Model callback, must not create return/retirement
+evidence, and the original winner must finish normally. The real PostgreSQL
+entry uses the required CI selector `TestRealPostgresPhysicalAdmissionACK`.
+Native deferred-constraint COMMIT failures verify that PostgreSQL, plain
+SQLite and encrypted SQLite roll back both fence and identity reservation;
+the same public ID can be admitted by a genuinely new attempt afterward.
+The post-commit ACK-loss cases inject a lost response after a real successful
+transaction; they do not claim to reproduce a physical network partition
+at an exact server COMMIT packet.

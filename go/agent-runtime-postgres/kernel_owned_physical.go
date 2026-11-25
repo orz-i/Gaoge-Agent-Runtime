@@ -66,7 +66,10 @@ func (store *KernelStore) BeginOwnedPhysicalExecution(ctx context.Context, grant
 	if store == nil || store.db == nil || ctx == nil || kernel.ValidateOwnedPhysicalAdmissionRequest(grant, lease) != nil {
 		return kernel.ErrInvalidInput
 	}
-	return store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	// GORM returns callback failures and COMMIT failures through the same
+	// error channel. Only the latter qualifies for an ACK recovery read.
+	readyToCommit := false
+	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		current, err := lockKernelRun(tx, grant.ChildRunID)
 		if err != nil {
 			return err
@@ -100,9 +103,17 @@ func (store *KernelStore) BeginOwnedPhysicalExecution(ctx context.Context, grant
 		if err = tx.Create(&row).Error; err != nil {
 			return translateKernelApplyError(err)
 		}
-		return translateKernelApplyError(tx.Model(&models.KernelRunRecord{}).Where("run_id = ?", grant.ChildRunID).
-			UpdateColumn("execution_physical_epoch", grant.ExecutionEpoch).Error)
+		if err = tx.Model(&models.KernelRunRecord{}).Where("run_id = ?", grant.ChildRunID).
+			UpdateColumn("execution_physical_epoch", grant.ExecutionEpoch).Error; err != nil {
+			return translateKernelApplyError(err)
+		}
+		readyToCommit = true
+		return nil
 	})
+	if err != nil && readyToCommit {
+		return admission.CommitOutcome(err)
+	}
+	return err
 }
 
 // ApplyOwnedPhysicalRecovery is a receipt-only exact-CAS capability. It cannot

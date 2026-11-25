@@ -194,6 +194,10 @@ alone is not a physical-effect receipt.
 - Each physical Root/Child Start, Resume and Tool/Model call requires its
   original frozen execution identity and the appropriate Store-serialized
   physical grant or lease. The durable identity is stable across restart.
+- An owned physical admission may recover a lost COMMIT acknowledgement
+  only within its original live invocation, from a direct attempt-bound
+  Store outcome and the exact persisted admission commitment. Public Grant
+  identity, a definite refusal or a later observer never grants dispatch.
 - Cancellation competes atomically with new dispatch admission. A cancelled
   parent cannot start a late child, while an unsettled child grant prevents
   premature terminalization of its ancestors.

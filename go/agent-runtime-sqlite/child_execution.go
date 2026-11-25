@@ -376,5 +376,8 @@ func (s *Store) BeginOwnedPhysicalExecution(ctx context.Context, g kernel.ChildE
 	if _, err = tx.ExecContext(ctx, `UPDATE runtime_runs SET execution_physical_epoch=? WHERE run_id=?`, g.ExecutionEpoch, g.ChildRunID); err != nil {
 		return conflictOrDatabaseError(err)
 	}
-	return conflictOrDatabaseError(tx.Commit())
+	if err = tx.Commit(); err != nil {
+		return permit.CommitOutcome(conflictOrDatabaseError(err))
+	}
+	return nil
 }

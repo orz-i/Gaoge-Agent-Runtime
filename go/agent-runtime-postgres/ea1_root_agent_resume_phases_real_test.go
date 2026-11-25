@@ -12,11 +12,20 @@ import (
 )
 
 func TestEA1RealPostgresRootAgentResumePhases(t *testing.T) {
+	conformance.RunEA1RootAgentResumePhases(t, realPostgresRootResumeFixture(t))
+}
+
+func TestRealPostgresPhysicalAdmissionACK(t *testing.T) {
+	conformance.RunPhysicalAdmissionACKSuite(t, realPostgresRootResumeFixture(t))
+}
+
+func realPostgresRootResumeFixture(t *testing.T) func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store) {
+	t.Helper()
 	dsn := strings.TrimSpace(os.Getenv("TEST_POSTGRES_DSN"))
 	if dsn == "" {
 		t.Skip("TEST_POSTGRES_DSN not configured")
 	}
-	conformance.RunEA1RootAgentResumePhases(t, func(t *testing.T) (kernel.Store, kernel.Store, func() kernel.Store) {
+	return func(t *testing.T) (kernel.Store, kernel.Store, func() kernel.Store) {
 		db, isolated := openIsolatedRealPostgres(t, dsn)
 		if e := Migrate(db); e != nil {
 			t.Fatal(e)
@@ -34,5 +43,5 @@ func TestEA1RealPostgresRootAgentResumePhases(t *testing.T) {
 			return NewKernelStore(fresh)
 		}
 		return NewKernelStore(db), open(), open
-	})
+	}
 }

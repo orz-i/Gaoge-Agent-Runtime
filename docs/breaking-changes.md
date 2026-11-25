@@ -1,5 +1,20 @@
 # Breaking changes (pre-stable Beta)
 
+## Original physical admission ACK
+
+Owned physical admission no longer converts a Store error to success merely
+because an equal public Grant is observed. Store adapters may use the supplied
+`OwnedPhysicalAdmission.CommitOutcome(err)` only at their actual native COMMIT
+boundary, and must return that result directly to permit original-invocation
+ACK recovery. Definite refusals, untyped or wrapped errors, cancelled calls,
+and observations from another attempt do not authorize dispatch. If a committed
+Grant cannot be safely reconciled within the original live invocation, it
+remains fenced; a later caller cannot invent the missing physical return.
+The existing `AdmissionSourceHash` now also commits to the private attempt
+for ordinary owned admissions. Existing persisted Grants are unchanged.
+This change adds no schema migration beyond the permanent identity migration
+described below.
+
 ## Permanent physical Grant identity (SQLite v10)
 
 Stop old writers before initializing the new identity constraint. Existing
