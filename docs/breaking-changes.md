@@ -35,7 +35,7 @@ executions before switching this unreleased cohort; no new SQL schema version.
 
 Tool authorization is now committed before physical dispatch. The Agent's
 private `toolAdmission` replaces the prerelease `requiredApproval` state:
-evaluating, required, authorized, or awaiting_capacity. Evaluation intent
+evaluating, required, authorized, awaiting_capacity, or unsent. Evaluation intent
 must be durable before an original policy callback; an unresolved decision
 cannot be retired or replaced by a successor policy. A committed restriction
 does not authorize dispatch. SharedBudget binds and reserves the original
@@ -48,6 +48,21 @@ be replaced. Earlier dispatched Children drain before any later approval
 or capacity pause. Existing prerelease `requiredApproval` snapshots and
 legacy WaitingInput states with unresolved physical Children are not
 automatically migrated or granted recovery authority.
+
+Local Tool permits now precede SharedBudget reservation. Physical intent is
+committed at the first actual ToolChain entry rather than before waiting for
+a permit or delivering a live observer event. A native no-entry disposition
+is persisted before releasing a permanently denied reservation or parking a
+retryable one. `Coordinator.ResolveUnsentTool` checks the exact original
+reservation and ledger revision, requires zero usage/no dispatch, and cannot
+refund physical work or park a successor reservation. The original
+`OwnedToolReturn.Unsent` flag can recover a committed marker whose ACK and
+immediate cleanup reads were lost, but only under the exact original returned
+Root Grant and snapshot. It is neither a provider receipt nor new control
+custody. Caller cancellation before entry is a resumable no-send yield, not a
+business cancellation of the Run. A live ToolStarted observation alone is
+not a durable physical dispatch or receipt. Old unresolved markers without
+original no-entry proof are not reinterpreted as unsent.
 
 ## PR #154 — Model original evidence and settlement qualification hard cut
 
