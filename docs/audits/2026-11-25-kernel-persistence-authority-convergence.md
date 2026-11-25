@@ -17,7 +17,7 @@ A common Store interface and common conformance entry points do not prevent sema
 | Retirement | kernel.BuildOwnedRetirementReceipt plus existing ACK/successor reducers | Persist receipt and delete exact grant atomically |
 | Relational reconciliation | runrelation.ReconciliationPageFromScan and PrepareReconciliationProgress | Indexed bounded scan, joined facts and atomic monotonic watermarks |
 
-No Store interface, persisted schema, migration or new dispatch capability is introduced. The existing native lock, transaction and CAS boundaries remain authoritative; opaque permits are checked within them. Caller-provided lease expiry cannot establish dispatch authority. Callback return and receipt recovery retain their existing original-evidence semantics after expiry. Partial or mismatched receipts are conflicts, not absence or permission to rebuild them. Original settlement evidence cannot be replaced on repeat settlement or retirement.
+No Store interface or new dispatch capability is introduced; the subsequent identity follow-up below adds the minimal permanent Grant identity table and explicit migration. The existing native lock, transaction and CAS boundaries remain authoritative; opaque permits are checked within them. Caller-provided lease expiry cannot establish dispatch authority. Callback return and receipt recovery retain their existing original-evidence semantics after expiry. Partial or mismatched receipts are conflicts, not absence or permission to rebuild them. Original settlement evidence cannot be replaced on repeat settlement or retirement.
 
 PostgreSQL and native SQLite now return the same kind of bounded joined facts to the reconciliation reducer, using one SQL statement per page. Cursor advancement is independent of candidate eligibility and follows the native indexed database collation. Watermarks share the signed positive revision domain; SQL-specific monotonic updates remain atomic. Memory has a separate Run store, so its candidate enumeration is intentionally not a relational join; it shares the watermark domain.
 
@@ -51,8 +51,7 @@ rejections while continuing valid handoffs. No rejected relation is queued or
 marked as delivered. The shared tests exercise both isolated and mixed pages.
 
 This follow-up intentionally introduces a minimal identity table (SQLite v10,
-explicit v9-to-v10 migration; PostgreSQL Migrate). The original statement
-above that no schema change was needed applies only to the first commit.
+explicit v9-to-v10 migration; PostgreSQL Migrate).
 Retained active/retired/managed history can reserve known old IDs, but already
 discarded pre-cutover identities cannot be reconstructed. No historic
 production data migration was requested. Stop all old writers at cutover.
@@ -115,3 +114,23 @@ the same public ID can be admitted by a genuinely new attempt afterward.
 The post-commit ACK-loss cases inject a lost response after a real successful
 transaction; they do not claim to reproduce a physical network partition
 at an exact server COMMIT packet.
+
+## Final audit hardening
+
+- PostgreSQL `Migrate` now executes idempotent Grant identity backfill even when
+  `agent_kernel_grant_identities` already exists, preventing external DDL or
+  `AutoMigrate(Models()...)` calls from bypassing legacy identity reservation.
+  Both PostgreSQL and SQLite v9-to-v10 backfills share
+  `kernel.MergeGrantIdentities`, cover both managed history and active managed
+  transfers, reject blank/whitespace identifiers and active/retired overlaps,
+  and report migration ownership conflicts as `kernel.ErrExecutionConflict`.
+- SQLite `ApplyOwnedPhysicalRecovery` propagates non-`ErrNotFound` database/scan
+  errors from `loadOwnedCallbackReturn` instead of masking them as
+  `ErrExecutionConflict`; owned `MarkChildExecutionSettled` and
+  `FinishChildExecution` validate self-scoped grants via `loadOwnedPhysicalGrant`
+  and translate `sql.ErrNoRows` on owned settlement rows to
+  `kernel.ErrExecutionConflict`.
+- PostgreSQL `LookupOwnedPhysicalCallbackReturn` checks
+  `pgLoadOwnedPhysicalGrant` when `lockKernelRun` returns `ErrNotFound`,
+  aligning cross-Run foreign-Grant probe responses on `ErrExecutionConflict`
+  across Memory, SQLite and PostgreSQL.
