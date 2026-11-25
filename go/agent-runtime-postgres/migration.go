@@ -12,6 +12,10 @@ import (
 
 var ErrNilDatabase = errors.New("postgres kernel store database is nil")
 
+// Models returns the GORM schema models managed by this adapter.
+// Hosts must initialize and upgrade databases through Migrate(db) rather than
+// calling AutoMigrate(Models()...) directly, which skips managed authority and
+// permanent Grant identity backfill.
 func Models() []interface{} {
 	return []interface{}{
 		&models.KernelRunRecord{}, &models.KernelEventRecord{}, &models.KernelTransitionOutboxRecord{},
@@ -27,14 +31,11 @@ func Migrate(db *gorm.DB) error {
 		return ErrNilDatabase
 	}
 	return db.Transaction(func(tx *gorm.DB) error {
-		hadIdentities := tx.Migrator().HasTable(&models.KernelGrantIdentityRecord{})
 		if err := tx.AutoMigrate(Models()...); err != nil {
 			return err
 		}
-		if !hadIdentities {
-			if err := pgBackfillGrantIdentities(tx); err != nil {
-				return err
-			}
+		if err := pgBackfillGrantIdentities(tx); err != nil {
+			return err
 		}
 		var namespace [32]byte
 		if _, err := rand.Read(namespace[:]); err != nil {

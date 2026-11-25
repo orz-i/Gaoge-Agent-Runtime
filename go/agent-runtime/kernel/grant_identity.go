@@ -2,6 +2,7 @@ package kernel
 
 import (
 	"encoding/json"
+	"sort"
 	"strings"
 )
 
@@ -42,5 +43,53 @@ func ManagedGrantIdentities(raw []byte, runID string) ([]GrantIdentity, error) {
 			return nil, ErrExecutionConflict
 		}
 	}
+	return out, nil
+}
+
+// MergeGrantIdentities validates and merges active, retired, and managed
+// identities into deterministic GrantID-sorted reservations. Active ancestor
+// replicas may share an identity, while active and retired rows must be
+// disjoint and cross-Run ownership or invalid identifiers are rejected.
+func MergeGrantIdentities(active, retired, managed []GrantIdentity) ([]GrantIdentity, error) {
+	activeOwners := make(map[string]string, len(active))
+	merged := make(map[string]string, len(active)+len(retired)+len(managed))
+	for _, i := range active {
+		if !i.Valid() {
+			return nil, ErrExecutionConflict
+		}
+		if prev, exists := activeOwners[i.GrantID]; exists && prev != i.RunID {
+			return nil, ErrExecutionConflict
+		}
+		activeOwners[i.GrantID] = i.RunID
+		merged[i.GrantID] = i.RunID
+	}
+	for _, i := range retired {
+		if !i.Valid() {
+			return nil, ErrExecutionConflict
+		}
+		if _, isActive := activeOwners[i.GrantID]; isActive {
+			return nil, ErrExecutionConflict
+		}
+		if prev, exists := merged[i.GrantID]; exists && prev != i.RunID {
+			return nil, ErrExecutionConflict
+		}
+		merged[i.GrantID] = i.RunID
+	}
+	for _, i := range managed {
+		if !i.Valid() {
+			return nil, ErrExecutionConflict
+		}
+		if prev, exists := merged[i.GrantID]; exists && prev != i.RunID {
+			return nil, ErrExecutionConflict
+		}
+		merged[i.GrantID] = i.RunID
+	}
+	out := make([]GrantIdentity, 0, len(merged))
+	for grantID, runID := range merged {
+		out = append(out, GrantIdentity{GrantID: grantID, RunID: runID})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].GrantID < out[j].GrantID
+	})
 	return out, nil
 }

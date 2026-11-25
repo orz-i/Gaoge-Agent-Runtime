@@ -28,14 +28,29 @@ func pgReserveGrantIdentity(tx *gorm.DB, g kernel.ChildExecutionGrant) error {
 // and retired rows must be disjoint; ancestor replicas of one active grant
 // legitimately share the same identity.
 func pgBackfillGrantIdentities(tx *gorm.DB) error {
-	for _, query := range []string{
-		"INSERT INTO agent_kernel_grant_identities(grant_id,run_id) SELECT DISTINCT grant_id,child_run_id FROM agent_kernel_child_effect_grants",
-		"INSERT INTO agent_kernel_grant_identities(grant_id,run_id) SELECT grant_id,run_id FROM agent_kernel_owned_retirements",
-	} {
-		if err := tx.Exec(query).Error; err != nil {
-			return translateKernelError(err)
-		}
+	var activeRows []struct {
+		GrantID    string
+		ChildRunID string
 	}
+	if err := tx.Raw("SELECT DISTINCT grant_id, child_run_id FROM agent_kernel_child_effect_grants").Scan(&activeRows).Error; err != nil {
+		return translateKernelError(err)
+	}
+	active := make([]kernel.GrantIdentity, 0, len(activeRows))
+	for _, r := range activeRows {
+		active = append(active, kernel.GrantIdentity{GrantID: r.GrantID, RunID: r.ChildRunID})
+	}
+	var retiredRows []struct {
+		GrantID string
+		RunID   string
+	}
+	if err := tx.Raw("SELECT grant_id, run_id FROM agent_kernel_owned_retirements").Scan(&retiredRows).Error; err != nil {
+		return translateKernelError(err)
+	}
+	retired := make([]kernel.GrantIdentity, 0, len(retiredRows))
+	for _, r := range retiredRows {
+		retired = append(retired, kernel.GrantIdentity{GrantID: r.GrantID, RunID: r.RunID})
+	}
+	var managed []kernel.GrantIdentity
 	var histories []models.KernelManagedHistoryRecord
 	if err := tx.Find(&histories).Error; err != nil {
 		return translateKernelError(err)
@@ -45,18 +60,34 @@ func pgBackfillGrantIdentities(tx *gorm.DB) error {
 		if err != nil {
 			return err
 		}
-		for _, i := range ids {
-			row := models.KernelGrantIdentityRecord{GrantID: i.GrantID, RunID: i.RunID}
-			if err = tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&row).Error; err != nil {
-				return translateKernelError(err)
-			}
-			var existing models.KernelGrantIdentityRecord
-			if err = tx.Where("grant_id = ?", i.GrantID).First(&existing).Error; err != nil {
-				return translateKernelError(err)
-			}
-			if existing.RunID != i.RunID {
-				return kernel.ErrExecutionConflict
-			}
+		managed = append(managed, ids...)
+	}
+	var transfers []models.KernelManagedTransferRecord
+	if err := tx.Find(&transfers).Error; err != nil {
+		return translateKernelError(err)
+	}
+	for _, tr := range transfers {
+		ids, err := kernel.ManagedGrantIdentities([]byte(tr.Payload), tr.RunID)
+		if err != nil {
+			return err
+		}
+		managed = append(managed, ids...)
+	}
+	ids, err := kernel.MergeGrantIdentities(active, retired, managed)
+	if err != nil {
+		return err
+	}
+	for _, i := range ids {
+		row := models.KernelGrantIdentityRecord{GrantID: i.GrantID, RunID: i.RunID}
+		if err = tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&row).Error; err != nil {
+			return translateKernelError(err)
+		}
+		var existing models.KernelGrantIdentityRecord
+		if err = tx.Where("grant_id = ?", i.GrantID).First(&existing).Error; err != nil {
+			return translateKernelError(err)
+		}
+		if existing.RunID != i.RunID {
+			return kernel.ErrExecutionConflict
 		}
 	}
 	return nil

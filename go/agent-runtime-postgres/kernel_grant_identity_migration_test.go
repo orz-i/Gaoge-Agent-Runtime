@@ -1,10 +1,12 @@
 package postgres
 
 import (
+	"errors"
 	"os"
 	"testing"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"gorm.io/gorm"
 )
 
@@ -23,8 +25,8 @@ func verifyGrantIdentityMigration(t *testing.T, db *gorm.DB) {
 	if e := db.Create(&rows).Error; e != nil {
 		t.Fatal(e)
 	}
-	if e := Migrate(db); e == nil || db.Migrator().HasTable(&models.KernelGrantIdentityRecord{}) {
-		t.Fatal("ambiguous original identity was silently migrated or partial DDL committed")
+	if e := Migrate(db); !errors.Is(e, kernel.ErrExecutionConflict) || db.Migrator().HasTable(&models.KernelGrantIdentityRecord{}) {
+		t.Fatalf("ambiguous original identity was silently migrated or partial DDL committed: err=%v", e)
 	}
 	var count int64
 	if e := db.Model(&models.KernelChildEffectGrantRecord{}).Count(&count).Error; e != nil || count != 3 {
@@ -46,6 +48,49 @@ func verifyGrantIdentityMigration(t *testing.T, db *gorm.DB) {
 	var ids []models.KernelGrantIdentityRecord
 	if e := db.Order("grant_id").Find(&ids).Error; e != nil || len(ids) != 2 || ids[0].GrantID != "borrowed" || ids[0].RunID != "child" || ids[1].GrantID != "retired" || ids[1].RunID != "old-root" {
 		t.Fatalf("identity backfill: %+v %v", ids, e)
+	}
+
+	// Pre-created empty identity table (e.g. via external AutoMigrate(Models()...))
+	// must not cause Migrate to skip backfill.
+	if e := db.Migrator().DropTable(&models.KernelGrantIdentityRecord{}); e != nil {
+		t.Fatal(e)
+	}
+	if e := db.AutoMigrate(&models.KernelGrantIdentityRecord{}); e != nil {
+		t.Fatal(e)
+	}
+	if e := Migrate(db); e != nil {
+		t.Fatal(e)
+	}
+	ids = nil
+	if e := db.Order("grant_id").Find(&ids).Error; e != nil || len(ids) != 2 || ids[0].GrantID != "borrowed" || ids[1].GrantID != "retired" {
+		t.Fatalf("precreated table skipped backfill: %+v %v", ids, e)
+	}
+
+	// Active and retired rows with the same GrantID must abort with ErrExecutionConflict.
+	overlap := models.KernelOwnedRetirementRecord{GrantID: "borrowed", RunID: "child", SettledRevision: 1, Version: 1, Phase: "ACKNOWLEDGED", Payload: "{}"}
+	if e := db.Create(&overlap).Error; e != nil {
+		t.Fatal(e)
+	}
+	if e := Migrate(db); !errors.Is(e, kernel.ErrExecutionConflict) {
+		t.Fatalf("active/retired overlap was not rejected: %v", e)
+	}
+	if e := db.Where("grant_id = ?", "borrowed").Delete(&models.KernelOwnedRetirementRecord{}).Error; e != nil {
+		t.Fatal(e)
+	}
+
+	// Whitespace-padded grant_id must abort with ErrExecutionConflict.
+	badID := models.KernelOwnedRetirementRecord{GrantID: " bad-id ", RunID: "old-root", SettledRevision: 1, Version: 1, Phase: "ACKNOWLEDGED", Payload: "{}"}
+	if e := db.Create(&badID).Error; e != nil {
+		t.Fatal(e)
+	}
+	if e := Migrate(db); !errors.Is(e, kernel.ErrExecutionConflict) {
+		t.Fatalf("whitespace grant_id was not rejected: %v", e)
+	}
+	if e := db.Where("grant_id = ?", " bad-id ").Delete(&models.KernelOwnedRetirementRecord{}).Error; e != nil {
+		t.Fatal(e)
+	}
+	if e := Migrate(db); e != nil {
+		t.Fatal(e)
 	}
 }
 
