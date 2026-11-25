@@ -115,6 +115,32 @@ func recordBudgetRunDenial(ctx context.Context, adapter *BoundedBudgetAdapter, i
 // elected cancellation can perform its own Kernel CAS after retirement.
 func (r *Runner) invokeNativeRun(ctx context.Context, source kernel.Snapshot, inv plugin.RunInvocation, next plugin.RunNext) (kernel.Snapshot, error) {
 	frame := &nativeRunAdmission{invocation: inv}
+	if source.Run.ParentRunID == "" {
+		// The actual first Host callback is AFTER all setup/Store reads,
+		// including Managed Leave. Never use an ACK or earlier lease check
+		// as current authority, and never enter this scope twice.
+		if r.activeRootGrant == nil || r.rootCallbacks == nil || r.activeRootGrant.ChildRunID != inv.RunID ||
+			r.rootCallbacks.entered.Load() {
+			return source, kernel.ErrExecutionConflict
+		}
+		deadlineElapsed, err := r.runtime.CheckOwnedPhysicalEntry(ctx, source)
+		if err != nil {
+			return source, err
+		}
+		if deadlineElapsed {
+			// No new Host callback may be entered. Consume at most one
+			// previously committed receipt through the native-only reducer.
+			if inv.Operation != plugin.RunResume || r.activeRootGrant.AdmissionOperation != "resume" {
+				return source, kernel.ErrDeadline
+			}
+			return r.consumeExpiredRootReceipt(ctx, source)
+		}
+		if !r.rootCallbacks.entered.CompareAndSwap(false, true) {
+			return source, kernel.ErrExecutionConflict
+		}
+	} else if r.rootCallbacks != nil {
+		r.rootCallbacks.entered.Store(true)
+	}
 	result, err := r.runChain.Invoke(callbackscope.BindRunCall(ctx, frame), inv, func(c context.Context) (kernel.Snapshot, error) {
 		frame.entered.Store(true)
 		return next(c)

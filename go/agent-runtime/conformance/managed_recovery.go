@@ -42,6 +42,7 @@ func RunManagedRecoveryStoreSuite(t *testing.T, factory func(*testing.T) Managed
 	t.Run("parked-ancestor", func(t *testing.T) { runManagedStoreAncestorGate(t, factory) })
 	t.Run("parked-gates", func(t *testing.T) { runManagedStoreParkedAuthorityGates(t, factory) })
 	t.Run("selection-ack", func(t *testing.T) { runManagedStoreSelectionAndExactACK(t, factory) })
+	t.Run("callback-entry", func(t *testing.T) { runManagedStoreCallbackEntry(t, factory) })
 	t.Run("two-enable-claimants", func(t *testing.T) { runManagedStoreEnableCompetition(t, factory) })
 	t.Run("transaction-ack", func(t *testing.T) { runManagedStoreTransactionACK(t, factory) })
 	t.Run("historical-closure", func(t *testing.T) { runManagedStoreT4ClosesHistoricalTransfer(t, factory) })
@@ -345,6 +346,47 @@ func runManagedStoreSelectionAndExactACK(t *testing.T, factory func(*testing.T) 
 			}
 			managedStoreReopenEqual(t, f, result)
 		})
+	}
+}
+
+// The new shared callback gate must not turn ENABLE into permission before
+// Leave, and a successor that has already left must not dispatch on expiry.
+func runManagedStoreCallbackEntry(t *testing.T, factory func(*testing.T) ManagedRecoveryStoreFixture) {
+	f := managedStoreSetup(t, factory)
+	selection, parked := managedStoreSelection(t, f, kernel.ManagedResume)
+	timed, e := f.store.EnableManagedRecovery(t.Context(), kernel.ManagedEnableRequest{RunID: f.source.Run.ID, SuspensionID: f.point.ID, ClaimantID: "entry-claimant", OwnerID: "entry-owner", LeaseID: "entry-lease", GrantID: "entry-grant", ExpectedTransferRevision: parked.Revision, Generation: parked.Generation, LeaseDuration: 3 * time.Second, Selection: selection})
+	if e != nil {
+		t.Fatal(e)
+	}
+	g, l := timed.SuccessorGrant, timed.SuccessorLease
+	port := f.backend.Peer.(kernel.OwnedPhysicalExecutionStore)
+	if _, e = port.CheckOwnedPhysicalEntry(t.Context(), g, l, f.source); !errors.Is(e, kernel.ErrExecutionConflict) {
+		t.Fatalf("ENABLE alone admitted callback: %v", e)
+	}
+	left, e := f.store.LeaveManagedSafePoint(t.Context(), kernel.ManagedLeaveRequest{RunID: f.source.Run.ID, SuspensionID: f.point.ID, ExpectedRevision: f.source.Run.Revision, ExpectedTransferRevision: timed.Revision, Generation: timed.Generation, Lease: l})
+	if e != nil || left.State != kernel.ManagedInvalidated {
+		t.Fatalf("valid Leave: %v", e)
+	}
+	window, e := port.CheckOwnedPhysicalEntry(t.Context(), g, l, f.source)
+	if e != nil || window.LeaseRemaining <= 0 {
+		t.Fatalf("valid left successor refused: %+v %v", window, e)
+	}
+	foreign := f.source
+	foreign.EventHead++
+	if _, e = port.CheckOwnedPhysicalEntry(t.Context(), g, l, foreign); !errors.Is(e, kernel.ErrExecutionConflict) {
+		t.Fatalf("changed source admitted: %v", e)
+	}
+	f.backend.AdvanceTo(l.ExpiresAt.Add(100 * time.Millisecond))
+	if _, e = port.CheckOwnedPhysicalEntry(t.Context(), g, l, f.source); !errors.Is(e, kernel.ErrExecutionConflict) {
+		t.Fatalf("expired left successor admitted: %v", e)
+	}
+	f.grant = g
+	managedStoreSame(t, f, left)
+	if _, e = f.store.LookupOwnedPhysicalCallbackReturn(t.Context(), g); !errors.Is(e, kernel.ErrNotFound) {
+		t.Fatalf("entry observation fabricated callback: %v", e)
+	}
+	if _, e = f.store.LoadOwnedRetirement(t.Context(), g.ID); !errors.Is(e, kernel.ErrNotFound) {
+		t.Fatalf("entry observation fabricated closure: %v", e)
 	}
 }
 

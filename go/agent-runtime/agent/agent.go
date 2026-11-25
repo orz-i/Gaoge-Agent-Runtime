@@ -798,11 +798,11 @@ func (runner *Runner) startRunWithMiddleware(ctx context.Context, request StartR
 	snapshot, invokeErr := runner.withRootSegment(ctx, created, operation, func(rootCtx context.Context, root *Runner, admitted kernel.Snapshot) (kernel.Snapshot, error) {
 		return root.withChildPhysicalGrant(rootCtx, admitted.Run.ID, admitted.Run.Revision, operation,
 			func(childCtx context.Context, scoped *Runner) (kernel.Snapshot, error) {
-				middlewareEntered = true
 				result, err := scoped.invokeNativeRun(childCtx, admitted, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
 					continuationReached = true
 					return scoped.continuePreparedRun(nextCtx, admitted, deferred)
 				})
+				middlewareEntered = scoped.rootCallbacks != nil && scoped.rootCallbacks.entered.Load()
 				if !continuationReached && scoped.rootCallbacks != nil {
 					admissionReturn = scoped.rootCallbacks.knownReturn.Load()
 				}
@@ -1412,6 +1412,13 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 		}
 		return snapshot, true, err
 	}
+	return runner.consumeCompletedModel(ctx, snapshot, state, invocation)
+}
+
+// consumeCompletedModel processes exactly one persisted model receipt; it
+// never calls a provider. The ordinary drive and the expired receipt-only
+// path share this reducer, but the latter excludes Host-dependent branches.
+func (runner *Runner) consumeCompletedModel(ctx context.Context, snapshot kernel.Snapshot, state runState, invocation ModelInvocation) (kernel.Snapshot, bool, error) {
 	if invocation.Purpose == ModelInvocationContextSummary {
 		next, summaryErr := runner.consumeContextSummary(ctx, snapshot, state)
 		return next, summaryErr != nil, summaryErr
@@ -2276,23 +2283,8 @@ func (runner *Runner) executePending(ctx context.Context, snapshot kernel.Snapsh
 		failed, failErr := runner.fail(ctx, snapshot, execution.state, failCode, err)
 		return failed, false, failErr
 	}
-	for index, receipt := range execution.state.RecoveredTools {
-		if receipt.Call.ID != execution.call.ID {
-			continue
-		}
-		if !sameRecoveredCall(receipt.Call, execution.call) {
-			return snapshot, true, ErrToolReceiptMismatch
-		}
-		refusal, invalid := receipt.outcome().terminalError(execution.call.ID)
-		if invalid != nil {
-			return snapshot, true, invalid
-		}
-		execution.state.RecoveredTools = append(execution.state.RecoveredTools[:index], execution.state.RecoveredTools[index+1:]...)
-		execution.originalApprovalDigest = receipt.ApprovalDigest
-		if refusal != nil {
-			return runner.handlePendingToolExecutionError(ctx, snapshot, execution.state, refusal)
-		}
-		return runner.persistPendingToolResult(ctx, snapshot, execution, tools.CloneExecutionResult(receipt.Result))
+	if result, yielded, err, handled := runner.consumeRecoveredPending(ctx, snapshot, execution); handled {
+		return result, yielded, err
 	}
 	if a := execution.state.ToolAdmission; a != nil && (!a.authorized(execution.call) || (a.ApprovalDigest != "" && durableApprovalSource(snapshot, execution.state, execution.call) != a.ApprovalDigest)) {
 		return snapshot, true, ErrApprovalRequired
@@ -2426,6 +2418,31 @@ func (runner *Runner) executePending(ctx context.Context, snapshot kernel.Snapsh
 		return persisted, true, ErrToolLateResult
 	}
 	return persisted, yielded, nil
+}
+
+// consumeRecoveredPending cannot fall through to a physical Tool call.
+func (runner *Runner) consumeRecoveredPending(ctx context.Context, snapshot kernel.Snapshot, execution pendingToolExecution) (kernel.Snapshot, bool, error, bool) {
+	for index, receipt := range execution.state.RecoveredTools {
+		if receipt.Call.ID != execution.call.ID {
+			continue
+		}
+		if !sameRecoveredCall(receipt.Call, execution.call) {
+			return snapshot, true, ErrToolReceiptMismatch, true
+		}
+		refusal, invalid := receipt.outcome().terminalError(execution.call.ID)
+		if invalid != nil {
+			return snapshot, true, invalid, true
+		}
+		execution.state.RecoveredTools = append(execution.state.RecoveredTools[:index], execution.state.RecoveredTools[index+1:]...)
+		execution.originalApprovalDigest = receipt.ApprovalDigest
+		if refusal != nil {
+			next, yielded, err := runner.handlePendingToolExecutionError(ctx, snapshot, execution.state, refusal)
+			return next, yielded, err, true
+		}
+		next, yielded, err := runner.persistPendingToolResult(ctx, snapshot, execution, tools.CloneExecutionResult(receipt.Result))
+		return next, yielded, err, true
+	}
+	return snapshot, false, nil, false
 }
 
 type pendingToolExecution struct {

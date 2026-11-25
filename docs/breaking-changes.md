@@ -1,5 +1,22 @@
 # Breaking changes (pre-stable Beta)
 
+## Owned physical callback entry and no-entry retirement
+
+Custom `OwnedPhysicalExecutionStore` adapters must implement
+`CheckOwnedPhysicalEntry` using the same native Run transaction/mutex as
+the original Grant, lease, settlement and managed transfer facts. Return the
+authoritative remaining lease and deadline durations; a lookup or the
+caller's expiry is not permission to enter the callback.
+
+An exact acknowledged ordinary admission that did not enter the callback
+can persist `not-entered-v1` evidence and retire only that Grant. This is
+not Host completion, control custody or a receipt replay authority.
+Unknown admissions and unresolved managed successors remain fenced.
+No new SQL schema version is needed, but old writers must not mix with
+the new evidence semantics. A due Run may consume a qualified known receipt
+locally without invoking new Host callbacks; any branch still requiring
+Host input, completion-policy or summary callbacks remains blocked.
+
 ## Original physical admission ACK
 
 Owned physical admission no longer converts a Store error to success merely

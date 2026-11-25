@@ -67,6 +67,9 @@ func (e OwnedSettlementEvidence) Valid() bool {
 	if c.GrantID == "" {
 		return c == (OwnedPhysicalCallbackCompletion{}) && e.MarkOrigin == "LEGACY_UNKNOWN"
 	}
+	if c.NotEntered() {
+		return e.MarkOrigin == "NOT_ENTERED" && c.MatchesNotEnteredSnapshot(g, s)
+	}
 	return ValidateOwnedPhysicalCompletion(g, c) == nil && c.HostCompleted && c.ReturnRevision <= s.Run.Revision &&
 		(e.MarkOrigin == "OWNER_RETURN" || e.MarkOrigin == "RECOVERED_RETURN" || e.MarkOrigin == "LEGACY_UNKNOWN")
 }
@@ -100,7 +103,7 @@ func (r OwnedRetirementReceipt) Identity() string {
 	}{r.Version, r.Evidence, r.Closures})
 }
 func (r OwnedRetirementReceipt) Valid() bool {
-	if r.Version != 1 || !r.Evidence.Valid() || r.Closures == nil {
+	if r.Version != 1 || !r.Evidence.Valid() || r.Closures == nil || (r.Evidence.Completion.NotEntered() && len(r.Closures) != 0) {
 		return false
 	}
 	for i, t := range r.Closures {

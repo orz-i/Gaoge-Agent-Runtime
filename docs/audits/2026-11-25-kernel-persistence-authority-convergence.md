@@ -134,3 +134,47 @@ at an exact server COMMIT packet.
   `pgLoadOwnedPhysicalGrant` when `lockKernelRun` returns `ErrNotFound`,
   aligning cross-Run foreign-Grant probe responses on `ErrExecutionConflict`
   across Memory, SQLite and PostgreSQL.
+
+## Independent audit follow-up: actual callback entry and no-entry retirement (F5/F6)
+
+Original admission ACK and a matching Grant are not current execution permission.
+All first-party owned RunChain entries (Start, Prepare, Resume, Approval and
+Managed Resume) now consume a shared Store-authoritative entry observation after
+scope binding and prelude reads, immediately before the first callback.
+`ValidateOwnedPhysicalEntry` checks the exact current source, sole self-scoped
+Grant, persisted lease owner/epoch, physical epoch, quarantine, settlement and
+transfer facts under the native transaction/mutex. Approval admits only
+WAITING_INPUT; the other ordinary operations require RUNNING. A managed
+successor additionally requires its exact INVALIDATED/Leave source.
+
+The Store supplies its remaining lease/deadline durations, not a caller's
+wall-clock expiry. Runtime deducts the entire monotonic observation round trip
+and rejects expired lease or canceled context. A due Run deadline cannot enter
+a new Host RunChain. Resume may still consume at most one already committed,
+qualified Model or recovered Tool receipt with the same native reducer, no
+new provider/Tool dispatch, no Host middleware, and no optional observers.
+Summary consumption or final Model completion requiring Host inputs or
+completion policies remains blocked after expiry. This is a narrow local
+receipt-only path, not a second dispatch authority.
+
+Only the original acknowledged ordinary admission whose callback has not
+entered can seal `not-entered-v1` evidence against its unchanged original
+snapshot. This is explicitly not Host completion, control/Tool custody,
+model evidence or a receipt-recovery permit. Its exact evidence permits
+retirement using the existing Record/Mark/Finish/ACK transaction protocol,
+including lost cleanup ACKs and later reconciliation of durable no-entry
+evidence. The ACK releases only the original internally owned lease; an
+external caller's lease remains its own. Uncertain admission ownership still
+keeps its fence. Managed successor failure keeps the original transfer/fence
+and cannot manufacture ordinary no-entry retirement or T4 completion.
+
+F6: absent Run and absent Grant is absence; a matching orphan or a foreign
+Grant is a conflict; database/scan errors propagate. A successful lookup
+must contain a valid original completion, never a zero value. PostgreSQL,
+SQLite and Memory enforce this boundary, and Runtime validates successful
+adapter results before exposing them.
+
+No additional table or SQL schema version is required. Store implementations
+of `OwnedPhysicalExecutionStore` must implement `CheckOwnedPhysicalEntry`
+and forward the real authoritative durations. Old writers must not mix with
+writers that understand the new no-entry custody/settlement evidence.

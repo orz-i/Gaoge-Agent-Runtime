@@ -52,6 +52,7 @@ func ValidateOwnedPhysicalCompletion(g ChildExecutionGrant, c OwnedPhysicalCallb
 	}
 	if !g.IsOwned() || g.ID == "" || c.GrantID != g.ID || c.ReturnRevision < g.ExpectedRevision || c.ReturnRevision == 0 ||
 		!validToolReceiptDigest(c.ReturnSourceHash) || !c.ControlCustody.Valid() || !c.ToolReturns.Valid() ||
+		(c.NotEntered() && (c.HostCompleted || c.ToolReturns != "" || c.ReturnRevision != g.ExpectedRevision || !ordinaryOwnedOperation(g.AdmissionOperation))) ||
 		(c.ControlCustody == OwnedCustodyPrepared && g.AdmissionOperation != "prepare") ||
 		(c.ToolReturns != "" && (!c.HostCompleted || c.ControlCustody == OwnedCustodyPrepared || c.ControlCustody == OwnedToolBudgetReturn)) {
 		return ErrExecutionConflict
@@ -84,7 +85,7 @@ func ReduceOwnedPhysicalCallbackReturn(g ChildExecutionGrant, current Snapshot, 
 // Neither a historical grant nor a completion alone grants physical dispatch.
 func ValidateOwnedPhysicalRecovery(g ChildExecutionGrant, current Snapshot, persisted ExecutionLease, revision uint64, mutation StoreMutation, permit OwnedPhysicalRecovery, completion OwnedPhysicalCallbackCompletion, settled uint64) error {
 	if !g.MatchesExecution(persisted) || settled != 0 || ValidateOwnedPhysicalCompletion(g, completion) != nil ||
-		completion.ReturnRevision > current.Run.Revision || completion.HostCompleted == permit.IsModelEvidence() ||
+		completion.NotEntered() || completion.ReturnRevision > current.Run.Revision || completion.HostCompleted == permit.IsModelEvidence() ||
 		current.Run.Kind != "agent" || current.Run.ParentRunID != "" || current.Run.Status != RunStatusRunning {
 		return ErrExecutionConflict
 	}
@@ -137,6 +138,12 @@ func ReduceOwnedPhysicalSettlement(g ChildExecutionGrant, current Snapshot, pers
 		return OwnedSettlementEvidence{}, ErrExecutionConflict
 	}
 	origin := "OWNER_RETURN"
+	if completion.NotEntered() {
+		if !permit.IsRecovery() || !completion.MatchesNotEnteredSnapshot(g, current) {
+			return OwnedSettlementEvidence{}, ErrExecutionConflict
+		}
+		return resolveOwnedSettlement(g, current, marked, completion, original, "NOT_ENTERED")
+	}
 	if permit.IsRecovery() {
 		if ValidateOwnedPhysicalCompletion(g, completion) != nil || !completion.HostCompleted {
 			return OwnedSettlementEvidence{}, ErrExecutionConflict

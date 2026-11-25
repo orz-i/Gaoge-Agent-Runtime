@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
@@ -56,6 +57,53 @@ func loadOwnedPhysicalGrant(ctx context.Context, q schemaQuery, g kernel.ChildEx
 		return 0, kernel.ErrExecutionConflict
 	}
 	return marked, nil
+}
+
+func (s *Store) CheckOwnedPhysicalEntry(ctx context.Context, g kernel.ChildExecutionGrant, l kernel.ExecutionLease, expected kernel.Snapshot) (kernel.OwnedPhysicalEntryWindow, error) {
+	if s == nil || s.db == nil || ctx == nil || kernel.ValidateOwnedPhysicalAdmissionRequest(g, l) != nil {
+		return kernel.OwnedPhysicalEntryWindow{}, kernel.ErrInvalidInput
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return kernel.OwnedPhysicalEntryWindow{}, conflictOrDatabaseError(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	current, err := loadTx(ctx, tx, g.ChildRunID)
+	if err != nil {
+		return kernel.OwnedPhysicalEntryWindow{}, err
+	}
+	marked, err := loadOwnedPhysicalGrant(ctx, tx, g)
+	if err != nil {
+		return kernel.OwnedPhysicalEntryWindow{}, err
+	}
+	var active int
+	if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM runtime_child_effect_grants WHERE parent_run_id=?", g.ChildRunID).Scan(&active); err != nil {
+		return kernel.OwnedPhysicalEntryWindow{}, conflictOrDatabaseError(err)
+	}
+	if active != 1 {
+		return kernel.OwnedPhysicalEntryWindow{}, kernel.ErrExecutionConflict
+	}
+	completion, err := loadOwnedCallbackReturn(ctx, tx, g)
+	if err != nil && !errors.Is(err, kernel.ErrNotFound) {
+		return kernel.OwnedPhysicalEntryWindow{}, err
+	}
+	native, quarantine, err := sqliteManagedLease(ctx, tx, g.ChildRunID)
+	if err != nil {
+		return kernel.OwnedPhysicalEntryWindow{}, err
+	}
+	var physicalEpoch uint64
+	if err = tx.QueryRowContext(ctx, "SELECT execution_physical_epoch FROM runtime_runs WHERE run_id=?", g.ChildRunID).Scan(&physicalEpoch); err != nil {
+		return kernel.OwnedPhysicalEntryWindow{}, conflictOrDatabaseError(err)
+	}
+	transfer, err := sqliteLoadManaged(ctx, tx, g.ChildRunID)
+	if err != nil && !errors.Is(err, kernel.ErrNotFound) {
+		return kernel.OwnedPhysicalEntryWindow{}, err
+	}
+	now, err := sqliteExecutionNow(ctx, tx)
+	if err != nil {
+		return kernel.OwnedPhysicalEntryWindow{}, err
+	}
+	return kernel.ValidateOwnedPhysicalEntry(g, expected, current, l, native, time.UnixMilli(now), quarantine != 0, physicalEpoch, marked, completion, transfer)
 }
 
 func (s *Store) RecordOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, revision uint64, outcome kernel.OwnedPhysicalCallbackOutcome, permit kernel.OwnedPhysicalCallbackReturn) error {
@@ -118,6 +166,14 @@ func (s *Store) LookupOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.
 	defer func() { _ = tx.Rollback() }()
 	if _, err = loadOwnedPhysicalGrant(ctx, tx, g); err != nil {
 		return kernel.OwnedPhysicalCallbackCompletion{}, err
+	}
+	// A matching orphan is an integrity conflict, not an original return.
+	var sourceID string
+	if err = tx.QueryRowContext(ctx, "SELECT run_id FROM runtime_runs WHERE run_id=?", g.ChildRunID).Scan(&sourceID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return kernel.OwnedPhysicalCallbackCompletion{}, kernel.ErrExecutionConflict
+		}
+		return kernel.OwnedPhysicalCallbackCompletion{}, conflictOrDatabaseError(err)
 	}
 	return loadOwnedCallbackReturn(ctx, tx, g)
 }

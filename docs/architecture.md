@@ -198,6 +198,14 @@ alone is not a physical-effect receipt.
   only within its original live invocation, from a direct attempt-bound
   Store outcome and the exact persisted admission commitment. Public Grant
   identity, a definite refusal or a later observer never grants dispatch.
+- After admission acknowledgement, the actual owned RunChain entry still
+  checks the exact original Grant, persisted owner/epoch, source revision and
+  operation status against Store time. Runtime accounts for the observation's
+  full elapsed time; a due deadline, canceled context or expired lease cannot
+  enter new Host work. An expired Resume can consume one qualified known
+  receipt locally without invoking the RunChain or dispatching new work.
+  A confirmed but unentered ordinary Grant may retire only on the original
+  no-entry proof, not on an inferred Host return or an uncertain admission.
 - Cancellation competes atomically with new dispatch admission. A cancelled
   parent cannot start a late child, while an unsettled child grant prevents
   premature terminalization of its ancestors.

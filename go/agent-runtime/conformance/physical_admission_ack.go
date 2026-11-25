@@ -3,6 +3,7 @@ package conformance
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,17 +18,114 @@ var errAdmissionTransport = errors.New("injected admission response loss")
 // transaction. It never creates or substitutes a persisted Grant.
 type admissionACKStore struct {
 	*ea1AgentAdmissionStore
-	mode      string
-	cancel    context.CancelFunc
-	grant     kernel.ChildExecutionGrant
-	source    kernel.Snapshot
-	nativeErr error
-	attempted bool
-	readbacks int
+	mode               string
+	cancel             context.CancelFunc
+	grant              kernel.ChildExecutionGrant
+	source             kernel.Snapshot
+	nativeErr          error
+	attempted          bool
+	readbacks          int
+	lease              kernel.ExecutionLease
+	postAdmissionLoads int
+	entryChecks        int
+}
+
+func waitAdmissionUntil(ctx context.Context, until time.Time) error {
+	delay := time.Until(until)
+	if delay <= 0 {
+		return ctx.Err()
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(delay):
+		return nil
+	}
+}
+
+func (s *admissionACKStore) AcquireExecution(ctx context.Context, q kernel.ExecutionAcquireRequest) (kernel.ExecutionLease, error) {
+	if strings.HasPrefix(s.mode, "expired-") {
+		// Shorten only the fixture's actual Store lease. Use the returned
+		// authoritative expiry, including DB timestamp granularity.
+		q.LeaseDuration = 2 * time.Second
+	}
+	return s.ea1AgentAdmissionStore.AcquireExecution(ctx, q)
+}
+
+func (s *admissionACKStore) Load(ctx context.Context, id string) (kernel.Snapshot, error) {
+	v, err := s.ea1AgentAdmissionStore.Load(ctx, id)
+	if s.attempted && err == nil {
+		s.postAdmissionLoads++
+		if s.mode == "expired-prelude" && s.postAdmissionLoads == 2 {
+			// Scope binding has already completed. Delay the subsequent
+			// prelude read so an earlier binding-time check is insufficient.
+			err = waitAdmissionUntil(ctx, s.lease.ExpiresAt.Add(100*time.Millisecond))
+		}
+	}
+	return v, err
+}
+
+func (s *admissionACKStore) CheckOwnedPhysicalEntry(ctx context.Context, g kernel.ChildExecutionGrant, l kernel.ExecutionLease, source kernel.Snapshot) (kernel.OwnedPhysicalEntryWindow, error) {
+	s.entryChecks++
+	if s.mode == "entry-unavailable" || strings.HasPrefix(s.mode, "no-entry-") {
+		return kernel.OwnedPhysicalEntryWindow{}, errAdmissionTransport
+	}
+	window, err := s.OwnedPhysicalExecutionStore.CheckOwnedPhysicalEntry(ctx, g, l, source)
+	if err == nil && s.mode == "cancelled-at-entry" {
+		s.cancel()
+	}
+	if err == nil && s.mode == "expired-entry-ack" {
+		// Delay a real successful Store entry observation until its
+		// returned authority window has ended, not a forged error.
+		err = waitAdmissionUntil(ctx, s.lease.ExpiresAt.Add(100*time.Millisecond))
+	}
+	if err == nil && s.mode == "deadline-entry-ack" {
+		if source.Run.DeadlineAt == nil {
+			return kernel.OwnedPhysicalEntryWindow{}, errors.New("missing fixture deadline")
+		}
+		err = waitAdmissionUntil(ctx, source.Run.DeadlineAt.Add(100*time.Millisecond))
+	}
+	return window, err
+}
+
+func (s *admissionACKStore) MarkChildExecutionSettled(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
+	if s.mode == "no-entry-mark-unavailable" {
+		return errAdmissionTransport
+	}
+	err := s.ChildExecutionStore.MarkChildExecutionSettled(ctx, g, p)
+	if err == nil && s.mode == "no-entry-mark-ack" {
+		return errAdmissionTransport
+	}
+	return err
+}
+
+func (s *admissionACKStore) RecordOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, revision uint64, o kernel.OwnedPhysicalCallbackOutcome, p kernel.OwnedPhysicalCallbackReturn) error {
+	err := s.OwnedPhysicalExecutionStore.RecordOwnedPhysicalCallbackReturn(ctx, g, revision, o, p)
+	if err == nil && s.mode == "no-entry-record-ack" {
+		return errAdmissionTransport
+	}
+	return err
+}
+
+func (s *admissionACKStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant) error {
+	err := s.ChildExecutionStore.FinishChildExecution(ctx, g)
+	if err == nil && s.mode == "no-entry-finish-ack" {
+		return errAdmissionTransport
+	}
+	return err
+}
+
+func (s *admissionACKStore) AcknowledgeOwnedRetirement(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.OwnedRetirementAcknowledgement) (kernel.OwnedRetirementAckResult, error) {
+	out, err := s.ea1AgentAdmissionStore.AcknowledgeOwnedRetirement(ctx, g, p)
+	if err == nil && s.mode == "no-entry-retirement-ack" {
+		return kernel.OwnedRetirementAckResult{}, errAdmissionTransport
+	}
+	return out, err
 }
 
 func (s *admissionACKStore) BeginOwnedPhysicalExecution(ctx context.Context, g kernel.ChildExecutionGrant, l kernel.ExecutionLease, p kernel.OwnedPhysicalAdmission) error {
 	s.grant = g
+	s.lease = l
 	var err error
 	s.source, err = s.Load(ctx, g.ChildRunID)
 	if err != nil {
@@ -50,6 +148,22 @@ func (s *admissionACKStore) BeginOwnedPhysicalExecution(ctx context.Context, g k
 		return s.nativeErr
 	}
 	switch s.mode {
+	case "expired-confirmed", "expired-ack-lost":
+		if err := waitAdmissionUntil(ctx, l.ExpiresAt.Add(100*time.Millisecond)); err != nil {
+			return p.CommitOutcome(err)
+		}
+		if s.mode == "expired-ack-lost" {
+			return p.CommitOutcome(errAdmissionTransport)
+		}
+		return nil
+	case "deadline-after":
+		if s.source.Run.DeadlineAt == nil {
+			return errors.New("missing fixture deadline")
+		}
+		return waitAdmissionUntil(ctx, s.source.Run.DeadlineAt.Add(100*time.Millisecond))
+	case "cancelled-confirmed":
+		s.cancel()
+		return nil
 	case "ack-lost", "unreadable-after":
 		return p.CommitOutcome(errAdmissionTransport)
 	case "plain-ack-lost":
@@ -95,6 +209,18 @@ func RunPhysicalAdmissionACKSuite(t *testing.T, factory func(*testing.T) (kernel
 			runPhysicalAdmissionACKCase(t, factory, "resume", mode)
 		})
 	}
+	for _, operation := range []string{"start", "prepare", "resume", "approval"} {
+		for _, mode := range []string{"expired-confirmed", "expired-ack-lost", "expired-prelude", "expired-entry-ack", "cancelled-confirmed", "cancelled-at-entry", "entry-unavailable"} {
+			t.Run("callback-entry/"+operation+"/"+mode, func(t *testing.T) { runPhysicalAdmissionACKCase(t, factory, operation, mode) })
+		}
+	}
+	for _, mode := range []string{"deadline-after", "deadline-entry-ack"} {
+		t.Run("callback-entry/start/"+mode, func(t *testing.T) { runPhysicalAdmissionACKCase(t, factory, "start", mode) })
+	}
+	for _, mode := range []string{"no-entry-mark-unavailable", "no-entry-record-ack", "no-entry-mark-ack", "no-entry-finish-ack", "no-entry-retirement-ack"} {
+		t.Run("callback-entry/resume/"+mode, func(t *testing.T) { runPhysicalAdmissionACKCase(t, factory, "resume", mode) })
+	}
+	t.Run("callback-entry/external-lease-preserved", func(t *testing.T) { runPhysicalEntryExternalLease(t, factory) })
 	for _, mode := range []string{"definite-denial", "unknown-after-denial"} {
 		t.Run("admission-ack/race/"+mode, func(t *testing.T) {
 			runPhysicalAdmissionACKRace(t, factory, mode)
@@ -138,7 +264,12 @@ func runPhysicalAdmissionACKCase(t *testing.T, factory func(*testing.T) (kernel.
 	wantStatus := kernel.RunStatusCompleted
 	switch operation {
 	case "start":
-		out, err = r.StartRun(ctx, ea1AdmissionRequest())
+		request := ea1AdmissionRequest()
+		if strings.HasPrefix(mode, "deadline-") {
+			deadline := time.Now().UTC().Add(2 * time.Second)
+			request.DeadlineAt = &deadline
+		}
+		out, err = r.StartRun(ctx, request)
 	case "prepare":
 		wantStatus = kernel.RunStatusRunning
 		out, err = r.PrepareRun(ctx, ea1AdmissionRequest())
@@ -161,6 +292,58 @@ func runPhysicalAdmissionACKCase(t *testing.T, factory func(*testing.T) (kernel.
 	}
 	fresh := ea1StartRuntime(t, reopen())
 	g, lookupErr := fresh.LookupChildExecution(t.Context(), w.grant.ChildRunID)
+	if strings.HasPrefix(mode, "expired-") || strings.HasPrefix(mode, "deadline-") || mode == "cancelled-confirmed" || mode == "cancelled-at-entry" || mode == "entry-unavailable" || strings.HasPrefix(mode, "no-entry-") {
+		want := kernel.ErrExecutionConflict
+		switch mode {
+		case "deadline-after", "deadline-entry-ack":
+			want = kernel.ErrDeadline
+		case "cancelled-confirmed", "cancelled-at-entry":
+			want = context.Canceled
+		case "entry-unavailable", "no-entry-mark-unavailable", "no-entry-record-ack", "no-entry-mark-ack", "no-entry-finish-ack", "no-entry-retirement-ack":
+			want = errAdmissionTransport
+		}
+		if !errors.Is(err, want) || hostCalls != 0 || approvalCalls != 0 || modelCalls != 0 || toolCalls != 0 || w.nativeErr != nil {
+			t.Fatalf("acknowledged but invalid entry: host=%d approval=%d model=%d tool=%d native=%v err=%v", hostCalls, approvalCalls, modelCalls, toolCalls, w.nativeErr, err)
+		}
+		if out.Run.ID != w.source.Run.ID {
+			t.Fatalf("denial lost original Run: %+v", out.Run)
+		}
+		if current, e := fresh.Load(t.Context(), w.grant.ChildRunID); e != nil || kernel.ManagedDigest(current) != kernel.ManagedDigest(w.source) {
+			t.Fatalf("no-entry changed original business source: %v", e)
+		}
+		if mode == "no-entry-mark-unavailable" {
+			if lookupErr != nil || g != w.grant || !errors.Is(err, agent.ErrRootOutcomeUnknown) {
+				t.Fatalf("unacknowledged cleanup lost fence: %+v %v %v", g, lookupErr, err)
+			}
+			c, e := fresh.LookupOwnedPhysicalCallbackReturn(t.Context(), g)
+			if e != nil || !c.MatchesNotEnteredSnapshot(g, w.source) || c.HostCompleted || c.MatchesReturnSnapshot(w.source) {
+				t.Fatalf("durable no-entry fact not distinct: %+v %v", c, e)
+			}
+			obs := admissionACKRunner(t, fresh, &ea1AdmissionModel{}, &ea1AdmissionMiddleware{})
+			if e = obs.ReconcileRootPhysicalExecution(t.Context(), g.ChildRunID); e != nil {
+				t.Fatalf("restart could not consume exact no-entry retirement: %v", e)
+			}
+		} else if !errors.Is(lookupErr, kernel.ErrNotFound) {
+			t.Fatalf("known original no-entry fence was not retired: %+v %v", g, lookupErr)
+		}
+		assertNoEntryRetirement(t, fresh, w.grant, w.source, true)
+		if _, e := fresh.LookupChildExecution(t.Context(), w.grant.ChildRunID); !errors.Is(e, kernel.ErrNotFound) {
+			t.Fatalf("no-entry still fenced: %v", e)
+		}
+		// ACK must release only the internally acquired owner. A new
+		// original lease can be obtained (unless the Run deadline is due).
+		l, e := fresh.AcquireExecution(t.Context(), kernel.ExecutionAcquireRequest{RunID: w.grant.ChildRunID, OwnerID: "next-owner", LeaseDuration: time.Minute})
+		if e != nil {
+			t.Fatalf("no-entry retirement did not release owned lease: %v", e)
+		}
+		if l.Epoch <= w.lease.Epoch {
+			t.Fatal("next native lease did not advance epoch")
+		}
+		if e = fresh.ReleaseExecution(t.Context(), l); e != nil {
+			t.Fatal(e)
+		}
+		return
+	}
 	if mode == "confirmed" || mode == "ack-lost" {
 		wantModel, wantApproval := 0, 0
 		if operation == "start" || operation == "resume" {
@@ -237,6 +420,59 @@ func runPhysicalAdmissionACKCase(t *testing.T, factory func(*testing.T) (kernel.
 	}
 	if retained, e := fresh.LookupChildExecution(t.Context(), g.ChildRunID); e != nil || retained != g {
 		t.Fatalf("observer changed original barrier: %+v %v", retained, e)
+	}
+}
+
+func assertNoEntryRetirement(t *testing.T, rt *kernel.Runtime, g kernel.ChildExecutionGrant, source kernel.Snapshot, owned bool) {
+	t.Helper()
+	receipt, e := rt.LoadOwnedRetirement(t.Context(), g.ID)
+	c := receipt.Evidence.Completion
+	if e != nil || !receipt.Valid() || receipt.Phase != "ACKNOWLEDGED" || receipt.Evidence.Grant != g || receipt.Evidence.MarkOrigin != "NOT_ENTERED" ||
+		!c.MatchesNotEnteredSnapshot(g, source) || c.HostCompleted || c.LeaseOwned != owned || c.ToolReturns != "" || c.MatchesReturnSnapshot(source) ||
+		len(receipt.Closures) != 0 || kernel.ManagedDigest(receipt.Evidence.Snapshot) != kernel.ManagedDigest(source) {
+		t.Fatalf("invalid original no-entry retirement: %+v %v", receipt, e)
+	}
+	if e = rt.VerifyOwnedRootSettlement(t.Context(), source); e == nil {
+		t.Fatal("no-entry retirement manufactured returned callback custody")
+	}
+}
+
+func runPhysicalEntryExternalLease(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store)) {
+	f := ea1NewResumeFixture(t, factory, false)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	lease, e := f.observer.AcquireExecution(ctx, kernel.ExecutionAcquireRequest{RunID: f.prepared.Run.ID, OwnerID: "external-owner", LeaseDuration: time.Minute})
+	if e != nil {
+		t.Fatal(e)
+	}
+	w := &admissionACKStore{ea1AgentAdmissionStore: ea1AgentAdmissionWrap(t, f.store.Store), mode: "cancelled-at-entry", cancel: cancel}
+	rt, e := ea1StartRuntime(t, w).WithExecution(lease)
+	if e != nil {
+		t.Fatal(e)
+	}
+	m, host := &ea1AdmissionModel{}, &ea1AdmissionMiddleware{}
+	r := admissionACKRunner(t, rt, m, host)
+	_, e = r.Resume(ctx, f.prepared.Run.ID, f.prepared.Run.Revision)
+	if !errors.Is(e, context.Canceled) || m.calls.Load() != 0 || host.calls.Load() != 0 || w.entryChecks != 1 {
+		t.Fatalf("external denial entered callback: %v", e)
+	}
+	fresh := ea1StartRuntime(t, f.reopen())
+	assertNoEntryRetirement(t, fresh, w.grant, w.source, false)
+	if e = fresh.RequireExecution(t.Context(), w.grant.ChildRunID); !errors.Is(e, kernel.ErrExecutionRequired) {
+		t.Fatalf("unbound observer inherited lease: %v", e)
+	}
+	bound, e := fresh.WithExecution(lease)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = bound.RequireExecution(t.Context(), w.grant.ChildRunID); e != nil {
+		t.Fatalf("no-entry retirement released caller-owned lease: %v", e)
+	}
+	// The same caller lease can admit a new real attempt, never the old ID.
+	r = admissionACKRunner(t, bound, m, host)
+	out, e := r.Resume(t.Context(), f.prepared.Run.ID, f.prepared.Run.Revision)
+	if e != nil || out.Run.Status != kernel.RunStatusCompleted || m.calls.Load() != 1 || host.calls.Load() != 1 {
+		t.Fatalf("fresh physical attempt did not execute: %v", e)
 	}
 }
 

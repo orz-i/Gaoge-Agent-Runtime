@@ -116,6 +116,49 @@ func (store *KernelStore) BeginOwnedPhysicalExecution(ctx context.Context, grant
 	return err
 }
 
+func (store *KernelStore) CheckOwnedPhysicalEntry(ctx context.Context, g kernel.ChildExecutionGrant, l kernel.ExecutionLease, expected kernel.Snapshot) (kernel.OwnedPhysicalEntryWindow, error) {
+	if store == nil || store.db == nil || ctx == nil || kernel.ValidateOwnedPhysicalAdmissionRequest(g, l) != nil {
+		return kernel.OwnedPhysicalEntryWindow{}, kernel.ErrInvalidInput
+	}
+	var window kernel.OwnedPhysicalEntryWindow
+	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		run, err := lockKernelRun(tx, g.ChildRunID)
+		if err != nil {
+			return err
+		}
+		row, err := pgLoadOwnedPhysicalGrant(tx, g)
+		if err != nil {
+			return err
+		}
+		var active int64
+		if err = tx.Model(&models.KernelChildEffectGrantRecord{}).Where("parent_run_id = ?", g.ChildRunID).Count(&active).Error; err != nil {
+			return translateKernelError(err)
+		}
+		if active != 1 {
+			return kernel.ErrExecutionConflict
+		}
+		current, err := kernelSnapshotFrom(run)
+		if err != nil {
+			return err
+		}
+		transfer, err := pgLoadManaged(tx, g.ChildRunID)
+		if err != nil && !errors.Is(err, kernel.ErrNotFound) {
+			return err
+		}
+		now, err := pgStoreNow(tx)
+		if err != nil {
+			return err
+		}
+		window, err = kernel.ValidateOwnedPhysicalEntry(g, expected, current, l, pgManagedLease(run), now, run.ExecutionQuarantineRevision != 0,
+			run.ExecutionPhysicalEpoch, row.SettledRevision, pgCallbackCompletion(row), transfer)
+		return err
+	})
+	if err != nil {
+		return kernel.OwnedPhysicalEntryWindow{}, err
+	}
+	return window, nil
+}
+
 // ApplyOwnedPhysicalRecovery is a receipt-only exact-CAS capability. It cannot
 // mint an epoch, renew the original lease, enter middleware or authorize send.
 func (store *KernelStore) ApplyOwnedPhysicalRecovery(ctx context.Context, grant kernel.ChildExecutionGrant, expectedRevision uint64, mutation kernel.StoreMutation, permit kernel.OwnedPhysicalRecovery) (kernel.Snapshot, error) {
@@ -234,7 +277,9 @@ func (store *KernelStore) LookupOwnedPhysicalCallbackReturn(ctx context.Context,
 	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if _, e := lockKernelRun(tx, g.ChildRunID); e != nil {
 			if errors.Is(e, kernel.ErrNotFound) {
-				if _, grantErr := pgLoadOwnedPhysicalGrant(tx, g); !errors.Is(grantErr, kernel.ErrNotFound) {
+				if _, grantErr := pgLoadOwnedPhysicalGrant(tx, g); grantErr == nil {
+					return kernel.ErrExecutionConflict
+				} else if !errors.Is(grantErr, kernel.ErrNotFound) {
 					return grantErr
 				}
 			}

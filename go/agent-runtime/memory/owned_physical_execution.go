@@ -79,6 +79,32 @@ func (s *Store) loadOwnedPhysicalGrantLocked(g kernel.ChildExecutionGrant) (memo
 	return original, nil
 }
 
+func (s *Store) CheckOwnedPhysicalEntry(ctx context.Context, g kernel.ChildExecutionGrant, l kernel.ExecutionLease, expected kernel.Snapshot) (kernel.OwnedPhysicalEntryWindow, error) {
+	if s == nil || ctx == nil || kernel.ValidateOwnedPhysicalAdmissionRequest(g, l) != nil {
+		return kernel.OwnedPhysicalEntryWindow{}, kernel.ErrInvalidInput
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if err := ctx.Err(); err != nil {
+		return kernel.OwnedPhysicalEntryWindow{}, err
+	}
+	current, ok := s.records[g.ChildRunID]
+	if !ok {
+		return kernel.OwnedPhysicalEntryWindow{}, kernel.ErrNotFound
+	}
+	original, err := s.loadOwnedPhysicalGrantLocked(g)
+	if err != nil {
+		return kernel.OwnedPhysicalEntryWindow{}, err
+	}
+	owners := s.childGrantOwners[g.ChildRunID]
+	if _, ok := owners[g.ID]; !ok || len(owners) != 1 {
+		return kernel.OwnedPhysicalEntryWindow{}, kernel.ErrExecutionConflict
+	}
+	native := s.execution[g.ChildRunID]
+	return kernel.ValidateOwnedPhysicalEntry(g, expected, current, l, native.lease, s.currentExecutionTime(), native.quarantineRev != 0, native.physicalEpoch,
+		original.settledRevision, original.completion, s.managedTransfers[s.managedCurrent[g.ChildRunID]])
+}
+
 func (s *Store) ApplyOwnedPhysicalRecovery(ctx context.Context, g kernel.ChildExecutionGrant, revision uint64, m kernel.StoreMutation, p kernel.OwnedPhysicalRecovery) (kernel.Snapshot, error) {
 	if s == nil || ctx == nil || kernel.ValidateOwnedPhysicalRecoveryRequest(g, revision, m) != nil {
 		return kernel.Snapshot{}, kernel.ErrInvalidInput
@@ -145,6 +171,9 @@ func (s *Store) LookupOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.
 	original, err := s.loadOwnedPhysicalGrantLocked(g)
 	if err != nil {
 		return kernel.OwnedPhysicalCallbackCompletion{}, err
+	}
+	if _, exists := s.records[g.ChildRunID]; !exists {
+		return kernel.OwnedPhysicalCallbackCompletion{}, kernel.ErrExecutionConflict
 	}
 	if err := kernel.ValidateOwnedPhysicalCompletion(g, original.completion); err != nil {
 		return kernel.OwnedPhysicalCallbackCompletion{}, err

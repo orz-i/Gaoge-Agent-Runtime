@@ -170,6 +170,12 @@ func verifyOwnedRootSettlementFacts(
 			return ErrExecutionConflict
 		}
 		seenEpochs[callbackEpoch] = true
+		if r.Evidence.Completion.NotEntered() {
+			if r.Phase != "ACKNOWLEDGED" || !r.Evidence.Completion.LeaseOwned {
+				return ErrExecutionConflict
+			}
+			continue
+		}
 		// ALL physical history matters. A later scoped callback cannot retire
 		// detached effects from an earlier opaque callback, or borrow its ACK.
 		custody := r.Evidence.Completion.ControlCustody

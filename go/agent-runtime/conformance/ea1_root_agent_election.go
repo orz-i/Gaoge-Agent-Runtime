@@ -457,7 +457,13 @@ func ea1AgentElectionRecovery(t *testing.T, factory func(*testing.T) (kernel.Sto
 		}
 		return r.ReconcileToolOutcome(ctx, f.request.ID, rev, "original-call")
 	}
-	runner := f.runner(f.rt, "recovery-original", false)
+	// Even a configured effect-capable Host Run middleware must not enter
+	// while consuming a previously committed receipt past the Run deadline.
+	if mode == "deadline-known" {
+		f.host.operation = plugin.RunResume
+		f.host.hook = func() { t.Error("expired receipt consumption entered Host callback") }
+	}
+	runner := f.runner(f.rt, "recovery-original", mode == "deadline-known")
 	verifyHook = func() {
 		f.compete(before, grant, true)
 		if mode == "deadline-known" {
@@ -553,7 +559,7 @@ func ea1AgentElectionRecovery(t *testing.T, factory func(*testing.T) (kernel.Sto
 	if e != nil || !reflect.DeepEqual(persisted, out) {
 		t.Fatal("complete original receipt changed across reopen")
 	}
-	fresh := f.runner(freshRT, "fresh-after-receipt", false)
+	fresh := f.runner(freshRT, "fresh-after-receipt", mode == "deadline-known")
 	if e = fresh.ReconcileRootPhysicalExecution(ctx, f.request.ID); !errors.Is(e, kernel.ErrNotFound) {
 		t.Fatalf("duplicate retirement invented scope: %v", e)
 	}
@@ -573,5 +579,8 @@ func ea1AgentElectionRecovery(t *testing.T, factory func(*testing.T) (kernel.Sto
 	}
 	if len(f.physical.requests) != 1 || kind == "tool" && len(f.physical.toolRequests) != 1 {
 		t.Fatal("known recovery/continuation sent new physical work")
+	}
+	if mode == "deadline-known" && f.host.calls != 0 {
+		t.Fatal("expired receipt consumption invoked Host middleware")
 	}
 }
