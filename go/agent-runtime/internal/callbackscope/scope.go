@@ -50,7 +50,18 @@ func Inherit(ctx, original context.Context) context.Context {
 	}
 	s, _ := original.Value(scopeKey{}).(*Scope)
 	t, _ := original.Value(ticketKey{}).(*Ticket)
-	return context.WithValue(Bind(ctx, s), ticketKey{}, t)
+	return BindRootToolFrame(context.WithValue(Bind(ctx, s), ticketKey{}, t), RootToolFrame(original))
+}
+
+type rootToolFrameKey struct{}
+type rootToolFrameValue struct{ frame any }
+
+func BindRootToolFrame(ctx context.Context, frame any) context.Context {
+	return context.WithValue(ctx, rootToolFrameKey{}, rootToolFrameValue{frame})
+}
+func RootToolFrame(ctx context.Context) any {
+	value, _ := ctx.Value(rootToolFrameKey{}).(rootToolFrameValue)
+	return value.frame
 }
 
 // Model-call authority is Runtime-owned and travels with the actual Next

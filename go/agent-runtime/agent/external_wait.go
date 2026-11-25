@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/callbackscope"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
@@ -224,7 +225,7 @@ func (runner *Runner) persistToolWait(ctx context.Context, snapshot kernel.Snaps
 		return snapshot, true, ErrInvalidRequest
 	}
 	if descriptor.Kind == tools.PendingExternalResult {
-		frame, _ := ctx.Value(toolReturnGrantKey{}).(*originalToolFrame)
+		frame, _ := callbackscope.RootToolFrame(ctx).(*originalToolFrame)
 		state.ExternalToolHold = frame.hold(tools.ExecutionRequest{RunID: snapshot.Run.ID, Call: call})
 	}
 	pending := tools.ClonePending(descriptor)

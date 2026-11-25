@@ -67,8 +67,6 @@ func newMemberExternalCase(t *testing.T, withCommittedReader bool) memberExterna
 	fail(err)
 	bounded, err := shared.Adapter()
 	fail(err)
-	reader, err := shared.VerifiedToolOutcomeVerifier(delegate)
-	fail(err)
 	approval, err := agent.NewBoundedToolApproval(func(context.Context, tools.ExecutionRequest) (plugin.ApprovalRequirement, error) {
 		return plugin.ApprovalNotRequired, nil
 	})
@@ -76,10 +74,10 @@ func newMemberExternalCase(t *testing.T, withCommittedReader bool) memberExterna
 	// A no-effect-only host must retain the same original budget reservation.
 	var committed agent.ToolOutcomeVerifier
 	if withCommittedReader {
-		committed = reader
+		committed = delegate
 	}
 	c.native, err = agent.NewRunner(agent.Dependencies{Runtime: rt, Model: c.model, Catalog: registry, Executor: registry, ApprovalPolicies: []plugin.ApprovalPolicy{approval},
-		ToolOutcomeVerifier: committed, DelegatedToolResults: reader, ExternalToolNoEffectVerifier: c.owner, RunMiddleware: []plugin.RunMiddleware{bounded},
+		ToolOutcomeVerifier: committed, DelegatedToolResults: delegate, ExternalToolNoEffectVerifier: c.owner, RunMiddleware: []plugin.RunMiddleware{bounded},
 		ModelMiddleware: []plugin.ModelMiddleware{bounded}, ToolMiddleware: []plugin.ToolMiddleware{bounded}})
 	fail(err)
 	route, err := handoff.NewDeferredAgent(c.native)

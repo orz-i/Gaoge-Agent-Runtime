@@ -14,6 +14,16 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
+// Select the actual Tool settlement owner, never a Run/Model-only adapter.
+func selectedToolBudget(d Dependencies) *BoundedBudgetAdapter {
+	for _, layer := range d.ToolMiddleware {
+		if a, ok := layer.(*BoundedBudgetAdapter); ok {
+			return a
+		}
+	}
+	return nil
+}
+
 // This policy only classifies infrastructure concurrency; it cannot certify
 // callback completion, Tool effects, or the outcome of a physical dispatch.
 type BoundedBudgetToolPorts interface {
@@ -43,6 +53,10 @@ func (a *BoundedBudgetAdapter) Tool(ctx context.Context, inv plugin.ToolInvocati
 		record("budget.tool.unconfigured.returned", l)
 		return out, e
 	}
+	// Freeze the actual ledger selection before reservation or dispatch.
+	// A pre-send budget wait must not look unmetered to a replacement Runner.
+	frame, _ := callbackscope.RootToolFrame(ctx).(*originalToolFrame)
+	frame.recordHold(inv.Request, l.ID, "")
 	raw, err := json.Marshal(inv.Request)
 	if err != nil {
 		return tools.ExecutionResult{}, err
@@ -73,7 +87,6 @@ func (a *BoundedBudgetAdapter) Tool(ctx context.Context, inv plugin.ToolInvocati
 		callErr, _ := receipt.terminalError(inv.Request.Call.ID)
 		result, callErr := toolAuthority(ctx).record(receipt.Result, callErr)
 		if record("budget.tool.replayed", l) {
-			frame, _ := ctx.Value(toolReturnGrantKey{}).(*originalToolFrame)
 			frame.recordSettled(inv.Request, l)
 		}
 		return result, callErr
@@ -96,7 +109,6 @@ func (a *BoundedBudgetAdapter) Tool(ctx context.Context, inv plugin.ToolInvocati
 	if !validBoundedToolReceipt(result, callErr, inv.Request.Call.ID) {
 		updated, suspendErr := a.coordinator.Suspend(accounting, l.ID, id)
 		projectErr := a.ports.Project(accounting, updated)
-		frame, _ := ctx.Value(toolReturnGrantKey{}).(*originalToolFrame)
 		if suspendErr != nil || projectErr != nil {
 			return toolAuthority(ctx).reject(errors.Join(callErr, suspendErr, projectErr))
 		}
@@ -104,7 +116,14 @@ func (a *BoundedBudgetAdapter) Tool(ctx context.Context, inv plugin.ToolInvocati
 			result.Receipt.Disposition == tools.ReceiptDispositionPending && tools.ValidateExecutionResult(result) == nil
 		if frame != nil && (errors.Is(callErr, ErrToolOutcomeUnknown) || pending) {
 			if record("budget.tool.suspended", updated) {
-				frame.recordHold(inv.Request, l.ID)
+				kind := ""
+				if pending {
+					kind = "pending"
+					if result.Pending != nil {
+						kind = string(result.Pending.Kind)
+					}
+				}
+				frame.recordHold(inv.Request, l.ID, kind)
 			}
 		}
 		return result, callErr
@@ -122,7 +141,6 @@ func (a *BoundedBudgetAdapter) Tool(ctx context.Context, inv plugin.ToolInvocati
 		return toolAuthority(ctx).reject(errors.Join(callErr, err, projectionErr))
 	}
 	if record("budget.tool.settled", updated) {
-		frame, _ := ctx.Value(toolReturnGrantKey{}).(*originalToolFrame)
 		frame.recordSettled(inv.Request, updated)
 	}
 	return result, callErr

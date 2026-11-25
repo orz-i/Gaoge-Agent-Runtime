@@ -86,13 +86,9 @@ func testRoleDelegationChildApproval(t *testing.T, wrongRoute bool, terminalPare
 	if err != nil {
 		t.Fatal(err)
 	}
-	verifiedTool, err := shared.VerifiedToolOutcomeVerifier(delegation)
-	if err != nil {
-		t.Fatal(err)
-	}
 	direct, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: meteredModel, Catalog: registry, Executor: registry,
 		Approvals: interactionadapter.New(approvals), ApprovalPolicies: []plugin.ApprovalPolicy{policy},
-		ToolOutcomeVerifier: verifiedTool,
+		ToolOutcomeVerifier: delegation,
 		RunMiddleware:       []plugin.RunMiddleware{mustBudgetAdapter(t, shared)}, ModelMiddleware: []plugin.ModelMiddleware{mustBudgetAdapter(t, shared)}, ToolMiddleware: []plugin.ToolMiddleware{mustBudgetAdapter(t, shared)}})
 	if err != nil {
 		t.Fatal(err)

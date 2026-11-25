@@ -349,14 +349,7 @@ func openBoundedAgentSession(options AgentSessionOptions, registrations []tools.
 		dependencies.BoundedContext = bounded
 	}
 	if delegation != nil {
-		if shared != nil {
-			dependencies.ToolOutcomeVerifier, err = shared.VerifiedToolOutcomeVerifier(delegation)
-			if err != nil {
-				return nil, err
-			}
-		} else {
-			dependencies.ToolOutcomeVerifier = delegation
-		}
+		dependencies.ToolOutcomeVerifier = delegation
 	}
 	if options.Context.ManagedRecovery {
 		dependencies.ManagedContextRecovery = bounded

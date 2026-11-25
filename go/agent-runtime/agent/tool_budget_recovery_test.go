@@ -30,7 +30,7 @@ func TestSuspendedToolSettlementRequiresOriginalCallbackAndReservation(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := &Runner{boundedCallbacks: []any{a}}
+	r := &Runner{toolBudget: a}
 	s := kernel.Snapshot{Run: kernel.Run{ID: "run", Revision: 7}}
 	q := tools.ExecutionRequest{RunID: "run", Call: tools.Call{ID: "call", ToolKey: "read", Arguments: []byte("{}")}}
 	const id = "tool:run:call"
@@ -143,7 +143,7 @@ func TestOriginalHeldToolReplayPreservesNativeReceiptBytes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := &Runner{boundedCallbacks: []any{a}}
+	r := &Runner{toolBudget: a}
 	q := tools.ExecutionRequest{RunID: "run", Call: tools.Call{ID: "call", ToolKey: "read", Arguments: []byte("{}")}}
 	id := "tool:run:call"
 	b := kernel.OwnedToolReturn{CallID: q.Call.ID, LedgerID: "turn", RequestDigest: kernel.ManagedDigest(q)}

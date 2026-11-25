@@ -371,6 +371,7 @@ type Runner struct {
 	boundedCallbacks          []any
 	boundedContext            *BoundedContextAdapter
 	samplingBudget            *BoundedBudgetAdapter
+	toolBudget                *BoundedBudgetAdapter
 	managedContextRecovery    *BoundedContextAdapter
 	contextSummary            *ContextSummaryAdapter
 	contextSummaryBudget      bool
@@ -676,6 +677,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		runChain:             runChain, modelChain: modelChain, toolChain: toolChain,
 		boundedContext:         dependencies.BoundedContext,
 		samplingBudget:         selectedSamplingBudget(dependencies),
+		toolBudget:             selectedToolBudget(dependencies),
 		managedContextRecovery: dependencies.ManagedContextRecovery,
 		contextSummary:         dependencies.ContextSummary,
 		contextSummaryBudget:   summaryBudgetConfigured(dependencies),
@@ -2136,6 +2138,9 @@ func (runner *Runner) preparePendingApproval(
 		return runner.fail(ctx, snapshot, state, "agent.approval_policy_failed", err)
 	}
 	if !requiresApproval {
+		if runner.rootCallbacks != nil && runner.delegatedToolResults != nil && runner.scopedRootCallbacks {
+			runner.rootCallbacks.toolApprovals.authorize(invocation.Request)
+		}
 		return snapshot, nil
 	}
 	if runner.approvals == nil {
@@ -2192,6 +2197,7 @@ func (runner *Runner) executePending(ctx context.Context, snapshot kernel.Snapsh
 			return snapshot, true, invalid
 		}
 		execution.state.RecoveredTools = append(execution.state.RecoveredTools[:index], execution.state.RecoveredTools[index+1:]...)
+		execution.originalApprovalDigest = receipt.ApprovalDigest
 		if refusal != nil {
 			return runner.handlePendingToolExecutionError(ctx, snapshot, execution.state, refusal)
 		}
@@ -2276,9 +2282,10 @@ func (runner *Runner) executePending(ctx context.Context, snapshot kernel.Snapsh
 }
 
 type pendingToolExecution struct {
-	state      runState
-	call       tools.Call
-	definition tools.Definition
+	state                  runState
+	call                   tools.Call
+	definition             tools.Definition
+	originalApprovalDigest string
 }
 
 func (runner *Runner) preparePendingToolExecution(snapshot kernel.Snapshot) (pendingToolExecution, string, error) {
@@ -2454,8 +2461,14 @@ func (runner *Runner) persistCompletedToolCall(
 ) (kernel.Snapshot, bool, error) {
 	state := execution.state
 	state.ToolWait = nil
-	if runner.rootCallbacks != nil && runner.delegatedToolResults != nil && runner.scopedRootCallbacks {
-		if receipt, ok := runner.rootCallbacks.toolApprovals.committed(execution.call, result, approvedPendingCall(snapshot, state)); ok {
+	if execution.originalApprovalDigest != "" {
+		receipt, ok := qualifiedOwnerToolReceipt(execution.call, result, execution.originalApprovalDigest)
+		if !ok {
+			return snapshot, true, ErrToolReceiptMismatch
+		}
+		state.DelegatedToolReceipts = append(state.DelegatedToolReceipts, receipt)
+	} else if runner.rootCallbacks != nil && runner.delegatedToolResults != nil && runner.scopedRootCallbacks {
+		if receipt, ok := runner.rootCallbacks.toolApprovals.committed(snapshot, state, execution.call, result); ok {
 			state.DelegatedToolReceipts = append(state.DelegatedToolReceipts, receipt)
 		}
 	}

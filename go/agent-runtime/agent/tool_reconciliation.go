@@ -13,7 +13,8 @@ import (
 // ToolOutcomeVerifier is a trusted host/provider lookup, NOT an executor.
 // It must verify the durable external disposition for the exact RunID/CallID
 // using a provider-owned idempotency record or receipt. It must never
-// dispatch/retry the Tool or derive "committed" from untrusted user input.
+// dispatch/retry the Tool, write its shared Budget settlement, or derive
+// "committed" from untrusted user input. Native Runtime owns settlement.
 // Register it with the Runner at construction; no arbitrary result supplied
 // to ReconcileToolOutcome can bypass this provider verification.
 type ToolOutcomeVerifier interface {
@@ -78,6 +79,11 @@ func (runner *Runner) ReconcileToolOutcome(ctx context.Context, runID string,
 		if !errors.Is(lookupErr, kernel.ErrNotFound) {
 			return snapshot, lookupErr
 		}
+	}
+	// Non-owned or legacy recovery has no original native budget-return
+	// proof. Never consume a metered call through a verifier-only path.
+	if err := runner.requireUnmeteredToolRecovery(ctx, runID); err != nil {
+		return snapshot, errors.Join(ErrToolOutcomeUnknown, err)
 	}
 	return runner.withRunOwner(ctx, runID, expectedRevision,
 		func(nextCtx context.Context, scoped *Runner) (out kernel.Snapshot, callbackErr error) {

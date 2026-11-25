@@ -72,14 +72,20 @@ func OwnedPhysicalCallbackReturnPayload(s Snapshot, o OwnedPhysicalCallbackOutco
 
 type OwnedPhysicalCallbackReturn struct{ proof *featurecontrol.Proof }
 
-// OwnedToolReturn binds one original Call's exact reservation. A nonempty
-// ReceiptDigest selects an already settled terminal outcome; empty selects a
-// held reservation whose result must still be independently verified.
+// OwnedToolReturn binds one outstanding Call to its original reservation
+// and/or approval. ReceiptDigest identifies a settled ledger outcome;
+// OwnerResultDigest identifies a qualified committed owner result from the
+// original callback, independently of whether a shared ledger was selected.
 type OwnedToolReturn struct {
-	CallID        string
-	RequestDigest string
-	LedgerID      string
-	ReceiptDigest string `json:",omitempty"`
+	CallID            string
+	RequestDigest     string
+	LedgerID          string
+	ReceiptDigest     string `json:",omitempty"`
+	ApprovalDigest    string `json:",omitempty"`
+	OwnerResultDigest string `json:",omitempty"`
+	// PendingKind records an actual returned pending disposition, not an
+	// inferred external outcome. Empty means no qualified pending return.
+	PendingKind string `json:",omitempty"`
 }
 
 // OwnedToolReturns is a canonical, comparable encoding of a bounded ordered
@@ -100,8 +106,12 @@ func NewOwnedToolReturns(bindings []OwnedToolReturn) (OwnedToolReturns, error) {
 	sort.Slice(bindings, func(i, j int) bool { return bindings[i].CallID < bindings[j].CallID })
 	for i, b := range bindings {
 		if strings.TrimSpace(b.CallID) == "" || b.CallID != strings.TrimSpace(b.CallID) ||
-			strings.TrimSpace(b.LedgerID) == "" || b.LedgerID != strings.TrimSpace(b.LedgerID) ||
-			!validToolReceiptDigest(b.RequestDigest) || (b.ReceiptDigest != "" && !validToolReceiptDigest(b.ReceiptDigest)) ||
+			b.LedgerID != strings.TrimSpace(b.LedgerID) || (b.LedgerID == "" && b.ApprovalDigest == "") ||
+			!validToolReceiptDigest(b.RequestDigest) ||
+			(b.ReceiptDigest != "" && (b.LedgerID == "" || !validToolReceiptDigest(b.ReceiptDigest))) ||
+			(b.ApprovalDigest != "" && !validToolReceiptDigest(b.ApprovalDigest)) ||
+			(b.OwnerResultDigest != "" && (b.ApprovalDigest == "" || !validToolReceiptDigest(b.OwnerResultDigest))) ||
+			(b.PendingKind != "" && (b.LedgerID == "" || b.ReceiptDigest != "" || b.OwnerResultDigest != "" || (b.PendingKind != "pending" && b.PendingKind != "scheduled" && b.PendingKind != "child_terminal" && b.PendingKind != "external_result"))) ||
 			(i > 0 && bindings[i-1].CallID == b.CallID) {
 			return "", ErrInvalidInput
 		}

@@ -165,9 +165,9 @@ func (runner *Runner) executeOwnedRoot(ctx context.Context, current kernel.Snaps
 	defer lifecycle.Close()
 	physicalCtx := callbackscope.Bind(ctx, lifecycle)
 	var toolFrame *originalToolFrame
-	if runner.scopedRootCallbacks && (grant.AdmissionOperation == "resume" || grant.AdmissionOperation == "start" || grant.AdmissionOperation == "approval") {
+	if grant.AdmissionOperation == "resume" || grant.AdmissionOperation == "start" || grant.AdmissionOperation == "approval" {
 		toolFrame = &originalToolFrame{grantID: grant.ID, runID: grant.ChildRunID}
-		physicalCtx = context.WithValue(physicalCtx, toolReturnGrantKey{}, toolFrame)
+		physicalCtx = callbackscope.BindRootToolFrame(physicalCtx, toolFrame)
 	}
 	result, callErr := execute(physicalCtx, &scoped, current)
 	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
@@ -179,37 +179,47 @@ func (runner *Runner) executeOwnedRoot(ctx context.Context, current kernel.Snaps
 	hostComplete := lifecycle.Complete() && !scoped.rootCallbacks.unknown.Load()
 	settled := hostComplete && knownRootPhysicalSettlement(latest)
 	outcome := kernel.OwnedPhysicalCallbackOutcome{HostCompleted: hostComplete, LeaseOwned: !external}
-	// Seal the executing stack's custody with the original callback return.
-	// A reconstructed/same-Kernel observer cannot upgrade opaque Host effects.
-	if grant.AdmissionOperation == "prepare" && runner.trustedDeferredPreparedControl {
-		outcome.ControlCustody = kernel.OwnedCustodyPrepared
-	} else if runner.scopedRootCallbacks && !scoped.rootCallbacks.approvalPolicyEntered.Load() {
-		outcome.ControlCustody = kernel.OwnedCustodyScoped
-	} else if runner.boundedApproval && runner.scopedRootCallbacks && runner.externalNoEffectVerifier != nil && hostComplete {
-		// A returned async tool has not produced a result. Bind only its
-		// original read-only approval to the exact stored wait. The kernel
-		// keeps this grant active until a separate owner receipt is verified.
-		pending, waiting, _ := FrozenExternalToolCall(latest)
-		boundWait := waiting && scoped.rootCallbacks.toolApprovals.bind(pending)
-		if (settled || boundWait) && scoped.rootCallbacks.toolApprovals.allBound() {
-			outcome.ControlCustody = kernel.OwnedBoundedApprovalReturn
-		}
-	} else if runner.scopedRootCallbacks && settled && scoped.rootCallbacks.toolApprovals.allBound() {
-		outcome.ControlCustody = kernel.OwnedToolResultReturn
-		if runner.boundedApproval {
-			outcome.ControlCustody = kernel.OwnedBoundedApprovalReturn
-		}
-	}
 	pendingCall, pending, _ := FrozenPendingDispatch(latest)
 	settledCall := false
+	allApproved := false
 	if hostComplete {
-		bindings, evidenceErr := toolFrame.outstanding(latest)
+		// A bounded policy may bind its original typed wait. This attests
+		// authorization only; the independent owner must still prove COMMIT
+		// or the elected no-effect control before retirement.
+		if runner.boundedApproval && runner.scopedRootCallbacks && runner.delegatedToolResults != nil {
+			state, e := decodeState(latest.State)
+			if e != nil {
+				return latest, errors.Join(callErr, ErrRootOutcomeUnknown, e)
+			}
+			if state.ToolWait != nil {
+				if call, ok := nextPendingCall(state); ok && call.ID == state.ToolWait.CallID {
+					scoped.rootCallbacks.toolApprovals.wait(latest, state, call)
+				}
+			}
+			for _, child := range state.DeferredChildren {
+				scoped.rootCallbacks.toolApprovals.wait(latest, state, child.Call)
+			}
+		}
+		bindings, approved, evidenceErr := toolFrame.outstanding(latest, &scoped.rootCallbacks.toolApprovals)
 		if evidenceErr != nil {
 			return latest, errors.Join(callErr, ErrRootOutcomeUnknown, evidenceErr)
 		}
 		outcome.ToolReturns = bindings
+		allApproved = approved
 		if b, found, _ := bindings.Find(pendingCall.ID); pending && found && b.ReceiptDigest != "" {
 			settledCall = true
+		}
+	}
+	// Control custody describes the actual whole executing callback. Original
+	// outstanding approval evidence is sealed independently of the business CAS.
+	if grant.AdmissionOperation == "prepare" && runner.trustedDeferredPreparedControl {
+		outcome.ControlCustody = kernel.OwnedCustodyPrepared
+	} else if runner.scopedRootCallbacks && !scoped.rootCallbacks.approvalPolicyEntered.Load() {
+		outcome.ControlCustody = kernel.OwnedCustodyScoped
+	} else if hostComplete && runner.scopedRootCallbacks && (settled || allApproved) && scoped.rootCallbacks.toolApprovals.allBound() {
+		outcome.ControlCustody = kernel.OwnedToolResultReturn
+		if runner.boundedApproval {
+			outcome.ControlCustody = kernel.OwnedBoundedApprovalReturn
 		}
 	}
 	payload := kernel.OwnedPhysicalCallbackReturnPayload(latest, outcome)

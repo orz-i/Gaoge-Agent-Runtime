@@ -2,8 +2,8 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
+	"reflect"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
@@ -15,7 +15,8 @@ type rootToolReceipt struct {
 	Wait   *PendingTool          `json:"wait,omitempty"`
 	Result tools.ExecutionResult `json:"result"`
 	// Keep the original Result field and its opaque-evidence typed path.
-	Rejection *toolRejection `json:"rejection,omitempty"`
+	Rejection      *toolRejection `json:"rejection,omitempty"`
+	ApprovalDigest string         `json:"approvalDigest,omitempty"`
 }
 
 // ReconcileExternalToolForControl verifies the original external wait without
@@ -51,9 +52,7 @@ func (r rootToolReceipt) outcome() toolOutcomeReceipt {
 }
 
 func sameRecoveredCall(a, b tools.Call) bool {
-	x, e := json.Marshal(a)
-	y, f := json.Marshal(b)
-	return e == nil && f == nil && string(x) == string(y)
+	return reflect.DeepEqual(a, b)
 }
 
 // reconcileSettledToolIfPresent never consults a provider or dispatches work.
@@ -131,7 +130,12 @@ func (runner *Runner) reconcileRootToolReceipt(ctx context.Context, snapshot ker
 		if runner.toolOutcomeVerifier == nil {
 			return snapshot, ErrToolVerificationRequired
 		}
-		if bound {
+		if (!bound || binding.LedgerID == "") && state.ExternalToolHold == nil && completion.ControlCustody != kernel.OwnedToolBudgetReturn {
+			if err := runner.requireUnmeteredToolRecovery(ctx, request.RunID); err != nil {
+				return snapshot, errors.Join(ErrToolOutcomeUnknown, err)
+			}
+		}
+		if bound && binding.LedgerID != "" {
 			if _, _, _, err := runner.originalHeldTool(ctx, request, binding); err != nil {
 				return snapshot, errors.Join(ErrToolOutcomeUnknown, err)
 			}
@@ -144,19 +148,25 @@ func (runner *Runner) reconcileRootToolReceipt(ctx context.Context, snapshot ker
 			return snapshot, ErrToolReceiptMismatch
 		}
 		outcome = newToolOutcomeReceipt(verified, nil)
-		if hold := state.ExternalToolHold; hold != nil {
-			if state.ToolWait == nil || state.ToolWait.Kind != tools.PendingExternalResult || hold.GrantID != grant.ID || hold.RequestHash != kernel.ManagedDigest(request) ||
-				(bound && hold.LedgerID != binding.LedgerID) {
+		if binding.OwnerResultDigest != "" {
+			receipt, ok := qualifiedOwnerToolReceipt(call, verified, binding.ApprovalDigest)
+			if !ok || receipt.ResultDigest != binding.OwnerResultDigest {
 				return snapshot, ErrToolReceiptMismatch
 			}
-			if !bound {
+		}
+		if hold := state.ExternalToolHold; hold != nil {
+			if state.ToolWait == nil || state.ToolWait.Kind != tools.PendingExternalResult || hold.GrantID != grant.ID || hold.RequestHash != kernel.ManagedDigest(request) ||
+				(bound && binding.LedgerID != "" && hold.LedgerID != binding.LedgerID) {
+				return snapshot, ErrToolReceiptMismatch
+			}
+			if !bound || binding.LedgerID == "" {
 				if err := runner.settleToolHold(ctx, request, verified, func(id string) bool { return id == hold.LedgerID }); err != nil {
 					return snapshot, errors.Join(ErrToolOutcomeUnknown, err)
 				}
 			}
 			state.ExternalToolHold = nil
 		}
-		if bound {
+		if bound && binding.LedgerID != "" {
 			childWait := state.ToolWait != nil && state.ToolWait.Kind == tools.PendingChildTerminal
 			if err := runner.settleOriginalHeldTool(ctx, request, binding, verified, childWait); err != nil {
 				return snapshot, errors.Join(ErrToolOutcomeUnknown, err)
@@ -168,12 +178,22 @@ func (runner *Runner) reconcileRootToolReceipt(ctx context.Context, snapshot ker
 			}
 		}
 	}
+	approvalDigest := ""
+	if bound && binding.ApprovalDigest != "" {
+		receipt, qualified := qualifiedOwnerToolReceipt(call, outcome.Result, binding.ApprovalDigest)
+		if binding.OwnerResultDigest != "" && (!qualified || receipt.ResultDigest != binding.OwnerResultDigest) {
+			return snapshot, ErrToolReceiptMismatch
+		}
+		if qualified && outcome.ErrorCode == "" {
+			approvalDigest = receipt.ApprovalDigest
+		}
+	}
 	for _, old := range state.RecoveredTools {
 		if old.Call.ID == callID {
 			return snapshot, ErrToolReceiptMismatch
 		}
 	}
-	state.RecoveredTools = append(state.RecoveredTools, rootToolReceipt{Call: tools.CloneCall(call), Wait: clonePendingTool(state.ToolWait), Result: outcome.Result, Rejection: outcome.rejection()})
+	state.RecoveredTools = append(state.RecoveredTools, rootToolReceipt{Call: tools.CloneCall(call), Wait: clonePendingTool(state.ToolWait), Result: outcome.Result, Rejection: outcome.rejection(), ApprovalDigest: approvalDigest})
 	state.ToolDispatchID = ""
 	state.ToolWait = nil
 	state.PendingCalls = remainingPendingCalls(state)

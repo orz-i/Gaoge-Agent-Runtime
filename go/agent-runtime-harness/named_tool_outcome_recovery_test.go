@@ -41,8 +41,10 @@ func (s *namedOutcomeFaultStore) ApplyExecution(ctx context.Context, l kernel.Ex
 // logical parent. Its recovered result must pass the actual Handoff/Host
 // terminal observation and parent receipt path, not just a Kernel unit check.
 func TestDeferredNamedAgentRecoveredToolResultReachesParent(t *testing.T) {
-	for _, rejected := range []bool{false, true} {
-		t.Run(map[bool]string{false: "committed", true: "rejected"}[rejected], func(t *testing.T) {
+	for _, mode := range []string{"committed", "rejected", "bounded-approval-committed"} {
+		t.Run(mode, func(t *testing.T) {
+			rejected := mode == "rejected"
+			boundedApproval := mode == "bounded-approval-committed"
 			ctx := t.Context()
 			hs := harness.NewMemoryStore()
 			ks := &namedOutcomeFaultStore{Store: memory.NewStore(), event: "tool.completed", cut: errors.New("child Tool result CAS cut")}
@@ -51,7 +53,8 @@ func TestDeferredNamedAgentRecoveredToolResultReachesParent(t *testing.T) {
 			}
 			rs := memory.NewRunRelationStore()
 			m := &roleBudgetModel{}
-			physical := 0
+			physical, childApprovals := 0, 0
+			var ownerReceipt tools.ExecutionResult
 			compose := func() (*harness.Runner, *agent.Runner, *kernel.Runtime) {
 				t.Helper()
 				rt, e := kernel.New(kernel.Dependencies{Store: ks})
@@ -68,7 +71,12 @@ func TestDeferredNamedAgentRecoveredToolResultReachesParent(t *testing.T) {
 					if rejected {
 						return tools.RecoverableNoEffectResult(q.Call.ID, tools.NewRecoverableCallErrorAllowCompletion("tool.unavailable", "original no-effect refusal", nil))
 					}
-					return tools.ExecutionResult{Content: json.RawMessage(`{"evidence":"original"}`), Receipt: tools.Receipt{ExecutionID: q.Call.ID, Disposition: "committed"}}, nil
+					result := tools.ExecutionResult{Content: json.RawMessage(`{ "evidence": "original <>&" }`), Receipt: tools.Receipt{ExecutionID: q.Call.ID, Disposition: "committed"}}
+					if boundedApproval {
+						result.Receipt.OwnerReceiptDigest = kernel.ManagedDigest("original child owner")
+						ownerReceipt = tools.CloneExecutionResult(result)
+					}
+					return result, nil
 				})}})
 				if e != nil {
 					t.Fatal(e)
@@ -78,11 +86,26 @@ func TestDeferredNamedAgentRecoveredToolResultReachesParent(t *testing.T) {
 					t.Fatal(e)
 				}
 				b := mustBudgetAdapter(t, shared)
-				verify, e := shared.VerifiedToolOutcomeVerifier(delegation)
-				if e != nil {
-					t.Fatal(e)
+				deps := agent.Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, ToolOutcomeVerifier: delegation, RunMiddleware: []plugin.RunMiddleware{b}, ModelMiddleware: []plugin.ModelMiddleware{b}, ToolMiddleware: []plugin.ToolMiddleware{b}}
+				if boundedApproval {
+					approval, e := agent.NewBoundedToolApproval(func(_ context.Context, q tools.ExecutionRequest) (plugin.ApprovalRequirement, error) {
+						if q.Call.ToolKey == roleEvidenceTool {
+							childApprovals++
+						}
+						return plugin.ApprovalNotRequired, nil
+					})
+					if e != nil {
+						t.Fatal(e)
+					}
+					deps.ApprovalPolicies = []plugin.ApprovalPolicy{approval}
+					deps.DelegatedToolResults = agent.ToolOutcomeVerifierFunc(func(ctx context.Context, q tools.ExecutionRequest) (tools.ExecutionResult, error) {
+						if q.RunID == ks.child && q.Call.ID == ownerReceipt.Receipt.ExecutionID && q.Call.ToolKey == roleEvidenceTool {
+							return tools.CloneExecutionResult(ownerReceipt), nil
+						}
+						return delegation.VerifyCommittedTool(ctx, q)
+					})
 				}
-				native, e := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, ToolOutcomeVerifier: verify, RunMiddleware: []plugin.RunMiddleware{b}, ModelMiddleware: []plugin.ModelMiddleware{b}, ToolMiddleware: []plugin.ToolMiddleware{b}})
+				native, e := agent.NewRunner(deps)
 				if e != nil {
 					t.Fatal(e)
 				}
@@ -140,6 +163,9 @@ func TestDeferredNamedAgentRecoveredToolResultReachesParent(t *testing.T) {
 			done, e := native.Resume(ctx, child.RunID, staged.Run.Revision)
 			if e != nil || done.Run.Status != kernel.RunStatusCompleted || physical != 1 {
 				t.Fatal("child business consume", e, done.Run.Status, physical)
+			}
+			if boundedApproval && (childApprovals != 1 || !native.VerifyDeferredToolResults(ctx, rt, done) || !native.VerifiedDeferredRootControl(ctx, rt, done)) {
+				t.Fatal("original bounded approval result/control did not survive child recovery", childApprovals)
 			}
 			observed, e := h.RefreshInvocation(ctx, invID)
 			if e != nil || len(observed.Subtasks) != 1 || observed.Subtasks[0].Status != "completed" {
