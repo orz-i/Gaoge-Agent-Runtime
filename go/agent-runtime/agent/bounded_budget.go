@@ -121,8 +121,49 @@ func (a *BoundedBudgetAdapter) bindScope(ctx context.Context, id string, scope B
 	}
 	return l, nil
 }
+
+// A known receipt cannot create or rebind accounting authority. Use the
+// selected native Run adapter, but qualify the already-existing ledger
+// before consuming any local result after the deadline.
+func (a *BoundedBudgetAdapter) bindReceiptScope(ctx context.Context, runID, originalLedger string) (budget.Ledger, error) {
+	scope, err := a.ports.ResolveScope(ctx, runID)
+	if err != nil {
+		return budget.Ledger{}, err
+	}
+	if originalLedger != "" && scope.LedgerID != originalLedger {
+		return budget.Ledger{}, budget.ErrLedgerConflict
+	}
+	if scope.LedgerID == "" {
+		return budget.Ledger{}, nil
+	}
+	l, err := a.coordinator.Store.LoadBudget(ctx, scope.LedgerID)
+	if err != nil {
+		return l, err
+	}
+	if l.ID != scope.LedgerID || l.Limits != scope.Limits {
+		return l, budget.ErrLedgerConflict
+	}
+	for _, r := range scope.Runs {
+		if old, ok := l.Runs[r.RunID]; !ok || !sameBoundedValue(old, r.Binding) {
+			return l, budget.ErrLedgerConflict
+		}
+	}
+	if _, ok := l.Runs[runID]; !ok {
+		return l, budget.ErrLedgerConflict
+	}
+	return l, nil
+}
+
 func (a *BoundedBudgetAdapter) Run(ctx context.Context, inv plugin.RunInvocation, next plugin.RunNext) (kernel.Snapshot, error) {
-	l, err := a.bind(ctx, inv.RunID)
+	frame, _ := callbackscope.RunCall(ctx).(*nativeRunAdmission)
+	receiptOnly := frame != nil && frame.invocation == inv && frame.receiptOnly
+	var l budget.Ledger
+	var err error
+	if receiptOnly {
+		l, err = a.bindReceiptScope(ctx, inv.RunID, frame.receiptLedger)
+	} else {
+		l, err = a.bind(ctx, inv.RunID)
+	}
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
@@ -140,6 +181,9 @@ func (a *BoundedBudgetAdapter) Run(ctx context.Context, inv plugin.RunInvocation
 				}
 			}
 			return kernel.Snapshot{}, errors.Join(budget.ErrExhausted, ownErr)
+		}
+		if receiptOnly && ownErr != nil {
+			return kernel.Snapshot{}, ownErr
 		}
 	}
 	out, callErr := next(ctx)

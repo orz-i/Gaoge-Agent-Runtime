@@ -49,8 +49,9 @@ type OwnedPhysicalExecutionStore interface {
 // commitment is retained in the existing AdmissionSourceHash field; the
 // attempt nonce is never exported or reconstructed from a stored Grant.
 type OwnedPhysicalAdmission struct {
-	proof   *featurecontrol.Proof
-	attempt [32]byte
+	proof      *featurecontrol.Proof
+	attempt    [32]byte
+	dispatchID string
 }
 
 // The error classification alone is not evidence of this invocation's
@@ -94,9 +95,19 @@ func (p OwnedPhysicalAdmission) commitUncertain(err error) bool {
 }
 
 func (p OwnedPhysicalAdmission) Matches(g ChildExecutionGrant, s Snapshot, l ExecutionLease) bool {
+	domain, subject := "agent_owned_physical_admission", l.LeaseID
+	if p.dispatchID != "" {
+		id, err := OwnedPhysicalDispatchGrantID(g.ChildRunID, g.AdmissionOperation, p.dispatchID)
+		if err != nil || g.ID != id {
+			return false
+		}
+		domain, subject = "agent_owned_physical_dispatch_admission", ManagedDigest(struct{ LeaseID, DispatchID string }{l.LeaseID, p.dispatchID})
+	} else if strings.HasPrefix(g.ID, ownedDispatchGrantPrefix) {
+		return false
+	}
 	return p.attempt != ([32]byte{}) && s.Run.Kind == "agent" && s.Run.ParentRunID == "" && (s.Run.Status == RunStatusRunning || s.Run.Status == RunStatusWaitingInput) && s.Run.Revision == g.ExpectedRevision && g.Identity().Valid() && g.MatchesExecution(l) &&
 		g.AdmissionSourceHash == ownedAdmissionAttemptHash(s, l, g.AdmissionOperation, g.ID, p.attempt) &&
-		p.proof.Matches(s.Run.ID, s.Run.Revision, "agent_owned_physical_admission", l.LeaseID, s.State, s.Checkpoint)
+		p.proof.Matches(s.Run.ID, s.Run.Revision, domain, subject, s.State, s.Checkpoint)
 }
 
 func ownedAdmissionAttemptHash(s Snapshot, l ExecutionLease, operation, grantID string, attempt [32]byte) string {
@@ -146,8 +157,39 @@ func (r *Runtime) SupportsOwnedPhysicalExecution() bool {
 	_, ok := r.store.(OwnedPhysicalExecutionStore)
 	return ok
 }
+
+const ownedDispatchGrantPrefix = "owneddispatch_"
+
+// OwnedPhysicalDispatchGrantID links an existing Host dispatch to its one
+// native Grant identity. The reserved namespace prevents ordinary IDSource
+// output from impersonating this linkage. The identity is not permission:
+// private attempt commitment, source proof and native lease still arbitrate.
+func OwnedPhysicalDispatchGrantID(runID, operation, dispatchID string) (string, error) {
+	if runID == "" || strings.TrimSpace(runID) != runID || !ordinaryOwnedOperation(operation) ||
+		dispatchID == "" || strings.TrimSpace(dispatchID) != dispatchID || len(dispatchID) > 256 {
+		return "", ErrInvalidInput
+	}
+	return ownedDispatchGrantPrefix + ManagedDigest(struct{ RunID, Operation, DispatchID string }{runID, operation, dispatchID}), nil
+}
+
 func (r *Runtime) BeginOwnedPhysicalExecution(ctx context.Context, id string, revision uint64, proof *featurecontrol.Proof, operation ...string) (ChildExecutionGrant, error) {
-	if r == nil || ctx == nil || id == "" || revision == 0 || len(operation) != 1 || strings.TrimSpace(operation[0]) == "" || operation[0] != strings.TrimSpace(operation[0]) {
+	if len(operation) != 1 {
+		return ChildExecutionGrant{}, ErrInvalidInput
+	}
+	return r.beginOwnedPhysicalExecution(ctx, id, revision, proof, operation[0], "")
+}
+
+// BeginOwnedPhysicalExecutionForDispatch uses the existing admission with
+// an additional original Host-dispatch correlation, not a second permit.
+func (r *Runtime) BeginOwnedPhysicalExecutionForDispatch(ctx context.Context, id string, revision uint64, proof *featurecontrol.Proof, operation, dispatchID string) (ChildExecutionGrant, error) {
+	if _, err := OwnedPhysicalDispatchGrantID(id, operation, dispatchID); err != nil {
+		return ChildExecutionGrant{}, err
+	}
+	return r.beginOwnedPhysicalExecution(ctx, id, revision, proof, operation, dispatchID)
+}
+
+func (r *Runtime) beginOwnedPhysicalExecution(ctx context.Context, id string, revision uint64, proof *featurecontrol.Proof, operation, dispatchID string) (ChildExecutionGrant, error) {
+	if r == nil || ctx == nil || id == "" || revision == 0 || strings.TrimSpace(operation) == "" || operation != strings.TrimSpace(operation) {
 		return ChildExecutionGrant{}, ErrInvalidInput
 	}
 	store, ok := r.store.(OwnedPhysicalExecutionStore)
@@ -165,17 +207,25 @@ func (r *Runtime) BeginOwnedPhysicalExecution(ctx context.Context, id string, re
 	if s.Run.Revision != revision {
 		return ChildExecutionGrant{}, ErrConflict
 	}
-	gid, e := r.NewID("ownedgrant")
+	var gid string
+	if dispatchID != "" {
+		gid, e = OwnedPhysicalDispatchGrantID(id, operation, dispatchID)
+	} else {
+		gid, e = r.NewID("ownedgrant")
+		if e == nil && strings.HasPrefix(gid, ownedDispatchGrantPrefix) {
+			return ChildExecutionGrant{}, ErrInvalidInput
+		}
+	}
 	if e != nil {
 		return ChildExecutionGrant{}, e
 	}
-	p := OwnedPhysicalAdmission{proof: proof}
+	p := OwnedPhysicalAdmission{proof: proof, dispatchID: dispatchID}
 	// Do not use configured IDSource or other Host callbacks for attempt
 	// entropy: two contenders may deliberately return the same public ID.
 	if _, e = rand.Read(p.attempt[:]); e != nil {
 		return ChildExecutionGrant{}, e
 	}
-	g := ChildExecutionGrant{ID: gid, ChildRunID: id, ExpectedRevision: revision, ExecutionOwnerID: l.OwnerID, ExecutionLeaseID: l.LeaseID, ExecutionEpoch: l.Epoch, AdmissionSourceHash: ownedAdmissionAttemptHash(s, l, operation[0], gid, p.attempt), AdmissionOperation: operation[0]}
+	g := ChildExecutionGrant{ID: gid, ChildRunID: id, ExpectedRevision: revision, ExecutionOwnerID: l.OwnerID, ExecutionLeaseID: l.LeaseID, ExecutionEpoch: l.Epoch, AdmissionSourceHash: ownedAdmissionAttemptHash(s, l, operation, gid, p.attempt), AdmissionOperation: operation}
 	if !p.Matches(g, s, l) {
 		return ChildExecutionGrant{}, ErrExecutionConflict
 	}

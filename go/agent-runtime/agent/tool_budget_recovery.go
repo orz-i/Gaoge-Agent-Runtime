@@ -272,14 +272,23 @@ func (r *Runner) settleOriginalHeldTool(ctx context.Context, q tools.ExecutionRe
 	return a.settleSuspendedTool(ctx, b.LedgerID, q, budget.Usage{ToolCalls: 1}, raw)
 }
 
-func (r *Runner) settleOriginalToolBudget(ctx context.Context, s kernel.Snapshot, c kernel.OwnedPhysicalCallbackCompletion, request tools.ExecutionRequest, result tools.ExecutionResult) error {
+func (r *Runner) settleOriginalToolBudget(ctx context.Context, s kernel.Snapshot, c kernel.OwnedPhysicalCallbackCompletion, request tools.ExecutionRequest, result tools.ExecutionResult) (string, error) {
 	if c.ReturnRevision != s.Run.Revision || !c.HostCompleted {
-		return ErrToolReceiptMismatch
+		return "", ErrToolReceiptMismatch
 	}
-	return r.settleToolHold(ctx, request, result, func(ledger string) bool {
+	var originalLedger string
+	err := r.settleToolHold(ctx, request, result, func(ledger string) bool {
 		out := kernel.OwnedPhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: c.LeaseOwned, ControlCustody: c.ControlCustody, ToolBudgetScope: ledger}
-		return kernel.ManagedDigest(kernel.OwnedPhysicalCallbackReturnPayload(s, out)) == c.ReturnSourceHash
+		if kernel.ManagedDigest(kernel.OwnedPhysicalCallbackReturnPayload(s, out)) != c.ReturnSourceHash {
+			return false
+		}
+		originalLedger = ledger
+		return true
 	})
+	if err != nil {
+		return "", err
+	}
+	return originalLedger, nil
 }
 
 func (r *Runner) settleToolHold(ctx context.Context, request tools.ExecutionRequest, result tools.ExecutionResult, original func(string) bool) error {

@@ -20,6 +20,9 @@ type ManagedRecoveryStoreFixture struct {
 	Peer      kernel.Store
 	AdvanceTo func(time.Time)
 	Reopen    func() kernel.Store
+	// RetryableContention is an adapter-specific infrastructure observation.
+	// It is not an authorization outcome and never satisfies a conflict check.
+	RetryableContention func(error) bool
 }
 type managedStorePorts interface {
 	kernel.Store
@@ -617,13 +620,14 @@ func runManagedStoreEnableCompetition(t *testing.T, factory func(*testing.T) Man
 	type answer struct {
 		transfer kernel.ManagedTransfer
 		err      error
+		request  kernel.ManagedEnableRequest
 	}
 	results := make(chan answer, 2)
 	attempt := func(store kernel.ManagedRecoveryStore, q kernel.ManagedEnableRequest) {
 		ready <- struct{}{}
 		<-start
 		v, e := store.EnableManagedRecovery(t.Context(), q)
-		results <- answer{v, e}
+		results <- answer{v, e, q}
 	}
 	go attempt(f.store, a)
 	go attempt(f.backend.Peer.(kernel.ManagedRecoveryStore), b)
@@ -634,8 +638,19 @@ func runManagedStoreEnableCompetition(t *testing.T, factory func(*testing.T) Man
 	if one.err != nil {
 		one, two = two, one
 	}
-	if one.err != nil || !errors.Is(two.err, kernel.ErrExecutionConflict) || two.transfer.SuccessorLease.LeaseID != "" {
+	if one.err != nil || two.transfer.SuccessorLease.LeaseID != "" {
 		t.Fatalf("ENABLE competitors: winner=%v loser=%v", one.err, two.err)
+	}
+	if f.backend.RetryableContention != nil && f.backend.RetryableContention(two.err) {
+		// The winner has returned from COMMIT. The busy contender never
+		// acquired authority. Re-read its original selection through the
+		// actual same Store transaction before requiring business conflict.
+		loser, err := f.store.EnableManagedRecovery(t.Context(), two.request)
+		if loser.SuccessorLease.LeaseID != "" || !errors.Is(err, kernel.ErrExecutionConflict) {
+			t.Fatalf("busy loser acquired authority after winner: %+v %v", loser, err)
+		}
+	} else if !errors.Is(two.err, kernel.ErrExecutionConflict) {
+		t.Fatalf("ENABLE competition returned unclassified loser: %v", two.err)
 	}
 	if one.transfer.SuccessorLease.Epoch != f.lease.Epoch+1 || len(one.transfer.Activations) != 1 {
 		t.Fatal("competition advanced more than one epoch/activation")

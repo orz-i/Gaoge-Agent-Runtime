@@ -463,7 +463,7 @@ func ea1AgentElectionRecovery(t *testing.T, factory func(*testing.T) (kernel.Sto
 		f.host.operation = plugin.RunResume
 		f.host.hook = func() { t.Error("expired receipt consumption entered Host callback") }
 	}
-	runner := f.runner(f.rt, "recovery-original", mode == "deadline-known")
+	runner := f.runner(f.rt, "recovery-original", mode == "deadline-known" && kind == "model")
 	verifyHook = func() {
 		f.compete(before, grant, true)
 		if mode == "deadline-known" {
@@ -559,12 +559,19 @@ func ea1AgentElectionRecovery(t *testing.T, factory func(*testing.T) (kernel.Sto
 	if e != nil || !reflect.DeepEqual(persisted, out) {
 		t.Fatal("complete original receipt changed across reopen")
 	}
-	fresh := f.runner(freshRT, "fresh-after-receipt", mode == "deadline-known")
+	fresh := f.runner(freshRT, "fresh-after-receipt", false)
 	if e = fresh.ReconcileRootPhysicalExecution(ctx, f.request.ID); !errors.Is(e, kernel.ErrNotFound) {
 		t.Fatalf("duplicate retirement invented scope: %v", e)
 	}
 	if kind == "model" {
 		// Continue=true is the original durable yield, not a request to resend.
+		if mode == "deadline-known" {
+			opaque := f.runner(freshRT, "opaque-after-deadline", true)
+			blocked, denyErr := opaque.Resume(ctx, persisted.Run.ID, persisted.Run.Revision)
+			if !errors.Is(denyErr, kernel.ErrDeadline) || kernel.ManagedDigest(blocked) != kernel.ManagedDigest(persisted) || f.host.calls != 0 {
+				t.Fatalf("opaque Run policy silently skipped or entered: %v", denyErr)
+			}
+		}
 		consumed, consumeErr := fresh.Resume(ctx, persisted.Run.ID, persisted.Run.Revision)
 		if consumeErr != nil {
 			t.Fatalf("known Model receipt consumption failed: %v", consumeErr)

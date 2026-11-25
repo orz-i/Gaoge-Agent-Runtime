@@ -68,9 +68,11 @@ func (t *toolBudgetAdmission) requireEntry(ctx context.Context) error {
 // a Host middleware error or a nested foreign Run from qualifying this frame.
 // No persistent execution authority is introduced here.
 type nativeRunAdmission struct {
-	invocation plugin.RunInvocation
-	denial     atomic.Pointer[nativeAdmissionDenied]
-	entered    atomic.Bool
+	invocation    plugin.RunInvocation
+	denial        atomic.Pointer[nativeAdmissionDenied]
+	entered       atomic.Bool
+	receiptOnly   bool
+	receiptLedger string
 }
 
 type nativeAdmissionDenied struct{ cause error }
@@ -133,7 +135,14 @@ func (r *Runner) invokeNativeRun(ctx context.Context, source kernel.Snapshot, in
 			if inv.Operation != plugin.RunResume || r.activeRootGrant.AdmissionOperation != "resume" {
 				return source, kernel.ErrDeadline
 			}
-			return r.consumeExpiredRootReceipt(ctx, source)
+			frame.receiptOnly = true
+			receipt, receiptErr := r.expiredRootReceipt(source, frame)
+			if receiptErr != nil {
+				return source, receiptErr
+			}
+			// Same original chain, same admission frame, same terminal
+			// settlement. Only its terminal is narrowed to one known receipt.
+			next = receipt
 		}
 		if !r.rootCallbacks.entered.CompareAndSwap(false, true) {
 			return source, kernel.ErrExecutionConflict

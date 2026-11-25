@@ -254,11 +254,19 @@ func runPhysicalAdmissionACKCase(t *testing.T, factory func(*testing.T) (kernel.
 	default:
 		backing, _, reopen = factory(t)
 	}
+	if operation == "resume" && mode == "entry-unavailable" {
+		before := resume.observer
+		if e := before.VerifyPreparedRootSettlement(t.Context(), resume.prepared); e != nil {
+			t.Fatalf("fixture missing original prepared custody: %v", e)
+		}
+	}
 	w := &admissionACKStore{ea1AgentAdmissionStore: ea1AgentAdmissionWrap(t, backing), mode: mode, cancel: cancel}
 	rt := ea1StartRuntime(t, w)
 	m, host := &ea1AdmissionModel{}, &ea1AdmissionMiddleware{}
 	var out kernel.Snapshot
 	var err error
+	var observed agent.PhysicalCallOutcome
+	dispatchID := "dispatch-fixture-" + operation
 	var hostCalls, modelCalls, toolCalls, approvalCalls int
 	r := admissionACKRunner(t, rt, m, host)
 	wantStatus := kernel.RunStatusCompleted
@@ -269,16 +277,21 @@ func runPhysicalAdmissionACKCase(t *testing.T, factory func(*testing.T) (kernel.
 			deadline := time.Now().UTC().Add(2 * time.Second)
 			request.DeadlineAt = &deadline
 		}
-		out, err = r.StartRun(ctx, request)
+		out, observed, err = r.ObservePhysicalDispatch(ctx, request.ID, plugin.RunStart, dispatchID, func(c context.Context) (kernel.Snapshot, error) { return r.StartRun(c, request) })
 	case "prepare":
 		wantStatus = kernel.RunStatusRunning
-		out, err = r.PrepareRun(ctx, ea1AdmissionRequest())
+		request := ea1AdmissionRequest()
+		out, observed, err = r.ObservePhysicalCall(ctx, request.ID, plugin.RunStart, func(c context.Context) (kernel.Snapshot, error) { return r.PrepareRun(c, request) })
 	case "resume":
-		out, err = r.Resume(ctx, resume.prepared.Run.ID, resume.prepared.Run.Revision)
+		out, observed, err = r.ObservePhysicalDispatch(ctx, resume.prepared.Run.ID, plugin.RunResume, dispatchID, func(c context.Context) (kernel.Snapshot, error) {
+			return r.Resume(c, resume.prepared.Run.ID, resume.prepared.Run.Revision)
+		})
 	case "approval":
 		wantStatus = kernel.RunStatusRunning
 		r = approval.runner(rt, true, true)
-		out, err = r.ResolveApproval(ctx, approval.request.ID, approval.waiting.Run.Revision, plugin.ApprovalResponse{Decision: plugin.ApprovalApprove})
+		out, observed, err = r.ObservePhysicalDispatch(ctx, approval.request.ID, plugin.RunResolveApproval, dispatchID, func(c context.Context) (kernel.Snapshot, error) {
+			return r.ResolveApproval(c, approval.request.ID, approval.waiting.Run.Revision, plugin.ApprovalResponse{Decision: plugin.ApprovalApprove})
+		})
 	}
 	if approval != nil {
 		modelCalls, toolCalls = approval.physical.counts()
@@ -289,6 +302,12 @@ func runPhysicalAdmissionACKCase(t *testing.T, factory func(*testing.T) (kernel.
 	}
 	if w.grant.ID == "" || w.grant.AdmissionOperation != operation {
 		t.Fatalf("did not measure real %s admission: %+v %v", operation, w.grant, err)
+	}
+	if operation != "prepare" {
+		id, linkErr := kernel.OwnedPhysicalDispatchGrantID(w.source.Run.ID, operation, dispatchID)
+		if linkErr != nil || w.grant.ID != id {
+			t.Fatalf("native grant not bound to original host dispatch: got %s want %s", w.grant.ID, id)
+		}
 	}
 	fresh := ea1StartRuntime(t, reopen())
 	g, lookupErr := fresh.LookupChildExecution(t.Context(), w.grant.ChildRunID)
@@ -312,6 +331,9 @@ func runPhysicalAdmissionACKCase(t *testing.T, factory func(*testing.T) (kernel.
 			t.Fatalf("no-entry changed original business source: %v", e)
 		}
 		if mode == "no-entry-mark-unavailable" {
+			if observed.Kind() != agent.PhysicalCallUnknown {
+				t.Fatal("unacknowledged retirement escaped as completed observation")
+			}
 			if lookupErr != nil || g != w.grant || !errors.Is(err, agent.ErrRootOutcomeUnknown) {
 				t.Fatalf("unacknowledged cleanup lost fence: %+v %v %v", g, lookupErr, err)
 			}
@@ -320,13 +342,62 @@ func runPhysicalAdmissionACKCase(t *testing.T, factory func(*testing.T) (kernel.
 				t.Fatalf("durable no-entry fact not distinct: %+v %v", c, e)
 			}
 			obs := admissionACKRunner(t, fresh, &ea1AdmissionModel{}, &ea1AdmissionMiddleware{})
-			if e = obs.ReconcileRootPhysicalExecution(t.Context(), g.ChildRunID); e != nil {
-				t.Fatalf("restart could not consume exact no-entry retirement: %v", e)
+			repaired, e := obs.ReconcileUnenteredPhysicalDispatch(t.Context(), g.ChildRunID, plugin.RunResume, dispatchID)
+			if e != nil || !repaired {
+				t.Fatalf("restart could not consume exact no-entry retirement: %t %v", repaired, e)
 			}
 		} else if !errors.Is(lookupErr, kernel.ErrNotFound) {
 			t.Fatalf("known original no-entry fence was not retired: %+v %v", g, lookupErr)
 		}
 		assertNoEntryRetirement(t, fresh, w.grant, w.source, true)
+		if operation != "prepare" {
+			obs := admissionACKRunner(t, fresh, &ea1AdmissionModel{}, &ea1AdmissionMiddleware{})
+			op := plugin.RunStart
+			if operation == "resume" {
+				op = plugin.RunResume
+			}
+			if operation == "approval" {
+				op = plugin.RunResolveApproval
+			}
+			if ok, e := obs.ReconcileUnenteredPhysicalDispatch(t.Context(), w.source.Run.ID, op, dispatchID+"-foreign"); e != nil || ok {
+				t.Fatalf("foreign dispatch borrowed no-entry retirement: %t %v", ok, e)
+			}
+			if ok, e := obs.ReconcileUnenteredPhysicalDispatch(t.Context(), w.source.Run.ID, op, dispatchID); e != nil || !ok {
+				t.Fatalf("exact acknowledged retirement not recoverable: %t %v", ok, e)
+			}
+		}
+		if operation == "resume" {
+			e := fresh.VerifyPreparedRootSettlement(t.Context(), resume.prepared)
+			t.Logf("original prepared custody after exact no-entry retirement: %v", e)
+			if e != nil {
+				t.Errorf("no-entry erased original prepared custody: %v", e)
+			}
+		}
+		if operation == "start" || operation == "prepare" {
+			if e := fresh.VerifyOwnedRootSettlement(t.Context(), w.source); e == nil {
+				t.Fatal("no-entry without prior actual callback manufactured custody")
+			}
+		}
+		if mode == "no-entry-retirement-ack" {
+			// The fault loses every ACK response, including the canonical
+			// retry. The live observer must remain unknown; only the fresh,
+			// exact dispatch-linked retirement read above can close it.
+			if observed.Kind() != agent.PhysicalCallUnknown || !errors.Is(err, agent.ErrRootOutcomeUnknown) {
+				t.Fatalf("unacknowledged live retirement claimed completion: %v %v", observed.Kind(), err)
+			}
+		} else if mode != "no-entry-mark-unavailable" {
+			op := plugin.RunStart
+			if operation == "resume" {
+				op = plugin.RunResume
+			}
+			if operation == "approval" {
+				op = plugin.RunResolveApproval
+			}
+			t.Logf("exact no-entry retirement ACK, op=%s, native physical observation=%v matches=%t", operation, observed.Kind(), observed.Matches(w.source.Run.ID, op))
+			if !observed.Matches(w.source.Run.ID, op) || observed.Kind() != agent.PhysicalCallNotEntered {
+				t.Errorf("original acknowledged no-entry not consumable by Host dispatch protocol")
+			}
+		}
 		if _, e := fresh.LookupChildExecution(t.Context(), w.grant.ChildRunID); !errors.Is(e, kernel.ErrNotFound) {
 			t.Fatalf("no-entry still fenced: %v", e)
 		}
@@ -432,9 +503,6 @@ func assertNoEntryRetirement(t *testing.T, rt *kernel.Runtime, g kernel.ChildExe
 		len(receipt.Closures) != 0 || kernel.ManagedDigest(receipt.Evidence.Snapshot) != kernel.ManagedDigest(source) {
 		t.Fatalf("invalid original no-entry retirement: %+v %v", receipt, e)
 	}
-	if e = rt.VerifyOwnedRootSettlement(t.Context(), source); e == nil {
-		t.Fatal("no-entry retirement manufactured returned callback custody")
-	}
 }
 
 func runPhysicalEntryExternalLease(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store)) {
@@ -458,6 +526,9 @@ func runPhysicalEntryExternalLease(t *testing.T, factory func(*testing.T) (kerne
 	}
 	fresh := ea1StartRuntime(t, f.reopen())
 	assertNoEntryRetirement(t, fresh, w.grant, w.source, false)
+	if e := fresh.VerifyOwnedRootSettlement(t.Context(), w.source); e == nil {
+		t.Fatal("no-entry with a borrowed lease created control custody")
+	}
 	if e = fresh.RequireExecution(t.Context(), w.grant.ChildRunID); !errors.Is(e, kernel.ErrExecutionRequired) {
 		t.Fatalf("unbound observer inherited lease: %v", e)
 	}

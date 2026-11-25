@@ -202,10 +202,17 @@ alone is not a physical-effect receipt.
   checks the exact original Grant, persisted owner/epoch, source revision and
   operation status against Store time. Runtime accounts for the observation's
   full elapsed time; a due deadline, canceled context or expired lease cannot
-  enter new Host work. An expired Resume can consume one qualified known
-  receipt locally without invoking the RunChain or dispatching new work.
+  enter new Host work. An expired Resume may narrow its original, explicitly
+  bounded first-party RunChain terminal to one qualified known receipt. It
+  still obeys the frozen budget's admission/cancellation and completion
+  projection; opaque Host layers cannot be entered or skipped to consume it.
+  No new Model/Tool work is dispatched.
   A confirmed but unentered ordinary Grant may retire only on the original
   no-entry proof, not on an inferred Host return or an uncertain admission.
+  A Harness dispatch binds that native Grant's immutable identity so an exact
+  acknowledged no-entry can close the original Host dispatch, including after
+  a lost Host receipt acknowledgement. No-entry cannot create callback custody;
+  an unchanged suffix of such retirements preserves prior actual custody.
 - Cancellation competes atomically with new dispatch admission. A cancelled
   parent cannot start a late child, while an unsettled child grant prevents
   premature terminalization of its ancestors.

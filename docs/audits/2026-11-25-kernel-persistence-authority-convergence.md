@@ -178,3 +178,42 @@ No additional table or SQL schema version is required. Store implementations
 of `OwnedPhysicalExecutionStore` must implement `CheckOwnedPhysicalEntry`
 and forward the real authoritative durations. Old writers must not mix with
 writers that understand the new no-entry custody/settlement evidence.
+
+## Cross-layer lifecycle convergence (F7–F9)
+
+- **F7:** A due Resume selects a single qualified, already committed receipt
+  as the terminal of the *same* explicitly bounded first-party RunChain.
+  The native admission frame preserves the existing cancellation decision,
+  original budget binding, projection and terminal `FinishRuns` obligation.
+  Receipt-only budget admission reads the existing ledger without ensuring
+  or registering a replacement. Recovered Tool evidence retains its original
+  ledger ID. Arbitrary Host Run middleware cannot be entered or skipped;
+  unresolved Host-input/completion-policy/summary obligations still refuse.
+  No new Model/Tool dispatch or optional observer callback is authorized.
+- **F8:** A native call whose original no-entry retirement is ACKed reports
+  `PhysicalCallNotEntered`, distinct from created, settled, durable yield
+  and unknown. The immutable Host dispatch ID determines a reserved native
+  Grant identity, with the same private admission attempt and Store authority
+  checks. Harness closes the original dispatch only on that outcome or on
+  exact persisted no-entry evidence for the same dispatch during recovery.
+  Before/after Host receipt write interruptions can be retried without
+  inventing completion or repeating external work. An unentered approval
+  retains the pending decision. Unknown or uncorrelated historical evidence
+  does not close a Host dispatch.
+- **F9:** Root custody checks use the latest actual acknowledged safe callback
+  and verify the latest physical admission watermark, all retained history,
+  and an exact unchanged acknowledged no-entry suffix. No-entry alone cannot
+  create custody; changed, duplicate, unacknowledged, foreign or missing latest
+  evidence cannot preserve it. Prepare still requires exactly one actual
+  Prepare callback, not exactly one retirement record.
+
+The Windows SQLite Managed ENABLE competition conformance test distinguishes
+an adapter's transient BUSY observation from a definitive execution denial.
+It still requires exactly one elected successor and, after an actual BUSY
+loser, retries the same selection to require a definitive conflict. Production
+SQLite errors, retry policy and authorization transactions are unchanged.
+
+This convergence reuses the existing grant, retirement, RunChain, budget
+ledger and Harness dispatch receipt persistence. There is no new SQL table
+or schema version, and no authority granted by correlation alone. Existing
+uncorrelated unknown dispatches remain fenced. No mixed-version writers.

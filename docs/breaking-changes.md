@@ -14,8 +14,18 @@ not Host completion, control custody or a receipt replay authority.
 Unknown admissions and unresolved managed successors remain fenced.
 No new SQL schema version is needed, but old writers must not mix with
 the new evidence semantics. A due Run may consume a qualified known receipt
-locally without invoking new Host callbacks; any branch still requiring
-Host input, completion-policy or summary callbacks remains blocked.
+through the existing explicitly bounded first-party RunChain, without
+dispatching new Model/Tool work. Opaque Host Run middleware and branches
+requiring Host inputs, completion-policy or summary callbacks fail closed.
+The original shared budget's cancellation and terminal projection still apply.
+
+The Harness-owned admission uses the reserved `owneddispatch_` Grant ID
+namespace for immutable dispatch correlation (not new execution permission).
+Custom ordinary ID sources must not generate that prefix. The original
+no-entry ACK closes only its linked Harness dispatch; a historical
+uncorrelated retirement cannot prove this relationship. New writers must
+not mix with writers that do not recognize the Host no-entry boundary.
+No additional SQL schema change is required.
 
 ## Original physical admission ACK
 

@@ -7,6 +7,7 @@ import (
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
 // resumeNativeFencedAgentAfterInterruptedStart is NOT a second Harness
@@ -24,7 +25,8 @@ func (runner *Runner) resumeNativeFencedAgentAfterInterruptedStart(
 		!runner.runtime.SupportsExecution() {
 		return kernel.Snapshot{}, grantErr
 	}
-	if _, native := runner.agent.(*agent.Runner); !native {
+	native, ok := runner.agent.(*agent.Runner)
+	if !ok {
 		return kernel.Snapshot{}, grantErr
 	}
 	turn, err := loadVerifiedTurn(ctx, runner.store, invocation.TurnID)
@@ -87,13 +89,20 @@ func (runner *Runner) resumeNativeFencedAgentAfterInterruptedStart(
 	// A rejected attempt under the previous live lease returns the native
 	// execution conflict WITHOUT adding another grant or doing effects.
 	// After Store-clock expiry, withRunOwner fences a unique new Epoch.
-	resumed, resumeErr := resumer.Resume(ctx, invocation.ExecutionRefID, expectedRevision)
+	resumed, outcome, resumeErr := native.ObservePhysicalCall(ctx, invocation.ExecutionRefID, plugin.RunResume, func(observedCtx context.Context) (kernel.Snapshot, error) {
+		return resumer.Resume(observedCtx, invocation.ExecutionRefID, expectedRevision)
+	})
 	if resumed.Run.ID != invocation.ExecutionRefID {
 		return resumed, resumeErr
 	}
-	// Once this native segment has returned a real Run snapshot, the
-	// interrupted Start's dispatch is no longer an unknown, orphaned
-	// authority. Releasing only this same grant preserves other claims.
+	// A returned snapshot is not a physical completion. Require the same
+	// original-call result used by ordinary dispatch settlement. A rejected
+	// successor (even an ACKed no-entry) cannot settle the interrupted Start.
+	if !outcome.Matches(invocation.ExecutionRefID, plugin.RunResume) ||
+		(outcome.Kind() != agent.PhysicalCallSettled && outcome.Kind() != agent.PhysicalCallDurableYield) {
+		return resumed, errors.Join(grantErr, ErrExecutionOutcomeUnknown, resumeErr)
+	}
+	// Release only the interrupted Start's own immutable dispatch.
 	return resumed, errors.Join(resumeErr,
 		runner.finishPhysicalDispatchGrant(ctx, interruptedStart, "native_kernel_epoch_recovered"))
 }

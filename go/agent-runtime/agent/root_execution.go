@@ -145,8 +145,15 @@ func (runner *Runner) withRootSegment(ctx context.Context, snapshot kernel.Snaps
 		return abort(kernel.ErrConflict)
 	}
 
-	proof := featurecontrol.Seal(current.Run.ID, current.Run.Revision, "agent_owned_physical_admission", lease.LeaseID, current.State, current.Checkpoint)
-	grant, err := bound.BeginOwnedPhysicalExecution(ctx, current.Run.ID, current.Run.Revision, proof, operation)
+	var grant kernel.ChildExecutionGrant
+	if dispatchID := runner.originalPhysicalDispatch(ctx, current.Run.ID, operation); dispatchID != "" {
+		subject := kernel.ManagedDigest(struct{ LeaseID, DispatchID string }{lease.LeaseID, dispatchID})
+		proof := featurecontrol.Seal(current.Run.ID, current.Run.Revision, "agent_owned_physical_dispatch_admission", subject, current.State, current.Checkpoint)
+		grant, err = bound.BeginOwnedPhysicalExecutionForDispatch(ctx, current.Run.ID, current.Run.Revision, proof, operation, dispatchID)
+	} else {
+		proof := featurecontrol.Seal(current.Run.ID, current.Run.Revision, "agent_owned_physical_admission", lease.LeaseID, current.State, current.Checkpoint)
+		grant, err = bound.BeginOwnedPhysicalExecution(ctx, current.Run.ID, current.Run.Revision, proof, operation)
+	}
 	if err != nil {
 		if errors.Is(err, kernel.ErrPhysicalAdmissionCommitUnknown) {
 			// No effect-capable callback has entered, but an unresolved
@@ -294,6 +301,7 @@ func (runner *Runner) retireUnenteredOwnedRoot(ctx context.Context, rt *kernel.R
 	if err := rt.RecordOwnedPhysicalCallbackReturn(cleanup, g, source.Run.Revision, outcome, proof); err != nil {
 		if found, ackErr := acknowledgeExactOwnedRetirement(cleanup, rt, g, source, &completion); found {
 			if ackErr == nil {
+				recordPhysicalObservation(ctx, g.ChildRunID, PhysicalCallNotEntered)
 				return cause
 			}
 			return errors.Join(cause, ErrRootOutcomeUnknown, err, ackErr)
@@ -306,6 +314,7 @@ func (runner *Runner) retireUnenteredOwnedRoot(ctx context.Context, rt *kernel.R
 	if err := settleOwnedRoot(cleanup, rt, g, source, &completion, false); err != nil {
 		return errors.Join(cause, ErrRootOutcomeUnknown, err)
 	}
+	recordPhysicalObservation(ctx, g.ChildRunID, PhysicalCallNotEntered)
 	return cause
 }
 

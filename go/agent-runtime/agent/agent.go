@@ -366,6 +366,7 @@ type Runner struct {
 	approvalControlPreflight  func(context.Context, kernel.Snapshot) error
 	startControlPreflight     func(context.Context, StartRequest) error
 	runMiddlewareConfigured   bool
+	receiptOnlyRunChain       bool
 	modelMiddlewareConfigured bool
 	rootCallbacks             *rootCallbackState
 	boundedCallbacks          []any
@@ -660,6 +661,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		approvalControlPreflight:  dependencies.ApprovalControlPreflight,
 		startControlPreflight:     dependencies.StartControlPreflight,
 		runMiddlewareConfigured:   len(dependencies.RunMiddleware) > 0,
+		receiptOnlyRunChain:       supportsReceiptOnlyRunChain(dependencies),
 		modelMiddlewareConfigured: len(dependencies.ModelMiddleware) > 0,
 		hostedTools:               dependencies.HostedTools, discovery: dependencies.ToolDiscovery, observers: observers, telemetry: telemetry, approvalPolicies: approvalPolicies,
 		completionPolicies:   compactCompletionPolicies(dependencies.CompletionPolicies),
@@ -829,7 +831,7 @@ func (runner *Runner) startRunWithMiddleware(ctx context.Context, request StartR
 		// own dispatch Grant. Persisted Run identity remains recoverable.
 		return kernel.Snapshot{}, invokeErr
 	}
-	if invokeErr != nil && !middlewareEntered {
+	if invokeErr != nil && !middlewareEntered && !errors.Is(invokeErr, ErrRootOutcomeUnknown) {
 		// Actual Create ACK, followed by a proven pre-Host denial. This
 		// preserves recoverable identity, not authority to dispatch again.
 		recordPhysicalObservation(ctx, created.Run.ID, PhysicalCallCreated)
