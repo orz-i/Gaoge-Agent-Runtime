@@ -33,6 +33,15 @@ the same independent owner before local usage is incremented. Existing
 opaque/legacy custody is not upgraded. Drain or quarantine old in-flight
 executions before switching this unreleased cohort; no new SQL schema version.
 
+Tool approval is captured from the original returned Call, not its wait
+projection. Batch approval and local allowance pauses now drain outstanding
+Child calls first. The Agent State may contain a restrictive
+`requiredApproval` binding for an unsent Call; it is not a Checkpoint or
+permission to execute. Earlier already-dispatched Calls are reconciled and
+retired before publication of the original approval requirement. Legacy
+WaitingInput snapshots that already contain unresolved physical children
+are not automatically rewritten or granted recovery authority.
+
 ## PR #154 — Model original evidence and settlement qualification hard cut
 
 Model intent, logical budget reservation and physical sampling hashes now bind

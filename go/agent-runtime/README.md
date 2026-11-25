@@ -88,6 +88,15 @@ custody. Only the native Tool Budget adapter settles the original ledger
 reservation. Host outcome verifiers read evidence and must not write Budget
 settlements. Newly bound Calls reject unsealed legacy receipts.
 
+Pending approval evidence is captured at the actual qualified Tool return,
+independently of its ChildTerminal, ExternalResult, Scheduled or descriptor-less
+wait representation. Independent Child calls may still be launched in one
+batch. A later restrictive approval decision is parked against its exact
+unsent Call while the original physical frontier drains; only a subsequent
+owner may create and publish its approval Checkpoint. Local Tool allowance
+counts deferred physical obligations before new Call admission. An exhausted
+allowance cannot pause a batch with unresolved children.
+
 Every dispatched Model invocation durably binds the exact physical SDK request
 through its `SamplingPlan`. Context and SharedBudget admission freeze that plan
 before the invocation is committed; otherwise the final dispatch boundary freezes
