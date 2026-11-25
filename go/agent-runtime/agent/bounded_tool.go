@@ -52,7 +52,7 @@ func (a *BoundedBudgetAdapter) reserveTool(ctx context.Context, inv plugin.ToolI
 	if l.ID == "" {
 		return l, nil
 	}
-	res := budget.Reservation{ID: "tool:" + inv.Run.ID + ":" + inv.Request.Call.ID, RunID: inv.Run.ID, RequestHash: kernel.ManagedDigest(inv.Request), Requested: budget.Usage{ToolCalls: 1}}
+	res := originalToolReservation(inv.Request)
 	l, err := a.coordinator.Reserve(ctx, l.ID, res, ports.ToolReservationActive(inv))
 	if projectErr := a.ports.Project(ctx, l); projectErr != nil {
 		return l, projectErr

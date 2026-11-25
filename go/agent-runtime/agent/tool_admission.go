@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
@@ -38,18 +39,9 @@ func (r *Runner) admitPendingToolBudget(ctx context.Context, s kernel.Snapshot, 
 			return s, e, nil, false, ErrToolReceiptMismatch
 		}
 		if scope.LedgerID != "" {
-			l, err = a.coordinator.Store.LoadBudget(ctx, scope.LedgerID)
-			if err != nil || l.ID != scope.LedgerID {
-				return s, e, nil, false, errors.Join(ErrToolReceiptMismatch, err)
-			}
-			binding, registered := l.Runs[q.RunID]
-			if !registered || l.Limits != scope.Limits {
-				return s, e, nil, false, ErrToolReceiptMismatch
-			}
-			for _, original := range scope.Runs {
-				if original.RunID == q.RunID && original.Binding != binding {
-					return s, e, nil, false, ErrToolReceiptMismatch
-				}
+			l, err = r.loadBoundToolLedger(ctx, q.RunID, scope)
+			if err != nil {
+				return s, e, nil, false, err
 			}
 		}
 	} else {
@@ -59,7 +51,7 @@ func (r *Runner) admitPendingToolBudget(ctx context.Context, s kernel.Snapshot, 
 		copy := *admission
 		copy.BudgetBound, copy.LedgerID = true, scope.LedgerID
 		state.ToolAdmission = &copy
-		s, err = r.commitToolTransition(ctx, s, state, s.Checkpoint, kernel.RunStatusRunning, kernel.EventDraft{Type: "tool.capacity_bound", Message: e.call.ID})
+		s, err = r.commitToolTransition(ctx, s, state, s.Checkpoint, kernel.RunStatusRunning, kernel.EventDraft{Type: "tool.capacity_bound", Message: e.call.ID, Wakeup: true, WakeupAt: agentWakeupAt(r.clock.Now())})
 		if err != nil {
 			r.noteRootCallbackFailure(err)
 			return s, e, nil, false, err
@@ -75,12 +67,16 @@ func (r *Runner) admitPendingToolBudget(ctx context.Context, s kernel.Snapshot, 
 			return s, e, nil, false, err
 		}
 	}
-	id := "tool:" + q.RunID + ":" + q.Call.ID
+	expected := originalToolReservation(q)
+	id := expected.ID
 	validUnsent := func(res budget.Reservation) bool {
-		return res.ID == id && res.RunID == q.RunID && res.RequestHash == kernel.ManagedDigest(q) && res.Requested == (budget.Usage{ToolCalls: 1}) &&
-			!res.Dispatched && res.Usage == (budget.Usage{}) && len(res.Receipt) == 0 && (res.Status == budget.ReservationHeld || res.Status == budget.ReservationWaiting)
+		return exactUnsentToolReservation(res, expected) && (res.Status == budget.ReservationHeld || res.Status == budget.ReservationWaiting)
 	}
 	existing, exists := l.Reservations[id]
+	if exists && existing.Status == budget.ReservationReleased && exactUnsentToolReservation(existing, expected) && l.RunCancelled(q.RunID) {
+		next, closeErr := r.settleUnsentTool(ctx, s, state, e.call, unsentToolDisposition{Release: true, Reservation: true, Code: "agent.shared_budget_exhausted"})
+		return next, e, nil, true, closeErr
+	}
 	if (exists && !validUnsent(existing)) || (admission != nil && admission.Phase == toolAdmissionCapacity && !exists) {
 		r.noteRootCallbackFailure(ErrToolReceiptMismatch)
 		return s, e, nil, false, ErrToolReceiptMismatch
@@ -97,50 +93,52 @@ func (r *Runner) admitPendingToolBudget(ctx context.Context, s kernel.Snapshot, 
 		}
 		return s, e, &toolBudgetAdmission{adapter: a, request: q, ledger: l}, false, nil
 	}
-	// Only the exact native ledger's acknowledged pre-send state can
-	// qualify a capacity denial. No typed provider/Host error is sufficient.
-	var denial toolCapacityDenial
-	if !errors.As(err, &denial) {
-		r.noteRootCallbackFailure(err)
+	if scope.LedgerID == "" {
 		return s, e, nil, false, err
 	}
-	original, loadErr := a.coordinator.Store.LoadBudget(ctx, scope.LedgerID)
+	// The capacity operation never enters the ToolChain. Resolve its
+	// authoritative ledger fact, not a speculative returned reservation
+	// or the error text. This includes reserve ACK/projection interruption.
+	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	defer cancel()
+	original, loadErr := r.loadBoundToolLedger(cleanup, q.RunID, scope)
 	if loadErr != nil {
 		r.noteRootCallbackFailure(loadErr)
 		return s, e, nil, false, errors.Join(err, loadErr)
 	}
 	res, found := original.Reservations[id]
-	if original.ID != scope.LedgerID ||
-		(found && (!validUnsent(res) || res.Active)) ||
-		(errors.Is(err, budget.ErrWaiting) && (!found || res.Status != budget.ReservationWaiting)) {
+	cancelled := original.RunCancelled(q.RunID)
+	if (found && !exactUnsentToolReservation(res, expected)) ||
+		(found && res.Status != budget.ReservationHeld && res.Status != budget.ReservationWaiting && (!cancelled || res.Status != budget.ReservationReleased)) ||
+		(!found && admission != nil && admission.Phase == toolAdmissionCapacity) {
 		r.noteRootCallbackFailure(ErrToolReceiptMismatch)
 		return s, e, nil, false, errors.Join(err, ErrToolReceiptMismatch)
 	}
-	if len(state.DeferredChildren) != 0 || errors.Is(err, budget.ErrWaiting) {
-		parked := *state.ToolAdmission
-		if found {
-			parked.Phase = toolAdmissionCapacity
+	var denial toolCapacityDenial
+	if cancelled || errors.As(err, &denial) && errors.Is(err, budget.ErrExhausted) {
+		code := "agent.shared_budget_exhausted"
+		if !cancelled {
+			code = sharedBudgetErrorCode(err)
 		}
-		state.ToolAdmission = &parked
+		next, closeErr := r.settleUnsentTool(cleanup, s, state, e.call, unsentToolDisposition{Release: true, Reservation: found, Code: code})
+		return next, e, nil, true, closeErr
 	}
+	if !errors.As(err, &denial) || !errors.Is(err, budget.ErrWaiting) || !found || res.Status != budget.ReservationWaiting || res.Active {
+		// Any exact held, undispatched reservation is safe to park. If
+		// the ledger write never committed, there is nothing to park.
+		// The durable decision precedes both park and continuation.
+		next, closeErr := r.settleUnsentTool(cleanup, s, state, e.call, unsentToolDisposition{Reservation: found})
+		if closeErr != nil {
+			return next, e, nil, false, errors.Join(err, closeErr)
+		}
+		return next, e, nil, true, err
+	}
+	parked := *state.ToolAdmission
+	parked.Phase = toolAdmissionCapacity
+	state.ToolAdmission = &parked
 	if len(state.DeferredChildren) != 0 {
 		next, _, yieldErr := r.activateDeferredChild(ctx, s, state)
 		return next, e, nil, true, yieldErr
-	}
-	if errors.Is(err, budget.ErrExhausted) {
-		if found {
-			updated, releaseErr := a.coordinator.Release(ctx, original.ID, id)
-			if releaseErr == nil {
-				releaseErr = a.ports.Project(ctx, updated)
-			}
-			if releaseErr != nil {
-				r.noteRootCallbackFailure(releaseErr)
-				return s, e, nil, false, errors.Join(err, releaseErr)
-			}
-		}
-		state.clearToolAdmission(q.Call.ID)
-		failed, failErr := r.fail(ctx, s, state, sharedBudgetErrorCode(err), err)
-		return failed, e, nil, true, failErr
 	}
 	// Persist a continuation wakeup without a dispatch marker. A fresh
 	// owner may reserve the same original Call after capacity is available.

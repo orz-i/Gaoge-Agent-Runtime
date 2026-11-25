@@ -51,6 +51,21 @@ func (f *originalToolFrame) recordHold(q tools.ExecutionRequest, ledgerID, pendi
 	}
 }
 
+// Only the native pre-entry boundary sets/clears this flag. It survives an
+// uncertain intent or cleanup CAS, but never an actual ToolChain invocation.
+func (f *originalToolFrame) recordUnsent(q tools.ExecutionRequest, ledgerID string) {
+	if f != nil && f.runID == q.RunID {
+		f.returns.Store(q.Call.ID, kernel.OwnedToolReturn{CallID: q.Call.ID, RequestDigest: kernel.ManagedDigest(q), LedgerID: ledgerID, Unsent: true})
+	}
+}
+func (f *originalToolFrame) clearUnsent(q tools.ExecutionRequest) {
+	if f != nil && f.runID == q.RunID {
+		if b, ok := f.binding(q); ok && b.Unsent {
+			f.returns.Delete(q.Call.ID)
+		}
+	}
+}
+
 func (f *originalToolFrame) recordSettled(q tools.ExecutionRequest, ledger budget.Ledger) {
 	if f == nil || f.runID != q.RunID {
 		return
@@ -81,6 +96,10 @@ func (f *originalToolFrame) outstanding(s kernel.Snapshot, approvals *approvedTo
 		q := tools.ExecutionRequest{RunID: s.Run.ID, Call: call}
 		b, ok := f.binding(q)
 		proof, approved := approvals.returned(call)
+		if ok && b.Unsent {
+			proof.ApprovalDigest = durableApprovalSource(s, state, call)
+			approved = proof.ApprovalDigest != ""
+		}
 		allApproved = allApproved && approved
 		if !ok && !approved {
 			return nil

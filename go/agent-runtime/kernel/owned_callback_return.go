@@ -86,6 +86,9 @@ type OwnedToolReturn struct {
 	// PendingKind records an actual returned pending disposition, not an
 	// inferred external outcome. Empty means no qualified pending return.
 	PendingKind string `json:",omitempty"`
+	// Unsent attests that the original native callback never entered the
+	// ToolChain after preparing its dispatch intent. It is not a receipt.
+	Unsent bool `json:",omitempty"`
 }
 
 // OwnedToolReturns is a canonical, comparable encoding of a bounded ordered
@@ -106,11 +109,12 @@ func NewOwnedToolReturns(bindings []OwnedToolReturn) (OwnedToolReturns, error) {
 	sort.Slice(bindings, func(i, j int) bool { return bindings[i].CallID < bindings[j].CallID })
 	for i, b := range bindings {
 		if strings.TrimSpace(b.CallID) == "" || b.CallID != strings.TrimSpace(b.CallID) ||
-			b.LedgerID != strings.TrimSpace(b.LedgerID) || (b.LedgerID == "" && b.ApprovalDigest == "") ||
+			b.LedgerID != strings.TrimSpace(b.LedgerID) || (b.LedgerID == "" && b.ApprovalDigest == "" && !b.Unsent) ||
 			!validToolReceiptDigest(b.RequestDigest) ||
 			(b.ReceiptDigest != "" && (b.LedgerID == "" || !validToolReceiptDigest(b.ReceiptDigest))) ||
 			(b.ApprovalDigest != "" && !validToolReceiptDigest(b.ApprovalDigest)) ||
 			(b.OwnerResultDigest != "" && (b.ApprovalDigest == "" || !validToolReceiptDigest(b.OwnerResultDigest))) ||
+			(b.Unsent && (b.ReceiptDigest != "" || b.OwnerResultDigest != "" || b.PendingKind != "")) ||
 			(b.PendingKind != "" && (b.ReceiptDigest != "" || b.OwnerResultDigest != "" || (b.PendingKind != "pending" && b.PendingKind != "scheduled" && b.PendingKind != "child_terminal" && b.PendingKind != "external_result"))) ||
 			(i > 0 && bindings[i-1].CallID == b.CallID) {
 			return "", ErrInvalidInput

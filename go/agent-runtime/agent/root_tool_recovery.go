@@ -55,10 +55,11 @@ func sameRecoveredCall(a, b tools.Call) bool {
 	return reflect.DeepEqual(a, b)
 }
 
-// reconcileSettledToolIfPresent never consults a provider or dispatches work.
-// Only an original, fully returned Root callback with sealed Budget bytes
-// can select this path. A missing/opaque completion remains unresolved.
-func (runner *Runner) reconcileSettledToolIfPresent(ctx context.Context, s kernel.Snapshot, state runState) (kernel.Snapshot, bool, error) {
+// reconcileOriginalToolReturnIfPresent never consults a provider or dispatches
+// work. Only a fully returned original Root callback with sealed settlement
+// or native no-entry proof can select this path. Missing/opaque completion
+// remains unresolved.
+func (runner *Runner) reconcileOriginalToolReturnIfPresent(ctx context.Context, s kernel.Snapshot, state runState) (kernel.Snapshot, bool, error) {
 	if s.Run.Status != kernel.RunStatusRunning || s.Run.ParentRunID != "" || state.ToolWait != nil || state.ToolDispatchID == "" {
 		return s, false, nil
 	}
@@ -87,7 +88,7 @@ func (runner *Runner) reconcileSettledToolIfPresent(ctx context.Context, s kerne
 	if err != nil {
 		return s, true, errors.Join(ErrToolOutcomeUnknown, err)
 	}
-	if !found || binding.ReceiptDigest == "" {
+	if !found || (binding.ReceiptDigest == "" && !binding.Unsent) {
 		return s, false, nil
 	}
 	repaired, err := runner.reconcileRootToolReceipt(ctx, s, state, grant, state.ToolDispatchID, false)
@@ -104,18 +105,21 @@ func (runner *Runner) reconcileRootToolReceipt(ctx context.Context, snapshot ker
 	if err != nil || !completion.HostCompleted || completion.GrantID != grant.ID {
 		return snapshot, errors.Join(ErrToolOutcomeUnknown, ErrRootOutcomeUnknown, err)
 	}
-	execution, _, err := runner.preparePendingToolExecution(snapshot)
-	if err != nil {
-		return snapshot, err
-	}
-	call := execution.call
-	if state.ToolDispatchID != callID || call.ID != callID {
+	call, ok := nextPendingCall(state)
+	if !ok || state.ToolDispatchID != callID || call.ID != callID {
 		return snapshot, ErrToolOutcomeUnknown
 	}
 	request := tools.ExecutionRequest{RunID: snapshot.Run.ID, Call: tools.CloneCall(call)}
 	binding, bound, err := originalCallReturn(snapshot, completion, request)
 	if err != nil {
 		return snapshot, errors.Join(ErrToolOutcomeUnknown, err)
+	}
+	if bound && binding.Unsent {
+		return runner.reconcileOriginalUnsentTool(ctx, snapshot, state, grant, completion, request, binding)
+	}
+	execution, _, err := runner.preparePendingToolExecution(snapshot)
+	if err != nil {
+		return snapshot, err
 	}
 	if a := state.ToolAdmission; a.authorized(call) && a.BudgetBound && a.LedgerID != "" && (!bound || binding.LedgerID != a.LedgerID) {
 		return snapshot, errors.Join(ErrToolOutcomeUnknown, ErrToolReceiptMismatch)

@@ -42,6 +42,10 @@ func DeniedDimension(err error) (Dimension, bool) {
 	return denied.dimension, true
 }
 
+// ExhaustedAt reconstructs the same structured native quota denial when
+// consuming an already committed, exact admission decision.
+func ExhaustedAt(dimension Dimension) error { return deny(ErrExhausted, dimension) }
+
 func deny(cause error, dimension Dimension) error {
 	return deniedError{cause: cause, dimension: dimension}
 }
@@ -392,6 +396,43 @@ func (coordinator Coordinator) Release(ctx context.Context, scopeID, id string) 
 			return ErrLedgerConflict
 		}
 		value.Status, value.Active = ReservationReleased, false
+		return nil
+	})
+}
+
+// ResolveUnsentTool changes only an exact, never-dispatched Tool reservation.
+// The caller must have committed its native no-send disposition first. Release
+// is terminal; park permits a later fresh capacity admission of the same Call.
+// Neither can refund dispatched or settled usage. Repeating the same action
+// after a lost acknowledgement requires the current exact fact. A stale
+// receipt observer may not park a successor's newly acquired reservation.
+func (coordinator Coordinator) ResolveUnsentTool(ctx context.Context, scopeID string, expected Reservation, release bool, revision uint64) (Ledger, error) {
+	if revision == 0 || !validReservationRequest(expected) || !strings.HasPrefix(expected.ID, "tool:"+expected.RunID+":") ||
+		len(expected.ID) <= len("tool:"+expected.RunID+":") || expected.Requested != (Usage{ToolCalls: 1}) || expected.PhysicalRequestHash != "" {
+		return Ledger{}, ErrInvalidUsage
+	}
+	return coordinator.update(ctx, scopeID, func(l *Ledger) error {
+		if l.Revision != revision {
+			return ErrLedgerConflict
+		}
+		if _, ok := l.Runs[expected.RunID]; !ok {
+			return ErrLedgerConflict
+		}
+		terminal := release || l.RunCancelled(expected.RunID)
+		res, ok := l.Reservations[expected.ID]
+		if !ok || res.ID != expected.ID || res.RunID != expected.RunID || res.RequestHash != expected.RequestHash || res.PhysicalRequestHash != "" ||
+			res.Requested != expected.Requested || res.Dispatched || res.Usage != (Usage{}) || len(res.Receipt) != 0 ||
+			(res.Status != ReservationWaiting && res.Status != ReservationHeld && (!terminal || res.Status != ReservationReleased)) {
+			return ErrLedgerConflict
+		}
+		res.Active = false
+		if terminal {
+			res.Status = ReservationReleased
+		} else {
+			res.Status = ReservationWaiting
+			res.Dimension = ""
+		}
+		l.Reservations[expected.ID] = res
 		return nil
 	})
 }

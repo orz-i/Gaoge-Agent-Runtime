@@ -99,15 +99,10 @@ func (runner *Runner) commitToolTransition(ctx context.Context, snapshot kernel.
 		if loadErr != nil {
 			return snapshot, errors.Join(err, loadErr)
 		}
-		expected := snapshot.Run
-		expected.Revision++
-		expected.Status = status
-		expected.ErrorCode, expected.ErrorDetail = "", ""
-		expected.UpdatedAt = latest.Run.UpdatedAt
-		if reflect.DeepEqual(latest.Run, expected) && latest.EventHead == snapshot.EventHead+1 && bytes.Equal(latest.State, encoded) && reflect.DeepEqual(latest.Checkpoint, checkpoint) && reflect.DeepEqual(latest.Result, snapshot.Result) {
+		if sameToolTransitionTarget(latest, snapshot, state, checkpoint, status) {
 			return latest, nil
 		}
-		if !reflect.DeepEqual(latest, snapshot) || ctx.Err() != nil {
+		if !sameToolTransitionSource(latest, snapshot) || ctx.Err() != nil {
 			return snapshot, err
 		}
 		if attempt == 1 {
@@ -115,6 +110,22 @@ func (runner *Runner) commitToolTransition(ctx context.Context, snapshot kernel.
 		}
 	}
 	return snapshot, kernel.ErrConflict
+}
+
+func sameToolTransitionSource(a, b kernel.Snapshot) bool { return reflect.DeepEqual(a, b) }
+
+func sameToolTransitionTarget(latest, source kernel.Snapshot, state runState, checkpoint *kernel.Checkpoint, status kernel.RunStatus) bool {
+	encoded, err := encodeState(state)
+	if err != nil {
+		return false
+	}
+	expected := source.Run
+	expected.Revision++
+	expected.Status = status
+	expected.ErrorCode, expected.ErrorDetail = "", ""
+	expected.UpdatedAt = latest.Run.UpdatedAt
+	return reflect.DeepEqual(latest.Run, expected) && latest.EventHead == source.EventHead+1 && bytes.Equal(latest.State, encoded) &&
+		reflect.DeepEqual(latest.Checkpoint, checkpoint) && reflect.DeepEqual(latest.Result, source.Result)
 }
 
 func validDeferredChildren(state runState) bool {

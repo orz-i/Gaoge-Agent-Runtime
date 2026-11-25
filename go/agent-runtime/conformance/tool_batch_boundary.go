@@ -57,11 +57,26 @@ func (s *batchBoundaryFault) ApplyExecution(ctx context.Context, l kernel.Execut
 	return s.ExecutionStore.ApplyExecution(ctx, l, r, m)
 }
 
+type batchUnsentCancelPorts struct {
+	settledToolPorts
+	cancel context.CancelFunc
+	hits   *int
+}
+
+func (p batchUnsentCancelPorts) Project(_ context.Context, l budget.Ledger) error {
+	res := l.Reservations["tool:batch-boundary:next-call"]
+	if res.Status == budget.ReservationHeld && !res.Dispatched && *p.hits == 0 {
+		*p.hits++
+		p.cancel()
+	}
+	return nil
+}
+
 // All sibling effects must drain before publication of a new Approval or a
 // local allowance pause. With no boundary, independent children retain their
 // original parallel admission. These are real store/reopen paths.
 func toolBatchBoundary(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store), ledgerFactory func(*testing.T) (budget.LedgerStore, func() budget.LedgerStore)) {
-	for _, mode := range []string{"approval-approve", "approval-reject", "approval-frontier-before", "approval-frontier-ack", "approval-frontier-persistent", "allowance", "parallel"} {
+	for _, mode := range []string{"approval-approve", "approval-reject", "approval-frontier-before", "approval-frontier-ack", "approval-frontier-persistent", "allowance", "parallel", "unsent-before-chain"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx := t.Context()
 			backing, peer, reopen := factory(t)
@@ -90,10 +105,16 @@ func toolBatchBoundary(t *testing.T, factory func(*testing.T) (kernel.Store, ker
 			if e != nil {
 				t.Fatal(e)
 			}
-			approvalMode := mode != "allowance" && mode != "parallel"
+			approvalMode := mode != "allowance" && mode != "parallel" && mode != "unsent-before-chain"
+			var cancelBeforeChain context.CancelFunc
+			cancelHits := 0
 			makeRunner := func(rt *kernel.Runtime, l budget.LedgerStore, withPolicy bool) *agent.Runner {
 				t.Helper()
-				b, e := agent.NewBoundedBudgetAdapter(l, settledToolPorts{id: "original-ledger"})
+				var ports agent.BoundedBudgetPorts = settledToolPorts{id: "original-ledger"}
+				if cancelBeforeChain != nil {
+					ports = batchUnsentCancelPorts{settledToolPorts: settledToolPorts{id: "original-ledger"}, cancel: cancelBeforeChain, hits: &cancelHits}
+				}
+				b, e := agent.NewBoundedBudgetAdapter(l, ports)
 				if e != nil {
 					t.Fatal(e)
 				}
@@ -141,12 +162,26 @@ func toolBatchBoundary(t *testing.T, factory func(*testing.T) (kernel.Store, ker
 				initial = fault
 			}
 			rt := ea1StartRuntime(t, initial)
+			callCtx := ctx
+			if mode == "unsent-before-chain" {
+				var cancel context.CancelFunc
+				callCtx, cancel = context.WithCancel(ctx)
+				defer cancel()
+				cancelBeforeChain = cancel
+			}
 			r := makeRunner(rt, ledger, true)
 			req := agent.StartRequest{ID: "batch-boundary", Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "test", ID: "thread"}, Goal: "three calls", ToolKeys: []string{"read"}}
 			if mode == "allowance" {
 				req.CallAllowance = &agent.CallAllowance{ToolCalls: 2}
 			}
-			started, e := r.StartRun(ctx, req)
+			started, e := r.StartRun(callCtx, req)
+			if mode == "unsent-before-chain" {
+				if !errors.Is(e, context.Canceled) || cancelHits != 1 {
+					t.Fatal("unsent sibling cut", e)
+				}
+				cancelBeforeChain = nil
+				e = nil
+			}
 			if mode == "approval-frontier-persistent" {
 				if !errors.Is(e, fault.injected) || fault.hits != 2 || physical["child-a"] != 1 || physical["child-b"] != 1 || physical["next-call"] != 0 || policies["next-call"] != 1 {
 					t.Fatal("persistent write fault not reached", e, fault.hits, physical, policies)
@@ -215,6 +250,16 @@ func toolBatchBoundary(t *testing.T, factory func(*testing.T) (kernel.Store, ker
 			if mode == "parallel" && physical["next-call"] != 1 {
 				t.Fatal("unrestricted sibling did not execute")
 			}
+			if mode == "unsent-before-chain" {
+				saved, err := ledger.LoadBudget(ctx, "original-ledger")
+				if err != nil {
+					t.Fatal(err)
+				}
+				r := saved.Reservations["tool:batch-boundary:next-call"]
+				if r.Status != budget.ReservationWaiting || r.Dispatched || r.Active || policies["next-call"] != 1 || !bytes.Contains(started.State, []byte(`"phase":"unsent"`)) {
+					t.Fatal("unsent sibling capacity not parked", r, policies)
+				}
+			}
 			if approvalMode && policies["next-call"] != 1 {
 				t.Fatal("required policy was not evaluated once", policies)
 			}
@@ -259,6 +304,14 @@ func toolBatchBoundary(t *testing.T, factory func(*testing.T) (kernel.Store, ker
 				t.Fatal("consume original receipts", e)
 			}
 			switch mode {
+			case "unsent-before-chain":
+				if cur.Run.Status != kernel.RunStatusRunning || physical["next-call"] != 0 || policies["next-call"] != 1 || len(m.requests) != 1 {
+					t.Fatal("unsent sibling bypassed original closure", cur.Run, physical, policies)
+				}
+				cur, e = r.Resume(ctx, req.ID, cur.Run.Revision)
+				if e != nil || policies["next-call"] != 1 {
+					t.Fatal("unsent sibling did not re-admit once", e, policies)
+				}
 			case "approval-approve", "approval-reject", "approval-frontier-before", "approval-frontier-ack":
 				if cur.Run.Status != kernel.RunStatusWaitingInput || cur.Checkpoint == nil || physical["next-call"] != 0 || policies["next-call"] != 1 || len(m.requests) != 1 {
 					t.Fatal("parked approval not published exactly once after retirement", cur.Run.Status, physical, policies)
