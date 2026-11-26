@@ -144,7 +144,7 @@ func TestManagedContextCarriesOriginalBudgetAndInputCursor(t *testing.T) {
 			if _, err = q.Submit(ctx, original.Run, "late", "late steering"); err != nil {
 				t.Fatal(err)
 			}
-			if strings.HasPrefix(mode, "cancel") {
+			if mode == "cancel kernel committed" {
 				now := time.Now().UTC()
 				payload, _ := json.Marshal(map[string]string{"boundary": "cancel_scope_pending", "runID": root.ExecutionRefID, "protocol": "effects_v1", "canceller": "native"})
 				_, fresh, e := host.AppendItem(ctx, harness.Item{ID: "combined-cancel", TurnID: pending.Turn.ID, RunID: root.ExecutionRefID, Kind: harness.ItemDiagnostic, Status: harness.ItemStarted, ParentItemID: harness.CancellationFenceParentItemID, Payload: payload, CreatedAt: now, UpdatedAt: now})
@@ -205,7 +205,12 @@ func TestManagedContextCarriesOriginalBudgetAndInputCursor(t *testing.T) {
 					t.Fatal("closed Host before original ledger")
 				}
 			}
-			result, err := session.Resume(ctx, "managed-obligations")
+			var result harness.Snapshot
+			if mode == "cancel" {
+				result, err = session.Cancel(ctx, "managed-obligations", "stop original task")
+			} else {
+				result, err = session.Resume(ctx, "managed-obligations")
+			}
 			if strings.HasPrefix(mode, "changed") {
 				if err == nil || len(client.requests) != 1 || inputs.reads != reads {
 					t.Fatalf("changed source enabled recovery: %v", err)

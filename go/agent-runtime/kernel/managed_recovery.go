@@ -262,13 +262,14 @@ func managedSafePointEventMatches(point ManagedSafePoint, events []EventDraft) b
 		return events[0].Type == "agent.model_invocation.pending"
 	}
 	var phase string
-	if point.LifecycleVersion == ManagedLifecycleAgentObligations {
+	switch point.LifecycleVersion {
+	case ManagedLifecycleAgentObligations:
 		o, ok := point.AgentObligations()
 		if !ok {
 			return false
 		}
 		phase = o.Phase
-	} else if point.LifecycleVersion == ManagedLifecycleWorkingStateSummary {
+	case ManagedLifecycleWorkingStateSummary:
 		var source struct {
 			Phase          string `json:"phase"`
 			SourceRevision uint64 `json:"sourceRevision"`
@@ -281,7 +282,7 @@ func managedSafePointEventMatches(point ManagedSafePoint, events []EventDraft) b
 			return false
 		}
 		phase = source.Phase
-	} else {
+	default:
 		return false
 	}
 	switch phase {

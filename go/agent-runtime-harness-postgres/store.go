@@ -157,7 +157,7 @@ func (store *Store) UpdateInvocation(ctx context.Context, value harness.Invocati
 					return checkErr
 				}
 			} else {
-				if checkErr := checkManagedReservationTx(tx, value.TurnID); checkErr != nil {
+				if checkErr := checkManagedInvocationReservationTx(tx, value); checkErr != nil {
 					return checkErr
 				}
 				pending, checkErr := pendingExecutionDispatchTx(tx, value.TurnID, value.ID)
@@ -1511,6 +1511,7 @@ func appendItemTx(tx *gorm.DB, value harness.Item, outcome *itemAppendOutcome) e
 	if value.Kind == harness.ItemDiagnostic && value.Status == harness.ItemStarted {
 		switch value.ParentItemID {
 		case harness.CancellationFenceParentItemID:
+			var target harness.Invocation
 			if expectedRoot, _, bound := harness.CancellationAttemptForStore(tx.Statement.Context); bound {
 				var rootRow invocationRecord
 				if err = tx.Where("id = ?", expectedRoot.ID).Take(&rootRow).Error; err != nil {
@@ -1524,7 +1525,6 @@ func appendItemTx(tx *gorm.DB, value harness.Item, outcome *itemAppendOutcome) e
 				if err = tx.Where("execution_ref_id = ?", value.RunID).Limit(1).Find(&targets).Error; err != nil {
 					return err
 				}
-				var target harness.Invocation
 				if len(targets) != 0 {
 					target, err = invocationFromRecord(targets[0])
 					if err != nil {
@@ -1535,7 +1535,13 @@ func appendItemTx(tx *gorm.DB, value harness.Item, outcome *itemAppendOutcome) e
 					return harness.ErrConflict
 				}
 			}
-			if err = checkManagedReservationTx(tx, value.TurnID); err != nil {
+			_, _, bound := harness.CancellationAttemptForStore(tx.Statement.Context)
+			if bound && target.ID != "" {
+				err = checkManagedInvocationReservationTx(tx, target)
+			} else {
+				err = checkManagedReservationTx(tx, value.TurnID)
+			}
+			if err != nil {
 				return err
 			}
 			if err = checkCancellationFenceTx(tx, value.TurnID); err != nil {

@@ -112,6 +112,21 @@ func cloneManagedReservation(r kernel.ManagedHostReservation) kernel.ManagedHost
 	return r
 }
 
+// ManagedReservationBlocksInvocation keeps the elected root's projection
+// fenced until closure. A RESUME successor can wait for the exact original
+// child receipt; the child's own ordinary terminal CAS must remain usable.
+func ManagedReservationBlocksInvocation(r kernel.ManagedHostReservation, inv Invocation) bool {
+	if !r.Valid() || inv.TurnID != r.Binding.TurnID {
+		return true
+	}
+	if r.Mode != kernel.ManagedResume || inv.ParentItemID == "" || inv.ID == r.Binding.InvocationID || inv.ExecutionRefID == r.Binding.RunID {
+		return true
+	}
+	binding, err := frozenChildRoot(inv)
+	return err != nil || binding.attempt().InvocationID != r.Binding.InvocationID ||
+		binding.attempt().ExecutionRefID != r.Binding.RunID || uint64(binding.attempt().Attempt) != uint64(r.Binding.Attempt)
+}
+
 // SameManagedReservation includes mode, payload, source, namespaces and revision.
 func SameManagedReservation(a, b kernel.ManagedHostReservation) bool { return reflect.DeepEqual(a, b) }
 

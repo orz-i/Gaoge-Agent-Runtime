@@ -183,7 +183,7 @@ func (runner *Runner) executeOwnedRoot(ctx context.Context, current kernel.Snaps
 	defer lifecycle.Close()
 	physicalCtx := callbackscope.Bind(ctx, lifecycle)
 	var toolFrame *originalToolFrame
-	if grant.AdmissionOperation == "resume" || grant.AdmissionOperation == "start" || grant.AdmissionOperation == "approval" {
+	if grant.AdmissionOperation == "resume" || grant.AdmissionOperation == "start" || grant.AdmissionOperation == "approval" || grant.AdmissionOperation == "managed_resume" {
 		toolFrame = &originalToolFrame{grantID: grant.ID, runID: grant.ChildRunID}
 		physicalCtx = callbackscope.BindRootToolFrame(physicalCtx, toolFrame)
 	}

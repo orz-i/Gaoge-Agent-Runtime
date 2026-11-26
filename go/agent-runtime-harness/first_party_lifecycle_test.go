@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
@@ -27,16 +28,23 @@ func (q *lifecycleInputs) ReadRunInputs(ctx context.Context, run kernel.Run, aft
 }
 
 func TestFirstPartyLifecycleNamedApprovalInputsAndBudget(t *testing.T) {
-	for _, mode := range []string{"approve", "cancel child"} {
-		t.Run(mode, func(t *testing.T) { exerciseFirstPartyLifecycle(t, mode) })
+	for _, profile := range []string{"ordinary", "managed", "successor"} {
+		for _, mode := range []string{"approve", "cancel child"} {
+			t.Run(profile+"/"+mode, func(t *testing.T) { exerciseFirstPartyLifecycle(t, mode, profile) })
+		}
 	}
 }
 
-func exerciseFirstPartyLifecycle(t *testing.T, mode string) {
+func exerciseFirstPartyLifecycle(t *testing.T, mode, profile string) {
 	const private = "specialist.commit"
 	const steering = "include the verified child result"
 	ctx := t.Context()
-	runs, store := memory.NewStore(), harness.NewMemoryStore()
+	clock := &managedObligationClock{now: time.Now().UTC()}
+	base, store := memory.NewStoreWithExecutionClock(clock), harness.NewMemoryStore()
+	var runs kernel.Store = base
+	if profile == "successor" {
+		runs = &managedObligationStore{Store: base, event: "agent.model_invocation.pending", count: 1}
+	}
 	queue, err := agent.NewMemoryRunInputs("lifecycle-inputs")
 	if err != nil {
 		t.Fatal(err)
@@ -45,6 +53,13 @@ func exerciseFirstPartyLifecycle(t *testing.T, mode string) {
 	rootCalls, childCalls, writes := 0, 0, 0
 	client := &agentSessionModel{}
 	options := agentSessionOptions(t, runs, store, client)
+	if profile != "ordinary" {
+		options.Runtime, err = kernel.New(kernel.Dependencies{Store: runs, ManagedRecoveryHost: store})
+		if err != nil {
+			t.Fatal(err)
+		}
+		options.Context.ManagedRecovery = true
+	}
 	client.generate = func(req model.Request) (model.Response, error) {
 		if req.Model == "specialist-model" {
 			childCalls++
@@ -95,7 +110,23 @@ func exerciseFirstPartyLifecycle(t *testing.T, mode string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pending, err := session.Prompt(ctx, "full", "perform the original task")
+	var pending harness.Snapshot
+	if profile == "successor" {
+		crashManagedObligation(t, func() { _, _ = session.Prompt(ctx, "full", "perform the original task") })
+		options.Runtime, err = kernel.New(kernel.Dependencies{Store: base, ManagedRecoveryHost: store})
+		if err != nil {
+			t.Fatal(err)
+		}
+		options.Session.Transcript = nil
+		session, err = harness.OpenAgentSession(options)
+		if err != nil {
+			t.Fatal(err)
+		}
+		clock.now = clock.now.Add(25 * time.Hour)
+		pending, err = session.Resume(ctx, "full")
+	} else {
+		pending, err = session.Prompt(ctx, "full", "perform the original task")
+	}
 	if err != nil || len(pending.Subtasks) != 1 || pending.Subtasks[0].Approval == nil || writes != 0 {
 		t.Fatalf("original child approval missing: status=%s err=%v tasks=%+v writes=%d", pending.Turn.Status, err, pending.Subtasks, writes)
 	}

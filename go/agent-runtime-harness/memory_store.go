@@ -118,8 +118,13 @@ func (store *MemoryStore) UpdateInvocation(ctx context.Context, value Invocation
 	if current.ExecutionRefID != value.ExecutionRefID {
 		return Invocation{}, ErrConflict
 	}
-	if terminalInvocationStatus(value.Status) && store.managedReservedTurnLocked(value.TurnID) {
-		return Invocation{}, ErrConflict
+	if terminalInvocationStatus(value.Status) {
+		for _, r := range store.managedReservations {
+			if r.Binding.TurnID == value.TurnID && store.managedClosures[r.Binding.DispatchID] == "" &&
+				ManagedReservationBlocksInvocation(r, current) {
+				return Invocation{}, ErrConflict
+			}
+		}
 	}
 	// Every terminal CAS must assess the same globally complete original
 	// Dispatch evidence as the new-grant and Retry admission paths. Do not
@@ -969,7 +974,18 @@ func (store *MemoryStore) AppendItem(ctx context.Context, value Item) (Item, boo
 					return Item{}, false, ErrConflict
 				}
 			}
-			if store.managedReservedTurnLocked(value.TurnID) || store.activeCancellationFenceLocked(value.TurnID) {
+			// The already elected RESUME owns the root, not an independently
+			// admitted child cancellation. The exact child Attempt was
+			// verified above; raw Store callers cannot use the exception.
+			_, _, bound := CancellationAttemptForStore(ctx)
+			target := store.invocations[store.invocationExecutionRefs[value.RunID]]
+			for _, r := range store.managedReservations {
+				if r.Binding.TurnID == value.TurnID && store.managedClosures[r.Binding.DispatchID] == "" &&
+					(!bound || ManagedReservationBlocksInvocation(r, target)) {
+					return Item{}, false, ErrConflict
+				}
+			}
+			if store.activeCancellationFenceLocked(value.TurnID) {
 				return Item{}, false, ErrConflict
 			}
 		case ExecutionDispatchParentItemID:

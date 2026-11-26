@@ -202,6 +202,20 @@ func checkManagedReservationTx(tx *gorm.DB, turnID string) error {
 	return nil
 }
 
+func checkManagedInvocationReservationTx(tx *gorm.DB, inv harness.Invocation) error {
+	var rows []managedReservationRecord
+	if err := tx.Where("turn_id = ? AND closure_hash = ?", inv.TurnID, "").Find(&rows).Error; err != nil {
+		return err
+	}
+	for _, row := range rows {
+		var r kernel.ManagedHostReservation
+		if json.Unmarshal([]byte(row.RecordJSON), &r) != nil || harness.ManagedReservationBlocksInvocation(r, inv) {
+			return harness.ErrConflict
+		}
+	}
+	return nil
+}
+
 func checkManagedCompletionTx(tx *gorm.DB, item harness.Item) error {
 	if harness.IsManagedDispatchClosure(item) {
 		return harness.ErrConflict

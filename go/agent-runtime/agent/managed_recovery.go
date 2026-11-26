@@ -82,6 +82,17 @@ func (r *Runner) leaveModelSafePoint(ctx context.Context, s kernel.Snapshot, sta
 	if !required && r.managedContextRecovery == nil {
 		return nil
 	}
+	// A historical closed transfer cannot gate another ordinary model
+	// invocation after the original successor retirement.
+	if !required {
+		point, err := r.runtime.LoadManagedRecovery(ctx, s.Run.ID)
+		if kernel.ManagedRecoveryAbsent(err) || (err == nil && (point.State == kernel.ManagedClosed || point.State == kernel.ManagedCancelled)) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+	}
 	_, err := r.runtime.LeaveManagedSafePoint(ctx, s.Run.ID)
 	if !required && kernel.ManagedRecoveryAbsent(err) {
 		return nil
@@ -94,6 +105,36 @@ func (r *Runner) leaveModelSafePoint(ctx context.Context, s kernel.Snapshot, sta
 // PARK and committed Host mode selection. No configurable callback runs before
 // the new owner's explicit LeaveManagedSafePoint ACK.
 func (r *Runner) RecoverManagedContinuation(ctx context.Context, id string) (kernel.Snapshot, kernel.ManagedClosureProof, error) {
+	return r.recoverManagedContinuation(ctx, id, "")
+}
+
+// ParkManagedForCancellation qualifies the original source and performs only
+// the native PARK. It cannot select RESUME or issue a callback. Host must
+// still elect the original cancellation under its own Turn lock.
+func (r *Runner) ParkManagedForCancellation(ctx context.Context, id string) (kernel.ManagedParkedProof, error) {
+	if !r.SupportsManagedContextRecovery() && !r.SupportsSummaryNativeRecovery() {
+		return kernel.ManagedParkedProof{}, ErrInvalidRequest
+	}
+	t, err := r.runtime.LoadManagedRecovery(ctx, id)
+	if err != nil {
+		return kernel.ManagedParkedProof{}, err
+	}
+	if t.SafePoint.LifecycleVersion != kernel.ManagedLifecycleAgentObligations || t.Selection.Mode == kernel.ManagedResume {
+		return kernel.ManagedParkedProof{}, ErrRootOutcomeUnknown
+	}
+	if _, err = r.preflightCombinedManaged(ctx, t); err != nil {
+		return kernel.ManagedParkedProof{}, err
+	}
+	return r.runtime.ParkManagedContinuation(ctx, id)
+}
+
+// CancelManagedContinuation can consume only a CANCEL elected by the original
+// Host reservation. A concurrent RESUME winner is never driven by this entry.
+func (r *Runner) CancelManagedContinuation(ctx context.Context, id string) (kernel.Snapshot, kernel.ManagedClosureProof, error) {
+	return r.recoverManagedContinuation(ctx, id, kernel.ManagedCancel)
+}
+
+func (r *Runner) recoverManagedContinuation(ctx context.Context, id string, requiredMode kernel.ManagedRecoveryMode) (kernel.Snapshot, kernel.ManagedClosureProof, error) {
 	if !r.SupportsManagedContextRecovery() && !r.SupportsSummaryNativeRecovery() {
 		return kernel.Snapshot{}, kernel.ManagedClosureProof{}, ErrRootOutcomeUnknown
 	}
@@ -137,6 +178,27 @@ func (r *Runner) RecoverManagedContinuation(ctx context.Context, id string) (ker
 	} else if !errors.Is(readErr, kernel.ErrNotFound) {
 		return kernel.Snapshot{}, kernel.ManagedClosureProof{}, readErr
 	}
+	if requiredMode != "" && current.Selection.Mode != "" && current.Selection.Mode != requiredMode {
+		return kernel.Snapshot{}, kernel.ManagedClosureProof{}, kernel.ErrExecutionConflict
+	}
+	if current.Selection.Mode == kernel.ManagedResume && current.SuccessorGrant.ID != "" &&
+		current.State != kernel.ManagedClosed && current.State != kernel.ManagedCancelled {
+		// A real returned successor is ordinary Agent work awaiting its
+		// original receipt. Never PARK it or mint another callback.
+		if source, loadErr := r.runtime.Load(ctx, id); loadErr == nil {
+			if scope, scopeErr := r.RootDeferredCleanupEligibility(ctx, id, source.Run.Revision); scopeErr == nil && scope.grant == current.SuccessorGrant {
+				next, receiptErr := r.ReconcileRootDeferredChildren(ctx, id, source.Run.Revision, scope)
+				if errors.Is(receiptErr, ErrToolOutcomeUnknown) && !scope.RetirementOnly() {
+					return next, kernel.ManagedClosureProof{}, nil
+				}
+				if receiptErr != nil {
+					return next, kernel.ManagedClosureProof{}, receiptErr
+				}
+				p, closeErr := r.runtime.ManagedRecoveryClosure(ctx, current.SafePoint.ID)
+				return next, p, closeErr
+			}
+		}
+	}
 	var obligations managedObligations
 	if current.SafePoint.LifecycleVersion == kernel.ManagedLifecycleAgentObligations {
 		obligations, err = r.preflightCombinedManaged(ctx, current)
@@ -158,6 +220,9 @@ func (r *Runner) RecoverManagedContinuation(ctx context.Context, id string) (ker
 	selected, err := r.runtime.SelectManagedContinuation(ctx, parked)
 	if err != nil {
 		return kernel.Snapshot{}, kernel.ManagedClosureProof{}, err
+	}
+	if requiredMode != "" && selected.Reservation().Mode != requiredMode {
+		return kernel.Snapshot{}, kernel.ManagedClosureProof{}, kernel.ErrExecutionConflict
 	}
 	if selected.Reservation().Mode == kernel.ManagedCancel {
 		if err = r.cancelManagedBudget(ctx, obligations, id, false); err != nil {
@@ -203,18 +268,19 @@ func (r *Runner) RecoverManagedContinuation(ctx context.Context, id string) (ker
 	if err != nil {
 		return snapshot, kernel.ManagedClosureProof{}, err
 	}
-	if t.SafePoint.LifecycleVersion == kernel.ManagedLifecycleAgentObligations {
+	switch t.SafePoint.LifecycleVersion {
+	case kernel.ManagedLifecycleAgentObligations:
 		if _, err = r.validateManagedObligations(t.SafePoint); err != nil || !kernel.ManagedSourceMatches(t.SafePoint, snapshot) {
 			return snapshot, kernel.ManagedClosureProof{}, errors.Join(ErrRootOutcomeUnknown, err)
 		}
 		if _, err = r.checkManagedLedger(ctx, obligations, id, false, false); err != nil {
 			return snapshot, kernel.ManagedClosureProof{}, err
 		}
-	} else if t.SafePoint.LifecycleVersion == kernel.ManagedLifecycleWorkingStateSummary {
+	case kernel.ManagedLifecycleWorkingStateSummary:
 		if err = r.validateSummarySafePoint(t.SafePoint); err != nil || !kernel.ManagedSourceMatches(t.SafePoint, snapshot) {
 			return snapshot, kernel.ManagedClosureProof{}, errors.Join(ErrRootOutcomeUnknown, err)
 		}
-	} else {
+	default:
 		inv, ok := activeModelInvocation(state)
 		if !ok || inv.ID != t.SafePoint.ModelInvocationID || inv.RequestHash != t.SafePoint.ModelRequestHash || inv.Status != ModelInvocationPending || inv.DispatchAttempt != 0 || !knownRootPhysicalSettlement(snapshot) {
 			return snapshot, kernel.ManagedClosureProof{}, ErrRootOutcomeUnknown
@@ -242,6 +308,11 @@ func (r *Runner) RecoverManagedContinuation(ctx context.Context, id string) (ker
 	})
 	closure, closureErr := r.runtime.ManagedRecoveryClosure(context.WithoutCancel(ctx), t.SafePoint.ID)
 	if closureErr != nil {
+		if runErr == nil {
+			if scope, err := r.RootDeferredCleanupEligibility(ctx, id, result.Run.Revision); err == nil && scope.grant == t.SuccessorGrant && !scope.RetirementOnly() {
+				return result, kernel.ManagedClosureProof{}, nil
+			}
+		}
 		return result, kernel.ManagedClosureProof{}, errors.Join(runErr, ErrRootOutcomeUnknown, closureErr)
 	}
 	return result, closure, runErr

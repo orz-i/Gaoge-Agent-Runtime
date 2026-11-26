@@ -1013,6 +1013,9 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 			return Snapshot{}, loadErr
 		}
 	}
+	if managed, recognized, managedErr := runner.cancelManagedOriginal(ctx, turn, invocation); recognized {
+		return managed, managedErr
+	}
 	intent, err := runner.cancelPreflightWithIntent(ctx, turn, invocation.ExecutionRefID,
 		func() error {
 			if checkErr := runner.checkInteractionCancellation(ctx, turn, ""); checkErr != nil {
