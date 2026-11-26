@@ -217,3 +217,24 @@ This convergence reuses the existing grant, retirement, RunChain, budget
 ledger and Harness dispatch receipt persistence. There is no new SQL table
 or schema version, and no authority granted by correlation alone. Existing
 uncorrelated unknown dispatches remain fenced. No mixed-version writers.
+
+### Windows lease-expiry conformance follow-up
+
+CI at `334e08c7` failed in `TestEA1RootAgentElectionNativeSQLite/start/unknown-tool`:
+the original native owner was still valid after waiting on the first Acquire
+response. The same failure was reproduced on native SQLite by delaying the
+successful Model receipt CAS before the Tool step and retaining the old
+fixed expiry wait; an actual native renewal extended the original lease by
+754 ms, beyond the former 150 ms margin.
+
+The shared EA1 fixture now records successful Store renewals by exact bearer
+identity (Run, owner, lease ID, epoch). RUNNING-state expiry assertions wait
+for the latest acknowledged expiry as a scheduling hint, and require
+`CheckExecution` to reject the original token under a bounded monotonic wait.
+Other Store errors fail the test; no test renews, releases or replaces a lease
+to manufacture expiry. A WAITING_INPUT gate cannot prove TTL expiry through
+the ordinary RUNNING-only execution guard and retains its distinct wait.
+Start and Resume now exercise a real renewal before the unknown Tool receipt
+cut, and still require the original grant, business snapshot and physical
+send counts to remain unchanged after expiry. No production behavior or SQL
+schema changed.

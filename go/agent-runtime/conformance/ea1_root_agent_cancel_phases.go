@@ -259,19 +259,7 @@ func ea1RootCancelUnknown(t *testing.T, factory func(*testing.T) (kernel.Store, 
 	if e = f.peer.(kernel.ExecutionStore).CheckExecution(t.Context(), f.request.ID, &lease); e != nil {
 		t.Fatalf("rejected Cancel revoked original native owner: %v", e)
 	}
-	delay := time.Until(lease.ExpiresAt.Add(150 * time.Millisecond))
-	if delay > 5*time.Second {
-		t.Fatal("unbounded native lease fixture")
-	}
-	if delay > 0 {
-		timer := time.NewTimer(delay)
-		defer timer.Stop()
-		select {
-		case <-timer.C:
-		case <-t.Context().Done():
-			t.Fatal(t.Context().Err())
-		}
-	}
+	ea1AwaitNativeExpiry(t, f.peer.(kernel.ExecutionStore), f.store.renewals.latest(t, lease))
 	fresh := f.reopen()
 	freshRT := ea1StartRuntime(t, fresh)
 	f.physical.rt = freshRT

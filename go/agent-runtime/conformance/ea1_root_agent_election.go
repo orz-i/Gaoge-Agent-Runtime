@@ -22,7 +22,7 @@ import (
 // every denial snapshot, and physical unknown never acquires retry authority.
 func RunEA1RootAgentElectionSuite(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store)) {
 	for _, entry := range []string{"start", "resume"} {
-		for _, cut := range []string{"host", "model", "tool", "deadline", "unknown-model", "unknown-tool"} {
+		for _, cut := range []string{"host", "model", "tool", "deadline", "unknown-model", "unknown-tool", "unknown-tool-renewed"} {
 			t.Run(entry+"/"+cut, func(t *testing.T) { ea1AgentElectionEntry(t, factory, entry, cut) })
 		}
 	}
@@ -38,6 +38,7 @@ type ea1ElectionStore struct {
 	created          func(kernel.Snapshot)
 	acquired         kernel.ExecutionLease
 	receiptCommitted func(kernel.Snapshot)
+	afterApply       func(kernel.StoreMutation)
 }
 
 func (s *ea1ElectionStore) Create(ctx context.Context, r kernel.Record, e []kernel.EventDraft) (kernel.Snapshot, error) {
@@ -51,6 +52,14 @@ func (s *ea1ElectionStore) AcquireExecution(ctx context.Context, r kernel.Execut
 	out, err := s.ExecutionStore.AcquireExecution(ctx, r)
 	if err == nil {
 		s.acquired = out
+	}
+	return out, err
+}
+
+func (s *ea1ElectionStore) ApplyExecution(ctx context.Context, lease kernel.ExecutionLease, revision uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
+	out, err := s.ea1AgentReceiptFault.ApplyExecution(ctx, lease, revision, m)
+	if err == nil && s.afterApply != nil {
+		s.afterApply(m)
 	}
 	return out, err
 }
@@ -104,18 +113,19 @@ func (p *ea1ElectionPhysical) execute(ctx context.Context, r tools.ExecutionRequ
 }
 
 type ea1ElectionFixture struct {
-	t             *testing.T
-	store         *ea1ElectionStore
-	rt, peer      *kernel.Runtime
-	peerStore     kernel.Store
-	reopen        func() kernel.Store
-	physical      *ea1ElectionPhysical
-	catalog       *tools.Registry
-	host          *ea1ElectionHost
-	request       agent.StartRequest
-	created       kernel.Snapshot
-	modelVerifier agent.ModelOutcomeVerifier
-	toolVerifier  agent.ToolOutcomeVerifier
+	t              *testing.T
+	store          *ea1ElectionStore
+	rt, peer       *kernel.Runtime
+	peerStore      kernel.Store
+	reopen         func() kernel.Store
+	physical       *ea1ElectionPhysical
+	catalog        *tools.Registry
+	host           *ea1ElectionHost
+	request        agent.StartRequest
+	created        kernel.Snapshot
+	modelVerifier  agent.ModelOutcomeVerifier
+	toolVerifier   agent.ToolOutcomeVerifier
+	renewalFixture bool
 }
 
 func ea1NewElection(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store), withTool bool) *ea1ElectionFixture {
@@ -142,7 +152,13 @@ func ea1NewElection(t *testing.T, factory func(*testing.T) (kernel.Store, kernel
 	return f
 }
 func (f *ea1ElectionFixture) runner(rt *kernel.Runtime, owner string, host bool) *agent.Runner {
-	deps := agent.Dependencies{Runtime: rt, Model: f.physical, Catalog: f.catalog, Executor: f.catalog, ModelOutcomeVerifier: f.modelVerifier, ToolOutcomeVerifier: f.toolVerifier, RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: 2 * time.Second}, Execution: agent.ExecutionPolicy{Model: agent.CallPolicy{Timeout: 500 * time.Millisecond, MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}, Tool: agent.CallPolicy{Timeout: 500 * time.Millisecond, MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}}}
+	ttl, callTimeout := 2*time.Second, 500*time.Millisecond
+	if f.renewalFixture {
+		// Leave the same 500 ms renewal threshold but more margin for
+		// deliberately delaying a completed Model receipt on Windows.
+		ttl, callTimeout = 4*time.Second, 2500*time.Millisecond
+	}
+	deps := agent.Dependencies{Runtime: rt, Model: f.physical, Catalog: f.catalog, Executor: f.catalog, ModelOutcomeVerifier: f.modelVerifier, ToolOutcomeVerifier: f.toolVerifier, RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: ttl}, Execution: agent.ExecutionPolicy{Model: agent.CallPolicy{Timeout: callTimeout, MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}, Tool: agent.CallPolicy{Timeout: callTimeout, MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}}}
 	if host {
 		deps.RunMiddleware = []plugin.RunMiddleware{f.host}
 	}
@@ -259,9 +275,22 @@ func (f *ea1ElectionFixture) originalReceipt(s kernel.Snapshot, completed bool) 
 	ea1StartSettlementJSONEqual(t, "original budget limits", v.Budget.Limits, f.request.Limits)
 }
 func ea1AgentElectionEntry(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store), entry, cut string) {
-	withTool := cut == "tool" || cut == "unknown-tool"
+	withTool := cut == "tool" || strings.HasPrefix(cut, "unknown-tool")
 	f := ea1NewElection(t, factory, withTool)
 	ctx := t.Context()
+	if cut == "unknown-tool-renewed" {
+		f.renewalFixture = true
+		// Delay AFTER the actual successful Model receipt CAS, not
+		// inside a provider callback or before its timeout. The next
+		// drive step must really renew the same native lease before Tool.
+		f.store.afterApply = func(m kernel.StoreMutation) {
+			for _, e := range m.Events {
+				if e.Type == "agent.model_invocation.completed" {
+					time.Sleep(750 * time.Millisecond)
+				}
+			}
+		}
+	}
 	if cut == "deadline" {
 		deadline := time.Now().UTC().Add(time.Second)
 		f.request.DeadlineAt = &deadline
@@ -347,7 +376,11 @@ func ea1AgentElectionEntry(t *testing.T, factory func(*testing.T) (kernel.Store,
 		before := f.snapshot()
 		g := f.grant()
 		f.originalReceipt(before, withTool)
-		ea1ControlWaitUntil(f.store.acquired.ExpiresAt.Add(150 * time.Millisecond))
+		latest := f.store.renewals.latest(t, f.store.acquired)
+		if f.renewalFixture && !latest.ExpiresAt.After(f.store.acquired.ExpiresAt) {
+			t.Fatal("delayed Model receipt did not exercise actual native renewal")
+		}
+		ea1AwaitNativeExpiry(t, f.peerStore.(kernel.ExecutionStore), latest)
 		f.compete(before, g, false)
 		peer := f.runner(f.peer, "retry-after-expiry", false)
 		if entry == "start" {
@@ -493,7 +526,7 @@ func ea1AgentElectionRecovery(t *testing.T, factory func(*testing.T) (kernel.Sto
 			t.Fatalf("unknown recovery contract: %v", err)
 		}
 		f.unchanged(before, grant)
-		ea1ControlWaitUntil(f.store.acquired.ExpiresAt.Add(150 * time.Millisecond))
+		ea1AwaitNativeExpiry(t, f.peerStore.(kernel.ExecutionStore), f.store.renewals.latest(t, f.store.acquired))
 		f.compete(before, grant, false)
 		fresh := f.reopen()
 		freshRT := ea1StartRuntime(t, fresh)

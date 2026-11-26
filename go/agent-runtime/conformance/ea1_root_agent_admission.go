@@ -500,6 +500,7 @@ type ea1AgentAdmissionStore struct {
 	kernel.ExecutionQuarantineStore
 	kernel.OwnedPhysicalExecutionStore
 	acquired     kernel.ExecutionLease
+	renewals     ea1LeaseRenewals
 	releaseCalls int
 	renewCalls   int
 	acquireCalls int
@@ -573,5 +574,9 @@ func (s *ea1AgentAdmissionStore) ReleaseExecution(ctx context.Context, l kernel.
 
 func (s *ea1AgentAdmissionStore) RenewExecution(ctx context.Context, r kernel.ExecutionRenewRequest) (kernel.ExecutionLease, error) {
 	s.renewCalls++
-	return s.ExecutionStore.RenewExecution(ctx, r)
+	renewed, err := s.ExecutionStore.RenewExecution(ctx, r)
+	if err == nil {
+		s.renewals.record(r.Lease, renewed)
+	}
+	return renewed, err
 }

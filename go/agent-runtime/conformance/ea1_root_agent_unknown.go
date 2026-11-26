@@ -112,19 +112,7 @@ func RunEA1RootAgentUnknownSuite(t *testing.T, factory func(*testing.T) (kernel.
 			if lease.RunID != request.ID || lease.OwnerID != "first-owner" {
 				t.Fatal("fault did not observe native original lease")
 			}
-			delay := time.Until(lease.ExpiresAt.Add(150 * time.Millisecond))
-			if delay > 5*time.Second {
-				t.Fatalf("unexpected native lease duration: %s", delay)
-			}
-			if delay > 0 {
-				timer := time.NewTimer(delay)
-				defer timer.Stop()
-				select {
-				case <-timer.C:
-				case <-t.Context().Done():
-					t.Fatal(t.Context().Err())
-				}
-			}
+			ea1AwaitNativeExpiry(t, native, fault.renewals.latest(t, lease))
 			if err = native.CheckExecution(t.Context(), request.ID, &lease); !errors.Is(err, kernel.ErrExecutionConflict) {
 				t.Fatalf("old native owner still valid after real expiry: %v", err)
 			}
@@ -182,6 +170,7 @@ type ea1AgentReceiptFault struct {
 	failures int
 	mu       sync.Mutex
 	lease    kernel.ExecutionLease
+	renewals ea1LeaseRenewals
 }
 
 func (s *ea1AgentReceiptFault) ApplyExecution(ctx context.Context, lease kernel.ExecutionLease, revision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
@@ -196,6 +185,14 @@ func (s *ea1AgentReceiptFault) ApplyExecution(ctx context.Context, lease kernel.
 	}
 	return s.ExecutionStore.ApplyExecution(ctx, lease, revision, mutation)
 }
+func (s *ea1AgentReceiptFault) RenewExecution(ctx context.Context, req kernel.ExecutionRenewRequest) (kernel.ExecutionLease, error) {
+	renewed, err := s.ExecutionStore.RenewExecution(ctx, req)
+	if err == nil {
+		s.renewals.record(req.Lease, renewed)
+	}
+	return renewed, err
+}
+
 func (s *ea1AgentReceiptFault) lastLease() kernel.ExecutionLease {
 	s.mu.Lock()
 	defer s.mu.Unlock()

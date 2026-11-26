@@ -498,7 +498,11 @@ func ea1ApprovalUnknown(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 			t.Fatal("original approved Call/checkpoint changed")
 		}
 	}
-	ea1AwaitControlExpiry(t, l)
+	if before.Run.Status == kernel.RunStatusRunning {
+		ea1AwaitNativeExpiry(t, f.peer.(kernel.ExecutionStore), f.store.renewals.latest(t, l))
+	} else {
+		ea1AwaitControlExpiry(t, f.store.renewals.latest(t, l))
+	}
 	fresh := f.reopen()
 	freshRT := ea1StartRuntime(t, fresh)
 	f.physical.rt = freshRT
@@ -609,7 +613,7 @@ func ea1ToolWaitPhase(t *testing.T, factory func(*testing.T) (kernel.Store, kern
 		t.Fatalf("unknown verified wait accepted: %v", e)
 	}
 	unchanged(f.rt)
-	ea1AwaitControlExpiry(t, l)
+	ea1AwaitNativeExpiry(t, f.peer.(kernel.ExecutionStore), f.store.renewals.latest(t, l))
 	fresh := f.reopen()
 	freshRT := ea1StartRuntime(t, fresh)
 	f.physical.rt = freshRT

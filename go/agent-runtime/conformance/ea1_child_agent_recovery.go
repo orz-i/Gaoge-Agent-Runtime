@@ -106,19 +106,7 @@ func RunEA1ChildAgentRecoveryUnknownSuite(t *testing.T, factory func(*testing.T)
 			if lease.RunID != request.ID || lease.OwnerID != "first-owner" {
 				t.Fatal("fault did not observe native original lease")
 			}
-			delay := time.Until(lease.ExpiresAt.Add(150 * time.Millisecond))
-			if delay > 5*time.Second {
-				t.Fatalf("unexpected native lease duration: %s", delay)
-			}
-			if delay > 0 {
-				timer := time.NewTimer(delay)
-				defer timer.Stop()
-				select {
-				case <-timer.C:
-				case <-t.Context().Done():
-					t.Fatal(t.Context().Err())
-				}
-			}
+			ea1AwaitNativeExpiry(t, native, fault.renewals.latest(t, lease))
 			if err = native.CheckExecution(t.Context(), request.ID, &lease); !errors.Is(err, kernel.ErrExecutionConflict) {
 				t.Fatalf("old native owner still valid after real expiry: %v", err)
 			}
