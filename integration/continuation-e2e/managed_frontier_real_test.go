@@ -122,14 +122,15 @@ func openManagedFrontierProcess(t *testing.T, db *gorm.DB, files, phase string) 
 	} else if !os.IsNotExist(e) {
 		t.Fatal(e)
 	}
+	execution, leaseDuration := conformance.ManagedFixtureExecutionPolicy()
 	session, err := harness.OpenAgentSession(harness.AgentSessionOptions{
 		LocalTools: local,
 		Runtime:    rt, Store: host, Model: managedFrontierProcessModel{files: files, phase: phase}, Inputs: managedRecoveryFileInputs{path: filepath.Join(files, "inputs.jsonl")},
 		Session: options, Context: harness.AgentSessionContextOptions{ManagedRecovery: true, ResolveWindow: func(context.Context, model.Request) (runtimecontext.ModelWindow, error) {
 			return runtimecontext.ModelWindow{ContextTokens: 4096, ReservedOutputTokens: 128}, nil
 		}},
-		Execution:    agent.ExecutionPolicy{Model: agent.CallPolicy{Timeout: time.Second, MaxAttempts: 1, MaxConcurrency: 1}, Tool: agent.CallPolicy{Timeout: time.Second, MaxAttempts: 1, MaxConcurrency: 1}},
-		RunExecution: &agent.RunExecution{OwnerID: "frontier-" + phase, LeaseDuration: 3 * time.Second},
+		Execution:    execution,
+		RunExecution: &agent.RunExecution{OwnerID: "frontier-" + phase, LeaseDuration: leaseDuration},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -258,7 +259,8 @@ func TestRealPostgresManagedOriginalFrontierMatrix(t *testing.T) {
 					t.Fatal("live probe invoked the model")
 				}
 			}
-			conformance.AwaitManagedOriginalLeaseExpiry(t, ks, original, safe, 15*time.Second)
+			_, leaseDuration := conformance.ManagedFixtureExecutionPolicy()
+			conformance.AwaitManagedOriginalLeaseExpiry(t, ks, original, safe, 2*leaseDuration+5*time.Second)
 			if phase == "unknown" || phase == "dispatch_intent/after" {
 				if _, err = session.Resume(ctx, managedRecoveryTurn); err == nil {
 					t.Fatal("unknown dispatch resumed")

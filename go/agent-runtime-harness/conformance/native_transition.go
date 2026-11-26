@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -107,10 +106,7 @@ func exerciseNativeTransitionCommit(t *testing.T, c nativeTransitionCase, factor
 		t.Fatal(err)
 	}
 	effects := 0
-	leaseDuration := 3 * time.Second
-	if runtime.GOOS == "windows" {
-		leaseDuration = 8 * time.Second
-	}
+	execution, leaseDuration := ManagedFixtureExecutionPolicy()
 	config := harness.ConfigSnapshot{AgentSpec: harness.AgentSpec{Model: "fixture", MaxModelOutputTokens: 128, Limits: agent.Limits{MaxLLMCalls: 4, MaxToolCalls: 4}},
 		SharedBudget: &budget.Limits{MaxLLMCalls: 4, MaxToolCalls: 4}}
 	if mode == "structured" {
@@ -173,7 +169,7 @@ func exerciseNativeTransitionCommit(t *testing.T, c nativeTransitionCase, factor
 			t.Fatal(e)
 		}
 		native, e := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: provider, Catalog: registry, Executor: registry, ManagedContextRecovery: bounded, BoundedBudget: b, ModelOutcomeVerifier: authority, Inputs: inputs, ApprovalPolicies: []plugin.ApprovalPolicy{approval},
-			Execution:    agent.ExecutionPolicy{Model: agent.CallPolicy{Timeout: time.Second, MaxAttempts: 1, MaxConcurrency: 1}, Tool: agent.CallPolicy{Timeout: time.Second, MaxAttempts: 1, MaxConcurrency: 1}},
+			Execution:    execution,
 			RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: leaseDuration}})
 		if e != nil {
 			t.Fatal(e)

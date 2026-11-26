@@ -47,6 +47,14 @@ func (r *Runner) qualifyNativeTransition(ctx context.Context, source kernel.Snap
 	if m.Status != kernel.RunStatusRunning || (!r.SupportsManagedContextRecovery() && !r.SupportsSummaryNativeRecovery()) {
 		return nil, nil
 	}
+	// A selected successor cannot publish a second first-owner safe point.
+	// Decide that before decoding the potentially large, already encoded
+	// reducer target. The same ordinary Kernel physical permit still
+	// validates and commits the mutation; this is not a new execution path.
+	if g := r.activeRootGrant; g != nil && g.AdmissionOperation == "managed_resume" &&
+		g.ChildRunID == source.Run.ID && source.Run.ParentRunID == "" && r.activeRunLease != nil {
+		return nil, nil
+	}
 	state, err := decodeState(m.State)
 	if err != nil {
 		return nil, err
@@ -58,7 +66,7 @@ func (r *Runner) qualifyNativeTransition(ctx context.Context, source kernel.Snap
 			if !ok {
 				return nil, ErrInvalidRequest
 			}
-			return r.qualifyManagedModelBoundary(ctx, source, state, *inv, m)
+			return r.qualifyManagedModelBoundary(ctx, source, state, *inv)
 		case EventContextSummaryConsumed:
 			// Its exact bound artifact/checkpoint installation proof is
 			// retained, including the existing pure Summary profile.

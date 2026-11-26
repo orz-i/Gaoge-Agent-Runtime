@@ -39,7 +39,7 @@ func (r *Runner) readManagedPreparationContext(ctx context.Context, b kernel.Man
 }
 
 func managedPreparationState(s kernel.Snapshot, state runState) bool {
-	if s.Run.Status != kernel.RunStatusRunning || !managedObligationsQuiescent(state) || !knownRootPhysicalSettlement(s) {
+	if s.Run.Status != kernel.RunStatusRunning || !managedObligationsQuiescent(state) || !knownRootStatePhysicalSettlement(state) {
 		return false
 	}
 	_, active := activeModelInvocation(state)
@@ -91,10 +91,6 @@ func (r *Runner) ensureManagedPreparation(ctx context.Context, s kernel.Snapshot
 }
 
 func (r *Runner) qualifyManagedPreparation(ctx context.Context, s kernel.Snapshot, state runState, m kernel.Mutation, b kernel.ManagedHostBinding) (*kernel.ManagedSafePoint, error) {
-	target := nativeTransitionTarget(s, m)
-	if !managedPreparationState(target, state) {
-		return nil, nil
-	}
 	p, l, eligible, err := r.freezeManagedSource(ctx, s, state, b)
 	if err != nil || !eligible {
 		return nil, err

@@ -75,7 +75,13 @@ func defaultRunExecution(rt *kernel.Runtime, policy ExecutionPolicy) (*RunExecut
 
 func knownRootPhysicalSettlement(snapshot kernel.Snapshot) bool {
 	state, err := decodeState(snapshot.State)
-	if err != nil || state.ToolDispatchID != "" || state.ToolWait != nil || len(state.DeferredChildren) != 0 || (state.ToolAdmission != nil && state.ToolAdmission.Phase == toolAdmissionEvaluating) {
+	return err == nil && knownRootStatePhysicalSettlement(state)
+}
+
+// Callers that already validated the exact aggregate can use the same
+// settlement predicate without decoding and restoring opaque evidence again.
+func knownRootStatePhysicalSettlement(state runState) bool {
+	if state.ToolDispatchID != "" || state.ToolWait != nil || len(state.DeferredChildren) != 0 || (state.ToolAdmission != nil && state.ToolAdmission.Phase == toolAdmissionEvaluating) {
 		return false
 	}
 	for _, inv := range state.ModelInvocations {
@@ -205,7 +211,7 @@ func (runner *Runner) executeOwnedRoot(ctx context.Context, current kernel.Snaps
 	state, stateErr := decodeState(latest.State)
 	hostComplete := lifecycle.Complete() && !scoped.rootCallbacks.unknown.Load() && stateErr == nil &&
 		(state.ToolAdmission == nil || state.ToolAdmission.Phase != toolAdmissionEvaluating)
-	settled := hostComplete && knownRootPhysicalSettlement(latest)
+	settled := hostComplete && knownRootStatePhysicalSettlement(state)
 	outcome := kernel.OwnedPhysicalCallbackOutcome{HostCompleted: hostComplete, LeaseOwned: !external}
 	pendingCall, pending, _ := FrozenPendingDispatch(latest)
 	returnedCall := false

@@ -19,7 +19,7 @@ func (r *Runner) SupportsManagedContextRecovery() bool {
 	return r != nil && r.managedContextRecovery != nil
 }
 
-func (r *Runner) qualifyManagedModelBoundary(ctx context.Context, s kernel.Snapshot, state runState, inv ModelInvocation, m kernel.Mutation) (*kernel.ManagedSafePoint, error) {
+func (r *Runner) qualifyManagedModelBoundary(ctx context.Context, s kernel.Snapshot, state runState, inv ModelInvocation) (*kernel.ManagedSafePoint, error) {
 	if state.SummaryNativeRecovery && inv.Purpose == ModelInvocationContextSummary {
 		return r.qualifySummaryBoundary(ctx, s, state)
 	}
@@ -40,8 +40,7 @@ func (r *Runner) qualifyManagedModelBoundary(ctx context.Context, s kernel.Snaps
 		if err != nil {
 			return nil, err
 		}
-		target := nativeTransitionTarget(s, m)
-		if !eligible || !knownRootPhysicalSettlement(target) {
+		if !eligible || !knownRootStatePhysicalSettlement(state) {
 			return nil, nil
 		}
 		id := "managed-safe-" + kernel.ManagedDigest(struct {

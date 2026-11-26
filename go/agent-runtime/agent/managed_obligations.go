@@ -200,7 +200,7 @@ func (r *Runner) validateManagedObligations(point kernel.ManagedSafePoint) (mana
 	} else if !validModelInvocationReceipt(inv) {
 		return p, ErrInvalidRequest
 	}
-	if p.SettledReceiptDigest == "" && !knownRootPhysicalSettlement(point.Source) {
+	if p.SettledReceiptDigest == "" && !knownRootStatePhysicalSettlement(state) {
 		return p, ErrInvalidRequest
 	}
 

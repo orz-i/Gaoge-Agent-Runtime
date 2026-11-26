@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -139,10 +138,7 @@ func TestSQLiteManagedOriginalObligationsReopen(t *testing.T) {
 				}
 			}
 			req := request()
-			leaseDuration := 3 * time.Second
-			if runtime.GOOS == "windows" {
-				leaseDuration = 8 * time.Second
-			}
+			execution, leaseDuration := conformance.ManagedFixtureExecutionPolicy()
 			options := harness.AgentSessionOptions{Runtime: rt, Store: host, Model: provider, Inputs: inputs,
 				Session: harness.SessionOptions{HostThread: req.HostThread, Actor: req.Actor, Thread: req.Thread,
 					Config: harness.ConfigSnapshot{AgentSpec: harness.AgentSpec{Model: "fixture", MaxModelOutputTokens: 128}, SharedBudget: &budget.Limits{MaxLLMCalls: 3}},
@@ -152,7 +148,7 @@ func TestSQLiteManagedOriginalObligationsReopen(t *testing.T) {
 				Context: harness.AgentSessionContextOptions{ManagedRecovery: true, ResolveWindow: func(context.Context, model.Request) (runtimecontext.ModelWindow, error) {
 					return runtimecontext.ModelWindow{ContextTokens: 4096, ReservedOutputTokens: 128}, nil
 				}},
-				Execution:    agent.ExecutionPolicy{Model: agent.CallPolicy{Timeout: time.Second, MaxAttempts: 1, MaxConcurrency: 1}, Tool: agent.CallPolicy{Timeout: time.Second, MaxAttempts: 1, MaxConcurrency: 1}},
+				Execution:    execution,
 				RunExecution: &agent.RunExecution{OwnerID: "sqlite-managed-original", LeaseDuration: leaseDuration}}
 			session, e := harness.OpenAgentSession(options)
 			if e != nil {

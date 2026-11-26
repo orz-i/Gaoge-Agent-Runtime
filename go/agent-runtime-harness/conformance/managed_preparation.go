@@ -65,11 +65,49 @@ func (s *preparationCut) ApplyExecution(ctx context.Context, l kernel.ExecutionL
 	return next, err
 }
 
+// The positive recovery fixtures are not timeout tests. These two
+// deterministic delays reproduce slow storage before physical dispatch and
+// a successful response that would outlive the old one-second fixture.
+const preparationSlowIO = 1250 * time.Millisecond
+
+// ManagedFixtureExecutionPolicy covers real Store reads, admission and
+// settlement inside a physical call. These matrices assert the injected
+// state/receipt cut, not elapsed-time behavior. Keep one bounded attempt
+// and the production one-second lease safety margin; encrypted Windows
+// profiles need a larger window for the same operation.
+func ManagedFixtureExecutionPolicy() (agent.ExecutionPolicy, time.Duration) {
+	timeout, lease := 3*time.Second, 5*time.Second
+	if runtime.GOOS == "windows" {
+		timeout, lease = 6*time.Second, 9*time.Second
+	}
+	call := agent.CallPolicy{Timeout: timeout, MaxAttempts: 1, MaxConcurrency: 1}
+	return agent.ExecutionPolicy{Model: call, Tool: call}, lease
+}
+
+type slowPreparationDispatch struct{ preparationKernelPorts }
+
+func (s slowPreparationDispatch) ApplyExecution(ctx context.Context, l kernel.ExecutionLease, rev uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
+	for _, e := range m.Events {
+		if e.Type == "agent.model_invocation.dispatch_intent" {
+			timer := time.NewTimer(preparationSlowIO)
+			defer timer.Stop()
+			select {
+			case <-timer.C:
+			case <-ctx.Done():
+				return kernel.Snapshot{}, ctx.Err()
+			}
+			break
+		}
+	}
+	return s.preparationKernelPorts.ApplyExecution(ctx, l, rev, m)
+}
+
 type preparationSummaryModel struct {
-	store     kernel.Store
-	inputs    *agent.MemoryRunInputs
-	requests  []model.Request
-	summaries int
+	store         kernel.Store
+	inputs        *agent.MemoryRunInputs
+	requests      []model.Request
+	summaries     int
+	businessDelay time.Duration
 }
 
 func (*preparationSummaryModel) Capabilities(context.Context, string) (model.Capabilities, error) {
@@ -88,6 +126,10 @@ func (m *preparationSummaryModel) Generate(ctx context.Context, r model.Request)
 			return out, err
 		}
 		out.Content = `{"goal":"retain verified evidence","constraints":["never invent facts"],"completed":[],"pending":["verify original evidence"],"decisions":[]}`
+	} else if m.businessDelay > 0 {
+		// Deliberately return a successful result even when the old call
+		// context expired. Runtime must never replay that physical result.
+		time.Sleep(m.businessDelay)
 	}
 	return out, nil
 }
@@ -166,10 +208,7 @@ func ManagedPreparationSummary(t *testing.T, factory func(*testing.T) (kernel.St
 				if err != nil {
 					t.Fatal(err)
 				}
-				leaseDuration := 3 * time.Second
-				if runtime.GOOS == "windows" {
-					leaseDuration = 8 * time.Second
-				}
+				execution, leaseDuration := ManagedFixtureExecutionPolicy()
 				firstText := "first prompt " + strings.Repeat("ORIGINAL_EVIDENCE_", 700)
 				secondText := "second prompt " + strings.Repeat("CURRENT_EVIDENCE_", 700)
 				options := harness.AgentSessionOptions{Runtime: rt, Store: h, Model: provider,
@@ -192,7 +231,7 @@ func ManagedPreparationSummary(t *testing.T, factory func(*testing.T) (kernel.St
 					Context: harness.AgentSessionContextOptions{ReadArtifacts: true, ResolveWindow: func(context.Context, model.Request) (runtimecontext.ModelWindow, error) {
 						return runtimecontext.ModelWindow{ContextTokens: 65536, ReservedOutputTokens: 128}, nil
 					}},
-					Execution:    agent.ExecutionPolicy{Model: agent.CallPolicy{Timeout: time.Second, MaxAttempts: 1, MaxConcurrency: 1}, Tool: agent.CallPolicy{Timeout: time.Second, MaxAttempts: 1, MaxConcurrency: 1}},
+					Execution:    execution,
 					RunExecution: &agent.RunExecution{OwnerID: "preparation-original", LeaseDuration: leaseDuration}}
 				session, err := harness.OpenAgentSession(options)
 				if err != nil {
@@ -267,7 +306,14 @@ func ManagedPreparationSummary(t *testing.T, factory func(*testing.T) (kernel.St
 					t.Fatal("missing reopened Host ports")
 				}
 				provider.store = base
-				options.Runtime, err = kernel.New(kernel.Dependencies{Store: base, ManagedRecoveryHost: h})
+				successorStore := base
+				if boundary == "input" && after {
+					successorStore = slowPreparationDispatch{base.(preparationKernelPorts)}
+				}
+				if boundary == "business" && !after {
+					provider.businessDelay = preparationSlowIO
+				}
+				options.Runtime, err = kernel.New(kernel.Dependencies{Store: successorStore, ManagedRecoveryHost: h})
 				if err != nil {
 					t.Fatal(err)
 				}
