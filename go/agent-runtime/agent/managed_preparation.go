@@ -71,7 +71,7 @@ func (r *Runner) managedPreparationBinding(ctx context.Context, s kernel.Snapsho
 }
 
 func (r *Runner) ensureManagedPreparation(ctx context.Context, s kernel.Snapshot, state runState) (kernel.Snapshot, error) {
-	b, ok := r.managedPreparationBinding(ctx, s, state)
+	_, ok := r.managedPreparationBinding(ctx, s, state)
 	if !ok || !managedPreparationState(s, state) {
 		return s, nil
 	}
@@ -87,41 +87,24 @@ func (r *Runner) ensureManagedPreparation(ctx context.Context, s kernel.Snapshot
 	}
 	m := kernel.Mutation{Status: kernel.RunStatusRunning, State: s.State, Checkpoint: s.Checkpoint, ErrorCode: s.Run.ErrorCode, ErrorDetail: s.Run.ErrorDetail,
 		Events: []kernel.EventDraft{{Type: "agent.native_preparation.ready", Message: "First-party model preparation frontier"}}}
-	next, qualified, err := r.commitManagedPreparation(ctx, s, state, m, b)
-	if err != nil || !qualified {
-		return s, err
-	}
-	return next, nil
+	return r.commitNativeTransition(ctx, s, m)
 }
 
-// Commit the actual input cursor and its next preparation boundary together.
-// Ineligible (e.g. opaque) execution keeps its existing ordinary CAS.
-func (r *Runner) commitManagedInput(ctx context.Context, s kernel.Snapshot, state runState, m kernel.Mutation) (kernel.Snapshot, error) {
-	if b, ok := r.managedPreparationBinding(ctx, s, state); ok {
-		next, qualified, err := r.commitManagedPreparation(ctx, s, state, m, b)
-		if qualified || err != nil {
-			return next, err
-		}
-	}
-	return r.runtime.Apply(ctx, s.Run.ID, s.Run.Revision, m)
-}
-
-func (r *Runner) commitManagedPreparation(ctx context.Context, s kernel.Snapshot, state runState, m kernel.Mutation, b kernel.ManagedHostBinding) (kernel.Snapshot, bool, error) {
-	target := s
-	target.State = m.State
+func (r *Runner) qualifyManagedPreparation(ctx context.Context, s kernel.Snapshot, state runState, m kernel.Mutation, b kernel.ManagedHostBinding) (*kernel.ManagedSafePoint, error) {
+	target := nativeTransitionTarget(s, m)
 	if !managedPreparationState(target, state) {
-		return s, false, nil
+		return nil, nil
 	}
 	p, l, eligible, err := r.freezeManagedSource(ctx, s, state, b)
 	if err != nil || !eligible {
-		return s, false, err
+		return nil, err
 	}
 	if p.LedgerID != "" && !managedPreparationLedger(state, l) {
-		return s, false, budget.ErrLedgerConflict
+		return nil, budget.ErrLedgerConflict
 	}
 	source, err := r.readManagedPreparationContext(ctx, b, nil, state)
 	if err != nil {
-		return s, false, err
+		return nil, err
 	}
 	p.Phase = "prepare"
 	p.PreparationContext = &source
@@ -131,17 +114,20 @@ func (r *Runner) commitManagedPreparation(ctx context.Context, s kernel.Snapshot
 			Context          kernel.ManagedPreparationContext
 		}{p.SourceRevision, p.InputCursor, source})
 	if !ok {
-		return s, false, nil
+		return nil, nil
 	}
+	if !kernel.ManagedPreparationTransition(m.Events) {
+		return nil, ErrInvalidRequest
+	}
+	p.PreparationTransitionDigest = kernel.ManagedDigest(m.Events)
 	p.Journal = journal
 	raw, err := json.Marshal(p)
 	if err != nil {
-		return s, false, err
+		return nil, err
 	}
 	id := "managed-safe-" + kernel.ManagedDigest(struct {
 		Grant, Phase string
 		Revision     uint64
 	}{r.activeRootGrant.ID, p.Phase, p.SourceRevision})
-	next, err := r.applyManagedSafePoint(ctx, s, ModelInvocation{}, m, b, id, kernel.ManagedLifecycleAgentObligations, raw)
-	return next, true, err
+	return r.managedTransitionPoint(ModelInvocation{}, b, id, kernel.ManagedLifecycleAgentObligations, raw), nil
 }

@@ -85,7 +85,7 @@ func (runner *Runner) pauseCallAllowance(
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
-	paused, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
+	paused, err := runner.commitNativeTransition(ctx, snapshot, kernel.Mutation{
 		Status: kernel.RunStatusPausedBudget, State: encoded, Checkpoint: snapshot.Checkpoint,
 		ErrorCode: code, ErrorDetail: fmt.Sprintf("%s call allowance exhausted", dimension),
 		Events: []kernel.EventDraft{{Type: "agent.budget_paused", Message: dimension}},

@@ -2,6 +2,7 @@ package continuatione2e
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -19,6 +20,7 @@ import (
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 	"gorm.io/gorm"
 )
 
@@ -56,6 +58,12 @@ func (m managedFrontierProcessModel) Generate(_ context.Context, req model.Reque
 	if m.phase == "unknown" {
 		os.Exit(managedRecoveryCrashExit)
 	}
+	if strings.HasPrefix(m.phase, "continued/") {
+		return model.Response{Content: "original continuation", Continue: true}, nil
+	}
+	if strings.HasPrefix(m.phase, "tool_completed/") {
+		return model.Response{ToolCalls: []tools.Call{{ID: "original-tool", ToolKey: "fixture.lookup", Arguments: json.RawMessage(`{}`)}}}, nil
+	}
 	if strings.HasPrefix(m.phase, "input_applied/") {
 		if err := appendManagedRecoveryRecord(filepath.Join(m.files, "inputs.jsonl"), agent.RunInput{Sequence: 1, ID: "original-steering", Text: "frontier steering"}); err != nil {
 			return model.Response{}, err
@@ -80,6 +88,10 @@ func openManagedFrontierProcess(t *testing.T, db *gorm.DB, files, phase string) 
 			event = "agent.input_applied"
 		case "initial_intent":
 			event = "agent.model_invocation.pending"
+		case "continued":
+			event = "agent.model_continued"
+		case "tool_completed":
+			event = "tool.completed"
 		default:
 			event = "agent.model_invocation." + event
 		}
@@ -96,8 +108,23 @@ func openManagedFrontierProcess(t *testing.T, db *gorm.DB, files, phase string) 
 			return nil, nil
 		})
 	}
+	var local []harness.SessionTool
+	if _, e := os.Stat(filepath.Join(files, "tool.jsonl")); e == nil {
+		options.Config.SharedBudget.MaxToolCalls = 2
+		local = []harness.SessionTool{{Registration: tools.Registration{
+			Definition: tools.Definition{Key: "fixture.lookup", Name: "fixture lookup", InputSchema: json.RawMessage(`{"type":"object","additionalProperties":false}`)},
+			Handler: tools.HandlerFunc(func(_ context.Context, r tools.ExecutionRequest) (tools.ExecutionResult, error) {
+				if err := appendManagedRecoveryRecord(filepath.Join(files, "tool.jsonl"), r); err != nil {
+					return tools.ExecutionResult{}, err
+				}
+				return tools.ExecutionResult{Content: json.RawMessage(`{"original":"evidence"}`), Receipt: tools.Receipt{ExecutionID: r.Call.ID, Disposition: "read"}}, nil
+			})}, Policy: harness.ToolPolicySnapshot{Key: "fixture.lookup", DefinitionVersion: "fixture-v1", ApprovalMode: "never", SideEffectLevel: "read"}}}
+	} else if !os.IsNotExist(e) {
+		t.Fatal(e)
+	}
 	session, err := harness.OpenAgentSession(harness.AgentSessionOptions{
-		Runtime: rt, Store: host, Model: managedFrontierProcessModel{files: files, phase: phase}, Inputs: managedRecoveryFileInputs{path: filepath.Join(files, "inputs.jsonl")},
+		LocalTools: local,
+		Runtime:    rt, Store: host, Model: managedFrontierProcessModel{files: files, phase: phase}, Inputs: managedRecoveryFileInputs{path: filepath.Join(files, "inputs.jsonl")},
 		Session: options, Context: harness.AgentSessionContextOptions{ManagedRecovery: true, ResolveWindow: func(context.Context, model.Request) (runtimecontext.ModelWindow, error) {
 			return runtimecontext.ModelWindow{ContextTokens: 4096, ReservedOutputTokens: 128}, nil
 		}},
@@ -125,7 +152,7 @@ func TestRealPostgresManagedOriginalFrontierMatrix(t *testing.T) {
 	if dsn == "" {
 		t.Skip("TEST_POSTGRES_DSN is not configured")
 	}
-	for _, phase := range []string{"claimed/before", "claimed/after", "completed/before", "completed/after", "input_applied/before", "input_applied/after", "cancel/after", "unknown", "dispatch_intent/after", "initial_input/before", "initial_input/after", "initial_intent/before", "initial_intent/after"} {
+	for _, phase := range []string{"claimed/before", "claimed/after", "completed/before", "completed/after", "input_applied/before", "input_applied/after", "cancel/after", "unknown", "dispatch_intent/after", "initial_input/before", "initial_input/after", "initial_intent/before", "initial_intent/after", "continued/before", "continued/after", "tool_completed/after"} {
 		t.Run(phase, func(t *testing.T) {
 			t.Parallel()
 			ctx := t.Context()
@@ -143,6 +170,13 @@ func TestRealPostgresManagedOriginalFrontierMatrix(t *testing.T) {
 				}
 			}
 			initial := strings.HasPrefix(phase, "initial_")
+			continued := strings.HasPrefix(phase, "continued/")
+			tool := strings.HasPrefix(phase, "tool_completed/")
+			if tool {
+				if err := os.WriteFile(filepath.Join(files, "tool.jsonl"), nil, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
 			if initial {
 				if err := appendManagedRecoveryRecord(filepath.Join(files, "inputs.jsonl"), agent.RunInput{Sequence: 1, ID: "initial-steering", Text: "initial steering"}); err != nil {
 					t.Fatal(err)
@@ -188,9 +222,21 @@ func TestRealPostgresManagedOriginalFrontierMatrix(t *testing.T) {
 					t.Fatalf("wrong initial frontier: %+v", proof)
 				}
 			}
+			if phase == "continued/after" || tool {
+				proof, ok := safe.SafePoint.AgentObligations()
+				if !ok || proof.Phase != "prepare" || proof.PreparationTransitionDigest == "" || !kernel.ManagedSourceMatches(safe.SafePoint, original) || before.ModelInvocations[0].Status != agent.ModelInvocationConsumed {
+					t.Fatalf("transition committed without exact preparation proof: %+v", proof)
+				}
+			}
+			if tool {
+				ledger, e := host.LoadBudget(ctx, turnID)
+				if e != nil || ledger.View("").Usage.ToolCalls != 1 || len(readManagedRecoveryRecords[tools.ExecutionRequest](t, filepath.Join(files, "tool.jsonl"))) != 1 {
+					t.Fatalf("original Tool not settled: %v", e)
+				}
+			}
 			beforeCalls := readManagedRecoveryRecords[model.Request](t, filepath.Join(files, "model.jsonl"))
 			wantBefore := 0
-			if strings.HasPrefix(phase, "completed/") || strings.HasPrefix(phase, "input_applied/") || phase == "unknown" {
+			if strings.HasPrefix(phase, "completed/") || strings.HasPrefix(phase, "input_applied/") || phase == "unknown" || continued || tool {
 				wantBefore = 1
 			}
 			if len(beforeCalls) != wantBefore {
@@ -228,6 +274,10 @@ func TestRealPostgresManagedOriginalFrontierMatrix(t *testing.T) {
 				done, err = session.Cancel(ctx, managedRecoveryTurn, "stop original task")
 			} else {
 				done, err = session.Resume(ctx, managedRecoveryTurn)
+				// Continue is a legitimate native yield, not an error.
+				if continued && err == nil && done.Turn.Status != harness.TurnCompleted {
+					done, err = session.Resume(ctx, managedRecoveryTurn)
+				}
 			}
 			if err != nil {
 				t.Fatalf("recover: %v", err)
@@ -251,6 +301,9 @@ func TestRealPostgresManagedOriginalFrontierMatrix(t *testing.T) {
 			if strings.HasPrefix(phase, "input_applied/") {
 				wantCalls, wantCursor = 2, 1
 			}
+			if continued || tool {
+				wantCalls = 2
+			}
 			if initial {
 				wantCursor = 1
 			}
@@ -265,8 +318,14 @@ func TestRealPostgresManagedOriginalFrontierMatrix(t *testing.T) {
 			if initial && strings.Count(requestMessages(calls[0]), "initial steering") != 1 {
 				t.Fatal("initial input lost or duplicated")
 			}
-			if wantCalls == 2 && strings.Count(requestMessages(calls[1]), "frontier steering") != 1 {
+			if strings.HasPrefix(phase, "input_applied/") && strings.Count(requestMessages(calls[1]), "frontier steering") != 1 {
 				t.Fatal("input duplicated or missing")
+			}
+			if continued && strings.Count(requestMessages(calls[1]), "original continuation") != 1 {
+				t.Fatal("original continuation duplicated or lost")
+			}
+			if tool && (ledger.View("").Usage.ToolCalls != 1 || len(readManagedRecoveryRecords[tools.ExecutionRequest](t, filepath.Join(files, "tool.jsonl"))) != 1 || strings.Count(requestMessages(calls[1]), `{"original":"evidence"}`) != 1) {
+				t.Fatal("original Tool effect or receipt duplicated or lost")
 			}
 			if _, err = ks.LookupChildExecution(ctx, root.ExecutionRefID); !errors.Is(err, kernel.ErrNotFound) {
 				t.Fatalf("original grant not retired: %v", err)

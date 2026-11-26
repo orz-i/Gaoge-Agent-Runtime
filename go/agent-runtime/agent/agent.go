@@ -81,7 +81,7 @@ func (runner *Runner) completeWithToolResult(
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
-	completed, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
+	completed, err := runner.commitNativeTransition(ctx, snapshot, kernel.Mutation{
 		Status: kernel.RunStatusCompleted, State: encodedState, Checkpoint: snapshot.Checkpoint,
 		Result: &kernel.Result{
 			ContentType: "application/json",
@@ -162,7 +162,7 @@ func (runner *Runner) correctCompletion(
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
-	return runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
+	return runner.commitNativeTransition(ctx, snapshot, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
 		Events: []kernel.EventDraft{{
 			Type: "agent.completion_corrected", Message: correction.Code, Wakeup: true,
@@ -1337,7 +1337,7 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 					active.OutcomeErrorDetail = err.Error()
 					if replaceLastModelInvocation(&currentState, *active) {
 						if encoded, encodeErr := encodeState(currentState); encodeErr == nil {
-							diagnosed, diagnoseErr := runner.runtime.Apply(context.WithoutCancel(ctx), current.Run.ID, current.Run.Revision, kernel.Mutation{Status: current.Run.Status, State: encoded, Checkpoint: current.Checkpoint, ErrorCode: code, ErrorDetail: err.Error()})
+							diagnosed, diagnoseErr := runner.commitNativeTransition(context.WithoutCancel(ctx), current, kernel.Mutation{Status: current.Run.Status, State: encoded, Checkpoint: current.Checkpoint, ErrorCode: code, ErrorDetail: err.Error()})
 							if diagnoseErr == nil {
 								current = diagnosed
 							} else {
@@ -1803,7 +1803,7 @@ func (runner *Runner) correctRequiredToolCompletion(
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
-	return runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
+	return runner.commitNativeTransition(ctx, snapshot, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
 		Events: []kernel.EventDraft{{
 			Type: "agent.completion_corrected", Message: strings.Join(missing, ","), Wakeup: true,
@@ -2122,7 +2122,7 @@ func (runner *Runner) queueToolCalls(
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
-	next, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
+	next, err := runner.commitNativeTransition(ctx, snapshot, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
 		Events: []kernel.EventDraft{{
 			Type: "tool.batch_requested", Message: "Tool call batch requested", Wakeup: true,
@@ -2658,7 +2658,7 @@ func (runner *Runner) persistPendingToolYield(
 	if err != nil {
 		return kernel.Snapshot{}, false, err
 	}
-	next, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
+	next, err := runner.commitNativeTransition(ctx, snapshot, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
 		Events: []kernel.EventDraft{{
 			Type: EventToolPending, Message: tools.ReceiptDispositionPending, Wakeup: true,
@@ -2710,7 +2710,7 @@ func (runner *Runner) persistCompletedToolCall(
 	if err != nil {
 		return kernel.Snapshot{}, false, err
 	}
-	next, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
+	next, err := runner.commitNativeTransition(ctx, snapshot, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
 		Events: []kernel.EventDraft{{
 			Type: "tool.completed", Message: result.Receipt.Disposition, Wakeup: true,
@@ -2777,7 +2777,7 @@ func (runner *Runner) recordRecoverableToolError(
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
-	next, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
+	next, err := runner.commitNativeTransition(ctx, snapshot, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
 		Events: []kernel.EventDraft{{
 			Type: "tool.correction_requested", Message: strings.TrimSpace(code), Wakeup: true,
@@ -2892,7 +2892,7 @@ func (runner *Runner) complete(
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
-	completed, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
+	completed, err := runner.commitNativeTransition(ctx, snapshot, kernel.Mutation{
 		Status: kernel.RunStatusCompleted, State: encodedState, Checkpoint: snapshot.Checkpoint,
 		Result: result,
 		Events: []kernel.EventDraft{{Type: "agent.completed", Message: "Agent loop completed"}},
@@ -2949,7 +2949,7 @@ func (runner *Runner) fail(
 	if err != nil {
 		return kernel.Snapshot{}, errors.Join(cause, err)
 	}
-	failed, transitionErr := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
+	failed, transitionErr := runner.commitNativeTransition(ctx, snapshot, kernel.Mutation{
 		Status: kernel.RunStatusFailed, State: encoded, Checkpoint: snapshot.Checkpoint,
 		ErrorCode: code, ErrorDetail: cause.Error(),
 		Events: []kernel.EventDraft{{Type: "agent.failed", Message: code}},

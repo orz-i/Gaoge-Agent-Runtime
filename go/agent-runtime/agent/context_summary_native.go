@@ -82,28 +82,28 @@ func summaryNativePhase(state runState) (ModelInvocation, bool) {
 	return invocation, true
 }
 
-func (runner *Runner) commitSummarySafePoint(ctx context.Context, snapshot kernel.Snapshot, state runState, mutation kernel.Mutation) (kernel.Snapshot, error) {
+func (runner *Runner) qualifySummaryBoundary(ctx context.Context, snapshot kernel.Snapshot, state runState) (*kernel.ManagedSafePoint, error) {
 	if !state.SummaryNativeRecovery {
-		return runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, mutation)
+		return nil, nil
 	}
 	if !runner.SupportsSummaryNativeRecovery() || runner.activeRootGrant == nil || runner.activeRunLease == nil || snapshot.Run.ParentRunID != "" {
-		return snapshot, ErrInvalidRequest
+		return nil, ErrInvalidRequest
 	}
 	// The Host reservation is immutable per original dispatch. This release
 	// supports its first transfer and exact same-point ACK repair, not a new
 	// cross-phase recovery chain after a successor has already been enabled.
 	if runner.activeRootGrant.AdmissionOperation == "managed_resume" {
-		return runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, mutation)
+		return nil, nil
 	}
 	invocation, valid := summaryNativePhase(state)
 	host, bound := runner.runtime.ManagedDispatch(ctx, snapshot.Run.ID)
 	if !valid || !bound {
-		return snapshot, kernel.ErrExecutionRequired
+		return nil, kernel.ErrExecutionRequired
 	}
 	lifecycle := contextSummaryLifecycle{Phase: invocation.Status, SourceRevision: snapshot.Run.Revision + 1,
 		InvocationID: invocation.ID, RequestHash: invocation.RequestHash, BindingDigest: kernel.ManagedDigest(invocation.ContextSummary)}
 	if !callbackscope.Operation(ctx, runner.contextSummary.bounded, "context.summary.native-phase:"+string(invocation.Status), lifecycle) {
-		return snapshot, ErrInvalidRequest
+		return nil, ErrInvalidRequest
 	}
 	raw, err := json.Marshal(lifecycle)
 	version := kernel.ManagedLifecycleWorkingStateSummary
@@ -114,20 +114,20 @@ func (runner *Runner) commitSummarySafePoint(ctx context.Context, snapshot kerne
 			// A receipt already committed with no eligible suspension still
 			// has its original ordinary recovery semantics.
 			if invocation.Status != ModelInvocationPending {
-				return runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, mutation)
+				return nil, nil
 			}
-			return snapshot, ErrRootOutcomeUnknown
+			return nil, ErrRootOutcomeUnknown
 		}
 		version = kernel.ManagedLifecycleAgentObligations
 	}
 	if err != nil {
-		return snapshot, err
+		return nil, err
 	}
 	id := "summary-safe-" + kernel.ManagedDigest(struct {
 		Grant, Invocation, Phase string
 		Revision                 uint64
 	}{runner.activeRootGrant.ID, invocation.ID, string(invocation.Status), snapshot.Run.Revision + 1})
-	return runner.applyManagedSafePoint(ctx, snapshot, invocation, mutation, host, id, version, raw)
+	return runner.managedTransitionPoint(invocation, host, id, version, raw), nil
 }
 
 func (runner *Runner) validateSummarySafePoint(point kernel.ManagedSafePoint) error {

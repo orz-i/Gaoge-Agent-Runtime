@@ -443,17 +443,51 @@ func TestManagedPreparationSafePointRequiresExactNativeProof(t *testing.T) {
 		t.Fatal("pre-Model proof required a fabricated invocation")
 	}
 	proof := ManagedSafePointProof{point: point, proof: featurecontrol.Seal(previous.Run.ID, previous.Run.Revision, "managed_safe_point", grant.ID, previous.State, point)}
-	for _, event := range []string{"agent.native_preparation.ready", "agent.input_applied"} {
-		if !proof.MatchesMutation(previous, next, lease, grant, []EventDraft{{Type: event}}) {
+	// New points bind the entire exact event (including payload and wakeup).
+	// Older ready/input evidence cannot authorize a new transition class.
+	for _, event := range []string{"agent.native_preparation.ready", "agent.input_applied", "agent.model_continued", "agent.completion_corrected", "tool.completed", "tool.correction_requested", "agent.allowance_auto_granted"} {
+		events := []EventDraft{{Type: event, Message: "original", Wakeup: true}}
+		originalEvent := obligation
+		originalEvent.PreparationTransitionDigest = ManagedDigest(events)
+		target := set(point, originalEvent)
+		qualified := ManagedSafePointProof{point: target, proof: featurecontrol.Seal(previous.Run.ID, previous.Run.Revision, "managed_safe_point", grant.ID, previous.State, target)}
+		if !qualified.MatchesMutation(previous, next, lease, grant, events) {
 			t.Fatalf("rejected exact native phase: %s", event)
 		}
-		if (ManagedSafePointProof{point: point}).MatchesMutation(previous, next, lease, grant, []EventDraft{{Type: event}}) {
+		if (ManagedSafePointProof{point: target}).MatchesMutation(previous, next, lease, grant, events) {
 			t.Fatalf("public metadata forged native proof: %s", event)
 		}
+		changed := []EventDraft{{Type: event, Message: "different", Wakeup: true}}
+		if qualified.MatchesMutation(previous, next, lease, grant, changed) ||
+			qualified.MatchesMutation(previous, next, lease, grant, []EventDraft{{Type: "agent.input_applied", Message: "other"}}) {
+			t.Fatalf("proof authorized another transition: %s", event)
+		}
+		wantLegacy := event == "agent.native_preparation.ready" || event == "agent.input_applied"
+		if proof.MatchesMutation(previous, next, lease, grant, events) != wantLegacy {
+			t.Fatalf("legacy preparation scope changed: %s", event)
+		}
 	}
-	for _, event := range []string{"agent.model_invocation.pending", "agent.model_invocation.completed", "agent.context_summary.consumed", "run.completed"} {
-		if proof.MatchesMutation(previous, next, lease, grant, []EventDraft{{Type: event}}) {
+	for _, event := range []string{"agent.model_invocation.pending", "agent.model_invocation.claimed", "agent.model_invocation.dispatch_intent", "agent.model_invocation.completed", "agent.context_summary.consumed", "tool.batch_requested", "tool.authorization_started", "tool.authorization_committed", "tool.dispatch_intent", "tool.pending", "tool.capacity_waiting", "interaction.created", "agent.budget_paused", "run.completed"} {
+		events := []EventDraft{{Type: event}}
+		other := obligation
+		other.PreparationTransitionDigest = ManagedDigest(events)
+		target := set(point, other)
+		qualified := ManagedSafePointProof{point: target, proof: featurecontrol.Seal(previous.Run.ID, previous.Run.Revision, "managed_safe_point", grant.ID, previous.State, target)}
+		if qualified.MatchesMutation(previous, next, lease, grant, events) {
 			t.Fatalf("preparation proof authorized another event: %s", event)
+		}
+	}
+	for _, events := range [][]EventDraft{
+		nil,
+		{{Type: "tool.completed"}, {Type: "tool.dispatch_intent"}},
+		{{Type: "agent.input_applied"}, {Type: "agent.model_continued"}},
+	} {
+		other := obligation
+		other.PreparationTransitionDigest = ManagedDigest(events)
+		target := set(point, other)
+		qualified := ManagedSafePointProof{point: target, proof: featurecontrol.Seal(previous.Run.ID, previous.Run.Revision, "managed_safe_point", grant.ID, previous.State, target)}
+		if qualified.MatchesMutation(previous, next, lease, grant, events) {
+			t.Fatalf("preparation proof authorized ambiguous transition: %+v", events)
 		}
 	}
 	for _, change := range []func(*ManagedSafePoint, *ManagedAgentObligations){
@@ -470,6 +504,7 @@ func TestManagedPreparationSafePointRequiresExactNativeProof(t *testing.T) {
 			o.RequestHash = p.ModelRequestHash
 		},
 		func(_ *ManagedSafePoint, o *ManagedAgentObligations) { o.SamplingDigest = strings.Repeat("b", 64) },
+		func(_ *ManagedSafePoint, o *ManagedAgentObligations) { o.PreparationTransitionDigest = "invalid" },
 		func(_ *ManagedSafePoint, o *ManagedAgentObligations) { o.RequalifiedFrom = "old-point" },
 		func(_ *ManagedSafePoint, o *ManagedAgentObligations) { o.SourceRevision++ },
 		func(_ *ManagedSafePoint, o *ManagedAgentObligations) { o.Phase = "pending" },

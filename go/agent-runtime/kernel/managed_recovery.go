@@ -146,6 +146,9 @@ type ManagedAgentObligations struct {
 	LedgerDigest       string                     `json:"ledgerDigest,omitempty"`
 	Journal            json.RawMessage            `json:"journal"`
 	PreparationContext *ManagedPreparationContext `json:"preparationContext,omitempty"`
+	// New preparation proofs bind the exact reducer event, not merely a
+	// recognized event name. Older ready/input points retain their profile.
+	PreparationTransitionDigest string `json:"preparationTransitionDigest,omitempty"`
 	// RequalifiedFrom binds an expired first-owner frontier to its exact
 	// preceding immutable point. No callback return is inferred.
 	RequalifiedFrom      string `json:"requalifiedFrom,omitempty"`
@@ -177,9 +180,10 @@ func (p ManagedSafePoint) AgentObligations() (ManagedAgentObligations, bool) {
 		c := o.PreparationContext
 		return o, c != nil && c.CheckpointID != "" && validToolReceiptDigest(c.CheckpointDigest) &&
 			o.InvocationID == "" && o.RequestHash == "" && o.SamplingDigest == "" && o.Purpose == "" &&
-			o.BindingDigest == "" && o.RequalifiedFrom == "" && o.SettledReceiptDigest == ""
+			o.BindingDigest == "" && o.RequalifiedFrom == "" && o.SettledReceiptDigest == "" &&
+			(o.PreparationTransitionDigest == "" || validToolReceiptDigest(o.PreparationTransitionDigest))
 	}
-	if o.PreparationContext != nil || o.InvocationID == "" || len(o.RequestHash) != 64 || !validToolReceiptDigest(o.SamplingDigest) {
+	if o.PreparationContext != nil || o.PreparationTransitionDigest != "" || o.InvocationID == "" || len(o.RequestHash) != 64 || !validToolReceiptDigest(o.SamplingDigest) {
 		return o, false
 	}
 	if o.SettledReceiptDigest != "" && (o.RequalifiedFrom == "" || o.Phase != "pending" || o.LedgerID == "" || !validToolReceiptDigest(o.SettledReceiptDigest)) {
@@ -288,6 +292,26 @@ func (p ManagedSafePointProof) MatchesMutation(previous Snapshot, next Record, l
 	return p.Matches(previous, next, lease, grant) && managedSafePointEventMatches(p.point, events)
 }
 
+// ManagedPreparationTransition is the closed event class for ordinary
+// native reducers that may return to model preparation. It is NOT evidence
+// of quiescence: Agent validates the encoded target, original receipts and
+// actual frame before minting a proof, and Store verifies that proof with
+// the exact mutation. New reducers must not silently leave an eligible gap.
+func ManagedPreparationTransition(events []EventDraft) bool {
+	if len(events) != 1 {
+		return false
+	}
+	switch events[0].Type {
+	case "agent.native_preparation.ready", "agent.input_applied",
+		"agent.model_continued", "agent.completion_corrected",
+		"tool.completed", "tool.correction_requested",
+		"agent.allowance_auto_granted":
+		return true
+	default:
+		return false
+	}
+}
+
 func managedSafePointEventMatches(point ManagedSafePoint, events []EventDraft) bool {
 	if len(events) != 1 {
 		return false
@@ -306,7 +330,12 @@ func managedSafePointEventMatches(point ManagedSafePoint, events []EventDraft) b
 			return false
 		}
 		if o.Phase == "prepare" {
-			return events[0].Type == "agent.native_preparation.ready" || events[0].Type == "agent.input_applied"
+			if o.PreparationTransitionDigest == "" {
+				// The preceding prepare profile admitted only these two events.
+				// Do not use a historical proof for a newly admitted transition.
+				return events[0].Type == "agent.native_preparation.ready" || events[0].Type == "agent.input_applied"
+			}
+			return ManagedPreparationTransition(events) && o.PreparationTransitionDigest == ManagedDigest(events)
 		}
 		if o.Purpose == "" && o.Phase == "consumed" {
 			return events[0].Type == "agent.input_applied"

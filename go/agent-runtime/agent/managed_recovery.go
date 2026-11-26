@@ -19,64 +19,59 @@ func (r *Runner) SupportsManagedContextRecovery() bool {
 	return r != nil && r.managedContextRecovery != nil
 }
 
-func (r *Runner) commitManagedModelIntent(ctx context.Context, s kernel.Snapshot, state runState, inv ModelInvocation, m kernel.Mutation) (kernel.Snapshot, error) {
+func (r *Runner) qualifyManagedModelBoundary(ctx context.Context, s kernel.Snapshot, state runState, inv ModelInvocation, m kernel.Mutation) (*kernel.ManagedSafePoint, error) {
 	if state.SummaryNativeRecovery && inv.Purpose == ModelInvocationContextSummary {
-		return r.commitSummarySafePoint(ctx, s, state, m)
+		return r.qualifySummaryBoundary(ctx, s, state)
 	}
 	if (r.managedContextRecovery == nil && (!r.SupportsSummaryNativeRecovery() || !r.combinedManaged(state))) || r.activeRootGrant == nil || r.activeRunLease == nil || s.Run.ParentRunID != "" {
-		return r.runtime.Apply(ctx, s.Run.ID, s.Run.Revision, m)
+		return nil, nil
 	}
 	binding, ok := r.runtime.ManagedDispatch(ctx, s.Run.ID)
 	if !ok {
-		return r.runtime.Apply(ctx, s.Run.ID, s.Run.Revision, m)
+		return nil, nil
 	}
 	if r.combinedManaged(state) {
 		// A Host reservation selects one original transfer, not a chain
 		// of new transferable successor grants.
 		if r.activeRootGrant.AdmissionOperation == "managed_resume" {
-			return r.runtime.Apply(ctx, s.Run.ID, s.Run.Revision, m)
+			return nil, nil
 		}
 		raw, eligible, err := r.freezeManagedObligations(ctx, s, state, inv, binding)
 		if err != nil {
-			return s, err
+			return nil, err
 		}
-		target := s
-		target.State = m.State
+		target := nativeTransitionTarget(s, m)
 		if !eligible || !knownRootPhysicalSettlement(target) {
-			return r.runtime.Apply(ctx, s.Run.ID, s.Run.Revision, m)
+			return nil, nil
 		}
 		id := "managed-safe-" + kernel.ManagedDigest(struct {
 			Grant, Invocation string
 			Revision          uint64
 		}{r.activeRootGrant.ID, inv.ID, s.Run.Revision + 1})
-		return r.applyManagedSafePoint(ctx, s, inv, m, binding, id, kernel.ManagedLifecycleAgentObligations, raw)
+		return r.managedTransitionPoint(inv, binding, id, kernel.ManagedLifecycleAgentObligations, raw), nil
 	}
 	if inv.Status != ModelInvocationPending {
-		return r.runtime.Apply(ctx, s.Run.ID, s.Run.Revision, m)
+		return nil, nil
 	}
 	// Only actual returned operations can describe a suspendable frame. This
 	// leaves opaque/incomplete configurations on existing fail-closed semantics.
 	lifecycle, ok := callbackscope.ManagedSuspension(ctx, r.managedContextRecovery, inv.Request)
 	if !ok || !knownRootPhysicalSettlement(s) || state.ToolDispatchID != "" || state.ToolWait != nil || len(state.DeferredChildren) != 0 || inv.DispatchAttempt != 0 {
-		return r.runtime.Apply(ctx, s.Run.ID, s.Run.Revision, m)
+		return nil, nil
 	}
 	id := "managed-safe-" + kernel.ManagedDigest(struct {
 		Grant, Invocation string
 		Revision          uint64
 	}{r.activeRootGrant.ID, inv.ID, s.Run.Revision + 1})
-	return r.applyManagedSafePoint(ctx, s, inv, m, binding, id, "managed-context-v1", lifecycle)
+	return r.managedTransitionPoint(inv, binding, id, "managed-context-v1", lifecycle), nil
 }
 
-// Only the concrete native phase validators may select a point.
-// This is the shared original-grant/source commit, not a new transfer
-// authority or a re-interpretation of either persisted lifecycle version.
-func (r *Runner) applyManagedSafePoint(ctx context.Context, source kernel.Snapshot, inv ModelInvocation, m kernel.Mutation,
-	binding kernel.ManagedHostBinding, id, version string, lifecycle json.RawMessage) (kernel.Snapshot, error) {
-	point := kernel.ManagedSafePoint{ID: id, RecoveryID: kernel.ManagedRecoveryID(id, binding), Host: binding,
-		OriginalGrant: *r.activeRootGrant, OriginalLease: *r.activeRunLease,
-		ModelInvocationID: inv.ID, ModelRequestHash: inv.RequestHash, LifecycleVersion: version, LifecycleSource: lifecycle}
-	proof := featurecontrol.Seal(source.Run.ID, source.Run.Revision, "managed_intent_source", r.activeRootGrant.ID, source.State, point)
-	return r.runtime.ApplyManagedModelIntent(ctx, source.Run.ID, source.Run.Revision, m, point, proof)
+// The concrete phase validators share construction of the original point.
+// Only commitNativeTransition seals and commits it together with the mutation.
+func (r *Runner) managedTransitionPoint(inv ModelInvocation, binding kernel.ManagedHostBinding, id, version string, lifecycle json.RawMessage) *kernel.ManagedSafePoint {
+	return &kernel.ManagedSafePoint{ID: id, RecoveryID: kernel.ManagedRecoveryID(id, binding), Host: binding,
+		OriginalGrant: *r.activeRootGrant, OriginalLease: *r.activeRunLease, ModelInvocationID: inv.ID, ModelRequestHash: inv.RequestHash,
+		LifecycleVersion: version, LifecycleSource: lifecycle}
 }
 
 // Business and Summary both leave the original safe point before claim and

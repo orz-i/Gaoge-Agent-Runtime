@@ -89,7 +89,7 @@ func (runner *Runner) commitToolTransition(ctx context.Context, snapshot kernel.
 	}
 	mutation := kernel.Mutation{Status: status, State: encoded, Checkpoint: checkpoint, Events: []kernel.EventDraft{event}}
 	for attempt := 0; attempt < 2; attempt++ {
-		next, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, mutation)
+		next, err := runner.commitNativeTransition(ctx, snapshot, mutation)
 		if err == nil {
 			return next, nil
 		}

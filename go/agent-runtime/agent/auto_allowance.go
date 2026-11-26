@@ -192,7 +192,7 @@ func (runner *Runner) autoRenewCallAllowance(
 	if err != nil {
 		return kernel.Snapshot{}, false, err
 	}
-	renewed, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
+	renewed, err := runner.commitNativeTransition(ctx, snapshot, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
 		Events: []kernel.EventDraft{{
 			Type: "agent.allowance_auto_granted", Message: dimension, Wakeup: true,

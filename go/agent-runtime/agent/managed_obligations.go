@@ -524,7 +524,7 @@ func (r *Runner) recoverManagedModelFrontier(ctx context.Context, s kernel.Snaps
 	if err != nil {
 		return s, err
 	}
-	return r.runtime.Apply(ctx, s.Run.ID, s.Run.Revision, kernel.Mutation{Status: kernel.RunStatusRunning, State: encoded, Checkpoint: s.Checkpoint,
+	return r.commitNativeTransition(ctx, s, kernel.Mutation{Status: kernel.RunStatusRunning, State: encoded, Checkpoint: s.Checkpoint,
 		Events: []kernel.EventDraft{{Type: event, Message: inv.ID, Wakeup: true}}})
 }
 

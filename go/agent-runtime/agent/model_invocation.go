@@ -431,7 +431,7 @@ func (runner *Runner) ensureModelInvocation(
 	if err != nil {
 		return kernel.Snapshot{}, runState{}, ModelInvocation{}, err
 	}
-	next, err := runner.commitManagedModelIntent(ctx, snapshot, state, invocation, kernel.Mutation{
+	next, err := runner.commitNativeTransition(ctx, snapshot, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
 		Events: []kernel.EventDraft{{Type: "agent.model_invocation.pending", Message: invocation.ID, Wakeup: true}},
 	})
@@ -838,7 +838,7 @@ func (runner *Runner) executeModelInvocation(
 			if err != nil {
 				return err
 			}
-			staged, err := runner.runtime.Apply(dispatchCtx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
+			staged, err := runner.commitNativeTransition(dispatchCtx, snapshot, kernel.Mutation{
 				Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
 				Events: []kernel.EventDraft{{Type: "agent.model_invocation.dispatch_intent", Message: invocation.ID, Wakeup: true}},
 			})
@@ -936,7 +936,7 @@ func (runner *Runner) executeModelInvocation(
 			Type: "agent.model_invocation.completed", Message: invocation.ID, Wakeup: true,
 		}},
 	}
-	next, err := runner.commitManagedModelIntent(context.WithoutCancel(ctx), snapshot, state, invocation, mutation)
+	next, err := runner.commitNativeTransition(context.WithoutCancel(ctx), snapshot, mutation)
 	if err != nil {
 		endedAt := runner.clock.Now().UTC()
 		runner.recordTelemetry(ctx, observability.Event{
@@ -1026,7 +1026,7 @@ func (runner *Runner) claimModelInvocationExecution(
 	if err != nil {
 		return snapshot, state, invocation, err
 	}
-	next, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
+	next, err := runner.commitNativeTransition(ctx, snapshot, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
 		Events: []kernel.EventDraft{{
 			Type: "agent.model_invocation.claimed", Message: invocation.ID, Wakeup: true,
@@ -1064,7 +1064,7 @@ func (runner *Runner) releaseModelInvocationExecution(
 	if err != nil {
 		return snapshot, err
 	}
-	return runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
+	return runner.commitNativeTransition(ctx, snapshot, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
 		Events: []kernel.EventDraft{{
 			Type: "agent.model_invocation.retryable", Message: invocation.ID, Wakeup: true, WakeupAt: &wakeupAt,

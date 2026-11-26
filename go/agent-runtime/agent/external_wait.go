@@ -252,7 +252,7 @@ func (runner *Runner) persistToolWait(ctx context.Context, snapshot kernel.Snaps
 	if err != nil {
 		return kernel.Snapshot{}, true, err
 	}
-	next, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
+	next, err := runner.commitNativeTransition(ctx, snapshot, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint, Events: events,
 	})
 	return next, true, err

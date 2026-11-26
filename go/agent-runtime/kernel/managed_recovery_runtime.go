@@ -75,11 +75,15 @@ func (r *Runtime) ManagedDispatch(ctx context.Context, id string) (ManagedHostBi
 	return managedClone(b.binding), true
 }
 
-// ApplyManagedModelIntent is callable only by a first-party implementation
-// possessing an internal source proof for a qualified native phase. The
-// historical method name includes pre-intent and input-application T0; all
-// phases still use normal ApplyExecution.
+// ApplyManagedModelIntent is the historical spelling of the native
+// transition commit. The same original proof and Store CAS are required.
 func (r *Runtime) ApplyManagedModelIntent(ctx context.Context, id string, rev uint64, m Mutation, p ManagedSafePoint, proof *featurecontrol.Proof) (Snapshot, error) {
+	return r.ApplyManagedNativeTransition(ctx, id, rev, m, p, proof)
+}
+
+// ApplyManagedNativeTransition commits a qualified native phase and its
+// exact safe point through the same existing ApplyExecution transaction.
+func (r *Runtime) ApplyManagedNativeTransition(ctx context.Context, id string, rev uint64, m Mutation, p ManagedSafePoint, proof *featurecontrol.Proof) (Snapshot, error) {
 	if r == nil || r.execution == nil || r.physicalGrant == nil {
 		return Snapshot{}, ErrExecutionRequired
 	}

@@ -210,9 +210,24 @@ proof can seal a preparation frontier before the first Model intent or between
 settled invocations. It binds the original Context checkpoint and the
 committed input cursor; it has no Model invocation ID, request hash, or
 sampling plan. The initial marker and subsequent input application are
-native Kernel CAS operations. Input application seals the next frontier
-in the same mutation. This includes the transition from a consumed native
-summary to business preparation. A Context pressure rollover committed
+native Kernel CAS operations. Every ordinary Agent reducer now commits
+through one native transition entrance. It qualifies the encoded target
+and original obligations before committing; Model and Summary phase
+validators supply evidence, not their own independent writes. When the
+target is eligible for preparation, the same mutation seals its next
+frontier: input application, business continuation, completion correction,
+last Tool receipt/correction consumption, or a native allowance renewal.
+A new preparation proof binds the exact reducer event (including its
+payload and wakeup) in addition to Context, input cursor and ledger.
+The Kernel and Stores validate it in the same ApplyExecution CAS.
+A new eligible reducer cannot silently commit an unrecognized preparation
+event. Older ready/input proofs keep their original event authority.
+
+This includes the transition from a consumed native summary to business
+preparation. Pending Model/Tool effects, partial Tool batches and opaque
+callback frames do not acquire preparation qualification. Manual Host
+controls and original returned-receipt reconciliation retain their
+distinct authorization, not a new ordinary execution permission. A Context pressure rollover committed
 before the next intent can be recovered only if the persisted checkpoint and
 artifacts match a native transformation of the original Context and Run
 messages under the frozen policy. Recovery verifies the source before PARK

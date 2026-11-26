@@ -136,7 +136,7 @@ func (runner *Runner) consumeContextSummary(ctx context.Context, snapshot kernel
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
 		Events: []kernel.EventDraft{{Type: EventContextSummaryConsumed, Message: invocation.ID, Wakeup: true}},
 	}
-	next, err := runner.commitSummarySafePoint(ctx, snapshot, state, mutation)
+	next, err := runner.commitNativeTransition(ctx, snapshot, mutation)
 	if err != nil && next.Run.ID == "" {
 		return snapshot, err
 	}

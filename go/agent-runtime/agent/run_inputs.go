@@ -153,7 +153,7 @@ func (runner *Runner) admitRunInputs(ctx context.Context, snapshot kernel.Snapsh
 		Events: []kernel.EventDraft{{Type: "agent.input_applied", Message: "Host user input applied at a model boundary", Wakeup: true,
 			WakeupAt: agentWakeupAt(runner.clock.Now())}},
 	}
-	next, err := runner.commitManagedInput(ctx, snapshot, state, mutation)
+	next, err := runner.commitNativeTransition(ctx, snapshot, mutation)
 	return next, state, true, err
 }
 
