@@ -353,6 +353,11 @@ type StartRequest struct {
 	CallAllowance *CallAllowance
 	// AutoAllowance is an opt-in bounded P2 policy, frozen with the Agent Run.
 	AutoAllowance *AutoAllowancePolicy
+	// DisableInputs restricts the selected Host input log for this new Run.
+	// A logical Handoff child is an independent Kernel root, but must not
+	// inherit its supervisor's steering source. This field only removes
+	// capability; the persisted InputBinding owns every later continuation.
+	DisableInputs bool
 }
 
 // Runner owns only the Agent model and Tool loop, not Host intent routing.
@@ -689,7 +694,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		// share the SAME Host-callback trust decision. Native Start remains
 		// strictly middleware-free while the deferred path may also accept
 		// the audited, callback-scoped first-party middleware below.
-		kernelOwnedStartCancellation: control &&
+		kernelOwnedStartCancellation: control && dependencies.Inputs == nil &&
 			len(dependencies.RunMiddleware) == 0 &&
 			len(dependencies.ModelMiddleware) == 0 && len(dependencies.ToolMiddleware) == 0 &&
 			dependencies.ManagedContextRecovery == nil,
@@ -936,7 +941,9 @@ func (runner *Runner) prepareStartState(ctx context.Context, request StartReques
 		AutoAllowance:         automaticAllowance,
 
 		ToolProgressPolicy: freezeToolProgressPolicy(runner.toolProgressPolicy, toolKeys),
-		InputBinding:       runner.inputBinding,
+	}
+	if !request.DisableInputs {
+		state.InputBinding = runner.inputBinding
 	}
 	if instructions := strings.TrimSpace(request.Instructions); instructions != "" {
 		state.Messages = append([]model.Message{{Role: model.RoleSystem, Content: model.TextParts(instructions)}}, state.Messages...)
@@ -2210,7 +2217,7 @@ func (runner *Runner) preparePendingApproval(
 		snapshot = evaluating
 		if runner.rootCallbacks != nil {
 			runner.rootCallbacks.approvalPolicyEntered.Store(true)
-			if runner.delegatedToolResults != nil && runner.scopedRootCallbacks {
+			if runner.scopedRootCallbacks && (runner.boundedApproval || runner.delegatedToolResults != nil) {
 				runner.rootCallbacks.toolApprovals.enter(call)
 			}
 		}
@@ -2227,7 +2234,7 @@ func (runner *Runner) preparePendingApproval(
 			if len(state.DeferredChildren) != 0 {
 				yielded, _, err := runner.activateDeferredChild(ctx, snapshot, state)
 				runner.noteRootCallbackFailure(err)
-				if err == nil && runner.rootCallbacks != nil && runner.delegatedToolResults != nil && runner.scopedRootCallbacks {
+				if err == nil && runner.rootCallbacks != nil && runner.scopedRootCallbacks && (runner.boundedApproval || runner.delegatedToolResults != nil) {
 					runner.rootCallbacks.toolApprovals.bind(call)
 				}
 				return yielded, err
@@ -2248,7 +2255,7 @@ func (runner *Runner) preparePendingApproval(
 		}
 		snapshot = committed
 		if !required {
-			if runner.rootCallbacks != nil && runner.boundedApproval && runner.scopedRootCallbacks && runner.delegatedToolResults != nil {
+			if runner.rootCallbacks != nil && runner.boundedApproval && runner.scopedRootCallbacks {
 				runner.rootCallbacks.toolApprovals.bind(call)
 			}
 			return snapshot, nil
@@ -2273,7 +2280,7 @@ func (runner *Runner) preparePendingApproval(
 	waiting, err := runner.commitToolTransition(ctx, snapshot, state, checkpoint, kernel.RunStatusWaitingInput, kernel.EventDraft{Type: "interaction.created", Message: "Tool approval required"})
 	runner.noteRootCallbackFailure(err)
 	if err == nil {
-		if runner.rootCallbacks != nil && runner.delegatedToolResults != nil && runner.scopedRootCallbacks {
+		if runner.rootCallbacks != nil && runner.scopedRootCallbacks && (runner.boundedApproval || runner.delegatedToolResults != nil) {
 			runner.rootCallbacks.toolApprovals.bind(call)
 		}
 		runner.publishRunEvent(ctx, waiting, EventRunWaitingInput, false)

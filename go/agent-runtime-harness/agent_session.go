@@ -318,7 +318,16 @@ func openBoundedAgentSession(options AgentSessionOptions, registrations []tools.
 	if len(exploration) != 0 {
 		dependencies.ToolProgressPolicy = &agent.ToolProgressPolicy{ExplorationToolKeys: exploration}
 	}
-	approval, err := NewFrozenApprovalPolicy(options.Store)
+	frozenApproval, err := NewFrozenApprovalPolicy(options.Store)
+	if err != nil {
+		return nil, err
+	}
+	// Approval is a first-party read-only decision stage, not a generic
+	// Host policy callback. The original native approval return and the
+	// frozen Harness owner are both required for later control.
+	approval, err := agent.NewBoundedToolApproval(func(ctx context.Context, request tools.ExecutionRequest) (plugin.ApprovalRequirement, error) {
+		return frozenApproval.requirement(ctx, request.RunID, request.Call.ToolKey, true)
+	})
 	if err != nil {
 		return nil, err
 	}

@@ -24,6 +24,7 @@ type rootCallbackState struct {
 	entered               atomic.Bool
 	unknown               atomic.Bool
 	approvalPolicyEntered atomic.Bool
+	inputReadEntered      atomic.Bool
 	toolApprovals         approvedToolCalls
 	knownReturn           atomic.Pointer[committedAgentReturn]
 }
@@ -224,11 +225,16 @@ func (runner *Runner) executeOwnedRoot(ctx context.Context, current kernel.Snaps
 	}
 	// Control custody describes the actual whole executing callback. Original
 	// outstanding approval evidence is sealed independently of the business CAS.
-	if grant.AdmissionOperation == "prepare" && runner.trustedDeferredPreparedControl {
+	// Qualification is about the actual returned execution, not whether
+	// the Runner has an input source configured. A logical child with no
+	// input binding has not entered that Host boundary. A Run that did
+	// read the Host source still receives no deferred-control shortcut.
+	scopedReturn := hostComplete && runner.scopedRootCallbacks && !scoped.rootCallbacks.inputReadEntered.Load()
+	if hostComplete && grant.AdmissionOperation == "prepare" && runner.trustedDeferredPreparedControl {
 		outcome.ControlCustody = kernel.OwnedCustodyPrepared
-	} else if runner.scopedRootCallbacks && !scoped.rootCallbacks.approvalPolicyEntered.Load() {
+	} else if scopedReturn && !scoped.rootCallbacks.approvalPolicyEntered.Load() {
 		outcome.ControlCustody = kernel.OwnedCustodyScoped
-	} else if hostComplete && runner.scopedRootCallbacks && (settled || allApproved) && scoped.rootCallbacks.toolApprovals.allBound() {
+	} else if scopedReturn && (settled || allApproved) && scoped.rootCallbacks.toolApprovals.allBound() {
 		outcome.ControlCustody = kernel.OwnedToolResultReturn
 		if runner.boundedApproval {
 			outcome.ControlCustody = kernel.OwnedBoundedApprovalReturn
@@ -265,7 +271,7 @@ func (runner *Runner) executeOwnedRoot(ctx context.Context, current kernel.Snaps
 	if !settled {
 		// The enclosing native call has really returned. The Kernel grant still
 		// fences the Tool until an independent receipt settles the original intent.
-		if hostComplete && pending && runner.scopedRootCallbacks && (runner.toolOutcomeVerifier != nil || returnedCall) {
+		if scopedReturn && pending && (runner.toolOutcomeVerifier != nil || returnedCall) {
 			recordPhysicalObservation(ctx, latest.Run.ID, PhysicalCallDurableYield)
 		}
 		state, stateErr := decodeState(latest.State)

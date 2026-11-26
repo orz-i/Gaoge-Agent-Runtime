@@ -123,6 +123,11 @@ continue another member's old physical work. Child Tools marked `ApprovalMode:
 "always"` use the original per-call operator approval and immutable Tool
 receipt; changing the approval policy or replaying an approved call is denied.
 SharedBudget accounts Root and selected children on the single native adapter.
+The standard Session's frozen approval lookup uses the native bounded approval
+decision path; a missing original Host owner is an error, not approval. A
+reopened Session reconciles the original local or standard remote child receipt
+before resuming the parent. This does not authorize another child dispatch or
+retroactively qualify opaque historical callback returns for cancellation.
 
 `AgentSessionOptions.HostedTools` supplies the existing provider-hosted Tool
 catalog, and `ToolDiscovery` the existing read-only search port; neither

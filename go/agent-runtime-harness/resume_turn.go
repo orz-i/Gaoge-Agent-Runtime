@@ -129,15 +129,19 @@ func (runner *Runner) resumeTurn(ctx context.Context, turnID string, expected *s
 	if err = runner.refreshStandardRemoteChildren(ctx, turn); err != nil {
 		return runner.resumeTurnError(ctx, turn, &runtimeSnapshot, err)
 	}
-	if runner.standardRemoteCoordinator() != nil {
-		// The original Agent owns the retained physical Tool grant. Recover
-		// its exact terminal child receipts before issuing another Resume
-		// grant; never re-enter a still-dispatched delegation Tool.
-		original, ok := runner.agent.(*agent.Runner)
-		if !ok {
-			return Snapshot{}, ErrConflict
-		}
+	if original := runner.standardDelegationReceiptOwner(); original != nil {
+		// Local and remote standard delegates both leave an original native
+		// Tool receipt obligation. The original Agent owns its retained
+		// physical grant, not the transport. Recover the exact terminal
+		// child receipt before issuing another Resume grant.
 		if scope, scopeErr := original.RootDeferredCleanupEligibility(ctx, runtimeSnapshot.Run.ID, runtimeSnapshot.Run.Revision); scopeErr == nil && scope.Valid() {
+			items, evidenceErr := runner.loadGlobalPhysicalEvidence(ctx, turn.ID)
+			if evidenceErr != nil {
+				return runner.resumeTurnError(ctx, turn, &runtimeSnapshot, evidenceErr)
+			}
+			if ActiveCancellationFence(items) {
+				return runner.resumeTurnError(ctx, turn, &runtimeSnapshot, ErrConflict)
+			}
 			repaired, receiptErr := original.ReconcileRootDeferredChildren(ctx, runtimeSnapshot.Run.ID, runtimeSnapshot.Run.Revision, scope)
 			if errors.Is(receiptErr, agent.ErrToolOutcomeUnknown) {
 				// The peer has not reached terminal evidence yet. No new

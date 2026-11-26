@@ -14,7 +14,14 @@ import (
 // Kernel separately proves that no such callback has ever been dispatched.
 // This does not grant custody after any physical callback starts.
 func trustedDeferredPreparationStack(d Dependencies) bool {
-	if d.Inputs != nil || len(d.Observers) != 0 || len(d.Telemetry) != 0 {
+	return d.Inputs == nil && nativeRunLayers(d)
+}
+
+// Input is an explicit stage, not Run middleware. The candidate Run stack
+// may be native even when an input source is configured; an executing frame
+// that actually reads that Host source cannot claim scoped control custody.
+func nativeRunLayers(d Dependencies) bool {
+	if len(d.Observers) != 0 || len(d.Telemetry) != 0 {
 		return false
 	}
 	for _, item := range d.RunMiddleware {
@@ -32,7 +39,7 @@ func trustedDeferredPreparationStack(d Dependencies) bool {
 // policies are checked at their actual entry inside the owned callback journal.
 // Every other unscoped Host callback keeps the stack opaque.
 func scopedDeferredRootCallbacks(d Dependencies) bool {
-	if !trustedDeferredPreparationStack(d) ||
+	if !nativeRunLayers(d) ||
 		d.PrepareModelRequest != nil || d.ContextSummary != nil || d.NormalizeModelPolicy != nil ||
 		len(d.CompletionPolicies) != 0 || d.ToolDiscovery != nil {
 		return false
@@ -76,7 +83,7 @@ func (runner *Runner) VerifiedDeferredRootControl(ctx context.Context, rt *kerne
 	if runner.trustedDeferredPreparedControl && rt.VerifyPreparedRootSettlement(ctx, child) == nil {
 		return true
 	}
-	boundedToolControl := runner.boundedApproval && runner.scopedRootCallbacks && runner.delegatedToolResults != nil
+	boundedToolControl := runner.boundedApproval && runner.scopedRootCallbacks
 	if !runner.trustedDeferredRootControl && !boundedToolControl {
 		return false
 	}
@@ -94,7 +101,16 @@ func (runner *Runner) VerifiedDeferredRootControl(ctx context.Context, rt *kerne
 	}
 	if boundedToolControl {
 		state, err := decodeState(child.State)
-		return err == nil && rt.VerifyBoundedToolControl(ctx, child) == nil && runner.verifyToolHistory(ctx, child.Run.ID, state)
+		if err != nil || rt.VerifyBoundedToolControl(ctx, child) != nil {
+			return false
+		}
+		// Before any Tool effect, the original bounded approval return and
+		// exact retired frame suffice. No external verifier is needed for an
+		// empty Tool history. Nonempty history still needs its original owner.
+		if state.Budget.Usage.ToolCalls == 0 && len(state.DelegatedToolReceipts) == 0 && len(state.RecoveredTools) == 0 {
+			return true
+		}
+		return runner.verifyToolHistory(ctx, child.Run.ID, state)
 	}
 	return rt.VerifyOwnedRootSettlement(ctx, child) == nil
 }

@@ -33,7 +33,9 @@ source before offering a Host queue operation. `View.InputCursor` reports the
 last applied source sequence. Input while a Tool
 or Model outcome is unknown does not bypass reconciliation. Inputs do not reset
 completion repair or exhausted budgets. The initial delivery supports root
-Agents only; a child must not inherit its supervisor's input log.
+Agents only; the local Handoff path explicitly disables the supervisor's input
+log when starting a logical child, even though that child is an independent
+Kernel root. Existing Runs keep their originally persisted binding.
 
 ### Queueing is not an atomic terminal-delivery promise
 
@@ -63,7 +65,9 @@ The Runner reads inputs directly at its native safe point, inside the original
 Run callback. It checks execution ownership and deadline before and after the
 read and journals that read's return, not an input-application commit or the
 return of any enclosing Host middleware. No input RunNext wrapper or
-callback-free/deferred-control custody is granted. Inputs
+callback-free custody is granted. A frame that actually reads the Host input
+source cannot claim scoped deferred-control custody; an independently retired
+child that never entered that boundary may qualify using its original proofs. Inputs
 cannot be combined with the separately opted-in `ManagedContextRecovery` path
 or `SummaryNativeRecovery`; ordinary bounded Session composition remains supported.
 

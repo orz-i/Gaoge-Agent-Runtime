@@ -66,6 +66,9 @@ func (runner *Runner) readRunInputs(ctx context.Context, run kernel.Run, binding
 		}
 		callbackscope.Returned(ticket, err)
 	}()
+	if runner.rootCallbacks != nil {
+		runner.rootCallbacks.inputReadEntered.Store(true)
+	}
 	if runner.inputs.BindingID() != binding {
 		return nil, ErrInvalidRequest
 	}

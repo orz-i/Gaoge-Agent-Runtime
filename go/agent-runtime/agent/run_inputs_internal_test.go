@@ -75,3 +75,29 @@ func TestRunInputSourceIsClassifiedAsHostCallbackBoundary(t *testing.T) {
 		t.Fatalf("Host input bypassed the managed-transfer boundary: %v", err)
 	}
 }
+
+func TestRunInputControlCustodyDependsOnActualRead(t *testing.T) {
+	rt, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inputs, err := NewMemoryRunInputs("inputs-v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, err := NewRunner(Dependencies{Runtime: rt, Model: inputBoundaryModel{}, Inputs: inputs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"read", "disabled"} {
+		disabled := id == "disabled"
+		req := StartRequest{ID: id, RequestID: id, Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "thread", ID: "thread"}, Goal: "start", Model: "test", DisableInputs: disabled}
+		final, err := runner.StartRun(t.Context(), req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := runner.VerifiedDeferredRootControl(t.Context(), rt, final); got != disabled {
+			t.Fatalf("%s: control custody = %t, want %t", id, got, disabled)
+		}
+	}
+}

@@ -50,12 +50,18 @@ func (policy *FrozenApprovalPolicy) Approval(
 	ctx context.Context,
 	invocation plugin.ToolInvocation,
 ) (plugin.ApprovalRequirement, error) {
-	if policy == nil || policy.store == nil || strings.TrimSpace(invocation.Run.ID) == "" ||
-		strings.TrimSpace(invocation.Definition.Key) == "" {
+	return policy.requirement(ctx, invocation.Run.ID, invocation.Definition.Key, false)
+}
+
+// The standard Session uses the same frozen lookup, but every admitted Run
+// must have its original Harness owner. A missing owner is not an approval.
+func (policy *FrozenApprovalPolicy) requirement(ctx context.Context, runID, toolKey string, requireOwner bool) (plugin.ApprovalRequirement, error) {
+	if policy == nil || policy.store == nil || strings.TrimSpace(runID) == "" ||
+		strings.TrimSpace(toolKey) == "" {
 		return plugin.ApprovalNotRequired, ErrInvalidRequest
 	}
-	agentInvocation, err := policy.resolveAgentInvocation(ctx, invocation.Run.ID)
-	if errors.Is(err, ErrNotFound) {
+	agentInvocation, err := policy.resolveAgentInvocation(ctx, runID)
+	if errors.Is(err, ErrNotFound) && !requireOwner {
 		return plugin.ApprovalNotRequired, nil
 	}
 	if err != nil {
@@ -69,7 +75,7 @@ func (policy *FrozenApprovalPolicy) Approval(
 	if err != nil {
 		return plugin.ApprovalNotRequired, err
 	}
-	return frozenApprovalRequirement(config, invocation.Definition.Key)
+	return frozenApprovalRequirement(config, toolKey)
 }
 
 func (policy *FrozenApprovalPolicy) resolveAgentInvocation(

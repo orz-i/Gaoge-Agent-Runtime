@@ -331,6 +331,7 @@ func (coordinator *Coordinator) StartOrLoad(
 		ToolKeys:             append([]string(nil), delegation.ToolKeys...),
 		InitialToolKeys:      append([]string(nil), delegation.InitialToolKeys...),
 		HostedToolGrants:     append([]agent.HostedToolGrant(nil), delegation.HostedToolGrants...),
+		DisableInputs:        !delegation.Remote,
 	})
 	if child.Run.ID == "" && err != nil {
 		return Delegation{}, err
