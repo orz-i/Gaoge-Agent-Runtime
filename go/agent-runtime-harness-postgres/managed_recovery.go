@@ -260,6 +260,9 @@ func (s *Store) CloseManagedRecovery(ctx context.Context, p kernel.ManagedClosur
 		if _, _, _, err = managedRows(tx, b); err != nil {
 			return err
 		}
+		if err := harness.ValidateManagedClosureAccounting(ctx, &Store{db: tx}, p); err != nil {
+			return err
+		}
 		additions, err := harness.ManagedClosureItems(p, r)
 		if err != nil {
 			return err

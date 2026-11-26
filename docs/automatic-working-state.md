@@ -50,9 +50,11 @@ mode requires the built-in Harness bounded Context/summary bridges and the
 restricted native callback composition checked by the constructor. Custom or
 wrapped Context ports cannot opt into this proof with a marker or flag. It is separate from
 and mutually exclusive with the existing `ManagedRecovery` option. Ordinary
-summary supports `SharedBudget` with the complete native budget composition;
-summary native recovery plus shared budget remains rejected. An ordinary
-budgeted summary uses the same physical sampling admission, original ledger
+summary and native summary recovery support `SharedBudget` with the complete
+native budget composition. The combined managed proof is limited to the
+original first-party suspension and settled or not-yet-dispatched model
+obligations; it excludes unresolved reservations and unknown provider effects.
+A budgeted summary uses the same physical sampling admission, original ledger
 reservation, settlement and receipt recovery as business sampling. A candidate
 that cannot be admitted, or would consume the last available shared model call,
 is skipped. These planning checks do not replace the live ledger CAS.
@@ -155,7 +157,15 @@ Claim/dispatch invalidates a pending safe point: a Provider response without a
 durable receipt remains unknown and cannot be redispatched. A new handle cannot
 retrofit this authority onto an ordinary Run; a recovery handle for a Run that
 selected it must retain the required native composition, even with nil current
-summary policy.
+summary policy. If SharedBudget or Inputs was selected at the original safe
+point, the mixed proof freezes the ledger and the committed input cursor.
+Recovery uses the original ledger without creating or registering a new scope;
+it cannot apply new user input before the frozen summary completes. The
+first business request can consume input queued during the suspension. If SharedBudget or Inputs was selected at the original safe
+point, the mixed proof freezes the ledger and the committed input cursor.
+Recovery uses the original ledger without creating or registering a new scope;
+it cannot apply new user input before the frozen summary completes. The
+first business request can consume input queued during the suspension.
 
 The dedicated proof covers only the summary pending/completed/consumed phases
 and the original dispatch's first managed transfer, including repair of its

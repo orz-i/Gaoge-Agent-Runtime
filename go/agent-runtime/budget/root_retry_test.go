@@ -184,3 +184,26 @@ func TestRootRetryConcurrentAtomicAdmissionFencesLateOriginal(t *testing.T) {
 		}
 	}
 }
+
+func TestManagedLedgerTransitionsDoNotRebaseStaleRevision(t *testing.T) {
+	c := newLedger(t, budget.Limits{MaxLLMCalls: 3})
+	original, err := c.Store.LoadBudget(t.Context(), "turn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A concurrent reservation becomes a new obligation after qualification.
+	live, err := c.Reserve(t.Context(), "turn", budget.Reservation{ID: "new", RunID: "root", RequestHash: "new", Requested: budget.Usage{LLMCalls: 1}}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = c.CancelRootAtRevision(t.Context(), "turn", "root", original.Revision); !errors.Is(err, budget.ErrLedgerConflict) {
+		t.Fatalf("stale cancellation accepted: %v", err)
+	}
+	if _, err = c.FinishRunsAtRevision(t.Context(), "turn", original.Revision, "root"); !errors.Is(err, budget.ErrLedgerConflict) {
+		t.Fatalf("stale finish accepted: %v", err)
+	}
+	unchanged, err := c.Store.LoadBudget(t.Context(), "turn")
+	if err != nil || unchanged.Revision != live.Revision || unchanged.RunCancelled("root") || unchanged.FinishedRuns["root"] || unchanged.Reservations["new"].Status != budget.ReservationHeld {
+		t.Fatalf("stale transition mutated ledger: %+v %v", unchanged, err)
+	}
+}

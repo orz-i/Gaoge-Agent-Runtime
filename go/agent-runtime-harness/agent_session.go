@@ -96,7 +96,7 @@ type AgentSessionOptions struct {
 	// explicitly granted archive reader) into bounded exploration.
 	ExploreReads bool
 	// Inputs optionally binds an authenticated, Host-owned user input log.
-	// It is not supported with either native managed recovery option.
+	// Managed recovery retains the original binding and committed cursor.
 	Inputs       agent.RunInputSource
 	Session      SessionOptions
 	Context      AgentSessionContextOptions
@@ -113,8 +113,7 @@ func OpenAgentSession(options AgentSessionOptions) (*SessionClient, error) {
 	if options.Runtime == nil || options.Store == nil || options.Model == nil || options.Context.ResolveWindow == nil {
 		return nil, ErrInvalidRequest
 	}
-	if (options.Context.ManagedRecovery && options.Context.SummaryNativeRecovery) ||
-		(options.Inputs != nil && (options.Context.ManagedRecovery || options.Context.SummaryNativeRecovery)) {
+	if options.Context.ManagedRecovery && options.Context.SummaryNativeRecovery {
 		return nil, ErrInvalidRequest
 	}
 	options.Session.Config = cloneConfigSnapshot(options.Session.Config)
@@ -198,8 +197,7 @@ func OpenAgentSession(options AgentSessionOptions) (*SessionClient, error) {
 		return nil, ErrInvalidRequest
 	}
 	if config.SharedBudget != nil {
-		if !enforceableHarnessBudgetLimits(*config.SharedBudget) || options.Context.ManagedRecovery ||
-			options.Context.SummaryNativeRecovery {
+		if !enforceableHarnessBudgetLimits(*config.SharedBudget) {
 			return nil, ErrInvalidRequest
 		}
 		if _, ok := options.Store.(budget.LedgerStore); !ok {
@@ -544,9 +542,7 @@ func (session *SessionClient) preflightAgentSessionResume(ctx context.Context, t
 		!reflect.DeepEqual(originalNamed, currentNamed) {
 		return ErrInvalidRequest
 	}
-	if config.SharedBudget != nil && (session.runner.budgets == nil ||
-		session.runner.agent.(*agent.Runner).SupportsManagedContextRecovery() ||
-		session.runner.agent.(*agent.Runner).SupportsSummaryNativeRecovery()) {
+	if config.SharedBudget != nil && session.runner.budgets == nil {
 		return ErrInvalidRequest
 	}
 	if config.WorkingStateSummary != nil {

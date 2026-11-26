@@ -266,7 +266,17 @@ func (a *BoundedBudgetAdapter) admitRun(ctx context.Context, inv plugin.RunInvoc
 	receiptOnly := frame != nil && frame.invocation == inv && frame.receiptOnly
 	var l budget.Ledger
 	var err error
-	if receiptOnly {
+	if frame != nil && frame.managedBudget != nil {
+		p := frame.managedBudget
+		if p.LedgerID == "" {
+			return nil, budget.ErrLedgerConflict
+		}
+		l, err = a.bindReceiptScope(ctx, inv.RunID, p.LedgerID)
+		if err == nil && (l.ID != p.LedgerID || l.Revision < p.LedgerRevision || l.RunCancelled(inv.RunID) || l.FinishedRuns[inv.RunID] ||
+			!quiescentManagedLedger(l, inv.RunID) || managedLedgerDigest(l, inv.RunID) != p.LedgerDigest) {
+			err = budget.ErrLedgerConflict
+		}
+	} else if receiptOnly {
 		l, err = a.bindReceiptScope(ctx, inv.RunID, frame.receiptLedger)
 	} else {
 		l, err = a.bind(ctx, inv.RunID)
@@ -336,7 +346,13 @@ func (a *BoundedBudgetAdapter) Model(ctx context.Context, request model.Request,
 	original := model.CloneRequest(request)
 	call := modelCallFrom(ctx)
 	frozen := call.samplingPlan()
-	l, err := a.bind(ctx, request.RunID)
+	var l budget.Ledger
+	var err error
+	if frozen != nil && frozen.LedgerID != "" {
+		l, err = a.bindReceiptScope(ctx, request.RunID, frozen.LedgerID)
+	} else {
+		l, err = a.bind(ctx, request.RunID)
+	}
 	if err != nil {
 		return model.Response{}, err
 	}

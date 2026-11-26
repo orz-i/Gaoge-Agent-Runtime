@@ -309,6 +309,17 @@ func ManagedPrepareReturned(ctx context.Context, adapter any, request any, err e
 // frame. Every other entered ticket must have returned without an unresolved
 // failure. The output journals actual operations, never a caller promise.
 func ManagedSuspension(ctx context.Context, adapter any, request any) (json.RawMessage, bool) {
+	return managedSuspension(ctx, adapter, nil, request, "", false)
+}
+
+// ManagedObligationSuspension accepts only the explicitly selected native
+// Budget frame with an actual admission operation and no unresolved ticket.
+// Summary supplies its concrete phase operation instead of a business prepare.
+func ManagedObligationSuspension(ctx context.Context, adapter, budgetAdapter any, request any, phase string) (json.RawMessage, bool) {
+	return managedSuspension(ctx, adapter, budgetAdapter, request, phase, true)
+}
+
+func managedSuspension(ctx context.Context, adapter, budgetAdapter any, request any, phase string, obligations bool) (json.RawMessage, bool) {
 	t, _ := ctx.Value(ticketKey{}).(*Ticket)
 	if t == nil {
 		return nil, false
@@ -322,25 +333,49 @@ func ManagedSuspension(ctx context.Context, adapter any, request any) (json.RawM
 	if _, ok := t.operations["managed.hydrated"]; !ok {
 		return nil, false
 	}
-	if t.managedPreparing || len(t.managedPrepared) == 0 {
+	if t.managedPreparing {
 		return nil, false
 	}
+	if phase == "" {
+		if len(t.managedPrepared) == 0 {
+			return nil, false
+		}
+	} else if _, ok := t.operations["context.summary.native-phase:"+phase]; !ok {
+		return nil, false
+	}
+	var budgetProof *[32]byte
 	for _, other := range s.tickets {
 		if other == t {
 			continue
 		}
-		if other.invalid || !other.returned || (other.failed && !other.receipt) {
+		if obligations && budgetAdapter != nil && other.adapter == budgetAdapter && !other.returned {
+			if other.invalid || other.receipt || !s.trusted[other.adapter] || budgetProof != nil {
+				return nil, false
+			}
+			proof, ok := other.operations["managed.budget.admitted"]
+			if !ok {
+				return nil, false
+			}
+			budgetProof = &proof
+			continue
+		}
+		if other.invalid || !other.returned || (other.failed && !other.receipt) ||
+			(obligations && !s.trusted[other.adapter]) {
 			return nil, false
 		}
 	}
+	if obligations && (budgetAdapter != nil) != (budgetProof != nil) {
+		return nil, false
+	}
 	b, e := json.Marshal(struct {
-		Binding    Binding
-		Nonce      uint64
-		Input      [32]byte
-		Operations map[string][32]byte
-		Request    any
-		Prepared   json.RawMessage
-	}{s.binding, t.nonce, t.input, t.operations, request, t.managedPrepared})
+		Binding         Binding
+		Nonce           uint64
+		Input           [32]byte
+		Operations      map[string][32]byte
+		Request         any
+		Prepared        json.RawMessage
+		BudgetAdmission *[32]byte `json:",omitempty"`
+	}{s.binding, t.nonce, t.input, t.operations, request, t.managedPrepared, budgetProof})
 	return b, e == nil
 }
 

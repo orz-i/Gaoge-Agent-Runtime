@@ -211,7 +211,23 @@ func (coordinator Coordinator) RegisterRun(ctx context.Context, scopeID, runID s
 // terminal Run facts. Model/Tool reservations, including unknown charges, remain.
 // Repeating reconciliation after a crash is safe.
 func (coordinator Coordinator) FinishRuns(ctx context.Context, scopeID string, runIDs ...string) (Ledger, error) {
+	return coordinator.finishRuns(ctx, scopeID, 0, runIDs...)
+}
+
+// FinishRunsAtRevision releases lifetime capacity only for an already
+// qualified ledger revision; conflicts require requalification.
+func (coordinator Coordinator) FinishRunsAtRevision(ctx context.Context, scopeID string, revision uint64, runIDs ...string) (Ledger, error) {
+	if revision == 0 {
+		return Ledger{}, ErrLedgerConflict
+	}
+	return coordinator.finishRuns(ctx, scopeID, revision, runIDs...)
+}
+
+func (coordinator Coordinator) finishRuns(ctx context.Context, scopeID string, revision uint64, runIDs ...string) (Ledger, error) {
 	return coordinator.update(ctx, scopeID, func(ledger *Ledger) error {
+		if revision != 0 && ledger.Revision != revision {
+			return ErrLedgerConflict
+		}
 		for _, runID := range runIDs {
 			if _, ok := ledger.Runs[runID]; !ok {
 				return ErrLedgerNotFound

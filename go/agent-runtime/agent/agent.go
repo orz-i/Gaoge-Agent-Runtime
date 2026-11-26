@@ -383,6 +383,7 @@ type Runner struct {
 	samplingBudget           *BoundedBudgetAdapter
 	toolBudget               *BoundedBudgetAdapter
 	managedContextRecovery   *BoundedContextAdapter
+	managedBudgetSource      *managedObligations
 	contextSummary           *ContextSummaryAdapter
 	summaryNativeRecovery    bool
 	approvalPolicies         *plugin.ApprovalPolicySet

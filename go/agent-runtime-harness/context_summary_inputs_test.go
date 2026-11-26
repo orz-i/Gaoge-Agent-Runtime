@@ -2,7 +2,6 @@ package harness_test
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
@@ -26,7 +25,7 @@ func (inputs *summaryRejectedInputs) ReadRunInputs(context.Context, kernel.Run, 
 	return nil, nil
 }
 
-func TestContextSummaryNativeRejectsHostInputsWithRealBridges(t *testing.T) {
+func TestContextSummaryNativeBindsHostInputsWithRealBridges(t *testing.T) {
 	store := harness.NewMemoryStore()
 	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore(), ManagedRecoveryHost: store})
 	if err != nil {
@@ -53,10 +52,10 @@ func TestContextSummaryNativeRejectsHostInputsWithRealBridges(t *testing.T) {
 	}
 	inputs := &summaryRejectedInputs{}
 	dependencies.Inputs = inputs
-	if _, err = agent.NewRunner(dependencies); !errors.Is(err, agent.ErrInvalidRequest) {
-		t.Fatalf("Host input frame acquired native summary transfer authority: %v", err)
+	if _, err = agent.NewRunner(dependencies); err != nil {
+		t.Fatalf("exact managed Host input composition rejected: %v", err)
 	}
-	if inputs.bindingCalls != 0 || inputs.reads != 0 || resolved != 0 || len(client.requests) != 0 {
-		t.Fatal("invalid native composition invoked a Host source or Provider")
+	if inputs.bindingCalls != 1 || inputs.reads != 0 || resolved != 0 || len(client.requests) != 0 {
+		t.Fatal("construction read a queue or called Provider")
 	}
 }

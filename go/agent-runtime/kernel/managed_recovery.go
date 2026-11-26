@@ -38,6 +38,10 @@ type ManagedRecoveryState string
 // summary phases. Feature-owned validation is required before any PARK.
 const ManagedLifecycleWorkingStateSummary = "working-state-summary-v3"
 
+// ManagedLifecycleAgentObligations is the native combined proof profile.
+// Older readers must not reinterpret it as a Context-only continuation.
+const ManagedLifecycleAgentObligations = "managed-agent-obligations-v1"
+
 const (
 	ManagedAvailable   ManagedRecoveryState = "AVAILABLE"
 	ManagedInvalidated ManagedRecoveryState = "INVALIDATED"
@@ -115,8 +119,59 @@ type ManagedSafePoint struct {
 	LifecycleSource   json.RawMessage
 }
 
+// ManagedAgentObligations is the exact combined safe-point payload. Kernel
+// validates its closed event/source shape; Agent validates feature state and
+// the original Budget Store before ownership transfer. Host closure consumes
+// the same representation, not another interpretation of the ledger identity.
+type ManagedAgentObligations struct {
+	Phase          string          `json:"phase"`
+	Purpose        string          `json:"purpose,omitempty"`
+	SourceRevision uint64          `json:"sourceRevision"`
+	InvocationID   string          `json:"invocationID"`
+	RequestHash    string          `json:"requestHash"`
+	BindingDigest  string          `json:"bindingDigest,omitempty"`
+	SamplingDigest string          `json:"samplingDigest"`
+	InputBinding   string          `json:"inputBinding,omitempty"`
+	InputCursor    uint64          `json:"inputCursor,omitempty"`
+	LedgerID       string          `json:"ledgerID,omitempty"`
+	LedgerRevision uint64          `json:"ledgerRevision,omitempty"`
+	LedgerDigest   string          `json:"ledgerDigest,omitempty"`
+	Journal        json.RawMessage `json:"journal"`
+}
+
+func (p ManagedSafePoint) AgentObligations() (ManagedAgentObligations, bool) {
+	var o ManagedAgentObligations
+	if p.LifecycleVersion != ManagedLifecycleAgentObligations || json.Unmarshal(p.LifecycleSource, &o) != nil ||
+		o.SourceRevision != p.Source.Run.Revision || o.InvocationID != p.ModelInvocationID || o.RequestHash != p.ModelRequestHash ||
+		!validToolReceiptDigest(o.SamplingDigest) || p.Host.Attempt != 1 || (o.InputBinding == "" && o.InputCursor != 0) ||
+		(o.LedgerID == "" && o.InputBinding == "") {
+		return o, false
+	}
+	var journal map[string]json.RawMessage
+	if json.Unmarshal(o.Journal, &journal) != nil || len(journal) == 0 {
+		return o, false
+	}
+	if o.LedgerID == "" {
+		if o.LedgerRevision != 0 || o.LedgerDigest != "" {
+			return o, false
+		}
+	} else if o.LedgerID != p.Host.TurnID || o.LedgerRevision == 0 || !validToolReceiptDigest(o.LedgerDigest) {
+		return o, false
+	}
+	if o.Purpose == "" {
+		return o, o.Phase == "pending" && o.BindingDigest == ""
+	}
+	return o, o.Purpose == "context_summary" && validToolReceiptDigest(o.BindingDigest) &&
+		(o.Phase == "pending" || o.Phase == "completed" || o.Phase == "consumed")
+}
+
 func (p ManagedSafePoint) Valid() bool {
-	return p.ID != "" && p.RecoveryID == ManagedRecoveryID(p.ID, p.Host) && p.Host.Valid() && p.Source.Run.ID == p.Host.RunID && p.Source.Run.Kind == "agent" && p.Source.Run.ParentRunID == "" && p.Source.Run.Status == RunStatusRunning && p.Source.Run.Revision > 0 && json.Valid(p.Source.State) && p.OriginalGrant.ChildRunID == p.Host.RunID && p.OriginalGrant.MatchesExecution(p.OriginalLease) && p.ModelInvocationID != "" && len(p.ModelRequestHash) == 64 && (p.LifecycleVersion == "managed-context-v1" || p.LifecycleVersion == ManagedLifecycleWorkingStateSummary) && json.Valid(p.LifecycleSource)
+	if p.LifecycleVersion == ManagedLifecycleAgentObligations {
+		if _, ok := p.AgentObligations(); !ok {
+			return false
+		}
+	}
+	return p.ID != "" && p.RecoveryID == ManagedRecoveryID(p.ID, p.Host) && p.Host.Valid() && p.Source.Run.ID == p.Host.RunID && p.Source.Run.Kind == "agent" && p.Source.Run.ParentRunID == "" && p.Source.Run.Status == RunStatusRunning && p.Source.Run.Revision > 0 && json.Valid(p.Source.State) && p.OriginalGrant.ChildRunID == p.Host.RunID && p.OriginalGrant.MatchesExecution(p.OriginalLease) && p.ModelInvocationID != "" && len(p.ModelRequestHash) == 64 && (p.LifecycleVersion == "managed-context-v1" || p.LifecycleVersion == ManagedLifecycleWorkingStateSummary || p.LifecycleVersion == ManagedLifecycleAgentObligations) && json.Valid(p.LifecycleSource)
 }
 
 // ManagedTransfer retains one immutable original recovery identity. Selection
@@ -206,25 +261,30 @@ func managedSafePointEventMatches(point ManagedSafePoint, events []EventDraft) b
 	if point.LifecycleVersion == "managed-context-v1" {
 		return events[0].Type == "agent.model_invocation.pending"
 	}
-	if point.LifecycleVersion != ManagedLifecycleWorkingStateSummary {
+	var phase string
+	if point.LifecycleVersion == ManagedLifecycleAgentObligations {
+		o, ok := point.AgentObligations()
+		if !ok {
+			return false
+		}
+		phase = o.Phase
+	} else if point.LifecycleVersion == ManagedLifecycleWorkingStateSummary {
+		var source struct {
+			Phase          string `json:"phase"`
+			SourceRevision uint64 `json:"sourceRevision"`
+			InvocationID   string `json:"invocationID"`
+			RequestHash    string `json:"requestHash"`
+			BindingDigest  string `json:"bindingDigest"`
+		}
+		if json.Unmarshal(point.LifecycleSource, &source) != nil || source.SourceRevision != point.Source.Run.Revision ||
+			source.InvocationID != point.ModelInvocationID || source.RequestHash != point.ModelRequestHash || !validToolReceiptDigest(source.BindingDigest) {
+			return false
+		}
+		phase = source.Phase
+	} else {
 		return false
 	}
-	var source struct {
-		Phase          string `json:"phase"`
-		SourceRevision uint64 `json:"sourceRevision"`
-		InvocationID   string `json:"invocationID"`
-		RequestHash    string `json:"requestHash"`
-		BindingDigest  string `json:"bindingDigest"`
-	}
-	if json.Unmarshal(point.LifecycleSource, &source) != nil || source.SourceRevision != point.Source.Run.Revision ||
-		source.InvocationID != point.ModelInvocationID || source.RequestHash != point.ModelRequestHash {
-		return false
-	}
-	digest, err := hex.DecodeString(source.BindingDigest)
-	if err != nil || len(digest) != sha256.Size || hex.EncodeToString(digest) != source.BindingDigest {
-		return false
-	}
-	switch source.Phase {
+	switch phase {
 	case "pending":
 		return events[0].Type == "agent.model_invocation.pending"
 	case "completed":

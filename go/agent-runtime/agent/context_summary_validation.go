@@ -21,7 +21,7 @@ func (runner *Runner) SupportsContextSummary() bool {
 // for the shared summary/business sampling protocol. It grants no execution
 // permission and is used only to reject mismatched Host compositions.
 func (runner *Runner) UsesBudgetedContextSummary(adapter *BoundedBudgetAdapter) bool {
-	return runner.SupportsContextSummary() && !runner.summaryNativeRecovery &&
+	return runner.SupportsContextSummary() &&
 		adapter != nil && runner.samplingBudget == adapter && runner.toolBudget == adapter
 }
 
@@ -41,7 +41,7 @@ func validSummaryComposition(d Dependencies) bool {
 		return selectedToolBudget(d) == nil && contextOnlyRun(d, summary.bounded) &&
 			(d.BoundedContext == nil || d.BoundedContext == summary.bounded)
 	}
-	return !d.SummaryNativeRecovery && d.BoundedContext == summary.bounded &&
+	return d.BoundedContext == summary.bounded &&
 		(d.BoundedBudget == b || completeLegacyBudget(d, summary.bounded) == b)
 }
 
@@ -157,9 +157,6 @@ func contextSummaryInputBytesWithinPolicy(invocation ModelInvocation) bool {
 func validContextSummaryState(state runState) bool {
 	if state.SummaryNativeRecovery && state.WorkingStateSummary == nil || state.WorkingStateSummary != nil && state.MaxModelOutputTokens <= 0 {
 		return false
-	}
-	if state.SummaryNativeRecovery && (state.InputBinding != "" || state.InputCursor != 0) {
-		return false // Host input boundaries are not part of the dedicated transfer proof.
 	}
 	for index, invocation := range state.ModelInvocations {
 		if invocation.Purpose == ModelInvocationContextSummary && (index != 0 || state.WorkingStateSummary == nil ||

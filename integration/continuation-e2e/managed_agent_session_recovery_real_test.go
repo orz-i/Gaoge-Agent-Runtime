@@ -23,6 +23,7 @@ import (
 	postgresadapter "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres"
 	postgresmodels "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
@@ -142,7 +143,15 @@ func TestRealPostgresManagedClosureRetirementAcrossProcessCrash(t *testing.T) {
 	}
 }
 
-func testManagedAgentSessionRecoveryAcrossProcessCrash(t *testing.T, dsn string, facade, workingState bool) {
+func TestRealPostgresManagedOriginalObligationsAcrossProcessCrash(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("TEST_POSTGRES_DSN"))
+	if dsn == "" {
+		t.Skip("TEST_POSTGRES_DSN is not configured")
+	}
+	testManagedAgentSessionRecoveryAcrossProcessCrash(t, dsn, true, false, true)
+}
+
+func testManagedAgentSessionRecoveryAcrossProcessCrash(t *testing.T, dsn string, facade, workingState bool, obligations ...bool) {
 	t.Helper()
 	db, isolatedDSN := managedRecoveryDatabase(t, dsn)
 	if err := postgresadapter.Migrate(db); err != nil {
@@ -152,6 +161,12 @@ func testManagedAgentSessionRecoveryAcrossProcessCrash(t *testing.T, dsn string,
 		t.Fatal(err)
 	}
 	files := t.TempDir()
+	combined := len(obligations) == 1 && obligations[0]
+	if combined {
+		if err := appendManagedRecoveryRecord(filepath.Join(files, "inputs.jsonl"), agent.RunInput{Sequence: 1, ID: "first", Text: "first managed steering"}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	var expectedWorkingState *runtimecontext.WorkingState
 	if workingState {
 		expectedWorkingState = prepareManagedRecoveryWorkingState(t, db, files)
@@ -206,6 +221,18 @@ func testManagedAgentSessionRecoveryAcrossProcessCrash(t *testing.T, dsn string,
 		originalTransfer.SafePoint.ModelInvocationID != frozen.ID || originalTransfer.SafePoint.ModelRequestHash != frozen.RequestHash ||
 		!reflect.DeepEqual(originalTransfer.SafePoint.Source, pending) {
 		t.Fatalf("original process did not atomically commit exact managed source: %+v err=%v", originalTransfer, transferErr)
+	}
+	if combined {
+		proof, ok := originalTransfer.SafePoint.AgentObligations()
+		ledger, e := store.LoadBudget(t.Context(), turnID)
+		if !ok || e != nil || before.InputCursor != 1 || proof.InputCursor != 1 || proof.LedgerID != turnID ||
+			ledger.View("").Usage.LLMCalls != 1 || ledger.View("").Usage.ToolCalls != 1 ||
+			ledger.View("").Reserved != (budget.Usage{}) || !strings.Contains(requestMessages(frozen.Request), "first managed steering") {
+			t.Fatalf("original obligations missing: proof=%+v ledger=%+v err=%v", proof, ledger.View(""), e)
+		}
+		if err := appendManagedRecoveryRecord(filepath.Join(files, "inputs.jsonl"), agent.RunInput{Sequence: 2, ID: "late", Text: "late managed steering"}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	originalHostAuthority, authorityErr := store.ManagedRecoveryAuthority(t.Context())
 	if authorityErr != nil || originalHostAuthority != originalTransfer.SafePoint.Host.HostAuthority {
@@ -298,7 +325,19 @@ func testManagedAgentSessionRecoveryAcrossProcessCrash(t *testing.T, dsn string,
 	}
 	// JSON log round trips omit empty optional slices; normalize both through
 	// the same public clone before comparing every request field.
-	if len(calls) != 3 || !reflect.DeepEqual(model.CloneRequest(calls[1]), model.CloneRequest(frozen.Request)) {
+	if combined {
+		ledger, e := reopenedStore.LoadBudget(t.Context(), turnID)
+		if e != nil || after.InputCursor != 2 || !ledger.FinishedRuns[runID] ||
+			ledger.View("").Usage.LLMCalls != 3 || ledger.View("").Usage.ToolCalls != 2 ||
+			ledger.View("").Reserved != (budget.Usage{}) || len(calls) != 3 || frozen.SamplingPlan == nil {
+			t.Fatalf("combined recovery lost obligations: cursor=%d ledger=%+v calls=%d err=%v", after.InputCursor, ledger.View(""), len(calls), e)
+		}
+		hash, e := model.PhysicalRequestHash(calls[1])
+		if e != nil || hash != frozen.SamplingPlan.RequestHash || calls[1].InvocationID != frozen.ID ||
+			strings.Contains(requestMessages(calls[1]), "late managed steering") || !strings.Contains(requestMessages(calls[2]), "late managed steering") {
+			t.Fatalf("frozen sampling plan or late input changed: %v", e)
+		}
+	} else if len(calls) != 3 || !reflect.DeepEqual(model.CloneRequest(calls[1]), model.CloneRequest(frozen.Request)) {
 		t.Fatalf("pending request was re-prepared or redispatched: model calls=%d", len(calls))
 	}
 	for index, request := range calls {
@@ -570,7 +609,15 @@ func newManagedRecoverySessionWithComposition(t *testing.T, db *gorm.DB, files s
 	if facade {
 		options.Config.ToolKeys = nil
 		options.Config.ToolPolicies = nil
+		var inputs agent.RunInputSource
+		if _, e := os.Stat(filepath.Join(files, "inputs.jsonl")); e == nil {
+			inputs = managedRecoveryFileInputs{path: filepath.Join(files, "inputs.jsonl")}
+			options.Config.SharedBudget = &budget.Limits{MaxLLMCalls: 6, MaxToolCalls: 5}
+		} else if !os.IsNotExist(e) {
+			t.Fatal(e)
+		}
 		session, err := harness.OpenAgentSession(harness.AgentSessionOptions{
+			Inputs:  inputs,
 			Runtime: runtime, Store: hostStore, Model: managedRecoveryModel{logPath: filepath.Join(files, "model.jsonl")},
 			LocalTools: managedRecoverySessionTools(files), Session: options,
 			Context:   harness.AgentSessionContextOptions{ResolveWindow: resolveWindow, ManagedRecovery: managed, ReadArtifacts: true},
@@ -895,4 +942,44 @@ func managedRecoveryDatabase(t *testing.T, dsn string) (*gorm.DB, string) {
 	parsed.RawQuery = query.Encode()
 	isolatedDSN := parsed.String()
 	return openManagedRecoveryDB(t, isolatedDSN), isolatedDSN
+}
+
+// Test-only append-only durable input source, independently reopened in the
+// successor process. The fixture directory is exclusive to one root Run.
+type managedRecoveryFileInputs struct{ path string }
+
+func (s managedRecoveryFileInputs) BindingID() string { return "managed-recovery-fixture-inputs" }
+func (s managedRecoveryFileInputs) ReadRunInputs(ctx context.Context, _ kernel.Run, cursor uint64, limit int) ([]agent.RunInput, error) {
+	f, e := os.Open(s.path)
+	if e != nil {
+		return nil, e
+	}
+	defer f.Close()
+	d := json.NewDecoder(f)
+	var out []agent.RunInput
+	var last uint64
+	for {
+		if e = ctx.Err(); e != nil {
+			return nil, e
+		}
+		var in agent.RunInput
+		e = d.Decode(&in)
+		if errors.Is(e, io.EOF) {
+			break
+		}
+		if e != nil {
+			return nil, e
+		}
+		if in.Sequence != last+1 {
+			return nil, errors.New("invalid input sequence")
+		}
+		last = in.Sequence
+		if in.Sequence > cursor && len(out) < limit {
+			out = append(out, in)
+		}
+	}
+	if last < cursor {
+		return nil, errors.New("input source lost committed cursor")
+	}
+	return out, nil
 }

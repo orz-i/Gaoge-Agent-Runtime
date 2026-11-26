@@ -142,6 +142,9 @@ func (s *MemoryStore) CloseManagedRecovery(ctx context.Context, p kernel.Managed
 	if err := s.readManagedOriginalLocked(b); err != nil {
 		return err
 	}
+	if err := ValidateManagedClosureAccounting(ctx, s.MemoryLedgerStore, p); err != nil {
+		return err
+	}
 	additions, err := ManagedClosureItems(p, r)
 	if err != nil {
 		return err

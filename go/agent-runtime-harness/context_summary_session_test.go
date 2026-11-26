@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
@@ -66,14 +67,16 @@ func (s *sharedSummaryReceiptFaultStore) ApplyExecution(ctx context.Context, lea
 }
 
 func TestAgentSessionSummaryProducesNativeStateAndVerifiesPriorOrigin(t *testing.T) {
-	for _, name := range []string{"success", "invalid output fallback", "missing prior origin", "native recovery complete source", "shared budget", "shared token budget", "last shared call", "shared before receipt", "shared after receipt"} {
+	for _, name := range []string{"success", "invalid output fallback", "missing prior origin", "native recovery complete source", "shared budget", "shared token budget", "last shared call", "shared before receipt", "shared after receipt", "combined managed pending", "combined managed completed", "combined managed consumed"} {
 		t.Run(name, func(t *testing.T) {
 			invalid := name == "invalid output fallback"
-			nativeRecovery := name == "native recovery complete source"
-			shared := strings.HasPrefix(name, "shared ") || name == "last shared call"
+			combined := strings.HasPrefix(name, "combined managed ")
+			nativeRecovery := name == "native recovery complete source" || combined
+			shared := strings.HasPrefix(name, "shared ") || name == "last shared call" || combined
 			fault := name == "shared before receipt" || name == "shared after receipt"
 			tokenBudget := name == "shared token budget"
-			store, runs := harness.NewMemoryStore(), memory.NewStore()
+			clock := &managedObligationClock{now: time.Now().UTC()}
+			store, runs := harness.NewMemoryStore(), memory.NewStoreWithExecutionClock(clock)
 			backing := &sharedSummaryReceiptFaultStore{Store: runs, after: name == "shared after receipt"}
 			client := &summarySessionModel{}
 			summaryCalls := 0
@@ -144,8 +147,28 @@ func TestAgentSessionSummaryProducesNativeStateAndVerifiesPriorOrigin(t *testing
 					options.BudgetMeter = &samplingMeter{}
 				}
 			}
+			var combinedStore *managedObligationStore
+			var inputs *managedCountingInputs
 			if nativeRecovery {
-				options.Runtime, err = kernel.New(kernel.Dependencies{Store: runs, ManagedRecoveryHost: store})
+				var nativeStore kernel.Store = runs
+				if combined {
+					event := "agent.model_invocation.pending"
+					switch name {
+					case "combined managed completed":
+						event = "agent.model_invocation.completed"
+					case "combined managed consumed":
+						event = agent.EventContextSummaryConsumed
+					}
+					combinedStore = &managedObligationStore{Store: runs, event: event, count: 1}
+					nativeStore = combinedStore
+					queue, e := agent.NewMemoryRunInputs("summary-queue")
+					if e != nil {
+						t.Fatal(e)
+					}
+					inputs = &managedCountingInputs{MemoryRunInputs: queue}
+					options.Inputs = inputs
+				}
+				options.Runtime, err = kernel.New(kernel.Dependencies{Store: nativeStore, ManagedRecoveryHost: store})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -155,7 +178,67 @@ func TestAgentSessionSummaryProducesNativeStateAndVerifiesPriorOrigin(t *testing
 			if err != nil {
 				t.Fatal(err)
 			}
-			second, err := session.Prompt(t.Context(), "second", secondText)
+			var second harness.Snapshot
+			if combined {
+				crashManagedObligation(t, func() { _, _ = session.Prompt(t.Context(), "second", secondText) })
+				if !combinedStore.hit {
+					t.Fatal("missing combined summary point")
+				}
+				pending, e := session.Load(t.Context(), "second")
+				if e != nil {
+					t.Fatal(e)
+				}
+				root, ok := harness.TopLevelInvocation(pending)
+				if !ok {
+					t.Fatal("missing original root")
+				}
+				original, e := runs.Load(t.Context(), root.ExecutionRefID)
+				if e != nil {
+					t.Fatal(e)
+				}
+				before, e := agent.ViewState(original)
+				if e != nil || len(before.ModelInvocations) != 1 || before.InputCursor != 0 {
+					t.Fatalf("wrong summary source: %v", e)
+				}
+				point, e := options.Runtime.LoadManagedRecovery(t.Context(), root.ExecutionRefID)
+				if e != nil || point.SafePoint.LifecycleVersion != kernel.ManagedLifecycleAgentObligations || point.State != kernel.ManagedAvailable {
+					t.Fatalf("missing original combined point: %v %s %s", e, point.State, point.SafePoint.LifecycleVersion)
+				}
+				if _, e = inputs.Submit(t.Context(), original.Run, "later", "late summary steering"); e != nil {
+					t.Fatal(e)
+				}
+				reads := inputs.reads
+				options.Runtime, e = kernel.New(kernel.Dependencies{Store: runs, ManagedRecoveryHost: store})
+				if e != nil {
+					t.Fatal(e)
+				}
+				options.Session.Transcript = nil
+				session, e = harness.OpenAgentSession(options)
+				if e != nil {
+					t.Fatal(e)
+				}
+				if _, e = session.Resume(t.Context(), "second"); e == nil || inputs.reads != reads {
+					t.Fatalf("live owner did not block recovery: %v", e)
+				}
+				clock.now = clock.now.Add(25 * time.Hour)
+				second, err = session.Resume(t.Context(), "second")
+				if err != nil || second.Turn.Status != harness.TurnCompleted {
+					t.Fatalf("combined summary recovery: %v status=%s", err, second.Turn.Status)
+				}
+				after, e := runs.Load(t.Context(), root.ExecutionRefID)
+				if e != nil {
+					t.Fatal(e)
+				}
+				view, e := agent.ViewState(after)
+				if e != nil || view.InputCursor != 1 || view.ModelInvocations[0].ID != before.ModelInvocations[0].ID {
+					t.Fatalf("source identity or input changed: %v cursor=%d", e, view.InputCursor)
+				}
+				if len(client.requests) != 3 || strings.Contains(requestTextManaged(client.requests[1]), "late summary steering") || !strings.Contains(requestTextManaged(client.requests[2]), "late summary steering") {
+					t.Fatal("late input changed frozen summary or disappeared before business")
+				}
+			} else {
+				second, err = session.Prompt(t.Context(), "second", secondText)
+			}
 			if fault {
 				if !errors.Is(err, errSharedSummaryReceiptCut) || !backing.fired || summaryCalls != 1 || len(client.requests) != 2 {
 					t.Fatalf("summary fault missed original receipt boundary: %v calls=%d/%d", err, summaryCalls, len(client.requests))

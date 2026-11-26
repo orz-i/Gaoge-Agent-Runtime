@@ -35,9 +35,6 @@ func selectFirstPartyStages(d *Dependencies) (*BoundedContextAdapter, *BoundedBu
 	if !validBoundedBudgetComposition(*d) || !validBoundedContextComposition(*d) {
 		return nil, nil, ErrInvalidRequest
 	}
-	if d.Inputs != nil && (d.ManagedContextRecovery != nil || d.SummaryNativeRecovery) {
-		return nil, nil, ErrInvalidRequest
-	}
 	if d.SummaryNativeRecovery && !validSummaryNativeDependencies(*d) {
 		return nil, nil, ErrInvalidRequest
 	}
@@ -49,11 +46,21 @@ func selectFirstPartyStages(d *Dependencies) (*BoundedContextAdapter, *BoundedBu
 	}
 	if a := d.ManagedContextRecovery; a != nil {
 		if a.manager == nil || a.ports == nil || !d.Runtime.SupportsManagedRecovery() ||
-			d.PrepareModelRequest != nil || d.BoundedBudget != nil || !contextOnlyRun(*d, a) ||
+			d.PrepareModelRequest != nil || !contextOnlyRun(*d, a) ||
 			len(d.ModelMiddleware) != 0 || len(d.ToolMiddleware) != 0 || d.NormalizeModelPolicy != nil {
 			return nil, nil, ErrInvalidRequest
 		}
 		d.BoundedContext = a
+	}
+	if (d.ManagedContextRecovery != nil || d.SummaryNativeRecovery) && (d.BoundedBudget != nil || d.Inputs != nil) {
+		// Mixed transfers need the exact native Host storage bridge. Unlike
+		// ordinary execution, arbitrary Context/Budget ports cannot certify
+		// continuation of a still-unreturned physical frame.
+		if d.BoundedContext == nil || !summaryNativeBridge(d.BoundedContext.ports, "boundedContextPorts", d.Runtime) ||
+			(d.BoundedBudget != nil && !summaryNativeBridge(d.BoundedBudget.ports, "boundedBudgetPorts", d.Runtime)) ||
+			len(d.Observers) != 0 || len(d.Telemetry) != 0 || len(d.CompletionPolicies) != 0 || d.ToolDiscovery != nil {
+			return nil, nil, ErrInvalidRequest
+		}
 	}
 	b := d.BoundedBudget
 	if b == nil {
@@ -93,6 +100,9 @@ func (r *Runner) invokeFirstPartyRun(ctx context.Context, inv plugin.RunInvocati
 	admission, err := b.admitRun(stageCtx, inv)
 	if err != nil {
 		return kernel.Snapshot{}, err
+	}
+	if admission.projectionErr == nil && admission.ledger.ID != "" {
+		callbackscope.Operation(stageCtx, b, "managed.budget.admitted", admission.ledger)
 	}
 	out, err = r.invokeContextRun(stageCtx, inv, terminal)
 	return b.finishRun(stageCtx, inv, admission, out, err)

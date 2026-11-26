@@ -33,10 +33,10 @@ func validSummaryNativeDependencies(dependencies Dependencies) bool {
 	adapter := dependencies.ContextSummary
 	return dependencies.Runtime != nil && dependencies.Runtime.SupportsManagedRecovery() && dependencies.Runtime.HasManagedRecoveryHost() &&
 		adapter != nil && adapter.bounded != nil && adapter.ports != nil && dependencies.ManagedContextRecovery == nil &&
-		dependencies.PrepareModelRequest == nil && dependencies.BoundedBudget == nil && contextOnlyRun(dependencies, adapter.bounded) &&
+		dependencies.PrepareModelRequest == nil && contextOnlyRun(dependencies, adapter.bounded) &&
 		len(dependencies.ModelMiddleware) == 0 && len(dependencies.ToolMiddleware) == 0 &&
 		len(dependencies.Observers) == 0 && len(dependencies.Telemetry) == 0 && len(dependencies.CompletionPolicies) == 0 &&
-		dependencies.NormalizeModelPolicy == nil && dependencies.ToolDiscovery == nil && dependencies.Inputs == nil &&
+		dependencies.NormalizeModelPolicy == nil && dependencies.ToolDiscovery == nil &&
 		summaryNativeBridge(adapter.ports, "contextSummaryPorts", dependencies.Runtime) &&
 		summaryNativeBridge(adapter.bounded.ports, "boundedContextPorts", dependencies.Runtime)
 }
@@ -54,7 +54,7 @@ type contextSummaryLifecycle struct {
 }
 
 func summaryNativePhase(state runState) (ModelInvocation, bool) {
-	if !state.SummaryNativeRecovery || state.WorkingStateSummary == nil || state.InputBinding != "" || state.InputCursor != 0 || len(state.ModelInvocations) != 1 ||
+	if !state.SummaryNativeRecovery || state.WorkingStateSummary == nil || state.InputCursor != 0 || len(state.ModelInvocations) != 1 ||
 		len(state.Messages) != 1 || len(state.PendingCalls) != 0 || state.PendingApproval != nil || state.ToolDispatchID != "" ||
 		state.ToolWait != nil || len(state.DeferredChildren) != 0 || len(state.RecoveredTools) != 0 {
 		return ModelInvocation{}, false
@@ -106,6 +106,20 @@ func (runner *Runner) commitSummarySafePoint(ctx context.Context, snapshot kerne
 		return snapshot, ErrInvalidRequest
 	}
 	raw, err := json.Marshal(lifecycle)
+	version := kernel.ManagedLifecycleWorkingStateSummary
+	if runner.combinedManaged(state) {
+		var eligible bool
+		raw, eligible, err = runner.freezeManagedObligations(ctx, snapshot, state, invocation, host)
+		if err == nil && !eligible {
+			// A receipt already committed with no eligible suspension still
+			// has its original ordinary recovery semantics.
+			if invocation.Status != ModelInvocationPending {
+				return runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, mutation)
+			}
+			return snapshot, ErrRootOutcomeUnknown
+		}
+		version = kernel.ManagedLifecycleAgentObligations
+	}
 	if err != nil {
 		return snapshot, err
 	}
@@ -113,7 +127,7 @@ func (runner *Runner) commitSummarySafePoint(ctx context.Context, snapshot kerne
 		Grant, Invocation, Phase string
 		Revision                 uint64
 	}{runner.activeRootGrant.ID, invocation.ID, string(invocation.Status), snapshot.Run.Revision + 1})
-	return runner.applyManagedSafePoint(ctx, snapshot, invocation, mutation, host, id, kernel.ManagedLifecycleWorkingStateSummary, raw)
+	return runner.applyManagedSafePoint(ctx, snapshot, invocation, mutation, host, id, version, raw)
 }
 
 func (runner *Runner) validateSummarySafePoint(point kernel.ManagedSafePoint) error {
@@ -126,7 +140,7 @@ func (runner *Runner) validateSummarySafePoint(point kernel.ManagedSafePoint) er
 	}
 	invocation, valid := summaryNativePhase(state)
 	var lifecycle contextSummaryLifecycle
-	if !valid || json.Unmarshal(point.LifecycleSource, &lifecycle) != nil ||
+	if !valid || state.InputBinding != "" || json.Unmarshal(point.LifecycleSource, &lifecycle) != nil ||
 		lifecycle.SourceRevision != point.Source.Run.Revision || lifecycle.Phase != invocation.Status ||
 		lifecycle.InvocationID != invocation.ID || lifecycle.RequestHash != invocation.RequestHash ||
 		lifecycle.BindingDigest != kernel.ManagedDigest(invocation.ContextSummary) || point.ModelInvocationID != invocation.ID ||

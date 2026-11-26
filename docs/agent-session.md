@@ -194,12 +194,26 @@ sampling share the original ledger, physical sampling plan and receipt
 settlement; the summary retains its separate source validation and installation.
 Reopen a budgeted summary Turn with summary support configured. A summary is
 optional and is skipped if the shared ledger cannot admit it while retaining a
-call for business work. `Context.ManagedRecovery` and
-`Context.SummaryNativeRecovery` remain incompatible with `SharedBudget`; their
-managed transfer proof is not interchangeable with ordinary receipt recovery.
-They also retain the existing restriction on `Inputs`. Both managed profiles
-share native Context preparation and exact successor retirement, without
-changing the original safe-point proof, lifecycle version, or recovery ID.
+call for business work. Both `Context.ManagedRecovery` and
+`Context.SummaryNativeRecovery` can carry `SharedBudget` and `Inputs` through
+their original first-party managed transfer. The combined
+`managed-agent-obligations-v1` safe point binds the original ledger revision
+and accounting digest, physical sampling plan, and committed input binding
+and cursor to the Kernel source. Only the exact registered Harness/ledger
+Store and native bounded bridges qualify. No outstanding held/waiting
+reservation, unfinished descendant, unknown effect or Retry generation is
+transferable. Existing pure-context and pure-summary proof versions remain
+unchanged; they cannot be promoted by reopening with more capabilities.
+
+RESUME requalifies the original ledger before enabling a successor and uses
+its existing accounting scope without Ensure/Register. No input-source read
+or request preparation runs before leaving the safe point. New input applies
+only at a later ordinary input safe point. For an elected CANCEL, the original
+ledger is fenced by revision CAS, Kernel cancellation commits, and terminal
+lifetime accounting is completed before the Host closes the dispatch.
+A lost closure ACK can be repaired against these same original facts.
+Drain or reconcile mixed in-flight transfers before downgrading workers
+that do not understand the new proof version.
 
 The unused `MemoryPolicy` configuration field has been removed. Host memory
 can be supplied through selected Context history, Skills or authorized Tools;
@@ -326,9 +340,10 @@ Selecting the flag does not make Memory durable or add a recovery authority.
 Unknown external outcomes continue to require trusted reconciliation.
 
 For mid-task user input, pass the Host's authenticated log as `Inputs` and use
-the [steering guide](run-inputs-and-parallel-reads.md). Neither `ManagedRecovery`
-nor `SummaryNativeRecovery` accepts that log. A queued input is not an applied
-input and cannot rewrite an already frozen invocation.
+the [steering guide](run-inputs-and-parallel-reads.md). Both native managed
+profiles can preserve the committed input binding and cursor; the Host must
+retain that log across restarts. A queued input is not an applied input and
+cannot rewrite an already frozen invocation.
 
 Hosts can now supply bounded, source-bound task data through
 `ContextSeed.WorkingState`. See [Explicit WorkingState](working-state.md) for

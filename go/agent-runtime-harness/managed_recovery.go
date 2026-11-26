@@ -2,11 +2,15 @@ package harness
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"reflect"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
@@ -110,6 +114,28 @@ func cloneManagedReservation(r kernel.ManagedHostReservation) kernel.ManagedHost
 
 // SameManagedReservation includes mode, payload, source, namespaces and revision.
 func SameManagedReservation(a, b kernel.ManagedHostReservation) bool { return reflect.DeepEqual(a, b) }
+
+// ValidateManagedClosureAccounting is shared by all Host Stores. A direct
+// Kernel CANCEL cannot close the Host dispatch while its original ledger
+// remains open. Ordinary unbudgeted historical transfers are unchanged.
+func ValidateManagedClosureAccounting(ctx context.Context, store budget.LedgerStore, p kernel.ManagedClosureProof) error {
+	t := p.Transfer()
+	if t.SafePoint.LifecycleVersion != kernel.ManagedLifecycleAgentObligations {
+		return nil
+	}
+	source, ok := t.SafePoint.AgentObligations()
+	if !ok {
+		return ErrConflict
+	}
+	if source.LedgerID == "" {
+		return nil
+	}
+	l, err := store.LoadBudget(ctx, source.LedgerID)
+	if err != nil {
+		return errors.Join(ErrConflict, err)
+	}
+	return agent.ValidateManagedBudgetClosure(t.SafePoint, p.Snapshot(), t.Selection.Mode, l)
+}
 
 // ManagedClosureItems derives the fixed append-only projection from an opaque
 // Kernel read proof. No returned-callback fact is attributed to the old owner.

@@ -11,10 +11,26 @@ import (
 // authoritative ledger CAS. The original Turn cancellation is a historical
 // closure; newer Attempts are independently fenced without refunding charges.
 func (coordinator Coordinator) CancelRoot(ctx context.Context, scopeID, rootRunID string) (Ledger, error) {
+	return coordinator.cancelRoot(ctx, scopeID, rootRunID, 0)
+}
+
+// CancelRootAtRevision applies the same cancellation transition only to the
+// ledger revision previously qualified by a managed transfer.
+func (coordinator Coordinator) CancelRootAtRevision(ctx context.Context, scopeID, rootRunID string, revision uint64) (Ledger, error) {
+	if revision == 0 {
+		return Ledger{}, ErrLedgerConflict
+	}
+	return coordinator.cancelRoot(ctx, scopeID, rootRunID, revision)
+}
+
+func (coordinator Coordinator) cancelRoot(ctx context.Context, scopeID, rootRunID string, revision uint64) (Ledger, error) {
 	if strings.TrimSpace(rootRunID) == "" {
 		return Ledger{}, ErrInvalidUsage
 	}
 	return coordinator.update(ctx, scopeID, func(l *Ledger) error {
+		if revision != 0 && l.Revision != revision {
+			return ErrLedgerConflict
+		}
 		if binding, exists := l.Runs[rootRunID]; exists && binding.ParentRunID != "" {
 			return ErrLedgerConflict
 		}
