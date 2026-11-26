@@ -73,8 +73,12 @@ accounting identity and logical ancestry. Custom native Stores implement
 `CreateRequest.Budget` / `Record.BudgetEnrollment` as part of the original
 Run creation transaction; the new Run and ledger enrollment commit together.
 The local parent's original scope, identity and nonterminal status are checked
-under that transaction. A new Root Retry activates the exact already selected
-Attempt and enrolls it when creating the successor Run. Native ordinary
+under that transaction. Custom `kernel.Store` implementations must also implement
+`CancelBeforeCreate(context.Context, RunCreationCancellation)` as an immutable
+Run identity decision in the same transaction as Create and budget closure.
+A cancelled identity cannot subsequently create a Run. A new Root Retry
+activates the exact already selected Attempt and enrolls it when creating the
+successor Run. Native ordinary
 `Cancel`, `Expire` and terminal writes settle the original scope under the same
 Store transaction. `Runtime.CancelBudgeted` is removed, without an alias.
 Unknown dispatched effects still block cancellation or expiry without revoking

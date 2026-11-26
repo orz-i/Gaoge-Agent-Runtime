@@ -32,7 +32,7 @@ func TestRetirementCutoverRejectsUnfinishedHistory(t *testing.T) {
 				t.Fatal(e)
 			}
 			if upgrade {
-				if _, e = s.db.Exec("DROP TABLE agent_harness_budgets"); e != nil {
+				if _, e = s.db.Exec("DROP TABLE agent_harness_budgets; DROP TABLE runtime_run_identities"); e != nil {
 					t.Fatal(e)
 				}
 				if _, e = s.db.Exec("PRAGMA user_version=10"); e != nil {

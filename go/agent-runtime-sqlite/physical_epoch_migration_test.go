@@ -29,7 +29,7 @@ func TestPhysicalEpochMigrationPreservesOriginalCustodyAndLeaseHistory(t *testin
 	if _, err = db.Exec("INSERT INTO runtime_managed_authority VALUES('managed-recovery-authority/v1',?,1,1)", strings.Repeat("a", 64)); err != nil {
 		t.Fatal(err)
 	}
-	rt, err := kernel.New(kernel.Dependencies{Store: &Store{db: db}})
+	rt, err := kernel.New(kernel.Dependencies{Store: legacyRunFixtureStore{&Store{db: db}}})
 	if err != nil {
 		t.Fatal(err)
 	}

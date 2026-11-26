@@ -29,7 +29,7 @@ func TestGrantIdentityV9MigrationRejectsAmbiguousOwnersAtomically(t *testing.T) 
 	if _, e = db.Exec("INSERT INTO runtime_managed_authority VALUES('managed-recovery-authority/v1',?,1,1)", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"); e != nil {
 		t.Fatal(e)
 	}
-	rt, e := kernel.New(kernel.Dependencies{Store: &Store{db: db}})
+	rt, e := kernel.New(kernel.Dependencies{Store: legacyRunFixtureStore{&Store{db: db}}})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -114,7 +114,7 @@ func TestGrantIdentityV9MigrationRejectsOverlapAndWhitespaceAtomically(t *testin
 			if _, e = db.Exec("INSERT INTO runtime_managed_authority VALUES('managed-recovery-authority/v1',?,1,1)", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"); e != nil {
 				t.Fatal(e)
 			}
-			rt, e := kernel.New(kernel.Dependencies{Store: &Store{db: db}})
+			rt, e := kernel.New(kernel.Dependencies{Store: legacyRunFixtureStore{&Store{db: db}}})
 			if e != nil {
 				t.Fatal(e)
 			}

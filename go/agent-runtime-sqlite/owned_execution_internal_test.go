@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -20,6 +21,51 @@ func ownedPrivatePath(t *testing.T, name string) string {
 	t.Helper()
 	return filepath.Join(testprofile.Dir(t), name)
 }
+
+// legacyRunFixtureStore writes historical root fixtures using only the
+// schema shared by v3-v10. Do not run the modern identity/ledger writer
+// against an older schema or add new tables before testing migration.
+type legacyRunFixtureStore struct{ *Store }
+
+func (s legacyRunFixtureStore) Create(ctx context.Context, record kernel.Record, drafts []kernel.EventDraft) (kernel.Snapshot, error) {
+	if record.ExecutionRequired || record.BudgetEnrollment != nil || record.Run.ParentRunID != "" {
+		return kernel.Snapshot{}, kernel.ErrInvalidInput
+	}
+	encoded, err := encodeRecord(record)
+	if err != nil {
+		return kernel.Snapshot{}, err
+	}
+	events, err := encodeEvents(drafts)
+	if err != nil {
+		return kernel.Snapshot{}, err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return kernel.Snapshot{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	_, err = tx.ExecContext(ctx, `INSERT INTO runtime_runs(run_id,scope_id,kind,status,revision,run_json,state_json,checkpoint_json,result_json,event_head)
+		VALUES(?,?,?,?,?,?,?,?,?,?)`, record.Run.ID, record.Run.Actor.TenantID, string(record.Run.Kind), string(record.Run.Status), record.Run.Revision,
+		encoded.run, encoded.state, encoded.checkpoint, encoded.result, len(drafts))
+	if err != nil {
+		return kernel.Snapshot{}, err
+	}
+	if err = writeEvents(ctx, tx, record.Run.ID, 0, record.Run.UpdatedAt, drafts); err != nil {
+		return kernel.Snapshot{}, err
+	}
+	if err = writeReady(ctx, tx, record.Run, drafts, events); err != nil {
+		return kernel.Snapshot{}, err
+	}
+	if err = writeCommitProof(ctx, tx, record.Run, commitFingerprint(encoded, events)); err != nil {
+		return kernel.Snapshot{}, err
+	}
+	snapshot, err := loadTx(ctx, tx, record.Run.ID)
+	if err != nil {
+		return kernel.Snapshot{}, err
+	}
+	return snapshot, tx.Commit()
+}
+
 func TestOwnedSchemaMigrationPreservesOriginalGrants(t *testing.T) {
 	path := ownedPrivatePath(t, "legacy.sqlite")
 	raw, err := sql.Open("sqlite", "file:"+filepath.ToSlash(path))
@@ -35,7 +81,7 @@ func TestOwnedSchemaMigrationPreservesOriginalGrants(t *testing.T) {
 		t.Fatal(err)
 	}
 	old := &Store{db: raw}
-	rt, err := kernel.New(kernel.Dependencies{Store: old})
+	rt, err := kernel.New(kernel.Dependencies{Store: legacyRunFixtureStore{old}})
 	if err != nil {
 		t.Fatal(err)
 	}

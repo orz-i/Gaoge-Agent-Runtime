@@ -48,7 +48,7 @@ func TestEncryptedV8RelationMigrationPreservesOriginalAuthority(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := &Store{db: db}
-	rt, err := kernel.New(kernel.Dependencies{Store: s})
+	rt, err := kernel.New(kernel.Dependencies{Store: legacyRunFixtureStore{s}})
 	if err != nil {
 		t.Fatal(err)
 	}

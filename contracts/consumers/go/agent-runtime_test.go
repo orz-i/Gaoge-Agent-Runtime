@@ -18,6 +18,7 @@ import (
 // new required methods and would not protect external implementations.
 type storeContract interface {
 	Create(context.Context, kernel.Record, []kernel.EventDraft) (kernel.Snapshot, error)
+	CancelBeforeCreate(context.Context, kernel.RunCreationCancellation) (kernel.RunCreationCancellation, error)
 	Load(context.Context, string) (kernel.Snapshot, error)
 	Apply(context.Context, string, uint64, kernel.StoreMutation) (kernel.Snapshot, error)
 	ListEvents(context.Context, string, int64, int) ([]kernel.Event, error)
@@ -83,8 +84,8 @@ var (
 	_ func(*agent.WorkingStateSummaryPolicy) *agent.WorkingStateSummaryPolicy                             = agent.CloneWorkingStateSummaryPolicy
 	_ func(*agent.BoundedContextAdapter, agent.ContextSummaryPorts) (*agent.ContextSummaryAdapter, error) = agent.NewContextSummaryAdapter
 	_                                                                                                     = agent.ModelInvocationContextSummary
-	_                                                                                                     = agent.Dependencies{SummaryNativeRecovery: true}
-	_ func(*agent.Runner) bool                                                                            = (*agent.Runner).SupportsSummaryNativeRecovery
+	_                                                                                                     = agent.Dependencies{ManagedRecovery: true}
+	_ func(*agent.Runner) bool                                                                            = (*agent.Runner).SupportsManagedRecovery
 )
 
 // A separately linked Host implements only the narrow, immutable first-party
@@ -96,7 +97,7 @@ type childPhysicalStoreContract interface {
 	BeginChildExecution(context.Context, kernel.ChildExecutionGrant) error
 	LookupChildExecution(context.Context, string) (kernel.ChildExecutionGrant, error)
 	MarkChildExecutionSettled(context.Context, kernel.ChildExecutionGrant, kernel.ChildExecutionSettlement) error
-	FinishChildExecution(context.Context, kernel.ChildExecutionGrant) error
+	FinishChildExecution(context.Context, kernel.ChildExecutionGrant, kernel.ChildExecutionSettlement) error
 }
 
 var (

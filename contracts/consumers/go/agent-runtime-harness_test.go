@@ -92,5 +92,4 @@ var (
 var (
 	_ = harness.ConfigSnapshot{WorkingStateSummary: &agent.WorkingStateSummaryPolicy{MaxInputTokens: 8192, MaxSerializedBytes: 64 << 10}}
 	_ = runtimecontext.WorkingState{Derivation: &runtimecontext.WorkingStateDerivation{Kind: runtimecontext.WorkingStateDerivationSummary}}
-	_ = harness.AgentSessionContextOptions{SummaryNativeRecovery: true}
 )
