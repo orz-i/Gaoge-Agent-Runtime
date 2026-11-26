@@ -67,6 +67,69 @@ func (r *Runner) bindManagedOriginalDispatch(ctx context.Context, inv Invocation
 	return r.runtime.BindManagedDispatch(ctx, b)
 }
 
+// closeOriginalManagedDispatch retains the original transfer's separate
+// reservation and mode proof, but consumes the same native retirement before
+// Host closure. It never manufactures an ordinary callback return.
+func (r *Runner) closeOriginalManagedDispatch(ctx context.Context, native *agent.Runner, host managedHostStore, proof kernel.ManagedClosureProof) error {
+	if err := native.ReconcileManagedClosure(ctx, proof); err != nil {
+		return err
+	}
+	return host.CloseManagedRecovery(ctx, proof)
+}
+
+// recoverReturnedManagedDispatch is receipt-only. Refresh can close a CLOSED
+// original RESUME without entering the managed PARK/ENABLE or execution path.
+func (r *Runner) recoverReturnedManagedDispatch(ctx context.Context, native *agent.Runner, inv Invocation, dispatch Item) (bool, error) {
+	if inv.ParentItemID != "" || inv.Attempt != 1 ||
+		(!native.SupportsManagedContextRecovery() && !native.SupportsSummaryNativeRecovery()) {
+		return false, nil
+	}
+	phase, ok := VerifiedExecutionDispatchGrant(dispatch)
+	if !ok || phase != "start" {
+		return false, nil
+	}
+	t, err := r.runtime.LoadManagedRecovery(ctx, inv.ExecutionRefID)
+	if kernel.ManagedRecoveryAbsent(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	b := t.SafePoint.Host
+	if b.InvocationID != inv.ID || b.TurnID != inv.TurnID || b.RunID != inv.ExecutionRefID || uint64(b.Attempt) != uint64(inv.Attempt) || b.DispatchID != dispatch.ID {
+		return false, ErrConflict
+	}
+	host, ok := r.store.(managedHostStore)
+	if !ok || !r.runtime.UsesManagedRecoveryHost(host) {
+		return false, kernel.ErrExecutionRequired
+	}
+	res, err := host.ReadManagedRecovery(ctx, b, "")
+	if errors.Is(err, kernel.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if res.Mode != kernel.ManagedResume {
+		return false, nil
+	}
+	closed, err := r.runtime.LoadManagedRecoveryByID(ctx, res.SuspensionID)
+	if err != nil {
+		return false, err
+	}
+	if closed.State != kernel.ManagedClosed {
+		return false, nil
+	}
+	proof, err := r.runtime.ManagedRecoveryClosure(ctx, res.SuspensionID)
+	if err != nil || !proof.Matches(res) {
+		return false, errors.Join(ErrConflict, err)
+	}
+	if err = r.closeOriginalManagedDispatch(ctx, native, host, proof); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // recoverManagedInvocation does not open a new physical dispatch. The Core
 // entry performs Kernel PARK, immutable Host reservation and unique ENABLE.
 func (r *Runner) recoverManagedInvocation(ctx context.Context, inv Invocation) (kernel.Snapshot, bool, error) {
@@ -87,6 +150,13 @@ func (r *Runner) recoverManagedInvocation(ctx context.Context, inv Invocation) (
 	b := transfer.SafePoint.Host
 	if b.InvocationID != inv.ID || b.TurnID != inv.TurnID || b.RunID != inv.ExecutionRefID || uint64(b.Attempt) != uint64(inv.Attempt) {
 		return kernel.Snapshot{}, true, ErrConflict
+	}
+	if transfer.State == kernel.ManagedInvalidated && transfer.Selection.ID == "" {
+		if repaired, e := r.recoverOriginalPhysicalDispatch(ctx, inv); e != nil {
+			return kernel.Snapshot{}, true, e
+		} else if repaired {
+			return kernel.Snapshot{}, false, nil
+		}
 	}
 	// A normal already-returned Start may also have historical INVALIDATED
 	// safe points. It needs ordinary Resume, not the interrupted-start path.
@@ -155,10 +225,7 @@ func (r *Runner) recoverManagedInvocation(ctx context.Context, inv Invocation) (
 		}
 		// Host closure and native retirement are separate durable facts.
 		// A replay closes the exact original successor, never another callback.
-		if retireErr := native.ReconcileManagedClosure(ctx, proof); retireErr != nil {
-			return proof.Snapshot(), true, retireErr
-		}
-		if closeErr := host.CloseManagedRecovery(ctx, proof); closeErr != nil {
+		if closeErr := r.closeOriginalManagedDispatch(ctx, native, host, proof); closeErr != nil {
 			return kernel.Snapshot{}, true, closeErr
 		}
 		return proof.Snapshot(), true, nil
@@ -176,10 +243,7 @@ func (r *Runner) recoverManagedInvocation(ctx context.Context, inv Invocation) (
 		(runErr != nil && !terminalRuntimeStatus(snap.Run.Status)) {
 		return snap, true, errors.Join(ErrConflict, runErr)
 	}
-	if err = native.ReconcileManagedClosure(ctx, proof); err != nil {
-		return snap, true, errors.Join(runErr, err)
-	}
-	if err = host.CloseManagedRecovery(ctx, proof); err != nil {
+	if err = r.closeOriginalManagedDispatch(ctx, native, host, proof); err != nil {
 		return snap, true, errors.Join(runErr, err)
 	}
 	return snap, true, nil

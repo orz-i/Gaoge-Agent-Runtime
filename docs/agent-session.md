@@ -232,6 +232,20 @@ facts. Repeated cross-phase takeover after a selected successor remains
 outside this proof. Drain or reconcile mixed in-flight transfers before
 downgrading to readers that cannot validate the extended safe-point phases.
 
+Ordinary native Start, Resume and approval dispatches also have a receipt-only
+closure path. The original Harness dispatch identity determines the exact
+Kernel owned Grant. An actual persisted callback return with settled physical
+obligations can complete that Grant's original retirement and ACK, after
+which Harness can append the canonical dispatch completion and project the
+original Invocation and Turn. Refresh and Resume share this path; neither
+requires another physical callback for an already settled result. No-entry
+remains a distinct proof, and a managed transfer still requires its own
+selected closure proof. A terminal Run without an original qualified return
+is not sufficient evidence. Foreign or ambiguous dispatches stay fenced.
+Locally owned delegated approval results use the same retirement evidence
+before terminal child projection; recovery does not invent an absent Host
+approval decision or comment.
+
 The unused `MemoryPolicy` configuration field has been removed. Host memory
 can be supplied through selected Context history, Skills or authorized Tools;
 there is no separate Runtime memory interpreter. A pre-cut configuration with

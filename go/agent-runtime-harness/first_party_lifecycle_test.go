@@ -3,6 +3,7 @@ package harness_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -29,7 +30,7 @@ func (q *lifecycleInputs) ReadRunInputs(ctx context.Context, run kernel.Run, aft
 
 func TestFirstPartyLifecycleNamedApprovalInputsAndBudget(t *testing.T) {
 	for _, profile := range []string{"ordinary", "managed", "successor"} {
-		for _, mode := range []string{"approve", "cancel child"} {
+		for _, mode := range []string{"approve", "cancel child", "approve returned-cut", "approve unknown-cut"} {
 			t.Run(profile+"/"+mode, func(t *testing.T) { exerciseFirstPartyLifecycle(t, mode, profile) })
 		}
 	}
@@ -89,7 +90,7 @@ func exerciseFirstPartyLifecycle(t *testing.T, mode, profile string) {
 			if m.Role == model.RoleUser && model.TextValue(m.Content) == steering {
 				inputCount++
 			}
-			if m.Role == model.RoleTool && (mode == "approve" && strings.Contains(model.TextValue(m.Content), "verified child result") || mode == "cancel child" && strings.Contains(model.TextValue(m.Content), `"status":"cancelled"`)) {
+			if m.Role == model.RoleTool && (mode != "cancel child" && strings.Contains(model.TextValue(m.Content), "verified child result") || mode == "cancel child" && strings.Contains(model.TextValue(m.Content), `"status":"cancelled"`)) {
 				resultCount++
 			}
 		}
@@ -166,9 +167,58 @@ func exerciseFirstPartyLifecycle(t *testing.T, mode, profile string) {
 		}
 		wantChildCalls, wantWrites, wantLLM, wantTools = 1, 0, 3, 1
 	} else {
-		approved, err = reopened.ResolveSubtaskApproval(ctx, "full", task.ID, task.Approval.CheckpointID, harness.ResolveApprovalRequest{Decision: harness.ApprovalApprove})
-		if err != nil || writes != 1 {
-			t.Fatalf("original child approval did not finish: status=%s err=%v tasks=%+v writes=%d", approved.Turn.Status, err, approved.Subtasks, writes)
+		if mode == "approve returned-cut" || mode == "approve unknown-cut" {
+			cut := &firstPartyChildReturnCut{Store: base, before: mode == "approve unknown-cut"}
+			var host kernel.ManagedRecoveryHostStore
+			if profile != "ordinary" {
+				host = store
+			}
+			options.Runtime, err = kernel.New(kernel.Dependencies{Store: cut, ManagedRecoveryHost: host})
+			if err != nil {
+				t.Fatal(err)
+			}
+			reopened, err = harness.OpenAgentSession(options)
+			if err != nil {
+				t.Fatal(err)
+			}
+			crashManagedObligation(t, func() {
+				_, _ = reopened.ResolveSubtaskApproval(ctx, "full", task.ID, task.Approval.CheckpointID, harness.ResolveApprovalRequest{Decision: harness.ApprovalApprove})
+			})
+			if writes != 1 || cut.grant.ChildRunID != task.RunID {
+				t.Fatal("child return cut missed")
+			}
+			options.Runtime, err = kernel.New(kernel.Dependencies{Store: base, ManagedRecoveryHost: host})
+			if err != nil {
+				t.Fatal(err)
+			}
+			reopened, err = harness.OpenAgentSession(options)
+			if err != nil {
+				t.Fatal(err)
+			}
+			approved, err = reopened.Refresh(ctx, "full")
+			if mode == "approve unknown-cut" {
+				if !errors.Is(err, harness.ErrExecutionOutcomeUnknown) {
+					t.Fatalf("unknown child projected: %v", err)
+				}
+				if _, err = reopened.Resume(ctx, "full"); !errors.Is(err, harness.ErrExecutionOutcomeUnknown) {
+					t.Fatalf("unknown child continued parent: %v", err)
+				}
+				if rootCalls != 1 || childCalls != 2 || writes != 1 {
+					t.Fatal("unknown child reentered or advanced parent")
+				}
+				if g, e := base.LookupChildExecution(ctx, task.RunID); e != nil || g != cut.grant {
+					t.Fatalf("unknown child fence lost: %v", e)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			approved, err = reopened.ResolveSubtaskApproval(ctx, "full", task.ID, task.Approval.CheckpointID, harness.ResolveApprovalRequest{Decision: harness.ApprovalApprove})
+			if err != nil || writes != 1 {
+				t.Fatalf("original child approval did not finish: status=%s err=%v tasks=%+v writes=%d", approved.Turn.Status, err, approved.Subtasks, writes)
+			}
 		}
 	}
 	for i := 0; i < 4 && approved.Turn.Status != harness.TurnCompleted; i++ {
@@ -198,4 +248,23 @@ func exerciseFirstPartyLifecycle(t *testing.T, mode, profile string) {
 	if u := l.View("").Usage; u.LLMCalls != wantLLM || u.ToolCalls != wantTools || u.ChildRuns != 1 {
 		t.Fatalf("unexpected shared accounting: %+v", u)
 	}
+}
+
+type firstPartyChildReturnCut struct {
+	*memory.Store
+	grant  kernel.ChildExecutionGrant
+	before bool
+}
+
+func (s *firstPartyChildReturnCut) RecordOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, o kernel.OwnedPhysicalCallbackOutcome, p kernel.OwnedPhysicalCallbackReturn) error {
+	if s.before && g.AdmissionOperation == "approval" && o.HostCompleted {
+		s.grant = g
+		panic(managedObligationCrash{})
+	}
+	err := s.Store.RecordOwnedPhysicalCallbackReturn(ctx, g, rev, o, p)
+	if err == nil && g.AdmissionOperation == "approval" && o.HostCompleted {
+		s.grant = g
+		panic(managedObligationCrash{})
+	}
+	return err
 }

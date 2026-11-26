@@ -224,7 +224,7 @@ func (runner *Runner) pendingExecutionDispatch(
 		}
 		// The same exact original-dispatch repair used by Resume is also
 		// available to protective control. Never require a new physical
-		// call to close an already acknowledged Kernel no-entry.
+		// call to close an already acknowledged native retirement.
 		if native, ok := runner.agent.(*agent.Runner); ok && native.ObservesKernelRuntime(runner.runtime) {
 			owner, ownerErr := runner.store.GetInvocation(ctx, item.InvocationID)
 			if ownerErr != nil {
@@ -233,7 +233,7 @@ func (runner *Runner) pendingExecutionDispatch(
 			if owner.ID != item.InvocationID || owner.TurnID != turnID || owner.ExecutionRefID != item.RunID {
 				return false, ErrConflict
 			}
-			repaired, repairErr := runner.recoverUnenteredDispatch(ctx, owner)
+			repaired, repairErr := runner.recoverOriginalPhysicalDispatch(ctx, owner)
 			if repairErr != nil {
 				return false, repairErr
 			}
@@ -523,7 +523,7 @@ func (runner *Runner) beginPhysicalInvocationDispatch(
 	}
 	_, fresh, appendErr := runner.store.AppendItem(ctx, grant)
 	if errors.Is(appendErr, ErrConflict) {
-		repaired, repairErr := runner.recoverUnenteredDispatch(ctx, invocation)
+		repaired, repairErr := runner.recoverOriginalPhysicalDispatch(ctx, invocation)
 		if repairErr != nil {
 			return Item{}, errors.Join(ErrConflict, repairErr)
 		}

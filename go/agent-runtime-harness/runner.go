@@ -898,6 +898,9 @@ func (runner *Runner) refreshTurn(ctx context.Context, turnID string, expected *
 	if ActiveCancellationFence(physicalEvidence) {
 		return Snapshot{}, ErrConflict
 	}
+	if err = runner.recoverReturnedChildApprovals(ctx, turn); err != nil {
+		return Snapshot{}, err
+	}
 	if err = runner.refreshStandardRemoteChildren(ctx, turn); err != nil {
 		return Snapshot{}, err
 	}
@@ -949,6 +952,16 @@ func (runner *Runner) refreshTurn(ctx context.Context, turnID string, expected *
 	}
 	if terminalTurnStatus(turn.Status) && !terminalRuntimeStatus(runtimeSnapshot.Run.Status) {
 		return Snapshot{}, ErrConflict
+	}
+	if err = validateRootRuntimeOwnership(invocation, runtimeSnapshot); err != nil {
+		return Snapshot{}, err
+	}
+	if !terminalRuntimeStatus(runtimeSnapshot.Run.Status) {
+		// A genuine returned callback may have reached a waiting gate.
+		// Recover only its original retirement; unknown work stays fenced.
+		if _, err = runner.recoverOriginalPhysicalDispatch(ctx, invocation); err != nil {
+			return Snapshot{}, err
+		}
 	}
 	// Refresh races naturally with Agent/ChildRunner continuation callbacks,
 	// which can advance the same root between the initial

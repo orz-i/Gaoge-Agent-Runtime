@@ -120,7 +120,11 @@ func TestRealPostgresManagedClosureRetirementAcrossProcessCrash(t *testing.T) {
 			if len(calls) != 3 || len(effects) != 1 {
 				t.Fatalf("unexpected pre-repair effects: %d/%d", len(calls), len(effects))
 			}
-			runManagedRecoveryProcess(t, isolated, files, "resume-closed", 0, true)
+			phase := "resume-closed"
+			if cut == "finish-after" {
+				phase = "refresh-closed"
+			}
+			runManagedRecoveryProcess(t, isolated, files, phase, 0, true)
 			receipt, err = ks.LoadOwnedRetirement(t.Context(), closed.SuccessorGrant.ID)
 			if err != nil || receipt.Phase != "ACKNOWLEDGED" || receipt.Evidence.Grant != closed.SuccessorGrant ||
 				kernel.ManagedDigest(receipt.Evidence.Snapshot) != kernel.ManagedDigest(*closed.Terminal) {
@@ -389,7 +393,7 @@ func TestManagedAgentSessionRecoveryProcess(t *testing.T) {
 	starting := phase == "crash" || phase == "opaque-crash"
 	retirementCut := ""
 	switch phase {
-	case "crash", "opaque-crash", "resume", "resume-closed":
+	case "crash", "opaque-crash", "resume", "resume-closed", "refresh-closed":
 	case "resume-finish-before", "resume-finish-after":
 		retirementCut = strings.TrimPrefix(phase, "resume-")
 	default:
@@ -407,7 +411,12 @@ func TestManagedAgentSessionRecoveryProcess(t *testing.T) {
 		t.Fatalf("expected process exit after second model intent commit, got %v", err)
 	}
 	var completed harness.Snapshot
-	if phase == "resume-closed" {
+	if phase == "refresh-closed" {
+		completed, err = session.Refresh(t.Context(), managedRecoveryTurn)
+		if err != nil {
+			t.Fatal(err)
+		}
+	} else if phase == "resume-closed" {
 		completed, err = session.Resume(t.Context(), managedRecoveryTurn)
 		if err != nil {
 			t.Fatal(err)

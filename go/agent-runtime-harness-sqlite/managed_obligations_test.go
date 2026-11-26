@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -118,6 +119,10 @@ func TestSQLiteManagedOriginalObligationsReopen(t *testing.T) {
 				}
 			}
 			req := request()
+			leaseDuration := 3 * time.Second
+			if runtime.GOOS == "windows" {
+				leaseDuration = 8 * time.Second
+			}
 			options := harness.AgentSessionOptions{Runtime: rt, Store: host, Model: provider, Inputs: inputs,
 				Session: harness.SessionOptions{HostThread: req.HostThread, Actor: req.Actor, Thread: req.Thread,
 					Config: harness.ConfigSnapshot{AgentSpec: harness.AgentSpec{Model: "fixture", MaxModelOutputTokens: 128}, SharedBudget: &budget.Limits{MaxLLMCalls: 3}},
@@ -128,7 +133,7 @@ func TestSQLiteManagedOriginalObligationsReopen(t *testing.T) {
 					return runtimecontext.ModelWindow{ContextTokens: 4096, ReservedOutputTokens: 128}, nil
 				}},
 				Execution:    agent.ExecutionPolicy{Model: agent.CallPolicy{Timeout: time.Second, MaxAttempts: 1, MaxConcurrency: 1}, Tool: agent.CallPolicy{Timeout: time.Second, MaxAttempts: 1, MaxConcurrency: 1}},
-				RunExecution: &agent.RunExecution{OwnerID: "sqlite-managed-original", LeaseDuration: 3 * time.Second}}
+				RunExecution: &agent.RunExecution{OwnerID: "sqlite-managed-original", LeaseDuration: leaseDuration}}
 			session, e := harness.OpenAgentSession(options)
 			if e != nil {
 				t.Fatal(e)
@@ -174,6 +179,30 @@ func TestSQLiteManagedOriginalObligationsReopen(t *testing.T) {
 					t.Fatalf("cancel contender: %v", e)
 				}
 			}
+			// Probe the live owner before the potentially slow encrypted
+			// profile reopen. Never accidentally elect RESUME on the
+			// public-CANCEL fixture after the real Store lease has expired.
+			if until := safe.SafePoint.OriginalLease.ExpiresAt.Add(-200 * time.Millisecond); time.Until(until) > time.Second {
+				probeOptions := options
+				probeOptions.Runtime, e = kernel.New(kernel.Dependencies{Store: ks, ManagedRecoveryHost: host})
+				if e != nil {
+					t.Fatal(e)
+				}
+				probeOptions.Session.Transcript = nil
+				probe, e := harness.OpenAgentSession(probeOptions)
+				if e != nil {
+					t.Fatal(e)
+				}
+				probeCtx, cancelProbe := context.WithDeadline(ctx, until)
+				_, probeErr := probe.Resume(probeCtx, "managed-obligations")
+				cancelProbe()
+				if (!errors.Is(probeErr, kernel.ErrExecutionConflict) && !errors.Is(probeErr, context.DeadlineExceeded)) || len(provider.requests) != wantBefore {
+					t.Fatalf("live lease permitted work: %v", probeErr)
+				}
+				if current, e := ks.Load(ctx, root.ExecutionRefID); e != nil || kernel.ManagedDigest(current) != kernel.ManagedDigest(original) {
+					t.Fatalf("live probe changed source: %v", e)
+				}
+			}
 			if e = host.Close(); e != nil {
 				t.Fatal(e)
 			}
@@ -196,13 +225,10 @@ func TestSQLiteManagedOriginalObligationsReopen(t *testing.T) {
 				t.Fatalf("safe point changed after reopen: %v", e)
 			}
 			options.Runtime, options.Store, options.Session.Transcript = rt, host, nil
-			options.RunExecution = &agent.RunExecution{OwnerID: "sqlite-managed-successor", LeaseDuration: 3 * time.Second}
+			options.RunExecution = &agent.RunExecution{OwnerID: "sqlite-managed-successor", LeaseDuration: leaseDuration}
 			session, e = harness.OpenAgentSession(options)
 			if e != nil {
 				t.Fatal(e)
-			}
-			if _, e = session.Resume(ctx, "managed-obligations"); !errors.Is(e, kernel.ErrExecutionConflict) || len(provider.requests) != wantBefore {
-				t.Fatalf("live lease permitted work: %v", e)
 			}
 			if delay := time.Until(safe.SafePoint.OriginalLease.ExpiresAt) + 100*time.Millisecond; delay > 0 {
 				time.Sleep(delay)
