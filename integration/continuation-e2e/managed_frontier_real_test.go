@@ -12,6 +12,7 @@ import (
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
 	harnesspostgres "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-postgres"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness/conformance"
 	postgresadapter "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
@@ -196,12 +197,22 @@ func TestRealPostgresManagedOriginalFrontierMatrix(t *testing.T) {
 				t.Fatalf("wrong original physical call count: %d", len(beforeCalls))
 			}
 			session := openManagedFrontierProcess(t, db, files, "resume")
-			if _, err = session.Resume(ctx, managedRecoveryTurn); err == nil {
-				t.Fatal("live lease enabled recovery")
+			// The historical expiry is only a conservative deadline for a
+			// live probe, not proof that the owner is still live or expired.
+			// Do not accidentally elect RESUME in the CANCEL fixture if a
+			// slow worker already consumed that window.
+			if until := safe.SafePoint.OriginalLease.ExpiresAt.Add(-200 * time.Millisecond); time.Until(until) > time.Second {
+				probe, cancel := context.WithDeadline(ctx, until)
+				_, probeErr := session.Resume(probe, managedRecoveryTurn)
+				cancel()
+				if probeErr == nil {
+					t.Fatal("live lease enabled recovery")
+				}
+				if len(readManagedRecoveryRecords[model.Request](t, filepath.Join(files, "model.jsonl"))) != wantBefore {
+					t.Fatal("live probe invoked the model")
+				}
 			}
-			if delay := time.Until(safe.SafePoint.OriginalLease.ExpiresAt) + 150*time.Millisecond; delay > 0 {
-				time.Sleep(delay)
-			}
+			conformance.AwaitManagedOriginalLeaseExpiry(t, ks, original, safe, 15*time.Second)
 			if phase == "unknown" || phase == "dispatch_intent/after" {
 				if _, err = session.Resume(ctx, managedRecoveryTurn); err == nil {
 					t.Fatal("unknown dispatch resumed")

@@ -11,6 +11,7 @@ import (
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
+	kernelconformance "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance"
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
@@ -32,6 +33,8 @@ type preparationCut struct {
 	event     string
 	remaining int
 	after     bool
+	renewal   time.Duration
+	renewed   kernel.ExecutionLease
 }
 
 func (s *preparationCut) ApplyExecution(ctx context.Context, l kernel.ExecutionLease, rev uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
@@ -43,6 +46,16 @@ func (s *preparationCut) ApplyExecution(ctx context.Context, l kernel.ExecutionL
 		}
 	}
 	if hit && !s.after {
+		// Force the real Store renewal after the previous safe point was
+		// committed, before the next intent can commit. The original bearer
+		// is unchanged; its persisted expiry now exceeds the historical one.
+		if s.renewal > 0 {
+			renewed, err := s.RenewExecution(ctx, kernel.ExecutionRenewRequest{Lease: l, LeaseDuration: s.renewal})
+			if err != nil {
+				return kernel.Snapshot{}, err
+			}
+			s.renewed = renewed
+		}
 		panic(preparationInterrupted{})
 	}
 	next, err := s.preparationKernelPorts.ApplyExecution(ctx, l, rev, m)
@@ -85,6 +98,43 @@ func preparationMessages(r model.Request) string {
 		b.WriteByte('\n')
 	}
 	return b.String()
+}
+
+// AwaitManagedOriginalLeaseExpiry requires the Store itself to reject the
+// original bearer and verifies that neither the Run nor the original transfer
+// or Grant changed during the read-only wait. A historical point's expiry
+// is not a takeover proof: the incumbent may have renewed the same lease.
+func AwaitManagedOriginalLeaseExpiry(t *testing.T, store kernel.Store, source kernel.Snapshot, transfer kernel.ManagedTransfer, maxWait time.Duration) {
+	t.Helper()
+	ports, ok := store.(interface {
+		kernel.ExecutionStore
+		kernel.ChildExecutionStore
+		kernel.ManagedRecoveryStore
+	})
+	if !ok || source.Run.Status != kernel.RunStatusRunning || transfer.SafePoint.Host.RunID != source.Run.ID ||
+		(transfer.State != kernel.ManagedAvailable && transfer.State != kernel.ManagedInvalidated) ||
+		transfer.Selection.ID != "" || transfer.SuccessorGrant.ID != "" {
+		t.Fatal("missing original unselected managed frontier")
+	}
+	unchanged := func() {
+		t.Helper()
+		ctx := t.Context()
+		s, err := store.Load(ctx, source.Run.ID)
+		if err != nil || kernel.ManagedDigest(s) != kernel.ManagedDigest(source) {
+			t.Fatalf("original source changed during expiry wait: %v", err)
+		}
+		g, err := ports.LookupChildExecution(ctx, source.Run.ID)
+		if err != nil || g != transfer.SafePoint.OriginalGrant {
+			t.Fatalf("original Grant changed during expiry wait: %v", err)
+		}
+		p, err := ports.LoadManagedRecovery(ctx, source.Run.ID)
+		if err != nil || kernel.ManagedDigest(p) != kernel.ManagedDigest(transfer) {
+			t.Fatalf("original transfer changed during expiry wait: %v", err)
+		}
+	}
+	unchanged()
+	kernelconformance.AwaitNativeExecutionExpiry(t, ports, transfer.SafePoint.OriginalLease, maxWait)
+	unchanged()
 }
 
 // ManagedPreparationSummary exercises the exact same persisted preparation
@@ -155,6 +205,9 @@ func ManagedPreparationSummary(t *testing.T, factory func(*testing.T) (kernel.St
 				if boundary == "business" {
 					cut.event = "agent.model_invocation.pending"
 					cut.remaining = 2
+					if !after {
+						cut.renewal = leaseDuration + 2*time.Second
+					}
 				}
 				options.Runtime, err = kernel.New(kernel.Dependencies{Store: cut, ManagedRecoveryHost: h})
 				if err != nil {
@@ -225,12 +278,19 @@ func ManagedPreparationSummary(t *testing.T, factory func(*testing.T) (kernel.St
 				if err != nil {
 					t.Fatal(err)
 				}
-				if delay := time.Until(point.SafePoint.OriginalLease.ExpiresAt) + 100*time.Millisecond; delay > 0 {
-					time.Sleep(delay)
+				if cut.renewal > 0 {
+					old := point.SafePoint.OriginalLease
+					if !point.SafePoint.OriginalGrant.MatchesExecution(cut.renewed) ||
+						!cut.renewed.ExpiresAt.After(old.ExpiresAt.Add(time.Second)) {
+						t.Fatalf("renewal fixture did not extend the original bearer: old=%+v renewed=%+v", old, cut.renewed)
+					}
+					t.Logf("historical expiry=%s renewed expiry=%s", old.ExpiresAt, cut.renewed.ExpiresAt)
 				}
+				AwaitManagedOriginalLeaseExpiry(t, base, original, point, 2*leaseDuration+5*time.Second)
 				done, err := session.Resume(ctx, "second")
 				if err != nil || done.Turn.Status != harness.TurnCompleted || provider.summaries != 1 || len(provider.requests) != 3 {
-					t.Fatalf("resume: %v %s calls=%d summary=%d", err, done.Turn.Status, len(provider.requests), provider.summaries)
+					transfer, e := options.Runtime.LoadManagedRecovery(ctx, root.ExecutionRefID)
+					t.Fatalf("resume: %v %s calls=%d summary=%d transfer=%s selection=%s read=%v", err, done.Turn.Status, len(provider.requests), provider.summaries, transfer.State, transfer.Selection.Mode, e)
 				}
 				final, err := base.Load(ctx, root.ExecutionRefID)
 				if err != nil {

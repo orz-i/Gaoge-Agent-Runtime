@@ -12,6 +12,7 @@ import (
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
 	harnesssqlite "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-sqlite"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness/conformance"
 	kernelsqlite "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/profile/testprofile"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
@@ -267,9 +268,7 @@ func TestSQLiteManagedOriginalObligationsReopen(t *testing.T) {
 			if e != nil {
 				t.Fatal(e)
 			}
-			if delay := time.Until(safe.SafePoint.OriginalLease.ExpiresAt) + 100*time.Millisecond; delay > 0 {
-				time.Sleep(delay)
-			}
+			conformance.AwaitManagedOriginalLeaseExpiry(t, ks, original, safe, 2*leaseDuration+5*time.Second)
 			if name == "cancel closure" {
 				parked, e := rt.ParkManagedContinuation(ctx, root.ExecutionRefID)
 				if e != nil {
