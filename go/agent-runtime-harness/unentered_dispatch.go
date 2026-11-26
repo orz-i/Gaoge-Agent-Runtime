@@ -52,10 +52,12 @@ func (runner *Runner) recoverOriginalPhysicalDispatch(ctx context.Context, inv I
 			frozen, e := decodeFrozenHandoffDelegation(inv.Input)
 			c, ok := runner.handoffs.(*handoff.Coordinator)
 			if e != nil || !ok || !isHandoffDelegationInvocation(inv) || !c.UsesEagerLocalAgentForDelegation(runner.runtime, native, frozen) {
-				return false, nil
+				// Invalid or nonlocal selection cannot authorize native receipt recovery.
+				return false, nil //nolint:nilerr
 			}
 			child, e := runner.runtime.Load(ctx, inv.ExecutionRefID)
 			if errors.Is(e, kernel.ErrNotFound) {
+				// A missing Run is not a receipt; leave the pending dispatch untouched.
 				return false, nil
 			}
 			if e != nil {

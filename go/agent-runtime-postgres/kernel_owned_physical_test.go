@@ -77,6 +77,9 @@ func runOwnedPhysicalBindingGuards(t *testing.T, db *gorm.DB) {
 	if e = db.Create(&row).Error; e != nil {
 		t.Fatal(e)
 	}
+	if e = db.Model(&models.KernelRunRecord{}).Where("run_id = ?", grant.ChildRunID).UpdateColumn("execution_physical_epoch", grant.ExecutionEpoch).Error; e != nil {
+		t.Fatal(e)
+	}
 	got, e := store.LookupChildExecution(ctx, original.Run.ID)
 	if e != nil || got != grant {
 		t.Fatalf("full binding not persisted: %+v %v", got, e)

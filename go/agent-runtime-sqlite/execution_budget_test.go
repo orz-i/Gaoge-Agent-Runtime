@@ -4,15 +4,15 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
+	"testing"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
-	"os"
-	"path/filepath"
-	"testing"
 )
 
 func TestExecutionBudgetAtomic(t *testing.T) {
@@ -47,7 +47,7 @@ func TestNativeBudgetCutoverAndCreateRollback(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 	rt, e := kernel.New(kernel.Dependencies{Store: s})
 	if e != nil {
 		t.Fatal(e)
@@ -89,7 +89,7 @@ func TestNativeBudgetCutoverAndCreateRollback(t *testing.T) {
 	}
 	opened, e := OpenExisting(ctx, path)
 	if opened != nil {
-		opened.Close()
+		_ = opened.Close()
 	}
 	if !errors.Is(e, ErrUnsupportedSchema) || !strings.Contains(e.Error(), "inconsistent native budget bindings") {
 		t.Fatalf("old budget membership admitted: %v", e)
@@ -98,7 +98,7 @@ func TestNativeBudgetCutoverAndCreateRollback(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer raw.Close()
+	defer func() { _ = raw.Close() }()
 	var got string
 	if e = raw.QueryRow("SELECT payload_json FROM agent_harness_budgets WHERE id='scope'").Scan(&got); e != nil {
 		t.Fatal(e)

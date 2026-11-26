@@ -48,6 +48,16 @@ func (s *ea1ElectionStore) Create(ctx context.Context, r kernel.Record, e []kern
 	}
 	return out, err
 }
+
+// Parented runs still use the real child lease admission.
+func (s *ea1ElectionStore) AcquireExecution(ctx context.Context, req kernel.ExecutionAcquireRequest) (kernel.ExecutionLease, error) {
+	lease, err := s.ExecutionStore.AcquireExecution(ctx, req)
+	if err == nil {
+		s.acquired = lease
+	}
+	return lease, err
+}
+
 func (s *ea1ElectionStore) BeginOwnedPhysicalExecution(ctx context.Context, a kernel.OwnedPhysicalAdmission) (kernel.OwnedPhysicalAdmissionResult, error) {
 	v, e := s.OwnedPhysicalExecutionStore.BeginOwnedPhysicalExecution(ctx, a)
 	if e == nil && a.AcquiresLease() {

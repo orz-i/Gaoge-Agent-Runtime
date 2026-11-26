@@ -1,6 +1,10 @@
 package harnesspostgres_test
 
 import (
+	"os"
+	"strings"
+	"testing"
+
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
 	harnesspostgres "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-postgres"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness/conformance"
@@ -9,9 +13,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
-	"os"
-	"strings"
-	"testing"
 )
 
 func TestRealPostgresNativeAuthorityCutover(t *testing.T) {

@@ -5,91 +5,59 @@ import (
 	"gorm.io/gorm"
 )
 
-// terminalHandoffChildEvidenceTx loads only original Handoff delegation
-// receipts and matching child physical grant/return facts. It is called
-// under the same Turn lock as terminal UpdateTurn, and deliberately does
-// not treat a generic accepted/running child as completed.
-func terminalHandoffChildEvidenceTx(
-	tx *gorm.DB, turnID string, owners []harness.Invocation,
-) ([]harness.Item, error) {
-	var ownerIDs, startedIDs []string
+// terminalHandoffChildEvidenceTx supplies the same original execution and
+// cancellation facts to Retry and terminal projection under the Turn lock.
+// Include pre-Invocation Delegations and their global receipts, not just
+// the currently materialized child owners.
+func terminalHandoffChildEvidenceTx(tx *gorm.DB, turnID string, owners []harness.Invocation) ([]harness.Item, error) {
+	var startedIDs []string
 	for _, owner := range owners {
-		if owner.TurnID != turnID || owner.ParentItemID == "" {
-			continue
+		if owner.TurnID == turnID && owner.ParentItemID != "" {
+			startedIDs = append(startedIDs, owner.ParentItemID)
 		}
-		startedIDs = append(startedIDs, owner.ParentItemID)
-		ownerIDs = append(ownerIDs, owner.ID)
 	}
-	var delegationRows, grants, receipts []itemRecord
-	// Load each original Delegation by exact ID, then up to two terminal
-	// Delegation children regardless of their Run/Turn (a second one is
-	// already ambiguous). Ordinary Artifact children are not terminal
-	// authority and must not block legitimate Handoff results.
-	if err := tx.Where("id IN ?", startedIDs).Find(&delegationRows).Error; err != nil {
+	var rows []itemRecord
+	parents := []string{harness.ExecutionDispatchParentItemID, harness.CancellationFenceParentItemID, harness.CancellationEffectParentItemID, harness.RootRetryTransitionParentItemID}
+	if err := tx.Where("(turn_id = ? AND (kind = ? OR parent_item_id IN ?)) OR id IN ?", turnID, string(harness.ItemDelegation), parents, startedIDs).Find(&rows).Error; err != nil {
 		return nil, err
 	}
-	for _, startedID := range startedIDs {
-		var childRows []itemRecord
-		if err := tx.Where("parent_item_id = ? AND kind = ?", startedID,
-			string(harness.ItemDelegation)).Limit(2).Find(&childRows).Error; err != nil {
-			return nil, err
-		}
-		delegationRows = append(delegationRows, childRows...)
-	}
-	if err := tx.Where("turn_id = ? AND parent_item_id = ? AND invocation_id IN ?",
-		turnID, harness.ExecutionDispatchParentItemID, ownerIDs).Find(&grants).Error; err != nil {
-		return nil, err
-	}
-	var grantIDs []string
-	for _, grant := range grants {
-		grantIDs = append(grantIDs, grant.ID)
-	}
-	if len(grantIDs) != 0 {
-		if err := tx.Where("parent_item_id IN ?", grantIDs).Find(&receipts).Error; err != nil {
-			return nil, err
-		}
-	}
-	all := make([]harness.Item, 0, len(delegationRows)+len(grants)+len(receipts))
-	for _, group := range [][]itemRecord{delegationRows, grants, receipts} {
-		for _, row := range group {
+	var all []harness.Item
+	seen := map[string]bool{}
+	add := func(rows []itemRecord) error {
+		for _, row := range rows {
+			if seen[row.ID] {
+				continue
+			}
 			item, err := itemFromRecord(row)
 			if err != nil {
-				return nil, err
+				return err
 			}
 			all = append(all, item)
+			seen[item.ID] = true
 		}
+		return nil
 	}
-	var transitions []itemRecord
-	if err := tx.Where("turn_id = ? AND parent_item_id = ?", turnID, harness.RootRetryTransitionParentItemID).Find(&transitions).Error; err != nil {
+	if err := add(rows); err != nil {
 		return nil, err
 	}
-	for _, row := range transitions {
-		item, err := itemFromRecord(row)
-		if err != nil {
-			return nil, err
-		}
-		all = append(all, item)
-	}
-	// Waiting-only observations deliberately have no child owner. Include
-	// every original Delegation fact as well, not just known Started owners,
-	// so SQL and Memory apply the same typed historical completeness rule.
-	var history []itemRecord
-	if err := tx.Where("turn_id = ? AND kind = ?", turnID, string(harness.ItemDelegation)).Find(&history).Error; err != nil {
-		return nil, err
-	}
-	seen := make(map[string]bool, len(all))
 	for _, item := range all {
-		seen[item.ID] = true
-	}
-	for _, row := range history {
-		if seen[row.ID] {
+		query := tx.Where("parent_item_id = ?", item.ID)
+		switch {
+		case item.Kind == harness.ItemDelegation && item.Status == harness.ItemStarted:
+			query = query.Where("kind = ?", string(harness.ItemDelegation))
+		case item.ParentItemID == harness.ExecutionDispatchParentItemID ||
+			item.ParentItemID == harness.CancellationFenceParentItemID ||
+			item.ParentItemID == harness.CancellationEffectParentItemID:
+		default:
 			continue
 		}
-		item, err := itemFromRecord(row)
-		if err != nil {
+		var receipts []itemRecord
+		if err := query.Limit(2).Find(&receipts).Error; err != nil {
 			return nil, err
 		}
-		all = append(all, item)
+		if err := add(receipts); err != nil {
+			return nil, err
+		}
 	}
 	return all, nil
 }

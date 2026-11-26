@@ -427,7 +427,7 @@ func ManagedPhysicalDispatch(t *testing.T, factory func(*testing.T) (kernel.Stor
 			}
 			if strings.HasPrefix(c.name, "resume/finish-") {
 				fault := &managedSuccessorFinishCut{preparationKernelPorts: base.(preparationKernelPorts), after: c.name == "resume/finish-ack"}
-				session, rt = open(fault)
+				session, _ = open(fault)
 				_, e = session.Resume(ctx, "original")
 				if e == nil || !fault.dead || len(client.requests) != 2 {
 					t.Fatalf("actual successor finish cut: %v calls=%d", e, len(client.requests))

@@ -82,7 +82,7 @@ func pgNativeEntryGate(tx *gorm.DB, id string) error {
 func pgManagedLease(r models.KernelRunRecord) kernel.ExecutionLease {
 	l := kernel.ExecutionLease{RunID: r.RunID, OwnerID: r.ExecutionOwner, LeaseID: r.ExecutionLeaseID, Epoch: r.ExecutionEpoch}
 	if r.ExecutionExpiresAt != nil {
-		l.ExpiresAt = *r.ExecutionExpiresAt
+		l.ExpiresAt = r.ExecutionExpiresAt.UTC()
 	}
 	return l
 }

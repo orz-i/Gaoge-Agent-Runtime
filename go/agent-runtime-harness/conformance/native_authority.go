@@ -238,10 +238,6 @@ func nativeAuthorityNamedChildTwoTools(t *testing.T, factory func(*testing.T) Na
 			if reads != 1 || writes != 0 {
 				t.Fatalf("incorrect original calls %d/%d", reads, writes)
 			}
-			before, e := runs.LoadBudget(ctx, pending.Turn.ID)
-			if e != nil {
-				t.Fatal(e)
-			}
 			child, e := runs.Load(ctx, task.RunID)
 			if e != nil || child.Run.Status != kernel.RunStatusWaitingInput {
 				t.Fatalf("second original approval: %v %+v", e, child.Run)
@@ -258,7 +254,7 @@ func nativeAuthorityNamedChildTwoTools(t *testing.T, factory func(*testing.T) Na
 				if _, e = c.DispatchTool(ctx, pending.Turn.ID, q); e != nil {
 					t.Fatal(e)
 				}
-				before, e = runs.LoadBudget(ctx, pending.Turn.ID)
+				before, e := runs.LoadBudget(ctx, pending.Turn.ID)
 				if e != nil {
 					t.Fatal(e)
 				}

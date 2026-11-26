@@ -58,7 +58,7 @@ func TestRetirementCutoverRejectsUnfinishedHistory(t *testing.T) {
 			if e != nil {
 				t.Fatal(e)
 			}
-			defer raw.Close()
+			defer func() { _ = raw.Close() }()
 			var phase, payload string
 			if e = raw.QueryRow("SELECT phase,payload_json FROM runtime_owned_retirements WHERE grant_id='old'").Scan(&phase, &payload); e != nil || phase != "RETIRED" || payload != "{}" {
 				t.Fatalf("legacy row was altered: %v %s %s", e, phase, payload)

@@ -1,6 +1,7 @@
 package sqlite_test
 
 import (
+	"errors"
 	"path/filepath"
 	"testing"
 
@@ -33,5 +34,5 @@ func TestEA1ChildAgentRecoveryPhasesNativeSQLite(t *testing.T) {
 			t.Cleanup(func() { _ = peer.Close() })
 			return reopened, peer
 		}
-	})
+	}, func(err error) bool { return errors.Is(err, sqlite.ErrBusy) })
 }

@@ -113,7 +113,7 @@ func nativeChildEnrollment(t *testing.T, factory func(*testing.T) NativeAuthorit
 				}
 				return model.Response{ToolCalls: []tools.Call{{ID: "delegate", ToolKey: harness.DelegationToolKey, Arguments: json.RawMessage(`{"memberID":"child","goal":"finish"}`)}}}, nil
 			}}
-			var host harness.Store = f.Host
+			host := f.Host
 			if mode == "host-return-cut" {
 				host = &childReturnCut{Store: f.Host, LedgerStore: f.Host.(budget.LedgerStore), cut: true}
 			}

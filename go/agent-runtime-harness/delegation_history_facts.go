@@ -54,7 +54,7 @@ func validDelegationWaitingFacts(root Invocation, owners []Invocation, items []I
 }
 
 func validDelegationWaitingHistory(root Invocation, item Item, byID, byRun map[string]Invocation, items []Item, ledger *budget.Ledger) bool {
-	payload, valid := frozenWaitingPayload(root, item)
+	payload, valid := frozenDelegationAdmissionPayload(root, item)
 	if !valid {
 		return false
 	}
@@ -76,25 +76,26 @@ func validDelegationWaitingHistory(root Invocation, item Item, byID, byRun map[s
 	return valid
 }
 
-func frozenWaitingPayload(root Invocation, item Item) (delegationItemPayload, bool) {
+func frozenDelegationAdmissionPayload(root Invocation, item Item) (delegationItemPayload, bool) {
 	var payload delegationItemPayload
-	if item.TurnID != root.TurnID || item.Seq == 0 || item.ParentItemID != "" ||
+	if (item.Status != ItemWaiting && item.Status != ItemStarted) ||
+		item.Kind != ItemDelegation || item.TurnID != root.TurnID || item.Seq == 0 || item.ParentItemID != "" ||
 		!decodeTypedAuthorityJSON(item.Payload, &payload) || payload.Execution == nil ||
 		payload.DelegationID == "" || payload.ParentRunID == "" || payload.MemberID == "" || payload.Goal == "" ||
 		payload.Status != handoff.StatusQueued || len(payload.Result) != 0 {
 		return payload, false
 	}
 	frozen := *payload.Execution
-	if frozen.ID != payload.DelegationID || frozen.ChildRunID != item.RunID || frozen.MemberID != payload.MemberID ||
+	if frozen.ID != payload.DelegationID || payload.ChildRunID != item.RunID || frozen.ChildRunID != item.RunID || frozen.MemberID != payload.MemberID ||
 		frozen.MemberRevision != payload.MemberRevision || frozen.Goal != payload.Goal || frozen.Status != handoff.StatusQueued ||
 		len(frozen.Result) != 0 || frozen.Error != "" || frozen.ErrorCode != "" ||
-		item.ID != stableID("hid", root.TurnID, frozen.ID, string(ItemWaiting)) {
+		item.ID != stableID("hid", root.TurnID, frozen.ID, string(item.Status)) {
 		return payload, false
 	}
 	// Manual waits intentionally have no model Call hash. A present hash must
 	// still be complete; neither kind is a physical dispatch capability.
 	if payload.OriginalCallHash != "" {
-		if len(payload.OriginalCallHash) != 64 {
+		if item.Status != ItemWaiting || len(payload.OriginalCallHash) != 64 {
 			return payload, false
 		}
 		if _, err := hex.DecodeString(payload.OriginalCallHash); err != nil {
@@ -136,7 +137,8 @@ func delegationOriginalParentRoot(root Invocation, parentID, parentRunID string,
 // must agree, no child/physical grant may exist, and predecessor parents require
 // the original Store-owned Attempt transition/ancestor proof.
 func delegationNoInvocationSource(root Invocation, runID string, byID, byRun map[string]Invocation, items []Item, ledger *budget.Ledger) (delegationItemPayload, bool, bool) {
-	var selected, waiting, started delegationItemPayload
+	var selected, waiting, started, cancelled delegationItemPayload
+	var startItem, cancelItem Item
 	if byRun[runID].ID != "" {
 		return selected, false, false
 	}
@@ -158,22 +160,27 @@ func delegationNoInvocationSource(root Invocation, runID string, byID, byRun map
 		switch item.Status {
 		case ItemWaiting:
 			var valid bool
-			waiting, valid = frozenWaitingPayload(root, item)
+			waiting, valid = frozenDelegationAdmissionPayload(root, item)
 			if !valid {
 				return selected, false, false
 			}
 			waits++
 		case ItemStarted:
-			f := payload.Execution
-			if f == nil || item.TurnID != root.TurnID || item.Seq == 0 || item.ParentItemID != "" || payload.DelegationID == "" || payload.MemberID == "" || payload.Goal == "" ||
-				payload.Status != "queued" || f.Status != "queued" || f.ID != payload.DelegationID || f.ChildRunID != runID ||
-				f.MemberID != payload.MemberID || f.MemberRevision != payload.MemberRevision || f.Goal != payload.Goal || len(payload.Result) != 0 ||
-				len(f.Result) != 0 || f.Error != "" || f.ErrorCode != "" || item.ID != stableID("hid", root.TurnID, f.ID, string(ItemStarted)) {
+			var valid bool
+			started, valid = frozenDelegationAdmissionPayload(root, item)
+			if !valid {
 				return selected, false, false
 			}
-			started = payload
+			startItem = item
 			starts++
-		case ItemCompleted, ItemFailed, ItemCancelled:
+		case ItemCancelled:
+			// This is the product projection of an already frozen,
+			// never-dispatched source, not a ChildRunner return.
+			if cancelItem.ID != "" {
+				return selected, false, false
+			}
+			cancelled, cancelItem = payload, item
+		case ItemCompleted, ItemFailed:
 			return selected, false, false
 		default:
 			return selected, false, false
@@ -192,6 +199,54 @@ func delegationNoInvocationSource(root Invocation, runID string, byID, byRun map
 	}
 	if waits == 1 && starts == 1 && (waiting.ParentRunID != started.ParentRunID || !sameHandoffFrozenExecution(*waiting.Execution, *started.Execution)) {
 		return selected, false, false
+	}
+	// A foreign Run/Turn on a globally indexed sibling must not
+	// disappear from the original Started admission's proof.
+	if starts == 1 {
+		for _, item := range items {
+			if item.Kind == ItemDelegation && item.ParentItemID == startItem.ID && item.ID != cancelItem.ID {
+				return selected, false, false
+			}
+		}
+	}
+	if cancelItem.ID != "" {
+		if starts != 1 || cancelItem.Seq <= startItem.Seq || cancelItem.TurnID != startItem.TurnID ||
+			cancelItem.InvocationID != startItem.InvocationID || cancelItem.ParentItemID != startItem.ID ||
+			cancelItem.ID != stableID("hid", root.TurnID, selected.DelegationID, string(ItemCancelled)) ||
+			cancelled.Status != handoff.StatusCancelled || cancelled.DelegationID != started.DelegationID ||
+			cancelled.ChildRunID != runID || cancelled.ParentRunID != started.ParentRunID ||
+			cancelled.MemberID != started.MemberID || cancelled.MemberRevision != started.MemberRevision || cancelled.Goal != started.Goal ||
+			len(cancelled.Result) != 0 || cancelled.OriginalCallHash != "" || cancelled.Execution == nil ||
+			cancelled.Execution.Status != handoff.StatusQueued || len(cancelled.Execution.Result) != 0 ||
+			cancelled.Execution.Error != "" || cancelled.Execution.ErrorCode != "" ||
+			!sameHandoffFrozenExecution(*started.Execution, *cancelled.Execution) {
+			return selected, false, false
+		}
+		// Reuse the original exact cancellation election. An ACK loss may
+		// leave that election active after the projection, so only its
+		// canonical receipt (if present) can close it. Neither receipt nor
+		// a terminal projection substitutes for the absent dispatch above.
+		receipts := cancellationFenceReceipts(items)
+		proven := false
+		for _, intent := range items {
+			if intent.RunID != runID || intent.TurnID != root.TurnID ||
+				intent.Seq <= startItem.Seq || intent.Seq >= cancelItem.Seq || !ValidCancellationFenceIntentAdmission(intent) {
+				continue
+			}
+			if !CancellationEffectsSettled(intent, items) {
+				return selected, false, false
+			}
+			r := receipts[intent.ID]
+			if len(r) != 0 && !VerifiedCancellationFenceReceipt(intent, r) {
+				return selected, false, false
+			}
+			if len(r) == 0 || r[0].Seq > cancelItem.Seq {
+				proven = true
+			}
+		}
+		if !proven {
+			return selected, false, false
+		}
 	}
 	return selected, starts == 1, true
 }

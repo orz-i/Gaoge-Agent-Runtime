@@ -63,6 +63,8 @@ func PlanExecutionAcquire(run Run, current ExecutionLease, now time.Time, q Exec
 		if run.Kind != "agent" || current.Epoch == 0 {
 			return ExecutionLease{}, ErrExecutionConflict
 		}
+	case RunStatusPausedBudget:
+		return ExecutionLease{}, ErrExecutionConflict
 	default:
 		return ExecutionLease{}, ErrExecutionConflict
 	}

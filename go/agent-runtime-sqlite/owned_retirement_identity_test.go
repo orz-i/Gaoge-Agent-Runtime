@@ -2,12 +2,12 @@ package sqlite
 
 import (
 	"errors"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 

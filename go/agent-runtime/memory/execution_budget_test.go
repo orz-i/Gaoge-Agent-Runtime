@@ -1,8 +1,9 @@
 package memory
 
 import (
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance"
 	"testing"
+
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance"
 )
 
 func TestExecutionBudgetAtomic(t *testing.T) {

@@ -530,7 +530,10 @@ func ea1MWExecute(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.S
 	if phase == "P0" {
 		expected := f.failure
 		if mode == "stale-admission" {
-			expected = kernel.ErrExecutionConflict
+			expected = kernel.ErrConflict
+			if child {
+				expected = kernel.ErrExecutionConflict
+			}
 		}
 		if mode == "duplicate" {
 			expected = kernel.ErrAlreadyExists

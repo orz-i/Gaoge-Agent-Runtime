@@ -1,6 +1,9 @@
 package harnesssqlite_test
 
 import (
+	"path/filepath"
+	"testing"
+
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
 	harnesssqlite "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness-sqlite"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness/conformance"
@@ -8,8 +11,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/profile/testprofile"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
-	"path/filepath"
-	"testing"
 )
 
 func TestNativeAuthorityCutoverSQLite(t *testing.T) {

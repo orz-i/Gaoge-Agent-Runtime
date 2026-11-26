@@ -1,10 +1,11 @@
 package harness_test
 
 import (
+	"testing"
+
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness/conformance"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
-	"testing"
 )
 
 func TestNativeAuthorityCutover(t *testing.T) {
