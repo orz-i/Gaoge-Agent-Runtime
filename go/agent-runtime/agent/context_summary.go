@@ -181,13 +181,7 @@ func (adapter *ContextSummaryAdapter) plan(ctx context.Context, runner *Runner, 
 	if providerName(runner.model, request) != providerName(runner.model, incoming) || modelBindingFingerprint(runner.model, request) != modelBindingFingerprint(runner.model, incoming) {
 		return ModelInvocation{}, false, ErrProviderBindingMismatch
 	}
-	inputPolicy := policy
-	if inputPolicy.MaxInputTokens <= 0 || binding.Policy.MaxInputTokens < inputPolicy.MaxInputTokens {
-		inputPolicy.MaxInputTokens = binding.Policy.MaxInputTokens
-	}
-	if binding.Policy.MaxSerializedBytes < inputPolicy.MaxSerializedBytes {
-		inputPolicy.MaxSerializedBytes = binding.Policy.MaxSerializedBytes
-	}
+	inputPolicy := summaryInputPolicy(binding)
 	// The summary has a distinct tool-free header and output contract.
 	// Freeze its own frame before deriving the durable invocation identity.
 	binding.SummaryAccounting, err = adapter.bounded.manager.FreezeRequestAccounting(ctx, request, plan.ModelWindow)
@@ -205,17 +199,59 @@ func (adapter *ContextSummaryAdapter) plan(ctx context.Context, runner *Runner, 
 	if err != nil {
 		return ModelInvocation{}, false, err
 	}
-	inputBudget, err := adapter.bounded.manager.AssessModelRequestWithAccounting(ctx, planned.Request, plan.ModelWindow, inputPolicy, binding.SummaryAccounting)
+	// Keep the original source-bound summary request within its own byte
+	// envelope, even if a physical budget restriction changes its header.
+	if !contextSummaryInputBytesWithinPolicy(planned) {
+		return ModelInvocation{}, false, nil
+	}
+	preparation = &modelPreparation{run: snapshot.Run, client: runner.model, now: runner.clock.Now(),
+		original: model.CloneRequest(request), budget: runner.samplingBudget}
+	defer preparation.close()
+	if preparation.budget != nil {
+		ledger, err := preparation.samplingLedger(ctx)
+		if err != nil {
+			return ModelInvocation{}, false, err
+		}
+		// Summary is optional. Do not deliberately use the last shared
+		// model call on a summary instead of the user's business request.
+		if ledger.ID != "" {
+			for id := snapshot.Run.ID; ; id = ledger.Runs[id].ParentRunID {
+				view := ledger.View(id)
+				if view.Limits.MaxLLMCalls > 0 && view.Remaining.LLMCalls < 2 {
+					return ModelInvocation{}, false, nil
+				}
+				if id == "" {
+					break
+				}
+			}
+		}
+	}
+	physical, err := assessInvocationCandidate(ctx, adapter.bounded,
+		modelCandidate{request: model.CloneRequest(request), modelWindow: plan.ModelWindow, invocation: &planned, preparation: preparation},
+		planned.Request, plan.ModelWindow, inputPolicy, binding.SummaryAccounting)
 	if err != nil {
 		return ModelInvocation{}, false, err
 	}
-	if !runtimecontext.WithinHardBudget(inputBudget, inputPolicy) {
+	// A summary is optional; a denied or waiting candidate does not seal
+	// an intent or reserve quota. Ordinary preparation may still succeed.
+	if physical.disposition != candidateAdmitted {
 		return ModelInvocation{}, false, nil
 	}
-	if !matchesFrozenProviderBinding(runner.model, planned) {
+	if physical.invocation == nil || physical.invocation.SamplingPlan == nil || !matchesFrozenProviderBinding(runner.model, *physical.invocation) {
 		return ModelInvocation{}, false, ErrInvalidRequest
 	}
-	return planned, true, nil
+	return *physical.invocation, true, nil
+}
+
+func summaryInputPolicy(binding *ContextSummaryBinding) runtimecontext.Policy {
+	policy := runtimecontext.NormalizePolicy(binding.ContextPolicy)
+	if policy.MaxInputTokens <= 0 || binding.Policy.MaxInputTokens < policy.MaxInputTokens {
+		policy.MaxInputTokens = binding.Policy.MaxInputTokens
+	}
+	if binding.Policy.MaxSerializedBytes < policy.MaxSerializedBytes {
+		policy.MaxSerializedBytes = binding.Policy.MaxSerializedBytes
+	}
+	return runtimecontext.NormalizePolicy(policy)
 }
 
 func summaryStateFitsEnvelope(value *runtimecontext.WorkingState) bool {

@@ -58,9 +58,16 @@ func (runner *Runner) resolveConfigExecutionPolicy(value ConfigSnapshot) (Config
 	}
 	if value.WorkingStateSummary != nil {
 		native, ok := runner.agent.(interface{ SupportsContextSummary() bool })
-		if !ok || !native.SupportsContextSummary() || runner.budgets != nil || value.SharedBudget != nil ||
+		if !ok || !native.SupportsContextSummary() ||
 			value.MaxModelOutputTokens <= 0 || agent.ValidateWorkingStateSummaryPolicy(value.WorkingStateSummary) != nil {
 			return ConfigSnapshot{}, ErrInvalidRequest
+		}
+		if runner.budgets != nil {
+			adapter, err := runner.budgets.Adapter()
+			loop, ok := runner.agent.(*agent.Runner)
+			if err != nil || !ok || !loop.UsesBudgetedContextSummary(adapter) {
+				return ConfigSnapshot{}, ErrInvalidRequest
+			}
 		}
 	}
 	requestedDepth := value.DelegationPolicy.MaxDepth

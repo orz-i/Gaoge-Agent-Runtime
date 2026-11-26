@@ -179,9 +179,14 @@ Run/Model/Tool middleware. Pass the Host authority separately as
 middleware chain; the previous `BudgetMiddleware` execution engine no longer
 exists. Only the native Adapter may dispatch and settle physical effects.
 
-`SharedBudget` remains incompatible with `Context.ManagedRecovery`,
-`Context.SummaryNativeRecovery` and the optional WorkingStateSummary lifecycle
-until they share one original-effect settlement protocol.
+Ordinary `WorkingStateSummary` can use `SharedBudget`. Summary and business
+sampling share the original ledger, physical sampling plan and receipt
+settlement; the summary retains its separate source validation and installation.
+Reopen a budgeted summary Turn with summary support configured. A summary is
+optional and is skipped if the shared ledger cannot admit it while retaining a
+call for business work. `Context.ManagedRecovery` and
+`Context.SummaryNativeRecovery` remain incompatible with `SharedBudget`; their
+managed transfer proof is not interchangeable with ordinary receipt recovery.
 
 The unused `MemoryPolicy` configuration field has been removed. Host memory
 can be supplied through selected Context history, Skills or authorized Tools;

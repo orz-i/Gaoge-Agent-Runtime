@@ -237,7 +237,7 @@ func validModelInvocations(values []ModelInvocation) bool {
 	for index, invocation := range values {
 		if !validContextSummaryInvocation(invocation) || !contextSummaryInputBytesWithinPolicy(invocation) ||
 			(invocation.SamplingPlan != nil && (invocation.Status == ModelInvocationConsumed ||
-				(invocation.Purpose != "" && invocation.SamplingPlan.LedgerID != "") || !invocation.SamplingPlan.valid(invocation.Request))) {
+				!invocation.SamplingPlan.valid(invocation.Request))) {
 			return false
 		}
 		if strings.TrimSpace(invocation.ID) == "" || strings.TrimSpace(invocation.RunID) == "" ||

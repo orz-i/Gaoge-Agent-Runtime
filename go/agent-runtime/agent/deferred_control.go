@@ -33,7 +33,7 @@ func trustedDeferredPreparationStack(d Dependencies) bool {
 // Every other unscoped Host callback keeps the stack opaque.
 func scopedDeferredRootCallbacks(d Dependencies) bool {
 	if !trustedDeferredPreparationStack(d) ||
-		d.PrepareModelRequest != nil || d.NormalizeModelPolicy != nil ||
+		d.PrepareModelRequest != nil || d.ContextSummary != nil || d.NormalizeModelPolicy != nil ||
 		len(d.CompletionPolicies) != 0 || d.ToolDiscovery != nil {
 		return false
 	}

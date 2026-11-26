@@ -375,7 +375,6 @@ type Runner struct {
 	toolBudget                *BoundedBudgetAdapter
 	managedContextRecovery    *BoundedContextAdapter
 	contextSummary            *ContextSummaryAdapter
-	contextSummaryBudget      bool
 	summaryNativeRecovery     bool
 	approvalPolicies          *plugin.ApprovalPolicySet
 	hostedTools               HostedToolCatalog
@@ -542,12 +541,14 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		return nil, ErrInvalidRequest
 	}
 	if summary := dependencies.ContextSummary; summary != nil {
-		if summary.bounded == nil || summary.ports == nil || dependencies.ManagedContextRecovery != nil ||
-			dependencies.PrepareModelRequest != nil ||
-			len(dependencies.RunMiddleware) != 1 || dependencies.RunMiddleware[0] != summary.bounded {
+		if !validSummaryComposition(dependencies) {
 			return nil, ErrInvalidRequest
 		}
-		dependencies.PrepareModelRequest = summary.bounded.Prepare
+		if dependencies.SummaryNativeRecovery {
+			dependencies.PrepareModelRequest = summary.bounded.Prepare
+		} else {
+			dependencies.BoundedContext = summary.bounded
+		}
 	}
 	if a := dependencies.ManagedContextRecovery; a != nil {
 		if !dependencies.Runtime.SupportsManagedRecovery() {
@@ -683,7 +684,6 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		toolBudget:             selectedToolBudget(dependencies),
 		managedContextRecovery: dependencies.ManagedContextRecovery,
 		contextSummary:         dependencies.ContextSummary,
-		contextSummaryBudget:   summaryBudgetConfigured(dependencies),
 		summaryNativeRecovery:  dependencies.SummaryNativeRecovery,
 		boundedCallbacks:       collectBoundedCallbacks(dependencies.RunMiddleware, dependencies.ModelMiddleware, dependencies.ToolMiddleware),
 		// Native pre-Start cancellation and deferred post-callback custody
@@ -847,7 +847,7 @@ func (runner *Runner) prepareStartState(ctx context.Context, request StartReques
 		return nil, ErrInvalidRequest // root-scoped input is never inherited by a child
 	}
 	if ValidateWorkingStateSummaryPolicy(request.WorkingStateSummary) != nil ||
-		(request.WorkingStateSummary != nil && (runner.contextSummary == nil || runner.contextSummaryBudget || request.ParentRunID != "" || request.MaxModelOutputTokens <= 0)) {
+		(request.WorkingStateSummary != nil && (runner.contextSummary == nil || request.ParentRunID != "" || request.MaxModelOutputTokens <= 0)) {
 		return nil, ErrInvalidRequest
 	}
 	if request.WorkingStateSummary != nil {
@@ -1068,7 +1068,7 @@ func (runner *Runner) Resume(ctx context.Context, runID string, expectedRevision
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
-	if state.WorkingStateSummary != nil && (!runner.SupportsContextSummary() || runner.contextSummaryBudget || state.SummaryNativeRecovery != runner.summaryNativeRecovery) {
+	if state.WorkingStateSummary != nil && (!runner.SupportsContextSummary() || state.SummaryNativeRecovery != runner.summaryNativeRecovery) {
 		return snapshot, ErrInvalidRequest
 	}
 	if snapshot.Run.Revision != expectedRevision {

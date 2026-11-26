@@ -49,9 +49,18 @@ must have a `ManagedRecoveryHost` bound to the exact same Harness Store. This
 mode requires the built-in Harness bounded Context/summary bridges and the
 restricted native callback composition checked by the constructor. Custom or
 wrapped Context ports cannot opt into this proof with a marker or flag. It is separate from
-and mutually exclusive with the existing `ManagedRecovery` option. Shared
-budget plus summary remains rejected. The constructor still does not read
-history, call a model, or perform Store I/O.
+and mutually exclusive with the existing `ManagedRecovery` option. Ordinary
+summary supports `SharedBudget` with the complete native budget composition;
+summary native recovery plus shared budget remains rejected. An ordinary
+budgeted summary uses the same physical sampling admission, original ledger
+reservation, settlement and receipt recovery as business sampling. A candidate
+that cannot be admitted, or would consume the last available shared model call,
+is skipped. These planning checks do not replace the live ledger CAS.
+Reopen a budgeted summary Turn with its summary capability and original budget
+composition configured. Drain or reconcile in-flight invocations before rolling
+back to a reader that does not support a budgeted summary sampling plan. Never
+reinterpret an older unbudgeted intent as a new budgeted one. The constructor
+still does not read history, call a model, or perform Store I/O.
 
 The selected window resolver and token counter remain read-only measurement
 dependencies. Recovery may repeat these reads; they must not hide model

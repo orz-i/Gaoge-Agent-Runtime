@@ -42,10 +42,12 @@ func (*summarySessionModel) Capabilities(context.Context, string) (model.Capabil
 }
 
 func TestAgentSessionSummaryProducesNativeStateAndVerifiesPriorOrigin(t *testing.T) {
-	for _, name := range []string{"success", "invalid output fallback", "missing prior origin", "native recovery complete source"} {
+	for _, name := range []string{"success", "invalid output fallback", "missing prior origin", "native recovery complete source", "shared budget", "shared token budget", "last shared call"} {
 		t.Run(name, func(t *testing.T) {
 			invalid := name == "invalid output fallback"
 			nativeRecovery := name == "native recovery complete source"
+			shared := name == "shared budget" || name == "shared token budget" || name == "last shared call"
+			tokenBudget := name == "shared token budget"
 			store, runs := harness.NewMemoryStore(), memory.NewStore()
 			client := &summarySessionModel{}
 			summaryCalls := 0
@@ -53,7 +55,11 @@ func TestAgentSessionSummaryProducesNativeStateAndVerifiesPriorOrigin(t *testing
 				response := model.Response{Content: "answer", Usage: &model.Usage{InputTokens: 10, OutputTokens: 5}}
 				if request.OutputContract != nil && request.OutputContract.Name == "working_state_summary" {
 					summaryCalls++
-					if len(request.Tools) != 0 || len(request.HostedTools) != 0 || request.RequireToolCall || request.MaxOutputTokens != 128 {
+					wantCap := int64(128)
+					if tokenBudget {
+						wantCap = 48
+					}
+					if len(request.Tools) != 0 || len(request.HostedTools) != 0 || request.RequireToolCall || request.MaxOutputTokens != wantCap {
 						t.Fatal("summary changed frozen output cap or retained Tool authority")
 					}
 					response.Content = `{"goal":"retain verified evidence","constraints":["never invent facts"],"completed":[],"pending":["verify original evidence"],"decisions":[]}`
@@ -100,6 +106,17 @@ func TestAgentSessionSummaryProducesNativeStateAndVerifiesPriorOrigin(t *testing
 				t.Fatal(err)
 			}
 			options.Session.Config.WorkingStateSummary = &agent.WorkingStateSummaryPolicy{MaxInputTokens: 60000, MaxSerializedBytes: 100000}
+			if shared {
+				options.Session.Config.SharedBudget = &budget.Limits{MaxLLMCalls: 2}
+				if name == "last shared call" {
+					options.Session.Config.SharedBudget.MaxLLMCalls = 1
+				}
+				if tokenBudget {
+					options.Session.Config.SharedBudget.MaxInputTokens = 1000
+					options.Session.Config.SharedBudget.MaxOutputTokens = 100
+					options.BudgetMeter = &samplingMeter{}
+				}
+			}
 			if nativeRecovery {
 				options.Runtime, err = kernel.New(kernel.Dependencies{Store: runs, ManagedRecoveryHost: store})
 				if err != nil {
@@ -116,6 +133,14 @@ func TestAgentSessionSummaryProducesNativeStateAndVerifiesPriorOrigin(t *testing
 				t.Fatal(err)
 			}
 			checkpoint := requireStoredContextCheckpoint(t, store, second.Turn.ContextCheckpointID)
+			if name == "last shared call" {
+				ledger, err := store.LoadBudget(t.Context(), second.Turn.ID)
+				if err != nil || second.Turn.Status != harness.TurnCompleted || summaryCalls != 0 ||
+					checkpoint.Window.WorkingState != nil || ledger.View("").Usage.LLMCalls != 1 || len(client.requests) != 2 {
+					t.Fatalf("optional summary consumed the last shared call: status=%s usage=%+v summaries=%d err=%v", second.Turn.Status, ledger.View("").Usage, summaryCalls, err)
+				}
+				return
+			}
 			if summaryCalls != 1 || len(client.requests) != 3 {
 				root, _ := harness.TopLevelInvocation(second)
 				observed, _ := options.Runtime.Load(t.Context(), root.ExecutionRefID)
@@ -136,6 +161,28 @@ func TestAgentSessionSummaryProducesNativeStateAndVerifiesPriorOrigin(t *testing
 			if err != nil || len(view.ModelInvocations) != 2 || view.ModelInvocations[0].Purpose != agent.ModelInvocationContextSummary || view.ModelInvocations[0].Status != agent.ModelInvocationConsumed || view.Budget.Usage.LLMCalls != 2 {
 				t.Fatalf("summary did not use and consume the native ledger exactly once: %+v err=%v", view, err)
 			}
+			if shared {
+				ledger, err := store.LoadBudget(t.Context(), second.Turn.ID)
+				if err != nil || ledger.View("").Usage.LLMCalls != 2 || len(ledger.Reservations) != 2 {
+					t.Fatalf("summary and business did not join a single shared ledger: %+v err=%v", ledger.View(""), err)
+				}
+				for _, request := range client.requests[1:] {
+					res := ledger.Reservations["model:"+request.InvocationID]
+					hash, err := model.PhysicalRequestHash(request)
+					if err != nil || res.Status != budget.ReservationSettled || res.PhysicalRequestHash != hash || res.Usage.LLMCalls != 1 {
+						t.Fatalf("receipt did not settle original physical sampling: %+v err=%v", res, err)
+					}
+				}
+				options.Session.Transcript = nil
+				reopened, err := harness.OpenAgentSession(options)
+				if err != nil {
+					t.Fatal(err)
+				}
+				again, err := reopened.Resume(t.Context(), "second")
+				if err != nil || again.Turn.Status != harness.TurnCompleted || len(client.requests) != 3 {
+					t.Fatalf("reopen repeated a shared model effect: %+v err=%v", again.Turn, err)
+				}
+			}
 			if invalid {
 				if checkpoint.Window.WorkingState != nil {
 					t.Fatal("invalid summary installed WorkingState")
@@ -145,6 +192,9 @@ func TestAgentSessionSummaryProducesNativeStateAndVerifiesPriorOrigin(t *testing
 			state := runtimecontext.CloneWorkingState(checkpoint.Window.WorkingState)
 			if state == nil || state.Version != 1 || state.Derivation == nil || !agent.VerifyWorkingStateSummaryOrigin(runtimeSnapshot, state, second.Turn.SessionID, options.Session.Actor, options.Session.Thread) {
 				t.Fatalf("installed state has no matching native origin: %+v", state)
+			}
+			if shared {
+				return
 			}
 			if name == "missing prior origin" {
 				options.Store = missingSummaryOriginStore{Store: store, runID: root.ExecutionRefID}
@@ -203,7 +253,7 @@ func TestAgentSessionSummaryProducesNativeStateAndVerifiesPriorOrigin(t *testing
 }
 
 func TestAgentSessionSummaryRejectsUnsupportedComposition(t *testing.T) {
-	for _, mode := range []string{"managed", "both recovery modes", "missing summary host binding", "shared budget", "zero input", "zero bytes"} {
+	for _, mode := range []string{"managed", "both recovery modes", "missing summary host binding", "shared native budget", "zero input", "zero bytes"} {
 		t.Run(mode, func(t *testing.T) {
 			client := &agentSessionModel{}
 			options := agentSessionOptions(t, memory.NewStore(), harness.NewMemoryStore(), client)
@@ -215,8 +265,9 @@ func TestAgentSessionSummaryRejectsUnsupportedComposition(t *testing.T) {
 				options.Context.ManagedRecovery, options.Context.SummaryNativeRecovery = true, true
 			case "missing summary host binding":
 				options.Context.SummaryNativeRecovery = true
-			case "shared budget":
+			case "shared native budget":
 				options.Session.Config.SharedBudget = &budget.Limits{MaxLLMCalls: 3}
+				options.Context.SummaryNativeRecovery = true
 			case "zero input":
 				options.Session.Config.WorkingStateSummary.MaxInputTokens = 0
 			case "zero bytes":

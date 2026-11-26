@@ -199,7 +199,7 @@ func OpenAgentSession(options AgentSessionOptions) (*SessionClient, error) {
 	}
 	if config.SharedBudget != nil {
 		if !enforceableHarnessBudgetLimits(*config.SharedBudget) || options.Context.ManagedRecovery ||
-			options.Context.SummaryNativeRecovery || config.WorkingStateSummary != nil {
+			options.Context.SummaryNativeRecovery {
 			return nil, ErrInvalidRequest
 		}
 		if _, ok := options.Store.(budget.LedgerStore); !ok {
@@ -353,7 +353,7 @@ func openBoundedAgentSession(options AgentSessionOptions, registrations []tools.
 	}
 	if options.Context.ManagedRecovery {
 		dependencies.ManagedContextRecovery = bounded
-	} else if shared == nil {
+	} else if shared == nil || options.Session.Config.WorkingStateSummary != nil {
 		dependencies.ContextSummary, err = NewContextSummaryAdapter(options.Store, options.Runtime, bounded, resolveWindow)
 		if err != nil {
 			return nil, err
@@ -542,7 +542,6 @@ func (session *SessionClient) preflightAgentSessionResume(ctx context.Context, t
 		return ErrInvalidRequest
 	}
 	if config.SharedBudget != nil && (session.runner.budgets == nil ||
-		config.WorkingStateSummary != nil ||
 		session.runner.agent.(*agent.Runner).SupportsManagedContextRecovery() ||
 		session.runner.agent.(*agent.Runner).SupportsSummaryNativeRecovery()) {
 		return ErrInvalidRequest

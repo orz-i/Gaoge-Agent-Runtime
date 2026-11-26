@@ -141,7 +141,7 @@ func (p contextSummaryPorts) PlanSummary(ctx context.Context, incoming model.Req
 	if err != nil {
 		return agent.ContextSummaryPlan{}, err
 	}
-	if config.WorkingStateSummary == nil || config.SharedBudget != nil {
+	if config.WorkingStateSummary == nil {
 		return agent.ContextSummaryPlan{}, ErrInvalidRequest
 	}
 	result.Root = summaryRoot(invocation)

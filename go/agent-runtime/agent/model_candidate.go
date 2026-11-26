@@ -156,14 +156,23 @@ func assessModelCandidate(ctx context.Context, adapter *BoundedContextAdapter, r
 		}
 		candidate.preparation, candidate.invocation = preparation, &invocation
 		measured = invocation.Request
-		if preparation.budget != nil {
-			ledger, err := preparation.samplingLedger(ctx)
-			if err != nil {
-				return modelCandidate{}, err
-			}
-			if ledger.ID != "" {
-				return preparation.assessBudgetCandidate(ctx, adapter, candidate, ledger, window, policy, frame)
-			}
+	}
+	return assessInvocationCandidate(ctx, adapter, candidate, measured, window, policy, frame)
+}
+
+// Both business and summary use the same physical assessment and reservation
+// logic after their purpose-specific logical invocation has been constructed.
+// A candidate remains non-authoritative until the original intent and grant
+// are committed by the Runner.
+func assessInvocationCandidate(ctx context.Context, adapter *BoundedContextAdapter, candidate modelCandidate, measured model.Request,
+	window runtimecontext.ModelWindow, policy runtimecontext.Policy, frame runtimecontext.FrozenAccounting) (modelCandidate, error) {
+	if preparation := candidate.preparation; preparation != nil && preparation.budget != nil {
+		ledger, err := preparation.samplingLedger(ctx)
+		if err != nil {
+			return modelCandidate{}, err
+		}
+		if ledger.ID != "" {
+			return preparation.assessBudgetCandidate(ctx, adapter, candidate, ledger, window, policy, frame)
 		}
 	}
 	assessment, err := adapter.manager.AssessModelRequestWithAccounting(ctx, measured, window, policy, frame)

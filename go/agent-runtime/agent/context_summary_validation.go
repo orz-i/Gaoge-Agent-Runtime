@@ -17,20 +17,34 @@ func (runner *Runner) SupportsContextSummary() bool {
 	return runner != nil && runner.contextSummary != nil && runner.managedContextRecovery == nil
 }
 
+// UsesBudgetedContextSummary checks the exact concrete budget owner selected
+// for the shared summary/business sampling protocol. It grants no execution
+// permission and is used only to reject mismatched Host compositions.
+func (runner *Runner) UsesBudgetedContextSummary(adapter *BoundedBudgetAdapter) bool {
+	return runner.SupportsContextSummary() && !runner.summaryNativeRecovery &&
+		adapter != nil && runner.samplingBudget == adapter && runner.toolBudget == adapter
+}
+
 type contextSummaryModelKey struct{}
 
-func summaryBudgetConfigured(dependencies Dependencies) bool {
-	for _, layer := range dependencies.RunMiddleware {
-		if _, ok := layer.(*BoundedBudgetAdapter); ok {
-			return true
-		}
+// Summary uses its original Context hydration/commit owner. Budgeted
+// summary is admitted only through the same complete native topology that
+// owns business sampling and result consumption, never a partial chain.
+func validSummaryComposition(d Dependencies) bool {
+	summary := d.ContextSummary
+	if summary == nil || summary.bounded == nil || summary.ports == nil ||
+		d.ManagedContextRecovery != nil || d.PrepareModelRequest != nil {
+		return false
 	}
-	for _, layer := range dependencies.ModelMiddleware {
-		if _, ok := layer.(*BoundedBudgetAdapter); ok {
-			return true
-		}
+	b := selectedSamplingBudget(d)
+	if b == nil {
+		return selectedToolBudget(d) == nil && len(d.RunMiddleware) == 1 &&
+			d.RunMiddleware[0] == summary.bounded && (d.BoundedContext == nil || d.BoundedContext == summary.bounded)
 	}
-	return false
+	return !d.SummaryNativeRecovery && d.BoundedContext == summary.bounded &&
+		len(d.RunMiddleware) == 2 && d.RunMiddleware[0] == b && d.RunMiddleware[1] == summary.bounded &&
+		len(d.ModelMiddleware) == 1 && d.ModelMiddleware[0] == b &&
+		len(d.ToolMiddleware) == 1 && d.ToolMiddleware[0] == b
 }
 
 func cloneContextSummaryBinding(value *ContextSummaryBinding) *ContextSummaryBinding {
@@ -103,6 +117,17 @@ func validContextSummaryInvocation(invocation ModelInvocation) bool {
 	}
 	if invocation.Status == ModelInvocationPending || invocation.Status == ModelInvocationCompleted {
 		request := invocation.Request
+		if plan := invocation.SamplingPlan; plan != nil {
+			// Old, unbudgeted intents could acquire only a physical hash at
+			// dispatch. Never reinterpret that hash as a budgeted admission.
+			if plan.Window.ContextTokens == 0 {
+				if plan.LedgerID != "" {
+					return false
+				}
+			} else if plan.Policy != summaryInputPolicy(invocation.ContextSummary) {
+				return false
+			}
+		}
 		return invocation.ContextSummary.SummaryAccounting.MatchesRequest(request) &&
 			len(request.Tools) == 0 && len(request.HostedTools) == 0 && !request.RequireToolCall &&
 			request.HostedToolCallLimit != nil && *request.HostedToolCallLimit == 0 &&

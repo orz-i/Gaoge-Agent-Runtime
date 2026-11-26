@@ -13,7 +13,8 @@ func validBoundedContextComposition(d Dependencies) bool {
 	if a == nil {
 		return true
 	}
-	if a.manager == nil || a.ports == nil || d.PrepareModelRequest != nil || d.ManagedContextRecovery != nil || d.ContextSummary != nil || d.SummaryNativeRecovery {
+	if a.manager == nil || a.ports == nil || d.PrepareModelRequest != nil || d.ManagedContextRecovery != nil || d.SummaryNativeRecovery ||
+		(d.ContextSummary != nil && d.ContextSummary.bounded != a) {
 		return false
 	}
 	count := 0

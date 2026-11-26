@@ -717,6 +717,12 @@ func TestContextSummaryActiveInputBytesAreCheckedOnRead(t *testing.T) {
 			}
 			state.WorkingStateSummary.MaxSerializedBytes = int64(len(raw) - 1)
 			invocation.ContextSummary.Policy = *state.WorkingStateSummary
+			// New plans bind the policy as well. Isolate the original
+			// byte-envelope guard using the legacy no-pre-intent-plan shape.
+			if invocation.SamplingPlan == nil || validContextSummaryInvocation(*invocation) {
+				t.Fatal("new physical plan did not bind the original summary policy")
+			}
+			invocation.SamplingPlan = nil
 			sourceRun := snapshot.Run
 			sourceRun.Revision = invocation.SourceRevision
 			input := model.CloneRequest(invocation.Request)
