@@ -152,13 +152,13 @@ func ea1NewElection(t *testing.T, factory func(*testing.T) (kernel.Store, kernel
 	return f
 }
 func (f *ea1ElectionFixture) runner(rt *kernel.Runtime, owner string, host bool) *agent.Runner {
-	ttl, callTimeout := 2*time.Second, 500*time.Millisecond
+	ttl, callTimeout := 2*time.Second, ea1StoreBackedCallTimeout
 	if f.renewalFixture {
 		// Leave the same 500 ms renewal threshold but more margin for
 		// deliberately delaying a completed Model receipt on Windows.
 		ttl, callTimeout = 4*time.Second, 2500*time.Millisecond
 	}
-	deps := agent.Dependencies{Runtime: rt, Model: f.physical, Catalog: f.catalog, Executor: f.catalog, ModelOutcomeVerifier: f.modelVerifier, ToolOutcomeVerifier: f.toolVerifier, RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: ttl}, Execution: agent.ExecutionPolicy{Model: agent.CallPolicy{Timeout: callTimeout, MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}, Tool: agent.CallPolicy{Timeout: callTimeout, MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}}}
+	deps := agent.Dependencies{Runtime: rt, Model: f.physical, Catalog: f.catalog, Executor: f.catalog, ModelOutcomeVerifier: f.modelVerifier, ToolOutcomeVerifier: f.toolVerifier, RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: ttl}, Execution: ea1FixtureExecutionPolicy(callTimeout)}
 	if host {
 		deps.RunMiddleware = []plugin.RunMiddleware{f.host}
 	}

@@ -145,7 +145,7 @@ func ea1NewChildStart(t *testing.T, factory func(*testing.T) (kernel.Store, kern
 	return f
 }
 func (f *ea1ChildStartFixture) runner(rt *kernel.Runtime, owner string, host bool) *agent.Runner {
-	d := agent.Dependencies{Runtime: rt, Model: f.physical, Catalog: f.catalog, Executor: f.catalog, RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: 2 * time.Second}, Execution: agent.ExecutionPolicy{Model: agent.CallPolicy{Timeout: 500 * time.Millisecond, MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}, Tool: agent.CallPolicy{Timeout: 500 * time.Millisecond, MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}}}
+	d := agent.Dependencies{Runtime: rt, Model: f.physical, Catalog: f.catalog, Executor: f.catalog, RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: 2 * time.Second}, Execution: ea1StoreBackedExecutionPolicy()}
 	if host {
 		d.RunMiddleware = []plugin.RunMiddleware{f.host}
 		d.StartControlPreflight = func(ctx context.Context, r agent.StartRequest) error {

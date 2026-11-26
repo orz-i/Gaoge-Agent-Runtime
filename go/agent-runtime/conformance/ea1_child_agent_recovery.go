@@ -48,7 +48,7 @@ func RunEA1ChildAgentRecoveryUnknownSuite(t *testing.T, factory func(*testing.T)
 			makeRunner := func(runtime *kernel.Runtime, owner string, offset time.Duration) *agent.Runner {
 				r, e := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: physical, Catalog: catalog, Executor: catalog,
 					Clock: ea1UnknownAgentClock{offset: offset}, RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: 2 * time.Second},
-					Execution: agent.ExecutionPolicy{Model: agent.CallPolicy{Timeout: 100 * time.Millisecond, MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}, Tool: agent.CallPolicy{Timeout: 100 * time.Millisecond, MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}}})
+					Execution: ea1StoreBackedExecutionPolicy()})
 				if e != nil {
 					t.Fatal(e)
 				}

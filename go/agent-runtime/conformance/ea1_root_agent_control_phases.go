@@ -213,10 +213,7 @@ func ea1NewControlFixture(t *testing.T, factory func(*testing.T) (kernel.Store, 
 	return f
 }
 func (f *ea1ControlFixture) runner(rt *kernel.Runtime, native, host bool) *agent.Runner {
-	// This suite injects explicit faults, not elapsed-time faults. Real Store
-	// reads run inside callback deadlines; allow slow Windows/encrypted I/O.
-	const callbackTimeout = 750 * time.Millisecond
-	d := agent.Dependencies{Runtime: rt, Model: f.physical, Catalog: f.registry, Executor: f.registry, Approvals: f.approval, Clock: ea1UnknownAgentClock{offset: f.offset}, Execution: agent.ExecutionPolicy{Model: agent.CallPolicy{Timeout: callbackTimeout, MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}, Tool: agent.CallPolicy{Timeout: callbackTimeout, MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}}}
+	d := agent.Dependencies{Runtime: rt, Model: f.physical, Catalog: f.registry, Executor: f.registry, Approvals: f.approval, Clock: ea1UnknownAgentClock{offset: f.offset}, Execution: ea1StoreBackedExecutionPolicy()}
 	if native {
 		d.RunExecution = &agent.RunExecution{OwnerID: "control-owner", LeaseDuration: 2 * time.Second}
 	}
