@@ -165,7 +165,7 @@ explicit PostgreSQL Capability-shell migration is required to reopen after
 this pre-stable hard cut; old Host Turns must be retired, not reclassified.
 
 The standard Session now accepts `Config.SharedBudget`. Supply a supported
-Harness Store implementing the existing budget ledger. Count-only limits
+Runtime Store implementing the native budget ledger. Count-only limits
 (e.g. `MaxLLMCalls`, `MaxToolCalls`, `MaxChildRuns`) require no token meter;
 for hard input/output/total token limits supply `BudgetMeter` implementing
 `model.TokenAdmissionPlanner`, or a model client implementing that interface.
@@ -173,6 +173,10 @@ Missing authoritative metering is rejected before Provider dispatch. The
 built-in first-party `BoundedBudgetAdapter` accounts the root, local specialist
 and Tools against **one frozen Ledger**; an external Handoff runner is rejected
 with SharedBudget because it cannot prove shared token/tool accounting.
+A fixed eager local child is enrolled only in its native Create transaction;
+a competing capacity refusal leaves no child Run or pre-registered quota.
+The original frozen delegation may continue after capacity is released, but
+an unknown Create or return cannot trigger a new child execution.
 On reopen, Runtime compares the **resolved original** shared-budget and
 Host deployment topology policy to the current handle, rather than only
 checking whether a ledger exists. Adding a meter to an originally unmetered
@@ -194,22 +198,28 @@ sampling share the original ledger, physical sampling plan and receipt
 settlement; the summary retains its separate source validation and installation.
 Reopen a budgeted summary Turn with summary support configured. A summary is
 optional and is skipped if the shared ledger cannot admit it while retaining a
-call for business work. Both `Context.ManagedRecovery` and
-`Context.SummaryNativeRecovery` can carry `SharedBudget` and `Inputs` through
-their original first-party managed transfer. The ownership unit is an
-independently admitted native Root physical dispatch, not the lifetime of the
-Run or its first Start. Start, Resume and inline approval share the original
-Host Dispatch ID, exact deterministic Kernel Grant ID and operation binding.
-A prior dispatch must be settled before a later dispatch can qualify; closed
-Transfers remain historical evidence and cannot authorize its successor.
+call for business work. The single `Context.ManagedRecovery` choice can
+carry Context, optional Summary, `SharedBudget` and `Inputs` through
+the original first-party managed transfer. The ownership unit is an independently admitted native Root execution
+segment, not the lifetime of the Run or its first Start. For an already
+created first-party Run, Resume and scoped root Approval submit the original
+frozen Host selection directly to native admission. No new Host dispatch
+grant or completion Item is created. Managed recovery binds the exact
+native command correlation, original Grant and operation to that same
+selection. An earlier segment must retire before ordinary admission can
+continue. Native explicit allowance uses only the guarded control CAS.
+Terminal projection requires the exact original native retirement; changing
+the reopened Host composition cannot clear an unknown effect. The Host
+dispatch fence for Start/Retry before Run creation, opaque middleware and
+independent external effects remains in place.
 The combined
-`managed-agent-obligations-v1` safe point binds the original ledger revision
+`managed-agent-obligations-v2` safe point binds the original ledger revision
 and accounting digest, physical sampling plan, and committed input binding
-and cursor to the Kernel source. Only the exact registered Harness/ledger
-Store and native bounded bridges qualify. No outstanding held/waiting
-reservation, unfinished descendant, unknown effect or Retry generation is
-transferable. Existing pure-context and pure-summary proof versions remain
-unchanged; they cannot be promoted by reopening with more capabilities.
+and cursor to the Kernel source. Only the exact registered Harness selection,
+Runtime ledger Store and native bounded bridges qualify. No outstanding
+held/waiting reservation, unfinished descendant, unknown effect or Retry
+generation is transferable. Earlier recovery payloads require draining with
+their original writer; they cannot be promoted by reopening.
 
 After actual native Budget admission and Context hydration, the combined
 proof can seal a preparation frontier before the first Model intent or between
@@ -236,63 +246,66 @@ controls and original returned-receipt reconciliation retain their
 distinct authorization, not a new ordinary execution permission. A Context pressure rollover committed
 before the next intent can be recovered only if the persisted checkpoint and
 artifacts match a native transformation of the original Context and Run
-messages under the frozen policy. Recovery verifies the source before PARK
-and again under the enabled successor before model preparation. No
+messages under the frozen policy. Recovery reads the original source without a state change, then rechecks its exact digest, lease expiry, active Grant, obligations and ledger in the native admission transaction and under the admitted successor before model preparation. No
 provider or window resolver is called for this verification.
 
-RESUME requalifies the original ledger before enabling a successor and uses
+RESUME requalifies the original ledger within the common native physical admission transaction and uses
 its existing accounting scope without Ensure/Register. Native Business receipt
-commit can seal the next exact safe point using the same proof. After Leave, an expired, unselected original first-owner
-point can be requalified at the existing PARK CAS only when its frozen model
+commit can seal the next exact safe point using the same proof. An ordinary
+Model Claim advances the Run revision, making its previous point stale without a second recovery-state write.
+An expired, unselected original first-owner point can be requalified inside native admission only when its frozen model
 identity and remaining aggregate are unchanged except for the original
 claim/receipt fields. No reservation or a matching settled original receipt
 is required, respectively; an unknown dispatched/held reservation remains
 fenced. The old point remains historical, not reactivated. A settled receipt
 is reduced by the ordinary model-receipt path without a provider call.
 
-No input-source read or request preparation runs before leaving the safe
-point. New input applies only at a later ordinary input safe point.
+An admitted recovery successor cannot mutate the Run or enter a Host callback
+until the common native callback-entry transaction advances the physical epoch
+to its Grant epoch. The recovery evidence is unchanged by entry.
+A lost entry ACK cannot grant another callback. No input-source read or
+request preparation runs before this entry. New input applies only at a
+later ordinary input safe point.
 A returned successor can await its original child approval or cancellation
 and consume the verified child receipt through ordinary native retirement.
+The native retirement receipt (including recovery evidence) and Grant deletion
+commit in the same Finish transaction together with owned Lease release. The
+managed closure is observed from that receipt; it has no independent state write. The Owned path validates
+the original callback return and exact full Snapshot proof without a Mark;
+Host projection observes that immutable final receipt.
 For an eligible unresolved mixed Root physical dispatch without descendant or other
-unresolved Host effects, public Session.Cancel PARKs the original source and
-uses the existing immutable Host cancellation election; it cannot drive a
-RESUME winner. A pending settled receipt still requiring native commitment
-must be recovered before this cancellation path can settle it. For elected
-CANCEL, the original ledger is fenced by revision CAS, Kernel cancellation
-commits, and terminal lifetime accounting is completed before the Host closes
-the dispatch. A lost closure ACK can be repaired against these same original
-facts. Interruption before the initial native preparation marker is committed (for
-example during first admission or hydration) does not acquire a new proof.
-Repeated cross-phase takeover inside a selected successor remains outside
-this proof. An independently admitted later Resume after retirement can
-qualify its own transfer. A root approval dispatch records the exact original
-checkpoint ID, decision and comment before entering native code. The
-native approval control CAS journals its actual applied decision and original
-Grant identity in the existing Kernel journal, even when the next Tool
-consumption removes the resolved checkpoint. A native returned dispatch and
-a managed closure use the same Host settlement reducer under the original
-Turn lock: the exact Approval Completed fact and physical dispatch receipt
-are appended atomically. A matching earlier approval projection is consumed
-idempotently; foreign, duplicate or contradictory decisions cannot qualify
-a new dispatch or transfer. A returned callback alone does not prove the
-approval was applied. No-entry or a known returned but unapplied original
-gate can close without an approval completion; uncertain returns stay fenced.
-This also applies to independently owned local Named Agent approvals.
-Control-only approval uses the same native control/return evidence, and the
-subsequent independently admitted Resume owns its own effects. Non-native
-and parent-owned borrowed controls retain their existing distinct custody.
+unresolved Host effects, public Session.Cancel submits the original user reason directly to the qualified native cancellation transaction; it does not append a second Host cancellation election. RESUME and CANCEL may both read the same eligible source, but only the native CAS can select a winner. A dispatched invocation without its committed receipt remains unknown.
+For elected CANCEL, Kernel cancellation, original ledger revocation and
+terminal lifetime release commit in the same native transaction. For direct
+native commands the Host projects that fact without a dispatch completion
+Item; outstanding older Host dispatches still consume the exact native
+closure proof. Interruption before the initial native preparation marker
+does not acquire a new proof. Repeated cross-phase takeover inside a
+selected successor remains outside this proof. An independently admitted
+later Resume after retirement can qualify its own transfer.
+
+A scoped native root Approval verifies the exact original waiting request,
+checkpoint ID, decision and comment before native admission. The approval
+control CAS journals its actual applied decision and Grant identity even
+when later Tool consumption removes the resolved checkpoint. Harness
+projects Approval Completed directly from that journal before advancing
+the waiting Invocation/Turn projection, and validates an existing decision
+idempotently. Foreign or contradictory decisions cannot authorize a new
+approval or managed recovery. No-entry and unapplied controls do not project
+a decision; uncertain callbacks remain fenced by the original native Grant.
+Opaque, external and parent-owned borrowed controls retain their independent
+boundary; original Host-bound approvals still settle their decision and
+dispatch receipt under the original Turn lock.
 Legacy two-field approval grants and older captured approvals without the
 native applied marker cannot be upgraded by inferring a decision from a
 terminal Run. Reconcile in-flight approvals before upgrading or downgrading.
 Drain or reconcile mixed in-flight transfers before
 downgrading to readers that cannot validate the extended safe-point phases.
 
-Ordinary native Start, Resume and approval dispatches also have a receipt-only
-closure path. The original Harness dispatch identity determines the exact
-Kernel owned Grant. An actual persisted callback return with settled physical
-obligations can complete that Grant's original retirement and ACK, after
-which Harness can append the canonical dispatch completion and project the
+Original native callbacks have a receipt-only closure path. A retained
+Host dispatch identity, when present, determines the exact Kernel owned Grant. An actual persisted callback return with settled physical
+obligations can complete that Grant's original retirement and owned Lease
+release atomically, after which Harness can append the canonical dispatch completion and project the
 original Invocation and Turn. Refresh and Resume share this path; neither
 requires another physical callback for an already settled result. No-entry
 remains a distinct proof, and a managed transfer still requires its own
@@ -418,8 +431,8 @@ Recovery reuses the committed plan without rerunning Context preparation or
 the admission meter.
 
 Ordinary bounded composition is the default. Explicit
-`Context.ManagedRecovery: true` selects the existing Runtime-owned Context
-recovery lifecycle. Before opening, construct the Runtime with its original
+`Context.ManagedRecovery: true` selects the first-party Runtime recovery
+lifecycle for the original Agent, including optional Summary. Before opening, construct the Runtime with its original
 `kernel.Dependencies.ManagedRecoveryHost` bound to that exact Harness Store;
 unsupported or mismatched Stores are rejected. Persistent Kernel and Harness
 Stores plus the original provider/Tool bindings remain Host responsibilities.
@@ -427,8 +440,8 @@ Selecting the flag does not make Memory durable or add a recovery authority.
 Unknown external outcomes continue to require trusted reconciliation.
 
 For mid-task user input, pass the Host's authenticated log as `Inputs` and use
-the [steering guide](run-inputs-and-parallel-reads.md). Both native managed
-profiles can preserve the committed input binding and cursor; the Host must
+the [steering guide](run-inputs-and-parallel-reads.md). The managed
+lifecycle can preserve the committed input binding and cursor; the Host must
 retain that log across restarts. A queued input is not an applied input and
 cannot rewrite an already frozen invocation.
 
@@ -441,8 +454,8 @@ Optional native automatic summaries are configured separately through the
 frozen `WorkingStateSummary` policy. They add a model invocation inside the
 original Run, before the first business call, and preserve exact raw Artifacts.
 See [Automatic WorkingState](automatic-working-state.md) for input/call limits,
-Host-state priority, ordinary recovery and the separate, restricted
-`Context.SummaryNativeRecovery` hard-crash option.
+Host-state priority, ordinary recovery and the shared, restricted
+`Context.ManagedRecovery` hard-crash option.
 
 ## Migrating Session callers
 

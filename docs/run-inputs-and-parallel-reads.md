@@ -68,11 +68,10 @@ return of any enclosing Host middleware. No input RunNext wrapper or
 callback-free custody is granted. A frame that actually reads the Host input
 source cannot claim scoped deferred-control custody; an independently retired
 child that never entered that boundary may qualify using its original proofs.
-Inputs can be combined with the separately opted-in `ManagedContextRecovery`
-path or `SummaryNativeRecovery` through the exact native mixed safe-point
-proof. The persisted aggregate and proof retain the original input binding and
+Inputs can be combined with `ManagedRecovery` through the common Agent
+obligation proof, including optional Summary and SharedBudget. The persisted aggregate and proof retain the original input binding and
 committed cursor. Reopening must select that source; no source read occurs
-before the successor leaves the safe point and no new input can rewrite its
+before the successor consumes the frontier at native callback entry, and no new input can rewrite its
 frozen request. CANCEL does not read or advance the queue. Active external
 effects and unresolved reservations are not made transferable by enabling Inputs.
 

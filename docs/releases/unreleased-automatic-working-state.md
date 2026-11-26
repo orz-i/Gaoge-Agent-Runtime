@@ -11,12 +11,11 @@ See the [integration guide](../automatic-working-state.md) and
 ## Supported composition
 
 The public Session integration supports ordinary Context recovery after callback
-return. Dedicated `Context.SummaryNativeRecovery` additionally uses the original
-Kernel PARK/ENABLE protocol for an interrupted native summary frame. It requires
-the exact same Harness Store as the Runtime's `ManagedRecoveryHost` and a
-restricted concrete native callback composition. This option and the existing
-`ManagedRecovery` option are mutually exclusive. Shared-budget combinations
-with summary remain rejected. No extra allowance, background worker, Kernel
+return. The unified `Context.ManagedRecovery` option additionally uses the
+original native recovery admission transaction for an interrupted first-party Agent
+frame, including summary. It requires the exact Harness Store as
+`ManagedRecoveryHost` and restricted native callback composition. Shared
+budget uses the same Runtime ledger and original receipt transactions. No extra allowance, background worker, Kernel
 RunKind, Store method or SQL column is introduced.
 
 Host-provided WorkingState remains authoritative task data for this feature:
@@ -32,7 +31,7 @@ selection, policy and scope checks.
 Nil policy/purpose/derivation fields retain their old serialization and hash
 behavior. New policies are part of sealed Config and native Run identity;
 reopening a handle cannot add or change an existing Run's policy.
-The dedicated native recovery choice is also frozen in the original Run.
+The common native recovery choice is also frozen in the original Run.
 An ordinary Run cannot gain its recovery authority from a new handle, and a
 native-recovery Run still requires that composition when reopened with nil
 current summary policy. Explicit root Retry skips summary for the same Turn.
@@ -61,7 +60,7 @@ pending safe point; no successor can resend it merely because the process died.
 This dedicated protocol covers the original dispatch's first summary-phase
 transfer and its selected safe-point repair. A later business intent gains no
 new recovery authority. Another hard crash at a different phase after transfer
-fails closed under the original immutable Host reservation; arbitrary chains
+fails closed under the original native committed authorization; arbitrary chains
 of cross-phase takeover are not supported.
 
 This change also repairs a Stage 3 sampling clone omission: WorkingState and

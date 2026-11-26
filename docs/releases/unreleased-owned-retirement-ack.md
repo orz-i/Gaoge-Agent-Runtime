@@ -1,21 +1,67 @@
-# Unreleased Root-owned retirement acknowledgement upgrade
+# Unreleased atomic Root-owned retirement
 
-This change repairs a race in which a legitimate reconciler retires an already-marked Root scope before the original callback receives its Finish acknowledgement. The old caller must not report success from a missing grant alone. A genuine Finish now retains the original settlement evidence so the original caller and a reconciler can acknowledge the same retirement without releasing another owner's lease.
+Owned Root retirement is a single Store transaction after the original
+durable callback return and all physical obligations are qualified. Finish
+validates the private whole-snapshot settlement proof and commits the immutable retirement
+receipt, any selected Managed closure, exact Grant deletion and release of
+the original owned native Lease together. A borrowed Lease remains unchanged.
+
+## Atomic Root admission
+
+The inverse transition is also atomic: automatic Root execution admits the
+next native Lease and exact Grant in a single Store transaction, with the
+original private attempt and full Snapshot proof. Explicitly borrowed Leases
+use that same admission reducer without acquisition or release.
+`Runtime.AdmitOwnedPhysicalExecution` returns the already-bound Runtime and
+committed pair. The old two Runtime Begin entries and automatic Root
+Acquire/Release compensation are removed. Custom
+`OwnedPhysicalExecutionStore.BeginOwnedPhysicalExecution` implementations
+accept the opaque admission request and return the admitted pair; an actual
+uncertain COMMIT returns its original candidate with the attempt-bound
+outcome. The subsequent callback-entry Store check remains mandatory.
 
 ## Custom Store hard cut
 
-Root Agent execution requires `kernel.OwnedRetirementStore` in addition to the existing owned/native Store capabilities. Implement `LoadOwnedRetirement`, `LookupOwnedRetirementForRun` and `AcknowledgeOwnedRetirement`. The Run-ID lookup selects only one unacknowledged retirement matching the current complete source and native identity, with no active replacement grant. It is not permission to acknowledge or dispatch; acknowledgement revalidates everything inside its own transaction. A decorator must forward these methods to the same transactional backend as its existing owned scope and native lease methods. A process-local cache, a separate database, or `ReleaseExecution` followed by a separate receipt write is not an equivalent implementation.
+Root Agent execution requires `kernel.OwnedRetirementStore` on the same
+transactional backend as native execution and owned scope storage. Implement
+`LoadOwnedRetirement` and `LookupOwnedRetirementForRun`. The latter reads only
+the exact current final receipt, matching the complete source, native epoch
+and Lease disposition without an active replacement Grant. Neither method
+writes, releases a Lease or grants dispatch authority.
 
-An old custom adapter that omits or hides this capability is rejected before Root dispatch. This is an explicitly approved runtime compatibility change, even though the capability is a separate Go interface. Memory, native SQLite and PostgreSQL are upgraded together. Default Runtime configuration and borrowed native leases remain supported; borrowed leases must not be released by retirement acknowledgement. Test decorators must preserve the real backend's capability rather than invent evidence.
+`AcknowledgeOwnedRetirement` and its proof/result types are removed. There is
+no successor-side ACK repair or separate confirmation write. An adapter
+that hides the required receipt-reading capability is rejected before Root
+dispatch. Memory, native SQLite and PostgreSQL implement the same contract.
 
 ## Atomicity and recovery
 
-Genuine Mark and the original callback-return evidence bind the exact grant, source, owner, lease and epoch. Finish atomically stores a retirement receipt and removes only that grant. First acknowledgement validates the unchanged settled source and original native identity, rejects replacement grants, and atomically records acknowledgement with any permitted owned-lease release. An exact repeat of an already acknowledged receipt is historical confirmation only and does not modify a later Run or lease.
+Finish binds the original durable callback return to the exact Grant,
+native identity, full current Snapshot and private Feature proof. It rejects
+unresolved descendant fences. Owned Mark and its recovered-Mark entry are
+removed. Parent-bound borrowed Grants still record their actual callback-return
+witness through Mark; both kinds of Finish require the private permit. A completed original return can be retired after
+Lease expiry; expiry alone is not evidence of return. Unknown effects, a
+missing callback return (including legacy Mark-only rows), and conflicting
+identities cannot retire.
 
-Unknown callbacks, absent or conflicting receipts, and merely clean or terminal state do not authorize acknowledgement. Ordinary `FinishChildExecution` on a missing grant remains a conflict. Existing genuinely marked legacy scopes remain immediately reconcilable; absence of original lease-ownership evidence does not authorize releasing a lease. Managed recovery is closed only by its existing proof-bearing operation; Finish verifies and retains that prior closure, without gaining a new cleanup authority.
+A lost Finish response is recovered by observing the exact immutable receipt.
+An absent Grant alone is not evidence of success; a historical receipt cannot
+release a later Lease or authorize another callback. Existing final wire fields
+`Phase=ACKNOWLEDGED` and `ACKIdentity` are retained only as immutable receipt
+serialization, not an independent execution phase.
 
 ## Rollout boundary
 
-Use the matching Core, PostgreSQL and SQLite cohort. Native SQLite upgrades the accepted v5 schema to v6; unsupported schemas remain rejected. PostgreSQL requires its corresponding additive migration. Do not run old and new writers against the same upgraded durable cohort without explicit compatibility evidence. The separately unpublished Browser-cancellation schema is not part of this hotfix.
+Use the matching Core, PostgreSQL and SQLite cohort, after stopping all old
+writers and retaining a backup. SQLite v11 Open and v10-to-v11 migration,
+and PostgreSQL Migrate, reject nonfinal old retirement rows without promoting
+or discarding them. Reconcile or drain these with their original writer before
+upgrading. Old active owned Mark rows and settlement-evidence columns are
+preserved by schema migration but do not qualify for the new Finish. Drain
+those owned grants with the old writer as well. New owned grants never write
+a Mark or its intermediate evidence. This cut adds no SQL tables beyond the native accounting migration.
+It neither migrates historical execution evidence nor authorizes deployment.
 
-Keep original failure evidence and run the same-SHA conformance, deterministic continuation race and full regression gates before release. This document does not authorize deployment or claim the six Host H-FROZEN cells are accepted.
+Keep original failure evidence and run same-SHA conformance, continuation
+races, consumer tests and full regression gates before release.

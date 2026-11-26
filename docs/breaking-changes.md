@@ -54,6 +54,209 @@ identities are reserved without inventing new authority; already-discarded
 pre-v10 history cannot be reconstructed. Ambiguous retained identities abort
 migration rather than being merged. No mixed-version writers.
 
+## Native accounting table (SQLite v11)
+
+Fresh Kernel stores use v11. Stop writers and back up existing v10 files, then
+run `MigrateV10ToV11` (or `MigrateV10ToV11With` using the original encrypted
+connection). This is a schema-only step; existing Harness ledgers are not
+transferred or erased. A separate verified execution-path cutover is required
+before a previously budgeted Run can use native accounting. PostgreSQL
+retains its existing ledger table and runs `postgres.Migrate`.
+
+The co-located native Model/Tool path requires the same Kernel Store as the
+Budget adapter. It commits dispatch, original receipt, and terminal lifetime
+accounting with the Run. Standard `OpenAgentSession` selects the native Kernel
+ledger, including Managed recovery.
+
+`Run.BudgetScopeID` and `Run.BudgetParentRunID` now freeze the original
+accounting identity and logical ancestry. Custom native Stores implement
+`CreateRequest.Budget` / `Record.BudgetEnrollment` as part of the original
+Run creation transaction; the new Run and ledger enrollment commit together.
+The local parent's original scope, identity and nonterminal status are checked
+under that transaction. A new Root Retry activates the exact already selected
+Attempt and enrolls it when creating the successor Run. Native ordinary
+`Cancel`, `Expire` and terminal writes settle the original scope under the same
+Store transaction. `Runtime.CancelBudgeted` is removed, without an alias.
+Unknown dispatched effects still block cancellation or expiry without revoking
+quota. Native receipt recovery uses the persisted binding, not a new Host scope.
+
+The Host still selects the original Attempt and projects committed facts.
+For an already-created first-party root Run, Managed Resume and scoped
+Approval no longer append a Host execution-dispatch grant or its receipt.
+The native Grant, execution Epoch, original callback return and retirement
+are the authority. The actual applied approval is read from the Kernel
+journal and projected idempotently before advancing the waiting Host state.
+Original pending Host grants must still be reconciled; Start/Retry before
+Create and opaque/external callbacks retain their existing fence.
+
+For a fixed eager local Named Agent using the same native budget adapter, Host
+capacity preview does not enroll the child. The original frozen delegation
+selects its subtree limit and native Create atomically occupies its lifetime
+capacity with the Run. A definitive native Create refusal can close the
+original Handoff admission without a fabricated Run; temporary capacity
+refusals retain the same frozen selection for continuation. Unknown Create
+outcomes cannot be retried. The original Handoff dispatch identity binds its
+native retirement; a missing Host return can be repaired from that exact
+receipt without invoking the child again. The Host dispatch election still
+fences cancellation before Create. Separately routed and deferred legacy
+compositions retain their original admission boundary. No new database schema
+is introduced by this Handoff cutover.
+
+Existing split-store accounting is not transferred automatically. Reopening
+a previously budgeted Turn whose Host and Kernel ledger records diverge is
+rejected rather than creating a replacement history. PostgreSQL migration adds
+the two Run binding columns; SQLite v11 stores them in the existing Run JSON
+(no additional table or schema version). Opening a native SQLite database or
+migrating PostgreSQL rejects a live local Agent registered in the native ledger
+without its original matching binding, and bound Runs with missing or conflicting
+membership. Historical unbound terminal Runs and registrations without a Run
+are retained. No binding is inferred or written by this check. The shared
+PostgreSQL table cannot distinguish active legacy external accounting from a
+native registration, so those deployments also require prior reconciliation.
+Drain old writers and reconcile with the previous writer before switching.
+Explicitly composed external accounting retains its legacy path and cannot
+certify Managed recovery. Actual deployed data must be verified separately.
+
+## Atomic Root execution admission (pre-stable hard cut)
+
+Automatic Root execution no longer calls `AcquireExecution` followed by a
+separate Grant admission. `Runtime.AdmitOwnedPhysicalExecution` accepts the
+complete original Snapshot and a single private admission proof; it returns
+the committed Lease/Grant result and a Runtime bound to that pair. The old
+Runtime `BeginOwnedPhysicalExecution` and
+`BeginOwnedPhysicalExecutionForDispatch` entries are removed without aliases.
+For custom Stores, `OwnedPhysicalExecutionStore.BeginOwnedPhysicalExecution`
+now accepts one opaque `OwnedPhysicalAdmission` and returns
+`OwnedPhysicalAdmissionResult`. The Store resolves the next epoch and expiry
+under its authoritative lock, commits them with the Grant and permanent
+identity reservation, or leaves all of them unchanged. Existing explicitly
+borrowed Leases take the same admission path without changing their owner or
+expiry. Generic Acquire remains for non-Root and explicitly leased operations.
+
+Memory, SQLite and PostgreSQL use the same lease planner (signed 64-bit
+epoch ceiling, millisecond-rounded positive duration). New ordinary
+admission commitments bind the full Snapshot and original private attempt;
+existing historical commitment fields are not rewritten. A Store reporting
+a genuinely uncertain COMMIT must return the original candidate with the
+direct attempt-bound outcome; only that live caller may verify the exact
+persisted Grant and recover. Definite rejection and generic transport errors
+are not authorization. The actual callback entry still verifies the
+current Store-owned lease, revision, operation and Grant, including Managed
+frontier consumption where applicable. No new schema is introduced. Upgrade
+matching Store adapters together, after draining or reconciling old writers;
+there is no split-admission compatibility path.
+
+## Native post-Create execution authority (pre-stable hard cut)
+
+For ordinary, non-Managed Root Resume using the concrete Agent, its exact
+Runtime and native canceller, no generic Host interaction handler, no external
+accounting and no externally bound Lease, Harness no longer admits or retires
+an independent Resume dispatch. The frozen Invocation and original Host
+effect/cancellation evidence are verified before native admission. Resume and
+Cancel compete on the same Runtime Run revision and Grant, not on a new Host
+Resume Item. Terminal projection must settle any active native Grant from its
+exact original callback evidence, even when reopened through a different Host
+composition. An unknown callback remains fenced.
+
+For the same native composition, explicit allowance is a guarded Kernel control
+CAS, not a physical dispatch; `NewAllowanceDispatch`, `CommittedAllowanceDispatch`
+and their extra journal correlation marker are removed without aliases. A lost
+control reply does not certify no effect; re-observation and a new explicitly
+requested control remain subject to the original Run revision and state. Old
+unresolved native allowance dispatches must be reconciled by the previous writer
+before upgrading. Historical completed dispatch facts remain readable, and the
+retired event namespace remains reserved against injection. No new schema or
+new durable authority is introduced. First Create, Managed recovery, Approval
+selection and independent Host/opaque operations retain their original fences.
+
+## Unified Agent recovery profile (pre-stable hard cut)
+
+Replace `agent.Dependencies.ManagedContextRecovery` with
+`BoundedContext` and `ManagedRecovery: true`. Replace
+`SummaryNativeRecovery` (both Agent and Session options) with the same
+`ManagedRecovery` choice. Summary remains optional business functionality.
+The original choice is frozen in Agent state as `managedRecovery`.
+
+Only `managed-agent-obligations-v2` qualifies new Managed recovery.
+Context-only, Summary-only and prior combined payloads cannot elect a
+successor under the new execution semantics. Drain or reconcile old
+in-flight runs with their original writer before upgrading; there is no
+automatic persisted-source or ledger migration. No new SQL table is required
+beyond the native accounting migration above.
+
+Managed Model/Tool dispatch, receipt and terminal accounting use the ordinary
+native transaction. A Managed CANCEL also commits Run cancellation, ledger
+revocation and terminal lifetime release together, before the Host projection.
+A lost pre-commit receipt is an unknown external effect, not a settled
+ledger receipt that can be used to reconstruct the Run. The separate Host
+ledger closure, revision-specific budget settlement APIs, and
+`ApplyManagedModelIntent` alias are removed.
+
+`ManagedRecoveryStore.LeaveManagedSafePoint`, `ManagedLeaveRequest`,
+`ManagedLeaveTransfer`, `CompleteManagedRecovery` and its completion proof
+are removed. Ordinary Model Claim advances the Run revision without a
+separate invalidation write. An admitted recovery successor has not entered
+until the native physical epoch reaches its Grant epoch. Custom
+`OwnedPhysicalExecutionStore.CheckOwnedPhysicalEntry` implementations must
+advance that epoch atomically under the Run/lease/grant lock before returning
+success. A repeated entry or lost ACK is not permission to run another callback.
+Ordinary mutations are denied before native entry.
+
+`FinishChildExecution` now persists the native retirement receipt with the
+original recovery evidence, exact Grant removal and release of its own native
+Lease in one transaction. The managed closure is read from that receipt, not
+written as a second mutable record. Borrowed Leases remain unchanged. An unmarked or uncertain
+return cannot close a transfer. A closed successor must have its exact
+retirement receipt; the old closed-but-active fallback is removed.
+The independent retirement ACK transaction, its public API and successor-side ACK repair are removed.
+
+Managed recovery no longer commits PARK or writes a Host recovery reservation.
+The old PARK, Store preflight, and Host reservation APIs are retired.
+`AuthorizeManagedContinuation` (or its qualified-frontier variant) reads the
+original evidence and verifies the Host facts, not execution eligibility.
+The Host port is `VerifyManagedOriginalDispatch`; the Runtime selects the
+command and carries only its mode and original cancellation reason.
+Managed successor admission now uses `BeginOwnedPhysicalExecution` through
+`AdmitManagedContinuation`, including the ordinary Lease planner and commit
+confirmation protocol. The separate Enable operation, claimant election, and
+transfer-generation CAS are retired; old wire history remains readable.
+Ordinary Run mutations no longer write an additional invalidation record.
+The native admission/cancel transaction revalidates the exact source, Store-time
+expiry, original Grant and ledger and selects the sole winning command.
+`CommitManagedCancellation` preserves the authorized user cancellation reason.
+Host closure is an idempotent projection of the original native result into
+its existing dispatch receipt, not an additional closure row. Newly written
+native Managed dispatches use the reserved `hdispatch_native_` ID prefix.
+
+This is a stopped-writer hard cut: drain or explicitly reconcile old in-flight
+managed transfers with unfinished legacy states, unmarked open Managed
+dispatches, and old open Host reservation rows with the original writer
+before upgrade. New managed records do not write an independent State;
+legacy closed wire fields remain readable for original receipt validation. Host SQL New/Migrate
+reject open legacy reservation rows; legacy PARKED is never emitted and cannot
+be promoted to executable authority. The legacy SQL table and closed rows
+remain as historical data; no production data is deleted or synthesized.
+Do not run old and new writers concurrently.
+Owned Mark is also removed: `MarkOwnedPhysicalRecovered` and
+`ReduceOwnedPhysicalSettlement` no longer exist.
+`ChildExecutionStore.FinishChildExecution` now takes a
+`ChildExecutionSettlement` permit. Owned Finish validates the private
+full-Snapshot proof and persisted original callback return directly.
+The borrowed parent-bound Mark remains an actual return witness, not an
+Owned settlement phase. Both kinds of Finish require the private permit;
+direct zero-permit calls cannot retire a marked child.
+Only immutable final retirement receipts are observed after Finish.
+The existing final wire fields are retained, not a separate execution phase.
+SQLite Open/v10-to-v11 migration and PostgreSQL Migrate reject old incomplete
+retirements rather than promote or discard them. A legacy Mark with no actual
+callback-return evidence does not qualify for Finish. Existing active
+Owned Mark rows, including ones with callback-return evidence, require
+old-writer drain or reconciliation; the new writer does not consume their
+intermediate Mark state. Old SQL columns are retained without new Owned
+Mark writes. No additional DDL migration is introduced.
+This is a hard cut; stop old writers and drain or reconcile old intermediate
+Leave/Closure/Retirement protocols with their original binary before upgrade.
+
 ## SQLite bounded child-terminal recovery (v9)
 
 Existing exact v8 Kernel databases require a stopped-writer, backed-up, explicit
@@ -148,17 +351,17 @@ write outcomes, opaque entered layers and failed projections remain fenced.
 Original receipt consumption and owned retirement are now one resumable
 cleanup contract. `RootDeferredCleanupEligibility` observes either the
 active returned Grant (including when every physical obligation has already
-been consumed) or the exact unique current RETIRED row awaiting ACK.
+been consumed) or the exact unique final retirement receipt for the current source.
 `ReconcileRootDeferredChildren` reuses the existing retirement protocol for
 the retirement-only phase and accepts an optional original cleanup scope to
 bind an earlier observation to the same Grant and callback completion.
 Ordinary three-argument calls still work; method values/interfaces with the
 old fixed signature must be updated. The shared Kernel returned-root facts
 checker receives the active-grant predicate from its Store and validates a
-pending RETIRED row with the existing exact selector and unchanged custody
-requirements. No historical ACK becomes a current retirement candidate.
+final receipt with the exact source, epoch and Lease-disposition selector.
+A historical receipt cannot authorize a new callback or later source.
 The elected Harness cancellation consumes the same original evidence after
-a lost recovery CAS ACK, Mark, Finish or ACK, including before terminal
+a lost recovery CAS or Finish response, including before terminal
 projection of an already committed business failure.
 
 ## PR #154 — Model original evidence and settlement qualification hard cut
@@ -699,7 +902,7 @@ See [ADR 0018](adr/0018-subagent-only-orchestration-hardcut.md) for the sole
 supported architecture and the acceptance criteria. Prior dated notes below
 remain a record of *superseded pre-stable behavior*, not current support.
 
-## Unreleased — Root-owned retirement acknowledgement
+## Unreleased — atomic Root-owned retirement
 
 Custom Root Store adapters must implement or forward `kernel.OwnedRetirementStore` on the same transactional backend as native execution and owned scope storage. Missing capability is rejected before dispatch; no unsafe legacy fallback remains. Built-in Memory, SQLite and PostgreSQL are upgraded together; default and borrowed-lease configurations remain supported. See [the migration and acknowledgement boundary](releases/unreleased-owned-retirement-ack.md).
 

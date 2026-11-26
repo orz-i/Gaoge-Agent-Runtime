@@ -351,9 +351,13 @@ v7 files require explicit `MigrateV7ToV8` with all old writers stopped and a
 retained backup; older files complete each prior migration first. Migration
 derives the last physical epoch only from original grant/retirement facts,
 never the current lease epoch, and does not rewrite original custody bytes.
-Successor execution/control transactions reconcile an exact genuinely retired
-callback ACK before advancing its owner or source. Unknown/stale/active effects
-remain fenced, and historical empty custody is never promoted to trusted.
+The independent retirement ACK, successor-side repair, and Owned Mark
+protocols have since been removed: current Owned Finish validates the exact
+private Snapshot proof and durable callback return, and commits the final
+receipt and owned Lease release together. The old Mark columns remain in the
+schema only for borrowed return witnesses or historical evidence; active
+legacy Owned Marks must be reconciled with their original writer. Unknown/stale/active effects remain fenced, and historical
+empty custody is never promoted to trusted.
 
 
 ### Bounded child-terminal reconciliation and Call-qualified recovery schema (v9)
@@ -394,5 +398,20 @@ writers and keep a backup. Open never migrates. The migration reserves IDs
 present in active grants, retained retirement receipts and managed history;
 ambiguous cross-Run ownership or active/retired collision aborts it atomically.
 It does not recreate missing historical evidence or reconstruct old discarded
-Borrowed IDs. Fresh databases start at v10; reservations survive all later
-physical consumption for the database lifetime.
+Borrowed IDs. Reservations survive all later physical consumption for the database lifetime.
+For current stores, complete the v11 migration below after v10.
+
+### Native accounting table schema (v11)
+
+Fresh Kernel databases now start at v11. Stop writers and back up before
+calling `MigrateV10ToV11` (or `MigrateV10ToV11With` with the original encrypted
+connection). This explicit schema migration adds an empty ledger table to
+the Kernel database; it does not move or delete an existing Harness ledger.
+Existing Host accounting stays at its original location until a verified
+execution-path cutover migrates those facts. Do not enable an empty replacement
+ledger for an already budgeted Run. Open never migrates.
+
+Atomic owned retirement retains the final v6 receipt wire fields without an
+independent ACK transition. v11 Open and v10-to-v11 migration reject old
+nonfinal retirement rows without rewriting them. Drain those rows with the
+original stopped-writer cohort before using this version.

@@ -75,11 +75,14 @@ through `agent.Dependencies.BoundedContext`. The Runner owns Context hydration,
 bounded model-request preparation and exact artifact/checkpoint CAS as native
 stages rather than requiring a Host Run middleware entry. `ContextSummary` optionally performs a separate, frozen
 summary-purpose ModelInvocation under that same bounded lifecycle;
-`SummaryNativeRecovery` and managed Context recovery retain their own original
-Kernel proofs, but use the same native preparation and original-grant
-commit/leave and retirement protocol. A closed managed transfer is not an
-ACK of its successor retirement; recovery must reconcile the exact original
-retirement before projecting Host closure. The never-connected `SamplingContextPorts` alternative and
+`ManagedRecovery` uses the same AgentObligations source, native preparation,
+original-grant native entry and retirement protocol for Context and Summary.
+The successor's enabled frontier is consumed by the common callback-entry
+transaction. Closure, retirement, Grant removal and owned Lease release
+commit together; Owned Finish consumes the original durable callback return
+and exact Snapshot proof directly, without a settlement Mark.
+Parent-bound borrowed callbacks retain their own return witness.
+Recovery observes the immutable receipt before projecting Host closure. The never-connected `SamplingContextPorts` alternative and
 `ContextPreparation` selector were retired before beta.24 instead of
 maintaining a second generic context executor. A Context receipt is not proof
 of an unknown Provider effect, and an unrelated Store ACK cannot authorize
@@ -142,8 +145,18 @@ qualify any original opaque callback return.
 
 The native Adapter alone performs the original reservation/dispatch, trusted
 Provider and Tool return observation, settlement and cancellation-aware
-accounting. The Host authority owns frozen Run/ancestor Ledger scope,
-Host-selected meter/limits and budget Timeline projection. An uncertain
+accounting. The Host selects the frozen Run/ancestor scope and meter/limits,
+and projects the budget Timeline. Standard and Managed execution commit
+physical accounting in the Runtime Store, with the Run mutation. Fixed eager
+local Named Agents preview capacity without a Host enrollment: their frozen
+child scope and lifetime capacity are enrolled in native Run Create. The
+Host dispatch election still fences the pre-Create cancellation window; its
+return is bound to the original native retirement, not a second execution
+permission. Already-created first-party root Resume and scoped Approval use
+only native admission; approval projection reads the original Kernel journal.
+Opaque or independently routed callbacks retain their distinct Host boundary.
+Definitively refused capacity can resume the same selection;
+an uncertain Create or callback cannot be replayed. An uncertain
 Provider or Tool result retains its original quota; a proven Agent terminal
 pre-dispatch denial can release only the matching original request's reserved
 quota. Other Host middleware may not borrow the native Adapter's callback
@@ -202,10 +215,18 @@ alone is not a physical-effect receipt.
 - Each physical Root/Child Start, Resume and Tool/Model call requires its
   original frozen execution identity and the appropriate Store-serialized
   physical grant or lease. The durable identity is stable across restart.
+- Automatic Root admission commits the next native Lease Epoch, exact
+  physical Grant, and original admission identity together in the same Store
+  transaction, against the complete frozen Snapshot. An explicitly borrowed
+  native Lease is validated by the same reducer without acquiring or releasing
+  it. There is no preliminary automatic Acquire or compensating Release.
+  Runtime returns a scope bound to the committed pair; the physical Grant
+  is an invocation fence, not an independently acquired execution owner.
 - An owned physical admission may recover a lost COMMIT acknowledgement
   only within its original live invocation, from a direct attempt-bound
-  Store outcome and the exact persisted admission commitment. Public Grant
-  identity, a definite refusal or a later observer never grants dispatch.
+  Store outcome carrying the original candidate and the exact persisted
+  admission commitment. Public Grant identity, a definite refusal or a later
+  observer never grants dispatch.
 - After admission acknowledgement, the actual owned RunChain entry still
   checks the exact original Grant, persisted owner/epoch, source revision and
   operation status against Store time. Runtime accounts for the observation's
@@ -231,6 +252,14 @@ alone is not a physical-effect receipt.
   post-election inspection. Repair does not authorize new dispatch or close
   the cancellation intent itself. No-entry cannot create callback custody;
   an unchanged suffix of such retirements preserves prior actual custody.
+- An already-created ordinary native Root uses one Runtime election for
+  Resume and Cancel. Harness checks frozen ownership and outstanding original
+  Host effects but writes no additional Resume dispatch/return. Native
+  allowance renewal is just the guarded control CAS, with no extra Host
+  dispatch or correlation event. Terminal projection observes the persisted
+  native retirement regardless of the current Host wrapper. First Create,
+  Managed transfer, Approval selection, externally leased and independent
+  Host/opaque operations retain their specific authority boundaries.
 - Cancellation competes atomically with new dispatch admission. A cancelled
   parent cannot start a late child, while an unsettled child grant prevents
   premature terminalization of its ancestors.
