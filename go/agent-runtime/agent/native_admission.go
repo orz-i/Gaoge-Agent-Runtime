@@ -151,7 +151,7 @@ func (r *Runner) invokeNativeRun(ctx context.Context, source kernel.Snapshot, in
 	} else if r.rootCallbacks != nil {
 		r.rootCallbacks.entered.Store(true)
 	}
-	result, err := r.runChain.Invoke(callbackscope.BindRunCall(ctx, frame), inv, func(c context.Context) (kernel.Snapshot, error) {
+	result, err := r.invokeFirstPartyRun(callbackscope.BindRunCall(ctx, frame), inv, func(c context.Context) (kernel.Snapshot, error) {
 		frame.entered.Store(true)
 		return next(c)
 	})

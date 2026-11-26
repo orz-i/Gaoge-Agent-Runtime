@@ -125,6 +125,11 @@ func (r *Runner) recoverManagedInvocation(ctx context.Context, inv Invocation) (
 		if proofErr != nil || !proof.Matches(reservation) {
 			return kernel.Snapshot{}, true, errors.Join(ErrConflict, proofErr)
 		}
+		// Host closure and native retirement are separate durable facts.
+		// A replay closes the exact original successor, never another callback.
+		if retireErr := native.ReconcileManagedClosure(ctx, proof); retireErr != nil {
+			return proof.Snapshot(), true, retireErr
+		}
 		if closeErr := host.CloseManagedRecovery(ctx, proof); closeErr != nil {
 			return kernel.Snapshot{}, true, closeErr
 		}

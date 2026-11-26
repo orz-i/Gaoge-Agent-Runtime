@@ -28,6 +28,11 @@ func (runner *Runner) buildInvocation(ctx context.Context, snapshot kernel.Snaps
 		if runner.contextSummary == nil {
 			return ModelInvocation{}, ErrInvalidRequest
 		}
+		// A configured but unused Summary owner is not an entered callback.
+		// The actual planning phase retains the conservative Host boundary.
+		if runner.rootCallbacks != nil {
+			runner.rootCallbacks.summaryPhaseEntered.Store(true)
+		}
 		planned, ok, planErr := runner.contextSummary.plan(ctx, runner, snapshot, state, request, definitions)
 		if planErr != nil {
 			return ModelInvocation{}, planErr

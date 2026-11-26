@@ -343,3 +343,20 @@ func TestContextSummaryInputByteCeilingIncludesFinalInvocationID(t *testing.T) {
 		}
 	}
 }
+
+func TestContextSummaryControlCustodyDependsOnActualStage(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		_, rt, ports, provider, clock, request := newSummaryCoreFixture(t, nil)
+		if !enabled {
+			request.WorkingStateSummary = nil
+		}
+		runner := summaryCoreRunner(t, rt, ports, provider, clock, nil)
+		done, err := runner.StartRun(t.Context(), request)
+		if err != nil || done.Run.Status != kernel.RunStatusCompleted {
+			t.Fatalf("summary fixture enabled=%t: %v", enabled, err)
+		}
+		if got := runner.VerifiedDeferredRootControl(t.Context(), rt, done); got == enabled {
+			t.Fatalf("summary enabled=%t actual control custody=%t", enabled, got)
+		}
+	}
+}

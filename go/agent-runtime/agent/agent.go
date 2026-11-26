@@ -280,10 +280,13 @@ type Dependencies struct {
 	// PrepareModelRequest is the only pre-commit message/Tool schema projection.
 	// It does not choose an Agent mode. ModelMiddleware cannot rewrite frozen input.
 	PrepareModelRequest ModelRequestPreparer
-	// BoundedContext selects the concrete Context adapter for ordinary owned
-	// execution with other bounded middleware (including Budget). It must
-	// occur exactly once in RunMiddleware and excludes other preparation modes.
+	// BoundedContext selects native Context hydration and preparation. An
+	// empty RunMiddleware selects the fixed first-party stage. A legacy
+	// explicit chain must still contain the exact adapter once.
 	BoundedContext *BoundedContextAdapter
+	// BoundedBudget selects one native Run, Model and Tool accounting owner.
+	// The Runner owns its execution order; do not also register middleware.
+	BoundedBudget *BoundedBudgetAdapter
 	// ManagedContextRecovery explicitly selects only the concrete Context lifecycle.
 	// PrepareModelRequest must be nil; Runtime installs this adapter preparation.
 	ManagedContextRecovery *BoundedContextAdapter
@@ -362,53 +365,54 @@ type StartRequest struct {
 
 // Runner owns only the Agent model and Tool loop, not Host intent routing.
 type Runner struct {
-	runtime                   *kernel.Runtime
-	model                     model.Client
-	clock                     kernel.Clock
-	catalog                   tools.Catalog
-	executor                  tools.Executor
-	approvals                 plugin.ApprovalHandler
-	approvalControlPreflight  func(context.Context, kernel.Snapshot) error
-	startControlPreflight     func(context.Context, StartRequest) error
-	runMiddlewareConfigured   bool
-	receiptOnlyRunChain       bool
-	modelMiddlewareConfigured bool
-	rootCallbacks             *rootCallbackState
-	boundedCallbacks          []any
-	boundedContext            *BoundedContextAdapter
-	samplingBudget            *BoundedBudgetAdapter
-	toolBudget                *BoundedBudgetAdapter
-	managedContextRecovery    *BoundedContextAdapter
-	contextSummary            *ContextSummaryAdapter
-	summaryNativeRecovery     bool
-	approvalPolicies          *plugin.ApprovalPolicySet
-	hostedTools               HostedToolCatalog
-	discovery                 ToolDiscovery
-	observers                 *plugin.ObserverSet
-	telemetry                 *observability.Set
-	runChain                  *plugin.RunChain
-	modelChain                *plugin.ModelChain
-	prepareModelRequest       ModelRequestPreparer
-	modelPolicyNormalizer     ModelPolicyNormalizer
-	toolChain                 *plugin.ToolChain
-	completionPolicies        []CompletionPolicy
-	toolProgressPolicy        *ToolProgressPolicy
-	inputs                    RunInputSource
-	inputBinding              string
-	limits                    Limits
-	execution                 ExecutionPolicy
-	runExecution              *RunExecution
-	activeRunLease            *kernel.ExecutionLease
-	activeRootGrant           *kernel.ChildExecutionGrant
-	externalRunLease          bool
-	defaultRunOwner           bool
-	toolOutcomeVerifier       ToolOutcomeVerifier
-	externalNoEffectVerifier  ExternalToolNoEffectVerifier
-	delegatedToolResults      ToolOutcomeVerifier
-	modelOutcomeVerifier      ModelOutcomeVerifier
-	modelLimiter              *callLimiter
-	toolLimiter               *callLimiter
-	deferResume               bool
+	runtime                  *kernel.Runtime
+	model                    model.Client
+	clock                    kernel.Clock
+	catalog                  tools.Catalog
+	executor                 tools.Executor
+	approvals                plugin.ApprovalHandler
+	approvalControlPreflight func(context.Context, kernel.Snapshot) error
+	startControlPreflight    func(context.Context, StartRequest) error
+	runMiddlewareConfigured  bool
+	receiptOnlyRunChain      bool
+	rootCallbacks            *rootCallbackState
+	boundedCallbacks         []any
+	boundedContext           *BoundedContextAdapter
+	nativeContext            *BoundedContextAdapter
+	nativeBudget             *BoundedBudgetAdapter
+	samplingBudget           *BoundedBudgetAdapter
+	toolBudget               *BoundedBudgetAdapter
+	managedContextRecovery   *BoundedContextAdapter
+	contextSummary           *ContextSummaryAdapter
+	summaryNativeRecovery    bool
+	approvalPolicies         *plugin.ApprovalPolicySet
+	hostedTools              HostedToolCatalog
+	discovery                ToolDiscovery
+	observers                *plugin.ObserverSet
+	telemetry                *observability.Set
+	runChain                 *plugin.RunChain
+	modelChain               *plugin.ModelChain
+	prepareModelRequest      ModelRequestPreparer
+	modelPolicyNormalizer    ModelPolicyNormalizer
+	toolChain                *plugin.ToolChain
+	completionPolicies       []CompletionPolicy
+	toolProgressPolicy       *ToolProgressPolicy
+	inputs                   RunInputSource
+	inputBinding             string
+	limits                   Limits
+	execution                ExecutionPolicy
+	runExecution             *RunExecution
+	activeRunLease           *kernel.ExecutionLease
+	activeRootGrant          *kernel.ChildExecutionGrant
+	externalRunLease         bool
+	defaultRunOwner          bool
+	toolOutcomeVerifier      ToolOutcomeVerifier
+	externalNoEffectVerifier ExternalToolNoEffectVerifier
+	delegatedToolResults     ToolOutcomeVerifier
+	modelOutcomeVerifier     ModelOutcomeVerifier
+	modelLimiter             *callLimiter
+	toolLimiter              *callLimiter
+	deferResume              bool
 
 	// Frozen at composition: Host middleware/preparers may issue effects
 	// after Kernel Cancel, even when the native Run is already terminal.
@@ -536,38 +540,16 @@ func publicModelInvocations(values []ModelInvocation) []ModelInvocation {
 
 // NewRunner constructs the Agent loop; Host selection and task routing remain external.
 func NewRunner(dependencies Dependencies) (*Runner, error) {
-	if !validBoundedBudgetComposition(dependencies) || !validBoundedContextComposition(dependencies) {
-		return nil, ErrInvalidRequest
-	}
-	if dependencies.Inputs != nil && (dependencies.ManagedContextRecovery != nil || dependencies.SummaryNativeRecovery) {
-		return nil, ErrInvalidRequest // Host input is not a managed-transfer adapter
-	}
-	if dependencies.SummaryNativeRecovery && !validSummaryNativeDependencies(dependencies) {
-		return nil, ErrInvalidRequest
-	}
-	if summary := dependencies.ContextSummary; summary != nil {
-		if !validSummaryComposition(dependencies) {
-			return nil, ErrInvalidRequest
-		}
-		if dependencies.SummaryNativeRecovery {
-			dependencies.PrepareModelRequest = summary.bounded.Prepare
-		} else {
-			dependencies.BoundedContext = summary.bounded
-		}
-	}
-	if a := dependencies.ManagedContextRecovery; a != nil {
-		if !dependencies.Runtime.SupportsManagedRecovery() {
-			return nil, ErrInvalidRequest
-		}
-		if dependencies.PrepareModelRequest != nil || len(dependencies.RunMiddleware) != 1 || dependencies.RunMiddleware[0] != a || len(dependencies.ModelMiddleware) != 0 || len(dependencies.ToolMiddleware) != 0 || dependencies.NormalizeModelPolicy != nil {
-			return nil, ErrInvalidRequest
-		}
-		dependencies.PrepareModelRequest = a.Prepare
-	}
-
 	if dependencies.Runtime == nil || dependencies.Model == nil ||
 		(dependencies.Catalog == nil) != (dependencies.Executor == nil) {
 		return nil, ErrInvalidRequest
+	}
+	// Select concrete native owners once. Complete legacy first-party
+	// compositions are normalized to the same Runner stages, not a second
+	// lifecycle. Opaque or intentionally partial middleware stays explicit.
+	nativeContext, nativeBudget, err := selectFirstPartyStages(&dependencies)
+	if err != nil {
+		return nil, err
 	}
 	progressPolicy, err := normalizeToolProgressPolicy(dependencies.ToolProgressPolicy, dependencies.Catalog)
 	if err != nil {
@@ -663,12 +645,11 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	return &Runner{
 		runtime: dependencies.Runtime, model: dependencies.Model, clock: dependencies.Clock, catalog: dependencies.Catalog,
 		executor: dependencies.Executor, approvals: dependencies.Approvals,
-		approvalControlPreflight:  dependencies.ApprovalControlPreflight,
-		startControlPreflight:     dependencies.StartControlPreflight,
-		runMiddlewareConfigured:   len(dependencies.RunMiddleware) > 0 || dependencies.Inputs != nil,
-		receiptOnlyRunChain:       supportsReceiptOnlyRunChain(dependencies),
-		modelMiddlewareConfigured: len(dependencies.ModelMiddleware) > 0,
-		hostedTools:               dependencies.HostedTools, discovery: dependencies.ToolDiscovery, observers: observers, telemetry: telemetry, approvalPolicies: approvalPolicies,
+		approvalControlPreflight: dependencies.ApprovalControlPreflight,
+		startControlPreflight:    dependencies.StartControlPreflight,
+		runMiddlewareConfigured:  len(dependencies.RunMiddleware) > 0 || nativeContext != nil || nativeBudget != nil || dependencies.Inputs != nil,
+		receiptOnlyRunChain:      supportsReceiptOnlyRunChain(dependencies),
+		hostedTools:              dependencies.HostedTools, discovery: dependencies.ToolDiscovery, observers: observers, telemetry: telemetry, approvalPolicies: approvalPolicies,
 		completionPolicies:   compactCompletionPolicies(dependencies.CompletionPolicies),
 		toolProgressPolicy:   progressPolicy,
 		inputs:               dependencies.Inputs,
@@ -684,17 +665,19 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		toolLimiter:          newCallLimiter(execution.Tool.MaxConcurrency),
 		runChain:             runChain, modelChain: modelChain, toolChain: toolChain,
 		boundedContext:         dependencies.BoundedContext,
+		nativeContext:          nativeContext,
+		nativeBudget:           nativeBudget,
 		samplingBudget:         selectedSamplingBudget(dependencies),
 		toolBudget:             selectedToolBudget(dependencies),
 		managedContextRecovery: dependencies.ManagedContextRecovery,
 		contextSummary:         dependencies.ContextSummary,
 		summaryNativeRecovery:  dependencies.SummaryNativeRecovery,
-		boundedCallbacks:       collectBoundedCallbacks(dependencies.RunMiddleware, dependencies.ModelMiddleware, dependencies.ToolMiddleware, dependencies.Inputs != nil),
+		boundedCallbacks:       collectBoundedCallbacks(dependencies, nativeContext, nativeBudget),
 		// Native pre-Start cancellation and deferred post-callback custody
 		// share the SAME Host-callback trust decision. Native Start remains
 		// strictly middleware-free while the deferred path may also accept
 		// the audited, callback-scoped first-party middleware below.
-		kernelOwnedStartCancellation: control && dependencies.Inputs == nil &&
+		kernelOwnedStartCancellation: control && dependencies.Inputs == nil && nativeContext == nil && nativeBudget == nil &&
 			len(dependencies.RunMiddleware) == 0 &&
 			len(dependencies.ModelMiddleware) == 0 && len(dependencies.ToolMiddleware) == 0 &&
 			dependencies.ManagedContextRecovery == nil,
@@ -1327,15 +1310,8 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 		}
 		return snapshot, true, err
 	}
-	if runner.managedContextRecovery != nil {
-		if _, leaveErr := runner.runtime.LeaveManagedSafePoint(ctx, snapshot.Run.ID); leaveErr != nil && !kernel.ManagedRecoveryAbsent(leaveErr) {
-			return snapshot, true, leaveErr
-		}
-	}
-	if state.SummaryNativeRecovery && invocation.Purpose == ModelInvocationContextSummary && invocation.Status == ModelInvocationPending {
-		if _, leaveErr := runner.runtime.LeaveManagedSafePoint(ctx, snapshot.Run.ID); leaveErr != nil {
-			return snapshot, true, leaveErr
-		}
+	if leaveErr := runner.leaveModelSafePoint(ctx, snapshot, state, invocation); leaveErr != nil {
+		return snapshot, true, leaveErr
 	}
 	snapshot, state, invocation, err = runner.claimModelInvocationExecution(ctx, snapshot, state, invocation)
 	if err != nil {
@@ -1953,7 +1929,7 @@ func (runner *Runner) generateModel(
 		}
 		return response, err
 	}
-	response, err := runner.modelChain.Invoke(ctx, request, emit, terminal)
+	response, err := runner.invokeFirstPartyModel(ctx, request, emit, terminal)
 	// Model layer completion is tracked by the actual chain lifecycle; only
 	// concrete Runtime-owned adapters can supply internal error-path receipts.
 	return response, err
@@ -2567,7 +2543,7 @@ func (runner *Runner) invokePendingTool(
 		// effects; an error is never proof that the Tool was unsent.
 		authority := &toolCallAuthority{id: call.ID, budget: ticket}
 		callCtx = callbackscope.BindToolCall(callCtx, authority)
-		out, chainErr := runner.toolChain.Invoke(callCtx, invocation, func(nextCtx context.Context) (tools.ExecutionResult, error) {
+		out, chainErr := runner.invokeFirstPartyTool(callCtx, invocation, func(nextCtx context.Context) (tools.ExecutionResult, error) {
 			// Recheck after middleware/limiter delays, immediately before the
 			// executor call. A Store gate cannot itself make external effects
 			// physically exactly-once; the receipt is fenced separately.

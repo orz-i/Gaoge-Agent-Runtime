@@ -38,13 +38,11 @@ func validSummaryComposition(d Dependencies) bool {
 	}
 	b := selectedSamplingBudget(d)
 	if b == nil {
-		return selectedToolBudget(d) == nil && len(d.RunMiddleware) == 1 &&
-			d.RunMiddleware[0] == summary.bounded && (d.BoundedContext == nil || d.BoundedContext == summary.bounded)
+		return selectedToolBudget(d) == nil && contextOnlyRun(d, summary.bounded) &&
+			(d.BoundedContext == nil || d.BoundedContext == summary.bounded)
 	}
 	return !d.SummaryNativeRecovery && d.BoundedContext == summary.bounded &&
-		len(d.RunMiddleware) == 2 && d.RunMiddleware[0] == b && d.RunMiddleware[1] == summary.bounded &&
-		len(d.ModelMiddleware) == 1 && d.ModelMiddleware[0] == b &&
-		len(d.ToolMiddleware) == 1 && d.ToolMiddleware[0] == b
+		(d.BoundedBudget == b || completeLegacyBudget(d, summary.bounded) == b)
 }
 
 func cloneContextSummaryBinding(value *ContextSummaryBinding) *ContextSummaryBinding {

@@ -68,6 +68,80 @@ func TestRealPostgresManagedAgentSessionRecoveryAcrossProcessCrash(t *testing.T)
 	}
 }
 
+// The original transfer has reached CLOSED, but its successor's ordinary
+// native retirement has not been acknowledged. A third process must close
+// the exact Grant/ACK without entering a model, Tool or another managed owner.
+func TestRealPostgresManagedClosureRetirementAcrossProcessCrash(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("TEST_POSTGRES_DSN"))
+	if dsn == "" {
+		t.Skip("TEST_POSTGRES_DSN is not configured")
+	}
+	for _, cut := range []string{"finish-before", "finish-after"} {
+		t.Run(cut, func(t *testing.T) {
+			db, isolated := managedRecoveryDatabase(t, dsn)
+			if err := postgresadapter.Migrate(db); err != nil {
+				t.Fatal(err)
+			}
+			if err := harnesspostgres.Migrate(db); err != nil {
+				t.Fatal(err)
+			}
+			files := t.TempDir()
+			runManagedRecoveryProcess(t, isolated, files, "crash", managedRecoveryCrashExit, true)
+			host, err := harnesspostgres.New(db)
+			if err != nil {
+				t.Fatal(err)
+			}
+			turnID, root := managedRecoveryRoot(t, host)
+			ks := postgresadapter.NewKernelStore(db)
+			original, err := ks.LoadManagedRecovery(t.Context(), root.ExecutionRefID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			runManagedRecoveryProcess(t, isolated, files, "resume-"+cut, managedRecoveryCrashExit, true)
+			closed, err := ks.LoadManagedRecoveryByID(t.Context(), original.SafePoint.ID)
+			if err != nil || closed.State != kernel.ManagedClosed || closed.SuccessorGrant.ID == "" || closed.Terminal == nil {
+				t.Fatalf("fault missed closed original transfer: state=%s err=%v", closed.State, err)
+			}
+			grant, grantErr := ks.LookupChildExecution(t.Context(), root.ExecutionRefID)
+			receipt, receiptErr := ks.LoadOwnedRetirement(t.Context(), closed.SuccessorGrant.ID)
+			if cut == "finish-before" {
+				if grantErr != nil || grant != closed.SuccessorGrant || !errors.Is(receiptErr, kernel.ErrNotFound) {
+					t.Fatalf("expected original marked grant: grant=%+v err=%v retirement=%v", grant, grantErr, receiptErr)
+				}
+			} else if !errors.Is(grantErr, kernel.ErrNotFound) || receiptErr != nil || receipt.Phase != "RETIRED" {
+				t.Fatalf("expected exact unacknowledged retirement: grant=%v receipt=%s err=%v", grantErr, receipt.Phase, receiptErr)
+			}
+			if _, err := host.ReadManagedOriginalDispatch(t.Context(), original.SafePoint.Host); err != nil {
+				t.Fatalf("Host dispatch was closed before native retirement: %v", err)
+			}
+			calls := readManagedRecoveryRecords[model.Request](t, filepath.Join(files, "model.jsonl"))
+			effects := readManagedRecoveryRecords[managedRecoveryEffect](t, filepath.Join(files, "ledger.jsonl"))
+			if len(calls) != 3 || len(effects) != 1 {
+				t.Fatalf("unexpected pre-repair effects: %d/%d", len(calls), len(effects))
+			}
+			runManagedRecoveryProcess(t, isolated, files, "resume-closed", 0, true)
+			receipt, err = ks.LoadOwnedRetirement(t.Context(), closed.SuccessorGrant.ID)
+			if err != nil || receipt.Phase != "ACKNOWLEDGED" || receipt.Evidence.Grant != closed.SuccessorGrant ||
+				kernel.ManagedDigest(receipt.Evidence.Snapshot) != kernel.ManagedDigest(*closed.Terminal) {
+				t.Fatalf("original retirement not acknowledged: phase=%s err=%v", receipt.Phase, err)
+			}
+			if lease := readManagedRecoveryLease(t, t.Context(), db, root.ExecutionRefID); lease.ExecutionOwner != "" || lease.ExecutionLeaseID != "" || lease.ExecutionEpoch != closed.SuccessorGrant.ExecutionEpoch {
+				t.Fatalf("repair created or retained execution owner: %+v", lease)
+			}
+			turn, err := host.GetTurn(t.Context(), turnID)
+			if err != nil || turn.Status != harness.TurnCompleted {
+				t.Fatalf("Host did not close original dispatch: %s %v", turn.Status, err)
+			}
+			if got := readManagedRecoveryRecords[model.Request](t, filepath.Join(files, "model.jsonl")); !reflect.DeepEqual(got, calls) {
+				t.Fatal("closure replay regenerated a model request")
+			}
+			if got := readManagedRecoveryRecords[managedRecoveryEffect](t, filepath.Join(files, "ledger.jsonl")); !reflect.DeepEqual(got, effects) {
+				t.Fatal("closure replay repeated business effect")
+			}
+		})
+	}
+}
+
 func testManagedAgentSessionRecoveryAcrossProcessCrash(t *testing.T, dsn string, facade, workingState bool) {
 	t.Helper()
 	db, isolatedDSN := managedRecoveryDatabase(t, dsn)
@@ -273,7 +347,13 @@ func TestManagedAgentSessionRecoveryProcess(t *testing.T) {
 	if phase == "" {
 		t.Skip("subprocess helper")
 	}
-	if phase != "crash" && phase != "resume" && phase != "opaque-crash" {
+	starting := phase == "crash" || phase == "opaque-crash"
+	retirementCut := ""
+	switch phase {
+	case "crash", "opaque-crash", "resume", "resume-closed":
+	case "resume-finish-before", "resume-finish-after":
+		retirementCut = strings.TrimPrefix(phase, "resume-")
+	default:
 		t.Fatalf("unknown helper phase %q", phase)
 	}
 	db := openManagedRecoveryDB(t, os.Getenv("TEST_POSTGRES_DSN"))
@@ -282,12 +362,20 @@ func TestManagedAgentSessionRecoveryProcess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session := newManagedRecoverySessionWithComposition(t, db, files, phase != "resume", phase != "opaque-crash", facade)
-	if phase != "resume" {
+	session := newManagedRecoverySessionWithComposition(t, db, files, starting, phase != "opaque-crash", facade, retirementCut)
+	if starting {
 		_, err := session.Prompt(t.Context(), managedRecoveryTurn, managedRecoveryPrompt)
 		t.Fatalf("expected process exit after second model intent commit, got %v", err)
 	}
-	completed := resumeManagedRecoveryAfterLease(t, db, session, files)
+	var completed harness.Snapshot
+	if phase == "resume-closed" {
+		completed, err = session.Resume(t.Context(), managedRecoveryTurn)
+		if err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		completed = resumeManagedRecoveryAfterLease(t, db, session, files)
+	}
 	if completed.Turn.Status != harness.TurnCompleted || completed.Output == nil {
 		t.Fatalf("nil-Transcript Session.Resume: turn=%+v", completed.Turn)
 	}
@@ -416,6 +504,22 @@ func (store *managedRecoveryCrashStore) ApplyExecution(ctx context.Context, leas
 	return snapshot, err
 }
 
+type managedRecoveryRetirementCrashStore struct {
+	*postgresadapter.KernelStore
+	cut string
+}
+
+func (s *managedRecoveryRetirementCrashStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant) error {
+	if g.AdmissionOperation == "managed_resume" && s.cut == "finish-before" {
+		os.Exit(managedRecoveryCrashExit)
+	}
+	err := s.KernelStore.FinishChildExecution(ctx, g)
+	if err == nil && g.AdmissionOperation == "managed_resume" && s.cut == "finish-after" {
+		os.Exit(managedRecoveryCrashExit)
+	}
+	return err
+}
+
 type managedRecoveryClock struct{}
 
 func (managedRecoveryClock) Now() time.Time { return time.Now().UTC() }
@@ -425,7 +529,7 @@ func newManagedRecoverySession(t *testing.T, db *gorm.DB, files string, crash bo
 	return newManagedRecoverySessionWithComposition(t, db, files, crash, len(managed) == 0 || managed[0], false)
 }
 
-func newManagedRecoverySessionWithComposition(t *testing.T, db *gorm.DB, files string, crash, managed, facade bool) *harness.SessionClient {
+func newManagedRecoverySessionWithComposition(t *testing.T, db *gorm.DB, files string, crash, managed, facade bool, retirementCut ...string) *harness.SessionClient {
 	t.Helper()
 	hostStore, err := harnesspostgres.New(db)
 	if err != nil {
@@ -434,6 +538,8 @@ func newManagedRecoverySessionWithComposition(t *testing.T, db *gorm.DB, files s
 	var kernelStore kernel.Store = postgresadapter.NewKernelStore(db)
 	if crash {
 		kernelStore = &managedRecoveryCrashStore{KernelStore: postgresadapter.NewKernelStore(db)}
+	} else if len(retirementCut) == 1 && retirementCut[0] != "" {
+		kernelStore = &managedRecoveryRetirementCrashStore{KernelStore: postgresadapter.NewKernelStore(db), cut: retirementCut[0]}
 	}
 	runtime, err := kernel.New(kernel.Dependencies{Store: kernelStore, ManagedRecoveryHost: hostStore})
 	if err != nil {

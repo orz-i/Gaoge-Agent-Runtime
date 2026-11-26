@@ -311,8 +311,8 @@ func openBoundedAgentSession(options AgentSessionOptions, registrations []tools.
 	dependencies := agent.Dependencies{
 		Runtime: options.Runtime, Model: options.Model, Catalog: registry, Executor: registry,
 		HostedTools: options.HostedTools, ToolDiscovery: options.ToolDiscovery,
-		Approvals:     interactionadapter.New(approvals),
-		RunMiddleware: []plugin.RunMiddleware{bounded}, Inputs: options.Inputs,
+		Approvals:      interactionadapter.New(approvals),
+		BoundedContext: bounded, Inputs: options.Inputs,
 		Limits: options.Limits, Execution: options.Execution, RunExecution: options.RunExecution,
 	}
 	if len(exploration) != 0 {
@@ -348,14 +348,8 @@ func openBoundedAgentSession(options AgentSessionOptions, registrations []tools.
 		if adapterErr != nil {
 			return nil, adapterErr
 		}
-		// Budget wraps Context: Context preparation must run in its own
-		// original trusted Context ticket, not inside the Budget Run ticket.
-		dependencies.RunMiddleware = append([]plugin.RunMiddleware{adapter}, dependencies.RunMiddleware...)
-		dependencies.ModelMiddleware = []plugin.ModelMiddleware{adapter}
+		dependencies.BoundedBudget = adapter
 		dependencies.ModelOutcomeVerifier = shared
-		dependencies.ToolMiddleware = []plugin.ToolMiddleware{adapter}
-		// Keep the same Context preparer without a competing summary lifecycle.
-		dependencies.BoundedContext = bounded
 	}
 	if delegation != nil {
 		dependencies.ToolOutcomeVerifier = delegation

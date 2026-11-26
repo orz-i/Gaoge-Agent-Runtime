@@ -19,6 +19,9 @@ func (runner *Runner) consumeContextSummary(ctx context.Context, snapshot kernel
 	if !ok || last.Status != ModelInvocationCompleted || last.Purpose != ModelInvocationContextSummary || !validContextSummaryInvocation(*last) {
 		return snapshot, ErrInvalidRequest
 	}
+	if runner.rootCallbacks != nil {
+		runner.rootCallbacks.summaryPhaseEntered.Store(true)
+	}
 	invocation := cloneModelInvocation(*last)
 	binding := invocation.ContextSummary
 	read, err := adapter.ports.ReadSummary(ctx, *cloneContextSummaryBinding(binding))

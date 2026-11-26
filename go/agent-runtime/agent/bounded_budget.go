@@ -48,6 +48,10 @@ func (*BoundedBudgetAdapter) Name() string { return "runtime.bounded_budget.v1" 
 // adapters in Run/Model/Tool chains would split the scope and allow a callback
 // to be charged or certified by an unrelated budget authority.
 func validBoundedBudgetComposition(dependencies Dependencies) bool {
+	if a := dependencies.BoundedBudget; a != nil {
+		return a.coordinator.Store != nil && a.ports != nil &&
+			len(dependencies.RunMiddleware) == 0 && len(dependencies.ModelMiddleware) == 0 && len(dependencies.ToolMiddleware) == 0
+	}
 	var original *BoundedBudgetAdapter
 	accept := func(candidate *BoundedBudgetAdapter) bool {
 		if candidate == nil {
@@ -246,7 +250,18 @@ func requireReceiptConsumption(ctx context.Context, runID, originalLedger string
 	return nil
 }
 
+// Run is the explicit middleware compatibility spelling. Native Runner
+// stages use the same admission and settlement operations directly.
 func (a *BoundedBudgetAdapter) Run(ctx context.Context, inv plugin.RunInvocation, next plugin.RunNext) (kernel.Snapshot, error) {
+	admission, err := a.admitRun(ctx, inv)
+	if err != nil {
+		return kernel.Snapshot{}, err
+	}
+	out, callErr := next(ctx)
+	return a.finishRun(ctx, inv, admission, out, callErr)
+}
+
+func (a *BoundedBudgetAdapter) admitRun(ctx context.Context, inv plugin.RunInvocation) (*runBudgetAdmission, error) {
 	frame, _ := callbackscope.RunCall(ctx).(*nativeRunAdmission)
 	receiptOnly := frame != nil && frame.invocation == inv && frame.receiptOnly
 	var l budget.Ledger
@@ -257,7 +272,7 @@ func (a *BoundedBudgetAdapter) Run(ctx context.Context, inv plugin.RunInvocation
 		l, err = a.bind(ctx, inv.RunID)
 	}
 	if err != nil {
-		return kernel.Snapshot{}, err
+		return nil, err
 	}
 	var ownErr error
 	if l.ID != "" {
@@ -267,7 +282,7 @@ func (a *BoundedBudgetAdapter) Run(ctx context.Context, inv plugin.RunInvocation
 		// is not the Run entry decision.
 		current, observeErr := a.observeRunBudget(ctx, l, inv.RunID)
 		if observeErr != nil {
-			return kernel.Snapshot{}, errors.Join(ownErr, observeErr)
+			return nil, errors.Join(ownErr, observeErr)
 		}
 		if current.RunCancelled(inv.RunID) && current.Revision != l.Revision {
 			// Only an actual acknowledged projection of the elected denial
@@ -282,20 +297,24 @@ func (a *BoundedBudgetAdapter) Run(ctx context.Context, inv plugin.RunInvocation
 			// model receipt, or certify a failed Host projection.
 			if ownErr == nil {
 				if denial := recordBudgetRunDenial(ctx, a, inv, l); denial != nil {
-					return kernel.Snapshot{}, denial
+					return nil, denial
 				}
 			}
-			return kernel.Snapshot{}, errors.Join(budget.ErrExhausted, ownErr)
+			return nil, errors.Join(budget.ErrExhausted, ownErr)
 		}
 		if receiptOnly && ownErr != nil {
-			return kernel.Snapshot{}, ownErr
+			return nil, ownErr
 		}
 	}
 	admission := &runBudgetAdmission{adapter: a, ledger: l, projectionErr: ownErr}
 	if frame != nil && frame.invocation == inv {
 		frame.budget.Store(admission)
 	}
-	out, callErr := next(ctx)
+	return admission, nil
+}
+
+func (a *BoundedBudgetAdapter) finishRun(ctx context.Context, inv plugin.RunInvocation, admission *runBudgetAdmission, out kernel.Snapshot, callErr error) (kernel.Snapshot, error) {
+	l, ownErr := admission.ledger, admission.projectionErr
 	if denial := admission.receiptDenial.Load(); denial != nil {
 		l = *denial
 		ownErr = errors.Join(ownErr, a.ports.Project(context.WithoutCancel(ctx), l))

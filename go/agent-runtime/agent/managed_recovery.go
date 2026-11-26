@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/callbackscope"
@@ -39,9 +40,34 @@ func (r *Runner) commitManagedModelIntent(ctx context.Context, s kernel.Snapshot
 		Grant, Invocation string
 		Revision          uint64
 	}{r.activeRootGrant.ID, inv.ID, s.Run.Revision + 1})
-	p := kernel.ManagedSafePoint{ID: id, RecoveryID: kernel.ManagedRecoveryID(id, binding), Host: binding, OriginalGrant: *r.activeRootGrant, OriginalLease: *r.activeRunLease, ModelInvocationID: inv.ID, ModelRequestHash: inv.RequestHash, LifecycleVersion: "managed-context-v1", LifecycleSource: lifecycle}
-	proof := featurecontrol.Seal(s.Run.ID, s.Run.Revision, "managed_intent_source", r.activeRootGrant.ID, s.State, p)
-	return r.runtime.ApplyManagedModelIntent(ctx, s.Run.ID, s.Run.Revision, m, p, proof)
+	return r.applyManagedSafePoint(ctx, s, inv, m, binding, id, "managed-context-v1", lifecycle)
+}
+
+// Only the two concrete phase validators above/below may select a point.
+// This is the shared original-grant/source commit, not a new transfer
+// authority or a re-interpretation of either persisted lifecycle version.
+func (r *Runner) applyManagedSafePoint(ctx context.Context, source kernel.Snapshot, inv ModelInvocation, m kernel.Mutation,
+	binding kernel.ManagedHostBinding, id, version string, lifecycle json.RawMessage) (kernel.Snapshot, error) {
+	point := kernel.ManagedSafePoint{ID: id, RecoveryID: kernel.ManagedRecoveryID(id, binding), Host: binding,
+		OriginalGrant: *r.activeRootGrant, OriginalLease: *r.activeRunLease,
+		ModelInvocationID: inv.ID, ModelRequestHash: inv.RequestHash, LifecycleVersion: version, LifecycleSource: lifecycle}
+	proof := featurecontrol.Seal(source.Run.ID, source.Run.Revision, "managed_intent_source", r.activeRootGrant.ID, source.State, point)
+	return r.runtime.ApplyManagedModelIntent(ctx, source.Run.ID, source.Run.Revision, m, point, proof)
+}
+
+// Business and Summary both leave the original safe point before claim and
+// provider admission. The ordinary managed Context may have no elected
+// point; a pending Summary in its native profile requires one.
+func (r *Runner) leaveModelSafePoint(ctx context.Context, s kernel.Snapshot, state runState, invocation ModelInvocation) error {
+	required := state.SummaryNativeRecovery && invocation.Purpose == ModelInvocationContextSummary && invocation.Status == ModelInvocationPending
+	if !required && r.managedContextRecovery == nil {
+		return nil
+	}
+	_, err := r.runtime.LeaveManagedSafePoint(ctx, s.Run.ID)
+	if !required && kernel.ManagedRecoveryAbsent(err) {
+		return nil
+	}
+	return err
 }
 
 // RecoverManagedContinuation never claims an interrupted callback returned.
@@ -81,7 +107,7 @@ func (r *Runner) RecoverManagedContinuation(ctx context.Context, id string) (ker
 	if current.State == kernel.ManagedClosed || current.State == kernel.ManagedCancelled {
 		p, e := r.runtime.ManagedRecoveryClosure(ctx, current.SafePoint.ID)
 		if e == nil {
-			e = r.retireManagedClosure(ctx, p)
+			e = r.ReconcileManagedClosure(ctx, p)
 		}
 		return p.Snapshot(), p, e
 	}
@@ -157,32 +183,81 @@ func (r *Runner) RecoverManagedContinuation(ctx context.Context, id string) (ker
 	return result, closure, runErr
 }
 
-// A crash after real Mark+completion but before Finish may repair ONLY the
-// already marked original successor. No callback or execution owner is adopted.
+// ReconcileManagedClosure only retires the exact already-closed transfer.
+// Harness can repair its original dispatch projection after this operation,
+// even when the Host closure ACK was lost. It cannot PARK, ENABLE or drive.
+func (r *Runner) ReconcileManagedClosure(ctx context.Context, proof kernel.ManagedClosureProof) error {
+	if r == nil || r.runtime == nil || ctx == nil {
+		return ErrInvalidRequest
+	}
+	t := proof.Transfer()
+	if !proof.Matches(t.Selection) {
+		return kernel.ErrExecutionConflict
+	}
+	switch t.SafePoint.LifecycleVersion {
+	case kernel.ManagedLifecycleWorkingStateSummary:
+		if !r.SupportsSummaryNativeRecovery() {
+			return kernel.ErrExecutionConflict
+		}
+	case "managed-context-v1":
+		if !r.SupportsManagedContextRecovery() {
+			return kernel.ErrExecutionConflict
+		}
+	default:
+		return kernel.ErrExecutionConflict
+	}
+	current, err := r.runtime.ManagedRecoveryClosure(ctx, t.SafePoint.ID)
+	if err != nil || !current.Matches(t.Selection) ||
+		kernel.ManagedDigest(current.Transfer()) != kernel.ManagedDigest(t) ||
+		kernel.ManagedDigest(current.Snapshot()) != kernel.ManagedDigest(proof.Snapshot()) {
+		return errors.Join(kernel.ErrExecutionConflict, err)
+	}
+	return r.retireManagedClosure(ctx, current)
+}
+
+// A closed T4 is not an ACK. Reuse the exact original successor's ordinary
+// Mark/Finish/ACK protocol; absence of the active Grant alone never releases
+// its lease or certifies completion. Managed cancellation has no successor.
 func (r *Runner) retireManagedClosure(ctx context.Context, p kernel.ManagedClosureProof) error {
 	t := p.Transfer()
 	if t.State != kernel.ManagedClosed {
 		return nil
 	}
-	g, e := r.runtime.LookupChildExecution(ctx, t.SafePoint.Host.RunID)
-	if errors.Is(e, kernel.ErrNotFound) {
-		return nil
+	g, source := t.SuccessorGrant, p.Snapshot()
+	receipt, err := r.runtime.LoadOwnedRetirement(ctx, g.ID)
+	if err == nil {
+		if receipt.Evidence.Grant != g || !receipt.Evidence.Completion.HostCompleted || !receipt.Evidence.Completion.LeaseOwned {
+			return kernel.ErrExecutionConflict
+		}
+		// The exact closed transfer must be part of the immutable retirement.
+		matched := false
+		for _, closed := range receipt.Closures {
+			if kernel.ManagedDigest(closed) == kernel.ManagedDigest(t) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return kernel.ErrExecutionConflict
+		}
+		found, ackErr := acknowledgeExactOwnedRetirement(ctx, r.runtime, g, source, &receipt.Evidence.Completion)
+		if !found {
+			return errors.Join(kernel.ErrExecutionConflict, ackErr)
+		}
+		return ackErr
 	}
-	if e != nil {
-		return e
+	if !errors.Is(err, kernel.ErrNotFound) {
+		return err
 	}
-	if g != t.SuccessorGrant {
-		return kernel.ErrExecutionConflict
+	active, err := r.runtime.LookupChildExecution(ctx, source.Run.ID)
+	if err != nil || active != g {
+		return errors.Join(kernel.ErrExecutionConflict, err)
 	}
-	s := p.Snapshot()
-	proof := featurecontrol.Seal(s.Run.ID, s.Run.Revision, "agent_owned_physical_settled", g.ID, s.State, s.Checkpoint)
-	if e = r.runtime.FinishChildExecution(ctx, g, proof); e != nil {
-		return e
+	completion, err := r.runtime.LookupOwnedPhysicalCallbackReturn(ctx, g)
+	if err != nil || !completion.HostCompleted || !completion.LeaseOwned {
+		return errors.Join(kernel.ErrExecutionConflict, err)
 	}
-	if e = r.runtime.ReleaseExecution(ctx, t.SuccessorLease); e != nil && !errors.Is(e, kernel.ErrExecutionConflict) {
-		return e
-	}
-	return nil
+	return r.reconcileRootRetirement(ctx, source, g, &completion)
 }
 
 // Internal entropy is not an IDSource callback and cannot run user code before

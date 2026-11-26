@@ -6,7 +6,6 @@ import (
 	"reflect"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/callbackscope"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
@@ -34,8 +33,8 @@ func validSummaryNativeDependencies(dependencies Dependencies) bool {
 	adapter := dependencies.ContextSummary
 	return dependencies.Runtime != nil && dependencies.Runtime.SupportsManagedRecovery() && dependencies.Runtime.HasManagedRecoveryHost() &&
 		adapter != nil && adapter.bounded != nil && adapter.ports != nil && dependencies.ManagedContextRecovery == nil &&
-		dependencies.PrepareModelRequest == nil && len(dependencies.RunMiddleware) == 1 &&
-		dependencies.RunMiddleware[0] == adapter.bounded && len(dependencies.ModelMiddleware) == 0 && len(dependencies.ToolMiddleware) == 0 &&
+		dependencies.PrepareModelRequest == nil && dependencies.BoundedBudget == nil && contextOnlyRun(dependencies, adapter.bounded) &&
+		len(dependencies.ModelMiddleware) == 0 && len(dependencies.ToolMiddleware) == 0 &&
 		len(dependencies.Observers) == 0 && len(dependencies.Telemetry) == 0 && len(dependencies.CompletionPolicies) == 0 &&
 		dependencies.NormalizeModelPolicy == nil && dependencies.ToolDiscovery == nil && dependencies.Inputs == nil &&
 		summaryNativeBridge(adapter.ports, "contextSummaryPorts", dependencies.Runtime) &&
@@ -114,12 +113,7 @@ func (runner *Runner) commitSummarySafePoint(ctx context.Context, snapshot kerne
 		Grant, Invocation, Phase string
 		Revision                 uint64
 	}{runner.activeRootGrant.ID, invocation.ID, string(invocation.Status), snapshot.Run.Revision + 1})
-	point := kernel.ManagedSafePoint{ID: id, RecoveryID: kernel.ManagedRecoveryID(id, host), Host: host,
-		OriginalGrant: *runner.activeRootGrant, OriginalLease: *runner.activeRunLease,
-		ModelInvocationID: invocation.ID, ModelRequestHash: invocation.RequestHash,
-		LifecycleVersion: kernel.ManagedLifecycleWorkingStateSummary, LifecycleSource: raw}
-	proof := featurecontrol.Seal(snapshot.Run.ID, snapshot.Run.Revision, "managed_intent_source", runner.activeRootGrant.ID, snapshot.State, point)
-	return runner.runtime.ApplyManagedModelIntent(ctx, snapshot.Run.ID, snapshot.Run.Revision, mutation, point, proof)
+	return runner.applyManagedSafePoint(ctx, snapshot, invocation, mutation, host, id, kernel.ManagedLifecycleWorkingStateSummary, raw)
 }
 
 func (runner *Runner) validateSummarySafePoint(point kernel.ManagedSafePoint) error {

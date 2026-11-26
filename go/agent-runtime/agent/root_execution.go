@@ -12,7 +12,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/callbackscope"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
 // ErrModelOutcomeUnknown retains the original dispatched invocation until an
@@ -25,6 +24,7 @@ type rootCallbackState struct {
 	unknown               atomic.Bool
 	approvalPolicyEntered atomic.Bool
 	inputReadEntered      atomic.Bool
+	summaryPhaseEntered   atomic.Bool
 	toolApprovals         approvedToolCalls
 	knownReturn           atomic.Pointer[committedAgentReturn]
 }
@@ -229,7 +229,8 @@ func (runner *Runner) executeOwnedRoot(ctx context.Context, current kernel.Snaps
 	// the Runner has an input source configured. A logical child with no
 	// input binding has not entered that Host boundary. A Run that did
 	// read the Host source still receives no deferred-control shortcut.
-	scopedReturn := hostComplete && runner.scopedRootCallbacks && !scoped.rootCallbacks.inputReadEntered.Load()
+	scopedReturn := hostComplete && runner.scopedRootCallbacks &&
+		!scoped.rootCallbacks.inputReadEntered.Load() && !scoped.rootCallbacks.summaryPhaseEntered.Load()
 	if hostComplete && grant.AdmissionOperation == "prepare" && runner.trustedDeferredPreparedControl {
 		outcome.ControlCustody = kernel.OwnedCustodyPrepared
 	} else if scopedReturn && !scoped.rootCallbacks.approvalPolicyEntered.Load() {
@@ -538,12 +539,18 @@ func validateOwnedRetirementACK(result kernel.OwnedRetirementAckResult, receipt 
 	return nil
 }
 
-func collectBoundedCallbacks(runs []plugin.RunMiddleware, models []plugin.ModelMiddleware, toolLayers []plugin.ToolMiddleware, hasInputs bool) []any {
+func collectBoundedCallbacks(d Dependencies, nativeContext *BoundedContextAdapter, nativeBudget *BoundedBudgetAdapter) []any {
 	var result []any
-	if hasInputs {
+	if nativeContext != nil {
+		result = append(result, nativeContext)
+	}
+	if nativeBudget != nil {
+		result = append(result, nativeBudget)
+	}
+	if d.Inputs != nil {
 		result = append(result, inputReadStage)
 	}
-	for _, m := range runs {
+	for _, m := range d.RunMiddleware {
 		switch value := m.(type) {
 		case *BoundedContextAdapter:
 			result = append(result, value)
@@ -551,7 +558,7 @@ func collectBoundedCallbacks(runs []plugin.RunMiddleware, models []plugin.ModelM
 			result = append(result, value)
 		}
 	}
-	for _, m := range models {
+	for _, m := range d.ModelMiddleware {
 		switch value := m.(type) {
 		case *BoundedBudgetAdapter:
 			result = append(result, value)
@@ -559,7 +566,7 @@ func collectBoundedCallbacks(runs []plugin.RunMiddleware, models []plugin.ModelM
 			result = append(result, value)
 		}
 	}
-	for _, m := range toolLayers {
+	for _, m := range d.ToolMiddleware {
 		switch value := m.(type) {
 		case *BoundedBudgetAdapter:
 			result = append(result, value)

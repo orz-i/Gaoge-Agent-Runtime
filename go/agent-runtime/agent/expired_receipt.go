@@ -12,7 +12,7 @@ import (
 // authorization, projection and completion obligations. An arbitrary Host
 // layer cannot be skipped (its policy is unknown) or entered after expiry.
 func supportsReceiptOnlyRunChain(d Dependencies) bool {
-	var runBudget *BoundedBudgetAdapter
+	runBudget := d.BoundedBudget
 	for _, layer := range d.RunMiddleware {
 		switch a := layer.(type) {
 		case *BoundedBudgetAdapter:

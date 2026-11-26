@@ -70,12 +70,16 @@ can place both schemas in one database and uses the same recovery protocol.
 
 ## Context execution path
 
-The supported SDK composes one concrete `agent.NewBoundedContextAdapter` for
-Context hydration, bounded model-request preparation and exact artifact/
-checkpoint CAS. `ContextSummary` optionally performs a separate, frozen
+The supported SDK selects one concrete `agent.NewBoundedContextAdapter`
+through `agent.Dependencies.BoundedContext`. The Runner owns Context hydration,
+bounded model-request preparation and exact artifact/checkpoint CAS as native
+stages rather than requiring a Host Run middleware entry. `ContextSummary` optionally performs a separate, frozen
 summary-purpose ModelInvocation under that same bounded lifecycle;
 `SummaryNativeRecovery` and managed Context recovery retain their own original
-Kernel proofs. The never-connected `SamplingContextPorts` alternative and
+Kernel proofs, but use the same native preparation and original-grant
+commit/leave and retirement protocol. A closed managed transfer is not an
+ACK of its successor retirement; recovery must reconcile the exact original
+retirement before projecting Host closure. The never-connected `SamplingContextPorts` alternative and
 `ContextPreparation` selector were retired before beta.24 instead of
 maintaining a second generic context executor. A Context receipt is not proof
 of an unknown Provider effect, and an unrelated Store ACK cannot authorize
@@ -118,19 +122,23 @@ continue to authorize all external effects and recovery.
 ## Shared Budget execution and Host ownership
 
 The sole first-party budget **execution** driver is
-`agent.BoundedBudgetAdapter` in the Agent Run/Model/Tool chains. When composing
+`agent.BoundedBudgetAdapter`, selected once through
+`agent.Dependencies.BoundedBudget`. The Runner owns its Run admission, Model
+and Tool accounting, and Run settlement stages. When composing
 an explicit Harness Runner, the Host constructs a single
 `harness.BudgetAuthority` with its selected ledger Store, relation index,
 token-admission planner and clock. `authority.Adapter()` returns the same
-native adapter pointer for each middleware chain; the Host passes `authority`
+native adapter pointer to select once; the Host passes `authority`
 separately into `harness.Dependencies.Budget` and may use its receipt-only
 verifiers. The Host `BudgetAuthority` does **not** implement any executable
 Run, Model or Tool Middleware: it cannot launch Provider or Tool effects.
 The recommended `OpenAgentSession` performs this exact composition itself.
-`agent.NewRunner` rejects two different native Budget Adapter instances or a
-duplicate adapter in any one chain; it does not require optional budgeted
-chains on an unbudgeted Agent. This binds the trusted original callback scope
-without creating a second execution path.
+`agent.NewRunner` normalizes the historical exact complete first-party
+middleware spelling to the same native stages. An explicit Budget owner
+cannot be combined with caller middleware; the older partial or opaque
+chains retain their actual execution and proof restrictions. Multiple or
+duplicate Budget adapters remain invalid. This does not retrospectively
+qualify any original opaque callback return.
 
 The native Adapter alone performs the original reservation/dispatch, trusted
 Provider and Tool return observation, settlement and cancellation-aware

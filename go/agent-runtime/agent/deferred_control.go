@@ -40,7 +40,7 @@ func nativeRunLayers(d Dependencies) bool {
 // Every other unscoped Host callback keeps the stack opaque.
 func scopedDeferredRootCallbacks(d Dependencies) bool {
 	if !nativeRunLayers(d) ||
-		d.PrepareModelRequest != nil || d.ContextSummary != nil || d.NormalizeModelPolicy != nil ||
+		d.PrepareModelRequest != nil || d.ManagedContextRecovery != nil || d.SummaryNativeRecovery || d.NormalizeModelPolicy != nil ||
 		len(d.CompletionPolicies) != 0 || d.ToolDiscovery != nil {
 		return false
 	}

@@ -178,8 +178,13 @@ Host deployment topology policy to the current handle, rather than only
 checking whether a ledger exists. Adding a meter to an originally unmetered
 Run, removing one, or changing frozen limits cannot silently resume it.
 For advanced manually composed Sessions, create one `BudgetAuthority` from
-`BudgetAuthorityDependencies` and use its memoized `Adapter()` as the **same**
-Run/Model/Tool middleware. Pass the Host authority separately as
+`BudgetAuthorityDependencies` and select its memoized `Adapter()` once as
+`agent.Dependencies.BoundedBudget`. Select the concrete Context adapter as
+`agent.Dependencies.BoundedContext`. The standard Runner owns the native
+stage order; do not also register those adapters as middleware. The exact
+historical complete composition normalizes to the same stages. Partial or
+opaque custom middleware remains subject to its original trust boundary.
+Pass the Host authority separately as
 `harness.Dependencies.Budget`. Never place `BudgetAuthority` itself in a
 middleware chain; the previous `BudgetMiddleware` execution engine no longer
 exists. Only the native Adapter may dispatch and settle physical effects.
@@ -192,6 +197,9 @@ optional and is skipped if the shared ledger cannot admit it while retaining a
 call for business work. `Context.ManagedRecovery` and
 `Context.SummaryNativeRecovery` remain incompatible with `SharedBudget`; their
 managed transfer proof is not interchangeable with ordinary receipt recovery.
+They also retain the existing restriction on `Inputs`. Both managed profiles
+share native Context preparation and exact successor retirement, without
+changing the original safe-point proof, lifecycle version, or recovery ID.
 
 The unused `MemoryPolicy` configuration field has been removed. Host memory
 can be supplied through selected Context history, Skills or authorized Tools;
