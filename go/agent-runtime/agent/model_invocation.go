@@ -928,12 +928,7 @@ func (runner *Runner) executeModelInvocation(
 			Type: "agent.model_invocation.completed", Message: invocation.ID, Wakeup: true,
 		}},
 	}
-	var next kernel.Snapshot
-	if invocation.Purpose == ModelInvocationContextSummary && state.SummaryNativeRecovery {
-		next, err = runner.commitSummarySafePoint(context.WithoutCancel(ctx), snapshot, state, mutation)
-	} else {
-		next, err = runner.runtime.Apply(context.WithoutCancel(ctx), snapshot.Run.ID, snapshot.Run.Revision, mutation)
-	}
+	next, err := runner.commitManagedModelIntent(context.WithoutCancel(ctx), snapshot, state, invocation, mutation)
 	if err != nil {
 		endedAt := runner.clock.Now().UTC()
 		runner.recordTelemetry(ctx, observability.Event{

@@ -68,10 +68,11 @@ The selected window resolver and token counter remain read-only measurement
 dependencies. Recovery may repeat these reads; they must not hide model
 generation, Tool execution or business mutations. The exact Store ports remain
 trusted storage with their original immutable-write/CAS contracts.
-Dedicated native summary recovery rejects Host `Inputs` before binding or
-reading an input source. Ordinary Session composition may use queued inputs;
-they enter before a later business intent is frozen and cannot rewrite an
-already pending intent or turn a summary into an assistant answer.
+The exact combined native summary proof can carry the original Host Inputs
+binding and committed cursor. No new input is read before Leave; queued inputs
+enter before a later business intent is frozen and cannot rewrite an already
+pending intent or turn a summary into an assistant answer. Custom or
+unqualified input callbacks do not gain recovery authority.
 
 ## Trigger and state ownership
 

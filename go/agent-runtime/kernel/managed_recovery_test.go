@@ -359,3 +359,58 @@ func TestManagedRecoveryUsesOnlyConstructionBoundHostAndInternalEntropy(t *testi
 		t.Fatalf("unconfigured proof issuer: %v", e)
 	}
 }
+
+func TestManagedQualifiedParkRetainsExactFirstOwnerSource(t *testing.T) {
+	original, source, lease, grant, authority, now := managedReducerFixture()
+	original.SafePoint.LifecycleVersion = ManagedLifecycleAgentObligations
+	o := ManagedAgentObligations{Phase: "pending", SourceRevision: source.Run.Revision, InvocationID: original.SafePoint.ModelInvocationID,
+		RequestHash: original.SafePoint.ModelRequestHash, SamplingDigest: strings.Repeat("c", 64), InputBinding: "queue", Journal: json.RawMessage(`{"prepared":true}`)}
+	original.SafePoint.LifecycleSource, _ = json.Marshal(o)
+	original = ManagedInvalidateMutation(original)
+	current := source
+	current.Run.Revision++
+	current.EventHead++
+	current.State = json.RawMessage(`{"claimed":"original"}`)
+	next := original.SafePoint
+	next.ID = "qualified"
+	next.RecoveryID = ManagedRecoveryID(next.ID, next.Host)
+	next.Source = current
+	o.SourceRevision = current.Run.Revision
+	o.RequalifiedFrom = original.SafePoint.ID
+	next.LifecycleSource, _ = json.Marshal(o)
+	q := ManagedParkRequest{RunID: current.Run.ID, SuspensionID: original.SafePoint.ID, ExpectedRevision: current.Run.Revision,
+		Qualification: ManagedParkQualification{prior: original, point: next, proof: featurecontrol.Seal(current.Run.ID, current.Run.Revision, "managed_qualified_park", original.SafePoint.ID, current.State, next)}}
+	parked, err := ManagedParkTransfer(original, q, current, lease, grant, authority, now)
+	if err != nil || parked.State != ManagedParked || ManagedDigest(parked.SafePoint) != ManagedDigest(next) {
+		t.Fatalf("qualified park: %v", err)
+	}
+	ordinary := q
+	ordinary.Qualification = ManagedParkQualification{}
+	forged := q
+	forged.Qualification.proof = nil
+	live := lease
+	live.ExpiresAt = now.Add(time.Second)
+	changed := current
+	changed.EventHead++
+	stale := original
+	stale.Revision++
+	legacy := original
+	legacy.SafePoint.LifecycleVersion = "managed-context-v1"
+	for _, c := range []struct {
+		name    string
+		prior   ManagedTransfer
+		request ManagedParkRequest
+		source  Snapshot
+		owner   ExecutionLease
+	}{
+		{"ordinary", original, ordinary, current, lease}, {"public metadata", original, forged, current, lease},
+		{"live lease", original, q, current, live}, {"changed source", original, q, changed, lease},
+		{"stale frontier", stale, q, current, lease}, {"legacy proof", legacy, q, current, lease},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if _, err := ManagedParkTransfer(c.prior, c.request, c.source, c.owner, grant, authority, now); !errors.Is(err, ErrExecutionConflict) {
+				t.Fatalf("unqualified park: %v", err)
+			}
+		})
+	}
+}

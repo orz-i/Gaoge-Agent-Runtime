@@ -40,7 +40,9 @@ func (r *Runner) commitManagedModelIntent(ctx context.Context, s kernel.Snapshot
 		if err != nil {
 			return s, err
 		}
-		if !eligible || !knownRootPhysicalSettlement(s) {
+		target := s
+		target.State = m.State
+		if !eligible || !knownRootPhysicalSettlement(target) {
 			return r.runtime.Apply(ctx, s.Run.ID, s.Run.Revision, m)
 		}
 		id := "managed-safe-" + kernel.ManagedDigest(struct {
@@ -48,6 +50,9 @@ func (r *Runner) commitManagedModelIntent(ctx context.Context, s kernel.Snapshot
 			Revision          uint64
 		}{r.activeRootGrant.ID, inv.ID, s.Run.Revision + 1})
 		return r.applyManagedSafePoint(ctx, s, inv, m, binding, id, kernel.ManagedLifecycleAgentObligations, raw)
+	}
+	if inv.Status != ModelInvocationPending {
+		return r.runtime.Apply(ctx, s.Run.ID, s.Run.Revision, m)
 	}
 	// Only actual returned operations can describe a suspendable frame. This
 	// leaves opaque/incomplete configurations on existing fail-closed semantics.
@@ -122,10 +127,8 @@ func (r *Runner) ParkManagedForCancellation(ctx context.Context, id string) (ker
 	if t.SafePoint.LifecycleVersion != kernel.ManagedLifecycleAgentObligations || t.Selection.Mode == kernel.ManagedResume {
 		return kernel.ManagedParkedProof{}, ErrRootOutcomeUnknown
 	}
-	if _, err = r.preflightCombinedManaged(ctx, t); err != nil {
-		return kernel.ManagedParkedProof{}, err
-	}
-	return r.runtime.ParkManagedContinuation(ctx, id)
+	parked, _, err := r.parkManagedFrontier(ctx, t, true)
+	return parked, err
 }
 
 // CancelManagedContinuation can consume only a CANCEL elected by the original
@@ -199,13 +202,6 @@ func (r *Runner) recoverManagedContinuation(ctx context.Context, id string, requ
 			}
 		}
 	}
-	var obligations managedObligations
-	if current.SafePoint.LifecycleVersion == kernel.ManagedLifecycleAgentObligations {
-		obligations, err = r.preflightCombinedManaged(ctx, current)
-		if err != nil {
-			return kernel.Snapshot{}, kernel.ManagedClosureProof{}, err
-		}
-	}
 	if current.State == kernel.ManagedClosed || current.State == kernel.ManagedCancelled {
 		p, e := r.runtime.ManagedRecoveryClosure(ctx, current.SafePoint.ID)
 		if e == nil {
@@ -213,7 +209,7 @@ func (r *Runner) recoverManagedContinuation(ctx context.Context, id string, requ
 		}
 		return p.Snapshot(), p, e
 	}
-	parked, err := r.runtime.ParkManagedContinuation(ctx, id)
+	parked, obligations, err := r.parkManagedFrontier(ctx, current, requiredMode == kernel.ManagedCancel)
 	if err != nil {
 		return kernel.Snapshot{}, kernel.ManagedClosureProof{}, err
 	}
@@ -225,6 +221,9 @@ func (r *Runner) recoverManagedContinuation(ctx context.Context, id string, requ
 		return kernel.Snapshot{}, kernel.ManagedClosureProof{}, kernel.ErrExecutionConflict
 	}
 	if selected.Reservation().Mode == kernel.ManagedCancel {
+		if obligations.SettledReceiptDigest != "" {
+			return kernel.Snapshot{}, kernel.ManagedClosureProof{}, ErrModelOutcomeUnknown
+		}
 		if err = r.cancelManagedBudget(ctx, obligations, id, false); err != nil {
 			return kernel.Snapshot{}, kernel.ManagedClosureProof{}, err
 		}
@@ -304,7 +303,13 @@ func (r *Runner) recoverManagedContinuation(ctx context.Context, id string, requ
 		recovering.managedBudgetSource = &obligations
 	}
 	result, runErr := recovering.executeOwnedRoot(ctx, snapshot, bound, scoped, t.SuccessorGrant, t.SuccessorLease, false, func(next context.Context, owner *Runner, source kernel.Snapshot) (kernel.Snapshot, error) {
-		return owner.invokeNativeRun(next, source, runInvocation(plugin.RunResume, source), func(drive context.Context) (kernel.Snapshot, error) { return owner.resumeRunning(drive, source, state) })
+		return owner.invokeNativeRun(next, source, runInvocation(plugin.RunResume, source), func(drive context.Context) (kernel.Snapshot, error) {
+			frontier, err := owner.recoverManagedModelFrontier(drive, source, obligations)
+			if err != nil {
+				return frontier, err
+			}
+			return owner.resumeRunning(drive, frontier, state)
+		})
 	})
 	closure, closureErr := r.runtime.ManagedRecoveryClosure(context.WithoutCancel(ctx), t.SafePoint.ID)
 	if closureErr != nil {

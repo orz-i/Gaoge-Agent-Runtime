@@ -7,7 +7,9 @@ import (
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/callbackscope"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 )
 
 // managedObligations is a proof of the already-selected native boundary, not
@@ -122,11 +124,7 @@ func managedModelLedgerPhase(inv ModelInvocation, l budget.Ledger) bool {
 			return false
 		}
 	}
-	response, err := budget.DecodeModelReceipt(res)
-	if err != nil || inv.ErrorCode != "" {
-		return false
-	}
-	return samePersistedModelResponse(inv.Response, response)
+	return matchesSettledModelReceipt(inv, res) == nil
 }
 
 func (r *Runner) validateManagedObligations(point kernel.ManagedSafePoint) (managedObligations, error) {
@@ -146,24 +144,38 @@ func (r *Runner) validateManagedObligations(point kernel.ManagedSafePoint) (mana
 		state.ExternalToolCancellation != nil || state.ExternalToolHold != nil {
 		return p, ErrInvalidRequest
 	}
-	var inv ModelInvocation
+	if len(state.ModelInvocations) == 0 {
+		return p, ErrInvalidRequest
+	}
+	inv := state.ModelInvocations[len(state.ModelInvocations)-1]
 	if p.Purpose == ModelInvocationContextSummary {
-		var ok bool
-		inv, ok = summaryNativePhase(state)
+		shape := state
+		if inv.Status == ModelInvocationPending && p.RequalifiedFrom != "" {
+			shape.ModelInvocations = cloneModelInvocations(state.ModelInvocations)
+			shape.ModelInvocations[len(shape.ModelInvocations)-1].DispatchAttempt = 0
+			shape.ModelInvocations[len(shape.ModelInvocations)-1].ExecutionAttempt = 0
+		}
+		_, ok := summaryNativePhase(shape)
 		if !r.SupportsSummaryNativeRecovery() || !ok || p.BindingDigest != kernel.ManagedDigest(inv.ContextSummary) ||
 			inv.ContextSummary.Cursor.Turn.ID != point.Host.TurnID || inv.ContextSummary.Root.InvocationID != point.Host.InvocationID ||
 			uint64(inv.ContextSummary.Root.Attempt) != uint64(point.Host.Attempt) {
 			return p, ErrInvalidRequest
 		}
-	} else {
-		active, ok := activeModelInvocation(state)
-		if p.Purpose != "" || p.BindingDigest != "" || !r.SupportsManagedContextRecovery() || !ok ||
-			active.Purpose != "" || active.Status != ModelInvocationPending || active.DispatchAttempt != 0 || active.ExecutionAttempt != 0 ||
-			!knownRootPhysicalSettlement(point.Source) {
+	} else if p.Purpose != "" || p.BindingDigest != "" || !r.SupportsManagedContextRecovery() ||
+		inv.Purpose != "" || (inv.Status == ModelInvocationConsumed && (state.InputBinding == "" || state.InputCursor == 0)) {
+		return p, ErrInvalidRequest
+	}
+	if inv.Status == ModelInvocationPending {
+		if (inv.DispatchAttempt != 0) != (p.SettledReceiptDigest != "") || (inv.ExecutionAttempt != 0 && p.RequalifiedFrom == "") {
 			return p, ErrInvalidRequest
 		}
-		inv = *active
+	} else if !validModelInvocationReceipt(inv) {
+		return p, ErrInvalidRequest
 	}
+	if p.SettledReceiptDigest == "" && !knownRootPhysicalSettlement(point.Source) {
+		return p, ErrInvalidRequest
+	}
+
 	if inv.ID != p.InvocationID || inv.RunID != point.Host.RunID || inv.RequestHash != p.RequestHash || string(inv.Status) != p.Phase ||
 		kernel.ManagedDigest(inv.SamplingPlan) != p.SamplingDigest ||
 		(inv.Status != ModelInvocationConsumed && p.LedgerID != "" && (inv.SamplingPlan == nil || inv.SamplingPlan.LedgerID != p.LedgerID)) {
@@ -248,6 +260,244 @@ func ValidateManagedBudgetClosure(point kernel.ManagedSafePoint, terminal kernel
 		}
 	}
 	return nil
+}
+
+// qualifyManagedFrontier accepts only the same original frozen Model
+// Invocation and unchanged remainder of the aggregate. An original first
+// party source may have advanced its claim or exact settled model receipt,
+// but never another Tool, input cursor, policy or external effect. The
+// actual Store PARK rechecks both the old transfer and new source under lock.
+func (r *Runner) qualifyManagedFrontier(ctx context.Context, t kernel.ManagedTransfer) (kernel.ManagedSafePoint, *featurecontrol.Proof, error) {
+	var empty kernel.ManagedSafePoint
+	p, err := r.validateManagedObligations(t.SafePoint)
+	if err != nil {
+		return empty, nil, err
+	}
+	if t.State != kernel.ManagedInvalidated || t.Selection.ID != "" || len(t.Activations) != 0 || p.Phase != "pending" ||
+		p.RequalifiedFrom != "" || p.SettledReceiptDigest != "" {
+		return empty, nil, ErrRootOutcomeUnknown
+	}
+	original := t.SafePoint.Source
+	current, err := r.runtime.Load(ctx, original.Run.ID)
+	if err != nil {
+		return empty, nil, err
+	}
+	if current.Run.Revision < original.Run.Revision || current.EventHead < original.EventHead || current.Run.Status != kernel.RunStatusRunning ||
+		!sameBoundedValue(current.Checkpoint, original.Checkpoint) || !sameBoundedValue(current.Result, original.Result) {
+		return empty, nil, ErrRootOutcomeUnknown
+	}
+	expectedRun := original.Run
+	expectedRun.Revision, expectedRun.UpdatedAt = current.Run.Revision, current.Run.UpdatedAt
+	// Diagnostic projection is not dispatch evidence. The entire remaining
+	// immutable Run identity and native aggregate must still be exact.
+	expectedRun.ErrorCode, expectedRun.ErrorDetail = current.Run.ErrorCode, current.Run.ErrorDetail
+	if !sameBoundedValue(expectedRun, current.Run) {
+		return empty, nil, ErrRootOutcomeUnknown
+	}
+	old, err := decodeState(original.State)
+	if err != nil {
+		return empty, nil, err
+	}
+	state, err := decodeState(current.State)
+	if err != nil {
+		return empty, nil, err
+	}
+	first, ok := activeModelInvocation(old)
+	last, found := activeModelInvocation(state)
+	if !ok || !found || first.Status != ModelInvocationPending || first.ExecutionAttempt != 0 || first.DispatchAttempt != 0 ||
+		len(state.ModelInvocations) != len(old.ModelInvocations) || last.ID != first.ID ||
+		(last.Status != ModelInvocationPending && last.Status != ModelInvocationCompleted) ||
+		last.ExecutionAttempt > 1 || last.DispatchAttempt > last.ExecutionAttempt {
+		return empty, nil, ErrRootOutcomeUnknown
+	}
+	// Only the common claim/dispatch/receipt fields can advance. Check the
+	// full frozen request and physical SamplingPlan via the original value.
+	normalized := cloneModelInvocation(*last)
+	normalized.Status = first.Status
+	normalized.ExecutionAttempt, normalized.DispatchAttempt = first.ExecutionAttempt, first.DispatchAttempt
+	normalized.ExecutionLeaseUntil, normalized.RetryAfter = first.ExecutionLeaseUntil, first.RetryAfter
+	normalized.ProviderResponseID, normalized.Response, normalized.Usage = first.ProviderResponseID, first.Response, first.Usage
+	normalized.CompletedAt, normalized.ErrorCode = first.CompletedAt, first.ErrorCode
+	normalized.OutcomeErrorCode, normalized.OutcomeErrorDetail = first.OutcomeErrorCode, first.OutcomeErrorDetail
+	if !sameBoundedValue(normalized, *first) {
+		return empty, nil, ErrRootOutcomeUnknown
+	}
+	normalizedState := state
+	normalizedState.ModelInvocations = cloneModelInvocations(state.ModelInvocations)
+	normalizedState.ModelInvocations[len(normalizedState.ModelInvocations)-1] = *first
+	if !sameBoundedValue(normalizedState, old) {
+		return empty, nil, ErrRootOutcomeUnknown
+	}
+	p.SourceRevision = current.Run.Revision
+	p.Phase = string(last.Status)
+	p.RequalifiedFrom = t.SafePoint.ID
+	if p.LedgerID != "" {
+		l, e := r.nativeBudget.coordinator.Store.LoadBudget(ctx, p.LedgerID)
+		if e != nil {
+			return empty, nil, e
+		}
+		if l.ID != p.LedgerID || l.Revision < p.LedgerRevision || !quiescentManagedLedger(l, current.Run.ID) || l.FinishedRuns[current.Run.ID] || l.RunCancelled(current.Run.ID) {
+			return empty, nil, ErrRootOutcomeUnknown
+		}
+		res, exists := l.Reservations["model:"+last.ID]
+		without := budget.CloneLedger(l)
+		delete(without.Reservations, "model:"+last.ID)
+		if managedLedgerDigest(without, current.Run.ID) != p.LedgerDigest {
+			return empty, nil, budget.ErrLedgerConflict
+		}
+		if last.DispatchAttempt == 0 {
+			if exists || last.Status != ModelInvocationPending {
+				return empty, nil, ErrRootOutcomeUnknown
+			}
+		} else {
+			if !exists || last.SamplingPlan == nil || last.SamplingPlan.LedgerID != l.ID ||
+				res.Status != budget.ReservationSettled || !res.Dispatched || res.Active {
+				return empty, nil, ErrModelOutcomeUnknown
+			}
+			expected, e := last.SamplingPlan.reservation(last.Request)
+			if e != nil || res.ID != expected.ID || res.RunID != expected.RunID || res.RequestHash != expected.RequestHash ||
+				res.PhysicalRequestHash != expected.PhysicalRequestHash || res.Requested != expected.Requested {
+				return empty, nil, ErrModelOutcomeUnknown
+			}
+			response, receiptErr := budget.DecodeModelReceipt(res)
+			if receiptErr != nil && !model.IsResponseRejectedError(receiptErr) {
+				return empty, nil, errors.Join(ErrModelOutcomeUnknown, receiptErr)
+			}
+			if receiptErr == nil && !model.ValidResponse(response) {
+				return empty, nil, ErrInvalidModelResponse
+			}
+			if last.Status == ModelInvocationCompleted {
+				if !managedModelLedgerPhase(*last, l) {
+					return empty, nil, ErrModelOutcomeUnknown
+				}
+			} else {
+				p.SettledReceiptDigest = kernel.ManagedDigest(res.Receipt)
+			}
+		}
+		p.LedgerRevision, p.LedgerDigest = l.Revision, managedLedgerDigest(l, current.Run.ID)
+	} else if last.DispatchAttempt != 0 || last.Status != ModelInvocationPending {
+		// No accounting authority exists to prove a returned external result.
+		return empty, nil, ErrModelOutcomeUnknown
+	}
+	raw, err := json.Marshal(p)
+	if err != nil {
+		return empty, nil, err
+	}
+	point := t.SafePoint
+	point.Source = current
+	point.LifecycleSource = raw
+	point.ID = "managed-qualified-" + kernel.ManagedDigest(struct {
+		Original    string
+		Source      kernel.Snapshot
+		Obligations managedObligations
+	}{t.SafePoint.ID, current, p})
+	point.RecoveryID = kernel.ManagedRecoveryID(point.ID, point.Host)
+	if _, err = r.validateManagedObligations(point); err != nil {
+		return empty, nil, err
+	}
+	proof := featurecontrol.Seal(current.Run.ID, current.Run.Revision, "managed_qualified_park", t.SafePoint.ID, current.State, point)
+	return point, proof, nil
+}
+
+// parkManagedFrontier has one original Store election, whether the source was
+// committed directly or requalified from exact native evidence after Leave.
+func (r *Runner) parkManagedFrontier(ctx context.Context, t kernel.ManagedTransfer, cancel bool) (kernel.ManagedParkedProof, managedObligations, error) {
+	var parked kernel.ManagedParkedProof
+	if t.SafePoint.LifecycleVersion != kernel.ManagedLifecycleAgentObligations {
+		parked, err := r.runtime.ParkManagedContinuation(ctx, t.SafePoint.Host.RunID)
+		return parked, managedObligations{}, err
+	}
+	var p managedObligations
+	var err error
+	if t.State == kernel.ManagedInvalidated && t.Selection.ID == "" {
+		point, proof, e := r.qualifyManagedFrontier(ctx, t)
+		if e != nil {
+			return parked, p, e
+		}
+		p, _ = point.AgentObligations()
+		if cancel && p.SettledReceiptDigest != "" {
+			return parked, p, ErrModelOutcomeUnknown
+		}
+		// A previously selected immutable Host reservation can never be
+		// rotated to a new point by this requalification.
+		if _, e = r.runtime.ReadManagedReservation(ctx, t.SafePoint.Host, ""); !errors.Is(e, kernel.ErrNotFound) {
+			return parked, p, errors.Join(kernel.ErrExecutionConflict, e)
+		}
+		parked, err = r.runtime.ParkQualifiedManagedContinuation(ctx, t, point, proof)
+	} else {
+		p, err = r.preflightCombinedManaged(ctx, t)
+		if err != nil {
+			return parked, p, err
+		}
+		if cancel && p.SettledReceiptDigest != "" {
+			return parked, p, ErrModelOutcomeUnknown
+		}
+		parked, err = r.runtime.ParkManagedContinuation(ctx, t.SafePoint.Host.RunID)
+	}
+	return parked, p, err
+}
+
+// recoverManagedModelFrontier runs only after the actual successor entered the
+// common native Run stage. It never dispatches a settled original receipt.
+func (r *Runner) recoverManagedModelFrontier(ctx context.Context, s kernel.Snapshot, p managedObligations) (kernel.Snapshot, error) {
+	if p.RequalifiedFrom == "" {
+		return s, nil
+	}
+	state, err := decodeState(s.State)
+	if err != nil {
+		return s, err
+	}
+	active, ok := activeModelInvocation(state)
+	if !ok || active.ID != p.InvocationID {
+		return s, ErrInvalidRequest
+	}
+	inv := *active
+	if inv.Status == ModelInvocationCompleted {
+		return s, r.requireSettledModelQualification(ctx, inv)
+	}
+	if inv.Status != ModelInvocationPending {
+		return s, ErrInvalidRequest
+	}
+	event := "agent.model_invocation.retryable"
+	if p.SettledReceiptDigest != "" {
+		res, e := r.originalModelReservation(ctx, inv)
+		if e != nil || res.Status != budget.ReservationSettled || kernel.ManagedDigest(res.Receipt) != p.SettledReceiptDigest {
+			return s, errors.Join(ErrModelOutcomeUnknown, e)
+		}
+		if !matchesFrozenProviderBinding(r.model, inv) {
+			return s, ErrProviderBindingMismatch
+		}
+		response, receiptErr := budget.DecodeModelReceipt(res)
+		inv, err = r.qualifiedRecoveredModelReceipt(state, inv, response, receiptErr, true)
+		if err != nil {
+			return s, err
+		}
+		event = "agent.model_invocation.completed"
+	} else {
+		if inv.DispatchAttempt != 0 {
+			return s, ErrModelOutcomeUnknown
+		}
+		if inv.ExecutionAttempt == 0 {
+			return s, nil
+		}
+		// Kernel just fenced the old execution epoch. Retire only its
+		// proven-unentered local claim, retaining the same frozen intent.
+		if inv.ExecutionLeaseUntil == nil {
+			return s, nil
+		}
+		inv.ExecutionLeaseUntil = nil
+		now := r.clock.Now().UTC()
+		inv.RetryAfter = &now
+	}
+	if !replaceLastModelInvocation(&state, inv) {
+		return s, ErrInvalidRequest
+	}
+	encoded, err := encodeState(state)
+	if err != nil {
+		return s, err
+	}
+	return r.runtime.Apply(ctx, s.Run.ID, s.Run.Revision, kernel.Mutation{Status: kernel.RunStatusRunning, State: encoded, Checkpoint: s.Checkpoint,
+		Events: []kernel.EventDraft{{Type: event, Message: inv.ID, Wakeup: true}}})
 }
 
 func (r *Runner) preflightCombinedManaged(ctx context.Context, t kernel.ManagedTransfer) (managedObligations, error) {

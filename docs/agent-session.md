@@ -206,14 +206,31 @@ transferable. Existing pure-context and pure-summary proof versions remain
 unchanged; they cannot be promoted by reopening with more capabilities.
 
 RESUME requalifies the original ledger before enabling a successor and uses
-its existing accounting scope without Ensure/Register. No input-source read
-or request preparation runs before leaving the safe point. New input applies
-only at a later ordinary input safe point. For an elected CANCEL, the original
-ledger is fenced by revision CAS, Kernel cancellation commits, and terminal
-lifetime accounting is completed before the Host closes the dispatch.
-A lost closure ACK can be repaired against these same original facts.
-Drain or reconcile mixed in-flight transfers before downgrading workers
-that do not understand the new proof version.
+its existing accounting scope without Ensure/Register. Native Business receipt
+commit and atomic input application can seal the next exact safe point using
+the same proof. After Leave, an expired, unselected original first-owner
+point can be requalified at the existing PARK CAS only when its frozen model
+identity and remaining aggregate are unchanged except for the original
+claim/receipt fields. No reservation or a matching settled original receipt
+is required, respectively; an unknown dispatched/held reservation remains
+fenced. The old point remains historical, not reactivated. A settled receipt
+is reduced by the ordinary model-receipt path without a provider call.
+
+No input-source read or request preparation runs before leaving the safe
+point. New input applies only at a later ordinary input safe point.
+A returned successor can await its original child approval or cancellation
+and consume the verified child receipt through ordinary native retirement.
+For an eligible unresolved mixed Root Start without descendant or other
+unresolved Host effects, public Session.Cancel PARKs the original source and
+uses the existing immutable Host cancellation election; it cannot drive a
+RESUME winner. A pending settled receipt still requiring native commitment
+must be recovered before this cancellation path can settle it. For elected
+CANCEL, the original ledger is fenced by revision CAS, Kernel cancellation
+commits, and terminal lifetime accounting is completed before the Host closes
+the dispatch. A lost closure ACK can be repaired against these same original
+facts. Repeated cross-phase takeover after a selected successor remains
+outside this proof. Drain or reconcile mixed in-flight transfers before
+downgrading to readers that cannot validate the extended safe-point phases.
 
 The unused `MemoryPolicy` configuration field has been removed. Host memory
 can be supplied through selected Context history, Skills or authorized Tools;

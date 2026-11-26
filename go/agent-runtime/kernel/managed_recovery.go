@@ -137,6 +137,10 @@ type ManagedAgentObligations struct {
 	LedgerRevision uint64          `json:"ledgerRevision,omitempty"`
 	LedgerDigest   string          `json:"ledgerDigest,omitempty"`
 	Journal        json.RawMessage `json:"journal"`
+	// RequalifiedFrom binds an expired first-owner frontier to its exact
+	// preceding immutable point. No callback return is inferred.
+	RequalifiedFrom      string `json:"requalifiedFrom,omitempty"`
+	SettledReceiptDigest string `json:"settledReceiptDigest,omitempty"`
 }
 
 func (p ManagedSafePoint) AgentObligations() (ManagedAgentObligations, bool) {
@@ -158,8 +162,15 @@ func (p ManagedSafePoint) AgentObligations() (ManagedAgentObligations, bool) {
 	} else if o.LedgerID != p.Host.TurnID || o.LedgerRevision == 0 || !validToolReceiptDigest(o.LedgerDigest) {
 		return o, false
 	}
+	if o.SettledReceiptDigest != "" && (o.RequalifiedFrom == "" || o.Phase != "pending" || o.LedgerID == "" || !validToolReceiptDigest(o.SettledReceiptDigest)) {
+		return o, false
+	}
+	if o.RequalifiedFrom != "" && (o.RequalifiedFrom == p.ID || o.Phase == "consumed") {
+		return o, false
+	}
 	if o.Purpose == "" {
-		return o, o.Phase == "pending" && o.BindingDigest == ""
+		return o, o.BindingDigest == "" && (o.Phase == "pending" || o.Phase == "completed" ||
+			(o.Phase == "consumed" && o.InputBinding != "" && o.InputCursor > 0))
 	}
 	return o, o.Purpose == "context_summary" && validToolReceiptDigest(o.BindingDigest) &&
 		(o.Phase == "pending" || o.Phase == "completed" || o.Phase == "consumed")
@@ -268,6 +279,12 @@ func managedSafePointEventMatches(point ManagedSafePoint, events []EventDraft) b
 		if !ok {
 			return false
 		}
+		if o.RequalifiedFrom != "" {
+			return false
+		}
+		if o.Purpose == "" && o.Phase == "consumed" {
+			return events[0].Type == "agent.input_applied"
+		}
 		phase = o.Phase
 	case ManagedLifecycleWorkingStateSummary:
 		var source struct {
@@ -296,9 +313,31 @@ func managedSafePointEventMatches(point ManagedSafePoint, events []EventDraft) b
 	return false
 }
 
+// ManagedParkQualification is an internal Agent proof of a new safe frontier
+// after the original point was left. It replaces no history and grants no
+// callback-return or dispatch fact. Store consumes it inside the same PARK CAS.
+type ManagedParkQualification struct {
+	prior ManagedTransfer
+	point ManagedSafePoint
+	proof *featurecontrol.Proof
+}
+
+func (q ManagedParkQualification) matches(t ManagedTransfer, s Snapshot) bool {
+	o, ok := q.point.AgentObligations()
+	return q.proof != nil && ok && t.SafePoint.LifecycleVersion == ManagedLifecycleAgentObligations &&
+		t.State == ManagedInvalidated && t.Selection.ID == "" && len(t.Activations) == 0 &&
+		ManagedDigest(q.prior) == ManagedDigest(t) && o.RequalifiedFrom == t.SafePoint.ID &&
+		q.point.Valid() && q.point.Host.RunID == s.Run.ID && reflect.DeepEqual(q.point.Host, t.SafePoint.Host) &&
+		q.point.OriginalGrant == t.SafePoint.OriginalGrant && sameManagedLease(q.point.OriginalLease, t.SafePoint.OriginalLease) &&
+		q.point.ModelInvocationID == t.SafePoint.ModelInvocationID && q.point.ModelRequestHash == t.SafePoint.ModelRequestHash &&
+		ManagedSourceMatches(q.point, s) &&
+		q.proof.Matches(s.Run.ID, s.Run.Revision, "managed_qualified_park", t.SafePoint.ID, s.State, q.point)
+}
+
 type ManagedParkRequest struct {
 	RunID, SuspensionID string
 	ExpectedRevision    uint64
+	Qualification       ManagedParkQualification
 }
 type ManagedLeaveRequest struct {
 	RunID, SuspensionID                                    string
@@ -428,6 +467,9 @@ func ManagedCancellationMutation(t ManagedTransfer, q ManagedCancelRequest, s Sn
 	if q.RunID != s.Run.ID || q.SuspensionID != t.SafePoint.ID || q.ExpectedTransferRevision != t.Revision || q.Generation != t.Generation || !ManagedSourceMatches(t.SafePoint, s) || !q.Selection.Matches(t, ManagedCancel) {
 		return ManagedTransfer{}, StoreMutation{}, ErrExecutionConflict
 	}
+	if o, ok := t.SafePoint.AgentObligations(); ok && o.SettledReceiptDigest != "" {
+		return ManagedTransfer{}, StoreMutation{}, ErrExecutionConflict
+	}
 	r := s.Run
 	r.Status = RunStatusCancelled
 	r.Revision++
@@ -449,7 +491,19 @@ func ManagedCancellationMutation(t ManagedTransfer, q ManagedCancelRequest, s Sn
 // transaction. Store-time expiry and identity are checked together, not by a
 // preliminary read. Existing PARKED is an idempotent read, not a second fence.
 func ManagedParkTransfer(t ManagedTransfer, q ManagedParkRequest, s Snapshot, l ExecutionLease, g ChildExecutionGrant, a ManagedAuthority, now time.Time) (ManagedTransfer, error) {
-	if q.RunID != s.Run.ID || q.SuspensionID != t.SafePoint.ID || q.ExpectedRevision != s.Run.Revision || !t.SafePoint.Valid() || a != t.SafePoint.Host.KernelAuthority || !ManagedSourceMatches(t.SafePoint, s) {
+	if q.RunID != s.Run.ID || q.SuspensionID != t.SafePoint.ID || q.ExpectedRevision != s.Run.Revision || !t.SafePoint.Valid() || a != t.SafePoint.Host.KernelAuthority {
+		return ManagedTransfer{}, ErrExecutionConflict
+	}
+	if q.Qualification.proof != nil {
+		if !q.Qualification.matches(t, s) {
+			return ManagedTransfer{}, ErrExecutionConflict
+		}
+		// Only the freshly qualified current source may be parked. The prior
+		// historical point remains INVALIDATED in every Store.
+		t.SafePoint = managedClone(q.Qualification.point)
+		t.State = ManagedAvailable
+	}
+	if !ManagedSourceMatches(t.SafePoint, s) {
 		return ManagedTransfer{}, ErrExecutionConflict
 	}
 	if t.State == ManagedParked {

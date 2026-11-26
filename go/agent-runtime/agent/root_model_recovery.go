@@ -64,43 +64,10 @@ func (runner *Runner) ReconcileModelOutcome(ctx context.Context, runID string, r
 	}
 	request := inv.SamplingPlan.request(inv.Request)
 	response, receiptErr := runner.recoveryModelReceipt(ctx, inv, request, completion.HostCompleted)
-	authorityState := state
-	if inv.Status == ModelInvocationCompleted {
-		authorityState.ModelInvocations = state.ModelInvocations[:len(state.ModelInvocations)-1]
-	}
-	authority := modelCompletionAuthority{named: inv.Provider != "" && inv.BindingFingerprint != "", request: model.CloneRequest(inv.Request), plan: inv.SamplingPlan, duplicate: func(id string) bool { return duplicatePhysicalProviderResponseID(authorityState, inv, id) }}
-	response, receiptErr = authority.replay(request, response, receiptErr)
-	response, receiptErr = authority.validate(response, receiptErr)
-	rejected := model.IsResponseRejectedError(receiptErr) && response.Usage != nil && model.ValidUsage(response.Usage)
-	if receiptErr != nil && !rejected {
-		return snapshot, errors.Join(ErrModelOutcomeUnknown, receiptErr)
-	}
-	if !rejected && !model.ValidResponse(response) {
-		return snapshot, errors.Join(ErrModelOutcomeUnknown, ErrInvalidModelResponse)
-	}
-	if rejected {
-		response = model.BillingOnlyResponse(response)
-	}
 	originalInvocation := inv
-	inv.Status = ModelInvocationCompleted
-	inv.ProviderResponseID = strings.TrimSpace(response.ResponseID)
-	inv.Response = model.CloneResponse(response)
-	inv.Usage = model.CloneUsage(response.Usage)
-	inv.ExecutionLeaseUntil = nil
-	inv.RetryAfter = nil
-	if completion.HostCompleted {
-		inv.OutcomeErrorCode = ""
-		inv.OutcomeErrorDetail = ""
-	}
-	completedAt := runner.clock.Now().UTC()
-	if inv.CompletedAt == nil {
-		inv.CompletedAt = &completedAt
-	}
-	if rejected {
-		inv.ErrorCode = model.ClassifiedErrorCode(receiptErr)
-		if inv.ErrorCode == "" {
-			inv.ErrorCode = rejectedModelResponseCode
-		}
+	inv, err = runner.qualifiedRecoveredModelReceipt(state, inv, response, receiptErr, completion.HostCompleted)
+	if err != nil {
+		return snapshot, err
 	}
 	if originalInvocation.Status == ModelInvocationCompleted {
 		// Immutable original evidence: neither another receipt nor another
@@ -144,6 +111,56 @@ func (runner *Runner) ReconcileModelOutcome(ctx context.Context, runID string, r
 		return repaired, err
 	}
 	return repaired, nil
+}
+
+// Both an ordinary returned callback and a qualified managed successor
+// use the same exact receipt identity and rejection reducer. The caller
+// still owns its separate Store mutation/retirement authority.
+func (runner *Runner) qualifiedRecoveredModelReceipt(state runState, inv ModelInvocation, response model.Response, receiptErr error, clearDiagnostic bool) (ModelInvocation, error) {
+	if inv.SamplingPlan == nil || !inv.SamplingPlan.valid(inv.Request) {
+		return ModelInvocation{}, ErrModelOutcomeUnknown
+	}
+	authorityState := state
+	if inv.Status == ModelInvocationCompleted {
+		authorityState.ModelInvocations = state.ModelInvocations[:len(state.ModelInvocations)-1]
+	}
+	authority := modelCompletionAuthority{named: inv.Provider != "" && inv.BindingFingerprint != "", request: model.CloneRequest(inv.Request), plan: inv.SamplingPlan, duplicate: func(id string) bool { return duplicatePhysicalProviderResponseID(authorityState, inv, id) }}
+	response, receiptErr = authority.replay(inv.SamplingPlan.request(inv.Request), response, receiptErr)
+	response, receiptErr = authority.validate(response, receiptErr)
+	rejected := model.IsResponseRejectedError(receiptErr) && response.Usage != nil && model.ValidUsage(response.Usage)
+	if receiptErr != nil && !rejected {
+		return ModelInvocation{}, errors.Join(ErrModelOutcomeUnknown, receiptErr)
+	}
+	if !rejected && !model.ValidResponse(response) {
+		return ModelInvocation{}, errors.Join(ErrModelOutcomeUnknown, ErrInvalidModelResponse)
+	}
+	if rejected {
+		response = model.BillingOnlyResponse(response)
+	}
+	inv.Status = ModelInvocationCompleted
+	inv.ProviderResponseID = strings.TrimSpace(response.ResponseID)
+	inv.Response = model.CloneResponse(response)
+	inv.Usage = model.CloneUsage(response.Usage)
+	inv.ExecutionLeaseUntil = nil
+	inv.RetryAfter = nil
+	if clearDiagnostic {
+		inv.OutcomeErrorCode = ""
+		inv.OutcomeErrorDetail = ""
+	}
+	completedAt := runner.clock.Now().UTC()
+	if inv.CompletedAt == nil {
+		inv.CompletedAt = &completedAt
+	}
+	if rejected {
+		inv.ErrorCode = model.ClassifiedErrorCode(receiptErr)
+		if inv.ErrorCode == "" {
+			inv.ErrorCode = rejectedModelResponseCode
+		}
+	}
+	if !validModelInvocationReceipt(inv) {
+		return ModelInvocation{}, ErrInvalidModelResponse
+	}
+	return inv, nil
 }
 
 // A SharedBudget invocation has one qualification owner: its original
@@ -206,6 +223,12 @@ func (runner *Runner) requireSettledModelQualification(ctx context.Context, inv 
 	if err != nil {
 		return errors.Join(ErrModelOutcomeUnknown, err)
 	}
+	return matchesSettledModelReceipt(inv, res)
+}
+
+// Match the exact original receipt for both ordinary consumption and managed
+// qualification. A classified rejection is settled evidence, not a retry.
+func matchesSettledModelReceipt(inv ModelInvocation, res budget.Reservation) error {
 	if res.Status != budget.ReservationSettled {
 		return errors.Join(ErrModelOutcomeUnknown, budget.ErrWaiting)
 	}

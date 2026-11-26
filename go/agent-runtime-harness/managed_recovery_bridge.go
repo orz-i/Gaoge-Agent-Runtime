@@ -163,20 +163,24 @@ func (r *Runner) recoverManagedInvocation(ctx context.Context, inv Invocation) (
 		}
 		return proof.Snapshot(), true, nil
 	}
-	snap, proof, err := native.RecoverManagedContinuation(ctx, inv.ExecutionRefID)
-	if err != nil {
-		return snap, true, err
-	}
+	snap, proof, runErr := native.RecoverManagedContinuation(ctx, inv.ExecutionRefID)
 	// A real returned successor may be waiting for its original child
 	// receipt. Do not close the original Host dispatch until retirement.
 	if !proof.Matches(proof.Transfer().Selection) {
-		return snap, true, nil
+		return snap, true, runErr
+	}
+	// A known terminal failure is an original result, not an uncertain
+	// callback. Close only with the same durable snapshot and retirement;
+	// leave nonterminal errors on their ordinary recovery path.
+	if kernel.ManagedDigest(snap) != kernel.ManagedDigest(proof.Snapshot()) ||
+		(runErr != nil && !terminalRuntimeStatus(snap.Run.Status)) {
+		return snap, true, errors.Join(ErrConflict, runErr)
 	}
 	if err = native.ReconcileManagedClosure(ctx, proof); err != nil {
-		return snap, true, err
+		return snap, true, errors.Join(runErr, err)
 	}
 	if err = host.CloseManagedRecovery(ctx, proof); err != nil {
-		return snap, true, err
+		return snap, true, errors.Join(runErr, err)
 	}
 	return snap, true, nil
 }

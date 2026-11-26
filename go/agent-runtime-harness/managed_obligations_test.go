@@ -267,3 +267,160 @@ func requestTextManaged(r model.Request) string {
 	}
 	return out
 }
+
+// Interrupt the actual first owner at a native boundary, without a callback
+// return. The successor must qualify only the persisted original obligations.
+type managedFrontierCutStore struct {
+	*memory.Store
+	event      string
+	after, hit bool
+}
+
+func (s *managedFrontierCutStore) ApplyExecution(ctx context.Context, lease kernel.ExecutionLease, revision uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
+	for _, e := range m.Events {
+		if !s.hit && e.Type == s.event {
+			s.hit = true
+			if s.after {
+				out, err := s.Store.ApplyExecution(ctx, lease, revision, m)
+				if err != nil {
+					return out, err
+				}
+			}
+			panic(managedObligationCrash{})
+		}
+	}
+	return s.Store.ApplyExecution(ctx, lease, revision, m)
+}
+func TestManagedOriginalModelAndInputFrontiers(t *testing.T) {
+	for _, phase := range []string{"claimed", "completed", "input_applied", "rejected"} {
+		for _, after := range []bool{false, true} {
+			name := phase + "/before"
+			if after {
+				name = phase + "/after"
+			}
+			t.Run(name, func(t *testing.T) {
+				ctx := t.Context()
+				clock := &managedObligationClock{now: time.Now().UTC()}
+				base := memory.NewStoreWithExecutionClock(clock)
+				event := "agent.model_invocation." + phase
+				switch phase {
+				case "input_applied":
+					event = "agent.input_applied"
+				case "rejected":
+					event = "agent.model_invocation.completed"
+				}
+				cut := &managedFrontierCutStore{Store: base, event: event, after: after}
+				host := harness.NewMemoryStore()
+				q, err := agent.NewMemoryRunInputs("frontier")
+				if err != nil {
+					t.Fatal(err)
+				}
+				client := &agentSessionModel{}
+				opts := agentSessionOptions(t, cut, host, client)
+				opts.Runtime, err = kernel.New(kernel.Dependencies{Store: cut, ManagedRecoveryHost: host})
+				if err != nil {
+					t.Fatal(err)
+				}
+				opts.Context.ManagedRecovery = true
+				opts.Inputs = q
+				opts.Session.Config.SharedBudget = &budget.Limits{MaxLLMCalls: 3}
+				client.generate = func(req model.Request) (model.Response, error) {
+					if phase == "input_applied" && len(client.requests) == 1 {
+						s, e := base.Load(ctx, req.RunID)
+						if e != nil {
+							return model.Response{}, e
+						}
+						if _, e = q.Submit(ctx, s.Run, "steer-once", "frontier steering"); e != nil {
+							return model.Response{}, e
+						}
+					}
+					if phase == "rejected" {
+						return model.Response{ResponseID: "rejected-original", Usage: &model.Usage{InputTokens: 20, OutputTokens: 10}}, model.NewResponseRejectedError(model.NewClassifiedError(errors.New("invalid fixture response"), "model.upstream_request_invalid"))
+					}
+					return model.Response{Content: "complete"}, nil
+				}
+				session, err := harness.OpenAgentSession(opts)
+				if err != nil {
+					t.Fatal(err)
+				}
+				crashManagedObligation(t, func() { _, _ = session.Prompt(ctx, "frontier", "original task") })
+				if !cut.hit {
+					t.Fatal("cut not reached")
+				}
+				pending, err := session.Load(ctx, "frontier")
+				if err != nil {
+					t.Fatal(err)
+				}
+				root, ok := harness.TopLevelInvocation(pending)
+				if !ok {
+					t.Fatal("missing root")
+				}
+				original, err := base.Load(ctx, root.ExecutionRefID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				view, err := agent.ViewState(original)
+				if err != nil || len(view.ModelInvocations) != 1 {
+					t.Fatalf("bad original state: %v", err)
+				}
+				first := view.ModelInvocations[0]
+				wantCalls := 1
+				if phase == "input_applied" {
+					wantCalls = 2
+				}
+				if phase == "claimed" && len(client.requests) != 0 {
+					t.Fatal("claim dispatched")
+				}
+				if phase != "claimed" && len(client.requests) != 1 {
+					t.Fatal("receipt cut did not dispatch exactly once")
+				}
+				opts.Session.Transcript = nil
+				opts.Runtime, err = kernel.New(kernel.Dependencies{Store: base, ManagedRecoveryHost: host})
+				if err != nil {
+					t.Fatal(err)
+				}
+				session, err = harness.OpenAgentSession(opts)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err = session.Resume(ctx, "frontier"); err == nil {
+					t.Fatal("live lease enabled recovery")
+				}
+				clock.now = clock.now.Add(25 * time.Hour)
+				done, err := session.Resume(ctx, "frontier")
+				if err != nil && phase != "rejected" {
+					t.Fatalf("resume: %v status=%s", err, done.Turn.Status)
+				}
+				final, err := base.Load(ctx, root.ExecutionRefID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				end, err := agent.ViewState(final)
+				if err != nil {
+					t.Fatal(err)
+				}
+				ledger, err := host.LoadBudget(ctx, pending.Turn.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				wantStatus := harness.TurnCompleted
+				if phase == "rejected" {
+					wantStatus = harness.TurnFailed
+					if end.ModelInvocations[0].ErrorCode != "model.upstream_request_invalid" || ledger.View("").Usage.TotalTokens != 30 {
+						t.Fatalf("original rejection lost: %+v %+v", end.ModelInvocations[0], ledger.View(""))
+					}
+				}
+				if done.Turn.Status != wantStatus || len(client.requests) != wantCalls || len(end.ModelInvocations) != wantCalls ||
+					end.ModelInvocations[0].ID != first.ID || ledger.View("").Usage.LLMCalls != wantCalls || !ledger.FinishedRuns[root.ExecutionRefID] {
+					t.Fatalf("original frontier lost: status=%s calls=%d inv=%d cursor=%d ledger=%+v err=%v", done.Turn.Status, len(client.requests), len(end.ModelInvocations), end.InputCursor, ledger.View(""), err)
+				}
+				if phase == "input_applied" && (end.InputCursor != 1 || strings.Count(requestTextManaged(client.requests[1]), "frontier steering") != 1) {
+					t.Fatal("input obligation lost or duplicated")
+				}
+				if _, err = opts.Runtime.LookupChildExecution(ctx, root.ExecutionRefID); !errors.Is(err, kernel.ErrNotFound) {
+					t.Fatalf("grant not retired: %v", err)
+				}
+			})
+		}
+	}
+}

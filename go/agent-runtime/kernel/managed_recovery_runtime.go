@@ -136,6 +136,32 @@ func (r *Runtime) ParkManagedContinuation(ctx context.Context, id string) (Manag
 	return ManagedParkedProof{transfer: managedClone(t), authority: a, valid: true}, nil
 }
 
+// ParkQualifiedManagedContinuation reuses the original PARK transaction
+// with an opaque native proof of the exact new source. Public callers cannot
+// construct the internal featurecontrol proof, nor change the selected Host.
+func (r *Runtime) ParkQualifiedManagedContinuation(ctx context.Context, prior ManagedTransfer, point ManagedSafePoint, proof *featurecontrol.Proof) (ManagedParkedProof, error) {
+	if r == nil || proof == nil {
+		return ManagedParkedProof{}, ErrExecutionRequired
+	}
+	s, ok := r.store.(ManagedRecoveryStore)
+	if !ok {
+		return ManagedParkedProof{}, ErrExecutionRequired
+	}
+	t, err := s.ParkManagedRecovery(ctx, ManagedParkRequest{RunID: point.Host.RunID, SuspensionID: prior.SafePoint.ID, ExpectedRevision: point.Source.Run.Revision,
+		Qualification: ManagedParkQualification{prior: managedClone(prior), point: managedClone(point), proof: proof}})
+	if err != nil {
+		return ManagedParkedProof{}, err
+	}
+	a, err := s.ManagedRecoveryAuthority(ctx)
+	if err != nil {
+		return ManagedParkedProof{}, err
+	}
+	if t.State != ManagedParked || ManagedDigest(t.SafePoint) != ManagedDigest(point) || a != point.Host.KernelAuthority {
+		return ManagedParkedProof{}, ErrExecutionConflict
+	}
+	return ManagedParkedProof{transfer: managedClone(t), authority: a, valid: true}, nil
+}
+
 // SelectManagedContinuation only accepts the fixed committed Host selection.
 func (r *Runtime) SelectManagedContinuation(ctx context.Context, p ManagedParkedProof) (ManagedSelectionProof, error) {
 	if r == nil || r.managedHost == nil || !p.Matches(p.transfer.SafePoint.Host) {

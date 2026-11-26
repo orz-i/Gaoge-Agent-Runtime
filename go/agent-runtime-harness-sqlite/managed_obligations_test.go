@@ -20,21 +20,42 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 )
 
-type sqliteManagedCut struct{ *kernelsqlite.Store }
+type sqliteManagedCut struct {
+	*kernelsqlite.Store
+	event  string
+	before bool
+}
 type sqliteManagedInterrupted struct{}
 
 func (s sqliteManagedCut) ApplyExecution(ctx context.Context, l kernel.ExecutionLease, rev uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
+	hit := s.event == "" && m.ManagedSafePoint.Present()
+	for _, e := range m.Events {
+		if s.event != "" && e.Type == s.event {
+			hit = true
+		}
+	}
+	if hit && s.before {
+		panic(sqliteManagedInterrupted{})
+	}
 	out, err := s.Store.ApplyExecution(ctx, l, rev, m)
-	if err == nil && m.ManagedSafePoint.Present() {
+	if err == nil && hit {
 		panic(sqliteManagedInterrupted{})
 	}
 	return out, err
 }
 
-type sqliteManagedModel struct{ requests []model.Request }
+type sqliteManagedModel struct {
+	requests   []model.Request
+	onGenerate func(model.Request) error
+}
 
 func (m *sqliteManagedModel) Generate(_ context.Context, r model.Request) (model.Response, error) {
 	m.requests = append(m.requests, model.CloneRequest(r))
+	if m.onGenerate != nil {
+		if err := m.onGenerate(r); err != nil {
+			return model.Response{}, err
+		}
+	}
 	return model.Response{Content: "answer"}, nil
 }
 
@@ -42,12 +63,26 @@ func (m *sqliteManagedModel) Generate(_ context.Context, r model.Request) (model
 // The shared mixed proof must survive both persistence round trips, including
 // closure reconciliation when CANCEL committed before the budget ACK.
 func TestSQLiteManagedOriginalObligationsReopen(t *testing.T) {
-	for _, cancel := range []bool{false, true} {
-		name := "resume"
-		if cancel {
-			name = "cancel closure"
-		}
+	for _, name := range []string{"resume", "cancel closure", "public cancel",
+		"claimed/before", "claimed/after", "completed/before", "completed/after", "input_applied/before", "input_applied/after"} {
 		t.Run(name, func(t *testing.T) {
+			cancel := strings.Contains(name, "cancel")
+			phase, _, frontier := strings.Cut(name, "/")
+			event := ""
+			if frontier {
+				event = "agent.model_invocation." + phase
+				if phase == "input_applied" {
+					event = "agent.input_applied"
+				}
+			}
+			wantBefore := 0
+			if phase == "completed" || phase == "input_applied" {
+				wantBefore = 1
+			}
+			wantCalls := 2
+			if frontier && phase != "input_applied" {
+				wantCalls = 1
+			}
 			ctx := t.Context()
 			dir := testprofile.Dir(t)
 			hp, kp := filepath.Join(dir, "harness.sqlite"), filepath.Join(dir, "kernel.sqlite")
@@ -65,9 +100,22 @@ func TestSQLiteManagedOriginalObligationsReopen(t *testing.T) {
 				t.Fatal(e)
 			}
 			provider := &sqliteManagedModel{}
-			rt, e := kernel.New(kernel.Dependencies{Store: sqliteManagedCut{ks}, ManagedRecoveryHost: host})
+			rt, e := kernel.New(kernel.Dependencies{Store: sqliteManagedCut{Store: ks, event: event, before: strings.HasSuffix(name, "/before")}, ManagedRecoveryHost: host})
 			if e != nil {
 				t.Fatal(e)
+			}
+			if phase == "input_applied" {
+				provider.onGenerate = func(r model.Request) error {
+					if len(provider.requests) != 1 {
+						return nil
+					}
+					current, e := ks.Load(ctx, r.RunID)
+					if e != nil {
+						return e
+					}
+					_, e = inputs.Submit(ctx, current.Run, "late", "late steering")
+					return e
+				}
 			}
 			req := request()
 			options := harness.AgentSessionOptions{Runtime: rt, Store: host, Model: provider, Inputs: inputs,
@@ -110,13 +158,15 @@ func TestSQLiteManagedOriginalObligationsReopen(t *testing.T) {
 				t.Fatal(e)
 			}
 			proof, ok := safe.SafePoint.AgentObligations()
-			if !ok || proof.LedgerID != pending.Turn.ID || proof.InputCursor != 0 || len(provider.requests) != 0 {
+			if !ok || proof.LedgerID != pending.Turn.ID || len(provider.requests) != wantBefore {
 				t.Fatalf("wrong cut: %+v", proof)
 			}
-			if _, e = inputs.Submit(ctx, original.Run, "late", "late steering"); e != nil {
-				t.Fatal(e)
+			if !frontier {
+				if _, e = inputs.Submit(ctx, original.Run, "late", "late steering"); e != nil {
+					t.Fatal(e)
+				}
 			}
-			if cancel {
+			if name == "cancel closure" {
 				now := time.Now().UTC()
 				payload, _ := json.Marshal(map[string]string{"boundary": "cancel_scope_pending", "runID": root.ExecutionRefID, "protocol": "effects_v1", "canceller": "native"})
 				_, fresh, e := host.AppendItem(ctx, harness.Item{ID: "sqlite-managed-cancel", TurnID: pending.Turn.ID, RunID: root.ExecutionRefID, Kind: harness.ItemDiagnostic, Status: harness.ItemStarted, ParentItemID: harness.CancellationFenceParentItemID, Payload: payload, CreatedAt: now, UpdatedAt: now})
@@ -151,13 +201,13 @@ func TestSQLiteManagedOriginalObligationsReopen(t *testing.T) {
 			if e != nil {
 				t.Fatal(e)
 			}
-			if _, e = session.Resume(ctx, "managed-obligations"); !errors.Is(e, kernel.ErrExecutionConflict) || len(provider.requests) != 0 {
+			if _, e = session.Resume(ctx, "managed-obligations"); !errors.Is(e, kernel.ErrExecutionConflict) || len(provider.requests) != wantBefore {
 				t.Fatalf("live lease permitted work: %v", e)
 			}
 			if delay := time.Until(safe.SafePoint.OriginalLease.ExpiresAt) + 100*time.Millisecond; delay > 0 {
 				time.Sleep(delay)
 			}
-			if cancel {
+			if name == "cancel closure" {
 				parked, e := rt.ParkManagedContinuation(ctx, root.ExecutionRefID)
 				if e != nil {
 					t.Fatal(e)
@@ -178,7 +228,12 @@ func TestSQLiteManagedOriginalObligationsReopen(t *testing.T) {
 					t.Fatal("Host closed before original budget")
 				}
 			}
-			result, e := session.Resume(ctx, "managed-obligations")
+			var result harness.Snapshot
+			if name == "public cancel" {
+				result, e = session.Cancel(ctx, "managed-obligations", "stop original task")
+			} else {
+				result, e = session.Resume(ctx, "managed-obligations")
+			}
 			if e != nil {
 				t.Fatal(e)
 			}
@@ -202,13 +257,19 @@ func TestSQLiteManagedOriginalObligationsReopen(t *testing.T) {
 					t.Fatalf("cancel entered effects or lost obligations: %+v", ledger.View(""))
 				}
 			} else {
-				if result.Turn.Status != harness.TurnCompleted || v.InputCursor != 1 || len(provider.requests) != 2 || ledger.View("").Usage.LLMCalls != 2 {
+				wantCursor := uint64(0)
+				if wantCalls == 2 {
+					wantCursor = 1
+				}
+				if result.Turn.Status != harness.TurnCompleted || v.InputCursor != wantCursor || len(provider.requests) != wantCalls || ledger.View("").Usage.LLMCalls != wantCalls {
 					t.Fatalf("resume accounting mismatch: %+v", ledger.View(""))
 				}
-				first, _ := json.Marshal(provider.requests[0].Messages)
-				second, _ := json.Marshal(provider.requests[1].Messages)
-				if strings.Contains(string(first), "late steering") || !strings.Contains(string(second), "late steering") {
-					t.Fatal("late input changed frozen invocation")
+				if wantCalls == 2 {
+					first, _ := json.Marshal(provider.requests[0].Messages)
+					second, _ := json.Marshal(provider.requests[1].Messages)
+					if strings.Contains(string(first), "late steering") || strings.Count(string(second), "late steering") != 1 {
+						t.Fatal("late input changed frozen invocation")
+					}
 				}
 			}
 		})

@@ -954,7 +954,7 @@ func (s managedRecoveryFileInputs) ReadRunInputs(ctx context.Context, _ kernel.R
 	if e != nil {
 		return nil, e
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	d := json.NewDecoder(f)
 	var out []agent.RunInput
 	var last uint64
