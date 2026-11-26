@@ -5,35 +5,42 @@ import (
 	"sync"
 )
 
-// MemoryLedgerStore is the reference CAS implementation for embedded hosts.
-type MemoryLedgerStore struct {
-	mu      sync.RWMutex
-	ledgers map[string]Ledger
-}
+// LedgerMap is the shared Memory CAS implementation. Callers hold their
+// enclosing Store lock; the Runtime uses the same lock for Run and accounting.
+type LedgerMap map[string]Ledger
 
-func NewMemoryLedgerStore() *MemoryLedgerStore {
-	return &MemoryLedgerStore{ledgers: map[string]Ledger{}}
-}
-
-func (store *MemoryLedgerStore) LoadBudget(_ context.Context, id string) (Ledger, error) {
-	store.mu.RLock()
-	defer store.mu.RUnlock()
-	ledger, ok := store.ledgers[id]
+func (m LedgerMap) LoadBudget(_ context.Context, id string) (Ledger, error) {
+	l, ok := m[id]
 	if !ok {
 		return Ledger{}, ErrLedgerNotFound
 	}
-	return CloneLedger(ledger), nil
+	return CloneLedger(l), nil
 }
-
-func (store *MemoryLedgerStore) SaveBudget(_ context.Context, ledger Ledger, revision uint64) error {
-	store.mu.Lock()
-	defer store.mu.Unlock()
-	if ledger.ID == "" || ledger.Revision != revision+1 || !ValidLimits(ledger.Limits) {
-		return ErrInvalidUsage
+func (m LedgerMap) SaveBudget(_ context.Context, l Ledger, rev uint64) error {
+	if err := ValidateLedgerWrite(l, rev); err != nil {
+		return err
 	}
-	if store.ledgers[ledger.ID].Revision != revision {
+	if m[l.ID].Revision != rev {
 		return ErrLedgerConflict
 	}
-	store.ledgers[ledger.ID] = CloneLedger(ledger)
+	m[l.ID] = CloneLedger(l)
 	return nil
+}
+
+// MemoryLedgerStore is the standalone accounting CAS for non-Run consumers.
+type MemoryLedgerStore struct {
+	mu      sync.RWMutex
+	ledgers LedgerMap
+}
+
+func NewMemoryLedgerStore() *MemoryLedgerStore { return &MemoryLedgerStore{ledgers: make(LedgerMap)} }
+func (s *MemoryLedgerStore) LoadBudget(ctx context.Context, id string) (Ledger, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.ledgers.LoadBudget(ctx, id)
+}
+func (s *MemoryLedgerStore) SaveBudget(ctx context.Context, l Ledger, rev uint64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.ledgers.SaveBudget(ctx, l, rev)
 }
