@@ -306,13 +306,27 @@ func TestRealPostgresManagedOriginalFrontierMatrix(t *testing.T) {
 			}
 			_, leaseDuration := conformance.ManagedFixtureExecutionPolicy()
 			conformance.AwaitManagedOriginalLeaseExpiry(t, ks, original, safe, 2*leaseDuration+5*time.Second)
-			if phase == "unknown" || phase == "dispatch_intent/after" || phase == "resume_unknown/after" {
+			// Before the atomic native receipt CAS, even a response already
+			// returned to the dead process has no durable receipt. Never
+			// resurrect a separately settled budget receipt or resend it.
+			if phase == "unknown" || phase == "dispatch_intent/after" || phase == "resume_unknown/after" || phase == "completed/before" {
+				ledger, e := ks.LoadBudget(ctx, turnID)
+				inv := before.ModelInvocations[len(before.ModelInvocations)-1]
+				res, found := ledger.Reservations["model:"+inv.ID]
+				if e != nil || !found || inv.Status != agent.ModelInvocationPending || inv.DispatchAttempt == 0 ||
+					res.RunID != root.ExecutionRefID || !res.Dispatched || res.Status != budget.ReservationHeld || len(res.Receipt) != 0 {
+					t.Fatalf("unknown receipt did not retain the original dispatched hold: %v", e)
+				}
 				if _, err = session.Resume(ctx, managedRecoveryTurn); err == nil {
 					t.Fatal("unknown dispatch resumed")
 				}
 				after, e := ks.Load(ctx, root.ExecutionRefID)
-				if e != nil || kernel.ManagedDigest(after) != kernel.ManagedDigest(original) || len(readManagedRecoveryRecords[model.Request](t, filepath.Join(files, "model.jsonl"))) != wantBefore {
-					t.Fatal("unknown dispatch changed or repeated")
+				afterLedger, ledgerErr := ks.LoadBudget(ctx, turnID)
+				grant, grantErr := ks.LookupChildExecution(ctx, root.ExecutionRefID)
+				if e != nil || ledgerErr != nil || grantErr != nil || grant != safe.SafePoint.OriginalGrant ||
+					kernel.ManagedDigest(after) != kernel.ManagedDigest(original) || kernel.ManagedDigest(afterLedger) != kernel.ManagedDigest(ledger) ||
+					len(readManagedRecoveryRecords[model.Request](t, filepath.Join(files, "model.jsonl"))) != wantBefore {
+					t.Fatal("unknown dispatch changed original Run, Grant, hold or physical call count")
 				}
 				return
 			}
