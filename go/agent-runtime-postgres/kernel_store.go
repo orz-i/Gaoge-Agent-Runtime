@@ -175,6 +175,9 @@ func (store *KernelStore) Create(
 	}
 	var snapshot kernel.Snapshot
 	err = store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if e := pgReserveRunIdentity(tx, record.Run.ID); e != nil {
+			return e
+		}
 		if model.ParentRunID != "" {
 			if _, checkErr := store.lockLiveChildAncestors(tx, model.ParentRunID, model.TenantID, model.ActorID, model.ThreadKind, model.ThreadID); checkErr != nil {
 				return checkErr

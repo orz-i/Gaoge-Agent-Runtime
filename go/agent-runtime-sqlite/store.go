@@ -242,6 +242,9 @@ func (s *Store) Create(ctx context.Context, record kernel.Record, drafts []kerne
 		return kernel.Snapshot{}, conflictOrDatabaseError(err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err = sqliteReserveRunIdentity(ctx, tx, record.Run.ID); err != nil {
+		return kernel.Snapshot{}, err
+	}
 	reservedEpoch := 0
 	if record.ExecutionRequired {
 		reservedEpoch = 1

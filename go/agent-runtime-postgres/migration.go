@@ -19,7 +19,7 @@ var ErrNilDatabase = errors.New("postgres kernel store database is nil")
 // permanent Grant identity backfill.
 func Models() []interface{} {
 	return []interface{}{
-		&models.KernelRunRecord{}, &models.KernelEventRecord{}, &models.KernelTransitionOutboxRecord{},
+		&models.KernelRunRecord{}, &models.KernelRunIdentityRecord{}, &models.KernelEventRecord{}, &models.KernelTransitionOutboxRecord{},
 		&models.KernelChildEffectGrantRecord{}, &models.KernelGrantIdentityRecord{},
 		&models.KernelOwnedRetirementRecord{},
 		&models.KernelManagedAuthorityRecord{}, &models.KernelManagedTransferRecord{}, &models.KernelManagedHistoryRecord{},

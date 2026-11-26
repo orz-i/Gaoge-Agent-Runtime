@@ -65,15 +65,75 @@ func runNativeBudgetBinding(t *testing.T, factory func(*testing.T) ExecutionBudg
 				before = load("scope")
 				retry := newRequest("retry", "scope", "")
 				retry.Budget.Retry = budget.RootRetryGrant{InvocationID: "inv", OriginalRunID: "root", Attempt: 2, Active: true}
+				cancel := kernel.RunCreationCancellation{RunID: retry.ID, Reason: "original reason", Budget: *retry.Budget}
+				if got, err := rt.CancelBeforeCreate(ctx, cancel); err != nil || got != cancel {
+					t.Fatalf("cancel-before-create: %+v %v", got, err)
+				}
+				closed := load("scope")
+				if closed.Revision != before.Revision+1 || !closed.RunCancelled(retry.ID) {
+					t.Fatalf("cancelled selection not committed: %+v", closed)
+				}
+				if _, ok := closed.Runs[retry.ID]; ok {
+					t.Fatal("negative identity fabricated a Run enrollment")
+				}
+				peer := rt
+				if f.Reopen != nil {
+					store, _ := f.Reopen(t)
+					peer = ea1StartRuntime(t, store)
+				}
+				if _, err := peer.Load(ctx, retry.ID); !errors.Is(err, kernel.ErrNotFound) {
+					t.Fatalf("negative identity fabricated a Run: %v", err)
+				}
+				if _, err := peer.Create(ctx, retry); !errors.Is(err, kernel.ErrCreationCancelled) {
+					t.Fatalf("cancelled identity admitted Create: %v", err)
+				}
+				replay := cancel
+				replay.Reason = "retry reason"
+				if got, err := peer.CancelBeforeCreate(ctx, replay); err != nil || got != cancel || !reflect.DeepEqual(closed, load("scope")) {
+					t.Fatalf("negative identity replay changed original fact: %+v %v", got, err)
+				}
+				before = closed
+				retry.ID = "retry-next"
+				retry.Budget.Retry.OriginalRunID = "retry"
+				retry.Budget.Retry.Attempt = 3
 				if _, e = rt.Create(ctx, retry); e != nil {
 					t.Fatal(e)
 				}
+				cancel.RunID, cancel.Budget = retry.ID, *retry.Budget
+				if _, e = peer.CancelBeforeCreate(ctx, cancel); !errors.Is(e, kernel.ErrAlreadyExists) {
+					t.Fatalf("created identity admitted missing-Run cancellation: %v", e)
+				}
 				after := load("scope")
-				if after.Revision != before.Revision+1 || !after.RootRetries["retry"].Active || after.RunCancelled("retry") {
+				if after.Revision != before.Revision+1 || !after.RootRetries[retry.ID].Active || after.RunCancelled(retry.ID) {
 					t.Fatalf("retry split: %+v", after)
 				}
-				if _, ok := after.Runs["retry"]; !ok {
+				if _, ok := after.Runs[retry.ID]; !ok {
 					t.Fatal("retry registration missing")
+				}
+				// Competing connections must decide one identity even before a Run exists.
+				race := newRequest("race", "race-scope", "")
+				if _, e = c.Ensure(ctx, race.Budget.ScopeID, limits); e != nil {
+					t.Fatal(e)
+				}
+				start, createErr, cancelErr := make(chan struct{}), make(chan error, 1), make(chan error, 1)
+				go func() {
+					<-start
+					_, err := rt.Create(ctx, race)
+					createErr <- err
+				}()
+				go func() {
+					<-start
+					_, err := peer.CancelBeforeCreate(ctx, kernel.RunCreationCancellation{RunID: race.ID, Budget: *race.Budget})
+					cancelErr <- err
+				}()
+				close(start)
+				ce, xe := <-createErr, <-cancelErr
+				l := load("race-scope")
+				_, member := l.Runs[race.ID]
+				if l.Revision != 2 || (ce == nil) == (xe == nil) ||
+					(ce == nil && (!errors.Is(xe, kernel.ErrAlreadyExists) || !member || l.RunCancelled(race.ID))) ||
+					(xe == nil && (!errors.Is(ce, kernel.ErrCreationCancelled) || member || !l.RunCancelled(race.ID))) {
+					t.Fatalf("create/cancel election split: %v %v %+v", ce, xe, l)
 				}
 			case "capacity":
 				unbound := newRequest("unbound", "scope", "root")
@@ -143,7 +203,8 @@ func runNativeBudgetBinding(t *testing.T, factory func(*testing.T) ExecutionBudg
 					}
 				}
 				before := load("scope")
-				if mode == "expire" || mode == "unknown-expire" {
+				switch mode {
+				case "expire", "unknown-expire":
 					_, expired, e := rt.Expire(ctx, "root", root.Run.Revision)
 					if mode == "unknown-expire" {
 						if expired || !errors.Is(e, kernel.ErrChildExecutionBusy) || !reflect.DeepEqual(before, load("scope")) {
@@ -158,11 +219,11 @@ func runNativeBudgetBinding(t *testing.T, factory func(*testing.T) ExecutionBudg
 					if e != nil || !expired {
 						t.Fatalf("expire: %v %v", expired, e)
 					}
-				} else if mode == "cancel" {
+				case "cancel":
 					if _, e = rt.Cancel(ctx, "root", root.Run.Revision, "stop"); e != nil {
 						t.Fatal(e)
 					}
-				} else {
+				default:
 					lease, e := f.Store.(kernel.ExecutionStore).AcquireExecution(ctx, kernel.ExecutionAcquireRequest{RunID: "root", OwnerID: "owner", LeaseDuration: time.Minute})
 					if e != nil {
 						t.Fatal(e)

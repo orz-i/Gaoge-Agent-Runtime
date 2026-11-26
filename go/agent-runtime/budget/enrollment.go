@@ -3,6 +3,7 @@ package budget
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 )
 
@@ -73,4 +74,54 @@ func EnrollRun(ctx context.Context, store LedgerStore, runID string, e RunEnroll
 		}
 	}
 	return ErrLedgerConflict
+}
+
+// CancelBeforeEnrollment closes an uncreated root's original accounting
+// generation without registering a Run. The caller owns the native Run
+// identity transaction; this reducer performs at most one ledger CAS.
+func CancelBeforeEnrollment(ctx context.Context, store LedgerStore, runID string, e RunEnrollment) error {
+	if e == (RunEnrollment{}) {
+		return nil
+	}
+	if store == nil || !e.Valid(runID) || e.Binding.ParentRunID != "" {
+		return ErrInvalidUsage
+	}
+	l, err := store.LoadBudget(ctx, e.ScopeID)
+	if err != nil {
+		return err
+	}
+	if l.ID != e.ScopeID || l.Limits != e.Limits || l.Revision == 0 {
+		return ErrLedgerConflict
+	}
+	if _, exists := l.Runs[runID]; exists {
+		return ErrLedgerConflict
+	}
+	for _, r := range l.Reservations {
+		if r.RunID == runID {
+			return ErrLedgerConflict
+		}
+	}
+	next := CloneLedger(l)
+	if e.Retry == (RootRetryGrant{}) {
+		if len(next.Runs) != 0 || len(next.Reservations) != 0 || len(next.RootRetries) != 0 {
+			return ErrLedgerConflict
+		}
+		next.Cancelled = true
+	} else {
+		if existing, ok := next.RootRetries[runID]; ok {
+			if existing != e.Retry {
+				return ErrLedgerConflict
+			}
+		} else if err = planRootRetry(&next, e.Retry.InvocationID, e.Retry.OriginalRunID, runID, e.Retry.Attempt); err != nil {
+			return err
+		}
+		if err = next.applyRootCancellation(runID); err != nil {
+			return err
+		}
+	}
+	if reflect.DeepEqual(l, next) {
+		return nil
+	}
+	next.Revision = l.Revision + 1
+	return store.SaveBudget(ctx, next, l.Revision)
 }

@@ -68,6 +68,13 @@ records. Recovery across the two files uses these records. A PostgreSQL Host
 can place both schemas in one database and uses the same recovery protocol.
 [Desktop Harness SQLite](../go/agent-runtime-harness-sqlite/README.md).
 
+Before a Run exists, native Create and CancelBeforeCreate arbitrate the same
+immutable Run identity in the Kernel Store. A negative decision fences any
+later Create without inventing a terminal Run. It atomically closes the original
+budget generation (including a selected Retry), and Harness can project the
+committed cancellation. The remaining Host Start/Retry dispatch fence is still
+in place until those entry paths consume the native identity decision.
+
 ## Context execution path
 
 The supported SDK selects one concrete `agent.NewBoundedContextAdapter`

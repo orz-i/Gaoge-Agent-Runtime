@@ -170,7 +170,7 @@ func (s *Store) initialize(ctx context.Context, create bool) error {
 
 const callbackToolReturnsColumn = "callback_tool_returns TEXT NOT NULL DEFAULT ''"
 
-var schemaDDL = append(schemaV10DDL(), sqlledger.SQLiteDDL)
+var schemaDDL = append(schemaV10DDL(), sqlledger.SQLiteDDL, runIdentityDDL)
 
 func schemaV10DDL() []string { return append(schemaV9DDL(), grantIdentityDDL) }
 

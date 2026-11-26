@@ -2,7 +2,6 @@ package harness
 
 import (
 	"context"
-	"errors"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 )
@@ -101,44 +100,4 @@ func nativeRetrySelection(ctx context.Context, store Store, inv Invocation) (roo
 		return selection, ErrConflict
 	}
 	return selection, nil
-}
-
-// An elected no-Run cancellation must close the original selected retry
-// without creating a fictitious Run. Live retry admission belongs to Create.
-func (runner *Runner) admitUnstartedRetryCancellation(ctx context.Context, turn Turn, inv Invocation) error {
-	if !runner.nativeBudget() || inv.Attempt <= 1 {
-		return nil
-	}
-	selected, err := nativeRetrySelection(ctx, runner.store, inv)
-	if err != nil {
-		return err
-	}
-	current, err := runner.store.GetInvocation(ctx, inv.ID)
-	if err != nil {
-		return err
-	}
-	if current.TurnID != turn.ID || invocationAttempt(current) != invocationAttempt(inv) || current.InputHash != inv.InputHash || current.Status != InvocationAccepted {
-		return ErrConflict
-	}
-	for range 8 {
-		original, err := runner.loadTurnBudget(ctx, turn)
-		if err != nil {
-			return err
-		}
-		if original == nil {
-			return ErrExecutionOutcomeUnknown
-		}
-		next, err := budget.PlanRootRetry(*original, inv.ID, selected.Previous.ExecutionRefID, inv.ExecutionRefID, inv.Attempt)
-		if err != nil {
-			return err
-		}
-		if next.Revision == original.Revision {
-			return nil
-		}
-		err = runner.budgets.dependencies.Ledgers.SaveBudget(ctx, next, original.Revision)
-		if !errors.Is(err, budget.ErrLedgerConflict) {
-			return err
-		}
-	}
-	return budget.ErrLedgerConflict
 }

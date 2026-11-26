@@ -3,6 +3,7 @@ package harness
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
@@ -112,12 +113,48 @@ func (runner *Runner) undispatchedRootNoEffect(
 	return true, nil
 }
 
+// cancelNativeUncreatedRoot commits the original absent-Run decision and its
+// accounting generation in the Runtime Store. No standalone retry enrollment
+// or quota revocation may race Create. Host status is only a later projection.
+func (runner *Runner) cancelNativeUncreatedRoot(ctx context.Context, turn Turn, inv Invocation, reason string) error {
+	q := kernel.RunCreationCancellation{RunID: inv.ExecutionRefID, Reason: strings.TrimSpace(reason)}
+	config, err := loadSealedConfig(ctx, runner.store, turn.ConfigSnapshotID)
+	if err != nil {
+		return err
+	}
+	if config.SharedBudget != nil {
+		q.Budget = budget.RunEnrollment{ScopeID: turn.ID, Limits: *config.SharedBudget}
+		if inv.Attempt > 1 {
+			selection, err := nativeRetrySelection(ctx, runner.store, inv)
+			if err != nil {
+				return err
+			}
+			q.Budget.Retry = budget.RootRetryGrant{InvocationID: inv.ID, OriginalRunID: selection.Previous.ExecutionRefID, Attempt: inv.Attempt, Active: true}
+		}
+	}
+	c, err := runner.runtime.CancelBeforeCreate(ctx, q)
+	if err != nil {
+		return err
+	}
+	if !c.MatchesSelection(q) {
+		return ErrExecutionOutcomeUnknown
+	}
+	if q.Budget.ScopeID != "" && runner.nativeBudget() {
+		ledger, err := runner.budgets.loadLedger(ctx, q.Budget.ScopeID)
+		if err != nil {
+			return err
+		}
+		return runner.budgets.project(ctx, ledger)
+	}
+	return nil
+}
+
 // cancelUndispatchedRoot is the no-effect counterpart of Kernel.Cancel.
 // Physical admission was already fenced. The original Store terminalizes
 // BOTH Invocation and Turn under one original Turn transaction, so a lost
 // ACK can never leave a half-cancelled accepted Attempt.
 func (runner *Runner) cancelUndispatchedRoot(
-	ctx context.Context, turn Turn, original Invocation,
+	ctx context.Context, turn Turn, original Invocation, reason string,
 ) (Snapshot, bool, error) {
 	recognized, err := runner.undispatchedRootNoEffect(ctx, turn, original, false)
 	if !recognized {
@@ -138,12 +175,19 @@ func (runner *Runner) cancelUndispatchedRoot(
 	if original.Status != InvocationAccepted || !undispatchedRootTurn(original, turn) {
 		return Snapshot{}, true, ErrConflict
 	}
-	if original.Attempt == 1 {
+	if runner.nativeBudget() || runner.nativeRootCommands() != nil {
+		if err = runner.cancelNativeUncreatedRoot(ctx, turn, original, reason); err != nil {
+			if errors.Is(err, kernel.ErrAlreadyExists) {
+				// Create won the same native identity. Continue the ordinary
+				// cancellation protocol against the actual Run.
+				return Snapshot{}, false, nil
+			}
+			return Snapshot{}, true, err
+		}
+	} else if original.Attempt == 1 {
 		if ledger, loadErr := runner.loadTurnBudget(ctx, turn); loadErr != nil {
 			return Snapshot{}, true, loadErr
 		} else if ledger != nil {
-			// No root registration is invented. The complete no-dispatch proof
-			// above establishes the original first generation's entire closure.
 			closed, closeErr := runner.budgets.coordinator().Cancel(ctx, turn.ID)
 			if closeErr != nil {
 				return Snapshot{}, true, closeErr
@@ -152,21 +196,8 @@ func (runner *Runner) cancelUndispatchedRoot(
 				return Snapshot{}, true, err
 			}
 		}
-	} else {
-		if runner.nativeBudget() {
-			l, loadErr := runner.loadTurnBudget(ctx, turn)
-			if loadErr != nil || l == nil {
-				return Snapshot{}, true, errors.Join(ErrExecutionOutcomeUnknown, loadErr)
-			}
-			if !l.CancelledRuns[original.ExecutionRefID] {
-				if err = runner.admitUnstartedRetryCancellation(ctx, turn, original); err != nil {
-					return Snapshot{}, true, err
-				}
-			}
-		}
-		if err = runner.cancelTurnBudget(ctx, turn, original.ExecutionRefID); err != nil {
-			return Snapshot{}, true, err
-		}
+	} else if err = runner.cancelTurnBudget(ctx, turn, original.ExecutionRefID); err != nil {
+		return Snapshot{}, true, err
 	}
 	if proven, proofErr := runner.undispatchedRootNoEffect(ctx, turn, original, true); !proven || proofErr != nil {
 		return Snapshot{}, true, errors.Join(ErrConflict, proofErr)

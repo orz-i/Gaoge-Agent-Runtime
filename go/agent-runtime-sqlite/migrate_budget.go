@@ -57,6 +57,10 @@ func (s *Store) migrateV10ToV11(ctx context.Context) error {
 	if _, err = tx.ExecContext(ctx, sqlledger.SQLiteDDL); err != nil {
 		return conflictOrDatabaseError(err)
 	}
+	if _, err = tx.ExecContext(ctx, runIdentityDDL); err != nil {
+		return conflictOrDatabaseError(err)
+	}
+
 	if _, err = tx.ExecContext(ctx, "PRAGMA user_version=11"); err != nil {
 		return conflictOrDatabaseError(err)
 	}

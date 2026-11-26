@@ -1118,7 +1118,7 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 	// Both initial Accepted and replacement Roots can be frozen before any
 	// physical Start. Their original Store atomically closes both records and
 	// budget generation; an absent Run is never a synthetic Kernel outcome.
-	if cancelled, recognized, cancelErr := runner.cancelUndispatchedRoot(ctx, turn, invocation); recognized {
+	if cancelled, recognized, cancelErr := runner.cancelUndispatchedRoot(ctx, turn, invocation, reason); recognized {
 		settled = cancelErr == nil
 		return cancelled, cancelErr
 	}

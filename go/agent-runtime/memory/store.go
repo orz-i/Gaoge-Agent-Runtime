@@ -15,21 +15,22 @@ import (
 
 // Store is the single-process atomic Kernel adapter used by minimal hosts and tests.
 type Store struct {
-	mu               sync.RWMutex
-	records          map[string]kernel.Snapshot
-	ledgers          budget.LedgerMap
-	events           map[string][]kernel.Event
-	transitions      map[string]transitionState
-	transitionOrder  []string
-	execution        map[string]memoryExecutionState
-	childGrants      map[string]memoryChildGrant
-	grantIdentities  map[string]string
-	ownedRetirements map[string]kernel.OwnedRetirementReceipt
-	childGrantOwners map[string]map[string]struct{}
-	executionClock   func() time.Time
-	managedAuthority kernel.ManagedAuthority
-	managedTransfers map[string]kernel.ManagedTransfer
-	managedCurrent   map[string]string
+	mu                    sync.RWMutex
+	records               map[string]kernel.Snapshot
+	creationCancellations map[string]kernel.RunCreationCancellation
+	ledgers               budget.LedgerMap
+	events                map[string][]kernel.Event
+	transitions           map[string]transitionState
+	transitionOrder       []string
+	execution             map[string]memoryExecutionState
+	childGrants           map[string]memoryChildGrant
+	grantIdentities       map[string]string
+	ownedRetirements      map[string]kernel.OwnedRetirementReceipt
+	childGrantOwners      map[string]map[string]struct{}
+	executionClock        func() time.Time
+	managedAuthority      kernel.ManagedAuthority
+	managedTransfers      map[string]kernel.ManagedTransfer
+	managedCurrent        map[string]string
 }
 
 type transitionState struct {
@@ -57,15 +58,16 @@ func NewStore() *Store {
 	return &Store{
 		ledgers: make(budget.LedgerMap),
 		records: make(map[string]kernel.Snapshot), events: make(map[string][]kernel.Event),
-		transitions:      make(map[string]transitionState),
-		execution:        make(map[string]memoryExecutionState),
-		childGrants:      make(map[string]memoryChildGrant),
-		grantIdentities:  make(map[string]string),
-		childGrantOwners: make(map[string]map[string]struct{}),
-		executionClock:   time.Now,
-		managedAuthority: newMemoryManagedAuthority(),
-		managedTransfers: make(map[string]kernel.ManagedTransfer),
-		managedCurrent:   make(map[string]string),
+		creationCancellations: make(map[string]kernel.RunCreationCancellation),
+		transitions:           make(map[string]transitionState),
+		execution:             make(map[string]memoryExecutionState),
+		childGrants:           make(map[string]memoryChildGrant),
+		grantIdentities:       make(map[string]string),
+		childGrantOwners:      make(map[string]map[string]struct{}),
+		executionClock:        time.Now,
+		managedAuthority:      newMemoryManagedAuthority(),
+		managedTransfers:      make(map[string]kernel.ManagedTransfer),
+		managedCurrent:        make(map[string]string),
 	}
 }
 
@@ -76,6 +78,10 @@ func (store *Store) Create(ctx context.Context, record kernel.Record, events []k
 	if _, exists := store.records[record.Run.ID]; exists {
 		return kernel.Snapshot{}, kernel.ErrAlreadyExists
 	}
+	if _, cancelled := store.creationCancellations[record.Run.ID]; cancelled {
+		return kernel.Snapshot{}, kernel.ErrCreationCancelled
+	}
+
 	if record.Run.ParentRunID != "" {
 		if _, err := store.childAncestorsLocked(record.Run); err != nil {
 			return kernel.Snapshot{}, err
@@ -103,6 +109,33 @@ func (store *Store) Create(ctx context.Context, record kernel.Record, events []k
 	store.events[record.Run.ID] = cloneEvents(journal)
 	store.appendCommittedTransition(record.Run, events)
 	return cloneSnapshot(snapshot), nil
+}
+
+// CancelBeforeCreate and Create share the same native mutex and ledger CAS.
+func (s *Store) CancelBeforeCreate(ctx context.Context, q kernel.RunCreationCancellation) (kernel.RunCreationCancellation, error) {
+	var zero kernel.RunCreationCancellation
+	if ctx == nil || !q.Valid() {
+		return zero, kernel.ErrInvalidInput
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return zero, err
+	}
+	if _, ok := s.records[q.RunID]; ok {
+		return zero, kernel.ErrAlreadyExists
+	}
+	if c, ok := s.creationCancellations[q.RunID]; ok {
+		if !c.MatchesSelection(q) {
+			return zero, kernel.ErrConflict
+		}
+		return c, nil
+	}
+	if err := budget.CancelBeforeEnrollment(ctx, s.ledgers, q.RunID, q.Budget); err != nil {
+		return zero, err
+	}
+	s.creationCancellations[q.RunID] = q
+	return q, nil
 }
 
 // ListEvents returns one isolated page without reading or cloning the aggregate.
