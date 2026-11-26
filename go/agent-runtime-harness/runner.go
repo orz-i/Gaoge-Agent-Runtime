@@ -281,7 +281,13 @@ func (runner *Runner) ResolveApproval(
 	if err != nil {
 		return Snapshot{}, err
 	}
-	runCtx = context.WithValue(runCtx, originalApprovalDispatchKey{}, kernel.ManagedApprovalDecision{CheckpointID: request.CheckpointID, Decision: string(request.Decision), Comment: strings.TrimSpace(request.Comment)})
+	_, nativeApproval := runner.agent.(*agent.Runner)
+	if nativeApproval {
+		if err = runner.recordApprovalRequestItem(ctx, turn, invocation, runtimeSnapshot); err != nil {
+			return Snapshot{}, err
+		}
+		runCtx = context.WithValue(runCtx, originalApprovalDispatchKey{}, kernel.ManagedApprovalDecision{CheckpointID: request.CheckpointID, Decision: string(request.Decision), Comment: strings.TrimSpace(request.Comment)})
+	}
 	resolved, resolveErr := runner.withPhysicalInvocationDispatch(runCtx, invocation, "resolve-approval", func(physicalCtx context.Context) (kernel.Snapshot, error) {
 		return runner.agent.ResolveApproval(
 			physicalCtx, runtimeSnapshot.Run.ID, runtimeSnapshot.Run.Revision,
@@ -299,8 +305,11 @@ func (runner *Runner) ResolveApproval(
 		snapshot, syncErr := runner.syncRuntimeSnapshot(ctx, turn, invocation, resolved)
 		return snapshot, errors.Join(resolveErr, syncErr)
 	}
-	if err = runner.recordApprovalDecisionItem(ctx, turn, invocation, pending, request); err != nil {
-		return Snapshot{}, errors.Join(resolveErr, err)
+	if !nativeApproval {
+		// Legacy non-native Feature does not own a native control journal.
+		if err = runner.recordApprovalDecisionItem(ctx, turn, invocation, pending, request); err != nil {
+			return Snapshot{}, errors.Join(resolveErr, err)
+		}
 	}
 	snapshot, syncErr := runner.syncRuntimeSnapshot(ctx, turn, invocation, resolved)
 	return snapshot, errors.Join(resolveErr, syncErr)

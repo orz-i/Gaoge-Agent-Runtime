@@ -267,11 +267,25 @@ example during first admission or hydration) does not acquire a new proof.
 Repeated cross-phase takeover inside a selected successor remains outside
 this proof. An independently admitted later Resume after retirement can
 qualify its own transfer. A root approval dispatch records the exact original
-checkpoint ID, decision and comment before entering native code. Managed
-closure projects that decision together with the original dispatch receipt;
-control-only approval still uses its normal receipt path and the subsequent
-independent Resume owns its own effects. Legacy approval grants without this
-evidence are not eligible for managed closure. Drain or reconcile mixed in-flight transfers before
+checkpoint ID, decision and comment before entering native code. The
+native approval control CAS journals its actual applied decision and original
+Grant identity in the existing Kernel journal, even when the next Tool
+consumption removes the resolved checkpoint. A native returned dispatch and
+a managed closure use the same Host settlement reducer under the original
+Turn lock: the exact Approval Completed fact and physical dispatch receipt
+are appended atomically. A matching earlier approval projection is consumed
+idempotently; foreign, duplicate or contradictory decisions cannot qualify
+a new dispatch or transfer. A returned callback alone does not prove the
+approval was applied. No-entry or a known returned but unapplied original
+gate can close without an approval completion; uncertain returns stay fenced.
+This also applies to independently owned local Named Agent approvals.
+Control-only approval uses the same native control/return evidence, and the
+subsequent independently admitted Resume owns its own effects. Non-native
+and parent-owned borrowed controls retain their existing distinct custody.
+Legacy two-field approval grants and older captured approvals without the
+native applied marker cannot be upgraded by inferring a decision from a
+terminal Run. Reconcile in-flight approvals before upgrading or downgrading.
+Drain or reconcile mixed in-flight transfers before
 downgrading to readers that cannot validate the extended safe-point phases.
 
 Ordinary native Start, Resume and approval dispatches also have a receipt-only

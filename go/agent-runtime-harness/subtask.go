@@ -445,6 +445,18 @@ func (runner *Runner) ResolveSubtaskApproval(ctx context.Context, turnID, taskID
 	if err != nil || invocation.ParentItemID == "" || invocation.ExecutionRefID != task.RunID || invocation.TurnID != turn.ID {
 		return Snapshot{}, errors.Join(ErrConflict, err)
 	}
+	_, nativeApproval := runner.agent.(*agent.Runner)
+	// Independently owned local delegates have the same native approval
+	// Grant as a root. Parented control retains its separate legacy custody.
+	nativeApproval = nativeApproval && snapshot.Run.ParentRunID == ""
+	if nativeApproval {
+		// The displayed Subtask may precede the standalone approval Item.
+		// Freeze the exact native pending request before dispatch admission.
+		if err = runner.recordApprovalRequestItem(ctx, turn, invocation, snapshot); err != nil {
+			return Snapshot{}, err
+		}
+		ctx = context.WithValue(ctx, originalApprovalDispatchKey{}, kernel.ManagedApprovalDecision{CheckpointID: checkpointID, Decision: string(request.Decision), Comment: strings.TrimSpace(request.Comment)})
+	}
 	resolved, resolveErr := runner.withPhysicalSubtaskApprovalDispatch(
 		ctx, invocation, task.RunID, snapshot.Run.Revision, checkpointID,
 		func(physicalCtx context.Context) (kernel.Snapshot, error) {
@@ -458,8 +470,10 @@ func (runner *Runner) ResolveSubtaskApproval(ctx context.Context, turnID, taskID
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if err = runner.recordApprovalDecisionItem(ctx, turn, invocation, pending, request); err != nil {
-		return Snapshot{}, err
+	if !nativeApproval {
+		if err = runner.recordApprovalDecisionItem(ctx, turn, invocation, pending, request); err != nil {
+			return Snapshot{}, err
+		}
 	}
 	if err = runner.syncSubtaskItems(ctx, turn); err != nil {
 		return Snapshot{}, err

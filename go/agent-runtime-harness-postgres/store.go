@@ -1572,6 +1572,11 @@ func appendItemTx(tx *gorm.DB, value harness.Item, outcome *itemAppendOutcome) e
 		return err
 	}
 	value.Seq = seq
+	if value.ParentItemID == harness.ExecutionDispatchParentItemID {
+		if err := checkOriginalApprovalAdmissionTx(tx, value); err != nil {
+			return err
+		}
+	}
 	if value.Kind == harness.ItemSubtask {
 		facts, err := cancellationEffectFactsTx(tx, value.TurnID)
 		if err != nil {
@@ -1592,6 +1597,33 @@ func appendItemTx(tx *gorm.DB, value harness.Item, outcome *itemAppendOutcome) e
 	}
 	if err := checkInteractionAuthorityAppendTx(tx, value); err != nil {
 		return err
+	}
+	if harness.IsExecutionDispatchCompletionID(value.ID) {
+		grant, found, err := findItem(tx, value.ParentItemID)
+		if err != nil {
+			return err
+		}
+		if !found || !harness.ValidOriginalApprovalSettlement(tx.Statement.Context, grant, value) {
+			return harness.ErrConflict
+		}
+		decision, insert, err := planOriginalApprovalTx(tx, grant, value)
+		if err != nil {
+			return err
+		}
+		if insert {
+			decision.Seq = value.Seq
+			row, err := itemToRecord(decision)
+			if err != nil {
+				return err
+			}
+			if err = tx.Create(&row).Error; err != nil {
+				return err
+			}
+			value.Seq, err = nextItemSeq(tx, value.TurnID)
+			if err != nil {
+				return err
+			}
+		}
 	}
 	record, err := itemToRecord(value)
 	if err != nil {

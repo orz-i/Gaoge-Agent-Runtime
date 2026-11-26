@@ -116,7 +116,8 @@ func (s *MemoryStore) managedReservedCompletionLocked(item Item) bool {
 		if s.managedClosures[r.Binding.DispatchID] != "" {
 			continue
 		}
-		if item.ParentItemID == r.Binding.DispatchID || (r.Mode == kernel.ManagedCancel && item.ParentItemID == r.Cancellation.IntentID) {
+		approvalParent, _ := OriginalApprovalRequestID(s.itemIDs[r.Binding.DispatchID])
+		if item.ParentItemID == r.Binding.DispatchID || (approvalParent != "" && item.ParentItemID == approvalParent) || (r.Mode == kernel.ManagedCancel && item.ParentItemID == r.Cancellation.IntentID) {
 			return true
 		}
 	}
@@ -156,6 +157,18 @@ func (s *MemoryStore) CloseManagedRecovery(ctx context.Context, p kernel.Managed
 	if err != nil {
 		return err
 	}
+	grant := s.itemIDs[b.DispatchID]
+	// Assign a prospective sequence before using the same settlement
+	// reducer as ordinary AppendItem; nothing is written until all facts
+	// validate. Existing exact approval decisions are not appended again.
+	additions[0].Seq = uint64(len(s.items[b.TurnID]) + 1)
+	decision, insert, err := s.planOriginalApprovalLocked(grant, additions[0])
+	if err != nil {
+		return err
+	}
+	if insert {
+		additions = append([]Item{decision}, additions...)
+	}
 	for _, item := range additions {
 		if _, exists := s.itemIDs[item.ID]; exists || len(s.itemChildren[item.ParentItemID]) != 0 {
 			return ErrConflict
@@ -163,9 +176,7 @@ func (s *MemoryStore) CloseManagedRecovery(ctx context.Context, p kernel.Managed
 	}
 	for _, item := range additions {
 		item.Seq = uint64(len(s.items[item.TurnID]) + 1)
-		s.items[item.TurnID] = append(s.items[item.TurnID], cloneItem(item))
-		s.itemIDs[item.ID] = cloneItem(item)
-		s.itemChildren[item.ParentItemID] = append(s.itemChildren[item.ParentItemID], cloneItem(item))
+		s.appendSettlementItemLocked(item)
 	}
 	s.managedClosures[b.DispatchID] = digest
 	return nil
@@ -177,4 +188,31 @@ func (s *MemoryStore) readManagedRecoverySourceLocked(b kernel.ManagedHostBindin
 	}
 	t := s.turns[b.TurnID]
 	return ValidateManagedOriginalRows(s.managedAuthority, b, s.sessions[t.SessionID], t, s.invocations[b.InvocationID], s.configs[t.ConfigSnapshotID], s.itemIDs[b.DispatchID], nil)
+}
+
+// planOriginalApprovalLocked reads all globally indexed children. An
+// occupied canonical decision ID under a different parent cannot be adopted.
+func (s *MemoryStore) planOriginalApprovalLocked(grant, receipt Item) (Item, bool, error) {
+	parent, ok := OriginalApprovalRequestID(grant)
+	if !ok {
+		return Item{}, false, nil
+	}
+	decision, insert, err := PlanOriginalApprovalSettlement(grant, receipt, s.itemIDs[parent], s.itemChildren[parent])
+	if err != nil {
+		return Item{}, false, err
+	}
+	if insert {
+		if _, exists := s.itemIDs[decision.ID]; exists {
+			return Item{}, false, ErrConflict
+		}
+	}
+	return decision, insert, nil
+}
+func (s *MemoryStore) appendSettlementItemLocked(item Item) {
+	item = cloneItem(item)
+	s.items[item.TurnID] = append(s.items[item.TurnID], item)
+	s.itemIDs[item.ID] = item
+	if item.ParentItemID != "" {
+		s.itemChildren[item.ParentItemID] = append(s.itemChildren[item.ParentItemID], item)
+	}
 }

@@ -67,7 +67,7 @@ func executionDispatchFields(raw json.RawMessage) (map[string]string, bool) {
 		return fields, true
 	}
 	fields, ok := authorityStringFields(raw, "phase", "physicalRunID", "checkpointID", "decision", "comment")
-	if !ok || fields["phase"] != "resolve-approval" {
+	if !ok || (fields["phase"] != "resolve-approval" && fields["phase"] != "resolve-subtask-approval") {
 		return nil, false
 	}
 	a := kernel.ManagedApprovalDecision{CheckpointID: fields["checkpointID"], Decision: fields["decision"], Comment: fields["comment"]}
@@ -75,7 +75,7 @@ func executionDispatchFields(raw json.RawMessage) (map[string]string, bool) {
 }
 func originalDispatchApproval(grant Item) (*kernel.ManagedApprovalDecision, bool) {
 	fields, ok := executionDispatchFields(grant.Payload)
-	if !ok || fields["phase"] != "resolve-approval" || fields["checkpointID"] == "" {
+	if !ok || (fields["phase"] != "resolve-approval" && fields["phase"] != "resolve-subtask-approval") || fields["checkpointID"] == "" {
 		return nil, false
 	}
 	return &kernel.ManagedApprovalDecision{CheckpointID: fields["checkpointID"], Decision: fields["decision"], Comment: fields["comment"]}, true
@@ -102,6 +102,9 @@ func ValidExecutionDispatchGrantAdmission(grant Item) (string, bool) {
 			return phase, true
 		}
 	case "resolve-subtask-approval", "resolve-wait":
+		if original["checkpointID"] != "" && original["physicalRunID"] != grant.RunID {
+			return "", false
+		}
 		// These explicitly target a proven descendant Kernel Run, not
 		// necessarily the owning Harness Invocation's root Run. The
 		// final physical call separately checks the child association.
@@ -179,6 +182,10 @@ func VerifiedExecutionDispatchReceipt(grant Item, receipts []Item) (string, bool
 		// original Agent call with acknowledged no-entry may close this.
 		if phase == "start" || phase == "start-retry" || phase == "resume" ||
 			phase == "resolve-approval" || phase == "resolve-subtask-approval" {
+			return payload["boundary"], true
+		}
+	case approvalNotAppliedBoundary:
+		if _, ok := originalDispatchApproval(grant); ok {
 			return payload["boundary"], true
 		}
 	case "native_agent_control_no_effect":
@@ -533,7 +540,7 @@ func (runner *Runner) beginPhysicalInvocationDispatch(
 		Phase         string `json:"phase"`
 		PhysicalRunID string `json:"physicalRunID,omitempty"`
 	}{Phase: phase, PhysicalRunID: physicalRunID})
-	if approval, ok := ctx.Value(originalApprovalDispatchKey{}).(kernel.ManagedApprovalDecision); ok && phase == "resolve-approval" {
+	if approval, ok := ctx.Value(originalApprovalDispatchKey{}).(kernel.ManagedApprovalDecision); ok && (phase == "resolve-approval" || phase == "resolve-subtask-approval") {
 		if !approval.Valid() {
 			return Item{}, ErrInvalidRequest
 		}
@@ -661,6 +668,13 @@ func (runner *Runner) requireLiveInvocationParents(ctx context.Context, invocati
 }
 
 func (runner *Runner) finishPhysicalDispatchGrant(ctx context.Context, grant Item, boundary string) error {
+	// The caller may have disconnected while the physical Feature returned.
+	settlementCtx, stopSettlement := cancellationSettlementContext(ctx)
+	defer stopSettlement()
+	settlementCtx, boundary, err := runner.qualifyApprovalSettlement(settlementCtx, grant, boundary)
+	if err != nil {
+		return err
+	}
 	now := runner.clock.Now().UTC()
 	payload, err := json.Marshal(struct {
 		Boundary string `json:"boundary"`
@@ -668,17 +682,18 @@ func (runner *Runner) finishPhysicalDispatchGrant(ctx context.Context, grant Ite
 	if err != nil {
 		return err
 	}
-	// The caller may have disconnected while the physical Feature returned.
-	// Preserve the completion opportunity, but never wait unboundedly on a
-	// blocked Store row. An expired/lost ACK is not a settled grant.
-	settlementCtx, stopSettlement := cancellationSettlementContext(ctx)
-	defer stopSettlement()
-	_, _, err = runner.store.AppendItem(settlementCtx, Item{
-		ID: stableID("hdispatchdone", grant.ID), TurnID: grant.TurnID,
-		InvocationID: grant.InvocationID, RunID: grant.RunID,
-		Kind: ItemDiagnostic, Status: ItemCompleted,
-		ParentItemID: grant.ID,
-		Payload:      payload, CreatedAt: now, UpdatedAt: now,
+	_, fresh, err := runner.store.AppendItem(settlementCtx, Item{
+		ID: stableID("hdispatchdone", grant.ID), TurnID: grant.TurnID, InvocationID: grant.InvocationID, RunID: grant.RunID,
+		Kind: ItemDiagnostic, Status: ItemCompleted, ParentItemID: grant.ID, Payload: payload, CreatedAt: now, UpdatedAt: now,
 	})
+	if err == nil && fresh && boundary == "physical_dispatch_returned" && runner.turnFeed != nil {
+		if a, ok := originalDispatchApproval(grant); ok {
+			// Durable projection was part of the Store transaction. The
+			// feed is only a live notification, not a second write.
+			if item, e := runner.store.GetItem(settlementCtx, stableID("hia", grant.TurnID, a.CheckpointID, "decision")); e == nil {
+				publishItemFact(settlementCtx, runner.turnFeed, item)
+			}
+		}
+	}
 	return errors.Join(err, settlementCtx.Err())
 }

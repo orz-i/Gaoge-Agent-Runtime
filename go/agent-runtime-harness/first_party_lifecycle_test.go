@@ -209,6 +209,15 @@ func exerciseFirstPartyLifecycle(t *testing.T, mode, profile string) {
 				if g, e := base.LookupChildExecution(ctx, task.RunID); e != nil || g != cut.grant {
 					t.Fatalf("unknown child fence lost: %v", e)
 				}
+				facts, e := store.ListItems(ctx, pending.Turn.ID, 0, 1000)
+				if e != nil {
+					t.Fatal(e)
+				}
+				for _, i := range facts {
+					if i.Kind == harness.ItemApproval && i.Status == harness.ItemCompleted && i.RunID == task.RunID {
+						t.Fatal("unknown child callback fabricated approval closure")
+					}
+				}
 				return
 			}
 			if err != nil {
@@ -226,6 +235,31 @@ func exerciseFirstPartyLifecycle(t *testing.T, mode, profile string) {
 		if err != nil {
 			t.Fatalf("reopen could not continue original parent: status=%s err=%v", approved.Turn.Status, err)
 		}
+	}
+	facts, e := store.ListItems(ctx, approved.Turn.ID, 0, 1000)
+	if e != nil {
+		t.Fatal(e)
+	}
+	decisions := 0
+	for _, i := range facts {
+		if i.Kind != harness.ItemApproval || i.Status != harness.ItemCompleted || i.RunID != task.RunID {
+			continue
+		}
+		var decision struct {
+			Subtask                         bool
+			CheckpointID, Decision, Comment string
+		}
+		if json.Unmarshal(i.Payload, &decision) != nil || !decision.Subtask || decision.CheckpointID != task.Approval.CheckpointID || decision.Decision != "approve" || decision.Comment != "" {
+			t.Fatalf("child decision lost: %s", i.Payload)
+		}
+		decisions++
+	}
+	wantDecisions := 1
+	if mode == "cancel child" {
+		wantDecisions = 0
+	}
+	if decisions != wantDecisions {
+		t.Fatalf("child approval decision count=%d want=%d", decisions, wantDecisions)
 	}
 	if input.reads[task.RunID] != 0 {
 		t.Fatal("child read supervisor input during resumed approval")

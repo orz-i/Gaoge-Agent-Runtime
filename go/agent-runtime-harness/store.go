@@ -130,6 +130,12 @@ type Store interface {
 	// insertion MUST serialize against these grants on the same Turn lock.
 	// Runner-bound cancellation admission MUST also recheck its exact immutable
 	// Root/target Attempt in that same critical section (CancellationAttemptForStore).
+	// Captured native approval dispatches additionally require the exact
+	// original waiting request and no decision at fresh admission. On
+	// completion, the Store verifies ValidOriginalApprovalSettlement and
+	// uses PlanOriginalApprovalSettlement under the same Turn lock to
+	// atomically append the decision (unless already exact) and receipt.
+	// Managed closure uses the same reducer with its opaque closure proof.
 	// Custom Stores must implement the hard-cut semantics; a loose
 	// append-only implementation is no longer a safe execution Store.
 	AppendItem(context.Context, Item) (Item, bool, error)

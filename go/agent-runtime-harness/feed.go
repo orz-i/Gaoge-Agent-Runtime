@@ -385,12 +385,16 @@ func appendItemFactWithAdmission(
 	if err != nil || !created || feed == nil {
 		return createdItem, created, err
 	}
-	raw, marshalErr := json.Marshal(createdItem)
+	publishItemFact(ctx, feed, createdItem)
+	return createdItem, created, nil
+}
+
+func publishItemFact(ctx context.Context, feed *TurnFeed, item Item) {
+	raw, marshalErr := json.Marshal(item)
 	if marshalErr == nil {
-		_, _ = feed.Publish(ctx, createdItem.TurnID, TurnEventDraft{
-			Type: turnEventTypeForItem(createdItem), ItemID: itemLifecycleID(createdItem), ItemKind: createdItem.Kind,
-			Data: raw, Status: string(createdItem.Status),
+		_, _ = feed.Publish(ctx, item.TurnID, TurnEventDraft{
+			Type: turnEventTypeForItem(item), ItemID: itemLifecycleID(item), ItemKind: item.Kind,
+			Data: raw, Status: string(item.Status),
 		})
 	}
-	return createdItem, created, nil
 }

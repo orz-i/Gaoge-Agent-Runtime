@@ -1009,6 +1009,17 @@ func (store *MemoryStore) AppendItem(ctx context.Context, value Item) (Item, boo
 		}
 	}
 	value.Seq = uint64(len(store.items[value.TurnID]) + 1)
+	if value.ParentItemID == ExecutionDispatchParentItemID {
+		if parent, ok := OriginalApprovalRequestID(value); ok {
+			decision, err := PlanOriginalApprovalAdmission(value, store.itemIDs[parent], store.itemChildren[parent])
+			if err != nil {
+				return Item{}, false, err
+			}
+			if _, exists := store.itemIDs[decision.ID]; exists {
+				return Item{}, false, ErrConflict
+			}
+		}
+	}
 	if value.Kind == ItemSubtask {
 		facts, err := store.globalPhysicalEvidenceLocked(value.TurnID)
 		if err != nil {
@@ -1062,6 +1073,8 @@ func (store *MemoryStore) AppendItem(ctx context.Context, value Item) (Item, boo
 			return Item{}, false, ErrConflict
 		}
 	}
+	var approval Item
+	var appendApproval bool
 	if grant, found := store.itemIDs[value.ParentItemID]; found &&
 		grant.Kind == ItemDiagnostic && grant.Status == ItemStarted &&
 		grant.ParentItemID == ExecutionDispatchParentItemID {
@@ -1077,13 +1090,21 @@ func (store *MemoryStore) AppendItem(ctx context.Context, value Item) (Item, boo
 		if len(store.itemChildren[grant.ID]) != 0 {
 			return Item{}, false, ErrConflict
 		}
+		if !ValidOriginalApprovalSettlement(ctx, grant, value) {
+			return Item{}, false, ErrConflict
+		}
+		var err error
+		approval, appendApproval, err = store.planOriginalApprovalLocked(grant, value)
+		if err != nil {
+			return Item{}, false, err
+		}
 	}
-	value = cloneItem(value)
-	store.items[value.TurnID] = append(store.items[value.TurnID], value)
-	store.itemIDs[value.ID] = value
-	if value.ParentItemID != "" {
-		store.itemChildren[value.ParentItemID] = append(store.itemChildren[value.ParentItemID], value)
+	if appendApproval {
+		approval.Seq = value.Seq
+		store.appendSettlementItemLocked(approval)
+		value.Seq++
 	}
+	store.appendSettlementItemLocked(value)
 	return cloneItem(value), true, nil
 }
 

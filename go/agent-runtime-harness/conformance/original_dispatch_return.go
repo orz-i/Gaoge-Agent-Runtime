@@ -24,6 +24,32 @@ type returnedDispatchKernelCut struct {
 	grant kernel.ChildExecutionGrant
 }
 
+var errApprovalControlCut = errors.New("original approval control interrupted")
+
+func (s *returnedDispatchKernelCut) CheckOwnedPhysicalEntry(ctx context.Context, g kernel.ChildExecutionGrant, l kernel.ExecutionLease, v kernel.Snapshot) (kernel.OwnedPhysicalEntryWindow, error) {
+	if s.cut == "approval-no-entry" {
+		return kernel.OwnedPhysicalEntryWindow{}, errApprovalControlCut
+	}
+	return s.noEntryKernelPorts.CheckOwnedPhysicalEntry(ctx, g, l, v)
+}
+func (s *returnedDispatchKernelCut) ApplyControl(ctx context.Context, id string, rev uint64, g kernel.ControlGuard, m kernel.StoreMutation) (kernel.Snapshot, bool, error) {
+	if g.Kind == kernel.ControlApproval && s.cut == "approval-control-before" {
+		return kernel.Snapshot{}, false, errApprovalControlCut
+	}
+	v, revoked, err := s.noEntryKernelPorts.ApplyControl(ctx, id, rev, g, m)
+	if err == nil && g.Kind == kernel.ControlApproval && s.cut == "approval-control-after" {
+		return kernel.Snapshot{}, false, errApprovalControlCut
+	}
+	return v, revoked, err
+}
+
+type substitutedApprovalHandler struct{ plugin.ApprovalHandler }
+
+func (h substitutedApprovalHandler) ResolveToolApproval(c *kernel.Checkpoint, r plugin.ApprovalResponse) (*kernel.Checkpoint, error) {
+	r.Comment = "substituted"
+	return h.ApprovalHandler.ResolveToolApproval(c, r)
+}
+
 func (s *returnedDispatchKernelCut) RecordOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, o kernel.OwnedPhysicalCallbackOutcome, p kernel.OwnedPhysicalCallbackReturn) error {
 	if s.cut != "" {
 		s.grant = g
@@ -104,6 +130,9 @@ func OriginalDispatchReturn(t *testing.T, factory func(*testing.T) (kernel.Store
 		}
 		t.Run(phase+"/rejected", func(t *testing.T) { exerciseOriginalDispatchReturn(t, factory, phase, "return-after", true) })
 	}
+	for _, cut := range []string{"approval-no-entry", "approval-not-applied", "approval-control-before", "approval-control-after", "approval-user-rejected", "approval-conflict-admission"} {
+		t.Run("approval/"+cut, func(t *testing.T) { exerciseOriginalDispatchReturn(t, factory, "approval", cut, false) })
+	}
 }
 func exerciseOriginalDispatchReturn(t *testing.T, factory func(*testing.T) (kernel.Store, harness.Store, func() (kernel.Store, harness.Store)), phase, cut string, rejected bool) {
 	t.Helper()
@@ -143,7 +172,11 @@ func exerciseOriginalDispatchReturn(t *testing.T, factory func(*testing.T) (kern
 		if e != nil {
 			t.Fatal(e)
 		}
-		native, e := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: provider, Catalog: reg, Executor: reg, Approvals: interactionadapter.New(approvals), ApprovalPolicies: []plugin.ApprovalPolicy{policy}})
+		var approvalHandler plugin.ApprovalHandler = interactionadapter.New(approvals)
+		if k == kcut && cut == "approval-not-applied" {
+			approvalHandler = substitutedApprovalHandler{approvalHandler}
+		}
+		native, e := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: provider, Catalog: reg, Executor: reg, Approvals: approvalHandler, ApprovalPolicies: []plugin.ApprovalPolicy{policy}})
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -186,8 +219,99 @@ func exerciseOriginalDispatchReturn(t *testing.T, factory func(*testing.T) (kern
 			checkpoint = s.Checkpoint.ID
 		}
 	}
-	kcut.cut = cut
+	if cut == "approval-conflict-admission" {
+		root, _ := harness.TopLevelInvocation(initial)
+		parentID := fixtureStableID("hia", turnID, checkpoint)
+		parent, err := host.GetItem(ctx, parentID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fact := harness.Item{ID: fixtureStableID("hia", turnID, checkpoint, "decision"), TurnID: turnID, RunID: root.ExecutionRefID, InvocationID: root.ID, Kind: harness.ItemApproval, Status: harness.ItemCompleted, ParentItemID: parentID,
+			Payload: json.RawMessage(`{"checkpointID":"` + checkpoint + `","decision":"reject","comment":"contradictory"}`), CreatedAt: parent.CreatedAt, UpdatedAt: parent.UpdatedAt}
+		if _, _, err = host.AppendItem(ctx, fact); err != nil {
+			t.Fatal(err)
+		}
+		_, err = r.ResolveApproval(ctx, turnID, harness.ResolveApprovalRequest{CheckpointID: checkpoint, Decision: harness.ApprovalApprove, Comment: "original decision"})
+		if !errors.Is(err, harness.ErrConflict) || provider.calls != 1 || writes != 0 {
+			t.Fatalf("contradictory prior decision admitted effects: %v %d/%d", err, provider.calls, writes)
+		}
+		items, err := host.ListItems(ctx, turnID, 0, 1000)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, item := range items {
+			if phase, ok := harness.VerifiedExecutionDispatchGrant(item); ok && phase == "resolve-approval" {
+				t.Fatal("conflicting decision acquired new dispatch")
+			}
+		}
+		return
+	}
+	if cut == "approval-user-rejected" {
+		// Same terminal-return fault, but the original Host explicitly
+		// denied the write. No effect may be invented on replay.
+		kcut.cut = "return-after"
+	} else {
+		kcut.cut = cut
+	}
 	hcut.cut = cut
+	if cut == "approval-no-entry" || cut == "approval-not-applied" || cut == "approval-control-before" || cut == "approval-control-after" {
+		_, err := r.ResolveApproval(ctx, turnID, harness.ResolveApprovalRequest{CheckpointID: checkpoint, Decision: harness.ApprovalApprove, Comment: "original decision"})
+		if err == nil {
+			t.Fatal("approval failure cut missed")
+		}
+		root, _ := harness.TopLevelInvocation(initial)
+		native, err := rt.Load(ctx, root.ExecutionRefID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		items, err := host.ListItems(ctx, turnID, 0, 1000)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantApplied := cut == "approval-control-after"
+		wantDecision := 0
+		if wantApplied {
+			wantDecision = 1
+		}
+		assertOriginalApprovalDecision(t, items, checkpoint, "approve", "original decision", wantDecision)
+		if provider.calls != 1 || writes != 0 || native.Checkpoint == nil || native.Checkpoint.ID != checkpoint {
+			t.Fatal("approval control cut dispatched or changed the original gate")
+		}
+		var dispatch harness.Item
+		for _, i := range items {
+			if p, ok := harness.VerifiedExecutionDispatchGrant(i); ok && p == "resolve-approval" {
+				dispatch = i
+			}
+		}
+		applied, err := rt.CommittedApprovalDispatch(ctx, root.ExecutionRefID, dispatch.ID, kernel.ManagedApprovalDecision{CheckpointID: checkpoint, Decision: "approve", Comment: "original decision"})
+		if err != nil || applied != wantApplied {
+			t.Fatalf("wrong native approval marker: %t %v", applied, err)
+		}
+		if harness.PendingExecutionDispatch(items, root.ID) {
+			t.Fatal("known returned control did not close")
+		}
+		backing, host = reopen()
+		r, _, _ = makeRunner(backing, host)
+		if wantApplied {
+			if native.Checkpoint.Status != kernel.CheckpointResolved {
+				t.Fatal("original approval not committed")
+			}
+			if _, err = r.Refresh(ctx, turnID); err != nil {
+				t.Fatal(err)
+			}
+			initial, err = r.ResumeTurn(ctx, turnID)
+		} else {
+			if native.Checkpoint.Status != kernel.CheckpointPending {
+				t.Fatal("unapplied approval resolved the gate")
+			}
+			initial, err = r.ResolveApproval(ctx, turnID, harness.ResolveApprovalRequest{CheckpointID: checkpoint, Decision: harness.ApprovalApprove, Comment: "original decision"})
+		}
+		if err != nil || initial.Turn.Status != harness.TurnCompleted || provider.calls != 2 || writes != 1 {
+			t.Fatalf("original control did not finish exactly once: %v %s %d/%d", err, initial.Turn.Status, provider.calls, writes)
+		}
+		assertOriginalApprovalDecision(t, initial.Items, checkpoint, "approve", "original decision", 1)
+		return
+	}
 	func() {
 		defer func() {
 			if _, ok := recover().(dispatchReturnInterrupted); !ok {
@@ -200,7 +324,11 @@ func exerciseOriginalDispatchReturn(t *testing.T, factory func(*testing.T) (kern
 		case "resume":
 			_, _ = r.ResumeTurn(ctx, turnID)
 		case "approval":
-			_, _ = r.ResolveApproval(ctx, turnID, harness.ResolveApprovalRequest{CheckpointID: checkpoint, Decision: harness.ApprovalApprove, Comment: "original decision"})
+			decision := harness.ApprovalApprove
+			if cut == "approval-user-rejected" {
+				decision = harness.ApprovalReject
+			}
+			_, _ = r.ResolveApproval(ctx, turnID, harness.ResolveApprovalRequest{CheckpointID: checkpoint, Decision: decision, Comment: "original decision"})
 		}
 	}()
 	pending, e := r.Load(ctx, turnID)
@@ -228,7 +356,7 @@ func exerciseOriginalDispatchReturn(t *testing.T, factory func(*testing.T) (kern
 		wantCalls = 2
 	}
 	wantWrites := 0
-	if phase == "approval" {
+	if phase == "approval" && cut != "approval-user-rejected" {
 		wantWrites = 1
 	}
 	if provider.calls != wantCalls || writes != wantWrites {
@@ -254,6 +382,25 @@ func exerciseOriginalDispatchReturn(t *testing.T, factory func(*testing.T) (kern
 	if dispatch.ID == "" || harness.PendingExecutionDispatch(items, root.ID) != (cut != "host-after") {
 		t.Fatal("wrong original dispatch cut")
 	}
+	originalDecision := "approve"
+	if cut == "approval-user-rejected" {
+		originalDecision = "reject"
+	}
+	if phase == "approval" {
+		want := 0
+		if cut == "host-after" {
+			want = 1
+		}
+		assertOriginalApprovalDecision(t, items, checkpoint, originalDecision, "original decision", want)
+		applied, err := rt.CommittedApprovalDispatch(ctx, root.ExecutionRefID, dispatch.ID, kernel.ManagedApprovalDecision{CheckpointID: checkpoint, Decision: originalDecision, Comment: "original decision"})
+		if err != nil || !applied {
+			t.Fatalf("native applied decision missing: %v", err)
+		}
+		bad, err := rt.CommittedApprovalDispatch(ctx, root.ExecutionRefID, dispatch.ID, kernel.ManagedApprovalDecision{CheckpointID: checkpoint, Decision: originalDecision, Comment: "substituted"})
+		if err == nil || bad {
+			t.Fatal("substituted decision acquired native proof")
+		}
+	}
 	op := plugin.RunStart
 	switch phase {
 	case "resume":
@@ -278,6 +425,17 @@ func exerciseOriginalDispatchReturn(t *testing.T, factory func(*testing.T) (kern
 		done, e = r.Refresh(ctx, turnID)
 	}
 	if cut == "return-before" {
+		if phase == "approval" {
+			forged := harness.Item{ID: fixtureStableID("hdispatchdone", dispatch.ID), TurnID: dispatch.TurnID, InvocationID: dispatch.InvocationID, RunID: dispatch.RunID, Kind: harness.ItemDiagnostic, Status: harness.ItemCompleted, ParentItemID: dispatch.ID, Payload: json.RawMessage(`{"boundary":"physical_dispatch_returned"}`), CreatedAt: dispatch.CreatedAt, UpdatedAt: dispatch.UpdatedAt}
+			if _, _, err := host.AppendItem(ctx, forged); !errors.Is(err, harness.ErrConflict) {
+				t.Fatalf("raw Host receipt projected approval: %v", err)
+			}
+			facts, err := host.ListItems(ctx, turnID, 0, 1000)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertOriginalApprovalDecision(t, facts, checkpoint, originalDecision, "original decision", 0)
+		}
 		if !errors.Is(e, harness.ErrExecutionOutcomeUnknown) {
 			t.Fatalf("unknown callback allowed terminal projection: %v", e)
 		}
@@ -304,8 +462,33 @@ func exerciseOriginalDispatchReturn(t *testing.T, factory func(*testing.T) (kern
 		}
 	}
 	items, e = host.ListItems(ctx, turnID, 0, 1000)
+	if phase == "approval" {
+		assertOriginalApprovalDecision(t, items, checkpoint, originalDecision, "original decision", 1)
+	}
 	boundary, valid := harness.VerifiedExecutionDispatchReceipt(dispatch, items)
 	if e != nil || harness.PendingExecutionDispatch(items, root.ID) || !valid || boundary != "physical_dispatch_returned" || provider.calls != wantCalls || writes != wantWrites {
 		t.Fatalf("original Host receipt/effects mismatch: %q %t %v %d/%d", boundary, valid, e, provider.calls, writes)
+	}
+}
+
+func assertOriginalApprovalDecision(t *testing.T, items []harness.Item, checkpoint, decision, comment string, want int) {
+	t.Helper()
+	count := 0
+	for _, item := range items {
+		if item.Kind != harness.ItemApproval || item.Status != harness.ItemCompleted {
+			continue
+		}
+		var fact struct {
+			CheckpointID string
+			Decision     string
+			Comment      string
+		}
+		if json.Unmarshal(item.Payload, &fact) != nil || fact.CheckpointID != checkpoint || fact.Decision != decision || fact.Comment != comment {
+			t.Fatalf("wrong decision: %s", item.Payload)
+		}
+		count++
+	}
+	if count != want {
+		t.Fatalf("original decision count=%d want=%d", count, want)
 	}
 }

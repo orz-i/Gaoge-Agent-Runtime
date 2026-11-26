@@ -136,7 +136,7 @@ func (runner *Runner) recoverReturnedChildApprovals(ctx context.Context, turn Tu
 		if terminalInvocationStatus(owner.Status) {
 			continue
 		}
-		fields, valid := authorityStringFields(dispatch.Payload, "phase", "physicalRunID")
+		fields, valid := executionDispatchFields(dispatch.Payload)
 		if !valid || fields["physicalRunID"] != owner.ExecutionRefID {
 			return ErrConflict
 		}

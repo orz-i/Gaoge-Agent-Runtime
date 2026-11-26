@@ -229,7 +229,18 @@ func checkManagedCompletionTx(tx *gorm.DB, item harness.Item) error {
 		if json.Unmarshal([]byte(row.RecordJSON), &r) != nil || !r.Valid() {
 			return harness.ErrConflict
 		}
-		if item.ParentItemID == r.Binding.DispatchID || (r.Mode == kernel.ManagedCancel && item.ParentItemID == r.Cancellation.IntentID) {
+		var approvalParent string
+		if r.Binding.Approval != nil {
+			grant, found, err := findItem(tx, r.Binding.DispatchID)
+			if err != nil {
+				return err
+			}
+			if !found {
+				return harness.ErrConflict
+			}
+			approvalParent, _ = harness.OriginalApprovalRequestID(grant)
+		}
+		if item.ParentItemID == r.Binding.DispatchID || (approvalParent != "" && item.ParentItemID == approvalParent) || (r.Mode == kernel.ManagedCancel && item.ParentItemID == r.Cancellation.IntentID) {
 			return harness.ErrConflict
 		}
 	}
@@ -280,6 +291,24 @@ func (s *Store) CloseManagedRecovery(ctx context.Context, p kernel.ManagedClosur
 		additions, err := harness.ManagedClosureItems(p, r)
 		if err != nil {
 			return err
+		}
+		grant, found, err := findItem(tx, b.DispatchID)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return harness.ErrConflict
+		}
+		additions[0].Seq, err = nextItemSeq(tx, b.TurnID)
+		if err != nil {
+			return err
+		}
+		decision, insert, err := planOriginalApprovalTx(tx, grant, additions[0])
+		if err != nil {
+			return err
+		}
+		if insert {
+			additions = append([]harness.Item{decision}, additions...)
 		}
 		for _, item := range additions {
 			var n int64

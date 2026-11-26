@@ -1041,6 +1041,12 @@ func (runner *Runner) resolveApproval(
 	if !validResolvedApproval(snapshot.Checkpoint, resolved, response.Decision) {
 		return kernel.Snapshot{}, ErrApprovalRequired
 	}
+	if g := runner.activeRootGrant; g != nil && g.AdmissionOperation == "approval" {
+		var applied plugin.ApprovalResponse
+		if json.Unmarshal(resolved.Response, &applied) != nil || applied.Decision != response.Decision || applied.Comment != strings.TrimSpace(response.Comment) {
+			return snapshot, ErrApprovalRequired
+		}
+	}
 	if response.Decision == plugin.ApprovalReject {
 		// Rejection is also a resolved checkpoint, not an unproven nil.
 		return runner.resumeRejected(ctx, snapshot, state, response, resolved)

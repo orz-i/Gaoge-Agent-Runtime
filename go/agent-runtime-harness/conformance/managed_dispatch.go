@@ -2,6 +2,8 @@ package conformance
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -18,9 +20,10 @@ import (
 )
 
 type dispatchFrontierModel struct {
-	approval bool
-	late     bool
-	requests []model.Request
+	approval              bool
+	continueAfterApproval bool
+	late                  bool
+	requests              []model.Request
 }
 
 func (m *dispatchFrontierModel) Generate(ctx context.Context, r model.Request) (model.Response, error) {
@@ -31,10 +34,21 @@ func (m *dispatchFrontierModel) Generate(ctx context.Context, r model.Request) (
 		}
 		return model.Response{Content: "continue original", Continue: true}, nil
 	}
+	if m.continueAfterApproval && len(m.requests) == 2 {
+		return model.Response{Content: "approved result, continue", Continue: true}, nil
+	}
 	if m.late {
 		<-ctx.Done()
 	}
 	return model.Response{Content: "original result"}, nil
+}
+
+// The original callback's record fails before commit after the native
+// Control, Model and Tool obligations already settled at a safe point.
+type approvalReturnFailure struct{ preparationKernelPorts }
+
+func (s approvalReturnFailure) RecordOwnedPhysicalCallbackReturn(context.Context, kernel.ChildExecutionGrant, uint64, kernel.OwnedPhysicalCallbackOutcome, kernel.OwnedPhysicalCallbackReturn) error {
+	return errors.New("original callback record refused before commit")
 }
 
 // ManagedPhysicalDispatch exercises a new independently admitted native
@@ -53,6 +67,9 @@ func ManagedPhysicalDispatch(t *testing.T, factory func(*testing.T) (kernel.Stor
 		{"resume/unknown", "agent.model_invocation.dispatch_intent", true},
 		{"repeat/intent-after", "agent.model_invocation.pending", true},
 		{"approval/inline", "tool.completed", true},
+		{"approval/return-record-failed", "agent.model_continued", true},
+		{"approval/prior-projection", "agent.model_continued", true},
+		{"approval/conflicting-projection", "agent.model_continued", true},
 		{"approval/reject", "agent.model_invocation.pending", true},
 		{"approval/deferred", "tool.completed", true},
 	} {
@@ -64,7 +81,8 @@ func ManagedPhysicalDispatch(t *testing.T, factory func(*testing.T) (kernel.Stor
 			approval := strings.HasPrefix(c.name, "approval/")
 			inline := approval && c.name != "approval/deferred"
 			repeated := strings.HasPrefix(c.name, "repeat/")
-			client := &dispatchFrontierModel{approval: approval}
+			returnFailure := c.name == "approval/return-record-failed" || c.name == "approval/prior-projection" || c.name == "approval/conflicting-projection"
+			client := &dispatchFrontierModel{approval: approval, continueAfterApproval: returnFailure}
 			inputs, e := agent.NewMemoryRunInputs("dispatch-input")
 			if e != nil {
 				t.Fatal(e)
@@ -186,13 +204,22 @@ func ManagedPhysicalDispatch(t *testing.T, factory func(*testing.T) (kernel.Stor
 			if !inline {
 				opts.RunExecution = &agent.RunExecution{OwnerID: "new-original", LeaseDuration: leaseDuration}
 			}
-			session, rt = open(cut)
+			if returnFailure {
+				session, rt = open(approvalReturnFailure{base.(preparationKernelPorts)})
+			} else {
+				session, rt = open(cut)
+			}
 			decision := harness.ApprovalApprove
 			if c.name == "approval/reject" {
 				decision = harness.ApprovalReject
 			}
 			unknown := c.name == "resume/unknown"
-			if unknown {
+			if returnFailure {
+				_, err := session.ResolveApproval(ctx, "original", harness.ResolveApprovalRequest{CheckpointID: checkpoint, Decision: decision, Comment: "original grant"})
+				if !errors.Is(err, agent.ErrRootOutcomeUnknown) {
+					t.Fatalf("expected original callback record failure: %v", err)
+				}
+			} else if unknown {
 				// The native safety wrapper catches a panic inside the final
 				// Model dispatch guard. Its committed dispatch marker must
 				// retain uncertainty, not become a replayable receipt.
@@ -245,7 +272,7 @@ func ManagedPhysicalDispatch(t *testing.T, factory func(*testing.T) (kernel.Stor
 				t.Fatal("point lost exact source")
 			}
 			wantBefore := 1
-			if strings.Contains(c.name, "receipt") {
+			if strings.Contains(c.name, "receipt") || returnFailure {
 				wantBefore = 2
 			}
 			wantTools := 0
@@ -255,6 +282,47 @@ func ManagedPhysicalDispatch(t *testing.T, factory func(*testing.T) (kernel.Stor
 			ledger, e := h.LoadBudget(ctx, pending.Turn.ID)
 			if e != nil || len(client.requests) != wantBefore || effects != wantTools || ledger.View("").Usage.LLMCalls != wantBefore || ledger.View("").Usage.ToolCalls != wantTools || (!unknown && ledger.View("").Reserved != (budget.Usage{})) {
 				t.Fatalf("wrong original effects: %v %+v calls=%d tools=%d", e, ledger.View(""), len(client.requests), effects)
+			}
+			if returnFailure {
+				// New normal execution cannot publish a standalone decision
+				// after a failed retirement. Exercise compatibility with
+				// the old partially projected exact fact and its conflict.
+				assertOriginalApprovalDecision(t, pending.Items, checkpoint, "approve", "original grant", 0)
+				if point.State != kernel.ManagedAvailable || point.Selection.ID != "" {
+					t.Fatal("wrong original return failure cut")
+				}
+				if _, err := rt.LookupOwnedPhysicalCallbackReturn(ctx, g); !errors.Is(err, kernel.ErrNotFound) {
+					t.Fatalf("unexpected original callback evidence: %v", err)
+				}
+				if c.name != "approval/return-record-failed" {
+					dispatch, err := h.GetItem(ctx, b.DispatchID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					parentID, ok := harness.OriginalApprovalRequestID(dispatch)
+					if !ok {
+						t.Fatal("missing original approval request")
+					}
+					parent, err := h.GetItem(ctx, parentID)
+					if err != nil {
+						t.Fatal(err)
+					}
+					prospective := harness.Item{ID: fixtureStableID("hdispatchdone", dispatch.ID), TurnID: dispatch.TurnID, InvocationID: dispatch.InvocationID, RunID: dispatch.RunID, Kind: harness.ItemDiagnostic, Status: harness.ItemCompleted, ParentItemID: dispatch.ID, Seq: dispatch.Seq + 1, Payload: json.RawMessage(`{"boundary":"physical_dispatch_returned"}`), CreatedAt: dispatch.CreatedAt, UpdatedAt: dispatch.UpdatedAt}
+					fact, insert, err := harness.PlanOriginalApprovalSettlement(dispatch, prospective, parent, nil)
+					if err != nil || !insert {
+						t.Fatalf("missing prior projection fixture: %v", err)
+					}
+					if c.name == "approval/conflicting-projection" {
+						fact.Payload = json.RawMessage(strings.ReplaceAll(string(fact.Payload), "original grant", "substituted grant"))
+					}
+					if _, _, err = h.AppendItem(ctx, fact); err != nil {
+						t.Fatal(err)
+					}
+				}
+				_, err := h.ReadManagedOriginalDispatch(ctx, b)
+				if (err != nil) != (c.name == "approval/conflicting-projection") {
+					t.Fatalf("wrong prior decision qualification: %v", err)
+				}
 			}
 			// Prior grant remains history, even when the current point is new.
 			old, e := rt.LoadManagedRecoveryByID(ctx, prior.SafePoint.ID)
@@ -283,6 +351,20 @@ func ManagedPhysicalDispatch(t *testing.T, factory func(*testing.T) (kernel.Stor
 			}
 			session, rt = open(base)
 			AwaitManagedOriginalLeaseExpiry(t, base, original, point, 2*leaseDuration+10*time.Second)
+			if c.name == "approval/conflicting-projection" {
+				if _, e = session.Resume(ctx, "original"); e == nil {
+					t.Fatal("conflicting approval was resumed")
+				}
+				after, e := base.Load(ctx, root.ExecutionRefID)
+				if e != nil || kernel.ManagedDigest(after) != kernel.ManagedDigest(original) || len(client.requests) != 2 || effects != 1 {
+					t.Fatal("conflicting approval changed original effects")
+				}
+				g2, e := rt.LookupChildExecution(ctx, root.ExecutionRefID)
+				if e != nil || g2 != g {
+					t.Fatal("conflicting approval lost original grant")
+				}
+				return
+			}
 			if unknown {
 				if _, e = session.Resume(ctx, "original"); e == nil {
 					t.Fatal("unknown dispatch was resumed")
@@ -318,6 +400,9 @@ func ManagedPhysicalDispatch(t *testing.T, factory func(*testing.T) (kernel.Stor
 				done, e = session.Resume(ctx, "original")
 			}
 			wantStatus, wantCalls := harness.TurnCompleted, 2
+			if returnFailure {
+				wantCalls = 3
+			}
 			if c.name == "resume/cancel" {
 				wantStatus, wantCalls = harness.TurnCancelled, 1
 			}
@@ -381,4 +466,13 @@ func ManagedPhysicalDispatch(t *testing.T, factory func(*testing.T) (kernel.Stor
 			}
 		})
 	}
+}
+
+func fixtureStableID(prefix string, values ...string) string {
+	h := sha256.New()
+	for _, v := range values {
+		_, _ = h.Write([]byte(strings.TrimSpace(v)))
+		_, _ = h.Write([]byte{0})
+	}
+	return prefix + "_" + hex.EncodeToString(h.Sum(nil))[:24]
 }

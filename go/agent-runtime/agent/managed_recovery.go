@@ -147,6 +147,9 @@ func (r *Runner) ParkManagedForCancellation(ctx context.Context, id string) (ker
 	if t.SafePoint.LifecycleVersion != kernel.ManagedLifecycleAgentObligations || t.Selection.Mode == kernel.ManagedResume {
 		return kernel.ManagedParkedProof{}, ErrRootOutcomeUnknown
 	}
+	if err = r.verifyManagedApproval(ctx, t.SafePoint.Host); err != nil {
+		return kernel.ManagedParkedProof{}, err
+	}
 	parked, _, err := r.parkManagedFrontier(ctx, t, true)
 	return parked, err
 }
@@ -167,6 +170,9 @@ func (r *Runner) recoverManagedContinuation(ctx context.Context, id string, requ
 	}
 	if expected, ok := r.runtime.ManagedDispatch(ctx, id); ok && kernel.ManagedDigest(expected) != kernel.ManagedDigest(current.SafePoint.Host) {
 		return kernel.Snapshot{}, kernel.ManagedClosureProof{}, kernel.ErrExecutionConflict
+	}
+	if err = r.verifyManagedApproval(ctx, current.SafePoint.Host); err != nil {
+		return kernel.Snapshot{}, kernel.ManagedClosureProof{}, err
 	}
 	// Check the current profile before consulting Host reservation. Older
 	// unbudgeted proofs never acquire new ledger authority from a new handle.
@@ -362,6 +368,9 @@ func (r *Runner) ReconcileManagedClosure(ctx context.Context, proof kernel.Manag
 	if !proof.Matches(t.Selection) {
 		return kernel.ErrExecutionConflict
 	}
+	if err := r.verifyManagedApproval(ctx, t.SafePoint.Host); err != nil {
+		return err
+	}
 	switch t.SafePoint.LifecycleVersion {
 	case kernel.ManagedLifecycleAgentObligations:
 		if _, err := r.validateManagedObligations(t.SafePoint); err != nil {
@@ -449,4 +458,15 @@ func newManagedClaimantID() (string, error) {
 		return "", err
 	}
 	return "managedclaimant-" + hex.EncodeToString(id[:]), nil
+}
+
+func (r *Runner) verifyManagedApproval(ctx context.Context, b kernel.ManagedHostBinding) error {
+	if b.Approval == nil {
+		return nil
+	}
+	applied, err := r.runtime.CommittedApprovalDispatch(ctx, b.RunID, b.DispatchID, *b.Approval)
+	if err != nil || !applied {
+		return errors.Join(ErrRootOutcomeUnknown, err)
+	}
+	return nil
 }

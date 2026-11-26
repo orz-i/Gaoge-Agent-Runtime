@@ -122,3 +122,70 @@ func pendingExecutionDispatchTx(tx *gorm.DB, turnID, invocationID string) (bool,
 	}
 	return false, nil
 }
+
+// planOriginalApprovalTx is shared by the ordinary and managed closure
+// transactions, after the original Turn lock is held.
+func readOriginalApprovalTx(tx *gorm.DB, grant harness.Item) (harness.Item, []harness.Item, error) {
+	parent, ok := harness.OriginalApprovalRequestID(grant)
+	if !ok {
+		return harness.Item{}, nil, harness.ErrConflict
+	}
+	request, found, err := findItem(tx, parent)
+	if err != nil {
+		return harness.Item{}, nil, err
+	}
+	if !found {
+		return harness.Item{}, nil, harness.ErrConflict
+	}
+	var rows []itemRecord
+	if err = tx.Where("parent_item_id = ?", parent).Limit(2).Find(&rows).Error; err != nil {
+		return harness.Item{}, nil, err
+	}
+	children := make([]harness.Item, 0, len(rows))
+	for _, row := range rows {
+		child, err := itemFromRecord(row)
+		if err != nil {
+			return harness.Item{}, nil, err
+		}
+		children = append(children, child)
+	}
+	return request, children, nil
+}
+
+func checkOriginalApprovalAdmissionTx(tx *gorm.DB, grant harness.Item) error {
+	if _, ok := harness.OriginalApprovalRequestID(grant); !ok {
+		return nil
+	}
+	request, children, err := readOriginalApprovalTx(tx, grant)
+	if err != nil {
+		return err
+	}
+	decision, err := harness.PlanOriginalApprovalAdmission(grant, request, children)
+	if err != nil {
+		return err
+	}
+	if _, found, err := findItem(tx, decision.ID); err != nil || found {
+		return errors.Join(harness.ErrConflict, err)
+	}
+	return nil
+}
+
+func planOriginalApprovalTx(tx *gorm.DB, grant, receipt harness.Item) (harness.Item, bool, error) {
+	if _, ok := harness.OriginalApprovalRequestID(grant); !ok {
+		return harness.Item{}, false, nil
+	}
+	request, children, err := readOriginalApprovalTx(tx, grant)
+	if err != nil {
+		return harness.Item{}, false, err
+	}
+	decision, insert, err := harness.PlanOriginalApprovalSettlement(grant, receipt, request, children)
+	if err != nil {
+		return harness.Item{}, false, err
+	}
+	if insert {
+		if _, found, err := findItem(tx, decision.ID); err != nil || found {
+			return harness.Item{}, false, errors.Join(harness.ErrConflict, err)
+		}
+	}
+	return decision, insert, nil
+}
