@@ -221,16 +221,26 @@ func VerifyWorkingStateSummaryOrigin(snapshot kernel.Snapshot, state *runtimecon
 	return false
 }
 
-// summaryTurnProjection permits only the one original Accepted-to-Running
-// projection. It never treats arbitrary revisions or status changes as retries.
+// summaryTurnProjection compares the exact immutable Context owner and
+// reference, allowing only forward live status/diagnostic projections.
 func summaryTurnProjection(original, current SummaryTurn) bool {
 	if sameBoundedValue(original, current) {
 		return true
 	}
-	if original.Status != "accepted" || current.Status != "running" || current.Revision != original.Revision+1 || current.UpdatedAt.Before(original.UpdatedAt) {
+	// Turn lifecycle/diagnostic projection may advance independently of a
+	// frozen summary: an unknown model outcome can be published and later
+	// cleared while the original invocation and Context stay unchanged.
+	// Do not make projection revision or diagnostics a second source owner.
+	// Accept only a forward live projection with every immutable identity and
+	// exact Context reference unchanged. The actual Context CAS still uses
+	// the freshly read revision; no earlier projection grants write authority.
+	if (original.Status != "accepted" && original.Status != "running") ||
+		current.Status != "running" || current.Revision <= original.Revision ||
+		current.UpdatedAt.Before(original.UpdatedAt) {
 		return false
 	}
 	expected := original
 	expected.Status, expected.Revision, expected.UpdatedAt = current.Status, current.Revision, current.UpdatedAt
+	expected.ErrorCode, expected.ErrorDetail = current.ErrorCode, current.ErrorDetail
 	return sameBoundedValue(expected, current)
 }

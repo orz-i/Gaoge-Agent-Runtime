@@ -41,20 +41,47 @@ func (*summarySessionModel) Capabilities(context.Context, string) (model.Capabil
 	return model.Capabilities{StructuredJSONSchema: true}, nil
 }
 
+var errSharedSummaryReceiptCut = errors.New("injected shared summary receipt acknowledgement loss")
+
+type sharedSummaryReceiptFaultStore struct {
+	*memory.Store
+	armed, after, fired bool
+}
+
+func (s *sharedSummaryReceiptFaultStore) ApplyExecution(ctx context.Context, lease kernel.ExecutionLease, revision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
+	if s.armed && !s.fired {
+		for _, event := range mutation.Events {
+			if event.Type == "agent.model_invocation.completed" {
+				s.fired = true
+				if s.after {
+					if _, err := s.Store.ApplyExecution(ctx, lease, revision, mutation); err != nil {
+						return kernel.Snapshot{}, err
+					}
+				}
+				return kernel.Snapshot{}, errSharedSummaryReceiptCut
+			}
+		}
+	}
+	return s.Store.ApplyExecution(ctx, lease, revision, mutation)
+}
+
 func TestAgentSessionSummaryProducesNativeStateAndVerifiesPriorOrigin(t *testing.T) {
-	for _, name := range []string{"success", "invalid output fallback", "missing prior origin", "native recovery complete source", "shared budget", "shared token budget", "last shared call"} {
+	for _, name := range []string{"success", "invalid output fallback", "missing prior origin", "native recovery complete source", "shared budget", "shared token budget", "last shared call", "shared before receipt", "shared after receipt"} {
 		t.Run(name, func(t *testing.T) {
 			invalid := name == "invalid output fallback"
 			nativeRecovery := name == "native recovery complete source"
-			shared := name == "shared budget" || name == "shared token budget" || name == "last shared call"
+			shared := strings.HasPrefix(name, "shared ") || name == "last shared call"
+			fault := name == "shared before receipt" || name == "shared after receipt"
 			tokenBudget := name == "shared token budget"
 			store, runs := harness.NewMemoryStore(), memory.NewStore()
+			backing := &sharedSummaryReceiptFaultStore{Store: runs, after: name == "shared after receipt"}
 			client := &summarySessionModel{}
 			summaryCalls := 0
 			client.generate = func(request model.Request) (model.Response, error) {
 				response := model.Response{Content: "answer", Usage: &model.Usage{InputTokens: 10, OutputTokens: 5}}
 				if request.OutputContract != nil && request.OutputContract.Name == "working_state_summary" {
 					summaryCalls++
+					backing.armed = fault
 					wantCap := int64(128)
 					if tokenBudget {
 						wantCap = 48
@@ -69,7 +96,7 @@ func TestAgentSessionSummaryProducesNativeStateAndVerifiesPriorOrigin(t *testing
 				}
 				return response, nil
 			}
-			options := agentSessionOptions(t, runs, store, client)
+			options := agentSessionOptions(t, backing, store, client)
 			options.Context.ResolveWindow = func(context.Context, model.Request) (runtimecontext.ModelWindow, error) {
 				return runtimecontext.ModelWindow{ContextTokens: 65536, ReservedOutputTokens: 128}, nil
 			}
@@ -129,6 +156,40 @@ func TestAgentSessionSummaryProducesNativeStateAndVerifiesPriorOrigin(t *testing
 				t.Fatal(err)
 			}
 			second, err := session.Prompt(t.Context(), "second", secondText)
+			if fault {
+				if !errors.Is(err, errSharedSummaryReceiptCut) || !backing.fired || summaryCalls != 1 || len(client.requests) != 2 {
+					t.Fatalf("summary fault missed original receipt boundary: %v calls=%d/%d", err, summaryCalls, len(client.requests))
+				}
+				root, ok := harness.TopLevelInvocation(second)
+				if !ok {
+					t.Fatal("missing original root")
+				}
+				raw, loadErr := options.Runtime.Load(t.Context(), root.ExecutionRefID)
+				view, viewErr := agent.ViewState(raw)
+				if loadErr != nil || viewErr != nil || len(view.ModelInvocations) != 1 || view.Budget.Usage.LLMCalls != 0 {
+					t.Fatalf("fault consumed original summary before recovery: load=%v view=%v usage=%+v", loadErr, viewErr, view.Budget.Usage)
+				}
+				expected := agent.ModelInvocationPending
+				if backing.after {
+					expected = agent.ModelInvocationCompleted
+				}
+				if view.ModelInvocations[0].Status != expected {
+					t.Fatalf("wrong persisted invocation status %s", view.ModelInvocations[0].Status)
+				}
+				ledger, ledgerErr := store.LoadBudget(t.Context(), second.Turn.ID)
+				if ledgerErr != nil || ledger.View("").Usage.LLMCalls != 1 || len(ledger.Reservations) != 1 {
+					t.Fatalf("original shared receipt not settled before cut: %v", ledgerErr)
+				}
+				options.Session.Transcript = nil
+				session, err = harness.OpenAgentSession(options)
+				if err != nil {
+					t.Fatal(err)
+				}
+				second, err = session.Resume(t.Context(), "second")
+				if err != nil || second.Turn.Status != harness.TurnCompleted {
+					t.Fatalf("settled original summary did not progress: %s %v", second.Turn.Status, err)
+				}
+			}
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -173,13 +173,5 @@ func reconcileSummaryCursor(binding ContextSummaryBinding, read ContextSummaryRe
 	if summaryTurnProjection(expected, cursor.Turn) {
 		return cursor, true, nil
 	}
-	// The same one Accepted->Running projection may precede the Context CAS.
-	if binding.Cursor.Turn.Status == "accepted" && cursor.Turn.Status == "running" &&
-		cursor.Turn.Revision == binding.Cursor.Turn.Revision+2 && !cursor.Turn.UpdatedAt.Before(expected.UpdatedAt) {
-		expected.Status, expected.Revision, expected.UpdatedAt = cursor.Turn.Status, cursor.Turn.Revision, cursor.Turn.UpdatedAt
-		if sameBoundedValue(expected, cursor.Turn) {
-			return cursor, true, nil
-		}
-	}
 	return SummaryCursor{}, false, ErrInvalidRequest
 }
