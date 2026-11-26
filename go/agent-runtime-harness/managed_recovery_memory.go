@@ -24,6 +24,13 @@ func (s *MemoryStore) readManagedOriginalLocked(b kernel.ManagedHostBinding) err
 	if err != nil {
 		return err
 	}
+	if b.Approval != nil {
+		for _, child := range s.itemChildren[stableID("hia", b.TurnID, b.Approval.CheckpointID)] {
+			if child.TurnID != b.TurnID {
+				items = append(items, child)
+			}
+		}
+	}
 	return ValidateManagedOriginalRows(s.managedAuthority, b, s.sessions[t.SessionID], t, i, s.configs[t.ConfigSnapshotID], s.itemIDs[b.DispatchID], items)
 }
 func (s *MemoryStore) ReadManagedOriginalDispatch(ctx context.Context, b kernel.ManagedHostBinding) (kernel.ManagedHostBinding, error) {

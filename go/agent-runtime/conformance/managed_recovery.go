@@ -96,7 +96,9 @@ func managedStoreSetup(t *testing.T, factory func(*testing.T) ManagedRecoverySto
 	if err != nil {
 		t.Fatal(err)
 	}
-	g, err := bound.BeginOwnedPhysicalExecution(t.Context(), v.Run.ID, v.Run.Revision, featurecontrol.Seal(v.Run.ID, v.Run.Revision, "agent_owned_physical_admission", l.LeaseID, v.State, v.Checkpoint), "start")
+	dispatchID := "original-dispatch"
+	subject := kernel.ManagedDigest(struct{ LeaseID, DispatchID string }{l.LeaseID, dispatchID})
+	g, err := bound.BeginOwnedPhysicalExecutionForDispatch(t.Context(), v.Run.ID, v.Run.Revision, featurecontrol.Seal(v.Run.ID, v.Run.Revision, "agent_owned_physical_dispatch_admission", subject, v.State, v.Checkpoint), "start", dispatchID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -412,31 +414,27 @@ func runManagedStoreT4ClosesHistoricalTransfer(t *testing.T, factory func(*testi
 	if _, e = scoped.LeaveManagedSafePoint(t.Context(), f.source.Run.ID); e != nil {
 		t.Fatal(e)
 	}
-	second := f.point
-	second.ID = "safe-2"
-	second.RecoveryID = kernel.ManagedRecoveryID(second.ID, second.Host)
-	second.OriginalGrant = g
-	second.OriginalLease = enabled.SuccessorLease
-	second.ModelInvocationID = "model-2"
-	next, e := scoped.ApplyManagedModelIntent(t.Context(), f.source.Run.ID, f.source.Run.Revision, kernel.Mutation{Status: kernel.RunStatusRunning, State: json.RawMessage(`{"pending":"model-2","originalReceipt":"retained"}`), Events: []kernel.EventDraft{{Type: "agent.model_invocation.pending"}}}, second, featurecontrol.Seal(f.source.Run.ID, f.source.Run.Revision, "managed_intent_source", g.ID, f.source.State, second))
+	mutation := kernel.Mutation{Status: kernel.RunStatusRunning, State: json.RawMessage(`{"pending":"model-2","originalReceipt":"retained"}`), Events: []kernel.EventDraft{{Type: "agent.model_invocation.pending"}}}
+	// The successor owns effects within the original transfer. Even with
+	// the internal proof seam it cannot mint a second original dispatch.
+	forged := f.point
+	forged.ID = "forged-safe"
+	forged.RecoveryID = kernel.ManagedRecoveryID(forged.ID, forged.Host)
+	forged.OriginalGrant, forged.OriginalLease = g, enabled.SuccessorLease
+	if _, e = scoped.ApplyManagedModelIntent(t.Context(), f.source.Run.ID, f.source.Run.Revision, mutation, forged, featurecontrol.Seal(f.source.Run.ID, f.source.Run.Revision, "managed_intent_source", g.ID, f.source.State, forged)); !errors.Is(e, kernel.ErrInvalidInput) && !errors.Is(e, kernel.ErrExecutionConflict) {
+		t.Fatalf("successor minted another original safe point: %v", e)
+	}
+	next, e := scoped.Apply(t.Context(), f.source.Run.ID, f.source.Run.Revision, mutation)
 	if e != nil {
-		t.Fatal(e)
-	}
-	current, e := f.store.LoadManagedRecovery(t.Context(), f.source.Run.ID)
-	if e != nil || current.SafePoint.ID != second.ID {
-		t.Fatalf("second safe point: %v", e)
-	}
-	if _, e = scoped.LeaveManagedSafePoint(t.Context(), f.source.Run.ID); e != nil {
 		t.Fatal(e)
 	}
 	completion := featurecontrol.Seal(next.Run.ID, next.Run.Revision, "managed_successor_completed", g.ID, next.State, next)
 	if e = scoped.CompleteManagedRecovery(t.Context(), g, next, completion); !errors.Is(e, kernel.ErrExecutionConflict) {
 		t.Fatalf("unmarked completion accepted: %v", e)
 	}
-	mark := featurecontrol.Seal(next.Run.ID, next.Run.Revision, "agent_owned_physical_settled", g.ID, next.State, next.Checkpoint)
-	if e = scoped.MarkChildExecutionSettled(t.Context(), g, mark); e != nil {
-		t.Fatal(e)
-	}
+	retired := retirementFixture{backend: f.backend, rt: f.runtime, bound: scoped, store: f.store, source: next, lease: enabled.SuccessorLease, grant: g}
+	retirementCallback(t, retired, true, true)
+	retirementMark(t, retired)
 	for i := 0; i < 2; i++ {
 		if e = scoped.CompleteManagedRecovery(t.Context(), g, next, completion); e != nil {
 			t.Fatal(e)
@@ -446,16 +444,55 @@ func runManagedStoreT4ClosesHistoricalTransfer(t *testing.T, factory func(*testi
 	if e != nil || original.State != kernel.ManagedClosed || original.Terminal == nil || kernel.ManagedDigest(*original.Terminal) != kernel.ManagedDigest(next) {
 		t.Fatalf("historical closure: %v", e)
 	}
-	current, e = f.store.LoadManagedRecovery(t.Context(), f.source.Run.ID)
-	if e != nil || current.SafePoint.ID != second.ID || current.State != kernel.ManagedInvalidated {
-		t.Fatalf("closure rewrote unrelated current pointer: %v", e)
-	}
-	if e = scoped.FinishChildExecution(t.Context(), g, mark); e != nil {
+	receipt := retirementFinish(t, retired)
+	if _, e = f.runtime.AcknowledgeOwnedRetirement(t.Context(), g, retirementACKProof(receipt)); e != nil {
 		t.Fatal(e)
 	}
-	persisted, e := f.runtime.Load(t.Context(), next.Run.ID)
-	if e != nil || kernel.ManagedDigest(persisted) != kernel.ManagedDigest(next) {
-		t.Fatal("T4 changed feature state")
+
+	// An actual later independently admitted dispatch can publish its own
+	// point without replacing or reactivating the earlier closure.
+	lease, e := f.runtime.AcquireExecution(t.Context(), kernel.ExecutionAcquireRequest{RunID: next.Run.ID, OwnerID: "later", LeaseDuration: time.Minute})
+	if e != nil {
+		t.Fatal(e)
+	}
+	bound, e = f.runtime.WithExecution(lease)
+	if e != nil {
+		t.Fatal(e)
+	}
+	dispatchID := "later-dispatch"
+	subject := kernel.ManagedDigest(struct{ LeaseID, DispatchID string }{lease.LeaseID, dispatchID})
+	later, e := bound.BeginOwnedPhysicalExecutionForDispatch(t.Context(), next.Run.ID, next.Run.Revision, featurecontrol.Seal(next.Run.ID, next.Run.Revision, "agent_owned_physical_dispatch_admission", subject, next.State, next.Checkpoint), "resume", dispatchID)
+	if e != nil {
+		t.Fatal(e)
+	}
+	scoped, e = bound.WithPhysicalGrant(t.Context(), later, featurecontrol.Seal(next.Run.ID, next.Run.Revision, "agent_physical_owner", later.ID, next.State, next.Checkpoint))
+	if e != nil {
+		t.Fatal(e)
+	}
+	second := f.point
+	second.ID = "safe-2"
+	second.Host.Phase, second.Host.DispatchID = "resume", dispatchID
+	second.RecoveryID = kernel.ManagedRecoveryID(second.ID, second.Host)
+	second.OriginalGrant, second.OriginalLease = later, lease
+	second.ModelInvocationID = "model-2"
+	fresh, e := scoped.ApplyManagedModelIntent(t.Context(), next.Run.ID, next.Run.Revision, mutation, second, featurecontrol.Seal(next.Run.ID, next.Run.Revision, "managed_intent_source", later.ID, next.State, second))
+	if e != nil {
+		t.Fatal(e)
+	}
+	current, e := f.store.LoadManagedRecovery(t.Context(), next.Run.ID)
+	if e != nil || current.SafePoint.ID != second.ID || current.State != kernel.ManagedAvailable || !kernel.ManagedSourceMatches(current.SafePoint, fresh) {
+		t.Fatalf("later independent dispatch did not own its point: %v", e)
+	}
+	historical, e := f.store.LoadManagedRecoveryByID(t.Context(), f.point.ID)
+	if e != nil || kernel.ManagedDigest(historical) != kernel.ManagedDigest(original) {
+		t.Fatalf("new dispatch rewrote historical closure: %v", e)
+	}
+	if _, e = f.runtime.ParkManagedTransfer(t.Context(), original); !errors.Is(e, kernel.ErrExecutionConflict) {
+		t.Fatalf("historical point parked current dispatch: %v", e)
+	}
+	persisted, e := f.runtime.Load(t.Context(), fresh.Run.ID)
+	if e != nil || kernel.ManagedDigest(persisted) != kernel.ManagedDigest(fresh) {
+		t.Fatal("historical closure changed current feature state")
 	}
 }
 
@@ -867,8 +904,8 @@ func runForeignGrantErasure(t *testing.T, factory func(*testing.T) ManagedRecove
 		t.Fatal(e)
 	}
 	other, e := b.BeginOwnedPhysicalExecution(ctx, v.Run.ID, v.Run.Revision, featurecontrol.Seal(v.Run.ID, v.Run.Revision, "agent_owned_physical_admission", l.LeaseID, v.State, v.Checkpoint), "start")
-	if !errors.Is(e, kernel.ErrExecutionConflict) || other != (kernel.ChildExecutionGrant{}) {
-		t.Fatalf("foreign duplicate identity admitted: %+v %v", other, e)
+	if !errors.Is(e, kernel.ErrInvalidInput) || other != (kernel.ChildExecutionGrant{}) {
+		t.Fatalf("foreign deterministic dispatch identity admitted: %+v %v", other, e)
 	}
 	if g, e := rt.LookupChildExecution(ctx, f.source.Run.ID); e != nil || g != f.grant {
 		t.Fatalf("collision changed original grant: %+v %v", g, e)
@@ -878,7 +915,15 @@ func runForeignGrantErasure(t *testing.T, factory func(*testing.T) ManagedRecove
 	}
 	switch mode {
 	case kernel.ManagedResume:
-		out, err := f.store.EnableManagedRecovery(ctx, kernel.ManagedEnableRequest{RunID: f.source.Run.ID, SuspensionID: f.point.ID, ClaimantID: "claimant", OwnerID: "owner", LeaseID: "lease", GrantID: "identity-valid-successor", ExpectedTransferRevision: parked.Revision, Generation: parked.Generation, LeaseDuration: time.Minute, Selection: selection})
+		// Also exercise the Store's actual transfer identity gate, not
+		// only the native ID namespace check at ordinary admission.
+		q := kernel.ManagedEnableRequest{RunID: f.source.Run.ID, SuspensionID: f.point.ID, ClaimantID: "claimant", OwnerID: "owner", LeaseID: "lease", GrantID: f.grant.ID, ExpectedTransferRevision: parked.Revision, Generation: parked.Generation, LeaseDuration: time.Minute, Selection: selection}
+		if _, err := f.store.EnableManagedRecovery(ctx, q); !errors.Is(err, kernel.ErrExecutionConflict) {
+			t.Fatalf("managed successor reused original dispatch Grant: %v", err)
+		}
+		managedStoreSame(t, f, parked)
+		q.GrantID = "identity-valid-successor"
+		out, err := f.store.EnableManagedRecovery(ctx, q)
 		if err != nil || out.State != kernel.ManagedEnabled {
 			t.Fatalf("valid transfer failed: %v", err)
 		}
@@ -889,7 +934,7 @@ func runForeignGrantErasure(t *testing.T, factory func(*testing.T) ManagedRecove
 		}
 	}
 	// Neither successful transfer nor cancellation releases the original ID.
-	if _, e = b.BeginOwnedPhysicalExecution(ctx, v.Run.ID, v.Run.Revision, featurecontrol.Seal(v.Run.ID, v.Run.Revision, "agent_owned_physical_admission", l.LeaseID, v.State, v.Checkpoint), "start"); !errors.Is(e, kernel.ErrExecutionConflict) {
+	if _, e = b.BeginOwnedPhysicalExecution(ctx, v.Run.ID, v.Run.Revision, featurecontrol.Seal(v.Run.ID, v.Run.Revision, "agent_owned_physical_admission", l.LeaseID, v.State, v.Checkpoint), "start"); !errors.Is(e, kernel.ErrInvalidInput) {
 		t.Fatalf("managed consumption released original identity: %v", e)
 	}
 	if _, e = rt.LookupChildExecution(ctx, v.Run.ID); !errors.Is(e, kernel.ErrNotFound) {

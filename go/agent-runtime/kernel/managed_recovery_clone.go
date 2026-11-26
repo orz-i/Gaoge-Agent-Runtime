@@ -27,6 +27,10 @@ func managedClone[T managedCloneValue](value T) T {
 
 func cloneManagedBinding(v ManagedHostBinding) ManagedHostBinding {
 	v.Source = slices.Clone(v.Source)
+	if v.Approval != nil {
+		a := *v.Approval
+		v.Approval = &a
+	}
 	return v
 }
 

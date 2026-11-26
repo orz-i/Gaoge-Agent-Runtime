@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
@@ -63,11 +64,54 @@ type ManagedHostBinding struct {
 	RunID           string
 	DispatchID      string
 	Phase           string
-	Source          json.RawMessage `json:",omitempty"`
+	Source          json.RawMessage          `json:",omitempty"`
+	Approval        *ManagedApprovalDecision `json:",omitempty"`
+}
+
+// ManagedApprovalDecision freezes the Host's original control request in the
+// dispatch itself. A recovered approval must not invent a decision/comment
+// after its native checkpoint was consumed.
+type ManagedApprovalDecision struct {
+	CheckpointID string
+	Decision     string
+	Comment      string
+}
+
+func (a ManagedApprovalDecision) Valid() bool {
+	return a.CheckpointID != "" && len(a.CheckpointID) <= 128 && strings.TrimSpace(a.CheckpointID) == a.CheckpointID &&
+		(a.Decision == "approve" || a.Decision == "reject") && strings.TrimSpace(a.Comment) == a.Comment
+}
+
+// ManagedDispatchOperation maps the three independently admitted native
+// root dispatches to their existing Kernel operation. Retry generations,
+// descendant controls and external handoffs have distinct authorities.
+func ManagedDispatchOperation(phase string) (string, bool) {
+	switch phase {
+	case "start", "resume":
+		return phase, true
+	case "resolve-approval":
+		return "approval", true
+	default:
+		return "", false
+	}
 }
 
 func (b ManagedHostBinding) Valid() bool {
-	return b.KernelAuthority.Valid() && b.HostAuthority.Valid() && b.TurnID != "" && b.InvocationID != "" && b.Attempt > 0 && b.RunID != "" && b.DispatchID != "" && b.Phase == "start" && json.Valid(b.Source)
+	_, ok := ManagedDispatchOperation(b.Phase)
+	approvalValid := (b.Phase == "resolve-approval" && b.Approval != nil && b.Approval.Valid()) || (b.Phase != "resolve-approval" && b.Approval == nil)
+	return ok && approvalValid && b.KernelAuthority.Valid() && b.HostAuthority.Valid() && b.TurnID != "" && b.InvocationID != "" && b.Attempt > 0 && b.RunID != "" && b.DispatchID != "" && json.Valid(b.Source)
+}
+
+// MatchesOriginalGrant prevents a later same-Run dispatch from borrowing
+// the old recovery identity. Both operation and deterministic original
+// dispatch Grant ID are required, in addition to the native bearer proof.
+func (b ManagedHostBinding) MatchesOriginalGrant(g ChildExecutionGrant) bool {
+	op, ok := ManagedDispatchOperation(b.Phase)
+	if !ok || g.ChildRunID != b.RunID || g.AdmissionOperation != op || !g.IsOwned() {
+		return false
+	}
+	id, err := OwnedPhysicalDispatchGrantID(b.RunID, op, b.DispatchID)
+	return err == nil && id == g.ID
 }
 
 // ManagedCancellation is the entire ORIGINAL hcancel identity. Payload is
@@ -209,7 +253,7 @@ func (p ManagedSafePoint) Valid() bool {
 		}
 		modelIdentity = o.Phase == "prepare" || modelIdentity
 	}
-	return p.ID != "" && p.RecoveryID == ManagedRecoveryID(p.ID, p.Host) && p.Host.Valid() && p.Source.Run.ID == p.Host.RunID && p.Source.Run.Kind == "agent" && p.Source.Run.ParentRunID == "" && p.Source.Run.Status == RunStatusRunning && p.Source.Run.Revision > 0 && json.Valid(p.Source.State) && p.OriginalGrant.ChildRunID == p.Host.RunID && p.OriginalGrant.MatchesExecution(p.OriginalLease) && modelIdentity && (p.LifecycleVersion == "managed-context-v1" || p.LifecycleVersion == ManagedLifecycleWorkingStateSummary || p.LifecycleVersion == ManagedLifecycleAgentObligations) && json.Valid(p.LifecycleSource)
+	return p.ID != "" && p.RecoveryID == ManagedRecoveryID(p.ID, p.Host) && p.Host.Valid() && p.Source.Run.ID == p.Host.RunID && p.Source.Run.Kind == "agent" && p.Source.Run.ParentRunID == "" && p.Source.Run.Status == RunStatusRunning && p.Source.Run.Revision > 0 && json.Valid(p.Source.State) && p.Host.MatchesOriginalGrant(p.OriginalGrant) && p.OriginalGrant.MatchesExecution(p.OriginalLease) && modelIdentity && (p.LifecycleVersion == "managed-context-v1" || p.LifecycleVersion == ManagedLifecycleWorkingStateSummary || p.LifecycleVersion == ManagedLifecycleAgentObligations) && json.Valid(p.LifecycleSource)
 }
 
 // ManagedTransfer retains one immutable original recovery identity. Selection

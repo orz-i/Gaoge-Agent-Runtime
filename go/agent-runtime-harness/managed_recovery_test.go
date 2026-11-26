@@ -96,10 +96,21 @@ func TestManagedDispatchReceiptExactSchema(t *testing.T) {
 			if _, ok := VerifiedExecutionDispatchReceipt(grant, []Item{receipt, receipt}); ok {
 				t.Fatal("duplicate managed receipt accepted")
 			}
-			resume := grant
-			resume.Payload = json.RawMessage(`{"phase":"resume","physicalRunID":"run"}`)
-			if _, ok := VerifiedExecutionDispatchReceipt(resume, []Item{receipt}); ok {
-				t.Fatal("managed receipt accepted for nonoriginal Start")
+			for _, phase := range []string{"resume", "resolve-approval", "start-retry", "resolve-subtask-approval", "handoff-start", "grant-call-allowance"} {
+				other := grant
+				other.Payload, _ = json.Marshal(map[string]string{"phase": phase, "physicalRunID": "run"})
+				_, ok := VerifiedExecutionDispatchReceipt(other, []Item{receipt})
+				_, allowed := kernel.ManagedDispatchOperation(phase)
+				if phase == "resolve-approval" {
+					if ok {
+						t.Fatal("legacy approval grant admitted managed closure")
+					}
+					other.Payload = json.RawMessage(`{"phase":"resolve-approval","physicalRunID":"run","checkpointID":"original","decision":"approve","comment":""}`)
+					_, ok = VerifiedExecutionDispatchReceipt(other, []Item{receipt})
+				}
+				if ok != allowed {
+					t.Fatalf("wrong managed receipt phase qualification: %s", phase)
+				}
 			}
 			ordinary := receipt
 			ordinary.Payload = json.RawMessage(`{"boundary":"physical_dispatch_returned"}`)

@@ -196,7 +196,13 @@ Reopen a budgeted summary Turn with summary support configured. A summary is
 optional and is skipped if the shared ledger cannot admit it while retaining a
 call for business work. Both `Context.ManagedRecovery` and
 `Context.SummaryNativeRecovery` can carry `SharedBudget` and `Inputs` through
-their original first-party managed transfer. The combined
+their original first-party managed transfer. The ownership unit is an
+independently admitted native Root physical dispatch, not the lifetime of the
+Run or its first Start. Start, Resume and inline approval share the original
+Host Dispatch ID, exact deterministic Kernel Grant ID and operation binding.
+A prior dispatch must be settled before a later dispatch can qualify; closed
+Transfers remain historical evidence and cannot authorize its successor.
+The combined
 `managed-agent-obligations-v1` safe point binds the original ledger revision
 and accounting digest, physical sampling plan, and committed input binding
 and cursor to the Kernel source. Only the exact registered Harness/ledger
@@ -248,7 +254,7 @@ No input-source read or request preparation runs before leaving the safe
 point. New input applies only at a later ordinary input safe point.
 A returned successor can await its original child approval or cancellation
 and consume the verified child receipt through ordinary native retirement.
-For an eligible unresolved mixed Root Start without descendant or other
+For an eligible unresolved mixed Root physical dispatch without descendant or other
 unresolved Host effects, public Session.Cancel PARKs the original source and
 uses the existing immutable Host cancellation election; it cannot drive a
 RESUME winner. A pending settled receipt still requiring native commitment
@@ -258,8 +264,14 @@ commits, and terminal lifetime accounting is completed before the Host closes
 the dispatch. A lost closure ACK can be repaired against these same original
 facts. Interruption before the initial native preparation marker is committed (for
 example during first admission or hydration) does not acquire a new proof.
-Repeated cross-phase takeover after a selected successor remains outside
-this proof. Drain or reconcile mixed in-flight transfers before
+Repeated cross-phase takeover inside a selected successor remains outside
+this proof. An independently admitted later Resume after retirement can
+qualify its own transfer. A root approval dispatch records the exact original
+checkpoint ID, decision and comment before entering native code. Managed
+closure projects that decision together with the original dispatch receipt;
+control-only approval still uses its normal receipt path and the subsequent
+independent Resume owns its own effects. Legacy approval grants without this
+evidence are not eligible for managed closure. Drain or reconcile mixed in-flight transfers before
 downgrading to readers that cannot validate the extended safe-point phases.
 
 Ordinary native Start, Resume and approval dispatches also have a receipt-only

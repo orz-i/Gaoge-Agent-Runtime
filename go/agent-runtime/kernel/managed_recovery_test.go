@@ -76,7 +76,8 @@ func managedReducerFixture() (ManagedTransfer, Snapshot, ExecutionLease, ChildEx
 	h := ManagedAuthority{Namespace: strings.Repeat("02", 32), Generation: 1, Version: 1}
 	s := Snapshot{Run: Run{ID: "root", Kind: "agent", Status: RunStatusRunning, Revision: 3}, State: json.RawMessage(`{"pending":"original"}`), EventHead: 4}
 	l := ExecutionLease{RunID: "root", OwnerID: "old", LeaseID: "old-lease", Epoch: 1, ExpiresAt: now.Add(-time.Second)}
-	g := ChildExecutionGrant{ID: "old-grant", ChildRunID: "root", ExpectedRevision: 1, ExecutionOwnerID: l.OwnerID, ExecutionLeaseID: l.LeaseID, ExecutionEpoch: l.Epoch, AdmissionSourceHash: strings.Repeat("a", 64), AdmissionOperation: "start"}
+	id, _ := OwnedPhysicalDispatchGrantID("root", "start", "original-dispatch")
+	g := ChildExecutionGrant{ID: id, ChildRunID: "root", ExpectedRevision: 1, ExecutionOwnerID: l.OwnerID, ExecutionLeaseID: l.LeaseID, ExecutionEpoch: l.Epoch, AdmissionSourceHash: strings.Repeat("a", 64), AdmissionOperation: "start"}
 	b := ManagedHostBinding{KernelAuthority: a, HostAuthority: h, TurnID: "turn", InvocationID: "inv", Attempt: 1, RunID: "root", DispatchID: "original-dispatch", Phase: "start", Source: json.RawMessage(`{"actor":"original"}`)}
 	p := ManagedSafePoint{ID: "safe", Host: b, Source: s, OriginalGrant: g, OriginalLease: l, ModelInvocationID: "model-2", ModelRequestHash: strings.Repeat("b", 64), LifecycleVersion: "managed-context-v1", LifecycleSource: json.RawMessage(`{"actual":"returned"}`)}
 	p.RecoveryID = ManagedRecoveryID(p.ID, b)
@@ -516,5 +517,51 @@ func TestManagedPreparationSafePointRequiresExactNativeProof(t *testing.T) {
 		if other.Valid() {
 			t.Fatalf("invalid pre-Model phase accepted: %+v", altered)
 		}
+	}
+}
+
+func TestManagedSafePointBindsExactPhysicalDispatch(t *testing.T) {
+	original, _, _, _, _, _ := managedReducerFixture()
+	for _, phase := range []string{"start", "resume", "resolve-approval"} {
+		t.Run(phase, func(t *testing.T) {
+			p := managedClone(original.SafePoint)
+			p.Host.Phase = phase
+			p.Host.DispatchID = "original-" + phase
+			if phase == "resolve-approval" {
+				p.Host.Approval = &ManagedApprovalDecision{CheckpointID: "checkpoint", Decision: "approve", Comment: "original grant"}
+			}
+			op, ok := ManagedDispatchOperation(phase)
+			if !ok {
+				t.Fatal("missing native phase")
+			}
+			p.OriginalGrant.AdmissionOperation = op
+			p.OriginalGrant.ID, _ = OwnedPhysicalDispatchGrantID(p.Host.RunID, op, p.Host.DispatchID)
+			p.RecoveryID = ManagedRecoveryID(p.ID, p.Host)
+			if !p.Valid() {
+				t.Fatal("exact original dispatch rejected")
+			}
+			for _, mutate := range []func(*ManagedSafePoint){
+				func(q *ManagedSafePoint) { q.Host.DispatchID = "foreign" },
+				func(q *ManagedSafePoint) { q.OriginalGrant.ID = "foreign" },
+				func(q *ManagedSafePoint) { q.OriginalGrant.AdmissionOperation = "managed_resume" },
+				func(q *ManagedSafePoint) { q.Host.Phase = "start-retry" },
+				func(q *ManagedSafePoint) { q.Host.Phase = "resolve-subtask-approval" },
+				func(q *ManagedSafePoint) { q.Host.Phase = "handoff-start" },
+				func(q *ManagedSafePoint) {
+					if q.Host.Approval == nil {
+						q.Host.Approval = &ManagedApprovalDecision{CheckpointID: "foreign", Decision: "approve"}
+					} else {
+						q.Host.Approval = nil
+					}
+				},
+			} {
+				bad := managedClone(p)
+				mutate(&bad)
+				bad.RecoveryID = ManagedRecoveryID(bad.ID, bad.Host)
+				if bad.Valid() {
+					t.Fatalf("foreign or malformed point accepted: %+v", bad)
+				}
+			}
+		})
 	}
 }

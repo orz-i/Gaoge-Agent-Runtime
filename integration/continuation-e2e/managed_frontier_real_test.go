@@ -58,7 +58,7 @@ func (m managedFrontierProcessModel) Generate(_ context.Context, req model.Reque
 	if m.phase == "unknown" {
 		os.Exit(managedRecoveryCrashExit)
 	}
-	if strings.HasPrefix(m.phase, "continued/") {
+	if m.phase == "warmup" || strings.HasPrefix(m.phase, "continued/") {
 		return model.Response{Content: "original continuation", Continue: true}, nil
 	}
 	if strings.HasPrefix(m.phase, "tool_completed/") {
@@ -78,7 +78,7 @@ func openManagedFrontierProcess(t *testing.T, db *gorm.DB, files, phase string) 
 		t.Fatal(err)
 	}
 	var ks kernel.Store = postgresadapter.NewKernelStore(db)
-	if phase != "resume" && phase != "unknown" {
+	if phase != "resume" && phase != "unknown" && phase != "warmup" {
 		event, when, _ := strings.Cut(phase, "/")
 		if event == "cancel" {
 			event = "pending"
@@ -86,8 +86,12 @@ func openManagedFrontierProcess(t *testing.T, db *gorm.DB, files, phase string) 
 		switch event {
 		case "input_applied", "initial_input":
 			event = "agent.input_applied"
-		case "initial_intent":
+		case "initial_intent", "resume_intent":
 			event = "agent.model_invocation.pending"
+		case "resume_receipt":
+			event = "agent.model_invocation.completed"
+		case "resume_unknown":
+			event = "agent.model_invocation.dispatch_intent"
 		case "continued":
 			event = "agent.model_continued"
 		case "tool_completed":
@@ -144,7 +148,12 @@ func TestManagedFrontierProcess(t *testing.T) {
 	}
 	db := openManagedRecoveryDB(t, os.Getenv("TEST_POSTGRES_DSN"))
 	session := openManagedFrontierProcess(t, db, os.Getenv("GAOGE_TEST_MANAGED_FRONTIER_FILES"), phase)
-	_, err := session.Prompt(t.Context(), managedRecoveryTurn, "original task")
+	var err error
+	if strings.HasPrefix(phase, "resume_") {
+		_, err = session.Resume(t.Context(), managedRecoveryTurn)
+	} else {
+		_, err = session.Prompt(t.Context(), managedRecoveryTurn, "original task")
+	}
 	t.Fatalf("expected hard process exit: %v", err)
 }
 
@@ -153,7 +162,7 @@ func TestRealPostgresManagedOriginalFrontierMatrix(t *testing.T) {
 	if dsn == "" {
 		t.Skip("TEST_POSTGRES_DSN is not configured")
 	}
-	for _, phase := range []string{"claimed/before", "claimed/after", "completed/before", "completed/after", "input_applied/before", "input_applied/after", "cancel/after", "unknown", "dispatch_intent/after", "initial_input/before", "initial_input/after", "initial_intent/before", "initial_intent/after", "continued/before", "continued/after", "tool_completed/after"} {
+	for _, phase := range []string{"claimed/before", "claimed/after", "completed/before", "completed/after", "input_applied/before", "input_applied/after", "cancel/after", "unknown", "dispatch_intent/after", "initial_input/before", "initial_input/after", "initial_intent/before", "initial_intent/after", "continued/before", "continued/after", "tool_completed/after", "resume_intent/before", "resume_intent/after", "resume_receipt/after", "resume_unknown/after"} {
 		t.Run(phase, func(t *testing.T) {
 			t.Parallel()
 			ctx := t.Context()
@@ -170,6 +179,7 @@ func TestRealPostgresManagedOriginalFrontierMatrix(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			nextDispatch := strings.HasPrefix(phase, "resume_")
 			initial := strings.HasPrefix(phase, "initial_")
 			continued := strings.HasPrefix(phase, "continued/")
 			tool := strings.HasPrefix(phase, "tool_completed/")
@@ -181,6 +191,21 @@ func TestRealPostgresManagedOriginalFrontierMatrix(t *testing.T) {
 			if initial {
 				if err := appendManagedRecoveryRecord(filepath.Join(files, "inputs.jsonl"), agent.RunInput{Sequence: 1, ID: "initial-steering", Text: "initial steering"}); err != nil {
 					t.Fatal(err)
+				}
+			}
+			var prior kernel.ManagedTransfer
+			if nextDispatch {
+				first, e := openManagedFrontierProcess(t, db, files, "warmup").Prompt(ctx, managedRecoveryTurn, "original task")
+				if e != nil || first.Turn.Status != harness.TurnRunning {
+					t.Fatalf("ordinary first dispatch did not yield: %v %s", e, first.Turn.Status)
+				}
+				root, ok := harness.TopLevelInvocation(first)
+				if !ok || harness.PendingExecutionDispatch(first.Items, root.ID) {
+					t.Fatal("original Start dispatch not retired")
+				}
+				prior, e = postgresadapter.NewKernelStore(db).LoadManagedRecovery(ctx, root.ExecutionRefID)
+				if e != nil || prior.SafePoint.Host.Phase != "start" {
+					t.Fatalf("missing original Start point: %v", e)
 				}
 			}
 			cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestManagedFrontierProcess$", "-test.count=1")
@@ -209,8 +234,22 @@ func TestRealPostgresManagedOriginalFrontierMatrix(t *testing.T) {
 			if initial && phase != "initial_intent/after" {
 				wantInv = 0
 			}
+			if nextDispatch && phase != "resume_intent/before" {
+				wantInv = 2
+			}
 			if err != nil || len(before.ModelInvocations) != wantInv {
 				t.Fatalf("wrong cut: %+v %v", before, err)
+			}
+			if nextDispatch {
+				b := safe.SafePoint.Host
+				g, e := ks.LookupChildExecution(ctx, root.ExecutionRefID)
+				if e != nil || b.Phase != "resume" || b.DispatchID == prior.SafePoint.Host.DispatchID || !b.MatchesOriginalGrant(g) || g != safe.SafePoint.OriginalGrant {
+					t.Fatalf("new Resume did not own its exact point: %v %s", e, b.Phase)
+				}
+				old, e := ks.LoadManagedRecoveryByID(ctx, prior.SafePoint.ID)
+				if e != nil || old.SafePoint.OriginalGrant != prior.SafePoint.OriginalGrant {
+					t.Fatalf("lost historical Start identity: %v", e)
+				}
 			}
 			if initial {
 				wantCursor := uint64(1)
@@ -240,6 +279,12 @@ func TestRealPostgresManagedOriginalFrontierMatrix(t *testing.T) {
 			if strings.HasPrefix(phase, "completed/") || strings.HasPrefix(phase, "input_applied/") || phase == "unknown" || continued || tool {
 				wantBefore = 1
 			}
+			if nextDispatch {
+				wantBefore = 1
+				if phase == "resume_receipt/after" {
+					wantBefore = 2
+				}
+			}
 			if len(beforeCalls) != wantBefore {
 				t.Fatalf("wrong original physical call count: %d", len(beforeCalls))
 			}
@@ -261,7 +306,7 @@ func TestRealPostgresManagedOriginalFrontierMatrix(t *testing.T) {
 			}
 			_, leaseDuration := conformance.ManagedFixtureExecutionPolicy()
 			conformance.AwaitManagedOriginalLeaseExpiry(t, ks, original, safe, 2*leaseDuration+5*time.Second)
-			if phase == "unknown" || phase == "dispatch_intent/after" {
+			if phase == "unknown" || phase == "dispatch_intent/after" || phase == "resume_unknown/after" {
 				if _, err = session.Resume(ctx, managedRecoveryTurn); err == nil {
 					t.Fatal("unknown dispatch resumed")
 				}
@@ -303,7 +348,7 @@ func TestRealPostgresManagedOriginalFrontierMatrix(t *testing.T) {
 			if strings.HasPrefix(phase, "input_applied/") {
 				wantCalls, wantCursor = 2, 1
 			}
-			if continued || tool {
+			if continued || tool || nextDispatch {
 				wantCalls = 2
 			}
 			if initial {
@@ -316,6 +361,12 @@ func TestRealPostgresManagedOriginalFrontierMatrix(t *testing.T) {
 				(wantInv != 0 && view.ModelInvocations[0].ID != before.ModelInvocations[0].ID) || ledger.View("").Usage.LLMCalls != wantCalls ||
 				!ledger.FinishedRuns[root.ExecutionRefID] || ledger.View("").Reserved != (budget.Usage{}) {
 				t.Fatalf("original obligations: status=%s calls=%d cursor=%d ledger=%+v", done.Turn.Status, len(calls), view.InputCursor, ledger.View(""))
+			}
+			if nextDispatch {
+				if len(view.ModelInvocations) != 2 || (wantInv == 2 && view.ModelInvocations[1].ID != before.ModelInvocations[1].ID) ||
+					strings.Count(requestMessages(calls[1]), "original continuation") != 1 {
+					t.Fatal("new Resume lost or duplicated its original invocation or input")
+				}
 			}
 			if initial && strings.Count(requestMessages(calls[0]), "initial steering") != 1 {
 				t.Fatal("initial input lost or duplicated")

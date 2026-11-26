@@ -432,7 +432,7 @@ func (r *Runner) qualifyManagedFrontier(ctx context.Context, t kernel.ManagedTra
 func (r *Runner) parkManagedFrontier(ctx context.Context, t kernel.ManagedTransfer, cancel bool) (kernel.ManagedParkedProof, managedObligations, error) {
 	var parked kernel.ManagedParkedProof
 	if t.SafePoint.LifecycleVersion != kernel.ManagedLifecycleAgentObligations {
-		parked, err := r.runtime.ParkManagedContinuation(ctx, t.SafePoint.Host.RunID)
+		parked, err := r.runtime.ParkManagedTransfer(ctx, t)
 		return parked, managedObligations{}, err
 	}
 	var p managedObligations
@@ -460,7 +460,7 @@ func (r *Runner) parkManagedFrontier(ctx context.Context, t kernel.ManagedTransf
 		if cancel && p.SettledReceiptDigest != "" {
 			return parked, p, ErrModelOutcomeUnknown
 		}
-		parked, err = r.runtime.ParkManagedContinuation(ctx, t.SafePoint.Host.RunID)
+		parked, err = r.runtime.ParkManagedTransfer(ctx, t)
 	}
 	return parked, p, err
 }

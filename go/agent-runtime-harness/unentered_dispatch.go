@@ -54,7 +54,7 @@ func (runner *Runner) recoverOriginalPhysicalDispatch(ctx context.Context, inv I
 		default:
 			return false, nil
 		}
-		fields, ok := authorityStringFields(item.Payload, "phase", "physicalRunID")
+		fields, ok := executionDispatchFields(item.Payload)
 		if !ok {
 			return false, nil
 		}

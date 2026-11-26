@@ -60,14 +60,14 @@ func managedPreparationLedger(state runState, l budget.Ledger) bool {
 // elected successor still owns its original transfer, never a new selection.
 func (r *Runner) managedPreparationBinding(ctx context.Context, s kernel.Snapshot, state runState) (kernel.ManagedHostBinding, bool) {
 	if !r.supportsManagedPreparation() || !r.combinedManaged(state) || r.activeRootGrant == nil ||
-		r.activeRunLease == nil || r.activeRootGrant.AdmissionOperation != "start" || s.Run.ParentRunID != "" {
+		r.activeRunLease == nil || s.Run.ParentRunID != "" {
 		return kernel.ManagedHostBinding{}, false
 	}
 	frame, _ := callbackscope.RunCall(ctx).(*nativeRunAdmission)
 	if frame == nil || frame.invocation.RunID != s.Run.ID || !frame.entered.Load() || frame.receiptOnly {
 		return kernel.ManagedHostBinding{}, false
 	}
-	return r.runtime.ManagedDispatch(ctx, s.Run.ID)
+	return r.managedOriginalDispatch(ctx, s.Run.ID)
 }
 
 func (r *Runner) ensureManagedPreparation(ctx context.Context, s kernel.Snapshot, state runState) (kernel.Snapshot, error) {

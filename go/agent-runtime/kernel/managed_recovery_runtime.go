@@ -126,8 +126,28 @@ func (r *Runtime) ParkManagedContinuation(ctx context.Context, id string) (Manag
 	if e != nil {
 		return ManagedParkedProof{}, e
 	}
+	return r.ParkManagedTransfer(ctx, t)
+}
+
+// ParkManagedTransfer uses the already qualified source as an exact CAS hint.
+// A later dispatch or safe point cannot be parked by an earlier caller.
+func (r *Runtime) ParkManagedTransfer(ctx context.Context, t ManagedTransfer) (ManagedParkedProof, error) {
+	if r == nil || ctx == nil {
+		return ManagedParkedProof{}, ErrInvalidInput
+	}
+	s, ok := r.store.(ManagedRecoveryStore)
+	if !ok {
+		return ManagedParkedProof{}, ErrExecutionRequired
+	}
+	current, e := s.LoadManagedRecovery(ctx, t.SafePoint.Host.RunID)
+	if e != nil {
+		return ManagedParkedProof{}, e
+	}
+	if ManagedDigest(current) != ManagedDigest(t) {
+		return ManagedParkedProof{}, ErrExecutionConflict
+	}
 	if t.State != ManagedParked {
-		t, e = s.ParkManagedRecovery(ctx, ManagedParkRequest{RunID: id, SuspensionID: t.SafePoint.ID, ExpectedRevision: t.SafePoint.Source.Run.Revision})
+		t, e = s.ParkManagedRecovery(ctx, ManagedParkRequest{RunID: t.SafePoint.Host.RunID, SuspensionID: t.SafePoint.ID, ExpectedRevision: t.SafePoint.Source.Run.Revision})
 		if e != nil {
 			return ManagedParkedProof{}, e
 		}

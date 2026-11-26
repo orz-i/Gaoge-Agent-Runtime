@@ -195,7 +195,8 @@ func summaryNativePointFixture(t *testing.T, completed bool) (*Runner, *summaryN
 	authority := kernel.ManagedAuthority{Namespace: strings.Repeat("1", 64), Generation: 1, Version: 1}
 	hostAuthority := kernel.ManagedAuthority{Namespace: strings.Repeat("2", 64), Generation: 1, Version: 1}
 	lease := kernel.ExecutionLease{RunID: request.ID, OwnerID: "owner", LeaseID: "lease", Epoch: 1, ExpiresAt: time.Now().Add(time.Hour)}
-	grant := kernel.ChildExecutionGrant{ID: "grant", ChildRunID: request.ID, ExpectedRevision: 1, ExecutionOwnerID: lease.OwnerID, ExecutionLeaseID: lease.LeaseID, ExecutionEpoch: lease.Epoch,
+	grantID, _ := kernel.OwnedPhysicalDispatchGrantID(request.ID, "start", "original-dispatch")
+	grant := kernel.ChildExecutionGrant{ID: grantID, ChildRunID: request.ID, ExpectedRevision: 1, ExecutionOwnerID: lease.OwnerID, ExecutionLeaseID: lease.LeaseID, ExecutionEpoch: lease.Epoch,
 		AdmissionOperation: "start", AdmissionSourceHash: strings.Repeat("d", 64)}
 	host := kernel.ManagedHostBinding{KernelAuthority: authority, HostAuthority: hostAuthority, TurnID: invocation.ContextSummary.Cursor.Turn.ID,
 		InvocationID: invocation.ContextSummary.Root.InvocationID, Attempt: uint32(invocation.ContextSummary.Root.Attempt), RunID: request.ID,

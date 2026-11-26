@@ -281,6 +281,7 @@ func (runner *Runner) ResolveApproval(
 	if err != nil {
 		return Snapshot{}, err
 	}
+	runCtx = context.WithValue(runCtx, originalApprovalDispatchKey{}, kernel.ManagedApprovalDecision{CheckpointID: request.CheckpointID, Decision: string(request.Decision), Comment: strings.TrimSpace(request.Comment)})
 	resolved, resolveErr := runner.withPhysicalInvocationDispatch(runCtx, invocation, "resolve-approval", func(physicalCtx context.Context) (kernel.Snapshot, error) {
 		return runner.agent.ResolveApproval(
 			physicalCtx, runtimeSnapshot.Run.ID, runtimeSnapshot.Run.Revision,
@@ -1731,20 +1732,13 @@ func (runner *Runner) recordApprovalDecisionItem(
 	pending approvalRequestItemPayload,
 	request ResolveApprovalRequest,
 ) error {
-	payload, err := json.Marshal(approvalDecisionItemPayload{
-		Subtask:      invocation.ParentItemID != "",
-		CheckpointID: pending.CheckpointID, Decision: request.Decision, Comment: strings.TrimSpace(request.Comment),
-	})
+	item, err := approvalDecisionFact(turn.ID, invocation.ID, invocation.ExecutionRefID, invocation.ParentItemID != "", kernel.ManagedApprovalDecision{
+		CheckpointID: pending.CheckpointID, Decision: string(request.Decision), Comment: strings.TrimSpace(request.Comment),
+	}, runner.clock.Now().UTC())
 	if err != nil {
 		return err
 	}
-	now := runner.clock.Now().UTC()
-	_, err = appendItemFact(ctx, runner.store, runner.turnFeed, Item{
-		ID: stableID("hia", turn.ID, pending.CheckpointID, "decision"), TurnID: turn.ID,
-		Kind: ItemApproval, Status: ItemCompleted, RunID: invocation.ExecutionRefID, InvocationID: invocation.ID,
-		ParentItemID: stableID("hia", turn.ID, pending.CheckpointID),
-		Payload:      payload, CreatedAt: now, UpdatedAt: now,
-	})
+	_, err = appendItemFact(ctx, runner.store, runner.turnFeed, item)
 	return err
 }
 

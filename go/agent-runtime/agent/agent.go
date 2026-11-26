@@ -1027,6 +1027,11 @@ func (runner *Runner) resolveApproval(
 	if !ok || snapshot.Checkpoint.Status != kernel.CheckpointPending {
 		return kernel.Snapshot{}, ErrApprovalRequired
 	}
+	if b, ok := runner.managedOriginalDispatch(ctx, snapshot.Run.ID); ok && b.Phase == "resolve-approval" {
+		if b.Approval == nil || b.Approval.CheckpointID != snapshot.Checkpoint.ID || b.Approval.Decision != string(response.Decision) || b.Approval.Comment != strings.TrimSpace(response.Comment) {
+			return snapshot, ErrApprovalRequired
+		}
+	}
 	state.PendingApproval = binding
 	resolved, err := runner.approvals.ResolveToolApproval(snapshot.Checkpoint, response)
 	runner.noteRootCallbackFailure(err)

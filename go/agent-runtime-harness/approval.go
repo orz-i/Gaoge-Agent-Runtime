@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/interaction"
@@ -179,4 +180,18 @@ func approvalRequestFromSnapshot(snapshot kernel.Snapshot) (approvalRequestItemP
 		ToolCallID:   request.ToolCallID, ToolKey: request.ToolKey, ToolName: request.ToolName,
 		Arguments: append(json.RawMessage(nil), request.Arguments...),
 	}, true, nil
+}
+
+// approvalDecisionFact is the canonical projection of an explicitly captured
+// Host decision, shared by normal return and original managed closure.
+func approvalDecisionFact(turnID, invocationID, runID string, subtask bool, a kernel.ManagedApprovalDecision, now time.Time) (Item, error) {
+	if !a.Valid() {
+		return Item{}, ErrInvalidRequest
+	}
+	payload, err := json.Marshal(approvalDecisionItemPayload{Subtask: subtask, CheckpointID: a.CheckpointID, Decision: ApprovalDecision(a.Decision), Comment: a.Comment})
+	if err != nil {
+		return Item{}, err
+	}
+	return Item{ID: stableID("hia", turnID, a.CheckpointID, "decision"), TurnID: turnID, Kind: ItemApproval, Status: ItemCompleted,
+		RunID: runID, InvocationID: invocationID, ParentItemID: stableID("hia", turnID, a.CheckpointID), Payload: payload, CreatedAt: now, UpdatedAt: now}, nil
 }

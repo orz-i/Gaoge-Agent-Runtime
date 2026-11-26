@@ -46,7 +46,7 @@ func ManagedHostSource(session Session, turn Turn, invocation Invocation, config
 }
 
 // ValidateManagedOriginalRows is shared by concrete storage transactions. It
-// admits only the original Root start, never an arbitrary child or resume.
+// admits the exact original native Root dispatch, never a descendant or retry.
 func ValidateManagedOriginalRows(authority kernel.ManagedAuthority, b kernel.ManagedHostBinding, session Session, turn Turn, invocation Invocation, config ConfigSnapshot, dispatch Item, items []Item) error {
 	if !b.Valid() || b.HostAuthority != authority || session.ID == "" || turn.SessionID != session.ID ||
 		turn.ID != b.TurnID || config.ID != turn.ConfigSnapshotID || config.TurnID != turn.ID ||
@@ -57,8 +57,35 @@ func ValidateManagedOriginalRows(authority kernel.ManagedAuthority, b kernel.Man
 		return ErrConflict
 	}
 	phase, ok := VerifiedExecutionDispatchGrant(dispatch)
-	if !ok || phase != b.Phase || phase != "start" {
+	if !ok || phase != b.Phase {
 		return ErrConflict
+	}
+	if b.Phase == "resolve-approval" {
+		a, ok := originalDispatchApproval(dispatch)
+		if !ok || !reflect.DeepEqual(a, b.Approval) {
+			return ErrConflict
+		}
+		if items != nil {
+			parent := stableID("hia", turn.ID, a.CheckpointID)
+			found := false
+			for _, item := range items {
+				if item.ParentItemID == parent {
+					return ErrConflict
+				}
+				if item.ID != parent {
+					continue
+				}
+				var pending approvalRequestItemPayload
+				if found || item.Kind != ItemApproval || item.Status != ItemWaiting || item.TurnID != turn.ID || item.InvocationID != invocation.ID || item.RunID != b.RunID || item.Seq == 0 || item.Seq >= dispatch.Seq ||
+					!decodeTypedAuthorityJSON(item.Payload, &pending) || pending.CheckpointID != a.CheckpointID || pending.Subtask || pending.ToolCallID == "" || pending.ToolKey == "" {
+					return ErrConflict
+				}
+				found = true
+			}
+			if !found {
+				return ErrConflict
+			}
+		}
 	}
 	source, err := ManagedHostSource(session, turn, invocation, config, dispatch)
 	if err != nil || !bytes.Equal(source, b.Source) {
@@ -66,8 +93,17 @@ func ValidateManagedOriginalRows(authority kernel.ManagedAuthority, b kernel.Man
 	}
 	// No ordinary completion, including a malformed sibling, is compatible
 	// with an unresolved original dispatch.
+	receipts := executionDispatchReceiptIndex(items)
 	for _, item := range items {
 		if item.ParentItemID == dispatch.ID {
+			return ErrConflict
+		}
+		if item.ParentItemID != ExecutionDispatchParentItemID || item.InvocationID != invocation.ID || item.ID == dispatch.ID {
+			continue
+		}
+		// An open original is the sole unresolved dispatch. Historical
+		// grants must have an exact receipt before the current one.
+		if _, settled := VerifiedExecutionDispatchReceipt(item, receipts[item.ID]); !settled || item.Seq >= dispatch.Seq || receipts[item.ID][0].Seq >= dispatch.Seq {
 			return ErrConflict
 		}
 	}
@@ -108,6 +144,10 @@ func SelectManagedReservation(p kernel.ManagedParkedProof, b kernel.ManagedHostB
 
 func cloneManagedReservation(r kernel.ManagedHostReservation) kernel.ManagedHostReservation {
 	r.Binding.Source = append(json.RawMessage(nil), r.Binding.Source...)
+	if r.Binding.Approval != nil {
+		a := *r.Binding.Approval
+		r.Binding.Approval = &a
+	}
 	r.Cancellation.Payload = append(json.RawMessage(nil), r.Cancellation.Payload...)
 	return r
 }
@@ -175,6 +215,13 @@ func ManagedClosureItems(p kernel.ManagedClosureProof, r kernel.ManagedHostReser
 	}
 	now := snap.Run.UpdatedAt
 	items := []Item{{ID: stableID("hdispatchdone", r.Binding.DispatchID), TurnID: r.Binding.TurnID, InvocationID: r.Binding.InvocationID, RunID: r.Binding.RunID, Kind: ItemDiagnostic, Status: ItemCompleted, ParentItemID: r.Binding.DispatchID, Payload: payload, CreatedAt: now, UpdatedAt: now}}
+	if r.Binding.Approval != nil {
+		decision, err := approvalDecisionFact(r.Binding.TurnID, r.Binding.InvocationID, r.Binding.RunID, false, *r.Binding.Approval, now)
+		if err != nil {
+			return nil, err
+		}
+		items = append([]Item{decision}, items...)
+	}
 	if r.Mode == kernel.ManagedCancel {
 		items = append(items, Item{ID: stableID("hcancelclosed", r.Cancellation.IntentID), TurnID: r.Binding.TurnID, RunID: r.Binding.RunID, Kind: ItemDiagnostic, Status: ItemCompleted, ParentItemID: r.Cancellation.IntentID, Payload: json.RawMessage(`{"boundary":"cancel_scope_settled"}`), CreatedAt: now, UpdatedAt: now})
 	}

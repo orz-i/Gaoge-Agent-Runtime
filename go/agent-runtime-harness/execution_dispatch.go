@@ -58,6 +58,29 @@ func executionDispatchReceiptIndex(items []Item) map[string][]Item {
 	return byGrant
 }
 
+type originalApprovalDispatchKey struct{}
+
+// The existing immutable physical grant carries the exact approval request.
+// Legacy two-field grants remain readable for ordinary return retirement.
+func executionDispatchFields(raw json.RawMessage) (map[string]string, bool) {
+	if fields, ok := authorityStringFields(raw, "phase", "physicalRunID"); ok {
+		return fields, true
+	}
+	fields, ok := authorityStringFields(raw, "phase", "physicalRunID", "checkpointID", "decision", "comment")
+	if !ok || fields["phase"] != "resolve-approval" {
+		return nil, false
+	}
+	a := kernel.ManagedApprovalDecision{CheckpointID: fields["checkpointID"], Decision: fields["decision"], Comment: fields["comment"]}
+	return fields, a.Valid()
+}
+func originalDispatchApproval(grant Item) (*kernel.ManagedApprovalDecision, bool) {
+	fields, ok := executionDispatchFields(grant.Payload)
+	if !ok || fields["phase"] != "resolve-approval" || fields["checkpointID"] == "" {
+		return nil, false
+	}
+	return &kernel.ManagedApprovalDecision{CheckpointID: fields["checkpointID"], Decision: fields["decision"], Comment: fields["comment"]}, true
+}
+
 // ValidExecutionDispatchGrantAdmission checks the exact original physical
 // phase before a Store has assigned its per-Turn Seq. Memory and SQL use this
 // same proof before committing a grant. A fabricated phase is not authority.
@@ -67,7 +90,7 @@ func ValidExecutionDispatchGrantAdmission(grant Item) (string, bool) {
 		grant.TurnID == "" || grant.InvocationID == "" || grant.RunID == "" {
 		return "", false
 	}
-	original, ok := authorityStringFields(grant.Payload, "phase", "physicalRunID")
+	original, ok := executionDispatchFields(grant.Payload)
 	if !ok || original["physicalRunID"] == "" {
 		return "", false
 	}
@@ -124,7 +147,12 @@ func VerifiedExecutionDispatchReceipt(grant Item, receipts []Item) (string, bool
 	}
 	// Managed closure has its own exact five-field schema. Do not relax the
 	// original single-field receipt contract or accept duplicate/unknown keys.
-	if phase == "start" && managedDispatchReceipt(receipt) {
+	if _, managed := kernel.ManagedDispatchOperation(phase); managed && managedDispatchReceipt(receipt) {
+		if phase == "resolve-approval" {
+			if _, ok := originalDispatchApproval(grant); !ok {
+				return "", false
+			}
+		}
 		fields, _ := authorityStringFields(receipt.Payload, "boundary", "recoveryID", "mode", "selectionHash", "terminalHash")
 		return fields["boundary"], true
 	}
@@ -505,6 +533,18 @@ func (runner *Runner) beginPhysicalInvocationDispatch(
 		Phase         string `json:"phase"`
 		PhysicalRunID string `json:"physicalRunID,omitempty"`
 	}{Phase: phase, PhysicalRunID: physicalRunID})
+	if approval, ok := ctx.Value(originalApprovalDispatchKey{}).(kernel.ManagedApprovalDecision); ok && phase == "resolve-approval" {
+		if !approval.Valid() {
+			return Item{}, ErrInvalidRequest
+		}
+		payload, err = json.Marshal(struct {
+			Phase         string `json:"phase"`
+			PhysicalRunID string `json:"physicalRunID"`
+			CheckpointID  string `json:"checkpointID"`
+			Decision      string `json:"decision"`
+			Comment       string `json:"comment"`
+		}{phase, physicalRunID, approval.CheckpointID, approval.Decision, approval.Comment})
+	}
 	if err != nil {
 		return Item{}, err
 	}

@@ -96,7 +96,7 @@ func (runner *Runner) qualifySummaryBoundary(ctx context.Context, snapshot kerne
 		return nil, nil
 	}
 	invocation, valid := summaryNativePhase(state)
-	host, bound := runner.runtime.ManagedDispatch(ctx, snapshot.Run.ID)
+	host, bound := runner.managedOriginalDispatch(ctx, snapshot.Run.ID)
 	if !valid || !bound {
 		return nil, kernel.ErrExecutionRequired
 	}

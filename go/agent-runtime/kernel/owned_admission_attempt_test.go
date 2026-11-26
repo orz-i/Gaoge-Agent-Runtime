@@ -10,6 +10,9 @@ import (
 
 func TestOwnedAdmissionAttemptBindsCommitAndSource(t *testing.T) {
 	_, source, lease, grant, _, _ := managedReducerFixture()
+	// This exercises the native unbound admission attempt, not the
+	// deterministic Host-dispatch grant used by the managed fixture.
+	grant.ID = "old-grant"
 	grant.ExpectedRevision = source.Run.Revision
 	proof := featurecontrol.Seal(source.Run.ID, source.Run.Revision, "agent_owned_physical_admission", lease.LeaseID, source.State, source.Checkpoint)
 	p := OwnedPhysicalAdmission{proof: proof, attempt: [32]byte{1}}

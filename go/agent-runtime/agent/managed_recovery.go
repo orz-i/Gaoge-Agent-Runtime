@@ -19,6 +19,14 @@ func (r *Runner) SupportsManagedContextRecovery() bool {
 	return r != nil && r.managedContextRecovery != nil
 }
 
+func (r *Runner) managedOriginalDispatch(ctx context.Context, id string) (kernel.ManagedHostBinding, bool) {
+	b, ok := r.runtime.ManagedDispatch(ctx, id)
+	if !ok || r.activeRootGrant == nil || r.activeRunLease == nil || !b.MatchesOriginalGrant(*r.activeRootGrant) {
+		return kernel.ManagedHostBinding{}, false
+	}
+	return b, true
+}
+
 func (r *Runner) qualifyManagedModelBoundary(ctx context.Context, s kernel.Snapshot, state runState, inv ModelInvocation) (*kernel.ManagedSafePoint, error) {
 	if state.SummaryNativeRecovery && inv.Purpose == ModelInvocationContextSummary {
 		return r.qualifySummaryBoundary(ctx, s, state)
@@ -26,7 +34,7 @@ func (r *Runner) qualifyManagedModelBoundary(ctx context.Context, s kernel.Snaps
 	if (r.managedContextRecovery == nil && (!r.SupportsSummaryNativeRecovery() || !r.combinedManaged(state))) || r.activeRootGrant == nil || r.activeRunLease == nil || s.Run.ParentRunID != "" {
 		return nil, nil
 	}
-	binding, ok := r.runtime.ManagedDispatch(ctx, s.Run.ID)
+	binding, ok := r.managedOriginalDispatch(ctx, s.Run.ID)
 	if !ok {
 		return nil, nil
 	}
@@ -87,18 +95,27 @@ func (r *Runner) leaveModelSafePoint(ctx context.Context, s kernel.Snapshot, sta
 	if !required && r.managedContextRecovery == nil && (!r.SupportsSummaryNativeRecovery() || !r.combinedManaged(state)) {
 		return nil
 	}
-	// A historical closed transfer cannot gate another ordinary model
-	// invocation after the original successor retirement.
-	if !required {
-		point, err := r.runtime.LoadManagedRecovery(ctx, s.Run.ID)
-		if kernel.ManagedRecoveryAbsent(err) || (err == nil && (point.State == kernel.ManagedClosed || point.State == kernel.ManagedCancelled)) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
+	point, err := r.runtime.LoadManagedRecovery(ctx, s.Run.ID)
+	if kernel.ManagedRecoveryAbsent(err) && !required {
+		return nil
 	}
-	_, err := r.runtime.LeaveManagedSafePoint(ctx, s.Run.ID)
+	if err != nil {
+		return err
+	}
+	if point.State == kernel.ManagedClosed || point.State == kernel.ManagedCancelled {
+		if required {
+			return kernel.ErrExecutionConflict
+		}
+		return nil
+	}
+	g, _ := kernel.ManagedCurrentAuthority(point)
+	if r.activeRootGrant == nil || g != *r.activeRootGrant {
+		if required {
+			return kernel.ErrExecutionConflict
+		}
+		return nil
+	}
+	_, err = r.runtime.LeaveManagedSafePoint(ctx, s.Run.ID)
 	if !required && kernel.ManagedRecoveryAbsent(err) {
 		return nil
 	}
@@ -124,6 +141,9 @@ func (r *Runner) ParkManagedForCancellation(ctx context.Context, id string) (ker
 	if err != nil {
 		return kernel.ManagedParkedProof{}, err
 	}
+	if expected, ok := r.runtime.ManagedDispatch(ctx, id); ok && kernel.ManagedDigest(expected) != kernel.ManagedDigest(t.SafePoint.Host) {
+		return kernel.ManagedParkedProof{}, kernel.ErrExecutionConflict
+	}
 	if t.SafePoint.LifecycleVersion != kernel.ManagedLifecycleAgentObligations || t.Selection.Mode == kernel.ManagedResume {
 		return kernel.ManagedParkedProof{}, ErrRootOutcomeUnknown
 	}
@@ -144,6 +164,9 @@ func (r *Runner) recoverManagedContinuation(ctx context.Context, id string, requ
 	current, err := r.runtime.LoadManagedRecovery(ctx, id)
 	if err != nil {
 		return kernel.Snapshot{}, kernel.ManagedClosureProof{}, err
+	}
+	if expected, ok := r.runtime.ManagedDispatch(ctx, id); ok && kernel.ManagedDigest(expected) != kernel.ManagedDigest(current.SafePoint.Host) {
+		return kernel.Snapshot{}, kernel.ManagedClosureProof{}, kernel.ErrExecutionConflict
 	}
 	// Check the current profile before consulting Host reservation. Older
 	// unbudgeted proofs never acquire new ledger authority from a new handle.

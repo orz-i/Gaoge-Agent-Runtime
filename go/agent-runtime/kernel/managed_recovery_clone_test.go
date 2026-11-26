@@ -15,7 +15,7 @@ func managedCopyFixture() ManagedTransfer {
 	snapshot := Snapshot{Run: Run{ID: "run", DeadlineAt: &now, EndedAt: &ended, CreatedAt: now, UpdatedAt: ended},
 		State: raw(), Checkpoint: &Checkpoint{ID: "cp", Payload: raw(), Response: raw(), CreatedAt: now, ResolvedAt: &ended},
 		Result: &Result{ContentType: "application/json", Content: raw()}, EventHead: 17}
-	binding := ManagedHostBinding{RunID: "run", Source: raw()}
+	binding := ManagedHostBinding{RunID: "run", Source: raw(), Approval: &ManagedApprovalDecision{CheckpointID: "original", Decision: "approve", Comment: "original"}}
 	reservation := ManagedHostReservation{Binding: binding, Cancellation: ManagedCancellation{Payload: raw(), PayloadDigest: "original-digest"}}
 	grant := ChildExecutionGrant{ID: "grant", ChildRunID: "run", ExpectedRevision: 3, ExecutionOwnerID: "owner", ExecutionLeaseID: "lease", ExecutionEpoch: 4, AdmissionSourceHash: "source", AdmissionOperation: "prepare"}
 	lease := ExecutionLease{RunID: "run", OwnerID: "owner", LeaseID: "lease", Epoch: 4, ExpiresAt: now}
@@ -38,12 +38,14 @@ func mutateManagedSnapshot(v *Snapshot) {
 
 func mutateManagedPoint(v *ManagedSafePoint) {
 	v.Host.Source[0] = '['
+	v.Host.Approval.Comment = "changed"
 	v.LifecycleSource[0] = '['
 	mutateManagedSnapshot(&v.Source)
 }
 
 func mutateManagedReservation(v *ManagedHostReservation) {
 	v.Binding.Source[0] = '['
+	v.Binding.Approval.Comment = "changed"
 	v.Cancellation.Payload[0] = '['
 }
 
@@ -78,7 +80,7 @@ func checkManagedCopyIsolation[T managedCloneValue](t *testing.T, original T, mu
 
 func TestManagedFiniteCopiesIsolateAllPersistenceLeaves(t *testing.T) {
 	t.Run("binding", func(t *testing.T) {
-		checkManagedCopyIsolation(t, managedCopyFixture().SafePoint.Host, func(v *ManagedHostBinding) { v.Source[0] = '[' })
+		checkManagedCopyIsolation(t, managedCopyFixture().SafePoint.Host, func(v *ManagedHostBinding) { v.Source[0] = '['; v.Approval.Comment = "changed" })
 	})
 	t.Run("point", func(t *testing.T) { checkManagedCopyIsolation(t, managedCopyFixture().SafePoint, mutateManagedPoint) })
 	t.Run("reservation", func(t *testing.T) {
