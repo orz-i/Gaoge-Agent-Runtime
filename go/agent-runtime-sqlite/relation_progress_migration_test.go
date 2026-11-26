@@ -83,6 +83,17 @@ func TestEncryptedV8RelationMigrationPreservesOriginalAuthority(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	if _, err = OpenExistingWith(ctx, path, open); !errors.Is(err, ErrUnsupportedSchema) {
+		t.Fatal("implicit v10 migration", err)
+	}
+	if err = MigrateV9ToV10With(ctx, path, encrypted.WithKey(&wrong)); err == nil {
+		t.Fatal("wrong key migrated original v9")
+	}
+	for range 2 {
+		if err = MigrateV9ToV10With(ctx, path, open); err != nil {
+			t.Fatal(err)
+		}
+	}
 	s, err = OpenExistingWith(ctx, path, open)
 	if err != nil {
 		t.Fatal(err)

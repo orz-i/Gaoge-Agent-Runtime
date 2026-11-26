@@ -47,7 +47,8 @@ func (runner *Runner) RootDeferredCleanupEligibility(ctx context.Context, runID 
 	if err != nil {
 		return RootDeferredCleanupScope{}, err
 	}
-	if completion == nil {
+	if completion == nil || completion.NotEntered() {
+		// No-entry is only admission retirement, never child-cleanup custody.
 		return RootDeferredCleanupScope{}, ErrRootOutcomeUnknown
 	}
 	scope := RootDeferredCleanupScope{grant: grant, completion: *completion, valid: true}

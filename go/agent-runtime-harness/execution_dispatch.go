@@ -146,6 +146,13 @@ func VerifiedExecutionDispatchReceipt(grant Item, receipts []Item) (string, bool
 		if phase == "start" || phase == "start-retry" {
 			return payload["boundary"], true
 		}
+	case "native_agent_callback_not_entered":
+		// Unlike pre-Create rejection, the native Run exists. Only an
+		// original Agent call with acknowledged no-entry may close this.
+		if phase == "start" || phase == "start-retry" || phase == "resume" ||
+			phase == "resolve-approval" || phase == "resolve-subtask-approval" {
+			return payload["boundary"], true
+		}
 	case "native_agent_control_no_effect":
 		if phase == "resolve-approval" || phase == "resolve-subtask-approval" ||
 			phase == "grant-call-allowance" {
@@ -214,6 +221,25 @@ func (runner *Runner) pendingExecutionDispatch(
 		// otherwise valid native Kernel Start cancellation exception.
 		if len(receipts[item.ID]) != 0 {
 			return true, nil
+		}
+		// The same exact original-dispatch repair used by Resume is also
+		// available to protective control. Never require a new physical
+		// call to close an already acknowledged Kernel no-entry.
+		if native, ok := runner.agent.(*agent.Runner); ok && native.ObservesKernelRuntime(runner.runtime) {
+			owner, ownerErr := runner.store.GetInvocation(ctx, item.InvocationID)
+			if ownerErr != nil {
+				return false, ownerErr
+			}
+			if owner.ID != item.InvocationID || owner.TurnID != turnID || owner.ExecutionRefID != item.RunID {
+				return false, ErrConflict
+			}
+			repaired, repairErr := runner.recoverUnenteredDispatch(ctx, owner)
+			if repairErr != nil {
+				return false, repairErr
+			}
+			if repaired {
+				continue
+			}
 		}
 		if (phase.Phase == "start" || phase.Phase == "start-retry") &&
 			runner.nativeAgentStartOwnedByKernel(ctx, item, phase.PhysicalRunID) {
@@ -382,7 +408,7 @@ func (runner *Runner) withPhysicalInvocationDispatchForContext(
 	var physicalErr error
 	var outcome agent.PhysicalCallOutcome
 	if observe {
-		snapshot, outcome, physicalErr = native.ObservePhysicalCall(physicalCtx, resultRunID, operation, physical)
+		snapshot, outcome, physicalErr = native.ObservePhysicalDispatch(physicalCtx, resultRunID, operation, grant.ID, physical)
 	} else {
 		snapshot, physicalErr = physical(physicalCtx)
 	}
@@ -432,10 +458,24 @@ func (runner *Runner) withPhysicalInvocationDispatchForContext(
 		return snapshot, errors.Join(ErrExecutionOutcomeUnknown, physicalErr)
 	}
 	boundary := "physical_dispatch_returned"
+	if observe && outcome.Kind() == agent.PhysicalCallNotEntered {
+		boundary = "native_agent_callback_not_entered"
+	}
 	if phase == "grant-call-allowance" && nativeAgent && physicalErr == nil {
 		boundary = "native_allowance_committed"
 	}
-	return snapshot, errors.Join(physicalErr, runner.finishPhysicalDispatchGrant(ctx, grant, boundary))
+	receiptErr := runner.finishPhysicalDispatchGrant(ctx, grant, boundary)
+	if boundary == "native_agent_callback_not_entered" {
+		if receiptErr != nil {
+			return snapshot, errors.Join(ErrExecutionOutcomeUnknown, physicalErr, receiptErr)
+		}
+		// Reuse the existing private no-effect result. Unlike pre-Create
+		// rejection this has a real snapshot and a distinct durable boundary.
+		if physicalErr != nil {
+			return snapshot, dispatchProvenNoEffect{cause: physicalErr}
+		}
+	}
+	return snapshot, errors.Join(physicalErr, receiptErr)
 }
 
 // beginPhysicalInvocationDispatch is shared by Kernel Feature operations and
@@ -482,6 +522,15 @@ func (runner *Runner) beginPhysicalInvocationDispatch(
 		}
 	}
 	_, fresh, appendErr := runner.store.AppendItem(ctx, grant)
+	if errors.Is(appendErr, ErrConflict) {
+		repaired, repairErr := runner.recoverUnenteredDispatch(ctx, invocation)
+		if repairErr != nil {
+			return Item{}, errors.Join(ErrConflict, repairErr)
+		}
+		if repaired {
+			_, fresh, appendErr = runner.store.AppendItem(ctx, grant)
+		}
+	}
 	if phase == "resume" && errors.Is(appendErr, ErrConflict) {
 		repaired, repairErr := runner.recoverAllowanceDispatch(ctx, invocation)
 		if repairErr != nil {

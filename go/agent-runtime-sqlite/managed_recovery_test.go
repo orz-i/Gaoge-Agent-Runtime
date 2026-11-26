@@ -1,6 +1,7 @@
 package sqlite_test
 
 import (
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -44,7 +45,7 @@ func TestSQLiteManagedRecoveryStore(t *testing.T) {
 		if e != nil || pa != authority {
 			t.Fatalf("independent connection changed authority: %v", e)
 		}
-		return conformance.ManagedRecoveryStoreFixture{Store: first, Peer: peer,
+		return conformance.ManagedRecoveryStoreFixture{Store: first, Peer: peer, RetryableContention: func(err error) bool { return errors.Is(err, sqlite.ErrBusy) },
 			AdvanceTo: func(target time.Time) {
 				if delay := time.Until(target) + 50*time.Millisecond; delay > 0 {
 					time.Sleep(delay)

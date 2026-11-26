@@ -17,6 +17,7 @@ type rootToolReceipt struct {
 	// Keep the original Result field and its opaque-evidence typed path.
 	Rejection      *toolRejection `json:"rejection,omitempty"`
 	ApprovalDigest string         `json:"approvalDigest,omitempty"`
+	LedgerID       string         `json:"ledgerID,omitempty"`
 }
 
 // ReconcileExternalToolForControl verifies the original external wait without
@@ -124,6 +125,7 @@ func (runner *Runner) reconcileRootToolReceipt(ctx context.Context, snapshot ker
 	if a := state.ToolAdmission; a.authorized(call) && a.BudgetBound && a.LedgerID != "" && (!bound || binding.LedgerID != a.LedgerID) {
 		return snapshot, errors.Join(ErrToolOutcomeUnknown, ErrToolReceiptMismatch)
 	}
+	ledgerID := binding.LedgerID
 	var outcome toolOutcomeReceipt
 	if bound && binding.ReceiptDigest != "" {
 		if state.ToolWait != nil || state.ExternalToolHold != nil {
@@ -171,6 +173,7 @@ func (runner *Runner) reconcileRootToolReceipt(ctx context.Context, snapshot ker
 					return snapshot, errors.Join(ErrToolOutcomeUnknown, err)
 				}
 			}
+			ledgerID = hold.LedgerID
 			state.ExternalToolHold = nil
 		}
 		if bound && binding.LedgerID != "" {
@@ -180,7 +183,8 @@ func (runner *Runner) reconcileRootToolReceipt(ctx context.Context, snapshot ker
 			}
 		}
 		if completion.ControlCustody == kernel.OwnedToolBudgetReturn {
-			if err := runner.settleOriginalToolBudget(ctx, snapshot, completion, request, verified); err != nil {
+			ledgerID, err = runner.settleOriginalToolBudget(ctx, snapshot, completion, request, verified)
+			if err != nil {
 				return snapshot, errors.Join(ErrToolOutcomeUnknown, err)
 			}
 		}
@@ -200,7 +204,7 @@ func (runner *Runner) reconcileRootToolReceipt(ctx context.Context, snapshot ker
 			return snapshot, ErrToolReceiptMismatch
 		}
 	}
-	state.RecoveredTools = append(state.RecoveredTools, rootToolReceipt{Call: tools.CloneCall(call), Wait: clonePendingTool(state.ToolWait), Result: outcome.Result, Rejection: outcome.rejection(), ApprovalDigest: approvalDigest})
+	state.RecoveredTools = append(state.RecoveredTools, rootToolReceipt{Call: tools.CloneCall(call), Wait: clonePendingTool(state.ToolWait), Result: outcome.Result, Rejection: outcome.rejection(), ApprovalDigest: approvalDigest, LedgerID: ledgerID})
 	state.ToolDispatchID = ""
 	state.clearToolAdmission(callID)
 	state.ToolWait = nil

@@ -46,16 +46,7 @@ type ea1ChildCancelStore struct {
 	*ea1AgentAdmissionStore
 	runID, event, mode                                                        string
 	fault                                                                     error
-	lastRenewed                                                               kernel.ExecutionLease
 	begins, marks, finishes, markAttempts, applyHits, nativeHits, controlHits int
-}
-
-func (s *ea1ChildCancelStore) RenewExecution(ctx context.Context, req kernel.ExecutionRenewRequest) (kernel.ExecutionLease, error) {
-	lease, err := s.ea1AgentAdmissionStore.RenewExecution(ctx, req)
-	if err == nil {
-		s.lastRenewed = lease
-	}
-	return lease, err
 }
 
 func (s *ea1ChildCancelStore) BeginChildExecution(ctx context.Context, g kernel.ChildExecutionGrant) error {
@@ -356,16 +347,7 @@ func ea1ChildCancelUnknownWithModelReadDelay(
 		// A long but valid Model Store read can renew this same live native
 		// lease. Wait for its latest actual expiry, not the superseded first
 		// expiry; the stable LeaseID/Epoch are the identity to check below.
-		latest := lease
-		if renewed := f.store.lastRenewed; renewed.RunID != "" {
-			if renewed.RunID != lease.RunID || renewed.LeaseID != lease.LeaseID ||
-				renewed.Epoch != lease.Epoch || renewed.OwnerID != lease.OwnerID ||
-				renewed.ExpiresAt.Before(lease.ExpiresAt) {
-				t.Fatal("renewal lost original owner identity")
-			}
-			latest = renewed
-		}
-		ea1AwaitControlExpiry(t, latest)
+		ea1AwaitNativeExpiry(t, f.store, f.store.renewals.latest(t, lease))
 	} else if f.store.acquireCalls != 0 {
 		t.Fatal("default child fabricated Root native owner")
 	}

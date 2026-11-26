@@ -3,8 +3,7 @@ package sqlite
 import (
 	"context"
 	"fmt"
-	"math"
-	"strings"
+	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 )
@@ -27,9 +26,7 @@ const relationPageSQL = `WITH scanned AS MATERIALIZED (
 )
 SELECT s.child_run_id,s.parent_run_id,s.kind,s.owner_node_id,s.created_ns,
 	COALESCE(p.last_parent_revision,0),COALESCE(p.last_child_revision,0),
-	CASE WHEN child.status IN ('completed','failed','cancelled') AND parent.status='running'
-	AND (COALESCE(p.last_parent_revision,0)<parent.revision OR COALESCE(p.last_child_revision,0)<child.revision)
-	THEN 1 ELSE 0 END
+	COALESCE(parent.status,''),COALESCE(child.status,''),COALESCE(parent.revision,0),COALESCE(child.revision,0)
 FROM scanned s
 LEFT JOIN runtime_runs child ON child.run_id=s.child_run_id
 LEFT JOIN runtime_runs parent ON parent.run_id=s.parent_run_id
@@ -45,40 +42,22 @@ func (s *RunRelationStore) ListReconcilePage(ctx context.Context, after string, 
 		return runrelation.ReconciliationPage{}, conflictOrDatabaseError(err)
 	}
 	defer func() { _ = rows.Close() }()
-	page := runrelation.ReconciliationPage{NextCursor: after, Candidates: make([]runrelation.ReconciliationCandidate, 0)}
-	count := 0
+	scan := make([]runrelation.ReconciliationScanRow, 0, limit)
 	for rows.Next() {
-		var c runrelation.ReconciliationCandidate
-		var kind string
+		var row runrelation.ReconciliationScanRow
 		var createdNS int64
-		var eligible int
-		r := &c.Relation
-		if err = rows.Scan(&r.ChildRunID, &r.ParentRunID, &kind, &r.OwnerNodeID, &createdNS, &c.LastParentRevision, &c.LastChildRevision, &eligible); err != nil {
+		r := &row.Relation
+		if err = rows.Scan(&r.ChildRunID, &r.ParentRunID, &r.Kind, &r.OwnerNodeID, &createdNS, &row.LastParentRevision, &row.LastChildRevision,
+			&row.ParentStatus, &row.ChildStatus, &row.ParentRevision, &row.ChildRevision); err != nil {
 			return runrelation.ReconciliationPage{}, conflictOrDatabaseError(err)
 		}
-		if r.ChildRunID <= page.NextCursor {
-			return runrelation.ReconciliationPage{}, ErrInvalidRecord
-		}
-		page.NextCursor = r.ChildRunID
-		count++
-		if eligible == 0 {
-			continue
-		}
-		if eligible != 1 {
-			return runrelation.ReconciliationPage{}, ErrInvalidRecord
-		}
-		normalized, err := normalizeStoredRunRelation(*r, kind, createdNS)
-		if err != nil {
-			return runrelation.ReconciliationPage{}, err
-		}
-		c.Relation = normalized
-		page.Candidates = append(page.Candidates, c)
+		r.CreatedAt = time.Unix(0, createdNS).UTC()
+		scan = append(scan, row)
 	}
 	if err = rows.Err(); err != nil {
 		return runrelation.ReconciliationPage{}, conflictOrDatabaseError(err)
 	}
-	page.HasMore = count == limit
-	return page, nil
+	return runrelation.ReconciliationPageFromScan(after, limit, scan)
 }
 
 func (s *RunRelationStore) MarkObserved(ctx context.Context, child string, parentRevision, childRevision uint64) error {
@@ -88,9 +67,8 @@ func (s *RunRelationStore) MarkObserved(ctx context.Context, child string, paren
 // MarkEnqueued records only original queue acceptance or feature-verified
 // consumption. It cannot alter Runs, grants, relations, or physical effects.
 func (s *RunRelationStore) MarkEnqueued(ctx context.Context, child string, parentRevision, childRevision uint64) error {
-	child = strings.TrimSpace(child)
-	if s == nil || s.db == nil || ctx == nil || child == "" || parentRevision == 0 || childRevision == 0 ||
-		parentRevision > math.MaxInt64 || childRevision > math.MaxInt64 {
+	child, err := runrelation.PrepareReconciliationProgress(child, parentRevision, childRevision)
+	if s == nil || s.db == nil || ctx == nil || err != nil {
 		return runrelation.ErrInvalidInput
 	}
 	result, err := s.db.ExecContext(ctx, `INSERT INTO runtime_run_relation_progress(child_run_id,last_parent_revision,last_child_revision)

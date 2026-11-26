@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"strings"
 	"sync"
@@ -155,7 +156,7 @@ func (store *RunRelationStore) ListReconcileCandidates(
 	ctx context.Context, afterChildRunID string, limit int,
 ) ([]runrelation.ReconciliationCandidate, error) {
 	page, err := store.ListReconcilePage(ctx, afterChildRunID, limit)
-	return page.Candidates, err
+	return page.Candidates, errors.Join(err, page.RejectionError())
 }
 
 // MarkObserved records that a feature-owned guard verified this child was
@@ -170,8 +171,8 @@ func (store *RunRelationStore) MarkObserved(
 func (store *RunRelationStore) MarkEnqueued(
 	_ context.Context, childRunID string, parentRevision, childRevision uint64,
 ) error {
-	childRunID = strings.TrimSpace(childRunID)
-	if store == nil || childRunID == "" || parentRevision == 0 || childRevision == 0 {
+	childRunID, err := runrelation.PrepareReconciliationProgress(childRunID, parentRevision, childRevision)
+	if store == nil || err != nil {
 		return runrelation.ErrInvalidInput
 	}
 	store.mu.Lock()

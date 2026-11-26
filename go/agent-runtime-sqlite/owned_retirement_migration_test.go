@@ -86,6 +86,9 @@ func TestOwnedRetirementV5MigrationPreservesOriginalNativeMark(t *testing.T) {
 	if e = MigrateV8ToV9(t.Context(), path); e != nil {
 		t.Fatal(e)
 	}
+	if e = MigrateV9ToV10(t.Context(), path); e != nil {
+		t.Fatal(e)
+	}
 	current, e := OpenExisting(t.Context(), path)
 	if e != nil {
 		t.Fatal(e)

@@ -307,8 +307,8 @@ type ownedRecoveryWrite struct {
 }
 
 func (s *Store) ApplyOwnedPhysicalRecovery(ctx context.Context, g kernel.ChildExecutionGrant, expectedRevision uint64, mutation kernel.StoreMutation, permit kernel.OwnedPhysicalRecovery) (kernel.Snapshot, error) {
-	if !g.IsOwned() {
-		return kernel.Snapshot{}, kernel.ErrInvalidInput
+	if err := kernel.ValidateOwnedPhysicalRecoveryRequest(g, expectedRevision, mutation); err != nil {
+		return kernel.Snapshot{}, err
 	}
 	return s.applyWithAuthority(ctx, nil, nil, nil, &ownedRecoveryWrite{g, permit}, g.ChildRunID, expectedRevision, mutation)
 }
@@ -391,27 +391,27 @@ func (s *Store) applyWithAuthority(ctx context.Context, lease *kernel.ExecutionL
 		}
 	}
 	if recovery != nil {
-		original, marked, e := loadPhysicalGrant(ctx, tx, runID)
+		marked, e := loadOwnedPhysicalGrant(ctx, tx, recovery.grant)
+		if errors.Is(e, kernel.ErrNotFound) {
+			return kernel.Snapshot{}, kernel.ErrExecutionConflict
+		}
 		if e != nil {
 			return kernel.Snapshot{}, e
 		}
-		if original != recovery.grant || marked != 0 || current.Run.Kind != "agent" || current.Run.ParentRunID != "" || current.Run.Status != kernel.RunStatusRunning {
+		completion, completionErr := loadOwnedCallbackReturn(ctx, tx, recovery.grant)
+		if errors.Is(completionErr, kernel.ErrNotFound) {
 			return kernel.Snapshot{}, kernel.ErrExecutionConflict
 		}
-		completion, completionErr := loadOwnedCallbackReturn(ctx, tx, original)
-		if completionErr != nil || completion.HostCompleted == recovery.permit.IsModelEvidence() {
-			return kernel.Snapshot{}, kernel.ErrExecutionConflict
+		if completionErr != nil {
+			return kernel.Snapshot{}, completionErr
 		}
-		if e = sqliteOwnedIdentityCurrent(ctx, tx, original); e != nil {
+		native, _, e := sqliteManagedLease(ctx, tx, runID)
+		if e != nil {
 			return kernel.Snapshot{}, e
 		}
-		if current.Run.Revision != expectedRevision {
-			return kernel.Snapshot{}, kernel.ErrConflict
+		if e = kernel.ValidateOwnedPhysicalRecovery(recovery.grant, current, native, expectedRevision, mutation, recovery.permit, completion, marked); e != nil {
+			return kernel.Snapshot{}, e
 		}
-		if !recovery.permit.Matches(original, current, mutation) {
-			return kernel.Snapshot{}, kernel.ErrExecutionConflict
-		}
-
 	}
 	// An owned Agent physical Grant fences ALL concurrent writes,
 	// not just Cancel. Its scoped first-party Kernel Runtime provides one

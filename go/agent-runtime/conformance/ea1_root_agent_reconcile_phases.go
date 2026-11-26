@@ -371,19 +371,7 @@ func ea1RootReconcilePhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 			t.Fatal("unknown accepted")
 		}
 		unchanged(rt)
-		delay := time.Until(lease.ExpiresAt.Add(150 * time.Millisecond))
-		if delay > 5*time.Second {
-			t.Fatal("invalid native expiry fixture")
-		}
-		if delay > 0 {
-			timer := time.NewTimer(delay)
-			defer timer.Stop()
-			select {
-			case <-timer.C:
-			case <-t.Context().Done():
-				t.Fatal(t.Context().Err())
-			}
-		}
+		ea1AwaitNativeExpiry(t, peer.(kernel.ExecutionStore), initial.renewals.latest(t, lease))
 		fresh := reopen()
 		freshRT := ea1StartRuntime(t, fresh)
 		physical.rt = freshRT

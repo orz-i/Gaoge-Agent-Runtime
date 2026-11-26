@@ -511,7 +511,7 @@ func ea1ChildStartPhase(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 				t.Fatal("receipt fault not reached")
 			}
 			f.receipts(s, kind == "tool")
-			ea1ControlWaitUntil(f.store.acquired.ExpiresAt.Add(150 * time.Millisecond))
+			ea1AwaitNativeExpiry(t, f.peerStore.(kernel.ExecutionStore), f.store.renewals.latest(t, f.store.acquired))
 		}
 		freshStore := f.reopen()
 		freshRT := ea1StartRuntime(t, freshStore)

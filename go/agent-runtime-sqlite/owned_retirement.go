@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
@@ -18,39 +19,36 @@ func sqliteOwnedCompletion(ctx context.Context, q schemaQuery, g kernel.ChildExe
 	}
 	return c, e
 }
-func sqliteDecodeOwnedSettlement(raw []byte, g kernel.ChildExecutionGrant, s kernel.Snapshot, c kernel.OwnedPhysicalCallbackCompletion) (kernel.OwnedSettlementEvidence, error) {
-	var e kernel.OwnedSettlementEvidence
-	if err := json.Unmarshal(raw, &e); err != nil || !e.Valid() || e.Grant != g || kernel.ManagedDigest(e.Snapshot) != kernel.ManagedDigest(s) || e.Completion != c {
-		return e, kernel.ErrExecutionConflict
-	}
-	return e, nil
-}
 func sqliteOwnedMarkEvidence(ctx context.Context, tx *sql.Tx, g kernel.ChildExecutionGrant, s kernel.Snapshot, mark uint64, p kernel.ChildExecutionSettlement) ([]byte, error) {
 	var raw []byte
 	if e := tx.QueryRowContext(ctx, `SELECT settlement_evidence_json FROM runtime_child_effect_grants WHERE grant_id=? AND parent_run_id=? AND child_run_id=?`, g.ID, g.ChildRunID, g.ChildRunID).Scan(&raw); e != nil {
-		return nil, e
+		if errors.Is(e, sql.ErrNoRows) {
+			return nil, kernel.ErrExecutionConflict
+		}
+		return nil, conflictOrDatabaseError(e)
 	}
 	c, e := sqliteOwnedCompletion(ctx, tx, g)
 	if e != nil {
 		return nil, e
 	}
-	if raw != nil {
-		if mark != s.Run.Revision {
-			return nil, kernel.ErrExecutionConflict
-		}
-		_, e = sqliteDecodeOwnedSettlement(raw, g, s, c)
-		return raw, e
+	native, _, e := sqliteManagedLease(ctx, tx, g.ChildRunID)
+	if e != nil {
+		return nil, e
 	}
-	origin := "OWNER_RETURN"
-	if p.IsRecovery() {
-		origin = "RECOVERED_RETURN"
+	now, e := sqliteExecutionNow(ctx, tx)
+	if e != nil {
+		return nil, e
 	}
-	if c.GrantID == "" {
-		origin = "LEGACY_UNKNOWN"
+	original, e := kernel.DecodeOwnedSettlement(raw)
+	if e != nil {
+		return nil, e
 	}
-	evidence := kernel.OwnedSettlementEvidence{Version: 1, Grant: g, Snapshot: s, Completion: c, MarkOrigin: origin}
-	if !evidence.Valid() {
-		return nil, kernel.ErrExecutionConflict
+	evidence, e := kernel.ReduceOwnedPhysicalSettlement(g, s, native, time.UnixMilli(now), mark, c, original, p)
+	if e != nil {
+		return nil, e
+	}
+	if original != nil {
+		return raw, nil
 	}
 	return json.Marshal(evidence)
 }
@@ -86,38 +84,30 @@ func sqliteOwnedRetirementClosures(ctx context.Context, tx *sql.Tx, g kernel.Chi
 	}
 	return kernel.ValidateOwnedRetirementClosures(g, s, a, all)
 }
-func sqlitePersistOwnedRetirement(ctx context.Context, tx *sql.Tx, g kernel.ChildExecutionGrant, s kernel.Snapshot) error {
+func sqlitePersistOwnedRetirement(ctx context.Context, tx *sql.Tx, g kernel.ChildExecutionGrant, s kernel.Snapshot, native kernel.ExecutionLease) error {
 	var raw []byte
 	var mark uint64
 	if e := tx.QueryRowContext(ctx, `SELECT settled_revision,settlement_evidence_json FROM runtime_child_effect_grants WHERE grant_id=? AND parent_run_id=? AND child_run_id=?`, g.ID, g.ChildRunID, g.ChildRunID).Scan(&mark, &raw); e != nil {
-		return e
-	}
-	if mark == 0 || mark != s.Run.Revision {
-		return kernel.ErrExecutionConflict
+		if errors.Is(e, sql.ErrNoRows) {
+			return kernel.ErrExecutionConflict
+		}
+		return conflictOrDatabaseError(e)
 	}
 	c, e := sqliteOwnedCompletion(ctx, tx, g)
 	if e != nil {
 		return e
 	}
-	var evidence kernel.OwnedSettlementEvidence
-	if raw != nil {
-		evidence, e = sqliteDecodeOwnedSettlement(raw, g, s, c)
-		if e != nil {
-			return e
-		}
-	} else {
-		evidence = kernel.OwnedSettlementEvidence{Version: 1, Grant: g, Snapshot: s, Completion: c, MarkOrigin: "LEGACY_UNKNOWN"}
-		if !evidence.Valid() {
-			return kernel.ErrExecutionConflict
-		}
+	original, e := kernel.DecodeOwnedSettlement(raw)
+	if e != nil {
+		return e
 	}
 	closures, e := sqliteOwnedRetirementClosures(ctx, tx, g, s)
 	if e != nil {
 		return e
 	}
-	r := kernel.OwnedRetirementReceipt{Version: 1, Evidence: evidence, Closures: closures, Phase: "RETIRED"}
-	if !r.Valid() {
-		return kernel.ErrExecutionConflict
+	r, e := kernel.BuildOwnedRetirementReceipt(g, s, native, mark, c, original, closures)
+	if e != nil {
+		return e
 	}
 	payload, e := json.Marshal(r)
 	if e != nil {

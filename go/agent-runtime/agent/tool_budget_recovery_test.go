@@ -42,17 +42,17 @@ func TestSuspendedToolSettlementRequiresOriginalCallbackAndReservation(t *testin
 	c := kernel.OwnedPhysicalCallbackCompletion{GrantID: "grant", ReturnRevision: 7, ReturnSourceHash: kernel.ManagedDigest(kernel.OwnedPhysicalCallbackReturnPayload(s, out)), HostCompleted: true, LeaseOwned: true, ControlCustody: out.ControlCustody}
 	result := tools.ExecutionResult{Content: []byte("{}"), Receipt: tools.Receipt{ExecutionID: "call", Disposition: "committed", OwnerReceiptDigest: strings.Repeat("a", 64)}}
 	ports.scope = "other-turn"
-	if !errors.Is(r.settleOriginalToolBudget(ctx, s, c, q, result), ErrToolReceiptMismatch) {
+	if _, err := r.settleOriginalToolBudget(ctx, s, c, q, result); !errors.Is(err, ErrToolReceiptMismatch) {
 		t.Fatal("accepted foreign budget")
 	}
 	ports.scope = "turn"
 	other := q
 	other.Call.Arguments = []byte(`{"other":true}`)
-	if !errors.Is(r.settleOriginalToolBudget(ctx, s, c, other, result), ErrToolReceiptMismatch) {
+	if _, err := r.settleOriginalToolBudget(ctx, s, c, other, result); !errors.Is(err, ErrToolReceiptMismatch) {
 		t.Fatal("accepted different original request")
 	}
 	for range 2 {
-		if err = r.settleOriginalToolBudget(ctx, s, c, q, result); err != nil {
+		if _, err = r.settleOriginalToolBudget(ctx, s, c, q, result); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -61,7 +61,7 @@ func TestSuspendedToolSettlementRequiresOriginalCallbackAndReservation(t *testin
 		t.Fatalf("original Tool accounting: %+v %v", saved, err)
 	}
 	result.Content = []byte(`"different"`)
-	if !errors.Is(r.settleOriginalToolBudget(ctx, s, c, q, result), budget.ErrLedgerConflict) {
+	if _, err := r.settleOriginalToolBudget(ctx, s, c, q, result); !errors.Is(err, budget.ErrLedgerConflict) {
 		t.Fatal("changed a settled owner receipt")
 	}
 }

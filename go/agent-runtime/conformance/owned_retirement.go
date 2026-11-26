@@ -16,6 +16,9 @@ import (
 // Feature proofs to certify the Store boundary, not arbitrary callback truth.
 // Actual Agent callback lifetime/racing Reconcile is covered separately.
 func RunOwnedRetirementStoreSuite(t *testing.T, factory func(*testing.T) ManagedRecoveryStoreFixture) {
+	t.Run("identity-retired-ID-reuse", func(t *testing.T) { runRetiredGrantIDReuse(t, factory) })
+	t.Run("identity-owned-borrowed-race", func(t *testing.T) { runGrantIdentityRace(t, factory) })
+	t.Run("identity-rejected-admission-rolls-back", func(t *testing.T) { runGrantIdentityRollback(t, factory) })
 	for _, owned := range []bool{true, false} {
 		t.Run(map[bool]string{true: "owned", false: "borrowed"}[owned], func(t *testing.T) { runRetirementACKWindows(t, factory, owned) })
 	}
@@ -570,4 +573,194 @@ func runRetirementRunIDRecovery(t *testing.T, factory func(*testing.T) ManagedRe
 		t.Fatalf("durable ACK: %v", e)
 	}
 	retirementSame(t, fresh, f.source, acknowledged)
+}
+
+func runRetiredGrantIDReuse(t *testing.T, factory func(*testing.T) ManagedRecoveryStoreFixture) {
+	f := retirementSetup(t, factory)
+	retirementCallback(t, f, true, true)
+	retirementMark(t, f)
+	r := retirementFinish(t, f)
+	ctx := t.Context()
+	if _, e := f.rt.AcknowledgeOwnedRetirement(ctx, f.grant, retirementACKProof(r)); e != nil {
+		t.Fatal(e)
+	}
+	rt, e := kernel.New(kernel.Dependencies{Store: f.backend.Peer, IDs: fixedGrantIDs{f.grant.ID}})
+	if e != nil {
+		t.Fatal(e)
+	}
+	l, e := rt.AcquireExecution(ctx, kernel.ExecutionAcquireRequest{RunID: f.source.Run.ID, OwnerID: "new-owner", LeaseDuration: time.Minute})
+	if e != nil {
+		t.Fatal(e)
+	}
+	b, e := rt.WithExecution(l)
+	if e != nil {
+		t.Fatal(e)
+	}
+	v, e := rt.Load(ctx, f.source.Run.ID)
+	if e != nil {
+		t.Fatal(e)
+	}
+	g, e := b.BeginOwnedPhysicalExecution(ctx, v.Run.ID, v.Run.Revision, featurecontrol.Seal(v.Run.ID, v.Run.Revision, "agent_owned_physical_admission", l.LeaseID, v.State, v.Checkpoint), "start")
+	if !errors.Is(e, kernel.ErrExecutionConflict) || g != (kernel.ChildExecutionGrant{}) {
+		t.Fatalf("retired ID was admitted: %+v %v", g, e)
+	}
+	if _, e = rt.LookupChildExecution(ctx, v.Run.ID); !errors.Is(e, kernel.ErrNotFound) {
+		t.Fatalf("rejected admission left an active grant: %v", e)
+	}
+	retained, e := f.backend.Reopen().(kernel.OwnedRetirementStore).LoadOwnedRetirement(ctx, f.grant.ID)
+	if e != nil || retained.Identity() != r.Identity() || retained.Phase != "ACKNOWLEDGED" {
+		t.Fatalf("original retirement changed: %v", e)
+	}
+}
+
+// Competing transactions hold unrelated Run locks and use the same ID, but
+// only one identity may become authoritative. Borrowed replicas are legal
+// within the winner's grant, not a second identity.
+func runGrantIdentityRace(t *testing.T, factory func(*testing.T) ManagedRecoveryStoreFixture) {
+	b := factory(t)
+	ctx := t.Context()
+	id := "same-physical-identity"
+	rootRT, e := kernel.New(kernel.Dependencies{Store: b.Store, IDs: fixedGrantIDs{id}})
+	if e != nil {
+		t.Fatal(e)
+	}
+	childRT, e := kernel.New(kernel.Dependencies{Store: b.Peer, IDs: fixedGrantIDs{id}})
+	if e != nil {
+		t.Fatal(e)
+	}
+	create := func(rt *kernel.Runtime, id, parent, tenant string, native bool) kernel.Snapshot {
+		t.Helper()
+		s, e := rt.Create(ctx, kernel.CreateRequest{ID: id, ParentRunID: parent, Kind: "agent", Actor: kernel.ActorRef{TenantID: tenant, ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"}, Goal: "identity race", State: []byte("{}"), ExecutionRequired: native})
+		if e != nil {
+			t.Fatal(e)
+		}
+		return s
+	}
+	root := create(rootRT, "owned-root", "", "owned", true)
+	parent := create(childRT, "borrowed-parent", "", "borrowed", false)
+	child := create(childRT, "borrowed-child", parent.Run.ID, "borrowed", false)
+	lease, e := rootRT.AcquireExecution(ctx, kernel.ExecutionAcquireRequest{RunID: root.Run.ID, OwnerID: "owner", LeaseDuration: time.Minute})
+	if e != nil {
+		t.Fatal(e)
+	}
+	bound, e := rootRT.WithExecution(lease)
+	if e != nil {
+		t.Fatal(e)
+	}
+	admission := featurecontrol.Seal(root.Run.ID, root.Run.Revision, "agent_owned_physical_admission", lease.LeaseID, root.State, root.Checkpoint)
+	type result struct {
+		grant kernel.ChildExecutionGrant
+		err   error
+	}
+	start := make(chan struct{})
+	results := make(chan result, 2)
+	go func() {
+		<-start
+		g, e := bound.BeginOwnedPhysicalExecution(ctx, root.Run.ID, root.Run.Revision, admission, "start")
+		results <- result{g, e}
+	}()
+	go func() {
+		<-start
+		g, e := childRT.BeginChildExecution(ctx, child.Run.ID, child.Run.Revision)
+		results <- result{g, e}
+	}()
+	close(start)
+	var winner kernel.ChildExecutionGrant
+	var wins int
+	for range 2 {
+		r := <-results
+		if r.err == nil {
+			winner = r.grant
+			wins++
+		} else if !errors.Is(r.err, kernel.ErrExecutionConflict) {
+			t.Fatalf("unexpected contender error: %v", r.err)
+		}
+	}
+	if wins != 1 || winner.ID != id {
+		t.Fatalf("identity race admitted %d grants: %+v", wins, winner)
+	}
+	for _, runID := range []string{root.Run.ID, child.Run.ID} {
+		g, e := rootRT.LookupChildExecution(ctx, runID)
+		if runID == winner.ChildRunID {
+			if e != nil || g != winner {
+				t.Fatalf("winner lost original identity: %+v %v", g, e)
+			}
+		} else if !errors.Is(e, kernel.ErrNotFound) {
+			t.Fatalf("loser left fence: %+v %v", g, e)
+		}
+	}
+	if winner.IsOwned() {
+		o := kernel.OwnedPhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: true}
+		proof := featurecontrol.Seal(root.Run.ID, root.Run.Revision, "agent_owned_callback_return", winner.ID, kernel.OwnedPhysicalCallbackReturnPayload(root, o), nil)
+		if e = rootRT.RecordOwnedPhysicalCallbackReturn(ctx, winner, root.Run.Revision, o, proof); e != nil {
+			t.Fatal(e)
+		}
+		mark := featurecontrol.Seal(root.Run.ID, root.Run.Revision, "agent_owned_physical_settled", winner.ID, root.State, root.Checkpoint)
+		if e = bound.MarkChildExecutionSettled(ctx, winner, mark); e != nil {
+			t.Fatal(e)
+		}
+		if e = bound.FinishChildExecution(ctx, winner, mark); e != nil {
+			t.Fatal(e)
+		}
+	} else {
+		mark := featurecontrol.Seal(child.Run.ID, child.Run.Revision, "agent_child_physical_settled", winner.ID, child.State, child.Checkpoint)
+		if e = childRT.MarkChildExecutionSettled(ctx, winner, mark); e != nil {
+			t.Fatal(e)
+		}
+		if e = childRT.FinishChildExecution(ctx, winner, mark); e != nil {
+			t.Fatal(e)
+		}
+	}
+	// A new wrapper/pool must retain the identity after all fence rows vanish.
+	fresh, e := kernel.New(kernel.Dependencies{Store: b.Reopen(), IDs: fixedGrantIDs{id}})
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = fresh.BeginChildExecution(ctx, child.Run.ID, child.Run.Revision); !errors.Is(e, kernel.ErrExecutionConflict) {
+		t.Fatalf("consumed ID re-admitted as borrowed: %v", e)
+	}
+	freshBound, e := fresh.WithExecution(lease)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = freshBound.BeginOwnedPhysicalExecution(ctx, root.Run.ID, root.Run.Revision, admission, "start"); !errors.Is(e, kernel.ErrExecutionConflict) {
+		t.Fatalf("consumed ID re-admitted as owned: %v", e)
+	}
+}
+
+// A reservation is committed only with its fence, not with a rejected
+// attempt. A busy child may not burn a fresh ID for an unrelated Run.
+func runGrantIdentityRollback(t *testing.T, factory func(*testing.T) ManagedRecoveryStoreFixture) {
+	b := factory(t)
+	ctx := t.Context()
+	first, e := kernel.New(kernel.Dependencies{Store: b.Store, IDs: fixedGrantIDs{"first-id"}})
+	if e != nil {
+		t.Fatal(e)
+	}
+	second, e := kernel.New(kernel.Dependencies{Store: b.Peer, IDs: fixedGrantIDs{"rolled-back-id"}})
+	if e != nil {
+		t.Fatal(e)
+	}
+	create := func(id string) kernel.Snapshot {
+		t.Helper()
+		s, e := first.Create(ctx, kernel.CreateRequest{ID: id, Kind: "agent", Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"}, Goal: "identity rollback", State: []byte("{}")})
+		if e != nil {
+			t.Fatal(e)
+		}
+		return s
+	}
+	a, other := create("busy-run"), create("unrelated-run")
+	original, e := first.BeginChildExecution(ctx, a.Run.ID, a.Run.Revision)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = second.BeginChildExecution(ctx, a.Run.ID, a.Run.Revision); !errors.Is(e, kernel.ErrChildExecutionBusy) {
+		t.Fatalf("busy child error: %v", e)
+	}
+	if got, e := first.LookupChildExecution(ctx, a.Run.ID); e != nil || got != original {
+		t.Fatalf("rejected attempt changed original grant: %+v %v", got, e)
+	}
+	if got, e := second.BeginChildExecution(ctx, other.Run.ID, other.Run.Revision); e != nil || got.ID != "rolled-back-id" {
+		t.Fatalf("failed attempt permanently reserved ID: %+v %v", got, e)
+	}
 }

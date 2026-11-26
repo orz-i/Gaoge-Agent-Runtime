@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
@@ -12,34 +13,26 @@ import (
 
 var _ kernel.OwnedRetirementStore = (*KernelStore)(nil)
 
-func pgDecodeOwnedSettlement(raw string, g kernel.ChildExecutionGrant, s kernel.Snapshot, c kernel.OwnedPhysicalCallbackCompletion) (kernel.OwnedSettlementEvidence, error) {
-	var e kernel.OwnedSettlementEvidence
-	if err := json.Unmarshal([]byte(raw), &e); err != nil || !e.Valid() || e.Grant != g || kernel.ManagedDigest(e.Snapshot) != kernel.ManagedDigest(s) || e.Completion != c {
-		return e, kernel.ErrExecutionConflict
+func pgOwnedSettlement(raw string) (*kernel.OwnedSettlementEvidence, error) {
+	if raw == "" {
+		return nil, nil
 	}
-	return e, nil
+	return kernel.DecodeOwnedSettlement([]byte(raw))
 }
-func pgOwnedMarkEvidence(row models.KernelChildEffectGrantRecord, g kernel.ChildExecutionGrant, s kernel.Snapshot, p kernel.ChildExecutionSettlement) (string, error) {
-	c := pgCallbackCompletion(row)
-	if row.SettlementEvidence != "" {
-		if row.SettledRevision != s.Run.Revision {
-			return "", kernel.ErrExecutionConflict
-		}
-		_, e := pgDecodeOwnedSettlement(row.SettlementEvidence, g, s, c)
-		return row.SettlementEvidence, e
+
+func pgOwnedMarkEvidence(row models.KernelChildEffectGrantRecord, g kernel.ChildExecutionGrant, s kernel.Snapshot, native kernel.ExecutionLease, now time.Time, p kernel.ChildExecutionSettlement) (string, error) {
+	original, err := pgOwnedSettlement(row.SettlementEvidence)
+	if err != nil {
+		return "", err
 	}
-	origin := "OWNER_RETURN"
-	if p.IsRecovery() {
-		origin = "RECOVERED_RETURN"
+	evidence, err := kernel.ReduceOwnedPhysicalSettlement(g, s, native, now, row.SettledRevision, pgCallbackCompletion(row), original, p)
+	if err != nil {
+		return "", err
 	}
-	if c.GrantID == "" {
-		origin = "LEGACY_UNKNOWN"
+	if original != nil {
+		return row.SettlementEvidence, nil
 	}
-	e := kernel.OwnedSettlementEvidence{Version: 1, Grant: g, Snapshot: s, Completion: c, MarkOrigin: origin}
-	if !e.Valid() {
-		return "", kernel.ErrExecutionConflict
-	}
-	b, err := json.Marshal(e)
+	b, err := json.Marshal(evidence)
 	return string(b), err
 }
 func pgOwnedRetirementClosures(tx *gorm.DB, g kernel.ChildExecutionGrant, s kernel.Snapshot) ([]kernel.ManagedTransfer, error) {
@@ -61,31 +54,18 @@ func pgOwnedRetirementClosures(tx *gorm.DB, g kernel.ChildExecutionGrant, s kern
 	}
 	return kernel.ValidateOwnedRetirementClosures(g, s, a, histories)
 }
-func pgPersistOwnedRetirement(tx *gorm.DB, row models.KernelChildEffectGrantRecord, g kernel.ChildExecutionGrant, s kernel.Snapshot) error {
-	if row.SettledRevision == 0 || row.SettledRevision != s.Run.Revision {
-		return kernel.ErrExecutionConflict
+func pgPersistOwnedRetirement(tx *gorm.DB, row models.KernelChildEffectGrantRecord, g kernel.ChildExecutionGrant, s kernel.Snapshot, native kernel.ExecutionLease) error {
+	original, err := pgOwnedSettlement(row.SettlementEvidence)
+	if err != nil {
+		return err
 	}
-	c := pgCallbackCompletion(row)
-	var evidence kernel.OwnedSettlementEvidence
-	var e error
-	if row.SettlementEvidence != "" {
-		evidence, e = pgDecodeOwnedSettlement(row.SettlementEvidence, g, s, c)
-		if e != nil {
-			return e
-		}
-	} else {
-		evidence = kernel.OwnedSettlementEvidence{Version: 1, Grant: g, Snapshot: s, Completion: c, MarkOrigin: "LEGACY_UNKNOWN"}
-		if !evidence.Valid() {
-			return kernel.ErrExecutionConflict
-		}
+	closures, err := pgOwnedRetirementClosures(tx, g, s)
+	if err != nil {
+		return err
 	}
-	closures, e := pgOwnedRetirementClosures(tx, g, s)
-	if e != nil {
-		return e
-	}
-	r := kernel.OwnedRetirementReceipt{Version: 1, Evidence: evidence, Closures: closures, Phase: "RETIRED"}
-	if !r.Valid() {
-		return kernel.ErrExecutionConflict
+	r, err := kernel.BuildOwnedRetirementReceipt(g, s, native, row.SettledRevision, pgCallbackCompletion(row), original, closures)
+	if err != nil {
+		return err
 	}
 	payload, e := json.Marshal(r)
 	if e != nil {

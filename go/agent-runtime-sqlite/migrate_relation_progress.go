@@ -39,7 +39,7 @@ func (s *Store) migrateV8ToV9(ctx context.Context) error {
 	}
 	ddl := schemaV8DDL()
 	if version == 9 {
-		ddl = schemaDDL
+		ddl = schemaV9DDL()
 	}
 	if err = validateSchemaDDL(ctx, tx, ddl); err != nil {
 		return err
@@ -59,7 +59,7 @@ func (s *Store) migrateV8ToV9(ctx context.Context) error {
 	if _, err = tx.ExecContext(ctx, "PRAGMA user_version=9"); err != nil {
 		return err
 	}
-	if err = validateSchemaDDL(ctx, tx, schemaDDL); err != nil {
+	if err = validateSchemaDDL(ctx, tx, schemaV9DDL()); err != nil {
 		return err
 	}
 	if err = ctx.Err(); err != nil {

@@ -110,9 +110,10 @@ func exactOwnedRootCancelSuccessor(previous, current Snapshot) bool {
 }
 
 // VerifyPreparedRootSettlementFacts shares the exact owner/epoch/receipt
-// predicate with ordinary terminal settlement, but requires the SINGLE
-// acknowledged original operation to be "prepare". A later Model/approval
-// callback can NEVER inherit this pre-dispatch no-effect authorization.
+// predicate with ordinary terminal settlement, but requires a SINGLE actual
+// acknowledged "prepare" callback. A later Model/approval callback can NEVER
+// inherit this pre-dispatch authorization. An exact acknowledged no-entry
+// suffix is not a callback and cannot erase the unchanged original custody.
 func VerifyPreparedRootSettlementFacts(
 	expected Snapshot, current Snapshot, epoch, physicalEpoch uint64, lease ExecutionLease,
 	hasActiveGrants bool, receipts []OwnedRetirementReceipt,
@@ -120,9 +121,6 @@ func VerifyPreparedRootSettlementFacts(
 	if (expected.Run.Status != RunStatusRunning || expected.Run.Revision != 1) &&
 		(expected.Run.Status != RunStatusCancelled || expected.Run.Revision != 2 ||
 			expected.Run.ErrorCode != "run.cancelled") {
-		return ErrExecutionConflict
-	}
-	if len(receipts) != 1 || receipts[0].Evidence.Completion.ControlCustody != OwnedCustodyPrepared {
 		return ErrExecutionConflict
 	}
 	return verifyOwnedRootSettlementFacts(expected, current, epoch, physicalEpoch, lease, hasActiveGrants, receipts, "prepare", "")
@@ -159,10 +157,13 @@ func verifyOwnedRootSettlementFacts(
 		hasActiveGrants || lease.OwnerID != "" || lease.LeaseID != "" || physicalEpoch == 0 || epoch < physicalEpoch {
 		return ErrExecutionConflict
 	}
-	matches := 0
+	var lastReturned OwnedRetirementReceipt
+	var lastAdmission uint64
+	actualReturns := 0
 	seenEpochs := map[uint64]bool{}
 	for _, r := range receipts {
-		if !r.Valid() || r.Evidence.Grant.ChildRunID != current.Run.ID {
+		if !r.Valid() || r.Evidence.Grant.ChildRunID != current.Run.ID ||
+			r.Phase != "ACKNOWLEDGED" || !r.Evidence.Completion.LeaseOwned {
 			return ErrExecutionConflict
 		}
 		callbackEpoch := r.Evidence.Grant.ExecutionEpoch
@@ -170,31 +171,42 @@ func verifyOwnedRootSettlementFacts(
 			return ErrExecutionConflict
 		}
 		seenEpochs[callbackEpoch] = true
-		// ALL physical history matters. A later scoped callback cannot retire
-		// detached effects from an earlier opaque callback, or borrow its ACK.
-		custody := r.Evidence.Completion.ControlCustody
-		observedTool := toolCustody != "" && (custody == toolCustody || custody == OwnedBoundedApprovalReturn)
-		if r.Phase != "ACKNOWLEDGED" || !r.Evidence.Completion.LeaseOwned ||
-			!r.Evidence.Completion.HostCompleted || !custody.permitsControl() && !observedTool {
-			return ErrExecutionConflict
-		}
-		if requiredOperation != "" && r.Evidence.Grant.AdmissionOperation != requiredOperation {
-			return ErrExecutionConflict
-		}
-		// The Store advances physicalEpoch ONLY with actual physical grant
-		// admission, under the Run lock. A newer lease-only epoch cannot erase
-		// the latest callback, and a missing latest receipt cannot fall back
-		// to an older same-state one. All history above still must be safe.
-		original := r.Evidence.Snapshot
-		same := callbackEpoch == physicalEpoch && ManagedDigest(original) == ManagedDigest(current)
-		cancelled := callbackEpoch == physicalEpoch && exactOwnedRootCancelSuccessor(original, current)
-		if !same && !cancelled {
+		lastAdmission = max(lastAdmission, callbackEpoch)
+		if r.Evidence.Completion.NotEntered() {
 			continue
 		}
-		matches++
+		// ALL actual callbacks still require their own safe custody.
+		custody := r.Evidence.Completion.ControlCustody
+		observedTool := toolCustody != "" && (custody == toolCustody || custody == OwnedBoundedApprovalReturn)
+		if !r.Evidence.Completion.HostCompleted || !custody.permitsControl() && !observedTool {
+			return ErrExecutionConflict
+		}
+		if requiredOperation != "" && (r.Evidence.Grant.AdmissionOperation != requiredOperation || custody != OwnedCustodyPrepared) {
+			return ErrExecutionConflict
+		}
+		actualReturns++
+		if callbackEpoch > lastReturned.Evidence.Grant.ExecutionEpoch {
+			lastReturned = r
+		}
 	}
-	if matches != 1 {
+	// Every latest physical admission needs its own evidence. No-entry alone
+	// cannot create custody or make a missing physical watermark disappear.
+	if lastAdmission != physicalEpoch || actualReturns == 0 || (requiredOperation != "" && actualReturns != 1) {
 		return ErrExecutionConflict
+	}
+	original := lastReturned.Evidence.Snapshot
+	returnedEpoch := lastReturned.Evidence.Grant.ExecutionEpoch
+	if ManagedDigest(original) != ManagedDigest(current) && !exactOwnedRootCancelSuccessor(original, current) {
+		return ErrExecutionConflict
+	}
+	// A later acknowledged no-entry only preserves earlier custody when it
+	// proves precisely the same frozen source. It does not bridge a business
+	// mutation, substitute a later callback, or grant new control authority.
+	for _, r := range receipts {
+		if r.Evidence.Grant.ExecutionEpoch > returnedEpoch &&
+			(!r.Evidence.Completion.NotEntered() || !r.Evidence.Completion.MatchesNotEnteredSnapshot(r.Evidence.Grant, original)) {
+			return ErrExecutionConflict
+		}
 	}
 	return nil
 }

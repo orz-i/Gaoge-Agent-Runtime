@@ -23,9 +23,6 @@ func (s *Store) retireOwnedLocked(previous memoryChildGrant) error {
 	if _, exists := s.ownedRetirements[g.ID]; exists {
 		return kernel.ErrExecutionConflict
 	}
-	if !g.MatchesExecution(s.execution[g.ChildRunID].lease) {
-		return kernel.ErrExecutionConflict
-	}
 	histories := make([]kernel.ManagedTransfer, 0, len(s.managedTransfers))
 	for _, t := range s.managedTransfers {
 		histories = append(histories, t)
@@ -34,19 +31,9 @@ func (s *Store) retireOwnedLocked(previous memoryChildGrant) error {
 	if err != nil {
 		return err
 	}
-	var evidence kernel.OwnedSettlementEvidence
-	if previous.settlement != nil {
-		evidence = *previous.settlement
-	} else {
-		origin := "LEGACY_UNKNOWN"
-		evidence = kernel.OwnedSettlementEvidence{Version: 1, Grant: g, Snapshot: cloneSnapshot(current), Completion: previous.completion, MarkOrigin: origin}
-	}
-	if !evidence.Valid() || evidence.Grant != g || kernel.ManagedDigest(evidence.Snapshot) != kernel.ManagedDigest(current) || evidence.Completion != previous.completion {
-		return kernel.ErrExecutionConflict
-	}
-	r := kernel.OwnedRetirementReceipt{Version: 1, Evidence: evidence, Closures: closures, Phase: "RETIRED"}
-	if !r.Valid() {
-		return kernel.ErrExecutionConflict
+	r, err := kernel.BuildOwnedRetirementReceipt(g, cloneSnapshot(current), s.execution[g.ChildRunID].lease, previous.settledRevision, previous.completion, previous.settlement, closures)
+	if err != nil {
+		return err
 	}
 	if s.ownedRetirements == nil {
 		s.ownedRetirements = make(map[string]kernel.OwnedRetirementReceipt)

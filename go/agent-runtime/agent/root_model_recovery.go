@@ -51,6 +51,9 @@ func (runner *Runner) ReconcileModelOutcome(ctx context.Context, runID string, r
 	if err != nil {
 		return snapshot, errors.Join(ErrModelOutcomeUnknown, ErrRootOutcomeUnknown, err)
 	}
+	if completion.NotEntered() {
+		return snapshot, ErrModelOutcomeUnknown
+	}
 	if !matchesFrozenProviderBinding(runner.model, inv) {
 		return snapshot, ErrProviderBindingMismatch
 	}

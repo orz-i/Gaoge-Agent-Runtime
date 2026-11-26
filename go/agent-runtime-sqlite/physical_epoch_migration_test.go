@@ -77,6 +77,9 @@ func TestPhysicalEpochMigrationPreservesOriginalCustodyAndLeaseHistory(t *testin
 	if err = MigrateV8ToV9(t.Context(), path); err != nil {
 		t.Fatal(err)
 	}
+	if err = MigrateV9ToV10(t.Context(), path); err != nil {
+		t.Fatal(err)
+	}
 	s, err := OpenExisting(t.Context(), path)
 	if err != nil {
 		t.Fatal(err)
@@ -86,6 +89,12 @@ func TestPhysicalEpochMigrationPreservesOriginalCustodyAndLeaseHistory(t *testin
 		var physical, epoch uint64
 		if err = s.db.QueryRow(`SELECT execution_physical_epoch,execution_epoch FROM runtime_runs WHERE run_id=?`, id).Scan(&physical, &epoch); err != nil || physical != wanted || epoch != 9 {
 			t.Fatalf("migration guessed from lease instead of original dispatch: %s physical=%d epoch=%d %v", id, physical, epoch, err)
+		}
+	}
+	for id, owner := range map[string]string{"retired-original": "acknowledged", "pending": "active"} {
+		var got string
+		if err = s.db.QueryRow("SELECT run_id FROM runtime_grant_identities WHERE grant_id=?", id).Scan(&got); err != nil || got != owner {
+			t.Fatalf("migration lost known identity: %s %s %v", id, got, err)
 		}
 	}
 	var stored []byte

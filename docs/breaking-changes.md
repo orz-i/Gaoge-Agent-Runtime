@@ -1,5 +1,59 @@
 # Breaking changes (pre-stable Beta)
 
+## Owned physical callback entry and no-entry retirement
+
+Custom `OwnedPhysicalExecutionStore` adapters must implement
+`CheckOwnedPhysicalEntry` using the same native Run transaction/mutex as
+the original Grant, lease, settlement and managed transfer facts. Return the
+authoritative remaining lease and deadline durations; a lookup or the
+caller's expiry is not permission to enter the callback.
+
+An exact acknowledged ordinary admission that did not enter the callback
+can persist `not-entered-v1` evidence and retire only that Grant. This is
+not Host completion, control custody or a receipt replay authority.
+Unknown admissions and unresolved managed successors remain fenced.
+No new SQL schema version is needed, but old writers must not mix with
+the new evidence semantics. A due Run may consume a qualified known receipt
+through the existing explicitly bounded first-party RunChain, without
+dispatching new Model/Tool work. Opaque Host Run middleware and branches
+requiring Host inputs, completion-policy or summary callbacks fail closed.
+The original shared budget's cancellation and terminal projection still apply.
+
+The Harness-owned admission uses the reserved `owneddispatch_` Grant ID
+namespace for immutable dispatch correlation (not new execution permission).
+Custom ordinary ID sources must not generate that prefix. The original
+no-entry ACK closes only its linked Harness dispatch; a historical
+uncorrelated retirement cannot prove this relationship. New writers must
+not mix with writers that do not recognize the Host no-entry boundary.
+No additional SQL schema change is required.
+
+## Original physical admission ACK
+
+Owned physical admission no longer converts a Store error to success merely
+because an equal public Grant is observed. Store adapters may use the supplied
+`OwnedPhysicalAdmission.CommitOutcome(err)` only at their actual native COMMIT
+boundary, and must return that result directly to permit original-invocation
+ACK recovery. Definite refusals, untyped or wrapped errors, cancelled calls,
+and observations from another attempt do not authorize dispatch. If a committed
+Grant cannot be safely reconciled within the original live invocation, it
+remains fenced; a later caller cannot invent the missing physical return.
+The existing `AdmissionSourceHash` now also commits to the private attempt
+for ordinary owned admissions. Existing persisted Grants are unchanged.
+This change adds no schema migration beyond the permanent identity migration
+described below.
+
+## Permanent physical Grant identity (SQLite v10)
+
+Stop old writers before initializing the new identity constraint. Existing
+exact v9 SQLite files require explicit `MigrateV9ToV10` (or
+`MigrateV9ToV10With` with the original encrypted connection); PostgreSQL hosts
+run `postgres.Migrate` before serving the new Store. A physical Grant ID is
+reserved atomically for the Store lifetime, across Owned, Borrowed and Managed
+admissions. Retirement or transfer never makes it reusable. Existing retained
+identities are reserved without inventing new authority; already-discarded
+pre-v10 history cannot be reconstructed. Ambiguous retained identities abort
+migration rather than being merged. No mixed-version writers.
+
 ## SQLite bounded child-terminal recovery (v9)
 
 Existing exact v8 Kernel databases require a stopped-writer, backed-up, explicit

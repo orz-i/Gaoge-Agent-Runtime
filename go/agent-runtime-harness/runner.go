@@ -290,6 +290,14 @@ func (runner *Runner) ResolveApproval(
 	if resolved.Run.ID == "" {
 		return Snapshot{}, resolveErr
 	}
+	// An acknowledged no-entry (or any failed call still showing the same
+	// pending gate) has not resolved the user decision. Preserve the original
+	// approval request and let a fresh authorized action resolve it.
+	if isDispatchProvenNoEffect(resolveErr) || (resolveErr != nil && resolved.Checkpoint != nil &&
+		resolved.Checkpoint.ID == pending.CheckpointID && resolved.Checkpoint.Status == kernel.CheckpointPending) {
+		snapshot, syncErr := runner.syncRuntimeSnapshot(ctx, turn, invocation, resolved)
+		return snapshot, errors.Join(resolveErr, syncErr)
+	}
 	if err = runner.recordApprovalDecisionItem(ctx, turn, invocation, pending, request); err != nil {
 		return Snapshot{}, errors.Join(resolveErr, err)
 	}

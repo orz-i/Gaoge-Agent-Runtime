@@ -149,3 +149,45 @@ func TestOwnedSettlementRequiresLatestPhysicalAdmissionNotLatestLease(t *testing
 		t.Fatalf("latest safe callback erased earlier opaque effects: %v", err)
 	}
 }
+
+func TestOwnedSettlementPreservesOnlyExactNoEntrySuffix(t *testing.T) {
+	source, actual := settledRootFixture()
+	noEntry := func(id string, epoch uint64, s kernel.Snapshot) kernel.OwnedRetirementReceipt {
+		r := actual
+		g := r.Evidence.Grant
+		g.ID, g.ExecutionEpoch, g.ExpectedRevision, g.AdmissionOperation = id, epoch, s.Run.Revision, "resume"
+		outcome := kernel.OwnedPhysicalCallbackOutcome{LeaseOwned: true, ControlCustody: kernel.OwnedCustodyNotEntered}
+		r.Evidence = kernel.OwnedSettlementEvidence{Version: 1, Grant: g, Snapshot: s, MarkOrigin: "NOT_ENTERED",
+			Completion: kernel.OwnedPhysicalCallbackCompletion{GrantID: id, ReturnRevision: s.Run.Revision, ReturnSourceHash: kernel.ManagedDigest(kernel.OwnedPhysicalCallbackReturnPayload(s, outcome)), LeaseOwned: true, ControlCustody: kernel.OwnedCustodyNotEntered}}
+		r.ACKIdentity = r.Identity()
+		if !r.Valid() {
+			t.Fatal("invalid no-entry fixture")
+		}
+		return r
+	}
+	one, two := noEntry("no-entry-one", 5, source), noEntry("no-entry-two", 7, source)
+	changed := source
+	changed.Run.Revision++
+	foreign := noEntry("changed-source", 7, changed)
+	unack := two
+	unack.Phase, unack.ACKIdentity = "RETIRED", ""
+	for _, c := range []struct {
+		name     string
+		receipts []kernel.OwnedRetirementReceipt
+		want     bool
+	}{
+		{"exact suffix unordered", []kernel.OwnedRetirementReceipt{two, actual, one}, true},
+		{"no actual", []kernel.OwnedRetirementReceipt{one, two}, false},
+		{"missing latest", []kernel.OwnedRetirementReceipt{actual, one}, false},
+		{"different source", []kernel.OwnedRetirementReceipt{actual, one, foreign}, false},
+		{"unacknowledged", []kernel.OwnedRetirementReceipt{actual, one, unack}, false},
+		{"duplicate", []kernel.OwnedRetirementReceipt{actual, one, two, two}, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			err := kernel.VerifyOwnedRootSettlementFacts(source, source, 8, 7, kernel.ExecutionLease{}, false, c.receipts)
+			if (err == nil) != c.want {
+				t.Fatalf("custody mismatch: %v", err)
+			}
+		})
+	}
+}

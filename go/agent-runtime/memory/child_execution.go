@@ -61,7 +61,7 @@ func (store *Store) childAncestorsLocked(child kernel.Run) ([]string, error) {
 // BeginChildExecution is a persistent physical admission serialized with
 // parent Cancel/Fail/Complete, including native and unleased Run transitions.
 func (store *Store) BeginChildExecution(ctx context.Context, grant kernel.ChildExecutionGrant) error {
-	if store == nil || ctx == nil || grant.ID == "" || grant.ChildRunID == "" || grant.ExpectedRevision == 0 || grant.IsOwned() {
+	if store == nil || ctx == nil || !grant.Identity().Valid() || grant.ExpectedRevision == 0 || grant.IsOwned() {
 		return kernel.ErrInvalidInput
 	}
 	if err := ctx.Err(); err != nil {
@@ -95,18 +95,27 @@ func (store *Store) BeginChildExecution(ctx context.Context, grant kernel.ChildE
 	// The first-party Feature receives a per-revision scoped mutation permit,
 	// while unbound Kernel.Cancel/Apply/Control must fail until settlement.
 	ancestors = append(ancestors, child.Run.ID)
-	if _, exists := store.childGrants[grant.ID]; exists {
-		return kernel.ErrChildExecutionBusy
+	if store.grantIdentityUsedLocked(grant.ID) {
+		return kernel.ErrExecutionConflict
 	}
 	for _, previous := range store.childGrants {
 		if previous.grant.ChildRunID == grant.ChildRunID {
 			return kernel.ErrChildExecutionBusy
 		}
 	}
+	closures := make([]memoryRetirementSuccessor, 0, len(ancestors))
 	for _, id := range ancestors {
-		if _, err := store.settleRetirementSuccessorLocked(id); err != nil {
+		closure, err := store.planRetirementSuccessorLocked(id)
+		if err != nil {
 			return err
 		}
+		closures = append(closures, closure)
+	}
+	if err := store.reserveGrantIdentityLocked(grant); err != nil {
+		return err
+	}
+	for i, id := range ancestors {
+		store.commitRetirementSuccessorLocked(id, closures[i])
 	}
 	store.childGrants[grant.ID] = memoryChildGrant{grant: grant, ancestors: ancestors}
 	for _, id := range ancestors {
@@ -142,29 +151,11 @@ func (store *Store) MarkChildExecutionSettled(ctx context.Context, grant kernel.
 		(original.settledRevision != 0 && original.settledRevision != child.Run.Revision) {
 		return kernel.ErrExecutionConflict
 	}
-	if grant.IsOwned() && original.settledRevision == 0 && !permit.IsRecovery() {
-		lease, ok := permit.ExecutionLease()
-		if !ok || !grant.MatchesExecution(lease) || !activeMemoryLease(store.execution[grant.ChildRunID], lease, store.currentExecutionTime()) {
-			return kernel.ErrExecutionConflict
-		}
-	}
-	if grant.IsOwned() && !grant.MatchesExecution(store.execution[grant.ChildRunID].lease) {
-		return kernel.ErrExecutionConflict
-	}
-	if grant.IsOwned() && permit.IsRecovery() && (original.completion.GrantID != grant.ID || !original.completion.HostCompleted) {
-		return kernel.ErrExecutionConflict
-	}
-	if grant.IsOwned() && original.settlement == nil {
-		origin := "LEGACY_UNKNOWN"
-		if original.completion.GrantID != "" {
-			origin = "OWNER_RETURN"
-			if permit.IsRecovery() {
-				origin = "RECOVERED_RETURN"
-			}
-		}
-		evidence := kernel.OwnedSettlementEvidence{Version: 1, Grant: grant, Snapshot: cloneSnapshot(child), Completion: original.completion, MarkOrigin: origin}
-		if !evidence.Valid() {
-			return kernel.ErrExecutionConflict
+	if grant.IsOwned() {
+		evidence, err := kernel.ReduceOwnedPhysicalSettlement(grant, cloneSnapshot(child), store.execution[grant.ChildRunID].lease,
+			store.currentExecutionTime(), original.settledRevision, original.completion, original.settlement, permit)
+		if err != nil {
+			return err
 		}
 		original.settlement = &evidence
 	}

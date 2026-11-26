@@ -50,9 +50,9 @@ func VerifyReturnedRootSettlementFacts(expected, current Snapshot, epoch, physic
 		grant, completion = pending.Evidence.Grant, pending.Evidence.Completion
 	}
 	if grant.ID == "" || grant.ExpectedRevision == 0 || grant.ChildRunID != current.Run.ID || !grant.IsOwned() || !grant.MatchesExecution(lease) ||
-		grant.ExecutionEpoch != epoch || epoch != physicalEpoch || completion.GrantID != grant.ID || !completion.HostCompleted || !completion.LeaseOwned ||
-		completion.ControlCustody != OwnedCustodyScoped || len(completion.ReturnSourceHash) != 64 ||
-		completion.ReturnRevision < grant.ExpectedRevision || completion.ReturnRevision > current.Run.Revision {
+		grant.ExecutionEpoch != epoch || epoch != physicalEpoch || ValidateOwnedPhysicalCompletion(grant, completion) != nil ||
+		!completion.HostCompleted || !completion.LeaseOwned || completion.ControlCustody != OwnedCustodyScoped ||
+		completion.ReturnRevision > current.Run.Revision {
 		return ErrExecutionConflict
 	}
 	seen := map[uint64]bool{epoch: true}
@@ -64,11 +64,16 @@ func VerifyReturnedRootSettlementFacts(expected, current Snapshot, epoch, physic
 		}
 		previous := receipt.Evidence.Grant
 		if !receipt.Valid() || previous.ChildRunID != current.Run.ID || previous.ExecutionEpoch >= epoch || seen[previous.ExecutionEpoch] ||
-			receipt.Phase != "ACKNOWLEDGED" || !receipt.Evidence.Completion.HostCompleted || !receipt.Evidence.Completion.LeaseOwned ||
-			!receipt.Evidence.Completion.ControlCustody.permitsControl() {
+			receipt.Phase != "ACKNOWLEDGED" || !receipt.Evidence.Completion.LeaseOwned {
 			return ErrExecutionConflict
 		}
 		seen[previous.ExecutionEpoch] = true
+		if receipt.Evidence.Completion.NotEntered() {
+			continue
+		}
+		if !receipt.Evidence.Completion.HostCompleted || !receipt.Evidence.Completion.ControlCustody.permitsControl() {
+			return ErrExecutionConflict
+		}
 	}
 	return nil
 }

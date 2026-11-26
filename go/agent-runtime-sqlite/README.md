@@ -378,3 +378,21 @@ Do not infer physical completion from a watermark or missing legacy evidence.
 Earlier unpublished v9 trial files do not match this final schema and fail
 closed; recreate trial files or migrate from the original v8 backup. Do not
 mix old and new readers or writers.
+
+
+### Permanent physical Grant identity schema (v10)
+
+Every Owned, Borrowed and Managed-successor physical admission now reserves one
+immutable Grant ID in the same transaction as its fence rows. Ancestor replicas
+are not independent identities. Finish, Managed Resume and Managed Cancel
+consume exact original fences but never free the ID for reuse. The identity
+table itself is not execution authority and does not establish callback return.
+
+Existing exact v9 files require the explicit `MigrateV9ToV10` (or
+`MigrateV9ToV10With` with the original encrypted connection). Stop all old
+writers and keep a backup. Open never migrates. The migration reserves IDs
+present in active grants, retained retirement receipts and managed history;
+ambiguous cross-Run ownership or active/retired collision aborts it atomically.
+It does not recreate missing historical evidence or reconstruct old discarded
+Borrowed IDs. Fresh databases start at v10; reservations survive all later
+physical consumption for the database lifetime.

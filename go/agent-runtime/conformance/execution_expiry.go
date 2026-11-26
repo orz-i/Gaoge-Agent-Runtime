@@ -1,0 +1,95 @@
+package conformance
+
+import (
+	"context"
+	"errors"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+)
+
+// Native renewal preserves the bearer identity but changes the authoritative
+// expiry. The Runtime's bound token and the first Acquire response may retain
+// the old informational expiry even after the Store has renewed it.
+type ea1LeaseRenewals struct {
+	mu      sync.Mutex
+	byToken map[kernel.ExecutionLease]kernel.ExecutionLease
+}
+
+func ea1LeaseIdentity(l kernel.ExecutionLease) kernel.ExecutionLease {
+	l.ExpiresAt = time.Time{}
+	return l
+}
+
+func (r *ea1LeaseRenewals) record(original, renewed kernel.ExecutionLease) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.byToken == nil {
+		r.byToken = make(map[kernel.ExecutionLease]kernel.ExecutionLease)
+	}
+	r.byToken[ea1LeaseIdentity(original)] = renewed
+}
+
+func (r *ea1LeaseRenewals) latest(t *testing.T, original kernel.ExecutionLease) kernel.ExecutionLease {
+	t.Helper()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	latest, ok := r.byToken[ea1LeaseIdentity(original)]
+	if !ok {
+		return original
+	}
+	if ea1LeaseIdentity(latest) != ea1LeaseIdentity(original) || latest.ExpiresAt.Before(original.ExpiresAt) {
+		t.Fatalf("native renewal changed original lease identity or shortened its expiry: original=%+v latest=%+v", original, latest)
+	}
+	return latest
+}
+
+// Only for a RUNNING original Run: CheckExecution refuses WAITING_INPUT for
+// reasons unrelated to expiry. The original grant/source invariants are
+// independently asserted by the surrounding conformance fixture.
+//
+// Wait for the latest actual Store expiry, then require the Store itself to
+// reject the original token. A local-clock timer is a scheduling hint, not
+// proof; a still-live token is polled within a bounded monotonic deadline.
+// Never renew, release, acquire, or convert another error into expiry.
+func ea1AwaitNativeExpiry(t *testing.T, store kernel.ExecutionStore, lease kernel.ExecutionLease) {
+	t.Helper()
+	if lease.RunID == "" || lease.OwnerID == "" || lease.LeaseID == "" || lease.Epoch == 0 || lease.ExpiresAt.IsZero() {
+		t.Fatalf("missing original native lease: %+v", lease)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 7*time.Second)
+	defer cancel()
+	if delay := time.Until(lease.ExpiresAt); delay > 0 {
+		if delay > 5*time.Second {
+			t.Fatalf("unexpected native lease duration: %s", delay)
+		}
+		timer := time.NewTimer(delay)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			t.Fatalf("waiting for original expiry: %v", ctx.Err())
+		}
+	}
+	ticker := time.NewTicker(25 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		err := store.CheckExecution(ctx, lease.RunID, &lease)
+		if ctx.Err() != nil {
+			t.Fatalf("Store did not confirm original lease expiry: lease=%+v err=%v context=%v", lease, err, ctx.Err())
+		}
+		if errors.Is(err, kernel.ErrExecutionConflict) {
+			return
+		}
+		if err != nil {
+			t.Fatalf("unexpected Store error while awaiting original lease expiry: %v", err)
+		}
+		select {
+		case <-ticker.C:
+		case <-ctx.Done():
+			t.Fatalf("Store still authorizes original lease after bounded expiry wait: %+v (%v)", lease, ctx.Err())
+		}
+	}
+}

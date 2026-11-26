@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
@@ -50,7 +51,7 @@ func sqliteLiveChildAncestors(ctx context.Context, tx *sql.Tx, child kernel.Run)
 }
 
 func (s *Store) BeginChildExecution(ctx context.Context, grant kernel.ChildExecutionGrant) error {
-	if s == nil || s.db == nil || ctx == nil || grant.ID == "" || grant.ChildRunID == "" || grant.ExpectedRevision == 0 || grant.IsOwned() {
+	if s == nil || s.db == nil || ctx == nil || !grant.Identity().Valid() || grant.ExpectedRevision == 0 || grant.IsOwned() {
 		return kernel.ErrInvalidInput
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -81,6 +82,9 @@ func (s *Store) BeginChildExecution(ctx context.Context, grant kernel.ChildExecu
 	}
 	// Self + ancestor execution fencing is atomic in the SQLite writer.
 	ids = append(ids, child.Run.ID)
+	if err = sqliteReserveGrantIdentity(ctx, tx, grant); err != nil {
+		return err
+	}
 	var count int
 	if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM runtime_child_effect_grants WHERE child_run_id=?", grant.ChildRunID).Scan(&count); err != nil {
 		return err
@@ -131,33 +135,6 @@ func (s *Store) MarkChildExecutionSettled(ctx context.Context, grant kernel.Chil
 	if original != grant {
 		return kernel.ErrExecutionConflict
 	}
-	if grant.IsOwned() {
-		// Receipt recovery and repeated Mark may outlive the lease, but cannot
-		// settle a scope whose native owner identity has since been replaced.
-		var epoch uint64
-		var owner, leaseID string
-		if err = tx.QueryRowContext(ctx, "SELECT execution_epoch,execution_owner,execution_lease_id FROM runtime_runs WHERE run_id=?", grant.ChildRunID).Scan(&epoch, &owner, &leaseID); err != nil {
-			return err
-		}
-		if epoch != grant.ExecutionEpoch || owner != grant.ExecutionOwnerID || leaseID != grant.ExecutionLeaseID {
-			return kernel.ErrExecutionConflict
-		}
-	}
-	if grant.IsOwned() && marked == 0 && !permit.IsRecovery() {
-		lease, ok := permit.ExecutionLease()
-		if !ok {
-			return kernel.ErrExecutionConflict
-		}
-		if err = sqliteBoundLeaseCurrent(ctx, tx, grant, lease, true); err != nil {
-			return err
-		}
-	}
-	if grant.IsOwned() && permit.IsRecovery() {
-		completion, err := loadOwnedCallbackReturn(ctx, tx, grant)
-		if err != nil || !completion.HostCompleted {
-			return kernel.ErrExecutionConflict
-		}
-	}
 	if !permit.Matches(grant, child) {
 		return kernel.ErrExecutionConflict
 	}
@@ -182,6 +159,12 @@ func (s *Store) MarkChildExecutionSettled(ctx context.Context, grant kernel.Chil
 	if grant.IsOwned() {
 		if total != 1 {
 			return kernel.ErrExecutionConflict
+		}
+		if _, ownedErr := loadOwnedPhysicalGrant(ctx, tx, grant); ownedErr != nil {
+			if errors.Is(ownedErr, kernel.ErrNotFound) {
+				return kernel.ErrExecutionConflict
+			}
+			return ownedErr
 		}
 		evidence, evidenceErr := sqliteOwnedMarkEvidence(ctx, tx, grant, child, marked, permit)
 		if evidenceErr != nil {
@@ -249,14 +232,17 @@ func (s *Store) FinishChildExecution(ctx context.Context, grant kernel.ChildExec
 		if correct != 1 {
 			return kernel.ErrExecutionConflict
 		}
+		if _, ownedErr := loadOwnedPhysicalGrant(ctx, tx, grant); ownedErr != nil {
+			if errors.Is(ownedErr, kernel.ErrNotFound) {
+				return kernel.ErrExecutionConflict
+			}
+			return ownedErr
+		}
 		native, _, e := sqliteManagedLease(ctx, tx, grant.ChildRunID)
 		if e != nil {
 			return e
 		}
-		if !grant.MatchesExecution(native) {
-			return kernel.ErrExecutionConflict
-		}
-		if e := sqlitePersistOwnedRetirement(ctx, tx, grant, child); e != nil {
+		if e := sqlitePersistOwnedRetirement(ctx, tx, grant, child, native); e != nil {
 			return e
 		}
 	}
@@ -359,7 +345,7 @@ func sqliteBoundLeaseCurrent(ctx context.Context, tx *sql.Tx, g kernel.ChildExec
 }
 
 func (s *Store) BeginOwnedPhysicalExecution(ctx context.Context, g kernel.ChildExecutionGrant, lease kernel.ExecutionLease, permit kernel.OwnedPhysicalAdmission) error {
-	if s == nil || s.db == nil || ctx == nil || g.ID == "" || !g.IsOwned() {
+	if s == nil || s.db == nil || ctx == nil || kernel.ValidateOwnedPhysicalAdmissionRequest(g, lease) != nil {
 		return kernel.ErrInvalidInput
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -367,32 +353,33 @@ func (s *Store) BeginOwnedPhysicalExecution(ctx context.Context, g kernel.ChildE
 		return conflictOrDatabaseError(err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err = sqliteSettleRetirementSuccessor(ctx, tx, g.ChildRunID); err != nil {
-		return err
-	}
 	current, err := loadTx(ctx, tx, g.ChildRunID)
 	if err != nil {
 		return err
 	}
-	if !permit.Matches(g, current, lease) {
-		return kernel.ErrExecutionConflict
-	}
-	if err = sqliteBoundLeaseCurrent(ctx, tx, g, lease, true); err != nil {
+	if err = sqliteManagedGate(ctx, tx, g.ChildRunID); err != nil {
 		return err
 	}
-	var quarantineRev int64
-	if err = tx.QueryRowContext(ctx, "SELECT execution_quarantine_revision FROM runtime_runs WHERE run_id=?", g.ChildRunID).Scan(&quarantineRev); err != nil {
+	if err = sqliteReserveGrantIdentity(ctx, tx, g); err != nil {
 		return err
 	}
-	if quarantineRev != 0 {
-		return kernel.ErrExecutionQuarantined
+	if _, err = sqliteSettleRetirementSuccessor(ctx, tx, g.ChildRunID); err != nil {
+		return err
+	}
+	native, quarantine, err := sqliteManagedLease(ctx, tx, g.ChildRunID)
+	if err != nil {
+		return err
+	}
+	now, err := sqliteExecutionNow(ctx, tx)
+	if err != nil {
+		return err
 	}
 	var count int
 	if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM runtime_child_effect_grants WHERE parent_run_id=? OR child_run_id=?", g.ChildRunID, g.ChildRunID).Scan(&count); err != nil {
 		return err
 	}
-	if count != 0 {
-		return kernel.ErrChildExecutionBusy
+	if err = kernel.ValidateOwnedPhysicalAdmission(g, current, lease, native, time.UnixMilli(now), quarantine != 0, count != 0, permit); err != nil {
+		return err
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO runtime_child_effect_grants(grant_id,parent_run_id,child_run_id,start_revision,execution_owner_id,execution_lease_id,execution_epoch,admission_source_hash,admission_operation) VALUES(?,?,?,?,?,?,?,?,?)`, g.ID, g.ChildRunID, g.ChildRunID, g.ExpectedRevision, g.ExecutionOwnerID, g.ExecutionLeaseID, g.ExecutionEpoch, g.AdmissionSourceHash, g.AdmissionOperation)
 	if err != nil {
@@ -401,5 +388,8 @@ func (s *Store) BeginOwnedPhysicalExecution(ctx context.Context, g kernel.ChildE
 	if _, err = tx.ExecContext(ctx, `UPDATE runtime_runs SET execution_physical_epoch=? WHERE run_id=?`, g.ExecutionEpoch, g.ChildRunID); err != nil {
 		return conflictOrDatabaseError(err)
 	}
-	return conflictOrDatabaseError(tx.Commit())
+	if err = tx.Commit(); err != nil {
+		return permit.CommitOutcome(conflictOrDatabaseError(err))
+	}
+	return nil
 }

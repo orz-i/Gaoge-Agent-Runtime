@@ -21,6 +21,9 @@ type OwnedCallbackCustody string
 const (
 	OwnedCustodyPrepared OwnedCallbackCustody = "prepared-v1"
 	OwnedCustodyScoped   OwnedCallbackCustody = "scoped-v1"
+	// OwnedCustodyNotEntered is original no-entry evidence, not Host completion
+	// or control/Tool custody. It only permits retirement of that admission.
+	OwnedCustodyNotEntered OwnedCallbackCustody = "not-entered-v1"
 	// OwnedToolResultReturn binds committed Tool results for observation only.
 	OwnedToolResultReturn OwnedCallbackCustody = "tool-result-v1"
 	// OwnedToolBudgetReturn binds an unresolved Tool to its suspended reservation.
@@ -29,7 +32,7 @@ const (
 )
 
 func (c OwnedCallbackCustody) Valid() bool {
-	return c == "" || c.permitsControl() || c == OwnedToolResultReturn || c == OwnedToolBudgetReturn || c == OwnedBoundedApprovalReturn
+	return c == "" || c == OwnedCustodyNotEntered || c.permitsControl() || c == OwnedToolResultReturn || c == OwnedToolBudgetReturn || c == OwnedBoundedApprovalReturn
 }
 
 func (c OwnedCallbackCustody) permitsControl() bool {
@@ -170,7 +173,40 @@ func (c OwnedPhysicalCallbackCompletion) MatchesReturnSnapshot(s Snapshot) bool 
 	return ManagedDigest(OwnedPhysicalCallbackReturnPayload(s, o)) == c.ReturnSourceHash
 }
 
+// NotEntered identifies a distinct original no-callback fact. It must not
+// authorize any receipt consumer that needs an actual Host return.
+func (c OwnedPhysicalCallbackCompletion) NotEntered() bool {
+	return c.ControlCustody == OwnedCustodyNotEntered
+}
+
+// MatchesNotEnteredSnapshot binds the retirement-only evidence to the exact
+// original admission revision and unchanged source. Managed activations have
+// their own transfer lifecycle and are not ordinary no-entry retirements.
+func (c OwnedPhysicalCallbackCompletion) MatchesNotEnteredSnapshot(g ChildExecutionGrant, s Snapshot) bool {
+	if !c.NotEntered() || ValidateOwnedPhysicalCompletion(g, c) != nil || s.Run.ID != g.ChildRunID ||
+		s.Run.Kind != "agent" || s.Run.ParentRunID != "" || s.Run.Revision != g.ExpectedRevision {
+		return false
+	}
+	o := OwnedPhysicalCallbackOutcome{LeaseOwned: c.LeaseOwned, ControlCustody: OwnedCustodyNotEntered}
+	return ManagedDigest(OwnedPhysicalCallbackReturnPayload(s, o)) == c.ReturnSourceHash
+}
+
+func ordinaryOwnedOperation(op string) bool {
+	switch op {
+	case "start", "prepare", "resume", "approval":
+		return true
+	default:
+		return false
+	}
+}
+
 func (p OwnedPhysicalCallbackReturn) Matches(g ChildExecutionGrant, s Snapshot, o OwnedPhysicalCallbackOutcome) bool {
+	if o.ControlCustody == OwnedCustodyNotEntered {
+		return ordinaryOwnedOperation(g.AdmissionOperation) && !o.HostCompleted && o.ToolReturns == "" && o.ToolBudgetScope == "" &&
+			g.IsOwned() && g.ID != "" && g.ChildRunID == s.Run.ID && s.Run.Kind == "agent" && s.Run.ParentRunID == "" &&
+			s.Run.Revision == g.ExpectedRevision &&
+			p.proof.Matches(s.Run.ID, s.Run.Revision, "agent_owned_callback_not_entered", g.ID, OwnedPhysicalCallbackReturnPayload(s, o), nil)
+	}
 	return o.ControlCustody.Valid() && (o.ControlCustody == OwnedToolBudgetReturn) == (o.ToolBudgetScope != "") &&
 		o.ToolReturns.Valid() && (o.ToolReturns == "" || (o.HostCompleted && o.ToolBudgetScope == "" && o.ControlCustody != OwnedCustodyPrepared)) &&
 		(o.ControlCustody != OwnedCustodyPrepared || g.AdmissionOperation == "prepare") &&
@@ -203,5 +239,12 @@ func (r *Runtime) LookupOwnedPhysicalCallbackReturn(ctx context.Context, g Child
 	if !ok {
 		return OwnedPhysicalCallbackCompletion{}, ErrExecutionRequired
 	}
-	return store.LookupOwnedPhysicalCallbackReturn(ctx, g)
+	c, err := store.LookupOwnedPhysicalCallbackReturn(ctx, g)
+	if err != nil {
+		return OwnedPhysicalCallbackCompletion{}, err
+	}
+	if err = ValidateOwnedPhysicalCompletion(g, c); err != nil {
+		return OwnedPhysicalCallbackCompletion{}, ErrExecutionConflict
+	}
+	return c, nil
 }

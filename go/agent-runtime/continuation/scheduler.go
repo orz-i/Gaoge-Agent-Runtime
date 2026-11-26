@@ -74,7 +74,7 @@ var errReconcileRetryBacklogFull = errors.New("continuation reconciliation retry
 
 // Reconcile repairs terminal child handoffs. Built-in adapters use bounded
 // keyset pages. Progress advances after durable queue acceptance or
-// feature-verified consumption; unknown kinds are conservatively enqueued.
+// feature-verified consumption; invalid relations are reported without delivery.
 // Legacy host-defined relation adapters without a pager retain ListAll fallback.
 func (scheduler *Scheduler) Reconcile(ctx context.Context) error {
 	if scheduler == nil {
@@ -95,6 +95,7 @@ func (scheduler *Scheduler) Reconcile(ctx context.Context) error {
 	if err != nil {
 		return errors.Join(result, err)
 	}
+	result = errors.Join(result, page.RejectionError())
 	lastProcessed := scheduler.reconcileCursor
 	for _, candidate := range page.Candidates {
 		if err = ctx.Err(); err != nil {
@@ -160,7 +161,7 @@ func (scheduler *Scheduler) ReconcilePage(ctx context.Context, after string) (ne
 	if err != nil {
 		return after, err
 	}
-	var result error
+	result := page.RejectionError()
 	next = after
 	for _, candidate := range page.Candidates {
 		if err = ctx.Err(); err != nil {

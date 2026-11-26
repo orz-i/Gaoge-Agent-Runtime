@@ -194,6 +194,35 @@ alone is not a physical-effect receipt.
 - Each physical Root/Child Start, Resume and Tool/Model call requires its
   original frozen execution identity and the appropriate Store-serialized
   physical grant or lease. The durable identity is stable across restart.
+- An owned physical admission may recover a lost COMMIT acknowledgement
+  only within its original live invocation, from a direct attempt-bound
+  Store outcome and the exact persisted admission commitment. Public Grant
+  identity, a definite refusal or a later observer never grants dispatch.
+- After admission acknowledgement, the actual owned RunChain entry still
+  checks the exact original Grant, persisted owner/epoch, source revision and
+  operation status against Store time. Runtime accounts for the observation's
+  full elapsed time; a due deadline, canceled context or expired lease cannot
+  enter new Host work. An expired Resume may narrow its original, explicitly
+  bounded first-party RunChain terminal to one qualified known receipt. It
+  still obeys the frozen budget's admission/cancellation and completion
+  projection; opaque Host layers cannot be entered or skipped to consume it.
+  The Run adapter observes the authoritative ledger after Host projection.
+  Both normal and receipt-only Model/Tool consumption use the same final
+  original-ledger admission decision before their local reducer. A cancellation
+  committed before this observation denies consumption and preserves the
+  committed receipt and usage. A later cancellation cannot retroactively
+  invalidate the admitted reducer; the existing Kernel Grant and revision CAS
+  still own business state. This is not a distributed atomic transaction.
+  No new Model/Tool work is dispatched by receipt-only recovery.
+  A confirmed but unentered ordinary Grant may retire only on the original
+  no-entry proof, not on an inferred Host return or an uncertain admission.
+  A Harness dispatch binds that native Grant's immutable identity so an exact
+  acknowledged no-entry can close the original Host dispatch, including after
+  a lost Host receipt acknowledgement. The same receipt-only repair serves
+  ordinary Resume and protective cancellation, including the latter's
+  post-election inspection. Repair does not authorize new dispatch or close
+  the cancellation intent itself. No-entry cannot create callback custody;
+  an unchanged suffix of such retirements preserves prior actual custody.
 - Cancellation competes atomically with new dispatch admission. A cancelled
   parent cannot start a late child, while an unsettled child grant prevents
   premature terminalization of its ancestors.

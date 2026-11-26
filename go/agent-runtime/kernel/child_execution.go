@@ -18,12 +18,14 @@ var ErrChildExecutionBusy = errors.New("kernel descendant has an unsettled physi
 // and execution-lease commits. This identity is not a Model/Tool receipt.
 // Unknown effects keep the Grant pending until explicit reconciliation.
 type ChildExecutionGrant struct {
-	ID                  string
-	ChildRunID          string
-	ExpectedRevision    uint64 // Original physical caller's immutable Run revision.
-	ExecutionOwnerID    string
-	ExecutionLeaseID    string
-	ExecutionEpoch      uint64
+	ID               string
+	ChildRunID       string
+	ExpectedRevision uint64 // Original physical caller's immutable Run revision.
+	ExecutionOwnerID string
+	ExecutionLeaseID string
+	ExecutionEpoch   uint64
+	// New ordinary owned grants bind the frozen source AND original private
+	// admission attempt. Retained older and managed hashes remain opaque.
 	AdmissionSourceHash string
 	AdmissionOperation  string
 }
@@ -161,6 +163,9 @@ func (runtime *Runtime) WithPhysicalGrant(ctx context.Context, grant ChildExecut
 			physicalFeatureProofDomain(current.Run.Kind, "owner"),
 			grant.ID, current.State, current.Checkpoint) {
 		return nil, ErrExecutionConflict
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	bound := *runtime
 	bound.physicalGrant = &grant
