@@ -25,6 +25,11 @@ func RunEA1RootAgentResumePhases(t *testing.T, factory func(*testing.T) (kernel.
 	for _, kind := range []string{"model", "tool", "host"} {
 		t.Run("P2/"+kind, func(t *testing.T) { ea1RootResumeUnknown(t, factory, kind) })
 	}
+	// Reproduce slow, successful Model-side intent reads independently
+	// of the Store implementation or scheduler.
+	t.Run("P2/model-delayed-store-read", func(t *testing.T) {
+		ea1RootResumeUnknownWithModelReadDelay(t, factory, "model", 175*time.Millisecond)
+	})
 }
 
 type ea1ResumeFixture struct {
@@ -111,7 +116,7 @@ func (f *ea1ResumeFixture) runner(rt *kernel.Runtime, owner string, withHost boo
 	if withHost {
 		middleware = []plugin.RunMiddleware{f.host}
 	}
-	r, e := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: f.physical, Catalog: f.catalog, Executor: f.catalog, RunMiddleware: middleware, Clock: ea1UnknownAgentClock{offset: f.clockOffset}, RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: 2 * time.Second}, Execution: agent.ExecutionPolicy{Model: agent.CallPolicy{Timeout: 100 * time.Millisecond, MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}, Tool: agent.CallPolicy{Timeout: 100 * time.Millisecond, MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}}})
+	r, e := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: f.physical, Catalog: f.catalog, Executor: f.catalog, RunMiddleware: middleware, Clock: ea1UnknownAgentClock{offset: f.clockOffset}, RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: 2 * time.Second}, Execution: ea1StoreBackedExecutionPolicy()})
 	if e != nil {
 		f.t.Fatal(e)
 	}
@@ -285,7 +290,11 @@ func ea1RootResumeBarrier(t *testing.T, factory func(*testing.T) (kernel.Store, 
 	}
 }
 func ea1RootResumeUnknown(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store), kind string) {
+	ea1RootResumeUnknownWithModelReadDelay(t, factory, kind, 0)
+}
+func ea1RootResumeUnknownWithModelReadDelay(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store), kind string, delay time.Duration) {
 	f := ea1NewResumeFixture(t, factory, kind == "tool")
+	f.physical.modelReadDelay = delay
 	injected := errors.New("actual Resume physical outcome missing")
 	event := "agent.model_invocation.completed"
 	if kind == "tool" {

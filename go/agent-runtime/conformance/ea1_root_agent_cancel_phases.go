@@ -23,6 +23,11 @@ func RunEA1RootAgentCancelPhases(t *testing.T, factory func(*testing.T) (kernel.
 	for _, k := range []string{"host", "model", "tool"} {
 		t.Run("P2/"+k, func(t *testing.T) { ea1RootCancelUnknown(t, factory, k) })
 	}
+	// Reproduce slow, successful Model-side intent reads independently
+	// of the Store implementation or scheduler.
+	t.Run("P2/model-delayed-store-read", func(t *testing.T) {
+		ea1RootCancelUnknownWithModelReadDelay(t, factory, "model", 175*time.Millisecond)
+	})
 	for _, p := range []string{"P3", "P4"} {
 		for _, tool := range []bool{false, true} {
 			t.Run(p+"/"+map[bool]string{false: "yield", true: "terminal"}[tool], func(t *testing.T) { ea1RootCancelSettlement(t, factory, p, tool) })
@@ -182,7 +187,11 @@ func ea1RootCancelActive(t *testing.T, factory func(*testing.T) (kernel.Store, k
 	}
 }
 func ea1RootCancelUnknown(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store), kind string) {
+	ea1RootCancelUnknownWithModelReadDelay(t, factory, kind, 0)
+}
+func ea1RootCancelUnknownWithModelReadDelay(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store), kind string, delay time.Duration) {
 	f := ea1NewResumeFixture(t, factory, kind == "tool")
+	f.physical.modelReadDelay = delay
 	injected := errors.New("actual Resume physical outcome missing")
 	event := "agent.model_invocation.completed"
 	if kind == "tool" {

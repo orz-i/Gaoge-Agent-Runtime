@@ -50,12 +50,9 @@ func RunEA1RootAgentUnknownSuite(t *testing.T, factory func(*testing.T) (kernel.
 				t.Fatal(err)
 			}
 			makeRunner := func(runtime *kernel.Runtime, owner string, offset time.Duration) *agent.Runner {
-				// The successful callback reads its durable intent from the Store.
-				// Allow race-instrumented I/O to reach the injected receipt failure;
-				// keep this below the native lease's one-second safety margin.
 				r, e := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: physical, Catalog: catalog, Executor: catalog,
 					Clock: ea1UnknownAgentClock{offset: offset}, RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: 2 * time.Second},
-					Execution: agent.ExecutionPolicy{Model: agent.CallPolicy{Timeout: 500 * time.Millisecond, MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}, Tool: agent.CallPolicy{Timeout: 500 * time.Millisecond, MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}}})
+					Execution: ea1StoreBackedExecutionPolicy()})
 				if e != nil {
 					t.Fatal(e)
 				}
@@ -204,15 +201,27 @@ type ea1UnknownAgentClock struct{ offset time.Duration }
 func (c ea1UnknownAgentClock) Now() time.Time { return time.Now().UTC().Add(c.offset) }
 
 type ea1UnknownAgentPhysical struct {
-	mu      sync.Mutex
-	tool    bool
-	models  []model.Request
-	rt      *kernel.Runtime
-	intents []agent.ModelInvocation
-	tools   []tools.ExecutionRequest
+	mu sync.Mutex
+	// A successful Model may spend time reading its original durable intent.
+	// The delay is used only by explicit slow-read receipt regression cases.
+	modelReadDelay time.Duration
+	tool           bool
+	models         []model.Request
+	rt             *kernel.Runtime
+	intents        []agent.ModelInvocation
+	tools          []tools.ExecutionRequest
 }
 
 func (p *ea1UnknownAgentPhysical) Generate(ctx context.Context, req model.Request) (model.Response, error) {
+	if p.modelReadDelay > 0 {
+		timer := time.NewTimer(p.modelReadDelay)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			return model.Response{}, ctx.Err()
+		}
+	}
 	// Check the actual durable pending intent at the physical callback,
 	// before normal consumption intentionally prunes the request payload.
 	var intent agent.ModelInvocation
@@ -304,8 +313,7 @@ func ea1RootHostUnknown(t *testing.T, factory func(*testing.T) (kernel.Store, fu
 	makeRunner := func(runtime *kernel.Runtime, owner string) *agent.Runner {
 		r, e := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: physical, RunMiddleware: []plugin.RunMiddleware{host},
 			RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: 2 * time.Second},
-			Execution: agent.ExecutionPolicy{Model: agent.CallPolicy{Timeout: 100 * time.Millisecond, MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond},
-				Tool: agent.CallPolicy{Timeout: 100 * time.Millisecond, MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}}})
+			Execution:    ea1StoreBackedExecutionPolicy()})
 		if e != nil {
 			t.Fatal(e)
 		}

@@ -202,22 +202,12 @@ func ea1NewChildCancelFixture(t *testing.T, factory func(*testing.T) (kernel.Sto
 	return f
 }
 func (f *ea1ChildCancelFixture) runner(rt *kernel.Runtime, owner string, host bool) *agent.Runner {
-	// These cases inject exact Host, Model-receipt, Tool-receipt and Grant
-	// faults. They do NOT test call timeouts. Under -race, a real SQLite or
-	// PostgreSQL Store read inside the Model callback can exceed 100ms,
-	// turning a deliberate Store fault into an unrelated timeout and leaving
-	// the physical Grant open. The explicit 2s native lease requires a
-	// strictly greater than 1s safety margin, so bound these calls at 900ms.
-	return f.runnerWithModelTimeout(rt, owner, host, 900*time.Millisecond)
-}
-
-func (f *ea1ChildCancelFixture) runnerWithModelTimeout(rt *kernel.Runtime, owner string, host bool, modelTimeout time.Duration) *agent.Runner {
 	var middleware []plugin.RunMiddleware
 	if host {
 		middleware = []plugin.RunMiddleware{f.host}
 	}
 	deps := agent.Dependencies{Runtime: rt, Model: f.physical, Catalog: f.registry, Executor: f.registry, RunMiddleware: middleware, ToolMiddleware: []plugin.ToolMiddleware{f.physical},
-		Execution: agent.ExecutionPolicy{Model: agent.CallPolicy{Timeout: modelTimeout, MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}, Tool: agent.CallPolicy{Timeout: 900 * time.Millisecond, MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}}}
+		Execution: ea1StoreBackedExecutionPolicy()}
 	if f.native {
 		deps.RunExecution = &agent.RunExecution{OwnerID: owner, LeaseDuration: 2 * time.Second}
 	}
