@@ -59,8 +59,11 @@ Capacity rejection is `ErrInputQueueFull`, not evidence that the Run's execution
 budget was consumed. Submission does not start a worker or wake an approval or
 budget pause; existing authorized continuation and approval controls still apply.
 The source is a trusted input-storage port, not arbitrary effectful middleware.
-The SDK binds reads to the original Run callback and journals that concrete
-frame's return without granting callback-free/deferred-control custody. Inputs
+The Runner reads inputs directly at its native safe point, inside the original
+Run callback. It checks execution ownership and deadline before and after the
+read and journals that read's return, not an input-application commit or the
+return of any enclosing Host middleware. No input RunNext wrapper or
+callback-free/deferred-control custody is granted. Inputs
 cannot be combined with the separately opted-in `ManagedContextRecovery` path
 or `SummaryNativeRecovery`; ordinary bounded Session composition remains supported.
 

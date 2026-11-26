@@ -11,7 +11,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
 const runInputBatchLimit = 16
@@ -40,19 +39,37 @@ type RunInputSource interface {
 	ReadRunInputs(context.Context, kernel.Run, uint64, int) ([]RunInput, error)
 }
 
-type runInputScopeKey struct{}
-type runInputBoundary struct{}
+// The input read is an explicit synchronous Host stage, not a RunNext
+// wrapper. This private journal identity witnesses the read's actual return
+// only; it is never a callback-free or deferred-control qualification.
+var inputReadStage = &struct{ marker bool }{true}
 
-func (*runInputBoundary) Name() string { return "agent.host_input_boundary" }
-func (boundary *runInputBoundary) Run(ctx context.Context, invocation plugin.RunInvocation, next plugin.RunNext) (kernel.Snapshot, error) {
-	// Keep Host input reads inside the original Run callback. This deliberately
-	// participates as a Host boundary, not a callback-free native/deferred
-	// authority shortcut.
-	result, err := next(context.WithValue(ctx, runInputScopeKey{}, invocation.RunID))
-	// This records only this concrete SDK frame's return after Next. Other
-	// middleware tickets and outstanding physical receipts remain independent.
-	callbackscope.Record(ctx, boundary, "input.boundary.returned", invocation.RunID)
-	return result, err
+func (runner *Runner) readRunInputs(ctx context.Context, run kernel.Run, binding string, cursor uint64) (inputs []RunInput, err error) {
+	source := struct {
+		RunID            string
+		Revision, Cursor uint64
+		Binding          string
+	}{run.ID, run.Revision, cursor, binding}
+	readCtx, ticket := callbackscope.Enter(ctx, run.ID, inputReadStage, source)
+	if ticket == nil {
+		return nil, ErrInvalidRequest
+	}
+	defer func() {
+		if failure := recover(); failure != nil {
+			callbackscope.Aborted(ticket)
+			panic(failure)
+		}
+		// The trusted port is read-only by contract. Its return is not a
+		// receipt for any enclosing callback or input application CAS.
+		if !callbackscope.Record(readCtx, inputReadStage, "input.read.returned", source) {
+			err = errors.Join(err, ErrInvalidRequest)
+		}
+		callbackscope.Returned(ticket, err)
+	}()
+	if runner.inputs.BindingID() != binding {
+		return nil, ErrInvalidRequest
+	}
+	return runner.inputs.ReadRunInputs(readCtx, run, cursor, runInputBatchLimit)
 }
 
 func validInputBinding(value string) bool {
@@ -69,14 +86,32 @@ func (runner *Runner) admitRunInputs(ctx context.Context, snapshot kernel.Snapsh
 	if state.InputBinding == "" {
 		return snapshot, state, false, nil // old Runs never silently enable inputs
 	}
-	if snapshot.Run.ID == "" || ctx.Value(runInputScopeKey{}) != snapshot.Run.ID {
+	frame, _ := callbackscope.RunCall(ctx).(*nativeRunAdmission)
+	if snapshot.Run.ID == "" || snapshot.Run.Status != kernel.RunStatusRunning ||
+		frame == nil || frame.invocation.RunID != snapshot.Run.ID || !frame.entered.Load() || frame.receiptOnly {
 		return snapshot, state, false, ErrInvalidRequest
 	}
-	if runner.inputs == nil || runner.inputBinding != state.InputBinding || runner.inputs.BindingID() != state.InputBinding {
+	// The reducer may have consumed a final receipt in its local state, but
+	// cannot read inputs over a pending model intent or outstanding Tool work.
+	// Its original receipt and the input cursor will commit in the same CAS.
+	if _, active := activeModelInvocation(state); active || len(state.PendingCalls) != 0 ||
+		state.ToolDispatchID != "" || state.ToolWait != nil || len(state.DeferredChildren) != 0 ||
+		state.PendingApproval != nil || state.ExternalToolCancellation != nil {
 		return snapshot, state, false, ErrInvalidRequest
 	}
-	inputs, err := runner.inputs.ReadRunInputs(ctx, snapshot.Run, state.InputCursor, runInputBatchLimit)
+	if runner.inputs == nil || runner.inputBinding != state.InputBinding {
+		return snapshot, state, false, ErrInvalidRequest
+	}
+	if err := runner.requireNativeAdmission(ctx, snapshot.Run); err != nil {
+		return snapshot, state, false, err
+	}
+	inputs, err := runner.readRunInputs(ctx, snapshot.Run, state.InputBinding, state.InputCursor)
 	if err != nil {
+		return snapshot, state, false, err
+	}
+	// Even an empty read is not authorization to finish a cancelled or
+	// expired Run. The later mutation still uses the original revision CAS.
+	if err = runner.requireNativeAdmission(ctx, snapshot.Run); err != nil {
 		return snapshot, state, false, err
 	}
 	if len(inputs) == 0 {

@@ -17,9 +17,9 @@ func supportsReceiptOnlyRunChain(d Dependencies) bool {
 		switch a := layer.(type) {
 		case *BoundedBudgetAdapter:
 			runBudget = a
-		case *BoundedContextAdapter, *runInputBoundary:
-			// Bounded hydration and the input scope are native, explicitly
-			// selected operations, not an arbitrary effect-capable RunNext.
+		case *BoundedContextAdapter:
+			// Bounded hydration is native, not an arbitrary RunNext.
+			// Input reads are separate and excluded by the persisted binding.
 		default:
 			return false
 		}

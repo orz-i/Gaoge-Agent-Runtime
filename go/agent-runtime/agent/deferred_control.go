@@ -14,7 +14,7 @@ import (
 // Kernel separately proves that no such callback has ever been dispatched.
 // This does not grant custody after any physical callback starts.
 func trustedDeferredPreparationStack(d Dependencies) bool {
-	if len(d.Observers) != 0 || len(d.Telemetry) != 0 {
+	if d.Inputs != nil || len(d.Observers) != 0 || len(d.Telemetry) != 0 {
 		return false
 	}
 	for _, item := range d.RunMiddleware {

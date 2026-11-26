@@ -532,17 +532,16 @@ func validateOwnedRetirementACK(result kernel.OwnedRetirementAckResult, receipt 
 	return nil
 }
 
-func collectBoundedCallbacks(runs []plugin.RunMiddleware, models []plugin.ModelMiddleware, toolLayers []plugin.ToolMiddleware) []any {
+func collectBoundedCallbacks(runs []plugin.RunMiddleware, models []plugin.ModelMiddleware, toolLayers []plugin.ToolMiddleware, hasInputs bool) []any {
 	var result []any
+	if hasInputs {
+		result = append(result, inputReadStage)
+	}
 	for _, m := range runs {
 		switch value := m.(type) {
 		case *BoundedContextAdapter:
 			result = append(result, value)
 		case *BoundedBudgetAdapter:
-			result = append(result, value)
-		case *runInputBoundary:
-			// Journal this concrete frame's return only. It remains outside
-			// native callback-free/deferred-control authority classification.
 			result = append(result, value)
 		}
 	}

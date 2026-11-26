@@ -574,7 +574,6 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		if !validInputBinding(inputBinding) {
 			return nil, ErrInvalidRequest
 		}
-		dependencies.RunMiddleware = append([]plugin.RunMiddleware{&runInputBoundary{}}, dependencies.RunMiddleware...)
 	}
 	runChain, err := plugin.NewRunChain(dependencies.RunMiddleware...)
 	if err != nil {
@@ -661,7 +660,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		executor: dependencies.Executor, approvals: dependencies.Approvals,
 		approvalControlPreflight:  dependencies.ApprovalControlPreflight,
 		startControlPreflight:     dependencies.StartControlPreflight,
-		runMiddlewareConfigured:   len(dependencies.RunMiddleware) > 0,
+		runMiddlewareConfigured:   len(dependencies.RunMiddleware) > 0 || dependencies.Inputs != nil,
 		receiptOnlyRunChain:       supportsReceiptOnlyRunChain(dependencies),
 		modelMiddlewareConfigured: len(dependencies.ModelMiddleware) > 0,
 		hostedTools:               dependencies.HostedTools, discovery: dependencies.ToolDiscovery, observers: observers, telemetry: telemetry, approvalPolicies: approvalPolicies,
@@ -685,7 +684,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		managedContextRecovery: dependencies.ManagedContextRecovery,
 		contextSummary:         dependencies.ContextSummary,
 		summaryNativeRecovery:  dependencies.SummaryNativeRecovery,
-		boundedCallbacks:       collectBoundedCallbacks(dependencies.RunMiddleware, dependencies.ModelMiddleware, dependencies.ToolMiddleware),
+		boundedCallbacks:       collectBoundedCallbacks(dependencies.RunMiddleware, dependencies.ModelMiddleware, dependencies.ToolMiddleware, dependencies.Inputs != nil),
 		// Native pre-Start cancellation and deferred post-callback custody
 		// share the SAME Host-callback trust decision. Native Start remains
 		// strictly middleware-free while the deferred path may also accept

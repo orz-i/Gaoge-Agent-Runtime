@@ -28,12 +28,26 @@ func TestRunInputAdmissionRejectsMalformedBatchBeforeStateMutation(t *testing.T)
 		make([]RunInput, runInputBatchLimit+1),
 	}
 	for index, records := range cases {
-		runner := Runner{inputs: invalidRunInputSource{records}, inputBinding: "inputs-v1"}
-		original := runState{InputBinding: "inputs-v1"}
-		ctx := context.WithValue(t.Context(), runInputScopeKey{}, "run")
-		_, state, changed, err := runner.admitRunInputs(ctx, kernel.Snapshot{Run: kernel.Run{ID: "run"}}, original, nil)
-		if !errors.Is(err, ErrInvalidRequest) || changed || state.InputCursor != 0 || len(state.Messages) != 0 {
-			t.Fatalf("case %d changed state for invalid input: %v changed=%t", index, err, changed)
+		rt, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		runner, err := NewRunner(Dependencies{Runtime: rt, Model: inputBoundaryModel{}, Inputs: invalidRunInputSource{records}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		request := StartRequest{ID: "run", RequestID: "request", Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "thread", ID: "thread"}, Goal: "start", Model: "test"}
+		result, err := runner.StartRun(t.Context(), request)
+		if !errors.Is(err, ErrInvalidRequest) {
+			t.Fatalf("case %d: %v", index, err)
+		}
+		snapshot, err := rt.Load(t.Context(), result.Run.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		state, err := ViewState(snapshot)
+		if err != nil || state.InputCursor != 0 || len(state.ModelInvocations) != 0 {
+			t.Fatalf("case %d changed state or dispatched Model: %v", index, err)
 		}
 	}
 }
