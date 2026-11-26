@@ -69,9 +69,10 @@ func TestRealPostgresManagedAgentSessionRecoveryAcrossProcessCrash(t *testing.T)
 	}
 }
 
-// The original transfer has reached CLOSED, but its successor's ordinary
-// native retirement has not been acknowledged. A third process must close
-// the exact Grant/ACK without entering a model, Tool or another managed owner.
+// A successor retirement transaction is cut immediately before or after
+// commit. Closure, receipt, grant deletion and lease release are one native
+// fact. A third process may repair that fact or its Host projection, never
+// execute another Model, Tool or managed owner.
 func TestRealPostgresManagedClosureRetirementAcrossProcessCrash(t *testing.T) {
 	dsn := strings.TrimSpace(os.Getenv("TEST_POSTGRES_DSN"))
 	if dsn == "" {
@@ -100,19 +101,23 @@ func TestRealPostgresManagedClosureRetirementAcrossProcessCrash(t *testing.T) {
 			}
 			runManagedRecoveryProcess(t, isolated, files, "resume-"+cut, managedRecoveryCrashExit, true)
 			closed, err := ks.LoadManagedRecoveryByID(t.Context(), original.SafePoint.ID)
-			if err != nil || closed.State != kernel.ManagedClosed || closed.SuccessorGrant.ID == "" || closed.Terminal == nil {
-				t.Fatalf("fault missed closed original transfer: state=%s err=%v", closed.State, err)
+			if err != nil || closed.SuccessorGrant.ID == "" {
+				t.Fatalf("fault missed original successor: state=%s err=%v", closed.Selection.Mode, err)
+			}
+			before, err := ks.Load(t.Context(), root.ExecutionRefID)
+			if err != nil || before.Run.Status != kernel.RunStatusCompleted {
+				t.Fatalf("fault missed terminal callback result: %v", err)
 			}
 			grant, grantErr := ks.LookupChildExecution(t.Context(), root.ExecutionRefID)
 			receipt, receiptErr := ks.LoadOwnedRetirement(t.Context(), closed.SuccessorGrant.ID)
 			if cut == "finish-before" {
-				if grantErr != nil || grant != closed.SuccessorGrant || !errors.Is(receiptErr, kernel.ErrNotFound) {
-					t.Fatalf("expected original marked grant: grant=%+v err=%v retirement=%v", grant, grantErr, receiptErr)
+				if closed.Resolved() || closed.Selection.Mode != kernel.ManagedResume || closed.Terminal != nil || grantErr != nil || grant != closed.SuccessorGrant || !errors.Is(receiptErr, kernel.ErrNotFound) {
+					t.Fatalf("retirement partially committed: state=%s grant=%+v err=%v retirement=%v", closed.Selection.Mode, grant, grantErr, receiptErr)
 				}
-			} else if !errors.Is(grantErr, kernel.ErrNotFound) || receiptErr != nil || receipt.Phase != "RETIRED" {
-				t.Fatalf("expected exact unacknowledged retirement: grant=%v receipt=%s err=%v", grantErr, receipt.Phase, receiptErr)
+			} else if !closed.Resolved() || closed.Selection.Mode != kernel.ManagedResume || closed.Terminal == nil || !errors.Is(grantErr, kernel.ErrNotFound) || receiptErr != nil || !receipt.MatchesManagedClosure(closed, before) {
+				t.Fatalf("atomic retirement missing: state=%s grant=%v receipt=%s err=%v", closed.Selection.Mode, grantErr, receipt.Phase, receiptErr)
 			}
-			if _, err := host.ReadManagedOriginalDispatch(t.Context(), original.SafePoint.Host); err != nil {
+			if err := host.VerifyManagedOriginalDispatch(t.Context(), original.SafePoint.Host, false); err != nil {
 				t.Fatalf("Host dispatch was closed before native retirement: %v", err)
 			}
 			calls := readManagedRecoveryRecords[model.Request](t, filepath.Join(files, "model.jsonl"))
@@ -125,9 +130,12 @@ func TestRealPostgresManagedClosureRetirementAcrossProcessCrash(t *testing.T) {
 				phase = "refresh-closed"
 			}
 			runManagedRecoveryProcess(t, isolated, files, phase, 0, true)
+			settled, err := ks.LoadManagedRecoveryByID(t.Context(), original.SafePoint.ID)
+			if err != nil || !settled.Resolved() || settled.Selection.Mode != kernel.ManagedResume || settled.SuccessorGrant != closed.SuccessorGrant || settled.Terminal == nil || kernel.ManagedDigest(*settled.Terminal) != kernel.ManagedDigest(before) {
+				t.Fatalf("original transfer not atomically closed: state=%s err=%v", settled.Selection.Mode, err)
+			}
 			receipt, err = ks.LoadOwnedRetirement(t.Context(), closed.SuccessorGrant.ID)
-			if err != nil || receipt.Phase != "ACKNOWLEDGED" || receipt.Evidence.Grant != closed.SuccessorGrant ||
-				kernel.ManagedDigest(receipt.Evidence.Snapshot) != kernel.ManagedDigest(*closed.Terminal) {
+			if err != nil || !receipt.MatchesManagedClosure(settled, before) {
 				t.Fatalf("original retirement not acknowledged: phase=%s err=%v", receipt.Phase, err)
 			}
 			if lease := readManagedRecoveryLease(t, t.Context(), db, root.ExecutionRefID); lease.ExecutionOwner != "" || lease.ExecutionLeaseID != "" || lease.ExecutionEpoch != closed.SuccessorGrant.ExecutionEpoch {
@@ -221,7 +229,7 @@ func testManagedAgentSessionRecoveryAcrossProcessCrash(t *testing.T, dsn string,
 		t.Fatal("pending post-Tool intent lost its frozen per-model output ceiling")
 	}
 	originalTransfer, transferErr := postgresadapter.NewKernelStore(db).LoadManagedRecovery(t.Context(), runID)
-	if transferErr != nil || originalTransfer.State != kernel.ManagedAvailable ||
+	if transferErr != nil || originalTransfer.LegacyState != "" ||
 		originalTransfer.SafePoint.ModelInvocationID != frozen.ID || originalTransfer.SafePoint.ModelRequestHash != frozen.RequestHash ||
 		!reflect.DeepEqual(originalTransfer.SafePoint.Source, pending) {
 		t.Fatalf("original process did not atomically commit exact managed source: %+v err=%v", originalTransfer, transferErr)
@@ -270,9 +278,10 @@ func testManagedAgentSessionRecoveryAcrossProcessCrash(t *testing.T, dsn string,
 	if err != nil || completed.Run.Status != kernel.RunStatusCompleted || completed.Result == nil {
 		t.Fatalf("same Kernel Run did not complete: %+v err=%v", completed.Run, err)
 	}
-	reservation, reservationErr := reopenedStore.ReadManagedRecovery(t.Context(), originalTransfer.SafePoint.Host, originalTransfer.SafePoint.RecoveryID)
+	finalTransfer, reservationErr := postgresadapter.NewKernelStore(reopened).LoadManagedRecovery(t.Context(), runID)
+	reservation := finalTransfer.Selection
 	if reservationErr != nil || reservation.Mode != kernel.ManagedResume ||
-		reservation.SuspensionID != originalTransfer.SafePoint.ID ||
+		finalTransfer.SafePoint.ID != originalTransfer.SafePoint.ID ||
 		!reflect.DeepEqual(reservation.Cancellation, kernel.ManagedCancellation{}) {
 		t.Fatalf("original immutable RESUME reservation lost: %+v err=%v", reservation, reservationErr)
 	}
@@ -284,7 +293,7 @@ func testManagedAgentSessionRecoveryAcrossProcessCrash(t *testing.T, dsn string,
 	if closureErr != nil {
 		t.Fatal(closureErr)
 	}
-	closure, closureErr := closureRT.ManagedRecoveryClosure(t.Context(), reservation.SuspensionID)
+	closure, closureErr := closureRT.ManagedRecoveryClosure(t.Context(), finalTransfer.SafePoint.ID)
 	if closureErr != nil || !closure.Matches(reservation) || !reflect.DeepEqual(closure.Snapshot(), completed) {
 		t.Fatalf("original transfer closure missing: %v", closureErr)
 	}
@@ -558,11 +567,11 @@ type managedRecoveryRetirementCrashStore struct {
 	cut string
 }
 
-func (s *managedRecoveryRetirementCrashStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant) error {
+func (s *managedRecoveryRetirementCrashStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
 	if g.AdmissionOperation == "managed_resume" && s.cut == "finish-before" {
 		os.Exit(managedRecoveryCrashExit)
 	}
-	err := s.KernelStore.FinishChildExecution(ctx, g)
+	err := s.KernelStore.FinishChildExecution(ctx, g, p)
 	if err == nil && g.AdmissionOperation == "managed_resume" && s.cut == "finish-after" {
 		os.Exit(managedRecoveryCrashExit)
 	}
@@ -650,7 +659,7 @@ func newManagedRecoverySessionWithComposition(t *testing.T, db *gorm.DB, files s
 	}
 	dependencies := agent.Dependencies{
 		Runtime: runtime, Model: managedRecoveryModel{logPath: filepath.Join(files, "model.jsonl")},
-		Catalog: registry, Executor: registry, ManagedContextRecovery: bounded,
+		Catalog: registry, Executor: registry, BoundedContext: bounded, ManagedRecovery: managed,
 		RunMiddleware: []plugin.RunMiddleware{bounded},
 		RunExecution:  runExecution, Execution: execution,
 	}
@@ -659,7 +668,7 @@ func newManagedRecoverySessionWithComposition(t *testing.T, db *gorm.DB, files s
 		if ordinaryErr != nil {
 			t.Fatal(ordinaryErr)
 		}
-		dependencies.ManagedContextRecovery = nil
+		dependencies.BoundedContext = nil
 		dependencies.RunMiddleware = []plugin.RunMiddleware{ordinary}
 		dependencies.PrepareModelRequest = bounded.Prepare
 	}
