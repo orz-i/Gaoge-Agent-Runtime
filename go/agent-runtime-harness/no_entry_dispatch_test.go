@@ -57,7 +57,7 @@ func (s *noEntryReceiptFaultStore) AppendItem(ctx context.Context, item harness.
 }
 
 func TestNoEntryRetirementClosesHarnessDispatch(t *testing.T) {
-	for _, mode := range []string{"direct", "before-write", "after-write"} {
+	for _, mode := range []string{"direct", "before-write", "after-write", "before-write-cancel", "direct-cancel"} {
 		t.Run(mode, func(t *testing.T) { testNoEntryRetirementClosesHarnessDispatch(t, mode) })
 	}
 }
@@ -65,7 +65,9 @@ func testNoEntryRetirementClosesHarnessDispatch(t *testing.T, mode string) {
 	clock := newResumeTurnClock()
 	base := &noEntryExpiryStore{Store: memory.NewStoreWithExecutionClock(clock), clock: clock}
 	hostStore := &noEntryReceiptFaultStore{MemoryStore: harness.NewMemoryStore()}
-	if mode != "direct" {
+	if strings.HasPrefix(mode, "before-write") {
+		hostStore.mode = "before-write"
+	} else if mode == "after-write" {
 		hostStore.mode = mode
 	}
 	calls := 0
@@ -116,11 +118,22 @@ func testNoEntryRetirementClosesHarnessDispatch(t *testing.T, mode string) {
 		}
 	}
 	t.Logf("Kernel retired; Harness pending=%t", pending)
-	if pending != (mode == "before-write") || (mode != "direct" && (!hostStore.fired || !errors.Is(firstErr, errNoEntryReceipt))) {
+	if pending != strings.HasPrefix(mode, "before-write") || (hostStore.mode != "" && (!hostStore.fired || !errors.Is(firstErr, errNoEntryReceipt))) {
 		t.Fatalf("unexpected dispatch persistence outcome mode=%s pending=%t error=%v", mode, pending, e)
 	}
 	// Reopen the Runner rather than relying on its original call frame.
 	host, _ = newResumeTurnHarness(t, base, hostStore, provider, clock, configure)
+	if strings.HasSuffix(mode, "-cancel") {
+		cancelled, e := host.Cancel(t.Context(), initial.Turn.ID, "original user cancel")
+		current, readErr := rt.Load(t.Context(), root.ExecutionRefID)
+		items, itemErr := hostStore.ListItems(t.Context(), initial.Turn.ID, 0, 1000)
+		stillPending := harness.PendingExecutionDispatch(items, "")
+		t.Logf("cancel after known no-entry: err=%v turn=%s kernel=%s calls=%d pending=%t readErr=%v itemErr=%v", e, cancelled.Turn.Status, current.Run.Status, calls, stillPending, readErr, itemErr)
+		if e != nil || readErr != nil || itemErr != nil || stillPending || cancelled.Turn.Status != harness.TurnCancelled || current.Run.Status != kernel.RunStatusCancelled || calls != 1 {
+			t.Fatalf("Cancel could not consume original exact no-entry retirement without another execution: %v", e)
+		}
+		return
+	}
 	after, e := host.ResumeTurn(t.Context(), initial.Turn.ID)
 	t.Logf("second resume: status=%s error=%v model calls=%d", after.Turn.Status, e, calls)
 	if e != nil || after.Turn.Status != harness.TurnCompleted || calls != 2 {

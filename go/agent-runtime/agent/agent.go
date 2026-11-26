@@ -1421,6 +1421,15 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 // never calls a provider. The ordinary drive and the expired receipt-only
 // path share this reducer, but the latter excludes Host-dependent branches.
 func (runner *Runner) consumeCompletedModel(ctx context.Context, snapshot kernel.Snapshot, state runState, invocation ModelInvocation) (kernel.Snapshot, bool, error) {
+	ledgerID := ""
+	if invocation.SamplingPlan != nil {
+		ledgerID = invocation.SamplingPlan.LedgerID
+	}
+	if err := requireReceiptConsumption(ctx, snapshot.Run.ID, ledgerID, runner.samplingBudget); err != nil {
+		// Preserve the exact committed receipt and its charge. A refused
+		// local consumption neither resends nor terminalizes the Run.
+		return snapshot, true, err
+	}
 	if invocation.Purpose == ModelInvocationContextSummary {
 		next, summaryErr := runner.consumeContextSummary(ctx, snapshot, state)
 		return next, summaryErr != nil, summaryErr
@@ -2434,6 +2443,9 @@ func (runner *Runner) consumeRecoveredPending(ctx context.Context, snapshot kern
 		refusal, invalid := receipt.outcome().terminalError(execution.call.ID)
 		if invalid != nil {
 			return snapshot, true, invalid, true
+		}
+		if err := requireReceiptConsumption(ctx, snapshot.Run.ID, receipt.LedgerID, runner.toolBudget); err != nil {
+			return snapshot, true, err, true
 		}
 		execution.state.RecoveredTools = append(execution.state.RecoveredTools[:index], execution.state.RecoveredTools[index+1:]...)
 		execution.originalApprovalDigest = receipt.ApprovalDigest

@@ -2,7 +2,9 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,6 +18,7 @@ type receiptLifecycleBudgetPorts struct {
 	*frozenReceiptBudgetPorts
 	retarget   string
 	projectErr error
+	onProject  func(context.Context, budget.Ledger) error
 }
 
 func (p *receiptLifecycleBudgetPorts) ResolveScope(ctx context.Context, runID string) (BoundedBudgetScope, error) {
@@ -25,12 +28,31 @@ func (p *receiptLifecycleBudgetPorts) ResolveScope(ctx context.Context, runID st
 	}
 	return s, err
 }
-func (p *receiptLifecycleBudgetPorts) Project(context.Context, budget.Ledger) error {
+func (p *receiptLifecycleBudgetPorts) Project(ctx context.Context, l budget.Ledger) error {
+	if p.onProject != nil {
+		if err := p.onProject(ctx, l); err != nil {
+			return err
+		}
+	}
 	return p.projectErr
 }
 
+type receiptHydrationPorts struct {
+	BoundedContextPorts
+	onHydrate func(context.Context) error
+}
+
+func (p *receiptHydrationPorts) Hydrate(ctx context.Context, inv plugin.RunInvocation) (context.Context, BoundedContextHydration, error) {
+	if p.onHydrate != nil {
+		if err := p.onHydrate(ctx); err != nil {
+			return ctx, BoundedContextHydration{}, err
+		}
+	}
+	return ctx, BoundedContextHydration{RunID: inv.RunID, SourceBinding: json.RawMessage(`{"receipt-only":true}`)}, nil
+}
+
 func TestExpiredReceiptPreservesElectedBudgetCancellation(t *testing.T) {
-	for _, mode := range []string{"cancelled", "completed", "retarget", "projection-failed"} {
+	for _, mode := range []string{"cancelled", "completed", "retarget", "projection-failed", "cancel-during-project-live", "cancel-during-project-expired", "cancel-after-run-admission-live", "cancel-after-run-admission-expired"} {
 		t.Run(mode, func(t *testing.T) { testExpiredReceiptBudgetLifecycle(t, mode) })
 	}
 }
@@ -39,7 +61,7 @@ func testExpiredReceiptBudgetLifecycle(t *testing.T, mode string) {
 	storeClock := &modelRetryTestClock{now: time.Now().UTC()}
 	base := memory.NewStoreWithExecutionClock(storeClock)
 	fault := &summaryCoreFaultStore{Store: base, event: "agent.model_invocation.completed"}
-	_, rt, _, provider, clock, start := newSummaryCoreFixture(t, fault)
+	_, rt, contextPorts, provider, clock, start := newSummaryCoreFixture(t, fault)
 	start.WorkingStateSummary = nil
 	deadline := storeClock.now.Add(time.Minute)
 	start.DeadlineAt = &deadline
@@ -50,6 +72,14 @@ func testExpiredReceiptBudgetLifecycle(t *testing.T, mode string) {
 		t.Fatal(e)
 	}
 	deps := Dependencies{Runtime: rt, Model: provider, Clock: clock, RunMiddleware: []plugin.RunMiddleware{shared}, ModelMiddleware: []plugin.ModelMiddleware{shared}, ToolMiddleware: []plugin.ToolMiddleware{shared}}
+	hydrate := &receiptHydrationPorts{}
+	if strings.HasPrefix(mode, "cancel-after-run-admission") {
+		inner, e := NewBoundedContextAdapter(contextPorts.manager, hydrate)
+		if e != nil {
+			t.Fatal(e)
+		}
+		deps.RunMiddleware = append(deps.RunMiddleware, inner)
+	}
 	r, e := NewRunner(deps)
 	if e != nil {
 		t.Fatal(e)
@@ -83,7 +113,33 @@ func testExpiredReceiptBudgetLifecycle(t *testing.T, mode string) {
 	if mode == "projection-failed" {
 		ports.projectErr = projectionErr
 	}
-	storeClock.now = deadline.Add(time.Second)
+	if mode == "cancel-during-project-live" || mode == "cancel-during-project-expired" {
+		ports.onProject = func(ctx context.Context, l budget.Ledger) error {
+			ports.onProject = nil
+			if l.RunCancelled(start.ID) {
+				t.Fatal("cancellation unexpectedly already elected")
+			}
+			cancelled, e := (budget.Coordinator{Store: ledgerStore}).CancelRoot(ctx, l.ID, start.ID)
+			if e != nil || !cancelled.RunCancelled(start.ID) {
+				t.Fatalf("real election failed: %v", e)
+			}
+			t.Logf("cancel elected in pre-Next projection: old revision=%d new=%d", l.Revision, cancelled.Revision)
+			return nil
+		}
+	}
+	if strings.HasPrefix(mode, "cancel-after-run-admission") {
+		hydrate.onHydrate = func(ctx context.Context) error {
+			hydrate.onHydrate = nil
+			l, e := (budget.Coordinator{Store: ledgerStore}).CancelRoot(ctx, "turn", start.ID)
+			if e != nil || !l.RunCancelled(start.ID) {
+				t.Fatalf("inner hydration did not elect cancellation: %v", e)
+			}
+			return nil
+		}
+	}
+	if !strings.HasSuffix(mode, "-live") {
+		storeClock.now = deadline.Add(time.Second)
+	}
 	out, e := r.Resume(ctx, start.ID, repaired.Run.Revision)
 	after, loadErr := ledgerStore.LoadBudget(ctx, "turn")
 	t.Logf("expired deadline: status=%s rev=%d error=%v ledgerCancelled=%t finished=%t providerCalls=%d", out.Run.Status, out.Run.Revision, e, after.RunCancelled(start.ID), after.FinishedRuns[start.ID], len(provider.calls()))
@@ -106,6 +162,9 @@ func testExpiredReceiptBudgetLifecycle(t *testing.T, mode string) {
 	persisted, readErr := rt.Load(ctx, start.ID)
 	if readErr != nil || kernel.ManagedDigest(persisted) != kernel.ManagedDigest(repaired) || !errors.Is(e, want) || after.FinishedRuns[start.ID] {
 		t.Fatalf("expired receipt bypassed original budget lifecycle: %v read=%v", e, readErr)
+	}
+	if strings.HasPrefix(mode, "cancel-") && (!after.RunCancelled(start.ID) || after.View("").Usage.LLMCalls != 1) {
+		t.Fatal("receipt refusal lost the elected cancellation or original accounting")
 	}
 	if mode == "retarget" {
 		if _, err := ledgerStore.LoadBudget(ctx, "other-ledger"); err == nil {

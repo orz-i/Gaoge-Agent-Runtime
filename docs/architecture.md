@@ -206,12 +206,22 @@ alone is not a physical-effect receipt.
   bounded first-party RunChain terminal to one qualified known receipt. It
   still obeys the frozen budget's admission/cancellation and completion
   projection; opaque Host layers cannot be entered or skipped to consume it.
-  No new Model/Tool work is dispatched.
+  The Run adapter observes the authoritative ledger after Host projection.
+  Both normal and receipt-only Model/Tool consumption use the same final
+  original-ledger admission decision before their local reducer. A cancellation
+  committed before this observation denies consumption and preserves the
+  committed receipt and usage. A later cancellation cannot retroactively
+  invalidate the admitted reducer; the existing Kernel Grant and revision CAS
+  still own business state. This is not a distributed atomic transaction.
+  No new Model/Tool work is dispatched by receipt-only recovery.
   A confirmed but unentered ordinary Grant may retire only on the original
   no-entry proof, not on an inferred Host return or an uncertain admission.
   A Harness dispatch binds that native Grant's immutable identity so an exact
   acknowledged no-entry can close the original Host dispatch, including after
-  a lost Host receipt acknowledgement. No-entry cannot create callback custody;
+  a lost Host receipt acknowledgement. The same receipt-only repair serves
+  ordinary Resume and protective cancellation, including the latter's
+  post-election inspection. Repair does not authorize new dispatch or close
+  the cancellation intent itself. No-entry cannot create callback custody;
   an unchanged suffix of such retirements preserves prior actual custody.
 - Cancellation competes atomically with new dispatch admission. A cancelled
   parent cannot start a late child, while an unsettled child grant prevents

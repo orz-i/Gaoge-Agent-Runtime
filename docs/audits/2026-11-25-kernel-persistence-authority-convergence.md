@@ -238,3 +238,38 @@ Start and Resume now exercise a real renewal before the unknown Tool receipt
 cut, and still require the original grant, business snapshot and physical
 send counts to remain unchanged after expiry. No production behavior or SQL
 schema changed.
+
+### Original receipt consumption and protective closure (F10/F11)
+
+F10: an acknowledged Host budget projection is not a current admission
+decision. The original native Run adapter now observes its registered Ledger
+after projection, checks immutable scope/Run binding, and consumes the same
+native admission-denial return if cancellation has already committed. The
+common local Model/Tool receipt reducers (including deadline-only Resume and
+Model/Tool-only native compositions) qualify the original ledger at actual
+consumption admission, after the surrounding layers and receipt qualification.
+If the decision denies consumption, preserve the business snapshot, original
+receipt and its accounting; the original Run adapter projects the denial
+observed by its terminal. No receipt or authority is minted from a projection
+error. The final authoritative Ledger read orders admission against the native
+cancellation CAS; cancellation after that read does not retroactively erase
+an already admitted reducer. The existing Kernel Grant and revision CAS
+remain the authority for the business transition. There is no claim of
+cross-database atomicity, new budget write, reservation or schema.
+
+F11: Resume's exact dispatch-linked no-entry retirement repair is also
+consumed by the existing protective-control pending-dispatch inspection,
+before and after cancellation election. It verifies the current original
+Invocation/Run indexes and the concrete native Agent's Kernel identity.
+No new execution or cancellation intent is elected by this receipt repair.
+The original Store's immutable receipt/cancellation/managed arbitration is
+unchanged. Uncorrelated, missing or contradictory facts stay pending.
+
+Acceptance extends the original independent probes: budget cancellation
+during projection and after outer Run admission (bounded Context hydration)
+for normal/expired Model receipt, known Tool receipt with Run+Tool and
+Tool-only native composition, exact accounting after denied consumption;
+Host receipt lost after acknowledged Kernel no-entry, a no-entry dispatch
+admitted between cancellation inspections, and unresolved native no-entry
+evidence. Harness cancellation can complete without a new Model or Tool call;
+unknown evidence does not permit cancellation or delete the original fence.

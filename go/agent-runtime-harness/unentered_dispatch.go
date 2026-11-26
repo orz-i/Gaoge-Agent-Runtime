@@ -12,13 +12,20 @@ import (
 // cannot settle a different dispatch. No new invocation/attempt is elected.
 func (runner *Runner) recoverUnenteredDispatch(ctx context.Context, inv Invocation) (bool, error) {
 	native, ok := runner.agent.(*agent.Runner)
-	if !ok || !validInvocationExecutionAuthority(inv) {
+	if !ok || !native.ObservesKernelRuntime(runner.runtime) || !validInvocationExecutionAuthority(inv) {
 		return false, nil
 	}
-	items, err := runner.loadGlobalPhysicalEvidence(ctx, inv.TurnID)
-	if err != nil || ActiveCancellationFence(items) {
+	if err := verifyProtectiveInvocation(ctx, runner.store, inv); err != nil {
 		return false, err
 	}
+	items, err := runner.loadGlobalPhysicalEvidence(ctx, inv.TurnID)
+	if err != nil {
+		return false, err
+	}
+	// An exact no-entry receipt closes old work; it cannot elect a new
+	// dispatch or settle the cancellation intent itself. The same repair is
+	// safe before and after cancellation election, including an active fence.
+	// AppendItem still arbitrates its own canonical receipt and managed owner.
 	receipts := executionDispatchReceiptIndex(items)
 	var pending Item
 	var operation plugin.RunOperation

@@ -18,13 +18,19 @@ import (
 
 type settledToolPorts struct {
 	agent.BoundedBudgetPorts
-	id string
+	id      string
+	project func(context.Context, budget.Ledger) error
 }
 
 func (p settledToolPorts) ResolveScope(_ context.Context, runID string) (agent.BoundedBudgetScope, error) {
 	return agent.BoundedBudgetScope{LedgerID: p.id, Limits: budget.Limits{MaxToolCalls: 3}, Runs: []agent.BoundedBudgetRunBinding{{RunID: runID}}}, nil
 }
-func (settledToolPorts) Project(context.Context, budget.Ledger) error     { return nil }
+func (p settledToolPorts) Project(ctx context.Context, l budget.Ledger) error {
+	if p.project != nil {
+		return p.project(ctx, l)
+	}
+	return nil
+}
 func (settledToolPorts) ToolReservationActive(plugin.ToolInvocation) bool { return true }
 
 type settledToolModel struct {
@@ -57,7 +63,7 @@ func RunSettledToolRecovery(t *testing.T, factory func(*testing.T) (kernel.Store
 	t.Run("unsent-recovery", func(t *testing.T) { toolUnsentRecovery(t, factory, ledgerFactory) })
 	t.Run("native-admission-return", func(t *testing.T) { nativeAdmissionReturns(t, factory, ledgerFactory) })
 	t.Run("actual-dispatch-denial", func(t *testing.T) { toolDispatchDenial(t, factory, ledgerFactory) })
-	for _, variant := range []string{"committed", "strict-rejection", "allow-completion", "foreign-ledger", "changed-receipt", "opaque-callback", "lost-recovery-ack"} {
+	for _, variant := range []string{"committed", "strict-rejection", "allow-completion", "foreign-ledger", "changed-receipt", "opaque-callback", "lost-recovery-ack", "cancel-before-consume", "cancel-during-project"} {
 		t.Run(variant, func(t *testing.T) {
 			ctx := t.Context()
 			backing, peer, reopen := factory(t)
@@ -71,7 +77,7 @@ func RunSettledToolRecovery(t *testing.T, factory func(*testing.T) (kernel.Store
 				ledger, reopenLedger = ledgerFactory(t)
 			}
 			event := "tool.correction_requested"
-			committed := variant == "committed"
+			committed := variant == "committed" || variant == "cancel-before-consume" || variant == "cancel-during-project"
 			if committed {
 				event = "tool.completed"
 			}
@@ -107,8 +113,14 @@ func RunSettledToolRecovery(t *testing.T, factory func(*testing.T) (kernel.Store
 			if err != nil {
 				t.Fatal(err)
 			}
+			var project func(context.Context, budget.Ledger) error
 			makeRunner := func(rt *kernel.Runtime, l budget.LedgerStore, scope string, opaque bool, verify bool) *agent.Runner {
-				a, e := agent.NewBoundedBudgetAdapter(l, settledToolPorts{id: scope})
+				a, e := agent.NewBoundedBudgetAdapter(l, settledToolPorts{id: scope, project: func(ctx context.Context, l budget.Ledger) error {
+					if project != nil {
+						return project(ctx, l)
+					}
+					return nil
+				}})
 				if e != nil {
 					t.Fatal(e)
 				}
@@ -117,6 +129,9 @@ func RunSettledToolRecovery(t *testing.T, factory func(*testing.T) (kernel.Store
 					layers = append(layers, ea1OpaqueToolMiddleware{})
 				}
 				d := agent.Dependencies{Runtime: rt, Model: m, Catalog: registry, Executor: registry, ToolMiddleware: layers}
+				if variant == "cancel-during-project" {
+					d.RunMiddleware = []plugin.RunMiddleware{a}
+				}
 				if verify {
 					d.ToolOutcomeVerifier = agent.ToolOutcomeVerifierFunc(func(context.Context, tools.ExecutionRequest) (tools.ExecutionResult, error) {
 						verifications++
@@ -244,6 +259,33 @@ func RunSettledToolRecovery(t *testing.T, factory func(*testing.T) (kernel.Store
 			}
 			// No Host provider verifier is required to consume the staged result.
 			r = makeRunner(freshRT, freshLedger, "original-ledger", false, false)
+			if variant == "cancel-before-consume" || variant == "cancel-during-project" {
+				elect := func(ctx context.Context) error {
+					l, e := (budget.Coordinator{Store: freshLedger}).CancelRoot(ctx, "original-ledger", request.ID)
+					if e != nil || !l.RunCancelled(request.ID) {
+						t.Fatalf("original cancellation not elected: %v", e)
+					}
+					return nil
+				}
+				if variant == "cancel-before-consume" {
+					if e := elect(ctx); e != nil {
+						t.Fatal(e)
+					}
+				} else {
+					project = func(ctx context.Context, l budget.Ledger) error { project = nil; return elect(ctx) }
+				}
+				out, e := r.Resume(ctx, request.ID, staged.Run.Revision)
+				current, readErr := freshRT.Load(ctx, request.ID)
+				after, ledgerErr := freshLedger.LoadBudget(ctx, "original-ledger")
+				if !errors.Is(e, budget.ErrExhausted) || readErr != nil || ledgerErr != nil || kernel.ManagedDigest(out) != kernel.ManagedDigest(staged) || kernel.ManagedDigest(current) != kernel.ManagedDigest(staged) ||
+					!after.RunCancelled(request.ID) || after.FinishedRuns[request.ID] || !reflect.DeepEqual(after.Reservations[id], saved.Reservations[id]) || originalCalls != 1 || len(m.calls) != 1 || verifications != 0 {
+					t.Fatalf("receipt consumption crossed elected cancellation: error=%v read=%v ledger=%v", e, readErr, ledgerErr)
+				}
+				if _, e := freshRT.LookupChildExecution(ctx, request.ID); !errors.Is(e, kernel.ErrNotFound) {
+					t.Fatalf("known denied receipt retained an unknown callback: %v", e)
+				}
+				return
+			}
 			final, err := r.Resume(ctx, request.ID, staged.Run.Revision)
 			if err != nil || final.Run.Status != kernel.RunStatusCompleted || originalCalls != 1 {
 				t.Fatalf("original outcome not consumed: status=%s err=%v calls=%d", final.Run.Status, err, originalCalls)

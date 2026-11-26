@@ -1,0 +1,193 @@
+package conformance
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+
+	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
+)
+
+type noEntryKernelPorts interface {
+	kernel.Store
+	kernel.ExecutionStore
+	kernel.ControlStore
+	kernel.ChildExecutionStore
+	kernel.OwnedPhysicalExecutionStore
+	kernel.OwnedRetirementStore
+	kernel.OwnedRootSettlementStore
+	kernel.PreparedRootSettlementStore
+}
+
+var errNoEntryCut = errors.New("entry observation unavailable")
+var errNoEntryHostReceipt = errors.New("host retirement receipt acknowledgement lost")
+
+type noEntryKernelCut struct {
+	noEntryKernelPorts
+	deny, loseEvidence bool
+	grant              kernel.ChildExecutionGrant
+}
+
+func (s *noEntryKernelCut) CheckOwnedPhysicalEntry(ctx context.Context, g kernel.ChildExecutionGrant, l kernel.ExecutionLease, v kernel.Snapshot) (kernel.OwnedPhysicalEntryWindow, error) {
+	if s.deny {
+		s.deny = false
+		s.grant = g
+		// Fail BEFORE entry; all actual Record/Mark/Finish/ACK writes
+		// are performed by the real native Store.
+		return kernel.OwnedPhysicalEntryWindow{}, errNoEntryCut
+	}
+	return s.noEntryKernelPorts.CheckOwnedPhysicalEntry(ctx, g, l, v)
+}
+func (s *noEntryKernelCut) RecordOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, o kernel.OwnedPhysicalCallbackOutcome, p kernel.OwnedPhysicalCallbackReturn) error {
+	if s.loseEvidence && g == s.grant {
+		return errNoEntryCut
+	}
+	return s.noEntryKernelPorts.RecordOwnedPhysicalCallbackReturn(ctx, g, rev, o, p)
+}
+
+type noEntryHostCut struct {
+	harness.Store
+	lose         bool
+	beforeIntent func()
+}
+
+func (s *noEntryHostCut) AppendItem(ctx context.Context, i harness.Item) (harness.Item, bool, error) {
+	if s.beforeIntent != nil && i.ParentItemID == harness.CancellationFenceParentItemID {
+		hook := s.beforeIntent
+		s.beforeIntent = nil
+		hook()
+	}
+	if s.lose && strings.Contains(string(i.Payload), "native_agent_callback_not_entered") {
+		s.lose = false
+		return harness.Item{}, false, errNoEntryHostReceipt
+	}
+	return s.Store.AppendItem(ctx, i)
+}
+
+type noEntryModel struct{ calls int }
+
+func (m *noEntryModel) Generate(context.Context, model.Request) (model.Response, error) {
+	m.calls++
+	return model.Response{Content: "original receipt", Continue: m.calls == 1}, nil
+}
+
+// NoEntryCancellation verifies the same Host/Kernel retirement protocol
+// across independent Store instances. The interleaving inserts the rejected
+// Resume AFTER Cancel's first inspection but BEFORE its intent is committed.
+// Repair must also work under that already elected cancellation fence.
+func NoEntryCancellation(t *testing.T, factory func(*testing.T) (kernel.Store, harness.Store, func() (kernel.Store, harness.Store))) {
+	for _, mode := range []string{"receipt-lost", "during-election", "unknown-no-entry"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx := t.Context()
+			backing, host, reopen := factory(t)
+			ports, ok := backing.(noEntryKernelPorts)
+			if !ok {
+				t.Fatal("native fixture lacks original retirement ports")
+			}
+			cut := &noEntryKernelCut{noEntryKernelPorts: ports}
+			hostCut := &noEntryHostCut{Store: host}
+			m := &noEntryModel{}
+			makeRunner := func(k kernel.Store, h harness.Store) (*harness.Runner, *kernel.Runtime) {
+				t.Helper()
+				rt, e := kernel.New(kernel.Dependencies{Store: k})
+				if e != nil {
+					t.Fatal(e)
+				}
+				native, e := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: m})
+				if e != nil {
+					t.Fatal(e)
+				}
+				r, e := harness.NewRunner(harness.Dependencies{Runtime: rt, Agent: native, Store: h})
+				if e != nil {
+					t.Fatal(e)
+				}
+				return r, rt
+			}
+			r, rt := makeRunner(cut, hostCut)
+			initial, e := r.StartAgentTurn(ctx, harness.StartRequest{
+				HostThread: harness.HostRef{Kind: "conversation", ID: "no-entry-thread"}, HostTurn: harness.HostRef{Kind: "turn", ID: "no-entry-turn"},
+				Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "owner"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "no-entry-thread"},
+				Goal: "one original result", Config: harness.ConfigSnapshot{Environment: harness.VersionRef{ID: "test", Revision: 1}, AgentSpec: harness.AgentSpec{Model: "fixture"}},
+			})
+			if e != nil || initial.Turn.Status != harness.TurnRunning || m.calls != 1 {
+				t.Fatalf("original Start: %+v %v calls=%d", initial.Turn, e, m.calls)
+			}
+			root, ok := harness.TopLevelInvocation(initial)
+			if !ok {
+				t.Fatal("root missing")
+			}
+			before, e := rt.Load(ctx, root.ExecutionRefID)
+			if e != nil {
+				t.Fatal(e)
+			}
+			failResume := func() {
+				cut.deny = true
+				cut.loseEvidence = mode == "unknown-no-entry"
+				hostCut.lose = true
+				_, e := r.ResumeTurn(ctx, initial.Turn.ID)
+				if !errors.Is(e, errNoEntryCut) || m.calls != 1 || cut.grant.ID == "" {
+					t.Fatalf("original entry cut: %v calls=%d", e, m.calls)
+				}
+				if mode != "unknown-no-entry" && !errors.Is(e, errNoEntryHostReceipt) {
+					t.Fatalf("Host receipt cut not reached: %v", e)
+				}
+				items, e := host.ListItems(ctx, initial.Turn.ID, 0, 1000)
+				if e != nil || !harness.PendingExecutionDispatch(items, root.ID) {
+					t.Fatalf("missing retained original Host dispatch: %v", e)
+				}
+				if mode != "unknown-no-entry" {
+					retired, e := rt.LoadOwnedRetirement(ctx, cut.grant.ID)
+					if e != nil || retired.Phase != "ACKNOWLEDGED" || !retired.Evidence.Completion.MatchesNotEnteredSnapshot(cut.grant, before) {
+						t.Fatalf("exact original retirement missing: %v", e)
+					}
+				}
+			}
+			var cancelled harness.Snapshot
+			if mode == "during-election" {
+				hostCut.beforeIntent = failResume
+				cancelled, e = r.Cancel(ctx, initial.Turn.ID, "original stop")
+			} else {
+				failResume()
+				// No reliance on the original observer, wrapper, or Runner.
+				backing, host = reopen()
+				r, rt = makeRunner(backing, host)
+				cancelled, e = r.Cancel(ctx, initial.Turn.ID, "original stop")
+			}
+			current, readErr := rt.Load(ctx, root.ExecutionRefID)
+			items, itemErr := host.ListItems(ctx, initial.Turn.ID, 0, 1000)
+			if readErr != nil || itemErr != nil || m.calls != 1 {
+				t.Fatalf("control lost original identity or reentered model: %v %v calls=%d", readErr, itemErr, m.calls)
+			}
+			if mode == "unknown-no-entry" {
+				if !errors.Is(e, harness.ErrConflict) || kernel.ManagedDigest(current) != kernel.ManagedDigest(before) || !harness.PendingExecutionDispatch(items, root.ID) {
+					t.Fatalf("unknown retirement improperly granted cancellation: %v", e)
+				}
+				if g, e := rt.LookupChildExecution(ctx, root.ExecutionRefID); e != nil || g != cut.grant {
+					t.Fatalf("unknown original native fence was erased: %v", e)
+				}
+				return
+			}
+			if e != nil || cancelled.Turn.Status != harness.TurnCancelled || current.Run.Status != kernel.RunStatusCancelled ||
+				harness.PendingExecutionDispatch(items, root.ID) || harness.ActiveCancellationFence(items) {
+				t.Fatalf("Cancel failed exact no-entry closure: %v turn=%s run=%s", e, cancelled.Turn.Status, current.Run.Status)
+			}
+			count := 0
+			for _, item := range items {
+				if phase, valid := harness.VerifiedExecutionDispatchGrant(item); valid && phase == "resume" {
+					boundary, valid := harness.VerifiedExecutionDispatchReceipt(item, items)
+					if !valid || boundary != "native_agent_callback_not_entered" {
+						t.Fatalf("wrong original receipt: %q", boundary)
+					}
+					count++
+				}
+			}
+			if count != 1 {
+				t.Fatalf("expected one original Resume, not a new recovery dispatch: %d", count)
+			}
+		})
+	}
+}

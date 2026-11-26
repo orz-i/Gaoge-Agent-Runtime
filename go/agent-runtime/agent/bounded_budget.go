@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync/atomic"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/callbackscope"
@@ -154,6 +155,97 @@ func (a *BoundedBudgetAdapter) bindReceiptScope(ctx context.Context, runID, orig
 	return l, nil
 }
 
+// observeRunBudget is the read-only admission decision at the existing
+// authoritative Ledger, not at a previously projected copy. LoadBudget
+// serializes the observation with the Store's cancellation CAS. If cancel
+// wins before this observation, no subsequent local consumption is admitted.
+// The Kernel Grant, not this read, still fences concurrent Kernel control.
+func (a *BoundedBudgetAdapter) observeRunBudget(ctx context.Context, original budget.Ledger, runID string) (budget.Ledger, error) {
+	if err := ctx.Err(); err != nil {
+		return budget.Ledger{}, err
+	}
+	if original.ID == "" {
+		return original, nil
+	}
+	current, err := a.coordinator.Store.LoadBudget(ctx, original.ID)
+	if err != nil {
+		return budget.Ledger{}, err
+	}
+	before, wasRegistered := original.Runs[runID]
+	after, registered := current.Runs[runID]
+	if current.ID != original.ID || current.Revision < original.Revision || current.Revision == 0 ||
+		current.Limits != original.Limits || !wasRegistered || !registered || before != after {
+		return budget.Ledger{}, budget.ErrLedgerConflict
+	}
+	return current, ctx.Err()
+}
+
+// The original Run adapter carries its selected immutable scope into the
+// terminal. Both live and deadline-only receipt reducers consume this same
+// selection, including when an inner layer blocked after Run admission.
+type runBudgetAdmission struct {
+	adapter       *BoundedBudgetAdapter
+	ledger        budget.Ledger
+	projectionErr error
+	// The terminal can observe a cancellation after this outer Run layer
+	// returned from projection. Carry that actual decision back to the
+	// original adapter, which still owns the final projection obligation.
+	receiptDenial atomic.Pointer[budget.Ledger]
+}
+
+// requireReceiptConsumption is the final Ledger decision for a previously
+// committed receipt, not a new reservation or external dispatch. The read
+// is the ordering point with CancelRoot/CancelRun. A cancellation elected
+// AFTER it cannot retroactively erase the admitted reducer; the existing
+// Kernel Grant/CAS still owns the state transition. No distributed atomic
+// transaction or durable authority is inferred from this observation.
+func requireReceiptConsumption(ctx context.Context, runID, originalLedger string, owner *BoundedBudgetAdapter) error {
+	frame, _ := callbackscope.RunCall(ctx).(*nativeRunAdmission)
+	var bound *runBudgetAdmission
+	if frame != nil && frame.invocation.RunID == runID {
+		bound = frame.budget.Load()
+	}
+	if bound != nil {
+		if originalLedger != "" && (owner != bound.adapter || originalLedger != bound.ledger.ID) {
+			return budget.ErrLedgerConflict
+		}
+		if bound.projectionErr != nil {
+			return bound.projectionErr
+		}
+		l, err := bound.adapter.observeRunBudget(ctx, bound.ledger, runID)
+		if err != nil {
+			return err
+		}
+		if l.ID != "" && l.RunCancelled(runID) {
+			bound.receiptDenial.Store(&l)
+			return budget.ErrExhausted
+		}
+		return nil
+	}
+	// A Model/Tool-only native composition has no enclosing budget Run
+	// layer. It still cannot ignore the exact durable ledger of its receipt.
+	if originalLedger == "" {
+		return nil
+	}
+	if owner == nil {
+		return budget.ErrLedgerConflict
+	}
+	l, err := owner.coordinator.Store.LoadBudget(ctx, originalLedger)
+	if err != nil {
+		return err
+	}
+	if _, ok := l.Runs[runID]; l.ID != originalLedger || l.Revision == 0 || !ok {
+		return budget.ErrLedgerConflict
+	}
+	if err = ctx.Err(); err != nil {
+		return err
+	}
+	if l.RunCancelled(runID) {
+		return budget.ErrExhausted
+	}
+	return nil
+}
+
 func (a *BoundedBudgetAdapter) Run(ctx context.Context, inv plugin.RunInvocation, next plugin.RunNext) (kernel.Snapshot, error) {
 	frame, _ := callbackscope.RunCall(ctx).(*nativeRunAdmission)
 	receiptOnly := frame != nil && frame.invocation == inv && frame.receiptOnly
@@ -170,6 +262,19 @@ func (a *BoundedBudgetAdapter) Run(ctx context.Context, inv plugin.RunInvocation
 	var ownErr error
 	if l.ID != "" {
 		ownErr = a.ports.Project(ctx, l)
+		// Projection is a Host port and may have blocked while the
+		// authoritative cancellation was committed. The projected value
+		// is not the Run entry decision.
+		current, observeErr := a.observeRunBudget(ctx, l, inv.RunID)
+		if observeErr != nil {
+			return kernel.Snapshot{}, errors.Join(ownErr, observeErr)
+		}
+		if current.RunCancelled(inv.RunID) && current.Revision != l.Revision {
+			// Only an actual acknowledged projection of the elected denial
+			// can qualify the original native Run return.
+			ownErr = errors.Join(ownErr, a.ports.Project(ctx, current))
+		}
+		l = current
 		if l.RunCancelled(inv.RunID) {
 			// No Next has entered. Only the actual bounded frame, after
 			// native ledger and projection acknowledgement, can return a
@@ -186,7 +291,15 @@ func (a *BoundedBudgetAdapter) Run(ctx context.Context, inv plugin.RunInvocation
 			return kernel.Snapshot{}, ownErr
 		}
 	}
+	admission := &runBudgetAdmission{adapter: a, ledger: l, projectionErr: ownErr}
+	if frame != nil && frame.invocation == inv {
+		frame.budget.Store(admission)
+	}
 	out, callErr := next(ctx)
+	if denial := admission.receiptDenial.Load(); denial != nil {
+		l = *denial
+		ownErr = errors.Join(ownErr, a.ports.Project(context.WithoutCancel(ctx), l))
+	}
 	if l.ID != "" && out.Run.ID == inv.RunID && (out.Run.Status == kernel.RunStatusCompleted || out.Run.Status == kernel.RunStatusFailed || out.Run.Status == kernel.RunStatusCancelled) {
 		updated, e := a.coordinator.FinishRuns(context.WithoutCancel(ctx), l.ID, inv.RunID)
 		ownErr = errors.Join(ownErr, e, a.ports.Project(context.WithoutCancel(ctx), updated))

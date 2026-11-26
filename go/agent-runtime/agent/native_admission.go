@@ -73,6 +73,7 @@ type nativeRunAdmission struct {
 	entered       atomic.Bool
 	receiptOnly   bool
 	receiptLedger string
+	budget        atomic.Pointer[runBudgetAdmission]
 }
 
 type nativeAdmissionDenied struct{ cause error }

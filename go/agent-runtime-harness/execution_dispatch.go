@@ -222,6 +222,25 @@ func (runner *Runner) pendingExecutionDispatch(
 		if len(receipts[item.ID]) != 0 {
 			return true, nil
 		}
+		// The same exact original-dispatch repair used by Resume is also
+		// available to protective control. Never require a new physical
+		// call to close an already acknowledged Kernel no-entry.
+		if native, ok := runner.agent.(*agent.Runner); ok && native.ObservesKernelRuntime(runner.runtime) {
+			owner, ownerErr := runner.store.GetInvocation(ctx, item.InvocationID)
+			if ownerErr != nil {
+				return false, ownerErr
+			}
+			if owner.ID != item.InvocationID || owner.TurnID != turnID || owner.ExecutionRefID != item.RunID {
+				return false, ErrConflict
+			}
+			repaired, repairErr := runner.recoverUnenteredDispatch(ctx, owner)
+			if repairErr != nil {
+				return false, repairErr
+			}
+			if repaired {
+				continue
+			}
+		}
 		if (phase.Phase == "start" || phase.Phase == "start-retry") &&
 			runner.nativeAgentStartOwnedByKernel(ctx, item, phase.PhysicalRunID) {
 			// Only the exact first-party Agent with an authoritative
