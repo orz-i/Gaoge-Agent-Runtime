@@ -3,7 +3,6 @@ package harness_test
 import (
 	"context"
 	"errors"
-	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -264,7 +263,7 @@ func (store *lostAllowanceACKStore) ApplyControl(
 	return snapshot, revoked, err
 }
 
-func TestPostCommitLostControlReplyRemainsFailClosed(t *testing.T) {
+func TestNativeAllowanceLostCASReplyDoesNotNeedHostRetirement(t *testing.T) {
 	store := &lostAllowanceACKStore{Store: memory.NewStore()}
 	runtime, err := kernel.New(kernel.Dependencies{Store: store, Clock: fixedClock{}})
 	if err != nil {
@@ -305,12 +304,38 @@ func TestPostCommitLostControlReplyRemainsFailClosed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !harness.PendingExecutionDispatch(items, owner.ID) {
-		t.Fatal("lost post-CAS ACK incorrectly released the uncertain control grant")
+	if harness.PendingExecutionDispatch(items, owner.ID) {
+		t.Fatal("pure native control created Host dispatch authority")
 	}
-	if _, err := runner.Cancel(t.Context(), paused.Turn.ID, "uncertain control"); !errors.Is(err, harness.ErrConflict) {
-		t.Fatalf("ambiguous control outcome was cancelled as if proven no-effect: %v", err)
+	for _, i := range items {
+		if phase, ok := harness.VerifiedExecutionDispatchGrant(i); ok && phase == "grant-call-allowance" {
+			t.Fatal("native allowance still wrote Host dispatch")
+		}
 	}
+	view, err := agent.ViewState(run)
+	if err != nil || view.CallAllowance == nil || view.CallAllowance.LLMCalls != 2 || view.Budget.Usage.LLMCalls != 1 {
+		t.Fatalf("original allowance not committed exactly once: %+v %v", view, err)
+	}
+	reopened, e := harness.NewRunner(harness.Dependencies{Runtime: runtime, Store: harnessStore, Agent: direct, Clock: fixedClock{}})
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = reopened.GrantCallAllowance(t.Context(), paused.Turn.ID, paused.Turn.Revision, agent.CallAllowance{LLMCalls: 1}); !errors.Is(e, harness.ErrConflict) {
+		t.Fatalf("stale allowance accepted: %v", e)
+	}
+	complete, e := reopened.ResumeTurnAtRevision(t.Context(), paused.Turn.ID, run.Run.ID, run.Run.Revision)
+	if e != nil || complete.Turn.Status != harness.TurnCompleted {
+		t.Fatalf("committed native allowance did not resume: %s %v", complete.Turn.Status, e)
+	}
+	after, e := runtime.Load(t.Context(), run.Run.ID)
+	if e != nil {
+		t.Fatal(e)
+	}
+	view, e = agent.ViewState(after)
+	if e != nil || view.CallAllowance == nil || view.CallAllowance.LLMCalls != 2 || view.Budget.Usage.LLMCalls != 2 {
+		t.Fatalf("allowance replayed: %+v %v", view, e)
+	}
+
 }
 
 // Even the concrete native Agent can run host-defined middleware. A middleware
@@ -402,71 +427,30 @@ func TestNativeAgentRunMiddlewareCannotForgeControlNoEffectProof(t *testing.T) {
 	}
 }
 
-var errControlReceiptWrite = errors.New("injected Harness dispatch completion write failure")
-
-type interruptedNoEffectReceiptStore struct {
-	harness.Store
-	rejectNext atomic.Bool
-}
-
-func (store *interruptedNoEffectReceiptStore) AppendItem(ctx context.Context, item harness.Item) (harness.Item, bool, error) {
-	if item.Kind == harness.ItemDiagnostic && item.Status == harness.ItemCompleted &&
-		strings.HasPrefix(item.ParentItemID, "hdispatch_") &&
-		store.rejectNext.CompareAndSwap(true, false) {
-		return harness.Item{}, false, errControlReceiptWrite
-	}
-	return store.Store.AppendItem(ctx, item)
-}
-
-func TestLostNativeNoEffectReceiptRemainsFailClosed(t *testing.T) {
-	kernelStore := &preDispatchReadFaultStore{Store: memory.NewStore()}
-	runtime, err := kernel.New(kernel.Dependencies{Store: kernelStore, Clock: fixedClock{}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	direct, err := agent.NewRunner(agent.Dependencies{
-		Runtime: runtime, Model: directModel{},
-		CompletionPolicies: []agent.CompletionPolicy{&allowanceCompletionPolicy{}},
-		Limits:             agent.Limits{MaxLLMCalls: 4, MaxToolCalls: 6},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	backing := harness.NewMemoryStore()
-	store := &interruptedNoEffectReceiptStore{Store: backing}
-	runner, err := harness.NewRunner(harness.Dependencies{
-		Runtime: runtime, Agent: direct, Store: store, Clock: fixedClock{},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	request := testStartRequest()
-	request.CallAllowance = &agent.CallAllowance{LLMCalls: 1}
-	paused, err := runner.StartAgentTurn(t.Context(), request)
-	if err != nil || paused.Turn.Status != harness.TurnPausedBudget {
-		t.Fatalf("setup pause failed: status=%s err=%v", paused.Turn.Status, err)
-	}
+func TestNativeAllowancePreflightHasNoHostReceiptToLose(t *testing.T) {
+	runner, backing, runtime, fault, paused := newReadFaultAllowanceHarness(t)
 	owner, _ := harness.TopLevelInvocation(paused)
-	kernelStore.armed.Store(true)
-	store.rejectNext.Store(true)
-	_, firstErr := runner.GrantCallAllowance(t.Context(), paused.Turn.ID, paused.Turn.Revision, agent.CallAllowance{LLMCalls: 1})
-	kernelStore.armed.Store(false)
-	if !errors.Is(firstErr, errControlReadOutage) || !errors.Is(firstErr, errControlReceiptWrite) ||
-		!errors.Is(firstErr, agent.ErrControlNoEffect) {
-		t.Fatalf("wrong failure boundary for lost proof receipt: %v", firstErr)
+	fault.armed.Store(true)
+	_, e := runner.GrantCallAllowance(t.Context(), paused.Turn.ID, paused.Turn.Revision, agent.CallAllowance{LLMCalls: 1})
+	fault.armed.Store(false)
+	if !errors.Is(e, errControlReadOutage) || !errors.Is(e, agent.ErrControlNoEffect) {
+		t.Fatalf("wrong native preflight failure: %v", e)
 	}
-	items, err := backing.ListItems(t.Context(), paused.Turn.ID, 0, 500)
-	if err != nil {
-		t.Fatal(err)
+	items, e := backing.ListItems(t.Context(), paused.Turn.ID, 0, 500)
+	if e != nil || harness.PendingExecutionDispatch(items, owner.ID) {
+		t.Fatalf("read-only rejection left Host authority: %v", e)
 	}
-	if !harness.PendingExecutionDispatch(items, owner.ID) {
-		t.Fatal("a failed no-effect receipt write incorrectly released a control grant")
+	for _, i := range items {
+		if phase, ok := harness.VerifiedExecutionDispatchGrant(i); ok && phase == "grant-call-allowance" {
+			t.Fatal("unexpected native allowance grant")
+		}
 	}
-	run, err := runtime.Load(t.Context(), owner.ExecutionRefID)
-	if err != nil || run.Run.Status != kernel.RunStatusPausedBudget {
-		t.Fatalf("unexpected Kernel effect despite preflight failure: status=%s err=%v", run.Run.Status, err)
+	run, e := runtime.Load(t.Context(), owner.ExecutionRefID)
+	if e != nil || run.Run.Status != kernel.RunStatusPausedBudget {
+		t.Fatalf("preflight mutated Run: %v", e)
 	}
-	if _, err := runner.Cancel(t.Context(), paused.Turn.ID, "unknown incomplete proof"); !errors.Is(err, harness.ErrConflict) {
-		t.Fatalf("incomplete proof receipt must remain fail-closed: %v", err)
+	stopped, e := runner.Cancel(t.Context(), paused.Turn.ID, "stop after rejected allowance")
+	if e != nil || stopped.Turn.Status != harness.TurnCancelled {
+		t.Fatalf("rejected native control blocked cancellation: %v", e)
 	}
 }

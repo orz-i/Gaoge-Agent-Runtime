@@ -468,7 +468,7 @@ func ea1ChildStartPhase(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 			f.unchanged(f.peer, s, g)
 			wrong := g
 			wrong.ID += "-foreign"
-			if e := f.peerStore.(kernel.ChildExecutionStore).FinishChildExecution(ctx, wrong); !errors.Is(e, kernel.ErrExecutionConflict) {
+			if e := f.peerStore.(kernel.ChildExecutionStore).FinishChildExecution(ctx, wrong, kernel.ChildExecutionSettlement{}); !errors.Is(e, kernel.ErrExecutionConflict) {
 				t.Fatalf("foreign grant retired callback: %v", e)
 			}
 			f.unchanged(f.peer, s, g)

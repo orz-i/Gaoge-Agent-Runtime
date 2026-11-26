@@ -271,8 +271,8 @@ func TestManagedPreparationPreservesCommittedContextRollover(t *testing.T) {
 					t.Fatalf("forged context enabled recovery: %v", err)
 				}
 				same, e := opts.Runtime.LoadManagedRecovery(ctx, root.ExecutionRefID)
-				if e != nil || same.State != kernel.ManagedAvailable {
-					t.Fatalf("forged context acquired selection: %v %s", e, same.State)
+				if e != nil || same.LegacyState != "" {
+					t.Fatalf("forged context acquired selection: %v %s", e, same.Selection.Mode)
 				}
 				return
 			}

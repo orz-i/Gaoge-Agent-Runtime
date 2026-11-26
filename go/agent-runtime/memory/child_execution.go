@@ -13,7 +13,6 @@ type memoryChildGrant struct {
 	ancestors       []string
 	settledRevision uint64
 	completion      kernel.OwnedPhysicalCallbackCompletion
-	settlement      *kernel.OwnedSettlementEvidence
 }
 
 func memoryTerminalStatus(status kernel.RunStatus) bool {
@@ -38,7 +37,7 @@ func (store *Store) childAncestorsLocked(child kernel.Run) ([]string, error) {
 			return nil, kernel.ErrInvalidInput
 		}
 		seen[id] = struct{}{}
-		if err := store.managedGateLocked(id); err != nil {
+		if err := store.nativeEntryGateLocked(id); err != nil {
 			return nil, err
 		}
 		parent, ok := store.records[id]
@@ -69,7 +68,7 @@ func (store *Store) BeginChildExecution(ctx context.Context, grant kernel.ChildE
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	if err := store.managedGateLocked(grant.ChildRunID); err != nil {
+	if err := store.nativeEntryGateLocked(grant.ChildRunID); err != nil {
 		return err
 	}
 	child, ok := store.records[grant.ChildRunID]
@@ -103,19 +102,8 @@ func (store *Store) BeginChildExecution(ctx context.Context, grant kernel.ChildE
 			return kernel.ErrChildExecutionBusy
 		}
 	}
-	closures := make([]memoryRetirementSuccessor, 0, len(ancestors))
-	for _, id := range ancestors {
-		closure, err := store.planRetirementSuccessorLocked(id)
-		if err != nil {
-			return err
-		}
-		closures = append(closures, closure)
-	}
 	if err := store.reserveGrantIdentityLocked(grant); err != nil {
 		return err
-	}
-	for i, id := range ancestors {
-		store.commitRetirementSuccessorLocked(id, closures[i])
 	}
 	store.childGrants[grant.ID] = memoryChildGrant{grant: grant, ancestors: ancestors}
 	for _, id := range ancestors {
@@ -127,10 +115,13 @@ func (store *Store) BeginChildExecution(ctx context.Context, grant kernel.ChildE
 	return nil
 }
 
-// MarkChildExecutionSettled requires an exact persisted child revision and
+// Borrowed MarkChildExecutionSettled requires an exact persisted child revision and
 // original Grant. The callback-completion marker cannot be inferred from a
 // clean-looking Run while the original physical callback is still active.
 func (store *Store) MarkChildExecutionSettled(ctx context.Context, grant kernel.ChildExecutionGrant, permit kernel.ChildExecutionSettlement) error {
+	if grant.IsOwned() {
+		return kernel.ErrExecutionConflict
+	}
 	if store == nil || ctx == nil || grant.ID == "" || grant.ChildRunID == "" {
 		return kernel.ErrInvalidInput
 	}
@@ -139,7 +130,7 @@ func (store *Store) MarkChildExecutionSettled(ctx context.Context, grant kernel.
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	if err := store.managedGateLocked(grant.ChildRunID); err != nil {
+	if err := store.nativeEntryGateLocked(grant.ChildRunID); err != nil {
 		return err
 	}
 	original, ok := store.childGrants[grant.ID]
@@ -151,14 +142,6 @@ func (store *Store) MarkChildExecutionSettled(ctx context.Context, grant kernel.
 		(original.settledRevision != 0 && original.settledRevision != child.Run.Revision) {
 		return kernel.ErrExecutionConflict
 	}
-	if grant.IsOwned() {
-		evidence, err := kernel.ReduceOwnedPhysicalSettlement(grant, cloneSnapshot(child), store.execution[grant.ChildRunID].lease,
-			store.currentExecutionTime(), original.settledRevision, original.completion, original.settlement, permit)
-		if err != nil {
-			return err
-		}
-		original.settlement = &evidence
-	}
 	original.settledRevision = child.Run.Revision
 	store.childGrants[grant.ID] = original
 	return nil
@@ -167,7 +150,7 @@ func (store *Store) MarkChildExecutionSettled(ctx context.Context, grant kernel.
 // FinishChildExecution requires the original immutable Grant identity. An
 // unknown result never calls this port and therefore fences parent terminal
 // control until explicit result reconciliation instead of inventing cleanup.
-func (store *Store) FinishChildExecution(ctx context.Context, grant kernel.ChildExecutionGrant) error {
+func (store *Store) FinishChildExecution(ctx context.Context, grant kernel.ChildExecutionGrant, permit kernel.ChildExecutionSettlement) error {
 	if store == nil || ctx == nil || grant.ID == "" || grant.ChildRunID == "" {
 		return kernel.ErrInvalidInput
 	}
@@ -176,18 +159,23 @@ func (store *Store) FinishChildExecution(ctx context.Context, grant kernel.Child
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	if err := store.managedGateLocked(grant.ChildRunID); err != nil {
+	if err := store.nativeEntryGateLocked(grant.ChildRunID); err != nil {
 		return err
 	}
 	previous, ok := store.childGrants[grant.ID]
-	if !ok || previous.grant != grant || previous.settledRevision == 0 ||
-		store.records[grant.ChildRunID].Run.Revision != previous.settledRevision {
+	child := store.records[grant.ChildRunID]
+	if !ok || previous.grant != grant {
 		return kernel.ErrExecutionConflict
 	}
 	if grant.IsOwned() {
-		if err := store.retireOwnedLocked(previous); err != nil {
+		if previous.settledRevision != 0 {
+			return kernel.ErrExecutionConflict
+		}
+		if err := store.retireOwnedLocked(previous, permit); err != nil {
 			return err
 		}
+	} else if previous.settledRevision == 0 || child.Run.Revision != previous.settledRevision || !permit.Matches(grant, child) {
+		return kernel.ErrExecutionConflict
 	}
 	delete(store.childGrants, grant.ID)
 	for _, id := range previous.ancestors {

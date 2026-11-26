@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget/sqlledger"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -72,7 +73,7 @@ func (store *KernelStore) applyKernelMutation(
 			return kernel.Snapshot{}, err
 		}
 	}
-	query := db.Model(&models.KernelRunRecord{}).Where("run_id = ? AND revision = ? AND parent_run_id = ?", runID, expectedRevision, updatedModel.ParentRunID)
+	query := db.Model(&models.KernelRunRecord{}).Where("run_id = ? AND revision = ? AND parent_run_id = ? AND budget_scope_id = ? AND budget_parent_run_id = ?", runID, expectedRevision, updatedModel.ParentRunID, updatedModel.BudgetScopeID, updatedModel.BudgetParentRunID)
 	if ownedRecovery {
 		// Only the opaque, exact-source recovery transaction may reach here.
 	} else if control {
@@ -179,8 +180,24 @@ func (store *KernelStore) Create(
 				return checkErr
 			}
 		}
+		if id := kernel.BudgetParentID(record.Run); id != "" {
+			parent, e := lockKernelRun(tx, id)
+			if e != nil {
+				return e
+			}
+			snap, e := kernelSnapshotFrom(parent)
+			if e != nil {
+				return e
+			}
+			if e = kernel.ValidateRunBudgetParent(record.Run, snap.Run); e != nil {
+				return e
+			}
+		}
 		if createErr := tx.Create(&model).Error; createErr != nil {
 			return translateKernelError(createErr)
+		}
+		if e := kernel.EnrollRunBudget(ctx, sqlledger.Store{DB: tx.Statement.ConnPool, Lock: tx.Name() == "postgres"}, record); e != nil {
+			return e
 		}
 		if createErr := createKernelEvents(tx, record.Run.ID, 0, record.Run.UpdatedAt, events); createErr != nil {
 			return createErr
@@ -280,7 +297,10 @@ func (store *KernelStore) applyWithExecution(ctx context.Context, lease *kernel.
 		// Parent terminal control and already admitted child effects share the
 		// authoritative parent row lock. A child Approval control must lock its
 		// ancestry first so a concurrent parent Cancel cannot slip past CAS.
-		if guard != nil && guard.Kind == kernel.ControlApproval {
+		if mutation.Ledger != nil && lease == nil && guard == nil && (mutation.Record.Run.ParentRunID == "" || !mutation.PhysicalPermit.IsPresent()) {
+			return kernel.ErrExecutionRequired
+		}
+		if (guard != nil && guard.Kind == kernel.ControlApproval) || (guard == nil && mutation.Ledger != nil) {
 			var child models.KernelRunRecord
 			if readErr := tx.Where("run_id = ?", runID).First(&child).Error; readErr != nil {
 				return translateKernelError(readErr)
@@ -304,16 +324,20 @@ func (store *KernelStore) applyWithExecution(ctx context.Context, lease *kernel.
 		if lease == nil && guard == nil && lockedRun.ExecutionEpoch > 0 {
 			return kernel.ErrExecutionRequired
 		}
-		lockedRun, _, lockErr = pgSettleRetirementSuccessor(tx, lockedRun)
-		if lockErr != nil {
-			return lockErr
-		}
-		if e := pgManagedGate(tx, runID); e != nil {
+		if e := pgNativeEntryGate(tx, runID); e != nil {
 			return e
 		}
 		current, decodeErr := kernelSnapshotFrom(lockedRun)
 		if decodeErr != nil {
 			return decodeErr
+		}
+		accounting := sqlledger.Store{DB: tx.Statement.ConnPool, Lock: tx.Name() == "postgres"}
+		ledger, e := kernel.PlanRunBudgetMutation(ctx, accounting, current.Run, mutation, guard != nil)
+		if e != nil {
+			return e
+		}
+		if e = accounting.Apply(ctx, runID, ledger); e != nil {
+			return e
 		}
 		var active []models.KernelChildEffectGrantRecord
 		if queryErr := tx.Where("parent_run_id = ?", runID).Find(&active).Error; queryErr != nil {
@@ -570,7 +594,7 @@ func kernelRunRecordFrom(record kernel.Record, lastEventSeq int64) (models.Kerne
 		return models.KernelRunRecord{}, errKernelStateJSON
 	}
 	return models.KernelRunRecord{
-		RunID: record.Run.ID, RequestID: record.Run.RequestID, ParentRunID: record.Run.ParentRunID, Kind: string(record.Run.Kind),
+		RunID: record.Run.ID, RequestID: record.Run.RequestID, ParentRunID: record.Run.ParentRunID, BudgetScopeID: record.Run.BudgetScopeID, BudgetParentRunID: record.Run.BudgetParentRunID, Kind: string(record.Run.Kind),
 		TenantID: record.Run.Actor.TenantID, ActorID: record.Run.Actor.ActorID,
 		ThreadKind: record.Run.Thread.Kind, ThreadID: record.Run.Thread.ID,
 		Goal: record.Run.Goal, Status: string(record.Run.Status), Revision: record.Run.Revision,
@@ -709,7 +733,7 @@ func kernelSnapshotFrom(runRecord models.KernelRunRecord) (kernel.Snapshot, erro
 			ID: runRecord.RunID, Kind: kernel.RunKind(runRecord.Kind),
 			Actor:     kernel.ActorRef{TenantID: runRecord.TenantID, ActorID: runRecord.ActorID},
 			Thread:    kernel.ThreadRef{Kind: runRecord.ThreadKind, ID: runRecord.ThreadID},
-			RequestID: runRecord.RequestID, ParentRunID: runRecord.ParentRunID, Goal: runRecord.Goal,
+			RequestID: runRecord.RequestID, ParentRunID: runRecord.ParentRunID, BudgetScopeID: runRecord.BudgetScopeID, BudgetParentRunID: runRecord.BudgetParentRunID, Goal: runRecord.Goal,
 			Status: kernel.RunStatus(runRecord.Status), Revision: runRecord.Revision,
 			ErrorCode: runRecord.ErrorCode, ErrorDetail: runRecord.ErrorDetail,
 			DeadlineAt: cloneTime(runRecord.DeadlineAt), EndedAt: cloneTime(runRecord.EndedAt),

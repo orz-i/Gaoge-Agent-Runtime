@@ -14,7 +14,6 @@ func validBoundedContextComposition(d Dependencies) bool {
 		return true
 	}
 	if a.manager == nil || a.ports == nil || d.PrepareModelRequest != nil ||
-		(d.ManagedContextRecovery != nil && d.ManagedContextRecovery != a) ||
 		(d.ContextSummary != nil && d.ContextSummary.bounded != a) {
 		return false
 	}
@@ -49,7 +48,7 @@ func (r *Runner) prepareBoundedContext(ctx context.Context, source kernel.Snapsh
 	// A managed transfer must retain the exact original hydrated frame's
 	// preparation evidence. The actual preparation and sampling selection
 	// remain the same concrete operation as the ordinary native path.
-	if r.managedContextRecovery != nil || r.summaryNativeRecovery {
+	if r.managedRecovery {
 		prepared, err := a.Prepare(ctx, model.CloneRequest(request))
 		r.noteRootCallbackFailure(err)
 		if err == nil && !validPreparedModelRequest(request, prepared) {

@@ -287,16 +287,11 @@ type Dependencies struct {
 	// BoundedBudget selects one native Run, Model and Tool accounting owner.
 	// The Runner owns its execution order; do not also register middleware.
 	BoundedBudget *BoundedBudgetAdapter
-	// ManagedContextRecovery explicitly selects only the concrete Context lifecycle.
-	// PrepareModelRequest must be nil; Runtime installs this adapter preparation.
-	ManagedContextRecovery *BoundedContextAdapter
-	// ContextSummary selects native summary orchestration under this exact
-	// bounded adapter. Its business preparer is installed here; dedicated hard
-	// recovery requires the separate SummaryNativeRecovery selection below.
+	// ManagedRecovery selects source-bound recovery of the first-party Agent
+	// lifecycle. Context, Summary, Budget and Inputs use their actual stages.
+	ManagedRecovery bool
+	// ContextSummary selects the native optional Summary operation.
 	ContextSummary *ContextSummaryAdapter
-	// SummaryNativeRecovery freezes a separate, finite summary continuation
-	// capability. It never enables the older general Context managed mode.
-	SummaryNativeRecovery bool
 	// NormalizeModelPolicy selects and freezes Host options/route policy before preparation.
 	NormalizeModelPolicy ModelPolicyNormalizer
 	ToolMiddleware       []plugin.ToolMiddleware
@@ -382,10 +377,9 @@ type Runner struct {
 	nativeBudget             *BoundedBudgetAdapter
 	samplingBudget           *BoundedBudgetAdapter
 	toolBudget               *BoundedBudgetAdapter
-	managedContextRecovery   *BoundedContextAdapter
 	managedObligationSource  *managedObligations
 	contextSummary           *ContextSummaryAdapter
-	summaryNativeRecovery    bool
+	managedRecovery          bool
 	approvalPolicies         *plugin.ApprovalPolicySet
 	hostedTools              HostedToolCatalog
 	discovery                ToolDiscovery
@@ -441,7 +435,7 @@ type runState struct {
 	OutputContract        *model.OutputContract      `json:"outputContract,omitempty"`
 	MaxModelOutputTokens  int64                      `json:"maxModelOutputTokens,omitempty"`
 	WorkingStateSummary   *WorkingStateSummaryPolicy `json:"workingStateSummary,omitempty"`
-	SummaryNativeRecovery bool                       `json:"summaryNativeRecovery,omitempty"`
+	ManagedRecovery       bool                       `json:"managedRecovery,omitempty"`
 	ToolKeys              []string                   `json:"toolKeys"`
 	RequiredToolKeys      []string                   `json:"requiredToolKeys,omitempty"`
 	HostedToolGrants      []HostedToolGrant          `json:"hostedToolGrants,omitempty"`
@@ -473,20 +467,20 @@ type runState struct {
 // the durable transcript and bounded usage state without leaking the private
 // execution representation or allowing callers to mutate Kernel state.
 type View struct {
-	Messages              []model.Message
-	Model                 string
-	ModelOptions          json.RawMessage
-	OutputContract        *model.OutputContract
-	MaxModelOutputTokens  int64                      `json:"maxModelOutputTokens,omitempty"`
-	WorkingStateSummary   *WorkingStateSummaryPolicy `json:"workingStateSummary,omitempty"`
-	SummaryNativeRecovery bool                       `json:"summaryNativeRecovery,omitempty"`
-	ToolKeys              []string
-	RequiredToolKeys      []string
-	Budget                runtimebudget.Snapshot
-	CallAllowance         *CallAllowance
-	AutoAllowance         *AutoAllowanceProgress
-	ModelInvocations      []ModelInvocation
-	PendingTool           *PendingToolView
+	Messages             []model.Message
+	Model                string
+	ModelOptions         json.RawMessage
+	OutputContract       *model.OutputContract
+	MaxModelOutputTokens int64                      `json:"maxModelOutputTokens,omitempty"`
+	WorkingStateSummary  *WorkingStateSummaryPolicy `json:"workingStateSummary,omitempty"`
+	ManagedRecovery      bool                       `json:"managedRecovery,omitempty"`
+	ToolKeys             []string
+	RequiredToolKeys     []string
+	Budget               runtimebudget.Snapshot
+	CallAllowance        *CallAllowance
+	AutoAllowance        *AutoAllowanceProgress
+	ModelInvocations     []ModelInvocation
+	PendingTool          *PendingToolView
 
 	ToolProgressPolicy *ToolProgressPolicy
 	InputBinding       string
@@ -500,20 +494,20 @@ func ViewState(snapshot kernel.Snapshot) (View, error) {
 		return View{}, err
 	}
 	return View{
-		Messages:              publicModelMessages(state.Messages),
-		Model:                 state.Model,
-		ModelOptions:          cloneRawJSON(state.ModelOptions),
-		OutputContract:        model.CloneOutputContract(state.OutputContract),
-		MaxModelOutputTokens:  state.MaxModelOutputTokens,
-		WorkingStateSummary:   CloneWorkingStateSummaryPolicy(state.WorkingStateSummary),
-		SummaryNativeRecovery: state.SummaryNativeRecovery,
-		ToolKeys:              append([]string(nil), state.ToolKeys...),
-		RequiredToolKeys:      append([]string(nil), state.RequiredToolKeys...),
-		Budget:                state.Budget,
-		CallAllowance:         cloneCallAllowance(state.CallAllowance),
-		AutoAllowance:         autoAllowanceProgress(state.AutoAllowance),
-		ModelInvocations:      publicModelInvocations(state.ModelInvocations),
-		PendingTool:           publicPendingTool(snapshot, state.ToolWait),
+		Messages:             publicModelMessages(state.Messages),
+		Model:                state.Model,
+		ModelOptions:         cloneRawJSON(state.ModelOptions),
+		OutputContract:       model.CloneOutputContract(state.OutputContract),
+		MaxModelOutputTokens: state.MaxModelOutputTokens,
+		WorkingStateSummary:  CloneWorkingStateSummaryPolicy(state.WorkingStateSummary),
+		ManagedRecovery:      state.ManagedRecovery,
+		ToolKeys:             append([]string(nil), state.ToolKeys...),
+		RequiredToolKeys:     append([]string(nil), state.RequiredToolKeys...),
+		Budget:               state.Budget,
+		CallAllowance:        cloneCallAllowance(state.CallAllowance),
+		AutoAllowance:        autoAllowanceProgress(state.AutoAllowance),
+		ModelInvocations:     publicModelInvocations(state.ModelInvocations),
+		PendingTool:          publicPendingTool(snapshot, state.ToolWait),
 
 		ToolProgressPolicy: cloneToolProgressPolicy(state.ToolProgressPolicy),
 		InputBinding:       state.InputBinding,
@@ -551,6 +545,11 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	nativeContext, nativeBudget, err := selectFirstPartyStages(&dependencies)
 	if err != nil {
 		return nil, err
+	}
+	for _, b := range []*BoundedBudgetAdapter{nativeBudget, selectedSamplingBudget(dependencies), selectedToolBudget(dependencies)} {
+		if b != nil && b.nativeStore() != nil && (b != nativeBudget || !dependencies.Runtime.UsesLedgerStore(b.coordinator.Store)) {
+			return nil, ErrInvalidRequest
+		}
 	}
 	progressPolicy, err := normalizeToolProgressPolicy(dependencies.ToolProgressPolicy, dependencies.Catalog)
 	if err != nil {
@@ -665,15 +664,14 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		modelLimiter:         newCallLimiter(execution.Model.MaxConcurrency),
 		toolLimiter:          newCallLimiter(execution.Tool.MaxConcurrency),
 		runChain:             runChain, modelChain: modelChain, toolChain: toolChain,
-		boundedContext:         dependencies.BoundedContext,
-		nativeContext:          nativeContext,
-		nativeBudget:           nativeBudget,
-		samplingBudget:         selectedSamplingBudget(dependencies),
-		toolBudget:             selectedToolBudget(dependencies),
-		managedContextRecovery: dependencies.ManagedContextRecovery,
-		contextSummary:         dependencies.ContextSummary,
-		summaryNativeRecovery:  dependencies.SummaryNativeRecovery,
-		boundedCallbacks:       collectBoundedCallbacks(dependencies, nativeContext, nativeBudget),
+		boundedContext:   dependencies.BoundedContext,
+		nativeContext:    nativeContext,
+		nativeBudget:     nativeBudget,
+		samplingBudget:   selectedSamplingBudget(dependencies),
+		toolBudget:       selectedToolBudget(dependencies),
+		contextSummary:   dependencies.ContextSummary,
+		managedRecovery:  dependencies.ManagedRecovery,
+		boundedCallbacks: collectBoundedCallbacks(dependencies, nativeContext, nativeBudget),
 		// Native pre-Start cancellation and deferred post-callback custody
 		// share the SAME Host-callback trust decision. Native Start remains
 		// strictly middleware-free while the deferred path may also accept
@@ -681,7 +679,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		kernelOwnedStartCancellation: control && dependencies.Inputs == nil && nativeContext == nil && nativeBudget == nil &&
 			len(dependencies.RunMiddleware) == 0 &&
 			len(dependencies.ModelMiddleware) == 0 && len(dependencies.ToolMiddleware) == 0 &&
-			dependencies.ManagedContextRecovery == nil,
+			!dependencies.ManagedRecovery,
 		prepareModelRequest:            dependencies.PrepareModelRequest,
 		trustedDeferredPreparedControl: trustedDeferredPreparationStack(dependencies),
 		trustedDeferredRootControl:     control,
@@ -709,6 +707,12 @@ func (runner *Runner) NativeStartCancellationFencedByKernel(runtime *kernel.Runt
 // after the Kernel Run is cancelled. Run metadata is not ownership proof.
 func (runner *Runner) OwnsKernelRuntime(runtime *kernel.Runtime) bool {
 	return runner.NativeStartCancellationFencedByKernel(runtime)
+}
+
+// NativeRootCallbacksScoped exposes the existing first-party callback custody
+// qualification. Opaque middleware retains its independent Host effect boundary.
+func (runner *Runner) NativeRootCallbacksScoped() bool {
+	return runner != nil && runner.scopedRootCallbacks
 }
 
 // ObservesKernelRuntime proves only the immutable Kernel used by LoadRun.
@@ -776,6 +780,9 @@ func (runner *Runner) startRunWithMiddleware(ctx context.Context, request StartR
 	// can issue external work. A duplicate Root ID never executes middleware.
 	created, createErr := runner.createPreparedRun(ctx, request, encoded)
 	if createErr != nil {
+		if kernel.IsRunBudgetEnrollmentDenied(createErr) {
+			return kernel.Snapshot{}, nativeStartNoEffect(createErr)
+		}
 		return kernel.Snapshot{}, createErr
 	}
 	invocation.RunID = created.Run.ID
@@ -786,7 +793,7 @@ func (runner *Runner) startRunWithMiddleware(ctx context.Context, request StartR
 		operation = "prepare"
 	}
 	snapshot, invokeErr := runner.withRootSegment(ctx, created, operation, func(rootCtx context.Context, root *Runner, admitted kernel.Snapshot) (kernel.Snapshot, error) {
-		return root.withChildPhysicalGrant(rootCtx, admitted.Run.ID, admitted.Run.Revision, operation,
+		return root.withChildPhysicalGrant(rootCtx, admitted, operation,
 			func(childCtx context.Context, scoped *Runner) (kernel.Snapshot, error) {
 				result, err := scoped.invokeNativeRun(childCtx, admitted, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
 					continuationReached = true
@@ -908,21 +915,21 @@ func (runner *Runner) prepareStartState(ctx context.Context, request StartReques
 		return nil, ErrInvalidRequest
 	}
 	state := runState{
-		OriginFingerprint:     request.OriginFingerprint,
-		Messages:              []model.Message{{Role: model.RoleUser, Content: model.TextParts(strings.TrimSpace(request.Goal))}},
-		Model:                 strings.TrimSpace(request.Model),
-		ModelOptions:          cloneRawJSON(request.ModelOptions),
-		OutputContract:        model.CloneOutputContract(request.OutputContract),
-		MaxModelOutputTokens:  request.MaxModelOutputTokens,
-		WorkingStateSummary:   CloneWorkingStateSummaryPolicy(request.WorkingStateSummary),
-		SummaryNativeRecovery: request.WorkingStateSummary != nil && runner.summaryNativeRecovery,
-		ToolKeys:              toolKeys,
-		RequiredToolKeys:      requiredToolKeys,
-		HostedToolGrants:      grants,
-		Discovery:             discovery,
-		Budget:                runtimebudget.Snapshot{Limits: limits},
-		CallAllowance:         allowance,
-		AutoAllowance:         automaticAllowance,
+		OriginFingerprint:    request.OriginFingerprint,
+		Messages:             []model.Message{{Role: model.RoleUser, Content: model.TextParts(strings.TrimSpace(request.Goal))}},
+		Model:                strings.TrimSpace(request.Model),
+		ModelOptions:         cloneRawJSON(request.ModelOptions),
+		OutputContract:       model.CloneOutputContract(request.OutputContract),
+		MaxModelOutputTokens: request.MaxModelOutputTokens,
+		WorkingStateSummary:  CloneWorkingStateSummaryPolicy(request.WorkingStateSummary),
+		ManagedRecovery:      runner.managedRecovery,
+		ToolKeys:             toolKeys,
+		RequiredToolKeys:     requiredToolKeys,
+		HostedToolGrants:     grants,
+		Discovery:            discovery,
+		Budget:               runtimebudget.Snapshot{Limits: limits},
+		CallAllowance:        allowance,
+		AutoAllowance:        automaticAllowance,
 
 		ToolProgressPolicy: freezeToolProgressPolicy(runner.toolProgressPolicy, toolKeys),
 	}
@@ -941,8 +948,17 @@ func (runner *Runner) prepareStartState(ctx context.Context, request StartReques
 }
 
 func (runner *Runner) createPreparedRun(ctx context.Context, request StartRequest, encoded json.RawMessage) (kernel.Snapshot, error) {
+	var enrollment *runtimebudget.RunEnrollment
+	if a := runner.atomicBudget(); a != nil {
+		var e error
+		enrollment, e = a.creationBudget(ctx, strings.TrimSpace(request.ID))
+		if e != nil {
+			return kernel.Snapshot{}, nativeStartNoEffect(e)
+		}
+	}
 	return runner.runtime.Create(ctx, kernel.CreateRequest{
 		ID: request.ID, Kind: RunKind, Actor: request.Actor, Thread: request.Thread,
+		Budget:            enrollment,
 		ExecutionRequired: runner.runExecution != nil && (request.ParentRunID == "" || !runner.defaultRunOwner),
 		RequestID:         request.RequestID, ParentRunID: request.ParentRunID,
 		Goal: request.Goal, DeadlineAt: request.DeadlineAt, State: encoded,
@@ -987,6 +1003,9 @@ func (runner *Runner) ResolveApproval(
 	if snapshot.Run.Revision != expectedRevision {
 		return kernel.Snapshot{}, agentControlNoEffect(kernel.ErrConflict)
 	}
+	if state.ManagedRecovery != runner.managedRecovery || (state.WorkingStateSummary != nil && !runner.SupportsContextSummary()) {
+		return snapshot, agentControlNoEffect(ErrInvalidRequest)
+	}
 	if snapshot.Run.Status != kernel.RunStatusWaitingInput || len(state.PendingCalls) == 0 {
 		return kernel.Snapshot{}, agentControlNoEffect(ErrApprovalRequired)
 	}
@@ -1004,7 +1023,7 @@ func (runner *Runner) ResolveApproval(
 	ctx = runner.claimPhysicalObservation(ctx, runID, plugin.RunResolveApproval)
 	invocation := runInvocation(plugin.RunResolveApproval, snapshot)
 	return runner.withRootSegment(ctx, snapshot, "approval", func(rootCtx context.Context, root *Runner, admitted kernel.Snapshot) (kernel.Snapshot, error) {
-		return root.withChildPhysicalGrant(rootCtx, admitted.Run.ID, admitted.Run.Revision, "approval",
+		return root.withChildPhysicalGrant(rootCtx, admitted, "approval",
 			func(childCtx context.Context, scoped *Runner) (kernel.Snapshot, error) {
 				freshState, decodeErr := decodeState(admitted.State)
 				if decodeErr != nil {
@@ -1069,7 +1088,7 @@ func (runner *Runner) Resume(ctx context.Context, runID string, expectedRevision
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
-	if state.WorkingStateSummary != nil && (!runner.SupportsContextSummary() || state.SummaryNativeRecovery != runner.summaryNativeRecovery) {
+	if state.ManagedRecovery != runner.managedRecovery || (state.WorkingStateSummary != nil && !runner.SupportsContextSummary()) {
 		return snapshot, ErrInvalidRequest
 	}
 	if snapshot.Run.Revision != expectedRevision {
@@ -1149,7 +1168,7 @@ func (runner *Runner) Resume(ctx context.Context, runID string, expectedRevision
 	// side effect. A runner without RunExecution still follows the original
 	// pre-dispatch Store guard and will be rejected on fenced Runs.
 	resumed, resumeErr := runner.withRootSegment(ctx, snapshot, "resume", func(rootCtx context.Context, root *Runner, admitted kernel.Snapshot) (kernel.Snapshot, error) {
-		return root.withChildPhysicalGrant(rootCtx, admitted.Run.ID, admitted.Run.Revision, "resume",
+		return root.withChildPhysicalGrant(rootCtx, admitted, "resume",
 			func(childCtx context.Context, physical *Runner) (kernel.Snapshot, error) {
 				return physical.withRunOwner(childCtx, admitted.Run.ID, admitted.Run.Revision,
 					func(driveCtx context.Context, scoped *Runner) (kernel.Snapshot, error) {
@@ -1326,9 +1345,6 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 		}
 		return snapshot, true, err
 	}
-	if leaveErr := runner.leaveModelSafePoint(ctx, snapshot, state, invocation); leaveErr != nil {
-		return snapshot, true, leaveErr
-	}
 	snapshot, state, invocation, err = runner.claimModelInvocationExecution(ctx, snapshot, state, invocation)
 	if err != nil {
 		return snapshot, true, err
@@ -1348,12 +1364,24 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 					active.OutcomeErrorDetail = err.Error()
 					if replaceLastModelInvocation(&currentState, *active) {
 						if encoded, encodeErr := encodeState(currentState); encodeErr == nil {
-							diagnosed, diagnoseErr := runner.commitNativeTransition(context.WithoutCancel(ctx), current, kernel.Mutation{Status: current.Run.Status, State: encoded, Checkpoint: current.Checkpoint, ErrorCode: code, ErrorDetail: err.Error()})
-							if diagnoseErr == nil {
-								current = diagnosed
-							} else {
-								err = errors.Join(err, diagnoseErr)
+							accounting := context.WithoutCancel(ctx)
+							mutation := kernel.Mutation{Status: current.Run.Status, State: encoded, Checkpoint: current.Checkpoint, ErrorCode: code, ErrorDetail: err.Error()}
+							a := runner.atomicModelBudget(active.SamplingPlan)
+							var diagnoseErr error
+							if a != nil {
+								mutation.Ledger, diagnoseErr = a.planModelSuspend(accounting, *active)
 							}
+							if diagnoseErr == nil {
+								var diagnosed kernel.Snapshot
+								diagnosed, diagnoseErr = runner.commitNativeTransition(accounting, current, mutation)
+								if diagnoseErr == nil {
+									current = diagnosed
+									if mutation.Ledger != nil {
+										diagnoseErr = a.ports.Project(accounting, mutation.Ledger.Next())
+									}
+								}
+							}
+							err = errors.Join(err, diagnoseErr)
 						}
 					}
 					return current, true, errors.Join(ErrModelOutcomeUnknown, err)
@@ -1945,6 +1973,11 @@ func (runner *Runner) generateModel(
 		}
 		return response, err
 	}
+	if runner.atomicModelBudget(call.samplingPlan()) != nil {
+		// No budget callback surrounds the physical call: admission and receipt
+		// settlement are the existing Agent Run transitions.
+		return terminal(ctx, call.samplingPlan().request(frozen), emit)
+	}
 	response, err := runner.invokeFirstPartyModel(ctx, request, emit, terminal)
 	// Model layer completion is tracked by the actual chain lifecycle; only
 	// concrete Runtime-owned adapters can supply internal error-path receipts.
@@ -2329,8 +2362,12 @@ func (runner *Runner) executePending(ctx context.Context, snapshot kernel.Snapsh
 		runner.noteNativeAdmissionReturn(snapshot, err)
 		return snapshot, true, err
 	}
-	// Reserve capacity before entering Tool middleware or persisting a
-	// physical dispatch intent. A waiting reservation has no Tool receipt.
+	// A co-located first-party budget admits the original Call in the
+	// existing Run transaction, without a speculative capacity ticket.
+	if bound := runner.nativeRunBudget(ctx, snapshot.Run.ID); bound != nil {
+		return runner.executeBudgetedTool(ctx, snapshot, execution, bound.ledger, release)
+	}
+	// External ledger compatibility retains its original conservative entry.
 	snapshot, execution, ticket, denied, err := runner.admitPendingToolBudget(ctx, snapshot, execution)
 	if err != nil {
 		runner.noteNativeAdmissionReturn(snapshot, err)
@@ -2354,7 +2391,7 @@ func (runner *Runner) executePending(ctx context.Context, snapshot kernel.Snapsh
 	if ticket != nil {
 		ledgerID = ticket.ledger.ID
 	}
-	result, entered, nativeDenied, err := runner.invokePendingTool(ctx, source, execution.call, execution.definition, ticket, release, func(callCtx context.Context) (kernel.Snapshot, error) {
+	result, entered, nativeDenied, err := runner.invokePendingTool(ctx, source, execution.call, execution.definition, ticket, false, release, func(callCtx context.Context) (kernel.Snapshot, error) {
 		stageAttempted = true
 		frame.recordUnsent(q, ledgerID)
 		staged, stageErr := runner.commitToolTransition(callCtx, source, state, source.Checkpoint, kernel.RunStatusRunning, kernel.EventDraft{Type: "tool.dispatch_intent", Message: execution.call.ID, Wakeup: true})
@@ -2442,6 +2479,20 @@ func (runner *Runner) consumeRecoveredPending(ctx context.Context, snapshot kern
 		if invalid != nil {
 			return snapshot, true, invalid, true
 		}
+		if a := runner.atomicBudget(); a != nil && receipt.LedgerID != "" {
+			l, loadErr := a.coordinator.Store.LoadBudget(ctx, receipt.LedgerID)
+			if loadErr != nil {
+				return snapshot, true, loadErr, true
+			}
+			res, loadErr := originalSettledToolReservation(l, tools.ExecutionRequest{RunID: snapshot.Run.ID, Call: execution.call})
+			if loadErr != nil {
+				return snapshot, true, loadErr, true
+			}
+			out, loadErr := decodeToolOutcome(res.Receipt, execution.call.ID, true)
+			if loadErr != nil || !reflect.DeepEqual(out, receipt.outcome()) {
+				return snapshot, true, ErrToolReceiptMismatch, true
+			}
+		}
 		if err := requireReceiptConsumption(ctx, snapshot.Run.ID, receipt.LedgerID, runner.toolBudget); err != nil {
 			return snapshot, true, err, true
 		}
@@ -2462,6 +2513,7 @@ type pendingToolExecution struct {
 	call                   tools.Call
 	definition             tools.Definition
 	originalApprovalDigest string
+	ledger                 *runtimebudget.LedgerMutation // only for a pending physical return
 }
 
 func (runner *Runner) preparePendingToolExecution(snapshot kernel.Snapshot) (pendingToolExecution, string, error) {
@@ -2509,6 +2561,7 @@ func (runner *Runner) invokePendingTool(
 	call tools.Call,
 	definition tools.Definition,
 	ticket *toolBudgetAdmission,
+	atomicBudget bool,
 	permit func(),
 	dispatch func(context.Context) (kernel.Snapshot, error),
 	enter func(),
@@ -2559,7 +2612,7 @@ func (runner *Runner) invokePendingTool(
 		// effects; an error is never proof that the Tool was unsent.
 		authority := &toolCallAuthority{id: call.ID, budget: ticket}
 		callCtx = callbackscope.BindToolCall(callCtx, authority)
-		out, chainErr := runner.invokeFirstPartyTool(callCtx, invocation, func(nextCtx context.Context) (tools.ExecutionResult, error) {
+		terminal := func(nextCtx context.Context) (tools.ExecutionResult, error) {
 			// Recheck after middleware/limiter delays, immediately before the
 			// executor call. A Store gate cannot itself make external effects
 			// physically exactly-once; the receipt is fenced separately.
@@ -2568,7 +2621,14 @@ func (runner *Runner) invokePendingTool(
 			}
 			result, err := runner.executor.Execute(nextCtx, executionRequest)
 			return authority.record(result, err)
-		})
+		}
+		var out tools.ExecutionResult
+		var chainErr error
+		if atomicBudget {
+			out, chainErr = terminal(callCtx)
+		} else {
+			out, chainErr = runner.invokeFirstPartyTool(callCtx, invocation, terminal)
+		}
 		out, chainErr = authority.validate(out, chainErr)
 		if denial, claimed := authority.admissionReturn(callCtx, out, chainErr); claimed {
 			if denial == nil {
@@ -2649,7 +2709,7 @@ func (runner *Runner) persistPendingToolResult(
 		// A Pending result is never proof of terminal execution. Preserve
 		// the same committed Tool dispatch identity in every execution mode
 		// so a later Resume cannot silently call its Handler again.
-		return runner.persistPendingToolYield(ctx, snapshot, execution.state, result)
+		return runner.persistPendingToolYield(ctx, snapshot, execution.state, result, execution.ledger)
 	}
 	// A terminal receipt and marker removal share the SAME revision CAS.
 	execution.state.ToolDispatchID = ""
@@ -2661,15 +2721,17 @@ func (runner *Runner) persistPendingToolYield(
 	snapshot kernel.Snapshot,
 	state runState,
 	result tools.ExecutionResult,
+	ledger *runtimebudget.LedgerMutation,
 ) (kernel.Snapshot, bool, error) {
 	if result.Pending != nil && result.Pending.Kind != tools.PendingScheduled {
-		return runner.persistToolWait(ctx, snapshot, state, result.Pending)
+		return runner.persistToolWait(ctx, snapshot, state, result.Pending, ledger)
 	}
 	encoded, err := encodeState(state)
 	if err != nil {
 		return kernel.Snapshot{}, false, err
 	}
 	next, err := runner.commitNativeTransition(ctx, snapshot, kernel.Mutation{
+		Ledger: ledger,
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
 		Events: []kernel.EventDraft{{
 			Type: EventToolPending, Message: tools.ReceiptDispositionPending, Wakeup: true,

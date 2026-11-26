@@ -3,6 +3,7 @@ package harness_test
 import (
 	"context"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
@@ -45,11 +46,11 @@ func (s *resumeTurnFaultStore) LookupChildExecution(ctx context.Context, id stri
 func (s *resumeTurnFaultStore) MarkChildExecutionSettled(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
 	return s.Store.(kernel.ChildExecutionStore).MarkChildExecutionSettled(ctx, g, p)
 }
-func (s *resumeTurnFaultStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant) error {
-	return s.Store.(kernel.ChildExecutionStore).FinishChildExecution(ctx, g)
+func (s *resumeTurnFaultStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
+	return s.Store.(kernel.ChildExecutionStore).FinishChildExecution(ctx, g, p)
 }
-func (s *resumeTurnFaultStore) BeginOwnedPhysicalExecution(ctx context.Context, g kernel.ChildExecutionGrant, l kernel.ExecutionLease, p kernel.OwnedPhysicalAdmission) error {
-	return s.Store.(kernel.OwnedPhysicalExecutionStore).BeginOwnedPhysicalExecution(ctx, g, l, p)
+func (s *resumeTurnFaultStore) BeginOwnedPhysicalExecution(ctx context.Context, p kernel.OwnedPhysicalAdmission) (kernel.OwnedPhysicalAdmissionResult, error) {
+	return s.Store.(kernel.OwnedPhysicalExecutionStore).BeginOwnedPhysicalExecution(ctx, p)
 }
 func (s *resumeTurnFaultStore) CheckOwnedPhysicalEntry(ctx context.Context, g kernel.ChildExecutionGrant, l kernel.ExecutionLease, source kernel.Snapshot) (kernel.OwnedPhysicalEntryWindow, error) {
 	return s.Store.(kernel.OwnedPhysicalExecutionStore).CheckOwnedPhysicalEntry(ctx, g, l, source)
@@ -107,11 +108,11 @@ func (s *preDispatchReadFaultStore) LookupChildExecution(ctx context.Context, id
 func (s *preDispatchReadFaultStore) MarkChildExecutionSettled(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
 	return s.Store.(kernel.ChildExecutionStore).MarkChildExecutionSettled(ctx, g, p)
 }
-func (s *preDispatchReadFaultStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant) error {
-	return s.Store.(kernel.ChildExecutionStore).FinishChildExecution(ctx, g)
+func (s *preDispatchReadFaultStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
+	return s.Store.(kernel.ChildExecutionStore).FinishChildExecution(ctx, g, p)
 }
-func (s *preDispatchReadFaultStore) BeginOwnedPhysicalExecution(ctx context.Context, g kernel.ChildExecutionGrant, l kernel.ExecutionLease, p kernel.OwnedPhysicalAdmission) error {
-	return s.Store.(kernel.OwnedPhysicalExecutionStore).BeginOwnedPhysicalExecution(ctx, g, l, p)
+func (s *preDispatchReadFaultStore) BeginOwnedPhysicalExecution(ctx context.Context, p kernel.OwnedPhysicalAdmission) (kernel.OwnedPhysicalAdmissionResult, error) {
+	return s.Store.(kernel.OwnedPhysicalExecutionStore).BeginOwnedPhysicalExecution(ctx, p)
 }
 func (s *preDispatchReadFaultStore) CheckOwnedPhysicalEntry(ctx context.Context, g kernel.ChildExecutionGrant, l kernel.ExecutionLease, source kernel.Snapshot) (kernel.OwnedPhysicalEntryWindow, error) {
 	return s.Store.(kernel.OwnedPhysicalExecutionStore).CheckOwnedPhysicalEntry(ctx, g, l, source)
@@ -166,11 +167,11 @@ func (s *beforeModelIntentStore) LookupChildExecution(ctx context.Context, id st
 func (s *beforeModelIntentStore) MarkChildExecutionSettled(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
 	return s.Store.(kernel.ChildExecutionStore).MarkChildExecutionSettled(ctx, g, p)
 }
-func (s *beforeModelIntentStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant) error {
-	return s.Store.(kernel.ChildExecutionStore).FinishChildExecution(ctx, g)
+func (s *beforeModelIntentStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
+	return s.Store.(kernel.ChildExecutionStore).FinishChildExecution(ctx, g, p)
 }
-func (s *beforeModelIntentStore) BeginOwnedPhysicalExecution(ctx context.Context, g kernel.ChildExecutionGrant, l kernel.ExecutionLease, p kernel.OwnedPhysicalAdmission) error {
-	return s.Store.(kernel.OwnedPhysicalExecutionStore).BeginOwnedPhysicalExecution(ctx, g, l, p)
+func (s *beforeModelIntentStore) BeginOwnedPhysicalExecution(ctx context.Context, p kernel.OwnedPhysicalAdmission) (kernel.OwnedPhysicalAdmissionResult, error) {
+	return s.Store.(kernel.OwnedPhysicalExecutionStore).BeginOwnedPhysicalExecution(ctx, p)
 }
 func (s *beforeModelIntentStore) CheckOwnedPhysicalEntry(ctx context.Context, g kernel.ChildExecutionGrant, l kernel.ExecutionLease, source kernel.Snapshot) (kernel.OwnedPhysicalEntryWindow, error) {
 	return s.Store.(kernel.OwnedPhysicalExecutionStore).CheckOwnedPhysicalEntry(ctx, g, l, source)
@@ -203,24 +204,15 @@ func (s *beforeModelIntentStore) RepairExecutionQuarantine(ctx context.Context, 
 func (s *resumeTurnFaultStore) LoadOwnedRetirement(ctx context.Context, id string) (kernel.OwnedRetirementReceipt, error) {
 	return s.Store.(kernel.OwnedRetirementStore).LoadOwnedRetirement(ctx, id)
 }
-func (s *resumeTurnFaultStore) AcknowledgeOwnedRetirement(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.OwnedRetirementAcknowledgement) (kernel.OwnedRetirementAckResult, error) {
-	return s.Store.(kernel.OwnedRetirementStore).AcknowledgeOwnedRetirement(ctx, g, p)
-}
 
 // Preserve the backend's atomic retirement authority through this fault decorator.
 func (s *preDispatchReadFaultStore) LoadOwnedRetirement(ctx context.Context, id string) (kernel.OwnedRetirementReceipt, error) {
 	return s.Store.(kernel.OwnedRetirementStore).LoadOwnedRetirement(ctx, id)
 }
-func (s *preDispatchReadFaultStore) AcknowledgeOwnedRetirement(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.OwnedRetirementAcknowledgement) (kernel.OwnedRetirementAckResult, error) {
-	return s.Store.(kernel.OwnedRetirementStore).AcknowledgeOwnedRetirement(ctx, g, p)
-}
 
 // Preserve the backend's atomic retirement authority through this fault decorator.
 func (s *beforeModelIntentStore) LoadOwnedRetirement(ctx context.Context, id string) (kernel.OwnedRetirementReceipt, error) {
 	return s.Store.(kernel.OwnedRetirementStore).LoadOwnedRetirement(ctx, id)
-}
-func (s *beforeModelIntentStore) AcknowledgeOwnedRetirement(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.OwnedRetirementAcknowledgement) (kernel.OwnedRetirementAckResult, error) {
-	return s.Store.(kernel.OwnedRetirementStore).AcknowledgeOwnedRetirement(ctx, g, p)
 }
 
 func (s *resumeTurnFaultStore) LookupOwnedRetirementForRun(ctx context.Context, id string) (kernel.OwnedRetirementReceipt, error) {
@@ -233,4 +225,11 @@ func (s *preDispatchReadFaultStore) LookupOwnedRetirementForRun(ctx context.Cont
 
 func (s *beforeModelIntentStore) LookupOwnedRetirementForRun(ctx context.Context, id string) (kernel.OwnedRetirementReceipt, error) {
 	return s.Store.(kernel.OwnedRetirementStore).LookupOwnedRetirementForRun(ctx, id)
+}
+
+func (s *resumeTurnFaultStore) LoadBudget(ctx context.Context, id string) (budget.Ledger, error) {
+	return s.Store.(budget.LedgerStore).LoadBudget(ctx, id)
+}
+func (s *resumeTurnFaultStore) SaveBudget(ctx context.Context, l budget.Ledger, rev uint64) error {
+	return s.Store.(budget.LedgerStore).SaveBudget(ctx, l, rev)
 }

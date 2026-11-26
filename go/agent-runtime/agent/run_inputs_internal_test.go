@@ -71,7 +71,7 @@ func TestRunInputSourceIsClassifiedAsHostCallbackBoundary(t *testing.T) {
 	if runner.kernelOwnedStartCancellation || !runner.runMiddlewareConfigured {
 		t.Fatal("Host input source was classified as native callback-free execution")
 	}
-	if _, err = NewRunner(Dependencies{Runtime: runtime, Model: inputBoundaryModel{}, Inputs: inputs, ManagedContextRecovery: &BoundedContextAdapter{}}); !errors.Is(err, ErrInvalidRequest) {
+	if _, err = NewRunner(Dependencies{Runtime: runtime, Model: inputBoundaryModel{}, Inputs: inputs, ManagedRecovery: true, BoundedContext: &BoundedContextAdapter{}}); !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("Host input bypassed the managed-transfer boundary: %v", err)
 	}
 }

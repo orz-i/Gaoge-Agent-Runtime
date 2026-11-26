@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
@@ -127,6 +128,7 @@ func (runner *Runner) reconcileRootToolReceipt(ctx context.Context, snapshot ker
 	}
 	ledgerID := binding.LedgerID
 	var outcome toolOutcomeReceipt
+	var ledgerMutation *budget.LedgerMutation
 	if bound && binding.ReceiptDigest != "" {
 		if state.ToolWait != nil || state.ExternalToolHold != nil {
 			return snapshot, ErrToolReceiptMismatch
@@ -178,7 +180,8 @@ func (runner *Runner) reconcileRootToolReceipt(ctx context.Context, snapshot ker
 		}
 		if bound && binding.LedgerID != "" {
 			childWait := state.ToolWait != nil && state.ToolWait.Kind == tools.PendingChildTerminal
-			if err := runner.settleOriginalHeldTool(ctx, request, binding, verified, childWait); err != nil {
+			ledgerMutation, err = runner.settleOriginalHeldTool(ctx, request, binding, verified, childWait)
+			if err != nil {
 				return snapshot, errors.Join(ErrToolOutcomeUnknown, err)
 			}
 		}
@@ -227,8 +230,8 @@ func (runner *Runner) reconcileRootToolReceipt(ctx context.Context, snapshot ker
 		return snapshot, err
 	}
 	source := featurecontrol.Seal(snapshot.Run.ID, snapshot.Run.Revision, "agent_owned_receipt_recovery_source", grant.ID, snapshot.State, snapshot.Checkpoint)
-	target := featurecontrol.Seal(snapshot.Run.ID, snapshot.Run.Revision, "agent_owned_receipt_recovery_target", grant.ID, encoded, snapshot.Checkpoint)
-	repaired, err := runner.runtime.ApplyOwnedPhysicalRecovery(ctx, grant, snapshot.Run.Revision, kernel.Mutation{Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint, ErrorCode: snapshot.Run.ErrorCode, ErrorDetail: snapshot.Run.ErrorDetail, Events: []kernel.EventDraft{{Type: "tool.receipt_recovered", Message: callID, Wakeup: true}}}, source, target)
+	target := featurecontrol.Seal(snapshot.Run.ID, snapshot.Run.Revision, "agent_owned_receipt_recovery_target", grant.ID, encoded, kernel.ReceiptRecoveryTarget(snapshot.Checkpoint, ledgerMutation))
+	repaired, err := runner.runtime.ApplyOwnedPhysicalRecovery(ctx, grant, snapshot.Run.Revision, kernel.Mutation{Ledger: ledgerMutation, Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint, ErrorCode: snapshot.Run.ErrorCode, ErrorDetail: snapshot.Run.ErrorDetail, Events: []kernel.EventDraft{{Type: "tool.receipt_recovered", Message: callID, Wakeup: true}}}, source, target)
 	if err != nil {
 		return snapshot, err
 	}

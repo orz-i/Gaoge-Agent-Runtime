@@ -178,7 +178,7 @@ func (r *Runner) originalToolLedger(ctx context.Context, q tools.ExecutionReques
 	if a == nil || b.LedgerID == "" {
 		return nil, budget.Ledger{}, ErrToolReceiptMismatch
 	}
-	scope, err := a.ports.ResolveScope(ctx, q.RunID)
+	scope, err := a.resolveScope(ctx, q.RunID)
 	if err != nil {
 		return nil, budget.Ledger{}, err
 	}
@@ -201,7 +201,7 @@ func (r *Runner) requireUnmeteredToolRecovery(ctx context.Context, runID string)
 	if r.toolBudget == nil {
 		return nil
 	}
-	scope, err := r.toolBudget.ports.ResolveScope(ctx, runID)
+	scope, err := r.toolBudget.resolveScope(ctx, runID)
 	if err != nil {
 		return err
 	}
@@ -236,7 +236,7 @@ func (r *Runner) originalHeldTool(ctx context.Context, q tools.ExecutionRequest,
 	res := l.Reservations[id]
 	_, registered := l.Runs[q.RunID]
 	if !registered || b.ReceiptDigest != "" || res.ID != id || res.RunID != q.RunID || res.RequestHash != b.RequestDigest ||
-		res.Requested != (budget.Usage{ToolCalls: 1}) || !res.Dispatched || res.Active ||
+		res.Requested != (budget.Usage{ToolCalls: 1}) || !res.Dispatched || (res.Active && r.atomicBudget() != a) ||
 		(res.Status != budget.ReservationHeld && res.Status != budget.ReservationSettled) {
 		return nil, budget.Ledger{}, budget.Reservation{}, ErrToolReceiptMismatch
 	}
@@ -245,31 +245,34 @@ func (r *Runner) originalHeldTool(ctx context.Context, q tools.ExecutionRequest,
 
 // The native adapter is the sole settlement driver. A newly returned Call
 // cannot adopt an unsealed legacy/Host-written receipt after a lost CAS.
-func (r *Runner) settleOriginalHeldTool(ctx context.Context, q tools.ExecutionRequest, b kernel.OwnedToolReturn, result tools.ExecutionResult, childWait bool) error {
+func (r *Runner) settleOriginalHeldTool(ctx context.Context, q tools.ExecutionRequest, b kernel.OwnedToolReturn, result tools.ExecutionResult, childWait bool) (*budget.LedgerMutation, error) {
 	ownerRequired := b.PendingKind == string(tools.PendingExternalResult) || (b.PendingKind == "" && !childWait)
 	if ownerRequired && !validBindingFingerprint(result.Receipt.OwnerReceiptDigest) {
-		return ErrToolReceiptMismatch
+		return nil, ErrToolReceiptMismatch
 	}
 	a, l, res, err := r.originalHeldTool(ctx, q, b)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if res.Status == budget.ReservationSettled {
 		known, err := originalSettledToolReservation(l, q)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		outcome, err := decodeToolOutcome(known.Receipt, q.Call.ID, true)
 		if err != nil || outcome.ErrorCode != "" || !reflect.DeepEqual(outcome.Result, tools.CloneExecutionResult(result)) {
-			return ErrToolReceiptMismatch
+			return nil, ErrToolReceiptMismatch
 		}
-		return a.ports.Project(ctx, l)
+		return nil, a.ports.Project(ctx, l)
+	}
+	if r.atomicBudget() == a {
+		return a.planToolReturn(ctx, l.ID, q, result, nil, true)
 	}
 	raw, err := encodeToolOutcome(newToolOutcomeReceipt(result, nil))
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return a.settleSuspendedTool(ctx, b.LedgerID, q, budget.Usage{ToolCalls: 1}, raw)
+	return nil, a.settleSuspendedTool(ctx, b.LedgerID, q, budget.Usage{ToolCalls: 1}, raw)
 }
 
 func (r *Runner) settleOriginalToolBudget(ctx context.Context, s kernel.Snapshot, c kernel.OwnedPhysicalCallbackCompletion, request tools.ExecutionRequest, result tools.ExecutionResult) (string, error) {
@@ -307,7 +310,7 @@ func (r *Runner) settleVerifiedToolReservation(ctx context.Context, request tool
 	if a == nil {
 		return ErrToolReceiptMismatch
 	}
-	scope, err := a.ports.ResolveScope(ctx, request.RunID)
+	scope, err := a.resolveScope(ctx, request.RunID)
 	if err != nil {
 		return err
 	}

@@ -35,32 +35,14 @@ func selectFirstPartyStages(d *Dependencies) (*BoundedContextAdapter, *BoundedBu
 	if !validBoundedBudgetComposition(*d) || !validBoundedContextComposition(*d) {
 		return nil, nil, ErrInvalidRequest
 	}
-	if d.SummaryNativeRecovery && !validSummaryNativeDependencies(*d) {
-		return nil, nil, ErrInvalidRequest
-	}
 	if summary := d.ContextSummary; summary != nil {
 		if !validSummaryComposition(*d) {
 			return nil, nil, ErrInvalidRequest
 		}
 		d.BoundedContext = summary.bounded
 	}
-	if a := d.ManagedContextRecovery; a != nil {
-		if a.manager == nil || a.ports == nil || !d.Runtime.SupportsManagedRecovery() ||
-			d.PrepareModelRequest != nil || !contextOnlyRun(*d, a) ||
-			len(d.ModelMiddleware) != 0 || len(d.ToolMiddleware) != 0 || d.NormalizeModelPolicy != nil {
-			return nil, nil, ErrInvalidRequest
-		}
-		d.BoundedContext = a
-	}
-	if (d.ManagedContextRecovery != nil || d.SummaryNativeRecovery) && (d.BoundedBudget != nil || d.Inputs != nil) {
-		// Mixed transfers need the exact native Host storage bridge. Unlike
-		// ordinary execution, arbitrary Context/Budget ports cannot certify
-		// continuation of a still-unreturned physical frame.
-		if d.BoundedContext == nil || !summaryNativeBridge(d.BoundedContext.ports, "boundedContextPorts", d.Runtime) ||
-			(d.BoundedBudget != nil && !summaryNativeBridge(d.BoundedBudget.ports, "boundedBudgetPorts", d.Runtime)) ||
-			len(d.Observers) != 0 || len(d.Telemetry) != 0 || len(d.CompletionPolicies) != 0 || d.ToolDiscovery != nil {
-			return nil, nil, ErrInvalidRequest
-		}
+	if d.ManagedRecovery && !validManagedDependencies(*d) {
+		return nil, nil, ErrInvalidRequest
 	}
 	b := d.BoundedBudget
 	if b == nil {
@@ -105,7 +87,7 @@ func (r *Runner) invokeFirstPartyRun(ctx context.Context, inv plugin.RunInvocati
 		callbackscope.Operation(stageCtx, b, "managed.budget.admitted", admission.ledger)
 	}
 	out, err = r.invokeContextRun(stageCtx, inv, terminal)
-	return b.finishRun(stageCtx, inv, admission, out, err)
+	return b.finishRun(stageCtx, inv, admission, out, err, r.atomicBudget() == b)
 }
 
 func (r *Runner) invokeContextRun(ctx context.Context, inv plugin.RunInvocation, terminal plugin.RunNext) (out kernel.Snapshot, err error) {

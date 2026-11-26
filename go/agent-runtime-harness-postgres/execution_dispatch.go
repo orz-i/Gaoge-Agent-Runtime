@@ -10,7 +10,8 @@ import (
 // The caller already holds the owning Turn row's UPDATE lock. A physical
 // dispatch grant and a cancellation intent cannot both win this boundary.
 func checkExecutionDispatchGrantTx(tx *gorm.DB, value harness.Item) error {
-	if _, valid := harness.ValidExecutionDispatchGrantAdmission(value); !valid {
+	phase, valid := harness.ValidExecutionDispatchGrantAdmission(value)
+	if !valid {
 		return harness.ErrConflict
 	}
 	if err := checkCancellationFenceTx(tx, value.TurnID); err != nil {
@@ -44,7 +45,7 @@ func checkExecutionDispatchGrantTx(tx *gorm.DB, value harness.Item) error {
 	default:
 		return harness.ErrConflict
 	}
-	pending, err := pendingExecutionDispatchTx(tx, value.TurnID, value.InvocationID)
+	pending, err := pendingExecutionDispatchTx(tx, value.TurnID, value.InvocationID, phase)
 	if err != nil {
 		return err
 	}
@@ -85,7 +86,7 @@ func checkExecutionDispatchCompletionTx(tx *gorm.DB, completion harness.Item) er
 	return nil
 }
 
-func pendingExecutionDispatchTx(tx *gorm.DB, turnID, invocationID string) (bool, error) {
+func pendingExecutionDispatchTx(tx *gorm.DB, turnID, invocationID, phase string) (bool, error) {
 	// Read EVERY original claim at this reserved parent, including a
 	// previously committed Item with corrupted status/kind. The shared
 	// VerifiedExecutionDispatchReceipt decides validity fail-closed.
@@ -116,7 +117,7 @@ func pendingExecutionDispatchTx(tx *gorm.DB, turnID, invocationID string) (bool,
 			}
 			receipts = append(receipts, receipt)
 		}
-		if _, settled := harness.VerifiedExecutionDispatchReceipt(grant, receipts); !settled {
+		if harness.ExecutionDispatchBlocksAdmission(grant, receipts, phase) {
 			return true, nil
 		}
 	}
@@ -188,4 +189,23 @@ func planOriginalApprovalTx(tx *gorm.DB, grant, receipt harness.Item) (harness.I
 		}
 	}
 	return decision, insert, nil
+}
+
+// The original dispatch and its global children are the only Host fence for
+// a native recovery source. No managed reservation lookup is involved.
+func managedDispatchFactsTx(tx *gorm.DB, turnID string) ([]harness.Item, error) {
+	var rows []itemRecord
+	parents := tx.Model(&itemRecord{}).Select("id").Where("turn_id = ? AND parent_item_id = ?", turnID, harness.ExecutionDispatchParentItemID)
+	if err := tx.Where("(turn_id = ? AND parent_item_id = ?) OR parent_item_id IN (?)", turnID, harness.ExecutionDispatchParentItemID, parents).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	items := make([]harness.Item, 0, len(rows))
+	for _, row := range rows {
+		item, err := itemFromRecord(row)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, nil
 }

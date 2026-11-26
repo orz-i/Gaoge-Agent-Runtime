@@ -49,14 +49,14 @@ func (s *ea1ChildRecoveryPhaseStore) MarkChildExecutionSettled(ctx context.Conte
 	}
 	return e
 }
-func (s *ea1ChildRecoveryPhaseStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant) error {
+func (s *ea1ChildRecoveryPhaseStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
 	if s.beforeFinish != nil {
 		s.beforeFinish()
 	}
 	if s.mode == "marked" || s.mode == "P5" {
 		return s.fault
 	}
-	e := s.ChildExecutionStore.FinishChildExecution(ctx, g)
+	e := s.ChildExecutionStore.FinishChildExecution(ctx, g, p)
 	if e == nil {
 		s.finishes++
 	}

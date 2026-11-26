@@ -275,7 +275,7 @@ func exerciseFirstPartyLifecycle(t *testing.T, mode, profile string) {
 	if err != nil || view.InputCursor != 1 {
 		t.Fatalf("input cursor: %d %v", view.InputCursor, err)
 	}
-	l, err := store.LoadBudget(ctx, approved.Turn.ID)
+	l, err := base.LoadBudget(ctx, approved.Turn.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -85,7 +85,7 @@ func TestIssue107RealPostgresChildGrantVsParentTermination(t *testing.T) {
 				if err = NewKernelStore(twoDB).MarkChildExecutionSettled(t.Context(), grant, kernel.ChildExecutionSettlement{}); !errors.Is(err, kernel.ErrExecutionConflict) {
 					t.Fatalf("untrusted direct Store Mark authorized cleanup: %v", err)
 				}
-				if err = NewKernelStore(twoDB).FinishChildExecution(t.Context(), grant); !errors.Is(err, kernel.ErrExecutionConflict) {
+				if err = NewKernelStore(twoDB).FinishChildExecution(t.Context(), grant, kernel.ChildExecutionSettlement{}); !errors.Is(err, kernel.ErrExecutionConflict) {
 					t.Fatalf("pending physical Grant was released without receipt: %v", err)
 				}
 			} else if cancelErr == nil {

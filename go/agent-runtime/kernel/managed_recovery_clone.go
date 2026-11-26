@@ -5,7 +5,7 @@ import "slices"
 // Keep this set limited to the actual persistence values exposed by managed
 // recovery. Copying must not encode JSON or reinterpret authority evidence.
 type managedCloneValue interface {
-	ManagedHostBinding | ManagedSafePoint | ManagedHostReservation | ManagedTransfer | Snapshot
+	ManagedHostBinding | ManagedSafePoint | ManagedRecoveryAuthorization | ManagedTransfer | Snapshot
 }
 
 func managedClone[T managedCloneValue](value T) T {
@@ -15,8 +15,8 @@ func managedClone[T managedCloneValue](value T) T {
 		copied = cloneManagedBinding(v)
 	case ManagedSafePoint:
 		copied = cloneManagedPoint(v)
-	case ManagedHostReservation:
-		copied = cloneManagedReservation(v)
+	case ManagedRecoveryAuthorization:
+		copied = cloneManagedAuthorization(v)
 	case ManagedTransfer:
 		copied = cloneManagedTransfer(v)
 	case Snapshot:
@@ -41,7 +41,7 @@ func cloneManagedPoint(v ManagedSafePoint) ManagedSafePoint {
 	return v
 }
 
-func cloneManagedReservation(v ManagedHostReservation) ManagedHostReservation {
+func cloneManagedAuthorization(v ManagedRecoveryAuthorization) ManagedRecoveryAuthorization {
 	v.Binding = cloneManagedBinding(v.Binding)
 	v.Cancellation.Payload = slices.Clone(v.Cancellation.Payload)
 	return v
@@ -49,10 +49,10 @@ func cloneManagedReservation(v ManagedHostReservation) ManagedHostReservation {
 
 func cloneManagedTransfer(v ManagedTransfer) ManagedTransfer {
 	v.SafePoint = cloneManagedPoint(v.SafePoint)
-	v.Selection = cloneManagedReservation(v.Selection)
+	v.Selection = cloneManagedAuthorization(v.Selection)
 	v.Activations = slices.Clone(v.Activations)
 	for i := range v.Activations {
-		v.Activations[i].Selection = cloneManagedReservation(v.Activations[i].Selection)
+		v.Activations[i].Selection = cloneManagedAuthorization(v.Activations[i].Selection)
 	}
 	if v.Terminal != nil {
 		terminal := cloneManagedSnapshot(*v.Terminal)

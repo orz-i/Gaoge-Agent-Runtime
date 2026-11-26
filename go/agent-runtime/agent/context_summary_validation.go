@@ -14,7 +14,7 @@ import (
 )
 
 func (runner *Runner) SupportsContextSummary() bool {
-	return runner != nil && runner.contextSummary != nil && runner.managedContextRecovery == nil
+	return runner != nil && runner.contextSummary != nil
 }
 
 // UsesBudgetedContextSummary checks the exact concrete budget owner selected
@@ -33,7 +33,7 @@ type contextSummaryModelKey struct{}
 func validSummaryComposition(d Dependencies) bool {
 	summary := d.ContextSummary
 	if summary == nil || summary.bounded == nil || summary.ports == nil ||
-		d.ManagedContextRecovery != nil || d.PrepareModelRequest != nil {
+		d.PrepareModelRequest != nil {
 		return false
 	}
 	b := selectedSamplingBudget(d)
@@ -155,7 +155,7 @@ func contextSummaryInputBytesWithinPolicy(invocation ModelInvocation) bool {
 }
 
 func validContextSummaryState(state runState) bool {
-	if state.SummaryNativeRecovery && state.WorkingStateSummary == nil || state.WorkingStateSummary != nil && state.MaxModelOutputTokens <= 0 {
+	if state.WorkingStateSummary != nil && state.MaxModelOutputTokens <= 0 {
 		return false
 	}
 	for index, invocation := range state.ModelInvocations {

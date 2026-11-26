@@ -33,43 +33,15 @@ func (s *noEntryExpiryStore) CheckOwnedPhysicalEntry(ctx context.Context, g kern
 	return s.Store.CheckOwnedPhysicalEntry(ctx, g, l, v)
 }
 
-type noEntryReceiptFaultStore struct {
-	*harness.MemoryStore
-	mode  string
-	fired bool
-}
-
-var errNoEntryReceipt = errors.New("lost harness no-entry receipt")
-
-func (s *noEntryReceiptFaultStore) AppendItem(ctx context.Context, item harness.Item) (harness.Item, bool, error) {
-	if !s.fired && s.mode != "" && strings.Contains(string(item.Payload), "native_agent_callback_not_entered") {
-		s.fired = true
-		if s.mode == "before-write" {
-			return harness.Item{}, false, errNoEntryReceipt
-		}
-		_, _, err := s.MemoryStore.AppendItem(ctx, item)
-		if err != nil {
-			return harness.Item{}, false, err
-		}
-		return harness.Item{}, false, errNoEntryReceipt
-	}
-	return s.MemoryStore.AppendItem(ctx, item)
-}
-
-func TestNoEntryRetirementClosesHarnessDispatch(t *testing.T) {
-	for _, mode := range []string{"direct", "before-write", "after-write", "before-write-cancel", "direct-cancel"} {
-		t.Run(mode, func(t *testing.T) { testNoEntryRetirementClosesHarnessDispatch(t, mode) })
+func TestNoEntryRetirementNeedsNoHarnessDispatch(t *testing.T) {
+	for _, mode := range []string{"direct", "direct-cancel"} {
+		t.Run(mode, func(t *testing.T) { testNoEntryRetirementNeedsNoHarnessDispatch(t, mode) })
 	}
 }
-func testNoEntryRetirementClosesHarnessDispatch(t *testing.T, mode string) {
+func testNoEntryRetirementNeedsNoHarnessDispatch(t *testing.T, mode string) {
 	clock := newResumeTurnClock()
 	base := &noEntryExpiryStore{Store: memory.NewStoreWithExecutionClock(clock), clock: clock}
-	hostStore := &noEntryReceiptFaultStore{MemoryStore: harness.NewMemoryStore()}
-	if strings.HasPrefix(mode, "before-write") {
-		hostStore.mode = "before-write"
-	} else if mode == "after-write" {
-		hostStore.mode = mode
-	}
+	hostStore := harness.NewMemoryStore()
 	calls := 0
 	provider := resumeTurnModelFunc(func(context.Context, model.Request) (model.Response, error) {
 		calls++
@@ -95,7 +67,6 @@ func testNoEntryRetirementClosesHarnessDispatch(t *testing.T, mode string) {
 	base.expire = true
 	_, e = host.ResumeTurn(t.Context(), initial.Turn.ID)
 	t.Logf("first resume: %v", e)
-	firstErr := e
 	if !errors.Is(e, kernel.ErrExecutionConflict) || calls != 1 || base.grant.ID == "" {
 		t.Fatalf("not actual pre-entry denial: %v %d", e, calls)
 	}
@@ -111,15 +82,13 @@ func testNoEntryRetirementClosesHarnessDispatch(t *testing.T, mode string) {
 		t.Fatal(e)
 	}
 	pending := harness.PendingExecutionDispatch(items, "")
+	if pending {
+		t.Fatal("native no-entry left a Host dispatch")
+	}
 	for _, item := range items {
 		if phase, ok := harness.VerifiedExecutionDispatchGrant(item); ok && phase == "resume" {
-			boundary, ok := harness.VerifiedExecutionDispatchReceipt(item, items)
-			t.Logf("resume dispatch %s receipt=%t boundary=%q", item.ID, ok, boundary)
+			t.Fatal("native Resume persisted a Host grant")
 		}
-	}
-	t.Logf("Kernel retired; Harness pending=%t", pending)
-	if pending != strings.HasPrefix(mode, "before-write") || (hostStore.mode != "" && (!hostStore.fired || !errors.Is(firstErr, errNoEntryReceipt))) {
-		t.Fatalf("unexpected dispatch persistence outcome mode=%s pending=%t error=%v", mode, pending, e)
 	}
 	// Reopen the Runner rather than relying on its original call frame.
 	host, _ = newResumeTurnHarness(t, base, hostStore, provider, clock, configure)

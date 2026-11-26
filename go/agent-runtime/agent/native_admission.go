@@ -118,6 +118,9 @@ func recordBudgetRunDenial(ctx context.Context, adapter *BoundedBudgetAdapter, i
 // admission return. It leaves the existing snapshot unchanged so an already
 // elected cancellation can perform its own Kernel CAS after retirement.
 func (r *Runner) invokeNativeRun(ctx context.Context, source kernel.Snapshot, inv plugin.RunInvocation, next plugin.RunNext) (kernel.Snapshot, error) {
+	if source.Run.BudgetScopeID != "" && r.atomicBudget() == nil {
+		return source, budget.ErrLedgerConflict
+	}
 	frame := &nativeRunAdmission{invocation: inv, managedObligations: r.managedObligationSource}
 	if source.Run.ParentRunID == "" {
 		// The actual first Host callback is AFTER all setup/Store reads,

@@ -95,15 +95,42 @@ func (s *Store) CheckOwnedPhysicalEntry(ctx context.Context, g kernel.ChildExecu
 	if err = tx.QueryRowContext(ctx, "SELECT execution_physical_epoch FROM runtime_runs WHERE run_id=?", g.ChildRunID).Scan(&physicalEpoch); err != nil {
 		return kernel.OwnedPhysicalEntryWindow{}, conflictOrDatabaseError(err)
 	}
-	transfer, err := sqliteLoadManaged(ctx, tx, g.ChildRunID)
-	if err != nil && !errors.Is(err, kernel.ErrNotFound) {
-		return kernel.OwnedPhysicalEntryWindow{}, err
+	var transfer kernel.ManagedTransfer
+	if g.AdmissionOperation == "managed_resume" {
+		transfer, err = sqliteLoadManaged(ctx, tx, g.ChildRunID)
+		if err != nil {
+			return kernel.OwnedPhysicalEntryWindow{}, err
+		}
 	}
 	now, err := sqliteExecutionNow(ctx, tx)
 	if err != nil {
 		return kernel.OwnedPhysicalEntryWindow{}, err
 	}
-	return kernel.ValidateOwnedPhysicalEntry(g, expected, current, l, native, time.UnixMilli(now), quarantine != 0, physicalEpoch, marked, completion, transfer)
+	window, err := kernel.ValidateOwnedPhysicalEntry(g, expected, current, l, native, time.UnixMilli(now), quarantine != 0, physicalEpoch, marked, completion, transfer)
+	if err != nil {
+		return kernel.OwnedPhysicalEntryWindow{}, err
+	}
+	if g.AdmissionOperation == "managed_resume" {
+		a, e := sqliteManagedAuthority(ctx, tx)
+		if e != nil {
+			return kernel.OwnedPhysicalEntryWindow{}, e
+		}
+		if transfer.SafePoint.Host.KernelAuthority != a {
+			return kernel.OwnedPhysicalEntryWindow{}, kernel.ErrExecutionConflict
+		}
+		result, e := tx.ExecContext(ctx, "UPDATE runtime_runs SET execution_physical_epoch=? WHERE run_id=? AND execution_epoch=? AND execution_physical_epoch<?", g.ExecutionEpoch, g.ChildRunID, g.ExecutionEpoch, g.ExecutionEpoch)
+		if e != nil {
+			return kernel.OwnedPhysicalEntryWindow{}, e
+		}
+		n, e := result.RowsAffected()
+		if e != nil || n != 1 {
+			return kernel.OwnedPhysicalEntryWindow{}, errors.Join(kernel.ErrExecutionConflict, e)
+		}
+		if err = tx.Commit(); err != nil {
+			return kernel.OwnedPhysicalEntryWindow{}, conflictOrDatabaseError(err)
+		}
+	}
+	return window, nil
 }
 
 func (s *Store) RecordOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, revision uint64, outcome kernel.OwnedPhysicalCallbackOutcome, permit kernel.OwnedPhysicalCallbackReturn) error {
@@ -126,7 +153,7 @@ func (s *Store) RecordOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.
 	if err != nil {
 		return err
 	}
-	if err = sqliteManagedGate(ctx, tx, g.ChildRunID); err != nil {
+	if err = sqliteNativeEntryGate(ctx, tx, g.ChildRunID); err != nil {
 		return err
 	}
 	native, _, err := sqliteManagedLease(ctx, tx, g.ChildRunID)

@@ -172,7 +172,7 @@ func runEA1RootAgentAdmission(t *testing.T, factory func(*testing.T) (kernel.Sto
 		runner := ea1AdmissionConfiguredRunner(t, rt, m, mw, automatic)
 		req := ea1AdmissionRequest()
 		var winner kernel.Snapshot
-		wrapped.afterAcquire = func(ctx context.Context, lease kernel.ExecutionLease) error {
+		wrapped.beforeOwned = func(ctx context.Context, grant kernel.ChildExecutionGrant) error {
 			before, e := observer.Load(ctx, req.ID)
 			if e != nil {
 				return e
@@ -181,7 +181,7 @@ func runEA1RootAgentAdmission(t *testing.T, factory func(*testing.T) (kernel.Sto
 			return e
 		}
 		_, e := runner.StartRun(t.Context(), req)
-		if e == nil || winner.Run.Status != kernel.RunStatusCancelled || m.calls.Load() != 0 || mw.calls.Load() != 0 || wrapped.acquireCalls != 1 {
+		if e == nil || winner.Run.Status != kernel.RunStatusCancelled || m.calls.Load() != 0 || mw.calls.Load() != 0 || wrapped.acquireCalls != 0 {
 			t.Fatalf("pre-admission control did not win without callback: %v", e)
 		}
 		ea1CompBarrierUnchanged(t, observer, winner)
@@ -505,7 +505,6 @@ type ea1AgentAdmissionStore struct {
 	renewCalls   int
 	acquireCalls int
 	afterCreate  func(context.Context, kernel.Snapshot) error
-	afterAcquire func(context.Context, kernel.ExecutionLease) error
 	afterOwned   func(context.Context, kernel.ChildExecutionGrant) error
 	beforeOwned  func(context.Context, kernel.ChildExecutionGrant) error
 }
@@ -548,23 +547,27 @@ func (s *ea1AgentAdmissionStore) AcquireExecution(ctx context.Context, r kernel.
 		return l, e
 	}
 	s.acquired = l
-	if s.afterAcquire != nil {
-		e = s.afterAcquire(ctx, l)
-	}
+
 	return l, e
 }
 
-func (s *ea1AgentAdmissionStore) BeginOwnedPhysicalExecution(ctx context.Context, g kernel.ChildExecutionGrant, l kernel.ExecutionLease, a kernel.OwnedPhysicalAdmission) error {
+func (s *ea1AgentAdmissionStore) BeginOwnedPhysicalExecution(ctx context.Context, a kernel.OwnedPhysicalAdmission) (kernel.OwnedPhysicalAdmissionResult, error) {
+	g := a.Candidate().Grant
 	if s.beforeOwned != nil {
 		if e := s.beforeOwned(ctx, g); e != nil {
-			return e
+			return kernel.OwnedPhysicalAdmissionResult{}, e
 		}
 	}
-	e := s.OwnedPhysicalExecutionStore.BeginOwnedPhysicalExecution(ctx, g, l, a)
-	if e == nil && s.afterOwned != nil {
-		return s.afterOwned(ctx, g)
+	v, e := s.OwnedPhysicalExecutionStore.BeginOwnedPhysicalExecution(ctx, a)
+	if e == nil {
+		if a.AcquiresLease() {
+			s.acquired = v.Lease
+		}
+		if s.afterOwned != nil {
+			e = s.afterOwned(ctx, v.Grant)
+		}
 	}
-	return e
+	return v, e
 }
 
 func (s *ea1AgentAdmissionStore) ReleaseExecution(ctx context.Context, l kernel.ExecutionLease) error {

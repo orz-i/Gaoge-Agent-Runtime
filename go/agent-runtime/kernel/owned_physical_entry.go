@@ -18,6 +18,8 @@ type OwnedPhysicalEntryWindow struct {
 // This is not a second grant or a Model/Tool dispatch check: approval may
 // legitimately be entered at WAITING_INPUT. Native stores evaluate the facts
 // under the Run transaction, using their own clock, never the claimed expiry.
+// A recoverable successor advances the native physical epoch in that
+// transaction before acknowledging entry; any error stops entry.
 func (r *Runtime) CheckOwnedPhysicalEntry(ctx context.Context, expected Snapshot) (deadlineElapsed bool, err error) {
 	if r == nil || ctx == nil || r.physicalGrant == nil || r.execution == nil {
 		return false, ErrExecutionRequired
@@ -48,9 +50,9 @@ func (r *Runtime) CheckOwnedPhysicalEntry(ctx context.Context, expected Snapshot
 	return expected.Run.DeadlineAt != nil && window.DeadlineRemaining <= elapsed, nil
 }
 
-// ValidateOwnedPhysicalEntry is the single Store-time entry decision. The
-// caller loads the exact self-scoped Grant and its sole fence under the same
-// native lock as the Run, lease, callback and managed transfer facts.
+// ValidateOwnedPhysicalEntry is the single Store-time entry decision. On
+// success for managed_resume, commit its native physical epoch under the
+// same transaction before returning the window.
 func ValidateOwnedPhysicalEntry(g ChildExecutionGrant, expected, current Snapshot, claimed, persisted ExecutionLease,
 	now time.Time, quarantined bool, physicalEpoch, marked uint64, completion OwnedPhysicalCallbackCompletion, transfer ManagedTransfer,
 ) (OwnedPhysicalEntryWindow, error) {
@@ -59,15 +61,15 @@ func ValidateOwnedPhysicalEntry(g ChildExecutionGrant, expected, current Snapsho
 	}
 	if current.Run.ID != g.ChildRunID || current.Run.Kind != "agent" || current.Run.ParentRunID != "" ||
 		current.Run.Revision != g.ExpectedRevision || ManagedDigest(current) != ManagedDigest(expected) ||
-		physicalEpoch != g.ExecutionEpoch || !g.MatchesExecution(persisted) || marked != 0 ||
+		!g.MatchesExecution(persisted) || marked != 0 ||
 		completion != (OwnedPhysicalCallbackCompletion{}) || !now.Before(persisted.ExpiresAt) {
 		return OwnedPhysicalEntryWindow{}, ErrExecutionConflict
 	}
 	if quarantined {
 		return OwnedPhysicalEntryWindow{}, ErrExecutionQuarantined
 	}
-	if err := ManagedOrdinaryGate(transfer); err != nil {
-		return OwnedPhysicalEntryWindow{}, err
+	if g.AdmissionOperation != "managed_resume" && physicalEpoch != g.ExecutionEpoch {
+		return OwnedPhysicalEntryWindow{}, ErrExecutionConflict
 	}
 	switch g.AdmissionOperation {
 	case "start", "prepare", "resume":
@@ -79,10 +81,12 @@ func ValidateOwnedPhysicalEntry(g ChildExecutionGrant, expected, current Snapsho
 			return OwnedPhysicalEntryWindow{}, ErrExecutionRequired
 		}
 	case "managed_resume":
-		// Managed Enable alone is not entry: the exact successor must have
-		// left the persisted safe point before any Host callback.
-		if current.Run.Status != RunStatusRunning || transfer.State != ManagedInvalidated ||
-			transfer.SuccessorGrant != g || !ManagedSourceMatches(transfer.SafePoint, current) {
+		// Equality means this native segment has already crossed entry;
+		// an entry ACK can never be used to dispatch again.
+		if current.Run.Status != RunStatusRunning || physicalEpoch >= g.ExecutionEpoch || transfer.LegacyState != "" || transfer.Terminal != nil ||
+			transfer.SuccessorGrant != g || !transfer.SafePoint.Valid() ||
+			!managedResumeSelectionMatches(transfer) ||
+			!ManagedSourceMatches(transfer.SafePoint, current) {
 			return OwnedPhysicalEntryWindow{}, ErrExecutionConflict
 		}
 	default:

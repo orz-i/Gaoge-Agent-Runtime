@@ -16,12 +16,12 @@ func managedCopyFixture() ManagedTransfer {
 		State: raw(), Checkpoint: &Checkpoint{ID: "cp", Payload: raw(), Response: raw(), CreatedAt: now, ResolvedAt: &ended},
 		Result: &Result{ContentType: "application/json", Content: raw()}, EventHead: 17}
 	binding := ManagedHostBinding{RunID: "run", Source: raw(), Approval: &ManagedApprovalDecision{CheckpointID: "original", Decision: "approve", Comment: "original"}}
-	reservation := ManagedHostReservation{Binding: binding, Cancellation: ManagedCancellation{Payload: raw(), PayloadDigest: "original-digest"}}
+	reservation := ManagedRecoveryAuthorization{Binding: binding, Cancellation: ManagedCancellation{Payload: raw(), PayloadDigest: "original-digest"}}
 	grant := ChildExecutionGrant{ID: "grant", ChildRunID: "run", ExpectedRevision: 3, ExecutionOwnerID: "owner", ExecutionLeaseID: "lease", ExecutionEpoch: 4, AdmissionSourceHash: "source", AdmissionOperation: "prepare"}
 	lease := ExecutionLease{RunID: "run", OwnerID: "owner", LeaseID: "lease", Epoch: 4, ExpiresAt: now}
 	return ManagedTransfer{SafePoint: ManagedSafePoint{Host: binding, OriginalGrant: grant, OriginalLease: lease, Source: snapshot, LifecycleSource: raw()},
 		Selection: reservation, SuccessorGrant: grant, SuccessorLease: lease,
-		Activations: []ManagedActivation{{Generation: 2, ClaimantID: "claimant", Grant: grant, Lease: lease, Selection: reservation}}, Terminal: &snapshot}
+		Activations: []ManagedActivation{{Generation: 2, Grant: grant, Lease: lease, Selection: reservation}}, Terminal: &snapshot}
 }
 
 func mutateManagedSnapshot(v *Snapshot) {
@@ -43,7 +43,7 @@ func mutateManagedPoint(v *ManagedSafePoint) {
 	mutateManagedSnapshot(&v.Source)
 }
 
-func mutateManagedReservation(v *ManagedHostReservation) {
+func mutateManagedReservation(v *ManagedRecoveryAuthorization) {
 	v.Binding.Source[0] = '['
 	v.Binding.Approval.Comment = "changed"
 	v.Cancellation.Payload[0] = '['
@@ -103,7 +103,7 @@ func TestManagedFiniteCopiesIsolateAllPersistenceLeaves(t *testing.T) {
 func TestManagedFiniteCopiesPreserveNilEmptyAndMalformedRaw(t *testing.T) {
 	for _, raw := range []json.RawMessage{nil, {}, []byte("null"), []byte("{"), []byte(`{"b":9007199254740993,"a":0}`)} {
 		binding := ManagedHostBinding{Source: raw}
-		reservation := ManagedHostReservation{Binding: binding, Cancellation: ManagedCancellation{Payload: raw}}
+		reservation := ManagedRecoveryAuthorization{Binding: binding, Cancellation: ManagedCancellation{Payload: raw}}
 		snapshot := Snapshot{State: raw, Checkpoint: &Checkpoint{Payload: raw, Response: raw}, Result: &Result{Content: raw}}
 		point := ManagedSafePoint{Host: binding, Source: snapshot, LifecycleSource: raw}
 		for _, activations := range [][]ManagedActivation{nil, {}, {{Selection: reservation}}} {

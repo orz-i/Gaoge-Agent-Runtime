@@ -131,7 +131,7 @@ func ea1RootCancelPreflight(t *testing.T, factory func(*testing.T) (kernel.Store
 		return nil
 	}
 	_, e := f.runner(f.rt, "candidate", true).Resume(t.Context(), f.request.ID, f.prepared.Run.Revision)
-	if !errors.Is(e, kernel.ErrExecutionConflict) || hits != 1 {
+	if !errors.Is(e, kernel.ErrConflict) || hits != 1 {
 		t.Fatalf("pre-owned Cancel did not win: %v", e)
 	}
 	ea1CompBarrierUnchanged(t, f.observer, cancelled)

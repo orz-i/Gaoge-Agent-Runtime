@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"reflect"
 	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
@@ -136,7 +135,7 @@ func (p boundedContextPorts) ReadManagedPreparationContext(ctx context.Context, 
 	if !ok {
 		return kernel.ManagedPreparationContext{}, ErrConflict
 	}
-	if original, err := host.ReadManagedOriginalDispatch(ctx, b); err != nil || !reflect.DeepEqual(original, b) {
+	if err := host.VerifyManagedOriginalDispatch(ctx, b, false); err != nil {
 		return kernel.ManagedPreparationContext{}, errors.Join(ErrConflict, err)
 	}
 	turn, err := loadVerifiedTurn(ctx, p.store, b.TurnID)

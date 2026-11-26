@@ -67,7 +67,7 @@ func runOwnedPhysicalBindingGuards(t *testing.T, db *gorm.DB) {
 		t.Fatal(e)
 	}
 	grant := kernel.ChildExecutionGrant{ID: "owned-original-grant", ChildRunID: original.Run.ID, ExpectedRevision: original.Run.Revision, ExecutionOwnerID: lease.OwnerID, ExecutionLeaseID: lease.LeaseID, ExecutionEpoch: lease.Epoch, AdmissionSourceHash: strings.Repeat("a", 64), AdmissionOperation: "start"}
-	if e = store.BeginOwnedPhysicalExecution(ctx, grant, lease, kernel.OwnedPhysicalAdmission{}); !errors.Is(e, kernel.ErrExecutionConflict) {
+	if _, e = store.BeginOwnedPhysicalExecution(ctx, kernel.OwnedPhysicalAdmission{}); !errors.Is(e, kernel.ErrExecutionConflict) {
 		t.Fatalf("forged admission: %v", e)
 	}
 	if e = store.BeginChildExecution(ctx, grant); !errors.Is(e, kernel.ErrInvalidInput) {
@@ -121,7 +121,7 @@ func runOwnedPhysicalBindingGuards(t *testing.T, db *gorm.DB) {
 	if e = store.MarkChildExecutionSettled(ctx, grant, kernel.ChildExecutionSettlement{}); !errors.Is(e, kernel.ErrExecutionConflict) {
 		t.Fatalf("forged completion: %v", e)
 	}
-	if e = store.FinishChildExecution(ctx, grant); !errors.Is(e, kernel.ErrExecutionConflict) {
+	if e = store.FinishChildExecution(ctx, grant, kernel.ChildExecutionSettlement{}); !errors.Is(e, kernel.ErrExecutionConflict) {
 		t.Fatalf("premature retirement: %v", e)
 	}
 	assertOwnedKernelRecord(t, db, before)
@@ -194,7 +194,7 @@ func runOwnedPhysicalBindingGuards(t *testing.T, db *gorm.DB) {
 	for _, mutate := range []func(*kernel.ChildExecutionGrant){func(g *kernel.ChildExecutionGrant) { g.ExecutionOwnerID = "foreign" }, func(g *kernel.ChildExecutionGrant) { g.ExecutionLeaseID = "foreign" }, func(g *kernel.ChildExecutionGrant) { g.ExecutionEpoch++ }, func(g *kernel.ChildExecutionGrant) { g.AdmissionOperation = "resume" }, func(g *kernel.ChildExecutionGrant) { g.AdmissionSourceHash = strings.Repeat("b", 64) }} {
 		forged := grant
 		mutate(&forged)
-		if e = store.FinishChildExecution(ctx, forged); !errors.Is(e, kernel.ErrExecutionConflict) {
+		if e = store.FinishChildExecution(ctx, forged, kernel.ChildExecutionSettlement{}); !errors.Is(e, kernel.ErrExecutionConflict) {
 			t.Fatalf("foreign binding retired original marker: %v", e)
 		}
 		got, e = store.LookupChildExecution(ctx, original.Run.ID)
@@ -202,11 +202,11 @@ func runOwnedPhysicalBindingGuards(t *testing.T, db *gorm.DB) {
 			t.Fatal("foreign retirement changed original binding")
 		}
 	}
-	if e = store.FinishChildExecution(ctx, grant); e != nil {
-		t.Fatalf("exact marked retirement failed: %v", e)
+	if e = store.FinishChildExecution(ctx, grant, kernel.ChildExecutionSettlement{}); !errors.Is(e, kernel.ErrExecutionConflict) {
+		t.Fatalf("legacy owned Mark authorized retirement: %v", e)
 	}
-	if _, e = store.LookupChildExecution(ctx, original.Run.ID); !errors.Is(e, kernel.ErrNotFound) {
-		t.Fatalf("original marker not retired: %v", e)
+	if retained, e := store.LookupChildExecution(ctx, original.Run.ID); e != nil || retained != grant {
+		t.Fatalf("legacy owned Mark fence was removed: %v", e)
 	}
 	assertOwnedKernelRecord(t, db, expired)
 }

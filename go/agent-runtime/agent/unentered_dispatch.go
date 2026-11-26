@@ -132,19 +132,5 @@ func (runner *Runner) reconcileOriginalPhysicalDispatch(ctx context.Context, run
 	if err != nil || kind == PhysicalCallUnknown {
 		return kind, err
 	}
-	identity := receipt.Identity()
-	if receipt.Phase == "RETIRED" {
-		found, e := acknowledgeExactOwnedRetirement(ctx, rt, receipt.Evidence.Grant, receipt.Evidence.Snapshot, &c)
-		if !found || e != nil {
-			return PhysicalCallUnknown, errors.Join(kernel.ErrExecutionConflict, e)
-		}
-		receipt, err = rt.LoadOwnedRetirement(ctx, id)
-		if err != nil {
-			return PhysicalCallUnknown, err
-		}
-	}
-	if !receipt.Valid() || receipt.Phase != "ACKNOWLEDGED" || receipt.Identity() != identity {
-		return PhysicalCallUnknown, kernel.ErrExecutionConflict
-	}
 	return kind, nil
 }

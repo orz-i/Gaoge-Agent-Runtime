@@ -80,6 +80,9 @@ func TestPhysicalEpochMigrationPreservesOriginalCustodyAndLeaseHistory(t *testin
 	if err = MigrateV9ToV10(t.Context(), path); err != nil {
 		t.Fatal(err)
 	}
+	if err = MigrateV10ToV11(t.Context(), path); err != nil {
+		t.Fatal(err)
+	}
 	s, err := OpenExisting(t.Context(), path)
 	if err != nil {
 		t.Fatal(err)

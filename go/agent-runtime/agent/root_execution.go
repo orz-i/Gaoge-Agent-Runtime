@@ -118,67 +118,23 @@ func (runner *Runner) withRootSegment(ctx context.Context, snapshot kernel.Snaps
 		return snapshot, err
 	}
 	lease, external := runner.runtime.BoundExecutionLease()
-	var err error
-	if external {
-		if lease.RunID != snapshot.Run.ID {
-			return snapshot, kernel.ErrExecutionConflict
-		}
-		// Store validates native authority atomically again at owned admission.
-	} else {
-		lease, err = runner.runtime.AcquireExecution(ctx, kernel.ExecutionAcquireRequest{RunID: snapshot.Run.ID, OwnerID: runner.runExecution.OwnerID, LeaseDuration: runner.runExecution.LeaseDuration})
-		if err != nil {
-			return snapshot, err
-		}
+	dispatchID := runner.originalPhysicalDispatch(ctx, snapshot.Run.ID, operation)
+	var q kernel.ExecutionAcquireRequest
+	if !external {
+		q = kernel.ExecutionAcquireRequest{RunID: snapshot.Run.ID, OwnerID: runner.runExecution.OwnerID, LeaseDuration: runner.runExecution.LeaseDuration}
 	}
-	bound, err := runner.runtime.WithExecution(lease)
-	if err != nil {
-		return snapshot, err
-	}
-	abort := func(cause error) (kernel.Snapshot, error) {
-		if !external {
-			// Release still competes atomically with any committed Grant.
-			// A failed admission ACK must never free a retained barrier.
-			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
-			defer cancel()
-			cause = errors.Join(cause, runner.runtime.ReleaseExecution(cleanup, lease))
-		}
-		return snapshot, cause
-	}
-	current, err := bound.Load(ctx, snapshot.Run.ID)
-	if err != nil {
-		return abort(err)
-	}
-	if current.Run.Revision != snapshot.Run.Revision {
-		return abort(kernel.ErrConflict)
-	}
-
-	var grant kernel.ChildExecutionGrant
-	if dispatchID := runner.originalPhysicalDispatch(ctx, current.Run.ID, operation); dispatchID != "" {
-		subject := kernel.ManagedDigest(struct{ LeaseID, DispatchID string }{lease.LeaseID, dispatchID})
-		proof := featurecontrol.Seal(current.Run.ID, current.Run.Revision, "agent_owned_physical_dispatch_admission", subject, current.State, current.Checkpoint)
-		grant, err = bound.BeginOwnedPhysicalExecutionForDispatch(ctx, current.Run.ID, current.Run.Revision, proof, operation, dispatchID)
-	} else {
-		proof := featurecontrol.Seal(current.Run.ID, current.Run.Revision, "agent_owned_physical_admission", lease.LeaseID, current.State, current.Checkpoint)
-		grant, err = bound.BeginOwnedPhysicalExecution(ctx, current.Run.ID, current.Run.Revision, proof, operation)
-	}
+	proof := featurecontrol.Seal(snapshot.Run.ID, snapshot.Run.Revision, "agent_owned_physical_admission", kernel.OwnedPhysicalAdmissionSubject(q, lease, operation, dispatchID), snapshot.State, snapshot)
+	scopedRT, admitted, err := runner.runtime.AdmitOwnedPhysicalExecution(ctx, snapshot, q, proof, operation, dispatchID)
 	if err != nil {
 		if errors.Is(err, kernel.ErrPhysicalAdmissionCommitUnknown) {
-			// No effect-capable callback has entered, but an unresolved
-			// durable Grant may exist. Never synthesize a return or retire it.
 			err = errors.Join(ErrRootOutcomeUnknown, err)
 		}
-		return abort(err)
+		return snapshot, err
 	}
-
-	ownerProof := featurecontrol.Seal(current.Run.ID, current.Run.Revision, "agent_physical_owner", grant.ID, current.State, current.Checkpoint)
-	scopedRT, err := bound.WithPhysicalGrant(ctx, grant, ownerProof)
-	if err != nil {
-		return current, runner.retireUnenteredOwnedRoot(ctx, bound, grant, current, external, err)
-	}
-	return runner.executeOwnedRoot(ctx, current, bound, scopedRT, grant, lease, external, execute)
+	return runner.executeOwnedRoot(ctx, snapshot, scopedRT, admitted.Grant, admitted.Lease, external, execute)
 }
 
-func (runner *Runner) executeOwnedRoot(ctx context.Context, current kernel.Snapshot, bound, scopedRT *kernel.Runtime, grant kernel.ChildExecutionGrant, lease kernel.ExecutionLease, external bool, execute func(context.Context, *Runner, kernel.Snapshot) (kernel.Snapshot, error)) (kernel.Snapshot, error) {
+func (runner *Runner) executeOwnedRoot(ctx context.Context, current kernel.Snapshot, scopedRT *kernel.Runtime, grant kernel.ChildExecutionGrant, lease kernel.ExecutionLease, external bool, execute func(context.Context, *Runner, kernel.Snapshot) (kernel.Snapshot, error)) (kernel.Snapshot, error) {
 	scoped := *runner
 	scoped.runtime = scopedRT
 	scoped.activeRunLease = &lease
@@ -200,7 +156,7 @@ func (runner *Runner) executeOwnedRoot(ctx context.Context, current kernel.Snaps
 		if callErr == nil {
 			callErr = kernel.ErrExecutionConflict
 		}
-		return current, runner.retireUnenteredOwnedRoot(ctx, bound, grant, current, external, callErr)
+		return current, runner.retireUnenteredOwnedRoot(ctx, scopedRT, grant, current, external, callErr)
 	}
 	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 	defer cancel()
@@ -256,11 +212,11 @@ func (runner *Runner) executeOwnedRoot(ctx context.Context, current kernel.Snaps
 		ControlCustody: outcome.ControlCustody, ToolReturns: outcome.ToolReturns,
 	}
 	// The actual whole callback owns this fact, including the fast-known path.
-	// Persist it before Mark so any competing recovery retains the same original
+	// Persist it before Finish so any competing recovery retains the same original
 	// lease disposition. Public state or a clean receipt cannot manufacture it.
-	if recordErr := bound.RecordOwnedPhysicalCallbackReturn(cleanup, grant, latest.Run.Revision, outcome, returned); recordErr != nil {
+	if recordErr := scopedRT.RecordOwnedPhysicalCallbackReturn(cleanup, grant, latest.Run.Revision, outcome, returned); recordErr != nil {
 		if settled {
-			if found, ackErr := acknowledgeExactOwnedRetirement(cleanup, bound, grant, latest, &completion); found {
+			if found, ackErr := observeExactOwnedRetirement(cleanup, scopedRT, grant, latest, &completion); found {
 				if ackErr != nil {
 					return latest, errors.Join(callErr, ErrRootOutcomeUnknown, recordErr, ackErr)
 				}
@@ -270,7 +226,7 @@ func (runner *Runner) executeOwnedRoot(ctx context.Context, current kernel.Snaps
 		}
 		// A lost Record ACK may leave the identical immutable fact on the active
 		// grant. Only that exact fact allows this call to continue.
-		stored, lookupErr := bound.LookupOwnedPhysicalCallbackReturn(cleanup, grant)
+		stored, lookupErr := scopedRT.LookupOwnedPhysicalCallbackReturn(cleanup, grant)
 		if lookupErr != nil || stored != completion {
 			return latest, errors.Join(callErr, ErrRootOutcomeUnknown, recordErr, lookupErr)
 		}
@@ -288,7 +244,7 @@ func (runner *Runner) executeOwnedRoot(ctx context.Context, current kernel.Snaps
 		}
 		return latest, errors.Join(callErr, ErrRootOutcomeUnknown)
 	}
-	if err := settleOwnedRoot(cleanup, bound, grant, latest, &completion, true); err != nil {
+	if err := settleOwnedRoot(cleanup, scopedRT, grant, latest, &completion); err != nil {
 		return latest, errors.Join(callErr, ErrRootOutcomeUnknown, err)
 	}
 	recordPhysicalObservation(ctx, latest.Run.ID, PhysicalCallSettled)
@@ -299,7 +255,7 @@ func (runner *Runner) executeOwnedRoot(ctx context.Context, current kernel.Snaps
 // invocation before execute is called. The unchanged frozen source is sealed
 // as no-entry, not as a returned Host callback or Tool receipt. Managed
 // successors must keep their separate selection/closure protocol; never
-// manufacture a T4 completion for an unentered managed continuation.
+// manufacture a managed closure for an unentered managed continuation.
 func (runner *Runner) retireUnenteredOwnedRoot(ctx context.Context, rt *kernel.Runtime, g kernel.ChildExecutionGrant, source kernel.Snapshot, external bool, cause error) error {
 	if g.AdmissionOperation == "managed_resume" {
 		return errors.Join(cause, ErrRootOutcomeUnknown)
@@ -312,7 +268,7 @@ func (runner *Runner) retireUnenteredOwnedRoot(ctx context.Context, rt *kernel.R
 	hash := sha256.Sum256(payload)
 	completion := kernel.OwnedPhysicalCallbackCompletion{GrantID: g.ID, ReturnRevision: source.Run.Revision, ReturnSourceHash: hex.EncodeToString(hash[:]), LeaseOwned: !external, ControlCustody: outcome.ControlCustody}
 	if err := rt.RecordOwnedPhysicalCallbackReturn(cleanup, g, source.Run.Revision, outcome, proof); err != nil {
-		if found, ackErr := acknowledgeExactOwnedRetirement(cleanup, rt, g, source, &completion); found {
+		if found, ackErr := observeExactOwnedRetirement(cleanup, rt, g, source, &completion); found {
 			if ackErr == nil {
 				recordPhysicalObservation(ctx, g.ChildRunID, PhysicalCallNotEntered)
 				return cause
@@ -324,7 +280,7 @@ func (runner *Runner) retireUnenteredOwnedRoot(ctx context.Context, rt *kernel.R
 			return errors.Join(cause, ErrRootOutcomeUnknown, err, lookupErr)
 		}
 	}
-	if err := settleOwnedRoot(cleanup, rt, g, source, &completion, false); err != nil {
+	if err := settleOwnedRoot(cleanup, rt, g, source, &completion); err != nil {
 		return errors.Join(cause, ErrRootOutcomeUnknown, err)
 	}
 	recordPhysicalObservation(ctx, g.ChildRunID, PhysicalCallNotEntered)
@@ -352,10 +308,8 @@ func (runner *Runner) ReconcileRootPhysicalExecution(ctx context.Context, runID 
 	return runner.reconcileRootRetirement(ctx, snapshot, grant, completion)
 }
 
-// Select the actual active original return or the unique pending retirement
-// at the exact current source. Never fall back to historical acknowledged
-// rows or infer completion from an absent physical marker. The legacy nil
-// completion is supported only by the existing genuine marked Store path.
+// Select the actual active original return or the exact finished receipt at
+// the current epoch and source. An absent Grant alone is not completion.
 func (runner *Runner) originalRootReturn(ctx context.Context, snapshot kernel.Snapshot) (kernel.ChildExecutionGrant, *kernel.OwnedPhysicalCallbackCompletion, error) {
 	grant, err := runner.runtime.LookupChildExecution(ctx, snapshot.Run.ID)
 	if errors.Is(err, kernel.ErrNotFound) {
@@ -393,14 +347,14 @@ func (runner *Runner) originalRootReturn(ctx context.Context, snapshot kernel.Sn
 }
 
 // Every receipt-only consumer uses the same original grant and exact
-// settlement source for Mark/T4/Finish/ACK. Re-resolving by RunID here
+// settlement source for Finish. Re-resolving by RunID here
 // could select a successor grant admitted after a concurrent retirement.
 func (runner *Runner) reconcileRootRetirement(ctx context.Context, snapshot kernel.Snapshot, grant kernel.ChildExecutionGrant, completion *kernel.OwnedPhysicalCallbackCompletion) error {
 	if completion != nil && completion.NotEntered() {
 		if !completion.MatchesNotEnteredSnapshot(grant, snapshot) {
 			return ErrRootOutcomeUnknown
 		}
-		return settleOwnedRoot(ctx, runner.runtime, grant, snapshot, completion, false)
+		return settleOwnedRoot(ctx, runner.runtime, grant, snapshot, completion)
 	}
 	if !grant.IsOwned() || grant.ChildRunID != snapshot.Run.ID || !knownRootPhysicalSettlement(snapshot) ||
 		(completion != nil && (!completion.HostCompleted || completion.GrantID != grant.ID)) {
@@ -409,7 +363,7 @@ func (runner *Runner) reconcileRootRetirement(ctx context.Context, snapshot kern
 	if err := runner.requireRootModelQualification(ctx, snapshot); err != nil {
 		return err
 	}
-	if err := settleOwnedRoot(ctx, runner.runtime, grant, snapshot, completion, false); err != nil {
+	if err := settleOwnedRoot(ctx, runner.runtime, grant, snapshot, completion); err != nil {
 		return errors.Join(ErrRootOutcomeUnknown, err)
 	}
 	return nil
@@ -426,75 +380,33 @@ func (runner *Runner) requireRootModelQualification(ctx context.Context, snapsho
 	return nil
 }
 
-// settleOwnedRoot keeps the active-grant T4 path separate from historical ACK.
-// A peer's validated retirement already proves T4 and must never be followed by
-// another CompleteManagedRecovery call requiring the now-deleted grant.
-func settleOwnedRoot(ctx context.Context, rt *kernel.Runtime, grant kernel.ChildExecutionGrant, snapshot kernel.Snapshot, completion *kernel.OwnedPhysicalCallbackCompletion, owner bool) error {
-	if found, err := acknowledgeExactOwnedRetirement(ctx, rt, grant, snapshot, completion); found {
+// settleOwnedRoot keeps active-grant retirement separate from historical receipt.
+// A peer's validated retirement already proves closure and must never be followed by
+// another settlement operation requiring the now-deleted grant.
+func settleOwnedRoot(ctx context.Context, rt *kernel.Runtime, grant kernel.ChildExecutionGrant, snapshot kernel.Snapshot, completion *kernel.OwnedPhysicalCallbackCompletion) error {
+	if completion == nil {
+		return ErrRootOutcomeUnknown
+	}
+	if found, err := observeExactOwnedRetirement(ctx, rt, grant, snapshot, completion); found {
 		return err
 	}
-	proof := featurecontrol.Seal(snapshot.Run.ID, snapshot.Run.Revision, "agent_owned_physical_settled", grant.ID, snapshot.State, snapshot.Checkpoint)
-	var markErr error
-	if owner {
-		markErr = rt.MarkChildExecutionSettled(ctx, grant, proof)
-	}
-	if !owner || markErr != nil {
-		if found, err := acknowledgeExactOwnedRetirement(ctx, rt, grant, snapshot, completion); found {
-			if err != nil {
-				return errors.Join(markErr, err)
-			}
-			return nil
-		}
-		if completion != nil {
-			recovered := featurecontrol.Seal(snapshot.Run.ID, snapshot.Run.Revision, "agent_owned_physical_recovered", grant.ID, snapshot.State, snapshot.Checkpoint)
-			markErr = errors.Join(markErr, rt.MarkOwnedPhysicalRecovered(ctx, grant, recovered))
-		}
-	}
-	if markErr != nil {
-		if found, err := acknowledgeExactOwnedRetirement(ctx, rt, grant, snapshot, completion); found {
-			if err != nil {
-				return errors.Join(markErr, err)
-			}
-			return nil
-		}
-		// Both Mark responses may be lost after their actual commits. Continue
-		// with the existing proof-bound T4/Finish; those Store gates alone decide
-		// whether a genuine marker exists. An error is not evidence of absence.
-	}
-	if completion == nil || !completion.NotEntered() {
-		completed := featurecontrol.Seal(snapshot.Run.ID, snapshot.Run.Revision, "managed_successor_completed", grant.ID, snapshot.State, snapshot)
-		if err := rt.CompleteManagedRecovery(ctx, grant, snapshot, completed); err != nil {
-			if found, ackErr := acknowledgeExactOwnedRetirement(ctx, rt, grant, snapshot, completion); found {
-				if ackErr != nil {
-					return errors.Join(markErr, err, ackErr)
-				}
-				return nil
-			}
-			return errors.Join(markErr, err)
-		}
-	}
+	proof := featurecontrol.Seal(snapshot.Run.ID, snapshot.Run.Revision, "agent_owned_physical_settled", grant.ID, snapshot.State, snapshot)
 	finishErr := rt.FinishChildExecution(ctx, grant, proof)
-	if found, err := acknowledgeExactOwnedRetirement(ctx, rt, grant, snapshot, completion); found {
+	if found, err := observeExactOwnedRetirement(ctx, rt, grant, snapshot, completion); found {
 		if err != nil {
-			return errors.Join(markErr, finishErr, err)
+			return errors.Join(finishErr, err)
 		}
-		return nil
-	}
-	// Legacy genuine markers without a callback disposition remain retireable,
-	// but never authorize a native lease release. New calls always have a fact.
-	if finishErr == nil && completion == nil {
 		return nil
 	}
 	if finishErr != nil {
-		return errors.Join(markErr, finishErr)
+		return finishErr
 	}
-	return errors.Join(markErr, kernel.ErrExecutionConflict)
+	return kernel.ErrExecutionConflict
 }
 
-// The caller supplies the exact grant it admitted/loaded and settled source it
-// actually observed. Only Store-validated retirement evidence can authorize ACK.
-// The canonical payload is identical for original-owner and recovery entrances.
-func acknowledgeExactOwnedRetirement(ctx context.Context, rt *kernel.Runtime, grant kernel.ChildExecutionGrant, snapshot kernel.Snapshot, completion *kernel.OwnedPhysicalCallbackCompletion) (bool, error) {
+// The original caller observes the one committed retirement receipt.
+// No confirmation can write or release a lease; Finish already did so.
+func observeExactOwnedRetirement(ctx context.Context, rt *kernel.Runtime, grant kernel.ChildExecutionGrant, snapshot kernel.Snapshot, completion *kernel.OwnedPhysicalCallbackCompletion) (bool, error) {
 	if !rt.SupportsOwnedRetirement() {
 		return false, nil
 	}
@@ -509,40 +421,7 @@ func acknowledgeExactOwnedRetirement(ctx context.Context, rt *kernel.Runtime, gr
 		(completion != nil && receipt.Evidence.Completion != *completion) {
 		return true, kernel.ErrExecutionConflict
 	}
-	if receipt.Evidence.Completion.GrantID == "" {
-		if completion != nil {
-			return true, kernel.ErrExecutionConflict
-		}
-		return true, nil // validated LEGACY_UNKNOWN: no ACK or release claim
-	}
-	proof := featurecontrol.Seal(grant.ChildRunID, snapshot.Run.Revision, "agent_owned_retirement_ack", grant.ID, kernel.OwnedRetirementAcknowledgementPayload(receipt), nil)
-	result, err := rt.AcknowledgeOwnedRetirement(ctx, grant, proof)
-	if err == nil {
-		return true, validateOwnedRetirementACK(result, receipt)
-	}
-	// An ACK may atomically release the original lease and lose its response.
-	// Retry only the identical already-committed canonical ACK, never an absent
-	// receipt or a first-ACK current-source/epoch conflict.
-	stored, loadErr := rt.LoadOwnedRetirement(ctx, grant.ID)
-	if loadErr != nil || stored.Phase != "ACKNOWLEDGED" || stored.Identity() != receipt.Identity() {
-		return true, errors.Join(err, loadErr)
-	}
-	result, retryErr := rt.AcknowledgeOwnedRetirement(ctx, grant, proof)
-	if retryErr != nil {
-		return true, retryErr
-	}
-	return true, validateOwnedRetirementACK(result, receipt)
-}
-
-func validateOwnedRetirementACK(result kernel.OwnedRetirementAckResult, receipt kernel.OwnedRetirementReceipt) error {
-	disposition := "preserved_borrowed"
-	if receipt.Evidence.Completion.LeaseOwned {
-		disposition = "released_owned"
-	}
-	if result.ReceiptID != receipt.Evidence.Grant.ID || result.SettledSourceDigest != kernel.ManagedDigest(receipt.Evidence.Snapshot) || result.Disposition != disposition {
-		return kernel.ErrExecutionConflict
-	}
-	return nil
+	return true, nil
 }
 
 func collectBoundedCallbacks(d Dependencies, nativeContext *BoundedContextAdapter, nativeBudget *BoundedBudgetAdapter) []any {

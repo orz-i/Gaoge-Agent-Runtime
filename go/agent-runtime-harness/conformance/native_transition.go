@@ -146,7 +146,7 @@ func exerciseNativeTransitionCommit(t *testing.T, c nativeTransitionCase, factor
 		if e != nil {
 			t.Fatal(e)
 		}
-		authority, e := harness.NewBudgetAuthority(harness.BudgetAuthorityDependencies{Store: h, Clock: transitionClock{}})
+		authority, e := harness.NewBudgetAuthority(harness.BudgetAuthorityDependencies{Store: h, Runtime: rt, Clock: transitionClock{}})
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -168,7 +168,7 @@ func exerciseNativeTransitionCommit(t *testing.T, c nativeTransitionCase, factor
 		if e != nil {
 			t.Fatal(e)
 		}
-		native, e := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: provider, Catalog: registry, Executor: registry, ManagedContextRecovery: bounded, BoundedBudget: b, ModelOutcomeVerifier: authority, Inputs: inputs, ApprovalPolicies: []plugin.ApprovalPolicy{approval},
+		native, e := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: provider, Catalog: registry, Executor: registry, ManagedRecovery: true, BoundedContext: bounded, BoundedBudget: b, ModelOutcomeVerifier: authority, Inputs: inputs, ApprovalPolicies: []plugin.ApprovalPolicy{approval},
 			Execution:    execution,
 			RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: leaseDuration}})
 		if e != nil {
@@ -218,7 +218,7 @@ func exerciseNativeTransitionCommit(t *testing.T, c nativeTransitionCase, factor
 	if e != nil {
 		t.Fatal(e)
 	}
-	ledger, e := h.LoadBudget(ctx, turnID)
+	ledger, e := base.(budget.LedgerStore).LoadBudget(ctx, turnID)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -234,12 +234,12 @@ func exerciseNativeTransitionCommit(t *testing.T, c nativeTransitionCase, factor
 	}
 	if c.after && !c.blocked {
 		p, ok := transfer.SafePoint.AgentObligations()
-		if !ok || p.Phase != "prepare" || p.InvocationID != "" || p.PreparationContext == nil || p.PreparationTransitionDigest == "" || transfer.State != kernel.ManagedAvailable || !kernel.ManagedSourceMatches(transfer.SafePoint, original) || view.ModelInvocations[0].Status != agent.ModelInvocationConsumed {
-			t.Fatalf("transition committed without exact next preparation: %+v status=%s", p, transfer.State)
+		if !ok || p.Phase != "prepare" || p.InvocationID != "" || p.PreparationContext == nil || p.PreparationTransitionDigest == "" || transfer.LegacyState != "" || !kernel.ManagedSourceMatches(transfer.SafePoint, original) || view.ModelInvocations[0].Status != agent.ModelInvocationConsumed {
+			t.Fatalf("transition committed without exact next preparation: %+v source=%s", p, kernel.ManagedDigest(transfer.SafePoint.Source))
 		}
 	}
-	if c.blocked && transfer.State != kernel.ManagedInvalidated {
-		t.Fatalf("unresolved Tool gained a point: %s", transfer.State)
+	if c.blocked && kernel.ManagedSourceMatches(transfer.SafePoint, original) {
+		t.Fatalf("unresolved Tool gained a point: %s", kernel.ManagedDigest(transfer.SafePoint.Source))
 	}
 	base, host = reopen()
 	h = host.(preparationHostPorts)
@@ -272,7 +272,7 @@ func exerciseNativeTransitionCommit(t *testing.T, c nativeTransitionCase, factor
 	if e != nil {
 		t.Fatal(e)
 	}
-	ledger, e = h.LoadBudget(ctx, turnID)
+	ledger, e = base.(budget.LedgerStore).LoadBudget(ctx, turnID)
 	if e != nil {
 		t.Fatal(e)
 	}

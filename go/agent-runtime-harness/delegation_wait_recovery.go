@@ -16,9 +16,9 @@ import (
 // original Tool handler, preparation policies, model, or a new logical Call.
 //
 // The exact prior ToolDispatchID, immutable Invocation, Waiting Item and
-// frozen child identity must all agree. RegisterRun and AppendItem remain
-// CAS/idempotent, while beginPhysicalInvocationDispatch fences the actual
-// ChildRunner effect. An ambiguous Started/Grant outcome is never restarted.
+// frozen child identity must all agree. Native local capacity is only
+// consumed by Create; the original dispatch admission fences actual work.
+// An ambiguous Started/Grant outcome is never restarted.
 func (runner *Runner) ResumeWaitingDelegation(
 	ctx context.Context, parentRunID string, expectedRevision uint64,
 ) (bool, error) {
@@ -34,6 +34,10 @@ func (runner *Runner) ResumeWaitingDelegation(
 		return false, kernel.ErrConflict
 	}
 	call, pending, err := agent.FrozenPendingDispatch(parent)
+	var wait tools.PendingExecution
+	if err == nil && !pending {
+		call, wait, pending, err = agent.FrozenChildWaitCall(parent)
+	}
 	if err != nil || !pending || call.ToolKey != DelegationToolKey {
 		return false, err
 	}
@@ -74,7 +78,11 @@ func (runner *Runner) ResumeWaitingDelegation(
 	if err != nil {
 		return true, err
 	}
+	if wait.Kind != "" && (wait.OperationID != frozen.ID || wait.ChildRunID != frozen.ChildRunID) {
+		return true, ErrConflict
+	}
 	startedItemID := stableID("hid", turn.ID, frozen.ID, string(ItemStarted))
+	startedAlready := false
 	if started, loadErr := runner.store.GetItem(ctx, startedItemID); loadErr == nil {
 		// A competing worker or crashed predecessor has already committed
 		// admission. Never dispatch the same child twice: there may be an
@@ -99,7 +107,23 @@ func (runner *Runner) ResumeWaitingDelegation(
 			original.Execution.Error != "" || original.Execution.ErrorCode != "" {
 			return true, ErrConflict
 		}
-		return true, ErrExecutionOutcomeUnknown
+		retry, e := runner.retryNativeDelegation(ctx, turn, frozen, startedItemID)
+		if e != nil {
+			return true, e
+		}
+		if !retry {
+			if runner.nativeLocalDelegation(frozen) != nil {
+				// An already created child is an observation obligation,
+				// never a second Start. The normal receipt path owns it.
+				if _, e := runner.runtime.Load(ctx, frozen.ChildRunID); e == nil {
+					return false, nil
+				} else if !errors.Is(e, kernel.ErrNotFound) {
+					return true, e
+				}
+			}
+			return true, ErrExecutionOutcomeUnknown
+		}
+		startedAlready = true
 	} else if !errors.Is(loadErr, ErrNotFound) {
 		return true, loadErr
 	}
@@ -111,19 +135,19 @@ func (runner *Runner) ResumeWaitingDelegation(
 	}
 	// The same Store enforces cancellation-intent and frozen-original grant
 	// exclusion on this stable Started Item. No independent worker identity.
-	_, admitted, err := runner.recordDelegationItemWithAdmission(ctx, turn, owner, frozen, ItemStarted, "")
-	if err != nil {
-		return true, err
+	if !startedAlready {
+		_, admitted, e := runner.recordDelegationItemWithAdmission(ctx, turn, owner, frozen, ItemStarted, "")
+		if e != nil {
+			return true, e
+		}
+		if !admitted {
+			return true, ErrExecutionOutcomeUnknown
+		}
 	}
-	if !admitted {
-		// A concurrent worker won the Store CAS. It alone can start the
-		// child; without its physical return receipt, our outcome is unknown.
-		return true, ErrExecutionOutcomeUnknown
+	result, err := runner.executeDelegation(ctx, turn, owner, parent, frozen, startedItemID, hashInvocationBytes(call.Arguments))
+	if err == nil && result.Delegation.Status == handoff.StatusQueued {
+		return true, budget.ErrWaiting
 	}
-	// This is the first child physical dispatch, not a replay of the parent
-	// Agent Tool call. An already committed/uncertain child Grant remains
-	// fenced by executeDelegation.
-	_, err = runner.executeDelegation(ctx, turn, owner, parent, frozen, startedItemID)
 	return true, err
 }
 

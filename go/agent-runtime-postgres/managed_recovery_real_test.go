@@ -79,36 +79,39 @@ func TestRealPostgresManagedRecoveryStore(t *testing.T) {
 }
 
 // All directed ENABLE calls (including exact ACK replay and losing claimants)
-// and Leave calls must preserve the full sealed source, not just revision.
+// and entry calls must preserve the full sealed source, not just revision.
 // The suite does not concurrently mutate feature state at these boundaries.
 type managedProjectionStore struct {
 	*KernelStore
 	t *testing.T
 }
 
-func (s *managedProjectionStore) EnableManagedRecovery(ctx context.Context, q kernel.ManagedEnableRequest) (kernel.ManagedTransfer, error) {
-	before, e := s.Load(ctx, q.RunID)
-	if e != nil {
-		s.t.Errorf("load before authority operation: %v", e)
-		return kernel.ManagedTransfer{}, e
+func (s *managedProjectionStore) BeginOwnedPhysicalExecution(ctx context.Context, p kernel.OwnedPhysicalAdmission) (kernel.OwnedPhysicalAdmissionResult, error) {
+	if !p.IsManagedRecovery() {
+		return s.KernelStore.BeginOwnedPhysicalExecution(ctx, p)
 	}
-	out, callErr := s.KernelStore.EnableManagedRecovery(ctx, q)
-	after, e := s.Load(ctx, q.RunID)
+	id := p.Candidate().Grant.ChildRunID
+	before, e := s.Load(ctx, id)
+	if e != nil {
+		return kernel.OwnedPhysicalAdmissionResult{}, e
+	}
+	out, callErr := s.KernelStore.BeginOwnedPhysicalExecution(ctx, p)
+	after, e := s.Load(ctx, id)
 	if e != nil || kernel.ManagedDigest(before) != kernel.ManagedDigest(after) {
-		s.t.Errorf("ENABLE/ACK changed sealed aggregate (including UpdatedAt/EventHead): %v", e)
+		s.t.Errorf("native admission changed sealed aggregate: %v", e)
 	}
 	return out, callErr
 }
-func (s *managedProjectionStore) LeaveManagedSafePoint(ctx context.Context, q kernel.ManagedLeaveRequest) (kernel.ManagedTransfer, error) {
-	before, e := s.Load(ctx, q.RunID)
+func (s *managedProjectionStore) CheckOwnedPhysicalEntry(ctx context.Context, g kernel.ChildExecutionGrant, l kernel.ExecutionLease, expected kernel.Snapshot) (kernel.OwnedPhysicalEntryWindow, error) {
+	before, e := s.Load(ctx, g.ChildRunID)
 	if e != nil {
-		s.t.Errorf("load before authority operation: %v", e)
-		return kernel.ManagedTransfer{}, e
+		s.t.Errorf("load before entry: %v", e)
+		return kernel.OwnedPhysicalEntryWindow{}, e
 	}
-	out, callErr := s.KernelStore.LeaveManagedSafePoint(ctx, q)
-	after, e := s.Load(ctx, q.RunID)
+	out, callErr := s.KernelStore.CheckOwnedPhysicalEntry(ctx, g, l, expected)
+	after, e := s.Load(ctx, g.ChildRunID)
 	if e != nil || kernel.ManagedDigest(before) != kernel.ManagedDigest(after) {
-		s.t.Errorf("Leave changed sealed aggregate (including UpdatedAt/EventHead): %v", e)
+		s.t.Errorf("entry changed original aggregate: %v", e)
 	}
 	return out, callErr
 }

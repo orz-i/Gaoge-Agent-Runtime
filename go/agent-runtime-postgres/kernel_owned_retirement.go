@@ -3,8 +3,6 @@ package postgres
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
@@ -13,57 +11,33 @@ import (
 
 var _ kernel.OwnedRetirementStore = (*KernelStore)(nil)
 
-func pgOwnedSettlement(raw string) (*kernel.OwnedSettlementEvidence, error) {
-	if raw == "" {
-		return nil, nil
-	}
-	return kernel.DecodeOwnedSettlement([]byte(raw))
-}
-
-func pgOwnedMarkEvidence(row models.KernelChildEffectGrantRecord, g kernel.ChildExecutionGrant, s kernel.Snapshot, native kernel.ExecutionLease, now time.Time, p kernel.ChildExecutionSettlement) (string, error) {
-	original, err := pgOwnedSettlement(row.SettlementEvidence)
-	if err != nil {
-		return "", err
-	}
-	evidence, err := kernel.ReduceOwnedPhysicalSettlement(g, s, native, now, row.SettledRevision, pgCallbackCompletion(row), original, p)
-	if err != nil {
-		return "", err
-	}
-	if original != nil {
-		return row.SettlementEvidence, nil
-	}
-	b, err := json.Marshal(evidence)
-	return string(b), err
-}
 func pgOwnedRetirementClosures(tx *gorm.DB, g kernel.ChildExecutionGrant, s kernel.Snapshot) ([]kernel.ManagedTransfer, error) {
-	var rows []models.KernelManagedHistoryRecord
-	if e := tx.Where("run_id = ?", g.ChildRunID).Find(&rows).Error; e != nil {
-		return nil, translateKernelError(e)
+	if g.AdmissionOperation != "managed_resume" {
+		return []kernel.ManagedTransfer{}, nil
 	}
-	histories := make([]kernel.ManagedTransfer, 0, len(rows))
-	for _, row := range rows {
-		var t kernel.ManagedTransfer
-		if e := json.Unmarshal([]byte(row.Payload), &t); e != nil || !t.SafePoint.Valid() || t.SafePoint.ID != row.SuspensionID || t.SafePoint.RecoveryID != row.RecoveryID || t.SafePoint.Host.RunID != row.RunID || t.Revision != row.Revision {
-			return nil, kernel.ErrExecutionConflict
-		}
-		histories = append(histories, t)
+	t, e := pgLoadManaged(tx, g.ChildRunID)
+	if e != nil {
+		return nil, e
+	}
+	h, e := pgLoadManagedByID(tx, t.SafePoint.ID)
+	if e != nil {
+		return nil, e
+	}
+	if kernel.ManagedDigest(h) != kernel.ManagedDigest(t) {
+		return nil, kernel.ErrExecutionConflict
 	}
 	a, e := pgManagedAuthority(tx)
 	if e != nil {
 		return nil, e
 	}
-	return kernel.ValidateOwnedRetirementClosures(g, s, a, histories)
+	return kernel.CloseManagedRetirement(g, s, a, t)
 }
-func pgPersistOwnedRetirement(tx *gorm.DB, row models.KernelChildEffectGrantRecord, g kernel.ChildExecutionGrant, s kernel.Snapshot, native kernel.ExecutionLease) error {
-	original, err := pgOwnedSettlement(row.SettlementEvidence)
-	if err != nil {
-		return err
-	}
+func pgPersistOwnedRetirement(tx *gorm.DB, row models.KernelChildEffectGrantRecord, g kernel.ChildExecutionGrant, s kernel.Snapshot, native kernel.ExecutionLease, permit kernel.ChildExecutionSettlement) error {
 	closures, err := pgOwnedRetirementClosures(tx, g, s)
 	if err != nil {
 		return err
 	}
-	r, err := kernel.BuildOwnedRetirementReceipt(g, s, native, row.SettledRevision, pgCallbackCompletion(row), original, closures)
+	r, err := kernel.BuildOwnedRetirementReceipt(g, s, native, pgCallbackCompletion(row), permit, closures)
 	if err != nil {
 		return err
 	}
@@ -77,7 +51,19 @@ func pgPersistOwnedRetirement(tx *gorm.DB, row models.KernelChildEffectGrantReco
 	if isKernelUniqueConstraint(e) {
 		return kernel.ErrExecutionConflict
 	}
-	return translateKernelError(e)
+	if e != nil {
+		return translateKernelError(e)
+	}
+	if r.Evidence.Completion.LeaseOwned {
+		update := tx.Model(&models.KernelRunRecord{}).Where("run_id = ? AND execution_epoch = ? AND execution_owner = ? AND execution_lease_id = ?", g.ChildRunID, g.ExecutionEpoch, g.ExecutionOwnerID, g.ExecutionLeaseID).UpdateColumns(map[string]any{"execution_owner": "", "execution_lease_id": "", "execution_expires_at": nil})
+		if update.Error != nil {
+			return translateKernelError(update.Error)
+		}
+		if update.RowsAffected != 1 {
+			return kernel.ErrExecutionConflict
+		}
+	}
+	return nil
 }
 func pgLoadOwnedRetirement(tx *gorm.DB, id string) (kernel.OwnedRetirementReceipt, error) {
 	var row models.KernelOwnedRetirementRecord
@@ -96,73 +82,6 @@ func (s *KernelStore) LoadOwnedRetirement(ctx context.Context, id string) (kerne
 	}
 	return pgLoadOwnedRetirement(s.db.WithContext(ctx), id)
 }
-func (s *KernelStore) AcknowledgeOwnedRetirement(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.OwnedRetirementAcknowledgement) (kernel.OwnedRetirementAckResult, error) {
-	if s == nil || s.db == nil || ctx == nil || !g.IsOwned() || g.ID == "" {
-		return kernel.OwnedRetirementAckResult{}, kernel.ErrInvalidInput
-	}
-	var out kernel.OwnedRetirementAckResult
-	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		run, e := lockKernelRun(tx, g.ChildRunID)
-		if e != nil {
-			return e
-		}
-		receipt, e := pgLoadOwnedRetirement(tx, g.ID)
-		if e != nil {
-			if errors.Is(e, kernel.ErrNotFound) {
-				return kernel.ErrExecutionConflict
-			}
-			return e
-		}
-		current, e := kernelSnapshotFrom(run)
-		if e != nil {
-			return e
-		}
-		var count int64
-		if e = tx.Model(&models.KernelChildEffectGrantRecord{}).Where("parent_run_id = ? OR child_run_id = ?", g.ChildRunID, g.ChildRunID).Count(&count).Error; e != nil {
-			return translateKernelError(e)
-		}
-		updated, result, release, e := kernel.ReduceOwnedRetirementACK(receipt, g, p, current, run.ExecutionEpoch, pgManagedLease(run), count != 0)
-		if e != nil {
-			return e
-		}
-		out = result
-		if result.PreviouslyAcknowledged {
-			return nil
-		}
-		if e = pgManagedGate(tx, g.ChildRunID); e != nil {
-			return e
-		}
-		if run.ExecutionQuarantineRevision != 0 {
-			return kernel.ErrExecutionConflict
-		}
-		if release {
-			update := tx.Model(&models.KernelRunRecord{}).Where("run_id = ? AND execution_epoch = ? AND execution_owner = ? AND execution_lease_id = ?", g.ChildRunID, g.ExecutionEpoch, g.ExecutionOwnerID, g.ExecutionLeaseID).UpdateColumns(map[string]any{"execution_owner": "", "execution_lease_id": "", "execution_expires_at": nil})
-			if update.Error != nil {
-				return translateKernelError(update.Error)
-			}
-			if update.RowsAffected != 1 {
-				return kernel.ErrExecutionConflict
-			}
-		}
-		raw, e := json.Marshal(updated)
-		if e != nil {
-			return e
-		}
-		update := tx.Model(&models.KernelOwnedRetirementRecord{}).Where("grant_id = ? AND run_id = ? AND phase = ? AND version = ? AND settled_revision = ?", g.ID, g.ChildRunID, "RETIRED", receipt.Version, receipt.Evidence.Snapshot.Run.Revision).UpdateColumns(map[string]any{"phase": updated.Phase, "payload": string(raw)})
-		if update.Error != nil {
-			return translateKernelError(update.Error)
-		}
-		if update.RowsAffected != 1 {
-			return kernel.ErrExecutionConflict
-		}
-		return nil
-	})
-	if err != nil {
-		return kernel.OwnedRetirementAckResult{}, err
-	}
-	return out, nil
-}
-
 func (s *KernelStore) LookupOwnedRetirementForRun(ctx context.Context, id string) (kernel.OwnedRetirementReceipt, error) {
 	if s == nil || s.db == nil || ctx == nil || id == "" {
 		return kernel.OwnedRetirementReceipt{}, kernel.ErrInvalidInput
@@ -173,7 +92,7 @@ func (s *KernelStore) LookupOwnedRetirementForRun(ctx context.Context, id string
 		if e != nil {
 			return e
 		}
-		if e = pgManagedGate(tx, id); e != nil {
+		if e = pgNativeEntryGate(tx, id); e != nil {
 			return e
 		}
 		if run.ExecutionQuarantineRevision != 0 {

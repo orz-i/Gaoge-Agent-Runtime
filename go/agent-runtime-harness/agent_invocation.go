@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
@@ -185,9 +186,8 @@ func (runner *Runner) startNextInvocationAttempt(
 ) (Snapshot, error) {
 	nextAttempt := invocation.Attempt + 1
 	nextRef := invocationExecutionRefID(invocation.ID, nextAttempt)
-	// The original Store CAS MUST atomically admit the replacement shared
-	// budget generation. A separate Prepare/Commit saga could survive a crash
-	// as an Accepted Invocation without any cancellable Kernel Run.
+	// The Host CAS chooses one immutable Attempt. Native execution admission
+	// follows that choice; legacy external ledgers retain their original CAS.
 	ctx, err := runner.withAtomicRetryBudget(ctx, turn, invocation, nextRef)
 	if err != nil {
 		return Snapshot{}, err
@@ -211,9 +211,8 @@ func (runner *Runner) replayRetriedInvocation(
 	turn Turn,
 	invocation Invocation,
 ) (Snapshot, error) {
-	// The Store's original Retry CAS has already atomically committed the
-	// replacement budget generation. Replay only the same frozen Invocation
-	// and exact physical dispatch identity; never mint another budget grant.
+	// Replay the immutable Host selection. For native accounting an accepted
+	// Attempt may not yet have been admitted to the original ledger.
 	loaded, err := runner.runtime.Load(ctx, invocation.ExecutionRefID)
 	if err == nil {
 		return runner.syncRuntimeSnapshotWithRetry(ctx, turn, invocation, loaded)
@@ -429,6 +428,73 @@ func (runner *Runner) loadInvocationRuntime(
 	return invocation, turn, runtimeSnapshot, err
 }
 
+// nativeRootCommands selects the exact local execution owner. A generic Host
+// interaction handler, external accounting or a foreign/custom canceller
+// has an independent effect boundary and cannot use this native-only contract.
+func (runner *Runner) nativeRootCommands() *agent.Runner {
+	native, ok := runner.agent.(*agent.Runner)
+	cancel, local := runner.cancellation.(*kernel.Runtime)
+	if !ok || !local || cancel != runner.runtime || !native.ObservesKernelRuntime(runner.runtime) ||
+		runner.interactions != nil || (runner.budgets != nil && !runner.nativeBudget()) {
+		return nil
+	}
+	if _, bound := runner.runtime.BoundExecutionLease(); bound {
+		return nil
+	}
+	return native
+}
+
+// Host authorization is read-only for an existing native Run. Do not bypass
+// independent outstanding Host operations from older or mixed compositions.
+// The native Run revision/Grant is the only new execution election.
+func (runner *Runner) originalNativeCommand(ctx context.Context, inv Invocation) (bool, error) {
+	if inv.ParentItemID != "" || terminalInvocationStatus(inv.Status) {
+		return false, ErrConflict
+	}
+	if e := verifyProtectiveInvocation(ctx, runner.store, inv); e != nil {
+		return false, e
+	}
+	turn, e := loadVerifiedTurn(ctx, runner.store, inv.TurnID)
+	if e != nil {
+		return false, e
+	}
+	if terminalTurnStatus(turn.Status) {
+		return false, ErrConflict
+	}
+	current, e := loadTopLevelInvocation(ctx, runner.store, inv.TurnID)
+	if e != nil {
+		return false, e
+	}
+	if !sameFrozenInvocationAuthority(inv, current) || terminalInvocationStatus(current.Status) {
+		return false, ErrConflict
+	}
+	items, e := runner.loadGlobalPhysicalEvidence(ctx, inv.TurnID)
+	if e != nil {
+		return false, e
+	}
+	if ActiveCancellationFence(items) {
+		return false, ErrConflict
+	}
+	if !PendingExecutionDispatch(items, inv.ID) {
+		return true, nil
+	}
+	if repaired, e := runner.recoverOriginalPhysicalDispatch(ctx, inv); e != nil {
+		return false, e
+	} else if !repaired {
+		return false, nil
+	}
+	// Only observe the original receipt. A new Host admission or cancellation
+	// must not be confused with its closure.
+	items, e = runner.loadGlobalPhysicalEvidence(ctx, inv.TurnID)
+	if e != nil {
+		return false, e
+	}
+	if ActiveCancellationFence(items) {
+		return false, ErrConflict
+	}
+	return !PendingExecutionDispatch(items, inv.ID), nil
+}
+
 func (runner *Runner) resumeInvocationExecution(
 	ctx context.Context,
 	invocation Invocation,
@@ -459,6 +525,23 @@ func (runner *Runner) resumeInvocationExecution(
 	}
 	if snapshot, managed, managedErr := runner.recoverManagedInvocation(ctx, invocation); managed {
 		return snapshot, managedErr
+	}
+	if native := runner.nativeRootCommands(); native != nil {
+		ready, e := runner.originalNativeCommand(ctx, invocation)
+		if e != nil {
+			return kernel.Snapshot{}, e
+		}
+		if !ready {
+			// Preserve the original pre-Create Start recovery contract; this
+			// consumes its existing election, never appends a Resume grant.
+			return runner.resumeNativeFencedAgentAfterInterruptedStart(ctx, invocation, expectedRevision, resumer, ErrConflict)
+		}
+		if !native.SupportsManagedRecovery() {
+			return native.Resume(ctx, invocation.ExecutionRefID, expectedRevision)
+		}
+		return runner.withNativeRootCommand(ctx, native, invocation, "resume", nil, func(c context.Context) (kernel.Snapshot, error) {
+			return native.Resume(c, invocation.ExecutionRefID, expectedRevision)
+		})
 	}
 	resumed, resumeErr := runner.withPhysicalInvocationDispatch(ctx, invocation, "resume", func(physicalCtx context.Context) (kernel.Snapshot, error) {
 		return resumer.Resume(physicalCtx, invocation.ExecutionRefID, expectedRevision)

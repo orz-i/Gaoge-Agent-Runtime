@@ -1,10 +1,12 @@
 package kernel
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"reflect"
 	"strings"
 	"time"
@@ -33,24 +35,9 @@ const (
 	ManagedCancel ManagedRecoveryMode = "CANCEL"
 )
 
-type ManagedRecoveryState string
-
-// ManagedLifecycleWorkingStateSummary admits only the dedicated native Agent
-// summary phases. Feature-owned validation is required before any PARK.
-const ManagedLifecycleWorkingStateSummary = "working-state-summary-v3"
-
-// ManagedLifecycleAgentObligations is the native combined proof profile.
-// Older readers must not reinterpret it as a Context-only continuation.
-const ManagedLifecycleAgentObligations = "managed-agent-obligations-v1"
-
-const (
-	ManagedAvailable   ManagedRecoveryState = "AVAILABLE"
-	ManagedInvalidated ManagedRecoveryState = "INVALIDATED"
-	ManagedParked      ManagedRecoveryState = "PARKED"
-	ManagedEnabled     ManagedRecoveryState = "ENABLED"
-	ManagedCancelled   ManagedRecoveryState = "CANCELLED"
-	ManagedClosed      ManagedRecoveryState = "CLOSED"
-)
+// ManagedLifecycleAgentObligations is the one native transfer payload.
+// Context, Summary, Inputs and Budget are optional original obligations.
+const ManagedLifecycleAgentObligations = "managed-agent-obligations-v2"
 
 // ManagedHostBinding is the actual original native Harness dispatch source.
 // Source contains the canonical frozen Invocation/Turn ownership projection,
@@ -96,6 +83,9 @@ func ManagedDispatchOperation(phase string) (string, bool) {
 	}
 }
 
+// DirectNativeCommand has no independently admitted Host execution Item.
+func (b ManagedHostBinding) DirectNativeCommand() bool { return NativeCommandCorrelation(b.DispatchID) }
+
 func (b ManagedHostBinding) Valid() bool {
 	_, ok := ManagedDispatchOperation(b.Phase)
 	approvalValid := (b.Phase == "resolve-approval" && b.Approval != nil && b.Approval.Valid()) || (b.Phase != "resolve-approval" && b.Approval == nil)
@@ -123,6 +113,7 @@ type ManagedCancellation struct {
 	Payload       json.RawMessage `json:",omitempty"`
 	PayloadDigest string
 	Reason        string
+	Native        bool `json:",omitempty"`
 }
 
 // MarshalJSON omits ONLY nil payload. A nonnil empty RawMessage is malformed,
@@ -140,11 +131,18 @@ func (c ManagedCancellation) MarshalJSON() ([]byte, error) {
 		Payload       *json.RawMessage `json:",omitempty"`
 		PayloadDigest string
 		Reason        string
-	}{c.IntentID, c.Seq, payload, c.PayloadDigest, c.Reason})
+		Native        bool `json:",omitempty"`
+	}{c.IntentID, c.Seq, payload, c.PayloadDigest, c.Reason, c.Native})
+}
+
+// Direct represents a cancellation authorized by the native command itself,
+// without electing or persisting a second Host cancellation operation.
+func (c ManagedCancellation) Direct() bool {
+	return c.Native && c.IntentID == "" && c.Seq == 0 && c.Payload == nil && c.PayloadDigest == ""
 }
 
 func (c ManagedCancellation) Valid() bool {
-	return c.IntentID != "" && c.Seq > 0 && json.Valid(c.Payload) && c.PayloadDigest == ManagedDigest(c.Payload)
+	return !c.Native && c.IntentID != "" && c.Seq > 0 && json.Valid(c.Payload) && c.PayloadDigest == ManagedDigest(c.Payload)
 }
 
 // ManagedSafePoint is stored IN the existing native ApplyExecution
@@ -195,16 +193,16 @@ type ManagedAgentObligations struct {
 	PreparationTransitionDigest string `json:"preparationTransitionDigest,omitempty"`
 	// RequalifiedFrom binds an expired first-owner frontier to its exact
 	// preceding immutable point. No callback return is inferred.
-	RequalifiedFrom      string `json:"requalifiedFrom,omitempty"`
-	SettledReceiptDigest string `json:"settledReceiptDigest,omitempty"`
+	RequalifiedFrom string `json:"requalifiedFrom,omitempty"`
 }
 
 func (p ManagedSafePoint) AgentObligations() (ManagedAgentObligations, bool) {
 	var o ManagedAgentObligations
-	if p.LifecycleVersion != ManagedLifecycleAgentObligations || json.Unmarshal(p.LifecycleSource, &o) != nil ||
+	decoder := json.NewDecoder(bytes.NewReader(p.LifecycleSource))
+	decoder.DisallowUnknownFields()
+	if p.LifecycleVersion != ManagedLifecycleAgentObligations || !json.Valid(p.LifecycleSource) || decoder.Decode(&o) != nil ||
 		o.SourceRevision != p.Source.Run.Revision || o.InvocationID != p.ModelInvocationID || o.RequestHash != p.ModelRequestHash ||
-		p.Host.Attempt != 1 || (o.InputBinding == "" && o.InputCursor != 0) ||
-		(o.LedgerID == "" && o.InputBinding == "") {
+		p.Host.Attempt != 1 || (o.InputBinding == "" && o.InputCursor != 0) {
 		return o, false
 	}
 	var journal map[string]json.RawMessage
@@ -224,13 +222,10 @@ func (p ManagedSafePoint) AgentObligations() (ManagedAgentObligations, bool) {
 		c := o.PreparationContext
 		return o, c != nil && c.CheckpointID != "" && validToolReceiptDigest(c.CheckpointDigest) &&
 			o.InvocationID == "" && o.RequestHash == "" && o.SamplingDigest == "" && o.Purpose == "" &&
-			o.BindingDigest == "" && o.RequalifiedFrom == "" && o.SettledReceiptDigest == "" &&
+			o.BindingDigest == "" && o.RequalifiedFrom == "" &&
 			(o.PreparationTransitionDigest == "" || validToolReceiptDigest(o.PreparationTransitionDigest))
 	}
 	if o.PreparationContext != nil || o.PreparationTransitionDigest != "" || o.InvocationID == "" || len(o.RequestHash) != 64 || !validToolReceiptDigest(o.SamplingDigest) {
-		return o, false
-	}
-	if o.SettledReceiptDigest != "" && (o.RequalifiedFrom == "" || o.Phase != "pending" || o.LedgerID == "" || !validToolReceiptDigest(o.SettledReceiptDigest)) {
 		return o, false
 	}
 	if o.RequalifiedFrom != "" && (o.RequalifiedFrom == p.ID || o.Phase == "consumed") {
@@ -245,34 +240,28 @@ func (p ManagedSafePoint) AgentObligations() (ManagedAgentObligations, bool) {
 }
 
 func (p ManagedSafePoint) Valid() bool {
-	modelIdentity := p.ModelInvocationID != "" && len(p.ModelRequestHash) == 64
-	if p.LifecycleVersion == ManagedLifecycleAgentObligations {
-		o, ok := p.AgentObligations()
-		if !ok {
-			return false
-		}
-		modelIdentity = o.Phase == "prepare" || modelIdentity
-	}
-	return p.ID != "" && p.RecoveryID == ManagedRecoveryID(p.ID, p.Host) && p.Host.Valid() && p.Source.Run.ID == p.Host.RunID && p.Source.Run.Kind == "agent" && p.Source.Run.ParentRunID == "" && p.Source.Run.Status == RunStatusRunning && p.Source.Run.Revision > 0 && json.Valid(p.Source.State) && p.Host.MatchesOriginalGrant(p.OriginalGrant) && p.OriginalGrant.MatchesExecution(p.OriginalLease) && modelIdentity && (p.LifecycleVersion == "managed-context-v1" || p.LifecycleVersion == ManagedLifecycleWorkingStateSummary || p.LifecycleVersion == ManagedLifecycleAgentObligations) && json.Valid(p.LifecycleSource)
+	o, ok := p.AgentObligations()
+	return ok && p.ID != "" && p.RecoveryID == ManagedRecoveryID(p.ID, p.Host) && p.Host.Valid() && p.Source.Run.ID == p.Host.RunID && p.Source.Run.Kind == "agent" && p.Source.Run.ParentRunID == "" && p.Source.Run.Status == RunStatusRunning && p.Source.Run.Revision > 0 && json.Valid(p.Source.State) && p.Host.MatchesOriginalGrant(p.OriginalGrant) && p.OriginalGrant.MatchesExecution(p.OriginalLease) && (o.Phase == "prepare" || (p.ModelInvocationID != "" && len(p.ModelRequestHash) == 64))
 }
 
-// ManagedTransfer retains one immutable original recovery identity. Selection
-// is initially empty; its first nonempty mode is immutable across generations.
-// PARKED has no executable owner. ENABLED grants only its winning claimant.
+// ManagedTransfer retains the original recovery facts. The Run revision and
+// native Grant/Lease/Epoch arbitrate admission. The old generation, claimant
+// and activation fields (including the old wire State) are retained only
+// for historical receipt identity. New records never advance a managed state.
 type ManagedActivation struct {
 	Generation uint64
 	ClaimantID string
 	Grant      ChildExecutionGrant
 	Lease      ExecutionLease
-	Selection  ManagedHostReservation
+	Selection  ManagedRecoveryAuthorization
 }
 
 type ManagedTransfer struct {
 	SafePoint      ManagedSafePoint
-	State          ManagedRecoveryState
+	LegacyState    string `json:"State"`
 	Revision       uint64
 	Generation     uint64
-	Selection      ManagedHostReservation
+	Selection      ManagedRecoveryAuthorization
 	ClaimantID     string
 	SuccessorGrant ChildExecutionGrant
 	SuccessorLease ExecutionLease
@@ -280,7 +269,22 @@ type ManagedTransfer struct {
 	Terminal       *Snapshot
 }
 
-type ManagedHostReservation struct {
+// Resolved is an observed native result, not a lifecycle state. Legacy
+// completed wire records retain their exact original receipt digest.
+func (t ManagedTransfer) Resolved() bool {
+	if t.Terminal == nil || !t.Selection.matchesPoint(t.SafePoint) {
+		return false
+	}
+	switch t.Selection.Mode {
+	case ManagedResume:
+		return t.LegacyState == "" || t.LegacyState == "CLOSED"
+	case ManagedCancel:
+		return t.LegacyState == "" || t.LegacyState == "CANCELLED"
+	}
+	return false
+}
+
+type ManagedRecoveryAuthorization struct {
 	ID           string
 	RecoveryID   string
 	SuspensionID string
@@ -290,31 +294,37 @@ type ManagedHostReservation struct {
 	Revision     uint64
 }
 
-func (r ManagedHostReservation) Valid() bool {
-	if r.ID == "" || r.RecoveryID == "" || r.SuspensionID == "" || !r.Binding.Valid() || r.Revision == 0 {
+func (r ManagedRecoveryAuthorization) Valid() bool {
+	// New commands carry only the mode/reason. The remaining fields are
+	// retained solely to verify previously committed historical receipts.
+	if r.ID == "" {
+		if r.RecoveryID != "" || r.SuspensionID != "" || r.Revision != 0 || !reflect.DeepEqual(r.Binding, ManagedHostBinding{}) {
+			return false
+		}
+	} else if r.RecoveryID == "" || r.SuspensionID == "" || !r.Binding.Valid() || r.Revision == 0 {
 		return false
 	}
 	switch r.Mode {
 	case ManagedResume:
 		return reflect.DeepEqual(r.Cancellation, ManagedCancellation{})
 	case ManagedCancel:
-		return r.Cancellation.Valid()
-	default:
-		return false
+		return r.Cancellation.Direct() || (r.ID != "" && r.Cancellation.Valid())
 	}
+	return false
+}
+
+func (r ManagedRecoveryAuthorization) matchesPoint(p ManagedSafePoint) bool {
+	return r.Valid() && (r.ID == "" || (r.RecoveryID == p.RecoveryID && r.SuspensionID == p.ID && reflect.DeepEqual(r.Binding, p.Host)))
 }
 
 // ManagedRecoveryHostStore is a STORAGE authority port wired by the concrete
 // first-party Harness bridge. It receives no Next/callback and cannot certify
 // lifecycle completion. Stores are trusted persistence, as Kernel.Store is.
-// Reserve takes the original Turn lock; it chooses exactly RESUME or CANCEL
-// from real records. Identical replay returns the same immutable selection.
-// A RESERVED selection cannot be revoked while its Kernel transfer may run.
+// Authorization is read-only under the original Turn lock. The Kernel alone
+// chooses the winning RESUME or CANCEL in its native commit.
 type ManagedRecoveryHostStore interface {
 	ManagedRecoveryAuthority(context.Context) (ManagedAuthority, error)
-	ReadManagedOriginalDispatch(context.Context, ManagedHostBinding) (ManagedHostBinding, error)
-	ReserveManagedRecovery(context.Context, ManagedParkedProof) (ManagedHostReservation, error)
-	ReadManagedRecovery(context.Context, ManagedHostBinding, string) (ManagedHostReservation, error)
+	VerifyManagedOriginalDispatch(context.Context, ManagedHostBinding, bool) error
 }
 
 // ManagedSafePointProof is not externally constructible. Stores must validate
@@ -360,151 +370,108 @@ func managedSafePointEventMatches(point ManagedSafePoint, events []EventDraft) b
 	if len(events) != 1 {
 		return false
 	}
-	if point.LifecycleVersion == "managed-context-v1" {
-		return events[0].Type == "agent.model_invocation.pending"
-	}
-	var phase string
-	switch point.LifecycleVersion {
-	case ManagedLifecycleAgentObligations:
-		o, ok := point.AgentObligations()
-		if !ok {
-			return false
-		}
-		if o.RequalifiedFrom != "" {
-			return false
-		}
-		if o.Phase == "prepare" {
-			if o.PreparationTransitionDigest == "" {
-				// The preceding prepare profile admitted only these two events.
-				// Do not use a historical proof for a newly admitted transition.
-				return events[0].Type == "agent.native_preparation.ready" || events[0].Type == "agent.input_applied"
-			}
-			return ManagedPreparationTransition(events) && o.PreparationTransitionDigest == ManagedDigest(events)
-		}
-		if o.Purpose == "" && o.Phase == "consumed" {
-			return events[0].Type == "agent.input_applied"
-		}
-		phase = o.Phase
-	case ManagedLifecycleWorkingStateSummary:
-		var source struct {
-			Phase          string `json:"phase"`
-			SourceRevision uint64 `json:"sourceRevision"`
-			InvocationID   string `json:"invocationID"`
-			RequestHash    string `json:"requestHash"`
-			BindingDigest  string `json:"bindingDigest"`
-		}
-		if json.Unmarshal(point.LifecycleSource, &source) != nil || source.SourceRevision != point.Source.Run.Revision ||
-			source.InvocationID != point.ModelInvocationID || source.RequestHash != point.ModelRequestHash || !validToolReceiptDigest(source.BindingDigest) {
-			return false
-		}
-		phase = source.Phase
-	default:
+	o, ok := point.AgentObligations()
+	if !ok || o.RequalifiedFrom != "" {
 		return false
 	}
-	switch phase {
+	switch o.Phase {
+	case "prepare":
+		if o.PreparationTransitionDigest == "" {
+			return events[0].Type == "agent.native_preparation.ready" || events[0].Type == "agent.input_applied"
+		}
+		return ManagedPreparationTransition(events) && o.PreparationTransitionDigest == ManagedDigest(events)
 	case "pending":
 		return events[0].Type == "agent.model_invocation.pending"
 	case "completed":
 		return events[0].Type == "agent.model_invocation.completed"
 	case "consumed":
+		if o.Purpose == "" {
+			return events[0].Type == "agent.input_applied"
+		}
 		return events[0].Type == "agent.context_summary.consumed"
 	}
 	return false
 }
 
-// ManagedParkQualification is an internal Agent proof of a new safe frontier
+// ManagedFrontierQualification is an internal Agent proof of a new safe frontier
 // after the original point was left. It replaces no history and grants no
-// callback-return or dispatch fact. Store consumes it inside the same PARK CAS.
-type ManagedParkQualification struct {
+// callback-return or dispatch fact. Store consumes it inside the same native admission CAS.
+type ManagedFrontierQualification struct {
 	prior ManagedTransfer
 	point ManagedSafePoint
 	proof *featurecontrol.Proof
 }
 
-func (q ManagedParkQualification) matches(t ManagedTransfer, s Snapshot) bool {
+func (q ManagedFrontierQualification) matches(t ManagedTransfer, s Snapshot) bool {
 	o, ok := q.point.AgentObligations()
 	return q.proof != nil && ok && t.SafePoint.LifecycleVersion == ManagedLifecycleAgentObligations &&
-		t.State == ManagedInvalidated && t.Selection.ID == "" && len(t.Activations) == 0 &&
+		t.LegacyState == "" && t.Terminal == nil && t.Selection.Mode == "" && t.SuccessorGrant.ID == "" && s.Run.Revision > t.SafePoint.Source.Run.Revision &&
 		ManagedDigest(q.prior) == ManagedDigest(t) && o.RequalifiedFrom == t.SafePoint.ID &&
 		q.point.Valid() && q.point.Host.RunID == s.Run.ID && reflect.DeepEqual(q.point.Host, t.SafePoint.Host) &&
 		q.point.OriginalGrant == t.SafePoint.OriginalGrant && sameManagedLease(q.point.OriginalLease, t.SafePoint.OriginalLease) &&
 		q.point.ModelInvocationID == t.SafePoint.ModelInvocationID && q.point.ModelRequestHash == t.SafePoint.ModelRequestHash &&
 		ManagedSourceMatches(q.point, s) &&
-		q.proof.Matches(s.Run.ID, s.Run.Revision, "managed_qualified_park", t.SafePoint.ID, s.State, q.point)
+		q.proof.Matches(s.Run.ID, s.Run.Revision, "managed_qualified_recovery", t.SafePoint.ID, s.State, q.point)
 }
 
-type ManagedParkRequest struct {
-	RunID, SuspensionID string
-	ExpectedRevision    uint64
-	Qualification       ManagedParkQualification
-}
-type ManagedLeaveRequest struct {
-	RunID, SuspensionID                                    string
-	ExpectedRevision, ExpectedTransferRevision, Generation uint64
-	Lease                                                  ExecutionLease
-}
-
-// Caller must stop on any Leave error, including an ambiguous committed ACK.
-// No configurable callback may run before Leave returns successfully.
-type ManagedEnableRequest struct {
-	RunID, SuspensionID, ClaimantID, OwnerID, LeaseID, GrantID string
-	ExpectedTransferRevision, Generation                       uint64
-	LeaseDuration                                              time.Duration
-	Selection                                                  ManagedSelectionProof
+type ManagedRecoverySourceRequest struct {
+	RunID, SuspensionID    string
+	ExpectedRevision       uint64
+	ExpectedTransferDigest string
+	Qualification          ManagedFrontierQualification
 }
 type ManagedCancelRequest struct {
-	RunID, SuspensionID                  string
-	ExpectedTransferRevision, Generation uint64
-	Selection                            ManagedSelectionProof
+	RunID, SuspensionID string
+	Selection           ManagedAdmissionProof
 }
 
 // ManagedRecoveryStore operations use the existing Run/native-lease/grant
 // transaction (Memory mutex, SQLite write transaction, PG row locks).
-// All ordinary Apply/ApplyExecution/Control/Acquire/Renew/Check paths reject
-// PARKED, and cannot substitute an expired native token for recovery authority.
+// Ordinary execution observes only the active native Grant and entry epoch.
 // T0 is carried by StoreMutation.ManagedSafePoint, not a separate commit.
-// Any subsequent ordinary mutation invalidates AVAILABLE atomically.
+// A changed Run revision makes the recorded safe point stale without a write.
 type ManagedRecoveryStore interface {
 	ManagedRecoveryAuthority(context.Context) (ManagedAuthority, error)
 	LoadManagedRecovery(context.Context, string) (ManagedTransfer, error)
 	LoadManagedRecoveryByID(context.Context, string) (ManagedTransfer, error)
-	CompleteManagedRecovery(context.Context, ChildExecutionGrant, Snapshot, ManagedCompletionProof) error
-	ParkManagedRecovery(context.Context, ManagedParkRequest) (ManagedTransfer, error)
-	LeaveManagedSafePoint(context.Context, ManagedLeaveRequest) (ManagedTransfer, error)
-	EnableManagedRecovery(context.Context, ManagedEnableRequest) (ManagedTransfer, error)
-	CancelParkedManagedContinuation(context.Context, ManagedCancelRequest) (ManagedTransfer, error)
+	CommitManagedCancellation(context.Context, ManagedCancelRequest) (ManagedTransfer, error)
 }
 
-// ManagedParkedProof can only be reconstructed by Runtime reading its actual
-// configured Store. Host compares this binding against its own original rows.
-type ManagedParkedProof struct {
-	transfer  ManagedTransfer
-	authority ManagedAuthority
-	valid     bool
-}
-
-func (p ManagedParkedProof) Transfer() ManagedTransfer { return managedClone(p.transfer) }
-func (p ManagedParkedProof) Matches(binding ManagedHostBinding) bool {
-	return p.valid && p.authority == binding.KernelAuthority && p.transfer.State == ManagedParked && p.transfer.SafePoint.Valid() && reflect.DeepEqual(p.transfer.SafePoint.Host, binding)
-}
-
-// ManagedSelectionProof is minted only after Runtime's configured Host port
-// reads the committed reservation; it is not deserializable caller authority.
-type ManagedSelectionProof struct {
-	reservation ManagedHostReservation
+// ManagedAdmissionProof is minted from the configured Host's read-only
+// authorization on first admission, or the native selection on re-admission.
+// It is not deserializable caller authority.
+type ManagedAdmissionProof struct {
+	reservation ManagedRecoveryAuthorization
 	transfer    ManagedTransfer
+	request     ManagedRecoverySourceRequest
 	valid       bool
 }
 
-func (p ManagedSelectionProof) Reservation() ManagedHostReservation {
+func (p ManagedAdmissionProof) Point() ManagedSafePoint { return managedClone(p.transfer.SafePoint) }
+
+func (p ManagedAdmissionProof) Authorization() ManagedRecoveryAuthorization {
 	return managedClone(p.reservation)
 }
-func (p ManagedSelectionProof) Matches(t ManagedTransfer, mode ManagedRecoveryMode) bool {
+func (p ManagedAdmissionProof) Matches(t ManagedTransfer, mode ManagedRecoveryMode) bool {
 	r := p.reservation
-	if !p.valid || !r.Valid() || r.Mode != mode || t.State != ManagedParked || t.Revision != p.transfer.Revision || t.Generation != p.transfer.Generation || !reflect.DeepEqual(t.SafePoint, p.transfer.SafePoint) || r.RecoveryID != t.SafePoint.RecoveryID || r.SuspensionID != t.SafePoint.ID || !reflect.DeepEqual(r.Binding, t.SafePoint.Host) {
+	if !p.valid || !r.Valid() || r.Mode != mode || t.LegacyState != "" || t.Terminal != nil || ManagedDigest(t) != ManagedDigest(p.transfer) || r.ID != "" {
 		return false
 	}
-	return t.Selection.ID == "" || reflect.DeepEqual(t.Selection, r)
+	return t.Selection.Mode == "" || reflect.DeepEqual(t.Selection, r)
+}
+
+// PrepareManagedAdmission rechecks the exact observed source, expiry, and
+// old execution segment under the same native transaction that commits the
+// successor or cancellation. The preliminary preparation was read-only.
+func PrepareManagedAdmission(t ManagedTransfer, p ManagedAdmissionProof, s Snapshot, l ExecutionLease, g ChildExecutionGrant, a ManagedAuthority, physicalEpoch uint64, now time.Time) (ManagedTransfer, error) {
+	if !p.valid || p.request.ExpectedTransferDigest == "" {
+		return ManagedTransfer{}, ErrExecutionConflict
+	}
+	next, err := ValidateManagedRecoverySource(t, p.request, s, l, g, a, physicalEpoch, now)
+	if err != nil || !p.Matches(next, p.reservation.Mode) {
+		return ManagedTransfer{}, ErrExecutionConflict
+	}
+	return next, nil
 }
 
 func ManagedDigest(value any) string {
@@ -525,13 +492,13 @@ func sameManagedLease(a, b ExecutionLease) bool {
 	return a.RunID == b.RunID && a.OwnerID == b.OwnerID && a.LeaseID == b.LeaseID && a.Epoch == b.Epoch
 }
 
-// ManagedCurrentAuthority selects the only active native identity. Original
-// authority remains immutable historical evidence after a successor is enabled.
-func ManagedCurrentAuthority(t ManagedTransfer) (ChildExecutionGrant, ExecutionLease) {
+// ManagedCurrentGrant identifies the predecessor execution segment. Only
+// the native Store lease, not a historical copy in the safe point, owns time.
+func ManagedCurrentGrant(t ManagedTransfer) ChildExecutionGrant {
 	if t.SuccessorGrant.ID != "" {
-		return t.SuccessorGrant, t.SuccessorLease
+		return t.SuccessorGrant
 	}
-	return t.SafePoint.OriginalGrant, t.SafePoint.OriginalLease
+	return t.SafePoint.OriginalGrant
 }
 
 // ManagedSourceMatches compares the full persisted aggregate including EventHead.
@@ -539,137 +506,197 @@ func ManagedSourceMatches(p ManagedSafePoint, s Snapshot) bool {
 	return ManagedDigest(p.Source) == ManagedDigest(s)
 }
 
-// ManagedEnabledTransfer is the shared exact T3 builder. Store supplies current
-// authoritative native epoch and time INSIDE its lock/transaction. Persist its
-// lease and active child-grant index together with the returned transfer.
-func ManagedEnabledTransfer(t ManagedTransfer, q ManagedEnableRequest, s Snapshot, epoch uint64, now time.Time) (ManagedTransfer, error) {
-	if q.RunID != s.Run.ID || q.SuspensionID != t.SafePoint.ID || q.ExpectedTransferRevision != t.Revision || q.Generation != t.Generation || q.ClaimantID == "" || q.OwnerID == "" || q.LeaseID == "" || !(GrantIdentity{GrantID: q.GrantID, RunID: q.RunID}).Valid() || !validExecutionDuration(q.LeaseDuration) || epoch == ^uint64(0) || !ManagedSourceMatches(t.SafePoint, s) || !q.Selection.Matches(t, ManagedResume) {
-		return ManagedTransfer{}, ErrExecutionConflict
-	}
-	lease := ExecutionLease{RunID: q.RunID, OwnerID: q.OwnerID, LeaseID: q.LeaseID, Epoch: epoch + 1, ExpiresAt: now.UTC().Add(q.LeaseDuration)}
-	grant := ChildExecutionGrant{ID: q.GrantID, ChildRunID: q.RunID, ExpectedRevision: s.Run.Revision, ExecutionOwnerID: lease.OwnerID, ExecutionLeaseID: lease.LeaseID, ExecutionEpoch: lease.Epoch, AdmissionOperation: "managed_resume"}
-	grant.AdmissionSourceHash = ownedAdmissionHash(s, lease, grant.AdmissionOperation)
-	t.State = ManagedEnabled
-	t.Revision++
-	t.Selection = q.Selection.Reservation()
-	t.ClaimantID = q.ClaimantID
-	t.SuccessorLease = lease
-	t.SuccessorGrant = grant
-	t.Activations = append(t.Activations, ManagedActivation{Generation: t.Generation, ClaimantID: q.ClaimantID, Grant: grant, Lease: lease, Selection: t.Selection})
-	return t, nil
+// The original selection must retain its exact persisted source identity
+// when the entered successor is later retired. Neither entry nor closure
+// may substitute another valid reservation for the same Run.
+func managedResumeSelectionMatches(t ManagedTransfer) bool {
+	return t.Selection.Mode == ManagedResume && t.Selection.matchesPoint(t.SafePoint)
 }
 
-// ManagedCancellationMutation is the ONLY allowed PARKED terminal mutation.
+// OwnedAdmission turns an already authorized recovery source into the same
+// native admission permit as ordinary execution. The Lease token supplies
+// the private attempt commitment; there is no separate claimant identity.
+func (p ManagedAdmissionProof) OwnedAdmission(q ExecutionAcquireRequest, leaseID, grantID string) OwnedPhysicalAdmission {
+	t := p.transfer
+	if !p.Matches(t, ManagedResume) || q.RunID != t.SafePoint.Host.RunID || !validExecutionAcquireRequest(q) || strings.TrimSpace(q.OwnerID) != q.OwnerID || leaseID == "" || !(GrantIdentity{GrantID: grantID, RunID: q.RunID}).Valid() {
+		return OwnedPhysicalAdmission{}
+	}
+	l := ExecutionLease{RunID: q.RunID, OwnerID: q.OwnerID, LeaseID: leaseID}
+	g := ChildExecutionGrant{ID: grantID, ChildRunID: q.RunID, ExpectedRevision: t.SafePoint.Source.Run.Revision, ExecutionOwnerID: q.OwnerID, ExecutionLeaseID: leaseID, AdmissionOperation: "managed_resume"}
+	return OwnedPhysicalAdmission{acquire: q, attempt: sha256.Sum256([]byte(leaseID)), candidate: OwnedPhysicalAdmissionResult{Grant: g, Lease: l}, recovery: p}
+}
+
+// ResolveManagedPhysicalAdmission qualifies the sole expired predecessor,
+// then delegates the new owner to the ordinary native admission reducer.
+// The returned recovery facts and native segment commit together.
+func ResolveManagedPhysicalAdmission(ctx context.Context, t ManagedTransfer, p OwnedPhysicalAdmission, s Snapshot, l ExecutionLease, g ChildExecutionGrant, a ManagedAuthority, physicalEpoch uint64, now time.Time, ledger budget.LedgerStore) (OwnedPhysicalAdmissionResult, ManagedTransfer, error) {
+	var zero OwnedPhysicalAdmissionResult
+	t, err := PrepareManagedAdmission(t, p.recovery, s, l, g, a, physicalEpoch, now)
+	if err != nil {
+		return zero, ManagedTransfer{}, err
+	}
+	if _, err = managedRecoveryLedger(ctx, t, ledger); err != nil {
+		return zero, ManagedTransfer{}, err
+	}
+	v, err := ResolveOwnedPhysicalAdmission(s, l, now, false, false, p)
+	if err != nil {
+		return zero, ManagedTransfer{}, err
+	}
+	t.Revision, t.Selection = s.Run.Revision, p.recovery.Authorization()
+	t.SuccessorGrant, t.SuccessorLease = v.Grant, v.Lease
+	return v, t, nil
+}
+
+// Quiescence is deliberately narrower than ordinary receipt recovery. Never
+// transfer an active child or held/waiting reservation (even a known unsent
+// hold). No quota is reserved at this pre-dispatch point. Prior settled and
+// released reservations remain the original accounting authority.
+func QuiescentManagedLedger(l budget.Ledger, runID string) bool {
+	binding, ok := l.Runs[runID]
+	if !ok || binding.ParentRunID != "" || l.ID == "" || l.Revision == 0 || len(l.RootRetries) != 0 {
+		return false
+	}
+	for id := range l.Runs {
+		if id != runID && !l.FinishedRuns[id] {
+			return false
+		}
+	}
+	for _, res := range l.Reservations {
+		if res.Status != budget.ReservationSettled && res.Status != budget.ReservationReleased {
+			return false
+		}
+	}
+	return true
+}
+
+// Allow only the original Root cancellation and terminal lifetime closure to
+// change the ledger during CANCEL. All charges/receipts, limits, ancestry,
+// prior child closures and other reservations remain exactly the frozen facts.
+func ManagedLedgerDigest(l budget.Ledger, runID string) string {
+	l = budget.CloneLedger(l)
+	l.Revision = 0
+	l.Cancelled = false
+	delete(l.FinishedRuns, runID)
+	return ManagedDigest(l)
+}
+
+// ManagedCancellationLedger plans the accounting part under the existing
+// managed cancellation Store transaction. No callback or Host ledger writes.
+func managedRecoveryLedger(ctx context.Context, t ManagedTransfer, store budget.LedgerStore) (budget.Ledger, error) {
+	p, ok := t.SafePoint.AgentObligations()
+	if !ok || p.LedgerID != t.SafePoint.Source.Run.BudgetScopeID {
+		return budget.Ledger{}, ErrInvalidInput
+	}
+	if p.LedgerID == "" {
+		return budget.Ledger{}, nil
+	}
+	runID := t.SafePoint.Host.RunID
+	l, err := LoadRunBudget(ctx, store, t.SafePoint.Source.Run)
+	if err != nil {
+		return l, err
+	}
+	if l.ID != p.LedgerID || l.Revision < p.LedgerRevision || !QuiescentManagedLedger(l, runID) || ManagedLedgerDigest(l, runID) != p.LedgerDigest || l.RunCancelled(runID) || l.FinishedRuns[runID] {
+		return l, budget.ErrLedgerConflict
+	}
+	return l, nil
+}
+
+func ManagedCancellationLedger(ctx context.Context, t ManagedTransfer, store budget.LedgerStore) (*budget.LedgerMutation, error) {
+	l, err := managedRecoveryLedger(ctx, t, store)
+	if err != nil || l.ID == "" {
+		return nil, err
+	}
+	return budget.PlanRunCancellation(ctx, l, t.SafePoint.Host.RunID, "")
+}
+
+// ValidateManagedBudgetClosure verifies native accounting before issuing a
+// closure proof to the Host projection.
+func ValidateManagedBudgetClosure(point ManagedSafePoint, terminal Snapshot, mode ManagedRecoveryMode, l budget.Ledger) error {
+	p, ok := point.AgentObligations()
+	if !ok {
+		return ErrInvalidInput
+	}
+	if p.LedgerID == "" {
+		return nil
+	}
+	if l.ID != point.Host.TurnID || l.ID != p.LedgerID || l.Revision < p.LedgerRevision {
+		return budget.ErrLedgerConflict
+	}
+	runID := point.Host.RunID
+	if mode == ManagedCancel {
+		if terminal.Run.Status != RunStatusCancelled || !l.RunCancelled(runID) || !l.FinishedRuns[runID] ||
+			!QuiescentManagedLedger(l, runID) || ManagedLedgerDigest(l, runID) != p.LedgerDigest {
+			return budget.ErrLedgerConflict
+		}
+	} else if terminal.Run.Status == RunStatusCompleted || terminal.Run.Status == RunStatusFailed || terminal.Run.Status == RunStatusCancelled {
+		if !l.FinishedRuns[runID] {
+			return budget.ErrLedgerConflict
+		}
+	}
+	return nil
+}
+
+// ManagedCancellationMutation is the qualified native cancellation reducer.
 // It preserves feature state and prior receipts exactly and performs the native
 // Cancel transformation, not arbitrary caller-provided ApplyControl content.
 func ManagedCancellationMutation(t ManagedTransfer, q ManagedCancelRequest, s Snapshot, now time.Time) (ManagedTransfer, StoreMutation, error) {
-	if q.RunID != s.Run.ID || q.SuspensionID != t.SafePoint.ID || q.ExpectedTransferRevision != t.Revision || q.Generation != t.Generation || !ManagedSourceMatches(t.SafePoint, s) || !q.Selection.Matches(t, ManagedCancel) {
-		return ManagedTransfer{}, StoreMutation{}, ErrExecutionConflict
-	}
-	if o, ok := t.SafePoint.AgentObligations(); ok && o.SettledReceiptDigest != "" {
+	if q.RunID != s.Run.ID || q.SuspensionID != t.SafePoint.ID || !ManagedSourceMatches(t.SafePoint, s) || !q.Selection.Matches(t, ManagedCancel) {
 		return ManagedTransfer{}, StoreMutation{}, ErrExecutionConflict
 	}
 	r := s.Run
 	r.Status = RunStatusCancelled
 	r.Revision++
 	r.ErrorCode = "run.cancelled"
-	r.ErrorDetail = q.Selection.Reservation().Cancellation.Reason
+	r.ErrorDetail = q.Selection.Authorization().Cancellation.Reason
 	r.UpdatedAt = now.UTC()
 	ended := now.UTC()
 	r.EndedAt = &ended
 	m := StoreMutation{Record: Record{Run: r, State: cloneJSON(s.State)}, Events: []EventDraft{{Type: "run.cancelled", Message: r.ErrorDetail}}}
-	t.State = ManagedCancelled
-	t.Revision++
-	t.Selection = q.Selection.Reservation()
+	t.Revision = r.Revision
+	t.Selection = q.Selection.Authorization()
 	terminal := Snapshot{Run: r, State: cloneJSON(s.State), EventHead: s.EventHead + 1}
 	t.Terminal = &terminal
 	return t, m, nil
 }
 
-// ManagedParkTransfer is a pure reducer; caller holds the Run/lease/grant
+// ValidateManagedRecoverySource is a pure reducer; caller holds the Run/lease/grant
 // transaction. Store-time expiry and identity are checked together, not by a
-// preliminary read. Existing PARKED is an idempotent read, not a second fence.
-func ManagedParkTransfer(t ManagedTransfer, q ManagedParkRequest, s Snapshot, l ExecutionLease, g ChildExecutionGrant, a ManagedAuthority, now time.Time) (ManagedTransfer, error) {
-	if q.RunID != s.Run.ID || q.SuspensionID != t.SafePoint.ID || q.ExpectedRevision != s.Run.Revision || !t.SafePoint.Valid() || a != t.SafePoint.Host.KernelAuthority {
+// preliminary read. No durable PARKED state is produced.
+func ValidateManagedRecoverySource(t ManagedTransfer, q ManagedRecoverySourceRequest, s Snapshot, l ExecutionLease, g ChildExecutionGrant, a ManagedAuthority, physicalEpoch uint64, now time.Time) (ManagedTransfer, error) {
+	if q.RunID != s.Run.ID || q.SuspensionID != t.SafePoint.ID || q.ExpectedRevision != s.Run.Revision || t.LegacyState != "" || t.Terminal != nil || (q.ExpectedTransferDigest != "" && q.ExpectedTransferDigest != ManagedDigest(t)) || !t.SafePoint.Valid() || a != t.SafePoint.Host.KernelAuthority {
 		return ManagedTransfer{}, ErrExecutionConflict
 	}
 	if q.Qualification.proof != nil {
 		if !q.Qualification.matches(t, s) {
 			return ManagedTransfer{}, ErrExecutionConflict
 		}
-		// Only the freshly qualified current source may be parked. The prior
-		// historical point remains INVALIDATED in every Store.
+		// A stale source stays historical; only its exact requalification
+		// can be admitted at the new Run revision.
 		t.SafePoint = managedClone(q.Qualification.point)
-		t.State = ManagedAvailable
+		t.Revision = s.Run.Revision
 	}
 	if !ManagedSourceMatches(t.SafePoint, s) {
 		return ManagedTransfer{}, ErrExecutionConflict
 	}
-	if t.State == ManagedParked {
-		return t, nil
-	}
-	if t.State != ManagedAvailable && t.State != ManagedEnabled {
+	// Ordinary predecessor admission is conservatively considered entered.
+	// A recovered segment can be taken over only before native entry.
+	if g.AdmissionOperation == "managed_resume" {
+		if physicalEpoch >= g.ExecutionEpoch {
+			return ManagedTransfer{}, ErrExecutionConflict
+		}
+	} else if physicalEpoch != g.ExecutionEpoch {
 		return ManagedTransfer{}, ErrExecutionConflict
 	}
-	wantG, wantL := ManagedCurrentAuthority(t)
-	if g != wantG || !sameManagedLease(l, wantL) || !g.MatchesExecution(l) || l.ExpiresAt.IsZero() || now.Before(l.ExpiresAt) {
+	if g != ManagedCurrentGrant(t) || !g.MatchesExecution(l) || l.ExpiresAt.IsZero() || now.Before(l.ExpiresAt) {
 		return ManagedTransfer{}, ErrExecutionConflict
 	}
-	t.State = ManagedParked
-	t.Revision++
-	t.Generation++
-	return t, nil
-}
-func ManagedLeaveTransfer(t ManagedTransfer, q ManagedLeaveRequest, s Snapshot, l ExecutionLease, now time.Time) (ManagedTransfer, error) {
-	if q.RunID != s.Run.ID || q.SuspensionID != t.SafePoint.ID || q.ExpectedRevision != s.Run.Revision || q.ExpectedTransferRevision != t.Revision || q.Generation != t.Generation || !ManagedSourceMatches(t.SafePoint, s) || (t.State != ManagedAvailable && t.State != ManagedEnabled) {
-		return ManagedTransfer{}, ErrExecutionConflict
-	}
-	_, expected := ManagedCurrentAuthority(t)
-	if !sameManagedLease(expected, l) || !sameManagedLease(q.Lease, l) || !now.Before(l.ExpiresAt) {
-		return ManagedTransfer{}, ErrExecutionConflict
-	}
-	t.State = ManagedInvalidated
-	t.Revision++
 	return t, nil
 }
 
-// ManagedOrdinaryGate is mandatory before ordinary owner/control mutations.
-// AVAILABLE renewal remains legal and competes atomically with PARK.
-// Source mutations invalidate AVAILABLE/ENABLED in the same transaction.
-// Read-only loads and exact recovery reducers do not call this helper.
-func ManagedOrdinaryGate(t ManagedTransfer) error {
-	switch t.State {
-	case ManagedParked:
-		return ErrExecutionConflict
-	case ManagedAvailable, ManagedInvalidated, ManagedEnabled, ManagedCancelled, ManagedClosed:
-		return nil
-	}
-	return nil
-}
-
-// ManagedInitialTransfer stores T0 metadata only after proof.Matches passed in
-// the same transaction. A new safe point must not destroy historical lineage;
-// keep prior transfers indexed by suspension ID, plus a current Run pointer.
+// ManagedInitialTransfer records the original immutable qualification.
+// Its freshness is the Run revision and its recovery owner is the Grant.
 func ManagedInitialTransfer(p ManagedSafePoint) ManagedTransfer {
-	return ManagedTransfer{SafePoint: managedClone(p), State: ManagedAvailable, Revision: 1, Generation: 1}
-}
-
-// ManagedInvalidateMutation must be persisted with a successful ordinary Run
-// mutation; rejected mutations leave it unchanged. It never grants dispatch.
-func ManagedInvalidateMutation(t ManagedTransfer) ManagedTransfer {
-	if t.State == ManagedAvailable || t.State == ManagedEnabled {
-		t.State = ManagedInvalidated
-		t.Revision++
-	}
-	return t
-}
-
-// ManagedCompletionProof records an actual returned, settled successor. It is
-// issued by the Root owner only after real lifecycle completion, never PARK.
-type ManagedCompletionProof struct{ proof *featurecontrol.Proof }
-
-func (p ManagedCompletionProof) Matches(g ChildExecutionGrant, s Snapshot) bool {
-	return p.proof.Matches(s.Run.ID, s.Run.Revision, "managed_successor_completed", g.ID, s.State, s)
+	return ManagedTransfer{SafePoint: managedClone(p), Revision: p.Source.Run.Revision}
 }
 
 // ManagedClosureProof is reconstructed only by authoritative Kernel reads.
@@ -682,15 +709,14 @@ type ManagedClosureProof struct {
 
 func (p ManagedClosureProof) Transfer() ManagedTransfer { return managedClone(p.transfer) }
 func (p ManagedClosureProof) Snapshot() Snapshot        { return managedClone(p.snapshot) }
-func (p ManagedClosureProof) Matches(r ManagedHostReservation) bool {
-	return p.valid && r.Valid() && reflect.DeepEqual(p.transfer.Selection, r) && (p.transfer.State == ManagedClosed || p.transfer.State == ManagedCancelled) && p.transfer.Terminal != nil && ManagedDigest(*p.transfer.Terminal) == ManagedDigest(p.snapshot)
+func (p ManagedClosureProof) Matches(r ManagedRecoveryAuthorization) bool {
+	return p.valid && r.Valid() && reflect.DeepEqual(p.transfer.Selection, r) && p.transfer.Resolved() && ManagedDigest(*p.transfer.Terminal) == ManagedDigest(p.snapshot)
 }
 
-func ManagedEnableReplay(t ManagedTransfer, q ManagedEnableRequest, s Snapshot, l ExecutionLease, now time.Time) bool {
-	original := q.Selection.transfer
-	return q.Selection.Matches(original, ManagedResume) && t.State == ManagedEnabled && t.SafePoint.ID == q.SuspensionID && t.SafePoint.Host.RunID == q.RunID && t.Revision == q.ExpectedTransferRevision+1 && t.Generation == q.Generation && t.ClaimantID == q.ClaimantID && t.SuccessorLease.OwnerID == q.OwnerID && t.SuccessorLease.LeaseID == q.LeaseID && t.SuccessorGrant.ID == q.GrantID && sameManagedLease(l, t.SuccessorLease) && now.Before(l.ExpiresAt) && ManagedSourceMatches(t.SafePoint, s) && reflect.DeepEqual(t.Selection, q.Selection.reservation)
-}
 func ManagedCancelReplay(t ManagedTransfer, q ManagedCancelRequest, s Snapshot) bool {
 	original := q.Selection.transfer
-	return q.Selection.Matches(original, ManagedCancel) && t.State == ManagedCancelled && t.SafePoint.ID == q.SuspensionID && t.SafePoint.Host.RunID == q.RunID && t.Revision == q.ExpectedTransferRevision+1 && t.Generation == q.Generation && t.Terminal != nil && ManagedDigest(*t.Terminal) == ManagedDigest(s) && reflect.DeepEqual(t.Selection, q.Selection.reservation)
+	return q.Selection.Matches(original, ManagedCancel) && t.Resolved() && t.Selection.Mode == ManagedCancel &&
+		t.SafePoint.ID == q.SuspensionID && s.Run.ID == q.RunID && ManagedDigest(t.SafePoint) == ManagedDigest(original.SafePoint) &&
+		t.Terminal != nil && s.Run.Revision == original.SafePoint.Source.Run.Revision+1 &&
+		ManagedDigest(*t.Terminal) == ManagedDigest(s) && reflect.DeepEqual(t.Selection, q.Selection.reservation)
 }

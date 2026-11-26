@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
@@ -44,10 +45,25 @@ func (runner *Runner) undispatchedRootNoEffect(
 			}
 		} else {
 			grant, ok := ledger.RootRetries[original.ExecutionRefID]
-			if !ok || !grant.Active || grant.InvocationID != original.ID || grant.Attempt != original.Attempt {
+			if !ok && runner.nativeBudget() && !requireBudgetCancelled && original.Status == InvocationAccepted {
+				// The Host selected this Attempt but the native admission
+				// never committed. Its immutable selection and no-dispatch
+				// facts are sufficient to elect cancellation.
+				selection, selectionErr := nativeRetrySelection(ctx, runner.store, original)
+				if selectionErr != nil {
+					return true, selectionErr
+				}
+				selected, selectionErr := budget.PlanRootRetry(*ledger, original.ID, selection.Previous.ExecutionRefID, original.ExecutionRefID, original.Attempt)
+				if selectionErr != nil {
+					return true, selectionErr
+				}
+				// Verify the complete historical accounting lineage against
+				// the pure candidate; this read-side check grants no dispatch.
+				ledger = &selected
+			} else if !ok || !grant.Active || grant.InvocationID != original.ID || grant.Attempt != original.Attempt {
 				return true, ErrExecutionOutcomeUnknown
 			}
-			if requireBudgetCancelled && !ledger.CancelledRuns[original.ExecutionRefID] {
+			if requireBudgetCancelled && (ledger == nil || !ledger.CancelledRuns[original.ExecutionRefID]) {
 				return true, ErrExecutionOutcomeUnknown
 			}
 		}
@@ -136,8 +152,21 @@ func (runner *Runner) cancelUndispatchedRoot(
 				return Snapshot{}, true, err
 			}
 		}
-	} else if err = runner.cancelTurnBudget(ctx, turn, original.ExecutionRefID); err != nil {
-		return Snapshot{}, true, err
+	} else {
+		if runner.nativeBudget() {
+			l, loadErr := runner.loadTurnBudget(ctx, turn)
+			if loadErr != nil || l == nil {
+				return Snapshot{}, true, errors.Join(ErrExecutionOutcomeUnknown, loadErr)
+			}
+			if !l.CancelledRuns[original.ExecutionRefID] {
+				if err = runner.admitUnstartedRetryCancellation(ctx, turn, original); err != nil {
+					return Snapshot{}, true, err
+				}
+			}
+		}
+		if err = runner.cancelTurnBudget(ctx, turn, original.ExecutionRefID); err != nil {
+			return Snapshot{}, true, err
+		}
 	}
 	if proven, proofErr := runner.undispatchedRootNoEffect(ctx, turn, original, true); !proven || proofErr != nil {
 		return Snapshot{}, true, errors.Join(ErrConflict, proofErr)

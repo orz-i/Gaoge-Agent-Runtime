@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
@@ -41,7 +42,6 @@ func nativeRunLayers(d Dependencies) bool {
 func scopedDeferredRootCallbacks(d Dependencies) bool {
 	if !nativeRunLayers(d) ||
 		d.PrepareModelRequest != nil || d.NormalizeModelPolicy != nil ||
-		(d.ManagedContextRecovery != nil && !summaryNativeBridge(d.ManagedContextRecovery.ports, "boundedContextPorts", d.Runtime)) ||
 		len(d.CompletionPolicies) != 0 || d.ToolDiscovery != nil {
 		return false
 	}
@@ -105,9 +105,27 @@ func (runner *Runner) VerifiedDeferredRootControl(ctx context.Context, rt *kerne
 		if err != nil || rt.VerifyBoundedToolControl(ctx, child) != nil {
 			return false
 		}
-		// Before any Tool effect, the original bounded approval return and
-		// exact retired frame suffice. No external verifier is needed for an
-		// empty Tool history. Nonempty history still needs its original owner.
+		// Co-located execution already committed original Tool outcomes
+		// with the Run's receipt transitions. The native Cancel CAS checks
+		// all admitted accounting obligations; a second external owner
+		// receipt is not required to stop an otherwise quiescent Agent.
+		// Delegated result verification remains a distinct read-only API.
+		if a := runner.atomicBudget(); a != nil {
+			l, e := a.bindReceiptScope(ctx, child.Run.ID, "")
+			if e != nil {
+				return false
+			}
+			if l.ID != "" {
+				for _, res := range l.Reservations {
+					if res.RunID == child.Run.ID && res.Dispatched && res.Status != budget.ReservationSettled {
+						return false
+					}
+				}
+				return true
+			}
+		}
+		// Split-store legacy compositions still require independent owner
+		// evidence for a nonempty Tool history.
 		if state.Budget.Usage.ToolCalls == 0 && len(state.DelegatedToolReceipts) == 0 && len(state.RecoveredTools) == 0 {
 			return true
 		}

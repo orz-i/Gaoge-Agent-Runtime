@@ -13,6 +13,7 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
@@ -200,13 +201,15 @@ func (runner *Runner) delegate(ctx context.Context, turn Turn, invocation Invoca
 		return DelegationResult{}, err
 	}
 	if !admitted {
-		// Do not issue another physical Handoff, but allow a duplicate
-		// Manual/API caller to read a fully authenticated *original*
-		// terminal result. A merely Running child, absent grant receipt,
-		// foreign route, or inconsistent terminal projection is unknown.
-		return runner.verifiedTerminalDelegationReplay(ctx, turn, delegation, startedItemID)
+		retry, err := runner.retryNativeDelegation(ctx, turn, delegation, startedItemID)
+		if err != nil {
+			return DelegationResult{}, err
+		}
+		if !retry {
+			return runner.verifiedTerminalDelegationReplay(ctx, turn, delegation, startedItemID)
+		}
 	}
-	return runner.executeDelegation(ctx, turn, invocation, parent, delegation, startedItemID)
+	return runner.executeDelegation(ctx, turn, invocation, parent, delegation, startedItemID, request.callHash)
 }
 
 // verifiedTerminalDelegationReplay is read-only. It cannot run the original
@@ -428,13 +431,45 @@ func (runner *Runner) prepareDelegation(
 	return delegation, parent, nil
 }
 
+// Retry only the immutable same child after an actual native no-effect
+// rejection. The Store's original dispatch fence still elects the next
+// caller, including a concurrent cancellation or an already returned Start.
+func (runner *Runner) retryNativeDelegation(ctx context.Context, turn Turn, d handoff.Delegation, startedID string) (bool, error) {
+	if runner.nativeLocalDelegation(d) == nil {
+		return false, nil
+	}
+	owner, e := verifiedRunInvocation(ctx, runner.store, d.ChildRunID)
+	if errors.Is(e, ErrNotFound) {
+		return false, nil
+	}
+	if e != nil {
+		return false, e
+	}
+	if owner.TurnID != turn.ID || owner.ParentItemID != startedID {
+		return false, ErrConflict
+	}
+	frozen, e := decodeFrozenHandoffDelegation(owner.Input)
+	if e != nil || !sameHandoffFrozenExecution(frozen, d) {
+		return false, ErrConflict
+	}
+	items, e := runner.loadGlobalPhysicalEvidence(ctx, turn.ID)
+	if e != nil || !verifiedRejectedHandoffStarts(items, owner) {
+		return false, e
+	}
+	_, e = runner.runtime.Load(ctx, d.ChildRunID)
+	if errors.Is(e, kernel.ErrNotFound) {
+		return true, nil
+	}
+	return false, e
+}
+
 func (runner *Runner) executeDelegation(
 	ctx context.Context,
 	turn Turn,
 	invocation Invocation,
 	parent kernel.Snapshot,
 	delegation handoff.Delegation,
-	startedItemID string,
+	startedItemID, callHash string,
 ) (DelegationResult, error) {
 	if err := runner.ensureDelegationRelation(ctx, invocation.ExecutionRefID, delegation); err != nil {
 		return DelegationResult{}, err
@@ -445,7 +480,41 @@ func (runner *Runner) executeDelegation(
 	if err := runner.prepareHandoffChild(ctx, turn, invocation, delegation, startedItemID); err != nil {
 		return DelegationResult{}, err
 	}
-	delegation, delegateErr := runner.dispatchHandoff(ctx, turn, parent, delegation, startedItemID)
+	returned, delegateErr := runner.dispatchHandoff(ctx, turn, parent, delegation, startedItemID)
+	if isDispatchProvenNoEffect(delegateErr) {
+		if errors.Is(delegateErr, budget.ErrWaiting) {
+			if _, e := runner.recordDelegationItem(ctx, turn, invocation, delegation, ItemWaiting, "", callHash); e != nil {
+				return DelegationResult{}, errors.Join(ErrExecutionOutcomeUnknown, e)
+			}
+			snapshot, e := runner.Load(ctx, turn.ID)
+			return DelegationResult{Delegation: delegation, Snapshot: snapshot}, e
+		}
+		// Project the original rejected Host selection, not a synthetic
+		// terminal Kernel Run. Never let it block a parent's known no-effect
+		// Tool receipt or grant another Attempt.
+		child, e := verifiedRunInvocation(ctx, runner.store, delegation.ChildRunID)
+		if e != nil || child.ParentItemID != startedItemID {
+			return DelegationResult{}, errors.Join(ErrExecutionOutcomeUnknown, e)
+		}
+		witness, e := withOriginalNoEffectTerminalWitness(ctx, child, delegateErr)
+		if e != nil {
+			return DelegationResult{}, e
+		}
+		child.Status, child.ErrorCode, child.ErrorDetail = InvocationFailed, agentStartFailedCode, delegateErr.Error()
+		child.UpdatedAt = runner.clock.Now().UTC()
+		child, e = runner.store.UpdateInvocation(witness, child, child.Revision)
+		if e == nil {
+			e = runner.recordInvocationItem(ctx, child)
+		}
+		if e != nil {
+			return DelegationResult{}, errors.Join(ErrExecutionOutcomeUnknown, e)
+		}
+		return DelegationResult{}, delegateErr
+	}
+	if returned.ID == "" {
+		return DelegationResult{}, delegateErr
+	}
+	delegation = returned
 	status := delegationItemStatus(delegation.Status)
 	if status != ItemStarted {
 		if _, itemErr := runner.recordDelegationItem(ctx, turn, invocation, delegation, status, startedItemID); itemErr != nil {
@@ -557,7 +626,26 @@ func (runner *Runner) dispatchHandoff(
 	if err != nil {
 		return handoff.Delegation{}, err
 	}
-	started, startErr := runner.handoffs.StartOrLoad(withoutContextCheckpoint(ctx), parent, delegation)
+	var started handoff.Delegation
+	var startErr error
+	if native := runner.nativeLocalDelegation(frozen); native != nil {
+		_, outcome, e := native.ObservePhysicalDispatch(withoutContextCheckpoint(ctx), child.ExecutionRefID, plugin.RunStart, grant.ID, func(c context.Context) (kernel.Snapshot, error) {
+			started, startErr = runner.handoffs.StartOrLoad(c, parent, delegation)
+			return kernel.Snapshot{}, startErr
+		})
+		startErr = e
+		if started.ID == "" && agent.IsNativeStartNoEffect(startErr) {
+			if e = runner.finishPhysicalDispatchGrant(ctx, grant, "native_agent_start_no_effect"); e != nil {
+				return handoff.Delegation{}, errors.Join(ErrExecutionOutcomeUnknown, startErr, e)
+			}
+			return handoff.Delegation{}, dispatchProvenNoEffect{cause: startErr}
+		}
+		if !outcome.Matches(child.ExecutionRefID, plugin.RunStart) || outcome.Kind() == agent.PhysicalCallCreated {
+			return handoff.Delegation{}, errors.Join(ErrExecutionOutcomeUnknown, startErr)
+		}
+	} else {
+		started, startErr = runner.handoffs.StartOrLoad(withoutContextCheckpoint(ctx), parent, delegation)
+	}
 	if !sameHandoffFrozenExecution(frozen, started) ||
 		(started.Status != handoff.StatusRunning && started.Status != handoff.StatusCompleted &&
 			started.Status != handoff.StatusFailed && started.Status != handoff.StatusCancelled) {

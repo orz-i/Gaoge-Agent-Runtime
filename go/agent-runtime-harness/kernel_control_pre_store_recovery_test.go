@@ -170,11 +170,12 @@ func TestKernelStoreControlConflictNeverProvesNativeNoEffect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !harness.PendingExecutionDispatch(items, owner.ID) {
-		t.Fatal("Store CAS conflict in write-capable phase released grant")
+	if harness.PendingExecutionDispatch(items, owner.ID) {
+		t.Fatal("Store CAS conflict created separate Host authority")
 	}
-	if _, err := runner.Cancel(t.Context(), paused.Turn.ID, "uncertain Store control conflict"); !errors.Is(err, harness.ErrConflict) {
-		t.Fatalf("uncertain Store CAS conflict was allowed to cancel: %v", err)
+	stopped, e := runner.Cancel(t.Context(), paused.Turn.ID, "native cancellation after Store CAS conflict")
+	if e != nil || stopped.Turn.Status != harness.TurnCancelled {
+		t.Fatalf("native control could not arbitrate: %v", e)
 	}
 }
 
@@ -244,10 +245,11 @@ func TestCommittedStoreCannotForwardUnrelatedNoEffectProof(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !harness.PendingExecutionDispatch(items, owner.ID) {
-		t.Fatal("unrelated direct Kernel proof crossed a committed Store CAS")
+	if harness.PendingExecutionDispatch(items, owner.ID) {
+		t.Fatal("forwarded no-effect created separate Host authority")
 	}
-	if _, err := runner.Cancel(t.Context(), paused.Turn.ID, "uncertain Store outcome"); !errors.Is(err, harness.ErrConflict) {
-		t.Fatalf("Kernel forwarded proof accidentally allowed cancel: %v", err)
+	stopped, e := runner.Cancel(t.Context(), paused.Turn.ID, "native cancellation after forwarded no-effect")
+	if e != nil || stopped.Turn.Status != harness.TurnCancelled {
+		t.Fatalf("native control could not arbitrate: %v", e)
 	}
 }

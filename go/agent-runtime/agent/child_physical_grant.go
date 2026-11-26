@@ -23,24 +23,21 @@ import (
 // A crashed/unknown Model or Tool outcome retains the Grant. Only an Agent
 // that has committed settlement of every physical intent may close it; no
 // deadline or process-local mutex can silently authorize another executor.
-func (runner *Runner) withChildPhysicalGrant(ctx context.Context, runID string, expectedRevision uint64, operation string,
+func (runner *Runner) withChildPhysicalGrant(ctx context.Context, sourceSnapshot kernel.Snapshot, operation string,
 	physical func(context.Context, *Runner) (kernel.Snapshot, error)) (kernel.Snapshot, error) {
 	if runner == nil || runner.runtime == nil || physical == nil {
 		return kernel.Snapshot{}, ErrInvalidRequest
 	}
-	// A child nested in another first-party physical owner acquires its
-	// OWN Grant. Never carry the parent's write permit into a foreign Run.
+	if sourceSnapshot.Run.ParentRunID == "" {
+		return physical(ctx, runner)
+	}
+	runID, expectedRevision := sourceSnapshot.Run.ID, sourceSnapshot.Run.Revision
+	// A parented child needs its own original scope, never the parent's
+	// physical mutation permit.
 	executionRuntime := runner.runtime.WithoutPhysicalGrant()
 	child, err := executionRuntime.Load(ctx, runID)
 	if err != nil {
 		return kernel.Snapshot{}, err
-	}
-	if child.Run.ParentRunID == "" {
-		// Root Agent's durable ModelInvocation/ToolDispatch and ExecutionLease
-		// authority has distinct restart/replay semantics. Do not conflate it
-		// with a child execution Grant. The Root Start creates
-		// its Run before any arbitrary Host Run middleware is called.
-		return physical(ctx, runner)
 	}
 	// This is only the in-process journal source, not new Store authority.
 	source, err := json.Marshal(struct {

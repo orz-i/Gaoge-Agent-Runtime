@@ -68,7 +68,7 @@ func feasibilityState(t *testing.T, s *harness.SessionClient, o harness.AgentSes
 	if err != nil {
 		t.Fatal(err)
 	}
-	ledger, err := store.LoadBudget(t.Context(), out.Turn.ID)
+	ledger, err := o.Runtime.BudgetStore().LoadBudget(t.Context(), out.Turn.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +229,7 @@ func TestContextSharedBudgetPreexistingHoldWaitsWithoutReplanning(t *testing.T) 
 	meter := &samplingMeter{}
 	opts.BudgetMeter, opts.Context.Counter = meter, meter
 	opts.Session.Config.SharedBudget = &budget.Limits{MaxLLMCalls: 1, MaxInputTokens: 1000, MaxOutputTokens: 128}
-	coordinator := budget.Coordinator{Store: store}
+	coordinator := budget.Coordinator{Store: opts.Runtime.BudgetStore()}
 	const holdID = "model:other-run"
 	var ledgerID string
 	opts.Context.ResolveWindow = func(ctx context.Context, r model.Request) (rc.ModelWindow, error) {
@@ -261,10 +261,15 @@ func TestContextSharedBudgetPreexistingHoldWaitsWithoutReplanning(t *testing.T) 
 	out, run, view, ledger := feasibilityState(t, s, opts, store, "waiting")
 	if !errors.Is(err, budget.ErrWaiting) || errors.Is(err, agent.ErrRootOutcomeUnknown) || run.Run.Status != kernel.RunStatusRunning ||
 		len(client.requests) != 0 || len(view.ModelInvocations) != 1 || view.ModelInvocations[0].SamplingPlan == nil ||
-		out.Turn.ContextRef.Generation != 1 || ledger.Reservations["model:"+view.ModelInvocations[0].ID].Status != budget.ReservationWaiting {
+		out.Turn.ContextRef.Generation != 1 {
 		t.Fatalf("transient contention did not preserve a waiting plan: err=%v run=%s", err, run.Run.Status)
 	}
 	inv := view.ModelInvocations[0]
+	// Native admission has not committed: the durable intent owns the wait,
+	// and no separate reservation or dispatch has been granted to this call.
+	if _, exists := ledger.Reservations["model:"+inv.ID]; exists || inv.DispatchAttempt != 0 {
+		t.Fatalf("waiting intent acquired physical accounting authority: %+v", ledger.Reservations)
+	}
 	counts, plans := len(meter.counted), len(meter.metered)
 	if _, err = coordinator.Release(t.Context(), ledgerID, holdID); err != nil {
 		t.Fatal(err)

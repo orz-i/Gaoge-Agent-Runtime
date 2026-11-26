@@ -115,6 +115,32 @@ func (runner *Runner) frozenDelegation(ctx context.Context, turnID, id string) (
 	return handoff.Delegation{}, false, nil
 }
 
+// The standard local child uses the exact same native budget adapter and
+// Runtime as its root. Route identity is a composition fact, not inferred
+// from a same-ID local Run.
+func (runner *Runner) nativeLocalDelegation(d handoff.Delegation) *agent.Runner {
+	if !runner.nativeBudget() {
+		return nil
+	}
+	native, ok := runner.agent.(*agent.Runner)
+	c, bound := runner.handoffs.(*handoff.Coordinator)
+	if !ok || !bound || !c.UsesEagerLocalAgentForDelegation(runner.runtime, native, d) {
+		return nil
+	}
+	a, err := runner.budgets.Adapter()
+	if err != nil || !native.UsesNativeBudget(a) {
+		return nil
+	}
+	return native
+}
+
+func delegationBudgetLimits(d handoff.Delegation) budget.Limits {
+	if d.SubtreeLimits != nil {
+		return *d.SubtreeLimits
+	}
+	return d.Limits
+}
+
 func (runner *Runner) admitDelegationChild(ctx context.Context, turn Turn, parent Invocation, delegation handoff.Delegation) error {
 	config, err := loadSealedConfig(ctx, runner.store, turn.ConfigSnapshotID)
 	if err != nil || config.SharedBudget == nil {
@@ -122,10 +148,7 @@ func (runner *Runner) admitDelegationChild(ctx context.Context, turn Turn, paren
 	}
 	// Historical frozen Waiting envelopes cannot bypass the current meter
 	// contract. Reject unsupported hard limits before any ledger mutation.
-	childLimits := delegation.Limits
-	if delegation.SubtreeLimits != nil {
-		childLimits = *delegation.SubtreeLimits
-	}
+	childLimits := delegationBudgetLimits(delegation)
 	if !enforceableHarnessBudgetLimits(childLimits) {
 		return ErrInvalidRequest
 	}
@@ -137,9 +160,20 @@ func (runner *Runner) admitDelegationChild(ctx context.Context, turn Turn, paren
 	if err != nil {
 		return err
 	}
-	// Recover terminal releases missed between the Runtime commit and the budget
-	// commit. Waiting coordinators and merely cancelled requests still occupy
-	// capacity until their Run has actually ended.
+	binding := budget.RunBudget{ParentRunID: parent.ExecutionRefID, Limits: childLimits}
+	if runner.nativeLocalDelegation(delegation) != nil {
+		// Capacity preview only. Do not consume a child count, lifetime
+		// slot, or project a phantom registration before native Create.
+		if ledger.ID != turn.ID {
+			return budget.ErrLedgerConflict
+		}
+		draft := budget.LedgerMap{ledger.ID: ledger}
+		_, err = (budget.Coordinator{Store: draft}).RegisterRun(ctx, ledger.ID, delegation.ChildRunID, binding)
+		return err
+	}
+	// Reconcile legacy/remote lifetime releases and uncreated reservations.
+	// A native local terminal Run must already have settled its own ledger.
+	// Waiting or merely cancelled requests retain lifetime capacity.
 	var finished []string
 	for id, binding := range ledger.Runs {
 		if ledger.FinishedRuns[id] {
@@ -170,6 +204,12 @@ func (runner *Runner) admitDelegationChild(ctx context.Context, turn Turn, paren
 			return loadErr
 		}
 		if terminalRuntimeStatus(snapshot.Run.Status) {
+			// Native terminal commits already settle the lifetime in the
+			// same transaction. Missing accounting is not a repairable
+			// Host projection, nor permission to admit another descendant.
+			if runner.budgets.dependencies.Runtime != nil && snapshot.Run.Kind == "agent" {
+				return ErrExecutionOutcomeUnknown
+			}
 			finished = append(finished, id)
 		}
 	}
@@ -180,10 +220,7 @@ func (runner *Runner) admitDelegationChild(ctx context.Context, turn Turn, paren
 	}
 	// Admission happens before child topology facts are appended so a hard
 	// descendant ceiling cannot leave a phantom relation or child Invocation.
-	ledger, err = coordinator.RegisterRun(ctx, turn.ID, delegation.ChildRunID, budget.RunBudget{
-		ParentRunID: parent.ExecutionRefID,
-		Limits:      childLimits,
-	})
+	ledger, err = coordinator.RegisterRun(ctx, turn.ID, delegation.ChildRunID, binding)
 	if err != nil {
 		return err
 	}

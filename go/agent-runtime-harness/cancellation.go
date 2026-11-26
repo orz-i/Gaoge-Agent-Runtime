@@ -185,17 +185,23 @@ func (runner *Runner) cancelRuntimeRun(
 				}
 			}
 			if err != nil {
+				if runner.nativeBudget() && nativeKernel {
+					return current, true, cancellationReadNoEffect{cause: err}
+				}
 				return kernel.Snapshot{}, true, err
 			}
 		}
 		// RunRelation children may belong to a remote Feature executor even
 		// when this Kernel contains a same-ID Run (including a terminal twin).
 		if err = runner.verifyLocalRelationRun(ctx, current, true); err != nil {
+			if runner.nativeBudget() && nativeKernel {
+				return current, true, cancellationReadNoEffect{cause: err}
+			}
 			return kernel.Snapshot{}, true, err
 		}
 		if terminalRuntimeStatus(current.Run.Status) {
 			if root != nil {
-				if err := runner.reconcileTerminalRootCancellation(ctx, current); err != nil {
+				if err := runner.reconcileTerminalRootRetirement(ctx, current); err != nil {
 					return current, true, err
 				}
 			}

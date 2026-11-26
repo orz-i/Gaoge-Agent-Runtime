@@ -90,54 +90,26 @@ func (store *KernelStore) AcquireExecution(ctx context.Context, request kernel.E
 		if err != nil {
 			return err
 		}
-		if transfer, e := pgLoadManaged(tx, request.RunID); e == nil && transfer.State == kernel.ManagedParked {
-			return kernel.ErrChildExecutionBusy
-		} else if e != nil && !errors.Is(e, kernel.ErrNotFound) {
-			return e
-		}
 		if scopeErr := pgRejectOwnedPhysical(tx, request.RunID); scopeErr != nil {
 			return scopeErr
-		}
-		current, _, err = pgSettleRetirementSuccessor(tx, current)
-		if err != nil {
-			return err
-		}
-		switch kernel.RunStatus(current.Status) {
-		case kernel.RunStatusCompleted, kernel.RunStatusFailed, kernel.RunStatusCancelled:
-			return kernel.ErrTerminal
-		case kernel.RunStatusRunning:
-		case kernel.RunStatusWaitingInput:
-			if current.Kind != "agent" || current.ExecutionEpoch == 0 {
-				return kernel.ErrExecutionConflict
-			}
-		case kernel.RunStatusPausedBudget:
-			return kernel.ErrExecutionConflict
-		default:
-			return kernel.ErrExecutionConflict
 		}
 		now, err := pgStoreNow(tx)
 		if err != nil {
 			return err
 		}
-		if current.ExecutionQuarantineRevision != 0 {
-			return kernel.ErrExecutionQuarantined
-		}
-		if current.ExecutionEpoch == 0 {
-			return kernel.ErrExecutionRequired
-		}
-		if current.ExecutionEpoch == math.MaxInt64 || (current.ExecutionExpiresAt != nil && now.Before(*current.ExecutionExpiresAt)) {
-			return kernel.ErrExecutionConflict
-		}
 		id, err := pgLeaseToken()
 		if err != nil {
 			return err
 		}
-		expiration := now.Add(request.LeaseDuration).UTC()
+		lease, err = kernel.PlanExecutionAcquire(kernel.Run{ID: current.RunID, Kind: kernel.RunKind(current.Kind), Status: kernel.RunStatus(current.Status)}, pgManagedLease(current), now, request, id, current.ExecutionQuarantineRevision != 0)
+		if err != nil {
+			return err
+		}
 		res := tx.Model(&models.KernelRunRecord{}).Where("run_id = ? AND revision = ? AND execution_epoch = ?",
 			request.RunID, current.Revision, current.ExecutionEpoch).UpdateColumns(map[string]any{
-			"execution_epoch": current.ExecutionEpoch + 1,
-			"execution_owner": strings.TrimSpace(request.OwnerID), "execution_lease_id": id,
-			"execution_expires_at": expiration,
+			"execution_epoch": lease.Epoch,
+			"execution_owner": lease.OwnerID, "execution_lease_id": lease.LeaseID,
+			"execution_expires_at": lease.ExpiresAt,
 		})
 		if res.Error != nil {
 			return executionQueryError(tx, res.Error)
@@ -152,8 +124,7 @@ func (store *KernelStore) AcquireExecution(ctx context.Context, request kernel.E
 		if persisted.ExecutionExpiresAt == nil {
 			return kernel.ErrExecutionConflict
 		}
-		lease = kernel.ExecutionLease{RunID: request.RunID, OwnerID: strings.TrimSpace(request.OwnerID),
-			LeaseID: id, Epoch: current.ExecutionEpoch + 1, ExpiresAt: persisted.ExecutionExpiresAt.UTC()}
+		lease = pgManagedLease(persisted)
 		return nil
 	})
 	if err != nil {
@@ -222,15 +193,6 @@ func (store *KernelStore) ReleaseExecution(ctx context.Context, lease kernel.Exe
 		}
 		if scopeErr := pgRejectOwnedPhysical(tx, lease.RunID); scopeErr != nil {
 			return scopeErr
-		}
-		original := current
-		var released bool
-		current, released, err = pgSettleRetirementSuccessor(tx, current)
-		if err != nil {
-			return err
-		}
-		if released && original.ExecutionEpoch == lease.Epoch && original.ExecutionOwner == lease.OwnerID && original.ExecutionLeaseID == lease.LeaseID {
-			return nil
 		}
 		now, err := pgStoreNow(tx)
 		if err != nil {

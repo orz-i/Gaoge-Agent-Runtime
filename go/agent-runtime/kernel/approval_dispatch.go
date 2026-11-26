@@ -44,8 +44,7 @@ func (r *Runtime) stampApprovalDispatch(current Snapshot, next *StoreMutation) e
 }
 
 // CommittedApprovalDispatch reads the exact native approval fact, never a
-// later terminal state or a decision supplied by the observer. The original
-// callback/transfer retirement is a separate obligation.
+// later terminal state or a decision supplied by the observer.
 func (r *Runtime) CommittedApprovalDispatch(ctx context.Context, runID, dispatchID string, expected ManagedApprovalDecision) (bool, error) {
 	if r == nil || ctx == nil || !expected.Valid() {
 		return false, ErrInvalidInput
@@ -58,33 +57,72 @@ func (r *Runtime) CommittedApprovalDispatch(ctx context.Context, runID, dispatch
 	if err != nil {
 		return false, err
 	}
-	var after int64
 	found := false
+	err = r.visitCommittedApprovals(ctx, source, func(grant string, decision ManagedApprovalDecision) error {
+		if grant != id {
+			return nil
+		}
+		if found || decision != expected {
+			return ErrExecutionConflict
+		}
+		found = true
+		return nil
+	})
+	return found, err
+}
+
+// NativeApprovalDecisions observes only approval facts committed by native
+// commands without a Host dispatch Item. Other approval projections retain
+// their original external/legacy contract.
+func (r *Runtime) NativeApprovalDecisions(ctx context.Context, source Snapshot) ([]ManagedApprovalDecision, error) {
+	var decisions []ManagedApprovalDecision
+	seen := map[string]bool{}
+	err := r.visitCommittedApprovals(ctx, source, func(grant string, decision ManagedApprovalDecision) error {
+		if !strings.HasPrefix(grant, ownedNativeCommandGrantPrefix) {
+			return nil
+		}
+		if seen[decision.CheckpointID] {
+			return ErrExecutionConflict
+		}
+		seen[decision.CheckpointID] = true
+		decisions = append(decisions, decision)
+		return nil
+	})
+	return decisions, err
+}
+
+func (r *Runtime) visitCommittedApprovals(ctx context.Context, source Snapshot, visit func(string, ManagedApprovalDecision) error) error {
+	if r == nil || ctx == nil || source.Run.ID == "" {
+		return ErrInvalidInput
+	}
+	var after int64
 	for after < source.EventHead {
-		events, err := r.ListEvents(ctx, runID, after, 512)
+		events, err := r.ListEvents(ctx, source.Run.ID, after, 512)
 		if err != nil {
-			return false, err
+			return err
 		}
 		if len(events) == 0 {
-			return false, ErrApplyOutcomeUnknown
+			return ErrApplyOutcomeUnknown
 		}
 		for _, event := range events {
 			if event.Seq != after+1 {
-				return false, ErrApplyOutcomeUnknown
+				return ErrApplyOutcomeUnknown
 			}
 			after = event.Seq
 			if after > source.EventHead {
 				break
 			}
-			if event.Type != approvalDispatchEvent || event.Message != id {
+			if event.Type != approvalDispatchEvent {
 				continue
 			}
 			var fact approvalDispatchFact
-			if found || jsoncontract.ValidateUniqueJSONObject(event.Data) != nil || json.Unmarshal(event.Data, &fact) != nil || fact.SourceRevision == 0 || fact.SourceRevision >= source.Run.Revision || fact.Decision != expected {
-				return false, ErrExecutionConflict
+			if !strings.HasPrefix(event.Message, ownedDispatchGrantPrefix) || jsoncontract.ValidateUniqueJSONObject(event.Data) != nil || json.Unmarshal(event.Data, &fact) != nil || fact.SourceRevision == 0 || fact.SourceRevision >= source.Run.Revision || !fact.Decision.Valid() {
+				return ErrExecutionConflict
 			}
-			found = true
+			if err = visit(event.Message, fact.Decision); err != nil {
+				return err
+			}
 		}
 	}
-	return found, nil
+	return nil
 }

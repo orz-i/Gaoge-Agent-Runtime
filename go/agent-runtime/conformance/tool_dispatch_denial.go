@@ -133,7 +133,7 @@ func (m dispatchDenialOpaqueLayer) Tool(ctx context.Context, _ plugin.ToolInvoca
 }
 
 func toolDispatchDenial(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store), ledgerFactory func(*testing.T) (budget.LedgerStore, func() budget.LedgerStore)) {
-	for _, mode := range []string{"budget-only", "timeline-outer", "timeline-inner", "parented", "cleanup-cas", "projection-failure", "timeline-failure", "opaque-before", "opaque-pass", "opaque-mask", "opaque-augment", "opaque-forged-result", "opaque-inner-unentered", "dispatch-write-before", "dispatch-write-ack", "actual-handler-error", "retirement-recovery-before", "retirement-recovery-ack", "retirement-mark-before", "retirement-mark-ack", "retirement-t4-before", "retirement-t4-ack", "retirement-finish-before", "retirement-finish-ack", "retirement-ack-before", "retirement-ack-ack"} {
+	for _, mode := range []string{"budget-only", "timeline-outer", "timeline-inner", "parented", "cleanup-cas", "projection-failure", "timeline-failure", "opaque-before", "opaque-pass", "opaque-mask", "opaque-augment", "opaque-forged-result", "opaque-inner-unentered", "dispatch-write-before", "dispatch-write-ack", "actual-handler-error", "retirement-recovery-before", "retirement-recovery-ack", "retirement-finish-before", "retirement-finish-ack"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx := t.Context()
 			retirementMode := strings.HasPrefix(mode, "retirement-")
@@ -324,14 +324,11 @@ func toolDispatchDenial(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 				}
 				receipt, receiptErr := rt.LoadOwnedRetirement(ctx, g.ID)
 				switch stage {
-				case "finish-ack", "ack-before", "ack-ack":
+				case "finish-ack":
 					if receiptErr != nil {
 						t.Fatal(receiptErr)
 					}
-					want := "RETIRED"
-					if stage == "ack-ack" {
-						want = "ACKNOWLEDGED"
-					}
+					want := "ACKNOWLEDGED"
 					if receipt.Phase != want || receipt.Evidence.Grant != g || receipt.Evidence.Completion != c {
 						t.Fatal("wrong original retirement", receipt)
 					}
@@ -340,28 +337,19 @@ func toolDispatchDenial(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 						t.Fatal("premature retirement", receiptErr)
 					}
 				}
-				if stage == "ack-ack" {
-					if _, err = r.RootDeferredCleanupEligibility(ctx, root, before.Run.Revision); !errors.Is(err, kernel.ErrNotFound) {
-						t.Fatal("historical ACK selected as current scope", err)
-					}
-					if err = rt.VerifyOwnedRootSettlement(ctx, before); err != nil {
-						t.Fatal("actual acknowledged retirement not observable", err)
-					}
-				} else {
-					if err = rt.VerifyReturnedRootSettlement(ctx, before); err != nil {
-						t.Fatal("exact returned original scope not observable", stage, err)
-					}
-					next, err := r.RootDeferredCleanupEligibility(ctx, root, before.Run.Revision)
-					if err != nil || !original.Matches(next) || next.RetirementOnly() == marked {
-						t.Fatal("same original retirement scope not selected", stage, err)
-					}
-					if _, err = r.ReconcileRootDeferredChildren(ctx, root, before.Run.Revision, agent.RootDeferredCleanupScope{}); !errors.Is(err, kernel.ErrExecutionConflict) {
-						t.Fatal("foreign cleanup scope accepted", err)
-					}
-					before, err = r.ReconcileRootDeferredChildren(ctx, root, before.Run.Revision, original)
-					if err != nil {
-						t.Fatal("receipt-only retirement did not converge", stage, err)
-					}
+				if err = rt.VerifyReturnedRootSettlement(ctx, before); err != nil {
+					t.Fatal("exact returned original scope not observable", stage, err)
+				}
+				next, err := r.RootDeferredCleanupEligibility(ctx, root, before.Run.Revision)
+				if err != nil || !original.Matches(next) || next.RetirementOnly() == marked {
+					t.Fatal("same original retirement scope not selected", stage, err)
+				}
+				if _, err = r.ReconcileRootDeferredChildren(ctx, root, before.Run.Revision, agent.RootDeferredCleanupScope{}); !errors.Is(err, kernel.ErrExecutionConflict) {
+					t.Fatal("foreign cleanup scope accepted", err)
+				}
+				before, err = r.ReconcileRootDeferredChildren(ctx, root, before.Run.Revision, original)
+				if err != nil {
+					t.Fatal("receipt-only retirement did not converge", stage, err)
 				}
 				final, err := rt.Cancel(ctx, root, before.Run.Revision, "finish original elected cancellation")
 				if err != nil || final.Run.Status != kernel.RunStatusCancelled || physical != 0 || policies != 0 || reads != 0 || len(m.calls) != 1 {

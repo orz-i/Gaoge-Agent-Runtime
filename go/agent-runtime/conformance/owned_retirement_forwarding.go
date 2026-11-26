@@ -23,13 +23,6 @@ func (s *ea1AgentReceiptFault) LoadOwnedRetirement(ctx context.Context, id strin
 	}
 	return p.LoadOwnedRetirement(ctx, id)
 }
-func (s *ea1AgentReceiptFault) AcknowledgeOwnedRetirement(ctx context.Context, g kernel.ChildExecutionGrant, a kernel.OwnedRetirementAcknowledgement) (kernel.OwnedRetirementAckResult, error) {
-	p, e := retirementPort(s.Store)
-	if e != nil {
-		return kernel.OwnedRetirementAckResult{}, e
-	}
-	return p.AcknowledgeOwnedRetirement(ctx, g, a)
-}
 
 func (s *ea1AgentAdmissionStore) LoadOwnedRetirement(ctx context.Context, id string) (kernel.OwnedRetirementReceipt, error) {
 	p, e := retirementPort(s.Store)
@@ -38,27 +31,16 @@ func (s *ea1AgentAdmissionStore) LoadOwnedRetirement(ctx context.Context, id str
 	}
 	return p.LoadOwnedRetirement(ctx, id)
 }
-func (s *ea1AgentAdmissionStore) AcknowledgeOwnedRetirement(ctx context.Context, g kernel.ChildExecutionGrant, a kernel.OwnedRetirementAcknowledgement) (kernel.OwnedRetirementAckResult, error) {
-	p, e := retirementPort(s.Store)
-	if e != nil {
-		return kernel.OwnedRetirementAckResult{}, e
-	}
-	return p.AcknowledgeOwnedRetirement(ctx, g, a)
-}
 
 func (s *ea1StartSettlementStore) LoadOwnedRetirement(ctx context.Context, id string) (kernel.OwnedRetirementReceipt, error) {
+	if s.mode == "P4" && s.finishCommits != 0 && s.original.ID == id {
+		return kernel.OwnedRetirementReceipt{}, s.fault
+	}
 	p, e := retirementPort(s.Store)
 	if e != nil {
 		return kernel.OwnedRetirementReceipt{}, e
 	}
 	return p.LoadOwnedRetirement(ctx, id)
-}
-func (s *ea1StartSettlementStore) AcknowledgeOwnedRetirement(ctx context.Context, g kernel.ChildExecutionGrant, a kernel.OwnedRetirementAcknowledgement) (kernel.OwnedRetirementAckResult, error) {
-	p, e := retirementPort(s.Store)
-	if e != nil {
-		return kernel.OwnedRetirementAckResult{}, e
-	}
-	return p.AcknowledgeOwnedRetirement(ctx, g, a)
 }
 
 func (s *ea1OwnedRecoveryCapture) LoadOwnedRetirement(ctx context.Context, id string) (kernel.OwnedRetirementReceipt, error) {
@@ -67,13 +49,6 @@ func (s *ea1OwnedRecoveryCapture) LoadOwnedRetirement(ctx context.Context, id st
 		return kernel.OwnedRetirementReceipt{}, e
 	}
 	return p.LoadOwnedRetirement(ctx, id)
-}
-func (s *ea1OwnedRecoveryCapture) AcknowledgeOwnedRetirement(ctx context.Context, g kernel.ChildExecutionGrant, a kernel.OwnedRetirementAcknowledgement) (kernel.OwnedRetirementAckResult, error) {
-	p, e := retirementPort(s.Store)
-	if e != nil {
-		return kernel.OwnedRetirementAckResult{}, e
-	}
-	return p.AcknowledgeOwnedRetirement(ctx, g, a)
 }
 
 func (s *ea1AgentReceiptFault) LookupOwnedRetirementForRun(ctx context.Context, id string) (kernel.OwnedRetirementReceipt, error) {

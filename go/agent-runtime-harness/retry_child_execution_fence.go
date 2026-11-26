@@ -67,10 +67,41 @@ func acceptedChildPhysicalEffectPossible(items []Item, child Invocation) bool {
 	for _, item := range items {
 		if item.ParentItemID == ExecutionDispatchParentItemID && item.InvocationID == child.ID {
 			boundary, verified := VerifiedExecutionDispatchReceipt(item, receipts[item.ID])
-			if item.RunID != child.ExecutionRefID || !verified || boundary != "physical_dispatch_rejected" {
+			phase, _ := VerifiedExecutionDispatchGrant(item)
+			nativeRejection := phase == "handoff-start" && isHandoffDelegationInvocation(child) && boundary == "native_agent_start_no_effect"
+			if item.RunID != child.ExecutionRefID || !verified || (boundary != "physical_dispatch_rejected" && !nativeRejection) {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+// verifiedRejectedHandoffStarts permits only a frozen child whose actual
+// native Start was conclusively refused and every original grant is settled
+// without dispatch. A returned or unknown grant can never be retried.
+func verifiedRejectedHandoffStarts(items []Item, child Invocation) bool {
+	if child.Status != InvocationAccepted || !isHandoffDelegationInvocation(child) {
+		return false
+	}
+	receipts := executionDispatchReceiptIndex(items)
+	nativeRejected := false
+	for _, g := range items {
+		if g.ParentItemID != ExecutionDispatchParentItemID || g.InvocationID != child.ID {
+			continue
+		}
+		phase, valid := VerifiedExecutionDispatchGrant(g)
+		boundary, settled := VerifiedExecutionDispatchReceipt(g, receipts[g.ID])
+		if !valid || phase != "handoff-start" || g.RunID != child.ExecutionRefID || g.TurnID != child.TurnID || !settled {
+			return false
+		}
+		switch boundary {
+		case "native_agent_start_no_effect":
+			nativeRejected = true
+		case "physical_dispatch_rejected":
+		default:
+			return false
+		}
+	}
+	return nativeRejected
 }

@@ -70,6 +70,9 @@ func TestGrantIdentityV9MigrationRejectsAmbiguousOwnersAtomically(t *testing.T) 
 			t.Fatal(e)
 		}
 	}
+	if e = MigrateV10ToV11(ctx, path); e != nil {
+		t.Fatal(e)
+	}
 	s, e := OpenExisting(ctx, path)
 	if e != nil {
 		t.Fatal(e)

@@ -40,7 +40,7 @@ func validSQLiteExecutionLease(lease kernel.ExecutionLease) bool {
 		!lease.ExpiresAt.IsZero() && lease.ExpiresAt.Nanosecond()%int(time.Millisecond) == 0
 }
 func (s *Store) AcquireExecution(ctx context.Context, req kernel.ExecutionAcquireRequest) (kernel.ExecutionLease, error) {
-	ttl, ok := sqliteLeaseMilliseconds(req.LeaseDuration)
+	_, ok := sqliteLeaseMilliseconds(req.LeaseDuration)
 	if s == nil || s.db == nil || ctx == nil || !ok || strings.TrimSpace(req.RunID) == "" || strings.TrimSpace(req.OwnerID) == "" {
 		return kernel.ExecutionLease{}, kernel.ErrInvalidInput
 	}
@@ -49,15 +49,7 @@ func (s *Store) AcquireExecution(ctx context.Context, req kernel.ExecutionAcquir
 		return kernel.ExecutionLease{}, conflictOrDatabaseError(err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if transfer, e := sqliteLoadManaged(ctx, tx, req.RunID); e == nil && transfer.State == kernel.ManagedParked {
-		return kernel.ExecutionLease{}, kernel.ErrChildExecutionBusy
-	} else if e != nil && !errors.Is(e, kernel.ErrNotFound) {
-		return kernel.ExecutionLease{}, e
-	}
 	if err = ownedGrantBlocks(ctx, tx, req.RunID, nil, true); err != nil {
-		return kernel.ExecutionLease{}, err
-	}
-	if _, err = sqliteSettleRetirementSuccessor(ctx, tx, req.RunID); err != nil {
 		return kernel.ExecutionLease{}, err
 	}
 	now, err := sqliteExecutionNow(ctx, tx)
@@ -73,28 +65,20 @@ func (s *Store) AcquireExecution(ctx context.Context, req kernel.ExecutionAcquir
 	if err != nil {
 		return kernel.ExecutionLease{}, err
 	}
-	if status == string(kernel.RunStatusCompleted) || status == string(kernel.RunStatusFailed) || status == string(kernel.RunStatusCancelled) {
-		return kernel.ExecutionLease{}, kernel.ErrTerminal
-	}
-	if status != string(kernel.RunStatusRunning) && (epoch == 0 || kind != "agent" || status != string(kernel.RunStatusWaitingInput)) {
-		return kernel.ExecutionLease{}, kernel.ErrExecutionConflict
-	}
-	if quarantineRev != 0 {
-		return kernel.ExecutionLease{}, kernel.ErrExecutionQuarantined
-	}
-	if epoch == 0 {
-		return kernel.ExecutionLease{}, kernel.ErrExecutionRequired
-	}
-	if expires > now || epoch == math.MaxInt64 {
-		return kernel.ExecutionLease{}, kernel.ErrExecutionConflict
-	}
 	id, err := sqliteLeaseID()
 	if err != nil {
 		return kernel.ExecutionLease{}, err
 	}
-	until := now + ttl
+	current := kernel.ExecutionLease{RunID: req.RunID, Epoch: uint64(epoch)}
+	if expires != 0 {
+		current.ExpiresAt = time.UnixMilli(expires).UTC()
+	}
+	lease, err := kernel.PlanExecutionAcquire(kernel.Run{ID: req.RunID, Kind: kernel.RunKind(kind), Status: kernel.RunStatus(status)}, current, time.UnixMilli(now).UTC(), req, id, quarantineRev != 0)
+	if err != nil {
+		return kernel.ExecutionLease{}, err
+	}
 	result, err := tx.ExecContext(ctx, `UPDATE runtime_runs SET execution_epoch=?,execution_owner=?,execution_lease_id=?,execution_expiry_ms=?
-  WHERE run_id=? AND execution_epoch=?`, epoch+1, strings.TrimSpace(req.OwnerID), id, until, req.RunID, epoch)
+  WHERE run_id=? AND execution_epoch=?`, lease.Epoch, lease.OwnerID, lease.LeaseID, lease.ExpiresAt.UnixMilli(), req.RunID, epoch)
 	if err != nil {
 		return kernel.ExecutionLease{}, conflictOrDatabaseError(err)
 	}
@@ -108,7 +92,7 @@ func (s *Store) AcquireExecution(ctx context.Context, req kernel.ExecutionAcquir
 	if err = tx.Commit(); err != nil {
 		return kernel.ExecutionLease{}, err
 	}
-	return kernel.ExecutionLease{RunID: req.RunID, OwnerID: strings.TrimSpace(req.OwnerID), LeaseID: id, Epoch: uint64(epoch + 1), ExpiresAt: time.UnixMilli(until).UTC()}, nil
+	return lease, nil
 }
 func (s *Store) RenewExecution(ctx context.Context, req kernel.ExecutionRenewRequest) (kernel.ExecutionLease, error) {
 	ttl, ok := sqliteLeaseMilliseconds(req.LeaseDuration)
@@ -161,17 +145,6 @@ func (s *Store) ReleaseExecution(ctx context.Context, lease kernel.ExecutionLeas
 	defer func() { _ = tx.Rollback() }()
 	if err = ownedGrantBlocks(ctx, tx, lease.RunID, nil, true); err != nil {
 		return err
-	}
-	original, _, err := sqliteManagedLease(ctx, tx, lease.RunID)
-	if err != nil {
-		return err
-	}
-	released, err := sqliteSettleRetirementSuccessor(ctx, tx, lease.RunID)
-	if err != nil {
-		return err
-	}
-	if released && original.Epoch == lease.Epoch && original.OwnerID == lease.OwnerID && original.LeaseID == lease.LeaseID {
-		return tx.Commit()
 	}
 	now, err := sqliteExecutionNow(ctx, tx)
 	if err != nil {

@@ -130,9 +130,17 @@ func VerifiedTerminalHandoffChild(root, child Invocation, items []Item) bool {
 			item.InvocationID != child.ID || item.RunID != child.ExecutionRefID {
 			continue
 		}
-		grants++
+		phase, valid := VerifiedExecutionDispatchGrant(item)
 		boundary, ok := VerifiedExecutionDispatchReceipt(item, receipts[item.ID])
-		if !ok || boundary != "handoff_start_returned" {
+		if !valid || phase != "handoff-start" || !ok {
+			return false
+		}
+		switch boundary {
+		case "physical_dispatch_rejected", "native_agent_start_no_effect":
+			// A definitive refusal never claims a returned ChildRunner.
+		case "handoff_start_returned":
+			grants++
+		default:
 			return false
 		}
 	}

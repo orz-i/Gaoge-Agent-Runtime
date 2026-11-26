@@ -28,29 +28,33 @@ func OriginalApprovalRequestID(grant Item) (string, bool) {
 
 func originalApprovalProjection(grant, request Item, children []Item, now time.Time) (Item, bool, error) {
 	a, ok := originalDispatchApproval(grant)
-	if !ok {
-		return Item{}, false, ErrConflict
-	}
 	phase, valid := VerifiedExecutionDispatchGrant(grant)
-	parent, _ := OriginalApprovalRequestID(grant)
-	subtask := phase == "resolve-subtask-approval"
-	var pending approvalRequestItemPayload
-	if !valid || request.ID != parent || request.Kind != ItemApproval || request.Status != ItemWaiting ||
-		request.TurnID != grant.TurnID || request.InvocationID != grant.InvocationID || request.RunID != grant.RunID ||
-		request.Seq == 0 || request.Seq >= grant.Seq || !decodeTypedAuthorityJSON(request.Payload, &pending) ||
-		pending.CheckpointID != a.CheckpointID || pending.Subtask != subtask || pending.ToolCallID == "" || pending.ToolKey == "" {
+	if !ok || !valid || request.Seq >= grant.Seq {
 		return Item{}, false, ErrConflict
 	}
-	decision, err := approvalDecisionFact(grant.TurnID, grant.InvocationID, grant.RunID, subtask, *a, now)
+	return approvalProjection(grant.TurnID, grant.InvocationID, grant.RunID, phase == "resolve-subtask-approval", *a, request, children, grant.Seq, now)
+}
+
+// Both native journal projection and the remaining external dispatch
+// settlement use the original request and the same canonical decision.
+func approvalProjection(turnID, invID, runID string, subtask bool, a kernel.ManagedApprovalDecision, request Item, children []Item, after uint64, now time.Time) (Item, bool, error) {
+	decision, err := approvalDecisionFact(turnID, invID, runID, subtask, a, now)
 	if err != nil {
 		return Item{}, false, err
+	}
+	var pending approvalRequestItemPayload
+	if request.ID != decision.ParentItemID || request.Kind != ItemApproval || request.Status != ItemWaiting ||
+		request.TurnID != turnID || request.InvocationID != invID || request.RunID != runID ||
+		request.Seq == 0 || !decodeTypedAuthorityJSON(request.Payload, &pending) ||
+		pending.CheckpointID != a.CheckpointID || pending.Subtask != subtask || pending.ToolCallID == "" || pending.ToolKey == "" {
+		return Item{}, false, ErrConflict
 	}
 	switch len(children) {
 	case 0:
 		return decision, false, nil
 	case 1:
 		existing := children[0]
-		if existing.Seq <= grant.Seq || !sameItemIdentity(existing, decision) {
+		if existing.Seq <= max(request.Seq, after) || !sameItemIdentity(existing, decision) {
 			return Item{}, false, ErrConflict
 		}
 		return decision, true, nil
@@ -142,4 +146,56 @@ func (r *Runner) qualifyApprovalSettlement(ctx context.Context, grant Item, boun
 		boundary = approvalNotAppliedBoundary
 	}
 	return context.WithValue(ctx, approvalSettlementKey{}, approvalSettlement{grant.ID, kernel.ManagedDigest(grant.Payload), boundary}), boundary, nil
+}
+
+func verifyNativeApprovalProjection(turnID, invID, runID string, a kernel.ManagedApprovalDecision, items []Item) error {
+	parent := stableID("hia", turnID, a.CheckpointID)
+	var request Item
+	var children []Item
+	for _, item := range items {
+		if item.ID == parent {
+			request = item
+		}
+		if item.ParentItemID == parent {
+			children = append(children, item)
+		}
+	}
+	_, _, err := approvalProjection(turnID, invID, runID, false, a, request, children, 0, time.Time{})
+	return err
+}
+
+func (r *Runner) readNativeApprovalProjection(ctx context.Context, turn Turn, inv Invocation, a kernel.ManagedApprovalDecision, now time.Time) (Item, bool, error) {
+	parent := stableID("hia", turn.ID, a.CheckpointID)
+	request, err := r.store.GetItem(ctx, parent)
+	if err != nil {
+		return Item{}, false, err
+	}
+	children, err := r.store.ListItemChildren(ctx, parent, ItemChildProofAll)
+	if err != nil {
+		return Item{}, false, err
+	}
+	return approvalProjection(turn.ID, inv.ID, inv.ExecutionRefID, false, a, request, children, 0, now)
+}
+
+func (r *Runner) recordNativeApprovalDecisions(ctx context.Context, turn Turn, inv Invocation, snapshot kernel.Snapshot) error {
+	if inv.ParentItemID != "" || snapshot.Run.Kind != "agent" || !r.runtime.SupportsOwnedPhysicalExecution() ||
+		(turn.Status != TurnWaitingInput && inv.Status != InvocationWaitingInput) {
+		return nil
+	}
+	decisions, err := r.runtime.NativeApprovalDecisions(ctx, snapshot)
+	if err != nil {
+		return err
+	}
+	for _, decision := range decisions {
+		item, exists, err := r.readNativeApprovalProjection(ctx, turn, inv, decision, snapshot.Run.UpdatedAt)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			if _, err = appendItemFact(ctx, r.store, r.turnFeed, item); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

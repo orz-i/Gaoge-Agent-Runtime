@@ -2,6 +2,7 @@ package harness
 
 import (
 	"context"
+	"errors"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 )
@@ -12,6 +13,7 @@ import (
 type retryBudgetAdmission struct {
 	turnID, invocationID, previousRunID, nextRunID string
 	attempt                                        int
+	native                                         bool
 }
 type retryBudgetAdmissionKey struct{}
 
@@ -40,14 +42,22 @@ func (runner *Runner) withAtomicRetryBudget(ctx context.Context, turn Turn, orig
 		}
 		return ctx, nil
 	}
-	authoritative, ok := runner.store.(budget.LedgerStore)
-	if !ok || authoritative != runner.budgets.dependencies.Ledgers {
-		return ctx, ErrConflict
+	if runner.nativeBudget() {
+		// The Host selects an Attempt; preflight the existing native ledger
+		// without independently advancing its execution generation.
+		if _, err = budget.PlanRootRetry(*l, original.ID, original.ExecutionRefID, nextRunID, original.Attempt+1); err != nil {
+			return ctx, err
+		}
+	} else {
+		authoritative, ok := runner.store.(budget.LedgerStore)
+		if !ok || authoritative != runner.budgets.dependencies.Ledgers {
+			return ctx, ErrConflict
+		}
 	}
 	return context.WithValue(ctx, retryBudgetAdmissionKey{}, retryBudgetAdmission{
 		turnID: turn.ID, invocationID: original.ID,
 		previousRunID: original.ExecutionRefID, nextRunID: nextRunID,
-		attempt: original.Attempt + 1,
+		attempt: original.Attempt + 1, native: runner.nativeBudget(),
 	}), nil
 }
 
@@ -72,5 +82,63 @@ func AtomicRetryBudgetForStore(ctx context.Context, original Invocation, nextRun
 		value.attempt != original.Attempt+1 || original.Attempt < 1 || original.ParentItemID != "" {
 		return false, ErrConflict
 	}
-	return true, nil
+	return !value.native, nil
+}
+
+// nativeRetrySelection returns the original Store-owned Host selection.
+// The immutable transition already exists; never derive a new RunID here.
+func nativeRetrySelection(ctx context.Context, store Store, inv Invocation) (rootRetryTransition, error) {
+	var selection rootRetryTransition
+	fact, err := store.GetItem(ctx, stableID("hrootretry", inv.ID, attemptString(inv.Attempt)))
+	if err != nil {
+		return selection, err
+	}
+	if fact.Seq == 0 || fact.TurnID != inv.TurnID || fact.InvocationID != inv.ID || fact.RunID != inv.ExecutionRefID ||
+		fact.ParentItemID != RootRetryTransitionParentItemID || fact.Kind != ItemDiagnostic || fact.Status != ItemCompleted ||
+		!decodeTypedAuthorityJSON(fact.Payload, &selection) || selection.Version != 1 || selection.Next != invocationAttempt(inv) ||
+		selection.Previous.InvocationID != inv.ID || selection.Previous.Attempt != inv.Attempt-1 || !validChildAttempt(selection.Previous) ||
+		selection.Previous.ExecutionRefID == inv.ExecutionRefID || selection.InputHash != inv.InputHash {
+		return selection, ErrConflict
+	}
+	return selection, nil
+}
+
+// An elected no-Run cancellation must close the original selected retry
+// without creating a fictitious Run. Live retry admission belongs to Create.
+func (runner *Runner) admitUnstartedRetryCancellation(ctx context.Context, turn Turn, inv Invocation) error {
+	if !runner.nativeBudget() || inv.Attempt <= 1 {
+		return nil
+	}
+	selected, err := nativeRetrySelection(ctx, runner.store, inv)
+	if err != nil {
+		return err
+	}
+	current, err := runner.store.GetInvocation(ctx, inv.ID)
+	if err != nil {
+		return err
+	}
+	if current.TurnID != turn.ID || invocationAttempt(current) != invocationAttempt(inv) || current.InputHash != inv.InputHash || current.Status != InvocationAccepted {
+		return ErrConflict
+	}
+	for range 8 {
+		original, err := runner.loadTurnBudget(ctx, turn)
+		if err != nil {
+			return err
+		}
+		if original == nil {
+			return ErrExecutionOutcomeUnknown
+		}
+		next, err := budget.PlanRootRetry(*original, inv.ID, selected.Previous.ExecutionRefID, inv.ExecutionRefID, inv.Attempt)
+		if err != nil {
+			return err
+		}
+		if next.Revision == original.Revision {
+			return nil
+		}
+		err = runner.budgets.dependencies.Ledgers.SaveBudget(ctx, next, original.Revision)
+		if !errors.Is(err, budget.ErrLedgerConflict) {
+			return err
+		}
+	}
+	return budget.ErrLedgerConflict
 }

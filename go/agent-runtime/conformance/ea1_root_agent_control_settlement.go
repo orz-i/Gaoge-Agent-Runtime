@@ -260,7 +260,7 @@ func ea1ControlSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, 
 		}
 	}
 	// Arm only the actual control operation, never setup Start.
-	wrapped.markCalls, wrapped.markCommits, wrapped.finishCalls = 0, 0, 0
+	wrapped.markCalls, wrapped.finishCommits, wrapped.finishCalls = 0, 0, 0
 	if phase == "P3" || phase == "P4" {
 		wrapped.mode = phase
 	}
@@ -412,6 +412,30 @@ func ea1ControlSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, 
 		}
 		return
 	}
+	if phase == "P4" {
+		if wrapped.markCalls != 0 || wrapped.finishCalls != 1 || wrapped.finishCommits != 1 {
+			t.Fatal("actual Finish commit cut missed")
+		}
+		freshStore := reopen()
+		freshRT := ea1StartRuntime(t, freshStore)
+		ea1AssertFinishedOriginal(t, freshRT, wrapped.original, before)
+		fresh := makeRunner(freshRT, "fresh-control-recovery", false)
+		if e := fresh.ReconcileRootPhysicalExecution(ctx, req.ID); e != nil {
+			t.Fatal(e)
+		}
+		ea1AssertFinishedOriginal(t, freshRT, wrapped.original, before)
+		if entry == "toolwait" {
+			completed, e := fresh.Resume(ctx, req.ID, before.Run.Revision)
+			if e != nil {
+				t.Fatal(e)
+			}
+			ea1ControlTerminalResult(t, completed, verifiedResult)
+			if verifyCalls != 1 || toolCalls != 1 || len(physical.requests) != 1 {
+				t.Fatal("recovery replayed original effect")
+			}
+		}
+		return
+	}
 	grant, err := rt.LookupChildExecution(ctx, req.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -434,14 +458,8 @@ func ea1ControlSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, 
 	if entry == "approval" && (grant.AdmissionOperation != "approval" || grant.ExpectedRevision != initial.Run.Revision || grant.ExecutionOwnerID != "original-control-owner") {
 		t.Fatal("approval source authority changed")
 	}
-	if phase == "P3" && wrapped.markCommits != 0 {
-		t.Fatal("P3 unexpectedly marked")
-	}
-	if phase == "P4" && ((entry == "approval" && (wrapped.markCalls != 2 || wrapped.markCommits != 2 || wrapped.finishCalls != 1)) || (entry == "toolwait" && wrapped.markCommits != 1)) {
-		t.Fatal("P4 actual Mark ACK loss not reached")
-	}
-	if wrapped.markCalls == 0 {
-		t.Fatal("actual Mark never reached")
+	if wrapped.markCalls != 0 || wrapped.finishCalls != 1 || wrapped.finishCommits != 0 {
+		t.Fatal("precommit Finish cut missed")
 	}
 	if entry == "toolwait" {
 		var state struct {
@@ -468,7 +486,7 @@ func ea1ControlSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, 
 	ea1ControlUnchanged(t, freshRT, before, grant)
 	wrong := grant
 	wrong.ExecutionEpoch++
-	if err = freshStore.(kernel.ChildExecutionStore).FinishChildExecution(ctx, wrong); !errors.Is(err, kernel.ErrExecutionConflict) {
+	if err = freshStore.(kernel.ChildExecutionStore).FinishChildExecution(ctx, wrong, kernel.ChildExecutionSettlement{}); !errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("foreign epoch retired scope: %v", err)
 	}
 	ea1ControlUnchanged(t, freshRT, before, grant)
@@ -479,7 +497,7 @@ func ea1ControlSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, 
 	if err != nil || !reflect.DeepEqual(after, before) {
 		t.Fatal("retirement changed committed control/receipt")
 	}
-	if err = fresh.ReconcileRootPhysicalExecution(ctx, req.ID); !errors.Is(err, kernel.ErrNotFound) {
+	if err = fresh.ReconcileRootPhysicalExecution(ctx, req.ID); err != nil {
 		t.Fatalf("duplicate retirement: %v", err)
 	}
 	if entry == "toolwait" {

@@ -98,7 +98,7 @@ func TestFirstPartyOwnerSelectionConvergesExactLegacyAndExplicitStages(t *testin
 		{BoundedContext: c, BoundedBudget: b, RunMiddleware: []plugin.RunMiddleware{c}},
 		{BoundedContext: c, BoundedBudget: b, ModelMiddleware: []plugin.ModelMiddleware{b}},
 		{BoundedContext: c, BoundedBudget: b, ToolMiddleware: []plugin.ToolMiddleware{b}},
-		{BoundedContext: c, BoundedBudget: b, ManagedContextRecovery: c},
+		{BoundedContext: c, BoundedBudget: b, ManagedRecovery: true},
 	} {
 		d.Runtime, d.Model = rt, boundBudgetCompositionModel{}
 		if _, err := NewRunner(d); !errors.Is(err, ErrInvalidRequest) {
@@ -111,8 +111,7 @@ func TestFirstPartyOwnerSelectionConvergesExactLegacyAndExplicitStages(t *testin
 	if err != nil || r.nativeBudget != nil || r.samplingBudget != b || r.toolBudget != nil || r.receiptOnlyRunChain {
 		t.Fatalf("partial chain reclassified as complete: %v", err)
 	}
-	managed, err := NewRunner(Dependencies{Runtime: rt, Model: boundBudgetCompositionModel{}, ManagedContextRecovery: c})
-	if err != nil || managed.nativeContext != c || managed.boundedContext != c || managed.prepareModelRequest != nil || managed.scopedRootCallbacks {
-		t.Fatalf("managed Context did not reuse native stages with distinct custody: %v", err)
+	if _, err := NewRunner(Dependencies{Runtime: rt, Model: boundBudgetCompositionModel{}, BoundedContext: c, ManagedRecovery: true}); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("unregistered custom Context certified managed recovery: %v", err)
 	}
 }

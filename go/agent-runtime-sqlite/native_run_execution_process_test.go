@@ -229,36 +229,36 @@ type auditClaimAdvancesRevision struct {
 	did bool
 }
 
-func (w *auditClaimAdvancesRevision) AcquireExecution(ctx context.Context, req kernel.ExecutionAcquireRequest) (kernel.ExecutionLease, error) {
-	lease, err := w.Store.AcquireExecution(ctx, req)
-	if err != nil {
-		return lease, err
-	}
+func (w *auditClaimAdvancesRevision) BeginOwnedPhysicalExecution(ctx context.Context, p kernel.OwnedPhysicalAdmission) (kernel.OwnedPhysicalAdmissionResult, error) {
+	g := p.Candidate().Grant
+	var zero kernel.OwnedPhysicalAdmissionResult
 	if w.did {
-		return lease, nil
+		return w.Store.BeginOwnedPhysicalExecution(ctx, p)
 	}
 	w.did = true
-	fresh, err := w.Load(ctx, req.RunID)
-	if err != nil {
-		return kernel.ExecutionLease{}, err
+	rt, e := kernel.New(kernel.Dependencies{Store: w.Store})
+	if e != nil {
+		return zero, e
 	}
-	rt, err := kernel.New(kernel.Dependencies{Store: w})
-	if err != nil {
-		return kernel.ExecutionLease{}, err
+	lease, e := rt.AcquireExecution(ctx, kernel.ExecutionAcquireRequest{RunID: g.ChildRunID, OwnerID: "competing-revision", LeaseDuration: time.Minute})
+	if e != nil {
+		return zero, e
 	}
-	scoped, err := rt.WithExecution(lease)
-	if err != nil {
-		return kernel.ExecutionLease{}, err
+	fresh, e := rt.Load(ctx, g.ChildRunID)
+	if e != nil {
+		return zero, e
 	}
-	_, err = scoped.Apply(ctx, req.RunID, fresh.Run.Revision, kernel.Mutation{
-		Status: kernel.RunStatusRunning, State: fresh.State,
-		Checkpoint: fresh.Checkpoint,
-		Events:     []kernel.EventDraft{{Type: "simulated.concurrent.new-revision"}},
-	})
-	if err != nil {
-		return kernel.ExecutionLease{}, err
+	scoped, e := rt.WithExecution(lease)
+	if e != nil {
+		return zero, e
 	}
-	return lease, nil
+	if _, e = scoped.Apply(ctx, g.ChildRunID, fresh.Run.Revision, kernel.Mutation{Status: kernel.RunStatusRunning, State: fresh.State, Checkpoint: fresh.Checkpoint, Events: []kernel.EventDraft{{Type: "simulated.concurrent.new-revision"}}}); e != nil {
+		return zero, e
+	}
+	if e = rt.ReleaseExecution(ctx, lease); e != nil {
+		return zero, e
+	}
+	return w.Store.BeginOwnedPhysicalExecution(ctx, p)
 }
 
 func TestNativeResumeReloadsSnapshotAfterAcquireBeforeTool(t *testing.T) {

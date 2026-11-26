@@ -24,7 +24,7 @@ func (r *Runner) admitPendingToolBudget(ctx context.Context, s kernel.Snapshot, 
 		return s, e, nil, false, nil
 	}
 	q := tools.ExecutionRequest{RunID: s.Run.ID, Call: tools.CloneCall(e.call)}
-	scope, err := a.ports.ResolveScope(ctx, q.RunID)
+	scope, err := a.resolveScope(ctx, q.RunID)
 	if err != nil {
 		r.noteRootCallbackFailure(err)
 		return s, e, nil, false, err

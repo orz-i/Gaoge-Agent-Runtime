@@ -45,7 +45,7 @@ func (s *Store) verifyRootSettlement(ctx context.Context, expected kernel.Snapsh
 		return conflictOrDatabaseError(err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err = sqliteManagedGate(ctx, tx, expected.Run.ID); err != nil {
+	if err = sqliteNativeEntryGate(ctx, tx, expected.Run.ID); err != nil {
 		return err
 	}
 	current, err := loadTx(ctx, tx, expected.Run.ID)

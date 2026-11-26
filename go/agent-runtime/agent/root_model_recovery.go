@@ -65,6 +65,24 @@ func (runner *Runner) ReconcileModelOutcome(ctx context.Context, runID string, r
 	request := inv.SamplingPlan.request(inv.Request)
 	response, receiptErr := runner.recoveryModelReceipt(ctx, inv, request, completion.HostCompleted)
 	originalInvocation := inv
+	var ledgerMutation *budget.LedgerMutation
+	if a := runner.atomicModelBudget(inv.SamplingPlan); a != nil && completion.HostCompleted && inv.Status == ModelInvocationPending {
+		res, loadErr := runner.originalModelReservation(ctx, inv)
+		if loadErr != nil {
+			return snapshot, errors.Join(ErrModelOutcomeUnknown, loadErr)
+		}
+		if res.Status == budget.ReservationHeld {
+			// Validate the actual original verifier receipt before computing
+			// accounting (including hosted effects and quota rejection).
+			if _, err = runner.qualifiedRecoveredModelReceipt(state, inv, response, receiptErr, true); err != nil {
+				return snapshot, err
+			}
+			ledgerMutation, response, receiptErr, err = a.planModelReceipt(ctx, inv, response, receiptErr)
+			if err != nil {
+				return snapshot, errors.Join(ErrModelOutcomeUnknown, err)
+			}
+		}
+	}
 	inv, err = runner.qualifiedRecoveredModelReceipt(state, inv, response, receiptErr, completion.HostCompleted)
 	if err != nil {
 		return snapshot, err
@@ -102,8 +120,8 @@ func (runner *Runner) ReconcileModelOutcome(ctx context.Context, runID string, r
 		return evidence, ErrRootOutcomeUnknown
 	}
 	source := featurecontrol.Seal(runID, revision, "agent_owned_receipt_recovery_source", grant.ID, snapshot.State, snapshot.Checkpoint)
-	target := featurecontrol.Seal(runID, revision, "agent_owned_receipt_recovery_target", grant.ID, encoded, snapshot.Checkpoint)
-	repaired, err := runner.runtime.ApplyOwnedPhysicalRecovery(ctx, grant, revision, kernel.Mutation{Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint, Events: []kernel.EventDraft{{Type: "agent.model_invocation.completed", Message: inv.ID, Wakeup: true}}}, source, target)
+	target := featurecontrol.Seal(runID, revision, "agent_owned_receipt_recovery_target", grant.ID, encoded, kernel.ReceiptRecoveryTarget(snapshot.Checkpoint, ledgerMutation))
+	repaired, err := runner.runtime.ApplyOwnedPhysicalRecovery(ctx, grant, revision, kernel.Mutation{Ledger: ledgerMutation, Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint, Events: []kernel.EventDraft{{Type: "agent.model_invocation.completed", Message: inv.ID, Wakeup: true}}}, source, target)
 	if err != nil {
 		return snapshot, errors.Join(ErrModelOutcomeUnknown, err)
 	}
@@ -202,7 +220,7 @@ func (runner *Runner) recoveryModelReceipt(ctx context.Context, inv ModelInvocat
 		if res.Status == budget.ReservationSettled {
 			return budget.DecodeModelReceipt(res)
 		}
-		if hostCompleted {
+		if hostCompleted && runner.atomicModelBudget(inv.SamplingPlan) == nil {
 			return model.Response{}, budget.ErrWaiting
 		}
 	}

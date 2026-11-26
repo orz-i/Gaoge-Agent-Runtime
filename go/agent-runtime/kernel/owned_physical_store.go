@@ -1,7 +1,6 @@
 package kernel
 
 import (
-	"encoding/json"
 	"math"
 	"time"
 )
@@ -25,23 +24,45 @@ func ValidateOwnedPhysicalRecoveryRequest(g ChildExecutionGrant, revision uint64
 	return nil
 }
 
-// ValidateOwnedPhysicalAdmission evaluates the original admission under the
-// Store's authoritative write transaction. now and persisted come from that
-// transaction, not from the caller's informational lease expiry.
-func ValidateOwnedPhysicalAdmission(g ChildExecutionGrant, current Snapshot, claimed, persisted ExecutionLease, now time.Time, quarantined, hasGrants bool, permit OwnedPhysicalAdmission) error {
+// ResolveOwnedPhysicalAdmission is the common Store reducer. A fresh claim
+// and physical identity are planned from the same locked source. A borrowed
+// claim is checked against the existing owner and never changes the Lease.
+func ResolveOwnedPhysicalAdmission(current Snapshot, persisted ExecutionLease, now time.Time, quarantined, hasGrants bool, permit OwnedPhysicalAdmission) (OwnedPhysicalAdmissionResult, error) {
+	var zero OwnedPhysicalAdmissionResult
+	g, claimed := permit.candidate.Grant, permit.candidate.Lease
+	if permit.attempt == ([32]byte{}) {
+		return zero, ErrExecutionConflict
+	}
+	if permit.AcquiresLease() {
+		if current.Run.Revision != g.ExpectedRevision {
+			return zero, ErrConflict
+		}
+		if hasGrants {
+			return zero, ErrChildExecutionBusy
+		}
+		lease, e := PlanExecutionAcquire(current.Run, persisted, now, permit.acquire, claimed.LeaseID, quarantined)
+		if e != nil {
+			return zero, e
+		}
+		claimed, persisted = lease, lease
+		g.ExecutionEpoch = lease.Epoch
+		g.AdmissionSourceHash = ownedAdmissionAttemptHash(current, lease, g.AdmissionOperation, g.ID, permit.attempt)
+	}
 	if err := ValidateOwnedPhysicalAdmissionRequest(g, claimed); err != nil {
-		return err
+		return zero, err
 	}
 	if !permit.Matches(g, current, claimed) || !g.MatchesExecution(persisted) || !now.Before(persisted.ExpiresAt) {
-		return ErrExecutionConflict
+		return zero, ErrExecutionConflict
 	}
 	if quarantined {
-		return ErrExecutionQuarantined
+		return zero, ErrExecutionQuarantined
 	}
 	if hasGrants {
-		return ErrChildExecutionBusy
+		return zero, ErrChildExecutionBusy
 	}
-	return nil
+	// For a borrowed Lease, use the authoritative expiration, never the
+	// caller's informational timestamp.
+	return OwnedPhysicalAdmissionResult{Grant: g, Lease: persisted}, nil
 }
 
 // ValidateOwnedPhysicalCompletion checks the shape of an original persisted
@@ -98,78 +119,26 @@ func ValidateOwnedPhysicalRecovery(g ChildExecutionGrant, current Snapshot, pers
 	return nil
 }
 
-// DecodeOwnedSettlement reads the original optional marker. Absence alone is
-// legacy evidence; malformed or mismatched evidence can never be replaced.
-func DecodeOwnedSettlement(raw []byte) (*OwnedSettlementEvidence, error) {
-	if raw == nil {
-		return nil, nil
-	}
-	var e OwnedSettlementEvidence
-	if err := json.Unmarshal(raw, &e); err != nil || !e.Valid() {
-		return nil, ErrExecutionConflict
-	}
-	return &e, nil
-}
-
-func resolveOwnedSettlement(g ChildExecutionGrant, current Snapshot, marked uint64, completion OwnedPhysicalCallbackCompletion, original *OwnedSettlementEvidence, origin string) (OwnedSettlementEvidence, error) {
-	if original != nil {
-		if marked != current.Run.Revision || !original.Valid() || original.Grant != g ||
-			ManagedDigest(original.Snapshot) != ManagedDigest(current) || original.Completion != completion {
-			return OwnedSettlementEvidence{}, ErrExecutionConflict
-		}
-		return *original, nil
-	}
-	if completion == (OwnedPhysicalCallbackCompletion{}) {
-		origin = "LEGACY_UNKNOWN"
-	}
-	evidence := OwnedSettlementEvidence{Version: 1, Grant: g, Snapshot: current, Completion: completion, MarkOrigin: origin}
-	if !evidence.Valid() {
-		return OwnedSettlementEvidence{}, ErrExecutionConflict
-	}
-	return evidence, nil
-}
-
-// ReduceOwnedPhysicalSettlement binds a Mark to the exact persisted callback,
-// revision and native identity. A repeated Mark retains the original evidence
-// and need not revive an expired lease. Recovery requires a completed return.
-func ReduceOwnedPhysicalSettlement(g ChildExecutionGrant, current Snapshot, persisted ExecutionLease, now time.Time, marked uint64, completion OwnedPhysicalCallbackCompletion, original *OwnedSettlementEvidence, permit ChildExecutionSettlement) (OwnedSettlementEvidence, error) {
-	if !g.MatchesExecution(persisted) || !permit.Matches(g, current) ||
-		(marked != 0 && marked != current.Run.Revision) {
-		return OwnedSettlementEvidence{}, ErrExecutionConflict
-	}
-	origin := "OWNER_RETURN"
-	if completion.NotEntered() {
-		if !permit.IsRecovery() || !completion.MatchesNotEnteredSnapshot(g, current) {
-			return OwnedSettlementEvidence{}, ErrExecutionConflict
-		}
-		return resolveOwnedSettlement(g, current, marked, completion, original, "NOT_ENTERED")
-	}
-	if permit.IsRecovery() {
-		if ValidateOwnedPhysicalCompletion(g, completion) != nil || !completion.HostCompleted {
-			return OwnedSettlementEvidence{}, ErrExecutionConflict
-		}
-		origin = "RECOVERED_RETURN"
-	} else if marked == 0 {
-		claimed, ok := permit.ExecutionLease()
-		if !ok || !g.MatchesExecution(claimed) || !now.Before(persisted.ExpiresAt) {
-			return OwnedSettlementEvidence{}, ErrExecutionConflict
-		}
-	}
-	return resolveOwnedSettlement(g, current, marked, completion, original, origin)
-}
-
-// BuildOwnedRetirementReceipt is the only construction of a retirement from
-// an active Grant's original settlement marker and verified managed closures.
-// The Store must persist this receipt and delete the exact Grant atomically.
-func BuildOwnedRetirementReceipt(g ChildExecutionGrant, current Snapshot, persisted ExecutionLease, marked uint64, completion OwnedPhysicalCallbackCompletion, original *OwnedSettlementEvidence, closures []ManagedTransfer) (OwnedRetirementReceipt, error) {
-	if !g.MatchesExecution(persisted) || marked == 0 || marked != current.Run.Revision {
+// BuildOwnedRetirementReceipt validates the original returned-callback fact
+// and private Feature settlement against the exact current native owner and
+// Run. Both the live caller and receipt-only recovery use this same reducer.
+// Lease expiry is not evidence of return, nor does it erase a genuine return.
+func BuildOwnedRetirementReceipt(g ChildExecutionGrant, current Snapshot, persisted ExecutionLease, completion OwnedPhysicalCallbackCompletion, permit ChildExecutionSettlement, closures []ManagedTransfer) (OwnedRetirementReceipt, error) {
+	if !g.MatchesExecution(persisted) || !permit.Matches(g, current) || ValidateOwnedPhysicalCompletion(g, completion) != nil {
 		return OwnedRetirementReceipt{}, ErrExecutionConflict
 	}
-	evidence, err := resolveOwnedSettlement(g, current, marked, completion, original, "LEGACY_UNKNOWN")
-	if err != nil {
-		return OwnedRetirementReceipt{}, err
+	origin := "CALLBACK_RETURN"
+	if completion.NotEntered() {
+		if !completion.MatchesNotEnteredSnapshot(g, current) {
+			return OwnedRetirementReceipt{}, ErrExecutionConflict
+		}
+		origin = "NOT_ENTERED"
+	} else if !completion.HostCompleted || completion.ReturnRevision > current.Run.Revision {
+		return OwnedRetirementReceipt{}, ErrExecutionConflict
 	}
-	r := OwnedRetirementReceipt{Version: 1, Evidence: evidence, Closures: closures, Phase: "RETIRED"}
+	evidence := OwnedSettlementEvidence{Version: 1, Grant: g, Snapshot: current, Completion: completion, MarkOrigin: origin}
+	r := OwnedRetirementReceipt{Version: 1, Evidence: evidence, Closures: closures, Phase: "ACKNOWLEDGED"}
+	r.ACKIdentity = r.Identity()
 	if !r.Valid() {
 		return OwnedRetirementReceipt{}, ErrExecutionConflict
 	}

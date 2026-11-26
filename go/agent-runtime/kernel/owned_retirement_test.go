@@ -3,10 +3,9 @@ package kernel
 import (
 	"encoding/json"
 	"errors"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
 	"strings"
 	"testing"
-
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
 )
 
 func retirementFixture() (OwnedRetirementReceipt, ExecutionLease) {
@@ -14,11 +13,13 @@ func retirementFixture() (OwnedRetirementReceipt, ExecutionLease) {
 	g := ChildExecutionGrant{ID: "scope", ChildRunID: "root", ExpectedRevision: 1, ExecutionOwnerID: l.OwnerID, ExecutionLeaseID: l.LeaseID, ExecutionEpoch: l.Epoch, AdmissionSourceHash: strings.Repeat("a", 64), AdmissionOperation: "start"}
 	s := Snapshot{Run: Run{ID: "root", Kind: "agent", Status: RunStatusRunning, Revision: 2}, State: json.RawMessage(`{"receipt":"original"}`)}
 	c := OwnedPhysicalCallbackCompletion{GrantID: g.ID, ReturnRevision: 2, ReturnSourceHash: strings.Repeat("b", 64), HostCompleted: true, LeaseOwned: true}
-	return OwnedRetirementReceipt{Version: 1, Evidence: OwnedSettlementEvidence{Version: 1, Grant: g, Snapshot: s, Completion: c, MarkOrigin: "OWNER_RETURN"}, Closures: []ManagedTransfer{}, Phase: "RETIRED"}, l
+	r := OwnedRetirementReceipt{Version: 1, Evidence: OwnedSettlementEvidence{Version: 1, Grant: g, Snapshot: s, Completion: c, MarkOrigin: "CALLBACK_RETURN"}, Closures: []ManagedTransfer{}, Phase: "ACKNOWLEDGED"}
+	r.ACKIdentity = r.Identity()
+	return r, l
 }
-func TestOwnedRetirementWireAndCanonicalACK(t *testing.T) {
+func TestOwnedRetirementWireAndExactFinish(t *testing.T) {
 	r, l := retirementFixture()
-	g := r.Evidence.Grant
+	g, s, c := r.Evidence.Grant, r.Evidence.Snapshot, r.Evidence.Completion
 	b, e := json.Marshal(r)
 	if e != nil {
 		t.Fatal(e)
@@ -27,92 +28,75 @@ func TestOwnedRetirementWireAndCanonicalACK(t *testing.T) {
 	if e = json.Unmarshal(b, &decoded); e != nil || !decoded.Valid() || decoded.Identity() != r.Identity() {
 		t.Fatalf("wire: %v", e)
 	}
-	proof := OwnedRetirementAcknowledgement{proof: featurecontrol.Seal(g.ChildRunID, r.Evidence.Snapshot.Run.Revision, "agent_owned_retirement_ack", g.ID, OwnedRetirementAcknowledgementPayload(r), nil)}
-	for _, kind := range []string{"nil-proof", "epoch", "source", "replacement", "lease"} {
+	permit := ChildExecutionSettlement{proof: featurecontrol.Seal(s.Run.ID, s.Run.Revision, "agent_owned_physical_settled", g.ID, s.State, s)}
+	receipt, e := BuildOwnedRetirementReceipt(g, s, l, c, permit, []ManagedTransfer{})
+	if e != nil || !receipt.Valid() || receipt.Identity() != r.Identity() {
+		t.Fatalf("finish: %v", e)
+	}
+	for _, kind := range []string{"missing-permit", "foreign-lease", "changed-source", "unknown-return", "missing-return", "old-intermediate", "invalid-digest", "nil-closures"} {
 		t.Run(kind, func(t *testing.T) {
-			p, current, epoch, lease, busy := proof, r.Evidence.Snapshot, l.Epoch, l, false
+			owner, current, completion, p := l, s, c, permit
 			switch kind {
-			case "nil-proof":
-				p = OwnedRetirementAcknowledgement{}
-			case "epoch":
-				epoch++
-			case "source":
-				current.Run.Revision++
-			case "replacement":
-				busy = true
-			case "lease":
-				lease.OwnerID = "foreign"
+			case "missing-permit":
+				p = ChildExecutionSettlement{}
+			case "foreign-lease":
+				owner.LeaseID = "foreign"
+			case "changed-source":
+				current.EventHead++
+			case "unknown-return":
+				completion.HostCompleted = false
+			case "missing-return":
+				completion = OwnedPhysicalCallbackCompletion{}
+			case "old-intermediate":
+				old := r
+				old.Phase = "RETIRED"
+				old.ACKIdentity = ""
+				if old.Valid() {
+					t.Fatal("old intermediate accepted")
+				}
+				return
+			case "invalid-digest":
+				bad := r
+				bad.ACKIdentity = "foreign"
+				if bad.Valid() {
+					t.Fatal("changed digest accepted")
+				}
+				return
+			case "nil-closures":
+				bad := r
+				bad.Closures = nil
+				bad.ACKIdentity = bad.Identity()
+				if bad.Valid() {
+					t.Fatal("null closure accepted")
+				}
+				return
 			}
-			next, _, release, e := ReduceOwnedRetirementACK(r, g, p, current, epoch, lease, busy)
-			if !errors.Is(e, ErrExecutionConflict) || release || ManagedDigest(next) != ManagedDigest(r) {
-				t.Fatal("invalid first ACK changed authority")
+			if _, e := BuildOwnedRetirementReceipt(g, current, owner, completion, p, []ManagedTransfer{}); !errors.Is(e, ErrExecutionConflict) {
+				t.Fatalf("invalid finish: %v", e)
 			}
 		})
-	}
-	ack, result, release, e := ReduceOwnedRetirementACK(r, g, proof, r.Evidence.Snapshot, l.Epoch, l, false)
-	if e != nil || !release || result.PreviouslyAcknowledged || !ack.Valid() {
-		t.Fatalf("first ACK: %v", e)
-	}
-	b, e = json.Marshal(ack)
-	if e != nil {
-		t.Fatal(e)
-	}
-	if e = json.Unmarshal(b, &decoded); e != nil || !decoded.Valid() {
-		t.Fatalf("ACK wire: %v", e)
-	}
-	changed := r.Evidence.Snapshot
-	changed.Run.Revision++
-	again, result, release, e := ReduceOwnedRetirementACK(ack, g, proof, changed, l.Epoch+1, ExecutionLease{}, true)
-	if e != nil || release || !result.PreviouslyAcknowledged || ManagedDigest(again) != ManagedDigest(ack) {
-		t.Fatal("historical ACK mutated or borrowed new authority")
-	}
-	bad := r
-	bad.Closures = nil
-	if bad.Valid() {
-		t.Fatal("null closures accepted")
-	}
-	bad = r
-	bad.Phase = "ACKNOWLEDGED"
-	if bad.Valid() {
-		t.Fatal("missing ACK identity accepted")
-	}
-	bad = r
-	bad.Evidence.Completion = OwnedPhysicalCallbackCompletion{}
-	bad.Evidence.MarkOrigin = "LEGACY_UNKNOWN"
-	if !bad.Valid() || proof.Matches(g, bad) {
-		t.Fatal("legacy marker fabricated release authority")
 	}
 }
 
 func TestOwnedRetirementRunSelector(t *testing.T) {
 	r, l := retirementFixture()
-	for _, name := range []string{"unique", "absent", "acked", "ambiguous", "corrupt", "source", "epoch", "replacement", "foreign-lease", "old-then-current", "current-then-old", "old-only", "old-corrupt-with-current"} {
+	for _, name := range []string{"unique", "absent", "ambiguous", "corrupt", "source", "epoch", "replacement", "foreign-lease", "old-then-current", "old-only", "borrowed", "borrowed-foreign", "old-intermediate"} {
 		t.Run(name, func(t *testing.T) {
 			rows := []OwnedRetirementReceipt{r}
-			current := r.Evidence.Snapshot
-			epoch := l.Epoch
-			lease := l
-			busy := false
+			current, epoch, lease, busy := r.Evidence.Snapshot, l.Epoch, ExecutionLease{}, false
 			var want error
 			switch name {
 			case "absent":
 				rows = nil
 				want = ErrNotFound
-			case "acked":
-				rows[0].Phase = "ACKNOWLEDGED"
-				rows[0].ACKIdentity = rows[0].Identity()
-				want = ErrNotFound
 			case "ambiguous":
-				other := r
-				other.Evidence.Grant.ID = "second"
-				other.Evidence.Completion.GrantID = "second"
-				rows = append(rows, other)
+				rows = append(rows, r)
 				want = ErrExecutionConflict
 			case "corrupt":
-				rows[0].Evidence.Completion.ReturnSourceHash = "bad"
+				rows[0].ACKIdentity = "bad"
 				want = ErrExecutionConflict
 			case "source":
-				current.Run.Revision++
+				current.EventHead++
 				want = ErrNotFound
 			case "epoch":
 				epoch++
@@ -121,41 +105,37 @@ func TestOwnedRetirementRunSelector(t *testing.T) {
 				busy = true
 				want = ErrExecutionConflict
 			case "foreign-lease":
-				lease.LeaseID = "other"
+				lease = l
 				want = ErrNotFound
-			case "old-then-current", "current-then-old", "old-only", "old-corrupt-with-current":
+			case "old-then-current", "old-only":
 				old := r
-				old.Evidence.Grant.ID = "old-scope"
-				old.Evidence.Grant.ExecutionLeaseID = "old-lease"
-				old.Evidence.Completion.GrantID = "old-scope"
-				if !old.Valid() {
-					t.Fatal("historical fixture invalid")
-				}
+				old.Evidence.Grant.ExecutionEpoch = 2
+				old.ACKIdentity = old.Identity()
 				rows = []OwnedRetirementReceipt{old, r}
-				if name == "current-then-old" {
-					rows = []OwnedRetirementReceipt{r, old}
-				}
 				if name == "old-only" {
-					rows = []OwnedRetirementReceipt{old}
+					rows = rows[:1]
 					want = ErrNotFound
 				}
-				if name == "old-corrupt-with-current" {
-					rows[0].Evidence.Completion.ReturnSourceHash = "bad"
-					want = ErrExecutionConflict
+			case "borrowed", "borrowed-foreign":
+				rows[0].Evidence.Completion.LeaseOwned = false
+				rows[0].ACKIdentity = rows[0].Identity()
+				lease = l
+				if name == "borrowed-foreign" {
+					lease.LeaseID = "other"
+					want = ErrNotFound
 				}
+			case "old-intermediate":
+				rows[0].Phase = "RETIRED"
+				rows[0].ACKIdentity = ""
+				want = ErrExecutionConflict
 			}
 			before := ManagedDigest(rows)
-			// Multiple current candidates are a defensive pure-helper corruption
-			// vector, not a state produced by lawful single-grant admission.
-			selected, e := SelectOwnedRetirementForRun("root", rows, current, epoch, lease, busy)
-			if ManagedDigest(rows) != before {
-				t.Fatal("selector mutated historical evidence")
+			got, e := SelectOwnedRetirementForRun("root", rows, current, epoch, lease, busy)
+			if !errors.Is(e, want) || ManagedDigest(rows) != before {
+				t.Fatalf("selector: %v want %v", e, want)
 			}
-			if !errors.Is(e, want) {
-				t.Fatalf("got %v want %v", e, want)
-			}
-			if want == nil && selected.Identity() != r.Identity() {
-				t.Fatal("selected wrong original scope")
+			if want == nil && got.Evidence.Grant != r.Evidence.Grant {
+				t.Fatal("wrong current grant")
 			}
 		})
 	}

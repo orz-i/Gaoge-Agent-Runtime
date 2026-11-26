@@ -2,7 +2,6 @@ package harness
 
 import (
 	"context"
-	"reflect"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
@@ -28,12 +27,12 @@ func (authority *BudgetAuthority) Adapter() (*agent.BoundedBudgetAdapter, error)
 
 type boundedBudgetPorts struct{ authority *BudgetAuthority }
 
-// Managed continuation is supported only by the same registered Host
-// Store that owns the original Turn AND its Ledger.
+// Managed continuation uses the original Host selection and the native
+// Runtime accounting store, never a Host-owned accounting history.
 func (p boundedBudgetPorts) ContextSummaryRecoveryHost() kernel.ManagedRecoveryHostStore {
 	d := p.authority.dependencies
 	host, ok := d.Store.(kernel.ManagedRecoveryHostStore)
-	if !ok || reflect.ValueOf(host).Kind() != reflect.Pointer || any(d.Ledgers) != any(host) {
+	if !ok || d.Runtime == nil || !d.Runtime.UsesLedgerStore(d.Ledgers) {
 		return nil
 	}
 	return host

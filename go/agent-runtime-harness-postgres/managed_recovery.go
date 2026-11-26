@@ -2,8 +2,6 @@ package harnesspostgres
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
@@ -81,7 +79,7 @@ func managedRows(tx *gorm.DB, b kernel.ManagedHostBinding, closed ...bool) (harn
 	if err != nil {
 		return t, inv, nil, err
 	}
-	if !found {
+	if !found && !b.DirectNativeCommand() {
 		return t, inv, nil, harness.ErrConflict
 	}
 	// Include globally keyed children of original dispatch/cancellation facts,
@@ -108,27 +106,11 @@ func managedRows(tx *gorm.DB, b kernel.ManagedHostBinding, closed ...bool) (harn
 	}
 	return t, inv, items, nil
 }
-func (s *Store) ReadManagedOriginalDispatch(ctx context.Context, b kernel.ManagedHostBinding) (kernel.ManagedHostBinding, error) {
-	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if e := lockTurn(tx, b.TurnID); e != nil {
-			return e
-		}
-		_, _, _, e := managedRows(tx, b)
-		return e
-	})
-	if err != nil {
-		return kernel.ManagedHostBinding{}, err
+func (s *Store) VerifyManagedOriginalDispatch(ctx context.Context, b kernel.ManagedHostBinding, recovery bool) error {
+	if !b.Valid() {
+		return harness.ErrConflict
 	}
-	b.Source = append([]byte(nil), b.Source...)
-	return b, nil
-}
-func (s *Store) ReserveManagedRecovery(ctx context.Context, p kernel.ManagedParkedProof) (kernel.ManagedHostReservation, error) {
-	b := p.Transfer().SafePoint.Host
-	if !p.Matches(b) {
-		return kernel.ManagedHostReservation{}, harness.ErrConflict
-	}
-	var out kernel.ManagedHostReservation
-	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if e := lockTurn(tx, b.TurnID); e != nil {
 			return e
 		}
@@ -136,113 +118,24 @@ func (s *Store) ReserveManagedRecovery(ctx context.Context, p kernel.ManagedPark
 		if e != nil {
 			return e
 		}
-		candidate, e := harness.SelectManagedReservation(p, b, t, i, items)
-		if e != nil {
-			return e
-		}
-		var row managedReservationRecord
-		e = tx.Where("dispatch_id = ?", b.DispatchID).Take(&row).Error
-		if e == nil {
-			if json.Unmarshal([]byte(row.RecordJSON), &out) != nil || !harness.SameManagedReservation(out, candidate) || row.RecoveryID != out.RecoveryID || row.TurnID != b.TurnID {
-				return harness.ErrConflict
-			}
-			return nil
-		}
-		if !errors.Is(e, gorm.ErrRecordNotFound) {
-			return e
-		}
-		raw, e := json.Marshal(candidate)
-		if e != nil {
-			return e
-		}
-		row = managedReservationRecord{DispatchID: b.DispatchID, RecoveryID: candidate.RecoveryID, TurnID: b.TurnID, RecordJSON: string(raw)}
-		if e = tx.Create(&row).Error; e != nil {
-			return e
-		}
-		out = candidate
-		return nil
-	})
-	return out, err
-}
-func (s *Store) ReadManagedRecovery(ctx context.Context, b kernel.ManagedHostBinding, id string) (kernel.ManagedHostReservation, error) {
-	var out kernel.ManagedHostReservation
-	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if e := lockTurn(tx, b.TurnID); e != nil {
-			return e
-		}
-		var row managedReservationRecord
-		if e := tx.Where("dispatch_id = ?", b.DispatchID).Take(&row).Error; e != nil {
-			if errors.Is(e, gorm.ErrRecordNotFound) {
-				return kernel.ErrNotFound
-			}
-			return e
-		}
-		if json.Unmarshal([]byte(row.RecordJSON), &out) != nil || !out.Valid() || (id != "" && out.RecoveryID != id) || row.RecoveryID != out.RecoveryID || row.TurnID != b.TurnID || kernel.ManagedDigest(out.Binding) != kernel.ManagedDigest(b) {
-			return harness.ErrConflict
-		}
-		_, _, items, e := managedRows(tx, b, row.ClosureHash != "")
-		if e != nil {
-			return e
-		}
-		if e = harness.ValidateManagedReservationRows(out, items, row.ClosureHash != ""); e != nil {
-			return e
+		if recovery {
+			return harness.VerifyManagedRecoveryAdmission(b, t, i, items)
 		}
 		return nil
 	})
-	return out, err
 }
-func checkManagedReservationTx(tx *gorm.DB, turnID string) error {
+
+// Retired reservation records are preserved only as migration history.
+func rejectOpenManagedReservations(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&managedReservationRecord{}) {
+		return nil
+	}
 	var n int64
-	if err := tx.Model(&managedReservationRecord{}).Where("turn_id = ? AND closure_hash = ?", turnID, "").Count(&n).Error; err != nil {
+	if err := db.Model(&managedReservationRecord{}).Where("closure_hash = ?", "").Count(&n).Error; err != nil {
 		return err
 	}
 	if n != 0 {
 		return harness.ErrConflict
-	}
-	return nil
-}
-
-func checkManagedInvocationReservationTx(tx *gorm.DB, inv harness.Invocation) error {
-	var rows []managedReservationRecord
-	if err := tx.Where("turn_id = ? AND closure_hash = ?", inv.TurnID, "").Find(&rows).Error; err != nil {
-		return err
-	}
-	for _, row := range rows {
-		var r kernel.ManagedHostReservation
-		if json.Unmarshal([]byte(row.RecordJSON), &r) != nil || harness.ManagedReservationBlocksInvocation(r, inv) {
-			return harness.ErrConflict
-		}
-	}
-	return nil
-}
-
-func checkManagedCompletionTx(tx *gorm.DB, item harness.Item) error {
-	if harness.IsManagedDispatchClosure(item) {
-		return harness.ErrConflict
-	}
-	var rows []managedReservationRecord
-	if err := tx.Where("(dispatch_id = ? OR turn_id = ?) AND closure_hash = ?", item.ParentItemID, item.TurnID, "").Find(&rows).Error; err != nil {
-		return err
-	}
-	for _, row := range rows {
-		var r kernel.ManagedHostReservation
-		if json.Unmarshal([]byte(row.RecordJSON), &r) != nil || !r.Valid() {
-			return harness.ErrConflict
-		}
-		var approvalParent string
-		if r.Binding.Approval != nil {
-			grant, found, err := findItem(tx, r.Binding.DispatchID)
-			if err != nil {
-				return err
-			}
-			if !found {
-				return harness.ErrConflict
-			}
-			approvalParent, _ = harness.OriginalApprovalRequestID(grant)
-		}
-		if item.ParentItemID == r.Binding.DispatchID || (approvalParent != "" && item.ParentItemID == approvalParent) || (r.Mode == kernel.ManagedCancel && item.ParentItemID == r.Cancellation.IntentID) {
-			return harness.ErrConflict
-		}
 	}
 	return nil
 }
@@ -257,38 +150,20 @@ func (s *Store) CloseManagedRecovery(ctx context.Context, p kernel.ManagedClosur
 		if err := lockTurn(tx, b.TurnID); err != nil {
 			return err
 		}
-		a, err := (&Store{db: tx}).ManagedRecoveryAuthority(ctx)
+		_, _, items, err := managedRows(tx, b, true)
 		if err != nil {
 			return err
 		}
-		if a != b.HostAuthority {
-			return harness.ErrConflict
-		}
-		var row managedReservationRecord
-		if err = tx.Where("dispatch_id = ?", b.DispatchID).Take(&row).Error; err != nil {
-			return mapError(err)
-		}
-		var r kernel.ManagedHostReservation
-		if json.Unmarshal([]byte(row.RecordJSON), &r) != nil || !p.Matches(r) || row.RecoveryID != r.RecoveryID || row.TurnID != b.TurnID {
-			return harness.ErrConflict
-		}
-		digest := kernel.ManagedDigest(struct {
-			Transfer kernel.ManagedTransfer
-			Snapshot kernel.Snapshot
-		}{t, p.Snapshot()})
-		if row.ClosureHash != "" {
-			if row.ClosureHash != digest {
-				return harness.ErrConflict
-			}
-			return nil
+		if replay, err := harness.ManagedClosureReplay(p, items); err != nil || replay {
+			return err
 		}
 		if _, _, _, err = managedRows(tx, b); err != nil {
 			return err
 		}
-		if err := harness.ValidateManagedClosureAccounting(ctx, &Store{db: tx}, p); err != nil {
+		if err = harness.ManagedClosureAuthorization(p, items); err != nil {
 			return err
 		}
-		additions, err := harness.ManagedClosureItems(p, r)
+		additions, err := harness.ManagedClosureItems(p, t.Selection)
 		if err != nil {
 			return err
 		}
@@ -331,13 +206,6 @@ func (s *Store) CloseManagedRecovery(ctx context.Context, p kernel.ManagedClosur
 			if err = tx.Create(&record).Error; err != nil {
 				return err
 			}
-		}
-		result := tx.Model(&managedReservationRecord{}).Where("dispatch_id = ? AND closure_hash = ?", b.DispatchID, "").Update("closure_hash", digest)
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected != 1 {
-			return harness.ErrConflict
 		}
 		return nil
 	})

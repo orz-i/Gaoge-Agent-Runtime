@@ -288,14 +288,43 @@ func (runner *Runner) ResolveApproval(
 		}
 		runCtx = context.WithValue(runCtx, originalApprovalDispatchKey{}, kernel.ManagedApprovalDecision{CheckpointID: request.CheckpointID, Decision: string(request.Decision), Comment: strings.TrimSpace(request.Comment)})
 	}
-	resolved, resolveErr := runner.withPhysicalInvocationDispatch(runCtx, invocation, "resolve-approval", func(physicalCtx context.Context) (kernel.Snapshot, error) {
-		return runner.agent.ResolveApproval(
-			physicalCtx, runtimeSnapshot.Run.ID, runtimeSnapshot.Run.Revision,
-			plugin.ApprovalResponse{Decision: decision, Comment: strings.TrimSpace(request.Comment)},
-		)
-	})
+	resolve := func(physicalCtx context.Context) (kernel.Snapshot, error) {
+		return runner.agent.ResolveApproval(physicalCtx, runtimeSnapshot.Run.ID, runtimeSnapshot.Run.Revision, plugin.ApprovalResponse{Decision: decision, Comment: strings.TrimSpace(request.Comment)})
+	}
+	var resolved kernel.Snapshot
+	var resolveErr error
+	native := runner.nativeRootCommands()
+	if native != nil && !native.NativeRootCallbacksScoped() {
+		native = nil
+	}
+	if native != nil {
+		if err = validateRootRuntimeOwnership(invocation, runtimeSnapshot); err != nil {
+			return Snapshot{}, err
+		}
+		if err = runner.requireInvocationRootModelOutputCeiling(ctx, invocation); err != nil {
+			return Snapshot{}, err
+		}
+		if err = runner.requireUnclaimedInteractionContinuation(ctx, turn.ID, ""); err != nil {
+			return Snapshot{}, err
+		}
+		ready, e := runner.originalNativeCommand(ctx, invocation)
+		if e != nil || !ready {
+			return Snapshot{}, errors.Join(ErrConflict, e)
+		}
+		a := kernel.ManagedApprovalDecision{CheckpointID: request.CheckpointID, Decision: string(request.Decision), Comment: strings.TrimSpace(request.Comment)}
+		if _, exists, readErr := runner.readNativeApprovalProjection(ctx, turn, invocation, a, runtimeSnapshot.Run.UpdatedAt); readErr != nil || exists {
+			return Snapshot{}, errors.Join(ErrConflict, readErr)
+		}
+		resolved, resolveErr = runner.withNativeRootCommand(runCtx, native, invocation, "resolve-approval", &a, resolve)
+	} else {
+		resolved, resolveErr = runner.withPhysicalInvocationDispatch(runCtx, invocation, "resolve-approval", resolve)
+	}
 	if resolved.Run.ID == "" {
 		return Snapshot{}, resolveErr
+	}
+	if native != nil && errors.Is(resolveErr, agent.ErrRootOutcomeUnknown) {
+		snapshot, loadErr := runner.loadSnapshot(ctx, turn, &resolved)
+		return snapshot, errors.Join(resolveErr, loadErr)
 	}
 	// An acknowledged no-entry (or any failed call still showing the same
 	// pending gate) has not resolved the user decision. Preserve the original
@@ -682,9 +711,20 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	if dependencies.Runtime == nil || dependencies.Agent == nil || dependencies.Store == nil {
 		return nil, ErrInvalidRequest
 	}
-	if native, ok := dependencies.Agent.(*agent.Runner); ok && (native.SupportsManagedContextRecovery() || native.SupportsSummaryNativeRecovery()) {
+	if native, ok := dependencies.Agent.(*agent.Runner); ok && native.SupportsManagedRecovery() {
 		host, supported := dependencies.Store.(managedHostStore)
-		if !supported || !dependencies.Runtime.UsesManagedRecoveryHost(host) {
+		if !supported || !native.ObservesKernelRuntime(dependencies.Runtime) || !dependencies.Runtime.UsesManagedRecoveryHost(host) {
+			return nil, ErrInvalidRequest
+		}
+	}
+	if dependencies.Budget != nil && dependencies.Budget.dependencies.Runtime != nil {
+		native, ok := dependencies.Agent.(*agent.Runner)
+		if !ok || !native.ObservesKernelRuntime(dependencies.Runtime) || dependencies.Budget.dependencies.Runtime != dependencies.Runtime ||
+			(dependencies.Cancellation != nil && dependencies.Cancellation != dependencies.Runtime) {
+			return nil, ErrInvalidRequest
+		}
+		adapter, err := dependencies.Budget.Adapter()
+		if err != nil || !native.UsesNativeBudget(adapter) {
 			return nil, ErrInvalidRequest
 		}
 	}
@@ -908,7 +948,7 @@ func (runner *Runner) refreshTurn(ctx context.Context, turnID string, expected *
 	if ActiveCancellationFence(physicalEvidence) {
 		return Snapshot{}, ErrConflict
 	}
-	if err = runner.recoverReturnedChildApprovals(ctx, turn); err != nil {
+	if err = runner.recoverReturnedChildDispatches(ctx, turn); err != nil {
 		return Snapshot{}, err
 	}
 	if err = runner.refreshStandardRemoteChildren(ctx, turn); err != nil {
@@ -1036,7 +1076,7 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 			return Snapshot{}, loadErr
 		}
 	}
-	if managed, recognized, managedErr := runner.cancelManagedOriginal(ctx, turn, invocation); recognized {
+	if managed, recognized, managedErr := runner.cancelManagedOriginal(ctx, turn, invocation, reason); recognized {
 		return managed, managedErr
 	}
 	intent, err := runner.cancelPreflightWithIntent(ctx, turn, invocation.ExecutionRefID,
@@ -1082,8 +1122,10 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 		settled = cancelErr == nil
 		return cancelled, cancelErr
 	}
-	if err = runner.cancelTurnBudget(ctx, turn, invocation.ExecutionRefID); err != nil {
-		return Snapshot{}, err
+	if !runner.nativeBudget() {
+		if err = runner.cancelTurnBudget(ctx, turn, invocation.ExecutionRefID); err != nil {
+			return Snapshot{}, err
+		}
 	}
 	runtimeSnapshot, found, err := runner.cancelRuntimeRun(ctx, invocation.ExecutionRefID, reason, &invocation)
 	if err != nil {
@@ -1302,6 +1344,11 @@ func (runner *Runner) syncRuntimeSnapshotWithCancellationProof(
 		if ActiveCancellationFence(items) {
 			return Snapshot{}, ErrConflict
 		}
+		// Native retirement is an execution fact, independent of the current
+		// Host composition. A terminal Run alone cannot settle an active callback.
+		if e := runner.reconcileTerminalRootRetirement(ctx, runtimeSnapshot); e != nil {
+			return Snapshot{}, errors.Join(ErrExecutionOutcomeUnknown, e)
+		}
 	}
 	status, err := runner.invocationRuntimeStatus(ctx, invocation, runtimeSnapshot)
 	if err != nil {
@@ -1332,6 +1379,9 @@ func (runner *Runner) syncRuntimeSnapshotWithCancellationProof(
 		// A lagging projection may be repaired, but a committed terminal
 		// outcome is never rewritten into another outcome or back to running.
 		return Snapshot{}, ErrConflict
+	}
+	if err = runner.recordNativeApprovalDecisions(ctx, turn, invocation, runtimeSnapshot); err != nil {
+		return Snapshot{}, err
 	}
 	invocation, err = runner.syncInvocationProjection(ctx, invocation, runtimeSnapshot, status)
 	if err != nil {
@@ -1696,14 +1746,16 @@ func (runner *Runner) requireInvocationRootModelOutputCeiling(ctx context.Contex
 		}
 		return err
 	}
-	if config.WorkingStateSummary != nil {
+	if err := checkRootModelPolicy(root, current, config); err != nil {
+		return err
+	}
+	if native, supported := runner.agent.(interface{ SupportsManagedRecovery() bool }); supported {
 		view, viewErr := agent.ViewState(current)
-		native, supported := runner.agent.(interface{ SupportsSummaryNativeRecovery() bool })
-		if viewErr != nil || !supported || view.SummaryNativeRecovery != native.SupportsSummaryNativeRecovery() {
+		if viewErr != nil || view.ManagedRecovery != native.SupportsManagedRecovery() {
 			return ErrInvalidRequest
 		}
 	}
-	return checkRootModelPolicy(root, current, config)
+	return nil
 }
 
 func runtimeSnapshotConflicts(invocation Invocation, snapshot kernel.Snapshot) bool {

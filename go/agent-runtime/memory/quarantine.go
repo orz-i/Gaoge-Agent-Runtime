@@ -26,7 +26,7 @@ func (store *Store) QuarantineExecution(ctx context.Context, value kernel.Execut
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	if err := store.managedGateLocked(value.RunID); err != nil {
+	if err := store.nativeEntryGateLocked(value.RunID); err != nil {
 		return err
 	}
 	snapshot, ok := store.records[value.RunID]
@@ -55,9 +55,6 @@ func (store *Store) QuarantineExecution(ctx context.Context, value kernel.Execut
 	if state.epoch == math.MaxUint64 {
 		return kernel.ErrExecutionConflict
 	}
-	if _, err := store.settleRetirementSuccessorLocked(value.RunID); err != nil {
-		return err
-	}
 	state = store.execution[value.RunID]
 	state.epoch++
 	state.lease = kernel.ExecutionLease{}
@@ -78,7 +75,7 @@ func (store *Store) RepairExecutionQuarantine(ctx context.Context, value kernel.
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	if err := store.managedGateLocked(value.RunID); err != nil {
+	if err := store.nativeEntryGateLocked(value.RunID); err != nil {
 		return err
 	}
 	snapshot, ok := store.records[value.RunID]

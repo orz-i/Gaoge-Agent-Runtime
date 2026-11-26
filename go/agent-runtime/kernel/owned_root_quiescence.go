@@ -8,7 +8,7 @@ import (
 
 // OwnedRootSettlementStore is an OPTIONAL read-only custody proof. It is not
 // a generic physical Cancel capability. The Store inspects an exact Root Run,
-// its execution epoch, unsettled grants and acknowledged callback retirement
+// its execution epoch, unsettled grants and retired callback retirement
 // under the same Run lock used for new physical admission and Kernel Cancel.
 type OwnedRootSettlementStore interface {
 	VerifyOwnedRootSettlement(context.Context, Snapshot) error
@@ -50,7 +50,7 @@ func (r *Runtime) VerifyBoundedToolControl(ctx context.Context, expected Snapsho
 type RootSettlementCheck func(Snapshot, Snapshot, uint64, uint64, ExecutionLease, bool, []OwnedRetirementReceipt) error
 
 // PreparedRootSettlementStore proves that the entire first-party PREPARE
-// callback returned and was acknowledged, without ever entering Model, Tool
+// callback returned and was retired, without ever entering Model, Tool
 // or Host approval/completion callbacks. The original Run lock serializes
 // this read with the next Resume/Start grant and native Kernel Cancel.
 type PreparedRootSettlementStore interface {
@@ -84,12 +84,12 @@ func (r *Runtime) VerifyOwnedRootSettlement(ctx context.Context, expected Snapsh
 
 // VerifyOwnedRootSettlementFacts is shared by Memory and PostgreSQL Stores.
 // The latest callback must have *returned*, committed a verified retirement
-// and acknowledged release of the latest actual physical admission. Its
+// and retired release of the latest actual physical admission. Its
 // Store-owned watermark is distinct from later lease-only epochs. Unknown,
 // borrowed, pre-ACK, missing, duplicate and stale historical receipts cannot
 // establish that the original middleware and external callbacks are quiescent.
 // exactOwnedRootCancelSuccessor recognizes only one native ControlCancel CAS
-// directly after the original acknowledged callback. A terminal-looking
+// directly after the original retired callback. A terminal-looking
 // same-ID snapshot, a stale receipt or an arbitrary later mutation cannot
 // convert an old release into present physical ownership.
 func exactOwnedRootCancelSuccessor(previous, current Snapshot) bool {
@@ -111,8 +111,8 @@ func exactOwnedRootCancelSuccessor(previous, current Snapshot) bool {
 
 // VerifyPreparedRootSettlementFacts shares the exact owner/epoch/receipt
 // predicate with ordinary terminal settlement, but requires a SINGLE actual
-// acknowledged "prepare" callback. A later Model/approval callback can NEVER
-// inherit this pre-dispatch authorization. An exact acknowledged no-entry
+// retired "prepare" callback. A later Model/approval callback can NEVER
+// inherit this pre-dispatch authorization. An exact retired no-entry
 // suffix is not a callback and cannot erase the unchanged original custody.
 func VerifyPreparedRootSettlementFacts(
 	expected Snapshot, current Snapshot, epoch, physicalEpoch uint64, lease ExecutionLease,
@@ -163,7 +163,7 @@ func verifyOwnedRootSettlementFacts(
 	seenEpochs := map[uint64]bool{}
 	for _, r := range receipts {
 		if !r.Valid() || r.Evidence.Grant.ChildRunID != current.Run.ID ||
-			r.Phase != "ACKNOWLEDGED" || !r.Evidence.Completion.LeaseOwned {
+			!r.Evidence.Completion.LeaseOwned {
 			return ErrExecutionConflict
 		}
 		callbackEpoch := r.Evidence.Grant.ExecutionEpoch
@@ -199,7 +199,7 @@ func verifyOwnedRootSettlementFacts(
 	if ManagedDigest(original) != ManagedDigest(current) && !exactOwnedRootCancelSuccessor(original, current) {
 		return ErrExecutionConflict
 	}
-	// A later acknowledged no-entry only preserves earlier custody when it
+	// A later retired no-entry only preserves earlier custody when it
 	// proves precisely the same frozen source. It does not bridge a business
 	// mutation, substitute a later callback, or grant new control authority.
 	for _, r := range receipts {

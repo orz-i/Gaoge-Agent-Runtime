@@ -305,13 +305,6 @@ func ManagedPrepareReturned(ctx context.Context, adapter any, request any, err e
 	return true
 }
 
-// ManagedSuspension is available only inside the one audited Context Run
-// frame. Every other entered ticket must have returned without an unresolved
-// failure. The output journals actual operations, never a caller promise.
-func ManagedSuspension(ctx context.Context, adapter any, request any) (json.RawMessage, bool) {
-	return managedSuspension(ctx, adapter, nil, request, "", false)
-}
-
 // ManagedObligationSuspension accepts only the explicitly selected native
 // Budget frame with an actual admission operation and no unresolved ticket.
 // Summary supplies its concrete phase operation instead of a business prepare.
@@ -319,7 +312,7 @@ func ManagedObligationSuspension(ctx context.Context, adapter, budgetAdapter any
 	if phase != "" {
 		phase = "context.summary.native-phase:" + phase
 	}
-	return managedSuspension(ctx, adapter, budgetAdapter, request, phase, true)
+	return managedSuspension(ctx, adapter, budgetAdapter, request, phase)
 }
 
 // ManagedPreparationSuspension proves the actual hydrated native frontier
@@ -330,10 +323,10 @@ func ManagedPreparationSuspension(ctx context.Context, adapter, budgetAdapter an
 	if !Operation(ctx, adapter, operation, source) {
 		return nil, false
 	}
-	return managedSuspension(ctx, adapter, budgetAdapter, source, operation, true)
+	return managedSuspension(ctx, adapter, budgetAdapter, source, operation)
 }
 
-func managedSuspension(ctx context.Context, adapter, budgetAdapter any, request any, phase string, obligations bool) (json.RawMessage, bool) {
+func managedSuspension(ctx context.Context, adapter, budgetAdapter any, request any, phase string) (json.RawMessage, bool) {
 	t, _ := ctx.Value(ticketKey{}).(*Ticket)
 	if t == nil {
 		return nil, false
@@ -362,7 +355,7 @@ func managedSuspension(ctx context.Context, adapter, budgetAdapter any, request 
 		if other == t {
 			continue
 		}
-		if obligations && budgetAdapter != nil && other.adapter == budgetAdapter && !other.returned {
+		if budgetAdapter != nil && other.adapter == budgetAdapter && !other.returned {
 			if other.invalid || other.receipt || !s.trusted[other.adapter] || budgetProof != nil {
 				return nil, false
 			}
@@ -374,11 +367,11 @@ func managedSuspension(ctx context.Context, adapter, budgetAdapter any, request 
 			continue
 		}
 		if other.invalid || !other.returned || (other.failed && !other.receipt) ||
-			(obligations && !s.trusted[other.adapter]) {
+			!s.trusted[other.adapter] {
 			return nil, false
 		}
 	}
-	if obligations && (budgetAdapter != nil) != (budgetProof != nil) {
+	if (budgetAdapter != nil) != (budgetProof != nil) {
 		return nil, false
 	}
 	b, e := json.Marshal(struct {

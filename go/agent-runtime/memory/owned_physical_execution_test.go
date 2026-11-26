@@ -39,8 +39,10 @@ func ownedPhysicalFixture(t *testing.T) (*memory.Store, *kernel.Runtime, *kernel
 }
 func ownedPhysicalAdmit(t *testing.T, bound *kernel.Runtime, v kernel.Snapshot, l kernel.ExecutionLease) (kernel.ChildExecutionGrant, *kernel.Runtime) {
 	t.Helper()
-	proof := featurecontrol.Seal(v.Run.ID, v.Run.Revision, "agent_owned_physical_admission", l.LeaseID, v.State, v.Checkpoint)
-	g, e := bound.BeginOwnedPhysicalExecution(t.Context(), v.Run.ID, v.Run.Revision, proof, "start")
+	q := kernel.ExecutionAcquireRequest{}
+	proof := featurecontrol.Seal(v.Run.ID, v.Run.Revision, "agent_owned_physical_admission", kernel.OwnedPhysicalAdmissionSubject(q, l, "start", ""), v.State, v)
+	_, admission, e := bound.AdmitOwnedPhysicalExecution(t.Context(), v, q, proof, "start", "")
+	g := admission.Grant
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -52,7 +54,7 @@ func ownedPhysicalAdmit(t *testing.T, bound *kernel.Runtime, v kernel.Snapshot, 
 }
 func TestOwnedPhysicalMemoryAdmissionBindingAndTTL(t *testing.T) {
 	s, rt, bound, v, l, clock := ownedPhysicalFixture(t)
-	if _, e := bound.BeginOwnedPhysicalExecution(t.Context(), v.Run.ID, v.Run.Revision, nil, "start"); !errors.Is(e, kernel.ErrExecutionConflict) {
+	if _, _, e := bound.AdmitOwnedPhysicalExecution(t.Context(), v, kernel.ExecutionAcquireRequest{}, nil, "start", ""); !errors.Is(e, kernel.ErrExecutionConflict) {
 		t.Fatalf("nil proof: %v", e)
 	}
 	g, scoped := ownedPhysicalAdmit(t, bound, v, l)
@@ -103,7 +105,7 @@ func TestOwnedPhysicalMemoryAdmissionBindingAndTTL(t *testing.T) {
 	if _, e = scoped.Apply(t.Context(), v.Run.ID, advanced.Run.Revision, mutation); !errors.Is(e, kernel.ErrExecutionConflict) {
 		t.Fatalf("expired original wrote: %v", e)
 	}
-	proof := featurecontrol.Seal(v.Run.ID, advanced.Run.Revision, "agent_owned_physical_settled", g.ID, advanced.State, advanced.Checkpoint)
+	proof := featurecontrol.Seal(v.Run.ID, advanced.Run.Revision, "agent_owned_physical_settled", g.ID, advanced.State, advanced)
 	if e = scoped.MarkChildExecutionSettled(t.Context(), g, proof); !errors.Is(e, kernel.ErrExecutionConflict) {
 		t.Fatalf("expired original minted completion: %v", e)
 	}
@@ -138,13 +140,7 @@ func TestOwnedPhysicalMemoryReceiptOnlyRecovery(t *testing.T) {
 	if e = s.CheckExecution(t.Context(), v.Run.ID, &l); !errors.Is(e, kernel.ErrExecutionConflict) {
 		t.Fatalf("receipt granted send authority: %v", e)
 	}
-	recoveredProof := featurecontrol.Seal(v.Run.ID, recovered.Run.Revision, "agent_owned_physical_recovered", g.ID, recovered.State, recovered.Checkpoint)
-	if e = rt.MarkOwnedPhysicalRecovered(t.Context(), g, recoveredProof); e != nil {
-		t.Fatal(e)
-	}
-	if e = rt.MarkOwnedPhysicalRecovered(t.Context(), g, recoveredProof); e != nil {
-		t.Fatalf("repeat recovered Mark: %v", e)
-	}
+	recoveredProof := featurecontrol.Seal(v.Run.ID, recovered.Run.Revision, "agent_owned_physical_settled", g.ID, recovered.State, recovered)
 	if e = rt.FinishChildExecution(t.Context(), g, recoveredProof); e != nil {
 		t.Fatal(e)
 	}
@@ -157,23 +153,57 @@ func TestOwnedPhysicalMemoryReceiptOnlyRecovery(t *testing.T) {
 	}
 }
 func TestOwnedPhysicalMemoryMarkedRecoveryAfterExpiry(t *testing.T) {
-	_, rt, bound, v, l, clock := ownedPhysicalFixture(t)
-	g, scoped := ownedPhysicalAdmit(t, bound, v, l)
-	proof := featurecontrol.Seal(v.Run.ID, v.Run.Revision, "agent_owned_physical_settled", g.ID, v.State, v.Checkpoint)
-	if e := scoped.MarkChildExecutionSettled(t.Context(), g, proof); e != nil {
-		t.Fatal(e)
-	}
-	clock.now = clock.now.Add(2 * time.Minute)
-	if e := scoped.MarkChildExecutionSettled(t.Context(), g, proof); e != nil {
-		t.Fatalf("repeat original Mark after ACK loss: %v", e)
-	}
-	forged := g
-	forged.AdmissionOperation = "other"
-	if e := rt.FinishChildExecution(t.Context(), forged, proof); !errors.Is(e, kernel.ErrExecutionConflict) {
-		t.Fatalf("wrong operation released: %v", e)
-	}
-	if e := rt.FinishChildExecution(t.Context(), g, proof); e != nil {
-		t.Fatal(e)
+	for _, returned := range []bool{false, true} {
+		name := "legacy-mark-only"
+		if returned {
+			name = "original-return"
+		}
+		t.Run(name, func(t *testing.T) {
+			_, rt, bound, v, l, clock := ownedPhysicalFixture(t)
+			g, scoped := ownedPhysicalAdmit(t, bound, v, l)
+			if returned {
+				outcome := kernel.OwnedPhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: true}
+				callbackProof := featurecontrol.Seal(v.Run.ID, v.Run.Revision, "agent_owned_callback_return", g.ID, kernel.OwnedPhysicalCallbackReturnPayload(v, outcome), nil)
+				if e := rt.RecordOwnedPhysicalCallbackReturn(t.Context(), g, v.Run.Revision, outcome, callbackProof); e != nil {
+					t.Fatal(e)
+				}
+			}
+			proof := featurecontrol.Seal(v.Run.ID, v.Run.Revision, "agent_owned_physical_settled", g.ID, v.State, v)
+			if e := scoped.MarkChildExecutionSettled(t.Context(), g, proof); !errors.Is(e, kernel.ErrExecutionConflict) {
+				t.Fatalf("owned legacy mark was admitted: %v", e)
+			}
+			clock.now = clock.now.Add(2 * time.Minute)
+			forged := g
+			forged.AdmissionOperation = "other"
+			if e := rt.FinishChildExecution(t.Context(), forged, proof); !errors.Is(e, kernel.ErrExecutionConflict) {
+				t.Fatalf("wrong operation released: %v", e)
+			}
+			e := rt.FinishChildExecution(t.Context(), g, proof)
+			if !returned {
+				if !errors.Is(e, kernel.ErrExecutionConflict) {
+					t.Fatalf("legacy Mark without callback return retired: %v", e)
+				}
+				if _, e = rt.LoadOwnedRetirement(t.Context(), g.ID); !errors.Is(e, kernel.ErrNotFound) {
+					t.Fatalf("legacy Mark created retirement: %v", e)
+				}
+				if current, e := rt.LookupChildExecution(t.Context(), v.Run.ID); e != nil || current != g {
+					t.Fatalf("legacy Mark fence changed: %v %v", current, e)
+				}
+				return
+			}
+			if e != nil {
+				t.Fatal(e)
+			}
+			if receipt, e := rt.LoadOwnedRetirement(t.Context(), g.ID); e != nil || !receipt.Valid() || !receipt.Evidence.Completion.LeaseOwned {
+				t.Fatalf("missing exact final retirement: %v %v", receipt, e)
+			}
+			if _, e = rt.LookupChildExecution(t.Context(), v.Run.ID); !errors.Is(e, kernel.ErrNotFound) {
+				t.Fatalf("retired grant remains: %v", e)
+			}
+			if next, e := rt.AcquireExecution(t.Context(), kernel.ExecutionAcquireRequest{RunID: v.Run.ID, OwnerID: "next", LeaseDuration: time.Minute}); e != nil || next.Epoch <= l.Epoch {
+				t.Fatalf("successor after final retirement: %v %v", next, e)
+			}
+		})
 	}
 }
 func TestOwnedPhysicalMemoryApprovalPreservesLease(t *testing.T) {
@@ -251,16 +281,12 @@ func TestOwnedPhysicalCallbackReturnMemory(t *testing.T) {
 			if e != nil || !reflect.DeepEqual(current, v) {
 				t.Fatal("callback fact changed Run")
 			}
-			recoveredProof := featurecontrol.Seal(v.Run.ID, v.Run.Revision, "agent_owned_physical_recovered", g.ID, v.State, v.Checkpoint)
-			e = rt.MarkOwnedPhysicalRecovered(t.Context(), g, recoveredProof)
+			recoveredProof := featurecontrol.Seal(v.Run.ID, v.Run.Revision, "agent_owned_physical_settled", g.ID, v.State, v)
 			if !hostComplete {
-				if !errors.Is(e, kernel.ErrExecutionConflict) {
+				if e = rt.FinishChildExecution(t.Context(), g, recoveredProof); !errors.Is(e, kernel.ErrExecutionConflict) {
 					t.Fatalf("unknown Host released: %v", e)
 				}
 				return
-			}
-			if e != nil {
-				t.Fatal(e)
 			}
 			// Record and Finish serialize on the same authority. Either order must
 			// leave no resurrected scope, even when the original ACK was lost.

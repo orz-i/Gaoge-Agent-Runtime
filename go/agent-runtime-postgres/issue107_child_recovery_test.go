@@ -44,7 +44,7 @@ func TestIssue107PostgresChildGrantSurvivesNewStoreInstance(t *testing.T) {
 	if err = NewKernelStore(db).MarkChildExecutionSettled(t.Context(), original, kernel.ChildExecutionSettlement{}); !errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("untrusted direct Store Mark authorized cleanup: %v", err)
 	}
-	if err = NewKernelStore(db).FinishChildExecution(t.Context(), original); !errors.Is(err, kernel.ErrExecutionConflict) {
+	if err = NewKernelStore(db).FinishChildExecution(t.Context(), original, kernel.ChildExecutionSettlement{}); !errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("reopened pending grant was incorrectly released: %v", err)
 	}
 	if _, err = other.Cancel(t.Context(), parent.Run.ID, parent.Run.Revision, "still unknown"); !errors.Is(err, kernel.ErrChildExecutionBusy) {

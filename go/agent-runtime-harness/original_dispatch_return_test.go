@@ -15,3 +15,10 @@ func TestOriginalDispatchReturnMemory(t *testing.T) {
 		return k, h, func() (kernel.Store, harness.Store) { return k, h }
 	})
 }
+
+func TestNoEntryCancellationMemory(t *testing.T) {
+	conformance.NoEntryCancellation(t, func(t *testing.T) (kernel.Store, harness.Store, func() (kernel.Store, harness.Store)) {
+		k, h := memory.NewStore(), harness.NewMemoryStore()
+		return k, h, func() (kernel.Store, harness.Store) { return k, h }
+	})
+}

@@ -58,8 +58,7 @@ func RunEA1OwnedCallbackReturn(t *testing.T, factory func(*testing.T) (kernel.St
 			if e != nil {
 				t.Fatal(e)
 			}
-			admit := featurecontrol.Seal(initial.Run.ID, initial.Run.Revision, "agent_owned_physical_admission", lease.LeaseID, initial.State, initial.Checkpoint)
-			g, e := bound.BeginOwnedPhysicalExecution(t.Context(), initial.Run.ID, initial.Run.Revision, admit, "start")
+			g, e := admitBorrowed(t.Context(), bound, initial, "start", "")
 			if e != nil {
 				t.Fatal(e)
 			}
@@ -119,9 +118,9 @@ func RunEA1OwnedCallbackReturn(t *testing.T, factory func(*testing.T) (kernel.St
 				if !errors.Is(e, kernel.ErrExecutionConflict) {
 					t.Fatalf("unknown Host authorized receipt CAS: %v", e)
 				}
-				mark := featurecontrol.Seal(initial.Run.ID, initial.Run.Revision, "agent_owned_physical_recovered", g.ID, initial.State, initial.Checkpoint)
-				if e = observer.MarkOwnedPhysicalRecovered(t.Context(), g, mark); !errors.Is(e, kernel.ErrExecutionConflict) {
-					t.Fatalf("unknown Host authorized Mark: %v", e)
+				mark := featurecontrol.Seal(initial.Run.ID, initial.Run.Revision, "agent_owned_physical_settled", g.ID, initial.State, initial)
+				if e = observer.FinishChildExecution(t.Context(), g, mark); !errors.Is(e, kernel.ErrExecutionConflict) {
+					t.Fatalf("unknown Host authorized Finish: %v", e)
 				}
 				// Purpose isolation: only verified model evidence may be persisted under
 				// a recorded but unknown Host callback. This Store test seals synthetic
@@ -141,8 +140,8 @@ func RunEA1OwnedCallbackReturn(t *testing.T, factory func(*testing.T) (kernel.St
 				if e != nil || persisted != before {
 					t.Fatal("evidence CAS replaced callback outcome")
 				}
-				mark = featurecontrol.Seal(evidence.Run.ID, evidence.Run.Revision, "agent_owned_physical_recovered", g.ID, evidence.State, evidence.Checkpoint)
-				if e = observer.MarkOwnedPhysicalRecovered(t.Context(), g, mark); !errors.Is(e, kernel.ErrExecutionConflict) {
+				mark = featurecontrol.Seal(evidence.Run.ID, evidence.Run.Revision, "agent_owned_physical_settled", g.ID, evidence.State, evidence)
+				if e = observer.FinishChildExecution(t.Context(), g, mark); !errors.Is(e, kernel.ErrExecutionConflict) {
 					t.Fatalf("known model evidence retired unknown Host: %v", e)
 				}
 				if _, e = observer.AcquireExecution(t.Context(), kernel.ExecutionAcquireRequest{RunID: initial.Run.ID, OwnerID: "forbidden", LeaseDuration: time.Second}); !errors.Is(e, kernel.ErrChildExecutionBusy) {
@@ -169,21 +168,15 @@ func RunEA1OwnedCallbackReturn(t *testing.T, factory func(*testing.T) (kernel.St
 			}
 			// A crash/fault between the receipt CAS and Mark leaves the original
 			// completion intact; a new Runtime must seal the CURRENT receipt state.
-			stale := featurecontrol.Seal(initial.Run.ID, initial.Run.Revision, "agent_owned_physical_recovered", g.ID, initial.State, initial.Checkpoint)
-			if e = observer.MarkOwnedPhysicalRecovered(t.Context(), g, stale); !errors.Is(e, kernel.ErrExecutionConflict) {
-				t.Fatalf("stale Mark accepted: %v", e)
+			stale := featurecontrol.Seal(initial.Run.ID, initial.Run.Revision, "agent_owned_physical_settled", g.ID, initial.State, initial)
+			if e = observer.FinishChildExecution(t.Context(), g, stale); !errors.Is(e, kernel.ErrExecutionConflict) {
+				t.Fatalf("stale settlement accepted: %v", e)
 			}
 			completion, e := rt.LookupOwnedPhysicalCallbackReturn(t.Context(), g)
 			if e != nil || completion != before {
 				t.Fatal("receipt CAS rewrote callback completion")
 			}
-			recovered := featurecontrol.Seal(repaired.Run.ID, repaired.Run.Revision, "agent_owned_physical_recovered", g.ID, repaired.State, repaired.Checkpoint)
-			if e = rt.MarkOwnedPhysicalRecovered(t.Context(), g, recovered); e != nil {
-				t.Fatal(e)
-			}
-			if e = observer.MarkOwnedPhysicalRecovered(t.Context(), g, recovered); e != nil {
-				t.Fatalf("Mark lost ACK retry: %v", e)
-			}
+			recovered := featurecontrol.Seal(repaired.Run.ID, repaired.Run.Revision, "agent_owned_physical_settled", g.ID, repaired.State, repaired)
 			if e = rt.FinishChildExecution(t.Context(), g, recovered); e != nil {
 				t.Fatal(e)
 			}

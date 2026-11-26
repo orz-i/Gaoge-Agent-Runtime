@@ -107,7 +107,7 @@ func ea1RootResumeSettlement(t *testing.T, factory func(*testing.T) (kernel.Stor
 	}
 	// Arm only after real deferred creation and its setup scope retirement.
 	wrapped.mode = mode
-	wrapped.markCalls, wrapped.markCommits, wrapped.finishCalls = 0, 0, 0
+	wrapped.markCalls, wrapped.finishCommits, wrapped.finishCalls = 0, 0, 0
 	_, startErr := runner.Resume(t.Context(), req.ID, prepared.Run.Revision)
 	if unknownHost {
 		if !errors.Is(startErr, physical.hostFault) || wrapped.markCalls != 0 || wrapped.finishCalls != 0 {
@@ -120,6 +120,30 @@ func ea1RootResumeSettlement(t *testing.T, factory func(*testing.T) (kernel.Stor
 	if err != nil {
 		t.Fatal(err)
 	}
+	if phase == "P4" && wrapped.finishCommits == 1 {
+		if wrapped.markCalls != 0 || wrapped.finishCalls != 1 {
+			t.Fatal("retirement was not one transaction")
+		}
+		ea1AssertStartSettlementReceipt(t, physical, req, definition, before, withTool)
+		freshStore := reopen()
+		freshRT := ea1StartRuntime(t, freshStore)
+		ea1AssertFinishedOriginal(t, freshRT, wrapped.original, before)
+		fresh := makeRunner(freshRT, "fresh-recovery-owner")
+		if e := fresh.ReconcileRootPhysicalExecution(t.Context(), req.ID); e != nil {
+			t.Fatalf("final receipt recovery: %v", e)
+		}
+		ea1AssertFinishedOriginal(t, freshRT, wrapped.original, before)
+		if withTool {
+			ea1CancelRejected(t, freshRT, before, kernel.ChildExecutionGrant{}, kernel.ErrTerminal)
+		} else {
+			out, e := freshRT.Cancel(t.Context(), req.ID, before.Run.Revision, "original cancel")
+			if e != nil {
+				t.Fatal(e)
+			}
+			ea1CancelCommitted(t, freshRT, before, out)
+		}
+		return
+	}
 	grant, err := rt.LookupChildExecution(t.Context(), req.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -127,12 +151,8 @@ func ea1RootResumeSettlement(t *testing.T, factory func(*testing.T) (kernel.Stor
 	if grant.ExecutionOwnerID != "original-resume-owner" || grant.ExecutionLeaseID == "" || grant.ExecutionEpoch == 0 || grant.AdmissionOperation != "resume" || len(grant.AdmissionSourceHash) != 64 || grant.ExpectedRevision != prepared.Run.Revision {
 		t.Fatal("original owned source binding missing")
 	}
-	if phase == "P4" && !unknownHost {
-		if wrapped.markCalls != 2 || wrapped.markCommits != 2 || wrapped.finishCalls != 1 {
-			t.Fatal("actual original Mark commit/ACK-loss not reached")
-		}
-	} else if !unknownHost && (wrapped.markCommits != 0 || wrapped.markCalls < 2) {
-		t.Fatal("P3 did not retain unmarked callback-return fact")
+	if wrapped.markCalls != 0 || wrapped.finishCommits != 0 || (!unknownHost && wrapped.finishCalls != 1) {
+		t.Fatal("wrong precommit Finish boundary")
 	}
 	completion := ea1AssertOriginalRootCompletion(t, rt, grant, before, !unknownHost, true)
 	ea1AssertStartSettlementReceipt(t, physical, req, definition, before, withTool)
@@ -159,7 +179,7 @@ func ea1RootResumeSettlement(t *testing.T, factory func(*testing.T) (kernel.Stor
 	for _, mutate := range []func(*kernel.ChildExecutionGrant){func(g *kernel.ChildExecutionGrant) { g.ID += "-foreign" }, func(g *kernel.ChildExecutionGrant) { g.ExecutionEpoch++ }, func(g *kernel.ChildExecutionGrant) { g.AdmissionOperation = "start" }, func(g *kernel.ChildExecutionGrant) { g.AdmissionSourceHash = strings.Repeat("0", 64) }} {
 		wrong := grant
 		mutate(&wrong)
-		if e = freshStore.(kernel.ChildExecutionStore).FinishChildExecution(t.Context(), wrong); !errors.Is(e, kernel.ErrExecutionConflict) {
+		if e = freshStore.(kernel.ChildExecutionStore).FinishChildExecution(t.Context(), wrong, kernel.ChildExecutionSettlement{}); !errors.Is(e, kernel.ErrExecutionConflict) {
 			t.Fatalf("foreign authority retired original: %v", e)
 		}
 		same, e := freshRT.LookupChildExecution(t.Context(), req.ID)
@@ -169,7 +189,7 @@ func ea1RootResumeSettlement(t *testing.T, factory func(*testing.T) (kernel.Stor
 		assertUnchanged()
 	}
 	if phase == "P3" {
-		if e = freshStore.(kernel.ChildExecutionStore).FinishChildExecution(t.Context(), grant); !errors.Is(e, kernel.ErrExecutionConflict) {
+		if e = freshStore.(kernel.ChildExecutionStore).FinishChildExecution(t.Context(), grant, kernel.ChildExecutionSettlement{}); !errors.Is(e, kernel.ErrExecutionConflict) {
 			t.Fatalf("receipt alone retired unmarked scope: %v", e)
 		}
 		assertUnchanged()
@@ -196,7 +216,7 @@ func ea1RootResumeSettlement(t *testing.T, factory func(*testing.T) (kernel.Stor
 	if _, e = freshRT.LookupChildExecution(t.Context(), req.ID); !errors.Is(e, kernel.ErrNotFound) {
 		t.Fatalf("scope not retired: %v", e)
 	}
-	if e = fresh.ReconcileRootPhysicalExecution(t.Context(), req.ID); !errors.Is(e, kernel.ErrNotFound) {
+	if e = fresh.ReconcileRootPhysicalExecution(t.Context(), req.ID); e != nil {
 		t.Fatalf("duplicate reconciliation invented work: %v", e)
 	}
 	assertUnchanged()

@@ -180,9 +180,6 @@ func TestAgentSessionPairedSelectionRejectsConflictingToolAuthority(t *testing.T
 		{"custom archive reader", func(o *harness.AgentSessionOptions) {
 			o.LocalTools[0].Registration.Definition.Key = harness.ContextArtifactToolKey
 		}},
-		{"both managed recovery profiles", func(o *harness.AgentSessionOptions) {
-			o.Context.ManagedRecovery, o.Context.SummaryNativeRecovery = true, true
-		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			calls := 0

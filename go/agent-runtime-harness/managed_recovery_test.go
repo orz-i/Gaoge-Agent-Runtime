@@ -15,14 +15,14 @@ func TestManagedHostMemoryRejectsUnissuedProofs(t *testing.T) {
 	if err != nil || !a.Valid() {
 		t.Fatal(a, err)
 	}
-	if _, err = s.ReserveManagedRecovery(t.Context(), kernel.ManagedParkedProof{}); !errors.Is(err, ErrConflict) {
+	if err = s.VerifyManagedOriginalDispatch(t.Context(), kernel.ManagedHostBinding{}, true); !errors.Is(err, ErrConflict) {
 		t.Fatalf("unissued parked proof: %v", err)
 	}
 	if err = s.CloseManagedRecovery(t.Context(), kernel.ManagedClosureProof{}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("unissued closure proof: %v", err)
 	}
 	after, err := s.ManagedRecoveryAuthority(t.Context())
-	if err != nil || a != after || len(s.managedReservations) != 0 || len(s.managedClosures) != 0 || len(s.items) != 0 {
+	if err != nil || a != after || len(s.items) != 0 {
 		t.Fatal("denied proof mutated Host authority or history")
 	}
 	other, err := NewMemoryStore().ManagedRecoveryAuthority(t.Context())

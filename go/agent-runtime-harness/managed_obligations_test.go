@@ -136,10 +136,10 @@ func TestManagedContextCarriesOriginalBudgetAndInputCursor(t *testing.T) {
 			}
 			frozen := view.ModelInvocations[1]
 			safe, err := options.Runtime.LoadManagedRecovery(ctx, root.ExecutionRefID)
-			if err != nil || safe.State != kernel.ManagedAvailable || safe.SafePoint.LifecycleVersion != kernel.ManagedLifecycleAgentObligations || safe.SafePoint.ModelInvocationID != frozen.ID {
-				t.Fatalf("missing combined safe point: %v %s %s", err, safe.State, safe.SafePoint.LifecycleVersion)
+			if err != nil || safe.LegacyState != "" || safe.SafePoint.LifecycleVersion != kernel.ManagedLifecycleAgentObligations || safe.SafePoint.ModelInvocationID != frozen.ID {
+				t.Fatalf("missing combined safe point: %v %s %s", err, safe.Selection.Mode, safe.SafePoint.LifecycleVersion)
 			}
-			ledger, err := host.LoadBudget(ctx, pending.Turn.ID)
+			ledger, err := base.LoadBudget(ctx, pending.Turn.ID)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -154,8 +154,8 @@ func TestManagedContextCarriesOriginalBudgetAndInputCursor(t *testing.T) {
 				now := time.Now().UTC()
 				payload, _ := json.Marshal(map[string]string{"boundary": "cancel_scope_pending", "runID": root.ExecutionRefID, "protocol": "effects_v1", "canceller": "native"})
 				_, fresh, e := host.AppendItem(ctx, harness.Item{ID: "combined-cancel", TurnID: pending.Turn.ID, RunID: root.ExecutionRefID, Kind: harness.ItemDiagnostic, Status: harness.ItemStarted, ParentItemID: harness.CancellationFenceParentItemID, Payload: payload, CreatedAt: now, UpdatedAt: now})
-				if e != nil || !fresh {
-					t.Fatalf("cancel contender: %v", e)
+				if !errors.Is(e, harness.ErrConflict) || fresh {
+					t.Fatalf("independent Host cancel unexpectedly admitted: %v", e)
 				}
 			}
 			options.Session.Transcript = nil
@@ -172,7 +172,7 @@ func TestManagedContextCarriesOriginalBudgetAndInputCursor(t *testing.T) {
 				altered := budget.CloneLedger(ledger)
 				altered.Revision++
 				altered.Limits.MaxLLMCalls++
-				if err = host.SaveBudget(ctx, altered, ledger.Revision); err != nil {
+				if err = base.SaveBudget(ctx, altered, ledger.Revision); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -186,29 +186,27 @@ func TestManagedContextCarriesOriginalBudgetAndInputCursor(t *testing.T) {
 			}
 			clock.now = clock.now.Add(25 * time.Hour)
 			if mode == "cancel kernel committed" {
-				// Emulate a crash after the kernel CANCEL transition but before
-				// the original budget fence/lifetime receipt was closed.
-				parked, e := options.Runtime.ParkManagedContinuation(ctx, root.ExecutionRefID)
+				// Emulate a crash after the atomic native CANCEL but before
+				// the Host projection was closed.
+				parked, e := options.Runtime.LoadManagedRecovery(ctx, root.ExecutionRefID)
 				if e != nil {
 					t.Fatal(e)
 				}
-				selected, e := options.Runtime.SelectManagedContinuation(ctx, parked)
+				selected, e := options.Runtime.AuthorizeManagedContinuation(ctx, parked, "stop original task")
 				if e != nil {
 					t.Fatal(e)
 				}
-				if selected.Reservation().Mode != kernel.ManagedCancel {
+				if selected.Authorization().Mode != kernel.ManagedCancel {
 					t.Fatal("wrong cancellation election")
 				}
-				transferred, e := options.Runtime.CancelParkedManagedContinuation(ctx, selected)
+				transferred, e := options.Runtime.CommitManagedCancellation(ctx, selected)
 				if e != nil {
 					t.Fatal(e)
 				}
 				closure, e := options.Runtime.ManagedRecoveryClosure(ctx, transferred.SafePoint.ID)
-				if e != nil {
-					t.Fatal(e)
-				}
-				if e = host.CloseManagedRecovery(ctx, closure); e == nil {
-					t.Fatal("closed Host before original ledger")
+				l, le := base.LoadBudget(ctx, pending.Turn.ID)
+				if e != nil || !closure.Matches(transferred.Selection) || le != nil || !l.RunCancelled(root.ExecutionRefID) || !l.FinishedRuns[root.ExecutionRefID] {
+					t.Fatalf("native CANCEL did not commit accounting: %v %v", e, le)
 				}
 			}
 			var result harness.Snapshot
@@ -238,7 +236,7 @@ func TestManagedContextCarriesOriginalBudgetAndInputCursor(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			after, err := host.LoadBudget(ctx, pending.Turn.ID)
+			after, err := base.LoadBudget(ctx, pending.Turn.ID)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -434,7 +432,7 @@ func TestManagedOriginalModelAndInputFrontiers(t *testing.T) {
 					done, e := session.Cancel(ctx, "frontier", "cancel before first model")
 					final, readErr := base.Load(ctx, root.ExecutionRefID)
 					end, viewErr := agent.ViewState(final)
-					ledger, ledgerErr := host.LoadBudget(ctx, pending.Turn.ID)
+					ledger, ledgerErr := base.LoadBudget(ctx, pending.Turn.ID)
 					if e != nil || readErr != nil || viewErr != nil || ledgerErr != nil ||
 						done.Turn.Status != harness.TurnCancelled || len(client.requests) != 0 || len(end.ModelInvocations) != 0 ||
 						end.InputCursor != view.InputCursor || ledger.View("").Usage.LLMCalls != 0 ||
@@ -447,6 +445,17 @@ func TestManagedOriginalModelAndInputFrontiers(t *testing.T) {
 					return
 				}
 				done, err := session.Resume(ctx, "frontier")
+				if !after && (phase == "completed" || phase == "rejected") {
+					// Atomic receipt CAS did not commit. The provider might have
+					// charged, but no original receipt exists in either state.
+					current, e := base.Load(ctx, root.ExecutionRefID)
+					l, le := base.LoadBudget(ctx, pending.Turn.ID)
+					res := l.Reservations["model:"+firstID]
+					if err == nil || e != nil || le != nil || !reflect.DeepEqual(current, original) || len(client.requests) != 1 || !res.Dispatched || res.Status != budget.ReservationHeld || l.FinishedRuns[root.ExecutionRefID] {
+						t.Fatalf("unknown physical result not fenced: err=%v load=%v ledger=%v reservation=%+v", err, e, le, res)
+					}
+					return
+				}
 				if err != nil && phase != "rejected" {
 					t.Fatalf("resume: %v status=%s", err, done.Turn.Status)
 				}
@@ -458,7 +467,7 @@ func TestManagedOriginalModelAndInputFrontiers(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				ledger, err := host.LoadBudget(ctx, pending.Turn.ID)
+				ledger, err := base.LoadBudget(ctx, pending.Turn.ID)
 				if err != nil {
 					t.Fatal(err)
 				}

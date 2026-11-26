@@ -26,16 +26,23 @@ var errBeforeRetirementACK = errors.New("process died before retirement ACK comm
 
 type retirementACKBeforeCommitCut struct {
 	retirementKernelPorts
-	deny bool
+	deny, finished bool
 }
 
-func (s *retirementACKBeforeCommitCut) AcknowledgeOwnedRetirement(ctx context.Context, grant kernel.ChildExecutionGrant, proof kernel.OwnedRetirementAcknowledgement) (kernel.OwnedRetirementAckResult, error) {
-	if s.deny {
-		return kernel.OwnedRetirementAckResult{}, errBeforeRetirementACK
+func (s *retirementACKBeforeCommitCut) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
+	e := s.retirementKernelPorts.FinishChildExecution(ctx, g, p)
+	if e == nil && s.deny {
+		s.finished = true
+		return errBeforeRetirementACK
 	}
-	return s.retirementKernelPorts.AcknowledgeOwnedRetirement(ctx, grant, proof)
+	return e
 }
-
+func (s *retirementACKBeforeCommitCut) LoadOwnedRetirement(ctx context.Context, id string) (kernel.OwnedRetirementReceipt, error) {
+	if s.deny && s.finished {
+		return kernel.OwnedRetirementReceipt{}, errBeforeRetirementACK
+	}
+	return s.retirementKernelPorts.LoadOwnedRetirement(ctx, id)
+}
 func TestRetiredCallbackClosurePrecedesEveryNewGeneration(t *testing.T) {
 	for _, backend := range generationBackends {
 		for _, cancelInstead := range []bool{false, true} {
@@ -71,7 +78,7 @@ func TestRetiredCallbackClosurePrecedesEveryNewGeneration(t *testing.T) {
 					t.Fatalf("pre-ACK crash not exercised: %v", err)
 				}
 				prior, err := base.LookupOwnedRetirementForRun(t.Context(), prepared.Run.ID)
-				if err != nil || prior.Phase != "RETIRED" {
+				if err != nil || prior.Phase != "ACKNOWLEDGED" {
 					t.Fatalf("original genuine retirement missing: %+v %v", prior, err)
 				}
 				cut.deny = false

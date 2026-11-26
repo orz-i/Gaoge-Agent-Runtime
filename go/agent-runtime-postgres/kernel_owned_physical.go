@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget/sqlledger"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"gorm.io/gorm"
 )
@@ -23,7 +24,7 @@ func pgPhysicalRecord(g kernel.ChildExecutionGrant, parent string) models.Kernel
 // Call only while holding the Run row lock. The same lock serializes admission,
 // controls, owner changes and retirement; TTL is not a completion witness.
 func pgOwnedPhysicalGrants(tx *gorm.DB, runID string) ([]kernel.ChildExecutionGrant, error) {
-	if e := pgManagedGate(tx, runID); e != nil {
+	if e := pgNativeEntryGate(tx, runID); e != nil {
 		return nil, e
 	}
 	var rows []models.KernelChildEffectGrantRecord
@@ -62,58 +63,113 @@ func pgMatchOwnedPhysical(tx *gorm.DB, runID string, lease *kernel.ExecutionLeas
 	return nil
 }
 
-func (store *KernelStore) BeginOwnedPhysicalExecution(ctx context.Context, grant kernel.ChildExecutionGrant, lease kernel.ExecutionLease, admission kernel.OwnedPhysicalAdmission) error {
-	if store == nil || store.db == nil || ctx == nil || kernel.ValidateOwnedPhysicalAdmissionRequest(grant, lease) != nil {
-		return kernel.ErrInvalidInput
+func (store *KernelStore) BeginOwnedPhysicalExecution(ctx context.Context, admission kernel.OwnedPhysicalAdmission) (kernel.OwnedPhysicalAdmissionResult, error) {
+	var result kernel.OwnedPhysicalAdmissionResult
+	if store == nil || store.db == nil || ctx == nil {
+		return result, kernel.ErrInvalidInput
 	}
-	// GORM returns callback failures and COMMIT failures through the same
-	// error channel. Only the latter qualifies for an ACK recovery read.
+	grant := admission.Candidate().Grant
+	if !grant.Identity().Valid() {
+		return kernel.OwnedPhysicalAdmissionResult{}, kernel.ErrExecutionConflict
+	}
+	// Only actual COMMIT uncertainty carries the original candidate.
 	readyToCommit := false
 	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		current, err := lockKernelRun(tx, grant.ChildRunID)
-		if err != nil {
-			return err
-		}
-		if e := pgManagedGate(tx, grant.ChildRunID); e != nil {
+		current, e := lockKernelRun(tx, grant.ChildRunID)
+		if e != nil {
 			return e
 		}
-		if err = pgReserveGrantIdentity(tx, grant); err != nil {
-			return err
+		if e = pgReserveGrantIdentity(tx, grant); e != nil {
+			return e
 		}
-		current, _, err = pgSettleRetirementSuccessor(tx, current)
-		if err != nil {
-			return err
+		snapshot, e := kernelSnapshotFrom(current)
+		if e != nil {
+			return e
 		}
-		snapshot, err := kernelSnapshotFrom(current)
-		if err != nil {
-			return err
+		now, e := pgStoreNow(tx)
+		if e != nil {
+			return e
 		}
-		now, err := pgStoreNow(tx)
-		if err != nil {
-			return err
+		var v kernel.OwnedPhysicalAdmissionResult
+		var next kernel.ManagedTransfer
+		if admission.IsManagedRecovery() {
+			if current.ExecutionQuarantineRevision != 0 {
+				return kernel.ErrExecutionConflict
+			}
+			t, e := pgLoadManaged(tx, grant.ChildRunID)
+			if e != nil {
+				return e
+			}
+			old, e := pgManagedGrant(tx, grant.ChildRunID)
+			if e != nil {
+				return e
+			}
+			a, e := pgManagedAuthority(tx)
+			if e != nil {
+				return e
+			}
+			v, next, e = kernel.ResolveManagedPhysicalAdmission(ctx, t, admission, snapshot, pgManagedLease(current), old, a, current.ExecutionPhysicalEpoch, now, sqlledger.Store{DB: tx.Statement.ConnPool, Lock: tx.Name() == "postgres"})
+			if e != nil {
+				return e
+			}
+			if e = pgConsumeManagedGrant(tx, old); e != nil {
+				return e
+			}
+		} else {
+			var active int64
+			if e = tx.Model(&models.KernelChildEffectGrantRecord{}).Where("parent_run_id = ? OR child_run_id = ?", grant.ChildRunID, grant.ChildRunID).Count(&active).Error; e != nil {
+				return translateKernelError(e)
+			}
+			v, e = kernel.ResolveOwnedPhysicalAdmission(snapshot, pgManagedLease(current), now, current.ExecutionQuarantineRevision != 0, active != 0, admission)
+			if e != nil {
+				return e
+			}
 		}
-		var active int64
-		if err = tx.Model(&models.KernelChildEffectGrantRecord{}).Where("parent_run_id = ? OR child_run_id = ?", grant.ChildRunID, grant.ChildRunID).Count(&active).Error; err != nil {
-			return translateKernelError(err)
+		row := pgPhysicalRecord(v.Grant, v.Grant.ChildRunID)
+		if e = tx.Create(&row).Error; e != nil {
+			return translateKernelApplyError(e)
 		}
-		if err = kernel.ValidateOwnedPhysicalAdmission(grant, snapshot, lease, pgManagedLease(current), now, current.ExecutionQuarantineRevision != 0, active != 0, admission); err != nil {
-			return err
+		updates := map[string]any{}
+		if !admission.IsManagedRecovery() {
+			updates["execution_physical_epoch"] = v.Grant.ExecutionEpoch
 		}
-		row := pgPhysicalRecord(grant, grant.ChildRunID)
-		if err = tx.Create(&row).Error; err != nil {
-			return translateKernelApplyError(err)
+		if admission.AcquiresLease() {
+			updates["execution_epoch"] = v.Lease.Epoch
+			updates["execution_owner"] = v.Lease.OwnerID
+			updates["execution_lease_id"] = v.Lease.LeaseID
+			updates["execution_expires_at"] = v.Lease.ExpiresAt
 		}
-		if err = tx.Model(&models.KernelRunRecord{}).Where("run_id = ?", grant.ChildRunID).
-			UpdateColumn("execution_physical_epoch", grant.ExecutionEpoch).Error; err != nil {
-			return translateKernelApplyError(err)
+		res := tx.Model(&models.KernelRunRecord{}).Where("run_id = ? AND revision = ? AND execution_epoch = ?", grant.ChildRunID, current.Revision, current.ExecutionEpoch).UpdateColumns(updates)
+		if res.Error != nil {
+			return translateKernelApplyError(res.Error)
 		}
+		if res.RowsAffected != 1 {
+			return kernel.ErrExecutionConflict
+		}
+		if admission.AcquiresLease() {
+			persisted, e := lockKernelRun(tx, grant.ChildRunID)
+			if e != nil {
+				return e
+			}
+			v.Lease = pgManagedLease(persisted)
+			if !v.Grant.MatchesExecution(v.Lease) {
+				return kernel.ErrExecutionConflict
+			}
+		}
+		if admission.IsManagedRecovery() {
+			next.SuccessorLease = v.Lease
+			if e = pgSaveManaged(tx, next); e != nil {
+				return e
+			}
+		}
+		result = v
 		readyToCommit = true
 		return nil
 	})
 	if err != nil && readyToCommit {
-		return admission.CommitOutcome(err)
+		return result, admission.CommitOutcome(err)
 	}
-	return err
+	return result, err
 }
 
 func (store *KernelStore) CheckOwnedPhysicalEntry(ctx context.Context, g kernel.ChildExecutionGrant, l kernel.ExecutionLease, expected kernel.Snapshot) (kernel.OwnedPhysicalEntryWindow, error) {
@@ -141,9 +197,12 @@ func (store *KernelStore) CheckOwnedPhysicalEntry(ctx context.Context, g kernel.
 		if err != nil {
 			return err
 		}
-		transfer, err := pgLoadManaged(tx, g.ChildRunID)
-		if err != nil && !errors.Is(err, kernel.ErrNotFound) {
-			return err
+		var transfer kernel.ManagedTransfer
+		if g.AdmissionOperation == "managed_resume" {
+			transfer, err = pgLoadManaged(tx, g.ChildRunID)
+			if err != nil {
+				return err
+			}
 		}
 		now, err := pgStoreNow(tx)
 		if err != nil {
@@ -151,6 +210,22 @@ func (store *KernelStore) CheckOwnedPhysicalEntry(ctx context.Context, g kernel.
 		}
 		window, err = kernel.ValidateOwnedPhysicalEntry(g, expected, current, l, pgManagedLease(run), now, run.ExecutionQuarantineRevision != 0,
 			run.ExecutionPhysicalEpoch, row.SettledRevision, pgCallbackCompletion(row), transfer)
+		if err == nil && g.AdmissionOperation == "managed_resume" {
+			a, e := pgManagedAuthority(tx)
+			if e != nil {
+				return e
+			}
+			if transfer.SafePoint.Host.KernelAuthority != a {
+				return kernel.ErrExecutionConflict
+			}
+			result := tx.Model(&models.KernelRunRecord{}).Where("run_id=? AND execution_epoch=? AND execution_physical_epoch<?", g.ChildRunID, g.ExecutionEpoch, g.ExecutionEpoch).UpdateColumn("execution_physical_epoch", g.ExecutionEpoch)
+			if result.Error != nil {
+				return translateKernelError(result.Error)
+			}
+			if result.RowsAffected != 1 {
+				return kernel.ErrExecutionConflict
+			}
+		}
 		return err
 	})
 	if err != nil {
@@ -171,7 +246,7 @@ func (store *KernelStore) ApplyOwnedPhysicalRecovery(ctx context.Context, grant 
 		if err != nil {
 			return err
 		}
-		if e := pgManagedGate(tx, grant.ChildRunID); e != nil {
+		if e := pgNativeEntryGate(tx, grant.ChildRunID); e != nil {
 			return e
 		}
 		snapshot, err := kernelSnapshotFrom(current)
@@ -194,6 +269,14 @@ func (store *KernelStore) ApplyOwnedPhysicalRecovery(ctx context.Context, grant 
 		}
 		if active != 1 {
 			return kernel.ErrChildExecutionBusy
+		}
+		accounting := sqlledger.Store{DB: tx.Statement.ConnPool, Lock: tx.Name() == "postgres"}
+		ledger, e := kernel.PlanRunBudgetMutation(ctx, accounting, snapshot.Run, mutation, false)
+		if e != nil {
+			return e
+		}
+		if e = accounting.Apply(ctx, grant.ChildRunID, ledger); e != nil {
+			return e
 		}
 		updated, err := kernelRunRecordFrom(mutation.Record, 0)
 		if err != nil {
@@ -241,7 +324,7 @@ func (store *KernelStore) RecordOwnedPhysicalCallbackReturn(ctx context.Context,
 		if e != nil {
 			return e
 		}
-		if e := pgManagedGate(tx, g.ChildRunID); e != nil {
+		if e := pgNativeEntryGate(tx, g.ChildRunID); e != nil {
 			return e
 		}
 		snap, e := kernelSnapshotFrom(current)

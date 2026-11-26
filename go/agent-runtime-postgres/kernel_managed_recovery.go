@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget/sqlledger"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -50,7 +51,8 @@ func (s *KernelStore) LoadManagedRecovery(ctx context.Context, id string) (kerne
 	if s == nil || s.db == nil || ctx == nil || id == "" {
 		return kernel.ManagedTransfer{}, kernel.ErrInvalidInput
 	}
-	return pgLoadManaged(s.db.WithContext(ctx), id)
+	t, e := pgLoadManaged(s.db.WithContext(ctx), id)
+	return pgObserveManaged(s.db.WithContext(ctx), t, e)
 }
 func pgSaveManaged(tx *gorm.DB, t kernel.ManagedTransfer) error {
 	b, e := json.Marshal(t)
@@ -64,15 +66,18 @@ func pgSaveManaged(tx *gorm.DB, t kernel.ManagedTransfer) error {
 	r := models.KernelManagedTransferRecord{RunID: h.RunID, SuspensionID: h.SuspensionID, RecoveryID: h.RecoveryID, Revision: h.Revision, Payload: h.Payload}
 	return translateKernelError(tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "run_id"}}, DoUpdates: clause.AssignmentColumns([]string{"suspension_id", "recovery_id", "revision", "payload"})}).Create(&r).Error)
 }
-func pgManagedGate(tx *gorm.DB, id string) error {
-	t, e := pgLoadManaged(tx, id)
-	if errors.Is(e, kernel.ErrNotFound) {
-		return nil
+
+// A current owned Grant must have crossed native entry before any ordinary
+// write or receipt operation. No managed history is consulted.
+func pgNativeEntryGate(tx *gorm.DB, id string) error {
+	var pending int64
+	if err := tx.Raw(`SELECT count(*) FROM agent_kernel_child_effect_grants g JOIN agent_kernel_runs r ON r.run_id=g.child_run_id WHERE g.child_run_id=? AND g.parent_run_id=g.child_run_id AND g.execution_epoch<>0 AND (g.execution_epoch<>r.execution_epoch OR g.execution_epoch<>r.execution_physical_epoch)`, id).Scan(&pending).Error; err != nil {
+		return translateKernelError(err)
 	}
-	if e != nil {
-		return e
+	if pending != 0 {
+		return kernel.ErrExecutionConflict
 	}
-	return kernel.ManagedOrdinaryGate(t)
+	return nil
 }
 func pgManagedLease(r models.KernelRunRecord) kernel.ExecutionLease {
 	l := kernel.ExecutionLease{RunID: r.RunID, OwnerID: r.ExecutionOwner, LeaseID: r.ExecutionLeaseID, Epoch: r.ExecutionEpoch}
@@ -132,95 +137,7 @@ func (s *KernelStore) managedTx(ctx context.Context, id string, f func(*gorm.DB,
 	}
 	return out, nil
 }
-func (s *KernelStore) ParkManagedRecovery(ctx context.Context, q kernel.ManagedParkRequest) (kernel.ManagedTransfer, error) {
-	return s.managedTx(ctx, q.RunID, func(tx *gorm.DB, r models.KernelRunRecord, snap kernel.Snapshot, t kernel.ManagedTransfer, now time.Time) (kernel.ManagedTransfer, error) {
-		if r.ExecutionQuarantineRevision != 0 {
-			return t, kernel.ErrExecutionQuarantined
-		}
-		a, e := pgManagedAuthority(tx)
-		if e != nil {
-			return t, e
-		}
-		g, e := pgManagedGrant(tx, q.RunID)
-		if e != nil {
-			return t, e
-		}
-		n, e := kernel.ManagedParkTransfer(t, q, snap, pgManagedLease(r), g, a, now)
-		if e != nil {
-			return t, e
-		}
-		if n.Revision == t.Revision {
-			return n, nil
-		}
-		return n, pgSaveManaged(tx, n)
-	})
-}
-func (s *KernelStore) LeaveManagedSafePoint(ctx context.Context, q kernel.ManagedLeaveRequest) (kernel.ManagedTransfer, error) {
-	return s.managedTx(ctx, q.RunID, func(tx *gorm.DB, r models.KernelRunRecord, snap kernel.Snapshot, t kernel.ManagedTransfer, now time.Time) (kernel.ManagedTransfer, error) {
-		if r.ExecutionQuarantineRevision != 0 {
-			return t, kernel.ErrExecutionQuarantined
-		}
-		g, e := pgManagedGrant(tx, q.RunID)
-		if e != nil {
-			return t, e
-		}
-		want, _ := kernel.ManagedCurrentAuthority(t)
-		if g != want {
-			return t, kernel.ErrExecutionConflict
-		}
-		n, e := kernel.ManagedLeaveTransfer(t, q, snap, pgManagedLease(r), now)
-		if e != nil {
-			return t, e
-		}
-		return n, pgSaveManaged(tx, n)
-	})
-}
-func (s *KernelStore) EnableManagedRecovery(ctx context.Context, q kernel.ManagedEnableRequest) (kernel.ManagedTransfer, error) {
-	return s.managedTx(ctx, q.RunID, func(tx *gorm.DB, r models.KernelRunRecord, snap kernel.Snapshot, t kernel.ManagedTransfer, now time.Time) (kernel.ManagedTransfer, error) {
-		// Only the SAME caller gets its exact committed activation after ACK loss.
-		if kernel.ManagedEnableReplay(t, q, snap, pgManagedLease(r), now) {
-			return t, nil
-		}
-		if r.ExecutionEpoch >= math.MaxInt64 || r.ExecutionQuarantineRevision != 0 {
-			return t, kernel.ErrExecutionConflict
-		}
-		g, e := pgManagedGrant(tx, q.RunID)
-		if e != nil {
-			return t, e
-		}
-		want, _ := kernel.ManagedCurrentAuthority(t)
-		if g != want {
-			return t, kernel.ErrExecutionConflict
-		}
-		if !g.MatchesExecution(pgManagedLease(r)) {
-			return t, kernel.ErrExecutionConflict
-		}
-		if _, _, e = pgSettleRetirementSuccessor(tx, r); e != nil {
-			return t, e
-		}
-		n, e := kernel.ManagedEnabledTransfer(t, q, snap, r.ExecutionEpoch, now)
-		if e != nil {
-			return t, e
-		}
-		if e = pgReserveGrantIdentity(tx, n.SuccessorGrant); e != nil {
-			return t, e
-		}
-		if e = pgConsumeManagedGrant(tx, g); e != nil {
-			return t, e
-		}
-		row := pgPhysicalRecord(n.SuccessorGrant, q.RunID)
-		if e = tx.Create(&row).Error; e != nil {
-			return t, translateKernelApplyError(e)
-		}
-		// Authority-only handover must not invoke GORM UpdatedAt hooks or alter
-		// the sealed aggregate needed by same-call ACK replay and Leave.
-		if e = tx.Model(&models.KernelRunRecord{}).Where("run_id = ?", q.RunID).UpdateColumns(map[string]any{"execution_epoch": n.SuccessorLease.Epoch, "execution_physical_epoch": n.SuccessorGrant.ExecutionEpoch, "execution_owner": n.SuccessorLease.OwnerID, "execution_lease_id": n.SuccessorLease.LeaseID, "execution_expires_at": n.SuccessorLease.ExpiresAt}).Error; e != nil {
-			return t, translateKernelError(e)
-		}
-		return n, pgSaveManaged(tx, n)
-	})
-}
-func (s *KernelStore) CancelParkedManagedContinuation(ctx context.Context, q kernel.ManagedCancelRequest) (kernel.ManagedTransfer, error) {
+func (s *KernelStore) CommitManagedCancellation(ctx context.Context, q kernel.ManagedCancelRequest) (kernel.ManagedTransfer, error) {
 	return s.managedTx(ctx, q.RunID, func(tx *gorm.DB, r models.KernelRunRecord, snap kernel.Snapshot, t kernel.ManagedTransfer, now time.Time) (kernel.ManagedTransfer, error) {
 		if kernel.ManagedCancelReplay(t, q, snap) {
 			return t, nil
@@ -232,15 +149,27 @@ func (s *KernelStore) CancelParkedManagedContinuation(ctx context.Context, q ker
 		if e != nil {
 			return t, e
 		}
-		want, _ := kernel.ManagedCurrentAuthority(t)
+		want := kernel.ManagedCurrentGrant(t)
 		if g != want {
 			return t, kernel.ErrExecutionConflict
 		}
 		if !g.MatchesExecution(pgManagedLease(r)) {
 			return t, kernel.ErrExecutionConflict
 		}
+		t, e = kernel.PrepareManagedAdmission(t, q.Selection, snap, pgManagedLease(r), g, t.SafePoint.Host.KernelAuthority, r.ExecutionPhysicalEpoch, now)
+		if e != nil {
+			return t, e
+		}
 		n, m, e := kernel.ManagedCancellationMutation(t, q, snap, now)
 		if e != nil {
+			return t, e
+		}
+		accounting := sqlledger.Store{DB: tx.Statement.ConnPool, Lock: tx.Name() == "postgres"}
+		ledger, e := kernel.ManagedCancellationLedger(ctx, t, accounting)
+		if e != nil {
+			return t, e
+		}
+		if e = accounting.Apply(ctx, q.RunID, ledger); e != nil {
 			return t, e
 		}
 		record, e := kernelRunRecordFrom(m.Record, 0)
@@ -263,21 +192,6 @@ func (s *KernelStore) CancelParkedManagedContinuation(ctx context.Context, q ker
 // The caller binds the verified point to the actual committed aggregate after
 // applyKernelMutation succeeds, before this same transaction can commit.
 func pgManagedMutation(tx *gorm.DB, current kernel.Snapshot, m kernel.StoreMutation, lease *kernel.ExecutionLease) (*kernel.ManagedSafePoint, error) {
-	old, e := pgLoadManaged(tx, current.Run.ID)
-	if e != nil && !errors.Is(e, kernel.ErrNotFound) {
-		return nil, e
-	}
-	if e == nil {
-		if e = kernel.ManagedOrdinaryGate(old); e != nil {
-			return nil, e
-		}
-		n := kernel.ManagedInvalidateMutation(old)
-		if n.Revision != old.Revision {
-			if e = pgSaveManaged(tx, n); e != nil {
-				return nil, e
-			}
-		}
-	}
 	if !m.ManagedSafePoint.Present() {
 		return nil, nil
 	}
@@ -310,8 +224,12 @@ func (s *KernelStore) LoadManagedRecoveryByID(ctx context.Context, id string) (k
 	if s == nil || s.db == nil || ctx == nil || id == "" {
 		return kernel.ManagedTransfer{}, kernel.ErrInvalidInput
 	}
+	t, e := pgLoadManagedByID(s.db.WithContext(ctx), id)
+	return pgObserveManaged(s.db.WithContext(ctx), t, e)
+}
+func pgLoadManagedByID(tx *gorm.DB, id string) (kernel.ManagedTransfer, error) {
 	var r models.KernelManagedHistoryRecord
-	if e := s.db.WithContext(ctx).Where("suspension_id = ?", id).First(&r).Error; e != nil {
+	if e := tx.Where("suspension_id = ?", id).First(&r).Error; e != nil {
 		return kernel.ManagedTransfer{}, translateKernelError(e)
 	}
 	var t kernel.ManagedTransfer
@@ -320,94 +238,17 @@ func (s *KernelStore) LoadManagedRecoveryByID(ctx context.Context, id string) (k
 	}
 	return t, nil
 }
-func (s *KernelStore) CompleteManagedRecovery(ctx context.Context, g kernel.ChildExecutionGrant, snapshot kernel.Snapshot, p kernel.ManagedCompletionProof) error {
-	if s == nil || s.db == nil || ctx == nil || !g.IsOwned() {
-		return kernel.ErrInvalidInput
+
+func pgObserveManaged(tx *gorm.DB, t kernel.ManagedTransfer, e error) (kernel.ManagedTransfer, error) {
+	if e != nil || t.SuccessorGrant.ID == "" || t.Terminal != nil {
+		return t, e
 	}
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		r, e := lockKernelRun(tx, g.ChildRunID)
-		if e != nil {
-			return e
-		}
-		actual, e := kernelSnapshotFrom(r)
-		if e != nil {
-			return e
-		}
-		var rows []models.KernelManagedHistoryRecord
-		if e = tx.Where("run_id = ?", g.ChildRunID).Find(&rows).Error; e != nil {
-			return translateKernelError(e)
-		}
-		matches := false
-		for _, row := range rows {
-			var t kernel.ManagedTransfer
-			if e = json.Unmarshal([]byte(row.Payload), &t); e != nil || t.SafePoint.ID != row.SuspensionID || t.SafePoint.RecoveryID != row.RecoveryID || t.SafePoint.Host.RunID != row.RunID || t.Revision != row.Revision || !t.SafePoint.Valid() {
-				return kernel.ErrExecutionConflict
-			}
-			if t.SuccessorGrant == g && t.Selection.Valid() {
-				matches = true
-			}
-		}
-		if !matches {
-			return nil
-		}
-		authority, e := pgManagedAuthority(tx)
-		if e != nil {
-			return e
-		}
-		if kernel.ManagedDigest(actual) != kernel.ManagedDigest(snapshot) || !p.Matches(g, actual) {
-			return kernel.ErrExecutionConflict
-		}
-		if e = pgManagedGate(tx, g.ChildRunID); e != nil {
-			return e
-		}
-		var grantRows []models.KernelChildEffectGrantRecord
-		if e = tx.Where("parent_run_id = ? OR child_run_id = ?", g.ChildRunID, g.ChildRunID).Find(&grantRows).Error; e != nil {
-			return translateKernelError(e)
-		}
-		if len(grantRows) != 1 || pgPhysicalGrant(grantRows[0]) != g || grantRows[0].SettledRevision != actual.Run.Revision {
-			return kernel.ErrExecutionConflict
-		}
-		current, ce := pgLoadManaged(tx, g.ChildRunID)
-		if ce != nil && !errors.Is(ce, kernel.ErrNotFound) {
-			return ce
-		}
-		for _, row := range rows {
-			var t kernel.ManagedTransfer
-			if e = json.Unmarshal([]byte(row.Payload), &t); e != nil {
-				return kernel.ErrExecutionConflict
-			}
-			if t.SuccessorGrant != g || !t.Selection.Valid() {
-				continue
-			}
-			if t.Selection.Mode != kernel.ManagedResume || t.SafePoint.Host.KernelAuthority != authority {
-				return kernel.ErrExecutionConflict
-			}
-			if t.State == kernel.ManagedClosed {
-				if t.Terminal == nil || kernel.ManagedDigest(*t.Terminal) != kernel.ManagedDigest(actual) {
-					return kernel.ErrExecutionConflict
-				}
-				continue
-			}
-			if t.State != kernel.ManagedInvalidated && t.State != kernel.ManagedEnabled {
-				return kernel.ErrExecutionConflict
-			}
-			t.State = kernel.ManagedClosed
-			t.Revision++
-			t.Terminal = &actual
-			if ce == nil && current.SafePoint.ID == t.SafePoint.ID {
-				if e = pgSaveManaged(tx, t); e != nil {
-					return e
-				}
-			} else {
-				b, e := json.Marshal(t)
-				if e != nil {
-					return e
-				}
-				if e = tx.Model(&models.KernelManagedHistoryRecord{}).Where("suspension_id = ? AND revision = ?", row.SuspensionID, row.Revision).Updates(map[string]any{"revision": t.Revision, "payload": string(b)}).Error; e != nil {
-					return translateKernelError(e)
-				}
-			}
-		}
-		return nil
-	})
+	r, e := pgLoadOwnedRetirement(tx, t.SuccessorGrant.ID)
+	if errors.Is(e, kernel.ErrNotFound) {
+		return t, nil
+	}
+	if e != nil {
+		return t, e
+	}
+	return kernel.ObserveManagedRetirement(t, r)
 }

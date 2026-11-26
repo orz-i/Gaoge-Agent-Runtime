@@ -2,15 +2,11 @@ package harness
 
 import (
 	"bytes"
-	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"reflect"
 
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
@@ -26,7 +22,7 @@ func NewManagedHostAuthority() (kernel.ManagedAuthority, error) {
 
 // ManagedHostSource is the canonical immutable source projection. It is not a
 // capability: the storage transaction must read and validate all original rows.
-func ManagedHostSource(session Session, turn Turn, invocation Invocation, config ConfigSnapshot, dispatch Item) (json.RawMessage, error) {
+func ManagedHostSource(session Session, turn Turn, invocation Invocation, config ConfigSnapshot, dispatch any) (json.RawMessage, error) {
 	return json.Marshal(struct {
 		SessionID                  string
 		HostThread                 HostRef
@@ -39,10 +35,20 @@ func ManagedHostSource(session Session, turn Turn, invocation Invocation, config
 		Input                     json.RawMessage
 		InputHash, ExecutionRefID string
 		Attempt                   int
-		Dispatch                  Item
+		Dispatch                  any
 	}{session.ID, session.HostThread, session.Actor, turn.ID, turn.HostTurn, config,
 		invocation.ID, invocation.ParentItemID,
 		invocation.Input, invocation.InputHash, invocation.ExecutionRefID, invocation.Attempt, dispatch})
+}
+
+func nativeHostSource(session Session, turn Turn, inv Invocation, config ConfigSnapshot, b kernel.ManagedHostBinding) (json.RawMessage, error) {
+	if _, err := canonicalSealedConfig(config); err != nil {
+		return nil, err
+	}
+	return ManagedHostSource(session, turn, inv, config, struct {
+		Correlation, Phase string
+		Approval           *kernel.ManagedApprovalDecision
+	}{b.DispatchID, b.Phase, b.Approval})
 }
 
 // ValidateManagedOriginalRows is shared by concrete storage transactions. It
@@ -52,8 +58,25 @@ func ValidateManagedOriginalRows(authority kernel.ManagedAuthority, b kernel.Man
 		turn.ID != b.TurnID || config.ID != turn.ConfigSnapshotID || config.TurnID != turn.ID ||
 		invocation.ID != b.InvocationID || invocation.TurnID != turn.ID || invocation.ParentItemID != "" ||
 		invocation.Attempt <= 0 || uint64(invocation.Attempt) != uint64(b.Attempt) ||
-		invocation.ExecutionRefID != b.RunID || dispatch.ID != b.DispatchID || dispatch.InvocationID != invocation.ID ||
-		dispatch.TurnID != turn.ID || dispatch.RunID != b.RunID {
+		invocation.ExecutionRefID != b.RunID {
+		return ErrConflict
+	}
+	if b.DirectNativeCommand() {
+		source, err := nativeHostSource(session, turn, invocation, config, b)
+		if err != nil || !bytes.Equal(source, b.Source) {
+			return ErrConflict
+		}
+		if dispatch.ID != "" || terminalTurnStatus(turn.Status) || terminalInvocationStatus(invocation.Status) || ActiveCancellationFence(items) || PendingExecutionDispatch(items, invocation.ID) {
+			return ErrConflict
+		}
+		if b.Approval != nil {
+			if err = verifyNativeApprovalProjection(turn.ID, invocation.ID, b.RunID, *b.Approval, items); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if dispatch.ID != b.DispatchID || dispatch.InvocationID != invocation.ID || dispatch.TurnID != turn.ID || dispatch.RunID != b.RunID {
 		return ErrConflict
 	}
 	phase, ok := VerifiedExecutionDispatchGrant(dispatch)
@@ -108,94 +131,21 @@ func ValidateManagedOriginalRows(authority kernel.ManagedAuthority, b kernel.Man
 	return nil
 }
 
-// SelectManagedReservation runs under the original Turn lock. Mode and full
-// cancellation payload are chosen only from real immutable Host records.
-func SelectManagedReservation(p kernel.ManagedParkedProof, b kernel.ManagedHostBinding, turn Turn, invocation Invocation, items []Item) (kernel.ManagedHostReservation, error) {
-	if !p.Matches(b) || terminalTurnStatus(turn.Status) || terminalInvocationStatus(invocation.Status) {
-		return kernel.ManagedHostReservation{}, ErrConflict
-	}
-	transfer := p.Transfer()
-	out := kernel.ManagedHostReservation{ID: "managed-host-" + kernel.ManagedDigest(transfer.SafePoint.RecoveryID), RecoveryID: transfer.SafePoint.RecoveryID, SuspensionID: transfer.SafePoint.ID, Binding: b, Mode: kernel.ManagedResume, Revision: 1}
-	receipts := cancellationFenceReceipts(items)
-	for _, item := range items {
-		if item.ParentItemID != CancellationFenceParentItemID {
-			continue
-		}
-		if VerifiedCancellationFenceReceipt(item, receipts[item.ID]) {
-			continue
-		}
-		if !ValidCancellationFenceIntentAdmission(item) || item.Seq == 0 || item.RunID != b.RunID || item.TurnID != b.TurnID ||
-			len(receipts[item.ID]) != 0 || out.Mode == kernel.ManagedCancel {
-			return kernel.ManagedHostReservation{}, ErrConflict
-		}
-		if source, valid := cancellationProtocol(item); !valid || source != "native" || !CancellationEffectsSettled(item, items) {
-			return kernel.ManagedHostReservation{}, ErrCancellationOutcomeUnknown
-		}
-		out.Mode = kernel.ManagedCancel
-		out.Cancellation = kernel.ManagedCancellation{IntentID: item.ID, Seq: item.Seq, Payload: append(json.RawMessage(nil), item.Payload...), PayloadDigest: kernel.ManagedDigest(item.Payload), Reason: ""}
-	}
-	if !out.Valid() {
-		return kernel.ManagedHostReservation{}, ErrConflict
-	}
-	return out, nil
-}
-
-func cloneManagedReservation(r kernel.ManagedHostReservation) kernel.ManagedHostReservation {
-	r.Binding.Source = append(json.RawMessage(nil), r.Binding.Source...)
-	if r.Binding.Approval != nil {
-		a := *r.Binding.Approval
-		r.Binding.Approval = &a
-	}
-	r.Cancellation.Payload = append(json.RawMessage(nil), r.Cancellation.Payload...)
-	return r
-}
-
-// ManagedReservationBlocksInvocation keeps the elected root's projection
-// fenced until closure. A RESUME successor can wait for the exact original
-// child receipt; the child's own ordinary terminal CAS must remain usable.
-func ManagedReservationBlocksInvocation(r kernel.ManagedHostReservation, inv Invocation) bool {
-	if !r.Valid() || inv.TurnID != r.Binding.TurnID {
-		return true
-	}
-	if r.Mode != kernel.ManagedResume || inv.ParentItemID == "" || inv.ID == r.Binding.InvocationID || inv.ExecutionRefID == r.Binding.RunID {
-		return true
-	}
-	binding, err := frozenChildRoot(inv)
-	return err != nil || binding.attempt().InvocationID != r.Binding.InvocationID ||
-		binding.attempt().ExecutionRefID != r.Binding.RunID || uint64(binding.attempt().Attempt) != uint64(r.Binding.Attempt)
-}
-
-// SameManagedReservation includes mode, payload, source, namespaces and revision.
-func SameManagedReservation(a, b kernel.ManagedHostReservation) bool { return reflect.DeepEqual(a, b) }
-
-// ValidateManagedClosureAccounting is shared by all Host Stores. A direct
-// Kernel CANCEL cannot close the Host dispatch while its original ledger
-// remains open. Ordinary unbudgeted historical transfers are unchanged.
-func ValidateManagedClosureAccounting(ctx context.Context, store budget.LedgerStore, p kernel.ManagedClosureProof) error {
-	t := p.Transfer()
-	if t.SafePoint.LifecycleVersion != kernel.ManagedLifecycleAgentObligations {
-		return nil
-	}
-	source, ok := t.SafePoint.AgentObligations()
-	if !ok {
+func VerifyManagedRecoveryAdmission(b kernel.ManagedHostBinding, turn Turn, invocation Invocation, items []Item) error {
+	if (!b.DirectNativeCommand() && !nativeManagedDispatchID(b.DispatchID)) || terminalTurnStatus(turn.Status) || terminalInvocationStatus(invocation.Status) || ActiveCancellationFence(items) {
 		return ErrConflict
 	}
-	if source.LedgerID == "" {
-		return nil
-	}
-	l, err := store.LoadBudget(ctx, source.LedgerID)
-	if err != nil {
-		return errors.Join(ErrConflict, err)
-	}
-	return agent.ValidateManagedBudgetClosure(t.SafePoint, p.Snapshot(), t.Selection.Mode, l)
+	return nil
 }
 
 // ManagedClosureItems derives the fixed append-only projection from an opaque
 // Kernel read proof. No returned-callback fact is attributed to the old owner.
-func ManagedClosureItems(p kernel.ManagedClosureProof, r kernel.ManagedHostReservation) ([]Item, error) {
+func ManagedClosureItems(p kernel.ManagedClosureProof, r kernel.ManagedRecoveryAuthorization) ([]Item, error) {
 	if !p.Matches(r) {
 		return nil, ErrConflict
 	}
+	point := p.Transfer().SafePoint
+	b := point.Host
 	snap := p.Snapshot()
 	boundary := "managed_dispatch_transferred"
 	if r.Mode == kernel.ManagedCancel {
@@ -207,15 +157,15 @@ func ManagedClosureItems(p kernel.ManagedClosureProof, r kernel.ManagedHostReser
 		Mode          kernel.ManagedRecoveryMode `json:"mode"`
 		SelectionHash string                     `json:"selectionHash"`
 		TerminalHash  string                     `json:"terminalHash"`
-	}{boundary, r.RecoveryID, r.Mode, kernel.ManagedDigest(r), kernel.ManagedDigest(snap)})
+	}{boundary, point.RecoveryID, r.Mode, kernel.ManagedDigest(r), kernel.ManagedDigest(snap)})
 	if err != nil {
 		return nil, err
 	}
 	now := snap.Run.UpdatedAt
-	items := []Item{{ID: stableID("hdispatchdone", r.Binding.DispatchID), TurnID: r.Binding.TurnID, InvocationID: r.Binding.InvocationID, RunID: r.Binding.RunID, Kind: ItemDiagnostic, Status: ItemCompleted, ParentItemID: r.Binding.DispatchID, Payload: payload, CreatedAt: now, UpdatedAt: now}}
+	items := []Item{{ID: stableID("hdispatchdone", b.DispatchID), TurnID: b.TurnID, InvocationID: b.InvocationID, RunID: b.RunID, Kind: ItemDiagnostic, Status: ItemCompleted, ParentItemID: b.DispatchID, Payload: payload, CreatedAt: now, UpdatedAt: now}}
 
-	if r.Mode == kernel.ManagedCancel {
-		items = append(items, Item{ID: stableID("hcancelclosed", r.Cancellation.IntentID), TurnID: r.Binding.TurnID, RunID: r.Binding.RunID, Kind: ItemDiagnostic, Status: ItemCompleted, ParentItemID: r.Cancellation.IntentID, Payload: json.RawMessage(`{"boundary":"cancel_scope_settled"}`), CreatedAt: now, UpdatedAt: now})
+	if r.Mode == kernel.ManagedCancel && !r.Cancellation.Direct() {
+		items = append(items, Item{ID: stableID("hcancelclosed", r.Cancellation.IntentID), TurnID: b.TurnID, RunID: b.RunID, Kind: ItemDiagnostic, Status: ItemCompleted, ParentItemID: r.Cancellation.IntentID, Payload: json.RawMessage(`{"boundary":"cancel_scope_settled"}`), CreatedAt: now, UpdatedAt: now})
 	}
 	return items, nil
 }
@@ -242,38 +192,89 @@ func IsManagedDispatchClosure(item Item) bool {
 	return v.Boundary == "managed_dispatch_transferred" || v.Boundary == "managed_dispatch_cancelled_before_next_effect"
 }
 
-// ValidateManagedReservationRows rechecks the immutable selected cancellation,
-// not merely a RESERVED row's existence. Closed RESUME history is unaffected
-// by a later independent cancellation of the same Turn.
-func ValidateManagedReservationRows(r kernel.ManagedHostReservation, items []Item, closed bool) error {
-	if !r.Valid() {
+// ManagedClosureReplay compares the native projection with the original
+// append-only receipts. No independent Host closure state is needed.
+func ManagedClosureReplay(p kernel.ManagedClosureProof, items []Item) (bool, error) {
+	t := p.Transfer()
+	r, b := t.Selection, t.SafePoint.Host
+	additions, err := ManagedClosureItems(p, r)
+	if err != nil {
+		return false, err
+	}
+	receipts := executionDispatchReceiptIndex(items)
+	children := receipts[b.DispatchID]
+	if len(children) == 0 {
+		return false, nil
+	}
+	if len(children) != 1 || !sameItemIdentity(children[0], additions[0]) {
+		return false, ErrConflict
+	}
+	var grant Item
+	for _, item := range items {
+		if item.ID == b.DispatchID {
+			grant = item
+		}
+	}
+	if _, ok := VerifiedExecutionDispatchReceipt(grant, children); !ok {
+		return false, ErrConflict
+	}
+	if parent, ok := OriginalApprovalRequestID(grant); ok {
+		var request Item
+		var decisions []Item
+		for _, item := range items {
+			if item.ID == parent {
+				request = item
+			}
+			if item.ParentItemID == parent {
+				decisions = append(decisions, item)
+			}
+		}
+		_, insert, err := PlanOriginalApprovalSettlement(grant, children[0], request, decisions)
+		if err != nil || insert {
+			return false, ErrConflict
+		}
+	}
+	if len(additions) == 2 {
+		if err := ManagedClosureAuthorization(p, items); err != nil {
+			return false, err
+		}
+		var intent Item
+		for _, item := range items {
+			if item.ID == r.Cancellation.IntentID {
+				intent = item
+			}
+		}
+		done := cancellationFenceReceipts(items)[intent.ID]
+		if len(done) != 1 || !sameItemIdentity(done[0], additions[1]) || !VerifiedCancellationFenceReceipt(intent, done) || !CancellationEffectsSettled(intent, items) {
+			return false, ErrConflict
+		}
+	}
+	return true, nil
+}
+
+// ManagedClosureAuthorization checks a legacy cancellation fact if one
+// exists; a direct native cancellation carries its immutable user reason
+// in the native commit and needs no Host cancellation fence.
+func ManagedClosureAuthorization(p kernel.ManagedClosureProof, items []Item) error {
+	t := p.Transfer()
+	r, b := t.Selection, t.SafePoint.Host
+	if !p.Matches(r) {
 		return ErrConflict
 	}
-	if r.Mode == kernel.ManagedResume {
-		if !closed && ActiveCancellationFence(items) {
-			return ErrConflict
-		}
+	if r.Mode != kernel.ManagedCancel || r.Cancellation.Direct() {
 		return nil
 	}
-	found := false
 	for _, item := range items {
 		if item.ID != r.Cancellation.IntentID {
 			continue
 		}
-		if found || !ValidCancellationFenceIntentAdmission(item) || item.RunID != r.Binding.RunID || item.TurnID != r.Binding.TurnID ||
-			item.Seq != r.Cancellation.Seq || !bytes.Equal(item.Payload, r.Cancellation.Payload) ||
-			kernel.ManagedDigest(item.Payload) != r.Cancellation.PayloadDigest || r.Cancellation.Reason != "" {
+		if !ValidCancellationFenceIntentAdmission(item) || item.RunID != b.RunID || item.TurnID != b.TurnID || item.Seq != r.Cancellation.Seq || !bytes.Equal(item.Payload, r.Cancellation.Payload) || kernel.ManagedDigest(item.Payload) != r.Cancellation.PayloadDigest {
 			return ErrConflict
 		}
-		if !closed {
-			if source, valid := cancellationProtocol(item); !valid || source != "native" || !CancellationEffectsSettled(item, items) {
-				return ErrCancellationOutcomeUnknown
-			}
+		if source, ok := cancellationProtocol(item); !ok || source != "native" || !CancellationEffectsSettled(item, items) {
+			return ErrCancellationOutcomeUnknown
 		}
-		found = true
+		return nil
 	}
-	if !found {
-		return ErrConflict
-	}
-	return nil
+	return ErrConflict
 }

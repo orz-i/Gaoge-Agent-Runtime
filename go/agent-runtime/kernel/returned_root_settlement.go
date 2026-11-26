@@ -4,7 +4,7 @@ import "context"
 
 // ReturnedRootSettlementStore proves that the current owned callback has
 // returned under its original custody, while its physical grant is retained
-// for receipt recovery/retirement, or the exact current retirement awaits ACK.
+// for receipt recovery/retirement, or the exact current retirement has committed.
 // This is NOT a terminal/descendant settlement vote or a
 // capability to finish the grant. A subsequent Cancel must still arbitrate
 // the native CAS and independently verify/clean up every child effect.
@@ -39,9 +39,8 @@ func VerifyReturnedRootSettlementFacts(expected, current Snapshot, epoch, physic
 		if completion != (OwnedPhysicalCallbackCompletion{}) {
 			return ErrExecutionConflict
 		}
-		// Finish already committed. The existing exact current-retirement
-		// selector arbitrates the absent active Grant, source and owner.
-		// No historical ACK or unrelated RETIRED row may supply custody.
+		// Finish already committed and released the owned lease. Observe
+		// the exact final receipt at the current source and epoch.
 		var err error
 		pending, err = SelectOwnedRetirementForRun(current.Run.ID, receipts, current, epoch, lease, hasGrants)
 		if err != nil {
@@ -49,7 +48,7 @@ func VerifyReturnedRootSettlementFacts(expected, current Snapshot, epoch, physic
 		}
 		grant, completion = pending.Evidence.Grant, pending.Evidence.Completion
 	}
-	if grant.ID == "" || grant.ExpectedRevision == 0 || grant.ChildRunID != current.Run.ID || !grant.IsOwned() || !grant.MatchesExecution(lease) ||
+	if grant.ID == "" || grant.ExpectedRevision == 0 || grant.ChildRunID != current.Run.ID || !grant.IsOwned() || (pending.Version == 0 && !grant.MatchesExecution(lease)) ||
 		grant.ExecutionEpoch != epoch || epoch != physicalEpoch || ValidateOwnedPhysicalCompletion(grant, completion) != nil ||
 		!completion.HostCompleted || !completion.LeaseOwned || completion.ControlCustody != OwnedCustodyScoped ||
 		completion.ReturnRevision > current.Run.Revision {
@@ -57,14 +56,14 @@ func VerifyReturnedRootSettlementFacts(expected, current Snapshot, epoch, physic
 	}
 	seen := map[uint64]bool{epoch: true}
 	for _, receipt := range receipts {
-		if pending.Version != 0 && receipt.Evidence.Grant == grant && receipt.Phase == "RETIRED" && receipt.Identity() == pending.Identity() {
+		if pending.Version != 0 && receipt.Evidence.Grant == grant && receipt.Identity() == pending.Identity() {
 			// This exact row was already validated by the selector. ALL
-			// other history must still be acknowledged, owned and scoped.
+			// other history must still be completed, owned and scoped.
 			continue
 		}
 		previous := receipt.Evidence.Grant
 		if !receipt.Valid() || previous.ChildRunID != current.Run.ID || previous.ExecutionEpoch >= epoch || seen[previous.ExecutionEpoch] ||
-			receipt.Phase != "ACKNOWLEDGED" || !receipt.Evidence.Completion.LeaseOwned {
+			!receipt.Evidence.Completion.LeaseOwned {
 			return ErrExecutionConflict
 		}
 		seen[previous.ExecutionEpoch] = true

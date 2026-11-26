@@ -798,6 +798,7 @@ func (runner *Runner) executeModelInvocation(
 	if invocation.Purpose == ModelInvocationContextSummary {
 		generateCtx = context.WithValue(ctx, contextSummaryModelKey{}, true)
 	}
+	atomicBudget := runner.atomicModelBudget(invocation.SamplingPlan)
 	response, err := runner.generateModelWithPolicyGuarded(generateCtx, model.CloneRequest(invocation.Request), snapshot.Run.DeadlineAt,
 		func(dispatchCtx context.Context, candidate model.Request) error {
 			// Resolve and revalidate Catalog authority first: a slow external
@@ -813,6 +814,14 @@ func (runner *Runner) executeModelInvocation(
 			// guards and physical Provider dispatch.
 			if !matchesProviderBindingForRequest(runner.model, invocation, candidate) {
 				return ErrProviderBindingMismatch
+			}
+			var ledgerMutation *runtimebudget.LedgerMutation
+			if atomicBudget != nil {
+				var planErr error
+				ledgerMutation, planErr = atomicBudget.planModelDispatch(dispatchCtx, invocation.Request, candidate, invocation.SamplingPlan)
+				if planErr != nil {
+					return planErr
+				}
 			}
 			if err := runner.validateModelInvocationClaim(dispatchCtx, snapshot, invocation); err != nil {
 				return err
@@ -839,6 +848,7 @@ func (runner *Runner) executeModelInvocation(
 				return err
 			}
 			staged, err := runner.commitNativeTransition(dispatchCtx, snapshot, kernel.Mutation{
+				Ledger: ledgerMutation,
 				Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
 				Events: []kernel.EventDraft{{Type: "agent.model_invocation.dispatch_intent", Message: invocation.ID, Wakeup: true}},
 			})
@@ -855,7 +865,11 @@ func (runner *Runner) executeModelInvocation(
 	}
 	// Validate against the original receipt, not just another syntactically
 	// valid ID. The same authority also fences downstream shared settlement.
-	response, err = authority.validateFinal(response, err)
+	if atomicBudget != nil {
+		response, err = authority.validate(response, err)
+	} else {
+		response, err = authority.validateFinal(response, err)
+	}
 	late := errors.Is(err, ErrModelLateResult)
 	knownRejection := model.IsResponseRejectedError(err) && response.Usage != nil && model.ValidUsage(response.Usage)
 	if knownRejection {
@@ -910,6 +924,24 @@ func (runner *Runner) executeModelInvocation(
 		})
 		return snapshot, state, ErrInvalidModelResponse
 	}
+	var ledgerMutation *runtimebudget.LedgerMutation
+	physicalResponse, physicalErr := response, err
+	if late {
+		physicalErr = nil
+	}
+	accounting := context.WithoutCancel(ctx)
+	if atomicBudget != nil {
+		var receiptErr, planErr error
+		ledgerMutation, response, receiptErr, planErr = atomicBudget.planModelReceipt(accounting, invocation, physicalResponse, physicalErr)
+		if planErr != nil {
+			return snapshot, state, errors.Join(ErrModelOutcomeUnknown, planErr)
+		}
+		response, err = authority.settle(response, receiptErr)
+		knownRejection = model.IsResponseRejectedError(err) && response.Usage != nil && model.ValidUsage(response.Usage)
+		if err != nil && !knownRejection {
+			return snapshot, state, errors.Join(ErrModelOutcomeUnknown, err)
+		}
+	}
 	completedAt := runner.clock.Now().UTC()
 	invocation.Status = ModelInvocationCompleted
 	invocation.ProviderResponseID = strings.TrimSpace(response.ResponseID)
@@ -931,12 +963,33 @@ func (runner *Runner) executeModelInvocation(
 		return kernel.Snapshot{}, runState{}, err
 	}
 	mutation := kernel.Mutation{
+		Ledger: ledgerMutation,
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
 		Events: []kernel.EventDraft{{
 			Type: "agent.model_invocation.completed", Message: invocation.ID, Wakeup: true,
 		}},
 	}
-	next, err := runner.commitNativeTransition(context.WithoutCancel(ctx), snapshot, mutation)
+	next, err := runner.commitNativeTransition(accounting, snapshot, mutation)
+	// A competing Run may advance the shared ledger without changing this
+	// Run's revision. Replan only the same already-returned physical receipt;
+	// never retry the Provider, or change the qualified receipt on a stale CAS.
+	for attempt := 0; atomicBudget != nil && errors.Is(err, runtimebudget.ErrLedgerConflict) && attempt < 7; attempt++ {
+		replanned, receipt, receiptErr, planErr := atomicBudget.planModelReceipt(accounting, invocation, physicalResponse, physicalErr)
+		if planErr != nil {
+			err = errors.Join(err, planErr)
+			break
+		}
+		code := model.ClassifiedErrorCode(receiptErr)
+		if model.IsResponseRejectedError(receiptErr) && code == "" {
+			code = rejectedModelResponseCode
+		}
+		if !samePersistedModelResponse(response, receipt) || code != invocation.ErrorCode {
+			err = errors.Join(err, ErrInvalidModelResponse)
+			break
+		}
+		ledgerMutation, mutation.Ledger = replanned, replanned
+		next, err = runner.commitNativeTransition(accounting, snapshot, mutation)
+	}
 	if err != nil {
 		endedAt := runner.clock.Now().UTC()
 		runner.recordTelemetry(ctx, observability.Event{
@@ -963,6 +1016,13 @@ func (runner *Runner) executeModelInvocation(
 	})
 	if invocation.Purpose != ModelInvocationContextSummary {
 		runner.publishHostedToolReceipts(ctx, next, response.HostedToolCalls)
+	}
+	if ledgerMutation != nil {
+		if projectErr := atomicBudget.ports.Project(context.WithoutCancel(ctx), ledgerMutation.Next()); projectErr != nil {
+			// The original receipt and charge have already committed. The projection
+			// cannot replace their result or grant another provider dispatch.
+			return next, state, errors.Join(ErrModelOutcomeUnknown, projectErr)
+		}
 	}
 	if late {
 		return next, state, ErrModelLateResult

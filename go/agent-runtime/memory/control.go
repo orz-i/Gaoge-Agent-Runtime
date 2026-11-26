@@ -22,7 +22,7 @@ func (store *Store) ApplyControl(ctx context.Context, runID string, expectedRevi
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	if err := store.managedGateLocked(runID); err != nil {
+	if err := store.nativeEntryGateLocked(runID); err != nil {
 		return kernel.Snapshot{}, false, err
 	}
 	current, ok := store.records[runID]
@@ -38,9 +38,6 @@ func (store *Store) ApplyControl(ctx context.Context, runID string, expectedRevi
 		}
 	}
 	if err := kernel.ValidateControl(current, guard, mutation, store.currentExecutionTime()); err != nil {
-		return kernel.Snapshot{}, false, err
-	}
-	if _, err := store.settleRetirementSuccessorLocked(runID); err != nil {
 		return kernel.Snapshot{}, false, err
 	}
 	authority := store.execution[runID]
@@ -76,14 +73,18 @@ func (store *Store) ApplyControl(ctx context.Context, runID string, expectedRevi
 	if authority.epoch == math.MaxUint64 {
 		return kernel.Snapshot{}, false, kernel.ErrExecutionConflict
 	}
-	// Invalidate even a still-live external worker before committing the
-	// state and wakeup; Epoch=0 stays legacy/unclaimed.
+	// Commit state, accounting, wakeup and revocation under the same mutex.
+	// A rejected mutation must not invalidate a still-live worker.
+	// Epoch=0 stays legacy/unclaimed.
 	revoked := authority.epoch > 0 && !ownedApproval
+	snapshot, err := store.applyLocked(ctx, runID, expectedRevision, mutation, true)
+	if err != nil {
+		return kernel.Snapshot{}, false, err
+	}
 	if revoked {
 		authority.epoch++
 		authority.lease = kernel.ExecutionLease{}
 		store.execution[runID] = authority
 	}
-	snapshot, err := store.applyLocked(runID, expectedRevision, mutation)
-	return snapshot, revoked, err
+	return snapshot, revoked, nil
 }

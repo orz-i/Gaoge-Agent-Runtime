@@ -62,7 +62,7 @@ func ValidateControl(current Snapshot, guard ControlGuard, mutation StoreMutatio
 	if next.Run.Kind != current.Run.Kind || next.Run.Actor != current.Run.Actor ||
 		next.Run.Thread != current.Run.Thread || next.Run.Goal != current.Run.Goal ||
 		next.Run.RequestID != current.Run.RequestID ||
-		next.Run.ParentRunID != current.Run.ParentRunID ||
+		next.Run.ParentRunID != current.Run.ParentRunID || next.Run.BudgetScopeID != current.Run.BudgetScopeID || next.Run.BudgetParentRunID != current.Run.BudgetParentRunID ||
 		!next.Run.CreatedAt.Equal(current.Run.CreatedAt) ||
 		(next.Run.DeadlineAt == nil) != (current.Run.DeadlineAt == nil) {
 		return ErrInvalidInput
@@ -187,7 +187,7 @@ func ValidateControl(current Snapshot, guard ControlGuard, mutation StoreMutatio
 // a new execution claim before the Feature dispatches external effects.
 func (runtime *Runtime) ApplyControl(ctx context.Context, runID string, expectedRevision uint64,
 	guard ControlGuard, mutation Mutation, permit *featurecontrol.Proof) (Snapshot, bool, error) {
-	if runtime == nil || hasReservedApplyEvidence(mutation.Events) {
+	if runtime == nil || mutation.Ledger != nil || hasReservedApplyEvidence(mutation.Events) {
 		return Snapshot{}, false, controlNoEffectBeforeStore(ErrInvalidInput)
 	}
 	if runtime.execution != nil && (guard.Kind != ControlApproval || runtime.physicalGrant == nil || !runtime.physicalGrant.IsOwned() || !runtime.physicalGrant.MatchesExecution(*runtime.execution)) {
@@ -222,11 +222,6 @@ func (runtime *Runtime) ApplyControl(ctx context.Context, runID string, expected
 	if err = ValidateControl(current, guard, next, runtime.Now()); err != nil {
 		return Snapshot{}, false, controlNoEffectBeforeStore(err)
 	}
-	if guard.Kind == ControlAllowance {
-		if err := stampAllowanceDispatch(ctx, current, &next); err != nil {
-			return Snapshot{}, false, controlNoEffectBeforeStore(err)
-		}
-	}
 	if guard.Kind == ControlApproval {
 		if err := runtime.stampApprovalDispatch(current, &next); err != nil {
 			return Snapshot{}, false, controlNoEffectBeforeStore(err)
@@ -248,6 +243,9 @@ func (runtime *Runtime) ApplyControl(ctx context.Context, runID string, expected
 	}
 	// Older custom stores implement no execution epochs and retain the existing
 	// six-state single-executor behavior; never fall back on a fenced Store.
+	if current.Run.BudgetScopeID != "" {
+		return Snapshot{}, false, controlNoEffectBeforeStore(ErrExecutionRequired)
+	}
 	if _, fenced := runtime.store.(ExecutionStore); fenced {
 		return Snapshot{}, false, controlNoEffectBeforeStore(ErrExecutionRequired)
 	}

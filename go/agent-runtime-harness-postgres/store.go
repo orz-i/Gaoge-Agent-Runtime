@@ -32,6 +32,9 @@ func New(db *gorm.DB) (*Store, error) {
 	if err := rejectLegacyInvocationColumns(db); err != nil {
 		return nil, err
 	}
+	if err := rejectOpenManagedReservations(db); err != nil {
+		return nil, err
+	}
 	return &Store{db: db}, nil
 }
 
@@ -157,10 +160,7 @@ func (store *Store) UpdateInvocation(ctx context.Context, value harness.Invocati
 					return checkErr
 				}
 			} else {
-				if checkErr := checkManagedInvocationReservationTx(tx, value); checkErr != nil {
-					return checkErr
-				}
-				pending, checkErr := pendingExecutionDispatchTx(tx, value.TurnID, value.ID)
+				pending, checkErr := pendingExecutionDispatchTx(tx, value.TurnID, value.ID, "")
 				if checkErr != nil {
 					return checkErr
 				}
@@ -170,7 +170,11 @@ func (store *Store) UpdateInvocation(ctx context.Context, value harness.Invocati
 					// when the owning Turn has already sealed its durable
 					// cancellation intent. The fence remains active until
 					// physical/descendant cleanup is independently proven.
-					if value.Status != harness.InvocationCancelled {
+					facts, e := managedDispatchFactsTx(tx, value.TurnID)
+					if e != nil {
+						return e
+					}
+					if harness.PendingNativeManagedDispatch(facts, value.ID) || value.Status != harness.InvocationCancelled {
 						return harness.ErrConflict
 					}
 					active, activeErr := pendingCancellationFenceTx(tx, value.TurnID)
@@ -283,7 +287,7 @@ func (store *Store) RetryInvocation(
 		// A child's unfinished physical grant must also fence an intermediate
 		// parent's Attempt rotation. Turn-wide is intentionally conservative;
 		// the grant alone does not freeze transitive ancestor ownership.
-		pending, pendingErr := pendingExecutionDispatchTx(tx, current.TurnID, "")
+		pending, pendingErr := pendingExecutionDispatchTx(tx, current.TurnID, "", "")
 		if pendingErr != nil {
 			return pendingErr
 		}
@@ -795,6 +799,9 @@ func Migrate(db *gorm.DB) error {
 	if err := checkInvocationRootMigration(db); err != nil {
 		return err
 	}
+	if err := rejectOpenManagedReservations(db); err != nil {
+		return err
+	}
 	return db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.AutoMigrate(Models()...); err != nil {
 			return err
@@ -918,9 +925,6 @@ func (store *Store) UpdateTurn(ctx context.Context, value harness.Turn, expected
 			if lockErr := lockAdmissionTurn(tx, value.ID); lockErr != nil {
 				return lockErr
 			}
-			if checkErr := checkManagedReservationTx(tx, value.ID); checkErr != nil {
-				return checkErr
-			}
 			var current turnRecord
 			if loadErr := tx.Where("id = ?", value.ID).Take(&current).Error; loadErr != nil {
 				return interactionOwnerLockError(loadErr)
@@ -995,7 +999,7 @@ func (store *Store) UpdateTurn(ctx context.Context, value harness.Turn, expected
 				if activeErr != nil {
 					return activeErr
 				}
-				pending, pendingErr := pendingExecutionDispatchTx(tx, value.ID, "")
+				pending, pendingErr := pendingExecutionDispatchTx(tx, value.ID, "", "")
 				if pendingErr != nil {
 					return pendingErr
 				}
@@ -1489,8 +1493,8 @@ func appendItemTx(tx *gorm.DB, value harness.Item, outcome *itemAppendOutcome) e
 	if err = lockTurn(tx, value.TurnID); err != nil {
 		return err
 	}
-	if err = checkManagedCompletionTx(tx, value); err != nil {
-		return err
+	if harness.IsManagedDispatchClosure(value) {
+		return harness.ErrConflict
 	}
 	// The original authority namespace and its completion identity are
 	// validated for ALL Item kinds, not only the expected Diagnostic kind.
@@ -1536,13 +1540,12 @@ func appendItemTx(tx *gorm.DB, value harness.Item, outcome *itemAppendOutcome) e
 				}
 			}
 			_, _, bound := harness.CancellationAttemptForStore(tx.Statement.Context)
-			if bound && target.ID != "" {
-				err = checkManagedInvocationReservationTx(tx, target)
-			} else {
-				err = checkManagedReservationTx(tx, value.TurnID)
+			facts, e := managedDispatchFactsTx(tx, value.TurnID)
+			if e != nil {
+				return e
 			}
-			if err != nil {
-				return err
+			if harness.NativeManagedDispatchBlocksCancellation(facts, target, bound) {
+				return harness.ErrConflict
 			}
 			if err = checkCancellationFenceTx(tx, value.TurnID); err != nil {
 				return err
@@ -1603,7 +1606,7 @@ func appendItemTx(tx *gorm.DB, value harness.Item, outcome *itemAppendOutcome) e
 		if err != nil {
 			return err
 		}
-		if !found || !harness.ValidOriginalApprovalSettlement(tx.Statement.Context, grant, value) {
+		if !found || !harness.ValidNativeManagedDispatchCompletion(tx.Statement.Context, grant, value) || !harness.ValidOriginalApprovalSettlement(tx.Statement.Context, grant, value) {
 			return harness.ErrConflict
 		}
 		decision, insert, err := planOriginalApprovalTx(tx, grant, value)

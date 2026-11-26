@@ -20,6 +20,7 @@ import (
 type preparationKernelPorts interface {
 	noEntryKernelPorts
 	kernel.ManagedRecoveryStore
+	budget.LedgerStore
 }
 type preparationHostPorts interface {
 	harness.Store
@@ -154,8 +155,8 @@ func AwaitManagedOriginalLeaseExpiry(t *testing.T, store kernel.Store, source ke
 		kernel.ManagedRecoveryStore
 	})
 	if !ok || source.Run.Status != kernel.RunStatusRunning || transfer.SafePoint.Host.RunID != source.Run.ID ||
-		(transfer.State != kernel.ManagedAvailable && transfer.State != kernel.ManagedInvalidated) ||
-		transfer.Selection.ID != "" || transfer.SuccessorGrant.ID != "" {
+		transfer.LegacyState != "" ||
+		transfer.Selection.Mode != "" || transfer.SuccessorGrant.ID != "" {
 		t.Fatal("missing original unselected managed frontier")
 	}
 	unchanged := func() {
@@ -252,7 +253,7 @@ func ManagedPreparationSummary(t *testing.T, factory func(*testing.T) (kernel.St
 				if err != nil {
 					t.Fatal(err)
 				}
-				options.Context.SummaryNativeRecovery = true
+				options.Context.ManagedRecovery = true
 				options.Session.Config.WorkingStateSummary = &agent.WorkingStateSummaryPolicy{MaxInputTokens: 60000, MaxSerializedBytes: 100000}
 				options.Session.Config.SharedBudget = &budget.Limits{MaxLLMCalls: 2}
 				options.Inputs = inputs
@@ -296,7 +297,7 @@ func ManagedPreparationSummary(t *testing.T, factory func(*testing.T) (kernel.St
 				}
 				point, err := options.Runtime.LoadManagedRecovery(ctx, root.ExecutionRefID)
 				proof, ok := point.SafePoint.AgentObligations()
-				if err != nil || !ok || point.State != kernel.ManagedAvailable || !kernel.ManagedSourceMatches(point.SafePoint, original) ||
+				if err != nil || !ok || point.LegacyState != "" || !kernel.ManagedSourceMatches(point.SafePoint, original) ||
 					(wantInv == 1 && (proof.Phase != "prepare" || proof.InvocationID != "" || proof.PreparationContext == nil)) {
 					t.Fatalf("missing preparation obligation: %v %+v", err, proof)
 				}
@@ -336,7 +337,7 @@ func ManagedPreparationSummary(t *testing.T, factory func(*testing.T) (kernel.St
 				done, err := session.Resume(ctx, "second")
 				if err != nil || done.Turn.Status != harness.TurnCompleted || provider.summaries != 1 || len(provider.requests) != 3 {
 					transfer, e := options.Runtime.LoadManagedRecovery(ctx, root.ExecutionRefID)
-					t.Fatalf("resume: %v %s calls=%d summary=%d transfer=%s selection=%s read=%v", err, done.Turn.Status, len(provider.requests), provider.summaries, transfer.State, transfer.Selection.Mode, e)
+					t.Fatalf("resume: %v %s calls=%d summary=%d transfer=%s selection=%s read=%v", err, done.Turn.Status, len(provider.requests), provider.summaries, transfer.Selection.Mode, transfer.Selection.Mode, e)
 				}
 				final, err := base.Load(ctx, root.ExecutionRefID)
 				if err != nil {
@@ -346,7 +347,7 @@ func ManagedPreparationSummary(t *testing.T, factory func(*testing.T) (kernel.St
 				if err != nil {
 					t.Fatal(err)
 				}
-				ledger, err := h.LoadBudget(ctx, done.Turn.ID)
+				ledger, err := base.(budget.LedgerStore).LoadBudget(ctx, done.Turn.ID)
 				if err != nil {
 					t.Fatal(err)
 				}

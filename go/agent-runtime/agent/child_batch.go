@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
@@ -25,7 +26,7 @@ func independentChildBatch(state runState) bool {
 	return true
 }
 
-func (runner *Runner) deferChildCall(ctx context.Context, snapshot kernel.Snapshot, state runState, call tools.Call) (kernel.Snapshot, bool, error) {
+func (runner *Runner) deferChildCall(ctx context.Context, snapshot kernel.Snapshot, state runState, call tools.Call, ledger *budget.LedgerMutation) (kernel.Snapshot, bool, error) {
 	if state.ToolDispatchID != call.ID || state.ToolWait == nil || state.ToolWait.CallID != call.ID {
 		return snapshot, true, ErrToolOutcomeUnknown
 	}
@@ -37,7 +38,7 @@ func (runner *Runner) deferChildCall(ctx context.Context, snapshot kernel.Snapsh
 	state.PendingCalls = remainingPendingCalls(state)
 	state.ToolWait = nil
 	state.ToolDispatchID = ""
-	return runner.persistChildBatch(ctx, snapshot, state)
+	return runner.persistChildBatch(ctx, snapshot, state, ledger)
 }
 
 // toolBatchAllowanceFull counts already-dispatched but not yet consumed
@@ -55,7 +56,7 @@ func (runner *Runner) activateDeferredChild(ctx context.Context, snapshot kernel
 	if err := state.activateDeferredChild(); err != nil {
 		return snapshot, true, err
 	}
-	next, _, err := runner.persistChildBatch(ctx, snapshot, state)
+	next, _, err := runner.persistChildBatch(ctx, snapshot, state, nil)
 	return next, true, err
 }
 
@@ -74,8 +75,17 @@ func (state *runState) activateDeferredChild() error {
 	return nil
 }
 
-func (runner *Runner) persistChildBatch(ctx context.Context, snapshot kernel.Snapshot, state runState) (kernel.Snapshot, bool, error) {
-	next, err := runner.commitToolTransition(ctx, snapshot, state, snapshot.Checkpoint, kernel.RunStatusRunning, kernel.EventDraft{Type: EventToolPending, Message: "child_batch", Wakeup: true, WakeupAt: agentWakeupAt(runner.clock.Now())})
+func (runner *Runner) persistChildBatch(ctx context.Context, snapshot kernel.Snapshot, state runState, ledger *budget.LedgerMutation) (kernel.Snapshot, bool, error) {
+	event := kernel.EventDraft{Type: EventToolPending, Message: "child_batch", Wakeup: true, WakeupAt: agentWakeupAt(runner.clock.Now())}
+	if ledger != nil {
+		encoded, err := encodeState(state)
+		if err != nil {
+			return snapshot, true, err
+		}
+		next, err := runner.commitNativeTransition(ctx, snapshot, kernel.Mutation{Ledger: ledger, Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint, Events: []kernel.EventDraft{event}})
+		return next, err != nil, err
+	}
+	next, err := runner.commitToolTransition(ctx, snapshot, state, snapshot.Checkpoint, kernel.RunStatusRunning, event)
 	return next, err != nil, err
 }
 

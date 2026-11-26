@@ -57,8 +57,8 @@ func (s *ea1ChildResumeSettlementStore) MarkChildExecutionSettled(ctx context.Co
 	}
 	return e
 }
-func (s *ea1ChildResumeSettlementStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant) error {
-	e := s.ChildExecutionStore.FinishChildExecution(ctx, g)
+func (s *ea1ChildResumeSettlementStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
+	e := s.ChildExecutionStore.FinishChildExecution(ctx, g, p)
 	if e == nil {
 		s.finishes++
 	}

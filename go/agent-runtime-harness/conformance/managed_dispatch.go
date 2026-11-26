@@ -51,6 +51,39 @@ func (s approvalReturnFailure) RecordOwnedPhysicalCallbackReturn(context.Context
 	return errors.New("original callback record refused before commit")
 }
 
+// Interrupt the actual successor retirement, not its original physical
+// work. The next process may only consume the original settled facts.
+type managedSuccessorFinishCut struct {
+	preparationKernelPorts
+	after, dead bool
+	grant       kernel.ChildExecutionGrant
+}
+
+var errManagedSuccessorFinishCut = errors.New("managed successor finish interrupted")
+
+func (s *managedSuccessorFinishCut) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
+	if g.AdmissionOperation != "managed_resume" {
+		return s.preparationKernelPorts.FinishChildExecution(ctx, g, p)
+	}
+	if s.dead {
+		return errManagedSuccessorFinishCut
+	}
+	s.grant = g
+	if s.after {
+		if e := s.preparationKernelPorts.FinishChildExecution(ctx, g, p); e != nil {
+			return e
+		}
+	}
+	s.dead = true
+	return errManagedSuccessorFinishCut
+}
+func (s *managedSuccessorFinishCut) LoadOwnedRetirement(ctx context.Context, id string) (kernel.OwnedRetirementReceipt, error) {
+	if s.dead && id == s.grant.ID {
+		return kernel.OwnedRetirementReceipt{}, errManagedSuccessorFinishCut
+	}
+	return s.preparationKernelPorts.LoadOwnedRetirement(ctx, id)
+}
+
 // ManagedPhysicalDispatch exercises a new independently admitted native
 // dispatch on the same Run after ordinary or managed Start retirement. A
 // successor still cannot mint another point inside the same dispatch.
@@ -62,6 +95,8 @@ func ManagedPhysicalDispatch(t *testing.T, factory func(*testing.T) (kernel.Stor
 		{"resume/intent-before", "agent.model_invocation.pending", false},
 		{"resume/intent-after", "agent.model_invocation.pending", true},
 		{"resume/receipt-after", "agent.model_invocation.completed", true},
+		{"resume/finish-before", "agent.model_invocation.pending", true},
+		{"resume/finish-ack", "agent.model_invocation.pending", true},
 		{"resume/late-successor", "agent.model_invocation.pending", true},
 		{"resume/cancel", "agent.model_invocation.pending", true},
 		{"resume/unknown", "agent.model_invocation.dispatch_intent", true},
@@ -190,8 +225,8 @@ func ManagedPhysicalDispatch(t *testing.T, factory func(*testing.T) (kernel.Stor
 			if e != nil {
 				t.Fatal(e)
 			}
-			if repeated && prior.State != kernel.ManagedClosed {
-				t.Fatalf("first selected transfer not closed: %s", prior.State)
+			if repeated && (!prior.Resolved() || prior.Selection.Mode != kernel.ManagedResume) {
+				t.Fatalf("first selected transfer not closed: %s", prior.Selection.Mode)
 			}
 			if _, e = rt.LookupChildExecution(ctx, root.ExecutionRefID); !errors.Is(e, kernel.ErrNotFound) {
 				t.Fatalf("first grant not retired: %v", e)
@@ -262,7 +297,7 @@ func ManagedPhysicalDispatch(t *testing.T, factory func(*testing.T) (kernel.Stor
 			if e != nil {
 				t.Fatal(e)
 			}
-			if b.Phase != wantPhase || b.DispatchID == prior.SafePoint.Host.DispatchID || g != point.SafePoint.OriginalGrant || !b.MatchesOriginalGrant(g) || g.ID == prior.SafePoint.OriginalGrant.ID || !harness.PendingExecutionDispatch(pending.Items, root.ID) {
+			if b.Phase != wantPhase || b.DispatchID == prior.SafePoint.Host.DispatchID || g != point.SafePoint.OriginalGrant || !b.MatchesOriginalGrant(g) || g.ID == prior.SafePoint.OriginalGrant.ID || !b.DirectNativeCommand() || harness.PendingExecutionDispatch(pending.Items, root.ID) {
 				t.Fatalf("new dispatch did not own its proof: phase=%s grant=%+v", b.Phase, g)
 			}
 			if inline && (b.Approval == nil || b.Approval.CheckpointID != checkpoint || b.Approval.Decision != string(decision) || b.Approval.Comment != "original grant") {
@@ -279,7 +314,7 @@ func ManagedPhysicalDispatch(t *testing.T, factory func(*testing.T) (kernel.Stor
 			if approval && decision == harness.ApprovalApprove {
 				wantTools = 1
 			}
-			ledger, e := h.LoadBudget(ctx, pending.Turn.ID)
+			ledger, e := base.(budget.LedgerStore).LoadBudget(ctx, pending.Turn.ID)
 			if e != nil || len(client.requests) != wantBefore || effects != wantTools || ledger.View("").Usage.LLMCalls != wantBefore || ledger.View("").Usage.ToolCalls != wantTools || (!unknown && ledger.View("").Reserved != (budget.Usage{})) {
 				t.Fatalf("wrong original effects: %v %+v calls=%d tools=%d", e, ledger.View(""), len(client.requests), effects)
 			}
@@ -288,30 +323,27 @@ func ManagedPhysicalDispatch(t *testing.T, factory func(*testing.T) (kernel.Stor
 				// after a failed retirement. Exercise compatibility with
 				// the old partially projected exact fact and its conflict.
 				assertOriginalApprovalDecision(t, pending.Items, checkpoint, "approve", "original grant", 0)
-				if point.State != kernel.ManagedAvailable || point.Selection.ID != "" {
+				if point.LegacyState != "" || point.Selection.Mode != "" {
 					t.Fatal("wrong original return failure cut")
 				}
 				if _, err := rt.LookupOwnedPhysicalCallbackReturn(ctx, g); !errors.Is(err, kernel.ErrNotFound) {
 					t.Fatalf("unexpected original callback evidence: %v", err)
 				}
 				if c.name != "approval/return-record-failed" {
-					dispatch, err := h.GetItem(ctx, b.DispatchID)
-					if err != nil {
-						t.Fatal(err)
-					}
-					parentID, ok := harness.OriginalApprovalRequestID(dispatch)
-					if !ok {
-						t.Fatal("missing original approval request")
-					}
+					parentID := fixtureStableID("hia", pending.Turn.ID, checkpoint)
 					parent, err := h.GetItem(ctx, parentID)
 					if err != nil {
 						t.Fatal(err)
 					}
-					prospective := harness.Item{ID: fixtureStableID("hdispatchdone", dispatch.ID), TurnID: dispatch.TurnID, InvocationID: dispatch.InvocationID, RunID: dispatch.RunID, Kind: harness.ItemDiagnostic, Status: harness.ItemCompleted, ParentItemID: dispatch.ID, Seq: dispatch.Seq + 1, Payload: json.RawMessage(`{"boundary":"physical_dispatch_returned"}`), CreatedAt: dispatch.CreatedAt, UpdatedAt: dispatch.UpdatedAt}
-					fact, insert, err := harness.PlanOriginalApprovalSettlement(dispatch, prospective, parent, nil)
-					if err != nil || !insert {
-						t.Fatalf("missing prior projection fixture: %v", err)
+					payload, err := json.Marshal(struct {
+						CheckpointID string                   `json:"checkpointID"`
+						Decision     harness.ApprovalDecision `json:"decision"`
+						Comment      string                   `json:"comment"`
+					}{checkpoint, decision, "original grant"})
+					if err != nil {
+						t.Fatal(err)
 					}
+					fact := harness.Item{ID: fixtureStableID("hia", pending.Turn.ID, checkpoint, "decision"), TurnID: parent.TurnID, InvocationID: parent.InvocationID, RunID: parent.RunID, Kind: harness.ItemApproval, Status: harness.ItemCompleted, ParentItemID: parent.ID, Payload: payload, CreatedAt: parent.CreatedAt, UpdatedAt: parent.UpdatedAt}
 					if c.name == "approval/conflicting-projection" {
 						fact.Payload = json.RawMessage(strings.ReplaceAll(string(fact.Payload), "original grant", "substituted grant"))
 					}
@@ -319,7 +351,7 @@ func ManagedPhysicalDispatch(t *testing.T, factory func(*testing.T) (kernel.Stor
 						t.Fatal(err)
 					}
 				}
-				_, err := h.ReadManagedOriginalDispatch(ctx, b)
+				err := h.VerifyManagedOriginalDispatch(ctx, b, false)
 				if (err != nil) != (c.name == "approval/conflicting-projection") {
 					t.Fatalf("wrong prior decision qualification: %v", err)
 				}
@@ -332,7 +364,7 @@ func ManagedPhysicalDispatch(t *testing.T, factory func(*testing.T) (kernel.Stor
 			if repeated && kernel.ManagedDigest(old) != kernel.ManagedDigest(prior) {
 				t.Fatal("closed historical transfer was rewritten")
 			}
-			if _, e = h.ReadManagedOriginalDispatch(ctx, prior.SafePoint.Host); e == nil {
+			if e = h.VerifyManagedOriginalDispatch(ctx, prior.SafePoint.Host, false); e == nil {
 				t.Fatal("historical dispatch acquired current Host authority")
 			}
 			if inline {
@@ -340,7 +372,7 @@ func ManagedPhysicalDispatch(t *testing.T, factory func(*testing.T) (kernel.Stor
 				decision := *bad.Approval
 				decision.Comment = "substituted decision"
 				bad.Approval = &decision
-				if _, e = h.ReadManagedOriginalDispatch(ctx, bad); e == nil {
+				if e = h.VerifyManagedOriginalDispatch(ctx, bad, false); e == nil {
 					t.Fatal("substituted approval acquired original Host authority")
 				}
 			}
@@ -389,9 +421,33 @@ func ManagedPhysicalDispatch(t *testing.T, factory func(*testing.T) (kernel.Stor
 					t.Fatalf("returned successor did not close its original dispatch: %v", e)
 				}
 				closed, e := rt.LoadManagedRecovery(ctx, root.ExecutionRefID)
-				if e != nil || closed.State != kernel.ManagedClosed || closed.SafePoint.Host.DispatchID != b.DispatchID {
+				if e != nil || !closed.Resolved() || closed.Selection.Mode != kernel.ManagedResume || closed.SafePoint.Host.DispatchID != b.DispatchID {
 					t.Fatalf("late successor not retired: %v", e)
 				}
+			}
+			if strings.HasPrefix(c.name, "resume/finish-") {
+				fault := &managedSuccessorFinishCut{preparationKernelPorts: base.(preparationKernelPorts), after: c.name == "resume/finish-ack"}
+				session, rt = open(fault)
+				_, e = session.Resume(ctx, "original")
+				if e == nil || !fault.dead || len(client.requests) != 2 {
+					t.Fatalf("actual successor finish cut: %v calls=%d", e, len(client.requests))
+				}
+				observed, e := base.(kernel.ManagedRecoveryStore).LoadManagedRecovery(ctx, root.ExecutionRefID)
+				receipt, retErr := base.(kernel.OwnedRetirementStore).LoadOwnedRetirement(ctx, fault.grant.ID)
+				grant, grantErr := base.(kernel.ChildExecutionStore).LookupChildExecution(ctx, root.ExecutionRefID)
+				if e != nil {
+					t.Fatal(e)
+				}
+				if fault.after {
+					if !observed.Resolved() || observed.Selection.Mode != kernel.ManagedResume || observed.Terminal == nil || retErr != nil || !receipt.MatchesManagedClosure(observed, *observed.Terminal) || !errors.Is(grantErr, kernel.ErrNotFound) {
+						t.Fatalf("partial finish ACK: transfer=%s retirement=%v grant=%v", observed.Selection.Mode, retErr, grantErr)
+					}
+				} else if observed.Resolved() || observed.Selection.Mode != kernel.ManagedResume || !errors.Is(retErr, kernel.ErrNotFound) || grantErr != nil || grant != fault.grant {
+					t.Fatalf("uncommitted finish changed authority: transfer=%s retirement=%v grant=%v", observed.Selection.Mode, retErr, grantErr)
+				}
+				base, host = reopen()
+				h = host.(preparationHostPorts)
+				session, rt = open(base)
 			}
 			var done harness.Snapshot
 			if c.name == "resume/cancel" {
@@ -417,7 +473,7 @@ func ManagedPhysicalDispatch(t *testing.T, factory func(*testing.T) (kernel.Stor
 			if e != nil {
 				t.Fatal(e)
 			}
-			ledger, e = h.LoadBudget(ctx, done.Turn.ID)
+			ledger, e = base.(budget.LedgerStore).LoadBudget(ctx, done.Turn.ID)
 			if e != nil {
 				t.Fatal(e)
 			}
@@ -435,7 +491,7 @@ func ManagedPhysicalDispatch(t *testing.T, factory func(*testing.T) (kernel.Stor
 			if e != nil {
 				t.Fatal(e)
 			}
-			if closed.SafePoint.Host.DispatchID != b.DispatchID || closed.Selection.Binding.DispatchID != b.DispatchID {
+			if closed.SafePoint.Host.DispatchID != b.DispatchID {
 				t.Fatal("closed wrong dispatch")
 			}
 			if approval {

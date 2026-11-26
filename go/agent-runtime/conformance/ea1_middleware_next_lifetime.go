@@ -37,7 +37,7 @@ func RunEA1MiddlewareNextLifetime(t *testing.T, factory func(*testing.T) (kernel
 			}
 			t.Run("P2/model/swallowed-inner", func(t *testing.T) { ea1MWExecute(t, factory, child, false, "P2", "swallow", "model") })
 			t.Run("P3/durable-before-whole-return", func(t *testing.T) { ea1MWExecute(t, factory, child, false, "P3", "receipt", "run") })
-			t.Run("P4/mark-ack-lost", func(t *testing.T) { ea1MWExecute(t, factory, child, false, "P4", "ack", "run") })
+			t.Run(map[bool]string{true: "P4/mark-ack-lost", false: "P4/finish-before"}[child], func(t *testing.T) { ea1MWExecute(t, factory, child, false, "P4", "ack", "run") })
 			t.Run("P5/deadline-before-new-send", func(t *testing.T) { ea1MWExecute(t, factory, child, false, "P5", "deadline", "run") })
 			t.Run("P1/default-owner", func(t *testing.T) { ea1MWExecute(t, factory, child, true, "P1", "double", "run") })
 		})
@@ -58,11 +58,12 @@ func (s *ea1MWStore) Create(ctx context.Context, r kernel.Record, events []kerne
 	}
 	return s.ea1ChildStartStore.Create(ctx, r, events)
 }
-func (s *ea1MWStore) BeginOwnedPhysicalExecution(ctx context.Context, g kernel.ChildExecutionGrant, l kernel.ExecutionLease, a kernel.OwnedPhysicalAdmission) error {
+func (s *ea1MWStore) BeginOwnedPhysicalExecution(ctx context.Context, a kernel.OwnedPhysicalAdmission) (kernel.OwnedPhysicalAdmissionResult, error) {
+	g := a.Candidate().Grant
 	if s.beforeOwned != nil {
 		s.beforeOwned(g)
 	}
-	return s.OwnedPhysicalExecutionStore.BeginOwnedPhysicalExecution(ctx, g, l, a)
+	return s.ea1ChildStartStore.BeginOwnedPhysicalExecution(ctx, a)
 }
 func (s *ea1MWStore) MarkChildExecutionSettled(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
 	s.markCalls++
@@ -75,12 +76,12 @@ func (s *ea1MWStore) MarkChildExecutionSettled(ctx context.Context, g kernel.Chi
 	}
 	return nil
 }
-func (s *ea1MWStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant) error {
+func (s *ea1MWStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
 	s.finishCalls++
 	if s.ack {
 		return s.failure
 	}
-	return s.ChildExecutionStore.FinishChildExecution(ctx, g)
+	return s.ChildExecutionStore.FinishChildExecution(ctx, g, p)
 }
 
 type ea1MWFixture struct {
@@ -666,10 +667,10 @@ func ea1MWExecute(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.S
 				t.Fatalf("actual child Finish hold missed: %v", e)
 			}
 		}
-		if !errors.Is(out.err, f.failure) || f.storeMW.markCommits == 0 || f.storeMW.finishCalls == 0 {
+		if !errors.Is(out.err, f.failure) || f.storeMW.finishCalls == 0 || (child && f.storeMW.markCommits == 0) {
 			t.Fatalf("actual Mark ACKlost/Finish cut not reached: %v", out.err)
 		}
-		if !child && (f.storeMW.markCalls != 2 || f.storeMW.markCommits != 2 || f.storeMW.finishCalls != 1) {
+		if !child && (f.storeMW.markCalls != 0 || f.storeMW.markCommits != 0 || f.storeMW.finishCalls != 1) {
 			t.Fatalf("exact Root owner/recovery Mark ACKloss sequence: calls=%d committed=%d finish=%d", f.storeMW.markCalls, f.storeMW.markCommits, f.storeMW.finishCalls)
 		}
 		g := f.scope(f.peer)
@@ -705,7 +706,7 @@ func ea1MWExecute(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.S
 		t.Fatal(out.err)
 	}
 	f.receipts(s, true)
-	if s.Run.Status != kernel.RunStatusCompleted || f.storeMW.markCommits != 1 {
+	if s.Run.Status != kernel.RunStatusCompleted || (child && f.storeMW.markCommits != 1) || (!child && (f.storeMW.markCommits != 0 || f.storeMW.finishCalls != 1)) {
 		t.Fatal("actual successful whole callback did not settle once")
 	}
 	f.layer.rejected("all")

@@ -64,7 +64,7 @@ func (runner *Runner) releaseNoEffectCancellation(
 	if err != nil {
 		return errors.Join(cause, err)
 	}
-	if ledger != nil {
+	if ledger != nil && (!runner.nativeBudget() || ledger.RunCancelled(runID)) {
 		// The shared budget was deliberately revoked BEFORE physical
 		// cancellation. An exact Kernel ChildGrant busy-no-effect does not
 		// erase that protective budget action, so never retire its Turn
@@ -85,7 +85,7 @@ func (runner *Runner) releaseNoEffectCancellation(
 		return cause
 	}
 	interactions, err := runner.store.ListInteractions(recoveryCtx, turn.ID)
-	if err != nil || len(interactions) != 0 {
+	if err != nil || (len(interactions) != 0 && !runner.nativeBudget()) {
 		return errors.Join(cause, err)
 	}
 	run, err := runner.runtime.Load(recoveryCtx, runID)

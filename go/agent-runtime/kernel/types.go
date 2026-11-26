@@ -3,6 +3,8 @@ package kernel
 import (
 	"encoding/json"
 	"time"
+
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 )
 
 // RunKind identifies the state-machine owner selected before Run creation.
@@ -41,16 +43,19 @@ type Run struct {
 	RequestID string    `json:"requestID,omitempty"`
 	// ParentRunID is the immutable, Store-fenced physical ancestry of a child.
 	// A relation index is not an authoritative substitute when unavailable.
-	ParentRunID string     `json:"parentRunID,omitempty"`
-	Goal        string     `json:"goal"`
-	Status      RunStatus  `json:"status"`
-	Revision    uint64     `json:"revision"`
-	ErrorCode   string     `json:"errorCode,omitempty"`
-	ErrorDetail string     `json:"errorDetail,omitempty"`
-	DeadlineAt  *time.Time `json:"deadlineAt,omitempty"`
-	EndedAt     *time.Time `json:"endedAt,omitempty"`
-	CreatedAt   time.Time  `json:"createdAt"`
-	UpdatedAt   time.Time  `json:"updatedAt"`
+	ParentRunID string `json:"parentRunID,omitempty"`
+	// Immutable native accounting scope, including logical Handoff ancestry.
+	BudgetScopeID     string     `json:"budgetScopeID,omitempty"`
+	BudgetParentRunID string     `json:"budgetParentRunID,omitempty"`
+	Goal              string     `json:"goal"`
+	Status            RunStatus  `json:"status"`
+	Revision          uint64     `json:"revision"`
+	ErrorCode         string     `json:"errorCode,omitempty"`
+	ErrorDetail       string     `json:"errorDetail,omitempty"`
+	DeadlineAt        *time.Time `json:"deadlineAt,omitempty"`
+	EndedAt           *time.Time `json:"endedAt,omitempty"`
+	CreatedAt         time.Time  `json:"createdAt"`
+	UpdatedAt         time.Time  `json:"updatedAt"`
 }
 
 // EventDraft is an unsequenced event submitted with an atomic transition.
@@ -118,6 +123,7 @@ type CreateRequest struct {
 	// ExecutionRequired reserves the existing Store execution epoch at
 	// creation. It must not be enabled after creating a legacy Run.
 	ExecutionRequired bool
+	Budget            *budget.RunEnrollment
 	ID                string
 	Kind              RunKind
 	Actor             ActorRef
@@ -132,6 +138,8 @@ type CreateRequest struct {
 
 // Mutation replaces feature state and advances the Run through one atomic CAS.
 type Mutation struct {
+	// Ledger couples accounting to this exact existing execution CAS. It is not a persisted Run field.
+	Ledger      *budget.LedgerMutation `json:"-"`
 	Status      RunStatus
 	State       json.RawMessage
 	Checkpoint  *Checkpoint

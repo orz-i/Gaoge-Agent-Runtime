@@ -79,14 +79,14 @@ func TestReturnedRootCustodyAcrossPendingRetirement(t *testing.T) {
 	c := previous.Evidence.Completion
 	c.GrantID, c.ControlCustody = g.ID, kernel.OwnedCustodyScoped
 	c.ReturnRevision = current.Run.Revision
-	l := kernel.ExecutionLease{RunID: current.Run.ID, OwnerID: g.ExecutionOwnerID, LeaseID: g.ExecutionLeaseID, Epoch: g.ExecutionEpoch}
-	pending := kernel.OwnedRetirementReceipt{Version: 1, Evidence: kernel.OwnedSettlementEvidence{Version: 1, Grant: g, Snapshot: current, Completion: c, MarkOrigin: "RECOVERED_RETURN"}, Closures: []kernel.ManagedTransfer{}, Phase: "RETIRED"}
+	pending := kernel.OwnedRetirementReceipt{Version: 1, Evidence: kernel.OwnedSettlementEvidence{Version: 1, Grant: g, Snapshot: current, Completion: c, MarkOrigin: "RECOVERED_RETURN"}, Closures: []kernel.ManagedTransfer{}, Phase: "ACKNOWLEDGED"}
+	pending.ACKIdentity = pending.Identity()
 	if !pending.Valid() {
 		t.Fatal("invalid retirement fixture")
 	}
-	for _, mode := range []string{"exact", "foreign-owner", "stale-source", "active-other-grant", "old-unacknowledged", "duplicate", "opaque", "borrowed", "historical-ack", "missing-current"} {
+	for _, mode := range []string{"exact", "foreign-owner", "stale-source", "active-other-grant", "old-unacknowledged", "duplicate", "opaque", "borrowed", "historical-epoch", "missing-current"} {
 		t.Run(mode, func(t *testing.T) {
-			s, lease, old, row := current, l, previous, pending
+			s, lease, old, row := current, kernel.ExecutionLease{}, previous, pending
 			active := false
 			switch mode {
 			case "foreign-owner":
@@ -101,8 +101,8 @@ func TestReturnedRootCustodyAcrossPendingRetirement(t *testing.T) {
 				row.Evidence.Completion.ControlCustody = ""
 			case "borrowed":
 				row.Evidence.Completion.LeaseOwned = false
-			case "historical-ack":
-				row.Phase = "ACKNOWLEDGED"
+			case "historical-epoch":
+				row.Evidence.Grant.ExecutionEpoch = 5
 				row.ACKIdentity = row.Identity()
 			}
 			rows := []kernel.OwnedRetirementReceipt{old, row}

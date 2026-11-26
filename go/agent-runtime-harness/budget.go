@@ -11,7 +11,7 @@ func (runner *Runner) loadTurnBudget(ctx context.Context, turn Turn) (*budget.Le
 	if runner.budgets == nil {
 		return nil, nil
 	}
-	ledger, err := runner.budgets.dependencies.Ledgers.LoadBudget(ctx, turn.ID)
+	ledger, err := runner.budgets.loadLedger(ctx, turn.ID)
 	if errors.Is(err, budget.ErrLedgerNotFound) {
 		return nil, nil
 	}
@@ -19,6 +19,12 @@ func (runner *Runner) loadTurnBudget(ctx context.Context, turn Turn) (*budget.Le
 		return nil, err
 	}
 	return &ledger, nil
+}
+
+// nativeBudget is selected by the standard first-party composition; the
+// same Runtime owns effect admission, receipt and local cancellation.
+func (runner *Runner) nativeBudget() bool {
+	return runner.budgets != nil && runner.budgets.dependencies.Runtime == runner.runtime
 }
 
 // Cancellation closes the original Root subtree, not the cumulative Turn

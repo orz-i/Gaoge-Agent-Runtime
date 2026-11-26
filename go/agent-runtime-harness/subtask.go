@@ -349,14 +349,16 @@ func (runner *Runner) CancelSubtask(ctx context.Context, turnID, taskID, reason 
 	if err = runner.recordSubtaskItem(ctx, turn.ID, task); err != nil {
 		return Snapshot{}, err
 	}
-	if ledger, loadErr := runner.loadTurnBudget(ctx, turn); loadErr != nil {
-		return Snapshot{}, loadErr
-	} else if ledger != nil {
-		if _, err = runner.budgets.coordinator().CancelRun(ctx, turn.ID, task.RunID); err != nil {
-			return Snapshot{}, err
+	if !runner.nativeBudget() {
+		if ledger, loadErr := runner.loadTurnBudget(ctx, turn); loadErr != nil {
+			return Snapshot{}, loadErr
+		} else if ledger != nil {
+			if _, err = runner.budgets.coordinator().CancelRun(ctx, turn.ID, task.RunID); err != nil {
+				return Snapshot{}, err
+			}
 		}
 	}
-	_, found, cancelErr := runner.cancelRuntimeRun(ctx, task.RunID, reason, nil)
+	target, found, cancelErr := runner.cancelRuntimeRun(ctx, task.RunID, reason, nil)
 	// Only conflicts from the TARGET cancellation itself can prove that no
 	// physical cancellation began. A later descendant-cleanup conflict may
 	// follow already committed effects; it must retain the intent.
@@ -365,6 +367,13 @@ func (runner *Runner) CancelSubtask(ctx context.Context, turnID, taskID, reason 
 		var descendants map[string]kernel.Snapshot
 		descendants, cancelErr = runner.cancelOwnedDescendants(ctx, turn, task.RunID, reason)
 		if cancelErr == nil {
+			// Project the target from its verified cancellation outcome, not
+			// a speculative Invocation status written before Kernel control.
+			if found {
+				descendants[task.RunID] = target
+			} else {
+				descendants[task.RunID] = cancelledRuntimeSnapshot(task.RunID, reason)
+			}
 			cancelErr = runner.syncInvocationRuns(ctx, turn, descendants)
 		}
 		if cancelErr == nil {

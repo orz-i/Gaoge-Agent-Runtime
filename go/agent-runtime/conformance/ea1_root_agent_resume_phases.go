@@ -151,7 +151,7 @@ func ea1RootResumePreflight(t *testing.T, factory func(*testing.T) (kernel.Store
 		revision = winner.Run.Revision
 		want = agent.ErrRunTerminal
 	case "admission-revision", "admission-cancel":
-		want = kernel.ErrExecutionConflict
+		want = kernel.ErrConflict
 		f.store.beforeOwned = func(ctx context.Context, g kernel.ChildExecutionGrant) error {
 			hits++
 			if g.AdmissionOperation != "resume" || g.ExpectedRevision != f.prepared.Run.Revision {
@@ -159,11 +159,18 @@ func ea1RootResumePreflight(t *testing.T, factory func(*testing.T) (kernel.Store
 			}
 			var e error
 			if vector == "admission-revision" {
-				bound, e2 := f.observer.WithExecution(f.store.acquired)
+				competitor, e2 := f.observer.AcquireExecution(ctx, kernel.ExecutionAcquireRequest{RunID: id, OwnerID: "competing-revision", LeaseDuration: time.Minute})
+				if e2 != nil {
+					t.Fatal(e2)
+				}
+				bound, e2 := f.observer.WithExecution(competitor)
 				if e2 != nil {
 					t.Fatal(e2)
 				}
 				winner, e = bound.Apply(ctx, id, revision, kernel.Mutation{Status: kernel.RunStatusRunning, State: f.prepared.State, Checkpoint: f.prepared.Checkpoint})
+				if e == nil {
+					e = f.observer.ReleaseExecution(ctx, competitor)
+				}
 			} else {
 				winner, e = f.observer.Cancel(ctx, id, revision, "Cancel wins actual admission")
 			}

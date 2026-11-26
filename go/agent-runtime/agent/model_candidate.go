@@ -70,7 +70,7 @@ func planModelInvocation(run kernel.Run, client model.Client, request model.Requ
 // A candidate disposition joins Context and SharedBudget feasibility.
 // Pressure may be relieved by another transcript candidate; a permanent
 // minimum-quota denial cannot. Waiting is permanently feasible but not yet
-// executable; the original ledger CAS owns that wait and its recovery.
+// executable; the durable intent retains the plan until native admission.
 type candidateDisposition uint8
 
 const (

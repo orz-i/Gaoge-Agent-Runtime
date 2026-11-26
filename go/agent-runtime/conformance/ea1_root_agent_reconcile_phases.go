@@ -27,7 +27,7 @@ func RunEA1RootAgentReconcilePhases(t *testing.T, factory func(*testing.T) (kern
 		for _, kind := range []string{"model", "tool"} {
 			t.Run(phase+"/"+kind, func(t *testing.T) { ea1RootReconcilePhase(t, factory, phase, kind) })
 			if phase == "P4" {
-				t.Run(phase+"/"+kind+"/single-mark-ack-loss-no-finish-hold", func(t *testing.T) { ea1RootReconcilePhase(t, factory, phase, kind, false) })
+				t.Run(phase+"/"+kind+"/finish-ack-loss-observed", func(t *testing.T) { ea1RootReconcilePhase(t, factory, phase, kind, false) })
 			}
 		}
 	}
@@ -52,29 +52,25 @@ func (s *ea1RootRecoveryFault) ApplyOwnedPhysicalRecovery(ctx context.Context, g
 	}
 	return out, err
 }
-func (s *ea1RootRecoveryFault) MarkChildExecutionSettled(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
-	err := s.ChildExecutionStore.MarkChildExecutionSettled(ctx, g, p)
-	if err == nil && s.phase == "P4" && s.cuts == 0 {
+func (s *ea1RootRecoveryFault) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
+	if s.phase == "P4" && s.cuts == 0 {
 		s.cuts++
 		s.recoveryGrant = g
-		return s.injected
-	}
-	return err
-}
-
-// P4 hold adds a SECOND, explicit precommit fault after genuine Mark ACK
-// loss. The paired no-hold case proves the single original fault is recovered.
-func (s *ea1RootRecoveryFault) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant) error {
-	if s.phase == "P4" && s.holdFinish && s.cuts == 1 && g == s.recoveryGrant {
-		source, e := s.Load(ctx, g.ChildRunID)
-		if e != nil {
+		if s.holdFinish {
+			source, e := s.Load(ctx, g.ChildRunID)
+			if e != nil {
+				return e
+			}
+			s.finishHolds++
+			s.heldSource = source
+			return s.injected
+		}
+		if e := s.ChildExecutionStore.FinishChildExecution(ctx, g, p); e != nil {
 			return e
 		}
-		s.finishHolds++
-		s.heldSource = source
 		return s.injected
 	}
-	return s.ChildExecutionStore.FinishChildExecution(ctx, g)
+	return s.ChildExecutionStore.FinishChildExecution(ctx, g, p)
 }
 
 type ea1RootRecoveryPhysical struct {
@@ -469,8 +465,8 @@ func ea1RootReconcilePhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 	}
 	e = next.ReconcileRootPhysicalExecution(t.Context(), request.ID)
 	if noHoldSuccess {
-		if !errors.Is(e, kernel.ErrNotFound) {
-			t.Fatalf("already acknowledged recovery selected history: %v", e)
+		if e != nil {
+			t.Fatalf("current final retirement could not be observed: %v", e)
 		}
 		retained, readErr := freshRT.LoadOwnedRetirement(t.Context(), grant.ID)
 		if readErr != nil || !ea1RecoveryJSONEqual(retained, accepted) {
@@ -486,9 +482,20 @@ func ea1RootReconcilePhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 	if e = fresh.(kernel.ExecutionStore).CheckExecution(t.Context(), request.ID, &lease); !errors.Is(e, kernel.ErrExecutionConflict) {
 		t.Fatalf("retired scope retained original native authority: %v", e)
 	}
-	if e = next.ReconcileRootPhysicalExecution(t.Context(), request.ID); !errors.Is(e, kernel.ErrNotFound) {
-		t.Fatalf("retired recovery recreated scope: %v", e)
+	finalReceipt, e := freshRT.LoadOwnedRetirement(t.Context(), grant.ID)
+	if e != nil || !finalReceipt.Valid() || finalReceipt.Evidence.Grant != grant || !ea1RecoveryJSONEqual(finalReceipt.Evidence.Snapshot, committed) {
+		t.Fatalf("missing exact final retirement receipt: %v", e)
 	}
+	if e = next.ReconcileRootPhysicalExecution(t.Context(), request.ID); e != nil {
+		t.Fatalf("repeat final receipt observation: %v", e)
+	}
+	if retained, e := freshRT.LoadOwnedRetirement(t.Context(), grant.ID); e != nil || !ea1RecoveryJSONEqual(retained, finalReceipt) {
+		t.Fatalf("repeat observation changed retirement: %v", e)
+	}
+	if _, e = freshRT.LookupChildExecution(t.Context(), request.ID); !errors.Is(e, kernel.ErrNotFound) {
+		t.Fatalf("repeat observation recreated scope: %v", e)
+	}
+	ea1CompBarrierUnchanged(t, freshRT, committed)
 	m, n := physical.counts()
 	if m != models || n != toolCalls || lookups != 1 {
 		t.Fatal("receipt recovery replayed dispatch/lookup")

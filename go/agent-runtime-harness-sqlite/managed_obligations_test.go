@@ -209,8 +209,8 @@ func TestSQLiteManagedOriginalObligationsReopen(t *testing.T) {
 				now := time.Now().UTC()
 				payload, _ := json.Marshal(map[string]string{"boundary": "cancel_scope_pending", "runID": root.ExecutionRefID, "protocol": "effects_v1", "canceller": "native"})
 				_, fresh, e := host.AppendItem(ctx, harness.Item{ID: "sqlite-managed-cancel", TurnID: pending.Turn.ID, RunID: root.ExecutionRefID, Kind: harness.ItemDiagnostic, Status: harness.ItemStarted, ParentItemID: harness.CancellationFenceParentItemID, Payload: payload, CreatedAt: now, UpdatedAt: now})
-				if e != nil || !fresh {
-					t.Fatalf("cancel contender: %v", e)
+				if !errors.Is(e, harness.ErrConflict) || fresh {
+					t.Fatalf("independent Host cancel unexpectedly admitted: %v", e)
 				}
 			}
 			// Probe the live owner before the potentially slow encrypted
@@ -230,7 +230,8 @@ func TestSQLiteManagedOriginalObligationsReopen(t *testing.T) {
 				probeCtx, cancelProbe := context.WithDeadline(ctx, until)
 				_, probeErr := probe.Resume(probeCtx, "managed-obligations")
 				cancelProbe()
-				if (!errors.Is(probeErr, kernel.ErrExecutionConflict) && !errors.Is(probeErr, context.DeadlineExceeded)) || len(provider.requests) != wantBefore {
+				unknownReceipt := name == "completed/before" && (errors.Is(probeErr, agent.ErrRootOutcomeUnknown) || errors.Is(probeErr, agent.ErrModelOutcomeUnknown))
+				if (!unknownReceipt && !errors.Is(probeErr, kernel.ErrExecutionConflict) && !errors.Is(probeErr, context.DeadlineExceeded)) || len(provider.requests) != wantBefore {
 					t.Fatalf("live lease permitted work: %v", probeErr)
 				}
 				if current, e := ks.Load(ctx, root.ExecutionRefID); e != nil || kernel.ManagedDigest(current) != kernel.ManagedDigest(original) {
@@ -266,15 +267,15 @@ func TestSQLiteManagedOriginalObligationsReopen(t *testing.T) {
 			}
 			conformance.AwaitManagedOriginalLeaseExpiry(t, ks, original, safe, 2*leaseDuration+5*time.Second)
 			if name == "cancel closure" {
-				parked, e := rt.ParkManagedContinuation(ctx, root.ExecutionRefID)
+				parked, e := rt.LoadManagedRecovery(ctx, root.ExecutionRefID)
 				if e != nil {
 					t.Fatal(e)
 				}
-				selected, e := rt.SelectManagedContinuation(ctx, parked)
+				selected, e := rt.AuthorizeManagedContinuation(ctx, parked, "stop original task")
 				if e != nil {
 					t.Fatal(e)
 				}
-				closed, e := rt.CancelParkedManagedContinuation(ctx, selected)
+				closed, e := rt.CommitManagedCancellation(ctx, selected)
 				if e != nil {
 					t.Fatal(e)
 				}
@@ -282,8 +283,9 @@ func TestSQLiteManagedOriginalObligationsReopen(t *testing.T) {
 				if e != nil {
 					t.Fatal(e)
 				}
-				if e = host.CloseManagedRecovery(ctx, receipt); e == nil {
-					t.Fatal("Host closed before original budget")
+				l, le := ks.LoadBudget(ctx, pending.Turn.ID)
+				if !receipt.Matches(closed.Selection) || le != nil || !l.RunCancelled(root.ExecutionRefID) || !l.FinishedRuns[root.ExecutionRefID] {
+					t.Fatalf("native CANCEL did not commit accounting: %v", le)
 				}
 			}
 			var result harness.Snapshot
@@ -292,10 +294,18 @@ func TestSQLiteManagedOriginalObligationsReopen(t *testing.T) {
 			} else {
 				result, e = session.Resume(ctx, "managed-obligations")
 			}
+			if name == "completed/before" {
+				current, ce := ks.Load(ctx, root.ExecutionRefID)
+				l, le := ks.LoadBudget(ctx, pending.Turn.ID)
+				if e == nil || ce != nil || le != nil || kernel.ManagedDigest(current) != kernel.ManagedDigest(original) || len(provider.requests) != 1 || l.FinishedRuns[root.ExecutionRefID] {
+					t.Fatalf("unknown receipt escaped original fence: %v %v %v", e, ce, le)
+				}
+				return
+			}
 			if e != nil {
 				t.Fatal(e)
 			}
-			ledger, e := host.LoadBudget(ctx, pending.Turn.ID)
+			ledger, e := ks.LoadBudget(ctx, pending.Turn.ID)
 			if e != nil {
 				t.Fatal(e)
 			}

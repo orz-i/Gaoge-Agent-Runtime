@@ -7,6 +7,7 @@ import (
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
 type managedHostStore interface {
@@ -18,25 +19,39 @@ type managedHostStore interface {
 // admission. The source is read back, then revalidated under the Host Turn lock.
 func (r *Runner) bindManagedOriginalDispatch(ctx context.Context, inv Invocation, dispatch Item) (context.Context, error) {
 	native, ok := r.agent.(*agent.Runner)
-	if !ok || (!native.SupportsManagedContextRecovery() && !native.SupportsSummaryNativeRecovery()) || inv.ParentItemID != "" {
+	if !ok || !native.SupportsManagedRecovery() || inv.ParentItemID != "" {
 		return ctx, nil
 	}
 	phase, ok := ValidExecutionDispatchGrantAdmission(dispatch)
 	if _, managed := kernel.ManagedDispatchOperation(phase); !ok || !managed || inv.Attempt != 1 {
 		return ctx, nil
 	}
-	host, ok := r.store.(managedHostStore)
-	if !ok || !r.runtime.UsesManagedRecoveryHost(host) {
-		return ctx, kernel.ErrExecutionRequired
-	}
-	if inv.Attempt <= 0 || uint64(inv.Attempt) > math.MaxUint32 {
-		return ctx, ErrConflict
-	}
 	saved, err := r.store.GetItem(ctx, dispatch.ID)
 	if err != nil {
 		return ctx, err
 	}
 	if savedPhase, valid := VerifiedExecutionDispatchGrant(saved); !valid || savedPhase != phase {
+		return ctx, ErrConflict
+	}
+	var approval *kernel.ManagedApprovalDecision
+	if phase == "resolve-approval" {
+		var valid bool
+		approval, valid = originalDispatchApproval(saved)
+		if !valid {
+			return ctx, ErrConflict
+		}
+	}
+	return r.bindManagedRoot(ctx, inv, phase, saved.ID, saved, approval)
+}
+
+// Both native commands and legacy outstanding dispatches seal the same
+// immutable Host selection. Only the old path needs a Host execution Item.
+func (r *Runner) bindManagedRoot(ctx context.Context, inv Invocation, phase, id string, dispatch Item, approval *kernel.ManagedApprovalDecision) (context.Context, error) {
+	host, ok := r.store.(managedHostStore)
+	if !ok || !r.runtime.UsesManagedRecoveryHost(host) {
+		return ctx, kernel.ErrExecutionRequired
+	}
+	if inv.Attempt <= 0 || uint64(inv.Attempt) > math.MaxUint32 {
 		return ctx, ErrConflict
 	}
 	turn, err := r.store.GetTurn(ctx, inv.TurnID)
@@ -51,10 +66,6 @@ func (r *Runner) bindManagedOriginalDispatch(ctx context.Context, inv Invocation
 	if err != nil {
 		return ctx, err
 	}
-	source, err := ManagedHostSource(session, turn, inv, config, saved)
-	if err != nil {
-		return ctx, err
-	}
 	ka, err := r.runtime.ManagedRecoveryAuthority(ctx)
 	if err != nil {
 		return ctx, err
@@ -63,32 +74,64 @@ func (r *Runner) bindManagedOriginalDispatch(ctx context.Context, inv Invocation
 	if err != nil {
 		return ctx, err
 	}
-	b := kernel.ManagedHostBinding{KernelAuthority: ka, HostAuthority: ha, TurnID: turn.ID, InvocationID: inv.ID, Attempt: uint32(inv.Attempt), RunID: inv.ExecutionRefID, DispatchID: saved.ID, Phase: phase, Source: source}
-	if phase == "resolve-approval" {
-		var valid bool
-		b.Approval, valid = originalDispatchApproval(saved)
-		if !valid {
-			return ctx, ErrConflict
-		}
+	b := kernel.ManagedHostBinding{KernelAuthority: ka, HostAuthority: ha, TurnID: turn.ID, InvocationID: inv.ID, Attempt: uint32(inv.Attempt), RunID: inv.ExecutionRefID, DispatchID: id, Phase: phase, Approval: approval}
+	if b.DirectNativeCommand() {
+		b.Source, err = nativeHostSource(session, turn, inv, config, b)
+	} else {
+		b.Source, err = ManagedHostSource(session, turn, inv, config, dispatch)
+	}
+	if err != nil {
+		return ctx, err
 	}
 	return r.runtime.BindManagedDispatch(ctx, b)
 }
 
-// closeOriginalManagedDispatch retains the original transfer's separate
-// reservation and mode proof, but consumes the same native retirement before
-// Host closure. It never manufactures an ordinary callback return.
-func (r *Runner) closeOriginalManagedDispatch(ctx context.Context, native *agent.Runner, host managedHostStore, proof kernel.ManagedClosureProof) error {
-	if err := native.ReconcileManagedClosure(ctx, proof); err != nil {
-		return err
+// Native root commands use the Host's already frozen selection, with no new
+// Host dispatch grant. The correlation is consumed only by the native Grant
+// and its approval journal. Managed recovery seals these same Host facts.
+func (r *Runner) withNativeRootCommand(ctx context.Context, native *agent.Runner, inv Invocation, phase string, approval *kernel.ManagedApprovalDecision, physical func(context.Context) (kernel.Snapshot, error)) (kernel.Snapshot, error) {
+	id, err := r.runtime.NewID("nativecmd")
+	if err != nil {
+		return kernel.Snapshot{}, err
 	}
-	return host.CloseManagedRecovery(ctx, proof)
+	id = "nativecmd_" + kernel.ManagedDigest(struct{ Invocation, Run, Attempt string }{inv.ID, inv.ExecutionRefID, id})
+	if native.SupportsManagedRecovery() && inv.Attempt == 1 {
+		ctx, err = r.bindManagedRoot(ctx, inv, phase, id, Item{}, approval)
+		if err != nil {
+			return kernel.Snapshot{}, err
+		}
+	}
+	op := plugin.RunResume
+	if approval != nil {
+		op = plugin.RunResolveApproval
+	}
+	snap, _, err := native.ObservePhysicalDispatch(ctx, inv.ExecutionRefID, op, id, physical)
+	return snap, err
+}
+
+// Direct recovery is qualified by the native original Grant/retirement. A
+// normally returned source is historical, not a second Host pending dispatch.
+func (r *Runner) directManagedPending(ctx context.Context, native *agent.Runner, t kernel.ManagedTransfer) (bool, error) {
+	if t.Resolved() {
+		return t.Selection.Mode == kernel.ManagedCancel, nil
+	}
+	if t.Selection.Mode != "" {
+		return true, nil
+	}
+	b := t.SafePoint.Host
+	op := plugin.RunResume
+	if b.Approval != nil {
+		op = plugin.RunResolveApproval
+	}
+	kind, err := native.ReconcileOriginalPhysicalDispatch(ctx, b.RunID, op, b.DispatchID)
+	return kind == agent.PhysicalCallUnknown, err
 }
 
 // recoverReturnedManagedDispatch is receipt-only. Refresh can close a CLOSED
-// original RESUME without entering the managed PARK/ENABLE or execution path.
+// original RESUME without entering native admission or the execution path.
 func (r *Runner) recoverReturnedManagedDispatch(ctx context.Context, native *agent.Runner, inv Invocation, dispatch Item) (bool, error) {
 	if inv.ParentItemID != "" || inv.Attempt != 1 ||
-		(!native.SupportsManagedContextRecovery() && !native.SupportsSummaryNativeRecovery()) {
+		!native.SupportsManagedRecovery() {
 		return false, nil
 	}
 	phase, ok := VerifiedExecutionDispatchGrant(dispatch)
@@ -114,38 +157,24 @@ func (r *Runner) recoverReturnedManagedDispatch(ctx context.Context, native *age
 	if !ok || !r.runtime.UsesManagedRecoveryHost(host) {
 		return false, kernel.ErrExecutionRequired
 	}
-	res, err := host.ReadManagedRecovery(ctx, b, "")
-	if errors.Is(err, kernel.ErrNotFound) {
+	if !t.Resolved() || t.Selection.Mode != kernel.ManagedResume {
 		return false, nil
 	}
-	if err != nil {
-		return false, err
-	}
-	if res.Mode != kernel.ManagedResume {
-		return false, nil
-	}
-	closed, err := r.runtime.LoadManagedRecoveryByID(ctx, res.SuspensionID)
-	if err != nil {
-		return false, err
-	}
-	if closed.State != kernel.ManagedClosed {
-		return false, nil
-	}
-	proof, err := r.runtime.ManagedRecoveryClosure(ctx, res.SuspensionID)
-	if err != nil || !proof.Matches(res) {
+	proof, err := r.runtime.ManagedRecoveryClosure(ctx, t.SafePoint.ID)
+	if err != nil || !proof.Matches(t.Selection) {
 		return false, errors.Join(ErrConflict, err)
 	}
-	if err = r.closeOriginalManagedDispatch(ctx, native, host, proof); err != nil {
+	if err = host.CloseManagedRecovery(ctx, proof); err != nil {
 		return false, err
 	}
 	return true, nil
 }
 
 // recoverManagedInvocation does not open a new physical dispatch. The Core
-// entry performs Kernel PARK, immutable Host reservation and unique ENABLE.
+// entry checks the original source, reads Host authorization and commits native admission.
 func (r *Runner) recoverManagedInvocation(ctx context.Context, inv Invocation) (kernel.Snapshot, bool, error) {
 	native, ok := r.agent.(*agent.Runner)
-	if !ok || (!native.SupportsManagedContextRecovery() && !native.SupportsSummaryNativeRecovery()) || inv.ParentItemID != "" {
+	if !ok || !native.SupportsManagedRecovery() || inv.ParentItemID != "" {
 		return kernel.Snapshot{}, false, nil
 	}
 	if err := r.requireInvocationRootModelOutputCeiling(ctx, inv); err != nil {
@@ -162,95 +191,92 @@ func (r *Runner) recoverManagedInvocation(ctx context.Context, inv Invocation) (
 	if b.InvocationID != inv.ID || b.TurnID != inv.TurnID || b.RunID != inv.ExecutionRefID || uint64(b.Attempt) != uint64(inv.Attempt) {
 		return kernel.Snapshot{}, true, ErrConflict
 	}
-	// A normally returned dispatch may have a historical safe point.
-	// It needs ordinary Resume, not recovery of the retired original.
-	items, itemsErr := r.loadGlobalPhysicalEvidence(ctx, inv.TurnID)
-	if itemsErr != nil {
-		return kernel.Snapshot{}, true, itemsErr
-	}
-	receipts := executionDispatchReceiptIndex(items)
-	var original Item
-	for _, item := range items {
-		if item.ID != b.DispatchID {
-			continue
+	if b.DirectNativeCommand() {
+		pending, e := r.directManagedPending(ctx, native, transfer)
+		if e != nil || !pending {
+			return kernel.Snapshot{}, e != nil, e
 		}
-		original = item
-		if phase, ok := VerifiedExecutionDispatchGrant(item); !ok || phase != b.Phase || item.InvocationID != inv.ID || item.RunID != inv.ExecutionRefID || item.TurnID != inv.TurnID {
-			return kernel.Snapshot{}, true, ErrConflict
+	} else {
+		// A normally returned dispatch may have a historical safe point.
+		// It needs ordinary Resume, not recovery of the retired original.
+		items, itemsErr := r.loadGlobalPhysicalEvidence(ctx, inv.TurnID)
+		if itemsErr != nil {
+			return kernel.Snapshot{}, true, itemsErr
 		}
-		if boundary, settled := VerifiedExecutionDispatchReceipt(item, receipts[item.ID]); settled {
-			if boundary == "managed_dispatch_transferred" || boundary == "managed_dispatch_cancelled_before_next_effect" {
-				host, ok := r.store.(managedHostStore)
-				if !ok || !r.runtime.UsesManagedRecoveryHost(host) {
-					return kernel.Snapshot{}, true, kernel.ErrExecutionRequired
-				}
-				res, e := host.ReadManagedRecovery(ctx, b, "")
-				if e != nil {
-					return kernel.Snapshot{}, true, e
-				}
-				closed, e := r.runtime.LoadManagedRecoveryByID(ctx, res.SuspensionID)
-				if e != nil || !SameManagedReservation(closed.Selection, res) || closed.Terminal == nil {
-					return kernel.Snapshot{}, true, errors.Join(ErrConflict, e)
-				}
-				fields, valid := authorityStringFields(receipts[item.ID][0].Payload, "boundary", "recoveryID", "mode", "selectionHash", "terminalHash")
-				if !valid || fields["recoveryID"] != res.RecoveryID || fields["mode"] != string(res.Mode) || fields["selectionHash"] != kernel.ManagedDigest(res) || fields["terminalHash"] != kernel.ManagedDigest(*closed.Terminal) {
-					return kernel.Snapshot{}, true, ErrConflict
-				}
-				if closed.State == kernel.ManagedClosed {
-					receipt, e := r.runtime.LoadOwnedRetirement(ctx, closed.SuccessorGrant.ID)
-					if e != nil || receipt.Phase != "ACKNOWLEDGED" || receipt.Evidence.Grant != closed.SuccessorGrant ||
-						kernel.ManagedDigest(receipt.Evidence.Snapshot) != kernel.ManagedDigest(*closed.Terminal) {
-						return kernel.Snapshot{}, true, errors.Join(ErrConflict, e)
-					}
-					for _, t := range receipt.Closures {
-						if kernel.ManagedDigest(t) == kernel.ManagedDigest(closed) {
-							return kernel.Snapshot{}, false, nil
-						}
-					}
-				} else if closed.State == kernel.ManagedCancelled && res.Mode == kernel.ManagedCancel {
-					return *closed.Terminal, true, nil
-				}
+		receipts := executionDispatchReceiptIndex(items)
+		var original Item
+		for _, item := range items {
+			if item.ID != b.DispatchID {
+				continue
+			}
+			original = item
+			if phase, ok := VerifiedExecutionDispatchGrant(item); !ok || phase != b.Phase || item.InvocationID != inv.ID || item.RunID != inv.ExecutionRefID || item.TurnID != inv.TurnID {
 				return kernel.Snapshot{}, true, ErrConflict
 			}
-			host, ok := r.store.(managedHostStore)
-			if !ok || !r.runtime.UsesManagedRecoveryHost(host) {
-				return kernel.Snapshot{}, true, kernel.ErrExecutionRequired
+			if boundary, settled := VerifiedExecutionDispatchReceipt(item, receipts[item.ID]); settled {
+				if boundary == "managed_dispatch_transferred" || boundary == "managed_dispatch_cancelled_before_next_effect" {
+					res := transfer.Selection
+					if !res.Valid() || transfer.Terminal == nil {
+						return kernel.Snapshot{}, true, ErrConflict
+					}
+					fields, valid := authorityStringFields(receipts[item.ID][0].Payload, "boundary", "recoveryID", "mode", "selectionHash", "terminalHash")
+					if !valid || fields["recoveryID"] != transfer.SafePoint.RecoveryID || fields["mode"] != string(res.Mode) || fields["selectionHash"] != kernel.ManagedDigest(res) || fields["terminalHash"] != kernel.ManagedDigest(*transfer.Terminal) {
+						return kernel.Snapshot{}, true, ErrConflict
+					}
+					if transfer.Resolved() && res.Mode == kernel.ManagedResume {
+						receipt, e := r.runtime.LoadOwnedRetirement(ctx, transfer.SuccessorGrant.ID)
+						if e != nil || !receipt.MatchesManagedClosure(transfer, *transfer.Terminal) {
+							return kernel.Snapshot{}, true, errors.Join(ErrConflict, e)
+						}
+						return kernel.Snapshot{}, false, nil
+					}
+					if transfer.Resolved() && res.Mode == kernel.ManagedCancel {
+						if e := r.verifyManagedCancelledProjection(ctx, inv, b.DispatchID); e != nil {
+							return kernel.Snapshot{}, true, e
+						}
+						return *transfer.Terminal, true, nil
+					}
+					return kernel.Snapshot{}, true, ErrConflict
+				}
+				// A legacy parked or selected native frontier cannot be settled by an
+				// ordinary callback receipt. Host projection is not a native return.
+				if transfer.LegacyState == "PARKED" || transfer.Selection.Mode != "" {
+					return kernel.Snapshot{}, true, ErrConflict
+				}
+				return kernel.Snapshot{}, false, nil
 			}
-			if _, e := host.ReadManagedRecovery(ctx, b, ""); !errors.Is(e, kernel.ErrNotFound) {
-				return kernel.Snapshot{}, true, errors.Join(ErrConflict, e)
-			}
-			return kernel.Snapshot{}, false, nil
 		}
-	}
-	if original.ID == "" || len(receipts[b.DispatchID]) != 0 {
-		return kernel.Snapshot{}, true, ErrConflict
-	}
-	if transfer.Selection.ID == "" {
-		if repaired, e := r.recoverOriginalPhysicalDispatch(ctx, inv); e != nil {
-			return kernel.Snapshot{}, true, e
-		} else if repaired {
-			return kernel.Snapshot{}, false, nil
+		if original.ID == "" || len(receipts[b.DispatchID]) != 0 {
+			return kernel.Snapshot{}, true, ErrConflict
+		}
+		if transfer.Selection.Mode == "" {
+			if repaired, e := r.recoverOriginalPhysicalDispatch(ctx, inv); e != nil {
+				return kernel.Snapshot{}, true, e
+			} else if repaired {
+				return kernel.Snapshot{}, false, nil
+			}
 		}
 	}
 	host, ok := r.store.(managedHostStore)
 	if !ok || !r.runtime.UsesManagedRecoveryHost(host) {
 		return kernel.Snapshot{}, true, kernel.ErrExecutionRequired
 	}
-	// Actual source-bound storage check precedes any PARK mutation.
-	if _, err = host.ReadManagedOriginalDispatch(ctx, b); err != nil {
-		// Exact already-closed reservation may need only Host projection repair.
-		reservation, readErr := host.ReadManagedRecovery(ctx, b, "")
-		if readErr != nil {
-			return kernel.Snapshot{}, true, errors.Join(err, readErr)
-		}
-		proof, proofErr := r.runtime.ManagedRecoveryClosure(ctx, reservation.SuspensionID)
-		if proofErr != nil || !proof.Matches(reservation) {
+	// An already committed native closure needs projection only, never a
+	// Host reservation lookup or a second dispatch admission.
+	if transfer.Resolved() {
+		proof, proofErr := r.runtime.ManagedRecoveryClosure(ctx, transfer.SafePoint.ID)
+		if proofErr != nil || !proof.Matches(transfer.Selection) {
 			return kernel.Snapshot{}, true, errors.Join(ErrConflict, proofErr)
 		}
-		// Host closure and native retirement are separate durable facts.
-		// A replay closes the exact original successor, never another callback.
-		if closeErr := r.closeOriginalManagedDispatch(ctx, native, host, proof); closeErr != nil {
-			return kernel.Snapshot{}, true, closeErr
+		if transfer.Selection.Mode == kernel.ManagedCancel {
+			if e := r.verifyManagedCancelledProjection(ctx, inv, b.DispatchID); e != nil {
+				return kernel.Snapshot{}, true, e
+			}
+		}
+		if !b.DirectNativeCommand() {
+			if closeErr := host.CloseManagedRecovery(ctx, proof); closeErr != nil {
+				return kernel.Snapshot{}, true, closeErr
+			}
 		}
 		return proof.Snapshot(), true, nil
 	}
@@ -270,8 +296,15 @@ func (r *Runner) recoverManagedInvocation(ctx context.Context, inv Invocation) (
 	if kernel.ManagedDigest(snap) != kernel.ManagedDigest(proof.Snapshot()) {
 		return snap, true, errors.Join(ErrConflict, runErr)
 	}
-	if err = r.closeOriginalManagedDispatch(ctx, native, host, proof); err != nil {
-		return snap, true, errors.Join(runErr, err)
+	if snap.Run.Status == kernel.RunStatusCancelled {
+		if e := r.verifyManagedCancelledProjection(ctx, inv, b.DispatchID); e != nil {
+			return snap, true, errors.Join(runErr, e)
+		}
+	}
+	if !b.DirectNativeCommand() {
+		if err = host.CloseManagedRecovery(ctx, proof); err != nil {
+			return snap, true, errors.Join(runErr, err)
+		}
 	}
 	if runErr != nil && !terminalRuntimeStatus(snap.Run.Status) {
 		return snap, true, runErr
@@ -279,18 +312,15 @@ func (r *Runner) recoverManagedInvocation(ctx context.Context, inv Invocation) (
 	return snap, true, nil
 }
 
-// cancelManagedOriginal is the public root cancellation entrance for an
-// unresolved exact managed physical dispatch. PARK arbitrates the expired
-// Kernel owner;
-// the normal immutable cancellation intent arbitrates the Host RESUME/CANCEL
-// choice. Do not use the ordinary callback-free Start exception.
-func (r *Runner) cancelManagedOriginal(ctx context.Context, turn Turn, inv Invocation) (Snapshot, bool, error) {
+// cancelManagedOriginal passes the authorized root cancellation to the same
+// native transaction as recovery admission; it creates no Host election.
+func (r *Runner) cancelManagedOriginal(ctx context.Context, turn Turn, inv Invocation, reason string) (Snapshot, bool, error) {
 	native, ok := r.agent.(*agent.Runner)
 	canceller, nativeCancel := r.cancellation.(*kernel.Runtime)
 	host, bound := r.store.(managedHostStore)
 	if !ok || !nativeCancel || canceller != r.runtime || !native.ObservesKernelRuntime(r.runtime) ||
 		!bound || !r.runtime.UsesManagedRecoveryHost(host) ||
-		(!native.SupportsManagedContextRecovery() && !native.SupportsSummaryNativeRecovery()) {
+		!native.SupportsManagedRecovery() {
 		return Snapshot{}, false, nil
 	}
 	t, err := r.runtime.LoadManagedRecovery(ctx, inv.ExecutionRefID)
@@ -304,114 +334,113 @@ func (r *Runner) cancelManagedOriginal(ctx context.Context, turn Turn, inv Invoc
 	if b.TurnID != turn.ID || b.InvocationID != inv.ID || b.RunID != inv.ExecutionRefID || uint64(b.Attempt) != uint64(inv.Attempt) {
 		return Snapshot{}, true, ErrConflict
 	}
-	items, err := r.loadGlobalPhysicalEvidence(ctx, turn.ID)
-	if err != nil {
-		return Snapshot{}, true, err
-	}
-	receipts := executionDispatchReceiptIndex(items)
-	for _, item := range items {
-		if item.ID == b.DispatchID {
-			if _, settled := VerifiedExecutionDispatchReceipt(item, receipts[item.ID]); settled {
-				return Snapshot{}, false, nil
+	if b.DirectNativeCommand() {
+		pending, e := r.directManagedPending(ctx, native, t)
+		if e != nil || !pending {
+			return Snapshot{}, e != nil, e
+		}
+	} else {
+		items, err := r.loadGlobalPhysicalEvidence(ctx, turn.ID)
+		if err != nil {
+			return Snapshot{}, true, err
+		}
+		receipts := executionDispatchReceiptIndex(items)
+		for _, item := range items {
+			if item.ID == b.DispatchID {
+				if _, settled := VerifiedExecutionDispatchReceipt(item, receipts[item.ID]); settled {
+					return Snapshot{}, false, nil
+				}
 			}
 		}
 	}
 	if t.SafePoint.LifecycleVersion != kernel.ManagedLifecycleAgentObligations || t.Selection.Mode == kernel.ManagedResume {
 		return Snapshot{}, false, nil
 	}
-	if _, err = host.ReadManagedOriginalDispatch(ctx, b); err != nil {
+	if err = r.verifyManagedCancellationScope(ctx, turn, inv, b.DispatchID); err != nil {
 		return Snapshot{}, true, err
 	}
-	// The parked root has no unresolved native children. This entry cannot
-	// close a whole-turn cancellation on behalf of unrelated Host effects.
-	// Historical child executions must first use their ordinary cleanup.
-	invocations, err := r.store.ListInvocations(ctx, turn.ID)
+	if !t.Resolved() {
+		ctx, err = r.runtime.BindManagedDispatch(ctx, b)
+		if err != nil {
+			return Snapshot{}, true, err
+		}
+	}
+	// No new Host cancellation fence or mode reservation. The already
+	// authorized command competes in the original native execution transaction.
+	snap, proof, err := native.CancelManagedContinuation(ctx, inv.ExecutionRefID, reason)
 	if err != nil {
 		return Snapshot{}, true, err
 	}
+	if !proof.Matches(proof.Transfer().Selection) || proof.Transfer().Selection.Mode != kernel.ManagedCancel || snap.Run.Status != kernel.RunStatusCancelled {
+		return Snapshot{}, true, ErrConflict
+	}
+	if err = r.verifyManagedCancellationScope(ctx, turn, inv, b.DispatchID); err != nil {
+		return Snapshot{}, true, err
+	}
+	if !b.DirectNativeCommand() {
+		if err = host.CloseManagedRecovery(ctx, proof); err != nil {
+			return Snapshot{}, true, err
+		}
+	}
+	out, err := r.syncRuntimeSnapshotWithRetryAfterCancellation(ctx, turn, inv, snap)
+	return out, true, err
+}
+
+func (r *Runner) verifyManagedCancelledProjection(ctx context.Context, inv Invocation, dispatchID string) error {
+	turn, err := loadVerifiedTurn(ctx, r.store, inv.TurnID)
+	if err != nil {
+		return err
+	}
+	return r.verifyManagedCancellationScope(ctx, turn, inv, dispatchID)
+}
+
+// A root cancellation proves only the original native scope. Both direct
+// cancellation and replay must establish that no unrelated Host or child
+// effects need cleanup before claiming whole-turn cancellation.
+func (r *Runner) verifyManagedCancellationScope(ctx context.Context, turn Turn, inv Invocation, dispatchID string) error {
+	invocations, err := r.store.ListInvocations(ctx, turn.ID)
+	if err != nil {
+		return err
+	}
 	if len(invocations) != 1 || invocations[0].ID != inv.ID {
-		return Snapshot{}, true, ErrRuntimeCancellationUnverified
+		return ErrRuntimeCancellationUnverified
 	}
 	children, err := r.relatedChildRunIDs(ctx, inv.ExecutionRefID)
 	if err != nil {
-		return Snapshot{}, true, err
+		return err
 	}
 	delegated, err := r.delegatedRunIDs(ctx, turn.ID)
 	if err != nil {
-		return Snapshot{}, true, err
+		return err
 	}
 	if len(children) != 0 || len(delegated) != 0 {
-		return Snapshot{}, true, ErrRuntimeCancellationUnverified
+		return ErrRuntimeCancellationUnverified
 	}
+	items, err := r.loadGlobalPhysicalEvidence(ctx, turn.ID)
+	if err != nil {
+		return err
+	}
+	receipts := executionDispatchReceiptIndex(items)
 	for _, item := range items {
-		if item.ParentItemID == ExecutionDispatchParentItemID && item.ID != b.DispatchID {
+		if item.ParentItemID == ExecutionDispatchParentItemID && item.ID != dispatchID {
 			if _, settled := VerifiedExecutionDispatchReceipt(item, receipts[item.ID]); !settled {
-				return Snapshot{}, true, ErrConflict
+				return ErrConflict
 			}
 		}
 	}
 	if err = r.checkInteractionCancellation(ctx, turn, ""); err != nil {
-		return Snapshot{}, true, err
+		return err
 	}
 	// No write-capable waiting Interaction projection is owned by this
 	// specialized parked root selection.
 	interactions, err := r.store.ListInteractions(ctx, turn.ID)
 	if err != nil {
-		return Snapshot{}, true, err
+		return err
 	}
 	for _, i := range interactions {
 		if i.Status == InteractionWaiting {
-			return Snapshot{}, true, ErrConflict
+			return ErrConflict
 		}
 	}
-	ctx, err = r.runtime.BindManagedDispatch(ctx, b)
-	if err != nil {
-		return Snapshot{}, true, err
-	}
-	if t.State != kernel.ManagedCancelled {
-		if _, err = native.ParkManagedForCancellation(ctx, inv.ExecutionRefID); err != nil {
-			return Snapshot{}, true, err
-		}
-	}
-	// Recover the original elected intent rather than creating a new one
-	// after a lost intent/selection/cancellation ACK.
-	items, err = r.loadGlobalPhysicalEvidence(ctx, turn.ID)
-	if err != nil {
-		return Snapshot{}, true, err
-	}
-	cancelReceipts := cancellationFenceReceipts(items)
-	var elected Item
-	for _, item := range items {
-		if item.ParentItemID != CancellationFenceParentItemID || VerifiedCancellationFenceReceipt(item, cancelReceipts[item.ID]) {
-			continue
-		}
-		source, valid := cancellationProtocol(item)
-		if elected.ID != "" || !valid || source != "native" || item.RunID != inv.ExecutionRefID || item.TurnID != turn.ID ||
-			!ValidCancellationFenceIntentAdmission(item) || !CancellationEffectsSettled(item, items) {
-			return Snapshot{}, true, ErrConflict
-		}
-		elected = item
-	}
-	if elected.ID == "" {
-		if t.State == kernel.ManagedCancelled {
-			return Snapshot{}, true, ErrConflict
-		}
-		elected, _, err = r.beginCancellationFence(ctx, turn, inv.ExecutionRefID, inv)
-		if err != nil {
-			return Snapshot{}, true, err
-		}
-	}
-	snap, proof, err := native.CancelManagedContinuation(ctx, inv.ExecutionRefID)
-	if err != nil {
-		return Snapshot{}, true, err
-	}
-	if !proof.Matches(proof.Transfer().Selection) || proof.Transfer().Selection.Mode != kernel.ManagedCancel ||
-		proof.Transfer().Selection.Cancellation.IntentID != elected.ID || snap.Run.Status != kernel.RunStatusCancelled {
-		return Snapshot{}, true, ErrConflict
-	}
-	if err = host.CloseManagedRecovery(ctx, proof); err != nil {
-		return Snapshot{}, true, err
-	}
-	out, err := r.syncRuntimeSnapshotWithRetryAfterCancellation(ctx, turn, inv, snap)
-	return out, true, err
+	return nil
 }

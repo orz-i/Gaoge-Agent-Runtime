@@ -658,7 +658,7 @@ func (runner *Runner) fenceInteractionCancellationWithClaim(ctx context.Context,
 				}
 			}
 		case InvocationWaitingInput:
-			if writeAttempted == nil {
+			if writeAttempted == nil || runner.nativeBudget() {
 				continue
 			}
 			owner.Status = InvocationCancelled

@@ -18,6 +18,9 @@ import (
 
 type dispatchReturnInterrupted struct{}
 
+// A reopened Host wrapper must not erase persisted native execution authority.
+type wrappedReturnAgent struct{ *agent.Runner }
+
 type returnedDispatchKernelCut struct {
 	noEntryKernelPorts
 	cut   string
@@ -63,22 +66,15 @@ func (s *returnedDispatchKernelCut) RecordOwnedPhysicalCallbackReturn(ctx contex
 	}
 	return err
 }
-func (s *returnedDispatchKernelCut) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant) error {
+func (s *returnedDispatchKernelCut) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
 	if s.cut == "finish-before" {
 		panic(dispatchReturnInterrupted{})
 	}
-	err := s.noEntryKernelPorts.FinishChildExecution(ctx, g)
+	err := s.noEntryKernelPorts.FinishChildExecution(ctx, g, p)
 	if err == nil && s.cut == "finish-after" {
 		panic(dispatchReturnInterrupted{})
 	}
 	return err
-}
-func (s *returnedDispatchKernelCut) AcknowledgeOwnedRetirement(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.OwnedRetirementAcknowledgement) (kernel.OwnedRetirementAckResult, error) {
-	result, err := s.noEntryKernelPorts.AcknowledgeOwnedRetirement(ctx, g, p)
-	if err == nil && s.cut == "ack-after" {
-		panic(dispatchReturnInterrupted{})
-	}
-	return result, err
 }
 
 type returnedDispatchHostCut struct {
@@ -87,7 +83,7 @@ type returnedDispatchHostCut struct {
 }
 
 func (s *returnedDispatchHostCut) AppendItem(ctx context.Context, i harness.Item) (harness.Item, bool, error) {
-	hit := s.cut != "" && i.Kind == harness.ItemDiagnostic && i.Status == harness.ItemCompleted && string(i.Payload) == `{"boundary":"physical_dispatch_returned"}`
+	hit := s.cut != "" && i.Status == harness.ItemCompleted && (i.Kind == harness.ItemApproval || i.Kind == harness.ItemDiagnostic && string(i.Payload) == `{"boundary":"physical_dispatch_returned"}`)
 	if hit && s.cut == "host-before" {
 		panic(dispatchReturnInterrupted{})
 	}
@@ -96,6 +92,18 @@ func (s *returnedDispatchHostCut) AppendItem(ctx context.Context, i harness.Item
 		panic(dispatchReturnInterrupted{})
 	}
 	return out, fresh, err
+}
+
+func (s *returnedDispatchHostCut) UpdateInvocation(ctx context.Context, v harness.Invocation, rev uint64) (harness.Invocation, error) {
+	terminal := v.Status == harness.InvocationCompleted || v.Status == harness.InvocationFailed || v.Status == harness.InvocationCancelled
+	if terminal && s.cut == "projection-before" {
+		panic(dispatchReturnInterrupted{})
+	}
+	out, e := s.Store.UpdateInvocation(ctx, v, rev)
+	if terminal && s.cut == "projection-after" && e == nil {
+		panic(dispatchReturnInterrupted{})
+	}
+	return out, e
 }
 
 type originalDispatchModel struct {
@@ -125,7 +133,13 @@ func (m *originalDispatchModel) Generate(context.Context, model.Request) (model.
 // a completion Item or invokes a new physical callback to close the old one.
 func OriginalDispatchReturn(t *testing.T, factory func(*testing.T) (kernel.Store, harness.Store, func() (kernel.Store, harness.Store))) {
 	for _, phase := range []string{"start", "resume", "approval"} {
-		for _, cut := range []string{"return-before", "return-after", "finish-before", "finish-after", "ack-after", "host-before", "host-after"} {
+		cuts := []string{"return-before", "return-after", "finish-before", "finish-after"}
+		if phase == "resume" {
+			cuts = append(cuts, "projection-before", "projection-after")
+		} else {
+			cuts = append(cuts, "host-before", "host-after")
+		}
+		for _, cut := range cuts {
 			t.Run(phase+"/"+cut, func(t *testing.T) { exerciseOriginalDispatchReturn(t, factory, phase, cut, false) })
 		}
 		t.Run(phase+"/rejected", func(t *testing.T) { exerciseOriginalDispatchReturn(t, factory, phase, "return-after", true) })
@@ -277,15 +291,9 @@ func exerciseOriginalDispatchReturn(t *testing.T, factory func(*testing.T) (kern
 		if provider.calls != 1 || writes != 0 || native.Checkpoint == nil || native.Checkpoint.ID != checkpoint {
 			t.Fatal("approval control cut dispatched or changed the original gate")
 		}
-		var dispatch harness.Item
-		for _, i := range items {
-			if p, ok := harness.VerifiedExecutionDispatchGrant(i); ok && p == "resolve-approval" {
-				dispatch = i
-			}
-		}
-		applied, err := rt.CommittedApprovalDispatch(ctx, root.ExecutionRefID, dispatch.ID, kernel.ManagedApprovalDecision{CheckpointID: checkpoint, Decision: "approve", Comment: "original decision"})
-		if err != nil || applied != wantApplied {
-			t.Fatalf("wrong native approval marker: %t %v", applied, err)
+		decisions, err := rt.NativeApprovalDecisions(ctx, native)
+		if err != nil || len(decisions) != wantDecision || wantApplied && decisions[0] != (kernel.ManagedApprovalDecision{CheckpointID: checkpoint, Decision: "approve", Comment: "original decision"}) {
+			t.Fatalf("wrong native approval marker: %+v %v", decisions, err)
 		}
 		if harness.PendingExecutionDispatch(items, root.ID) {
 			t.Fatal("known returned control did not close")
@@ -379,7 +387,11 @@ func exerciseOriginalDispatchReturn(t *testing.T, factory func(*testing.T) (kern
 			dispatch = i
 		}
 	}
-	if dispatch.ID == "" || harness.PendingExecutionDispatch(items, root.ID) != (cut != "host-after") {
+	if phase != "start" {
+		if dispatch.ID != "" || harness.PendingExecutionDispatch(items, root.ID) {
+			t.Fatal("native command still created Host dispatch")
+		}
+	} else if dispatch.ID == "" || harness.PendingExecutionDispatch(items, root.ID) != (cut != "host-after") {
 		t.Fatal("wrong original dispatch cut")
 	}
 	originalDecision := "approve"
@@ -392,13 +404,9 @@ func exerciseOriginalDispatchReturn(t *testing.T, factory func(*testing.T) (kern
 			want = 1
 		}
 		assertOriginalApprovalDecision(t, items, checkpoint, originalDecision, "original decision", want)
-		applied, err := rt.CommittedApprovalDispatch(ctx, root.ExecutionRefID, dispatch.ID, kernel.ManagedApprovalDecision{CheckpointID: checkpoint, Decision: originalDecision, Comment: "original decision"})
-		if err != nil || !applied {
-			t.Fatalf("native applied decision missing: %v", err)
-		}
-		bad, err := rt.CommittedApprovalDispatch(ctx, root.ExecutionRefID, dispatch.ID, kernel.ManagedApprovalDecision{CheckpointID: checkpoint, Decision: originalDecision, Comment: "substituted"})
-		if err == nil || bad {
-			t.Fatal("substituted decision acquired native proof")
+		decisions, err := rt.NativeApprovalDecisions(ctx, source)
+		if err != nil || len(decisions) != 1 || decisions[0] != (kernel.ManagedApprovalDecision{CheckpointID: checkpoint, Decision: originalDecision, Comment: "original decision"}) {
+			t.Fatalf("native applied decision missing: %+v %v", decisions, err)
 		}
 	}
 	op := plugin.RunStart
@@ -410,26 +418,33 @@ func exerciseOriginalDispatchReturn(t *testing.T, factory func(*testing.T) (kern
 	}
 	backing, host = reopen()
 	r, rt, native := makeRunner(backing, host)
+	if phase == "resume" && cut == "return-before" {
+		wrapped, err := harness.NewRunner(harness.Dependencies{Runtime: rt, Agent: &wrappedReturnAgent{native}, Store: host, Catalog: reg})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = wrapped.Refresh(ctx, turnID); !errors.Is(err, harness.ErrExecutionOutcomeUnknown) {
+			t.Fatalf("reopened wrapper bypassed native retirement: %v", err)
+		}
+	}
 	if kind, e := native.ReconcileOriginalPhysicalDispatch(ctx, root.ExecutionRefID, op, dispatch.ID+"-foreign"); e != nil || kind != agent.PhysicalCallUnknown {
 		t.Fatalf("foreign dispatch accepted: %v %v", kind, e)
 	}
-	if ok, e := native.ReconcileUnenteredPhysicalDispatch(ctx, root.ExecutionRefID, op, dispatch.ID); e != nil || ok {
-		t.Fatalf("actual return reclassified as no-entry: %v %v", ok, e)
+	if phase == "start" {
+		if ok, e := native.ReconcileUnenteredPhysicalDispatch(ctx, root.ExecutionRefID, op, dispatch.ID); e != nil || ok {
+			t.Fatalf("actual return reclassified as no-entry: %v %v", ok, e)
+		}
 	}
 	var done harness.Snapshot
 	// Both observation and continuation must consume the same durable fact.
 	// Neither can dispatch another callback for an already terminal source.
-	if cut == "finish-before" || cut == "ack-after" {
+	if cut == "finish-before" {
 		done, e = r.ResumeTurn(ctx, turnID)
 	} else {
 		done, e = r.Refresh(ctx, turnID)
 	}
 	if cut == "return-before" {
 		if phase == "approval" {
-			forged := harness.Item{ID: fixtureStableID("hdispatchdone", dispatch.ID), TurnID: dispatch.TurnID, InvocationID: dispatch.InvocationID, RunID: dispatch.RunID, Kind: harness.ItemDiagnostic, Status: harness.ItemCompleted, ParentItemID: dispatch.ID, Payload: json.RawMessage(`{"boundary":"physical_dispatch_returned"}`), CreatedAt: dispatch.CreatedAt, UpdatedAt: dispatch.UpdatedAt}
-			if _, _, err := host.AppendItem(ctx, forged); !errors.Is(err, harness.ErrConflict) {
-				t.Fatalf("raw Host receipt projected approval: %v", err)
-			}
 			facts, err := host.ListItems(ctx, turnID, 0, 1000)
 			if err != nil {
 				t.Fatal(err)
@@ -466,6 +481,14 @@ func exerciseOriginalDispatchReturn(t *testing.T, factory func(*testing.T) (kern
 		assertOriginalApprovalDecision(t, items, checkpoint, originalDecision, "original decision", 1)
 	}
 	boundary, valid := harness.VerifiedExecutionDispatchReceipt(dispatch, items)
+	if phase != "start" {
+		for _, i := range items {
+			if p, ok := harness.VerifiedExecutionDispatchGrant(i); ok && p == expectedPhase {
+				t.Fatal("recovery created another Host grant")
+			}
+		}
+		valid, boundary = true, "physical_dispatch_returned"
+	}
 	if e != nil || harness.PendingExecutionDispatch(items, root.ID) || !valid || boundary != "physical_dispatch_returned" || provider.calls != wantCalls || writes != wantWrites {
 		t.Fatalf("original Host receipt/effects mismatch: %q %t %v %d/%d", boundary, valid, e, provider.calls, writes)
 	}

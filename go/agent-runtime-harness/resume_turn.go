@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
@@ -98,11 +99,11 @@ func (runner *Runner) resumeTurn(ctx context.Context, turnID string, expected *s
 	}
 	// Managed recovery is a separate source-bound continuation. Validate
 	// frozen admission first, but do not run ordinary restoration/preparation
-	// or terminal projection before Kernel PARK/ENABLE or exact T4 repair.
+	// or terminal projection before native recovery admission or exact retirement repair.
 	if err = runner.requireFrozenAdmission(ctx, turn); err != nil {
 		return runner.resumeTurnError(ctx, turn, &runtimeSnapshot, err)
 	}
-	if err = runner.recoverReturnedChildApprovals(ctx, turn); err != nil {
+	if err = runner.recoverReturnedChildDispatches(ctx, turn); err != nil {
 		return runner.resumeTurnError(ctx, turn, &runtimeSnapshot, err)
 	}
 	if recovered, managed, recoveryErr := runner.recoverManagedInvocation(ctx, invocation); managed {
@@ -136,6 +137,17 @@ func (runner *Runner) resumeTurn(ctx context.Context, turnID string, expected *s
 	}
 	if err = runner.refreshStandardRemoteChildren(ctx, turn); err != nil {
 		return runner.resumeTurnError(ctx, turn, &runtimeSnapshot, err)
+	}
+	if runner.nativeBudget() && runner.relations != nil && runner.standardDelegationReceiptOwner() != nil {
+		// An original capacity wait can now reach native Create after
+		// a definitive rejection. This is not replay of the Tool handler.
+		_, e := runner.ResumeWaitingDelegation(ctx, runtimeSnapshot.Run.ID, runtimeSnapshot.Run.Revision)
+		if errors.Is(e, budget.ErrWaiting) {
+			return runner.loadSnapshot(ctx, turn, &runtimeSnapshot)
+		}
+		if e != nil {
+			return runner.resumeTurnError(ctx, turn, &runtimeSnapshot, e)
+		}
 	}
 	if original := runner.standardDelegationReceiptOwner(); original != nil {
 		// Local and remote standard delegates both leave an original native

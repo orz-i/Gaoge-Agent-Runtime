@@ -12,7 +12,6 @@ import (
 func runRetirementSuccessorClosure(t *testing.T, factory func(*testing.T) ManagedRecoveryStoreFixture, kind string) {
 	f := retirementSetup(t, factory)
 	retirementCallback(t, f, true, true)
-	retirementMark(t, f)
 	original := retirementFinish(t, f)
 	var newLease kernel.ExecutionLease
 	var childGrant kernel.ChildExecutionGrant
@@ -24,18 +23,13 @@ func runRetirementSuccessorClosure(t *testing.T, factory func(*testing.T) Manage
 			t.Fatal(err)
 		}
 	case "release":
-		if err := f.rt.ReleaseExecution(t.Context(), f.lease); err != nil {
-			t.Fatal(err)
+		if err := f.rt.ReleaseExecution(t.Context(), f.lease); !errors.Is(err, kernel.ErrExecutionConflict) {
+			t.Fatalf("retired lease released again: %v", err)
 		}
 	case "leased-apply":
 		if _, err := f.bound.Apply(t.Context(), f.source.Run.ID, f.source.Run.Revision,
 			kernel.Mutation{Status: kernel.RunStatusRunning, State: json.RawMessage(`{"forbiddenOldOwnerWrite":true}`)}); !errors.Is(err, kernel.ErrExecutionConflict) {
 			t.Fatalf("retired lease mutated its successor source: %v", err)
-		}
-		// A rejected SQL mutation may roll the closure back with its transaction;
-		// either the original ACK is still recoverable or the same ACK committed.
-		if _, err := f.rt.AcknowledgeOwnedRetirement(t.Context(), f.grant, retirementACKProof(original)); err != nil {
-			t.Fatal(err)
 		}
 	case "cancel":
 		if _, err := f.rt.Cancel(t.Context(), f.source.Run.ID, f.source.Run.Revision, "stop after finished callback"); err != nil {
@@ -68,8 +62,8 @@ func runRetirementSuccessorClosure(t *testing.T, factory func(*testing.T) Manage
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result, err := f.rt.AcknowledgeOwnedRetirement(t.Context(), f.grant, retirementACKProof(original)); err != nil || !result.PreviouslyAcknowledged {
-		t.Fatalf("original ACK identity not recoverable: %+v %v", result, err)
+	if observed, err := f.rt.LoadOwnedRetirement(t.Context(), f.grant.ID); err != nil || kernel.ManagedDigest(observed) != kernel.ManagedDigest(original) {
+		t.Fatalf("original final receipt changed: %v", err)
 	}
 	after, err := f.rt.Load(t.Context(), f.source.Run.ID)
 	if err != nil || kernel.ManagedDigest(before) != kernel.ManagedDigest(after) {

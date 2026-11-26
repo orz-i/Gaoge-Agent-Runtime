@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/callbackscope"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
@@ -43,8 +44,26 @@ func (r *Runner) commitNativeTransition(ctx context.Context, source kernel.Snaps
 	return r.runtime.ApplyManagedNativeTransition(ctx, source.Run.ID, source.Run.Revision, m, *point, proof)
 }
 
+// The existing Run admission selects the original co-located scope. No
+// Host resolution or ledger lookup can substitute a different scope.
+func (r *Runner) nativeRunBudget(ctx context.Context, id string) *runBudgetAdmission {
+	a := r.atomicBudget()
+	if a == nil {
+		return nil
+	}
+	frame, _ := callbackscope.RunCall(ctx).(*nativeRunAdmission)
+	if frame == nil || frame.invocation.RunID != id {
+		return nil
+	}
+	bound := frame.budget.Load()
+	if bound == nil || bound.adapter != a || bound.ledger.ID == "" {
+		return nil
+	}
+	return bound
+}
+
 func (r *Runner) qualifyNativeTransition(ctx context.Context, source kernel.Snapshot, m kernel.Mutation) (*kernel.ManagedSafePoint, error) {
-	if m.Status != kernel.RunStatusRunning || (!r.SupportsManagedContextRecovery() && !r.SupportsSummaryNativeRecovery()) {
+	if m.Status != kernel.RunStatusRunning || !r.SupportsManagedRecovery() {
 		return nil, nil
 	}
 	// A selected successor cannot publish a second first-owner safe point.
@@ -66,11 +85,14 @@ func (r *Runner) qualifyNativeTransition(ctx context.Context, source kernel.Snap
 			if !ok {
 				return nil, ErrInvalidRequest
 			}
-			return r.qualifyManagedModelBoundary(ctx, source, state, *inv)
+			return r.qualifyManagedModelBoundary(ctx, source, state, *inv, m.Ledger)
 		case EventContextSummaryConsumed:
 			// Its exact bound artifact/checkpoint installation proof is
 			// retained, including the existing pure Summary profile.
-			return r.qualifySummaryBoundary(ctx, source, state)
+			if len(state.ModelInvocations) == 0 {
+				return nil, ErrInvalidRequest
+			}
+			return r.qualifyManagedModelBoundary(ctx, source, state, state.ModelInvocations[len(state.ModelInvocations)-1], m.Ledger)
 		}
 	}
 	if managedPreparationState(nativeTransitionTarget(source, m), state) {

@@ -33,6 +33,7 @@ func (runner *Runner) recoverOriginalPhysicalDispatch(ctx context.Context, inv I
 	var pending Item
 	var operation plugin.RunOperation
 	var physicalRunID string
+	var handoffStart bool
 	for _, item := range items {
 		if item.ParentItemID != ExecutionDispatchParentItemID || item.InvocationID != inv.ID {
 			continue
@@ -47,6 +48,26 @@ func (runner *Runner) recoverOriginalPhysicalDispatch(ctx context.Context, inv I
 		switch phase {
 		case "start", "start-retry":
 			operation = plugin.RunStart
+		case "handoff-start":
+			frozen, e := decodeFrozenHandoffDelegation(inv.Input)
+			c, ok := runner.handoffs.(*handoff.Coordinator)
+			if e != nil || !ok || !isHandoffDelegationInvocation(inv) || !c.UsesEagerLocalAgentForDelegation(runner.runtime, native, frozen) {
+				return false, nil
+			}
+			child, e := runner.runtime.Load(ctx, inv.ExecutionRefID)
+			if errors.Is(e, kernel.ErrNotFound) {
+				return false, nil
+			}
+			if e != nil {
+				return false, e
+			}
+			if child.Run.BudgetScopeID != inv.TurnID {
+				return false, nil
+			}
+			if _, _, e = runner.localHandoffCancellationAuthority(ctx, inv, child); e != nil {
+				return false, e
+			}
+			operation, handoffStart = plugin.RunStart, true
 		case "resume":
 			operation = plugin.RunResume
 		case "resolve-approval", "resolve-subtask-approval":
@@ -78,6 +99,13 @@ func (runner *Runner) recoverOriginalPhysicalDispatch(ctx context.Context, inv I
 	if err != nil {
 		return false, err
 	}
+	if handoffStart {
+		if kind != agent.PhysicalCallSettled && kind != agent.PhysicalCallNotEntered {
+			return false, nil
+		}
+		err = runner.finishPhysicalDispatchGrant(ctx, pending, "handoff_start_returned")
+		return err == nil, err
+	}
 	var boundary string
 	switch kind {
 	case agent.PhysicalCallNotEntered:
@@ -93,13 +121,13 @@ func (runner *Runner) recoverOriginalPhysicalDispatch(ctx context.Context, inv I
 	return err == nil, err
 }
 
-// recoverReturnedChildApprovals synchronizes the original child projection
+// recoverReturnedChildDispatches synchronizes the original child dispatch and projection
 // before the supervisor consumes a terminal child receipt. A terminal Kernel
 // child alone cannot prove that its enclosing Harness approval returned.
 // Only a locally routed native Agent and the exact original approval Grant
 // can repair this gap. It does not create a new approval or reconstruct an
 // absent Host decision payload.
-func (runner *Runner) recoverReturnedChildApprovals(ctx context.Context, turn Turn) error {
+func (runner *Runner) recoverReturnedChildDispatches(ctx context.Context, turn Turn) error {
 	native, ok := runner.agent.(*agent.Runner)
 	coordinator, bound := runner.handoffs.(*handoff.Coordinator)
 	if !ok || !bound || !native.ObservesKernelRuntime(runner.runtime) {
@@ -120,7 +148,43 @@ func (runner *Runner) recoverReturnedChildApprovals(ctx context.Context, turn Tu
 	// A historical approval cannot stand in for a later physical operation.
 	for _, dispatch := range items {
 		phase, valid := VerifiedExecutionDispatchGrant(dispatch)
-		if !valid || phase != "resolve-subtask-approval" || latest[dispatch.InvocationID].ID != dispatch.ID {
+		if !valid || (phase != "resolve-subtask-approval" && phase != "handoff-start") || latest[dispatch.InvocationID].ID != dispatch.ID {
+			continue
+		}
+		if phase == "handoff-start" {
+			if _, settled := VerifiedExecutionDispatchReceipt(dispatch, receipts[dispatch.ID]); settled {
+				continue
+			}
+			if len(receipts[dispatch.ID]) != 0 {
+				return ErrConflict
+			}
+			owner, e := runner.store.GetInvocation(ctx, dispatch.InvocationID)
+			if e != nil {
+				return e
+			}
+			if owner.TurnID != turn.ID || owner.ExecutionRefID != dispatch.RunID || !isHandoffDelegationInvocation(owner) {
+				return ErrConflict
+			}
+			frozen, e := decodeFrozenHandoffDelegation(owner.Input)
+			if e != nil {
+				return e
+			}
+			if !coordinator.UsesEagerLocalAgentForDelegation(runner.runtime, native, frozen) {
+				continue
+			}
+			child, e := runner.runtime.Load(ctx, owner.ExecutionRefID)
+			if errors.Is(e, kernel.ErrNotFound) {
+				continue
+			}
+			if e != nil {
+				return e
+			}
+			if child.Run.BudgetScopeID != turn.ID {
+				continue
+			}
+			if _, e = runner.recoverOriginalPhysicalDispatch(ctx, owner); e != nil {
+				return e
+			}
 			continue
 		}
 		owner, err := runner.store.GetInvocation(ctx, dispatch.InvocationID)
@@ -147,7 +211,7 @@ func (runner *Runner) recoverReturnedChildApprovals(ctx context.Context, turn Tu
 		if err != nil {
 			return err
 		}
-		if child.Run.Kind != agent.RunKind || !terminalRuntimeStatus(child.Run.Status) {
+		if child.Run.Kind != agent.RunKind || (!terminalRuntimeStatus(child.Run.Status) && (!runner.nativeBudget() || child.Run.Status != kernel.RunStatusWaitingInput)) {
 			continue
 		}
 		if ActiveCancellationFence(items) {
@@ -204,7 +268,7 @@ func (runner *Runner) recoverReturnedChildApprovals(ctx context.Context, turn Tu
 			return err
 		}
 		receipt, err := runner.runtime.LoadOwnedRetirement(ctx, id)
-		if err != nil || !receipt.Valid() || receipt.Phase != "ACKNOWLEDGED" || !receipt.Evidence.Completion.HostCompleted ||
+		if err != nil || !receipt.Valid() || !receipt.Evidence.Completion.HostCompleted ||
 			receipt.Evidence.Grant.ID != id || receipt.Evidence.Grant.ChildRunID != child.Run.ID || receipt.Evidence.Grant.AdmissionOperation != "approval" {
 			return errors.Join(ErrExecutionOutcomeUnknown, err)
 		}
@@ -231,8 +295,12 @@ func (runner *Runner) recoverReturnedChildApprovals(ctx context.Context, turn Tu
 		// An unrelated, unresolved Host interaction can leave the child
 		// projection pending. Do not resume the supervisor through that fence.
 		confirmed := false
+		status, err := runner.invocationRuntimeStatus(ctx, owner, child)
+		if err != nil {
+			return err
+		}
 		for _, inv := range projected.Invocations {
-			if inv.ID == owner.ID && inv.ExecutionRefID == child.Run.ID && inv.Attempt == owner.Attempt && terminalInvocationStatus(inv.Status) {
+			if inv.ID == owner.ID && inv.ExecutionRefID == child.Run.ID && inv.Attempt == owner.Attempt && inv.Status == invocationStatusFromTurn(status) {
 				confirmed = true
 				break
 			}

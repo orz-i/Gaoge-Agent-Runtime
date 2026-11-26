@@ -106,8 +106,8 @@ func (s *ea1ChildCancelStore) MarkChildExecutionSettled(ctx context.Context, g k
 	}
 	return e
 }
-func (s *ea1ChildCancelStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant) error {
-	e := s.ChildExecutionStore.FinishChildExecution(ctx, g)
+func (s *ea1ChildCancelStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
+	e := s.ChildExecutionStore.FinishChildExecution(ctx, g, p)
 	if e == nil {
 		s.finishes++
 	}

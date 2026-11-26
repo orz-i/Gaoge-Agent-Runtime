@@ -86,6 +86,9 @@ func (handler *DelegationToolHandler) Execute(
 		err = nil
 	}
 	if err != nil {
+		if errors.Is(err, ErrExecutionOutcomeUnknown) {
+			return tools.ExecutionResult{}, err
+		}
 		if code, _, correctable := tools.RecoverableCallErrorInfo(err); correctable &&
 			code == "delegation.tool_selection_denied" {
 			// This exact authorization denial originates in prepareDelegation,
@@ -361,6 +364,12 @@ func delegationReceiptErrorCode(status handoff.Status) string {
 // Only the local SDK Agent has an autonomous committed-transition contract.
 // Custom/remote runners retain their existing scheduled observation behavior.
 func (runner *Runner) localDelegationWait(ctx context.Context, delegation handoff.Delegation) (*tools.PendingExecution, error) {
+	if delegation.Status == handoff.StatusQueued && runner.nativeLocalDelegation(delegation) != nil {
+		// The actual original handler just committed its frozen Waiting
+		// selection. The child Run may not yet exist; this wait does not
+		// grant dispatch and keeps the parent's original Tool identity.
+		return &tools.PendingExecution{Kind: tools.PendingChildTerminal, OperationID: delegation.ID, ChildRunID: delegation.ChildRunID}, nil
+	}
 	child, frozen, err := runner.delegationObservation(ctx, delegation.ChildRunID)
 	if errors.Is(err, kernel.ErrNotFound) || errors.Is(err, ErrHandoffCancellationUnverified) {
 		return nil, nil // No local autonomous wait for an unproven route.

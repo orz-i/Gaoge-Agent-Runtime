@@ -21,9 +21,7 @@ const maxListItems = 500
 
 // MemoryStore is the reference Store implementation used by conformance and small embedded hosts.
 type MemoryStore struct {
-	managedAuthority    kernel.ManagedAuthority
-	managedReservations map[string]kernel.ManagedHostReservation
-	managedClosures     map[string]string
+	managedAuthority kernel.ManagedAuthority
 	*budget.MemoryLedgerStore
 	mu                      sync.RWMutex
 	sessions                map[string]Session
@@ -118,14 +116,6 @@ func (store *MemoryStore) UpdateInvocation(ctx context.Context, value Invocation
 	if current.ExecutionRefID != value.ExecutionRefID {
 		return Invocation{}, ErrConflict
 	}
-	if terminalInvocationStatus(value.Status) {
-		for _, r := range store.managedReservations {
-			if r.Binding.TurnID == value.TurnID && store.managedClosures[r.Binding.DispatchID] == "" &&
-				ManagedReservationBlocksInvocation(r, current) {
-				return Invocation{}, ErrConflict
-			}
-		}
-	}
 	// Every terminal CAS must assess the same globally complete original
 	// Dispatch evidence as the new-grant and Retry admission paths. Do not
 	// reenter public Store readers while holding the exclusive Store mutex.
@@ -181,7 +171,7 @@ func (store *MemoryStore) UpdateInvocation(ctx context.Context, value Invocation
 		// an admitted Turn cancellation intent protects the real physical
 		// Kernel stop. This is NOT evidence that the Start itself returned;
 		// the cancellation fence remains until descendant/Kernel proof.
-		if value.Status != InvocationCancelled || !store.activeCancellationFenceLocked(value.TurnID) {
+		if PendingNativeManagedDispatch(physicalItems, value.ID) || value.Status != InvocationCancelled || !store.activeCancellationFenceLocked(value.TurnID) {
 			return Invocation{}, ErrConflict
 		}
 	}
@@ -555,7 +545,7 @@ func NewMemoryStore() *MemoryStore {
 		panic(err)
 	}
 	return &MemoryStore{
-		managedAuthority: authority, managedReservations: map[string]kernel.ManagedHostReservation{}, managedClosures: map[string]string{},
+		managedAuthority:  authority,
 		MemoryLedgerStore: budget.NewMemoryLedgerStore(),
 		sessions:          map[string]Session{}, turns: map[string]Turn{}, configs: map[string]ConfigSnapshot{},
 		invocations: map[string]Invocation{}, invocationExecutionRefs: map[string]string{},
@@ -838,9 +828,6 @@ func (store *MemoryStore) UpdateTurn(ctx context.Context, value Turn, expectedRe
 	if current.Revision != expectedRevision || !sameTurnIdentity(current, value) {
 		return Turn{}, ErrConflict
 	}
-	if terminalTurnStatus(value.Status) && store.managedReservedTurnLocked(value.ID) {
-		return Turn{}, ErrConflict
-	}
 	if terminalTurnStatus(current.Status) && current.Status != value.Status {
 		return Turn{}, ErrConflict
 	}
@@ -961,7 +948,7 @@ func (store *MemoryStore) AppendItem(ctx context.Context, value Item) (Item, boo
 		}
 		return cloneItem(existing), false, nil
 	}
-	if IsManagedDispatchClosure(value) || store.managedReservedCompletionLocked(value) {
+	if IsManagedDispatchClosure(value) {
 		return Item{}, false, ErrConflict
 	}
 	if value.Kind == ItemDiagnostic && value.Status == ItemStarted {
@@ -974,16 +961,14 @@ func (store *MemoryStore) AppendItem(ctx context.Context, value Item) (Item, boo
 					return Item{}, false, ErrConflict
 				}
 			}
-			// The already elected RESUME owns the root, not an independently
-			// admitted child cancellation. The exact child Attempt was
-			// verified above; raw Store callers cannot use the exception.
 			_, _, bound := CancellationAttemptForStore(ctx)
 			target := store.invocations[store.invocationExecutionRefs[value.RunID]]
-			for _, r := range store.managedReservations {
-				if r.Binding.TurnID == value.TurnID && store.managedClosures[r.Binding.DispatchID] == "" &&
-					(!bound || ManagedReservationBlocksInvocation(r, target)) {
-					return Item{}, false, ErrConflict
-				}
+			facts, e := store.globalPhysicalEvidenceLocked(value.TurnID)
+			if e != nil {
+				return Item{}, false, e
+			}
+			if NativeManagedDispatchBlocksCancellation(facts, target, bound) {
+				return Item{}, false, ErrConflict
 			}
 			if store.activeCancellationFenceLocked(value.TurnID) {
 				return Item{}, false, ErrConflict
@@ -993,7 +978,8 @@ func (store *MemoryStore) AppendItem(ctx context.Context, value Item) (Item, boo
 			if proofErr != nil {
 				return Item{}, false, proofErr
 			}
-			if _, valid := ValidExecutionDispatchGrantAdmission(value); !valid {
+			phase, valid := ValidExecutionDispatchGrantAdmission(value)
+			if !valid {
 				return Item{}, false, ErrConflict
 			}
 			turn, turnFound := store.turns[value.TurnID]
@@ -1003,7 +989,7 @@ func (store *MemoryStore) AppendItem(ctx context.Context, value Item) (Item, boo
 				owner.ExecutionRefID != value.RunID ||
 				terminalInvocationStatus(owner.Status) ||
 				store.activeCancellationFenceLocked(value.TurnID) ||
-				PendingExecutionDispatch(physicalItems, value.InvocationID) {
+				executionDispatchAdmissionBlocked(physicalItems, value.InvocationID, phase) {
 				return Item{}, false, ErrConflict
 			}
 		}
@@ -1090,7 +1076,7 @@ func (store *MemoryStore) AppendItem(ctx context.Context, value Item) (Item, boo
 		if len(store.itemChildren[grant.ID]) != 0 {
 			return Item{}, false, ErrConflict
 		}
-		if !ValidOriginalApprovalSettlement(ctx, grant, value) {
+		if !ValidNativeManagedDispatchCompletion(ctx, grant, value) || !ValidOriginalApprovalSettlement(ctx, grant, value) {
 			return Item{}, false, ErrConflict
 		}
 		var err error

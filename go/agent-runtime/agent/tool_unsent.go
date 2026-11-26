@@ -134,7 +134,7 @@ func (r *Runner) inspectUnsentReservation(ctx context.Context, runID string, cal
 	if b == nil {
 		return zero, none, ErrToolReceiptMismatch
 	}
-	scope, err := b.ports.ResolveScope(ctx, runID)
+	scope, err := b.resolveScope(ctx, runID)
 	if err != nil {
 		return zero, none, err
 	}

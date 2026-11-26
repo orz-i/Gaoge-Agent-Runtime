@@ -94,6 +94,9 @@ func TestEncryptedV8RelationMigrationPreservesOriginalAuthority(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	if err = MigrateV10ToV11With(ctx, path, open); err != nil {
+		t.Fatal(err)
+	}
 	s, err = OpenExistingWith(ctx, path, open)
 	if err != nil {
 		t.Fatal(err)
