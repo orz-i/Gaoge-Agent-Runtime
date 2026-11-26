@@ -23,13 +23,23 @@ import (
 
 type sqliteManagedCut struct {
 	*kernelsqlite.Store
-	event  string
-	before bool
+	event         string
+	before        bool
+	initialInputs *agent.MemoryRunInputs
 }
+
+func (s sqliteManagedCut) Create(ctx context.Context, r kernel.Record, events []kernel.EventDraft) (kernel.Snapshot, error) {
+	out, err := s.Store.Create(ctx, r, events)
+	if err == nil && s.initialInputs != nil && out.Run.Kind == agent.RunKind {
+		_, err = s.initialInputs.Submit(ctx, out.Run, "initial-steering", "initial steering")
+	}
+	return out, err
+}
+
 type sqliteManagedInterrupted struct{}
 
 func (s sqliteManagedCut) ApplyExecution(ctx context.Context, l kernel.ExecutionLease, rev uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
-	hit := s.event == "" && m.ManagedSafePoint.Present()
+	hit := false
 	for _, e := range m.Events {
 		if s.event != "" && e.Type == s.event {
 			hit = true
@@ -65,15 +75,20 @@ func (m *sqliteManagedModel) Generate(_ context.Context, r model.Request) (model
 // closure reconciliation when CANCEL committed before the budget ACK.
 func TestSQLiteManagedOriginalObligationsReopen(t *testing.T) {
 	for _, name := range []string{"resume", "cancel closure", "public cancel",
-		"claimed/before", "claimed/after", "completed/before", "completed/after", "input_applied/before", "input_applied/after"} {
+		"claimed/before", "claimed/after", "completed/before", "completed/after", "input_applied/before", "input_applied/after", "initial_input/before", "initial_input/after", "initial_intent/before", "initial_intent/after"} {
 		t.Run(name, func(t *testing.T) {
 			cancel := strings.Contains(name, "cancel")
 			phase, _, frontier := strings.Cut(name, "/")
-			event := ""
+			initial := strings.HasPrefix(phase, "initial_")
+			event := "agent.model_invocation.pending"
 			if frontier {
-				event = "agent.model_invocation." + phase
-				if phase == "input_applied" {
+				switch phase {
+				case "input_applied", "initial_input":
 					event = "agent.input_applied"
+				case "initial_intent":
+					event = "agent.model_invocation.pending"
+				default:
+					event = "agent.model_invocation." + phase
 				}
 			}
 			wantBefore := 0
@@ -101,7 +116,11 @@ func TestSQLiteManagedOriginalObligationsReopen(t *testing.T) {
 				t.Fatal(e)
 			}
 			provider := &sqliteManagedModel{}
-			rt, e := kernel.New(kernel.Dependencies{Store: sqliteManagedCut{Store: ks, event: event, before: strings.HasSuffix(name, "/before")}, ManagedRecoveryHost: host})
+			cut := sqliteManagedCut{Store: ks, event: event, before: strings.HasSuffix(name, "/before")}
+			if initial {
+				cut.initialInputs = inputs
+			}
+			rt, e := kernel.New(kernel.Dependencies{Store: cut, ManagedRecoveryHost: host})
 			if e != nil {
 				t.Fatal(e)
 			}
@@ -165,6 +184,24 @@ func TestSQLiteManagedOriginalObligationsReopen(t *testing.T) {
 			proof, ok := safe.SafePoint.AgentObligations()
 			if !ok || proof.LedgerID != pending.Turn.ID || len(provider.requests) != wantBefore {
 				t.Fatalf("wrong cut: %+v", proof)
+			}
+			if initial {
+				view, e := agent.ViewState(original)
+				if e != nil {
+					t.Fatal(e)
+				}
+				wantCursor := uint64(1)
+				if name == "initial_input/before" {
+					wantCursor = 0
+				}
+				wantInv := 0
+				if name == "initial_intent/after" {
+					wantInv = 1
+				}
+				if view.InputCursor != wantCursor || len(view.ModelInvocations) != wantInv || !kernel.ManagedSourceMatches(safe.SafePoint, original) ||
+					(wantInv == 0 && (proof.Phase != "prepare" || proof.InvocationID != "" || proof.PreparationContext == nil)) {
+					t.Fatalf("wrong initial frontier: cursor=%d inv=%d proof=%+v", view.InputCursor, len(view.ModelInvocations), proof)
+				}
 			}
 			if !frontier {
 				if _, e = inputs.Submit(ctx, original.Run, "late", "late steering"); e != nil {
@@ -284,11 +321,17 @@ func TestSQLiteManagedOriginalObligationsReopen(t *testing.T) {
 				}
 			} else {
 				wantCursor := uint64(0)
-				if wantCalls == 2 {
+				if wantCalls == 2 || initial {
 					wantCursor = 1
 				}
 				if result.Turn.Status != harness.TurnCompleted || v.InputCursor != wantCursor || len(provider.requests) != wantCalls || ledger.View("").Usage.LLMCalls != wantCalls {
 					t.Fatalf("resume accounting mismatch: %+v", ledger.View(""))
+				}
+				if initial {
+					first, _ := json.Marshal(provider.requests[0].Messages)
+					if strings.Count(string(first), "initial steering") != 1 {
+						t.Fatal("initial input lost or duplicated")
+					}
 				}
 				if wantCalls == 2 {
 					first, _ := json.Marshal(provider.requests[0].Messages)

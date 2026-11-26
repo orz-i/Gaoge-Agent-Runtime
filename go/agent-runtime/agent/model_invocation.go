@@ -456,16 +456,7 @@ func (runner *Runner) buildUnpreparedModelRequest(ctx context.Context, snapshot 
 		return model.Request{}, nil, ErrToolDiscoveryInvalid
 	}
 	definitions = filterLoadedDiscoveryTools(definitions, state.Discovery)
-	messages := model.CloneMessages(state.Messages)
-	if len(state.BlockedToolKeys) != 0 {
-		definitions = definitionsWithoutKeys(definitions, state.BlockedToolKeys)
-		hostedTools = hostedToolsWithoutKeys(hostedTools, state.BlockedToolKeys)
-		messages = withBlockedToolGuidance(messages, state.BlockedToolKeys)
-	}
-	definitions, hostedTools, messages = projectToolProgress(state, definitions, hostedTools, messages)
-	if hint := automaticAllowanceHint(state); hint != "" {
-		messages = withSystemGuidance(messages, hint)
-	}
+	definitions, hostedTools, messages := projectModelPreparation(state, definitions, hostedTools)
 	request := model.Request{
 		RunID: snapshot.Run.ID, Model: state.Model, ModelOptions: cloneRawJSON(state.ModelOptions),
 		OutputContract:  model.CloneOutputContract(state.OutputContract),
@@ -485,6 +476,23 @@ func (runner *Runner) buildUnpreparedModelRequest(ctx context.Context, snapshot 
 	// The final Request and original Catalog fingerprints are both hashed into
 	// the same durable ModelInvocation, never recomputed on resume.
 	return request, append([]tools.Definition(nil), request.Tools...), nil
+}
+
+// The pre-intent message projection is pure. Recovery can verify a committed
+// Context candidate against the exact durable state without selecting Tools,
+// calling a Provider, resolving a window or measuring tokens.
+func projectModelPreparation(state runState, definitions []tools.Definition, hostedTools []model.HostedTool) ([]tools.Definition, []model.HostedTool, []model.Message) {
+	messages := model.CloneMessages(state.Messages)
+	if len(state.BlockedToolKeys) != 0 {
+		definitions = definitionsWithoutKeys(definitions, state.BlockedToolKeys)
+		hostedTools = hostedToolsWithoutKeys(hostedTools, state.BlockedToolKeys)
+		messages = withBlockedToolGuidance(messages, state.BlockedToolKeys)
+	}
+	definitions, hostedTools, messages = projectToolProgress(state, definitions, hostedTools, messages)
+	if hint := automaticAllowanceHint(state); hint != "" {
+		messages = withSystemGuidance(messages, hint)
+	}
+	return definitions, hostedTools, messages
 }
 
 func (runner *Runner) prepareBusinessInvocation(ctx context.Context, snapshot kernel.Snapshot, request model.Request, originalTools []tools.Definition) (ModelInvocation, error) {

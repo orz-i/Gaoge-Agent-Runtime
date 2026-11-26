@@ -7,9 +7,11 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
@@ -175,4 +177,112 @@ func testManagedContextResume(t *testing.T, bounded bool) {
 		t.Fatalf("resume changed context ownership: status=%s id=%s err=%v", synced.Turn.Status, synced.Turn.ContextCheckpointID, err)
 	}
 	assertPersistedModelHash(t, rt, synced, freshModel.requests[0])
+}
+
+func TestManagedPreparationPreservesCommittedContextRollover(t *testing.T) {
+	for _, forged := range []bool{false, true} {
+		name := "exact"
+		if forged {
+			name = "forged"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx := t.Context()
+			clock := &managedObligationClock{now: time.Now().UTC()}
+			base := memory.NewStoreWithExecutionClock(clock)
+			cut := &managedFrontierCutStore{Store: base, event: "agent.model_invocation.pending"}
+			if forged {
+				cut.event = "agent.native_preparation.ready"
+				cut.after = true
+			}
+			host := harness.NewMemoryStore()
+			client := &agentSessionModel{}
+			opts := agentSessionOptions(t, cut, host, client)
+			rt, err := kernel.New(kernel.Dependencies{Store: cut, ManagedRecoveryHost: host})
+			if err != nil {
+				t.Fatal(err)
+			}
+			opts.Runtime = rt
+			opts.Context.ManagedRecovery = true
+			opts.Context.ReadArtifacts = true
+			opts.Session.Config.SharedBudget = &budget.Limits{MaxLLMCalls: 2}
+			opts.Session.Config.ContextPolicy = runtimecontext.Policy{PreserveRecentTurns: 1, MinimumRecentTurns: 1, MaxCompactionTokens: 80}
+			opts.Context.ResolveWindow = func(context.Context, model.Request) (runtimecontext.ModelWindow, error) {
+				return runtimecontext.ModelWindow{ContextTokens: 2000, ReservedOutputTokens: 128}, nil
+			}
+			originalText := strings.Repeat("archived original verifiable details ", 350)
+			opts.Session.Transcript = harness.TranscriptSourceFunc(func(context.Context, harness.HostRef, harness.HostRef, string) (*harness.ContextSeed, error) {
+				return contextSeed("durable guidance", contextEntry("m1", "old", model.RoleUser, "old question", false), contextEntry("a1", "old", model.RoleAssistant, originalText, false), contextEntry("m2", "current", model.RoleUser, "current question", true)), nil
+			})
+			session, err := harness.OpenAgentSession(opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			crashManagedObligation(t, func() { _, _ = session.Prompt(ctx, "rollover", "current question") })
+			pending, err := session.Load(ctx, "rollover")
+			if err != nil {
+				t.Fatal(err)
+			}
+			root, ok := harness.TopLevelInvocation(pending)
+			if !ok {
+				t.Fatal("missing root")
+			}
+			before, err := base.Load(ctx, root.ExecutionRefID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			point, err := rt.LoadManagedRecovery(ctx, root.ExecutionRefID)
+			proof, valid := point.SafePoint.AgentObligations()
+			if err != nil || !valid || proof.Phase != "prepare" || proof.PreparationContext == nil || !kernel.ManagedSourceMatches(point.SafePoint, before) || len(client.requests) != 0 {
+				t.Fatalf("wrong original frontier: %v %+v", err, proof)
+			}
+			turn := pending.Turn
+			if forged {
+				previous, e := host.GetContextCheckpoint(ctx, proof.PreparationContext.CheckpointID)
+				if e != nil {
+					t.Fatal(e)
+				}
+				window := runtimecontext.CloneWindow(previous.Window)
+				window.Entries[len(window.Entries)-1].Message.Content = model.TextParts("substituted user question")
+				changed, e := runtimecontext.NewManager(runtimecontext.Dependencies{}).Rollover(ctx, runtimecontext.RolloverRequest{Previous: previous, Window: window, Reason: "model_window_pressure", ModelWindowFingerprint: runtimecontext.ModelWindowFingerprint(runtimecontext.ModelWindow{ContextTokens: 2000, ReservedOutputTokens: 128})})
+				if e != nil {
+					t.Fatal(e)
+				}
+				turn, e = host.CommitContextCheckpoint(ctx, harness.ContextCheckpointCommit{TurnID: turn.ID, ExpectedTurnRevision: turn.Revision, ExpectedTurnCheckpointID: previous.ID, ExpectedHeadCheckpointID: previous.ID, Checkpoint: changed, UpdatedAt: time.Now().UTC()})
+				if e != nil {
+					t.Fatal(e)
+				}
+			} else if turn.ContextRef.Generation != 2 || turn.ContextCheckpointID == proof.PreparationContext.CheckpointID {
+				t.Fatalf("native rollover not committed: %+v", turn.ContextRef)
+			}
+			opts.Session.Transcript = nil
+			opts.Runtime, err = kernel.New(kernel.Dependencies{Store: base, ManagedRecoveryHost: host})
+			if err != nil {
+				t.Fatal(err)
+			}
+			session, err = harness.OpenAgentSession(opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			clock.now = clock.now.Add(25 * time.Hour)
+			done, err := session.Resume(ctx, "rollover")
+			if forged {
+				current, e := base.Load(ctx, root.ExecutionRefID)
+				if err == nil || len(client.requests) != 0 || e != nil || !reflect.DeepEqual(current, before) {
+					t.Fatalf("forged context enabled recovery: %v", err)
+				}
+				same, e := opts.Runtime.LoadManagedRecovery(ctx, root.ExecutionRefID)
+				if e != nil || same.State != kernel.ManagedAvailable {
+					t.Fatalf("forged context acquired selection: %v %s", e, same.State)
+				}
+				return
+			}
+			if err != nil || done.Turn.Status != harness.TurnCompleted || len(client.requests) != 1 || done.Turn.ContextCheckpointID != turn.ContextCheckpointID {
+				t.Fatalf("original rollover recovery failed: %v %s calls=%d context=%s", err, done.Turn.Status, len(client.requests), done.Turn.ContextCheckpointID)
+			}
+			if strings.Contains(requestTextManaged(client.requests[0]), originalText) {
+				t.Fatal("re-expanded original archive")
+			}
+			assertPersistedModelHash(t, opts.Runtime, done, client.requests[0])
+		})
+	}
 }

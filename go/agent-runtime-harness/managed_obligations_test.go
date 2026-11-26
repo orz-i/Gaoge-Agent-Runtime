@@ -25,25 +25,31 @@ func (c *managedObligationClock) Now() time.Time { return c.now }
 type managedObligationCrash struct{}
 type managedObligationStore struct {
 	*memory.Store
-	hit   bool
-	event string
-	count int
+	hit    bool
+	event  string
+	count  int
+	before bool
 }
 
 func (s *managedObligationStore) ApplyExecution(ctx context.Context, lease kernel.ExecutionLease, revision uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
-	out, err := s.Store.ApplyExecution(ctx, lease, revision, m)
-	if err == nil && m.ManagedSafePoint.Present() {
+	hit := false
+	if m.ManagedSafePoint.Present() {
 		for _, e := range m.Events {
 			if e.Type == s.event {
 				s.count--
-				if s.count == 0 {
-					s.hit = true
-					// Deliberately no original callback return/retirement. The stack
-					// aborts and the test reconstructs a separate Runner and Runtime.
-					panic(managedObligationCrash{})
-				}
+				hit = s.count == 0
 			}
 		}
+	}
+	if hit && s.before {
+		s.hit = true
+		panic(managedObligationCrash{})
+	}
+	out, err := s.Store.ApplyExecution(ctx, lease, revision, m)
+	if err == nil && hit {
+		s.hit = true
+		// Deliberately no original callback return/retirement.
+		panic(managedObligationCrash{})
 	}
 	return out, err
 }
@@ -272,8 +278,17 @@ func requestTextManaged(r model.Request) string {
 // return. The successor must qualify only the persisted original obligations.
 type managedFrontierCutStore struct {
 	*memory.Store
-	event      string
-	after, hit bool
+	event         string
+	after, hit    bool
+	initialInputs *agent.MemoryRunInputs
+}
+
+func (s *managedFrontierCutStore) Create(ctx context.Context, r kernel.Record, events []kernel.EventDraft) (kernel.Snapshot, error) {
+	out, err := s.Store.Create(ctx, r, events)
+	if err == nil && s.initialInputs != nil && out.Run.Kind == agent.RunKind {
+		_, err = s.initialInputs.Submit(ctx, out.Run, "initial-steering", "frontier steering")
+	}
+	return out, err
 }
 
 func (s *managedFrontierCutStore) ApplyExecution(ctx context.Context, lease kernel.ExecutionLease, revision uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
@@ -292,7 +307,7 @@ func (s *managedFrontierCutStore) ApplyExecution(ctx context.Context, lease kern
 	return s.Store.ApplyExecution(ctx, lease, revision, m)
 }
 func TestManagedOriginalModelAndInputFrontiers(t *testing.T) {
-	for _, phase := range []string{"claimed", "completed", "input_applied", "rejected"} {
+	for _, phase := range []string{"claimed", "completed", "input_applied", "rejected", "initial_input", "initial_intent", "initial_cancel"} {
 		for _, after := range []bool{false, true} {
 			name := phase + "/before"
 			if after {
@@ -303,9 +318,12 @@ func TestManagedOriginalModelAndInputFrontiers(t *testing.T) {
 				clock := &managedObligationClock{now: time.Now().UTC()}
 				base := memory.NewStoreWithExecutionClock(clock)
 				event := "agent.model_invocation." + phase
+				initial := strings.HasPrefix(phase, "initial_")
 				switch phase {
-				case "input_applied":
+				case "input_applied", "initial_input", "initial_cancel":
 					event = "agent.input_applied"
+				case "initial_intent":
+					event = "agent.model_invocation.pending"
 				case "rejected":
 					event = "agent.model_invocation.completed"
 				}
@@ -314,6 +332,9 @@ func TestManagedOriginalModelAndInputFrontiers(t *testing.T) {
 				q, err := agent.NewMemoryRunInputs("frontier")
 				if err != nil {
 					t.Fatal(err)
+				}
+				if initial {
+					cut.initialInputs = q
 				}
 				client := &agentSessionModel{}
 				opts := agentSessionOptions(t, cut, host, client)
@@ -360,18 +381,40 @@ func TestManagedOriginalModelAndInputFrontiers(t *testing.T) {
 					t.Fatal(err)
 				}
 				view, err := agent.ViewState(original)
-				if err != nil || len(view.ModelInvocations) != 1 {
-					t.Fatalf("bad original state: %v", err)
+				wantInv := 1
+				if initial && (phase != "initial_intent" || !after) {
+					wantInv = 0
 				}
-				first := view.ModelInvocations[0]
+				if err != nil || len(view.ModelInvocations) != wantInv {
+					t.Fatalf("bad original state: %v inv=%d", err, len(view.ModelInvocations))
+				}
+				var firstID string
+				if wantInv > 0 {
+					firstID = view.ModelInvocations[0].ID
+				}
+				if initial {
+					wantCursor := uint64(1)
+					if phase != "initial_intent" && !after {
+						wantCursor = 0
+					}
+					if view.InputCursor != wantCursor {
+						t.Fatalf("wrong committed initial cursor: %d", view.InputCursor)
+					}
+					point, e := opts.Runtime.LoadManagedRecovery(ctx, root.ExecutionRefID)
+					p, ok := point.SafePoint.AgentObligations()
+					if e != nil || !ok || !kernel.ManagedSourceMatches(point.SafePoint, original) ||
+						(wantInv == 0 && (p.Phase != "prepare" || p.InvocationID != "" || p.PreparationContext == nil)) {
+						t.Fatalf("no exact original preparation point: %v %+v", e, p)
+					}
+				}
 				wantCalls := 1
 				if phase == "input_applied" {
 					wantCalls = 2
 				}
-				if phase == "claimed" && len(client.requests) != 0 {
+				if (phase == "claimed" || initial) && len(client.requests) != 0 {
 					t.Fatal("claim dispatched")
 				}
-				if phase != "claimed" && len(client.requests) != 1 {
+				if phase != "claimed" && !initial && len(client.requests) != 1 {
 					t.Fatal("receipt cut did not dispatch exactly once")
 				}
 				opts.Session.Transcript = nil
@@ -387,6 +430,22 @@ func TestManagedOriginalModelAndInputFrontiers(t *testing.T) {
 					t.Fatal("live lease enabled recovery")
 				}
 				clock.now = clock.now.Add(25 * time.Hour)
+				if phase == "initial_cancel" {
+					done, e := session.Cancel(ctx, "frontier", "cancel before first model")
+					final, readErr := base.Load(ctx, root.ExecutionRefID)
+					end, viewErr := agent.ViewState(final)
+					ledger, ledgerErr := host.LoadBudget(ctx, pending.Turn.ID)
+					if e != nil || readErr != nil || viewErr != nil || ledgerErr != nil ||
+						done.Turn.Status != harness.TurnCancelled || len(client.requests) != 0 || len(end.ModelInvocations) != 0 ||
+						end.InputCursor != view.InputCursor || ledger.View("").Usage.LLMCalls != 0 ||
+						!ledger.RunCancelled(root.ExecutionRefID) || !ledger.FinishedRuns[root.ExecutionRefID] {
+						t.Fatalf("preparation CANCEL lost original obligations: %v status=%s cursor=%d", e, done.Turn.Status, end.InputCursor)
+					}
+					if _, e = opts.Runtime.LookupChildExecution(ctx, root.ExecutionRefID); !errors.Is(e, kernel.ErrNotFound) {
+						t.Fatalf("grant not retired: %v", e)
+					}
+					return
+				}
 				done, err := session.Resume(ctx, "frontier")
 				if err != nil && phase != "rejected" {
 					t.Fatalf("resume: %v status=%s", err, done.Turn.Status)
@@ -411,11 +470,13 @@ func TestManagedOriginalModelAndInputFrontiers(t *testing.T) {
 					}
 				}
 				if done.Turn.Status != wantStatus || len(client.requests) != wantCalls || len(end.ModelInvocations) != wantCalls ||
-					end.ModelInvocations[0].ID != first.ID || ledger.View("").Usage.LLMCalls != wantCalls || !ledger.FinishedRuns[root.ExecutionRefID] {
+					(firstID != "" && end.ModelInvocations[0].ID != firstID) || ledger.View("").Usage.LLMCalls != wantCalls || !ledger.FinishedRuns[root.ExecutionRefID] {
 					t.Fatalf("original frontier lost: status=%s calls=%d inv=%d cursor=%d ledger=%+v err=%v", done.Turn.Status, len(client.requests), len(end.ModelInvocations), end.InputCursor, ledger.View(""), err)
 				}
-				if phase == "input_applied" && (end.InputCursor != 1 || strings.Count(requestTextManaged(client.requests[1]), "frontier steering") != 1) {
-					t.Fatal("input obligation lost or duplicated")
+				if phase == "input_applied" || initial {
+					if end.InputCursor != 1 || strings.Count(requestTextManaged(client.requests[wantCalls-1]), "frontier steering") != 1 {
+						t.Fatal("input obligation lost or duplicated")
+					}
 				}
 				if _, err = opts.Runtime.LookupChildExecution(ctx, root.ExecutionRefID); !errors.Is(err, kernel.ErrNotFound) {
 					t.Fatalf("grant not retired: %v", err)

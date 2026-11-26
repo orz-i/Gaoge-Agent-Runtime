@@ -23,7 +23,7 @@ func (r *Runner) commitManagedModelIntent(ctx context.Context, s kernel.Snapshot
 	if state.SummaryNativeRecovery && inv.Purpose == ModelInvocationContextSummary {
 		return r.commitSummarySafePoint(ctx, s, state, m)
 	}
-	if r.managedContextRecovery == nil || r.activeRootGrant == nil || r.activeRunLease == nil || s.Run.ParentRunID != "" {
+	if (r.managedContextRecovery == nil && (!r.SupportsSummaryNativeRecovery() || !r.combinedManaged(state))) || r.activeRootGrant == nil || r.activeRunLease == nil || s.Run.ParentRunID != "" {
 		return r.runtime.Apply(ctx, s.Run.ID, s.Run.Revision, m)
 	}
 	binding, ok := r.runtime.ManagedDispatch(ctx, s.Run.ID)
@@ -67,7 +67,7 @@ func (r *Runner) commitManagedModelIntent(ctx context.Context, s kernel.Snapshot
 	return r.applyManagedSafePoint(ctx, s, inv, m, binding, id, "managed-context-v1", lifecycle)
 }
 
-// Only the two concrete phase validators above/below may select a point.
+// Only the concrete native phase validators may select a point.
 // This is the shared original-grant/source commit, not a new transfer
 // authority or a re-interpretation of either persisted lifecycle version.
 func (r *Runner) applyManagedSafePoint(ctx context.Context, source kernel.Snapshot, inv ModelInvocation, m kernel.Mutation,
@@ -83,8 +83,14 @@ func (r *Runner) applyManagedSafePoint(ctx context.Context, source kernel.Snapsh
 // provider admission. The ordinary managed Context may have no elected
 // point; a pending Summary in its native profile requires one.
 func (r *Runner) leaveModelSafePoint(ctx context.Context, s kernel.Snapshot, state runState, invocation ModelInvocation) error {
-	required := state.SummaryNativeRecovery && invocation.Purpose == ModelInvocationContextSummary && invocation.Status == ModelInvocationPending
-	if !required && r.managedContextRecovery == nil {
+	// A completed receipt is a local obligation, not a new physical call.
+	// Keep its exact safe point until the ordinary consumption CAS advances
+	// the source. A selected successor has already left before entry.
+	if invocation.Status != ModelInvocationPending {
+		return nil
+	}
+	required := state.SummaryNativeRecovery && invocation.Purpose == ModelInvocationContextSummary
+	if !required && r.managedContextRecovery == nil && (!r.SupportsSummaryNativeRecovery() || !r.combinedManaged(state)) {
 		return nil
 	}
 	// A historical closed transfer cannot gate another ordinary model
@@ -275,6 +281,11 @@ func (r *Runner) recoverManagedContinuation(ctx context.Context, id string, requ
 		if _, err = r.checkManagedLedger(ctx, obligations, id, false, false); err != nil {
 			return snapshot, kernel.ManagedClosureProof{}, err
 		}
+		if obligations.Phase == "prepare" {
+			if _, err = r.readManagedPreparationContext(ctx, t.SafePoint.Host, obligations.PreparationContext, state); err != nil {
+				return snapshot, kernel.ManagedClosureProof{}, err
+			}
+		}
 	case kernel.ManagedLifecycleWorkingStateSummary:
 		if err = r.validateSummarySafePoint(t.SafePoint); err != nil || !kernel.ManagedSourceMatches(t.SafePoint, snapshot) {
 			return snapshot, kernel.ManagedClosureProof{}, errors.Join(ErrRootOutcomeUnknown, err)
@@ -300,7 +311,7 @@ func (r *Runner) recoverManagedContinuation(ctx context.Context, id string, requ
 	// Ensure/Register or rebind the original managed source during recovery.
 	recovering := *r
 	if t.SafePoint.LifecycleVersion == kernel.ManagedLifecycleAgentObligations {
-		recovering.managedBudgetSource = &obligations
+		recovering.managedObligationSource = &obligations
 	}
 	result, runErr := recovering.executeOwnedRoot(ctx, snapshot, bound, scoped, t.SuccessorGrant, t.SuccessorLease, false, func(next context.Context, owner *Runner, source kernel.Snapshot) (kernel.Snapshot, error) {
 		return owner.invokeNativeRun(next, source, runInvocation(plugin.RunResume, source), func(drive context.Context) (kernel.Snapshot, error) {

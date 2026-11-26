@@ -266,8 +266,8 @@ func (a *BoundedBudgetAdapter) admitRun(ctx context.Context, inv plugin.RunInvoc
 	receiptOnly := frame != nil && frame.invocation == inv && frame.receiptOnly
 	var l budget.Ledger
 	var err error
-	if frame != nil && frame.managedBudget != nil {
-		p := frame.managedBudget
+	if frame != nil && frame.managedObligations != nil {
+		p := frame.managedObligations
 		if p.LedgerID == "" {
 			return nil, budget.ErrLedgerConflict
 		}

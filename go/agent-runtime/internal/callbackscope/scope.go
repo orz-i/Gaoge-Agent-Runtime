@@ -316,7 +316,21 @@ func ManagedSuspension(ctx context.Context, adapter any, request any) (json.RawM
 // Budget frame with an actual admission operation and no unresolved ticket.
 // Summary supplies its concrete phase operation instead of a business prepare.
 func ManagedObligationSuspension(ctx context.Context, adapter, budgetAdapter any, request any, phase string) (json.RawMessage, bool) {
+	if phase != "" {
+		phase = "context.summary.native-phase:" + phase
+	}
 	return managedSuspension(ctx, adapter, budgetAdapter, request, phase, true)
+}
+
+// ManagedPreparationSuspension proves the actual hydrated native frontier
+// before model preparation. It shares the same complete-ticket and Budget
+// admission checks as the concrete model/summary safe points.
+func ManagedPreparationSuspension(ctx context.Context, adapter, budgetAdapter any, identity string, source any) (json.RawMessage, bool) {
+	operation := "managed.preparation:" + identity
+	if !Operation(ctx, adapter, operation, source) {
+		return nil, false
+	}
+	return managedSuspension(ctx, adapter, budgetAdapter, source, operation, true)
 }
 
 func managedSuspension(ctx context.Context, adapter, budgetAdapter any, request any, phase string, obligations bool) (json.RawMessage, bool) {
@@ -340,7 +354,7 @@ func managedSuspension(ctx context.Context, adapter, budgetAdapter any, request 
 		if len(t.managedPrepared) == 0 {
 			return nil, false
 		}
-	} else if _, ok := t.operations["context.summary.native-phase:"+phase]; !ok {
+	} else if _, ok := t.operations[phase]; !ok {
 		return nil, false
 	}
 	var budgetProof *[32]byte

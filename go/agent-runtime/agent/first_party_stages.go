@@ -131,6 +131,29 @@ func (r *Runner) invokeContextRun(ctx context.Context, inv plugin.RunInvocation,
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
+	// Revalidate the exact source used by the newly enabled preparation
+	// owner. The pre-PARK read cannot authorize a later substituted Context.
+	if frame, _ := callbackscope.RunCall(stageCtx).(*nativeRunAdmission); frame != nil && frame.managedObligations != nil && frame.managedObligations.Phase == "prepare" {
+		b, ok := r.runtime.ManagedDispatch(stageCtx, inv.RunID)
+		if !ok {
+			return kernel.Snapshot{}, ErrInvalidRequest
+		}
+		snapshot, e := r.runtime.Load(stageCtx, inv.RunID)
+		if e != nil {
+			return kernel.Snapshot{}, e
+		}
+		state, e := decodeState(snapshot.State)
+		if e != nil {
+			return kernel.Snapshot{}, e
+		}
+		current, e := r.readManagedPreparationContext(stageCtx, b, frame.managedObligations.PreparationContext, state)
+		if e != nil {
+			return kernel.Snapshot{}, e
+		}
+		if source.Checkpoint == nil || source.Checkpoint.ID != current.CheckpointID || kernel.ManagedDigest(source.Checkpoint) != current.CheckpointDigest {
+			return kernel.Snapshot{}, ErrInvalidRequest
+		}
+	}
 	out, err = terminal(callbackscope.Inherit(hydrated, stageCtx))
 	a.finishHydration(stageCtx, source)
 	return out, err

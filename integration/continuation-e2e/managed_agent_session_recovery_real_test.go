@@ -411,17 +411,18 @@ func TestManagedAgentSessionRecoveryProcess(t *testing.T) {
 		t.Fatalf("expected process exit after second model intent commit, got %v", err)
 	}
 	var completed harness.Snapshot
-	if phase == "refresh-closed" {
+	switch phase {
+	case "refresh-closed":
 		completed, err = session.Refresh(t.Context(), managedRecoveryTurn)
 		if err != nil {
 			t.Fatal(err)
 		}
-	} else if phase == "resume-closed" {
+	case "resume-closed":
 		completed, err = session.Resume(t.Context(), managedRecoveryTurn)
 		if err != nil {
 			t.Fatal(err)
 		}
-	} else {
+	default:
 		completed = resumeManagedRecoveryAfterLease(t, db, session, files)
 	}
 	if completed.Turn.Status != harness.TurnCompleted || completed.Output == nil {

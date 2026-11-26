@@ -84,3 +84,32 @@ func TestRealPostgresNoEntryCancellation(t *testing.T) {
 		}
 	})
 }
+
+func TestRealPostgresManagedPreparationSummary(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("TEST_POSTGRES_DSN"))
+	if dsn == "" {
+		t.Skip("TEST_POSTGRES_DSN is not configured")
+	}
+	conformance.ManagedPreparationSummary(t, func(t *testing.T) (kernel.Store, harness.Store, func() (kernel.Store, harness.Store)) {
+		db, isolated := openIsolatedHarnessPostgres(t, dsn)
+		if e := kernelpostgres.Migrate(db); e != nil {
+			t.Fatal(e)
+		}
+		if e := harnesspostgres.Migrate(db); e != nil {
+			t.Fatal(e)
+		}
+		host, e := harnesspostgres.New(db)
+		if e != nil {
+			t.Fatal(e)
+		}
+		return kernelpostgres.NewKernelStore(db), host, func() (kernel.Store, harness.Store) {
+			closeToolRecoveryDB(t, db)
+			fresh := reopenToolRecoveryDB(t, isolated)
+			h, e := harnesspostgres.New(fresh)
+			if e != nil {
+				t.Fatal(e)
+			}
+			return kernelpostgres.NewKernelStore(fresh), h
+		}
+	})
+}

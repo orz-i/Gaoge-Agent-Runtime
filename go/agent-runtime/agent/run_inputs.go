@@ -153,14 +153,7 @@ func (runner *Runner) admitRunInputs(ctx context.Context, snapshot kernel.Snapsh
 		Events: []kernel.EventDraft{{Type: "agent.input_applied", Message: "Host user input applied at a model boundary", Wakeup: true,
 			WakeupAt: agentWakeupAt(runner.clock.Now())}},
 	}
-	if len(state.ModelInvocations) > 0 {
-		last := state.ModelInvocations[len(state.ModelInvocations)-1]
-		if last.Status == ModelInvocationConsumed && last.Purpose == "" {
-			next, err := runner.commitManagedModelIntent(ctx, snapshot, state, last, mutation)
-			return next, state, true, err
-		}
-	}
-	next, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, mutation)
+	next, err := runner.commitManagedInput(ctx, snapshot, state, mutation)
 	return next, state, true, err
 }
 

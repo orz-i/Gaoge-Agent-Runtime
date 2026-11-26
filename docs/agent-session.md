@@ -205,10 +205,23 @@ reservation, unfinished descendant, unknown effect or Retry generation is
 transferable. Existing pure-context and pure-summary proof versions remain
 unchanged; they cannot be promoted by reopening with more capabilities.
 
+After actual native Budget admission and Context hydration, the combined
+proof can seal a preparation frontier before the first Model intent or between
+settled invocations. It binds the original Context checkpoint and the
+committed input cursor; it has no Model invocation ID, request hash, or
+sampling plan. The initial marker and subsequent input application are
+native Kernel CAS operations. Input application seals the next frontier
+in the same mutation. This includes the transition from a consumed native
+summary to business preparation. A Context pressure rollover committed
+before the next intent can be recovered only if the persisted checkpoint and
+artifacts match a native transformation of the original Context and Run
+messages under the frozen policy. Recovery verifies the source before PARK
+and again under the enabled successor before model preparation. No
+provider or window resolver is called for this verification.
+
 RESUME requalifies the original ledger before enabling a successor and uses
 its existing accounting scope without Ensure/Register. Native Business receipt
-commit and atomic input application can seal the next exact safe point using
-the same proof. After Leave, an expired, unselected original first-owner
+commit can seal the next exact safe point using the same proof. After Leave, an expired, unselected original first-owner
 point can be requalified at the existing PARK CAS only when its frozen model
 identity and remaining aggregate are unchanged except for the original
 claim/receipt fields. No reservation or a matching settled original receipt
@@ -228,8 +241,10 @@ must be recovered before this cancellation path can settle it. For elected
 CANCEL, the original ledger is fenced by revision CAS, Kernel cancellation
 commits, and terminal lifetime accounting is completed before the Host closes
 the dispatch. A lost closure ACK can be repaired against these same original
-facts. Repeated cross-phase takeover after a selected successor remains
-outside this proof. Drain or reconcile mixed in-flight transfers before
+facts. Interruption before the initial native preparation marker is committed (for
+example during first admission or hydration) does not acquire a new proof.
+Repeated cross-phase takeover after a selected successor remains outside
+this proof. Drain or reconcile mixed in-flight transfers before
 downgrading to readers that cannot validate the extended safe-point phases.
 
 Ordinary native Start, Resume and approval dispatches also have a receipt-only

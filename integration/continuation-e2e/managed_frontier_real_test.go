@@ -74,9 +74,12 @@ func openManagedFrontierProcess(t *testing.T, db *gorm.DB, files, phase string) 
 		if event == "cancel" {
 			event = "pending"
 		}
-		if event == "input_applied" {
+		switch event {
+		case "input_applied", "initial_input":
 			event = "agent.input_applied"
-		} else {
+		case "initial_intent":
+			event = "agent.model_invocation.pending"
+		default:
 			event = "agent.model_invocation." + event
 		}
 		ks = &managedFrontierProcessStore{KernelStore: postgresadapter.NewKernelStore(db), event: event, before: when == "before"}
@@ -121,7 +124,7 @@ func TestRealPostgresManagedOriginalFrontierMatrix(t *testing.T) {
 	if dsn == "" {
 		t.Skip("TEST_POSTGRES_DSN is not configured")
 	}
-	for _, phase := range []string{"claimed/before", "claimed/after", "completed/before", "completed/after", "input_applied/before", "input_applied/after", "cancel/after", "unknown", "dispatch_intent/after"} {
+	for _, phase := range []string{"claimed/before", "claimed/after", "completed/before", "completed/after", "input_applied/before", "input_applied/after", "cancel/after", "unknown", "dispatch_intent/after", "initial_input/before", "initial_input/after", "initial_intent/before", "initial_intent/after"} {
 		t.Run(phase, func(t *testing.T) {
 			t.Parallel()
 			ctx := t.Context()
@@ -135,6 +138,12 @@ func TestRealPostgresManagedOriginalFrontierMatrix(t *testing.T) {
 			files := t.TempDir()
 			for _, name := range []string{"inputs.jsonl", "model.jsonl"} {
 				if err := os.WriteFile(filepath.Join(files, name), nil, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			initial := strings.HasPrefix(phase, "initial_")
+			if initial {
+				if err := appendManagedRecoveryRecord(filepath.Join(files, "inputs.jsonl"), agent.RunInput{Sequence: 1, ID: "initial-steering", Text: "initial steering"}); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -160,8 +169,23 @@ func TestRealPostgresManagedOriginalFrontierMatrix(t *testing.T) {
 				t.Fatal(err)
 			}
 			before, err := agent.ViewState(original)
-			if err != nil || len(before.ModelInvocations) != 1 {
+			wantInv := 1
+			if initial && phase != "initial_intent/after" {
+				wantInv = 0
+			}
+			if err != nil || len(before.ModelInvocations) != wantInv {
 				t.Fatalf("wrong cut: %+v %v", before, err)
+			}
+			if initial {
+				wantCursor := uint64(1)
+				if phase == "initial_input/before" {
+					wantCursor = 0
+				}
+				proof, ok := safe.SafePoint.AgentObligations()
+				if before.InputCursor != wantCursor || !ok || !kernel.ManagedSourceMatches(safe.SafePoint, original) ||
+					(wantInv == 0 && (proof.Phase != "prepare" || proof.InvocationID != "" || proof.PreparationContext == nil)) {
+					t.Fatalf("wrong initial frontier: %+v", proof)
+				}
 			}
 			beforeCalls := readManagedRecoveryRecords[model.Request](t, filepath.Join(files, "model.jsonl"))
 			wantBefore := 0
@@ -216,13 +240,19 @@ func TestRealPostgresManagedOriginalFrontierMatrix(t *testing.T) {
 			if strings.HasPrefix(phase, "input_applied/") {
 				wantCalls, wantCursor = 2, 1
 			}
+			if initial {
+				wantCursor = 1
+			}
 			if phase == "cancel/after" {
 				wantCalls, wantStatus = 0, harness.TurnCancelled
 			}
 			if done.Turn.Status != wantStatus || len(calls) != wantCalls || view.InputCursor != wantCursor ||
-				view.ModelInvocations[0].ID != before.ModelInvocations[0].ID || ledger.View("").Usage.LLMCalls != wantCalls ||
+				(wantInv != 0 && view.ModelInvocations[0].ID != before.ModelInvocations[0].ID) || ledger.View("").Usage.LLMCalls != wantCalls ||
 				!ledger.FinishedRuns[root.ExecutionRefID] || ledger.View("").Reserved != (budget.Usage{}) {
 				t.Fatalf("original obligations: status=%s calls=%d cursor=%d ledger=%+v", done.Turn.Status, len(calls), view.InputCursor, ledger.View(""))
+			}
+			if initial && strings.Count(requestMessages(calls[0]), "initial steering") != 1 {
+				t.Fatal("initial input lost or duplicated")
 			}
 			if wantCalls == 2 && strings.Count(requestMessages(calls[1]), "frontier steering") != 1 {
 				t.Fatal("input duplicated or missing")

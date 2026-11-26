@@ -103,7 +103,7 @@ func (c ManagedCancellation) Valid() bool {
 	return c.IntentID != "" && c.Seq > 0 && json.Valid(c.Payload) && c.PayloadDigest == ManagedDigest(c.Payload)
 }
 
-// ManagedSafePoint is stored IN the existing pending-intent ApplyExecution
+// ManagedSafePoint is stored IN the existing native ApplyExecution
 // transaction. Source is that committed snapshot, including the whole Run,
 // state/checkpoint/result. Its revision is not a later bookkeeping revision.
 type ManagedSafePoint struct {
@@ -119,24 +119,33 @@ type ManagedSafePoint struct {
 	LifecycleSource   json.RawMessage
 }
 
+// ManagedPreparationContext identifies the original Host-owned Context
+// checkpoint before a physical Model intent exists. The concrete Host bridge
+// verifies its immutable source and any exact native rollover on recovery.
+type ManagedPreparationContext struct {
+	CheckpointID     string `json:"checkpointID"`
+	CheckpointDigest string `json:"checkpointDigest"`
+}
+
 // ManagedAgentObligations is the exact combined safe-point payload. Kernel
 // validates its closed event/source shape; Agent validates feature state and
 // the original Budget Store before ownership transfer. Host closure consumes
 // the same representation, not another interpretation of the ledger identity.
 type ManagedAgentObligations struct {
-	Phase          string          `json:"phase"`
-	Purpose        string          `json:"purpose,omitempty"`
-	SourceRevision uint64          `json:"sourceRevision"`
-	InvocationID   string          `json:"invocationID"`
-	RequestHash    string          `json:"requestHash"`
-	BindingDigest  string          `json:"bindingDigest,omitempty"`
-	SamplingDigest string          `json:"samplingDigest"`
-	InputBinding   string          `json:"inputBinding,omitempty"`
-	InputCursor    uint64          `json:"inputCursor,omitempty"`
-	LedgerID       string          `json:"ledgerID,omitempty"`
-	LedgerRevision uint64          `json:"ledgerRevision,omitempty"`
-	LedgerDigest   string          `json:"ledgerDigest,omitempty"`
-	Journal        json.RawMessage `json:"journal"`
+	Phase              string                     `json:"phase"`
+	Purpose            string                     `json:"purpose,omitempty"`
+	SourceRevision     uint64                     `json:"sourceRevision"`
+	InvocationID       string                     `json:"invocationID"`
+	RequestHash        string                     `json:"requestHash"`
+	BindingDigest      string                     `json:"bindingDigest,omitempty"`
+	SamplingDigest     string                     `json:"samplingDigest"`
+	InputBinding       string                     `json:"inputBinding,omitempty"`
+	InputCursor        uint64                     `json:"inputCursor,omitempty"`
+	LedgerID           string                     `json:"ledgerID,omitempty"`
+	LedgerRevision     uint64                     `json:"ledgerRevision,omitempty"`
+	LedgerDigest       string                     `json:"ledgerDigest,omitempty"`
+	Journal            json.RawMessage            `json:"journal"`
+	PreparationContext *ManagedPreparationContext `json:"preparationContext,omitempty"`
 	// RequalifiedFrom binds an expired first-owner frontier to its exact
 	// preceding immutable point. No callback return is inferred.
 	RequalifiedFrom      string `json:"requalifiedFrom,omitempty"`
@@ -147,7 +156,7 @@ func (p ManagedSafePoint) AgentObligations() (ManagedAgentObligations, bool) {
 	var o ManagedAgentObligations
 	if p.LifecycleVersion != ManagedLifecycleAgentObligations || json.Unmarshal(p.LifecycleSource, &o) != nil ||
 		o.SourceRevision != p.Source.Run.Revision || o.InvocationID != p.ModelInvocationID || o.RequestHash != p.ModelRequestHash ||
-		!validToolReceiptDigest(o.SamplingDigest) || p.Host.Attempt != 1 || (o.InputBinding == "" && o.InputCursor != 0) ||
+		p.Host.Attempt != 1 || (o.InputBinding == "" && o.InputCursor != 0) ||
 		(o.LedgerID == "" && o.InputBinding == "") {
 		return o, false
 	}
@@ -160,6 +169,17 @@ func (p ManagedSafePoint) AgentObligations() (ManagedAgentObligations, bool) {
 			return o, false
 		}
 	} else if o.LedgerID != p.Host.TurnID || o.LedgerRevision == 0 || !validToolReceiptDigest(o.LedgerDigest) {
+		return o, false
+	}
+	// Preparation has no Model Invocation. It is a separately tagged
+	// phase of the same native obligation proof, never a fake sampling ID.
+	if o.Phase == "prepare" {
+		c := o.PreparationContext
+		return o, c != nil && c.CheckpointID != "" && validToolReceiptDigest(c.CheckpointDigest) &&
+			o.InvocationID == "" && o.RequestHash == "" && o.SamplingDigest == "" && o.Purpose == "" &&
+			o.BindingDigest == "" && o.RequalifiedFrom == "" && o.SettledReceiptDigest == ""
+	}
+	if o.PreparationContext != nil || o.InvocationID == "" || len(o.RequestHash) != 64 || !validToolReceiptDigest(o.SamplingDigest) {
 		return o, false
 	}
 	if o.SettledReceiptDigest != "" && (o.RequalifiedFrom == "" || o.Phase != "pending" || o.LedgerID == "" || !validToolReceiptDigest(o.SettledReceiptDigest)) {
@@ -177,12 +197,15 @@ func (p ManagedSafePoint) AgentObligations() (ManagedAgentObligations, bool) {
 }
 
 func (p ManagedSafePoint) Valid() bool {
+	modelIdentity := p.ModelInvocationID != "" && len(p.ModelRequestHash) == 64
 	if p.LifecycleVersion == ManagedLifecycleAgentObligations {
-		if _, ok := p.AgentObligations(); !ok {
+		o, ok := p.AgentObligations()
+		if !ok {
 			return false
 		}
+		modelIdentity = o.Phase == "prepare" || modelIdentity
 	}
-	return p.ID != "" && p.RecoveryID == ManagedRecoveryID(p.ID, p.Host) && p.Host.Valid() && p.Source.Run.ID == p.Host.RunID && p.Source.Run.Kind == "agent" && p.Source.Run.ParentRunID == "" && p.Source.Run.Status == RunStatusRunning && p.Source.Run.Revision > 0 && json.Valid(p.Source.State) && p.OriginalGrant.ChildRunID == p.Host.RunID && p.OriginalGrant.MatchesExecution(p.OriginalLease) && p.ModelInvocationID != "" && len(p.ModelRequestHash) == 64 && (p.LifecycleVersion == "managed-context-v1" || p.LifecycleVersion == ManagedLifecycleWorkingStateSummary || p.LifecycleVersion == ManagedLifecycleAgentObligations) && json.Valid(p.LifecycleSource)
+	return p.ID != "" && p.RecoveryID == ManagedRecoveryID(p.ID, p.Host) && p.Host.Valid() && p.Source.Run.ID == p.Host.RunID && p.Source.Run.Kind == "agent" && p.Source.Run.ParentRunID == "" && p.Source.Run.Status == RunStatusRunning && p.Source.Run.Revision > 0 && json.Valid(p.Source.State) && p.OriginalGrant.ChildRunID == p.Host.RunID && p.OriginalGrant.MatchesExecution(p.OriginalLease) && modelIdentity && (p.LifecycleVersion == "managed-context-v1" || p.LifecycleVersion == ManagedLifecycleWorkingStateSummary || p.LifecycleVersion == ManagedLifecycleAgentObligations) && json.Valid(p.LifecycleSource)
 }
 
 // ManagedTransfer retains one immutable original recovery identity. Selection
@@ -247,7 +270,7 @@ type ManagedRecoveryHostStore interface {
 }
 
 // ManagedSafePointProof is not externally constructible. Stores must validate
-// Matches within the SAME transaction as the source pending-intent mutation.
+// Matches within the SAME transaction as the qualified source mutation.
 type ManagedSafePointProof struct {
 	point ManagedSafePoint
 	proof *featurecontrol.Proof
@@ -281,6 +304,9 @@ func managedSafePointEventMatches(point ManagedSafePoint, events []EventDraft) b
 		}
 		if o.RequalifiedFrom != "" {
 			return false
+		}
+		if o.Phase == "prepare" {
+			return events[0].Type == "agent.native_preparation.ready" || events[0].Type == "agent.input_applied"
 		}
 		if o.Purpose == "" && o.Phase == "consumed" {
 			return events[0].Type == "agent.input_applied"

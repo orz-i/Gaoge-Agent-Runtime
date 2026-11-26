@@ -67,10 +67,14 @@ func (s *sharedSummaryReceiptFaultStore) ApplyExecution(ctx context.Context, lea
 }
 
 func TestAgentSessionSummaryProducesNativeStateAndVerifiesPriorOrigin(t *testing.T) {
-	for _, name := range []string{"success", "invalid output fallback", "missing prior origin", "native recovery complete source", "shared budget", "shared token budget", "last shared call", "shared before receipt", "shared after receipt", "combined managed pending", "combined managed completed", "combined managed consumed"} {
+	for _, name := range []string{"success", "invalid output fallback", "missing prior origin", "native recovery complete source", "shared budget", "shared token budget", "last shared call", "shared before receipt", "shared after receipt", "combined managed pending", "combined managed completed", "combined managed consumed", "combined managed input before", "combined managed input after", "combined managed business before", "combined managed business after"} {
 		t.Run(name, func(t *testing.T) {
 			invalid := name == "invalid output fallback"
 			combined := strings.HasPrefix(name, "combined managed ")
+			inputFrontier := strings.HasPrefix(name, "combined managed input ")
+			businessFrontier := strings.HasPrefix(name, "combined managed business ")
+			interphase := inputFrontier || businessFrontier
+			var inputs *managedCountingInputs
 			nativeRecovery := name == "native recovery complete source" || combined
 			shared := strings.HasPrefix(name, "shared ") || name == "last shared call" || combined
 			fault := name == "shared before receipt" || name == "shared after receipt"
@@ -84,6 +88,15 @@ func TestAgentSessionSummaryProducesNativeStateAndVerifiesPriorOrigin(t *testing
 				response := model.Response{Content: "answer", Usage: &model.Usage{InputTokens: 10, OutputTokens: 5}}
 				if request.OutputContract != nil && request.OutputContract.Name == "working_state_summary" {
 					summaryCalls++
+					if interphase {
+						run, e := runs.Load(t.Context(), request.RunID)
+						if e != nil {
+							return response, e
+						}
+						if _, e = inputs.Submit(t.Context(), run.Run, "later", "late summary steering"); e != nil {
+							return response, e
+						}
+					}
 					backing.armed = fault
 					wantCap := int64(128)
 					if tokenBudget {
@@ -148,7 +161,6 @@ func TestAgentSessionSummaryProducesNativeStateAndVerifiesPriorOrigin(t *testing
 				}
 			}
 			var combinedStore *managedObligationStore
-			var inputs *managedCountingInputs
 			if nativeRecovery {
 				var nativeStore kernel.Store = runs
 				if combined {
@@ -159,7 +171,14 @@ func TestAgentSessionSummaryProducesNativeStateAndVerifiesPriorOrigin(t *testing
 					case "combined managed consumed":
 						event = agent.EventContextSummaryConsumed
 					}
-					combinedStore = &managedObligationStore{Store: runs, event: event, count: 1}
+					count := 1
+					if inputFrontier {
+						event = "agent.input_applied"
+					}
+					if businessFrontier {
+						count = 2
+					}
+					combinedStore = &managedObligationStore{Store: runs, event: event, count: count, before: strings.HasSuffix(name, " before")}
 					nativeStore = combinedStore
 					queue, e := agent.NewMemoryRunInputs("summary-queue")
 					if e != nil {
@@ -197,14 +216,27 @@ func TestAgentSessionSummaryProducesNativeStateAndVerifiesPriorOrigin(t *testing
 					t.Fatal(e)
 				}
 				before, e := agent.ViewState(original)
-				if e != nil || len(before.ModelInvocations) != 1 || before.InputCursor != 0 {
-					t.Fatalf("wrong summary source: %v", e)
+				wantInv, wantCursor := 1, uint64(0)
+				if interphase && (!inputFrontier || !strings.HasSuffix(name, " before")) {
+					wantCursor = 1
+				}
+				if businessFrontier && strings.HasSuffix(name, " after") {
+					wantInv = 2
+				}
+				if e != nil || len(before.ModelInvocations) != wantInv || before.InputCursor != wantCursor {
+					t.Fatalf("wrong summary source: %v inv=%d cursor=%d", e, len(before.ModelInvocations), before.InputCursor)
 				}
 				point, e := options.Runtime.LoadManagedRecovery(t.Context(), root.ExecutionRefID)
 				if e != nil || point.SafePoint.LifecycleVersion != kernel.ManagedLifecycleAgentObligations || point.State != kernel.ManagedAvailable {
 					t.Fatalf("missing original combined point: %v %s %s", e, point.State, point.SafePoint.LifecycleVersion)
 				}
-				if _, e = inputs.Submit(t.Context(), original.Run, "later", "late summary steering"); e != nil {
+				if interphase {
+					p, ok := point.SafePoint.AgentObligations()
+					if !ok || !kernel.ManagedSourceMatches(point.SafePoint, original) || before.ModelInvocations[0].Status != agent.ModelInvocationConsumed ||
+						(wantInv == 1 && (p.Phase != "prepare" || p.PreparationContext == nil || p.InvocationID != "")) {
+						t.Fatalf("missing exact summary-to-business frontier: %+v", p)
+					}
+				} else if _, e = inputs.Submit(t.Context(), original.Run, "later", "late summary steering"); e != nil {
 					t.Fatal(e)
 				}
 				reads := inputs.reads
@@ -233,7 +265,10 @@ func TestAgentSessionSummaryProducesNativeStateAndVerifiesPriorOrigin(t *testing
 				if e != nil || view.InputCursor != 1 || view.ModelInvocations[0].ID != before.ModelInvocations[0].ID {
 					t.Fatalf("source identity or input changed: %v cursor=%d", e, view.InputCursor)
 				}
-				if len(client.requests) != 3 || strings.Contains(requestTextManaged(client.requests[1]), "late summary steering") || !strings.Contains(requestTextManaged(client.requests[2]), "late summary steering") {
+				if wantInv == 2 && view.ModelInvocations[1].ID != before.ModelInvocations[1].ID {
+					t.Fatal("business intent replaced")
+				}
+				if len(client.requests) != 3 || strings.Contains(requestTextManaged(client.requests[1]), "late summary steering") || strings.Count(requestTextManaged(client.requests[2]), "late summary steering") != 1 {
 					t.Fatal("late input changed frozen summary or disappeared before business")
 				}
 			} else {

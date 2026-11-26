@@ -68,13 +68,13 @@ func (t *toolBudgetAdmission) requireEntry(ctx context.Context) error {
 // a Host middleware error or a nested foreign Run from qualifying this frame.
 // No persistent execution authority is introduced here.
 type nativeRunAdmission struct {
-	invocation    plugin.RunInvocation
-	denial        atomic.Pointer[nativeAdmissionDenied]
-	entered       atomic.Bool
-	receiptOnly   bool
-	receiptLedger string
-	managedBudget *managedObligations
-	budget        atomic.Pointer[runBudgetAdmission]
+	invocation         plugin.RunInvocation
+	denial             atomic.Pointer[nativeAdmissionDenied]
+	entered            atomic.Bool
+	receiptOnly        bool
+	receiptLedger      string
+	managedObligations *managedObligations
+	budget             atomic.Pointer[runBudgetAdmission]
 }
 
 type nativeAdmissionDenied struct{ cause error }
@@ -118,7 +118,7 @@ func recordBudgetRunDenial(ctx context.Context, adapter *BoundedBudgetAdapter, i
 // admission return. It leaves the existing snapshot unchanged so an already
 // elected cancellation can perform its own Kernel CAS after retirement.
 func (r *Runner) invokeNativeRun(ctx context.Context, source kernel.Snapshot, inv plugin.RunInvocation, next plugin.RunNext) (kernel.Snapshot, error) {
-	frame := &nativeRunAdmission{invocation: inv, managedBudget: r.managedBudgetSource}
+	frame := &nativeRunAdmission{invocation: inv, managedObligations: r.managedObligationSource}
 	if source.Run.ParentRunID == "" {
 		// The actual first Host callback is AFTER all setup/Store reads,
 		// including Managed Leave. Never use an ACK or earlier lease check

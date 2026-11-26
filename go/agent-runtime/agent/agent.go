@@ -383,7 +383,7 @@ type Runner struct {
 	samplingBudget           *BoundedBudgetAdapter
 	toolBudget               *BoundedBudgetAdapter
 	managedContextRecovery   *BoundedContextAdapter
-	managedBudgetSource      *managedObligations
+	managedObligationSource  *managedObligations
 	contextSummary           *ContextSummaryAdapter
 	summaryNativeRecovery    bool
 	approvalPolicies         *plugin.ApprovalPolicySet
@@ -1283,6 +1283,10 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 		return runner.advanceCallAllowance(ctx, snapshot, state, "model")
 	}
 	if _, active := activeModelInvocation(state); !active {
+		snapshot, err = runner.ensureManagedPreparation(ctx, snapshot, state)
+		if err != nil {
+			return snapshot, true, err
+		}
 		updated, _, changed, inputErr := runner.admitRunInputs(ctx, snapshot, state, nil)
 		if inputErr != nil || changed {
 			// Recheck the lease and read the next page before freezing the request.

@@ -414,3 +414,72 @@ func TestManagedQualifiedParkRetainsExactFirstOwnerSource(t *testing.T) {
 		})
 	}
 }
+
+func TestManagedPreparationSafePointRequiresExactNativeProof(t *testing.T) {
+	initial, source, lease, grant, _, _ := managedReducerFixture()
+	previous := source
+	previous.Run.Revision--
+	previous.EventHead--
+	next := Record{Run: source.Run, State: source.State, Checkpoint: source.Checkpoint, Result: source.Result}
+	point := initial.SafePoint
+	point.LifecycleVersion = ManagedLifecycleAgentObligations
+	point.ModelInvocationID, point.ModelRequestHash = "", ""
+	obligation := ManagedAgentObligations{
+		Phase: "prepare", SourceRevision: source.Run.Revision,
+		InputBinding: "original-queue", InputCursor: 1,
+		PreparationContext: &ManagedPreparationContext{CheckpointID: "ctx-source", CheckpointDigest: strings.Repeat("c", 64)},
+		Journal:            json.RawMessage(`{"hydrated":true}`),
+	}
+	set := func(p ManagedSafePoint, o ManagedAgentObligations) ManagedSafePoint {
+		raw, err := json.Marshal(o)
+		if err != nil {
+			t.Fatal(err)
+		}
+		p.LifecycleSource = raw
+		return p
+	}
+	point = set(point, obligation)
+	if !point.Valid() {
+		t.Fatal("pre-Model proof required a fabricated invocation")
+	}
+	proof := ManagedSafePointProof{point: point, proof: featurecontrol.Seal(previous.Run.ID, previous.Run.Revision, "managed_safe_point", grant.ID, previous.State, point)}
+	for _, event := range []string{"agent.native_preparation.ready", "agent.input_applied"} {
+		if !proof.MatchesMutation(previous, next, lease, grant, []EventDraft{{Type: event}}) {
+			t.Fatalf("rejected exact native phase: %s", event)
+		}
+		if (ManagedSafePointProof{point: point}).MatchesMutation(previous, next, lease, grant, []EventDraft{{Type: event}}) {
+			t.Fatalf("public metadata forged native proof: %s", event)
+		}
+	}
+	for _, event := range []string{"agent.model_invocation.pending", "agent.model_invocation.completed", "agent.context_summary.consumed", "run.completed"} {
+		if proof.MatchesMutation(previous, next, lease, grant, []EventDraft{{Type: event}}) {
+			t.Fatalf("preparation proof authorized another event: %s", event)
+		}
+	}
+	for _, change := range []func(*ManagedSafePoint, *ManagedAgentObligations){
+		func(_ *ManagedSafePoint, o *ManagedAgentObligations) { o.PreparationContext = nil },
+		func(_ *ManagedSafePoint, o *ManagedAgentObligations) {
+			o.PreparationContext = &ManagedPreparationContext{CheckpointID: "ctx-source", CheckpointDigest: "bad"}
+		},
+		func(p *ManagedSafePoint, o *ManagedAgentObligations) {
+			p.ModelInvocationID = "fake"
+			o.InvocationID = "fake"
+		},
+		func(p *ManagedSafePoint, o *ManagedAgentObligations) {
+			p.ModelRequestHash = strings.Repeat("b", 64)
+			o.RequestHash = p.ModelRequestHash
+		},
+		func(_ *ManagedSafePoint, o *ManagedAgentObligations) { o.SamplingDigest = strings.Repeat("b", 64) },
+		func(_ *ManagedSafePoint, o *ManagedAgentObligations) { o.RequalifiedFrom = "old-point" },
+		func(_ *ManagedSafePoint, o *ManagedAgentObligations) { o.SourceRevision++ },
+		func(_ *ManagedSafePoint, o *ManagedAgentObligations) { o.Phase = "pending" },
+		func(p *ManagedSafePoint, _ *ManagedAgentObligations) { p.LifecycleVersion = "managed-context-v1" },
+	} {
+		other, altered := point, obligation
+		change(&other, &altered)
+		other = set(other, altered)
+		if other.Valid() {
+			t.Fatalf("invalid pre-Model phase accepted: %+v", altered)
+		}
+	}
+}

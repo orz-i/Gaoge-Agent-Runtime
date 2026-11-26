@@ -54,57 +54,80 @@ func (r *Runner) combinedManaged(state runState) bool {
 	return r.nativeBudget != nil || state.InputBinding != ""
 }
 
-func (r *Runner) freezeManagedObligations(ctx context.Context, s kernel.Snapshot, state runState, inv ModelInvocation, binding kernel.ManagedHostBinding) (json.RawMessage, bool, error) {
-	if r.rootCallbacks == nil || r.rootCallbacks.unknown.Load() ||
-		binding.Attempt != 1 || len(state.PendingCalls) != 0 || state.PendingApproval != nil ||
-		state.ToolAdmission != nil || state.ToolDispatchID != "" || state.ToolWait != nil ||
-		len(state.DeferredChildren) != 0 || len(state.RecoveredTools) != 0 ||
-		len(state.ExternalSignals) != 0 || state.ExternalToolCancellation != nil || state.ExternalToolHold != nil {
-		return nil, false, nil
+// freezeManagedSource binds the common native frame, exact input cursor
+// and original quiescent ledger. The caller selects only its feature phase.
+func (r *Runner) freezeManagedSource(ctx context.Context, s kernel.Snapshot, state runState, binding kernel.ManagedHostBinding) (managedObligations, budget.Ledger, bool, error) {
+	var p managedObligations
+	var l budget.Ledger
+	if r.rootCallbacks == nil || r.rootCallbacks.unknown.Load() || binding.Attempt != 1 || !managedObligationsQuiescent(state) {
+		return p, l, false, nil
 	}
 	if state.InputBinding != "" && (r.inputs == nil || r.inputBinding != state.InputBinding) {
-		return nil, false, ErrInvalidRequest
+		return p, l, false, ErrInvalidRequest
 	}
-	phase := ""
-	proof := managedObligations{Phase: string(inv.Status), Purpose: inv.Purpose, SourceRevision: s.Run.Revision + 1,
-		InvocationID: inv.ID, RequestHash: inv.RequestHash, SamplingDigest: kernel.ManagedDigest(inv.SamplingPlan),
-		InputBinding: state.InputBinding, InputCursor: state.InputCursor}
-	if inv.Purpose == ModelInvocationContextSummary {
-		phase = string(inv.Status)
-		proof.BindingDigest = kernel.ManagedDigest(inv.ContextSummary)
-	}
-	var budgetOwner any
+	p.SourceRevision, p.InputBinding, p.InputCursor = s.Run.Revision+1, state.InputBinding, state.InputCursor
 	if r.nativeBudget != nil {
 		frame, _ := callbackscope.RunCall(ctx).(*nativeRunAdmission)
 		if frame == nil || frame.invocation.RunID != s.Run.ID {
-			return nil, false, ErrInvalidRequest
+			return p, l, false, ErrInvalidRequest
 		}
 		admission := frame.budget.Load()
 		if admission == nil || admission.adapter != r.nativeBudget || admission.projectionErr != nil || admission.ledger.ID != binding.TurnID {
-			return nil, false, ErrInvalidRequest
+			return p, l, false, ErrInvalidRequest
 		}
-		l, err := r.nativeBudget.observeRunBudget(ctx, admission.ledger, s.Run.ID)
+		var err error
+		l, err = r.nativeBudget.observeRunBudget(ctx, admission.ledger, s.Run.ID)
 		if err != nil {
-			return nil, false, err
+			return p, l, false, err
 		}
 		if l.RunCancelled(s.Run.ID) || l.FinishedRuns[s.Run.ID] || !quiescentManagedLedger(l, s.Run.ID) {
-			return nil, false, nil
+			return p, l, false, nil
 		}
+		p.LedgerID, p.LedgerRevision, p.LedgerDigest = l.ID, l.Revision, managedLedgerDigest(l, s.Run.ID)
+	}
+	return p, l, true, nil
+}
+
+func managedObligationsQuiescent(state runState) bool {
+	return len(state.PendingCalls) == 0 && state.PendingApproval == nil && state.ToolAdmission == nil &&
+		state.ToolDispatchID == "" && state.ToolWait == nil && len(state.DeferredChildren) == 0 &&
+		len(state.RecoveredTools) == 0 && len(state.ExternalSignals) == 0 &&
+		state.ExternalToolCancellation == nil && state.ExternalToolHold == nil
+}
+
+func (r *Runner) managedBudgetOwner() any {
+	if r.nativeBudget != nil {
+		return r.nativeBudget
+	}
+	return nil
+}
+
+func (r *Runner) freezeManagedObligations(ctx context.Context, s kernel.Snapshot, state runState, inv ModelInvocation, binding kernel.ManagedHostBinding) (json.RawMessage, bool, error) {
+	p, l, eligible, err := r.freezeManagedSource(ctx, s, state, binding)
+	if err != nil || !eligible {
+		return nil, false, err
+	}
+	p.Phase, p.Purpose, p.InvocationID, p.RequestHash = string(inv.Status), inv.Purpose, inv.ID, inv.RequestHash
+	p.SamplingDigest = kernel.ManagedDigest(inv.SamplingPlan)
+	phase := ""
+	if inv.Purpose == ModelInvocationContextSummary {
+		phase = string(inv.Status)
+		p.BindingDigest = kernel.ManagedDigest(inv.ContextSummary)
+	}
+	if r.nativeBudget != nil {
 		if inv.Status != ModelInvocationConsumed && (inv.SamplingPlan == nil || inv.SamplingPlan.LedgerID != l.ID) {
 			return nil, false, ErrInvalidRequest
 		}
 		if !managedModelLedgerPhase(inv, l) {
 			return nil, false, nil
 		}
-		proof.LedgerID, proof.LedgerRevision, proof.LedgerDigest = l.ID, l.Revision, managedLedgerDigest(l, s.Run.ID)
-		budgetOwner = r.nativeBudget
 	}
-	journal, ok := callbackscope.ManagedObligationSuspension(ctx, r.nativeContext, budgetOwner, inv.Request, phase)
+	journal, ok := callbackscope.ManagedObligationSuspension(ctx, r.nativeContext, r.managedBudgetOwner(), inv.Request, phase)
 	if !ok {
 		return nil, false, nil
 	}
-	proof.Journal = journal
-	raw, err := json.Marshal(proof)
+	p.Journal = journal
+	raw, err := json.Marshal(p)
 	return raw, err == nil, err
 }
 
@@ -133,16 +156,21 @@ func (r *Runner) validateManagedObligations(point kernel.ManagedSafePoint) (mana
 		return p, ErrInvalidRequest
 	}
 	state, err := decodeState(point.Source.State)
-	if err != nil || state.InputBinding != p.InputBinding || state.InputCursor != p.InputCursor ||
+	if err != nil || state.SummaryNativeRecovery != r.SupportsSummaryNativeRecovery() ||
+		state.InputBinding != p.InputBinding || state.InputCursor != p.InputCursor ||
 		(p.InputBinding != "" && (r.inputs == nil || r.inputBinding != p.InputBinding)) ||
 		(p.LedgerID != "") != (r.nativeBudget != nil) ||
 		(p.LedgerID == "" && p.InputBinding == "") {
 		return p, ErrInvalidRequest
 	}
-	if len(state.PendingCalls) != 0 || state.PendingApproval != nil || state.ToolAdmission != nil || state.ToolDispatchID != "" ||
-		state.ToolWait != nil || len(state.DeferredChildren) != 0 || len(state.RecoveredTools) != 0 || len(state.ExternalSignals) != 0 ||
-		state.ExternalToolCancellation != nil || state.ExternalToolHold != nil {
+	if !managedObligationsQuiescent(state) {
 		return p, ErrInvalidRequest
+	}
+	if p.Phase == "prepare" {
+		if !r.supportsManagedPreparation() || !managedPreparationState(point.Source, state) {
+			return p, ErrInvalidRequest
+		}
+		return p, nil
 	}
 	if len(state.ModelInvocations) == 0 {
 		return p, ErrInvalidRequest
@@ -161,7 +189,7 @@ func (r *Runner) validateManagedObligations(point kernel.ManagedSafePoint) (mana
 			uint64(inv.ContextSummary.Root.Attempt) != uint64(point.Host.Attempt) {
 			return p, ErrInvalidRequest
 		}
-	} else if p.Purpose != "" || p.BindingDigest != "" || !r.SupportsManagedContextRecovery() ||
+	} else if p.Purpose != "" || p.BindingDigest != "" || (!r.SupportsManagedContextRecovery() && !r.SupportsSummaryNativeRecovery()) ||
 		inv.Purpose != "" || (inv.Status == ModelInvocationConsumed && (state.InputBinding == "" || state.InputCursor == 0)) {
 		return p, ErrInvalidRequest
 	}
@@ -515,6 +543,21 @@ func (r *Runner) preflightCombinedManaged(ctx context.Context, t kernel.ManagedT
 	if !kernel.ManagedSourceMatches(t.SafePoint, current) {
 		return p, errors.Join(ErrRootOutcomeUnknown, kernel.ErrExecutionConflict)
 	}
-	_, err = r.checkManagedLedger(ctx, p, t.SafePoint.Host.RunID, true, false)
-	return p, err
+	l, err := r.checkManagedLedger(ctx, p, t.SafePoint.Host.RunID, true, false)
+	if err != nil {
+		return p, err
+	}
+	if p.Phase == "prepare" {
+		state, e := decodeState(current.State)
+		if e != nil {
+			return p, e
+		}
+		if _, err = r.readManagedPreparationContext(ctx, t.SafePoint.Host, p.PreparationContext, state); err != nil {
+			return p, err
+		}
+		if p.LedgerID != "" && !managedPreparationLedger(state, l) {
+			return p, budget.ErrLedgerConflict
+		}
+	}
+	return p, nil
 }
