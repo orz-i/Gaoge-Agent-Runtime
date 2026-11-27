@@ -162,11 +162,9 @@ func ea1NewElection(t *testing.T, factory func(*testing.T) (kernel.Store, kernel
 	return f
 }
 func (f *ea1ElectionFixture) runner(rt *kernel.Runtime, owner string, host bool) *agent.Runner {
-	ttl, callTimeout := 2*time.Second, ea1StoreBackedCallTimeout
+	ttl, callTimeout := ea1FixtureLeaseWindow(f.request.DeadlineAt), ea1StoreBackedCallTimeout
 	if f.renewalFixture { // Preserve the 500 ms renewal threshold.
 		ttl, callTimeout = 4*time.Second, 2500*time.Millisecond
-	} else if f.request.DeadlineAt != nil { // Isolate Run deadline from lease expiry.
-		ttl = 2 * ea1StoreBackedDeadline
 	}
 	deps := agent.Dependencies{Runtime: rt, Model: f.physical, Catalog: f.catalog, Executor: f.catalog, ModelOutcomeVerifier: f.modelVerifier, ToolOutcomeVerifier: f.toolVerifier, RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: ttl}, Execution: ea1FixtureExecutionPolicy(callTimeout)}
 	if host {

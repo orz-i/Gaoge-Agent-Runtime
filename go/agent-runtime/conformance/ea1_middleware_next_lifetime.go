@@ -299,10 +299,9 @@ func ea1MWNew(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store
 }
 func (f *ea1MWFixture) runnerMW(rt *kernel.Runtime) *agent.Runner {
 	d := agent.Dependencies{Runtime: rt, Model: f.physical, Catalog: f.catalog, Executor: f.catalog, RunMiddleware: []plugin.RunMiddleware{f.layer}, ModelMiddleware: []plugin.ModelMiddleware{f.layer}, ToolMiddleware: []plugin.ToolMiddleware{f.layer}, Execution: ea1StoreBackedExecutionPolicy()}
-	leaseWindow := 2 * time.Second
+	leaseWindow := ea1FixtureLeaseWindow(f.request.DeadlineAt)
 	if f.mode == "async" {
-		d.Execution.Model.Timeout = 5 * time.Second
-		d.Execution.Tool.Timeout = 5 * time.Second
+		d.Execution = ea1FixtureExecutionPolicy(5 * time.Second)
 		leaseWindow = 10 * time.Second
 	}
 	if !f.automatic {

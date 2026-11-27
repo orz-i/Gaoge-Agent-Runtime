@@ -11,20 +11,23 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
-// EA1 receipt/settlement callbacks read the actual Store; allow slow native
-// or race-instrumented I/O without crossing the two-second lease's safety margin.
+// EA1 Store-backed callbacks need I/O margin within the two-second default lease.
 const ea1StoreBackedCallTimeout = 900 * time.Millisecond
-
-// Leave setup time before the intended cut; the actual Store still enforces
-// the frozen deadline, and each expiry barrier waits for that same deadline.
 const ea1StoreBackedDeadline = 3 * time.Second
+
+// Deadline fixtures must expire the Run before its live native Lease.
+func ea1FixtureLeaseWindow(deadline *time.Time) time.Duration {
+	if deadline != nil {
+		return 2 * ea1StoreBackedDeadline
+	}
+	return 2 * time.Second
+}
 
 func ea1StoreBackedExecutionPolicy() agent.ExecutionPolicy {
 	return ea1FixtureExecutionPolicy(ea1StoreBackedCallTimeout)
 }
 
-// Explicit timing cases can still select their own bounded window (e.g.
-// renewal or async middleware); they retain the same single-attempt policy.
+// Renewal and async timing fixtures retain the same single-attempt policy.
 func ea1FixtureExecutionPolicy(timeout time.Duration) agent.ExecutionPolicy {
 	call := agent.CallPolicy{Timeout: timeout, MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}
 	return agent.ExecutionPolicy{Model: call, Tool: call}
