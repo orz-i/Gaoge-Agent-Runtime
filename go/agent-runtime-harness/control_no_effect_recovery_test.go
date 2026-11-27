@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
 	interactionadapter "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/interaction"
@@ -264,6 +265,17 @@ func (store *lostAllowanceACKStore) ApplyControl(
 }
 
 func TestNativeAllowanceLostCASReplyDoesNotNeedHostRetirement(t *testing.T) {
+	for _, configured := range []bool{false, true} {
+		name := "native"
+		if configured {
+			name = "unrelated-interaction-handler"
+		}
+		t.Run(name, func(t *testing.T) { testNativeAllowanceLostReply(t, configured) })
+	}
+}
+
+func testNativeAllowanceLostReply(t *testing.T, configured bool) {
+	t.Helper()
 	store := &lostAllowanceACKStore{Store: memory.NewStore()}
 	runtime, err := kernel.New(kernel.Dependencies{Store: store, Clock: fixedClock{}})
 	if err != nil {
@@ -278,9 +290,12 @@ func TestNativeAllowanceLostCASReplyDoesNotNeedHostRetirement(t *testing.T) {
 		t.Fatal(err)
 	}
 	harnessStore := harness.NewMemoryStore()
-	runner, err := harness.NewRunner(harness.Dependencies{
-		Runtime: runtime, Store: harnessStore, Agent: direct, Clock: fixedClock{},
-	})
+	handler := &recordingInteractionResponseHandler{}
+	deps := harness.Dependencies{Runtime: runtime, Store: harnessStore, Agent: direct, Clock: fixedClock{}}
+	if configured {
+		deps.Interactions = handler
+	}
+	runner, err := harness.NewRunner(deps)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,13 +306,17 @@ func TestNativeAllowanceLostCASReplyDoesNotNeedHostRetirement(t *testing.T) {
 		t.Fatalf("failed to create paused Agent: %v", err)
 	}
 	owner, _ := harness.TopLevelInvocation(paused)
+	original, err := runtime.Load(t.Context(), owner.ExecutionRefID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	store.armed.Store(true)
 	_, firstErr := runner.GrantCallAllowance(t.Context(), paused.Turn.ID, paused.Turn.Revision, agent.CallAllowance{LLMCalls: 1})
 	if !errors.Is(firstErr, errControlLostACK) || errors.Is(firstErr, agent.ErrControlNoEffect) {
 		t.Fatalf("lost post-CAS acknowledgment was incorrectly classified: %v", firstErr)
 	}
 	run, err := runtime.Load(t.Context(), owner.ExecutionRefID)
-	if err != nil || run.Run.Status != kernel.RunStatusRunning {
+	if err != nil || run.Run.Status != kernel.RunStatusRunning || run.Run.Revision != original.Run.Revision+1 {
 		t.Fatalf("fixture did not physically commit before ACK was lost: status=%s err=%v", run.Run.Status, err)
 	}
 	items, err := harnessStore.ListItems(t.Context(), paused.Turn.ID, 0, 500)
@@ -316,7 +335,25 @@ func TestNativeAllowanceLostCASReplyDoesNotNeedHostRetirement(t *testing.T) {
 	if err != nil || view.CallAllowance == nil || view.CallAllowance.LLMCalls != 2 || view.Budget.Usage.LLMCalls != 1 {
 		t.Fatalf("original allowance not committed exactly once: %+v %v", view, err)
 	}
-	reopened, e := harness.NewRunner(harness.Dependencies{Runtime: runtime, Store: harnessStore, Agent: direct, Clock: fixedClock{}})
+	claims, err := store.ClaimTransitions(t.Context(), kernel.TransitionClaimRequest{WorkerID: "allowance-check", Limit: 500, LeaseDuration: time.Minute, Now: runtime.Now().Add(time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	granted := 0
+	for _, claim := range claims {
+		for _, event := range claim.Transition.Events {
+			if event.Type == "agent.allowance_granted" {
+				if !event.Wakeup || claim.Transition.RunID != run.Run.ID || claim.Transition.Revision != run.Run.Revision {
+					t.Fatal("allowance wakeup did not commit with its original native CAS")
+				}
+				granted++
+			}
+		}
+	}
+	if granted != 1 {
+		t.Fatalf("native allowance wakeup count = %d", granted)
+	}
+	reopened, e := harness.NewRunner(deps)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -335,7 +372,15 @@ func TestNativeAllowanceLostCASReplyDoesNotNeedHostRetirement(t *testing.T) {
 	if e != nil || view.CallAllowance == nil || view.CallAllowance.LLMCalls != 2 || view.Budget.Usage.LLMCalls != 2 {
 		t.Fatalf("allowance replayed: %+v %v", view, e)
 	}
-
+	items, e = harnessStore.ListItems(t.Context(), paused.Turn.ID, 0, 500)
+	if e != nil || handler.calls != 0 || handler.validationCalls != 0 {
+		t.Fatalf("unrelated interaction was invoked: %v %+v", e, handler)
+	}
+	for _, item := range items {
+		if phase, valid := harness.VerifiedExecutionDispatchGrant(item); valid && (phase == "grant-call-allowance" || phase == "resume") {
+			t.Fatalf("native command elected Host dispatch: %s", phase)
+		}
+	}
 }
 
 // Even the concrete native Agent can run host-defined middleware. A middleware

@@ -243,9 +243,6 @@ func (r *Runner) resolveNativeApproval(ctx context.Context, native *agent.Runner
 	if err := r.requireInvocationRootModelOutputCeiling(ctx, inv); err != nil {
 		return kernel.Snapshot{}, err
 	}
-	if err := r.requireUnclaimedInteractionContinuation(ctx, turn.ID, ""); err != nil {
-		return kernel.Snapshot{}, err
-	}
 	ready, err := r.originalNativeCommand(ctx, inv)
 	if err != nil || !ready {
 		return kernel.Snapshot{}, errors.Join(ErrConflict, err)

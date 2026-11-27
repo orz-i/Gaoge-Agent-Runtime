@@ -399,14 +399,14 @@ func (runner *Runner) validateParentItem(ctx context.Context, turnID, parentItem
 	return nil
 }
 
-// nativeRootCommands selects the exact local execution owner. A generic Host
-// interaction handler, external accounting or a foreign/custom canceller
-// has an independent effect boundary and cannot use this native-only contract.
+// nativeRootCommands selects the local execution owner with native cancellation
+// and accounting. Actual outstanding Interaction claims, not handler presence,
+// fence the command through originalNativeCommand.
 func (runner *Runner) nativeRootCommands() *agent.Runner {
 	native, ok := runner.agent.(*agent.Runner)
 	cancel, local := runner.cancellation.(*kernel.Runtime)
 	if !ok || !local || cancel != runner.runtime || !native.ObservesKernelRuntime(runner.runtime) ||
-		runner.interactions != nil || (runner.budgets != nil && !runner.nativeBudget()) {
+		(runner.budgets != nil && !runner.nativeBudget()) {
 		return nil
 	}
 	if _, bound := runner.runtime.BoundExecutionLease(); bound {
@@ -431,6 +431,9 @@ func (runner *Runner) originalNativeCommand(ctx context.Context, inv Invocation)
 	}
 	if terminalTurnStatus(turn.Status) {
 		return false, ErrConflict
+	}
+	if e = runner.requireUnclaimedInteractionContinuation(ctx, inv.TurnID, ""); e != nil {
+		return false, e
 	}
 	current, e := runner.store.GetInvocation(ctx, inv.ID)
 	if e != nil || !sameFrozenInvocationAuthority(inv, current) || terminalInvocationStatus(current.Status) {
