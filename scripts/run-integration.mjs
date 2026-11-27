@@ -3,7 +3,18 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const externalServices = process.argv.includes("--external-services");
+const args = process.argv.slice(2);
+const externalServices = args.includes("--external-services");
+const suite = args.find((arg) => arg.startsWith("--suite="))?.slice("--suite=".length);
+const suites = {
+  kernel: ["go/agent-runtime-postgres", "^TestRealPostgres", false],
+  harness: ["go/agent-runtime-harness-postgres", "^TestRealPostgres", false],
+  redis: ["go/agent-runtime-redis", "^TestRealRedis", false],
+  continuation: ["integration/continuation-e2e", "^(TestRealPostgres|TestPR151)", true],
+};
+if (new Set(args).size !== args.length || args.filter((arg) => arg.startsWith("--suite=")).length > 1 ||
+    args.some((arg) => arg !== "--external-services" && !arg.startsWith("--suite=")) ||
+    (suite !== undefined && !Object.hasOwn(suites, suite))) throw new Error("unknown integration suite or argument");
 const compose = ["compose", "-p", "gaoge-agent-runtime-beta", "-f", "docker-compose.test.yml"];
 
 if (externalServices) {
@@ -29,10 +40,10 @@ function requireEnvironment() {
 }
 
 function runSuites(env) {
-  run("go", ["test", "-race", "./...", "-run", "^TestRealPostgres", "-count=1", "-v"], path.join(root, "go/agent-runtime-postgres"), false, env);
-  run("go", ["test", "-race", "./...", "-run", "^TestRealPostgres", "-count=1", "-v"], path.join(root, "go/agent-runtime-harness-postgres"), false, env);
-  run("go", ["test", "-race", "./...", "-run", "^TestRealRedis", "-count=1", "-v"], path.join(root, "go/agent-runtime-redis"), false, env);
-  run("go", ["test", "-race", "./...", "-run", "^(TestRealPostgres|TestPR151)", "-count=1", "-v"], path.join(root, "integration/continuation-e2e"), false, { ...env, GOWORK: "off" });
+  for (const [directory, pattern, detached] of (suite === undefined ? Object.values(suites) : [suites[suite]])) {
+    run("go", ["test", "-race", "./...", "-run", pattern, "-count=1", "-v"], path.join(root, directory), false,
+      detached ? { ...env, GOWORK: "off" } : env);
+  }
 }
 
 function run(command, args, cwd, allowFailure = false, env = process.env) {

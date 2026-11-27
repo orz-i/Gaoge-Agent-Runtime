@@ -2,9 +2,10 @@ name: CI
 
 on:
   pull_request:
-    types: [opened, reopened, synchronize, edited, ready_for_review]
+    types: [opened, reopened, synchronize, edited, ready_for_review, converted_to_draft]
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -14,15 +15,16 @@ env:
   CI_TIMING_DIRECTORY: ${{ github.workspace }}/artifacts/ci-timings
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # Milestone dispatches must never cancel mandatory main-push validation.
+  group: ci-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   # Keep the existing required-check name; fail closed for every dependency.
   quality:
-    name: Unit, race, lint, and release consumers
+    name: ${{ github.event_name == 'workflow_dispatch' && 'Full CI (milestone, non-merge)' || 'Unit, race, lint, and release consumers' }}
     if: ${{ always() }}
-    needs: [quality-main, race, release-commands-windows, sqlite-windows, coverage-go, coverage, security, integration, observability]
+    needs: [quality-main, race, release-commands-windows, sqlite-windows, coverage-go, coverage, security, integration-shards, integration, observability]
     runs-on: ubuntu-26.04
     timeout-minutes: 3
     steps:
@@ -30,9 +32,11 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 24
-      - name: Require all quality checks to pass
+      - name: Require actually executed Full CI (Draft is deliberately blocked)
         env:
           CI_NEEDS_JSON: ${{ toJSON(needs) }}
+          CI_PR_DRAFT: ${{ github.event_name == 'pull_request' && toJSON(github.event.pull_request.draft) || 'null' }}
+          CI_GATE: ${{ github.event_name == 'workflow_dispatch' && 'milestone' || 'full' }}
         run: node scripts/check-ci-results.mjs
 
   impact:
@@ -114,13 +118,83 @@ jobs:
       - name: Run smoke and release-consumer checks
         run: make ci-consumers
 
+      - name: Run TypeScript tests in Draft (Full uses coverage)
+        if: github.event_name == 'pull_request' && github.event.pull_request.draft == true
+        run: make ts-test
+
       - name: Publish CI timing baseline
         if: always()
         continue-on-error: true
         uses: ./.github/actions/upload-ci-timings
 
+  fast-native:
+    name: Draft contracts (${{ matrix.profile }})
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft == true }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [core, native]
+    services:
+      postgres:
+        image: ${{ matrix.profile == 'native' && 'postgres:16-alpine' || '' }}
+        env:
+          POSTGRES_USER: agent_runtime
+          POSTGRES_PASSWORD: agent_runtime
+          POSTGRES_DB: agent_runtime
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U agent_runtime -d agent_runtime"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      TEST_POSTGRES_DSN: ${{ matrix.profile == 'native' && 'postgres://agent_runtime:agent_runtime@127.0.0.1:5432/agent_runtime?sslmode=disable' || '' }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/setup-go
+        with:
+          cache-scope: fast-${{ matrix.profile }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - uses: ./.github/actions/setup-sqlite
+      - name: Run the original Draft contract profile
+        env:
+          CI_FAST_PROFILE: ${{ matrix.profile }}
+        run: node scripts/ci-timings.mjs --run "draft-$CI_FAST_PROFILE" -- node scripts/ci-fast.mjs "--profile=$CI_FAST_PROFILE"
+      - name: Publish CI timing baseline
+        if: always()
+        continue-on-error: true
+        uses: ./.github/actions/upload-ci-timings
+        with:
+          suffix: -${{ matrix.profile }}
+
+  fast:
+    name: Fast CI (Draft task feedback)
+    if: ${{ always() && github.event_name == 'pull_request' && github.event.pull_request.draft == true }}
+    needs: [quality-main, security, fast-native]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Require all actually executed Draft checks
+        env:
+          CI_NEEDS_JSON: ${{ toJSON(needs) }}
+          CI_PR_DRAFT: ${{ github.event_name == 'pull_request' && toJSON(github.event.pull_request.draft) || 'null' }}
+          CI_GATE: fast
+        run: node scripts/check-ci-results.mjs
+
   race:
     name: Go race detector (${{ matrix.shard }})
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     strategy:
@@ -147,6 +221,7 @@ jobs:
 
   release-commands-windows:
     name: Windows release command safety
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: windows-latest
     timeout-minutes: 10
     steps:
@@ -166,6 +241,7 @@ jobs:
 
   sqlite-windows:
     name: Windows SQLite profiles
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: windows-latest
     timeout-minutes: 25
     steps:
@@ -181,6 +257,7 @@ jobs:
 
   coverage-go:
     name: Go unit and coverage (${{ matrix.shard }})
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     strategy:
@@ -215,6 +292,7 @@ jobs:
 
   coverage:
     name: Coverage gates
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     needs: [coverage-go]
     runs-on: ubuntu-26.04
     timeout-minutes: 15
@@ -275,10 +353,15 @@ jobs:
         continue-on-error: true
         uses: ./.github/actions/upload-ci-timings
 
-  integration:
-    name: PostgreSQL and Redis integration
+  integration-shards:
+    name: Real-engine integration (${{ matrix.suite }})
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-26.04
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [kernel, harness, redis, continuation]
     services:
       postgres:
         image: postgres:16-alpine
@@ -308,13 +391,39 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-go
+        with:
+          cache-scope: integration-${{ matrix.suite }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
       - uses: ./.github/actions/setup-sqlite
-      - name: Run real-engine suites
-        run: node scripts/run-ci-targets.mjs integration-test
+      - name: Run the complete original real-engine shard
+        env:
+          CI_INTEGRATION_SUITE: ${{ matrix.suite }}
+        run: node scripts/ci-timings.mjs --run "integration-$CI_INTEGRATION_SUITE" -- node scripts/run-integration.mjs --external-services "--suite=$CI_INTEGRATION_SUITE"
       - name: Publish CI timing baseline
         if: always()
         continue-on-error: true
         uses: ./.github/actions/upload-ci-timings
+        with:
+          suffix: -${{ matrix.suite }}
+
+  integration:
+    # The existing independently required context is not a matrix child.
+    name: ${{ github.event_name == 'workflow_dispatch' && 'Full real-engine integration (milestone)' || 'PostgreSQL and Redis integration' }}
+    if: ${{ always() }}
+    needs: [integration-shards]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 3
+    steps:
+      - name: Require all real-engine shards (Draft is deliberately blocked)
+        env:
+          INTEGRATION_RESULT: ${{ needs.integration-shards.result }}
+        run: |
+          if [[ "$INTEGRATION_RESULT" != success ]]; then
+            echo "::error::Complete real-engine integration has not passed ($INTEGRATION_RESULT). Draft Fast CI is not merge authorization."
+            exit 1
+          fi
 
   observability:
     name: OpenTelemetry Collector E2E
