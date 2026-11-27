@@ -168,7 +168,7 @@ func (runner *Runner) resumeCommittedCancellationFence(ctx context.Context, turn
 	terminal := err == nil && terminalRuntimeStatus(snapshot.Run.Status)
 	if errors.Is(err, kernel.ErrNotFound) {
 		var proofErr error
-		terminal, proofErr = runner.cancellationNoDispatchReady(ctx, turn, runID)
+		terminal, proofErr = runner.missingRunCancellation(ctx, turn, runID, nil)
 		if proofErr != nil {
 			return Item{}, proofErr
 		}

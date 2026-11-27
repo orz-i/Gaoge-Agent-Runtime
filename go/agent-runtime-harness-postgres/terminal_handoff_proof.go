@@ -43,7 +43,7 @@ func terminalHandoffChildEvidenceTx(tx *gorm.DB, turnID string, owners []harness
 	for _, item := range all {
 		query := tx.Where("parent_item_id = ?", item.ID)
 		switch {
-		case item.Kind == harness.ItemDelegation && item.Status == harness.ItemStarted:
+		case item.Kind == harness.ItemDelegation && (item.Status == harness.ItemStarted || item.Status == harness.ItemWaiting):
 			query = query.Where("kind = ?", string(harness.ItemDelegation))
 		case item.ParentItemID == harness.ExecutionDispatchParentItemID ||
 			item.ParentItemID == harness.CancellationFenceParentItemID ||

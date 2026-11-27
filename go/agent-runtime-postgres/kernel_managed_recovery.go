@@ -163,6 +163,20 @@ func (s *KernelStore) CommitManagedCancellation(ctx context.Context, q kernel.Ma
 		if e != nil {
 			return t, e
 		}
+		// Create locks the same ancestor row; inspect original descendant
+		// Runs and unresolved Grants before committing native termination.
+		var busy bool
+		if e = tx.Raw(`WITH RECURSIVE children(id) AS (
+			SELECT run_id FROM agent_kernel_runs WHERE parent_run_id=? OR logical_parent_run_id=?
+			UNION SELECT r.run_id FROM agent_kernel_runs r JOIN children c ON r.parent_run_id=c.id OR r.logical_parent_run_id=c.id)
+			SELECT EXISTS(SELECT 1 FROM children c JOIN agent_kernel_runs r ON r.run_id=c.id
+			WHERE r.status NOT IN ('completed','failed','cancelled') OR r.execution_quarantine_revision<>0
+			OR EXISTS(SELECT 1 FROM agent_kernel_child_effect_grants g WHERE g.child_run_id=c.id))`, q.RunID, q.RunID).Scan(&busy).Error; e != nil {
+			return t, translateKernelError(e)
+		}
+		if busy {
+			return t, kernel.ErrExecutionConflict
+		}
 		n, m, e := kernel.ManagedCancellationMutation(t, q, snap, now)
 		if e != nil {
 			return t, e

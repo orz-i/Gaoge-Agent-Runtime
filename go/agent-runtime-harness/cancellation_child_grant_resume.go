@@ -159,7 +159,7 @@ func (runner *Runner) cleanupReturnedRootChildren(ctx context.Context, turn Turn
 		_, err = native.ReconcileRootDeferredChildren(ctx, current.Run.ID, current.Run.Revision, scope)
 		return true, err
 	}
-	if _, err = runner.cancelTurnDescendants(ctx, turn.ID, invocation.ID, current.Run.ID, reason); err != nil {
+	if _, err = runner.cancelOwnedDescendants(ctx, turn, current.Run.ID, reason); err != nil {
 		return true, err
 	}
 	latest, err := runner.runtime.Load(ctx, current.Run.ID)

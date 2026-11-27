@@ -352,21 +352,15 @@ func (runner *Runner) CancelInvocation(ctx context.Context, invocationID, reason
 	if err != nil {
 		return Snapshot{}, runner.releaseNoEffectCancellation(ctx, turn, intent, invocation.ExecutionRefID, err)
 	}
-	if !found {
-		runtimeSnapshot = cancelledRuntimeSnapshot(invocation.ExecutionRefID, reason)
+	if found && !terminalRuntimeStatus(runtimeSnapshot.Run.Status) {
+		return Snapshot{}, ErrRuntimeCancellationUnverified
 	}
-	runs := map[string]kernel.Snapshot{invocation.ExecutionRefID: runtimeSnapshot}
-	// Failed/Completed parent Agents may still own active physical
-	// Handoff descendants in RunRelation. Only a
-	// proven terminal subtree may settle this child's cancellation intent.
-	if terminalRuntimeStatus(runtimeSnapshot.Run.Status) {
-		descendants, cancelErr := runner.cancelOwnedDescendants(ctx, turn, invocation.ExecutionRefID, reason)
-		if cancelErr != nil {
-			return Snapshot{}, cancelErr
-		}
-		for runID, snapshot := range descendants {
-			runs[runID] = snapshot
-		}
+	runs, err := runner.cancelOwnedDescendants(ctx, turn, invocation.ExecutionRefID, reason)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if found {
+		runs[invocation.ExecutionRefID] = runtimeSnapshot
 	}
 	if err = runner.syncInvocationRuns(ctx, turn, runs); err != nil {
 		return Snapshot{}, err
@@ -546,7 +540,7 @@ func (runner *Runner) syncChildInvocationSnapshot(
 	turn Turn,
 	invocation Invocation,
 	runtimeSnapshot kernel.Snapshot,
-	verifiedNoRunCancel ...bool,
+	verifiedCancellation ...bool,
 ) (Snapshot, error) {
 	// Handoff observations can also synchronize an independently advancing
 	// Kernel Run. Do not overwrite a claimed, unverified business response
@@ -560,8 +554,8 @@ func (runner *Runner) syncChildInvocationSnapshot(
 	}
 	// Handoff Refresh must not commit a terminal child
 	// projection while its original Host callback continuation is unknown.
-	// A Cancel path has its own verified no-Run cancellation proof.
-	verifiedCancel := len(verifiedNoRunCancel) == 1 && verifiedNoRunCancel[0]
+	// A Cancel path has its original elected cancellation proof.
+	verifiedCancel := len(verifiedCancellation) == 1 && verifiedCancellation[0]
 	if !verifiedCancel {
 		continuationPending, continuationErr := runner.pendingInteractionContinuation(ctx, turn.ID, invocation.ID)
 		if continuationErr != nil {
@@ -574,18 +568,11 @@ func (runner *Runner) syncChildInvocationSnapshot(
 	if runtimeSnapshotConflicts(invocation, runtimeSnapshot) {
 		return Snapshot{}, ErrConflict
 	}
-	// Reject a foreign child observation before status CAS and Artifact or
-	// diagnostic output. Delegated Handoff children retain their separate
-	// explicit physical-owner and receipt validation.
-	// Only a verified Cancel/CancelInvocation descendant cleanup may
-	// synthesize a cancelled child whose Kernel Run never existed. Public
-	// Refresh and all real physical snapshots must prove the original
-	// frozen owner even when the Run has no Result.
-	noRunProven := len(verifiedNoRunCancel) == 1 && verifiedNoRunCancel[0] &&
-		runtimeSnapshot.Run.ID == invocation.ExecutionRefID &&
-		runtimeSnapshot.Run.Kind == "" && runtimeSnapshot.Result == nil &&
-		runtimeSnapshot.Run.Status == kernel.RunStatusCancelled &&
-		runtimeSnapshot.Run.ErrorCode == "run.cancelled"
+	// Only actual Run snapshots reach this path. Never-dispatched children
+	// use their original native creation decision or opaque no-effect proof.
+	if runtimeSnapshot.Run.Kind == "" {
+		return Snapshot{}, ErrConflict
+	}
 	if !isHandoffDelegationInvocation(invocation) {
 		return Snapshot{}, ErrConflict
 	}
@@ -594,13 +581,9 @@ func (runner *Runner) syncChildInvocationSnapshot(
 		return Snapshot{}, err
 	}
 	if terminalTurnStatus(status) {
-		if noRunProven {
-			ctx = withOriginalWaitingCancellationWitness(ctx, invocation)
-		} else {
-			ctx, err = withOriginalKernelTerminalWitness(ctx, invocation, runtimeSnapshot)
-			if err != nil {
-				return Snapshot{}, err
-			}
+		ctx, err = withOriginalKernelTerminalWitness(ctx, invocation, runtimeSnapshot)
+		if err != nil {
+			return Snapshot{}, err
 		}
 	}
 	if err = runner.recordNativeApprovalDecisions(ctx, turn, invocation, runtimeSnapshot); err != nil {
@@ -610,13 +593,13 @@ func (runner *Runner) syncChildInvocationSnapshot(
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if err = runner.projectChildInvocationOutcome(ctx, invocation, runtimeSnapshot); err != nil {
+	if err = runner.projectChildInvocationOutcome(ctx, invocation, runtimeSnapshot.Result); err != nil {
 		return Snapshot{}, err
 	}
 	if err = runner.recordApprovalRequestItem(ctx, turn, invocation, runtimeSnapshot); err != nil {
 		return Snapshot{}, err
 	}
-	if terminalTurnStatus(status) && !noRunProven {
+	if terminalTurnStatus(status) {
 		frozen, e := decodeFrozenHandoffDelegation(invocation.Input)
 		if e != nil {
 			return Snapshot{}, e
@@ -640,19 +623,19 @@ func (runner *Runner) syncChildInvocationSnapshot(
 func (runner *Runner) projectChildInvocationOutcome(
 	ctx context.Context,
 	invocation Invocation,
-	runtimeSnapshot kernel.Snapshot,
+	result *kernel.Result,
 ) error {
 	now := runner.clock.Now().UTC()
 	item := Item{TurnID: invocation.TurnID, RunID: invocation.ExecutionRefID, InvocationID: invocation.ID, ParentItemID: invocationLifecycleItemID(invocation, InvocationAccepted, 1), CreatedAt: now, UpdatedAt: now}
 	var err error
 	switch {
-	case invocation.Status == InvocationCompleted && runtimeSnapshot.Result != nil:
+	case invocation.Status == InvocationCompleted && result != nil:
 		item.ID = stableID("hico", invocation.ID, "result", attemptString(invocation.Attempt))
 		item.Kind, item.Status = ItemArtifact, ItemCompleted
 		item.Payload, err = json.Marshal(struct {
 			ContentType string          `json:"contentType"`
 			Content     json.RawMessage `json:"content"`
-		}{runtimeSnapshot.Result.ContentType, runtimeSnapshot.Result.Content})
+		}{result.ContentType, result.Content})
 	case invocation.Status == InvocationFailed || invocation.Status == InvocationCancelled:
 		item.ID = stableID("hicd", invocation.ID, string(invocation.Status), attemptString(invocation.Attempt))
 		item.Kind, item.Status = ItemDiagnostic, invocationItemStatus(invocation.Status)

@@ -346,8 +346,6 @@ func (runner *Runner) CancelSubtask(ctx context.Context, turnID, taskID, reason 
 			// a speculative Invocation status written before Kernel control.
 			if found {
 				descendants[task.RunID] = target
-			} else {
-				descendants[task.RunID] = cancelledRuntimeSnapshot(task.RunID, reason)
 			}
 			cancelErr = runner.syncInvocationRuns(ctx, turn, descendants)
 		}

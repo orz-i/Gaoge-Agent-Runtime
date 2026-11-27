@@ -316,9 +316,35 @@ func runManagedStoreSelectionAndExactACK(t *testing.T, factory func(*testing.T) 
 				if e != nil {
 					t.Fatal(e)
 				}
+				// A logical native child can be created after authorization
+				// but before CANCEL's Store transaction. It is not a
+				// borrowed Grant and need not have entered a callback yet.
+				peer, e := kernel.New(kernel.Dependencies{Store: f.backend.Peer})
+				if e != nil {
+					t.Fatal(e)
+				}
+				req := kernel.CreateRequest{ID: "competing-logical-child", LogicalParentRunID: f.source.Run.ID, Kind: "agent", Actor: f.source.Run.Actor, Thread: f.source.Run.Thread, Goal: "competing child", State: json.RawMessage("{}")}
+				child, e := peer.Create(t.Context(), req)
+				if e != nil {
+					t.Fatal(e)
+				}
+				if _, e = f.store.CommitManagedCancellation(t.Context(), cancel); !errors.Is(e, kernel.ErrExecutionConflict) {
+					t.Fatalf("CANCEL bypassed native descendant: %v", e)
+				}
+				managedStoreSame(t, f, parked)
+				if observed, e := peer.Load(t.Context(), child.Run.ID); e != nil || kernel.ManagedDigest(observed) != kernel.ManagedDigest(child) {
+					t.Fatal("rejected CANCEL changed child", e)
+				}
+				if _, e = peer.Cancel(t.Context(), child.Run.ID, child.Run.Revision, "settle original child"); e != nil {
+					t.Fatal(e)
+				}
 				result, e := f.store.CommitManagedCancellation(t.Context(), cancel)
 				if e != nil || !result.Resolved() || result.Selection.Mode != kernel.ManagedCancel {
 					t.Fatalf("cancel: %v", e)
+				}
+				req.ID = "late-logical-child"
+				if _, e = peer.Create(t.Context(), req); !errors.Is(e, kernel.ErrExecutionConflict) {
+					t.Fatalf("child crossed committed ancestor CANCEL: %v", e)
 				}
 				again, e := f.store.CommitManagedCancellation(t.Context(), cancel)
 				if e != nil || kernel.ManagedDigest(again) != kernel.ManagedDigest(result) {

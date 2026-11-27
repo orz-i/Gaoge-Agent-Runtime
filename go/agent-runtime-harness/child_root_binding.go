@@ -67,8 +67,14 @@ func validChildRootBinding(binding childRootBinding) bool {
 // current owner is never authority for the old child physical effect.
 func sealChildRootInput(input json.RawMessage, inputHash string, root Invocation, parents ...childAttemptBinding) (json.RawMessage, string, error) {
 	selection := childRootBinding{InvocationID: root.ID, ExecutionRefID: root.ExecutionRefID, Attempt: root.Attempt, Parents: parents}
-	if len(input) == 0 || hashInvocationBytes(input) != inputHash || !validChildRootBinding(selection) ||
-		strings.TrimSpace(root.ParentItemID) != "" || !validInvocationStatus(root.Status) || terminalInvocationStatus(root.Status) {
+	if strings.TrimSpace(root.ParentItemID) != "" || !validInvocationStatus(root.Status) || terminalInvocationStatus(root.Status) {
+		return nil, "", ErrConflict
+	}
+	return sealChildRootBinding(input, inputHash, selection)
+}
+
+func sealChildRootBinding(input json.RawMessage, inputHash string, selection childRootBinding) (json.RawMessage, string, error) {
+	if len(input) == 0 || hashInvocationBytes(input) != inputHash || !validChildRootBinding(selection) {
 		return nil, "", ErrConflict
 	}
 	var fields map[string]json.RawMessage

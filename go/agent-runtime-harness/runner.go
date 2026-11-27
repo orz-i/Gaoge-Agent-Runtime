@@ -1041,7 +1041,7 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 			if invErr != nil {
 				return Snapshot{}, invErr
 			}
-			delegated, delegationErr := runner.delegatedRunIDs(ctx, turn.ID)
+			delegated, delegationErr := runner.delegatedRunIDs(ctx, turn.ID, nil)
 			if delegationErr != nil {
 				return Snapshot{}, delegationErr
 			}
@@ -1153,10 +1153,7 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 			return Snapshot{}, runner.releaseNoEffectCancellation(ctx, turn, intent, invocation.ExecutionRefID, err)
 		}
 	}
-	if !found {
-		runtimeSnapshot = cancelledRuntimeSnapshot(invocation.ExecutionRefID, reason)
-	}
-	if !terminalRuntimeStatus(runtimeSnapshot.Run.Status) {
+	if !found || !terminalRuntimeStatus(runtimeSnapshot.Run.Status) {
 		// A custom Canceller cannot turn a nonterminal Kernel outcome into a
 		// successful cancellation receipt. Keep the intent for reconciliation.
 		return Snapshot{}, ErrRuntimeCancellationUnverified
@@ -1165,7 +1162,7 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 	// Harness projected it. This is not proof that its descendants stopped;
 	// run the same child cleanup before releasing the cancellation fence.
 	// Otherwise a newly committed intent deadlocks ordinary root Refresh.
-	descendants, err := runner.cancelTurnDescendants(ctx, turn.ID, invocation.ID, invocation.ExecutionRefID, reason)
+	descendants, err := runner.cancelOwnedDescendants(ctx, turn, invocation.ExecutionRefID, reason)
 	if err != nil {
 		return Snapshot{}, err
 	}

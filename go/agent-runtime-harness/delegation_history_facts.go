@@ -2,6 +2,7 @@ package harness
 
 import (
 	"encoding/hex"
+	"slices"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
@@ -143,40 +144,41 @@ func delegationOriginalParentRoot(root Invocation, parentID, parentRunID string,
 // removes Started evidence to make a wait look undispatched. Both observations
 // must agree, no child/physical grant may exist, and predecessor parents require
 // the original Store-owned Attempt transition/ancestor proof.
-func delegationNoInvocationSource(root Invocation, runID string, byID, byRun map[string]Invocation, items []Item, ledger *budget.Ledger) (delegationItemPayload, bool, bool) {
+func delegationNoInvocationSource(root Invocation, runID string, byID, byRun map[string]Invocation, items []Item, ledger *budget.Ledger) (delegationItemPayload, Item, bool) {
 	var selected, waiting, started, cancelled delegationItemPayload
-	var startItem, cancelItem Item
+	var waitItem, startItem, cancelItem Item
 	if byRun[runID].ID != "" {
-		return selected, false, false
+		return selected, Item{}, false
 	}
 	waits, starts := 0, 0
 	for _, item := range items {
 		if item.ParentItemID == ExecutionDispatchParentItemID && item.RunID == runID {
-			return selected, false, false
+			return selected, Item{}, false
 		}
 		if item.Kind != ItemDelegation || item.RunID != runID {
 			continue
 		}
 		var payload delegationItemPayload
 		if !decodeTypedAuthorityJSON(item.Payload, &payload) {
-			return selected, false, false
+			return selected, Item{}, false
 		}
 		if _, valid := delegationOriginalParentRoot(root, item.InvocationID, payload.ParentRunID, byID, items, ledger); !valid {
-			return selected, false, false
+			return selected, Item{}, false
 		}
 		switch item.Status {
 		case ItemWaiting:
 			var valid bool
 			waiting, valid = frozenDelegationAdmissionPayload(root, item)
 			if !valid {
-				return selected, false, false
+				return selected, Item{}, false
 			}
+			waitItem = item
 			waits++
 		case ItemStarted:
 			var valid bool
 			started, valid = frozenDelegationAdmissionPayload(root, item)
 			if !valid {
-				return selected, false, false
+				return selected, Item{}, false
 			}
 			startItem = item
 			starts++
@@ -184,51 +186,50 @@ func delegationNoInvocationSource(root Invocation, runID string, byID, byRun map
 			// This is the product projection of an already frozen,
 			// never-dispatched source, not a ChildRunner return.
 			if cancelItem.ID != "" {
-				return selected, false, false
+				return selected, Item{}, false
 			}
 			cancelled, cancelItem = payload, item
 		case ItemCompleted, ItemFailed:
-			return selected, false, false
+			return selected, Item{}, false
 		default:
-			return selected, false, false
+			return selected, Item{}, false
 		}
 	}
 	if waits > 1 || starts > 1 || waits+starts == 0 {
-		return selected, false, false
+		return selected, Item{}, false
 	}
+	source := waitItem
+	selected = waiting
 	if starts == 1 {
-		selected = started
-	} else {
-		selected = waiting
+		source, selected = startItem, started
 	}
-	if runID != stableID("hchild", selected.ParentRunID, selected.DelegationID) {
-		return selected, false, false
+	if runID != stableID("hchild", selected.ParentRunID, selected.DelegationID) ||
+		(waits == 1 && starts == 1 && (waitItem.InvocationID != startItem.InvocationID || waitItem.Seq >= startItem.Seq || waiting.ParentRunID != started.ParentRunID || !sameHandoffFrozenExecution(*waiting.Execution, *started.Execution))) {
+		return selected, Item{}, false
 	}
-	if waits == 1 && starts == 1 && (waiting.ParentRunID != started.ParentRunID || !sameHandoffFrozenExecution(*waiting.Execution, *started.Execution)) {
-		return selected, false, false
-	}
-	// A foreign Run/Turn on a globally indexed sibling must not
-	// disappear from the original Started admission's proof.
-	if starts == 1 {
-		for _, item := range items {
-			if item.Kind == ItemDelegation && item.ParentItemID == startItem.ID && item.ID != cancelItem.ID {
-				return selected, false, false
-			}
+	// Both admission forms share the globally indexed terminal-child proof.
+	for _, item := range items {
+		if item.Kind == ItemDelegation && item.ParentItemID != "" &&
+			(item.ParentItemID == waitItem.ID || item.ParentItemID == startItem.ID) && item.ID != cancelItem.ID {
+			return selected, Item{}, false
 		}
 	}
 	if cancelItem.ID != "" {
-		if starts != 1 || cancelItem.Seq <= startItem.Seq || cancelItem.TurnID != startItem.TurnID ||
-			cancelItem.InvocationID != startItem.InvocationID || cancelItem.ParentItemID != startItem.ID ||
+		if cancelItem.Seq <= source.Seq || cancelItem.TurnID != source.TurnID ||
+			cancelItem.InvocationID != source.InvocationID || cancelItem.ParentItemID != source.ID ||
 			cancelItem.ID != stableID("hid", root.TurnID, selected.DelegationID, string(ItemCancelled)) ||
-			cancelled.Status != handoff.StatusCancelled || cancelled.DelegationID != started.DelegationID ||
-			cancelled.ChildRunID != runID || cancelled.ParentRunID != started.ParentRunID ||
-			cancelled.MemberID != started.MemberID || cancelled.MemberRevision != started.MemberRevision || cancelled.Goal != started.Goal ||
+			cancelled.Status != handoff.StatusCancelled || !matchesDelegationPayload(cancelled, *selected.Execution, selected.ParentRunID) ||
 			len(cancelled.Result) != 0 || cancelled.OriginalCallHash != "" || cancelled.Execution == nil ||
 			cancelled.Execution.Status != handoff.StatusQueued || len(cancelled.Execution.Result) != 0 ||
-			cancelled.Execution.Error != "" || cancelled.Execution.ErrorCode != "" ||
-			!sameHandoffFrozenExecution(*started.Execution, *cancelled.Execution) {
-			return selected, false, false
+			cancelled.Execution.Error != "" || cancelled.Execution.ErrorCode != "" {
+			return selected, Item{}, false
 		}
+		original, valid := delegationOriginalParentRoot(root, source.InvocationID, selected.ParentRunID, byID, items, ledger)
+		if !valid {
+			return selected, Item{}, false
+		}
+		ancestors, _ := frozenChildRoot(byID[source.InvocationID])
+
 		// Reuse the original exact cancellation election. An ACK loss may
 		// leave that election active after the projection, so only its
 		// canonical receipt (if present) can close it. Neither receipt nor
@@ -236,24 +237,25 @@ func delegationNoInvocationSource(root Invocation, runID string, byID, byRun map
 		receipts := cancellationFenceReceipts(items)
 		proven := false
 		for _, intent := range items {
-			if intent.RunID != runID || intent.TurnID != root.TurnID ||
-				intent.Seq <= startItem.Seq || intent.Seq >= cancelItem.Seq || !ValidCancellationFenceIntentAdmission(intent) {
+			if intent.TurnID != root.TurnID || intent.Seq <= source.Seq || intent.Seq >= cancelItem.Seq || !ValidCancellationFenceIntentAdmission(intent) ||
+				(intent.RunID != runID && intent.RunID != original.ExecutionRefID && intent.RunID != selected.ParentRunID &&
+					!slices.ContainsFunc(ancestors.Parents, func(p childAttemptBinding) bool { return p.ExecutionRefID == intent.RunID })) {
 				continue
 			}
 			if !CancellationEffectsSettled(intent, items) {
-				return selected, false, false
+				return selected, Item{}, false
 			}
 			r := receipts[intent.ID]
 			if len(r) != 0 && !VerifiedCancellationFenceReceipt(intent, r) {
-				return selected, false, false
+				return selected, Item{}, false
 			}
 			if len(r) == 0 || r[0].Seq > cancelItem.Seq {
 				proven = true
 			}
 		}
 		if !proven {
-			return selected, false, false
+			return selected, Item{}, false
 		}
 	}
-	return selected, starts == 1, true
+	return selected, source, true
 }

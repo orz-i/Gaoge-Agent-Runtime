@@ -143,6 +143,20 @@ func (s *Store) CommitManagedCancellation(ctx context.Context, q kernel.ManagedC
 	if err != nil {
 		return kernel.ManagedTransfer{}, err
 	}
+	// The original physical Grant index does not include independently
+	// owned logical children. Check their actual native ancestry under mu.
+	for id, child := range s.records {
+		if (child.Run.Status == kernel.RunStatusCompleted || child.Run.Status == kernel.RunStatusFailed || child.Run.Status == kernel.RunStatusCancelled) &&
+			len(s.childGrantOwners[id]) == 0 && s.execution[id].quarantineRev == 0 {
+			continue
+		}
+		for parent, depth := kernel.RunParentID(child.Run), 0; parent != "" && depth < 64; depth++ {
+			if parent == q.RunID {
+				return kernel.ManagedTransfer{}, kernel.ErrExecutionConflict
+			}
+			parent = kernel.RunParentID(s.records[parent].Run)
+		}
+	}
 	next, m, err := kernel.ManagedCancellationMutation(t, q, snap, s.currentExecutionTime())
 	if err != nil {
 		return kernel.ManagedTransfer{}, err

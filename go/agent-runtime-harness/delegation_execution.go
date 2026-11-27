@@ -314,18 +314,23 @@ func (r *Runner) nativeChildSelection(ctx context.Context, turn Turn, owner Invo
 	if e != nil || !d.NativeLocal || owner.TurnID != turn.ID || owner.Attempt != 1 || r.nativeHandoff(d) == nil {
 		return d, parent, kernel.RunCreationDecision{}, errors.Join(ErrConflict, e)
 	}
-	q, e := r.uncreatedRootSelection(ctx, turn, owner, status, reason)
-	if e != nil {
-		return d, parent, q, e
+	q, e := r.nativeChildCreationSelection(ctx, turn, d, parent.ExecutionRefID, owner.Input, status, reason)
+	return d, parent, q, e
+}
+
+func (r *Runner) nativeChildCreationSelection(ctx context.Context, turn Turn, d handoff.Delegation, parentRunID string, input json.RawMessage, status kernel.RunStatus, reason string) (kernel.RunCreationDecision, error) {
+	q := kernel.RunCreationDecision{RunID: d.ChildRunID, LogicalParentRunID: parentRunID, OriginFingerprint: agent.FrozenOriginFingerprint(input), Status: status, Reason: strings.TrimSpace(reason)}
+	config, err := loadSealedConfig(ctx, r.store, turn.ConfigSnapshotID)
+	if err != nil {
+		return q, err
 	}
-	q.LogicalParentRunID, q.OriginFingerprint = parent.ExecutionRefID, agent.FrozenOriginFingerprint(owner.Input)
-	if q.Budget.ScopeID != "" {
+	if config.SharedBudget != nil {
 		if !r.nativeBudget() {
-			return d, parent, q, ErrConflict
+			return q, ErrConflict
 		}
-		q.Budget.Binding = budget.RunBudget{ParentRunID: parent.ExecutionRefID, Limits: delegationBudgetLimits(d)}
+		q.Budget = budget.RunEnrollment{ScopeID: turn.ID, Limits: *config.SharedBudget, Binding: budget.RunBudget{ParentRunID: parentRunID, Limits: delegationBudgetLimits(d)}}
 	}
-	return d, parent, q, nil
+	return q, nil
 }
 
 func (r *Runner) nativeChildDecision(ctx context.Context, turn Turn, owner Invocation) (kernel.RunCreationDecision, error) {

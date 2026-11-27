@@ -197,6 +197,19 @@ func (s *Store) CommitManagedCancellation(ctx context.Context, q kernel.ManagedC
 		if e != nil {
 			return t, e
 		}
+		// Native Create and terminal control share the writer transaction.
+		var busy bool
+		if e = tx.QueryRowContext(ctx, `WITH RECURSIVE children(id) AS (
+			SELECT run_id FROM runtime_runs WHERE json_extract(CAST(run_json AS TEXT),'$.parentRunID')=? OR json_extract(CAST(run_json AS TEXT),'$.logicalParentRunID')=?
+			UNION SELECT r.run_id FROM runtime_runs r JOIN children c ON json_extract(CAST(r.run_json AS TEXT),'$.parentRunID')=c.id OR json_extract(CAST(r.run_json AS TEXT),'$.logicalParentRunID')=c.id)
+			SELECT EXISTS(SELECT 1 FROM children c JOIN runtime_runs r ON r.run_id=c.id
+			WHERE r.status NOT IN ('completed','failed','cancelled') OR r.execution_quarantine_revision<>0
+			OR EXISTS(SELECT 1 FROM runtime_child_effect_grants g WHERE g.child_run_id=c.id))`, q.RunID, q.RunID).Scan(&busy); e != nil {
+			return t, conflictOrDatabaseError(e)
+		}
+		if busy {
+			return t, kernel.ErrExecutionConflict
+		}
 		n, m, e := kernel.ManagedCancellationMutation(t, q, snap, now)
 		if e != nil {
 			return t, e

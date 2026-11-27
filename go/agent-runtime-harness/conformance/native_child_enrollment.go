@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
@@ -22,7 +23,16 @@ var errNativeChildCreateInterrupted = errors.New("native child Create interrupte
 type childReturnCut struct {
 	harness.Store
 	budget.LedgerStore
-	cut bool
+	cut, beforeInvocation bool
+	child                 harness.Invocation
+}
+
+func (s *childReturnCut) CreateInvocation(ctx context.Context, i harness.Invocation) (harness.Invocation, bool, error) {
+	if s.beforeInvocation && i.ParentItemID != "" {
+		s.beforeInvocation, s.child = false, i
+		return harness.Invocation{}, false, errNativeChildCreateInterrupted
+	}
+	return s.Store.CreateInvocation(ctx, i)
 }
 
 var errNativeChildHostReturnCut = errors.New("native child Host return interrupted")
@@ -40,8 +50,18 @@ type nativeChildCreateProbe struct {
 	t                  *testing.T
 	mode, child, scope string
 	creates            int
+	negativeACKLost    bool
 	record             kernel.Record
 	events             []kernel.EventDraft
+}
+
+func (s *nativeChildCreateProbe) DecideBeforeCreate(ctx context.Context, q kernel.RunCreationDecision) (kernel.RunCreationDecision, error) {
+	d, err := s.nativeAuthorityKernelPorts.DecideBeforeCreate(ctx, q)
+	if err == nil && s.mode == "pre-invocation-cut" && q.LogicalParentRunID != "" && !s.negativeACKLost {
+		s.negativeACKLost = true
+		return kernel.RunCreationDecision{}, errNativeChildCreateACKLost
+	}
+	return d, err
 }
 
 func (s *nativeChildCreateProbe) Create(ctx context.Context, r kernel.Record, events []kernel.EventDraft) (kernel.Snapshot, error) {
@@ -102,7 +122,7 @@ func (s *nativeChildCreateProbe) Create(ctx context.Context, r kernel.Record, ev
 }
 
 func nativeChildEnrollment(t *testing.T, factory func(*testing.T) NativeAuthorityFixture) {
-	for _, mode := range []string{"normal", "capacity-race", "exhausted-race", "unknown-after-create", "unknown-before-create", "host-return-cut"} {
+	for _, mode := range []string{"normal", "capacity-race", "exhausted-race", "unknown-after-create", "unknown-before-create", "host-return-cut", "pre-invocation-cut"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx := t.Context()
 			f := factory(t)
@@ -121,8 +141,9 @@ func nativeChildEnrollment(t *testing.T, factory func(*testing.T) NativeAuthorit
 				return model.Response{ToolCalls: []tools.Call{{ID: "delegate", ToolKey: harness.DelegationToolKey, Arguments: json.RawMessage(`{"memberID":"child","goal":"finish"}`)}}}, nil
 			}}
 			host := f.Host
-			if mode == "host-return-cut" {
-				host = &childReturnCut{Store: f.Host, LedgerStore: f.Host.(budget.LedgerStore), cut: true}
+			cut := &childReturnCut{Store: f.Host, LedgerStore: f.Host.(budget.LedgerStore), cut: mode == "host-return-cut", beforeInvocation: mode == "pre-invocation-cut"}
+			if cut.cut || cut.beforeInvocation {
+				host = cut
 			}
 			options := nativeAuthorityOptions(t, probe, host, client)
 			limits := budget.Limits{MaxLLMCalls: 5, MaxToolCalls: 3, MaxChildRuns: 3, MaxConcurrentDescendants: 1, MaxConcurrentRuns: 2}
@@ -143,6 +164,49 @@ func nativeChildEnrollment(t *testing.T, factory func(*testing.T) NativeAuthorit
 				t.Fatal(err)
 			}
 			out, err := session.Prompt(ctx, "binding", "original")
+			if mode == "pre-invocation-cut" {
+				if !errors.Is(err, errNativeChildCreateInterrupted) || cut.child.ID == "" || childCalls != 0 || probe.creates != 0 {
+					t.Fatalf("pre-Invocation cut not observed: %v %+v", err, cut.child)
+				}
+				id := cut.child.ExecutionRefID
+				before, e := probe.LoadBudget(ctx, cut.child.TurnID)
+				if e != nil {
+					t.Fatal(e)
+				}
+				snapshot, e := session.Load(ctx, "binding")
+				if e != nil || len(snapshot.Subtasks) != 1 {
+					t.Fatalf("missing admission: %v %+v", e, snapshot.Subtasks)
+				}
+				if _, e = session.CancelSubtask(ctx, "binding", snapshot.Subtasks[0].ID, "stop before Invocation"); !errors.Is(e, errNativeChildCreateACKLost) {
+					t.Fatalf("missing negative decision ACK loss: %v", e)
+				}
+				committed, e := probe.LoadCreationDecision(ctx, id)
+				if e != nil || committed.Status != kernel.RunStatusCancelled {
+					t.Fatalf("negative decision did not commit: %+v %v", committed, e)
+				}
+				stopped, e := session.CancelSubtask(ctx, "binding", snapshot.Subtasks[0].ID, "retry original cancellation")
+				if e != nil || len(stopped.Subtasks) != 1 || stopped.Subtasks[0].Status != "cancelled" {
+					t.Fatalf("cancel before Invocation: %v %+v", e, stopped.Subtasks)
+				}
+				d, e := probe.LoadCreationDecision(ctx, id)
+				if e != nil || d.Status != kernel.RunStatusCancelled || d.OriginFingerprint != agent.FrozenOriginFingerprint(cut.child.Input) || !reflect.DeepEqual(d, committed) {
+					t.Fatalf("negative identity differs from frozen positive input: %+v %v", d, e)
+				}
+				if _, e = f.Host.GetInvocation(ctx, cut.child.ID); !errors.Is(e, harness.ErrNotFound) {
+					t.Fatalf("invented Invocation: %v", e)
+				}
+				if _, e = probe.Load(ctx, id); !errors.Is(e, kernel.ErrNotFound) {
+					t.Fatalf("invented Run: %v", e)
+				}
+				after, e := probe.LoadBudget(ctx, cut.child.TurnID)
+				if e != nil || !after.RunCancelled(id) || after.View("").Usage.ChildRuns != before.View("").Usage.ChildRuns {
+					t.Fatalf("negative enrollment: %v %+v", e, after)
+				}
+				if _, ok := after.Runs[id]; ok {
+					t.Fatal("negative child enrolled")
+				}
+				return
+			}
 			if probe.child == "" || probe.creates != 1 {
 				t.Fatalf("missing child Create: %v calls=%d", err, probe.creates)
 			}

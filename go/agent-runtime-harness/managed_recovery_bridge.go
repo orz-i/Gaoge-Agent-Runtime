@@ -241,7 +241,7 @@ func (r *Runner) verifyManagedCancellationScope(ctx context.Context, inv Invocat
 	if err != nil {
 		return err
 	}
-	delegated, err := r.delegatedRunIDs(ctx, turn.ID)
+	delegated, err := r.delegatedRunIDs(ctx, turn.ID, nil)
 	if err != nil {
 		return err
 	}

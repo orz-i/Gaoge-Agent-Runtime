@@ -3,21 +3,26 @@ package harness
 import (
 	"context"
 	"errors"
+	"slices"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 )
 
-// cancellationNoDispatchReady gives missing-Run targets ONE meaning across
+// missingRunCancellation gives missing-Run targets ONE meaning across
 // initial control and recovery. Absence alone is never proof: the exact frozen
 // Root/child/Waiting source and complete dispatch ledger must agree while the
-// original elected cancellation fences future physical admission.
-func (runner *Runner) cancellationNoDispatchReady(ctx context.Context, turn Turn, runID string) (bool, error) {
+// original elected cancellation fences future physical admission. A nil reason
+// observes recovery eligibility only; a supplied reason settles the election.
+func (runner *Runner) missingRunCancellation(ctx context.Context, turn Turn, runID string, settleReason *string) (bool, error) {
 	if _, err := runner.runtime.Load(ctx, runID); !errors.Is(err, kernel.ErrNotFound) {
 		return false, err
 	}
 	owner, err := runner.store.GetInvocationByExecutionRefID(ctx, runID)
 	if err == nil {
+		if owner.TurnID != turn.ID {
+			return false, ErrConflict
+		}
 		if owner.ParentItemID == "" {
 			return runner.undispatchedRootNoEffect(ctx, turn, owner, false)
 		}
@@ -56,10 +61,23 @@ func (runner *Runner) cancellationNoDispatchReady(ctx context.Context, turn Turn
 	if err != nil {
 		return false, err
 	}
-	prepared, started, valid, err := runner.readNoInvocationDelegationSource(ctx, turn, runID, items)
+	root, err := loadTopLevelInvocation(ctx, runner.store, turn.ID)
 	if err != nil {
 		return false, err
 	}
+	owners, err := runner.store.ListInvocations(ctx, turn.ID)
+	if err != nil {
+		return false, err
+	}
+	byID, byRun := map[string]Invocation{root.ID: root}, map[string]Invocation{}
+	for _, owner := range owners {
+		byID[owner.ID], byRun[owner.ExecutionRefID] = owner, owner
+	}
+	ledger, err := runner.loadTurnBudget(ctx, turn)
+	if err != nil {
+		return false, err
+	}
+	prepared, source, valid := delegationNoInvocationSource(root, runID, byID, byRun, items, ledger)
 	if !valid {
 		return false, nil
 	}
@@ -69,31 +87,64 @@ func (runner *Runner) cancellationNoDispatchReady(ctx context.Context, turn Turn
 			if edgeErr != nil {
 				return false, edgeErr
 			}
-			if !started || relation.Kind != runrelation.KindDelegation || relation.ParentRunID != prepared.ParentRunID || relation.OwnerNodeID != prepared.DelegationID {
+			if source.Status != ItemStarted || relation.Kind != runrelation.KindDelegation || relation.ParentRunID != prepared.ParentRunID || relation.OwnerNodeID != prepared.DelegationID {
 				return false, nil
 			}
 		}
 	}
-	return true, nil
-}
-
-func (runner *Runner) readNoInvocationDelegationSource(ctx context.Context, turn Turn, runID string, items []Item) (delegationItemPayload, bool, bool, error) {
-	root, err := loadTopLevelInvocation(ctx, runner.store, turn.ID)
-	if err != nil {
-		return delegationItemPayload{}, false, false, err
+	if settleReason == nil {
+		return true, nil
 	}
-	owners, err := runner.store.ListInvocations(ctx, turn.ID)
-	if err != nil {
-		return delegationItemPayload{}, false, false, err
+	// Absence plus the sealed admission proves eligibility, not the negative
+	// native decision. Derive the exact future child input without creating
+	// an Invocation, and let native Create/DecideBeforeCreate arbitrate.
+	d := *prepared.Execution
+	parent := byID[source.InvocationID]
+	original, valid := delegationOriginalParentRoot(root, parent.ID, prepared.ParentRunID, byID, items, ledger)
+	if !valid {
+		return false, ErrConflict
 	}
-	byID, byRun := map[string]Invocation{root.ID: root}, map[string]Invocation{}
-	for _, owner := range owners {
-		byID[owner.ID], byRun[owner.ExecutionRefID] = owner, owner
+	if invocationAttempt(original) != invocationAttempt(root) {
+		return true, nil // validated history; never mutate a prior Attempt
 	}
-	ledger, err := runner.loadTurnBudget(ctx, turn)
-	if err != nil {
-		return delegationItemPayload{}, false, false, err
+	binding := childRootBinding{InvocationID: root.ID, ExecutionRefID: root.ExecutionRefID, Attempt: root.Attempt}
+	if parent.ID != root.ID {
+		frozen, e := frozenChildRoot(parent)
+		if e != nil {
+			return false, e
+		}
+		binding.Parents = append([]childAttemptBinding{invocationAttempt(parent)}, frozen.Parents...)
 	}
-	p, started, valid := delegationNoInvocationSource(root, runID, byID, byRun, items, ledger)
-	return p, started, valid, nil
+	intent, bound := ctx.Value(cancellationElectionKey{}).(Item)
+	if !bound || intent.TurnID != turn.ID || intent.Seq <= source.Seq || !ValidCancellationFenceIntentAdmission(intent) ||
+		(intent.RunID != runID && intent.RunID != root.ExecutionRefID && !slices.ContainsFunc(binding.Parents, func(p childAttemptBinding) bool { return p.ExecutionRefID == intent.RunID })) {
+		return false, ErrConflict
+	}
+	if d.NativeLocal {
+		if runner.nativeHandoff(d) == nil {
+			return false, ErrConflict
+		}
+		input, hash, e := marshalInvocationValue(d)
+		if e != nil {
+			return false, e
+		}
+		input, _, e = sealChildRootBinding(input, hash, binding)
+		if e != nil {
+			return false, e
+		}
+		q, e := runner.nativeChildCreationSelection(ctx, turn, d, parent.ExecutionRefID, input, kernel.RunStatusCancelled, *settleReason)
+		if e != nil {
+			return false, e
+		}
+		decision, e := runner.decideNativeCreation(ctx, q)
+		if e != nil || decision.Status != kernel.RunStatusCancelled {
+			return false, errors.Join(ErrExecutionOutcomeUnknown, e)
+		}
+		if e = runner.projectCreationDecisionBudget(ctx, decision); e != nil {
+			return false, e
+		}
+	}
+	d.Status = "cancelled"
+	_, err = runner.recordDelegationItem(ctx, turn, parent, d, ItemCancelled, source.ID)
+	return err == nil, err
 }

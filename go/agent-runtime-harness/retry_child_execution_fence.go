@@ -63,16 +63,16 @@ func RetryChildEffectFenceWithBudget(invocations []Invocation, items []Item, rot
 }
 
 func acceptedChildPhysicalEffectPossible(items []Item, child Invocation) bool {
-	if d, e := decodeFrozenHandoffDelegation(child.Input); e == nil && d.NativeLocal && isHandoffDelegationInvocation(child) {
-		return true // only the original native decision/terminal projection can settle it
+	if isHandoffDelegationInvocation(child) {
+		d, _ := decodeFrozenHandoffDelegation(child.Input)
+		_, returned, valid := handoffDispatchHistory(items, child)
+		return d.NativeLocal || !valid || returned != 0
 	}
 	receipts := executionDispatchReceiptIndex(items)
 	for _, item := range items {
 		if item.ParentItemID == ExecutionDispatchParentItemID && item.InvocationID == child.ID {
 			boundary, verified := VerifiedExecutionDispatchReceipt(item, receipts[item.ID])
-			phase, _ := VerifiedExecutionDispatchGrant(item)
-			nativeRejection := phase == "handoff-start" && isHandoffDelegationInvocation(child) && boundary == "native_agent_start_no_effect"
-			if item.RunID != child.ExecutionRefID || !verified || (boundary != "physical_dispatch_rejected" && !nativeRejection) {
+			if item.TurnID != child.TurnID || item.RunID != child.ExecutionRefID || !verified || boundary != "physical_dispatch_rejected" {
 				return true
 			}
 		}
