@@ -1,6 +1,10 @@
 package kernel
 
-import "context"
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+)
 
 // These records are immutable Store facts, not execution capabilities.
 type OwnedSettlementEvidence struct {
@@ -8,17 +12,28 @@ type OwnedSettlementEvidence struct {
 	Grant      ChildExecutionGrant
 	Snapshot   Snapshot
 	Completion OwnedPhysicalCallbackCompletion
-	MarkOrigin string
 }
 type OwnedRetirementReceipt struct {
 	Version  uint64
 	Evidence OwnedSettlementEvidence
 	Closures []ManagedTransfer
-	// Preserve the existing final on-disk representation. Both values are
-	// written once at Finish; no intermediate retirement is executable.
-	Phase       string
-	ACKIdentity string
+	// The immutable Finish fact has one integrity digest, no ACK state.
+	Digest string
 }
+
+// No intermediate retirement or old ACK tuple is a Finish fact.
+func (r *OwnedRetirementReceipt) UnmarshalJSON(raw []byte) error {
+	type fact OwnedRetirementReceipt
+	var value fact
+	d := json.NewDecoder(bytes.NewReader(raw))
+	d.DisallowUnknownFields()
+	if err := d.Decode(&value); err != nil {
+		return err
+	}
+	*r = OwnedRetirementReceipt(value)
+	return nil
+}
+
 type OwnedRetirementStore interface {
 	LoadOwnedRetirement(context.Context, string) (OwnedRetirementReceipt, error)
 	LookupOwnedRetirementForRun(context.Context, string) (OwnedRetirementReceipt, error)
@@ -33,10 +48,9 @@ func (e OwnedSettlementEvidence) Valid() bool {
 		return false
 	}
 	if c.NotEntered() {
-		return e.MarkOrigin == "NOT_ENTERED" && c.MatchesNotEnteredSnapshot(g, s)
+		return c.MatchesNotEnteredSnapshot(g, s)
 	}
-	return ValidateOwnedPhysicalCompletion(g, c) == nil && c.HostCompleted && c.ReturnRevision <= s.Run.Revision &&
-		(e.MarkOrigin == "CALLBACK_RETURN" || e.MarkOrigin == "OWNER_RETURN" || e.MarkOrigin == "RECOVERED_RETURN" || e.MarkOrigin == "LEGACY_UNKNOWN")
+	return ValidateOwnedPhysicalCompletion(g, c) == nil && c.HostCompleted && c.ReturnRevision <= s.Run.Revision
 }
 
 // CloseManagedRetirement derives the managed closure only from the exact
@@ -47,9 +61,9 @@ func CloseManagedRetirement(g ChildExecutionGrant, s Snapshot, a ManagedAuthorit
 	if g.AdmissionOperation != "managed_resume" {
 		return []ManagedTransfer{}, nil
 	}
-	if !t.SafePoint.Valid() || !managedResumeSelectionMatches(t) ||
+	if !t.Valid() || !managedResumeSelectionMatches(t) ||
 		t.SafePoint.Host.KernelAuthority != a || t.SafePoint.Host.RunID != g.ChildRunID ||
-		t.SuccessorGrant != g || !t.Native() ||
+		t.SuccessorGrant != g ||
 		t.Revision == 0 || t.Terminal != nil || s.Run.ID != g.ChildRunID {
 		return nil, ErrExecutionConflict
 	}
@@ -94,11 +108,11 @@ func (r OwnedRetirementReceipt) Valid() bool {
 		return false
 	}
 	for i, t := range r.Closures {
-		if !t.SafePoint.Valid() || !managedResumeSelectionMatches(t) || t.SuccessorGrant != r.Evidence.Grant || !t.Resolved() || t.Revision == 0 || ManagedDigest(*t.Terminal) != ManagedDigest(r.Evidence.Snapshot) || (i > 0 && r.Closures[i-1].SafePoint.ID >= t.SafePoint.ID) {
+		if !t.Resolved() || t.Selection.Mode != ManagedResume || t.SuccessorGrant != r.Evidence.Grant || t.Revision == 0 || ManagedDigest(*t.Terminal) != ManagedDigest(r.Evidence.Snapshot) || (i > 0 && r.Closures[i-1].SafePoint.ID >= t.SafePoint.ID) {
 			return false
 		}
 	}
-	return r.Phase == "ACKNOWLEDGED" && r.ACKIdentity == r.Identity()
+	return r.Digest != "" && r.Digest == r.Identity()
 }
 
 // SelectOwnedRetirementForRun observes only the exact completed physical

@@ -93,7 +93,7 @@ func runOwnedRetirementFinishNativeIdentity(t *testing.T, factory func(*testing.
 					t.Fatalf("expiry changed original identity: %v", e)
 				}
 				r, e := store.LoadOwnedRetirement(t.Context(), g.ID)
-				if e != nil || r.Evidence.MarkOrigin != "CALLBACK_RETURN" || r.Evidence.Completion != c {
+				if e != nil || r.Evidence.Completion.NotEntered() || r.Evidence.Completion != c {
 					t.Fatalf("legacy retirement fabricated proof: %+v %v", r, e)
 				}
 				if _, e = store.LookupChildExecution(t.Context(), g.ChildRunID); !errors.Is(e, kernel.ErrNotFound) {

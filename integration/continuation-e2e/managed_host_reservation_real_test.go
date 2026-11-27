@@ -25,14 +25,11 @@ type managedHostReadFault struct {
 	fault error
 }
 
-func (s *managedHostReadFault) VerifyManagedOriginalDispatch(ctx context.Context, b kernel.ManagedHostBinding, recovery bool) error {
-	if e := s.Store.VerifyManagedOriginalDispatch(ctx, b, recovery); e != nil {
+func (s *managedHostReadFault) VerifyManagedOriginalDispatch(ctx context.Context, b kernel.ManagedHostBinding) error {
+	if e := s.Store.VerifyManagedOriginalDispatch(ctx, b); e != nil {
 		return e
 	}
-	if recovery {
-		return s.fault
-	}
-	return nil
+	return s.fault
 }
 
 // A real interrupted process leaves one native source. Neither authorization
@@ -68,7 +65,7 @@ func TestRealPostgresManagedNativeElectionAfterProcessCrash(t *testing.T) {
 				t.Fatal(e)
 			}
 			safe, e := rt.LoadManagedRecovery(t.Context(), root.ExecutionRefID)
-			if e != nil || safe.LegacyState != "" {
+			if e != nil || !safe.Valid() {
 				t.Fatal("missing original safe point", e)
 			}
 			assertNoSend := func() {
@@ -79,9 +76,8 @@ func TestRealPostgresManagedNativeElectionAfterProcessCrash(t *testing.T) {
 				if got := readManagedRecoveryRecords[managedRecoveryEffect](t, filepath.Join(files, "ledger.jsonl")); len(got) != 1 {
 					t.Fatalf("replayed committed Tool: %d", len(got))
 				}
-				var n int64
-				if e := db.Table("agent_harness_managed_recovery").Count(&n).Error; e != nil || n != 0 {
-					t.Fatalf("independent Host reservation written: %d %v", n, e)
+				if db.Migrator().HasTable("agent_harness_managed_recovery") {
+					t.Fatal("independent Host reservation table exists")
 				}
 			}
 			assertOriginal := func() {
@@ -134,7 +130,7 @@ func TestRealPostgresManagedNativeElectionAfterProcessCrash(t *testing.T) {
 			if e != nil {
 				t.Fatal(e)
 			}
-			if resume.Authorization().Mode != kernel.ManagedResume || cancel.Authorization().Mode != kernel.ManagedCancel || !cancel.Authorization().Cancellation.Direct() {
+			if resume.Authorization().Mode != kernel.ManagedResume || cancel.Authorization().Mode != kernel.ManagedCancel || !cancel.Authorization().Valid() || cancel.Authorization().CancellationReason != "original stop" {
 				t.Fatal("commands are not independent read-only candidates")
 			}
 			assertOriginal()
@@ -157,7 +153,7 @@ func TestRealPostgresManagedNativeElectionAfterProcessCrash(t *testing.T) {
 			}
 			foreign := safe.SafePoint.Host
 			foreign.Source = json.RawMessage(`{"foreign":"source"}`)
-			if e = peer.VerifyManagedOriginalDispatch(t.Context(), foreign, false); !errors.Is(e, harness.ErrConflict) {
+			if e = peer.VerifyManagedOriginalDispatch(t.Context(), foreign); !errors.Is(e, harness.ErrConflict) {
 				t.Fatalf("foreign source: %v", e)
 			}
 			if mode == kernel.ManagedResume {
@@ -213,9 +209,8 @@ func TestRealPostgresManagedNativeElectionAfterProcessCrash(t *testing.T) {
 			if e != nil || !final.Resolved() || final.Selection.Mode != mode || !reflect.DeepEqual(final.Selection, r) {
 				t.Fatalf("native closure lost original authorization: %+v %v", final, e)
 			}
-			var n int64
-			if e = db.Table("agent_harness_managed_recovery").Count(&n).Error; e != nil || n != 0 {
-				t.Fatalf("Host reservation written: %d %v", n, e)
+			if db.Migrator().HasTable("agent_harness_managed_recovery") {
+				t.Fatal("Host reservation table exists")
 			}
 			effects := readManagedRecoveryRecords[managedRecoveryEffect](t, filepath.Join(files, "ledger.jsonl"))
 			calls := readManagedRecoveryRecords[model.Request](t, filepath.Join(files, "model.jsonl"))

@@ -404,7 +404,7 @@ func runPhysicalAdmissionACKCase(t *testing.T, factory func(*testing.T) (kernel.
 			t.Fatalf("successful attempt left fence: %+v %v", g, lookupErr)
 		}
 		retirement, e := fresh.LoadOwnedRetirement(t.Context(), w.grant.ID)
-		if e != nil || retirement.Evidence.Grant != w.grant || !retirement.Evidence.Completion.HostCompleted || retirement.Phase != "ACKNOWLEDGED" {
+		if e != nil || retirement.Evidence.Grant != w.grant || !retirement.Evidence.Completion.HostCompleted || !retirement.Valid() {
 			t.Fatalf("retirement not bound to original attempt: %+v %v", retirement, e)
 		}
 		wantReadbacks := 0
@@ -476,7 +476,7 @@ func assertNoEntryRetirement(t *testing.T, rt *kernel.Runtime, g kernel.ChildExe
 	t.Helper()
 	receipt, e := rt.LoadOwnedRetirement(t.Context(), g.ID)
 	c := receipt.Evidence.Completion
-	if e != nil || !receipt.Valid() || receipt.Phase != "ACKNOWLEDGED" || receipt.Evidence.Grant != g || receipt.Evidence.MarkOrigin != "NOT_ENTERED" ||
+	if e != nil || !receipt.Valid() || receipt.Evidence.Grant != g || !receipt.Evidence.Completion.NotEntered() ||
 		!c.MatchesNotEnteredSnapshot(g, source) || c.HostCompleted || c.LeaseOwned != owned || c.ToolReturns != "" || c.MatchesReturnSnapshot(source) ||
 		len(receipt.Closures) != 0 || kernel.ManagedDigest(receipt.Evidence.Snapshot) != kernel.ManagedDigest(source) {
 		t.Fatalf("invalid original no-entry retirement: %+v %v", receipt, e)
@@ -678,7 +678,7 @@ func runPhysicalAdmissionACKRace(t *testing.T, factory func(*testing.T) (kernel.
 	}
 	fresh := ea1StartRuntime(t, f.reopen())
 	receipt, e := fresh.LoadOwnedRetirement(t.Context(), grants[0].ID)
-	if e != nil || receipt.Evidence.Grant != grants[0] || !receipt.Evidence.Completion.HostCompleted || receipt.Phase != "ACKNOWLEDGED" {
+	if e != nil || receipt.Evidence.Grant != grants[0] || !receipt.Evidence.Completion.HostCompleted || !receipt.Valid() {
 		t.Fatalf("winner retirement not exact: %+v %v", receipt, e)
 	}
 }

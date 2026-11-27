@@ -71,7 +71,7 @@ func testNoEntryRetirementNeedsNoHarnessDispatch(t *testing.T, mode string) {
 		t.Fatalf("not actual pre-entry denial: %v %d", e, calls)
 	}
 	receipt, re := rt.LoadOwnedRetirement(t.Context(), base.grant.ID)
-	if re != nil || !receipt.Valid() || receipt.Phase != "ACKNOWLEDGED" || !receipt.Evidence.Completion.MatchesNotEnteredSnapshot(base.grant, before) {
+	if re != nil || !receipt.Valid() || !receipt.Evidence.Completion.MatchesNotEnteredSnapshot(base.grant, before) {
 		t.Fatalf("Kernel no-entry not retired: %+v %v", receipt, re)
 	}
 	if _, e = rt.LookupChildExecution(t.Context(), root.ExecutionRefID); !errors.Is(e, kernel.ErrNotFound) {
@@ -135,7 +135,7 @@ func TestNoEntryRetirementPreservesPreparedCustody(t *testing.T) {
 		t.Fatalf("fixture failed: %v %d", e, calls)
 	}
 	receipt, re := rt.LoadOwnedRetirement(t.Context(), base.grant.ID)
-	if re != nil || receipt.Phase != "ACKNOWLEDGED" || !receipt.Evidence.Completion.MatchesNotEnteredSnapshot(base.grant, prepared) {
+	if re != nil || !receipt.Valid() || !receipt.Evidence.Completion.MatchesNotEnteredSnapshot(base.grant, prepared) {
 		t.Fatalf("no-entry not retired: %v", re)
 	}
 	verified := r.VerifiedDeferredRootControl(t.Context(), rt, prepared)

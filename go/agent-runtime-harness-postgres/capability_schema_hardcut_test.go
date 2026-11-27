@@ -51,6 +51,11 @@ func TestCapabilityShellManualCutoverRejectsOldRowsAndAppliesAtomically(t *testi
 	if err := harnesspostgres.Migrate(db); err != nil {
 		t.Fatal(err)
 	}
+	// Reconstruct the stopped historical writer's table for the historical
+	// manual SQL. Fresh native Migrate must not create this retired table.
+	if err := db.Exec("CREATE TABLE agent_harness_managed_recovery (id TEXT PRIMARY KEY)").Error; err != nil {
+		t.Fatal(err)
+	}
 	for _, column := range []string{"capability_key TEXT NOT NULL DEFAULT 'runtime.agent'", "definition_version TEXT NOT NULL DEFAULT 'v1'"} {
 		if err := db.Exec("ALTER TABLE agent_harness_invocations ADD COLUMN " + column).Error; err != nil {
 			t.Fatal(err)

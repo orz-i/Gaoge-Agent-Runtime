@@ -102,7 +102,7 @@ func ValidExecutionDispatchGrantAdmission(grant Item) (string, bool) {
 		if original["physicalRunID"] == grant.RunID {
 			return phase, true
 		}
-	case "resolve-subtask-approval", "resolve-wait":
+	case "resolve-subtask-approval":
 		if original["checkpointID"] != "" && original["physicalRunID"] != grant.RunID {
 			return "", false
 		}
@@ -202,10 +202,6 @@ func VerifiedExecutionDispatchReceipt(grant Item, receipts []Item) (string, bool
 		if phase == "start" || phase == "start-retry" || phase == "handoff-start" {
 			return payload["boundary"], true
 		}
-	case "native_kernel_epoch_recovered":
-		if phase == "start" || phase == "start-retry" {
-			return payload["boundary"], true
-		}
 	case "native_agent_callback_not_entered":
 		// Unlike pre-Create rejection, the native Run exists. Only an
 		// original Agent call with acknowledged no-entry may close this.
@@ -220,10 +216,6 @@ func VerifiedExecutionDispatchReceipt(grant Item, receipts []Item) (string, bool
 	case "native_agent_control_no_effect":
 		if phase == "resolve-approval" || phase == "resolve-subtask-approval" ||
 			phase == "grant-call-allowance" {
-			return payload["boundary"], true
-		}
-	case "native_allowance_committed":
-		if phase == "grant-call-allowance" {
 			return payload["boundary"], true
 		}
 	case "handoff_start_returned":
@@ -374,21 +366,7 @@ func (runner *Runner) withPhysicalInvocationDispatch(
 	ctx context.Context, invocation Invocation, phase string,
 	physical func(context.Context) (kernel.Snapshot, error),
 ) (kernel.Snapshot, error) {
-	return runner.withPhysicalInvocationDispatchFor(ctx, invocation, phase, invocation.ExecutionRefID, physical)
-}
-
-// SubAgent control may mutate a proven descendant Run rather
-// than the owning Harness Invocation's root Run. The durable grant still
-// belongs to the owning Invocation for cancellation arbitration.
-func (runner *Runner) withPhysicalInvocationDispatchFor(
-	ctx context.Context, invocation Invocation, phase, resultRunID string,
-	physical func(context.Context) (kernel.Snapshot, error),
-) (kernel.Snapshot, error) {
-	if physical == nil {
-		return kernel.Snapshot{}, ErrInvalidRequest
-	}
-	return runner.withPhysicalInvocationDispatchForContext(ctx, invocation, phase, resultRunID,
-		nil, physical)
+	return runner.withPhysicalInvocationDispatchForContext(ctx, invocation, phase, invocation.ExecutionRefID, nil, physical)
 }
 
 // An AgentTask approval carries a private per-call proof only AFTER the

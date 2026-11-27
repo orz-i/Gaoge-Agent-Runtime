@@ -32,7 +32,7 @@ func New(db *gorm.DB) (*Store, error) {
 	if err := rejectLegacyInvocationColumns(db); err != nil {
 		return nil, err
 	}
-	if err := rejectOpenManagedReservations(db); err != nil {
+	if err := rejectManagedReservations(db); err != nil {
 		return nil, err
 	}
 	return &Store{db: db}, nil
@@ -780,7 +780,7 @@ func Models() []any {
 	return []any{
 		&sessionRecord{}, &turnRecord{}, &invocationRecord{}, &interactionRecord{}, &configRecord{},
 		&contextCheckpointRecord{}, &contextHeadRecord{}, &contextArtifactRecord{}, &itemRecord{}, &budgetRecord{},
-		&managedAuthorityRecord{}, &managedReservationRecord{},
+		&managedAuthorityRecord{},
 	}
 }
 
@@ -795,7 +795,7 @@ func Migrate(db *gorm.DB) error {
 	if err := checkInvocationRootMigration(db); err != nil {
 		return err
 	}
-	if err := rejectOpenManagedReservations(db); err != nil {
+	if err := rejectManagedReservations(db); err != nil {
 		return err
 	}
 	return db.Transaction(func(tx *gorm.DB) error {

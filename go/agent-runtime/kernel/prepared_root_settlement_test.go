@@ -20,7 +20,7 @@ func TestPreparedRootSettlementOnlyBeforeFirstPhysicalExecution(t *testing.T) {
 	receipt.Evidence.Grant.ExpectedRevision = 1
 	receipt.Evidence.Snapshot = prepared
 	receipt.Evidence.Completion.ReturnRevision = 1
-	receipt.ACKIdentity = receipt.Identity()
+	receipt.Digest = receipt.Identity()
 	if !receipt.Valid() {
 		t.Fatal("prepared receipt fixture is not a valid original ACK")
 	}
@@ -58,13 +58,13 @@ func TestPreparedRootSettlementOnlyBeforeFirstPhysicalExecution(t *testing.T) {
 		{"resume ACK cannot claim Prepare", prepared, 3, false, []kernel.OwnedRetirementReceipt{func() kernel.OwnedRetirementReceipt {
 			r := receipt
 			r.Evidence.Grant.AdmissionOperation = "resume"
-			r.ACKIdentity = r.Identity()
+			r.Digest = r.Identity()
 			return r
 		}()}},
 		{"start ACK cannot claim Prepare", prepared, 3, false, []kernel.OwnedRetirementReceipt{func() kernel.OwnedRetirementReceipt {
 			r := receipt
 			r.Evidence.Grant.AdmissionOperation = "start"
-			r.ACKIdentity = r.Identity()
+			r.Digest = r.Identity()
 			return r
 		}()}},
 	} {

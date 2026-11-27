@@ -35,12 +35,11 @@ Invocation, original dispatch, response receipts and budget reservations.
 
 ## Persistence and recovery
 
-Schema v3 uses application ID `GAHS`. The new pre-stable Harness Store
+Schema v4 uses application ID `GAHS`. The new pre-stable Harness Store
 Checkpoint payload is `checkpoint-opaque-v1`, preserving original Tool-call
 arguments and Provider Replay bytes across close/reopen and duplicate writes.
 It cannot interpret older Checkpoint payloads; start with a fresh profile and
-do not mix writers from different beta.24 source revisions. The SQL table and
-index definitions remain unchanged. Creation initializes and checkpoints a
+do not mix writers from different beta.24 source revisions. Schema v4 removes the retired Host reservation table and its indexes. Creation initializes and checkpoints a
 temporary database before atomically publishing it without overwrite. Reopen
 checks the application ID, version, WAL mode, exact table and index definitions,
 and the original managed recovery authority. A missing or damaged profile
@@ -55,9 +54,9 @@ Retry the original operation with its original identity and expected revision.
 Resume the original Turn after a process exits. A committed dispatch return
 can finish projection. An outstanding external call stays pending until the
 Runtime receives its original evidence. The two databases commit independently.
-The current pre-stable Schema v3 deletes obsolete `execution_class`,
+Schema v3 deleted obsolete `execution_class`,
 `capability_key` and `definition_version` columns from Agent Invocations.
-Older Harness SQLite v1/v2 files are rejected on reopen;
+Schema v4 also removes the retired Host reservation table. Older Harness SQLite v1–v3 files are rejected on reopen;
 there is no implicit migration or fallback to the legacy execution interpreter.
 For a consistent backup of a desktop profile, stop its executors, close both
 Stores, and retain both databases together.

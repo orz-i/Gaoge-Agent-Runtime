@@ -1,6 +1,7 @@
 package kernel
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -111,19 +112,9 @@ func TestManagedRecoveryReducersPreserveSourceAndLiveOwner(t *testing.T) {
 	if e != nil || ManagedDigest(parked) != ManagedDigest(original) {
 		t.Fatalf("park: %+v %v", parked, e)
 	}
-	for _, alter := range []func(*ManagedTransfer){
-		func(t *ManagedTransfer) { t.LegacyState = "INVALIDATED" },
-		func(t *ManagedTransfer) { t.Generation = 1 },
-		func(t *ManagedTransfer) { t.Selection.ID = "retired-reservation" },
-	} {
-		invalid := original
-		alter(&invalid)
-		if _, e := ValidateManagedRecoverySource(invalid, q, s, l, g, a, g.ExecutionEpoch, now); !errors.Is(e, ErrExecutionConflict) {
-			t.Fatalf("old claim won but native admission succeeded: %v", e)
-		}
-	}
+
 }
-func TestManagedRecoveryModeAndExactACKIdentity(t *testing.T) {
+func TestManagedRecoveryModeAndExactDigest(t *testing.T) {
 	initial, s, l, g, a, now := managedReducerFixture()
 	p, e := ValidateManagedRecoverySource(initial, ManagedRecoverySourceRequest{RunID: s.Run.ID, SuspensionID: "safe", ExpectedRevision: 3}, s, l, g, a, g.ExecutionEpoch, now)
 	if e != nil {
@@ -145,10 +136,9 @@ func TestManagedRecoveryModeAndExactACKIdentity(t *testing.T) {
 		t.Fatal("foreign caller adopted lease")
 	}
 
-	c := ManagedCancellation{Native: true, Reason: "original"}
 	cancelR := r
 	cancelR.Mode = ManagedCancel
-	cancelR.Cancellation = c
+	cancelR.CancellationReason = "original"
 	cancelP := ManagedAdmissionProof{reservation: cancelR, transfer: p, valid: true}
 	if _, _, e = ResolveManagedPhysicalAdmission(t.Context(), p, cancelP.OwnedAdmission(req, "next-lease", "next-grant"), s, l, g, a, g.ExecutionEpoch, now, nil); !errors.Is(e, ErrExecutionConflict) {
 		t.Fatalf("CANCEL enabled physical dispatch: %v", e)
@@ -165,7 +155,7 @@ func TestManagedRecoveryModeAndExactACKIdentity(t *testing.T) {
 		t.Fatal("cancel ACK replay rejected")
 	}
 	forged := cancelP
-	forged.reservation.Cancellation.Reason = "different"
+	forged.reservation.CancellationReason = "different"
 	cq.Selection = forged
 	if ManagedCancelReplay(cancelled, cq, *cancelled.Terminal) {
 		t.Fatal("foreign cancellation receipt adopted")
@@ -175,79 +165,33 @@ func TestManagedRecoveryModeAndExactACKIdentity(t *testing.T) {
 		t.Fatalf("RESUME became cancellation: %v", e)
 	}
 }
-func TestManagedReservationCloneAndPersistencePreserveModeZero(t *testing.T) {
-	transfer, _, _, _, _, _ := managedReducerFixture()
-	resume := ManagedRecoveryAuthorization{Mode: ManagedResume}
-	legacy := ManagedRecoveryAuthorization{ID: "reservation", RecoveryID: transfer.SafePoint.RecoveryID, SuspensionID: transfer.SafePoint.ID, Binding: transfer.SafePoint.Host, Mode: ManagedResume, Revision: 1}
-	if !resume.Valid() || legacy.Valid() {
-		t.Fatal("legacy Host reservation authorized a native command")
+func TestManagedTransferWireRejectsRetiredAuthority(t *testing.T) {
+	original, _, _, _, _, _ := managedReducerFixture()
+	for _, selection := range []ManagedRecoveryAuthorization{{}, {Mode: ManagedResume}, {Mode: ManagedCancel, CancellationReason: "original"}} {
+		original.Selection = selection
+		raw, err := json.Marshal(original)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var restored ManagedTransfer
+		if err = json.Unmarshal(raw, &restored); err != nil || !restored.Valid() || ManagedDigest(restored) != ManagedDigest(original) {
+			t.Fatalf("native wire changed: %v", err)
+		}
+		for _, retired := range []string{`"State":"INVALIDATED"`, `"Generation":1`, `"ClaimantID":"old"`, `"Activations":[]`} {
+			if err := json.Unmarshal(append([]byte("{"+retired+","), raw[1:]...), &restored); err == nil {
+				t.Fatalf("retired transfer field accepted: %s", retired)
+			}
+		}
+		for _, retired := range []string{`"ID":"reservation"`, `"RecoveryID":"old"`, `"SuspensionID":"old"`, `"Binding":{}`, `"Revision":1`, `"Cancellation":{"Payload":null}`} {
+			legacy := bytes.Replace(raw, []byte(`"Selection":{`), []byte(`"Selection":{`+retired+","), 1)
+			if err := json.Unmarshal(legacy, &restored); err == nil {
+				t.Fatalf("retired selection field accepted: %s", retired)
+			}
+		}
 	}
-	legacy.Binding.Source = append(json.RawMessage(nil), legacy.Binding.Source...)
-	copied := managedClone(legacy)
-	copied.Binding.Source[0] = 'x'
-	if reflect.DeepEqual(copied.Binding.Source, legacy.Binding.Source) {
-		t.Fatal("mutable historical source alias")
-	}
-
-	cloned := managedClone(resume)
-	if !cloned.Valid() || !reflect.DeepEqual(cloned, resume) {
-		t.Fatal("clone changed zero cancellation")
-	}
-	encoded, err := json.Marshal(resume)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var restored ManagedRecoveryAuthorization
-	if err = json.Unmarshal(encoded, &restored); err != nil {
-		t.Fatal(err)
-	}
-	if !restored.Valid() || !reflect.DeepEqual(restored, resume) {
-		t.Fatalf("persistent roundtrip changed mode source: %s", encoded)
-	}
-	empty := resume
-	empty.Cancellation.Payload = json.RawMessage{}
-	if empty.Valid() {
-		t.Fatal("nonnil empty cancellation accepted")
-	}
-	if _, e := json.Marshal(empty); e == nil {
-		t.Fatal("empty cancellation erased on persistent write")
-	}
-	explicit := resume
-	explicit.Cancellation.Payload = json.RawMessage("null")
-	explicitClone := managedClone(explicit)
-	if explicitClone.Valid() || !reflect.DeepEqual(explicit, explicitClone) {
-		t.Fatal("explicit null was erased into RESUME authority")
-	}
-	raw, err := json.Marshal(explicit)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var restoredNull ManagedRecoveryAuthorization
-	if err = json.Unmarshal(raw, &restoredNull); err != nil {
-		t.Fatal(err)
-	}
-	if restoredNull.Valid() {
-		t.Fatal("persistent explicit null accepted")
-	}
-	cancel := resume
-	cancel.Mode = ManagedCancel
-	cancel.Cancellation = ManagedCancellation{Native: true, Reason: "original"}
-	oldCancel := cancel
-	oldCancel.Cancellation = ManagedCancellation{IntentID: "original", Seq: 8, Payload: json.RawMessage(`{"target":"root"}`)}
-	oldCancel.Cancellation.PayloadDigest = ManagedDigest(oldCancel.Cancellation.Payload)
-	if oldCancel.Valid() {
-		t.Fatal("old Host cancellation receipt authorized native control")
-	}
-	raw, err = json.Marshal(cancel)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var restoredCancel ManagedRecoveryAuthorization
-	if err = json.Unmarshal(raw, &restoredCancel); err != nil {
-		t.Fatal(err)
-	}
-	if !restoredCancel.Valid() || !reflect.DeepEqual(cancel, restoredCancel) {
-		t.Fatal("CANCEL source lost in codec")
+	if (ManagedRecoveryAuthorization{Mode: ManagedResume, CancellationReason: "foreign"}).Valid() ||
+		(ManagedRecoveryAuthorization{Mode: ManagedCancel, CancellationReason: " noncanonical "}).Valid() {
+		t.Fatal("invalid native selection accepted")
 	}
 }
 
@@ -280,7 +224,7 @@ func (s *managedConfiguredHost) ManagedRecoveryAuthority(context.Context) (Manag
 	s.calls++
 	return s.binding.HostAuthority, nil
 }
-func (s *managedConfiguredHost) VerifyManagedOriginalDispatch(_ context.Context, b ManagedHostBinding, _ bool) error {
+func (s *managedConfiguredHost) VerifyManagedOriginalDispatch(_ context.Context, b ManagedHostBinding) error {
 	s.calls++
 	if !reflect.DeepEqual(b, s.binding) {
 		return ErrExecutionConflict
@@ -385,7 +329,7 @@ func TestManagedQualifiedParkRetainsExactFirstOwnerSource(t *testing.T) {
 	q := ManagedRecoverySourceRequest{RunID: current.Run.ID, SuspensionID: original.SafePoint.ID, ExpectedRevision: current.Run.Revision,
 		Qualification: ManagedFrontierQualification{prior: original, point: next, proof: featurecontrol.Seal(current.Run.ID, current.Run.Revision, "managed_qualified_recovery", original.SafePoint.ID, current.State, next)}}
 	parked, err := ValidateManagedRecoverySource(original, q, current, lease, grant, authority, grant.ExecutionEpoch, now)
-	if err != nil || parked.LegacyState != "" || parked.Revision != current.Run.Revision || ManagedDigest(parked.SafePoint) != ManagedDigest(next) {
+	if err != nil || !parked.Valid() || parked.Revision != current.Run.Revision || ManagedDigest(parked.SafePoint) != ManagedDigest(next) {
 		t.Fatalf("qualified park: %v", err)
 	}
 	ordinary := q

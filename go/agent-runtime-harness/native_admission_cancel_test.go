@@ -454,9 +454,8 @@ func testHarnessCancelAtActualToolDispatch(t *testing.T, timelineOrder, retireme
 			if e != nil {
 				t.Fatal(e)
 			}
-			want := "ACKNOWLEDGED"
-			if originalRetired.Phase != want {
-				t.Fatal("wrong committed retirement phase", originalRetired.Phase, want)
+			if !originalRetired.Valid() {
+				t.Fatal("invalid committed retirement fact", originalRetired)
 			}
 			if _, e = rt.LookupChildExecution(ctx, inv.ExecutionRefID); !errors.Is(e, kernel.ErrNotFound) {
 				t.Fatal("Finish retained original grant", e)
@@ -505,7 +504,7 @@ func testHarnessCancelAtActualToolDispatch(t *testing.T, timelineOrder, retireme
 	}
 	if retirementCut != "" {
 		receipt, e := rt.LoadOwnedRetirement(ctx, originalGrant.ID)
-		if e != nil || receipt.Phase != "ACKNOWLEDGED" || receipt.Evidence.Grant != originalGrant || (originalRetired.Version != 0 && receipt.Identity() != originalRetired.Identity()) {
+		if e != nil || !receipt.Valid() || receipt.Evidence.Grant != originalGrant || (originalRetired.Version != 0 && receipt.Identity() != originalRetired.Identity()) {
 			t.Fatal("original retirement was not acknowledged exactly", e, receipt)
 		}
 		currentReceipt, e := rt.LookupOwnedRetirementForRun(ctx, inv.ExecutionRefID)

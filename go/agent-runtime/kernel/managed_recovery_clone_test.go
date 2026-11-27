@@ -16,12 +16,11 @@ func managedCopyFixture() ManagedTransfer {
 		State: raw(), Checkpoint: &Checkpoint{ID: "cp", Payload: raw(), Response: raw(), CreatedAt: now, ResolvedAt: &ended},
 		Result: &Result{ContentType: "application/json", Content: raw()}, EventHead: 17}
 	binding := ManagedHostBinding{RunID: "run", Source: raw(), Approval: &ManagedApprovalDecision{CheckpointID: "original", Decision: "approve", Comment: "original"}}
-	reservation := ManagedRecoveryAuthorization{Binding: binding, Cancellation: ManagedCancellation{Payload: raw(), PayloadDigest: "original-digest"}}
+	selection := ManagedRecoveryAuthorization{Mode: ManagedCancel, CancellationReason: "original"}
 	grant := ChildExecutionGrant{ID: "grant", ChildRunID: "run", ExpectedRevision: 3, ExecutionOwnerID: "owner", ExecutionLeaseID: "lease", ExecutionEpoch: 4, AdmissionSourceHash: "source", AdmissionOperation: "prepare"}
 	lease := ExecutionLease{RunID: "run", OwnerID: "owner", LeaseID: "lease", Epoch: 4, ExpiresAt: now}
 	return ManagedTransfer{SafePoint: ManagedSafePoint{Host: binding, OriginalGrant: grant, OriginalLease: lease, Source: snapshot, LifecycleSource: raw()},
-		Selection: reservation, SuccessorGrant: grant, SuccessorLease: lease,
-		Activations: []ManagedActivation{{Generation: 2, Grant: grant, Lease: lease, Selection: reservation}}, Terminal: &snapshot}
+		Selection: selection, SuccessorGrant: grant, SuccessorLease: lease, Terminal: &snapshot}
 }
 
 func mutateManagedSnapshot(v *Snapshot) {
@@ -41,12 +40,6 @@ func mutateManagedPoint(v *ManagedSafePoint) {
 	v.Host.Approval.Comment = "changed"
 	v.LifecycleSource[0] = '['
 	mutateManagedSnapshot(&v.Source)
-}
-
-func mutateManagedReservation(v *ManagedRecoveryAuthorization) {
-	v.Binding.Source[0] = '['
-	v.Binding.Approval.Comment = "changed"
-	v.Cancellation.Payload[0] = '['
 }
 
 func checkManagedCopyIsolation[T managedCloneValue](t *testing.T, original T, mutate func(*T)) {
@@ -83,18 +76,13 @@ func TestManagedFiniteCopiesIsolateAllPersistenceLeaves(t *testing.T) {
 		checkManagedCopyIsolation(t, managedCopyFixture().SafePoint.Host, func(v *ManagedHostBinding) { v.Source[0] = '['; v.Approval.Comment = "changed" })
 	})
 	t.Run("point", func(t *testing.T) { checkManagedCopyIsolation(t, managedCopyFixture().SafePoint, mutateManagedPoint) })
-	t.Run("reservation", func(t *testing.T) {
-		checkManagedCopyIsolation(t, managedCopyFixture().Selection, mutateManagedReservation)
-	})
 	t.Run("snapshot", func(t *testing.T) {
 		checkManagedCopyIsolation(t, managedCopyFixture().SafePoint.Source, mutateManagedSnapshot)
 	})
 	t.Run("transfer", func(t *testing.T) {
 		checkManagedCopyIsolation(t, managedCopyFixture(), func(v *ManagedTransfer) {
 			mutateManagedPoint(&v.SafePoint)
-			mutateManagedReservation(&v.Selection)
-			mutateManagedReservation(&v.Activations[0].Selection)
-			v.Activations[0].ClaimantID = "changed"
+			v.Selection.CancellationReason = "changed"
 			mutateManagedSnapshot(v.Terminal)
 		})
 	})
@@ -103,15 +91,12 @@ func TestManagedFiniteCopiesIsolateAllPersistenceLeaves(t *testing.T) {
 func TestManagedFiniteCopiesPreserveNilEmptyAndMalformedRaw(t *testing.T) {
 	for _, raw := range []json.RawMessage{nil, {}, []byte("null"), []byte("{"), []byte(`{"b":9007199254740993,"a":0}`)} {
 		binding := ManagedHostBinding{Source: raw}
-		reservation := ManagedRecoveryAuthorization{Binding: binding, Cancellation: ManagedCancellation{Payload: raw}}
 		snapshot := Snapshot{State: raw, Checkpoint: &Checkpoint{Payload: raw, Response: raw}, Result: &Result{Content: raw}}
 		point := ManagedSafePoint{Host: binding, Source: snapshot, LifecycleSource: raw}
-		for _, activations := range [][]ManagedActivation{nil, {}, {{Selection: reservation}}} {
-			transfer := ManagedTransfer{SafePoint: point, Selection: reservation, Activations: activations, Terminal: &snapshot}
-			if !reflect.DeepEqual(binding, managedClone(binding)) || !reflect.DeepEqual(reservation, managedClone(reservation)) ||
-				!reflect.DeepEqual(snapshot, managedClone(snapshot)) || !reflect.DeepEqual(point, managedClone(point)) || !reflect.DeepEqual(transfer, managedClone(transfer)) {
-				t.Fatalf("copy normalized nil/empty/malformed evidence: raw=%#v activations=%#v", raw, activations)
-			}
+		transfer := ManagedTransfer{SafePoint: point, Terminal: &snapshot}
+		if !reflect.DeepEqual(binding, managedClone(binding)) || !reflect.DeepEqual(snapshot, managedClone(snapshot)) ||
+			!reflect.DeepEqual(point, managedClone(point)) || !reflect.DeepEqual(transfer, managedClone(transfer)) {
+			t.Fatalf("copy normalized nil/empty/malformed evidence: raw=%#v", raw)
 		}
 	}
 	zero := ManagedTransfer{}

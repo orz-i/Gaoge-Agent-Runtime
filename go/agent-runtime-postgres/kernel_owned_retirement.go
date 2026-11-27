@@ -45,7 +45,7 @@ func pgPersistOwnedRetirement(tx *gorm.DB, row models.KernelChildEffectGrantReco
 	if e != nil {
 		return e
 	}
-	value := models.KernelOwnedRetirementRecord{GrantID: g.ID, RunID: g.ChildRunID, SettledRevision: s.Run.Revision, Version: r.Version, Phase: r.Phase, Payload: string(payload)}
+	value := models.KernelOwnedRetirementRecord{GrantID: g.ID, RunID: g.ChildRunID, SettledRevision: s.Run.Revision, Version: r.Version, Phase: "ACKNOWLEDGED", Payload: string(payload)}
 	e = tx.Create(&value).Error
 	// Even an identical old receipt beside an active grant is impossible state.
 	if isKernelUniqueConstraint(e) {
@@ -71,7 +71,7 @@ func pgLoadOwnedRetirement(tx *gorm.DB, id string) (kernel.OwnedRetirementReceip
 		return kernel.OwnedRetirementReceipt{}, translateKernelError(e)
 	}
 	var r kernel.OwnedRetirementReceipt
-	if e := json.Unmarshal([]byte(row.Payload), &r); e != nil || !r.Valid() || r.Evidence.Grant.ID != row.GrantID || r.Evidence.Grant.ChildRunID != row.RunID || r.Evidence.Snapshot.Run.Revision != row.SettledRevision || r.Version != row.Version || r.Phase != row.Phase {
+	if e := json.Unmarshal([]byte(row.Payload), &r); e != nil || !r.Valid() || r.Evidence.Grant.ID != row.GrantID || r.Evidence.Grant.ChildRunID != row.RunID || r.Evidence.Snapshot.Run.Revision != row.SettledRevision || r.Version != row.Version || row.Phase != "ACKNOWLEDGED" {
 		return r, kernel.ErrExecutionConflict
 	}
 	return r, nil

@@ -78,7 +78,7 @@ func TestRetiredCallbackClosurePrecedesEveryNewGeneration(t *testing.T) {
 					t.Fatalf("pre-ACK crash not exercised: %v", err)
 				}
 				prior, err := base.LookupOwnedRetirementForRun(t.Context(), prepared.Run.ID)
-				if err != nil || prior.Phase != "ACKNOWLEDGED" {
+				if err != nil || !prior.Valid() {
 					t.Fatalf("original genuine retirement missing: %+v %v", prior, err)
 				}
 				cut.deny = false
@@ -96,7 +96,7 @@ func TestRetiredCallbackClosurePrecedesEveryNewGeneration(t *testing.T) {
 					t.Fatalf("successor failed original closure: %v", err)
 				}
 				closed, err := base.LoadOwnedRetirement(t.Context(), prior.Evidence.Grant.ID)
-				if err != nil || closed.Phase != "ACKNOWLEDGED" || closed.Identity() != prior.Identity() {
+				if err != nil || !closed.Valid() || closed.Identity() != prior.Identity() {
 					t.Fatalf("original identity was lost or silently rewritten: %+v %v", closed, err)
 				}
 				if err = rt.VerifyOwnedRootSettlement(t.Context(), done); err != nil {

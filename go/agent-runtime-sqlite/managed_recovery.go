@@ -49,7 +49,7 @@ func sqliteLoadManaged(ctx context.Context, q schemaQuery, id string) (kernel.Ma
 	if e = json.Unmarshal(b, &t); e != nil {
 		return t, kernel.ErrExecutionConflict
 	}
-	if t.SafePoint.Host.RunID != id || t.SafePoint.ID != sid || t.SafePoint.RecoveryID != rid || t.Revision != rev || !t.SafePoint.Valid() {
+	if t.SafePoint.Host.RunID != id || t.SafePoint.ID != sid || t.SafePoint.RecoveryID != rid || t.Revision != rev || !t.Valid() {
 		return t, kernel.ErrExecutionConflict
 	}
 	return t, nil
@@ -309,7 +309,7 @@ func sqliteLoadManagedByID(ctx context.Context, q schemaQuery, id string) (kerne
 		return kernel.ManagedTransfer{}, e
 	}
 	var t kernel.ManagedTransfer
-	if e = json.Unmarshal(b, &t); e != nil || t.SafePoint.ID != id || t.SafePoint.RecoveryID != rid || t.SafePoint.Host.RunID != run || t.Revision != rev || !t.SafePoint.Valid() {
+	if e = json.Unmarshal(b, &t); e != nil || t.SafePoint.ID != id || t.SafePoint.RecoveryID != rid || t.SafePoint.Host.RunID != run || t.Revision != rev || !t.Valid() {
 		return t, kernel.ErrExecutionConflict
 	}
 	return t, nil

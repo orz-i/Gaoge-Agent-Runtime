@@ -80,16 +80,23 @@ func validateFinalRetirements(ctx context.Context, q schemaQuery) error {
 	if pending != 0 {
 		return fmt.Errorf("%w: %d unfinished original retirements; drain with the previous writer", ErrUnsupportedSchema, pending)
 	}
-	if err := q.QueryRowContext(ctx, `SELECT count(*) FROM runtime_managed_transfers m
-		WHERE COALESCE(json_extract(CAST(m.payload_json AS TEXT),'$.State'),'')<>''
-		AND json_extract(CAST(m.payload_json AS TEXT),'$.State') NOT IN ('CLOSED','CANCELLED')
-		AND (json_extract(CAST(m.payload_json AS TEXT),'$.State') IN ('PARKED','ENABLED')
-		OR COALESCE(json_extract(CAST(m.payload_json AS TEXT),'$.Selection.ID'),'')<>''
-		OR EXISTS (SELECT 1 FROM runtime_child_effect_grants g WHERE g.child_run_id=m.run_id AND g.grant_id=json_extract(CAST(m.payload_json AS TEXT),'$.SafePoint.OriginalGrant.ID') AND g.execution_epoch<>0))`).Scan(&pending); err != nil {
+	if err := q.QueryRowContext(ctx, `SELECT count(*) FROM (
+        SELECT payload_json FROM runtime_managed_transfers
+        UNION ALL SELECT payload_json FROM runtime_managed_history
+        ) WHERE json_type(CAST(payload_json AS TEXT),'$.State') IS NOT NULL
+        OR json_type(CAST(payload_json AS TEXT),'$.Selection.ID') IS NOT NULL`).Scan(&pending); err != nil {
 		return err
 	}
 	if pending != 0 {
-		return fmt.Errorf("%w: legacy managed execution must be drained with the previous writer", ErrUnsupportedSchema)
+		return fmt.Errorf("%w: retired managed wire requires a fresh profile", ErrUnsupportedSchema)
+	}
+	if err := q.QueryRowContext(ctx, `SELECT count(*) FROM runtime_owned_retirements
+        WHERE json_type(CAST(payload_json AS TEXT),'$.Phase') IS NOT NULL
+        OR json_type(CAST(payload_json AS TEXT),'$.ACKIdentity') IS NOT NULL`).Scan(&pending); err != nil {
+		return err
+	}
+	if pending != 0 {
+		return fmt.Errorf("%w: retired receipt wire requires a fresh profile", ErrUnsupportedSchema)
 	}
 	return nil
 }

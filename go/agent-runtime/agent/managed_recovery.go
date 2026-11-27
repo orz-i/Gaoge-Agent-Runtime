@@ -84,7 +84,7 @@ func (r *Runner) recoverManagedContinuation(ctx context.Context, original kernel
 	if err != nil {
 		return kernel.Snapshot{}, kernel.ManagedClosureProof{}, err
 	}
-	if !current.Native() || kernel.ManagedDigest(current) != kernel.ManagedDigest(original) {
+	if !current.Valid() || kernel.ManagedDigest(current) != kernel.ManagedDigest(original) {
 		return kernel.Snapshot{}, kernel.ManagedClosureProof{}, kernel.ErrExecutionConflict
 	}
 	if expected, ok := r.runtime.ManagedDispatch(ctx, id); ok && kernel.ManagedDigest(expected) != kernel.ManagedDigest(current.SafePoint.Host) {

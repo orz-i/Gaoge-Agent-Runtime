@@ -330,7 +330,7 @@ func ManagedPhysicalDispatch(t *testing.T, factory func(*testing.T) (kernel.Stor
 			if retry {
 				bad := b
 				bad.Attempt = 1
-				if b.Attempt != 2 || h.VerifyManagedOriginalDispatch(ctx, bad, false) == nil {
+				if b.Attempt != 2 || h.VerifyManagedOriginalDispatch(ctx, bad) == nil {
 					t.Fatal("retry recovery lost generation authority")
 				}
 			}
@@ -357,7 +357,7 @@ func ManagedPhysicalDispatch(t *testing.T, factory func(*testing.T) (kernel.Stor
 				// after a failed retirement. Exercise compatibility with
 				// the old partially projected exact fact and its conflict.
 				assertOriginalApprovalDecision(t, pending.Items, checkpoint, "approve", "original grant", 0)
-				if point.LegacyState != "" || point.Selection.Mode != "" {
+				if !point.Valid() || point.Selection.Mode != "" {
 					t.Fatal("wrong original return failure cut")
 				}
 				if _, err := rt.LookupOwnedPhysicalCallbackReturn(ctx, g); !errors.Is(err, kernel.ErrNotFound) {
@@ -385,7 +385,7 @@ func ManagedPhysicalDispatch(t *testing.T, factory func(*testing.T) (kernel.Stor
 						t.Fatal(err)
 					}
 				}
-				err := h.VerifyManagedOriginalDispatch(ctx, b, false)
+				err := h.VerifyManagedOriginalDispatch(ctx, b)
 				if (err != nil) != (c.name == "approval/conflicting-projection") {
 					t.Fatalf("wrong prior decision qualification: %v", err)
 				}
@@ -408,7 +408,7 @@ func ManagedPhysicalDispatch(t *testing.T, factory func(*testing.T) (kernel.Stor
 				decision := *bad.Approval
 				decision.Comment = "substituted decision"
 				bad.Approval = &decision
-				if e = h.VerifyManagedOriginalDispatch(ctx, bad, false); e == nil {
+				if e = h.VerifyManagedOriginalDispatch(ctx, bad); e == nil {
 					t.Fatal("substituted approval acquired original Host authority")
 				}
 			}

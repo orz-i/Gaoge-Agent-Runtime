@@ -20,15 +20,6 @@ type managedAuthorityRecord struct {
 
 func (managedAuthorityRecord) TableName() string { return "agent_harness_managed_authority" }
 
-type managedReservationRecord struct {
-	ClosureHash string `gorm:"size:64;not null;default:''"`
-	DispatchID  string `gorm:"primaryKey;size:128"`
-	RecoveryID  string `gorm:"uniqueIndex;size:128;not null"`
-	TurnID      string `gorm:"index;size:64;not null"`
-	RecordJSON  string `gorm:"type:text;not null"`
-}
-
-func (managedReservationRecord) TableName() string { return "agent_harness_managed_recovery" }
 func initializeManagedAuthority(tx *gorm.DB) error {
 	a, err := harness.NewManagedHostAuthority()
 	if err != nil {
@@ -99,7 +90,7 @@ func verifyManagedRows(tx *gorm.DB, b kernel.ManagedHostBinding) error {
 	}
 	return harness.ValidateManagedOriginalRows(a, b, session, t, inv, config, dispatch, items)
 }
-func (s *Store) VerifyManagedOriginalDispatch(ctx context.Context, b kernel.ManagedHostBinding, _ bool) error {
+func (s *Store) VerifyManagedOriginalDispatch(ctx context.Context, b kernel.ManagedHostBinding) error {
 	if !b.Valid() {
 		return harness.ErrConflict
 	}
@@ -111,13 +102,15 @@ func (s *Store) VerifyManagedOriginalDispatch(ctx context.Context, b kernel.Mana
 	})
 }
 
-// Retired reservation records are preserved only as migration history.
-func rejectOpenManagedReservations(db *gorm.DB) error {
-	if !db.Migrator().HasTable(&managedReservationRecord{}) {
+// The old Host reservation table has no writer in the native contract.
+// Reject populated retired tables without deleting or interpreting records.
+func rejectManagedReservations(db *gorm.DB) error {
+	const table = "agent_harness_managed_recovery"
+	if !db.Migrator().HasTable(table) {
 		return nil
 	}
 	var n int64
-	if err := db.Model(&managedReservationRecord{}).Where("closure_hash = ?", "").Count(&n).Error; err != nil {
+	if err := db.Table(table).Count(&n).Error; err != nil {
 		return err
 	}
 	if n != 0 {

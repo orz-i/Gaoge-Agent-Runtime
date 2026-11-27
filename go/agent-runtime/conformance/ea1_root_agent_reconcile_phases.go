@@ -430,7 +430,7 @@ func ea1RootReconcilePhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 	var accepted kernel.OwnedRetirementReceipt
 	if noHoldSuccess {
 		accepted, err = rt.LoadOwnedRetirement(t.Context(), grant.ID)
-		if err != nil || !accepted.Valid() || accepted.Phase != "ACKNOWLEDGED" || accepted.Evidence.Grant != grant || !ea1RecoveryJSONEqual(accepted.Evidence.Snapshot, committed) || accepted.Evidence.Completion != completion || accepted.ACKIdentity != accepted.Identity() {
+		if err != nil || !accepted.Valid() || accepted.Evidence.Grant != grant || !ea1RecoveryJSONEqual(accepted.Evidence.Snapshot, committed) || accepted.Evidence.Completion != completion || accepted.Digest != accepted.Identity() {
 			t.Fatalf("single Mark ACK loss did not preserve exact acknowledged retirement: %v", err)
 		}
 		if _, err = rt.LookupChildExecution(t.Context(), request.ID); !errors.Is(err, kernel.ErrNotFound) {

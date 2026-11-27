@@ -23,20 +23,17 @@ func (i GrantIdentity) Valid() bool {
 		i.RunID != "" && strings.TrimSpace(i.RunID) == i.RunID
 }
 
-// ManagedGrantIdentities enumerates the original and every activation
-// retained in a managed history. Used only to reserve known old identities
+// ManagedGrantIdentities enumerates the original and selected successor
+// retained in a managed history. Used only to reserve retained identities
 // during the stopped-writer schema migration, never to recreate authority.
 func ManagedGrantIdentities(raw []byte, runID string) ([]GrantIdentity, error) {
 	var t ManagedTransfer
-	if err := json.Unmarshal(raw, &t); err != nil || !t.SafePoint.Valid() || t.SafePoint.Host.RunID != runID {
+	if err := json.Unmarshal(raw, &t); err != nil || !t.Valid() || t.SafePoint.Host.RunID != runID {
 		return nil, ErrExecutionConflict
 	}
 	out := []GrantIdentity{t.SafePoint.OriginalGrant.Identity()}
 	if t.SuccessorGrant.ID != "" {
 		out = append(out, t.SuccessorGrant.Identity())
-	}
-	for _, a := range t.Activations {
-		out = append(out, a.Grant.Identity())
 	}
 	for _, i := range out {
 		if !i.Valid() || i.RunID != runID {

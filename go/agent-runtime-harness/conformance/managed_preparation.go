@@ -155,7 +155,7 @@ func AwaitManagedOriginalLeaseExpiry(t *testing.T, store kernel.Store, source ke
 		kernel.ManagedRecoveryStore
 	})
 	if !ok || source.Run.Status != kernel.RunStatusRunning || transfer.SafePoint.Host.RunID != source.Run.ID ||
-		transfer.LegacyState != "" ||
+		!transfer.Valid() ||
 		transfer.Selection.Mode != "" || transfer.SuccessorGrant.ID != "" {
 		t.Fatal("missing original unselected managed frontier")
 	}
@@ -297,7 +297,7 @@ func ManagedPreparationSummary(t *testing.T, factory func(*testing.T) (kernel.St
 				}
 				point, err := options.Runtime.LoadManagedRecovery(ctx, root.ExecutionRefID)
 				proof, ok := point.SafePoint.AgentObligations()
-				if err != nil || !ok || point.LegacyState != "" || !kernel.ManagedSourceMatches(point.SafePoint, original) ||
+				if err != nil || !ok || !point.Valid() || !kernel.ManagedSourceMatches(point.SafePoint, original) ||
 					(wantInv == 1 && (proof.Phase != "prepare" || proof.InvocationID != "" || proof.PreparationContext == nil)) {
 					t.Fatalf("missing preparation obligation: %v %+v", err, proof)
 				}

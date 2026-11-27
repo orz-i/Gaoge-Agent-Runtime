@@ -227,7 +227,7 @@ func TestAgentSessionSummaryProducesNativeStateAndVerifiesPriorOrigin(t *testing
 					t.Fatalf("wrong summary source: %v inv=%d cursor=%d", e, len(before.ModelInvocations), before.InputCursor)
 				}
 				point, e := options.Runtime.LoadManagedRecovery(t.Context(), root.ExecutionRefID)
-				if e != nil || point.SafePoint.LifecycleVersion != kernel.ManagedLifecycleAgentObligations || point.LegacyState != "" {
+				if e != nil || point.SafePoint.LifecycleVersion != kernel.ManagedLifecycleAgentObligations || !point.Valid() {
 					t.Fatalf("missing original combined point: %v %s %s", e, point.Selection.Mode, point.SafePoint.LifecycleVersion)
 				}
 				if interphase {

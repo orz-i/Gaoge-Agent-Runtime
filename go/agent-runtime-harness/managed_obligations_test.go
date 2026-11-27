@@ -136,7 +136,7 @@ func TestManagedContextCarriesOriginalBudgetAndInputCursor(t *testing.T) {
 			}
 			frozen := view.ModelInvocations[1]
 			safe, err := options.Runtime.LoadManagedRecovery(ctx, root.ExecutionRefID)
-			if err != nil || safe.LegacyState != "" || safe.SafePoint.LifecycleVersion != kernel.ManagedLifecycleAgentObligations || safe.SafePoint.ModelInvocationID != frozen.ID {
+			if err != nil || !safe.Valid() || safe.SafePoint.LifecycleVersion != kernel.ManagedLifecycleAgentObligations || safe.SafePoint.ModelInvocationID != frozen.ID {
 				t.Fatalf("missing combined safe point: %v %s %s", err, safe.Selection.Mode, safe.SafePoint.LifecycleVersion)
 			}
 			ledger, err := base.LoadBudget(ctx, pending.Turn.ID)

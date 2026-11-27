@@ -120,7 +120,7 @@ func retirementFinish(t *testing.T, f retirementFixture) kernel.OwnedRetirementR
 		t.Fatal(e)
 	}
 	r, e := f.rt.LoadOwnedRetirement(t.Context(), f.grant.ID)
-	if e != nil || !r.Valid() || r.Phase != "ACKNOWLEDGED" || r.Evidence.Grant != f.grant || kernel.ManagedDigest(r.Evidence.Snapshot) != kernel.ManagedDigest(f.source) {
+	if e != nil || !r.Valid() || r.Evidence.Grant != f.grant || kernel.ManagedDigest(r.Evidence.Snapshot) != kernel.ManagedDigest(f.source) {
 		t.Fatalf("retirement did not retain original full evidence: %+v %v", r, e)
 	}
 	return r
@@ -334,7 +334,7 @@ func runRetirementCompetition(t *testing.T, factory func(*testing.T) ManagedReco
 	if e != nil {
 		t.Fatal(e)
 	}
-	if !r.Valid() || r.Phase != "ACKNOWLEDGED" {
+	if !r.Valid() {
 		t.Fatal("winning Finish lacks final receipt")
 	}
 	if e = f.store.CheckExecution(t.Context(), f.source.Run.ID, &f.lease); !errors.Is(e, kernel.ErrExecutionConflict) {
@@ -404,7 +404,7 @@ func runRetirementRunIDRecovery(t *testing.T, factory func(*testing.T) ManagedRe
 	}
 	fresh := retirementRuntime(t, f.backend.Reopen())
 	selected, e := fresh.LookupOwnedRetirementForRun(t.Context(), f.source.Run.ID)
-	if e != nil || selected.Phase != "ACKNOWLEDGED" || kernel.ManagedDigest(selected.Evidence.Snapshot) != kernel.ManagedDigest(f.source) || selected.Evidence.Grant != f.grant {
+	if e != nil || !selected.Valid() || kernel.ManagedDigest(selected.Evidence.Snapshot) != kernel.ManagedDigest(f.source) || selected.Evidence.Grant != f.grant {
 		t.Fatalf("run-only durable recovery: %v", e)
 	}
 	acknowledged, e := fresh.LoadOwnedRetirement(t.Context(), selected.Evidence.Grant.ID)
@@ -443,7 +443,7 @@ func runRetiredGrantIDReuse(t *testing.T, factory func(*testing.T) ManagedRecove
 		t.Fatalf("rejected admission left an active grant: %v", e)
 	}
 	retained, e := f.backend.Reopen().(kernel.OwnedRetirementStore).LoadOwnedRetirement(ctx, f.grant.ID)
-	if e != nil || retained.Identity() != r.Identity() || retained.Phase != "ACKNOWLEDGED" {
+	if e != nil || retained.Identity() != r.Identity() || !retained.Valid() {
 		t.Fatalf("original retirement changed: %v", e)
 	}
 }

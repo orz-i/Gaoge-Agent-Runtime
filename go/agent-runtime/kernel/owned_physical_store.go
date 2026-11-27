@@ -128,18 +128,16 @@ func BuildOwnedRetirementReceipt(g ChildExecutionGrant, current Snapshot, persis
 	if !g.MatchesExecution(persisted) || !permit.Matches(g, current) || ValidateOwnedPhysicalCompletion(g, completion) != nil {
 		return OwnedRetirementReceipt{}, ErrExecutionConflict
 	}
-	origin := "CALLBACK_RETURN"
 	if completion.NotEntered() {
 		if !completion.MatchesNotEnteredSnapshot(g, current) {
 			return OwnedRetirementReceipt{}, ErrExecutionConflict
 		}
-		origin = "NOT_ENTERED"
 	} else if !completion.HostCompleted || completion.ReturnRevision > current.Run.Revision {
 		return OwnedRetirementReceipt{}, ErrExecutionConflict
 	}
-	evidence := OwnedSettlementEvidence{Version: 1, Grant: g, Snapshot: current, Completion: completion, MarkOrigin: origin}
-	r := OwnedRetirementReceipt{Version: 1, Evidence: evidence, Closures: closures, Phase: "ACKNOWLEDGED"}
-	r.ACKIdentity = r.Identity()
+	evidence := OwnedSettlementEvidence{Version: 1, Grant: g, Snapshot: current, Completion: completion}
+	r := OwnedRetirementReceipt{Version: 1, Evidence: evidence, Closures: closures}
+	r.Digest = r.Identity()
 	if !r.Valid() {
 		return OwnedRetirementReceipt{}, ErrExecutionConflict
 	}

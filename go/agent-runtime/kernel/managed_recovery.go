@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
@@ -102,43 +103,6 @@ func (b ManagedHostBinding) MatchesOriginalGrant(g ChildExecutionGrant) bool {
 	}
 	id, err := OwnedPhysicalDispatchGrantID(b.RunID, op, b.DispatchID)
 	return err == nil && id == g.ID
-}
-
-// ManagedCancellation is the entire ORIGINAL hcancel identity. Payload is
-// retained as well as its digest so persistence/reconstruction cannot discard
-// a consequential field. RESUME requires the zero value.
-type ManagedCancellation struct {
-	IntentID      string
-	Seq           uint64
-	Payload       json.RawMessage `json:",omitempty"`
-	PayloadDigest string
-	Reason        string
-	Native        bool `json:",omitempty"`
-}
-
-// MarshalJSON omits ONLY nil payload. A nonnil empty RawMessage is malformed,
-// not an absent cancellation field, and must fail encoding rather than become
-// valid RESUME authority after a persistent round trip.
-func (c ManagedCancellation) MarshalJSON() ([]byte, error) {
-	var payload *json.RawMessage
-	if c.Payload != nil {
-		value := c.Payload
-		payload = &value
-	}
-	return json.Marshal(struct {
-		IntentID      string
-		Seq           uint64
-		Payload       *json.RawMessage `json:",omitempty"`
-		PayloadDigest string
-		Reason        string
-		Native        bool `json:",omitempty"`
-	}{c.IntentID, c.Seq, payload, c.PayloadDigest, c.Reason, c.Native})
-}
-
-// Direct represents a cancellation authorized by the native command itself,
-// without electing or persisting a second Host cancellation operation.
-func (c ManagedCancellation) Direct() bool {
-	return c.Native && c.IntentID == "" && c.Seq == 0 && c.Payload == nil && c.PayloadDigest == ""
 }
 
 // ManagedSafePoint is stored IN the existing native ApplyExecution
@@ -240,66 +204,48 @@ func (p ManagedSafePoint) Valid() bool {
 	return ok && p.ID != "" && p.RecoveryID == ManagedRecoveryID(p.ID, p.Host) && p.Host.Valid() && p.Source.Run.ID == p.Host.RunID && p.Source.Run.Kind == "agent" && p.Source.Run.ParentRunID == "" && p.Source.Run.Status == RunStatusRunning && p.Source.Run.Revision > 0 && json.Valid(p.Source.State) && p.Host.MatchesOriginalGrant(p.OriginalGrant) && p.OriginalGrant.MatchesExecution(p.OriginalLease) && (o.Phase == "prepare" || (p.ModelInvocationID != "" && len(p.ModelRequestHash) == 64))
 }
 
-// ManagedTransfer retains the original recovery facts. The Run revision and
-// native Grant/Lease/Epoch arbitrate admission. The old generation, claimant
-// and activation fields (including the old wire State) are retained only
-// for historical receipt identity. New records never advance a managed state.
-type ManagedActivation struct {
-	Generation uint64
-	ClaimantID string
-	Grant      ChildExecutionGrant
-	Lease      ExecutionLease
-	Selection  ManagedRecoveryAuthorization
-}
-
+// ManagedTransfer records only the native source and its actual successor
+// or cancellation. There is no Host reservation or activation state.
 type ManagedTransfer struct {
 	SafePoint      ManagedSafePoint
-	LegacyState    string `json:"State"`
 	Revision       uint64
-	Generation     uint64
 	Selection      ManagedRecoveryAuthorization
-	ClaimantID     string
 	SuccessorGrant ChildExecutionGrant
 	SuccessorLease ExecutionLease
-	Activations    []ManagedActivation
 	Terminal       *Snapshot
 }
 
-// Native rejects the retired Host reservation/claim/activation representation.
-// The obsolete fields remain readable for stopped-writer migration, not for
-// electing an owner or certifying a new product result.
-func (t ManagedTransfer) Native() bool {
-	return t.LegacyState == "" && t.Generation == 0 && t.ClaimantID == "" && len(t.Activations) == 0 &&
-		(reflect.DeepEqual(t.Selection, ManagedRecoveryAuthorization{}) || t.Selection.Valid())
+// Reject retired wire fields, including nested Host reservation tuples.
+// Stopped-writer history is not interpreted as a new native qualification.
+func (t *ManagedTransfer) UnmarshalJSON(raw []byte) error {
+	type native ManagedTransfer
+	var value native
+	d := json.NewDecoder(bytes.NewReader(raw))
+	d.DisallowUnknownFields()
+	if err := d.Decode(&value); err != nil {
+		return err
+	}
+	*t = ManagedTransfer(value)
+	return nil
+}
+
+func (t ManagedTransfer) Valid() bool {
+	return t.SafePoint.Valid() && (t.Selection == (ManagedRecoveryAuthorization{}) || t.Selection.Valid())
 }
 
 func (t ManagedTransfer) Resolved() bool {
-	return t.Native() && t.Terminal != nil && t.Selection.Mode != ""
+	return t.Valid() && t.Terminal != nil && t.Selection.Valid()
 }
 
 type ManagedRecoveryAuthorization struct {
-	ID           string
-	RecoveryID   string
-	SuspensionID string
-	Binding      ManagedHostBinding
-	Mode         ManagedRecoveryMode
-	Cancellation ManagedCancellation
-	Revision     uint64
+	Mode               ManagedRecoveryMode
+	CancellationReason string
 }
 
 func (r ManagedRecoveryAuthorization) Valid() bool {
-	// No original Host reservation may authorize or certify native work.
-	if r.ID != "" || r.RecoveryID != "" || r.SuspensionID != "" || r.Revision != 0 || !reflect.DeepEqual(r.Binding, ManagedHostBinding{}) {
-		return false
-	}
-	switch r.Mode {
-	case ManagedResume:
-		return reflect.DeepEqual(r.Cancellation, ManagedCancellation{})
-	case ManagedCancel:
-		return r.Cancellation.Direct()
-	default:
-		return false
-	}
+	return r.Mode == ManagedResume && r.CancellationReason == "" ||
+		r.Mode == ManagedCancel && strings.TrimSpace(r.CancellationReason) == r.CancellationReason &&
+			utf8.ValidString(r.CancellationReason)
 }
 
 // ManagedRecoveryHostStore is a STORAGE authority port wired by the concrete
@@ -309,7 +255,7 @@ func (r ManagedRecoveryAuthorization) Valid() bool {
 // chooses the winning RESUME or CANCEL in its native commit.
 type ManagedRecoveryHostStore interface {
 	ManagedRecoveryAuthority(context.Context) (ManagedAuthority, error)
-	VerifyManagedOriginalDispatch(context.Context, ManagedHostBinding, bool) error
+	VerifyManagedOriginalDispatch(context.Context, ManagedHostBinding) error
 }
 
 // ManagedSafePointProof is not externally constructible. Stores must validate
@@ -390,7 +336,7 @@ type ManagedFrontierQualification struct {
 func (q ManagedFrontierQualification) matches(t ManagedTransfer, s Snapshot) bool {
 	o, ok := q.point.AgentObligations()
 	return q.proof != nil && ok && t.SafePoint.LifecycleVersion == ManagedLifecycleAgentObligations &&
-		t.Native() && t.Terminal == nil && t.Selection.Mode == "" && t.SuccessorGrant.ID == "" && s.Run.Revision > t.SafePoint.Source.Run.Revision &&
+		t.Valid() && t.Terminal == nil && t.Selection.Mode == "" && t.SuccessorGrant.ID == "" && s.Run.Revision > t.SafePoint.Source.Run.Revision &&
 		ManagedDigest(q.prior) == ManagedDigest(t) && o.RequalifiedFrom == t.SafePoint.ID &&
 		q.point.Valid() && q.point.Host.RunID == s.Run.ID && reflect.DeepEqual(q.point.Host, t.SafePoint.Host) &&
 		q.point.OriginalGrant == t.SafePoint.OriginalGrant && sameManagedLease(q.point.OriginalLease, t.SafePoint.OriginalLease) &&
@@ -435,14 +381,14 @@ type ManagedAdmissionProof struct {
 func (p ManagedAdmissionProof) Point() ManagedSafePoint { return managedClone(p.transfer.SafePoint) }
 
 func (p ManagedAdmissionProof) Authorization() ManagedRecoveryAuthorization {
-	return managedClone(p.reservation)
+	return p.reservation
 }
 func (p ManagedAdmissionProof) Matches(t ManagedTransfer, mode ManagedRecoveryMode) bool {
 	r := p.reservation
-	if !p.valid || !r.Valid() || r.Mode != mode || !t.Native() || t.Terminal != nil || ManagedDigest(t) != ManagedDigest(p.transfer) {
+	if !p.valid || !r.Valid() || r.Mode != mode || !t.Valid() || t.Terminal != nil || ManagedDigest(t) != ManagedDigest(p.transfer) {
 		return false
 	}
-	return t.Selection.Mode == "" || reflect.DeepEqual(t.Selection, r)
+	return t.Selection.Mode == "" || t.Selection == r
 }
 
 // PrepareManagedAdmission rechecks the exact observed source, expiry, and
@@ -657,7 +603,7 @@ func ManagedCancellationMutation(t ManagedTransfer, q ManagedCancelRequest, s Sn
 	r.Status = RunStatusCancelled
 	r.Revision++
 	r.ErrorCode = "run.cancelled"
-	r.ErrorDetail = q.Selection.Authorization().Cancellation.Reason
+	r.ErrorDetail = q.Selection.Authorization().CancellationReason
 	r.UpdatedAt = now.UTC()
 	ended := now.UTC()
 	r.EndedAt = &ended
@@ -673,7 +619,7 @@ func ManagedCancellationMutation(t ManagedTransfer, q ManagedCancelRequest, s Sn
 // transaction. Store-time expiry and identity are checked together, not by a
 // preliminary read. No durable PARKED state is produced.
 func ValidateManagedRecoverySource(t ManagedTransfer, q ManagedRecoverySourceRequest, s Snapshot, l ExecutionLease, g ChildExecutionGrant, a ManagedAuthority, physicalEpoch uint64, now time.Time) (ManagedTransfer, error) {
-	if q.RunID != s.Run.ID || q.SuspensionID != t.SafePoint.ID || q.ExpectedRevision != s.Run.Revision || !t.Native() || t.Terminal != nil || (q.ExpectedTransferDigest != "" && q.ExpectedTransferDigest != ManagedDigest(t)) || !t.SafePoint.Valid() || a != t.SafePoint.Host.KernelAuthority {
+	if q.RunID != s.Run.ID || q.SuspensionID != t.SafePoint.ID || q.ExpectedRevision != s.Run.Revision || !t.Valid() || t.Terminal != nil || (q.ExpectedTransferDigest != "" && q.ExpectedTransferDigest != ManagedDigest(t)) || a != t.SafePoint.Host.KernelAuthority {
 		return ManagedTransfer{}, ErrExecutionConflict
 	}
 	if q.Qualification.proof != nil {
@@ -719,7 +665,7 @@ func (p ManagedClosureProof) Snapshot() Snapshot {
 }
 func (p ManagedClosureProof) Resolved() bool { return p.transfer.Resolved() }
 func (p ManagedClosureProof) Matches(r ManagedRecoveryAuthorization) bool {
-	return p.Resolved() && reflect.DeepEqual(p.transfer.Selection, r)
+	return p.Resolved() && p.transfer.Selection == r
 }
 
 func ManagedCancelReplay(t ManagedTransfer, q ManagedCancelRequest, s Snapshot) bool {
@@ -727,5 +673,5 @@ func ManagedCancelReplay(t ManagedTransfer, q ManagedCancelRequest, s Snapshot) 
 	return q.Selection.Matches(original, ManagedCancel) && t.Resolved() && t.Selection.Mode == ManagedCancel &&
 		t.SafePoint.ID == q.SuspensionID && s.Run.ID == q.RunID && ManagedDigest(t.SafePoint) == ManagedDigest(original.SafePoint) &&
 		t.Terminal != nil && s.Run.Revision == original.SafePoint.Source.Run.Revision+1 &&
-		ManagedDigest(*t.Terminal) == ManagedDigest(s) && reflect.DeepEqual(t.Selection, q.Selection.reservation)
+		ManagedDigest(*t.Terminal) == ManagedDigest(s) && t.Selection == q.Selection.reservation
 }

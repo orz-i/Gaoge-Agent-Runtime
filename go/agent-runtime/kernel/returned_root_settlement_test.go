@@ -49,10 +49,10 @@ func TestReturnedRootCustodyRequiresActualCallbackAndCompleteHistory(t *testing.
 		}},
 		{"opaque-history", func(_ *kernel.Snapshot, _ *kernel.ExecutionLease, _ *kernel.ChildExecutionGrant, _ *kernel.OwnedPhysicalCallbackCompletion, rows *[]kernel.OwnedRetirementReceipt) {
 			(*rows)[0].Evidence.Completion.ControlCustody = ""
-			(*rows)[0].ACKIdentity = (*rows)[0].Identity()
+			(*rows)[0].Digest = (*rows)[0].Identity()
 		}},
 		{"missing-old-ACK", func(_ *kernel.Snapshot, _ *kernel.ExecutionLease, _ *kernel.ChildExecutionGrant, _ *kernel.OwnedPhysicalCallbackCompletion, rows *[]kernel.OwnedRetirementReceipt) {
-			(*rows)[0].Phase, (*rows)[0].ACKIdentity = "RETIRED", ""
+			(*rows)[0].Digest = ""
 		}},
 		{"ambiguous-history", func(_ *kernel.Snapshot, _ *kernel.ExecutionLease, _ *kernel.ChildExecutionGrant, _ *kernel.OwnedPhysicalCallbackCompletion, rows *[]kernel.OwnedRetirementReceipt) {
 			*rows = append(*rows, (*rows)[0])
@@ -79,8 +79,8 @@ func TestReturnedRootCustodyAcrossPendingRetirement(t *testing.T) {
 	c := previous.Evidence.Completion
 	c.GrantID, c.ControlCustody = g.ID, kernel.OwnedCustodyScoped
 	c.ReturnRevision = current.Run.Revision
-	pending := kernel.OwnedRetirementReceipt{Version: 1, Evidence: kernel.OwnedSettlementEvidence{Version: 1, Grant: g, Snapshot: current, Completion: c, MarkOrigin: "RECOVERED_RETURN"}, Closures: []kernel.ManagedTransfer{}, Phase: "ACKNOWLEDGED"}
-	pending.ACKIdentity = pending.Identity()
+	pending := kernel.OwnedRetirementReceipt{Version: 1, Evidence: kernel.OwnedSettlementEvidence{Version: 1, Grant: g, Snapshot: current, Completion: c}, Closures: []kernel.ManagedTransfer{}}
+	pending.Digest = pending.Identity()
 	if !pending.Valid() {
 		t.Fatal("invalid retirement fixture")
 	}
@@ -96,14 +96,14 @@ func TestReturnedRootCustodyAcrossPendingRetirement(t *testing.T) {
 			case "active-other-grant":
 				active = true
 			case "old-unacknowledged":
-				old.Phase, old.ACKIdentity = "RETIRED", ""
+				old.Digest = ""
 			case "opaque":
 				row.Evidence.Completion.ControlCustody = ""
 			case "borrowed":
 				row.Evidence.Completion.LeaseOwned = false
 			case "historical-epoch":
 				row.Evidence.Grant.ExecutionEpoch = 5
-				row.ACKIdentity = row.Identity()
+				row.Digest = row.Identity()
 			}
 			rows := []kernel.OwnedRetirementReceipt{old, row}
 			if mode == "duplicate" {

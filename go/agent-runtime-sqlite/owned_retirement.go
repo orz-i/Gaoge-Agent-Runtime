@@ -66,7 +66,7 @@ func sqlitePersistOwnedRetirement(ctx context.Context, tx *sql.Tx, g kernel.Chil
 	if e != nil {
 		return e
 	}
-	_, e = tx.ExecContext(ctx, `INSERT INTO runtime_owned_retirements(grant_id,run_id,settled_revision,version,phase,payload_json) VALUES(?,?,?,?,?,?)`, g.ID, g.ChildRunID, s.Run.Revision, r.Version, r.Phase, payload)
+	_, e = tx.ExecContext(ctx, `INSERT INTO runtime_owned_retirements(grant_id,run_id,settled_revision,version,phase,payload_json) VALUES(?,?,?,?,?,?)`, g.ID, g.ChildRunID, s.Run.Revision, r.Version, "ACKNOWLEDGED", payload)
 	e = conflictOrDatabaseError(e)
 	if errors.Is(e, kernel.ErrConflict) {
 		return kernel.ErrExecutionConflict
@@ -101,7 +101,7 @@ func sqliteLoadOwnedRetirement(ctx context.Context, q schemaQuery, id string) (k
 		return kernel.OwnedRetirementReceipt{}, e
 	}
 	var r kernel.OwnedRetirementReceipt
-	if e = json.Unmarshal(raw, &r); e != nil || !r.Valid() || r.Evidence.Grant.ID != grant || r.Evidence.Grant.ChildRunID != run || r.Evidence.Snapshot.Run.Revision != rev || r.Version != version || r.Phase != phase {
+	if e = json.Unmarshal(raw, &r); e != nil || !r.Valid() || r.Evidence.Grant.ID != grant || r.Evidence.Grant.ChildRunID != run || r.Evidence.Snapshot.Run.Revision != rev || r.Version != version || phase != "ACKNOWLEDGED" {
 		return r, kernel.ErrExecutionConflict
 	}
 	return r, nil

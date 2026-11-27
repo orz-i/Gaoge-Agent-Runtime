@@ -15,7 +15,7 @@ func TestManagedHostSQLRejectsUnissuedProofs(t *testing.T) {
 	if err != nil || !a.Valid() {
 		t.Fatal(a, err)
 	}
-	if err = s.VerifyManagedOriginalDispatch(t.Context(), kernel.ManagedHostBinding{}, true); !errors.Is(err, harness.ErrConflict) {
+	if err = s.VerifyManagedOriginalDispatch(t.Context(), kernel.ManagedHostBinding{}); !errors.Is(err, harness.ErrConflict) {
 		t.Fatalf("unissued parked proof: %v", err)
 	}
 	after, err := s.ManagedRecoveryAuthority(t.Context())
@@ -24,9 +24,15 @@ func TestManagedHostSQLRejectsUnissuedProofs(t *testing.T) {
 	}
 }
 
-func TestManagedLegacyReservationCutoverRejectsOpenPreservesHistory(t *testing.T) {
+func TestManagedLegacyReservationCutoverRejectsOldWireWithoutDeletion(t *testing.T) {
 	_, db := newStoreWithDB(t)
 	const table = "agent_harness_managed_recovery"
+	if db.Migrator().HasTable(table) {
+		t.Fatal("new schema creates a retired authority table")
+	}
+	if err := db.Exec("CREATE TABLE " + table + " (dispatch_id TEXT PRIMARY KEY, recovery_id TEXT NOT NULL, turn_id TEXT NOT NULL, record_json TEXT NOT NULL, closure_hash TEXT NOT NULL)").Error; err != nil {
+		t.Fatal(err)
+	}
 	record := map[string]any{"dispatch_id": "legacy-dispatch", "recovery_id": "legacy-recovery", "turn_id": "legacy-turn", "record_json": "{}", "closure_hash": ""}
 	if err := db.Table(table).Create(record).Error; err != nil {
 		t.Fatal(err)
@@ -45,11 +51,11 @@ func TestManagedLegacyReservationCutoverRejectsOpenPreservesHistory(t *testing.T
 	if err := db.Table(table).Where("dispatch_id = ?", "legacy-dispatch").Update("closure_hash", "historical-closure").Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := harnesspostgres.Migrate(db); err != nil {
-		t.Fatal(err)
+	if err := harnesspostgres.Migrate(db); !errors.Is(err, harness.ErrConflict) {
+		t.Fatalf("retired history migrated: %v", err)
 	}
-	if _, err := harnesspostgres.New(db); err != nil {
-		t.Fatal(err)
+	if _, err := harnesspostgres.New(db); !errors.Is(err, harness.ErrConflict) {
+		t.Fatalf("retired history reopened: %v", err)
 	}
 	var n int64
 	if err := db.Table(table).Count(&n).Error; err != nil || n != 1 {

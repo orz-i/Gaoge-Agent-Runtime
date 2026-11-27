@@ -117,7 +117,7 @@ func TestOwnedNoEntryEvidenceCannotBecomeActualReturn(t *testing.T) {
 	}
 	permit := ChildExecutionSettlement{proof: featurecontrol.Seal(source.Run.ID, source.Run.Revision, "agent_owned_physical_settled", g.ID, source.State, source)}
 	receipt, e := BuildOwnedRetirementReceipt(g, source, lease, c, permit, []ManagedTransfer{})
-	if e != nil || !receipt.Valid() || receipt.Evidence.MarkOrigin != "NOT_ENTERED" {
+	if e != nil || !receipt.Valid() || !receipt.Evidence.Completion.NotEntered() {
 		t.Fatalf("exact no-entry could not retire: %v", e)
 	}
 	if _, e = BuildOwnedRetirementReceipt(g, changed, lease, c, permit, []ManagedTransfer{}); !errors.Is(e, ErrExecutionConflict) {

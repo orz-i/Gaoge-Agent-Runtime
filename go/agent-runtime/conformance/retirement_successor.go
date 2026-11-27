@@ -53,7 +53,7 @@ func runRetirementSuccessorClosure(t *testing.T, factory func(*testing.T) Manage
 		t.Fatalf("unknown successor: %s", kind)
 	}
 	closed, err := f.rt.LoadOwnedRetirement(t.Context(), f.grant.ID)
-	if err != nil || closed.Phase != "ACKNOWLEDGED" || closed.Identity() != original.Identity() {
+	if err != nil || !closed.Valid() || closed.Identity() != original.Identity() {
 		t.Fatalf("successor orphaned or rewrote original closure: %+v %v", closed, err)
 	}
 	// Exact replay is historical confirmation, never authority over the new

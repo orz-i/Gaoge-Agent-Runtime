@@ -14,8 +14,8 @@ func retirementFixture() (OwnedRetirementReceipt, ExecutionLease) {
 	g := ChildExecutionGrant{ID: "scope", ChildRunID: "root", ExpectedRevision: 1, ExecutionOwnerID: l.OwnerID, ExecutionLeaseID: l.LeaseID, ExecutionEpoch: l.Epoch, AdmissionSourceHash: strings.Repeat("a", 64), AdmissionOperation: "start"}
 	s := Snapshot{Run: Run{ID: "root", Kind: "agent", Status: RunStatusRunning, Revision: 2}, State: json.RawMessage(`{"receipt":"original"}`)}
 	c := OwnedPhysicalCallbackCompletion{GrantID: g.ID, ReturnRevision: 2, ReturnSourceHash: strings.Repeat("b", 64), HostCompleted: true, LeaseOwned: true}
-	r := OwnedRetirementReceipt{Version: 1, Evidence: OwnedSettlementEvidence{Version: 1, Grant: g, Snapshot: s, Completion: c, MarkOrigin: "CALLBACK_RETURN"}, Closures: []ManagedTransfer{}, Phase: "ACKNOWLEDGED"}
-	r.ACKIdentity = r.Identity()
+	r := OwnedRetirementReceipt{Version: 1, Evidence: OwnedSettlementEvidence{Version: 1, Grant: g, Snapshot: s, Completion: c}, Closures: []ManagedTransfer{}}
+	r.Digest = r.Identity()
 	return r, l
 }
 func TestOwnedRetirementWireAndExactFinish(t *testing.T) {
@@ -28,6 +28,11 @@ func TestOwnedRetirementWireAndExactFinish(t *testing.T) {
 	var decoded OwnedRetirementReceipt
 	if e = json.Unmarshal(b, &decoded); e != nil || !decoded.Valid() || decoded.Identity() != r.Identity() {
 		t.Fatalf("wire: %v", e)
+	}
+	for _, field := range []string{`"Phase":"RETIRED"`, `"Phase":"ACKNOWLEDGED"`, `"ACKIdentity":"old"`} {
+		if err := json.Unmarshal(append([]byte("{"+field+","), b[1:]...), &decoded); err == nil {
+			t.Fatalf("retired wire accepted: %s", field)
+		}
 	}
 	permit := ChildExecutionSettlement{proof: featurecontrol.Seal(s.Run.ID, s.Run.Revision, "agent_owned_physical_settled", g.ID, s.State, s)}
 	receipt, e := BuildOwnedRetirementReceipt(g, s, l, c, permit, []ManagedTransfer{})
@@ -50,15 +55,15 @@ func TestOwnedRetirementWireAndExactFinish(t *testing.T) {
 				completion = OwnedPhysicalCallbackCompletion{}
 			case "old-intermediate":
 				old := r
-				old.Phase = "RETIRED"
-				old.ACKIdentity = ""
+
+				old.Digest = ""
 				if old.Valid() {
 					t.Fatal("old intermediate accepted")
 				}
 				return
 			case "invalid-digest":
 				bad := r
-				bad.ACKIdentity = "foreign"
+				bad.Digest = "foreign"
 				if bad.Valid() {
 					t.Fatal("changed digest accepted")
 				}
@@ -66,7 +71,7 @@ func TestOwnedRetirementWireAndExactFinish(t *testing.T) {
 			case "nil-closures":
 				bad := r
 				bad.Closures = nil
-				bad.ACKIdentity = bad.Identity()
+				bad.Digest = bad.Identity()
 				if bad.Valid() {
 					t.Fatal("null closure accepted")
 				}
@@ -94,7 +99,7 @@ func TestOwnedRetirementRunSelector(t *testing.T) {
 				rows = append(rows, r)
 				want = ErrExecutionConflict
 			case "corrupt":
-				rows[0].ACKIdentity = "bad"
+				rows[0].Digest = "bad"
 				want = ErrExecutionConflict
 			case "source":
 				current.EventHead++
@@ -111,7 +116,7 @@ func TestOwnedRetirementRunSelector(t *testing.T) {
 			case "old-then-current", "old-only":
 				old := r
 				old.Evidence.Grant.ExecutionEpoch = 2
-				old.ACKIdentity = old.Identity()
+				old.Digest = old.Identity()
 				rows = []OwnedRetirementReceipt{old, r}
 				if name == "old-only" {
 					rows = rows[:1]
@@ -119,15 +124,15 @@ func TestOwnedRetirementRunSelector(t *testing.T) {
 				}
 			case "borrowed", "borrowed-foreign":
 				rows[0].Evidence.Completion.LeaseOwned = false
-				rows[0].ACKIdentity = rows[0].Identity()
+				rows[0].Digest = rows[0].Identity()
 				lease = l
 				if name == "borrowed-foreign" {
 					lease.LeaseID = "other"
 					want = ErrNotFound
 				}
 			case "old-intermediate":
-				rows[0].Phase = "RETIRED"
-				rows[0].ACKIdentity = ""
+
+				rows[0].Digest = ""
 				want = ErrExecutionConflict
 			}
 			before := ManagedDigest(rows)

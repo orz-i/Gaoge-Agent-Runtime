@@ -15,7 +15,7 @@ func TestManagedHostMemoryRejectsUnissuedProofs(t *testing.T) {
 	if err != nil || !a.Valid() {
 		t.Fatal(a, err)
 	}
-	if err = s.VerifyManagedOriginalDispatch(t.Context(), kernel.ManagedHostBinding{}, true); !errors.Is(err, ErrConflict) {
+	if err = s.VerifyManagedOriginalDispatch(t.Context(), kernel.ManagedHostBinding{}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("unissued parked proof: %v", err)
 	}
 	after, err := s.ManagedRecoveryAuthority(t.Context())

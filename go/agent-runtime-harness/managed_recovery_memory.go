@@ -33,7 +33,7 @@ func (s *MemoryStore) readManagedOriginalLocked(b kernel.ManagedHostBinding) err
 	}
 	return ValidateManagedOriginalRows(s.managedAuthority, b, s.sessions[t.SessionID], t, i, s.configs[t.ConfigSnapshotID], s.itemIDs[b.DispatchID], items)
 }
-func (s *MemoryStore) VerifyManagedOriginalDispatch(ctx context.Context, b kernel.ManagedHostBinding, _ bool) error {
+func (s *MemoryStore) VerifyManagedOriginalDispatch(ctx context.Context, b kernel.ManagedHostBinding) error {
 	if !b.Valid() {
 		return ErrConflict
 	}

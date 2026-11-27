@@ -5,7 +5,7 @@ import "slices"
 // Keep this set limited to the actual persistence values exposed by managed
 // recovery. Copying must not encode JSON or reinterpret authority evidence.
 type managedCloneValue interface {
-	ManagedHostBinding | ManagedSafePoint | ManagedRecoveryAuthorization | ManagedTransfer | Snapshot
+	ManagedHostBinding | ManagedSafePoint | ManagedTransfer | Snapshot
 }
 
 func managedClone[T managedCloneValue](value T) T {
@@ -15,8 +15,6 @@ func managedClone[T managedCloneValue](value T) T {
 		copied = cloneManagedBinding(v)
 	case ManagedSafePoint:
 		copied = cloneManagedPoint(v)
-	case ManagedRecoveryAuthorization:
-		copied = cloneManagedAuthorization(v)
 	case ManagedTransfer:
 		copied = cloneManagedTransfer(v)
 	case Snapshot:
@@ -41,19 +39,8 @@ func cloneManagedPoint(v ManagedSafePoint) ManagedSafePoint {
 	return v
 }
 
-func cloneManagedAuthorization(v ManagedRecoveryAuthorization) ManagedRecoveryAuthorization {
-	v.Binding = cloneManagedBinding(v.Binding)
-	v.Cancellation.Payload = slices.Clone(v.Cancellation.Payload)
-	return v
-}
-
 func cloneManagedTransfer(v ManagedTransfer) ManagedTransfer {
 	v.SafePoint = cloneManagedPoint(v.SafePoint)
-	v.Selection = cloneManagedAuthorization(v.Selection)
-	v.Activations = slices.Clone(v.Activations)
-	for i := range v.Activations {
-		v.Activations[i].Selection = cloneManagedAuthorization(v.Activations[i].Selection)
-	}
 	if v.Terminal != nil {
 		terminal := cloneManagedSnapshot(*v.Terminal)
 		v.Terminal = &terminal

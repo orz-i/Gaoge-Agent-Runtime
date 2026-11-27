@@ -135,7 +135,7 @@ func (p boundedContextPorts) ReadManagedPreparationContext(ctx context.Context, 
 	if !ok {
 		return kernel.ManagedPreparationContext{}, ErrConflict
 	}
-	if err := host.VerifyManagedOriginalDispatch(ctx, b, false); err != nil {
+	if err := host.VerifyManagedOriginalDispatch(ctx, b); err != nil {
 		return kernel.ManagedPreparationContext{}, errors.Join(ErrConflict, err)
 	}
 	turn, err := loadVerifiedTurn(ctx, p.store, b.TurnID)

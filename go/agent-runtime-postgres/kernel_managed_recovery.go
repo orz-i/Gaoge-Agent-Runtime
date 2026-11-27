@@ -42,7 +42,7 @@ func pgLoadManaged(tx *gorm.DB, id string) (kernel.ManagedTransfer, error) {
 	if e := json.Unmarshal([]byte(r.Payload), &t); e != nil {
 		return t, kernel.ErrExecutionConflict
 	}
-	if t.SafePoint.Host.RunID != id || t.SafePoint.ID != r.SuspensionID || t.SafePoint.RecoveryID != r.RecoveryID || t.Revision != r.Revision || !t.SafePoint.Valid() {
+	if t.SafePoint.Host.RunID != id || t.SafePoint.ID != r.SuspensionID || t.SafePoint.RecoveryID != r.RecoveryID || t.Revision != r.Revision || !t.Valid() {
 		return t, kernel.ErrExecutionConflict
 	}
 	return t, nil
@@ -250,7 +250,7 @@ func pgLoadManagedByID(tx *gorm.DB, id string) (kernel.ManagedTransfer, error) {
 		return kernel.ManagedTransfer{}, translateKernelError(e)
 	}
 	var t kernel.ManagedTransfer
-	if e := json.Unmarshal([]byte(r.Payload), &t); e != nil || t.SafePoint.ID != id || t.SafePoint.RecoveryID != r.RecoveryID || t.SafePoint.Host.RunID != r.RunID || t.Revision != r.Revision || !t.SafePoint.Valid() {
+	if e := json.Unmarshal([]byte(r.Payload), &t); e != nil || t.SafePoint.ID != id || t.SafePoint.RecoveryID != r.RecoveryID || t.SafePoint.Host.RunID != r.RunID || t.Revision != r.Revision || !t.Valid() {
 		return t, kernel.ErrExecutionConflict
 	}
 	return t, nil

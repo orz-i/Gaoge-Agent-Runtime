@@ -160,7 +160,7 @@ remain the execution and recovery authority.
 All standard Session Invocations are native Agents. The original
 `AgentInvocationID(turn, parent, request)` uses a fixed internal hash namespace,
 not selectable Capability metadata. Start admission fingerprints, Host Actor,
-Attempt and Tool permissions remain immutable. Harness SQLite Schema v3 or
+Attempt and Tool permissions remain immutable. Harness SQLite Schema v4 or
 explicit PostgreSQL Capability-shell migration is required to reopen after
 this pre-stable hard cut; old Host Turns must be retired, not reclassified.
 

@@ -115,7 +115,7 @@ model, HTTP/OpenAPI and TypeScript. The persisted event is
 `agent_invocation`; Tool definition versions remain independent Tool proofs.
 Because removal changes Start admission hashes, legacy pre-stable Host Turns
 must be explicitly retired and their effects reconciled before manual
-PostgreSQL DDL or new Harness SQLite Schema v3 enrollment. New storage never
+PostgreSQL DDL or new Harness SQLite Schema v4 enrollment. New storage never
 promotes old non-Agent data into native Agent authority.
 
 ## Host-selected Named Agent capabilities

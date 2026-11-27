@@ -56,7 +56,7 @@ func (r *Runtime) BindManagedDispatch(ctx context.Context, b ManagedHostBinding)
 	if ka != b.KernelAuthority || ha != b.HostAuthority {
 		return ctx, ErrExecutionConflict
 	}
-	if e = host.VerifyManagedOriginalDispatch(ctx, b, false); e != nil {
+	if e = host.VerifyManagedOriginalDispatch(ctx, b); e != nil {
 		return ctx, e
 	}
 	return context.WithValue(ctx, managedDispatchKey{}, managedDispatchBinding{r, managedClone(b)}), nil
@@ -104,7 +104,7 @@ func (r *Runtime) AuthorizeQualifiedManagedContinuation(ctx context.Context, pri
 }
 
 func (r *Runtime) authorizeManaged(ctx context.Context, t ManagedTransfer, qualification ManagedFrontierQualification, cancelReason ...string) (ManagedAdmissionProof, error) {
-	if r == nil || ctx == nil || r.managedHost == nil || !t.Native() || t.Terminal != nil || !t.SafePoint.Valid() || len(cancelReason) > 1 {
+	if r == nil || ctx == nil || r.managedHost == nil || !t.Valid() || t.Terminal != nil || len(cancelReason) > 1 {
 		return ManagedAdmissionProof{}, ErrExecutionConflict
 	}
 	q := ManagedRecoverySourceRequest{RunID: t.SafePoint.Host.RunID, SuspensionID: t.SafePoint.ID, ExpectedRevision: t.SafePoint.Source.Run.Revision, ExpectedTransferDigest: ManagedDigest(t), Qualification: qualification}
@@ -140,7 +140,7 @@ func (r *Runtime) authorizeManaged(ctx context.Context, t ManagedTransfer, quali
 	}
 	v := t.Selection
 	if v.Mode == "" {
-		if err = host.VerifyManagedOriginalDispatch(ctx, t.SafePoint.Host, true); err != nil {
+		if err = host.VerifyManagedOriginalDispatch(ctx, t.SafePoint.Host); err != nil {
 			return ManagedAdmissionProof{}, err
 		}
 		v = ManagedRecoveryAuthorization{Mode: ManagedResume}
@@ -149,10 +149,10 @@ func (r *Runtime) authorizeManaged(ctx context.Context, t ManagedTransfer, quali
 				return ManagedAdmissionProof{}, ErrInvalidInput
 			}
 			v.Mode = ManagedCancel
-			v.Cancellation = ManagedCancellation{Reason: strings.TrimSpace(cancelReason[0]), Native: true}
+			v.CancellationReason = strings.TrimSpace(cancelReason[0])
 		}
 	}
-	selected := ManagedAdmissionProof{reservation: managedClone(v), transfer: managedClone(t), request: q, valid: true}
+	selected := ManagedAdmissionProof{reservation: v, transfer: managedClone(t), request: q, valid: true}
 	if !selected.Matches(t, v.Mode) {
 		return ManagedAdmissionProof{}, ErrExecutionConflict
 	}

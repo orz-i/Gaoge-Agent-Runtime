@@ -459,7 +459,7 @@ func exerciseOriginalDispatchReturn(t *testing.T, factory func(*testing.T) (kern
 		t.Fatalf("original dispatch could not close: %s %v", done.Turn.Status, e)
 	}
 	receipt, e := rt.LoadOwnedRetirement(ctx, kcut.grant.ID)
-	if e != nil || !receipt.Valid() || receipt.Phase != "ACKNOWLEDGED" || receipt.Evidence.Grant != kcut.grant ||
+	if e != nil || !receipt.Valid() || receipt.Evidence.Grant != kcut.grant ||
 		!receipt.Evidence.Completion.HostCompleted || kernel.ManagedDigest(receipt.Evidence.Snapshot) != kernel.ManagedDigest(source) {
 		t.Fatalf("original retirement not preserved: %v %+v", e, receipt)
 	}

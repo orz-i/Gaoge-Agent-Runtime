@@ -511,9 +511,7 @@ func (runner *Runner) resumeInvocationExecution(
 			return kernel.Snapshot{}, e
 		}
 		if !ready {
-			// Preserve the original pre-Create Start recovery contract; this
-			// consumes its existing election, never appends a Resume grant.
-			return runner.resumeNativeFencedAgentAfterInterruptedStart(ctx, invocation, expectedRevision, resumer, ErrConflict)
+			return kernel.Snapshot{}, ErrExecutionOutcomeUnknown
 		}
 		if !native.SupportsManagedRecovery() {
 			return native.Resume(ctx, invocation.ExecutionRefID, expectedRevision)
@@ -522,17 +520,9 @@ func (runner *Runner) resumeInvocationExecution(
 			return native.Resume(c, invocation.ExecutionRefID, expectedRevision)
 		})
 	}
-	resumed, resumeErr := runner.withPhysicalInvocationDispatch(ctx, invocation, "resume", func(physicalCtx context.Context) (kernel.Snapshot, error) {
+	return runner.withPhysicalInvocationDispatch(ctx, invocation, "resume", func(physicalCtx context.Context) (kernel.Snapshot, error) {
 		return resumer.Resume(physicalCtx, invocation.ExecutionRefID, expectedRevision)
 	})
-	if errors.Is(resumeErr, ErrConflict) && resumed.Run.ID == "" {
-		// A crashed native Agent Start may retain a Harness grant even
-		// after its Kernel Run acquired a sticky execution Epoch. Let
-		// only the first-party Kernel lease arbitrate that recovery.
-		return runner.resumeNativeFencedAgentAfterInterruptedStart(
-			ctx, invocation, expectedRevision, resumer, resumeErr)
-	}
-	return resumed, resumeErr
 }
 
 func (runner *Runner) syncChildInvocationSnapshot(

@@ -128,12 +128,12 @@ func managedStoreSetup(t *testing.T, factory func(*testing.T) ManagedRecoverySto
 		t.Fatal(err)
 	}
 	persisted, loadErr := rt.Load(t.Context(), v.Run.ID)
-	if transfer.LegacyState != "" || transfer.SafePoint.Source.EventHead != source.EventHead || kernel.ManagedDigest(transfer.SafePoint.Source) != kernel.ManagedDigest(source) || loadErr != nil || kernel.ManagedDigest(source) != kernel.ManagedDigest(persisted) {
+	if !transfer.Valid() || transfer.SafePoint.Source.EventHead != source.EventHead || kernel.ManagedDigest(transfer.SafePoint.Source) != kernel.ManagedDigest(source) || loadErr != nil || kernel.ManagedDigest(source) != kernel.ManagedDigest(persisted) {
 		pointJSON, pointJSONErr := json.Marshal(transfer.SafePoint.Source)
 		sourceJSON, sourceJSONErr := json.Marshal(source)
 		persistedJSON, persistedJSONErr := json.Marshal(persisted)
 		t.Fatalf("T0 did not bind exact committed aggregate: available=%t eventHeadEqual=%t sourceDigestEqual=%t returnedMatchesLoaded=%t loadErr=%v JSONErrors=[%v,%v,%v]\npointSource=%s\nreturnedSource=%s\nloadedSource=%s",
-			transfer.LegacyState == "", transfer.SafePoint.Source.EventHead == source.EventHead,
+			transfer.Valid(), transfer.SafePoint.Source.EventHead == source.EventHead,
 			kernel.ManagedDigest(transfer.SafePoint.Source) == kernel.ManagedDigest(source),
 			loadErr == nil && kernel.ManagedDigest(source) == kernel.ManagedDigest(persisted), loadErr,
 			pointJSONErr, sourceJSONErr, persistedJSONErr, pointJSON, sourceJSON, persistedJSON)
@@ -195,7 +195,7 @@ func runManagedStoreLiveOwnerAndClaimCompetition(t *testing.T, factory func(*tes
 				}
 				f.source = changed
 				before, e = f.store.LoadManagedRecovery(t.Context(), f.source.Run.ID)
-				if e != nil || before.LegacyState != "" || kernel.ManagedSourceMatches(before.SafePoint, changed) {
+				if e != nil || !before.Valid() || kernel.ManagedSourceMatches(before.SafePoint, changed) {
 					t.Fatalf("ordinary claim did not stale the source: %v", e)
 				}
 				f.backend.AdvanceTo(f.lease.ExpiresAt.Add(100 * time.Millisecond))
@@ -250,7 +250,7 @@ type managedStoreHost struct{ binding kernel.ManagedHostBinding }
 func (h *managedStoreHost) ManagedRecoveryAuthority(context.Context) (kernel.ManagedAuthority, error) {
 	return h.binding.HostAuthority, nil
 }
-func (h *managedStoreHost) VerifyManagedOriginalDispatch(_ context.Context, b kernel.ManagedHostBinding, _ bool) error {
+func (h *managedStoreHost) VerifyManagedOriginalDispatch(_ context.Context, b kernel.ManagedHostBinding) error {
 	if kernel.ManagedDigest(b) != kernel.ManagedDigest(h.binding) {
 		return kernel.ErrExecutionConflict
 	}
@@ -562,7 +562,7 @@ func runManagedStoreFinishClosesHistoricalTransfer(t *testing.T, factory func(*t
 		t.Fatal(e)
 	}
 	current, e := f.store.LoadManagedRecovery(t.Context(), next.Run.ID)
-	if e != nil || current.SafePoint.ID != second.ID || current.LegacyState != "" || !kernel.ManagedSourceMatches(current.SafePoint, fresh) {
+	if e != nil || current.SafePoint.ID != second.ID || !current.Valid() || !kernel.ManagedSourceMatches(current.SafePoint, fresh) {
 		t.Fatalf("later independent dispatch did not own its point: %v", e)
 	}
 	historical, e := f.store.LoadManagedRecoveryByID(t.Context(), f.point.ID)
@@ -746,7 +746,7 @@ func runManagedStoreEnableCompetition(t *testing.T, factory func(*testing.T) Man
 	} else if !errors.Is(two.err, kernel.ErrExecutionConflict) {
 		t.Fatalf("ENABLE competition returned unclassified loser: %v", two.err)
 	}
-	if one.transfer.SuccessorLease.Epoch != f.lease.Epoch+1 || len(one.transfer.Activations) != 0 {
+	if one.transfer.SuccessorLease.Epoch != f.lease.Epoch+1 || !one.transfer.Valid() {
 		t.Fatal("competition advanced more than one epoch/activation")
 	}
 	original, e := f.runtime.Load(t.Context(), f.source.Run.ID)

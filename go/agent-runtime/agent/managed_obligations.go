@@ -204,7 +204,7 @@ func (r *Runner) qualifyManagedFrontier(ctx context.Context, t kernel.ManagedTra
 	if err != nil {
 		return empty, nil, err
 	}
-	if !t.Native() || t.Terminal != nil || t.Selection.Mode != "" || t.SuccessorGrant.ID != "" || p.Phase != "pending" ||
+	if !t.Valid() || t.Terminal != nil || t.Selection.Mode != "" || t.SuccessorGrant.ID != "" || p.Phase != "pending" ||
 		p.RequalifiedFrom != "" {
 		return empty, nil, ErrRootOutcomeUnknown
 	}

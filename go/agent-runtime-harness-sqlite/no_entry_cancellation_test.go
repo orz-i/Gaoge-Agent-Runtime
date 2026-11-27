@@ -12,130 +12,44 @@ import (
 )
 
 func TestNoEntryCancellationSQLiteReopen(t *testing.T) {
-	conformance.NoEntryCancellation(t, func(t *testing.T) (kernel.Store, harness.Store, func() (kernel.Store, harness.Store)) {
-		path, host := newHost(t)
-		kpath := filepath.Join(testprofile.Dir(t), "kernel.sqlite")
-		k, e := kernelsqlite.CreateNew(t.Context(), kpath)
-		if e != nil {
-			t.Fatal(e)
-		}
-		t.Cleanup(func() { _ = k.Close() })
-		return k, host, func() (kernel.Store, harness.Store) {
-			if e := host.Close(); e != nil {
-				t.Fatal(e)
-			}
-			if e := k.Close(); e != nil {
-				t.Fatal(e)
-			}
-			fresh, e := kernelsqlite.OpenExisting(t.Context(), kpath)
-			if e != nil {
-				t.Fatal(e)
-			}
-			t.Cleanup(func() { _ = fresh.Close() })
-			return fresh, reopenHost(t, path)
-		}
-	})
+	conformance.NoEntryCancellation(t, newReopenKernelHost)
 }
 func TestOriginalDispatchReturnSQLiteReopen(t *testing.T) {
-	conformance.OriginalDispatchReturn(t, func(t *testing.T) (kernel.Store, harness.Store, func() (kernel.Store, harness.Store)) {
-		path, host := newHost(t)
-		kpath := filepath.Join(testprofile.Dir(t), "kernel.sqlite")
-		k, e := kernelsqlite.CreateNew(t.Context(), kpath)
-		if e != nil {
-			t.Fatal(e)
-		}
-		t.Cleanup(func() { _ = k.Close() })
-		return k, host, func() (kernel.Store, harness.Store) {
-			if e := host.Close(); e != nil {
-				t.Fatal(e)
-			}
-			if e := k.Close(); e != nil {
-				t.Fatal(e)
-			}
-			fresh, e := kernelsqlite.OpenExisting(t.Context(), kpath)
-			if e != nil {
-				t.Fatal(e)
-			}
-			t.Cleanup(func() { _ = fresh.Close() })
-			return fresh, reopenHost(t, path)
-		}
-	})
+	conformance.OriginalDispatchReturn(t, newReopenKernelHost)
 }
 
 func TestManagedPreparationSummarySQLiteReopen(t *testing.T) {
-	conformance.ManagedPreparationSummary(t, func(t *testing.T) (kernel.Store, harness.Store, func() (kernel.Store, harness.Store)) {
-		path, host := newHost(t)
-		kpath := filepath.Join(testprofile.Dir(t), "kernel.sqlite")
-		k, e := kernelsqlite.CreateNew(t.Context(), kpath)
-		if e != nil {
-			t.Fatal(e)
-		}
-		t.Cleanup(func() { _ = k.Close() })
-		return k, host, func() (kernel.Store, harness.Store) {
-			if e := host.Close(); e != nil {
-				t.Fatal(e)
-			}
-			if e := k.Close(); e != nil {
-				t.Fatal(e)
-			}
-			fresh, e := kernelsqlite.OpenExisting(t.Context(), kpath)
-			if e != nil {
-				t.Fatal(e)
-			}
-			t.Cleanup(func() { _ = fresh.Close() })
-			return fresh, reopenHost(t, path)
-		}
-	})
+	conformance.ManagedPreparationSummary(t, newReopenKernelHost)
 }
 
 func TestNativeTransitionCommitSQLiteReopen(t *testing.T) {
-	conformance.NativeTransitionCommit(t, func(t *testing.T) (kernel.Store, harness.Store, func() (kernel.Store, harness.Store)) {
-		path, host := newHost(t)
-		kpath := filepath.Join(testprofile.Dir(t), "kernel.sqlite")
-		k, e := kernelsqlite.CreateNew(t.Context(), kpath)
-		if e != nil {
-			t.Fatal(e)
-		}
-		t.Cleanup(func() { _ = k.Close() })
-		return k, host, func() (kernel.Store, harness.Store) {
-			if e := host.Close(); e != nil {
-				t.Fatal(e)
-			}
-			if e := k.Close(); e != nil {
-				t.Fatal(e)
-			}
-			fresh, e := kernelsqlite.OpenExisting(t.Context(), kpath)
-			if e != nil {
-				t.Fatal(e)
-			}
-			t.Cleanup(func() { _ = fresh.Close() })
-			return fresh, reopenHost(t, path)
-		}
-	})
+	conformance.NativeTransitionCommit(t, newReopenKernelHost)
 }
 
 func TestManagedPhysicalDispatchSQLiteReopen(t *testing.T) {
-	conformance.ManagedPhysicalDispatch(t, func(t *testing.T) (kernel.Store, harness.Store, func() (kernel.Store, harness.Store)) {
-		path, host := newHost(t)
-		kpath := filepath.Join(testprofile.Dir(t), "kernel.sqlite")
-		k, e := kernelsqlite.CreateNew(t.Context(), kpath)
+	conformance.ManagedPhysicalDispatch(t, newReopenKernelHost)
+}
+
+func newReopenKernelHost(t *testing.T) (kernel.Store, harness.Store, func() (kernel.Store, harness.Store)) {
+	path, host := newHost(t)
+	kpath := filepath.Join(testprofile.Dir(t), "kernel.sqlite")
+	k, e := kernelsqlite.CreateNew(t.Context(), kpath)
+	if e != nil {
+		t.Fatal(e)
+	}
+	t.Cleanup(func() { _ = k.Close() })
+	return k, host, func() (kernel.Store, harness.Store) {
+		if e := host.Close(); e != nil {
+			t.Fatal(e)
+		}
+		if e := k.Close(); e != nil {
+			t.Fatal(e)
+		}
+		fresh, e := kernelsqlite.OpenExisting(t.Context(), kpath)
 		if e != nil {
 			t.Fatal(e)
 		}
-		t.Cleanup(func() { _ = k.Close() })
-		return k, host, func() (kernel.Store, harness.Store) {
-			if e := host.Close(); e != nil {
-				t.Fatal(e)
-			}
-			if e := k.Close(); e != nil {
-				t.Fatal(e)
-			}
-			fresh, e := kernelsqlite.OpenExisting(t.Context(), kpath)
-			if e != nil {
-				t.Fatal(e)
-			}
-			t.Cleanup(func() { _ = fresh.Close() })
-			return fresh, reopenHost(t, path)
-		}
-	})
+		t.Cleanup(func() { _ = fresh.Close() })
+		return fresh, reopenHost(t, path)
+	}
 }

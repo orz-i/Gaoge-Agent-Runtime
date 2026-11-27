@@ -234,7 +234,7 @@ func exerciseNativeTransitionCommit(t *testing.T, c nativeTransitionCase, factor
 	}
 	if c.after && !c.blocked {
 		p, ok := transfer.SafePoint.AgentObligations()
-		if !ok || p.Phase != "prepare" || p.InvocationID != "" || p.PreparationContext == nil || p.PreparationTransitionDigest == "" || transfer.LegacyState != "" || !kernel.ManagedSourceMatches(transfer.SafePoint, original) || view.ModelInvocations[0].Status != agent.ModelInvocationConsumed {
+		if !ok || p.Phase != "prepare" || p.InvocationID != "" || p.PreparationContext == nil || p.PreparationTransitionDigest == "" || !transfer.Valid() || !kernel.ManagedSourceMatches(transfer.SafePoint, original) || view.ModelInvocations[0].Status != agent.ModelInvocationConsumed {
 			t.Fatalf("transition committed without exact next preparation: %+v source=%s", p, kernel.ManagedDigest(transfer.SafePoint.Source))
 		}
 	}

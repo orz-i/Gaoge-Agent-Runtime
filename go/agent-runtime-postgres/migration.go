@@ -42,18 +42,23 @@ func Migrate(db *gorm.DB) error {
 		if pending != 0 {
 			return errors.New("postgres kernel migration requires draining unfinished original retirements with the previous writer")
 		}
-		state, selection := "m.payload::jsonb->>'State'", "m.payload::jsonb->'Selection'->>'ID'"
-		original := "m.payload::jsonb->'SafePoint'->'OriginalGrant'->>'ID'"
+		managed := "jsonb_exists(payload::jsonb,'State') OR jsonb_exists(payload::jsonb->'Selection','ID')"
+		retirement := "jsonb_exists(payload::jsonb,'Phase') OR jsonb_exists(payload::jsonb,'ACKIdentity')"
 		if tx.Name() == "sqlite" {
-			state, selection = "json_extract(m.payload,'$.State')", "json_extract(m.payload,'$.Selection.ID')"
-			original = "json_extract(m.payload,'$.SafePoint.OriginalGrant.ID')"
+			managed = "json_type(payload,'$.State') IS NOT NULL OR json_type(payload,'$.Selection.ID') IS NOT NULL"
+			retirement = "json_type(payload,'$.Phase') IS NOT NULL OR json_type(payload,'$.ACKIdentity') IS NOT NULL"
 		}
-		query := "SELECT count(*) FROM agent_kernel_managed_transfers m WHERE COALESCE(" + state + ",'')<>'' AND " + state + " NOT IN ('CLOSED','CANCELLED') AND (" + state + " IN ('PARKED','ENABLED') OR COALESCE(" + selection + ",'')<>'' OR EXISTS (SELECT 1 FROM agent_kernel_child_effect_grants g WHERE g.child_run_id=m.run_id AND g.grant_id=" + original + " AND g.execution_epoch<>0))"
-		if err := tx.Raw(query).Scan(&pending).Error; err != nil {
+		if err := tx.Raw("SELECT count(*) FROM (SELECT payload FROM agent_kernel_managed_transfers UNION ALL SELECT payload FROM agent_kernel_managed_history) m WHERE " + managed).Scan(&pending).Error; err != nil {
 			return err
 		}
 		if pending != 0 {
-			return errors.New("postgres kernel migration requires draining legacy managed execution with the previous writer")
+			return errors.New("postgres kernel migration rejects retired managed wire; use a fresh profile")
+		}
+		if err := tx.Raw("SELECT count(*) FROM agent_kernel_owned_retirements WHERE " + retirement).Scan(&pending).Error; err != nil {
+			return err
+		}
+		if pending != 0 {
+			return errors.New("postgres kernel migration rejects retired receipt wire; use a fresh profile")
 		}
 		if err := validateNativeBudgetBindings(tx); err != nil {
 			return err

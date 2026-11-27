@@ -99,7 +99,7 @@ func TestRootRetirementActualCallbackSurvivesCommittedACKLoss(t *testing.T) {
 				t.Fatalf("original full result changed: %#v %v", persisted, err)
 			}
 			receipt, err := store.LoadOwnedRetirement(t.Context(), store.grant.ID)
-			if err != nil || !receipt.Valid() || receipt.Phase != "ACKNOWLEDGED" || receipt.Evidence.Grant != store.grant || !reflect.DeepEqual(receipt.Evidence.Snapshot, completed) || !receipt.Evidence.Completion.HostCompleted || !receipt.Evidence.Completion.LeaseOwned {
+			if err != nil || !receipt.Valid() || receipt.Evidence.Grant != store.grant || !reflect.DeepEqual(receipt.Evidence.Snapshot, completed) || !receipt.Evidence.Completion.HostCompleted || !receipt.Evidence.Completion.LeaseOwned {
 				t.Fatalf("missing original durable ACK: %#v %v", receipt, err)
 			}
 			if store.releases != 0 {
@@ -144,7 +144,7 @@ func TestRootRetirementPreservesBorrowedLease(t *testing.T) {
 		t.Fatalf("borrowed result=%#v err=%v calls=%d", completed, err, model.calls)
 	}
 	receipt, err := store.LoadOwnedRetirement(t.Context(), store.grant.ID)
-	if err != nil || receipt.Phase != "ACKNOWLEDGED" || receipt.Evidence.Completion.LeaseOwned || !store.grant.MatchesExecution(lease) {
+	if err != nil || !receipt.Valid() || receipt.Evidence.Completion.LeaseOwned || !store.grant.MatchesExecution(lease) {
 		t.Fatalf("borrowed receipt=%#v err=%v", receipt, err)
 	}
 	if store.releases != 0 {
@@ -221,7 +221,7 @@ func TestRootRetirementFreshRunnerRecoversFinishedCallByRunID(t *testing.T) {
 		t.Fatalf("lost original source: %#v %v", before, err)
 	}
 	retired, err := base.LoadOwnedRetirement(t.Context(), store.grant.ID)
-	if err != nil || retired.Phase != "ACKNOWLEDGED" {
+	if err != nil || !retired.Valid() {
 		t.Fatalf("Finish did not commit before death: %#v %v", retired, err)
 	}
 	if _, err := base.LookupChildExecution(t.Context(), original.Run.ID); !errors.Is(err, kernel.ErrNotFound) {
@@ -243,7 +243,7 @@ func TestRootRetirementFreshRunnerRecoversFinishedCallByRunID(t *testing.T) {
 		t.Fatalf("recovery mutated source/replayed: %#v %v calls=%d", after, err, model.calls)
 	}
 	acknowledged, err := base.LoadOwnedRetirement(t.Context(), store.grant.ID)
-	if err != nil || acknowledged.Phase != "ACKNOWLEDGED" || acknowledged.Identity() != retired.Identity() {
+	if err != nil || !acknowledged.Valid() || acknowledged.Identity() != retired.Identity() {
 		t.Fatalf("recovery did not acknowledge original evidence: %#v %v", acknowledged, err)
 	}
 	if err := fresh.ReconcileRootPhysicalExecution(t.Context(), original.Run.ID); err != nil {
@@ -282,7 +282,7 @@ func TestRootRetirementFinishRequiresActualCommit(t *testing.T) {
 					t.Fatalf("committed marker not recovered: %#v err=%v commits=%d", result, callErr, store.finishCommits)
 				}
 				receipt, err := base.LoadOwnedRetirement(t.Context(), store.grant.ID)
-				if err != nil || !receipt.Valid() || receipt.Phase != "ACKNOWLEDGED" || receipt.Evidence.Grant != store.grant || !reflect.DeepEqual(receipt.Evidence.Snapshot, result) {
+				if err != nil || !receipt.Valid() || receipt.Evidence.Grant != store.grant || !reflect.DeepEqual(receipt.Evidence.Snapshot, result) {
 					t.Fatalf("wrong durable retirement: %#v %v", receipt, err)
 				}
 			} else {

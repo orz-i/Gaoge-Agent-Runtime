@@ -328,8 +328,7 @@ func toolDispatchDenial(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 					if receiptErr != nil {
 						t.Fatal(receiptErr)
 					}
-					want := "ACKNOWLEDGED"
-					if receipt.Phase != want || receipt.Evidence.Grant != g || receipt.Evidence.Completion != c {
+					if !receipt.Valid() || receipt.Evidence.Grant != g || receipt.Evidence.Completion != c {
 						t.Fatal("wrong original retirement", receipt)
 					}
 				default:
@@ -356,7 +355,7 @@ func toolDispatchDenial(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 					t.Fatal("original retirement did not permit elected control", err, final.Run, physical, reads)
 				}
 				acked, err := rt.LoadOwnedRetirement(ctx, g.ID)
-				if err != nil || acked.Phase != "ACKNOWLEDGED" || acked.Evidence.Grant != g || acked.Evidence.Completion != c || (receiptErr == nil && acked.Identity() != receipt.Identity()) {
+				if err != nil || !acked.Valid() || acked.Evidence.Grant != g || acked.Evidence.Completion != c || (receiptErr == nil && acked.Identity() != receipt.Identity()) {
 					t.Fatal("original retirement identity changed", err, acked)
 				}
 				if _, err = rt.LookupChildExecution(ctx, root); !errors.Is(err, kernel.ErrNotFound) {

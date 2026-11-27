@@ -136,7 +136,7 @@ func (r *Runner) pendingManagedInvocation(ctx context.Context, inv Invocation, r
 	}
 	b := t.SafePoint.Host
 	if b.InvocationID != inv.ID || b.TurnID != inv.TurnID || b.RunID != inv.ExecutionRefID ||
-		uint64(b.Attempt) != uint64(inv.Attempt) || !t.Native() || !t.SafePoint.Valid() {
+		uint64(b.Attempt) != uint64(inv.Attempt) || !t.Valid() {
 		return nil, t, ErrConflict
 	}
 	pending, err := r.directManagedPending(ctx, native, t)

@@ -115,9 +115,9 @@ func TestRealPostgresManagedClosureRetirementAcrossProcessCrash(t *testing.T) {
 					t.Fatalf("retirement partially committed: state=%s grant=%+v err=%v retirement=%v", closed.Selection.Mode, grant, grantErr, receiptErr)
 				}
 			} else if !closed.Resolved() || closed.Selection.Mode != kernel.ManagedResume || closed.Terminal == nil || !errors.Is(grantErr, kernel.ErrNotFound) || receiptErr != nil || !receipt.MatchesManagedClosure(closed, before) {
-				t.Fatalf("atomic retirement missing: state=%s grant=%v receipt=%s err=%v", closed.Selection.Mode, grantErr, receipt.Phase, receiptErr)
+				t.Fatalf("atomic retirement missing: state=%s grant=%v receipt=%s err=%v", closed.Selection.Mode, grantErr, receipt.Digest, receiptErr)
 			}
-			if err := host.VerifyManagedOriginalDispatch(t.Context(), original.SafePoint.Host, false); err != nil {
+			if err := host.VerifyManagedOriginalDispatch(t.Context(), original.SafePoint.Host); err != nil {
 				t.Fatalf("Host dispatch was closed before native retirement: %v", err)
 			}
 			calls := readManagedRecoveryRecords[model.Request](t, filepath.Join(files, "model.jsonl"))
@@ -136,7 +136,7 @@ func TestRealPostgresManagedClosureRetirementAcrossProcessCrash(t *testing.T) {
 			}
 			receipt, err = ks.LoadOwnedRetirement(t.Context(), closed.SuccessorGrant.ID)
 			if err != nil || !receipt.MatchesManagedClosure(settled, before) {
-				t.Fatalf("original retirement not acknowledged: phase=%s err=%v", receipt.Phase, err)
+				t.Fatalf("original retirement missing: digest=%s err=%v", receipt.Digest, err)
 			}
 			if lease := readManagedRecoveryLease(t, t.Context(), db, root.ExecutionRefID); lease.ExecutionOwner != "" || lease.ExecutionLeaseID != "" || lease.ExecutionEpoch != closed.SuccessorGrant.ExecutionEpoch {
 				t.Fatalf("repair created or retained execution owner: %+v", lease)
@@ -229,7 +229,7 @@ func testManagedAgentSessionRecoveryAcrossProcessCrash(t *testing.T, dsn string,
 		t.Fatal("pending post-Tool intent lost its frozen per-model output ceiling")
 	}
 	originalTransfer, transferErr := postgresadapter.NewKernelStore(db).LoadManagedRecovery(t.Context(), runID)
-	if transferErr != nil || originalTransfer.LegacyState != "" ||
+	if transferErr != nil || !originalTransfer.Valid() ||
 		originalTransfer.SafePoint.ModelInvocationID != frozen.ID || originalTransfer.SafePoint.ModelRequestHash != frozen.RequestHash ||
 		!reflect.DeepEqual(originalTransfer.SafePoint.Source, pending) {
 		t.Fatalf("original process did not atomically commit exact managed source: %+v err=%v", originalTransfer, transferErr)
@@ -282,7 +282,7 @@ func testManagedAgentSessionRecoveryAcrossProcessCrash(t *testing.T, dsn string,
 	reservation := finalTransfer.Selection
 	if reservationErr != nil || reservation.Mode != kernel.ManagedResume ||
 		finalTransfer.SafePoint.ID != originalTransfer.SafePoint.ID ||
-		!reflect.DeepEqual(reservation.Cancellation, kernel.ManagedCancellation{}) {
+		reservation.CancellationReason != "" {
 		t.Fatalf("original immutable RESUME reservation lost: %+v err=%v", reservation, reservationErr)
 	}
 	authority, authorityErr := reopenedStore.ManagedRecoveryAuthority(t.Context())

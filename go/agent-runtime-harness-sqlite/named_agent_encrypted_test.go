@@ -14,7 +14,7 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/profile/testprofile"
 )
 
-func TestNamedAgentPrivateSkillsSurviveEncryptedHarnessSchemaV3Reopen(t *testing.T) {
+func TestNamedAgentPrivateSkillsSurviveEncryptedHarnessSchemaV4Reopen(t *testing.T) {
 	ctx := t.Context()
 	var key [32]byte
 	if _, err := rand.Read(key[:]); err != nil {

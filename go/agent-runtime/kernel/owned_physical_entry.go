@@ -96,7 +96,7 @@ func ValidateOwnedPhysicalEntry(g ChildExecutionGrant, expected, current Snapsho
 	case "managed_resume":
 		// Equality means this native segment has already crossed entry;
 		// an entry ACK can never be used to dispatch again.
-		if current.Run.Status != RunStatusRunning || !transfer.Native() || transfer.Terminal != nil ||
+		if current.Run.Status != RunStatusRunning || !transfer.Valid() || transfer.Terminal != nil ||
 			transfer.SuccessorGrant != g || !transfer.SafePoint.Valid() ||
 			!managedResumeSelectionMatches(transfer) ||
 			!ManagedSourceMatches(transfer.SafePoint, current) {

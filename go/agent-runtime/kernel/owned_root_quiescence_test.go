@@ -16,8 +16,8 @@ func settledRootFixture() (kernel.Snapshot, kernel.OwnedRetirementReceipt) {
 		AdmissionSourceHash: strings.Repeat("a", 64), AdmissionOperation: "prepare",
 	}
 	c := kernel.OwnedPhysicalCallbackCompletion{GrantID: g.ID, ReturnRevision: run.Run.Revision, ReturnSourceHash: strings.Repeat("b", 64), HostCompleted: true, LeaseOwned: true, ControlCustody: kernel.OwnedCustodyPrepared}
-	r := kernel.OwnedRetirementReceipt{Version: 1, Evidence: kernel.OwnedSettlementEvidence{Version: 1, Grant: g, Snapshot: run, Completion: c, MarkOrigin: "OWNER_RETURN"}, Closures: []kernel.ManagedTransfer{}, Phase: "ACKNOWLEDGED"}
-	r.ACKIdentity = r.Identity()
+	r := kernel.OwnedRetirementReceipt{Version: 1, Evidence: kernel.OwnedSettlementEvidence{Version: 1, Grant: g, Snapshot: run, Completion: c}, Closures: []kernel.ManagedTransfer{}}
+	r.Digest = r.Identity()
 	return run, r
 }
 
@@ -25,7 +25,7 @@ func TestOwnedCancelSuccessorClearsOriginalApproval(t *testing.T) {
 	run, receipt := settledRootFixture()
 	run.Checkpoint = &kernel.Checkpoint{ID: "original-approval", Status: kernel.CheckpointPending}
 	receipt.Evidence.Snapshot = run
-	receipt.ACKIdentity = receipt.Identity()
+	receipt.Digest = receipt.Identity()
 	next := run
 	next.Run.Status, next.Run.ErrorCode = kernel.RunStatusCancelled, "run.cancelled"
 	next.Run.Revision++
@@ -53,7 +53,7 @@ func TestBoundedToolControlRejectsObservationOnlyCustody(t *testing.T) {
 		{kernel.OwnedBoundedApprovalReturn, true}, {kernel.OwnedToolResultReturn, false}, {kernel.OwnedToolBudgetReturn, false}, {"", false},
 	} {
 		receipt.Evidence.Completion.ControlCustody = tc.custody
-		receipt.ACKIdentity = receipt.Identity()
+		receipt.Digest = receipt.Identity()
 		err := kernel.VerifyBoundedToolControlFacts(run, run, 3, 3, kernel.ExecutionLease{}, false, []kernel.OwnedRetirementReceipt{receipt})
 		if (err == nil) != tc.accepted {
 			t.Fatalf("custody %q: %v", tc.custody, err)
@@ -91,7 +91,7 @@ func TestVerifiedOwnedRootQuiescenceRequiresExactRetiredCallback(t *testing.T) {
 		receipts          []kernel.OwnedRetirementReceipt
 	}{
 		{"without receipt", original, original, 3, kernel.ExecutionLease{}, false, nil},
-		{"unretired callback", original, original, 3, kernel.ExecutionLease{}, false, []kernel.OwnedRetirementReceipt{func() kernel.OwnedRetirementReceipt { r := receipt; r.Phase = "RETIRED"; r.ACKIdentity = ""; return r }()}},
+		{"unretired callback", original, original, 3, kernel.ExecutionLease{}, false, []kernel.OwnedRetirementReceipt{func() kernel.OwnedRetirementReceipt { r := receipt; r.Digest = ""; return r }()}},
 		{"different epoch", original, original, 4, kernel.ExecutionLease{}, false, []kernel.OwnedRetirementReceipt{receipt}},
 		{"live physical grant", original, original, 3, kernel.ExecutionLease{}, true, []kernel.OwnedRetirementReceipt{receipt}},
 		{"new execution owner", original, original, 3, kernel.ExecutionLease{RunID: "owned-root", OwnerID: "other", LeaseID: "other-lease", Epoch: 3}, false, []kernel.OwnedRetirementReceipt{receipt}},
@@ -101,7 +101,7 @@ func TestVerifiedOwnedRootQuiescenceRequiresExactRetiredCallback(t *testing.T) {
 		{"legacy or opaque custody", original, original, 3, kernel.ExecutionLease{}, false, []kernel.OwnedRetirementReceipt{func() kernel.OwnedRetirementReceipt {
 			r := receipt
 			r.Evidence.Completion.ControlCustody = ""
-			r.ACKIdentity = r.Identity()
+			r.Digest = r.Identity()
 			return r
 		}()}},
 		{"tampered callback proof", original, original, 3, kernel.ExecutionLease{}, false, []kernel.OwnedRetirementReceipt{func() kernel.OwnedRetirementReceipt {
@@ -139,12 +139,12 @@ func TestOwnedSettlementRequiresLatestPhysicalAdmissionNotLatestLease(t *testing
 	newer.Evidence.Grant.AdmissionOperation = "resume"
 	newer.Evidence.Completion.GrantID = "new-grant"
 	newer.Evidence.Completion.ControlCustody = kernel.OwnedCustodyScoped
-	newer.ACKIdentity = newer.Identity()
+	newer.Digest = newer.Identity()
 	if err := kernel.VerifyOwnedRootSettlementFacts(snapshot, snapshot, 8, 5, kernel.ExecutionLease{}, false, []kernel.OwnedRetirementReceipt{receipt, newer}); err != nil {
 		t.Fatalf("complete safe latest callback history rejected: %v", err)
 	}
 	receipt.Evidence.Completion.ControlCustody = ""
-	receipt.ACKIdentity = receipt.Identity()
+	receipt.Digest = receipt.Identity()
 	if err := kernel.VerifyOwnedRootSettlementFacts(snapshot, snapshot, 8, 5, kernel.ExecutionLease{}, false, []kernel.OwnedRetirementReceipt{receipt, newer}); !errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("latest safe callback erased earlier opaque effects: %v", err)
 	}
@@ -157,9 +157,9 @@ func TestOwnedSettlementPreservesOnlyExactNoEntrySuffix(t *testing.T) {
 		g := r.Evidence.Grant
 		g.ID, g.ExecutionEpoch, g.ExpectedRevision, g.AdmissionOperation = id, epoch, s.Run.Revision, "resume"
 		outcome := kernel.OwnedPhysicalCallbackOutcome{LeaseOwned: true, ControlCustody: kernel.OwnedCustodyNotEntered}
-		r.Evidence = kernel.OwnedSettlementEvidence{Version: 1, Grant: g, Snapshot: s, MarkOrigin: "NOT_ENTERED",
+		r.Evidence = kernel.OwnedSettlementEvidence{Version: 1, Grant: g, Snapshot: s,
 			Completion: kernel.OwnedPhysicalCallbackCompletion{GrantID: id, ReturnRevision: s.Run.Revision, ReturnSourceHash: kernel.ManagedDigest(kernel.OwnedPhysicalCallbackReturnPayload(s, outcome)), LeaseOwned: true, ControlCustody: kernel.OwnedCustodyNotEntered}}
-		r.ACKIdentity = r.Identity()
+		r.Digest = r.Identity()
 		if !r.Valid() {
 			t.Fatal("invalid no-entry fixture")
 		}
@@ -170,7 +170,7 @@ func TestOwnedSettlementPreservesOnlyExactNoEntrySuffix(t *testing.T) {
 	changed.Run.Revision++
 	foreign := noEntry("changed-source", 7, changed)
 	unack := two
-	unack.Phase, unack.ACKIdentity = "RETIRED", ""
+	unack.Digest = ""
 	for _, c := range []struct {
 		name     string
 		receipts []kernel.OwnedRetirementReceipt
