@@ -60,62 +60,6 @@ func executionDispatchReceiptIndex(items []Item) map[string][]Item {
 
 type originalApprovalDispatchKey struct{}
 
-const nativeManagedDispatchPrefix = "hdispatch_native_"
-
-func nativeManagedDispatchID(id string) bool {
-	return strings.HasPrefix(id, nativeManagedDispatchPrefix)
-}
-
-type nativeManagedDispatchCompletionKey struct{}
-type nativeManagedDispatchCompletion struct{ grantID, boundary string }
-
-// The existing native dispatch is an immutable source, not another election.
-// Only the Runner's already-verified physical return path or the native
-// ManagedClosureProof may project its completion.
-func ValidNativeManagedDispatchCompletion(ctx context.Context, grant, receipt Item) bool {
-	if !nativeManagedDispatchID(grant.ID) {
-		return true
-	}
-	boundary, ok := VerifiedExecutionDispatchReceipt(grant, []Item{receipt})
-	proof, issued := ctx.Value(nativeManagedDispatchCompletionKey{}).(nativeManagedDispatchCompletion)
-	return ok && issued && proof.grantID == grant.ID && proof.boundary == boundary
-}
-
-// Root cancellation of an open native dispatch is exclusively a native
-// command. A separately authorized child may retain its original Host scope.
-func NativeManagedDispatchBlocksCancellation(items []Item, target Invocation, bound bool) bool {
-	receipts := executionDispatchReceiptIndex(items)
-	for _, g := range items {
-		if g.ParentItemID != ExecutionDispatchParentItemID || !nativeManagedDispatchID(g.ID) {
-			continue
-		}
-		if _, settled := VerifiedExecutionDispatchReceipt(g, receipts[g.ID]); settled {
-			continue
-		}
-		if !bound || target.ParentItemID == "" || target.ExecutionRefID == g.RunID {
-			return true
-		}
-		b, err := frozenChildRoot(target)
-		if err != nil || b.attempt().InvocationID != g.InvocationID || b.attempt().ExecutionRefID != g.RunID || b.attempt().Attempt != 1 {
-			return true
-		}
-	}
-	return false
-}
-
-func PendingNativeManagedDispatch(items []Item, invocationID string) bool {
-	receipts := executionDispatchReceiptIndex(items)
-	for _, g := range items {
-		if g.ParentItemID != ExecutionDispatchParentItemID || !nativeManagedDispatchID(g.ID) || g.InvocationID != invocationID {
-			continue
-		}
-		if _, ok := VerifiedExecutionDispatchReceipt(g, receipts[g.ID]); !ok {
-			return true
-		}
-	}
-	return false
-}
-
 // The existing immutable physical grant carries the exact approval request.
 // Legacy two-field grants remain readable for ordinary return retirement.
 func executionDispatchFields(raw json.RawMessage) (map[string]string, bool) {
@@ -203,17 +147,6 @@ func VerifiedExecutionDispatchReceipt(grant Item, receipts []Item) (string, bool
 		receipt.TurnID != grant.TurnID || receipt.InvocationID != grant.InvocationID ||
 		receipt.RunID != grant.RunID || receipt.Seq <= grant.Seq {
 		return "", false
-	}
-	// Managed closure has its own exact five-field schema. Do not relax the
-	// original single-field receipt contract or accept duplicate/unknown keys.
-	if _, managed := kernel.ManagedDispatchOperation(phase); managed && managedDispatchReceipt(receipt) {
-		if phase == "resolve-approval" {
-			if _, ok := originalDispatchApproval(grant); !ok {
-				return "", false
-			}
-		}
-		fields, _ := authorityStringFields(receipt.Payload, "boundary", "recoveryID", "mode", "selectionHash", "terminalHash")
-		return fields["boundary"], true
 	}
 	payload, ok := authorityStringFields(receipt.Payload, "boundary")
 	if !ok {
@@ -478,10 +411,7 @@ func (runner *Runner) withPhysicalInvocationDispatchForContext(
 			return kernel.Snapshot{}, errors.Join(ErrConflict, loadErr)
 		}
 	}
-	physicalCtx, bindErr := runner.bindManagedOriginalDispatch(ctx, invocation, grant)
-	if bindErr != nil {
-		return kernel.Snapshot{}, errors.Join(bindErr, runner.finishPhysicalDispatchGrant(ctx, grant, "physical_dispatch_rejected"))
-	}
+	physicalCtx := ctx
 	if scope != nil {
 		bound := *scope
 		bound.GrantID = grant.ID
@@ -620,15 +550,9 @@ func (runner *Runner) beginPhysicalInvocationDispatch(
 	if err != nil {
 		return Item{}, err
 	}
-	prefix := "hdispatch"
-	if native, ok := runner.agent.(*agent.Runner); ok && native.SupportsManagedRecovery() && native.ObservesKernelRuntime(runner.runtime) && invocation.ParentItemID == "" && invocation.Attempt == 1 {
-		if _, managed := kernel.ManagedDispatchOperation(phase); managed {
-			prefix = "hdispatch_native"
-		}
-	}
 	now := runner.clock.Now().UTC()
 	grant := Item{
-		ID:     stableID(prefix, invocation.ID, invocation.ExecutionRefID, identifier),
+		ID:     stableID("hdispatch", invocation.ID, invocation.ExecutionRefID, identifier),
 		TurnID: invocation.TurnID, InvocationID: invocation.ID, RunID: invocation.ExecutionRefID,
 		Kind: ItemDiagnostic, Status: ItemStarted,
 		ParentItemID: ExecutionDispatchParentItemID, Payload: payload,
@@ -731,9 +655,6 @@ func (runner *Runner) finishPhysicalDispatchGrant(ctx context.Context, grant Ite
 	settlementCtx, boundary, err := runner.qualifyApprovalSettlement(settlementCtx, grant, boundary)
 	if err != nil {
 		return err
-	}
-	if nativeManagedDispatchID(grant.ID) {
-		settlementCtx = context.WithValue(settlementCtx, nativeManagedDispatchCompletionKey{}, nativeManagedDispatchCompletion{grant.ID, boundary})
 	}
 	now := runner.clock.Now().UTC()
 	payload, err := json.Marshal(struct {

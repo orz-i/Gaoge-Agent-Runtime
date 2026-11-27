@@ -190,22 +190,3 @@ func planOriginalApprovalTx(tx *gorm.DB, grant, receipt harness.Item) (harness.I
 	}
 	return decision, insert, nil
 }
-
-// The original dispatch and its global children are the only Host fence for
-// a native recovery source. No managed reservation lookup is involved.
-func managedDispatchFactsTx(tx *gorm.DB, turnID string) ([]harness.Item, error) {
-	var rows []itemRecord
-	parents := tx.Model(&itemRecord{}).Select("id").Where("turn_id = ? AND parent_item_id = ?", turnID, harness.ExecutionDispatchParentItemID)
-	if err := tx.Where("(turn_id = ? AND parent_item_id = ?) OR parent_item_id IN (?)", turnID, harness.ExecutionDispatchParentItemID, parents).Find(&rows).Error; err != nil {
-		return nil, err
-	}
-	items := make([]harness.Item, 0, len(rows))
-	for _, row := range rows {
-		item, err := itemFromRecord(row)
-		if err != nil {
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	return items, nil
-}

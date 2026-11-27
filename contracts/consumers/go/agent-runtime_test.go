@@ -18,7 +18,8 @@ import (
 // new required methods and would not protect external implementations.
 type storeContract interface {
 	Create(context.Context, kernel.Record, []kernel.EventDraft) (kernel.Snapshot, error)
-	CancelBeforeCreate(context.Context, kernel.RunCreationCancellation) (kernel.RunCreationCancellation, error)
+	DecideBeforeCreate(context.Context, kernel.RunCreationDecision) (kernel.RunCreationDecision, error)
+	LoadCreationDecision(context.Context, string) (kernel.RunCreationDecision, error)
 	Load(context.Context, string) (kernel.Snapshot, error)
 	Apply(context.Context, string, uint64, kernel.StoreMutation) (kernel.Snapshot, error)
 	ListEvents(context.Context, string, int64, int) ([]kernel.Event, error)

@@ -8,13 +8,13 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 )
 
-// CancelUndispatchedRoot atomically commits both terminal records under
+// SettleUncreatedRoot atomically commits both terminal records under
 // the same original Turn mutex that admits physical Dispatch grants.
 // It cannot turn an observed Kernel Run (checked by the original Runner)
 // into a fabricated no-Run result, and an unrelated Cancellation intent
 // cannot supply the exact owner proof.
-func (store *MemoryStore) CancelUndispatchedRoot(ctx context.Context, original Invocation, turn Turn) (Invocation, Turn, error) {
-	if store == nil || !VerifiedUndispatchedRootCancellation(ctx, original, turn) {
+func (store *MemoryStore) SettleUncreatedRoot(ctx context.Context, original Invocation, turn Turn) (Invocation, Turn, error) {
+	if store == nil || !VerifiedUncreatedRootWitness(ctx, original, turn) {
 		return Invocation{}, Turn{}, ErrConflict
 	}
 	store.mu.Lock()
@@ -48,18 +48,13 @@ func (store *MemoryStore) CancelUndispatchedRoot(ctx context.Context, original I
 			children = append(children, candidate)
 		}
 	}
-	if !ValidUndispatchedRootCancellationEvidence(current, storedTurn, items, store.activeCancellationFenceLocked(turn.ID), ledger, children) {
+	current, storedTurn, valid := ProjectUncreatedRoot(ctx, current, storedTurn, items, store.activeCancellationFenceLocked(turn.ID), ledger, children)
+	if !valid || current.Status == InvocationFailed && !store.validTerminalProjectionLocked(ctx, current.TurnID, "") {
 		return Invocation{}, Turn{}, ErrConflict
 	}
 	now := time.Now().UTC()
-	current.Status = InvocationCancelled
-	current.ErrorCode = "run.cancelled"
-	current.ErrorDetail = "Agent Run cancelled before physical admission"
 	current.Revision++
 	current.UpdatedAt = now
-	storedTurn.Status = TurnCancelled
-	storedTurn.ErrorCode = current.ErrorCode
-	storedTurn.ErrorDetail = current.ErrorDetail
 	storedTurn.Revision++
 	storedTurn.UpdatedAt = now
 	store.invocations[current.ID] = cloneInvocation(current)

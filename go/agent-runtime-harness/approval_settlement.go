@@ -93,7 +93,7 @@ func PlanOriginalApprovalSettlement(grant, receipt, request Item, children []Ite
 		return Item{}, false, err
 	}
 	switch boundary {
-	case "physical_dispatch_returned", "managed_dispatch_transferred", "managed_dispatch_cancelled_before_next_effect":
+	case "physical_dispatch_returned":
 		if exists && receipt.Seq > 0 {
 			// A previously projected decision must precede the new closure.
 			if children[0].Seq >= receipt.Seq {

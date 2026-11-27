@@ -171,7 +171,7 @@ func (store *MemoryStore) UpdateInvocation(ctx context.Context, value Invocation
 		// an admitted Turn cancellation intent protects the real physical
 		// Kernel stop. This is NOT evidence that the Start itself returned;
 		// the cancellation fence remains until descendant/Kernel proof.
-		if PendingNativeManagedDispatch(physicalItems, value.ID) || value.Status != InvocationCancelled || !store.activeCancellationFenceLocked(value.TurnID) {
+		if value.Status != InvocationCancelled || !store.activeCancellationFenceLocked(value.TurnID) {
 			return Invocation{}, ErrConflict
 		}
 	}
@@ -954,20 +954,10 @@ func (store *MemoryStore) AppendItem(ctx context.Context, value Item) (Item, boo
 	if value.Kind == ItemDiagnostic && value.Status == ItemStarted {
 		switch value.ParentItemID {
 		case CancellationFenceParentItemID:
-			if expectedRoot, _, bound := CancellationAttemptForStore(ctx); bound {
-				root := store.invocations[expectedRoot.ID]
-				target := store.invocations[store.invocationExecutionRefs[value.RunID]]
-				if !ValidCancellationAttemptAdmission(ctx, value, root, target) {
-					return Item{}, false, ErrConflict
-				}
-			}
-			_, _, bound := CancellationAttemptForStore(ctx)
+			expectedRoot, _, _ := CancellationAttemptForStore(ctx)
+			root := store.invocations[expectedRoot.ID]
 			target := store.invocations[store.invocationExecutionRefs[value.RunID]]
-			facts, e := store.globalPhysicalEvidenceLocked(value.TurnID)
-			if e != nil {
-				return Item{}, false, e
-			}
-			if NativeManagedDispatchBlocksCancellation(facts, target, bound) {
+			if !ValidCancellationAttemptAdmission(ctx, value, root, target) {
 				return Item{}, false, ErrConflict
 			}
 			if store.activeCancellationFenceLocked(value.TurnID) {
@@ -1076,7 +1066,7 @@ func (store *MemoryStore) AppendItem(ctx context.Context, value Item) (Item, boo
 		if len(store.itemChildren[grant.ID]) != 0 {
 			return Item{}, false, ErrConflict
 		}
-		if !ValidNativeManagedDispatchCompletion(ctx, grant, value) || !ValidOriginalApprovalSettlement(ctx, grant, value) {
+		if !ValidOriginalApprovalSettlement(ctx, grant, value) {
 			return Item{}, false, ErrConflict
 		}
 		var err error

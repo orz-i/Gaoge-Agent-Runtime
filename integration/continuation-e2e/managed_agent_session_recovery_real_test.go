@@ -297,8 +297,11 @@ func testManagedAgentSessionRecoveryAcrossProcessCrash(t *testing.T, dsn string,
 	if closureErr != nil || !closure.Matches(reservation) || !reflect.DeepEqual(closure.Snapshot(), completed) {
 		t.Fatalf("original transfer closure missing: %v", closureErr)
 	}
-	if closureErr = reopenedStore.CloseManagedRecovery(t.Context(), closure); closureErr != nil {
-		t.Fatalf("exact closure replay: %v", closureErr)
+	// Native closure is the original immutable result; replay does not
+	// create a second Host receipt.
+	replay, closureErr := closureRT.ManagedRecoveryClosure(t.Context(), finalTransfer.SafePoint.ID)
+	if closureErr != nil || !replay.Matches(reservation) || !reflect.DeepEqual(replay.Snapshot(), completed) {
+		t.Fatalf("exact native closure replay: %v", closureErr)
 	}
 	var answer string
 	if err = json.Unmarshal(completed.Result.Content, &answer); err != nil || answer != managedRecoveryAnswer {

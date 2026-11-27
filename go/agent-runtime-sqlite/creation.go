@@ -4,16 +4,17 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget/sqlledger"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
-const runIdentityDDL = `CREATE TABLE runtime_run_identities (run_id TEXT PRIMARY KEY NOT NULL, cancellation_json TEXT NOT NULL)`
+const runIdentityDDL = `CREATE TABLE runtime_run_identities (run_id TEXT PRIMARY KEY NOT NULL, decision_json TEXT NOT NULL)`
 
 func sqliteClaimRunIdentity(ctx context.Context, tx *sql.Tx, id, payload string) (bool, string, error) {
-	result, err := tx.ExecContext(ctx, "INSERT INTO runtime_run_identities(run_id,cancellation_json) VALUES(?,?) ON CONFLICT(run_id) DO NOTHING", id, payload)
+	result, err := tx.ExecContext(ctx, "INSERT INTO runtime_run_identities(run_id,decision_json) VALUES(?,?) ON CONFLICT(run_id) DO NOTHING", id, payload)
 	if err != nil {
 		return false, "", conflictOrDatabaseError(err)
 	}
@@ -25,7 +26,7 @@ func sqliteClaimRunIdentity(ctx context.Context, tx *sql.Tx, id, payload string)
 		return true, payload, nil
 	}
 	var prior string
-	err = tx.QueryRowContext(ctx, "SELECT cancellation_json FROM runtime_run_identities WHERE run_id=?", id).Scan(&prior)
+	err = tx.QueryRowContext(ctx, "SELECT decision_json FROM runtime_run_identities WHERE run_id=?", id).Scan(&prior)
 	return false, prior, conflictOrDatabaseError(err)
 }
 
@@ -34,14 +35,15 @@ func sqliteReserveRunIdentity(ctx context.Context, tx *sql.Tx, id string) error 
 	if err != nil || fresh {
 		return err
 	}
-	if _, err = kernel.DecodeCreationCancellation(id, prior); err != nil {
+	c, err := kernel.DecodeCreationDecision(id, prior)
+	if err != nil {
 		return err
 	}
-	return kernel.ErrCreationCancelled
+	return c.Rejection()
 }
 
-func (s *Store) CancelBeforeCreate(ctx context.Context, q kernel.RunCreationCancellation) (kernel.RunCreationCancellation, error) {
-	var zero kernel.RunCreationCancellation
+func (s *Store) DecideBeforeCreate(ctx context.Context, q kernel.RunCreationDecision) (kernel.RunCreationDecision, error) {
+	var zero kernel.RunCreationDecision
 	if s == nil || s.db == nil || ctx == nil || !q.Valid() {
 		return zero, kernel.ErrInvalidInput
 	}
@@ -65,7 +67,7 @@ func (s *Store) CancelBeforeCreate(ctx context.Context, q kernel.RunCreationCanc
 	if existing != 0 {
 		return zero, kernel.ErrAlreadyExists
 	}
-	c, err := kernel.DecodeCreationCancellation(q.RunID, prior)
+	c, err := kernel.DecodeCreationDecision(q.RunID, prior)
 	if err != nil {
 		return zero, err
 	}
@@ -73,7 +75,10 @@ func (s *Store) CancelBeforeCreate(ctx context.Context, q kernel.RunCreationCanc
 		return zero, kernel.ErrConflict
 	}
 	if fresh {
-		if err = budget.CancelBeforeEnrollment(ctx, sqlledger.Store{DB: tx}, q.RunID, q.Budget); err != nil {
+		if err = sqliteValidateCreationRetry(ctx, tx, &q.Budget); err != nil {
+			return zero, err
+		}
+		if err = budget.CloseBeforeEnrollment(ctx, sqlledger.Store{DB: tx}, q.RunID, q.Budget); err != nil {
 			return zero, conflictOrDatabaseError(err)
 		}
 	}
@@ -81,4 +86,28 @@ func (s *Store) CancelBeforeCreate(ctx context.Context, q kernel.RunCreationCanc
 		return zero, conflictOrDatabaseError(err)
 	}
 	return c, nil
+}
+
+func sqliteLoadCreationDecision(ctx context.Context, db schemaQuery, id string) (kernel.RunCreationDecision, error) {
+	var raw string
+	err := db.QueryRowContext(ctx, "SELECT decision_json FROM runtime_run_identities WHERE run_id=?", id).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return kernel.RunCreationDecision{}, kernel.ErrNotFound
+	}
+	if err != nil {
+		return kernel.RunCreationDecision{}, conflictOrDatabaseError(err)
+	}
+	return kernel.DecodeCreationDecision(id, raw)
+}
+
+func (s *Store) LoadCreationDecision(ctx context.Context, id string) (kernel.RunCreationDecision, error) {
+	return sqliteLoadCreationDecision(ctx, s.db, id)
+}
+
+func sqliteValidateCreationRetry(ctx context.Context, tx *sql.Tx, e *budget.RunEnrollment) error {
+	return kernel.ValidateCreationRetry(ctx, e, func(ctx context.Context, id string) (kernel.Snapshot, error) {
+		return loadTx(ctx, tx, id)
+	}, func(ctx context.Context, id string) (kernel.RunCreationDecision, error) {
+		return sqliteLoadCreationDecision(ctx, tx, id)
+	})
 }

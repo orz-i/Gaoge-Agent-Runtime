@@ -52,7 +52,7 @@ func (s *Store) ManagedRecoveryAuthority(ctx context.Context) (kernel.ManagedAut
 	}
 	return a, nil
 }
-func managedRows(tx *gorm.DB, b kernel.ManagedHostBinding, closed ...bool) (harness.Turn, harness.Invocation, []harness.Item, error) {
+func managedRows(tx *gorm.DB, b kernel.ManagedHostBinding) (harness.Turn, harness.Invocation, []harness.Item, error) {
 	s := &Store{db: tx}
 	ctx := tx.Statement.Context
 	a, err := s.ManagedRecoveryAuthority(ctx)
@@ -79,7 +79,7 @@ func managedRows(tx *gorm.DB, b kernel.ManagedHostBinding, closed ...bool) (harn
 	if err != nil {
 		return t, inv, nil, err
 	}
-	if !found && !b.DirectNativeCommand() {
+	if found || !b.DirectNativeCommand() {
 		return t, inv, nil, harness.ErrConflict
 	}
 	// Include globally keyed children of original dispatch/cancellation facts,
@@ -97,16 +97,12 @@ func managedRows(tx *gorm.DB, b kernel.ManagedHostBinding, closed ...bool) (harn
 		}
 		items = append(items, item)
 	}
-	verifyItems := items
-	if len(closed) == 1 && closed[0] {
-		verifyItems = nil
-	}
-	if err = harness.ValidateManagedOriginalRows(a, b, session, t, inv, config, dispatch, verifyItems); err != nil {
+	if err = harness.ValidateManagedOriginalRows(a, b, session, t, inv, config, dispatch, items); err != nil {
 		return t, inv, nil, err
 	}
 	return t, inv, items, nil
 }
-func (s *Store) VerifyManagedOriginalDispatch(ctx context.Context, b kernel.ManagedHostBinding, recovery bool) error {
+func (s *Store) VerifyManagedOriginalDispatch(ctx context.Context, b kernel.ManagedHostBinding, _ bool) error {
 	if !b.Valid() {
 		return harness.ErrConflict
 	}
@@ -114,14 +110,8 @@ func (s *Store) VerifyManagedOriginalDispatch(ctx context.Context, b kernel.Mana
 		if e := lockTurn(tx, b.TurnID); e != nil {
 			return e
 		}
-		t, i, items, e := managedRows(tx, b)
-		if e != nil {
-			return e
-		}
-		if recovery {
-			return harness.VerifyManagedRecoveryAdmission(b, t, i, items)
-		}
-		return nil
+		_, _, _, e := managedRows(tx, b)
+		return e
 	})
 }
 
@@ -138,75 +128,4 @@ func rejectOpenManagedReservations(db *gorm.DB) error {
 		return harness.ErrConflict
 	}
 	return nil
-}
-
-func (s *Store) CloseManagedRecovery(ctx context.Context, p kernel.ManagedClosureProof) error {
-	t := p.Transfer()
-	if !p.Matches(t.Selection) {
-		return harness.ErrConflict
-	}
-	b := t.SafePoint.Host
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := lockTurn(tx, b.TurnID); err != nil {
-			return err
-		}
-		_, _, items, err := managedRows(tx, b, true)
-		if err != nil {
-			return err
-		}
-		if replay, err := harness.ManagedClosureReplay(p, items); err != nil || replay {
-			return err
-		}
-		if _, _, _, err = managedRows(tx, b); err != nil {
-			return err
-		}
-		if err = harness.ManagedClosureAuthorization(p, items); err != nil {
-			return err
-		}
-		additions, err := harness.ManagedClosureItems(p, t.Selection)
-		if err != nil {
-			return err
-		}
-		grant, found, err := findItem(tx, b.DispatchID)
-		if err != nil {
-			return err
-		}
-		if !found {
-			return harness.ErrConflict
-		}
-		additions[0].Seq, err = nextItemSeq(tx, b.TurnID)
-		if err != nil {
-			return err
-		}
-		decision, insert, err := planOriginalApprovalTx(tx, grant, additions[0])
-		if err != nil {
-			return err
-		}
-		if insert {
-			additions = append([]harness.Item{decision}, additions...)
-		}
-		for _, item := range additions {
-			var n int64
-			if err = tx.Model(&itemRecord{}).Where("id = ? OR parent_item_id = ?", item.ID, item.ParentItemID).Count(&n).Error; err != nil {
-				return err
-			}
-			if n != 0 {
-				return harness.ErrConflict
-			}
-		}
-		for _, item := range additions {
-			item.Seq, err = nextItemSeq(tx, item.TurnID)
-			if err != nil {
-				return err
-			}
-			record, e := itemToRecord(item)
-			if e != nil {
-				return e
-			}
-			if err = tx.Create(&record).Error; err != nil {
-				return err
-			}
-		}
-		return nil
-	})
 }

@@ -13,7 +13,7 @@ import (
 )
 
 func pgClaimRunIdentity(tx *gorm.DB, id, payload string) (bool, string, error) {
-	row := models.KernelRunIdentityRecord{RunID: id, CancellationJSON: payload}
+	row := models.KernelRunIdentityRecord{RunID: id, DecisionJSON: payload}
 	result := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&row)
 	if result.Error != nil {
 		return false, "", translateKernelError(result.Error)
@@ -24,7 +24,7 @@ func pgClaimRunIdentity(tx *gorm.DB, id, payload string) (bool, string, error) {
 	if err := tx.Where("run_id=?", id).Take(&row).Error; err != nil {
 		return false, "", translateKernelError(err)
 	}
-	return false, row.CancellationJSON, nil
+	return false, row.DecisionJSON, nil
 }
 
 func pgReserveRunIdentity(tx *gorm.DB, id string) error {
@@ -32,14 +32,15 @@ func pgReserveRunIdentity(tx *gorm.DB, id string) error {
 	if err != nil || fresh {
 		return err
 	}
-	if _, err = kernel.DecodeCreationCancellation(id, prior); err != nil {
+	c, err := kernel.DecodeCreationDecision(id, prior)
+	if err != nil {
 		return err
 	}
-	return kernel.ErrCreationCancelled
+	return c.Rejection()
 }
 
-func (s *KernelStore) CancelBeforeCreate(ctx context.Context, q kernel.RunCreationCancellation) (kernel.RunCreationCancellation, error) {
-	var zero, result kernel.RunCreationCancellation
+func (s *KernelStore) DecideBeforeCreate(ctx context.Context, q kernel.RunCreationDecision) (kernel.RunCreationDecision, error) {
+	var zero, result kernel.RunCreationDecision
 	if s == nil || s.db == nil || ctx == nil || !q.Valid() {
 		return zero, kernel.ErrInvalidInput
 	}
@@ -59,7 +60,7 @@ func (s *KernelStore) CancelBeforeCreate(ctx context.Context, q kernel.RunCreati
 		if existing != 0 {
 			return kernel.ErrAlreadyExists
 		}
-		result, e = kernel.DecodeCreationCancellation(q.RunID, prior)
+		result, e = kernel.DecodeCreationDecision(q.RunID, prior)
 		if e != nil {
 			return e
 		}
@@ -69,10 +70,22 @@ func (s *KernelStore) CancelBeforeCreate(ctx context.Context, q kernel.RunCreati
 		if !fresh {
 			return nil
 		}
-		return budget.CancelBeforeEnrollment(ctx, sqlledger.Store{DB: tx.Statement.ConnPool, Lock: tx.Name() == "postgres"}, q.RunID, q.Budget)
+		scoped := &KernelStore{db: tx}
+		if e = kernel.ValidateCreationRetry(ctx, &q.Budget, scoped.Load, scoped.LoadCreationDecision); e != nil {
+			return e
+		}
+		return budget.CloseBeforeEnrollment(ctx, sqlledger.Store{DB: tx.Statement.ConnPool, Lock: tx.Name() == "postgres"}, q.RunID, q.Budget)
 	})
 	if err != nil {
 		return zero, err
 	}
 	return result, nil
+}
+
+func (s *KernelStore) LoadCreationDecision(ctx context.Context, id string) (kernel.RunCreationDecision, error) {
+	var row models.KernelRunIdentityRecord
+	if err := s.db.WithContext(ctx).Where("run_id=?", id).Take(&row).Error; err != nil {
+		return kernel.RunCreationDecision{}, translateKernelError(err)
+	}
+	return kernel.DecodeCreationDecision(id, row.DecisionJSON)
 }

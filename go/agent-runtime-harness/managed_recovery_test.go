@@ -18,9 +18,6 @@ func TestManagedHostMemoryRejectsUnissuedProofs(t *testing.T) {
 	if err = s.VerifyManagedOriginalDispatch(t.Context(), kernel.ManagedHostBinding{}, true); !errors.Is(err, ErrConflict) {
 		t.Fatalf("unissued parked proof: %v", err)
 	}
-	if err = s.CloseManagedRecovery(t.Context(), kernel.ManagedClosureProof{}); !errors.Is(err, ErrConflict) {
-		t.Fatalf("unissued closure proof: %v", err)
-	}
 	after, err := s.ManagedRecoveryAuthority(t.Context())
 	if err != nil || a != after || len(s.items) != 0 {
 		t.Fatal("denied proof mutated Host authority or history")
@@ -31,9 +28,9 @@ func TestManagedHostMemoryRejectsUnissuedProofs(t *testing.T) {
 	}
 }
 
-// Parsing proves only the exact persisted receipt shape. Store admission still
-// rejects ordinary Append of this namespace; only the opaque closure writes it.
-func TestManagedDispatchReceiptExactSchema(t *testing.T) {
+// Neither a syntactically exact retired Managed receipt nor a malformed
+// variant can authorize settlement after the native-only cutover.
+func TestRetiredManagedDispatchReceiptRejected(t *testing.T) {
 	grant := Item{ID: "original", TurnID: "turn", InvocationID: "invocation", RunID: "run", Kind: ItemDiagnostic, Status: ItemStarted, ParentItemID: ExecutionDispatchParentItemID, Seq: 1, Payload: json.RawMessage(`{"phase":"start","physicalRunID":"run"}`)}
 	for _, mode := range []kernel.ManagedRecoveryMode{kernel.ManagedResume, kernel.ManagedCancel} {
 		t.Run(string(mode), func(t *testing.T) {
@@ -44,81 +41,18 @@ func TestManagedDispatchReceiptExactSchema(t *testing.T) {
 			fields := map[string]string{"boundary": boundary, "recoveryID": "original-recovery", "mode": string(mode), "selectionHash": strings.Repeat("a", 64), "terminalHash": strings.Repeat("b", 64)}
 			raw, _ := json.Marshal(fields)
 			receipt := Item{ID: stableID("hdispatchdone", grant.ID), TurnID: grant.TurnID, InvocationID: grant.InvocationID, RunID: grant.RunID, Kind: ItemDiagnostic, Status: ItemCompleted, ParentItemID: grant.ID, Seq: 2, Payload: raw}
-			if got, ok := VerifiedExecutionDispatchReceipt(grant, []Item{receipt}); !ok || got != boundary {
-				t.Fatal("exact managed closure rejected", got)
+			if _, ok := VerifiedExecutionDispatchReceipt(grant, []Item{receipt}); ok || !IsManagedDispatchClosure(receipt) {
+				t.Fatal("retired managed closure admitted")
 			}
-			invalid := []json.RawMessage{
-				json.RawMessage(strings.TrimSuffix(string(raw), "}") + `,"boundary":"` + boundary + `"}`),
-				json.RawMessage(strings.TrimSuffix(string(raw), "}") + `,"extra":"unknown"}`),
+			if _, _, err := NewMemoryStore().AppendItem(t.Context(), receipt); !errors.Is(err, ErrConflict) {
+				t.Fatalf("forged closure accepted: %v", err)
 			}
-			for _, key := range []string{"boundary", "recoveryID", "mode", "selectionHash", "terminalHash"} {
-				changed := make(map[string]string, len(fields))
-				for k, v := range fields {
-					changed[k] = v
-				}
-				delete(changed, key)
-				b, _ := json.Marshal(changed)
-				invalid = append(invalid, b)
-				changed[key] = ""
-				b, _ = json.Marshal(changed)
-				invalid = append(invalid, b)
-			}
-			for _, hash := range []string{strings.Repeat("z", 64), strings.Repeat("A", 64), strings.Repeat("a", 63)} {
-				changed := make(map[string]string, len(fields))
-				for k, v := range fields {
-					changed[k] = v
-				}
-				changed["selectionHash"] = hash
-				b, _ := json.Marshal(changed)
-				invalid = append(invalid, b)
-			}
-			opposite := kernel.ManagedCancel
-			if mode == kernel.ManagedCancel {
-				opposite = kernel.ManagedResume
-			}
-			fields["mode"] = string(opposite)
-			b, _ := json.Marshal(fields)
-			invalid = append(invalid, b)
-			for i, payload := range invalid {
-				bad := receipt
-				bad.Payload = payload
-				if _, ok := VerifiedExecutionDispatchReceipt(grant, []Item{bad}); ok {
-					t.Fatalf("invalid payload %d accepted", i)
-				}
-			}
-			for _, change := range []func(*Item){func(v *Item) { v.RunID = "foreign" }, func(v *Item) { v.InvocationID = "foreign" }, func(v *Item) { v.Seq = grant.Seq }, func(v *Item) { v.ID = "foreign" }} {
-				bad := receipt
-				change(&bad)
-				if _, ok := VerifiedExecutionDispatchReceipt(grant, []Item{bad}); ok {
-					t.Fatal("foreign managed receipt accepted")
-				}
-			}
-			if _, ok := VerifiedExecutionDispatchReceipt(grant, []Item{receipt, receipt}); ok {
-				t.Fatal("duplicate managed receipt accepted")
-			}
-			for _, phase := range []string{"resume", "resolve-approval", "start-retry", "resolve-subtask-approval", "handoff-start", "grant-call-allowance"} {
-				other := grant
-				other.Payload, _ = json.Marshal(map[string]string{"phase": phase, "physicalRunID": "run"})
-				_, ok := VerifiedExecutionDispatchReceipt(other, []Item{receipt})
-				_, allowed := kernel.ManagedDispatchOperation(phase)
-				if phase == "resolve-approval" {
-					if ok {
-						t.Fatal("legacy approval grant admitted managed closure")
-					}
-					other.Payload = json.RawMessage(`{"phase":"resolve-approval","physicalRunID":"run","checkpointID":"original","decision":"approve","comment":""}`)
-					_, ok = VerifiedExecutionDispatchReceipt(other, []Item{receipt})
-				}
-				if ok != allowed {
-					t.Fatalf("wrong managed receipt phase qualification: %s", phase)
-				}
-			}
-			ordinary := receipt
-			ordinary.Payload = json.RawMessage(`{"boundary":"physical_dispatch_returned"}`)
-			if _, ok := VerifiedExecutionDispatchReceipt(grant, []Item{ordinary}); !ok {
+			receipt.Payload = json.RawMessage(`{"boundary":"physical_dispatch_returned"}`)
+			if _, ok := VerifiedExecutionDispatchReceipt(grant, []Item{receipt}); !ok {
 				t.Fatal("ordinary exact receipt changed")
 			}
-			ordinary.Payload = json.RawMessage(`{"boundary":"physical_dispatch_returned","extra":"no"}`)
-			if _, ok := VerifiedExecutionDispatchReceipt(grant, []Item{ordinary}); ok {
+			receipt.Payload = json.RawMessage(`{"boundary":"physical_dispatch_returned","extra":"no"}`)
+			if _, ok := VerifiedExecutionDispatchReceipt(grant, []Item{receipt}); ok {
 				t.Fatal("ordinary schema widened")
 			}
 		})

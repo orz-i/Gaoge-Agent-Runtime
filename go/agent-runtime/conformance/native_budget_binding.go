@@ -65,8 +65,8 @@ func runNativeBudgetBinding(t *testing.T, factory func(*testing.T) ExecutionBudg
 				before = load("scope")
 				retry := newRequest("retry", "scope", "")
 				retry.Budget.Retry = budget.RootRetryGrant{InvocationID: "inv", OriginalRunID: "root", Attempt: 2, Active: true}
-				cancel := kernel.RunCreationCancellation{RunID: retry.ID, Reason: "original reason", Budget: *retry.Budget}
-				if got, err := rt.CancelBeforeCreate(ctx, cancel); err != nil || got != cancel {
+				cancel := kernel.RunCreationDecision{RunID: retry.ID, Status: kernel.RunStatusCancelled, Reason: "original reason", Budget: *retry.Budget}
+				if got, err := rt.DecideBeforeCreate(ctx, cancel); err != nil || got != cancel {
 					t.Fatalf("cancel-before-create: %+v %v", got, err)
 				}
 				closed := load("scope")
@@ -89,7 +89,7 @@ func runNativeBudgetBinding(t *testing.T, factory func(*testing.T) ExecutionBudg
 				}
 				replay := cancel
 				replay.Reason = "retry reason"
-				if got, err := peer.CancelBeforeCreate(ctx, replay); err != nil || got != cancel || !reflect.DeepEqual(closed, load("scope")) {
+				if got, err := peer.DecideBeforeCreate(ctx, replay); err != nil || got != cancel || !reflect.DeepEqual(closed, load("scope")) {
 					t.Fatalf("negative identity replay changed original fact: %+v %v", got, err)
 				}
 				before = closed
@@ -100,7 +100,7 @@ func runNativeBudgetBinding(t *testing.T, factory func(*testing.T) ExecutionBudg
 					t.Fatal(e)
 				}
 				cancel.RunID, cancel.Budget = retry.ID, *retry.Budget
-				if _, e = peer.CancelBeforeCreate(ctx, cancel); !errors.Is(e, kernel.ErrAlreadyExists) {
+				if _, e = peer.DecideBeforeCreate(ctx, cancel); !errors.Is(e, kernel.ErrAlreadyExists) {
 					t.Fatalf("created identity admitted missing-Run cancellation: %v", e)
 				}
 				after := load("scope")
@@ -110,30 +110,90 @@ func runNativeBudgetBinding(t *testing.T, factory func(*testing.T) ExecutionBudg
 				if _, ok := after.Runs[retry.ID]; !ok {
 					t.Fatal("retry registration missing")
 				}
-				// Competing connections must decide one identity even before a Run exists.
+				// Both negative outcomes can close a first Attempt even before
+				// its ledger exists. The next generation enrolls only itself.
+				for _, status := range []kernel.RunStatus{kernel.RunStatusCancelled, kernel.RunStatusFailed} {
+					first := newRequest("uncreated-"+string(status), "scope-"+string(status), "")
+					q := kernel.RunCreationDecision{RunID: first.ID, Status: status, Reason: "definite", Budget: *first.Budget}
+					if got, err := rt.DecideBeforeCreate(ctx, q); err != nil || got != q {
+						t.Fatalf("first negative: %+v %v", got, err)
+					}
+					l := load(first.Budget.ScopeID)
+					if l.Revision != 1 || !l.Cancelled || !l.RunCancelled(first.ID) || len(l.Runs) != 0 || len(l.Reservations) != 0 {
+						t.Fatal("negative first fabricated membership or failed to close quota")
+					}
+					if got, err := peer.LoadCreationDecision(ctx, first.ID); err != nil || got != q {
+						t.Fatalf("read original negative: %+v %v", got, err)
+					}
+					other := q
+					other.Status = kernel.RunStatusCancelled
+					if status == kernel.RunStatusCancelled {
+						other.Status = kernel.RunStatusFailed
+					}
+					if got, err := peer.DecideBeforeCreate(ctx, other); err != nil || got != q || !reflect.DeepEqual(l, load(first.Budget.ScopeID)) {
+						t.Fatalf("opposing decision replaced first: %+v %v", got, err)
+					}
+					if _, err := peer.Create(ctx, first); !errors.Is(err, q.Rejection()) {
+						t.Fatalf("late Create won negative: %v", err)
+					}
+					next := newRequest(first.ID+"-retry", first.Budget.ScopeID, "")
+					next.Budget.Retry = budget.RootRetryGrant{InvocationID: "inv-" + string(status), OriginalRunID: first.ID, Attempt: 2, Active: true}
+					if _, err := peer.Create(ctx, next); err != nil {
+						t.Fatalf("uncreated first Retry: %v", err)
+					}
+					after := load(first.Budget.ScopeID)
+					if after.Revision != 2 || len(after.Runs) != 1 || after.RunCancelled(next.ID) || !after.RootRetries[next.ID].Active {
+						t.Fatal("first Retry did not preserve native identity closure")
+					}
+				}
+				// A budget-only marker cannot authorize a nonexistent native predecessor.
+				phantom := newRequest("forged-next", "forged-scope", "")
+				phantom.Budget.Retry = budget.RootRetryGrant{InvocationID: "forged-inv", OriginalRunID: "missing-predecessor", Attempt: 2, Active: true}
+				l, err := c.Ensure(ctx, phantom.Budget.ScopeID, limits)
+				if err != nil {
+					t.Fatal(err)
+				}
+				l.Cancelled, l.CancelledRuns = true, map[string]bool{"missing-predecessor": true}
+				l.Revision++
+				if err = f.Ledger.SaveBudget(ctx, l, l.Revision-1); err != nil {
+					t.Fatal(err)
+				}
+				if _, err = rt.Create(ctx, phantom); !errors.Is(err, budget.ErrLedgerConflict) || !reflect.DeepEqual(l, load(l.ID)) {
+					t.Fatalf("ledger marker substituted native predecessor: %v", err)
+				}
+				if _, err = rt.LoadCreationDecision(ctx, phantom.ID); !errors.Is(err, kernel.ErrNotFound) {
+					t.Fatalf("failed Create left identity: %v", err)
+				}
+
+				// Three competing commands use the one permanent Run identity.
 				race := newRequest("race", "race-scope", "")
 				if _, e = c.Ensure(ctx, race.Budget.ScopeID, limits); e != nil {
 					t.Fatal(e)
 				}
-				start, createErr, cancelErr := make(chan struct{}), make(chan error, 1), make(chan error, 1)
+				type result struct {
+					decision kernel.RunCreationDecision
+					err      error
+				}
+				start, createErr, negative := make(chan struct{}), make(chan error, 1), make(chan result, 2)
 				go func() {
 					<-start
 					_, err := rt.Create(ctx, race)
 					createErr <- err
 				}()
-				go func() {
-					<-start
-					_, err := peer.CancelBeforeCreate(ctx, kernel.RunCreationCancellation{RunID: race.ID, Budget: *race.Budget})
-					cancelErr <- err
-				}()
+				for _, status := range []kernel.RunStatus{kernel.RunStatusCancelled, kernel.RunStatusFailed} {
+					go func() {
+						<-start
+						d, err := peer.DecideBeforeCreate(ctx, kernel.RunCreationDecision{RunID: race.ID, Status: status, Reason: "definite", Budget: *race.Budget})
+						negative <- result{d, err}
+					}()
+				}
 				close(start)
-				ce, xe := <-createErr, <-cancelErr
-				l := load("race-scope")
+				ce, a, b := <-createErr, <-negative, <-negative
+				l = load("race-scope")
 				_, member := l.Runs[race.ID]
-				if l.Revision != 2 || (ce == nil) == (xe == nil) ||
-					(ce == nil && (!errors.Is(xe, kernel.ErrAlreadyExists) || !member || l.RunCancelled(race.ID))) ||
-					(xe == nil && (!errors.Is(ce, kernel.ErrCreationCancelled) || member || !l.RunCancelled(race.ID))) {
-					t.Fatalf("create/cancel election split: %v %v %+v", ce, xe, l)
+				if l.Revision != 2 || (ce == nil && (!errors.Is(a.err, kernel.ErrAlreadyExists) || !errors.Is(b.err, kernel.ErrAlreadyExists) || !member || l.RunCancelled(race.ID))) ||
+					(ce != nil && (a.err != nil || b.err != nil || a.decision != b.decision || !a.decision.Valid() || !errors.Is(ce, a.decision.Rejection()) || member || !l.RunCancelled(race.ID))) {
+					t.Fatalf("create/cancel/fail election split: %v %+v %+v %+v", ce, a, b, l)
 				}
 			case "capacity":
 				unbound := newRequest("unbound", "scope", "root")

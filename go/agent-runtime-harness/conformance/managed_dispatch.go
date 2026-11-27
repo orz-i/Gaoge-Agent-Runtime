@@ -364,8 +364,10 @@ func ManagedPhysicalDispatch(t *testing.T, factory func(*testing.T) (kernel.Stor
 			if repeated && kernel.ManagedDigest(old) != kernel.ManagedDigest(prior) {
 				t.Fatal("closed historical transfer was rewritten")
 			}
-			if e = h.VerifyManagedOriginalDispatch(ctx, prior.SafePoint.Host, false); e == nil {
-				t.Fatal("historical dispatch acquired current Host authority")
+			// Host validation reads frozen selection; only the native current
+			// transfer and Grant decide execution eligibility.
+			if _, e = rt.AuthorizeManagedContinuation(ctx, old); !errors.Is(e, kernel.ErrExecutionConflict) {
+				t.Fatalf("historical transfer acquired native execution authority: %v", e)
 			}
 			if inline {
 				bad := b

@@ -78,6 +78,9 @@ func (runner *Runner) finishTopLevelStart(
 				}
 			}
 		}
+		if runner.nativeRootStart() != nil {
+			return runner.finishNativeRootStart(ctx, turn, invocation, startErr)
+		}
 		if startErr == nil {
 			// Neither a physical Run nor an error is a completed effect.
 			return Snapshot{}, ErrExecutionOutcomeUnknown
@@ -294,23 +297,18 @@ func (runner *Runner) startInvocationAttempt(
 		return kernel.Snapshot{}, ErrConflict
 	}
 	requestID := stableID("hretry", invocation.ID, attemptString(invocation.Attempt))
-	return runner.withPhysicalInvocationDispatch(ctx, invocation, "start-retry", func(physicalCtx context.Context) (kernel.Snapshot, error) {
-		var input agentInvocationInput
-		if err := json.Unmarshal(invocation.Input, &input); err != nil {
-			return kernel.Snapshot{}, ErrConflict
-		}
-		config, err := loadSealedConfig(physicalCtx, runner.store, turn.ConfigSnapshotID)
-		if err != nil {
-			return kernel.Snapshot{}, err
-		}
-		start := rootAgentStartRequest(config, invocation.ExecutionRefID, actor, thread,
-			requestID, input.Goal, input.InitialToolKeys, input.RequiredToolKeys)
-		// The original invocation's admission hash already bound these
-		// per-run spending grants; without freezing them in Invocation Input,
-		// retry silently changes bounded execution into unbounded execution.
-		start.CallAllowance, start.AutoAllowance = input.CallAllowance, input.AutoAllowance
-		return runner.agent.StartRun(physicalCtx, start)
-	})
+	var input agentInvocationInput
+	if err := json.Unmarshal(invocation.Input, &input); err != nil {
+		return kernel.Snapshot{}, ErrConflict
+	}
+	config, err := loadSealedConfig(ctx, runner.store, turn.ConfigSnapshotID)
+	if err != nil {
+		return kernel.Snapshot{}, err
+	}
+	start := rootAgentStartRequest(config, invocation.ExecutionRefID, actor, thread,
+		requestID, input.Goal, input.InitialToolKeys, input.RequiredToolKeys)
+	start.CallAllowance, start.AutoAllowance = input.CallAllowance, input.AutoAllowance
+	return runner.startOriginalRoot(ctx, invocation, "start-retry", start)
 }
 
 // CancelInvocation cancels one original Handoff child with its frozen route

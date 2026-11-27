@@ -8,6 +8,8 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
 // undispatchedRootNoEffect is the shared read-side witness for cancellation
@@ -19,8 +21,8 @@ func (runner *Runner) undispatchedRootNoEffect(
 ) (bool, error) {
 	if runner == nil || runner.runtime == nil || original.Attempt < 1 ||
 		original.ParentItemID != "" ||
-		(original.Status != InvocationAccepted && original.Status != InvocationCancelled) ||
-		(!undispatchedRootTurn(original, turn) && (turn.Status != TurnCancelled || original.Status != InvocationCancelled)) ||
+		(original.Status != InvocationAccepted && original.Status != InvocationCancelled && original.Status != InvocationFailed) ||
+		(!undispatchedRootTurn(original, turn) && !missingRuntimeSnapshotAllowed(turn, original)) ||
 		original.ExecutionRefID == "" || original.TurnID != turn.ID {
 		return false, nil
 	}
@@ -54,12 +56,12 @@ func (runner *Runner) undispatchedRootNoEffect(
 				if selectionErr != nil {
 					return true, selectionErr
 				}
-				selected, selectionErr := budget.PlanRootRetry(*ledger, original.ID, selection.Previous.ExecutionRefID, original.ExecutionRefID, original.Attempt)
-				if selectionErr != nil {
-					return true, selectionErr
+				draft := budget.LedgerMap{ledger.ID: budget.CloneLedger(*ledger)}
+				enrollment := budget.RunEnrollment{ScopeID: ledger.ID, Limits: ledger.Limits, Retry: budget.RootRetryGrant{InvocationID: original.ID, OriginalRunID: selection.Previous.ExecutionRefID, Attempt: original.Attempt, Active: true}}
+				if e := budget.CloseBeforeEnrollment(ctx, draft, original.ExecutionRefID, enrollment); e != nil {
+					return true, e
 				}
-				// Verify the complete historical accounting lineage against
-				// the pure candidate; this read-side check grants no dispatch.
+				selected := draft[ledger.ID]
 				ledger = &selected
 			} else if !ok || !grant.Active || grant.InvocationID != original.ID || grant.Attempt != original.Attempt {
 				return true, ErrExecutionOutcomeUnknown
@@ -113,40 +115,92 @@ func (runner *Runner) undispatchedRootNoEffect(
 	return true, nil
 }
 
-// cancelNativeUncreatedRoot commits the original absent-Run decision and its
-// accounting generation in the Runtime Store. No standalone retry enrollment
-// or quota revocation may race Create. Host status is only a later projection.
-func (runner *Runner) cancelNativeUncreatedRoot(ctx context.Context, turn Turn, inv Invocation, reason string) error {
-	q := kernel.RunCreationCancellation{RunID: inv.ExecutionRefID, Reason: strings.TrimSpace(reason)}
+// uncreatedRootSelection is the same frozen selection used for Create,
+// either negative disposition, and replay. It does not create a Run.
+func (runner *Runner) uncreatedRootSelection(ctx context.Context, turn Turn, inv Invocation, status kernel.RunStatus, reason string) (kernel.RunCreationDecision, error) {
+	q := kernel.RunCreationDecision{RunID: inv.ExecutionRefID, Status: status, Reason: strings.TrimSpace(reason)}
 	config, err := loadSealedConfig(ctx, runner.store, turn.ConfigSnapshotID)
 	if err != nil {
-		return err
+		return q, err
 	}
 	if config.SharedBudget != nil {
 		q.Budget = budget.RunEnrollment{ScopeID: turn.ID, Limits: *config.SharedBudget}
 		if inv.Attempt > 1 {
 			selection, err := nativeRetrySelection(ctx, runner.store, inv)
 			if err != nil {
-				return err
+				return q, err
 			}
 			q.Budget.Retry = budget.RootRetryGrant{InvocationID: inv.ID, OriginalRunID: selection.Previous.ExecutionRefID, Attempt: inv.Attempt, Active: true}
 		}
 	}
-	c, err := runner.runtime.CancelBeforeCreate(ctx, q)
+	return q, nil
+}
+
+func (runner *Runner) readUncreatedRootDecision(ctx context.Context, turn Turn, inv Invocation) (kernel.RunCreationDecision, error) {
+	q, err := runner.uncreatedRootSelection(ctx, turn, inv, kernel.RunStatusCancelled, "")
 	if err != nil {
-		return err
+		return q, err
 	}
-	if !c.MatchesSelection(q) {
-		return ErrExecutionOutcomeUnknown
+	c, err := runner.runtime.LoadCreationDecision(ctx, q.RunID)
+	if err == nil && !c.MatchesSelection(q) {
+		err = ErrConflict
 	}
-	if q.Budget.ScopeID != "" && runner.nativeBudget() {
-		ledger, err := runner.budgets.loadLedger(ctx, q.Budget.ScopeID)
+	return c, err
+}
+
+func (runner *Runner) projectUncreatedRoot(ctx context.Context, turn Turn, inv Invocation, status InvocationStatus, reason string) (Snapshot, error) {
+	if proven, err := runner.undispatchedRootNoEffect(ctx, turn, inv, true); !proven || err != nil {
+		return Snapshot{}, errors.Join(ErrConflict, err)
+	}
+	proofCtx := withUncreatedRootWitness(ctx, inv, turn, status, reason)
+	closed, terminal, err := runner.store.SettleUncreatedRoot(proofCtx, inv, turn)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if err = runner.recordInvocationItem(ctx, closed); err != nil {
+		return Snapshot{}, err
+	}
+	if status == InvocationFailed {
+		pending, _, err := hostOutputProjectionState(ctx, runner.store, terminal)
 		if err != nil {
-			return err
+			return Snapshot{}, err
 		}
-		return runner.budgets.project(ctx, ledger)
+		if !pending {
+			if err = runner.recordTerminalAgentMessageItem(ctx, terminal, kernel.Snapshot{Run: kernel.Run{ID: inv.ExecutionRefID}}); err != nil {
+				return Snapshot{}, err
+			}
+			runner.ensureTerminalTurnFeed(ctx, terminal)
+		}
 	}
-	return nil
+	return runner.loadSnapshot(ctx, terminal, nil)
+}
+
+func (runner *Runner) projectNativeCreationDecision(ctx context.Context, turn Turn, inv Invocation, d kernel.RunCreationDecision) (Snapshot, error) {
+	if d.Budget.ScopeID != "" && runner.nativeBudget() {
+		ledger, err := runner.budgets.loadLedger(ctx, d.Budget.ScopeID)
+		if err != nil {
+			return Snapshot{}, err
+		}
+		if err = runner.budgets.project(ctx, ledger); err != nil {
+			return Snapshot{}, err
+		}
+	}
+	status := invocationStatusFromTurn(TurnStatus(d.Status))
+	if current, err := runner.store.GetInvocation(ctx, inv.ID); err != nil {
+		return Snapshot{}, err
+	} else if !sameFrozenInvocationAuthority(inv, current) {
+		return Snapshot{}, ErrConflict
+	} else if current.Status == status {
+		actual, err := loadVerifiedTurn(ctx, runner.store, turn.ID)
+		if err != nil || actual.Status != turnStatusFromInvocation(status) {
+			return Snapshot{}, errors.Join(ErrConflict, err)
+		}
+		if err = runner.recordInvocationItem(ctx, current); err != nil {
+			return Snapshot{}, err
+		}
+		return runner.loadSnapshot(ctx, actual, nil)
+	}
+	return runner.projectUncreatedRoot(ctx, turn, inv, status, d.Reason)
 }
 
 // cancelUndispatchedRoot is the no-effect counterpart of Kernel.Cancel.
@@ -176,14 +230,22 @@ func (runner *Runner) cancelUndispatchedRoot(
 		return Snapshot{}, true, ErrConflict
 	}
 	if runner.nativeBudget() || runner.nativeRootCommands() != nil {
-		if err = runner.cancelNativeUncreatedRoot(ctx, turn, original, reason); err != nil {
-			if errors.Is(err, kernel.ErrAlreadyExists) {
-				// Create won the same native identity. Continue the ordinary
-				// cancellation protocol against the actual Run.
-				return Snapshot{}, false, nil
-			}
-			return Snapshot{}, true, err
+		q, e := runner.uncreatedRootSelection(ctx, turn, original, kernel.RunStatusCancelled, reason)
+		if e != nil {
+			return Snapshot{}, true, e
 		}
+		d, e := runner.runtime.LoadCreationDecision(ctx, q.RunID)
+		if errors.Is(e, kernel.ErrNotFound) {
+			d, e = runner.runtime.DecideBeforeCreate(ctx, q)
+		}
+		if errors.Is(e, kernel.ErrAlreadyExists) {
+			return Snapshot{}, false, nil // Create won the native identity.
+		}
+		if e != nil || !d.MatchesSelection(q) {
+			return Snapshot{}, true, errors.Join(ErrExecutionOutcomeUnknown, e)
+		}
+		projected, e := runner.projectNativeCreationDecision(ctx, turn, original, d)
+		return projected, true, e
 	} else if original.Attempt == 1 {
 		if ledger, loadErr := runner.loadTurnBudget(ctx, turn); loadErr != nil {
 			return Snapshot{}, true, loadErr
@@ -199,17 +261,87 @@ func (runner *Runner) cancelUndispatchedRoot(
 	} else if err = runner.cancelTurnBudget(ctx, turn, original.ExecutionRefID); err != nil {
 		return Snapshot{}, true, err
 	}
-	if proven, proofErr := runner.undispatchedRootNoEffect(ctx, turn, original, true); !proven || proofErr != nil {
-		return Snapshot{}, true, errors.Join(ErrConflict, proofErr)
-	}
-	proofCtx := withUndispatchedRootCancellationWitness(ctx, original, turn)
-	cancelled, terminalTurn, err := runner.store.CancelUndispatchedRoot(proofCtx, original, turn)
-	if err != nil {
-		return Snapshot{}, true, err
-	}
-	if err = runner.recordInvocationItem(ctx, cancelled); err != nil {
-		return Snapshot{}, true, err
-	}
-	observed, err := runner.loadSnapshot(ctx, terminalTurn, nil)
+	observed, err := runner.projectUncreatedRoot(ctx, turn, original, InvocationCancelled, "")
 	return observed, true, err
+}
+
+// A native scoped Root needs no independently admitted Host dispatch.
+// The same immutable Host selection supplies Create and either rejection.
+func (runner *Runner) nativeRootStart() *agent.Runner {
+	native := runner.nativeRootCommands()
+	if native != nil && native.NativeRootCallbacksScoped() {
+		return native
+	}
+	return nil
+}
+
+func (runner *Runner) startOriginalRoot(ctx context.Context, inv Invocation, phase string, request agent.StartRequest) (kernel.Snapshot, error) {
+	physical := func(c context.Context) (kernel.Snapshot, error) { return runner.agent.StartRun(c, request) }
+	native := runner.nativeRootStart()
+	if native == nil {
+		return runner.withPhysicalInvocationDispatch(ctx, inv, phase, physical)
+	}
+	ready, err := runner.originalNativeCommand(ctx, inv)
+	if err != nil || !ready {
+		return kernel.Snapshot{}, errors.Join(ErrConflict, err)
+	}
+	if d, err := runner.runtime.LoadCreationDecision(ctx, inv.ExecutionRefID); err == nil {
+		return kernel.Snapshot{}, d.Rejection()
+	} else if !errors.Is(err, kernel.ErrNotFound) {
+		return kernel.Snapshot{}, err
+	}
+	return runner.withNativeRootCommand(ctx, native, inv, phase, nil, physical)
+}
+
+func (runner *Runner) finishNativeRootStart(ctx context.Context, turn Turn, inv Invocation, cause error) (Snapshot, error) {
+	d, err := runner.readUncreatedRootDecision(ctx, turn, inv)
+	// Only a direct native preflight rejection of a frozen input can commit
+	// the failed identity. Transient I/O and unknown Create ACKs stay open.
+	if errors.Is(err, kernel.ErrNotFound) && agent.IsNativeStartNoEffect(cause) && definitiveStartFailure(cause) {
+		q, e := runner.uncreatedRootSelection(ctx, turn, inv, kernel.RunStatusFailed, cause.Error())
+		if e != nil {
+			return Snapshot{}, errors.Join(cause, e)
+		}
+		d, err = runner.runtime.DecideBeforeCreate(ctx, q)
+		if err == nil && !d.MatchesSelection(q) {
+			err = ErrConflict
+		}
+	}
+	if errors.Is(err, kernel.ErrAlreadyExists) {
+		// The positive identity won. Only its real Run is observable.
+		s, e := runner.runtime.Load(ctx, inv.ExecutionRefID)
+		if e != nil {
+			return Snapshot{}, errors.Join(cause, e)
+		}
+		return runner.syncRuntimeSnapshotWithRetry(ctx, turn, inv, s)
+	}
+	if err != nil {
+		if errors.Is(err, kernel.ErrNotFound) && cause != nil {
+			return Snapshot{}, cause
+		}
+		return Snapshot{}, errors.Join(ErrExecutionOutcomeUnknown, cause, err)
+	}
+	observed, e := runner.projectNativeCreationDecision(ctx, turn, inv, d)
+	if cause == nil {
+		cause = d.Rejection()
+	}
+	return observed, errors.Join(cause, e)
+}
+
+func definitiveStartFailure(err error) bool {
+	switch e := err.(type) { //nolint:errorlint // Inspect each immediate cause; errors.As can skip ambiguous joined failures.
+	case interface{ Unwrap() []error }:
+		causes := e.Unwrap()
+		for _, cause := range causes {
+			if !definitiveStartFailure(cause) {
+				return false
+			}
+		}
+		return len(causes) != 0
+	case interface{ Unwrap() error }:
+		return definitiveStartFailure(e.Unwrap())
+	}
+	//nolint:errorlint // Only exact definitive leaves qualify; custom Is methods are not authority.
+	return err == agent.ErrInvalidRequest || err == model.ErrCapabilityUnavailable ||
+		err == model.ErrOutputContract || err == tools.ErrToolNotFound || err == budget.ErrExhausted
 }

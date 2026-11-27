@@ -129,7 +129,8 @@ type EventJournal interface {
 // transaction boundary; projector claim/ack is deliberately separate.
 type Store interface {
 	Create(context.Context, Record, []EventDraft) (Snapshot, error)
-	CancelBeforeCreate(context.Context, RunCreationCancellation) (RunCreationCancellation, error)
+	DecideBeforeCreate(context.Context, RunCreationDecision) (RunCreationDecision, error)
+	LoadCreationDecision(context.Context, string) (RunCreationDecision, error)
 	Load(context.Context, string) (Snapshot, error)
 	Apply(context.Context, string, uint64, StoreMutation) (Snapshot, error)
 	EventJournal

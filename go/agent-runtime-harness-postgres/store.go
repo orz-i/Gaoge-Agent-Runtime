@@ -170,11 +170,7 @@ func (store *Store) UpdateInvocation(ctx context.Context, value harness.Invocati
 					// when the owning Turn has already sealed its durable
 					// cancellation intent. The fence remains active until
 					// physical/descendant cleanup is independently proven.
-					facts, e := managedDispatchFactsTx(tx, value.TurnID)
-					if e != nil {
-						return e
-					}
-					if harness.PendingNativeManagedDispatch(facts, value.ID) || value.Status != harness.InvocationCancelled {
+					if value.Status != harness.InvocationCancelled {
 						return harness.ErrConflict
 					}
 					active, activeErr := pendingCancellationFenceTx(tx, value.TurnID)
@@ -1539,12 +1535,8 @@ func appendItemTx(tx *gorm.DB, value harness.Item, outcome *itemAppendOutcome) e
 					return harness.ErrConflict
 				}
 			}
-			_, _, bound := harness.CancellationAttemptForStore(tx.Statement.Context)
-			facts, e := managedDispatchFactsTx(tx, value.TurnID)
-			if e != nil {
-				return e
-			}
-			if harness.NativeManagedDispatchBlocksCancellation(facts, target, bound) {
+			if _, _, bound := harness.CancellationAttemptForStore(tx.Statement.Context); !bound &&
+				!harness.ValidCancellationAttemptAdmission(tx.Statement.Context, value, harness.Invocation{}, target) {
 				return harness.ErrConflict
 			}
 			if err = checkCancellationFenceTx(tx, value.TurnID); err != nil {
@@ -1606,7 +1598,7 @@ func appendItemTx(tx *gorm.DB, value harness.Item, outcome *itemAppendOutcome) e
 		if err != nil {
 			return err
 		}
-		if !found || !harness.ValidNativeManagedDispatchCompletion(tx.Statement.Context, grant, value) || !harness.ValidOriginalApprovalSettlement(tx.Statement.Context, grant, value) {
+		if !found || !harness.ValidOriginalApprovalSettlement(tx.Statement.Context, grant, value) {
 			return harness.ErrConflict
 		}
 		decision, insert, err := planOriginalApprovalTx(tx, grant, value)

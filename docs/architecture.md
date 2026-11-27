@@ -63,17 +63,21 @@ The desktop Host creates separate Kernel and Harness files in one private profil
 directory. The Harness adapter shares the PostgreSQL adapter's relational
 admission and receipt implementation and runs it on a native SQLite pool.
 SQLite acquires its writer lock before validating a mutation. The Kernel owns
-physical execution and the Harness owns the original dispatch and return
-records. Recovery across the two files uses these records. A PostgreSQL Host
-can place both schemas in one database and uses the same recovery protocol.
+first-party physical execution and accounting; the Harness owns product
+projections and the dispatch/return records of independent opaque effects.
+A PostgreSQL Host can place both schemas in one database and uses the same
+authority protocol.
 [Desktop Harness SQLite](../go/agent-runtime-harness-sqlite/README.md).
 
-Before a Run exists, native Create and CancelBeforeCreate arbitrate the same
-immutable Run identity in the Kernel Store. A negative decision fences any
-later Create without inventing a terminal Run. It atomically closes the original
-budget generation (including a selected Retry), and Harness can project the
-committed cancellation. The remaining Host Start/Retry dispatch fence is still
-in place until those entry paths consume the native identity decision.
+Before a Run exists, Create and DecideBeforeCreate arbitrate one immutable
+native Run identity: created, cancelled or definitively failed. Negative
+decisions close the exact budget generation in the same transaction without
+inventing a Run, membership, event or lease. An explicitly selected Retry can
+consume an original negative identity, including an uncreated first Attempt.
+Unknown results cannot authorize a new Attempt. Qualified first-party Root
+Start/Retry use the native admission and retirement directly, without a Host
+dispatch grant or receipt. Harness projects a committed negative decision with
+SettleUncreatedRoot; external and opaque dispatches retain their own fence.
 
 ## Context execution path
 
@@ -89,7 +93,7 @@ transaction. Closure, retirement, Grant removal and owned Lease release
 commit together; Owned Finish consumes the original durable callback return
 and exact Snapshot proof directly, without a settlement Mark.
 Parent-bound borrowed callbacks retain their own return witness.
-Recovery observes the immutable receipt before projecting Host closure. The never-connected `SamplingContextPorts` alternative and
+Recovery observes the immutable native receipt before projecting product state; no Managed Host closure is written. The never-connected `SamplingContextPorts` alternative and
 `ContextPreparation` selector were retired before beta.24 instead of
 maintaining a second generic context executor. A Context receipt is not proof
 of an unknown Provider effect, and an unrelated Store ACK cannot authorize

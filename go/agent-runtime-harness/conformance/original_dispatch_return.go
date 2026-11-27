@@ -134,7 +134,7 @@ func (m *originalDispatchModel) Generate(context.Context, model.Request) (model.
 func OriginalDispatchReturn(t *testing.T, factory func(*testing.T) (kernel.Store, harness.Store, func() (kernel.Store, harness.Store))) {
 	for _, phase := range []string{"start", "resume", "approval"} {
 		cuts := []string{"return-before", "return-after", "finish-before", "finish-after"}
-		if phase == "resume" {
+		if phase != "approval" {
 			cuts = append(cuts, "projection-before", "projection-after")
 		} else {
 			cuts = append(cuts, "host-before", "host-after")
@@ -387,12 +387,8 @@ func exerciseOriginalDispatchReturn(t *testing.T, factory func(*testing.T) (kern
 			dispatch = i
 		}
 	}
-	if phase != "start" {
-		if dispatch.ID != "" || harness.PendingExecutionDispatch(items, root.ID) {
-			t.Fatal("native command still created Host dispatch")
-		}
-	} else if dispatch.ID == "" || harness.PendingExecutionDispatch(items, root.ID) != (cut != "host-after") {
-		t.Fatal("wrong original dispatch cut")
+	if dispatch.ID != "" || harness.PendingExecutionDispatch(items, root.ID) {
+		t.Fatal("native command still created Host dispatch")
 	}
 	originalDecision := "approve"
 	if cut == "approval-user-rejected" {
@@ -418,7 +414,7 @@ func exerciseOriginalDispatchReturn(t *testing.T, factory func(*testing.T) (kern
 	}
 	backing, host = reopen()
 	r, rt, native := makeRunner(backing, host)
-	if phase == "resume" && cut == "return-before" {
+	if phase != "approval" && cut == "return-before" {
 		wrapped, err := harness.NewRunner(harness.Dependencies{Runtime: rt, Agent: &wrappedReturnAgent{native}, Store: host, Catalog: reg})
 		if err != nil {
 			t.Fatal(err)
@@ -431,8 +427,8 @@ func exerciseOriginalDispatchReturn(t *testing.T, factory func(*testing.T) (kern
 		t.Fatalf("foreign dispatch accepted: %v %v", kind, e)
 	}
 	if phase == "start" {
-		if ok, e := native.ReconcileUnenteredPhysicalDispatch(ctx, root.ExecutionRefID, op, dispatch.ID); e != nil || ok {
-			t.Fatalf("actual return reclassified as no-entry: %v %v", ok, e)
+		if ok, e := native.ReconcileUnenteredPhysicalDispatch(ctx, root.ExecutionRefID, op, "nativecmd_foreign"); e != nil || ok {
+			t.Fatalf("foreign no-entry proof accepted: %v %v", ok, e)
 		}
 	}
 	var done harness.Snapshot
@@ -480,17 +476,13 @@ func exerciseOriginalDispatchReturn(t *testing.T, factory func(*testing.T) (kern
 	if phase == "approval" {
 		assertOriginalApprovalDecision(t, items, checkpoint, originalDecision, "original decision", 1)
 	}
-	boundary, valid := harness.VerifiedExecutionDispatchReceipt(dispatch, items)
-	if phase != "start" {
-		for _, i := range items {
-			if p, ok := harness.VerifiedExecutionDispatchGrant(i); ok && p == expectedPhase {
-				t.Fatal("recovery created another Host grant")
-			}
+	for _, i := range items {
+		if p, ok := harness.VerifiedExecutionDispatchGrant(i); ok && p == expectedPhase {
+			t.Fatal("recovery created a Host grant")
 		}
-		valid, boundary = true, "physical_dispatch_returned"
 	}
-	if e != nil || harness.PendingExecutionDispatch(items, root.ID) || !valid || boundary != "physical_dispatch_returned" || provider.calls != wantCalls || writes != wantWrites {
-		t.Fatalf("original Host receipt/effects mismatch: %q %t %v %d/%d", boundary, valid, e, provider.calls, writes)
+	if e != nil || harness.PendingExecutionDispatch(items, root.ID) || provider.calls != wantCalls || writes != wantWrites {
+		t.Fatalf("original native effects mismatch: %v %d/%d", e, provider.calls, writes)
 	}
 }
 

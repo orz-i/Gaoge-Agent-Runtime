@@ -303,6 +303,7 @@ type protocolCut struct {
 	relations                       *runrelation.Registry
 	phase, runID, intentID          string
 	armed, hit, stopStart, startHit bool
+	stopRoot                        bool
 	stopInvocation, invocationHit   bool
 }
 
@@ -338,6 +339,11 @@ func (s *protocolCut) AppendItem(ctx context.Context, item harness.Item) (harnes
 		return harness.Item{}, false, errCancellationPhaseCut
 	}
 	saved, fresh, err := s.generationStore.AppendItem(ctx, item)
+	if err == nil && s.stopRoot && !s.startHit && item.Kind == harness.ItemAgentInvocation &&
+		item.Status == harness.ItemStarted && item.ParentItemID == "" {
+		s.startHit, s.runID = true, item.RunID
+		return harness.Item{}, false, errCancellationPhaseCut
+	}
 	if err == nil && fresh && intent && s.intentID == "" {
 		s.intentID = saved.ID
 	}
@@ -360,13 +366,13 @@ func (s *protocolCut) SaveBudget(ctx context.Context, l budget.Ledger, rev uint6
 	}
 	return err
 }
-func (s *protocolCut) CancelUndispatchedRoot(ctx context.Context, inv harness.Invocation, turn harness.Turn) (harness.Invocation, harness.Turn, error) {
+func (s *protocolCut) SettleUncreatedRoot(ctx context.Context, inv harness.Invocation, turn harness.Turn) (harness.Invocation, harness.Turn, error) {
 	cut := s.armed && !s.hit && strings.HasPrefix(s.phase, "atomic-")
 	if cut && strings.HasSuffix(s.phase, "before") {
 		s.hit = true
 		return harness.Invocation{}, harness.Turn{}, errCancellationPhaseCut
 	}
-	a, b, err := s.generationStore.CancelUndispatchedRoot(ctx, inv, turn)
+	a, b, err := s.generationStore.SettleUncreatedRoot(ctx, inv, turn)
 	if cut && err == nil {
 		s.hit = true
 		return harness.Invocation{}, harness.Turn{}, errCancellationPhaseCut
@@ -469,7 +475,7 @@ func TestCancellationProtocolInitialRootNoDispatchAllDurableCuts(t *testing.T) {
 					name = backend + "/budget/" + phase
 				}
 				t.Run(name, func(t *testing.T) {
-					cut := &protocolCut{phase: phase, stopStart: true}
+					cut := &protocolCut{phase: phase, stopStart: withBudget, stopRoot: !withBudget}
 					m := &generationModel{calls: 10}
 					r, s, rt, native, req := newGenerationHarnessBackend(t, backend, m, func(base generationStore) generationStore { cut.generationStore = base; return cut })
 					req.Config.ToolKeys, req.Config.ToolPolicies = nil, nil

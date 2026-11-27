@@ -99,7 +99,8 @@ func CancellationAttemptForStore(ctx context.Context) (Invocation, Invocation, b
 func ValidCancellationAttemptAdmission(ctx context.Context, intent Item, root, target Invocation) bool {
 	proof, ok := ctx.Value(cancellationAttemptAdmissionKey{}).(cancellationAttemptAdmission)
 	if !ok {
-		return true // Explicit raw Store intents retain their protective contract.
+		source, protocol := cancellationProtocol(intent)
+		return !protocol || source != "native"
 	}
 	if proof.runID != intent.RunID || root.TurnID != intent.TurnID || root.ParentItemID != "" ||
 		!sameFrozenInvocationAuthority(proof.root, root) {

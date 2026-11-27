@@ -407,11 +407,11 @@ Fresh Kernel databases now start at v11. Stop writers and back up before
 calling `MigrateV10ToV11` (or `MigrateV10ToV11With` with the original encrypted
 connection). This explicit schema migration adds the native ledger and
 immutable Run identity tables to the Kernel database; it does not move or
-delete an existing Harness ledger. Create and CancelBeforeCreate contend on
-one Run identity key in the native transaction. A cancelled identity has no
-Run, event stream or execution lease, and closes its selected budget generation
-in the same commit. Pre-release v11 databases from before the identity-table
-change are not compatible with this draft; Open fails closed.
+delete an existing Harness ledger. Create and DecideBeforeCreate contend on
+one Run identity key in the native transaction. A failed or cancelled identity
+has no Run, event stream or execution lease, and closes its selected budget
+generation in the same commit. Pre-release v11 databases using the old
+cancellation-only identity payload are incompatible; Open fails closed.
 Existing Host accounting stays at its original location until a verified
 execution-path cutover migrates those facts. Do not enable an empty replacement
 ledger for an already budgeted Run. Open never migrates.

@@ -25,7 +25,7 @@ type harnessStoreContract interface {
 	RetryInvocation(context.Context, string, uint64, string, time.Time) (harness.Invocation, error)
 	// Reviewed hard cut: first Accepted and Retry Roots use the same original
 	// atomic no-dispatch terminalization capability, not an optional adapter.
-	CancelUndispatchedRoot(context.Context, harness.Invocation, harness.Turn) (harness.Invocation, harness.Turn, error)
+	SettleUncreatedRoot(context.Context, harness.Invocation, harness.Turn) (harness.Invocation, harness.Turn, error)
 	ListInvocations(context.Context, string) ([]harness.Invocation, error)
 	CreateInteraction(context.Context, harness.Interaction, uint64, uint64) (harness.Interaction, bool, error)
 	GetInteraction(context.Context, string) (harness.Interaction, error)

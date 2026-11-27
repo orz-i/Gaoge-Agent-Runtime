@@ -36,7 +36,7 @@ func NativeAuthorityCutover(t *testing.T, factory func(*testing.T) NativeAuthori
 }
 
 func nativeAuthorityRetrySelectionACK(t *testing.T, factory func(*testing.T) NativeAuthorityFixture) {
-	for _, mode := range []string{"replay", "cancel-and-retry", "protective-reopen"} {
+	for _, mode := range []string{"replay", "cancel-and-retry", "protective-reopen", "uncreated-first"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx := t.Context()
 			f := factory(t)
@@ -46,7 +46,11 @@ func nativeAuthorityRetrySelectionACK(t *testing.T, factory func(*testing.T) Nat
 			client := &nativeAuthorityModel{generate: func(r model.Request) (model.Response, error) {
 				return model.Response{ToolCalls: []tools.Call{{ID: "call", ToolKey: "write", Arguments: json.RawMessage("{}")}}}, nil
 			}}
-			options := nativeAuthorityOptions(t, runs, host, client)
+			var runStore kernel.Store = runs
+			if mode == "uncreated-first" {
+				runStore = &nativeFirstCreateCut{nativeAuthorityKernelPorts: runs, cut: true}
+			}
+			options := nativeAuthorityOptions(t, runStore, host, client)
 			options.Session.Config.SharedBudget = &budget.Limits{MaxLLMCalls: 4, MaxToolCalls: 2}
 			options.LocalTools = []harness.SessionTool{{Registration: nativeAuthorityTool("write", &writes), Policy: harness.ToolPolicySnapshot{DefinitionVersion: "v1", SideEffectLevel: "write", ApprovalMode: "always", ApprovalCapability: "per_call"}}}
 			session, e := harness.OpenAgentSession(options)
@@ -54,7 +58,13 @@ func nativeAuthorityRetrySelectionACK(t *testing.T, factory func(*testing.T) Nat
 				t.Fatal(e)
 			}
 			first, e := session.Prompt(ctx, "retry", "original")
-			if e != nil || first.Turn.Status != harness.TurnWaitingInput {
+			wantCalls := 2
+			if mode == "uncreated-first" {
+				if !errors.Is(e, errFirstCreateCut) || len(client.requests) != 0 {
+					t.Fatalf("first Create cut: %v calls=%d", e, len(client.requests))
+				}
+				wantCalls = 1
+			} else if e != nil || first.Turn.Status != harness.TurnWaitingInput {
 				t.Fatalf("first wait: %s %v", first.Turn.Status, e)
 			}
 			cancelSession := session
@@ -74,9 +84,19 @@ func nativeAuthorityRetrySelectionACK(t *testing.T, factory func(*testing.T) Nat
 			if !ok {
 				t.Fatal("missing root")
 			}
+			first.Turn.ID = stop.Turn.ID
 			before, e := runs.LoadBudget(ctx, first.Turn.ID)
 			if e != nil || !before.RunCancelled(root.ExecutionRefID) {
 				t.Fatalf("native budget did not close: %v %+v", e, before)
+			}
+			if mode == "uncreated-first" {
+				d, e := runs.LoadCreationDecision(ctx, root.ExecutionRefID)
+				if e != nil || d.Status != kernel.RunStatusCancelled || len(before.Runs) != 0 || before.View("").Usage.LLMCalls != 0 {
+					t.Fatalf("negative first identity fabricated execution: %v %+v %+v", e, d, before)
+				}
+				if _, e = runs.Load(ctx, root.ExecutionRefID); !errors.Is(e, kernel.ErrNotFound) {
+					t.Fatalf("negative first identity created a Run: %v", e)
+				}
 			}
 			if _, e = session.Retry(ctx, "retry"); !errors.Is(e, errRootRetryCommittedAckLost) {
 				t.Fatalf("Host selection ACK cut: %v", e)
@@ -130,7 +150,7 @@ func nativeAuthorityRetrySelectionACK(t *testing.T, factory func(*testing.T) Nat
 				want = 3
 			}
 			l, e := runs.LoadBudget(ctx, first.Turn.ID)
-			if !ok || next.Attempt != want || e != nil || !l.RootRetries[next.ExecutionRefID].Active || l.RunCancelled(next.ExecutionRefID) || l.View("").Usage.LLMCalls != 2 || writes != 0 || len(client.requests) != 2 {
+			if !ok || next.Attempt != want || e != nil || !l.RootRetries[next.ExecutionRefID].Active || l.RunCancelled(next.ExecutionRefID) || l.View("").Usage.LLMCalls != wantCalls || writes != 0 || len(client.requests) != wantCalls {
 				t.Fatalf("unexpected retry identity or effects: %+v ledger=%+v err=%v calls=%d", next, l, e, len(client.requests))
 			}
 			observed, e := raw.(budget.LedgerStore).LoadBudget(ctx, first.Turn.ID)
@@ -369,6 +389,21 @@ var (
 // Original Host Store itself records the Attempt selection,
 // and the adapter discards only the ACK. Restarted callers must never
 // reconstruct a second Attempt or execute an unadmitted external effect.
+var errFirstCreateCut = errors.New("test original first Create interrupted before commit")
+
+type nativeFirstCreateCut struct {
+	nativeAuthorityKernelPorts
+	cut bool
+}
+
+func (s *nativeFirstCreateCut) Create(ctx context.Context, r kernel.Record, events []kernel.EventDraft) (kernel.Snapshot, error) {
+	if s.cut {
+		s.cut = false
+		return kernel.Snapshot{}, errFirstCreateCut
+	}
+	return s.nativeAuthorityKernelPorts.Create(ctx, r, events)
+}
+
 type nativeRetryLostACKStore struct {
 	harness.Store
 	budget.LedgerStore
@@ -376,8 +411,8 @@ type nativeRetryLostACKStore struct {
 	cancelAckOnce bool
 }
 
-func (s *nativeRetryLostACKStore) CancelUndispatchedRoot(ctx context.Context, inv harness.Invocation, turn harness.Turn) (harness.Invocation, harness.Turn, error) {
-	updated, terminal, err := s.Store.CancelUndispatchedRoot(ctx, inv, turn)
+func (s *nativeRetryLostACKStore) SettleUncreatedRoot(ctx context.Context, inv harness.Invocation, turn harness.Turn) (harness.Invocation, harness.Turn, error) {
+	updated, terminal, err := s.Store.SettleUncreatedRoot(ctx, inv, turn)
 	if err == nil && s.cancelAckOnce {
 		s.cancelAckOnce = false
 		return harness.Invocation{}, harness.Turn{}, errRootRetryCancelAckLost

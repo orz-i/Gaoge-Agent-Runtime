@@ -72,7 +72,7 @@ func PlanRootRetry(original Ledger, invocationID, priorRunID, nextRunID string, 
 		return Ledger{}, ErrInvalidUsage
 	}
 	next := CloneLedger(original)
-	if err := planRootRetry(&next, invocationID, priorRunID, nextRunID, attempt); err != nil {
+	if err := planRootRetry(&next, invocationID, priorRunID, nextRunID, attempt, true); err != nil {
 		return original, err
 	}
 	if reflect.DeepEqual(original, next) {
@@ -82,7 +82,7 @@ func PlanRootRetry(original Ledger, invocationID, priorRunID, nextRunID string, 
 	return next, nil
 }
 
-func planRootRetry(l *Ledger, invocationID, priorRunID, nextRunID string, attempt int) error {
+func planRootRetry(l *Ledger, invocationID, priorRunID, nextRunID string, attempt int, requireQuota bool) error {
 	wanted := RootRetryGrant{InvocationID: invocationID, OriginalRunID: priorRunID, Attempt: attempt, Active: true}
 	if existing, ok := l.RootRetries[nextRunID]; ok {
 		if existing != wanted || l.CancelledRuns[nextRunID] {
@@ -94,8 +94,11 @@ func planRootRetry(l *Ledger, invocationID, priorRunID, nextRunID string, attemp
 		if original.ParentRunID != "" {
 			return ErrLedgerConflict
 		}
-	} else if attempt <= 2 {
-		return ErrLedgerConflict
+	} else if attempt == 2 {
+		if !l.Cancelled || !l.CancelledRuns[priorRunID] || len(l.CancelledRuns) != 1 ||
+			len(l.Runs) != 0 || len(l.Reservations) != 0 || len(l.RootRetries) != 0 || len(l.FinishedRuns) != 0 {
+			return ErrLedgerConflict
+		}
 	} else {
 		// A later Attempt can be proven cancelled or failed before its
 		// physical Agent Run was ever registered. The original Host
@@ -133,10 +136,10 @@ func planRootRetry(l *Ledger, invocationID, priorRunID, nextRunID string, attemp
 		}
 	}
 	view := l.View("")
-	if (l.Limits.MaxLLMCalls > 0 && view.Remaining.LLMCalls < 1) ||
+	if requireQuota && ((l.Limits.MaxLLMCalls > 0 && view.Remaining.LLMCalls < 1) ||
 		(l.Limits.MaxTotalTokens > 0 && view.Remaining.TotalTokens < 1) ||
 		(l.Limits.MaxInputTokens > 0 && view.Remaining.InputTokens < 1) ||
-		(l.Limits.MaxOutputTokens > 0 && view.Remaining.OutputTokens < 1) {
+		(l.Limits.MaxOutputTokens > 0 && view.Remaining.OutputTokens < 1)) {
 		return ErrExhausted
 	}
 	if l.RootRetries == nil {

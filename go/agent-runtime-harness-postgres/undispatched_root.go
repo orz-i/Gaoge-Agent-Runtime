@@ -10,14 +10,14 @@ import (
 	"gorm.io/gorm"
 )
 
-// CancelUndispatchedRoot atomically retires a truly undispatched Root
+// SettleUncreatedRoot atomically retires a truly undispatched Root
 // Invocation and its owning Turn under the same original row lock used
 // by Start grant and cancellation admission. There is no transient
 // cancelled Invocation / still-running Turn state after a lost ACK.
-func (store *Store) CancelUndispatchedRoot(ctx context.Context, original harness.Invocation, turn harness.Turn) (
+func (store *Store) SettleUncreatedRoot(ctx context.Context, original harness.Invocation, turn harness.Turn) (
 	harness.Invocation, harness.Turn, error,
 ) {
-	if store == nil || store.db == nil || ctx == nil || !harness.VerifiedUndispatchedRootCancellation(ctx, original, turn) {
+	if store == nil || store.db == nil || ctx == nil || !harness.VerifiedUncreatedRootWitness(ctx, original, turn) {
 		return harness.Invocation{}, harness.Turn{}, harness.ErrConflict
 	}
 	var finalInvocation harness.Invocation
@@ -119,14 +119,17 @@ func (store *Store) CancelUndispatchedRoot(ctx context.Context, original harness
 		if readErr == nil {
 			ledger = &loaded
 		}
-		if !harness.ValidUndispatchedRootCancellationEvidence(current, actualTurn, items, active, ledger, children) {
+		var valid bool
+		finalInvocation, finalTurn, valid = harness.ProjectUncreatedRoot(ctx, current, actualTurn, items, active, ledger, children)
+		if !valid {
 			return harness.ErrConflict
 		}
+		if finalInvocation.Status == harness.InvocationFailed {
+			if err = checkTerminalProjectionTx(ctx, tx, turn.ID, ""); err != nil {
+				return err
+			}
+		}
 		now := time.Now().UTC()
-		finalInvocation = current
-		finalInvocation.Status = harness.InvocationCancelled
-		finalInvocation.ErrorCode = "run.cancelled"
-		finalInvocation.ErrorDetail = "Agent Run cancelled before physical admission"
 		finalInvocation.Revision++
 		finalInvocation.UpdatedAt = now
 		updateInv := tx.Model(&invocationRecord{}).
@@ -140,10 +143,6 @@ func (store *Store) CancelUndispatchedRoot(ctx context.Context, original harness
 		if updateInv.RowsAffected != 1 {
 			return harness.ErrConflict
 		}
-		finalTurn = actualTurn
-		finalTurn.Status = harness.TurnCancelled
-		finalTurn.ErrorCode = finalInvocation.ErrorCode
-		finalTurn.ErrorDetail = finalInvocation.ErrorDetail
 		finalTurn.Revision++
 		finalTurn.UpdatedAt = now
 		updateTurn := tx.Model(&turnRecord{}).Where("id = ? AND revision = ? AND status = ?",

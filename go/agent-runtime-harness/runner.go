@@ -140,13 +140,11 @@ func rootAgentStartRequest(
 func (runner *Runner) startAgentPhysical(
 	ctx context.Context, invocation Invocation, request StartRequest, config ConfigSnapshot,
 ) (kernel.Snapshot, error) {
-	return runner.withPhysicalInvocationDispatch(ctx, invocation, "start", func(physicalCtx context.Context) (kernel.Snapshot, error) {
-		start := rootAgentStartRequest(config, invocation.ExecutionRefID, request.Actor, request.Thread,
-			firstNonEmpty(strings.TrimSpace(request.RequestID), invocation.TurnID), request.Goal,
-			request.InitialToolKeys, request.RequiredToolKeys)
-		start.CallAllowance, start.AutoAllowance = request.CallAllowance, request.AutoAllowance
-		return runner.agent.StartRun(physicalCtx, start)
-	})
+	start := rootAgentStartRequest(config, invocation.ExecutionRefID, request.Actor, request.Thread,
+		firstNonEmpty(strings.TrimSpace(request.RequestID), invocation.TurnID), request.Goal,
+		request.InitialToolKeys, request.RequiredToolKeys)
+	start.CallAllowance, start.AutoAllowance = request.CallAllowance, request.AutoAllowance
+	return runner.startOriginalRoot(ctx, invocation, "start", start)
 }
 
 func (runner *Runner) resumeAgentStart(
@@ -164,14 +162,7 @@ func (runner *Runner) resumeAgentStart(
 		return Snapshot{}, err
 	}
 	runtimeSnapshot, startErr := runner.startAgentPhysical(runCtx, invocation, request, config)
-	if runtimeSnapshot.Run.ID == "" {
-		if !isDispatchProvenNoEffect(startErr) {
-			return Snapshot{}, startErr
-		}
-		failed, failErr := runner.failTopLevelInvocationAndTurn(ctx, turn, invocation, startErr)
-		return failed, errors.Join(startErr, failErr)
-	}
-	return runner.syncRuntimeSnapshotWithRetry(ctx, turn, invocation, runtimeSnapshot)
+	return runner.finishTopLevelStart(ctx, turn, invocation, runtimeSnapshot, startErr)
 }
 
 func (runner *Runner) replayAgentStart(
@@ -712,8 +703,11 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		return nil, ErrInvalidRequest
 	}
 	if native, ok := dependencies.Agent.(*agent.Runner); ok && native.SupportsManagedRecovery() {
-		host, supported := dependencies.Store.(managedHostStore)
-		if !supported || !native.ObservesKernelRuntime(dependencies.Runtime) || !dependencies.Runtime.UsesManagedRecoveryHost(host) {
+		host, supported := dependencies.Store.(kernel.ManagedRecoveryHostStore)
+		if !supported || !native.ObservesKernelRuntime(dependencies.Runtime) || !dependencies.Runtime.UsesManagedRecoveryHost(host) ||
+			!native.NativeRootCallbacksScoped() || dependencies.Interactions != nil ||
+			(dependencies.Cancellation != nil && dependencies.Cancellation != dependencies.Runtime) ||
+			(dependencies.Budget != nil && dependencies.Budget.dependencies.Runtime != dependencies.Runtime) {
 			return nil, ErrInvalidRequest
 		}
 	}
@@ -980,6 +974,15 @@ func (runner *Runner) refreshTurn(ctx context.Context, turnID string, expected *
 		return runner.loadSnapshot(ctx, turn, nil)
 	}
 	runtimeSnapshot, err := runner.runtime.Load(ctx, invocation.ExecutionRefID)
+	if errors.Is(err, kernel.ErrNotFound) && !terminalTurnStatus(turn.Status) && runner.nativeRootStart() != nil {
+		d, decisionErr := runner.readUncreatedRootDecision(ctx, turn, invocation)
+		if decisionErr == nil {
+			return runner.projectNativeCreationDecision(ctx, turn, invocation, d)
+		}
+		if !errors.Is(decisionErr, kernel.ErrNotFound) {
+			return Snapshot{}, decisionErr
+		}
+	}
 	if errors.Is(err, kernel.ErrNotFound) && terminalTurnStatus(turn.Status) && missingRuntimeSnapshotAllowed(turn, invocation) {
 		// A failed/cancelled admission can be terminal without ever creating
 		// a Kernel Run. Restore the final host message fact when safe, but do
@@ -1069,6 +1072,25 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 			}
 			if len(children) > 0 || len(invocations) != 1 || len(delegated) > 0 || pending {
 				return Snapshot{}, ErrRuntimeCancellationUnverified
+			}
+			if runner.nativeRootStart() != nil {
+				d, e := runner.readUncreatedRootDecision(ctx, turn, invocation)
+				if e != nil || d.Status != kernel.RunStatusFailed {
+					return Snapshot{}, errors.Join(ErrRuntimeCancellationUnverified, e)
+				}
+				items, e := runner.loadGlobalPhysicalEvidence(ctx, turn.ID)
+				if e != nil {
+					return Snapshot{}, e
+				}
+				if ActiveCancellationFence(items) {
+					intent, e := runner.resumeCommittedCancellationFence(ctx, turn, invocation.ExecutionRefID)
+					if e != nil {
+						return Snapshot{}, e
+					}
+					if e = runner.finishCancellationFenceAfterRequest(ctx, intent); e != nil {
+						return Snapshot{}, e
+					}
+				}
 			}
 			return runner.loadSnapshot(ctx, turn, nil)
 		}

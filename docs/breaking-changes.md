@@ -74,24 +74,25 @@ accounting identity and logical ancestry. Custom native Stores implement
 Run creation transaction; the new Run and ledger enrollment commit together.
 The local parent's original scope, identity and nonterminal status are checked
 under that transaction. Custom `kernel.Store` implementations must also implement
-`CancelBeforeCreate(context.Context, RunCreationCancellation)` as an immutable
-Run identity decision in the same transaction as Create and budget closure.
-A cancelled identity cannot subsequently create a Run. A new Root Retry
-activates the exact already selected Attempt and enrolls it when creating the
-successor Run. Native ordinary
+`DecideBeforeCreate(context.Context, RunCreationDecision)` and
+`LoadCreationDecision` instead of the cancellation-only API. Create and either
+negative decision share one immutable key and budget transaction. A negative
+identity cannot create a Run or fabricate membership; Retry validates the
+actual terminal or negative predecessor, including an uncreated first Attempt,
+before enrolling its selected successor. Native ordinary
 `Cancel`, `Expire` and terminal writes settle the original scope under the same
 Store transaction. `Runtime.CancelBudgeted` is removed, without an alias.
 Unknown dispatched effects still block cancellation or expiry without revoking
 quota. Native receipt recovery uses the persisted binding, not a new Host scope.
 
 The Host still selects the original Attempt and projects committed facts.
-For an already-created first-party root Run, Managed Resume and scoped
-Approval no longer append a Host execution-dispatch grant or its receipt.
-The native Grant, execution Epoch, original callback return and retirement
-are the authority. The actual applied approval is read from the Kernel
-journal and projected idempotently before advancing the waiting Host state.
-Original pending Host grants must still be reconciled; Start/Retry before
-Create and opaque/external callbacks retain their existing fence.
+Qualified first-party Root Start/Retry, Managed Resume and scoped Approval
+no longer append a Host execution-dispatch grant or receipt. The native
+creation identity, Grant, Epoch, callback return and retirement are the
+authority. Applied approval is read from the Kernel journal and projected
+idempotently. Opaque/external callbacks retain their independent effect fence.
+Custom managed compositions with an independent Host interaction/canceller or
+external ledger are not eligible for this native-only contract.
 
 For a fixed eager local Named Agent using the same native budget adapter, Host
 capacity preview does not enroll the child. The original frozen delegation
@@ -228,18 +229,18 @@ Ordinary Run mutations no longer write an additional invalidation record.
 The native admission/cancel transaction revalidates the exact source, Store-time
 expiry, original Grant and ledger and selects the sole winning command.
 `CommitManagedCancellation` preserves the authorized user cancellation reason.
-Host closure is an idempotent projection of the original native result into
-its existing dispatch receipt, not an additional closure row. Newly written
-native Managed dispatches use the reserved `hdispatch_native_` ID prefix.
+Managed closure is a native retirement fact. The Host verifies frozen
+selection and projects the native result; `CloseManagedRecovery` and the old
+Managed Host-dispatch closure writer/receipt are removed. A historical binding
+is not current native execution eligibility; only the original native
+transfer and Grant can authorize continuation.
 
-This is a stopped-writer hard cut: drain or explicitly reconcile old in-flight
-managed transfers with unfinished legacy states, unmarked open Managed
-dispatches, and old open Host reservation rows with the original writer
-before upgrade. New managed records do not write an independent State;
-legacy closed wire fields remain readable for original receipt validation. Host SQL New/Migrate
-reject open legacy reservation rows; legacy PARKED is never emitted and cannot
-be promoted to executable authority. The legacy SQL table and closed rows
-remain as historical data; no production data is deleted or synthesized.
+This is a stopped-writer hard cut. Drain or explicitly reconcile legacy
+Managed transfers, Host dispatch grants and reservation rows with the original
+writer before using the new native-only path. Do not interpret old Managed Host
+receipts as current execution authority. Host SQL New/Migrate rejects open
+legacy reservation rows; legacy PARKED cannot be promoted to executable
+authority. Historical SQL rows are not deleted or synthesized.
 Do not run old and new writers concurrently.
 Owned Mark is also removed: `MarkOwnedPhysicalRecovered` and
 `ReduceOwnedPhysicalSettlement` no longer exist.
@@ -627,13 +628,13 @@ not a new Harness interpreter.
 ## 2026-11-20 — Separate cancellation elections, Host effects and no-dispatch settlement
 
 **Breaking Harness Store and recovery contract:** implement required
-`Store.CancelUndispatchedRoot` instead of the optional
-`CancelUnstartedRootRetry` capability. It atomically commits the original Root
-Invocation and Turn under the existing admission lock, covering both the first
-Accepted Root and accepted Retry generations. It must recheck the private
-original witness, full globally indexed physical receipts, immutable Attempt,
-active intent and budget closure. Do not synthesize a Kernel Run or silently
-register an unstarted first Root in the budget ledger.
+`Store.SettleUncreatedRoot` (superseding the cancellation-only capability).
+It atomically projects the original failed/cancelled Root Invocation and Turn
+under the existing admission lock. Recheck the private original witness, full
+globally indexed physical receipts, immutable Attempt, any active intent and
+budget closure. Native cancellation intents require the original Runner-bound
+Attempt; raw Store clients cannot elect native control. Do not synthesize a
+Kernel Run or register an unstarted first Root in the budget ledger.
 
 Custom Store `AppendItem` must also consume the private cancellation-effect
 admission capability under that Turn lock, using

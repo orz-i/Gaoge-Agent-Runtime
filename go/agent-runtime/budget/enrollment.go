@@ -76,10 +76,10 @@ func EnrollRun(ctx context.Context, store LedgerStore, runID string, e RunEnroll
 	return ErrLedgerConflict
 }
 
-// CancelBeforeEnrollment closes an uncreated root's original accounting
+// CloseBeforeEnrollment closes an uncreated root's original accounting
 // generation without registering a Run. The caller owns the native Run
 // identity transaction; this reducer performs at most one ledger CAS.
-func CancelBeforeEnrollment(ctx context.Context, store LedgerStore, runID string, e RunEnrollment) error {
+func CloseBeforeEnrollment(ctx context.Context, store LedgerStore, runID string, e RunEnrollment) error {
 	if e == (RunEnrollment{}) {
 		return nil
 	}
@@ -87,10 +87,12 @@ func CancelBeforeEnrollment(ctx context.Context, store LedgerStore, runID string
 		return ErrInvalidUsage
 	}
 	l, err := store.LoadBudget(ctx, e.ScopeID)
-	if err != nil {
+	if errors.Is(err, ErrLedgerNotFound) && e.Retry == (RootRetryGrant{}) {
+		l = Ledger{ID: e.ScopeID, Limits: e.Limits}
+	} else if err != nil {
 		return err
 	}
-	if l.ID != e.ScopeID || l.Limits != e.Limits || l.Revision == 0 {
+	if l.ID != e.ScopeID || l.Limits != e.Limits {
 		return ErrLedgerConflict
 	}
 	if _, exists := l.Runs[runID]; exists {
@@ -103,23 +105,25 @@ func CancelBeforeEnrollment(ctx context.Context, store LedgerStore, runID string
 	}
 	next := CloneLedger(l)
 	if e.Retry == (RootRetryGrant{}) {
-		if len(next.Runs) != 0 || len(next.Reservations) != 0 || len(next.RootRetries) != 0 {
+		if len(next.Runs) != 0 || len(next.Reservations) != 0 || len(next.RootRetries) != 0 || len(next.FinishedRuns) != 0 ||
+			(len(next.CancelledRuns) != 0 && (len(next.CancelledRuns) != 1 || !next.CancelledRuns[runID])) {
 			return ErrLedgerConflict
 		}
 		next.Cancelled = true
+		next.CancelledRuns = map[string]bool{runID: true}
 	} else {
 		if existing, ok := next.RootRetries[runID]; ok {
 			if existing != e.Retry {
 				return ErrLedgerConflict
 			}
-		} else if err = planRootRetry(&next, e.Retry.InvocationID, e.Retry.OriginalRunID, runID, e.Retry.Attempt); err != nil {
+		} else if err = planRootRetry(&next, e.Retry.InvocationID, e.Retry.OriginalRunID, runID, e.Retry.Attempt, false); err != nil {
 			return err
 		}
 		if err = next.applyRootCancellation(runID); err != nil {
 			return err
 		}
 	}
-	if reflect.DeepEqual(l, next) {
+	if l.Revision != 0 && reflect.DeepEqual(l, next) {
 		return nil
 	}
 	next.Revision = l.Revision + 1

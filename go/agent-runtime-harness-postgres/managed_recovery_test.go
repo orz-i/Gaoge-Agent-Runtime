@@ -18,9 +18,6 @@ func TestManagedHostSQLRejectsUnissuedProofs(t *testing.T) {
 	if err = s.VerifyManagedOriginalDispatch(t.Context(), kernel.ManagedHostBinding{}, true); !errors.Is(err, harness.ErrConflict) {
 		t.Fatalf("unissued parked proof: %v", err)
 	}
-	if err = s.CloseManagedRecovery(t.Context(), kernel.ManagedClosureProof{}); !errors.Is(err, harness.ErrConflict) {
-		t.Fatalf("unissued closure proof: %v", err)
-	}
 	after, err := s.ManagedRecoveryAuthority(t.Context())
 	if err != nil || a != after {
 		t.Fatal("rejected proof mutated authority")

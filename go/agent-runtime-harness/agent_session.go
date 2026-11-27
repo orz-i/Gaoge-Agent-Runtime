@@ -197,7 +197,7 @@ func OpenAgentSession(options AgentSessionOptions) (*SessionClient, error) {
 		}
 	}
 	if options.Context.ManagedRecovery {
-		host, ok := options.Store.(managedHostStore)
+		host, ok := options.Store.(kernel.ManagedRecoveryHostStore)
 		if !ok || !options.Runtime.SupportsManagedRecovery() || !options.Runtime.UsesManagedRecoveryHost(host) {
 			return nil, ErrInvalidRequest
 		}

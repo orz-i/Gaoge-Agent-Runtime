@@ -289,8 +289,17 @@ func (runner *Runner) withOriginalRetryAuthority(
 	}
 	snapshot, err := runner.runtime.Load(ctx, owner.ExecutionRefID)
 	if errors.Is(err, kernel.ErrNotFound) {
-		// The Store still requires a valid original Start no-effect proof
-		// when physical grants exist. Absence alone is not a success vote.
+		if owner.ParentItemID == "" && runner.nativeRootStart() != nil {
+			turn, e := loadVerifiedTurn(ctx, runner.store, owner.TurnID)
+			if e != nil {
+				return ctx, e
+			}
+			d, e := runner.readUncreatedRootDecision(ctx, turn, owner)
+			if e != nil || invocationStatusFromTurn(TurnStatus(d.Status)) != owner.Status {
+				return ctx, errors.Join(ErrConflict, e)
+			}
+		}
+		// Opaque dispatches retain their independent original effect proof.
 		return ctx, nil
 	}
 	if err != nil {

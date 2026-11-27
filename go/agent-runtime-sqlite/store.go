@@ -274,6 +274,9 @@ func (s *Store) Create(ctx context.Context, record kernel.Record, drafts []kerne
 		}
 		return kernel.Snapshot{}, conflictOrDatabaseError(err)
 	}
+	if e := sqliteValidateCreationRetry(ctx, tx, record.BudgetEnrollment); e != nil {
+		return kernel.Snapshot{}, e
+	}
 	if e := kernel.EnrollRunBudget(ctx, sqlledger.Store{DB: tx}, record); e != nil {
 		return kernel.Snapshot{}, conflictOrDatabaseError(e)
 	}

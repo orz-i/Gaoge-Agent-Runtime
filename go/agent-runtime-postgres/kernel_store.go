@@ -199,6 +199,10 @@ func (store *KernelStore) Create(
 		if createErr := tx.Create(&model).Error; createErr != nil {
 			return translateKernelError(createErr)
 		}
+		scoped := &KernelStore{db: tx}
+		if e := kernel.ValidateCreationRetry(ctx, record.BudgetEnrollment, scoped.Load, scoped.LoadCreationDecision); e != nil {
+			return e
+		}
 		if e := kernel.EnrollRunBudget(ctx, sqlledger.Store{DB: tx.Statement.ConnPool, Lock: tx.Name() == "postgres"}, record); e != nil {
 			return e
 		}

@@ -115,7 +115,7 @@ func (runner *Runner) recoverOriginalPhysicalDispatch(ctx context.Context, inv I
 	case agent.PhysicalCallSettled:
 		boundary = "physical_dispatch_returned"
 	case agent.PhysicalCallUnknown, agent.PhysicalCallDurableYield, agent.PhysicalCallCreated:
-		return runner.recoverReturnedManagedDispatch(ctx, native, inv, pending)
+		return false, nil
 	default:
 		return false, ErrConflict
 	}
