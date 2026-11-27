@@ -132,7 +132,7 @@ func ea1ControlSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, 
 	setup := makeRunner(rt, "original-start-owner", false)
 	req := agent.StartRequest{ID: "root-control-settlement", RequestID: "original-request", Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "owner"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "original-thread"}, Goal: "original control", Instructions: "Keep original source", Model: "fixture-model", ModelOptions: json.RawMessage(`{"temperature":0.1}`), ToolKeys: []string{"effect"}, Limits: agent.Limits{MaxLLMCalls: 2, MaxToolCalls: 1}}
 	if phase == "P5-run-deadline" {
-		deadline := time.Now().UTC().Add(time.Second)
+		deadline := time.Now().UTC().Add(ea1StoreBackedDeadline)
 		req.DeadlineAt = &deadline
 	}
 	var created kernel.Snapshot

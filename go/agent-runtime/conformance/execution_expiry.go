@@ -11,13 +11,13 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
-// The EA1 receipt/settlement fixtures read the actual Store from the
-// original Model callback. A tiny per-call timeout makes slow native or
-// race-instrumented I/O win before the intended injected receipt fault.
-// These fixtures use a two-second lease with a strictly greater than one
-// second production safety margin; 900 ms fits it without changing expiry,
-// retry counts, deadline-specific cases or any production execution policy.
+// EA1 receipt/settlement callbacks read the actual Store; allow slow native
+// or race-instrumented I/O without crossing the two-second lease's safety margin.
 const ea1StoreBackedCallTimeout = 900 * time.Millisecond
+
+// Leave setup time before the intended cut; the actual Store still enforces
+// the frozen deadline, and each expiry barrier waits for that same deadline.
+const ea1StoreBackedDeadline = 3 * time.Second
 
 func ea1StoreBackedExecutionPolicy() agent.ExecutionPolicy {
 	return ea1FixtureExecutionPolicy(ea1StoreBackedCallTimeout)

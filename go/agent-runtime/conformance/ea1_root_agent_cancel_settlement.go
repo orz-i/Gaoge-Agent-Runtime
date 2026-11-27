@@ -207,7 +207,7 @@ func ea1NewCancelDeadlineFixture(t *testing.T, factory func(*testing.T) (kernel.
 	if tool {
 		f.request.ToolKeys = []string{"effect"}
 	}
-	deadline := time.Now().UTC().Add(3 * time.Second)
+	deadline := time.Now().UTC().Add(ea1StoreBackedDeadline)
 	f.request.DeadlineAt = &deadline
 	f.host = &ea1ResumeHost{t: t, request: f.request}
 	setup := f.runner(rt, "prepare-owner", false)

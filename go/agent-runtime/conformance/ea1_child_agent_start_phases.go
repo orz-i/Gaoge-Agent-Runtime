@@ -112,7 +112,7 @@ func ea1NewChildStart(t *testing.T, factory func(*testing.T) (kernel.Store, kern
 	f.rt = ea1StartRuntime(t, f.store)
 	f.request = agent.StartRequest{ID: "actual-start-child", ParentRunID: "middle", OriginFingerprint: agent.FrozenOriginFingerprint([]byte(`{"source":"original-child"}`)), RequestID: "original-child-effect", Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "owner"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"}, Goal: "original Child Start", Instructions: "Preserve child source", Model: "fixture-model", ModelOptions: json.RawMessage(`{"temperature":0.1}`), Limits: agent.Limits{MaxLLMCalls: 2, MaxToolCalls: 1}}
 	if deadline {
-		due := time.Now().UTC().Add(time.Second)
+		due := time.Now().UTC().Add(ea1StoreBackedDeadline)
 		f.request.DeadlineAt = &due
 	}
 	if withTool {

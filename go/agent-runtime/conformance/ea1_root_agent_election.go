@@ -163,10 +163,10 @@ func ea1NewElection(t *testing.T, factory func(*testing.T) (kernel.Store, kernel
 }
 func (f *ea1ElectionFixture) runner(rt *kernel.Runtime, owner string, host bool) *agent.Runner {
 	ttl, callTimeout := 2*time.Second, ea1StoreBackedCallTimeout
-	if f.renewalFixture {
-		// Leave the same 500 ms renewal threshold but more margin for
-		// deliberately delaying a completed Model receipt on Windows.
+	if f.renewalFixture { // Preserve the 500 ms renewal threshold.
 		ttl, callTimeout = 4*time.Second, 2500*time.Millisecond
+	} else if f.request.DeadlineAt != nil { // Isolate Run deadline from lease expiry.
+		ttl = 2 * ea1StoreBackedDeadline
 	}
 	deps := agent.Dependencies{Runtime: rt, Model: f.physical, Catalog: f.catalog, Executor: f.catalog, ModelOutcomeVerifier: f.modelVerifier, ToolOutcomeVerifier: f.toolVerifier, RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: ttl}, Execution: ea1FixtureExecutionPolicy(callTimeout)}
 	if host {
@@ -302,7 +302,7 @@ func ea1AgentElectionEntry(t *testing.T, factory func(*testing.T) (kernel.Store,
 		}
 	}
 	if cut == "deadline" {
-		deadline := time.Now().UTC().Add(time.Second)
+		deadline := time.Now().UTC().Add(ea1StoreBackedDeadline)
 		f.request.DeadlineAt = &deadline
 	}
 	var prepared kernel.Snapshot
@@ -441,7 +441,7 @@ func ea1AgentElectionRecovery(t *testing.T, factory func(*testing.T) (kernel.Sto
 		f.store.event = "tool.completed"
 	}
 	if mode == "deadline-known" {
-		deadline := time.Now().UTC().Add(time.Second)
+		deadline := time.Now().UTC().Add(ea1StoreBackedDeadline)
 		f.request.DeadlineAt = &deadline
 	}
 	// No arbitrary Host callback can turn a failed receipt write into unknown
