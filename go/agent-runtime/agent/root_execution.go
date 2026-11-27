@@ -33,6 +33,36 @@ func (runner *Runner) noteRootCallbackFailure(err error) {
 	}
 }
 
+// committedAgentReturn qualifies only an exact native business failure
+// or no-send yield from the original callback. Neither a Host-supplied error
+// classification nor a clean-looking snapshot supplies this evidence.
+type committedAgentReturn struct {
+	runID    string
+	revision uint64
+	status   kernel.RunStatus
+	cause    error
+}
+
+func (f *committedAgentReturn) matches(result, latest kernel.Snapshot, returned error) bool {
+	return f != nil && f.cause != nil && f.runID != "" && f.revision != 0 &&
+		result.Run.ID == f.runID && latest.Run.ID == f.runID && result.Run.Revision == f.revision && latest.Run.Revision == f.revision &&
+		result.Run.Status == f.status && latest.Run.Status == f.status && sameOriginalToolError(f.cause, returned)
+}
+
+func (r *Runner) noteNativeAdmissionReturn(s kernel.Snapshot, cause error) {
+	if r.rootCallbacks != nil && cause != nil && (s.Run.Status == kernel.RunStatusRunning || s.Run.Status == kernel.RunStatusWaitingInput || s.Run.Status == kernel.RunStatusPausedBudget) && knownAgentPhysicalSettlement(s) {
+		r.rootCallbacks.knownReturn.Store(&committedAgentReturn{runID: s.Run.ID, revision: s.Run.Revision, status: s.Run.Status, cause: cause})
+	}
+}
+
+// knownAgentPhysicalSettlement validates a persisted Feature state, including
+// nonterminal wait/resume points, without treating pending external work as
+// an automatic no-effect receipt. This is stricter than a Kernel RunStatus.
+func knownAgentPhysicalSettlement(snapshot kernel.Snapshot) bool {
+	state, err := decodeState(snapshot.State)
+	return err == nil && knownPhysicalSettlement(state, true)
+}
+
 // defaultRunExecution preserves optional configuration, not unowned dispatch.
 func defaultRunExecution(rt *kernel.Runtime, policy ExecutionPolicy) (*RunExecution, error) {
 	owner, err := rt.NewID("agentowner")
@@ -79,10 +109,22 @@ func knownRootPhysicalSettlement(snapshot kernel.Snapshot) bool {
 // Callers that already validated the exact aggregate can use the same
 // settlement predicate without decoding and restoring opaque evidence again.
 func knownRootStatePhysicalSettlement(state runState) bool {
-	if state.ToolDispatchID != "" || state.ToolWait != nil || len(state.DeferredChildren) != 0 || (state.ToolAdmission != nil && state.ToolAdmission.Phase == toolAdmissionEvaluating) {
+	return knownPhysicalSettlement(state, false)
+}
+
+// A borrowed Grant has no durable owned-return qualification for unconsumed
+// Model receipts or external signals. Its settlement therefore stays strict.
+func knownPhysicalSettlement(state runState, borrowed bool) bool {
+	if state.ToolDispatchID != "" || state.ToolWait != nil || len(state.DeferredChildren) != 0 || (state.ToolAdmission != nil && state.ToolAdmission.Phase == toolAdmissionEvaluating) || (borrowed && len(state.ExternalSignals) != 0) {
 		return false
 	}
 	for _, inv := range state.ModelInvocations {
+		if borrowed {
+			if inv.Status != ModelInvocationConsumed {
+				return false
+			}
+			continue
+		}
 		switch inv.Status {
 		case ModelInvocationCompleted, ModelInvocationConsumed:
 			if !validModelInvocationReceipt(inv) {
@@ -99,13 +141,32 @@ func knownRootStatePhysicalSettlement(state runState) bool {
 	return true
 }
 
-// withRootSegment encompasses middleware before/after Next, never just drive.
-func (runner *Runner) withRootSegment(ctx context.Context, snapshot kernel.Snapshot, operation string, execute func(context.Context, *Runner, kernel.Snapshot) (kernel.Snapshot, error)) (kernel.Snapshot, error) {
+// withNativeSegment selects only the original native ownership constraint;
+// all first-party execution enters the same callback lifecycle.
+func (runner *Runner) withNativeSegment(ctx context.Context, snapshot kernel.Snapshot, operation string, execute func(context.Context, *Runner, kernel.Snapshot) (kernel.Snapshot, error)) (kernel.Snapshot, error) {
 	if snapshot.Run.ParentRunID != "" {
-		return execute(ctx, runner, snapshot)
-	}
-	if runner.activeRootGrant != nil {
-		return execute(ctx, runner, snapshot)
+		rt := runner.runtime.WithoutPhysicalGrant()
+		child, err := rt.Load(ctx, snapshot.Run.ID)
+		if err != nil {
+			return kernel.Snapshot{}, err
+		}
+		sourceHash := kernel.ManagedDigest(struct {
+			Snapshot  kernel.Snapshot
+			Operation string
+		}{child, operation})
+		if sourceHash == "" {
+			return child, ErrInvalidRequest
+		}
+		grant, err := rt.BeginChildExecution(ctx, snapshot.Run.ID, snapshot.Run.Revision)
+		if err != nil {
+			return child, err
+		}
+		proof := featurecontrol.Seal(child.Run.ID, child.Run.Revision, "agent_physical_owner", grant.ID, child.State, child.Checkpoint)
+		bound, err := rt.WithPhysicalGrant(ctx, grant, proof)
+		if err != nil {
+			return child, errors.Join(kernel.ErrChildExecutionBusy, err)
+		}
+		return runner.executeNativeSegment(ctx, child, bound, grant, nil, false, operation, sourceHash, execute)
 	}
 	if !runner.runtime.SupportsOwnedPhysicalExecution() || !runner.runtime.SupportsOwnedRetirement() {
 		return snapshot, kernel.ErrExecutionRequired
@@ -129,26 +190,24 @@ func (runner *Runner) withRootSegment(ctx context.Context, snapshot kernel.Snaps
 		}
 		return snapshot, err
 	}
-	return runner.executeOwnedRoot(ctx, snapshot, scopedRT, admitted.Grant, admitted.Lease, external, execute)
+	return runner.executeNativeSegment(ctx, snapshot, scopedRT, admitted.Grant, &admitted.Lease, external, admitted.Grant.AdmissionOperation, admitted.Grant.AdmissionSourceHash, execute)
 }
 
-func (runner *Runner) executeOwnedRoot(ctx context.Context, current kernel.Snapshot, scopedRT *kernel.Runtime, grant kernel.ChildExecutionGrant, lease kernel.ExecutionLease, external bool, execute func(context.Context, *Runner, kernel.Snapshot) (kernel.Snapshot, error)) (kernel.Snapshot, error) {
+func (runner *Runner) executeNativeSegment(ctx context.Context, current kernel.Snapshot, scopedRT *kernel.Runtime, grant kernel.ChildExecutionGrant, lease *kernel.ExecutionLease, external bool, operation, sourceHash string, execute func(context.Context, *Runner, kernel.Snapshot) (kernel.Snapshot, error)) (kernel.Snapshot, error) {
 	scoped := *runner
 	scoped.runtime = scopedRT
-	scoped.activeRunLease = &lease
-	scoped.activeRootGrant = &grant
+	scoped.activeRunLease = lease
+	scoped.activePhysicalGrant = &grant
 	scoped.rootCallbacks = &rootCallbackState{}
 	scoped.externalRunLease = external
-	lifecycle := callbackscope.New(callbackscope.Binding{RunID: grant.ChildRunID, GrantID: grant.ID, OwnerID: grant.ExecutionOwnerID, LeaseID: grant.ExecutionLeaseID, Epoch: grant.ExecutionEpoch, SourceHash: grant.AdmissionSourceHash, Operation: grant.AdmissionOperation}, runner.boundedCallbacks)
+	lifecycle := callbackscope.New(callbackscope.Binding{RunID: grant.ChildRunID, GrantID: grant.ID, OwnerID: grant.ExecutionOwnerID, LeaseID: grant.ExecutionLeaseID, Epoch: grant.ExecutionEpoch, SourceHash: sourceHash, Operation: operation}, runner.boundedCallbacks)
 	defer lifecycle.Close()
-	physicalCtx := callbackscope.Bind(ctx, lifecycle)
 	var toolFrame *originalToolFrame
-	if grant.AdmissionOperation == "resume" || grant.AdmissionOperation == "start" || grant.AdmissionOperation == "approval" || grant.AdmissionOperation == "managed_resume" {
+	if grant.IsOwned() && (operation == "resume" || operation == "start" || operation == "approval" || operation == "managed_resume") {
 		toolFrame = &originalToolFrame{grantID: grant.ID, runID: grant.ChildRunID}
-		physicalCtx = callbackscope.BindRootToolFrame(physicalCtx, toolFrame)
 	}
-	result, callErr := execute(physicalCtx, &scoped, current)
-	if !scoped.rootCallbacks.entered.Load() {
+	result, callErr := execute(callbackscope.BindRootToolFrame(callbackscope.Bind(ctx, lifecycle), toolFrame), &scoped, current)
+	if grant.IsOwned() && !scoped.rootCallbacks.entered.Load() {
 		// All first-party entry closures reach invokeNativeRun before any
 		// effect-capable callback. A prelude or entry denial is not a return.
 		if callErr == nil {
@@ -156,15 +215,35 @@ func (runner *Runner) executeOwnedRoot(ctx context.Context, current kernel.Snaps
 		}
 		return current, runner.retireUnenteredOwnedRoot(ctx, scopedRT, grant, current, external, callErr)
 	}
+	hostComplete := lifecycle.Complete() && !scoped.rootCallbacks.unknown.Load()
+	if !grant.IsOwned() && !hostComplete {
+		return result, errors.Join(callErr, kernel.ErrChildExecutionBusy)
+	}
 	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 	defer cancel()
 	latest, loadErr := scopedRT.Load(cleanup, current.Run.ID)
+	if !grant.IsOwned() {
+		// A parent-bound Grant carries no owned callback return or retirement
+		// receipt. It requires the original durable Mark before exact Finish.
+		if loadErr != nil || !knownAgentPhysicalSettlement(latest) ||
+			(callErr != nil && !scoped.rootCallbacks.knownReturn.Load().matches(result, latest, callErr)) {
+			return result, errors.Join(callErr, kernel.ErrChildExecutionBusy, loadErr)
+		}
+		proof := physicalSettlementProof(grant, latest)
+		if err := scopedRT.MarkChildExecutionSettled(cleanup, grant, proof); err != nil {
+			return result, errors.Join(callErr, kernel.ErrChildExecutionBusy, err)
+		}
+		if err := scopedRT.FinishChildExecution(cleanup, grant, proof); err != nil {
+			return result, errors.Join(callErr, kernel.ErrChildExecutionBusy, err)
+		}
+		recordPhysicalObservation(ctx, current.Run.ID, PhysicalCallSettled)
+		return result, callErr
+	}
 	if loadErr != nil {
 		return result, errors.Join(callErr, ErrRootOutcomeUnknown, loadErr)
 	}
 	state, stateErr := decodeState(latest.State)
-	hostComplete := lifecycle.Complete() && !scoped.rootCallbacks.unknown.Load() && stateErr == nil &&
-		(state.ToolAdmission == nil || state.ToolAdmission.Phase != toolAdmissionEvaluating)
+	hostComplete = hostComplete && stateErr == nil && (state.ToolAdmission == nil || state.ToolAdmission.Phase != toolAdmissionEvaluating)
 	settled := hostComplete && knownRootStatePhysicalSettlement(state)
 	outcome := kernel.OwnedPhysicalCallbackOutcome{HostCompleted: hostComplete, LeaseOwned: !external}
 	pendingCall, pending, _ := FrozenPendingDispatch(latest)
@@ -384,7 +463,7 @@ func settleOwnedRoot(ctx context.Context, rt *kernel.Runtime, grant kernel.Child
 	if found, err := observeExactOwnedRetirement(ctx, rt, grant, snapshot, completion); found {
 		return err
 	}
-	proof := featurecontrol.Seal(snapshot.Run.ID, snapshot.Run.Revision, "agent_owned_physical_settled", grant.ID, snapshot.State, snapshot)
+	proof := physicalSettlementProof(grant, snapshot)
 	finishErr := rt.FinishChildExecution(ctx, grant, proof)
 	if found, err := observeExactOwnedRetirement(ctx, rt, grant, snapshot, completion); found {
 		if err != nil {
@@ -396,6 +475,13 @@ func settleOwnedRoot(ctx context.Context, rt *kernel.Runtime, grant kernel.Child
 		return finishErr
 	}
 	return kernel.ErrExecutionConflict
+}
+
+func physicalSettlementProof(grant kernel.ChildExecutionGrant, s kernel.Snapshot) *featurecontrol.Proof {
+	if grant.IsOwned() {
+		return featurecontrol.Seal(s.Run.ID, s.Run.Revision, "agent_owned_physical_settled", grant.ID, s.State, s)
+	}
+	return featurecontrol.Seal(s.Run.ID, s.Run.Revision, "agent_child_physical_settled", grant.ID, s.State, s.Checkpoint)
 }
 
 // The original caller observes the one committed retirement receipt.

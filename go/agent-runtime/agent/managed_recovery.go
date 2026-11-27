@@ -17,14 +17,14 @@ func (r *Runner) SupportsManagedRecovery() bool {
 
 func (r *Runner) managedOriginalDispatch(ctx context.Context, id string) (kernel.ManagedHostBinding, bool) {
 	b, ok := r.runtime.ManagedDispatch(ctx, id)
-	if !ok || r.activeRootGrant == nil || r.activeRunLease == nil || !b.MatchesOriginalGrant(*r.activeRootGrant) {
+	if !ok || r.activePhysicalGrant == nil || r.activeRunLease == nil || !b.MatchesOriginalGrant(*r.activePhysicalGrant) {
 		return kernel.ManagedHostBinding{}, false
 	}
 	return b, true
 }
 
 func (r *Runner) qualifyManagedModelBoundary(ctx context.Context, s kernel.Snapshot, state runState, inv ModelInvocation, mutation *budget.LedgerMutation) (*kernel.ManagedSafePoint, error) {
-	if !r.SupportsManagedRecovery() || r.activeRootGrant == nil || r.activeRunLease == nil || s.Run.ParentRunID != "" || r.activeRootGrant.AdmissionOperation == "managed_resume" {
+	if !r.SupportsManagedRecovery() || r.activePhysicalGrant == nil || r.activeRunLease == nil || s.Run.ParentRunID != "" || r.activePhysicalGrant.AdmissionOperation == "managed_resume" {
 		return nil, nil
 	}
 	if inv.Purpose == ModelInvocationContextSummary {
@@ -52,7 +52,7 @@ func (r *Runner) qualifyManagedModelBoundary(ctx context.Context, s kernel.Snaps
 	id := "managed-safe-" + kernel.ManagedDigest(struct {
 		Grant, Invocation string
 		Revision          uint64
-	}{r.activeRootGrant.ID, inv.ID, s.Run.Revision + 1})
+	}{r.activePhysicalGrant.ID, inv.ID, s.Run.Revision + 1})
 	return r.managedTransitionPoint(inv, binding, id, raw), nil
 }
 
@@ -60,7 +60,7 @@ func (r *Runner) qualifyManagedModelBoundary(ctx context.Context, s kernel.Snaps
 // Only commitNativeTransition seals and commits it together with the mutation.
 func (r *Runner) managedTransitionPoint(inv ModelInvocation, binding kernel.ManagedHostBinding, id string, lifecycle json.RawMessage) *kernel.ManagedSafePoint {
 	return &kernel.ManagedSafePoint{ID: id, RecoveryID: kernel.ManagedRecoveryID(id, binding), Host: binding,
-		OriginalGrant: *r.activeRootGrant, OriginalLease: *r.activeRunLease, ModelInvocationID: inv.ID, ModelRequestHash: inv.RequestHash,
+		OriginalGrant: *r.activePhysicalGrant, OriginalLease: *r.activeRunLease, ModelInvocationID: inv.ID, ModelRequestHash: inv.RequestHash,
 		LifecycleVersion: kernel.ManagedLifecycleAgentObligations, LifecycleSource: lifecycle}
 }
 
@@ -174,7 +174,7 @@ func (r *Runner) recoverManagedContinuation(ctx context.Context, original kernel
 	// Ensure/Register or rebind the original managed source during recovery.
 	recovering := *r
 	recovering.managedObligationSource = &obligations
-	result, runErr := recovering.executeOwnedRoot(ctx, snapshot, scoped, v.Grant, v.Lease, false, func(next context.Context, owner *Runner, source kernel.Snapshot) (kernel.Snapshot, error) {
+	result, runErr := recovering.executeNativeSegment(ctx, snapshot, scoped, v.Grant, &v.Lease, false, v.Grant.AdmissionOperation, v.Grant.AdmissionSourceHash, func(next context.Context, owner *Runner, source kernel.Snapshot) (kernel.Snapshot, error) {
 		return owner.invokeNativeRun(next, source, runInvocation(plugin.RunResume, source), func(drive context.Context) (kernel.Snapshot, error) {
 			frontier, err := owner.recoverManagedModelFrontier(drive, source, obligations)
 			if err != nil {

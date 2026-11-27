@@ -64,6 +64,12 @@ func TestNativeWrongToolReceiptCannotConsumePendingCall(t *testing.T) {
 }
 
 func TestNativePendingToolNeedsVerifiedResultBeforeReentry(t *testing.T) {
+	t.Run("owned", func(t *testing.T) { nativePendingToolReceipt(t, false) })
+	t.Run("parented-borrowed-lease", func(t *testing.T) { nativePendingToolReceipt(t, true) })
+}
+
+func nativePendingToolReceipt(t *testing.T, parented bool) {
+	t.Helper()
 	rt, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
 	if err != nil {
 		t.Fatal(err)
@@ -82,7 +88,7 @@ func TestNativePendingToolNeedsVerifiedResultBeforeReentry(t *testing.T) {
 		t.Fatal(err)
 	}
 	verifyCalls := 0
-	runner, err := agent.NewRunner(agent.Dependencies{
+	deps := agent.Dependencies{
 		Runtime: rt, Model: m, Catalog: catalog, Executor: catalog,
 		RunExecution: &agent.RunExecution{OwnerID: "native", LeaseDuration: 2 * time.Minute},
 		ToolOutcomeVerifier: agent.ToolOutcomeVerifierFunc(func(_ context.Context, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
@@ -100,14 +106,46 @@ func TestNativePendingToolNeedsVerifiedResultBeforeReentry(t *testing.T) {
 			return tools.ExecutionResult{Content: json.RawMessage(`{"ok":true}`),
 				Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: "committed"}}, nil
 		}),
-	})
+	}
+	runner, err := agent.NewRunner(deps)
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, e := runner.StartRun(t.Context(), agent.StartRequest{
-		ID: "pending-native", Actor: kernel.ActorRef{TenantID: "p", ActorID: "a"},
-		Thread: kernel.ThreadRef{Kind: "conversation", ID: "t"}, Goal: "pending Tool", ToolKeys: []string{"slow"},
-	})
+	request := agent.StartRequest{ID: "pending-native", Actor: kernel.ActorRef{TenantID: "p", ActorID: "a"},
+		Thread: kernel.ThreadRef{Kind: "conversation", ID: "t"}, Goal: "pending Tool", ToolKeys: []string{"slow"}}
+	var first kernel.Snapshot
+	var e error
+	var lease kernel.ExecutionLease
+	if parented {
+		request.ParentRunID = "parent"
+		request.OriginFingerprint = agent.FrozenOriginFingerprint([]byte(`{"source":"parent"}`))
+		if _, e = rt.Create(t.Context(), kernel.CreateRequest{ID: request.ParentRunID, Kind: "agent", Actor: request.Actor, Thread: request.Thread, Goal: "parent", State: json.RawMessage(`{}`)}); e != nil {
+			t.Fatal(e)
+		}
+		prepared, prepareErr := runner.PrepareRun(t.Context(), request)
+		if prepareErr != nil {
+			t.Fatal(prepareErr)
+		}
+		lease, e = rt.AcquireExecution(t.Context(), kernel.ExecutionAcquireRequest{RunID: prepared.Run.ID, OwnerID: "caller", LeaseDuration: 3 * time.Minute})
+		if e != nil {
+			t.Fatal(e)
+		}
+		deps.Runtime, e = rt.WithExecution(lease)
+		if e != nil {
+			t.Fatal(e)
+		}
+		runner, e = agent.NewRunner(deps)
+		if e != nil {
+			t.Fatal(e)
+		}
+		first, e = runner.Resume(t.Context(), prepared.Run.ID, prepared.Run.Revision)
+		if !errors.Is(e, kernel.ErrChildExecutionBusy) {
+			t.Fatalf("parented unknown physical grant was not retained: %v", e)
+		}
+		e = nil
+	} else {
+		first, e = runner.StartRun(t.Context(), request)
+	}
 	if e != nil || first.Run.Status != kernel.RunStatusRunning || effects != 1 {
 		t.Fatalf("native pending Tool failed: %+v effects=%d err=%v", first.Run, effects, e)
 	}
@@ -120,8 +158,24 @@ func TestNativePendingToolNeedsVerifiedResultBeforeReentry(t *testing.T) {
 	if _, e = runner.Resume(t.Context(), first.Run.ID, first.Run.Revision); !errors.Is(e, agent.ErrToolOutcomeUnknown) || effects != 1 {
 		t.Fatalf("Pending Tool was reexecuted: effects=%d err=%v", effects, e)
 	}
+	grant, e := rt.LookupChildExecution(t.Context(), first.Run.ID)
+	if e != nil || grant.IsOwned() == parented {
+		t.Fatalf("wrong original Grant: %v err=%v", grant, e)
+	}
 	if _, e = runner.ReconcileToolOutcome(t.Context(), first.Run.ID, first.Run.Revision, "late-call"); !errors.Is(e, agent.ErrToolOutcomeUnknown) || effects != 1 {
 		t.Fatalf("unverified result was accepted: %v effects=%d", e, effects)
+	}
+	if parented {
+		if e = deps.Runtime.RequireExecution(t.Context(), first.Run.ID); e != nil || verifyCalls != 1 {
+			t.Fatalf("read-only lookup released borrowed lease: %v calls=%d", e, verifyCalls)
+		}
+		if retained, e := rt.LookupChildExecution(t.Context(), first.Run.ID); e != nil || retained != grant {
+			t.Fatalf("unknown Tool changed original Grant: %v %v", retained, e)
+		}
+		if e = rt.ReleaseExecution(t.Context(), lease); e != nil {
+			t.Fatal(e)
+		}
+		return
 	}
 	// Failed and mismatched provider verifications must each release the
 	// read-only reconciliation lease; no Tool reentry is permitted.

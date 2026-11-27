@@ -122,14 +122,16 @@ func (r *Runner) invokeNativeRun(ctx context.Context, source kernel.Snapshot, in
 		return source, budget.ErrLedgerConflict
 	}
 	frame := &nativeRunAdmission{invocation: inv, managedObligations: r.managedObligationSource}
-	if source.Run.ParentRunID == "" {
-		// The actual first Host callback is AFTER all setup/Store reads,
-		// including Managed Leave. Never use an ACK or earlier lease check
-		// as current authority, and never enter this scope twice.
-		if r.activeRootGrant == nil || r.rootCallbacks == nil || r.activeRootGrant.ChildRunID != inv.RunID ||
-			r.rootCallbacks.entered.Load() {
-			return source, kernel.ErrExecutionConflict
-		}
+	grant := r.activePhysicalGrant
+	if grant == nil || r.rootCallbacks == nil || grant.ChildRunID != inv.RunID || grant.ChildRunID != source.Run.ID ||
+		grant.ExpectedRevision != source.Run.Revision || inv.ParentRunID != source.Run.ParentRunID ||
+		grant.IsOwned() != (source.Run.ParentRunID == "") || r.rootCallbacks.entered.Load() {
+		return source, kernel.ErrExecutionConflict
+	}
+	if grant.IsOwned() {
+		// Owned entry additionally consumes the original Store lease/epoch
+		// after all setup reads. A borrowed Grant has already fenced its
+		// native ancestors under BeginChildExecution.
 		deadlineElapsed, err := r.runtime.CheckOwnedPhysicalEntry(ctx, source)
 		if err != nil {
 			return source, err
@@ -137,7 +139,7 @@ func (r *Runner) invokeNativeRun(ctx context.Context, source kernel.Snapshot, in
 		if deadlineElapsed {
 			// No new Host callback may be entered. Consume at most one
 			// previously committed receipt through the native-only reducer.
-			if inv.Operation != plugin.RunResume || r.activeRootGrant.AdmissionOperation != "resume" {
+			if inv.Operation != plugin.RunResume || grant.AdmissionOperation != "resume" {
 				return source, kernel.ErrDeadline
 			}
 			frame.receiptOnly = true
@@ -149,11 +151,9 @@ func (r *Runner) invokeNativeRun(ctx context.Context, source kernel.Snapshot, in
 			// settlement. Only its terminal is narrowed to one known receipt.
 			next = receipt
 		}
-		if !r.rootCallbacks.entered.CompareAndSwap(false, true) {
-			return source, kernel.ErrExecutionConflict
-		}
-	} else if r.rootCallbacks != nil {
-		r.rootCallbacks.entered.Store(true)
+	}
+	if !r.rootCallbacks.entered.CompareAndSwap(false, true) {
+		return source, kernel.ErrExecutionConflict
 	}
 	result, err := r.invokeFirstPartyRun(callbackscope.BindRunCall(ctx, frame), inv, func(c context.Context) (kernel.Snapshot, error) {
 		frame.entered.Store(true)

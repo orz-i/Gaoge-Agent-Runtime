@@ -52,17 +52,18 @@ func safeToolRetryWindow(policy CallPolicy, available time.Duration) bool {
 }
 
 // withRunOwner acquires a fresh authoritative segment before native
-// Model/Tool dispatch. Root middleware is enclosed by withRootSegment; child
-// execution retains its parent-authorized physical scope.
-// On clean return, release is best effort. A failed, cancelled or ambiguous
-// segment retains its owner until Store TTL expiration.
-// No hidden goroutine or independent lease service.
-func (runner *Runner) withRunOwner(ctx context.Context, runID string, expectedRevision uint64,
+// Model/Tool dispatch. Both forms of native segment already enclose
+// middleware; the borrowed child may still need its own configured lease.
+// Release only a lease acquired here. A receipt-only observer never
+// dispatches work, so it releases its own lease even on a failed lookup.
+// An ambiguous physical segment retains its owner until Store TTL expiry.
+func (runner *Runner) withRunOwner(ctx context.Context, runID string, expectedRevision uint64, receiptOnly bool,
 	execute func(context.Context, *Runner) (kernel.Snapshot, error)) (kernel.Snapshot, error) {
-	if runner.activeRootGrant != nil && runner.rootCallbacks != nil && !runner.rootCallbacks.entered.Load() {
+	owned := runner.activePhysicalGrant != nil && runner.activePhysicalGrant.IsOwned()
+	if owned && runner.rootCallbacks != nil && !runner.rootCallbacks.entered.Load() {
 		return execute(ctx, runner) // invokeNativeRun owns the first native entry
 	}
-	if runner.activeRootGrant != nil || runner.activeRunLease != nil {
+	if owned || runner.activeRunLease != nil {
 		if err := runner.runtime.RequireExecution(ctx, runID); err != nil {
 			return kernel.Snapshot{}, err
 		}
@@ -149,13 +150,17 @@ func (runner *Runner) withRunOwner(ctx context.Context, runID string, expectedRe
 	result, driveErr := execute(ctx, &scoped)
 	// A late successful provider call is already recorded atomically with
 	// its receipt. Release so an explicit Resume can consume that known fact.
-	if driveErr == nil || errors.Is(driveErr, ErrToolLateResult) ||
+	if receiptOnly || driveErr == nil || errors.Is(driveErr, ErrToolLateResult) ||
 		errors.Is(driveErr, ErrModelLateResult) {
-		// The store retains the sticky Epoch fence after release. If Release fails
-		// (e.g. lease already replaced), a later recovery can still use its expiry.
-		releaseErr := runner.runtime.ReleaseExecution(ctx, lease)
+		releaseCtx := ctx
+		if receiptOnly {
+			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+			defer cancel()
+			releaseCtx = cleanup
+		}
+		releaseErr := runner.runtime.ReleaseExecution(releaseCtx, lease)
 		if releaseErr != nil && !errors.Is(releaseErr, kernel.ErrExecutionConflict) {
-			return result, releaseErr
+			return result, errors.Join(driveErr, releaseErr)
 		}
 	}
 	return result, driveErr

@@ -399,7 +399,7 @@ type Runner struct {
 	execution                ExecutionPolicy
 	runExecution             *RunExecution
 	activeRunLease           *kernel.ExecutionLease
-	activeRootGrant          *kernel.ChildExecutionGrant
+	activePhysicalGrant      *kernel.ChildExecutionGrant
 	externalRunLease         bool
 	defaultRunOwner          bool
 	toolOutcomeVerifier      ToolOutcomeVerifier
@@ -793,19 +793,16 @@ func (runner *Runner) startRunWithMiddleware(ctx context.Context, request StartR
 	if deferred {
 		operation = "prepare"
 	}
-	snapshot, invokeErr := runner.withRootSegment(ctx, created, operation, func(rootCtx context.Context, root *Runner, admitted kernel.Snapshot) (kernel.Snapshot, error) {
-		return root.withChildPhysicalGrant(rootCtx, admitted, operation,
-			func(childCtx context.Context, scoped *Runner) (kernel.Snapshot, error) {
-				result, err := scoped.invokeNativeRun(childCtx, admitted, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
-					continuationReached = true
-					return scoped.continuePreparedRun(nextCtx, admitted, deferred)
-				})
-				middlewareEntered = scoped.rootCallbacks != nil && scoped.rootCallbacks.entered.Load()
-				if !continuationReached && scoped.rootCallbacks != nil {
-					admissionReturn = scoped.rootCallbacks.knownReturn.Load()
-				}
-				return result, err
-			})
+	snapshot, invokeErr := runner.withNativeSegment(ctx, created, operation, func(physicalCtx context.Context, scoped *Runner, admitted kernel.Snapshot) (kernel.Snapshot, error) {
+		result, err := scoped.invokeNativeRun(physicalCtx, admitted, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
+			continuationReached = true
+			return scoped.continuePreparedRun(nextCtx, admitted, deferred)
+		})
+		middlewareEntered = scoped.rootCallbacks.entered.Load()
+		if !continuationReached {
+			admissionReturn = scoped.rootCallbacks.knownReturn.Load()
+		}
+		return result, err
 	})
 	if invokeErr != nil && snapshot.Run.ID == "" {
 		// Keep the newly created Run visible for explicit recovery, but
@@ -979,7 +976,7 @@ func (runner *Runner) continuePreparedRun(ctx context.Context, snapshot kernel.S
 	// The original parent's Store Grant (if any) already encloses every
 	// caller-supplied Host Run middleware before this code is reachable.
 	// Standalone Root Agent execution retains its original Run Owner lease.
-	driven, driveErr := runner.withRunOwner(ctx, snapshot.Run.ID, snapshot.Run.Revision, func(driveCtx context.Context, scoped *Runner) (kernel.Snapshot, error) {
+	driven, driveErr := runner.withRunOwner(ctx, snapshot.Run.ID, snapshot.Run.Revision, false, func(driveCtx context.Context, scoped *Runner) (kernel.Snapshot, error) {
 		scoped.publishRunEvent(driveCtx, snapshot, EventRunStarted, false)
 		return scoped.drive(driveCtx, snapshot)
 	})
@@ -1025,17 +1022,14 @@ func (runner *Runner) ResolveApproval(
 	// Model/Tool may perform effects; no generic return error proves no-effect.
 	ctx = runner.claimPhysicalObservation(ctx, runID, plugin.RunResolveApproval)
 	invocation := runInvocation(plugin.RunResolveApproval, snapshot)
-	return runner.withRootSegment(ctx, snapshot, "approval", func(rootCtx context.Context, root *Runner, admitted kernel.Snapshot) (kernel.Snapshot, error) {
-		return root.withChildPhysicalGrant(rootCtx, admitted, "approval",
-			func(childCtx context.Context, scoped *Runner) (kernel.Snapshot, error) {
-				freshState, decodeErr := decodeState(admitted.State)
-				if decodeErr != nil {
-					return admitted, decodeErr
-				}
-				return scoped.invokeNativeRun(childCtx, admitted, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
-					return scoped.resolveApproval(nextCtx, admitted, freshState, response)
-				})
-			})
+	return runner.withNativeSegment(ctx, snapshot, "approval", func(physicalCtx context.Context, scoped *Runner, admitted kernel.Snapshot) (kernel.Snapshot, error) {
+		freshState, decodeErr := decodeState(admitted.State)
+		if decodeErr != nil {
+			return admitted, decodeErr
+		}
+		return scoped.invokeNativeRun(physicalCtx, admitted, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
+			return scoped.resolveApproval(nextCtx, admitted, freshState, response)
+		})
 	})
 }
 
@@ -1063,7 +1057,7 @@ func (runner *Runner) resolveApproval(
 	if !validResolvedApproval(snapshot.Checkpoint, resolved, response.Decision) {
 		return kernel.Snapshot{}, ErrApprovalRequired
 	}
-	if g := runner.activeRootGrant; g != nil && g.AdmissionOperation == "approval" {
+	if g := runner.activePhysicalGrant; g != nil && g.AdmissionOperation == "approval" {
 		var applied plugin.ApprovalResponse
 		if json.Unmarshal(resolved.Response, &applied) != nil || applied.Decision != response.Decision || applied.Comment != strings.TrimSpace(response.Comment) {
 			return snapshot, ErrApprovalRequired
@@ -1170,16 +1164,13 @@ func (runner *Runner) Resume(ctx context.Context, runID string, expectedRevision
 	// Claim an execution segment BEFORE Run middleware and any Model/Tool
 	// side effect. A runner without RunExecution still follows the original
 	// pre-dispatch Store guard and will be rejected on fenced Runs.
-	resumed, resumeErr := runner.withRootSegment(ctx, snapshot, "resume", func(rootCtx context.Context, root *Runner, admitted kernel.Snapshot) (kernel.Snapshot, error) {
-		return root.withChildPhysicalGrant(rootCtx, admitted, "resume",
-			func(childCtx context.Context, physical *Runner) (kernel.Snapshot, error) {
-				return physical.withRunOwner(childCtx, admitted.Run.ID, admitted.Run.Revision,
-					func(driveCtx context.Context, scoped *Runner) (kernel.Snapshot, error) {
-						invocation := runInvocation(plugin.RunResume, admitted)
-						return scoped.invokeNativeRun(driveCtx, admitted, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
-							return scoped.resumeRunning(nextCtx, admitted, state)
-						})
-					})
+	resumed, resumeErr := runner.withNativeSegment(ctx, snapshot, "resume", func(physicalCtx context.Context, physical *Runner, admitted kernel.Snapshot) (kernel.Snapshot, error) {
+		return physical.withRunOwner(physicalCtx, admitted.Run.ID, admitted.Run.Revision, false,
+			func(driveCtx context.Context, scoped *Runner) (kernel.Snapshot, error) {
+				invocation := runInvocation(plugin.RunResume, admitted)
+				return scoped.invokeNativeRun(driveCtx, admitted, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
+					return scoped.resumeRunning(nextCtx, admitted, state)
+				})
 			})
 	})
 	if resumeErr != nil && resumed.Run.ID == "" {

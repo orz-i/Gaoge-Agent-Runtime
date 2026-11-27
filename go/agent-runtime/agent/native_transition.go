@@ -40,7 +40,7 @@ func (r *Runner) commitNativeTransition(ctx context.Context, source kernel.Snaps
 		}
 		return r.runtime.Apply(ctx, source.Run.ID, source.Run.Revision, m)
 	}
-	proof := featurecontrol.Seal(source.Run.ID, source.Run.Revision, "managed_intent_source", r.activeRootGrant.ID, source.State, *point)
+	proof := featurecontrol.Seal(source.Run.ID, source.Run.Revision, "managed_intent_source", r.activePhysicalGrant.ID, source.State, *point)
 	return r.runtime.ApplyManagedNativeTransition(ctx, source.Run.ID, source.Run.Revision, m, *point, proof)
 }
 
@@ -70,7 +70,7 @@ func (r *Runner) qualifyNativeTransition(ctx context.Context, source kernel.Snap
 	// Decide that before decoding the potentially large, already encoded
 	// reducer target. The same ordinary Kernel physical permit still
 	// validates and commits the mutation; this is not a new execution path.
-	if g := r.activeRootGrant; g != nil && g.AdmissionOperation == "managed_resume" &&
+	if g := r.activePhysicalGrant; g != nil && g.AdmissionOperation == "managed_resume" &&
 		g.ChildRunID == source.Run.ID && source.Run.ParentRunID == "" && r.activeRunLease != nil {
 		return nil, nil
 	}

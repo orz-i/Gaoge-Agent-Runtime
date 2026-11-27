@@ -59,7 +59,7 @@ func managedPreparationLedger(state runState, l budget.Ledger) bool {
 // or candidate preparation. It covers no dispatched request. A previously
 // elected successor still owns its original transfer, never a new selection.
 func (r *Runner) managedPreparationBinding(ctx context.Context, s kernel.Snapshot, state runState) (kernel.ManagedHostBinding, bool) {
-	if !r.supportsManagedPreparation() || r.activeRootGrant == nil ||
+	if !r.supportsManagedPreparation() || r.activePhysicalGrant == nil ||
 		r.activeRunLease == nil || s.Run.ParentRunID != "" {
 		return kernel.ManagedHostBinding{}, false
 	}
@@ -76,7 +76,7 @@ func (r *Runner) ensureManagedPreparation(ctx context.Context, s kernel.Snapshot
 		return s, nil
 	}
 	current, err := r.runtime.LoadManagedRecovery(ctx, s.Run.ID)
-	if err == nil && current.Native() && current.Selection.Mode == "" && current.Terminal == nil && current.SafePoint.OriginalGrant == *r.activeRootGrant &&
+	if err == nil && current.Native() && current.Selection.Mode == "" && current.Terminal == nil && current.SafePoint.OriginalGrant == *r.activePhysicalGrant &&
 		kernel.ManagedSourceMatches(current.SafePoint, s) {
 		if o, ok := current.SafePoint.AgentObligations(); ok && o.Phase == "prepare" {
 			return s, nil
@@ -124,6 +124,6 @@ func (r *Runner) qualifyManagedPreparation(ctx context.Context, s kernel.Snapsho
 	id := "managed-safe-" + kernel.ManagedDigest(struct {
 		Grant, Phase string
 		Revision     uint64
-	}{r.activeRootGrant.ID, p.Phase, p.SourceRevision})
+	}{r.activePhysicalGrant.ID, p.Phase, p.SourceRevision})
 	return r.managedTransitionPoint(ModelInvocation{}, b, id, raw), nil
 }
