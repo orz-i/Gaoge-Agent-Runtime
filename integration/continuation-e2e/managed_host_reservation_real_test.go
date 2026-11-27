@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -241,7 +242,11 @@ func TestRealPostgresOpaqueManagedProcessCrashRemainsUnknown(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	_, root := managedRecoveryRoot(t, host)
+	turnID, root := managedRecoveryRoot(t, host)
+	originalItems, e := host.ListItems(t.Context(), turnID, 0, 1000)
+	if e != nil || !harness.PendingExecutionDispatch(originalItems, root.ID) {
+		t.Fatalf("original Host dispatch missing: %v", e)
+	}
 	store := postgresadapter.NewKernelStore(db)
 	before, e := store.Load(t.Context(), root.ExecutionRefID)
 	if e != nil {
@@ -272,9 +277,11 @@ func TestRealPostgresOpaqueManagedProcessCrashRemainsUnknown(t *testing.T) {
 	}
 	originalLease := readManagedRecoveryLease(t, t.Context(), db, root.ExecutionRefID)
 	session := newManagedRecoverySession(t, db, files, false, false)
-	_, e = session.Resume(t.Context(), managedRecoveryTurn)
-	if !errors.Is(e, harness.ErrConflict) {
-		t.Fatalf("opaque pending-intent resume: %v", e)
+	resumed, e := session.Resume(t.Context(), managedRecoveryTurn)
+	projection := func(i harness.Item) bool { return i.ParentItemID != harness.ExecutionDispatchParentItemID }
+	if !errors.Is(e, harness.ErrExecutionOutcomeUnknown) || !harness.PendingExecutionDispatch(resumed.Items, root.ID) ||
+		!reflect.DeepEqual(slices.DeleteFunc(originalItems, projection), slices.DeleteFunc(resumed.Items, projection)) {
+		t.Fatalf("opaque pending-intent resume changed Host dispatch: %v", e)
 	}
 	after, e := store.Load(t.Context(), root.ExecutionRefID)
 	if e != nil || !reflect.DeepEqual(before, after) {

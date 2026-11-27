@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -103,9 +104,10 @@ func TestTaskDraftReceiptScopeKnownAndOpaque(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				_, resumeErr := reopened.Resume(t.Context(), hostTurnID)
-				if !errors.Is(resumeErr, agent.ErrRootOutcomeUnknown) {
-					t.Fatalf("opaque expiry did not remain unknown: %v", resumeErr)
+				resumed, resumeErr := reopened.Resume(t.Context(), hostTurnID)
+				projection := func(i harness.Item) bool { return i.ParentItemID != harness.ExecutionDispatchParentItemID }
+				if !errors.Is(resumeErr, harness.ErrExecutionOutcomeUnknown) || !harness.PendingExecutionDispatch(initial.Items, "") || !harness.PendingExecutionDispatch(resumed.Items, "") || !reflect.DeepEqual(slices.DeleteFunc(initial.Items, projection), slices.DeleteFunc(resumed.Items, projection)) {
+					t.Fatalf("opaque expiry did not preserve unknown Host dispatch: %v", resumeErr)
 				}
 				after, err := base.Load(t.Context(), actual.Run.ID)
 				if err != nil || !reflect.DeepEqual(original, after) {

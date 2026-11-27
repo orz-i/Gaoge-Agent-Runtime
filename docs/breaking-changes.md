@@ -166,8 +166,10 @@ Runtime and native canceller, no actual independent accounting obligation
 and no externally bound Lease, Harness no longer admits or retires an
 independent Resume dispatch. An unresolved Interaction continuation still
 blocks the command; the presence of an unrelated handler does not change
-the execution authority. The frozen Invocation and original Host
-effect/cancellation evidence are verified before native admission. Resume and
+the execution authority. An unresolved original opaque Host dispatch returns
+`harness.ErrExecutionOutcomeUnknown` before entering another Agent callback.
+The frozen Invocation and original Host effect/cancellation evidence are
+verified before native admission. Resume and
 Cancel compete on the same Runtime Run revision and Grant, not on a new Host
 Resume Item. Terminal projection must settle any active native Grant from its
 exact original callback evidence, even when reopened through a different Host
