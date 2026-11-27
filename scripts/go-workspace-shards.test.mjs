@@ -189,7 +189,7 @@ test("CI runs each full coverage/race shard, collects complete artifacts, and re
   const makefile = read("Makefile");
   const matrixes = [...ci.matchAll(/shard: \[([^\]]+)\]/gu)].map((match) => match[1].split(", "));
   assert.deepEqual(matrixes, [Object.keys(shards), Object.keys(shards)]);
-  assert.equal([...ci.matchAll(/fail-fast: false/gu)].length, 2);
+  assert.equal([...ci.matchAll(/fail-fast: false/gu)].length, 3);
   assert.match(ci, /coverage --shard=\$\{\{ matrix.shard \}\}/u);
   assert.match(ci, /race --shard=\$\{\{ matrix.shard \}\}/u);
   assert.match(ci, /cache-scope: race-\$\{\{ matrix.shard \}\}/u);

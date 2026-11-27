@@ -1,10 +1,74 @@
 # CI governance and rollout
 
+## CI execution profiles
+
+Draft task feedback and merge authorization are distinct facts. The existing
+required check names and branch protection are unchanged.
+
+| Profile | Trigger | Evidence |
+| --- | --- | --- |
+| Fast | Draft PR | `Fast CI (Draft task feedback)`: shared static/consumer/security checks, TS tests, complete non-Memory Core tests, focused Harness and Memory/native SQLite/actual PostgreSQL contracts, targeted Race, additional affected optional modules |
+| Full | Ready PR and every main push | Both existing required CI aggregates, complete Go/Race matrices, coverage union and floor, all four real-engine suites, Windows, consumers and security; Collector additionally on main |
+| Full milestone | Explicit `workflow_dispatch` on the selected branch | Same full test scope as Ready PR, distinctly named **non-merge** aggregates; does not validate the PR merge context or replace required checks |
+| Release | Immutable Beta tags | Existing release gate, unchanged |
+
+Draft **intentionally leaves both required Full contexts non-success**. GitHub
+may treat skipped jobs as passing required checks; the original `always()`
+aggregates run and explicitly block Draft instead of accepting a skip.
+A Draft workflow can therefore report overall failure with the Fast job green.
+Use that exact Fast job's actual success, not the overall conclusion or any
+skipped result, for intermediate task evidence. On Ready, every Full dependency
+must actually succeed; a prior Fast result, cancelled run, partial coverage,
+or manual milestone cannot satisfy the required merge contexts. Converting a
+PR back to Draft also triggers the two profiles' reevaluation. Full validates
+the PR description; until the separate required-description rollout below,
+`edited` remains a trigger.
+
+The Fast floor runs even for docs and conservative impact fallback. The existing
+impact collector adds affected optional modules for scoped changes, or known
+direct optional modules on Full fallback; it cannot remove that floor. Core's
+long real-time Memory/Store phases, complete adapter, Windows and E2E matrices
+are deferred, not certified by Fast. Required native test identities must emit
+actual PASS events, including real PostgreSQL and selected subtests; an empty
+filter or skipped service is not success. Full and Release never consume a Fast
+plan, and no coverage denominator or test assertion is reduced.
+
+Real-engine Full shards run the unchanged Kernel PostgreSQL, Harness PostgreSQL,
+Redis and detached continuation-E2E commands in parallel with independent service
+containers. Their existing required integration aggregate fails unless the
+matrix succeeds. `make integration-test` and Release still execute all four
+commands by default; `--suite=kernel|harness|redis|continuation` is only a
+partition of that same suite.
+
+### QUAL handoff for PR #157
+
+Roll out only after the independent CI PR is reviewed and merged, and the
+existing architecture PR updates its base to that accepted main. GAR-4 remains
+on its original Full gate. For GAR-5–GAR-8 use an exact candidate SHA, the
+card-specific local/actual three-engine contract, production/test size evidence,
+the actual successful Draft Fast job, and the existing strict independent
+review/Done Gate. This is task acceptance, **not merge admission**. Record
+any deferred checks and preserve failure evidence; no change to architecture
+acceptance criteria, dependency order, test assertions, or Qual review policy.
+
+Run a Full milestone after GAR-7 if desired (actual exact-SHA evidence, not a
+required merge context). GAR-9 and GAR-11 still require actual Full validation
+of the cumulative candidate with current main/base and independent review;
+GAR-12 retains controlled merge authorization. If a Full run finds a defect in
+an earlier accepted card, reopen/remediate that scope before merging. Do not
+reuse Full evidence after code/base changes.
+
+Initial baseline: GAR-3 CI run 45935872091 took 13m24s on the critical path
+and approximately 79 accumulated job-minutes (not billing minutes). The
+Fast target of 2–4m and the Full speedup must be measured on actual hosted runs;
+local warm-cache test time is not a hosted CI result. No repository permissions
+or branch-protection settings are changed by this profile implementation.
+
+## Historical P0–P2 baseline
+
 P0 front-loads static feedback and repairs gate coverage; P1 reuses unit coverage
-and partitions full suites; P2 reports advisory impact only. No affected-only
-execution, cached test result, dev branch, weaker threshold, or reduced release
-gate is introduced. This PR prepares changes; merging and operational cutovers
-are separate decisions.
+and partitions full suites; P2 introduced an advisory impact report. The complete
+coverage union and Release gate remain unchanged in the new profiles.
 
 | Accepted PR run | Workflow wall time | Accumulated CI job time |
 | --- | ---: | ---: |
@@ -68,7 +132,7 @@ The existing **Unit, race, lint, and release consumers** name is unchanged. Its
 `always()` aggregator requires static/consumer, complete coverage/race matrices,
 coverage floors, vulnerability audit, Windows safety, and real-engine checks.
 Missing, failed, cancelled, unexpected skipped, or unknown dependencies block.
-Only PR Collector E2E may be skipped; it must pass on main pushes. Independent
+Only Collector E2E may be skipped for non-main Full runs; it must pass on main pushes. Independent
 integration, CodeQL, and dependency-review protection remains unchanged.
 
 Timing and runtime shadow reporting are **non-blocking observations**. The
@@ -151,8 +215,8 @@ never just remove the coverage union/required dependencies.
 
 The optional read-only shadow job publishes `plan.json` and a Markdown summary
 with seven-day retention. It exports **no outputs, skip flags or matrix**. Plans
-are always `mode: shadow`, `execution: full`, with
-`complete-14-module-union-required`. No existing validation consumes this report.
+remain advisory for Full; the Fast script invokes the same collector directly
+to add optional-module tests to its fixed floor, never to waive Full checks.
 
 Candidate scopes include ordinary docs, TS/packed-client README, independent
 Transport, Provider plus task-agent, Harness reverse consumers (including HTTP,
@@ -189,7 +253,7 @@ node --test scripts/ci-impact.test.mjs
       not a reason to waive the test. Current CI-only changes validate full fallback,
       not all low-risk classifications.
 
-Actual incremental activation needs a separate reviewed skip/gate/coverage
-protocol; there is no hidden label/env toggle. Slow-test clock/lease/process
-semantics, paid Provider runs and further CI framework expansion are not part
-of this closeout. Keep unresolved items explicit instead of counting them done.
+The new Draft profile is a separate stage, not a hidden affected-only toggle
+for Full. Slow-test clock/lease/process semantics and paid Provider runs are
+outside this CI-only cutover. Keep unresolved items explicit instead of counting
+them done.
