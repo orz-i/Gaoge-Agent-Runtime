@@ -65,6 +65,7 @@ test("workflow keeps exact protected contexts, distinct milestone names and non-
   }
   assert.match(workflow,/converted_to_draft/u);
   assert.match(workflow,/workflow_dispatch:/u);
+  assert.match(workflow,/group: ci-\$\{\{ github.event_name \}\}-\$\{\{ github.ref \}\}/u);
   assert.doesNotMatch(blocks.quality,/continue-on-error/u);
   assert.doesNotMatch(blocks.integration,/continue-on-error/u);
   assert.match(blocks.fast,/CI_GATE: fast/u);

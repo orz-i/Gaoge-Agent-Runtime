@@ -20,7 +20,8 @@ Use that exact Fast job's actual success, not the overall conclusion or any
 skipped result, for intermediate task evidence. On Ready, every Full dependency
 must actually succeed; a prior Fast result, cancelled run, partial coverage,
 or manual milestone cannot satisfy the required merge contexts. Converting a
-PR back to Draft also triggers the two profiles' reevaluation. Full validates
+PR back to Draft also triggers the two profiles' reevaluation. Manual milestones
+use a distinct concurrency group and cannot cancel mandatory main-push CI. Full validates
 the PR description; until the separate required-description rollout below,
 `edited` remains a trigger.
 

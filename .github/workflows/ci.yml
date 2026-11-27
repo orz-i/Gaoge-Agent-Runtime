@@ -15,7 +15,8 @@ env:
   CI_TIMING_DIRECTORY: ${{ github.workspace }}/artifacts/ci-timings
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # Milestone dispatches must never cancel mandatory main-push validation.
+  group: ci-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
