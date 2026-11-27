@@ -416,7 +416,7 @@ Existing Host accounting stays at its original location until a verified
 execution-path cutover migrates those facts. Do not enable an empty replacement
 ledger for an already budgeted Run. Open never migrates.
 
-Atomic owned retirement retains the final v6 receipt wire fields without an
-independent ACK transition. v11 Open and v10-to-v11 migration reject old
-nonfinal retirement rows without rewriting them. Drain those rows with the
-original stopped-writer cohort before using this version.
+v11 Open/migration rejects unfinished retirements; drain them with the old
+writer. Retired Managed and retirement Phase/ACKIdentity payloads are rejected
+without rewriting; use a fresh profile for incompatible history. Only final
+native receipts remain, with no independent ACK transition.

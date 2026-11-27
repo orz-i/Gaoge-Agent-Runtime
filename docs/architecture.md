@@ -160,12 +160,15 @@ accounting. The Host selects the frozen Run/ancestor scope and meter/limits,
 and projects the budget Timeline. Standard and Managed execution commit
 physical accounting in the Runtime Store, with the Run mutation. Fixed eager
 local Named Agents preview capacity without a Host enrollment: their frozen
-child scope and lifetime capacity are enrolled in native Run Create. The
-Host dispatch election still fences the pre-Create cancellation window; its
-return is bound to the original native retirement, not a second execution
-permission. Already-created first-party root Resume and scoped Approval use
-only native admission; approval projection reads the original Kernel journal.
-Opaque or independently routed callbacks retain their distinct Host boundary.
+child scope and lifetime capacity are enrolled in native Run Create.
+For qualified scoped local Root and Named Agent starts, native Run Create
+competes with the original negative identity decision for cancellation or
+definitive failure, with any budget enrollment in the same transaction.
+Native Resume, allowance and scoped Approval use the original Runtime
+admission/control, and approval projection reads the Kernel journal.
+Actual external accounting, cancellation, opaque or independently routed
+callbacks retain their distinct Host effect boundary. Unused optional
+authorities do not create a new Host execution election.
 Definitively refused capacity can resume the same selection;
 an uncertain Create or callback cannot be replayed. An uncertain
 Provider or Tool result retains its original quota; a proven Agent terminal
@@ -263,14 +266,16 @@ alone is not a physical-effect receipt.
   post-election inspection. Repair does not authorize new dispatch or close
   the cancellation intent itself. No-entry cannot create callback custody;
   an unchanged suffix of such retirements preserves prior actual custody.
-- An already-created ordinary native Root uses one Runtime election for
-  Resume and Cancel. Harness checks frozen ownership and outstanding original
-  Host effects but writes no additional Resume dispatch/return. Native
-  allowance renewal is just the guarded control CAS, with no extra Host
-  dispatch or correlation event. Terminal projection observes the persisted
-  native retirement regardless of the current Host wrapper. First Create,
-  Managed transfer, Approval selection, externally leased and independent
-  Host/opaque operations retain their specific authority boundaries.
+- Qualified local Root Start/Retry and Named Agent Start use the same native
+  Run identity, with Create competing against definitive negative decisions.
+  Ordinary and Managed continuation use the same native Grant/lease, entry
+  and retirement authority; allowance uses the guarded control CAS and
+  approval uses the original checkpoint/journal. Harness checks frozen
+  ownership, actual accounting obligations and outstanding Host effects
+  without electing another execution dispatch. Externally bound leases,
+  independent accounting/cancellation and opaque callbacks retain their
+  actual effect boundaries. Terminal projection observes the persisted
+  native retirement; unknown original effects remain fenced.
 - Cancellation competes atomically with new dispatch admission. A cancelled
   parent cannot start a late child, while an unsettled child grant prevents
   premature terminalization of its ancestors.

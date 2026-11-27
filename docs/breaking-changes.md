@@ -90,13 +90,17 @@ Unknown dispatched effects still block cancellation or expiry without revoking
 quota. Native receipt recovery uses the persisted binding, not a new Host scope.
 
 The Host still selects the original Attempt and projects committed facts.
-Qualified first-party Root Start/Retry, Managed Resume and scoped Approval
-no longer append a Host execution-dispatch grant or receipt. The native
+Qualified first-party Root Start/Retry, fixed scoped local Named Agent
+Start/Approval, ordinary and Managed Resume, and allowance control no longer
+append a Host execution-dispatch grant or receipt. The native
 creation identity, Grant, Epoch, callback return and retirement are the
 authority. Applied approval is read from the Kernel journal and projected
 idempotently. Opaque/external callbacks retain their independent effect fence.
-Custom managed compositions with an independent Host interaction/canceller or
-external ledger are not eligible for this native-only contract.
+A configured but unused Interaction handler or BudgetAuthority does not by
+itself elect Host dispatch. Qualification uses the exact Runtime, frozen
+accounting obligation and actual selected ledger; contradictory evidence is
+rejected. Custom compositions with actual independent effects or externally
+bound execution custody retain their original fences.
 
 For a fixed eager local Named Agent using the same native budget adapter, Host
 capacity preview does not enroll the child. The original frozen delegation
@@ -104,12 +108,12 @@ selects its subtree limit and native Create atomically occupies its lifetime
 capacity with the Run. A definitive native Create refusal can close the
 original Handoff admission without a fabricated Run; temporary capacity
 refusals retain the same frozen selection for continuation. Unknown Create
-outcomes cannot be retried. The original Handoff dispatch identity binds its
-native retirement; a missing Host return can be repaired from that exact
-receipt without invoking the child again. The Host dispatch election still
-fences cancellation before Create. Separately routed and deferred legacy
-compositions retain their original admission boundary. No new database schema
-is introduced by this Handoff cutover.
+outcomes cannot be retried. Qualified fixed local eager or deferred Handoff
+uses the frozen parent and child selection and native Create/negative-decision
+arbitration without an additional Host dispatch election. Separately routed or opaque
+callbacks retain their original admission boundary; an already existing Host
+dispatch may be repaired only from its exact original return evidence, without
+reinvocation. No new database schema is introduced by this Handoff cutover.
 
 Existing split-store accounting is not transferred automatically. Reopening
 a previously budgeted Turn whose Host and Kernel ledger records diverge is
@@ -158,9 +162,11 @@ there is no split-admission compatibility path.
 ## Native post-Create execution authority (pre-stable hard cut)
 
 For ordinary, non-Managed Root Resume using the concrete Agent, its exact
-Runtime and native canceller, no generic Host interaction handler, no external
-accounting and no externally bound Lease, Harness no longer admits or retires
-an independent Resume dispatch. The frozen Invocation and original Host
+Runtime and native canceller, no actual independent accounting obligation
+and no externally bound Lease, Harness no longer admits or retires an
+independent Resume dispatch. An unresolved Interaction continuation still
+blocks the command; the presence of an unrelated handler does not change
+the execution authority. The frozen Invocation and original Host
 effect/cancellation evidence are verified before native admission. Resume and
 Cancel compete on the same Runtime Run revision and Grant, not on a new Host
 Resume Item. Terminal projection must settle any active native Grant from its
@@ -175,8 +181,9 @@ requested control remain subject to the original Run revision and state. Old
 unresolved native allowance dispatches must be reconciled by the previous writer
 before upgrading. Historical completed dispatch facts remain readable, and the
 retired event namespace remains reserved against injection. No new schema or
-new durable authority is introduced. First Create, Managed recovery, Approval
-selection and independent Host/opaque operations retain their original fences.
+new durable authority is introduced. Qualified Create, Managed recovery and
+scoped Approval use native authority as described above; actual independent
+Host/opaque operations retain their original fences.
 
 ## Unified Agent recovery profile (pre-stable hard cut)
 
@@ -237,7 +244,8 @@ command and carries only its mode and original cancellation reason.
 Managed successor admission now uses `BeginOwnedPhysicalExecution` through
 `AdmitManagedContinuation`, including the ordinary Lease planner and commit
 confirmation protocol. The separate Enable operation, claimant election, and
-transfer-generation CAS are retired; old wire history remains readable.
+transfer-generation CAS are retired; incompatible old wire records are
+rejected rather than decoded as current native evidence.
 Ordinary Run mutations no longer write an additional invalidation record.
 The native admission/cancel transaction revalidates the exact source, Store-time
 expiry, original Grant and ledger and selects the sole winning command.
@@ -251,9 +259,11 @@ transfer and Grant can authorize continuation.
 This is a stopped-writer hard cut. Drain or explicitly reconcile legacy
 Managed transfers, Host dispatch grants and reservation rows with the original
 writer before using the new native-only path. Do not interpret old Managed Host
-receipts as current execution authority. Host SQL New/Migrate rejects open
-legacy reservation rows; legacy PARKED cannot be promoted to executable
-authority. Historical SQL rows are not deleted or synthesized.
+receipts as current execution authority. Host PostgreSQL New/Migrate rejects
+legacy reservation rows even if closed. Kernel SQLite Open/migration and
+PostgreSQL Migrate reject the retired Managed and retirement wire records;
+use a fresh profile when the incompatible history remains. Historical SQL
+rows are not deleted or synthesized.
 Do not run old and new writers concurrently.
 Owned Mark is also removed: `MarkOwnedPhysicalRecovered` and
 `ReduceOwnedPhysicalSettlement` no longer exist.
