@@ -141,7 +141,7 @@ func ea1RootCancelActive(t *testing.T, factory func(*testing.T) (kernel.Store, k
 	f := ea1NewResumeFixture(t, factory, false)
 	hits := 0
 	var original kernel.ChildExecutionGrant
-	check := func(ctx context.Context) {
+	check := func(ctx context.Context, entered bool) {
 		hits++
 		before, e := f.observer.Load(ctx, f.request.ID)
 		if e != nil {
@@ -160,8 +160,9 @@ func ea1RootCancelActive(t *testing.T, factory func(*testing.T) (kernel.Store, k
 			t.Fatal("scope replaced")
 		}
 		ea1CancelRejected(t, f.observer, before, g, kernel.ErrChildExecutionBusy)
-		if e = f.peer.(kernel.ExecutionStore).CheckExecution(ctx, f.request.ID, &f.store.acquired); e != nil {
-			t.Fatal("Cancel revoked active owner", e)
+		e = f.peer.(kernel.ExecutionStore).CheckExecution(ctx, f.request.ID, &f.store.acquired)
+		if entered && e != nil || !entered && (!errors.Is(e, kernel.ErrExecutionConflict) || !errors.Is(e, kernel.ErrChildExecutionBusy)) {
+			t.Fatal("Cancel changed original entry qualification", e)
 		}
 		m, n := f.physical.counts()
 		if m != 0 || n != 0 {
@@ -172,10 +173,10 @@ func ea1RootCancelActive(t *testing.T, factory func(*testing.T) (kernel.Store, k
 		if f.host.calls != 0 {
 			t.Fatal("late admission cut")
 		}
-		check(ctx)
+		check(ctx, false)
 		return nil
 	}
-	f.host.before = func(ctx context.Context) error { check(ctx); return nil }
+	f.host.before = func(ctx context.Context) error { check(ctx, true); return nil }
 	out, e := f.runner(f.rt, "original", true).Resume(t.Context(), f.request.ID, f.prepared.Run.Revision)
 	if e != nil || hits != 2 || f.host.calls != 1 {
 		t.Fatalf("original callback could not finish: %v", e)

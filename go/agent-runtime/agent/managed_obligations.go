@@ -210,7 +210,7 @@ func (r *Runner) qualifyManagedFrontier(ctx context.Context, t kernel.ManagedTra
 	if err != nil {
 		return empty, nil, err
 	}
-	if t.LegacyState != "" || t.Terminal != nil || t.Selection.Mode != "" || t.SuccessorGrant.ID != "" || p.Phase != "pending" ||
+	if !t.Native() || t.Terminal != nil || t.Selection.Mode != "" || t.SuccessorGrant.ID != "" || p.Phase != "pending" ||
 		p.RequalifiedFrom != "" {
 		return empty, nil, ErrRootOutcomeUnknown
 	}
@@ -334,7 +334,7 @@ func (r *Runner) authorizeManagedFrontier(ctx context.Context, t kernel.ManagedT
 		selected, err := r.runtime.AuthorizeQualifiedManagedContinuation(ctx, t, point, proof, cancelReason...)
 		return selected, p, err
 	}
-	p, err = r.preflightCombinedManaged(ctx, t, current)
+	p, err = r.preflightManagedPoint(ctx, t.SafePoint, current)
 	if err != nil {
 		return empty, p, err
 	}
@@ -384,18 +384,15 @@ func (r *Runner) recoverManagedModelFrontier(ctx context.Context, s kernel.Snaps
 		Events: []kernel.EventDraft{{Type: "agent.model_invocation.retryable", Message: inv.ID, Wakeup: true}}})
 }
 
-func (r *Runner) preflightCombinedManaged(ctx context.Context, t kernel.ManagedTransfer, current kernel.Snapshot) (managedObligations, error) {
-	p, err := r.validateManagedObligations(t.SafePoint)
+func (r *Runner) preflightManagedPoint(ctx context.Context, point kernel.ManagedSafePoint, current kernel.Snapshot) (managedObligations, error) {
+	p, err := r.validateManagedObligations(point)
 	if err != nil {
 		return p, err
 	}
-	if t.Resolved() {
-		return p, nil
-	}
-	if !kernel.ManagedSourceMatches(t.SafePoint, current) {
+	if !kernel.ManagedSourceMatches(point, current) {
 		return p, errors.Join(ErrRootOutcomeUnknown, kernel.ErrExecutionConflict)
 	}
-	l, err := r.checkManagedLedger(ctx, p, t.SafePoint.Host.RunID)
+	l, err := r.checkManagedLedger(ctx, p, point.Host.RunID)
 	if err != nil {
 		return p, err
 	}
@@ -404,7 +401,7 @@ func (r *Runner) preflightCombinedManaged(ctx context.Context, t kernel.ManagedT
 		if e != nil {
 			return p, e
 		}
-		if _, err = r.readManagedPreparationContext(ctx, t.SafePoint.Host, p.PreparationContext, state); err != nil {
+		if _, err = r.readManagedPreparationContext(ctx, point.Host, p.PreparationContext, state); err != nil {
 			return p, err
 		}
 		if p.LedgerID != "" && !managedPreparationLedger(state, l) {

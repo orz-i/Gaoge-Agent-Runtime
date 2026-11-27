@@ -31,10 +31,7 @@ func (s *MemoryStore) readManagedOriginalLocked(b kernel.ManagedHostBinding) err
 			}
 		}
 	}
-	if err = ValidateManagedOriginalRows(s.managedAuthority, b, s.sessions[t.SessionID], t, i, s.configs[t.ConfigSnapshotID], s.itemIDs[b.DispatchID], items); err != nil {
-		return err
-	}
-	return nil
+	return ValidateManagedOriginalRows(s.managedAuthority, b, s.sessions[t.SessionID], t, i, s.configs[t.ConfigSnapshotID], s.itemIDs[b.DispatchID], items)
 }
 func (s *MemoryStore) VerifyManagedOriginalDispatch(ctx context.Context, b kernel.ManagedHostBinding, _ bool) error {
 	if !b.Valid() {

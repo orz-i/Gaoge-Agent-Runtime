@@ -121,19 +121,28 @@ func (s *Store) CheckOwnedPhysicalEntry(ctx context.Context, g kernel.ChildExecu
 		if transfer.SafePoint.Host.KernelAuthority != a {
 			return kernel.OwnedPhysicalEntryWindow{}, kernel.ErrExecutionConflict
 		}
-		result, e := tx.ExecContext(ctx, "UPDATE runtime_runs SET execution_physical_epoch=? WHERE run_id=? AND execution_epoch=? AND execution_physical_epoch<?", g.ExecutionEpoch, g.ChildRunID, g.ExecutionEpoch, g.ExecutionEpoch)
-		if e != nil {
-			return kernel.OwnedPhysicalEntryWindow{}, e
-		}
-		n, e := result.RowsAffected()
-		if e != nil || n != 1 {
-			return kernel.OwnedPhysicalEntryWindow{}, errors.Join(kernel.ErrExecutionConflict, e)
-		}
-		if err = tx.Commit(); err != nil {
-			return kernel.OwnedPhysicalEntryWindow{}, conflictOrDatabaseError(err)
-		}
+	}
+	if err = advanceOwnedEntryEpoch(ctx, tx, g); err != nil {
+		return kernel.OwnedPhysicalEntryWindow{}, err
+	}
+	if err = tx.Commit(); err != nil {
+		return kernel.OwnedPhysicalEntryWindow{}, conflictOrDatabaseError(err)
 	}
 	return window, nil
+}
+
+// A successful entry and a sealed original no-entry return consume the
+// same epoch watermark, in their respective original transactions.
+func advanceOwnedEntryEpoch(ctx context.Context, tx *sql.Tx, g kernel.ChildExecutionGrant) error {
+	result, e := tx.ExecContext(ctx, "UPDATE runtime_runs SET execution_physical_epoch=? WHERE run_id=? AND execution_epoch=? AND execution_physical_epoch<?", g.ExecutionEpoch, g.ChildRunID, g.ExecutionEpoch, g.ExecutionEpoch)
+	if e != nil {
+		return conflictOrDatabaseError(e)
+	}
+	n, e := result.RowsAffected()
+	if e != nil || n != 1 {
+		return errors.Join(kernel.ErrExecutionConflict, e)
+	}
+	return nil
 }
 
 func (s *Store) RecordOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, revision uint64, outcome kernel.OwnedPhysicalCallbackOutcome, permit kernel.OwnedPhysicalCallbackReturn) error {
@@ -156,9 +165,6 @@ func (s *Store) RecordOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.
 	if err != nil {
 		return err
 	}
-	if err = sqliteNativeEntryGate(ctx, tx, g.ChildRunID); err != nil {
-		return err
-	}
 	native, _, err := sqliteManagedLease(ctx, tx, g.ChildRunID)
 	if err != nil {
 		return err
@@ -167,7 +173,11 @@ func (s *Store) RecordOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.
 	if err != nil && !errors.Is(err, kernel.ErrNotFound) {
 		return err
 	}
-	completion, write, err := kernel.ReduceOwnedPhysicalCallbackReturn(g, current, native, revision, outcome, permit, existing, marked)
+	var physicalEpoch uint64
+	if err = tx.QueryRowContext(ctx, "SELECT execution_physical_epoch FROM runtime_runs WHERE run_id=?", g.ChildRunID).Scan(&physicalEpoch); err != nil {
+		return conflictOrDatabaseError(err)
+	}
+	completion, write, err := kernel.ReduceOwnedPhysicalCallbackReturn(g, current, native, revision, outcome, permit, existing, marked, physicalEpoch)
 	if err != nil || !write {
 		return err
 	}
@@ -181,6 +191,11 @@ func (s *Store) RecordOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.
 	}
 	if n != 1 {
 		return kernel.ErrExecutionConflict
+	}
+	if physicalEpoch < g.ExecutionEpoch {
+		if err = advanceOwnedEntryEpoch(ctx, tx, g); err != nil {
+			return err
+		}
 	}
 	return conflictOrDatabaseError(tx.Commit())
 }

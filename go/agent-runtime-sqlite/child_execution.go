@@ -384,8 +384,9 @@ func (s *Store) BeginOwnedPhysicalExecution(ctx context.Context, permit kernel.O
 		}
 	}
 	g = v.Grant
-	if !permit.IsManagedRecovery() {
-		physicalEpoch = g.ExecutionEpoch
+	physicalEpoch, e = kernel.PrepareOwnedEntryEpoch(g, native.Epoch, physicalEpoch)
+	if e != nil {
+		return zero, e
 	}
 	_, e = tx.ExecContext(ctx, `INSERT INTO runtime_child_effect_grants(grant_id,parent_run_id,child_run_id,start_revision,execution_owner_id,execution_lease_id,execution_epoch,admission_source_hash,admission_operation) VALUES(?,?,?,?,?,?,?,?,?)`, g.ID, g.ChildRunID, g.ChildRunID, g.ExpectedRevision, g.ExecutionOwnerID, g.ExecutionLeaseID, g.ExecutionEpoch, g.AdmissionSourceHash, g.AdmissionOperation)
 	if e != nil {
@@ -395,7 +396,7 @@ func (s *Store) BeginOwnedPhysicalExecution(ctx context.Context, permit kernel.O
 	if permit.AcquiresLease() {
 		changed, e = tx.ExecContext(ctx, `UPDATE runtime_runs SET execution_physical_epoch=?,execution_epoch=?,execution_owner=?,execution_lease_id=?,execution_expiry_ms=? WHERE run_id=? AND revision=? AND execution_epoch=?`, physicalEpoch, v.Lease.Epoch, v.Lease.OwnerID, v.Lease.LeaseID, v.Lease.ExpiresAt.UnixMilli(), g.ChildRunID, current.Run.Revision, native.Epoch)
 	} else {
-		changed, e = tx.ExecContext(ctx, `UPDATE runtime_runs SET execution_physical_epoch=? WHERE run_id=? AND revision=? AND execution_epoch=?`, g.ExecutionEpoch, g.ChildRunID, current.Run.Revision, native.Epoch)
+		changed, e = tx.ExecContext(ctx, `UPDATE runtime_runs SET execution_physical_epoch=? WHERE run_id=? AND revision=? AND execution_epoch=?`, physicalEpoch, g.ChildRunID, current.Run.Revision, native.Epoch)
 	}
 	if e != nil {
 		return zero, conflictOrDatabaseError(e)

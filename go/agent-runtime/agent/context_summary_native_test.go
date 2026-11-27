@@ -195,12 +195,12 @@ func summaryNativePointFixture(t *testing.T, completed bool) (*Runner, *summaryN
 	authority := kernel.ManagedAuthority{Namespace: strings.Repeat("1", 64), Generation: 1, Version: 1}
 	hostAuthority := kernel.ManagedAuthority{Namespace: strings.Repeat("2", 64), Generation: 1, Version: 1}
 	lease := kernel.ExecutionLease{RunID: request.ID, OwnerID: "owner", LeaseID: "lease", Epoch: 1, ExpiresAt: time.Now().Add(time.Hour)}
-	grantID, _ := kernel.OwnedPhysicalDispatchGrantID(request.ID, "start", "original-dispatch")
+	grantID, _ := kernel.OwnedPhysicalDispatchGrantID(request.ID, "start", "nativecmd_original-dispatch")
 	grant := kernel.ChildExecutionGrant{ID: grantID, ChildRunID: request.ID, ExpectedRevision: 1, ExecutionOwnerID: lease.OwnerID, ExecutionLeaseID: lease.LeaseID, ExecutionEpoch: lease.Epoch,
 		AdmissionOperation: "start", AdmissionSourceHash: strings.Repeat("d", 64)}
 	host := kernel.ManagedHostBinding{KernelAuthority: authority, HostAuthority: hostAuthority, TurnID: invocation.ContextSummary.Cursor.Turn.ID,
 		InvocationID: invocation.ContextSummary.Root.InvocationID, Attempt: uint32(invocation.ContextSummary.Root.Attempt), RunID: request.ID,
-		DispatchID: "original-dispatch", Phase: "start", Source: json.RawMessage(`{"original":true}`)}
+		DispatchID: "nativecmd_original-dispatch", Phase: "start", Source: json.RawMessage(`{"original":true}`)}
 	lifecycle, err := json.Marshal(kernel.ManagedAgentObligations{Phase: string(invocation.Status), Purpose: ModelInvocationContextSummary, SourceRevision: snapshot.Run.Revision, InvocationID: invocation.ID, RequestHash: invocation.RequestHash, SamplingDigest: kernel.ManagedDigest(invocation.SamplingPlan), BindingDigest: kernel.ManagedDigest(invocation.ContextSummary), Journal: json.RawMessage(`{"returned":"source"}`)})
 	if err != nil {
 		t.Fatal(err)
@@ -249,7 +249,7 @@ func TestContextSummaryNativeRejectsInvalidSourceBeforePark(t *testing.T) {
 				trap.transfer.SafePoint.Source.State, _ = encodeState(state)
 			}
 			before := append(json.RawMessage(nil), trap.current.State...)
-			_, _, err := runner.RecoverManagedContinuation(t.Context(), trap.current.Run.ID)
+			_, _, err := runner.RecoverManagedContinuation(t.Context(), trap.transfer)
 			if err == nil || trap.admissions != 0 || !reflect.DeepEqual(before, trap.current.State) {
 				t.Fatalf("invalid phase mutated before rejection: err=%v admissions=%d", err, trap.admissions)
 			}
@@ -260,6 +260,11 @@ func TestContextSummaryNativeRejectsInvalidSourceBeforePark(t *testing.T) {
 func TestContextSummaryNativeUnknownDispatchAndSecondPhaseStayFenced(t *testing.T) {
 	for _, secondPhase := range []bool{false, true} {
 		runner, trap := summaryNativePointFixture(t, secondPhase)
+		stale := trap.transfer
+		stale.Revision++
+		if _, _, e := runner.RecoverManagedContinuation(t.Context(), stale); !errors.Is(e, kernel.ErrExecutionConflict) || trap.admissions != 0 {
+			t.Fatalf("stale original transfer selected a later dispatch: %v", e)
+		}
 		state, err := decodeState(trap.current.State)
 		if err != nil {
 			t.Fatal(err)
@@ -287,7 +292,7 @@ func TestContextSummaryNativeUnknownDispatchAndSecondPhaseStayFenced(t *testing.
 		if secondPhase && !errors.Is(qualificationErr, ErrRootOutcomeUnknown) || !secondPhase && !errors.Is(qualificationErr, ErrModelOutcomeUnknown) {
 			t.Fatalf("unsafe qualification: %v", qualificationErr)
 		}
-		_, _, recoveryErr := runner.RecoverManagedContinuation(t.Context(), trap.current.Run.ID)
+		_, _, recoveryErr := runner.RecoverManagedContinuation(t.Context(), trap.transfer)
 		if recoveryErr == nil || trap.admissions != 0 || !reflect.DeepEqual(before, trap.current) {
 			t.Fatalf("unsupported phase got transfer or rewrite: second=%v err=%v admissions=%d", secondPhase, recoveryErr, trap.admissions)
 		}

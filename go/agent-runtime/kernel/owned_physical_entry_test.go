@@ -26,12 +26,9 @@ func TestOwnedPhysicalEntryOperationAndAuthority(t *testing.T) {
 					point := original.SafePoint
 					point.Source = s
 					selection := ManagedRecoveryAuthorization{Mode: ManagedResume}
-					transfer = ManagedTransfer{SuccessorGrant: a, SuccessorLease: lease, SafePoint: point, Selection: selection, Revision: 3, Generation: 2}
+					transfer = ManagedTransfer{SuccessorGrant: a, SuccessorLease: lease, SafePoint: point, Selection: selection, Revision: 3}
 				}
-				epoch := a.ExecutionEpoch
-				if op == "managed_resume" {
-					epoch--
-				}
+				epoch := a.ExecutionEpoch - 1
 				w, e := ValidateOwnedPhysicalEntry(a, s, s, lease, lease, now, false, epoch, 0, OwnedPhysicalCallbackCompletion{}, transfer)
 				want := ((op == "start" || op == "prepare" || op == "resume" || op == "managed_resume") && status == RunStatusRunning) || (op == "approval" && status == RunStatusWaitingInput)
 				if (e == nil) != want || (want && w.LeaseRemaining != time.Minute) {
@@ -54,6 +51,9 @@ func TestOwnedPhysicalEntryOperationAndAuthority(t *testing.T) {
 		{"foreign owner", func(_, _ *Snapshot, l *ExecutionLease, _, _ *uint64, _ *OwnedPhysicalCallbackCompletion, _ *ManagedTransfer, _ *bool) {
 			l.OwnerID = "foreign"
 		}, ErrExecutionConflict},
+		{"already entered", func(_, _ *Snapshot, _ *ExecutionLease, p, _ *uint64, _ *OwnedPhysicalCallbackCompletion, _ *ManagedTransfer, _ *bool) {
+			*p = g.ExecutionEpoch
+		}, ErrExecutionConflict},
 		{"physical epoch changed", func(_, _ *Snapshot, _ *ExecutionLease, p, _ *uint64, _ *OwnedPhysicalCallbackCompletion, _ *ManagedTransfer, _ *bool) {
 			*p = 3
 		}, ErrExecutionConflict},
@@ -71,7 +71,7 @@ func TestOwnedPhysicalEntryOperationAndAuthority(t *testing.T) {
 		}, ErrExecutionConflict},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			a, b, l, p, m, c, transfer, q := base, base, lease, g.ExecutionEpoch, uint64(0), OwnedPhysicalCallbackCompletion{}, ManagedTransfer{}, false
+			a, b, l, p, m, c, transfer, q := base, base, lease, g.ExecutionEpoch-1, uint64(0), OwnedPhysicalCallbackCompletion{}, ManagedTransfer{}, false
 			tc.alter(&a, &b, &l, &p, &m, &c, &transfer, &q)
 			if w, e := ValidateOwnedPhysicalEntry(g, a, b, lease, l, now, q, p, m, c, transfer); !errors.Is(e, tc.want) || w != (OwnedPhysicalEntryWindow{}) {
 				t.Fatalf("invalid entry: %+v %v", w, e)
@@ -82,7 +82,7 @@ func TestOwnedPhysicalEntryOperationAndAuthority(t *testing.T) {
 	// first-party receipt-only path may use this distinction.
 	due := now.Add(-time.Second)
 	base.Run.DeadlineAt = &due
-	window, err := ValidateOwnedPhysicalEntry(g, base, base, lease, lease, now, false, g.ExecutionEpoch, 0, OwnedPhysicalCallbackCompletion{}, ManagedTransfer{})
+	window, err := ValidateOwnedPhysicalEntry(g, base, base, lease, lease, now, false, g.ExecutionEpoch-1, 0, OwnedPhysicalCallbackCompletion{}, ManagedTransfer{})
 	if err != nil || window.DeadlineRemaining != -time.Second || window.LeaseRemaining != time.Minute {
 		t.Fatalf("deadline observation: %+v %v", window, err)
 	}

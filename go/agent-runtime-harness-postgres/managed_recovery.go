@@ -52,55 +52,52 @@ func (s *Store) ManagedRecoveryAuthority(ctx context.Context) (kernel.ManagedAut
 	}
 	return a, nil
 }
-func managedRows(tx *gorm.DB, b kernel.ManagedHostBinding) (harness.Turn, harness.Invocation, []harness.Item, error) {
+func verifyManagedRows(tx *gorm.DB, b kernel.ManagedHostBinding) error {
 	s := &Store{db: tx}
 	ctx := tx.Statement.Context
 	a, err := s.ManagedRecoveryAuthority(ctx)
 	if err != nil {
-		return harness.Turn{}, harness.Invocation{}, nil, err
+		return err
 	}
 	t, err := s.GetTurn(ctx, b.TurnID)
 	if err != nil {
-		return t, harness.Invocation{}, nil, err
+		return err
 	}
 	session, err := s.GetSession(ctx, t.SessionID)
 	if err != nil {
-		return t, harness.Invocation{}, nil, err
+		return err
 	}
 	inv, err := s.GetInvocation(ctx, b.InvocationID)
 	if err != nil {
-		return t, inv, nil, err
+		return err
 	}
 	config, err := s.GetConfigSnapshot(ctx, t.ConfigSnapshotID)
 	if err != nil {
-		return t, inv, nil, err
+		return err
 	}
 	dispatch, found, err := findItem(tx, b.DispatchID)
 	if err != nil {
-		return t, inv, nil, err
+		return err
 	}
-	if found || !b.DirectNativeCommand() {
-		return t, inv, nil, harness.ErrConflict
+	if found {
+		return harness.ErrConflict
 	}
 	// Include globally keyed children of original dispatch/cancellation facts,
 	// so damaged foreign-Turn siblings cannot disappear from verification.
 	var rows []itemRecord
 	parents := tx.Model(&itemRecord{}).Select("id").Where("turn_id = ?", b.TurnID)
 	if err = tx.Where("turn_id = ? OR parent_item_id IN (?)", b.TurnID, parents).Order("seq ASC").Find(&rows).Error; err != nil {
-		return t, inv, nil, err
+		return err
 	}
 	items := make([]harness.Item, 0, len(rows))
 	for _, row := range rows {
 		item, e := itemFromRecord(row)
 		if e != nil {
-			return t, inv, nil, e
+			return e
 		}
 		items = append(items, item)
 	}
-	if err = harness.ValidateManagedOriginalRows(a, b, session, t, inv, config, dispatch, items); err != nil {
-		return t, inv, nil, err
-	}
-	return t, inv, items, nil
+	return harness.ValidateManagedOriginalRows(a, b, session, t, inv, config, dispatch, items)
 }
 func (s *Store) VerifyManagedOriginalDispatch(ctx context.Context, b kernel.ManagedHostBinding, _ bool) error {
 	if !b.Valid() {
@@ -110,8 +107,7 @@ func (s *Store) VerifyManagedOriginalDispatch(ctx context.Context, b kernel.Mana
 		if e := lockTurn(tx, b.TurnID); e != nil {
 			return e
 		}
-		_, _, _, e := managedRows(tx, b)
-		return e
+		return verifyManagedRows(tx, b)
 	})
 }
 

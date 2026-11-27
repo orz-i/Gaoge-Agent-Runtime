@@ -76,7 +76,7 @@ func (r *Runner) ensureManagedPreparation(ctx context.Context, s kernel.Snapshot
 		return s, nil
 	}
 	current, err := r.runtime.LoadManagedRecovery(ctx, s.Run.ID)
-	if err == nil && current.LegacyState == "" && current.Selection.Mode == "" && current.Terminal == nil && current.SafePoint.OriginalGrant == *r.activeRootGrant &&
+	if err == nil && current.Native() && current.Selection.Mode == "" && current.Terminal == nil && current.SafePoint.OriginalGrant == *r.activeRootGrant &&
 		kernel.ManagedSourceMatches(current.SafePoint, s) {
 		if o, ok := current.SafePoint.AgentObligations(); ok && o.Phase == "prepare" {
 			return s, nil

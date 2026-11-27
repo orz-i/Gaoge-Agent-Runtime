@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"math"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
@@ -64,14 +65,27 @@ var _ kernel.ManagedRecoveryStore = (*Store)(nil)
 
 func (s *Store) nativeEntryGateLocked(runID string) error {
 	native := s.execution[runID]
+	pending := false
 	for id := range s.childGrantOwners[runID] {
 		g, ok := s.childGrants[id]
 		if !ok {
 			return kernel.ErrExecutionConflict
 		}
-		if g.grant.ChildRunID == runID && g.grant.IsOwned() && (g.grant.ExecutionEpoch != native.epoch || g.grant.ExecutionEpoch != native.physicalEpoch) {
+		if g.grant.ChildRunID != runID || !g.grant.IsOwned() {
+			continue
+		}
+		if g.grant.ExecutionEpoch != native.epoch || native.physicalEpoch > native.epoch {
 			return kernel.ErrExecutionConflict
 		}
+		if native.physicalEpoch < native.epoch {
+			if pending || native.quarantineRev != 0 || !g.grant.MatchesExecution(native.lease) {
+				return kernel.ErrExecutionConflict
+			}
+			pending = true
+		}
+	}
+	if pending {
+		return errors.Join(kernel.ErrExecutionConflict, kernel.ErrChildExecutionBusy)
 	}
 	return nil
 }

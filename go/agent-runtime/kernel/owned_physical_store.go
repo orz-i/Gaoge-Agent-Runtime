@@ -85,13 +85,14 @@ func ValidateOwnedPhysicalCompletion(g ChildExecutionGrant, c OwnedPhysicalCallb
 // completion or accept its identical replay. Stores supply the exact original
 // active grant and its facts under the same transaction as the conditional
 // write. Expiry is not a reason to discard an original callback return.
-func ReduceOwnedPhysicalCallbackReturn(g ChildExecutionGrant, current Snapshot, persisted ExecutionLease, revision uint64, outcome OwnedPhysicalCallbackOutcome, permit OwnedPhysicalCallbackReturn, existing OwnedPhysicalCallbackCompletion, settled uint64) (OwnedPhysicalCallbackCompletion, bool, error) {
-	if current.Run.Revision != revision || !g.MatchesExecution(persisted) || !permit.Matches(g, current, outcome) {
+func ReduceOwnedPhysicalCallbackReturn(g ChildExecutionGrant, current Snapshot, persisted ExecutionLease, revision uint64, outcome OwnedPhysicalCallbackOutcome, permit OwnedPhysicalCallbackReturn, existing OwnedPhysicalCallbackCompletion, settled, physicalEpoch uint64) (OwnedPhysicalCallbackCompletion, bool, error) {
+	if current.Run.Revision != revision || !g.MatchesExecution(persisted) || !permit.Matches(g, current, outcome) ||
+		physicalEpoch > g.ExecutionEpoch || (physicalEpoch != g.ExecutionEpoch && outcome.ControlCustody != OwnedCustodyNotEntered) {
 		return OwnedPhysicalCallbackCompletion{}, false, ErrExecutionConflict
 	}
 	next := permit.Completion(g, current, outcome)
 	if existing != (OwnedPhysicalCallbackCompletion{}) {
-		if ValidateOwnedPhysicalCompletion(g, existing) != nil || existing != next {
+		if physicalEpoch != g.ExecutionEpoch || ValidateOwnedPhysicalCompletion(g, existing) != nil || existing != next {
 			return OwnedPhysicalCallbackCompletion{}, false, ErrExecutionConflict
 		}
 		return existing, false, nil

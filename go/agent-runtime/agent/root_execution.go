@@ -2,8 +2,6 @@ package agent
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"math"
 	"sync/atomic"
@@ -203,33 +201,13 @@ func (runner *Runner) executeOwnedRoot(ctx context.Context, current kernel.Snaps
 			outcome.ControlCustody = kernel.OwnedBoundedApprovalReturn
 		}
 	}
-	payload := kernel.OwnedPhysicalCallbackReturnPayload(latest, outcome)
-	returned := featurecontrol.Seal(latest.Run.ID, latest.Run.Revision, "agent_owned_callback_return", grant.ID, payload, nil)
-	hash := sha256.Sum256(payload)
-	completion := kernel.OwnedPhysicalCallbackCompletion{
-		GrantID: grant.ID, ReturnRevision: latest.Run.Revision, ReturnSourceHash: hex.EncodeToString(hash[:]),
-		HostCompleted: hostComplete, LeaseOwned: !external,
-		ControlCustody: outcome.ControlCustody, ToolReturns: outcome.ToolReturns,
+	completion, retired, err := recordOwnedRootReturn(cleanup, scopedRT, grant, latest, outcome, settled)
+	if err != nil {
+		return latest, errors.Join(callErr, ErrRootOutcomeUnknown, err)
 	}
-	// The actual whole callback owns this fact, including the fast-known path.
-	// Persist it before Finish so any competing recovery retains the same original
-	// lease disposition. Public state or a clean receipt cannot manufacture it.
-	if recordErr := scopedRT.RecordOwnedPhysicalCallbackReturn(cleanup, grant, latest.Run.Revision, outcome, returned); recordErr != nil {
-		if settled {
-			if found, ackErr := observeExactOwnedRetirement(cleanup, scopedRT, grant, latest, &completion); found {
-				if ackErr != nil {
-					return latest, errors.Join(callErr, ErrRootOutcomeUnknown, recordErr, ackErr)
-				}
-				recordPhysicalObservation(ctx, latest.Run.ID, PhysicalCallSettled)
-				return latest, callErr
-			}
-		}
-		// A lost Record ACK may leave the identical immutable fact on the active
-		// grant. Only that exact fact allows this call to continue.
-		stored, lookupErr := scopedRT.LookupOwnedPhysicalCallbackReturn(cleanup, grant)
-		if lookupErr != nil || stored != completion {
-			return latest, errors.Join(callErr, ErrRootOutcomeUnknown, recordErr, lookupErr)
-		}
+	if retired {
+		recordPhysicalObservation(ctx, latest.Run.ID, PhysicalCallSettled)
+		return latest, callErr
 	}
 	if !settled {
 		// The enclosing native call has really returned. The Kernel grant still
@@ -263,28 +241,44 @@ func (runner *Runner) retireUnenteredOwnedRoot(ctx context.Context, rt *kernel.R
 	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 	defer cancel()
 	outcome := kernel.OwnedPhysicalCallbackOutcome{LeaseOwned: !external, ControlCustody: kernel.OwnedCustodyNotEntered}
-	payload := kernel.OwnedPhysicalCallbackReturnPayload(source, outcome)
-	proof := featurecontrol.Seal(source.Run.ID, source.Run.Revision, "agent_owned_callback_not_entered", g.ID, payload, nil)
-	hash := sha256.Sum256(payload)
-	completion := kernel.OwnedPhysicalCallbackCompletion{GrantID: g.ID, ReturnRevision: source.Run.Revision, ReturnSourceHash: hex.EncodeToString(hash[:]), LeaseOwned: !external, ControlCustody: outcome.ControlCustody}
-	if err := rt.RecordOwnedPhysicalCallbackReturn(cleanup, g, source.Run.Revision, outcome, proof); err != nil {
-		if found, ackErr := observeExactOwnedRetirement(cleanup, rt, g, source, &completion); found {
-			if ackErr == nil {
-				recordPhysicalObservation(ctx, g.ChildRunID, PhysicalCallNotEntered)
-				return cause
-			}
-			return errors.Join(cause, ErrRootOutcomeUnknown, err, ackErr)
-		}
-		stored, lookupErr := rt.LookupOwnedPhysicalCallbackReturn(cleanup, g)
-		if lookupErr != nil || stored != completion {
-			return errors.Join(cause, ErrRootOutcomeUnknown, err, lookupErr)
-		}
-	}
-	if err := settleOwnedRoot(cleanup, rt, g, source, &completion); err != nil {
+	completion, retired, err := recordOwnedRootReturn(cleanup, rt, g, source, outcome, true)
+	if err != nil {
 		return errors.Join(cause, ErrRootOutcomeUnknown, err)
+	}
+	if !retired {
+		if err := settleOwnedRoot(cleanup, rt, g, source, &completion); err != nil {
+			return errors.Join(cause, ErrRootOutcomeUnknown, err)
+		}
 	}
 	recordPhysicalObservation(ctx, g.ChildRunID, PhysicalCallNotEntered)
 	return cause
+}
+
+// Record the exact original return before Finish. Both callback and no-entry
+// retirement recover a lost write ACK only from the same immutable completion.
+func recordOwnedRootReturn(ctx context.Context, rt *kernel.Runtime, g kernel.ChildExecutionGrant, s kernel.Snapshot, o kernel.OwnedPhysicalCallbackOutcome, settled bool) (kernel.OwnedPhysicalCallbackCompletion, bool, error) {
+	domain := "agent_owned_callback_return"
+	if o.ControlCustody == kernel.OwnedCustodyNotEntered {
+		domain = "agent_owned_callback_not_entered"
+	}
+	payload := kernel.OwnedPhysicalCallbackReturnPayload(s, o)
+	proof := featurecontrol.Seal(s.Run.ID, s.Run.Revision, domain, g.ID, payload, nil)
+	c := kernel.OwnedPhysicalCallbackCompletion{GrantID: g.ID, ReturnRevision: s.Run.Revision, ReturnSourceHash: kernel.ManagedDigest(payload), HostCompleted: o.HostCompleted, LeaseOwned: o.LeaseOwned, ControlCustody: o.ControlCustody, ToolReturns: o.ToolReturns}
+	if err := rt.RecordOwnedPhysicalCallbackReturn(ctx, g, s.Run.Revision, o, proof); err != nil {
+		if settled {
+			if found, ackErr := observeExactOwnedRetirement(ctx, rt, g, s, &c); found {
+				if ackErr != nil {
+					return c, false, errors.Join(err, ackErr)
+				}
+				return c, true, nil
+			}
+		}
+		stored, lookupErr := rt.LookupOwnedPhysicalCallbackReturn(ctx, g)
+		if lookupErr != nil || stored != c {
+			return c, false, errors.Join(err, lookupErr)
+		}
+	}
+	return c, false, nil
 }
 
 // ReconcileRootPhysicalExecution consumes the existing native retirement

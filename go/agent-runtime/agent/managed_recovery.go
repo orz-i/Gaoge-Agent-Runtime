@@ -68,29 +68,33 @@ func (r *Runner) managedTransitionPoint(inv ModelInvocation, binding kernel.Mana
 // It resumes only the exact persisted concrete continuation, after Kernel-first
 // read-only authorization and native mode admission. The common native callback-entry
 // transaction consumes the successor's recovery qualification before entry.
-func (r *Runner) RecoverManagedContinuation(ctx context.Context, id string) (kernel.Snapshot, kernel.ManagedClosureProof, error) {
-	return r.recoverManagedContinuation(ctx, id, "", "")
+func (r *Runner) RecoverManagedContinuation(ctx context.Context, original kernel.ManagedTransfer) (kernel.Snapshot, kernel.ManagedClosureProof, error) {
+	return r.recoverManagedContinuation(ctx, original, "", "")
 }
 
 // CancelManagedContinuation is the explicitly authorized native cancellation
 // command. The Store arbitrates it against successor admission.
-func (r *Runner) CancelManagedContinuation(ctx context.Context, id, reason string) (kernel.Snapshot, kernel.ManagedClosureProof, error) {
-	return r.recoverManagedContinuation(ctx, id, kernel.ManagedCancel, reason)
+func (r *Runner) CancelManagedContinuation(ctx context.Context, original kernel.ManagedTransfer, reason string) (kernel.Snapshot, kernel.ManagedClosureProof, error) {
+	return r.recoverManagedContinuation(ctx, original, kernel.ManagedCancel, reason)
 }
 
-func (r *Runner) recoverManagedContinuation(ctx context.Context, id string, requiredMode kernel.ManagedRecoveryMode, reason string) (kernel.Snapshot, kernel.ManagedClosureProof, error) {
+func (r *Runner) recoverManagedContinuation(ctx context.Context, original kernel.ManagedTransfer, requiredMode kernel.ManagedRecoveryMode, reason string) (kernel.Snapshot, kernel.ManagedClosureProof, error) {
 	if !r.SupportsManagedRecovery() {
 		return kernel.Snapshot{}, kernel.ManagedClosureProof{}, ErrRootOutcomeUnknown
 	}
+	id := original.SafePoint.Host.RunID
 	current, err := r.runtime.LoadManagedRecovery(ctx, id)
 	if err != nil {
 		return kernel.Snapshot{}, kernel.ManagedClosureProof{}, err
 	}
+	if !current.Native() || kernel.ManagedDigest(current) != kernel.ManagedDigest(original) {
+		return kernel.Snapshot{}, kernel.ManagedClosureProof{}, kernel.ErrExecutionConflict
+	}
 	if expected, ok := r.runtime.ManagedDispatch(ctx, id); ok && kernel.ManagedDigest(expected) != kernel.ManagedDigest(current.SafePoint.Host) {
 		return kernel.Snapshot{}, kernel.ManagedClosureProof{}, kernel.ErrExecutionConflict
 	}
-	if err = r.verifyManagedApproval(ctx, current.SafePoint.Host); err != nil {
-		return kernel.Snapshot{}, kernel.ManagedClosureProof{}, err
+	if err = r.runtime.VerifyManagedApproval(ctx, current.SafePoint.Host); err != nil {
+		return kernel.Snapshot{}, kernel.ManagedClosureProof{}, errors.Join(ErrRootOutcomeUnknown, err)
 	}
 	if _, err = r.validateManagedObligations(current.SafePoint); err != nil {
 		return kernel.Snapshot{}, kernel.ManagedClosureProof{}, err
@@ -142,11 +146,6 @@ func (r *Runner) recoverManagedContinuation(ctx context.Context, id string, requ
 		p, e := r.runtime.ManagedRecoveryClosure(ctx, t.SafePoint.ID)
 		return p.Snapshot(), p, e
 	}
-	// The selected RESUME must still see the exact original, noncancelled
-	// ledger; a cancelled or missing quota source cannot elect an owner.
-	if _, err = r.checkManagedLedger(ctx, obligations, id); err != nil {
-		return kernel.Snapshot{}, kernel.ManagedClosureProof{}, err
-	}
 	point := selected.Point()
 	scoped, v, err := r.runtime.AdmitManagedContinuation(ctx, selected, r.runExecution.OwnerID, r.runExecution.LeaseDuration)
 	if err != nil {
@@ -156,20 +155,14 @@ func (r *Runner) recoverManagedContinuation(ctx context.Context, id string, requ
 	if err != nil {
 		return kernel.Snapshot{}, kernel.ManagedClosureProof{}, err
 	}
+	// Admission reserves the exact original obligation. Recheck the
+	// same point before entry, including any read-only Context rollover.
+	if obligations, err = r.preflightManagedPoint(ctx, point, snapshot); err != nil {
+		return snapshot, kernel.ManagedClosureProof{}, err
+	}
 	state, err := decodeState(snapshot.State)
 	if err != nil {
 		return snapshot, kernel.ManagedClosureProof{}, err
-	}
-	if _, err = r.validateManagedObligations(point); err != nil || !kernel.ManagedSourceMatches(point, snapshot) {
-		return snapshot, kernel.ManagedClosureProof{}, errors.Join(ErrRootOutcomeUnknown, err)
-	}
-	if _, err = r.checkManagedLedger(ctx, obligations, id); err != nil {
-		return snapshot, kernel.ManagedClosureProof{}, err
-	}
-	if obligations.Phase == "prepare" {
-		if _, err = r.readManagedPreparationContext(ctx, point.Host, obligations.PreparationContext, state); err != nil {
-			return snapshot, kernel.ManagedClosureProof{}, err
-		}
 	}
 	// Rebind only the original stored dispatch. This is a storage read before
 	// native callback entry; it does not create a second physical dispatch.
@@ -200,15 +193,4 @@ func (r *Runner) recoverManagedContinuation(ctx context.Context, id string, requ
 		return result, kernel.ManagedClosureProof{}, errors.Join(runErr, ErrRootOutcomeUnknown, closureErr)
 	}
 	return result, closure, runErr
-}
-
-func (r *Runner) verifyManagedApproval(ctx context.Context, b kernel.ManagedHostBinding) error {
-	if b.Approval == nil {
-		return nil
-	}
-	applied, err := r.runtime.CommittedApprovalDispatch(ctx, b.RunID, b.DispatchID, *b.Approval)
-	if err != nil || !applied {
-		return errors.Join(ErrRootOutcomeUnknown, err)
-	}
-	return nil
 }

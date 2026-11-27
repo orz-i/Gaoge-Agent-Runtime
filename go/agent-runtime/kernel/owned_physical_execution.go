@@ -35,8 +35,8 @@ var ErrPhysicalAdmissionCommitUnknown = errors.New("kernel physical admission co
 // public Grant ID is already present. Only an actual COMMIT failure may be
 // returned through this attempt's OwnedPhysicalAdmission.CommitOutcome.
 // Observations and receipt-only recovery never grant fresh dispatch authority.
-// For managed_resume, CheckOwnedPhysicalEntry must atomically consume the
-// exact ENABLED frontier before acknowledging callback entry; no replay.
+// CheckOwnedPhysicalEntry atomically consumes the original Grant entry epoch
+// before acknowledging callback entry, including Managed successors; no replay.
 type OwnedPhysicalExecutionStore interface {
 	RecordOwnedPhysicalCallbackReturn(context.Context, ChildExecutionGrant, uint64, OwnedPhysicalCallbackOutcome, OwnedPhysicalCallbackReturn) error
 	LookupOwnedPhysicalCallbackReturn(context.Context, ChildExecutionGrant) (OwnedPhysicalCallbackCompletion, error)

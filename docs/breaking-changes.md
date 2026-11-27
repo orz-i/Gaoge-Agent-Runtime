@@ -204,12 +204,21 @@ ledger closure, revision-specific budget settlement APIs, and
 `ManagedRecoveryStore.LeaveManagedSafePoint`, `ManagedLeaveRequest`,
 `ManagedLeaveTransfer`, `CompleteManagedRecovery` and its completion proof
 are removed. Ordinary Model Claim advances the Run revision without a
-separate invalidation write. An admitted recovery successor has not entered
-until the native physical epoch reaches its Grant epoch. Custom
+separate invalidation write. Every admitted owned segment, ordinary or Managed,
+must consume its original entry epoch exactly once. Custom
 `OwnedPhysicalExecutionStore.CheckOwnedPhysicalEntry` implementations must
 advance that epoch atomically under the Run/lease/grant lock before returning
 success. A repeated entry or lost ACK is not permission to run another callback.
-Ordinary mutations are denied before native entry.
+Ordinary mutations are denied before native entry. A sealed original ordinary
+no-entry return closes that epoch without manufacturing a callback return.
+A Managed successor that has not consumed entry keeps the original obligations
+and selection; an entered successor with an uncertain outcome cannot re-enter.
+
+Agent `RecoverManagedContinuation` and `CancelManagedContinuation` now accept the
+observed native ManagedTransfer, not just a RunID. Recovery revalidates that
+exact transfer before any admission or result consumption. Retired Host
+reservation, activation and dispatch identities do not qualify native recovery;
+old wire records are not upgraded into executable or completion authority.
 
 `FinishChildExecution` now persists the native retirement receipt with the
 original recovery evidence, exact Grant removal and release of its own native

@@ -238,8 +238,9 @@ func ea1RootResumeBarrier(t *testing.T, factory func(*testing.T) (kernel.Store, 
 			if e != nil || same != g {
 				t.Fatal("competing control changed scope")
 			}
-			if e = f.peer.(kernel.ExecutionStore).CheckExecution(ctx, f.request.ID, &lease); e != nil {
-				t.Fatalf("original native authority revoked: %v", e)
+			e = f.peer.(kernel.ExecutionStore).CheckExecution(ctx, f.request.ID, &lease)
+			if hostEntered && e != nil || !hostEntered && (!errors.Is(e, kernel.ErrExecutionConflict) || !errors.Is(e, kernel.ErrChildExecutionBusy)) {
+				t.Fatalf("original entry qualification changed: %v", e)
 			}
 			if _, e = f.observer.LookupOwnedPhysicalCallbackReturn(ctx, g); !errors.Is(e, kernel.ErrNotFound) {
 				t.Fatalf("active callback fabricated return fact: %v", e)

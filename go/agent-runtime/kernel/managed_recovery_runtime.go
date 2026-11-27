@@ -37,7 +37,6 @@ func (r *Runtime) LoadManagedRecovery(ctx context.Context, id string) (ManagedTr
 type managedDispatchKey struct{}
 type managedDispatchBinding struct {
 	runtime *Runtime
-	host    ManagedRecoveryHostStore
 	binding ManagedHostBinding
 }
 
@@ -60,14 +59,14 @@ func (r *Runtime) BindManagedDispatch(ctx context.Context, b ManagedHostBinding)
 	if e = host.VerifyManagedOriginalDispatch(ctx, b, false); e != nil {
 		return ctx, e
 	}
-	return context.WithValue(ctx, managedDispatchKey{}, managedDispatchBinding{r, host, managedClone(b)}), nil
+	return context.WithValue(ctx, managedDispatchKey{}, managedDispatchBinding{r, managedClone(b)}), nil
 }
 
 // ManagedDispatch is read-only and does not mint lifecycle evidence. Scoped
 // Runtime copies share the same actual Store and must have the original Run.
 func (r *Runtime) ManagedDispatch(ctx context.Context, id string) (ManagedHostBinding, bool) {
 	b, ok := ctx.Value(managedDispatchKey{}).(managedDispatchBinding)
-	if !ok || b.runtime == nil || r == nil || b.runtime.store != r.store || b.runtime.managedHost != r.managedHost || r.managedHost == nil || b.host != r.managedHost.store || b.binding.RunID != id {
+	if !ok || b.runtime == nil || r == nil || b.runtime.store != r.store || b.runtime.managedHost != r.managedHost || r.managedHost == nil || b.binding.RunID != id {
 		return ManagedHostBinding{}, false
 	}
 	return managedClone(b.binding), true
@@ -105,7 +104,7 @@ func (r *Runtime) AuthorizeQualifiedManagedContinuation(ctx context.Context, pri
 }
 
 func (r *Runtime) authorizeManaged(ctx context.Context, t ManagedTransfer, qualification ManagedFrontierQualification, cancelReason ...string) (ManagedAdmissionProof, error) {
-	if r == nil || ctx == nil || r.managedHost == nil || t.LegacyState != "" || t.Terminal != nil || !t.SafePoint.Valid() || len(cancelReason) > 1 {
+	if r == nil || ctx == nil || r.managedHost == nil || !t.Native() || t.Terminal != nil || !t.SafePoint.Valid() || len(cancelReason) > 1 {
 		return ManagedAdmissionProof{}, ErrExecutionConflict
 	}
 	q := ManagedRecoverySourceRequest{RunID: t.SafePoint.Host.RunID, SuspensionID: t.SafePoint.ID, ExpectedRevision: t.SafePoint.Source.Run.Revision, ExpectedTransferDigest: ManagedDigest(t), Qualification: qualification}
@@ -191,6 +190,19 @@ func ManagedRecoveryAbsent(err error) bool {
 	return errors.Is(err, ErrNotFound) || errors.Is(err, ErrExecutionRequired)
 }
 
+// VerifyManagedApproval reads the exact original native journal decision;
+// neither recovery admission nor result observation can use a Host receipt.
+func (r *Runtime) VerifyManagedApproval(ctx context.Context, b ManagedHostBinding) error {
+	if b.Approval == nil {
+		return nil
+	}
+	applied, err := r.CommittedApprovalDispatch(ctx, b.RunID, b.DispatchID, *b.Approval)
+	if err != nil || !applied {
+		return errors.Join(ErrExecutionConflict, err)
+	}
+	return nil
+}
+
 func (r *Runtime) ManagedRecoveryClosure(ctx context.Context, id string) (ManagedClosureProof, error) {
 	store, ok := r.store.(ManagedRecoveryStore)
 	if !ok {
@@ -200,7 +212,7 @@ func (r *Runtime) ManagedRecoveryClosure(ctx context.Context, id string) (Manage
 	if e != nil {
 		return ManagedClosureProof{}, e
 	}
-	if !t.Resolved() || !t.SafePoint.Valid() || !t.Selection.Valid() ||
+	if !t.Resolved() || !t.SafePoint.Valid() ||
 		(t.Selection.Mode == ManagedCancel && t.Terminal.Run.Status != RunStatusCancelled) {
 		return ManagedClosureProof{}, ErrExecutionConflict
 	}
@@ -218,13 +230,8 @@ func (r *Runtime) ManagedRecoveryClosure(ctx context.Context, id string) (Manage
 	if ManagedDigest(s) != ManagedDigest(*t.Terminal) {
 		return ManagedClosureProof{}, ErrExecutionConflict
 	}
-	// Projection of an approval must be backed by its original native
-	// decision, not by the live Agent configuration or a Host receipt.
-	if b := t.SafePoint.Host; b.Approval != nil {
-		applied, err := r.CommittedApprovalDispatch(ctx, b.RunID, b.DispatchID, *b.Approval)
-		if err != nil || !applied {
-			return ManagedClosureProof{}, errors.Join(ErrExecutionConflict, err)
-		}
+	if e = r.VerifyManagedApproval(ctx, t.SafePoint.Host); e != nil {
+		return ManagedClosureProof{}, e
 	}
 	if t.Selection.Mode == ManagedResume {
 		receipt, err := r.LoadOwnedRetirement(ctx, t.SuccessorGrant.ID)
@@ -249,7 +256,8 @@ func (r *Runtime) ManagedRecoveryClosure(ctx context.Context, id string) (Manage
 			return ManagedClosureProof{}, e
 		}
 	}
-	return ManagedClosureProof{transfer: managedClone(t), snapshot: s, valid: true}, nil
+	t.Terminal = &s
+	return ManagedClosureProof{transfer: managedClone(t)}, nil
 }
 
 func (r *Runtime) LoadManagedRecoveryByID(ctx context.Context, id string) (ManagedTransfer, error) {

@@ -366,6 +366,7 @@ func runEA1RootAgentAdmission(t *testing.T, factory func(*testing.T) (kernel.Sto
 			stop := errors.New("test-only stop after authoritative P1 observation")
 			observed := false
 			check := func(ctx context.Context) error {
+				entered := phase == "middleware-before-physical"
 				observed = true
 				before, e := observer.Load(ctx, req.ID)
 				if e != nil {
@@ -374,13 +375,20 @@ func runEA1RootAgentAdmission(t *testing.T, factory func(*testing.T) (kernel.Sto
 				if !runner.VerifyFrozenStartRequest(before, req) {
 					t.Error("P1 original frozen source missing")
 				}
-				// Accept either a verified native lease or a real Store physical grant;
-				// existence of a Run alone is not authority for arbitrary Host effects.
+				// Admission preserves the original lease and grant but grants no
+				// callback authority until the physical entry is committed.
 				lease := wrapped.acquired
-				leaseOK := lease.RunID == req.ID && lease.OwnerID != "" && (automatic || lease.OwnerID == "original-owner") && lease.LeaseID != "" && peer.(kernel.ExecutionStore).CheckExecution(ctx, req.ID, &lease) == nil
+				leaseOK := lease.RunID == req.ID && lease.OwnerID != "" && (automatic || lease.OwnerID == "original-owner") && lease.LeaseID != ""
+				checkEntry := func() bool {
+					err := peer.(kernel.ExecutionStore).CheckExecution(ctx, req.ID, &lease)
+					if entered {
+						return err == nil
+					}
+					return errors.Is(err, kernel.ErrExecutionConflict) && errors.Is(err, kernel.ErrChildExecutionBusy)
+				}
 				grant, grantErr := observer.LookupChildExecution(ctx, req.ID)
 				grantOK := grantErr == nil && grant.ChildRunID == req.ID && grant.ExpectedRevision == before.Run.Revision && grant.ExecutionOwnerID == lease.OwnerID && grant.ExecutionLeaseID == lease.LeaseID && grant.ExecutionEpoch == lease.Epoch && grant.AdmissionSourceHash != "" && grant.AdmissionOperation == string(plugin.RunStart)
-				if !leaseOK || !grantOK {
+				if !leaseOK || !grantOK || !checkEntry() {
 					t.Errorf("EA03/G01: arbitrary Root callback reached before authoritative owner: lease=%+v grantErr=%v", lease, grantErr)
 				}
 				if m.calls.Load() != 0 {
@@ -417,8 +425,8 @@ func runEA1RootAgentAdmission(t *testing.T, factory func(*testing.T) (kernel.Sto
 					t.Error("competing control changed full original snapshot")
 				}
 				if leaseOK {
-					if e = peer.(kernel.ExecutionStore).CheckExecution(ctx, req.ID, &lease); e != nil {
-						t.Errorf("competing Cancel revoked original owner: %v", e)
+					if !checkEntry() {
+						t.Error("competing Cancel changed original entry qualification")
 					}
 				}
 				if grantOK {

@@ -59,6 +59,9 @@ func safeToolRetryWindow(policy CallPolicy, available time.Duration) bool {
 // No hidden goroutine or independent lease service.
 func (runner *Runner) withRunOwner(ctx context.Context, runID string, expectedRevision uint64,
 	execute func(context.Context, *Runner) (kernel.Snapshot, error)) (kernel.Snapshot, error) {
+	if runner.activeRootGrant != nil && runner.rootCallbacks != nil && !runner.rootCallbacks.entered.Load() {
+		return execute(ctx, runner) // invokeNativeRun owns the first native entry
+	}
 	if runner.activeRootGrant != nil || runner.activeRunLease != nil {
 		if err := runner.runtime.RequireExecution(ctx, runID); err != nil {
 			return kernel.Snapshot{}, err

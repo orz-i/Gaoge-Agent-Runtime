@@ -74,9 +74,12 @@ func sqliteSaveManaged(ctx context.Context, tx *sql.Tx, t kernel.ManagedTransfer
 	return conflictOrDatabaseError(e)
 }
 func sqliteNativeEntryGate(ctx context.Context, q schemaQuery, id string) error {
-	var pending int
-	if e := q.QueryRowContext(ctx, `SELECT count(*) FROM runtime_child_effect_grants g JOIN runtime_runs r ON r.run_id=g.child_run_id WHERE g.child_run_id=? AND g.parent_run_id=g.child_run_id AND g.execution_epoch<>0 AND (g.execution_epoch<>r.execution_epoch OR g.execution_epoch<>r.execution_physical_epoch)`, id).Scan(&pending); e != nil {
+	var pending, valid int
+	if e := q.QueryRowContext(ctx, `SELECT count(*), COALESCE(SUM(CASE WHEN g.execution_epoch=r.execution_epoch AND r.execution_physical_epoch<g.execution_epoch AND g.execution_owner_id=r.execution_owner AND g.execution_lease_id=r.execution_lease_id AND r.execution_quarantine_revision=0 THEN 1 ELSE 0 END),0) FROM runtime_child_effect_grants g JOIN runtime_runs r ON r.run_id=g.child_run_id WHERE g.child_run_id=? AND g.parent_run_id=g.child_run_id AND g.execution_epoch<>0 AND (g.execution_epoch<>r.execution_epoch OR g.execution_epoch<>r.execution_physical_epoch)`, id).Scan(&pending, &valid); e != nil {
 		return conflictOrDatabaseError(e)
+	}
+	if pending == 1 && valid == 1 {
+		return errors.Join(kernel.ErrExecutionConflict, kernel.ErrChildExecutionBusy)
 	}
 	if pending != 0 {
 		return kernel.ErrExecutionConflict

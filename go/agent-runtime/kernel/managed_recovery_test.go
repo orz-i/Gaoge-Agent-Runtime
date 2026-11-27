@@ -81,9 +81,9 @@ func managedReducerFixture() (ManagedTransfer, Snapshot, ExecutionLease, ChildEx
 	h := ManagedAuthority{Namespace: strings.Repeat("02", 32), Generation: 1, Version: 1}
 	s := Snapshot{Run: Run{ID: "root", Kind: "agent", Status: RunStatusRunning, Revision: 3}, State: json.RawMessage(`{"pending":"original"}`), EventHead: 4}
 	l := ExecutionLease{RunID: "root", OwnerID: "old", LeaseID: "old-lease", Epoch: 1, ExpiresAt: now.Add(-time.Second)}
-	id, _ := OwnedPhysicalDispatchGrantID("root", "start", "original-dispatch")
+	id, _ := OwnedPhysicalDispatchGrantID("root", "start", "nativecmd_original-dispatch")
 	g := ChildExecutionGrant{ID: id, ChildRunID: "root", ExpectedRevision: 1, ExecutionOwnerID: l.OwnerID, ExecutionLeaseID: l.LeaseID, ExecutionEpoch: l.Epoch, AdmissionSourceHash: strings.Repeat("a", 64), AdmissionOperation: "start"}
-	b := ManagedHostBinding{KernelAuthority: a, HostAuthority: h, TurnID: "turn", InvocationID: "inv", Attempt: 1, RunID: "root", DispatchID: "original-dispatch", Phase: "start", Source: json.RawMessage(`{"actor":"original"}`)}
+	b := ManagedHostBinding{KernelAuthority: a, HostAuthority: h, TurnID: "turn", InvocationID: "inv", Attempt: 1, RunID: "root", DispatchID: "nativecmd_original-dispatch", Phase: "start", Source: json.RawMessage(`{"actor":"original"}`)}
 	p := ManagedSafePoint{ID: "safe", Host: b, Source: s, OriginalGrant: g, OriginalLease: l, ModelInvocationID: "model-2", ModelRequestHash: strings.Repeat("b", 64), LifecycleVersion: ManagedLifecycleAgentObligations}
 	p.LifecycleSource, _ = json.Marshal(ManagedAgentObligations{Phase: "pending", SourceRevision: s.Run.Revision, InvocationID: p.ModelInvocationID, RequestHash: p.ModelRequestHash, SamplingDigest: strings.Repeat("c", 64), Journal: json.RawMessage(`{"actual":"returned"}`)})
 	p.RecoveryID = ManagedRecoveryID(p.ID, b)
@@ -111,10 +111,16 @@ func TestManagedRecoveryReducersPreserveSourceAndLiveOwner(t *testing.T) {
 	if e != nil || ManagedDigest(parked) != ManagedDigest(original) {
 		t.Fatalf("park: %+v %v", parked, e)
 	}
-	invalid := original
-	invalid.LegacyState = "INVALIDATED"
-	if _, e := ValidateManagedRecoverySource(invalid, q, s, l, g, a, g.ExecutionEpoch, now); !errors.Is(e, ErrExecutionConflict) {
-		t.Fatalf("old claim won but park succeeded: %v", e)
+	for _, alter := range []func(*ManagedTransfer){
+		func(t *ManagedTransfer) { t.LegacyState = "INVALIDATED" },
+		func(t *ManagedTransfer) { t.Generation = 1 },
+		func(t *ManagedTransfer) { t.Selection.ID = "retired-reservation" },
+	} {
+		invalid := original
+		alter(&invalid)
+		if _, e := ValidateManagedRecoverySource(invalid, q, s, l, g, a, g.ExecutionEpoch, now); !errors.Is(e, ErrExecutionConflict) {
+			t.Fatalf("old claim won but native admission succeeded: %v", e)
+		}
 	}
 }
 func TestManagedRecoveryModeAndExactACKIdentity(t *testing.T) {
@@ -171,10 +177,18 @@ func TestManagedRecoveryModeAndExactACKIdentity(t *testing.T) {
 }
 func TestManagedReservationCloneAndPersistencePreserveModeZero(t *testing.T) {
 	transfer, _, _, _, _, _ := managedReducerFixture()
-	resume := ManagedRecoveryAuthorization{ID: "reservation", RecoveryID: transfer.SafePoint.RecoveryID, SuspensionID: transfer.SafePoint.ID, Binding: transfer.SafePoint.Host, Mode: ManagedResume, Revision: 1}
-	if !resume.Valid() {
-		t.Fatal("invalid source fixture")
+	resume := ManagedRecoveryAuthorization{Mode: ManagedResume}
+	legacy := ManagedRecoveryAuthorization{ID: "reservation", RecoveryID: transfer.SafePoint.RecoveryID, SuspensionID: transfer.SafePoint.ID, Binding: transfer.SafePoint.Host, Mode: ManagedResume, Revision: 1}
+	if !resume.Valid() || legacy.Valid() {
+		t.Fatal("legacy Host reservation authorized a native command")
 	}
+	legacy.Binding.Source = append(json.RawMessage(nil), legacy.Binding.Source...)
+	copied := managedClone(legacy)
+	copied.Binding.Source[0] = 'x'
+	if reflect.DeepEqual(copied.Binding.Source, legacy.Binding.Source) {
+		t.Fatal("mutable historical source alias")
+	}
+
 	cloned := managedClone(resume)
 	if !cloned.Valid() || !reflect.DeepEqual(cloned, resume) {
 		t.Fatal("clone changed zero cancellation")
@@ -215,14 +229,15 @@ func TestManagedReservationCloneAndPersistencePreserveModeZero(t *testing.T) {
 	if restoredNull.Valid() {
 		t.Fatal("persistent explicit null accepted")
 	}
-	cloned.Binding.Source[0] = 'x'
-	if reflect.DeepEqual(cloned.Binding.Source, resume.Binding.Source) {
-		t.Fatal("mutable source alias")
-	}
 	cancel := resume
 	cancel.Mode = ManagedCancel
-	cancel.Cancellation = ManagedCancellation{IntentID: "original", Seq: 8, Payload: json.RawMessage(`{"target":"root"}`)}
-	cancel.Cancellation.PayloadDigest = ManagedDigest(cancel.Cancellation.Payload)
+	cancel.Cancellation = ManagedCancellation{Native: true, Reason: "original"}
+	oldCancel := cancel
+	oldCancel.Cancellation = ManagedCancellation{IntentID: "original", Seq: 8, Payload: json.RawMessage(`{"target":"root"}`)}
+	oldCancel.Cancellation.PayloadDigest = ManagedDigest(oldCancel.Cancellation.Payload)
+	if oldCancel.Valid() {
+		t.Fatal("old Host cancellation receipt authorized native control")
+	}
 	raw, err = json.Marshal(cancel)
 	if err != nil {
 		t.Fatal(err)
@@ -332,7 +347,6 @@ func TestManagedRecoveryUsesOnlyConstructionBoundHostAndInternalEntropy(t *testi
 	// A native admission has already frozen the choice. Re-admission must
 	// never consult a second Host selection, even when its projection differs.
 	store.transfer.Selection = selected.Authorization()
-	store.transfer.Generation++
 	store.transfer.Revision++
 	calls := host.calls
 	readmitted, e := rt.AuthorizeManagedContinuation(t.Context(), managedClone(store.transfer))
@@ -515,7 +529,7 @@ func TestManagedSafePointBindsExactPhysicalDispatch(t *testing.T) {
 		t.Run(phase, func(t *testing.T) {
 			p := managedClone(original.SafePoint)
 			p.Host.Phase = phase
-			p.Host.DispatchID = "original-" + phase
+			p.Host.DispatchID = "nativecmd_original-" + phase
 			if phase == "resolve-approval" {
 				p.Host.Approval = &ManagedApprovalDecision{CheckpointID: "checkpoint", Decision: "approve", Comment: "original grant"}
 			}
@@ -531,6 +545,10 @@ func TestManagedSafePointBindsExactPhysicalDispatch(t *testing.T) {
 			}
 			for _, mutate := range []func(*ManagedSafePoint){
 				func(q *ManagedSafePoint) { q.Host.DispatchID = "foreign" },
+				func(q *ManagedSafePoint) {
+					q.Host.DispatchID = "retired-host-dispatch"
+					q.OriginalGrant.ID, _ = OwnedPhysicalDispatchGrantID(q.Host.RunID, op, q.Host.DispatchID)
+				},
 				func(q *ManagedSafePoint) { q.OriginalGrant.ID = "foreign" },
 				func(q *ManagedSafePoint) { q.OriginalGrant.AdmissionOperation = "managed_resume" },
 				func(q *ManagedSafePoint) { q.Host.Phase = "start-retry" },

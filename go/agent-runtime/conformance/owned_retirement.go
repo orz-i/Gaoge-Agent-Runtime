@@ -58,7 +58,10 @@ func admitBorrowed(ctx context.Context, rt *kernel.Runtime, s kernel.Snapshot, o
 	l, _ := rt.BoundExecutionLease()
 	q := kernel.ExecutionAcquireRequest{}
 	proof := featurecontrol.Seal(s.Run.ID, s.Run.Revision, "agent_owned_physical_admission", kernel.OwnedPhysicalAdmissionSubject(q, l, operation, dispatchID), s.State, s)
-	_, v, e := rt.AdmitOwnedPhysicalExecution(ctx, s, q, proof, operation, dispatchID)
+	scoped, v, e := rt.AdmitOwnedPhysicalExecution(ctx, s, q, proof, operation, dispatchID)
+	if e == nil {
+		_, e = scoped.CheckOwnedPhysicalEntry(ctx, s)
+	}
 	return v.Grant, e
 }
 

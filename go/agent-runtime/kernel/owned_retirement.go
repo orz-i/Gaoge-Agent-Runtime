@@ -49,7 +49,7 @@ func CloseManagedRetirement(g ChildExecutionGrant, s Snapshot, a ManagedAuthorit
 	}
 	if !t.SafePoint.Valid() || !managedResumeSelectionMatches(t) ||
 		t.SafePoint.Host.KernelAuthority != a || t.SafePoint.Host.RunID != g.ChildRunID ||
-		t.SuccessorGrant != g || t.LegacyState != "" ||
+		t.SuccessorGrant != g || !t.Native() ||
 		t.Revision == 0 || t.Terminal != nil || s.Run.ID != g.ChildRunID {
 		return nil, ErrExecutionConflict
 	}

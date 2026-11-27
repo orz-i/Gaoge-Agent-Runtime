@@ -131,7 +131,7 @@ func TestContextSummaryNativeInputStateRejectedBeforePark(t *testing.T) {
 			if mode == "cursor" && !errors.Is(err, ErrInvalidRequest) {
 				t.Fatalf("cursor without binding was decoded: %v", err)
 			}
-			_, _, err = runner.RecoverManagedContinuation(t.Context(), trap.current.Run.ID)
+			_, _, err = runner.RecoverManagedContinuation(t.Context(), trap.transfer)
 			if !errors.Is(err, ErrInvalidRequest) || trap.admissions != 0 || !bytes.Equal(trap.current.State, raw) {
 				t.Fatalf("invalid mixed frame reached PARK: err=%v admissions=%d", err, trap.admissions)
 			}

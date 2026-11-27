@@ -69,6 +69,10 @@ func (s *Store) BeginOwnedPhysicalExecution(ctx context.Context, p kernel.OwnedP
 		return zero, e
 	}
 	g = v.Grant
+	entryEpoch, e := kernel.PrepareOwnedEntryEpoch(g, native.epoch, native.physicalEpoch)
+	if e != nil {
+		return zero, e
+	}
 	if e = s.reserveGrantIdentityLocked(g); e != nil {
 		return zero, e
 	}
@@ -81,9 +85,7 @@ func (s *Store) BeginOwnedPhysicalExecution(ctx context.Context, p kernel.OwnedP
 	if p.AcquiresLease() {
 		native.epoch, native.lease = v.Lease.Epoch, v.Lease
 	}
-	if !p.IsManagedRecovery() {
-		native.physicalEpoch = g.ExecutionEpoch
-	}
+	native.physicalEpoch = entryEpoch
 	s.execution[g.ChildRunID] = native
 	return v, nil
 }
@@ -134,8 +136,8 @@ func (s *Store) CheckOwnedPhysicalEntry(ctx context.Context, g kernel.ChildExecu
 	}
 	window, err := kernel.ValidateOwnedPhysicalEntry(g, expected, current, l, native.lease, s.currentExecutionTime(), native.quarantineRev != 0, native.physicalEpoch,
 		original.settledRevision, original.completion, transfer)
-	if err == nil && g.AdmissionOperation == "managed_resume" {
-		if transfer.SafePoint.Host.KernelAuthority != s.managedAuthority {
+	if err == nil {
+		if g.AdmissionOperation == "managed_resume" && transfer.SafePoint.Host.KernelAuthority != s.managedAuthority {
 			return kernel.OwnedPhysicalEntryWindow{}, kernel.ErrExecutionConflict
 		}
 		native.physicalEpoch = g.ExecutionEpoch
@@ -182,20 +184,23 @@ func (s *Store) RecordOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.nativeEntryGateLocked(g.ChildRunID); err != nil {
-		return err
-	}
 	original, err := s.loadOwnedPhysicalGrantLocked(g)
 	current, exists := s.records[g.ChildRunID]
 	if err != nil || !exists {
 		return kernel.ErrExecutionConflict
 	}
-	completion, write, err := kernel.ReduceOwnedPhysicalCallbackReturn(g, current, s.execution[g.ChildRunID].lease, rev, o, p, original.completion, original.settledRevision)
+	native := s.execution[g.ChildRunID]
+	if native.epoch != g.ExecutionEpoch {
+		return kernel.ErrExecutionConflict
+	}
+	completion, write, err := kernel.ReduceOwnedPhysicalCallbackReturn(g, current, native.lease, rev, o, p, original.completion, original.settledRevision, native.physicalEpoch)
 	if err != nil || !write {
 		return err
 	}
 	original.completion = completion
 	s.childGrants[g.ID] = original
+	native.physicalEpoch = g.ExecutionEpoch
+	s.execution[g.ChildRunID] = native
 	return nil
 }
 func (s *Store) LookupOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant) (kernel.OwnedPhysicalCallbackCompletion, error) {

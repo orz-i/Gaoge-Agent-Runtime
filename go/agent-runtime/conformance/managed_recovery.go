@@ -96,7 +96,7 @@ func managedStoreSetup(t *testing.T, factory func(*testing.T) ManagedRecoverySto
 	if err != nil {
 		t.Fatal(err)
 	}
-	dispatchID := "original-dispatch"
+	dispatchID := "nativecmd_original-dispatch"
 	g, err := admitBorrowed(t.Context(), bound, v, "start", dispatchID)
 	if err != nil {
 		t.Fatal(err)
@@ -109,7 +109,7 @@ func managedStoreSetup(t *testing.T, factory func(*testing.T) ManagedRecoverySto
 	if err != nil {
 		t.Fatal(err)
 	}
-	host := kernel.ManagedHostBinding{KernelAuthority: authority, HostAuthority: kernel.ManagedAuthority{Namespace: strings.Repeat("a", 64), Generation: 1, Version: 1}, TurnID: "turn", InvocationID: "invocation", Attempt: 1, RunID: v.Run.ID, DispatchID: "original-dispatch", Phase: "start", Source: json.RawMessage(`{"frozen":"original"}`)}
+	host := kernel.ManagedHostBinding{KernelAuthority: authority, HostAuthority: kernel.ManagedAuthority{Namespace: strings.Repeat("a", 64), Generation: 1, Version: 1}, TurnID: "turn", InvocationID: "invocation", Attempt: 1, RunID: v.Run.ID, DispatchID: "nativecmd_original-dispatch", Phase: "start", Source: json.RawMessage(`{"frozen":"original"}`)}
 	point := kernel.ManagedSafePoint{ID: "safe-1", Host: host, OriginalGrant: g, OriginalLease: l, Source: v, ModelInvocationID: "model-1", ModelRequestHash: strings.Repeat("b", 64), LifecycleVersion: kernel.ManagedLifecycleAgentObligations}
 	point.LifecycleSource, err = json.Marshal(kernel.ManagedAgentObligations{Phase: "pending", SourceRevision: v.Run.Revision + 1, InvocationID: point.ModelInvocationID, RequestHash: point.ModelRequestHash, SamplingDigest: strings.Repeat("c", 64), Journal: json.RawMessage(`{"returned":"source"}`)})
 	if err != nil {
@@ -507,7 +507,7 @@ func runManagedStoreFinishClosesHistoricalTransfer(t *testing.T, factory func(*t
 	if e != nil {
 		t.Fatal(e)
 	}
-	dispatchID := "later-dispatch"
+	dispatchID := "nativecmd_later-dispatch"
 	later, e := admitBorrowed(t.Context(), bound, next, "resume", dispatchID)
 	if e != nil {
 		t.Fatal(e)

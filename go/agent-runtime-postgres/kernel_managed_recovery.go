@@ -70,11 +70,14 @@ func pgSaveManaged(tx *gorm.DB, t kernel.ManagedTransfer) error {
 // A current owned Grant must have crossed native entry before any ordinary
 // write or receipt operation. No managed history is consulted.
 func pgNativeEntryGate(tx *gorm.DB, id string) error {
-	var pending int64
-	if err := tx.Raw(`SELECT count(*) FROM agent_kernel_child_effect_grants g JOIN agent_kernel_runs r ON r.run_id=g.child_run_id WHERE g.child_run_id=? AND g.parent_run_id=g.child_run_id AND g.execution_epoch<>0 AND (g.execution_epoch<>r.execution_epoch OR g.execution_epoch<>r.execution_physical_epoch)`, id).Scan(&pending).Error; err != nil {
+	var counts struct{ Pending, Valid int64 }
+	if err := tx.Raw(`SELECT count(*) AS pending, COALESCE(SUM(CASE WHEN g.execution_epoch=r.execution_epoch AND r.execution_physical_epoch<g.execution_epoch AND g.execution_owner_id=r.execution_owner AND g.execution_lease_id=r.execution_lease_id AND r.execution_quarantine_revision=0 THEN 1 ELSE 0 END),0) AS valid FROM agent_kernel_child_effect_grants g JOIN agent_kernel_runs r ON r.run_id=g.child_run_id WHERE g.child_run_id=? AND g.parent_run_id=g.child_run_id AND g.execution_epoch<>0 AND (g.execution_epoch<>r.execution_epoch OR g.execution_epoch<>r.execution_physical_epoch)`, id).Scan(&counts).Error; err != nil {
 		return translateKernelError(err)
 	}
-	if pending != 0 {
+	if counts.Pending == 1 && counts.Valid == 1 {
+		return errors.Join(kernel.ErrExecutionConflict, kernel.ErrChildExecutionBusy)
+	}
+	if counts.Pending != 0 {
 		return kernel.ErrExecutionConflict
 	}
 	return nil

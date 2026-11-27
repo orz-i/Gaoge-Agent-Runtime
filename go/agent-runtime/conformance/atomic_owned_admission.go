@@ -52,11 +52,22 @@ func runAtomicOwnedAdmission(t *testing.T, factory func(*testing.T) ManagedRecov
 				if e != nil || g != v.Grant {
 					t.Fatalf("committed lease lacked exact grant: %v %+v", e, g)
 				}
-				if e = r.RequireExecution(ctx, source.Run.ID); e != nil {
-					t.Fatalf("returned scoped runtime not native owner: %v", e)
+				if e = r.RequireExecution(ctx, source.Run.ID); !errors.Is(e, kernel.ErrExecutionConflict) {
+					t.Fatalf("admission granted execution before entry: %v", e)
+				}
+				outcome := kernel.OwnedPhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: true}
+				proof := featurecontrol.Seal(source.Run.ID, source.Run.Revision, "agent_owned_callback_return", g.ID, kernel.OwnedPhysicalCallbackReturnPayload(source, outcome), nil)
+				if e = peer.RecordOwnedPhysicalCallbackReturn(ctx, g, source.Run.Revision, outcome, proof); !errors.Is(e, kernel.ErrExecutionConflict) {
+					t.Fatalf("admission fabricated an actual callback return: %v", e)
 				}
 				if _, e = r.CheckOwnedPhysicalEntry(ctx, source); e != nil {
 					t.Fatalf("committed pair not executable: %v", e)
+				}
+				if e = r.RequireExecution(ctx, source.Run.ID); e != nil {
+					t.Fatalf("entered runtime not native owner: %v", e)
+				}
+				if _, e = b.Peer.(kernel.OwnedPhysicalExecutionStore).CheckOwnedPhysicalEntry(ctx, g, v.Lease, source); !errors.Is(e, kernel.ErrExecutionConflict) {
+					t.Fatalf("repeated entry admitted: %v", e)
 				}
 				if e = peer.ReleaseExecution(ctx, v.Lease); !errors.Is(e, kernel.ErrChildExecutionBusy) {
 					t.Fatalf("independent Release escaped Grant: %v", e)

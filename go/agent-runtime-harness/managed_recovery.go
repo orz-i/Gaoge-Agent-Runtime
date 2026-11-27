@@ -19,9 +19,16 @@ func NewManagedHostAuthority() (kernel.ManagedAuthority, error) {
 	return kernel.ManagedAuthority{Namespace: hex.EncodeToString(b[:]), Generation: 1, Version: 1}, nil
 }
 
-// ManagedHostSource is the canonical immutable source projection. It is not a
-// capability: the storage transaction must read and validate all original rows.
-func ManagedHostSource(session Session, turn Turn, invocation Invocation, config ConfigSnapshot, dispatch any) (json.RawMessage, error) {
+// nativeHostSource is the one immutable command projection. The
+// transaction still validates all original rows; it grants no callback.
+func nativeHostSource(session Session, turn Turn, invocation Invocation, config ConfigSnapshot, b kernel.ManagedHostBinding) (json.RawMessage, error) {
+	if _, err := canonicalSealedConfig(config); err != nil {
+		return nil, err
+	}
+	type command struct {
+		Correlation, Phase string
+		Approval           *kernel.ManagedApprovalDecision
+	}
 	return json.Marshal(struct {
 		SessionID                  string
 		HostThread                 HostRef
@@ -30,24 +37,14 @@ func ManagedHostSource(session Session, turn Turn, invocation Invocation, config
 		HostTurn                   HostRef
 		Config                     ConfigSnapshot
 		InvocationID, ParentItemID string
-
-		Input                     json.RawMessage
-		InputHash, ExecutionRefID string
-		Attempt                   int
-		Dispatch                  any
+		Input                      json.RawMessage
+		InputHash, ExecutionRefID  string
+		Attempt                    int
+		Dispatch                   command
 	}{session.ID, session.HostThread, session.Actor, turn.ID, turn.HostTurn, config,
 		invocation.ID, invocation.ParentItemID,
-		invocation.Input, invocation.InputHash, invocation.ExecutionRefID, invocation.Attempt, dispatch})
-}
-
-func nativeHostSource(session Session, turn Turn, inv Invocation, config ConfigSnapshot, b kernel.ManagedHostBinding) (json.RawMessage, error) {
-	if _, err := canonicalSealedConfig(config); err != nil {
-		return nil, err
-	}
-	return ManagedHostSource(session, turn, inv, config, struct {
-		Correlation, Phase string
-		Approval           *kernel.ManagedApprovalDecision
-	}{b.DispatchID, b.Phase, b.Approval})
+		invocation.Input, invocation.InputHash, invocation.ExecutionRefID, invocation.Attempt,
+		command{b.DispatchID, b.Phase, b.Approval}})
 }
 
 // ValidateManagedOriginalRows is shared by concrete storage transactions. It
@@ -60,7 +57,7 @@ func ValidateManagedOriginalRows(authority kernel.ManagedAuthority, b kernel.Man
 		invocation.ExecutionRefID != b.RunID {
 		return ErrConflict
 	}
-	if !b.DirectNativeCommand() || dispatch.ID != "" || terminalTurnStatus(turn.Status) ||
+	if dispatch.ID != "" || terminalTurnStatus(turn.Status) ||
 		terminalInvocationStatus(invocation.Status) || ActiveCancellationFence(items) || PendingExecutionDispatch(items, invocation.ID) {
 		return ErrConflict
 	}

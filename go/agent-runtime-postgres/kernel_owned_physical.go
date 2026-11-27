@@ -136,10 +136,11 @@ func (store *KernelStore) BeginOwnedPhysicalExecution(ctx context.Context, admis
 		if e = tx.Create(&row).Error; e != nil {
 			return translateKernelApplyError(e)
 		}
-		updates := map[string]any{}
-		if !admission.IsManagedRecovery() {
-			updates["execution_physical_epoch"] = v.Grant.ExecutionEpoch
+		entryEpoch, e := kernel.PrepareOwnedEntryEpoch(v.Grant, current.ExecutionEpoch, current.ExecutionPhysicalEpoch)
+		if e != nil {
+			return e
 		}
+		updates := map[string]any{"execution_physical_epoch": entryEpoch}
 		if admission.AcquiresLease() {
 			updates["execution_epoch"] = v.Lease.Epoch
 			updates["execution_owner"] = v.Lease.OwnerID
@@ -220,7 +221,10 @@ func (store *KernelStore) CheckOwnedPhysicalEntry(ctx context.Context, g kernel.
 		}
 		window, err = kernel.ValidateOwnedPhysicalEntry(g, expected, current, l, pgManagedLease(run), now, run.ExecutionQuarantineRevision != 0,
 			run.ExecutionPhysicalEpoch, row.SettledRevision, pgCallbackCompletion(row), transfer)
-		if err == nil && g.AdmissionOperation == "managed_resume" {
+		if err != nil {
+			return err
+		}
+		if g.AdmissionOperation == "managed_resume" {
 			a, e := pgManagedAuthority(tx)
 			if e != nil {
 				return e
@@ -228,20 +232,24 @@ func (store *KernelStore) CheckOwnedPhysicalEntry(ctx context.Context, g kernel.
 			if transfer.SafePoint.Host.KernelAuthority != a {
 				return kernel.ErrExecutionConflict
 			}
-			result := tx.Model(&models.KernelRunRecord{}).Where("run_id=? AND execution_epoch=? AND execution_physical_epoch<?", g.ChildRunID, g.ExecutionEpoch, g.ExecutionEpoch).UpdateColumn("execution_physical_epoch", g.ExecutionEpoch)
-			if result.Error != nil {
-				return translateKernelError(result.Error)
-			}
-			if result.RowsAffected != 1 {
-				return kernel.ErrExecutionConflict
-			}
 		}
-		return err
+		return pgAdvanceOwnedEntryEpoch(tx, g)
 	})
 	if err != nil {
 		return kernel.OwnedPhysicalEntryWindow{}, err
 	}
 	return window, nil
+}
+
+func pgAdvanceOwnedEntryEpoch(tx *gorm.DB, g kernel.ChildExecutionGrant) error {
+	result := tx.Model(&models.KernelRunRecord{}).Where("run_id=? AND execution_epoch=? AND execution_physical_epoch<?", g.ChildRunID, g.ExecutionEpoch, g.ExecutionEpoch).UpdateColumn("execution_physical_epoch", g.ExecutionEpoch)
+	if result.Error != nil {
+		return translateKernelError(result.Error)
+	}
+	if result.RowsAffected != 1 {
+		return kernel.ErrExecutionConflict
+	}
+	return nil
 }
 
 // ApplyOwnedPhysicalRecovery is a receipt-only exact-CAS capability. It cannot
@@ -334,9 +342,6 @@ func (store *KernelStore) RecordOwnedPhysicalCallbackReturn(ctx context.Context,
 		if e != nil {
 			return e
 		}
-		if e := pgNativeEntryGate(tx, g.ChildRunID); e != nil {
-			return e
-		}
 		snap, e := kernelSnapshotFrom(current)
 		if e != nil {
 			return e
@@ -348,7 +353,7 @@ func (store *KernelStore) RecordOwnedPhysicalCallbackReturn(ctx context.Context,
 		if e != nil {
 			return e
 		}
-		completion, write, e := kernel.ReduceOwnedPhysicalCallbackReturn(g, snap, pgManagedLease(current), rev, o, p, pgCallbackCompletion(row), row.SettledRevision)
+		completion, write, e := kernel.ReduceOwnedPhysicalCallbackReturn(g, snap, pgManagedLease(current), rev, o, p, pgCallbackCompletion(row), row.SettledRevision, current.ExecutionPhysicalEpoch)
 		if e != nil || !write {
 			return e
 		}
@@ -358,6 +363,9 @@ func (store *KernelStore) RecordOwnedPhysicalCallbackReturn(ctx context.Context,
 		}
 		if result.RowsAffected != 1 {
 			return kernel.ErrExecutionConflict
+		}
+		if current.ExecutionPhysicalEpoch < g.ExecutionEpoch {
+			return pgAdvanceOwnedEntryEpoch(tx, g)
 		}
 		return nil
 	})

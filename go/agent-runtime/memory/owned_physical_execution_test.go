@@ -40,14 +40,21 @@ func ownedPhysicalFixture(t *testing.T) (*memory.Store, *kernel.Runtime, *kernel
 func ownedPhysicalAdmit(t *testing.T, bound *kernel.Runtime, v kernel.Snapshot, l kernel.ExecutionLease) (kernel.ChildExecutionGrant, *kernel.Runtime) {
 	t.Helper()
 	q := kernel.ExecutionAcquireRequest{}
-	proof := featurecontrol.Seal(v.Run.ID, v.Run.Revision, "agent_owned_physical_admission", kernel.OwnedPhysicalAdmissionSubject(q, l, "start", ""), v.State, v)
-	_, admission, e := bound.AdmitOwnedPhysicalExecution(t.Context(), v, q, proof, "start", "")
+	operation := "start"
+	if v.Run.Status == kernel.RunStatusWaitingInput {
+		operation = "approval"
+	}
+	proof := featurecontrol.Seal(v.Run.ID, v.Run.Revision, "agent_owned_physical_admission", kernel.OwnedPhysicalAdmissionSubject(q, l, operation, ""), v.State, v)
+	_, admission, e := bound.AdmitOwnedPhysicalExecution(t.Context(), v, q, proof, operation, "")
 	g := admission.Grant
 	if e != nil {
 		t.Fatal(e)
 	}
 	scoped, e := bound.WithPhysicalGrant(t.Context(), g, featurecontrol.Seal(v.Run.ID, v.Run.Revision, "agent_physical_owner", g.ID, v.State, v.Checkpoint))
 	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e := scoped.CheckOwnedPhysicalEntry(t.Context(), v); e != nil {
 		t.Fatal(e)
 	}
 	return g, scoped
