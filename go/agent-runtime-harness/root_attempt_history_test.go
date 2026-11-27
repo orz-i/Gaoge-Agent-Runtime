@@ -34,24 +34,27 @@ func TestHistoricalAttemptProofIsSharedByTerminalAndUnstartedCancellation(t *tes
 		!validUnstartedRetryHistoricalChildren(third, []Invocation{child}, facts, nil) {
 		t.Fatal("Store-owned unbudgeted ancestry did not preserve historical child proof")
 	}
-	// A Turn admitted before transition Items existed still owns its original
-	// atomic budget chain. New Retry facts must compose with that history,
-	// never require migration to backfill or re-sign old authorization.
+	// The current writer requires both original selection facts and their
+	// matching budget chain. A legacy ledger cannot replace a missing fact.
 	legacyLedger := budget.Ledger{ID: old.TurnID, Revision: 5,
 		RootRetries: map[string]budget.RootRetryGrant{
 			second.ExecutionRefID: {InvocationID: old.ID, OriginalRunID: old.ExecutionRefID, Attempt: 2},
 			third.ExecutionRefID:  {InvocationID: old.ID, OriginalRunID: second.ExecutionRefID, Attempt: 3, Active: true},
 		}, CancelledRuns: map[string]bool{old.ExecutionRefID: true, second.ExecutionRefID: true}}
 	mixedFacts := append(append([]Item(nil), facts[:4]...), secondTransition)
-	if !ValidTurnTerminalDescendantsWithBudget(third, []Invocation{third, child}, mixedFacts, &legacyLedger) ||
-		!validUnstartedRetryHistoricalChildren(third, []Invocation{child}, mixedFacts, &legacyLedger) {
-		t.Fatal("new transition failed to compose with original pre-migration budget ancestry")
+	if ValidTurnTerminalDescendantsWithBudget(third, []Invocation{third, child}, mixedFacts, &legacyLedger) ||
+		validUnstartedRetryHistoricalChildren(third, []Invocation{child}, mixedFacts, &legacyLedger) {
+		t.Fatal("legacy ledger substituted for missing original selection")
+	}
+	if !ValidTurnTerminalDescendantsWithBudget(third, []Invocation{third, child}, facts, &legacyLedger) ||
+		!validUnstartedRetryHistoricalChildren(third, []Invocation{child}, facts, &legacyLedger) {
+		t.Fatal("exact selection and accounting chain rejected")
 	}
 	corruptLedger := budget.CloneLedger(legacyLedger)
 	prior := corruptLedger.RootRetries[second.ExecutionRefID]
 	prior.Active = true
 	corruptLedger.RootRetries[second.ExecutionRefID] = prior
-	if ValidTurnTerminalDescendantsWithBudget(third, []Invocation{third, child}, mixedFacts, &corruptLedger) {
+	if ValidTurnTerminalDescendantsWithBudget(third, []Invocation{third, child}, facts, &corruptLedger) {
 		t.Fatal("competing active historical generation authorized terminal projection")
 	}
 	for _, tc := range []struct {

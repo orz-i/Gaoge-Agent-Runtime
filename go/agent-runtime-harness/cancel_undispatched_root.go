@@ -100,8 +100,7 @@ func (runner *Runner) undispatchedRootNoEffect(
 			children = append(children, owner)
 		}
 	}
-	if RetryChildEffectFenceWithBudget(children, items, original, ledger) != nil ||
-		!validUnstartedRetryHistoricalChildren(original, children, items, ledger) {
+	if !validUnstartedRetryHistoricalChildren(original, children, items, ledger) {
 		return true, ErrConflict
 	}
 	if related, err := runner.relatedChildRunIDs(ctx, original.ExecutionRefID); err != nil {

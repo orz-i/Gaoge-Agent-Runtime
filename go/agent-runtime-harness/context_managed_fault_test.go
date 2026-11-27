@@ -189,10 +189,10 @@ func TestManagedPreparationPreservesCommittedContextRollover(t *testing.T) {
 			ctx := t.Context()
 			clock := &managedObligationClock{now: time.Now().UTC()}
 			base := memory.NewStoreWithExecutionClock(clock)
-			cut := &managedFrontierCutStore{Store: base, event: "agent.model_invocation.pending"}
+			cut := &managedObligationStore{Store: base, event: "agent.model_invocation.pending", count: 1, before: true, allEvents: true}
 			if forged {
 				cut.event = "agent.native_preparation.ready"
-				cut.after = true
+				cut.before = false
 			}
 			host := harness.NewMemoryStore()
 			client := &agentSessionModel{}
