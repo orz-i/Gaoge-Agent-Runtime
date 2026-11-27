@@ -44,18 +44,20 @@ type Run struct {
 	// ParentRunID is the immutable, Store-fenced physical ancestry of a child.
 	// A relation index is not an authoritative substitute when unavailable.
 	ParentRunID string `json:"parentRunID,omitempty"`
-	// Immutable native accounting scope, including logical Handoff ancestry.
-	BudgetScopeID     string     `json:"budgetScopeID,omitempty"`
-	BudgetParentRunID string     `json:"budgetParentRunID,omitempty"`
-	Goal              string     `json:"goal"`
-	Status            RunStatus  `json:"status"`
-	Revision          uint64     `json:"revision"`
-	ErrorCode         string     `json:"errorCode,omitempty"`
-	ErrorDetail       string     `json:"errorDetail,omitempty"`
-	DeadlineAt        *time.Time `json:"deadlineAt,omitempty"`
-	EndedAt           *time.Time `json:"endedAt,omitempty"`
-	CreatedAt         time.Time  `json:"createdAt"`
-	UpdatedAt         time.Time  `json:"updatedAt"`
+	// LogicalParentRunID is the immutable local owner of an independently
+	// executing Handoff child, also used for original budget ancestry.
+	// It is distinct from the physical parent/borrowed Grant topology.
+	LogicalParentRunID string     `json:"logicalParentRunID,omitempty"`
+	BudgetScopeID      string     `json:"budgetScopeID,omitempty"`
+	Goal               string     `json:"goal"`
+	Status             RunStatus  `json:"status"`
+	Revision           uint64     `json:"revision"`
+	ErrorCode          string     `json:"errorCode,omitempty"`
+	ErrorDetail        string     `json:"errorDetail,omitempty"`
+	DeadlineAt         *time.Time `json:"deadlineAt,omitempty"`
+	EndedAt            *time.Time `json:"endedAt,omitempty"`
+	CreatedAt          time.Time  `json:"createdAt"`
+	UpdatedAt          time.Time  `json:"updatedAt"`
 }
 
 // EventDraft is an unsequenced event submitted with an atomic transition.
@@ -122,18 +124,19 @@ type Snapshot struct {
 type CreateRequest struct {
 	// ExecutionRequired reserves the existing Store execution epoch at
 	// creation. It must not be enabled after creating a legacy Run.
-	ExecutionRequired bool
-	Budget            *budget.RunEnrollment
-	ID                string
-	Kind              RunKind
-	Actor             ActorRef
-	Thread            ThreadRef
-	RequestID         string
-	ParentRunID       string
-	Goal              string
-	DeadlineAt        *time.Time
-	State             json.RawMessage
-	Events            []EventDraft
+	ExecutionRequired  bool
+	Budget             *budget.RunEnrollment
+	ID                 string
+	Kind               RunKind
+	Actor              ActorRef
+	Thread             ThreadRef
+	RequestID          string
+	ParentRunID        string
+	LogicalParentRunID string
+	Goal               string
+	DeadlineAt         *time.Time
+	State              json.RawMessage
+	Events             []EventDraft
 }
 
 // Mutation replaces feature state and advances the Run through one atomic CAS.

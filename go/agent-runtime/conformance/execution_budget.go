@@ -25,6 +25,7 @@ func RunExecutionBudgetSuite(t *testing.T, factory func(*testing.T) ExecutionBud
 	t.Run("native_tool", func(t *testing.T) { runNativeToolBudget(t, factory) })
 	t.Run("native_control", func(t *testing.T) { runNativeBudgetControl(t, factory) })
 	t.Run("native_binding", func(t *testing.T) { runNativeBudgetBinding(t, factory) })
+	t.Run("logical_owner", func(t *testing.T) { runNativeLogicalOwner(t, factory) })
 	const id = "run"
 	const scope = "scope"
 	atomic := func(f ExecutionBudgetStore, ctx context.Context, lease *kernel.ExecutionLease, guard *kernel.ControlGuard, m kernel.StoreMutation, change func(budget.Coordinator) error) error {
@@ -252,7 +253,7 @@ func RunExecutionBudgetSuite(t *testing.T, factory func(*testing.T) ExecutionBud
 		childRun := root.Run
 		childRun.ID = "child"
 		childRun.ParentRunID = id
-		childRun.BudgetParentRunID = id
+		childRun.LogicalParentRunID = id
 		child, e := f.Store.Create(ctx, kernel.Record{ExecutionRequired: true, BudgetEnrollment: &budget.RunEnrollment{ScopeID: scope, Limits: budget.Limits{MaxToolCalls: 1}, Binding: budget.RunBudget{ParentRunID: id}}, Run: childRun, State: json.RawMessage(`{"phase":"initial"}`)}, nil)
 		if e != nil {
 			t.Fatal(e)

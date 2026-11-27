@@ -17,6 +17,7 @@ import (
 )
 
 var errNativeChildCreateACKLost = errors.New("native child Create committed, ACK lost")
+var errNativeChildCreateInterrupted = errors.New("native child Create interrupted before commit")
 
 type childReturnCut struct {
 	harness.Store
@@ -27,7 +28,7 @@ type childReturnCut struct {
 var errNativeChildHostReturnCut = errors.New("native child Host return interrupted")
 
 func (s *childReturnCut) AppendItem(ctx context.Context, i harness.Item) (harness.Item, bool, error) {
-	if s.cut && strings.Contains(string(i.Payload), "handoff_start_returned") {
+	if s.cut && i.Kind == harness.ItemDelegation && i.Status == harness.ItemCompleted {
 		s.cut = false
 		return harness.Item{}, false, errNativeChildHostReturnCut
 	}
@@ -39,10 +40,12 @@ type nativeChildCreateProbe struct {
 	t                  *testing.T
 	mode, child, scope string
 	creates            int
+	record             kernel.Record
+	events             []kernel.EventDraft
 }
 
 func (s *nativeChildCreateProbe) Create(ctx context.Context, r kernel.Record, events []kernel.EventDraft) (kernel.Snapshot, error) {
-	if r.Run.Kind != "agent" || r.Run.BudgetParentRunID == "" {
+	if r.Run.Kind != "agent" || r.Run.LogicalParentRunID == "" {
 		return s.nativeAuthorityKernelPorts.Create(ctx, r, events)
 	}
 	s.creates++
@@ -62,7 +65,7 @@ func (s *nativeChildCreateProbe) Create(ctx context.Context, r kernel.Record, ev
 		if err != nil {
 			s.t.Fatal(err)
 		}
-		binding := budget.RunEnrollment{ScopeID: s.scope, Limits: ledger.Limits, Binding: budget.RunBudget{ParentRunID: r.Run.BudgetParentRunID}}
+		binding := budget.RunEnrollment{ScopeID: s.scope, Limits: ledger.Limits, Binding: budget.RunBudget{ParentRunID: r.Run.LogicalParentRunID}}
 		competitor, err := rt.Create(ctx, kernel.CreateRequest{ID: "capacity-competitor", Kind: "agent", Actor: r.Run.Actor, Thread: r.Run.Thread, Goal: "competing child", Budget: &binding, State: json.RawMessage("{}")})
 		if err != nil {
 			s.t.Fatal(err)
@@ -87,6 +90,10 @@ func (s *nativeChildCreateProbe) Create(ctx context.Context, r kernel.Record, ev
 		}
 		return kernel.Snapshot{}, denied
 	}
+	if s.mode == "unknown-before-create" && s.creates == 1 {
+		s.record, s.events = r, append([]kernel.EventDraft(nil), events...)
+		return kernel.Snapshot{}, errNativeChildCreateInterrupted
+	}
 	out, err := s.nativeAuthorityKernelPorts.Create(ctx, r, events)
 	if err == nil && s.mode == "unknown-after-create" {
 		return kernel.Snapshot{}, errNativeChildCreateACKLost
@@ -95,7 +102,7 @@ func (s *nativeChildCreateProbe) Create(ctx context.Context, r kernel.Record, ev
 }
 
 func nativeChildEnrollment(t *testing.T, factory func(*testing.T) NativeAuthorityFixture) {
-	for _, mode := range []string{"normal", "capacity-race", "exhausted-race", "unknown-after-create", "host-return-cut"} {
+	for _, mode := range []string{"normal", "capacity-race", "exhausted-race", "unknown-after-create", "unknown-before-create", "host-return-cut"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx := t.Context()
 			f := factory(t)
@@ -154,8 +161,12 @@ func nativeChildEnrollment(t *testing.T, factory func(*testing.T) NativeAuthorit
 					t.Fatal(e)
 				}
 				items, e := f.Host.ListItems(ctx, probe.scope, 0, 1000)
-				if e != nil || !harness.PendingExecutionDispatch(items, owner.ID) {
-					t.Fatalf("lost Host receipt not pending: %v", e)
+				if e != nil || harness.PendingExecutionDispatch(items, owner.ID) {
+					t.Fatalf("native child acquired Host dispatch: %v", e)
+				}
+				receipt, e := probe.LookupOwnedRetirementForRun(ctx, probe.child)
+				if e != nil || !receipt.Valid() || !receipt.Evidence.Completion.HostCompleted || receipt.Evidence.Snapshot.Run.Status != kernel.RunStatusCompleted {
+					t.Fatalf("lost product ACK lost native return: %v", e)
 				}
 				if f.Reopen != nil {
 					k, h, rel := f.Reopen()
@@ -179,7 +190,72 @@ func nativeChildEnrollment(t *testing.T, factory func(*testing.T) NativeAuthorit
 				_, refreshErr := session.Refresh(ctx, "binding")
 				items, e = f.Host.ListItems(ctx, probe.scope, 0, 1000)
 				if e != nil || harness.PendingExecutionDispatch(items, owner.ID) || childCalls != 1 || probe.creates != 1 {
-					t.Fatalf("exact retirement not recovered: %v / %v calls=%d", refreshErr, e, childCalls)
+					t.Fatalf("exact native return not recovered: %v / %v calls=%d", refreshErr, e, childCalls)
+				}
+				found := false
+				for _, i := range items {
+					if i.Kind == harness.ItemDelegation && i.Status == harness.ItemCompleted && i.RunID == probe.child {
+						found = true
+					}
+				}
+				if !found {
+					t.Fatalf("product receipt not recovered: %v", refreshErr)
+				}
+				again, e := probe.LookupOwnedRetirementForRun(ctx, probe.child)
+				if e != nil || kernel.ManagedDigest(again) != kernel.ManagedDigest(receipt) {
+					t.Fatalf("native receipt changed on recovery: %v", e)
+				}
+				return
+			case "unknown-before-create":
+				if !errors.Is(err, errNativeChildCreateInterrupted) || registered || childCalls != 0 {
+					t.Fatalf("original pre-Create fault: %v", err)
+				}
+				snapshot, e := session.Load(ctx, "binding")
+				if e != nil || len(snapshot.Subtasks) != 1 {
+					t.Fatalf("original frozen subtask missing: %v %+v", e, snapshot.Subtasks)
+				}
+				task := snapshot.Subtasks[0]
+				stopped, e := session.CancelSubtask(ctx, "binding", task.ID, "stop uncreated child")
+				if e != nil || len(stopped.Subtasks) != 1 || stopped.Subtasks[0].Status != "cancelled" {
+					t.Fatalf("native uncreated cancellation: %v %+v", e, stopped.Subtasks)
+				}
+				d, e := probe.LoadCreationDecision(ctx, probe.child)
+				if e != nil || d.Status != kernel.RunStatusCancelled || d.LogicalParentRunID != probe.record.Run.LogicalParentRunID || d.OriginFingerprint == "" {
+					t.Fatalf("negative child identity missing: %+v %v", d, e)
+				}
+				if _, e = probe.nativeAuthorityKernelPorts.Create(ctx, probe.record, probe.events); !errors.Is(e, kernel.ErrCreationCancelled) {
+					t.Fatalf("negative child admitted delayed Create: %v", e)
+				}
+				after, e := probe.LoadBudget(ctx, probe.scope)
+				if e != nil || !after.RunCancelled(probe.child) || after.View("").Usage.ChildRuns != before.View("").Usage.ChildRuns {
+					t.Fatalf("negative child fabricated accounting: %v %+v", e, after)
+				}
+				if _, ok := after.Runs[probe.child]; ok {
+					t.Fatal("negative child registered")
+				}
+				if _, e = probe.Load(ctx, probe.child); !errors.Is(e, kernel.ErrNotFound) {
+					t.Fatalf("negative child Run exists: %v", e)
+				}
+				if _, e = probe.LookupChildExecution(ctx, probe.child); !errors.Is(e, kernel.ErrNotFound) {
+					t.Fatalf("negative child Grant exists: %v", e)
+				}
+				root, ok := harness.TopLevelInvocation(stopped)
+				if !ok {
+					t.Fatal("missing original parent")
+				}
+				g, ge := probe.LookupChildExecution(ctx, root.ExecutionRefID)
+				completion, ce := probe.LookupOwnedPhysicalCallbackReturn(ctx, g)
+				if ge != nil || ce != nil || !completion.HostCompleted || completion.GrantID != g.ID {
+					t.Fatalf("original parent callback not returned: %v / %v", ge, ce)
+				}
+				calls := len(client.requests)
+				repaired, e := session.Resume(ctx, "binding")
+				if e != nil || repaired.Turn.Status != harness.TurnRunning || len(client.requests) != calls || probe.creates != 1 {
+					t.Fatalf("receipt-only parent recovery: %s %v", repaired.Turn.Status, e)
+				}
+				finished, e := session.Resume(ctx, "binding")
+				if e != nil || finished.Turn.Status != harness.TurnCompleted || childCalls != 0 || probe.creates != 1 {
+					t.Fatalf("parent could not consume native negative receipt: %s %v", finished.Turn.Status, e)
 				}
 				return
 			case "unknown-after-create":
@@ -221,28 +297,16 @@ func nativeChildEnrollment(t *testing.T, factory func(*testing.T) NativeAuthorit
 			if e != nil {
 				t.Fatal(e)
 			}
-			matched := 0
 			for _, item := range items {
-				phase, ok := harness.VerifiedExecutionDispatchGrant(item)
-				if !ok || phase != "handoff-start" || item.RunID != probe.child {
-					continue
+				if item.RunID == probe.child && item.ParentItemID == harness.ExecutionDispatchParentItemID {
+					t.Fatal("qualified native child appended Host dispatch")
 				}
-				boundary, settled := harness.VerifiedExecutionDispatchReceipt(item, items)
-				if !settled || boundary != "handoff_start_returned" {
-					continue
-				}
-				id, idErr := kernel.OwnedPhysicalDispatchGrantID(probe.child, "start", item.ID)
-				if idErr != nil {
-					t.Fatal(idErr)
-				}
-				receipt, e := probe.LoadOwnedRetirement(ctx, id)
-				if e != nil || !receipt.Valid() || receipt.Evidence.Grant.ID != id {
-					t.Fatalf("host return without exact native retirement: %v", e)
-				}
-				matched++
 			}
-			if matched != 1 {
-				t.Fatalf("expected one physical return, got %d", matched)
+			receipt, e := probe.LookupOwnedRetirementForRun(ctx, probe.child)
+			if e != nil || !receipt.Valid() || !strings.HasPrefix(receipt.Evidence.Grant.ID, "owneddispatch_native_") ||
+				receipt.Evidence.Grant.AdmissionOperation != "start" || !receipt.Evidence.Completion.HostCompleted ||
+				receipt.Evidence.Snapshot.Run.Status != kernel.RunStatusCompleted {
+				t.Fatalf("exact native child retirement missing: %v", e)
 			}
 		})
 	}

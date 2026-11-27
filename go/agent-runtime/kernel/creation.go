@@ -2,6 +2,7 @@ package kernel
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -20,21 +21,32 @@ var (
 // RunCreationDecision records the single negative decision under the same
 // native identity key as Create. Status describes the decision, not a Run.
 type RunCreationDecision struct {
-	RunID  string
-	Status RunStatus
-	Reason string
-	Budget budget.RunEnrollment
+	RunID              string
+	LogicalParentRunID string
+	OriginFingerprint  string
+	Status             RunStatus
+	Reason             string
+	Budget             budget.RunEnrollment
 }
 
 func (c RunCreationDecision) Valid() bool {
+	if c.LogicalParentRunID != "" {
+		digest, e := hex.DecodeString(c.OriginFingerprint)
+		if strings.TrimSpace(c.LogicalParentRunID) != c.LogicalParentRunID || c.LogicalParentRunID == c.RunID ||
+			e != nil || len(digest) != 32 || hex.EncodeToString(digest) != c.OriginFingerprint {
+			return false
+		}
+	} else if c.OriginFingerprint != "" {
+		return false
+	}
 	return c.RunID != "" && strings.TrimSpace(c.RunID) == c.RunID && utf8.ValidString(c.RunID) &&
 		(c.Status == RunStatusCancelled || c.Status == RunStatusFailed && c.Reason != "") &&
 		strings.TrimSpace(c.Reason) == c.Reason && utf8.ValidString(c.Reason) &&
-		(c.Budget == (budget.RunEnrollment{}) || (c.Budget.Valid(c.RunID) && c.Budget.Binding.ParentRunID == ""))
+		(c.Budget == (budget.RunEnrollment{}) || (c.Budget.Valid(c.RunID) && c.Budget.Binding.ParentRunID == c.LogicalParentRunID))
 }
 
 func (c RunCreationDecision) MatchesSelection(q RunCreationDecision) bool {
-	return c.Valid() && q.Valid() && c.RunID == q.RunID && c.Budget == q.Budget
+	return c.Valid() && q.Valid() && c.RunID == q.RunID && c.LogicalParentRunID == q.LogicalParentRunID && c.OriginFingerprint == q.OriginFingerprint && c.Budget == q.Budget
 }
 
 func (c RunCreationDecision) Rejection() error {
@@ -82,7 +94,7 @@ func ValidateCreationRetry(ctx context.Context, e *budget.RunEnrollment,
 	prior := e.Retry.OriginalRunID
 	s, err := load(ctx, prior)
 	if err == nil {
-		if s.Run.ID != prior || s.Run.BudgetScopeID != e.ScopeID || s.Run.BudgetParentRunID != "" ||
+		if s.Run.ID != prior || s.Run.BudgetScopeID != e.ScopeID || s.Run.LogicalParentRunID != "" ||
 			s.Run.ParentRunID != "" || !terminalStatus(s.Run.Status) || s.Run.Status == RunStatusCompleted {
 			return budget.ErrLedgerConflict
 		}

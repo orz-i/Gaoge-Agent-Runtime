@@ -134,31 +134,11 @@ func (authority *BudgetAuthority) resolveScope(ctx context.Context, runID string
 				return scope, ErrConflict
 			}
 			if inv.ParentItemID != "" && isHandoffDelegationInvocation(inv) {
-				frozen, e := decodeFrozenHandoffDelegation(inv.Input)
-				if e != nil {
-					return scope, e
-				}
-				proof, e := frozenChildRoot(inv)
-				if e != nil {
-					return scope, e
-				}
-				parent := proof.attempt()
-				if len(proof.Parents) > 0 {
-					parent = proof.Parents[0]
-				}
-				edge, found, e := contextParentRunID(ctx, d.Relations, runID)
-				if e != nil || !found || edge != parent.ExecutionRefID {
+				frozen, parent, e := readOriginalHandoffParent(ctx, d.Store, d.Relations, inv, true)
+				if e != nil || d.Relations == nil {
 					return scope, errors.Join(ErrConflict, e)
 				}
-				item, e := d.Store.GetItem(ctx, inv.ParentItemID)
-				var payload delegationItemPayload
-				if e != nil || item.ID != inv.ParentItemID || item.Seq == 0 || item.TurnID != turn.ID || item.Kind != ItemDelegation || item.Status != ItemStarted ||
-					item.InvocationID != parent.InvocationID || item.RunID != runID ||
-					!decodeTypedAuthorityJSON(item.Payload, &payload) || payload.Execution == nil || payload.ParentRunID != edge ||
-					!sameHandoffFrozenExecution(*payload.Execution, frozen) {
-					return scope, errors.Join(ErrConflict, e)
-				}
-				binding := budget.RunBudget{ParentRunID: edge, Limits: delegationBudgetLimits(frozen)}
+				binding := budget.RunBudget{ParentRunID: parent.ExecutionRefID, Limits: delegationBudgetLimits(frozen)}
 				if old, ok := existing.Runs[runID]; ok && old != binding {
 					return scope, budget.ErrLedgerConflict
 				}

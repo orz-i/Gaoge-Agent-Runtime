@@ -1,12 +1,14 @@
 package conformance
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"reflect"
 	"testing"
 	"time"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
@@ -303,6 +305,76 @@ func runNativeBudgetBinding(t *testing.T, factory func(*testing.T) ExecutionBudg
 				}
 				if mode != "complete" && (!after.RunCancelled("root") || after.Reservations[res.ID].Status != budget.ReservationReleased) {
 					t.Fatalf("control accounting: %+v", after)
+				}
+			}
+		})
+	}
+}
+
+// The same actual Create, owned admission and entry transactions must fence
+// logical local children even when no SharedBudget is configured.
+func runNativeLogicalOwner(t *testing.T, factory func(*testing.T) ExecutionBudgetStore) {
+	for _, cut := range []string{"success", "foreign", "missing", "terminal", "admission", "entry"} {
+		t.Run(cut, func(t *testing.T) {
+			ctx := t.Context()
+			f := factory(t)
+			rt := ea1StartRuntime(t, f.Store)
+			req := ea1AdmissionRequest()
+			parent, err := rt.Create(ctx, kernel.CreateRequest{ID: "parent", Kind: "agent", Actor: req.Actor, Thread: req.Thread, Goal: "parent", State: json.RawMessage("{}")})
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.LogicalParentRunID = parent.Run.ID
+			req.OriginFingerprint = agent.FrozenOriginFingerprint([]byte("frozen-child"))
+			stop := func() error {
+				_, e := rt.Cancel(ctx, parent.Run.ID, parent.Run.Revision, "original parent stopped")
+				return e
+			}
+			w := ea1AgentAdmissionWrap(t, f.Store)
+			switch cut {
+			case "foreign":
+				req.Actor.ActorID = "foreign"
+			case "missing":
+				req.LogicalParentRunID = "missing"
+			case "terminal":
+				if err := stop(); err != nil {
+					t.Fatal(err)
+				}
+			case "admission":
+				w.afterCreate = func(context.Context, kernel.Snapshot) error { return stop() }
+			case "entry":
+				w.afterOwned = func(context.Context, kernel.ChildExecutionGrant) error { return stop() }
+			}
+			m, host := &ea1AdmissionModel{}, &ea1AdmissionMiddleware{}
+			runner := ea1AdmissionConfiguredRunner(t, ea1StartRuntime(t, w), m, host, false)
+			out, err := runner.StartRun(ctx, req)
+			if cut == "success" {
+				if err != nil || out.Run.Status != kernel.RunStatusCompleted || out.Run.ParentRunID != "" ||
+					out.Run.LogicalParentRunID != parent.Run.ID || out.Run.BudgetScopeID != "" ||
+					!agent.MatchesFrozenOrigin(out, []byte("frozen-child")) ||
+					m.calls.Load() != 1 || host.calls.Load() != 1 {
+					t.Fatalf("native logical owner not retained: %+v %v", out.Run, err)
+				}
+				return
+			}
+			if err == nil || m.calls.Load() != 0 || host.calls.Load() != 0 {
+				t.Fatalf("rejected owner entered a callback: %v", err)
+			}
+			if cut == "foreign" || cut == "missing" || cut == "terminal" {
+				ea1StartAbsent(t, rt, req.ID)
+				return
+			}
+			s, err := rt.Load(ctx, req.ID)
+			if err != nil || s.Run.LogicalParentRunID != parent.Run.ID || s.Run.Revision != 1 {
+				t.Fatalf("original child changed on denial: %+v %v", s.Run, err)
+			}
+			if _, err = rt.LookupChildExecution(ctx, req.ID); !errors.Is(err, kernel.ErrNotFound) {
+				t.Fatalf("denied entry retained grant: %v", err)
+			}
+			if cut == "entry" {
+				receipt, err := rt.LookupOwnedRetirementForRun(ctx, req.ID)
+				if err != nil || !receipt.Valid() || !receipt.Evidence.Completion.NotEntered() {
+					t.Fatalf("exact no-entry retirement not retained: %+v %v", receipt, err)
 				}
 			}
 		})

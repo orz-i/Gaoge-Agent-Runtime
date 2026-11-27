@@ -13,12 +13,12 @@ import (
 func EnrollRunBudget(ctx context.Context, store budget.LedgerStore, r Record) error {
 	e := r.BudgetEnrollment
 	if e == nil {
-		if r.Run.BudgetScopeID != "" || r.Run.BudgetParentRunID != "" {
+		if r.Run.BudgetScopeID != "" {
 			return budget.ErrLedgerConflict
 		}
 		return nil
 	}
-	if r.Run.BudgetScopeID != e.ScopeID || r.Run.BudgetParentRunID != e.Binding.ParentRunID ||
+	if r.Run.BudgetScopeID != e.ScopeID || r.Run.LogicalParentRunID != e.Binding.ParentRunID ||
 		(r.Run.ParentRunID != "" && r.Run.ParentRunID != e.Binding.ParentRunID) {
 		return budget.ErrLedgerConflict
 	}
@@ -43,30 +43,64 @@ func IsRunBudgetEnrollmentDenied(err error) bool {
 
 func ValidRunBudgetBinding(run Run) bool {
 	return strings.TrimSpace(run.BudgetScopeID) == run.BudgetScopeID &&
-		strings.TrimSpace(run.BudgetParentRunID) == run.BudgetParentRunID &&
-		(run.BudgetScopeID != "" || run.BudgetParentRunID == "") &&
-		(run.BudgetScopeID == "" || run.ParentRunID == "" || run.ParentRunID == run.BudgetParentRunID) &&
-		run.BudgetParentRunID != run.ID
+		strings.TrimSpace(run.LogicalParentRunID) == run.LogicalParentRunID &&
+		(run.ParentRunID == "" || run.LogicalParentRunID == "" || run.ParentRunID == run.LogicalParentRunID) &&
+		(run.BudgetScopeID == "" || run.ParentRunID == "" || run.ParentRunID == run.LogicalParentRunID) &&
+		run.LogicalParentRunID != run.ID
 }
 
-// BudgetParentID selects the existing local parent that must be checked
-// under Create's transaction. Logical Handoff ancestry may be distinct
-// from the physical child-Grant topology.
-func BudgetParentID(run Run) string {
+// RunParentID selects the immutable owner for native admission. Logical
+// ownership remains distinct from the physical child-Grant topology.
+func RunParentID(run Run) string {
 	if run.ParentRunID != "" {
 		return run.ParentRunID
 	}
-	return run.BudgetParentRunID
+	return run.LogicalParentRunID
 }
 
-func ValidateRunBudgetParent(child, parent Run) error {
-	if parent.ID == "" || parent.ID != BudgetParentID(child) || parent.Actor != child.Actor || parent.Thread != child.Thread || terminalStatus(parent.Status) {
+func ValidateRunParent(child, parent Run) error {
+	if !ValidRunBudgetBinding(child) || !ValidRunBudgetBinding(parent) ||
+		parent.ID == "" || parent.ID != RunParentID(child) || parent.Actor != child.Actor || parent.Thread != child.Thread ||
+		(parent.Status != RunStatusRunning && parent.Status != RunStatusWaitingInput && parent.Status != RunStatusPausedBudget) {
 		return ErrExecutionConflict
 	}
-	if child.BudgetScopeID != parent.BudgetScopeID || (child.BudgetScopeID != "" && child.BudgetParentRunID != parent.ID) {
+	if child.BudgetScopeID != parent.BudgetScopeID || (child.BudgetScopeID != "" && child.LogicalParentRunID != parent.ID) {
 		return budget.ErrLedgerConflict
 	}
 	return nil
+}
+
+// ValidateLiveRunOwners is consumed only under the native Store transaction.
+// The same immutable owner chain gates Create and independently owned entry;
+// a relation index or mutable Host projection never substitutes for it.
+func ValidateLiveRunOwners(ctx context.Context, child Run, load func(context.Context, string) (Snapshot, error)) ([]string, error) {
+	if !ValidRunBudgetBinding(child) {
+		return nil, ErrExecutionConflict
+	}
+	seen := map[string]bool{child.ID: true}
+	var physical []string
+	physicalChain := true
+	for id := RunParentID(child); id != ""; id = RunParentID(child) {
+		if seen[id] || len(seen) >= 64 {
+			return nil, ErrExecutionConflict
+		}
+		seen[id] = true
+		parent, err := load(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if err = ValidateRunParent(child, parent.Run); err != nil {
+			return nil, err
+		}
+		// Preserve the physical/borrowed Grant topology; the independent
+		// logical owner is validated, not enrolled as a borrowed Grant.
+		physicalChain = physicalChain && child.ParentRunID != ""
+		if physicalChain {
+			physical = append(physical, id)
+		}
+		child = parent.Run
+	}
+	return physical, nil
 }
 
 // LoadRunBudget reads the exact original accounting scope, never a new
@@ -80,7 +114,7 @@ func LoadRunBudget(ctx context.Context, store budget.LedgerStore, run Run) (budg
 		return budget.Ledger{}, e
 	}
 	b, ok := l.Runs[run.ID]
-	if l.ID != run.BudgetScopeID || l.Revision == 0 || !ok || b.ParentRunID != run.BudgetParentRunID {
+	if l.ID != run.BudgetScopeID || l.Revision == 0 || !ok || b.ParentRunID != run.LogicalParentRunID {
 		return budget.Ledger{}, budget.ErrLedgerConflict
 	}
 	return l, nil
@@ -91,7 +125,7 @@ func LoadRunBudget(ctx context.Context, store budget.LedgerStore, run Run) (budg
 // accounting proposal. Unknown dispatched effects cannot be cancelled.
 func PlanRunBudgetMutation(ctx context.Context, store budget.LedgerStore, current Run, m StoreMutation, control bool) (*budget.LedgerMutation, error) {
 	next := m.Record.Run
-	if m.Record.BudgetEnrollment != nil || (control && m.Ledger != nil) || !ValidRunBudgetBinding(current) || current.BudgetScopeID != next.BudgetScopeID || current.BudgetParentRunID != next.BudgetParentRunID {
+	if m.Record.BudgetEnrollment != nil || (control && m.Ledger != nil) || !ValidRunBudgetBinding(current) || current.BudgetScopeID != next.BudgetScopeID || current.LogicalParentRunID != next.LogicalParentRunID {
 		return nil, budget.ErrLedgerConflict
 	}
 	if current.BudgetScopeID == "" {
@@ -119,7 +153,7 @@ func PlanRunBudgetMutation(ctx context.Context, store budget.LedgerStore, curren
 			return nil, budget.ErrLedgerConflict
 		}
 		if control {
-			p, e := budget.PlanRunCancellation(ctx, l, current.ID, current.BudgetParentRunID)
+			p, e := budget.PlanRunCancellation(ctx, l, current.ID, current.LogicalParentRunID)
 			if errors.Is(e, budget.ErrWaiting) {
 				return nil, ErrChildExecutionBusy
 			}

@@ -72,6 +72,9 @@ func (s *Store) CheckOwnedPhysicalEntry(ctx context.Context, g kernel.ChildExecu
 	if err != nil {
 		return kernel.OwnedPhysicalEntryWindow{}, err
 	}
+	if _, err = sqliteValidateLiveRunOwners(ctx, tx, current.Run); err != nil {
+		return kernel.OwnedPhysicalEntryWindow{}, err
+	}
 	marked, err := loadOwnedPhysicalGrant(ctx, tx, g)
 	if err != nil {
 		return kernel.OwnedPhysicalEntryWindow{}, err

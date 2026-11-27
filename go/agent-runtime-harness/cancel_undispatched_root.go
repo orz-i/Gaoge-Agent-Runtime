@@ -141,11 +141,38 @@ func (runner *Runner) readUncreatedRootDecision(ctx context.Context, turn Turn, 
 	if err != nil {
 		return q, err
 	}
+	return runner.readNativeCreationDecision(ctx, q)
+}
+
+func (runner *Runner) readNativeCreationDecision(ctx context.Context, q kernel.RunCreationDecision) (kernel.RunCreationDecision, error) {
 	c, err := runner.runtime.LoadCreationDecision(ctx, q.RunID)
 	if err == nil && !c.MatchesSelection(q) {
 		err = ErrConflict
 	}
 	return c, err
+}
+
+// A decision is permanent and can only be adopted for the exact frozen selection.
+func (runner *Runner) decideNativeCreation(ctx context.Context, q kernel.RunCreationDecision) (kernel.RunCreationDecision, error) {
+	d, err := runner.runtime.DecideBeforeCreate(ctx, q)
+	if err == nil && !d.MatchesSelection(q) {
+		err = ErrConflict
+	}
+	return d, err
+}
+
+func (runner *Runner) projectCreationDecisionBudget(ctx context.Context, d kernel.RunCreationDecision) error {
+	if d.Budget.ScopeID == "" {
+		return nil
+	}
+	if !runner.nativeBudget() {
+		return ErrConflict
+	}
+	ledger, err := runner.budgets.loadLedger(ctx, d.Budget.ScopeID)
+	if err != nil {
+		return err
+	}
+	return runner.budgets.project(ctx, ledger)
 }
 
 func (runner *Runner) projectUncreatedRoot(ctx context.Context, turn Turn, inv Invocation, status InvocationStatus, reason string) (Snapshot, error) {
@@ -176,12 +203,8 @@ func (runner *Runner) projectUncreatedRoot(ctx context.Context, turn Turn, inv I
 }
 
 func (runner *Runner) projectNativeCreationDecision(ctx context.Context, turn Turn, inv Invocation, d kernel.RunCreationDecision) (Snapshot, error) {
-	if d.Budget.ScopeID != "" && runner.nativeBudget() {
-		ledger, err := runner.budgets.loadLedger(ctx, d.Budget.ScopeID)
-		if err != nil {
-			return Snapshot{}, err
-		}
-		if err = runner.budgets.project(ctx, ledger); err != nil {
+	if runner.nativeBudget() {
+		if err := runner.projectCreationDecisionBudget(ctx, d); err != nil {
 			return Snapshot{}, err
 		}
 	}
@@ -234,14 +257,14 @@ func (runner *Runner) cancelUndispatchedRoot(
 		if e != nil {
 			return Snapshot{}, true, e
 		}
-		d, e := runner.runtime.LoadCreationDecision(ctx, q.RunID)
+		d, e := runner.readNativeCreationDecision(ctx, q)
 		if errors.Is(e, kernel.ErrNotFound) {
-			d, e = runner.runtime.DecideBeforeCreate(ctx, q)
+			d, e = runner.decideNativeCreation(ctx, q)
 		}
 		if errors.Is(e, kernel.ErrAlreadyExists) {
 			return Snapshot{}, false, nil // Create won the native identity.
 		}
-		if e != nil || !d.MatchesSelection(q) {
+		if e != nil {
 			return Snapshot{}, true, errors.Join(ErrExecutionOutcomeUnknown, e)
 		}
 		projected, e := runner.projectNativeCreationDecision(ctx, turn, original, d)
@@ -294,19 +317,11 @@ func (runner *Runner) startOriginalRoot(ctx context.Context, inv Invocation, pha
 }
 
 func (runner *Runner) finishNativeRootStart(ctx context.Context, turn Turn, inv Invocation, cause error) (Snapshot, error) {
-	d, err := runner.readUncreatedRootDecision(ctx, turn, inv)
-	// Only a direct native preflight rejection of a frozen input can commit
-	// the failed identity. Transient I/O and unknown Create ACKs stay open.
-	if errors.Is(err, kernel.ErrNotFound) && agent.IsNativeStartNoEffect(cause) && definitiveStartFailure(cause) {
-		q, e := runner.uncreatedRootSelection(ctx, turn, inv, kernel.RunStatusFailed, cause.Error())
-		if e != nil {
-			return Snapshot{}, errors.Join(cause, e)
-		}
-		d, err = runner.runtime.DecideBeforeCreate(ctx, q)
-		if err == nil && !d.MatchesSelection(q) {
-			err = ErrConflict
-		}
+	q, err := runner.uncreatedRootSelection(ctx, turn, inv, kernel.RunStatusCancelled, "")
+	if err != nil {
+		return Snapshot{}, errors.Join(cause, err)
 	}
+	d, err := runner.resolveNativeStartDecision(ctx, q, cause)
 	if errors.Is(err, kernel.ErrAlreadyExists) {
 		// The positive identity won. Only its real Run is observable.
 		s, e := runner.runtime.Load(ctx, inv.ExecutionRefID)
@@ -326,6 +341,16 @@ func (runner *Runner) finishNativeRootStart(ctx context.Context, turn Turn, inv 
 		cause = d.Rejection()
 	}
 	return observed, errors.Join(cause, e)
+}
+
+// Neither transient I/O nor unknown Create ACK is a negative identity.
+func (runner *Runner) resolveNativeStartDecision(ctx context.Context, q kernel.RunCreationDecision, cause error) (kernel.RunCreationDecision, error) {
+	d, err := runner.readNativeCreationDecision(ctx, q)
+	if errors.Is(err, kernel.ErrNotFound) && agent.IsNativeStartNoEffect(cause) && definitiveStartFailure(cause) {
+		q.Status, q.Reason = kernel.RunStatusFailed, cause.Error()
+		d, err = runner.decideNativeCreation(ctx, q)
+	}
+	return d, err
 }
 
 func definitiveStartFailure(err error) bool {

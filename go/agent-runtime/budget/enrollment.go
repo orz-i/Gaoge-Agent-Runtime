@@ -76,18 +76,18 @@ func EnrollRun(ctx context.Context, store LedgerStore, runID string, e RunEnroll
 	return ErrLedgerConflict
 }
 
-// CloseBeforeEnrollment closes an uncreated root's original accounting
+// CloseBeforeEnrollment closes an uncreated Run's original accounting
 // generation without registering a Run. The caller owns the native Run
 // identity transaction; this reducer performs at most one ledger CAS.
 func CloseBeforeEnrollment(ctx context.Context, store LedgerStore, runID string, e RunEnrollment) error {
 	if e == (RunEnrollment{}) {
 		return nil
 	}
-	if store == nil || !e.Valid(runID) || e.Binding.ParentRunID != "" {
+	if store == nil || !e.Valid(runID) {
 		return ErrInvalidUsage
 	}
 	l, err := store.LoadBudget(ctx, e.ScopeID)
-	if errors.Is(err, ErrLedgerNotFound) && e.Retry == (RootRetryGrant{}) {
+	if errors.Is(err, ErrLedgerNotFound) && e.Retry == (RootRetryGrant{}) && e.Binding.ParentRunID == "" {
 		l = Ledger{ID: e.ScopeID, Limits: e.Limits}
 	} else if err != nil {
 		return err
@@ -104,7 +104,19 @@ func CloseBeforeEnrollment(ctx context.Context, store LedgerStore, runID string,
 		}
 	}
 	next := CloneLedger(l)
-	if e.Retry == (RootRetryGrant{}) {
+	if e.Binding.ParentRunID != "" {
+		// A rejected child has no lifetime slot, membership or charge.
+		// Revoke only that identity in the original parent's ledger.
+		if _, ok := l.Runs[e.Binding.ParentRunID]; !ok {
+			return ErrLedgerConflict
+		}
+		if _, ok := l.Reservations["child:"+runID]; ok {
+			return ErrLedgerConflict
+		}
+		if err = next.applyRunCancellation(runID); err != nil {
+			return err
+		}
+	} else if e.Retry == (RootRetryGrant{}) {
 		if len(next.Runs) != 0 || len(next.Reservations) != 0 || len(next.RootRetries) != 0 || len(next.FinishedRuns) != 0 ||
 			(len(next.CancelledRuns) != 0 && (len(next.CancelledRuns) != 1 || !next.CancelledRuns[runID])) {
 			return ErrLedgerConflict

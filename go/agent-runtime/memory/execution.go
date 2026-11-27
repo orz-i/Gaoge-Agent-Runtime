@@ -165,7 +165,7 @@ func (store *Store) ApplyExecution(ctx context.Context, lease kernel.ExecutionLe
 		return kernel.Snapshot{}, kernel.ErrNotFound
 	}
 	if mutation.Ledger != nil && current.Run.ParentRunID != "" {
-		if _, err := store.childAncestorsLocked(current.Run); err != nil {
+		if _, err := store.validateLiveRunOwners(ctx, current.Run); err != nil {
 			return kernel.Snapshot{}, err
 		}
 	}

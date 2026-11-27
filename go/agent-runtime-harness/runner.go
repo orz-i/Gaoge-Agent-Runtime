@@ -272,41 +272,20 @@ func (runner *Runner) ResolveApproval(
 	if err != nil {
 		return Snapshot{}, err
 	}
-	_, nativeApproval := runner.agent.(*agent.Runner)
-	if nativeApproval {
-		if err = runner.recordApprovalRequestItem(ctx, turn, invocation, runtimeSnapshot); err != nil {
-			return Snapshot{}, err
-		}
-		runCtx = context.WithValue(runCtx, originalApprovalDispatchKey{}, kernel.ManagedApprovalDecision{CheckpointID: request.CheckpointID, Decision: string(request.Decision), Comment: strings.TrimSpace(request.Comment)})
+	a := kernel.ManagedApprovalDecision{CheckpointID: request.CheckpointID, Decision: string(request.Decision), Comment: strings.TrimSpace(request.Comment)}
+	runCtx, nativeApproval, err := runner.prepareApprovalDispatch(runCtx, turn, invocation, runtimeSnapshot, a)
+	if err != nil {
+		return Snapshot{}, err
 	}
-	resolve := func(physicalCtx context.Context) (kernel.Snapshot, error) {
-		return runner.agent.ResolveApproval(physicalCtx, runtimeSnapshot.Run.ID, runtimeSnapshot.Run.Revision, plugin.ApprovalResponse{Decision: decision, Comment: strings.TrimSpace(request.Comment)})
-	}
+	resolve := runner.approvalCallback(runtimeSnapshot, decision, a.Comment)
 	var resolved kernel.Snapshot
 	var resolveErr error
-	native := runner.nativeRootCommands()
-	if native != nil && !native.NativeRootCallbacksScoped() {
-		native = nil
-	}
+	native := runner.nativeRootStart()
 	if native != nil {
 		if err = validateRootRuntimeOwnership(invocation, runtimeSnapshot); err != nil {
 			return Snapshot{}, err
 		}
-		if err = runner.requireInvocationRootModelOutputCeiling(ctx, invocation); err != nil {
-			return Snapshot{}, err
-		}
-		if err = runner.requireUnclaimedInteractionContinuation(ctx, turn.ID, ""); err != nil {
-			return Snapshot{}, err
-		}
-		ready, e := runner.originalNativeCommand(ctx, invocation)
-		if e != nil || !ready {
-			return Snapshot{}, errors.Join(ErrConflict, e)
-		}
-		a := kernel.ManagedApprovalDecision{CheckpointID: request.CheckpointID, Decision: string(request.Decision), Comment: strings.TrimSpace(request.Comment)}
-		if _, exists, readErr := runner.readNativeApprovalProjection(ctx, turn, invocation, a, runtimeSnapshot.Run.UpdatedAt); readErr != nil || exists {
-			return Snapshot{}, errors.Join(ErrConflict, readErr)
-		}
-		resolved, resolveErr = runner.withNativeRootCommand(runCtx, native, invocation, "resolve-approval", &a, resolve)
+		resolved, resolveErr = runner.resolveNativeApproval(runCtx, native, turn, invocation, runtimeSnapshot, a, resolve)
 	} else {
 		resolved, resolveErr = runner.withPhysicalInvocationDispatch(runCtx, invocation, "resolve-approval", resolve)
 	}
@@ -1381,7 +1360,7 @@ func (runner *Runner) syncRuntimeSnapshotWithCancellationProof(
 		// Handoff Start returned Running. Verify the same physical Kernel
 		// owner read-only, then persist its first-party terminal Handoff
 		// result BEFORE the parent Turn's terminal CAS.
-		if err := runner.reconcileLocalTerminalHandoffEvidence(ctx, turn); err != nil {
+		if err := runner.recoverReturnedChildDispatches(ctx, turn, true); err != nil {
 			return Snapshot{}, err
 		}
 	}
@@ -1438,7 +1417,10 @@ func (runner *Runner) syncInvocationProjection(
 	runtimeSnapshot kernel.Snapshot,
 	status TurnStatus,
 ) (Invocation, error) {
-	nextStatus := invocationStatusFromTurn(status)
+	return runner.syncInvocationStatus(ctx, invocation, invocationStatusFromTurn(status), runtimeSnapshot.Run.ErrorCode, runtimeSnapshot.Run.ErrorDetail)
+}
+
+func (runner *Runner) syncInvocationStatus(ctx context.Context, invocation Invocation, nextStatus InvocationStatus, code, detail string) (Invocation, error) {
 	// Root projection already fences terminal outcomes, but child callbacks
 	// enter here directly. A stale Runtime snapshot must not reopen or replace
 	// a settled Invocation within its frozen Attempt. Only RetryInvocation
@@ -1446,16 +1428,16 @@ func (runner *Runner) syncInvocationProjection(
 	if terminalInvocationStatus(invocation.Status) && invocation.Status != nextStatus {
 		return Invocation{}, ErrConflict
 	}
-	if nextStatus == invocation.Status && invocation.ErrorCode == runtimeSnapshot.Run.ErrorCode &&
-		invocation.ErrorDetail == runtimeSnapshot.Run.ErrorDetail {
+	if nextStatus == invocation.Status && invocation.ErrorCode == code &&
+		invocation.ErrorDetail == detail {
 		if err := runner.recordInvocationItem(ctx, invocation); err != nil {
 			return Invocation{}, err
 		}
 		return invocation, nil
 	}
 	invocation.Status = nextStatus
-	invocation.ErrorCode = strings.TrimSpace(runtimeSnapshot.Run.ErrorCode)
-	invocation.ErrorDetail = strings.TrimSpace(runtimeSnapshot.Run.ErrorDetail)
+	invocation.ErrorCode = strings.TrimSpace(code)
+	invocation.ErrorDetail = strings.TrimSpace(detail)
 	invocation.UpdatedAt = runner.clock.Now().UTC()
 	updated, err := runner.store.UpdateInvocation(ctx, invocation, invocation.Revision)
 	if err != nil {

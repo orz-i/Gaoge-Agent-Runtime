@@ -249,19 +249,8 @@ func (s *Store) Create(ctx context.Context, record kernel.Record, drafts []kerne
 	if record.ExecutionRequired {
 		reservedEpoch = 1
 	}
-	if record.Run.ParentRunID != "" {
-		if _, err = sqliteLiveChildAncestors(ctx, tx, record.Run); err != nil {
-			return kernel.Snapshot{}, err
-		}
-	}
-	if id := kernel.BudgetParentID(record.Run); id != "" {
-		parent, e := loadTx(ctx, tx, id)
-		if e != nil {
-			return kernel.Snapshot{}, e
-		}
-		if e = kernel.ValidateRunBudgetParent(record.Run, parent.Run); e != nil {
-			return kernel.Snapshot{}, e
-		}
+	if _, err = sqliteValidateLiveRunOwners(ctx, tx, record.Run); err != nil {
+		return kernel.Snapshot{}, err
 	}
 	_, err = tx.ExecContext(ctx,
 		`INSERT INTO runtime_runs(run_id,scope_id,kind,status,revision,run_json,state_json,checkpoint_json,result_json,event_head,execution_epoch)
@@ -415,7 +404,7 @@ func (s *Store) applyWithAuthority(ctx context.Context, lease *kernel.ExecutionL
 		return kernel.Snapshot{}, kernel.ErrExecutionConflict
 	}
 	if ((guard != nil && guard.Kind == kernel.ControlApproval) || (guard == nil && recovery == nil && mutation.Ledger != nil)) && current.Run.ParentRunID != "" {
-		if _, err := sqliteLiveChildAncestors(ctx, tx, current.Run); err != nil {
+		if _, err := sqliteValidateLiveRunOwners(ctx, tx, current.Run); err != nil {
 			return kernel.Snapshot{}, err
 		}
 	}

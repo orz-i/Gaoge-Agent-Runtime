@@ -82,19 +82,8 @@ func (store *Store) Create(ctx context.Context, record kernel.Record, events []k
 		return kernel.Snapshot{}, decision.Rejection()
 	}
 
-	if record.Run.ParentRunID != "" {
-		if _, err := store.childAncestorsLocked(record.Run); err != nil {
-			return kernel.Snapshot{}, err
-		}
-	}
-	if id := kernel.BudgetParentID(record.Run); id != "" {
-		parent, ok := store.records[id]
-		if !ok {
-			return kernel.Snapshot{}, kernel.ErrNotFound
-		}
-		if err := kernel.ValidateRunBudgetParent(record.Run, parent.Run); err != nil {
-			return kernel.Snapshot{}, err
-		}
+	if _, err := store.validateLiveRunOwners(ctx, record.Run); err != nil {
+		return kernel.Snapshot{}, err
 	}
 	if err := store.validateCreationRetry(ctx, record.BudgetEnrollment); err != nil {
 		return kernel.Snapshot{}, err
@@ -213,7 +202,7 @@ func (store *Store) Apply(ctx context.Context, runID string, expectedRevision ui
 		if !ok || current.Run.ParentRunID == "" || !mutation.PhysicalPermit.IsPresent() {
 			return kernel.Snapshot{}, kernel.ErrExecutionRequired
 		}
-		if _, err := store.childAncestorsLocked(current.Run); err != nil {
+		if _, err := store.validateLiveRunOwners(ctx, current.Run); err != nil {
 			return kernel.Snapshot{}, err
 		}
 	}

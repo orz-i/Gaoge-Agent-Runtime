@@ -323,17 +323,18 @@ type Dependencies struct {
 
 // StartRequest starts one explicitly selected Agent Run.
 type StartRequest struct {
-	ID                string
-	Actor             kernel.ActorRef
-	Thread            kernel.ThreadRef
-	RequestID         string
-	ParentRunID       string
-	OriginFingerprint string
-	Goal              string
-	Instructions      string
-	Model             string
-	ModelOptions      json.RawMessage
-	OutputContract    *model.OutputContract
+	ID                 string
+	Actor              kernel.ActorRef
+	Thread             kernel.ThreadRef
+	RequestID          string
+	ParentRunID        string
+	LogicalParentRunID string
+	OriginFingerprint  string
+	Goal               string
+	Instructions       string
+	Model              string
+	ModelOptions       json.RawMessage
+	OutputContract     *model.OutputContract
 	// MaxModelOutputTokens bounds each model sampling request. Zero leaves the
 	// per-request ceiling unspecified; Limits.MaxOutputTokens bounds Run usage.
 	MaxModelOutputTokens int64                      `json:"maxModelOutputTokens,omitempty"`
@@ -737,7 +738,7 @@ func (runner *Runner) PrepareRun(ctx context.Context, request StartRequest) (ker
 
 func (runner *Runner) startRunWithMiddleware(ctx context.Context, request StartRequest, deferred bool) (kernel.Snapshot, error) {
 	if runner == nil || strings.TrimSpace(request.Goal) == "" ||
-		((!runner.defaultRunOwner || request.ParentRunID != "") && strings.TrimSpace(request.ID) == "") {
+		((!runner.defaultRunOwner || request.ParentRunID != "" || request.LogicalParentRunID != "") && strings.TrimSpace(request.ID) == "") {
 		// Native durability cannot recover an uncertain Create when the
 		// caller never knew the generated Run ID. RequestID alone is not a
 		// Store-enforced unique idempotency key.
@@ -850,8 +851,10 @@ func (runner *Runner) prepareStartState(ctx context.Context, request StartReques
 			return nil, err
 		}
 	}
-	if request.MaxModelOutputTokens < 0 || (request.ParentRunID == "") != (request.OriginFingerprint == "") ||
-		(request.ParentRunID != "" && !validFrozenOriginFingerprint(request.OriginFingerprint)) {
+	parented := request.ParentRunID != "" || request.LogicalParentRunID != ""
+	if request.MaxModelOutputTokens < 0 || parented != (request.OriginFingerprint != "") ||
+		(parented && !validFrozenOriginFingerprint(request.OriginFingerprint)) ||
+		(request.ParentRunID != "" && request.LogicalParentRunID != "") {
 		return nil, ErrInvalidRequest
 	}
 	if err := runner.validateOutputCapability(ctx, request.Model, request.OutputContract); err != nil {
@@ -960,7 +963,7 @@ func (runner *Runner) createPreparedRun(ctx context.Context, request StartReques
 		ID: request.ID, Kind: RunKind, Actor: request.Actor, Thread: request.Thread,
 		Budget:            enrollment,
 		ExecutionRequired: runner.runExecution != nil && (request.ParentRunID == "" || !runner.defaultRunOwner),
-		RequestID:         request.RequestID, ParentRunID: request.ParentRunID,
+		RequestID:         request.RequestID, ParentRunID: request.ParentRunID, LogicalParentRunID: request.LogicalParentRunID,
 		Goal: request.Goal, DeadlineAt: request.DeadlineAt, State: encoded,
 		Events: []kernel.EventDraft{{
 			Type: "agent.started", Message: "Agent loop started", Wakeup: true,

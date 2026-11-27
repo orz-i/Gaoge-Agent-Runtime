@@ -13,42 +13,13 @@ import (
 var _ kernel.ChildExecutionStore = (*Store)(nil)
 var _ kernel.OwnedPhysicalExecutionStore = (*Store)(nil)
 
-func sqliteTerminalStatus(status kernel.RunStatus) bool {
-	switch status {
-	case kernel.RunStatusCompleted, kernel.RunStatusFailed, kernel.RunStatusCancelled:
-		return true
-	case kernel.RunStatusRunning, kernel.RunStatusWaitingInput, kernel.RunStatusPausedBudget:
-		return false
-	default:
-		return true
-	}
-}
-
-func sqliteLiveChildAncestors(ctx context.Context, tx *sql.Tx, child kernel.Run) ([]string, error) {
-	seen := map[string]struct{}{child.ID: {}}
-	ids := make([]string, 0, 4)
-	for id := child.ParentRunID; id != ""; {
-		if _, duplicate := seen[id]; duplicate || len(ids) >= 64 {
-			return nil, kernel.ErrExecutionConflict
+func sqliteValidateLiveRunOwners(ctx context.Context, tx *sql.Tx, run kernel.Run) ([]string, error) {
+	return kernel.ValidateLiveRunOwners(ctx, run, func(ctx context.Context, id string) (kernel.Snapshot, error) {
+		if err := sqliteNativeEntryGate(ctx, tx, id); err != nil {
+			return kernel.Snapshot{}, err
 		}
-		seen[id] = struct{}{}
-		parent, err := loadTx(ctx, tx, id)
-		if err != nil {
-			return nil, err
-		}
-		if e := sqliteNativeEntryGate(ctx, tx, id); e != nil {
-			return nil, e
-		}
-		if parent.Run.Actor != child.Actor || parent.Run.Thread != child.Thread || sqliteTerminalStatus(parent.Run.Status) {
-			return nil, kernel.ErrExecutionConflict
-		}
-		ids = append(ids, id)
-		id = parent.Run.ParentRunID
-	}
-	if len(ids) == 0 {
-		return nil, kernel.ErrExecutionConflict
-	}
-	return ids, nil
+		return loadTx(ctx, tx, id)
+	})
 }
 
 func (s *Store) BeginChildExecution(ctx context.Context, grant kernel.ChildExecutionGrant) error {
@@ -76,7 +47,7 @@ func (s *Store) BeginChildExecution(ctx context.Context, grant kernel.ChildExecu
 		return kernel.ErrExecutionRequired
 	}
 	if child.Run.ParentRunID != "" {
-		ids, err = sqliteLiveChildAncestors(ctx, tx, child.Run)
+		ids, err = sqliteValidateLiveRunOwners(ctx, tx, child.Run)
 		if err != nil {
 			return err
 		}
@@ -357,6 +328,9 @@ func (s *Store) BeginOwnedPhysicalExecution(ctx context.Context, permit kernel.O
 	defer func() { _ = tx.Rollback() }()
 	current, e := loadTx(ctx, tx, g.ChildRunID)
 	if e != nil {
+		return zero, e
+	}
+	if _, e = sqliteValidateLiveRunOwners(ctx, tx, current.Run); e != nil {
 		return zero, e
 	}
 	if e = sqliteReserveGrantIdentity(ctx, tx, g); e != nil {

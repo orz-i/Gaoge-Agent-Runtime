@@ -15,46 +15,17 @@ type memoryChildGrant struct {
 	completion      kernel.OwnedPhysicalCallbackCompletion
 }
 
-func memoryTerminalStatus(status kernel.RunStatus) bool {
-	switch status {
-	case kernel.RunStatusCompleted, kernel.RunStatusFailed, kernel.RunStatusCancelled:
-		return true
-	case kernel.RunStatusRunning, kernel.RunStatusWaitingInput, kernel.RunStatusPausedBudget:
-		return false
-	default:
-		return true
-	}
-}
-
-// childAncestorsLocked checks the immutable whole physical ancestry under the
-// same mutex as parent mutations. A copied relation row cannot lend a same-ID
-// child the authority to dispatch effects through a foreign parent.
-func (store *Store) childAncestorsLocked(child kernel.Run) ([]string, error) {
-	seen := map[string]struct{}{child.ID: {}}
-	ancestors := make([]string, 0, 4)
-	for id := child.ParentRunID; id != ""; {
-		if _, cycle := seen[id]; cycle || len(ancestors) >= 64 {
-			return nil, kernel.ErrInvalidInput
-		}
-		seen[id] = struct{}{}
+func (store *Store) validateLiveRunOwners(ctx context.Context, run kernel.Run) ([]string, error) {
+	return kernel.ValidateLiveRunOwners(ctx, run, func(_ context.Context, id string) (kernel.Snapshot, error) {
 		if err := store.nativeEntryGateLocked(id); err != nil {
-			return nil, err
+			return kernel.Snapshot{}, err
 		}
 		parent, ok := store.records[id]
 		if !ok {
-			return nil, kernel.ErrNotFound
+			return kernel.Snapshot{}, kernel.ErrNotFound
 		}
-		if parent.Run.Actor != child.Actor || parent.Run.Thread != child.Thread ||
-			memoryTerminalStatus(parent.Run.Status) {
-			return nil, kernel.ErrExecutionConflict
-		}
-		ancestors = append(ancestors, id)
-		id = parent.Run.ParentRunID
-	}
-	if len(ancestors) == 0 {
-		return nil, kernel.ErrInvalidInput
-	}
-	return ancestors, nil
+		return parent, nil
+	})
 }
 
 // BeginChildExecution is a persistent physical admission serialized with
@@ -85,7 +56,7 @@ func (store *Store) BeginChildExecution(ctx context.Context, grant kernel.ChildE
 	}
 	if child.Run.ParentRunID != "" {
 		var err error
-		ancestors, err = store.childAncestorsLocked(child.Run)
+		ancestors, err = store.validateLiveRunOwners(ctx, child.Run)
 		if err != nil {
 			return err
 		}

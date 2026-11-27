@@ -75,6 +75,13 @@ func (store *KernelStore) BeginOwnedPhysicalExecution(ctx context.Context, admis
 	// Only actual COMMIT uncertainty carries the original candidate.
 	readyToCommit := false
 	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		source, e := (&KernelStore{db: tx}).Load(ctx, grant.ChildRunID)
+		if e != nil {
+			return e
+		}
+		if _, e = pgValidateLiveRunOwners(ctx, tx, source.Run); e != nil {
+			return e
+		}
 		current, e := lockKernelRun(tx, grant.ChildRunID)
 		if e != nil {
 			return e
@@ -178,6 +185,9 @@ func (store *KernelStore) CheckOwnedPhysicalEntry(ctx context.Context, g kernel.
 	}
 	var window kernel.OwnedPhysicalEntryWindow
 	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if _, err := pgValidateLiveRunOwners(ctx, tx, expected.Run); err != nil {
+			return err
+		}
 		run, err := lockKernelRun(tx, g.ChildRunID)
 		if err != nil {
 			return err

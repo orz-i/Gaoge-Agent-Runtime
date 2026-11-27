@@ -10,61 +10,33 @@ import (
 
 var _ kernel.ChildExecutionStore = (*KernelStore)(nil)
 
-func kernelPGTerminalStatus(s kernel.RunStatus) bool {
-	switch s {
-	case kernel.RunStatusCompleted, kernel.RunStatusFailed, kernel.RunStatusCancelled:
-		return true
-	case kernel.RunStatusRunning, kernel.RunStatusWaitingInput, kernel.RunStatusPausedBudget:
-		return false
-	default:
-		return true
-	}
-}
-
-// lockLiveChildAncestors acquires parent rows root-to-leaf so ancestor
-// termination and child physical admission cannot both commit. The initial
-// traversal is untrusted and rechecked after every row is locked.
-func (store *KernelStore) lockLiveChildAncestors(tx *gorm.DB, parentID, tenant, actor, threadKind, threadID string) ([]string, error) {
-	seen := map[string]struct{}{}
-	ids := make([]string, 0, 4)
-	for id := parentID; id != ""; {
-		if _, duplicate := seen[id]; duplicate || len(ids) >= 64 {
-			return nil, kernel.ErrExecutionConflict
-		}
-		seen[id] = struct{}{}
-		var parent models.KernelRunRecord
-		if err := tx.Where("run_id = ?", id).First(&parent).Error; err != nil {
-			return nil, translateKernelError(err)
-		}
+func pgValidateLiveRunOwners(ctx context.Context, tx *gorm.DB, run kernel.Run) ([]string, error) {
+	var ids []string
+	if _, err := kernel.ValidateLiveRunOwners(ctx, run, func(ctx context.Context, id string) (kernel.Snapshot, error) {
 		ids = append(ids, id)
-		id = parent.ParentRunID
+		return (&KernelStore{db: tx}).Load(ctx, id)
+	}); err != nil {
+		return nil, err
 	}
-	for i, j := 0, len(ids)-1; i < j; i, j = i+1, j-1 {
-		ids[i], ids[j] = ids[j], ids[i]
-	}
-	for i, id := range ids {
-		parent, err := lockKernelRun(tx, id)
+	locked := make(map[string]kernel.Snapshot, len(ids))
+	for i := len(ids) - 1; i >= 0; i-- {
+		row, err := lockKernelRun(tx, ids[i])
 		if err != nil {
 			return nil, err
 		}
-		if e := pgNativeEntryGate(tx, id); e != nil {
-			return nil, e
+		snapshot, err := kernelSnapshotFrom(row)
+		if err != nil {
+			return nil, err
 		}
-		if parent.TenantID != tenant || parent.ActorID != actor || parent.ThreadKind != threadKind || parent.ThreadID != threadID ||
-			kernelPGTerminalStatus(kernel.RunStatus(parent.Status)) {
-			return nil, kernel.ErrExecutionConflict
-		}
-		if i > 0 && parent.ParentRunID != ids[i-1] {
-			return nil, kernel.ErrExecutionConflict
-		}
-		if i == 0 && parent.ParentRunID != "" {
-			return nil, kernel.ErrExecutionConflict
-		}
+		locked[ids[i]] = snapshot
 	}
-	if len(ids) == 0 {
-		return nil, kernel.ErrExecutionConflict
-	}
-	return ids, nil
+	return kernel.ValidateLiveRunOwners(ctx, run, func(ctx context.Context, id string) (kernel.Snapshot, error) {
+		snapshot, ok := locked[id]
+		if !ok {
+			return kernel.Snapshot{}, kernel.ErrExecutionConflict
+		}
+		return snapshot, pgNativeEntryGate(tx, id)
+	})
 }
 
 func (store *KernelStore) BeginChildExecution(ctx context.Context, grant kernel.ChildExecutionGrant) error {
@@ -86,8 +58,11 @@ func (store *KernelStore) BeginChildExecution(ctx context.Context, grant kernel.
 		}
 		if child.ParentRunID != "" {
 			var ancestorErr error
-			ids, ancestorErr = store.lockLiveChildAncestors(tx, child.ParentRunID,
-				child.TenantID, child.ActorID, child.ThreadKind, child.ThreadID)
+			source, e := kernelSnapshotFrom(child)
+			if e != nil {
+				return e
+			}
+			ids, ancestorErr = pgValidateLiveRunOwners(ctx, tx, source.Run)
 			if ancestorErr != nil {
 				return ancestorErr
 			}

@@ -14,7 +14,7 @@ func TestPausedChildProjectsAsPendingDelegation(t *testing.T) {
 		ID: "paused-child", Status: kernel.RunStatusPausedBudget,
 		ErrorCode: "agent.model_allowance_exhausted",
 	}}
-	projected := projectChild(Delegation{ID: "delegation", MemberID: "member",
+	projected := ProjectChild(Delegation{ID: "delegation", MemberID: "member",
 		ChildRunID: "paused-child", Goal: "research"}, child)
 	if projected.Status != StatusRunning || projected.ErrorCode != child.Run.ErrorCode {
 		t.Fatalf("paused child projected incorrectly: %#v", projected)

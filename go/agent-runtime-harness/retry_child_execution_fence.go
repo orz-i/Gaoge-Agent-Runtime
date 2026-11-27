@@ -63,6 +63,9 @@ func RetryChildEffectFenceWithBudget(invocations []Invocation, items []Item, rot
 }
 
 func acceptedChildPhysicalEffectPossible(items []Item, child Invocation) bool {
+	if d, e := decodeFrozenHandoffDelegation(child.Input); e == nil && d.NativeLocal && isHandoffDelegationInvocation(child) {
+		return true // only the original native decision/terminal projection can settle it
+	}
 	receipts := executionDispatchReceiptIndex(items)
 	for _, item := range items {
 		if item.ParentItemID == ExecutionDispatchParentItemID && item.InvocationID == child.ID {
@@ -77,31 +80,34 @@ func acceptedChildPhysicalEffectPossible(items []Item, child Invocation) bool {
 	return false
 }
 
-// verifiedRejectedHandoffStarts permits only a frozen child whose actual
-// native Start was conclusively refused and every original grant is settled
-// without dispatch. A returned or unknown grant can never be retried.
-func verifiedRejectedHandoffStarts(items []Item, child Invocation) bool {
-	if child.Status != InvocationAccepted || !isHandoffDelegationInvocation(child) {
-		return false
-	}
+// Opaque Handoff's one immutable dispatch history governs refusal replay,
+// terminal result and cancellation. A foreign or contradictory grant
+// prevents all three from claiming that the original external effect is known.
+func handoffDispatchHistory(items []Item, child Invocation) (nativeRejected bool, returned int, valid bool) {
 	receipts := executionDispatchReceiptIndex(items)
-	nativeRejected := false
 	for _, g := range items {
 		if g.ParentItemID != ExecutionDispatchParentItemID || g.InvocationID != child.ID {
 			continue
 		}
-		phase, valid := VerifiedExecutionDispatchGrant(g)
+		phase, ok := VerifiedExecutionDispatchGrant(g)
 		boundary, settled := VerifiedExecutionDispatchReceipt(g, receipts[g.ID])
-		if !valid || phase != "handoff-start" || g.RunID != child.ExecutionRefID || g.TurnID != child.TurnID || !settled {
-			return false
+		if !ok || !settled || phase != "handoff-start" || g.RunID != child.ExecutionRefID || g.TurnID != child.TurnID {
+			return false, 0, false
 		}
 		switch boundary {
 		case "native_agent_start_no_effect":
 			nativeRejected = true
 		case "physical_dispatch_rejected":
+		case "handoff_start_returned":
+			returned++
 		default:
-			return false
+			return false, 0, false
 		}
 	}
-	return nativeRejected
+	return nativeRejected, returned, true
+}
+
+func verifiedRejectedHandoffStarts(items []Item, child Invocation) bool {
+	rejected, returned, valid := handoffDispatchHistory(items, child)
+	return child.Status == InvocationAccepted && isHandoffDelegationInvocation(child) && valid && rejected && returned == 0
 }

@@ -166,7 +166,7 @@ func nativeAuthorityRetrySelectionACK(t *testing.T, factory func(*testing.T) Nat
 }
 
 func nativeAuthorityNamedChildTwoTools(t *testing.T, factory func(*testing.T) NativeAuthorityFixture) {
-	for _, mode := range []string{"cancel", "blocked-then-approve", "refresh-second-approval"} {
+	for _, mode := range []string{"cancel", "blocked-then-approve", "refresh-second-approval", "unmetered-approve"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx := t.Context()
 			f := factory(t)
@@ -188,7 +188,9 @@ func nativeAuthorityNamedChildTwoTools(t *testing.T, factory func(*testing.T) Na
 				return model.Response{ToolCalls: []tools.Call{{ID: "delegate", ToolKey: harness.DelegationToolKey, Arguments: json.RawMessage(`{"memberID":"child","goal":"finish"}`)}}}, nil
 			}}
 			options := nativeAuthorityOptions(t, runs, host, client)
-			options.Session.Config.SharedBudget = &budget.Limits{MaxLLMCalls: 4, MaxToolCalls: 4, MaxChildRuns: 1, MaxConcurrentRuns: 2}
+			if mode != "unmetered-approve" {
+				options.Session.Config.SharedBudget = &budget.Limits{MaxLLMCalls: 4, MaxToolCalls: 4, MaxChildRuns: 1, MaxConcurrentRuns: 2}
+			}
 			options.Session.Config.DelegationPolicy = harness.DelegationPolicySnapshot{MaxDepth: 1}
 			var e error
 			options.Relations, e = runrelation.New(f.Relations, nil)
@@ -216,6 +218,18 @@ func nativeAuthorityNamedChildTwoTools(t *testing.T, factory func(*testing.T) Na
 				t.Fatalf("missing approval: %v %+v", e, pending.Subtasks)
 			}
 			task := pending.Subtasks[0]
+			// Bypassing the Runner must not recreate the retired Host election.
+			childInvocation, e := host.GetInvocationByExecutionRefID(ctx, task.RunID)
+			if e != nil {
+				t.Fatal(e)
+			}
+			for _, phase := range []string{"handoff-start", "resolve-subtask-approval"} {
+				payload, _ := json.Marshal(map[string]string{"phase": phase, "physicalRunID": task.RunID})
+				_, _, e = host.AppendItem(ctx, harness.Item{ID: "forbidden-native-child-" + phase, TurnID: pending.Turn.ID, InvocationID: childInvocation.ID, RunID: task.RunID, Kind: harness.ItemDiagnostic, Status: harness.ItemStarted, ParentItemID: harness.ExecutionDispatchParentItemID, Payload: payload, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()})
+				if !errors.Is(e, harness.ErrConflict) {
+					t.Fatalf("native child admitted Host %s grant: %v", phase, e)
+				}
+			}
 			if mode == "refresh-second-approval" {
 				cut := &nativeChildReturnCut{nativeAuthorityKernelPorts: runs}
 				options.Runtime, e = kernel.New(kernel.Dependencies{Store: cut})
@@ -313,9 +327,39 @@ func nativeAuthorityNamedChildTwoTools(t *testing.T, factory func(*testing.T) Na
 					t.Fatalf("wrong subtree accounting: %v %+v", e, after)
 				}
 			} else {
-				done, e := session.ResolveSubtaskApproval(ctx, "two", task.ID, task.Approval.CheckpointID, harness.ResolveApprovalRequest{Decision: harness.ApprovalApprove})
+				comment := "approve original write"
+				done, e := session.ResolveSubtaskApproval(ctx, "two", task.ID, task.Approval.CheckpointID, harness.ResolveApprovalRequest{Decision: harness.ApprovalApprove, Comment: comment})
 				if e != nil || writes != 1 || len(done.Subtasks) != 1 || done.Subtasks[0].Status != "completed" {
 					t.Fatalf("second original approval: %v %+v writes=%d", e, done.Subtasks, writes)
+				}
+				source, e := runs.Load(ctx, task.RunID)
+				if e != nil {
+					t.Fatal(e)
+				}
+				decisions, e := options.Runtime.NativeApprovalDecisions(ctx, source)
+				want := kernel.ManagedApprovalDecision{CheckpointID: task.Approval.CheckpointID, Decision: "approve", Comment: comment}
+				if e != nil || len(decisions) == 0 || decisions[len(decisions)-1] != want {
+					t.Fatalf("native original decision not retained: %v %+v", e, decisions)
+				}
+				// Check the original approval control projection rather than
+				// relying solely on the terminal child result.
+				count := 0
+				for _, i := range done.Items {
+					if i.RunID == task.RunID && i.Kind == harness.ItemApproval && i.Status == harness.ItemCompleted {
+						var observed struct{ CheckpointID, Decision, Comment string }
+						if json.Unmarshal(i.Payload, &observed) == nil && observed.CheckpointID == want.CheckpointID {
+							if observed.Decision != want.Decision || observed.Comment != want.Comment {
+								t.Fatal("projected a different approval")
+							}
+							count++
+						}
+					}
+					if i.RunID == task.RunID && i.ParentItemID == harness.ExecutionDispatchParentItemID {
+						t.Fatal("qualified native child used Host dispatch")
+					}
+				}
+				if count != 1 {
+					t.Fatalf("original approval projections=%d", count)
 				}
 			}
 			childOwner, e := host.GetInvocationByExecutionRefID(ctx, task.RunID)

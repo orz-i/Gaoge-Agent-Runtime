@@ -68,12 +68,16 @@ Budget adapter. It commits dispatch, original receipt, and terminal lifetime
 accounting with the Run. Standard `OpenAgentSession` selects the native Kernel
 ledger, including Managed recovery.
 
-`Run.BudgetScopeID` and `Run.BudgetParentRunID` now freeze the original
+`Run.BudgetScopeID` and `Run.LogicalParentRunID` now freeze the original
 accounting identity and logical ancestry. Custom native Stores implement
 `CreateRequest.Budget` / `Record.BudgetEnrollment` as part of the original
 Run creation transaction; the new Run and ledger enrollment commit together.
-The local parent's original scope, identity and nonterminal status are checked
-under that transaction. Custom `kernel.Store` implementations must also implement
+The original local parent chain is checked at Create, owned admission and
+physical entry, with or without shared budget. Fixed, callback-scoped local
+Named Agent Start/Approval consumes native identity, Grant/Lease and the
+original approval journal; Host Stores reject a second Host dispatch for
+that frozen child. Remote/opaque routes retain their own effect receipts.
+Custom `kernel.Store` implementations must also implement
 `DecideBeforeCreate(context.Context, RunCreationDecision)` and
 `LoadCreationDecision` instead of the cancellation-only API. Create and either
 negative decision share one immutable key and budget transaction. A negative

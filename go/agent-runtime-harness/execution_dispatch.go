@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"sync/atomic"
 
@@ -111,6 +112,41 @@ func ValidExecutionDispatchGrantAdmission(grant Item) (string, bool) {
 		return phase, true
 	}
 	return "", false
+}
+
+// HostExecutionDispatchOwnerAllowed is evaluated under the original Turn
+// lock. Native Named Agent commands cannot elect Host execution authority.
+func HostExecutionDispatchOwnerAllowed(owner Invocation) bool {
+	if !validInvocationStatus(owner.Status) || terminalInvocationStatus(owner.Status) {
+		return false
+	}
+	if owner.ParentItemID != "" && (isHandoffDelegationInvocation(owner) || strings.HasPrefix(owner.ParentItemID, "hid_")) {
+		d, err := decodeFrozenHandoffDelegation(owner.Input)
+		return err == nil && !d.NativeLocal
+	}
+	return true
+}
+
+// ValidateHostExecutionDispatchOwner checks both the elected owner and any
+// separately targeted subtask. The original Turn lock covers both reads.
+func ValidateHostExecutionDispatchOwner(grant Item, owner Invocation, status TurnStatus, lookup func(string) (Invocation, error)) error {
+	if !validTurnStatus(status) || terminalTurnStatus(status) || owner.ID != grant.InvocationID || owner.TurnID != grant.TurnID || owner.ExecutionRefID != grant.RunID || !HostExecutionDispatchOwnerAllowed(owner) {
+		return ErrConflict
+	}
+	fields, valid := executionDispatchFields(grant.Payload)
+	if !valid {
+		return ErrConflict
+	}
+	if fields["phase"] == "resolve-subtask-approval" && fields["physicalRunID"] != grant.RunID {
+		target, err := lookup(fields["physicalRunID"])
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			return err
+		}
+		if err == nil && !HostExecutionDispatchOwnerAllowed(target) {
+			return ErrConflict
+		}
+	}
+	return nil
 }
 
 // VerifiedExecutionDispatchGrant also requires the original Store-allocated
@@ -374,6 +410,20 @@ func (runner *Runner) withPhysicalSubtaskApprovalDispatch(
 		}, physical)
 }
 
+// Native callback names are shared by initial dispatch and original receipt recovery.
+func nativeDispatchOperation(phase string) plugin.RunOperation {
+	switch phase {
+	case "start", "start-retry", "handoff-start":
+		return plugin.RunStart
+	case "resume":
+		return plugin.RunResume
+	case "resolve-approval", "resolve-subtask-approval":
+		return plugin.RunResolveApproval
+	default:
+		return ""
+	}
+}
+
 func (runner *Runner) withPhysicalInvocationDispatchForContext(
 	ctx context.Context, invocation Invocation, phase, resultRunID string,
 	scope *subtaskApprovalDispatchScope,
@@ -425,18 +475,8 @@ func (runner *Runner) withPhysicalInvocationDispatchForContext(
 		physicalCtx = context.WithValue(physicalCtx, subtaskApprovalDispatchContextKey{}, bound)
 	}
 	native, nativeAgent := runner.agent.(*agent.Runner)
-	var operation plugin.RunOperation
-	observe := nativeAgent
-	switch phase {
-	case "start", "start-retry":
-		operation = plugin.RunStart
-	case "resume":
-		operation = plugin.RunResume
-	case "resolve-approval", "resolve-subtask-approval":
-		operation = plugin.RunResolveApproval
-	default:
-		observe = false // Pure native allowance CAS and non-Agent features keep their own exact contracts.
-	}
+	operation := nativeDispatchOperation(phase)
+	observe := nativeAgent && operation != "" && phase != "handoff-start"
 	var snapshot kernel.Snapshot
 	var physicalErr error
 	var outcome agent.PhysicalCallOutcome
@@ -584,67 +624,27 @@ func (runner *Runner) requireLiveInvocationParents(ctx context.Context, invocati
 	if invocation.ParentItemID == "" {
 		return nil
 	}
-	// The Input was sealed at the first admission. A parent's stable ID
-	// becoming Running on Attempt 2 cannot authorize an older descendant.
 	proof, err := frozenChildRoot(invocation)
 	if err != nil {
 		return err
-	}
-	expected := make(map[string]childAttemptBinding, len(proof.Parents))
-	for _, bound := range proof.Parents {
-		expected[bound.InvocationID] = bound
-	}
-	seen := make(map[string]struct{})
-	for id := invocation.ParentItemID; id != ""; {
-		if _, cycle := seen[id]; cycle {
-			return ErrConflict
-		}
-		seen[id] = struct{}{}
-		item, loadErr := runner.store.GetItem(ctx, id)
-		if errors.Is(loadErr, ErrNotFound) || errors.Is(loadErr, ErrInvalidRequest) {
-			return ErrConflict
-		}
-		if loadErr != nil {
-			return loadErr
-		}
-		if item.ID != id || item.TurnID != invocation.TurnID || item.Seq == 0 {
-			return ErrConflict
-		}
-		if ownerID := item.InvocationID; ownerID != "" && ownerID != invocation.ID {
-			bound := proof.attempt()
-			if ownerID != proof.InvocationID {
-				var found bool
-				bound, found = expected[ownerID]
-				if !found {
-					return ErrConflict // Unfrozen ancestor cannot grant authority.
-				}
-			}
-			if err := runner.requireItemOwnerAttempt(ctx, item, bound); err != nil {
-				return err
-			}
-		}
-		id = item.ParentItemID
-	}
-	// An Item ancestry may end at a Host delegation boundary. Validate ALL
-	// inherited owners even when no Item in this immediate chain names them.
-	for _, bound := range proof.Parents {
-		if err := runner.requireLiveParentAttempt(ctx, invocation.TurnID, bound); err != nil {
-			return err
-		}
 	}
 	root, err := runner.loadFrozenChildRoot(ctx, invocation)
 	if err != nil {
 		return err
 	}
-	if runner.runtime == nil || strings.TrimSpace(root.ExecutionRefID) == "" {
+	// Derive the same ordered transitive Attempt selection as admission.
+	// Do not adopt a current Item owner or permit a missing ancestor.
+	parents, err := runner.freezeChildParentAttempts(ctx, invocation.TurnID, invocation.ParentItemID, root, invocation.ID)
+	if err != nil || !slices.Equal(parents, proof.Parents) {
+		return errors.Join(ErrConflict, err)
+	}
+	if runner.runtime == nil {
 		return ErrConflict
 	}
 	state, err := runner.runtime.Load(ctx, root.ExecutionRefID)
 	if err != nil || state.Run.ID != root.ExecutionRefID || terminalRuntimeStatus(state.Run.Status) {
 		return errors.Join(ErrConflict, err)
 	}
-	// Admission and this final post-grant check both prove the frozen root
-	// before a child may physically start or resume after a concurrent change.
 	return validateRootRuntimeOwnership(root, state)
 }
 

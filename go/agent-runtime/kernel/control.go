@@ -62,7 +62,7 @@ func ValidateControl(current Snapshot, guard ControlGuard, mutation StoreMutatio
 	if next.Run.Kind != current.Run.Kind || next.Run.Actor != current.Run.Actor ||
 		next.Run.Thread != current.Run.Thread || next.Run.Goal != current.Run.Goal ||
 		next.Run.RequestID != current.Run.RequestID ||
-		next.Run.ParentRunID != current.Run.ParentRunID || next.Run.BudgetScopeID != current.Run.BudgetScopeID || next.Run.BudgetParentRunID != current.Run.BudgetParentRunID ||
+		next.Run.ParentRunID != current.Run.ParentRunID || next.Run.BudgetScopeID != current.Run.BudgetScopeID || next.Run.LogicalParentRunID != current.Run.LogicalParentRunID ||
 		!next.Run.CreatedAt.Equal(current.Run.CreatedAt) ||
 		(next.Run.DeadlineAt == nil) != (current.Run.DeadlineAt == nil) {
 		return ErrInvalidInput

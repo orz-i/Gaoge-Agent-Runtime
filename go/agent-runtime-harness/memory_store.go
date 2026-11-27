@@ -974,13 +974,17 @@ func (store *MemoryStore) AppendItem(ctx context.Context, value Item) (Item, boo
 			}
 			turn, turnFound := store.turns[value.TurnID]
 			owner, ownerFound := store.invocations[value.InvocationID]
-			if !turnFound || terminalTurnStatus(turn.Status) ||
-				!ownerFound || owner.TurnID != value.TurnID ||
-				owner.ExecutionRefID != value.RunID ||
-				terminalInvocationStatus(owner.Status) ||
-				store.activeCancellationFenceLocked(value.TurnID) ||
+			if !turnFound || !ownerFound || store.activeCancellationFenceLocked(value.TurnID) ||
 				executionDispatchAdmissionBlocked(physicalItems, value.InvocationID, phase) {
 				return Item{}, false, ErrConflict
+			}
+			if err := ValidateHostExecutionDispatchOwner(value, owner, turn.Status, func(id string) (Invocation, error) {
+				if target, ok := store.invocations[store.invocationExecutionRefs[id]]; ok {
+					return target, nil
+				}
+				return Invocation{}, ErrNotFound
+			}); err != nil {
+				return Item{}, false, err
 			}
 		}
 	}

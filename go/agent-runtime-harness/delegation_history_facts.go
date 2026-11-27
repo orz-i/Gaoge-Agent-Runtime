@@ -76,6 +76,14 @@ func validDelegationWaitingHistory(root Invocation, item Item, byID, byRun map[s
 	return valid
 }
 
+// A Delegation Item repeats the frozen identity for product queries. All
+// readers compare that one identity with the sealed execution envelope.
+func matchesDelegationPayload(p delegationItemPayload, d handoff.Delegation, parent string) bool {
+	return p.DelegationID == d.ID && p.ChildRunID == d.ChildRunID && p.ParentRunID == parent &&
+		p.MemberID == d.MemberID && p.MemberRevision == d.MemberRevision && p.Goal == d.Goal &&
+		(p.Execution == nil || sameHandoffFrozenExecution(d, *p.Execution))
+}
+
 func frozenDelegationAdmissionPayload(root Invocation, item Item) (delegationItemPayload, bool) {
 	var payload delegationItemPayload
 	if (item.Status != ItemWaiting && item.Status != ItemStarted) ||
@@ -86,8 +94,7 @@ func frozenDelegationAdmissionPayload(root Invocation, item Item) (delegationIte
 		return payload, false
 	}
 	frozen := *payload.Execution
-	if frozen.ID != payload.DelegationID || payload.ChildRunID != item.RunID || frozen.ChildRunID != item.RunID || frozen.MemberID != payload.MemberID ||
-		frozen.MemberRevision != payload.MemberRevision || frozen.Goal != payload.Goal || frozen.Status != handoff.StatusQueued ||
+	if !matchesDelegationPayload(payload, frozen, payload.ParentRunID) || frozen.ChildRunID != item.RunID || frozen.Status != handoff.StatusQueued ||
 		len(frozen.Result) != 0 || frozen.Error != "" || frozen.ErrorCode != "" ||
 		item.ID != stableID("hid", root.TurnID, frozen.ID, string(item.Status)) {
 		return payload, false

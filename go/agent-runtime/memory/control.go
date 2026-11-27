@@ -33,7 +33,7 @@ func (store *Store) ApplyControl(ctx context.Context, runID string, expectedRevi
 		return kernel.Snapshot{}, false, kernel.ErrConflict
 	}
 	if guard.Kind == kernel.ControlApproval && current.Run.ParentRunID != "" {
-		if _, err := store.childAncestorsLocked(current.Run); err != nil {
+		if _, err := store.validateLiveRunOwners(ctx, current.Run); err != nil {
 			return kernel.Snapshot{}, false, err
 		}
 	}

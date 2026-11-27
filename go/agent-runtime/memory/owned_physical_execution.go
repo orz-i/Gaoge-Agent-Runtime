@@ -35,6 +35,9 @@ func (s *Store) BeginOwnedPhysicalExecution(ctx context.Context, p kernel.OwnedP
 	if !ok {
 		return zero, kernel.ErrNotFound
 	}
+	if _, e := s.validateLiveRunOwners(ctx, current.Run); e != nil {
+		return zero, e
+	}
 	if s.grantIdentityUsedLocked(g.ID) {
 		return zero, kernel.ErrExecutionConflict
 	}
@@ -112,6 +115,9 @@ func (s *Store) CheckOwnedPhysicalEntry(ctx context.Context, g kernel.ChildExecu
 	current, ok := s.records[g.ChildRunID]
 	if !ok {
 		return kernel.OwnedPhysicalEntryWindow{}, kernel.ErrNotFound
+	}
+	if _, e := s.validateLiveRunOwners(ctx, current.Run); e != nil {
+		return kernel.OwnedPhysicalEntryWindow{}, e
 	}
 	original, err := s.loadOwnedPhysicalGrantLocked(g)
 	if err != nil {

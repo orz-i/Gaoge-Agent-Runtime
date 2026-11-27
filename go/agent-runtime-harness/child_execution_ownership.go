@@ -38,14 +38,8 @@ func (runner *Runner) validateChildRuntimeOwnership(
 	if err != nil {
 		return err
 	}
-	// A root Retry rotates the original physical authority. Never accept an
-	// old child Attempt as a result of a new root or inherited parent Attempt.
-	for _, parent := range binding.Parents {
-		owner, loadErr := runner.store.GetInvocation(ctx, parent.InvocationID)
-		if loadErr != nil || owner.TurnID != child.TurnID ||
-			owner.ParentItemID == "" || invocationAttempt(owner) != parent {
-			return ErrConflict
-		}
+	if _, err = verifyFrozenChildAttempts(ctx, runner.store, child, root); err != nil {
+		return err
 	}
 	// The actual root Run must agree with its immutable Harness owner, not
 	// merely share its ID with a foreign physical Run. This guards cases

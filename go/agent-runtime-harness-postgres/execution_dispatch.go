@@ -21,14 +21,6 @@ func checkExecutionDispatchGrantTx(tx *gorm.DB, value harness.Item) error {
 	if err := tx.Where("id = ?", value.TurnID).Take(&turn).Error; err != nil {
 		return mapError(err)
 	}
-	switch harness.TurnStatus(turn.Status) {
-	case harness.TurnAccepted, harness.TurnRunning, harness.TurnWaitingInput, harness.TurnPausedBudget:
-		// Allowed nonterminal Turn states.
-	case harness.TurnCompleted, harness.TurnFailed, harness.TurnCancelled:
-		return harness.ErrConflict
-	default:
-		return harness.ErrConflict
-	}
 	var owner invocationRecord
 	if err := tx.Where("id = ? AND turn_id = ? AND execution_ref_id = ?",
 		value.InvocationID, value.TurnID, value.RunID).Take(&owner).Error; err != nil {
@@ -37,13 +29,18 @@ func checkExecutionDispatchGrantTx(tx *gorm.DB, value harness.Item) error {
 		}
 		return err
 	}
-	switch harness.InvocationStatus(owner.Status) {
-	case harness.InvocationAccepted, harness.InvocationRunning, harness.InvocationWaitingInput, harness.InvocationPausedBudget:
-		// The active owner may acquire physical execution authority.
-	case harness.InvocationCompleted, harness.InvocationFailed, harness.InvocationCancelled:
-		return harness.ErrConflict
-	default:
-		return harness.ErrConflict
+	inv, err := invocationFromRecord(owner)
+	if err != nil {
+		return err
+	}
+	if err = harness.ValidateHostExecutionDispatchOwner(value, inv, harness.TurnStatus(turn.Status), func(id string) (harness.Invocation, error) {
+		var row invocationRecord
+		if e := tx.Where("execution_ref_id = ?", id).Take(&row).Error; e != nil {
+			return harness.Invocation{}, mapError(e)
+		}
+		return invocationFromRecord(row)
+	}); err != nil {
+		return err
 	}
 	pending, err := pendingExecutionDispatchTx(tx, value.TurnID, value.InvocationID, phase)
 	if err != nil {

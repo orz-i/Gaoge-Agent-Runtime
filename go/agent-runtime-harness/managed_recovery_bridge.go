@@ -7,7 +7,6 @@ import (
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
 // Managed recovery uses the native Store for election and retirement.
@@ -52,26 +51,24 @@ func (r *Runner) bindManagedRoot(ctx context.Context, inv Invocation, phase, id 
 // Host dispatch grant. The correlation is consumed only by the native Grant
 // and its approval journal. Managed recovery seals these same Host facts.
 func (r *Runner) withNativeRootCommand(ctx context.Context, native *agent.Runner, inv Invocation, phase string, approval *kernel.ManagedApprovalDecision, physical func(context.Context) (kernel.Snapshot, error)) (kernel.Snapshot, error) {
+	snap, _, err := r.observeNativeCommand(ctx, native, inv, phase, approval, physical)
+	return snap, err
+}
+
+func (r *Runner) observeNativeCommand(ctx context.Context, native *agent.Runner, inv Invocation, phase string, approval *kernel.ManagedApprovalDecision, physical func(context.Context) (kernel.Snapshot, error)) (kernel.Snapshot, agent.PhysicalCallOutcome, error) {
 	id, err := r.runtime.NewID("nativecmd")
 	if err != nil {
-		return kernel.Snapshot{}, err
+		return kernel.Snapshot{}, agent.PhysicalCallOutcome{}, err
 	}
 	id = "nativecmd_" + kernel.ManagedDigest(struct{ Invocation, Run, Attempt string }{inv.ID, inv.ExecutionRefID, id})
-	if native.SupportsManagedRecovery() && inv.Attempt == 1 {
+	if native.SupportsManagedRecovery() && inv.Attempt == 1 && inv.ParentItemID == "" {
 		ctx, err = r.bindManagedRoot(ctx, inv, phase, id, approval)
 		if err != nil {
-			return kernel.Snapshot{}, err
+			return kernel.Snapshot{}, agent.PhysicalCallOutcome{}, err
 		}
 	}
-	op := plugin.RunResume
-	switch phase {
-	case "start", "start-retry":
-		op = plugin.RunStart
-	case "resolve-approval":
-		op = plugin.RunResolveApproval
-	}
-	snap, _, err := native.ObservePhysicalDispatch(ctx, inv.ExecutionRefID, op, id, physical)
-	return snap, err
+	op := nativeDispatchOperation(phase)
+	return native.ObservePhysicalDispatch(ctx, inv.ExecutionRefID, op, id, physical)
 }
 
 // Direct recovery is qualified by the native original Grant/retirement. A
@@ -110,13 +107,7 @@ func (r *Runner) directManagedPending(ctx context.Context, native *agent.Runner,
 		return false, e
 	}
 	b := t.SafePoint.Host
-	op := plugin.RunResume
-	switch b.Phase {
-	case "start":
-		op = plugin.RunStart
-	case "resolve-approval":
-		op = plugin.RunResolveApproval
-	}
+	op := nativeDispatchOperation(b.Phase)
 	kind, err := native.ReconcileOriginalPhysicalDispatch(ctx, b.RunID, op, b.DispatchID)
 	return kind == agent.PhysicalCallUnknown, err
 }

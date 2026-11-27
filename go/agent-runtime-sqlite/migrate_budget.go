@@ -106,7 +106,7 @@ func validateNativeBudgetBindings(ctx context.Context, q schemaQuery) error {
 		), runs AS (
 			SELECT run_id, kind, status,
 				COALESCE(json_extract(CAST(run_json AS TEXT),'$.budgetScopeID'),'') AS scope,
-				COALESCE(json_extract(CAST(run_json AS TEXT),'$.budgetParentRunID'),'') AS parent
+				COALESCE(json_extract(CAST(run_json AS TEXT),'$.logicalParentRunID'),'') AS parent
 			FROM runtime_runs
 		)
 		SELECT COUNT(*) FROM (
@@ -114,7 +114,7 @@ func validateNativeBudgetBindings(ctx context.Context, q schemaQuery) error {
 			WHERE (r.scope<>'' OR (r.kind='agent' AND r.status IN ('running','waiting_input','paused_budget')))
 			  AND (r.scope<>m.scope OR r.parent<>m.parent)
 			UNION ALL
-			SELECT r.run_id FROM runs r WHERE (r.scope<>'' OR r.parent<>'')
+			SELECT r.run_id FROM runs r WHERE r.scope<>''
 			 AND NOT EXISTS (SELECT 1 FROM members m WHERE m.run_id=r.run_id AND m.scope=r.scope AND m.parent=r.parent)
 		) invalid`).Scan(&invalid)
 	if err != nil {

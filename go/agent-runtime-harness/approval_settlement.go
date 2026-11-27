@@ -5,7 +5,9 @@ import (
 	"errors"
 	"time"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
 // The receipt and decision are two durable facts of one Host settlement.
@@ -174,13 +176,28 @@ func (r *Runner) readNativeApprovalProjection(ctx context.Context, turn Turn, in
 	if err != nil {
 		return Item{}, false, err
 	}
-	return approvalProjection(turn.ID, inv.ID, inv.ExecutionRefID, false, a, request, children, 0, now)
+	return approvalProjection(turn.ID, inv.ID, inv.ExecutionRefID, inv.ParentItemID != "", a, request, children, 0, now)
 }
 
 func (r *Runner) recordNativeApprovalDecisions(ctx context.Context, turn Turn, inv Invocation, snapshot kernel.Snapshot) error {
-	if inv.ParentItemID != "" || snapshot.Run.Kind != "agent" || !r.runtime.SupportsOwnedPhysicalExecution() ||
-		(turn.Status != TurnWaitingInput && inv.Status != InvocationWaitingInput) {
+	if snapshot.Run.Kind != "agent" || !r.runtime.SupportsOwnedPhysicalExecution() {
 		return nil
+	}
+	if inv.ParentItemID == "" {
+		if turn.Status != TurnWaitingInput && inv.Status != InvocationWaitingInput {
+			return nil
+		}
+	} else {
+		if !isHandoffDelegationInvocation(inv) {
+			return nil
+		}
+		d, err := decodeFrozenHandoffDelegation(inv.Input)
+		if err != nil {
+			return err
+		}
+		if !d.NativeLocal {
+			return nil
+		}
 	}
 	decisions, err := r.runtime.NativeApprovalDecisions(ctx, snapshot)
 	if err != nil {
@@ -198,4 +215,47 @@ func (r *Runner) recordNativeApprovalDecisions(ctx context.Context, turn Turn, i
 		}
 	}
 	return nil
+}
+
+// Root and child approvals bind the same original journal request before
+// invoking the callback. Legacy parented children keep their Host request.
+func (r *Runner) prepareApprovalDispatch(ctx context.Context, turn Turn, inv Invocation, source kernel.Snapshot, a kernel.ManagedApprovalDecision) (context.Context, bool, error) {
+	_, native := r.agent.(*agent.Runner)
+	native = native && (inv.ParentItemID == "" || source.Run.ParentRunID == "")
+	if !native {
+		return ctx, false, nil
+	}
+	if err := r.recordApprovalRequestItem(ctx, turn, inv, source); err != nil {
+		return ctx, false, err
+	}
+	return context.WithValue(ctx, originalApprovalDispatchKey{}, a), true, nil
+}
+
+func (r *Runner) approvalCallback(source kernel.Snapshot, decision plugin.ApprovalDecision, comment string) func(context.Context) (kernel.Snapshot, error) {
+	return func(ctx context.Context) (kernel.Snapshot, error) {
+		return r.agent.ResolveApproval(ctx, source.Run.ID, source.Run.Revision, plugin.ApprovalResponse{Decision: decision, Comment: comment})
+	}
+}
+
+// The original native approval gate, not a Host Dispatch, elects control.
+// Root and independently owned local Named Agents consume the same journal.
+func (r *Runner) resolveNativeApproval(ctx context.Context, native *agent.Runner, turn Turn, inv Invocation, source kernel.Snapshot, a kernel.ManagedApprovalDecision, physical func(context.Context) (kernel.Snapshot, error)) (kernel.Snapshot, error) {
+	if err := r.requireInvocationRootModelOutputCeiling(ctx, inv); err != nil {
+		return kernel.Snapshot{}, err
+	}
+	if err := r.requireUnclaimedInteractionContinuation(ctx, turn.ID, ""); err != nil {
+		return kernel.Snapshot{}, err
+	}
+	ready, err := r.originalNativeCommand(ctx, inv)
+	if err != nil || !ready {
+		return kernel.Snapshot{}, errors.Join(ErrConflict, err)
+	}
+	if _, exists, err := r.readNativeApprovalProjection(ctx, turn, inv, a, source.Run.UpdatedAt); err != nil || exists {
+		return kernel.Snapshot{}, errors.Join(ErrConflict, err)
+	}
+	result, outcome, err := r.observeNativeCommand(ctx, native, inv, "resolve-approval", &a, physical)
+	if inv.ParentItemID != "" && err == nil && (!outcome.Matches(inv.ExecutionRefID, plugin.RunResolveApproval) || outcome.Kind() == agent.PhysicalCallCreated || outcome.Kind() == agent.PhysicalCallNotEntered) {
+		return kernel.Snapshot{}, ErrExecutionOutcomeUnknown
+	}
+	return result, err
 }

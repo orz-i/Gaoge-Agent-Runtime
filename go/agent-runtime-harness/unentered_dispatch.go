@@ -45,10 +45,11 @@ func (runner *Runner) recoverOriginalPhysicalDispatch(ctx context.Context, inv I
 		if !valid || item.TurnID != inv.TurnID || item.RunID != inv.ExecutionRefID || len(receipts[item.ID]) != 0 || pending.ID != "" {
 			return false, nil
 		}
-		switch phase {
-		case "start", "start-retry":
-			operation = plugin.RunStart
-		case "handoff-start":
+		operation = nativeDispatchOperation(phase)
+		if operation == "" {
+			return false, nil
+		}
+		if phase == "handoff-start" {
 			frozen, e := decodeFrozenHandoffDelegation(inv.Input)
 			c, ok := runner.handoffs.(*handoff.Coordinator)
 			if e != nil || !ok || !isHandoffDelegationInvocation(inv) || !c.UsesEagerLocalAgentForDelegation(runner.runtime, native, frozen) {
@@ -69,13 +70,7 @@ func (runner *Runner) recoverOriginalPhysicalDispatch(ctx context.Context, inv I
 			if _, _, e = runner.localHandoffCancellationAuthority(ctx, inv, child); e != nil {
 				return false, e
 			}
-			operation, handoffStart = plugin.RunStart, true
-		case "resume":
-			operation = plugin.RunResume
-		case "resolve-approval", "resolve-subtask-approval":
-			operation = plugin.RunResolveApproval
-		default:
-			return false, nil
+			handoffStart = true
 		}
 		fields, ok := executionDispatchFields(item.Payload)
 		if !ok {
@@ -123,193 +118,197 @@ func (runner *Runner) recoverOriginalPhysicalDispatch(ctx context.Context, inv I
 	return err == nil, err
 }
 
-// recoverReturnedChildDispatches synchronizes the original child dispatch and projection
-// before the supervisor consumes a terminal child receipt. A terminal Kernel
-// child alone cannot prove that its enclosing Harness approval returned.
-// Only a locally routed native Agent and the exact original approval Grant
-// can repair this gap. It does not create a new approval or reconstruct an
-// absent Host decision payload.
-func (runner *Runner) recoverReturnedChildDispatches(ctx context.Context, turn Turn) error {
+// Recover the original native child result before supervisor projection.
+// Only opaque routes can still need the independent Host dispatch receipt.
+func (runner *Runner) recoverReturnedChildDispatches(ctx context.Context, turn Turn, final ...bool) error {
+	terminal := len(final) == 1 && final[0]
 	native, ok := runner.agent.(*agent.Runner)
 	coordinator, bound := runner.handoffs.(*handoff.Coordinator)
-	if !ok || !bound || !native.ObservesKernelRuntime(runner.runtime) {
+	nativeOwner := ok && native.ObservesKernelRuntime(runner.runtime)
+	if !bound || !nativeOwner && !terminal || terminal && !coordinator.SupportsLocalDelegationObservation(runner.runtime) {
 		return nil
+	}
+	owners, err := runner.store.ListInvocations(ctx, turn.ID)
+	if err != nil {
+		return err
+	}
+	root, found := topLevelInvocation(owners)
+	if !found {
+		return ErrConflict
+	}
+	owners, _, err = runner.currentCancellationChildren(ctx, turn, root.ID, owners)
+	if err != nil {
+		return err
 	}
 	items, err := runner.loadGlobalPhysicalEvidence(ctx, turn.ID)
 	if err != nil {
 		return err
 	}
+	if ActiveCancellationFence(items) {
+		return ErrConflict
+	}
 	receipts := executionDispatchReceiptIndex(items)
 	latest := make(map[string]Item)
+	finished := make(map[string]bool)
+	proven := make(map[string]kernel.Snapshot)
 	for _, item := range items {
 		if item.ParentItemID == ExecutionDispatchParentItemID && item.Seq > latest[item.InvocationID].Seq {
 			latest[item.InvocationID] = item
 		}
+		if item.Kind == ItemDelegation && (item.Status == ItemCompleted || item.Status == ItemFailed || item.Status == ItemCancelled) {
+			finished[item.ParentItemID] = true
+		}
 	}
-	// Preserve original dispatch order when multiple children can finish.
-	// A historical approval cannot stand in for a later physical operation.
-	for _, dispatch := range items {
-		phase, valid := VerifiedExecutionDispatchGrant(dispatch)
-		if !valid || (phase != "resolve-subtask-approval" && phase != "handoff-start") || latest[dispatch.InvocationID].ID != dispatch.ID {
+	for _, owner := range owners {
+		if !isHandoffDelegationInvocation(owner) {
 			continue
 		}
-		if phase == "handoff-start" {
-			if _, settled := VerifiedExecutionDispatchReceipt(dispatch, receipts[dispatch.ID]); settled {
-				continue
-			}
-			if len(receipts[dispatch.ID]) != 0 {
-				return ErrConflict
-			}
-			owner, e := runner.store.GetInvocation(ctx, dispatch.InvocationID)
-			if e != nil {
-				return e
-			}
-			if owner.TurnID != turn.ID || owner.ExecutionRefID != dispatch.RunID || !isHandoffDelegationInvocation(owner) {
-				return ErrConflict
-			}
-			frozen, e := decodeFrozenHandoffDelegation(owner.Input)
-			if e != nil {
-				return e
-			}
-			if !coordinator.UsesEagerLocalAgentForDelegation(runner.runtime, native, frozen) {
-				continue
-			}
-			child, e := runner.runtime.Load(ctx, owner.ExecutionRefID)
-			if errors.Is(e, kernel.ErrNotFound) {
-				continue
-			}
-			if e != nil {
-				return e
-			}
-			if child.Run.BudgetScopeID != turn.ID {
-				continue
-			}
-			if _, e = runner.recoverOriginalPhysicalDispatch(ctx, owner); e != nil {
-				return e
-			}
-			continue
-		}
-		owner, err := runner.store.GetInvocation(ctx, dispatch.InvocationID)
+		frozen, err := decodeFrozenHandoffDelegation(owner.Input)
 		if err != nil {
 			return err
 		}
-		// Root-owned descendant admissions (and older completed attempts)
-		// are not independent Handoff child return evidence. Their existing
-		// settlement/fencing rules remain authoritative; do not adopt them.
-		if owner.TurnID != turn.ID || owner.ExecutionRefID != dispatch.RunID || !isHandoffDelegationInvocation(owner) {
+		if terminal && !frozen.NativeLocal {
+			// Already-projected results and missing pre-Invocation admissions
+			// are validated by the original terminal Store CAS, not a second
+			// observation. Repair only an actual unprojected child.
+			if !finished[owner.ParentItemID] {
+				child, _, e := runner.delegationObservation(ctx, owner.ExecutionRefID)
+				if errors.Is(e, kernel.ErrNotFound) || (!coordinator.ObservesLocalKernelRunner(runner.runtime) && errors.Is(e, ErrHandoffCancellationUnverified)) {
+					continue
+				}
+				if e != nil {
+					return e
+				}
+				if terminalRuntimeStatus(child.Run.Status) {
+					proven[child.Run.ID] = child
+				}
+			}
 			continue
 		}
-		if terminalInvocationStatus(owner.Status) {
+		if !nativeOwner {
 			continue
 		}
-		fields, valid := executionDispatchFields(dispatch.Payload)
-		if !valid || fields["physicalRunID"] != owner.ExecutionRefID {
-			return ErrConflict
+		dispatch := latest[owner.ID]
+		phase, valid := VerifiedExecutionDispatchGrant(dispatch)
+		if !frozen.NativeLocal && (!valid || phase != "handoff-start" && phase != "resolve-subtask-approval" || terminalInvocationStatus(owner.Status) && phase != "handoff-start") {
+			continue
+		}
+		if !coordinator.UsesLocalAgentForDelegation(runner.runtime, native, frozen) {
+			if frozen.NativeLocal {
+				return ErrHandoffCancellationUnverified
+			}
+			continue
 		}
 		child, err := runner.runtime.Load(ctx, owner.ExecutionRefID)
 		if errors.Is(err, kernel.ErrNotFound) {
+			if !frozen.NativeLocal {
+				continue
+			}
+			d, err := runner.nativeChildDecision(ctx, turn, owner)
+			if errors.Is(err, kernel.ErrNotFound) {
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			if _, err = runner.projectUncreatedNativeChild(ctx, turn, owner, d); err != nil {
+				return err
+			}
 			continue
 		}
 		if err != nil {
 			return err
 		}
-		if child.Run.Kind != agent.RunKind || (!terminalRuntimeStatus(child.Run.Status) && (!runner.nativeBudget() || child.Run.Status != kernel.RunStatusWaitingInput)) {
+		if !frozen.NativeLocal && phase == "handoff-start" {
+			if _, settled := VerifiedExecutionDispatchReceipt(dispatch, receipts[dispatch.ID]); !settled {
+				if len(receipts[dispatch.ID]) != 0 {
+					return ErrConflict
+				}
+				// Legacy opaque local callback uses the original Host grant.
+				if child.Run.BudgetScopeID == turn.ID {
+					if _, err = runner.recoverOriginalPhysicalDispatch(ctx, owner); err != nil {
+						return err
+					}
+				}
+			}
 			continue
 		}
-		if ActiveCancellationFence(items) {
-			return ErrConflict
+		if child.Run.Kind != agent.RunKind || (!terminalRuntimeStatus(child.Run.Status) &&
+			(child.Run.Status != kernel.RunStatusWaitingInput || !frozen.NativeLocal && !runner.nativeBudget())) {
+			continue
 		}
 		if err = verifyProtectiveInvocation(ctx, runner.store, owner); err != nil {
 			return err
 		}
-		root, err := loadTopLevelInvocation(ctx, runner.store, turn.ID)
-		if err != nil {
+		if _, _, err = runner.localHandoffCancellationAuthority(ctx, owner, child); err != nil {
 			return err
 		}
-		ancestry, err := frozenChildRoot(owner)
-		if err != nil || ancestry.attempt() != invocationAttempt(root) {
-			return ErrConflict
-		}
-		for _, bound := range ancestry.Parents {
-			ancestor, err := runner.store.GetInvocation(ctx, bound.InvocationID)
-			if err != nil || ancestor.TurnID != turn.ID || invocationAttempt(ancestor) != bound {
-				return errors.Join(ErrConflict, err)
+		if frozen.NativeLocal {
+			if err = runner.reconcileTerminalRootRetirement(ctx, child); err != nil {
+				return errors.Join(ErrExecutionOutcomeUnknown, err)
 			}
-		}
-		frozen, _, err := runner.localHandoffCancellationAuthority(ctx, owner, child)
-		if err != nil || !coordinator.UsesLocalAgentForDelegation(runner.runtime, native, frozen) {
-			return errors.Join(ErrHandoffCancellationUnverified, err)
-		}
-		// If the Host ACK was lost, consume the same native receipt through
-		// the common dispatch recovery. If it was already committed, still
-		// require the exact native retirement before the child terminal CAS.
-		boundary, settled := VerifiedExecutionDispatchReceipt(dispatch, receipts[dispatch.ID])
-		if !settled {
-			if len(receipts[dispatch.ID]) != 0 {
+			if !runner.observesLocalChild(ctx, coordinator, frozen, child) {
+				return ErrExecutionOutcomeUnknown
+			}
+		} else {
+			// Opaque approval must prove the original Host-bound return,
+			// never adopt an unrelated native receipt at the same RunID.
+			fields, valid := executionDispatchFields(dispatch.Payload)
+			if !valid || fields["physicalRunID"] != child.Run.ID || dispatch.RunID != child.Run.ID || dispatch.TurnID != turn.ID {
 				return ErrConflict
 			}
-			repaired, err := runner.recoverOriginalPhysicalDispatch(ctx, owner)
+			if _, err = verifyFrozenChildAttempts(ctx, runner.store, owner, root); err != nil {
+				return err
+			}
+			boundary, settled := VerifiedExecutionDispatchReceipt(dispatch, receipts[dispatch.ID])
+			if !settled {
+				if len(receipts[dispatch.ID]) != 0 {
+					return ErrConflict
+				}
+				repaired, err := runner.recoverOriginalPhysicalDispatch(ctx, owner)
+				if err != nil || !repaired {
+					return errors.Join(ErrExecutionOutcomeUnknown, err)
+				}
+			} else if boundary != "physical_dispatch_returned" {
+				continue
+			}
+			kind, err := native.ReconcileOriginalPhysicalDispatch(ctx, child.Run.ID, plugin.RunResolveApproval, dispatch.ID)
+			if err != nil || kind != agent.PhysicalCallSettled {
+				return errors.Join(ErrExecutionOutcomeUnknown, err)
+			}
+			id, err := kernel.OwnedPhysicalDispatchGrantID(child.Run.ID, "approval", dispatch.ID)
 			if err != nil {
 				return err
 			}
-			if !repaired {
+			receipt, err := runner.runtime.LoadOwnedRetirement(ctx, id)
+			if err != nil {
+				return err
+			}
+			original := receipt.Evidence.Snapshot
+			if kernel.ManagedDigest(original) != kernel.ManagedDigest(child) {
+				if original.Run.Revision < child.Run.Revision && !terminalRuntimeStatus(original.Run.Status) {
+					continue
+				}
 				return ErrExecutionOutcomeUnknown
 			}
-		} else if boundary != "physical_dispatch_returned" {
-			continue
-		}
-		kind, err := native.ReconcileOriginalPhysicalDispatch(ctx, child.Run.ID, plugin.RunResolveApproval, dispatch.ID)
-		if err != nil {
-			return err
-		}
-		if kind != agent.PhysicalCallSettled {
-			return ErrExecutionOutcomeUnknown
-		}
-		id, err := kernel.OwnedPhysicalDispatchGrantID(child.Run.ID, "approval", dispatch.ID)
-		if err != nil {
-			return err
-		}
-		receipt, err := runner.runtime.LoadOwnedRetirement(ctx, id)
-		if err != nil || !receipt.Valid() || !receipt.Evidence.Completion.HostCompleted ||
-			receipt.Evidence.Grant.ID != id || receipt.Evidence.Grant.ChildRunID != child.Run.ID || receipt.Evidence.Grant.AdmissionOperation != "approval" {
-			return errors.Join(ErrExecutionOutcomeUnknown, err)
-		}
-		// The original approval may have genuinely returned at an earlier
-		// nonterminal revision. Its historical receipt cannot authorize a
-		// different later terminal result; leave that to its own observer.
-		if kernel.ManagedDigest(receipt.Evidence.Snapshot) != kernel.ManagedDigest(child) {
-			if receipt.Evidence.Snapshot.Run.Revision < child.Run.Revision && !terminalRuntimeStatus(receipt.Evidence.Snapshot.Run.Status) {
-				continue
-			}
-			return ErrExecutionOutcomeUnknown
-		}
-		currentItems, err := runner.loadGlobalPhysicalEvidence(ctx, turn.ID)
-		if err != nil {
-			return err
-		}
-		if PendingExecutionDispatch(currentItems, owner.ID) {
-			return ErrExecutionOutcomeUnknown
-		}
-		projected, err := runner.syncChildInvocationSnapshot(ctx, turn, owner, child)
-		if err != nil {
-			return err
-		}
-		// An unrelated, unresolved Host interaction can leave the child
-		// projection pending. Do not resume the supervisor through that fence.
-		confirmed := false
-		status, err := runner.invocationRuntimeStatus(ctx, owner, child)
-		if err != nil {
-			return err
-		}
-		for _, inv := range projected.Invocations {
-			if inv.ID == owner.ID && inv.ExecutionRefID == child.Run.ID && inv.Attempt == owner.Attempt && inv.Status == invocationStatusFromTurn(status) {
-				confirmed = true
-				break
+			current, err := runner.loadGlobalPhysicalEvidence(ctx, turn.ID)
+			if err != nil || PendingExecutionDispatch(current, owner.ID) {
+				return errors.Join(ErrExecutionOutcomeUnknown, err)
 			}
 		}
-		if !confirmed {
-			return ErrExecutionOutcomeUnknown
+		_, err = runner.syncChildInvocationSnapshot(ctx, turn, owner, child)
+		if err != nil {
+			return err
 		}
+		current, err := runner.store.GetInvocation(ctx, owner.ID)
+		status, statusErr := runner.invocationRuntimeStatus(ctx, owner, child)
+		if err != nil || statusErr != nil || !sameFrozenInvocationAuthority(owner, current) || current.Status != invocationStatusFromTurn(status) {
+			return errors.Join(ErrExecutionOutcomeUnknown, err, statusErr)
+		}
+
+	}
+	if len(proven) != 0 {
+		return runner.syncTerminalDelegations(ctx, turn, proven)
 	}
 	return nil
 }

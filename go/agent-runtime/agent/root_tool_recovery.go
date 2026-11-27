@@ -57,10 +57,10 @@ func sameRecoveredCall(a, b tools.Call) bool {
 	return reflect.DeepEqual(a, b)
 }
 
-// reconcileOriginalToolReturnIfPresent never consults a provider or dispatches
-// work. Only a fully returned original Root callback with sealed settlement
-// or native no-send proof can select this path. Missing/opaque completion
-// remains unresolved.
+// reconcileOriginalToolReturnIfPresent uses the original returned Call.
+// A sealed receipt or no-send proof can recover locally; a bound held
+// reservation can use the composed read-only verifier. Neither path
+// dispatches work, and a missing/opaque callback return stays unresolved.
 func (runner *Runner) reconcileOriginalToolReturnIfPresent(ctx context.Context, s kernel.Snapshot, state runState) (kernel.Snapshot, bool, error) {
 	if s.Run.Status != kernel.RunStatusRunning || s.Run.ParentRunID != "" || state.ToolWait != nil || state.ToolDispatchID == "" {
 		return s, false, nil
@@ -90,7 +90,7 @@ func (runner *Runner) reconcileOriginalToolReturnIfPresent(ctx context.Context, 
 	if err != nil {
 		return s, true, errors.Join(ErrToolOutcomeUnknown, err)
 	}
-	if !found || (binding.ReceiptDigest == "" && !binding.Unsent) {
+	if !found || (binding.ReceiptDigest == "" && !binding.Unsent && (binding.LedgerID == "" || runner.toolOutcomeVerifier == nil)) {
 		return s, false, nil
 	}
 	repaired, err := runner.reconcileRootToolReceipt(ctx, s, state, grant, state.ToolDispatchID, false)

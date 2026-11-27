@@ -150,8 +150,12 @@ func (runtime *Runtime) Create(ctx context.Context, request CreateRequest) (Snap
 	if request.ExecutionRequired && !runtime.SupportsExecution() {
 		return Snapshot{}, ErrExecutionRequired
 	}
-	if request.ParentRunID != "" {
-		if request.ParentRunID == request.ID || strings.TrimSpace(request.ParentRunID) != request.ParentRunID ||
+	if request.ParentRunID != "" || request.LogicalParentRunID != "" {
+		if request.ParentRunID != "" && request.LogicalParentRunID != "" ||
+			request.ParentRunID == request.ID && request.ParentRunID != "" ||
+			request.LogicalParentRunID == request.ID && request.LogicalParentRunID != "" ||
+			strings.TrimSpace(request.ParentRunID) != request.ParentRunID ||
+			strings.TrimSpace(request.LogicalParentRunID) != request.LogicalParentRunID ||
 			!runtime.SupportsChildExecution() {
 			return Snapshot{}, ErrExecutionRequired
 		}
@@ -173,7 +177,7 @@ func (runtime *Runtime) Create(ctx context.Context, request CreateRequest) (Snap
 		ExecutionRequired: request.ExecutionRequired,
 		Run: Run{
 			ID: runID, Kind: request.Kind, Actor: request.Actor, Thread: request.Thread,
-			RequestID: strings.TrimSpace(request.RequestID), ParentRunID: request.ParentRunID,
+			RequestID: strings.TrimSpace(request.RequestID), ParentRunID: request.ParentRunID, LogicalParentRunID: request.LogicalParentRunID,
 			Goal:   strings.TrimSpace(request.Goal),
 			Status: RunStatusRunning, Revision: 1, DeadlineAt: deadlineAt, CreatedAt: now, UpdatedAt: now,
 		},
@@ -185,10 +189,13 @@ func (runtime *Runtime) Create(ctx context.Context, request CreateRequest) (Snap
 		}
 		record.BudgetEnrollment = request.Budget
 		record.Run.BudgetScopeID = request.Budget.ScopeID
-		record.Run.BudgetParentRunID = request.Budget.Binding.ParentRunID
-		if !ValidRunBudgetBinding(record.Run) {
+		if request.LogicalParentRunID != "" && request.LogicalParentRunID != request.Budget.Binding.ParentRunID {
 			return Snapshot{}, ErrInvalidInput
 		}
+		record.Run.LogicalParentRunID = request.Budget.Binding.ParentRunID
+	}
+	if !ValidRunBudgetBinding(record.Run) {
+		return Snapshot{}, ErrInvalidInput
 	}
 	events := append([]EventDraft{{Type: "run.created", Message: "Run created"}}, request.Events...)
 	return runtime.store.Create(ctx, record, events)

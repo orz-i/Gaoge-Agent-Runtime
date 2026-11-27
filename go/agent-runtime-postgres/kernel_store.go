@@ -73,7 +73,7 @@ func (store *KernelStore) applyKernelMutation(
 			return kernel.Snapshot{}, err
 		}
 	}
-	query := db.Model(&models.KernelRunRecord{}).Where("run_id = ? AND revision = ? AND parent_run_id = ? AND budget_scope_id = ? AND budget_parent_run_id = ?", runID, expectedRevision, updatedModel.ParentRunID, updatedModel.BudgetScopeID, updatedModel.BudgetParentRunID)
+	query := db.Model(&models.KernelRunRecord{}).Where("run_id = ? AND revision = ? AND parent_run_id = ? AND budget_scope_id = ? AND logical_parent_run_id = ?", runID, expectedRevision, updatedModel.ParentRunID, updatedModel.BudgetScopeID, updatedModel.LogicalParentRunID)
 	if ownedRecovery {
 		// Only the opaque, exact-source recovery transaction may reach here.
 	} else if control {
@@ -178,23 +178,8 @@ func (store *KernelStore) Create(
 		if e := pgReserveRunIdentity(tx, record.Run.ID); e != nil {
 			return e
 		}
-		if model.ParentRunID != "" {
-			if _, checkErr := store.lockLiveChildAncestors(tx, model.ParentRunID, model.TenantID, model.ActorID, model.ThreadKind, model.ThreadID); checkErr != nil {
-				return checkErr
-			}
-		}
-		if id := kernel.BudgetParentID(record.Run); id != "" {
-			parent, e := lockKernelRun(tx, id)
-			if e != nil {
-				return e
-			}
-			snap, e := kernelSnapshotFrom(parent)
-			if e != nil {
-				return e
-			}
-			if e = kernel.ValidateRunBudgetParent(record.Run, snap.Run); e != nil {
-				return e
-			}
+		if _, e := pgValidateLiveRunOwners(ctx, tx, record.Run); e != nil {
+			return e
 		}
 		if createErr := tx.Create(&model).Error; createErr != nil {
 			return translateKernelError(createErr)
@@ -313,7 +298,11 @@ func (store *KernelStore) applyWithExecution(ctx context.Context, lease *kernel.
 				return translateKernelError(readErr)
 			}
 			if child.ParentRunID != "" {
-				if _, lockErr := store.lockLiveChildAncestors(tx, child.ParentRunID, child.TenantID, child.ActorID, child.ThreadKind, child.ThreadID); lockErr != nil {
+				source, e := kernelSnapshotFrom(child)
+				if e != nil {
+					return e
+				}
+				if _, lockErr := pgValidateLiveRunOwners(ctx, tx, source.Run); lockErr != nil {
 					return lockErr
 				}
 			}
@@ -601,7 +590,7 @@ func kernelRunRecordFrom(record kernel.Record, lastEventSeq int64) (models.Kerne
 		return models.KernelRunRecord{}, errKernelStateJSON
 	}
 	return models.KernelRunRecord{
-		RunID: record.Run.ID, RequestID: record.Run.RequestID, ParentRunID: record.Run.ParentRunID, BudgetScopeID: record.Run.BudgetScopeID, BudgetParentRunID: record.Run.BudgetParentRunID, Kind: string(record.Run.Kind),
+		RunID: record.Run.ID, RequestID: record.Run.RequestID, ParentRunID: record.Run.ParentRunID, BudgetScopeID: record.Run.BudgetScopeID, LogicalParentRunID: record.Run.LogicalParentRunID, Kind: string(record.Run.Kind),
 		TenantID: record.Run.Actor.TenantID, ActorID: record.Run.Actor.ActorID,
 		ThreadKind: record.Run.Thread.Kind, ThreadID: record.Run.Thread.ID,
 		Goal: record.Run.Goal, Status: string(record.Run.Status), Revision: record.Run.Revision,
@@ -740,7 +729,7 @@ func kernelSnapshotFrom(runRecord models.KernelRunRecord) (kernel.Snapshot, erro
 			ID: runRecord.RunID, Kind: kernel.RunKind(runRecord.Kind),
 			Actor:     kernel.ActorRef{TenantID: runRecord.TenantID, ActorID: runRecord.ActorID},
 			Thread:    kernel.ThreadRef{Kind: runRecord.ThreadKind, ID: runRecord.ThreadID},
-			RequestID: runRecord.RequestID, ParentRunID: runRecord.ParentRunID, BudgetScopeID: runRecord.BudgetScopeID, BudgetParentRunID: runRecord.BudgetParentRunID, Goal: runRecord.Goal,
+			RequestID: runRecord.RequestID, ParentRunID: runRecord.ParentRunID, BudgetScopeID: runRecord.BudgetScopeID, LogicalParentRunID: runRecord.LogicalParentRunID, Goal: runRecord.Goal,
 			Status: kernel.RunStatus(runRecord.Status), Revision: runRecord.Revision,
 			ErrorCode: runRecord.ErrorCode, ErrorDetail: runRecord.ErrorDetail,
 			DeadlineAt: cloneTime(runRecord.DeadlineAt), EndedAt: cloneTime(runRecord.EndedAt),

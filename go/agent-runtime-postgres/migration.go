@@ -85,10 +85,10 @@ func validateNativeBudgetBindings(db *gorm.DB) error {
 		SELECT COUNT(*) FROM (
 			SELECT r.run_id FROM agent_kernel_runs r JOIN members m ON m.run_id=r.run_id
 			WHERE (r.budget_scope_id<>'' OR (r.kind='agent' AND r.status IN ('running','waiting_input','paused_budget')))
-			  AND (r.budget_scope_id<>m.scope OR r.budget_parent_run_id<>m.parent)
+			  AND (r.budget_scope_id<>m.scope OR r.logical_parent_run_id<>m.parent)
 			UNION ALL
-			SELECT r.run_id FROM agent_kernel_runs r WHERE (r.budget_scope_id<>'' OR r.budget_parent_run_id<>'')
-			 AND NOT EXISTS (SELECT 1 FROM members m WHERE m.run_id=r.run_id AND m.scope=r.budget_scope_id AND m.parent=r.budget_parent_run_id)
+			SELECT r.run_id FROM agent_kernel_runs r WHERE r.budget_scope_id<>''
+			 AND NOT EXISTS (SELECT 1 FROM members m WHERE m.run_id=r.run_id AND m.scope=r.budget_scope_id AND m.parent=r.logical_parent_run_id)
 		) invalid`).Scan(&invalid).Error
 	if err != nil {
 		return err

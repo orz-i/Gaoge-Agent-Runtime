@@ -88,7 +88,12 @@ func (runner *Runner) cancelRuntimeRun(
 			delegatedChild = &owner
 		}
 	}
+	nativeSelected := false
 	if delegatedChild != nil {
+		d, e := decodeFrozenHandoffDelegation(delegatedChild.Input)
+		nativeSelected = e == nil && d.NativeLocal
+	}
+	if delegatedChild != nil && !nativeSelected {
 		// Run IDs, Actor/Thread and even full frozen Goal/RequestID prove
 		// task identity but not which Kernel/ChildRunner owns its effect.
 		// A remote Run may have an exact metadata twin in this Kernel.
@@ -123,6 +128,28 @@ func (runner *Runner) cancelRuntimeRun(
 	for range maxRuntimeSyncRetryAttempts {
 		current, err := runner.runtime.Load(ctx, runID)
 		if errors.Is(err, kernel.ErrNotFound) {
+			if nativeSelected {
+				turn, e := loadVerifiedTurnIdentity(ctx, runner.store, delegatedChild.TurnID)
+				if e != nil {
+					return kernel.Snapshot{}, false, e
+				}
+				if _, bound := ctx.Value(cancellationElectionKey{}).(Item); !bound {
+					return kernel.Snapshot{}, false, ErrConflict
+				}
+				_, _, q, e := runner.nativeChildSelection(ctx, turn, *delegatedChild, kernel.RunStatusCancelled, reason)
+				if e != nil {
+					return kernel.Snapshot{}, false, e
+				}
+				d, e := runner.decideNativeCreation(ctx, q)
+				if errors.Is(e, kernel.ErrAlreadyExists) {
+					continue
+				}
+				if e != nil {
+					return kernel.Snapshot{}, false, errors.Join(ErrExecutionOutcomeUnknown, e)
+				}
+				_, e = runner.projectUncreatedNativeChild(ctx, turn, *delegatedChild, d)
+				return kernel.Snapshot{}, false, e
+			}
 			// A routed Handoff can be executing in another Kernel. Its
 			// absence from this Kernel is NOT proof that external cleanup
 			// succeeded, even when the Handoff Start grant is settled.
@@ -159,48 +186,20 @@ func (runner *Runner) cancelRuntimeRun(
 				return kernel.Snapshot{}, true, cancellationReadNoEffect{cause: err}
 			}
 		}
-		// A RunID collision in the local Kernel is not authority to cancel
-		// a routed Handoff. Verify the full frozen child task and parent
-		// origin before either accepting a terminal state or issuing Cancel.
-		var parentRun kernel.Run
-		var delegation handoff.Delegation
-		if delegatedChild != nil {
-			delegation, parentRun, err = runner.localHandoffCancellationAuthority(ctx, *delegatedChild, current)
-			coordinator := runner.handoffs.(*handoff.Coordinator)
-			if err == nil {
-				switch current.Run.Kind {
-				case agent.RunKind:
-					if !coordinator.ObservesLocalDelegation(runner.runtime, delegation) ||
-						!coordinator.VerifiedLocalDelegationControl(ctx, runner.runtime, delegation, current) ||
-						!runner.localRelationCancellerOwnsKernel(agent.RunKind) {
-						err = ErrHandoffCancellationUnverified
-					}
-				case handoff.RemoteAgentRunKind:
-					if !coordinator.ObservesRemoteShadow(ctx, runner.runtime, delegation, current) ||
-						!runner.remoteHandoffCancellerOwnsDelegation(ctx, delegation, current) {
-						err = ErrHandoffCancellationUnverified
-					}
-				default:
-					err = ErrHandoffCancellationUnverified
-				}
+		// The same route and immutable parent proof gates observation and
+		// control; a matching same-ID Run cannot substitute an owner.
+		delegation, parentRun, err := runner.verifiedLocalRelation(ctx, current, true)
+		if err != nil {
+			if delegatedChild != nil {
+				err = errors.Join(ErrHandoffCancellationUnverified, err)
 			}
-			if err != nil {
-				if runner.nativeBudget() && nativeKernel {
-					return current, true, cancellationReadNoEffect{cause: err}
-				}
-				return kernel.Snapshot{}, true, err
-			}
-		}
-		// RunRelation children may belong to a remote Feature executor even
-		// when this Kernel contains a same-ID Run (including a terminal twin).
-		if err = runner.verifyLocalRelationRun(ctx, current, true); err != nil {
 			if runner.nativeBudget() && nativeKernel {
 				return current, true, cancellationReadNoEffect{cause: err}
 			}
 			return kernel.Snapshot{}, true, err
 		}
 		if terminalRuntimeStatus(current.Run.Status) {
-			if root != nil {
+			if root != nil || nativeSelected {
 				if err := runner.reconcileTerminalRootRetirement(ctx, current); err != nil {
 					return current, true, err
 				}
@@ -396,60 +395,82 @@ func (runner *Runner) remoteHandoffCancellerOwnsDelegation(
 // terminal projection. The immutable Delegation Item names its original
 // parent Run, and the child's hashed input supplies its frozen task envelope.
 // Missing/corrupt evidence is unknown remote outcome, never local authority.
-func (runner *Runner) localHandoffCancellationAuthority(
-	ctx context.Context, child Invocation, candidate kernel.Snapshot,
-) (handoff.Delegation, kernel.Run, error) {
-	unverified := func(err error) (handoff.Delegation, kernel.Run, error) {
-		return handoff.Delegation{}, kernel.Run{}, errors.Join(ErrHandoffCancellationUnverified, err)
+func (runner *Runner) originalHandoffParent(ctx context.Context, child Invocation) (handoff.Delegation, Invocation, error) {
+	c, ok := runner.handoffs.(*handoff.Coordinator)
+	return readOriginalHandoffParent(ctx, runner.store, runner.relationReader, child, !ok || !c.ObservesLocalKernelRunner(runner.runtime))
+}
+
+// The native budget binding, negative decision and ordinary child control
+// share this exact original Host selection. Only a legacy fixed opaque
+// route may lack the complete execution envelope.
+func readOriginalHandoffParent(ctx context.Context, store Store, relations ContextRunRelationSource, child Invocation, requireEnvelope bool) (handoff.Delegation, Invocation, error) {
+	unverified := func(e error) (handoff.Delegation, Invocation, error) {
+		return handoff.Delegation{}, Invocation{}, errors.Join(ErrHandoffCancellationUnverified, e)
 	}
-	if _, err := frozenChildRoot(child); err != nil {
+	binding, err := frozenChildRoot(child)
+	if err != nil {
 		return unverified(err)
 	}
-	delegation, decodeErr := decodeFrozenHandoffDelegation(child.Input)
-	if decodeErr != nil {
-		return unverified(decodeErr)
+	d, err := decodeFrozenHandoffDelegation(child.Input)
+	if err != nil {
+		return unverified(err)
 	}
-	item, err := runner.store.GetItem(ctx, child.ParentItemID)
+	item, err := store.GetItem(ctx, child.ParentItemID)
 	if err != nil {
 		return unverified(err)
 	}
 	if item.ID != child.ParentItemID || item.TurnID != child.TurnID || item.Seq == 0 ||
-		item.Kind != ItemDelegation || item.Status != ItemStarted ||
-		item.RunID != child.ExecutionRefID || item.InvocationID == "" {
+		item.Kind != ItemDelegation || item.Status != ItemStarted || item.RunID != child.ExecutionRefID || item.InvocationID == "" {
 		return unverified(ErrConflict)
 	}
 	var payload delegationItemPayload
-	if err := json.Unmarshal(item.Payload, &payload); err != nil {
-		return unverified(err)
-	}
-	if coordinator, ok := runner.handoffs.(*handoff.Coordinator); ok && !coordinator.ObservesLocalKernelRunner(runner.runtime) && payload.Execution == nil {
+	if !decodeTypedAuthorityJSON(item.Payload, &payload) || !matchesDelegationPayload(payload, d, payload.ParentRunID) ||
+		d.ChildRunID != child.ExecutionRefID || strings.TrimSpace(payload.ParentRunID) == "" {
 		return unverified(ErrConflict)
 	}
-	if payload.DelegationID != delegation.ID || payload.ChildRunID != delegation.ChildRunID ||
-		payload.ChildRunID != child.ExecutionRefID ||
-		payload.MemberID != delegation.MemberID || payload.MemberRevision != delegation.MemberRevision ||
-		payload.Goal != delegation.Goal ||
-		strings.TrimSpace(payload.ParentRunID) == "" ||
-		(payload.Execution != nil && !sameHandoffFrozenExecution(delegation, *payload.Execution)) {
+	parent, err := store.GetInvocation(ctx, item.InvocationID)
+	if err != nil || parent.ID != item.InvocationID || parent.ID == child.ID || parent.TurnID != child.TurnID || parent.ExecutionRefID != payload.ParentRunID {
+		return unverified(errors.Join(ErrConflict, err))
+	}
+	if requireEnvelope && payload.Execution == nil {
 		return unverified(ErrConflict)
 	}
-	parent, err := runner.store.GetInvocation(ctx, item.InvocationID)
+	if d.NativeLocal || requireEnvelope && relations != nil {
+		if _, valid := frozenDelegationAdmissionPayload(child, item); !valid || invocationAttempt(parent) != binding.immediateParent() {
+			return unverified(ErrConflict)
+		}
+		if err = verifyProtectiveInvocation(ctx, store, child); err != nil {
+			return unverified(err)
+		}
+		root, err := loadTopLevelInvocation(ctx, store, child.TurnID)
+		if err != nil {
+			return unverified(err)
+		}
+		if _, err = verifyFrozenChildAttempts(ctx, store, child, root); err != nil {
+			return unverified(err)
+		}
+		if relations == nil {
+			return unverified(ErrConflict)
+		}
+		edge, err := relations.GetByChild(ctx, child.ExecutionRefID)
+		if err != nil || edge.Kind != runrelation.KindDelegation || edge.ParentRunID != parent.ExecutionRefID || edge.ChildRunID != child.ExecutionRefID || edge.OwnerNodeID != d.ID {
+			return unverified(errors.Join(ErrConflict, err))
+		}
+	}
+	return d, parent, nil
+}
+
+func (runner *Runner) localHandoffCancellationAuthority(ctx context.Context, child Invocation, candidate kernel.Snapshot) (handoff.Delegation, kernel.Run, error) {
+	d, parent, err := runner.originalHandoffParent(ctx, child)
 	if err != nil {
-		return unverified(err)
+		return handoff.Delegation{}, kernel.Run{}, err
 	}
-	if parent.ID != item.InvocationID || parent.ID == child.ID ||
-		parent.TurnID != child.TurnID || parent.ExecutionRefID != payload.ParentRunID {
-		return unverified(ErrConflict)
+	source, err := runner.runtime.Load(ctx, parent.ExecutionRefID)
+	if err != nil || !handoff.VerifiedChildRun(d, source.Run, candidate) ||
+		(d.NativeLocal && !agent.MatchesFrozenOrigin(candidate, child.Input)) {
+		return handoff.Delegation{}, kernel.Run{}, errors.Join(ErrHandoffCancellationUnverified, err)
 	}
-	parentSnapshot, err := runner.runtime.Load(ctx, payload.ParentRunID)
-	if err != nil {
-		return unverified(err)
-	}
-	if parentSnapshot.Run.ID != payload.ParentRunID ||
-		!handoff.VerifiedChildRun(delegation, parentSnapshot.Run, candidate) {
-		return unverified(ErrConflict)
-	}
-	return delegation, parentSnapshot.Run, nil
+	return d, source.Run, nil
 }
 
 func (runner *Runner) syncTerminalDelegations(ctx context.Context, turn Turn, runs map[string]kernel.Snapshot) error {
@@ -479,11 +500,22 @@ func (runner *Runner) syncTerminalDelegations(ctx context.Context, turn Turn, ru
 		}
 		if payload.Execution != nil {
 			delegation = *payload.Execution
-			delegation.Status = handoff.Status(snapshot.Run.Status)
+			if delegation.NativeLocal && snapshot.Run.Kind == "" {
+				owner, e := verifiedRunInvocation(ctx, runner.store, item.RunID)
+				if e != nil {
+					return e
+				}
+				d, e := runner.nativeChildDecision(ctx, turn, owner)
+				if e != nil {
+					return e
+				}
+				if _, e = runner.projectUncreatedNativeChild(ctx, turn, owner, d); e != nil {
+					return e
+				}
+				continue
+			}
 		}
-		if snapshot.Run.Status == kernel.RunStatusCompleted && snapshot.Result != nil {
-			delegation.Result = append(json.RawMessage(nil), snapshot.Result.Content...)
-		}
+		delegation = handoff.ProjectChild(delegation, snapshot)
 		_, err = runner.recordDelegationItem(ctx, turn, invocation, delegation, delegationItemStatus(delegation.Status), item.ID)
 		if err != nil {
 			return err
@@ -637,6 +669,20 @@ func (runner *Runner) handoffPhysicalEffectPossible(ctx context.Context, child I
 		// Pre-hard-cut records lack an authoritative root/Attempt proof.
 		// Never infer a safe no-effect outcome from their missing grant.
 		return true, errors.Join(ErrHandoffCancellationUnverified, err)
+	}
+	if d, e := decodeFrozenHandoffDelegation(child.Input); e == nil && d.NativeLocal {
+		turn, e := loadVerifiedTurnIdentity(ctx, runner.store, child.TurnID)
+		if e != nil {
+			return true, e
+		}
+		_, e = runner.nativeChildDecision(ctx, turn, child)
+		if e == nil {
+			return false, nil
+		}
+		if errors.Is(e, kernel.ErrNotFound) || errors.Is(e, kernel.ErrAlreadyExists) {
+			return true, nil
+		}
+		return true, e
 	}
 	items, err := listAllItems(ctx, runner.store, child.TurnID)
 	if err != nil {
