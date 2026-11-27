@@ -10,6 +10,7 @@ import (
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
 	interactionadapter "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/interaction"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/interaction"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
@@ -265,16 +266,12 @@ func (store *lostAllowanceACKStore) ApplyControl(
 }
 
 func TestNativeAllowanceLostCASReplyDoesNotNeedHostRetirement(t *testing.T) {
-	for _, configured := range []bool{false, true} {
-		name := "native"
-		if configured {
-			name = "unrelated-interaction-handler"
-		}
-		t.Run(name, func(t *testing.T) { testNativeAllowanceLostReply(t, configured) })
+	for _, mode := range []string{"native", "unrelated-interaction-handler", "unused-budget-on-reopen", "both-on-reopen", "unexpected-ledger", "missing-authority"} {
+		t.Run(mode, func(t *testing.T) { testNativeAllowanceLostReply(t, mode) })
 	}
 }
 
-func testNativeAllowanceLostReply(t *testing.T, configured bool) {
+func testNativeAllowanceLostReply(t *testing.T, mode string) {
 	t.Helper()
 	store := &lostAllowanceACKStore{Store: memory.NewStore()}
 	runtime, err := kernel.New(kernel.Dependencies{Store: store, Clock: fixedClock{}})
@@ -292,8 +289,15 @@ func testNativeAllowanceLostReply(t *testing.T, configured bool) {
 	harnessStore := harness.NewMemoryStore()
 	handler := &recordingInteractionResponseHandler{}
 	deps := harness.Dependencies{Runtime: runtime, Store: harnessStore, Agent: direct, Clock: fixedClock{}}
-	if configured {
+	if mode == "unrelated-interaction-handler" || mode == "both-on-reopen" {
 		deps.Interactions = handler
+	}
+	shared, err := harness.NewBudgetAuthority(harness.BudgetAuthorityDependencies{Store: harnessStore, Clock: fixedClock{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode == "missing-authority" {
+		deps.Budget = shared
 	}
 	runner, err := harness.NewRunner(deps)
 	if err != nil {
@@ -306,9 +310,38 @@ func testNativeAllowanceLostReply(t *testing.T, configured bool) {
 		t.Fatalf("failed to create paused Agent: %v", err)
 	}
 	owner, _ := harness.TopLevelInvocation(paused)
+	switch mode {
+	case "unused-budget-on-reopen", "both-on-reopen", "unexpected-ledger":
+		if paused.Config.SharedBudget != nil {
+			t.Fatal("original is not unbudgeted")
+		}
+		deps.Budget = shared
+	case "missing-authority":
+		deps.Budget = nil
+	}
+	if mode == "unexpected-ledger" {
+		if _, err = (budget.Coordinator{Store: harnessStore}).Ensure(t.Context(), paused.Turn.ID, budget.Limits{MaxChildRuns: 1}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if mode != "native" && mode != "unrelated-interaction-handler" {
+		runner, err = harness.NewRunner(deps)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	original, err := runtime.Load(t.Context(), owner.ExecutionRefID)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if mode == "unexpected-ledger" || mode == "missing-authority" {
+		_, err = runner.GrantCallAllowance(t.Context(), paused.Turn.ID, paused.Turn.Revision, agent.CallAllowance{LLMCalls: 1})
+		after, e := runtime.Load(t.Context(), owner.ExecutionRefID)
+		items, readErr := harnessStore.ListItems(t.Context(), paused.Turn.ID, 0, 500)
+		if !errors.Is(err, harness.ErrExecutionOutcomeUnknown) || e != nil || readErr != nil || kernel.ManagedDigest(after) != kernel.ManagedDigest(original) || len(items) != len(paused.Items) {
+			t.Fatalf("contradictory accounting admitted control: %v %v %v", err, e, readErr)
+		}
+		return
 	}
 	store.armed.Store(true)
 	_, firstErr := runner.GrantCallAllowance(t.Context(), paused.Turn.ID, paused.Turn.Revision, agent.CallAllowance{LLMCalls: 1})
@@ -320,16 +353,8 @@ func testNativeAllowanceLostReply(t *testing.T, configured bool) {
 		t.Fatalf("fixture did not physically commit before ACK was lost: status=%s err=%v", run.Run.Status, err)
 	}
 	items, err := harnessStore.ListItems(t.Context(), paused.Turn.ID, 0, 500)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if harness.PendingExecutionDispatch(items, owner.ID) {
-		t.Fatal("pure native control created Host dispatch authority")
-	}
-	for _, i := range items {
-		if phase, ok := harness.VerifiedExecutionDispatchGrant(i); ok && phase == "grant-call-allowance" {
-			t.Fatal("native allowance still wrote Host dispatch")
-		}
+	if err != nil || harness.PendingExecutionDispatch(items, owner.ID) {
+		t.Fatalf("pure native control created Host dispatch authority or unreadable evidence: %v", err)
 	}
 	view, err := agent.ViewState(run)
 	if err != nil || view.CallAllowance == nil || view.CallAllowance.LLMCalls != 2 || view.Budget.Usage.LLMCalls != 1 {
@@ -375,6 +400,9 @@ func testNativeAllowanceLostReply(t *testing.T, configured bool) {
 	items, e = harnessStore.ListItems(t.Context(), paused.Turn.ID, 0, 500)
 	if e != nil || handler.calls != 0 || handler.validationCalls != 0 {
 		t.Fatalf("unrelated interaction was invoked: %v %+v", e, handler)
+	}
+	if _, e = harnessStore.LoadBudget(t.Context(), paused.Turn.ID); !errors.Is(e, budget.ErrLedgerNotFound) {
+		t.Fatalf("unbudgeted execution acquired a ledger: %v", e)
 	}
 	for _, item := range items {
 		if phase, valid := harness.VerifiedExecutionDispatchGrant(item); valid && (phase == "grant-call-allowance" || phase == "resume") {

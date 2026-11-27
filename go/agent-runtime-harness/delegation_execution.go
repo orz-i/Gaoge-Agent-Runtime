@@ -127,13 +127,16 @@ func (runner *Runner) nativeLocalDelegation(d handoff.Delegation) *agent.Runner 
 
 // Only a fixed, scoped local Agent in this exact Runtime may replace
 // Host Dispatch. The selected route is frozen with the original Delegation.
-func (runner *Runner) nativeHandoff(d handoff.Delegation) *agent.Runner {
-	native := runner.nativeRootStart()
+func (runner *Runner) nativeHandoff(ctx context.Context, turnID string, d handoff.Delegation) (*agent.Runner, error) {
 	c, ok := runner.handoffs.(*handoff.Coordinator)
-	if native == nil || !ok || d.Remote || !c.UsesLocalAgentForDelegation(runner.runtime, native, d) {
-		return nil
+	if !ok || d.Remote {
+		return nil, nil
 	}
-	return native
+	native, err := runner.nativeRootCommands(ctx, turnID, true)
+	if err != nil || native == nil || !c.UsesLocalAgentForDelegation(runner.runtime, native, d) {
+		return nil, err
+	}
+	return native, nil
 }
 
 func delegationBudgetLimits(d handoff.Delegation) budget.Limits {
@@ -309,13 +312,17 @@ func isHandoffDelegationInvocation(invocation Invocation) bool {
 
 // nativeChildSelection uses the same original sealed parent and child identity
 // for Create, definitive rejection and cancellation. No Host grant is needed.
-func (r *Runner) nativeChildSelection(ctx context.Context, turn Turn, owner Invocation, status kernel.RunStatus, reason string) (handoff.Delegation, Invocation, kernel.RunCreationDecision, error) {
+func (r *Runner) nativeChildSelection(ctx context.Context, turn Turn, owner Invocation, status kernel.RunStatus, reason string) (handoff.Delegation, Invocation, kernel.RunCreationDecision, *agent.Runner, error) {
 	d, parent, e := r.originalHandoffParent(ctx, owner)
-	if e != nil || !d.NativeLocal || owner.TurnID != turn.ID || owner.Attempt != 1 || r.nativeHandoff(d) == nil {
-		return d, parent, kernel.RunCreationDecision{}, errors.Join(ErrConflict, e)
+	if e != nil || !d.NativeLocal || owner.TurnID != turn.ID || owner.Attempt != 1 {
+		return d, parent, kernel.RunCreationDecision{}, nil, errors.Join(ErrConflict, e)
+	}
+	native, err := r.nativeHandoff(ctx, turn.ID, d)
+	if err != nil || native == nil {
+		return d, parent, kernel.RunCreationDecision{}, nil, errors.Join(ErrConflict, err)
 	}
 	q, e := r.nativeChildCreationSelection(ctx, turn, d, parent.ExecutionRefID, owner.Input, status, reason)
-	return d, parent, q, e
+	return d, parent, q, native, e
 }
 
 func (r *Runner) nativeChildCreationSelection(ctx context.Context, turn Turn, d handoff.Delegation, parentRunID string, input json.RawMessage, status kernel.RunStatus, reason string) (kernel.RunCreationDecision, error) {
@@ -334,7 +341,7 @@ func (r *Runner) nativeChildCreationSelection(ctx context.Context, turn Turn, d 
 }
 
 func (r *Runner) nativeChildDecision(ctx context.Context, turn Turn, owner Invocation) (kernel.RunCreationDecision, error) {
-	_, _, q, e := r.nativeChildSelection(ctx, turn, owner, kernel.RunStatusCancelled, "")
+	_, _, q, _, e := r.nativeChildSelection(ctx, turn, owner, kernel.RunStatusCancelled, "")
 	if e != nil {
 		return q, e
 	}
@@ -344,7 +351,7 @@ func (r *Runner) nativeChildDecision(ctx context.Context, turn Turn, owner Invoc
 // Project only the immutable native negative decision; no synthetic Kernel
 // snapshot, lease, ledger member or ChildRunner receipt is created.
 func (r *Runner) projectUncreatedNativeChild(ctx context.Context, turn Turn, owner Invocation, d kernel.RunCreationDecision) (handoff.Delegation, error) {
-	frozen, parent, q, e := r.nativeChildSelection(ctx, turn, owner, d.Status, d.Reason)
+	frozen, parent, q, _, e := r.nativeChildSelection(ctx, turn, owner, d.Status, d.Reason)
 	if e != nil || !d.MatchesSelection(q) {
 		return handoff.Delegation{}, errors.Join(ErrConflict, e)
 	}
@@ -369,12 +376,11 @@ func (r *Runner) projectUncreatedNativeChild(ctx context.Context, turn Turn, own
 }
 
 func (r *Runner) dispatchNativeHandoff(ctx context.Context, turn Turn, parent kernel.Snapshot, child Invocation, d handoff.Delegation) (handoff.Delegation, error) {
-	frozen, owner, q, e := r.nativeChildSelection(ctx, turn, child, kernel.RunStatusCancelled, "")
-	native := r.nativeHandoff(d)
-	if e != nil || native == nil || !sameHandoffFrozenExecution(frozen, d) || owner.ExecutionRefID != parent.Run.ID {
+	frozen, owner, q, native, e := r.nativeChildSelection(ctx, turn, child, kernel.RunStatusCancelled, "")
+	if e != nil || !sameHandoffFrozenExecution(frozen, d) || owner.ExecutionRefID != parent.Run.ID {
 		return handoff.Delegation{}, errors.Join(ErrConflict, e)
 	}
-	if ready, e := r.originalNativeCommand(ctx, child); e != nil || !ready {
+	if e := r.originalNativeCommand(ctx, child); e != nil {
 		return handoff.Delegation{}, errors.Join(ErrConflict, e)
 	}
 	decision, e := r.readNativeCreationDecision(ctx, q)

@@ -212,19 +212,14 @@ func withOriginalKernelRetryWitness(
 // Any existing Running/Waiting/Paused Kernel Run categorically forbids a
 // second physical execution, even if historical Harness rows say Failed.
 func (runner *Runner) withOriginalRetryAuthority(
-	ctx context.Context, owner Invocation,
+	ctx context.Context, turn Turn, owner Invocation,
 ) (context.Context, error) {
 	if runner == nil || runner.runtime == nil || owner.ExecutionRefID == "" || owner.ParentItemID != "" {
 		return ctx, ErrConflict
 	}
 	snapshot, err := runner.runtime.Load(ctx, owner.ExecutionRefID)
 	if errors.Is(err, kernel.ErrNotFound) {
-		if runner.nativeRootStart() != nil {
-			turn, e := loadVerifiedTurn(ctx, runner.store, owner.TurnID)
-			if e != nil {
-				return ctx, e
-			}
-			d, e := runner.readUncreatedRootDecision(ctx, turn, owner)
+		if d, native, e := runner.readUncreatedRootDecision(ctx, turn, owner); native || e != nil {
 			if e != nil || invocationStatusFromTurn(TurnStatus(d.Status)) != owner.Status {
 				return ctx, errors.Join(ErrConflict, e)
 			}

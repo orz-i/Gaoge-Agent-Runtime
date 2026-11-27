@@ -75,12 +75,10 @@ func (runner *Runner) resumeTurn(ctx context.Context, turnID string, expected *s
 	runtimeSnapshot, err := runner.runtime.Load(ctx, invocation.ExecutionRefID)
 	if err != nil {
 		if errors.Is(err, kernel.ErrNotFound) {
-			if revision == 0 && runner.nativeRootStart() != nil {
-				d, e := runner.readUncreatedRootDecision(ctx, turn, invocation)
-				if e == nil {
+			if revision == 0 {
+				if d, native, e := runner.readUncreatedRootDecision(ctx, turn, invocation); native && e == nil {
 					return runner.projectNativeCreationDecision(ctx, turn, invocation, d)
-				}
-				if !errors.Is(e, kernel.ErrNotFound) {
+				} else if e != nil && (!native || !errors.Is(e, kernel.ErrNotFound)) {
 					return runner.resumeTurnError(ctx, turn, nil, e)
 				}
 			}

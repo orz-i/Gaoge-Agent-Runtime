@@ -121,12 +121,16 @@ func (runner *Runner) uncreatedRootSelection(ctx context.Context, turn Turn, inv
 	return q, nil
 }
 
-func (runner *Runner) readUncreatedRootDecision(ctx context.Context, turn Turn, inv Invocation) (kernel.RunCreationDecision, error) {
-	q, err := runner.uncreatedRootSelection(ctx, turn, inv, kernel.RunStatusCancelled, "")
-	if err != nil {
-		return q, err
+func (runner *Runner) readUncreatedRootDecision(ctx context.Context, turn Turn, inv Invocation) (kernel.RunCreationDecision, bool, error) {
+	native, err := runner.nativeRootCommands(ctx, turn.ID, true)
+	if err != nil || native == nil {
+		return kernel.RunCreationDecision{}, false, err
 	}
-	return runner.readNativeCreationDecision(ctx, q)
+	q, err := runner.uncreatedRootSelection(ctx, turn, inv, kernel.RunStatusCancelled, "")
+	if err == nil {
+		q, err = runner.readNativeCreationDecision(ctx, q)
+	}
+	return q, true, err
 }
 
 func (runner *Runner) readNativeCreationDecision(ctx context.Context, q kernel.RunCreationDecision) (kernel.RunCreationDecision, error) {
@@ -188,10 +192,8 @@ func (runner *Runner) projectUncreatedRoot(ctx context.Context, turn Turn, inv I
 }
 
 func (runner *Runner) projectNativeCreationDecision(ctx context.Context, turn Turn, inv Invocation, d kernel.RunCreationDecision) (Snapshot, error) {
-	if runner.nativeBudget() {
-		if err := runner.projectCreationDecisionBudget(ctx, d); err != nil {
-			return Snapshot{}, err
-		}
+	if err := runner.projectCreationDecisionBudget(ctx, d); err != nil {
+		return Snapshot{}, err
 	}
 	status := invocationStatusFromTurn(TurnStatus(d.Status))
 	if current, err := runner.store.GetInvocation(ctx, inv.ID); err != nil {
@@ -237,7 +239,11 @@ func (runner *Runner) cancelUndispatchedRoot(
 	if original.Status != InvocationAccepted || !undispatchedRootTurn(original, turn) {
 		return Snapshot{}, true, ErrConflict
 	}
-	if runner.nativeBudget() || runner.nativeRootCommands() != nil {
+	native, err := runner.nativeRootCommands(ctx, turn.ID, false)
+	if err != nil {
+		return Snapshot{}, true, err
+	}
+	if runner.nativeBudget() || native != nil {
 		q, e := runner.uncreatedRootSelection(ctx, turn, original, kernel.RunStatusCancelled, reason)
 		if e != nil {
 			return Snapshot{}, true, e
@@ -273,24 +279,16 @@ func (runner *Runner) cancelUndispatchedRoot(
 	return observed, true, err
 }
 
-// A native scoped Root needs no independently admitted Host dispatch.
-// The same immutable Host selection supplies Create and either rejection.
-func (runner *Runner) nativeRootStart() *agent.Runner {
-	native := runner.nativeRootCommands()
-	if native != nil && native.NativeRootCallbacksScoped() {
-		return native
-	}
-	return nil
-}
-
 func (runner *Runner) startOriginalRoot(ctx context.Context, inv Invocation, phase string, request agent.StartRequest) (kernel.Snapshot, error) {
 	physical := func(c context.Context) (kernel.Snapshot, error) { return runner.agent.StartRun(c, request) }
-	native := runner.nativeRootStart()
+	native, err := runner.nativeRootCommands(ctx, inv.TurnID, true)
+	if err != nil {
+		return kernel.Snapshot{}, err
+	}
 	if native == nil {
 		return runner.withPhysicalInvocationDispatch(ctx, inv, phase, physical)
 	}
-	ready, err := runner.originalNativeCommand(ctx, inv)
-	if err != nil || !ready {
+	if err := runner.originalNativeCommand(ctx, inv); err != nil {
 		return kernel.Snapshot{}, errors.Join(ErrConflict, err)
 	}
 	if d, err := runner.runtime.LoadCreationDecision(ctx, inv.ExecutionRefID); err == nil {
@@ -298,7 +296,8 @@ func (runner *Runner) startOriginalRoot(ctx context.Context, inv Invocation, pha
 	} else if !errors.Is(err, kernel.ErrNotFound) {
 		return kernel.Snapshot{}, err
 	}
-	return runner.withNativeRootCommand(ctx, native, inv, phase, nil, physical)
+	snap, _, err := runner.observeNativeCommand(ctx, native, inv, phase, nil, physical)
+	return snap, err
 }
 
 func (runner *Runner) finishNativeRootStart(ctx context.Context, turn Turn, inv Invocation, cause error) (Snapshot, error) {

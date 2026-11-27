@@ -424,8 +424,9 @@ func (runner *Runner) prepareDelegation(
 	resolved.MaxChildRuns, resolved.MaxConcurrentRuns, resolved.MaxCostUnits, resolved.MaxStateBytes = 0, 0, 0, 0
 	resolved.MaxConcurrentDescendants = 0
 	delegation.Limits = resolved
-	delegation.NativeLocal = runner.nativeHandoff(delegation) != nil
-	return delegation, parent, nil
+	native, err := runner.nativeHandoff(ctx, turn.ID, delegation)
+	delegation.NativeLocal = native != nil
+	return delegation, parent, err
 }
 
 // Retry only the immutable same child after an actual native no-effect
@@ -456,8 +457,9 @@ func (runner *Runner) retryNativeDelegation(ctx context.Context, turn Turn, d ha
 	if d.NativeLocal {
 		// Only a recorded original Waiting admission can attempt the same
 		// identity after a budget-capacity rejection. Create still elects.
-		if runner.nativeHandoff(d) == nil || owner.Status != InvocationAccepted || ActiveCancellationFence(items) || PendingExecutionDispatch(items, owner.ID) {
-			return false, nil
+		native, err := runner.nativeHandoff(ctx, turn.ID, d)
+		if err != nil || native == nil || owner.Status != InvocationAccepted || ActiveCancellationFence(items) || PendingExecutionDispatch(items, owner.ID) {
+			return false, err
 		}
 		waiting, e := runner.store.GetItem(ctx, stableID("hid", turn.ID, d.ID, string(ItemWaiting)))
 		if errors.Is(e, ErrNotFound) {

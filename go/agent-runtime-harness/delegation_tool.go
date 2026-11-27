@@ -272,7 +272,7 @@ func (runner *Runner) observeDelegation(ctx context.Context, runID string, allow
 		if !allowRemote || !coordinator.ObservesRemoteShadow(ctx, runner.runtime, frozen, child) {
 			return kernel.Snapshot{}, handoff.Delegation{}, ErrHandoffCancellationUnverified
 		}
-	} else if !runner.observesLocalChild(ctx, coordinator, frozen, child) {
+	} else if !runner.observesLocalChild(ctx, owner.TurnID, coordinator, frozen, child) {
 		return kernel.Snapshot{}, handoff.Delegation{}, ErrHandoffCancellationUnverified
 	}
 	return child, frozen, nil
@@ -281,13 +281,14 @@ func (runner *Runner) observeDelegation(ctx context.Context, runID string, allow
 // The caller has authenticated the original frozen Handoff and child. A
 // completed result needs the executing callbacks' acknowledged custody even
 // when the reader has Host approval hooks and cannot take physical control.
-func (runner *Runner) observesLocalChild(ctx context.Context, coordinator *handoff.Coordinator, frozen handoff.Delegation, child kernel.Snapshot) bool {
+func (runner *Runner) observesLocalChild(ctx context.Context, turnID string, coordinator *handoff.Coordinator, frozen handoff.Delegation, child kernel.Snapshot) bool {
 	rt := runner.runtime
 	if (!coordinator.ObservesLocalKernelRunner(rt) && child.Run.Kind != agent.RunKind) || !coordinator.ObservesLocalDelegation(rt, frozen) {
 		return false
 	}
 	if frozen.NativeLocal && terminalRuntimeStatus(child.Run.Status) {
-		if runner.nativeHandoff(frozen) == nil || !agent.TerminalPhysicalEffectsSettled(child) {
+		native, err := runner.nativeHandoff(ctx, turnID, frozen)
+		if err != nil || native == nil || !agent.TerminalPhysicalEffectsSettled(child) {
 			return false
 		}
 		if _, e := rt.LookupChildExecution(ctx, child.Run.ID); !errors.Is(e, kernel.ErrNotFound) {
@@ -301,7 +302,7 @@ func (runner *Runner) observesLocalChild(ctx context.Context, coordinator *hando
 			return true
 		}
 		return rt.VerifyOwnedRootSettlement(ctx, child) == nil ||
-			child.Run.Status == kernel.RunStatusCancelled && (runner.nativeHandoff(frozen).VerifiedDeferredRootControl(ctx, rt, child) || errors.Is(e, kernel.ErrNotFound) && child.Run.Revision == 2)
+			child.Run.Status == kernel.RunStatusCancelled && (native.VerifiedDeferredRootControl(ctx, rt, child) || errors.Is(e, kernel.ErrNotFound) && child.Run.Revision == 2)
 	}
 	if !terminalRuntimeStatus(child.Run.Status) || !coordinator.IsDeferredLocalDelegation(rt, frozen) {
 		return true

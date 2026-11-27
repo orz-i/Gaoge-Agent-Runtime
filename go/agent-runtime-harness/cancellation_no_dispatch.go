@@ -121,8 +121,8 @@ func (runner *Runner) missingRunCancellation(ctx context.Context, turn Turn, run
 		return false, ErrConflict
 	}
 	if d.NativeLocal {
-		if runner.nativeHandoff(d) == nil {
-			return false, ErrConflict
+		if native, e := runner.nativeHandoff(ctx, turn.ID, d); e != nil || native == nil {
+			return false, errors.Join(ErrConflict, e)
 		}
 		input, hash, e := marshalInvocationValue(d)
 		if e != nil {

@@ -164,26 +164,26 @@ func sameFrozenInvocationAuthority(candidate, returned Invocation) bool {
 // This is an identity proof, not a second cancellation grant or an alternate
 // Kernel state authority. The existing cancellation intent/CAS still governs
 // the actual physical stop.
-func verifyProtectiveInvocation(ctx context.Context, store Store, returned Invocation) error {
+func verifyProtectiveInvocation(ctx context.Context, store Store, returned Invocation) (Invocation, error) {
 	if store == nil || !validInvocationExecutionAuthority(returned) ||
 		strings.TrimSpace(returned.ExecutionRefID) == "" {
-		return ErrConflict
+		return Invocation{}, ErrConflict
 	}
 	byID, err := store.GetInvocation(ctx, returned.ID)
 	if err != nil {
-		return err
+		return Invocation{}, err
 	}
 	if !validInvocationExecutionAuthority(byID) || !sameFrozenInvocationAuthority(returned, byID) {
-		return ErrConflict
+		return Invocation{}, ErrConflict
 	}
 	byRun, err := store.GetInvocationByExecutionRefID(ctx, returned.ExecutionRefID)
 	if err != nil {
-		return err
+		return Invocation{}, err
 	}
 	if !validInvocationExecutionAuthority(byRun) || !sameFrozenInvocationAuthority(returned, byRun) {
-		return ErrConflict
+		return Invocation{}, ErrConflict
 	}
-	return nil
+	return byID, nil
 }
 
 // createVerifiedInvocation never treats a Store's Create result as a new

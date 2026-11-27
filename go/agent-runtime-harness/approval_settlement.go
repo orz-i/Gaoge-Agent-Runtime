@@ -243,8 +243,7 @@ func (r *Runner) resolveNativeApproval(ctx context.Context, native *agent.Runner
 	if err := r.requireInvocationRootModelOutputCeiling(ctx, inv); err != nil {
 		return kernel.Snapshot{}, err
 	}
-	ready, err := r.originalNativeCommand(ctx, inv)
-	if err != nil || !ready {
+	if err := r.originalNativeCommand(ctx, inv); err != nil {
 		return kernel.Snapshot{}, errors.Join(ErrConflict, err)
 	}
 	if _, exists, err := r.readNativeApprovalProjection(ctx, turn, inv, a, source.Run.UpdatedAt); err != nil || exists {

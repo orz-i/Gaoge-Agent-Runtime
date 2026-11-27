@@ -440,9 +440,9 @@ func (runner *Runner) ResolveSubtaskApproval(ctx context.Context, turnID, taskID
 	var resolved kernel.Snapshot
 	var resolveErr error
 	if frozen.NativeLocal {
-		native := runner.nativeHandoff(frozen)
-		if native == nil || !nativeApproval {
-			return Snapshot{}, ErrConflict
+		native, e := runner.nativeHandoff(ctx, turn.ID, frozen)
+		if e != nil || native == nil || !nativeApproval {
+			return Snapshot{}, errors.Join(ErrConflict, e)
 		}
 		resolved, resolveErr = runner.resolveNativeApproval(ctx, native, turn, invocation, snapshot, a, resolve)
 	} else {

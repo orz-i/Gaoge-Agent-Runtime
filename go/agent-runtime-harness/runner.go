@@ -280,7 +280,10 @@ func (runner *Runner) ResolveApproval(
 	resolve := runner.approvalCallback(runtimeSnapshot, decision, a.Comment)
 	var resolved kernel.Snapshot
 	var resolveErr error
-	native := runner.nativeRootStart()
+	native, err := runner.nativeRootCommands(ctx, turn.ID, true)
+	if err != nil {
+		return Snapshot{}, err
+	}
 	if native != nil {
 		if err = validateRootRuntimeOwnership(invocation, runtimeSnapshot); err != nil {
 			return Snapshot{}, err
@@ -953,13 +956,11 @@ func (runner *Runner) refreshTurn(ctx context.Context, turnID string, expected *
 		return runner.loadSnapshot(ctx, turn, nil)
 	}
 	runtimeSnapshot, err := runner.runtime.Load(ctx, invocation.ExecutionRefID)
-	if errors.Is(err, kernel.ErrNotFound) && !terminalTurnStatus(turn.Status) && runner.nativeRootStart() != nil {
-		d, decisionErr := runner.readUncreatedRootDecision(ctx, turn, invocation)
-		if decisionErr == nil {
+	if errors.Is(err, kernel.ErrNotFound) && !terminalTurnStatus(turn.Status) {
+		if d, native, e := runner.readUncreatedRootDecision(ctx, turn, invocation); native && e == nil {
 			return runner.projectNativeCreationDecision(ctx, turn, invocation, d)
-		}
-		if !errors.Is(decisionErr, kernel.ErrNotFound) {
-			return Snapshot{}, decisionErr
+		} else if e != nil && (!native || !errors.Is(e, kernel.ErrNotFound)) {
+			return Snapshot{}, e
 		}
 	}
 	if errors.Is(err, kernel.ErrNotFound) && terminalTurnStatus(turn.Status) && missingRuntimeSnapshotAllowed(turn, invocation) {
@@ -1022,7 +1023,7 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 		strings.TrimSpace(invocation.ParentItemID) != "" || strings.TrimSpace(invocation.ExecutionRefID) == "" {
 		return Snapshot{}, errors.Join(ErrConflict, err)
 	}
-	if err = verifyProtectiveInvocation(ctx, runner.store, invocation); err != nil {
+	if _, err = verifyProtectiveInvocation(ctx, runner.store, invocation); err != nil {
 		return Snapshot{}, err
 	}
 	if terminalTurnStatus(turn.Status) && turn.Status != TurnCancelled {
@@ -1052,8 +1053,7 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 			if len(children) > 0 || len(invocations) != 1 || len(delegated) > 0 || pending {
 				return Snapshot{}, ErrRuntimeCancellationUnverified
 			}
-			if runner.nativeRootStart() != nil {
-				d, e := runner.readUncreatedRootDecision(ctx, turn, invocation)
+			if d, native, e := runner.readUncreatedRootDecision(ctx, turn, invocation); native || e != nil {
 				if e != nil || d.Status != kernel.RunStatusFailed {
 					return Snapshot{}, errors.Join(ErrRuntimeCancellationUnverified, e)
 				}

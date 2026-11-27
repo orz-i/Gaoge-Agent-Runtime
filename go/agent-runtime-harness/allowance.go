@@ -70,15 +70,16 @@ func (runner *Runner) GrantCallAllowance(
 		return Snapshot{}, err
 	}
 	var resumed kernel.Snapshot
-	if native := runner.nativeRootCommands(); native != nil {
+	if native, e := runner.nativeRootCommands(ctx, turn.ID, false); e != nil {
+		return Snapshot{}, e
+	} else if native != nil {
 		if err = validateRootRuntimeOwnership(invocation, current); err != nil {
 			return Snapshot{}, err
 		}
 		if err = runner.requireInvocationRootModelOutputCeiling(ctx, invocation); err != nil {
 			return Snapshot{}, err
 		}
-		ready, e := runner.originalNativeCommand(ctx, invocation)
-		if e != nil || !ready {
+		if e := runner.originalNativeCommand(ctx, invocation); e != nil {
 			return Snapshot{}, errors.Join(ErrConflict, e)
 		}
 		// This is the guarded native control CAS, not a physical callback.

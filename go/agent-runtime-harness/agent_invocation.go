@@ -78,7 +78,9 @@ func (runner *Runner) finishTopLevelStart(
 				}
 			}
 		}
-		if runner.nativeRootStart() != nil {
+		if native, e := runner.nativeRootCommands(ctx, turn.ID, true); e != nil {
+			return Snapshot{}, errors.Join(startErr, e)
+		} else if native != nil {
 			return runner.finishNativeRootStart(ctx, turn, invocation, startErr)
 		}
 		if startErr == nil {
@@ -170,7 +172,7 @@ func (runner *Runner) RetryInvocation(ctx context.Context, invocationID string) 
 	if _, _, err := frozenTopLevelInvocationIdentity(invocation); err != nil {
 		return Snapshot{}, err
 	}
-	retryCtx, authorityErr := runner.withOriginalRetryAuthority(ctx, invocation)
+	retryCtx, authorityErr := runner.withOriginalRetryAuthority(ctx, turn, invocation)
 	if authorityErr != nil {
 		return Snapshot{}, authorityErr
 	}
@@ -318,7 +320,7 @@ func (runner *Runner) CancelInvocation(ctx context.Context, invocationID, reason
 		!isHandoffDelegationInvocation(invocation) || strings.TrimSpace(invocation.ExecutionRefID) == "" {
 		return Snapshot{}, ErrConflict
 	}
-	if err = verifyProtectiveInvocation(ctx, runner.store, invocation); err != nil {
+	if _, err = verifyProtectiveInvocation(ctx, runner.store, invocation); err != nil {
 		return Snapshot{}, err
 	}
 	// A protective child stop uses only the original Turn identity here.
@@ -399,82 +401,80 @@ func (runner *Runner) validateParentItem(ctx context.Context, turnID, parentItem
 	return nil
 }
 
-// nativeRootCommands selects the local execution owner with native cancellation
-// and accounting. Actual outstanding Interaction claims, not handler presence,
-// fence the command through originalNativeCommand.
-func (runner *Runner) nativeRootCommands() *agent.Runner {
+// Native eligibility is operation-specific. An opaque callback or actual
+// independent accounting/cancellation domain needs Host arbitration; invalid
+// original evidence is a rejection, never permission to fall back.
+func (runner *Runner) nativeRootCommands(ctx context.Context, turnID string, scoped bool) (*agent.Runner, error) {
 	native, ok := runner.agent.(*agent.Runner)
+	if !ok || !native.ObservesKernelRuntime(runner.runtime) {
+		return nil, nil
+	}
+	turn, err := loadVerifiedTurnIdentity(ctx, runner.store, turnID)
+	if err != nil {
+		return nil, err
+	}
+	ledger, err := runner.frozenTurnBudget(ctx, turn)
 	cancel, local := runner.cancellation.(*kernel.Runtime)
-	if !ok || !local || cancel != runner.runtime || !native.ObservesKernelRuntime(runner.runtime) ||
-		(runner.budgets != nil && !runner.nativeBudget()) {
-		return nil
+	_, bound := runner.runtime.BoundExecutionLease()
+	if err != nil || ledger != nil && !runner.nativeBudget() ||
+		!local || cancel != runner.runtime || bound || scoped && !native.NativeRootCallbacksScoped() {
+		return nil, err
 	}
-	if _, bound := runner.runtime.BoundExecutionLease(); bound {
-		return nil
-	}
-	return native
+	return native, nil
 }
 
 // Host authorization is read-only for an existing native Run. Do not bypass
 // independent outstanding Host operations from older or mixed compositions.
 // The native Run revision/Grant is the only new execution election.
-func (runner *Runner) originalNativeCommand(ctx context.Context, inv Invocation) (bool, error) {
+func (runner *Runner) originalNativeCommand(ctx context.Context, inv Invocation) error {
 	if terminalInvocationStatus(inv.Status) {
-		return false, ErrConflict
-	}
-	if e := verifyProtectiveInvocation(ctx, runner.store, inv); e != nil {
-		return false, e
+		return ErrConflict
 	}
 	turn, e := loadVerifiedTurn(ctx, runner.store, inv.TurnID)
 	if e != nil {
-		return false, e
+		return e
 	}
 	if terminalTurnStatus(turn.Status) {
-		return false, ErrConflict
+		return ErrConflict
 	}
 	if e = runner.requireUnclaimedInteractionContinuation(ctx, inv.TurnID, ""); e != nil {
-		return false, e
+		return e
 	}
-	current, e := runner.store.GetInvocation(ctx, inv.ID)
-	if e != nil || !sameFrozenInvocationAuthority(inv, current) || terminalInvocationStatus(current.Status) {
-		return false, errors.Join(ErrConflict, e)
+	current, e := verifyProtectiveInvocation(ctx, runner.store, inv)
+	if e != nil || terminalInvocationStatus(current.Status) {
+		return errors.Join(ErrConflict, e)
 	}
 	if inv.ParentItemID == "" {
 		root, e := loadTopLevelInvocation(ctx, runner.store, inv.TurnID)
 		if e != nil || !sameFrozenInvocationAuthority(inv, root) {
-			return false, errors.Join(ErrConflict, e)
+			return errors.Join(ErrConflict, e)
 		}
 	} else if e = runner.requireLiveInvocationParents(ctx, inv); e != nil {
-		return false, e
+		return e
 	}
-	items, e := runner.loadGlobalPhysicalEvidence(ctx, inv.TurnID)
-	if e != nil {
-		return false, e
+	// Re-read after at most one exact original receipt repair, including
+	// the cancellation fence; repair itself is not new admission.
+	for attempt := range 2 {
+		items, e := runner.loadGlobalPhysicalEvidence(ctx, inv.TurnID)
+		if e != nil {
+			return e
+		}
+		if ActiveCancellationFence(items) {
+			return ErrConflict
+		}
+		if !PendingExecutionDispatch(items, inv.ID) {
+			return nil
+		}
+		if inv.ParentItemID != "" {
+			return ErrConflict
+		}
+		if attempt == 0 {
+			if repaired, e := runner.recoverOriginalPhysicalDispatch(ctx, inv); e != nil || !repaired {
+				return errors.Join(ErrExecutionOutcomeUnknown, e)
+			}
+		}
 	}
-	if ActiveCancellationFence(items) {
-		return false, ErrConflict
-	}
-	if !PendingExecutionDispatch(items, inv.ID) {
-		return true, nil
-	}
-	if inv.ParentItemID != "" {
-		return false, ErrConflict
-	}
-	if repaired, e := runner.recoverOriginalPhysicalDispatch(ctx, inv); e != nil {
-		return false, e
-	} else if !repaired {
-		return false, nil
-	}
-	// Only observe the original receipt. A new Host admission or cancellation
-	// must not be confused with its closure.
-	items, e = runner.loadGlobalPhysicalEvidence(ctx, inv.TurnID)
-	if e != nil {
-		return false, e
-	}
-	if ActiveCancellationFence(items) {
-		return false, ErrConflict
-	}
-	return !PendingExecutionDispatch(items, inv.ID), nil
+	return ErrExecutionOutcomeUnknown
 }
 
 func (runner *Runner) resumeInvocationExecution(
@@ -508,20 +508,19 @@ func (runner *Runner) resumeInvocationExecution(
 	if snapshot, managed, managedErr := runner.recoverManagedInvocation(ctx, invocation); managed {
 		return snapshot, managedErr
 	}
-	if native := runner.nativeRootCommands(); native != nil {
-		ready, e := runner.originalNativeCommand(ctx, invocation)
-		if e != nil {
+	if native, e := runner.nativeRootCommands(ctx, turn.ID, false); e != nil {
+		return kernel.Snapshot{}, e
+	} else if native != nil {
+		if e := runner.originalNativeCommand(ctx, invocation); e != nil {
 			return kernel.Snapshot{}, e
-		}
-		if !ready {
-			return kernel.Snapshot{}, ErrExecutionOutcomeUnknown
 		}
 		if !native.SupportsManagedRecovery() {
 			return native.Resume(ctx, invocation.ExecutionRefID, expectedRevision)
 		}
-		return runner.withNativeRootCommand(ctx, native, invocation, "resume", nil, func(c context.Context) (kernel.Snapshot, error) {
+		snap, _, e := runner.observeNativeCommand(ctx, native, invocation, "resume", nil, func(c context.Context) (kernel.Snapshot, error) {
 			return native.Resume(c, invocation.ExecutionRefID, expectedRevision)
 		})
+		return snap, e
 	}
 	return runner.withPhysicalInvocationDispatch(ctx, invocation, "resume", func(physicalCtx context.Context) (kernel.Snapshot, error) {
 		return resumer.Resume(physicalCtx, invocation.ExecutionRefID, expectedRevision)

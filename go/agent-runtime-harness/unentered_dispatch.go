@@ -18,7 +18,7 @@ func (runner *Runner) recoverOriginalPhysicalDispatch(ctx context.Context, inv I
 	if !ok || !native.ObservesKernelRuntime(runner.runtime) || !validInvocationExecutionAuthority(inv) {
 		return false, nil
 	}
-	if err := verifyProtectiveInvocation(ctx, runner.store, inv); err != nil {
+	if _, err := verifyProtectiveInvocation(ctx, runner.store, inv); err != nil {
 		return false, err
 	}
 	items, err := runner.loadGlobalPhysicalEvidence(ctx, inv.TurnID)
@@ -233,7 +233,7 @@ func (runner *Runner) recoverReturnedChildDispatches(ctx context.Context, turn T
 			(child.Run.Status != kernel.RunStatusWaitingInput || !frozen.NativeLocal && !runner.nativeBudget())) {
 			continue
 		}
-		if err = verifyProtectiveInvocation(ctx, runner.store, owner); err != nil {
+		if _, err = verifyProtectiveInvocation(ctx, runner.store, owner); err != nil {
 			return err
 		}
 		if _, _, err = runner.localHandoffCancellationAuthority(ctx, owner, child); err != nil {
@@ -243,7 +243,7 @@ func (runner *Runner) recoverReturnedChildDispatches(ctx context.Context, turn T
 			if err = runner.reconcileTerminalRootRetirement(ctx, child); err != nil {
 				return errors.Join(ErrExecutionOutcomeUnknown, err)
 			}
-			if !runner.observesLocalChild(ctx, coordinator, frozen, child) {
+			if !runner.observesLocalChild(ctx, turn.ID, coordinator, frozen, child) {
 				return ErrExecutionOutcomeUnknown
 			}
 		} else {

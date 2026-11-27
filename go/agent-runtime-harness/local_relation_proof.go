@@ -161,11 +161,15 @@ func (runner *Runner) verifiedLocalRelation(ctx context.Context, candidate kerne
 				return unverified(nil)
 			}
 		case agent.RunKind:
-			if !coordinator.ObservesLocalDelegation(runner.runtime, frozen) ||
-				(control && ((frozen.NativeLocal && runner.nativeHandoff(frozen) == nil) ||
-					(!frozen.NativeLocal && !coordinator.VerifiedLocalDelegationControl(ctx, runner.runtime, frozen, candidate)) ||
-					!runner.localRelationCancellerOwnsKernel(agent.RunKind))) {
+			if !coordinator.ObservesLocalDelegation(runner.runtime, frozen) || control &&
+				(!runner.localRelationCancellerOwnsKernel(agent.RunKind) ||
+					!frozen.NativeLocal && !coordinator.VerifiedLocalDelegationControl(ctx, runner.runtime, frozen, candidate)) {
 				return unverified(nil)
+			}
+			if control && frozen.NativeLocal {
+				if native, e := runner.nativeHandoff(ctx, owner.TurnID, frozen); e != nil || native == nil {
+					return unverified(e)
+				}
 			}
 		default:
 			return unverified(nil)

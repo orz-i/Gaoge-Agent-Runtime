@@ -20,26 +20,9 @@ type retryBudgetAdmissionKey struct{}
 // Turn budget ledger. A foreign LedgerStore cannot be atomically committed:
 // reject before mutating Invocation, rather than attempting a two-store saga.
 func (runner *Runner) withAtomicRetryBudget(ctx context.Context, turn Turn, original Invocation, nextRunID string) (context.Context, error) {
-	if runner.budgets == nil {
-		return ctx, nil
-	}
-	l, err := runner.loadTurnBudget(ctx, turn)
-	if err != nil {
+	l, err := runner.frozenTurnBudget(ctx, turn)
+	if err != nil || l == nil {
 		return ctx, err
-	}
-	if l == nil {
-		// An original Turn whose frozen configuration required shared
-		// accounting cannot recreate a fresh ledger during Retry: that
-		// would erase historical charges/unknown provider dispatches.
-		// A genuinely unbudgeted Turn retains its existing Retry path.
-		config, configErr := loadSealedConfig(ctx, runner.store, turn.ConfigSnapshotID)
-		if configErr != nil {
-			return ctx, configErr
-		}
-		if config.SharedBudget != nil {
-			return ctx, ErrExecutionOutcomeUnknown
-		}
-		return ctx, nil
 	}
 	if runner.nativeBudget() {
 		// The Host selects an Attempt; preflight the existing native ledger

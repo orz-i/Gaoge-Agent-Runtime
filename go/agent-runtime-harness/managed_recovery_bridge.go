@@ -50,11 +50,6 @@ func (r *Runner) bindManagedRoot(ctx context.Context, inv Invocation, phase, id 
 // Native root commands use the Host's already frozen selection, with no new
 // Host dispatch grant. The correlation is consumed only by the native Grant
 // and its approval journal. Managed recovery seals these same Host facts.
-func (r *Runner) withNativeRootCommand(ctx context.Context, native *agent.Runner, inv Invocation, phase string, approval *kernel.ManagedApprovalDecision, physical func(context.Context) (kernel.Snapshot, error)) (kernel.Snapshot, error) {
-	snap, _, err := r.observeNativeCommand(ctx, native, inv, phase, approval, physical)
-	return snap, err
-}
-
 func (r *Runner) observeNativeCommand(ctx context.Context, native *agent.Runner, inv Invocation, phase string, approval *kernel.ManagedApprovalDecision, physical func(context.Context) (kernel.Snapshot, error)) (kernel.Snapshot, agent.PhysicalCallOutcome, error) {
 	id, err := r.runtime.NewID("nativecmd")
 	if err != nil {

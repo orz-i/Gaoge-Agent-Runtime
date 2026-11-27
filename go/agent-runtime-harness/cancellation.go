@@ -137,7 +137,7 @@ func (runner *Runner) cancelRuntimeRun(
 				if e != nil {
 					return kernel.Snapshot{}, false, e
 				}
-				_, _, q, e := runner.nativeChildSelection(ctx, turn, *delegatedChild, kernel.RunStatusCancelled, reason)
+				_, _, q, _, e := runner.nativeChildSelection(ctx, turn, *delegatedChild, kernel.RunStatusCancelled, reason)
 				if e != nil {
 					return kernel.Snapshot{}, false, e
 				}
@@ -431,7 +431,7 @@ func readOriginalHandoffParent(ctx context.Context, store Store, relations Conte
 		if _, valid := frozenDelegationAdmissionPayload(child, item); !valid || invocationAttempt(parent) != binding.immediateParent() {
 			return unverified(ErrConflict)
 		}
-		if err = verifyProtectiveInvocation(ctx, store, child); err != nil {
+		if _, err = verifyProtectiveInvocation(ctx, store, child); err != nil {
 			return unverified(err)
 		}
 		root, err := loadTopLevelInvocation(ctx, store, child.TurnID)
