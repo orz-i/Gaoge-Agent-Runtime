@@ -127,13 +127,17 @@ jobs:
         uses: ./.github/actions/upload-ci-timings
 
   fast-native:
-    name: Draft native and affected contracts
+    name: Draft contracts (${{ matrix.profile }})
     if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft == true }}
     runs-on: ubuntu-26.04
     timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [core, native]
     services:
       postgres:
-        image: postgres:16-alpine
+        image: ${{ matrix.profile == 'native' && 'postgres:16-alpine' || '' }}
         env:
           POSTGRES_USER: agent_runtime
           POSTGRES_PASSWORD: agent_runtime
@@ -146,24 +150,28 @@ jobs:
           --health-timeout 3s
           --health-retries 20
     env:
-      TEST_POSTGRES_DSN: postgres://agent_runtime:agent_runtime@127.0.0.1:5432/agent_runtime?sslmode=disable
+      TEST_POSTGRES_DSN: ${{ matrix.profile == 'native' && 'postgres://agent_runtime:agent_runtime@127.0.0.1:5432/agent_runtime?sslmode=disable' || '' }}
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: ./.github/actions/setup-go
         with:
-          cache-scope: fast-native
+          cache-scope: fast-${{ matrix.profile }}
       - uses: actions/setup-node@v7
         with:
           node-version: 24
       - uses: ./.github/actions/setup-sqlite
-      - name: Run original entry, return, retirement and three-engine contracts
-        run: node scripts/ci-timings.mjs --run draft-native -- node scripts/ci-fast.mjs
+      - name: Run the original Draft contract profile
+        env:
+          CI_FAST_PROFILE: ${{ matrix.profile }}
+        run: node scripts/ci-timings.mjs --run "draft-$CI_FAST_PROFILE" -- node scripts/ci-fast.mjs "--profile=$CI_FAST_PROFILE"
       - name: Publish CI timing baseline
         if: always()
         continue-on-error: true
         uses: ./.github/actions/upload-ci-timings
+        with:
+          suffix: -${{ matrix.profile }}
 
   fast:
     name: Fast CI (Draft task feedback)

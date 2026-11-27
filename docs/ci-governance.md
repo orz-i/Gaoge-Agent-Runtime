@@ -26,8 +26,10 @@ the PR description; until the separate required-description rollout below,
 
 The Fast floor runs even for docs and conservative impact fallback. The existing
 impact collector adds affected optional modules for scoped changes, or known
-direct optional modules on Full fallback; it cannot remove that floor. Core's
-long real-time Memory/Store phases, complete adapter, Windows and E2E matrices
+direct optional modules on Full fallback; it cannot remove that floor. Core and the native three-engine profile run in parallel. The new NativeTransitionCommit
+family contributes one original commit/readback cut to Fast; its complete fault matrix
+is retained in the affected task and Full. Core's long real-time Memory/Store phases,
+complete adapter, Windows and E2E matrices
 are deferred, not certified by Fast. Required native test identities must emit
 actual PASS events, including real PostgreSQL and selected subtests; an empty
 filter or skipped service is not success. Full and Release never consume a Fast

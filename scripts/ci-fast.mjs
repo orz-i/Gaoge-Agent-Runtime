@@ -49,36 +49,63 @@ function contracts(packages, pattern, expected, race = true) {
   if (missing.length) throw new Error("required Fast tests did not pass: " + missing.map((pair) => pair.join("/")).join(", "));
 }
 
-export function runFast(plan, env = process.env) {
-  if (!env.TEST_POSTGRES_DSN?.trim()) throw new Error("Fast CI requires actual TEST_POSTGRES_DSN");
-  console.log(`Draft Fast CI: impact=${plan.recommendation}; Full merge gate remains separate.`);
-  // Cover all Core packages except the long-running native Memory matrix.
-  // Memory's original authority cases run with both actual database engines.
-  const corePackages = execFileSync("go", ["list", goPath(core) + "/..."], { cwd: root, encoding: "utf8" })
-    .trim().split("\n").filter((pkg) => pkg && pkg !== prefix + stores[0]);
-  if (![core + "/kernel", core + "/agent", core + "/budget"].every((pkg) => corePackages.includes(prefix + pkg))) {
-    throw new Error("incomplete Core package discovery");
+// The native transition matrix is introduced as a shared family on PR157.
+// Only one commit/readback cut is part of Fast. A missing whole family on
+// the older baseline is explicit; a partial family or missing selected cut
+// on a branch that has the suite must not pass.
+function transitionSmoke(packages, names, race) {
+  const events = go(["test", ...(race ? ["-race"] : []), "-json", "-count=1", "-run",
+    `^(${names.join("|")})$/^continue$/^after$`, ...packages.map(goPath)], { json: true });
+  const expected = packages.map((pkg, index) => [pkg, names[index]]);
+  const present = expected.filter(([pkg, name]) => events.some((e) => e.Action === "run" && e.Package === prefix + pkg && e.Test === name));
+  if (!present.length) {
+    console.log("NativeTransitionCommit family not present on this baseline; other required native anchors ran.");
+    return;
   }
-  go(["test", "-count=1", ...corePackages]);
-  contracts([harness], "^Test(AgentSession|NamedAgent|GlobalOriginal|NativeAuthorityCutover|NativeTransitionCommit|OriginalDispatchReturn|FirstPartyLifecycle|CancellationProtocol|RootRetry|NoEntry|Managed|PR82)",
-    [[harness, "TestAgentSessionToolApprovalAndOwnerBoundResolution"], [harness, "TestGlobalOriginalDispatchEvidenceFencesEveryMemoryAdmission"]], false);
-  // Native Store/Host Store checks run with Race; the stable anchors work on
-  // main and newer branches. New native authority suites are included as soon
-  // as they exist. Full runs all original suites and all fault/expiry phases.
-  contracts([...stores, ...hostStores],
-    "^Test(EA1RootAgentAdmission(Memory|SQLite)|OwnedPhysicalMemory.*|OwnedPhysicalCallbackReturnMemory|PhysicalAdmissionCommitRollbackSQLite|RealPostgresPhysicalAdmissionCommitRollback|RealPostgresOwnedPhysicalBindingGuards|NoEntryCancellationSQLiteReopen|RealPostgresNoEntryCancellation|RealPostgresToolApprovalAndLedgerReopen|BudgetReplaysOriginalSettlementAfterReopen|ExecutionBudgetAtomic|RealPostgresExecutionBudgetAtomic|NativeAuthorityCutoverSQLite|RealPostgresNativeAuthorityCutover|OriginalDispatchReturnSQLiteReopen|RealPostgresOriginalDispatchReturn|NativeTransitionCommitSQLiteReopen|RealPostgresNativeTransitionCommit)$",
+  if (present.length !== expected.length || missingRequiredPasses(events, expected.map(([pkg, name]) => [pkg, name + "/continue/after"])).length) {
+    throw new Error("native transition family or selected commit/readback cut incomplete");
+  }
+}
+
+export function runFast(plan, profile = "all") {
+  if (!["all", "core", "native"].includes(profile)) throw new Error("unknown Fast profile");
+  if (profile !== "core" && !process.env.TEST_POSTGRES_DSN?.trim()) throw new Error("Fast native requires actual TEST_POSTGRES_DSN");
+  console.log(`Draft Fast CI: profile=${profile}; impact=${plan.recommendation}; Full merge gate remains separate.`);
+  if (profile !== "native") {
+    // Cover all Core packages except the long-running native Memory matrix.
+    // Memory's original authority cases run with both actual database engines.
+    const corePackages = execFileSync("go", ["list", goPath(core) + "/..."], { cwd: root, encoding: "utf8" })
+      .trim().split("\n").filter((pkg) => pkg && pkg !== prefix + stores[0]);
+    if (![core + "/kernel", core + "/agent", core + "/budget"].every((pkg) => corePackages.includes(prefix + pkg))) {
+      throw new Error("incomplete Core package discovery");
+    }
+    go(["test", "-count=1", ...corePackages]);
+    contracts([harness], "^Test(AgentSession|NamedAgent|GlobalOriginal|NativeAuthorityCutover|OriginalDispatchReturn|FirstPartyLifecycle|CancellationProtocol|RootRetry|NoEntry|Managed|PR82)",
+      [[harness, "TestAgentSessionToolApprovalAndOwnerBoundResolution"], [harness, "TestGlobalOriginalDispatchEvidenceFencesEveryMemoryAdmission"]], false);
+    transitionSmoke([harness], ["TestNativeTransitionCommitMemory"], false);
+    const additional = additionalFastModules(plan);
+    if (additional.length) go(["test", "-count=1", ...additional.map((module) => goPath(module) + "/...")]);
+  }
+  if (profile !== "core") {
+    // Native Store/Host Store checks run with Race; the stable anchors work on
+    // main and newer branches. New native authority suites are included as soon
+    // as they exist. Full runs all original suites and all fault/expiry phases.
+    contracts([...stores, ...hostStores],
+    "^Test(EA1RootAgentAdmission(Memory|SQLite)|OwnedPhysicalMemory.*|OwnedPhysicalCallbackReturnMemory|PhysicalAdmissionCommitRollbackSQLite|RealPostgresPhysicalAdmissionCommitRollback|RealPostgresOwnedPhysicalBindingGuards|NoEntryCancellationSQLiteReopen|RealPostgresNoEntryCancellation|RealPostgresToolApprovalAndLedgerReopen|BudgetReplaysOriginalSettlementAfterReopen|ExecutionBudgetAtomic|RealPostgresExecutionBudgetAtomic|NativeAuthorityCutoverSQLite|RealPostgresNativeAuthorityCutover|OriginalDispatchReturnSQLiteReopen|RealPostgresOriginalDispatchReturn)$",
     [[stores[0], "TestEA1RootAgentAdmissionMemory"], [stores[1], "TestPhysicalAdmissionCommitRollbackSQLite"],
       [stores[2], "TestRealPostgresPhysicalAdmissionCommitRollback"], [hostStores[0], "TestNoEntryCancellationSQLiteReopen"],
       [hostStores[1], "TestRealPostgresNoEntryCancellation"]]);
-  const retirement = ["TestOwnedRetirementMemoryStoreConformance", "TestSQLiteOwnedRetirementStore", "TestRealPostgresOwnedRetirementStore"];
-  const managed = ["TestManagedMemoryStoreConformance", "TestSQLiteManagedRecoveryStore", "TestRealPostgresManagedRecoveryStore"];
-  contracts(stores, `^(${[...retirement, ...managed].join("|")})$/(identity-retired-ID-reuse|identity-owned-borrowed-race|identity-rejected-admission-rolls-back|atomic-fresh-admission|callback-entry)$`,
+    const retirement = ["TestOwnedRetirementMemoryStoreConformance", "TestSQLiteOwnedRetirementStore", "TestRealPostgresOwnedRetirementStore"];
+    const managed = ["TestManagedMemoryStoreConformance", "TestSQLiteManagedRecoveryStore", "TestRealPostgresManagedRecoveryStore"];
+    contracts(stores, `^(${[...retirement, ...managed].join("|")})$/(identity-retired-ID-reuse|identity-owned-borrowed-race|identity-rejected-admission-rolls-back|atomic-fresh-admission|callback-entry)$`,
     stores.flatMap((pkg, index) => [[pkg, retirement[index] + "/identity-retired-ID-reuse"], [pkg, managed[index] + "/callback-entry"]]));
-  const additional = additionalFastModules(plan);
-  if (additional.length) go(["test", "-count=1", ...additional.map((module) => goPath(module) + "/...")]);
-  console.log("Draft Fast native and affected tests passed (not Full CI).");
+    transitionSmoke(hostStores, ["TestNativeTransitionCommitSQLiteReopen", "TestRealPostgresNativeTransitionCommit"], true);
+  }
+  console.log(`Draft Fast ${profile} contracts passed (not Full CI).`);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  runFast(collectImpact(impactContext(process.argv.slice(2)), { cwd: root }));
+  const args = process.argv.slice(2);
+  const profile = args[0]?.startsWith("--profile=") ? args.shift().slice("--profile=".length) : "all";
+  runFast(collectImpact(impactContext(args), { cwd: root }), profile);
 }

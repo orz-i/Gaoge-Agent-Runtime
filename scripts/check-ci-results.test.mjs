@@ -70,6 +70,9 @@ test("workflow keeps exact protected contexts, distinct milestone names and non-
   assert.match(blocks.fast,/CI_GATE: fast/u);
   assert.match(blocks["fast-native"],/TEST_POSTGRES_DSN:/u);
   assert.match(blocks["fast-native"],/scripts\/ci-fast.mjs/u);
+  assert.match(blocks["fast-native"],/profile: \[core, native\]/u);
+  assert.match(blocks["fast-native"],/image: .*matrix.profile == 'native'/u);
+  assert.match(blocks["fast-native"],/suffix: -\$\{\{ matrix.profile \}\}/u);
   assert.match(blocks["integration-shards"],/suite: \[kernel, harness, redis, continuation\]/u);
   assert.match(blocks["integration-shards"],/run-integration.mjs --external-services "--suite=\$CI_INTEGRATION_SUITE"/u);
 });
