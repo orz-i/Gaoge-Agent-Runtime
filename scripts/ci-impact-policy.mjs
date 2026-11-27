@@ -6,7 +6,7 @@ const identities = new Map(allGoModules.map((module) => [module.startsWith("go/"
   `example.com/agent-runtime-${module.split("/").at(-1)}`, module]));
 const persistent = new Set(["go/agent-runtime", "go/agent-runtime-postgres", "go/agent-runtime-sqlite",
   "go/agent-runtime-redis", "go/agent-runtime-harness-postgres", "go/agent-runtime-harness-sqlite", "integration/continuation-e2e"]);
-const ownerOf = (file) => [...allGoModules].sort((a, b) => b.length - a.length).find((module) => file.startsWith(`${module}/`));
+export const ownerOf = (file) => [...allGoModules].sort((a, b) => b.length - a.length).find((module) => file.startsWith(`${module}/`));
 
 export function validChangedPath(file) {
   return typeof file === "string" && file.length > 0 && !/[\x00-\x1f\x7f\\]/u.test(file) &&

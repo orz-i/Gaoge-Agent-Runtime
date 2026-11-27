@@ -33,8 +33,13 @@ scope. Timed entry points include `make ci-static` and `make ci-consumers`;
 See [CI governance](docs/ci-governance.md) for coverage-union validation, cache
 scope, timing evidence, and the staged PR-description cutover. Run coverage
 shards sequentially in one checkout: each owns the `coverage/go` report directory.
-CI also publishes a shadow impact report. It is advisory only: do not use its
-candidate scope to skip local/CI gates or replace the complete coverage union.
+Draft PRs use the separate **Fast CI (Draft task feedback)** result: static,
+consumer, security, native/affected contracts and targeted Race checks. The
+required Full aggregates intentionally do not pass in Draft. Mark the PR Ready
+for the complete merge gate, or dispatch a separately named non-merge Full
+milestone. Full and Release retain all checks; the impact report can add Fast
+tests but cannot waive a Full requirement. See the CI governance profile and
+QUAL handoff before accepting intermediate tasks.
 
 ## Architecture rules
 

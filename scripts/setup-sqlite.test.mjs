@@ -78,7 +78,7 @@ test("a false-successful install or failed package query cannot bypass dependenc
 test("CI shares the checked setup while release bootstrap is independent of the tag's files", () => {
   const read = (name) => readFileSync(new URL(`../.github/workflows/${name}.yml`, import.meta.url), "utf8");
   const ci = read("ci");
-  assert.equal([...ci.matchAll(/uses: \.\/\.github\/actions\/setup-sqlite/gu)].length, 4);
+  assert.equal([...ci.matchAll(/uses: \.\/\.github\/actions\/setup-sqlite/gu)].length, 5);
   assert.doesNotMatch(ci, /apt-get/u);
   assert.doesNotMatch(releaseWorkflow, /uses: \.\//u, "old tags need not contain newly introduced local actions");
   assert.equal(releaseBootstrap, readFileSync(script, "utf8").replace(/^#![^\n]*\n/u, "").trim(),

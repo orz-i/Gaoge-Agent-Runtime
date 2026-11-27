@@ -145,7 +145,7 @@ func ea1NewChildControl(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 	return f
 }
 func (f *ea1ChildControlFixture) runner(rt *kernel.Runtime, host bool) *agent.Runner {
-	d := agent.Dependencies{Runtime: rt, Model: f.physical, Catalog: f.catalog, Executor: f.catalog, Approvals: f.approval, ApprovalPolicies: []plugin.ApprovalPolicy{ea1ControlPolicy{}}, ApprovalControlPreflight: f.preflight, Execution: agent.ExecutionPolicy{Model: agent.CallPolicy{Timeout: 500 * time.Millisecond, MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}, Tool: agent.CallPolicy{Timeout: 500 * time.Millisecond, MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}}}
+	d := agent.Dependencies{Runtime: rt, Model: f.physical, Catalog: f.catalog, Executor: f.catalog, Approvals: f.approval, ApprovalPolicies: []plugin.ApprovalPolicy{ea1ControlPolicy{}}, ApprovalControlPreflight: f.preflight, Execution: ea1StoreBackedExecutionPolicy()}
 	if f.native {
 		d.RunExecution = &agent.RunExecution{OwnerID: "child-approval-native", LeaseDuration: 2 * time.Second}
 	}

@@ -7,8 +7,28 @@ import (
 	"testing"
 	"time"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
+
+// The EA1 receipt/settlement fixtures read the actual Store from the
+// original Model callback. A tiny per-call timeout makes slow native or
+// race-instrumented I/O win before the intended injected receipt fault.
+// These fixtures use a two-second lease with a strictly greater than one
+// second production safety margin; 900 ms fits it without changing expiry,
+// retry counts, deadline-specific cases or any production execution policy.
+const ea1StoreBackedCallTimeout = 900 * time.Millisecond
+
+func ea1StoreBackedExecutionPolicy() agent.ExecutionPolicy {
+	return ea1FixtureExecutionPolicy(ea1StoreBackedCallTimeout)
+}
+
+// Explicit timing cases can still select their own bounded window (e.g.
+// renewal or async middleware); they retain the same single-attempt policy.
+func ea1FixtureExecutionPolicy(timeout time.Duration) agent.ExecutionPolicy {
+	call := agent.CallPolicy{Timeout: timeout, MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}
+	return agent.ExecutionPolicy{Model: call, Tool: call}
+}
 
 // Native renewal preserves the bearer identity but changes the authoritative
 // expiry. The Runtime's bound token and the first Acquire response may retain

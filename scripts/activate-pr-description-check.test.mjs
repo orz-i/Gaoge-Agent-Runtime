@@ -112,6 +112,6 @@ test("the standalone workflow is read-only and the old required gate remains dur
   assert.match(workflow, /group: pr-description-/u);
   assert.match(workflow, /timeout-minutes: 3/u);
   assert.doesNotMatch(workflow, /pull_request_target|write|pnpm install|setup-go/u);
-  assert.match(ci, /types: \[opened, reopened, synchronize, edited, ready_for_review\]/u);
+  assert.match(ci, /types: \[opened, reopened, synchronize, edited, ready_for_review, converted_to_draft\]/u);
   assert.match(ci, /run: node scripts\/check-pr-body-format\.mjs/u);
 });
