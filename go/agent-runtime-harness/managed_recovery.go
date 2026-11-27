@@ -48,7 +48,7 @@ func nativeHostSource(session Session, turn Turn, invocation Invocation, config 
 }
 
 // ValidateManagedOriginalRows is shared by concrete storage transactions. It
-// admits the exact original native Root dispatch, never a descendant or retry.
+// admits the exact original native Root dispatch, including a frozen Retry.
 func ValidateManagedOriginalRows(authority kernel.ManagedAuthority, b kernel.ManagedHostBinding, session Session, turn Turn, invocation Invocation, config ConfigSnapshot, dispatch Item, items []Item) error {
 	if !b.Valid() || b.HostAuthority != authority || session.ID == "" || turn.SessionID != session.ID ||
 		turn.ID != b.TurnID || config.ID != turn.ConfigSnapshotID || config.TurnID != turn.ID ||
@@ -60,6 +60,11 @@ func ValidateManagedOriginalRows(authority kernel.ManagedAuthority, b kernel.Man
 	if dispatch.ID != "" || terminalTurnStatus(turn.Status) ||
 		terminalInvocationStatus(invocation.Status) || ActiveCancellationFence(items) || PendingExecutionDispatch(items, invocation.ID) {
 		return ErrConflict
+	}
+	if invocation.Attempt > 1 {
+		if _, err := retrySelectionFromItems(invocation, items); err != nil {
+			return ErrConflict
+		}
 	}
 	source, err := nativeHostSource(session, turn, invocation, config, b)
 	if err != nil || !bytes.Equal(source, b.Source) {

@@ -12,36 +12,10 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
 func workingStateSummaryContract() *model.OutputContract {
 	return &model.OutputContract{Name: "working_state_summary", Schema: json.RawMessage(`{"type":"object","properties":{"goal":{"type":"string"},"constraints":{"type":"array","items":{"type":"string"}},"completed":{"type":"array","items":{"type":"string"}},"pending":{"type":"array","items":{"type":"string"}},"decisions":{"type":"array","items":{"type":"string"}}},"required":["goal","constraints","completed","pending","decisions"],"additionalProperties":false}`)}
-}
-
-func (runner *Runner) buildInvocation(ctx context.Context, snapshot kernel.Snapshot, state runState) (ModelInvocation, error) {
-	request, definitions, err := runner.buildUnpreparedModelRequest(ctx, snapshot, state)
-	if err != nil {
-		return ModelInvocation{}, err
-	}
-	if summaryEligible(snapshot, state) {
-		if runner.contextSummary == nil {
-			return ModelInvocation{}, ErrInvalidRequest
-		}
-		// A configured but unused Summary owner is not an entered callback.
-		// The actual planning phase retains the conservative Host boundary.
-		if runner.rootCallbacks != nil {
-			runner.rootCallbacks.summaryPhaseEntered.Store(true)
-		}
-		planned, ok, planErr := runner.contextSummary.plan(ctx, runner, snapshot, state, request, definitions)
-		if planErr != nil {
-			return ModelInvocation{}, planErr
-		}
-		if ok {
-			return planned, nil
-		}
-	}
-	return runner.prepareBusinessInvocation(ctx, snapshot, request, definitions)
 }
 
 func summaryEligible(snapshot kernel.Snapshot, state runState) bool {
@@ -52,7 +26,8 @@ func summaryEligible(snapshot kernel.Snapshot, state runState) bool {
 		(state.CallAllowance == nil || state.CallAllowance.LLMCalls == 0 || state.CallAllowance.LLMCalls-state.Budget.Usage.LLMCalls >= 2)
 }
 
-func (adapter *ContextSummaryAdapter) plan(ctx context.Context, runner *Runner, snapshot kernel.Snapshot, state runState, incoming model.Request, definitions []tools.Definition) (ModelInvocation, bool, error) {
+func (adapter *ContextSummaryAdapter) plan(ctx context.Context, runner *Runner, snapshot kernel.Snapshot, state runState, preparation *modelPreparation) (ModelInvocation, bool, error) {
+	incoming := preparation.original
 	if !summaryStatelessOptions(incoming.ModelOptions) {
 		return ModelInvocation{}, false, nil
 	}
@@ -103,8 +78,6 @@ func (adapter *ContextSummaryAdapter) plan(ctx context.Context, runner *Runner, 
 	if err != nil {
 		return ModelInvocation{}, false, err
 	}
-	preparation := &modelPreparation{run: snapshot.Run, client: runner.model, now: runner.clock.Now(),
-		original: model.CloneRequest(incoming), catalog: definitions}
 	business, err := preparation.candidate(plan.Request)
 	if err != nil {
 		return ModelInvocation{}, false, err
@@ -199,8 +172,8 @@ func (adapter *ContextSummaryAdapter) plan(ctx context.Context, runner *Runner, 
 	// The invocation ID is excluded from its own request hash, so its actual
 	// value can be derived before admission without creating a durable intent.
 	// Equal-length placeholders prove byte size but not an exact token count.
-	planned, err := planModelInvocation(snapshot.Run, runner.model, request, nil,
-		ModelInvocationContextSummary, binding, runner.clock.Now())
+	planned, err := planModelInvocation(preparation.run, preparation.client, request, nil,
+		ModelInvocationContextSummary, binding, preparation.now)
 	if err != nil {
 		return ModelInvocation{}, false, err
 	}
@@ -209,9 +182,6 @@ func (adapter *ContextSummaryAdapter) plan(ctx context.Context, runner *Runner, 
 	if !contextSummaryInputBytesWithinPolicy(planned) {
 		return ModelInvocation{}, false, nil
 	}
-	preparation = &modelPreparation{run: snapshot.Run, client: runner.model, now: runner.clock.Now(),
-		original: model.CloneRequest(request), budget: runner.samplingBudget}
-	defer preparation.close()
 	if preparation.budget != nil {
 		ledger, err := preparation.samplingLedger(ctx)
 		if err != nil {

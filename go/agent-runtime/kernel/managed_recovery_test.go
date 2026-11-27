@@ -525,10 +525,13 @@ func TestManagedPreparationSafePointRequiresExactNativeProof(t *testing.T) {
 
 func TestManagedSafePointBindsExactPhysicalDispatch(t *testing.T) {
 	original, _, _, _, _, _ := managedReducerFixture()
-	for _, phase := range []string{"start", "resume", "resolve-approval"} {
+	for _, phase := range []string{"start", "start-retry", "resume", "resolve-approval"} {
 		t.Run(phase, func(t *testing.T) {
 			p := managedClone(original.SafePoint)
 			p.Host.Phase = phase
+			if phase == "start-retry" {
+				p.Host.Attempt = 2
+			}
 			p.Host.DispatchID = "nativecmd_original-" + phase
 			if phase == "resolve-approval" {
 				p.Host.Approval = &ManagedApprovalDecision{CheckpointID: "checkpoint", Decision: "approve", Comment: "original grant"}
@@ -551,7 +554,13 @@ func TestManagedSafePointBindsExactPhysicalDispatch(t *testing.T) {
 				},
 				func(q *ManagedSafePoint) { q.OriginalGrant.ID = "foreign" },
 				func(q *ManagedSafePoint) { q.OriginalGrant.AdmissionOperation = "managed_resume" },
-				func(q *ManagedSafePoint) { q.Host.Phase = "start-retry" },
+				func(q *ManagedSafePoint) {
+					if q.Host.Phase == "start-retry" {
+						q.Host.Attempt = 1
+					} else {
+						q.Host.Phase = "start-retry"
+					}
+				},
 				func(q *ManagedSafePoint) { q.Host.Phase = "resolve-subtask-approval" },
 				func(q *ManagedSafePoint) { q.Host.Phase = "handoff-start" },
 				func(q *ManagedSafePoint) {

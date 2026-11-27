@@ -171,8 +171,9 @@ func PlanRunBudgetMutation(ctx context.Context, store budget.LedgerStore, curren
 		l = m.Ledger.Next()
 	}
 	if m.ManagedSafePoint.Present() {
-		o, ok := m.ManagedSafePoint.Point().AgentObligations()
-		if !ok || o.LedgerID != l.ID || o.LedgerRevision != l.Revision || o.LedgerDigest != ManagedLedgerDigest(l, current.ID) || !QuiescentManagedLedger(l, current.ID) {
+		point := m.ManagedSafePoint.Point()
+		o, ok := point.AgentObligations()
+		if !ok || o.LedgerRevision != l.Revision || !o.MatchesLiveLedger(l, point.Host) {
 			return nil, budget.ErrLedgerConflict
 		}
 	}

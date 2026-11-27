@@ -21,7 +21,7 @@ type managedObligations = kernel.ManagedAgentObligations
 func (r *Runner) freezeManagedSource(ctx context.Context, s kernel.Snapshot, state runState, binding kernel.ManagedHostBinding, mutation *budget.LedgerMutation) (managedObligations, budget.Ledger, bool, error) {
 	var p managedObligations
 	var l budget.Ledger
-	if r.rootCallbacks == nil || r.rootCallbacks.unknown.Load() || binding.Attempt != 1 || !managedObligationsQuiescent(state) {
+	if r.rootCallbacks == nil || r.rootCallbacks.unknown.Load() || !managedObligationsQuiescent(state) {
 		return p, l, false, nil
 	}
 	if state.InputBinding != "" && (r.inputs == nil || r.inputBinding != state.InputBinding) {
@@ -29,12 +29,8 @@ func (r *Runner) freezeManagedSource(ctx context.Context, s kernel.Snapshot, sta
 	}
 	p.SourceRevision, p.InputBinding, p.InputCursor = s.Run.Revision+1, state.InputBinding, state.InputCursor
 	if r.nativeBudget != nil {
-		frame, _ := callbackscope.RunCall(ctx).(*nativeRunAdmission)
-		if frame == nil || frame.invocation.RunID != s.Run.ID {
-			return p, l, false, ErrInvalidRequest
-		}
-		admission := frame.budget.Load()
-		if admission == nil || admission.adapter != r.nativeBudget || admission.projectionErr != nil || admission.ledger.ID != binding.TurnID {
+		admission := r.nativeRunBudget(ctx, s.Run.ID)
+		if admission == nil || admission.projectionErr != nil || admission.ledger.ID != binding.TurnID {
 			return p, l, false, ErrInvalidRequest
 		}
 		var err error
@@ -48,7 +44,7 @@ func (r *Runner) freezeManagedSource(ctx context.Context, s kernel.Snapshot, sta
 			}
 			l = mutation.Next()
 		}
-		if l.RunCancelled(s.Run.ID) || l.FinishedRuns[s.Run.ID] || !kernel.QuiescentManagedLedger(l, s.Run.ID) {
+		if l.RunCancelled(s.Run.ID) || l.FinishedRuns[s.Run.ID] || !kernel.QuiescentManagedLedger(l, binding) {
 			return p, l, false, nil
 		}
 		p.LedgerID, p.LedgerRevision, p.LedgerDigest = l.ID, l.Revision, kernel.ManagedLedgerDigest(l, s.Run.ID)
@@ -137,7 +133,7 @@ func (r *Runner) validateManagedObligations(point kernel.ManagedSafePoint) (mana
 		return p, ErrInvalidRequest
 	}
 	if p.Phase == "prepare" {
-		if !r.supportsManagedPreparation() || !managedPreparationState(point.Source, state) {
+		if !managedPreparationState(point.Source.Run.Status, state) {
 			return p, ErrInvalidRequest
 		}
 		return p, nil
@@ -153,13 +149,12 @@ func (r *Runner) validateManagedObligations(point kernel.ManagedSafePoint) (mana
 			shape.ModelInvocations[len(shape.ModelInvocations)-1].DispatchAttempt = 0
 			shape.ModelInvocations[len(shape.ModelInvocations)-1].ExecutionAttempt = 0
 		}
-		_, ok := summaryNativePhase(shape)
-		if !r.SupportsManagedRecovery() || !ok || p.BindingDigest != kernel.ManagedDigest(inv.ContextSummary) ||
+		if !validSummaryNativePhase(shape) || p.BindingDigest != kernel.ManagedDigest(inv.ContextSummary) ||
 			inv.ContextSummary.Cursor.Turn.ID != point.Host.TurnID || inv.ContextSummary.Root.InvocationID != point.Host.InvocationID ||
 			uint64(inv.ContextSummary.Root.Attempt) != uint64(point.Host.Attempt) {
 			return p, ErrInvalidRequest
 		}
-	} else if p.Purpose != "" || p.BindingDigest != "" || !r.SupportsManagedRecovery() ||
+	} else if p.Purpose != "" || p.BindingDigest != "" ||
 		inv.Purpose != "" || (inv.Status == ModelInvocationConsumed && (state.InputBinding == "" || state.InputCursor == 0)) {
 		return p, ErrInvalidRequest
 	}
@@ -184,7 +179,7 @@ func (r *Runner) validateManagedObligations(point kernel.ManagedSafePoint) (mana
 
 // Read only the original Ledger, never Ensure/Register or a Host callback.
 // The registered exact first-party Store is the original accounting owner.
-func (r *Runner) checkManagedLedger(ctx context.Context, p managedObligations, runID string) (budget.Ledger, error) {
+func (r *Runner) checkManagedLedger(ctx context.Context, p managedObligations, host kernel.ManagedHostBinding) (budget.Ledger, error) {
 	if p.LedgerID == "" {
 		return budget.Ledger{}, nil
 	}
@@ -192,8 +187,7 @@ func (r *Runner) checkManagedLedger(ctx context.Context, p managedObligations, r
 	if err != nil {
 		return l, err
 	}
-	if l.ID != p.LedgerID || l.Revision < p.LedgerRevision || !kernel.QuiescentManagedLedger(l, runID) ||
-		kernel.ManagedLedgerDigest(l, runID) != p.LedgerDigest || l.RunCancelled(runID) || l.FinishedRuns[runID] {
+	if !p.MatchesLiveLedger(l, host) {
 		return l, budget.ErrLedgerConflict
 	}
 	return l, nil
@@ -273,7 +267,7 @@ func (r *Runner) qualifyManagedFrontier(ctx context.Context, t kernel.ManagedTra
 		if e != nil {
 			return empty, nil, e
 		}
-		if l.ID != p.LedgerID || l.Revision < p.LedgerRevision || !kernel.QuiescentManagedLedger(l, current.Run.ID) || l.FinishedRuns[current.Run.ID] || l.RunCancelled(current.Run.ID) {
+		if l.ID != p.LedgerID || l.Revision < p.LedgerRevision || !kernel.QuiescentManagedLedger(l, t.SafePoint.Host) || l.FinishedRuns[current.Run.ID] || l.RunCancelled(current.Run.ID) {
 			return empty, nil, ErrRootOutcomeUnknown
 		}
 		_, exists := l.Reservations["model:"+last.ID]
@@ -392,7 +386,7 @@ func (r *Runner) preflightManagedPoint(ctx context.Context, point kernel.Managed
 	if !kernel.ManagedSourceMatches(point, current) {
 		return p, errors.Join(ErrRootOutcomeUnknown, kernel.ErrExecutionConflict)
 	}
-	l, err := r.checkManagedLedger(ctx, p, point.Host.RunID)
+	l, err := r.checkManagedLedger(ctx, p, point.Host)
 	if err != nil {
 		return p, err
 	}

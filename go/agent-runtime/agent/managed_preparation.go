@@ -18,13 +18,8 @@ type managedPreparationContextPort interface {
 	ReadManagedPreparationContext(context.Context, kernel.ManagedHostBinding, *kernel.ManagedPreparationContext, []model.Message) (kernel.ManagedPreparationContext, error)
 }
 
-func (r *Runner) supportsManagedPreparation() bool {
-	return r.SupportsManagedRecovery() &&
-		r.nativeContext != nil && summaryNativeBridge(r.nativeContext.ports, "boundedContextPorts", r.runtime)
-}
-
 func (r *Runner) readManagedPreparationContext(ctx context.Context, b kernel.ManagedHostBinding, expected *kernel.ManagedPreparationContext, state runState) (kernel.ManagedPreparationContext, error) {
-	if !r.supportsManagedPreparation() {
+	if !r.SupportsManagedRecovery() {
 		return kernel.ManagedPreparationContext{}, ErrInvalidRequest
 	}
 	port, ok := r.nativeContext.ports.(managedPreparationContextPort)
@@ -38,8 +33,8 @@ func (r *Runner) readManagedPreparationContext(ctx context.Context, b kernel.Man
 	return port.ReadManagedPreparationContext(ctx, b, expected, messages)
 }
 
-func managedPreparationState(s kernel.Snapshot, state runState) bool {
-	if s.Run.Status != kernel.RunStatusRunning || !managedObligationsQuiescent(state) || !knownRootStatePhysicalSettlement(state) {
+func managedPreparationState(status kernel.RunStatus, state runState) bool {
+	if status != kernel.RunStatusRunning || !managedObligationsQuiescent(state) || !knownRootStatePhysicalSettlement(state) {
 		return false
 	}
 	_, active := activeModelInvocation(state)
@@ -58,9 +53,8 @@ func managedPreparationLedger(state runState, l budget.Ledger) bool {
 // A first-owner native preparation point is established BEFORE input reading
 // or candidate preparation. It covers no dispatched request. A previously
 // elected successor still owns its original transfer, never a new selection.
-func (r *Runner) managedPreparationBinding(ctx context.Context, s kernel.Snapshot, state runState) (kernel.ManagedHostBinding, bool) {
-	if !r.supportsManagedPreparation() || r.activePhysicalGrant == nil ||
-		r.activeRunLease == nil || s.Run.ParentRunID != "" {
+func (r *Runner) managedPreparationBinding(ctx context.Context, s kernel.Snapshot) (kernel.ManagedHostBinding, bool) {
+	if s.Run.ParentRunID != "" {
 		return kernel.ManagedHostBinding{}, false
 	}
 	frame, _ := callbackscope.RunCall(ctx).(*nativeRunAdmission)
@@ -71,8 +65,8 @@ func (r *Runner) managedPreparationBinding(ctx context.Context, s kernel.Snapsho
 }
 
 func (r *Runner) ensureManagedPreparation(ctx context.Context, s kernel.Snapshot, state runState) (kernel.Snapshot, error) {
-	_, ok := r.managedPreparationBinding(ctx, s, state)
-	if !ok || !managedPreparationState(s, state) {
+	_, ok := r.managedPreparationBinding(ctx, s)
+	if !ok || !managedPreparationState(s.Run.Status, state) {
 		return s, nil
 	}
 	current, err := r.runtime.LoadManagedRecovery(ctx, s.Run.ID)

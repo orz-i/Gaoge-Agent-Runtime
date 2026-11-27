@@ -297,7 +297,7 @@ func (runtime *Runtime) apply(ctx context.Context, runID string, expectedRevisio
 		if mutation.Ledger != nil {
 			p, ok := candidate.AgentObligations()
 			l := mutation.Ledger.Next()
-			if !ok || p.LedgerID != l.ID || p.LedgerRevision != l.Revision || p.LedgerDigest != ManagedLedgerDigest(l, runID) || !QuiescentManagedLedger(l, runID) {
+			if !ok || p.LedgerRevision != l.Revision || !p.MatchesLiveLedger(l, candidate.Host) {
 				return Snapshot{}, budget.ErrLedgerConflict
 			}
 		}

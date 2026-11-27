@@ -495,11 +495,32 @@ func projectModelPreparation(state runState, definitions []tools.Definition, hos
 	return definitions, hostedTools, messages
 }
 
-func (runner *Runner) prepareBusinessInvocation(ctx context.Context, snapshot kernel.Snapshot, request model.Request, originalTools []tools.Definition) (ModelInvocation, error) {
+func (runner *Runner) buildInvocation(ctx context.Context, snapshot kernel.Snapshot, state runState) (ModelInvocation, error) {
+	request, definitions, err := runner.buildUnpreparedModelRequest(ctx, snapshot, state)
+	if err != nil {
+		return ModelInvocation{}, err
+	}
 	preparation := &modelPreparation{run: snapshot.Run, client: runner.model, now: runner.clock.Now(),
-		original: model.CloneRequest(request), catalog: originalTools, budget: runner.samplingBudget}
-	ctx = context.WithValue(ctx, modelPreparationKey{}, preparation)
+		original: model.CloneRequest(request), catalog: definitions, budget: runner.samplingBudget}
 	defer preparation.close()
+	if summaryEligible(snapshot, state) {
+		if runner.contextSummary == nil {
+			return ModelInvocation{}, ErrInvalidRequest
+		}
+		// A configured but unused Summary owner is not an entered callback.
+		// The actual planning phase retains the conservative Host boundary.
+		if runner.rootCallbacks != nil {
+			runner.rootCallbacks.summaryPhaseEntered.Store(true)
+		}
+		planned, ok, planErr := runner.contextSummary.plan(ctx, runner, snapshot, state, preparation)
+		if planErr != nil {
+			return ModelInvocation{}, planErr
+		}
+		if ok {
+			return planned, nil
+		}
+	}
+	ctx = context.WithValue(ctx, modelPreparationKey{}, preparation)
 	if runner.boundedContext != nil {
 		prepared, err := runner.prepareBoundedContext(ctx, snapshot, request)
 		if err != nil {

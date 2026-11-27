@@ -358,8 +358,7 @@ func (a *BoundedBudgetAdapter) admitRun(ctx context.Context, inv plugin.RunInvoc
 			return nil, budget.ErrLedgerConflict
 		}
 		l, err = a.bindReceiptScope(ctx, inv.RunID, p.LedgerID)
-		if err == nil && (l.ID != p.LedgerID || l.Revision < p.LedgerRevision || l.RunCancelled(inv.RunID) || l.FinishedRuns[inv.RunID] ||
-			!kernel.QuiescentManagedLedger(l, inv.RunID) || kernel.ManagedLedgerDigest(l, inv.RunID) != p.LedgerDigest) {
+		if err == nil && !p.MatchesLiveLedger(l, frame.managedHost) {
 			err = budget.ErrLedgerConflict
 		}
 	} else if receiptOnly {

@@ -61,7 +61,7 @@ func (r *Runner) observeNativeCommand(ctx context.Context, native *agent.Runner,
 		return kernel.Snapshot{}, agent.PhysicalCallOutcome{}, err
 	}
 	id = "nativecmd_" + kernel.ManagedDigest(struct{ Invocation, Run, Attempt string }{inv.ID, inv.ExecutionRefID, id})
-	if native.SupportsManagedRecovery() && inv.Attempt == 1 && inv.ParentItemID == "" {
+	if native.SupportsManagedRecovery() && inv.ParentItemID == "" {
 		ctx, err = r.bindManagedRoot(ctx, inv, phase, id, approval)
 		if err != nil {
 			return kernel.Snapshot{}, agent.PhysicalCallOutcome{}, err

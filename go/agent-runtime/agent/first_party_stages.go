@@ -41,9 +41,6 @@ func selectFirstPartyStages(d *Dependencies) (*BoundedContextAdapter, *BoundedBu
 		}
 		d.BoundedContext = summary.bounded
 	}
-	if d.ManagedRecovery && !validManagedDependencies(*d) {
-		return nil, nil, ErrInvalidRequest
-	}
 	b := d.BoundedBudget
 	if b == nil {
 		b = completeLegacyBudget(*d, d.BoundedContext)
@@ -57,7 +54,18 @@ func selectFirstPartyStages(d *Dependencies) (*BoundedContextAdapter, *BoundedBu
 		a = d.BoundedContext
 		d.RunMiddleware = nil
 	}
+	if d.ManagedRecovery && (a == nil || !validManagedDependencies(*d)) {
+		return nil, nil, ErrInvalidRequest
+	}
 	return a, b, nil
+}
+
+func finishNativeStage(ticket *callbackscope.Ticket, err *error) {
+	if failure := recover(); failure != nil {
+		callbackscope.Aborted(ticket)
+		panic(failure)
+	}
+	callbackscope.Returned(ticket, *err)
 }
 
 // The Runner now fixes this order: original Budget scope, Context hydration,
@@ -72,13 +80,7 @@ func (r *Runner) invokeFirstPartyRun(ctx context.Context, inv plugin.RunInvocati
 	if ticket == nil {
 		return kernel.Snapshot{}, ErrInvalidRequest
 	}
-	defer func() {
-		if failure := recover(); failure != nil {
-			callbackscope.Aborted(ticket)
-			panic(failure)
-		}
-		callbackscope.Returned(ticket, err)
-	}()
+	defer finishNativeStage(ticket, &err)
 	admission, err := b.admitRun(stageCtx, inv)
 	if err != nil {
 		return kernel.Snapshot{}, err
@@ -102,13 +104,7 @@ func (r *Runner) invokeContextRun(ctx context.Context, inv plugin.RunInvocation,
 	if ticket == nil {
 		return kernel.Snapshot{}, ErrInvalidRequest
 	}
-	defer func() {
-		if failure := recover(); failure != nil {
-			callbackscope.Aborted(ticket)
-			panic(failure)
-		}
-		callbackscope.Returned(ticket, err)
-	}()
+	defer finishNativeStage(ticket, &err)
 	hydrated, source, err := a.hydrate(stageCtx, inv)
 	if err != nil {
 		return kernel.Snapshot{}, err
@@ -116,10 +112,6 @@ func (r *Runner) invokeContextRun(ctx context.Context, inv plugin.RunInvocation,
 	// Revalidate the exact source used by the newly enabled preparation
 	// owner. The pre-PARK read cannot authorize a later substituted Context.
 	if frame, _ := callbackscope.RunCall(stageCtx).(*nativeRunAdmission); frame != nil && frame.managedObligations != nil && frame.managedObligations.Phase == "prepare" {
-		b, ok := r.runtime.ManagedDispatch(stageCtx, inv.RunID)
-		if !ok {
-			return kernel.Snapshot{}, ErrInvalidRequest
-		}
 		snapshot, e := r.runtime.Load(stageCtx, inv.RunID)
 		if e != nil {
 			return kernel.Snapshot{}, e
@@ -128,7 +120,7 @@ func (r *Runner) invokeContextRun(ctx context.Context, inv plugin.RunInvocation,
 		if e != nil {
 			return kernel.Snapshot{}, e
 		}
-		current, e := r.readManagedPreparationContext(stageCtx, b, frame.managedObligations.PreparationContext, state)
+		current, e := r.readManagedPreparationContext(stageCtx, frame.managedHost, frame.managedObligations.PreparationContext, state)
 		if e != nil {
 			return kernel.Snapshot{}, e
 		}
@@ -150,13 +142,7 @@ func (r *Runner) invokeFirstPartyModel(ctx context.Context, request model.Reques
 	if ticket == nil {
 		return model.Response{}, ErrInvalidRequest
 	}
-	defer func() {
-		if failure := recover(); failure != nil {
-			callbackscope.Aborted(ticket)
-			panic(failure)
-		}
-		callbackscope.Returned(ticket, err)
-	}()
+	defer finishNativeStage(ticket, &err)
 	// The concrete Budget operation is the only selected physical owner.
 	// It calls the existing provider admission terminal synchronously.
 	return a.Model(stageCtx, model.CloneRequest(request), emit, terminal)
@@ -171,13 +157,7 @@ func (r *Runner) invokeFirstPartyTool(ctx context.Context, inv plugin.ToolInvoca
 	if ticket == nil {
 		return tools.ExecutionResult{}, ErrInvalidRequest
 	}
-	defer func() {
-		if failure := recover(); failure != nil {
-			callbackscope.Aborted(ticket)
-			panic(failure)
-		}
-		callbackscope.Returned(ticket, err)
-	}()
+	defer finishNativeStage(ticket, &err)
 	// Keep the exact original Tool authority and budget receipt ticket.
 	inv.Definition = tools.CloneDefinition(inv.Definition)
 	inv.Request = tools.CloneExecutionRequest(inv.Request)

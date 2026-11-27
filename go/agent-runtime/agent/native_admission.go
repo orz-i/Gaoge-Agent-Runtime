@@ -74,6 +74,7 @@ type nativeRunAdmission struct {
 	receiptOnly        bool
 	receiptLedger      string
 	managedObligations *managedObligations
+	managedHost        kernel.ManagedHostBinding
 	budget             atomic.Pointer[runBudgetAdmission]
 }
 
@@ -122,6 +123,12 @@ func (r *Runner) invokeNativeRun(ctx context.Context, source kernel.Snapshot, in
 		return source, budget.ErrLedgerConflict
 	}
 	frame := &nativeRunAdmission{invocation: inv, managedObligations: r.managedObligationSource}
+	if frame.managedObligations != nil {
+		var ok bool
+		if frame.managedHost, ok = r.runtime.ManagedDispatch(ctx, source.Run.ID); !ok {
+			return source, ErrInvalidRequest
+		}
+	}
 	grant := r.activePhysicalGrant
 	if grant == nil || r.rootCallbacks == nil || grant.ChildRunID != inv.RunID || grant.ChildRunID != source.Run.ID ||
 		grant.ExpectedRevision != source.Run.Revision || inv.ParentRunID != source.Run.ParentRunID ||

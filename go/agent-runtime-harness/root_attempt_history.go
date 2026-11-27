@@ -2,6 +2,7 @@ package harness
 
 import (
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
@@ -65,34 +66,16 @@ func historicalRetryRootBound(current Invocation, frozen childRootBinding, ledge
 	}
 	bound := invocationAttempt(current)
 	for bound.Attempt > frozen.Attempt {
-		id := stableID("hrootretry", current.ID, attemptString(bound.Attempt))
-		matches := 0
-		var source rootRetryTransition
-		for _, fact := range items {
-			if fact.ID != id {
-				continue
-			}
-			matches++
-			if fact.Seq == 0 || fact.TurnID != current.TurnID || fact.InvocationID != current.ID || fact.RunID != bound.ExecutionRefID ||
-				fact.ParentItemID != RootRetryTransitionParentItemID || fact.Kind != ItemDiagnostic || fact.Status != ItemCompleted ||
-				!decodeTypedAuthorityJSON(fact.Payload, &source) || source.Version != 1 || source.Next != bound ||
-				source.Previous.InvocationID != current.ID || !validChildAttempt(source.Previous) || source.Previous.Attempt != bound.Attempt-1 ||
-				source.Previous.ExecutionRefID == bound.ExecutionRefID || source.InputHash != current.InputHash {
-				return false
-			}
-		}
-		if matches == 0 {
-			if ledger == nil {
-				return false
-			}
+		attempt := current
+		attempt.Attempt, attempt.ExecutionRefID = bound.Attempt, bound.ExecutionRefID
+		source, err := retrySelectionFromItems(attempt, items)
+		if errors.Is(err, ErrNotFound) && ledger != nil {
 			// Pre-existing atomic budget grants remain original authority.
-			// Upgrading must not require backfilling historical Item facts;
-			// continue validating every other present/missing link as well.
 			grant := ledger.RootRetries[bound.ExecutionRefID]
 			bound = childAttemptBinding{InvocationID: current.ID, ExecutionRefID: grant.OriginalRunID, Attempt: bound.Attempt - 1}
 			continue
 		}
-		if matches != 1 {
+		if err != nil {
 			return false
 		}
 		bound = source.Previous

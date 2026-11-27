@@ -92,7 +92,29 @@ func nativeRetrySelection(ctx context.Context, store Store, inv Invocation) (roo
 	if err != nil {
 		return selection, err
 	}
-	if fact.Seq == 0 || fact.TurnID != inv.TurnID || fact.InvocationID != inv.ID || fact.RunID != inv.ExecutionRefID ||
+	return retrySelectionFromFact(inv, fact)
+}
+
+func retrySelectionFromItems(inv Invocation, items []Item) (rootRetryTransition, error) {
+	var source Item
+	id := stableID("hrootretry", inv.ID, attemptString(inv.Attempt))
+	for _, item := range items {
+		if item.ID == id {
+			if source.ID != "" {
+				return rootRetryTransition{}, ErrConflict
+			}
+			source = item
+		}
+	}
+	if source.ID == "" {
+		return rootRetryTransition{}, ErrNotFound
+	}
+	return retrySelectionFromFact(inv, source)
+}
+
+func retrySelectionFromFact(inv Invocation, fact Item) (rootRetryTransition, error) {
+	var selection rootRetryTransition
+	if fact.ID != stableID("hrootretry", inv.ID, attemptString(inv.Attempt)) || fact.Seq == 0 || fact.TurnID != inv.TurnID || fact.InvocationID != inv.ID || fact.RunID != inv.ExecutionRefID ||
 		fact.ParentItemID != RootRetryTransitionParentItemID || fact.Kind != ItemDiagnostic || fact.Status != ItemCompleted ||
 		!decodeTypedAuthorityJSON(fact.Payload, &selection) || selection.Version != 1 || selection.Next != invocationAttempt(inv) ||
 		selection.Previous.InvocationID != inv.ID || selection.Previous.Attempt != inv.Attempt-1 || !validChildAttempt(selection.Previous) ||

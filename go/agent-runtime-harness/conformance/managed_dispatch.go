@@ -99,6 +99,8 @@ func ManagedPhysicalDispatch(t *testing.T, factory func(*testing.T) (kernel.Stor
 		{"resume/finish-ack", "agent.model_invocation.pending", true},
 		{"resume/late-successor", "agent.model_invocation.pending", true},
 		{"resume/cancel", "agent.model_invocation.pending", true},
+		{"retry/intent-after", "agent.model_invocation.pending", true},
+		{"retry/cancel", "agent.model_invocation.pending", true},
 		{"resume/unknown", "agent.model_invocation.dispatch_intent", true},
 		{"repeat/intent-after", "agent.model_invocation.pending", true},
 		{"approval/inline", "tool.completed", true},
@@ -116,6 +118,8 @@ func ManagedPhysicalDispatch(t *testing.T, factory func(*testing.T) (kernel.Stor
 			approval := strings.HasPrefix(c.name, "approval/")
 			inline := approval && c.name != "approval/deferred"
 			repeated := strings.HasPrefix(c.name, "repeat/")
+			retry := strings.HasPrefix(c.name, "retry/")
+			cancel := strings.HasSuffix(c.name, "/cancel")
 			returnFailure := c.name == "approval/return-record-failed" || c.name == "approval/prior-projection" || c.name == "approval/conflicting-projection"
 			client := &dispatchFrontierModel{approval: approval, continueAfterApproval: returnFailure}
 			inputs, e := agent.NewMemoryRunInputs("dispatch-input")
@@ -234,6 +238,18 @@ func ManagedPhysicalDispatch(t *testing.T, factory func(*testing.T) (kernel.Stor
 			if harness.PendingExecutionDispatch(first.Items, root.ID) {
 				t.Fatal("first physical dispatch not closed")
 			}
+			previous := root
+			var originalContext harness.Item
+			if retry {
+				first, e = session.Cancel(ctx, "original", "retry original task")
+				if e != nil || first.Turn.Status != harness.TurnCancelled {
+					t.Fatalf("first attempt not closed: %v %s", e, first.Turn.Status)
+				}
+				originalContext, e = h.GetItem(ctx, fixtureStableID("hic", first.Turn.ID, first.Turn.ContextRef.ID))
+				if e != nil || originalContext.RunID != previous.ExecutionRefID {
+					t.Fatalf("original Context projection missing: %v", e)
+				}
+			}
 			cut := &preparationCut{preparationKernelPorts: base.(preparationKernelPorts), event: c.event, remaining: 1, after: c.after}
 			opts.Session.Transcript = nil
 			if !inline {
@@ -266,6 +282,9 @@ func ManagedPhysicalDispatch(t *testing.T, factory func(*testing.T) (kernel.Stor
 					if inline {
 						got, err := session.ResolveApproval(ctx, "original", harness.ResolveApprovalRequest{CheckpointID: checkpoint, Decision: decision, Comment: "original grant"})
 						t.Logf("uncut approval: %s %v", got.Turn.Status, err)
+					} else if retry {
+						got, err := session.Retry(ctx, "original")
+						t.Logf("uncut retry: %s %v", got.Turn.Status, err)
 					} else {
 						got, err := session.Resume(ctx, "original")
 						t.Logf("uncut resume: %s %v", got.Turn.Status, err)
@@ -275,6 +294,12 @@ func ManagedPhysicalDispatch(t *testing.T, factory func(*testing.T) (kernel.Stor
 			pending, e := session.Load(ctx, "original")
 			if e != nil {
 				t.Fatal(e)
+			}
+			if retry {
+				root, ok = harness.TopLevelInvocation(pending)
+				if !ok || root.ID != previous.ID || root.Attempt != 2 || root.ExecutionRefID == previous.ExecutionRefID {
+					t.Fatal("retry did not select a new original Run")
+				}
 			}
 			original, e := base.Load(ctx, root.ExecutionRefID)
 			if e != nil {
@@ -290,7 +315,9 @@ func ManagedPhysicalDispatch(t *testing.T, factory func(*testing.T) (kernel.Stor
 			}
 			b := point.SafePoint.Host
 			wantPhase := "resume"
-			if inline {
+			if retry {
+				wantPhase = "start-retry"
+			} else if inline {
 				wantPhase = "resolve-approval"
 			}
 			g, e := rt.LookupChildExecution(ctx, root.ExecutionRefID)
@@ -299,6 +326,13 @@ func ManagedPhysicalDispatch(t *testing.T, factory func(*testing.T) (kernel.Stor
 			}
 			if b.Phase != wantPhase || b.DispatchID == prior.SafePoint.Host.DispatchID || g != point.SafePoint.OriginalGrant || !b.MatchesOriginalGrant(g) || g.ID == prior.SafePoint.OriginalGrant.ID || !b.DirectNativeCommand() || harness.PendingExecutionDispatch(pending.Items, root.ID) {
 				t.Fatalf("new dispatch did not own its proof: phase=%s grant=%+v", b.Phase, g)
+			}
+			if retry {
+				bad := b
+				bad.Attempt = 1
+				if b.Attempt != 2 || h.VerifyManagedOriginalDispatch(ctx, bad, false) == nil {
+					t.Fatal("retry recovery lost generation authority")
+				}
 			}
 			if inline && (b.Approval == nil || b.Approval.CheckpointID != checkpoint || b.Approval.Decision != string(decision) || b.Approval.Comment != "original grant") {
 				t.Fatalf("approval source lost: %+v", b.Approval)
@@ -366,7 +400,7 @@ func ManagedPhysicalDispatch(t *testing.T, factory func(*testing.T) (kernel.Stor
 			}
 			// Host validation reads frozen selection; only the native current
 			// transfer and Grant decide execution eligibility.
-			if _, e = rt.AuthorizeManagedContinuation(ctx, old); !errors.Is(e, kernel.ErrExecutionConflict) {
+			if _, e = rt.AuthorizeManagedContinuation(ctx, old); !errors.Is(e, kernel.ErrExecutionConflict) && (!retry || !errors.Is(e, harness.ErrConflict)) {
 				t.Fatalf("historical transfer acquired native execution authority: %v", e)
 			}
 			if inline {
@@ -452,7 +486,7 @@ func ManagedPhysicalDispatch(t *testing.T, factory func(*testing.T) (kernel.Stor
 				session, rt = open(base)
 			}
 			var done harness.Snapshot
-			if c.name == "resume/cancel" {
+			if cancel {
 				done, e = session.Cancel(ctx, "original", "cancel next dispatch")
 			} else {
 				done, e = session.Resume(ctx, "original")
@@ -461,7 +495,7 @@ func ManagedPhysicalDispatch(t *testing.T, factory func(*testing.T) (kernel.Stor
 			if returnFailure {
 				wantCalls = 3
 			}
-			if c.name == "resume/cancel" {
+			if cancel {
 				wantStatus, wantCalls = harness.TurnCancelled, 1
 			}
 			if e != nil || done.Turn.Status != wantStatus || len(client.requests) != wantCalls || effects != wantTools {
@@ -480,11 +514,20 @@ func ManagedPhysicalDispatch(t *testing.T, factory func(*testing.T) (kernel.Stor
 				t.Fatal(e)
 			}
 			wantInv := wantCalls
+			if retry {
+				wantInv-- // the original charge belongs to the prior Run
+			}
 			if wantStatus == harness.TurnCancelled {
 				wantInv = len(view.ModelInvocations)
 			}
 			if end.ModelInvocations[0].ID != view.ModelInvocations[0].ID || len(end.ModelInvocations) != wantInv || ledger.View("").Usage.LLMCalls != wantCalls || ledger.View("").Usage.ToolCalls != wantTools || !ledger.FinishedRuns[root.ExecutionRefID] || ledger.View("").Reserved != (budget.Usage{}) {
 				t.Fatalf("original identity or accounting lost: %+v", ledger.View(""))
+			}
+			if retry {
+				grant := ledger.RootRetries[root.ExecutionRefID]
+				if grant.OriginalRunID != previous.ExecutionRefID || grant.Attempt != 2 || !ledger.FinishedRuns[previous.ExecutionRefID] || ledger.View(previous.ExecutionRefID).Usage.LLMCalls != 1 {
+					t.Fatalf("retry rewrote original charge or generation: %+v", ledger)
+				}
 			}
 			if _, e = rt.LookupChildExecution(ctx, root.ExecutionRefID); !errors.Is(e, kernel.ErrNotFound) {
 				t.Fatalf("original grant retained: %v", e)
@@ -521,6 +564,12 @@ func ManagedPhysicalDispatch(t *testing.T, factory func(*testing.T) (kernel.Stor
 			replay, e := session.Resume(ctx, "original")
 			if e != nil || replay.Turn.Status != wantStatus || len(client.requests) != wantCalls || effects != wantTools {
 				t.Fatalf("terminal replay changed effects: %v", e)
+			}
+			if retry {
+				fact, e := h.GetItem(ctx, originalContext.ID)
+				if e != nil || kernel.ManagedDigest(fact) != kernel.ManagedDigest(originalContext) {
+					t.Fatalf("retry rewrote original Context projection: %v", e)
+				}
 			}
 		})
 	}

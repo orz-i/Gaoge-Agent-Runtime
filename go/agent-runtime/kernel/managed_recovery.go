@@ -69,12 +69,12 @@ func (a ManagedApprovalDecision) Valid() bool {
 		(a.Decision == "approve" || a.Decision == "reject") && strings.TrimSpace(a.Comment) == a.Comment
 }
 
-// ManagedDispatchOperation maps the three independently admitted native
-// root dispatches to their existing Kernel operation. Retry generations,
-// descendant controls and external handoffs have distinct authorities.
+// ManagedDispatchOperation maps the original native command to its Kernel operation.
 func ManagedDispatchOperation(phase string) (string, bool) {
 	switch phase {
-	case "start", "resume":
+	case "start", "start-retry":
+		return "start", true
+	case "resume":
 		return phase, true
 	case "resolve-approval":
 		return "approval", true
@@ -89,7 +89,7 @@ func (b ManagedHostBinding) DirectNativeCommand() bool { return NativeCommandCor
 func (b ManagedHostBinding) Valid() bool {
 	_, ok := ManagedDispatchOperation(b.Phase)
 	approvalValid := (b.Phase == "resolve-approval" && b.Approval != nil && b.Approval.Valid()) || (b.Phase != "resolve-approval" && b.Approval == nil)
-	return ok && approvalValid && b.DirectNativeCommand() && b.KernelAuthority.Valid() && b.HostAuthority.Valid() && b.TurnID != "" && b.InvocationID != "" && b.Attempt > 0 && b.RunID != "" && b.DispatchID != "" && json.Valid(b.Source)
+	return ok && approvalValid && (b.Phase != "start-retry" || b.Attempt > 1) && (b.Phase != "start" || b.Attempt == 1) && b.DirectNativeCommand() && b.KernelAuthority.Valid() && b.HostAuthority.Valid() && b.TurnID != "" && b.InvocationID != "" && b.Attempt > 0 && b.RunID != "" && b.DispatchID != "" && json.Valid(b.Source)
 }
 
 // MatchesOriginalGrant prevents a later same-Run dispatch from borrowing
@@ -198,7 +198,7 @@ func (p ManagedSafePoint) AgentObligations() (ManagedAgentObligations, bool) {
 	decoder.DisallowUnknownFields()
 	if p.LifecycleVersion != ManagedLifecycleAgentObligations || !json.Valid(p.LifecycleSource) || decoder.Decode(&o) != nil ||
 		o.SourceRevision != p.Source.Run.Revision || o.InvocationID != p.ModelInvocationID || o.RequestHash != p.ModelRequestHash ||
-		p.Host.Attempt != 1 || (o.InputBinding == "" && o.InputCursor != 0) {
+		p.Host.Attempt == 0 || (o.InputBinding == "" && o.InputCursor != 0) {
 		return o, false
 	}
 	var journal map[string]json.RawMessage
@@ -536,9 +536,24 @@ func ResolveManagedPhysicalAdmission(ctx context.Context, t ManagedTransfer, p O
 // transfer an active child or held/waiting reservation (even a known unsent
 // hold). No quota is reserved at this pre-dispatch point. Prior settled and
 // released reservations remain the original accounting authority.
-func QuiescentManagedLedger(l budget.Ledger, runID string) bool {
+func QuiescentManagedLedger(l budget.Ledger, host ManagedHostBinding) bool {
+	runID := host.RunID
 	binding, ok := l.Runs[runID]
-	if !ok || binding.ParentRunID != "" || l.ID == "" || l.Revision == 0 || len(l.RootRetries) != 0 {
+	if !ok || binding.ParentRunID != "" || l.ID == "" || l.ID != host.TurnID || l.Revision == 0 ||
+		uint64(len(l.RootRetries))+1 != uint64(host.Attempt) {
+		return false
+	}
+	id := runID
+	for attempt := host.Attempt; attempt > 1; attempt-- {
+		g, ok := l.RootRetries[id]
+		if !ok || g.InvocationID != host.InvocationID || uint64(g.Attempt) != uint64(attempt) ||
+			g.Active != (id == runID) || g.OriginalRunID == "" || !l.CancelledRuns[g.OriginalRunID] ||
+			l.Runs[g.OriginalRunID].ParentRunID != "" {
+			return false
+		}
+		id = g.OriginalRunID
+	}
+	if _, retry := l.RootRetries[id]; retry {
 		return false
 	}
 	for id := range l.Runs {
@@ -560,9 +575,20 @@ func QuiescentManagedLedger(l budget.Ledger, runID string) bool {
 func ManagedLedgerDigest(l budget.Ledger, runID string) string {
 	l = budget.CloneLedger(l)
 	l.Revision = 0
-	l.Cancelled = false
+	if _, retry := l.RootRetries[runID]; retry {
+		delete(l.CancelledRuns, runID)
+	} else {
+		l.Cancelled = false
+	}
 	delete(l.FinishedRuns, runID)
 	return ManagedDigest(l)
+}
+
+// MatchesLiveLedger is the common check before sealing, admitting or recovering
+// a live original obligation. Cancellation closure uses its separate terminal predicate.
+func (o ManagedAgentObligations) MatchesLiveLedger(l budget.Ledger, host ManagedHostBinding) bool {
+	return l.ID == o.LedgerID && l.Revision >= o.LedgerRevision && QuiescentManagedLedger(l, host) &&
+		ManagedLedgerDigest(l, host.RunID) == o.LedgerDigest && !l.RunCancelled(host.RunID) && !l.FinishedRuns[host.RunID]
 }
 
 // ManagedCancellationLedger plans the accounting part under the existing
@@ -575,12 +601,11 @@ func managedRecoveryLedger(ctx context.Context, t ManagedTransfer, store budget.
 	if p.LedgerID == "" {
 		return budget.Ledger{}, nil
 	}
-	runID := t.SafePoint.Host.RunID
 	l, err := LoadRunBudget(ctx, store, t.SafePoint.Source.Run)
 	if err != nil {
 		return l, err
 	}
-	if l.ID != p.LedgerID || l.Revision < p.LedgerRevision || !QuiescentManagedLedger(l, runID) || ManagedLedgerDigest(l, runID) != p.LedgerDigest || l.RunCancelled(runID) || l.FinishedRuns[runID] {
+	if !p.MatchesLiveLedger(l, t.SafePoint.Host) {
 		return l, budget.ErrLedgerConflict
 	}
 	return l, nil
@@ -610,7 +635,7 @@ func ValidateManagedBudgetClosure(point ManagedSafePoint, terminal Snapshot, mod
 	runID := point.Host.RunID
 	if mode == ManagedCancel {
 		if terminal.Run.Status != RunStatusCancelled || !l.RunCancelled(runID) || !l.FinishedRuns[runID] ||
-			!QuiescentManagedLedger(l, runID) || ManagedLedgerDigest(l, runID) != p.LedgerDigest {
+			!QuiescentManagedLedger(l, point.Host) || ManagedLedgerDigest(l, runID) != p.LedgerDigest {
 			return budget.ErrLedgerConflict
 		}
 	} else if terminal.Run.Status == RunStatusCompleted || terminal.Run.Status == RunStatusFailed || terminal.Run.Status == RunStatusCancelled {

@@ -48,7 +48,7 @@ func (r *Runner) prepareBoundedContext(ctx context.Context, source kernel.Snapsh
 	// A managed transfer must retain the exact original hydrated frame's
 	// preparation evidence. The actual preparation and sampling selection
 	// remain the same concrete operation as the ordinary native path.
-	if r.managedRecovery {
+	if _, bound := r.managedOriginalDispatch(ctx, source.Run.ID); r.managedRecovery && (bound || r.managedObligationSource != nil) {
 		prepared, err := a.Prepare(ctx, model.CloneRequest(request))
 		r.noteRootCallbackFailure(err)
 		if err == nil && !validPreparedModelRequest(request, prepared) {

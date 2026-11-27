@@ -17,18 +17,15 @@ func (r *Runner) SupportsManagedRecovery() bool {
 
 func (r *Runner) managedOriginalDispatch(ctx context.Context, id string) (kernel.ManagedHostBinding, bool) {
 	b, ok := r.runtime.ManagedDispatch(ctx, id)
-	if !ok || r.activePhysicalGrant == nil || r.activeRunLease == nil || !b.MatchesOriginalGrant(*r.activePhysicalGrant) {
+	if !r.SupportsManagedRecovery() || !ok || r.activePhysicalGrant == nil || r.activeRunLease == nil || !b.MatchesOriginalGrant(*r.activePhysicalGrant) {
 		return kernel.ManagedHostBinding{}, false
 	}
 	return b, true
 }
 
 func (r *Runner) qualifyManagedModelBoundary(ctx context.Context, s kernel.Snapshot, state runState, inv ModelInvocation, mutation *budget.LedgerMutation) (*kernel.ManagedSafePoint, error) {
-	if !r.SupportsManagedRecovery() || r.activePhysicalGrant == nil || r.activeRunLease == nil || s.Run.ParentRunID != "" || r.activePhysicalGrant.AdmissionOperation == "managed_resume" {
-		return nil, nil
-	}
 	if inv.Purpose == ModelInvocationContextSummary {
-		if _, valid := summaryNativePhase(state); !valid {
+		if !validSummaryNativePhase(state) {
 			return nil, ErrInvalidRequest
 		}
 	}

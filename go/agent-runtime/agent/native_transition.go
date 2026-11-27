@@ -8,16 +8,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
-// nativeTransitionTarget represents the aggregate the ordinary Kernel CAS
-// will commit. Its authority is the original scoped Agent callback, not the
-// fact that this derived target happens to look quiescent.
-func nativeTransitionTarget(source kernel.Snapshot, m kernel.Mutation) kernel.Snapshot {
-	target := source
-	target.Run.Status = m.Status
-	target.State, target.Checkpoint, target.Result = m.State, m.Checkpoint, m.Result
-	return target
-}
-
 // commitNativeTransition is the sole ordinary execution-loop mutation
 // entrance. Reducers supply only their normal business mutation. Select
 // the next eligible managed phase from the actual encoded target and its
@@ -63,15 +53,12 @@ func (r *Runner) nativeRunBudget(ctx context.Context, id string) *runBudgetAdmis
 }
 
 func (r *Runner) qualifyNativeTransition(ctx context.Context, source kernel.Snapshot, m kernel.Mutation) (*kernel.ManagedSafePoint, error) {
-	if m.Status != kernel.RunStatusRunning || !r.SupportsManagedRecovery() {
-		return nil, nil
-	}
-	// A selected successor cannot publish a second first-owner safe point.
-	// Decide that before decoding the potentially large, already encoded
-	// reducer target. The same ordinary Kernel physical permit still
-	// validates and commits the mutation; this is not a new execution path.
-	if g := r.activePhysicalGrant; g != nil && g.AdmissionOperation == "managed_resume" &&
-		g.ChildRunID == source.Run.ID && source.Run.ParentRunID == "" && r.activeRunLease != nil {
+	// Only the original native owner can publish a first-owner point.
+	// A selected successor consumes its frozen obligations without another point.
+	g := r.activePhysicalGrant
+	if m.Status != kernel.RunStatusRunning || !r.SupportsManagedRecovery() || g == nil ||
+		r.activeRunLease == nil || source.Run.ParentRunID != "" || g.ChildRunID != source.Run.ID ||
+		g.AdmissionOperation == "managed_resume" {
 		return nil, nil
 	}
 	state, err := decodeState(m.State)
@@ -95,8 +82,8 @@ func (r *Runner) qualifyNativeTransition(ctx context.Context, source kernel.Snap
 			return r.qualifyManagedModelBoundary(ctx, source, state, state.ModelInvocations[len(state.ModelInvocations)-1], m.Ledger)
 		}
 	}
-	if managedPreparationState(nativeTransitionTarget(source, m), state) {
-		if b, ok := r.managedPreparationBinding(ctx, source, state); ok {
+	if managedPreparationState(m.Status, state) {
+		if b, ok := r.managedPreparationBinding(ctx, source); ok {
 			return r.qualifyManagedPreparation(ctx, source, state, m, b)
 		}
 	}
