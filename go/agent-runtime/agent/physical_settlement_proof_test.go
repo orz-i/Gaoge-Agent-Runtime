@@ -2,10 +2,14 @@ package agent
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
 func TestIssue107TerminalPhysicalSettlementStateMatrix(t *testing.T) {
@@ -60,6 +64,38 @@ func TestIssue107TerminalPhysicalSettlementStateMatrix(t *testing.T) {
 				if TerminalPhysicalEffectsSettled(makeSnapshot(status, state)) {
 					t.Fatalf("unknown physical effect was certified settled after %s", status)
 				}
+			}
+		})
+	}
+	// A valid signal is historical only with the exact original consumed
+	// model call and durable Tool result. Duplicate/foreign/unfinished facts
+	// must never be treated as settlement.
+	call := tools.Call{ID: "call", ToolKey: "external"}
+	signal := ExternalToolResultSignal{RunID: "agent-run", CallID: call.ID, OperationID: "op", InputDigest: strings.Repeat("e", 64), SignalID: "signal"}
+	history := base
+	history.ExternalSignals = []ExternalToolResultSignal{signal}
+	now := time.Now().UTC()
+	history.ModelInvocations = []ModelInvocation{{ID: "model", RunID: signal.RunID, SourceRevision: 1, RequestHash: strings.Repeat("a", 64), CreatedAt: now, CompletedAt: &now, ConsumedAt: &now, Status: ModelInvocationConsumed, Response: model.Response{ToolCalls: []tools.Call{call}}}}
+	history.Messages = []model.Message{{Role: model.RoleTool, ToolCallID: call.ID, Content: model.TextParts("42")}}
+	if !TerminalPhysicalEffectsSettled(makeSnapshot(kernel.RunStatusCompleted, history)) {
+		t.Fatal("consumed original external signal blocked terminal observation")
+	}
+	for name, alter := range map[string]func(*runState){
+		"missing result":        func(s *runState) { s.Messages = nil },
+		"missing original call": func(s *runState) { s.ModelInvocations = nil },
+		"foreign original call": func(s *runState) {
+			s.ModelInvocations = append([]ModelInvocation(nil), s.ModelInvocations...)
+			s.ModelInvocations[0].RunID = "foreign"
+		},
+		"duplicate signal": func(s *runState) { s.ExternalSignals = append(s.ExternalSignals, signal) },
+		"duplicate result": func(s *runState) { s.Messages = append(s.Messages, s.Messages[0]) },
+		"staged result":    func(s *runState) { s.RecoveredTools = []rootToolReceipt{{Call: call}} },
+	} {
+		t.Run(name, func(t *testing.T) {
+			state := history
+			alter(&state)
+			if TerminalPhysicalEffectsSettled(makeSnapshot(kernel.RunStatusCompleted, state)) {
+				t.Fatal("invalid original signal history treated as settled")
 			}
 		})
 	}

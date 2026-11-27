@@ -2,8 +2,10 @@ package agent
 
 import (
 	"encoding/json"
+	"slices"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 )
 
 // TerminalPhysicalEffectsSettled is a pure durable-state check that a terminal
@@ -30,14 +32,35 @@ func TerminalPhysicalEffectsSettled(snapshot kernel.Snapshot) bool {
 		return false
 	}
 	state, err := decodeState(snapshot.State)
-	if err != nil || state.ToolDispatchID != "" || state.ToolWait != nil ||
-		len(state.ExternalSignals) != 0 || len(state.DeferredChildren) != 0 || (state.ToolAdmission != nil && state.ToolAdmission.Phase == toolAdmissionEvaluating) {
+	if err != nil || state.ExternalToolHold != nil || len(state.RecoveredTools) != 0 {
 		return false
 	}
-	for _, invocation := range state.ModelInvocations {
-		if invocation.Status != ModelInvocationConsumed {
+	// Signals remain as idempotency history. Only a unique consumed
+	// original Tool result (not the signal itself) can discharge one.
+	for i, signal := range state.ExternalSignals {
+		if !validToolSignal(signal) || signal.RunID != snapshot.Run.ID || slices.ContainsFunc(state.ExternalSignals[:i], func(s ExternalToolResultSignal) bool {
+			return s.CallID == signal.CallID || s.SignalID == signal.SignalID
+		}) {
+			return false
+		}
+		results, calls := 0, 0
+		for _, inv := range state.ModelInvocations {
+			for _, call := range inv.Response.ToolCalls {
+				if call.ID == signal.CallID && inv.RunID == signal.RunID && inv.ErrorCode == "" {
+					calls++
+				}
+			}
+		}
+		for _, m := range state.Messages {
+			if m.Role == model.RoleTool && m.ToolCallID == signal.CallID {
+				results++
+			}
+		}
+		if calls != 1 || results != 1 {
 			return false
 		}
 	}
-	return true
+	// The immutable signal history is not outstanding physical work.
+	state.ExternalSignals = nil
+	return knownPhysicalSettlement(state, true)
 }

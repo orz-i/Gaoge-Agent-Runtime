@@ -189,14 +189,24 @@ func TestHarnessCancelRefusesUnsettledDelegationDispatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	activeChildRunID := activeDelegationRunID(t, runtime, before.Items)
+	originalGrant, err := runtime.LookupChildExecution(t.Context(), activeChildRunID)
+	if err != nil || !originalGrant.IsOwned() || originalGrant.AdmissionOperation != "start" {
+		t.Fatalf("original native child Start grant missing: %v", err)
+	}
 	if _, err := runner.Cancel(t.Context(), turnID, "operator request"); !errors.Is(err, harness.ErrConflict) {
 		t.Fatalf("unsettled external child Start must fence cancellation: %v", err)
 	}
 	pending, err := runner.Load(t.Context(), turnID)
+	grant, grantErr := runtime.LookupChildExecution(t.Context(), activeChildRunID)
 	if err != nil ||
 		(pending.Turn.Status != harness.TurnAccepted && pending.Turn.Status != harness.TurnRunning) ||
-		!harness.PendingExecutionDispatch(pending.Items, "") {
-		t.Fatalf("unsettled Handoff lost its durable pending grant: %+v %v", pending.Turn, err)
+		harness.PendingExecutionDispatch(pending.Items, "") || grantErr != nil || grant != originalGrant {
+		t.Fatalf("unsettled Handoff lost its original native grant or elected a Host grant: %+v %v %v", pending.Turn, err, grantErr)
+	}
+	for _, item := range pending.Items {
+		if item.ParentItemID == harness.ExecutionDispatchParentItemID {
+			t.Fatal("first-party Handoff elected Host dispatch")
+		}
 	}
 	activeChild, err := runtime.Load(t.Context(), activeChildRunID)
 	if err != nil || activeChild.Run.Status != kernel.RunStatusRunning {
@@ -287,6 +297,11 @@ func TestHarnessMixedDelegationUnknownSiblingRemainsPending(t *testing.T) {
 	pending, err := runner.StartAgentTurn(t.Context(), request)
 	if err != nil || pending.Turn.Status != harness.TurnRunning || client.synthesized {
 		t.Fatalf("unknown child fabricated failed receipt: %+v %v", pending.Turn, err)
+	}
+	for _, item := range pending.Items {
+		if item.ParentItemID == harness.ExecutionDispatchParentItemID {
+			t.Fatal("unknown native child elected Host dispatch")
+		}
 	}
 	root, _ := harness.TopLevelInvocation(pending)
 	before, err := runtime.Load(t.Context(), root.ExecutionRefID)

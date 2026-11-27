@@ -424,10 +424,7 @@ func (runner *Runner) prepareDelegation(
 	resolved.MaxChildRuns, resolved.MaxConcurrentRuns, resolved.MaxCostUnits, resolved.MaxStateBytes = 0, 0, 0, 0
 	resolved.MaxConcurrentDescendants = 0
 	delegation.Limits = resolved
-	_, named := namedAgentForMember(config, request.MemberID, request.MemberRevision)
-	if named || runner.nativeBudget() {
-		delegation.NativeLocal = runner.nativeHandoff(delegation) != nil
-	}
+	delegation.NativeLocal = runner.nativeHandoff(delegation) != nil
 	return delegation, parent, nil
 }
 

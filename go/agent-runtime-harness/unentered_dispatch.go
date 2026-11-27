@@ -51,8 +51,7 @@ func (runner *Runner) recoverOriginalPhysicalDispatch(ctx context.Context, inv I
 		}
 		if phase == "handoff-start" {
 			frozen, e := decodeFrozenHandoffDelegation(inv.Input)
-			c, ok := runner.handoffs.(*handoff.Coordinator)
-			if e != nil || !ok || !isHandoffDelegationInvocation(inv) || !c.UsesEagerLocalAgentForDelegation(runner.runtime, native, frozen) {
+			if e != nil || !isHandoffDelegationInvocation(inv) || runner.nativeLocalDelegation(frozen) != native {
 				// Invalid or nonlocal selection cannot authorize native receipt recovery.
 				return false, nil //nolint:nilerr
 			}
@@ -224,11 +223,8 @@ func (runner *Runner) recoverReturnedChildDispatches(ctx context.Context, turn T
 				if len(receipts[dispatch.ID]) != 0 {
 					return ErrConflict
 				}
-				// Legacy opaque local callback uses the original Host grant.
-				if child.Run.BudgetScopeID == turn.ID {
-					if _, err = runner.recoverOriginalPhysicalDispatch(ctx, owner); err != nil {
-						return err
-					}
+				if _, err = runner.recoverOriginalPhysicalDispatch(ctx, owner); err != nil {
+					return err
 				}
 			}
 			continue

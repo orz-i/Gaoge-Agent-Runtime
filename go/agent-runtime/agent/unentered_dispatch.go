@@ -73,27 +73,12 @@ func (runner *Runner) reconcileOriginalPhysicalDispatch(ctx context.Context, run
 	receipt, err := rt.LoadOwnedRetirement(ctx, id)
 	if errors.Is(err, kernel.ErrNotFound) {
 		g, lookupErr := rt.LookupChildExecution(ctx, runID)
-		if errors.Is(lookupErr, kernel.ErrNotFound) || (lookupErr == nil && !matches(g)) {
-			// A concurrent finisher may have deleted the original active
-			// Grant. Read the exact historical identity, never a new Grant.
-			receipt, err = rt.LoadOwnedRetirement(ctx, id)
-			if errors.Is(err, kernel.ErrNotFound) {
-				return PhysicalCallUnknown, nil
-			}
-		} else {
-			if lookupErr != nil {
-				return PhysicalCallUnknown, lookupErr
-			}
-			c, e := rt.LookupOwnedPhysicalCallbackReturn(ctx, g)
-			if errors.Is(e, kernel.ErrNotFound) {
-				receipt, err = rt.LoadOwnedRetirement(ctx, id)
-				if errors.Is(err, kernel.ErrNotFound) {
-					return PhysicalCallUnknown, nil
-				}
-			} else {
-				if e != nil {
-					return PhysicalCallUnknown, e
-				}
+		var c kernel.OwnedPhysicalCallbackCompletion
+		var retireErr error
+		attempted := false
+		if lookupErr == nil && matches(g) {
+			c, lookupErr = rt.LookupOwnedPhysicalCallbackReturn(ctx, g)
+			if lookupErr == nil {
 				source, e := rt.Load(ctx, runID)
 				if e != nil {
 					return PhysicalCallUnknown, e
@@ -102,35 +87,35 @@ func (runner *Runner) reconcileOriginalPhysicalDispatch(ctx context.Context, run
 				if e != nil || kind == PhysicalCallUnknown {
 					return kind, e
 				}
-				if e = runner.reconcileRootRetirement(ctx, source, g, &c); e != nil {
-					// If a peer already retired this exact Grant, the
-					// immutable retirement is the winning evidence.
-					receipt, err = rt.LoadOwnedRetirement(ctx, id)
-					if err != nil {
-						return PhysicalCallUnknown, errors.Join(e, err)
-					}
-					if receipt.Evidence.Grant != g || receipt.Evidence.Completion != c {
-						return PhysicalCallUnknown, kernel.ErrExecutionConflict
-					}
-				} else {
-					receipt, err = rt.LoadOwnedRetirement(ctx, id)
-				}
+				attempted = true
+				retireErr = runner.reconcileRootRetirement(ctx, source, g, &c)
+			}
+		}
+		if lookupErr != nil && !errors.Is(lookupErr, kernel.ErrNotFound) {
+			return PhysicalCallUnknown, lookupErr
+		}
+		// A concurrent finisher can delete the active Grant or return.
+		// Read only the immutable exact identity, never another Grant.
+		receipt, err = rt.LoadOwnedRetirement(ctx, id)
+		if !attempted && errors.Is(err, kernel.ErrNotFound) {
+			return PhysicalCallUnknown, nil
+		}
+		if retireErr != nil {
+			if err != nil {
+				return PhysicalCallUnknown, errors.Join(retireErr, err)
+			}
+			if receipt.Evidence.Grant != g || receipt.Evidence.Completion != c {
+				return PhysicalCallUnknown, kernel.ErrExecutionConflict
 			}
 		}
 	}
 	if err != nil {
 		return PhysicalCallUnknown, err
 	}
-	if !receipt.Valid() || !matches(receipt.Evidence.Grant) || len(receipt.Closures) != 0 {
+	// LoadOwnedRetirement already validates the complete receipt and
+	// nonempty completion; qualify the exact original operation.
+	if len(receipt.Closures) != 0 {
 		return PhysicalCallUnknown, kernel.ErrExecutionConflict
 	}
-	c := receipt.Evidence.Completion
-	if c.GrantID == "" {
-		return PhysicalCallUnknown, nil
-	}
-	kind, err := qualify(receipt.Evidence.Grant, c, receipt.Evidence.Snapshot)
-	if err != nil || kind == PhysicalCallUnknown {
-		return kind, err
-	}
-	return kind, nil
+	return qualify(receipt.Evidence.Grant, receipt.Evidence.Completion, receipt.Evidence.Snapshot)
 }

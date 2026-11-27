@@ -387,10 +387,28 @@ func (r *Runner) dispatchNativeHandoff(ctx context.Context, turn Turn, parent ke
 			return c.StartNative(cctx, r.runtime, native, parent, d, child.Input)
 		})
 		if snap.Run.ID != "" {
+			current, original, err := r.localDelegationObservation(ctx, child.ExecutionRefID)
+			if err != nil || kernel.ManagedDigest(current) != kernel.ManagedDigest(snap) {
+				return handoff.Delegation{}, errors.Join(ErrExecutionOutcomeUnknown, startErr, err)
+			}
+			// An original retained grant qualifies only a pending wait, not
+			// a returned effect. No second election or terminal projection.
+			if outcome.Kind() == agent.PhysicalCallUnknown && snap.Run.Status == kernel.RunStatusRunning && errors.Is(startErr, agent.ErrRootOutcomeUnknown) {
+				if g, err := r.runtime.LookupChildExecution(ctx, child.ExecutionRefID); err == nil && g.IsOwned() && g.AdmissionOperation == "start" {
+					return handoff.ProjectChild(original, current), handoff.ErrChildPending
+				}
+			}
 			if !outcome.Matches(child.ExecutionRefID, plugin.RunStart) || outcome.Kind() == agent.PhysicalCallCreated || outcome.Kind() == agent.PhysicalCallNotEntered {
 				return handoff.Delegation{}, errors.Join(ErrExecutionOutcomeUnknown, startErr)
 			}
-			return r.projectNativeChildReturn(ctx, turn, child, snap, startErr)
+			if _, err = r.syncChildInvocationSnapshot(ctx, turn, child, current); err != nil {
+				return handoff.Delegation{}, errors.Join(ErrExecutionOutcomeUnknown, err)
+			}
+			result := handoff.ProjectChild(original, current)
+			if result.Status == handoff.StatusFailed || result.Status == handoff.StatusCancelled {
+				startErr = errors.Join(startErr, handoff.ErrChildFailed)
+			}
+			return result, startErr
 		}
 		if agent.IsNativeStartNoEffect(startErr) && errors.Is(startErr, budget.ErrWaiting) {
 			return handoff.Delegation{}, dispatchProvenNoEffect{cause: startErr}
@@ -402,19 +420,4 @@ func (r *Runner) dispatchNativeHandoff(ctx context.Context, turn Turn, parent ke
 	}
 	result, e := r.projectUncreatedNativeChild(ctx, turn, child, decision)
 	return result, errors.Join(handoff.ErrChildFailed, startErr, e)
-}
-
-func (r *Runner) projectNativeChildReturn(ctx context.Context, turn Turn, owner Invocation, snap kernel.Snapshot, cause error) (handoff.Delegation, error) {
-	d, _, e := r.localHandoffCancellationAuthority(ctx, owner, snap)
-	if e != nil || !d.NativeLocal || r.nativeHandoff(d) == nil {
-		return handoff.Delegation{}, errors.Join(ErrConflict, e)
-	}
-	if _, e = r.syncChildInvocationSnapshot(ctx, turn, owner, snap); e != nil {
-		return handoff.Delegation{}, errors.Join(ErrExecutionOutcomeUnknown, e)
-	}
-	d = handoff.ProjectChild(d, snap)
-	if d.Status == handoff.StatusFailed || d.Status == handoff.StatusCancelled {
-		cause = errors.Join(cause, handoff.ErrChildFailed)
-	}
-	return d, cause
 }
