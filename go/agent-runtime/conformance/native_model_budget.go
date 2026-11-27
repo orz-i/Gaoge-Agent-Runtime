@@ -31,7 +31,7 @@ func (f nativeModelBudgetClient) Generate(ctx context.Context, r model.Request) 
 	return f(ctx, r)
 }
 
-type nativeModelBudgetFault struct {
+type nativeBudgetFault struct {
 	*ea1AgentAdmissionStore
 	budget.LedgerStore
 	event              string
@@ -41,41 +41,44 @@ type nativeModelBudgetFault struct {
 	dispatch, receipts int
 }
 
-var _ kernel.OwnedRetirementStore = (*nativeModelBudgetFault)(nil)
+var _ kernel.OwnedRetirementStore = (*nativeBudgetFault)(nil)
 
 var errNativeModelBudgetCut = errors.New("native model budget transaction interrupted")
 
-func (s *nativeModelBudgetFault) ApplyExecution(ctx context.Context, l kernel.ExecutionLease, rev uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
+func (s *nativeBudgetFault) ApplyExecution(ctx context.Context, l kernel.ExecutionLease, rev uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
 	for _, e := range m.Events {
-		if e.Type == "agent.model_invocation.dispatch_intent" || e.Type == "agent.model_invocation.completed" {
-			if m.Ledger == nil {
-				return kernel.Snapshot{}, errors.New("model transition without accounting")
-			}
-			if e.Type == "agent.model_invocation.dispatch_intent" {
-				s.dispatch++
-			} else {
-				s.receipts++
-			}
-			if e.Type == s.event && !s.hit {
-				s.hit = true
-				if s.contend {
-					// Advance only the ledger from another registered Run. The
-					// original Run stays at its exact source revision.
-					if _, err := (budget.Coordinator{Store: s.LedgerStore}).RegisterRun(ctx, "scope", "sibling", budget.RunBudget{ParentRunID: l.RunID}); err != nil {
-						return kernel.Snapshot{}, err
-					}
-					return s.ExecutionStore.ApplyExecution(ctx, l, rev, m)
-				}
-				if !s.after {
-					return kernel.Snapshot{}, errNativeModelBudgetCut
-				}
-				committed, err := s.ExecutionStore.ApplyExecution(ctx, l, rev, m)
-				if err != nil {
-					return committed, err
-				}
-				return kernel.Snapshot{}, errNativeModelBudgetCut
-			}
+		switch e.Type {
+		case "agent.model_invocation.dispatch_intent":
+			s.dispatch++
+		case "agent.model_invocation.completed":
+			s.receipts++
+		case "tool.dispatch_intent", "tool.receipt_recovered":
+		default:
+			continue
 		}
+		if m.Ledger == nil {
+			return kernel.Snapshot{}, errors.New("physical transition without accounting")
+		}
+		if e.Type != s.event || s.hit {
+			continue
+		}
+		s.hit = true
+		if s.contend {
+			// Advance only the ledger from another registered Run. The
+			// original Run stays at its exact source revision.
+			if _, err := (budget.Coordinator{Store: s.LedgerStore}).RegisterRun(ctx, "scope", "sibling", budget.RunBudget{ParentRunID: l.RunID}); err != nil {
+				return kernel.Snapshot{}, err
+			}
+			return s.ExecutionStore.ApplyExecution(ctx, l, rev, m)
+		}
+		if !s.after {
+			return kernel.Snapshot{}, errNativeModelBudgetCut
+		}
+		committed, err := s.ExecutionStore.ApplyExecution(ctx, l, rev, m)
+		if err != nil {
+			return committed, err
+		}
+		return kernel.Snapshot{}, errNativeModelBudgetCut
 	}
 	return s.ExecutionStore.ApplyExecution(ctx, l, rev, m)
 }
@@ -98,7 +101,7 @@ func runNativeModelBudget(t *testing.T, factory func(*testing.T) ExecutionBudget
 		t.Run(tc.name, func(t *testing.T) {
 			f := factory(t)
 			ctx := t.Context()
-			s := &nativeModelBudgetFault{ea1AgentAdmissionStore: ea1AgentAdmissionWrap(t, f.Store), LedgerStore: f.Ledger, event: tc.event, after: tc.after, contend: tc.name == "receipt-contended"}
+			s := &nativeBudgetFault{ea1AgentAdmissionStore: ea1AgentAdmissionWrap(t, f.Store), LedgerStore: f.Ledger, event: tc.event, after: tc.after, contend: tc.name == "receipt-contended"}
 			rt := ea1StartRuntime(t, s)
 			a, err := agent.NewBoundedBudgetAdapter(s, nativeModelBudgetPorts{})
 			if err != nil {

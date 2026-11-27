@@ -3,7 +3,6 @@ package harness
 import (
 	"context"
 	"errors"
-	"strings"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
@@ -14,26 +13,17 @@ import (
 // or a conclusively no-effect Start can mint one. The Store checks this together with original durable facts in
 // the same Turn CAS; neither a terminal Status nor a settled dispatch receipt
 // can manufacture this capability.
-type terminalTransitionKind uint8
-
-const (
-	terminalFromKernel terminalTransitionKind = iota + 1
-	terminalFromNoEffect
-	terminalFromHostCancellation
-)
-
 type terminalTransitionWitness struct {
 	turnID, invocationID, runID string
 	target                      TurnStatus
-	source                      terminalTransitionKind
 }
 
 type terminalTransitionWitnessKey struct{}
 
-func withTerminalWitness(ctx context.Context, owner Invocation, target TurnStatus, source terminalTransitionKind) context.Context {
+func withTerminalWitness(ctx context.Context, owner Invocation, target TurnStatus) context.Context {
 	return context.WithValue(ctx, terminalTransitionWitnessKey{}, terminalTransitionWitness{
 		turnID: owner.TurnID, invocationID: owner.ID,
-		runID: owner.ExecutionRefID, target: target, source: source,
+		runID: owner.ExecutionRefID, target: target,
 	})
 }
 
@@ -48,7 +38,7 @@ func withOriginalKernelTerminalWitness(
 		snapshot.Run.ID == "" || snapshot.Run.ID != owner.ExecutionRefID {
 		return ctx, ErrConflict
 	}
-	return withTerminalWitness(ctx, owner, target, terminalFromKernel), nil
+	return withTerminalWitness(ctx, owner, target), nil
 }
 
 // withOriginalNoEffectTerminalWitness is for the physical Start error
@@ -60,39 +50,32 @@ func withOriginalNoEffectTerminalWitness(
 	if !isDispatchProvenNoEffect(proofErr) {
 		return ctx, ErrConflict
 	}
-	return withTerminalWitness(ctx, owner, TurnFailed, terminalFromNoEffect), nil
+	return withTerminalWitness(ctx, owner, TurnFailed), nil
 }
 
 // withOriginalWaitingCancellationWitness is issued solely after the
 // selected waiting Invocation wins cancellation admission. It is not
 // transferable to another sibling Invocation, even in the same Turn.
 func withOriginalWaitingCancellationWitness(ctx context.Context, owner Invocation) context.Context {
-	return withTerminalWitness(ctx, owner, TurnCancelled, terminalFromHostCancellation)
+	return withTerminalWitness(ctx, owner, TurnCancelled)
 }
 
 // VerifiedInvocationTerminalWitness reads an otherwise unforgeable private
 // admission token. SQL adapters may inspect it but cannot construct it.
 // It binds the *exact* owner Run, Invocation, Turn and terminal outcome.
 func VerifiedInvocationTerminalWitness(ctx context.Context, owner Invocation, target InvocationStatus) bool {
-	proof, ok := ctx.Value(terminalTransitionWitnessKey{}).(terminalTransitionWitness)
-	if !ok || proof.turnID == "" || proof.invocationID == "" || proof.runID == "" ||
-		proof.turnID != owner.TurnID || proof.invocationID != owner.ID ||
-		proof.runID != owner.ExecutionRefID {
-		return false
-	}
-	return proof.target == turnStatusFromInvocation(target)
+	return terminalWitnessMatches(ctx, owner, turnStatusFromInvocation(target))
 }
 
-// VerifiedTurnTerminalWitness uses the original single root Invocation to
-// prevent a child callback/Run from authorizing a terminal parent Turn.
 func VerifiedTurnTerminalWitness(ctx context.Context, root Invocation, target TurnStatus) bool {
-	if root.ParentItemID != "" || root.ID == "" || root.TurnID == "" {
-		return false
-	}
+	return root.ParentItemID == "" && terminalWitnessMatches(ctx, root, target)
+}
+
+func terminalWitnessMatches(ctx context.Context, owner Invocation, target TurnStatus) bool {
 	proof, ok := ctx.Value(terminalTransitionWitnessKey{}).(terminalTransitionWitness)
-	return ok && proof.target == target && proof.turnID == root.TurnID &&
-		proof.invocationID == root.ID && proof.runID == root.ExecutionRefID &&
-		terminalTurnStatus(target)
+	return ok && terminalTurnStatus(target) && proof.target == target &&
+		proof.turnID != "" && proof.invocationID != "" && proof.runID != "" &&
+		proof.turnID == owner.TurnID && proof.invocationID == owner.ID && proof.runID == owner.ExecutionRefID
 }
 
 func turnStatusFromInvocation(status InvocationStatus) TurnStatus {
@@ -126,59 +109,7 @@ func ValidTurnTerminalDescendantsWithBudget(root Invocation, owners []Invocation
 	if root.ID == "" || root.TurnID == "" || root.ParentItemID != "" {
 		return false
 	}
-	// The original Handoff child binds the entire ancestor Attempt chain.
-	// All owners are already loaded under the same Turn-serializing Store
-	// lock as terminal CAS; comparing them here prevents an old child Run
-	// from settling its parent after an intermediate Attempt rotated.
-	byID := make(map[string]Invocation, len(owners))
-	for _, owner := range owners {
-		if owner.TurnID != root.TurnID || owner.ID == "" {
-			return false
-		}
-		if _, duplicate := byID[owner.ID]; duplicate {
-			return false
-		}
-		byID[owner.ID] = owner
-	}
-	if stored, ok := byID[root.ID]; !ok ||
-		invocationAttempt(stored) != invocationAttempt(root) {
-		return false
-	}
-	for _, owner := range owners {
-		if owner.ID == root.ID {
-			continue
-		}
-		// Every Handoff child, including one already marked Completed,
-		// must retain the exact original sealed ChildRun and ancestor
-		// Attempt provenance. A corrupt input can make the permissive
-		// Handoff classification fail; its reserved hid_ parent identity
-		// must still force strict source verification, not fall through
-		// as an ordinary terminal Agent child.
-		handoffCandidate := isHandoffDelegationInvocation(owner) ||
-			strings.HasPrefix(owner.ParentItemID, "hid_")
-		if handoffCandidate {
-			original, binding, valid := historicalHandoffRoot(root, owner, items, ledger)
-			if !valid {
-				return false
-			}
-			if !validTerminalHandoffAncestorBindings(owner, binding, byID) {
-				return false
-			}
-			if binding.Attempt < root.Attempt {
-				if !historicalHandoffSettled(original, owner, items) {
-					return false
-				}
-				continue
-			}
-		}
-		if terminalInvocationStatus(owner.Status) {
-			continue
-		}
-		if !VerifiedTerminalHandoffChild(root, owner, items) {
-			return false
-		}
-	}
-	return validDelegationWaitingFacts(root, owners, items, ledger)
+	return validateChildEffects(owners, items, root, ledger, true, false) == nil
 }
 
 // ValidTurnTerminalTransition checks original immutable state, intended
@@ -215,36 +146,35 @@ func ValidTurnTerminalTransition(ctx context.Context, current, requested Turn, r
 // for the current Invocation/Run and its unique pre-effect receipt. A second
 // grant for this original Run is ambiguous, even if it also reports no effect.
 func VerifiedOriginalStartNoEffect(items []Item, owner Invocation) bool {
+	total, starts, rejected, valid := originalDispatchEvidence(items, owner)
+	return valid && total == 1 && starts == 1 && rejected
+}
+
+// Read the original Host effect history once. Retry may accept a settled
+// control in addition to Start only with a verified original Kernel result.
+func originalDispatchEvidence(items []Item, owner Invocation) (total, starts int, rejected, valid bool) {
 	receipts := executionDispatchReceiptIndex(items)
-	originals := 0
 	for _, grant := range items {
 		if grant.ParentItemID != ExecutionDispatchParentItemID ||
 			grant.InvocationID != owner.ID || grant.RunID != owner.ExecutionRefID ||
 			grant.TurnID != owner.TurnID {
 			continue
 		}
-		phase, valid := VerifiedExecutionDispatchGrant(grant)
-		if !valid || (phase != "start" && phase != "start-retry") {
-			return false
-		}
-		// A retry Start belongs to the newly allocated Attempt, not the
-		// original one. Distinguish these from control/middleware retries.
-		if (phase == "start-retry" && owner.Attempt <= 1) ||
-			(phase == "start" && owner.Attempt > 1) {
-			return false
-		}
+		total++
+		phase, ok := VerifiedExecutionDispatchGrant(grant)
 		boundary, settled := VerifiedExecutionDispatchReceipt(grant, receipts[grant.ID])
-		if !settled {
-			return false
+		if !ok || !settled {
+			return total, starts, false, false
 		}
-		switch boundary {
-		case "physical_dispatch_rejected", "native_agent_start_no_effect":
-			originals++
-		default:
-			return false
+		if phase == "start" || phase == "start-retry" {
+			if (phase == "start" && owner.Attempt != 1) || (phase == "start-retry" && owner.Attempt <= 1) {
+				return total, starts, false, false
+			}
+			starts++
+			rejected = boundary == "physical_dispatch_rejected" || boundary == "native_agent_start_no_effect"
 		}
 	}
-	return originals == 1
+	return total, starts, rejected, true
 }
 
 // retryKernelTerminalWitness is a private, one-operation capability minted
@@ -284,12 +214,12 @@ func withOriginalKernelRetryWitness(
 func (runner *Runner) withOriginalRetryAuthority(
 	ctx context.Context, owner Invocation,
 ) (context.Context, error) {
-	if runner == nil || runner.runtime == nil || owner.ExecutionRefID == "" {
+	if runner == nil || runner.runtime == nil || owner.ExecutionRefID == "" || owner.ParentItemID != "" {
 		return ctx, ErrConflict
 	}
 	snapshot, err := runner.runtime.Load(ctx, owner.ExecutionRefID)
 	if errors.Is(err, kernel.ErrNotFound) {
-		if owner.ParentItemID == "" && runner.nativeRootStart() != nil {
+		if runner.nativeRootStart() != nil {
 			turn, e := loadVerifiedTurn(ctx, runner.store, owner.TurnID)
 			if e != nil {
 				return ctx, e
@@ -308,14 +238,8 @@ func (runner *Runner) withOriginalRetryAuthority(
 	if !terminalRuntimeStatus(snapshot.Run.Status) {
 		return ctx, ErrConflict
 	}
-	if owner.ParentItemID == "" {
-		if err := validateRootRuntimeOwnership(owner, snapshot); err != nil {
-			return ctx, err
-		}
-	} else {
-		if err := runner.validateChildRuntimeOwnership(ctx, owner, snapshot); err != nil {
-			return ctx, err
-		}
+	if err := validateRootRuntimeOwnership(owner, snapshot); err != nil {
+		return ctx, err
 	}
 	return withOriginalKernelRetryWitness(ctx, owner, snapshot)
 }
@@ -345,43 +269,8 @@ func verifiedKernelRetryWitness(ctx context.Context, owner Invocation) bool {
 // already-written historical Failed status cannot independently authorize a
 // second physical Run. No second persisted execution state machine is added.
 func RetryOriginalOperationEvidenceValid(ctx context.Context, items []Item, owner Invocation) bool {
-	receipts := executionDispatchReceiptIndex(items)
-	hasGrant := false
-	originalStarts := 0
-	for _, grant := range items {
-		if grant.ParentItemID != ExecutionDispatchParentItemID ||
-			grant.TurnID != owner.TurnID || grant.InvocationID != owner.ID ||
-			grant.RunID != owner.ExecutionRefID {
-			continue
-		}
-		hasGrant = true
-		phase, valid := VerifiedExecutionDispatchGrant(grant)
-		if !valid {
-			return false
-		}
-		if _, settled := VerifiedExecutionDispatchReceipt(grant, receipts[grant.ID]); !settled {
-			return false
-		}
-		switch phase {
-		case "start":
-			if owner.Attempt != 1 {
-				return false
-			}
-			originalStarts++
-		case "start-retry":
-			if owner.Attempt <= 1 {
-				return false
-			}
-			originalStarts++
-		}
-	}
-	if !hasGrant {
-		return true
-	}
-	if VerifiedOriginalStartNoEffect(items, owner) {
-		return true
-	}
-	return originalStarts == 1 && verifiedKernelRetryWitness(ctx, owner)
+	total, starts, rejected, valid := originalDispatchEvidence(items, owner)
+	return valid && (total == 0 || starts == 1 && (total == 1 && rejected || verifiedKernelRetryWitness(ctx, owner)))
 }
 
 // ValidInvocationTerminalTransitionWithEvidence is the single original

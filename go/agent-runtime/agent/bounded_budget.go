@@ -99,26 +99,10 @@ func (a *BoundedBudgetAdapter) nativeStore() kernel.Store {
 	return store
 }
 func (a *BoundedBudgetAdapter) resolveScope(ctx context.Context, id string) (BoundedBudgetScope, error) {
-	if store := a.nativeStore(); store != nil {
-		s, err := store.Load(ctx, id)
-		if err != nil {
+	if a.nativeStore() != nil {
+		l, err := a.boundNativeLedger(ctx, id, "")
+		if err != nil || l.ID == "" {
 			return BoundedBudgetScope{}, err
-		}
-		if s.Run.BudgetScopeID == "" {
-			// A legacy or genuinely unbudgeted Run cannot silently acquire
-			// a new scope on Resume. Check the Host selection read-only.
-			scope, e := a.ports.ResolveScope(ctx, id)
-			if e != nil {
-				return BoundedBudgetScope{}, e
-			}
-			if scope.LedgerID != "" {
-				return BoundedBudgetScope{}, budget.ErrLedgerConflict
-			}
-			return BoundedBudgetScope{}, nil
-		}
-		l, e := kernel.LoadRunBudget(ctx, a.coordinator.Store, s.Run)
-		if e != nil {
-			return BoundedBudgetScope{}, e
 		}
 		return BoundedBudgetScope{LedgerID: l.ID, Limits: l.Limits, Runs: []BoundedBudgetRunBinding{{RunID: id, Binding: l.Runs[id]}}}, nil
 	}
@@ -202,8 +186,13 @@ func (a *BoundedBudgetAdapter) boundNativeLedger(ctx context.Context, id, expect
 		return budget.Ledger{}, budget.ErrLedgerConflict
 	}
 	if s.Run.BudgetScopeID == "" {
-		if _, e = a.resolveScope(ctx, id); e != nil {
+		// Unbudgeted Runs may not acquire a scope on Resume.
+		scope, e := a.ports.ResolveScope(ctx, id)
+		if e != nil {
 			return budget.Ledger{}, e
+		}
+		if scope.LedgerID != "" {
+			return budget.Ledger{}, budget.ErrLedgerConflict
 		}
 		return budget.Ledger{}, nil
 	}
@@ -227,6 +216,11 @@ func (a *BoundedBudgetAdapter) bindReceiptScope(ctx context.Context, runID, orig
 	if scope.LedgerID == "" {
 		return budget.Ledger{}, nil
 	}
+	return a.loadExistingScope(ctx, runID, scope)
+}
+
+// No receipt or unsent Tool check may establish an accounting binding.
+func (a *BoundedBudgetAdapter) loadExistingScope(ctx context.Context, runID string, scope BoundedBudgetScope) (budget.Ledger, error) {
 	l, err := a.coordinator.Store.LoadBudget(ctx, scope.LedgerID)
 	if err != nil {
 		return l, err

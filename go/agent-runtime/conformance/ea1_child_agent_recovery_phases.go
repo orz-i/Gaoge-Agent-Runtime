@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -236,7 +235,7 @@ func ea1ChildRecoveryPhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 		if startErr != nil || cuts != 2 || modelCuts != 1 || store.marks != 1 || store.finishes != 1 {
 			t.Fatal("actual callback failed after denied recovery", startErr)
 		}
-		ea1AssertChildRecoveryPhaseReceipt(t, physical, request, definition, out, withTool)
+		ea1AssertStartSettlementReceipt(t, physical, request, definition, out, withTool)
 		ea1CompBarrierUnchanged(t, rt, parent)
 		ea1CompBarrierUnchanged(t, rt, grandparent)
 		if e = first.ReconcileChildPhysicalGrant(t.Context(), request.ID); !errors.Is(e, kernel.ErrNotFound) {
@@ -255,7 +254,7 @@ func ea1ChildRecoveryPhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 	if e != nil || g.ChildRunID != request.ID || g.ExpectedRevision != created.Run.Revision || g.IsOwned() {
 		t.Fatal("original child grant replaced by Root authority", e)
 	}
-	ea1AssertChildRecoveryPhaseReceipt(t, physical, request, definition, before, withTool)
+	ea1AssertStartSettlementReceipt(t, physical, request, definition, before, withTool)
 	if phase == "unmarked" && store.marks != 0 {
 		t.Fatal("unmarked fixture committed marker")
 	}
@@ -281,7 +280,7 @@ func ea1ChildRecoveryPhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 			}
 			ea1ChildRecoveryPhaseUnchanged(t, ar, before, parent, grandparent, g)
 		}
-		ea1AssertChildRecoveryPhaseReceipt(t, physical, request, definition, before, withTool)
+		ea1AssertStartSettlementReceipt(t, physical, request, definition, before, withTool)
 		return
 	}
 	if phase == "P5" {
@@ -377,7 +376,7 @@ func ea1ChildRecoveryPhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 	ea1CompBarrierUnchanged(t, ar, before)
 	ea1CompBarrierUnchanged(t, ar, parent)
 	ea1CompBarrierUnchanged(t, ar, grandparent)
-	ea1AssertChildRecoveryPhaseReceipt(t, physical, request, definition, before, withTool)
+	ea1AssertStartSettlementReceipt(t, physical, request, definition, before, withTool)
 	// Use an unwrapped runner after the concurrent barrier; never reuse a closed
 	// callback gate to accidentally turn sequential retry into claimed concurrency.
 	if e = makeRunner(ar, "inspection").ReconcileChildPhysicalGrant(t.Context(), request.ID); !errors.Is(e, kernel.ErrNotFound) {
@@ -426,61 +425,5 @@ func ea1ChildRecoveryPhaseControls(t *testing.T, rt *kernel.Runtime, child, pare
 			t.Fatal("physical child/ancestor control wrong priority", e, want)
 		}
 		ea1ChildRecoveryPhaseUnchanged(t, rt, child, parent, grandparent, g)
-	}
-}
-func ea1AssertChildRecoveryPhaseReceipt(t *testing.T, p *ea1StartSettlementPhysical, req agent.StartRequest, definition tools.Definition, s kernel.Snapshot, withTool bool) {
-	t.Helper()
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if len(p.requests) != 1 || len(p.responses) != 1 || len(p.intents) != 1 || p.hostCalls != 1 || (p.hostUnknown && p.hostSends != 1) {
-		t.Fatal("physical callback replayed")
-	}
-	inv := p.intents[0]
-	actual := p.requests[0]
-	canonical := model.CloneRequest(actual)
-	canonical.InvocationID = ""
-	digest, e := ea1ModelIntentEvidenceHash(canonical, inv.CatalogFingerprints, inv.Provider, inv.BindingFingerprint)
-	if e != nil || inv.RequestHash != digest || !reflect.DeepEqual(inv.Request, actual) || actual.RunID != req.ID || actual.Model != req.Model || !reflect.DeepEqual(actual.ModelOptions, req.ModelOptions) || inv.ID != actual.InvocationID || inv.Provider != p.ProviderName() || inv.BindingFingerprint != strings.Repeat("b", 64) || inv.SourceRevision == 0 || inv.ExecutionAttempt != 1 || inv.DispatchAttempt != 1 {
-		t.Fatal("full original Model request/hash/provider/attempt mismatch")
-	}
-	var frozen struct {
-		OriginFingerprint string `json:"originFingerprint"`
-	}
-	if json.Unmarshal(s.State, &frozen) != nil || frozen.OriginFingerprint != req.OriginFingerprint || frozen.OriginFingerprint == "" {
-		t.Fatal("original child frozen origin lost")
-	}
-	view, e := agent.ViewState(s)
-	if e != nil || len(view.ModelInvocations) != 1 {
-		t.Fatalf("persisted receipt missing: %v", e)
-	}
-	settled := view.ModelInvocations[0]
-	if settled.ID != inv.ID || settled.SourceRevision != inv.SourceRevision || settled.RequestHash != inv.RequestHash || settled.Provider != inv.Provider || settled.BindingFingerprint != inv.BindingFingerprint || settled.ExecutionAttempt != 1 || settled.DispatchAttempt != 1 || settled.Status != agent.ModelInvocationConsumed || settled.ProviderResponseID != "original-response" || settled.CompletedAt == nil || settled.ConsumedAt == nil || settled.Usage == nil || settled.Usage.InputTokens != 7 || settled.Usage.OutputTokens != 3 {
-		t.Fatal("consumed receipt not original physical result")
-	}
-	// Compare the whole provider response, including optional fields and raw JSON,
-	// through its persisted JSON representation rather than only receipt metadata.
-	ea1StartSettlementJSONEqual(t, "durable Model response", settled.Response, p.responses[0])
-	if s.Run.ID != req.ID || s.Run.ParentRunID != req.ParentRunID || s.Run.Actor != req.Actor || s.Run.Thread != req.Thread || s.Run.RequestID != req.RequestID || s.Run.Goal != req.Goal || !reflect.DeepEqual(view.Budget.Limits, req.Limits) {
-		t.Fatal("frozen Child source/budget changed")
-	}
-	if withTool {
-		if s.Run.Status != kernel.RunStatusCompleted || len(p.toolInvocations) != 1 || len(p.toolRequests) != 1 || len(p.receipts) != 1 {
-			t.Fatal("terminal Tool receipt/count missing")
-		}
-		ti := p.toolInvocations[0]
-		tr := p.toolRequests[0]
-		receipt := p.receipts[0]
-		if s.Result == nil || s.Result.ContentType != "application/json" {
-			t.Fatal("terminal durable result missing or wrong content type")
-		}
-		ea1StartSettlementJSONEqual(t, "terminal durable Tool result", s.Result.Content, receipt.Content)
-		want := tools.ExecutionRequest{RunID: req.ID, Call: tools.Call{ID: "original-call", ToolKey: "effect", Arguments: json.RawMessage(`{"source":"original"}`)}}
-		// Agent binds the public Call.Name from the original catalog definition.
-		want.Call.Name = definition.Name
-		if !reflect.DeepEqual(tr, want) || !reflect.DeepEqual(ti.Request, tr) || !reflect.DeepEqual(ti.Definition, definition) || ti.Run.Actor != req.Actor || ti.Run.Thread != req.Thread || ti.Run.ParentRunID != req.ParentRunID || receipt.Receipt.ExecutionID != tr.Call.ID || receipt.Receipt.Disposition != "committed" || string(receipt.Content) != `{"committed":"original"}` || view.Budget.Usage.ToolCalls != 1 {
-			t.Fatal("full Tool definition/request/receipt source mismatch")
-		}
-	} else if len(p.toolRequests) != 0 || s.Run.Status != kernel.RunStatusRunning || view.Budget.Usage.ToolCalls != 0 {
-		t.Fatal("model-only yield dispatched Tool or became terminal")
 	}
 }

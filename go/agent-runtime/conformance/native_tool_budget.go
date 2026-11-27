@@ -3,7 +3,6 @@ package conformance
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"testing"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
@@ -27,40 +26,6 @@ func (nativeToolBudgetPorts) ResolveScope(_ context.Context, id string) (agent.B
 }
 func (nativeToolBudgetPorts) ToolReservationActive(plugin.ToolInvocation) bool { return true }
 
-type nativeToolBudgetFault struct {
-	*nativeModelBudgetFault
-	event               string
-	after, contend, hit bool
-}
-
-func (s *nativeToolBudgetFault) ApplyExecution(ctx context.Context, l kernel.ExecutionLease, rev uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
-	for _, e := range m.Events {
-		if e.Type == "tool.dispatch_intent" || e.Type == "tool.receipt_recovered" {
-			if m.Ledger == nil {
-				return kernel.Snapshot{}, errors.New("tool transition without accounting")
-			}
-			if e.Type == s.event && !s.hit {
-				s.hit = true
-				if s.contend {
-					if _, err := (budget.Coordinator{Store: s.LedgerStore}).RegisterRun(ctx, "scope", "sibling", budget.RunBudget{ParentRunID: l.RunID}); err != nil {
-						return kernel.Snapshot{}, err
-					}
-					return s.ExecutionStore.ApplyExecution(ctx, l, rev, m)
-				}
-				if !s.after {
-					return kernel.Snapshot{}, errNativeModelBudgetCut
-				}
-				_, err := s.ExecutionStore.ApplyExecution(ctx, l, rev, m)
-				if err != nil {
-					return kernel.Snapshot{}, err
-				}
-				return kernel.Snapshot{}, errNativeModelBudgetCut
-			}
-		}
-	}
-	return s.nativeModelBudgetFault.ApplyExecution(ctx, l, rev, m)
-}
-
 func runNativeToolBudget(t *testing.T, factory func(*testing.T) ExecutionBudgetStore) {
 	for _, tc := range []struct {
 		name, event           string
@@ -82,7 +47,7 @@ func runNativeToolBudget(t *testing.T, factory func(*testing.T) ExecutionBudgetS
 		t.Run(tc.name, func(t *testing.T) {
 			f := factory(t)
 			ctx := t.Context()
-			wrapped := &nativeToolBudgetFault{nativeModelBudgetFault: &nativeModelBudgetFault{ea1AgentAdmissionStore: ea1AgentAdmissionWrap(t, f.Store), LedgerStore: f.Ledger}, event: tc.event, after: tc.after, contend: tc.contend}
+			wrapped := &nativeBudgetFault{ea1AgentAdmissionStore: ea1AgentAdmissionWrap(t, f.Store), LedgerStore: f.Ledger, event: tc.event, after: tc.after, contend: tc.contend}
 			var store kernel.Store = wrapped
 			var ledgerStore budget.LedgerStore = wrapped
 			if tc.child {

@@ -75,21 +75,7 @@ func (runner *Runner) undispatchedRootNoEffect(
 	if err != nil {
 		return true, err
 	}
-	for _, item := range items {
-		if item.ParentItemID == CancellationFenceParentItemID && !CancellationEffectsSettled(item, items) {
-			return true, ErrCancellationOutcomeUnknown
-		}
-	}
-	if PendingExecutionDispatch(items, "") {
-		return true, ErrExecutionOutcomeUnknown
-	}
-	for _, item := range items {
-		if item.ParentItemID == ExecutionDispatchParentItemID &&
-			(item.RunID == original.ExecutionRefID ||
-				item.InvocationID == original.ID && item.RunID == "") {
-			return true, ErrExecutionOutcomeUnknown
-		}
-	}
+
 	invocations, err := runner.store.ListInvocations(ctx, turn.ID)
 	if err != nil {
 		return true, err
@@ -100,8 +86,8 @@ func (runner *Runner) undispatchedRootNoEffect(
 			children = append(children, owner)
 		}
 	}
-	if !validUnstartedRetryHistoricalChildren(original, children, items, ledger) {
-		return true, ErrConflict
+	if _, err = uncreatedRootHostEvidence(original, children, items, ledger); err != nil {
+		return true, err
 	}
 	if related, err := runner.relatedChildRunIDs(ctx, original.ExecutionRefID); err != nil {
 		return true, err

@@ -77,7 +77,15 @@ func (s *Store) BeginChildExecution(ctx context.Context, grant kernel.ChildExecu
 // lost acknowledgement after the first-party physical callback returned.
 // A clean but still-running callback cannot generate this persisted marker.
 func (s *Store) MarkChildExecutionSettled(ctx context.Context, grant kernel.ChildExecutionGrant, permit kernel.ChildExecutionSettlement) error {
-	if grant.IsOwned() {
+	return s.settleChildExecution(ctx, grant, permit, true)
+}
+
+func (s *Store) FinishChildExecution(ctx context.Context, grant kernel.ChildExecutionGrant, permit kernel.ChildExecutionSettlement) error {
+	return s.settleChildExecution(ctx, grant, permit, false)
+}
+
+func (s *Store) settleChildExecution(ctx context.Context, grant kernel.ChildExecutionGrant, permit kernel.ChildExecutionSettlement, markOnly bool) error {
+	if markOnly && grant.IsOwned() {
 		return kernel.ErrExecutionConflict
 	}
 	if s == nil || s.db == nil || ctx == nil || grant.ID == "" || grant.ChildRunID == "" || grant.ExpectedRevision == 0 {
@@ -108,66 +116,37 @@ func (s *Store) MarkChildExecutionSettled(ctx context.Context, grant kernel.Chil
 	if !permit.Matches(grant, child) {
 		return kernel.ErrExecutionConflict
 	}
-	revision := child.Run.Revision
-	var total, valid int
-	if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM runtime_child_effect_grants WHERE grant_id=?", grant.ID).Scan(&total); err != nil {
-		return err
-	}
-	if total == 0 {
-		return kernel.ErrExecutionConflict
-	}
-	if err = tx.QueryRowContext(ctx,
-		"SELECT count(*) FROM runtime_child_effect_grants WHERE grant_id=? AND child_run_id=? AND start_revision=? AND (settled_revision=0 OR settled_revision=?)",
-		grant.ID, grant.ChildRunID, grant.ExpectedRevision, revision).Scan(&valid); err != nil {
-		return err
-	}
-	if valid != total {
-		return kernel.ErrExecutionConflict
-	}
-	query := "UPDATE runtime_child_effect_grants SET settled_revision=? WHERE grant_id=? AND child_run_id=? AND start_revision=? AND (settled_revision=0 OR settled_revision=?)"
-	args := []any{revision, grant.ID, grant.ChildRunID, grant.ExpectedRevision, revision}
-	result, err := tx.ExecContext(ctx, query, args...)
-	if err != nil {
-		return conflictOrDatabaseError(err)
-	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if rows != int64(total) {
-		return kernel.ErrExecutionConflict
-	}
-	return tx.Commit()
-}
-
-func (s *Store) FinishChildExecution(ctx context.Context, grant kernel.ChildExecutionGrant, permit kernel.ChildExecutionSettlement) error {
-	if s == nil || s.db == nil || ctx == nil || grant.ID == "" || grant.ChildRunID == "" || grant.ExpectedRevision == 0 {
-		return kernel.ErrInvalidInput
-	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return conflictOrDatabaseError(err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	child, err := loadTx(ctx, tx, grant.ChildRunID)
-	if err != nil {
-		return err
-	}
-	if e := sqliteNativeEntryGate(ctx, tx, grant.ChildRunID); e != nil {
-		return e
-	}
-	if child.Run.Revision == 0 || !permit.Matches(grant, child) {
-		return kernel.ErrExecutionConflict
-	}
-	original, _, lookupErr := loadPhysicalGrant(ctx, tx, grant.ChildRunID)
-	if errors.Is(lookupErr, kernel.ErrNotFound) {
-		return kernel.ErrExecutionConflict
-	}
-	if lookupErr != nil {
-		return lookupErr
-	}
-	if original != grant {
-		return kernel.ErrExecutionConflict
+	if markOnly {
+		revision := child.Run.Revision
+		var total, valid int
+		if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM runtime_child_effect_grants WHERE grant_id=?", grant.ID).Scan(&total); err != nil {
+			return err
+		}
+		if total == 0 {
+			return kernel.ErrExecutionConflict
+		}
+		if err = tx.QueryRowContext(ctx,
+			"SELECT count(*) FROM runtime_child_effect_grants WHERE grant_id=? AND child_run_id=? AND start_revision=? AND (settled_revision=0 OR settled_revision=?)",
+			grant.ID, grant.ChildRunID, grant.ExpectedRevision, revision).Scan(&valid); err != nil {
+			return err
+		}
+		if valid != total {
+			return kernel.ErrExecutionConflict
+		}
+		query := "UPDATE runtime_child_effect_grants SET settled_revision=? WHERE grant_id=? AND child_run_id=? AND start_revision=? AND (settled_revision=0 OR settled_revision=?)"
+		args := []any{revision, grant.ID, grant.ChildRunID, grant.ExpectedRevision, revision}
+		result, err := tx.ExecContext(ctx, query, args...)
+		if err != nil {
+			return conflictOrDatabaseError(err)
+		}
+		rows, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if rows != int64(total) {
+			return kernel.ErrExecutionConflict
+		}
+		return tx.Commit()
 	}
 
 	mark := child.Run.Revision

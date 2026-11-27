@@ -19,19 +19,23 @@ func RetryChildEffectFence(invocations []Invocation, items []Item, rotating Invo
 // its stale projection is not a new physical effect. Active Host claims and
 // unknown/missing/ambiguous child receipts still categorically fence Retry.
 func RetryChildEffectFenceWithBudget(invocations []Invocation, items []Item, rotating Invocation, ledger *budget.Ledger) error {
-	return retryChildEffectFence(invocations, items, rotating, ledger, false)
+	return validateChildEffects(invocations, items, rotating, ledger, false, false)
 }
 
-// The uncreated successor additionally requires every child admission to
-// belong to an earlier Attempt. All paths share the same original receipts.
-func retryChildEffectFence(invocations []Invocation, items []Item, root Invocation, ledger *budget.Ledger, uncreated bool) error {
+// The same original child/ancestor and receipt proof serves terminal projection,
+// Retry and cancellation of an uncreated successor. Only the operation-specific
+// restrictions differ: Retry cannot overtake a live effect, and an uncreated
+// successor cannot have admitted descendants of its own.
+func validateChildEffects(invocations []Invocation, items []Item, root Invocation, ledger *budget.Ledger, terminal, uncreated bool) error {
 	owners := map[string]Invocation{root.ID: root}
 	byRun := make(map[string]Invocation, len(invocations))
+	rootSeen := false
 	for _, child := range invocations {
 		if child.ID == root.ID {
-			if uncreated {
+			if uncreated || rootSeen || (terminal && (child.TurnID != root.TurnID || invocationAttempt(child) != invocationAttempt(root))) {
 				return ErrConflict
 			}
+			rootSeen = true
 			continue
 		}
 		if _, duplicate := owners[child.ID]; duplicate || child.ID == "" || child.TurnID != root.TurnID ||
@@ -46,14 +50,36 @@ func retryChildEffectFence(invocations []Invocation, items []Item, root Invocati
 		}
 		owners[child.ID] = child
 	}
+	if terminal && !rootSeen {
+		return ErrConflict
+	}
 	for _, child := range invocations {
-		if child.ID == root.ID || child.ParentItemID == "" {
+		if child.ID == root.ID || (!terminal && child.ParentItemID == "") {
 			continue
 		}
 		handoff := isHandoffDelegationInvocation(child) || strings.HasPrefix(child.ParentItemID, "hid_")
+		if handoff {
+			original, binding, valid := historicalHandoffRoot(root, child, items, ledger)
+			if !valid || (uncreated && binding.Attempt >= root.Attempt) ||
+				!validTerminalHandoffAncestorBindings(child, binding, owners) {
+				return ErrConflict
+			}
+			if !terminal || binding.Attempt < root.Attempt {
+				if !historicalHandoffSettled(original, child, items) {
+					return ErrConflict
+				}
+				continue
+			}
+		}
+		if terminal {
+			if !terminalInvocationStatus(child.Status) && !VerifiedTerminalHandoffChild(root, child, items) {
+				return ErrConflict
+			}
+			continue
+		}
 		switch child.Status {
 		case InvocationAccepted:
-			if !handoff && acceptedChildPhysicalEffectPossible(items, child) {
+			if acceptedChildPhysicalEffectPossible(items, child) {
 				return ErrConflict
 			}
 		case InvocationCompleted, InvocationFailed, InvocationCancelled:
@@ -62,15 +88,8 @@ func retryChildEffectFence(invocations []Invocation, items []Item, root Invocati
 		default:
 			return ErrConflict
 		}
-		if handoff {
-			original, binding, valid := historicalHandoffRoot(root, child, items, ledger)
-			if !valid || (uncreated && binding.Attempt >= root.Attempt) ||
-				!validTerminalHandoffAncestorBindings(child, binding, owners) || !historicalHandoffSettled(original, child, items) {
-				return ErrConflict
-			}
-		}
 	}
-	if !validDelegationWaitingFacts(root, invocations, items, ledger) {
+	if !validDelegationWaitingFacts(root, owners, byRun, items, ledger) {
 		return ErrConflict
 	}
 	if uncreated {

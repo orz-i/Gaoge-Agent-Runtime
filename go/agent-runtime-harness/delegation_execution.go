@@ -359,7 +359,7 @@ func (r *Runner) projectUncreatedNativeChild(ctx context.Context, turn Turn, own
 	if d.Status == kernel.RunStatusCancelled {
 		code = "run.cancelled"
 	}
-	current, e = r.syncInvocationStatus(withTerminalWitness(ctx, current, TurnStatus(d.Status), terminalFromNoEffect), current, invocationStatusFromTurn(TurnStatus(d.Status)), code, d.Reason)
+	current, e = r.syncInvocationStatus(withTerminalWitness(ctx, current, TurnStatus(d.Status)), current, invocationStatusFromTurn(TurnStatus(d.Status)), code, d.Reason)
 	if e != nil {
 		return handoff.Delegation{}, e
 	}

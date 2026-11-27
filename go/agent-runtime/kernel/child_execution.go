@@ -212,25 +212,7 @@ func (runtime *Runtime) BeginChildExecution(ctx context.Context, childRunID stri
 // a parent-bound borrowed Grant only. Owned Grants already have a durable
 // callback-return fact and retire directly with Finish.
 func (runtime *Runtime) MarkChildExecutionSettled(ctx context.Context, grant ChildExecutionGrant, proof *featurecontrol.Proof) error {
-	if grant.IsOwned() {
-		return ErrExecutionConflict
-	}
-	if runtime == nil || ctx == nil || grant.ID == "" || grant.ChildRunID == "" || grant.ExpectedRevision == 0 {
-		return ErrInvalidInput
-	}
-	store, ok := runtime.store.(ChildExecutionStore)
-	if !ok {
-		return ErrExecutionRequired
-	}
-	snapshot, err := runtime.Load(ctx, grant.ChildRunID)
-	if err != nil {
-		return err
-	}
-	permit := ChildExecutionSettlement{proof: proof}
-	if !permit.Matches(grant, snapshot) {
-		return ErrExecutionConflict
-	}
-	return store.MarkChildExecutionSettled(ctx, grant, permit)
+	return runtime.settleChildExecution(ctx, grant, proof, true)
 }
 
 // FinishChildExecution releases only its exact original Grant. A timed-out
@@ -238,6 +220,13 @@ func (runtime *Runtime) MarkChildExecutionSettled(ctx context.Context, grant Chi
 // not authorize Finish; the persisted Grant deliberately blocks terminal
 // parent state until its outcome has been reconciled.
 func (runtime *Runtime) FinishChildExecution(ctx context.Context, grant ChildExecutionGrant, proof *featurecontrol.Proof) error {
+	return runtime.settleChildExecution(ctx, grant, proof, false)
+}
+
+func (runtime *Runtime) settleChildExecution(ctx context.Context, grant ChildExecutionGrant, proof *featurecontrol.Proof, markOnly bool) error {
+	if markOnly && grant.IsOwned() {
+		return ErrExecutionConflict
+	}
 	if runtime == nil || ctx == nil || grant.ID == "" || grant.ChildRunID == "" || grant.ExpectedRevision == 0 {
 		return ErrInvalidInput
 	}
@@ -245,9 +234,6 @@ func (runtime *Runtime) FinishChildExecution(ctx context.Context, grant ChildExe
 	if !ok {
 		return ErrExecutionRequired
 	}
-	// Owned settlement consumes the persisted callback return under the
-	// same Store transaction as final retirement. The borrowed child still
-	// requires its original durable returned-callback witness.
 	snapshot, err := runtime.Load(ctx, grant.ChildRunID)
 	if err != nil {
 		return err
@@ -255,6 +241,9 @@ func (runtime *Runtime) FinishChildExecution(ctx context.Context, grant ChildExe
 	permit := ChildExecutionSettlement{proof: proof}
 	if !permit.Matches(grant, snapshot) {
 		return ErrExecutionConflict
+	}
+	if markOnly {
+		return store.MarkChildExecutionSettled(ctx, grant, permit)
 	}
 	return store.FinishChildExecution(ctx, grant, permit)
 }

@@ -430,7 +430,7 @@ func ea1ChildCancelSettlement(t *testing.T, factory func(*testing.T) (kernel.Sto
 	if e != nil || g.IsOwned() || g.ExpectedRevision != f.prepared.Run.Revision {
 		t.Fatal("original child settlement scope absent", e)
 	}
-	ea1AssertChildRecoveryPhaseReceipt(t, f.physical, f.request, f.definition, before, tool)
+	ea1AssertStartSettlementReceipt(t, f.physical, f.request, f.definition, before, tool)
 	ea1ChildRecoveryPhaseControls(t, f.rt, before, f.parent, f.grandparent, g)
 	a, _ := f.reopen()
 	ar := ea1StartRuntime(t, a)
@@ -463,7 +463,7 @@ func ea1ChildCancelSettlement(t *testing.T, factory func(*testing.T) (kernel.Sto
 		ea1CompBarrierUnchanged(t, ar, f.parent)
 		ea1CompBarrierUnchanged(t, ar, f.grandparent)
 	}
-	ea1AssertChildRecoveryPhaseReceipt(t, f.physical, f.request, f.definition, before, tool)
+	ea1AssertStartSettlementReceipt(t, f.physical, f.request, f.definition, before, tool)
 }
 func ea1ChildCancelACK(t *testing.T, factory func(*testing.T) (kernel.Store, func() (kernel.Store, kernel.Store))) {
 	f := ea1NewChildCancelFixture(t, factory, false, true)

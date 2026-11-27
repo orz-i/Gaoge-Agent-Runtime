@@ -60,30 +60,34 @@ func ValidUndispatchedRootCancellationEvidence(inv Invocation, turn Turn, items 
 			}
 		}
 	}
-	// Retry and Cancel must use the same historical child proof. A child
-	// terminated under a prior immutable Attempt cannot block a new Root
-	// that never obtained physical execution; an active or ambiguous child
-	// still fences both operations.
-	if !validUnstartedRetryHistoricalChildren(inv, children, items, ledger) {
-		return false
-	}
-	originalIntent := false
+	active, err := uncreatedRootHostEvidence(inv, children, items, ledger)
+	return err == nil && active == hasActiveCancellation
+}
+
+// Both the read-side observation and the original Turn transaction consume
+// the same immutable Host evidence. Neither qualifies a native Create.
+func uncreatedRootHostEvidence(inv Invocation, children []Invocation, items []Item, ledger *budget.Ledger) (bool, error) {
+	active := false
 	fenceReceipts := cancellationFenceReceipts(items)
 	for _, item := range items {
-		if item.ParentItemID == CancellationFenceParentItemID && item.RunID == inv.ExecutionRefID &&
-			ValidCancellationFenceIntentAdmission(item) && !VerifiedCancellationFenceReceipt(item, fenceReceipts[item.ID]) {
+		if item.ParentItemID == CancellationFenceParentItemID {
 			if !CancellationEffectsSettled(item, items) {
-				return false
+				return false, ErrCancellationOutcomeUnknown
 			}
-			originalIntent = true
+			active = active || item.RunID == inv.ExecutionRefID && ValidCancellationFenceIntentAdmission(item) && !VerifiedCancellationFenceReceipt(item, fenceReceipts[item.ID])
 		}
 		if item.ParentItemID == ExecutionDispatchParentItemID &&
-			(item.RunID == inv.ExecutionRefID ||
-				(item.InvocationID == inv.ID && item.RunID == "")) {
-			return false
+			(item.RunID == inv.ExecutionRefID || item.InvocationID == inv.ID && item.RunID == "") {
+			return false, ErrExecutionOutcomeUnknown
 		}
 	}
-	return originalIntent == hasActiveCancellation && !PendingExecutionDispatch(items, "")
+	if PendingExecutionDispatch(items, "") {
+		return false, ErrExecutionOutcomeUnknown
+	}
+	if !validUnstartedRetryHistoricalChildren(inv, children, items, ledger) {
+		return false, ErrConflict
+	}
+	return active, nil
 }
 
 // ProjectUncreatedRoot consumes the exact Runner witness and the original

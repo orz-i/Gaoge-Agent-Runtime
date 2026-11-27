@@ -103,18 +103,9 @@ func (r *Runner) loadBoundToolLedger(ctx context.Context, runID string, scope Bo
 	if b == nil || scope.LedgerID == "" {
 		return budget.Ledger{}, ErrToolReceiptMismatch
 	}
-	l, err := b.coordinator.Store.LoadBudget(ctx, scope.LedgerID)
-	if err != nil || l.ID != scope.LedgerID || l.Limits != scope.Limits {
+	l, err := b.loadExistingScope(ctx, runID, scope)
+	if err != nil {
 		return l, errors.Join(ErrToolReceiptMismatch, err)
-	}
-	binding, registered := l.Runs[runID]
-	if !registered {
-		return l, ErrToolReceiptMismatch
-	}
-	for _, original := range scope.Runs {
-		if original.RunID == runID && original.Binding != binding {
-			return l, ErrToolReceiptMismatch
-		}
 	}
 	return l, nil
 }

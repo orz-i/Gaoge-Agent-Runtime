@@ -29,15 +29,7 @@ func historicalRootForRun(root Invocation, runID string, items []Item, ledger *b
 // actual physical admission and terminal receipts. The normal terminal CAS and
 // unstarted cancellation consume this identical predicate under the Turn lock;
 // their separate Kernel/no-Run authority still owns non-Waiting effects.
-func validDelegationWaitingFacts(root Invocation, owners []Invocation, items []Item, ledger *budget.Ledger) bool {
-	byID := map[string]Invocation{root.ID: root}
-	byRun := make(map[string]Invocation, len(owners))
-	for _, owner := range owners {
-		if owner.ID != root.ID {
-			byID[owner.ID] = owner
-			byRun[owner.ExecutionRefID] = owner
-		}
-	}
+func validDelegationWaitingFacts(root Invocation, byID, byRun map[string]Invocation, items []Item, ledger *budget.Ledger) bool {
 	for _, item := range items {
 		if item.Kind != ItemDelegation {
 			continue

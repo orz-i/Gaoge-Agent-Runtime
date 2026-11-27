@@ -65,15 +65,17 @@ func (s *ea1ChildResumeSettlementStore) FinishChildExecution(ctx context.Context
 	return e
 }
 
-type ea1ChildResumeSettlementHost struct {
-	request  agent.StartRequest
-	physical *ea1StartSettlementPhysical
-	before   func()
+type ea1ChildSettlementHost struct {
+	operation plugin.RunOperation
+	name      string
+	request   agent.StartRequest
+	physical  *ea1StartSettlementPhysical
+	before    func()
 }
 
-func (*ea1ChildResumeSettlementHost) Name() string { return "ea1.original.child.resume" }
-func (h *ea1ChildResumeSettlementHost) Run(ctx context.Context, i plugin.RunInvocation, next plugin.RunNext) (kernel.Snapshot, error) {
-	if i.Operation != plugin.RunResume || i.RunID != h.request.ID || i.ParentRunID != h.request.ParentRunID || i.Actor != h.request.Actor || i.Thread != h.request.Thread || i.Goal != h.request.Goal {
+func (h *ea1ChildSettlementHost) Name() string { return h.name }
+func (h *ea1ChildSettlementHost) Run(ctx context.Context, i plugin.RunInvocation, next plugin.RunNext) (kernel.Snapshot, error) {
+	if i.Operation != h.operation || i.RunID != h.request.ID || i.ParentRunID != h.request.ParentRunID || i.Actor != h.request.Actor || i.Thread != h.request.Thread || i.Goal != h.request.Goal {
 		return kernel.Snapshot{}, agent.ErrInvalidRequest
 	}
 	h.physical.mu.Lock()
@@ -93,16 +95,12 @@ type ea1ChildResumeSettlementFixture struct {
 	request                                agent.StartRequest
 	parent, grandparent, created, prepared kernel.Snapshot
 	physical                               *ea1StartSettlementPhysical
-	host                                   *ea1ChildResumeSettlementHost
+	host                                   *ea1ChildSettlementHost
 	definition                             tools.Definition
 	registry                               *tools.Registry
 }
 
-func ea1NewChildResumeSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, func() (kernel.Store, kernel.Store)), tool, deadline bool) *ea1ChildResumeSettlementFixture {
-	backing, reopen := factory(t)
-	st := &ea1ChildResumeSettlementStore{ea1AgentAdmissionStore: ea1AgentAdmissionWrap(t, backing), fault: errors.New("actual Child Resume settlement ACK cut")}
-	rt := ea1StartRuntime(t, st)
-	f := &ea1ChildResumeSettlementFixture{t: t, store: st, rt: rt, reopen: reopen}
+func ea1ChildSettlementAncestors(t *testing.T, rt *kernel.Runtime, deadline bool) (kernel.Snapshot, kernel.Snapshot) {
 	actor := kernel.ActorRef{TenantID: "tenant", ActorID: "owner"}
 	thread := kernel.ThreadRef{Kind: "conversation", ID: "original-thread"}
 	var due *time.Time
@@ -110,15 +108,25 @@ func ea1NewChildResumeSettlement(t *testing.T, factory func(*testing.T) (kernel.
 		v := time.Now().UTC().Add(3 * time.Second)
 		due = &v
 	}
+	grandparent, e := rt.Create(t.Context(), kernel.CreateRequest{ID: "grandparent", Kind: "agent", Actor: actor, Thread: thread, Goal: "original grandparent", State: json.RawMessage("{}"), DeadlineAt: due})
+	if e != nil {
+		t.Fatal(e)
+	}
+	parent, e := rt.Create(t.Context(), kernel.CreateRequest{ID: "parent", ParentRunID: grandparent.Run.ID, Kind: "agent", Actor: actor, Thread: thread, Goal: "original parent", State: json.RawMessage("{}")})
+	if e != nil {
+		t.Fatal(e)
+	}
+	return parent, grandparent
+}
+
+func ea1NewChildResumeSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, func() (kernel.Store, kernel.Store)), tool, deadline bool) *ea1ChildResumeSettlementFixture {
+	backing, reopen := factory(t)
+	st := &ea1ChildResumeSettlementStore{ea1AgentAdmissionStore: ea1AgentAdmissionWrap(t, backing), fault: errors.New("actual Child Resume settlement ACK cut")}
+	rt := ea1StartRuntime(t, st)
+	f := &ea1ChildResumeSettlementFixture{t: t, store: st, rt: rt, reopen: reopen}
+	f.parent, f.grandparent = ea1ChildSettlementAncestors(t, rt, deadline)
+	actor, thread := f.parent.Run.Actor, f.parent.Run.Thread
 	var e error
-	f.grandparent, e = rt.Create(t.Context(), kernel.CreateRequest{ID: "grandparent", Kind: "agent", Actor: actor, Thread: thread, Goal: "original grandparent", State: json.RawMessage("{}"), DeadlineAt: due})
-	if e != nil {
-		t.Fatal(e)
-	}
-	f.parent, e = rt.Create(t.Context(), kernel.CreateRequest{ID: "parent", ParentRunID: f.grandparent.Run.ID, Kind: "agent", Actor: actor, Thread: thread, Goal: "original parent", State: json.RawMessage("{}")})
-	if e != nil {
-		t.Fatal(e)
-	}
 	f.request = agent.StartRequest{ID: "child-resume-settlement", RequestID: "original-child-resume", ParentRunID: f.parent.Run.ID, OriginFingerprint: agent.FrozenOriginFingerprint([]byte(`{"source":"original-child-resume","context":"isolated"}`)), Actor: actor, Thread: thread, Goal: "original child resume", Instructions: "Preserve original source.", Model: "fixture-model", ModelOptions: json.RawMessage(`{"temperature":0.1}`), Limits: agent.Limits{MaxLLMCalls: 2, MaxToolCalls: 1}}
 	if tool {
 		f.request.ToolKeys = []string{"effect"}
@@ -129,7 +137,7 @@ func ea1NewChildResumeSettlement(t *testing.T, factory func(*testing.T) (kernel.
 	if e != nil {
 		t.Fatal(e)
 	}
-	f.host = &ea1ChildResumeSettlementHost{request: f.request, physical: f.physical}
+	f.host = &ea1ChildSettlementHost{operation: plugin.RunResume, name: "ea1.original.child.resume", request: f.request, physical: f.physical}
 	setup := f.runner(rt, "prepare-owner", false)
 	st.afterCreate = func(_ context.Context, s kernel.Snapshot) error {
 		f.created = s
@@ -182,7 +190,7 @@ func ea1ChildResumeSettlement(t *testing.T, factory func(*testing.T) (kernel.Sto
 	if (phase == "P3" && f.store.marks != 0) || (phase == "P4" && f.store.marks != 1) || f.store.finishes != 0 {
 		t.Fatal("wrong actual Mark/Finish boundary")
 	}
-	ea1AssertChildRecoveryPhaseReceipt(t, f.physical, f.request, f.definition, before, tool)
+	ea1AssertStartSettlementReceipt(t, f.physical, f.request, f.definition, before, tool)
 	if f.physical.intents[0].SourceRevision < f.prepared.Run.Revision || f.store.acquired.RunID != f.request.ID || f.store.acquired.OwnerID != "original-resume-owner" || f.store.acquired.LeaseID == "" || f.store.acquired.Epoch == 0 || f.store.acquireCalls != 1 || f.store.releaseCalls != 1 {
 		t.Fatal("receipt not from original actual Resume native attempt")
 	}
@@ -218,20 +226,31 @@ func ea1ChildResumeSettlement(t *testing.T, factory func(*testing.T) (kernel.Sto
 		ea1CompBarrierUnchanged(t, ar, f.parent)
 		ea1CompBarrierUnchanged(t, ar, f.grandparent)
 	}
-	ea1AssertChildRecoveryPhaseReceipt(t, f.physical, f.request, f.definition, before, tool)
+	ea1AssertStartSettlementReceipt(t, f.physical, f.request, f.definition, before, tool)
 }
 func ea1ChildResumeElection(t *testing.T, factory func(*testing.T) (kernel.Store, func() (kernel.Store, kernel.Store)), deadline bool) {
 	f := ea1NewChildResumeSettlement(t, factory, false, deadline)
-	a, b := f.reopen()
+	ea1ChildSettlementElection(t, f.reopen, f.request, f.prepared, f.parent, f.grandparent, f.physical, f.definition, f.host, f.runner, nil, deadline)
+}
+
+// Both controls compete for the exact same original borrowed grant. Approval
+// differs from Resume only in its callback, preflight, and lease assertions.
+func ea1ChildSettlementElection(t *testing.T, reopen func() (kernel.Store, kernel.Store), request agent.StartRequest, source, parent, grandparent kernel.Snapshot,
+	physical *ea1StartSettlementPhysical, definition tools.Definition, host *ea1ChildSettlementHost, runner func(*kernel.Runtime, string, bool) *agent.Runner, approval *ea1ChildApprovalSettlementFixture, deadline bool) {
+	t.Helper()
+	a, b := reopen()
 	sa := &ea1ChildResumeSettlementStore{ea1AgentAdmissionStore: ea1AgentAdmissionWrap(t, a)}
 	sb := &ea1ChildResumeSettlementStore{ea1AgentAdmissionStore: ea1AgentAdmissionWrap(t, b)}
 	ar, br := ea1StartRuntime(t, sa), ea1StartRuntime(t, sb)
-	f.physical.rt = ar
+	physical.rt = ar
+	if approval != nil {
+		approval.rt = ar
+	}
 	begin := make(chan struct{}, 2)
 	allowBegin := make(chan struct{})
-	barrier := func(candidate kernel.ChildExecutionGrant) {
-		if candidate.ChildRunID != f.request.ID || candidate.ExpectedRevision != f.prepared.Run.Revision || candidate.IsOwned() {
-			t.Error("BeginChild candidate not original prepared child")
+	barrier := func(g kernel.ChildExecutionGrant) {
+		if g.ChildRunID != request.ID || g.ExpectedRevision != source.Run.Revision || g.IsOwned() {
+			t.Error("wrong original Child admission candidate")
 		}
 		begin <- struct{}{}
 		select {
@@ -242,7 +261,7 @@ func ea1ChildResumeElection(t *testing.T, factory func(*testing.T) (kernel.Store
 	sa.beforeBegin, sb.beforeBegin = barrier, barrier
 	enteredHost := make(chan struct{}, 1)
 	releaseHost := make(chan struct{})
-	f.host.before = func() {
+	host.before = func() {
 		enteredHost <- struct{}{}
 		select {
 		case <-releaseHost:
@@ -256,10 +275,16 @@ func ea1ChildResumeElection(t *testing.T, factory func(*testing.T) (kernel.Store
 	results := make(chan outcome, 2)
 	var wg sync.WaitGroup
 	wg.Add(2)
-	for _, r := range []*agent.Runner{f.runner(ar, "candidate-a", true), f.runner(br, "candidate-b", true)} {
+	for _, r := range []*agent.Runner{runner(ar, "candidate-a", true), runner(br, "candidate-b", true)} {
 		go func(r *agent.Runner) {
 			defer wg.Done()
-			s, e := r.Resume(t.Context(), f.request.ID, f.prepared.Run.Revision)
+			var s kernel.Snapshot
+			var e error
+			if approval != nil {
+				s, e = r.ResolveApproval(t.Context(), request.ID, source.Run.Revision, plugin.ApprovalResponse{Decision: plugin.ApprovalApprove, Comment: "original decision"})
+			} else {
+				s, e = r.Resume(t.Context(), request.ID, source.Run.Revision)
+			}
 			results <- outcome{s, e}
 		}(r)
 	}
@@ -274,95 +299,104 @@ func ea1ChildResumeElection(t *testing.T, factory func(*testing.T) (kernel.Store
 		}
 	}
 	close(allowBegin)
+	defer func() {
+		if releaseHost != nil {
+			close(releaseHost)
+			wg.Wait()
+		}
+	}()
 	select {
 	case <-enteredHost:
 	case <-t.Context().Done():
-		close(releaseHost)
-		wg.Wait()
 		t.Fatal("winner Host absent")
 	}
 	var loser outcome
 	select {
 	case loser = <-results:
 	case <-t.Context().Done():
-		close(releaseHost)
-		wg.Wait()
-		t.Fatal("competing Resume did not reject")
+		t.Fatal("competing control did not reject")
 	}
-	if !errors.Is(loser.e, kernel.ErrChildExecutionBusy) {
-		close(releaseHost)
-		wg.Wait()
-		t.Fatal("wrong competing Resume error", loser.e)
+	if !errors.Is(loser.e, kernel.ErrChildExecutionBusy) || !ea1RecoveryJSONEqual(loser.s, source) {
+		t.Fatal("wrong competing control result", loser.e)
 	}
-	current, e := ar.Load(t.Context(), f.request.ID)
+	current, e := ar.Load(t.Context(), request.ID)
 	if e != nil {
 		t.Fatal(e)
 	}
-	g, e := ar.LookupChildExecution(t.Context(), f.request.ID)
-	if e != nil || g.IsOwned() || g.ExpectedRevision != f.prepared.Run.Revision {
+	g, e := ar.LookupChildExecution(t.Context(), request.ID)
+	if e != nil || g.IsOwned() || g.ExpectedRevision != source.Run.Revision || g.ChildRunID != request.ID {
 		t.Fatal("winner scope not original", e)
 	}
-	ea1CompBarrierUnchanged(t, ar, f.prepared)
-	if !ea1RecoveryJSONEqual(loser.s, f.prepared) {
-		t.Fatal("loser changed original prepared snapshot")
-	}
+	ea1CompBarrierUnchanged(t, ar, source)
 	lease := sa.acquired
 	if lease.LeaseID == "" {
 		lease = sb.acquired
 	}
-	if lease.RunID != f.request.ID || lease.LeaseID == "" || lease.Epoch == 0 || sa.acquireCalls+sb.acquireCalls != 1 {
+	if approval == nil && (lease.RunID != request.ID || lease.LeaseID == "" || lease.Epoch == 0 || sa.acquireCalls+sb.acquireCalls != 1) {
 		t.Fatal("winner native authority missing or loser claimed")
 	}
-	ea1ChildRecoveryPhaseControls(t, ar, current, f.parent, f.grandparent, g)
-	if e = a.(kernel.ExecutionStore).CheckExecution(t.Context(), f.request.ID, &lease); e != nil {
-		t.Fatal("rejected competing controls revoked winner epoch", e)
+	ea1ChildRecoveryPhaseControls(t, ar, current, parent, grandparent, g)
+	if approval == nil {
+		if e = a.(kernel.ExecutionStore).CheckExecution(t.Context(), request.ID, &lease); e != nil {
+			t.Fatal("rejected competing controls revoked winner epoch", e)
+		}
 	}
 	if deadline {
-		delay := time.Until(f.grandparent.Run.DeadlineAt.Add(30 * time.Millisecond))
-		if delay > 0 {
+		if delay := time.Until(grandparent.Run.DeadlineAt.Add(30 * time.Millisecond)); delay > 0 {
 			select {
 			case <-time.After(delay):
 			case <-t.Context().Done():
-				close(releaseHost)
-				wg.Wait()
 				t.Fatal(t.Context().Err())
 			}
 		}
-		_, _, e = br.Expire(t.Context(), f.grandparent.Run.ID, f.grandparent.Run.Revision)
+		_, _, e = br.Expire(t.Context(), grandparent.Run.ID, grandparent.Run.Revision)
 		if !errors.Is(e, kernel.ErrChildExecutionBusy) {
-			close(releaseHost)
-			wg.Wait()
-			t.Fatal("deadline bypassed original admitted Resume", e)
+			t.Fatal("deadline bypassed original admitted control", e)
 		}
-		ea1ChildRecoveryPhaseUnchanged(t, ar, current, f.parent, f.grandparent, g)
+		ea1ChildRecoveryPhaseUnchanged(t, ar, current, parent, grandparent, g)
 	}
-	if len(f.physical.requests) != 0 || len(f.physical.toolRequests) != 0 {
+	if approval != nil {
+		if approval.approval.calls != 0 || len(physical.toolRequests) != 0 || len(physical.requests) != 1 || sa.acquireCalls+sb.acquireCalls != 0 {
+			t.Fatal("approval winner cutpoint dispatched early")
+		}
+	} else if len(physical.requests) != 0 || len(physical.toolRequests) != 0 {
 		t.Fatal("winner dispatched before Host boundary")
 	}
 	close(releaseHost)
 	wg.Wait()
+	releaseHost = nil
 	winner := <-results
-	if winner.e != nil || sa.begins+sb.begins != 1 || sa.marks+sb.marks != 1 || sa.finishes+sb.finishes != 1 || sa.acquireCalls+sb.acquireCalls != 1 || sa.releaseCalls+sb.releaseCalls != 1 {
-		t.Fatal("unique actual Resume winner failed", winner.e)
+	if winner.e != nil || sa.begins+sb.begins != 1 || sa.marks+sb.marks != 1 || sa.finishes+sb.finishes != 1 {
+		t.Fatal("actual control did not elect one winner", winner.e)
 	}
-	ea1AssertChildRecoveryPhaseReceipt(t, f.physical, f.request, f.definition, winner.s, false)
-	ea1CompBarrierUnchanged(t, ar, f.parent)
-	ea1CompBarrierUnchanged(t, ar, f.grandparent)
-	if _, e = ar.LookupChildExecution(t.Context(), f.request.ID); !errors.Is(e, kernel.ErrNotFound) {
+	if approval != nil {
+		if approval.preflights.Load() != 2 || sa.acquireCalls+sb.acquireCalls+sa.renewCalls+sb.renewCalls+sa.releaseCalls+sb.releaseCalls != 0 {
+			t.Fatal("Child approval invented Root native owner lifecycle or skipped preflight")
+		}
+		approval.assertReceipt(winner.s)
+	} else {
+		if sa.acquireCalls+sb.acquireCalls != 1 || sa.releaseCalls+sb.releaseCalls != 1 {
+			t.Fatal("unique Resume did not preserve native lease lifecycle")
+		}
+		ea1AssertStartSettlementReceipt(t, physical, request, definition, winner.s, false)
+	}
+	ea1CompBarrierUnchanged(t, ar, parent)
+	ea1CompBarrierUnchanged(t, ar, grandparent)
+	if _, e = ar.LookupChildExecution(t.Context(), request.ID); !errors.Is(e, kernel.ErrNotFound) {
 		t.Fatal("winner original scope not retired", e)
 	}
 	if deadline {
-		out, changed, e := ar.Expire(t.Context(), f.grandparent.Run.ID, f.grandparent.Run.Revision)
-		if e != nil || !changed || out.Run.Status != kernel.RunStatusFailed || out.Run.ErrorCode != "run.deadline_exceeded" || !ea1RecoveryJSONEqual(out.State, f.grandparent.State) {
+		out, changed, e := ar.Expire(t.Context(), grandparent.Run.ID, grandparent.Run.Revision)
+		if e != nil || !changed || out.Run.Status != kernel.RunStatusFailed || out.Run.ErrorCode != "run.deadline_exceeded" || !ea1RecoveryJSONEqual(out.State, grandparent.State) {
 			t.Fatal("retired callback failed to release deadline election", e)
 		}
 	} else {
-		out, e := ar.Cancel(t.Context(), f.grandparent.Run.ID, f.grandparent.Run.Revision, "original cancel")
+		out, e := ar.Cancel(t.Context(), grandparent.Run.ID, grandparent.Run.Revision, "original cancel")
 		if e != nil {
 			t.Fatal(e)
 		}
-		ea1CancelCommitted(t, ar, f.grandparent, out)
+		ea1CancelCommitted(t, ar, grandparent, out)
 	}
 	ea1CompBarrierUnchanged(t, ar, winner.s)
-	ea1CompBarrierUnchanged(t, ar, f.parent)
+	ea1CompBarrierUnchanged(t, ar, parent)
 }

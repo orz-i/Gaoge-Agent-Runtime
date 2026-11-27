@@ -118,7 +118,15 @@ func (store *KernelStore) BeginChildExecution(ctx context.Context, grant kernel.
 // the two leaves a provably settled marker, whereas a crash before Mark
 // leaves the physical effect quarantined.
 func (store *KernelStore) MarkChildExecutionSettled(ctx context.Context, grant kernel.ChildExecutionGrant, permit kernel.ChildExecutionSettlement) error {
-	if grant.IsOwned() {
+	return store.settleChildExecution(ctx, grant, permit, true)
+}
+
+func (store *KernelStore) FinishChildExecution(ctx context.Context, grant kernel.ChildExecutionGrant, permit kernel.ChildExecutionSettlement) error {
+	return store.settleChildExecution(ctx, grant, permit, false)
+}
+
+func (store *KernelStore) settleChildExecution(ctx context.Context, grant kernel.ChildExecutionGrant, permit kernel.ChildExecutionSettlement, markOnly bool) error {
+	if markOnly && grant.IsOwned() {
 		return kernel.ErrExecutionConflict
 	}
 	if store == nil || store.db == nil || ctx == nil || grant.ID == "" || grant.ChildRunID == "" || grant.ExpectedRevision == 0 {
@@ -144,55 +152,29 @@ func (store *KernelStore) MarkChildExecutionSettled(ctx context.Context, grant k
 		if err = tx.Where("grant_id = ?", grant.ID).Find(&records).Error; err != nil {
 			return translateKernelError(err)
 		}
-		if len(records) == 0 {
-			return kernel.ErrExecutionConflict
-		}
-		for _, record := range records {
-			if pgPhysicalGrant(record) != grant ||
-				(record.SettledRevision != 0 && record.SettledRevision != revision) {
-				return kernel.ErrExecutionConflict
-			}
-		}
-		updates := map[string]any{"settled_revision": revision}
-		result := tx.Model(&models.KernelChildEffectGrantRecord{}).
-			Where("grant_id = ? AND child_run_id = ? AND start_revision = ? AND (settled_revision = 0 OR settled_revision = ?)",
-				grant.ID, grant.ChildRunID, grant.ExpectedRevision, revision).UpdateColumns(updates)
-		if result.Error != nil {
-			return translateKernelApplyError(result.Error)
-		}
-		if result.RowsAffected != int64(len(records)) {
-			return kernel.ErrExecutionConflict
-		}
-		return nil
-	})
-}
-
-func (store *KernelStore) FinishChildExecution(ctx context.Context, grant kernel.ChildExecutionGrant, permit kernel.ChildExecutionSettlement) error {
-	if store == nil || store.db == nil || ctx == nil || grant.ID == "" || grant.ChildRunID == "" || grant.ExpectedRevision == 0 {
-		return kernel.ErrInvalidInput
-	}
-	return store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		child, lockErr := lockKernelRun(tx, grant.ChildRunID)
-		if lockErr != nil {
-			return lockErr
-		}
-		if e := pgNativeEntryGate(tx, grant.ChildRunID); e != nil {
-			return e
-		}
-		var records []models.KernelChildEffectGrantRecord
-		if err := tx.Where("grant_id = ?", grant.ID).Find(&records).Error; err != nil {
-			return translateKernelError(err)
-		}
 		if len(records) == 0 || child.Revision == 0 {
 			return kernel.ErrExecutionConflict
 		}
-		snapshot, e := kernelSnapshotFrom(child)
-		if e != nil {
-			return e
+		if markOnly {
+			for _, record := range records {
+				if pgPhysicalGrant(record) != grant ||
+					(record.SettledRevision != 0 && record.SettledRevision != revision) {
+					return kernel.ErrExecutionConflict
+				}
+			}
+			updates := map[string]any{"settled_revision": revision}
+			result := tx.Model(&models.KernelChildEffectGrantRecord{}).
+				Where("grant_id = ? AND child_run_id = ? AND start_revision = ? AND (settled_revision = 0 OR settled_revision = ?)",
+					grant.ID, grant.ChildRunID, grant.ExpectedRevision, revision).UpdateColumns(updates)
+			if result.Error != nil {
+				return translateKernelApplyError(result.Error)
+			}
+			if result.RowsAffected != int64(len(records)) {
+				return kernel.ErrExecutionConflict
+			}
+			return nil
 		}
-		if !permit.Matches(grant, snapshot) {
-			return kernel.ErrExecutionConflict
-		}
+
 		mark := child.Revision
 		if grant.IsOwned() {
 			mark = 0
@@ -213,7 +195,7 @@ func (store *KernelStore) FinishChildExecution(ctx context.Context, grant kernel
 			if active != 1 || child.ExecutionEpoch != grant.ExecutionEpoch || child.ExecutionPhysicalEpoch != grant.ExecutionEpoch || child.ExecutionQuarantineRevision != 0 {
 				return kernel.ErrExecutionConflict
 			}
-			if e = pgPersistOwnedRetirement(tx, records[0], grant, snapshot, pgManagedLease(child), permit); e != nil {
+			if e := pgPersistOwnedRetirement(tx, records[0], grant, snapshot, pgManagedLease(child), permit); e != nil {
 				return e
 			}
 		}
