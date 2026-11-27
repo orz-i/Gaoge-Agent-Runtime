@@ -301,6 +301,10 @@ func ea1RootResumeUnknown(t *testing.T, factory func(*testing.T) (kernel.Store, 
 	ea1RootResumeUnknownWithModelReadDelay(t, factory, kind, 0)
 }
 func ea1RootResumeUnknownWithModelReadDelay(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store), kind string, delay time.Duration) {
+	ea1RootUnknownResume(t, factory, kind, delay, false)
+}
+
+func ea1RootUnknownResume(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store), kind string, delay time.Duration, cancel bool) {
 	f := ea1NewResumeFixture(t, factory, kind == "tool")
 	f.physical.modelReadDelay = delay
 	injected := errors.New("actual Resume physical outcome missing")
@@ -375,6 +379,12 @@ func ea1RootResumeUnknownWithModelReadDelay(t *testing.T, factory func(*testing.
 			ea1StartSettlementJSONEqual(t, "prior consumed Model response", inv.Response, f.physical.response)
 		}
 	}
+	if cancel {
+		ea1CancelRejected(t, f.observer, before, g, kernel.ErrChildExecutionBusy)
+		if e = f.peer.(kernel.ExecutionStore).CheckExecution(t.Context(), f.request.ID, &lease); e != nil {
+			t.Fatalf("rejected Cancel revoked original native owner: %v", e)
+		}
+	}
 	ea1AwaitNativeExpiry(t, f.peer.(kernel.ExecutionStore), f.store.renewals.latest(t, lease))
 	fresh := f.reopen()
 	freshRT := ea1StartRuntime(t, fresh)
@@ -387,6 +397,9 @@ func ea1RootResumeUnknownWithModelReadDelay(t *testing.T, factory func(*testing.
 		t.Fatalf("Store native TTL not expired: %v", e)
 	}
 	for range 2 {
+		if cancel {
+			ea1CancelRejected(t, freshRT, before, g, kernel.ErrChildExecutionBusy)
+		}
 		_, e = next.Resume(t.Context(), f.request.ID, before.Run.Revision)
 		want := agent.ErrRootOutcomeUnknown
 		switch kind {

@@ -23,6 +23,12 @@ import (
 // wall-clock time before reopening, without private-table mutation.
 func RunEA1RootAgentUnknownSuite(t *testing.T, factory func(*testing.T) (kernel.Store, func() kernel.Store)) {
 	t.Run("host_middleware", func(t *testing.T) { ea1RootHostUnknown(t, factory) })
+	ea1AgentUnknownReceipts(t, factory, false)
+}
+
+// Root Resume and Child reconciliation differ in admission authority, not
+// in the original physical request, receipt, or lease-expiry evidence.
+func ea1AgentUnknownReceipts(t *testing.T, factory func(*testing.T) (kernel.Store, func() kernel.Store), child bool) {
 	for _, kind := range []string{"model", "tool"} {
 		t.Run(kind, func(t *testing.T) {
 			backing, reopen := factory(t)
@@ -60,6 +66,12 @@ func RunEA1RootAgentUnknownSuite(t *testing.T, factory func(*testing.T) (kernel.
 			}
 			first := makeRunner(rt, "first-owner", 0)
 			request := agent.StartRequest{ID: "unknown-root", Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"}, Goal: "original physical attempt"}
+			var parent kernel.Snapshot
+			if child {
+				parent = ea1ChildRecoveryParent(t, rt)
+				request.ID, request.ParentRunID, request.RequestID = "unknown-child", parent.Run.ID, "original-child-effect"
+				request.OriginFingerprint = agent.FrozenOriginFingerprint([]byte(`{"source":"original-child"}`))
+			}
 			if kind == "tool" {
 				request.ToolKeys = []string{"effect"}
 			}
@@ -113,6 +125,13 @@ func RunEA1RootAgentUnknownSuite(t *testing.T, factory func(*testing.T) (kernel.
 			if err = native.CheckExecution(t.Context(), request.ID, &lease); !errors.Is(err, kernel.ErrExecutionConflict) {
 				t.Fatalf("old native owner still valid after real expiry: %v", err)
 			}
+			var grant kernel.ChildExecutionGrant
+			if child {
+				grant, err = rt.LookupChildExecution(t.Context(), request.ID)
+				if err != nil || grant.ChildRunID != request.ID {
+					t.Fatalf("original child grant: %v", err)
+				}
+			}
 			fresh := reopen()
 			ownerRT, err := kernel.New(kernel.Dependencies{Store: fresh})
 			if err != nil {
@@ -128,14 +147,27 @@ func RunEA1RootAgentUnknownSuite(t *testing.T, factory func(*testing.T) (kernel.
 			}
 			physical.rt = ownerRT
 			next := makeRunner(ownerRT, "fresh-owner", 3*time.Minute)
-			_, resumeErr := next.Resume(t.Context(), request.ID, durable.Run.Revision)
+			var resumeErr error
+			if child {
+				resumeErr = next.ReconcileChildPhysicalGrant(t.Context(), request.ID)
+				if !errors.Is(resumeErr, kernel.ErrChildExecutionBusy) {
+					t.Fatalf("unknown child reconciliation: %v", resumeErr)
+				}
+				ea1CompBarrierUnchanged(t, ownerRT, parent)
+				same, lookupErr := ownerRT.LookupChildExecution(t.Context(), request.ID)
+				if lookupErr != nil || same != grant {
+					t.Fatal("unknown recovery changed original grant")
+				}
+			} else {
+				_, resumeErr = next.Resume(t.Context(), request.ID, durable.Run.Revision)
+			}
 			afterCalls, afterTools := physical.counts()
 			// No provider idempotency or affirmative no-effect proof exists here.
 			// Reusing InvocationID is not permission for another physical send.
 			if afterCalls != calls || afterTools != toolCalls {
 				t.Errorf("EA-06 UNKNOWN replay: model %d->%d tool %d->%d resumeErr=%v originalInvocation=%s attempt=%d", calls, afterCalls, toolCalls, afterTools, resumeErr, invocation.ID, invocation.ExecutionAttempt)
 			}
-			if kind == "tool" && !errors.Is(resumeErr, agent.ErrToolOutcomeUnknown) {
+			if !child && kind == "tool" && !errors.Is(resumeErr, agent.ErrToolOutcomeUnknown) {
 				t.Errorf("Tool unknown must remain typed quarantine: %v", resumeErr)
 			}
 			// Model has no established ModelUnknown error contract. Assert the safety
