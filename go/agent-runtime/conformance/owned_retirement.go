@@ -374,15 +374,25 @@ func runRetirementManaged(t *testing.T, factory func(*testing.T) ManagedRecovery
 	}
 	r, e := f.runtime.LoadOwnedRetirement(t.Context(), g.ID)
 	after, ce := f.store.LoadManagedRecoveryByID(t.Context(), f.point.ID)
-	if e != nil || ce != nil || len(r.Closures) != 1 || r.Closures[0].SafePoint.ID != f.point.ID || !r.Closures[0].Resolved() || r.Closures[0].Selection.Mode != kernel.ManagedResume || kernel.ManagedDigest(r.Closures[0]) != kernel.ManagedDigest(after) {
+	if e != nil || ce != nil || !after.Resolved() || after.SafePoint.ID != f.point.ID || !r.MatchesManagedClosure(after, *after.Terminal) {
 		t.Fatalf("retirement omitted original closure: %v %v", e, ce)
 	}
 	if _, e = f.store.LookupChildExecution(t.Context(), g.ChildRunID); !errors.Is(e, kernel.ErrNotFound) {
 		t.Fatalf("retired grant survived closure: %v", e)
 	}
+	if len(r.ClosureRefs) != 1 || r.ClosureRefs[0].SourceID != f.point.ID || r.ClosureRefs[0].Digest != kernel.ManagedDigest(after) {
+		t.Fatal("retirement copied or lost original closure identity")
+	}
+	forged := r
+	forged.ClosureRefs = append([]kernel.ManagedClosureRef(nil), r.ClosureRefs...)
+	forged.ClosureRefs[0].SourceID = "foreign-suspension"
+	forged.Digest = forged.Identity()
+	if forged.MatchesManagedClosure(after, *after.Terminal) {
+		t.Fatal("foreign closure source gained original authority")
+	}
 	fresh := retirementRuntime(t, f.backend.Reopen())
 	retired, e := fresh.LoadOwnedRetirement(t.Context(), g.ID)
-	if e != nil || len(retired.Closures) != 1 || kernel.ManagedDigest(retired.Closures) != kernel.ManagedDigest(r.Closures) {
+	if e != nil || !retired.MatchesManagedClosure(after, *after.Terminal) || retired.Identity() != r.Identity() {
 		t.Fatal("reopen lost managed lineage")
 	}
 	retirementSame(t, fresh, f.source, retired)
@@ -438,7 +448,7 @@ func runRetiredGrantIDReuse(t *testing.T, factory func(*testing.T) ManagedRecove
 	if _, e = rt.LookupChildExecution(ctx, v.Run.ID); !errors.Is(e, kernel.ErrNotFound) {
 		t.Fatalf("rejected admission left an active grant: %v", e)
 	}
-	retained, e := f.backend.Reopen().(kernel.OwnedRetirementStore).LoadOwnedRetirement(ctx, f.grant.ID)
+	retained, e := f.backend.Reopen().(kernel.PhysicalExecutionStore).LoadOwnedRetirement(ctx, f.grant.ID)
 	if e != nil || retained.Identity() != r.Identity() || !retained.Valid() {
 		t.Fatalf("original retirement changed: %v", e)
 	}

@@ -38,6 +38,8 @@ var ErrPhysicalAdmissionCommitUnknown = errors.New("kernel physical admission co
 // CheckOwnedPhysicalEntry atomically consumes the original Grant entry epoch
 // before acknowledging callback entry, including Managed successors; no replay.
 type PhysicalExecutionStore interface {
+	LoadOwnedRetirement(context.Context, string) (OwnedRetirementReceipt, error)
+	LookupOwnedRetirementForRun(context.Context, string) (OwnedRetirementReceipt, error)
 	LookupChildExecution(context.Context, string) (ChildExecutionGrant, error)
 	FinishChildExecution(context.Context, ChildExecutionGrant, ChildExecutionSettlement) error
 	RecordPhysicalCallbackReturn(context.Context, ChildExecutionGrant, uint64, PhysicalCallbackOutcome, PhysicalCallbackReturn) error

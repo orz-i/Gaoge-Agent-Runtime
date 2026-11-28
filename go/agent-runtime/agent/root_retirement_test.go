@@ -166,7 +166,6 @@ type retirementHiddenStore struct {
 	kernel.Store
 	kernel.ExecutionStore
 
-	kernel.PhysicalExecutionStore
 	creates int
 }
 
@@ -175,10 +174,10 @@ func (s *retirementHiddenStore) Create(ctx context.Context, r kernel.Record, e [
 	return s.Store.Create(ctx, r, e)
 }
 
-func TestRootRetirementCapabilityRequiredBeforeCreate(t *testing.T) {
+func TestPhysicalExecutionCapabilityRequiredBeforeCreate(t *testing.T) {
 	for _, explicit := range []bool{false, true} {
 		base := memory.NewStore()
-		store := &retirementHiddenStore{Store: base, ExecutionStore: base, PhysicalExecutionStore: base}
+		store := &retirementHiddenStore{Store: base, ExecutionStore: base}
 		rt, err := kernel.New(kernel.Dependencies{Store: store})
 		if err != nil {
 			t.Fatal(err)
@@ -189,8 +188,8 @@ func TestRootRetirementCapabilityRequiredBeforeCreate(t *testing.T) {
 		if explicit {
 			deps.RunExecution = &agent.RunExecution{OwnerID: "explicit-owner", LeaseDuration: 3 * time.Minute}
 		}
-		if _, err := agent.NewRunner(deps); !errors.Is(err, kernel.ErrExecutionRequired) {
-			t.Fatalf("missing retirement accepted explicit=%v: %v", explicit, err)
+		if _, err := agent.NewRunner(deps); !errors.Is(err, agent.ErrInvalidRequest) {
+			t.Fatalf("missing physical contract accepted explicit=%v: %v", explicit, err)
 		}
 		if store.creates != 0 || model.calls != 0 || host.calls.Load() != 0 {
 			t.Fatalf("unsupported adapter changed state: creates=%d host=%d sends=%d", store.creates, host.calls.Load(), model.calls)

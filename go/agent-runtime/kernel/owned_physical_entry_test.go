@@ -116,14 +116,14 @@ func TestOwnedNoEntryEvidenceCannotBecomeActualReturn(t *testing.T) {
 		t.Fatal("changed source inherited no-entry")
 	}
 	permit := ChildExecutionSettlement{proof: featurecontrol.Seal(source.Run.ID, source.Run.Revision, "agent_owned_physical_settled", g.ID, source.State, source)}
-	receipt, e := BuildOwnedRetirementReceipt(g, source, lease, c, permit, []ManagedTransfer{})
+	receipt, e := BuildOwnedRetirementReceipt(g, source, lease, c, permit, ManagedAuthority{}, ManagedTransfer{})
 	if e != nil || !receipt.Valid() || !receipt.Evidence.Completion.NotEntered() {
 		t.Fatalf("exact no-entry could not retire: %v", e)
 	}
-	if _, e = BuildOwnedRetirementReceipt(g, changed, lease, c, permit, []ManagedTransfer{}); !errors.Is(e, ErrExecutionConflict) {
+	if _, e = BuildOwnedRetirementReceipt(g, changed, lease, c, permit, ManagedAuthority{}, ManagedTransfer{}); !errors.Is(e, ErrExecutionConflict) {
 		t.Fatal("changed source borrowed no-entry")
 	}
-	if _, e = BuildOwnedRetirementReceipt(g, source, lease, c, permit, []ManagedTransfer{{}}); !errors.Is(e, ErrExecutionConflict) {
+	if _, e = BuildOwnedRetirementReceipt(g, source, lease, c, permit, ManagedAuthority{Namespace: "foreign"}, ManagedTransfer{}); !errors.Is(e, ErrExecutionConflict) {
 		t.Fatal("no-entry retirement borrowed managed closure")
 	}
 	if e = ValidateOwnedPhysicalRecovery(g, source, lease, source.Run.Revision, StoreMutation{}, OwnedPhysicalRecovery{modelEvidence: true}, c, 0); !errors.Is(e, ErrExecutionConflict) {

@@ -17,7 +17,7 @@ type noEntryKernelPorts interface {
 	kernel.ControlStore
 
 	kernel.PhysicalExecutionStore
-	kernel.OwnedRetirementStore
+
 	kernel.ExecutionCustodyStore
 }
 

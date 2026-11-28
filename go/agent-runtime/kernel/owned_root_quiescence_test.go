@@ -16,7 +16,7 @@ func settledRootFixture() (kernel.Snapshot, kernel.OwnedRetirementReceipt) {
 		AdmissionSourceHash: strings.Repeat("a", 64), AdmissionOperation: "prepare",
 	}
 	c := kernel.PhysicalCallbackCompletion{GrantID: g.ID, ReturnRevision: run.Run.Revision, ReturnSourceHash: strings.Repeat("b", 64), HostCompleted: true, LeaseOwned: true, ControlCustody: kernel.OwnedCustodyPrepared}
-	r := kernel.OwnedRetirementReceipt{Version: 1, Evidence: kernel.OwnedSettlementEvidence{Version: 1, Grant: g, Snapshot: run, Completion: c}, Closures: []kernel.ManagedTransfer{}}
+	r := kernel.OwnedRetirementReceipt{Version: 1, Evidence: kernel.OwnedSettlementEvidence{Version: 1, Grant: g, Snapshot: run, Completion: c}, ClosureRefs: []kernel.ManagedClosureRef{}}
 	r.Digest = r.Identity()
 	return run, r
 }

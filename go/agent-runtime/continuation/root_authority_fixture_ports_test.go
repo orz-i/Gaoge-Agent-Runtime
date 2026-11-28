@@ -57,11 +57,9 @@ func (s *claimantAfterCreateStore) RepairExecutionQuarantine(ctx context.Context
 	return s.Store.(kernel.ExecutionQuarantineStore).RepairExecutionQuarantine(ctx, q)
 }
 
-var _ kernel.OwnedRetirementStore = (*claimantAfterCreateStore)(nil)
-
 func (s *claimantAfterCreateStore) LoadOwnedRetirement(ctx context.Context, id string) (kernel.OwnedRetirementReceipt, error) {
-	return s.Store.(kernel.OwnedRetirementStore).LoadOwnedRetirement(ctx, id)
+	return s.Store.(kernel.PhysicalExecutionStore).LoadOwnedRetirement(ctx, id)
 }
 func (s *claimantAfterCreateStore) LookupOwnedRetirementForRun(ctx context.Context, id string) (kernel.OwnedRetirementReceipt, error) {
-	return s.Store.(kernel.OwnedRetirementStore).LookupOwnedRetirementForRun(ctx, id)
+	return s.Store.(kernel.PhysicalExecutionStore).LookupOwnedRetirementForRun(ctx, id)
 }

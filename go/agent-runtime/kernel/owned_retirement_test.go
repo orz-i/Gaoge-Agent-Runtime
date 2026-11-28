@@ -14,7 +14,7 @@ func retirementFixture() (OwnedRetirementReceipt, ExecutionLease) {
 	g := ChildExecutionGrant{ID: "scope", ChildRunID: "root", ExpectedRevision: 1, ExecutionOwnerID: l.OwnerID, ExecutionLeaseID: l.LeaseID, ExecutionEpoch: l.Epoch, AdmissionSourceHash: strings.Repeat("a", 64), AdmissionOperation: "start"}
 	s := Snapshot{Run: Run{ID: "root", Kind: "agent", Status: RunStatusRunning, Revision: 2}, State: json.RawMessage(`{"receipt":"original"}`)}
 	c := PhysicalCallbackCompletion{GrantID: g.ID, ReturnRevision: 2, ReturnSourceHash: strings.Repeat("b", 64), HostCompleted: true, LeaseOwned: true}
-	r := OwnedRetirementReceipt{Version: 1, Evidence: OwnedSettlementEvidence{Version: 1, Grant: g, Snapshot: s, Completion: c}, Closures: []ManagedTransfer{}}
+	r := OwnedRetirementReceipt{Version: 1, Evidence: OwnedSettlementEvidence{Version: 1, Grant: g, Snapshot: s, Completion: c}, ClosureRefs: []ManagedClosureRef{}}
 	r.Digest = r.Identity()
 	return r, l
 }
@@ -35,7 +35,7 @@ func TestOwnedRetirementWireAndExactFinish(t *testing.T) {
 		}
 	}
 	permit := ChildExecutionSettlement{proof: featurecontrol.Seal(s.Run.ID, s.Run.Revision, "agent_owned_physical_settled", g.ID, s.State, s)}
-	receipt, e := BuildOwnedRetirementReceipt(g, s, l, c, permit, []ManagedTransfer{})
+	receipt, e := BuildOwnedRetirementReceipt(g, s, l, c, permit, ManagedAuthority{}, ManagedTransfer{})
 	if e != nil || !receipt.Valid() || receipt.Identity() != r.Identity() {
 		t.Fatalf("finish: %v", e)
 	}
@@ -70,14 +70,14 @@ func TestOwnedRetirementWireAndExactFinish(t *testing.T) {
 				return
 			case "nil-closures":
 				bad := r
-				bad.Closures = nil
+				bad.ClosureRefs = nil
 				bad.Digest = bad.Identity()
 				if bad.Valid() {
 					t.Fatal("null closure accepted")
 				}
 				return
 			}
-			if _, e := BuildOwnedRetirementReceipt(g, current, owner, completion, p, []ManagedTransfer{}); !errors.Is(e, ErrExecutionConflict) {
+			if _, e := BuildOwnedRetirementReceipt(g, current, owner, completion, p, ManagedAuthority{}, ManagedTransfer{}); !errors.Is(e, ErrExecutionConflict) {
 				t.Fatalf("invalid finish: %v", e)
 			}
 		})

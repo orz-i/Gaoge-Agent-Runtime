@@ -3,7 +3,6 @@ package sqlite
 import (
 	"context"
 	"database/sql"
-	"errors"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
@@ -32,17 +31,10 @@ func sqliteReserveGrantIdentity(ctx context.Context, tx *sql.Tx, g kernel.ChildE
 	return nil
 }
 
-func sqliteConsumeManagedGrant(ctx context.Context, tx *sql.Tx, g kernel.ChildExecutionGrant) error {
-	mark, err := loadOwnedPhysicalGrant(ctx, tx, g)
-	if err != nil || mark != 0 {
-		return kernel.ErrExecutionConflict
-	}
-	_, err = loadPhysicalCallbackReturn(ctx, tx, g)
-	if !errors.Is(err, kernel.ErrNotFound) {
-		return kernel.ErrExecutionConflict
-	}
-	r, err := tx.ExecContext(ctx, `DELETE FROM runtime_child_effect_grants WHERE grant_id=? AND parent_run_id=? AND child_run_id=? AND start_revision=? AND execution_owner_id=? AND execution_lease_id=? AND execution_epoch=? AND admission_source_hash=? AND admission_operation=? AND settled_revision=0 AND callback_return_revision=0`,
-		g.ID, g.ChildRunID, g.ChildRunID, g.ExpectedRevision, g.ExecutionOwnerID, g.ExecutionLeaseID, g.ExecutionEpoch, g.AdmissionSourceHash, g.AdmissionOperation)
+// Delete the exact qualified effect and active index in its existing transaction.
+func sqliteConsumePhysicalGrant(ctx context.Context, tx *sql.Tx, g kernel.ChildExecutionGrant, count int64) error {
+	r, err := tx.ExecContext(ctx, `DELETE FROM runtime_child_effect_grants WHERE grant_id=? AND child_run_id=? AND start_revision=? AND execution_owner_id=? AND execution_lease_id=? AND execution_epoch=? AND admission_source_hash=? AND admission_operation=? AND settled_revision=0`,
+		g.ID, g.ChildRunID, g.ExpectedRevision, g.ExecutionOwnerID, g.ExecutionLeaseID, g.ExecutionEpoch, g.AdmissionSourceHash, g.AdmissionOperation)
 	if err != nil {
 		return conflictOrDatabaseError(err)
 	}
@@ -50,7 +42,7 @@ func sqliteConsumeManagedGrant(ctx context.Context, tx *sql.Tx, g kernel.ChildEx
 	if err != nil {
 		return err
 	}
-	if n != 1 {
+	if count < 1 || n != count {
 		return kernel.ErrExecutionConflict
 	}
 	return nil

@@ -95,6 +95,8 @@ var (
 // the Agent's internal settlement proof. Store backends must check the opaque
 // marker inside their own authoritative commit transaction.
 type childPhysicalStoreContract interface {
+	LoadOwnedRetirement(context.Context, string) (kernel.OwnedRetirementReceipt, error)
+	LookupOwnedRetirementForRun(context.Context, string) (kernel.OwnedRetirementReceipt, error)
 	BeginPhysicalExecution(context.Context, kernel.PhysicalAdmission) (kernel.PhysicalAdmissionResult, error)
 	LookupChildExecution(context.Context, string) (kernel.ChildExecutionGrant, error)
 	RecordPhysicalCallbackReturn(context.Context, kernel.ChildExecutionGrant, uint64, kernel.PhysicalCallbackOutcome, kernel.PhysicalCallbackReturn) error

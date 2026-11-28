@@ -190,29 +190,29 @@ func (s *beforeModelIntentStore) RepairExecutionQuarantine(ctx context.Context, 
 
 // Preserve the backend's atomic retirement authority through this fault decorator.
 func (s *resumeTurnFaultStore) LoadOwnedRetirement(ctx context.Context, id string) (kernel.OwnedRetirementReceipt, error) {
-	return s.Store.(kernel.OwnedRetirementStore).LoadOwnedRetirement(ctx, id)
+	return s.Store.(kernel.PhysicalExecutionStore).LoadOwnedRetirement(ctx, id)
 }
 
 // Preserve the backend's atomic retirement authority through this fault decorator.
 func (s *preDispatchReadFaultStore) LoadOwnedRetirement(ctx context.Context, id string) (kernel.OwnedRetirementReceipt, error) {
-	return s.Store.(kernel.OwnedRetirementStore).LoadOwnedRetirement(ctx, id)
+	return s.Store.(kernel.PhysicalExecutionStore).LoadOwnedRetirement(ctx, id)
 }
 
 // Preserve the backend's atomic retirement authority through this fault decorator.
 func (s *beforeModelIntentStore) LoadOwnedRetirement(ctx context.Context, id string) (kernel.OwnedRetirementReceipt, error) {
-	return s.Store.(kernel.OwnedRetirementStore).LoadOwnedRetirement(ctx, id)
+	return s.Store.(kernel.PhysicalExecutionStore).LoadOwnedRetirement(ctx, id)
 }
 
 func (s *resumeTurnFaultStore) LookupOwnedRetirementForRun(ctx context.Context, id string) (kernel.OwnedRetirementReceipt, error) {
-	return s.Store.(kernel.OwnedRetirementStore).LookupOwnedRetirementForRun(ctx, id)
+	return s.Store.(kernel.PhysicalExecutionStore).LookupOwnedRetirementForRun(ctx, id)
 }
 
 func (s *preDispatchReadFaultStore) LookupOwnedRetirementForRun(ctx context.Context, id string) (kernel.OwnedRetirementReceipt, error) {
-	return s.Store.(kernel.OwnedRetirementStore).LookupOwnedRetirementForRun(ctx, id)
+	return s.Store.(kernel.PhysicalExecutionStore).LookupOwnedRetirementForRun(ctx, id)
 }
 
 func (s *beforeModelIntentStore) LookupOwnedRetirementForRun(ctx context.Context, id string) (kernel.OwnedRetirementReceipt, error) {
-	return s.Store.(kernel.OwnedRetirementStore).LookupOwnedRetirementForRun(ctx, id)
+	return s.Store.(kernel.PhysicalExecutionStore).LookupOwnedRetirementForRun(ctx, id)
 }
 
 func (s *resumeTurnFaultStore) LoadBudget(ctx context.Context, id string) (budget.Ledger, error) {

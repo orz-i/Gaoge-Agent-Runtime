@@ -41,8 +41,6 @@ type nativeBudgetFault struct {
 	dispatch, receipts int
 }
 
-var _ kernel.OwnedRetirementStore = (*nativeBudgetFault)(nil)
-
 var errNativeModelBudgetCut = errors.New("native model budget transaction interrupted")
 
 func (s *nativeBudgetFault) ApplyExecution(ctx context.Context, l kernel.ExecutionLease, rev uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {

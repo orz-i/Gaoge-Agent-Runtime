@@ -83,9 +83,9 @@ func (s *receiptFaultStore) RepairExecutionQuarantine(ctx context.Context, q ker
 
 // Preserve the backend's atomic retirement authority through this fault decorator.
 func (s *receiptFaultStore) LoadOwnedRetirement(ctx context.Context, id string) (kernel.OwnedRetirementReceipt, error) {
-	return s.Store.(kernel.OwnedRetirementStore).LoadOwnedRetirement(ctx, id)
+	return s.Store.(kernel.PhysicalExecutionStore).LoadOwnedRetirement(ctx, id)
 }
 
 func (s *receiptFaultStore) LookupOwnedRetirementForRun(ctx context.Context, id string) (kernel.OwnedRetirementReceipt, error) {
-	return s.Store.(kernel.OwnedRetirementStore).LookupOwnedRetirementForRun(ctx, id)
+	return s.Store.(kernel.PhysicalExecutionStore).LookupOwnedRetirementForRun(ctx, id)
 }

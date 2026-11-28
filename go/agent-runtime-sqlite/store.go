@@ -633,6 +633,20 @@ func (s *Store) applyWithAuthority(ctx context.Context, lease *kernel.ExecutionL
 		}
 		return kernel.Snapshot{}, kernel.ErrConflict
 	}
+	snapshot, err := commitRunJournal(ctx, tx, mutation, encoded, events)
+	if err != nil {
+		return kernel.Snapshot{}, err
+	}
+	if err = tx.Commit(); err != nil {
+		return kernel.Snapshot{}, err
+	}
+	return snapshot, nil
+}
+
+// The qualified Run CAS has already committed its row within tx. Both
+// ordinary control and managed cancellation write the same journal/proof.
+func commitRunJournal(ctx context.Context, tx *sql.Tx, mutation kernel.StoreMutation, encoded encodedRecord, events []byte) (kernel.Snapshot, error) {
+	runID := mutation.Record.Run.ID
 	snapshot, err := loadTx(ctx, tx, runID)
 	if err != nil {
 		return kernel.Snapshot{}, err
@@ -644,9 +658,6 @@ func (s *Store) applyWithAuthority(ctx context.Context, lease *kernel.ExecutionL
 		return kernel.Snapshot{}, err
 	}
 	if err = writeCommitProof(ctx, tx, mutation.Record.Run, commitFingerprint(encoded, events)); err != nil {
-		return kernel.Snapshot{}, err
-	}
-	if err = tx.Commit(); err != nil {
 		return kernel.Snapshot{}, err
 	}
 	return snapshot, nil

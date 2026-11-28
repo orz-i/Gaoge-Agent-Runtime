@@ -33,6 +33,8 @@
 
 - Physical execution admission now uses one `kernel.PhysicalExecutionStore` and `BeginPhysicalExecution` transaction with `PhysicalAdmission`. The old Child/Owned Store interfaces and admission methods are removed. Runtime binds the original committed result directly through `AdmitPhysicalExecution`; `WithPhysicalGrant` and standalone unleased Root admission are removed. Parent-bound operations still fence immutable physical ancestors; independently leased operations retain native lease/epoch and attempt-specific commit acknowledgement, and managed continuation consumes the original predecessor in that same admission transaction. A visible Grant cannot be converted into a new admission permit.
 
+- Physical retirement observation is part of `PhysicalExecutionStore`; the separate `OwnedRetirementStore` capability is removed. Managed retirement keeps a single source ID and closure digest in the receipt, not a nested copy of the complete Managed Transfer and terminal snapshot. SQL current Managed rows now index the sole history payload (legacy NOT NULL payload columns contain JSON null on new writes); the original history must resolve before a retirement can be observed. Empty ordinary retirement receipt wire remains unchanged; old nonempty managed closure objects are not interpreted as the new reference format. Schema and explicit legacy cutover remain AC-03 work.
+
 ## Owned physical callback entry and no-entry retirement
 
 Custom `OwnedPhysicalExecutionStore` adapters must implement

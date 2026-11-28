@@ -478,7 +478,7 @@ func assertNoEntryRetirement(t *testing.T, rt *kernel.Runtime, g kernel.ChildExe
 	c := receipt.Evidence.Completion
 	if e != nil || !receipt.Valid() || receipt.Evidence.Grant != g || !receipt.Evidence.Completion.NotEntered() ||
 		!c.MatchesNotEnteredSnapshot(g, source) || c.HostCompleted || c.LeaseOwned != owned || c.ToolReturns != "" || c.MatchesReturnSnapshot(source) ||
-		len(receipt.Closures) != 0 || kernel.ManagedDigest(receipt.Evidence.Snapshot) != kernel.ManagedDigest(source) {
+		len(receipt.ClosureRefs) != 0 || kernel.ManagedDigest(receipt.Evidence.Snapshot) != kernel.ManagedDigest(source) {
 		t.Fatalf("invalid original no-entry retirement: %+v %v", receipt, e)
 	}
 }

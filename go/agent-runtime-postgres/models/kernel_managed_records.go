@@ -10,8 +10,8 @@ type KernelManagedAuthorityRecord struct {
 
 func (KernelManagedAuthorityRecord) TableName() string { return "agent_kernel_managed_authority" }
 
-// One current certificate per Run; its full immutable source and handover
-// history live in Payload. Run row lock serializes every transition.
+// One current index per Run. The referenced history owns the full payload.
+// Payload is a legacy NOT NULL column, written as JSON null until AC03.
 type KernelManagedTransferRecord struct {
 	RunID        string `gorm:"size:64;primaryKey"`
 	SuspensionID string `gorm:"size:128;not null;uniqueIndex"`

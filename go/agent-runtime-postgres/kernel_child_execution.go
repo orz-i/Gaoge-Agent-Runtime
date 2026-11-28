@@ -84,15 +84,7 @@ func (store *KernelStore) FinishChildExecution(ctx context.Context, grant kernel
 				return e
 			}
 		}
-		result := tx.Where("grant_id = ? AND child_run_id = ? AND start_revision = ? AND settled_revision = 0",
-			grant.ID, grant.ChildRunID, grant.ExpectedRevision).Delete(&models.KernelChildEffectGrantRecord{})
-		if result.Error != nil {
-			return translateKernelApplyError(result.Error)
-		}
-		if result.RowsAffected != int64(len(records)) {
-			return kernel.ErrExecutionConflict
-		}
-		return nil
+		return pgConsumePhysicalGrant(tx, grant, int64(len(records)))
 	})
 }
 

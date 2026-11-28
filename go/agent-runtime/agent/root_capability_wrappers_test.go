@@ -159,25 +159,25 @@ func (s *stealerOnCreateStore) LookupPhysicalCallbackReturn(ctx context.Context,
 }
 
 func (s *modelInvocationFaultStore) LoadOwnedRetirement(ctx context.Context, id string) (kernel.OwnedRetirementReceipt, error) {
-	return s.Store.(kernel.OwnedRetirementStore).LoadOwnedRetirement(ctx, id)
+	return s.Store.(kernel.PhysicalExecutionStore).LoadOwnedRetirement(ctx, id)
 }
 
 func (s *lostCreateResponseStore) LoadOwnedRetirement(ctx context.Context, id string) (kernel.OwnedRetirementReceipt, error) {
-	return s.Store.(kernel.OwnedRetirementStore).LoadOwnedRetirement(ctx, id)
+	return s.Store.(kernel.PhysicalExecutionStore).LoadOwnedRetirement(ctx, id)
 }
 
 func (s *stealerOnCreateStore) LoadOwnedRetirement(ctx context.Context, id string) (kernel.OwnedRetirementReceipt, error) {
-	return s.Store.(kernel.OwnedRetirementStore).LoadOwnedRetirement(ctx, id)
+	return s.Store.(kernel.PhysicalExecutionStore).LoadOwnedRetirement(ctx, id)
 }
 
 func (s *modelInvocationFaultStore) LookupOwnedRetirementForRun(ctx context.Context, id string) (kernel.OwnedRetirementReceipt, error) {
-	return s.Store.(kernel.OwnedRetirementStore).LookupOwnedRetirementForRun(ctx, id)
+	return s.Store.(kernel.PhysicalExecutionStore).LookupOwnedRetirementForRun(ctx, id)
 }
 
 func (s *lostCreateResponseStore) LookupOwnedRetirementForRun(ctx context.Context, id string) (kernel.OwnedRetirementReceipt, error) {
-	return s.Store.(kernel.OwnedRetirementStore).LookupOwnedRetirementForRun(ctx, id)
+	return s.Store.(kernel.PhysicalExecutionStore).LookupOwnedRetirementForRun(ctx, id)
 }
 
 func (s *stealerOnCreateStore) LookupOwnedRetirementForRun(ctx context.Context, id string) (kernel.OwnedRetirementReceipt, error) {
-	return s.Store.(kernel.OwnedRetirementStore).LookupOwnedRetirementForRun(ctx, id)
+	return s.Store.(kernel.PhysicalExecutionStore).LookupOwnedRetirementForRun(ctx, id)
 }

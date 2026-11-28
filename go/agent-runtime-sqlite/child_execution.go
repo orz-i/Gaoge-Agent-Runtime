@@ -99,18 +99,8 @@ func (s *Store) FinishChildExecution(ctx context.Context, grant kernel.ChildExec
 			return e
 		}
 	}
-	result, err := tx.ExecContext(ctx,
-		"DELETE FROM runtime_child_effect_grants WHERE grant_id=? AND child_run_id=? AND start_revision=? AND settled_revision=0",
-		grant.ID, grant.ChildRunID, grant.ExpectedRevision)
-	if err != nil {
-		return conflictOrDatabaseError(err)
-	}
-	rows, err := result.RowsAffected()
-	if err != nil {
+	if err = sqliteConsumePhysicalGrant(ctx, tx, grant, int64(correct)); err != nil {
 		return err
-	}
-	if rows != int64(correct) {
-		return kernel.ErrExecutionConflict
 	}
 	return tx.Commit()
 }
@@ -262,7 +252,7 @@ func (s *Store) BeginPhysicalExecution(ctx context.Context, permit kernel.Physic
 		if e != nil {
 			return zero, e
 		}
-		if e = sqliteConsumeManagedGrant(ctx, tx, old); e != nil {
+		if e = sqliteConsumePhysicalGrant(ctx, tx, old, 1); e != nil {
 			return zero, e
 		}
 	} else {

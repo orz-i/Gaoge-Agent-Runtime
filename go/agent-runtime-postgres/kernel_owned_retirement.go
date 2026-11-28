@@ -3,41 +3,34 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"gorm.io/gorm"
 )
 
-var _ kernel.OwnedRetirementStore = (*KernelStore)(nil)
-
-func pgOwnedRetirementClosures(tx *gorm.DB, g kernel.ChildExecutionGrant, s kernel.Snapshot) ([]kernel.ManagedTransfer, error) {
+func pgRetirementSource(tx *gorm.DB, g kernel.ChildExecutionGrant) (kernel.ManagedAuthority, kernel.ManagedTransfer, error) {
 	if g.AdmissionOperation != "managed_resume" {
-		return []kernel.ManagedTransfer{}, nil
+		return kernel.ManagedAuthority{}, kernel.ManagedTransfer{}, nil
 	}
 	t, e := pgLoadManaged(tx, g.ChildRunID)
 	if e != nil {
-		return nil, e
+		return kernel.ManagedAuthority{}, kernel.ManagedTransfer{}, e
 	}
-	h, e := pgLoadManagedByID(tx, t.SafePoint.ID)
-	if e != nil {
-		return nil, e
-	}
-	if kernel.ManagedDigest(h) != kernel.ManagedDigest(t) {
-		return nil, kernel.ErrExecutionConflict
-	}
+
 	a, e := pgManagedAuthority(tx)
 	if e != nil {
-		return nil, e
+		return kernel.ManagedAuthority{}, kernel.ManagedTransfer{}, e
 	}
-	return kernel.CloseManagedRetirement(g, s, a, t)
+	return a, t, nil
 }
 func pgPersistOwnedRetirement(tx *gorm.DB, row models.KernelChildEffectGrantRecord, g kernel.ChildExecutionGrant, s kernel.Snapshot, native kernel.ExecutionLease, permit kernel.ChildExecutionSettlement) error {
-	closures, err := pgOwnedRetirementClosures(tx, g, s)
+	authority, transfer, err := pgRetirementSource(tx, g)
 	if err != nil {
 		return err
 	}
-	r, err := kernel.BuildOwnedRetirementReceipt(g, s, native, pgCallbackCompletion(row), permit, closures)
+	r, err := kernel.BuildOwnedRetirementReceipt(g, s, native, pgCallbackCompletion(row), permit, authority, transfer)
 	if err != nil {
 		return err
 	}
@@ -73,6 +66,18 @@ func pgLoadOwnedRetirement(tx *gorm.DB, id string) (kernel.OwnedRetirementReceip
 	var r kernel.OwnedRetirementReceipt
 	if e := json.Unmarshal([]byte(row.Payload), &r); e != nil || !r.Valid() || r.Evidence.Grant.ID != row.GrantID || r.Evidence.Grant.ChildRunID != row.RunID || r.Evidence.Snapshot.Run.Revision != row.SettledRevision || r.Version != row.Version || row.Phase != "ACKNOWLEDGED" {
 		return r, kernel.ErrExecutionConflict
+	}
+	if len(r.ClosureRefs) != 0 {
+		t, e := pgLoadManagedByID(tx, r.ClosureRefs[0].SourceID)
+		if e != nil {
+			if errors.Is(e, kernel.ErrNotFound) {
+				return r, kernel.ErrExecutionConflict
+			}
+			return r, e
+		}
+		if _, e = kernel.ObserveManagedRetirement(t, r); e != nil {
+			return r, e
+		}
 	}
 	return r, nil
 }

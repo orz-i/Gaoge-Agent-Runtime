@@ -34,25 +34,24 @@ func (s *KernelStore) ManagedRecoveryAuthority(ctx context.Context) (kernel.Mana
 	return pgManagedAuthority(s.db.WithContext(ctx))
 }
 func pgLoadManaged(tx *gorm.DB, id string) (kernel.ManagedTransfer, error) {
-	var r models.KernelManagedTransferRecord
-	if e := tx.Where("run_id = ?", id).First(&r).Error; e != nil {
-		return kernel.ManagedTransfer{}, translateKernelError(e)
+	var r models.KernelManagedHistoryRecord
+	result := tx.Raw(`SELECT COALESCE(h.suspension_id,'') AS suspension_id,COALESCE(h.recovery_id,'') AS recovery_id,COALESCE(h.run_id,'') AS run_id,COALESCE(h.revision,0) AS revision,COALESCE(h.payload,'') AS payload
+ FROM agent_kernel_managed_transfers c LEFT JOIN agent_kernel_managed_history h ON h.suspension_id=c.suspension_id AND h.run_id=c.run_id AND h.recovery_id=c.recovery_id AND h.revision=c.revision WHERE c.run_id=?`, id).Scan(&r)
+	if result.Error != nil {
+		return kernel.ManagedTransfer{}, translateKernelError(result.Error)
 	}
-	var t kernel.ManagedTransfer
-	if e := json.Unmarshal([]byte(r.Payload), &t); e != nil {
-		return t, kernel.ErrExecutionConflict
+	if result.RowsAffected != 1 {
+		return kernel.ManagedTransfer{}, kernel.ErrNotFound
 	}
-	if t.SafePoint.Host.RunID != id || t.SafePoint.ID != r.SuspensionID || t.SafePoint.RecoveryID != r.RecoveryID || t.Revision != r.Revision || !t.Valid() {
-		return t, kernel.ErrExecutionConflict
-	}
-	return t, nil
+	return pgDecodeManagedHistory(r)
 }
 func (s *KernelStore) LoadManagedRecovery(ctx context.Context, id string) (kernel.ManagedTransfer, error) {
 	if s == nil || s.db == nil || ctx == nil || id == "" {
 		return kernel.ManagedTransfer{}, kernel.ErrInvalidInput
 	}
-	t, e := pgLoadManaged(s.db.WithContext(ctx), id)
-	return pgObserveManaged(s.db.WithContext(ctx), t, e)
+	tx := s.db.WithContext(ctx)
+	t, e := pgLoadManaged(tx, id)
+	return pgObserveManaged(tx, t, e)
 }
 func pgSaveManaged(tx *gorm.DB, t kernel.ManagedTransfer) error {
 	b, e := json.Marshal(t)
@@ -63,7 +62,7 @@ func pgSaveManaged(tx *gorm.DB, t kernel.ManagedTransfer) error {
 	if e = tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "suspension_id"}}, DoUpdates: clause.AssignmentColumns([]string{"revision", "payload"})}).Create(&h).Error; e != nil {
 		return translateKernelError(e)
 	}
-	r := models.KernelManagedTransferRecord{RunID: h.RunID, SuspensionID: h.SuspensionID, RecoveryID: h.RecoveryID, Revision: h.Revision, Payload: h.Payload}
+	r := models.KernelManagedTransferRecord{RunID: h.RunID, SuspensionID: h.SuspensionID, RecoveryID: h.RecoveryID, Revision: h.Revision, Payload: "null"}
 	return translateKernelError(tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "run_id"}}, DoUpdates: clause.AssignmentColumns([]string{"suspension_id", "recovery_id", "revision", "payload"})}).Create(&r).Error)
 }
 
@@ -198,7 +197,7 @@ func (s *KernelStore) CommitManagedCancellation(ctx context.Context, q kernel.Ma
 			return t, e
 		}
 		n.Terminal = &terminal
-		if e = pgConsumeManagedGrant(tx, g); e != nil {
+		if e = pgConsumePhysicalGrant(tx, g, 1); e != nil {
 			return t, e
 		}
 		return n, pgSaveManaged(tx, n)
@@ -249,8 +248,11 @@ func pgLoadManagedByID(tx *gorm.DB, id string) (kernel.ManagedTransfer, error) {
 	if e := tx.Where("suspension_id = ?", id).First(&r).Error; e != nil {
 		return kernel.ManagedTransfer{}, translateKernelError(e)
 	}
+	return pgDecodeManagedHistory(r)
+}
+func pgDecodeManagedHistory(r models.KernelManagedHistoryRecord) (kernel.ManagedTransfer, error) {
 	var t kernel.ManagedTransfer
-	if e := json.Unmarshal([]byte(r.Payload), &t); e != nil || t.SafePoint.ID != id || t.SafePoint.RecoveryID != r.RecoveryID || t.SafePoint.Host.RunID != r.RunID || t.Revision != r.Revision || !t.Valid() {
+	if e := json.Unmarshal([]byte(r.Payload), &t); e != nil || t.SafePoint.ID != r.SuspensionID || t.SafePoint.RecoveryID != r.RecoveryID || t.SafePoint.Host.RunID != r.RunID || t.Revision != r.Revision || !t.Valid() {
 		return t, kernel.ErrExecutionConflict
 	}
 	return t, nil

@@ -145,7 +145,7 @@ func ValidateOwnedPhysicalRecovery(g ChildExecutionGrant, current Snapshot, pers
 // and private Feature settlement against the exact current native owner and
 // Run. Both the live caller and receipt-only recovery use this same reducer.
 // Lease expiry is not evidence of return, nor does it erase a genuine return.
-func BuildOwnedRetirementReceipt(g ChildExecutionGrant, current Snapshot, persisted ExecutionLease, completion PhysicalCallbackCompletion, permit ChildExecutionSettlement, closures []ManagedTransfer) (OwnedRetirementReceipt, error) {
+func BuildOwnedRetirementReceipt(g ChildExecutionGrant, current Snapshot, persisted ExecutionLease, completion PhysicalCallbackCompletion, permit ChildExecutionSettlement, authority ManagedAuthority, transfer ManagedTransfer) (OwnedRetirementReceipt, error) {
 	if !g.MatchesExecution(persisted) || !permit.Matches(g, current) || ValidatePhysicalCompletion(g, completion) != nil {
 		return OwnedRetirementReceipt{}, ErrExecutionConflict
 	}
@@ -157,7 +157,16 @@ func BuildOwnedRetirementReceipt(g ChildExecutionGrant, current Snapshot, persis
 		return OwnedRetirementReceipt{}, ErrExecutionConflict
 	}
 	evidence := OwnedSettlementEvidence{Version: 1, Grant: g, Snapshot: current, Completion: completion}
-	r := OwnedRetirementReceipt{Version: 1, Evidence: evidence, Closures: closures}
+	r := OwnedRetirementReceipt{Version: 1, Evidence: evidence, ClosureRefs: []ManagedClosureRef{}}
+	if g.AdmissionOperation == "managed_resume" {
+		closed, err := closeManagedRetirement(g, current, authority, transfer)
+		if err != nil {
+			return OwnedRetirementReceipt{}, err
+		}
+		r.ClosureRefs = append(r.ClosureRefs, ManagedClosureRef{SourceID: closed.SafePoint.ID, Digest: ManagedDigest(closed)})
+	} else if ManagedDigest(transfer) != ManagedDigest(ManagedTransfer{}) || authority != (ManagedAuthority{}) {
+		return OwnedRetirementReceipt{}, ErrExecutionConflict
+	}
 	r.Digest = r.Identity()
 	if !r.Valid() {
 		return OwnedRetirementReceipt{}, ErrExecutionConflict

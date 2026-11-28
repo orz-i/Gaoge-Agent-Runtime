@@ -469,7 +469,7 @@ func ManagedPhysicalDispatch(t *testing.T, factory func(*testing.T) (kernel.Stor
 					t.Fatalf("actual successor finish cut: %v calls=%d", e, len(client.requests))
 				}
 				observed, e := base.(kernel.ManagedRecoveryStore).LoadManagedRecovery(ctx, root.ExecutionRefID)
-				receipt, retErr := base.(kernel.OwnedRetirementStore).LoadOwnedRetirement(ctx, fault.grant.ID)
+				receipt, retErr := base.(kernel.PhysicalExecutionStore).LoadOwnedRetirement(ctx, fault.grant.ID)
 				grant, grantErr := base.(kernel.PhysicalExecutionStore).LookupChildExecution(ctx, root.ExecutionRefID)
 				if e != nil {
 					t.Fatal(e)

@@ -7,8 +7,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
-var _ kernel.OwnedRetirementStore = (*Store)(nil)
-
 func cloneOwnedRetirement(r kernel.OwnedRetirementReceipt) kernel.OwnedRetirementReceipt {
 	b, _ := json.Marshal(r)
 	var out kernel.OwnedRetirementReceipt
@@ -29,11 +27,13 @@ func (s *Store) retireOwnedLocked(previous memoryEffect, permit kernel.ChildExec
 	if _, ok := s.effectOwners[g.ChildRunID][g.ID]; !ok {
 		return kernel.ErrExecutionConflict
 	}
-	closures, err := kernel.CloseManagedRetirement(g, current, s.managedAuthority, s.managedTransfers[s.managedCurrent[g.ChildRunID]])
-	if err != nil {
-		return err
+	var authority kernel.ManagedAuthority
+	var transfer kernel.ManagedTransfer
+	if g.AdmissionOperation == "managed_resume" {
+		authority = s.managedAuthority
+		transfer = s.managedTransfers[s.managedCurrent[g.ChildRunID]]
 	}
-	r, err := kernel.BuildOwnedRetirementReceipt(g, cloneSnapshot(current), s.runs[g.ChildRunID].execution.lease, previous.completion, permit, closures)
+	r, err := kernel.BuildOwnedRetirementReceipt(g, cloneSnapshot(current), native.lease, previous.completion, permit, authority, transfer)
 	if err != nil {
 		return err
 	}
@@ -59,7 +59,7 @@ func (s *Store) LoadOwnedRetirement(ctx context.Context, id string) (kernel.Owne
 		return kernel.OwnedRetirementReceipt{}, kernel.ErrNotFound
 	}
 	r := *effect.retirement
-	if !r.Valid() || r.Evidence.Grant.ID != id {
+	if !s.validRetirementLocked(r) || r.Evidence.Grant.ID != id {
 		return kernel.OwnedRetirementReceipt{}, kernel.ErrExecutionConflict
 	}
 	return cloneOwnedRetirement(r), nil
@@ -99,10 +99,25 @@ func (s *Store) retirementsLocked(runID string) ([]kernel.OwnedRetirementReceipt
 		if e.retirement == nil || e.retirement.Evidence.Grant.ChildRunID != runID {
 			continue
 		}
-		if e.retirement.Evidence.Grant.ID != id {
+		if e.retirement.Evidence.Grant.ID != id || !s.validRetirementLocked(*e.retirement) {
 			return nil, kernel.ErrExecutionConflict
 		}
 		rows = append(rows, *e.retirement)
 	}
 	return rows, nil
+}
+
+func (s *Store) validRetirementLocked(r kernel.OwnedRetirementReceipt) bool {
+	if !r.Valid() {
+		return false
+	}
+	if len(r.ClosureRefs) == 0 {
+		return true
+	}
+	t, ok := s.managedTransfers[r.ClosureRefs[0].SourceID]
+	if !ok || t.SafePoint.Host.KernelAuthority != s.managedAuthority {
+		return false
+	}
+	_, err := kernel.ObserveManagedRetirement(t, r)
+	return err == nil
 }

@@ -68,6 +68,10 @@ func TestRealPostgresManagedRecoveryStore(t *testing.T) {
 			Reopen: func() kernel.Store {
 				closeAll()
 				fresh := open()
+				var duplicate int64
+				if e := fresh.db.Raw("SELECT count(*) FROM agent_kernel_managed_transfers WHERE payload <> 'null'").Scan(&duplicate).Error; e != nil || duplicate != 0 {
+					t.Fatalf("current index still carries duplicated payload: %d %v", duplicate, e)
+				}
 				a, e := fresh.ManagedRecoveryAuthority(t.Context())
 				if e != nil || a != authority {
 					t.Fatalf("reopen changed authority: %v", e)

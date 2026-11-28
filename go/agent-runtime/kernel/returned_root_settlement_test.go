@@ -79,7 +79,7 @@ func TestReturnedRootCustodyAcrossPendingRetirement(t *testing.T) {
 	c := previous.Evidence.Completion
 	c.GrantID, c.ControlCustody = g.ID, kernel.OwnedCustodyScoped
 	c.ReturnRevision = current.Run.Revision
-	pending := kernel.OwnedRetirementReceipt{Version: 1, Evidence: kernel.OwnedSettlementEvidence{Version: 1, Grant: g, Snapshot: current, Completion: c}, Closures: []kernel.ManagedTransfer{}}
+	pending := kernel.OwnedRetirementReceipt{Version: 1, Evidence: kernel.OwnedSettlementEvidence{Version: 1, Grant: g, Snapshot: current, Completion: c}, ClosureRefs: []kernel.ManagedClosureRef{}}
 	pending.Digest = pending.Identity()
 	if !pending.Valid() {
 		t.Fatal("invalid retirement fixture")

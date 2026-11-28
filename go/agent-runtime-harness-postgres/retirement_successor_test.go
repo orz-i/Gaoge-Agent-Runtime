@@ -16,7 +16,7 @@ type retirementKernelPorts interface {
 	kernel.ExecutionStore
 
 	kernel.PhysicalExecutionStore
-	kernel.OwnedRetirementStore
+
 	kernel.ControlStore
 	kernel.ExecutionCustodyStore
 }

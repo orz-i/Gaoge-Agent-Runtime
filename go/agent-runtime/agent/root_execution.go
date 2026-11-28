@@ -149,7 +149,7 @@ func (runner *Runner) withNativeSegment(ctx context.Context, snapshot kernel.Sna
 	if parented {
 		rt = rt.WithoutPhysicalGrant()
 	}
-	if !runner.runtime.SupportsPhysicalExecution() || !runner.runtime.SupportsOwnedRetirement() {
+	if !runner.runtime.SupportsPhysicalExecution() {
 		return snapshot, kernel.ErrExecutionRequired
 	}
 	if !parented {
@@ -485,9 +485,6 @@ func physicalSettlementProof(grant kernel.ChildExecutionGrant, s kernel.Snapshot
 // The original caller observes the one committed retirement receipt.
 // No confirmation can write or release a lease; Finish already did so.
 func observeExactOwnedRetirement(ctx context.Context, rt *kernel.Runtime, grant kernel.ChildExecutionGrant, snapshot kernel.Snapshot, completion *kernel.PhysicalCallbackCompletion) (bool, error) {
-	if !rt.SupportsOwnedRetirement() {
-		return false, nil
-	}
 	receipt, err := rt.LoadOwnedRetirement(ctx, grant.ID)
 	if errors.Is(err, kernel.ErrNotFound) {
 		return false, nil

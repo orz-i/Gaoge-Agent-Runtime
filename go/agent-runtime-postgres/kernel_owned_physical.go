@@ -129,7 +129,7 @@ func (store *KernelStore) BeginPhysicalExecution(ctx context.Context, admission 
 			if e != nil {
 				return e
 			}
-			if e = pgConsumeManagedGrant(tx, old); e != nil {
+			if e = pgConsumePhysicalGrant(tx, old, 1); e != nil {
 				return e
 			}
 		} else {

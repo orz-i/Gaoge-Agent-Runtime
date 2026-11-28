@@ -114,7 +114,7 @@ func (runner *Runner) reconcileOriginalPhysicalDispatch(ctx context.Context, run
 	}
 	// LoadOwnedRetirement already validates the complete receipt and
 	// nonempty completion; qualify the exact original operation.
-	if len(receipt.Closures) != 0 {
+	if len(receipt.ClosureRefs) != 0 {
 		return PhysicalCallUnknown, kernel.ErrExecutionConflict
 	}
 	return qualify(receipt.Evidence.Grant, receipt.Evidence.Completion, receipt.Evidence.Snapshot)

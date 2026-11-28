@@ -30,7 +30,7 @@ type managedStorePorts interface {
 	kernel.ControlStore
 
 	kernel.PhysicalExecutionStore
-	kernel.OwnedRetirementStore
+
 	kernel.ExecutionQuarantineStore
 	kernel.ManagedRecoveryStore
 }
@@ -508,7 +508,7 @@ func runManagedStoreFinishClosesHistoricalTransfer(t *testing.T, factory func(*t
 	}
 	receipt := retirementFinish(t, retired)
 	original, e := f.store.LoadManagedRecoveryByID(t.Context(), f.point.ID)
-	if e != nil || !original.Resolved() || original.Selection.Mode != kernel.ManagedResume || original.Terminal == nil || kernel.ManagedDigest(*original.Terminal) != kernel.ManagedDigest(next) || len(receipt.Closures) != 1 || kernel.ManagedDigest(receipt.Closures[0]) != kernel.ManagedDigest(original) {
+	if e != nil || !original.Resolved() || original.Selection.Mode != kernel.ManagedResume || original.Terminal == nil || kernel.ManagedDigest(*original.Terminal) != kernel.ManagedDigest(next) || !receipt.MatchesManagedClosure(original, next) {
 		t.Fatalf("Finish did not atomically close exact transfer: %v", e)
 	}
 

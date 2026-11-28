@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"encoding/json"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"gorm.io/gorm"
@@ -67,11 +68,17 @@ func pgBackfillGrantIdentities(tx *gorm.DB) error {
 		return translateKernelError(err)
 	}
 	for _, tr := range transfers {
-		ids, err := kernel.ManagedGrantIdentities([]byte(tr.Payload), tr.RunID)
+		t, err := pgLoadManaged(tx, tr.RunID)
 		if err != nil {
 			return err
 		}
-		managed = append(managed, ids...)
+		// A pre-cut redundant payload must match before it may be discarded.
+		if tr.Payload != "null" {
+			var original kernel.ManagedTransfer
+			if err = json.Unmarshal([]byte(tr.Payload), &original); err != nil || kernel.ManagedDigest(original) != kernel.ManagedDigest(t) {
+				return kernel.ErrExecutionConflict
+			}
+		}
 	}
 	ids, err := kernel.MergeGrantIdentities(active, retired, managed)
 	if err != nil {
@@ -93,20 +100,14 @@ func pgBackfillGrantIdentities(tx *gorm.DB) error {
 	return nil
 }
 
-// Consume exactly one original self-scoped managed grant. Never delete by
-// global ID alone, even if the identity reservation normally prevents a
-// collision. A malformed or missing fence rolls the entire transfer back.
-func pgConsumeManagedGrant(tx *gorm.DB, g kernel.ChildExecutionGrant) error {
-	row, err := pgLoadOwnedPhysicalGrant(tx, g)
-	if err != nil || row.SettledRevision != 0 || pgCallbackCompletion(row) != (kernel.PhysicalCallbackCompletion{}) {
-		return kernel.ErrExecutionConflict
-	}
-	r := tx.Where("grant_id = ? AND parent_run_id = ? AND child_run_id = ? AND start_revision = ? AND execution_owner_id = ? AND execution_lease_id = ? AND execution_epoch = ? AND admission_source_hash = ? AND admission_operation = ? AND settled_revision = 0 AND callback_return_revision = 0",
-		g.ID, g.ChildRunID, g.ChildRunID, g.ExpectedRevision, g.ExecutionOwnerID, g.ExecutionLeaseID, g.ExecutionEpoch, g.AdmissionSourceHash, g.AdmissionOperation).Delete(&models.KernelChildEffectGrantRecord{})
+// Consume the qualified physical effect and its active ancestor index.
+func pgConsumePhysicalGrant(tx *gorm.DB, g kernel.ChildExecutionGrant, count int64) error {
+	r := tx.Where("grant_id = ? AND child_run_id = ? AND start_revision = ? AND execution_owner_id = ? AND execution_lease_id = ? AND execution_epoch = ? AND admission_source_hash = ? AND admission_operation = ? AND settled_revision = 0",
+		g.ID, g.ChildRunID, g.ExpectedRevision, g.ExecutionOwnerID, g.ExecutionLeaseID, g.ExecutionEpoch, g.AdmissionSourceHash, g.AdmissionOperation).Delete(&models.KernelChildEffectGrantRecord{})
 	if r.Error != nil {
-		return translateKernelError(r.Error)
+		return translateKernelApplyError(r.Error)
 	}
-	if r.RowsAffected != 1 {
+	if count < 1 || r.RowsAffected != count {
 		return kernel.ErrExecutionConflict
 	}
 	return nil
