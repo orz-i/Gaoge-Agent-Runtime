@@ -277,12 +277,19 @@ func (store *KernelStore) applyWithExecution(ctx context.Context, lease *kernel.
 	if store == nil || store.db == nil || strings.TrimSpace(runID) == "" {
 		return kernel.Snapshot{}, kernel.ErrNotFound
 	}
-	if mutation.Record.Run.ID != runID || mutation.Record.Run.Revision != expectedRevision+1 {
-		return kernel.Snapshot{}, kernel.ErrConflict
-	}
-	updatedModel, err := kernelRunRecordFrom(mutation.Record, 0)
+	p, managed, err := guard.ManagedCancellation(runID, expectedRevision, mutation)
 	if err != nil {
 		return kernel.Snapshot{}, err
+	}
+	var updatedModel models.KernelRunRecord
+	if !managed {
+		if mutation.Record.Run.ID != runID || mutation.Record.Run.Revision != expectedRevision+1 {
+			return kernel.Snapshot{}, kernel.ErrConflict
+		}
+		updatedModel, err = kernelRunRecordFrom(mutation.Record, 0)
+		if err != nil {
+			return kernel.Snapshot{}, err
+		}
 	}
 	var snapshot kernel.Snapshot
 	err = store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -320,12 +327,29 @@ func (store *KernelStore) applyWithExecution(ctx context.Context, lease *kernel.
 		if lease == nil && guard == nil && lockedRun.ExecutionEpoch > 0 {
 			return kernel.ErrExecutionRequired
 		}
-		if e := pgNativeEntryGate(tx, runID); e != nil {
-			return e
-		}
 		current, decodeErr := kernelSnapshotFrom(lockedRun)
 		if decodeErr != nil {
 			return decodeErr
+		}
+		var transfer kernel.ManagedTransfer
+		if managed {
+			var replay bool
+			var e error
+			transfer, mutation, replay, e = pgManagedControl(ctx, tx, lockedRun, current, p)
+			if e != nil {
+				return e
+			}
+			if replay {
+				snapshot = current
+				return nil
+			}
+			updatedModel, e = kernelRunRecordFrom(mutation.Record, 0)
+			if e != nil {
+				return e
+			}
+		}
+		if e := pgNativeEntryGate(tx, runID); e != nil {
+			return e
 		}
 		accounting := sqlledger.Store{DB: tx.Statement.ConnPool, Lock: tx.Name() == "postgres"}
 		ledger, e := kernel.PlanRunBudgetMutation(ctx, accounting, current.Run, mutation, guard != nil)
@@ -432,6 +456,10 @@ func (store *KernelStore) applyWithExecution(ctx context.Context, lease *kernel.
 		snapshot, applyErr = store.applyKernelMutation(tx, runID, expectedRevision, updatedModel, mutation, effectiveLease, guard != nil && approvalLease == nil, false, approvalLease != nil)
 		if applyErr != nil {
 			return applyErr
+		}
+		if managed {
+			transfer.Terminal = &snapshot
+			return pgSaveManaged(tx, transfer)
 		}
 		if managedPoint != nil {
 			// PostgreSQL may represent timestamps at a different precision than

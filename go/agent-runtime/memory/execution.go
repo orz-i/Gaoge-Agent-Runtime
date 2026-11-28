@@ -174,7 +174,7 @@ func (store *Store) ApplyExecution(ctx context.Context, lease kernel.ExecutionLe
 		// Only a Feature-validated ApplyControl can release it.
 		return kernel.Snapshot{}, kernel.ErrExecutionRequired
 	}
-	return store.applyLocked(ctx, lease.RunID, expectedRevision, mutation, false)
+	return store.applyLocked(ctx, lease.RunID, expectedRevision, mutation, false, nil)
 }
 
 // CheckExecution obtains the Store-owned clock under the same mutex as epoch

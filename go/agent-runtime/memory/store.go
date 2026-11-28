@@ -214,13 +214,15 @@ func (store *Store) Apply(ctx context.Context, runID string, expectedRevision ui
 			return kernel.Snapshot{}, err
 		}
 	}
-	return store.applyLocked(ctx, runID, expectedRevision, mutation, false)
+	return store.applyLocked(ctx, runID, expectedRevision, mutation, false, nil)
 }
 
 // applyLocked is reached only after ordinary or fenced eligibility checks.
-func (store *Store) applyLocked(ctx context.Context, runID string, expectedRevision uint64, mutation kernel.StoreMutation, control bool) (kernel.Snapshot, error) {
-	if err := store.nativeEntryGateLocked(runID); err != nil {
-		return kernel.Snapshot{}, err
+func (store *Store) applyLocked(ctx context.Context, runID string, expectedRevision uint64, mutation kernel.StoreMutation, control bool, consumed *kernel.ChildExecutionGrant) (kernel.Snapshot, error) {
+	if consumed == nil {
+		if err := store.nativeEntryGateLocked(runID); err != nil {
+			return kernel.Snapshot{}, err
+		}
 	}
 	current, ok := store.snapshotLocked(runID)
 	if !ok {
@@ -241,6 +243,9 @@ func (store *Store) applyLocked(ctx context.Context, runID string, expectedRevis
 		granted, ok := store.activeEffect(id)
 		if !ok {
 			return kernel.Snapshot{}, kernel.ErrExecutionConflict
+		}
+		if consumed != nil && granted.grant == *consumed {
+			continue
 		}
 		if granted.grant.ChildRunID == runID {
 			rootGrantFound = true

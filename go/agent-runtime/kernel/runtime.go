@@ -52,12 +52,13 @@ func (runtime *Runtime) Cancel(
 		unbound.execution = nil
 		controlRuntime = &unbound
 	}
-	cancelled, _, err := controlRuntime.ApplyControl(ctx, runID, expectedRevision, ControlGuard{Kind: ControlCancel}, Mutation{
-		Status: RunStatusCancelled, State: current.State,
-		ErrorCode: "run.cancelled", ErrorDetail: strings.TrimSpace(reason),
-		Events: []EventDraft{{Type: "run.cancelled", Message: strings.TrimSpace(reason)}},
-	}, nil)
+	cancelled, _, err := controlRuntime.ApplyControl(ctx, runID, expectedRevision, ControlGuard{Kind: ControlCancel}, cancelMutation(current, reason), nil)
 	return cancelled, err
+}
+
+func cancelMutation(current Snapshot, reason string) Mutation {
+	reason = strings.TrimSpace(reason)
+	return Mutation{Status: RunStatusCancelled, State: current.State, ErrorCode: "run.cancelled", ErrorDetail: reason, Events: []EventDraft{{Type: "run.cancelled", Message: reason}}}
 }
 
 // Expire fails one Run only when its frozen DeadlineAt is due.
@@ -316,12 +317,14 @@ func (runtime *Runtime) apply(ctx context.Context, runID string, expectedRevisio
 // makeStoreMutation is the common validated replacement builder used by
 // normal execution and Feature-owned guarded control transitions.
 func (runtime *Runtime) makeStoreMutation(current Snapshot, mutation Mutation) StoreMutation {
+	return storeMutationAt(current, mutation, runtime.Now())
+}
+func storeMutationAt(current Snapshot, mutation Mutation, now time.Time) StoreMutation {
 	next := current.Run
 	next.Status = mutation.Status
 	next.Revision++
 	next.ErrorCode = strings.TrimSpace(mutation.ErrorCode)
 	next.ErrorDetail = strings.TrimSpace(mutation.ErrorDetail)
-	now := runtime.Now()
 	next.UpdatedAt = now
 	if terminalStatus(next.Status) {
 		endedAt := now

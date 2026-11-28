@@ -292,13 +292,31 @@ func enableManagedRecovery(ctx context.Context, s managedStorePorts, q managedEn
 	return t, nil
 }
 
+// CancelManagedFixture submits the same native control as the Agent and
+// reads the original history only after a successful commit.
+func CancelManagedFixture(ctx context.Context, rt *kernel.Runtime, p kernel.ManagedAdmissionProof) (kernel.ManagedTransfer, error) {
+	point := p.Point()
+	if _, _, err := rt.ApplyControl(ctx, point.Host.RunID, point.Source.Run.Revision, p.CancellationGuard(), kernel.Mutation{}, nil); err != nil {
+		return kernel.ManagedTransfer{}, err
+	}
+	return rt.LoadManagedRecoveryByID(ctx, point.ID)
+}
+
+func cancelManagedStoreFixture(ctx context.Context, store managedStorePorts, p kernel.ManagedAdmissionProof) (kernel.ManagedTransfer, error) {
+	point := p.Point()
+	if _, _, err := store.ApplyControl(ctx, point.Host.RunID, point.Source.Run.Revision, p.CancellationGuard(), kernel.StoreMutation{}); err != nil {
+		return kernel.ManagedTransfer{}, err
+	}
+	return store.LoadManagedRecoveryByID(ctx, point.ID)
+}
+
 func runManagedStoreSelectionAndExactACK(t *testing.T, factory func(*testing.T) ManagedRecoveryStoreFixture) {
 	for _, mode := range []kernel.ManagedRecoveryMode{kernel.ManagedResume, kernel.ManagedCancel} {
 		t.Run(string(mode), func(t *testing.T) {
 			f := managedStoreSetup(t, factory)
 			proof, parked := managedStoreSelection(t, f, mode)
 			enable := managedEnableRequest{RunID: f.source.Run.ID, SuspensionID: f.point.ID, OwnerID: "owner", LeaseID: "lease", GrantID: "successor", LeaseDuration: time.Minute, Selection: proof}
-			cancel := kernel.ManagedCancelRequest{RunID: f.source.Run.ID, SuspensionID: f.point.ID, Selection: proof}
+			cancel := proof
 			if mode == kernel.ManagedCancel {
 				if _, e := enableManagedRecovery(t.Context(), f.store, enable); !errors.Is(e, kernel.ErrExecutionConflict) {
 					t.Fatalf("CANCEL authorized send: %v", e)
@@ -324,7 +342,7 @@ func runManagedStoreSelectionAndExactACK(t *testing.T, factory func(*testing.T) 
 				if e != nil {
 					t.Fatal(e)
 				}
-				if _, e = f.store.CommitManagedCancellation(t.Context(), cancel); !errors.Is(e, kernel.ErrExecutionConflict) {
+				if _, e = cancelManagedStoreFixture(t.Context(), f.store, cancel); !errors.Is(e, kernel.ErrExecutionConflict) {
 					t.Fatalf("CANCEL bypassed native descendant: %v", e)
 				}
 				managedStoreSame(t, f, parked)
@@ -334,7 +352,7 @@ func runManagedStoreSelectionAndExactACK(t *testing.T, factory func(*testing.T) 
 				if _, e = peer.Cancel(t.Context(), child.Run.ID, child.Run.Revision, "settle original child"); e != nil {
 					t.Fatal(e)
 				}
-				result, e := f.store.CommitManagedCancellation(t.Context(), cancel)
+				result, e := cancelManagedStoreFixture(t.Context(), f.store, cancel)
 				if e != nil || !result.Resolved() || result.Selection.Mode != kernel.ManagedCancel {
 					t.Fatalf("cancel: %v", e)
 				}
@@ -342,13 +360,13 @@ func runManagedStoreSelectionAndExactACK(t *testing.T, factory func(*testing.T) 
 				if _, e = peer.Create(t.Context(), req); !errors.Is(e, kernel.ErrExecutionConflict) {
 					t.Fatalf("child crossed committed ancestor CANCEL: %v", e)
 				}
-				again, e := f.store.CommitManagedCancellation(t.Context(), cancel)
+				again, e := cancelManagedStoreFixture(t.Context(), f.store, cancel)
 				if e != nil || kernel.ManagedDigest(again) != kernel.ManagedDigest(result) {
 					t.Fatalf("cancel ACK: %v", e)
 				}
 				foreignCancel := cancel
-				foreignCancel.Selection = different
-				if _, e = f.store.CommitManagedCancellation(t.Context(), foreignCancel); !errors.Is(e, kernel.ErrExecutionConflict) {
+				foreignCancel = different
+				if _, e = cancelManagedStoreFixture(t.Context(), f.store, foreignCancel); !errors.Is(e, kernel.ErrExecutionConflict) {
 					t.Fatalf("different cancellation overwrote selection: %v", e)
 				}
 				if kernel.ManagedDigest(result.Terminal.State) != kernel.ManagedDigest(f.source.State) || result.Terminal.EventHead != f.source.EventHead+1 {
@@ -357,7 +375,7 @@ func runManagedStoreSelectionAndExactACK(t *testing.T, factory func(*testing.T) 
 				managedStoreReopenEqual(t, f, result)
 				return
 			}
-			if _, e := f.store.CommitManagedCancellation(t.Context(), cancel); !errors.Is(e, kernel.ErrExecutionConflict) {
+			if _, e := cancelManagedStoreFixture(t.Context(), f.store, cancel); !errors.Is(e, kernel.ErrExecutionConflict) {
 				t.Fatalf("RESUME authorized cancel: %v", e)
 			}
 			managedStoreSame(t, f, parked)
@@ -615,13 +633,13 @@ func (s *managedStoreACK) BeginPhysicalExecution(ctx context.Context, p kernel.P
 	}
 	return v, e
 }
-func (s *managedStoreACK) CommitManagedCancellation(ctx context.Context, q kernel.ManagedCancelRequest) (kernel.ManagedTransfer, error) {
-	v, e := s.managedStorePorts.CommitManagedCancellation(ctx, q)
-	if e == nil && s.mode == "cancel" {
+func (s *managedStoreACK) ApplyControl(ctx context.Context, id string, rev uint64, g kernel.ControlGuard, m kernel.StoreMutation) (kernel.Snapshot, bool, error) {
+	v, revoke, e := s.managedStorePorts.ApplyControl(ctx, id, rev, g, m)
+	if _, managed, _ := g.ManagedCancellation(id, rev, m); e == nil && s.mode == "cancel" && managed {
 		s.hits++
-		return kernel.ManagedTransfer{}, errManagedStoreACK
+		return kernel.Snapshot{}, false, errManagedStoreACK
 	}
-	return v, e
+	return v, revoke, e
 }
 func runManagedStoreTransactionACK(t *testing.T, factory func(*testing.T) ManagedRecoveryStoreFixture) {
 	for _, mode := range []string{"t0", "enable", "cancel"} {
@@ -667,11 +685,11 @@ func runManagedStoreTransactionACK(t *testing.T, factory func(*testing.T) Manage
 				}
 
 			} else {
-				q := kernel.ManagedCancelRequest{RunID: f.source.Run.ID, SuspensionID: f.point.ID, Selection: proof}
-				if _, e = fault.CommitManagedCancellation(t.Context(), q); !errors.Is(e, errManagedStoreACK) {
+				q := proof
+				if _, e = cancelManagedStoreFixture(t.Context(), fault, q); !errors.Is(e, errManagedStoreACK) {
 					t.Fatalf("CANCEL fault: %v", e)
 				}
-				retry, e = peer.CommitManagedCancellation(t.Context(), q)
+				retry, e = cancelManagedStoreFixture(t.Context(), peer, q)
 			}
 			if e != nil || fault.hits != 1 {
 				t.Fatalf("exact original recovery failed/hit=%d: %v", fault.hits, e)
@@ -754,7 +772,7 @@ func runManagedResumeCancelElection(t *testing.T, factory func(*testing.T) Manag
 			}
 			managedStoreSame(t, f, source)
 			q := managedEnableRequest{RunID: f.source.Run.ID, SuspensionID: f.point.ID, OwnerID: "owner", LeaseID: "lease", GrantID: "successor", LeaseDuration: time.Minute, Selection: resume}
-			c := kernel.ManagedCancelRequest{RunID: f.source.Run.ID, SuspensionID: f.point.ID, Selection: cancel}
+			c := cancel
 			var result kernel.ManagedTransfer
 			var e error
 			peer := f.backend.Peer.(managedStorePorts)
@@ -763,7 +781,7 @@ func runManagedResumeCancelElection(t *testing.T, factory func(*testing.T) Manag
 				if e != nil {
 					t.Fatal(e)
 				}
-				if _, e = peer.CommitManagedCancellation(t.Context(), c); !errors.Is(e, kernel.ErrExecutionConflict) {
+				if _, e = cancelManagedStoreFixture(t.Context(), peer, c); !errors.Is(e, kernel.ErrExecutionConflict) {
 					t.Fatalf("losing cancel mutated original: %v", e)
 				}
 				if result.Resolved() || result.Selection.Mode != kernel.ManagedResume || result.SuccessorLease.Epoch != f.lease.Epoch+1 {
@@ -772,7 +790,7 @@ func runManagedResumeCancelElection(t *testing.T, factory func(*testing.T) Manag
 				f.grant = result.SuccessorGrant
 				managedStoreSame(t, f, result)
 			} else {
-				result, e = f.store.CommitManagedCancellation(t.Context(), c)
+				result, e = cancelManagedStoreFixture(t.Context(), f.store, c)
 				if e != nil {
 					t.Fatal(e)
 				}
@@ -896,7 +914,7 @@ func runForeignGrantErasure(t *testing.T, factory func(*testing.T) ManagedRecove
 			t.Fatalf("valid transfer failed: %v", err)
 		}
 	case kernel.ManagedCancel:
-		out, err := f.store.CommitManagedCancellation(ctx, kernel.ManagedCancelRequest{RunID: f.source.Run.ID, SuspensionID: f.point.ID, Selection: selection})
+		out, err := cancelManagedStoreFixture(ctx, f.store, selection)
 		if err != nil || !out.Resolved() || out.Selection.Mode != kernel.ManagedCancel {
 			t.Fatalf("valid cancellation failed: %v", err)
 		}

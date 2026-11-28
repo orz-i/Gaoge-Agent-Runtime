@@ -136,11 +136,12 @@ func (r *Runner) recoverManagedContinuation(ctx context.Context, original kernel
 		return kernel.Snapshot{}, kernel.ManagedClosureProof{}, kernel.ErrExecutionConflict
 	}
 	if selected.Authorization().Mode == kernel.ManagedCancel {
-		t, e := r.runtime.CommitManagedCancellation(ctx, selected)
+		point := selected.Point()
+		_, _, e := r.runtime.ApplyControl(ctx, point.Host.RunID, point.Source.Run.Revision, selected.CancellationGuard(), kernel.Mutation{}, nil)
 		if e != nil {
 			return kernel.Snapshot{}, kernel.ManagedClosureProof{}, e
 		}
-		p, e := r.runtime.ManagedRecoveryClosure(ctx, t.SafePoint.ID)
+		p, e := r.runtime.ManagedRecoveryClosure(ctx, point.ID)
 		return p.Snapshot(), p, e
 	}
 	point := selected.Point()

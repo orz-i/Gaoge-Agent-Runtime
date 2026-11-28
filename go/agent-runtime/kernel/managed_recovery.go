@@ -351,10 +351,6 @@ type ManagedRecoverySourceRequest struct {
 	ExpectedTransferDigest string
 	Qualification          ManagedFrontierQualification
 }
-type ManagedCancelRequest struct {
-	RunID, SuspensionID string
-	Selection           ManagedAdmissionProof
-}
 
 // ManagedRecoveryStore operations use the existing Run/native-lease/grant
 // transaction (Memory mutex, SQLite write transaction, PG row locks).
@@ -365,7 +361,6 @@ type ManagedRecoveryStore interface {
 	ManagedRecoveryAuthority(context.Context) (ManagedAuthority, error)
 	LoadManagedRecovery(context.Context, string) (ManagedTransfer, error)
 	LoadManagedRecoveryByID(context.Context, string) (ManagedTransfer, error)
-	CommitManagedCancellation(context.Context, ManagedCancelRequest) (ManagedTransfer, error)
 }
 
 // ManagedAdmissionProof is minted from the configured Host's read-only
@@ -391,16 +386,19 @@ func (p ManagedAdmissionProof) Matches(t ManagedTransfer, mode ManagedRecoveryMo
 	return t.Selection.Mode == "" || t.Selection == r
 }
 
-// PrepareManagedAdmission rechecks the exact observed source, expiry, and
+// qualifyManagedSource rechecks the exact observed source, expiry, and
 // old execution segment under the same native transaction that commits the
 // successor or cancellation. The preliminary preparation was read-only.
-func PrepareManagedAdmission(t ManagedTransfer, p ManagedAdmissionProof, s Snapshot, l ExecutionLease, g ChildExecutionGrant, a ManagedAuthority, physicalEpoch uint64, now time.Time) (ManagedTransfer, error) {
+func qualifyManagedSource(ctx context.Context, t ManagedTransfer, p ManagedAdmissionProof, s Snapshot, l ExecutionLease, g ChildExecutionGrant, a ManagedAuthority, physicalEpoch uint64, now time.Time, ledger budget.LedgerStore) (ManagedTransfer, error) {
 	if !p.valid || p.request.ExpectedTransferDigest == "" {
 		return ManagedTransfer{}, ErrExecutionConflict
 	}
 	next, err := ValidateManagedRecoverySource(t, p.request, s, l, g, a, physicalEpoch, now)
 	if err != nil || !p.Matches(next, p.reservation.Mode) {
 		return ManagedTransfer{}, ErrExecutionConflict
+	}
+	if _, err = managedRecoveryLedger(ctx, next, ledger); err != nil {
+		return ManagedTransfer{}, err
 	}
 	return next, nil
 }
@@ -462,11 +460,8 @@ func (p ManagedAdmissionProof) OwnedAdmission(q ExecutionAcquireRequest, leaseID
 // The returned recovery facts and native segment commit together.
 func ResolveManagedPhysicalAdmission(ctx context.Context, t ManagedTransfer, p PhysicalAdmission, s Snapshot, l ExecutionLease, g ChildExecutionGrant, a ManagedAuthority, physicalEpoch uint64, now time.Time, ledger budget.LedgerStore) (PhysicalAdmissionResult, ManagedTransfer, error) {
 	var zero PhysicalAdmissionResult
-	t, err := PrepareManagedAdmission(t, p.recovery, s, l, g, a, physicalEpoch, now)
+	t, err := qualifyManagedSource(ctx, t, p.recovery, s, l, g, a, physicalEpoch, now, ledger)
 	if err != nil {
-		return zero, ManagedTransfer{}, err
-	}
-	if _, err = managedRecoveryLedger(ctx, t, ledger); err != nil {
 		return zero, ManagedTransfer{}, err
 	}
 	v, err := ResolvePhysicalAdmission(s, l, now, false, false, p)
@@ -537,8 +532,7 @@ func (o ManagedAgentObligations) MatchesLiveLedger(l budget.Ledger, host Managed
 		ManagedLedgerDigest(l, host.RunID) == o.LedgerDigest && !l.RunCancelled(host.RunID) && !l.FinishedRuns[host.RunID]
 }
 
-// ManagedCancellationLedger plans the accounting part under the existing
-// managed cancellation Store transaction. No callback or Host ledger writes.
+// managedRecoveryLedger verifies the original quiescent accounting source.
 func managedRecoveryLedger(ctx context.Context, t ManagedTransfer, store budget.LedgerStore) (budget.Ledger, error) {
 	p, ok := t.SafePoint.AgentObligations()
 	if !ok || p.LedgerID != t.SafePoint.Source.Run.BudgetScopeID {
@@ -555,14 +549,6 @@ func managedRecoveryLedger(ctx context.Context, t ManagedTransfer, store budget.
 		return l, budget.ErrLedgerConflict
 	}
 	return l, nil
-}
-
-func ManagedCancellationLedger(ctx context.Context, t ManagedTransfer, store budget.LedgerStore) (*budget.LedgerMutation, error) {
-	l, err := managedRecoveryLedger(ctx, t, store)
-	if err != nil || l.ID == "" {
-		return nil, err
-	}
-	return budget.PlanRunCancellation(ctx, l, t.SafePoint.Host.RunID, "")
 }
 
 // ValidateManagedBudgetClosure verifies native accounting before issuing a
@@ -592,26 +578,30 @@ func ValidateManagedBudgetClosure(point ManagedSafePoint, terminal Snapshot, mod
 	return nil
 }
 
-// ManagedCancellationMutation is the qualified native cancellation reducer.
+// PlanManagedCancellation consumes no facts itself. The ordinary control
+// transaction qualifies its predecessor, verifies the original ledger and
+// commits the returned native mutation, retirement and selection together.
+func PlanManagedCancellation(ctx context.Context, t ManagedTransfer, p ManagedAdmissionProof, s Snapshot, l ExecutionLease, g ChildExecutionGrant, a ManagedAuthority, physicalEpoch uint64, now time.Time, store budget.LedgerStore) (ManagedTransfer, StoreMutation, error) {
+	t, e := qualifyManagedSource(ctx, t, p, s, l, g, a, physicalEpoch, now, store)
+	if e != nil {
+		return ManagedTransfer{}, StoreMutation{}, e
+	}
+	return managedCancellationMutation(t, p, s, now)
+}
+
+// managedCancellationMutation is the qualified native cancellation reducer.
 // It preserves feature state and prior receipts exactly and performs the native
 // Cancel transformation, not arbitrary caller-provided ApplyControl content.
-func ManagedCancellationMutation(t ManagedTransfer, q ManagedCancelRequest, s Snapshot, now time.Time) (ManagedTransfer, StoreMutation, error) {
-	if q.RunID != s.Run.ID || q.SuspensionID != t.SafePoint.ID || !ManagedSourceMatches(t.SafePoint, s) || !q.Selection.Matches(t, ManagedCancel) {
+func managedCancellationMutation(t ManagedTransfer, p ManagedAdmissionProof, s Snapshot, now time.Time) (ManagedTransfer, StoreMutation, error) {
+	if p.transfer.SafePoint.Host.RunID != s.Run.ID || p.transfer.SafePoint.ID != t.SafePoint.ID || !ManagedSourceMatches(t.SafePoint, s) || !p.Matches(t, ManagedCancel) {
 		return ManagedTransfer{}, StoreMutation{}, ErrExecutionConflict
 	}
-	r := s.Run
-	r.Status = RunStatusCancelled
-	r.Revision++
-	r.ErrorCode = "run.cancelled"
-	r.ErrorDetail = q.Selection.Authorization().CancellationReason
-	r.UpdatedAt = now.UTC()
-	ended := now.UTC()
-	r.EndedAt = &ended
-	m := StoreMutation{Record: Record{Run: r, State: cloneJSON(s.State)}, Events: []EventDraft{{Type: "run.cancelled", Message: r.ErrorDetail}}}
-	t.Revision = r.Revision
-	t.Selection = q.Selection.Authorization()
-	terminal := Snapshot{Run: r, State: cloneJSON(s.State), EventHead: s.EventHead + 1}
-	t.Terminal = &terminal
+	m := storeMutationAt(s, cancelMutation(s, p.Authorization().CancellationReason), now.UTC())
+	t.Revision = m.Record.Run.Revision
+	t.Selection = p.Authorization()
+	// The actual committed Snapshot, not a speculative mutation result,
+	// is attached by the control transaction after its CAS.
+
 	return t, m, nil
 }
 
@@ -668,10 +658,10 @@ func (p ManagedClosureProof) Matches(r ManagedRecoveryAuthorization) bool {
 	return p.Resolved() && p.transfer.Selection == r
 }
 
-func ManagedCancelReplay(t ManagedTransfer, q ManagedCancelRequest, s Snapshot) bool {
-	original := q.Selection.transfer
-	return q.Selection.Matches(original, ManagedCancel) && t.Resolved() && t.Selection.Mode == ManagedCancel &&
-		t.SafePoint.ID == q.SuspensionID && s.Run.ID == q.RunID && ManagedDigest(t.SafePoint) == ManagedDigest(original.SafePoint) &&
+func ManagedCancelReplay(t ManagedTransfer, p ManagedAdmissionProof, s Snapshot) bool {
+	original := p.transfer
+	return p.Matches(original, ManagedCancel) && t.Resolved() && t.Selection.Mode == ManagedCancel &&
+		t.SafePoint.ID == original.SafePoint.ID && s.Run.ID == original.SafePoint.Host.RunID && ManagedDigest(t.SafePoint) == ManagedDigest(original.SafePoint) &&
 		t.Terminal != nil && s.Run.Revision == original.SafePoint.Source.Run.Revision+1 &&
-		ManagedDigest(*t.Terminal) == ManagedDigest(s) && t.Selection == q.Selection.reservation
+		ManagedDigest(*t.Terminal) == ManagedDigest(s) && t.Selection == p.reservation
 }

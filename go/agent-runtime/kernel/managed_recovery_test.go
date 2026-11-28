@@ -143,25 +143,26 @@ func TestManagedRecoveryModeAndExactDigest(t *testing.T) {
 	if _, _, e = ResolveManagedPhysicalAdmission(t.Context(), p, cancelP.OwnedAdmission(req, "next-lease", "next-grant"), s, l, g, a, g.ExecutionEpoch, now, nil); !errors.Is(e, ErrExecutionConflict) {
 		t.Fatalf("CANCEL enabled physical dispatch: %v", e)
 	}
-	cq := ManagedCancelRequest{RunID: s.Run.ID, SuspensionID: "safe", Selection: cancelP}
-	cancelled, m, e := ManagedCancellationMutation(p, cq, s, now)
+	cq := cancelP
+	cancelled, m, e := managedCancellationMutation(p, cq, s, now)
 	if e != nil {
 		t.Fatal(e)
 	}
-	if m.Record.Run.Status != RunStatusCancelled || ManagedDigest(m.Record.State) != ManagedDigest(s.State) || cancelled.Terminal.EventHead != s.EventHead+1 {
+	if m.Record.Run.Status != RunStatusCancelled || ManagedDigest(m.Record.State) != ManagedDigest(s.State) || cancelled.Terminal != nil {
 		t.Fatal("cancel changed original evidence")
 	}
+	cancelled.Terminal = &Snapshot{Run: m.Record.Run, State: m.Record.State, EventHead: s.EventHead + int64(len(m.Events))}
 	if !ManagedCancelReplay(cancelled, cq, *cancelled.Terminal) {
 		t.Fatal("cancel ACK replay rejected")
 	}
 	forged := cancelP
 	forged.reservation.CancellationReason = "different"
-	cq.Selection = forged
+	cq = forged
 	if ManagedCancelReplay(cancelled, cq, *cancelled.Terminal) {
 		t.Fatal("foreign cancellation receipt adopted")
 	}
-	cq.Selection = proof
-	if _, _, e = ManagedCancellationMutation(p, cq, s, now); !errors.Is(e, ErrExecutionConflict) {
+	cq = proof
+	if _, _, e = managedCancellationMutation(p, cq, s, now); !errors.Is(e, ErrExecutionConflict) {
 		t.Fatalf("RESUME became cancellation: %v", e)
 	}
 }

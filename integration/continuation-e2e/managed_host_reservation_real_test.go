@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	runtimeconformance "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -162,7 +163,7 @@ func TestRealPostgresManagedNativeElectionAfterProcessCrash(t *testing.T) {
 				if e != nil {
 					t.Fatal(e)
 				}
-				if _, e = peerRT.CommitManagedCancellation(t.Context(), cancel); !errors.Is(e, kernel.ErrExecutionConflict) {
+				if _, e = runtimeconformance.CancelManagedFixture(t.Context(), peerRT, cancel); !errors.Is(e, kernel.ErrExecutionConflict) {
 					t.Fatalf("losing cancellation: %v", e)
 				}
 				enabled, e := peerRT.LoadManagedRecovery(t.Context(), root.ExecutionRefID)
@@ -182,7 +183,7 @@ func TestRealPostgresManagedNativeElectionAfterProcessCrash(t *testing.T) {
 				}
 			} else {
 				r = cancel.Authorization()
-				committed, e := peerRT.CommitManagedCancellation(t.Context(), cancel)
+				committed, e := runtimeconformance.CancelManagedFixture(t.Context(), peerRT, cancel)
 				if e != nil || !committed.Resolved() || committed.Selection.Mode != kernel.ManagedCancel {
 					t.Fatalf("native cancel: %v", e)
 				}

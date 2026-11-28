@@ -324,17 +324,14 @@ func (s *Store) applyWithAuthority(ctx context.Context, lease *kernel.ExecutionL
 	if s == nil || s.db == nil || ctx == nil || strings.TrimSpace(runID) == "" || expectedRevision == 0 {
 		return kernel.Snapshot{}, kernel.ErrInvalidInput
 	}
-	if mutation.Record.Run.ID != runID || mutation.Record.Run.Revision != expectedRevision+1 {
+	p, managed, err := guard.ManagedCancellation(runID, expectedRevision, mutation)
+	if err != nil {
+		return kernel.Snapshot{}, err
+	}
+	if !managed && (mutation.Record.Run.ID != runID || mutation.Record.Run.Revision != expectedRevision+1) {
 		return kernel.Snapshot{}, kernel.ErrConflict
 	}
-	encoded, err := encodeRecord(mutation.Record)
-	if err != nil {
-		return kernel.Snapshot{}, err
-	}
-	events, err := encodeEvents(mutation.Events)
-	if err != nil {
-		return kernel.Snapshot{}, err
-	}
+
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return kernel.Snapshot{}, conflictOrDatabaseError(err)
@@ -351,6 +348,27 @@ func (s *Store) applyWithAuthority(ctx context.Context, lease *kernel.ExecutionL
 	if readErr != nil {
 		return kernel.Snapshot{}, readErr
 	}
+	var transfer kernel.ManagedTransfer
+	if managed {
+		var replay bool
+		var e error
+		transfer, mutation, replay, e = sqliteManagedControl(ctx, tx, current, p)
+		if e != nil {
+			return kernel.Snapshot{}, e
+		}
+		if replay {
+			return current, nil
+		}
+	}
+	encoded, err := encodeRecord(mutation.Record)
+	if err != nil {
+		return kernel.Snapshot{}, err
+	}
+	events, err := encodeEvents(mutation.Events)
+	if err != nil {
+		return kernel.Snapshot{}, err
+	}
+
 	accounting := sqlledger.Store{DB: tx}
 	ledger, e := kernel.PlanRunBudgetMutation(ctx, accounting, current.Run, mutation, guard != nil)
 	if e != nil {
@@ -636,6 +654,12 @@ func (s *Store) applyWithAuthority(ctx context.Context, lease *kernel.ExecutionL
 	snapshot, err := commitRunJournal(ctx, tx, mutation, encoded, events)
 	if err != nil {
 		return kernel.Snapshot{}, err
+	}
+	if managed {
+		transfer.Terminal = &snapshot
+		if err = sqliteSaveManaged(ctx, tx, transfer); err != nil {
+			return kernel.Snapshot{}, err
+		}
 	}
 	if err = tx.Commit(); err != nil {
 		return kernel.Snapshot{}, err

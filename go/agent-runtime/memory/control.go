@@ -22,12 +22,45 @@ func (store *Store) ApplyControl(ctx context.Context, runID string, expectedRevi
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	if err := store.nativeEntryGateLocked(runID); err != nil {
+	p, managed, err := guard.ManagedCancellation(runID, expectedRevision, mutation)
+	if err != nil {
 		return kernel.Snapshot{}, false, err
+	}
+	if !managed {
+		if err = store.nativeEntryGateLocked(runID); err != nil {
+			return kernel.Snapshot{}, false, err
+		}
 	}
 	current, ok := store.snapshotLocked(runID)
 	if !ok {
 		return kernel.Snapshot{}, false, kernel.ErrNotFound
+	}
+	authority := store.runs[runID].execution
+	var transfer kernel.ManagedTransfer
+	var predecessor memoryEffect
+	var consumed *kernel.ChildExecutionGrant
+	if managed {
+		t, exists := store.managedTransfers[store.managedCurrent[runID]]
+		if !exists || t.SafePoint.Host.RunID != runID || t.SafePoint.Host.KernelAuthority != store.managedAuthority {
+			return kernel.Snapshot{}, false, kernel.ErrExecutionConflict
+		}
+		if kernel.ManagedCancelReplay(t, p, current) {
+			return cloneSnapshot(current), false, nil
+		}
+		g := kernel.ManagedCurrentGrant(t)
+		predecessor, ok = store.activeEffect(g.ID)
+		if !ok || !store.managedSoleGrantLocked(runID, g.ID) || predecessor.grant != g || predecessor.completion.GrantID != "" ||
+			!g.MatchesExecution(authority.lease) || authority.epoch != g.ExecutionEpoch || authority.epoch == math.MaxUint64 || authority.quarantineRev != 0 {
+			return kernel.Snapshot{}, false, kernel.ErrExecutionConflict
+		}
+		if e := store.managedCancellationQuiescentLocked(runID); e != nil {
+			return kernel.Snapshot{}, false, e
+		}
+		transfer, mutation, err = kernel.PlanManagedCancellation(ctx, t, p, current, authority.lease, g, store.managedAuthority, authority.physicalEpoch, store.currentExecutionTime(), store.ledgers)
+		if err != nil {
+			return kernel.Snapshot{}, false, err
+		}
+		consumed = &g
 	}
 	if current.Run.Revision != expectedRevision {
 		return kernel.Snapshot{}, false, kernel.ErrConflict
@@ -40,7 +73,6 @@ func (store *Store) ApplyControl(ctx context.Context, runID string, expectedRevi
 	if err := kernel.ValidateControl(current, guard, mutation, store.currentExecutionTime()); err != nil {
 		return kernel.Snapshot{}, false, err
 	}
-	authority := store.runs[runID].execution
 	if authority.quarantineRev != 0 && mutation.Record.Run.Status == kernel.RunStatusRunning {
 		// An unrelated validated control cannot age out a poisoned work
 		// identity while the same Feature wait remains unresolved.
@@ -54,6 +86,9 @@ func (store *Store) ApplyControl(ctx context.Context, runID string, expectedRevi
 		original, ok := store.activeEffect(id)
 		if !ok {
 			return kernel.Snapshot{}, false, kernel.ErrExecutionConflict
+		}
+		if consumed != nil && original.grant == *consumed {
+			continue
 		}
 		if original.grant.IsOwned() {
 			lease, hasLease := mutation.PhysicalPermit.ExecutionLease()
@@ -77,9 +112,14 @@ func (store *Store) ApplyControl(ctx context.Context, runID string, expectedRevi
 	// A rejected mutation must not invalidate a still-live worker.
 	// Epoch=0 stays legacy/unclaimed.
 	revoked := authority.epoch > 0 && !ownedApproval
-	snapshot, err := store.applyLocked(ctx, runID, expectedRevision, mutation, true)
+	snapshot, err := store.applyLocked(ctx, runID, expectedRevision, mutation, true, consumed)
 	if err != nil {
 		return kernel.Snapshot{}, false, err
+	}
+	if consumed != nil {
+		store.consumeEffectLocked(predecessor, nil)
+		transfer.Terminal = &snapshot
+		store.saveManagedLocked(transfer)
 	}
 	if revoked {
 		authority.epoch++

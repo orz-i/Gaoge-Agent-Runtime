@@ -176,14 +176,6 @@ func (r *Runtime) AdmitManagedContinuation(ctx context.Context, p ManagedAdmissi
 	admission := p.OwnedAdmission(ExecutionAcquireRequest{RunID: source.Run.ID, OwnerID: owner, LeaseDuration: d}, lid, gid)
 	return r.admitPhysical(ctx, source, admission)
 }
-func (r *Runtime) CommitManagedCancellation(ctx context.Context, p ManagedAdmissionProof) (ManagedTransfer, error) {
-	s, ok := r.store.(ManagedRecoveryStore)
-	if !ok {
-		return ManagedTransfer{}, ErrExecutionRequired
-	}
-	t := p.transfer
-	return s.CommitManagedCancellation(ctx, ManagedCancelRequest{RunID: t.SafePoint.Host.RunID, SuspensionID: t.SafePoint.ID, Selection: p})
-}
 
 // ManagedRecoveryAbsent is only a compatibility helper for non-opted-in Runs.
 func ManagedRecoveryAbsent(err error) bool {

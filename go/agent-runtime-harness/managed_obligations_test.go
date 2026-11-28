@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	runtimeconformance "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance"
 	"reflect"
 	"strings"
 	"testing"
@@ -201,7 +202,7 @@ func TestManagedContextCarriesOriginalBudgetAndInputCursor(t *testing.T) {
 				if selected.Authorization().Mode != kernel.ManagedCancel {
 					t.Fatal("wrong cancellation election")
 				}
-				transferred, e := options.Runtime.CommitManagedCancellation(ctx, selected)
+				transferred, e := runtimeconformance.CancelManagedFixture(ctx, options.Runtime, selected)
 				if e != nil {
 					t.Fatal(e)
 				}

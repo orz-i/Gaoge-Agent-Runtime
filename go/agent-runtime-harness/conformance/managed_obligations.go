@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	runtimeconformance "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance"
 	"reflect"
 	"strings"
 	"testing"
@@ -242,7 +243,7 @@ func ManagedOriginalObligations(t *testing.T, factory func(*testing.T) (kernel.S
 				if e != nil {
 					t.Fatal(e)
 				}
-				closed, e := rt.CommitManagedCancellation(ctx, selected)
+				closed, e := runtimeconformance.CancelManagedFixture(ctx, rt, selected)
 				if e != nil {
 					t.Fatal(e)
 				}

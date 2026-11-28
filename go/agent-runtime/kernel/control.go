@@ -38,6 +38,29 @@ type ControlGuard struct {
 	// Unexported and minted only by first-party Feature validators; custom SDK
 	// consumers and independent Store adapters cannot forge a guarded resume.
 	verified *featurecontrol.Proof
+	managed  *ManagedAdmissionProof
+}
+
+// CancellationGuard carries the already authorized original recovery source
+// into the ordinary terminal control transaction. It confers no dispatch.
+func (p ManagedAdmissionProof) CancellationGuard() ControlGuard {
+	return ControlGuard{Kind: ControlCancel, managed: &p}
+}
+
+// ManagedCancellation identifies a sealed cancellation of the original
+// expired physical effect. The Store constructs the terminal mutation from
+// that source under its own lock; no caller-provided mutation is accepted.
+func (g *ControlGuard) ManagedCancellation(runID string, revision uint64, m StoreMutation) (ManagedAdmissionProof, bool, error) {
+	if g == nil || g.managed == nil {
+		return ManagedAdmissionProof{}, false, nil
+	}
+	p := *g.managed
+	if g.Kind != ControlCancel || g.CheckpointID != "" || g.BlockedCode != "" || g.WaitID != "" || g.WaitDeadlineAt != nil || g.verified != nil ||
+		!p.Matches(p.transfer, ManagedCancel) || runID != p.transfer.SafePoint.Host.RunID || revision != p.transfer.SafePoint.Source.Run.Revision ||
+		!reflect.DeepEqual(m, StoreMutation{}) {
+		return p, true, ErrExecutionConflict
+	}
+	return p, true, nil
 }
 
 // ControlStore is one optional, guarded-CAS Store capability. It does not
@@ -190,6 +213,19 @@ func (runtime *Runtime) ApplyControl(ctx context.Context, runID string, expected
 	if runtime == nil || mutation.Ledger != nil || hasReservedApplyEvidence(mutation.Events) {
 		return Snapshot{}, false, controlNoEffectBeforeStore(ErrInvalidInput)
 	}
+	if guard.managed != nil {
+		if ctx == nil || runtime.execution != nil || runtime.physicalGrant != nil || permit != nil || !reflect.DeepEqual(mutation, Mutation{}) {
+			return Snapshot{}, false, ErrExecutionConflict
+		}
+		store, ok := runtime.store.(ControlStore)
+		if !ok {
+			return Snapshot{}, false, ErrExecutionRequired
+		}
+		// Exact ACK replay is checked under the same control transaction; an
+		// already terminal Run must not be rejected by a preliminary Load.
+		return store.ApplyControl(ctx, runID, expectedRevision, guard, StoreMutation{})
+	}
+
 	if runtime.execution != nil && (guard.Kind != ControlApproval || runtime.physicalGrant == nil || !runtime.physicalGrant.IsOwned() || !runtime.physicalGrant.MatchesExecution(*runtime.execution)) {
 		return Snapshot{}, false, controlNoEffectBeforeStore(ErrInvalidInput)
 	}

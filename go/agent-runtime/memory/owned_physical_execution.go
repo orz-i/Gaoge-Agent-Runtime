@@ -187,7 +187,7 @@ func (s *Store) ApplyOwnedPhysicalRecovery(ctx context.Context, g kernel.ChildEx
 		return kernel.Snapshot{}, err
 	}
 	m.PhysicalPermit = p.PhysicalPermit(g, current, m)
-	return s.applyLocked(ctx, g.ChildRunID, revision, m, false)
+	return s.applyLocked(ctx, g.ChildRunID, revision, m, false, nil)
 }
 
 // RecordPhysicalCallbackReturn changes only the original physical scope,

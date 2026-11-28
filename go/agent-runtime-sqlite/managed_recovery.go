@@ -110,131 +110,68 @@ func sqliteManagedGrant(ctx context.Context, tx *sql.Tx, id string) (kernel.Chil
 	}
 	return g, nil
 }
-func (s *Store) managedTx(ctx context.Context, id string, f func(*sql.Tx, kernel.Snapshot, kernel.ExecutionLease, kernel.ManagedTransfer, uint64, time.Time) (kernel.ManagedTransfer, error)) (kernel.ManagedTransfer, error) {
-	if s == nil || s.db == nil || ctx == nil || id == "" {
-		return kernel.ManagedTransfer{}, kernel.ErrInvalidInput
-	}
-	tx, e := s.db.BeginTx(ctx, nil)
-	if e != nil {
-		return kernel.ManagedTransfer{}, conflictOrDatabaseError(e)
-	}
-	defer func() { _ = tx.Rollback() }()
-	snap, e := loadTx(ctx, tx, id)
-	if e != nil {
-		return kernel.ManagedTransfer{}, e
-	}
+func sqliteManagedControl(ctx context.Context, tx *sql.Tx, snap kernel.Snapshot, p kernel.ManagedAdmissionProof) (kernel.ManagedTransfer, kernel.StoreMutation, bool, error) {
+	id := snap.Run.ID
 	l, q, e := sqliteManagedLease(ctx, tx, id)
 	if e != nil {
-		return kernel.ManagedTransfer{}, e
+		return kernel.ManagedTransfer{}, kernel.StoreMutation{}, false, e
 	}
 	if q != 0 {
-		return kernel.ManagedTransfer{}, kernel.ErrExecutionQuarantined
+		return kernel.ManagedTransfer{}, kernel.StoreMutation{}, false, kernel.ErrExecutionQuarantined
 	}
 	t, e := sqliteLoadManaged(ctx, tx, id)
 	if e != nil {
-		return t, e
+		return t, kernel.StoreMutation{}, false, e
 	}
 	a, e := sqliteManagedAuthority(ctx, tx)
 	if e != nil {
-		return t, e
+		return t, kernel.StoreMutation{}, false, e
 	}
 	if a != t.SafePoint.Host.KernelAuthority {
-		return t, kernel.ErrExecutionConflict
+		return t, kernel.StoreMutation{}, false, kernel.ErrExecutionConflict
+	}
+	if kernel.ManagedCancelReplay(t, p, snap) {
+		return t, kernel.StoreMutation{}, true, nil
+	}
+	if l.Epoch >= math.MaxInt64 {
+		return t, kernel.StoreMutation{}, false, kernel.ErrExecutionConflict
+	}
+	g, e := sqliteManagedGrant(ctx, tx, id)
+	if e != nil {
+		return t, kernel.StoreMutation{}, false, e
+	}
+	if g != kernel.ManagedCurrentGrant(t) || !g.MatchesExecution(l) {
+		return t, kernel.StoreMutation{}, false, kernel.ErrExecutionConflict
 	}
 	ms, e := sqliteExecutionNow(ctx, tx)
 	if e != nil {
-		return t, e
+		return t, kernel.StoreMutation{}, false, e
 	}
 	var physicalEpoch uint64
 	if e = tx.QueryRowContext(ctx, "SELECT execution_physical_epoch FROM runtime_runs WHERE run_id=?", id).Scan(&physicalEpoch); e != nil {
-		return t, e
+		return t, kernel.StoreMutation{}, false, e
 	}
-	out, e := f(tx, snap, l, t, physicalEpoch, time.UnixMilli(ms).UTC())
-	if e != nil {
-		return kernel.ManagedTransfer{}, e
-	}
-	if e = tx.Commit(); e != nil {
-		return kernel.ManagedTransfer{}, conflictOrDatabaseError(e)
-	}
-	return out, nil
-}
-func (s *Store) CommitManagedCancellation(ctx context.Context, q kernel.ManagedCancelRequest) (kernel.ManagedTransfer, error) {
-	return s.managedTx(ctx, q.RunID, func(tx *sql.Tx, snap kernel.Snapshot, l kernel.ExecutionLease, t kernel.ManagedTransfer, physicalEpoch uint64, now time.Time) (kernel.ManagedTransfer, error) {
-		if kernel.ManagedCancelReplay(t, q, snap) {
-			return t, nil
-		}
-		if l.Epoch >= math.MaxInt64 {
-			return t, kernel.ErrExecutionConflict
-		}
-		g, e := sqliteManagedGrant(ctx, tx, q.RunID)
-		if e != nil {
-			return t, e
-		}
-		want := kernel.ManagedCurrentGrant(t)
-		if g != want {
-			return t, kernel.ErrExecutionConflict
-		}
-		if !g.MatchesExecution(l) {
-			return t, kernel.ErrExecutionConflict
-		}
-		t, e = kernel.PrepareManagedAdmission(t, q.Selection, snap, l, g, t.SafePoint.Host.KernelAuthority, physicalEpoch, now)
-		if e != nil {
-			return t, e
-		}
-		// Native Create and terminal control share the writer transaction.
-		var busy bool
-		if e = tx.QueryRowContext(ctx, `WITH RECURSIVE children(id) AS (
+	// Native Create and terminal control share the writer transaction.
+	var busy bool
+	if e = tx.QueryRowContext(ctx, `WITH RECURSIVE children(id) AS (
 			SELECT run_id FROM runtime_runs WHERE json_extract(CAST(run_json AS TEXT),'$.parentRunID')=? OR json_extract(CAST(run_json AS TEXT),'$.logicalParentRunID')=?
 			UNION SELECT r.run_id FROM runtime_runs r JOIN children c ON json_extract(CAST(r.run_json AS TEXT),'$.parentRunID')=c.id OR json_extract(CAST(r.run_json AS TEXT),'$.logicalParentRunID')=c.id)
 			SELECT EXISTS(SELECT 1 FROM children c JOIN runtime_runs r ON r.run_id=c.id
 			WHERE r.status NOT IN ('completed','failed','cancelled') OR r.execution_quarantine_revision<>0
-			OR EXISTS(SELECT 1 FROM runtime_child_effect_grants g WHERE g.child_run_id=c.id))`, q.RunID, q.RunID).Scan(&busy); e != nil {
-			return t, conflictOrDatabaseError(e)
-		}
-		if busy {
-			return t, kernel.ErrExecutionConflict
-		}
-		n, m, e := kernel.ManagedCancellationMutation(t, q, snap, now)
-		if e != nil {
-			return t, e
-		}
-		accounting := sqlledger.Store{DB: tx}
-		ledger, e := kernel.ManagedCancellationLedger(ctx, t, accounting)
-		if e != nil {
-			return t, e
-		}
-		if e = accounting.Apply(ctx, q.RunID, ledger); e != nil {
-			return t, e
-		}
-		encoded, e := encodeRecord(m.Record)
-		if e != nil {
-			return t, e
-		}
-		events, e := encodeEvents(m.Events)
-		if e != nil {
-			return t, e
-		}
-		result, e := tx.ExecContext(ctx, `UPDATE runtime_runs SET status=?,revision=?,run_json=?,state_json=?,checkpoint_json=?,result_json=?,event_head=event_head+?,execution_epoch=execution_epoch+1,execution_owner='',execution_lease_id='',execution_expiry_ms=0 WHERE run_id=? AND revision=?`, string(m.Record.Run.Status), m.Record.Run.Revision, encoded.run, encoded.state, encoded.checkpoint, encoded.result, len(m.Events), q.RunID, snap.Run.Revision)
-		if e != nil {
-			return t, e
-		}
-		count, e := result.RowsAffected()
-		if e != nil {
-			return t, e
-		}
-		if count != 1 {
-			return t, kernel.ErrExecutionConflict
-		}
-		terminal, e := commitRunJournal(ctx, tx, m, encoded, events)
-		if e != nil {
-			return t, e
-		}
-		n.Terminal = &terminal
-		if e = sqliteConsumePhysicalGrant(ctx, tx, g, 1); e != nil {
-			return t, e
-		}
-		return n, sqliteSaveManaged(ctx, tx, n)
-	})
+			OR EXISTS(SELECT 1 FROM runtime_child_effect_grants g WHERE g.child_run_id=c.id))`, id, id).Scan(&busy); e != nil {
+		return t, kernel.StoreMutation{}, false, conflictOrDatabaseError(e)
+	}
+	if busy {
+		return t, kernel.StoreMutation{}, false, kernel.ErrExecutionConflict
+	}
+	n, m, e := kernel.PlanManagedCancellation(ctx, t, p, snap, l, g, a, physicalEpoch, time.UnixMilli(ms).UTC(), sqlledger.Store{DB: tx})
+	if e != nil {
+		return t, kernel.StoreMutation{}, false, e
+	}
+	if e = sqliteConsumePhysicalGrant(ctx, tx, g, 1); e != nil {
+		return t, kernel.StoreMutation{}, false, e
+	}
+	return n, m, false, nil
 }
 func sqliteManagedMutation(ctx context.Context, tx *sql.Tx, current kernel.Snapshot, m kernel.StoreMutation, lease *kernel.ExecutionLease) error {
 	if !m.ManagedSafePoint.Present() {

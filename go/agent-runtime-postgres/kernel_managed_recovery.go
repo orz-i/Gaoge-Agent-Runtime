@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
-	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget/sqlledger"
@@ -102,106 +101,62 @@ func pgManagedGrant(tx *gorm.DB, id string) (kernel.ChildExecutionGrant, error) 
 	}
 	return g, nil
 }
-func (s *KernelStore) managedTx(ctx context.Context, id string, f func(*gorm.DB, models.KernelRunRecord, kernel.Snapshot, kernel.ManagedTransfer, time.Time) (kernel.ManagedTransfer, error)) (kernel.ManagedTransfer, error) {
-	if s == nil || s.db == nil || ctx == nil || id == "" {
-		return kernel.ManagedTransfer{}, kernel.ErrInvalidInput
-	}
-	var out kernel.ManagedTransfer
-	e := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		r, e := lockKernelRun(tx, id)
-		if e != nil {
-			return e
-		}
-		snap, e := kernelSnapshotFrom(r)
-		if e != nil {
-			return e
-		}
-		t, e := pgLoadManaged(tx, id)
-		if e != nil {
-			return e
-		}
-		a, e := pgManagedAuthority(tx)
-		if e != nil {
-			return e
-		}
-		if a != t.SafePoint.Host.KernelAuthority {
-			return kernel.ErrExecutionConflict
-		}
-		now, e := pgStoreNow(tx)
-		if e != nil {
-			return e
-		}
-		out, e = f(tx, r, snap, t, now)
-		return e
-	})
+
+// Qualify the original managed predecessor under the ordinary control lock.
+// The shared terminal CAS, accounting and journal commit follow in the caller.
+func pgManagedControl(ctx context.Context, tx *gorm.DB, r models.KernelRunRecord, snap kernel.Snapshot, p kernel.ManagedAdmissionProof) (kernel.ManagedTransfer, kernel.StoreMutation, bool, error) {
+	id := snap.Run.ID
+	t, e := pgLoadManaged(tx, id)
 	if e != nil {
-		return kernel.ManagedTransfer{}, e
+		return t, kernel.StoreMutation{}, false, e
 	}
-	return out, nil
-}
-func (s *KernelStore) CommitManagedCancellation(ctx context.Context, q kernel.ManagedCancelRequest) (kernel.ManagedTransfer, error) {
-	return s.managedTx(ctx, q.RunID, func(tx *gorm.DB, r models.KernelRunRecord, snap kernel.Snapshot, t kernel.ManagedTransfer, now time.Time) (kernel.ManagedTransfer, error) {
-		if kernel.ManagedCancelReplay(t, q, snap) {
-			return t, nil
-		}
-		if r.ExecutionEpoch >= math.MaxInt64 || r.ExecutionQuarantineRevision != 0 {
-			return t, kernel.ErrExecutionConflict
-		}
-		g, e := pgManagedGrant(tx, q.RunID)
-		if e != nil {
-			return t, e
-		}
-		want := kernel.ManagedCurrentGrant(t)
-		if g != want {
-			return t, kernel.ErrExecutionConflict
-		}
-		if !g.MatchesExecution(pgManagedLease(r)) {
-			return t, kernel.ErrExecutionConflict
-		}
-		t, e = kernel.PrepareManagedAdmission(t, q.Selection, snap, pgManagedLease(r), g, t.SafePoint.Host.KernelAuthority, r.ExecutionPhysicalEpoch, now)
-		if e != nil {
-			return t, e
-		}
-		// Create locks the same ancestor row; inspect original descendant
-		// Runs and unresolved Grants before committing native termination.
-		var busy bool
-		if e = tx.Raw(`WITH RECURSIVE children(id) AS (
+	a, e := pgManagedAuthority(tx)
+	if e != nil {
+		return t, kernel.StoreMutation{}, false, e
+	}
+	if a != t.SafePoint.Host.KernelAuthority || r.ExecutionQuarantineRevision != 0 {
+		return t, kernel.StoreMutation{}, false, kernel.ErrExecutionConflict
+	}
+	if kernel.ManagedCancelReplay(t, p, snap) {
+		return t, kernel.StoreMutation{}, true, nil
+	}
+	if r.ExecutionEpoch >= math.MaxInt64 {
+		return t, kernel.StoreMutation{}, false, kernel.ErrExecutionConflict
+	}
+	g, e := pgManagedGrant(tx, id)
+	if e != nil {
+		return t, kernel.StoreMutation{}, false, e
+	}
+	if g != kernel.ManagedCurrentGrant(t) || !g.MatchesExecution(pgManagedLease(r)) {
+		return t, kernel.StoreMutation{}, false, kernel.ErrExecutionConflict
+	}
+	now, e := pgStoreNow(tx)
+	if e != nil {
+		return t, kernel.StoreMutation{}, false, e
+	}
+	// Create locks the same ancestor row; inspect original descendant
+	// Runs and unresolved Grants before committing native termination.
+	var busy bool
+	if e = tx.Raw(`WITH RECURSIVE children(id) AS (
 			SELECT run_id FROM agent_kernel_runs WHERE parent_run_id=? OR logical_parent_run_id=?
 			UNION SELECT r.run_id FROM agent_kernel_runs r JOIN children c ON r.parent_run_id=c.id OR r.logical_parent_run_id=c.id)
 			SELECT EXISTS(SELECT 1 FROM children c JOIN agent_kernel_runs r ON r.run_id=c.id
 			WHERE r.status NOT IN ('completed','failed','cancelled') OR r.execution_quarantine_revision<>0
-			OR EXISTS(SELECT 1 FROM agent_kernel_child_effect_grants g WHERE g.child_run_id=c.id))`, q.RunID, q.RunID).Scan(&busy).Error; e != nil {
-			return t, translateKernelError(e)
-		}
-		if busy {
-			return t, kernel.ErrExecutionConflict
-		}
-		n, m, e := kernel.ManagedCancellationMutation(t, q, snap, now)
-		if e != nil {
-			return t, e
-		}
-		accounting := sqlledger.Store{DB: tx.Statement.ConnPool, Lock: tx.Name() == "postgres"}
-		ledger, e := kernel.ManagedCancellationLedger(ctx, t, accounting)
-		if e != nil {
-			return t, e
-		}
-		if e = accounting.Apply(ctx, q.RunID, ledger); e != nil {
-			return t, e
-		}
-		record, e := kernelRunRecordFrom(m.Record, 0)
-		if e != nil {
-			return t, e
-		}
-		terminal, e := s.applyKernelMutation(tx, q.RunID, snap.Run.Revision, record, m, nil, true, true, false)
-		if e != nil {
-			return t, e
-		}
-		n.Terminal = &terminal
-		if e = pgConsumePhysicalGrant(tx, g, 1); e != nil {
-			return t, e
-		}
-		return n, pgSaveManaged(tx, n)
-	})
+			OR EXISTS(SELECT 1 FROM agent_kernel_child_effect_grants g WHERE g.child_run_id=c.id))`, id, id).Scan(&busy).Error; e != nil {
+		return t, kernel.StoreMutation{}, false, translateKernelError(e)
+	}
+	if busy {
+		return t, kernel.StoreMutation{}, false, kernel.ErrExecutionConflict
+	}
+	accounting := sqlledger.Store{DB: tx.Statement.ConnPool, Lock: tx.Name() == "postgres"}
+	n, m, e := kernel.PlanManagedCancellation(ctx, t, p, snap, pgManagedLease(r), g, a, r.ExecutionPhysicalEpoch, now, accounting)
+	if e != nil {
+		return t, kernel.StoreMutation{}, false, e
+	}
+	if e = pgConsumePhysicalGrant(tx, g, 1); e != nil {
+		return t, kernel.StoreMutation{}, false, e
+	}
+	return n, m, false, nil
 }
 
 // Prepare only after ordinary authority validation and inside its transaction.
