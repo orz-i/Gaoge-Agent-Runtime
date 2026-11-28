@@ -109,7 +109,7 @@ func assertNoRepeatResume(t *testing.T, runner *ShadowRunner, client *uncertainR
 	t.Helper()
 	before, countBefore, _, _ := client.counts()
 	for _, input := range []string{"approved", "another answer"} {
-		_, err := runner.ResumeRun(t.Context(), id, input)
+		_, err := runner.ResumeRun(t.Context(), id, shadowRevision(t, runner, id), input)
 		if !errors.Is(err, ErrRemoteOutcomeUnknown) {
 			t.Fatalf("pending physical resume was re-admitted for %q: %v", input, err)
 		}
@@ -135,7 +135,7 @@ func TestPR113ResumeOutcomeUnknownNeverResendsAcrossRestartOrSameStateGET(t *tes
 		t.Fatalf("initial wait failed: %+v %v", initial.Run, err)
 	}
 	remote.resumeErr = errors.New("lost reply after success: Bearer private-secret-123")
-	pending, err := runner.ResumeRun(t.Context(), initial.Run.ID, "approved")
+	pending, err := runner.ResumeRun(t.Context(), initial.Run.ID, shadowRevision(t, runner, initial.Run.ID), "approved")
 	if !errors.Is(err, ErrRemoteOutcomeUnknown) || strings.Contains(err.Error(), "private-secret") ||
 		pending.Run.Status != kernel.RunStatusRunning || pending.Run.ErrorDetail != "" {
 		t.Fatalf("resume ambiguity leaked or was falsely made retryable: %+v %v", pending.Run, err)
@@ -195,7 +195,7 @@ func TestPR113ResumeMalformedAcknowledgementsRemainUnresolved(t *testing.T) {
 				t.Fatal(err)
 			}
 			remote.resumeMode = mode
-			_, err = runner.ResumeRun(t.Context(), initial.Run.ID, "approved")
+			_, err = runner.ResumeRun(t.Context(), initial.Run.ID, shadowRevision(t, runner, initial.Run.ID), "approved")
 			if err == nil {
 				t.Fatal("unverifiable SendMessage reply was accepted")
 			}
@@ -230,7 +230,10 @@ func TestPR113ConcurrentResumeAdmissionAndRestartAreSinglePhysicalSend(t *testin
 	release := func() { once.Do(func() { close(remote.release) }) }
 	defer release()
 	outcome := make(chan error, 1)
-	go func() { _, err := runner.ResumeRun(t.Context(), initial.Run.ID, "approved"); outcome <- err }()
+	go func() {
+		_, err := runner.ResumeRun(t.Context(), initial.Run.ID, shadowRevision(t, runner, initial.Run.ID), "approved")
+		outcome <- err
+	}()
 	select {
 	case <-remote.entered:
 	case <-time.After(3 * time.Second):
@@ -268,10 +271,10 @@ func TestPR113UncertainResumeCanCancelOriginalBoundTask(t *testing.T) {
 		t.Fatal(err)
 	}
 	remote.resumeErr = errors.New("transport reply lost")
-	if _, err := runner.ResumeRun(t.Context(), initial.Run.ID, "approved"); !errors.Is(err, ErrRemoteOutcomeUnknown) {
+	if _, err := runner.ResumeRun(t.Context(), initial.Run.ID, shadowRevision(t, runner, initial.Run.ID), "approved"); !errors.Is(err, ErrRemoteOutcomeUnknown) {
 		t.Fatalf("uncertain input accepted: %v", err)
 	}
-	cancelled, err := runner.CancelRun(t.Context(), initial.Run.ID)
+	cancelled, err := runner.CancelRemote(t.Context(), initial.Run.ID, shadowRevision(t, runner, initial.Run.ID))
 	if err != nil || cancelled.Run.Status != kernel.RunStatusCancelled {
 		t.Fatalf("known original Task was not cancellable: %+v %v", cancelled.Run, err)
 	}
@@ -296,7 +299,7 @@ func TestPR113NonterminalGETCannotReopenUncertainResume(t *testing.T) {
 				t.Fatal(err)
 			}
 			remote.resumeErr = errors.New("unknown effect")
-			pending, err := runner.ResumeRun(t.Context(), initial.Run.ID, "approved")
+			pending, err := runner.ResumeRun(t.Context(), initial.Run.ID, shadowRevision(t, runner, initial.Run.ID), "approved")
 			if !errors.Is(err, ErrRemoteOutcomeUnknown) {
 				t.Fatal(err)
 			}

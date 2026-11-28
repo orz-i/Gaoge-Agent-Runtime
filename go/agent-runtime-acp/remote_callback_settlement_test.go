@@ -65,7 +65,7 @@ func TestPR151ACPCancelCtxRetainsPhysicalReturn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, cancelErr := runner.CancelRun(ctx, before.Run.ID, before.Run.Revision)
+	_, cancelErr := runner.CancelRemote(ctx, before.Run.ID, before.Run.Revision)
 	t.Logf("CancelRun returned err=%v, context=%v", cancelErr, ctx.Err())
 	close(fake.release)
 	after := <-done

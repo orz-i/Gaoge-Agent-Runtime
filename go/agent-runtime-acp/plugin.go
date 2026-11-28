@@ -129,11 +129,7 @@ func (p *Plugin) Cancel(ctx context.Context, id string, revision uint64, _ strin
 	if err != nil {
 		return snap, err
 	}
-	remote := child.(*ShadowRunner)
-	if _, err = remote.decodeState(snap); err != nil {
-		return snap, err
-	}
-	return remote.CancelRun(ctx, id, revision)
+	return child.(*ShadowRunner).CancelRemote(ctx, id, revision)
 }
 
 // OwnsRemoteDelegation is the read-only proof required by the Harness

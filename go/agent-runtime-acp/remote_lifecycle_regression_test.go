@@ -104,7 +104,7 @@ func TestPR151ACPCancelBeforePhysicalPrompt(t *testing.T) {
 	}()
 	snap := <-s.committed
 	beforeO, beforeP, beforeC := f.counts()
-	cancelSnap, cancelErr := runner.CancelRun(t.Context(), snap.Run.ID, snap.Run.Revision)
+	cancelSnap, cancelErr := runner.CancelRemote(t.Context(), snap.Run.ID, snap.Run.Revision)
 	afterO, afterP, afterC := f.counts()
 	t.Logf("committed prompt intent rev=%d before counts=%d/%d/%d; cancel returned rev=%d err=%v counts=%d/%d/%d", snap.Run.Revision, beforeO, beforeP, beforeC, cancelSnap.Run.Revision, cancelErr, afterO, afterP, afterC)
 	close(s.release)
@@ -158,7 +158,7 @@ func TestPR151ACPRealStdioLatePromptAfterCancel(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
-	cancelled, err := runner.CancelRun(ctx, snap.Run.ID, snap.Run.Revision)
+	cancelled, err := runner.CancelRemote(ctx, snap.Run.ID, snap.Run.Revision)
 	if !errors.Is(err, ErrOutcomeUnknown) {
 		close(store.release)
 		t.Fatalf("unexpected cancel result %v", err)

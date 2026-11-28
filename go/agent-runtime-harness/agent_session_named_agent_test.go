@@ -275,7 +275,7 @@ func TestNamedAgentHostSelectionRejectsIncompleteOrConflictingAuthority(t *testi
 		}},
 		{"conflicting Host policy", func(o *harness.AgentSessionOptions) { o.DelegationPolicy = hostSelectedAgentPolicy{MemberID: "worker"} }},
 		{"missing relation index", func(o *harness.AgentSessionOptions) { o.Relations = nil }},
-		{"missing delegation depth", func(o *harness.AgentSessionOptions) { o.Session.Config.DelegationPolicy.MaxDepth = 0 }},
+		{"invalid delegation depth", func(o *harness.AgentSessionOptions) { o.Session.Config.DelegationPolicy.MaxDepth = -1 }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			client := &agentSessionModel{}

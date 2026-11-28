@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runfeed"
@@ -144,7 +145,7 @@ func wireFixtureBodies(t *testing.T) map[string]any {
 	completed.Status, completed.Revision = kernel.RunStatusCompleted, 3
 	completed.RequestID, completed.DeadlineAt = "request-1", &deadline
 	completed.EndedAt, completed.UpdatedAt = &ended, ended
-	extension.Kind, extension.Status, extension.Revision = "a2a.remote", kernel.RunStatusCompleted, 2
+	extension.Kind, extension.Status, extension.Revision = "agent.remote", kernel.RunStatusCompleted, 2
 	extension.EndedAt, extension.UpdatedAt = &ended, ended
 	cancelled.Status, cancelled.Revision = kernel.RunStatusCancelled, 2
 	cancelled.EndedAt, cancelled.UpdatedAt = &ended, ended
@@ -166,11 +167,11 @@ func wireFixtureBodies(t *testing.T) map[string]any {
 		"snapshot-running.json": SnapshotResponse(kernel.Snapshot{Run: run, State: json.RawMessage(`{}`)}),
 		"snapshot-external-wait.json": RunSnapshotResponse{
 			Run: run, State: json.RawMessage(`{}`),
-			PendingTool: &PendingToolResponse{Kind: tools.PendingExternalResult, CallID: "call-1", ToolKey: "test.external", DeadlineAt: &deadline},
+			PendingTool: &agent.PendingToolView{Kind: tools.PendingExternalResult, CallID: "call-1", ToolKey: "test.external", DeadlineAt: &deadline},
 		},
 		"snapshot-child-wait.json": RunSnapshotResponse{
 			Run: run, State: json.RawMessage(`{}`),
-			PendingTool: &PendingToolResponse{Kind: tools.PendingChildTerminal, CallID: "call-2", ToolKey: "harness.delegate"},
+			PendingTool: &agent.PendingToolView{Kind: tools.PendingChildTerminal, CallID: "call-2", ToolKey: "harness.delegate"},
 		},
 		"snapshot-waiting.json": SnapshotResponse(kernel.Snapshot{
 			Run: waiting, State: json.RawMessage(`{"step":1}`), Checkpoint: &checkpoint, EventHead: 2,
@@ -188,7 +189,7 @@ func wireFixtureBodies(t *testing.T) map[string]any {
 			{Seq: 2, Type: "run.waiting", Message: "Approval required", Data: json.RawMessage(`{"checkpointID":"checkpoint-1"}`), CreatedAt: created},
 		}, EventHead: 2},
 		"events-empty.json": RunEventPageResponse{Events: []kernel.Event{}},
-		"cancel.json":       CancelRunResponse{Run: PublicRun(cancelled)},
+		"cancel.json":       SnapshotResponse(kernel.Snapshot{Run: cancelled, State: json.RawMessage(`{}`), EventHead: 2}),
 		"error.json":        json.RawMessage(errorRecorder.Body.Bytes()),
 		"feed-terminal.json": runfeed.Event{
 			Seq: 3, RunID: "run-1", Type: "run.completed", Delta: "done", Message: "Run completed",

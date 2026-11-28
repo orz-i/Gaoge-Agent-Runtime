@@ -1,6 +1,5 @@
-/** Feature-owned identifier, including agent and a2a.remote. */
-export type RuntimeKind = string;
-export type RunStatus = "running" | "waiting_input" | "paused_budget" | "completed" | "failed" | "cancelled";
+import type { ResultDTO, RunSnapshotDTO, RunStatus } from "./types.gen.js";
+export * from "./types.gen.js";
 export type HarnessTurnStatus = "accepted" | RunStatus;
 export type HarnessItemKind =
   | "user_message"
@@ -18,8 +17,6 @@ export type HarnessItemKind =
   | "diagnostic";
 export type HarnessItemStatus = "started" | "waiting" | "completed" | "failed" | "cancelled";
 
-export type ActorRefDTO = { tenantID: string; actorID: string };
-export type ThreadRefDTO = { kind: string; id: string };
 export type HostRefDTO = { kind: string; id: string };
 
 export type HarnessItemDTO = {
@@ -192,72 +189,6 @@ export type HarnessTurnFeedEventDTO = {
   createdAt: string;
 };
 
-export type RunDTO = {
-  id: string;
-  kind: RuntimeKind;
-  actor: ActorRefDTO;
-  thread: ThreadRefDTO;
-  requestID?: string;
-  goal: string;
-  status: RunStatus;
-  revision: number;
-  errorCode?: string;
-  errorDetail?: string;
-  deadlineAt?: string | null;
-  endedAt?: string | null;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type EventDTO = {
-  seq: number;
-  type: string;
-  message?: string;
-  data?: unknown;
-  createdAt: string;
-};
-
-export type RunFeedEventDTO = {
-  seq: number;
-  runID: string;
-  type: string;
-  delta?: string;
-  message?: string;
-  data?: unknown;
-  revision?: number;
-  status?: RunStatus | string;
-  terminal?: boolean;
-  createdAt: string;
-};
-
-export type CheckpointDTO = {
-  id: string;
-  kind: string;
-  status: string;
-  payload: null;
-  createdAt: string;
-  resolvedAt?: string | null;
-};
-
-export type ResultDTO = { contentType: string; content: unknown };
-
-export type RunSnapshotDTO = {
-  run: RunDTO;
-  state: unknown;
-  checkpoint?: CheckpointDTO | null;
-  result?: ResultDTO | null;
-  eventHead: number;
-  pendingTool?: PendingToolDTO | null;
-};
-
-export type PendingToolDTO = {
-  kind: "external_result" | "child_terminal";
-  callID: string;
-  toolKey: string;
-  deadlineAt?: string | null;
-  ready: boolean;
-};
-
 // External/child waits retain the running lifecycle and never impersonate
 // interaction or call-allowance pauses.
 export function toolWaitPhase(snapshot: RunSnapshotDTO): "waiting_external_result" | "waiting_child" | "result_ready" | undefined {
@@ -265,21 +196,3 @@ export function toolWaitPhase(snapshot: RunSnapshotDTO): "waiting_external_resul
   if (snapshot.pendingTool.ready) return "result_ready";
   return snapshot.pendingTool.kind === "external_result" ? "waiting_external_result" : "waiting_child";
 }
-
-export type RunEventPageDTO = {
-  events: EventDTO[];
-  eventHead: number;
-};
-
-export type StartAgentRunRequest = {
-  thread: ThreadRefDTO;
-  input: { content: string };
-  clientRunID?: string;
-  model?: string;
-  /** Per-model-response output ceiling; zero or omission leaves it unspecified. */
-  maxModelOutputTokens?: number;
-  toolKeys?: string[];
-};
-
-export type CancelRunRequest = { expectedRevision: number; reason?: string };
-export type CancelRunResponse = { run: RunDTO };

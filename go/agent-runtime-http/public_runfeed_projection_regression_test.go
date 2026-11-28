@@ -22,11 +22,11 @@ func TestRunFeedSSEWriterNeverEmitsRequestedToolOrApprovalArguments(t *testing.T
 	}
 	writer := httptest.NewRecorder()
 	context, _ := gin.CreateTestContext(writer)
-	cursor, closed := writeRunFeedReplay(context, events, 0)
+	closed := writeRunFeedReplay(context, events)
 	encoded := writer.Body.String()
-	if cursor != 2 || closed || strings.Contains(encoded, private) || strings.Contains(encoded, `"arguments"`) ||
+	if !strings.Contains(encoded, "id: 2\n") || closed || strings.Contains(encoded, private) || strings.Contains(encoded, `"arguments"`) ||
 		!strings.Contains(encoded, `"status":"requested"`) || !strings.Contains(encoded, `"id":"checkpoint-one"`) {
-		t.Fatalf("public SSE replay exposes private Tool context: last=%d stopped=%v SSE=%s", cursor, closed, encoded)
+		t.Fatalf("public SSE replay exposes private Tool context: stopped=%v SSE=%s", closed, encoded)
 	}
 	for _, event := range events {
 		if err := writeRunFeedEvent(context, event); err != nil {

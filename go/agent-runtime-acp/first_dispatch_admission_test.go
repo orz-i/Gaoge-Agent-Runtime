@@ -49,7 +49,7 @@ func TestPR151CancelBeforeOriginalCreateAck(t *testing.T) {
 		done <- outcome{snap, e}
 	}()
 	original := <-store.created
-	before, err := runner.CancelRun(t.Context(), original.Run.ID, original.Run.Revision)
+	before, err := runner.CancelRemote(t.Context(), original.Run.ID, original.Run.Revision)
 	if !errors.Is(err, ErrOutcomeUnknown) {
 		t.Fatalf("expected cancellation pending before Session ID; got %+v %v", before.Run, err)
 	}
@@ -154,7 +154,7 @@ func TestPR151RealStdioACPFirstSessionAfterCancel(t *testing.T) {
 		done <- outcome{snap, e}
 	}()
 	original := <-store.created
-	before, err := runner.CancelRun(t.Context(), original.Run.ID, original.Run.Revision)
+	before, err := runner.CancelRemote(t.Context(), original.Run.ID, original.Run.Revision)
 	if !errors.Is(err, ErrOutcomeUnknown) {
 		t.Fatalf("no durable cancellation: %+v %v", before.Run, err)
 	}
@@ -211,7 +211,7 @@ func TestPR151ACPDelayedFirstDispatchClaimCannotOutliveCancel(t *testing.T) {
 		done <- outcome{snap, startErr}
 	}()
 	admitted := <-store.committed
-	cancelled, cancelErr := runner.CancelRun(t.Context(), admitted.Run.ID, admitted.Run.Revision)
+	cancelled, cancelErr := runner.CancelRemote(t.Context(), admitted.Run.ID, admitted.Run.Revision)
 	if !errors.Is(cancelErr, ErrOutcomeUnknown) || cancelled.Run.Revision != admitted.Run.Revision+1 {
 		close(store.release)
 		t.Fatalf("original cancellation was not serialized after first-dispatch claim: %+v %v", cancelled.Run, cancelErr)

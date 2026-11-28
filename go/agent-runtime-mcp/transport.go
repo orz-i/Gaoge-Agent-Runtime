@@ -6,8 +6,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
 var ErrInvalidTransport = errors.New("invalid MCP transport")
@@ -90,19 +88,4 @@ func normalizeEndpoint(raw string) (string, error) {
 		return "", ErrInvalidTransport
 	}
 	return parsed.String(), nil
-}
-
-// CatalogSnapshot is an immutable host-neutral projection of one MCP tool discovery.
-type CatalogSnapshot struct {
-	Endpoint    string
-	Definitions []tools.Definition
-}
-
-// CloneCatalogSnapshot isolates model-visible schemas from protocol cache mutation.
-func CloneCatalogSnapshot(snapshot CatalogSnapshot) CatalogSnapshot {
-	clone := CatalogSnapshot{Endpoint: snapshot.Endpoint, Definitions: make([]tools.Definition, len(snapshot.Definitions))}
-	for index, definition := range snapshot.Definitions {
-		clone.Definitions[index] = tools.CloneDefinition(definition)
-	}
-	return clone
 }

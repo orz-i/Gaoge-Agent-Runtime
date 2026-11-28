@@ -215,7 +215,7 @@ func exerciseSkillPageScenario(t *testing.T, content string, maxBytes int) {
 		}}}, nil
 	}}
 	options := agentSessionOptions(t, memory.NewStore(), harness.NewMemoryStore(), client)
-	options.Limits = agent.Limits{MaxLLMCalls: 14, MaxToolCalls: 13}
+	options.Session.Config.Limits = agent.Limits{MaxLLMCalls: 14, MaxToolCalls: 13}
 	options.Session.Config.ContextPolicy = runtimecontext.Policy{MaxToolResultBytes: maxBytes}
 	options.Session.Config.Skills = []harness.SkillSnapshot{{ID: "doc", Revision: 1, Title: "Long original", Markdown: content}}
 	session, err := harness.OpenAgentSession(options)

@@ -29,15 +29,27 @@ JSON or fields return HTTP 400; oversized bodies return HTTP 413 with
 The only first-party orchestration routes are Agent Run and Harness/Subtask
 endpoints; no obsolete composite routes are mounted.
 
-`GET /runs/:run_id` returns the current aggregate plus `eventHead`, not the full
+Start, read and cancel return the same snapshot, including the canonical
+`agent.PendingToolView` from `agent.ViewState`; there is no projector injection
+or separate cancel response. `GET /runs/:run_id` returns `eventHead`, not the full
 Kernel Event journal. Use `GET /runs/:run_id/events?afterSeq=...&limit=...` for
 bounded durable audit/event history. `/runs/:run_id/feed` remains the separate
 semantic Run Feed and is not used as a compatibility substitute for the journal.
+Feed sequences come only from retained events. A terminal, drained feed returns
+204; HTTP never invents a terminal sequence or publishes a cancellation event.
+
+Inject the existing owner `RunCanceller` through `Dependencies.Canceller` for
+remote Runs. There is no Run-kind cancellation table: both A2A and ACP use
+`agent.remote`, and only the original executor can verify and cancel its effect.
+Without that owner, remote cancellation fails closed instead of cancelling a
+local shadow. Native Runs may use the default Kernel canceller.
 
 The unique wire contract is [contracts/agent-runtime/v1/openapi.yaml](../../contracts/agent-runtime/v1/openapi.yaml),
 including the `harness` capability fragment and explicit cursor-expired
 recovery headers for both Run Feed and Harness Turn Feed.
 
-Run kinds are feature-owned strings, including `a2a.remote` and host extensions.
+Run kinds include `agent`, protocol-neutral `agent.remote` and host extensions.
+Generate/check the edge TS types from this contract with
+`go run ./go/agent-runtime-http/internal/contractgen [-check]` at the repository root.
 HTTP `v1` names the protocol namespace; the SDK still follows the
 [Beta integration and upgrade contract](../../docs/integration-contract.md).

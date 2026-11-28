@@ -62,6 +62,9 @@ The feed reconnects transient disconnects, skips already-seen sequence numbers,
 and ends after an event marked `terminal`. Persist `lastSeq` if the caller needs
 to reconnect after a reload. The optional `onCursorExpired` callback receives
 a replacement snapshot when the server reports an expired cursor.
+An authorized terminal Run with no retained events after the cursor returns
+204 and ends iteration without a synthetic event. Read `runs.get` for its final
+snapshot; `runs.cancel` now returns this same snapshot shape.
 
 > **BREAKING CHANGE:** The development candidate removes Team, GroupChat and
 > Workflow clients and DTOs. Use the Agent/SubAgent delegation APIs. Existing
@@ -81,8 +84,11 @@ to a caller. Generic `admin`, `agents`, `events`, and `interactions` namespaces,
 and generic run delegation/resume methods, are not part of this client.
 
 `RuntimeKind` is a feature-owned string. Handle unfamiliar kinds when reading
-Runs; built-ins include `agent` and `a2a.remote`. Feature-specific start methods remain
+Runs; built-ins include `agent` and `agent.remote` (A2A and ACP). Start methods remain
 explicit. JSON payloads typed as `unknown` require their owning host schema.
+Run/request/event types are generated from the canonical OpenAPI, not maintained
+as a second schema. Contributors use `pnpm generate` and `pnpm contract:check`
+from this package. Harness contracts are unchanged by this edge cut.
 
 ## Harness input and approval
 

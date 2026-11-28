@@ -53,7 +53,7 @@ paths:
           description: Cancelled
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/CancelRunResponse'}
+              schema: {$ref: '#/components/schemas/RunSnapshot'}
         default: {$ref: '#/components/responses/Error'}
   /runs/{runID}/events:
     get:
@@ -76,6 +76,8 @@ paths:
         - $ref: '#/components/parameters/RunID'
         - $ref: '#/components/parameters/AfterSeq'
       responses:
+        '204':
+          description: The authorized Run is terminal and no retained Feed events remain after this cursor. No synthetic terminal sequence is emitted.
         '200':
           description: Replayable Run Feed event stream
           content:
@@ -440,10 +442,13 @@ components:
         id: {type: string}
         kind:
           type: string
-          description: Feature-owned Run kind. Built-ins include agent and a2a.remote; hosts may register additional kinds.
+          description: Agent Run kind; both A2A and ACP remote executions use agent.remote. Hosts may register additional kinds.
         actor: {$ref: '#/components/schemas/ActorRef'}
         thread: {$ref: '#/components/schemas/ThreadRef'}
         requestID: {type: string}
+        parentRunID: {type: string}
+        logicalParentRunID: {type: string}
+        budgetScopeID: {type: string}
         goal: {type: string}
         status: {type: string, enum: [running, waiting_input, paused_budget, completed, failed, cancelled]}
         revision: {type: integer, minimum: 1}
@@ -687,7 +692,9 @@ components:
         id: {type: string}
         kind: {type: string}
         status: {type: string, enum: [pending, resolved]}
-        payload: {description: 'Public Run snapshots always return null; original opaque checkpoint content and response remain in Kernel.'}
+        payload:
+          description: Public Run snapshots always return null; original opaque checkpoint content and response remain in Kernel.
+          enum: [null]
         createdAt: {type: string, format: date-time}
         resolvedAt: {type: string, format: date-time, nullable: true}
     Result:
@@ -733,12 +740,6 @@ components:
           type: integer
           format: int64
           minimum: 0
-    CancelRunResponse:
-      type: object
-      additionalProperties: false
-      required: [run]
-      properties:
-        run: {$ref: '#/components/schemas/Run'}
     ErrorResponse:
       type: object
       additionalProperties: false

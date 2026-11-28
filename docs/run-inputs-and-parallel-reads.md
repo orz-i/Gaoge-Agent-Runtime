@@ -5,6 +5,9 @@
 `agent.Dependencies.Inputs` accepts a trusted, read-only `RunInputSource`.
 `harness.AgentSessionOptions.Inputs` passes the same source to its existing
 Agent loop. The Host authenticates submissions and owns their durable log.
+It is not a writer: `SessionClient` exposes no `Steer` method over this read-only
+port. Keep the Host's original authenticated submission path; do not assert
+delivery from queue acceptance.
 
 ```go
 inputs, err := agent.NewMemoryRunInputs("product-user-inputs-v1")
@@ -16,6 +19,12 @@ loop, err := agent.NewRunner(agent.Dependencies{
 // While StartRun/Resume is working, a separately authenticated Host request:
 current, err := runtime.Load(ctx, originalRunID)
 if err != nil { return err }
+view, err := agent.ViewState(current)
+if err != nil { return err }
+if current.Run.Actor != authenticatedActor || current.Run.Thread != originalThread ||
+    view.InputBinding != inputs.BindingID() {
+    return errors.New("original input owner or binding mismatch")
+}
 queued, err := inputs.Submit(ctx, current.Run, stableInputID, "Use the second source instead")
 // queued.Sequence acknowledges queueing, NOT delivery or completion.
 ```
@@ -102,6 +111,6 @@ prove all of these in the same execution protocol:
 - Cancellation/lease loss that neither starts late work nor discards in-flight
   obligations; restart and partial-receipt-ACK fault tests.
 
-Use the full Harness/Handoff composition for existing independent SubAgents;
-`OpenAgentSession` intentionally does not add delegation authority. This
-boundary avoids colliding with PR #131's physical-execution settlement work.
+Use `OpenAgentSession` with an explicit Host-selected `NamedAgents` roster and
+`Relations` for native SubAgents. No delegation authority is inferred from
+input text or a default depth. Advanced custom routes remain explicit.

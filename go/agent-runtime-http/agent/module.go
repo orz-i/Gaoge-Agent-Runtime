@@ -74,5 +74,5 @@ func (handler *Handler) StartRun(context *gin.Context) {
 		runtimehttp.WriteKernelError(context, "agent", err)
 		return
 	}
-	context.JSON(stdhttp.StatusAccepted, SnapshotResponse(snapshot))
+	context.JSON(stdhttp.StatusAccepted, runtimehttp.SnapshotResponse(snapshot))
 }

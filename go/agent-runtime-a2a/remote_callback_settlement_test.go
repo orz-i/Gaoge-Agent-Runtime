@@ -52,7 +52,7 @@ func TestPR151A2ACancelCtxRetainsPhysicalReturn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, cancelErr := runner.cancelRunAtRevision(ctx, snap.Run.ID, snap.Run.Revision)
+	_, cancelErr := runner.CancelRemote(ctx, snap.Run.ID, snap.Run.Revision)
 	t.Logf("CancelRun returned err=%v context=%v", cancelErr, ctx.Err())
 	pending, err := rt.Load(t.Context(), snap.Run.ID)
 	if err != nil {
@@ -134,7 +134,7 @@ func TestPR151A2AResumeReturnProofLostOnCallerCancellation(t *testing.T) {
 	if err != nil || snap.Run.Status != kernel.RunStatusWaitingInput {
 		t.Fatalf("no initial wait: %+v %v", snap.Run, err)
 	}
-	_, resumeErr := runner.ResumeRun(ctx, snap.Run.ID, "approved")
+	_, resumeErr := runner.ResumeRun(ctx, snap.Run.ID, shadowRevision(t, runner, snap.Run.ID), "approved")
 	persisted, err := rt.Load(t.Context(), snap.Run.ID)
 	if err != nil {
 		t.Fatal(err)

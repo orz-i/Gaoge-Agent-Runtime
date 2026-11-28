@@ -20,6 +20,15 @@ const json = (value: unknown, status = 200) => new Response(JSON.stringify(value
 });
 
 describe("RuntimeClient target API", () => {
+  it("stops a drained terminal feed on 204 without inventing an event or reconnecting", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 }));
+    const client = new RuntimeClient({ baseURL: "https://runtime.test/api/v1", fetch: fetcher });
+    const iterator = client.runs.feed("terminal", { afterSeq: 12, reconnectDelayMS: 0 });
+    await expect(iterator.next()).resolves.toEqual({ done: true, value: undefined });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher.mock.calls[0]?.[0]).toBe("https://runtime.test/api/v1/runs/terminal/feed?afterSeq=12");
+  });
+
   it("does not expose deleted composite orchestrators", () => {
     const client = new RuntimeClient({ baseURL: "https://runtime.test/api/v1" });
     const surface = client as unknown as Record<string, unknown>;

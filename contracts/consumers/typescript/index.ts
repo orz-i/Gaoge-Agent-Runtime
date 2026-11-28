@@ -2,7 +2,6 @@ import {
   RuntimeClient,
   toolWaitPhase,
   type PendingToolDTO,
-  type CancelRunResponse,
   type HarnessTurnSnapshotDTO,
   type RunEventPageDTO,
   type RunFeedEventDTO,
@@ -24,7 +23,7 @@ const snapshot: Promise<RunSnapshotDTO> = client.runs.get("run-1");
 const pendingTool: PendingToolDTO = { kind: "external_result", callID: "call-1", toolKey: "test.external", ready: false };
 const waitPhase: ReturnType<typeof toolWaitPhase> = "waiting_external_result";
 const events: Promise<RunEventPageDTO> = client.runs.events("run-1", { afterSeq: 1, limit: 10 });
-const cancelled: Promise<CancelRunResponse> = client.runs.cancel("run-1", { expectedRevision: 1 });
+const cancelled: Promise<RunSnapshotDTO> = client.runs.cancel("run-1", { expectedRevision: 1 });
 const feed: AsyncIterable<RunFeedEventDTO> = client.runs.feed("run-1", { afterSeq: 1 });
 const hostKind: RuntimeKind = "host.custom_feature";
 const turn: Promise<HarnessTurnSnapshotDTO> = client.harness.turns.get("turn-1");

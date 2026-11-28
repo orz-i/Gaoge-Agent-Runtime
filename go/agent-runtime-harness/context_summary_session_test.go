@@ -437,12 +437,12 @@ func TestAgentSessionSummaryProducesNativeStateAndVerifiesPriorOrigin(t *testing
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := retrospective.Resume(t.Context(), "second"); !errors.Is(err, harness.ErrInvalidRequest) || len(client.requests) != before {
-				t.Fatalf("replacement store registration changed original recovery authority: %v", err)
+			if observed, err := retrospective.Resume(t.Context(), "second"); err != nil || observed.Turn.Status != harness.TurnCompleted || len(client.requests) != before {
+				t.Fatalf("terminal observation executed or required a recovery selector: %v", err)
 			}
 			retainedNative, err := options.Runtime.Load(t.Context(), root.ExecutionRefID)
 			if err != nil || retainedNative.Run.Revision != originalNative.Run.Revision {
-				t.Fatal("rejected recovery selector changed the original Run")
+				t.Fatal("terminal observation changed the original Run")
 			}
 		})
 	}

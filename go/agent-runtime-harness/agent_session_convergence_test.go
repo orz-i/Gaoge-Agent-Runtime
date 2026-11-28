@@ -203,8 +203,12 @@ func TestAgentSessionDelegatesAuthorizedSubAgentWithoutAnotherInterpreter(t *tes
 	}
 	withoutRoute := options
 	withoutRoute.Handoffs, withoutRoute.Relations, withoutRoute.DelegationPolicy = nil, nil, nil
-	if _, err := harness.OpenAgentSession(withoutRoute); !errors.Is(err, harness.ErrInvalidRequest) {
-		t.Fatalf("unconfigured delegate accepted: %v", err)
+	minimal, err := harness.OpenAgentSession(withoutRoute)
+	if err != nil {
+		t.Fatalf("depth alone should not require a delegation engine: %v", err)
+	}
+	if _, err := minimal.Resume(t.Context(), "delegate-1"); !errors.Is(err, harness.ErrInvalidRequest) {
+		t.Fatalf("missing original delegation route accepted: %v", err)
 	}
 	// A newly constructed minimal handle cannot resume a delegated original
 	// Turn after losing the original Host route and delegation policy.

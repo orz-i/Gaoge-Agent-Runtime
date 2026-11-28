@@ -232,7 +232,7 @@ func TestAgentSessionRejectsUncomposedOrUnselectedConfiguration(t *testing.T) {
 		{"foreign policy", func(o *harness.AgentSessionOptions) { o.LocalTools[0].Policy.Key = "foreign" }},
 		{"skills", func(o *harness.AgentSessionOptions) { o.Session.Config.Skills = []harness.SkillSnapshot{{ID: "skill"}} }},
 
-		{"delegation", func(o *harness.AgentSessionOptions) { o.Session.Config.DelegationPolicy.MaxDepth = 1 }},
+		{"invalid delegation depth", func(o *harness.AgentSessionOptions) { o.Session.Config.DelegationPolicy.MaxDepth = -1 }},
 		{"override reader", func(o *harness.AgentSessionOptions) {
 			o.LocalTools[0].Registration.Definition.Key = harness.ContextArtifactToolKey
 		}},
@@ -405,8 +405,8 @@ func TestAgentSessionDerivesRecoveryFromExactStores(t *testing.T) {
 	if err != nil || !view.ManagedRecovery {
 		t.Fatalf("matched stores did not derive recovery: %v", err)
 	}
-	if _, err = session.Resume(t.Context(), "ordinary-first"); !errors.Is(err, harness.ErrInvalidRequest) {
-		t.Fatalf("replacement Store configuration acquired historical authority: %v", err)
+	if terminal, err := session.Resume(t.Context(), "ordinary-first"); err != nil || terminal.Turn.Status != harness.TurnCompleted {
+		t.Fatalf("terminal observation unnecessarily required an execution mode: %v", err)
 	}
 	options.Store = harness.NewMemoryStore()
 	if _, err = harness.OpenAgentSession(options); !errors.Is(err, harness.ErrInvalidRequest) {

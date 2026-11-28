@@ -22,6 +22,43 @@ const (
 	testMessageID    = "message-1"
 )
 
+func TestProtocolProjectionsOwnTheirBuffersWithoutRecursiveRecloning(t *testing.T) {
+	raw := []byte("bytes")
+	message := a2asdk.NewMessage(a2asdk.MessageRoleAgent, &a2asdk.Part{Content: a2asdk.Raw(raw)})
+	message.ID, message.TaskID, message.ContextID = "message", "task", "context"
+	message.Metadata = map[string]any{"label": "original"}
+	task := &a2asdk.Task{ID: "task", ContextID: "context", Status: a2asdk.TaskStatus{State: a2asdk.TaskStateWorking, Message: message},
+		History: []*a2asdk.Message{message}, Artifacts: []*a2asdk.Artifact{{ID: "artifact", Parts: message.Parts}}}
+	stream, err := projectTaskStreamEvent(task)
+	if err != nil {
+		t.Fatal(err)
+	}
+	interaction, err := projectInteraction(task)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := projectTaskPage(&a2asdk.ListTasksResponse{Tasks: []*a2asdk.Task{task}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := json.Marshal([]any{stream, interaction, page})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw[0] = 'X'
+	message.Metadata["label"] = "changed"
+	message.Parts[0].Content = a2asdk.Text("replaced")
+	after, err := json.Marshal([]any{stream, interaction, page})
+	if err != nil || string(before) != string(after) {
+		t.Fatalf("SDK source mutation escaped: %v", err)
+	}
+	stream.Task.History[0].Parts[0].Raw[0] = 'Y'
+	if string(stream.Task.StatusMessage.Parts[0].Raw) != "bytes" || string(stream.Task.Artifacts[0].Parts[0].Raw) != "bytes" ||
+		string(interaction.Task.History[0].Parts[0].Raw) != "bytes" || string(page.Tasks[0].History[0].Parts[0].Raw) != "bytes" {
+		t.Fatal("independent protocol projections share mutable buffers")
+	}
+}
+
 type testA2AObserver struct {
 	name   string
 	events []plugin.Event

@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func TestCoreHTTPDoesNotImportConcreteFeatures(t *testing.T) {
+func TestHTTPDoesNotReviveDeletedCompositeFeatures(t *testing.T) {
 	entries, err := os.ReadDir(".")
 	if err != nil {
 		t.Fatal(err)
@@ -28,7 +28,7 @@ func TestCoreHTTPDoesNotImportConcreteFeatures(t *testing.T) {
 			if unquoteErr != nil {
 				t.Fatal(unquoteErr)
 			}
-			for _, feature := range []string{"agent", "team", "workflow", "groupchat"} {
+			for _, feature := range []string{"team", "workflow", "groupchat"} {
 				prefix := "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/" + feature
 				if module == prefix || strings.HasPrefix(module, prefix+"/") {
 					t.Errorf("%s imports concrete feature %s", name, module)

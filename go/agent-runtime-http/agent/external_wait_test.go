@@ -48,7 +48,7 @@ func TestPendingToolSnapshotPublicProjectionHasNoHostCorrelation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	response := SnapshotResponse(snapshot)
+	response := runtimehttp.SnapshotResponse(snapshot)
 	if response.PendingTool == nil || response.PendingTool.Kind != tools.PendingExternalResult || response.Run.Status != kernel.RunStatusRunning {
 		t.Fatalf("response=%#v", response)
 	}
@@ -61,36 +61,28 @@ func TestPendingToolSnapshotPublicProjectionHasNoHostCorrelation(t *testing.T) {
 			t.Fatalf("correlation %q leaked: %s", private, data)
 		}
 	}
-	if runtimehttp.SnapshotResponse(snapshot).PendingTool != nil {
-		t.Fatal("core utility interpreted Agent-owned state")
-	}
 	for _, authorized := range []bool{true, false} {
 		actor := snapshot.Run.Actor
 		if !authorized {
 			actor.ActorID = "other-actor"
 		}
-		projections := 0
 		shared := runtimehttp.NewShared(waitProjectionPrincipal{actor: actor}, nil, runtime, nil)
 		handler := runtimehttp.NewHandler(runtimehttp.Dependencies{
 			Runtime: runtime, Shared: shared,
-			PendingToolProjector: func(value kernel.Snapshot) *runtimehttp.PendingToolResponse {
-				projections++
-				return PendingTool(value)
-			},
 		})
 		router := gin.New()
 		runtimehttp.NewModule(handler).RegisterRoutes(router.Group("/v1"))
 		recorder := httptest.NewRecorder()
 		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/v1/runs/http-wait", nil))
 		if !authorized {
-			if recorder.Code != http.StatusNotFound || projections != 0 {
-				t.Fatalf("denied projection=%d status=%d", projections, recorder.Code)
+			if recorder.Code != http.StatusNotFound || strings.Contains(recorder.Body.String(), "pendingTool") {
+				t.Fatalf("denied status=%d body=%s", recorder.Code, recorder.Body)
 			}
 			continue
 		}
 		var actual runtimehttp.RunSnapshotResponse
-		if err = json.Unmarshal(recorder.Body.Bytes(), &actual); err != nil || recorder.Code != http.StatusOK || projections != 1 || actual.PendingTool == nil {
-			t.Fatalf("authorized projection=%d response=%s err=%v", projections, recorder.Body, err)
+		if err = json.Unmarshal(recorder.Body.Bytes(), &actual); err != nil || recorder.Code != http.StatusOK || actual.PendingTool == nil {
+			t.Fatalf("authorized response=%s err=%v", recorder.Body, err)
 		}
 		for _, private := range []string{"private-host-operation", strings.Repeat("b", 64), "externalSignals", "toolWait", "toolReturns"} {
 			if strings.Contains(recorder.Body.String(), private) {

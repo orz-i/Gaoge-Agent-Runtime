@@ -101,3 +101,23 @@ func TestPluginOnlyClaimsA2ATargets(t *testing.T) {
 		t.Fatal("non-A2A member was claimed")
 	}
 }
+
+func TestPluginUsesCanonicalRemoteGoalOnlyContractBeforeBindingResolution(t *testing.T) {
+	lookups := 0
+	plugin, err := NewPlugin(PluginDependencies{Runtime: newShadowRuntime(t), AttestationKey: testA2AShadowKey(),
+		Bindings: BindingResolverFunc(func(context.Context, string, string) (Binding, error) { lookups++; return Binding{}, ErrBindingMissing })})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range []handoff.Delegation{
+		{MemberID: "a2a:remote", ChildRunID: "child"},
+		{Remote: true, MemberID: "a2a:remote", ChildRunID: "child", Model: "local-only"},
+	} {
+		if _, err := plugin.ResolveChild(t.Context(), d); !errors.Is(err, ErrInvalidTarget) {
+			t.Fatalf("unprovable remote policy accepted: %v", err)
+		}
+	}
+	if lookups != 0 {
+		t.Fatal("invalid remote policy reached Host resolver")
+	}
+}

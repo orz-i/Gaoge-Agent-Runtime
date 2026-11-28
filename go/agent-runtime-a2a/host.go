@@ -420,22 +420,14 @@ func projectHostedOutput(execCtx *a2asrv.ExecutorContext, event HostedEvent) (a2
 }
 
 func projectHostedDirectMessage(execCtx *a2asrv.ExecutorContext, event HostedEvent) (*a2asdk.Message, error) {
-	messageID := strings.TrimSpace(event.MessageID)
-	if messageID == "" || execCtx == nil || execCtx.StoredTask != nil {
+	if execCtx == nil || execCtx.StoredTask != nil {
 		return nil, ErrInvalidHostedEvent
 	}
-	parts, err := projectHostedParts(event)
+	message, err := projectHostedAgentMessage(execCtx, event)
 	if err != nil {
 		return nil, err
 	}
-	metadata, err := decodeMetadata(event.Metadata)
-	if err != nil {
-		return nil, ErrInvalidHostedEvent
-	}
-	message := a2asdk.NewMessage(a2asdk.MessageRoleAgent, parts...)
-	message.ID = messageID
-	message.ContextID = execCtx.ContextID
-	message.Metadata = metadata
+	message.TaskID = "" // A direct reply does not create an A2A Task.
 	return message, nil
 }
 

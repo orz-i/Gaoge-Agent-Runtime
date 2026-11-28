@@ -127,10 +127,6 @@ func (runner *ShadowRunner) MatchesRemoteDelegation(d handoff.Delegation) bool {
 		runner.revision != "" && d.MemberID == TargetPrefix+runner.targetID && d.MemberRevision == runner.revision
 }
 
-func (runner *ShadowRunner) CancelRemote(ctx context.Context, id string, revision uint64) (kernel.Snapshot, error) {
-	return runner.cancelRunAtRevision(ctx, id, revision)
-}
-
 // ObservesFrozenRemoteShadow is the first-party, read-only ownership
 // attestation used by Harness receipt and cancellation checks. It makes no
 // network call and never applies a Kernel mutation. Frozen origin/Invocation
@@ -289,24 +285,11 @@ func (runner *ShadowRunner) LoadRun(ctx context.Context, runID string) (kernel.S
 	return runner.applyTask(ctx, snapshot, state, remote)
 }
 
-// CancelRun uses the current revision as an implicit one-shot control source.
-// The public Plugin additionally pins the caller's original revision.
-func (runner *ShadowRunner) CancelRun(ctx context.Context, runID string) (kernel.Snapshot, error) {
-	if runner == nil || runner.runtime == nil {
-		return kernel.Snapshot{}, ErrInvalidShadowRunner
-	}
-	original, err := runner.runtime.Load(ctx, runID)
-	if err != nil {
-		return original, err
-	}
-	return runner.cancelRunAtRevision(ctx, runID, original.Run.Revision)
-}
-
-// cancelRunAtRevision gives one physical CancelTask the same durable CAS
+// CancelRemote gives one physical CancelTask the same durable CAS
 // admission as Resume input. An existing input/cancel callback which has not
 // returned can never race a successful cancellation ACK. No locks, TTLs or
 // process-local state grant authority; the sealed Store revision does.
-func (runner *ShadowRunner) cancelRunAtRevision(
+func (runner *ShadowRunner) CancelRemote(
 	ctx context.Context, runID string, expectedRevision uint64,
 ) (kernel.Snapshot, error) {
 	if runner == nil || runner.runtime == nil || expectedRevision == 0 {
@@ -387,21 +370,10 @@ func (runner *ShadowRunner) cancelRunAtRevision(
 // durable, uniquely identified user message. The MessageID is correlation,
 // NOT proof that a remote peer deduplicates sends. Only the pending input hash
 // is persisted locally; message content stays in the caller request.
-func (runner *ShadowRunner) ResumeRun(ctx context.Context, runID, text string) (kernel.Snapshot, error) {
-	if runner == nil || runner.runtime == nil || strings.TrimSpace(runID) == "" || strings.TrimSpace(text) == "" {
-		return kernel.Snapshot{}, ErrInvalidShadowRunner
-	}
-	snapshot, err := runner.runtime.Load(ctx, strings.TrimSpace(runID))
-	if err != nil {
-		return snapshot, err
-	}
-	return runner.resumeRunAtRevision(ctx, runID, snapshot.Run.Revision, text)
-}
-
-// resumeRunAtRevision binds the caller's original wait revision all the way
+// It binds the caller's original wait revision all the way
 // through the Store CAS granting the physical SendMessage. A resolver or GET
 // may not transparently select a newer prompt or cancellation state.
-func (runner *ShadowRunner) resumeRunAtRevision(
+func (runner *ShadowRunner) ResumeRun(
 	ctx context.Context, runID string, expectedRevision uint64, text string,
 ) (kernel.Snapshot, error) {
 	if runner == nil || runner.runtime == nil || expectedRevision == 0 || strings.TrimSpace(runID) == "" || strings.TrimSpace(text) == "" {

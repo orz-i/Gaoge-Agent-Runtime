@@ -41,8 +41,8 @@
   },
   {
     "file": "cancel.json",
-    "schema": "CancelRunResponse",
-    "typescript": "CancelRunResponse"
+    "schema": "RunSnapshot",
+    "typescript": "RunSnapshotDTO"
   },
   {
     "file": "error.json",

@@ -6,12 +6,14 @@ import (
 	"testing"
 
 	edge "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-mcp"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
 var (
-	_ func(edge.TransportDependencies) (*edge.Transport, error) = edge.NewTransport
-	_ edge.EndpointValidator                                    = edge.EndpointValidatorFunc(func(string) error { return nil })
-	_ edge.HeaderProvider                                       = edge.HeaderProviderFunc(func(context.Context) (http.Header, error) { return nil, nil })
+	_ func(edge.TransportDependencies) (*edge.Transport, error)      = edge.NewTransport
+	_ edge.EndpointValidator                                         = edge.EndpointValidatorFunc(func(string) error { return nil })
+	_ edge.HeaderProvider                                            = edge.HeaderProviderFunc(func(context.Context) (http.Header, error) { return nil, nil })
+	_ func(edge.ToolCaller, edge.Discovery) (*tools.Registry, error) = edge.NewRegistry
 )
 
 func TestHostComposesTransport(t *testing.T) {
