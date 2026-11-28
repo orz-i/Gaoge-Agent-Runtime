@@ -138,7 +138,7 @@ func (a *approvedToolCalls) committed(s kernel.Snapshot, state runState, call to
 // pendingReturn captures the actual qualified return before its state CAS.
 // The descriptor selects only the wait transport, never approval custody.
 func (a *approvedToolCalls) pendingReturn(s kernel.Snapshot, state runState, call tools.Call, result tools.ExecutionResult) {
-	kind := qualifiedPendingKind(result, nil, call.ID)
+	_, kind := qualifyToolReturn(result, nil, call.ID)
 	if kind == "" {
 		return
 	}

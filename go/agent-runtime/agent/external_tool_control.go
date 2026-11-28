@@ -167,9 +167,7 @@ func (r *Runner) ReconcileExternalToolNoEffectForControl(ctx context.Context, re
 			return original.snapshot, errors.Join(ErrToolOutcomeUnknown, err)
 		}
 	}
-	state.ToolWait = nil
-	state.ToolDispatchID = ""
-	state.clearToolAdmission(original.request.Call.ID)
+	state.clearToolDispatch(original.request.Call.ID)
 	state.PendingCalls = remainingPendingCalls(state)
 	state.ExternalToolCancellation = &externalToolCancellation{Receipt: receipt, Call: tools.CloneCall(original.request.Call), GrantID: original.grant.ID, SourceRevision: revision, SourceHash: original.returnHash}
 	next, err := r.applyExternalControlState(ctx, original.snapshot, original.grant, state, ledger)

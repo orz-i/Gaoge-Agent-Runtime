@@ -97,6 +97,14 @@ func (s *runState) clearToolAdmission(callID string) {
 	}
 }
 
+// A returned Call leaves the active physical slot exactly once, regardless
+// of whether its durable outcome is consumed, staged or deferred.
+func (s *runState) clearToolDispatch(callID string) {
+	s.ToolDispatchID = ""
+	s.ToolWait = nil
+	s.clearToolAdmission(callID)
+}
+
 func newPendingToolApproval(checkpoint *kernel.Checkpoint, call tools.Call) (*pendingToolApproval, error) {
 	if checkpoint == nil || strings.TrimSpace(checkpoint.ID) == "" ||
 		strings.TrimSpace(call.ID) == "" || strings.TrimSpace(call.ToolKey) == "" ||

@@ -1021,11 +1021,36 @@ func (runner *Runner) resolveApproval(
 			return snapshot, ErrApprovalRequired
 		}
 	}
+	event := kernel.EventDraft{Type: "interaction.resolved", Message: "Tool call approved", Wakeup: true}
 	if response.Decision == plugin.ApprovalReject {
-		// Rejection is also a resolved checkpoint, not an unproven nil.
-		return runner.resumeRejected(ctx, snapshot, state, response, resolved)
+		// Rejection resolves and consumes the exact original call without
+		// charging a physical Tool invocation.
+		call, ok := nextPendingCall(state)
+		if !ok {
+			return runner.fail(ctx, snapshot, state, "agent.state_invalid", ErrInvalidRequest)
+		}
+		state.consumeToolCall(call, rejectedToolContent(response.Comment), false)
+		event.Type, event.Message = "tool.rejected", "Tool call rejected"
 	}
-	return runner.resumeApproved(ctx, snapshot, state, resolved)
+	encoded, err := encodeState(state)
+	if err != nil {
+		return kernel.Snapshot{}, err
+	}
+	proof := featurecontrol.Seal(snapshot.Run.ID, snapshot.Run.Revision,
+		string(kernel.ControlApproval), snapshot.Checkpoint.ID, encoded, resolved)
+	running, revoked, err := runner.runtime.ApplyControl(ctx, snapshot.Run.ID, snapshot.Run.Revision,
+		kernel.ControlGuard{Kind: kernel.ControlApproval, CheckpointID: snapshot.Checkpoint.ID}, kernel.Mutation{
+			Status: kernel.RunStatusRunning, State: encoded, Checkpoint: resolved,
+			Events: []kernel.EventDraft{event},
+		}, proof)
+	if err != nil {
+		return kernel.Snapshot{}, err
+	}
+	// A fenced control cannot continue dispatching under a revoked owner.
+	if runner.deferResume || revoked || !runner.defaultRunOwner {
+		return running, nil
+	}
+	return runner.drive(ctx, running)
 }
 
 // LoadRun returns one Agent Run snapshot for parent orchestrators and recovery.
@@ -1099,16 +1124,7 @@ func (runner *Runner) Resume(ctx context.Context, runID string, expectedRevision
 			}
 			return repaired, recoveryErr
 		}
-		// Every Agent execution mode preserves unresolved physical effects.
-		// A stored Tool dispatch identity is never permission to execute it
-		// again, including on Agent Runs without a Kernel execution lease.
-		// Distinguish an overdue provider wait without erasing its
-		// persisted identity or asserting a physical COMMIT.
-		if state.ToolWait != nil && state.ToolWait.DeadlineAt != nil &&
-			!runner.clock.Now().Before(*state.ToolWait.DeadlineAt) {
-			return snapshot, errors.Join(ErrToolOutcomeUnknown, ErrToolOutcomeOverdue)
-		}
-		return snapshot, ErrToolOutcomeUnknown
+		return snapshot, runner.unresolvedToolReturn(state)
 	}
 	if snapshot.Run.ParentRunID == "" && knownRootPhysicalSettlement(snapshot) {
 		if retained, lookupErr := runner.runtime.LookupChildExecution(ctx, runID); lookupErr == nil && retained.IsOwned() {
@@ -1125,7 +1141,7 @@ func (runner *Runner) Resume(ctx context.Context, runID string, expectedRevision
 	resumed, resumeErr := runner.withNativeSegment(ctx, snapshot, "resume", func(physicalCtx context.Context, physical *Runner, admitted kernel.Snapshot) (kernel.Snapshot, error) {
 		invocation := runInvocation(plugin.RunResume, admitted)
 		return physical.invokeNativeRun(physicalCtx, admitted, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
-			return physical.resumeRunning(nextCtx, admitted, state)
+			return physical.drive(nextCtx, admitted)
 		})
 	})
 	if resumeErr != nil && resumed.Run.ID == "" {
@@ -1164,6 +1180,9 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 	if state.ToolAdmission != nil && state.ToolAdmission.Phase == toolAdmissionEvaluating {
 		return snapshot, true, ErrApprovalRequired
 	}
+	if state.ToolDispatchID != "" {
+		return snapshot, true, runner.unresolvedToolReturn(state)
+	}
 	if len(state.DeferredChildren) != 0 && (len(state.PendingCalls) == 0 || (state.ToolAdmission != nil && state.ToolAdmission.Phase != toolAdmissionAuthorized) || toolBatchAllowanceFull(state)) {
 		return runner.activateDeferredChild(ctx, snapshot, state)
 	}
@@ -1172,12 +1191,6 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 			next, closeErr := runner.finishUnsentTool(ctx, snapshot, state, call)
 			runner.noteNativeAdmissionReturn(next, closeErr)
 			return next, true, closeErr
-		}
-		if state.ToolWait != nil {
-			waitSnapshot, ready, waitErr := runner.toolWaitReady(ctx, snapshot, state)
-			if waitErr != nil || !ready {
-				return waitSnapshot, true, waitErr
-			}
 		}
 		if state.Discovery != nil && state.Discovery.RunID != snapshot.Run.ID {
 			if len(state.DeferredChildren) != 0 {
@@ -2303,11 +2316,7 @@ func (runner *Runner) consumeRecoveredPending(ctx context.Context, snapshot kern
 		}
 		execution.state.RecoveredTools = append(execution.state.RecoveredTools[:index], execution.state.RecoveredTools[index+1:]...)
 		execution.originalApprovalDigest = receipt.ApprovalDigest
-		if refusal != nil {
-			next, yielded, err := runner.handlePendingToolExecutionError(ctx, snapshot, execution.state, refusal)
-			return next, yielded, err, true
-		}
-		next, yielded, err := runner.persistPendingToolResult(ctx, snapshot, execution, tools.CloneExecutionResult(receipt.Outcome.Result))
+		next, yielded, err := runner.persistToolReturn(ctx, snapshot, execution, tools.CloneExecutionResult(receipt.Outcome.Result), refusal)
 		return next, yielded, err, true
 	}
 	return snapshot, false, nil, false
@@ -2472,43 +2481,29 @@ func (runner *Runner) handlePendingToolExecutionError(
 	return failed, false, failErr
 }
 
-func (runner *Runner) persistPendingToolResult(
-	ctx context.Context, snapshot kernel.Snapshot, execution pendingToolExecution,
-	result tools.ExecutionResult) (kernel.Snapshot, bool, error) {
-	// The actual qualified Call return is the only source of pending
-	// approval evidence. Scheduled, descriptor-less and typed waits use the
-	// same lifecycle; no later Run state can invent a return.
+// persistToolReturn reduces a qualified original result, independent of
+// whether it came from a local handler, delegated owner or staged receipt.
+func (runner *Runner) persistToolReturn(ctx context.Context, snapshot kernel.Snapshot, execution pendingToolExecution, result tools.ExecutionResult, refusal error) (kernel.Snapshot, bool, error) {
+	state := execution.state
+	if refusal != nil {
+		return runner.handlePendingToolExecutionError(ctx, snapshot, state, refusal)
+	}
+	if result.Receipt.Disposition != tools.ReceiptDispositionPending {
+		return runner.persistCompletedToolCall(ctx, snapshot, execution, result)
+	}
 	if runner.rootCallbacks != nil && runner.delegatedToolResults != nil && runner.scopedRootCallbacks &&
-		(approvedPendingCall(snapshot, execution.state) || (execution.state.ToolAdmission.authorized(execution.call) && execution.state.ToolAdmission.ApprovalBounded)) {
-		runner.rootCallbacks.toolApprovals.pendingReturn(snapshot, execution.state, execution.call, result)
+		(approvedPendingCall(snapshot, state) || (state.ToolAdmission.authorized(execution.call) && state.ToolAdmission.ApprovalBounded)) {
+		runner.rootCallbacks.toolApprovals.pendingReturn(snapshot, state, execution.call, result)
 	}
-	if strings.TrimSpace(result.Receipt.Disposition) == tools.ReceiptDispositionPending {
-		// A Pending result is never proof of terminal execution. Preserve
-		// the same committed Tool dispatch identity in every execution mode
-		// so a later Resume cannot silently call its Handler again.
-		return runner.persistPendingToolYield(ctx, snapshot, execution.state, result, execution.ledger)
-	}
-	// A terminal receipt and marker removal share the SAME revision CAS.
-	execution.state.ToolDispatchID = ""
-	return runner.persistCompletedToolCall(ctx, snapshot, execution, result)
-}
-
-func (runner *Runner) persistPendingToolYield(
-	ctx context.Context,
-	snapshot kernel.Snapshot,
-	state runState,
-	result tools.ExecutionResult,
-	ledger *runtimebudget.LedgerMutation,
-) (kernel.Snapshot, bool, error) {
 	if result.Pending != nil && result.Pending.Kind != tools.PendingScheduled {
-		return runner.persistToolWait(ctx, snapshot, state, result.Pending, ledger)
+		return runner.persistToolWait(ctx, snapshot, state, result.Pending, execution.ledger)
 	}
 	encoded, err := encodeState(state)
 	if err != nil {
 		return kernel.Snapshot{}, false, err
 	}
 	next, err := runner.commitNativeTransition(ctx, snapshot, kernel.Mutation{
-		Ledger: ledger,
+		Ledger: execution.ledger,
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
 		Events: []kernel.EventDraft{{
 			Type: EventToolPending, Message: tools.ReceiptDispositionPending, Wakeup: true,
@@ -2528,7 +2523,6 @@ func (runner *Runner) persistCompletedToolCall(
 	result tools.ExecutionResult,
 ) (kernel.Snapshot, bool, error) {
 	state := execution.state
-	state.ToolWait = nil
 	if execution.originalApprovalDigest != "" {
 		receipt, ok := qualifiedOwnerToolReceipt(execution.call, result, execution.originalApprovalDigest)
 		if !ok {
@@ -2540,14 +2534,8 @@ func (runner *Runner) persistCompletedToolCall(
 			state.DelegatedToolReceipts = append(state.DelegatedToolReceipts, receipt)
 		}
 	}
-	state.Messages = append(state.Messages, model.Message{
-		Role: model.RoleTool, Content: model.TextParts(string(result.Content)), ToolCallID: execution.call.ID,
-	})
-	state.PendingCalls = remainingPendingCalls(state)
-	state.clearToolAdmission(execution.call.ID)
-	state.PendingApproval = nil
+	state.consumeToolCall(execution.call, string(result.Content), true)
 	snapshot.Checkpoint = nil // Consumed approval cannot authorize a later call.
-	state.Budget.Usage.ToolCalls++
 	if execution.definition.Terminal {
 		if len(state.PendingCalls) != 0 || len(state.DeferredChildren) != 0 {
 			failed, failErr := runner.fail(ctx, snapshot, state, "agent.state_invalid", ErrInvalidRequest)
@@ -2604,15 +2592,8 @@ func (runner *Runner) recordRecoverableToolError(
 	if err != nil {
 		return runner.fail(ctx, snapshot, state, "agent.tool_error_invalid", err)
 	}
-	callID := call.ID
-	state.Messages = append(state.Messages, model.Message{
-		Role: model.RoleTool, Content: model.TextParts(string(content)), ToolCallID: callID,
-	})
-	state.PendingCalls = remainingPendingCalls(state)
-	state.clearToolAdmission(callID)
-	state.PendingApproval = nil
+	state.consumeToolCall(call, string(content), true)
 	snapshot.Checkpoint = nil
-	state.Budget.Usage.ToolCalls++
 	state.BlockedToolKeys = normalizedToolKeys(append(state.BlockedToolKeys, blockedToolKeys...))
 	// A third consecutive recoverable failure (even with different Tool
 	// arguments) has no productive Tool correction left. Other granted Tools
@@ -2641,81 +2622,6 @@ func (runner *Runner) recordRecoverableToolError(
 		}, call)
 	}
 	return next, err
-}
-
-func (runner *Runner) resumeApproved(
-	ctx context.Context,
-	snapshot kernel.Snapshot,
-	state runState,
-	checkpoint *kernel.Checkpoint,
-) (kernel.Snapshot, error) {
-	encoded, err := encodeState(state)
-	if err != nil {
-		return kernel.Snapshot{}, err
-	}
-	proof := featurecontrol.Seal(snapshot.Run.ID, snapshot.Run.Revision,
-		string(kernel.ControlApproval), snapshot.Checkpoint.ID, encoded, checkpoint)
-	running, revoked, err := runner.runtime.ApplyControl(ctx, snapshot.Run.ID, snapshot.Run.Revision,
-		kernel.ControlGuard{Kind: kernel.ControlApproval, CheckpointID: snapshot.Checkpoint.ID}, kernel.Mutation{
-			Status: kernel.RunStatusRunning, State: encoded, Checkpoint: checkpoint,
-			Events: []kernel.EventDraft{{Type: "interaction.resolved", Message: "Tool call approved", Wakeup: true}},
-		}, proof)
-	if err != nil {
-		return kernel.Snapshot{}, err
-	}
-	// A fenced control revoked the former executor. Never dispatch an
-	// external Model/Tool from this unbound Runner, regardless of whether
-	// legacy DeferResumption was enabled; a new owner must be acquired.
-	if runner.deferResume || revoked || !runner.defaultRunOwner {
-		return running, nil
-	}
-	return runner.resumeRunning(ctx, running, state)
-}
-
-func (runner *Runner) resumeRejected(
-	ctx context.Context,
-	snapshot kernel.Snapshot,
-	state runState,
-	response plugin.ApprovalResponse,
-	resolved *kernel.Checkpoint,
-) (kernel.Snapshot, error) {
-	call, ok := nextPendingCall(state)
-	if !ok {
-		return runner.fail(ctx, snapshot, state, "agent.state_invalid", ErrInvalidRequest)
-	}
-	state.Messages = append(state.Messages, model.Message{
-		Role: model.RoleTool, Content: model.TextParts(rejectedToolContent(response.Comment)), ToolCallID: call.ID,
-	})
-	state.PendingCalls = remainingPendingCalls(state)
-	state.clearToolAdmission(call.ID)
-	state.PendingApproval = nil
-	encoded, err := encodeState(state)
-	if err != nil {
-		return kernel.Snapshot{}, err
-	}
-	proof := featurecontrol.Seal(snapshot.Run.ID, snapshot.Run.Revision,
-		string(kernel.ControlApproval), snapshot.Checkpoint.ID, encoded, resolved)
-	running, revoked, err := runner.runtime.ApplyControl(ctx, snapshot.Run.ID, snapshot.Run.Revision,
-		kernel.ControlGuard{Kind: kernel.ControlApproval, CheckpointID: snapshot.Checkpoint.ID}, kernel.Mutation{
-			Status: kernel.RunStatusRunning, State: encoded, Checkpoint: resolved,
-			Events: []kernel.EventDraft{{Type: "tool.rejected", Message: "Tool call rejected", Wakeup: true}},
-		}, proof)
-	if err != nil {
-		return kernel.Snapshot{}, err
-	}
-	// A fenced control revoked the former executor. Never dispatch an
-	// external Model/Tool from this unbound Runner, regardless of whether
-	// legacy DeferResumption was enabled; a new owner must be acquired.
-	if runner.deferResume || revoked || !runner.defaultRunOwner {
-		return running, nil
-	}
-	return runner.drive(ctx, running)
-}
-
-func (runner *Runner) resumeRunning(ctx context.Context, snapshot kernel.Snapshot, _ runState) (kernel.Snapshot, error) {
-	// An approval is consumed only by its own pending Tool call. The normal
-	// drive validates the decision and binding before every Tool execution.
-	return runner.drive(ctx, snapshot)
 }
 
 func (runner *Runner) complete(
@@ -2949,6 +2855,17 @@ func remainingPendingCalls(state runState) []tools.Call {
 		return nil
 	}
 	return cloneToolCalls(state.PendingCalls[1:])
+}
+
+// consumeToolCall is the sole business consumption of a pending Call.
+func (state *runState) consumeToolCall(call tools.Call, content string, charged bool) {
+	state.Messages = append(state.Messages, model.Message{Role: model.RoleTool, Content: model.TextParts(content), ToolCallID: call.ID})
+	state.PendingCalls = remainingPendingCalls(*state)
+	state.clearToolDispatch(call.ID)
+	state.PendingApproval = nil
+	if charged {
+		state.Budget.Usage.ToolCalls++
+	}
 }
 
 func cloneToolCalls(values []tools.Call) []tools.Call {

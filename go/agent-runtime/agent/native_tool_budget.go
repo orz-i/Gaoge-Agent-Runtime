@@ -144,15 +144,14 @@ func (r *Runner) executeNativeTool(ctx context.Context, source kernel.Snapshot, 
 	if late {
 		receiptErr = nil
 	}
-	terminal := validBoundedToolReceipt(result, receiptErr, q.Call.ID)
-	pendingKind := qualifiedPendingKind(result, receiptErr, q.Call.ID)
+	terminal, pendingKind := qualifyToolReturn(result, receiptErr, q.Call.ID)
 	if plan == nil && receiptErr != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return snapshot, true, ctxErr
 		}
-		if tools.ValidRecoverableNoEffectReceipt(result, receiptErr, q.Call.ID) {
-			state.ToolDispatchID = ""
-			return r.handlePendingToolExecutionError(ctx, snapshot, state, receiptErr)
+		if terminal {
+			e.state = state
+			return r.persistToolReturn(ctx, snapshot, e, result, receiptErr)
 		}
 		if tools.ValidRetryableNoEffectReceipt(result, receiptErr, q.Call.ID) {
 			state.ToolDispatchID = ""
@@ -188,7 +187,7 @@ func (r *Runner) executeNativeTool(ctx context.Context, source kernel.Snapshot, 
 			if plan != nil {
 				writeCtx = accounting
 			}
-			next, yielded, err = r.persistPendingToolResult(writeCtx, snapshot, e, tools.CloneExecutionResult(result))
+			next, yielded, err = r.persistToolReturn(writeCtx, snapshot, e, tools.CloneExecutionResult(result), receiptErr)
 		case settlement != nil:
 			// Release only the live slot, retaining original unknown quota.
 			next, err = r.commitNativeTransition(accounting, snapshot, kernel.Mutation{Ledger: settlement, Status: kernel.RunStatusRunning, State: snapshot.State, Checkpoint: snapshot.Checkpoint, Events: []kernel.EventDraft{{Type: EventToolPending, Message: q.Call.ID}}})

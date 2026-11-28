@@ -80,7 +80,7 @@ func TestToolReceiptCannotBorrowForeignCallOrHostCompletion(t *testing.T) {
 	if scope.Complete() {
 		t.Fatal("Tool outcome certified unrelated Host callback")
 	}
-	if validBoundedToolReceipt(result, err, "foreign-call") {
+	if terminal, _ := qualifyToolReturn(result, err, "foreign-call"); terminal {
 		t.Fatal("foreign Tool source accepted")
 	}
 }

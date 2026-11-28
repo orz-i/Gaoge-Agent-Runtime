@@ -74,7 +74,7 @@ func (r toolOutcomeReceipt) terminalError(id string) (error, error) {
 	} else if r.ErrorMessage != "" || len(r.BlockedTools) != 0 || r.AllowCompletion {
 		return nil, ErrToolReceiptMismatch
 	}
-	if !validBoundedToolReceipt(r.Result, refusal, id) {
+	if terminal, _ := qualifyToolReturn(r.Result, refusal, id); !terminal {
 		return nil, ErrToolReceiptMismatch
 	}
 	return refusal, nil

@@ -34,10 +34,8 @@ func (runner *Runner) deferChildCall(ctx context.Context, snapshot kernel.Snapsh
 	// Transfer the active dispatch marker atomically with that record so
 	// independent children may start without re-executing earlier handlers.
 	state.DeferredChildren = append(state.DeferredChildren, deferredChildCall{Call: tools.CloneCall(call), Wait: *clonePendingTool(state.ToolWait)})
-	state.clearToolAdmission(call.ID)
+	state.clearToolDispatch(call.ID)
 	state.PendingCalls = remainingPendingCalls(state)
-	state.ToolWait = nil
-	state.ToolDispatchID = ""
 	return runner.persistChildBatch(ctx, snapshot, state, ledger)
 }
 

@@ -158,8 +158,7 @@ func (r *Runner) recoverManagedContinuation(ctx context.Context, original kernel
 	if obligations, err = r.preflightManagedPoint(ctx, point, snapshot); err != nil {
 		return snapshot, kernel.ManagedClosureProof{}, err
 	}
-	state, err := decodeState(snapshot.State)
-	if err != nil {
+	if _, err := decodeState(snapshot.State); err != nil {
 		return snapshot, kernel.ManagedClosureProof{}, err
 	}
 	// Rebind only the original stored dispatch. This is a storage read before
@@ -178,7 +177,7 @@ func (r *Runner) recoverManagedContinuation(ctx context.Context, original kernel
 			if err != nil {
 				return frontier, err
 			}
-			return owner.resumeRunning(drive, frontier, state)
+			return owner.drive(drive, frontier)
 		})
 	})
 	closure, closureErr := r.runtime.ManagedRecoveryClosure(context.WithoutCancel(ctx), point.ID)

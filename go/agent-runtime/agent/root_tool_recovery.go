@@ -32,9 +32,7 @@ func (s *runState) stageToolReceipt(call tools.Call, outcome toolOutcomeReceipt,
 		}
 	}
 	s.RecoveredTools = append(append([]stagedToolReceipt(nil), s.RecoveredTools...), stagedToolReceipt{Call: tools.CloneCall(call), Wait: clonePendingTool(s.ToolWait), Outcome: outcome, ApprovalDigest: approval})
-	s.ToolDispatchID = ""
-	s.clearToolAdmission(call.ID)
-	s.ToolWait = nil
+	s.clearToolDispatch(call.ID)
 	return nil
 }
 

@@ -31,8 +31,8 @@ func (fn ToolOutcomeVerifierFunc) VerifyCommittedTool(ctx context.Context, reque
 // requested Call. Both recovery and delegated custody use this qualification;
 // the caller still owns the original Run, ledger and approval checks.
 func validCommittedToolResult(result tools.ExecutionResult, callID string) bool {
-	return result.Receipt.ExecutionID == callID && result.Receipt.Disposition == "committed" &&
-		result.Pending == nil && tools.ValidateExecutionResult(result) == nil
+	terminal, _ := qualifyToolReturn(result, nil, callID)
+	return terminal && result.Receipt.Disposition == "committed"
 }
 
 func verifyCommittedTool(ctx context.Context, verifier ToolOutcomeVerifier, request tools.ExecutionRequest) (tools.ExecutionResult, error) {
@@ -128,8 +128,7 @@ func (runner *Runner) ReconcileToolOutcome(ctx context.Context, runID string,
 			if verifyErr != nil {
 				return fresh, verifyErr
 			}
-			persisted, _, applyErr := scoped.persistPendingToolResult(nextCtx, fresh, execution,
-				tools.CloneExecutionResult(verified))
+			persisted, _, applyErr := scoped.persistToolReturn(nextCtx, fresh, execution, tools.CloneExecutionResult(verified), nil)
 			return persisted, applyErr
 		})
 }

@@ -210,7 +210,7 @@ func validToolWaitState(state runState) bool {
 		return false
 	}
 	call, ok := nextPendingCall(state)
-	return ok && wait.CallID == call.ID && wait.ToolKey == call.ToolKey
+	return ok && wait.CallID == state.ToolDispatchID && wait.CallID == call.ID && wait.ToolKey == call.ToolKey
 }
 
 func (runner *Runner) persistToolWait(ctx context.Context, snapshot kernel.Snapshot, state runState, descriptor *tools.PendingExecution, ledger *budget.LedgerMutation) (kernel.Snapshot, bool, error) {
@@ -253,24 +253,13 @@ func (runner *Runner) persistToolWait(ctx context.Context, snapshot kernel.Snaps
 	return next, true, err
 }
 
-func (runner *Runner) toolWaitReady(ctx context.Context, snapshot kernel.Snapshot, state runState) (kernel.Snapshot, bool, error) {
-	wait := state.ToolWait
-	if wait.SignalID != "" {
-		return snapshot, true, nil
+// An unresolved dispatch is never permission to resend or to fail the Run
+// on a wait deadline. Only the original receipt can consume that identity.
+func (runner *Runner) unresolvedToolReturn(state runState) error {
+	if wait := state.ToolWait; wait != nil && wait.DeadlineAt != nil && !runner.clock.Now().Before(*wait.DeadlineAt) {
+		return errors.Join(ErrToolOutcomeUnknown, ErrToolOutcomeOverdue)
 	}
-	if wait.DeadlineAt != nil && !runner.clock.Now().Before(*wait.DeadlineAt) {
-		failed, err := runner.fail(ctx, snapshot, state, "agent.tool_deadline_exceeded", kernel.ErrDeadline)
-		return failed, false, err
-	}
-	if wait.Kind != tools.PendingChildTerminal {
-		return snapshot, false, nil
-	}
-	child, err := runner.runtime.Load(ctx, wait.ChildRunID)
-	if err != nil {
-		return snapshot, false, err
-	}
-	return snapshot, child.Run.Status == kernel.RunStatusCompleted || child.Run.Status == kernel.RunStatusFailed ||
-		child.Run.Status == kernel.RunStatusCancelled, nil
+	return ErrToolOutcomeUnknown
 }
 
 // ResumeToolWait allows a durable wait delivery across unrelated revisions,
@@ -286,33 +275,17 @@ func (runner *Runner) ResumeToolWait(ctx context.Context, runID string, expected
 	if snapshot.Run.Status != kernel.RunStatusRunning || state.ToolWait == nil || state.ToolWait.Generation != generation {
 		return snapshot, nil
 	}
-	if state.ToolDispatchID != "" {
-		// A pending Tool is already physically dispatched. For an
-		// exact ready signal, use the trusted read-only Provider verifier.
-		// NEVER call its non-idempotent Tool Handler from a queue delivery.
-		if state.ToolWait.Kind == tools.PendingExternalResult && state.ToolWait.SignalID != "" {
-			verified, verifyErr := runner.ReconcileToolOutcome(ctx, runID, expectedRevision, state.ToolDispatchID)
-			if verifyErr == nil {
-				// A Ready wakeup carries no physical Tool authority. After
-				// a trusted read-only COMMIT is persisted, the original
-				// feature may advance its already-committed state in a new
-				// CAS/owner segment. The Tool Handler is never reinvoked.
-				if verified.Run.Status == kernel.RunStatusRunning {
-					return runner.Resume(ctx, runID, verified.Run.Revision)
-				}
-				return verified, nil
-			}
-			if state.ToolWait.DeadlineAt != nil && !runner.clock.Now().Before(*state.ToolWait.DeadlineAt) {
-				return snapshot, errors.Join(ErrToolOutcomeUnknown, ErrToolOutcomeOverdue, verifyErr)
-			}
-			return snapshot, errors.Join(ErrToolOutcomeUnknown, verifyErr)
+	// A ready signal carries no dispatch authority. Read the original
+	// provider receipt, then resume the already-committed business state.
+	if state.ToolWait.Kind == tools.PendingExternalResult && state.ToolWait.SignalID != "" {
+		verified, verifyErr := runner.ReconcileToolOutcome(ctx, runID, expectedRevision, state.ToolDispatchID)
+		if verifyErr != nil {
+			return snapshot, errors.Join(runner.unresolvedToolReturn(state), verifyErr)
 		}
-		// A deadline without a verified provider COMMIT must not discard its
-		// durable operation ID and must not authorize physical Tool replay.
-		if state.ToolWait.DeadlineAt != nil && !runner.clock.Now().Before(*state.ToolWait.DeadlineAt) {
-			return snapshot, errors.Join(ErrToolOutcomeUnknown, ErrToolOutcomeOverdue)
+		if verified.Run.Status == kernel.RunStatusRunning {
+			return runner.Resume(ctx, runID, verified.Run.Revision)
 		}
-		return snapshot, ErrToolOutcomeUnknown
+		return verified, nil
 	}
-	return runner.Resume(ctx, runID, expectedRevision)
+	return snapshot, runner.unresolvedToolReturn(state)
 }

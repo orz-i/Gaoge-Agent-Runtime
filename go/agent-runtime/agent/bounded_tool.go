@@ -17,16 +17,6 @@ type BoundedBudgetToolPorts interface {
 	ToolReservationActive(plugin.ToolInvocation) bool
 }
 
-func validBoundedToolReceipt(result tools.ExecutionResult, err error, id string) bool {
-	if result.Receipt.ExecutionID != id || result.Receipt.Disposition == tools.ReceiptDispositionPending {
-		return false
-	}
-	if err != nil {
-		return tools.ValidRecoverableNoEffectReceipt(result, err, id)
-	}
-	return tools.ValidateExecutionResult(result) == nil
-}
-
 type BoundedToolTimelineScope struct {
 	RunID, TurnID, InvocationID string
 	Active                      bool
