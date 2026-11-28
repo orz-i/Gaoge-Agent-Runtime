@@ -11,77 +11,114 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
-// The native Call uses the original Agent intent, receipt slot and reducer.
-// The ledger is a participant in those existing mutations, not middleware.
-func (r *Runner) executeBudgetedTool(ctx context.Context, source kernel.Snapshot, e pendingToolExecution, original budget.Ledger, release func()) (kernel.Snapshot, bool, error) {
-	a := r.boundedBudget
+// One native Tool lifecycle. A configured ledger contributes a proposal to
+// the existing intent and receipt transactions; it does not own another call.
+func (r *Runner) executeNativeTool(ctx context.Context, source kernel.Snapshot, e pendingToolExecution, release func()) (kernel.Snapshot, bool, error) {
 	q := tools.ExecutionRequest{RunID: source.Run.ID, Call: tools.CloneCall(e.call)}
-	scope := original.ID
-	admission := e.state.ToolAdmission
-	if admission != nil && (!admission.authorized(e.call) || admission.BudgetBound && admission.LedgerID != scope) {
+	scope := source.Run.BudgetScopeID
+	bound := r.nativeRunBudget(ctx, source.Run.ID)
+	if (bound == nil) != (scope == "") || bound != nil && bound.ledger.ID != scope {
 		return source, true, ErrToolReceiptMismatch
 	}
-	p, ok := a.ports.(BoundedBudgetToolPorts)
-	if !ok {
-		return source, true, ErrInvalidRequest
+	admission := e.state.ToolAdmission
+	if admission != nil && (!admission.authorized(e.call) || admission.LedgerID != "" && admission.LedgerID != scope) {
+		return source, true, ErrToolReceiptMismatch
 	}
-	inv := plugin.ToolInvocation{Run: source.Run, Definition: tools.CloneDefinition(e.definition), Request: q}
-	active := p.ToolReservationActive(inv)
-	expected := originalToolReservation(q)
-	ledger, err := a.observeRunBudget(ctx, original, q.RunID)
-	if err != nil {
-		return source, true, err
-	}
-	plan, err := budget.PlanDispatch(ctx, ledger, expected, active)
-	if errors.Is(err, budget.ErrWaiting) {
-		if len(e.state.DeferredChildren) != 0 {
-			return r.activateDeferredChild(ctx, source, e.state)
+	a := r.boundedBudget
+	var plan *budget.LedgerMutation
+	if bound != nil {
+		if admission != nil && admission.BudgetBound && admission.LedgerID != scope {
+			return source, true, ErrToolReceiptMismatch
 		}
-		next, writeErr := r.commitToolTransition(ctx, source, e.state, source.Checkpoint, kernel.RunStatusRunning, kernel.EventDraft{Type: "tool.capacity_waiting", Message: q.Call.ID, Wakeup: true, WakeupAt: agentWakeupAt(r.clock.Now())})
-		return next, true, writeErr
-	}
-	if errors.Is(err, budget.ErrExhausted) {
-		if len(e.state.DeferredChildren) != 0 {
-			return r.activateDeferredChild(ctx, source, e.state)
+		p, ok := a.ports.(BoundedBudgetToolPorts)
+		if !ok {
+			return source, true, ErrInvalidRequest
 		}
-		return r.handlePendingToolExecutionError(ctx, source, e.state, err)
-	}
-	if err != nil || plan == nil {
-		return source, true, errors.Join(ErrToolReceiptMismatch, err)
+		inv := plugin.ToolInvocation{Run: source.Run, Definition: tools.CloneDefinition(e.definition), Request: q}
+		ledger, err := a.observeRunBudget(ctx, bound.ledger, q.RunID)
+		if err != nil {
+			return source, true, err
+		}
+		plan, err = budget.PlanDispatch(ctx, ledger, originalToolReservation(q), p.ToolReservationActive(inv))
+		if errors.Is(err, budget.ErrWaiting) || errors.Is(err, budget.ErrExhausted) {
+			if len(e.state.DeferredChildren) != 0 {
+				return r.activateDeferredChild(ctx, source, e.state)
+			}
+			if errors.Is(err, budget.ErrExhausted) {
+				return r.handlePendingToolExecutionError(ctx, source, e.state, err)
+			}
+			next, writeErr := r.commitToolTransition(ctx, source, e.state, source.Checkpoint, kernel.RunStatusRunning, kernel.EventDraft{Type: "tool.capacity_waiting", Message: q.Call.ID, Wakeup: true, WakeupAt: agentWakeupAt(r.clock.Now())})
+			return next, true, writeErr
+		}
+		if err != nil || plan == nil {
+			return source, true, errors.Join(ErrToolReceiptMismatch, err)
+		}
+		if admission == nil {
+			admission = newToolAdmission(e.call, toolAdmissionAuthorized)
+		}
 	}
 	state := e.state
-	if admission == nil {
-		admission = newToolAdmission(e.call, toolAdmissionAuthorized)
+	if admission != nil {
+		ready := *admission
+		ready.Phase = toolAdmissionAuthorized
+		if plan != nil {
+			ready.BudgetBound, ready.LedgerID = true, scope
+		}
+		state.ToolAdmission = &ready
 	}
-	copy := *admission
-	copy.Phase, copy.BudgetBound, copy.LedgerID = toolAdmissionAuthorized, true, scope
-	state.ToolAdmission = &copy
 	state.ToolDispatchID = q.Call.ID
-	encoded, err := encodeState(state)
-	if err != nil {
-		return source, true, err
-	}
-	mutation := kernel.Mutation{Ledger: plan, Status: kernel.RunStatusRunning, State: encoded, Checkpoint: source.Checkpoint,
-		Events: []kernel.EventDraft{{Type: "tool.dispatch_intent", Message: q.Call.ID, Wakeup: true}}}
+	event := kernel.EventDraft{Type: "tool.dispatch_intent", Message: q.Call.ID, Wakeup: true}
 	snapshot := source
+	stageAttempted := false
 	frame, _ := callbackscope.RootToolFrame(ctx).(*originalToolFrame)
 	result, entered, callErr := r.invokePendingTool(ctx, source, e.call, e.definition, release, func(callCtx context.Context) (kernel.Snapshot, error) {
-		// Revalidate native entry after planning (including Host policy).
-		if err := r.requireNativeAdmission(callCtx, source.Run); err != nil {
-			return source, err
+		stageAttempted = true
+		var next kernel.Snapshot
+		var err error
+		if plan == nil {
+			// The unmetered owner may seal original no-entry across the
+			// intent ACK cut; no ledger reservation is being released.
+			frame.recordUnsent(q, "")
+			next, err = r.commitToolTransition(callCtx, source, state, source.Checkpoint, kernel.RunStatusRunning, event)
+		} else {
+			if err = r.requireNativeAdmission(callCtx, source.Run); err != nil {
+				return source, err
+			}
+			var encoded []byte
+			encoded, err = encodeState(state)
+			if err == nil {
+				next, err = r.commitNativeTransition(callCtx, source, kernel.Mutation{Ledger: plan, Status: kernel.RunStatusRunning, State: encoded, Checkpoint: source.Checkpoint, Events: []kernel.EventDraft{event}})
+			}
 		}
-		next, err := r.commitNativeTransition(callCtx, source, mutation)
 		if err != nil {
 			return source, err
 		}
 		snapshot = next
-		frame.recordHold(q, scope, "")
+		if plan != nil {
+			frame.recordHold(q, scope, "")
+		}
 		return next, nil
-	}, func() {})
+	}, func() {
+		if plan == nil {
+			frame.clearUnsent(q)
+		}
+	})
 	accounting := context.WithoutCancel(ctx)
 	if !entered {
-		// An interrupted dispatch CAS never certifies no-send to another
-		// owner. If it committed, retain the original admitted obligation.
+		if plan == nil {
+			var next kernel.Snapshot
+			var done bool
+			var err error
+			if stageAttempted {
+				next, done, err = r.parkUnsentAfterDispatchCAS(ctx, source, e, state, callErr)
+			} else {
+				next, done, err = r.parkOriginalUnsentTool(ctx, source, e.state, e.call, callErr)
+			}
+			r.noteNativeAdmissionReturn(next, err)
+			return next, done, err
+		}
+		// A metered dispatch ACK that is uncertain cannot refund the
+		// original reservation. Only exact acknowledged non-entry can.
 		current, currentState, loadErr := r.loadState(accounting, source.Run.ID)
 		if loadErr != nil {
 			return snapshot, true, errors.Join(callErr, loadErr)
@@ -93,8 +130,6 @@ func (r *Runner) executeBudgetedTool(ctx context.Context, source kernel.Snapshot
 		if currentState.ToolDispatchID != q.Call.ID || current.Run.Revision != source.Run.Revision+1 || currentState.ToolAdmission == nil || currentState.ToolAdmission.LedgerID != scope {
 			return current, true, errors.Join(ErrToolOutcomeUnknown, callErr)
 		}
-		// Only the acknowledged intent and the actual returned pre-entry
-		// boundary qualify no-send. An uncertain CAS ACK remains held.
 		if snapshot.Run.Revision == source.Run.Revision+1 && sameToolTransitionSource(current, snapshot) {
 			frame.recordUnsent(q, scope)
 			next, done, err := r.parkOriginalUnsentTool(accounting, current, currentState, q.Call, callErr)
@@ -111,37 +146,60 @@ func (r *Runner) executeBudgetedTool(ctx context.Context, source kernel.Snapshot
 	}
 	terminal := validBoundedToolReceipt(result, receiptErr, q.Call.ID)
 	pendingKind := qualifiedPendingKind(result, receiptErr, q.Call.ID)
-	// Retry only the original accounting proposal after an unrelated Run's
-	// revision advances. The Handler is never called by this loop.
+	if plan == nil && receiptErr != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return snapshot, true, ctxErr
+		}
+		if tools.ValidRecoverableNoEffectReceipt(result, receiptErr, q.Call.ID) {
+			state.ToolDispatchID = ""
+			return r.handlePendingToolExecutionError(ctx, snapshot, state, receiptErr)
+		}
+		if tools.ValidRetryableNoEffectReceipt(result, receiptErr, q.Call.ID) {
+			state.ToolDispatchID = ""
+			failed, err := r.fail(ctx, snapshot, state, "agent.tool_retry_exhausted", errors.Join(ErrToolFailure, receiptErr))
+			return failed, false, err
+		}
+		return snapshot, true, errors.Join(ErrToolOutcomeUnknown, receiptErr)
+	}
+	if plan == nil && !terminal && pendingKind == "" {
+		return snapshot, true, errors.Join(ErrToolOutcomeUnknown, ErrToolReceiptMismatch, tools.ValidateExecutionResult(result))
+	}
+	// Only the already returned accounting proposal may be replanned; the
+	// original Handler is never called by this loop.
 	for attempt := 0; attempt < 8; attempt++ {
-		settlement, err := a.planToolReturn(accounting, scope, q, result, receiptErr, terminal)
-		if err != nil {
-			return snapshot, true, errors.Join(ErrToolOutcomeUnknown, callErr, err)
-		}
-		var next kernel.Snapshot
-		var yielded bool
-		if terminal {
-			next, err = r.recordBudgetedToolReceipt(accounting, snapshot, state, q, result, receiptErr, scope, settlement)
-		} else if pendingKind != "" {
-			frame.recordHold(q, scope, pendingKind)
-			e.state, e.ledger = state, settlement
-			next, yielded, err = r.persistPendingToolResult(accounting, snapshot, e, result)
-		} else {
-			next = snapshot
-			if settlement != nil {
-				// Keep the admitted Call and quota; release the live slot
-				// only after the original callback has actually returned.
-				next, err = r.commitNativeTransition(accounting, snapshot, kernel.Mutation{Ledger: settlement, Status: kernel.RunStatusRunning, State: snapshot.State, Checkpoint: snapshot.Checkpoint,
-					Events: []kernel.EventDraft{{Type: EventToolPending, Message: q.Call.ID}}})
+		var settlement *budget.LedgerMutation
+		var err error
+		if plan != nil {
+			settlement, err = a.planToolReturn(accounting, scope, q, result, receiptErr, terminal)
+			if err != nil {
+				return snapshot, true, errors.Join(ErrToolOutcomeUnknown, callErr, err)
 			}
-			yielded = true
 		}
-		if errors.Is(err, budget.ErrLedgerConflict) {
+		next, yielded := snapshot, true
+		switch {
+		case terminal && plan != nil:
+			next, err = r.recordBudgetedToolReceipt(accounting, snapshot, state, q, result, receiptErr, scope, settlement)
+		case terminal || pendingKind != "":
+			if plan != nil {
+				frame.recordHold(q, scope, pendingKind)
+			}
+			e.state, e.ledger = state, settlement
+			writeCtx := ctx
+			if plan != nil {
+				writeCtx = accounting
+			}
+			next, yielded, err = r.persistPendingToolResult(writeCtx, snapshot, e, tools.CloneExecutionResult(result))
+		case settlement != nil:
+			// Release only the live slot, retaining original unknown quota.
+			next, err = r.commitNativeTransition(accounting, snapshot, kernel.Mutation{Ledger: settlement, Status: kernel.RunStatusRunning, State: snapshot.State, Checkpoint: snapshot.Checkpoint, Events: []kernel.EventDraft{{Type: EventToolPending, Message: q.Call.ID}}})
+		}
+		if plan != nil && errors.Is(err, budget.ErrLedgerConflict) {
 			continue
 		}
 		if err != nil {
-			// A failed receipt CAS may already have committed. The
-			// original hold remains recoverable without authorizing send.
+			if plan == nil {
+				return next, yielded, err
+			}
 			return snapshot, true, errors.Join(ErrToolOutcomeUnknown, callErr, err)
 		}
 		if settlement != nil {
@@ -152,10 +210,10 @@ func (r *Runner) executeBudgetedTool(ctx context.Context, source kernel.Snapshot
 				return next, true, err
 			}
 		}
-		if terminal {
-			if late {
-				return next, true, ErrToolLateResult
-			}
+		if (terminal || pendingKind != "") && late {
+			return next, true, ErrToolLateResult
+		}
+		if terminal && plan != nil {
 			recovered, _, err := r.preparePendingToolExecution(next)
 			if err != nil {
 				return next, true, err
@@ -166,10 +224,7 @@ func (r *Runner) executeBudgetedTool(ctx context.Context, source kernel.Snapshot
 			}
 			return consumed, done, err
 		}
-		if pendingKind != "" {
-			if late {
-				return next, true, ErrToolLateResult
-			}
+		if terminal || pendingKind != "" {
 			return next, yielded, nil
 		}
 		return next, true, errors.Join(ErrToolOutcomeUnknown, callErr)
