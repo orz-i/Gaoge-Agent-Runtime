@@ -60,31 +60,18 @@ func (s *batchBoundaryFault) Commit(commitCtx context.Context, commitID string, 
 	return s.ea1AgentReceiptFault.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
 }
 
-type batchUnsentCancelPorts struct {
-	settledToolPorts
-	cancel context.CancelFunc
-	hits   *int
-}
-
-func (p batchUnsentCancelPorts) Project(_ context.Context, l budget.Ledger) error {
-	res := l.Reservations["tool:batch-boundary:next-call"]
-	if res.Status == budget.ReservationHeld && !res.Dispatched && *p.hits == 0 {
-		*p.hits++
-		p.cancel()
-	}
-	return nil
-}
-
 // All sibling effects must drain before publication of a new Approval or a
 // local allowance pause. With no boundary, independent children retain their
 // original parallel admission. These are real store/reopen paths.
-func toolBatchBoundary(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store), ledgerFactory func(*testing.T) (budget.LedgerStore, func() budget.LedgerStore)) {
-	for _, mode := range []string{"approval-approve", "approval-reject", "approval-frontier-before", "approval-frontier-ack", "approval-frontier-persistent", "allowance", "parallel", "unsent-before-chain", "actual-dispatch-denial", "actual-dispatch-denial-closure-cas", "actual-dispatch-denial-final-child-ack"} {
+func toolBatchBoundary(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store)) {
+	// There is no speculative reservation/no-send closure CAS in the native
+	// batch. Its cut is the final child receipt CAS (before/ACK) below.
+	for _, mode := range []string{"approval-approve", "approval-reject", "approval-frontier-before", "approval-frontier-ack", "approval-frontier-persistent", "allowance", "parallel", "unsent-before-chain", "actual-dispatch-denial", "actual-dispatch-denial-final-child-before", "actual-dispatch-denial-final-child-ack"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx := t.Context()
 			backing, peer, reopen := factory(t)
 			observer := ea1StartRuntime(t, peer)
-			ledger, reopenLedger := newToolTestLedger(t, ledgerFactory)
+			ledger := newToolTestLedger(t, backing)
 			children := map[string]kernel.Snapshot{}
 			for _, id := range []string{"child-a", "child-b"} {
 				c, e := observer.Create(ctx, kernel.CreateRequest{ID: id, Kind: "fixture.child", Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "test", ID: "thread"}, Goal: "child", State: json.RawMessage("{}")})
@@ -108,17 +95,12 @@ func toolBatchBoundary(t *testing.T, factory func(*testing.T) (kernel.Store, ker
 			if e != nil {
 				t.Fatal(e)
 			}
-			actualDenial := mode == "actual-dispatch-denial" || mode == "actual-dispatch-denial-closure-cas" || mode == "actual-dispatch-denial-final-child-ack"
+			actualDenial := mode == "actual-dispatch-denial" || mode == "actual-dispatch-denial-final-child-before" || mode == "actual-dispatch-denial-final-child-ack"
 			approvalMode := mode != "allowance" && mode != "parallel" && mode != "unsent-before-chain" && !actualDenial
-			var cancelBeforeChain context.CancelFunc
-			cancelHits := 0
+			var cancelBeforeChain *unsentCancelObserver
 			makeRunner := func(rt *kernel.Runtime, l budget.LedgerStore, withPolicy bool) *agent.Runner {
 				t.Helper()
-				var ports agent.BoundedBudgetPorts = settledToolPorts{id: "original-ledger"}
-				if cancelBeforeChain != nil {
-					ports = batchUnsentCancelPorts{settledToolPorts: settledToolPorts{id: "original-ledger"}, cancel: cancelBeforeChain, hits: &cancelHits}
-				}
-				b, e := agent.NewBoundedBudgetAdapter(l, ports)
+				b, e := agent.NewBoundedBudgetAdapter(l, settledToolPorts{id: "original-ledger"})
 				if e != nil {
 					t.Fatal(e)
 				}
@@ -150,6 +132,9 @@ func toolBatchBoundary(t *testing.T, factory func(*testing.T) (kernel.Store, ker
 					return result(q.Call.ID), nil
 				})
 				d := agent.Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, Approvals: interactionadapter.New(interactions), BoundedBudget: b, ToolOutcomeVerifier: reader, DelegatedToolResults: reader, DeferResumption: true}
+				if cancelBeforeChain != nil {
+					d.Observers = []plugin.Observer{cancelBeforeChain}
+				}
 				if withPolicy {
 					d.ApprovalPolicies = []plugin.ApprovalPolicy{p}
 				}
@@ -162,19 +147,16 @@ func toolBatchBoundary(t *testing.T, factory func(*testing.T) (kernel.Store, ker
 			var fault *batchBoundaryFault
 			initial := backing
 			if mode == "approval-frontier-before" || mode == "approval-frontier-ack" || mode == "approval-frontier-persistent" {
-				fault = &batchBoundaryFault{ea1AgentReceiptFault: &ea1AgentReceiptFault{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), PhysicalExecutionStore: backing.(kernel.PhysicalExecutionStore), injected: errors.New("batch frontier commit fault")}, after: mode == "approval-frontier-ack", persistent: mode == "approval-frontier-persistent"}
+				fault = &batchBoundaryFault{ea1AgentReceiptFault: &ea1AgentReceiptFault{Store: backing, LedgerStore: ledger, ExecutionStore: backing.(kernel.ExecutionStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), PhysicalExecutionStore: backing.(kernel.PhysicalExecutionStore), injected: errors.New("batch frontier commit fault")}, after: mode == "approval-frontier-ack", persistent: mode == "approval-frontier-persistent"}
 				initial = fault
 			}
 			var denialFault *toolDispatchDenialStore
 			if actualDenial {
-				denialFault = &toolDispatchDenialStore{ea1AgentReceiptFault: &ea1AgentReceiptFault{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), PhysicalExecutionStore: backing.(kernel.PhysicalExecutionStore), injected: errors.New("batch no-send CAS cut")}, afterCallID: "next-call"}
+				denialFault = &toolDispatchDenialStore{ea1AgentReceiptFault: &ea1AgentReceiptFault{Store: backing, LedgerStore: ledger, ExecutionStore: backing.(kernel.ExecutionStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), PhysicalExecutionStore: backing.(kernel.PhysicalExecutionStore), injected: errors.New("batch no-send CAS cut")}, afterCallID: "next-call"}
 				denialFault.afterCheck = func() {
 					if _, err := (budget.Coordinator{Store: ledger}).CancelRoot(ctx, "original-ledger", "batch-boundary"); err != nil {
 						t.Fatal(err)
 					}
-				}
-				if mode == "actual-dispatch-denial-closure-cas" {
-					denialFault.closureCuts = 2
 				}
 				initial = denialFault
 			}
@@ -184,16 +166,16 @@ func toolBatchBoundary(t *testing.T, factory func(*testing.T) (kernel.Store, ker
 				var cancel context.CancelFunc
 				callCtx, cancel = context.WithCancel(ctx)
 				defer cancel()
-				cancelBeforeChain = cancel
+				cancelBeforeChain = &unsentCancelObserver{cancel: cancel, callID: "next-call"}
 			}
-			r := makeRunner(rt, ledger, true)
+			r := makeRunner(rt, newToolTestLedger(t, initial), true)
 			req := agent.StartRequest{ID: "batch-boundary", Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "test", ID: "thread"}, Goal: "three calls", ToolKeys: []string{"read"}}
 			if mode == "allowance" {
 				req.CallAllowance = &agent.CallAllowance{ToolCalls: 2}
 			}
 			started, e := r.StartRun(callCtx, req)
 			if mode == "unsent-before-chain" {
-				if !errors.Is(e, context.Canceled) || cancelHits != 1 {
+				if !errors.Is(e, context.Canceled) || cancelBeforeChain.calls != 1 {
 					t.Fatal("unsent sibling cut", e)
 				}
 				cancelBeforeChain = nil
@@ -220,8 +202,9 @@ func toolBatchBoundary(t *testing.T, factory func(*testing.T) (kernel.Store, ker
 						t.Fatal(e)
 					}
 				}
-				rt = ea1StartRuntime(t, reopen())
-				l := reopenLedger()
+				fresh := reopen()
+				rt = ea1StartRuntime(t, fresh)
+				l := newToolTestLedger(t, fresh)
 				r = makeRunner(rt, l, false)
 				if _, e = r.ReconcileRootDeferredChildren(ctx, req.ID, before.Run.Revision); !errors.Is(e, agent.ErrRootOutcomeUnknown) {
 					t.Fatal("unknown original authorization allowed child cleanup", e)
@@ -239,7 +222,10 @@ func toolBatchBoundary(t *testing.T, factory func(*testing.T) (kernel.Store, ker
 				return
 			}
 			if actualDenial {
-				if !errors.Is(e, budget.ErrExhausted) || denialFault.hits != 1 || physical["child-a"] != 1 || physical["child-b"] != 1 || physical["next-call"] != 0 || policies["next-call"] != 1 || len(m.requests) != 1 {
+				// Native cancellation blocks the unsent sibling while the
+				// earlier physical children still drain, rather than creating
+				// a speculative no-send reservation for that sibling.
+				if e != nil || denialFault.hits != 1 || physical["child-a"] != 1 || physical["child-b"] != 1 || physical["next-call"] != 0 || policies["next-call"] != 1 || len(m.requests) != 1 {
 					t.Fatal("actual batch denial cut not reached", e, physical, policies)
 				}
 				g, err := observer.LookupChildExecution(ctx, req.ID)
@@ -254,22 +240,11 @@ func toolBatchBoundary(t *testing.T, factory func(*testing.T) (kernel.Store, ker
 				if err != nil {
 					t.Fatal(err)
 				}
-				want := 2
-				if mode == "actual-dispatch-denial-closure-cas" {
-					want = 3
-					if denialFault.cuts != 2 {
-						t.Fatal("closure cuts", denialFault.cuts)
-					}
-				}
-				if len(bindings) != want {
+				if len(bindings) != 2 {
 					t.Fatal("wrong original obligations", bindings)
 				}
 				for _, b := range bindings {
-					if b.CallID == "next-call" {
-						if !b.Unsent || b.ReceiptDigest != "" || b.PendingKind != "" {
-							t.Fatal("denied call acquired physical evidence", b)
-						}
-					} else if b.PendingKind != "child_terminal" || b.Unsent || b.ApprovalDigest == "" {
+					if b.CallID == "next-call" || b.PendingKind != "child_terminal" || b.Unsent || b.ApprovalDigest == "" {
 						t.Fatal("earlier physical receipt lost", b)
 					}
 				}
@@ -278,11 +253,13 @@ func toolBatchBoundary(t *testing.T, factory func(*testing.T) (kernel.Store, ker
 						t.Fatal(err)
 					}
 				}
-				if mode == "actual-dispatch-denial-final-child-ack" {
-					// Last physical child receipt commits, but its response
-					// is lost before the original Grant can retire.
-					fault := &returnedRootRetirementFault{managedStorePorts: backing.(managedStorePorts), mode: "recovery-ack", recoveryCallID: "child-b"}
-					r = makeRunner(ea1StartRuntime(t, fault), ledger, false)
+				if mode == "actual-dispatch-denial-final-child-before" || mode == "actual-dispatch-denial-final-child-ack" {
+					stage := "recovery-ack"
+					if mode == "actual-dispatch-denial-final-child-before" {
+						stage = "recovery-before"
+					}
+					fault := &returnedRootRetirementFault{managedStorePorts: backing.(managedStorePorts), LedgerStore: ledger, mode: stage, recoveryCallID: "child-b"}
+					r = makeRunner(ea1StartRuntime(t, fault), fault, false)
 					original, err := r.RootDeferredCleanupEligibility(ctx, req.ID, started.Run.Revision)
 					if err != nil || original.RetirementOnly() {
 						t.Fatal("original child scope missing", err)
@@ -291,19 +268,24 @@ func toolBatchBoundary(t *testing.T, factory func(*testing.T) (kernel.Store, ker
 					if !errors.Is(err, errReturnedRootRetirementCut) || fault.hits != 1 || fault.grant != g || reads["child-a"] != 1 || reads["child-b"] != 1 {
 						t.Fatal("last original child ACK cut missing", err, reads)
 					}
-					rt = ea1StartRuntime(t, reopen())
-					l := reopenLedger()
+					fresh := reopen()
+					rt = ea1StartRuntime(t, fresh)
+					l := newToolTestLedger(t, fresh)
 					r = makeRunner(rt, l, false)
 					after, err := rt.Load(ctx, req.ID)
 					if err != nil {
 						t.Fatal(err)
 					}
 					ready, err := r.RootDeferredCleanupEligibility(ctx, req.ID, after.Run.Revision)
-					if err != nil || !ready.RetirementOnly() || !original.Matches(ready) {
+					if err != nil || ready.RetirementOnly() != (stage == "recovery-ack") || !original.Matches(ready) {
 						t.Fatal("last child receipt did not yield same original retirement", err)
 					}
 					after, err = r.ReconcileRootDeferredChildren(ctx, req.ID, after.Run.Revision, original)
-					if err != nil || reads["child-a"] != 1 || reads["child-b"] != 1 || reads["next-call"] != 0 || len(m.requests) != 1 {
+					wantReads := 1
+					if stage == "recovery-before" {
+						wantReads = 2
+					}
+					if err != nil || reads["child-a"] != 1 || reads["child-b"] != wantReads || reads["next-call"] != 0 || len(m.requests) != 1 {
 						t.Fatal("retirement re-read original child effects", err, reads)
 					}
 					if _, err = rt.LookupChildExecution(ctx, req.ID); !errors.Is(err, kernel.ErrNotFound) {
@@ -319,8 +301,9 @@ func toolBatchBoundary(t *testing.T, factory func(*testing.T) (kernel.Store, ker
 					}
 					return
 				}
-				rt = ea1StartRuntime(t, reopen())
-				l := reopenLedger()
+				fresh := reopen()
+				rt = ea1StartRuntime(t, fresh)
+				l := newToolTestLedger(t, fresh)
 				r = makeRunner(rt, l, false)
 				cur, err := r.ReconcileRootDeferredChildren(ctx, req.ID, started.Run.Revision)
 				if err != nil || reads["child-a"] != 1 || reads["child-b"] != 1 || reads["next-call"] != 0 || physical["next-call"] != 0 || len(m.requests) != 1 {
@@ -337,8 +320,8 @@ func toolBatchBoundary(t *testing.T, factory func(*testing.T) (kernel.Store, ker
 				if err != nil {
 					t.Fatal(err)
 				}
-				third := saved.Reservations["tool:batch-boundary:next-call"]
-				if saved.View("").Usage.ToolCalls != 2 || saved.View("").Reserved.ToolCalls != 0 || third.Status != budget.ReservationReleased || third.Dispatched || third.Active || len(third.Receipt) != 0 {
+				third, exists := saved.Reservations["tool:batch-boundary:next-call"]
+				if saved.View("").Usage.ToolCalls != 2 || saved.View("").Reserved.ToolCalls != 0 || exists {
 					t.Fatal("wrong original accounting", saved.View(""), third)
 				}
 				return
@@ -377,8 +360,8 @@ func toolBatchBoundary(t *testing.T, factory func(*testing.T) (kernel.Store, ker
 				if err != nil {
 					t.Fatal(err)
 				}
-				r := saved.Reservations["tool:batch-boundary:next-call"]
-				if r.Status != budget.ReservationWaiting || r.Dispatched || r.Active || policies["next-call"] != 1 || !bytes.Contains(started.State, []byte(`"phase":"unsent"`)) {
+				r, exists := saved.Reservations["tool:batch-boundary:next-call"]
+				if exists || policies["next-call"] != 1 {
 					t.Fatal("unsent sibling capacity not parked", r, policies)
 				}
 			}
@@ -393,8 +376,9 @@ func toolBatchBoundary(t *testing.T, factory func(*testing.T) (kernel.Store, ker
 					t.Fatal(e)
 				}
 			}
-			rt = ea1StartRuntime(t, reopen())
-			l := reopenLedger()
+			fresh := reopen()
+			rt = ea1StartRuntime(t, fresh)
+			l := newToolTestLedger(t, fresh)
 			// Replacement without policies must honor the originally parked
 			// restrictive decision, never repeat it or silently authorize.
 			r = makeRunner(rt, l, !approvalMode)
@@ -426,14 +410,6 @@ func toolBatchBoundary(t *testing.T, factory func(*testing.T) (kernel.Store, ker
 				t.Fatal("consume original receipts", e)
 			}
 			switch mode {
-			case "unsent-before-chain":
-				if cur.Run.Status != kernel.RunStatusRunning || physical["next-call"] != 0 || policies["next-call"] != 1 || len(m.requests) != 1 {
-					t.Fatal("unsent sibling bypassed original closure", cur.Run, physical, policies)
-				}
-				cur, e = r.Resume(ctx, req.ID, cur.Run.Revision)
-				if e != nil || policies["next-call"] != 1 {
-					t.Fatal("unsent sibling did not re-admit once", e, policies)
-				}
 			case "approval-approve", "approval-reject", "approval-frontier-before", "approval-frontier-ack":
 				if cur.Run.Status != kernel.RunStatusWaitingInput || cur.Checkpoint == nil || physical["next-call"] != 0 || policies["next-call"] != 1 || len(m.requests) != 1 {
 					t.Fatal("parked approval not published exactly once after retirement", cur.Run.Status, physical, policies)

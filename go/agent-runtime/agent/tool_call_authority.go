@@ -17,11 +17,9 @@ import (
 type toolCallAuthority struct {
 	mu                sync.Mutex
 	id                string
-	budget            *toolBudgetAdmission
 	observed, invalid bool
 	original          toolOutcomeReceipt
 	cause             error
-	denial            *nativeAdmissionDenied
 }
 
 func toolAuthority(ctx context.Context) *toolCallAuthority {
@@ -91,7 +89,7 @@ func (a *toolCallAuthority) record(result tools.ExecutionResult, err error) (too
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.invalid || a.observed || a.denial != nil {
+	if a.invalid || a.observed {
 		a.invalid = true
 		return unqualifiedToolOutcome(errors.Join(ErrToolReceiptMismatch, err))
 	}
@@ -110,13 +108,7 @@ func (a *toolCallAuthority) validate(result tools.ExecutionResult, err error) (t
 	if a.invalid {
 		return unqualifiedToolOutcome(err)
 	}
-	if a.denial != nil {
-		if a.observed || !reflect.DeepEqual(result, tools.ExecutionResult{}) || !a.denial.matches(err) {
-			a.invalid = true
-			return unqualifiedToolOutcome(errors.Join(ErrToolReceiptMismatch, err))
-		}
-		return result, err
-	}
+
 	if !toolReceiptCandidate(result, err, a.id) {
 		return result, err
 	}
@@ -126,35 +118,4 @@ func (a *toolCallAuthority) validate(result tools.ExecutionResult, err error) (t
 		return unqualifiedToolOutcome(errors.Join(ErrToolReceiptMismatch, err))
 	}
 	return result, err
-}
-
-// The actual Budget Tool layer records the same unique native denial identity
-// as the Run layer. It is not an executor result or a retryable Tool receipt.
-func (a *toolCallAuthority) recordAdmissionDenied(ctx context.Context, adapter *BoundedBudgetAdapter, source any, cause error) *nativeAdmissionDenied {
-	if a == nil || a.budget == nil || a.budget.adapter != adapter {
-		return nil
-	}
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.invalid || a.observed || a.denial != nil {
-		return nil
-	}
-	d := recordNativeAdmissionDenial(ctx, adapter, "budget.tool.admission_denied", source, cause)
-	if d != nil {
-		a.denial = d
-	}
-	return d
-}
-
-func (a *toolCallAuthority) admissionReturn(ctx context.Context, result tools.ExecutionResult, err error) (*nativeAdmissionDenied, bool) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.denial == nil {
-		return nil, false
-	}
-	if a.invalid || a.observed || !reflect.DeepEqual(result, tools.ExecutionResult{}) || !a.denial.matches(err) || !callbackscope.QualifiedToolReturn(ctx) {
-		a.invalid = true
-		return nil, true
-	}
-	return a.denial, true
 }

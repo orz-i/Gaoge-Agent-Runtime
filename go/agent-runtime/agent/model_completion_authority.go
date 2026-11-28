@@ -27,14 +27,12 @@ type modelCompletionAuthority struct {
 	billingHash   string
 	rejected      bool
 	rejectionCode string
-	settled       bool
 }
 
 // One invocation-scoped carrier keeps the plan, receipt authority and
 // no-send nonce together across every Model middleware boundary.
 type modelCallScope struct {
 	completion *modelCompletionAuthority
-	denial     *modelDenialScope
 }
 
 func modelCallFrom(ctx context.Context) *modelCallScope {
@@ -113,21 +111,12 @@ func (authority *modelCompletionAuthority) settle(response model.Response, err e
 	defer authority.mu.Unlock()
 	response, err = authority.validateLocked(response, err, true)
 	if !authority.invalid && hasModelCompletionReceipt(response, err) {
-		authority.settled = true
 		if model.IsResponseRejectedError(err) {
 			authority.rejected = true
 			authority.rejectionCode = model.ClassifiedErrorCode(err)
 		}
 	}
 	return response, err
-}
-func (authority *modelCompletionAuthority) validateFinal(response model.Response, err error) (model.Response, error) {
-	authority.mu.Lock()
-	defer authority.mu.Unlock()
-	if authority.plan != nil && authority.plan.LedgerID != "" && !authority.settled && hasModelCompletionReceipt(response, err) {
-		return authority.reject()
-	}
-	return authority.validateLocked(response, err, false)
 }
 func (authority *modelCompletionAuthority) validateLocked(response model.Response, err error, settlement bool) (model.Response, error) {
 	if authority.invalid {

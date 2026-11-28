@@ -37,7 +37,7 @@ func (r *Runner) commitNativeTransition(ctx context.Context, source kernel.Snaps
 // The existing Run admission selects the original co-located scope. No
 // Host resolution or ledger lookup can substitute a different scope.
 func (r *Runner) nativeRunBudget(ctx context.Context, id string) *runBudgetAdmission {
-	a := r.atomicBudget()
+	a := r.boundedBudget
 	if a == nil {
 		return nil
 	}

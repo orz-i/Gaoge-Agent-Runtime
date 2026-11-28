@@ -62,7 +62,7 @@ func TestRootFrozenSamplingRecoveryUsesOriginalPhysicalReceipt(t *testing.T) {
 				// A suspended Budget stage still lacks its accounting receipt.
 				hostUnknown := unknown && mode.budget
 				base := memory.NewStore()
-				fault := &summaryCoreFaultStore{Store: base, event: "agent.model_invocation.completed"}
+				fault := &summaryCoreFaultStore{Store: base, LedgerStore: base, event: "agent.model_invocation.completed"}
 				var store kernel.Store = fault
 				if unknown {
 					store = base
@@ -81,7 +81,7 @@ func TestRootFrozenSamplingRecoveryUsesOriginalPhysicalReceipt(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				ledgerStore := budget.NewMemoryLedgerStore()
+				ledgerStore := rt.BudgetStore()
 				budgetPorts := &frozenReceiptBudgetPorts{}
 				shared, err := NewBoundedBudgetAdapter(ledgerStore, budgetPorts)
 				if err != nil {

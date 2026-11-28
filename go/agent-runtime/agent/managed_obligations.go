@@ -183,7 +183,7 @@ func (r *Runner) checkManagedLedger(ctx context.Context, p managedObligations, h
 	if p.LedgerID == "" {
 		return budget.Ledger{}, nil
 	}
-	l, err := r.boundedBudget.coordinator.Store.LoadBudget(ctx, p.LedgerID)
+	l, err := r.boundedBudget.store.LoadBudget(ctx, p.LedgerID)
 	if err != nil {
 		return l, err
 	}
@@ -263,7 +263,7 @@ func (r *Runner) qualifyManagedFrontier(ctx context.Context, t kernel.ManagedTra
 	p.Phase = string(last.Status)
 	p.RequalifiedFrom = t.SafePoint.ID
 	if p.LedgerID != "" {
-		l, e := r.boundedBudget.coordinator.Store.LoadBudget(ctx, p.LedgerID)
+		l, e := r.boundedBudget.store.LoadBudget(ctx, p.LedgerID)
 		if e != nil {
 			return empty, nil, e
 		}

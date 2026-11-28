@@ -61,6 +61,15 @@ The SQLite v14 and matching PostgreSQL layout require a fresh Profile;
 earlier Profiles remain unchanged. Do not decode the internal state column
 as logical Agent JSON or mix old/new writers.
 
+## Native Agent budget (AC-04)
+
+The BoundedBudget adapter must use exactly the same native Run and ledger
+Store instance as Runtime. The split-store Model/Tool reservation, dispatch,
+receipt, and finish paths are retired. Host scope resolution enrolls the Run
+at creation; later accounting reads that binding. Projection follows the
+native commit. Legacy split-store execution state is not migrated or
+requalified; resolve its original obligations with the previous writer.
+
 ## Owned physical callback entry and no-entry retirement
 
 Custom `OwnedPhysicalExecutionStore` adapters must implement

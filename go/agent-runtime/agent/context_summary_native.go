@@ -33,7 +33,7 @@ func validManagedStores(d Dependencies) bool {
 	return d.Runtime != nil && d.Runtime.SupportsManagedRecovery() && d.Runtime.HasManagedRecoveryHost() &&
 		a != nil && summaryNativeBridge(a.ports, "boundedContextPorts", d.Runtime) &&
 		(d.ContextSummary == nil || summaryNativeBridge(d.ContextSummary.ports, "contextSummaryPorts", d.Runtime)) &&
-		(d.BoundedBudget == nil || (d.Runtime.UsesLedgerStore(d.BoundedBudget.coordinator.Store) && summaryNativeBridge(d.BoundedBudget.ports, "boundedBudgetPorts", d.Runtime)))
+		(d.BoundedBudget == nil || (d.Runtime.UsesLedgerStore(d.BoundedBudget.store) && summaryNativeBridge(d.BoundedBudget.ports, "boundedBudgetPorts", d.Runtime)))
 }
 
 func validManagedDependencies(d Dependencies) bool {

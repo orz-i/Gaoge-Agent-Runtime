@@ -18,20 +18,7 @@ import (
 // modelPreDispatchDenied distinguishes a failed ownership/authorization
 // preflight from an actual Provider error. No physical send occurred, so it
 // must not be charged, retried as a Provider failure, or terminalize the Run.
-type modelDenialScope struct{ marker byte }
-type modelPreDispatchDenied struct {
-	cause     error
-	scope     *modelDenialScope
-	original  model.Request // exact request admitted before any Model middleware
-	candidate model.Request // actual downstream request that failed at the final gate
-}
-
-func modelDeniedForRequest(ctx context.Context, original model.Request, err error) bool {
-	var denied modelPreDispatchDenied
-	call := modelCallFrom(ctx)
-	return call != nil && call.denial != nil && errors.As(err, &denied) && denied.scope == call.denial &&
-		sameBoundedValue(model.CloneRequest(denied.original), model.CloneRequest(original))
-}
+type modelPreDispatchDenied struct{ cause error }
 
 func (denied modelPreDispatchDenied) Error() string { return denied.cause.Error() }
 func (denied modelPreDispatchDenied) Unwrap() error { return denied.cause }

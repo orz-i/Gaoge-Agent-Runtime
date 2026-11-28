@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
@@ -14,6 +15,7 @@ var errReturnedRootRetirementCut = errors.New("original returned Root retirement
 
 type returnedRootRetirementFault struct {
 	managedStorePorts
+	budget.LedgerStore
 	mode, recoveryCallID string
 	dead                 bool
 	hits                 int

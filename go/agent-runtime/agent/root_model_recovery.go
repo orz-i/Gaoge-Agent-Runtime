@@ -58,14 +58,14 @@ func (runner *Runner) ReconcileModelOutcome(ctx context.Context, runID string, r
 	}
 	// The verifier only sees the exact committed physical request. A missing
 	// plan after dispatch is not evidence that logical and physical were equal.
-	if inv.SamplingPlan == nil || !inv.SamplingPlan.valid(inv.Request) {
+	if inv.SamplingPlan == nil || !inv.SamplingPlan.valid(inv.Request) || inv.SamplingPlan.LedgerID != snapshot.Run.BudgetScopeID {
 		return snapshot, ErrModelOutcomeUnknown
 	}
 	request := inv.SamplingPlan.request(inv.Request)
 	response, receiptErr := runner.recoveryModelReceipt(ctx, inv, request, completion.HostCompleted)
 	originalInvocation := inv
 	var ledgerMutation *budget.LedgerMutation
-	if a := runner.atomicModelBudget(inv.SamplingPlan); a != nil && completion.HostCompleted && inv.Status == ModelInvocationPending {
+	if a := runner.modelBudget(inv.SamplingPlan); a != nil && completion.HostCompleted && inv.Status == ModelInvocationPending {
 		res, loadErr := runner.originalModelReservation(ctx, inv)
 		if loadErr != nil {
 			return snapshot, errors.Join(ErrModelOutcomeUnknown, loadErr)
@@ -174,7 +174,7 @@ func (runner *Runner) originalModelReservation(ctx context.Context, inv ModelInv
 	if err != nil {
 		return budget.Reservation{}, err
 	}
-	ledger, err := runner.boundedBudget.coordinator.Store.LoadBudget(ctx, plan.LedgerID)
+	ledger, err := runner.boundedBudget.bindReceiptScope(ctx, inv.RunID, plan.LedgerID)
 	if err != nil {
 		return budget.Reservation{}, err
 	}
@@ -200,9 +200,7 @@ func (runner *Runner) recoveryModelReceipt(ctx context.Context, inv ModelInvocat
 		if res.Status == budget.ReservationSettled {
 			return budget.DecodeModelReceipt(res)
 		}
-		if hostCompleted && runner.atomicModelBudget(inv.SamplingPlan) == nil {
-			return model.Response{}, budget.ErrWaiting
-		}
+
 	}
 	if runner.modelOutcomeVerifier == nil {
 		return model.Response{}, ErrModelOutcomeUnknown

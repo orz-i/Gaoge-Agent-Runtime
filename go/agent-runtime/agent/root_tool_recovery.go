@@ -104,7 +104,7 @@ func (runner *Runner) reconcileRootTool(ctx context.Context, snapshot kernel.Sna
 }
 func (runner *Runner) reconcileRootToolReceipt(ctx context.Context, snapshot kernel.Snapshot, state runState, grant kernel.ChildExecutionGrant, callID string, continueTerminal bool) (kernel.Snapshot, error) {
 	completion, err := runner.runtime.LookupPhysicalCallbackReturn(ctx, grant)
-	if err != nil || !completion.HostCompleted || completion.GrantID != grant.ID {
+	if err != nil || !completion.HostCompleted || completion.GrantID != grant.ID || completion.ControlCustody == kernel.OwnedToolBudgetReturn {
 		return snapshot, errors.Join(ErrToolOutcomeUnknown, ErrRootOutcomeUnknown, err)
 	}
 	call, ok := nextPendingCall(state)
@@ -141,7 +141,7 @@ func (runner *Runner) reconcileRootToolReceipt(ctx context.Context, snapshot ker
 		if runner.toolOutcomeVerifier == nil {
 			return snapshot, ErrToolVerificationRequired
 		}
-		if (!bound || binding.LedgerID == "") && state.ExternalToolHold == nil && completion.ControlCustody != kernel.OwnedToolBudgetReturn {
+		if (!bound || binding.LedgerID == "") && state.ExternalToolHold == nil {
 			if err := runner.requireUnmeteredToolRecovery(ctx, request.RunID); err != nil {
 				return snapshot, errors.Join(ErrToolOutcomeUnknown, err)
 			}
@@ -171,7 +171,15 @@ func (runner *Runner) reconcileRootToolReceipt(ctx context.Context, snapshot ker
 				return snapshot, ErrToolReceiptMismatch
 			}
 			if !bound || binding.LedgerID == "" {
-				if err := runner.settleToolHold(ctx, request, verified, func(id string) bool { return id == hold.LedgerID }); err != nil {
+				if !validBindingFingerprint(verified.Receipt.OwnerReceiptDigest) {
+					return snapshot, ErrToolReceiptMismatch
+				}
+				raw, e := encodeToolOutcome(outcome)
+				if e != nil {
+					return snapshot, e
+				}
+				ledgerMutation, err = runner.planVerifiedToolSettlement(ctx, request, hold.LedgerID, budget.Usage{ToolCalls: 1}, raw)
+				if err != nil {
 					return snapshot, errors.Join(ErrToolOutcomeUnknown, err)
 				}
 			}
@@ -185,12 +193,7 @@ func (runner *Runner) reconcileRootToolReceipt(ctx context.Context, snapshot ker
 				return snapshot, errors.Join(ErrToolOutcomeUnknown, err)
 			}
 		}
-		if completion.ControlCustody == kernel.OwnedToolBudgetReturn {
-			ledgerID, err = runner.settleOriginalToolBudget(ctx, snapshot, completion, request, verified)
-			if err != nil {
-				return snapshot, errors.Join(ErrToolOutcomeUnknown, err)
-			}
-		}
+
 	}
 	approvalDigest := ""
 	if bound && binding.ApprovalDigest != "" {
@@ -234,6 +237,11 @@ func (runner *Runner) reconcileRootToolReceipt(ctx context.Context, snapshot ker
 	repaired, err := runner.runtime.ApplyOwnedPhysicalRecovery(ctx, grant, snapshot.Run.Revision, kernel.Mutation{Ledger: ledgerMutation, Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint, ErrorCode: snapshot.Run.ErrorCode, ErrorDetail: snapshot.Run.ErrorDetail, Events: []kernel.EventDraft{{Type: "tool.receipt_recovered", Message: callID, Wakeup: true}}}, source, target)
 	if err != nil {
 		return snapshot, err
+	}
+	if ledgerMutation != nil {
+		if e := runner.boundedBudget.ports.Project(ctx, ledgerMutation.Next()); e != nil {
+			return repaired, e
+		}
 	}
 	if !knownRootPhysicalSettlement(repaired) {
 		return repaired, nil

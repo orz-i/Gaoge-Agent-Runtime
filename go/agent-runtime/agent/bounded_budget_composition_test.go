@@ -19,7 +19,8 @@ func (boundBudgetCompositionModel) Generate(context.Context, model.Request) (mod
 }
 
 func TestFirstPartyOwnerSelectionUsesExplicitStages(t *testing.T) {
-	rt, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
+	native := memory.NewStore()
+	rt, err := kernel.New(kernel.Dependencies{Store: native})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -27,7 +28,7 @@ func TestFirstPartyOwnerSelectionUsesExplicitStages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := NewBoundedBudgetAdapter(budget.NewMemoryLedgerStore(), &receiptBudgetPorts{scope: "turn"})
+	b, err := NewBoundedBudgetAdapter(native, &receiptBudgetPorts{scope: "turn"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,6 +39,12 @@ func TestFirstPartyOwnerSelectionUsesExplicitStages(t *testing.T) {
 	}
 	if candidate, err := NewRunner(Dependencies{Runtime: rt, Model: boundBudgetCompositionModel{}, BoundedContext: c}); err != nil || candidate.SupportsManagedRecovery() {
 		t.Fatalf("unregistered custom Context certified managed recovery: %v", err)
+	}
+}
+
+func TestBoundedBudgetAdapterRejectsSplitStore(t *testing.T) {
+	if _, err := NewBoundedBudgetAdapter(budget.NewMemoryLedgerStore(), &receiptBudgetPorts{scope: "turn"}); err != ErrInvalidRequest {
+		t.Fatalf("standalone ledger store accepted: %v", err)
 	}
 }
 
@@ -65,52 +72,45 @@ func (m *budgetCompositionModel) Generate(ctx context.Context, request model.Req
 	return model.Response{Content: "done"}, nil
 }
 func TestBudgetFixedStagesEncloseProviderAndExecutor(t *testing.T) {
-	for _, atomic := range []bool{false, true} {
-		t.Run(map[bool]string{false: "split-store", true: "co-located"}[atomic], func(t *testing.T) {
-			ctx := t.Context()
-			native := memory.NewStore()
-			rt, err := kernel.New(kernel.Dependencies{Store: native})
-			if err != nil {
-				t.Fatal(err)
-			}
-			var store budget.LedgerStore = budget.NewMemoryLedgerStore()
-			if atomic {
-				store = native
-			}
-			b, err := NewBoundedBudgetAdapter(store, toolAccountingPorts{})
-			if err != nil {
-				t.Fatal(err)
-			}
-			const runID = "fixed-budget-order"
-			physical := 0
-			reg, err := tools.NewRegistry([]tools.Registration{{Definition: tools.Definition{Key: "read", Name: "read", InputSchema: []byte(`{"type":"object"}`)}, Handler: tools.HandlerFunc(func(ctx context.Context, q tools.ExecutionRequest) (tools.ExecutionResult, error) {
-				l, err := store.LoadBudget(ctx, "turn")
-				res := l.Reservations["tool:"+q.RunID+":"+q.Call.ID]
-				if err != nil || l.FinishedRuns[q.RunID] || res.Status != budget.ReservationHeld || !res.Dispatched || len(res.Receipt) != 0 {
-					t.Fatalf("Executor not enclosed by original accounting: %+v %v", res, err)
-				}
-				physical++
-				return tools.ExecutionResult{Content: []byte(`{ "answer": true }`), Receipt: tools.Receipt{ExecutionID: q.Call.ID, Disposition: "committed"}}, nil
-			})}})
-			if err != nil {
-				t.Fatal(err)
-			}
-			m := &budgetCompositionModel{t: t, store: store}
-			r, err := NewRunner(Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, BoundedBudget: b})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !r.scopedRootCallbacks || len(r.boundedCallbacks) != 1 || r.boundedCallbacks[0] != b {
-				t.Fatal("fixed stages duplicated the Budget owner")
-			}
-			out, err := r.StartRun(ctx, StartRequest{ID: runID, Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "test", ID: "thread"}, Goal: "read", ToolKeys: []string{"read"}})
-			if err != nil || out.Run.Status != kernel.RunStatusCompleted || physical != 1 || m.calls != 2 {
-				t.Fatalf("fixed stages skipped physical work: %v %s tools=%d models=%d", err, out.Run.Status, physical, m.calls)
-			}
-			l, err := store.LoadBudget(ctx, "turn")
-			if err != nil || !l.FinishedRuns[runID] || l.View(runID).Usage.LLMCalls != 2 || l.View(runID).Usage.ToolCalls != 1 || l.View(runID).Reserved != (budget.Usage{}) {
-				t.Fatalf("original accounting did not settle exactly once: %+v %v", l, err)
-			}
-		})
+	ctx := t.Context()
+	native := memory.NewStore()
+	rt, err := kernel.New(kernel.Dependencies{Store: native})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := budget.LedgerStore(native)
+	b, err := NewBoundedBudgetAdapter(store, toolAccountingPorts{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const runID = "fixed-budget-order"
+	physical := 0
+	reg, err := tools.NewRegistry([]tools.Registration{{Definition: tools.Definition{Key: "read", Name: "read", InputSchema: []byte(`{"type":"object"}`)}, Handler: tools.HandlerFunc(func(ctx context.Context, q tools.ExecutionRequest) (tools.ExecutionResult, error) {
+		l, err := store.LoadBudget(ctx, "turn")
+		res := l.Reservations["tool:"+q.RunID+":"+q.Call.ID]
+		if err != nil || l.FinishedRuns[q.RunID] || res.Status != budget.ReservationHeld || !res.Dispatched || len(res.Receipt) != 0 {
+			t.Fatalf("Executor not enclosed by original accounting: %+v %v", res, err)
+		}
+		physical++
+		return tools.ExecutionResult{Content: []byte(`{ "answer": true }`), Receipt: tools.Receipt{ExecutionID: q.Call.ID, Disposition: "committed"}}, nil
+	})}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := &budgetCompositionModel{t: t, store: store}
+	r, err := NewRunner(Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, BoundedBudget: b})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.scopedRootCallbacks || len(r.boundedCallbacks) != 1 || r.boundedCallbacks[0] != b {
+		t.Fatal("fixed stages duplicated the Budget owner")
+	}
+	out, err := r.StartRun(ctx, StartRequest{ID: runID, Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "test", ID: "thread"}, Goal: "read", ToolKeys: []string{"read"}})
+	if err != nil || out.Run.Status != kernel.RunStatusCompleted || physical != 1 || m.calls != 2 {
+		t.Fatalf("fixed stages skipped physical work: %v %s tools=%d models=%d", err, out.Run.Status, physical, m.calls)
+	}
+	l, err := store.LoadBudget(ctx, "turn")
+	if err != nil || !l.FinishedRuns[runID] || l.View(runID).Usage.LLMCalls != 2 || l.View(runID).Usage.ToolCalls != 1 || l.View(runID).Reserved != (budget.Usage{}) {
+		t.Fatalf("original accounting did not settle exactly once: %+v %v", l, err)
 	}
 }

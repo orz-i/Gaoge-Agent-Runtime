@@ -1,7 +1,6 @@
 package conformance
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -22,22 +21,23 @@ type capacityAdmissionPorts struct {
 	settledToolPorts
 	limits        budget.Limits
 	inactiveChild bool
+	parent        string
 }
 
 func (p capacityAdmissionPorts) ResolveScope(_ context.Context, id string) (agent.BoundedBudgetScope, error) {
-	return agent.BoundedBudgetScope{LedgerID: p.id, Limits: p.limits, Runs: []agent.BoundedBudgetRunBinding{{RunID: id}}}, nil
+	return agent.BoundedBudgetScope{LedgerID: p.id, Limits: p.limits, Runs: []agent.BoundedBudgetRunBinding{{RunID: id, Binding: budget.RunBudget{ParentRunID: p.parent}}}}, nil
 }
 func (p capacityAdmissionPorts) ToolReservationActive(inv plugin.ToolInvocation) bool {
 	return !p.inactiveChild || inv.Request.Call.ID != "child-a"
 }
 
-func toolCapacityAdmission(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store), ledgerFactory func(*testing.T) (budget.LedgerStore, func() budget.LedgerStore)) {
+func toolCapacityAdmission(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store)) {
 	for _, mode := range []string{"single-no-policy", "single-bounded", "single-checkpoint", "mixed-quota", "mixed-slot"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx := t.Context()
 			backing, peer, reopen := factory(t)
 			observer := ea1StartRuntime(t, peer)
-			ledger, reopenLedger := newToolTestLedger(t, ledgerFactory)
+			ledger := newToolTestLedger(t, backing)
 			const scope = "capacity-ledger"
 			const rootID = "capacity-root"
 			mixed := mode == "mixed-quota" || mode == "mixed-slot"
@@ -170,7 +170,7 @@ func toolCapacityAdmission(t *testing.T, factory func(*testing.T) (kernel.Store,
 					started, err = r.Resume(ctx, rootID, started.Run.Revision)
 				}
 			}
-			if err != nil || started.Run.Status != kernel.RunStatusRunning || physical[waitingID] != 0 || modelCalls() != 1 || !bytes.Contains(started.State, []byte(`"phase":"awaiting_capacity"`)) {
+			if err != nil || started.Run.Status != kernel.RunStatusRunning || physical[waitingID] != 0 || modelCalls() != 1 || started.Run.BudgetScopeID != scope {
 				t.Fatal("expected native unsent wait", started.Run.Status, err, physical)
 			}
 			if withPolicy && policies[waitingID] != 1 {
@@ -181,9 +181,10 @@ func toolCapacityAdmission(t *testing.T, factory func(*testing.T) (kernel.Store,
 				t.Fatal(err)
 			}
 			id := "tool:" + rootID + ":" + waitingID
-			res := before.Reservations[id]
-			if res.Status != budget.ReservationWaiting || res.Dispatched || res.Active || len(res.Receipt) != 0 || res.Usage != (budget.Usage{}) {
-				t.Fatal("wait acquired physical effects", res)
+			// A denied native dispatch plan publishes neither a speculative
+			// hold nor a waiting reservation. The Run retains authorization.
+			if res, exists := before.Reservations[id]; exists {
+				t.Fatal("capacity wait published a reservation without dispatch", res)
 			}
 			if !mixed {
 				if timeline.starts != 0 || timeline.ends != 0 {
@@ -215,8 +216,9 @@ func toolCapacityAdmission(t *testing.T, factory func(*testing.T) (kernel.Store,
 					t.Fatal(err)
 				}
 			}
-			rt = ea1StartRuntime(t, reopen())
-			l := reopenLedger()
+			fresh := reopen()
+			rt = ea1StartRuntime(t, fresh)
+			l := newToolTestLedger(t, fresh)
 			coord.Store = l
 			// Exact original authorization and capacity scope survive Runner replacement.
 			r = makeRunner(rt, l, scope, false)
@@ -232,25 +234,16 @@ func toolCapacityAdmission(t *testing.T, factory func(*testing.T) (kernel.Store,
 					t.Fatal("original child grant retained", err)
 				}
 			} else {
-				// Wrong or missing adapter must never dispatch the previously bound Call.
-				for _, foreign := range []string{"", "foreign-ledger"} {
-					if _, err = makeRunner(rt, l, foreign, false).Resume(ctx, rootID, started.Run.Revision); !errors.Is(err, agent.ErrToolReceiptMismatch) || physical[waitingID] != 0 {
-						t.Fatal("replacement lost original budget authority", foreign, err)
-					}
-					started, err = rt.Load(ctx, rootID)
-					if err != nil {
-						t.Fatal(err)
-					}
+				if _, err = makeRunner(rt, l, "", false).Resume(ctx, rootID, started.Run.Revision); !errors.Is(err, budget.ErrLedgerConflict) || physical[waitingID] != 0 {
+					t.Fatal("missing adapter lost native budget authority", err)
+				}
+				// A Host's newly selected scope is ignored for an enrolled Run.
+				started, err = makeRunner(rt, l, "foreign-ledger", false).Resume(ctx, rootID, started.Run.Revision)
+				if err != nil || started.Run.BudgetScopeID != scope || physical[waitingID] != 0 {
+					t.Fatal("replacement moved original budget scope", err)
 				}
 				if _, err = l.LoadBudget(ctx, "foreign-ledger"); !errors.Is(err, budget.ErrLedgerNotFound) {
 					t.Fatal("foreign ledger written", err)
-				}
-				empty := budget.NewMemoryLedgerStore()
-				if _, err = makeRunner(rt, empty, scope, false).Resume(ctx, rootID, started.Run.Revision); !errors.Is(err, agent.ErrToolReceiptMismatch) {
-					t.Fatal("same-ID missing ledger was accepted", err)
-				}
-				if _, err = empty.LoadBudget(ctx, scope); !errors.Is(err, budget.ErrLedgerNotFound) {
-					t.Fatal("same-ID ledger manufactured", err)
 				}
 				started, err = r.Resume(ctx, rootID, started.Run.Revision)
 				if err != nil || started.Run.Status != kernel.RunStatusRunning || physical[waitingID] != 0 || timeline.starts != 0 || modelCalls() != 1 {
@@ -286,14 +279,11 @@ func toolCapacityAdmission(t *testing.T, factory func(*testing.T) (kernel.Store,
 				t.Fatal(err)
 			}
 			charge := 1
-			want := budget.ReservationSettled
 			if mode == "mixed-slot" {
 				charge = 3
 			}
-			if limited {
-				want = budget.ReservationReleased
-			}
-			if after.View("").Usage.ToolCalls != charge || after.View("").Reserved.ToolCalls != 0 || after.Reservations[id].Status != want {
+			res, exists := after.Reservations[id]
+			if after.View("").Usage.ToolCalls != charge || after.View("").Reserved.ToolCalls != 0 || limited && exists || !limited && (!exists || res.Status != budget.ReservationSettled) {
 				t.Fatal("wrong final settlement", after.View(""), after.Reservations[id])
 			}
 			if reads[waitingID] != 0 {

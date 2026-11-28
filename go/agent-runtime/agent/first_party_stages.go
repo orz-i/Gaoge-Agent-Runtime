@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/callbackscope"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
@@ -45,7 +44,7 @@ type modelCall func(context.Context, model.Request, model.StreamSink) (model.Res
 type toolCall func(context.Context) (tools.ExecutionResult, error)
 
 // Original Budget scope, Context hydration, native operation, then settlement.
-func (r *Runner) invokeFirstPartyRun(ctx context.Context, inv plugin.RunInvocation, originalBudget *budget.Ledger, terminal runContinuation) (out kernel.Snapshot, err error) {
+func (r *Runner) invokeFirstPartyRun(ctx context.Context, inv plugin.RunInvocation, terminal runContinuation) (out kernel.Snapshot, err error) {
 	b := r.boundedBudget
 	if b == nil {
 		return r.invokeContextRun(ctx, inv, terminal)
@@ -55,7 +54,7 @@ func (r *Runner) invokeFirstPartyRun(ctx context.Context, inv plugin.RunInvocati
 		return kernel.Snapshot{}, ErrInvalidRequest
 	}
 	defer finishNativeStage(ticket, &err)
-	admission, err := b.admitRun(stageCtx, inv, originalBudget)
+	admission, err := b.admitRun(stageCtx, inv)
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
@@ -63,7 +62,7 @@ func (r *Runner) invokeFirstPartyRun(ctx context.Context, inv plugin.RunInvocati
 		callbackscope.Operation(stageCtx, b, "managed.budget.admitted", admission.ledger)
 	}
 	out, err = r.invokeContextRun(stageCtx, inv, terminal)
-	return b.finishRun(stageCtx, inv, admission, out, err, r.atomicBudget() == b)
+	return b.finishRun(stageCtx, inv, admission, out, err)
 }
 
 func (r *Runner) invokeContextRun(ctx context.Context, inv plugin.RunInvocation, terminal runContinuation) (out kernel.Snapshot, err error) {
@@ -104,21 +103,6 @@ func (r *Runner) invokeContextRun(ctx context.Context, inv plugin.RunInvocation,
 	return out, err
 }
 
-func (r *Runner) invokeFirstPartyModel(ctx context.Context, request model.Request, emit model.StreamSink, terminal modelCall) (out model.Response, err error) {
-	a := r.boundedBudget
-	if a == nil {
-		return r.invokeAdmittedModel(ctx, request, emit, terminal)
-	}
-	stageCtx, ticket := callbackscope.Enter(ctx, request.RunID, a, request)
-	if ticket == nil {
-		return model.Response{}, ErrInvalidRequest
-	}
-	defer finishNativeStage(ticket, &err)
-	return a.invokeModel(stageCtx, model.CloneRequest(request), emit, func(ctx context.Context, request model.Request, emit model.StreamSink) (model.Response, error) {
-		return r.invokeAdmittedModel(ctx, request, emit, terminal)
-	})
-}
-
 func (r *Runner) invokeAdmittedModel(ctx context.Context, request model.Request, emit model.StreamSink, terminal modelCall) (out model.Response, err error) {
 	b := r.modelAdmissionBarrier
 	if b == nil {
@@ -135,24 +119,6 @@ func (r *Runner) invokeAdmittedModel(ctx context.Context, request model.Request,
 	out, err = terminal(stageCtx, request, emit)
 	callbackscope.Record(stageCtx, b, "model.admission_barrier.returned", request)
 	return out, err
-}
-
-func (r *Runner) invokeFirstPartyTool(ctx context.Context, inv plugin.ToolInvocation, terminal toolCall) (out tools.ExecutionResult, err error) {
-	a := r.boundedBudget
-	if a == nil {
-		return r.invokeProjectedTool(ctx, inv, terminal)
-	}
-	stageCtx, ticket := callbackscope.EnterTool(ctx, inv.Run.ID, a, inv)
-	if ticket == nil {
-		return tools.ExecutionResult{}, ErrInvalidRequest
-	}
-	defer finishNativeStage(ticket, &err)
-	// Keep the exact original Tool authority and budget receipt ticket.
-	inv.Definition = tools.CloneDefinition(inv.Definition)
-	inv.Request = tools.CloneExecutionRequest(inv.Request)
-	return a.invokeTool(stageCtx, inv, func(ctx context.Context) (tools.ExecutionResult, error) {
-		return r.invokeProjectedTool(ctx, inv, terminal)
-	})
 }
 
 func (r *Runner) invokeProjectedTool(ctx context.Context, inv plugin.ToolInvocation, terminal toolCall) (out tools.ExecutionResult, err error) {

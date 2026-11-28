@@ -83,7 +83,7 @@ func (runner *Runner) VerifiedDeferredRootControl(ctx context.Context, rt *kerne
 		// all admitted accounting obligations; a second external owner
 		// receipt is not required to stop an otherwise quiescent Agent.
 		// Delegated result verification remains a distinct read-only API.
-		if a := runner.atomicBudget(); a != nil {
+		if a := runner.boundedBudget; a != nil {
 			l, e := a.bindReceiptScope(ctx, child.Run.ID, "")
 			if e != nil {
 				return false

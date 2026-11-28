@@ -20,7 +20,7 @@ import (
 // N2 is limited to absence of NEW physical dispatch in receipt-only recovery;
 // the original physical owner and its competing-control fence remain tested.
 func RunEA1RootAgentReconcilePhases(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store)) {
-	t.Run("settled-tool-outcome", func(t *testing.T) { RunSettledToolRecovery(t, factory, nil) })
+	t.Run("settled-tool-outcome", func(t *testing.T) { RunSettledToolRecovery(t, factory) })
 	for _, phase := range []string{"P0", "P1", "P2", "P3", "P4"} {
 		for _, kind := range []string{"model", "tool"} {
 			t.Run(phase+"/"+kind, func(t *testing.T) { ea1RootReconcilePhase(t, factory, phase, kind) })

@@ -178,14 +178,7 @@ func (r *Runner) originalToolLedger(ctx context.Context, q tools.ExecutionReques
 	if a == nil || b.LedgerID == "" {
 		return nil, budget.Ledger{}, ErrToolReceiptMismatch
 	}
-	scope, err := a.resolveScope(ctx, q.RunID)
-	if err != nil {
-		return nil, budget.Ledger{}, err
-	}
-	if scope.LedgerID != b.LedgerID {
-		return nil, budget.Ledger{}, ErrToolReceiptMismatch
-	}
-	l, err := a.coordinator.Store.LoadBudget(ctx, b.LedgerID)
+	l, err := a.bindReceiptScope(ctx, q.RunID, b.LedgerID)
 	if err != nil {
 		return nil, budget.Ledger{}, err
 	}
@@ -198,14 +191,11 @@ func (r *Runner) originalToolLedger(ctx context.Context, q tools.ExecutionReques
 // An observer must not accept a paid Tool without original accounting
 // evidence, or silently switch to a newly resolved ledger.
 func (r *Runner) requireUnmeteredToolRecovery(ctx context.Context, runID string) error {
-	if r.boundedBudget == nil {
-		return nil
+	s, e := r.runtime.Load(ctx, runID)
+	if e != nil {
+		return e
 	}
-	scope, err := r.boundedBudget.resolveScope(ctx, runID)
-	if err != nil {
-		return err
-	}
-	if scope.LedgerID != "" {
+	if s.Run.BudgetScopeID != "" {
 		return ErrToolReceiptMismatch
 	}
 	return nil
@@ -236,7 +226,7 @@ func (r *Runner) originalHeldTool(ctx context.Context, q tools.ExecutionRequest,
 	res := l.Reservations[id]
 	_, registered := l.Runs[q.RunID]
 	if !registered || b.ReceiptDigest != "" || res.ID != id || res.RunID != q.RunID || res.RequestHash != b.RequestDigest ||
-		res.Requested != (budget.Usage{ToolCalls: 1}) || !res.Dispatched || (res.Active && r.atomicBudget() != a) ||
+		res.Requested != (budget.Usage{ToolCalls: 1}) || !res.Dispatched ||
 		(res.Status != budget.ReservationHeld && res.Status != budget.ReservationSettled) {
 		return nil, budget.Ledger{}, budget.Reservation{}, ErrToolReceiptMismatch
 	}
@@ -265,76 +255,19 @@ func (r *Runner) settleOriginalHeldTool(ctx context.Context, q tools.ExecutionRe
 		}
 		return nil, a.ports.Project(ctx, l)
 	}
-	if r.atomicBudget() == a {
-		return a.planToolReturn(ctx, l.ID, q, result, nil, true)
-	}
-	raw, err := encodeToolOutcome(newToolOutcomeReceipt(result, nil))
-	if err != nil {
-		return nil, err
-	}
-	return nil, a.settleSuspendedTool(ctx, b.LedgerID, q, budget.Usage{ToolCalls: 1}, raw)
+	return a.planToolReturn(ctx, l.ID, q, result, nil, true)
 }
 
-func (r *Runner) settleOriginalToolBudget(ctx context.Context, s kernel.Snapshot, c kernel.PhysicalCallbackCompletion, request tools.ExecutionRequest, result tools.ExecutionResult) (string, error) {
-	if c.ReturnRevision != s.Run.Revision || !c.HostCompleted {
-		return "", ErrToolReceiptMismatch
-	}
-	var originalLedger string
-	err := r.settleToolHold(ctx, request, result, func(ledger string) bool {
-		out := kernel.PhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: c.LeaseOwned, ControlCustody: c.ControlCustody, ToolBudgetScope: ledger}
-		if kernel.ManagedDigest(kernel.PhysicalCallbackReturnPayload(s, out)) != c.ReturnSourceHash {
-			return false
-		}
-		originalLedger = ledger
-		return true
-	})
-	if err != nil {
-		return "", err
-	}
-	return originalLedger, nil
-}
-
-func (r *Runner) settleToolHold(ctx context.Context, request tools.ExecutionRequest, result tools.ExecutionResult, original func(string) bool) error {
-	if !validBindingFingerprint(result.Receipt.OwnerReceiptDigest) {
-		return ErrToolReceiptMismatch
-	}
-	raw, err := encodeToolOutcome(newToolOutcomeReceipt(result, nil))
-	if err != nil {
-		return err
-	}
-	return r.settleVerifiedToolReservation(ctx, request, original, budget.Usage{ToolCalls: 1}, raw)
-}
-
-func (r *Runner) settleVerifiedToolReservation(ctx context.Context, request tools.ExecutionRequest, original func(string) bool, usage budget.Usage, receipt json.RawMessage) error {
+// External cancellation is a verified original no-effect receipt, committed
+// in the existing recovery transaction. Never independently settle a ledger.
+func (r *Runner) planVerifiedToolSettlement(ctx context.Context, q tools.ExecutionRequest, scope string, usage budget.Usage, raw json.RawMessage) (*budget.LedgerMutation, error) {
 	a := r.boundedBudget
-	if a == nil {
-		return ErrToolReceiptMismatch
+	if a == nil || scope == "" {
+		return nil, ErrToolReceiptMismatch
 	}
-	scope, err := a.resolveScope(ctx, request.RunID)
-	if err != nil {
-		return err
+	l, res, e := a.originalDispatchedTool(ctx, scope, q)
+	if e != nil {
+		return nil, e
 	}
-	if scope.LedgerID == "" || !original(scope.LedgerID) {
-		return ErrToolReceiptMismatch
-	}
-	return a.settleSuspendedTool(ctx, scope.LedgerID, request, usage, receipt)
-}
-
-func (a *BoundedBudgetAdapter) settleSuspendedTool(ctx context.Context, ledgerID string, request tools.ExecutionRequest, usage budget.Usage, receipt json.RawMessage) error {
-	ledger, err := a.coordinator.Store.LoadBudget(ctx, ledgerID)
-	if err != nil {
-		return err
-	}
-	id := "tool:" + request.RunID + ":" + request.Call.ID
-	res := ledger.Reservations[id]
-	_, registered := ledger.Runs[request.RunID]
-	if ledger.ID != ledgerID || !registered || res.ID != id || res.RunID != request.RunID || res.RequestHash != kernel.ManagedDigest(request) ||
-		res.Requested != (budget.Usage{ToolCalls: 1}) || !res.Dispatched || res.Active {
-		return ErrToolReceiptMismatch
-	}
-	updated, err := a.coordinator.Settle(ctx, ledger.ID, id, usage, receipt)
-	if err != nil {
-		return err
-	}
-	return a.ports.Project(ctx, updated)
+	return budget.PlanLedgerMutation(ctx, l, func(c budget.Coordinator) error { _, err := c.Settle(ctx, scope, res.ID, usage, raw); return err })
 }

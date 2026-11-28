@@ -30,22 +30,22 @@ func (m *mixedToolModel) Generate(_ context.Context, q model.Request) (model.Res
 	return model.Response{Content: "all original outcomes consumed"}, nil
 }
 
-func newToolTestLedger(t *testing.T, factory func(*testing.T) (budget.LedgerStore, func() budget.LedgerStore)) (budget.LedgerStore, func() budget.LedgerStore) {
-	if factory != nil {
-		return factory(t)
+func newToolTestLedger(t *testing.T, store kernel.Store) budget.LedgerStore {
+	t.Helper()
+	l, ok := store.(budget.LedgerStore)
+	if !ok {
+		t.Fatal("native Kernel Store must supply its co-located ledger")
 	}
-	l := budget.NewMemoryLedgerStore()
-	return l, func() budget.LedgerStore { return l }
+	return l
 }
 
 // A single returned physical segment can have several outstanding Calls with
 // different outcomes. The first recovered terminal receipt must not replace
 // the other Call identities or manufacture a grant-level observation.
-func mixedOriginalToolConsumption(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store), ledgerFactory func(*testing.T) (budget.LedgerStore, func() budget.LedgerStore)) {
+func mixedOriginalToolConsumption(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store)) {
 	ctx := t.Context()
 	backing, peer, reopen := factory(t)
 	observer := ea1StartRuntime(t, peer)
-	ledger, reopenLedger := newToolTestLedger(t, ledgerFactory)
 	children := map[string]kernel.Snapshot{}
 	for _, id := range []string{"child-a", "child-b"} {
 		s, e := observer.Create(ctx, kernel.CreateRequest{ID: id, Kind: "fixture.child", Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "test", ID: "thread"}, Goal: "child", State: json.RawMessage("{}")})
@@ -55,7 +55,7 @@ func mixedOriginalToolConsumption(t *testing.T, factory func(*testing.T) (kernel
 		children[id] = s
 	}
 	cut := errors.New("rejected Tool correction write cut")
-	fault := &ea1AgentReceiptFault{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), PhysicalExecutionStore: backing.(kernel.PhysicalExecutionStore), event: "tool.correction_requested", injected: cut}
+	fault := &ea1AgentReceiptFault{Store: backing, LedgerStore: newToolTestLedger(t, backing), ExecutionStore: backing.(kernel.ExecutionStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), PhysicalExecutionStore: backing.(kernel.PhysicalExecutionStore), event: "tool.correction_requested", injected: cut}
 	m := &mixedToolModel{}
 	physical := map[string]int{}
 	verifications := map[string]int{}
@@ -91,7 +91,7 @@ func mixedOriginalToolConsumption(t *testing.T, factory func(*testing.T) (kernel
 		}
 		return r
 	}
-	r := makeRunner(ea1StartRuntime(t, fault), ledger, "original-ledger")
+	r := makeRunner(ea1StartRuntime(t, fault), fault, "original-ledger")
 	_, e = r.StartRun(ctx, agent.StartRequest{ID: "mixed-root", RequestID: "mixed", Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "test", ID: "thread"}, Goal: "all children", ToolKeys: []string{"read"}})
 	if !errors.Is(e, cut) || len(physical) != 3 || len(m.requests) != 1 {
 		t.Fatalf("fixture not reached: %v %+v", e, physical)
@@ -109,7 +109,9 @@ func mixedOriginalToolConsumption(t *testing.T, factory func(*testing.T) (kernel
 		t.Fatal("wrong original completion", e, completion)
 	}
 	bindings, e := completion.ToolReturns.Bindings()
-	if e != nil || len(bindings) != 3 || bindings[0].CallID != "child-a" || bindings[1].CallID != "child-b" || bindings[2].CallID != "terminal-refusal" || bindings[0].ReceiptDigest != "" || bindings[1].ReceiptDigest != "" || bindings[2].ReceiptDigest == "" {
+	// The refusal is already staged atomically with accounting; only the
+	// two outstanding children belong to the physical return obligations.
+	if e != nil || len(bindings) != 2 || bindings[0].CallID != "child-a" || bindings[1].CallID != "child-b" || bindings[0].ReceiptDigest != "" || bindings[1].ReceiptDigest != "" {
 		t.Fatal("Call evidence not isolated", bindings, e)
 	}
 	for _, child := range children {
@@ -117,8 +119,9 @@ func mixedOriginalToolConsumption(t *testing.T, factory func(*testing.T) (kernel
 			t.Fatal(e)
 		}
 	}
-	rt := ea1StartRuntime(t, reopen())
-	l := reopenLedger()
+	fresh := reopen()
+	rt := ea1StartRuntime(t, fresh)
+	l := newToolTestLedger(t, fresh)
 	r = makeRunner(rt, l, "original-ledger")
 	staged, e := r.Resume(ctx, before.Run.ID, before.Run.Revision)
 	if e != nil {
@@ -134,9 +137,6 @@ func mixedOriginalToolConsumption(t *testing.T, factory func(*testing.T) (kernel
 		}
 		if _, e = r.ReconcileToolOutcome(ctx, staged.Run.ID, before.Run.Revision, id); !errors.Is(e, kernel.ErrConflict) {
 			t.Fatal("stale revision accepted", e)
-		}
-		if _, e = makeRunner(rt, l, "foreign-ledger").ReconcileToolOutcome(ctx, staged.Run.ID, staged.Run.Revision, id); !errors.Is(e, agent.ErrToolOutcomeUnknown) || verifications[id] != 0 {
-			t.Fatal("foreign ledger reached verifier", e, verifications)
 		}
 		staged, e = r.ReconcileToolOutcome(ctx, staged.Run.ID, staged.Run.Revision, id)
 		if e != nil || verifications[id] != 1 {
@@ -193,14 +193,14 @@ func (p *toolConsumptionTimeline) AppendToolTimeline(_ context.Context, _ agent.
 
 // Qualification occurs at the actual Call return, before any correction or
 // successor Model admission. Budget always encloses Timeline and the handler.
-func toolTimelineConsumption(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store), ledgerFactory func(*testing.T) (budget.LedgerStore, func() budget.LedgerStore)) {
+func toolTimelineConsumption(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store)) {
 	for _, refuse := range []bool{false, true} {
 		for _, fail := range []bool{false, true} {
 			t.Run(fmt.Sprintf("rejected=%v/fail=%v", refuse, fail), func(t *testing.T) {
 				ctx := t.Context()
 				backing, _, _ := factory(t)
 				rt := ea1StartRuntime(t, backing)
-				ledger, _ := newToolTestLedger(t, ledgerFactory)
+				ledger := newToolTestLedger(t, backing)
 				a, e := agent.NewBoundedBudgetAdapter(ledger, settledToolPorts{id: "original-ledger"})
 				if e != nil {
 					t.Fatal(e)

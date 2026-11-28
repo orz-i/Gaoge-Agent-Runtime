@@ -14,7 +14,7 @@ import (
 // The native Call uses the original Agent intent, receipt slot and reducer.
 // The ledger is a participant in those existing mutations, not middleware.
 func (r *Runner) executeBudgetedTool(ctx context.Context, source kernel.Snapshot, e pendingToolExecution, original budget.Ledger, release func()) (kernel.Snapshot, bool, error) {
-	a := r.atomicBudget()
+	a := r.boundedBudget
 	q := tools.ExecutionRequest{RunID: source.Run.ID, Call: tools.CloneCall(e.call)}
 	scope := original.ID
 	admission := e.state.ToolAdmission
@@ -65,7 +65,7 @@ func (r *Runner) executeBudgetedTool(ctx context.Context, source kernel.Snapshot
 		Events: []kernel.EventDraft{{Type: "tool.dispatch_intent", Message: q.Call.ID, Wakeup: true}}}
 	snapshot := source
 	frame, _ := callbackscope.RootToolFrame(ctx).(*originalToolFrame)
-	result, entered, _, callErr := r.invokePendingTool(ctx, source, e.call, e.definition, nil, true, release, func(callCtx context.Context) (kernel.Snapshot, error) {
+	result, entered, callErr := r.invokePendingTool(ctx, source, e.call, e.definition, release, func(callCtx context.Context) (kernel.Snapshot, error) {
 		// Revalidate native entry after planning (including Host policy).
 		if err := r.requireNativeAdmission(callCtx, source.Run); err != nil {
 			return source, err
@@ -171,15 +171,25 @@ func (r *Runner) executeBudgetedTool(ctx context.Context, source kernel.Snapshot
 
 // Both live completion and verified recovery settle the same original
 // reservation using the existing sealed Tool receipt representation.
-func (a *BoundedBudgetAdapter) planToolReturn(ctx context.Context, scope string, q tools.ExecutionRequest, result tools.ExecutionResult, callErr error, terminal bool) (*budget.LedgerMutation, error) {
-	l, err := a.coordinator.Store.LoadBudget(ctx, scope)
-	if err != nil {
-		return nil, err
+// Reconcile both terminal and verified no-effect returns against the
+// same actual held operation under the persisted Run scope.
+func (a *BoundedBudgetAdapter) originalDispatchedTool(ctx context.Context, scope string, q tools.ExecutionRequest) (budget.Ledger, budget.Reservation, error) {
+	l, e := a.bindReceiptScope(ctx, q.RunID, scope)
+	if e != nil {
+		return l, budget.Reservation{}, e
 	}
 	expected := originalToolReservation(q)
 	res, ok := l.Reservations[expected.ID]
-	if !ok || res.ID != expected.ID || res.RunID != expected.RunID || res.RequestHash != expected.RequestHash || res.Requested != expected.Requested || res.PhysicalRequestHash != "" || !res.Dispatched || res.Status != budget.ReservationHeld {
-		return nil, ErrToolReceiptMismatch
+	if !ok || l.ID != scope || res.ID != expected.ID || res.RunID != expected.RunID || res.RequestHash != expected.RequestHash || res.Requested != expected.Requested || res.PhysicalRequestHash != "" || !res.Dispatched || res.Status != budget.ReservationHeld {
+		return l, res, ErrToolReceiptMismatch
+	}
+	return l, res, nil
+}
+
+func (a *BoundedBudgetAdapter) planToolReturn(ctx context.Context, scope string, q tools.ExecutionRequest, result tools.ExecutionResult, callErr error, terminal bool) (*budget.LedgerMutation, error) {
+	l, res, err := a.originalDispatchedTool(ctx, scope, q)
+	if err != nil {
+		return nil, err
 	}
 	return budget.PlanLedgerMutation(ctx, l, func(c budget.Coordinator) error {
 		if !terminal {

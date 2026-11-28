@@ -156,6 +156,7 @@ func (r *Runner) ReconcileExternalToolNoEffectForControl(ctx context.Context, re
 		return original.snapshot, r.retireExternalToolControl(ctx, original.snapshot, previous.GrantID)
 	}
 	state := original.state
+	var ledger *budget.LedgerMutation
 	if hold := state.ExternalToolHold; hold != nil {
 		if hold.GrantID != original.grant.ID || hold.RequestHash != kernel.ManagedDigest(original.request) {
 			return original.snapshot, ErrToolReceiptMismatch
@@ -164,7 +165,7 @@ func (r *Runner) ReconcileExternalToolNoEffectForControl(ctx context.Context, re
 		if marshalErr != nil {
 			return original.snapshot, marshalErr
 		}
-		if err = r.settleVerifiedToolReservation(ctx, original.request, func(id string) bool { return id == hold.LedgerID }, budget.Usage{}, raw); err != nil {
+		if ledger, err = r.planVerifiedToolSettlement(ctx, original.request, hold.LedgerID, budget.Usage{}, raw); err != nil {
 			return original.snapshot, errors.Join(ErrToolOutcomeUnknown, err)
 		}
 	}
@@ -173,22 +174,27 @@ func (r *Runner) ReconcileExternalToolNoEffectForControl(ctx context.Context, re
 	state.clearToolAdmission(original.request.Call.ID)
 	state.PendingCalls = remainingPendingCalls(state)
 	state.ExternalToolCancellation = &externalToolCancellation{Receipt: receipt, Call: tools.CloneCall(original.request.Call), GrantID: original.grant.ID, SourceRevision: revision, SourceHash: original.returnHash}
-	next, err := r.applyExternalControlState(ctx, original.snapshot, original.grant, state)
+	next, err := r.applyExternalControlState(ctx, original.snapshot, original.grant, state, ledger)
 	if err != nil {
 		return original.snapshot, err
+	}
+	if ledger != nil {
+		if e := r.boundedBudget.ports.Project(ctx, ledger.Next()); e != nil {
+			return next, e
+		}
 	}
 	return next, r.retireExternalToolControl(ctx, next, original.grant.ID)
 }
 
-func (r *Runner) applyExternalControlState(ctx context.Context, s kernel.Snapshot, g kernel.ChildExecutionGrant, state runState) (kernel.Snapshot, error) {
+func (r *Runner) applyExternalControlState(ctx context.Context, s kernel.Snapshot, g kernel.ChildExecutionGrant, state runState, ledger *budget.LedgerMutation) (kernel.Snapshot, error) {
 	encoded, err := encodeState(state)
 	if err != nil {
 		return s, err
 	}
-	m := kernel.Mutation{Status: s.Run.Status, State: encoded, Checkpoint: s.Checkpoint, ErrorCode: s.Run.ErrorCode, ErrorDetail: s.Run.ErrorDetail}
+	m := kernel.Mutation{Ledger: ledger, Status: s.Run.Status, State: encoded, Checkpoint: s.Checkpoint, ErrorCode: s.Run.ErrorCode, ErrorDetail: s.Run.ErrorDetail}
 
 	source := featurecontrol.Seal(s.Run.ID, s.Run.Revision, "agent_owned_receipt_recovery_source", g.ID, s.State, s.Checkpoint)
-	target := featurecontrol.Seal(s.Run.ID, s.Run.Revision, "agent_owned_receipt_recovery_target", g.ID, encoded, s.Checkpoint)
+	target := featurecontrol.Seal(s.Run.ID, s.Run.Revision, "agent_owned_receipt_recovery_target", g.ID, encoded, kernel.ReceiptRecoveryTarget(s.Checkpoint, ledger))
 	return r.runtime.ApplyOwnedPhysicalRecovery(ctx, g, s.Run.Revision, m, source, target)
 }
 

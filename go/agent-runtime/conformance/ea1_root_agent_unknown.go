@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
@@ -187,11 +188,13 @@ func ea1AgentUnknownReceipts(t *testing.T, factory func(*testing.T) (kernel.Stor
 
 type ea1AgentReceiptFault struct {
 	kernel.Store
+	budget.LedgerStore
 	kernel.ExecutionStore
 
 	kernel.ExecutionQuarantineStore
 	kernel.PhysicalExecutionStore
 	event    string
+	after    bool
 	injected error
 	failures int
 	mu       sync.Mutex
@@ -209,6 +212,11 @@ func (s *ea1AgentReceiptFault) Commit(commitCtx context.Context, commitID string
 		for _, event := range commitMutation.Events {
 			if event.Type == s.event && s.failures == 0 {
 				s.failures++
+				if s.after {
+					if _, _, err := s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth); err != nil {
+						return kernel.Snapshot{}, false, err
+					}
+				}
 				return kernel.Snapshot{}, false, s.injected
 			}
 		}

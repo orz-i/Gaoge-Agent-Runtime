@@ -22,11 +22,12 @@ func TestNativeRunAdmissionDenialAtStartPrepareAndApproval(t *testing.T) {
 	for _, op := range []string{"start", "prepare", "approval"} {
 		t.Run(op, func(t *testing.T) {
 			ctx := t.Context()
-			rt, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
+			native := memory.NewStore()
+			rt, err := kernel.New(kernel.Dependencies{Store: native})
 			if err != nil {
 				t.Fatal(err)
 			}
-			ledger := budget.NewMemoryLedgerStore()
+			ledger := budget.LedgerStore(native)
 			adapter, err := NewBoundedBudgetAdapter(ledger, toolAccountingPorts{})
 			if err != nil {
 				t.Fatal(err)

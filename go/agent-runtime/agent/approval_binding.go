@@ -25,22 +25,21 @@ type pendingToolApproval struct {
 // unsent/current Call. Evaluating is a fence, required is a restriction,
 // and authorized is the committed decision (not physical permission).
 type toolAdmission struct {
-	CallID          string                 `json:"callID"`
-	CallDigest      string                 `json:"callDigest"`
-	Phase           string                 `json:"phase"`
-	ApprovalDigest  string                 `json:"approvalDigest,omitempty"`
-	ApprovalBounded bool                   `json:"approvalBounded,omitempty"`
-	BudgetBound     bool                   `json:"budgetBound,omitempty"`
-	LedgerID        string                 `json:"ledgerID,omitempty"`
-	Unsent          *unsentToolDisposition `json:"unsent,omitempty"`
+	CallID          string `json:"callID"`
+	CallDigest      string `json:"callDigest"`
+	Phase           string `json:"phase"`
+	ApprovalDigest  string `json:"approvalDigest,omitempty"`
+	ApprovalBounded bool   `json:"approvalBounded,omitempty"`
+	BudgetBound     bool   `json:"budgetBound,omitempty"`
+	LedgerID        string `json:"ledgerID,omitempty"`
 }
 
 const (
 	toolAdmissionEvaluating = "evaluating"
 	toolAdmissionRequired   = "required"
 	toolAdmissionAuthorized = "authorized"
-	toolAdmissionCapacity   = "awaiting_capacity"
-	toolAdmissionUnsent     = "unsent"
+
+	toolAdmissionUnsent = "unsent"
 )
 
 func newToolAdmission(call tools.Call, phase string) *toolAdmission {
@@ -50,19 +49,18 @@ func (a *toolAdmission) matches(call tools.Call) bool {
 	return a != nil && a.CallID != "" && a.CallID == call.ID && validBindingFingerprint(a.CallDigest) && a.CallDigest == approvalCallKey(call)
 }
 func (a *toolAdmission) authorized(call tools.Call) bool {
-	return a.matches(call) && (a.Phase == toolAdmissionAuthorized || a.Phase == toolAdmissionCapacity)
+	return a.matches(call) && a.Phase == toolAdmissionAuthorized
 }
 func validToolAdmission(state runState) bool {
 	a := state.ToolAdmission
 	if a == nil {
 		return true
 	}
-	positive := a.Phase == toolAdmissionAuthorized || a.Phase == toolAdmissionCapacity
+	positive := a.Phase == toolAdmissionAuthorized
 	unsent := a.Phase == toolAdmissionUnsent
 	if (!positive && !unsent && a.Phase != toolAdmissionEvaluating && a.Phase != toolAdmissionRequired) ||
 		(!positive && !unsent && (a.ApprovalDigest != "" || a.ApprovalBounded || a.BudgetBound || state.ToolDispatchID == a.CallID)) ||
-		(unsent != (a.Unsent != nil)) || (unsent && (!a.Unsent.valid(a) || state.ToolDispatchID == a.CallID)) ||
-		(a.Phase == toolAdmissionCapacity && (!a.BudgetBound || a.LedgerID == "" || state.ToolDispatchID == a.CallID)) ||
+		(unsent && (a.LedgerID != "" || state.ToolDispatchID == a.CallID)) ||
 		(a.ApprovalDigest != "" && !validBindingFingerprint(a.ApprovalDigest)) || (a.ApprovalBounded && a.ApprovalDigest == "") ||
 		(!a.BudgetBound && a.LedgerID != "") || a.LedgerID != strings.TrimSpace(a.LedgerID) {
 		return false

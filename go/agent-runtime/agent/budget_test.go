@@ -8,6 +8,7 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	runtimebudget "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	runtimemodel "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 )
 
@@ -123,8 +124,12 @@ func (sharedDimensionBudgetPorts) PreviewModel(_ runtimebudget.Ledger, request r
 	return request, runtimebudget.Reservation{ID: "model:" + request.InvocationID, RunID: request.RunID, RequestHash: hash, Requested: runtimebudget.Usage{LLMCalls: 1}}, err
 }
 func TestRunnerReportsSharedBudgetExhaustionDimension(t *testing.T) {
-	runtime, _ := newTestRuntimeAndApprovals(t)
-	ledger := runtimebudget.NewMemoryLedgerStore()
+	native := memory.NewStore()
+	runtime, err := kernel.New(kernel.Dependencies{Store: native})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ledger := runtimebudget.LedgerStore(native)
 	coordinator := runtimebudget.Coordinator{Store: ledger}
 	ctx := t.Context()
 	if _, err := coordinator.Ensure(ctx, "turn", runtimebudget.Limits{MaxLLMCalls: 1}); err != nil {

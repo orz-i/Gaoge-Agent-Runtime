@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"errors"
 	"reflect"
 	"sync/atomic"
 
@@ -30,35 +29,6 @@ func (r *Runner) requireNativeAdmission(ctx context.Context, run kernel.Run) err
 	}
 	if run.DeadlineAt != nil && !r.clock.Now().Before(*run.DeadlineAt) {
 		return kernel.ErrDeadline
-	}
-	return nil
-}
-
-// The native ticket is still a reservation, not dispatch permission. An
-// elected Ledger cancellation (or changed original reservation) may have
-// intervened while the physical intent was written. Before chain entry,
-// retain the no-entry proof until both admission authorities pass.
-func (t *toolBudgetAdmission) requireEntry(ctx context.Context) error {
-	if t == nil || t.ledger.ID == "" {
-		return nil
-	}
-	l, err := t.adapter.coordinator.Store.LoadBudget(ctx, t.ledger.ID)
-	if err != nil {
-		return err
-	}
-	if l.ID != t.ledger.ID || l.Limits != t.ledger.Limits {
-		return ErrToolReceiptMismatch
-	}
-	expected := originalToolReservation(t.request)
-	res, ok := l.Reservations[expected.ID]
-	if !ok || !exactUnsentToolReservation(res, expected) {
-		return ErrToolReceiptMismatch
-	}
-	if l.RunCancelled(t.request.RunID) {
-		return budget.ErrExhausted
-	}
-	if res.Status != budget.ReservationHeld {
-		return ErrToolReceiptMismatch
 	}
 	return nil
 }
@@ -119,7 +89,7 @@ func recordBudgetRunDenial(ctx context.Context, adapter *BoundedBudgetAdapter, i
 // admission return. It leaves the existing snapshot unchanged so an already
 // elected cancellation can perform its own Kernel CAS after retirement.
 func (r *Runner) invokeNativeRun(ctx context.Context, source kernel.Snapshot, inv plugin.RunInvocation, next runContinuation) (kernel.Snapshot, error) {
-	if source.Run.BudgetScopeID != "" && r.atomicBudget() == nil {
+	if source.Run.BudgetScopeID != "" && r.boundedBudget == nil {
 		return source, budget.ErrLedgerConflict
 	}
 	frame := &nativeRunAdmission{invocation: inv, managedObligations: r.managedObligationSource}
@@ -135,48 +105,19 @@ func (r *Runner) invokeNativeRun(ctx context.Context, source kernel.Snapshot, in
 		grant.IsOwned() != (source.Run.ParentRunID == "") || r.rootCallbacks.entered.Load() {
 		return source, kernel.ErrExecutionConflict
 	}
-	// In the transitional split-store path, the frozen Run facts are the
-	// scope authority on re-entry. Read them before physical callback entry;
-	// a wrong/missing ledger must never create a replacement scope.
-	var originalBudget *budget.Ledger
-	if r.atomicBudget() == nil && frame.managedObligations == nil {
-		state, err := decodeState(source.State)
-		if err != nil {
-			return source, err
-		}
-		ledgerID, known := "", false
-		if n := len(state.ModelInvocations); n > 0 && state.ModelInvocations[n-1].SamplingPlan != nil {
-			ledgerID, known = state.ModelInvocations[n-1].SamplingPlan.LedgerID, true
-		}
-		mismatch := budget.ErrLedgerConflict
-		if a := state.ToolAdmission; a != nil && a.BudgetBound {
-			if known && ledgerID != a.LedgerID {
-				return source, ErrToolReceiptMismatch
-			}
-			ledgerID, known, mismatch = a.LedgerID, true, ErrToolReceiptMismatch
-		}
-		if known {
-			if r.boundedBudget == nil {
-				if ledgerID != "" {
-					return source, mismatch
-				}
-			} else {
-				a := r.boundedBudget
-				scope, err := a.resolveScope(ctx, inv.RunID)
-				if err != nil || scope.LedgerID != ledgerID {
-					return source, errors.Join(mismatch, err)
-				}
-				l := budget.Ledger{}
-				if ledgerID != "" {
-					l, err = a.loadExistingScope(ctx, inv.RunID, scope)
-					if err != nil {
-						return source, errors.Join(mismatch, err)
-					}
-				}
-				originalBudget = &l
-			}
-		}
+	// The durable Run binding is the authority, not a newly selected
+	// ledger inferred from a pending request. Reject old split-store facts.
+	state, e := decodeState(source.State)
+	if e != nil {
+		return source, e
 	}
+	if inv, ok := activeModelInvocation(state); ok && inv.SamplingPlan != nil && inv.SamplingPlan.LedgerID != source.Run.BudgetScopeID {
+		return source, budget.ErrLedgerConflict
+	}
+	if a := state.ToolAdmission; a != nil && a.BudgetBound && a.LedgerID != source.Run.BudgetScopeID {
+		return source, ErrToolReceiptMismatch
+	}
+
 	if grant.IsOwned() {
 		// Owned entry additionally consumes the original Store lease/epoch
 		// after all setup reads. A borrowed Grant has already fenced its
@@ -204,7 +145,7 @@ func (r *Runner) invokeNativeRun(ctx context.Context, source kernel.Snapshot, in
 	if !r.rootCallbacks.entered.CompareAndSwap(false, true) {
 		return source, kernel.ErrExecutionConflict
 	}
-	result, err := r.invokeFirstPartyRun(callbackscope.BindRunCall(ctx, frame), inv, originalBudget, func(c context.Context) (kernel.Snapshot, error) {
+	result, err := r.invokeFirstPartyRun(callbackscope.BindRunCall(ctx, frame), inv, func(c context.Context) (kernel.Snapshot, error) {
 		frame.entered.Store(true)
 		return next(c)
 	})
@@ -219,23 +160,4 @@ func (r *Runner) invokeNativeRun(ctx context.Context, source kernel.Snapshot, in
 		return source, err
 	}
 	return result, err
-}
-
-// The actual DispatchTool return, not the earlier admission read, decides
-// whether native ledger cancellation refused this exact original Tool.
-// A speculative dispatched candidate, missing/foreign reservation, or
-// unknown storage failure cannot qualify this return.
-func (t *toolBudgetAdmission) cancelledDispatch(l budget.Ledger, err error) bool {
-	if t == nil || !errors.Is(err, budget.ErrExhausted) || l.ID == "" || l.ID != t.ledger.ID || l.Limits != t.ledger.Limits || l.Revision < t.ledger.Revision {
-		return false
-	}
-	old, ok := t.ledger.Runs[t.request.RunID]
-	actual, registered := l.Runs[t.request.RunID]
-	if !ok || !registered || old != actual || !l.RunCancelled(t.request.RunID) {
-		return false
-	}
-	expected := originalToolReservation(t.request)
-	res, found := l.Reservations[expected.ID]
-	return found && exactUnsentToolReservation(res, expected) &&
-		(res.Status == budget.ReservationHeld || res.Status == budget.ReservationWaiting || res.Status == budget.ReservationReleased)
 }

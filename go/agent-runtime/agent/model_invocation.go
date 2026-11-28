@@ -756,15 +756,20 @@ func (runner *Runner) executeModelInvocation(
 		},
 	}
 	generateCtx := ctx
-	if invocation.SamplingPlan != nil {
-		if (invocation.SamplingPlan.LedgerID != "" && runner.boundedBudget == nil) || !invocation.SamplingPlan.valid(invocation.Request) {
+	ledgerID := ""
+	if plan := invocation.SamplingPlan; plan != nil {
+		ledgerID = plan.LedgerID
+		if !plan.valid(invocation.Request) {
 			return snapshot, state, ErrInvalidRequest
 		}
+	}
+	if ledgerID != snapshot.Run.BudgetScopeID || (ledgerID != "" && runner.boundedBudget == nil) {
+		return snapshot, state, runtimebudget.ErrLedgerConflict
 	}
 	if invocation.Purpose == ModelInvocationContextSummary {
 		generateCtx = context.WithValue(ctx, contextSummaryModelKey{}, true)
 	}
-	atomicBudget := runner.atomicModelBudget(invocation.SamplingPlan)
+	atomicBudget := runner.modelBudget(invocation.SamplingPlan)
 	response, err := runner.generateModelWithPolicyGuarded(generateCtx, model.CloneRequest(invocation.Request), snapshot.Run.DeadlineAt,
 		func(dispatchCtx context.Context, candidate model.Request) error {
 			// Resolve and revalidate Catalog authority first: a slow external
@@ -831,11 +836,7 @@ func (runner *Runner) executeModelInvocation(
 	}
 	// Validate against the original receipt, not just another syntactically
 	// valid ID. The same authority also fences downstream shared settlement.
-	if atomicBudget != nil {
-		response, err = authority.validate(response, err)
-	} else {
-		response, err = authority.validateFinal(response, err)
-	}
+	response, err = authority.validate(response, err)
 	late := errors.Is(err, ErrModelLateResult)
 	knownRejection := model.IsResponseRejectedError(err) && response.Usage != nil && model.ValidUsage(response.Usage)
 	var denied modelPreDispatchDenied

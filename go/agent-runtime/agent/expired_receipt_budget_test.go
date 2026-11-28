@@ -65,12 +65,12 @@ func testExpiredReceiptBudgetLifecycle(t *testing.T, mode string) {
 	ctx := t.Context()
 	storeClock := &modelRetryTestClock{now: time.Now().UTC()}
 	base := memory.NewStoreWithExecutionClock(storeClock)
-	fault := &summaryCoreFaultStore{Store: base, event: "agent.model_invocation.completed"}
+	fault := &summaryCoreFaultStore{Store: base, LedgerStore: base, event: "agent.model_invocation.completed"}
 	_, rt, contextPorts, provider, clock, start := newSummaryCoreFixture(t, fault)
 	start.WorkingStateSummary = nil
 	deadline := storeClock.now.Add(time.Minute)
 	start.DeadlineAt = &deadline
-	ledgerStore := budget.NewMemoryLedgerStore()
+	ledgerStore := rt.BudgetStore()
 	ports := &receiptLifecycleBudgetPorts{frozenReceiptBudgetPorts: &frozenReceiptBudgetPorts{}}
 	shared, e := NewBoundedBudgetAdapter(ledgerStore, ports)
 	if e != nil {

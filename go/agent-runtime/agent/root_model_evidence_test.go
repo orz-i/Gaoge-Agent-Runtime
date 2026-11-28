@@ -9,26 +9,29 @@ import (
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
-type modelEvidenceLedgerFault struct{ budget.LedgerStore }
+type modelEvidenceLedgerFault struct {
+	kernel.Store
+	budget.LedgerStore
+}
 
-func (s modelEvidenceLedgerFault) SaveBudget(ctx context.Context, ledger budget.Ledger, revision uint64) error {
-	for _, reservation := range ledger.Reservations {
-		if reservation.Status == budget.ReservationSettled {
-			return errInjectedModelInvocationCrash
-		}
+func (s *modelEvidenceLedgerFault) Commit(ctx context.Context, id string, revision uint64, mutation kernel.StoreMutation, authority kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	if mutation.Ledger != nil && mutationHasEvent(mutation.Events, "agent.model_invocation.completed") {
+		return kernel.Snapshot{}, false, errInjectedModelInvocationCrash
 	}
-	return s.LedgerStore.SaveBudget(ctx, ledger, revision)
+	return s.Store.Commit(ctx, id, revision, mutation, authority)
 }
 
 func TestRootUnknownHostRetainsExactModelEvidenceWithoutConsumption(t *testing.T) {
 	base := memory.NewStore()
-	rt := newModelInvocationRuntime(t, base)
-	bounded, err := agent.NewBoundedBudgetAdapter(modelEvidenceLedgerFault{budget.NewMemoryLedgerStore()}, sharedDimensionBudgetPorts{})
+	fault := &modelEvidenceLedgerFault{Store: base, LedgerStore: base}
+	rt := newModelInvocationRuntime(t, fault)
+	bounded, err := agent.NewBoundedBudgetAdapter(fault, sharedDimensionBudgetPorts{})
 	if err != nil {
 		t.Fatal(err)
 	}
