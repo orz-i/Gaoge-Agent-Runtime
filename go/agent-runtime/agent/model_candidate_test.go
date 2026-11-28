@@ -11,7 +11,6 @@ import (
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
 type finalCandidateCounter struct {
@@ -37,7 +36,7 @@ func ownedCandidateRunner(t *testing.T, rt *kernel.Runtime, ports *summaryCorePo
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner, err := NewRunner(Dependencies{Runtime: rt, Model: provider, Clock: clock, RunMiddleware: []plugin.RunMiddleware{bounded}, BoundedContext: bounded})
+	runner, err := NewRunner(Dependencies{Runtime: rt, Model: provider, Clock: clock, BoundedContext: bounded})
 	if err != nil {
 		t.Fatal(err)
 	}

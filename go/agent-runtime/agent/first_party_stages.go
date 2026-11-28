@@ -10,54 +10,21 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
-// A complete concrete Budget owner has the historical exact order
-// Budget -> Context (if selected), plus one Model and one Tool adapter.
-// Partial/opaque chains retain their actual ordering and qualifications.
-func completeLegacyBudget(d Dependencies, ctx *BoundedContextAdapter) *BoundedBudgetAdapter {
-	b := selectedSamplingBudget(d)
-	if b == nil || selectedToolBudget(d) != b || len(d.ModelMiddleware) != 1 || len(d.ToolMiddleware) != 1 {
-		return nil
-	}
-	if ctx == nil && len(d.RunMiddleware) == 1 && d.RunMiddleware[0] == b ||
-		ctx != nil && len(d.RunMiddleware) == 2 && d.RunMiddleware[0] == b && d.RunMiddleware[1] == ctx {
-		return b
-	}
-	return nil
-}
-
-func contextOnlyRun(d Dependencies, a *BoundedContextAdapter) bool {
-	return len(d.RunMiddleware) == 0 || len(d.RunMiddleware) == 1 && d.RunMiddleware[0] == a
-}
-
-// No generic participant registry or chain synthesis. The standard
-// composition and its exact legacy spelling select the SAME concrete stages.
-func selectFirstPartyStages(d *Dependencies) (*BoundedContextAdapter, *BoundedBudgetAdapter, error) {
+// Context and Budget are selected through their explicit, fixed stages.
+func selectFirstPartyStages(d *Dependencies) error {
 	if !validBoundedBudgetComposition(*d) || !validBoundedContextComposition(*d) {
-		return nil, nil, ErrInvalidRequest
+		return ErrInvalidRequest
 	}
 	if summary := d.ContextSummary; summary != nil {
 		if !validSummaryComposition(*d) {
-			return nil, nil, ErrInvalidRequest
+			return ErrInvalidRequest
 		}
 		d.BoundedContext = summary.bounded
 	}
-	b := d.BoundedBudget
-	if b == nil {
-		b = completeLegacyBudget(*d, d.BoundedContext)
-		if b != nil {
-			d.BoundedBudget = b
-			d.RunMiddleware, d.ModelMiddleware, d.ToolMiddleware = nil, nil, nil
-		}
+	if d.ManagedRecovery && !validManagedDependencies(*d) {
+		return ErrInvalidRequest
 	}
-	var a *BoundedContextAdapter
-	if d.BoundedContext != nil && contextOnlyRun(*d, d.BoundedContext) {
-		a = d.BoundedContext
-		d.RunMiddleware = nil
-	}
-	if d.ManagedRecovery && (a == nil || !validManagedDependencies(*d)) {
-		return nil, nil, ErrInvalidRequest
-	}
-	return a, b, nil
+	return nil
 }
 
 func finishNativeStage(ticket *callbackscope.Ticket, err *error) {
@@ -93,7 +60,7 @@ func (r *Runner) invokeFirstPartyRun(ctx context.Context, inv plugin.RunInvocati
 }
 
 func (r *Runner) invokeContextRun(ctx context.Context, inv plugin.RunInvocation, terminal plugin.RunNext) (out kernel.Snapshot, err error) {
-	a := r.nativeContext
+	a := r.boundedContext
 	if a == nil {
 		if r.nativeBudget != nil {
 			return terminal(ctx) // complete native topology has no Host Run chain

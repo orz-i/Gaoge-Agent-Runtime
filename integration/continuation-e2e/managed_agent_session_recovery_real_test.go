@@ -663,8 +663,7 @@ func newManagedRecoverySessionWithComposition(t *testing.T, db *gorm.DB, files s
 	dependencies := agent.Dependencies{
 		Runtime: runtime, Model: managedRecoveryModel{logPath: filepath.Join(files, "model.jsonl")},
 		Catalog: registry, Executor: registry, BoundedContext: bounded, ManagedRecovery: managed,
-		RunMiddleware: []plugin.RunMiddleware{bounded},
-		RunExecution:  runExecution, Execution: execution,
+		RunExecution: runExecution, Execution: execution,
 	}
 	if !managed {
 		ordinary, ordinaryErr := harness.NewContextRunMiddleware(hostStore, nil)

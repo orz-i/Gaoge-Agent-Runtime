@@ -122,7 +122,7 @@ func TestAgentSessionMatchesExplicitCompositionAndAuthorizesOnlySelectedTools(t 
 					t.Fatal(e)
 				}
 				loop, e := agent.NewRunner(agent.Dependencies{Runtime: options.Runtime, Model: client, Catalog: registry, Executor: registry,
-					PrepareModelRequest: bounded.Prepare, RunMiddleware: []plugin.RunMiddleware{bounded}, ApprovalPolicies: []plugin.ApprovalPolicy{approval}})
+					BoundedContext: bounded, ApprovalPolicies: []plugin.ApprovalPolicy{approval}})
 				if e != nil {
 					t.Fatal(e)
 				}
@@ -573,7 +573,7 @@ func TestAgentSessionResumeRejectsOriginalUnsupportedCompositionBeforeGeneration
 				loop, err := agent.NewRunner(agent.Dependencies{
 					Runtime: rt, Model: originalModel, Clock: clock, PrepareModelRequest: harness.MaterializeContextWindowRequest,
 					Catalog: registry, Executor: registry,
-					RunMiddleware: []plugin.RunMiddleware{mustBudgetAdapter(t, shared)}, ModelMiddleware: []plugin.ModelMiddleware{mustBudgetAdapter(t, shared)}, ToolMiddleware: []plugin.ToolMiddleware{mustBudgetAdapter(t, shared)},
+					BoundedBudget: mustBudgetAdapter(t, shared),
 				})
 				if err != nil {
 					t.Fatal(err)

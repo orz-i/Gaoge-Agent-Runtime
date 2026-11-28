@@ -8,7 +8,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/callbackscope"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
@@ -91,17 +90,6 @@ func NewBoundedContextAdapter(manager *runtimecontext.Manager, ports BoundedCont
 	}
 	return &BoundedContextAdapter{manager: manager, ports: ports}, nil
 }
-func (*BoundedContextAdapter) Name() string { return "runtime.bounded_context.v1" }
-func (a *BoundedContextAdapter) Run(ctx context.Context, inv plugin.RunInvocation, next plugin.RunNext) (kernel.Snapshot, error) {
-	hydrated, source, err := a.hydrate(ctx, inv)
-	if err != nil {
-		return kernel.Snapshot{}, err
-	}
-	snapshot, nextErr := next(hydrated)
-	a.finishHydration(ctx, source)
-	return snapshot, nextErr
-}
-
 func (a *BoundedContextAdapter) hydrate(ctx context.Context, inv plugin.RunInvocation) (context.Context, BoundedContextHydration, error) {
 	hydrated, source, err := a.ports.Hydrate(ctx, inv)
 	if err != nil {

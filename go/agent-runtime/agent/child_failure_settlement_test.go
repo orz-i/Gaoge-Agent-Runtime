@@ -128,7 +128,7 @@ func TestChildPhysicalFailureSettlement(t *testing.T) {
 		{"unknown tool effect after approval", "approve", "tool", "", false, 1, 1},
 		{"unknown approval policy", "start", "approval-policy", "agent.approval_policy_failed", false, 1, 0},
 		{"unknown completion policy", "start", "completion", "agent.completion_validation_failed", false, 1, 0},
-		{"opaque middleware adds error", "start", "middleware", "context.input_budget_exceeded", false, 0, 0},
+		{"opaque middleware cannot wrap fixed context", "start", "middleware", "", false, 0, 0},
 		{"terminal CAS fails", "start", "failure-cas", "", false, 0, 0},
 		{"settlement marker fails", "start", "mark", "context.input_budget_exceeded", false, 0, 0},
 		{"settlement marker ACK lost", "start", "mark-ack", "context.input_budget_exceeded", false, 0, 0},
@@ -153,8 +153,7 @@ func TestChildPhysicalFailureSettlement(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			deps := Dependencies{Runtime: rt, Model: m, BoundedContext: adapter, RunMiddleware: []plugin.RunMiddleware{adapter},
-				StartControlPreflight:    func(context.Context, StartRequest) error { return nil },
+			deps := Dependencies{Runtime: rt, Model: m, BoundedContext: adapter, StartControlPreflight: func(context.Context, StartRequest) error { return nil },
 				ApprovalControlPreflight: func(context.Context, kernel.Snapshot) error { return nil }}
 			if tc.fault == "completion" {
 				deps.CompletionPolicies = []CompletionPolicy{childFailureCompletion{}}
@@ -188,6 +187,15 @@ func TestChildPhysicalFailureSettlement(t *testing.T) {
 				request.ToolKeys = []string{"effect"}
 			}
 			runner, err := NewRunner(deps)
+			if tc.fault == "middleware" {
+				if !errors.Is(err, ErrInvalidRequest) || m.calls != 0 || toolCalls != 0 {
+					t.Fatalf("opaque middleware was allowed to wrap fixed Context: %v", err)
+				}
+				if _, loadErr := rt.Load(t.Context(), request.ID); !errors.Is(loadErr, kernel.ErrNotFound) {
+					t.Fatalf("invalid composition created a child Run: %v", loadErr)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatal(err)
 			}

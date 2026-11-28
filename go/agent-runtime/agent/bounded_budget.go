@@ -89,7 +89,10 @@ func validBoundedBudgetComposition(dependencies Dependencies) bool {
 			tool = true
 		}
 	}
-	return true
+	// A complete first-party Budget must use BoundedBudget; the old exact
+	// three-layer registration is no longer a selectable topology.
+	return !(run && modelSelected && tool && len(dependencies.RunMiddleware) == 1 &&
+		len(dependencies.ModelMiddleware) == 1 && len(dependencies.ToolMiddleware) == 1)
 }
 
 // Native scope selection is creation-only. Later phases use the persisted

@@ -77,8 +77,7 @@ func newMemberExternalCase(t *testing.T, withCommittedReader bool) memberExterna
 		committed = delegate
 	}
 	c.native, err = agent.NewRunner(agent.Dependencies{Runtime: rt, Model: c.model, Catalog: registry, Executor: registry, ApprovalPolicies: []plugin.ApprovalPolicy{approval},
-		ToolOutcomeVerifier: committed, DelegatedToolResults: delegate, ExternalToolNoEffectVerifier: c.owner, RunMiddleware: []plugin.RunMiddleware{bounded},
-		ModelMiddleware: []plugin.ModelMiddleware{bounded}, ToolMiddleware: []plugin.ToolMiddleware{bounded}})
+		ToolOutcomeVerifier: committed, DelegatedToolResults: delegate, ExternalToolNoEffectVerifier: c.owner, BoundedBudget: bounded})
 	fail(err)
 	route, err := handoff.NewDeferredAgent(c.native)
 	fail(err)

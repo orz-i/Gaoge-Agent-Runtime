@@ -80,19 +80,18 @@ func testManagedContextResume(t *testing.T, bounded bool) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		hydrate, err := harness.NewContextRunMiddleware(harnessStore, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		prepare := archive
+		d := agent.Dependencies{Runtime: rt, Model: provider, Catalog: registry, Executor: registry}
 		if bounded {
-			hydrate = boundedContext
-			prepare = boundedContext.Prepare
+			d.BoundedContext = boundedContext
+		} else {
+			hydrate, err := harness.NewContextRunMiddleware(harnessStore, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			d.PrepareModelRequest = archive
+			d.RunMiddleware = []plugin.RunMiddleware{hydrate}
 		}
-		direct, err := agent.NewRunner(agent.Dependencies{
-			Runtime: rt, Model: provider, Catalog: registry, Executor: registry,
-			PrepareModelRequest: prepare, RunMiddleware: []plugin.RunMiddleware{hydrate},
-		})
+		direct, err := agent.NewRunner(d)
 		if err != nil {
 			t.Fatal(err)
 		}

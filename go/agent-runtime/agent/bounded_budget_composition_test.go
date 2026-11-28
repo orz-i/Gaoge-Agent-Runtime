@@ -40,7 +40,7 @@ func TestBoundedBudgetCompositionHasOneOriginalAdapterAcrossAllCallbackLayers(t 
 		tool  []plugin.ToolMiddleware
 		valid bool
 	}{
-		{"same adapter in all layers", []plugin.RunMiddleware{original}, []plugin.ModelMiddleware{original}, []plugin.ToolMiddleware{original}, true},
+		{"retired triple registration", []plugin.RunMiddleware{original}, []plugin.ModelMiddleware{original}, []plugin.ToolMiddleware{original}, false},
 		{"model-only explicit native adapter", nil, []plugin.ModelMiddleware{original}, nil, true},
 		{"unmetered stand-alone Agent", nil, nil, nil, true},
 		{"foreign model adapter", []plugin.RunMiddleware{original}, []plugin.ModelMiddleware{other}, nil, false},
@@ -63,7 +63,7 @@ func TestBoundedBudgetCompositionHasOneOriginalAdapterAcrossAllCallbackLayers(t 
 	}
 }
 
-func TestFirstPartyOwnerSelectionConvergesExactLegacyAndExplicitStages(t *testing.T) {
+func TestFirstPartyOwnerSelectionUsesExplicitStages(t *testing.T) {
 	rt, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
 	if err != nil {
 		t.Fatal(err)
@@ -76,26 +76,13 @@ func TestFirstPartyOwnerSelectionConvergesExactLegacyAndExplicitStages(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, form := range []string{"explicit", "legacy"} {
-		d := Dependencies{Runtime: rt, Model: boundBudgetCompositionModel{}, BoundedContext: c}
-		if form == "explicit" {
-			d.BoundedBudget = b
-		} else {
-			d.RunMiddleware = []plugin.RunMiddleware{b, c}
-			d.ModelMiddleware = []plugin.ModelMiddleware{b}
-			d.ToolMiddleware = []plugin.ToolMiddleware{b}
-		}
-		r, err := NewRunner(d)
-		if err != nil || r.nativeContext != c || r.nativeBudget != b || r.samplingBudget != b || r.toolBudget != b ||
-			r.prepareModelRequest != nil || !r.receiptOnlyRunChain || r.kernelOwnedStartCancellation {
-			t.Fatalf("%s did not select the same native owner: %v", form, err)
-		}
-		if len(r.boundedCallbacks) != 2 {
-			t.Fatalf("%s: duplicate callback owners", form)
-		}
+	r, err := NewRunner(Dependencies{Runtime: rt, Model: boundBudgetCompositionModel{}, BoundedContext: c, BoundedBudget: b})
+	if err != nil || r.boundedContext != c || r.nativeBudget != b || r.samplingBudget != b || r.toolBudget != b ||
+		r.prepareModelRequest != nil || !r.receiptOnlyRunChain || r.kernelOwnedStartCancellation || len(r.boundedCallbacks) != 2 {
+		t.Fatalf("fixed stages did not select one original owner: %v", err)
 	}
 	for _, d := range []Dependencies{
-		{BoundedContext: c, BoundedBudget: b, RunMiddleware: []plugin.RunMiddleware{c}},
+		{BoundedContext: c, BoundedBudget: b, RunMiddleware: []plugin.RunMiddleware{b}},
 		{BoundedContext: c, BoundedBudget: b, ModelMiddleware: []plugin.ModelMiddleware{b}},
 		{BoundedContext: c, BoundedBudget: b, ToolMiddleware: []plugin.ToolMiddleware{b}},
 		{BoundedContext: c, BoundedBudget: b, ManagedRecovery: true},
@@ -107,7 +94,7 @@ func TestFirstPartyOwnerSelectionConvergesExactLegacyAndExplicitStages(t *testin
 	}
 	// The old mixed/partial extension remains in its actual chain. It cannot
 	// acquire native budget run custody merely by selecting a Model adapter.
-	r, err := NewRunner(Dependencies{Runtime: rt, Model: boundBudgetCompositionModel{}, BoundedContext: c, ModelMiddleware: []plugin.ModelMiddleware{b}})
+	r, err = NewRunner(Dependencies{Runtime: rt, Model: boundBudgetCompositionModel{}, BoundedContext: c, ModelMiddleware: []plugin.ModelMiddleware{b}})
 	if err != nil || r.nativeBudget != nil || r.samplingBudget != b || r.toolBudget != nil || r.receiptOnlyRunChain {
 		t.Fatalf("partial chain reclassified as complete: %v", err)
 	}

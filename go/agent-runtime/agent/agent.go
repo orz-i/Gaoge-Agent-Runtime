@@ -280,9 +280,7 @@ type Dependencies struct {
 	// PrepareModelRequest is the only pre-commit message/Tool schema projection.
 	// It does not choose an Agent mode. ModelMiddleware cannot rewrite frozen input.
 	PrepareModelRequest ModelRequestPreparer
-	// BoundedContext selects native Context hydration and preparation. An
-	// empty RunMiddleware selects the fixed first-party stage. A legacy
-	// explicit chain must still contain the exact adapter once.
+	// BoundedContext selects the fixed Context hydration and preparation stage.
 	BoundedContext *BoundedContextAdapter
 	// BoundedBudget selects one native Run, Model and Tool accounting owner.
 	// The Runner owns its execution order; do not also register middleware.
@@ -374,7 +372,6 @@ type Runner struct {
 	rootCallbacks            *rootCallbackState
 	boundedCallbacks         []any
 	boundedContext           *BoundedContextAdapter
-	nativeContext            *BoundedContextAdapter
 	nativeBudget             *BoundedBudgetAdapter
 	samplingBudget           *BoundedBudgetAdapter
 	toolBudget               *BoundedBudgetAdapter
@@ -540,13 +537,10 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		(dependencies.Catalog == nil) != (dependencies.Executor == nil) {
 		return nil, ErrInvalidRequest
 	}
-	// Select concrete native owners once. Complete legacy first-party
-	// compositions are normalized to the same Runner stages, not a second
-	// lifecycle. Opaque or intentionally partial middleware stays explicit.
-	nativeContext, nativeBudget, err := selectFirstPartyStages(&dependencies)
-	if err != nil {
+	if err := selectFirstPartyStages(&dependencies); err != nil {
 		return nil, err
 	}
+	nativeBudget := dependencies.BoundedBudget
 	for _, b := range []*BoundedBudgetAdapter{nativeBudget, selectedSamplingBudget(dependencies), selectedToolBudget(dependencies)} {
 		if b != nil && b.nativeStore() != nil && (b != nativeBudget || !dependencies.Runtime.UsesLedgerStore(b.coordinator.Store)) {
 			return nil, ErrInvalidRequest
@@ -648,7 +642,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		executor: dependencies.Executor, approvals: dependencies.Approvals,
 		approvalControlPreflight: dependencies.ApprovalControlPreflight,
 		startControlPreflight:    dependencies.StartControlPreflight,
-		runMiddlewareConfigured:  len(dependencies.RunMiddleware) > 0 || nativeContext != nil || nativeBudget != nil || dependencies.Inputs != nil,
+		runMiddlewareConfigured:  len(dependencies.RunMiddleware) > 0 || dependencies.BoundedContext != nil || nativeBudget != nil || dependencies.Inputs != nil,
 		receiptOnlyRunChain:      supportsReceiptOnlyRunChain(dependencies),
 		hostedTools:              dependencies.HostedTools, discovery: dependencies.ToolDiscovery, observers: observers, telemetry: telemetry, approvalPolicies: approvalPolicies,
 		completionPolicies:   compactCompletionPolicies(dependencies.CompletionPolicies),
@@ -666,18 +660,17 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		toolLimiter:          newCallLimiter(execution.Tool.MaxConcurrency),
 		runChain:             runChain, modelChain: modelChain, toolChain: toolChain,
 		boundedContext:   dependencies.BoundedContext,
-		nativeContext:    nativeContext,
 		nativeBudget:     nativeBudget,
 		samplingBudget:   selectedSamplingBudget(dependencies),
 		toolBudget:       selectedToolBudget(dependencies),
 		contextSummary:   dependencies.ContextSummary,
 		managedRecovery:  dependencies.ManagedRecovery,
-		boundedCallbacks: collectBoundedCallbacks(dependencies, nativeContext, nativeBudget),
+		boundedCallbacks: collectBoundedCallbacks(dependencies, dependencies.BoundedContext, nativeBudget),
 		// Native pre-Start cancellation and deferred post-callback custody
 		// share the SAME Host-callback trust decision. Native Start remains
 		// strictly middleware-free while the deferred path may also accept
 		// the audited, callback-scoped first-party middleware below.
-		kernelOwnedStartCancellation: control && dependencies.Inputs == nil && nativeContext == nil && nativeBudget == nil &&
+		kernelOwnedStartCancellation: control && dependencies.Inputs == nil && dependencies.BoundedContext == nil && nativeBudget == nil &&
 			len(dependencies.RunMiddleware) == 0 &&
 			len(dependencies.ModelMiddleware) == 0 && len(dependencies.ToolMiddleware) == 0 &&
 			!dependencies.ManagedRecovery,

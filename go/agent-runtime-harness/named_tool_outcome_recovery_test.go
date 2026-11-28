@@ -86,7 +86,7 @@ func TestDeferredNamedAgentRecoveredToolResultReachesParent(t *testing.T) {
 					t.Fatal(e)
 				}
 				b := mustBudgetAdapter(t, shared)
-				deps := agent.Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, ToolOutcomeVerifier: delegation, RunMiddleware: []plugin.RunMiddleware{b}, ModelMiddleware: []plugin.ModelMiddleware{b}, ToolMiddleware: []plugin.ToolMiddleware{b}}
+				deps := agent.Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, ToolOutcomeVerifier: delegation, BoundedBudget: b}
 				if boundedApproval {
 					approval, e := agent.NewBoundedToolApproval(func(_ context.Context, q tools.ExecutionRequest) (plugin.ApprovalRequirement, error) {
 						if q.Call.ToolKey == roleEvidenceTool {

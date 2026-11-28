@@ -6,6 +6,7 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
@@ -30,12 +31,19 @@ func ea1RootBoundedContext(t *testing.T, factory func(*testing.T) (kernel.Store,
 			if err != nil {
 				t.Fatal(err)
 			}
-			var middleware plugin.RunMiddleware = bounded
-			if mode == "opaque" {
-				middleware = &ea1AdmissionMiddleware{}
-			}
 			physical := &ea1AdmissionModel{}
-			runner := ea1AdmissionConfiguredRunner(t, rt, physical, middleware, automatic)
+			d := agent.Dependencies{Runtime: rt, Model: physical, BoundedContext: bounded}
+			if mode == "opaque" {
+				d.BoundedContext = nil
+				d.RunMiddleware = []plugin.RunMiddleware{&ea1AdmissionMiddleware{}}
+			}
+			if !automatic {
+				d.RunExecution = &agent.RunExecution{OwnerID: "original-owner", LeaseDuration: 3 * time.Minute}
+			}
+			runner, err := agent.NewRunner(d)
+			if err != nil {
+				t.Fatal(err)
+			}
 			_, firstErr := runner.StartRun(t.Context(), request)
 			if firstErr == nil || physical.calls.Load() != 0 {
 				t.Fatalf("denied callback sent or succeeded: calls=%d err=%v", physical.calls.Load(), firstErr)
@@ -45,7 +53,7 @@ func ea1RootBoundedContext(t *testing.T, factory func(*testing.T) (kernel.Store,
 				t.Fatalf("original source lost: %v", err)
 			}
 			if ports.unexpected != 0 {
-				t.Fatal("hydration vector performed archival or preparation operations")
+				t.Fatal("hydration vector performed unexpected archival operations")
 			}
 			if mode != "foreign-hydration" && (!errors.Is(firstErr, injected) || fault.failures != 1) {
 				t.Fatalf("actual pre-intent CAS not reached: %v", firstErr)
@@ -123,9 +131,8 @@ func (p *ea1BoundedContextPorts) ResolveWindow(ctx context.Context, request mode
 	plan, err := p.Plan(ctx, request)
 	return plan.ModelWindow, err
 }
-func (p *ea1BoundedContextPorts) Plan(context.Context, model.Request) (agent.BoundedContextPlan, error) {
-	p.unexpected++
-	return agent.BoundedContextPlan{}, errors.New("unexpected preparation")
+func (p *ea1BoundedContextPorts) Plan(_ context.Context, request model.Request) (agent.BoundedContextPlan, error) {
+	return agent.BoundedContextPlan{Request: request}, nil
 }
 func (p *ea1BoundedContextPorts) PutArtifact(context.Context, runtimecontext.Artifact) (runtimecontext.Artifact, error) {
 	p.unexpected++

@@ -111,16 +111,13 @@ func TestRootFrozenSamplingRecoveryUsesOriginalPhysicalReceipt(t *testing.T) {
 					}),
 				}
 				if mode.budget {
-					deps.RunMiddleware = append(deps.RunMiddleware, shared)
-					deps.ModelMiddleware = []plugin.ModelMiddleware{shared}
-					deps.ToolMiddleware = []plugin.ToolMiddleware{shared}
+					deps.BoundedBudget = shared
 				}
 				if unknown && !mode.budget {
 					deps.ModelMiddleware = []plugin.ModelMiddleware{frozenReceiptNarrowingMiddleware{narrow: !mode.context}}
 				}
 				if mode.context {
 					deps.BoundedContext = bounded
-					deps.RunMiddleware = append(deps.RunMiddleware, bounded)
 				}
 				runner, err := NewRunner(deps)
 				if err != nil {
@@ -215,7 +212,7 @@ func TestContextOnlySamplingRejectsLateNarrowing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner, err := NewRunner(Dependencies{Runtime: rt, Model: provider, Clock: clock, BoundedContext: bounded, RunMiddleware: []plugin.RunMiddleware{bounded}, ModelMiddleware: []plugin.ModelMiddleware{frozenReceiptNarrowingMiddleware{narrow: true}}})
+	runner, err := NewRunner(Dependencies{Runtime: rt, Model: provider, Clock: clock, BoundedContext: bounded, ModelMiddleware: []plugin.ModelMiddleware{frozenReceiptNarrowingMiddleware{narrow: true}}})
 	if err != nil {
 		t.Fatal(err)
 	}

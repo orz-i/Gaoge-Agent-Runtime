@@ -89,7 +89,7 @@ func TestHarnessElectedCancellationSurvivesNativeRunAdmissionDenial(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	native, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, RunMiddleware: []plugin.RunMiddleware{b}, ModelMiddleware: []plugin.ModelMiddleware{b}, ToolMiddleware: []plugin.ToolMiddleware{b}})
+	native, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, BoundedBudget: b})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -301,7 +301,15 @@ func testHarnessCancelAtActualToolDispatch(t *testing.T, timelineOrder, retireme
 				layers = append(layers, timeline)
 			}
 		}
-		native, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, RunMiddleware: []plugin.RunMiddleware{b}, ModelMiddleware: []plugin.ModelMiddleware{b}, ToolMiddleware: layers})
+		d := agent.Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg}
+		if len(layers) == 1 {
+			d.BoundedBudget = b
+		} else {
+			d.RunMiddleware = []plugin.RunMiddleware{b}
+			d.ModelMiddleware = []plugin.ModelMiddleware{b}
+			d.ToolMiddleware = layers
+		}
+		native, err := agent.NewRunner(d)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -11,6 +11,7 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
@@ -51,6 +52,10 @@ func (p *receiptHydrationPorts) Hydrate(ctx context.Context, inv plugin.RunInvoc
 	return ctx, BoundedContextHydration{RunID: inv.RunID, SourceBinding: json.RawMessage(`{"receipt-only":true}`)}, nil
 }
 
+func (*receiptHydrationPorts) Plan(_ context.Context, request model.Request) (BoundedContextPlan, error) {
+	return BoundedContextPlan{Request: request}, nil
+}
+
 func TestExpiredReceiptPreservesElectedBudgetCancellation(t *testing.T) {
 	for _, mode := range []string{"cancelled", "completed", "retarget", "projection-failed", "cancel-during-project-live", "cancel-during-project-expired", "cancel-after-run-admission-live", "cancel-after-run-admission-expired"} {
 		t.Run(mode, func(t *testing.T) { testExpiredReceiptBudgetLifecycle(t, mode) })
@@ -71,14 +76,14 @@ func testExpiredReceiptBudgetLifecycle(t *testing.T, mode string) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	deps := Dependencies{Runtime: rt, Model: provider, Clock: clock, RunMiddleware: []plugin.RunMiddleware{shared}, ModelMiddleware: []plugin.ModelMiddleware{shared}, ToolMiddleware: []plugin.ToolMiddleware{shared}}
+	deps := Dependencies{Runtime: rt, Model: provider, Clock: clock, BoundedBudget: shared}
 	hydrate := &receiptHydrationPorts{}
 	if strings.HasPrefix(mode, "cancel-after-run-admission") {
 		inner, e := NewBoundedContextAdapter(contextPorts.manager, hydrate)
 		if e != nil {
 			t.Fatal(e)
 		}
-		deps.RunMiddleware = append(deps.RunMiddleware, inner)
+		deps.BoundedContext = inner
 	}
 	r, e := NewRunner(deps)
 	if e != nil {

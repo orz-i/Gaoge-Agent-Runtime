@@ -105,8 +105,7 @@ func testRootRetryCommittedAckLoss(t *testing.T, historicalTerminalChild bool) {
 	original, err := agent.NewRunner(agent.Dependencies{
 		Runtime: rt, Model: client, Catalog: registry, Executor: registry,
 		Approvals: interactionadapter.New(approvals), ApprovalPolicies: []plugin.ApprovalPolicy{policies},
-		RunMiddleware: []plugin.RunMiddleware{bounded}, ModelMiddleware: []plugin.ModelMiddleware{bounded},
-		ToolMiddleware: []plugin.ToolMiddleware{bounded},
+		BoundedBudget: bounded,
 	})
 	if err != nil {
 		t.Fatal(err)

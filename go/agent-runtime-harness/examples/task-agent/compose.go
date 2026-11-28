@@ -199,31 +199,31 @@ func composeContextMode(store kernel.Store, state *taskState, client model.Clien
 	if err != nil {
 		return nil, err
 	}
-	var prepare agent.ModelRequestPreparer = bounded.Prepare
-	var rehydrate plugin.RunMiddleware = bounded
-	if opaque {
-		prepare, err = harness.NewManagedContextPreparer(state.store, manager, resolve)
-		if err != nil {
-			return nil, err
-		}
-		rehydrate, err = harness.NewContextRunMiddleware(state.store, nil)
-		if err != nil {
-			return nil, err
-		}
-	}
-	agentRunner, err := agent.NewRunner(agent.Dependencies{
+	dependencies := agent.Dependencies{
 		Runtime: rt, Model: client, Catalog: registry, Executor: registry, Clock: state.clock,
-		// Add any host schema projections BEFORE Context preparation, which must be last.
-		PrepareModelRequest: agent.ChainModelRequestPreparers(prepare),
-		RunMiddleware:       []plugin.RunMiddleware{rehydrate},
-		ModelMiddleware:     []plugin.ModelMiddleware{outputCeiling{tokens: config.outputTokens, state: state}},
-		Limits:              taskLimits(),
-		RunExecution:        &agent.RunExecution{OwnerID: owner, LeaseDuration: leaseDuration},
+		BoundedContext:  bounded,
+		ModelMiddleware: []plugin.ModelMiddleware{outputCeiling{tokens: config.outputTokens, state: state}},
+		Limits:          taskLimits(),
+		RunExecution:    &agent.RunExecution{OwnerID: owner, LeaseDuration: leaseDuration},
 		Execution: agent.ExecutionPolicy{
 			Model: agent.CallPolicy{Timeout: modelTimeout, MaxAttempts: 1, MaxConcurrency: 1},
 			Tool:  agent.CallPolicy{Timeout: toolTimeout, MaxAttempts: 1, MaxConcurrency: 1},
 		},
-	})
+	}
+	if opaque {
+		prepare, err := harness.NewManagedContextPreparer(state.store, manager, resolve)
+		if err != nil {
+			return nil, err
+		}
+		rehydrate, err := harness.NewContextRunMiddleware(state.store, nil)
+		if err != nil {
+			return nil, err
+		}
+		dependencies.BoundedContext = nil
+		dependencies.PrepareModelRequest = prepare
+		dependencies.RunMiddleware = []plugin.RunMiddleware{rehydrate}
+	}
+	agentRunner, err := agent.NewRunner(dependencies)
 	if err != nil {
 		return nil, err
 	}

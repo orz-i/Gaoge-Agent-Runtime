@@ -76,8 +76,7 @@ func testDeferredBoundedAgentCancellation(t *testing.T, withHostApprovalPolicy b
 		original, e := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: m, Catalog: registry, Executor: registry,
 			Approvals: interactionadapter.New(approvals), ApprovalPolicies: policyLayers,
 			ToolOutcomeVerifier: d,
-			RunMiddleware:       []plugin.RunMiddleware{bounded}, ModelMiddleware: []plugin.ModelMiddleware{bounded},
-			ToolMiddleware: []plugin.ToolMiddleware{bounded}})
+			BoundedBudget:       bounded})
 		if e != nil {
 			return nil, nil, e
 		}

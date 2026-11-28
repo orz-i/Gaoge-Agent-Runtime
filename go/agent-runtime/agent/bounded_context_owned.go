@@ -10,23 +10,8 @@ import (
 
 func validBoundedContextComposition(d Dependencies) bool {
 	a := d.BoundedContext
-	if a == nil {
-		return true
-	}
-	if a.manager == nil || a.ports == nil || d.PrepareModelRequest != nil ||
-		(d.ContextSummary != nil && d.ContextSummary.bounded != a) {
-		return false
-	}
-	count := 0
-	for _, layer := range d.RunMiddleware {
-		if contextLayer, ok := layer.(*BoundedContextAdapter); ok {
-			if contextLayer != a {
-				return false
-			}
-			count++
-		}
-	}
-	return count == 1 || len(d.RunMiddleware) == 0
+	return a == nil || a.manager != nil && a.ports != nil && d.PrepareModelRequest == nil &&
+		len(d.RunMiddleware) == 0 && (d.ContextSummary == nil || d.ContextSummary.bounded == a)
 }
 
 // A private, source-bound preparation rejection is not a provider

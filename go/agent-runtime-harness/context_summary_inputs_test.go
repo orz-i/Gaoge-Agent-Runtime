@@ -11,7 +11,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
 type summaryRejectedInputs struct{ bindingCalls, reads int }
@@ -52,9 +51,9 @@ func TestContextSummaryNativeBindsHostInputsWithRealBridges(t *testing.T) {
 		t.Fatalf("the same native composition without Host inputs must be valid: %v", err)
 	}
 	legacy := dependencies
-	legacy.RunMiddleware = []plugin.RunMiddleware{bounded}
+	legacy.PrepareModelRequest = bounded.Prepare
 	if _, err = agent.NewRunner(legacy); !errors.Is(err, agent.ErrInvalidRequest) {
-		t.Fatalf("summary accepted obsolete Run middleware registration: %v", err)
+		t.Fatalf("summary accepted competing Host preparation: %v", err)
 	}
 	inputs := &summaryRejectedInputs{}
 	dependencies.Inputs = inputs

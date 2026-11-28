@@ -8,6 +8,11 @@
   `BoundedContext` and `BoundedBudget` for budgeted operation, not a
   `RunMiddleware` registration of its Context owner. The Runner selects
   the original concrete Context stage directly.
+- Configure `BoundedContextAdapter` exclusively through `Dependencies.BoundedContext`
+  (or the matching Summary owner). Its executable `Run` middleware interface and
+  registration name are removed; a competing Run wrapper or request preparer is rejected.
+- Configure a complete shared Budget through `Dependencies.BoundedBudget`. The old
+  exact Run/Model/Tool triple registration is rejected rather than normalized.
 
 ## Owned physical callback entry and no-entry retirement
 

@@ -220,7 +220,7 @@ func TestRecoveredAcceptedReceiptRetainsOriginalToolAndReplayBytes(t *testing.T)
 		t.Fatal(err)
 	}
 	adapter := mustBudgetAdapter(t, shared)
-	deps := agent.Dependencies{Runtime: rt, Model: client, ModelOutcomeVerifier: shared, Catalog: registry, Executor: registry, RunMiddleware: []plugin.RunMiddleware{adapter}, ModelMiddleware: []plugin.ModelMiddleware{adapter}, ToolMiddleware: []plugin.ToolMiddleware{adapter}}
+	deps := agent.Dependencies{Runtime: rt, Model: client, ModelOutcomeVerifier: shared, Catalog: registry, Executor: registry, BoundedBudget: adapter}
 	runner, err := agent.NewRunner(deps)
 	if err != nil {
 		t.Fatal(err)
@@ -303,9 +303,7 @@ func TestModelReceiptPresenceDoesNotChangeToolExecutionAuthority(t *testing.T) {
 						})}
 					if mode == "shared_budget" {
 						adapter := mustBudgetAdapter(t, shared)
-						deps.ModelMiddleware = []plugin.ModelMiddleware{adapter}
-						deps.RunMiddleware = []plugin.RunMiddleware{adapter}
-						deps.ToolMiddleware = []plugin.ToolMiddleware{adapter}
+						deps.BoundedBudget = adapter
 						deps.ModelOutcomeVerifier = shared
 					}
 					runner, err := agent.NewRunner(deps)

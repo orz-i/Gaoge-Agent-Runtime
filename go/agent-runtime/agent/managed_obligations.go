@@ -77,7 +77,7 @@ func (r *Runner) freezeManagedObligations(ctx context.Context, s kernel.Snapshot
 	if inv.Purpose == ModelInvocationContextSummary {
 		phase = string(inv.Status)
 		p.BindingDigest = kernel.ManagedDigest(inv.ContextSummary)
-		if !callbackscope.Operation(ctx, r.nativeContext, "context.summary.native-phase:"+phase, inv) {
+		if !callbackscope.Operation(ctx, r.boundedContext, "context.summary.native-phase:"+phase, inv) {
 			return nil, false, ErrInvalidRequest
 		}
 	}
@@ -89,7 +89,7 @@ func (r *Runner) freezeManagedObligations(ctx context.Context, s kernel.Snapshot
 			return nil, false, nil
 		}
 	}
-	journal, ok := callbackscope.ManagedObligationSuspension(ctx, r.nativeContext, r.managedBudgetOwner(), inv.Request, phase)
+	journal, ok := callbackscope.ManagedObligationSuspension(ctx, r.boundedContext, r.managedBudgetOwner(), inv.Request, phase)
 	if !ok {
 		return nil, false, nil
 	}

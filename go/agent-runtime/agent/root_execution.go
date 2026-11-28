@@ -517,8 +517,6 @@ func collectBoundedCallbacks(d Dependencies, nativeContext *BoundedContextAdapte
 	}
 	for _, m := range d.RunMiddleware {
 		switch value := m.(type) {
-		case *BoundedContextAdapter:
-			result = append(result, value)
 		case *BoundedBudgetAdapter:
 			result = append(result, value)
 		}

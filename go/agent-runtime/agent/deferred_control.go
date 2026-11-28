@@ -27,7 +27,7 @@ func nativeRunLayers(d Dependencies) bool {
 	}
 	for _, item := range d.RunMiddleware {
 		switch item.(type) {
-		case *BoundedContextAdapter, *BoundedBudgetAdapter:
+		case *BoundedBudgetAdapter:
 		default:
 			return false
 		}
@@ -135,6 +135,5 @@ func (runner *Runner) VerifiedDeferredRootControl(ctx context.Context, rt *kerne
 }
 
 var (
-	_ plugin.RunMiddleware = (*BoundedContextAdapter)(nil)
 	_ plugin.RunMiddleware = (*BoundedBudgetAdapter)(nil)
 )

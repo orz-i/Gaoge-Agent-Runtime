@@ -89,7 +89,7 @@ func testRoleDelegationChildApproval(t *testing.T, wrongRoute bool, terminalPare
 	direct, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: meteredModel, Catalog: registry, Executor: registry,
 		Approvals: interactionadapter.New(approvals), ApprovalPolicies: []plugin.ApprovalPolicy{policy},
 		ToolOutcomeVerifier: delegation,
-		RunMiddleware:       []plugin.RunMiddleware{mustBudgetAdapter(t, shared)}, ModelMiddleware: []plugin.ModelMiddleware{mustBudgetAdapter(t, shared)}, ToolMiddleware: []plugin.ToolMiddleware{mustBudgetAdapter(t, shared)}})
+		BoundedBudget:       mustBudgetAdapter(t, shared)})
 	if err != nil {
 		t.Fatal(err)
 	}

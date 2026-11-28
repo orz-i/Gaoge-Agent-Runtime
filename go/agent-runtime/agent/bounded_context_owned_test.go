@@ -36,14 +36,10 @@ func TestOwnedBoundedContextReceiptsRequireConcretePreparation(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			chain, err := plugin.NewRunChain(a)
-			if err != nil {
-				t.Fatal(err)
-			}
 			runner := &Runner{boundedContext: a, rootCallbacks: &rootCallbackState{}}
 			scope := callbackscope.New(callbackscope.Binding{RunID: "run", GrantID: "grant"}, []any{a})
 			request := model.CloneRequest(model.Request{RunID: "run", Model: "openai/example", Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts(tc.text)}}})
-			_, err = chain.Invoke(callbackscope.Bind(t.Context(), scope), plugin.RunInvocation{RunID: "run", Operation: plugin.RunStart}, func(ctx context.Context) (kernel.Snapshot, error) {
+			_, err = runner.invokeContextRun(callbackscope.Bind(t.Context(), scope), plugin.RunInvocation{RunID: "run", Operation: plugin.RunStart}, func(ctx context.Context) (kernel.Snapshot, error) {
 				_, err := runner.prepareBoundedContext(ctx, kernel.Snapshot{}, request)
 				return kernel.Snapshot{}, err
 			})
@@ -56,22 +52,13 @@ func TestOwnedBoundedContextReceiptsRequireConcretePreparation(t *testing.T) {
 
 func TestOwnedBoundedContextCompositionExcludesOtherPreparers(t *testing.T) {
 	a, _ := NewBoundedContextAdapter(runtimecontext.NewManager(runtimecontext.Dependencies{}), &managedScopePorts{})
-	b, _ := NewBoundedContextAdapter(runtimecontext.NewManager(runtimecontext.Dependencies{}), &managedScopePorts{})
-	d := Dependencies{BoundedContext: a, RunMiddleware: []plugin.RunMiddleware{a}}
+	d := Dependencies{BoundedContext: a}
 	if !validBoundedContextComposition(d) || !scopedDeferredRootCallbacks(d) {
 		t.Fatal("valid concrete adapter rejected")
 	}
-	d.RunMiddleware = nil
-	if !validBoundedContextComposition(d) {
-		t.Fatal("explicit concrete native Context rejected")
+	if _, legacy := any(a).(plugin.RunMiddleware); legacy {
+		t.Fatal("Context adapter still implements executable middleware")
 	}
-	for _, layers := range [][]plugin.RunMiddleware{{a, a}, {a, b}, {b}} {
-		d.RunMiddleware = layers
-		if validBoundedContextComposition(d) {
-			t.Fatal("ambiguous or foreign adapter accepted")
-		}
-	}
-	d.RunMiddleware = []plugin.RunMiddleware{a}
 	d.PrepareModelRequest = a.Prepare
 	if validBoundedContextComposition(d) || scopedDeferredRootCallbacks(d) {
 		t.Fatal("generic callback was trusted")
