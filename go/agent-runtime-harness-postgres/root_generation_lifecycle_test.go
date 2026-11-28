@@ -460,7 +460,7 @@ func TestPreparedChildCancellationSurvivesLeaseOnlyEpochs(t *testing.T) {
 				if err = rt.ReleaseExecution(t.Context(), lease); err != nil {
 					t.Fatal(err)
 				}
-				if err = rt.VerifyPreparedRootSettlement(t.Context(), child); err != nil {
+				if err = rt.VerifyExecutionCustody(t.Context(), child, kernel.CustodyPrepared); err != nil {
 					t.Fatalf("lease-only epoch invalidated physical history: %v", err)
 				}
 				cancelled, err := r.CancelSubtask(t.Context(), first.Turn.ID, first.Subtasks[0].ID, "stop undispatched child")

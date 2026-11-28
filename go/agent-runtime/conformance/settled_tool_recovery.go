@@ -286,7 +286,7 @@ func RunSettledToolRecovery(t *testing.T, factory func(*testing.T) (kernel.Store
 			if _, e := freshRT.LookupChildExecution(ctx, request.ID); !errors.Is(e, kernel.ErrNotFound) {
 				t.Fatal("original grant not retired", e)
 			}
-			if err := freshRT.VerifyOwnedRootSettlement(ctx, final); err != nil {
+			if err := freshRT.VerifyExecutionCustody(ctx, final, kernel.CustodyRetired); err != nil {
 				t.Fatal("terminal original callback history not observable", err)
 			}
 			if !r.VerifiedDeferredRootControl(ctx, freshRT, final) {

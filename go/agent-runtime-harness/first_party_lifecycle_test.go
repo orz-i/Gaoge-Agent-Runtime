@@ -152,7 +152,7 @@ func exerciseFirstPartyLifecycle(t *testing.T, mode, profile string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := options.Runtime.VerifyBoundedToolControl(ctx, child); err != nil {
+	if err := options.Runtime.VerifyExecutionCustody(ctx, child, kernel.CustodyBoundedApproval); err != nil {
 		t.Fatalf("original child approval return was not qualified: %v", err)
 	}
 	var approved harness.Snapshot

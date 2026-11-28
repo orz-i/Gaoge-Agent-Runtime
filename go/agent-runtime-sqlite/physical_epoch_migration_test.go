@@ -104,7 +104,7 @@ func TestPhysicalEpochMigrationPreservesOriginalCustodyAndLeaseHistory(t *testin
 	if err = s.db.QueryRow(`SELECT payload_json FROM runtime_owned_retirements WHERE grant_id=?`, g.ID).Scan(&stored); err != nil || string(stored) != string(raw) {
 		t.Fatalf("migration rewrote original custody bytes: %v", err)
 	}
-	if err = s.VerifyPreparedRootSettlement(t.Context(), snapshot); err != nil {
+	if err = s.VerifyExecutionCustody(t.Context(), snapshot, kernel.CustodyPrepared); err != nil {
 		t.Fatalf("migrated safe prepared history lost control: %v", err)
 	}
 }

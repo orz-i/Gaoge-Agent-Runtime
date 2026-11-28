@@ -27,6 +27,8 @@
 
 - Removed `agent.Dependencies.ManagedRecovery` and `AgentSessionContextOptions.ManagedRecovery`. Recovery capability is derived from the exact registered Host Store and first-party stage sources; the persisted original capability cannot be changed on reopen.
 
+- Root execution custody observations now use the single `kernel.ExecutionCustodyStore.VerifyExecutionCustody` port and shared `VerifyExecutionCustodyFacts` reducer. The five prior settlement verification methods and their separate Store interfaces are removed. The explicit read predicate does not grant dispatch or control authority; the later write must still arbitrate the original transaction.
+
 ## Owned physical callback entry and no-entry retirement
 
 Custom `OwnedPhysicalExecutionStore` adapters must implement

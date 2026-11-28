@@ -8,30 +8,10 @@ import (
 	"gorm.io/gorm"
 )
 
-var _ kernel.OwnedRootSettlementStore = (*KernelStore)(nil)
-var _ kernel.ReturnedRootSettlementStore = (*KernelStore)(nil)
+var _ kernel.ExecutionCustodyStore = (*KernelStore)(nil)
 
-func (s *KernelStore) VerifyReturnedRootSettlement(ctx context.Context, expected kernel.Snapshot) error {
-	return s.verifyRootSettlement(ctx, expected, nil)
-}
-
-func (s *KernelStore) VerifyBoundedToolControl(ctx context.Context, expected kernel.Snapshot) error {
-	return s.verifyRootSettlement(ctx, expected, kernel.VerifyBoundedToolControlFacts)
-}
-
-func (s *KernelStore) VerifyCompletedToolReturn(ctx context.Context, expected kernel.Snapshot) error {
-	return s.verifyRootSettlement(ctx, expected, kernel.VerifyCompletedToolReturnFacts)
-}
-
-// VerifyOwnedRootSettlement locks the exact Kernel Run and observes *all*
-// physical grants and acknowledged retirements in one transaction. It never
-// inserts a new lease or treats a historical same-ID terminal status as proof.
-func (s *KernelStore) VerifyOwnedRootSettlement(ctx context.Context, expected kernel.Snapshot) error {
-	return s.verifyRootSettlement(ctx, expected, kernel.VerifyOwnedRootSettlementFacts)
-}
-
-func (s *KernelStore) verifyRootSettlement(ctx context.Context, expected kernel.Snapshot, check kernel.RootSettlementCheck) error {
-	if s == nil || s.db == nil || ctx == nil || expected.Run.ID == "" {
+func (s *KernelStore) VerifyExecutionCustody(ctx context.Context, expected kernel.Snapshot, requirement kernel.ExecutionCustody) error {
+	if s == nil || s.db == nil || ctx == nil || expected.Run.ID == "" || !requirement.Valid() {
 		return kernel.ErrInvalidInput
 	}
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -66,7 +46,7 @@ func (s *KernelStore) verifyRootSettlement(ctx context.Context, expected kernel.
 			Where("parent_run_id = ? OR child_run_id = ?", expected.Run.ID, expected.Run.ID).Count(&active).Error; err != nil {
 			return translateKernelError(err)
 		}
-		if check == nil {
+		if requirement == kernel.CustodyReturned {
 			var roots []models.KernelChildEffectGrantRecord
 			if err = tx.Where("child_run_id = ?", expected.Run.ID).Limit(2).Find(&roots).Error; err != nil {
 				return translateKernelError(err)
@@ -78,7 +58,7 @@ func (s *KernelStore) verifyRootSettlement(ctx context.Context, expected kernel.
 			} else if len(roots) != 0 {
 				return kernel.ErrExecutionConflict
 			}
-			return kernel.VerifyReturnedRootSettlementFacts(expected, current, run.ExecutionEpoch, run.ExecutionPhysicalEpoch, pgManagedLease(run), grant, completion, receipts, active != 0)
+			return kernel.VerifyExecutionCustodyFacts(expected, current, run.ExecutionEpoch, run.ExecutionPhysicalEpoch, pgManagedLease(run), active != 0, receipts, grant, completion, requirement)
 		}
 		lease := pgManagedLease(run)
 		now, err := pgStoreNow(tx)
@@ -91,8 +71,6 @@ func (s *KernelStore) verifyRootSettlement(ctx context.Context, expected kernel.
 		if !lease.ExpiresAt.After(now) {
 			lease = kernel.ExecutionLease{}
 		}
-		return check(
-			expected, current, run.ExecutionEpoch, run.ExecutionPhysicalEpoch, lease, active != 0, receipts,
-		)
+		return kernel.VerifyExecutionCustodyFacts(expected, current, run.ExecutionEpoch, run.ExecutionPhysicalEpoch, lease, active != 0, receipts, kernel.ChildExecutionGrant{}, kernel.OwnedPhysicalCallbackCompletion{}, requirement)
 	})
 }

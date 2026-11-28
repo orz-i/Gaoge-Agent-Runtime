@@ -300,7 +300,7 @@ func toolDispatchDenial(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 						t.Fatal("premature retirement", receiptErr)
 					}
 				}
-				if err = rt.VerifyReturnedRootSettlement(ctx, before); err != nil {
+				if err = rt.VerifyExecutionCustody(ctx, before, kernel.CustodyReturned); err != nil {
 					t.Fatal("exact returned original scope not observable", stage, err)
 				}
 				next, err := r.RootDeferredCleanupEligibility(ctx, root, before.Run.Revision)

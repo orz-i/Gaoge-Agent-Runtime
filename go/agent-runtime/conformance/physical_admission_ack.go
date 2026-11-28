@@ -233,7 +233,7 @@ func runPhysicalAdmissionACKCase(t *testing.T, factory func(*testing.T) (kernel.
 	}
 	if operation == "resume" && mode == "entry-unavailable" {
 		before := resume.observer
-		if e := before.VerifyPreparedRootSettlement(t.Context(), resume.prepared); e != nil {
+		if e := before.VerifyExecutionCustody(t.Context(), resume.prepared, kernel.CustodyPrepared); e != nil {
 			t.Fatalf("fixture missing original prepared custody: %v", e)
 		}
 	}
@@ -348,14 +348,14 @@ func runPhysicalAdmissionACKCase(t *testing.T, factory func(*testing.T) (kernel.
 			}
 		}
 		if operation == "resume" {
-			e := fresh.VerifyPreparedRootSettlement(t.Context(), resume.prepared)
+			e := fresh.VerifyExecutionCustody(t.Context(), resume.prepared, kernel.CustodyPrepared)
 			t.Logf("original prepared custody after exact no-entry retirement: %v", e)
 			if e != nil {
 				t.Errorf("no-entry erased original prepared custody: %v", e)
 			}
 		}
 		if operation == "start" || operation == "prepare" {
-			if e := fresh.VerifyOwnedRootSettlement(t.Context(), w.source); e == nil {
+			if e := fresh.VerifyExecutionCustody(t.Context(), w.source, kernel.CustodyRetired); e == nil {
 				t.Fatal("no-entry without prior actual callback manufactured custody")
 			}
 		}
@@ -504,7 +504,7 @@ func runPhysicalEntryExternalLease(t *testing.T, factory func(*testing.T) (kerne
 	}
 	fresh := ea1StartRuntime(t, f.reopen())
 	assertNoEntryRetirement(t, fresh, w.grant, w.source, false)
-	if e := fresh.VerifyOwnedRootSettlement(t.Context(), w.source); e == nil {
+	if e := fresh.VerifyExecutionCustody(t.Context(), w.source, kernel.CustodyRetired); e == nil {
 		t.Fatal("no-entry with a borrowed lease created control custody")
 	}
 	if e = fresh.RequireExecution(t.Context(), w.grant.ChildRunID); !errors.Is(e, kernel.ErrExecutionRequired) {

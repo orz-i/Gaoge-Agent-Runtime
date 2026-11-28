@@ -150,7 +150,7 @@ func mixedOriginalToolConsumption(t *testing.T, factory func(*testing.T) (kernel
 	if e != nil || final.Run.Status != kernel.RunStatusCompleted || len(m.requests) != 2 {
 		t.Fatal("original batch did not complete", e, final.Run.Status)
 	}
-	if e = rt.VerifyOwnedRootSettlement(ctx, final); e != nil || !r.VerifiedDeferredRootControl(ctx, rt, final) {
+	if e = rt.VerifyExecutionCustody(ctx, final, kernel.CustodyRetired); e != nil || !r.VerifiedDeferredRootControl(ctx, rt, final) {
 		t.Fatal("final history not qualified", e)
 	}
 	if !reflect.DeepEqual(physical, map[string]int{"child-a": 1, "child-b": 1, "terminal-refusal": 1}) {
@@ -255,7 +255,7 @@ func toolTimelineConsumption(t *testing.T, factory func(*testing.T) (kernel.Stor
 					if l.View("").Usage.ToolCalls != 0 || l.View("").Reserved.ToolCalls != 1 {
 						t.Fatal("outer Budget accepted unqualified result", l.View(""))
 					}
-				} else if e != nil || final.Run.Status != kernel.RunStatusCompleted || len(m.calls) != 2 || l.View("").Usage.ToolCalls != 1 || l.View("").Reserved.ToolCalls != 0 || rt.VerifyOwnedRootSettlement(ctx, final) != nil {
+				} else if e != nil || final.Run.Status != kernel.RunStatusCompleted || len(m.calls) != 2 || l.View("").Usage.ToolCalls != 1 || l.View("").Reserved.ToolCalls != 0 || rt.VerifyExecutionCustody(ctx, final, kernel.CustodyRetired) != nil {
 					t.Fatal("qualified outcome lost", e, final.Run.Status, len(m.calls), l.View(""))
 				}
 			})

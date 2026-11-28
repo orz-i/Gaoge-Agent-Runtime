@@ -58,7 +58,7 @@ func TestDeferredHostCompletionCallbackNeverGrantsNativeCustody(t *testing.T) {
 		t.Fatalf("callback: %+v %v", completed.Run, err)
 	}
 	claim := c.VerifiedLocalDelegationControl(t.Context(), rt, delegation, completed)
-	if err := rt.VerifyOwnedRootSettlement(t.Context(), completed); !errors.Is(err, kernel.ErrExecutionConflict) {
+	if err := rt.VerifyExecutionCustody(t.Context(), completed, kernel.CustodyRetired); !errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("completed result obtained scoped execution evidence after a Host completion callback: %v", err)
 	}
 	t.Logf("Host standalone CompletionPolicy has untracked asynchronous effect, NativeStartCancellationFencedByKernel=%t, VerifiedLocalDelegationControl=%t, pendingEffects=%d", r.NativeStartCancellationFencedByKernel(rt), claim, effects.Load())

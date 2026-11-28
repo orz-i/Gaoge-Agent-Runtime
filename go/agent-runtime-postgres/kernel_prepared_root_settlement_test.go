@@ -34,13 +34,13 @@ func TestSQLPreparedCustodySurvivesExpiredUndispatchedLease(t *testing.T) {
 	if _, err = rt.AcquireExecution(t.Context(), kernel.ExecutionAcquireRequest{RunID: prepared.Run.ID, OwnerID: "crashed-before-physical", LeaseDuration: time.Minute}); err != nil {
 		t.Fatal(err)
 	}
-	if err = rt.VerifyPreparedRootSettlement(t.Context(), prepared); !errors.Is(err, kernel.ErrExecutionConflict) {
+	if err = rt.VerifyExecutionCustody(t.Context(), prepared, kernel.CustodyPrepared); !errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("live owner was ignored: %v", err)
 	}
 	if err = db.Table("agent_kernel_runs").Where("run_id = ?", prepared.Run.ID).UpdateColumn("execution_expires_at", time.Now().UTC().Add(-time.Minute)).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err = rt.VerifyPreparedRootSettlement(t.Context(), prepared); err != nil {
+	if err = rt.VerifyExecutionCustody(t.Context(), prepared, kernel.CustodyPrepared); err != nil {
 		t.Fatalf("expired undispatched owner lost physical proof: %v", err)
 	}
 	if _, err = rt.Cancel(t.Context(), prepared.Run.ID, prepared.Run.Revision, "stop"); err != nil {
@@ -73,7 +73,7 @@ func TestSQLPreparedRootControlDoesNotBorrowLaterPhysicalRetirement(t *testing.T
 		if e != nil || s.Run.Status != kernel.RunStatusRunning {
 			t.Fatalf("Prepare Root: %+v %v", s.Run, e)
 		}
-		if e = rt.VerifyPreparedRootSettlement(t.Context(), s); e != nil {
+		if e = rt.VerifyExecutionCustody(t.Context(), s, kernel.CustodyPrepared); e != nil {
 			t.Fatalf("original prepare receipt missing: %v", e)
 		}
 		return s
@@ -83,7 +83,7 @@ func TestSQLPreparedRootControlDoesNotBorrowLaterPhysicalRetirement(t *testing.T
 	if err != nil || cancelled.Run.Status != kernel.RunStatusCancelled {
 		t.Fatalf("native pre-dispatch Cancel: %+v %v", cancelled.Run, err)
 	}
-	if err = rt.VerifyPreparedRootSettlement(t.Context(), cancelled); err != nil {
+	if err = rt.VerifyExecutionCustody(t.Context(), cancelled, kernel.CustodyPrepared); err != nil {
 		t.Fatalf("original native Cancel successor lost Prep proof: %v", err)
 	}
 	next := start("next-prepared")
@@ -91,10 +91,10 @@ func TestSQLPreparedRootControlDoesNotBorrowLaterPhysicalRetirement(t *testing.T
 	if err != nil || terminal.Run.Status != kernel.RunStatusCompleted {
 		t.Fatalf("Resume Model callback: %+v %v", terminal.Run, err)
 	}
-	if err = rt.VerifyPreparedRootSettlement(t.Context(), terminal); !errors.Is(err, kernel.ErrExecutionConflict) {
+	if err = rt.VerifyExecutionCustody(t.Context(), terminal, kernel.CustodyPrepared); !errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("post-Model terminal borrowed earlier Prepare: %v", err)
 	}
-	if err = rt.VerifyOwnedRootSettlement(t.Context(), terminal); err != nil {
+	if err = rt.VerifyExecutionCustody(t.Context(), terminal, kernel.CustodyRetired); err != nil {
 		t.Fatalf("completed physical callback lacked ordinary receipt: %v", err)
 	}
 }

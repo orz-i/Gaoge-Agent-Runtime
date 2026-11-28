@@ -18,8 +18,7 @@ type noEntryKernelPorts interface {
 	kernel.ChildExecutionStore
 	kernel.OwnedPhysicalExecutionStore
 	kernel.OwnedRetirementStore
-	kernel.OwnedRootSettlementStore
-	kernel.PreparedRootSettlementStore
+	kernel.ExecutionCustodyStore
 }
 
 var errNoEntryCut = errors.New("entry observation unavailable")

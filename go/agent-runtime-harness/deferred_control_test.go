@@ -136,7 +136,7 @@ func testDeferredBoundedAgentCancellation(t *testing.T, withHostApprovalPolicy b
 	if err != nil {
 		t.Fatal(err)
 	}
-	if childBefore.Run.Status != kernel.RunStatusRunning || rt.VerifyPreparedRootSettlement(t.Context(), childBefore) != nil {
+	if childBefore.Run.Status != kernel.RunStatusRunning || rt.VerifyExecutionCustody(t.Context(), childBefore, kernel.CustodyPrepared) != nil {
 		t.Fatalf("unexpected prior child status: %s", childBefore.Run.Status)
 	}
 	cancelled, err := second.CancelSubtask(t.Context(), started.Turn.ID, task.ID, "bounded original cancellation")

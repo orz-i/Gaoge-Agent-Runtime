@@ -301,14 +301,14 @@ func (runner *Runner) observesLocalChild(ctx context.Context, turnID string, coo
 		if e == nil && receipt.Evidence.Completion.HostCompleted && kernel.ManagedDigest(receipt.Evidence.Snapshot) == kernel.ManagedDigest(child) {
 			return true
 		}
-		return rt.VerifyOwnedRootSettlement(ctx, child) == nil ||
+		return rt.VerifyExecutionCustody(ctx, child, kernel.CustodyRetired) == nil ||
 			child.Run.Status == kernel.RunStatusCancelled && (native.VerifiedDeferredRootControl(ctx, rt, child) || errors.Is(e, kernel.ErrNotFound) && child.Run.Revision == 2)
 	}
 	if !terminalRuntimeStatus(child.Run.Status) || !coordinator.IsDeferredLocalDelegation(rt, frozen) {
 		return true
 	}
 	if child.Run.Status == kernel.RunStatusCompleted {
-		return agent.TerminalPhysicalEffectsSettled(child) && (rt.VerifyOwnedRootSettlement(ctx, child) == nil ||
+		return agent.TerminalPhysicalEffectsSettled(child) && (rt.VerifyExecutionCustody(ctx, child, kernel.CustodyRetired) == nil ||
 			coordinator.VerifiedLocalToolResult(ctx, rt, frozen, child))
 	}
 	return coordinator.VerifiedLocalDelegationControl(ctx, rt, frozen, child)

@@ -39,11 +39,11 @@ func TestPreparedCustodySurvivesExpiredUndispatchedLease(t *testing.T) {
 	if _, err = rt.AcquireExecution(t.Context(), kernel.ExecutionAcquireRequest{RunID: prepared.Run.ID, OwnerID: "crashed-before-physical", LeaseDuration: time.Minute}); err != nil {
 		t.Fatal(err)
 	}
-	if err = rt.VerifyPreparedRootSettlement(t.Context(), prepared); !errors.Is(err, kernel.ErrExecutionConflict) {
+	if err = rt.VerifyExecutionCustody(t.Context(), prepared, kernel.CustodyPrepared); !errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("live lease was ignored: %v", err)
 	}
 	clock.now = clock.now.Add(2 * time.Minute)
-	if err = rt.VerifyPreparedRootSettlement(t.Context(), prepared); err != nil {
+	if err = rt.VerifyExecutionCustody(t.Context(), prepared, kernel.CustodyPrepared); err != nil {
 		t.Fatalf("expired undispatched lease lost physical proof: %v", err)
 	}
 	if _, err = rt.Cancel(t.Context(), prepared.Run.ID, prepared.Run.Revision, "stop before physical admission"); err != nil {

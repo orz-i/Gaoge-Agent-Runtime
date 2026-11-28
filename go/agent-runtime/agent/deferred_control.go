@@ -54,7 +54,7 @@ func (runner *Runner) VerifiedDeferredRootControl(ctx context.Context, rt *kerne
 	// first-party Prepare callback retired and ACKed. This permits a
 	// product with Host approval policies to cancel BEFORE those policies
 	// are invoked, without lending them physical custody after invocation.
-	if runner.trustedDeferredPreparedControl && rt.VerifyPreparedRootSettlement(ctx, child) == nil {
+	if runner.trustedDeferredPreparedControl && rt.VerifyExecutionCustody(ctx, child, kernel.CustodyPrepared) == nil {
 		return true
 	}
 	boundedToolControl := runner.boundedApproval && runner.scopedRootCallbacks
@@ -75,7 +75,7 @@ func (runner *Runner) VerifiedDeferredRootControl(ctx context.Context, rt *kerne
 	}
 	if boundedToolControl {
 		state, err := decodeState(child.State)
-		if err != nil || rt.VerifyBoundedToolControl(ctx, child) != nil {
+		if err != nil || rt.VerifyExecutionCustody(ctx, child, kernel.CustodyBoundedApproval) != nil {
 			return false
 		}
 		// Co-located execution already committed original Tool outcomes
@@ -104,5 +104,5 @@ func (runner *Runner) VerifiedDeferredRootControl(ctx context.Context, rt *kerne
 		}
 		return runner.verifyToolHistory(ctx, child.Run.ID, state)
 	}
-	return rt.VerifyOwnedRootSettlement(ctx, child) == nil
+	return rt.VerifyExecutionCustody(ctx, child, kernel.CustodyRetired) == nil
 }

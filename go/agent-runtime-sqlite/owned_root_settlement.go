@@ -7,37 +7,12 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
-var (
-	_ kernel.PreparedRootSettlementStore = (*Store)(nil)
-	_ kernel.OwnedRootSettlementStore    = (*Store)(nil)
-	_ kernel.ReturnedRootSettlementStore = (*Store)(nil)
-)
+var _ kernel.ExecutionCustodyStore = (*Store)(nil)
 
-func (s *Store) VerifyReturnedRootSettlement(ctx context.Context, expected kernel.Snapshot) error {
-	return s.verifyRootSettlement(ctx, expected, nil)
-}
-
-func (s *Store) VerifyBoundedToolControl(ctx context.Context, expected kernel.Snapshot) error {
-	return s.verifyRootSettlement(ctx, expected, kernel.VerifyBoundedToolControlFacts)
-}
-
-func (s *Store) VerifyCompletedToolReturn(ctx context.Context, expected kernel.Snapshot) error {
-	return s.verifyRootSettlement(ctx, expected, kernel.VerifyCompletedToolReturnFacts)
-}
-
-func (s *Store) VerifyPreparedRootSettlement(ctx context.Context, expected kernel.Snapshot) error {
-	return s.verifyRootSettlement(ctx, expected, kernel.VerifyPreparedRootSettlementFacts)
-}
-
-func (s *Store) VerifyOwnedRootSettlement(ctx context.Context, expected kernel.Snapshot) error {
-	return s.verifyRootSettlement(ctx, expected, kernel.VerifyOwnedRootSettlementFacts)
-}
-
-// SQLite's immediate writer transaction is the same authority boundary used by
-// physical admission, retirement, execution takeover and Cancel. TTL alone
-// never supplies a callback return or upgrades historical Host custody.
-func (s *Store) verifyRootSettlement(ctx context.Context, expected kernel.Snapshot, check kernel.RootSettlementCheck) error {
-	if s == nil || s.db == nil || ctx == nil || expected.Run.ID == "" {
+// The SQLite immediate transaction reads the same original authority as
+// Memory and PostgreSQL; lease expiry never supplies a physical return.
+func (s *Store) VerifyExecutionCustody(ctx context.Context, expected kernel.Snapshot, requirement kernel.ExecutionCustody) error {
+	if s == nil || s.db == nil || ctx == nil || expected.Run.ID == "" || !requirement.Valid() {
 		return kernel.ErrInvalidInput
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -102,7 +77,7 @@ func (s *Store) verifyRootSettlement(ctx context.Context, expected kernel.Snapsh
 	if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM runtime_child_effect_grants WHERE parent_run_id=? OR child_run_id=?`, expected.Run.ID, expected.Run.ID).Scan(&active); err != nil {
 		return err
 	}
-	if check == nil {
+	if requirement == kernel.CustodyReturned {
 		grant, _, err := loadPhysicalGrant(ctx, tx, expected.Run.ID)
 		var completion kernel.OwnedPhysicalCallbackCompletion
 		if err == nil {
@@ -113,7 +88,7 @@ func (s *Store) verifyRootSettlement(ctx context.Context, expected kernel.Snapsh
 		} else if !errors.Is(err, kernel.ErrNotFound) {
 			return err
 		}
-		return kernel.VerifyReturnedRootSettlementFacts(expected, current, epoch, physicalEpoch, originalLease, grant, completion, receipts, active != 0)
+		return kernel.VerifyExecutionCustodyFacts(expected, current, epoch, physicalEpoch, originalLease, active != 0, receipts, grant, completion, requirement)
 	}
-	return check(expected, current, epoch, physicalEpoch, lease, active != 0, receipts)
+	return kernel.VerifyExecutionCustodyFacts(expected, current, epoch, physicalEpoch, lease, active != 0, receipts, kernel.ChildExecutionGrant{}, kernel.OwnedPhysicalCallbackCompletion{}, requirement)
 }

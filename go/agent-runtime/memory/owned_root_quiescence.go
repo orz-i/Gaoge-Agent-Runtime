@@ -6,30 +6,10 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
-var _ kernel.OwnedRootSettlementStore = (*Store)(nil)
-var _ kernel.ReturnedRootSettlementStore = (*Store)(nil)
+var _ kernel.ExecutionCustodyStore = (*Store)(nil)
 
-func (s *Store) VerifyReturnedRootSettlement(ctx context.Context, expected kernel.Snapshot) error {
-	return s.verifyRootSettlement(ctx, expected, nil)
-}
-
-func (s *Store) VerifyBoundedToolControl(ctx context.Context, expected kernel.Snapshot) error {
-	return s.verifyRootSettlement(ctx, expected, kernel.VerifyBoundedToolControlFacts)
-}
-
-func (s *Store) VerifyCompletedToolReturn(ctx context.Context, expected kernel.Snapshot) error {
-	return s.verifyRootSettlement(ctx, expected, kernel.VerifyCompletedToolReturnFacts)
-}
-
-// VerifyOwnedRootSettlement is read-only under the same Store lock that
-// serializes physical grants and Kernel control writes. No public Run metadata
-// can substitute for the exact retired owner callback retirement.
-func (s *Store) VerifyOwnedRootSettlement(ctx context.Context, expected kernel.Snapshot) error {
-	return s.verifyRootSettlement(ctx, expected, kernel.VerifyOwnedRootSettlementFacts)
-}
-
-func (s *Store) verifyRootSettlement(ctx context.Context, expected kernel.Snapshot, check kernel.RootSettlementCheck) error {
-	if s == nil || ctx == nil || expected.Run.ID == "" {
+func (s *Store) VerifyExecutionCustody(ctx context.Context, expected kernel.Snapshot, requirement kernel.ExecutionCustody) error {
+	if s == nil || ctx == nil || expected.Run.ID == "" || !requirement.Valid() {
 		return kernel.ErrInvalidInput
 	}
 	if err := ctx.Err(); err != nil {
@@ -71,7 +51,7 @@ func (s *Store) verifyRootSettlement(ctx context.Context, expected kernel.Snapsh
 		}
 		receipts = append(receipts, r)
 	}
-	if check == nil {
+	if requirement == kernel.CustodyReturned {
 		var original memoryChildGrant
 		for _, candidate := range s.childGrants {
 			if candidate.grant.ChildRunID == expected.Run.ID {
@@ -81,8 +61,7 @@ func (s *Store) verifyRootSettlement(ctx context.Context, expected kernel.Snapsh
 				original = candidate
 			}
 		}
-		return kernel.VerifyReturnedRootSettlementFacts(expected, current, native.epoch, native.physicalEpoch,
-			native.lease, original.grant, original.completion, receipts, active)
+		return kernel.VerifyExecutionCustodyFacts(expected, current, native.epoch, native.physicalEpoch, native.lease, active, receipts, original.grant, original.completion, requirement)
 	}
-	return check(expected, current, native.epoch, native.physicalEpoch, lease, active, receipts)
+	return kernel.VerifyExecutionCustodyFacts(expected, current, native.epoch, native.physicalEpoch, lease, active, receipts, kernel.ChildExecutionGrant{}, kernel.OwnedPhysicalCallbackCompletion{}, requirement)
 }

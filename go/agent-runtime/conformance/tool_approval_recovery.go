@@ -231,7 +231,7 @@ func originalToolApprovalRecovery(t *testing.T, factory func(*testing.T) (kernel
 			if got := r.VerifiedDeferredRootControl(ctx, rt, final); got != (mode != "result-only-policy") {
 				t.Fatal("approval control classification changed", got, mode)
 			}
-			if rt.VerifyOwnedRootSettlement(ctx, final) == nil {
+			if rt.VerifyExecutionCustody(ctx, final, kernel.CustodyRetired) == nil {
 				t.Fatal("original approval policy upgraded to unrestricted scoped custody")
 			}
 			current.Content = json.RawMessage(`{"answer":"<>&"}`)

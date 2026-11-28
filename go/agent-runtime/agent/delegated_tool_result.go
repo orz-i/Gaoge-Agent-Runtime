@@ -167,7 +167,7 @@ func (a *approvedToolCalls) allBound() bool {
 func (r *Runner) VerifyDeferredToolResults(ctx context.Context, rt *kernel.Runtime, child kernel.Snapshot) bool {
 	if r == nil || rt == nil || r.runtime != rt || r.delegatedToolResults == nil ||
 		child.Run.Status != kernel.RunStatusCompleted || !TerminalPhysicalEffectsSettled(child) ||
-		rt.VerifyCompletedToolReturn(ctx, child) != nil {
+		rt.VerifyExecutionCustody(ctx, child, kernel.CustodyCompletedTool) != nil {
 		return false
 	}
 	state, err := decodeState(child.State)
