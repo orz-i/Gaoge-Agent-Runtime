@@ -1,9 +1,9 @@
 # Harness SQLite Store
 
-The desktop adapter implements `harness.Store`, the Turn budget ledger and the
-managed recovery Host Store. It uses modernc SQLite with a private on-disk file
-and runs with `CGO_ENABLED=0`. Timeline, Handoff and cancellation facts use the
-same ownership and receipt checks as the relational PostgreSQL adapter.
+The desktop adapter implements `harness.Store` and the managed recovery Host
+Store for product projections and independently fenced Host effects. It uses
+modernc SQLite with a private on-disk file and `CGO_ENABLED=0`. Timeline,
+Handoff and cancellation share the relational PostgreSQL receipt checks.
 
 ## Create and reopen a profile
 
@@ -27,11 +27,11 @@ runner, err := harness.NewRunner(harness.Dependencies{
 })
 ```
 
-The Host supplies its configured Kernel and Agent to this constructor. If a
-SharedBudget is authorized, the Host provides a single `BudgetAuthority` and
-uses its native `Adapter()` for Run/Model/Tool execution. The Kernel file owns the
-physical Run and executor authority. The Harness file owns the Session, Turn,
-Invocation, original dispatch, response receipts and budget reservations.
+For SharedBudget, pass the exact Kernel Runtime to `BudgetAuthority` and select
+its native `Adapter()` once. The Kernel file owns first-party execution and
+budget reservations; their Run/Model/Tool changes commit together. The Harness
+file owns Session/Turn/Invocation and budget projections plus dispatch/return
+evidence for independently fenced Host effects.
 
 ## Persistence and recovery
 
