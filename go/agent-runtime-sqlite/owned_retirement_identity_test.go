@@ -35,6 +35,11 @@ func TestOwnedRetirementFinishNativeIdentity(t *testing.T) {
 					t.Fatal(e)
 				}
 				request.ParentRunID = parent.ID
+				foreign := parent
+				foreign.ID = "foreign"
+				if _, e := rt.Create(t.Context(), foreign); e != nil {
+					t.Fatal(e)
+				}
 			}
 			snap, e := rt.Create(t.Context(), request)
 			if e != nil {
