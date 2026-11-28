@@ -42,10 +42,43 @@ func (settlement ChildExecutionSettlement) Matches(grant ChildExecutionGrant, sn
 		snapshot.Run.ID != grant.ChildRunID || snapshot.Run.Revision < grant.ExpectedRevision {
 		return false
 	}
-	if snapshot.Run.Kind != "agent" || grant.IsOwned() != (snapshot.Run.ParentRunID == "") {
+	if snapshot.Run.Kind != "agent" || (!grant.IsOwned() && snapshot.Run.ParentRunID == "") {
 		return false
 	}
 	return settlement.proof.Matches(grant.ChildRunID, snapshot.Run.Revision, "agent_physical_settled", grant.ID, snapshot.State, snapshot)
+}
+
+// ValidatePhysicalExecutionOwners compares the complete persisted physical
+// ancestor index, including self. Logical ownership gates admission separately;
+// it never adds an owner to this index. Retirement may inspect terminal Runs.
+func ValidatePhysicalExecutionOwners(ctx context.Context, child Run, owners []string, load func(context.Context, string) (Snapshot, error)) error {
+	seen := make(map[string]bool, len(owners))
+	for _, id := range owners {
+		if id == "" || seen[id] {
+			return ErrExecutionConflict
+		}
+		seen[id] = true
+	}
+	for depth := 0; ; depth++ {
+		if depth >= 64 || !ValidRunBudgetBinding(child) || !seen[child.ID] {
+			return ErrExecutionConflict
+		}
+		delete(seen, child.ID)
+		if child.ParentRunID == "" {
+			if len(seen) != 0 {
+				return ErrExecutionConflict
+			}
+			return nil
+		}
+		parent, err := load(ctx, child.ParentRunID)
+		if err != nil {
+			return err
+		}
+		if parent.Run.ID != child.ParentRunID || parent.Run.Actor != child.Actor || parent.Run.Thread != child.Thread || parent.Run.BudgetScopeID != child.BudgetScopeID {
+			return ErrExecutionConflict
+		}
+		child = parent.Run
+	}
 }
 
 // PhysicalApplyPermit is an opaque per-Run write proof for a Root or child

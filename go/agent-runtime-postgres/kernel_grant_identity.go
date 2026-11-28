@@ -42,14 +42,20 @@ func pgActivateEffect(tx *gorm.DB, g kernel.ChildExecutionGrant, owners []string
 	return translateKernelApplyError(tx.Create(&rows).Error)
 }
 func pgEffectOwners(tx *gorm.DB, g kernel.ChildExecutionGrant) (int64, error) {
-	var counts struct{ Count, Self int64 }
-	if e := tx.Raw("SELECT count(*) AS count,COALESCE(SUM(CASE WHEN parent_run_id=? THEN 1 ELSE 0 END),0) AS self FROM agent_kernel_effect_owners WHERE grant_id=?", g.ChildRunID, g.ID).Scan(&counts).Error; e != nil {
+	var owners []string
+	if e := tx.Model(&models.KernelEffectOwnerRecord{}).Where("grant_id=?", g.ID).Pluck("parent_run_id", &owners).Error; e != nil {
 		return 0, translateKernelError(e)
 	}
-	if counts.Self != 1 || (g.IsOwned() && counts.Count != 1) {
-		return 0, kernel.ErrExecutionConflict
+	store := &KernelStore{db: tx}
+	ctx := tx.Statement.Context
+	current, e := store.Load(ctx, g.ChildRunID)
+	if e != nil {
+		return 0, e
 	}
-	return counts.Count, nil
+	if e = kernel.ValidatePhysicalExecutionOwners(ctx, current.Run, owners, store.Load); e != nil {
+		return 0, e
+	}
+	return int64(len(owners)), nil
 }
 func pgConsumePhysicalGrant(tx *gorm.DB, g kernel.ChildExecutionGrant, receipt string) error {
 	count, e := pgEffectOwners(tx, g)

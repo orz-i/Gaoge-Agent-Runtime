@@ -9,7 +9,7 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
-// RunExecution configures the Agent Root Kernel execution lease. Nil configuration
+// RunExecution configures the Agent Kernel execution lease. Nil configuration
 // uses a unique internal owner and a checked call-window duration.
 // It uses the existing Store ExecutionLease; no extra scheduler, progress
 // record, queue, or ActiveSegment table is introduced. The Store owns time.
@@ -51,23 +51,17 @@ func safeToolRetryWindow(policy CallPolicy, available time.Duration) bool {
 	return delay <= remainder/(attempts-1)
 }
 
-// withRunOwner acquires a fresh authoritative segment before native
-// Model/Tool dispatch. Both forms of native segment already enclose
-// middleware; the borrowed child may still need its own configured lease.
-// Release only a lease acquired here. A receipt-only observer never
-// dispatches work, so it releases its own lease even on a failed lookup.
-// An ambiguous physical segment retains its owner until Store TTL expiry.
-func (runner *Runner) withRunOwner(ctx context.Context, runID string, expectedRevision uint64, receiptOnly bool,
+// withReceiptOwner is only for unmetered verifier-only recovery. Ordinary
+// execution acquires and retires its lease with its physical Grant instead.
+// The observer cannot dispatch and releases only its own acquired lease.
+func (runner *Runner) withReceiptOwner(ctx context.Context, runID string, expectedRevision uint64,
 	execute func(context.Context, *Runner) (kernel.Snapshot, error)) (kernel.Snapshot, error) {
-	owned := runner.activePhysicalGrant != nil && runner.activePhysicalGrant.IsOwned()
-	if owned && runner.rootCallbacks != nil && !runner.rootCallbacks.entered.Load() {
-		return execute(ctx, runner) // invokeNativeRun owns the first native entry
+	source, err := runner.runtime.Load(ctx, runID)
+	if err != nil {
+		return kernel.Snapshot{}, err
 	}
-	if owned || runner.activeRunLease != nil {
-		if err := runner.runtime.RequireExecution(ctx, runID); err != nil {
-			return kernel.Snapshot{}, err
-		}
-		return execute(ctx, runner)
+	if source.Run.Revision != expectedRevision || source.Run.BudgetScopeID != "" || runner.activePhysicalGrant != nil {
+		return source, kernel.ErrExecutionConflict
 	}
 	if lease, bound := runner.runtime.BoundExecutionLease(); bound {
 		if lease.RunID != runID {
@@ -81,21 +75,7 @@ func (runner *Runner) withRunOwner(ctx context.Context, runID string, expectedRe
 		scoped.externalRunLease = true
 		return execute(ctx, &scoped)
 	}
-	if runner.defaultRunOwner {
-		// Child physical admission remains its existing authority. The
-		// automatic native owner applies only to standalone Root segments.
-		snapshot, err := runner.runtime.Load(ctx, runID)
-		if err != nil {
-			return kernel.Snapshot{}, err
-		}
-		if snapshot.Run.ParentRunID != "" {
-			if err = runner.runtime.RequireExecution(ctx, runID); err != nil {
-				return kernel.Snapshot{}, err
-			}
-			return execute(ctx, runner)
-		}
-	}
-	if runner.runExecution == nil {
+	if runner.runExecution == nil || (runner.defaultRunOwner && source.Run.ParentRunID != "") {
 		if err := runner.runtime.RequireExecution(ctx, runID); err != nil {
 			return kernel.Snapshot{}, err
 		}
@@ -148,20 +128,10 @@ func (runner *Runner) withRunOwner(ctx context.Context, runID string, expectedRe
 	// many internal CAS operations without creating extra work items.
 	scoped.activeRunLease = &lease
 	result, driveErr := execute(ctx, &scoped)
-	// A late successful provider call is already recorded atomically with
-	// its receipt. Release so an explicit Resume can consume that known fact.
-	if receiptOnly || driveErr == nil || errors.Is(driveErr, ErrToolLateResult) ||
-		errors.Is(driveErr, ErrModelLateResult) {
-		releaseCtx := ctx
-		if receiptOnly {
-			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
-			defer cancel()
-			releaseCtx = cleanup
-		}
-		releaseErr := runner.runtime.ReleaseExecution(releaseCtx, lease)
-		if releaseErr != nil && !errors.Is(releaseErr, kernel.ErrExecutionConflict) {
-			return result, errors.Join(driveErr, releaseErr)
-		}
+	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	defer cancel()
+	if releaseErr := runner.runtime.ReleaseExecution(cleanup, lease); releaseErr != nil && !errors.Is(releaseErr, kernel.ErrExecutionConflict) {
+		return result, errors.Join(driveErr, releaseErr)
 	}
 	return result, driveErr
 }

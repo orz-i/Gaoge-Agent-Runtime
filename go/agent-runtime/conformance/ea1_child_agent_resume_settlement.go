@@ -36,9 +36,6 @@ type ea1ChildResumeSettlementStore struct {
 }
 
 func (s *ea1ChildResumeSettlementStore) BeginPhysicalExecution(ctx context.Context, p kernel.PhysicalAdmission) (kernel.PhysicalAdmissionResult, error) {
-	if p.Candidate().Grant.IsOwned() {
-		return s.ea1AgentAdmissionStore.BeginPhysicalExecution(ctx, p)
-	}
 	g := p.Candidate().Grant
 	if s.beforeBegin != nil {
 		s.beforeBegin(g)
@@ -53,9 +50,6 @@ func (s *ea1ChildResumeSettlementStore) BeginPhysicalExecution(ctx context.Conte
 	return result, e
 }
 func (s *ea1ChildResumeSettlementStore) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, outcome kernel.PhysicalCallbackOutcome, p kernel.PhysicalCallbackReturn) error {
-	if g.IsOwned() {
-		return s.PhysicalExecutionStore.RecordPhysicalCallbackReturn(ctx, g, rev, outcome, p)
-	}
 	if s.mode == "P3" {
 		return s.fault
 	}
@@ -167,14 +161,14 @@ func ea1ChildResumeSettlement(t *testing.T, factory func(*testing.T) (kernel.Sto
 		t.Fatal(e)
 	}
 	g, e := f.rt.LookupChildExecution(t.Context(), f.request.ID)
-	if e != nil || g.IsOwned() || g.ChildRunID != f.request.ID || g.ExpectedRevision != f.prepared.Run.Revision || f.store.begins != 1 {
+	if e != nil || !g.IsOwned() || !g.MatchesExecution(f.store.acquired) || g.ChildRunID != f.request.ID || g.ExpectedRevision != f.prepared.Run.Revision || f.store.begins != 1 {
 		t.Fatal("not original Child Resume grant", e)
 	}
 	if (phase == "P3" && f.store.marks != 0) || (phase == "P4" && f.store.marks != 1) || f.store.finishes != 0 {
 		t.Fatal("wrong actual Mark/Finish boundary")
 	}
 	ea1AssertStartSettlementReceipt(t, f.physical, f.request, f.definition, before, tool)
-	if f.physical.intents[0].SourceRevision < f.prepared.Run.Revision || f.store.acquired.RunID != f.request.ID || f.store.acquired.OwnerID != "original-resume-owner" || f.store.acquired.LeaseID == "" || f.store.acquired.Epoch == 0 || f.store.acquireCalls != 1 || f.store.releaseCalls != 1 {
+	if f.physical.intents[0].SourceRevision < f.prepared.Run.Revision || f.store.acquired.RunID != f.request.ID || f.store.acquired.OwnerID != "original-resume-owner" || f.store.acquired.LeaseID == "" || f.store.acquired.Epoch == 0 || f.store.atomicClaims != 2 || f.store.acquireCalls != 0 || f.store.releaseCalls != 0 {
 		t.Fatal("receipt not from original actual Resume native attempt")
 	}
 	ea1ChildRecoveryPhaseControls(t, f.rt, before, f.parent, f.grandparent, g)
@@ -232,7 +226,7 @@ func ea1ChildSettlementElection(t *testing.T, reopen func() (kernel.Store, kerne
 	begin := make(chan struct{}, 2)
 	allowBegin := make(chan struct{})
 	barrier := func(g kernel.ChildExecutionGrant) {
-		if g.ChildRunID != request.ID || g.ExpectedRevision != source.Run.Revision || g.IsOwned() {
+		if g.ChildRunID != request.ID || g.ExpectedRevision != source.Run.Revision || g.IsOwned() != (approval == nil || approval.native) {
 			t.Error("wrong original Child admission candidate")
 		}
 		begin <- struct{}{}
@@ -254,7 +248,7 @@ func ea1ChildSettlementElection(t *testing.T, reopen func() (kernel.Store, kerne
 	if approval != nil {
 		sa.afterBegin, sb.afterBegin = hold, hold
 	} else {
-		sa.afterAcquire, sb.afterAcquire = hold, hold
+		sa.afterAdmission, sb.afterAdmission = hold, hold
 	}
 	type outcome struct {
 		s kernel.Snapshot
@@ -312,7 +306,7 @@ func ea1ChildSettlementElection(t *testing.T, reopen func() (kernel.Store, kerne
 		t.Fatal(e)
 	}
 	g, e := ar.LookupChildExecution(t.Context(), request.ID)
-	if e != nil || g.IsOwned() || g.ExpectedRevision != source.Run.Revision || g.ChildRunID != request.ID {
+	if e != nil || g.IsOwned() != (approval == nil || approval.native) || g.ExpectedRevision != source.Run.Revision || g.ChildRunID != request.ID {
 		t.Fatal("winner scope not original", e)
 	}
 	ea1CompBarrierUnchanged(t, ar, source)
@@ -320,13 +314,13 @@ func ea1ChildSettlementElection(t *testing.T, reopen func() (kernel.Store, kerne
 	if lease.LeaseID == "" {
 		lease = sb.acquired
 	}
-	if approval == nil && (lease.RunID != request.ID || lease.LeaseID == "" || lease.Epoch == 0 || sa.acquireCalls+sb.acquireCalls != 1) {
+	if (approval == nil || approval.native) && (lease.RunID != request.ID || lease.LeaseID == "" || lease.Epoch == 0 || !g.MatchesExecution(lease) || sa.atomicClaims+sb.atomicClaims != 1 || sa.acquireCalls+sb.acquireCalls != 0) {
 		t.Fatal("winner native authority missing or loser claimed")
 	}
 	ea1ChildRecoveryPhaseControls(t, ar, current, parent, grandparent, g)
 	if approval == nil {
-		if e = a.(kernel.ExecutionStore).CheckExecution(t.Context(), request.ID, &lease); e != nil {
-			t.Fatal("rejected competing controls revoked winner epoch", e)
+		if e = a.(kernel.ExecutionStore).CheckExecution(t.Context(), request.ID, &lease); !errors.Is(e, kernel.ErrExecutionConflict) || !errors.Is(e, kernel.ErrChildExecutionBusy) {
+			t.Fatal("atomic admission permitted execution before original entry", e)
 		}
 	}
 	if deadline {
@@ -363,7 +357,7 @@ func ea1ChildSettlementElection(t *testing.T, reopen func() (kernel.Store, kerne
 		}
 		approval.assertReceipt(winner.s)
 	} else {
-		if sa.acquireCalls+sb.acquireCalls != 1 || sa.releaseCalls+sb.releaseCalls != 1 {
+		if sa.atomicClaims+sb.atomicClaims != 1 || sa.acquireCalls+sb.acquireCalls != 0 || sa.releaseCalls+sb.releaseCalls != 0 {
 			t.Fatal("unique Resume did not preserve native lease lifecycle")
 		}
 		ea1AssertStartSettlementReceipt(t, physical, request, definition, winner.s, false)

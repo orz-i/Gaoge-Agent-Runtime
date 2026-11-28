@@ -102,7 +102,7 @@ func (r *Runner) invokeNativeRun(ctx context.Context, source kernel.Snapshot, in
 	grant := r.activePhysicalGrant
 	if grant == nil || r.rootCallbacks == nil || grant.ChildRunID != inv.RunID || grant.ChildRunID != source.Run.ID ||
 		grant.ExpectedRevision != source.Run.Revision || inv.ParentRunID != source.Run.ParentRunID ||
-		grant.IsOwned() != (source.Run.ParentRunID == "") || r.rootCallbacks.entered.Load() {
+		(!grant.IsOwned() && source.Run.ParentRunID == "") || r.rootCallbacks.entered.Load() {
 		return source, kernel.ErrExecutionConflict
 	}
 	// The durable Run binding is the authority, not a newly selected
@@ -127,6 +127,9 @@ func (r *Runner) invokeNativeRun(ctx context.Context, source kernel.Snapshot, in
 			return source, err
 		}
 		if deadlineElapsed {
+			if source.Run.ParentRunID != "" {
+				return source, kernel.ErrDeadline
+			}
 			// No new Host callback may be entered. Consume at most one
 			// previously committed receipt through the native-only reducer.
 			if inv.Operation != plugin.RunResume || grant.AdmissionOperation != "resume" {

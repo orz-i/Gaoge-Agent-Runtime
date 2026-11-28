@@ -482,16 +482,17 @@ type ea1AgentAdmissionStore struct {
 
 	kernel.ExecutionQuarantineStore
 	kernel.PhysicalExecutionStore
-	acquired     kernel.ExecutionLease
-	renewals     ea1LeaseRenewals
-	releaseCalls int
-	renewCalls   int
-	acquireCalls int
-	afterCreate  func(context.Context, kernel.Snapshot) error
-	afterOwned   func(context.Context, kernel.ChildExecutionGrant) error
-	beforeOwned  func(context.Context, kernel.ChildExecutionGrant) error
-	afterEntry   func(context.Context) error
-	afterAcquire func(context.Context)
+	acquired       kernel.ExecutionLease
+	renewals       ea1LeaseRenewals
+	releaseCalls   int
+	renewCalls     int
+	acquireCalls   int
+	afterCreate    func(context.Context, kernel.Snapshot) error
+	afterOwned     func(context.Context, kernel.ChildExecutionGrant) error
+	beforeOwned    func(context.Context, kernel.ChildExecutionGrant) error
+	afterEntry     func(context.Context) error
+	afterAdmission func(context.Context)
+	atomicClaims   int
 }
 
 func ea1AgentAdmissionWrap(t *testing.T, s kernel.Store) *ea1AgentAdmissionStore {
@@ -525,9 +526,6 @@ func (s *ea1AgentAdmissionStore) AcquireExecution(ctx context.Context, r kernel.
 		return l, e
 	}
 	s.acquired = l
-	if s.afterAcquire != nil {
-		s.afterAcquire(ctx)
-	}
 	return l, e
 }
 
@@ -553,6 +551,10 @@ func (s *ea1AgentAdmissionStore) BeginPhysicalExecution(ctx context.Context, a k
 	if e == nil {
 		if a.AcquiresLease() {
 			s.acquired = v.Lease
+			s.atomicClaims++
+			if s.afterAdmission != nil {
+				s.afterAdmission(ctx)
+			}
 		}
 		if s.afterOwned != nil {
 			e = s.afterOwned(ctx, v.Grant)

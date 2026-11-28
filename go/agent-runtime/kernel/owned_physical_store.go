@@ -26,7 +26,7 @@ func ValidatePhysicalRetirement(g ChildExecutionGrant, current Snapshot, complet
 			return nil
 		}
 	} else if completion.HostCompleted && completion.ReturnRevision <= current.Run.Revision &&
-		(g.IsOwned() || completion.MatchesReturnSnapshot(current)) {
+		((g.IsOwned() && current.Run.ParentRunID == "") || completion.MatchesReturnSnapshot(current)) {
 		return nil
 	}
 	return ErrExecutionConflict
@@ -49,7 +49,7 @@ func ResolvePhysicalAdmission(current Snapshot, persisted ExecutionLease, now ti
 	var zero PhysicalAdmissionResult
 	g, claimed := permit.candidate.Grant, permit.candidate.Lease
 	if !g.IsOwned() {
-		if current.Run.Kind != "agent" {
+		if current.Run.Kind != "agent" || persisted.Epoch != 0 {
 			return zero, ErrExecutionRequired
 		}
 		claimed, persisted = ExecutionLease{}, ExecutionLease{}

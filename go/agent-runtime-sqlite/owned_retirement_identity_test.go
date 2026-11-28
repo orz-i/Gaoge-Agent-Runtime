@@ -12,7 +12,7 @@ import (
 )
 
 func TestOwnedRetirementFinishNativeIdentity(t *testing.T) {
-	for _, mode := range []string{"owner", "lease", "epoch", "cleared", "expired", "unknown-return", "foreign-return"} {
+	for _, mode := range []string{"owner", "lease", "epoch", "cleared", "expired", "unknown-return", "foreign-return", "child-expired", "child-missing-ancestor", "child-foreign-ancestor", "child-extra-ancestor"} {
 		t.Run(mode, func(t *testing.T) {
 			store, e := CreateNew(t.Context(), ownedPrivatePath(t, "identity.sqlite"))
 			if e != nil {
@@ -27,7 +27,16 @@ func TestOwnedRetirementFinishNativeIdentity(t *testing.T) {
 			if e != nil {
 				t.Fatal(e)
 			}
-			snap, e := rt.Create(t.Context(), kernel.CreateRequest{ID: "retire-root", Kind: "agent", Actor: kernel.ActorRef{TenantID: "t", ActorID: "a"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "th"}, Goal: "original", State: []byte("{}"), ExecutionRequired: true})
+			request := kernel.CreateRequest{ID: "retire-root", Kind: "agent", Actor: kernel.ActorRef{TenantID: "t", ActorID: "a"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "th"}, Goal: "original", State: []byte("{}"), ExecutionRequired: true}
+			if strings.HasPrefix(mode, "child-") {
+				parent := request
+				parent.ID = "parent"
+				if _, e := rt.Create(t.Context(), parent); e != nil {
+					t.Fatal(e)
+				}
+				request.ParentRunID = parent.ID
+			}
+			snap, e := rt.Create(t.Context(), request)
 			if e != nil {
 				t.Fatal(e)
 			}
@@ -39,11 +48,33 @@ func TestOwnedRetirementFinishNativeIdentity(t *testing.T) {
 			// Persist an exact original callback/mark fixture. A legacy mark
 			// without this return is separately required to remain fenced.
 			c := kernel.PhysicalCallbackCompletion{GrantID: g.ID, ReturnRevision: snap.Run.Revision, ReturnSourceHash: strings.Repeat("b", 64), HostCompleted: true, LeaseOwned: true}
+			if snap.Run.ParentRunID != "" {
+				c.ReturnSourceHash = kernel.ManagedDigest(kernel.PhysicalCallbackReturnPayload(snap, kernel.PhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: true}))
+			}
 			_, e = store.db.Exec("UPDATE runtime_runs SET execution_physical_epoch=? WHERE run_id=?", g.ExecutionEpoch, g.ChildRunID)
 			if e != nil {
 				t.Fatal(e)
 			}
 			seedPhysicalFixture(t, store, g)
+			if snap.Run.ParentRunID != "" {
+				if _, e := store.db.Exec("INSERT INTO runtime_effect_owners(grant_id,parent_run_id) VALUES(?,?)", g.ID, snap.Run.ParentRunID); e != nil {
+					t.Fatal(e)
+				}
+				query := ""
+				switch mode {
+				case "child-missing-ancestor":
+					query = "DELETE FROM runtime_effect_owners WHERE parent_run_id='parent'"
+				case "child-foreign-ancestor":
+					query = "UPDATE runtime_effect_owners SET parent_run_id='foreign' WHERE parent_run_id='parent'"
+				case "child-extra-ancestor":
+					query = "INSERT INTO runtime_effect_owners(grant_id,parent_run_id) VALUES('retire-grant','foreign')"
+				}
+				if query != "" {
+					if _, e := store.db.Exec(query); e != nil {
+						t.Fatal(e)
+					}
+				}
+			}
 			if mode != "unknown-return" {
 				sourceHash := c.ReturnSourceHash
 				if mode == "foreign-return" {
@@ -65,7 +96,7 @@ func TestOwnedRetirementFinishNativeIdentity(t *testing.T) {
 				query = "execution_owner='',execution_lease_id='',execution_expiry_ms=0"
 			case "expired":
 				query = "execution_expiry_ms=1"
-			case "unknown-return", "foreign-return":
+			case "unknown-return", "foreign-return", "child-expired", "child-missing-ancestor", "child-foreign-ancestor", "child-extra-ancestor":
 				query = "execution_expiry_ms=1"
 			}
 			if _, e = store.db.Exec("UPDATE runtime_runs SET "+query+" WHERE run_id=?", g.ChildRunID); e != nil {
@@ -112,7 +143,7 @@ func TestOwnedRetirementFinishNativeIdentity(t *testing.T) {
 			grants := readRows("runtime_effects")
 			receipts := readRows("runtime_effect_owners")
 			e = conformance.FinishOwnedFixture(t.Context(), rt, g, snap)
-			if mode == "expired" {
+			if mode == "expired" || mode == "child-expired" {
 				if e != nil {
 					t.Fatalf("expiry changed identity: %v", e)
 				}
@@ -131,7 +162,7 @@ func TestOwnedRetirementFinishNativeIdentity(t *testing.T) {
 					t.Fatal("rejected finish changed durable grants/receipts")
 				}
 			}
-			if mode == "expired" {
+			if mode == "expired" || mode == "child-expired" {
 				current, e := rt.Load(t.Context(), g.ChildRunID)
 				native, _, le := sqliteManagedLease(t.Context(), store.db, g.ChildRunID)
 				if e != nil || le != nil || kernel.ManagedDigest(current) != kernel.ManagedDigest(snap) || native.OwnerID != "" || native.LeaseID != "" || native.Epoch != lease.Epoch || !native.ExpiresAt.IsZero() {

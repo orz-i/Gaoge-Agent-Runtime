@@ -13,7 +13,7 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
 )
 
-// IsOwned distinguishes ANY native binding from separately owned child grants.
+// IsOwned identifies a native lease binding, independently of physical parentage.
 // Partial bindings are owned-invalid, never a fallback to unrelated authority.
 func (g ChildExecutionGrant) IsOwned() bool {
 	return g.ExecutionOwnerID != "" || g.ExecutionLeaseID != "" || g.ExecutionEpoch != 0 || g.AdmissionSourceHash != "" || g.AdmissionOperation != ""
@@ -130,7 +130,7 @@ func (p PhysicalAdmission) Matches(g ChildExecutionGrant, s Snapshot, l Executio
 	if !g.Identity().Valid() || g.ExpectedRevision == 0 ||
 		g.ID != c.Grant.ID || g.ChildRunID != c.Grant.ChildRunID || g.ExpectedRevision != c.Grant.ExpectedRevision ||
 		s.Run.Kind != "agent" || s.Run.ID != g.ChildRunID || s.Run.Revision != g.ExpectedRevision ||
-		g.IsOwned() != c.Grant.IsOwned() || g.IsOwned() != (s.Run.ParentRunID == "") ||
+		g.IsOwned() != c.Grant.IsOwned() || (!g.IsOwned() && s.Run.ParentRunID == "") ||
 		(s.Run.Status != RunStatusRunning && s.Run.Status != RunStatusWaitingInput) {
 		return false
 	}
@@ -146,7 +146,7 @@ func (p PhysicalAdmission) Matches(g ChildExecutionGrant, s Snapshot, l Executio
 			return false
 		}
 		if p.IsManagedRecovery() {
-			return p.AcquiresLease() && g.AdmissionOperation == "managed_resume" && !strings.HasPrefix(g.ID, ownedDispatchGrantPrefix) &&
+			return s.Run.ParentRunID == "" && p.AcquiresLease() && g.AdmissionOperation == "managed_resume" && !strings.HasPrefix(g.ID, ownedDispatchGrantPrefix) &&
 				p.recovery.Matches(p.recovery.transfer, ManagedResume) && ManagedSourceMatches(p.recovery.transfer.SafePoint, s)
 		}
 		if g.AdmissionOperation != p.operation {
@@ -238,12 +238,14 @@ func (r *Runtime) AdmitPhysicalExecution(ctx context.Context, s Snapshot, q Exec
 	l, bound := r.BoundExecutionLease()
 	parented := s.Run.ParentRunID != ""
 	p := PhysicalAdmission{proof: proof, operation: operation, dispatchID: dispatchID, acquire: q}
-	if parented {
-		if q != (ExecutionAcquireRequest{}) || dispatchID != "" {
-			return nil, zero, ErrExecutionConflict
-		}
-		l = ExecutionLease{}
-	} else {
+	if bound && l.RunID != id {
+		return nil, zero, ErrExecutionConflict
+	}
+	leased := bound || q != (ExecutionAcquireRequest{})
+	if parented && dispatchID != "" {
+		return nil, zero, ErrExecutionConflict
+	}
+	if !parented || leased {
 		if !r.SupportsPhysicalExecution() || !r.SupportsExecution() {
 			return nil, zero, ErrExecutionRequired
 		}
@@ -277,7 +279,7 @@ func (r *Runtime) AdmitPhysicalExecution(ctx context.Context, s Snapshot, q Exec
 		return nil, zero, e
 	}
 	g := ChildExecutionGrant{ID: gid, ChildRunID: id, ExpectedRevision: rev}
-	if parented {
+	if !leased && parented {
 		p.candidate.Grant = g
 		return r.admitPhysical(ctx, s, p)
 	}

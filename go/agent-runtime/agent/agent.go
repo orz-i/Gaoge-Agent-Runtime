@@ -935,13 +935,9 @@ func (runner *Runner) continuePreparedRun(ctx context.Context, snapshot kernel.S
 	if deferred {
 		return snapshot, nil
 	}
-	// The original parent's Store Grant (if any) already encloses every
-	// caller-supplied Host Run middleware before this code is reachable.
-	// Standalone Root Agent execution retains its original Run Owner lease.
-	driven, driveErr := runner.withRunOwner(ctx, snapshot.Run.ID, snapshot.Run.Revision, false, func(driveCtx context.Context, scoped *Runner) (kernel.Snapshot, error) {
-		scoped.publishRunEvent(driveCtx, snapshot, EventRunStarted, false)
-		return scoped.drive(driveCtx, snapshot)
-	})
+	// Physical admission already bound the only execution owner.
+	runner.publishRunEvent(ctx, snapshot, EventRunStarted, false)
+	driven, driveErr := runner.drive(ctx, snapshot)
 	if driveErr != nil && driven.Run.ID == "" {
 		return snapshot, driveErr
 	}
@@ -1127,13 +1123,10 @@ func (runner *Runner) Resume(ctx context.Context, runID string, expectedRevision
 	// side effect. A runner without RunExecution still follows the original
 	// pre-dispatch Store guard and will be rejected on fenced Runs.
 	resumed, resumeErr := runner.withNativeSegment(ctx, snapshot, "resume", func(physicalCtx context.Context, physical *Runner, admitted kernel.Snapshot) (kernel.Snapshot, error) {
-		return physical.withRunOwner(physicalCtx, admitted.Run.ID, admitted.Run.Revision, false,
-			func(driveCtx context.Context, scoped *Runner) (kernel.Snapshot, error) {
-				invocation := runInvocation(plugin.RunResume, admitted)
-				return scoped.invokeNativeRun(driveCtx, admitted, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
-					return scoped.resumeRunning(nextCtx, admitted, state)
-				})
-			})
+		invocation := runInvocation(plugin.RunResume, admitted)
+		return physical.invokeNativeRun(physicalCtx, admitted, invocation, func(nextCtx context.Context) (kernel.Snapshot, error) {
+			return physical.resumeRunning(nextCtx, admitted, state)
+		})
 	})
 	if resumeErr != nil && resumed.Run.ID == "" {
 		return snapshot, resumeErr

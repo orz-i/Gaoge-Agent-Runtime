@@ -34,12 +34,13 @@ func RunEA1RootAgentElectionSuite(t *testing.T, factory func(*testing.T) (kernel
 
 type ea1ElectionStore struct {
 	*ea1AgentReceiptFault
-	created          func(kernel.Snapshot)
-	acquired         kernel.ExecutionLease
-	receiptCommitted func(kernel.Snapshot)
-	afterApply       func(kernel.StoreMutation)
-	afterEntry       func()
-	afterAcquire     func()
+	created                    func(kernel.Snapshot)
+	acquired                   kernel.ExecutionLease
+	receiptCommitted           func(kernel.Snapshot)
+	afterApply                 func(kernel.StoreMutation)
+	afterEntry                 func()
+	afterAdmission             func()
+	acquireCalls, releaseCalls int
 }
 
 func (s *ea1ElectionStore) Create(ctx context.Context, r kernel.Record, e []kernel.EventDraft) (kernel.Snapshot, error) {
@@ -50,16 +51,18 @@ func (s *ea1ElectionStore) Create(ctx context.Context, r kernel.Record, e []kern
 	return out, err
 }
 
-// Parented runs still use the real child lease admission.
+// Standalone lease calls are counted separately from atomic physical admission.
 func (s *ea1ElectionStore) AcquireExecution(ctx context.Context, req kernel.ExecutionAcquireRequest) (kernel.ExecutionLease, error) {
+	s.acquireCalls++
 	lease, err := s.ExecutionStore.AcquireExecution(ctx, req)
 	if err == nil {
 		s.acquired = lease
-		if s.afterAcquire != nil {
-			s.afterAcquire()
-		}
 	}
 	return lease, err
+}
+func (s *ea1ElectionStore) ReleaseExecution(ctx context.Context, lease kernel.ExecutionLease) error {
+	s.releaseCalls++
+	return s.ExecutionStore.ReleaseExecution(ctx, lease)
 }
 
 func (s *ea1ElectionStore) BeginPhysicalExecution(ctx context.Context, a kernel.PhysicalAdmission) (kernel.PhysicalAdmissionResult, error) {
@@ -69,6 +72,9 @@ func (s *ea1ElectionStore) BeginPhysicalExecution(ctx context.Context, a kernel.
 	v, e := s.PhysicalExecutionStore.BeginPhysicalExecution(ctx, a)
 	if e == nil && a.AcquiresLease() {
 		s.acquired = v.Lease
+		if s.afterAdmission != nil {
+			s.afterAdmission()
+		}
 	}
 	return v, e
 }

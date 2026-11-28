@@ -42,7 +42,7 @@ func (r *OwnedRetirementReceipt) UnmarshalJSON(raw []byte) error {
 
 func (e OwnedSettlementEvidence) Valid() bool {
 	g, s, c := e.Grant, e.Snapshot, e.Completion
-	if e.Version != 1 || !g.IsOwned() || g.ID == "" || !g.MatchesExecution(ExecutionLease{RunID: g.ChildRunID, OwnerID: g.ExecutionOwnerID, LeaseID: g.ExecutionLeaseID, Epoch: g.ExecutionEpoch}) || s.Run.ID != g.ChildRunID || s.Run.Kind != "agent" || s.Run.ParentRunID != "" || s.Run.Revision < g.ExpectedRevision {
+	if e.Version != 1 || !g.IsOwned() || g.ID == "" || !g.MatchesExecution(ExecutionLease{RunID: g.ChildRunID, OwnerID: g.ExecutionOwnerID, LeaseID: g.ExecutionLeaseID, Epoch: g.ExecutionEpoch}) || s.Run.ID != g.ChildRunID || s.Run.Kind != "agent" || s.Run.Revision < g.ExpectedRevision {
 		return false
 	}
 	if c.GrantID == "" {
@@ -51,14 +51,15 @@ func (e OwnedSettlementEvidence) Valid() bool {
 	if c.NotEntered() {
 		return c.MatchesNotEnteredSnapshot(g, s)
 	}
-	return ValidatePhysicalCompletion(g, c) == nil && c.HostCompleted && c.ReturnRevision <= s.Run.Revision
+	return ValidatePhysicalCompletion(g, c) == nil && c.HostCompleted && c.ReturnRevision <= s.Run.Revision &&
+		(s.Run.ParentRunID == "" || (c.MatchesReturnSnapshot(s) && c.ControlCustody == "" && c.ToolReturns == ""))
 }
 
 // The original selected Transfer is stored once. Its terminal view is
 // reconstructed from the single committed retirement Snapshot; the digest
 // binds every source/selection/lease field to that exact view.
 func closeManagedRetirement(g ChildExecutionGrant, s Snapshot, a ManagedAuthority, t ManagedTransfer) (ManagedTransfer, error) {
-	if g.AdmissionOperation != "managed_resume" || !t.Valid() || !managedResumeSelectionMatches(t) ||
+	if s.Run.ParentRunID != "" || g.AdmissionOperation != "managed_resume" || !t.Valid() || !managedResumeSelectionMatches(t) ||
 		t.SafePoint.Host.KernelAuthority != a || t.SafePoint.Host.RunID != g.ChildRunID ||
 		t.SuccessorGrant != g || t.Revision == 0 || t.Terminal != nil || s.Run.ID != g.ChildRunID {
 		return ManagedTransfer{}, ErrExecutionConflict

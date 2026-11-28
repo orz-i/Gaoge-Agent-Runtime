@@ -44,9 +44,6 @@ type ea1ChildRecoveryPhaseStore struct {
 }
 
 func (s *ea1ChildRecoveryPhaseStore) BeginPhysicalExecution(ctx context.Context, p kernel.PhysicalAdmission) (kernel.PhysicalAdmissionResult, error) {
-	if p.Candidate().Grant.IsOwned() {
-		return s.ea1AgentAdmissionStore.BeginPhysicalExecution(ctx, p)
-	}
 	result, err := s.ea1AgentAdmissionStore.BeginPhysicalExecution(ctx, p)
 	if err == nil && s.afterBegin != nil {
 		s.afterBegin()
@@ -55,9 +52,6 @@ func (s *ea1ChildRecoveryPhaseStore) BeginPhysicalExecution(ctx context.Context,
 }
 
 func (s *ea1ChildRecoveryPhaseStore) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, outcome kernel.PhysicalCallbackOutcome, p kernel.PhysicalCallbackReturn) error {
-	if g.IsOwned() {
-		return s.PhysicalExecutionStore.RecordPhysicalCallbackReturn(ctx, g, rev, outcome, p)
-	}
 	if s.beforeMark != nil {
 		s.beforeMark()
 	}
@@ -243,8 +237,8 @@ func ea1ChildRecoveryPhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 		t.Fatal(e)
 	}
 	g, e := rt.LookupChildExecution(t.Context(), request.ID)
-	if e != nil || g.ChildRunID != request.ID || g.ExpectedRevision != created.Run.Revision || g.IsOwned() {
-		t.Fatal("original child grant replaced by Root authority", e)
+	if e != nil || g.ChildRunID != request.ID || g.ExpectedRevision != created.Run.Revision || !g.IsOwned() || !g.MatchesExecution(admission.acquired) || admission.acquireCalls+admission.releaseCalls != 0 {
+		t.Fatal("original child grant lost atomic lease authority", e)
 	}
 	ea1AssertStartSettlementReceipt(t, physical, request, definition, before, withTool)
 	if phase == "unmarked" && store.marks != 0 {

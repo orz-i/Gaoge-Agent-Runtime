@@ -50,9 +50,6 @@ type ea1ChildCancelStore struct {
 }
 
 func (s *ea1ChildCancelStore) BeginPhysicalExecution(ctx context.Context, p kernel.PhysicalAdmission) (kernel.PhysicalAdmissionResult, error) {
-	if p.Candidate().Grant.IsOwned() {
-		return s.ea1AgentAdmissionStore.BeginPhysicalExecution(ctx, p)
-	}
 	result, e := s.ea1AgentAdmissionStore.BeginPhysicalExecution(ctx, p)
 	if e == nil {
 		s.begins++
@@ -102,9 +99,6 @@ func (s *ea1ChildCancelStore) Commit(commitCtx context.Context, commitID string,
 }
 
 func (s *ea1ChildCancelStore) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, outcome kernel.PhysicalCallbackOutcome, p kernel.PhysicalCallbackReturn) error {
-	if g.IsOwned() {
-		return s.PhysicalExecutionStore.RecordPhysicalCallbackReturn(ctx, g, rev, outcome, p)
-	}
 	if g.ChildRunID != s.runID {
 		return s.PhysicalExecutionStore.RecordPhysicalCallbackReturn(ctx, g, rev, outcome, p)
 	}
@@ -292,7 +286,7 @@ func ea1ChildCancelUnknownWithModelReadDelay(
 		t.Fatal(e)
 	}
 	g, e := f.rt.LookupChildExecution(t.Context(), f.request.ID)
-	if e != nil || g.IsOwned() || g.ChildRunID != f.request.ID || g.ExpectedRevision != f.prepared.Run.Revision {
+	if e != nil || g.IsOwned() != native || g.ChildRunID != f.request.ID || g.ExpectedRevision != f.prepared.Run.Revision || f.store.acquireCalls+f.store.releaseCalls != 0 {
 		t.Fatal("unknown original child scope missing", e)
 	}
 	{
@@ -405,7 +399,7 @@ func ea1ChildCancelSettlement(t *testing.T, factory func(*testing.T) (kernel.Sto
 		t.Fatal(e)
 	}
 	g, e := f.rt.LookupChildExecution(t.Context(), f.request.ID)
-	if e != nil || g.IsOwned() || g.ExpectedRevision != f.prepared.Run.Revision {
+	if e != nil || g.IsOwned() != native || g.ExpectedRevision != f.prepared.Run.Revision || f.store.acquireCalls+f.store.releaseCalls != 0 {
 		t.Fatal("original child settlement scope absent", e)
 	}
 	ea1AssertStartSettlementReceipt(t, f.physical, f.request, f.definition, before, tool)

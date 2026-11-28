@@ -118,8 +118,14 @@ func loadPhysicalGrant(ctx context.Context, q schemaQuery, runID, grantID string
 	if count == 0 {
 		return g, kernel.ErrNotFound
 	}
-	if count != 1 || g.ChildRunID != runID || self != 1 || (g.IsOwned() && owners != 1) {
+	if count != 1 || g.ChildRunID != runID || self != 1 {
 		return g, kernel.ErrExecutionConflict
+	}
+	if e = rows.Close(); e != nil {
+		return g, e
+	}
+	if _, e = sqliteEffectOwners(ctx, q, g); e != nil {
+		return g, e
 	}
 	return g, nil
 }

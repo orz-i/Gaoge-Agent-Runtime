@@ -179,7 +179,7 @@ func (c PhysicalCallbackCompletion) NotEntered() bool {
 // their own transfer lifecycle and are not ordinary no-entry retirements.
 func (c PhysicalCallbackCompletion) MatchesNotEnteredSnapshot(g ChildExecutionGrant, s Snapshot) bool {
 	if !c.NotEntered() || ValidatePhysicalCompletion(g, c) != nil || s.Run.ID != g.ChildRunID ||
-		s.Run.Kind != "agent" || s.Run.ParentRunID != "" || s.Run.Revision != g.ExpectedRevision {
+		s.Run.Kind != "agent" || s.Run.Revision != g.ExpectedRevision {
 		return false
 	}
 	o := PhysicalCallbackOutcome{LeaseOwned: c.LeaseOwned, ControlCustody: OwnedCustodyNotEntered}
@@ -200,13 +200,17 @@ func (p PhysicalCallbackReturn) Matches(g ChildExecutionGrant, s Snapshot, o Phy
 		return false
 	}
 	if o.ControlCustody == OwnedCustodyNotEntered {
-		return g.IsOwned() && s.Run.ParentRunID == "" && ordinaryOwnedOperation(g.AdmissionOperation) && !o.HostCompleted && o.ToolReturns == "" &&
+		return g.IsOwned() && ordinaryOwnedOperation(g.AdmissionOperation) && !o.HostCompleted && o.ToolReturns == "" &&
 			s.Run.Revision == g.ExpectedRevision && p.proof.Matches(s.Run.ID, s.Run.Revision, "agent_owned_callback_not_entered", g.ID, PhysicalCallbackReturnPayload(s, o), nil)
 	}
 	// A borrowed operation still requires its exact complete return;
 	// it has no lease ownership or deferred-control custody to transfer.
-	if g.IsOwned() {
-		if s.Run.ParentRunID != "" || !o.ControlCustody.Valid() || !o.ToolReturns.Valid() ||
+	if s.Run.ParentRunID != "" {
+		if !o.HostCompleted || o.ControlCustody != "" || o.ToolReturns != "" || (!g.IsOwned() && o.LeaseOwned) {
+			return false
+		}
+	} else if g.IsOwned() {
+		if !o.ControlCustody.Valid() || !o.ToolReturns.Valid() ||
 			(o.ToolReturns != "" && (!o.HostCompleted || o.ControlCustody == OwnedCustodyPrepared)) ||
 			(o.ControlCustody == OwnedCustodyPrepared && g.AdmissionOperation != "prepare") {
 			return false

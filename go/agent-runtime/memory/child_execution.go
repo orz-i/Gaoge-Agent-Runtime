@@ -74,6 +74,9 @@ func (store *Store) FinishChildExecution(ctx context.Context, grant kernel.Child
 	if !ok || previous.grant != grant {
 		return kernel.ErrExecutionConflict
 	}
+	if err := store.validateEffectOwnersLocked(previous); err != nil {
+		return err
+	}
 	child, err := store.snapshotLocked(grant.ChildRunID)
 	if err != nil {
 		return err
@@ -104,6 +107,9 @@ func (store *Store) LookupChildExecution(ctx context.Context, childID string) (k
 		}
 		if value.grant.ChildRunID != childID {
 			continue
+		}
+		if err := store.validateEffectOwnersLocked(value); err != nil {
+			return kernel.ChildExecutionGrant{}, err
 		}
 		if candidate.ID != "" {
 			return kernel.ChildExecutionGrant{}, kernel.ErrExecutionConflict

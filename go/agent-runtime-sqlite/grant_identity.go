@@ -43,15 +43,35 @@ func sqliteActivateEffect(ctx context.Context, tx *sql.Tx, g kernel.ChildExecuti
 	return nil
 }
 func sqliteEffectOwners(ctx context.Context, q schemaQuery, g kernel.ChildExecutionGrant) (int, error) {
-	var count, self int
-	e := q.QueryRowContext(ctx, "SELECT count(*),COALESCE(SUM(CASE WHEN parent_run_id=? THEN 1 ELSE 0 END),0) FROM runtime_effect_owners WHERE grant_id=?", g.ChildRunID, g.ID).Scan(&count, &self)
+	rows, e := q.QueryContext(ctx, "SELECT parent_run_id FROM runtime_effect_owners WHERE grant_id=?", g.ID)
 	if e != nil {
 		return 0, conflictOrDatabaseError(e)
 	}
-	if self != 1 || (g.IsOwned() && count != 1) {
-		return 0, kernel.ErrExecutionConflict
+	var owners []string
+	for rows.Next() {
+		var id string
+		if e = rows.Scan(&id); e != nil {
+			_ = rows.Close()
+			return 0, e
+		}
+		owners = append(owners, id)
 	}
-	return count, nil
+	e = rows.Err()
+	_ = rows.Close()
+	if e != nil {
+		return 0, e
+	}
+	load := func(ctx context.Context, id string) (kernel.Snapshot, error) {
+		return decodeSnapshot(ctx, q, q.QueryRowContext(ctx, readSnapshotSQL, id), nil)
+	}
+	current, e := load(ctx, g.ChildRunID)
+	if e != nil {
+		return 0, e
+	}
+	if e = kernel.ValidatePhysicalExecutionOwners(ctx, current.Run, owners, load); e != nil {
+		return 0, e
+	}
+	return len(owners), nil
 }
 func sqliteConsumePhysicalGrant(ctx context.Context, tx *sql.Tx, g kernel.ChildExecutionGrant, retirement string) error {
 	count, e := sqliteEffectOwners(ctx, tx, g)

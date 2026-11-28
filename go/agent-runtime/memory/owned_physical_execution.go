@@ -117,10 +117,36 @@ func (s *Store) loadOwnedPhysicalGrantLocked(g kernel.ChildExecutionGrant) (memo
 		}
 		return memoryEffect{}, kernel.ErrNotFound
 	}
-	if original.grant != g || len(original.ancestors) != 1 || original.ancestors[0] != g.ChildRunID {
+	if original.grant != g || s.validateEffectOwnersLocked(original) != nil {
 		return memoryEffect{}, kernel.ErrExecutionConflict
 	}
 	return original, nil
+}
+
+func (s *Store) validateEffectOwnersLocked(effect memoryEffect) error {
+	current, err := s.snapshotLocked(effect.grant.ChildRunID)
+	if err != nil {
+		return err
+	}
+	// Compare both directions: no missing, extra or foreign index entries.
+	for id, grants := range s.effectOwners {
+		_, indexed := grants[effect.grant.ID]
+		found := false
+		for _, owner := range effect.ancestors {
+			found = found || owner == id
+		}
+		if indexed != found {
+			return kernel.ErrExecutionConflict
+		}
+	}
+	for _, id := range effect.ancestors {
+		if _, ok := s.effectOwners[id][effect.grant.ID]; !ok {
+			return kernel.ErrExecutionConflict
+		}
+	}
+	return kernel.ValidatePhysicalExecutionOwners(context.Background(), current.Run, effect.ancestors, func(_ context.Context, id string) (kernel.Snapshot, error) {
+		return s.snapshotLocked(id)
+	})
 }
 
 func (s *Store) CheckOwnedPhysicalEntry(ctx context.Context, g kernel.ChildExecutionGrant, l kernel.ExecutionLease, expected kernel.Snapshot) (kernel.OwnedPhysicalEntryWindow, error) {
@@ -184,8 +210,11 @@ func (s *Store) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.Child
 		return kernel.ErrExecutionConflict
 	}
 	native := s.runs[g.ChildRunID].execution
+	if err := s.validateEffectOwnersLocked(original); err != nil {
+		return err
+	}
 	if g.IsOwned() {
-		if len(original.ancestors) != 1 || original.ancestors[0] != g.ChildRunID || native.epoch != g.ExecutionEpoch {
+		if native.epoch != g.ExecutionEpoch {
 			return kernel.ErrExecutionConflict
 		}
 	} else if err := s.nativeEntryGateLocked(g.ChildRunID); err != nil {

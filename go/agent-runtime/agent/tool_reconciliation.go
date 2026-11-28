@@ -104,7 +104,7 @@ func (runner *Runner) ReconcileToolOutcome(ctx context.Context, runID string,
 	if snapshot.Run.BudgetScopeID != "" {
 		return snapshot, errors.Join(ErrToolOutcomeUnknown, ErrToolReceiptMismatch)
 	}
-	return runner.withRunOwner(ctx, runID, expectedRevision, true,
+	return runner.withReceiptOwner(ctx, runID, expectedRevision,
 		func(nextCtx context.Context, scoped *Runner) (kernel.Snapshot, error) {
 			fresh, freshState, loadErr := scoped.loadState(nextCtx, runID)
 			if loadErr != nil {

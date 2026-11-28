@@ -97,7 +97,7 @@ func ea1NewChildApprovalSettlement(t *testing.T, factory func(*testing.T) (kerne
 	if native {
 		expectedClaims = 1
 	}
-	if store.acquireCalls != expectedClaims || store.releaseCalls != expectedClaims {
+	if store.atomicClaims != expectedClaims || store.acquireCalls != 0 || store.releaseCalls != 0 {
 		t.Fatal("setup did not preserve explicit/default Child native policy")
 	}
 	store.begins, store.marks, store.finishes = 0, 0, 0
@@ -183,7 +183,7 @@ func ea1ChildApprovalSettlement(t *testing.T, factory func(*testing.T) (kernel.S
 		t.Fatal(e)
 	}
 	g, e := f.rt.LookupChildExecution(t.Context(), f.request.ID)
-	if e != nil || g.IsOwned() || g.ExpectedRevision != f.waiting.Run.Revision || g.ChildRunID != f.request.ID || f.store.begins != 1 {
+	if e != nil || g.IsOwned() != native || g.ExpectedRevision != f.waiting.Run.Revision || g.ChildRunID != f.request.ID || f.store.begins != 1 {
 		t.Fatal("original approval ChildGrant missing", e)
 	}
 	if (phase == "P3" && f.store.marks != 0) || (phase == "P4" && f.store.marks != 1) || f.store.finishes != 0 {
@@ -220,9 +220,9 @@ func ea1ChildApprovalSettlement(t *testing.T, factory func(*testing.T) (kernel.S
 	f.assertReceipt(before)
 	expectedClaims := 0
 	if native {
-		expectedClaims = 1
+		expectedClaims = 2
 	}
-	if f.store.acquireCalls != expectedClaims || f.store.releaseCalls != expectedClaims {
+	if f.store.atomicClaims != expectedClaims || f.store.acquireCalls != 0 || f.store.releaseCalls != 0 {
 		t.Fatal("approval/recovery fabricated native acquisition")
 	}
 }

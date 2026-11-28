@@ -12,7 +12,7 @@ import (
 
 // RunEA1ChildAgentResumePhases measures actual Resume only, after PrepareRun
 // has created the original child and retired its setup grant without dispatch.
-// Child grants retain their original protocol, not Root-owned lease bindings.
+// Child grants retain strict effect semantics with an atomic lease binding.
 func RunEA1ChildAgentResumePhases(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store)) {
 	for _, kind := range []string{"missing", "stale-revision", "terminal", "parent-wins", "stale-admission"} {
 		t.Run("P0/"+kind, func(t *testing.T) { ea1ChildResumePreflight(t, factory, kind) })
@@ -20,13 +20,13 @@ func RunEA1ChildAgentResumePhases(t *testing.T, factory func(*testing.T) (kernel
 	t.Run("P1/admitted-before-dispatch", func(t *testing.T) {
 		f := ea1NewChildResume(t, factory, false)
 		checks := 0
-		f.store.afterAcquire = func() {
+		f.store.afterAdmission = func() {
 			checks++
 			s, g := f.load(f.peer), f.grant(f.peer)
 			if !reflect.DeepEqual(s, f.prepared) || len(f.physical.requests) != 0 || len(f.physical.toolRequests) != 0 {
 				t.Fatal("Resume dispatched before admission checks")
 			}
-			f.fence(s, g, true)
+			f.fence(s, g, true, false)
 		}
 		out, err := f.runner(f.rt, "original-resume-owner", true).Resume(t.Context(), f.request.ID, f.prepared.Run.Revision)
 		if err != nil || checks != 1 {
@@ -84,7 +84,7 @@ func (f *ea1ChildResumeFixture) grant(rt *kernel.Runtime) kernel.ChildExecutionG
 	if e != nil {
 		f.t.Fatal(e)
 	}
-	if g.IsOwned() || g.ChildRunID != f.request.ID || g.ExpectedRevision != f.prepared.Run.Revision {
+	if !g.IsOwned() || g.ChildRunID != f.request.ID || g.ExpectedRevision != f.prepared.Run.Revision || !g.MatchesExecution(f.store.acquired) {
 		f.t.Fatal("Resume grant not bound to original prepared revision")
 	}
 	return g
@@ -119,7 +119,7 @@ func ea1ChildResumePreflight(t *testing.T, factory func(*testing.T) (kernel.Stor
 			f.ancestors[0] = s
 		}
 	case "stale-admission":
-		expected = kernel.ErrExecutionConflict
+		expected = kernel.ErrConflict
 		f.store.beforeAdmission = func(g kernel.ChildExecutionGrant) {
 			l, e := f.peer.AcquireExecution(ctx, kernel.ExecutionAcquireRequest{RunID: g.ChildRunID, OwnerID: "admission-winner", LeaseDuration: 2 * time.Second})
 			if e != nil {
@@ -167,7 +167,7 @@ func ea1ChildResumePhase(t *testing.T, factory func(*testing.T) (kernel.Store, k
 		if f.store.acquired.LeaseID == "" {
 			t.Fatal("Resume Host/physical callback ran before native owner")
 		}
-		f.fence(s, g, true)
+		f.fence(s, g, true, true)
 	}
 	{
 		f.store.event = "agent.model_invocation.completed"

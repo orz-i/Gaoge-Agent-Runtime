@@ -17,7 +17,7 @@ import (
 )
 
 // RunEA1ChildAgentControlPhases measures only actual ResolveApproval.
-// Child native approval does not acquire a Root-owned lease. Default child
+// Child native approval binds its own lease atomically. Default child
 // approval can continue the original Tool inside this same public call.
 func RunEA1ChildAgentControlPhases(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store)) {
 	for _, v := range []string{"missing", "stale", "not-waiting", "missing-preflight", "preflight-rejected", "parent-wins", "invalid-decision", "foreign-checkpoint"} {
@@ -177,7 +177,7 @@ func (f *ea1ChildControlFixture) assertResolved(s kernel.Snapshot) {
 }
 func (f *ea1ChildControlFixture) scope() kernel.ChildExecutionGrant {
 	g, e := f.peer.LookupChildExecution(f.t.Context(), f.request.ID)
-	if e != nil || g.IsOwned() || g.ExpectedRevision != f.waiting.Run.Revision || g.ChildRunID != f.request.ID {
+	if e != nil || g.IsOwned() != f.native || g.ExpectedRevision != f.waiting.Run.Revision || g.ChildRunID != f.request.ID {
 		f.t.Fatalf("wrong actual child approval grant: %+v %v", g, e)
 	}
 	return g
@@ -204,8 +204,11 @@ func (f *ea1ChildControlFixture) fence() {
 			f.unchanged(f.peer, s, g)
 		}
 	}
-	if f.store.acquired != f.setupLease {
-		t.Fatal("child approval unexpectedly acquired new native owner")
+	if f.store.acquireCalls+f.store.releaseCalls != 0 {
+		t.Fatal("child approval used standalone lease operations")
+	}
+	if (f.native && (!g.MatchesExecution(f.store.acquired) || f.store.acquired.Epoch <= f.setupLease.Epoch)) || (!f.native && f.store.acquired != f.setupLease) {
+		t.Fatal("child approval lost its original atomic lease policy")
 	}
 	if f.native {
 		if e := f.peerStore.(kernel.ExecutionStore).CheckExecution(ctx, s.Run.ID, &f.store.acquired); !errors.Is(e, kernel.ErrExecutionRequired) {

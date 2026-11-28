@@ -23,7 +23,7 @@ func (s *Store) retireOwnedLocked(previous memoryEffect, permit kernel.ChildExec
 	}
 	native := s.runs[g.ChildRunID].execution
 	if native.epoch != g.ExecutionEpoch || native.physicalEpoch != g.ExecutionEpoch ||
-		native.quarantineRev != 0 || len(previous.ancestors) != 1 || previous.ancestors[0] != g.ChildRunID ||
+		native.quarantineRev != 0 || s.validateEffectOwnersLocked(previous) != nil ||
 		len(s.effectOwners[g.ChildRunID]) != 1 {
 		return kernel.ErrExecutionConflict
 	}

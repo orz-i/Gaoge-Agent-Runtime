@@ -27,7 +27,7 @@ func pgOwnedPhysicalGrants(tx *gorm.DB, runID string) ([]kernel.ChildExecutionGr
 		return nil, e
 	}
 	var rows []models.KernelEffectRecord
-	if err := pgActiveEffects(tx).Where(activeEffectScope, runID, runID).Find(&rows).Error; err != nil {
+	if err := pgActiveEffects(tx).Where("child_run_id=?", runID).Find(&rows).Error; err != nil {
 		return nil, translateKernelError(err)
 	}
 	var grants []kernel.ChildExecutionGrant
@@ -97,10 +97,10 @@ func (store *KernelStore) BeginPhysicalExecution(ctx context.Context, admission 
 			if e = pgNativeEntryGate(tx, grant.ChildRunID); e != nil {
 				return e
 			}
-			if source.Run.Kind != snapshot.Run.Kind || source.Run.ParentRunID != snapshot.Run.ParentRunID ||
-				source.Run.LogicalParentRunID != snapshot.Run.LogicalParentRunID || source.Run.Actor != snapshot.Run.Actor || source.Run.Thread != snapshot.Run.Thread {
-				return kernel.ErrExecutionConflict
-			}
+		}
+		if source.Run.Kind != snapshot.Run.Kind || source.Run.ParentRunID != snapshot.Run.ParentRunID ||
+			source.Run.LogicalParentRunID != snapshot.Run.LogicalParentRunID || source.Run.Actor != snapshot.Run.Actor || source.Run.Thread != snapshot.Run.Thread {
+			return kernel.ErrExecutionConflict
 		}
 		now, e := pgStoreNow(tx)
 		if e != nil {
@@ -291,8 +291,11 @@ func pgLoadPhysicalGrant(tx *gorm.DB, id, grantID string) (models.KernelEffectRe
 	if len(rows) == 0 {
 		return models.KernelEffectRecord{}, kernel.ErrNotFound
 	}
-	if len(rows) != 1 || rows[0].ChildRunID != id || rows[0].Self != 1 || (pgPhysicalGrant(rows[0].KernelEffectRecord).IsOwned() && rows[0].Owners != 1) {
+	if len(rows) != 1 || rows[0].ChildRunID != id || rows[0].Self != 1 {
 		return models.KernelEffectRecord{}, kernel.ErrExecutionConflict
+	}
+	if _, e = pgEffectOwners(tx, pgPhysicalGrant(rows[0].KernelEffectRecord)); e != nil {
+		return models.KernelEffectRecord{}, e
 	}
 	return rows[0].KernelEffectRecord, nil
 }

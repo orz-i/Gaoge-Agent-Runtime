@@ -82,6 +82,20 @@ func TestOwnedRetirementWireAndExactFinish(t *testing.T) {
 			}
 		})
 	}
+	// A lease binding must not give a physical child the root's relaxed
+	// post-return revision or deferred-custody semantics.
+	s.Run.ParentRunID = "parent"
+	o := PhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: true}
+	c.ReturnSourceHash = ManagedDigest(PhysicalCallbackReturnPayload(s, o))
+	permit = ChildExecutionSettlement{proof: featurecontrol.Seal(s.Run.ID, s.Run.Revision, "agent_physical_settled", g.ID, s.State, s)}
+	if _, e := BuildOwnedRetirementReceipt(g, s, l, c, permit, ManagedAuthority{}, ManagedTransfer{}); e != nil {
+		t.Fatal("exact leased child return rejected", e)
+	}
+	s.Run.Revision++
+	permit = ChildExecutionSettlement{proof: featurecontrol.Seal(s.Run.ID, s.Run.Revision, "agent_physical_settled", g.ID, s.State, s)}
+	if _, e := BuildOwnedRetirementReceipt(g, s, l, c, permit, ManagedAuthority{}, ManagedTransfer{}); !errors.Is(e, ErrExecutionConflict) {
+		t.Fatal("leased child retired at a different return revision", e)
+	}
 }
 
 func TestOwnedRetirementRunSelector(t *testing.T) {
