@@ -54,6 +54,7 @@ func testSharedBudgetUnsentClaim(t *testing.T, outputCeiling int64) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	shared = bindHostedBudgetAuthority(t, runtime, shared)
 	entered, release := make(chan struct{}, 1), make(chan struct{})
 	var once sync.Once
 	unblock := func() { once.Do(func() { close(release) }) }
@@ -85,7 +86,7 @@ func testSharedBudgetUnsentClaim(t *testing.T, outputCeiling int64) {
 	case <-time.After(4 * time.Second):
 		t.Fatal("shared Budget did not enter Model middleware")
 	}
-	ledger, err := store.LoadBudget(t.Context(), "hosted-budget-turn")
+	ledger, err := runtime.BudgetStore().LoadBudget(t.Context(), "hosted-budget-turn")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +105,7 @@ func testSharedBudgetUnsentClaim(t *testing.T, outputCeiling int64) {
 	case <-time.After(4 * time.Second):
 		t.Fatal("expired worker did not finish")
 	}
-	ledger, err = store.LoadBudget(t.Context(), "hosted-budget-turn")
+	ledger, err = runtime.BudgetStore().LoadBudget(t.Context(), "hosted-budget-turn")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,9 +171,10 @@ func TestPreIntentFailureDoesNotReserveSharedModelBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	nativeShared := bindHostedBudgetAuthority(t, rt, shared)
 	provider := &countedBudgetModel{}
 	runner, err := agent.NewRunner(agent.Dependencies{
-		Runtime: rt, Model: provider, BoundedBudget: mustBudgetAdapter(t, shared),
+		Runtime: rt, Model: provider, BoundedBudget: mustBudgetAdapter(t, nativeShared),
 		PrepareModelRequest: func(context.Context, model.Request) (model.Request, error) {
 			return model.Request{}, errors.New("pre-intent context admission rejected")
 		},

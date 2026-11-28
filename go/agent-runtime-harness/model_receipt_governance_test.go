@@ -100,12 +100,8 @@ func TestSettledQuotaRejectionSurvivesRootReceiptFault(t *testing.T) {
 		for _, mode := range []string{"ordinary", "lost_receipt_commit", "external_success_cannot_override_rejection"} {
 			fault := mode != "ordinary"
 			t.Run(scenario.name+"/"+mode, func(t *testing.T) {
-				store, _, req := hostedBudgetFixture(t, scenario.limits)
+				store, fixtureAuthority, req := hostedBudgetFixture(t, scenario.limits)
 				client := &governanceReceiptModel{responses: []model.Response{scenario.response}}
-				shared, err := NewBudgetAuthority(BudgetAuthorityDependencies{Store: store, Clock: hostedBudgetClock{}, Meter: client})
-				if err != nil {
-					t.Fatal(err)
-				}
 				base := memory.NewStore()
 				var backing kernel.Store = base
 				if fault {
@@ -116,6 +112,7 @@ func TestSettledQuotaRejectionSurvivesRootReceiptFault(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				shared := bindHostedBudgetAuthority(t, rt, fixtureAuthority, client)
 				adapter := mustBudgetAdapter(t, shared)
 				deps := agent.Dependencies{Runtime: rt, Model: client, Clock: durabilityTestClock{now: now}, ModelOutcomeVerifier: shared, BoundedBudget: adapter}
 				start := agent.StartRequest{ID: req.RunID, Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "owner"}, Thread: kernel.ThreadRef{Kind: "test", ID: "quota-recovery"}, Goal: "finish", MaxModelOutputTokens: 128, Limits: budget.Limits{MaxLLMCalls: 1}}
@@ -140,7 +137,7 @@ func TestSettledQuotaRejectionSurvivesRootReceiptFault(t *testing.T) {
 				} else if physical.MaxOutputTokens != 48 {
 					t.Fatal("token quota fixture")
 				}
-				ledger, err := store.LoadBudget(t.Context(), "hosted-budget-turn")
+				ledger, err := rt.BudgetStore().LoadBudget(t.Context(), "hosted-budget-turn")
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -201,21 +198,18 @@ func TestSettledQuotaRejectionSurvivesRootReceiptFault(t *testing.T) {
 }
 
 func TestRecoveredAcceptedReceiptRetainsOriginalToolAndReplayBytes(t *testing.T) {
-	store, _, req := hostedBudgetFixture(t, budget.Limits{MaxLLMCalls: 3, MaxInputTokens: 1000, MaxOutputTokens: 128, MaxToolCalls: 2})
+	_, fixtureAuthority, req := hostedBudgetFixture(t, budget.Limits{MaxLLMCalls: 3, MaxInputTokens: 1000, MaxOutputTokens: 128, MaxToolCalls: 2})
 	raw := json.RawMessage(`{"x": "<>&", "y":9007199254740993}`)
 	replay := json.RawMessage(`{"opaque": "<>&", "sig":"signed"}`)
 	original := model.Response{Content: "  exact original content  ", ResponseID: "opaque-receipt", Usage: &model.Usage{InputTokens: 20, OutputTokens: 2}, ToolCalls: []tools.Call{{ID: "call1", ToolKey: "lookup", Name: "lookup", Arguments: raw}}, ProviderReplay: &model.ProviderReplay{Provider: "audit", Format: "signed", Data: replay}}
 	client := &governanceReceiptModel{responses: []model.Response{original, {Content: "done", ResponseID: "final", Usage: &model.Usage{InputTokens: 20, OutputTokens: 2}}}}
-	shared, err := NewBudgetAuthority(BudgetAuthorityDependencies{Store: store, Clock: hostedBudgetClock{}, Meter: client})
-	if err != nil {
-		t.Fatal(err)
-	}
 	base := memory.NewStore()
 	fault := &receiptFaultStore{Store: base}
 	rt, err := kernel.New(kernel.Dependencies{Store: fault})
 	if err != nil {
 		t.Fatal(err)
 	}
+	shared := bindHostedBudgetAuthority(t, rt, fixtureAuthority, client)
 	effects := 0
 	registry, err := tools.NewRegistry([]tools.Registration{{Definition: tools.Definition{Key: "lookup", Name: "lookup", InputSchema: json.RawMessage(`{"type":"object"}`)}, Handler: tools.HandlerFunc(func(_ context.Context, r tools.ExecutionRequest) (tools.ExecutionResult, error) {
 		effects++
@@ -276,7 +270,7 @@ func TestModelReceiptPresenceDoesNotChangeToolExecutionAuthority(t *testing.T) {
 			for _, missing := range []bool{true, false} {
 				label := map[bool]string{true: "missing", false: "explicit_null"}[missing]
 				t.Run(mode+"/"+fault+"/"+label, func(t *testing.T) {
-					store, shared, req := hostedBudgetFixture(t, budget.Limits{MaxLLMCalls: 3, MaxToolCalls: 2})
+					_, fixtureAuthority, req := hostedBudgetFixture(t, budget.Limits{MaxLLMCalls: 3, MaxToolCalls: 2})
 					args := json.RawMessage("null")
 					if missing {
 						args = nil
@@ -290,6 +284,10 @@ func TestModelReceiptPresenceDoesNotChangeToolExecutionAuthority(t *testing.T) {
 					rt, err := kernel.New(kernel.Dependencies{Store: backing})
 					if err != nil {
 						t.Fatal(err)
+					}
+					var shared *BudgetAuthority
+					if mode == "shared_budget" {
+						shared = bindHostedBudgetAuthority(t, rt, fixtureAuthority)
 					}
 					effects := 0
 					registry, err := tools.NewRegistry([]tools.Registration{{Definition: tools.Definition{Key: "lookup", Name: "lookup", InputSchema: json.RawMessage(`{}`)}, Handler: tools.HandlerFunc(func(_ context.Context, r tools.ExecutionRequest) (tools.ExecutionResult, error) {
@@ -350,7 +348,7 @@ func TestModelReceiptPresenceDoesNotChangeToolExecutionAuthority(t *testing.T) {
 						t.Fatalf("explicit null did not retain valid schema authority: status=%s err=%v effects=%d calls=%d", final.Run.Status, callErr, effects, len(client.requests))
 					}
 					if mode == "shared_budget" {
-						ledger, e := store.LoadBudget(t.Context(), "hosted-budget-turn")
+						ledger, e := rt.BudgetStore().LoadBudget(t.Context(), "hosted-budget-turn")
 						if e != nil {
 							t.Fatal(e)
 						}

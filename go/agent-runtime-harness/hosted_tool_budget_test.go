@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
@@ -39,6 +40,23 @@ func hostedBudgetFixture(t *testing.T, limits budget.Limits) (*MemoryStore, *Bud
 		t.Fatal(err)
 	}
 	return store, shared, model.Request{RunID: "hosted-run", InvocationID: "search-1", Messages: []model.Message{{Role: model.RoleUser, Content: model.TextParts("research")}}, HostedTools: []model.HostedTool{{Key: "native.search"}}, Tools: []tools.Definition{{Key: "local.read", Name: "read"}}}
+}
+
+// bindHostedBudgetAuthority keeps the fixture's Host projection store while
+// binding native accounting to the exact Kernel Store used by the Agent.
+func bindHostedBudgetAuthority(t testing.TB, runtime *kernel.Runtime, authority *BudgetAuthority, meter ...model.TokenAdmissionPlanner) *BudgetAuthority {
+	t.Helper()
+	dependencies := authority.dependencies
+	dependencies.Runtime = runtime
+	dependencies.Ledgers = nil
+	if len(meter) != 0 {
+		dependencies.Meter = meter[0]
+	}
+	bound, err := NewBudgetAuthority(dependencies)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return bound
 }
 
 // admitModelLedgerFixture creates only the original persisted dispatch fact.

@@ -38,28 +38,26 @@ func (*namedBudgetReceiptModel) BindingFingerprintForRequest(model.Request) stri
 func TestNamedBudgetCompletionReplayDoesNotRedispatchProvider(t *testing.T) {
 	for _, accepted := range []bool{false, true} {
 		t.Run(map[bool]string{false: "rejected", true: "successful"}[accepted], func(t *testing.T) {
-			store, _, request := hostedBudgetFixture(t, budget.Limits{MaxLLMCalls: 1, MaxInputTokens: 1000, MaxOutputTokens: 64})
+			_, fixtureAuthority, request := hostedBudgetFixture(t, budget.Limits{MaxLLMCalls: 1, MaxInputTokens: 1000, MaxOutputTokens: 64})
 			base := memory.NewStore()
 			faults := &receiptFaultStore{Store: base}
 			client := &namedBudgetReceiptModel{rejectedReceiptModel: &rejectedReceiptModel{accepted: accepted, code: "model.post_generation_failed"}}
-			shared, err := NewBudgetAuthority(BudgetAuthorityDependencies{Store: store, Clock: hostedBudgetClock{}, Meter: client})
-			if err != nil {
-				t.Fatal(err)
-			}
+			var shared *BudgetAuthority
 			now := time.Now().UTC()
 			makeRunner := func(backing kernel.Store, at time.Time) (*kernel.Runtime, *agent.Runner) {
 				rt, err := kernel.New(kernel.Dependencies{Store: backing, Clock: durabilityTestClock{now: at}})
 				if err != nil {
 					t.Fatal(err)
 				}
+				shared = bindHostedBudgetAuthority(t, rt, fixtureAuthority, client)
 				runner, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: client, ModelOutcomeVerifier: shared, Clock: durabilityTestClock{now: at}, BoundedBudget: mustBudgetAdapter(t, shared)})
 				if err != nil {
 					t.Fatal(err)
 				}
 				return rt, runner
 			}
-			_, first := makeRunner(faults, now)
-			_, err = first.StartRun(t.Context(), agent.StartRequest{ID: request.RunID, Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "owner"}, Thread: kernel.ThreadRef{Kind: "test", ID: "named-replay"}, Goal: "finish", MaxModelOutputTokens: 128, Limits: budget.Limits{MaxLLMCalls: 1}})
+			runtime, first := makeRunner(faults, now)
+			_, err := first.StartRun(t.Context(), agent.StartRequest{ID: request.RunID, Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "owner"}, Thread: kernel.ThreadRef{Kind: "test", ID: "named-replay"}, Goal: "finish", MaxModelOutputTokens: 128, Limits: budget.Limits{MaxLLMCalls: 1}})
 			if err == nil {
 				t.Fatal("fault not injected")
 			}
@@ -72,7 +70,7 @@ func TestNamedBudgetCompletionReplayDoesNotRedispatchProvider(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			ledgerBefore, err := store.LoadBudget(t.Context(), "hosted-budget-turn")
+			ledgerBefore, err := runtime.BudgetStore().LoadBudget(t.Context(), "hosted-budget-turn")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -102,7 +100,7 @@ func TestNamedBudgetCompletionReplayDoesNotRedispatchProvider(t *testing.T) {
 			if (view.ModelInvocations[0].ErrorCode == "") != accepted || view.ModelInvocations[0].Provider != "audit" || view.ModelInvocations[0].BindingFingerprint != strings.Repeat("a", 64) || client.calls != 1 || client.meterCalls != meterCalls {
 				t.Fatalf("named receipt source/outcome lost: %+v calls=%d", view.ModelInvocations, client.calls)
 			}
-			ledger, err := store.LoadBudget(t.Context(), "hosted-budget-turn")
+			ledger, err := runtime.BudgetStore().LoadBudget(t.Context(), "hosted-budget-turn")
 			if err != nil || !reflect.DeepEqual(ledgerBefore.Reservations, ledger.Reservations) || ledger.View("").Usage.TotalTokens != 30 || ledger.View("").UnknownUsage {
 				t.Fatalf("replay bill changed: %+v %v", ledger, err)
 			}

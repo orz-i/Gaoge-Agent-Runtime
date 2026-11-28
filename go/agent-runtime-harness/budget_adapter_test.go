@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 )
 
 func mustBudgetAdapter(t testing.TB, authority *BudgetAuthority) *agent.BoundedBudgetAdapter {
@@ -20,7 +22,11 @@ func mustBudgetAdapter(t testing.TB, authority *BudgetAuthority) *agent.BoundedB
 // The authority is not a second executable middleware. All three callback
 // roles receive the SAME native instance, even under concurrent Host setup.
 func TestBudgetAuthorityHasOneNativeDriverAndNoLegacyPluginEngine(t *testing.T) {
-	authority, err := NewBudgetAuthority(BudgetAuthorityDependencies{Store: NewMemoryStore(), Clock: hostedBudgetClock{}})
+	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority, err := NewBudgetAuthority(BudgetAuthorityDependencies{Runtime: runtime, Store: NewMemoryStore(), Clock: hostedBudgetClock{}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -46,11 +46,12 @@ func TestToolRejectedReceiptAuthority(t *testing.T) {
 		}, true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			store, shared, request := hostedBudgetFixture(t, budget.Limits{MaxToolCalls: 1, MaxLLMCalls: 3})
+			_, shared, request := hostedBudgetFixture(t, budget.Limits{MaxToolCalls: 1, MaxLLMCalls: 3})
 			rt, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
 			if err != nil {
 				t.Fatal(err)
 			}
+			shared = bindHostedBudgetAuthority(t, rt, shared)
 			provider := &heldToolRecoveryModel{}
 			physical := 0
 			reg, err := tools.NewRegistry([]tools.Registration{{Definition: tools.Definition{Key: "local.read", Name: "read", InputSchema: json.RawMessage(`{"type":"object"}`)}, Handler: tools.HandlerFunc(func(_ context.Context, q tools.ExecutionRequest) (tools.ExecutionResult, error) {
@@ -68,7 +69,7 @@ func TestToolRejectedReceiptAuthority(t *testing.T) {
 			if physical != 1 {
 				t.Fatalf("physical=%d err=%v", physical, err)
 			}
-			ledger, e := store.LoadBudget(t.Context(), "hosted-budget-turn")
+			ledger, e := rt.BudgetStore().LoadBudget(t.Context(), "hosted-budget-turn")
 			if e != nil {
 				t.Fatal(e)
 			}
@@ -119,11 +120,12 @@ func TestToolRejectedReceiptAuthority(t *testing.T) {
 
 // Keep the Provider-error fence on an actual dispatched Agent invocation.
 func TestProviderBusyErrorDoesNotProveNoSend(t *testing.T) {
-	store, shared, q := hostedBudgetFixture(t, budget.Limits{MaxLLMCalls: 1})
+	_, shared, q := hostedBudgetFixture(t, budget.Limits{MaxLLMCalls: 1})
 	rt, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
 	if err != nil {
 		t.Fatal(err)
 	}
+	shared = bindHostedBudgetAuthority(t, rt, shared)
 	calls := 0
 	r, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: budgetFixtureModelFunc(func(context.Context, model.Request) (model.Response, error) {
 		calls++
@@ -136,7 +138,7 @@ func TestProviderBusyErrorDoesNotProveNoSend(t *testing.T) {
 	if err == nil || calls != 1 || agent.IsModelPreDispatchDenied(err) {
 		t.Fatalf("provider busy qualified as no-send: %v %d", err, calls)
 	}
-	ledger, e := store.LoadBudget(t.Context(), "hosted-budget-turn")
+	ledger, e := rt.BudgetStore().LoadBudget(t.Context(), "hosted-budget-turn")
 	if e != nil || !ledger.View("").UnknownUsage || ledger.View("").Reserved.LLMCalls != 1 {
 		t.Fatalf("unknown result refunded: %+v %v", ledger, e)
 	}

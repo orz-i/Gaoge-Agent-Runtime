@@ -38,7 +38,7 @@ func newLedgerHarness(t *testing.T, client *ledgerTestModel) (*harness.MemorySto
 	if err != nil {
 		t.Fatal(err)
 	}
-	shared, err := harness.NewBudgetAuthority(harness.BudgetAuthorityDependencies{Store: store, Clock: fixedClock{}, Meter: client})
+	shared, err := harness.NewBudgetAuthority(harness.BudgetAuthorityDependencies{Runtime: runtime, Store: store, Clock: fixedClock{}, Meter: client})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func newLedgerHarness(t *testing.T, client *ledgerTestModel) (*harness.MemorySto
 func TestSharedBudgetUnknownReceiptSurvivesRestartWithoutRedispatch(t *testing.T) {
 	client := &ledgerTestModel{missing: true}
 	store, _, snapshot, rt := newLedgerHarness(t, client)
-	shared, err := harness.NewBudgetAuthority(harness.BudgetAuthorityDependencies{Store: store, Clock: fixedClock{}, Meter: client})
+	shared, err := harness.NewBudgetAuthority(harness.BudgetAuthorityDependencies{Runtime: rt, Store: store, Clock: fixedClock{}, Meter: client})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestSharedBudgetUnknownReceiptSurvivesRestartWithoutRedispatch(t *testing.T
 	if _, err := restarted.Resume(t.Context(), current.Run.ID, current.Run.Revision); err == nil || client.calls != 1 {
 		t.Fatalf("unknown result regained dispatch: err=%v calls=%d", err, client.calls)
 	}
-	ledger, err := store.LoadBudget(t.Context(), snapshot.Turn.ID)
+	ledger, err := rt.BudgetStore().LoadBudget(t.Context(), snapshot.Turn.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,13 +91,13 @@ func TestSharedBudgetUnknownReceiptSurvivesRestartWithoutRedispatch(t *testing.T
 }
 func TestSharedBudgetReplaysSettledReceiptAndRejectsUnmeteredRemote(t *testing.T) {
 	client := &ledgerTestModel{}
-	store, shared, snapshot, _ := newLedgerHarness(t, client)
+	_, shared, snapshot, rt := newLedgerHarness(t, client)
 	request := client.request
 	response, err := shared.VerifyModelOutcome(t.Context(), request)
 	if err != nil || response.Content != "receipt" {
 		t.Fatalf("replay=%+v %v", response, err)
 	}
-	ledger, err := store.LoadBudget(t.Context(), snapshot.Turn.ID)
+	ledger, err := rt.BudgetStore().LoadBudget(t.Context(), snapshot.Turn.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,9 +115,9 @@ func TestSharedBudgetReplaysSettledReceiptAndRejectsUnmeteredRemote(t *testing.T
 }
 func TestBudgetModelOutcomeVerifierOnlyReadsOriginalPhysicalSettledReceipt(t *testing.T) {
 	client := &ledgerTestModel{}
-	store, shared, snapshot, _ := newLedgerHarness(t, client)
+	_, shared, snapshot, rt := newLedgerHarness(t, client)
 	request := model.CloneRequest(client.request)
-	before, err := store.LoadBudget(t.Context(), snapshot.Turn.ID)
+	before, err := rt.BudgetStore().LoadBudget(t.Context(), snapshot.Turn.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +142,7 @@ func TestBudgetModelOutcomeVerifierOnlyReadsOriginalPhysicalSettledReceipt(t *te
 			t.Fatal("accepted foreign or changed original request")
 		}
 	}
-	after, err := store.LoadBudget(t.Context(), snapshot.Turn.ID)
+	after, err := rt.BudgetStore().LoadBudget(t.Context(), snapshot.Turn.ID)
 	if err != nil || !reflect.DeepEqual(before, after) {
 		t.Fatalf("receipt-only lookup changed ledger: %v", err)
 	}

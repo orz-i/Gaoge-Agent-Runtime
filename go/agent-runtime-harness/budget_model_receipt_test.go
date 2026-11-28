@@ -55,12 +55,9 @@ func (store *receiptProjectionFaultStore) AppendItem(ctx context.Context, item I
 func TestBudgetProjectionFailureCannotEraseSettledModelReceipt(t *testing.T) {
 	for _, replay := range []bool{false, true} {
 		t.Run(map[bool]string{false: "initial_return", true: "receipt_replay"}[replay], func(t *testing.T) {
-			store, _, request := hostedBudgetFixture(t, budget.Limits{MaxLLMCalls: 1})
+			store, fixtureAuthority, request := hostedBudgetFixture(t, budget.Limits{MaxLLMCalls: 1})
 			projection := &receiptProjectionFaultStore{MemoryStore: store}
-			shared, err := NewBudgetAuthority(BudgetAuthorityDependencies{Store: projection, Clock: hostedBudgetClock{}})
-			if err != nil {
-				t.Fatal(err)
-			}
+			fixtureAuthority.dependencies.Store = projection
 			client := &rejectedReceiptModel{accepted: true, onGenerate: func() { projection.fail = !replay }}
 			base := memory.NewStore()
 			backing := &receiptFaultStore{Store: base, fired: !replay}
@@ -69,6 +66,7 @@ func TestBudgetProjectionFailureCannotEraseSettledModelReceipt(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			shared := bindHostedBudgetAuthority(t, runtime, fixtureAuthority)
 			runner, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: client, ModelOutcomeVerifier: shared, Clock: durabilityTestClock{now: now}, BoundedBudget: mustBudgetAdapter(t, shared)})
 			if err != nil {
 				t.Fatal(err)
@@ -89,7 +87,7 @@ func TestBudgetProjectionFailureCannotEraseSettledModelReceipt(t *testing.T) {
 			if err != nil || completion.HostCompleted != replay {
 				t.Fatalf("incorrect original fixed-stage completion: %+v %v", completion, err)
 			}
-			ledgerBefore, err := store.LoadBudget(t.Context(), "hosted-budget-turn")
+			ledgerBefore, err := runtime.BudgetStore().LoadBudget(t.Context(), "hosted-budget-turn")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -116,7 +114,7 @@ func TestBudgetProjectionFailureCannotEraseSettledModelReceipt(t *testing.T) {
 					t.Fatalf("original known rejection lost: %+v %v", view, viewErr)
 				}
 			}
-			ledgerAfter, err := store.LoadBudget(t.Context(), "hosted-budget-turn")
+			ledgerAfter, err := runtime.BudgetStore().LoadBudget(t.Context(), "hosted-budget-turn")
 			if err != nil || !reflect.DeepEqual(ledgerBefore, ledgerAfter) || ledgerAfter.View("").UnknownUsage || ledgerAfter.View("").Usage.LLMCalls != 1 || ledgerAfter.View("").Usage.TotalTokens != 30 || ledgerAfter.View("").Usage.ToolCalls != 0 || ledgerAfter.View("").Reserved.LLMCalls != 0 || client.calls != 1 {
 				t.Fatalf("known ledger receipt changed: %+v %v calls=%d", ledgerAfter, err, client.calls)
 			}
@@ -156,7 +154,7 @@ func TestSettledRejectionRecoversSDKReceiptWithoutRegeneration(t *testing.T) {
 	for _, code := range []string{"", "model.post_generation_failed"} {
 		for _, fault := range []string{"before_receipt_commit", "after_receipt_commit", "caller_cancelled"} {
 			t.Run(code+"/"+fault, func(t *testing.T) {
-				store, shared, request := hostedBudgetFixture(t, budget.Limits{MaxLLMCalls: 1})
+				_, fixtureAuthority, request := hostedBudgetFixture(t, budget.Limits{MaxLLMCalls: 1})
 				base := memory.NewStore()
 				faults := &receiptFaultStore{Store: base, afterCommit: fault == "after_receipt_commit", fired: fault == "caller_cancelled"}
 				client := &rejectedReceiptModel{code: code}
@@ -166,18 +164,20 @@ func TestSettledRejectionRecoversSDKReceiptWithoutRegeneration(t *testing.T) {
 					client.cancel = cancel
 				}
 				now := time.Now().UTC()
+				var shared *BudgetAuthority
 				newRunner := func(backing kernel.Store, at time.Time) (*kernel.Runtime, *agent.Runner) {
 					runtime, err := kernel.New(kernel.Dependencies{Store: backing, Clock: durabilityTestClock{now: at}})
 					if err != nil {
 						t.Fatal(err)
 					}
+					shared = bindHostedBudgetAuthority(t, runtime, fixtureAuthority)
 					runner, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: client, ModelOutcomeVerifier: shared, Clock: durabilityTestClock{now: at}, BoundedBudget: mustBudgetAdapter(t, shared)})
 					if err != nil {
 						t.Fatal(err)
 					}
 					return runtime, runner
 				}
-				_, runner := newRunner(faults, now)
+				initialRuntime, runner := newRunner(faults, now)
 				_, err := runner.StartRun(ctx, agent.StartRequest{ID: request.RunID, Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "owner"}, Thread: kernel.ThreadRef{Kind: "test", ID: "receipt"}, Goal: "finish", Limits: budget.Limits{MaxLLMCalls: 1}})
 				if err == nil {
 					t.Fatal("injected receipt failure was ignored")
@@ -187,7 +187,7 @@ func TestSettledRejectionRecoversSDKReceiptWithoutRegeneration(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				ledgerBefore, err := store.LoadBudget(t.Context(), "hosted-budget-turn")
+				ledgerBefore, err := initialRuntime.BudgetStore().LoadBudget(t.Context(), "hosted-budget-turn")
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -207,7 +207,7 @@ func TestSettledRejectionRecoversSDKReceiptWithoutRegeneration(t *testing.T) {
 				if view.ModelInvocations[0].ErrorCode == "" {
 					t.Fatal("original rejected receipt lost rejection")
 				}
-				ledger, err := store.LoadBudget(t.Context(), "hosted-budget-turn")
+				ledger, err := runtime.BudgetStore().LoadBudget(t.Context(), "hosted-budget-turn")
 				if err != nil || !reflect.DeepEqual(ledgerBefore.Reservations, ledger.Reservations) || ledger.View("").UnknownUsage || ledger.View("").Reserved.LLMCalls != 0 || ledger.View("").Usage.TotalTokens != 30 || ledger.View("").Usage.ToolCalls != 0 || client.calls != 1 {
 					t.Fatalf("receipt lookup changed ledger/generation: %+v %v calls=%d", ledger, err, client.calls)
 				}

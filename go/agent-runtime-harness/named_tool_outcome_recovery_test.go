@@ -86,7 +86,7 @@ func TestDeferredNamedAgentRecoveredToolResultReachesParent(t *testing.T) {
 				if e != nil {
 					t.Fatal(e)
 				}
-				shared, e := harness.NewBudgetAuthority(harness.BudgetAuthorityDependencies{Store: hs, Relations: relations, Meter: m, Clock: fixedClock{}})
+				shared, e := harness.NewBudgetAuthority(harness.BudgetAuthorityDependencies{Runtime: rt, Store: hs, Relations: relations, Meter: m, Clock: fixedClock{}})
 				if e != nil {
 					t.Fatal(e)
 				}
@@ -161,13 +161,11 @@ func TestDeferredNamedAgentRecoveredToolResultReachesParent(t *testing.T) {
 			if e != nil {
 				t.Fatal(e)
 			}
-			staged, e := native.Resume(ctx, child.RunID, interrupted.Run.Revision)
-			if e != nil || staged.Run.Status != kernel.RunStatusRunning || physical != 1 {
-				t.Fatal("original receipt recovery", e, staged.Run.Status, physical)
-			}
-			done, e := native.Resume(ctx, child.RunID, staged.Run.Revision)
-			if e != nil || done.Run.Status != kernel.RunStatusCompleted || physical != 1 {
-				t.Fatal("child business consume", e, done.Run.Status, physical)
+			// Native Resume recovers the original receipt and continues the same
+			// child loop; it does not expose the legacy receipt-only yield.
+			done, e := native.Resume(ctx, child.RunID, interrupted.Run.Revision)
+			if e != nil || done.Run.Status != kernel.RunStatusCompleted || physical != 1 || len(m.requests) != 3 {
+				t.Fatal("original receipt recovery and child business consume", e, done.Run.Status, physical, len(m.requests))
 			}
 			if boundedApproval && (childApprovals != 1 || !native.VerifyDeferredToolResults(ctx, rt, done) || !native.VerifiedDeferredRootControl(ctx, rt, done)) {
 				t.Fatal("original bounded approval result/control did not survive child recovery", childApprovals)

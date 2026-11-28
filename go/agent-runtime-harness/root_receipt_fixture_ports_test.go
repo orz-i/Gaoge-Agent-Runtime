@@ -3,6 +3,8 @@ package harness
 import (
 	"context"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
+
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
@@ -53,4 +55,13 @@ func (s *receiptFaultStore) LoadOwnedRetirement(ctx context.Context, id string) 
 
 func (s *receiptFaultStore) LookupOwnedRetirementForRun(ctx context.Context, id string) (kernel.OwnedRetirementReceipt, error) {
 	return s.Store.(kernel.PhysicalExecutionStore).LookupOwnedRetirementForRun(ctx, id)
+}
+
+// Fault injection changes only the receipt commit; the native budget
+// port must retain the same underlying Store and transaction.
+func (s *receiptFaultStore) LoadBudget(ctx context.Context, scope string) (budget.Ledger, error) {
+	return s.Store.(budget.LedgerStore).LoadBudget(ctx, scope)
+}
+func (s *receiptFaultStore) SaveBudget(ctx context.Context, l budget.Ledger, rev uint64) error {
+	return s.Store.(budget.LedgerStore).SaveBudget(ctx, l, rev)
 }

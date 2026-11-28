@@ -26,12 +26,11 @@ var (
 	errRootRetryCancelAckLost    = errors.New("test unstarted Retry cancellation Store response lost after commit")
 )
 
-// Original Store itself performs the atomic budget+Invocation transition,
-// and the adapter discards only the ACK. Restarted callers must never
+// The Host Store selects an immutable retry Attempt and discards only its ACK.
+// Native admission owns the budget generation. Restarted callers must never
 // reconstruct a second Attempt or execute an unadmitted external effect.
 type rootRetryLostACKStore struct {
 	harness.Store
-	budget.LedgerStore
 	failOnce      bool
 	cancelAckOnce bool
 }
@@ -67,7 +66,7 @@ func TestRootRetryCommittedAckLossWithHistoricalTerminalChild(t *testing.T) {
 func testRootRetryCommittedAckLoss(t *testing.T, historicalTerminalChild bool) {
 	t.Helper()
 	raw := harness.NewMemoryStore()
-	store := &rootRetryLostACKStore{Store: raw, LedgerStore: raw, failOnce: true}
+	store := &rootRetryLostACKStore{Store: raw, failOnce: true}
 	rt, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
 	if err != nil {
 		t.Fatal(err)
@@ -78,7 +77,7 @@ func testRootRetryCommittedAckLoss(t *testing.T, historicalTerminalChild bool) {
 	}
 	client := &roleBudgetModel{}
 	shared, err := harness.NewBudgetAuthority(harness.BudgetAuthorityDependencies{
-		Store: store, Ledgers: store, Relations: relations, Meter: client, Clock: fixedClock{},
+		Runtime: rt, Store: store, Relations: relations, Meter: client, Clock: fixedClock{},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -157,6 +156,10 @@ func testRootRetryCommittedAckLoss(t *testing.T, historicalTerminalChild bool) {
 	if !ok {
 		t.Fatal("root invocation missing")
 	}
+	beforeRetry, err := rt.BudgetStore().LoadBudget(t.Context(), first.Turn.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	_, err = runner.RetryInvocation(t.Context(), root.ID)
 	if !errors.Is(err, errRootRetryCommittedAckLost) {
 		t.Fatalf("no committed-ACK loss: %v", err)
@@ -165,9 +168,9 @@ func testRootRetryCommittedAckLoss(t *testing.T, historicalTerminalChild bool) {
 	if err != nil || inv.Attempt != 2 || inv.Status != harness.InvocationAccepted {
 		t.Fatalf("rotated Invocation missing: %+v %v", inv, err)
 	}
-	ledger, err := store.LoadBudget(t.Context(), first.Turn.ID)
-	if err != nil || !ledger.RootRetries[inv.ExecutionRefID].Active {
-		t.Fatalf("atomic replacement budget absent: %+v %v", ledger.RootRetries, err)
+	ledger, err := rt.BudgetStore().LoadBudget(t.Context(), first.Turn.ID)
+	if err != nil || !reflect.DeepEqual(ledger, beforeRetry) {
+		t.Fatalf("Host retry selection changed native accounting before admission: %+v %v", ledger, err)
 	}
 	if _, err = rt.Load(t.Context(), inv.ExecutionRefID); !errors.Is(err, kernel.ErrNotFound) {
 		t.Fatalf("physical effect started before ACK: %v", err)
@@ -193,9 +196,10 @@ func testRootRetryCommittedAckLoss(t *testing.T, historicalTerminalChild bool) {
 	if err != nil || harness.ActiveCancellationFence(items) {
 		t.Fatalf("original cancellation fence not settled: %v", err)
 	}
-	ledger, err = store.LoadBudget(t.Context(), first.Turn.ID)
-	if err != nil || !ledger.CancelledRuns[inv.ExecutionRefID] {
-		t.Fatalf("new generation remained active: %+v %v", ledger.CancelledRuns, err)
+	ledger, err = rt.BudgetStore().LoadBudget(t.Context(), first.Turn.ID)
+	grant, enrolled := ledger.RootRetries[inv.ExecutionRefID]
+	if err != nil || !enrolled || grant.InvocationID != inv.ID || grant.OriginalRunID != root.ExecutionRefID || grant.Attempt != inv.Attempt || !grant.Active || !ledger.CancelledRuns[inv.ExecutionRefID] {
+		t.Fatalf("native negative admission did not enroll and close the selected generation: grant=%+v cancelled=%+v err=%v", grant, ledger.CancelledRuns, err)
 	}
 	if len(client.requests) != 1 {
 		t.Fatalf("unstarted Retry dispatched Model: %d", len(client.requests))

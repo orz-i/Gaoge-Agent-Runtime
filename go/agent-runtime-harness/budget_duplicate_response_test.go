@@ -40,11 +40,12 @@ func (m *reusedBudgetModel) Generate(context.Context, model.Request) (model.Resp
 
 func TestSharedBudgetRejectsDuplicatePhysicalReceipt(t *testing.T) {
 	t.Run("provider", func(t *testing.T) {
-		store, shared, req := hostedBudgetFixture(t, budget.Limits{MaxLLMCalls: 4, MaxToolCalls: 2})
+		_, shared, req := hostedBudgetFixture(t, budget.Limits{MaxLLMCalls: 4, MaxToolCalls: 2})
 		rt, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
 		if err != nil {
 			t.Fatal(err)
 		}
+		shared = bindHostedBudgetAuthority(t, rt, shared)
 		effects := 0
 		registry, err := tools.NewRegistry([]tools.Registration{{Definition: tools.Definition{Key: "lookup", Name: "lookup", InputSchema: json.RawMessage(`{"type":"object"}`)}, Handler: tools.HandlerFunc(func(_ context.Context, req tools.ExecutionRequest) (tools.ExecutionResult, error) {
 			effects++
@@ -62,7 +63,7 @@ func TestSharedBudgetRejectsDuplicatePhysicalReceipt(t *testing.T) {
 		if callErr == nil || m.calls != 2 || effects != 1 {
 			t.Fatalf("unexpected run: %+v err=%v calls=%d effects=%d", result.Run, callErr, m.calls, effects)
 		}
-		ledger, err := store.LoadBudget(t.Context(), "hosted-budget-turn")
+		ledger, err := rt.BudgetStore().LoadBudget(t.Context(), "hosted-budget-turn")
 		if err != nil {
 			t.Fatal(err)
 		}

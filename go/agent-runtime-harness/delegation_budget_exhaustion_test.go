@@ -29,7 +29,7 @@ func TestDelegationChildRunExhaustionBecomesRecoverableModelGuidance(t *testing.
 		t.Fatal(err)
 	}
 	shared, err := harness.NewBudgetAuthority(harness.BudgetAuthorityDependencies{
-		Store: store, Relations: relations, Clock: fixedClock{},
+		Runtime: runtime, Store: store, Relations: relations, Clock: fixedClock{},
 	})
 	if err != nil {
 		t.Fatal(err)

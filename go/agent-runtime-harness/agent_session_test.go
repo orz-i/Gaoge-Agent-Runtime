@@ -594,7 +594,7 @@ func TestAgentSessionResumeRejectsOriginalUnsupportedCompositionBeforeGeneration
 				if err != nil {
 					t.Fatal(err)
 				}
-				shared, err := harness.NewBudgetAuthority(harness.BudgetAuthorityDependencies{Store: store, Clock: clock})
+				shared, err := harness.NewBudgetAuthority(harness.BudgetAuthorityDependencies{Runtime: rt, Store: store, Clock: clock})
 				if err != nil {
 					t.Fatal(err)
 				}

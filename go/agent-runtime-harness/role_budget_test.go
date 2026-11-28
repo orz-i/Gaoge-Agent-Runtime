@@ -62,7 +62,7 @@ func testRoleDelegationChildApproval(t *testing.T, wrongRoute bool, terminalPare
 		t.Fatal(err)
 	}
 	meteredModel := &roleBudgetModel{}
-	shared, err := harness.NewBudgetAuthority(harness.BudgetAuthorityDependencies{Store: store, Relations: relations, Meter: meteredModel, Clock: fixedClock{}})
+	shared, err := harness.NewBudgetAuthority(harness.BudgetAuthorityDependencies{Runtime: runtime, Store: store, Relations: relations, Meter: meteredModel, Clock: fixedClock{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,8 +72,14 @@ func testRoleDelegationChildApproval(t *testing.T, wrongRoute bool, terminalPare
 			ToolKeys: []string{roleEvidenceTool}, Limits: budget.Limits{MaxLLMCalls: 2}},
 	}
 	delegation := harness.NewDelegationToolHandler()
+	var duringEvidence func()
 	registry, err := tools.NewRegistry([]tools.Registration{harness.DelegationToolRegistration(delegation), {
-		Definition: tools.Definition{Key: roleEvidenceTool, Name: "read_evidence", InputSchema: json.RawMessage(`{"type":"object"}`)}, Handler: roleEvidenceHandler{},
+		Definition: tools.Definition{Key: roleEvidenceTool, Name: "read_evidence", InputSchema: json.RawMessage(`{"type":"object"}`)}, Handler: tools.HandlerFunc(func(ctx context.Context, q tools.ExecutionRequest) (tools.ExecutionResult, error) {
+			if duringEvidence != nil {
+				duringEvidence()
+			}
+			return (roleEvidenceHandler{}).Execute(ctx, q)
+		}),
 	}})
 	if err != nil {
 		t.Fatal(err)
@@ -104,6 +110,12 @@ func testRoleDelegationChildApproval(t *testing.T, wrongRoute bool, terminalPare
 	}
 	runner, err := harness.NewRunner(harness.Dependencies{Runtime: runtime, Agent: rootAgent, Store: store, Clock: fixedClock{},
 		Handoffs: handoffs, Relations: relations, Budget: shared, DelegationPolicy: hostDelegationPolicy0})
+	if wrongRoute {
+		if !errors.Is(err, harness.ErrInvalidRequest) || wrong.calls != 0 || len(meteredModel.requests) != 0 {
+			t.Fatalf("substitute root acquired native budget authority: err=%v approvals=%d models=%d", err, wrong.calls, len(meteredModel.requests))
+		}
+		return
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,8 +201,7 @@ func testRoleDelegationChildApproval(t *testing.T, wrongRoute bool, terminalPare
 	}); closeErr != nil {
 		t.Fatal(closeErr)
 	}
-	// The same physical grant identifies the delegated child Run and its
-	// original frozen child owner; a forged root-only grant is not authority.
+	// A Host grant cannot impersonate the delegated child's native admission.
 	grant := harness.Item{
 		ID: "role-child-approval-grant", TurnID: started.Turn.ID,
 		Kind: harness.ItemDiagnostic, Status: harness.ItemStarted,
@@ -199,24 +210,8 @@ func testRoleDelegationChildApproval(t *testing.T, wrongRoute bool, terminalPare
 		Payload:      json.RawMessage(`{"phase":"resolve-subtask-approval","physicalRunID":"` + task.RunID + `"}`),
 		CreatedAt:    now, UpdatedAt: now,
 	}
-	if _, fresh, appendErr := store.AppendItem(t.Context(), grant); appendErr != nil || !fresh {
-		t.Fatalf("create delegated grant: fresh=%v err=%v", fresh, appendErr)
-	}
-	if _, blockedErr := runner.CancelSubtask(t.Context(), started.Turn.ID, task.ID, "cancel during delegated approval"); !errors.Is(blockedErr, harness.ErrConflict) {
-		t.Fatalf("subtask cancellation ignored physical child Run grant: %v", blockedErr)
-	}
-	if _, _, closeErr := store.AppendItem(t.Context(), harness.Item{
-		ID: testAuthorityReceiptID("hdispatchdone", grant.ID), TurnID: started.Turn.ID,
-		InvocationID: grant.InvocationID, RunID: grant.RunID,
-		Kind: harness.ItemDiagnostic, Status: harness.ItemCompleted,
-		ParentItemID: grant.ID, Payload: json.RawMessage(`{"boundary":"physical_dispatch_returned"}`),
-		CreatedAt: now, UpdatedAt: now,
-	}); closeErr != nil {
-		t.Fatal(closeErr)
-	}
-	beforeItems, err := store.ListItems(t.Context(), started.Turn.ID, 0, 500)
-	if err != nil {
-		t.Fatal(err)
+	if _, fresh, appendErr := store.AppendItem(t.Context(), grant); !errors.Is(appendErr, harness.ErrConflict) || fresh {
+		t.Fatalf("forged Host child grant accepted: fresh=%v err=%v", fresh, appendErr)
 	}
 	if len(terminalParent) > 0 && terminalParent[0] {
 		root, readErr := runtime.Load(t.Context(), rootInvocation.ExecutionRefID)
@@ -233,15 +228,21 @@ func testRoleDelegationChildApproval(t *testing.T, wrongRoute bool, terminalPare
 		}
 		return
 	}
-	approved, err := runner.ResolveSubtaskApproval(t.Context(), started.Turn.ID, task.ID, task.Approval.CheckpointID, harness.ResolveApprovalRequest{Decision: harness.ApprovalApprove})
-	if wrongRoute {
-		afterItems, listErr := store.ListItems(t.Context(), started.Turn.ID, 0, 500)
-		if !errors.Is(err, harness.ErrConflict) || wrong.calls != 0 || listErr != nil || len(afterItems) != len(beforeItems) {
-			t.Fatalf("substitute approval route dispatched or minted grant: calls=%d err=%v items=%d->%d listErr=%v", wrong.calls, err, len(beforeItems), len(afterItems), listErr)
+	checkedNativeOwner := false
+	duringEvidence = func() {
+		checkedNativeOwner = true
+		before, readErr := runtime.Load(t.Context(), task.RunID)
+		if readErr != nil {
+			t.Fatal(readErr)
 		}
-		return
+		_, blockedErr := runner.CancelSubtask(t.Context(), started.Turn.ID, task.ID, "cancel during delegated approval")
+		after, readErr := runtime.Load(t.Context(), task.RunID)
+		if (!errors.Is(blockedErr, kernel.ErrChildExecutionBusy) && !errors.Is(blockedErr, harness.ErrConflict)) || readErr != nil || kernel.ManagedDigest(before) != kernel.ManagedDigest(after) {
+			t.Fatalf("subtask cancellation crossed original native approval callback: cancel=%v read=%v", blockedErr, readErr)
+		}
 	}
-	if err != nil || approved.Subtasks[0].Status != "completed" {
+	approved, err := runner.ResolveSubtaskApproval(t.Context(), started.Turn.ID, task.ID, task.Approval.CheckpointID, harness.ResolveApprovalRequest{Decision: harness.ApprovalApprove})
+	if err != nil || !checkedNativeOwner || len(approved.Subtasks) != 1 || approved.Subtasks[0].Status != "completed" {
 		t.Fatalf("approval=%+v %v", approved.Subtasks, err)
 	}
 	root, err := runtime.Load(t.Context(), snapshotExecutionRef(t, started))

@@ -15,11 +15,12 @@ import (
 )
 
 func TestRunBudgetLifetimeEndsOnlyOnCommittedTerminalSnapshot(t *testing.T) {
-	store, shared, request := hostedBudgetFixture(t, budget.Limits{MaxConcurrentDescendants: 3})
+	_, fixtureAuthority, request := hostedBudgetFixture(t, budget.Limits{MaxConcurrentDescendants: 3})
 	rt, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
 	if err != nil {
 		t.Fatal(err)
 	}
+	shared := bindHostedBudgetAuthority(t, rt, fixtureAuthority)
 	r, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: budgetFixtureModelFunc(func(context.Context, model.Request) (model.Response, error) {
 		return model.Response{Content: "done"}, nil
 	}), BoundedBudget: mustBudgetAdapter(t, shared)})
@@ -30,7 +31,7 @@ func TestRunBudgetLifetimeEndsOnlyOnCommittedTerminalSnapshot(t *testing.T) {
 	if err != nil || prepared.Run.Status != kernel.RunStatusRunning {
 		t.Fatalf("prepare=%+v %v", prepared.Run, err)
 	}
-	ledger, err := store.LoadBudget(t.Context(), "hosted-budget-turn")
+	ledger, err := rt.BudgetStore().LoadBudget(t.Context(), "hosted-budget-turn")
 	if err != nil || ledger.FinishedRuns[request.RunID] {
 		t.Fatalf("nonterminal budget ended: %v", err)
 	}
@@ -38,7 +39,7 @@ func TestRunBudgetLifetimeEndsOnlyOnCommittedTerminalSnapshot(t *testing.T) {
 	if err != nil || result.Run.Status != kernel.RunStatusCompleted {
 		t.Fatalf("complete=%+v %v", result.Run, err)
 	}
-	ledger, err = store.LoadBudget(t.Context(), "hosted-budget-turn")
+	ledger, err = rt.BudgetStore().LoadBudget(t.Context(), "hosted-budget-turn")
 	if err != nil || !ledger.FinishedRuns[request.RunID] {
 		t.Fatalf("terminal budget not ended: %v", err)
 	}
