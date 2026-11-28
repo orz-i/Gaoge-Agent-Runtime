@@ -349,7 +349,7 @@ func newTimelineHarnessDependencies(t *testing.T) (*kernel.Runtime, *agent.Runne
 	if err != nil {
 		t.Fatal(err)
 	}
-	toolTimeline, err := harness.NewToolTimelineMiddleware(store, clock, nil)
+	toolTimeline, err := harness.NewBoundedToolTimelineAdapter(store, clock, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

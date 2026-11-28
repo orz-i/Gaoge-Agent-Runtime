@@ -9,8 +9,7 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
-// NewBoundedToolTimelineAdapter explicitly opts into Runtime-owned Tool
-// lifecycle orchestration. The ordinary timeline constructor stays opaque.
+// NewBoundedToolTimelineAdapter projects the Runtime-owned Tool lifecycle.
 func NewBoundedToolTimelineAdapter(store Store, clock Clock, feed *TurnFeed) (*agent.BoundedToolTimelineAdapter, error) {
 	if store == nil || clock == nil {
 		return nil, ErrInvalidRequest

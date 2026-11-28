@@ -236,7 +236,7 @@ func (fixture *asyncDelegationFixture) compose(t *testing.T, canceller harness.R
 	if err != nil {
 		t.Fatal(err)
 	}
-	timeline, err := harness.NewToolTimelineMiddleware(fixture.store, delegationTestClock{}, nil)
+	timeline, err := harness.NewBoundedToolTimelineAdapter(fixture.store, delegationTestClock{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

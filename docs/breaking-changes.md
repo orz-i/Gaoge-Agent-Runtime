@@ -1,5 +1,14 @@
 # Breaking changes (pre-stable Beta)
 
+## Agent-centric first-party execution (AC-01)
+
+- Replace `harness.NewToolTimelineMiddleware` with `harness.NewBoundedToolTimelineAdapter`.
+  The old Tool execution wrapper and its duplicate timeline projection are removed.
+- Configure Context Summary through `ContextSummary`, with explicit matching
+  `BoundedContext` and `BoundedBudget` for budgeted operation, not a
+  `RunMiddleware` registration of its Context owner. The Runner selects
+  the original concrete Context stage directly.
+
 ## Owned physical callback entry and no-entry retirement
 
 Custom `OwnedPhysicalExecutionStore` adapters must implement

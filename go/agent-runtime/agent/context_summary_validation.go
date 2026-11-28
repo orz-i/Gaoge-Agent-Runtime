@@ -33,16 +33,13 @@ type contextSummaryModelKey struct{}
 func validSummaryComposition(d Dependencies) bool {
 	summary := d.ContextSummary
 	if summary == nil || summary.bounded == nil || summary.ports == nil ||
-		d.PrepareModelRequest != nil {
+		d.PrepareModelRequest != nil || len(d.RunMiddleware) != 0 {
 		return false
 	}
-	b := selectedSamplingBudget(d)
-	if b == nil {
-		return selectedToolBudget(d) == nil && contextOnlyRun(d, summary.bounded) &&
-			(d.BoundedContext == nil || d.BoundedContext == summary.bounded)
+	if selectedSamplingBudget(d) == nil {
+		return selectedToolBudget(d) == nil && (d.BoundedContext == nil || d.BoundedContext == summary.bounded)
 	}
-	return d.BoundedContext == summary.bounded &&
-		(d.BoundedBudget == b || completeLegacyBudget(d, summary.bounded) == b)
+	return d.BoundedContext == summary.bounded && d.BoundedBudget != nil
 }
 
 func cloneContextSummaryBinding(value *ContextSummaryBinding) *ContextSummaryBinding {

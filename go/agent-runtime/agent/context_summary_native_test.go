@@ -12,7 +12,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
@@ -67,7 +66,7 @@ func TestContextSummaryCannotExecuteOrSatisfyRequiredBusinessTool(t *testing.T) 
 		t.Fatal(err)
 	}
 	runner, err := NewRunner(Dependencies{Runtime: rt, Model: provider, Clock: clock, Catalog: registry, Executor: registry,
-		RunMiddleware: []plugin.RunMiddleware{bounded}, ContextSummary: summary})
+		ContextSummary: summary})
 	if err != nil {
 		t.Fatal(err)
 	}

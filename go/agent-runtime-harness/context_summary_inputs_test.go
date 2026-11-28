@@ -2,6 +2,7 @@ package harness_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
@@ -45,10 +46,15 @@ func TestContextSummaryNativeBindsHostInputsWithRealBridges(t *testing.T) {
 		t.Fatal(err)
 	}
 	client := &summarySessionModel{}
-	dependencies := agent.Dependencies{Runtime: runtime, Model: client, RunMiddleware: []plugin.RunMiddleware{bounded},
+	dependencies := agent.Dependencies{Runtime: runtime, Model: client,
 		ContextSummary: summary, ManagedRecovery: true}
 	if _, err = agent.NewRunner(dependencies); err != nil {
 		t.Fatalf("the same native composition without Host inputs must be valid: %v", err)
+	}
+	legacy := dependencies
+	legacy.RunMiddleware = []plugin.RunMiddleware{bounded}
+	if _, err = agent.NewRunner(legacy); !errors.Is(err, agent.ErrInvalidRequest) {
+		t.Fatalf("summary accepted obsolete Run middleware registration: %v", err)
 	}
 	inputs := &summaryRejectedInputs{}
 	dependencies.Inputs = inputs

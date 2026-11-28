@@ -11,14 +11,7 @@ import (
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
-
-type ToolTimelineMiddleware struct {
-	store Store
-	clock Clock
-	feed  *TurnFeed
-}
 
 func appendHostedToolStartedItem(
 	ctx context.Context,
@@ -166,47 +159,6 @@ func hostedToolTerminalStatus(status string) bool {
 	}
 }
 
-func NewToolTimelineMiddleware(store Store, clock Clock, feed *TurnFeed) (*ToolTimelineMiddleware, error) {
-	if store == nil || clock == nil {
-		return nil, ErrInvalidRequest
-	}
-	return &ToolTimelineMiddleware{store: store, clock: clock, feed: feed}, nil
-}
-
-func (*ToolTimelineMiddleware) Name() string { return "harness.timeline.tool" }
-
-func (middleware *ToolTimelineMiddleware) Tool(
-	ctx context.Context,
-	invocation plugin.ToolInvocation,
-	next plugin.ToolNext,
-) (tools.ExecutionResult, error) {
-	turn, agentInvocation, harnessRun, err := timelineTurn(ctx, middleware.store, invocation.Run.ID)
-	if err != nil {
-		return tools.ExecutionResult{}, err
-	}
-	if !harnessRun {
-		return next(ctx)
-	}
-	startedID, err := appendToolTimelineItem(
-		ctx, middleware.store, middleware.clock, middleware.feed, turn, agentInvocation, invocation, tools.ExecutionResult{}, ItemStarted, "",
-	)
-	if err != nil {
-		return tools.ExecutionResult{}, err
-	}
-	result, executeErr := next(ctx)
-	if executeErr == nil && strings.TrimSpace(result.Receipt.Disposition) == tools.ReceiptDispositionPending {
-		return result, nil
-	}
-	status := ItemCompleted
-	if executeErr != nil {
-		status = ItemFailed
-	}
-	_, itemErr := appendToolTimelineItem(
-		ctx, middleware.store, middleware.clock, middleware.feed, turn, agentInvocation, invocation, result, status, startedID,
-	)
-	return result, errors.Join(executeErr, itemErr)
-}
-
 type ModelTimelineMiddleware struct {
 	store Store
 	clock Clock
@@ -324,36 +276,6 @@ func timelineTurn(ctx context.Context, store Store, executionRefID string) (Turn
 	}
 	turn, err := loadVerifiedTurn(ctx, store, invocation.TurnID)
 	return turn, invocation, err == nil, err
-}
-
-func appendToolTimelineItem(
-	ctx context.Context,
-	store Store,
-	clock Clock,
-	feed *TurnFeed,
-	turn Turn,
-	agentInvocation Invocation,
-	invocation plugin.ToolInvocation,
-	result tools.ExecutionResult,
-	status ItemStatus,
-	parentItemID string,
-) (string, error) {
-	payload, err := json.Marshal(toolTimelinePayload{
-		CallID: invocation.Request.Call.ID, ToolKey: invocation.Definition.Key,
-		ArgumentsHash: hashTimelineBytes(invocation.Request.Call.Arguments),
-		ContentHash:   hashTimelineBytes(result.Content), ExecutionID: result.Receipt.ExecutionID,
-		Disposition: result.Receipt.Disposition,
-	})
-	if err != nil {
-		return "", err
-	}
-	itemID := stableID("hit", turn.ID, invocation.Request.Call.ID, string(status))
-	now := clock.Now().UTC()
-	_, err = appendItemFact(ctx, store, feed, Item{
-		ID: itemID, TurnID: turn.ID, Kind: ItemTool, Status: status, RunID: invocation.Run.ID, InvocationID: agentInvocation.ID,
-		ParentItemID: parentItemID, Payload: payload, CreatedAt: now, UpdatedAt: now,
-	})
-	return itemID, err
 }
 
 func appendModelTimelineItems(

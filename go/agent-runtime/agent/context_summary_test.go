@@ -259,7 +259,7 @@ func summaryCoreRunner(t *testing.T, rt *kernel.Runtime, ports *summaryCorePorts
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner, err := NewRunner(Dependencies{Runtime: rt, Model: provider, Clock: clock, RunMiddleware: []plugin.RunMiddleware{bounded}, ContextSummary: summary, Observers: observers})
+	runner, err := NewRunner(Dependencies{Runtime: rt, Model: provider, Clock: clock, ContextSummary: summary, Observers: observers})
 	if err != nil {
 		t.Fatal(err)
 	}

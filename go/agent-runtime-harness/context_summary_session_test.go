@@ -15,7 +15,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
 func summaryTestPolicy() *agent.WorkingStateSummaryPolicy {
@@ -510,7 +509,7 @@ func TestNativeSummaryValidatesBothConcreteBridgesActualStore(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			dependencies := agent.Dependencies{Runtime: runtime, Model: &summarySessionModel{}, ContextSummary: summary, RunMiddleware: []plugin.RunMiddleware{bounded}}
+			dependencies := agent.Dependencies{Runtime: runtime, Model: &summarySessionModel{}, ContextSummary: summary}
 			if _, err := agent.NewRunner(dependencies); err != nil {
 				t.Fatalf("ordinary adapter construction was unnecessarily restricted: %v", err)
 			}
@@ -567,7 +566,7 @@ func TestRootSummaryPolicyMatchesOriginalConfigBeforeProjectionAndResume(t *test
 			if err != nil {
 				t.Fatal(err)
 			}
-			loop, err := agent.NewRunner(agent.Dependencies{Runtime: options.Runtime, Model: client, ContextSummary: summary, RunMiddleware: []plugin.RunMiddleware{bounded}})
+			loop, err := agent.NewRunner(agent.Dependencies{Runtime: options.Runtime, Model: client, ContextSummary: summary})
 			if err != nil {
 				t.Fatal(err)
 			}
