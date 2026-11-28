@@ -10,7 +10,7 @@ import (
 )
 
 func TestLegacyEffectProfilesRefusedWithoutWrites(t *testing.T) {
-	for _, version := range []int{3, 5, 6, 7, 8, 9, 10, 11, 12} {
+	for _, version := range []int{3, 5, 6, 7, 8, 9, 10, 11, 12, 13} {
 		t.Run(fmt.Sprint(version), func(t *testing.T) {
 			path := ownedPrivatePath(t, "legacy.sqlite")
 			raw, e := sql.Open("sqlite", "file:"+filepath.ToSlash(path))

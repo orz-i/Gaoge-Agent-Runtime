@@ -69,9 +69,9 @@ func (store *Store) AcquireExecution(ctx context.Context, request kernel.Executi
 	if err := store.nativeEntryGateLocked(request.RunID); err != nil {
 		return kernel.ExecutionLease{}, kernel.ErrChildExecutionBusy
 	}
-	snap, ok := store.snapshotLocked(request.RunID)
-	if !ok {
-		return kernel.ExecutionLease{}, kernel.ErrNotFound
+	snap, readErr := store.snapshotLocked(request.RunID)
+	if readErr != nil {
+		return kernel.ExecutionLease{}, readErr
 	}
 	if _, exists := store.ownedGrantLocked(request.RunID); exists {
 		return kernel.ExecutionLease{}, kernel.ErrChildExecutionBusy
@@ -153,9 +153,9 @@ func (store *Store) CheckExecution(ctx context.Context, runID string, lease *ker
 	if err := store.nativeEntryGateLocked(runID); err != nil {
 		return err
 	}
-	snap, ok := store.snapshotLocked(runID)
-	if !ok {
-		return kernel.ErrNotFound
+	snap, readErr := store.snapshotLocked(runID)
+	if readErr != nil {
+		return readErr
 	}
 	if snap.Run.Status == kernel.RunStatusCompleted || snap.Run.Status == kernel.RunStatusFailed || snap.Run.Status == kernel.RunStatusCancelled {
 		return kernel.ErrTerminal

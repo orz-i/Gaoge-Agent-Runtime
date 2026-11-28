@@ -20,7 +20,7 @@ var ErrUnsupportedSchema = errors.New("unsupported PostgreSQL Kernel profile: st
 // the current profile boundary.
 func Models() []interface{} {
 	return []interface{}{
-		&models.KernelRunRecord{}, &models.KernelRunIdentityRecord{}, &models.KernelEventRecord{}, &models.KernelTransitionOutboxRecord{},
+		&models.KernelRunRecord{}, &models.KernelStateHistoryRecord{}, &models.KernelRunIdentityRecord{}, &models.KernelEventRecord{}, &models.KernelTransitionOutboxRecord{},
 		&models.KernelEffectRecord{}, &models.KernelEffectOwnerRecord{},
 		&models.KernelManagedAuthorityRecord{}, &models.KernelManagedHistoryRecord{},
 		&models.RunRelationRecord{}, &sqlledger.Record{},
@@ -40,7 +40,7 @@ func Migrate(db *gorm.DB) error {
 			}
 		}
 		if tx.Migrator().HasTable(&models.KernelRunRecord{}) &&
-			(!tx.Migrator().HasTable(&models.KernelEffectRecord{}) || !tx.Migrator().HasTable(&models.KernelEffectOwnerRecord{})) {
+			(!tx.Migrator().HasTable(&models.KernelEffectRecord{}) || !tx.Migrator().HasTable(&models.KernelEffectOwnerRecord{}) || !tx.Migrator().HasTable(&models.KernelStateHistoryRecord{})) {
 			return ErrUnsupportedSchema
 		}
 		if err := tx.AutoMigrate(Models()...); err != nil {

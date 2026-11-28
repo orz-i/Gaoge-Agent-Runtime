@@ -17,9 +17,9 @@ func (s *Store) VerifyExecutionCustody(ctx context.Context, expected kernel.Snap
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	current, exists := s.snapshotLocked(expected.Run.ID)
-	if !exists {
-		return kernel.ErrNotFound
+	current, readErr := s.snapshotLocked(expected.Run.ID)
+	if readErr != nil {
+		return readErr
 	}
 	if err := s.nativeEntryGateLocked(expected.Run.ID); err != nil {
 		return err

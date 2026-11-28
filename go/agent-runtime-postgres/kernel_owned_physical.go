@@ -89,7 +89,7 @@ func (store *KernelStore) BeginPhysicalExecution(ctx context.Context, admission 
 		if e = pgReserveGrantIdentity(tx, grant); e != nil {
 			return e
 		}
-		snapshot, e := kernelSnapshotFrom(current)
+		snapshot, e := kernelSnapshotFrom(tx, current)
 		if e != nil {
 			return e
 		}
@@ -221,7 +221,7 @@ func (store *KernelStore) CheckOwnedPhysicalEntry(ctx context.Context, g kernel.
 		if active != 1 {
 			return kernel.ErrExecutionConflict
 		}
-		current, err := kernelSnapshotFrom(run)
+		current, err := kernelSnapshotFrom(tx, run)
 		if err != nil {
 			return err
 		}
@@ -317,7 +317,7 @@ func (store *KernelStore) RecordPhysicalCallbackReturn(ctx context.Context, g ke
 		if e != nil {
 			return e
 		}
-		snap, e := kernelSnapshotFrom(current)
+		snap, e := kernelSnapshotFrom(tx, current)
 		if e != nil {
 			return e
 		}

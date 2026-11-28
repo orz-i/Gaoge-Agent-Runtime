@@ -1847,25 +1847,13 @@ func withRepeatedToolGuidance(messages []model.Message, toolKeys []string) []mod
 	guidance := "These exact Tool calls have already returned the same successful results twice: " +
 		strings.Join(toolKeys, ", ") + ". " +
 		"Do not repeat them now; continue from the existing results, choose a different action, or answer the user."
-	for index := range messages {
-		if messages[index].Role == model.RoleSystem {
-			messages[index].Content = model.TextParts(strings.TrimSpace(model.TextValue(messages[index].Content)) + "\n\n" + guidance)
-			return messages
-		}
-	}
-	return append([]model.Message{{Role: model.RoleSystem, Content: model.TextParts(guidance)}}, messages...)
+	return withSystemGuidance(messages, guidance)
 }
 
 func withBlockedToolGuidance(messages []model.Message, toolKeys []string) []model.Message {
 	guidance := "These Tools are no longer available for this run: " +
 		strings.Join(toolKeys, ", ") + ". Continue now using only the remaining Tools."
-	for index := range messages {
-		if messages[index].Role == model.RoleSystem {
-			messages[index].Content = model.TextParts(strings.TrimSpace(model.TextValue(messages[index].Content)) + "\n\n" + guidance)
-			return messages
-		}
-	}
-	return append([]model.Message{{Role: model.RoleSystem, Content: model.TextParts(guidance)}}, messages...)
+	return withSystemGuidance(messages, guidance)
 }
 
 // The original physical receipt must qualify before accounting can persist it.

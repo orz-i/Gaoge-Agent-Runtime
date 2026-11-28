@@ -17,7 +17,10 @@ func cloneOwnedRetirement(r kernel.OwnedRetirementReceipt) kernel.OwnedRetiremen
 // retireOwnedLocked commits the exact managed closure with ordinary retirement.
 func (s *Store) retireOwnedLocked(previous memoryEffect, permit kernel.ChildExecutionSettlement) error {
 	g := previous.grant
-	current := s.runs[g.ChildRunID].Snapshot
+	current, err := s.snapshotLocked(g.ChildRunID)
+	if err != nil {
+		return err
+	}
 	native := s.runs[g.ChildRunID].execution
 	if native.epoch != g.ExecutionEpoch || native.physicalEpoch != g.ExecutionEpoch ||
 		native.quarantineRev != 0 || len(previous.ancestors) != 1 || previous.ancestors[0] != g.ChildRunID ||
@@ -85,7 +88,11 @@ func (s *Store) LookupOwnedRetirementForRun(ctx context.Context, runID string) (
 	if native.quarantineRev != 0 {
 		return kernel.OwnedRetirementReceipt{}, kernel.ErrExecutionConflict
 	}
-	r, e := kernel.SelectOwnedRetirementForRun(runID, rows, s.runs[runID].Snapshot, native.epoch, native.lease, hasGrants)
+	current, e := s.snapshotLocked(runID)
+	if e != nil {
+		return kernel.OwnedRetirementReceipt{}, e
+	}
+	r, e := kernel.SelectOwnedRetirementForRun(runID, rows, current, native.epoch, native.lease, hasGrants)
 	if e != nil {
 		return kernel.OwnedRetirementReceipt{}, e
 	}

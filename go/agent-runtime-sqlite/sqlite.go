@@ -14,8 +14,8 @@ import (
 	sqlite3 "modernc.org/sqlite"
 )
 
-// Schema v13 uses one permanent physical effect with an active ancestor index.
-const schemaVersion = 13
+// Schema v14 stores immutable Agent history separately from hot Run state.
+const schemaVersion = 14
 
 var (
 	ErrUnsupportedSchema = profile.ErrUnsupportedSchema
@@ -187,6 +187,16 @@ var schemaDDL = append([]string{
     , execution_physical_epoch INTEGER NOT NULL DEFAULT 0)`,
 	// A single stable physical effect owns identity, original live facts and
 	// its optional final receipt. The ancestor table is an index only.
+	// History is not another execution authority. The Run selects a prefix
+	// in the same CAS that commits the original hot state and receipts.
+	`CREATE TABLE runtime_state_history (
+            run_id TEXT NOT NULL REFERENCES runtime_runs(run_id),
+            stream INTEGER NOT NULL,
+            generation INTEGER NOT NULL,
+            ordinal INTEGER NOT NULL,
+            payload_json BLOB NOT NULL,
+            PRIMARY KEY(run_id,stream,generation,ordinal)
+        )`,
 	`CREATE TABLE runtime_effects (
             grant_id TEXT PRIMARY KEY NOT NULL,
             child_run_id TEXT NOT NULL,

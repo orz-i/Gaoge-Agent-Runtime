@@ -15,7 +15,7 @@ and profile restrictions are described in the
 [beta.24 upgrade notes](../../docs/releases/v0.1.0-beta.24.md).
 No production support is implied by `go.work`.
 
-**Schema v13:** initialize a fresh Profile. `OpenExisting` rejects earlier
+**Schema v14:** initialize a fresh Profile. `OpenExisting` rejects earlier
 layouts without rewriting them. Stop the previous writer only after draining
 or quarantining its original obligations; retain or export its existing data.
 Do not mix writers. There is no in-place upgrade in this pre-stable cohort.
@@ -157,7 +157,7 @@ block a subsequent explicit CreateNew. Do not delete unknown files
 indiscriminately. If publication is uncertain, keep the original file and
 use `OpenExisting` to recover it.
 
-**Schema v13:** each physical operation has one permanent `runtime_effects`
+**Schema v14:** each physical operation has one permanent `runtime_effects`
 row. Active ownership is indexed by `runtime_effect_owners`; consumption clears
 active facts while retaining identity and the original terminal receipt.
 The Store validates the exact Run revision and original physical authority
@@ -305,7 +305,7 @@ the [Stage 0 decision record](../../docs/audits/2026-10-15-minimal-runtime-stage
 the [Stage 1 post-audit fixes](../../docs/audits/2026-10-15-minimal-runtime-stage1-audit-remediation.md),
 and the [implementation contract](../../docs/minimal-agent-runtime-implementation.md).
 
-### Native Profile layout (v13)
+### Native Profile layout (v14)
 
 Physical admission, callback return, consumption and managed continuation
 commit against the same Effect identity. Native accounting and Run identity
@@ -316,4 +316,11 @@ are resolved.
 
 Earlier development layouts and their migration entry points are retired.
 Keep old Profiles and resolve or export their original facts with the
-previous writer; initialize a separate v13 Profile only after that cutover.
+previous writer; initialize a separate v14 Profile only after that cutover.
+
+Agent history is persisted in `runtime_state_history`; the hot Run record
+selects an immutable generation and prefix. Read the complete byte-exact
+logical State through the Store, not by decoding the internal `state_json`
+column. The same native transaction commits the history append, Run CAS,
+usage and journal. Context compaction can select a new history generation;
+older entries remain immutable. v13 profiles are not opened by v14 writers.

@@ -99,15 +99,15 @@ func (s *Store) managedCancellationQuiescentLocked(runID string) error {
 	// The original physical Grant index does not include independently
 	// owned logical children. Check their actual native ancestry under mu.
 	for id, child := range s.runs {
-		if (child.Run.Status == kernel.RunStatusCompleted || child.Run.Status == kernel.RunStatusFailed || child.Run.Status == kernel.RunStatusCancelled) &&
+		if (child.physical.Run.Status == kernel.RunStatusCompleted || child.physical.Run.Status == kernel.RunStatusFailed || child.physical.Run.Status == kernel.RunStatusCancelled) &&
 			len(s.effectOwners[id]) == 0 && s.runs[id].execution.quarantineRev == 0 {
 			continue
 		}
-		for parent, depth := kernel.RunParentID(child.Run), 0; parent != "" && depth < 64; depth++ {
+		for parent, depth := kernel.RunParentID(child.physical.Run), 0; parent != "" && depth < 64; depth++ {
 			if parent == runID {
 				return kernel.ErrExecutionConflict
 			}
-			parent = kernel.RunParentID(s.runs[parent].Snapshot.Run)
+			parent = kernel.RunParentID(s.runs[parent].physical.Run)
 		}
 	}
 	return nil

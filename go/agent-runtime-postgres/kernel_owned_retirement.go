@@ -95,7 +95,7 @@ func (s *KernelStore) LookupOwnedRetirementForRun(ctx context.Context, id string
 		if run.ExecutionQuarantineRevision != 0 {
 			return kernel.ErrExecutionConflict
 		}
-		snapshot, e := kernelSnapshotFrom(run)
+		snapshot, e := kernelSnapshotFrom(tx, run)
 		if e != nil {
 			return e
 		}

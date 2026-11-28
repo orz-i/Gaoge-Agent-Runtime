@@ -39,6 +39,18 @@ func verifyLegacyEffectRejection(t *testing.T, db *gorm.DB) {
 	if e := db.First(&observed, "grant_id=?", "used").Error; e != nil || observed != row {
 		t.Fatalf("identity changed: %+v %v", observed, e)
 	}
+	// Canonical Effect v13 without the new history table is an earlier
+	// profile as well. Refuse rather than adding a writer-compatible schema.
+	if e := db.Migrator().DropTable(&models.KernelStateHistoryRecord{}); e != nil {
+		t.Fatal(e)
+	}
+	if e := Migrate(db); !errors.Is(e, ErrUnsupportedSchema) || db.Migrator().HasTable(&models.KernelStateHistoryRecord{}) {
+		t.Fatalf("v13 profile admitted: %v", e)
+	}
+	if e := db.First(&observed, "grant_id=?", "used").Error; e != nil || observed != row {
+		t.Fatal("old identity changed", e)
+	}
+
 }
 func TestLegacyEffectProfileRejectionGORM(t *testing.T) {
 	verifyLegacyEffectRejection(t, openKernelStoreTestDB(t))

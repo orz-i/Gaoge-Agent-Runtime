@@ -29,9 +29,9 @@ func (store *Store) QuarantineExecution(ctx context.Context, value kernel.Execut
 	if err := store.nativeEntryGateLocked(value.RunID); err != nil {
 		return err
 	}
-	snapshot, ok := store.snapshotLocked(value.RunID)
-	if !ok {
-		return kernel.ErrNotFound
+	snapshot, readErr := store.snapshotLocked(value.RunID)
+	if readErr != nil {
+		return readErr
 	}
 	if snapshot.Run.Revision != value.Revision {
 		return kernel.ErrConflict
@@ -78,9 +78,9 @@ func (store *Store) RepairExecutionQuarantine(ctx context.Context, value kernel.
 	if err := store.nativeEntryGateLocked(value.RunID); err != nil {
 		return err
 	}
-	snapshot, ok := store.snapshotLocked(value.RunID)
-	if !ok {
-		return kernel.ErrNotFound
+	snapshot, readErr := store.snapshotLocked(value.RunID)
+	if readErr != nil {
+		return readErr
 	}
 	state := store.runs[value.RunID].execution
 	if snapshot.Run.Revision != value.Revision || snapshot.Run.Status != kernel.RunStatusRunning ||

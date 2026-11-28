@@ -13,6 +13,7 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget/sqlledger"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel/statehistory"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -59,6 +60,7 @@ func (store *KernelStore) applyKernelMutation(
 	runID string,
 	expectedRevision uint64,
 	updatedModel models.KernelRunRecord,
+	plan statehistory.Plan,
 	mutation kernel.StoreMutation,
 	lease *kernel.ExecutionLease,
 	control bool,
@@ -116,6 +118,9 @@ func (store *KernelStore) applyKernelMutation(
 		}
 		return kernel.Snapshot{}, store.executionCommitConflict(db, runID, lease)
 	}
+	if e := pgAppendHistory(db, runID, plan.Appends); e != nil {
+		return kernel.Snapshot{}, e
+	}
 	var persisted models.KernelRunRecord
 	if err := db.Where("run_id = ?", runID).First(&persisted).Error; err != nil {
 		return kernel.Snapshot{}, translateKernelError(err)
@@ -129,7 +134,7 @@ func (store *KernelStore) applyKernelMutation(
 	}
 	// The row was read under the successful CAS transaction. Never load again
 	// after commit: a different worker may already have advanced the revision.
-	return kernelSnapshotFrom(persisted)
+	return kernelSnapshotFrom(db, persisted)
 }
 
 const (
@@ -170,6 +175,8 @@ func (store *KernelStore) Create(
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
+	plan := statehistory.Prepare(string(record.Run.Kind), nil, record.State, statehistory.Manifest{}, record.Run.Revision)
+	model.StateJSON = string(plan.Physical())
 	if record.ExecutionRequired {
 		model.ExecutionEpoch = 1
 	}
@@ -183,6 +190,9 @@ func (store *KernelStore) Create(
 		}
 		if createErr := tx.Create(&model).Error; createErr != nil {
 			return translateKernelError(createErr)
+		}
+		if e := pgAppendHistory(tx, record.Run.ID, plan.Appends); e != nil {
+			return e
 		}
 		scoped := &KernelStore{db: tx}
 		if e := kernel.ValidateCreationRetry(ctx, record.BudgetEnrollment, scoped.Load, scoped.LoadCreationDecision); e != nil {
@@ -206,7 +216,7 @@ func (store *KernelStore) Create(
 			return translateKernelError(readErr)
 		}
 		var snapshotErr error
-		snapshot, snapshotErr = kernelSnapshotFrom(persisted)
+		snapshot, snapshotErr = kernelSnapshotFrom(tx, persisted)
 		return snapshotErr
 	})
 	if err != nil {
@@ -230,7 +240,7 @@ func (store *KernelStore) Load(ctx context.Context, runID string) (kernel.Snapsh
 	if err := db.Where("run_id = ?", runID).First(&runRecord).Error; err != nil {
 		return kernel.Snapshot{}, translateKernelError(err)
 	}
-	return kernelSnapshotFrom(runRecord)
+	return kernelSnapshotFrom(db, runRecord)
 }
 
 // ListEvents returns one monotonic journal page without loading aggregate state.
@@ -301,7 +311,7 @@ func (store *KernelStore) Commit(ctx context.Context, runID string, expectedRevi
 				return translateKernelError(readErr)
 			}
 			if child.ParentRunID != "" {
-				source, e := kernelSnapshotFrom(child)
+				source, e := kernelSnapshotFrom(tx, child)
 				if e != nil {
 					return e
 				}
@@ -323,7 +333,7 @@ func (store *KernelStore) Commit(ctx context.Context, runID string, expectedRevi
 		if lease == nil && guard == nil && recovery == nil && lockedRun.ExecutionEpoch > 0 {
 			return kernel.ErrExecutionRequired
 		}
-		current, decodeErr := kernelSnapshotFrom(lockedRun)
+		current, decodeErr := kernelSnapshotFrom(tx, lockedRun)
 		if decodeErr != nil {
 			return decodeErr
 		}
@@ -441,7 +451,7 @@ func (store *KernelStore) Commit(ctx context.Context, runID string, expectedRevi
 			if persisted.Revision != expectedRevision {
 				return kernel.ErrConflict
 			}
-			current, decodeErr := kernelSnapshotFrom(persisted)
+			current, decodeErr := kernelSnapshotFrom(tx, persisted)
 			if decodeErr != nil {
 				return decodeErr
 			}
@@ -469,7 +479,13 @@ func (store *KernelStore) Commit(ctx context.Context, runID string, expectedRevi
 		if managedErr != nil {
 			return managedErr
 		}
-		snapshot, applyErr = store.applyKernelMutation(tx, runID, expectedRevision, updatedModel, mutation, effectiveLease, guard != nil && approvalLease == nil, recovery != nil, approvalLease != nil)
+		_, manifest, e := statehistory.OpenPhysical(json.RawMessage(lockedRun.StateJSON))
+		if e != nil {
+			return e
+		}
+		plan := statehistory.Prepare(string(mutation.Record.Run.Kind), current.State, mutation.Record.State, manifest, mutation.Record.Run.Revision)
+		updatedModel.StateJSON = string(plan.Physical())
+		snapshot, applyErr = store.applyKernelMutation(tx, runID, expectedRevision, updatedModel, plan, mutation, effectiveLease, guard != nil && approvalLease == nil, recovery != nil, approvalLease != nil)
 		if applyErr != nil {
 			return applyErr
 		}
@@ -755,7 +771,7 @@ func validKernelTransitionLease(request kernel.TransitionLeaseRequest) bool {
 		strings.TrimSpace(request.WorkerID) != ""
 }
 
-func kernelSnapshotFrom(runRecord models.KernelRunRecord) (kernel.Snapshot, error) {
+func kernelSnapshotFrom(db *gorm.DB, runRecord models.KernelRunRecord) (kernel.Snapshot, error) {
 	checkpoint, hasCheckpoint, err := unmarshalCheckpoint(runRecord.CheckpointJSON)
 	if err != nil {
 		return kernel.Snapshot{}, err
@@ -765,9 +781,19 @@ func kernelSnapshotFrom(runRecord models.KernelRunRecord) (kernel.Snapshot, erro
 		return kernel.Snapshot{}, err
 	}
 	state := json.RawMessage(runRecord.StateJSON)
-	if !json.Valid(state) {
-		return kernel.Snapshot{}, errPersistedKernelStateJSON
+	hot, manifest, e := statehistory.OpenPhysical(state)
+	if e != nil {
+		return kernel.Snapshot{}, errors.Join(errPersistedKernelStateJSON, e)
 	}
+	if !manifest.Empty() {
+		state, e = statehistory.Restore(hot, manifest, func(stream int, gen uint64, count int) ([]json.RawMessage, error) {
+			return pgReadHistory(db, runRecord.RunID, stream, gen, count)
+		})
+		if e != nil {
+			return kernel.Snapshot{}, errors.Join(errPersistedKernelStateJSON, e)
+		}
+	}
+
 	snapshot := kernel.Snapshot{
 		Run: kernel.Run{
 			ID: runRecord.RunID, Kind: kernel.RunKind(runRecord.Kind),

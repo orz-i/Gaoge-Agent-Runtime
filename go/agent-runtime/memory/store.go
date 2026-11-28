@@ -11,6 +11,7 @@ import (
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel/statehistory"
 )
 
 // Store is the single-process atomic Kernel adapter used by minimal hosts and tests.
@@ -31,14 +32,59 @@ type Store struct {
 
 // A Run owns its snapshot, execution fence and event history together.
 type memoryRun struct {
-	kernel.Snapshot
-	execution memoryExecutionState
-	events    []kernel.Event
+	physical        kernel.Snapshot
+	execution       memoryExecutionState
+	events          []kernel.Event
+	archives        map[historyKey][]json.RawMessage
+	stateWriteBytes int64
 }
 
-func (s *Store) snapshotLocked(id string) (kernel.Snapshot, bool) {
+type historyKey struct {
+	Stream     int
+	Generation uint64
+}
+
+func (r memoryRun) snapshot() (kernel.Snapshot, error) {
+	out := r.physical
+	hot, manifest, e := statehistory.OpenPhysical(out.State)
+	if e != nil {
+		return kernel.Snapshot{}, e
+	}
+	if manifest.Empty() {
+		return out, nil
+	}
+	state, e := statehistory.Restore(hot, manifest, func(stream int, gen uint64, count int) ([]json.RawMessage, error) {
+		items := r.archives[historyKey{stream, gen}]
+		if len(items) < count {
+			return nil, kernel.ErrExecutionConflict
+		}
+		return items[:count], nil
+	})
+	if e != nil {
+		return kernel.Snapshot{}, e
+	}
+	out.State = state
+	return out, nil
+}
+func (s *Store) snapshotLocked(id string) (kernel.Snapshot, error) {
 	run, ok := s.runs[id]
-	return run.Snapshot, ok
+	if !ok {
+		return kernel.Snapshot{}, kernel.ErrNotFound
+	}
+	return run.snapshot()
+}
+
+// StateWriteBytes reports the actual hot JSON, manifest and newly appended
+// history payload bytes submitted to the in-memory commit representation.
+// It excludes allocator and journal overhead; it is not an execution port.
+func (s *Store) StateWriteBytes(id string) (int64, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	r, ok := s.runs[id]
+	if !ok {
+		return 0, kernel.ErrNotFound
+	}
+	return r.stateWriteBytes, nil
 }
 
 func (s *Store) setExecutionLocked(id string, state memoryExecutionState) {
@@ -87,7 +133,7 @@ func NewStore() *Store {
 func (store *Store) Create(ctx context.Context, record kernel.Record, events []kernel.EventDraft) (kernel.Snapshot, error) {
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	if _, exists := store.snapshotLocked(record.Run.ID); exists {
+	if _, exists := store.runs[record.Run.ID]; exists {
 		return kernel.Snapshot{}, kernel.ErrAlreadyExists
 	}
 	if decision, rejected := store.creationDecisions[record.Run.ID]; rejected {
@@ -108,7 +154,8 @@ func (store *Store) Create(ctx context.Context, record kernel.Record, events []k
 		run.execution.epoch = 1
 	}
 	store.runs[record.Run.ID] = run
-	return store.commitRunLocked(snapshotFromRecord(record), events, nil), nil
+	next := snapshotFromRecord(record)
+	return store.commitRunLocked(next, events, nil, statehistory.Prepare(string(next.Run.Kind), nil, next.State, statehistory.Manifest{}, next.Run.Revision)), nil
 }
 
 // DecideBeforeCreate and Create share the same native mutex and ledger CAS.
@@ -122,7 +169,7 @@ func (s *Store) DecideBeforeCreate(ctx context.Context, q kernel.RunCreationDeci
 	if err := ctx.Err(); err != nil {
 		return zero, err
 	}
-	if _, ok := s.snapshotLocked(q.RunID); ok {
+	if _, ok := s.runs[q.RunID]; ok {
 		return zero, kernel.ErrAlreadyExists
 	}
 	if c, ok := s.creationDecisions[q.RunID]; ok {
@@ -145,7 +192,7 @@ func (s *Store) loadCreationDecision(_ context.Context, id string) (kernel.RunCr
 	if c, ok := s.creationDecisions[id]; ok {
 		return c, nil
 	}
-	if _, ok := s.snapshotLocked(id); ok {
+	if _, ok := s.runs[id]; ok {
 		return kernel.RunCreationDecision{}, kernel.ErrAlreadyExists
 	}
 	return kernel.RunCreationDecision{}, kernel.ErrNotFound
@@ -159,10 +206,7 @@ func (s *Store) LoadCreationDecision(ctx context.Context, id string) (kernel.Run
 
 func (s *Store) validateCreationRetry(ctx context.Context, e *budget.RunEnrollment) error {
 	return kernel.ValidateCreationRetry(ctx, e, func(_ context.Context, id string) (kernel.Snapshot, error) {
-		if v, ok := s.snapshotLocked(id); ok {
-			return v, nil
-		}
-		return kernel.Snapshot{}, kernel.ErrNotFound
+		return s.snapshotLocked(id)
 	}, s.loadCreationDecision)
 }
 
@@ -173,7 +217,7 @@ func (store *Store) ListEvents(_ context.Context, runID string, afterSeq int64, 
 	}
 	store.mu.RLock()
 	defer store.mu.RUnlock()
-	if _, exists := store.snapshotLocked(runID); !exists {
+	if _, exists := store.runs[runID]; !exists {
 		return nil, kernel.ErrNotFound
 	}
 	journal := store.runs[runID].events
@@ -191,9 +235,9 @@ func (store *Store) ListEvents(_ context.Context, runID string, afterSeq int64, 
 func (store *Store) Load(_ context.Context, runID string) (kernel.Snapshot, error) {
 	store.mu.RLock()
 	defer store.mu.RUnlock()
-	snapshot, ok := store.snapshotLocked(runID)
-	if !ok {
-		return kernel.Snapshot{}, kernel.ErrNotFound
+	snapshot, e := store.snapshotLocked(runID)
+	if e != nil {
+		return kernel.Snapshot{}, e
 	}
 	return cloneSnapshot(snapshot), nil
 }
@@ -205,9 +249,9 @@ func (store *Store) applyLocked(ctx context.Context, runID string, expectedRevis
 			return kernel.Snapshot{}, err
 		}
 	}
-	current, ok := store.snapshotLocked(runID)
-	if !ok {
-		return kernel.Snapshot{}, kernel.ErrNotFound
+	current, readErr := store.snapshotLocked(runID)
+	if readErr != nil {
+		return kernel.Snapshot{}, readErr
 	}
 	if current.Run.Revision != expectedRevision {
 		return kernel.Snapshot{}, kernel.ErrConflict
@@ -261,23 +305,43 @@ func (store *Store) applyLocked(ctx context.Context, runID string, expectedRevis
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
+
+	_, manifest, e := statehistory.OpenPhysical(store.runs[runID].physical.State)
+	if e != nil {
+		return kernel.Snapshot{}, e
+	}
+	plan := statehistory.Prepare(string(next.Run.Kind), current.State, next.State, manifest, next.Run.Revision)
 	if safe.ID != "" {
 		store.saveManagedLocked(kernel.ManagedInitialTransfer(safe))
 	}
-	return store.commitRunLocked(next, mutation.Events, ledger), nil
+	return store.commitRunLocked(next, mutation.Events, ledger, plan), nil
 }
 
 // commitRunLocked commits the already-qualified Run, original accounting
 // delta, journal and outbox under the same native mutex. Admission, control
 // and receipt recovery validate their original facts before reaching here.
-func (s *Store) commitRunLocked(next kernel.Snapshot, drafts []kernel.EventDraft, ledger *budget.LedgerMutation) kernel.Snapshot {
+func (s *Store) commitRunLocked(next kernel.Snapshot, drafts []kernel.EventDraft, ledger *budget.LedgerMutation, plan statehistory.Plan) kernel.Snapshot {
 	if ledger != nil {
 		s.ledgers[ledger.ScopeID()] = ledger.Next()
 	}
 	run := s.runs[next.Run.ID]
 	run.events = appendEvents(run.events, drafts, next.Run.UpdatedAt)
 	next.EventHead = int64(len(run.events))
-	run.Snapshot = cloneSnapshot(next)
+	hot := next
+	hot.State = nil
+	run.physical = cloneSnapshot(hot)
+	run.physical.State = plan.Physical()
+	run.stateWriteBytes += int64(len(run.physical.State))
+	for _, delta := range plan.Appends {
+		if run.archives == nil {
+			run.archives = make(map[historyKey][]json.RawMessage)
+		}
+		key := historyKey{delta.Stream, delta.Generation}
+		run.archives[key] = append(run.archives[key], delta.Entries...)
+		for _, entry := range delta.Entries {
+			run.stateWriteBytes += int64(len(entry))
+		}
+	}
 	s.runs[next.Run.ID] = run
 	s.appendCommittedTransition(next.Run, drafts)
 	return cloneSnapshot(next)

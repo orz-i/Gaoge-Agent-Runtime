@@ -41,12 +41,22 @@
 
 ## Native SQL Profile hard cut (AC-03)
 
-SQLite v13 and the matching PostgreSQL layout store one permanent Effect
+SQLite v14 and the matching PostgreSQL layout store one permanent Effect
 row and an active ancestor index. Separate Grant identity, retirement, and
 replicated ancestor Grant tables and earlier SQLite migration entry points
 are retired. Initialize a fresh Profile; the current adapters reject legacy
 layouts without modifying their data. Resolve original obligations with the
 previous writer and retain or export the original Profile before cutover.
+
+## Agent hot state and immutable history (AC-04)
+
+The existing Run Create/Commit transaction now stores sealed Agent history
+as immutable ordered entries, selected by the current hot State envelope.
+The complete logical Snapshot is reconstructed byte-for-byte before exposure
+or authority verification. Pending model requests/receipts stay in hot state.
+The SQLite v14 and matching PostgreSQL layout require a fresh Profile;
+earlier Profiles remain unchanged. Do not decode the internal state column
+as logical Agent JSON or mix old/new writers.
 
 ## Owned physical callback entry and no-entry retirement
 

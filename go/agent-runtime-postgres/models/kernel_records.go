@@ -36,14 +36,27 @@ type KernelRunRecord struct {
 	DeadlineAt                    *time.Time `gorm:"index:idx_agent_kernel_runs_deadline"`
 	EndedAt                       *time.Time `gorm:"index:idx_agent_kernel_runs_ended"`
 	StateJSON                     string     `gorm:"type:text;not null"`
-	CheckpointJSON                string     `gorm:"type:text;not null;default:''"`
-	ResultJSON                    string     `gorm:"type:text;not null;default:''"`
-	LastEventSeq                  int64      `gorm:"not null;default:0"`
-	CreatedAt                     time.Time  `gorm:"not null"`
-	UpdatedAt                     time.Time  `gorm:"not null"`
+
+	CheckpointJSON string    `gorm:"type:text;not null;default:''"`
+	ResultJSON     string    `gorm:"type:text;not null;default:''"`
+	LastEventSeq   int64     `gorm:"not null;default:0"`
+	CreatedAt      time.Time `gorm:"not null"`
+	UpdatedAt      time.Time `gorm:"not null"`
 }
 
 func (KernelRunRecord) TableName() string { return "agent_kernel_runs" }
+
+// KernelStateHistoryRecord is an immutable piece of the selected Agent
+// history. Run history metadata determines the exact prefix to read.
+type KernelStateHistoryRecord struct {
+	RunID       string `gorm:"size:64;primaryKey"`
+	Stream      int    `gorm:"primaryKey;autoIncrement:false"`
+	Generation  uint64 `gorm:"primaryKey;autoIncrement:false"`
+	Ordinal     int    `gorm:"primaryKey;autoIncrement:false"`
+	PayloadJSON string `gorm:"type:text;not null"`
+}
+
+func (KernelStateHistoryRecord) TableName() string { return "agent_kernel_state_history" }
 
 // KernelEventRecord stores the monotonic event stream for one Kernel Run.
 type KernelEventRecord struct {

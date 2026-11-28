@@ -33,6 +33,7 @@ type measurements struct {
 	ReplayBytes               int    `json:"replayTextBytes"`
 	StateWrites               int    `json:"aggregateStateWrites"`
 	SubmittedStateBytes       int64  `json:"aggregateStateBytesSubmitted"`
+	StoredStateBytes          int64  `json:"physicalStatePayloadBytesSubmitted"`
 	MaxStateBytes             int    `json:"maxAggregateStateBytes"`
 	FinalStateBytes           int    `json:"finalAggregateStateBytes"`
 	SampledHeapAllocBytes     uint64 `json:"sampledProcessHeapAllocBytes"`
@@ -206,6 +207,10 @@ func measure(ctx context.Context, config settings) (measurements, error) {
 		result.FirstModelAfterResumeUS = probe.first.Sub(resumeStart).Microseconds()
 	}
 	result.FinalStateBytes = len(completed.State)
+	result.StoredStateBytes, err = store.StateWriteBytes(completed.Run.ID)
+	if err != nil {
+		return result, err
+	}
 	result.ModelCalls = view.Budget.Usage.LLMCalls
 	result.CommittedCallsNotReplayed = len(executions) == config.steps
 	for step, count := range executions {

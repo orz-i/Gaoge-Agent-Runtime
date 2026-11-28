@@ -15,6 +15,7 @@ import (
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget/sqlledger"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel/statehistory"
 )
 
 type encodedRecord struct {
@@ -178,7 +179,7 @@ func transitionID(runID string, revision uint64) string {
 
 type queryRow interface{ Scan(...any) error }
 
-func decodeSnapshot(row queryRow) (kernel.Snapshot, error) {
+func decodeSnapshot(ctx context.Context, q schemaQuery, row queryRow, selected *statehistory.Manifest) (kernel.Snapshot, error) {
 	var rawRun, state, checkpoint, result []byte
 	var revision int64
 	var head int64
@@ -192,9 +193,25 @@ func decodeSnapshot(row queryRow) (kernel.Snapshot, error) {
 	if err := json.Unmarshal(rawRun, &run); err != nil {
 		return kernel.Snapshot{}, fmt.Errorf("%w: run JSON: %w", ErrInvalidRecord, err)
 	}
-	if !json.Valid(state) || run.Revision != uint64(revision) || run.ID == "" {
+	if run.Revision != uint64(revision) || run.ID == "" {
 		return kernel.Snapshot{}, ErrInvalidRecord
 	}
+	hot, manifest, e := statehistory.OpenPhysical(state)
+	if e != nil {
+		return kernel.Snapshot{}, fmt.Errorf("%w: %v", ErrInvalidRecord, e)
+	}
+	if selected != nil {
+		*selected = manifest
+	}
+	if !manifest.Empty() {
+		state, e = statehistory.Restore(hot, manifest, func(stream int, gen uint64, count int) ([]json.RawMessage, error) {
+			return sqliteReadHistory(ctx, q, run.ID, stream, gen, count)
+		})
+		if e != nil {
+			return kernel.Snapshot{}, fmt.Errorf("%w: %v", ErrInvalidRecord, e)
+		}
+	}
+
 	// database/sql.Scan into *[]byte already makes an independent,
 	// caller-owned copy (unlike RawBytes). Transfer that buffer to the
 	// Snapshot: cloning it again only adds a full-State allocation.
@@ -220,7 +237,7 @@ const readSnapshotSQL = `SELECT run_json,state_json,checkpoint_json,result_json,
 	FROM runtime_runs WHERE run_id=?`
 
 func loadTx(ctx context.Context, tx *sql.Tx, runID string) (kernel.Snapshot, error) {
-	return decodeSnapshot(tx.QueryRowContext(ctx, readSnapshotSQL, runID))
+	return decodeSnapshot(ctx, tx, tx.QueryRowContext(ctx, readSnapshotSQL, runID), nil)
 }
 
 // Create commits the Run, event journal, transition-based local ready-work
@@ -252,16 +269,20 @@ func (s *Store) Create(ctx context.Context, record kernel.Record, drafts []kerne
 	if _, err = sqliteValidateLiveRunOwners(ctx, tx, record.Run); err != nil {
 		return kernel.Snapshot{}, err
 	}
+	plan := statehistory.Prepare(string(record.Run.Kind), nil, record.State, statehistory.Manifest{}, record.Run.Revision)
 	_, err = tx.ExecContext(ctx,
 		`INSERT INTO runtime_runs(run_id,scope_id,kind,status,revision,run_json,state_json,checkpoint_json,result_json,event_head,execution_epoch)
           VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
 		record.Run.ID, record.Run.Actor.TenantID, string(record.Run.Kind), string(record.Run.Status), record.Run.Revision,
-		encoded.run, encoded.state, encoded.checkpoint, encoded.result, len(drafts), reservedEpoch)
+		encoded.run, plan.Physical(), encoded.checkpoint, encoded.result, len(drafts), reservedEpoch)
 	if err != nil {
 		if constraintError(err) {
 			return kernel.Snapshot{}, fmt.Errorf("%w: %w", kernel.ErrAlreadyExists, err)
 		}
 		return kernel.Snapshot{}, conflictOrDatabaseError(err)
+	}
+	if e := sqliteAppendHistory(ctx, tx, record.Run.ID, plan.Appends); e != nil {
+		return kernel.Snapshot{}, e
 	}
 	if e := sqliteValidateCreationRetry(ctx, tx, record.BudgetEnrollment); e != nil {
 		return kernel.Snapshot{}, e
@@ -293,7 +314,7 @@ func (s *Store) Load(ctx context.Context, runID string) (kernel.Snapshot, error)
 	if s == nil || s.db == nil || ctx == nil || strings.TrimSpace(runID) == "" {
 		return kernel.Snapshot{}, kernel.ErrInvalidInput
 	}
-	return decodeSnapshot(s.db.QueryRowContext(ctx, readSnapshotSQL, strings.TrimSpace(runID)))
+	return decodeSnapshot(ctx, s.db, s.db.QueryRowContext(ctx, readSnapshotSQL, strings.TrimSpace(runID)), nil)
 }
 
 // Commit is the single Run/effect/usage mutation transaction.
@@ -326,7 +347,8 @@ func (s *Store) Commit(ctx context.Context, runID string, expectedRevision uint6
 	}
 	// Read under the same writer transaction, never trust preflight parent
 	// status or a matching revision observed before the writer lock.
-	current, readErr := loadTx(ctx, tx, runID)
+	var manifest statehistory.Manifest
+	current, readErr := decodeSnapshot(ctx, tx, tx.QueryRowContext(ctx, readSnapshotSQL, runID), &manifest)
 	if readErr != nil {
 		return kernel.Snapshot{}, false, readErr
 	}
@@ -526,12 +548,14 @@ func (s *Store) Commit(ctx context.Context, runID string, expectedRevision uint6
 	// The entire predicate is evaluated by SQLite while holding the same
 	// writer transaction, so a takeover cannot race between lease verification
 	// and the revision update. Claims/renewals also hold this DB writer lock.
+
+	plan := statehistory.Prepare(string(mutation.Record.Run.Kind), current.State, mutation.Record.State, manifest, mutation.Record.Run.Revision)
 	updateSQL := `UPDATE runtime_runs SET scope_id=?,kind=?,status=?,revision=?,run_json=?,state_json=?,
       checkpoint_json=?,result_json=?,event_head=event_head+?
       WHERE run_id=? AND revision=?`
 	args := []any{mutation.Record.Run.Actor.TenantID, string(mutation.Record.Run.Kind),
 		string(mutation.Record.Run.Status), mutation.Record.Run.Revision,
-		encoded.run, encoded.state, encoded.checkpoint, encoded.result, len(mutation.Events),
+		encoded.run, plan.Physical(), encoded.checkpoint, encoded.result, len(mutation.Events),
 		runID, expectedRevision}
 	if guard != nil && ownedControlGrant != nil {
 		nowMS, clockErr := sqliteExecutionNow(ctx, tx)
@@ -629,6 +653,9 @@ func (s *Store) Commit(ctx context.Context, runID string, expectedRevision uint6
 			}
 		}
 		return kernel.Snapshot{}, false, kernel.ErrConflict
+	}
+	if e := sqliteAppendHistory(ctx, tx, runID, plan.Appends); e != nil {
+		return kernel.Snapshot{}, false, e
 	}
 	snapshot, err := commitRunJournal(ctx, tx, mutation, encoded, events)
 	if err != nil {

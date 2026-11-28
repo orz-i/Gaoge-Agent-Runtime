@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"errors"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
@@ -32,9 +33,9 @@ func (s *Store) BeginPhysicalExecution(ctx context.Context, p kernel.PhysicalAdm
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	current, ok := s.snapshotLocked(g.ChildRunID)
-	if !ok {
-		return zero, kernel.ErrNotFound
+	current, readErr := s.snapshotLocked(g.ChildRunID)
+	if readErr != nil {
+		return zero, readErr
 	}
 	ancestors, e := s.validateLiveRunOwners(ctx, current.Run)
 	if e != nil {
@@ -131,9 +132,9 @@ func (s *Store) CheckOwnedPhysicalEntry(ctx context.Context, g kernel.ChildExecu
 	if err := ctx.Err(); err != nil {
 		return kernel.OwnedPhysicalEntryWindow{}, err
 	}
-	current, ok := s.snapshotLocked(g.ChildRunID)
-	if !ok {
-		return kernel.OwnedPhysicalEntryWindow{}, kernel.ErrNotFound
+	current, readErr := s.snapshotLocked(g.ChildRunID)
+	if readErr != nil {
+		return kernel.OwnedPhysicalEntryWindow{}, readErr
 	}
 	if _, e := s.validateLiveRunOwners(ctx, current.Run); e != nil {
 		return kernel.OwnedPhysicalEntryWindow{}, e
@@ -175,8 +176,11 @@ func (s *Store) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.Child
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	original, ok := s.activeEffect(g.ID)
-	current, exists := s.snapshotLocked(g.ChildRunID)
-	if !ok || !exists || original.grant != g {
+	current, readErr := s.snapshotLocked(g.ChildRunID)
+	if readErr != nil && !errors.Is(readErr, kernel.ErrNotFound) {
+		return readErr
+	}
+	if !ok || readErr != nil || original.grant != g {
 		return kernel.ErrExecutionConflict
 	}
 	native := s.runs[g.ChildRunID].execution
@@ -226,7 +230,7 @@ func (s *Store) LookupPhysicalCallbackReturn(ctx context.Context, g kernel.Child
 			return kernel.PhysicalCallbackCompletion{}, kernel.ErrExecutionConflict
 		}
 	}
-	if _, exists := s.snapshotLocked(g.ChildRunID); !exists {
+	if _, exists := s.runs[g.ChildRunID]; !exists {
 		return kernel.PhysicalCallbackCompletion{}, kernel.ErrExecutionConflict
 	}
 	if err := kernel.ValidatePhysicalCompletion(g, original.completion); err != nil {

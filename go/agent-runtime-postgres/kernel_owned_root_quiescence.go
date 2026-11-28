@@ -25,7 +25,7 @@ func (s *KernelStore) VerifyExecutionCustody(ctx context.Context, expected kerne
 		if run.ExecutionQuarantineRevision != 0 {
 			return kernel.ErrExecutionConflict
 		}
-		current, err := kernelSnapshotFrom(run)
+		current, err := kernelSnapshotFrom(tx, run)
 		if err != nil {
 			return err
 		}

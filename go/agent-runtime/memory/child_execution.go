@@ -47,9 +47,9 @@ func (store *Store) validateLiveRunOwners(ctx context.Context, run kernel.Run) (
 		if err := store.nativeEntryGateLocked(id); err != nil {
 			return kernel.Snapshot{}, err
 		}
-		parent, ok := store.snapshotLocked(id)
-		if !ok {
-			return kernel.Snapshot{}, kernel.ErrNotFound
+		parent, readErr := store.snapshotLocked(id)
+		if readErr != nil {
+			return kernel.Snapshot{}, readErr
 		}
 		return parent, nil
 	})
@@ -71,9 +71,12 @@ func (store *Store) FinishChildExecution(ctx context.Context, grant kernel.Child
 		return err
 	}
 	previous, ok := store.activeEffect(grant.ID)
-	child := store.runs[grant.ChildRunID].Snapshot
 	if !ok || previous.grant != grant {
 		return kernel.ErrExecutionConflict
+	}
+	child, err := store.snapshotLocked(grant.ChildRunID)
+	if err != nil {
+		return err
 	}
 	if grant.IsOwned() {
 		return store.retireOwnedLocked(previous, permit)

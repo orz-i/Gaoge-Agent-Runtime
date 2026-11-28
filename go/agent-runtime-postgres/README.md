@@ -82,3 +82,9 @@ The permanent `agent_kernel_effects` key serializes admissions across Run
 locks and pools. `agent_kernel_effect_owners` indexes active ancestor fences
 without copying the execution facts. Consumption retains the same identity
 and, when applicable, the final retirement receipt in the same row.
+
+Agent history uses `agent_kernel_state_history` with the same native Run
+transaction and shared physical codec as SQLite and Memory. Read logical
+State through the Store; the internal state column may contain a versioned
+hot-state envelope. Profiles lacking the immutable history table are
+refused before schema writes.

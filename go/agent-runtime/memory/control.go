@@ -35,9 +35,9 @@ func (store *Store) Commit(ctx context.Context, runID string, expectedRevision u
 			return kernel.Snapshot{}, false, err
 		}
 	}
-	current, ok := store.snapshotLocked(runID)
-	if !ok {
-		return kernel.Snapshot{}, false, kernel.ErrNotFound
+	current, readErr := store.snapshotLocked(runID)
+	if readErr != nil {
+		return kernel.Snapshot{}, false, readErr
 	}
 	authority := store.runs[runID].execution
 	if guard == nil {
@@ -94,6 +94,7 @@ func (store *Store) Commit(ctx context.Context, runID string, expectedRevision u
 			return cloneSnapshot(current), false, nil
 		}
 		g := kernel.ManagedCurrentGrant(t)
+		var ok bool
 		predecessor, ok = store.activeEffect(g.ID)
 		if !ok || !store.managedSoleGrantLocked(runID, g.ID) || predecessor.grant != g || predecessor.completion.GrantID != "" ||
 			!g.MatchesExecution(authority.lease) || authority.epoch != g.ExecutionEpoch || authority.epoch == math.MaxUint64 || authority.quarantineRev != 0 {

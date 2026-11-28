@@ -22,7 +22,7 @@ func pgValidateLiveRunOwners(ctx context.Context, tx *gorm.DB, run kernel.Run) (
 		if err != nil {
 			return nil, err
 		}
-		snapshot, err := kernelSnapshotFrom(row)
+		snapshot, err := kernelSnapshotFrom(tx, row)
 		if err != nil {
 			return nil, err
 		}
@@ -49,7 +49,7 @@ func (store *KernelStore) FinishChildExecution(ctx context.Context, grant kernel
 		if e := pgNativeEntryGate(tx, grant.ChildRunID); e != nil {
 			return e
 		}
-		snapshot, snapshotErr := kernelSnapshotFrom(child)
+		snapshot, snapshotErr := kernelSnapshotFrom(tx, child)
 		if snapshotErr != nil {
 			return snapshotErr
 		}

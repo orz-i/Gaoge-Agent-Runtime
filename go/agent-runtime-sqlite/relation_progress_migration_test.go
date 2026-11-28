@@ -12,7 +12,7 @@ import (
 
 func TestEncryptedCurrentRelationReopenPreservesOriginalAuthority(t *testing.T) {
 	ctx := t.Context()
-	path := ownedPrivatePath(t, "encrypted-v13.sqlite")
+	path := ownedPrivatePath(t, "encrypted-v14.sqlite")
 	var key [32]byte
 	key[0] = 27
 	defer clear(key[:])
