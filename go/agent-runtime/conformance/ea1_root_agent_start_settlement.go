@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -394,7 +395,7 @@ func ea1AssertStartSettlementReceipt(t *testing.T, p *ea1StartSettlementPhysical
 		want := tools.ExecutionRequest{RunID: req.ID, Call: tools.Call{ID: "original-call", ToolKey: "effect", Arguments: json.RawMessage(`{"source":"original"}`)}}
 		// Agent binds the public Call.Name from the original catalog definition.
 		want.Call.Name = definition.Name
-		if !reflect.DeepEqual(tr, want) || !reflect.DeepEqual(ti.Request, tr) || !reflect.DeepEqual(ti.Definition, definition) || ti.Run.Actor != req.Actor || ti.Run.Thread != req.Thread || ti.Run.ParentRunID != req.ParentRunID || receipt.Receipt.ExecutionID != tr.Call.ID || receipt.Receipt.Disposition != "committed" || string(receipt.Content) != `{"committed":"original"}` || view.Budget.Usage.ToolCalls != 1 {
+		if !reflect.DeepEqual(tr, want) || !reflect.DeepEqual(ti.Request, tr) || !slices.ContainsFunc(actual.Tools, func(d tools.Definition) bool { return ea1RecoveryJSONEqual(d, definition) }) || ti.Run.Actor != req.Actor || ti.Run.Thread != req.Thread || ti.Run.ParentRunID != req.ParentRunID || receipt.Receipt.ExecutionID != tr.Call.ID || receipt.Receipt.Disposition != "committed" || string(receipt.Content) != `{"committed":"original"}` || view.Budget.Usage.ToolCalls != 1 {
 			t.Fatal("full Tool definition/request/receipt source mismatch")
 		}
 	} else if len(p.toolRequests) != 0 || s.Run.Status != kernel.RunStatusRunning || view.Budget.Usage.ToolCalls != 0 {

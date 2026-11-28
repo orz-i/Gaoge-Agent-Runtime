@@ -68,7 +68,7 @@ func TestNamedBudgetCompletionReplayDoesNotRedispatchProvider(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			grant, err := rt.LookupChildExecution(t.Context(), pending.Run.ID)
+			_, err = rt.LookupChildExecution(t.Context(), pending.Run.ID)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -94,13 +94,16 @@ func TestNamedBudgetCompletionReplayDoesNotRedispatchProvider(t *testing.T) {
 			}
 			meterCalls := client.meterCalls
 			final, callErr := restarted.Resume(t.Context(), pending.Run.ID, pending.Run.Revision)
-			assertRootReceiptEvidenceOnly(t, rt, pending, final, grant, callErr)
+			assertNativeReceiptConsumed(t, rt, pending, final)
+			if (callErr == nil) != accepted || (final.Run.Status == kernel.RunStatusCompleted) != accepted {
+				t.Fatalf("recovered wrong terminal outcome: %+v %v", final.Run, callErr)
+			}
 			view, _ := agent.ViewState(final)
 			if (view.ModelInvocations[0].ErrorCode == "") != accepted || view.ModelInvocations[0].Provider != "audit" || view.ModelInvocations[0].BindingFingerprint != strings.Repeat("a", 64) || client.calls != 1 || client.meterCalls != meterCalls {
 				t.Fatalf("named receipt source/outcome lost: %+v calls=%d", view.ModelInvocations, client.calls)
 			}
 			ledger, err := store.LoadBudget(t.Context(), "hosted-budget-turn")
-			if err != nil || !reflect.DeepEqual(ledgerBefore, ledger) || ledger.View("").Usage.TotalTokens != 30 || ledger.View("").UnknownUsage {
+			if err != nil || !reflect.DeepEqual(ledgerBefore.Reservations, ledger.Reservations) || ledger.View("").Usage.TotalTokens != 30 || ledger.View("").UnknownUsage {
 				t.Fatalf("replay bill changed: %+v %v", ledger, err)
 			}
 

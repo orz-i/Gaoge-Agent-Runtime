@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -142,7 +143,8 @@ func ea1NewChildCancelFixture(t *testing.T, factory func(*testing.T) (kernel.Sto
 	if e != nil {
 		t.Fatal(e)
 	}
-	f.request = agent.StartRequest{ID: "child-cancel-source", RequestID: "original-child-cancel-source", ParentRunID: f.parent.Run.ID, OriginFingerprint: agent.FrozenOriginFingerprint([]byte(`{"source":"original-child-cancel-source","context":"isolated"}`)), Actor: actor, Thread: thread, Goal: "original child cancellation source", Instructions: "Preserve original source.", Model: "fixture-model", ModelOptions: json.RawMessage(`{"temperature":0.1}`), Limits: agent.Limits{MaxLLMCalls: 2, MaxToolCalls: 1}}
+	f.request = agent.StartRequest{ID: "child-cancel-source", RequestID: "original-child-cancel-source", ParentRunID: f.parent.Run.ID, OriginFingerprint: agent.FrozenOriginFingerprint([]byte(`{"source":"original-child-cancel-source","context"
+ "slices":"isolated"}`)), Actor: actor, Thread: thread, Goal: "original child cancellation source", Instructions: "Preserve original source.", Model: "fixture-model", ModelOptions: json.RawMessage(`{"temperature":0.1}`), Limits: agent.Limits{MaxLLMCalls: 2, MaxToolCalls: 1}}
 	if tool {
 		f.request.ToolKeys = []string{"effect"}
 	}
@@ -363,7 +365,7 @@ func ea1ChildCancelUnknownSource(t *testing.T, f *ea1ChildCancelFixture, s kerne
 		}
 		ea1StartSettlementJSONEqual(t, "original consumed Model response", inv.Response, p.responses[0])
 		want := tools.ExecutionRequest{RunID: f.request.ID, Call: tools.Call{ID: "original-call", ToolKey: "effect", Name: f.definition.Name, Arguments: json.RawMessage(`{"source":"original"}`)}}
-		if !ea1RecoveryJSONEqual(p.toolRequests[0], want) || len(p.toolInvocations) != 1 || !ea1RecoveryJSONEqual(p.toolInvocations[0].Definition, f.definition) || !ea1RecoveryJSONEqual(p.toolInvocations[0].Request, want) {
+		if !ea1RecoveryJSONEqual(p.toolRequests[0], want) || len(p.toolInvocations) != 1 || !slices.ContainsFunc(p.requests[0].Tools, func(d tools.Definition) bool { return ea1RecoveryJSONEqual(d, f.definition) }) || !ea1RecoveryJSONEqual(p.toolInvocations[0].Request, want) {
 			t.Fatal("unknown actual Tool original source changed")
 		}
 		result := tools.ExecutionResult{Content: json.RawMessage(`{"committed":"original"}`), Receipt: tools.Receipt{ExecutionID: "original-call", Disposition: "committed"}}

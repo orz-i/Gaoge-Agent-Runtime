@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"sync/atomic"
 	"testing"
@@ -216,7 +217,10 @@ func runEA1RootAgentAdmission(t *testing.T, factory func(*testing.T) (kernel.Sto
 			if err != nil || grant.ExecutionOwnerID != original.OwnerID || grant.ExecutionLeaseID != original.LeaseID || grant.ExecutionEpoch != original.Epoch || grant.AdmissionOperation != string(plugin.RunResume) {
 				t.Fatalf("external original owner not bound: %v", err)
 			}
-			return peer.(kernel.ExecutionStore).CheckExecution(ctx, req.ID, &original)
+			if e := peer.(kernel.ExecutionStore).CheckExecution(ctx, req.ID, &original); !errors.Is(e, kernel.ErrChildExecutionBusy) {
+				return fmt.Errorf("original owned Grant failed to fence generic entry: %w", e)
+			}
+			return nil
 		}
 		owner := ea1AdmissionConfiguredRunner(t, externalRT, m, nil, automatic)
 		final, e := owner.Resume(t.Context(), req.ID, prepared.Run.Revision)

@@ -467,8 +467,8 @@ func ea1ApprovalUnknown(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 		t.Fatal("unknown approval source changed")
 	}
 	c, e := f.rt.LookupOwnedPhysicalCallbackReturn(t.Context(), g)
-	if e != nil || c.HostCompleted {
-		t.Fatal("unknown approval Host falsely completed")
+	if e != nil || c.HostCompleted != (kind == "tool") {
+		t.Fatal("actual callback return was misclassified")
 	}
 	m, n := f.physical.counts()
 	if m != 1 || f.approval.calls != 1 || (kind == "handler" && (f.approval.sends != 1 || n != 0)) || (kind == "tool" && (n != 1 || f.fault.failures != 1)) {
