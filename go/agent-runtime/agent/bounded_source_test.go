@@ -9,46 +9,15 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 )
 
-func TestBoundedBudgetDenialRequiresOriginalRequestAndInvocationNonce(t *testing.T) {
-	request := model.Request{RunID: "run", InvocationID: "invocation", Model: "original"}
-	scope := &modelDenialScope{marker: 1}
-	ctx := callbackscope.BindModelCall(t.Context(), &modelCallScope{denial: scope})
-	denied := modelPreDispatchDenied{cause: ErrInvalidRequest, scope: scope, original: model.CloneRequest(request), candidate: model.CloneRequest(request)}
-	if !modelDeniedForRequest(ctx, request, denied) {
-		t.Fatal("original private denial rejected")
+// No-send classification does not grant ledger mutation authority. The
+// original request and commit proof are checked at the native Store boundary.
+func TestNativeModelDenialIsNotProviderError(t *testing.T) {
+	denied := modelPreDispatchDenied{cause: ErrInvalidRequest}
+	if !IsModelPreDispatchDenied(denied) || !errors.Is(denied, ErrInvalidRequest) {
+		t.Fatal("original admission denial lost")
 	}
-	normalized := model.CloneRequest(request)
-	if !modelDeniedForRequest(ctx, normalized, denied) {
-		t.Fatal("nil/empty normalized request rejected")
-	}
-	// A changed candidate is not the original frozen Provider request. Only
-	// the Agent terminal's private proof of that original request can restore
-	// its reservation, not the altered candidate by itself.
-	mutated := denied
-	mutated.candidate = model.CloneRequest(request)
-	mutated.candidate.Model = "unapproved-model"
-	if !modelDeniedForRequest(ctx, request, mutated) || modelDeniedForRequest(ctx, mutated.candidate, mutated) {
-		t.Fatal("candidate drift was mistaken for original dispatch authority")
-	}
-	for _, field := range []string{"run", "invocation", "model"} {
-		candidate := model.CloneRequest(request)
-		switch field {
-		case "run":
-			candidate.RunID = "other"
-		case "invocation":
-			candidate.InvocationID = "other"
-		case "model":
-			candidate.Model = "other"
-		}
-		if modelDeniedForRequest(ctx, candidate, denied) {
-			t.Fatalf("foreign %s accepted", field)
-		}
-	}
-	if modelDeniedForRequest(callbackscope.BindModelCall(ctx, &modelCallScope{denial: &modelDenialScope{marker: 1}}), request, denied) {
-		t.Fatal("old call nonce replayed")
-	}
-	if modelDeniedForRequest(ctx, request, errors.New(denied.Error())) {
-		t.Fatal("public error string forged authority")
+	if IsModelPreDispatchDenied(errors.New(denied.Error())) {
+		t.Fatal("provider error forged admission denial")
 	}
 }
 func TestAdmissionBarrierOwnsOnlyChannelWaitAndReturnedProvider(t *testing.T) {

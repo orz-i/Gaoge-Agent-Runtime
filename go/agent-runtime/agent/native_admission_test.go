@@ -89,6 +89,15 @@ func TestNativeRunAdmissionDenialAtStartPrepareAndApproval(t *testing.T) {
 					return r.ResolveApproval(c, req.ID, before.Run.Revision, plugin.ApprovalResponse{Decision: plugin.ApprovalApprove})
 				}
 			})
+			if op != "approval" {
+				if !errors.Is(err, budget.ErrExhausted) || obs.Kind() == PhysicalCallSettled || got.Run.ID != "" || physical != 0 || m.calls.Load() != 0 {
+					t.Fatal("creation denial escaped native enrollment", err, got.Run, obs.Kind())
+				}
+				if _, e := rt.Load(ctx, req.ID); !errors.Is(e, kernel.ErrNotFound) {
+					t.Fatal("denied creation published Run", e)
+				}
+				return
+			}
 			if !errors.Is(err, budget.ErrExhausted) || errors.Is(err, ErrRootOutcomeUnknown) || got.Run.ID != req.ID || obs.Kind() != PhysicalCallSettled || physical != 0 {
 				t.Fatal("native denied operation not settled", err, got.Run, obs.Kind(), physical)
 			}

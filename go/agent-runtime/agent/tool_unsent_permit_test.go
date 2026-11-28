@@ -26,6 +26,19 @@ func (m *permitUnsentModel) Generate(context.Context, model.Request) (model.Resp
 	return model.Response{Content: "done"}, nil
 }
 
+type permitBudgetPorts struct {
+	toolAccountingPorts
+	parented bool
+}
+
+func (p permitBudgetPorts) ResolveScope(ctx context.Context, id string) (BoundedBudgetScope, error) {
+	scope, e := p.toolAccountingPorts.ResolveScope(ctx, id)
+	if p.parented {
+		scope.Runs[0].Binding.ParentRunID = "permit-parent"
+	}
+	return scope, e
+}
+
 // Occupy the actual shared Runner semaphore, not a simulated Budget error.
 // Waiting for that permit must not create a shared reservation or dispatch
 // intent, and the exact original child/root segment can relinquish ownership.
@@ -43,7 +56,7 @@ func TestNativeToolPermitPrecedesSharedCapacity(t *testing.T) {
 				t.Fatal(err)
 			}
 			ledger := budget.LedgerStore(native)
-			adapter, err := NewBoundedBudgetAdapter(ledger, toolAccountingPorts{})
+			adapter, err := NewBoundedBudgetAdapter(ledger, permitBudgetPorts{parented: parented})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -72,7 +85,7 @@ func TestNativeToolPermitPrecedesSharedCapacity(t *testing.T) {
 			thread := kernel.ThreadRef{Kind: "test", ID: "thread"}
 			req := StartRequest{ID: "permit-root", Actor: actor, Thread: thread, Goal: "read", ToolKeys: []string{"read"}}
 			if parented {
-				parent, err := rt.Create(ctx, kernel.CreateRequest{ID: "permit-parent", Kind: "workflow", Actor: actor, Thread: thread, Goal: "parent", State: json.RawMessage("{}")})
+				parent, err := rt.Create(ctx, kernel.CreateRequest{ID: "permit-parent", Kind: "workflow", Actor: actor, Thread: thread, Goal: "parent", State: json.RawMessage("{}"), Budget: &budget.RunEnrollment{ScopeID: "turn", Limits: budget.Limits{MaxToolCalls: 2}}})
 				if err != nil {
 					t.Fatal(err)
 				}

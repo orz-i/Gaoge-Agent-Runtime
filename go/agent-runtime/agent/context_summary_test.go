@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
@@ -176,7 +175,6 @@ func (p *summaryCorePorts) BindSummary(_ context.Context, cursor SummaryCursor, 
 
 type summaryCoreFaultStore struct {
 	*memory.Store
-	budget.LedgerStore
 	event string
 	after bool
 	fired bool

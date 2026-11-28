@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
@@ -24,64 +25,59 @@ func (p *receiptBudgetPorts) ResolveScope(context.Context, string) (BoundedBudge
 }
 func (*receiptBudgetPorts) Project(context.Context, budget.Ledger) error { return nil }
 
-func TestSuspendedToolSettlementRequiresOriginalCallbackAndReservation(t *testing.T) {
+// Seed the original dispatched operation in the native Run transaction.
+func originalHeldFixture(t *testing.T) (*memory.Store, *kernel.Runtime, kernel.Snapshot, *Runner, tools.ExecutionRequest, kernel.OwnedToolReturn) {
+	t.Helper()
 	ctx := t.Context()
-	ports := &receiptBudgetPorts{scope: "turn"}
-	store := budget.NewMemoryLedgerStore()
-	a, err := NewBoundedBudgetAdapter(store, ports)
-	if err != nil {
-		t.Fatal(err)
+	store := memory.NewStore()
+	rt, e := kernel.New(kernel.Dependencies{Store: store})
+	if e != nil {
+		t.Fatal(e)
 	}
-	r := &Runner{boundedBudget: a}
-	s := kernel.Snapshot{Run: kernel.Run{ID: "run", Revision: 7}}
+	a, e := NewBoundedBudgetAdapter(store, &receiptBudgetPorts{scope: "turn"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	run, e := rt.Create(ctx, kernel.CreateRequest{ID: "run", Kind: "fixture", ExecutionRequired: true, Actor: kernel.ActorRef{TenantID: "t", ActorID: "a"}, Thread: kernel.ThreadRef{Kind: "test", ID: "thread"}, Goal: "original receipt", State: []byte(`{}`), Budget: &budget.RunEnrollment{ScopeID: "turn", Limits: budget.Limits{MaxToolCalls: 2}}})
+	if e != nil {
+		t.Fatal(e)
+	}
+	lease, e := rt.AcquireExecution(ctx, kernel.ExecutionAcquireRequest{RunID: run.Run.ID, OwnerID: "fixture", LeaseDuration: time.Minute})
+	if e != nil {
+		t.Fatal(e)
+	}
+	rt, e = rt.WithExecution(lease)
+	if e != nil {
+		t.Fatal(e)
+	}
 	q := tools.ExecutionRequest{RunID: "run", Call: tools.Call{ID: "call", ToolKey: "read", Arguments: []byte("{}")}}
-	const id = "tool:run:call"
-	res := budget.Reservation{ID: id, RunID: q.RunID, RequestHash: kernel.ManagedDigest(q), Requested: budget.Usage{ToolCalls: 1}, Status: budget.ReservationHeld, Dispatched: true}
-	if err = store.SaveBudget(ctx, budget.Ledger{ID: "turn", Revision: 1, Runs: map[string]budget.RunBudget{"run": {}}, Reservations: map[string]budget.Reservation{id: res}}, 0); err != nil {
-		t.Fatal(err)
+	l, e := store.LoadBudget(ctx, "turn")
+	if e != nil {
+		t.Fatal(e)
 	}
-	out := kernel.PhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: true, ControlCustody: kernel.OwnedToolBudgetReturn, ToolBudgetScope: "turn"}
-	c := kernel.PhysicalCallbackCompletion{GrantID: "grant", ReturnRevision: 7, ReturnSourceHash: kernel.ManagedDigest(kernel.PhysicalCallbackReturnPayload(s, out)), HostCompleted: true, LeaseOwned: true, ControlCustody: out.ControlCustody}
-	result := tools.ExecutionResult{Content: []byte("{}"), Receipt: tools.Receipt{ExecutionID: "call", Disposition: "committed", OwnerReceiptDigest: strings.Repeat("a", 64)}}
-	ports.scope = "other-turn"
-	if _, err := r.settleOriginalToolBudget(ctx, s, c, q, result); !errors.Is(err, ErrToolReceiptMismatch) {
-		t.Fatal("accepted foreign budget")
+	plan, e := budget.PlanDispatch(ctx, l, originalToolReservation(q), true)
+	if e != nil {
+		t.Fatal(e)
 	}
-	ports.scope = "turn"
-	other := q
-	other.Call.Arguments = []byte(`{"other":true}`)
-	if _, err := r.settleOriginalToolBudget(ctx, s, c, other, result); !errors.Is(err, ErrToolReceiptMismatch) {
-		t.Fatal("accepted different original request")
+	run, e = rt.Apply(ctx, run.Run.ID, run.Run.Revision, kernel.Mutation{Status: kernel.RunStatusRunning, State: run.State, Ledger: plan})
+	if e != nil {
+		t.Fatal(e)
 	}
-	for range 2 {
-		if _, err = r.settleOriginalToolBudget(ctx, s, c, q, result); err != nil {
-			t.Fatal(err)
-		}
-	}
-	saved, err := store.LoadBudget(ctx, "turn")
-	if err != nil || saved.Reservations[id].Status != budget.ReservationSettled || saved.View("run").Usage.ToolCalls != 1 {
-		t.Fatalf("original Tool accounting: %+v %v", saved, err)
-	}
-	result.Content = []byte(`"different"`)
-	if _, err := r.settleOriginalToolBudget(ctx, s, c, q, result); !errors.Is(err, budget.ErrLedgerConflict) {
-		t.Fatal("changed a settled owner receipt")
-	}
+	return store, rt, run, &Runner{boundedBudget: a, runtime: rt}, q, kernel.OwnedToolReturn{CallID: q.Call.ID, LedgerID: "turn", RequestDigest: kernel.ManagedDigest(q)}
 }
 
-// A definitive Tool refusal does not qualify Agent correction if accounting
-// itself has not acknowledged the same outcome.
 type unacknowledgedToolLedger struct {
-	budget.LedgerStore
+	*memory.Store
 	fail error
 }
 
-func (s unacknowledgedToolLedger) SaveBudget(ctx context.Context, ledger budget.Ledger, revision uint64) error {
-	for _, res := range ledger.Reservations {
-		if res.Status == budget.ReservationSettled && res.Requested.ToolCalls != 0 {
-			return s.fail
+func (s *unacknowledgedToolLedger) Commit(ctx context.Context, id string, rev uint64, m kernel.StoreMutation, a kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
+	for _, e := range m.Events {
+		if e.Type == "tool.receipt_recovered" && m.Ledger != nil {
+			return kernel.Snapshot{}, false, s.fail
 		}
 	}
-	return s.LedgerStore.SaveBudget(ctx, ledger, revision)
+	return s.Store.Commit(ctx, id, rev, m, a)
 }
 
 type toolAccountingPorts struct {
@@ -111,11 +107,14 @@ func TestToolRejectionCannotAdvanceWithoutAccountingAcknowledgement(t *testing.T
 	for _, cut := range []string{"settle", "project"} {
 		t.Run(cut, func(t *testing.T) {
 			failure := errors.New("accounting not acknowledged")
-			backing := budget.NewMemoryLedgerStore()
-			var store budget.LedgerStore = backing
+			backing := memory.NewStore()
+			var store interface {
+				kernel.Store
+				budget.LedgerStore
+			} = backing
 			ports := toolAccountingPorts{}
 			if cut == "settle" {
-				store = unacknowledgedToolLedger{backing, failure}
+				store = &unacknowledgedToolLedger{backing, failure}
 			} else {
 				ports.fail = failure
 			}
@@ -124,7 +123,7 @@ func TestToolRejectionCannotAdvanceWithoutAccountingAcknowledgement(t *testing.T
 				t.Fatal(err)
 			}
 
-			rt, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
+			rt, err := kernel.New(kernel.Dependencies{Store: store})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -142,7 +141,7 @@ func TestToolRejectionCannotAdvanceWithoutAccountingAcknowledgement(t *testing.T
 				t.Fatal(err)
 			}
 			result, err := runner.StartRun(t.Context(), StartRequest{ID: "run", Goal: "read", Actor: kernel.ActorRef{TenantID: "t", ActorID: "a"}, Thread: kernel.ThreadRef{Kind: "test", ID: "thread"}, ToolKeys: []string{"read"}})
-			if !errors.Is(err, failure) || !errors.Is(err, ErrToolOutcomeUnknown) || count != 1 || provider.calls.Load() != 1 || result.Run.Status == kernel.RunStatusCompleted {
+			if !errors.Is(err, failure) || (cut == "settle" && !errors.Is(err, ErrToolOutcomeUnknown)) || count != 1 || provider.calls.Load() != 1 || result.Run.Status == kernel.RunStatusCompleted {
 				t.Fatalf("unqualified refusal advanced Run: %v count=%d model=%d status=%s", err, count, provider.calls.Load(), result.Run.Status)
 			}
 			saved, e := backing.LoadBudget(t.Context(), "turn")
@@ -159,31 +158,38 @@ func TestToolRejectionCannotAdvanceWithoutAccountingAcknowledgement(t *testing.T
 
 func TestOriginalHeldToolReplayPreservesNativeReceiptBytes(t *testing.T) {
 	ctx := t.Context()
-	store := budget.NewMemoryLedgerStore()
-	a, err := NewBoundedBudgetAdapter(store, &receiptBudgetPorts{scope: "turn"})
-	if err != nil {
-		t.Fatal(err)
+	store, rt, s, r, q, b := originalHeldFixture(t)
+	result := tools.ExecutionResult{Content: []byte(`{ "a": 1 }`), Receipt: tools.Receipt{ExecutionID: q.Call.ID, Disposition: "committed", OwnerReceiptDigest: strings.Repeat("a", 64)}}
+	foreign := b
+	foreign.LedgerID = "other"
+	if _, e := r.settleOriginalHeldTool(ctx, q, foreign, result, true); e == nil {
+		t.Fatal("foreign ledger accepted")
 	}
-	r := &Runner{boundedBudget: a}
-	q := tools.ExecutionRequest{RunID: "run", Call: tools.Call{ID: "call", ToolKey: "read", Arguments: []byte("{}")}}
-	id := "tool:run:call"
-	b := kernel.OwnedToolReturn{CallID: q.Call.ID, LedgerID: "turn", RequestDigest: kernel.ManagedDigest(q)}
-	res := budget.Reservation{ID: id, RunID: q.RunID, RequestHash: b.RequestDigest, Requested: budget.Usage{ToolCalls: 1}, Status: budget.ReservationHeld, Dispatched: true}
-	if err = store.SaveBudget(ctx, budget.Ledger{ID: "turn", Revision: 1, Runs: map[string]budget.RunBudget{"run": {}}, Reservations: map[string]budget.Reservation{id: res}}, 0); err != nil {
-		t.Fatal(err)
+	other := q
+	other.Call.Arguments = []byte(`{"other":true}`)
+	if _, e := r.settleOriginalHeldTool(ctx, other, b, result, true); e == nil {
+		t.Fatal("changed original request accepted")
 	}
-	result := tools.ExecutionResult{Content: []byte(`{ "a": 1 }`), Receipt: tools.Receipt{ExecutionID: q.Call.ID, Disposition: "committed"}}
-	for range 2 {
-		if _, err = r.settleOriginalHeldTool(ctx, q, b, result, true); err != nil {
-			t.Fatal(err)
-		}
+	plan, e := r.settleOriginalHeldTool(ctx, q, b, result, true)
+	if e != nil || plan == nil {
+		t.Fatal("original settlement plan", e)
+	}
+	before, e := store.LoadBudget(ctx, "turn")
+	if e != nil || before.View(q.RunID).Usage.ToolCalls != 0 {
+		t.Fatal("plan mutated accounting", e)
+	}
+	if _, e = rt.Apply(ctx, s.Run.ID, s.Run.Revision, kernel.Mutation{Status: kernel.RunStatusRunning, State: s.State, Ledger: plan}); e != nil {
+		t.Fatal(e)
+	}
+	if plan, e = r.settleOriginalHeldTool(ctx, q, b, result, true); e != nil || plan != nil {
+		t.Fatal("original replay created another mutation", e)
 	}
 	result.Content = []byte(`{"a":1}`)
-	if _, err = r.settleOriginalHeldTool(ctx, q, b, result, true); !errors.Is(err, ErrToolReceiptMismatch) {
-		t.Fatal("accepted changed original receipt bytes", err)
+	if _, e = r.settleOriginalHeldTool(ctx, q, b, result, true); !errors.Is(e, ErrToolReceiptMismatch) {
+		t.Fatal("accepted changed original receipt bytes", e)
 	}
-	l, err := store.LoadBudget(ctx, "turn")
-	if err != nil || l.View(q.RunID).Usage.ToolCalls != 1 {
-		t.Fatal("native receipt replay charged twice", err, l)
+	l, e := store.LoadBudget(ctx, "turn")
+	if e != nil || l.View(q.RunID).Usage.ToolCalls != 1 {
+		t.Fatal("native receipt replay charged twice", e, l)
 	}
 }

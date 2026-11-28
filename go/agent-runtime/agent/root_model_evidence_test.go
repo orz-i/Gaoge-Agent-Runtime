@@ -16,8 +16,7 @@ import (
 )
 
 type modelEvidenceLedgerFault struct {
-	kernel.Store
-	budget.LedgerStore
+	*memory.Store
 }
 
 func (s *modelEvidenceLedgerFault) Commit(ctx context.Context, id string, revision uint64, mutation kernel.StoreMutation, authority kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
@@ -27,11 +26,17 @@ func (s *modelEvidenceLedgerFault) Commit(ctx context.Context, id string, revisi
 	return s.Store.Commit(ctx, id, revision, mutation, authority)
 }
 
+type modelEvidenceBudgetPorts struct{ sharedDimensionBudgetPorts }
+
+func (modelEvidenceBudgetPorts) Project(context.Context, budget.Ledger) error {
+	return errors.New("original Host projection interrupted")
+}
+
 func TestRootUnknownHostRetainsExactModelEvidenceWithoutConsumption(t *testing.T) {
 	base := memory.NewStore()
-	fault := &modelEvidenceLedgerFault{Store: base, LedgerStore: base}
+	fault := &modelEvidenceLedgerFault{Store: base}
 	rt := newModelInvocationRuntime(t, fault)
-	bounded, err := agent.NewBoundedBudgetAdapter(fault, sharedDimensionBudgetPorts{})
+	bounded, err := agent.NewBoundedBudgetAdapter(fault, modelEvidenceBudgetPorts{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -65,7 +66,7 @@ func testExpiredReceiptBudgetLifecycle(t *testing.T, mode string) {
 	ctx := t.Context()
 	storeClock := &modelRetryTestClock{now: time.Now().UTC()}
 	base := memory.NewStoreWithExecutionClock(storeClock)
-	fault := &summaryCoreFaultStore{Store: base, LedgerStore: base, event: "agent.model_invocation.completed"}
+	fault := &summaryCoreFaultStore{Store: base, event: "agent.model_invocation.completed"}
 	_, rt, contextPorts, provider, clock, start := newSummaryCoreFixture(t, fault)
 	start.WorkingStateSummary = nil
 	deadline := storeClock.now.Add(time.Minute)
@@ -76,7 +77,12 @@ func testExpiredReceiptBudgetLifecycle(t *testing.T, mode string) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	deps := Dependencies{Runtime: rt, Model: provider, Clock: clock, BoundedBudget: shared}
+	deps := Dependencies{Runtime: rt, Model: provider, Clock: clock, BoundedBudget: shared, ModelOutcomeVerifier: ModelOutcomeVerifierFunc(func(_ context.Context, q model.Request) (model.Response, error) {
+		if calls := provider.calls(); len(calls) != 1 || !reflect.DeepEqual(calls[0], q) {
+			t.Fatal("verifier received foreign request")
+		}
+		return model.Response{Content: "business answer", ResponseID: "response_" + q.InvocationID, Usage: &model.Usage{InputTokens: 7, OutputTokens: 3, CacheReadTokens: 1, ReasoningTokens: 2}}, nil
+	})}
 	hydrate := &receiptHydrationPorts{}
 	if strings.HasPrefix(mode, "cancel-after-run-admission") {
 		inner, e := NewBoundedContextAdapter(contextPorts.manager, hydrate)
@@ -151,16 +157,14 @@ func testExpiredReceiptBudgetLifecycle(t *testing.T, mode string) {
 	if loadErr != nil || len(provider.calls()) != 1 {
 		t.Fatalf("fixture lost ledger or resent provider: %v", loadErr)
 	}
-	if mode == "completed" {
+	if mode == "completed" || mode == "retarget" {
 		if e != nil || out.Run.Status != kernel.RunStatusCompleted || !after.FinishedRuns[start.ID] {
 			t.Fatalf("native receipt did not finish original budget obligation: %v", e)
 		}
 		return
 	}
 	want := budget.ErrExhausted
-	if mode == "retarget" {
-		want = budget.ErrLedgerConflict
-	}
+
 	if mode == "projection-failed" {
 		want = projectionErr
 	}

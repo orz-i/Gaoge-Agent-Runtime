@@ -16,14 +16,15 @@ import (
 
 type frozenReceiptBudgetPorts struct {
 	BoundedBudgetPorts
-	plans int
+	plans      int
+	projectErr error
 }
 
 func (*frozenReceiptBudgetPorts) ResolveScope(_ context.Context, runID string) (BoundedBudgetScope, error) {
 	return BoundedBudgetScope{LedgerID: "turn", Limits: budget.Limits{MaxLLMCalls: 2, MaxInputTokens: 60000, MaxOutputTokens: 512},
 		Runs: []BoundedBudgetRunBinding{{RunID: runID, Binding: budget.RunBudget{}}}}, nil
 }
-func (*frozenReceiptBudgetPorts) Project(context.Context, budget.Ledger) error { return nil }
+func (p *frozenReceiptBudgetPorts) Project(context.Context, budget.Ledger) error { return p.projectErr }
 func (*frozenReceiptBudgetPorts) PreviewModel(_ budget.Ledger, r model.Request) (model.Request, budget.Reservation, error) {
 	original := model.CloneRequest(r)
 	hash, err := model.PhysicalRequestHash(original)
@@ -62,7 +63,7 @@ func TestRootFrozenSamplingRecoveryUsesOriginalPhysicalReceipt(t *testing.T) {
 				// A suspended Budget stage still lacks its accounting receipt.
 				hostUnknown := unknown && mode.budget
 				base := memory.NewStore()
-				fault := &summaryCoreFaultStore{Store: base, LedgerStore: base, event: "agent.model_invocation.completed"}
+				fault := &summaryCoreFaultStore{Store: base, event: "agent.model_invocation.completed"}
 				var store kernel.Store = fault
 				if unknown {
 					store = base
@@ -83,6 +84,9 @@ func TestRootFrozenSamplingRecoveryUsesOriginalPhysicalReceipt(t *testing.T) {
 				}
 				ledgerStore := rt.BudgetStore()
 				budgetPorts := &frozenReceiptBudgetPorts{}
+				if hostUnknown {
+					budgetPorts.projectErr = errors.New("original Host projection interrupted")
+				}
 				shared, err := NewBoundedBudgetAdapter(ledgerStore, budgetPorts)
 				if err != nil {
 					t.Fatal(err)
@@ -179,8 +183,29 @@ func TestRootFrozenSamplingRecoveryUsesOriginalPhysicalReceipt(t *testing.T) {
 					t.Fatalf("repeat recovery mutated persisted state: %v", err)
 				}
 				current, err := ledgerStore.LoadBudget(t.Context(), "turn")
-				if (mode.budget && (err != nil || !reflect.DeepEqual(current, ledger))) || (!mode.budget && !errors.Is(err, budget.ErrLedgerNotFound)) || budgetPorts.plans != plans || len(provider.calls()) != 1 || (hostUnknown && verified != 2) || (!hostUnknown && !mode.budget && verified != 1) || (!hostUnknown && mode.budget && verified != 0) {
-					t.Fatal("read-only receipt recovery replanned or changed the original ledger")
+				if mode.budget {
+					if err != nil {
+						t.Fatal(err)
+					}
+					if hostUnknown {
+						if !reflect.DeepEqual(current, ledger) {
+							t.Fatal("unknown Host evidence charged budget")
+						}
+					} else {
+						res := current.Reservations["model:"+inv.ID]
+						if res.Status != budget.ReservationSettled || res.PhysicalRequestHash != inv.SamplingPlan.RequestHash || current.View("").Usage.LLMCalls != 1 {
+							t.Fatal("native receipt failed to settle exact original", res)
+						}
+					}
+				} else if !errors.Is(err, budget.ErrLedgerNotFound) {
+					t.Fatal("unmetered recovery created ledger", err)
+				}
+				wantVerifications := 1
+				if hostUnknown {
+					wantVerifications = 2
+				}
+				if budgetPorts.plans != plans || len(provider.calls()) != 1 || verified != wantVerifications {
+					t.Fatal("recovery replanned or resent original call", verified, wantVerifications)
 				}
 			})
 		}
