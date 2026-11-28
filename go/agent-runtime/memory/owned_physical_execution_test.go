@@ -109,7 +109,7 @@ func TestOwnedPhysicalMemoryAdmissionBindingAndTTL(t *testing.T) {
 	if _, e = scoped.Apply(t.Context(), v.Run.ID, advanced.Run.Revision, mutation); !errors.Is(e, kernel.ErrExecutionConflict) {
 		t.Fatalf("expired original wrote: %v", e)
 	}
-	proof := featurecontrol.Seal(v.Run.ID, advanced.Run.Revision, "agent_owned_physical_settled", g.ID, advanced.State, advanced)
+	proof := featurecontrol.Seal(v.Run.ID, advanced.Run.Revision, "agent_physical_settled", g.ID, advanced.State, advanced)
 	if e = scoped.RecordPhysicalCallbackReturn(t.Context(), g, advanced.Run.Revision, kernel.PhysicalCallbackOutcome{HostCompleted: true}, proof); !errors.Is(e, kernel.ErrExecutionConflict) {
 		t.Fatalf("expired original minted completion: %v", e)
 	}
@@ -133,7 +133,7 @@ func TestOwnedPhysicalMemoryReceiptOnlyRecovery(t *testing.T) {
 		t.Fatalf("receipt recovery before callback return: %v", e)
 	}
 	outcome := kernel.PhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: true}
-	callbackProof := featurecontrol.Seal(v.Run.ID, v.Run.Revision, "agent_owned_callback_return", g.ID, kernel.PhysicalCallbackReturnPayload(v, outcome), nil)
+	callbackProof := featurecontrol.Seal(v.Run.ID, v.Run.Revision, "agent_physical_callback_return", g.ID, kernel.PhysicalCallbackReturnPayload(v, outcome), nil)
 	if e := rt.RecordPhysicalCallbackReturn(t.Context(), g, v.Run.Revision, outcome, callbackProof); e != nil {
 		t.Fatal(e)
 	}
@@ -144,7 +144,7 @@ func TestOwnedPhysicalMemoryReceiptOnlyRecovery(t *testing.T) {
 	if e = s.CheckExecution(t.Context(), v.Run.ID, &l); !errors.Is(e, kernel.ErrExecutionConflict) {
 		t.Fatalf("receipt granted send authority: %v", e)
 	}
-	recoveredProof := featurecontrol.Seal(v.Run.ID, recovered.Run.Revision, "agent_owned_physical_settled", g.ID, recovered.State, recovered)
+	recoveredProof := featurecontrol.Seal(v.Run.ID, recovered.Run.Revision, "agent_physical_settled", g.ID, recovered.State, recovered)
 	if e = rt.FinishChildExecution(t.Context(), g, recoveredProof); e != nil {
 		t.Fatal(e)
 	}
@@ -167,12 +167,12 @@ func TestOwnedPhysicalMemoryMarkedRecoveryAfterExpiry(t *testing.T) {
 			g, scoped := ownedPhysicalAdmit(t, bound, v, l)
 			if returned {
 				outcome := kernel.PhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: true}
-				callbackProof := featurecontrol.Seal(v.Run.ID, v.Run.Revision, "agent_owned_callback_return", g.ID, kernel.PhysicalCallbackReturnPayload(v, outcome), nil)
+				callbackProof := featurecontrol.Seal(v.Run.ID, v.Run.Revision, "agent_physical_callback_return", g.ID, kernel.PhysicalCallbackReturnPayload(v, outcome), nil)
 				if e := rt.RecordPhysicalCallbackReturn(t.Context(), g, v.Run.Revision, outcome, callbackProof); e != nil {
 					t.Fatal(e)
 				}
 			}
-			proof := featurecontrol.Seal(v.Run.ID, v.Run.Revision, "agent_owned_physical_settled", g.ID, v.State, v)
+			proof := featurecontrol.Seal(v.Run.ID, v.Run.Revision, "agent_physical_settled", g.ID, v.State, v)
 			if e := scoped.RecordPhysicalCallbackReturn(t.Context(), g, v.Run.Revision, kernel.PhysicalCallbackOutcome{HostCompleted: true}, proof); !errors.Is(e, kernel.ErrExecutionConflict) {
 				t.Fatalf("owned legacy mark was admitted: %v", e)
 			}
@@ -259,7 +259,7 @@ func TestPhysicalCallbackReturnMemory(t *testing.T) {
 			g, _ := ownedPhysicalAdmit(t, bound, v, l)
 			clock.now = clock.now.Add(2 * time.Minute)
 			outcome := kernel.PhysicalCallbackOutcome{HostCompleted: hostComplete, LeaseOwned: true}
-			proof := featurecontrol.Seal(v.Run.ID, v.Run.Revision, "agent_owned_callback_return", g.ID, kernel.PhysicalCallbackReturnPayload(v, outcome), nil)
+			proof := featurecontrol.Seal(v.Run.ID, v.Run.Revision, "agent_physical_callback_return", g.ID, kernel.PhysicalCallbackReturnPayload(v, outcome), nil)
 			if e := rt.RecordPhysicalCallbackReturn(t.Context(), g, v.Run.Revision, outcome, proof); e != nil {
 				t.Fatal(e)
 			}
@@ -272,7 +272,7 @@ func TestPhysicalCallbackReturnMemory(t *testing.T) {
 			}
 			flipped := outcome
 			flipped.HostCompleted = !hostComplete
-			flippedProof := featurecontrol.Seal(v.Run.ID, v.Run.Revision, "agent_owned_callback_return", g.ID, kernel.PhysicalCallbackReturnPayload(v, flipped), nil)
+			flippedProof := featurecontrol.Seal(v.Run.ID, v.Run.Revision, "agent_physical_callback_return", g.ID, kernel.PhysicalCallbackReturnPayload(v, flipped), nil)
 			if e = rt.RecordPhysicalCallbackReturn(t.Context(), g, v.Run.Revision, flipped, flippedProof); !errors.Is(e, kernel.ErrExecutionConflict) {
 				t.Fatalf("contradictory completion: %v", e)
 			}
@@ -285,7 +285,7 @@ func TestPhysicalCallbackReturnMemory(t *testing.T) {
 			if e != nil || !reflect.DeepEqual(current, v) {
 				t.Fatal("callback fact changed Run")
 			}
-			recoveredProof := featurecontrol.Seal(v.Run.ID, v.Run.Revision, "agent_owned_physical_settled", g.ID, v.State, v)
+			recoveredProof := featurecontrol.Seal(v.Run.ID, v.Run.Revision, "agent_physical_settled", g.ID, v.State, v)
 			if !hostComplete {
 				if e = rt.FinishChildExecution(t.Context(), g, recoveredProof); !errors.Is(e, kernel.ErrExecutionConflict) {
 					t.Fatalf("unknown Host released: %v", e)

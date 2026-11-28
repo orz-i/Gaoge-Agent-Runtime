@@ -63,7 +63,7 @@ func (store *KernelStore) FinishChildExecution(ctx context.Context, grant kernel
 		if e != nil {
 			return e
 		}
-		if pgPhysicalGrant(row) != grant || (!grant.IsOwned() && !kernel.ReturnedChildEffect(grant, snapshot, pgCallbackCompletion(row))) {
+		if pgPhysicalGrant(row) != grant || (!grant.IsOwned() && kernel.ValidatePhysicalRetirement(grant, snapshot, pgCallbackCompletion(row), permit) != nil) {
 			return kernel.ErrExecutionConflict
 		}
 		var receipt string

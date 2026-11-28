@@ -34,7 +34,7 @@ func TestOwnedRetirementWireAndExactFinish(t *testing.T) {
 			t.Fatalf("retired wire accepted: %s", field)
 		}
 	}
-	permit := ChildExecutionSettlement{proof: featurecontrol.Seal(s.Run.ID, s.Run.Revision, "agent_owned_physical_settled", g.ID, s.State, s)}
+	permit := ChildExecutionSettlement{proof: featurecontrol.Seal(s.Run.ID, s.Run.Revision, "agent_physical_settled", g.ID, s.State, s)}
 	receipt, e := BuildOwnedRetirementReceipt(g, s, l, c, permit, ManagedAuthority{}, ManagedTransfer{})
 	if e != nil || !receipt.Valid() || receipt.Identity() != r.Identity() {
 		t.Fatalf("finish: %v", e)

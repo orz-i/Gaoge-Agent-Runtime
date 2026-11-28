@@ -50,7 +50,7 @@ func TestBoundedToolControlRejectsObservationOnlyCustody(t *testing.T) {
 		custody  kernel.OwnedCallbackCustody
 		accepted bool
 	}{
-		{kernel.OwnedBoundedApprovalReturn, true}, {kernel.OwnedToolResultReturn, false}, {kernel.OwnedToolBudgetReturn, false}, {"", false},
+		{kernel.OwnedBoundedApprovalReturn, true}, {kernel.OwnedToolResultReturn, false}, {kernel.OwnedCallbackCustody("tool-budget-return-v1"), false}, {"", false},
 	} {
 		receipt.Evidence.Completion.ControlCustody = tc.custody
 		receipt.Digest = receipt.Identity()

@@ -113,7 +113,7 @@ func (runner *Runner) reconcileRootTool(ctx context.Context, snapshot kernel.Sna
 }
 func (runner *Runner) reconcileRootToolReceipt(ctx context.Context, snapshot kernel.Snapshot, state runState, grant kernel.ChildExecutionGrant, callID string, continueTerminal bool) (kernel.Snapshot, error) {
 	completion, err := runner.runtime.LookupPhysicalCallbackReturn(ctx, grant)
-	if err != nil || !completion.HostCompleted || completion.GrantID != grant.ID || completion.ControlCustody == kernel.OwnedToolBudgetReturn {
+	if err != nil || !completion.HostCompleted || completion.GrantID != grant.ID {
 		return snapshot, errors.Join(ErrToolOutcomeUnknown, ErrRootOutcomeUnknown, err)
 	}
 	call, ok := nextPendingCall(state)

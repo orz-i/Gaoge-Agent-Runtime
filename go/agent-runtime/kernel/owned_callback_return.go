@@ -25,14 +25,12 @@ const (
 	// or control/Tool custody. It only permits retirement of that admission.
 	OwnedCustodyNotEntered OwnedCallbackCustody = "not-entered-v1"
 	// OwnedToolResultReturn binds committed Tool results for observation only.
-	OwnedToolResultReturn OwnedCallbackCustody = "tool-result-v1"
-	// OwnedToolBudgetReturn binds an unresolved Tool to its suspended reservation.
-	OwnedToolBudgetReturn      OwnedCallbackCustody = "tool-budget-return-v1"
+	OwnedToolResultReturn      OwnedCallbackCustody = "tool-result-v1"
 	OwnedBoundedApprovalReturn OwnedCallbackCustody = "bounded-approval-v1"
 )
 
 func (c OwnedCallbackCustody) Valid() bool {
-	return c == "" || c == OwnedCustodyNotEntered || c.permitsControl() || c == OwnedToolResultReturn || c == OwnedToolBudgetReturn || c == OwnedBoundedApprovalReturn
+	return c == "" || c == OwnedCustodyNotEntered || c.permitsControl() || c == OwnedToolResultReturn || c == OwnedBoundedApprovalReturn
 }
 
 func (c OwnedCallbackCustody) permitsControl() bool {
@@ -40,8 +38,6 @@ func (c OwnedCallbackCustody) permitsControl() bool {
 }
 
 type PhysicalCallbackOutcome struct {
-	// The original return hash seals the ledger identity while the Tool is unresolved.
-	ToolBudgetScope string `json:",omitempty"`
 	// ToolReturns identifies the outstanding Call obligations of this
 	// original callback independently of its control/approval custody.
 	ToolReturns    OwnedToolReturns `json:",omitempty"`
@@ -165,8 +161,7 @@ func (r OwnedToolReturns) Find(callID string) (OwnedToolReturn, bool, error) {
 // original revision. Later recovery CASes retain the same Store-owned
 // completion, with independently matched Call bindings.
 func (c PhysicalCallbackCompletion) MatchesReturnSnapshot(s Snapshot) bool {
-	if !c.HostCompleted || c.ReturnRevision != s.Run.Revision || !c.ToolReturns.Valid() ||
-		c.ControlCustody == OwnedToolBudgetReturn {
+	if !c.HostCompleted || c.ReturnRevision != s.Run.Revision || !c.ToolReturns.Valid() || !c.ControlCustody.Valid() {
 		return false
 	}
 	o := PhysicalCallbackOutcome{HostCompleted: c.HostCompleted, LeaseOwned: c.LeaseOwned, ControlCustody: c.ControlCustody, ToolReturns: c.ToolReturns}
@@ -201,25 +196,25 @@ func ordinaryOwnedOperation(op string) bool {
 }
 
 func (p PhysicalCallbackReturn) Matches(g ChildExecutionGrant, s Snapshot, o PhysicalCallbackOutcome) bool {
-	// A parent-bound return has no lease or native custody to transfer.
-	// Its original callback must have completed with all effects settled.
-	if !g.IsOwned() {
-		return o == (PhysicalCallbackOutcome{HostCompleted: true}) &&
-			(ChildExecutionSettlement{proof: p.proof}).Matches(g, s)
+	if g.ID == "" || g.ChildRunID != s.Run.ID || s.Run.Kind != "agent" || s.Run.Revision < g.ExpectedRevision {
+		return false
 	}
-
 	if o.ControlCustody == OwnedCustodyNotEntered {
-		return ordinaryOwnedOperation(g.AdmissionOperation) && !o.HostCompleted && o.ToolReturns == "" && o.ToolBudgetScope == "" &&
-			g.IsOwned() && g.ID != "" && g.ChildRunID == s.Run.ID && s.Run.Kind == "agent" && s.Run.ParentRunID == "" &&
-			s.Run.Revision == g.ExpectedRevision &&
-			p.proof.Matches(s.Run.ID, s.Run.Revision, "agent_owned_callback_not_entered", g.ID, PhysicalCallbackReturnPayload(s, o), nil)
+		return g.IsOwned() && s.Run.ParentRunID == "" && ordinaryOwnedOperation(g.AdmissionOperation) && !o.HostCompleted && o.ToolReturns == "" &&
+			s.Run.Revision == g.ExpectedRevision && p.proof.Matches(s.Run.ID, s.Run.Revision, "agent_owned_callback_not_entered", g.ID, PhysicalCallbackReturnPayload(s, o), nil)
 	}
-	return o.ControlCustody.Valid() && (o.ControlCustody == OwnedToolBudgetReturn) == (o.ToolBudgetScope != "") &&
-		o.ToolReturns.Valid() && (o.ToolReturns == "" || (o.HostCompleted && o.ToolBudgetScope == "" && o.ControlCustody != OwnedCustodyPrepared)) &&
-		(o.ControlCustody != OwnedCustodyPrepared || g.AdmissionOperation == "prepare") &&
-		g.IsOwned() && g.ID != "" && g.ChildRunID == s.Run.ID &&
-		s.Run.Kind == "agent" && s.Run.ParentRunID == "" && s.Run.Revision >= g.ExpectedRevision &&
-		p.proof.Matches(s.Run.ID, s.Run.Revision, "agent_owned_callback_return", g.ID, PhysicalCallbackReturnPayload(s, o), nil)
+	// A borrowed operation still requires its exact complete return;
+	// it has no lease ownership or deferred-control custody to transfer.
+	if g.IsOwned() {
+		if s.Run.ParentRunID != "" || !o.ControlCustody.Valid() || !o.ToolReturns.Valid() ||
+			(o.ToolReturns != "" && (!o.HostCompleted || o.ControlCustody == OwnedCustodyPrepared)) ||
+			(o.ControlCustody == OwnedCustodyPrepared && g.AdmissionOperation != "prepare") {
+			return false
+		}
+	} else if s.Run.ParentRunID == "" || o != (PhysicalCallbackOutcome{HostCompleted: true}) {
+		return false
+	}
+	return p.proof.Matches(s.Run.ID, s.Run.Revision, "agent_physical_callback_return", g.ID, PhysicalCallbackReturnPayload(s, o), nil)
 }
 func (p PhysicalCallbackReturn) Completion(g ChildExecutionGrant, s Snapshot, o PhysicalCallbackOutcome) PhysicalCallbackCompletion {
 	if !p.Matches(g, s, o) {

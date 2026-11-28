@@ -89,8 +89,7 @@ func TestIssue107ManualGrantRecoveryOnlyAfterPhysicalStateSettles(t *testing.T) 
 	if loadErr != nil {
 		t.Fatal(loadErr)
 	}
-	proof := featurecontrol.Seal(final.Run.ID, final.Run.Revision, "agent_child_physical_settled", original.ID, final.State, final.Checkpoint)
-	if markErr := rt.RecordPhysicalCallbackReturn(t.Context(), original, final.Run.Revision, kernel.PhysicalCallbackOutcome{HostCompleted: true}, proof); markErr != nil {
+	if markErr := rt.RecordPhysicalCallbackReturn(t.Context(), original, final.Run.Revision, kernel.PhysicalCallbackOutcome{HostCompleted: true}, featurecontrol.Seal(final.Run.ID, final.Run.Revision, "agent_physical_callback_return", original.ID, kernel.PhysicalCallbackReturnPayload(final, kernel.PhysicalCallbackOutcome{HostCompleted: true}), nil)); markErr != nil {
 		t.Fatal(markErr)
 	}
 	if err = runner.ReconcileChildPhysicalGrant(t.Context(), child.Run.ID); err != nil {

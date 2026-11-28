@@ -14,10 +14,22 @@ func ValidatePhysicalAdmissionRequest(g ChildExecutionGrant, claimed ExecutionLe
 	return nil
 }
 
-// ReturnedChildEffect verifies the actual durable original return, not
-// merely a clean state or a matching revision. A later read cannot mint it.
-func ReturnedChildEffect(g ChildExecutionGrant, current Snapshot, completion PhysicalCallbackCompletion) bool {
-	return !g.IsOwned() && ValidatePhysicalCompletion(g, completion) == nil && completion.MatchesReturnSnapshot(current)
+// ValidatePhysicalRetirement is the shared exact returned-effect
+// qualification. Borrowed work must match its return revision exactly;
+// an owned grant may additionally consume original receipts before Finish.
+func ValidatePhysicalRetirement(g ChildExecutionGrant, current Snapshot, completion PhysicalCallbackCompletion, permit ChildExecutionSettlement) error {
+	if !permit.Matches(g, current) || ValidatePhysicalCompletion(g, completion) != nil {
+		return ErrExecutionConflict
+	}
+	if completion.NotEntered() {
+		if completion.MatchesNotEnteredSnapshot(g, current) {
+			return nil
+		}
+	} else if completion.HostCompleted && completion.ReturnRevision <= current.Run.Revision &&
+		(g.IsOwned() || completion.MatchesReturnSnapshot(current)) {
+		return nil
+	}
+	return ErrExecutionConflict
 }
 
 // ValidateOwnedPhysicalRecoveryRequest is the shape of an exact receipt CAS.
@@ -96,7 +108,7 @@ func ValidatePhysicalCompletion(g ChildExecutionGrant, c PhysicalCallbackComplet
 		!validToolReceiptDigest(c.ReturnSourceHash) || !c.ControlCustody.Valid() || !c.ToolReturns.Valid() ||
 		(c.NotEntered() && (c.HostCompleted || c.ToolReturns != "" || c.ReturnRevision != g.ExpectedRevision || !ordinaryOwnedOperation(g.AdmissionOperation))) ||
 		(c.ControlCustody == OwnedCustodyPrepared && g.AdmissionOperation != "prepare") ||
-		(c.ToolReturns != "" && (!c.HostCompleted || c.ControlCustody == OwnedCustodyPrepared || c.ControlCustody == OwnedToolBudgetReturn)) {
+		(c.ToolReturns != "" && (!c.HostCompleted || c.ControlCustody == OwnedCustodyPrepared)) {
 		return ErrExecutionConflict
 	}
 	if !g.IsOwned() && (!c.HostCompleted || c.LeaseOwned || c.ControlCustody != "" || c.ToolReturns != "") {
@@ -146,14 +158,7 @@ func ValidateOwnedPhysicalRecovery(g ChildExecutionGrant, current Snapshot, pers
 // Run. Both the live caller and receipt-only recovery use this same reducer.
 // Lease expiry is not evidence of return, nor does it erase a genuine return.
 func BuildOwnedRetirementReceipt(g ChildExecutionGrant, current Snapshot, persisted ExecutionLease, completion PhysicalCallbackCompletion, permit ChildExecutionSettlement, authority ManagedAuthority, transfer ManagedTransfer) (OwnedRetirementReceipt, error) {
-	if !g.MatchesExecution(persisted) || !permit.Matches(g, current) || ValidatePhysicalCompletion(g, completion) != nil {
-		return OwnedRetirementReceipt{}, ErrExecutionConflict
-	}
-	if completion.NotEntered() {
-		if !completion.MatchesNotEnteredSnapshot(g, current) {
-			return OwnedRetirementReceipt{}, ErrExecutionConflict
-		}
-	} else if !completion.HostCompleted || completion.ReturnRevision > current.Run.Revision {
+	if !g.MatchesExecution(persisted) || ValidatePhysicalRetirement(g, current, completion, permit) != nil {
 		return OwnedRetirementReceipt{}, ErrExecutionConflict
 	}
 	evidence := OwnedSettlementEvidence{Version: 1, Grant: g, Snapshot: current, Completion: completion}

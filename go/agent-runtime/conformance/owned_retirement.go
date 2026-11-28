@@ -99,12 +99,12 @@ func retirementSetup(t *testing.T, factory func(*testing.T) ManagedRecoveryStore
 	return retirementFixture{b, rt, bound, s, v, l, g}
 }
 func retirementMarkProof(f retirementFixture) *featurecontrol.Proof {
-	return featurecontrol.Seal(f.source.Run.ID, f.source.Run.Revision, "agent_owned_physical_settled", f.grant.ID, f.source.State, f.source)
+	return featurecontrol.Seal(f.source.Run.ID, f.source.Run.Revision, "agent_physical_settled", f.grant.ID, f.source.State, f.source)
 }
 func retirementCallback(t *testing.T, f retirementFixture, known, owned bool) {
 	t.Helper()
 	o := kernel.PhysicalCallbackOutcome{HostCompleted: known, LeaseOwned: owned}
-	p := featurecontrol.Seal(f.source.Run.ID, f.source.Run.Revision, "agent_owned_callback_return", f.grant.ID, kernel.PhysicalCallbackReturnPayload(f.source, o), nil)
+	p := featurecontrol.Seal(f.source.Run.ID, f.source.Run.Revision, "agent_physical_callback_return", f.grant.ID, kernel.PhysicalCallbackReturnPayload(f.source, o), nil)
 	if e := f.rt.RecordPhysicalCallbackReturn(t.Context(), f.grant, f.source.Run.Revision, o, p); e != nil {
 		t.Fatal(e)
 	}
@@ -112,7 +112,7 @@ func retirementCallback(t *testing.T, f retirementFixture, known, owned bool) {
 
 // FinishOwnedFixture is used only by SQL conformance corruption tests.
 func FinishOwnedFixture(ctx context.Context, rt *kernel.Runtime, g kernel.ChildExecutionGrant, s kernel.Snapshot) error {
-	return rt.FinishChildExecution(ctx, g, featurecontrol.Seal(s.Run.ID, s.Run.Revision, "agent_owned_physical_settled", g.ID, s.State, s))
+	return rt.FinishChildExecution(ctx, g, featurecontrol.Seal(s.Run.ID, s.Run.Revision, "agent_physical_settled", g.ID, s.State, s))
 }
 func retirementFinish(t *testing.T, f retirementFixture) kernel.OwnedRetirementReceipt {
 	t.Helper()
@@ -269,7 +269,7 @@ func runRetirementNoRelease(t *testing.T, factory func(*testing.T) ManagedRecove
 	f := retirementSetup(t, factory)
 	if kind == "unknown-callback" {
 		retirementCallback(t, f, false, true)
-		p := featurecontrol.Seal(f.source.Run.ID, f.source.Run.Revision, "agent_owned_physical_settled", f.grant.ID, f.source.State, f.source)
+		p := featurecontrol.Seal(f.source.Run.ID, f.source.Run.Revision, "agent_physical_settled", f.grant.ID, f.source.State, f.source)
 		if e := f.rt.FinishChildExecution(t.Context(), f.grant, p); !errors.Is(e, kernel.ErrExecutionConflict) {
 			t.Fatalf("unknown callback authorized recovery Mark: %v", e)
 		}
@@ -531,17 +531,17 @@ func runGrantIdentityRace(t *testing.T, factory func(*testing.T) ManagedRecovery
 	}
 	if winner.IsOwned() {
 		o := kernel.PhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: true}
-		proof := featurecontrol.Seal(root.Run.ID, root.Run.Revision, "agent_owned_callback_return", winner.ID, kernel.PhysicalCallbackReturnPayload(root, o), nil)
+		proof := featurecontrol.Seal(root.Run.ID, root.Run.Revision, "agent_physical_callback_return", winner.ID, kernel.PhysicalCallbackReturnPayload(root, o), nil)
 		if e = rootRT.RecordPhysicalCallbackReturn(ctx, winner, root.Run.Revision, o, proof); e != nil {
 			t.Fatal(e)
 		}
-		mark := featurecontrol.Seal(root.Run.ID, root.Run.Revision, "agent_owned_physical_settled", winner.ID, root.State, root)
+		mark := featurecontrol.Seal(root.Run.ID, root.Run.Revision, "agent_physical_settled", winner.ID, root.State, root)
 		if e = bound.FinishChildExecution(ctx, winner, mark); e != nil {
 			t.Fatal(e)
 		}
 	} else {
-		mark := featurecontrol.Seal(child.Run.ID, child.Run.Revision, "agent_child_physical_settled", winner.ID, child.State, child.Checkpoint)
-		if e = childRT.RecordPhysicalCallbackReturn(ctx, winner, child.Run.Revision, kernel.PhysicalCallbackOutcome{HostCompleted: true}, mark); e != nil {
+		mark := featurecontrol.Seal(child.Run.ID, child.Run.Revision, "agent_physical_settled", winner.ID, child.State, child)
+		if e = childRT.RecordPhysicalCallbackReturn(ctx, winner, child.Run.Revision, kernel.PhysicalCallbackOutcome{HostCompleted: true}, featurecontrol.Seal(child.Run.ID, child.Run.Revision, "agent_physical_callback_return", winner.ID, kernel.PhysicalCallbackReturnPayload(child, kernel.PhysicalCallbackOutcome{HostCompleted: true}), nil)); e != nil {
 			t.Fatal(e)
 		}
 		if e = childRT.FinishChildExecution(ctx, winner, mark); e != nil {

@@ -120,8 +120,8 @@ func runNativeBudgetControl(t *testing.T, factory func(*testing.T) ExecutionBudg
 				if mode == "reject-active-grant-then-approve" {
 					// Test fixture owns this synthetic no-entry Grant and may retire
 					// it; no production observer is permitted to forge such a proof.
-					proof := featurecontrol.Seal(waiting.Run.ID, waiting.Run.Revision, "agent_child_physical_settled", grant.ID, waiting.State, waiting.Checkpoint)
-					if err = rt.RecordPhysicalCallbackReturn(ctx, grant, waiting.Run.Revision, kernel.PhysicalCallbackOutcome{HostCompleted: true}, proof); err != nil {
+					proof := featurecontrol.Seal(waiting.Run.ID, waiting.Run.Revision, "agent_physical_settled", grant.ID, waiting.State, waiting)
+					if err = rt.RecordPhysicalCallbackReturn(ctx, grant, waiting.Run.Revision, kernel.PhysicalCallbackOutcome{HostCompleted: true}, featurecontrol.Seal(waiting.Run.ID, waiting.Run.Revision, "agent_physical_callback_return", grant.ID, kernel.PhysicalCallbackReturnPayload(waiting, kernel.PhysicalCallbackOutcome{HostCompleted: true}), nil)); err != nil {
 						t.Fatal(err)
 					}
 					if err = rt.FinishChildExecution(ctx, grant, proof); err != nil {

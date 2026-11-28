@@ -85,15 +85,21 @@ func RunChildExecutionSuite(t *testing.T, create func(*testing.T) kernel.Store) 
 		if loadErr != nil {
 			t.Fatal(loadErr)
 		}
-		proof := featurecontrol.Seal(latest.Run.ID, latest.Run.Revision, "agent_child_physical_settled", grant.ID, latest.State, latest.Checkpoint)
-		if err = rt.RecordPhysicalCallbackReturn(t.Context(), grant, latest.Run.Revision, kernel.PhysicalCallbackOutcome{HostCompleted: true}, proof); err != nil {
+		proof := featurecontrol.Seal(latest.Run.ID, latest.Run.Revision, "agent_physical_settled", grant.ID, latest.State, latest)
+		outcome := kernel.PhysicalCallbackOutcome{HostCompleted: true}
+		callback := featurecontrol.Seal(latest.Run.ID, latest.Run.Revision, "agent_physical_callback_return", grant.ID, kernel.PhysicalCallbackReturnPayload(latest, outcome), nil)
+		if err = rt.RecordPhysicalCallbackReturn(t.Context(), grant, latest.Run.Revision, outcome, proof); !errors.Is(err, kernel.ErrExecutionConflict) {
+			t.Fatal("settlement proof manufactured an original return", err)
+		}
+
+		if err = rt.RecordPhysicalCallbackReturn(t.Context(), grant, latest.Run.Revision, outcome, callback); err != nil {
 			t.Fatalf("trusted Agent post-callback settlement marker was rejected: %v", err)
 		}
 		returned, returnErr := rt.LookupPhysicalCallbackReturn(t.Context(), grant)
 		if returnErr != nil || returned.GrantID != grant.ID || !returned.MatchesReturnSnapshot(latest) || returned.LeaseOwned || returned.ControlCustody != "" {
 			t.Fatalf("original child return fact: %+v %v", returned, returnErr)
 		}
-		if err = rt.RecordPhysicalCallbackReturn(t.Context(), grant, latest.Run.Revision, kernel.PhysicalCallbackOutcome{HostCompleted: true}, proof); err != nil {
+		if err = rt.RecordPhysicalCallbackReturn(t.Context(), grant, latest.Run.Revision, outcome, callback); err != nil {
 			t.Fatalf("exact original return replay: %v", err)
 		}
 
@@ -104,6 +110,9 @@ func RunChildExecutionSuite(t *testing.T, create func(*testing.T) kernel.Store) 
 		}
 		if err = store.FinishChildExecution(t.Context(), grant, kernel.ChildExecutionSettlement{}); !errors.Is(err, kernel.ErrExecutionConflict) {
 			t.Fatalf("marked borrowed grant accepted empty Finish permit: %v", err)
+		}
+		if err = rt.FinishChildExecution(t.Context(), grant, callback); !errors.Is(err, kernel.ErrExecutionConflict) {
+			t.Fatal("callback proof supplied settlement permission", err)
 		}
 		if err = rt.FinishChildExecution(t.Context(), grant, proof); err != nil {
 			t.Fatal(err)

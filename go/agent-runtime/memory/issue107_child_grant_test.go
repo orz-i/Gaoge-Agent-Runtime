@@ -50,8 +50,8 @@ func TestIssue107MemoryChildGrantAtomicParentTerminal(t *testing.T) {
 	if err = store.FinishChildExecution(t.Context(), grant, kernel.ChildExecutionSettlement{}); !errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("unsafe original pre-callback release accepted: %v", err)
 	}
-	proof := featurecontrol.Seal(child.Run.ID, child.Run.Revision, "agent_child_physical_settled", grant.ID, child.State, child.Checkpoint)
-	if err = rt.RecordPhysicalCallbackReturn(t.Context(), grant, child.Run.Revision, kernel.PhysicalCallbackOutcome{HostCompleted: true}, proof); err != nil {
+	proof := featurecontrol.Seal(child.Run.ID, child.Run.Revision, "agent_physical_settled", grant.ID, child.State, child)
+	if err = rt.RecordPhysicalCallbackReturn(t.Context(), grant, child.Run.Revision, kernel.PhysicalCallbackOutcome{HostCompleted: true}, featurecontrol.Seal(child.Run.ID, child.Run.Revision, "agent_physical_callback_return", grant.ID, kernel.PhysicalCallbackReturnPayload(child, kernel.PhysicalCallbackOutcome{HostCompleted: true}), nil)); err != nil {
 		t.Fatal(err)
 	}
 	if err = rt.FinishChildExecution(t.Context(), grant, proof); err != nil {
@@ -105,8 +105,8 @@ func TestIssue107MemoryParentCancelChildBeginLinearizable(t *testing.T) {
 				if !errors.Is(cancelErr, kernel.ErrChildExecutionBusy) {
 					t.Fatalf("child won but parent Cancel=%v", cancelErr)
 				}
-				proof := featurecontrol.Seal(child.Run.ID, child.Run.Revision, "agent_child_physical_settled", grant.ID, child.State, child.Checkpoint)
-				if err = rt.RecordPhysicalCallbackReturn(t.Context(), grant, child.Run.Revision, kernel.PhysicalCallbackOutcome{HostCompleted: true}, proof); err != nil {
+				proof := featurecontrol.Seal(child.Run.ID, child.Run.Revision, "agent_physical_settled", grant.ID, child.State, child)
+				if err = rt.RecordPhysicalCallbackReturn(t.Context(), grant, child.Run.Revision, kernel.PhysicalCallbackOutcome{HostCompleted: true}, featurecontrol.Seal(child.Run.ID, child.Run.Revision, "agent_physical_callback_return", grant.ID, kernel.PhysicalCallbackReturnPayload(child, kernel.PhysicalCallbackOutcome{HostCompleted: true}), nil)); err != nil {
 					t.Fatal(err)
 				}
 				if err = rt.FinishChildExecution(t.Context(), grant, proof); err != nil {

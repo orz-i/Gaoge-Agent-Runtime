@@ -52,7 +52,7 @@ func (s *Store) FinishChildExecution(ctx context.Context, grant kernel.ChildExec
 	}
 	if !grant.IsOwned() {
 		completion, e := loadPhysicalCallbackReturn(ctx, tx, grant)
-		if e != nil || !kernel.ReturnedChildEffect(grant, child, completion) {
+		if e != nil || kernel.ValidatePhysicalRetirement(grant, child, completion, permit) != nil {
 			if e != nil && !errors.Is(e, kernel.ErrNotFound) {
 				return e
 			}

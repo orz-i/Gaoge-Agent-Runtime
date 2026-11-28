@@ -97,7 +97,7 @@ func TestOwnedNoEntryEvidenceCannotBecomeActualReturn(t *testing.T) {
 	seal := func(domain string) PhysicalCallbackReturn {
 		return PhysicalCallbackReturn{proof: featurecontrol.Seal(source.Run.ID, source.Run.Revision, domain, g.ID, payload, nil)}
 	}
-	if seal("agent_owned_callback_return").Matches(g, source, outcome) {
+	if seal("agent_physical_callback_return").Matches(g, source, outcome) {
 		t.Fatal("actual return domain forged no-entry proof")
 	}
 	p := seal("agent_owned_callback_not_entered")
@@ -115,7 +115,7 @@ func TestOwnedNoEntryEvidenceCannotBecomeActualReturn(t *testing.T) {
 	if c.MatchesNotEnteredSnapshot(g, changed) {
 		t.Fatal("changed source inherited no-entry")
 	}
-	permit := ChildExecutionSettlement{proof: featurecontrol.Seal(source.Run.ID, source.Run.Revision, "agent_owned_physical_settled", g.ID, source.State, source)}
+	permit := ChildExecutionSettlement{proof: featurecontrol.Seal(source.Run.ID, source.Run.Revision, "agent_physical_settled", g.ID, source.State, source)}
 	receipt, e := BuildOwnedRetirementReceipt(g, source, lease, c, permit, ManagedAuthority{}, ManagedTransfer{})
 	if e != nil || !receipt.Valid() || !receipt.Evidence.Completion.NotEntered() {
 		t.Fatalf("exact no-entry could not retire: %v", e)

@@ -81,7 +81,7 @@ func RunEA1OwnedCallbackReturn(t *testing.T, factory func(*testing.T) (kernel.St
 				time.Sleep(5 * time.Millisecond)
 			}
 			outcome := kernel.PhysicalCallbackOutcome{HostCompleted: known, LeaseOwned: true}
-			proof := featurecontrol.Seal(initial.Run.ID, initial.Run.Revision, "agent_owned_callback_return", g.ID, kernel.PhysicalCallbackReturnPayload(initial, outcome), nil)
+			proof := featurecontrol.Seal(initial.Run.ID, initial.Run.Revision, "agent_physical_callback_return", g.ID, kernel.PhysicalCallbackReturnPayload(initial, outcome), nil)
 			if e = rt.RecordPhysicalCallbackReturn(t.Context(), g, initial.Run.Revision, outcome, proof); e != nil {
 				t.Fatal(e)
 			}
@@ -107,7 +107,7 @@ func RunEA1OwnedCallbackReturn(t *testing.T, factory func(*testing.T) (kernel.St
 			}
 			changed := outcome
 			changed.HostCompleted = !known
-			forged := featurecontrol.Seal(initial.Run.ID, initial.Run.Revision, "agent_owned_callback_return", g.ID, kernel.PhysicalCallbackReturnPayload(initial, changed), nil)
+			forged := featurecontrol.Seal(initial.Run.ID, initial.Run.Revision, "agent_physical_callback_return", g.ID, kernel.PhysicalCallbackReturnPayload(initial, changed), nil)
 			if e = observer.RecordPhysicalCallbackReturn(t.Context(), g, initial.Run.Revision, changed, forged); !errors.Is(e, kernel.ErrExecutionConflict) {
 				t.Fatalf("completion changed: %v", e)
 			}
@@ -123,7 +123,7 @@ func RunEA1OwnedCallbackReturn(t *testing.T, factory func(*testing.T) (kernel.St
 				if !errors.Is(e, kernel.ErrExecutionConflict) {
 					t.Fatalf("unknown Host authorized receipt CAS: %v", e)
 				}
-				mark := featurecontrol.Seal(initial.Run.ID, initial.Run.Revision, "agent_owned_physical_settled", g.ID, initial.State, initial)
+				mark := featurecontrol.Seal(initial.Run.ID, initial.Run.Revision, "agent_physical_settled", g.ID, initial.State, initial)
 				if e = observer.FinishChildExecution(t.Context(), g, mark); !errors.Is(e, kernel.ErrExecutionConflict) {
 					t.Fatalf("unknown Host authorized Finish: %v", e)
 				}
@@ -145,7 +145,7 @@ func RunEA1OwnedCallbackReturn(t *testing.T, factory func(*testing.T) (kernel.St
 				if e != nil || persisted != before {
 					t.Fatal("evidence CAS replaced callback outcome")
 				}
-				mark = featurecontrol.Seal(evidence.Run.ID, evidence.Run.Revision, "agent_owned_physical_settled", g.ID, evidence.State, evidence)
+				mark = featurecontrol.Seal(evidence.Run.ID, evidence.Run.Revision, "agent_physical_settled", g.ID, evidence.State, evidence)
 				if e = observer.FinishChildExecution(t.Context(), g, mark); !errors.Is(e, kernel.ErrExecutionConflict) {
 					t.Fatalf("known model evidence retired unknown Host: %v", e)
 				}
@@ -173,7 +173,7 @@ func RunEA1OwnedCallbackReturn(t *testing.T, factory func(*testing.T) (kernel.St
 			}
 			// A crash/fault between the receipt CAS and Mark leaves the original
 			// completion intact; a new Runtime must seal the CURRENT receipt state.
-			stale := featurecontrol.Seal(initial.Run.ID, initial.Run.Revision, "agent_owned_physical_settled", g.ID, initial.State, initial)
+			stale := featurecontrol.Seal(initial.Run.ID, initial.Run.Revision, "agent_physical_settled", g.ID, initial.State, initial)
 			if e = observer.FinishChildExecution(t.Context(), g, stale); !errors.Is(e, kernel.ErrExecutionConflict) {
 				t.Fatalf("stale settlement accepted: %v", e)
 			}
@@ -181,7 +181,7 @@ func RunEA1OwnedCallbackReturn(t *testing.T, factory func(*testing.T) (kernel.St
 			if e != nil || completion != before {
 				t.Fatal("receipt CAS rewrote callback completion")
 			}
-			recovered := featurecontrol.Seal(repaired.Run.ID, repaired.Run.Revision, "agent_owned_physical_settled", g.ID, repaired.State, repaired)
+			recovered := featurecontrol.Seal(repaired.Run.ID, repaired.Run.Revision, "agent_physical_settled", g.ID, repaired.State, repaired)
 			if e = rt.FinishChildExecution(t.Context(), g, recovered); e != nil {
 				t.Fatal(e)
 			}

@@ -80,7 +80,7 @@ func (store *Store) FinishChildExecution(ctx context.Context, grant kernel.Child
 	}
 	if grant.IsOwned() {
 		return store.retireOwnedLocked(previous, permit)
-	} else if !kernel.ReturnedChildEffect(grant, child, previous.completion) || !permit.Matches(grant, child) {
+	} else if kernel.ValidatePhysicalRetirement(grant, child, previous.completion, permit) != nil {
 		return kernel.ErrExecutionConflict
 	}
 	store.consumeEffectLocked(previous, nil)

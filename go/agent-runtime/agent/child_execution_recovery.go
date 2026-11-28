@@ -32,8 +32,7 @@ func (runner *Runner) ReconcileChildPhysicalGrant(ctx context.Context, childRunI
 	if err != nil {
 		return err
 	}
-	proof := physicalSettlementProof(grant, snapshot)
-	err = runner.runtime.FinishChildExecution(ctx, grant, proof)
+	err = finishPhysicalReturn(ctx, runner.runtime, grant, snapshot, nil)
 	if errors.Is(err, kernel.ErrExecutionConflict) {
 		// A clean-looking Run cannot retire the Grant without its original
 		// post-callback return fact. This remains quarantined, not a

@@ -56,7 +56,7 @@ func runAtomicOwnedAdmission(t *testing.T, factory func(*testing.T) ManagedRecov
 					t.Fatalf("admission granted execution before entry: %v", e)
 				}
 				outcome := kernel.PhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: true}
-				proof := featurecontrol.Seal(source.Run.ID, source.Run.Revision, "agent_owned_callback_return", g.ID, kernel.PhysicalCallbackReturnPayload(source, outcome), nil)
+				proof := featurecontrol.Seal(source.Run.ID, source.Run.Revision, "agent_physical_callback_return", g.ID, kernel.PhysicalCallbackReturnPayload(source, outcome), nil)
 				if e = peer.RecordPhysicalCallbackReturn(ctx, g, source.Run.Revision, outcome, proof); !errors.Is(e, kernel.ErrExecutionConflict) {
 					t.Fatalf("admission fabricated an actual callback return: %v", e)
 				}
@@ -117,6 +117,7 @@ func runAtomicOwnedAdmission(t *testing.T, factory func(*testing.T) ManagedRecov
 			var competing kernel.ExecutionLease
 			var childGrant kernel.ChildExecutionGrant
 			var childProof *featurecontrol.Proof
+			var childSource kernel.Snapshot
 			switch mode {
 			case "stale-revision":
 				candidate.Run.Revision++
@@ -140,7 +141,8 @@ func runAtomicOwnedAdmission(t *testing.T, factory func(*testing.T) ManagedRecov
 				if e != nil {
 					t.Fatal(e)
 				}
-				childProof = featurecontrol.Seal(child.Run.ID, child.Run.Revision, "agent_child_physical_settled", childGrant.ID, child.State, child.Checkpoint)
+				childSource = child
+				childProof = featurecontrol.Seal(child.Run.ID, child.Run.Revision, "agent_physical_settled", childGrant.ID, child.State, child)
 				want = kernel.ErrChildExecutionBusy
 			}
 			scoped, v, e := admit(rt, candidate, q, wrongProof)
@@ -163,7 +165,7 @@ func runAtomicOwnedAdmission(t *testing.T, factory func(*testing.T) ManagedRecov
 				}
 			}
 			if childGrant.ID != "" {
-				if e = peer.RecordPhysicalCallbackReturn(ctx, childGrant, childGrant.ExpectedRevision, kernel.PhysicalCallbackOutcome{HostCompleted: true}, childProof); e != nil {
+				if e = peer.RecordPhysicalCallbackReturn(ctx, childGrant, childGrant.ExpectedRevision, kernel.PhysicalCallbackOutcome{HostCompleted: true}, featurecontrol.Seal(childSource.Run.ID, childSource.Run.Revision, "agent_physical_callback_return", childGrant.ID, kernel.PhysicalCallbackReturnPayload(childSource, kernel.PhysicalCallbackOutcome{HostCompleted: true}), nil)); e != nil {
 					t.Fatal(e)
 				}
 				if e = peer.FinishChildExecution(ctx, childGrant, childProof); e != nil {

@@ -42,23 +42,10 @@ func (settlement ChildExecutionSettlement) Matches(grant ChildExecutionGrant, sn
 		snapshot.Run.ID != grant.ChildRunID || snapshot.Run.Revision < grant.ExpectedRevision {
 		return false
 	}
-	var proofKind string
-	var extra any = snapshot.Checkpoint
-	switch snapshot.Run.Kind {
-	case "agent":
-		proofKind = "agent_child_physical_settled"
-	default:
+	if snapshot.Run.Kind != "agent" || grant.IsOwned() != (snapshot.Run.ParentRunID == "") {
 		return false
 	}
-	if grant.IsOwned() {
-		if snapshot.Run.Kind != "agent" || snapshot.Run.ParentRunID != "" {
-			return false
-		}
-		proofKind = "agent_owned_physical_settled"
-		extra = snapshot
-	}
-	return settlement.proof.Matches(grant.ChildRunID, snapshot.Run.Revision,
-		proofKind, grant.ID, snapshot.State, extra)
+	return settlement.proof.Matches(grant.ChildRunID, snapshot.Run.Revision, "agent_physical_settled", grant.ID, snapshot.State, snapshot)
 }
 
 // PhysicalApplyPermit is an opaque per-Run write proof for a Root or child
