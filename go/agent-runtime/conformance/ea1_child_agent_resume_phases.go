@@ -1,7 +1,6 @@
 package conformance
 
 import (
-	"context"
 	"errors"
 	"reflect"
 	"testing"
@@ -9,7 +8,6 @@ import (
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
 // RunEA1ChildAgentResumePhases measures actual Resume only, after PrepareRun
@@ -19,6 +17,26 @@ func RunEA1ChildAgentResumePhases(t *testing.T, factory func(*testing.T) (kernel
 	for _, kind := range []string{"missing", "stale-revision", "terminal", "parent-wins", "stale-admission"} {
 		t.Run("P0/"+kind, func(t *testing.T) { ea1ChildResumePreflight(t, factory, kind) })
 	}
+	t.Run("P1/admitted-before-dispatch", func(t *testing.T) {
+		f := ea1NewChildResume(t, factory, false)
+		checks := 0
+		f.store.afterAcquire = func() {
+			checks++
+			s, g := f.load(f.peer), f.grant(f.peer)
+			if !reflect.DeepEqual(s, f.prepared) || len(f.physical.requests) != 0 || len(f.physical.toolRequests) != 0 {
+				t.Fatal("Resume dispatched before admission checks")
+			}
+			f.fence(s, g, true)
+		}
+		out, err := f.runner(f.rt, "original-resume-owner", true).Resume(t.Context(), f.request.ID, f.prepared.Run.Revision)
+		if err != nil || checks != 1 {
+			t.Fatalf("actual Resume admission cut missed: %v checks=%d", err, checks)
+		}
+		f.receipts(out, true)
+		if _, err = f.peer.LookupChildExecution(t.Context(), f.request.ID); !errors.Is(err, kernel.ErrNotFound) {
+			t.Fatalf("completed Resume retained scope: %v", err)
+		}
+	})
 	for _, kind := range []string{"model", "tool"} {
 		t.Run("P2/"+kind, func(t *testing.T) { ea1ChildResumePhase(t, factory, "P2", kind) })
 	}
@@ -40,7 +58,7 @@ func ea1NewChildResume(t *testing.T, factory func(*testing.T) (kernel.Store, ker
 	if f.created.Run.ID != s.Run.ID || !setup.VerifyFrozenStartRequest(f.created, f.request) || !setup.VerifyFrozenStartRequest(s, f.request) {
 		t.Fatal("PrepareRun lost original child source")
 	}
-	if s.Run.Status != kernel.RunStatusRunning || len(f.physical.requests) != 0 || len(f.physical.toolRequests) != 0 || f.host.calls != 0 {
+	if s.Run.Status != kernel.RunStatusRunning || len(f.physical.requests) != 0 || len(f.physical.toolRequests) != 0 {
 		t.Fatal("PrepareRun dispatched physical work")
 	}
 	if _, e = f.rt.LookupChildExecution(t.Context(), s.Run.ID); !errors.Is(e, kernel.ErrNotFound) {
@@ -126,7 +144,7 @@ func ea1ChildResumePreflight(t *testing.T, factory func(*testing.T) (kernel.Stor
 	if !errors.Is(e, expected) {
 		t.Fatalf("actual Resume %s: %v want %v", kind, e, expected)
 	}
-	if f.store.admissions != 0 || f.host.calls != 0 || len(f.physical.requests) != 0 || len(f.physical.toolRequests) != 0 {
+	if f.store.admissions != 0 || len(f.physical.requests) != 0 || len(f.physical.toolRequests) != 0 {
 		t.Fatal("denied Resume admitted or dispatched")
 	}
 	if got := f.load(f.peer); !reflect.DeepEqual(got, winner) {
@@ -142,7 +160,6 @@ func ea1ChildResumePreflight(t *testing.T, factory func(*testing.T) (kernel.Stor
 func ea1ChildResumePhase(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store), phase, kind string) {
 	f := ea1NewChildResume(t, factory, kind == "tool")
 	ctx := t.Context()
-	stop := errors.New("original Resume Host outcome unknown")
 	cuts := 0
 	barrier := func() {
 		cuts++
@@ -152,11 +169,7 @@ func ea1ChildResumePhase(t *testing.T, factory func(*testing.T) (kernel.Store, k
 		}
 		f.fence(s, g, true)
 	}
-	if kind == "host" {
-		f.host.hook = barrier
-		f.host.failure = stop
-		f.host.sendUnknown = phase == "P2"
-	} else {
+	{
 		f.store.event = "agent.model_invocation.completed"
 		f.physical.modelHook = barrier
 		if kind == "tool" {
@@ -165,14 +178,10 @@ func ea1ChildResumePhase(t *testing.T, factory func(*testing.T) (kernel.Store, k
 			f.physical.toolHook = barrier
 		}
 	}
-	_, err := f.runner(f.rt, "original-resume-owner", kind == "host").Resume(ctx, f.request.ID, f.prepared.Run.Revision)
-	f.host.hook = nil
+	_, err := f.runner(f.rt, "original-resume-owner", true).Resume(ctx, f.request.ID, f.prepared.Run.Revision)
 	f.physical.modelHook = nil
 	f.physical.toolHook = nil
 	expected := f.store.injected
-	if kind == "host" {
-		expected = stop
-	}
 	if !errors.Is(err, expected) || !errors.Is(err, kernel.ErrChildExecutionBusy) || cuts != 1 {
 		t.Fatalf("actual Resume cutpoint %d: %v", cuts, err)
 	}
@@ -181,24 +190,20 @@ func ea1ChildResumePhase(t *testing.T, factory func(*testing.T) (kernel.Store, k
 		t.Fatal("Resume did not retain exactly one original unmarked grant")
 	}
 	f.unchanged(f.peer, s, g)
-	if kind == "host" {
-		if !reflect.DeepEqual(s, f.prepared) || len(f.physical.requests) != 0 || len(f.physical.toolRequests) != 0 {
-			t.Fatal("pre-Next Resume changed source or dispatched")
-		}
-	} else {
+	{
 		if f.store.failures != 1 {
 			t.Fatal("actual receipt fault not reached")
 		}
 		f.receipts(s, kind == "tool")
 	}
-	// All Resume cutpoints, including Host-before-Next, follow native acquisition.
+	// All Resume cutpoints follow native acquisition.
 	// A real expiry must not authorize replay or invent a callback-return marker.
 	ea1AwaitNativeExpiry(t, f.peerStore.(kernel.ExecutionStore), f.store.renewals.latest(t, f.store.acquired))
 	freshStore := f.reopen()
 	freshRT := ea1StartRuntime(t, freshStore)
 	f.physical.rt = freshRT
 	f.unchanged(freshRT, s, g)
-	recovery := f.runner(freshRT, "fresh-resume-owner", kind == "host")
+	recovery := f.runner(freshRT, "fresh-resume-owner", true)
 	if e := recovery.ReconcileChildPhysicalGrant(ctx, s.Run.ID); !errors.Is(e, kernel.ErrChildExecutionBusy) {
 		t.Fatalf("unknown Resume scope retired: %v", e)
 	}
@@ -216,15 +221,5 @@ func ea1ChildResumePhase(t *testing.T, factory func(*testing.T) (kernel.Store, k
 	if e := freshStore.(kernel.ExecutionStore).CheckExecution(ctx, s.Run.ID, &f.store.acquired); !errors.Is(e, kernel.ErrExecutionConflict) {
 		t.Fatalf("original Resume lease not expired: %v", e)
 	}
-	if kind == "host" {
-		sends := 0
-		if phase == "P2" {
-			sends = 1
-		}
-		if f.host.calls != 1 || f.host.sends != sends || len(f.physical.requests) != 0 || len(f.physical.toolRequests) != 0 {
-			t.Fatal("Host/physical replay")
-		}
-	} else {
-		f.receipts(s, kind == "tool")
-	}
+	f.receipts(s, kind == "tool")
 }

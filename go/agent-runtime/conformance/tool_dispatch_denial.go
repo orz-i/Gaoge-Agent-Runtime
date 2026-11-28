@@ -108,16 +108,8 @@ func (p dispatchDenialPorts) Project(_ context.Context, l budget.Ledger) error {
 	return nil
 }
 
-type dispatchDenialOpaqueLayer struct{ calls *int }
-
-func (dispatchDenialOpaqueLayer) Name() string { return "fixture.opaque-tool-denial" }
-func (m dispatchDenialOpaqueLayer) Tool(ctx context.Context, _ plugin.ToolInvocation, next plugin.ToolNext) (tools.ExecutionResult, error) {
-	*m.calls++
-	return next(ctx)
-}
-
 func toolDispatchDenial(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store), ledgerFactory func(*testing.T) (budget.LedgerStore, func() budget.LedgerStore)) {
-	for _, mode := range []string{"budget-only", "timeline-inner", "parented", "cleanup-cas", "projection-failure", "opaque-inner-unentered", "dispatch-write-before", "dispatch-write-ack", "actual-handler-error", "retirement-recovery-before", "retirement-recovery-ack", "retirement-finish-before", "retirement-finish-ack"} {
+	for _, mode := range []string{"budget-only", "timeline-inner", "parented", "cleanup-cas", "projection-failure", "dispatch-write-before", "dispatch-write-ack", "actual-handler-error", "retirement-recovery-before", "retirement-recovery-ack", "retirement-finish-before", "retirement-finish-ack"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx := t.Context()
 			retirementMode := strings.HasPrefix(mode, "retirement-")
@@ -151,7 +143,7 @@ func toolDispatchDenial(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 				useLedger = writeFault
 			}
 			m := &settledToolModel{}
-			physical, policies, reads, opaque, projection := 0, 0, 0, 0, 0
+			physical, policies, reads, projection := 0, 0, 0, 0
 			reg, err := tools.NewRegistry([]tools.Registration{{Definition: tools.Definition{Key: "read", Name: "read", InputSchema: json.RawMessage(`{"type":"object"}`)}, Handler: tools.HandlerFunc(func(_ context.Context, q tools.ExecutionRequest) (tools.ExecutionResult, error) {
 				physical++
 				if mode == "actual-handler-error" {
@@ -174,7 +166,7 @@ func toolDispatchDenial(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 				if err != nil {
 					t.Fatal(err)
 				}
-				var layers []plugin.ToolMiddleware
+				var timelineAdapter *agent.BoundedToolTimelineAdapter
 				if original {
 					track, err := agent.NewBoundedToolTimelineAdapter(timeline)
 					if err != nil {
@@ -182,9 +174,7 @@ func toolDispatchDenial(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 					}
 					switch mode {
 					case "timeline-inner", "parented":
-						layers = append(layers, track)
-					case "opaque-inner-unentered":
-						layers = append(layers, dispatchDenialOpaqueLayer{calls: &opaque})
+						timelineAdapter = track
 					}
 				}
 				p, err := agent.NewBoundedToolApproval(func(context.Context, tools.ExecutionRequest) (plugin.ApprovalRequirement, error) {
@@ -198,7 +188,7 @@ func toolDispatchDenial(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 					reads++
 					return tools.ExecutionResult{}, agent.ErrToolOutcomeUnknown
 				})
-				d := agent.Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, BoundedBudget: b, ToolMiddleware: layers, ToolOutcomeVerifier: reader, DelegatedToolResults: reader, StartControlPreflight: func(context.Context, agent.StartRequest) error { return nil }}
+				d := agent.Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, BoundedBudget: b, ToolTimeline: timelineAdapter, ToolOutcomeVerifier: reader, DelegatedToolResults: reader, StartControlPreflight: func(context.Context, agent.StartRequest) error { return nil }}
 				if original && !retirementMode {
 					d.ApprovalPolicies = []plugin.ApprovalPolicy{p}
 				}
@@ -245,7 +235,7 @@ func toolDispatchDenial(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 			if physical != wantPhysical || policies != wantPolicies || reads != 0 || len(m.calls) != 1 || len(res.Receipt) != 0 || res.Usage != (budget.Usage{}) {
 				t.Fatal("original no-send/unknown effect identity changed", physical, policies, reads, len(m.calls), res)
 			}
-			positive := mode == "budget-only" || mode == "timeline-inner" || mode == "parented" || mode == "opaque-inner-unentered"
+			positive := mode == "budget-only" || mode == "timeline-inner" || mode == "parented"
 			if positive {
 				if !errors.Is(runErr, budget.ErrExhausted) || errors.Is(runErr, agent.ErrRootOutcomeUnknown) || errors.Is(runErr, kernel.ErrChildExecutionBusy) || got.Run.Status != kernel.RunStatusFailed || cur.Run.Status != kernel.RunStatusFailed || outcome.Kind() != agent.PhysicalCallSettled {
 					t.Fatal("exact actual native denial did not terminalize/retire", runErr, got.Run, cur.Run, outcome.Kind())
@@ -253,8 +243,8 @@ func toolDispatchDenial(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 				if _, err = observer.LookupChildExecution(ctx, root); !errors.Is(err, kernel.ErrNotFound) {
 					t.Fatal("exact denial retained grant", err)
 				}
-				if timeline.starts != 0 || timeline.ends != 0 || opaque != 0 {
-					t.Fatal("denied admission entered downstream callbacks", timeline, opaque)
+				if timeline.starts != 0 || timeline.ends != 0 {
+					t.Fatal("denied admission entered downstream timeline", timeline)
 				}
 				return
 			}

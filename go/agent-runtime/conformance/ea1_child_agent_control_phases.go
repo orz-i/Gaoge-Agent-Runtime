@@ -27,33 +27,9 @@ func RunEA1ChildAgentControlPhases(t *testing.T, factory func(*testing.T) (kerne
 		name := map[bool]string{false: "default", true: "native"}[native]
 		t.Run("P1/"+name, func(t *testing.T) { ea1ChildControlBarrier(t, factory, native) })
 	}
-	for _, v := range []string{"host", "handler", "tool"} {
+	for _, v := range []string{"handler", "tool"} {
 		t.Run("P2/"+v, func(t *testing.T) { ea1ChildControlUnknown(t, factory, v) })
 	}
-}
-
-type ea1ChildControlHost struct {
-	f            *ea1ChildControlFixture
-	before       func()
-	failure      error
-	calls, sends int
-}
-
-func (*ea1ChildControlHost) Name() string { return "ea1.actual.child.approval" }
-func (h *ea1ChildControlHost) Run(ctx context.Context, i plugin.RunInvocation, next plugin.RunNext) (kernel.Snapshot, error) {
-	r := h.f.request
-	if i.Operation != plugin.RunResolveApproval || i.RunID != r.ID || i.ParentRunID != r.ParentRunID || i.Actor != r.Actor || i.Thread != r.Thread || i.Goal != r.Goal {
-		h.f.t.Fatal("actual child approval source changed")
-	}
-	h.calls++
-	if h.before != nil {
-		h.before()
-	}
-	if h.failure != nil {
-		h.sends++
-		return kernel.Snapshot{}, h.failure
-	}
-	return next(ctx)
 }
 
 // Default Child control has no bound native lease: its real receipt CAS
@@ -84,7 +60,6 @@ type ea1ChildControlFixture struct {
 	native            bool
 	controlStore      *ea1ChildControlStore
 	approval          *ea1ControlApproval
-	controlHost       *ea1ChildControlHost
 	waiting, approved kernel.Snapshot
 	setupLease        kernel.ExecutionLease
 	preflight         func(context.Context, kernel.Snapshot) error
@@ -100,7 +75,6 @@ func ea1NewChildControl(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 		t.Fatal(e)
 	}
 	f.approval = &ea1ControlApproval{base: interactionadapter.New(approvals), t: t}
-	f.controlHost = &ea1ChildControlHost{f: f}
 	definition := tools.Definition{Key: "effect", Name: "Original Effect", InputSchema: []byte(`{"type":"object"}`), Terminal: true}
 	f.catalog, e = tools.NewRegistry([]tools.Registration{{Definition: definition, Handler: tools.HandlerFunc(func(ctx context.Context, r tools.ExecutionRequest) (tools.ExecutionResult, error) {
 		s, e := f.rt.Load(ctx, f.request.ID)
@@ -122,7 +96,7 @@ func ea1NewChildControl(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 	if f.waiting.Run.Status != kernel.RunStatusWaitingInput || f.waiting.Checkpoint == nil || f.waiting.Checkpoint.Status != kernel.CheckpointPending || !reflect.DeepEqual(f.waiting.Checkpoint, f.approval.checkpoint) {
 		t.Fatal("real Start did not preserve actual original checkpoint")
 	}
-	if f.approval.calls != 0 || f.controlHost.calls != 0 || len(f.physical.requests) != 1 || len(f.physical.toolRequests) != 0 {
+	if f.approval.calls != 0 || len(f.physical.requests) != 1 || len(f.physical.toolRequests) != 0 {
 		t.Fatal("setup entered measured approval/Tool")
 	}
 	f.receipts(f.waiting, true)
@@ -148,9 +122,6 @@ func (f *ea1ChildControlFixture) runner(rt *kernel.Runtime, host bool) *agent.Ru
 	d := agent.Dependencies{Runtime: rt, Model: f.physical, Catalog: f.catalog, Executor: f.catalog, Approvals: f.approval, ApprovalPolicies: []plugin.ApprovalPolicy{ea1ControlPolicy{}}, ApprovalControlPreflight: f.preflight, Execution: ea1StoreBackedExecutionPolicy()}
 	if f.native {
 		d.RunExecution = &agent.RunExecution{OwnerID: "child-approval-native", LeaseDuration: 2 * time.Second}
-	}
-	if host {
-		d.RunMiddleware = []plugin.RunMiddleware{f.controlHost}
 	}
 	r, e := agent.NewRunner(d)
 	if e != nil {
@@ -303,12 +274,12 @@ func ea1ChildControlPreflight(t *testing.T, factory func(*testing.T) (kernel.Sto
 		t.Fatal("denied approval sent Tool/Model")
 	}
 	if callback {
-		if f.approval.calls != 1 || f.controlHost.calls != 1 || !errors.Is(e, kernel.ErrChildExecutionBusy) {
+		if f.approval.calls != 1 || !errors.Is(e, kernel.ErrChildExecutionBusy) {
 			t.Fatal("handler refusal lost unknown original scope")
 		}
 		f.scope()
 	} else {
-		if f.approval.calls != 0 || f.controlHost.calls != 0 || f.store.admissions != 0 {
+		if f.approval.calls != 0 || f.store.admissions != 0 {
 			t.Fatal("preflight invoked arbitrary callback")
 		}
 		if _, e = f.peer.LookupChildExecution(ctx, f.request.ID); !errors.Is(e, kernel.ErrNotFound) {
@@ -320,10 +291,9 @@ func ea1ChildControlBarrier(t *testing.T, factory func(*testing.T) (kernel.Store
 	f := ea1NewChildControl(t, factory, native)
 	cuts := 0
 	check := func() { cuts++; f.fence() }
-	f.controlHost.before = check
 	f.approval.before = check
 	out, e := f.runner(f.rt, true).ResolveApproval(t.Context(), f.request.ID, f.waiting.Run.Revision, plugin.ApprovalResponse{Decision: plugin.ApprovalApprove})
-	if e != nil || cuts != 2 || f.approval.calls != 1 || f.controlHost.calls != 1 {
+	if e != nil || cuts != 1 || f.approval.calls != 1 {
 		t.Fatalf("real child approval failed: %v cuts %d", e, cuts)
 	}
 	if native {
@@ -349,8 +319,6 @@ func ea1ChildControlUnknown(t *testing.T, factory func(*testing.T) (kernel.Store
 	f := ea1NewChildControl(t, factory, kind != "tool")
 	stop := errors.New("original child approval callback unknown")
 	switch kind {
-	case "host":
-		f.controlHost.failure = stop
 	case "handler":
 		f.approval.failure = stop
 	case "tool":
@@ -394,7 +362,7 @@ func ea1ChildControlUnknown(t *testing.T, factory func(*testing.T) (kernel.Store
 		}
 	}
 	f.unchanged(rt, s, g)
-	if f.controlHost.calls != 1 || f.approval.calls != map[bool]int{true: 0, false: 1}[kind == "host"] {
+	if f.approval.calls != 1 {
 		t.Fatal("approval Host/handler replayed")
 	}
 	// No new native lease is acquired by Child ResolveApproval; do not

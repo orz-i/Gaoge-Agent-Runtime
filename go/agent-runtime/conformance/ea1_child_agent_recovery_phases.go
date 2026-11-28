@@ -12,7 +12,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
@@ -24,7 +23,7 @@ func RunEA1ChildAgentRecoveryPhases(t *testing.T, factory func(*testing.T) (kern
 	if len(contention) == 1 {
 		retryableContention = contention[0]
 	}
-	t.Run("P1/active-callback-before-and-after-Next", func(t *testing.T) { ea1ChildRecoveryPhase(t, factory, "P1", false, false) })
+	t.Run("P1/active-grant-before-dispatch-and-mark", func(t *testing.T) { ea1ChildRecoveryPhase(t, factory, "P1", false, false) })
 	for _, tool := range []bool{false, true} {
 		name := map[bool]string{false: "model-yield", true: "terminal-tool"}[tool]
 		t.Run("P3/unmarked-"+name, func(t *testing.T) { ea1ChildRecoveryPhase(t, factory, "unmarked", tool, false) })
@@ -36,14 +35,26 @@ func RunEA1ChildAgentRecoveryPhases(t *testing.T, factory func(*testing.T) (kern
 
 type ea1ChildRecoveryPhaseStore struct {
 	*ea1AgentAdmissionStore
-	mode            string
-	fault           error
-	marks, finishes int
-	beforeFinish    func()
-	lastFinish      func() error
+	mode                   string
+	fault                  error
+	marks, finishes        int
+	beforeFinish           func()
+	lastFinish             func() error
+	afterBegin, beforeMark func()
+}
+
+func (s *ea1ChildRecoveryPhaseStore) BeginChildExecution(ctx context.Context, g kernel.ChildExecutionGrant) error {
+	err := s.ChildExecutionStore.BeginChildExecution(ctx, g)
+	if err == nil && s.afterBegin != nil {
+		s.afterBegin()
+	}
+	return err
 }
 
 func (s *ea1ChildRecoveryPhaseStore) MarkChildExecutionSettled(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
+	if s.beforeMark != nil {
+		s.beforeMark()
+	}
 	if s.mode == "unmarked" {
 		return s.fault
 	}
@@ -80,30 +91,6 @@ func (m *ea1ChildRecoveryPhaseModel) Generate(ctx context.Context, r model.Reque
 	return m.ea1StartSettlementPhysical.Generate(ctx, r)
 }
 
-type ea1ChildRecoveryPhaseHost struct {
-	t             *testing.T
-	request       agent.StartRequest
-	physical      *ea1StartSettlementPhysical
-	before, after func()
-}
-
-func (*ea1ChildRecoveryPhaseHost) Name() string { return "ea1.actual.child.recovery.callback" }
-func (h *ea1ChildRecoveryPhaseHost) Run(ctx context.Context, i plugin.RunInvocation, next plugin.RunNext) (kernel.Snapshot, error) {
-	if i.Operation != plugin.RunStart || i.RunID != h.request.ID || i.ParentRunID != h.request.ParentRunID || i.Actor != h.request.Actor || i.Thread != h.request.Thread || i.Goal != h.request.Goal {
-		h.t.Fatal("original child callback source changed")
-	}
-	h.physical.mu.Lock()
-	h.physical.hostCalls++
-	h.physical.mu.Unlock()
-	if h.before != nil {
-		h.before()
-	}
-	out, e := next(ctx)
-	if h.after != nil {
-		h.after()
-	}
-	return out, e
-}
 func ea1ChildRecoveryPhase(t *testing.T, factory func(*testing.T) (kernel.Store, func() (kernel.Store, kernel.Store)), phase string, withTool, deadline bool, contention ...func(error) bool) {
 	backing, reopen := factory(t)
 	admission := ea1AgentAdmissionWrap(t, backing)
@@ -136,10 +123,9 @@ func ea1ChildRecoveryPhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 	if e != nil {
 		t.Fatal(e)
 	}
-	host := &ea1ChildRecoveryPhaseHost{t: t, request: request, physical: physical}
 	preflightCalls := 0
 	makeRunner := func(runtime *kernel.Runtime, owner string) *agent.Runner {
-		r, e := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: physicalModel, Catalog: registry, Executor: registry, RunMiddleware: []plugin.RunMiddleware{host}, StartControlPreflight: func(ctx context.Context, actual agent.StartRequest) error {
+		r, e := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: physicalModel, Catalog: registry, Executor: registry, StartControlPreflight: func(ctx context.Context, actual agent.StartRequest) error {
 			preflightCalls++
 			if !reflect.DeepEqual(actual, request) {
 				return agent.ErrInvalidRequest
@@ -154,7 +140,7 @@ func ea1ChildRecoveryPhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 				}
 			}
 			return nil
-		}, ToolMiddleware: []plugin.ToolMiddleware{physical}, RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: 3 * time.Minute}})
+		}, RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: 3 * time.Minute}})
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -169,7 +155,7 @@ func ea1ChildRecoveryPhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 		}
 		return nil
 	}
-	// Before native acquisition and after Next has returned, the outer callback
+	// After the actual grant and before its actual Mark, the native call
 	// still has not returned. Neither a clean state nor a durable Model receipt
 	// permits this public recovery entry to invent its settlement marker.
 	cuts := 0
@@ -198,8 +184,8 @@ func ea1ChildRecoveryPhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 		}
 	}
 	if phase == "P1" {
-		host.before = activeCheck
-		host.after = activeCheck
+		store.afterBegin = activeCheck
+		store.beforeMark = activeCheck
 		physicalModel.before = func() {
 			modelCuts++
 			current, e := rt.Load(t.Context(), request.ID)

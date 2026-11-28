@@ -12,7 +12,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
@@ -24,6 +23,7 @@ func RunEA1ChildAgentStartPhases(t *testing.T, factory func(*testing.T) (kernel.
 	for _, v := range []string{"origin", "actor", "thread", "missing-parent", "terminal-parent", "preflight", "duplicate", "stale-admission", "parent-wins"} {
 		t.Run("P0/"+v, func(t *testing.T) { ea1ChildStartPreflight(t, factory, v) })
 	}
+	t.Run("P1/admitted-before-dispatch", func(t *testing.T) { ea1ChildStartPhase(t, factory, "P1", "admission") })
 	for _, kind := range []string{"model", "tool"} {
 		t.Run("P2/"+kind, func(t *testing.T) { ea1ChildStartPhase(t, factory, "P2", kind) })
 	}
@@ -63,15 +63,6 @@ func (s *ea1ChildStartStore) MarkChildExecutionSettled(ctx context.Context, g ke
 	return err
 }
 
-type ea1ChildStartHost struct {
-	request      agent.StartRequest
-	calls, sends int
-	hook         func()
-	failure      error
-	sendUnknown  bool
-}
-
-
 type ea1ChildStartFixture struct {
 	t            *testing.T
 	store        *ea1ChildStartStore
@@ -80,7 +71,6 @@ type ea1ChildStartFixture struct {
 	reopen       func() kernel.Store
 	physical     *ea1ElectionPhysical
 	catalog      *tools.Registry
-	host         *ea1ChildStartHost
 	request      agent.StartRequest
 	ancestors    []kernel.Snapshot
 	created      kernel.Snapshot
@@ -115,7 +105,6 @@ func ea1NewChildStart(t *testing.T, factory func(*testing.T) (kernel.Store, kern
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.host = &ea1ChildStartHost{request: f.request}
 	f.store.created = func(s kernel.Snapshot) {
 		if s.Run.ID == f.request.ID {
 			f.created = s
@@ -350,7 +339,7 @@ func ea1ChildStartPreflight(t *testing.T, factory func(*testing.T) (kernel.Store
 	if !errors.Is(err, expected) {
 		t.Fatalf("%s public preflight: %v want %v", vector, err, expected)
 	}
-	if f.host.calls != 0 || len(f.physical.requests) != 0 || len(f.physical.toolRequests) != 0 || f.store.admissions != beforeAdmissions {
+	if len(f.physical.requests) != 0 || len(f.physical.toolRequests) != 0 || f.store.admissions != beforeAdmissions {
 		t.Fatal("denied child Start dispatched/admitted")
 	}
 	snap, e := f.peer.Load(ctx, req.ID)
@@ -376,12 +365,11 @@ func ea1ChildStartPhase(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 	f := ea1NewChildStart(t, factory, kind == "tool", kind == "deadline")
 	ctx := t.Context()
 	cuts := 0
-	stop := errors.New("test child callback stop before Next")
 	barrier := func() {
 		cuts++
 		s := f.load(f.peer)
 		g := f.grant(f.peer)
-		f.fence(s, g, phase != "P3" && (kind == "model" || kind == "tool"))
+		f.fence(s, g, phase != "P3")
 		if phase == "P5" {
 			duplicate := f.runner(f.peer, "duplicate-child", false)
 			if _, e := duplicate.StartRun(ctx, f.request); !errors.Is(e, kernel.ErrAlreadyExists) {
@@ -426,17 +414,11 @@ func ea1ChildStartPhase(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 	}
 	switch phase {
 	case "P1":
-		f.host.hook = barrier
-		f.host.failure = stop
+		f.store.afterAcquire = barrier
 	case "P2":
-		if kind == "host" {
-			f.host.sendUnknown = true
-			f.host.failure = stop
-		} else {
-			f.store.event = "agent.model_invocation.completed"
-			if kind == "tool" {
-				f.store.event = "tool.completed"
-			}
+		f.store.event = "agent.model_invocation.completed"
+		if kind == "tool" {
+			f.store.event = "tool.completed"
 		}
 	case "P3":
 		f.store.beforeMark = func(g kernel.ChildExecutionGrant) {
@@ -458,42 +440,34 @@ func ea1ChildStartPhase(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 		}
 	case "P5":
 		switch kind {
-		case "host", "deadline":
-			f.host.hook = barrier
+		case "deadline":
+			f.store.afterAcquire = barrier
 		case "model":
 			f.physical.modelHook = barrier
 		case "tool":
 			f.physical.toolHook = barrier
 		}
 	}
-	useHost := phase == "P1" || kind == "host" || kind == "deadline"
+	useHost := true
 	runner := f.runner(f.rt, "original-child-owner", useHost)
 	out, err := runner.StartRun(ctx, f.request)
-	f.host.hook = nil
+	f.store.afterAcquire = nil
 	f.physical.modelHook = nil
 	f.physical.toolHook = nil
 	f.store.beforeMark = nil
-	if phase == "P1" || phase == "P2" {
+	if phase == "P2" {
 		expected := f.store.injected
-		if kind == "host" {
-			expected = stop
-		}
 		if !errors.Is(err, expected) || !errors.Is(err, kernel.ErrChildExecutionBusy) {
 			t.Fatalf("actual child unknown cut: %v", err)
-		}
-		if phase == "P1" && (cuts != 1 || len(f.physical.requests) != 0) {
-			t.Fatal("P1 entered physical Model")
 		}
 		s := f.load(f.peer)
 		g := f.grant(f.peer)
 		f.unchanged(f.peer, s, g)
-		if kind != "host" {
-			if f.store.failures != 1 {
-				t.Fatal("receipt fault not reached")
-			}
-			f.receipts(s, kind == "tool")
-			ea1AwaitNativeExpiry(t, f.peerStore.(kernel.ExecutionStore), f.store.renewals.latest(t, f.store.acquired))
+		if f.store.failures != 1 {
+			t.Fatal("receipt fault not reached")
 		}
+		f.receipts(s, kind == "tool")
+		ea1AwaitNativeExpiry(t, f.peerStore.(kernel.ExecutionStore), f.store.renewals.latest(t, f.store.acquired))
 		freshStore := f.reopen()
 		freshRT := ea1StartRuntime(t, freshStore)
 		f.physical.rt = freshRT
@@ -513,13 +487,9 @@ func ea1ChildStartPhase(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 			t.Fatalf("unknown child resumed after TTL: %v", e)
 		}
 		f.unchanged(freshRT, s, g)
-		if kind != "host" {
-			f.receipts(s, kind == "tool")
-			if e := freshStore.(kernel.ExecutionStore).CheckExecution(ctx, s.Run.ID, &f.store.acquired); !errors.Is(e, kernel.ErrExecutionConflict) {
-				t.Fatalf("original child lease did not expire: %v", e)
-			}
-		} else if f.host.calls != 1 || (phase == "P2" && f.host.sends != 1) || (phase == "P1" && f.host.sends != 0) || len(f.physical.requests) != 0 {
-			t.Fatal("unknown Host replayed")
+		f.receipts(s, kind == "tool")
+		if e := freshStore.(kernel.ExecutionStore).CheckExecution(ctx, s.Run.ID, &f.store.acquired); !errors.Is(e, kernel.ErrExecutionConflict) {
+			t.Fatalf("original child lease did not expire: %v", e)
 		}
 		return
 	}

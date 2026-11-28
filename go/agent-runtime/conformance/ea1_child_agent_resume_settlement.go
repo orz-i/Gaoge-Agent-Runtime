@@ -31,6 +31,7 @@ type ea1ChildResumeSettlementStore struct {
 	mode                    string
 	fault                   error
 	beforeBegin             func(kernel.ChildExecutionGrant)
+	afterBegin              func(context.Context)
 	marks, finishes, begins int
 }
 
@@ -41,6 +42,9 @@ func (s *ea1ChildResumeSettlementStore) BeginChildExecution(ctx context.Context,
 	e := s.ChildExecutionStore.BeginChildExecution(ctx, g)
 	if e == nil {
 		s.begins++
+		if s.afterBegin != nil {
+			s.afterBegin(ctx)
+		}
 	}
 	return e
 }
@@ -65,15 +69,6 @@ func (s *ea1ChildResumeSettlementStore) FinishChildExecution(ctx context.Context
 	return e
 }
 
-type ea1ChildSettlementHost struct {
-	operation plugin.RunOperation
-	name      string
-	request   agent.StartRequest
-	physical  *ea1StartSettlementPhysical
-	before    func()
-}
-
-
 type ea1ChildResumeSettlementFixture struct {
 	t                                      *testing.T
 	store                                  *ea1ChildResumeSettlementStore
@@ -82,7 +77,6 @@ type ea1ChildResumeSettlementFixture struct {
 	request                                agent.StartRequest
 	parent, grandparent, created, prepared kernel.Snapshot
 	physical                               *ea1StartSettlementPhysical
-	host                                   *ea1ChildSettlementHost
 	definition                             tools.Definition
 	registry                               *tools.Registry
 }
@@ -124,7 +118,6 @@ func ea1NewChildResumeSettlement(t *testing.T, factory func(*testing.T) (kernel.
 	if e != nil {
 		t.Fatal(e)
 	}
-	f.host = &ea1ChildSettlementHost{operation: plugin.RunResume, name: "ea1.original.child.resume", request: f.request, physical: f.physical}
 	setup := f.runner(rt, "prepare-owner", false)
 	st.afterCreate = func(_ context.Context, s kernel.Snapshot) error {
 		f.created = s
@@ -140,7 +133,7 @@ func ea1NewChildResumeSettlement(t *testing.T, factory func(*testing.T) (kernel.
 	if _, e = rt.LookupChildExecution(t.Context(), f.request.ID); !errors.Is(e, kernel.ErrNotFound) {
 		t.Fatal("Prepare scope not retired", e)
 	}
-	if len(f.physical.requests) != 0 || len(f.physical.toolRequests) != 0 || f.physical.hostCalls != 0 || st.begins != 1 || st.marks != 1 || st.finishes != 1 {
+	if len(f.physical.requests) != 0 || len(f.physical.toolRequests) != 0 || st.begins != 1 || st.marks != 1 || st.finishes != 1 {
 		t.Fatal("Prepare did not finish its separate zero-send callback")
 	}
 	st.begins, st.marks, st.finishes = 0, 0, 0
@@ -213,13 +206,13 @@ func ea1ChildResumeSettlement(t *testing.T, factory func(*testing.T) (kernel.Sto
 }
 func ea1ChildResumeElection(t *testing.T, factory func(*testing.T) (kernel.Store, func() (kernel.Store, kernel.Store)), deadline bool) {
 	f := ea1NewChildResumeSettlement(t, factory, false, deadline)
-	ea1ChildSettlementElection(t, f.reopen, f.request, f.prepared, f.parent, f.grandparent, f.physical, f.definition, f.host, f.runner, nil, deadline)
+	ea1ChildSettlementElection(t, f.reopen, f.request, f.prepared, f.parent, f.grandparent, f.physical, f.definition, f.runner, nil, deadline)
 }
 
 // Both controls compete for the exact same original borrowed grant. Approval
 // differs from Resume only in its callback, preflight, and lease assertions.
 func ea1ChildSettlementElection(t *testing.T, reopen func() (kernel.Store, kernel.Store), request agent.StartRequest, source, parent, grandparent kernel.Snapshot,
-	physical *ea1StartSettlementPhysical, definition tools.Definition, host *ea1ChildSettlementHost, runner func(*kernel.Runtime, string, bool) *agent.Runner, approval *ea1ChildApprovalSettlementFixture, deadline bool) {
+	physical *ea1StartSettlementPhysical, definition tools.Definition, runner func(*kernel.Runtime, string, bool) *agent.Runner, approval *ea1ChildApprovalSettlementFixture, deadline bool) {
 	t.Helper()
 	a, b := reopen()
 	sa := &ea1ChildResumeSettlementStore{ea1AgentAdmissionStore: ea1AgentAdmissionWrap(t, a)}
@@ -244,12 +237,17 @@ func ea1ChildSettlementElection(t *testing.T, reopen func() (kernel.Store, kerne
 	sa.beforeBegin, sb.beforeBegin = barrier, barrier
 	enteredHost := make(chan struct{}, 1)
 	releaseHost := make(chan struct{})
-	host.before = func() {
+	hold := func(context.Context) {
 		enteredHost <- struct{}{}
 		select {
 		case <-releaseHost:
 		case <-t.Context().Done():
 		}
+	}
+	if approval != nil {
+		sa.afterBegin, sb.afterBegin = hold, hold
+	} else {
+		sa.afterAcquire, sb.afterAcquire = hold, hold
 	}
 	type outcome struct {
 		s kernel.Snapshot

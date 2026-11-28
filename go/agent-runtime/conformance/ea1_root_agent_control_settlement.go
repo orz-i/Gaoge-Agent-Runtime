@@ -39,23 +39,6 @@ func (ea1ControlApprovalPolicy) Approval(context.Context, plugin.ToolInvocation)
 	return plugin.ApprovalRequired, nil
 }
 
-type ea1ControlMiddleware struct {
-	hook  func()
-	calls int
-}
-
-func (*ea1ControlMiddleware) Name() string { return "ea1.control.callback" }
-func (m *ea1ControlMiddleware) Run(ctx context.Context, inv plugin.RunInvocation, next plugin.RunNext) (kernel.Snapshot, error) {
-	if inv.Operation != plugin.RunResolveApproval || inv.ParentRunID != "" {
-		return kernel.Snapshot{}, errors.New("not actual Root approval")
-	}
-	m.calls++
-	if m.hook != nil {
-		m.hook()
-	}
-	return next(ctx)
-}
-
 func ea1ControlSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store), entry, phase string) {
 	t.Helper()
 	ctx := t.Context()
@@ -91,7 +74,7 @@ func ea1ControlSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	middleware := &ea1ControlMiddleware{}
+	var approvalHook func()
 	var resolvedCheckpoint *kernel.Checkpoint
 	makeRunner := func(runtime *kernel.Runtime, owner string, control bool) *agent.Runner {
 		approvals, e := interaction.New(runtime)
@@ -111,6 +94,9 @@ func ea1ControlSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, 
 		})}
 		if entry == "approval" {
 			deps.Approvals = ea1ControlApprovalCapture{ApprovalHandler: interactionadapter.New(approvals), returned: func(cp *kernel.Checkpoint) {
+				if approvalHook != nil {
+					approvalHook()
+				}
 				raw, e := json.Marshal(cp)
 				if e != nil {
 					t.Fatal(e)
@@ -120,9 +106,6 @@ func ea1ControlSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, 
 				}
 			}}
 			deps.ApprovalPolicies = []plugin.ApprovalPolicy{ea1ControlApprovalPolicy{}}
-		}
-		if control {
-			deps.RunMiddleware = []plugin.RunMiddleware{middleware}
 		}
 		runner, e := agent.NewRunner(deps)
 		if e != nil {
@@ -329,7 +312,7 @@ func ea1ControlSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, 
 	}
 	if strings.HasPrefix(phase, "P5") {
 		if entry == "approval" {
-			middleware.hook = compete
+			approvalHook = compete
 		} else {
 			verifyHook = compete
 		}
@@ -345,7 +328,7 @@ func ea1ControlSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, 
 	} else {
 		out, operationErr = runner.ResumeToolWait(ctx, req.ID, initial.Run.Revision, wait.Generation)
 	}
-	middleware.hook = nil
+	approvalHook = nil
 	verifyHook = nil
 	if phase == "P5-run-deadline" {
 		if contested.ID == "" {
@@ -412,7 +395,7 @@ func ea1ControlSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, 
 		}
 	}
 	if entry == "approval" {
-		if middleware.calls != 1 || before.Run.Status != kernel.RunStatusRunning || toolCalls != 0 || before.Checkpoint == nil || before.Checkpoint.ID != initial.Checkpoint.ID || before.Checkpoint.Status == kernel.CheckpointPending {
+		if resolvedCheckpoint == nil || before.Run.Status != kernel.RunStatusRunning || toolCalls != 0 || before.Checkpoint == nil || before.Checkpoint.ID != initial.Checkpoint.ID || before.Checkpoint.Status == kernel.CheckpointPending {
 			t.Fatal("explicit native approval must only resolve checkpoint, not dispatch Tool")
 		}
 	} else if verifyCalls != 1 || !reflect.DeepEqual(verifiedRequest, pendingRequest) || toolCalls != 1 {

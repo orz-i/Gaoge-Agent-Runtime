@@ -18,7 +18,7 @@ import (
 // This is a hydration-layer vector in the existing Root Start P0/P1 suite.
 // It does not claim that a computed checkpoint proves archive persistence.
 func ea1RootBoundedContext(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store), automatic bool) {
-	for _, mode := range []string{"bounded", "opaque", "foreign-hydration"} {
+	for _, mode := range []string{"bounded", "foreign-hydration"} {
 		t.Run("P1/callback-completion-"+mode, func(t *testing.T) {
 			backing, peer := factory(t)
 			injected := errors.New("original pending intent CAS denied before commit")
@@ -33,10 +33,6 @@ func ea1RootBoundedContext(t *testing.T, factory func(*testing.T) (kernel.Store,
 			}
 			physical := &ea1AdmissionModel{}
 			d := agent.Dependencies{Runtime: rt, Model: physical, BoundedContext: bounded}
-			if mode == "opaque" {
-				d.BoundedContext = nil
-				d.RunMiddleware = []plugin.RunMiddleware{&ea1AdmissionMiddleware{}}
-			}
 			if !automatic {
 				d.RunExecution = &agent.RunExecution{OwnerID: "original-owner", LeaseDuration: 3 * time.Minute}
 			}
@@ -91,7 +87,7 @@ func ea1RootBoundedContext(t *testing.T, factory func(*testing.T) (kernel.Store,
 			}
 			ea1CompBarrierUnchanged(t, observer, original)
 			if mode == "foreign-hydration" && (ports.hydrates != 1 || fault.failures != 0) {
-				t.Fatal("foreign hydration reached original Next")
+				t.Fatal("foreign hydration reached original intent CAS")
 			}
 		})
 	}

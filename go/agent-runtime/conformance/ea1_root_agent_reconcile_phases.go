@@ -13,7 +13,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
@@ -22,7 +21,6 @@ import (
 // the original physical owner and its competing-control fence remain tested.
 func RunEA1RootAgentReconcilePhases(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store)) {
 	t.Run("settled-tool-outcome", func(t *testing.T) { RunSettledToolRecovery(t, factory, nil) })
-	t.Run("P2/model-host-evidence", func(t *testing.T) { ea1RootReconcilePhase(t, factory, "P2-evidence", "model") })
 	for _, phase := range []string{"P0", "P1", "P2", "P3", "P4"} {
 		for _, kind := range []string{"model", "tool"} {
 			t.Run(phase+"/"+kind, func(t *testing.T) { ea1RootReconcilePhase(t, factory, phase, kind) })
@@ -138,11 +136,7 @@ func ea1RootReconcilePhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 		return tools.CloneExecutionResult(verifiedToolResult), nil
 	})
 	runnerFor := func(runtime *kernel.Runtime, owner string) *agent.Runner {
-		var host []plugin.RunMiddleware
-		if phase == "P2-evidence" {
-			host = []plugin.RunMiddleware{&ea1AdmissionMiddleware{}}
-		}
-		r, e := agent.NewRunner(agent.Dependencies{Runtime: runtime, RunMiddleware: host, Model: physical, Catalog: registry, Executor: registry, ModelOutcomeVerifier: modelVerifier, ToolOutcomeVerifier: toolVerifier, RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: 2 * time.Second}, Execution: ea1StoreBackedExecutionPolicy()})
+		r, e := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: physical, Catalog: registry, Executor: registry, ModelOutcomeVerifier: modelVerifier, ToolOutcomeVerifier: toolVerifier, RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: 2 * time.Second}, Execution: ea1StoreBackedExecutionPolicy()})
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -181,7 +175,7 @@ func ea1RootReconcilePhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 		t.Fatal(err)
 	}
 	completion, err := rt.LookupOwnedPhysicalCallbackReturn(t.Context(), grant)
-	if err != nil || completion.HostCompleted != (phase != "P2-evidence") || completion.GrantID != grant.ID {
+	if err != nil || !completion.HostCompleted || completion.GrantID != grant.ID {
 		t.Fatalf("positive recovery lacks actual whole-callback completion: %+v %v", completion, err)
 	}
 	lease := initial.lastLease()
@@ -210,56 +204,6 @@ func ea1RootReconcilePhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 			return r.ReconcileModelOutcome(t.Context(), request.ID, revision)
 		}
 		return r.ReconcileToolOutcome(t.Context(), request.ID, revision, call)
-	}
-	if phase == "P2-evidence" {
-		evidence, e := reconcile(runner, before.Run.Revision, "original-tool-call")
-		if !errors.Is(e, agent.ErrRootOutcomeUnknown) || evidence.Run.Revision != before.Run.Revision+1 {
-			t.Fatalf("Host-unknown evidence purpose failed: %v", e)
-		}
-		v, e := agent.ViewState(evidence)
-		if e != nil || len(v.ModelInvocations) != 1 || v.ModelInvocations[0].Status != agent.ModelInvocationCompleted || v.ModelInvocations[0].ID != inv.ID || v.ModelInvocations[0].RequestHash != inv.RequestHash || v.ModelInvocations[0].ExecutionAttempt != inv.ExecutionAttempt || v.ModelInvocations[0].DispatchAttempt != inv.DispatchAttempt || !ea1RecoveryJSONEqual(v.ModelInvocations[0].Response, physical.response) {
-			t.Fatal("evidence lost exact original receipt")
-		}
-		var oldState, newState map[string]json.RawMessage
-		if json.Unmarshal(before.State, &oldState) != nil || json.Unmarshal(evidence.State, &newState) != nil {
-			t.Fatal("invalid evidence state")
-		}
-		delete(oldState, "modelInvocations")
-		delete(newState, "modelInvocations")
-		// The private State seal must follow the original ModelInvocation
-		// receipt. Compare the remaining Agent fields without treating that
-		// expected seal revision as unrelated execution state.
-		delete(oldState, "_originalStateEvidence")
-		delete(newState, "_originalStateEvidence")
-		if !ea1RecoveryJSONEqual(oldState, newState) || !ea1RecoveryJSONEqual(evidence.Checkpoint, before.Checkpoint) || evidence.Run.Status != before.Run.Status || evidence.Run.ErrorCode != before.Run.ErrorCode || evidence.Run.ErrorDetail != before.Run.ErrorDetail {
-			t.Fatal("evidence consumed or changed other state")
-		}
-		fresh := reopen()
-		freshRT := ea1StartRuntime(t, fresh)
-		physical.rt = freshRT
-		next := runnerFor(freshRT, "fresh-owner")
-		_, e = reconcile(next, evidence.Run.Revision, "original-tool-call")
-		if !errors.Is(e, agent.ErrRootOutcomeUnknown) {
-			t.Fatalf("Hostfalse evidence upgraded: %v", e)
-		}
-		ea1CompBarrierUnchanged(t, freshRT, evidence)
-		if e = next.ReconcileRootPhysicalExecution(t.Context(), request.ID); !errors.Is(e, agent.ErrRootOutcomeUnknown) {
-			t.Fatalf("Hostfalse scope retired: %v", e)
-		}
-		ea1CompBarrierUnchanged(t, freshRT, evidence)
-		g, e := freshRT.LookupChildExecution(t.Context(), request.ID)
-		if e != nil || g != grant {
-			t.Fatal("evidence changed original scope")
-		}
-		c, e := freshRT.LookupOwnedPhysicalCallbackReturn(t.Context(), g)
-		if e != nil || !ea1RecoveryJSONEqual(c, completion) {
-			t.Fatal("Hostfalse upgraded")
-		}
-		m, n := physical.counts()
-		if m != models || n != toolCalls {
-			t.Fatal("evidence physically replayed")
-		}
-		return
 	}
 	if phase == "P0" {
 		if e := runner.ReconcileRootPhysicalExecution(t.Context(), "missing-root"); !errors.Is(e, kernel.ErrNotFound) {

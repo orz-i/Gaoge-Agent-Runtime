@@ -12,7 +12,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
@@ -22,7 +21,6 @@ import (
 // expires only its model claim; native Store lease expiry is awaited in real
 // wall-clock time before reopening, without private-table mutation.
 func RunEA1RootAgentUnknownSuite(t *testing.T, factory func(*testing.T) (kernel.Store, func() kernel.Store)) {
-	t.Run("host_middleware", func(t *testing.T) { ea1RootHostUnknown(t, factory) })
 	ea1AgentUnknownReceipts(t, factory, false)
 }
 
@@ -330,110 +328,4 @@ func (p *ea1UnknownAgentPhysical) assertOriginal(t *testing.T, request agent.Sta
 	if p.tool && (len(p.tools) != 1 || p.tools[0].RunID != request.ID || p.tools[0].Call.ID != "original-tool-call" || p.tools[0].Call.ToolKey != "effect" || !bytes.Equal(p.tools[0].Call.Arguments, json.RawMessage(`{"source":"original"}`))) {
 		t.Fatal("physical Tool not original dispatch/source")
 	}
-}
-
-// G02 is an actual Host callback send followed by an unverified error, not
-// a Model/Tool proxy and not a proof that the callback caused no effect.
-func ea1RootHostUnknown(t *testing.T, factory func(*testing.T) (kernel.Store, func() kernel.Store)) {
-	backing, reopen := factory(t)
-	rt, err := kernel.New(kernel.Dependencies{Store: backing})
-	if err != nil {
-		t.Fatal(err)
-	}
-	physical := &ea1UnknownAgentPhysical{}
-	host := &ea1UnknownHostMiddleware{failure: errors.New("test-only Host write sent; outcome unknown")}
-	makeRunner := func(runtime *kernel.Runtime, owner string) *agent.Runner {
-		r, e := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: physical, RunMiddleware: []plugin.RunMiddleware{host},
-			RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: 2 * time.Second},
-			Execution:    ea1StoreBackedExecutionPolicy()})
-		if e != nil {
-			t.Fatal(e)
-		}
-		return r
-	}
-	request := agent.StartRequest{ID: "host-unknown-root", Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"}, Goal: "original Host write"}
-	_, startErr := makeRunner(rt, "host-first").StartRun(t.Context(), request)
-	if !errors.Is(startErr, host.failure) || agent.IsNativeStartNoEffect(startErr) || host.count() != 1 {
-		t.Fatalf("actual Host unknown boundary not reached or fabricated no-effect: %v sends=%d", startErr, host.count())
-	}
-	before, err := rt.Load(t.Context(), request.ID)
-	if err != nil {
-		t.Fatalf("Host sent without durable original Run: %v", err)
-	}
-	if before.Run.ID != request.ID || before.Run.Actor != request.Actor || before.Run.Thread != request.Thread || before.Run.Status != kernel.RunStatusRunning {
-		t.Fatal("Host original owner/source lost")
-	}
-	firstInvocation := host.first()
-	if firstInvocation.Operation != plugin.RunStart || firstInvocation.RunID != request.ID || firstInvocation.Actor != request.Actor || firstInvocation.Thread != request.Thread || firstInvocation.ParentRunID != "" {
-		t.Fatal("Host callback adopted different original source")
-	}
-	firstJSON, err := json.Marshal(before)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// This boundary currently precedes native acquisition. Waiting real time
-	// also covers a future correctly acquired 2-second native segment.
-	timer := time.NewTimer(2200 * time.Millisecond)
-	defer timer.Stop()
-	select {
-	case <-timer.C:
-	case <-t.Context().Done():
-		t.Fatal(t.Context().Err())
-	}
-	fresh := reopen()
-	ownerRT, err := kernel.New(kernel.Dependencies{Store: fresh})
-	if err != nil {
-		t.Fatal(err)
-	}
-	durable, err := ownerRT.Load(t.Context(), request.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	persistedJSON, err := json.Marshal(durable)
-	if err != nil || !bytes.Equal(firstJSON, persistedJSON) {
-		t.Fatal("original Host unknown source changed across reopen")
-	}
-	_, resumeErr := makeRunner(ownerRT, "host-next").Resume(t.Context(), request.ID, durable.Run.Revision)
-	if host.count() != 1 {
-		t.Errorf("EA-06 G02 UNKNOWN Host callback replayed after fresh owner/real TTL: sends=%d err=%v", host.count(), resumeErr)
-	}
-	if agent.IsNativeStartNoEffect(resumeErr) {
-		t.Error("Host unknown recovery fabricated native no-effect proof")
-	}
-	modelCalls, toolCalls := physical.counts()
-	if modelCalls != 0 || toolCalls != 0 {
-		t.Errorf("unknown Host callback allowed new Model/Tool work: model=%d tool=%d", modelCalls, toolCalls)
-	}
-	after, err := ownerRT.Load(t.Context(), request.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	afterJSON, err := json.Marshal(after)
-	if err != nil || !bytes.Equal(firstJSON, afterJSON) {
-		t.Errorf("unknown Host recovery mutated original full state: %v", resumeErr)
-	}
-}
-
-type ea1UnknownHostMiddleware struct {
-	mu          sync.Mutex
-	invocations []plugin.RunInvocation
-	failure     error
-}
-
-func (m *ea1UnknownHostMiddleware) Name() string { return "ea1.original_host_unknown" }
-func (m *ea1UnknownHostMiddleware) Run(_ context.Context, inv plugin.RunInvocation, _ plugin.RunNext) (kernel.Snapshot, error) {
-	m.mu.Lock()
-	m.invocations = append(m.invocations, inv)
-	m.mu.Unlock()
-	return kernel.Snapshot{}, m.failure
-}
-func (m *ea1UnknownHostMiddleware) count() int {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return len(m.invocations)
-}
-func (m *ea1UnknownHostMiddleware) first() plugin.RunInvocation {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.invocations[0]
 }

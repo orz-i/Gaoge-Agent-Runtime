@@ -213,7 +213,6 @@ func toolTimelineConsumption(t *testing.T, factory func(*testing.T) (kernel.Stor
 				if e != nil {
 					t.Fatal(e)
 				}
-				layers := []plugin.ToolMiddleware{b}
 				m := &settledToolModel{}
 				calls := 0
 				reg, e := tools.NewRegistry([]tools.Registration{{Definition: tools.Definition{Key: "read", Name: "read", InputSchema: json.RawMessage(`{"type":"object"}`)}, Handler: tools.HandlerFunc(func(_ context.Context, q tools.ExecutionRequest) (tools.ExecutionResult, error) {
@@ -226,7 +225,7 @@ func toolTimelineConsumption(t *testing.T, factory func(*testing.T) (kernel.Stor
 				if e != nil {
 					t.Fatal(e)
 				}
-				r, e := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, BoundedBudget: a, ToolMiddleware: layers})
+				r, e := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, BoundedBudget: a, ToolTimeline: b})
 				if e != nil {
 					t.Fatal(e)
 				}

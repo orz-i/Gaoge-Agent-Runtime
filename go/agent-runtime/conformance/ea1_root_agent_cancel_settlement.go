@@ -18,7 +18,7 @@ func ea1RootCancelSettlement(t *testing.T, factory func(*testing.T) (kernel.Stor
 	ea1RootSettlement(t, func(t *testing.T) (kernel.Store, func() kernel.Store) {
 		backing, _, reopen := factory(t)
 		return backing, reopen
-	}, phase, withTool, false, "start", true)
+	}, phase, withTool, "start", true)
 }
 
 // This wrapper only intercepts the actual public Cancel's ControlStore CAS.
@@ -209,7 +209,6 @@ func ea1NewCancelDeadlineFixture(t *testing.T, factory func(*testing.T) (kernel.
 	}
 	deadline := time.Now().UTC().Add(ea1StoreBackedDeadline)
 	f.request.DeadlineAt = &deadline
-	f.host = &ea1ResumeHost{t: t, request: f.request}
 	setup := f.runner(rt, "prepare-owner", false)
 	wrapped.afterCreate = func(_ context.Context, s kernel.Snapshot) error {
 		f.created = s
@@ -226,7 +225,7 @@ func ea1NewCancelDeadlineFixture(t *testing.T, factory func(*testing.T) (kernel.
 		t.Fatal("PrepareRun source not preserved")
 	}
 	m, n := f.physical.counts()
-	if m != 0 || n != 0 || f.host.calls != 0 {
+	if m != 0 || n != 0 {
 		t.Fatal("Prepare dispatched measured callbacks")
 	}
 	if _, e = rt.LookupChildExecution(t.Context(), f.request.ID); !errors.Is(e, kernel.ErrNotFound) {

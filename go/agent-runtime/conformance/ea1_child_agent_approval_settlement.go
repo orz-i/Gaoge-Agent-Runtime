@@ -39,7 +39,6 @@ type ea1ChildApprovalSettlementFixture struct {
 	request                                         agent.StartRequest
 	parent, grandparent, created, waiting, approved kernel.Snapshot
 	physical                                        *ea1StartSettlementPhysical
-	host                                            *ea1ChildSettlementHost
 	approval                                        *ea1ControlApproval
 	definition                                      tools.Definition
 	registry                                        *tools.Registry
@@ -73,7 +72,6 @@ func ea1NewChildApprovalSettlement(t *testing.T, factory func(*testing.T) (kerne
 	if e != nil {
 		t.Fatal(e)
 	}
-	f.host = &ea1ChildSettlementHost{operation: plugin.RunResolveApproval, name: "ea1.original.child.approval", request: f.request, physical: f.physical}
 	setup := f.runner(rt, "setup-owner", false)
 	store.afterCreate = func(_ context.Context, s kernel.Snapshot) error {
 		f.created = s
@@ -89,7 +87,7 @@ func ea1NewChildApprovalSettlement(t *testing.T, factory func(*testing.T) (kerne
 	if f.waiting.Checkpoint == nil || f.waiting.Checkpoint.Status != kernel.CheckpointPending || !ea1RecoveryJSONEqual(f.waiting.Checkpoint, f.approval.checkpoint) || !ea1RecoveryJSONEqual(f.approval.definition, f.definition) || f.approval.call.ID != "original-call" || f.approval.call.ToolKey != "effect" {
 		t.Fatal("original pending checkpoint/call/catalog missing")
 	}
-	if len(f.physical.requests) != 1 || len(f.physical.toolRequests) != 0 || f.physical.hostCalls != 0 || f.approval.calls != 0 || store.begins != 1 || store.marks != 1 || store.finishes != 1 {
+	if len(f.physical.requests) != 1 || len(f.physical.toolRequests) != 0 || f.approval.calls != 0 || store.begins != 1 || store.marks != 1 || store.finishes != 1 {
 		t.Fatal("setup callbacks or source scope count wrong")
 	}
 	if _, e = rt.LookupChildExecution(t.Context(), f.request.ID); !errors.Is(e, kernel.ErrNotFound) {
@@ -108,12 +106,11 @@ func ea1NewChildApprovalSettlement(t *testing.T, factory func(*testing.T) (kerne
 	return f
 }
 func (f *ea1ChildApprovalSettlementFixture) runner(rt *kernel.Runtime, owner string, control bool) *agent.Runner {
-	deps := agent.Dependencies{Runtime: rt, Model: f.physical, Catalog: f.registry, Executor: f.registry, Approvals: f.approval, ApprovalPolicies: []plugin.ApprovalPolicy{ea1ControlPolicy{}}, ToolMiddleware: []plugin.ToolMiddleware{f.physical}}
+	deps := agent.Dependencies{Runtime: rt, Model: f.physical, Catalog: f.registry, Executor: f.registry, Approvals: f.approval, ApprovalPolicies: []plugin.ApprovalPolicy{ea1ControlPolicy{}}}
 	if f.native {
 		deps.RunExecution = &agent.RunExecution{OwnerID: owner, LeaseDuration: 3 * time.Minute}
 	}
 	if control {
-		deps.RunMiddleware = []plugin.RunMiddleware{f.host}
 		deps.ApprovalControlPreflight = func(ctx context.Context, s kernel.Snapshot) error {
 			f.preflights.Add(1)
 			if !ea1RecoveryJSONEqual(s, f.waiting) {
@@ -231,5 +228,5 @@ func ea1ChildApprovalSettlement(t *testing.T, factory func(*testing.T) (kernel.S
 }
 func ea1ChildApprovalElection(t *testing.T, factory func(*testing.T) (kernel.Store, func() (kernel.Store, kernel.Store)), native, deadline bool) {
 	f := ea1NewChildApprovalSettlement(t, factory, native, deadline)
-	ea1ChildSettlementElection(t, f.reopen, f.request, f.waiting, f.parent, f.grandparent, f.physical, f.definition, f.host, f.runner, f, deadline)
+	ea1ChildSettlementElection(t, f.reopen, f.request, f.waiting, f.parent, f.grandparent, f.physical, f.definition, f.runner, f, deadline)
 }

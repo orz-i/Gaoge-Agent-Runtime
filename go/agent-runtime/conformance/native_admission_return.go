@@ -26,19 +26,11 @@ func (p admissionCancelPorts) Project(_ context.Context, l budget.Ledger) error 
 	return nil
 }
 
-type admissionOpaqueRun struct{ entered *int }
-
-func (admissionOpaqueRun) Name() string { return "fixture.opaque-admission" }
-func (m admissionOpaqueRun) Run(ctx context.Context, _ plugin.RunInvocation, next plugin.RunNext) (kernel.Snapshot, error) {
-	*m.entered++
-	return next(ctx)
-}
-
-// One original native ledger cancellation, with the exact Run middleware
-// invocation and its complete callback lifetime. No typed Host error or
+// One original native ledger cancellation and its complete native lifetime.
+// No typed Host error or
 // failed projection can manufacture a completed Grant.
 func nativeAdmissionReturns(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store), ledgerFactory func(*testing.T) (budget.LedgerStore, func() budget.LedgerStore)) {
-	for _, mode := range []string{"run-and-tool", "parented-run-and-tool", "projection-failure", "opaque-unentered"} {
+	for _, mode := range []string{"run-and-tool", "parented-run-and-tool", "projection-failure"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx := t.Context()
 			base, peer, reopen := factory(t)
@@ -61,7 +53,7 @@ func nativeAdmissionReturns(t *testing.T, factory func(*testing.T) (kernel.Store
 				t.Fatal(err)
 			}
 			m := &settledToolModel{}
-			physical, policy, reads, opaque := 0, 0, 0, 0
+			physical, policy, reads := 0, 0, 0
 			reg, err := tools.NewRegistry([]tools.Registration{{Definition: tools.Definition{Key: "read", Name: "read", InputSchema: json.RawMessage(`{"type":"object"}`)}, Handler: tools.HandlerFunc(func(_ context.Context, q tools.ExecutionRequest) (tools.ExecutionResult, error) {
 				physical++
 				return tools.ExecutionResult{Content: json.RawMessage("{}"), Receipt: tools.Receipt{ExecutionID: q.Call.ID, Disposition: "committed"}}, nil
@@ -92,9 +84,6 @@ func nativeAdmissionReturns(t *testing.T, factory func(*testing.T) (kernel.Store
 					return tools.ExecutionResult{}, agent.ErrToolOutcomeUnknown
 				})
 				d := agent.Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, ApprovalPolicies: []plugin.ApprovalPolicy{p}, BoundedBudget: a, ToolOutcomeVerifier: reader, DelegatedToolResults: reader, StartControlPreflight: func(context.Context, agent.StartRequest) error { return nil }}
-				if replace && (mode == "opaque-unentered") {
-					d.RunMiddleware = append([]plugin.RunMiddleware{admissionOpaqueRun{entered: &opaque}}, d.RunMiddleware...)
-				}
 				r, err := agent.NewRunner(d)
 				if err != nil {
 					t.Fatal(err)
@@ -133,7 +122,7 @@ func nativeAdmissionReturns(t *testing.T, factory func(*testing.T) (kernel.Store
 			if err != nil {
 				t.Fatal(err)
 			}
-			if physical != 0 || policy != 1 || len(m.calls) != 1 || reads != 0 || opaque != 0 {
+			if physical != 0 || policy != 1 || len(m.calls) != 1 || reads != 0 {
 				t.Fatal("cancelled scope dispatched new work", physical, policy, reads)
 			}
 			if mode != "projection-failure" {

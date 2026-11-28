@@ -345,19 +345,19 @@ func runNativeLogicalOwner(t *testing.T, factory func(*testing.T) ExecutionBudge
 			case "entry":
 				w.afterOwned = func(context.Context, kernel.ChildExecutionGrant) error { return stop() }
 			}
-			m, host := &ea1AdmissionModel{}, &ea1AdmissionMiddleware{}
-			runner := ea1AdmissionConfiguredRunner(t, ea1StartRuntime(t, w), m, host, false)
+			m := &ea1AdmissionModel{}
+			runner := ea1AdmissionConfiguredRunner(t, ea1StartRuntime(t, w), m, nil, false)
 			out, err := runner.StartRun(ctx, req)
 			if cut == "success" {
 				if err != nil || out.Run.Status != kernel.RunStatusCompleted || out.Run.ParentRunID != "" ||
 					out.Run.LogicalParentRunID != parent.Run.ID || out.Run.BudgetScopeID != "" ||
 					!agent.MatchesFrozenOrigin(out, []byte("frozen-child")) ||
-					m.calls.Load() != 1 || host.calls.Load() != 1 {
+					m.calls.Load() != 1 {
 					t.Fatalf("native logical owner not retained: %+v %v", out.Run, err)
 				}
 				return
 			}
-			if err == nil || m.calls.Load() != 0 || host.calls.Load() != 0 {
+			if err == nil || m.calls.Load() != 0 {
 				t.Fatalf("rejected owner entered a callback: %v", err)
 			}
 			if cut == "foreign" || cut == "missing" || cut == "terminal" {

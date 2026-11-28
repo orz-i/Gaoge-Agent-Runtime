@@ -182,7 +182,6 @@ func toolUnsentRecovery(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 				if e != nil {
 					t.Fatal(e)
 				}
-				layers := []plugin.ToolMiddleware{timeline}
 				var bounded *agent.BoundedBudgetAdapter
 				if !unmetered {
 					ports := unsentProjectionPorts{capacityAdmissionPorts: capacityAdmissionPorts{settledToolPorts: settledToolPorts{id: scope}, limits: limits}, hits: &projectHits}
@@ -214,7 +213,7 @@ func toolUnsentRecovery(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 					reads++
 					return tools.ExecutionResult{}, agent.ErrToolOutcomeUnknown
 				})
-				d := agent.Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, BoundedBudget: bounded, ToolMiddleware: layers, ToolOutcomeVerifier: reader, DelegatedToolResults: reader}
+				d := agent.Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, BoundedBudget: bounded, ToolTimeline: timeline, ToolOutcomeVerifier: reader, DelegatedToolResults: reader}
 				if policy {
 					d.ApprovalPolicies = []plugin.ApprovalPolicy{p}
 				}

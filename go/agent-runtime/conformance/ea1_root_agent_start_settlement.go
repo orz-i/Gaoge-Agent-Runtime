@@ -27,10 +27,9 @@ func RunEA1RootAgentStartSettlementSuite(t *testing.T, factory func(*testing.T) 
 	for _, phase := range []string{"P3", "P4"} {
 		for _, tool := range []bool{false, true} {
 			kind := map[bool]string{false: "model-yield", true: "terminal-tool"}[tool]
-			t.Run(phase+"/"+kind, func(t *testing.T) { ea1RootSettlement(t, factory, phase, tool, false, "start", false) })
+			t.Run(phase+"/"+kind, func(t *testing.T) { ea1RootSettlement(t, factory, phase, tool, "start", false) })
 		}
 	}
-	t.Run("P3/committed-model-receipt-unknown-host", func(t *testing.T) { ea1RootSettlement(t, factory, "P3", false, true, "start", false) })
 }
 
 type ea1StartSettlementStore struct {
@@ -99,10 +98,6 @@ type ea1StartSettlementPhysical struct {
 	toolInvocations []plugin.ToolInvocation
 	toolRequests    []tools.ExecutionRequest
 	receipts        []tools.ExecutionResult
-	hostCalls       int
-	hostSends       int
-	hostUnknown     bool
-	hostFault       error
 }
 
 func (*ea1StartSettlementPhysical) ProviderName() string { return "ea1-settlement-provider" }
@@ -159,14 +154,11 @@ func (p *ea1StartSettlementPhysical) execute(ctx context.Context, req tools.Exec
 	p.mu.Unlock()
 	return result, nil
 }
-func ea1RootSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, func() kernel.Store), phase string, withTool, unknownHost bool, operation string, cancelBefore bool) {
+func ea1RootSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, func() kernel.Store), phase string, withTool bool, operation string, cancelBefore bool) {
 	t.Helper()
 	backing, reopen := factory(t)
 	fault := errors.New("test-only original settlement transport fault")
 	mode := phase
-	if unknownHost {
-		mode = "unknown"
-	}
 	initialMode := mode
 	if operation == "resume" {
 		initialMode = "setup"
@@ -176,7 +168,7 @@ func ea1RootSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, fun
 	if err != nil {
 		t.Fatal(err)
 	}
-	physical := &ea1StartSettlementPhysical{rt: rt, tool: withTool, hostUnknown: unknownHost, hostFault: errors.New("original Host send outcome unknown")}
+	physical := &ea1StartSettlementPhysical{rt: rt, tool: withTool}
 	definition := tools.Definition{Key: "effect", Name: "Original Effect", Description: "frozen terminal effect", InputSchema: json.RawMessage(`{"type":"object","properties":{"source":{"type":"string"}},"required":["source"]}`), Terminal: true}
 	catalog, err := tools.NewRegistry([]tools.Registration{{Definition: definition, Handler: tools.HandlerFunc(physical.execute)}})
 	if err != nil {
@@ -224,7 +216,7 @@ func ea1RootSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, fun
 			t.Fatalf("setup scope not retired before Resume: %v", err)
 		}
 		physical.mu.Lock()
-		setupDispatched := len(physical.requests) != 0 || len(physical.responses) != 0 || len(physical.toolRequests) != 0 || physical.hostCalls != 0
+		setupDispatched := len(physical.requests) != 0 || len(physical.responses) != 0 || len(physical.toolRequests) != 0
 		physical.mu.Unlock()
 		if setupDispatched {
 			t.Fatal("PrepareRun dispatched physical work")
@@ -241,11 +233,7 @@ func ea1RootSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, fun
 		}
 		expectedRevision = created.Run.Revision
 	}
-	if unknownHost {
-		if !errors.Is(startErr, physical.hostFault) || wrapped.markCalls != 0 || wrapped.finishCalls != 0 {
-			t.Fatalf("unknown Host retired after model receipt: %v", startErr)
-		}
-	} else if !errors.Is(startErr, fault) || !errors.Is(startErr, agent.ErrRootOutcomeUnknown) {
+	if !errors.Is(startErr, fault) || !errors.Is(startErr, agent.ErrRootOutcomeUnknown) {
 		t.Fatalf("cutpoint not retained: %v", startErr)
 	}
 	before, err := rt.Load(t.Context(), req.ID)
@@ -289,10 +277,10 @@ func ea1RootSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, fun
 	if grant.ExecutionOwnerID != owner || grant.ExecutionLeaseID == "" || grant.ExecutionEpoch == 0 || grant.AdmissionOperation != operation || len(grant.AdmissionSourceHash) != 64 || grant.ExpectedRevision != expectedRevision {
 		t.Fatal("original owned source binding missing")
 	}
-	if wrapped.markCalls != 0 || wrapped.finishCommits != 0 || (!unknownHost && wrapped.finishCalls != 1) {
+	if wrapped.markCalls != 0 || wrapped.finishCommits != 0 || wrapped.finishCalls != 1 {
 		t.Fatal("wrong precommit Finish boundary")
 	}
-	completion := ea1AssertOriginalRootCompletion(t, rt, grant, before, !unknownHost, true)
+	ea1AssertOriginalRootCompletion(t, rt, grant, before, true, true)
 	ea1AssertStartSettlementReceipt(t, physical, req, definition, before, withTool)
 	wantCancel := kernel.ErrChildExecutionBusy
 	if before.Run.Status == kernel.RunStatusCompleted {
@@ -343,21 +331,6 @@ func ea1RootSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, fun
 		assertUnchanged()
 	}
 	e = fresh.ReconcileRootPhysicalExecution(t.Context(), req.ID)
-	if unknownHost {
-		if !errors.Is(e, agent.ErrRootOutcomeUnknown) {
-			t.Fatalf("receipt retired unknown Host: %v", e)
-		}
-		same, e := freshRT.LookupChildExecution(t.Context(), req.ID)
-		if e != nil || same != grant {
-			t.Fatal("unknown Host scope lost")
-		}
-		retained, e := freshRT.LookupOwnedPhysicalCallbackReturn(t.Context(), grant)
-		if e != nil || retained != completion {
-			t.Fatal("unknown Host completion changed")
-		}
-		assertUnchanged()
-		return
-	}
 	if e != nil {
 		t.Fatalf("original settlement could not recover: %v", e)
 	}
@@ -376,7 +349,7 @@ func ea1AssertStartSettlementReceipt(t *testing.T, p *ea1StartSettlementPhysical
 	t.Helper()
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if len(p.requests) != 1 || len(p.responses) != 1 || len(p.intents) != 1 || p.hostCalls != 1 || (p.hostUnknown && p.hostSends != 1) {
+	if len(p.requests) != 1 || len(p.responses) != 1 || len(p.intents) != 1 {
 		t.Fatal("physical callback replayed")
 	}
 	inv := p.intents[0]
