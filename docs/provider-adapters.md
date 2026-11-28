@@ -224,7 +224,7 @@ only final or done events remain supported.
 **Agent-level typed rejection receipt:** Provider adapters sanitize a
 completed but semantically invalid Tool response to physical ResponseID
 and verifiable cumulative Usage. Agent enforces the same minimal
-persistence boundary even if a custom named Provider or Model middleware
+persistence boundary even if a custom named Provider
 returns a rejected response with extra text/Tools/replay fields. Named
 Providers must have an exact nonempty physical ResponseID before
 Agent accepts a known paid rejection. An ID-less rejection cannot
@@ -234,14 +234,12 @@ their prior optional physical response ID contract. See the
 [P1/P2 independent audit](audits/2026-11-03-pr87-rejected-receipt-agent-authority.md).
 
 **Immutable invocation completion authority:** Agent records the first
-physical terminal or verified settled-budget replay before middleware can
-rewrite it. Named bindings must retain the exact response ID, cloned Usage
-value and completion outcome through accounting and durable receipt creation.
-Success may be rejected later; rejection or unknown failure cannot become
-success. Ordinary `ValidateModelResponseAuthority` cannot register a source.
-Trusted accounting middleware may call `ReplayModelResponseAuthority` only
-after verifying its settled reservation, original RequestHash and receipt;
-this Host attestation is not isolation from malicious in-process plugins.
+physical terminal or verified settled-budget replay at the fixed Model stage.
+Named bindings must retain the exact response ID, cloned Usage value and
+completion outcome through accounting and durable receipt creation. Success
+may be rejected later; rejection or unknown failure cannot become success.
+Only the internal Budget stage may register a replay after verifying its
+settled reservation, original RequestHash and receipt.
 Typed rejected streaming responses must carry their own final ID and Usage,
 not partial observations; any observed/final ID conflict fails closed.
 See the [convergence audit](audits/2026-11-04-pr87-completion-authority.md).

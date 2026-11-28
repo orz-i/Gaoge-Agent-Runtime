@@ -60,7 +60,7 @@ For explicit, versioned task data supplied by the Host, see
 freezes through existing admission and Context persistence, and materializes as
 user-role data. It does not change the ownership or dispatch boundary below.
 
-`agent.Dependencies.PrepareModelRequest` is the single trusted projection boundary **before** `ModelInvocation` intent creation and hashing. It may project messages and Host-scoped Tool descriptions/schemas but must not call a Provider, change Model/Run identity, alter limits, or enlarge Tool authority. The final request and original Catalog fingerprints are persisted atomically. A recovered pending intent dispatches that same frozen projection without rerunning preparers. `ModelMiddleware` may only apply enforcement/observation and bounded Tool/budget restrictions; no message/schema edits are supported. See [ADR 0010](adr/0010-prestable-model-dispatch-contract.md).
+`agent.Dependencies.PrepareModelRequest` is the single trusted projection boundary **before** `ModelInvocation` intent creation and hashing. It may project messages and Host-scoped Tool descriptions/schemas but must not call a Provider, change Model/Run identity, alter limits, or enlarge Tool authority. The final request and original Catalog fingerprints are persisted atomically. A recovered pending intent dispatches that same frozen projection without rerunning preparers. The fixed Model stage applies admission and bounded Tool/budget restrictions; observation is projected through observers. See [ADR 0010](adr/0010-prestable-model-dispatch-contract.md).
 
 Basic integration:
 

@@ -241,14 +241,14 @@ alone is not a physical-effect receipt.
   Store outcome carrying the original candidate and the exact persisted
   admission commitment. Public Grant identity, a definite refusal or a later
   observer never grants dispatch.
-- After admission acknowledgement, the actual owned RunChain entry still
+- After admission acknowledgement, the actual owned Run stage entry still
   checks the exact original Grant, persisted owner/epoch, source revision and
   operation status against Store time. Runtime accounts for the observation's
   full elapsed time; a due deadline, canceled context or expired lease cannot
   enter new Host work. An expired Resume may narrow its original, explicitly
-  bounded first-party RunChain terminal to one qualified known receipt. It
+  bounded first-party stage to one qualified known receipt. It
   still obeys the frozen budget's admission/cancellation and completion
-  projection; opaque Host layers cannot be entered or skipped to consume it.
+  projection; a receipt-only path cannot initiate new Host work.
   The Run adapter observes the authoritative ledger after Host projection.
   Both normal and receipt-only Model/Tool consumption use the same final
   original-ledger admission decision before their local reducer. A cancellation

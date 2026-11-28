@@ -64,8 +64,8 @@ The source is a trusted input-storage port, not arbitrary effectful middleware.
 The Runner reads inputs directly at its native safe point, inside the original
 Run callback. It checks execution ownership and deadline before and after the
 read and journals that read's return, not an input-application commit or the
-return of any enclosing Host middleware. No input RunNext wrapper or
-callback-free custody is granted. A frame that actually reads the Host input
+completion of the enclosing fixed stages. Input reads do not grant
+callback-free custody. A frame that actually reads the Host input
 source cannot claim scoped deferred-control custody; an independently retired
 child that never entered that boundary may qualify using its original proofs.
 Inputs can be combined with `ManagedRecovery` through the common Agent
