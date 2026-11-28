@@ -50,8 +50,8 @@ func RunChildExecutionSuite(t *testing.T, create func(*testing.T) kernel.Store) 
 		middle := newRun("middle", root.Run.ID)
 		child := newRun("child", middle.Run.ID)
 		q := kernel.ExecutionAcquireRequest{}
-		proof := featurecontrol.Seal(child.Run.ID, child.Run.Revision, "agent_owned_physical_admission", kernel.PhysicalAdmissionSubject(q, kernel.ExecutionLease{}, "start", ""), child.State, child)
-		if _, _, e := rt.AdmitPhysicalExecution(t.Context(), child, q, proof, "resume", ""); !errors.Is(e, kernel.ErrExecutionConflict) {
+		admissionProof := featurecontrol.Seal(child.Run.ID, child.Run.Revision, "agent_owned_physical_admission", kernel.PhysicalAdmissionSubject(q, kernel.ExecutionLease{}, "start", ""), child.State, child)
+		if _, _, e := rt.AdmitPhysicalExecution(t.Context(), child, q, admissionProof, "resume", ""); !errors.Is(e, kernel.ErrExecutionConflict) {
 			t.Fatalf("child admission accepted proof for a different operation: %v", e)
 		}
 		grant, err := AdmitChildFixture(t.Context(), rt, child.Run.ID, child.Run.Revision)
