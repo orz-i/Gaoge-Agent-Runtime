@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
@@ -17,11 +18,12 @@ type cancellationAdmissionCut struct {
 	once             sync.Once
 }
 
-func (s *cancellationAdmissionCut) AppendItem(ctx context.Context, item harness.Item) (harness.Item, bool, error) {
-	if item.ParentItemID == harness.CancellationFenceParentItemID {
-		s.once.Do(func() { close(s.entered); <-s.release })
-	}
-	return s.generationStore.AppendItem(ctx, item)
+// Pause the protective read after the caller selected the original Attempt.
+// The native Runtime is addressed by that immutable Run ID, not a Host
+// cancellation-intent append. A replacement must never inherit the stop.
+func (s *cancellationAdmissionCut) GetInvocation(ctx context.Context, id string) (harness.Invocation, error) {
+	s.once.Do(func() { close(s.entered); <-s.release })
+	return s.generationStore.GetInvocation(ctx, id)
 }
 
 func generationRunnerForStore(t *testing.T, store generationStore, rt *kernel.Runtime, native *agent.Runner) *harness.Runner {
@@ -57,7 +59,14 @@ func TestCancellationAdmissionCompetesWithExactRetryAttempt(t *testing.T) {
 				_, cancelErr := stale.Cancel(t.Context(), first.Turn.ID, "old original stop")
 				result <- cancelErr
 			}()
-			<-cut.entered
+			select {
+			case <-cut.entered:
+			case early := <-result:
+				t.Fatalf("original selection cut not exercised: %v", early)
+			case <-time.After(5 * time.Second):
+				close(cut.release)
+				t.Fatal("original selection cut timed out")
+			}
 			next, retryErr := r.RetryInvocation(t.Context(), root.ID)
 			close(cut.release)
 			staleErr := <-result

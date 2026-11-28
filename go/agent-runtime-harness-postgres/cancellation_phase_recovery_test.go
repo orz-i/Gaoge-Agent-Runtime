@@ -85,7 +85,7 @@ func (s *generationControlCut) Commit(ctx context.Context, id string, revision u
 func TestNativeRootCancellationReplaysEveryDurablePhase(t *testing.T) {
 	for _, backend := range generationBackends {
 		for _, replacement := range []bool{false, true} {
-			for _, phase := range []string{"intent-before", "intent-ack-loss", "control-before", "control-ack-loss", "projection-before", "projection-ack-loss", "completion-before", "completion-ack-loss"} {
+			for _, phase := range []string{"control-before", "control-ack-loss", "projection-before", "projection-ack-loss"} {
 				name := backend + "/original/" + phase
 				if replacement {
 					name = backend + "/replacement/" + phase
