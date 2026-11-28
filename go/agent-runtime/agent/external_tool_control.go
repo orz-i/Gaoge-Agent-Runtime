@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
@@ -120,13 +119,15 @@ func (r *Runner) externalControlWait(ctx context.Context, revision uint64, c Ext
 		return out, ErrRootOutcomeUnknown
 	}
 	outcome := kernel.PhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: completion.LeaseOwned, ControlCustody: completion.ControlCustody, ToolReturns: completion.ToolReturns}
-	if binding, found, bindingErr := originalCallReturn(s, completion, out.request); bindingErr != nil {
-		return out, errors.Join(ErrRootOutcomeUnknown, bindingErr)
-	} else if found && (binding.ReceiptDigest != "" ||
-		(binding.LedgerID != "" && (state.ExternalToolHold == nil || state.ExternalToolHold.LedgerID != binding.LedgerID)) ||
-		(binding.LedgerID == "" && state.ExternalToolHold != nil)) {
+	binding, found, err := originalCallReturn(s, completion, out.request)
+	if err != nil {
+		return out, errors.Join(ErrRootOutcomeUnknown, err)
+	}
+	if binding.ReceiptDigest != "" || binding.Unsent || binding.LedgerID != s.Run.BudgetScopeID ||
+		(s.Run.BudgetScopeID != "" && (!found || binding.PendingKind != string(tools.PendingExternalResult))) {
 		return out, ErrToolReceiptMismatch
 	}
+
 	out.returnHash = kernel.ManagedDigest(kernel.PhysicalCallbackReturnPayload(s, outcome))
 	if out.returnHash != completion.ReturnSourceHash {
 		return out, ErrRootOutcomeUnknown
@@ -156,23 +157,17 @@ func (r *Runner) ReconcileExternalToolNoEffectForControl(ctx context.Context, re
 		return original.snapshot, r.retireExternalToolControl(ctx, original.snapshot, previous.GrantID)
 	}
 	state := original.state
-	if original.snapshot.Run.BudgetScopeID != "" && (state.ExternalToolHold == nil || state.ExternalToolHold.LedgerID != original.snapshot.Run.BudgetScopeID) {
-		return original.snapshot, ErrToolReceiptMismatch
-	}
 	var ledger *budget.LedgerMutation
-	if hold := state.ExternalToolHold; hold != nil {
-		if hold.GrantID != original.grant.ID || hold.RequestHash != kernel.ManagedDigest(original.request) {
-			return original.snapshot, ErrToolReceiptMismatch
-		}
+	if scope := original.snapshot.Run.BudgetScopeID; scope != "" {
 		raw, marshalErr := json.Marshal(receipt)
 		if marshalErr != nil {
 			return original.snapshot, marshalErr
 		}
-		if ledger, err = r.planVerifiedToolSettlement(ctx, original.request, hold.LedgerID, budget.Usage{}, raw); err != nil {
+		if ledger, err = r.planVerifiedToolSettlement(ctx, original.request, scope, budget.Usage{}, raw); err != nil {
 			return original.snapshot, errors.Join(ErrToolOutcomeUnknown, err)
 		}
 	}
-	state.ToolWait, state.ExternalToolHold = nil, nil
+	state.ToolWait = nil
 	state.ToolDispatchID = ""
 	state.clearToolAdmission(original.request.Call.ID)
 	state.PendingCalls = remainingPendingCalls(state)
@@ -199,9 +194,7 @@ func (r *Runner) applyExternalControlState(ctx context.Context, s kernel.Snapsho
 		m.Events = []kernel.EventDraft{{Type: "tool.external_no_effect", Message: state.ExternalToolCancellation.Call.ID}}
 	}
 
-	source := featurecontrol.Seal(s.Run.ID, s.Run.Revision, "agent_owned_receipt_recovery_source", g.ID, s.State, s.Checkpoint)
-	target := featurecontrol.Seal(s.Run.ID, s.Run.Revision, "agent_owned_receipt_recovery_target", g.ID, encoded, kernel.ReceiptRecoveryTarget(s.Checkpoint, ledger))
-	return r.runtime.ApplyOwnedPhysicalRecovery(ctx, g, s.Run.Revision, m, source, target)
+	return r.commitReturnedState(ctx, s, g, m)
 }
 
 func (r *Runner) retireExternalToolControl(ctx context.Context, s kernel.Snapshot, grantID string) error {

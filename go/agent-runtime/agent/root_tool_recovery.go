@@ -6,19 +6,36 @@ import (
 	"reflect"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
-type rootToolReceipt struct {
-	Call   tools.Call            `json:"call"`
-	Wait   *PendingTool          `json:"wait,omitempty"`
-	Result tools.ExecutionResult `json:"result"`
-	// Keep the original Result field and its opaque-evidence typed path.
-	Rejection      *toolRejection `json:"rejection,omitempty"`
-	ApprovalDigest string         `json:"approvalDigest,omitempty"`
-	LedgerID       string         `json:"ledgerID,omitempty"`
+// A staged return retains one original terminal fact until the business
+// loop consumes it. The Run's immutable budget scope selects the ledger.
+type stagedToolReceipt struct {
+	Call           tools.Call         `json:"call"`
+	Wait           *PendingTool       `json:"wait,omitempty"`
+	Outcome        toolOutcomeReceipt `json:"outcome"`
+	ApprovalDigest string             `json:"approvalDigest,omitempty"`
+}
+
+func (s *runState) stageToolReceipt(call tools.Call, outcome toolOutcomeReceipt, approval string) error {
+	if s.ToolDispatchID != call.ID {
+		return ErrToolReceiptMismatch
+	}
+	if _, err := outcome.terminalError(call.ID); err != nil {
+		return err
+	}
+	for _, old := range s.RecoveredTools {
+		if old.Call.ID == call.ID {
+			return ErrToolReceiptMismatch
+		}
+	}
+	s.RecoveredTools = append(append([]stagedToolReceipt(nil), s.RecoveredTools...), stagedToolReceipt{Call: tools.CloneCall(call), Wait: clonePendingTool(s.ToolWait), Outcome: outcome, ApprovalDigest: approval})
+	s.ToolDispatchID = ""
+	s.clearToolAdmission(call.ID)
+	s.ToolWait = nil
+	return nil
 }
 
 // ReconcileExternalToolForControl verifies the original external wait without
@@ -43,14 +60,6 @@ func (runner *Runner) ReconcileExternalToolForControl(ctx context.Context, runID
 		return s, err
 	}
 	return runner.reconcileRootToolReceipt(ctx, s, state, grant, call.ID, false)
-}
-
-func (r rootToolReceipt) outcome() toolOutcomeReceipt {
-	outcome := toolOutcomeReceipt{Result: r.Result}
-	if r.Rejection != nil {
-		outcome.toolRejection = *r.Rejection
-	}
-	return outcome
 }
 
 func sameRecoveredCall(a, b tools.Call) bool {
@@ -123,14 +132,18 @@ func (runner *Runner) reconcileRootToolReceipt(ctx context.Context, snapshot ker
 	if err != nil {
 		return snapshot, err
 	}
-	if a := state.ToolAdmission; a.authorized(call) && a.BudgetBound && a.LedgerID != "" && (!bound || binding.LedgerID != a.LedgerID) {
+	if snapshot.Run.BudgetScopeID != binding.LedgerID || (snapshot.Run.BudgetScopeID != "" && !bound) ||
+		(state.ToolWait != nil && state.ToolWait.Kind == tools.PendingExternalResult && binding.LedgerID != "" && binding.PendingKind != string(tools.PendingExternalResult)) {
 		return snapshot, errors.Join(ErrToolOutcomeUnknown, ErrToolReceiptMismatch)
 	}
-	ledgerID := binding.LedgerID
+	if a := state.ToolAdmission; a.authorized(call) && a.BudgetBound && a.LedgerID != binding.LedgerID {
+		return snapshot, ErrToolReceiptMismatch
+	}
+
 	var outcome toolOutcomeReceipt
 	var ledgerMutation *budget.LedgerMutation
 	if bound && binding.ReceiptDigest != "" {
-		if state.ToolWait != nil || state.ExternalToolHold != nil {
+		if state.ToolWait != nil {
 			return snapshot, ErrToolReceiptMismatch
 		}
 		outcome, err = runner.readOriginalSettledTool(ctx, request, binding)
@@ -141,11 +154,7 @@ func (runner *Runner) reconcileRootToolReceipt(ctx context.Context, snapshot ker
 		if runner.toolOutcomeVerifier == nil {
 			return snapshot, ErrToolVerificationRequired
 		}
-		if (!bound || binding.LedgerID == "") && state.ExternalToolHold == nil {
-			if err := runner.requireUnmeteredToolRecovery(ctx, request.RunID); err != nil {
-				return snapshot, errors.Join(ErrToolOutcomeUnknown, err)
-			}
-		}
+
 		if bound && binding.LedgerID != "" {
 			if _, _, _, err := runner.originalHeldTool(ctx, request, binding); err != nil {
 				return snapshot, errors.Join(ErrToolOutcomeUnknown, err)
@@ -159,44 +168,9 @@ func (runner *Runner) reconcileRootToolReceipt(ctx context.Context, snapshot ker
 			return snapshot, ErrToolReceiptMismatch
 		}
 		outcome = newToolOutcomeReceipt(verified, nil)
-		if binding.OwnerResultDigest != "" {
-			receipt, ok := qualifiedOwnerToolReceipt(call, verified, binding.ApprovalDigest)
-			if !ok || receipt.ResultDigest != binding.OwnerResultDigest {
-				return snapshot, ErrToolReceiptMismatch
-			}
-		}
-		if hold := state.ExternalToolHold; hold != nil {
-			if state.ToolWait == nil || state.ToolWait.Kind != tools.PendingExternalResult || hold.GrantID != grant.ID || hold.RequestHash != kernel.ManagedDigest(request) ||
-				(bound && binding.LedgerID != "" && hold.LedgerID != binding.LedgerID) {
-				return snapshot, ErrToolReceiptMismatch
-			}
-			if !bound || binding.LedgerID == "" {
-				if !validBindingFingerprint(verified.Receipt.OwnerReceiptDigest) {
-					return snapshot, ErrToolReceiptMismatch
-				}
-				raw, e := encodeToolOutcome(outcome)
-				if e != nil {
-					return snapshot, e
-				}
-				ledgerMutation, err = runner.planVerifiedToolSettlement(ctx, request, hold.LedgerID, budget.Usage{ToolCalls: 1}, raw)
-				if err != nil {
-					return snapshot, errors.Join(ErrToolOutcomeUnknown, err)
-				}
-			}
-			ledgerID = hold.LedgerID
-			state.ExternalToolHold = nil
-		}
-		if bound && binding.LedgerID != "" {
-			childWait := state.ToolWait != nil && state.ToolWait.Kind == tools.PendingChildTerminal
-			ledgerMutation, err = runner.settleOriginalHeldTool(ctx, request, binding, verified, childWait)
-			if err != nil {
-				return snapshot, errors.Join(ErrToolOutcomeUnknown, err)
-			}
-		}
-
 	}
 	approvalDigest := ""
-	if bound && binding.ApprovalDigest != "" {
+	if binding.ApprovalDigest != "" || binding.OwnerResultDigest != "" {
 		receipt, qualified := qualifiedOwnerToolReceipt(call, outcome.Result, binding.ApprovalDigest)
 		if binding.OwnerResultDigest != "" && (!qualified || receipt.ResultDigest != binding.OwnerResultDigest) {
 			return snapshot, ErrToolReceiptMismatch
@@ -205,15 +179,16 @@ func (runner *Runner) reconcileRootToolReceipt(ctx context.Context, snapshot ker
 			approvalDigest = receipt.ApprovalDigest
 		}
 	}
-	for _, old := range state.RecoveredTools {
-		if old.Call.ID == callID {
-			return snapshot, ErrToolReceiptMismatch
+	if bound && binding.LedgerID != "" && binding.ReceiptDigest == "" {
+		childWait := state.ToolWait != nil && state.ToolWait.Kind == tools.PendingChildTerminal
+		ledgerMutation, err = runner.settleOriginalHeldTool(ctx, request, binding, outcome.Result, childWait)
+		if err != nil {
+			return snapshot, errors.Join(ErrToolOutcomeUnknown, err)
 		}
 	}
-	state.RecoveredTools = append(state.RecoveredTools, rootToolReceipt{Call: tools.CloneCall(call), Wait: clonePendingTool(state.ToolWait), Result: outcome.Result, Rejection: outcome.rejection(), ApprovalDigest: approvalDigest, LedgerID: ledgerID})
-	state.ToolDispatchID = ""
-	state.clearToolAdmission(callID)
-	state.ToolWait = nil
+	if err = state.stageToolReceipt(call, outcome, approvalDigest); err != nil {
+		return snapshot, err
+	}
 	state.PendingCalls = remainingPendingCalls(state)
 	if len(state.DeferredChildren) > 0 {
 		if err := state.activateDeferredChild(); err != nil {
@@ -239,9 +214,7 @@ func (runner *Runner) reconcileRootToolReceipt(ctx context.Context, snapshot ker
 	if err != nil {
 		return snapshot, err
 	}
-	source := featurecontrol.Seal(snapshot.Run.ID, snapshot.Run.Revision, "agent_owned_receipt_recovery_source", grant.ID, snapshot.State, snapshot.Checkpoint)
-	target := featurecontrol.Seal(snapshot.Run.ID, snapshot.Run.Revision, "agent_owned_receipt_recovery_target", grant.ID, encoded, kernel.ReceiptRecoveryTarget(snapshot.Checkpoint, ledgerMutation))
-	repaired, err := runner.runtime.ApplyOwnedPhysicalRecovery(ctx, grant, snapshot.Run.Revision, kernel.Mutation{Ledger: ledgerMutation, Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint, ErrorCode: snapshot.Run.ErrorCode, ErrorDetail: snapshot.Run.ErrorDetail, Events: []kernel.EventDraft{{Type: "tool.receipt_recovered", Message: callID, Wakeup: true}}}, source, target)
+	repaired, err := runner.commitReturnedState(ctx, snapshot, grant, kernel.Mutation{Ledger: ledgerMutation, Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint, ErrorCode: snapshot.Run.ErrorCode, ErrorDetail: snapshot.Run.ErrorDetail, Events: []kernel.EventDraft{{Type: "tool.receipt_recovered", Message: callID, Wakeup: true}}})
 	if err != nil {
 		return snapshot, err
 	}

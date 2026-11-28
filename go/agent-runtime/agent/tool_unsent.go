@@ -69,7 +69,7 @@ func (state *runState) markUnsentTool(call tools.Call) error {
 	if state.ToolDispatchID != "" && state.ToolDispatchID != call.ID {
 		return ErrToolOutcomeUnknown
 	}
-	if state.ToolWait != nil || state.ExternalToolHold != nil {
+	if state.ToolWait != nil {
 		return ErrToolOutcomeUnknown
 	}
 	current, ok := nextPendingCall(*state)
@@ -188,9 +188,7 @@ func (r *Runner) reconcileOriginalUnsentTool(ctx context.Context, s kernel.Snaps
 	if err != nil {
 		return s, err
 	}
-	source := featurecontrol.Seal(s.Run.ID, s.Run.Revision, "agent_owned_receipt_recovery_source", g.ID, s.State, s.Checkpoint)
-	target := featurecontrol.Seal(s.Run.ID, s.Run.Revision, "agent_owned_receipt_recovery_target", g.ID, encoded, kernel.ReceiptRecoveryTarget(s.Checkpoint, plan))
-	next, err := r.runtime.ApplyOwnedPhysicalRecovery(ctx, g, s.Run.Revision, kernel.Mutation{Ledger: plan, Status: kernel.RunStatusRunning, State: encoded, Checkpoint: s.Checkpoint, Events: []kernel.EventDraft{unsentToolEvent(q.Call, r.clock.Now())}}, source, target)
+	next, err := r.commitReturnedState(ctx, s, g, kernel.Mutation{Ledger: plan, Status: kernel.RunStatusRunning, State: encoded, Checkpoint: s.Checkpoint, Events: []kernel.EventDraft{unsentToolEvent(q.Call, r.clock.Now())}})
 	if err != nil {
 		return s, err
 	}

@@ -25,7 +25,7 @@ func TestAgentStateOneSealedOpaquePathForAllOriginalEvidence(t *testing.T) {
 		Messages:       []model.Message{message},
 		ModelOptions:   json.RawMessage(`{ "name": "<>&" }`),
 		PendingCalls:   []tools.Call{call},
-		RecoveredTools: []rootToolReceipt{{Call: call, Result: tools.ExecutionResult{Content: json.RawMessage(`{ "original": "<>&" }`)}}},
+		RecoveredTools: []stagedToolReceipt{{Call: call, Outcome: toolOutcomeReceipt{Result: tools.ExecutionResult{Content: json.RawMessage(`{ "original": "<>&" }`)}}}},
 		ModelInvocations: []ModelInvocation{{
 			Request: model.Request{
 				ModelOptions: json.RawMessage(raw),

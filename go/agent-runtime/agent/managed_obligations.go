@@ -56,7 +56,7 @@ func managedObligationsQuiescent(state runState) bool {
 	return len(state.PendingCalls) == 0 && state.PendingApproval == nil && state.ToolAdmission == nil &&
 		state.ToolDispatchID == "" && state.ToolWait == nil && len(state.DeferredChildren) == 0 &&
 		len(state.RecoveredTools) == 0 && len(state.ExternalSignals) == 0 &&
-		state.ExternalToolCancellation == nil && state.ExternalToolHold == nil
+		state.ExternalToolCancellation == nil
 }
 
 func (r *Runner) managedBudgetOwner() any {

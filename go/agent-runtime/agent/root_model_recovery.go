@@ -118,9 +118,7 @@ func (runner *Runner) ReconcileModelOutcome(ctx context.Context, runID string, r
 		// transcript, Tool authorization, wakeup or Host settlement is minted.
 		return evidence, ErrRootOutcomeUnknown
 	}
-	source := featurecontrol.Seal(runID, revision, "agent_owned_receipt_recovery_source", grant.ID, snapshot.State, snapshot.Checkpoint)
-	target := featurecontrol.Seal(runID, revision, "agent_owned_receipt_recovery_target", grant.ID, encoded, kernel.ReceiptRecoveryTarget(snapshot.Checkpoint, ledgerMutation))
-	repaired, err := runner.runtime.ApplyOwnedPhysicalRecovery(ctx, grant, revision, kernel.Mutation{Ledger: ledgerMutation, Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint, Events: []kernel.EventDraft{{Type: "agent.model_invocation.completed", Message: inv.ID, Wakeup: true}}}, source, target)
+	repaired, err := runner.commitReturnedState(ctx, snapshot, grant, kernel.Mutation{Ledger: ledgerMutation, Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint, Events: []kernel.EventDraft{{Type: "agent.model_invocation.completed", Message: inv.ID, Wakeup: true}}})
 	if err != nil {
 		return snapshot, errors.Join(ErrModelOutcomeUnknown, err)
 	}

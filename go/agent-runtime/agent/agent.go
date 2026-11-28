@@ -417,9 +417,8 @@ type Runner struct {
 type runState struct {
 	ExternalToolCancellation *externalToolCancellation `json:"externalToolCancellation,omitempty"`
 
-	ExternalToolHold      *externalToolHold          `json:"externalToolHold,omitempty"`
 	DelegatedToolReceipts []delegatedToolReceipt     `json:"delegatedToolReceipts,omitempty"`
-	RecoveredTools        []rootToolReceipt          `json:"recoveredTools,omitempty"`
+	RecoveredTools        []stagedToolReceipt        `json:"recoveredTools,omitempty"`
 	OriginFingerprint     string                     `json:"originFingerprint,omitempty"`
 	Messages              []model.Message            `json:"messages"`
 	Model                 string                     `json:"model,omitempty"`
@@ -2291,12 +2290,12 @@ func (runner *Runner) consumeRecoveredPending(ctx context.Context, snapshot kern
 		if !sameRecoveredCall(receipt.Call, execution.call) {
 			return snapshot, true, ErrToolReceiptMismatch, true
 		}
-		refusal, invalid := receipt.outcome().terminalError(execution.call.ID)
+		refusal, invalid := receipt.Outcome.terminalError(execution.call.ID)
 		if invalid != nil {
 			return snapshot, true, invalid, true
 		}
-		if a := runner.boundedBudget; a != nil && receipt.LedgerID != "" {
-			l, loadErr := a.store.LoadBudget(ctx, receipt.LedgerID)
+		if a := runner.boundedBudget; a != nil && snapshot.Run.BudgetScopeID != "" {
+			l, loadErr := a.bindReceiptScope(ctx, snapshot.Run.ID, snapshot.Run.BudgetScopeID)
 			if loadErr != nil {
 				return snapshot, true, loadErr, true
 			}
@@ -2305,11 +2304,11 @@ func (runner *Runner) consumeRecoveredPending(ctx context.Context, snapshot kern
 				return snapshot, true, loadErr, true
 			}
 			out, loadErr := decodeToolOutcome(res.Receipt, execution.call.ID, true)
-			if loadErr != nil || !reflect.DeepEqual(out, receipt.outcome()) {
+			if loadErr != nil || !reflect.DeepEqual(out, receipt.Outcome) {
 				return snapshot, true, ErrToolReceiptMismatch, true
 			}
 		}
-		if err := requireReceiptConsumption(ctx, snapshot.Run.ID, receipt.LedgerID, runner.boundedBudget); err != nil {
+		if err := requireReceiptConsumption(ctx, snapshot.Run.ID, snapshot.Run.BudgetScopeID, runner.boundedBudget); err != nil {
 			return snapshot, true, err, true
 		}
 		execution.state.RecoveredTools = append(execution.state.RecoveredTools[:index], execution.state.RecoveredTools[index+1:]...)
@@ -2318,7 +2317,7 @@ func (runner *Runner) consumeRecoveredPending(ctx context.Context, snapshot kern
 			next, yielded, err := runner.handlePendingToolExecutionError(ctx, snapshot, execution.state, refusal)
 			return next, yielded, err, true
 		}
-		next, yielded, err := runner.persistPendingToolResult(ctx, snapshot, execution, tools.CloneExecutionResult(receipt.Result))
+		next, yielded, err := runner.persistPendingToolResult(ctx, snapshot, execution, tools.CloneExecutionResult(receipt.Outcome.Result))
 		return next, yielded, err, true
 	}
 	return snapshot, false, nil, false

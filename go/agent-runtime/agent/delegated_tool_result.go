@@ -205,8 +205,8 @@ func (r *Runner) verifyToolHistory(ctx context.Context, runID string, state runS
 	// physical facts must independently qualify too; a zero usage count is
 	// not proof that there are no original Tool obligations.
 	for _, staged := range state.RecoveredTools {
-		receipt, ok := qualifiedOwnerToolReceipt(staged.Call, staged.Result, staged.ApprovalDigest)
-		if staged.Rejection != nil || !ok || !verify(receipt) {
+		receipt, ok := qualifiedOwnerToolReceipt(staged.Call, staged.Outcome.Result, staged.ApprovalDigest)
+		if staged.Outcome.ErrorCode != "" || !ok || !verify(receipt) {
 			return false
 		}
 	}

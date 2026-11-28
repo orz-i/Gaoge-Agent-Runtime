@@ -178,7 +178,7 @@ func (r *Runner) executeNativeTool(ctx context.Context, source kernel.Snapshot, 
 		next, yielded := snapshot, true
 		switch {
 		case terminal && plan != nil:
-			next, err = r.recordBudgetedToolReceipt(accounting, snapshot, state, q, result, receiptErr, scope, settlement)
+			next, err = r.recordBudgetedToolReceipt(accounting, snapshot, state, q, result, receiptErr, settlement)
 		case terminal || pendingKind != "":
 			if plan != nil {
 				frame.recordHold(q, scope, pendingKind)
@@ -268,7 +268,7 @@ func (a *BoundedBudgetAdapter) planToolReturn(ctx context.Context, scope string,
 	})
 }
 
-func (r *Runner) recordBudgetedToolReceipt(ctx context.Context, s kernel.Snapshot, state runState, q tools.ExecutionRequest, result tools.ExecutionResult, callErr error, scope string, ledger *budget.LedgerMutation) (kernel.Snapshot, error) {
+func (r *Runner) recordBudgetedToolReceipt(ctx context.Context, s kernel.Snapshot, state runState, q tools.ExecutionRequest, result tools.ExecutionResult, callErr error, ledger *budget.LedgerMutation) (kernel.Snapshot, error) {
 	if ledger == nil || state.ToolDispatchID != q.Call.ID {
 		return s, ErrToolReceiptMismatch
 	}
@@ -279,9 +279,9 @@ func (r *Runner) recordBudgetedToolReceipt(ctx context.Context, s kernel.Snapsho
 			approval = qualified.ApprovalDigest
 		}
 	}
-	state.RecoveredTools = append(append([]rootToolReceipt(nil), state.RecoveredTools...), rootToolReceipt{Call: q.Call, Result: outcome.Result, Rejection: outcome.rejection(), ApprovalDigest: approval, LedgerID: scope})
-	state.ToolDispatchID = ""
-	state.clearToolAdmission(q.Call.ID)
+	if err := state.stageToolReceipt(q.Call, outcome, approval); err != nil {
+		return s, err
+	}
 	encoded, err := encodeState(state)
 	if err != nil {
 		return s, err

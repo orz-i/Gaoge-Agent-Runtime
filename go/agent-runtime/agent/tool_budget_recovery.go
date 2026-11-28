@@ -14,15 +14,8 @@ import (
 // Only the executing SDK Tool frame records acknowledged Call obligations.
 // A whole callback returns one set of these independent original identities.
 type originalToolFrame struct {
-	grantID string
 	runID   string
 	returns sync.Map // CallID -> kernel.OwnedToolReturn
-}
-
-type externalToolHold struct {
-	GrantID     string `json:"grantID"`
-	LedgerID    string `json:"ledgerID"`
-	RequestHash string `json:"requestHash"`
 }
 
 func (f *originalToolFrame) binding(q tools.ExecutionRequest) (kernel.OwnedToolReturn, bool) {
@@ -35,14 +28,6 @@ func (f *originalToolFrame) binding(q tools.ExecutionRequest) (kernel.OwnedToolR
 	}
 	value := b.(kernel.OwnedToolReturn)
 	return value, value.RequestDigest == kernel.ManagedDigest(q)
-}
-
-func (f *originalToolFrame) hold(q tools.ExecutionRequest) *externalToolHold {
-	b, ok := f.binding(q)
-	if !ok || b.ReceiptDigest != "" {
-		return nil
-	}
-	return &externalToolHold{GrantID: f.grantID, LedgerID: b.LedgerID, RequestHash: b.RequestDigest}
 }
 
 func (f *originalToolFrame) recordHold(q tools.ExecutionRequest, ledgerID, pendingKind string) {

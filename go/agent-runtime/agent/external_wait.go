@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/callbackscope"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
@@ -147,9 +146,7 @@ func (runner *Runner) NotifyExternalToolResultReady(ctx context.Context, signal 
 			if snapshot.Run.ParentRunID != "" || completionErr != nil || !completion.HostCompleted {
 				return snapshot, ErrRootOutcomeUnknown
 			}
-			source := featurecontrol.Seal(signal.RunID, snapshot.Run.Revision, "agent_owned_receipt_recovery_source", grant.ID, snapshot.State, snapshot.Checkpoint)
-			target := featurecontrol.Seal(signal.RunID, snapshot.Run.Revision, "agent_owned_receipt_recovery_target", grant.ID, encoded, snapshot.Checkpoint)
-			next, applyErr = runner.runtime.ApplyOwnedPhysicalRecovery(ctx, grant, snapshot.Run.Revision, mutation, source, target)
+			next, applyErr = runner.commitReturnedState(ctx, snapshot, grant, mutation)
 		} else if grantErr != nil && !errors.Is(grantErr, kernel.ErrNotFound) {
 			return snapshot, grantErr
 		} else if runner.runExecution != nil {
@@ -225,10 +222,7 @@ func (runner *Runner) persistToolWait(ctx context.Context, snapshot kernel.Snaps
 	if !ok {
 		return snapshot, true, ErrInvalidRequest
 	}
-	if descriptor.Kind == tools.PendingExternalResult {
-		frame, _ := callbackscope.RootToolFrame(ctx).(*originalToolFrame)
-		state.ExternalToolHold = frame.hold(tools.ExecutionRequest{RunID: snapshot.Run.ID, Call: call})
-	}
+
 	pending := tools.ClonePending(descriptor)
 	if snapshot.Run.DeadlineAt != nil && (pending.DeadlineAt == nil || snapshot.Run.DeadlineAt.Before(*pending.DeadlineAt)) {
 		pending.DeadlineAt = timePointer(*snapshot.Run.DeadlineAt)

@@ -459,16 +459,18 @@ func ea1ControlSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, 
 	if entry == "toolwait" {
 		var state struct {
 			RecoveredTools []struct {
-				Call   tools.Call            `json:"call"`
-				Wait   *agent.PendingTool    `json:"wait"`
-				Result tools.ExecutionResult `json:"result"`
+				Call    tools.Call         `json:"call"`
+				Wait    *agent.PendingTool `json:"wait"`
+				Outcome struct {
+					Result tools.ExecutionResult `json:"result"`
+				} `json:"outcome"`
 			} `json:"recoveredTools"`
 		}
 		if err = json.Unmarshal(before.State, &state); err != nil || len(state.RecoveredTools) != 1 {
 			t.Fatalf("durable original receipt absent: %v", err)
 		}
 		recovered := state.RecoveredTools[0]
-		ea1StartSettlementJSONEqual(t, "full durable Tool receipt", recovered.Result, verifiedResult)
+		ea1StartSettlementJSONEqual(t, "full durable Tool receipt", recovered.Outcome.Result, verifiedResult)
 		ea1StartSettlementJSONEqual(t, "full recovered original Call", recovered.Call, pendingRequest.Call)
 		ea1StartSettlementJSONEqual(t, "full recovered original wait", recovered.Wait, wait)
 	}

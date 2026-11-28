@@ -23,8 +23,8 @@ func (r *Runner) expiredRootReceipt(source kernel.Snapshot, frame *nativeRunAdmi
 		found := false
 		for _, receipt := range state.RecoveredTools {
 			if sameRecoveredCall(receipt.Call, call) {
-				frame.receiptLedger = receipt.LedgerID
-				if receipt.LedgerID != "" && r.boundedBudget == nil {
+				frame.receiptLedger = source.Run.BudgetScopeID
+				if source.Run.BudgetScopeID != "" && r.boundedBudget == nil {
 					return nil, kernel.ErrDeadline
 				}
 				found = true

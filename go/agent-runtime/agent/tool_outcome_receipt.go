@@ -11,23 +11,19 @@ import (
 
 // toolOutcomeReceipt is the same immutable terminal fact in the Budget ledger
 // and the Agent's recovered outcome slot. No-effect rejection is not success.
-type toolRejection struct {
-	ErrorCode       string   `json:"errorCode,omitempty"`
-	ErrorMessage    string   `json:"errorMessage,omitempty"`
-	BlockedTools    []string `json:"blockedTools,omitempty"`
-	AllowCompletion bool     `json:"allowCompletion,omitempty"`
-}
-
 type toolOutcomeReceipt struct {
-	Result tools.ExecutionResult `json:"result"`
-	toolRejection
+	Result          tools.ExecutionResult `json:"result"`
+	ErrorCode       string                `json:"errorCode,omitempty"`
+	ErrorMessage    string                `json:"errorMessage,omitempty"`
+	BlockedTools    []string              `json:"blockedTools,omitempty"`
+	AllowCompletion bool                  `json:"allowCompletion,omitempty"`
 }
 
 func newToolOutcomeReceipt(result tools.ExecutionResult, err error) toolOutcomeReceipt {
 	code, message, _ := tools.RecoverableCallErrorInfo(err)
-	return toolOutcomeReceipt{Result: tools.CloneExecutionResult(result), toolRejection: toolRejection{
+	return toolOutcomeReceipt{Result: tools.CloneExecutionResult(result),
 		ErrorCode: code, ErrorMessage: message,
-		BlockedTools: tools.RecoverableCallErrorBlockedToolKeys(err), AllowCompletion: tools.RecoverableCallErrorAllowsCompletion(err)}}
+		BlockedTools: tools.RecoverableCallErrorBlockedToolKeys(err), AllowCompletion: tools.RecoverableCallErrorAllowsCompletion(err)}
 }
 
 const toolOutcomeEvidenceVersion = "budget-tool-outcome-opaque-v1"
@@ -67,14 +63,6 @@ func decodeToolOutcome(raw json.RawMessage, id string, requireOriginal bool) (to
 		return toolOutcomeReceipt{}, err
 	}
 	return r, nil
-}
-
-func (r toolOutcomeReceipt) rejection() *toolRejection {
-	if r.ErrorCode == "" {
-		return nil
-	}
-	value := r.toolRejection
-	return &value
 }
 
 // terminalError distinguishes an exact original refusal from invalid evidence.

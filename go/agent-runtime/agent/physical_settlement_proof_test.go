@@ -89,7 +89,7 @@ func TestIssue107TerminalPhysicalSettlementStateMatrix(t *testing.T) {
 		},
 		"duplicate signal": func(s *runState) { s.ExternalSignals = append(s.ExternalSignals, signal) },
 		"duplicate result": func(s *runState) { s.Messages = append(s.Messages, s.Messages[0]) },
-		"staged result":    func(s *runState) { s.RecoveredTools = []rootToolReceipt{{Call: call}} },
+		"staged result":    func(s *runState) { s.RecoveredTools = []stagedToolReceipt{{Call: call}} },
 	} {
 		t.Run(name, func(t *testing.T) {
 			state := history

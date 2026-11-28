@@ -202,7 +202,7 @@ func (runner *Runner) executeNativeSegment(ctx context.Context, current kernel.S
 	defer lifecycle.Close()
 	var toolFrame *originalToolFrame
 	if grant.IsOwned() && (operation == "resume" || operation == "start" || operation == "approval" || operation == "managed_resume") {
-		toolFrame = &originalToolFrame{grantID: grant.ID, runID: grant.ChildRunID}
+		toolFrame = &originalToolFrame{runID: grant.ChildRunID}
 	}
 	result, callErr := execute(callbackscope.BindRootToolFrame(callbackscope.Bind(ctx, lifecycle), toolFrame), &scoped, current)
 	if grant.IsOwned() && !scoped.rootCallbacks.entered.Load() {
