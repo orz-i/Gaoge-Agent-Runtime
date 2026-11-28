@@ -31,7 +31,7 @@ func (runner *Runner) GrantCallAllowance(
 	// physical-dispatch grant. Invalid increments produce no Kernel snapshot;
 	// entering the dispatch boundary first would leave an unfinishable grant
 	// and block subsequent legitimate allowance and cancellation commands.
-	if increment.LLMCalls < 0 || increment.ToolCalls < 0 ||
+	if increment.Renewal != nil || increment.LLMCalls < 0 || increment.ToolCalls < 0 ||
 		(increment.LLMCalls == 0 && increment.ToolCalls == 0) {
 		return Snapshot{}, ErrInvalidRequest
 	}

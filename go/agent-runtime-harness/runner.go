@@ -143,7 +143,7 @@ func (runner *Runner) startAgentPhysical(
 	start := rootAgentStartRequest(config, invocation.ExecutionRefID, request.Actor, request.Thread,
 		firstNonEmpty(strings.TrimSpace(request.RequestID), invocation.TurnID), request.Goal,
 		request.InitialToolKeys, request.RequiredToolKeys)
-	start.CallAllowance, start.AutoAllowance = request.CallAllowance, request.AutoAllowance
+	start.CallAllowance = request.CallAllowance
 	return runner.startOriginalRoot(ctx, invocation, "start", start)
 }
 
@@ -674,9 +674,6 @@ type StartRequest struct {
 	Context          *ContextSeed
 	// Only the selected top-level Agent Run may request a renewable, hard-bounded allowance.
 	CallAllowance *agent.CallAllowance
-	// AutoAllowance opts that Agent Run into bounded renewals; the SDK
-	// Agent owns its frozen policy, ledger and no-progress decisions.
-	AutoAllowance *agent.AutoAllowancePolicy
 }
 
 // NewRunner constructs a minimal first-party Harness composition layer.
@@ -750,7 +747,7 @@ func (runner *Runner) StartAgentTurn(ctx context.Context, request StartRequest) 
 	invocation, err := newAgentInvocation(
 		createdTurn.ID, firstNonEmpty(strings.TrimSpace(request.RequestID), createdTurn.ID), request.Goal,
 		request.Actor, request.Thread, request.RequiredToolKeys, request.InitialToolKeys,
-		request.CallAllowance, request.AutoAllowance, envelope.now,
+		request.CallAllowance, envelope.now,
 	)
 	if err != nil {
 		return Snapshot{}, err

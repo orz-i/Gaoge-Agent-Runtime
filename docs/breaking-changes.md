@@ -70,6 +70,22 @@ at creation; later accounting reads that binding. Projection follows the
 native commit. Legacy split-store execution state is not migrated or
 requalified; resolve its original obligations with the previous writer.
 
+## Unified Agent call allowance (AC-05)
+
+`agent.StartRequest` and `harness.StartRequest` now accept one
+`CallAllowance`, with optional `Renewal *AutoAllowancePolicy`. The separate
+`AutoAllowance` start and Invocation input fields are removed. Manual grants
+accept call increments only; both grant paths extend the same cumulative
+ceiling within the original hard Run limits. The read-only View still exposes
+renewal progress. Host retry seals the single original allowance, including
+its nested renewal policy, and rejects legacy separate-policy inputs.
+
+The private Agent state evidence version is v4; the single allowance record
+contains the ceiling, renewal policy and progress. Older sealed states are
+rejected rather than interpreting a previously automatic policy as manual.
+Finish original obligations with the prior writer and retain its Profile;
+use a fresh Profile for the new writer. No in-place data migration is provided.
+
 ## Owned physical callback entry and no-entry retirement
 
 Custom `OwnedPhysicalExecutionStore` adapters must implement

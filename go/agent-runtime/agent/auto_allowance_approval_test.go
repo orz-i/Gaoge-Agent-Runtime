@@ -39,7 +39,7 @@ func TestAutoAllowanceNeverOverridesToolApprovalOrCancellation(t *testing.T) {
 	}
 	request := startRequest("auto-approval", "auto-approval-request", "read with approval", manifestToolKey)
 	request.CallAllowance = &agent.CallAllowance{LLMCalls: 1, ToolCalls: 1}
-	request.AutoAllowance = &agent.AutoAllowancePolicy{
+	request.CallAllowance.Renewal = &agent.AutoAllowancePolicy{
 		ModelStep: 1, ToolStep: 1,
 		MaxModelRenewals: 2, MaxToolRenewals: 2, MaxNoProgressWindow: 1,
 	}

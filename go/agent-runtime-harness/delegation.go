@@ -73,7 +73,7 @@ func normalizeDelegateRequest(request DelegateRequest) (DelegateRequest, error) 
 	a := &request.Agent
 	if a.ID != "" || a.RequestID != "" || a.ParentRunID != "" || a.LogicalParentRunID != "" || a.OriginFingerprint != "" ||
 		a.Actor != (kernel.ActorRef{}) || a.Thread != (kernel.ThreadRef{}) || a.Goal != "" ||
-		a.DeadlineAt != nil || a.CallAllowance != nil || a.AutoAllowance != nil ||
+		a.DeadlineAt != nil || a.CallAllowance != nil ||
 		len(a.RequiredToolKeys) != 0 || model.ValidateOutputContract(a.OutputContract) != nil || a.MaxModelOutputTokens < 0 || !enforceableHarnessBudgetLimits(a.Limits) {
 		return DelegateRequest{}, ErrInvalidRequest
 	}

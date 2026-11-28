@@ -23,9 +23,9 @@ func RunStateHistorySuite(t *testing.T, store kernel.Store, reopen func() kernel
 	message := `{"role":"user","content":"` + strings.Repeat(`original evidence `, 32) + `"}`
 	transcript := `[` + message + `]`
 	frozen := `[{"role":"system","content":"original policy"},` + message + `]`
-	a := json.RawMessage(`{"messages":` + transcript + `,"modelInvocations":[{"status":"consumed","id":"one"},{"status":"pending","id":"two","request":{"messages":` + frozen + `}}],"_originalStateEvidence":{"version":"agent-state-opaque-v3","digest":"fixture"}}`)
-	b := json.RawMessage(`{"messages":[` + message + `,{"role":"assistant","content":"answer"}],"modelInvocations":[{"status":"consumed","id":"one"},{"status":"completed","id":"two","request":{"messages":` + frozen + `}}],"_originalStateEvidence":{"version":"agent-state-opaque-v3","digest":"fixture"}}`)
-	c := json.RawMessage(`{"messages":[{"role":"user","content":"compacted"}],"modelInvocations":[{"status":"consumed","id":"one"},{"status":"consumed","id":"two"}],"_originalStateEvidence":{"version":"agent-state-opaque-v3","digest":"fixture"}}`)
+	a := json.RawMessage(`{"messages":` + transcript + `,"modelInvocations":[{"status":"consumed","id":"one"},{"status":"pending","id":"two","request":{"messages":` + frozen + `}}],"_originalStateEvidence":{"version":"agent-state-opaque-v4","digest":"fixture"}}`)
+	b := json.RawMessage(`{"messages":[` + message + `,{"role":"assistant","content":"answer"}],"modelInvocations":[{"status":"consumed","id":"one"},{"status":"completed","id":"two","request":{"messages":` + frozen + `}}],"_originalStateEvidence":{"version":"agent-state-opaque-v4","digest":"fixture"}}`)
+	c := json.RawMessage(`{"messages":[{"role":"user","content":"compacted"}],"modelInvocations":[{"status":"consumed","id":"one"},{"status":"consumed","id":"two"}],"_originalStateEvidence":{"version":"agent-state-opaque-v4","digest":"fixture"}}`)
 	original, e := rt.Create(ctx, kernel.CreateRequest{ID: "state-history", Kind: "agent", Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "test", ID: "thread"}, Goal: "exact history", State: a})
 	if e != nil {
 		t.Fatal(e)

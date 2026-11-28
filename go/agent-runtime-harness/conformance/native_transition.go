@@ -131,7 +131,7 @@ func exerciseNativeTransitionCommit(t *testing.T, c nativeTransitionCase, factor
 	}
 	if mode == "allowance" {
 		req.CallAllowance = &agent.CallAllowance{LLMCalls: 1}
-		req.AutoAllowance = &agent.AutoAllowancePolicy{ModelStep: 1, MaxModelRenewals: 2, MaxNoProgressWindow: 2}
+		req.CallAllowance.Renewal = &agent.AutoAllowancePolicy{ModelStep: 1, MaxModelRenewals: 2, MaxNoProgressWindow: 2}
 	}
 	compose := func(k kernel.Store, h preparationHostPorts, owner string) (*harness.Runner, *kernel.Runtime) {
 		t.Helper()

@@ -295,7 +295,7 @@ func (runner *Runner) startInvocationAttempt(
 	}
 	requestID := stableID("hretry", invocation.ID, attemptString(invocation.Attempt))
 	var input agentInvocationInput
-	if err := json.Unmarshal(invocation.Input, &input); err != nil {
+	if !decodeTypedAuthorityJSON(invocation.Input, &input) {
 		return kernel.Snapshot{}, ErrConflict
 	}
 	config, err := loadSealedConfig(ctx, runner.store, turn.ConfigSnapshotID)
@@ -304,7 +304,7 @@ func (runner *Runner) startInvocationAttempt(
 	}
 	start := rootAgentStartRequest(config, invocation.ExecutionRefID, actor, thread,
 		requestID, input.Goal, input.InitialToolKeys, input.RequiredToolKeys)
-	start.CallAllowance, start.AutoAllowance = input.CallAllowance, input.AutoAllowance
+	start.CallAllowance = input.CallAllowance
 	return runner.startOriginalRoot(ctx, invocation, "start-retry", start)
 }
 

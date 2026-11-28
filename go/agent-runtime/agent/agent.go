@@ -346,8 +346,6 @@ type StartRequest struct {
 	Limits           Limits
 	// CallAllowance is a renewable segment allowance, never the absolute hard ceiling.
 	CallAllowance *CallAllowance
-	// AutoAllowance is an opt-in bounded P2 policy, frozen with the Agent Run.
-	AutoAllowance *AutoAllowancePolicy
 	// DisableInputs restricts the selected Host input log for this new Run.
 	// A logical Handoff child is an independent Kernel root, but must not
 	// inherit its supervisor's steering source. This field only removes
@@ -435,8 +433,7 @@ type runState struct {
 	RequireToolCall       bool                       `json:"requireToolCall,omitempty"`
 	CompletionRepair      bool                       `json:"completionRepair,omitempty"`
 	Budget                runtimebudget.Snapshot     `json:"budget"`
-	CallAllowance         *CallAllowance             `json:"callAllowance,omitempty"`
-	AutoAllowance         *autoAllowanceState        `json:"autoAllowance,omitempty"`
+	CallAllowance         *callAllowanceState        `json:"callAllowance,omitempty"`
 	PendingCalls          []tools.Call               `json:"pendingCalls,omitempty"`
 	PendingToolCatalog    map[string]string          `json:"pendingToolCatalog,omitempty"`
 	PendingApproval       *pendingToolApproval       `json:"pendingApproval,omitempty"`
@@ -484,6 +481,10 @@ func ViewState(snapshot kernel.Snapshot) (View, error) {
 	if err != nil {
 		return View{}, err
 	}
+	var allowance *CallAllowance
+	if state.CallAllowance != nil {
+		allowance = state.CallAllowance.CallAllowance.Clone()
+	}
 	return View{
 		Messages:             publicModelMessages(state.Messages),
 		Model:                state.Model,
@@ -495,8 +496,8 @@ func ViewState(snapshot kernel.Snapshot) (View, error) {
 		ToolKeys:             append([]string(nil), state.ToolKeys...),
 		RequiredToolKeys:     append([]string(nil), state.RequiredToolKeys...),
 		Budget:               state.Budget,
-		CallAllowance:        cloneCallAllowance(state.CallAllowance),
-		AutoAllowance:        autoAllowanceProgress(state.AutoAllowance),
+		CallAllowance:        allowance,
+		AutoAllowance:        autoAllowanceProgress(state.CallAllowance),
 		ModelInvocations:     publicModelInvocations(state.ModelInvocations),
 		PendingTool:          publicPendingTool(snapshot, state.ToolWait),
 
@@ -870,10 +871,7 @@ func (runner *Runner) prepareStartState(ctx context.Context, request StartReques
 	if err != nil {
 		return nil, err
 	}
-	automaticAllowance, err := initialAutoAllowance(request.AutoAllowance, allowance, limits)
-	if err != nil {
-		return nil, err
-	}
+
 	toolKeys := normalizedToolKeys(request.ToolKeys)
 	requiredToolKeys := normalizedToolKeys(request.RequiredToolKeys)
 	if !toolKeysContainAll(toolKeys, requiredToolKeys) {
@@ -894,7 +892,6 @@ func (runner *Runner) prepareStartState(ctx context.Context, request StartReques
 		Discovery:            discovery,
 		Budget:               runtimebudget.Snapshot{Limits: limits},
 		CallAllowance:        allowance,
-		AutoAllowance:        automaticAllowance,
 
 		ToolProgressPolicy: freezeToolProgressPolicy(runner.toolProgressPolicy, toolKeys),
 	}
@@ -2997,7 +2994,6 @@ func decodeState(encoded json.RawMessage) (runState, error) {
 		state.Budget.Limits.MaxLLMCalls <= 0 || state.Budget.Limits.MaxToolCalls <= 0 ||
 		!validAgentLimits(state.Budget.Limits) || !validAgentUsage(state.Budget.Usage) ||
 		!validCallAllowance(state.CallAllowance, state.Budget.Limits) ||
-		!validAutoAllowanceState(state.AutoAllowance, state.CallAllowance, state.Budget.Limits) ||
 		!toolKeysContainAll(state.ToolKeys, state.RequiredToolKeys) ||
 		!validHostedGrantSnapshot(state.HostedToolGrants, state.ToolKeys) ||
 		!validDiscoveryState(state) ||

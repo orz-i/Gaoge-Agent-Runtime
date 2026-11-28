@@ -178,7 +178,7 @@ func decompose(kind string, state json.RawMessage) split {
 	}
 	root := fields(state)
 	var evidence struct{ Version string }
-	if json.Unmarshal(root["_originalStateEvidence"].value, &evidence) != nil || evidence.Version != "agent-state-opaque-v3" {
+	if json.Unmarshal(root["_originalStateEvidence"].value, &evidence) != nil || evidence.Version != "agent-state-opaque-v4" {
 		return raw
 	}
 	transcript := root["messages"].value

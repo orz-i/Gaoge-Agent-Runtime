@@ -55,6 +55,7 @@ func TestInvalidAllowanceRejectedBeforePhysicalDispatchAndValidGrantStillWorks(t
 		increment agent.CallAllowance
 	}{
 		{"empty", agent.CallAllowance{}},
+		{"replacement-renewal", agent.CallAllowance{LLMCalls: 1, Renewal: &agent.AutoAllowancePolicy{ModelStep: 1, MaxModelRenewals: 1, MaxNoProgressWindow: 1}}},
 		{"negative-model", agent.CallAllowance{LLMCalls: -1}},
 		{"negative-tool", agent.CallAllowance{ToolCalls: -1}},
 		{"negative-model-with-positive-tool", agent.CallAllowance{LLMCalls: -1, ToolCalls: 2}},

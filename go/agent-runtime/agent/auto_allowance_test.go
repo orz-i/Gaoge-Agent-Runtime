@@ -23,7 +23,7 @@ func TestAutoAllowanceCompletesMultipleModelSegmentsWithoutManualGrant(t *testin
 	runner := allowanceRunner(t, runtime, approvals, model, &executed)
 	request := startRequest("auto-model-segments", "auto-model-request", "read twice", manifestToolKey)
 	request.CallAllowance = &agent.CallAllowance{LLMCalls: 1, ToolCalls: 5}
-	request.AutoAllowance = &agent.AutoAllowancePolicy{
+	request.CallAllowance.Renewal = &agent.AutoAllowancePolicy{
 		ModelStep: 1, MaxModelRenewals: 2, MaxNoProgressWindow: 1,
 	}
 	done, err := runner.StartRun(t.Context(), request)
@@ -60,7 +60,7 @@ func TestAutoAllowanceResumesPendingToolBatchWithoutModelReplay(t *testing.T) {
 	runner := allowanceRunner(t, runtime, approvals, model, &executed)
 	request := startRequest("auto-tool-batch", "auto-tool-request", "read a batch", manifestToolKey)
 	request.CallAllowance = &agent.CallAllowance{ToolCalls: 1}
-	request.AutoAllowance = &agent.AutoAllowancePolicy{
+	request.CallAllowance.Renewal = &agent.AutoAllowancePolicy{
 		ToolStep: 1, MaxToolRenewals: 2, MaxNoProgressWindow: 1,
 	}
 	done, err := runner.StartRun(t.Context(), request)
@@ -99,7 +99,7 @@ func TestAutoAllowancePausesOnRepeatedUnchangedWorkThenAllowsManualGrant(t *test
 	}
 	request := startRequest("auto-stall", "auto-stall-request", "repeat work", manifestToolKey)
 	request.CallAllowance = &agent.CallAllowance{LLMCalls: 1}
-	request.AutoAllowance = &agent.AutoAllowancePolicy{
+	request.CallAllowance.Renewal = &agent.AutoAllowancePolicy{
 		ModelStep: 1, MaxModelRenewals: 4, MaxNoProgressWindow: 1,
 	}
 	paused, err := runner.StartRun(t.Context(), request)
@@ -130,7 +130,7 @@ func TestAutoAllowanceCannotExceedFrozenHardLimit(t *testing.T) {
 	runner := allowanceRunner(t, runtime, approvals, model, &executed)
 	request := startRequest("auto-hard", "auto-hard-request", "read beyond hard guard", manifestToolKey)
 	request.CallAllowance = &agent.CallAllowance{LLMCalls: 2}
-	request.AutoAllowance = &agent.AutoAllowancePolicy{
+	request.CallAllowance.Renewal = &agent.AutoAllowancePolicy{
 		ModelStep: 3, MaxModelRenewals: 4, MaxNoProgressWindow: 1,
 	}
 	failed, err := runner.StartRun(t.Context(), request)
@@ -166,8 +166,11 @@ func TestAutoAllowanceRejectsInvalidOptInWithoutDispatch(t *testing.T) {
 	}
 	for i, tc := range invalid {
 		request := startRequest(fmt.Sprintf("invalid-auto-%d", i), fmt.Sprintf("invalid-auto-req-%d", i), "reject request")
-		request.CallAllowance = tc.allowance
-		request.AutoAllowance = &tc.policy
+		request.CallAllowance = tc.allowance.Clone()
+		if request.CallAllowance == nil {
+			request.CallAllowance = &agent.CallAllowance{}
+		}
+		request.CallAllowance.Renewal = &tc.policy
 		_, err := runner.StartRun(t.Context(), request)
 		if !errors.Is(err, agent.ErrInvalidCallAllowance) {
 			t.Fatalf("invalid policy %d unexpectedly accepted: policy=%#v err=%v", i, tc.policy, err)

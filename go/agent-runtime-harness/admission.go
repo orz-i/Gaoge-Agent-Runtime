@@ -53,33 +53,25 @@ func sealStartAdmission(request StartRequest, config *ConfigSnapshot, root rootA
 	request.OutputMessage = output
 	request.RequiredToolKeys = normalizeStrings(request.RequiredToolKeys)
 	request.InitialToolKeys = normalizeStrings(request.InitialToolKeys)
-	if request.CallAllowance != nil {
-		copied := *request.CallAllowance
-		request.CallAllowance = &copied
-	}
-	if request.AutoAllowance != nil {
-		copied := *request.AutoAllowance
-		request.AutoAllowance = &copied
-	}
+	request.CallAllowance = request.CallAllowance.Clone()
 	// The caller cannot supply or retain stale admission facts. Always bind
 	// the normalized, authorized request at this exact construction boundary.
 	config.InputMessage = input
 	config.OutputMessage = output
 	payload := struct {
-		Root             rootAdmission              `json:"root"`
-		HostThread       HostRef                    `json:"hostThread"`
-		HostTurn         HostRef                    `json:"hostTurn"`
-		Actor            kernel.ActorRef            `json:"actor"`
-		Thread           kernel.ThreadRef           `json:"thread"`
-		RequestID        string                     `json:"requestID"`
-		Goal             string                     `json:"goal"`
-		RequiredToolKeys []string                   `json:"requiredToolKeys"`
-		InitialToolKeys  []string                   `json:"initialToolKeys"`
-		InputMessage     *HostRef                   `json:"inputMessage"`
-		OutputMessage    *HostRef                   `json:"outputMessage"`
-		Context          *ContextSeed               `json:"context"`
-		CallAllowance    *agent.CallAllowance       `json:"callAllowance"`
-		AutoAllowance    *agent.AutoAllowancePolicy `json:"autoAllowance"`
+		Root             rootAdmission        `json:"root"`
+		HostThread       HostRef              `json:"hostThread"`
+		HostTurn         HostRef              `json:"hostTurn"`
+		Actor            kernel.ActorRef      `json:"actor"`
+		Thread           kernel.ThreadRef     `json:"thread"`
+		RequestID        string               `json:"requestID"`
+		Goal             string               `json:"goal"`
+		RequiredToolKeys []string             `json:"requiredToolKeys"`
+		InitialToolKeys  []string             `json:"initialToolKeys"`
+		InputMessage     *HostRef             `json:"inputMessage"`
+		OutputMessage    *HostRef             `json:"outputMessage"`
+		Context          *ContextSeed         `json:"context"`
+		CallAllowance    *agent.CallAllowance `json:"callAllowance"`
 	}{
 		Root: root, HostThread: request.HostThread, HostTurn: request.HostTurn,
 		Actor: request.Actor, Thread: request.Thread,
@@ -89,7 +81,7 @@ func sealStartAdmission(request StartRequest, config *ConfigSnapshot, root rootA
 		InitialToolKeys:  normalizeStrings(request.InitialToolKeys),
 		InputMessage:     input, OutputMessage: output,
 		Context:       contextSeed,
-		CallAllowance: request.CallAllowance, AutoAllowance: request.AutoAllowance,
+		CallAllowance: request.CallAllowance,
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
