@@ -84,6 +84,13 @@ func (r *Runner) needsHostCancellation(ctx context.Context, turn Turn, runID str
 		if snapshot.Run.Kind != agent.RunKind {
 			return true, nil
 		}
+		// A terminal delegated Run with foreign/opaque callback custody is
+		// not a proven native return. Retain the independent effect fence.
+		if id != runID || snapshot.Run.LogicalParentRunID != "" {
+			if terminalRuntimeStatus(snapshot.Run.Status) && !native.VerifiedDeferredRootControl(ctx, r.runtime, snapshot) {
+				return true, nil
+			}
+		}
 		_, waiting, e := agent.FrozenExternalToolCall(snapshot)
 		if e != nil {
 			return true, e
