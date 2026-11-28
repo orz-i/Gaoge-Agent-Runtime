@@ -25,7 +25,7 @@ func TestPreparedRootSettlementOnlyBeforeFirstPhysicalExecution(t *testing.T) {
 		t.Fatal("prepared receipt fixture is not a valid original ACK")
 	}
 	original := []kernel.OwnedRetirementReceipt{receipt}
-	if err := kernel.VerifyExecutionCustodyFacts(prepared, prepared, 3, 3, kernel.ExecutionLease{}, false, original, kernel.ChildExecutionGrant{}, kernel.OwnedPhysicalCallbackCompletion{}, kernel.CustodyPrepared); err != nil {
+	if err := kernel.VerifyExecutionCustodyFacts(prepared, prepared, 3, 3, kernel.ExecutionLease{}, false, original, kernel.ChildExecutionGrant{}, kernel.PhysicalCallbackCompletion{}, kernel.CustodyPrepared); err != nil {
 		t.Fatalf("initial acknowledged prepared Root rejected: %v", err)
 	}
 	cancelled := prepared
@@ -33,7 +33,7 @@ func TestPreparedRootSettlementOnlyBeforeFirstPhysicalExecution(t *testing.T) {
 	cancelled.Run.Status = kernel.RunStatusCancelled
 	cancelled.Run.ErrorCode = "run.cancelled"
 	cancelled.EventHead++
-	if err := kernel.VerifyExecutionCustodyFacts(cancelled, cancelled, 4, 3, kernel.ExecutionLease{}, false, original, kernel.ChildExecutionGrant{}, kernel.OwnedPhysicalCallbackCompletion{}, kernel.CustodyPrepared); err != nil {
+	if err := kernel.VerifyExecutionCustodyFacts(cancelled, cancelled, 4, 3, kernel.ExecutionLease{}, false, original, kernel.ChildExecutionGrant{}, kernel.PhysicalCallbackCompletion{}, kernel.CustodyPrepared); err != nil {
 		t.Fatalf("original native Cancel successor lost pre-dispatch proof: %v", err)
 	}
 	for _, testcase := range []struct {
@@ -69,7 +69,7 @@ func TestPreparedRootSettlementOnlyBeforeFirstPhysicalExecution(t *testing.T) {
 		}()}},
 	} {
 		t.Run(testcase.name, func(t *testing.T) {
-			if err := kernel.VerifyExecutionCustodyFacts(testcase.now, testcase.now, testcase.epoch, testcase.epoch, kernel.ExecutionLease{}, testcase.active, testcase.receipts, kernel.ChildExecutionGrant{}, kernel.OwnedPhysicalCallbackCompletion{}, kernel.CustodyPrepared); !errors.Is(err, kernel.ErrExecutionConflict) {
+			if err := kernel.VerifyExecutionCustodyFacts(testcase.now, testcase.now, testcase.epoch, testcase.epoch, kernel.ExecutionLease{}, testcase.active, testcase.receipts, kernel.ChildExecutionGrant{}, kernel.PhysicalCallbackCompletion{}, kernel.CustodyPrepared); !errors.Is(err, kernel.ErrExecutionConflict) {
 				t.Fatalf("not-only-original-Prepare obtained native callback custody: %v", err)
 			}
 		})

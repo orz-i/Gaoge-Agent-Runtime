@@ -14,6 +14,12 @@ func ValidateOwnedPhysicalAdmissionRequest(g ChildExecutionGrant, claimed Execut
 	return nil
 }
 
+// ReturnedChildEffect verifies the actual durable original return, not
+// merely a clean state or a matching revision. A later read cannot mint it.
+func ReturnedChildEffect(g ChildExecutionGrant, current Snapshot, completion PhysicalCallbackCompletion) bool {
+	return !g.IsOwned() && ValidatePhysicalCompletion(g, completion) == nil && completion.MatchesReturnSnapshot(current)
+}
+
 // ValidateOwnedPhysicalRecoveryRequest is the shape of an exact receipt CAS.
 // The real source revision and opaque proof are checked under the write lock.
 func ValidateOwnedPhysicalRecoveryRequest(g ChildExecutionGrant, revision uint64, mutation StoreMutation) error {
@@ -65,48 +71,48 @@ func ResolveOwnedPhysicalAdmission(current Snapshot, persisted ExecutionLease, n
 	return OwnedPhysicalAdmissionResult{Grant: g, Lease: persisted}, nil
 }
 
-// ValidateOwnedPhysicalCompletion checks the shape of an original persisted
+// ValidatePhysicalCompletion checks the shape of an original persisted
 // return. The empty value means there is no return, never a completion.
-func ValidateOwnedPhysicalCompletion(g ChildExecutionGrant, c OwnedPhysicalCallbackCompletion) error {
-	if c == (OwnedPhysicalCallbackCompletion{}) {
+func ValidatePhysicalCompletion(g ChildExecutionGrant, c PhysicalCallbackCompletion) error {
+	if c == (PhysicalCallbackCompletion{}) {
 		return ErrNotFound
 	}
-	if !g.IsOwned() || g.ID == "" || c.GrantID != g.ID || c.ReturnRevision < g.ExpectedRevision || c.ReturnRevision == 0 ||
+	if !g.Identity().Valid() || c.GrantID != g.ID || c.ReturnRevision < g.ExpectedRevision || c.ReturnRevision == 0 ||
 		!validToolReceiptDigest(c.ReturnSourceHash) || !c.ControlCustody.Valid() || !c.ToolReturns.Valid() ||
 		(c.NotEntered() && (c.HostCompleted || c.ToolReturns != "" || c.ReturnRevision != g.ExpectedRevision || !ordinaryOwnedOperation(g.AdmissionOperation))) ||
 		(c.ControlCustody == OwnedCustodyPrepared && g.AdmissionOperation != "prepare") ||
 		(c.ToolReturns != "" && (!c.HostCompleted || c.ControlCustody == OwnedCustodyPrepared || c.ControlCustody == OwnedToolBudgetReturn)) {
 		return ErrExecutionConflict
 	}
+	if !g.IsOwned() && (!c.HostCompleted || c.LeaseOwned || c.ControlCustody != "" || c.ToolReturns != "") {
+		return ErrExecutionConflict
+	}
 	return nil
 }
 
-// ReduceOwnedPhysicalCallbackReturn decides whether to insert the original
+// ReducePhysicalCallbackReturn decides whether to insert the original
 // completion or accept its identical replay. Stores supply the exact original
 // active grant and its facts under the same transaction as the conditional
 // write. Expiry is not a reason to discard an original callback return.
-func ReduceOwnedPhysicalCallbackReturn(g ChildExecutionGrant, current Snapshot, persisted ExecutionLease, revision uint64, outcome OwnedPhysicalCallbackOutcome, permit OwnedPhysicalCallbackReturn, existing OwnedPhysicalCallbackCompletion, settled, physicalEpoch uint64) (OwnedPhysicalCallbackCompletion, bool, error) {
-	if current.Run.Revision != revision || !g.MatchesExecution(persisted) || !permit.Matches(g, current, outcome) ||
-		physicalEpoch > g.ExecutionEpoch || (physicalEpoch != g.ExecutionEpoch && outcome.ControlCustody != OwnedCustodyNotEntered) {
-		return OwnedPhysicalCallbackCompletion{}, false, ErrExecutionConflict
+func ReducePhysicalCallbackReturn(g ChildExecutionGrant, current Snapshot, persisted ExecutionLease, revision uint64, outcome PhysicalCallbackOutcome, permit PhysicalCallbackReturn, existing PhysicalCallbackCompletion, settled, physicalEpoch uint64) (PhysicalCallbackCompletion, bool, error) {
+	if current.Run.Revision != revision || !permit.Matches(g, current, outcome) || settled != 0 ||
+		(g.IsOwned() && (!g.MatchesExecution(persisted) || physicalEpoch > g.ExecutionEpoch || (physicalEpoch != g.ExecutionEpoch && outcome.ControlCustody != OwnedCustodyNotEntered))) {
+		return PhysicalCallbackCompletion{}, false, ErrExecutionConflict
 	}
 	next := permit.Completion(g, current, outcome)
-	if existing != (OwnedPhysicalCallbackCompletion{}) {
-		if physicalEpoch != g.ExecutionEpoch || ValidateOwnedPhysicalCompletion(g, existing) != nil || existing != next {
-			return OwnedPhysicalCallbackCompletion{}, false, ErrExecutionConflict
+	if existing != (PhysicalCallbackCompletion{}) {
+		if (g.IsOwned() && physicalEpoch != g.ExecutionEpoch) || ValidatePhysicalCompletion(g, existing) != nil || existing != next {
+			return PhysicalCallbackCompletion{}, false, ErrExecutionConflict
 		}
 		return existing, false, nil
-	}
-	if settled != 0 {
-		return OwnedPhysicalCallbackCompletion{}, false, ErrExecutionConflict
 	}
 	return next, true, nil
 }
 
 // ValidateOwnedPhysicalRecovery is the shared receipt-only CAS decision.
 // Neither a historical grant nor a completion alone grants physical dispatch.
-func ValidateOwnedPhysicalRecovery(g ChildExecutionGrant, current Snapshot, persisted ExecutionLease, revision uint64, mutation StoreMutation, permit OwnedPhysicalRecovery, completion OwnedPhysicalCallbackCompletion, settled uint64) error {
-	if !g.MatchesExecution(persisted) || settled != 0 || ValidateOwnedPhysicalCompletion(g, completion) != nil ||
+func ValidateOwnedPhysicalRecovery(g ChildExecutionGrant, current Snapshot, persisted ExecutionLease, revision uint64, mutation StoreMutation, permit OwnedPhysicalRecovery, completion PhysicalCallbackCompletion, settled uint64) error {
+	if !g.MatchesExecution(persisted) || settled != 0 || ValidatePhysicalCompletion(g, completion) != nil ||
 		completion.NotEntered() || completion.ReturnRevision > current.Run.Revision || completion.HostCompleted == permit.IsModelEvidence() ||
 		current.Run.Kind != "agent" || current.Run.ParentRunID != "" || current.Run.Status != RunStatusRunning {
 		return ErrExecutionConflict
@@ -124,8 +130,8 @@ func ValidateOwnedPhysicalRecovery(g ChildExecutionGrant, current Snapshot, pers
 // and private Feature settlement against the exact current native owner and
 // Run. Both the live caller and receipt-only recovery use this same reducer.
 // Lease expiry is not evidence of return, nor does it erase a genuine return.
-func BuildOwnedRetirementReceipt(g ChildExecutionGrant, current Snapshot, persisted ExecutionLease, completion OwnedPhysicalCallbackCompletion, permit ChildExecutionSettlement, closures []ManagedTransfer) (OwnedRetirementReceipt, error) {
-	if !g.MatchesExecution(persisted) || !permit.Matches(g, current) || ValidateOwnedPhysicalCompletion(g, completion) != nil {
+func BuildOwnedRetirementReceipt(g ChildExecutionGrant, current Snapshot, persisted ExecutionLease, completion PhysicalCallbackCompletion, permit ChildExecutionSettlement, closures []ManagedTransfer) (OwnedRetirementReceipt, error) {
+	if !g.MatchesExecution(persisted) || !permit.Matches(g, current) || ValidatePhysicalCompletion(g, completion) != nil {
 		return OwnedRetirementReceipt{}, ErrExecutionConflict
 	}
 	if completion.NotEntered() {

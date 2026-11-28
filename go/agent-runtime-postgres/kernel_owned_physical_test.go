@@ -121,7 +121,7 @@ func runOwnedPhysicalBindingGuards(t *testing.T, db *gorm.DB) {
 	if !errors.Is(e, kernel.ErrChildExecutionBusy) {
 		t.Fatalf("lease alone passed scope: %v", e)
 	}
-	if e = store.MarkChildExecutionSettled(ctx, grant, kernel.ChildExecutionSettlement{}); !errors.Is(e, kernel.ErrExecutionConflict) {
+	if e = store.RecordPhysicalCallbackReturn(ctx, grant, grant.ExpectedRevision, kernel.PhysicalCallbackOutcome{HostCompleted: true}, kernel.PhysicalCallbackReturn{}); !errors.Is(e, kernel.ErrExecutionConflict) {
 		t.Fatalf("forged completion: %v", e)
 	}
 	if e = store.FinishChildExecution(ctx, grant, kernel.ChildExecutionSettlement{}); !errors.Is(e, kernel.ErrExecutionConflict) {

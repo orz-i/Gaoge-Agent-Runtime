@@ -208,7 +208,7 @@ func toolBatchBoundary(t *testing.T, factory func(*testing.T) (kernel.Store, ker
 				if e != nil {
 					t.Fatal(e)
 				}
-				c, e := observer.LookupOwnedPhysicalCallbackReturn(ctx, g)
+				c, e := observer.LookupPhysicalCallbackReturn(ctx, g)
 				if e != nil || c.HostCompleted || !bytes.Contains(before.State, []byte(`"phase":"evaluating"`)) {
 					t.Fatal("uncommitted policy obtained completed custody", c, e)
 				}
@@ -243,7 +243,7 @@ func toolBatchBoundary(t *testing.T, factory func(*testing.T) (kernel.Store, ker
 				if err != nil {
 					t.Fatal(err)
 				}
-				c, err := observer.LookupOwnedPhysicalCallbackReturn(ctx, g)
+				c, err := observer.LookupPhysicalCallbackReturn(ctx, g)
 				if err != nil || !c.HostCompleted {
 					t.Fatal("earlier sibling obligations lost", c, err)
 				}
@@ -350,7 +350,7 @@ func toolBatchBoundary(t *testing.T, factory func(*testing.T) (kernel.Store, ker
 			if e != nil {
 				t.Fatal(e)
 			}
-			c, e := observer.LookupOwnedPhysicalCallbackReturn(ctx, g)
+			c, e := observer.LookupPhysicalCallbackReturn(ctx, g)
 			if e != nil || !c.HostCompleted || c.ControlCustody != kernel.OwnedBoundedApprovalReturn {
 				t.Fatal("wrong original completion", c, e)
 			}

@@ -478,8 +478,8 @@ func (s *nativeRetryLostACKStore) RetryInvocation(
 type nativeChildReturnInterrupted struct{}
 type nativeChildReturnCut struct{ nativeAuthorityKernelPorts }
 
-func (s *nativeChildReturnCut) RecordOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, o kernel.OwnedPhysicalCallbackOutcome, p kernel.OwnedPhysicalCallbackReturn) error {
-	err := s.nativeAuthorityKernelPorts.RecordOwnedPhysicalCallbackReturn(ctx, g, rev, o, p)
+func (s *nativeChildReturnCut) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, o kernel.PhysicalCallbackOutcome, p kernel.PhysicalCallbackReturn) error {
+	err := s.nativeAuthorityKernelPorts.RecordPhysicalCallbackReturn(ctx, g, rev, o, p)
 	if err == nil && g.AdmissionOperation == "approval" && o.HostCompleted {
 		panic(nativeChildReturnInterrupted{})
 	}

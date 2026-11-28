@@ -44,7 +44,7 @@ func TestPhysicalEpochMigrationPreservesOriginalCustodyAndLeaseHistory(t *testin
 	}
 	g := kernel.ChildExecutionGrant{ID: "retired-original", ChildRunID: snapshot.Run.ID, ExpectedRevision: 1,
 		ExecutionOwnerID: "old", ExecutionLeaseID: "old-lease", ExecutionEpoch: 3, AdmissionSourceHash: strings.Repeat("a", 64), AdmissionOperation: "prepare"}
-	c := kernel.OwnedPhysicalCallbackCompletion{GrantID: g.ID, ReturnRevision: 1, ReturnSourceHash: strings.Repeat("b", 64), HostCompleted: true, LeaseOwned: true, ControlCustody: kernel.OwnedCustodyPrepared}
+	c := kernel.PhysicalCallbackCompletion{GrantID: g.ID, ReturnRevision: 1, ReturnSourceHash: strings.Repeat("b", 64), HostCompleted: true, LeaseOwned: true, ControlCustody: kernel.OwnedCustodyPrepared}
 	r := kernel.OwnedRetirementReceipt{Version: 1, Evidence: kernel.OwnedSettlementEvidence{Version: 1, Grant: g, Snapshot: snapshot, Completion: c}, Closures: []kernel.ManagedTransfer{}}
 	r.Digest = r.Identity()
 	raw, err := json.Marshal(r)

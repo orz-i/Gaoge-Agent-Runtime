@@ -98,7 +98,7 @@ func pgBackfillGrantIdentities(tx *gorm.DB) error {
 // collision. A malformed or missing fence rolls the entire transfer back.
 func pgConsumeManagedGrant(tx *gorm.DB, g kernel.ChildExecutionGrant) error {
 	row, err := pgLoadOwnedPhysicalGrant(tx, g)
-	if err != nil || row.SettledRevision != 0 || pgCallbackCompletion(row) != (kernel.OwnedPhysicalCallbackCompletion{}) {
+	if err != nil || row.SettledRevision != 0 || pgCallbackCompletion(row) != (kernel.PhysicalCallbackCompletion{}) {
 		return kernel.ErrExecutionConflict
 	}
 	r := tx.Where("grant_id = ? AND parent_run_id = ? AND child_run_id = ? AND start_revision = ? AND execution_owner_id = ? AND execution_lease_id = ? AND execution_epoch = ? AND admission_source_hash = ? AND admission_operation = ? AND settled_revision = 0 AND callback_return_revision = 0",

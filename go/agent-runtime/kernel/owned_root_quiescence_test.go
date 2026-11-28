@@ -15,7 +15,7 @@ func settledRootFixture() (kernel.Snapshot, kernel.OwnedRetirementReceipt) {
 		ExecutionOwnerID: "owner", ExecutionLeaseID: "lease", ExecutionEpoch: 3,
 		AdmissionSourceHash: strings.Repeat("a", 64), AdmissionOperation: "prepare",
 	}
-	c := kernel.OwnedPhysicalCallbackCompletion{GrantID: g.ID, ReturnRevision: run.Run.Revision, ReturnSourceHash: strings.Repeat("b", 64), HostCompleted: true, LeaseOwned: true, ControlCustody: kernel.OwnedCustodyPrepared}
+	c := kernel.PhysicalCallbackCompletion{GrantID: g.ID, ReturnRevision: run.Run.Revision, ReturnSourceHash: strings.Repeat("b", 64), HostCompleted: true, LeaseOwned: true, ControlCustody: kernel.OwnedCustodyPrepared}
 	r := kernel.OwnedRetirementReceipt{Version: 1, Evidence: kernel.OwnedSettlementEvidence{Version: 1, Grant: g, Snapshot: run, Completion: c}, Closures: []kernel.ManagedTransfer{}}
 	r.Digest = r.Identity()
 	return run, r
@@ -32,7 +32,7 @@ func TestOwnedCancelSuccessorClearsOriginalApproval(t *testing.T) {
 	next.EventHead++
 	next.Checkpoint = nil
 	check := func(s kernel.Snapshot) error {
-		return kernel.VerifyExecutionCustodyFacts(s, s, 3, 3, kernel.ExecutionLease{}, false, []kernel.OwnedRetirementReceipt{receipt}, kernel.ChildExecutionGrant{}, kernel.OwnedPhysicalCallbackCompletion{}, kernel.CustodyBoundedApproval)
+		return kernel.VerifyExecutionCustodyFacts(s, s, 3, 3, kernel.ExecutionLease{}, false, []kernel.OwnedRetirementReceipt{receipt}, kernel.ChildExecutionGrant{}, kernel.PhysicalCallbackCompletion{}, kernel.CustodyBoundedApproval)
 	}
 	if err := check(next); err != nil {
 		t.Fatal(err)
@@ -54,7 +54,7 @@ func TestBoundedToolControlRejectsObservationOnlyCustody(t *testing.T) {
 	} {
 		receipt.Evidence.Completion.ControlCustody = tc.custody
 		receipt.Digest = receipt.Identity()
-		err := kernel.VerifyExecutionCustodyFacts(run, run, 3, 3, kernel.ExecutionLease{}, false, []kernel.OwnedRetirementReceipt{receipt}, kernel.ChildExecutionGrant{}, kernel.OwnedPhysicalCallbackCompletion{}, kernel.CustodyBoundedApproval)
+		err := kernel.VerifyExecutionCustodyFacts(run, run, 3, 3, kernel.ExecutionLease{}, false, []kernel.OwnedRetirementReceipt{receipt}, kernel.ChildExecutionGrant{}, kernel.PhysicalCallbackCompletion{}, kernel.CustodyBoundedApproval)
 		if (err == nil) != tc.accepted {
 			t.Fatalf("custody %q: %v", tc.custody, err)
 		}
@@ -66,7 +66,7 @@ func TestVerifiedOwnedRootQuiescenceRequiresExactRetiredCallback(t *testing.T) {
 	if !receipt.Valid() {
 		t.Fatal("test requires a valid persisted retirement receipt")
 	}
-	if err := kernel.VerifyExecutionCustodyFacts(original, original, 3, 3, kernel.ExecutionLease{}, false, []kernel.OwnedRetirementReceipt{receipt}, kernel.ChildExecutionGrant{}, kernel.OwnedPhysicalCallbackCompletion{}, kernel.CustodyRetired); err != nil {
+	if err := kernel.VerifyExecutionCustodyFacts(original, original, 3, 3, kernel.ExecutionLease{}, false, []kernel.OwnedRetirementReceipt{receipt}, kernel.ChildExecutionGrant{}, kernel.PhysicalCallbackCompletion{}, kernel.CustodyRetired); err != nil {
 		t.Fatalf("valid native callback retired with original identity: %v", err)
 	}
 	cancelled := original
@@ -74,12 +74,12 @@ func TestVerifiedOwnedRootQuiescenceRequiresExactRetiredCallback(t *testing.T) {
 	cancelled.Run.Status = kernel.RunStatusCancelled
 	cancelled.Run.ErrorCode = "run.cancelled"
 	cancelled.EventHead++
-	if err := kernel.VerifyExecutionCustodyFacts(cancelled, cancelled, 4, 3, kernel.ExecutionLease{}, false, []kernel.OwnedRetirementReceipt{receipt}, kernel.ChildExecutionGrant{}, kernel.OwnedPhysicalCallbackCompletion{}, kernel.CustodyRetired); err != nil {
+	if err := kernel.VerifyExecutionCustodyFacts(cancelled, cancelled, 4, 3, kernel.ExecutionLease{}, false, []kernel.OwnedRetirementReceipt{receipt}, kernel.ChildExecutionGrant{}, kernel.PhysicalCallbackCompletion{}, kernel.CustodyRetired); err != nil {
 		t.Fatalf("exact atomic Cancel successor denied: %v", err)
 	}
 	mutated := cancelled
 	mutated.EventHead++
-	if err := kernel.VerifyExecutionCustodyFacts(mutated, mutated, 4, 3, kernel.ExecutionLease{}, false, []kernel.OwnedRetirementReceipt{receipt}, kernel.ChildExecutionGrant{}, kernel.OwnedPhysicalCallbackCompletion{}, kernel.CustodyRetired); !errors.Is(err, kernel.ErrExecutionConflict) {
+	if err := kernel.VerifyExecutionCustodyFacts(mutated, mutated, 4, 3, kernel.ExecutionLease{}, false, []kernel.OwnedRetirementReceipt{receipt}, kernel.ChildExecutionGrant{}, kernel.PhysicalCallbackCompletion{}, kernel.CustodyRetired); !errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("unwitnessed second journal mutation impersonated Cancel: %v", err)
 	}
 	testcases := []struct {
@@ -113,7 +113,7 @@ func TestVerifiedOwnedRootQuiescenceRequiresExactRetiredCallback(t *testing.T) {
 	}
 	for _, tc := range testcases {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := kernel.VerifyExecutionCustodyFacts(tc.expected, tc.current, tc.epoch, tc.epoch, tc.lease, tc.active, tc.receipts, kernel.ChildExecutionGrant{}, kernel.OwnedPhysicalCallbackCompletion{}, kernel.CustodyRetired); !errors.Is(err, kernel.ErrExecutionConflict) {
+			if err := kernel.VerifyExecutionCustodyFacts(tc.expected, tc.current, tc.epoch, tc.epoch, tc.lease, tc.active, tc.receipts, kernel.ChildExecutionGrant{}, kernel.PhysicalCallbackCompletion{}, kernel.CustodyRetired); !errors.Is(err, kernel.ErrExecutionConflict) {
 				t.Fatalf("invalid owned Root obtained cancellation custody: %v", err)
 			}
 		})
@@ -123,11 +123,11 @@ func TestVerifiedOwnedRootQuiescenceRequiresExactRetiredCallback(t *testing.T) {
 func TestOwnedSettlementRequiresLatestPhysicalAdmissionNotLatestLease(t *testing.T) {
 	snapshot, receipt := settledRootFixture()
 	// Store-proven lease-only generations may advance without dispatching.
-	if err := kernel.VerifyExecutionCustodyFacts(snapshot, snapshot, 8, 3, kernel.ExecutionLease{}, false, []kernel.OwnedRetirementReceipt{receipt}, kernel.ChildExecutionGrant{}, kernel.OwnedPhysicalCallbackCompletion{}, kernel.CustodyRetired); err != nil {
+	if err := kernel.VerifyExecutionCustodyFacts(snapshot, snapshot, 8, 3, kernel.ExecutionLease{}, false, []kernel.OwnedRetirementReceipt{receipt}, kernel.ChildExecutionGrant{}, kernel.PhysicalCallbackCompletion{}, kernel.CustodyRetired); err != nil {
 		t.Fatalf("undispatched lease churn lost physical custody: %v", err)
 	}
 	for _, physicalEpoch := range []uint64{0, 2, 4, 9} {
-		if err := kernel.VerifyExecutionCustodyFacts(snapshot, snapshot, 8, physicalEpoch, kernel.ExecutionLease{}, false, []kernel.OwnedRetirementReceipt{receipt}, kernel.ChildExecutionGrant{}, kernel.OwnedPhysicalCallbackCompletion{}, kernel.CustodyRetired); !errors.Is(err, kernel.ErrExecutionConflict) {
+		if err := kernel.VerifyExecutionCustodyFacts(snapshot, snapshot, 8, physicalEpoch, kernel.ExecutionLease{}, false, []kernel.OwnedRetirementReceipt{receipt}, kernel.ChildExecutionGrant{}, kernel.PhysicalCallbackCompletion{}, kernel.CustodyRetired); !errors.Is(err, kernel.ErrExecutionConflict) {
 			t.Fatalf("missing/substituted latest physical admission %d borrowed old receipt: %v", physicalEpoch, err)
 		}
 	}
@@ -140,12 +140,12 @@ func TestOwnedSettlementRequiresLatestPhysicalAdmissionNotLatestLease(t *testing
 	newer.Evidence.Completion.GrantID = "new-grant"
 	newer.Evidence.Completion.ControlCustody = kernel.OwnedCustodyScoped
 	newer.Digest = newer.Identity()
-	if err := kernel.VerifyExecutionCustodyFacts(snapshot, snapshot, 8, 5, kernel.ExecutionLease{}, false, []kernel.OwnedRetirementReceipt{receipt, newer}, kernel.ChildExecutionGrant{}, kernel.OwnedPhysicalCallbackCompletion{}, kernel.CustodyRetired); err != nil {
+	if err := kernel.VerifyExecutionCustodyFacts(snapshot, snapshot, 8, 5, kernel.ExecutionLease{}, false, []kernel.OwnedRetirementReceipt{receipt, newer}, kernel.ChildExecutionGrant{}, kernel.PhysicalCallbackCompletion{}, kernel.CustodyRetired); err != nil {
 		t.Fatalf("complete safe latest callback history rejected: %v", err)
 	}
 	receipt.Evidence.Completion.ControlCustody = ""
 	receipt.Digest = receipt.Identity()
-	if err := kernel.VerifyExecutionCustodyFacts(snapshot, snapshot, 8, 5, kernel.ExecutionLease{}, false, []kernel.OwnedRetirementReceipt{receipt, newer}, kernel.ChildExecutionGrant{}, kernel.OwnedPhysicalCallbackCompletion{}, kernel.CustodyRetired); !errors.Is(err, kernel.ErrExecutionConflict) {
+	if err := kernel.VerifyExecutionCustodyFacts(snapshot, snapshot, 8, 5, kernel.ExecutionLease{}, false, []kernel.OwnedRetirementReceipt{receipt, newer}, kernel.ChildExecutionGrant{}, kernel.PhysicalCallbackCompletion{}, kernel.CustodyRetired); !errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("latest safe callback erased earlier opaque effects: %v", err)
 	}
 }
@@ -156,9 +156,9 @@ func TestOwnedSettlementPreservesOnlyExactNoEntrySuffix(t *testing.T) {
 		r := actual
 		g := r.Evidence.Grant
 		g.ID, g.ExecutionEpoch, g.ExpectedRevision, g.AdmissionOperation = id, epoch, s.Run.Revision, "resume"
-		outcome := kernel.OwnedPhysicalCallbackOutcome{LeaseOwned: true, ControlCustody: kernel.OwnedCustodyNotEntered}
+		outcome := kernel.PhysicalCallbackOutcome{LeaseOwned: true, ControlCustody: kernel.OwnedCustodyNotEntered}
 		r.Evidence = kernel.OwnedSettlementEvidence{Version: 1, Grant: g, Snapshot: s,
-			Completion: kernel.OwnedPhysicalCallbackCompletion{GrantID: id, ReturnRevision: s.Run.Revision, ReturnSourceHash: kernel.ManagedDigest(kernel.OwnedPhysicalCallbackReturnPayload(s, outcome)), LeaseOwned: true, ControlCustody: kernel.OwnedCustodyNotEntered}}
+			Completion: kernel.PhysicalCallbackCompletion{GrantID: id, ReturnRevision: s.Run.Revision, ReturnSourceHash: kernel.ManagedDigest(kernel.PhysicalCallbackReturnPayload(s, outcome)), LeaseOwned: true, ControlCustody: kernel.OwnedCustodyNotEntered}}
 		r.Digest = r.Identity()
 		if !r.Valid() {
 			t.Fatal("invalid no-entry fixture")
@@ -184,7 +184,7 @@ func TestOwnedSettlementPreservesOnlyExactNoEntrySuffix(t *testing.T) {
 		{"duplicate", []kernel.OwnedRetirementReceipt{actual, one, two, two}, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			err := kernel.VerifyExecutionCustodyFacts(source, source, 8, 7, kernel.ExecutionLease{}, false, c.receipts, kernel.ChildExecutionGrant{}, kernel.OwnedPhysicalCallbackCompletion{}, kernel.CustodyRetired)
+			err := kernel.VerifyExecutionCustodyFacts(source, source, 8, 7, kernel.ExecutionLease{}, false, c.receipts, kernel.ChildExecutionGrant{}, kernel.PhysicalCallbackCompletion{}, kernel.CustodyRetired)
 			if (err == nil) != c.want {
 				t.Fatalf("custody mismatch: %v", err)
 			}

@@ -53,14 +53,14 @@ func (h substitutedApprovalHandler) ResolveToolApproval(c *kernel.Checkpoint, r 
 	return h.ApprovalHandler.ResolveToolApproval(c, r)
 }
 
-func (s *returnedDispatchKernelCut) RecordOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, o kernel.OwnedPhysicalCallbackOutcome, p kernel.OwnedPhysicalCallbackReturn) error {
+func (s *returnedDispatchKernelCut) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, o kernel.PhysicalCallbackOutcome, p kernel.PhysicalCallbackReturn) error {
 	if s.cut != "" {
 		s.grant = g
 	}
 	if s.cut == "return-before" {
 		panic(dispatchReturnInterrupted{})
 	}
-	err := s.noEntryKernelPorts.RecordOwnedPhysicalCallbackReturn(ctx, g, rev, o, p)
+	err := s.noEntryKernelPorts.RecordPhysicalCallbackReturn(ctx, g, rev, o, p)
 	if err == nil && s.cut == "return-after" {
 		panic(dispatchReturnInterrupted{})
 	}

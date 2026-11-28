@@ -47,8 +47,8 @@ func (runner *Runner) reconcileOriginalPhysicalDispatch(ctx context.Context, run
 	matches := func(g kernel.ChildExecutionGrant) bool {
 		return g.ID == id && g.ChildRunID == runID && g.AdmissionOperation == op && g.IsOwned()
 	}
-	qualify := func(g kernel.ChildExecutionGrant, c kernel.OwnedPhysicalCallbackCompletion, source kernel.Snapshot) (PhysicalCallOutcomeKind, error) {
-		if !matches(g) || kernel.ValidateOwnedPhysicalCompletion(g, c) != nil ||
+	qualify := func(g kernel.ChildExecutionGrant, c kernel.PhysicalCallbackCompletion, source kernel.Snapshot) (PhysicalCallOutcomeKind, error) {
+		if !matches(g) || kernel.ValidatePhysicalCompletion(g, c) != nil ||
 			source.Run.ID != runID || source.Run.Kind != RunKind || source.Run.ParentRunID != "" {
 			return PhysicalCallUnknown, kernel.ErrExecutionConflict
 		}
@@ -73,11 +73,11 @@ func (runner *Runner) reconcileOriginalPhysicalDispatch(ctx context.Context, run
 	receipt, err := rt.LoadOwnedRetirement(ctx, id)
 	if errors.Is(err, kernel.ErrNotFound) {
 		g, lookupErr := rt.LookupChildExecution(ctx, runID)
-		var c kernel.OwnedPhysicalCallbackCompletion
+		var c kernel.PhysicalCallbackCompletion
 		var retireErr error
 		attempted := false
 		if lookupErr == nil && matches(g) {
-			c, lookupErr = rt.LookupOwnedPhysicalCallbackReturn(ctx, g)
+			c, lookupErr = rt.LookupPhysicalCallbackReturn(ctx, g)
 			if lookupErr == nil {
 				source, e := rt.Load(ctx, runID)
 				if e != nil {

@@ -8,7 +8,7 @@ import (
 )
 
 // ReconcileChildPhysicalGrant verifies the child Feature state AND consumes
-// the original Store settlement marker issued after callback completion.
+// the original Store return fact issued after callback completion.
 // A clean persisted state alone is insufficient to free a still-live Grant. It must be invoked
 // only by the trusted Host recovery/continuation coordinator: it never
 // retries Models/Tools or assumes a timed-out external operation did nothing.
@@ -36,7 +36,7 @@ func (runner *Runner) ReconcileChildPhysicalGrant(ctx context.Context, childRunI
 	err = runner.runtime.FinishChildExecution(ctx, grant, proof)
 	if errors.Is(err, kernel.ErrExecutionConflict) {
 		// A clean-looking Run cannot retire the Grant without its original
-		// post-callback settlement marker. This remains quarantined, not a
+		// post-callback return fact. This remains quarantined, not a
 		// generic no-effect conflict eligible for automatic retry.
 		return errors.Join(kernel.ErrChildExecutionBusy, err)
 	}

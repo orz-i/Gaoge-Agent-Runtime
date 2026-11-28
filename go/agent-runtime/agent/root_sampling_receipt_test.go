@@ -142,7 +142,7 @@ func TestRootFrozenSamplingRecoveryUsesOriginalPhysicalReceipt(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				completion, err := rt.LookupOwnedPhysicalCallbackReturn(t.Context(), grant)
+				completion, err := rt.LookupPhysicalCallbackReturn(t.Context(), grant)
 				if err != nil || completion.HostCompleted == hostUnknown {
 					t.Fatalf("wrong callback fault: %+v %v", completion, err)
 				}

@@ -151,7 +151,7 @@ func RunSettledToolRecovery(t *testing.T, factory func(*testing.T) (kernel.Store
 			if err != nil {
 				t.Fatal(err)
 			}
-			completion, err := observer.LookupOwnedPhysicalCallbackReturn(ctx, grant)
+			completion, err := observer.LookupPhysicalCallbackReturn(ctx, grant)
 			if err != nil {
 				t.Fatal(err)
 			}

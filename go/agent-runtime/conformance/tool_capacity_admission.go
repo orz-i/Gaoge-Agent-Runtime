@@ -200,7 +200,7 @@ func toolCapacityAdmission(t *testing.T, factory func(*testing.T) (kernel.Store,
 				if e != nil {
 					t.Fatal(e)
 				}
-				c, e := observer.LookupOwnedPhysicalCallbackReturn(ctx, g)
+				c, e := observer.LookupPhysicalCallbackReturn(ctx, g)
 				if e != nil || !c.HostCompleted {
 					t.Fatal("earlier Child return missing", c, e)
 				}

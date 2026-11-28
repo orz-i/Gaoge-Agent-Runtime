@@ -352,7 +352,7 @@ func toolUnsentRecovery(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 				if e != nil {
 					t.Fatal(e)
 				}
-				c, e := observer.LookupOwnedPhysicalCallbackReturn(ctx, g)
+				c, e := observer.LookupPhysicalCallbackReturn(ctx, g)
 				if e != nil {
 					t.Fatal(e)
 				}
@@ -404,7 +404,7 @@ func toolUnsentRecovery(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 				if e != nil {
 					t.Fatal(e)
 				}
-				c, e := rt.LookupOwnedPhysicalCallbackReturn(ctx, g)
+				c, e := rt.LookupPhysicalCallbackReturn(ctx, g)
 				if e != nil || !c.HostCompleted {
 					t.Fatal("original no-send return missing", c, e)
 				}

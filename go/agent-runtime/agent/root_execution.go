@@ -223,14 +223,14 @@ func (runner *Runner) executeNativeSegment(ctx context.Context, current kernel.S
 	defer cancel()
 	latest, loadErr := scopedRT.Load(cleanup, current.Run.ID)
 	if !grant.IsOwned() {
-		// A parent-bound Grant carries no owned callback return or retirement
-		// receipt. It requires the original durable Mark before exact Finish.
+		// A parent-bound operation uses the same original callback return,
+		// without lease-owned custody. Finish consumes that exact fact.
 		if loadErr != nil || !knownAgentPhysicalSettlement(latest) ||
 			(callErr != nil && !scoped.rootCallbacks.knownReturn.Load().matches(result, latest, callErr)) {
 			return result, errors.Join(callErr, kernel.ErrChildExecutionBusy, loadErr)
 		}
 		proof := physicalSettlementProof(grant, latest)
-		if err := scopedRT.MarkChildExecutionSettled(cleanup, grant, proof); err != nil {
+		if err := scopedRT.RecordPhysicalCallbackReturn(cleanup, grant, latest.Run.Revision, kernel.PhysicalCallbackOutcome{HostCompleted: true}, proof); err != nil {
 			return result, errors.Join(callErr, kernel.ErrChildExecutionBusy, err)
 		}
 		if err := scopedRT.FinishChildExecution(cleanup, grant, proof); err != nil {
@@ -245,7 +245,7 @@ func (runner *Runner) executeNativeSegment(ctx context.Context, current kernel.S
 	state, stateErr := decodeState(latest.State)
 	hostComplete = hostComplete && stateErr == nil && (state.ToolAdmission == nil || state.ToolAdmission.Phase != toolAdmissionEvaluating)
 	settled := hostComplete && knownRootStatePhysicalSettlement(state)
-	outcome := kernel.OwnedPhysicalCallbackOutcome{HostCompleted: hostComplete, LeaseOwned: !external}
+	outcome := kernel.PhysicalCallbackOutcome{HostCompleted: hostComplete, LeaseOwned: !external}
 	pendingCall, pending, _ := FrozenPendingDispatch(latest)
 	returnedCall := false
 	allApproved := false
@@ -319,7 +319,7 @@ func (runner *Runner) retireUnenteredOwnedRoot(ctx context.Context, rt *kernel.R
 	}
 	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 	defer cancel()
-	outcome := kernel.OwnedPhysicalCallbackOutcome{LeaseOwned: !external, ControlCustody: kernel.OwnedCustodyNotEntered}
+	outcome := kernel.PhysicalCallbackOutcome{LeaseOwned: !external, ControlCustody: kernel.OwnedCustodyNotEntered}
 	completion, retired, err := recordOwnedRootReturn(cleanup, rt, g, source, outcome, true)
 	if err != nil {
 		return errors.Join(cause, ErrRootOutcomeUnknown, err)
@@ -335,15 +335,15 @@ func (runner *Runner) retireUnenteredOwnedRoot(ctx context.Context, rt *kernel.R
 
 // Record the exact original return before Finish. Both callback and no-entry
 // retirement recover a lost write ACK only from the same immutable completion.
-func recordOwnedRootReturn(ctx context.Context, rt *kernel.Runtime, g kernel.ChildExecutionGrant, s kernel.Snapshot, o kernel.OwnedPhysicalCallbackOutcome, settled bool) (kernel.OwnedPhysicalCallbackCompletion, bool, error) {
+func recordOwnedRootReturn(ctx context.Context, rt *kernel.Runtime, g kernel.ChildExecutionGrant, s kernel.Snapshot, o kernel.PhysicalCallbackOutcome, settled bool) (kernel.PhysicalCallbackCompletion, bool, error) {
 	domain := "agent_owned_callback_return"
 	if o.ControlCustody == kernel.OwnedCustodyNotEntered {
 		domain = "agent_owned_callback_not_entered"
 	}
-	payload := kernel.OwnedPhysicalCallbackReturnPayload(s, o)
+	payload := kernel.PhysicalCallbackReturnPayload(s, o)
 	proof := featurecontrol.Seal(s.Run.ID, s.Run.Revision, domain, g.ID, payload, nil)
-	c := kernel.OwnedPhysicalCallbackCompletion{GrantID: g.ID, ReturnRevision: s.Run.Revision, ReturnSourceHash: kernel.ManagedDigest(payload), HostCompleted: o.HostCompleted, LeaseOwned: o.LeaseOwned, ControlCustody: o.ControlCustody, ToolReturns: o.ToolReturns}
-	if err := rt.RecordOwnedPhysicalCallbackReturn(ctx, g, s.Run.Revision, o, proof); err != nil {
+	c := kernel.PhysicalCallbackCompletion{GrantID: g.ID, ReturnRevision: s.Run.Revision, ReturnSourceHash: kernel.ManagedDigest(payload), HostCompleted: o.HostCompleted, LeaseOwned: o.LeaseOwned, ControlCustody: o.ControlCustody, ToolReturns: o.ToolReturns}
+	if err := rt.RecordPhysicalCallbackReturn(ctx, g, s.Run.Revision, o, proof); err != nil {
 		if settled {
 			if found, ackErr := observeExactOwnedRetirement(ctx, rt, g, s, &c); found {
 				if ackErr != nil {
@@ -352,7 +352,7 @@ func recordOwnedRootReturn(ctx context.Context, rt *kernel.Runtime, g kernel.Chi
 				return c, true, nil
 			}
 		}
-		stored, lookupErr := rt.LookupOwnedPhysicalCallbackReturn(ctx, g)
+		stored, lookupErr := rt.LookupPhysicalCallbackReturn(ctx, g)
 		if lookupErr != nil || stored != c {
 			return c, false, errors.Join(err, lookupErr)
 		}
@@ -383,7 +383,7 @@ func (runner *Runner) ReconcileRootPhysicalExecution(ctx context.Context, runID 
 
 // Select the actual active original return or the exact finished receipt at
 // the current epoch and source. An absent Grant alone is not completion.
-func (runner *Runner) originalRootReturn(ctx context.Context, snapshot kernel.Snapshot) (kernel.ChildExecutionGrant, *kernel.OwnedPhysicalCallbackCompletion, error) {
+func (runner *Runner) originalRootReturn(ctx context.Context, snapshot kernel.Snapshot) (kernel.ChildExecutionGrant, *kernel.PhysicalCallbackCompletion, error) {
 	grant, err := runner.runtime.LookupChildExecution(ctx, snapshot.Run.ID)
 	if errors.Is(err, kernel.ErrNotFound) {
 		receipt, lookupErr := runner.runtime.LookupOwnedRetirementForRun(ctx, snapshot.Run.ID)
@@ -403,7 +403,7 @@ func (runner *Runner) originalRootReturn(ctx context.Context, snapshot kernel.Sn
 	if !grant.IsOwned() || grant.ExecutionLeaseID == "" || grant.ChildRunID != snapshot.Run.ID {
 		return grant, nil, ErrRootOutcomeUnknown
 	}
-	completion, completionErr := runner.runtime.LookupOwnedPhysicalCallbackReturn(ctx, grant)
+	completion, completionErr := runner.runtime.LookupPhysicalCallbackReturn(ctx, grant)
 	if errors.Is(completionErr, kernel.ErrNotFound) {
 		return grant, nil, nil
 	}
@@ -422,7 +422,7 @@ func (runner *Runner) originalRootReturn(ctx context.Context, snapshot kernel.Sn
 // Every receipt-only consumer uses the same original grant and exact
 // settlement source for Finish. Re-resolving by RunID here
 // could select a successor grant admitted after a concurrent retirement.
-func (runner *Runner) reconcileRootRetirement(ctx context.Context, snapshot kernel.Snapshot, grant kernel.ChildExecutionGrant, completion *kernel.OwnedPhysicalCallbackCompletion) error {
+func (runner *Runner) reconcileRootRetirement(ctx context.Context, snapshot kernel.Snapshot, grant kernel.ChildExecutionGrant, completion *kernel.PhysicalCallbackCompletion) error {
 	if completion != nil && completion.NotEntered() {
 		if !completion.MatchesNotEnteredSnapshot(grant, snapshot) {
 			return ErrRootOutcomeUnknown
@@ -456,7 +456,7 @@ func (runner *Runner) requireRootModelQualification(ctx context.Context, snapsho
 // settleOwnedRoot keeps active-grant retirement separate from historical receipt.
 // A peer's validated retirement already proves closure and must never be followed by
 // another settlement operation requiring the now-deleted grant.
-func settleOwnedRoot(ctx context.Context, rt *kernel.Runtime, grant kernel.ChildExecutionGrant, snapshot kernel.Snapshot, completion *kernel.OwnedPhysicalCallbackCompletion) error {
+func settleOwnedRoot(ctx context.Context, rt *kernel.Runtime, grant kernel.ChildExecutionGrant, snapshot kernel.Snapshot, completion *kernel.PhysicalCallbackCompletion) error {
 	if completion == nil {
 		return ErrRootOutcomeUnknown
 	}
@@ -486,7 +486,7 @@ func physicalSettlementProof(grant kernel.ChildExecutionGrant, s kernel.Snapshot
 
 // The original caller observes the one committed retirement receipt.
 // No confirmation can write or release a lease; Finish already did so.
-func observeExactOwnedRetirement(ctx context.Context, rt *kernel.Runtime, grant kernel.ChildExecutionGrant, snapshot kernel.Snapshot, completion *kernel.OwnedPhysicalCallbackCompletion) (bool, error) {
+func observeExactOwnedRetirement(ctx context.Context, rt *kernel.Runtime, grant kernel.ChildExecutionGrant, snapshot kernel.Snapshot, completion *kernel.PhysicalCallbackCompletion) (bool, error) {
 	if !rt.SupportsOwnedRetirement() {
 		return false, nil
 	}

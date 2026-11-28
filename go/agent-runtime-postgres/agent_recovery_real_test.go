@@ -78,7 +78,7 @@ func TestRealPostgresAgentRecoveryAcrossProcessCrash(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err = runtime.LookupOwnedPhysicalCallbackReturn(t.Context(), grant); !errors.Is(err, kernel.ErrNotFound) {
+			if _, err = runtime.LookupPhysicalCallbackReturn(t.Context(), grant); !errors.Is(err, kernel.ErrNotFound) {
 				t.Fatalf("crash invented callback return: %v", err)
 			}
 			_, err = runner.Resume(t.Context(), pending.Run.ID, pending.Run.Revision)
@@ -270,14 +270,14 @@ func (store *agentCrashStore) ApplyExecution(ctx context.Context, lease kernel.E
 	return snapshot, err
 }
 
-func (store *agentCrashStore) MarkChildExecutionSettled(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
-	if store.event == "callback_return" {
-		return errors.New("injected pre-Mark failure")
+func (store *agentCrashStore) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, o kernel.PhysicalCallbackOutcome, p kernel.PhysicalCallbackReturn) error {
+	if !g.IsOwned() {
+		if store.event == "callback_return" {
+			return errors.New("injected pre-return failure")
+		}
+		return store.KernelStore.RecordPhysicalCallbackReturn(ctx, g, rev, o, p)
 	}
-	return store.KernelStore.MarkChildExecutionSettled(ctx, g, p)
-}
-func (store *agentCrashStore) RecordOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, o kernel.OwnedPhysicalCallbackOutcome, p kernel.OwnedPhysicalCallbackReturn) error {
-	err := store.KernelStore.RecordOwnedPhysicalCallbackReturn(ctx, g, rev, o, p)
+	err := store.KernelStore.RecordPhysicalCallbackReturn(ctx, g, rev, o, p)
 	if err == nil && store.event == "callback_return" {
 		os.Exit(agentCrashExitCode)
 	}
@@ -299,7 +299,7 @@ func TestRealPostgresRecordedCallbackSurvivesProcessCrash(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	completion, e := rt.LookupOwnedPhysicalCallbackReturn(t.Context(), grant)
+	completion, e := rt.LookupPhysicalCallbackReturn(t.Context(), grant)
 	if e != nil || !completion.HostCompleted {
 		t.Fatalf("actual callback return absent: %+v %v", completion, e)
 	}

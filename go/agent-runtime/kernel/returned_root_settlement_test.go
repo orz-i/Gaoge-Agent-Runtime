@@ -21,40 +21,40 @@ func TestReturnedRootCustodyRequiresActualCallbackAndCompleteHistory(t *testing.
 	}
 	for _, tc := range []struct {
 		name   string
-		change func(*kernel.Snapshot, *kernel.ExecutionLease, *kernel.ChildExecutionGrant, *kernel.OwnedPhysicalCallbackCompletion, *[]kernel.OwnedRetirementReceipt)
+		change func(*kernel.Snapshot, *kernel.ExecutionLease, *kernel.ChildExecutionGrant, *kernel.PhysicalCallbackCompletion, *[]kernel.OwnedRetirementReceipt)
 	}{
-		{"not-returned", func(_ *kernel.Snapshot, _ *kernel.ExecutionLease, _ *kernel.ChildExecutionGrant, c *kernel.OwnedPhysicalCallbackCompletion, _ *[]kernel.OwnedRetirementReceipt) {
+		{"not-returned", func(_ *kernel.Snapshot, _ *kernel.ExecutionLease, _ *kernel.ChildExecutionGrant, c *kernel.PhysicalCallbackCompletion, _ *[]kernel.OwnedRetirementReceipt) {
 			c.HostCompleted = false
 		}},
-		{"opaque-callback", func(_ *kernel.Snapshot, _ *kernel.ExecutionLease, _ *kernel.ChildExecutionGrant, c *kernel.OwnedPhysicalCallbackCompletion, _ *[]kernel.OwnedRetirementReceipt) {
+		{"opaque-callback", func(_ *kernel.Snapshot, _ *kernel.ExecutionLease, _ *kernel.ChildExecutionGrant, c *kernel.PhysicalCallbackCompletion, _ *[]kernel.OwnedRetirementReceipt) {
 			c.ControlCustody = ""
 		}},
-		{"borrowed-owner", func(_ *kernel.Snapshot, _ *kernel.ExecutionLease, _ *kernel.ChildExecutionGrant, c *kernel.OwnedPhysicalCallbackCompletion, _ *[]kernel.OwnedRetirementReceipt) {
+		{"borrowed-owner", func(_ *kernel.Snapshot, _ *kernel.ExecutionLease, _ *kernel.ChildExecutionGrant, c *kernel.PhysicalCallbackCompletion, _ *[]kernel.OwnedRetirementReceipt) {
 			c.LeaseOwned = false
 		}},
-		{"foreign-owner", func(_ *kernel.Snapshot, l *kernel.ExecutionLease, _ *kernel.ChildExecutionGrant, _ *kernel.OwnedPhysicalCallbackCompletion, _ *[]kernel.OwnedRetirementReceipt) {
+		{"foreign-owner", func(_ *kernel.Snapshot, l *kernel.ExecutionLease, _ *kernel.ChildExecutionGrant, _ *kernel.PhysicalCallbackCompletion, _ *[]kernel.OwnedRetirementReceipt) {
 			l.OwnerID = "other"
 		}},
-		{"missing-grant", func(_ *kernel.Snapshot, _ *kernel.ExecutionLease, g *kernel.ChildExecutionGrant, _ *kernel.OwnedPhysicalCallbackCompletion, _ *[]kernel.OwnedRetirementReceipt) {
+		{"missing-grant", func(_ *kernel.Snapshot, _ *kernel.ExecutionLease, g *kernel.ChildExecutionGrant, _ *kernel.PhysicalCallbackCompletion, _ *[]kernel.OwnedRetirementReceipt) {
 			g.ID = ""
 		}},
-		{"stale-epoch", func(_ *kernel.Snapshot, _ *kernel.ExecutionLease, g *kernel.ChildExecutionGrant, _ *kernel.OwnedPhysicalCallbackCompletion, _ *[]kernel.OwnedRetirementReceipt) {
+		{"stale-epoch", func(_ *kernel.Snapshot, _ *kernel.ExecutionLease, g *kernel.ChildExecutionGrant, _ *kernel.PhysicalCallbackCompletion, _ *[]kernel.OwnedRetirementReceipt) {
 			g.ExecutionEpoch++
 		}},
-		{"stale-snapshot", func(s *kernel.Snapshot, _ *kernel.ExecutionLease, _ *kernel.ChildExecutionGrant, _ *kernel.OwnedPhysicalCallbackCompletion, _ *[]kernel.OwnedRetirementReceipt) {
+		{"stale-snapshot", func(s *kernel.Snapshot, _ *kernel.ExecutionLease, _ *kernel.ChildExecutionGrant, _ *kernel.PhysicalCallbackCompletion, _ *[]kernel.OwnedRetirementReceipt) {
 			s.EventHead++
 		}},
-		{"foreign-completion", func(_ *kernel.Snapshot, _ *kernel.ExecutionLease, _ *kernel.ChildExecutionGrant, c *kernel.OwnedPhysicalCallbackCompletion, _ *[]kernel.OwnedRetirementReceipt) {
+		{"foreign-completion", func(_ *kernel.Snapshot, _ *kernel.ExecutionLease, _ *kernel.ChildExecutionGrant, c *kernel.PhysicalCallbackCompletion, _ *[]kernel.OwnedRetirementReceipt) {
 			c.GrantID = "other"
 		}},
-		{"opaque-history", func(_ *kernel.Snapshot, _ *kernel.ExecutionLease, _ *kernel.ChildExecutionGrant, _ *kernel.OwnedPhysicalCallbackCompletion, rows *[]kernel.OwnedRetirementReceipt) {
+		{"opaque-history", func(_ *kernel.Snapshot, _ *kernel.ExecutionLease, _ *kernel.ChildExecutionGrant, _ *kernel.PhysicalCallbackCompletion, rows *[]kernel.OwnedRetirementReceipt) {
 			(*rows)[0].Evidence.Completion.ControlCustody = ""
 			(*rows)[0].Digest = (*rows)[0].Identity()
 		}},
-		{"missing-old-ACK", func(_ *kernel.Snapshot, _ *kernel.ExecutionLease, _ *kernel.ChildExecutionGrant, _ *kernel.OwnedPhysicalCallbackCompletion, rows *[]kernel.OwnedRetirementReceipt) {
+		{"missing-old-ACK", func(_ *kernel.Snapshot, _ *kernel.ExecutionLease, _ *kernel.ChildExecutionGrant, _ *kernel.PhysicalCallbackCompletion, rows *[]kernel.OwnedRetirementReceipt) {
 			(*rows)[0].Digest = ""
 		}},
-		{"ambiguous-history", func(_ *kernel.Snapshot, _ *kernel.ExecutionLease, _ *kernel.ChildExecutionGrant, _ *kernel.OwnedPhysicalCallbackCompletion, rows *[]kernel.OwnedRetirementReceipt) {
+		{"ambiguous-history", func(_ *kernel.Snapshot, _ *kernel.ExecutionLease, _ *kernel.ChildExecutionGrant, _ *kernel.PhysicalCallbackCompletion, rows *[]kernel.OwnedRetirementReceipt) {
 			*rows = append(*rows, (*rows)[0])
 		}},
 	} {
@@ -112,7 +112,7 @@ func TestReturnedRootCustodyAcrossPendingRetirement(t *testing.T) {
 			if mode == "missing-current" {
 				rows = rows[:1]
 			}
-			err := kernel.VerifyExecutionCustodyFacts(s, s, 4, 4, lease, active, rows, kernel.ChildExecutionGrant{}, kernel.OwnedPhysicalCallbackCompletion{}, kernel.CustodyReturned)
+			err := kernel.VerifyExecutionCustodyFacts(s, s, 4, 4, lease, active, rows, kernel.ChildExecutionGrant{}, kernel.PhysicalCallbackCompletion{}, kernel.CustodyReturned)
 			if mode == "exact" {
 				if err != nil {
 					t.Fatal(err)

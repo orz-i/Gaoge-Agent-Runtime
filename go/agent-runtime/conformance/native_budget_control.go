@@ -121,7 +121,7 @@ func runNativeBudgetControl(t *testing.T, factory func(*testing.T) ExecutionBudg
 					// Test fixture owns this synthetic no-entry Grant and may retire
 					// it; no production observer is permitted to forge such a proof.
 					proof := featurecontrol.Seal(waiting.Run.ID, waiting.Run.Revision, "agent_child_physical_settled", grant.ID, waiting.State, waiting.Checkpoint)
-					if err = rt.MarkChildExecutionSettled(ctx, grant, proof); err != nil {
+					if err = rt.RecordPhysicalCallbackReturn(ctx, grant, waiting.Run.Revision, kernel.PhysicalCallbackOutcome{HostCompleted: true}, proof); err != nil {
 						t.Fatal(err)
 					}
 					if err = rt.FinishChildExecution(ctx, grant, proof); err != nil {

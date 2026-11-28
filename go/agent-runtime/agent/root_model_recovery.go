@@ -47,7 +47,7 @@ func (runner *Runner) ReconcileModelOutcome(ctx context.Context, runID string, r
 	if err != nil {
 		return snapshot, errors.Join(ErrModelOutcomeUnknown, err)
 	}
-	completion, err := runner.runtime.LookupOwnedPhysicalCallbackReturn(ctx, grant)
+	completion, err := runner.runtime.LookupPhysicalCallbackReturn(ctx, grant)
 	if err != nil {
 		return snapshot, errors.Join(ErrModelOutcomeUnknown, ErrRootOutcomeUnknown, err)
 	}

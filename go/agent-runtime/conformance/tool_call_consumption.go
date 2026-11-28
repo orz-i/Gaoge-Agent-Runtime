@@ -104,7 +104,7 @@ func mixedOriginalToolConsumption(t *testing.T, factory func(*testing.T) (kernel
 	if e != nil {
 		t.Fatal(e)
 	}
-	completion, e := observer.LookupOwnedPhysicalCallbackReturn(ctx, grant)
+	completion, e := observer.LookupPhysicalCallbackReturn(ctx, grant)
 	if e != nil || !completion.MatchesReturnSnapshot(before) || completion.ControlCustody != kernel.OwnedCustodyScoped {
 		t.Fatal("wrong original completion", e, completion)
 	}
@@ -245,7 +245,7 @@ func toolTimelineConsumption(t *testing.T, factory func(*testing.T) (kernel.Stor
 					if gErr != nil {
 						t.Fatal(gErr)
 					}
-					c, cErr := rt.LookupOwnedPhysicalCallbackReturn(ctx, grant)
+					c, cErr := rt.LookupPhysicalCallbackReturn(ctx, grant)
 					if cErr != nil || c.HostCompleted || c.ToolReturns != "" {
 						t.Fatal("unacknowledged callback certified", cErr, c)
 					}

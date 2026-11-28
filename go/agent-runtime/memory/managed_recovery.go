@@ -126,7 +126,7 @@ func (s *Store) CommitManagedCancellation(ctx context.Context, q kernel.ManagedC
 	expected := kernel.ManagedCurrentGrant(t)
 	old, ok := s.activeEffect(expected.ID)
 	state := s.runs[q.RunID].execution
-	if !ok || !s.managedSoleGrantLocked(q.RunID, expected.ID) || old.grant != expected || old.settledRevision != 0 || old.completion.GrantID != "" || !expected.MatchesExecution(state.lease) || state.epoch != expected.ExecutionEpoch || state.epoch == math.MaxUint64 || state.quarantineRev != 0 || t.SafePoint.Host.KernelAuthority != s.managedAuthority {
+	if !ok || !s.managedSoleGrantLocked(q.RunID, expected.ID) || old.grant != expected || old.completion.GrantID != "" || !expected.MatchesExecution(state.lease) || state.epoch != expected.ExecutionEpoch || state.epoch == math.MaxUint64 || state.quarantineRev != 0 || t.SafePoint.Host.KernelAuthority != s.managedAuthority {
 		return kernel.ManagedTransfer{}, kernel.ErrExecutionConflict
 	}
 	t, err = kernel.PrepareManagedAdmission(t, q.Selection, snap, state.lease, old.grant, s.managedAuthority, state.physicalEpoch, s.currentExecutionTime())

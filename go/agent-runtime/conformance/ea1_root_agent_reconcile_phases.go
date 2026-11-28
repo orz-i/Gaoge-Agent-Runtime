@@ -174,7 +174,7 @@ func ea1RootReconcilePhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 	if err != nil {
 		t.Fatal(err)
 	}
-	completion, err := rt.LookupOwnedPhysicalCallbackReturn(t.Context(), grant)
+	completion, err := rt.LookupPhysicalCallbackReturn(t.Context(), grant)
 	if err != nil || !completion.HostCompleted || completion.GrantID != grant.ID {
 		t.Fatalf("positive recovery lacks actual whole-callback completion: %+v %v", completion, err)
 	}
@@ -190,7 +190,7 @@ func ea1RootReconcilePhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 		if e != nil || g != grant {
 			t.Fatal("rejected recovery changed original grant")
 		}
-		c, e := runtime.LookupOwnedPhysicalCallbackReturn(t.Context(), g)
+		c, e := runtime.LookupPhysicalCallbackReturn(t.Context(), g)
 		if e != nil || !ea1RecoveryJSONEqual(c, completion) {
 			t.Fatal("original callback completion changed")
 		}
@@ -391,7 +391,7 @@ func ea1RootReconcilePhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 		if e != nil || current != grant {
 			t.Fatalf("held Finish lost original grant: %v", e)
 		}
-		c, e := rt.LookupOwnedPhysicalCallbackReturn(t.Context(), grant)
+		c, e := rt.LookupPhysicalCallbackReturn(t.Context(), grant)
 		if e != nil || c != completion {
 			t.Fatalf("held Finish changed original callback: %v", e)
 		}

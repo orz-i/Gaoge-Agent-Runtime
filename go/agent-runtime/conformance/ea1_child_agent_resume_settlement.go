@@ -48,11 +48,14 @@ func (s *ea1ChildResumeSettlementStore) BeginChildExecution(ctx context.Context,
 	}
 	return e
 }
-func (s *ea1ChildResumeSettlementStore) MarkChildExecutionSettled(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
+func (s *ea1ChildResumeSettlementStore) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, outcome kernel.PhysicalCallbackOutcome, p kernel.PhysicalCallbackReturn) error {
+	if g.IsOwned() {
+		return s.OwnedPhysicalExecutionStore.RecordPhysicalCallbackReturn(ctx, g, rev, outcome, p)
+	}
 	if s.mode == "P3" {
 		return s.fault
 	}
-	e := s.ChildExecutionStore.MarkChildExecutionSettled(ctx, g, p)
+	e := s.OwnedPhysicalExecutionStore.RecordPhysicalCallbackReturn(ctx, g, rev, outcome, p)
 	if e == nil {
 		s.marks++
 		if s.mode == "P4" {

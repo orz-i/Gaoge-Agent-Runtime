@@ -148,7 +148,7 @@ func originalToolApprovalRecovery(t *testing.T, factory func(*testing.T) (kernel
 				if err != nil {
 					t.Fatal(err)
 				}
-				c, err := observer.LookupOwnedPhysicalCallbackReturn(ctx, g)
+				c, err := observer.LookupPhysicalCallbackReturn(ctx, g)
 				if err != nil {
 					t.Fatal(err)
 				}

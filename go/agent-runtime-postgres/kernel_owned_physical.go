@@ -309,9 +309,9 @@ func (store *KernelStore) ApplyOwnedPhysicalRecovery(ctx context.Context, grant 
 	return result, err
 }
 
-func pgCallbackCompletion(row models.KernelChildEffectGrantRecord) kernel.OwnedPhysicalCallbackCompletion {
-	c := kernel.OwnedPhysicalCallbackCompletion{ReturnRevision: row.CallbackReturnRevision, ReturnSourceHash: row.CallbackReturnSourceHash, HostCompleted: row.CallbackHostCompleted, LeaseOwned: row.CallbackLeaseOwned, ControlCustody: kernel.OwnedCallbackCustody(row.CallbackControlCustody), ToolReturns: kernel.OwnedToolReturns(row.CallbackToolReturns)}
-	if c != (kernel.OwnedPhysicalCallbackCompletion{}) {
+func pgCallbackCompletion(row models.KernelChildEffectGrantRecord) kernel.PhysicalCallbackCompletion {
+	c := kernel.PhysicalCallbackCompletion{ReturnRevision: row.CallbackReturnRevision, ReturnSourceHash: row.CallbackReturnSourceHash, HostCompleted: row.CallbackHostCompleted, LeaseOwned: row.CallbackLeaseOwned, ControlCustody: kernel.OwnedCallbackCustody(row.CallbackControlCustody), ToolReturns: kernel.OwnedToolReturns(row.CallbackToolReturns)}
+	if c != (kernel.PhysicalCallbackCompletion{}) {
 		c.GrantID = row.GrantID
 	}
 	return c
@@ -333,8 +333,8 @@ func pgLoadOwnedPhysicalGrant(tx *gorm.DB, g kernel.ChildExecutionGrant) (models
 	return rows[0], nil
 }
 
-func (store *KernelStore) RecordOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, o kernel.OwnedPhysicalCallbackOutcome, p kernel.OwnedPhysicalCallbackReturn) error {
-	if store == nil || store.db == nil || ctx == nil || !g.IsOwned() || rev == 0 {
+func (store *KernelStore) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, o kernel.PhysicalCallbackOutcome, p kernel.PhysicalCallbackReturn) error {
+	if store == nil || store.db == nil || ctx == nil || !g.Identity().Valid() || g.ExpectedRevision == 0 || rev == 0 {
 		return kernel.ErrInvalidInput
 	}
 	return store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -346,35 +346,55 @@ func (store *KernelStore) RecordOwnedPhysicalCallbackReturn(ctx context.Context,
 		if e != nil {
 			return e
 		}
-		row, e := pgLoadOwnedPhysicalGrant(tx, g)
-		if errors.Is(e, kernel.ErrNotFound) {
+		var rows []models.KernelChildEffectGrantRecord
+		if g.IsOwned() {
+			row, e := pgLoadOwnedPhysicalGrant(tx, g)
+			if errors.Is(e, kernel.ErrNotFound) {
+				return kernel.ErrExecutionConflict
+			}
+			if e != nil {
+				return e
+			}
+			rows = append(rows, row)
+		} else {
+			if e = pgNativeEntryGate(tx, g.ChildRunID); e != nil {
+				return e
+			}
+			if e = tx.Where("grant_id = ? OR child_run_id = ?", g.ID, g.ChildRunID).Find(&rows).Error; e != nil {
+				return translateKernelError(e)
+			}
+		}
+		if len(rows) == 0 {
 			return kernel.ErrExecutionConflict
 		}
-		if e != nil {
-			return e
+		existing := pgCallbackCompletion(rows[0])
+		for _, row := range rows {
+			if pgPhysicalGrant(row) != g || row.SettledRevision != 0 || pgCallbackCompletion(row) != existing {
+				return kernel.ErrExecutionConflict
+			}
 		}
-		completion, write, e := kernel.ReduceOwnedPhysicalCallbackReturn(g, snap, pgManagedLease(current), rev, o, p, pgCallbackCompletion(row), row.SettledRevision, current.ExecutionPhysicalEpoch)
+		completion, write, e := kernel.ReducePhysicalCallbackReturn(g, snap, pgManagedLease(current), rev, o, p, existing, 0, current.ExecutionPhysicalEpoch)
 		if e != nil || !write {
 			return e
 		}
-		result := tx.Model(&models.KernelChildEffectGrantRecord{}).Where("grant_id = ? AND parent_run_id = ? AND callback_return_revision = 0 AND settled_revision = 0", g.ID, g.ChildRunID).UpdateColumns(map[string]any{"callback_return_revision": completion.ReturnRevision, "callback_return_source_hash": completion.ReturnSourceHash, "callback_host_completed": completion.HostCompleted, "callback_lease_owned": completion.LeaseOwned, "callback_control_custody": string(completion.ControlCustody), "callback_tool_returns": string(completion.ToolReturns)})
+		result := tx.Model(&models.KernelChildEffectGrantRecord{}).Where("grant_id = ? AND child_run_id = ? AND start_revision = ? AND callback_return_revision = 0 AND settled_revision = 0", g.ID, g.ChildRunID, g.ExpectedRevision).UpdateColumns(map[string]any{"callback_return_revision": completion.ReturnRevision, "callback_return_source_hash": completion.ReturnSourceHash, "callback_host_completed": completion.HostCompleted, "callback_lease_owned": completion.LeaseOwned, "callback_control_custody": string(completion.ControlCustody), "callback_tool_returns": string(completion.ToolReturns)})
 		if result.Error != nil {
 			return translateKernelError(result.Error)
 		}
-		if result.RowsAffected != 1 {
+		if result.RowsAffected != int64(len(rows)) {
 			return kernel.ErrExecutionConflict
 		}
-		if current.ExecutionPhysicalEpoch < g.ExecutionEpoch {
+		if g.IsOwned() && current.ExecutionPhysicalEpoch < g.ExecutionEpoch {
 			return pgAdvanceOwnedEntryEpoch(tx, g)
 		}
 		return nil
 	})
 }
-func (store *KernelStore) LookupOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant) (kernel.OwnedPhysicalCallbackCompletion, error) {
-	if store == nil || store.db == nil || ctx == nil || !g.IsOwned() {
-		return kernel.OwnedPhysicalCallbackCompletion{}, kernel.ErrInvalidInput
+func (store *KernelStore) LookupPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant) (kernel.PhysicalCallbackCompletion, error) {
+	if store == nil || store.db == nil || ctx == nil || !g.Identity().Valid() || g.ExpectedRevision == 0 {
+		return kernel.PhysicalCallbackCompletion{}, kernel.ErrInvalidInput
 	}
-	var result kernel.OwnedPhysicalCallbackCompletion
+	var result kernel.PhysicalCallbackCompletion
 	err := store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if _, e := lockKernelRun(tx, g.ChildRunID); e != nil {
 			if errors.Is(e, kernel.ErrNotFound) {
@@ -386,15 +406,31 @@ func (store *KernelStore) LookupOwnedPhysicalCallbackReturn(ctx context.Context,
 			}
 			return e
 		}
-		row, e := pgLoadOwnedPhysicalGrant(tx, g)
-		if e != nil {
-			return e
+		if g.IsOwned() {
+			row, e := pgLoadOwnedPhysicalGrant(tx, g)
+			if e != nil {
+				return e
+			}
+			result = pgCallbackCompletion(row)
+		} else {
+			var rows []models.KernelChildEffectGrantRecord
+			if e := tx.Where("grant_id = ? OR child_run_id = ?", g.ID, g.ChildRunID).Find(&rows).Error; e != nil {
+				return translateKernelError(e)
+			}
+			if len(rows) == 0 {
+				return kernel.ErrNotFound
+			}
+			result = pgCallbackCompletion(rows[0])
+			for _, row := range rows {
+				if pgPhysicalGrant(row) != g || row.SettledRevision != 0 || pgCallbackCompletion(row) != result {
+					return kernel.ErrExecutionConflict
+				}
+			}
 		}
-		result = pgCallbackCompletion(row)
-		return kernel.ValidateOwnedPhysicalCompletion(g, result)
+		return kernel.ValidatePhysicalCompletion(g, result)
 	})
 	if err != nil {
-		return kernel.OwnedPhysicalCallbackCompletion{}, err
+		return kernel.PhysicalCallbackCompletion{}, err
 	}
 	return result, nil
 }

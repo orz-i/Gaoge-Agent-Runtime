@@ -4,7 +4,7 @@ package kernel
 // original Run lock. Expiry, a callback-shaped public snapshot, or a newer safe
 // callback cannot replace the actual current return and complete safe history.
 func verifyReturnedRootSettlementFacts(expected, current Snapshot, epoch, physicalEpoch uint64, lease ExecutionLease,
-	grant ChildExecutionGrant, completion OwnedPhysicalCallbackCompletion, receipts []OwnedRetirementReceipt, hasGrants bool,
+	grant ChildExecutionGrant, completion PhysicalCallbackCompletion, receipts []OwnedRetirementReceipt, hasGrants bool,
 ) error {
 	if current.Run.ID == "" || current.Run.ID != expected.Run.ID || current.Run.Kind != "agent" || current.Run.ParentRunID != "" ||
 		(current.Run.Status != RunStatusRunning && current.Run.Status != RunStatusWaitingInput && current.Run.Status != RunStatusPausedBudget) ||
@@ -13,7 +13,7 @@ func verifyReturnedRootSettlementFacts(expected, current Snapshot, epoch, physic
 	}
 	var pending OwnedRetirementReceipt
 	if grant == (ChildExecutionGrant{}) {
-		if completion != (OwnedPhysicalCallbackCompletion{}) {
+		if completion != (PhysicalCallbackCompletion{}) {
 			return ErrExecutionConflict
 		}
 		// Finish already committed and released the owned lease. Observe
@@ -26,7 +26,7 @@ func verifyReturnedRootSettlementFacts(expected, current Snapshot, epoch, physic
 		grant, completion = pending.Evidence.Grant, pending.Evidence.Completion
 	}
 	if grant.ID == "" || grant.ExpectedRevision == 0 || grant.ChildRunID != current.Run.ID || !grant.IsOwned() || (pending.Version == 0 && !grant.MatchesExecution(lease)) ||
-		grant.ExecutionEpoch != epoch || epoch != physicalEpoch || ValidateOwnedPhysicalCompletion(grant, completion) != nil ||
+		grant.ExecutionEpoch != epoch || epoch != physicalEpoch || ValidatePhysicalCompletion(grant, completion) != nil ||
 		!completion.HostCompleted || !completion.LeaseOwned || completion.ControlCustody != OwnedCustodyScoped ||
 		completion.ReturnRevision > current.Run.Revision {
 		return ErrExecutionConflict

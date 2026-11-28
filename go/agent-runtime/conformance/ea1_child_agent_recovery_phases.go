@@ -51,14 +51,17 @@ func (s *ea1ChildRecoveryPhaseStore) BeginChildExecution(ctx context.Context, g 
 	return err
 }
 
-func (s *ea1ChildRecoveryPhaseStore) MarkChildExecutionSettled(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
+func (s *ea1ChildRecoveryPhaseStore) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, outcome kernel.PhysicalCallbackOutcome, p kernel.PhysicalCallbackReturn) error {
+	if g.IsOwned() {
+		return s.OwnedPhysicalExecutionStore.RecordPhysicalCallbackReturn(ctx, g, rev, outcome, p)
+	}
 	if s.beforeMark != nil {
 		s.beforeMark()
 	}
 	if s.mode == "unmarked" {
 		return s.fault
 	}
-	e := s.ChildExecutionStore.MarkChildExecutionSettled(ctx, g, p)
+	e := s.OwnedPhysicalExecutionStore.RecordPhysicalCallbackReturn(ctx, g, rev, outcome, p)
 	if e == nil {
 		s.marks++
 	}

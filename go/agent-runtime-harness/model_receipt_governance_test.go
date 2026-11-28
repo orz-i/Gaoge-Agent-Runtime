@@ -165,7 +165,7 @@ func TestSettledQuotaRejectionSurvivesRootReceiptFault(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				cb, err := rt.LookupOwnedPhysicalCallbackReturn(t.Context(), grant)
+				cb, err := rt.LookupPhysicalCallbackReturn(t.Context(), grant)
 				if err != nil || !cb.HostCompleted {
 					t.Fatalf("fixture must retain returned Host: %+v %v", cb, err)
 				}

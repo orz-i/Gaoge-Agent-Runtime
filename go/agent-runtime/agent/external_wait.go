@@ -143,7 +143,7 @@ func (runner *Runner) NotifyExternalToolResultReady(ctx context.Context, signal 
 		var applyErr error
 		grant, grantErr := runner.runtime.LookupChildExecution(ctx, signal.RunID)
 		if grantErr == nil && grant.IsOwned() {
-			completion, completionErr := runner.runtime.LookupOwnedPhysicalCallbackReturn(ctx, grant)
+			completion, completionErr := runner.runtime.LookupPhysicalCallbackReturn(ctx, grant)
 			if snapshot.Run.ParentRunID != "" || completionErr != nil || !completion.HostCompleted {
 				return snapshot, ErrRootOutcomeUnknown
 			}

@@ -30,18 +30,18 @@ func verifyOwnedCallbackLookupMissingRun(t *testing.T, db *gorm.DB) {
 	}
 	// Query both the native port and Runtime: a matching orphan is a
 	// conflict, a missing identity is absent, and neither can succeed.
-	for _, lookup := range []func(context.Context, kernel.ChildExecutionGrant) (kernel.OwnedPhysicalCallbackCompletion, error){
-		NewKernelStore(db).LookupOwnedPhysicalCallbackReturn, rt.LookupOwnedPhysicalCallbackReturn,
+	for _, lookup := range []func(context.Context, kernel.ChildExecutionGrant) (kernel.PhysicalCallbackCompletion, error){
+		NewKernelStore(db).LookupPhysicalCallbackReturn, rt.LookupPhysicalCallbackReturn,
 	} {
 		got, e := lookup(t.Context(), g)
-		if !errors.Is(e, kernel.ErrExecutionConflict) || got != (kernel.OwnedPhysicalCallbackCompletion{}) {
+		if !errors.Is(e, kernel.ErrExecutionConflict) || got != (kernel.PhysicalCallbackCompletion{}) {
 			t.Fatalf("matching orphan did not report conflict: %+v %v", got, e)
 		}
 		foreign := g
 		foreign.ID = "absent-grant"
 		foreign.ChildRunID = "absent-run"
 		got, e = lookup(t.Context(), foreign)
-		if !errors.Is(e, kernel.ErrNotFound) || got != (kernel.OwnedPhysicalCallbackCompletion{}) {
+		if !errors.Is(e, kernel.ErrNotFound) || got != (kernel.PhysicalCallbackCompletion{}) {
 			t.Fatalf("absent identity did not report absence: %+v %v", got, e)
 		}
 	}

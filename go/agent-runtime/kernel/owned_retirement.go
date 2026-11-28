@@ -11,7 +11,7 @@ type OwnedSettlementEvidence struct {
 	Version    uint64
 	Grant      ChildExecutionGrant
 	Snapshot   Snapshot
-	Completion OwnedPhysicalCallbackCompletion
+	Completion PhysicalCallbackCompletion
 }
 type OwnedRetirementReceipt struct {
 	Version  uint64
@@ -50,7 +50,7 @@ func (e OwnedSettlementEvidence) Valid() bool {
 	if c.NotEntered() {
 		return c.MatchesNotEnteredSnapshot(g, s)
 	}
-	return ValidateOwnedPhysicalCompletion(g, c) == nil && c.HostCompleted && c.ReturnRevision <= s.Run.Revision
+	return ValidatePhysicalCompletion(g, c) == nil && c.HostCompleted && c.ReturnRevision <= s.Run.Revision
 }
 
 // CloseManagedRetirement derives the managed closure only from the exact

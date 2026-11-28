@@ -385,7 +385,7 @@ func ea1ApprovalBarrier(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 			t.Fatal("approval changed admitted scope")
 		}
 		ea1ControlFence(t, f, f.waiting, g, l, entered)
-		if _, e = f.observer.LookupOwnedPhysicalCallbackReturn(t.Context(), g); !errors.Is(e, kernel.ErrNotFound) {
+		if _, e = f.observer.LookupPhysicalCallbackReturn(t.Context(), g); !errors.Is(e, kernel.ErrNotFound) {
 			t.Fatal("active approval fabricated callback return")
 		}
 		m, n := f.physical.counts()
@@ -466,7 +466,7 @@ func ea1ApprovalUnknown(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 	if g.AdmissionOperation != "approval" || g.ExpectedRevision != f.waiting.Run.Revision || g.ExecutionLeaseID != l.LeaseID || g.ExecutionEpoch != l.Epoch || g.ExecutionOwnerID != l.OwnerID {
 		t.Fatal("unknown approval source changed")
 	}
-	c, e := f.rt.LookupOwnedPhysicalCallbackReturn(t.Context(), g)
+	c, e := f.rt.LookupPhysicalCallbackReturn(t.Context(), g)
 	if e != nil || c.HostCompleted != (kind == "tool") {
 		t.Fatal("actual callback return was misclassified")
 	}
@@ -503,7 +503,7 @@ func ea1ApprovalUnknown(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 	if e != nil || same != g {
 		t.Fatal("TTL changed original approval scope")
 	}
-	after, e := freshRT.LookupOwnedPhysicalCallbackReturn(t.Context(), g)
+	after, e := freshRT.LookupPhysicalCallbackReturn(t.Context(), g)
 	if e != nil || !ea1RecoveryJSONEqual(c, after) {
 		t.Fatal("TTL upgraded callback outcome")
 	}
@@ -525,7 +525,7 @@ func ea1ToolWaitPhase(t *testing.T, factory func(*testing.T) (kernel.Store, kern
 	if g.AdmissionOperation != "start" || g.ChildRunID != f.request.ID || g.ExecutionOwnerID != l.OwnerID || g.ExecutionLeaseID != l.LeaseID || g.ExecutionEpoch != l.Epoch || g.AdmissionSourceHash == "" {
 		t.Fatal("ToolWait lost original Start scope/native source")
 	}
-	c, e := f.rt.LookupOwnedPhysicalCallbackReturn(t.Context(), g)
+	c, e := f.rt.LookupPhysicalCallbackReturn(t.Context(), g)
 	if e != nil || !c.HostCompleted {
 		t.Fatal("pending Tool lacks actual returned Host scope")
 	}
@@ -535,7 +535,7 @@ func ea1ToolWaitPhase(t *testing.T, factory func(*testing.T) (kernel.Store, kern
 		if e != nil || same != g {
 			t.Fatal("ToolWait changed original physical scope")
 		}
-		co, e := rt.LookupOwnedPhysicalCallbackReturn(t.Context(), g)
+		co, e := rt.LookupPhysicalCallbackReturn(t.Context(), g)
 		if e != nil || !ea1RecoveryJSONEqual(co, c) {
 			t.Fatal("ToolWait changed original callback fact")
 		}

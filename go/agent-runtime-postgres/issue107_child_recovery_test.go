@@ -41,7 +41,7 @@ func TestIssue107PostgresChildGrantSurvivesNewStoreInstance(t *testing.T) {
 	if lookupErr != nil || original != grant {
 		t.Fatalf("original Grant not recoverable: %+v err=%v", original, lookupErr)
 	}
-	if err = NewKernelStore(db).MarkChildExecutionSettled(t.Context(), original, kernel.ChildExecutionSettlement{}); !errors.Is(err, kernel.ErrExecutionConflict) {
+	if err = NewKernelStore(db).RecordPhysicalCallbackReturn(t.Context(), original, original.ExpectedRevision, kernel.PhysicalCallbackOutcome{HostCompleted: true}, kernel.PhysicalCallbackReturn{}); !errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("untrusted direct Store Mark authorized cleanup: %v", err)
 	}
 	if err = NewKernelStore(db).FinishChildExecution(t.Context(), original, kernel.ChildExecutionSettlement{}); !errors.Is(err, kernel.ErrExecutionConflict) {

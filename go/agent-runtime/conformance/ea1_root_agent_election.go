@@ -441,7 +441,7 @@ func ea1AgentElectionRecovery(t *testing.T, factory func(*testing.T) (kernel.Sto
 	before := f.snapshot()
 	grant := f.grant()
 	f.originalReceipt(before, kind == "tool")
-	completion, err := f.rt.LookupOwnedPhysicalCallbackReturn(ctx, grant)
+	completion, err := f.rt.LookupPhysicalCallbackReturn(ctx, grant)
 	if err != nil || !completion.HostCompleted {
 		t.Fatalf("actual callback return missing: %v", err)
 	}

@@ -160,7 +160,7 @@ func (runtime *Runtime) WithPhysicalGrant(ctx context.Context, grant ChildExecut
 // writes/terminal Control on the executing Run ITSELF and every immutable
 // ancestor in the SAME Store transaction; a read-then-check fallback is
 // insufficient.
-// The Mark port records only borrowed parent-bound callback returns.
+// Callback returns for both kinds use the same physical return port.
 // Finish validates the private settlement permit for both grant kinds.
 // Finish may retire a Grant only after the owning Feature has certified the
 // physical execution returned with no unresolved effects. For an owned Grant,
@@ -174,7 +174,6 @@ func (runtime *Runtime) WithPhysicalGrant(ctx context.Context, grant ChildExecut
 type ChildExecutionStore interface {
 	BeginChildExecution(context.Context, ChildExecutionGrant) error
 	LookupChildExecution(context.Context, string) (ChildExecutionGrant, error)
-	MarkChildExecutionSettled(context.Context, ChildExecutionGrant, ChildExecutionSettlement) error
 	FinishChildExecution(context.Context, ChildExecutionGrant, ChildExecutionSettlement) error
 }
 
@@ -208,25 +207,12 @@ func (runtime *Runtime) BeginChildExecution(ctx context.Context, childRunID stri
 	return grant, nil
 }
 
-// MarkChildExecutionSettled is the original returned-callback witness for
-// a parent-bound borrowed Grant only. Owned Grants already have a durable
-// callback-return fact and retire directly with Finish.
-func (runtime *Runtime) MarkChildExecutionSettled(ctx context.Context, grant ChildExecutionGrant, proof *featurecontrol.Proof) error {
-	return runtime.settleChildExecution(ctx, grant, proof, true)
-}
-
 // FinishChildExecution releases only its exact original Grant. A timed-out
 // callback, lost ACK, unresolved Model/Tool dispatch or detached process does
 // not authorize Finish; the persisted Grant deliberately blocks terminal
 // parent state until its outcome has been reconciled.
 func (runtime *Runtime) FinishChildExecution(ctx context.Context, grant ChildExecutionGrant, proof *featurecontrol.Proof) error {
-	return runtime.settleChildExecution(ctx, grant, proof, false)
-}
 
-func (runtime *Runtime) settleChildExecution(ctx context.Context, grant ChildExecutionGrant, proof *featurecontrol.Proof, markOnly bool) error {
-	if markOnly && grant.IsOwned() {
-		return ErrExecutionConflict
-	}
 	if runtime == nil || ctx == nil || grant.ID == "" || grant.ChildRunID == "" || grant.ExpectedRevision == 0 {
 		return ErrInvalidInput
 	}
@@ -241,9 +227,6 @@ func (runtime *Runtime) settleChildExecution(ctx context.Context, grant ChildExe
 	permit := ChildExecutionSettlement{proof: proof}
 	if !permit.Matches(grant, snapshot) {
 		return ErrExecutionConflict
-	}
-	if markOnly {
-		return store.MarkChildExecutionSettled(ctx, grant, permit)
 	}
 	return store.FinishChildExecution(ctx, grant, permit)
 }

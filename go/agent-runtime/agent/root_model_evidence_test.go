@@ -60,7 +60,7 @@ func TestRootUnknownHostRetainsExactModelEvidenceWithoutConsumption(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	completion, err := rt.LookupOwnedPhysicalCallbackReturn(t.Context(), grant)
+	completion, err := rt.LookupPhysicalCallbackReturn(t.Context(), grant)
 	if err != nil || completion.HostCompleted {
 		t.Fatalf("Host completion=%#v %v", completion, err)
 	}
@@ -126,7 +126,7 @@ func TestRootUnknownHostRetainsExactModelEvidenceWithoutConsumption(t *testing.T
 	if err != nil || retained != grant {
 		t.Fatal("evidence retired original grant")
 	}
-	finalCompletion, err := rt.LookupOwnedPhysicalCallbackReturn(t.Context(), grant)
+	finalCompletion, err := rt.LookupPhysicalCallbackReturn(t.Context(), grant)
 	if err != nil || finalCompletion != completion || host.calls.Load() != 1 || len(provider.callsCopy()) != 1 {
 		t.Fatal("evidence changed Host completion or replayed callbacks")
 	}

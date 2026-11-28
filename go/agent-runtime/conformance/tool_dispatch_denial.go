@@ -252,7 +252,7 @@ func toolDispatchDenial(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 			if err != nil {
 				t.Fatal("original unresolved grant removed", err)
 			}
-			c, err := observer.LookupOwnedPhysicalCallbackReturn(ctx, g)
+			c, err := observer.LookupPhysicalCallbackReturn(ctx, g)
 			if err != nil {
 				t.Fatal(err)
 			}

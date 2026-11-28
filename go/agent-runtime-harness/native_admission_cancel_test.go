@@ -386,7 +386,7 @@ func testHarnessCancelAtActualToolDispatch(t *testing.T, timelineOrder, retireme
 		if e != nil {
 			t.Fatal(e)
 		}
-		c, e := rt.LookupOwnedPhysicalCallbackReturn(ctx, g)
+		c, e := rt.LookupPhysicalCallbackReturn(ctx, g)
 		b, found, bErr := c.ToolReturns.Find("held-call")
 		if e != nil || bErr != nil || !c.HostCompleted || !found || !b.Unsent {
 			t.Fatal("original no-send return not sealed", c, e, b, bErr)
@@ -465,7 +465,7 @@ func testHarnessCancelAtActualToolDispatch(t *testing.T, timelineOrder, retireme
 			if e != nil || g != originalGrant {
 				t.Fatal("original grant changed", e, g)
 			}
-			completion, e := rt.LookupOwnedPhysicalCallbackReturn(ctx, g)
+			completion, e := rt.LookupPhysicalCallbackReturn(ctx, g)
 			if e != nil || !completion.HostCompleted {
 				t.Fatal("original callback evidence lost", e, completion)
 			}

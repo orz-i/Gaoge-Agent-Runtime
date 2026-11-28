@@ -150,7 +150,7 @@ func originalSettledToolReservation(ledger budget.Ledger, q tools.ExecutionReque
 
 // originalCallReturn selects by the current Call rather than by the whole
 // grant's control classification. A sibling cannot borrow another binding.
-func originalCallReturn(s kernel.Snapshot, c kernel.OwnedPhysicalCallbackCompletion, q tools.ExecutionRequest) (kernel.OwnedToolReturn, bool, error) {
+func originalCallReturn(s kernel.Snapshot, c kernel.PhysicalCallbackCompletion, q tools.ExecutionRequest) (kernel.OwnedToolReturn, bool, error) {
 	if !c.HostCompleted || c.ReturnRevision > s.Run.Revision || q.RunID != s.Run.ID {
 		return kernel.OwnedToolReturn{}, false, ErrToolReceiptMismatch
 	}
@@ -275,14 +275,14 @@ func (r *Runner) settleOriginalHeldTool(ctx context.Context, q tools.ExecutionRe
 	return nil, a.settleSuspendedTool(ctx, b.LedgerID, q, budget.Usage{ToolCalls: 1}, raw)
 }
 
-func (r *Runner) settleOriginalToolBudget(ctx context.Context, s kernel.Snapshot, c kernel.OwnedPhysicalCallbackCompletion, request tools.ExecutionRequest, result tools.ExecutionResult) (string, error) {
+func (r *Runner) settleOriginalToolBudget(ctx context.Context, s kernel.Snapshot, c kernel.PhysicalCallbackCompletion, request tools.ExecutionRequest, result tools.ExecutionResult) (string, error) {
 	if c.ReturnRevision != s.Run.Revision || !c.HostCompleted {
 		return "", ErrToolReceiptMismatch
 	}
 	var originalLedger string
 	err := r.settleToolHold(ctx, request, result, func(ledger string) bool {
-		out := kernel.OwnedPhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: c.LeaseOwned, ControlCustody: c.ControlCustody, ToolBudgetScope: ledger}
-		if kernel.ManagedDigest(kernel.OwnedPhysicalCallbackReturnPayload(s, out)) != c.ReturnSourceHash {
+		out := kernel.PhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: c.LeaseOwned, ControlCustody: c.ControlCustody, ToolBudgetScope: ledger}
+		if kernel.ManagedDigest(kernel.PhysicalCallbackReturnPayload(s, out)) != c.ReturnSourceHash {
 			return false
 		}
 		originalLedger = ledger

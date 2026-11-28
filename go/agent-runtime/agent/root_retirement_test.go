@@ -34,17 +34,18 @@ func (s *rootRetirementFaultStore) lose(cut string) bool {
 	}
 	return false
 }
-func (s *rootRetirementFaultStore) RecordOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, revision uint64, outcome kernel.OwnedPhysicalCallbackOutcome, p kernel.OwnedPhysicalCallbackReturn) error {
-	err := s.Store.RecordOwnedPhysicalCallbackReturn(ctx, g, revision, outcome, p)
+func (s *rootRetirementFaultStore) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, revision uint64, outcome kernel.PhysicalCallbackOutcome, p kernel.PhysicalCallbackReturn) error {
+	if !g.IsOwned() {
+		s.markCalls++
+		return s.Store.RecordPhysicalCallbackReturn(ctx, g, revision, outcome, p)
+	}
+	err := s.Store.RecordPhysicalCallbackReturn(ctx, g, revision, outcome, p)
 	if err == nil && s.lose("record") {
 		return errRootRetirementACKLost
 	}
 	return err
 }
-func (s *rootRetirementFaultStore) MarkChildExecutionSettled(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
-	s.markCalls++
-	return s.Store.MarkChildExecutionSettled(ctx, g, p)
-}
+
 func (s *rootRetirementFaultStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
 	s.finishCalls++
 	s.grant = g

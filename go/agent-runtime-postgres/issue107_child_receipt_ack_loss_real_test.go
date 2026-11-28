@@ -16,8 +16,11 @@ import (
 
 type issue107PostMarkAckLossPG struct{ *KernelStore }
 
-func (s issue107PostMarkAckLossPG) MarkChildExecutionSettled(ctx context.Context, grant kernel.ChildExecutionGrant, permit kernel.ChildExecutionSettlement) error {
-	if err := s.KernelStore.MarkChildExecutionSettled(ctx, grant, permit); err != nil {
+func (s issue107PostMarkAckLossPG) RecordPhysicalCallbackReturn(ctx context.Context, grant kernel.ChildExecutionGrant, rev uint64, outcome kernel.PhysicalCallbackOutcome, permit kernel.PhysicalCallbackReturn) error {
+	if grant.IsOwned() {
+		return s.KernelStore.RecordPhysicalCallbackReturn(ctx, grant, rev, outcome, permit)
+	}
+	if err := s.KernelStore.RecordPhysicalCallbackReturn(ctx, grant, rev, outcome, permit); err != nil {
 		return err
 	}
 	return kernel.ErrExecutionBusy // the original ACK was lost AFTER durable Mark

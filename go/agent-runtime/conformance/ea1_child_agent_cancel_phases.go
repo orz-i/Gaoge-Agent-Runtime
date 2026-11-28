@@ -89,15 +89,18 @@ func (s *ea1ChildCancelStore) ApplyControl(ctx context.Context, id string, rev u
 	}
 	return out, revoked, e
 }
-func (s *ea1ChildCancelStore) MarkChildExecutionSettled(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
+func (s *ea1ChildCancelStore) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, outcome kernel.PhysicalCallbackOutcome, p kernel.PhysicalCallbackReturn) error {
+	if g.IsOwned() {
+		return s.OwnedPhysicalExecutionStore.RecordPhysicalCallbackReturn(ctx, g, rev, outcome, p)
+	}
 	if g.ChildRunID != s.runID {
-		return s.ChildExecutionStore.MarkChildExecutionSettled(ctx, g, p)
+		return s.OwnedPhysicalExecutionStore.RecordPhysicalCallbackReturn(ctx, g, rev, outcome, p)
 	}
 	s.markAttempts++
 	if s.mode == "P3" {
 		return s.fault
 	}
-	e := s.ChildExecutionStore.MarkChildExecutionSettled(ctx, g, p)
+	e := s.OwnedPhysicalExecutionStore.RecordPhysicalCallbackReturn(ctx, g, rev, outcome, p)
 	if e == nil {
 		s.marks++
 		if s.mode == "P4" {

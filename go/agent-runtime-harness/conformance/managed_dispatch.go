@@ -47,7 +47,7 @@ func (m *dispatchFrontierModel) Generate(ctx context.Context, r model.Request) (
 // Control, Model and Tool obligations already settled at a safe point.
 type approvalReturnFailure struct{ preparationKernelPorts }
 
-func (s approvalReturnFailure) RecordOwnedPhysicalCallbackReturn(context.Context, kernel.ChildExecutionGrant, uint64, kernel.OwnedPhysicalCallbackOutcome, kernel.OwnedPhysicalCallbackReturn) error {
+func (s approvalReturnFailure) RecordPhysicalCallbackReturn(context.Context, kernel.ChildExecutionGrant, uint64, kernel.PhysicalCallbackOutcome, kernel.PhysicalCallbackReturn) error {
 	return errors.New("original callback record refused before commit")
 }
 
@@ -360,7 +360,7 @@ func ManagedPhysicalDispatch(t *testing.T, factory func(*testing.T) (kernel.Stor
 				if !point.Valid() || point.Selection.Mode != "" {
 					t.Fatal("wrong original return failure cut")
 				}
-				if _, err := rt.LookupOwnedPhysicalCallbackReturn(ctx, g); !errors.Is(err, kernel.ErrNotFound) {
+				if _, err := rt.LookupPhysicalCallbackReturn(ctx, g); !errors.Is(err, kernel.ErrNotFound) {
 					t.Fatalf("unexpected original callback evidence: %v", err)
 				}
 				if c.name != "approval/return-record-failed" {

@@ -54,11 +54,11 @@ func (s *noEntryKernelCut) CheckOwnedPhysicalEntry(ctx context.Context, g kernel
 	}
 	return s.noEntryKernelPorts.CheckOwnedPhysicalEntry(ctx, g, l, v)
 }
-func (s *noEntryKernelCut) RecordOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, o kernel.OwnedPhysicalCallbackOutcome, p kernel.OwnedPhysicalCallbackReturn) error {
+func (s *noEntryKernelCut) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, o kernel.PhysicalCallbackOutcome, p kernel.PhysicalCallbackReturn) error {
 	if s.loseEvidence && g == s.grant {
 		return errNoEntryCut
 	}
-	return s.noEntryKernelPorts.RecordOwnedPhysicalCallbackReturn(ctx, g, rev, o, p)
+	return s.noEntryKernelPorts.RecordPhysicalCallbackReturn(ctx, g, rev, o, p)
 }
 
 func (s *noEntryKernelCut) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
@@ -185,7 +185,7 @@ func NoEntryCancellation(t *testing.T, factory func(*testing.T) (kernel.Store, h
 					t.Fatalf("native resume still wrote a Host dispatch: %v", e)
 				}
 				if mode != "unknown-no-entry" {
-					returned, e := rt.LookupOwnedPhysicalCallbackReturn(ctx, cut.grant)
+					returned, e := rt.LookupPhysicalCallbackReturn(ctx, cut.grant)
 					if e != nil || !returned.MatchesNotEnteredSnapshot(cut.grant, before) {
 						t.Fatalf("exact original no-entry missing: %v", e)
 					}

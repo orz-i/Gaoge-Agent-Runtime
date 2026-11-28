@@ -13,7 +13,7 @@ func retirementFixture() (OwnedRetirementReceipt, ExecutionLease) {
 	l := ExecutionLease{RunID: "root", OwnerID: "owner", LeaseID: "lease", Epoch: 1}
 	g := ChildExecutionGrant{ID: "scope", ChildRunID: "root", ExpectedRevision: 1, ExecutionOwnerID: l.OwnerID, ExecutionLeaseID: l.LeaseID, ExecutionEpoch: l.Epoch, AdmissionSourceHash: strings.Repeat("a", 64), AdmissionOperation: "start"}
 	s := Snapshot{Run: Run{ID: "root", Kind: "agent", Status: RunStatusRunning, Revision: 2}, State: json.RawMessage(`{"receipt":"original"}`)}
-	c := OwnedPhysicalCallbackCompletion{GrantID: g.ID, ReturnRevision: 2, ReturnSourceHash: strings.Repeat("b", 64), HostCompleted: true, LeaseOwned: true}
+	c := PhysicalCallbackCompletion{GrantID: g.ID, ReturnRevision: 2, ReturnSourceHash: strings.Repeat("b", 64), HostCompleted: true, LeaseOwned: true}
 	r := OwnedRetirementReceipt{Version: 1, Evidence: OwnedSettlementEvidence{Version: 1, Grant: g, Snapshot: s, Completion: c}, Closures: []ManagedTransfer{}}
 	r.Digest = r.Identity()
 	return r, l
@@ -52,7 +52,7 @@ func TestOwnedRetirementWireAndExactFinish(t *testing.T) {
 			case "unknown-return":
 				completion.HostCompleted = false
 			case "missing-return":
-				completion = OwnedPhysicalCallbackCompletion{}
+				completion = PhysicalCallbackCompletion{}
 			case "old-intermediate":
 				old := r
 

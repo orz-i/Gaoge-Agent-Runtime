@@ -52,7 +52,7 @@ func (c ExecutionCustody) Valid() bool {
 // differs. Expired lease-only ownership may be ignored for retired proofs,
 // never for the retained original physical callback.
 func VerifyExecutionCustodyFacts(expected, current Snapshot, epoch, physicalEpoch uint64, lease ExecutionLease,
-	hasActiveGrants bool, receipts []OwnedRetirementReceipt, grant ChildExecutionGrant, completion OwnedPhysicalCallbackCompletion,
+	hasActiveGrants bool, receipts []OwnedRetirementReceipt, grant ChildExecutionGrant, completion PhysicalCallbackCompletion,
 	requirement ExecutionCustody) error {
 	var operation string
 	var toolCustody OwnedCallbackCustody

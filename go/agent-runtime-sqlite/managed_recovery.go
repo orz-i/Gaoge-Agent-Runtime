@@ -117,7 +117,7 @@ func sqliteManagedGrant(ctx context.Context, tx *sql.Tx, id string) (kernel.Chil
 	if _, e = loadOwnedPhysicalGrant(ctx, tx, g); e != nil {
 		return g, e
 	}
-	_, e = loadOwnedCallbackReturn(ctx, tx, g)
+	_, e = loadPhysicalCallbackReturn(ctx, tx, g)
 	if !errors.Is(e, kernel.ErrNotFound) {
 		if e != nil {
 			return g, e

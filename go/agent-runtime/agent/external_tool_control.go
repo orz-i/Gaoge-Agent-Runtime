@@ -112,14 +112,14 @@ func (r *Runner) externalControlWait(ctx context.Context, revision uint64, c Ext
 	}
 	out.grant = g
 	out.request = tools.ExecutionRequest{RunID: c.RunID, Call: tools.CloneCall(call)}
-	completion, err := r.runtime.LookupOwnedPhysicalCallbackReturn(ctx, g)
+	completion, err := r.runtime.LookupPhysicalCallbackReturn(ctx, g)
 	if err != nil || !completion.HostCompleted || completion.GrantID != g.ID || completion.ReturnRevision != revision {
 		return out, errors.Join(ErrRootOutcomeUnknown, err)
 	}
 	if completion.ControlCustody != kernel.OwnedCustodyScoped && completion.ControlCustody != kernel.OwnedBoundedApprovalReturn {
 		return out, ErrRootOutcomeUnknown
 	}
-	outcome := kernel.OwnedPhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: completion.LeaseOwned, ControlCustody: completion.ControlCustody, ToolReturns: completion.ToolReturns}
+	outcome := kernel.PhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: completion.LeaseOwned, ControlCustody: completion.ControlCustody, ToolReturns: completion.ToolReturns}
 	if binding, found, bindingErr := originalCallReturn(s, completion, out.request); bindingErr != nil {
 		return out, errors.Join(ErrRootOutcomeUnknown, bindingErr)
 	} else if found && (binding.ReceiptDigest != "" ||
@@ -127,7 +127,7 @@ func (r *Runner) externalControlWait(ctx context.Context, revision uint64, c Ext
 		(binding.LedgerID == "" && state.ExternalToolHold != nil)) {
 		return out, ErrToolReceiptMismatch
 	}
-	out.returnHash = kernel.ManagedDigest(kernel.OwnedPhysicalCallbackReturnPayload(s, outcome))
+	out.returnHash = kernel.ManagedDigest(kernel.PhysicalCallbackReturnPayload(s, outcome))
 	if out.returnHash != completion.ReturnSourceHash {
 		return out, ErrRootOutcomeUnknown
 	}
@@ -221,10 +221,10 @@ func (r *Runner) retireExternalToolControl(ctx context.Context, s kernel.Snapsho
 // original grant identity verifiable both before and after its retirement.
 func (r *Runner) verifyRecordedControl(ctx context.Context, s kernel.Snapshot, p *externalToolCancellation) error {
 	g, err := r.runtime.LookupChildExecution(ctx, s.Run.ID)
-	var original kernel.OwnedPhysicalCallbackCompletion
+	var original kernel.PhysicalCallbackCompletion
 	switch {
 	case err == nil && g.ID == p.GrantID:
-		original, err = r.runtime.LookupOwnedPhysicalCallbackReturn(ctx, g)
+		original, err = r.runtime.LookupPhysicalCallbackReturn(ctx, g)
 	case errors.Is(err, kernel.ErrNotFound):
 		var record kernel.OwnedRetirementReceipt
 		record, err = r.runtime.LoadOwnedRetirement(ctx, p.GrantID)

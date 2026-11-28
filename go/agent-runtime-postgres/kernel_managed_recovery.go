@@ -94,7 +94,7 @@ func pgManagedGrant(tx *gorm.DB, id string) (kernel.ChildExecutionGrant, error) 
 	if e := tx.Where("parent_run_id = ? OR child_run_id = ?", id, id).Find(&rows).Error; e != nil {
 		return kernel.ChildExecutionGrant{}, translateKernelError(e)
 	}
-	if len(rows) != 1 || rows[0].ParentRunID != id || rows[0].ChildRunID != id || rows[0].SettledRevision != 0 || pgCallbackCompletion(rows[0]) != (kernel.OwnedPhysicalCallbackCompletion{}) {
+	if len(rows) != 1 || rows[0].ParentRunID != id || rows[0].ChildRunID != id || rows[0].SettledRevision != 0 || pgCallbackCompletion(rows[0]) != (kernel.PhysicalCallbackCompletion{}) {
 		return kernel.ChildExecutionGrant{}, kernel.ErrExecutionConflict
 	}
 	g := pgPhysicalGrant(rows[0])

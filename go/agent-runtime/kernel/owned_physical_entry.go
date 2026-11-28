@@ -65,7 +65,7 @@ func PrepareOwnedEntryEpoch(g ChildExecutionGrant, epoch, previous uint64) (uint
 // success, commit its native physical epoch under the
 // same transaction before returning the window.
 func ValidateOwnedPhysicalEntry(g ChildExecutionGrant, expected, current Snapshot, claimed, persisted ExecutionLease,
-	now time.Time, quarantined bool, physicalEpoch, marked uint64, completion OwnedPhysicalCallbackCompletion, transfer ManagedTransfer,
+	now time.Time, quarantined bool, physicalEpoch, marked uint64, completion PhysicalCallbackCompletion, transfer ManagedTransfer,
 ) (OwnedPhysicalEntryWindow, error) {
 	if err := ValidateOwnedPhysicalAdmissionRequest(g, claimed); err != nil {
 		return OwnedPhysicalEntryWindow{}, err
@@ -73,7 +73,7 @@ func ValidateOwnedPhysicalEntry(g ChildExecutionGrant, expected, current Snapsho
 	if current.Run.ID != g.ChildRunID || current.Run.Kind != "agent" || current.Run.ParentRunID != "" ||
 		current.Run.Revision != g.ExpectedRevision || ManagedDigest(current) != ManagedDigest(expected) ||
 		!g.MatchesExecution(persisted) || marked != 0 ||
-		completion != (OwnedPhysicalCallbackCompletion{}) || !now.Before(persisted.ExpiresAt) {
+		completion != (PhysicalCallbackCompletion{}) || !now.Before(persisted.ExpiresAt) {
 		return OwnedPhysicalEntryWindow{}, ErrExecutionConflict
 	}
 	if quarantined {

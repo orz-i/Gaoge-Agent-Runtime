@@ -64,7 +64,7 @@ func TestIssue107SQLiteGrantSurvivesReopenUntilOriginalSettlement(t *testing.T) 
 	if err = second.FinishChildExecution(t.Context(), original, kernel.ChildExecutionSettlement{}); !errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("reopened pending Grant was unsafely retired: %v", err)
 	}
-	if err = second.MarkChildExecutionSettled(t.Context(), original, kernel.ChildExecutionSettlement{}); !errors.Is(err, kernel.ErrExecutionConflict) {
+	if err = second.RecordPhysicalCallbackReturn(t.Context(), original, original.ExpectedRevision, kernel.PhysicalCallbackOutcome{HostCompleted: true}, kernel.PhysicalCallbackReturn{}); !errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("untrusted direct Store Mark authorized cleanup: %v", err)
 	}
 	if err = second.FinishChildExecution(t.Context(), original, kernel.ChildExecutionSettlement{}); !errors.Is(err, kernel.ErrExecutionConflict) {

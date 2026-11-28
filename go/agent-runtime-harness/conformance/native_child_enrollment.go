@@ -308,7 +308,7 @@ func nativeChildEnrollment(t *testing.T, factory func(*testing.T) NativeAuthorit
 					t.Fatal("missing original parent")
 				}
 				g, ge := probe.LookupChildExecution(ctx, root.ExecutionRefID)
-				completion, ce := probe.LookupOwnedPhysicalCallbackReturn(ctx, g)
+				completion, ce := probe.LookupPhysicalCallbackReturn(ctx, g)
 				if ge != nil || ce != nil || !completion.HostCompleted || completion.GrantID != g.ID {
 					t.Fatalf("original parent callback not returned: %v / %v", ge, ce)
 				}

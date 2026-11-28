@@ -259,7 +259,7 @@ func (store *Store) applyLocked(ctx context.Context, runID string, expectedRevis
 		g, ok := store.ownedGrantLocked(runID)
 		lease := store.runs[runID].execution.lease
 		safe = mutation.ManagedSafePoint.Point()
-		if !ok || g.settledRevision != 0 || g.completion.GrantID != "" || store.runs[runID].execution.quarantineRev != 0 || !activeMemoryLease(store.runs[runID].execution, lease, store.currentExecutionTime()) || safe.Host.KernelAuthority != store.managedAuthority || !mutation.ManagedSafePoint.MatchesMutation(current, mutation.Record, lease, g.grant, mutation.Events) {
+		if !ok || g.completion.GrantID != "" || store.runs[runID].execution.quarantineRev != 0 || !activeMemoryLease(store.runs[runID].execution, lease, store.currentExecutionTime()) || safe.Host.KernelAuthority != store.managedAuthority || !mutation.ManagedSafePoint.MatchesMutation(current, mutation.Record, lease, g.grant, mutation.Events) {
 			return kernel.Snapshot{}, kernel.ErrExecutionConflict
 		}
 		if _, exists := store.managedTransfers[safe.ID]; exists {

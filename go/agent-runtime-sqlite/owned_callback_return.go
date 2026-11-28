@@ -9,22 +9,42 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
-// loadOwnedCallbackReturn is only used inside the same transaction that checks
+// loadPhysicalCallbackReturn is only used inside the same transaction that checks
 // the immutable active grant. A callback return is not a reusable Run receipt.
-func loadOwnedCallbackReturn(ctx context.Context, q schemaQuery, g kernel.ChildExecutionGrant) (kernel.OwnedPhysicalCallbackCompletion, error) {
-	var c kernel.OwnedPhysicalCallbackCompletion
-	err := q.QueryRowContext(ctx, `SELECT callback_return_revision,callback_return_source_hash,callback_host_completed,callback_lease_owned,callback_control_custody,callback_tool_returns FROM runtime_child_effect_grants WHERE grant_id=? AND parent_run_id=? AND child_run_id=?`, g.ID, g.ChildRunID, g.ChildRunID).Scan(&c.ReturnRevision, &c.ReturnSourceHash, &c.HostCompleted, &c.LeaseOwned, &c.ControlCustody, &c.ToolReturns)
-	if errors.Is(err, sql.ErrNoRows) {
-		return kernel.OwnedPhysicalCallbackCompletion{}, kernel.ErrNotFound
+func loadPhysicalCallbackReturn(ctx context.Context, q schemaQuery, g kernel.ChildExecutionGrant) (kernel.PhysicalCallbackCompletion, error) {
+	var c kernel.PhysicalCallbackCompletion
+	query := "SELECT DISTINCT callback_return_revision,callback_return_source_hash,callback_host_completed,callback_lease_owned,callback_control_custody,callback_tool_returns FROM runtime_child_effect_grants WHERE grant_id=? AND child_run_id=?"
+	args := []any{g.ID, g.ChildRunID}
+	if g.IsOwned() {
+		query += " AND parent_run_id=?"
+		args = append(args, g.ChildRunID)
 	}
+	rows, err := q.QueryContext(ctx, query, args...)
 	if err != nil {
-		return kernel.OwnedPhysicalCallbackCompletion{}, conflictOrDatabaseError(err)
+		return c, conflictOrDatabaseError(err)
 	}
-	if c != (kernel.OwnedPhysicalCallbackCompletion{}) {
+	defer rows.Close()
+	count := 0
+	for rows.Next() {
+		count++
+		if err = rows.Scan(&c.ReturnRevision, &c.ReturnSourceHash, &c.HostCompleted, &c.LeaseOwned, &c.ControlCustody, &c.ToolReturns); err != nil {
+			return c, conflictOrDatabaseError(err)
+		}
+	}
+	if err = rows.Err(); err != nil {
+		return c, conflictOrDatabaseError(err)
+	}
+	if count == 0 {
+		return c, kernel.ErrNotFound
+	}
+	if count != 1 {
+		return kernel.PhysicalCallbackCompletion{}, kernel.ErrExecutionConflict
+	}
+	if c != (kernel.PhysicalCallbackCompletion{}) {
 		c.GrantID = g.ID
 	}
-	if err = kernel.ValidateOwnedPhysicalCompletion(g, c); err != nil {
-		return kernel.OwnedPhysicalCallbackCompletion{}, err
+	if err = kernel.ValidatePhysicalCompletion(g, c); err != nil {
+		return kernel.PhysicalCallbackCompletion{}, err
 	}
 	return c, nil
 }
@@ -86,7 +106,7 @@ func (s *Store) CheckOwnedPhysicalEntry(ctx context.Context, g kernel.ChildExecu
 	if active != 1 {
 		return kernel.OwnedPhysicalEntryWindow{}, kernel.ErrExecutionConflict
 	}
-	completion, err := loadOwnedCallbackReturn(ctx, tx, g)
+	completion, err := loadPhysicalCallbackReturn(ctx, tx, g)
 	if err != nil && !errors.Is(err, kernel.ErrNotFound) {
 		return kernel.OwnedPhysicalEntryWindow{}, err
 	}
@@ -145,8 +165,8 @@ func advanceOwnedEntryEpoch(ctx context.Context, tx *sql.Tx, g kernel.ChildExecu
 	return nil
 }
 
-func (s *Store) RecordOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, revision uint64, outcome kernel.OwnedPhysicalCallbackOutcome, permit kernel.OwnedPhysicalCallbackReturn) error {
-	if s == nil || s.db == nil || ctx == nil || !g.IsOwned() || revision == 0 {
+func (s *Store) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, revision uint64, outcome kernel.PhysicalCallbackOutcome, permit kernel.PhysicalCallbackReturn) error {
+	if s == nil || s.db == nil || ctx == nil || !g.Identity().Valid() || g.ExpectedRevision == 0 || revision == 0 {
 		return kernel.ErrInvalidInput
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -154,7 +174,25 @@ func (s *Store) RecordOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.
 		return conflictOrDatabaseError(err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	marked, err := loadOwnedPhysicalGrant(ctx, tx, g)
+	var marked uint64
+	count := 1
+	if g.IsOwned() {
+		marked, err = loadOwnedPhysicalGrant(ctx, tx, g)
+	} else {
+		if err = sqliteNativeEntryGate(ctx, tx, g.ChildRunID); err != nil {
+			return err
+		}
+		var original kernel.ChildExecutionGrant
+		original, marked, err = loadPhysicalGrant(ctx, tx, g.ChildRunID)
+		if err == nil && original != g {
+			return kernel.ErrExecutionConflict
+		}
+		if err == nil {
+			if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM runtime_child_effect_grants WHERE grant_id=?", g.ID).Scan(&count); err != nil {
+				return err
+			}
+		}
+	}
 	if errors.Is(err, kernel.ErrNotFound) {
 		return kernel.ErrExecutionConflict
 	}
@@ -169,7 +207,7 @@ func (s *Store) RecordOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.
 	if err != nil {
 		return err
 	}
-	existing, err := loadOwnedCallbackReturn(ctx, tx, g)
+	existing, err := loadPhysicalCallbackReturn(ctx, tx, g)
 	if err != nil && !errors.Is(err, kernel.ErrNotFound) {
 		return err
 	}
@@ -177,11 +215,11 @@ func (s *Store) RecordOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.
 	if err = tx.QueryRowContext(ctx, "SELECT execution_physical_epoch FROM runtime_runs WHERE run_id=?", g.ChildRunID).Scan(&physicalEpoch); err != nil {
 		return conflictOrDatabaseError(err)
 	}
-	completion, write, err := kernel.ReduceOwnedPhysicalCallbackReturn(g, current, native, revision, outcome, permit, existing, marked, physicalEpoch)
+	completion, write, err := kernel.ReducePhysicalCallbackReturn(g, current, native, revision, outcome, permit, existing, marked, physicalEpoch)
 	if err != nil || !write {
 		return err
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE runtime_child_effect_grants SET callback_return_revision=?,callback_return_source_hash=?,callback_host_completed=?,callback_lease_owned=?,callback_control_custody=?,callback_tool_returns=? WHERE grant_id=? AND parent_run_id=? AND child_run_id=? AND settled_revision=0 AND callback_return_revision=0`, completion.ReturnRevision, completion.ReturnSourceHash, completion.HostCompleted, completion.LeaseOwned, string(completion.ControlCustody), string(completion.ToolReturns), g.ID, g.ChildRunID, g.ChildRunID)
+	result, err := tx.ExecContext(ctx, `UPDATE runtime_child_effect_grants SET callback_return_revision=?,callback_return_source_hash=?,callback_host_completed=?,callback_lease_owned=?,callback_control_custody=?,callback_tool_returns=? WHERE grant_id=? AND child_run_id=? AND start_revision=? AND settled_revision=0 AND callback_return_revision=0`, completion.ReturnRevision, completion.ReturnSourceHash, completion.HostCompleted, completion.LeaseOwned, string(completion.ControlCustody), string(completion.ToolReturns), g.ID, g.ChildRunID, g.ExpectedRevision)
 	if err != nil {
 		return conflictOrDatabaseError(err)
 	}
@@ -189,10 +227,10 @@ func (s *Store) RecordOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.
 	if err != nil {
 		return err
 	}
-	if n != 1 {
+	if n != int64(count) {
 		return kernel.ErrExecutionConflict
 	}
-	if physicalEpoch < g.ExecutionEpoch {
+	if g.IsOwned() && physicalEpoch < g.ExecutionEpoch {
 		if err = advanceOwnedEntryEpoch(ctx, tx, g); err != nil {
 			return err
 		}
@@ -200,25 +238,35 @@ func (s *Store) RecordOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.
 	return conflictOrDatabaseError(tx.Commit())
 }
 
-func (s *Store) LookupOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant) (kernel.OwnedPhysicalCallbackCompletion, error) {
-	if s == nil || s.db == nil || ctx == nil || !g.IsOwned() {
-		return kernel.OwnedPhysicalCallbackCompletion{}, kernel.ErrInvalidInput
+func (s *Store) LookupPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant) (kernel.PhysicalCallbackCompletion, error) {
+	if s == nil || s.db == nil || ctx == nil || !g.Identity().Valid() || g.ExpectedRevision == 0 {
+		return kernel.PhysicalCallbackCompletion{}, kernel.ErrInvalidInput
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return kernel.OwnedPhysicalCallbackCompletion{}, conflictOrDatabaseError(err)
+		return kernel.PhysicalCallbackCompletion{}, conflictOrDatabaseError(err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err = loadOwnedPhysicalGrant(ctx, tx, g); err != nil {
-		return kernel.OwnedPhysicalCallbackCompletion{}, err
+	if g.IsOwned() {
+		if _, err = loadOwnedPhysicalGrant(ctx, tx, g); err != nil {
+			return kernel.PhysicalCallbackCompletion{}, err
+		}
+	} else {
+		original, marked, e := loadPhysicalGrant(ctx, tx, g.ChildRunID)
+		if e != nil {
+			return kernel.PhysicalCallbackCompletion{}, e
+		}
+		if original != g || marked != 0 {
+			return kernel.PhysicalCallbackCompletion{}, kernel.ErrExecutionConflict
+		}
 	}
 	// A matching orphan is an integrity conflict, not an original return.
 	var sourceID string
 	if err = tx.QueryRowContext(ctx, "SELECT run_id FROM runtime_runs WHERE run_id=?", g.ChildRunID).Scan(&sourceID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return kernel.OwnedPhysicalCallbackCompletion{}, kernel.ErrExecutionConflict
+			return kernel.PhysicalCallbackCompletion{}, kernel.ErrExecutionConflict
 		}
-		return kernel.OwnedPhysicalCallbackCompletion{}, conflictOrDatabaseError(err)
+		return kernel.PhysicalCallbackCompletion{}, conflictOrDatabaseError(err)
 	}
-	return loadOwnedCallbackReturn(ctx, tx, g)
+	return loadPhysicalCallbackReturn(ctx, tx, g)
 }

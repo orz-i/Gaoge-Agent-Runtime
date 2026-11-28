@@ -40,8 +40,8 @@ func TestSuspendedToolSettlementRequiresOriginalCallbackAndReservation(t *testin
 	if err = store.SaveBudget(ctx, budget.Ledger{ID: "turn", Revision: 1, Runs: map[string]budget.RunBudget{"run": {}}, Reservations: map[string]budget.Reservation{id: res}}, 0); err != nil {
 		t.Fatal(err)
 	}
-	out := kernel.OwnedPhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: true, ControlCustody: kernel.OwnedToolBudgetReturn, ToolBudgetScope: "turn"}
-	c := kernel.OwnedPhysicalCallbackCompletion{GrantID: "grant", ReturnRevision: 7, ReturnSourceHash: kernel.ManagedDigest(kernel.OwnedPhysicalCallbackReturnPayload(s, out)), HostCompleted: true, LeaseOwned: true, ControlCustody: out.ControlCustody}
+	out := kernel.PhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: true, ControlCustody: kernel.OwnedToolBudgetReturn, ToolBudgetScope: "turn"}
+	c := kernel.PhysicalCallbackCompletion{GrantID: "grant", ReturnRevision: 7, ReturnSourceHash: kernel.ManagedDigest(kernel.PhysicalCallbackReturnPayload(s, out)), HostCompleted: true, LeaseOwned: true, ControlCustody: out.ControlCustody}
 	result := tools.ExecutionResult{Content: []byte("{}"), Receipt: tools.Receipt{ExecutionID: "call", Disposition: "committed", OwnerReceiptDigest: strings.Repeat("a", 64)}}
 	ports.scope = "other-turn"
 	if _, err := r.settleOriginalToolBudget(ctx, s, c, q, result); !errors.Is(err, ErrToolReceiptMismatch) {

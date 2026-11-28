@@ -85,7 +85,7 @@ func TestBudgetProjectionFailureCannotEraseSettledModelReceipt(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			completion, err := runtime.LookupOwnedPhysicalCallbackReturn(t.Context(), grant)
+			completion, err := runtime.LookupPhysicalCallbackReturn(t.Context(), grant)
 			if err != nil || completion.HostCompleted != replay {
 				t.Fatalf("incorrect original fixed-stage completion: %+v %v", completion, err)
 			}

@@ -53,9 +53,12 @@ func (s *ea1StartSettlementStore) Create(ctx context.Context, r kernel.Record, e
 	}
 	return snap, err
 }
-func (s *ea1StartSettlementStore) MarkChildExecutionSettled(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
+func (s *ea1StartSettlementStore) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, outcome kernel.PhysicalCallbackOutcome, p kernel.PhysicalCallbackReturn) error {
+	if g.IsOwned() {
+		return s.OwnedPhysicalExecutionStore.RecordPhysicalCallbackReturn(ctx, g, rev, outcome, p)
+	}
 	s.markCalls++
-	return s.ChildExecutionStore.MarkChildExecutionSettled(ctx, g, p)
+	return s.OwnedPhysicalExecutionStore.RecordPhysicalCallbackReturn(ctx, g, rev, outcome, p)
 }
 func (s *ea1StartSettlementStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
 	s.finishCalls++
@@ -427,15 +430,15 @@ func ea1StartSettlementJSONEqual(t *testing.T, label string, actual, expected an
 
 // The new retirement protocol records the actual whole-callback fact before
 // either owner Mark or its recovered retry. Compare the entire immutable fact.
-func ea1AssertOriginalRootCompletion(t *testing.T, rt *kernel.Runtime, grant kernel.ChildExecutionGrant, source kernel.Snapshot, hostCompleted, leaseOwned bool) kernel.OwnedPhysicalCallbackCompletion {
+func ea1AssertOriginalRootCompletion(t *testing.T, rt *kernel.Runtime, grant kernel.ChildExecutionGrant, source kernel.Snapshot, hostCompleted, leaseOwned bool) kernel.PhysicalCallbackCompletion {
 	t.Helper()
-	got, e := rt.LookupOwnedPhysicalCallbackReturn(t.Context(), grant)
+	got, e := rt.LookupPhysicalCallbackReturn(t.Context(), grant)
 	if e != nil {
 		t.Fatal(e)
 	}
-	outcome := kernel.OwnedPhysicalCallbackOutcome{HostCompleted: hostCompleted, LeaseOwned: leaseOwned, ControlCustody: got.ControlCustody}
-	hash := sha256.Sum256(kernel.OwnedPhysicalCallbackReturnPayload(source, outcome))
-	want := kernel.OwnedPhysicalCallbackCompletion{GrantID: grant.ID, ReturnRevision: source.Run.Revision, ReturnSourceHash: hex.EncodeToString(hash[:]), HostCompleted: hostCompleted, LeaseOwned: leaseOwned, ControlCustody: got.ControlCustody}
+	outcome := kernel.PhysicalCallbackOutcome{HostCompleted: hostCompleted, LeaseOwned: leaseOwned, ControlCustody: got.ControlCustody}
+	hash := sha256.Sum256(kernel.PhysicalCallbackReturnPayload(source, outcome))
+	want := kernel.PhysicalCallbackCompletion{GrantID: grant.ID, ReturnRevision: source.Run.Revision, ReturnSourceHash: hex.EncodeToString(hash[:]), HostCompleted: hostCompleted, LeaseOwned: leaseOwned, ControlCustody: got.ControlCustody}
 	if !got.ControlCustody.Valid() || got != want {
 		t.Fatalf("original whole callback binding: got=%+v want=%+v err=%v", got, want, e)
 	}

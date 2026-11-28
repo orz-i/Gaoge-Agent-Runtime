@@ -103,9 +103,9 @@ func retirementMarkProof(f retirementFixture) *featurecontrol.Proof {
 }
 func retirementCallback(t *testing.T, f retirementFixture, known, owned bool) {
 	t.Helper()
-	o := kernel.OwnedPhysicalCallbackOutcome{HostCompleted: known, LeaseOwned: owned}
-	p := featurecontrol.Seal(f.source.Run.ID, f.source.Run.Revision, "agent_owned_callback_return", f.grant.ID, kernel.OwnedPhysicalCallbackReturnPayload(f.source, o), nil)
-	if e := f.rt.RecordOwnedPhysicalCallbackReturn(t.Context(), f.grant, f.source.Run.Revision, o, p); e != nil {
+	o := kernel.PhysicalCallbackOutcome{HostCompleted: known, LeaseOwned: owned}
+	p := featurecontrol.Seal(f.source.Run.ID, f.source.Run.Revision, "agent_owned_callback_return", f.grant.ID, kernel.PhysicalCallbackReturnPayload(f.source, o), nil)
+	if e := f.rt.RecordPhysicalCallbackReturn(t.Context(), f.grant, f.source.Run.Revision, o, p); e != nil {
 		t.Fatal(e)
 	}
 }
@@ -276,7 +276,7 @@ func runRetirementNoRelease(t *testing.T, factory func(*testing.T) ManagedRecove
 
 	}
 	if kind == "legacy-mark" {
-		if e := f.bound.MarkChildExecutionSettled(t.Context(), f.grant, retirementMarkProof(f)); !errors.Is(e, kernel.ErrExecutionConflict) {
+		if e := f.bound.RecordPhysicalCallbackReturn(t.Context(), f.grant, f.source.Run.Revision, kernel.PhysicalCallbackOutcome{HostCompleted: true}, retirementMarkProof(f)); !errors.Is(e, kernel.ErrExecutionConflict) {
 			t.Fatalf("owned mark accepted: %v", e)
 		}
 	}
@@ -524,9 +524,9 @@ func runGrantIdentityRace(t *testing.T, factory func(*testing.T) ManagedRecovery
 		}
 	}
 	if winner.IsOwned() {
-		o := kernel.OwnedPhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: true}
-		proof := featurecontrol.Seal(root.Run.ID, root.Run.Revision, "agent_owned_callback_return", winner.ID, kernel.OwnedPhysicalCallbackReturnPayload(root, o), nil)
-		if e = rootRT.RecordOwnedPhysicalCallbackReturn(ctx, winner, root.Run.Revision, o, proof); e != nil {
+		o := kernel.PhysicalCallbackOutcome{HostCompleted: true, LeaseOwned: true}
+		proof := featurecontrol.Seal(root.Run.ID, root.Run.Revision, "agent_owned_callback_return", winner.ID, kernel.PhysicalCallbackReturnPayload(root, o), nil)
+		if e = rootRT.RecordPhysicalCallbackReturn(ctx, winner, root.Run.Revision, o, proof); e != nil {
 			t.Fatal(e)
 		}
 		mark := featurecontrol.Seal(root.Run.ID, root.Run.Revision, "agent_owned_physical_settled", winner.ID, root.State, root)
@@ -535,7 +535,7 @@ func runGrantIdentityRace(t *testing.T, factory func(*testing.T) ManagedRecovery
 		}
 	} else {
 		mark := featurecontrol.Seal(child.Run.ID, child.Run.Revision, "agent_child_physical_settled", winner.ID, child.State, child.Checkpoint)
-		if e = childRT.MarkChildExecutionSettled(ctx, winner, mark); e != nil {
+		if e = childRT.RecordPhysicalCallbackReturn(ctx, winner, child.Run.Revision, kernel.PhysicalCallbackOutcome{HostCompleted: true}, mark); e != nil {
 			t.Fatal(e)
 		}
 		if e = childRT.FinishChildExecution(ctx, winner, mark); e != nil {

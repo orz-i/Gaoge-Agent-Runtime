@@ -84,12 +84,15 @@ func (s *childFailureStore) Apply(ctx context.Context, id string, rev uint64, mu
 	}
 	return s.Store.Apply(ctx, id, rev, mutation)
 }
-func (s *childFailureStore) MarkChildExecutionSettled(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
+func (s *childFailureStore) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, outcome kernel.PhysicalCallbackOutcome, p kernel.PhysicalCallbackReturn) error {
+	if g.IsOwned() {
+		return s.Store.RecordPhysicalCallbackReturn(ctx, g, rev, outcome, p)
+	}
 	s.marks++
 	if s.fault == "mark" {
 		return errChildFailureFixture
 	}
-	err := s.Store.MarkChildExecutionSettled(ctx, g, p)
+	err := s.Store.RecordPhysicalCallbackReturn(ctx, g, rev, outcome, p)
 	if err == nil && s.fault == "mark-ack" {
 		return errChildFailureFixture
 	}

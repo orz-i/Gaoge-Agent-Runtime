@@ -29,6 +29,8 @@
 
 - Root execution custody observations now use the single `kernel.ExecutionCustodyStore.VerifyExecutionCustody` port and shared `VerifyExecutionCustodyFacts` reducer. The five prior settlement verification methods and their separate Store interfaces are removed. The explicit read predicate does not grant dispatch or control authority; the later write must still arbitrate the original transaction.
 
+- Child and Root physical callback returns now use `RecordPhysicalCallbackReturn`, `LookupPhysicalCallbackReturn` and the common `PhysicalCallbackCompletion` fact. The separate `MarkChildExecutionSettled` command and Memory settled-revision field are removed. Child consumption validates the original complete return snapshot; new SQL writes use the same callback-return columns. Old SQL settled-revision-only rows fail closed pending the AC-03 schema cut; a legacy revision marker cannot fabricate a return receipt.
+
 ## Owned physical callback entry and no-entry retirement
 
 Custom `OwnedPhysicalExecutionStore` adapters must implement

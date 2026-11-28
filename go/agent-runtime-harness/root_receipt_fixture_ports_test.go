@@ -43,9 +43,7 @@ func (s *receiptFaultStore) BeginChildExecution(ctx context.Context, g kernel.Ch
 func (s *receiptFaultStore) LookupChildExecution(ctx context.Context, id string) (kernel.ChildExecutionGrant, error) {
 	return s.Store.(kernel.ChildExecutionStore).LookupChildExecution(ctx, id)
 }
-func (s *receiptFaultStore) MarkChildExecutionSettled(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
-	return s.Store.(kernel.ChildExecutionStore).MarkChildExecutionSettled(ctx, g, p)
-}
+
 func (s *receiptFaultStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
 	return s.Store.(kernel.ChildExecutionStore).FinishChildExecution(ctx, g, p)
 }
@@ -72,11 +70,11 @@ func (s *receiptFaultStore) ApplyOwnedPhysicalRecovery(ctx context.Context, g ke
 	return s.Store.(kernel.OwnedPhysicalExecutionStore).ApplyOwnedPhysicalRecovery(ctx, g, r, m, p)
 
 }
-func (s *receiptFaultStore) RecordOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, r uint64, o kernel.OwnedPhysicalCallbackOutcome, p kernel.OwnedPhysicalCallbackReturn) error {
-	return s.Store.(kernel.OwnedPhysicalExecutionStore).RecordOwnedPhysicalCallbackReturn(ctx, g, r, o, p)
+func (s *receiptFaultStore) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, r uint64, o kernel.PhysicalCallbackOutcome, p kernel.PhysicalCallbackReturn) error {
+	return s.Store.(kernel.OwnedPhysicalExecutionStore).RecordPhysicalCallbackReturn(ctx, g, r, o, p)
 }
-func (s *receiptFaultStore) LookupOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant) (kernel.OwnedPhysicalCallbackCompletion, error) {
-	return s.Store.(kernel.OwnedPhysicalExecutionStore).LookupOwnedPhysicalCallbackReturn(ctx, g)
+func (s *receiptFaultStore) LookupPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant) (kernel.PhysicalCallbackCompletion, error) {
+	return s.Store.(kernel.OwnedPhysicalExecutionStore).LookupPhysicalCallbackReturn(ctx, g)
 }
 func (s *receiptFaultStore) QuarantineExecution(ctx context.Context, q kernel.ExecutionQuarantine) error {
 	return s.Store.(kernel.ExecutionQuarantineStore).QuarantineExecution(ctx, q)

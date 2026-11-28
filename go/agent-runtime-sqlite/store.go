@@ -416,7 +416,7 @@ func (s *Store) applyWithAuthority(ctx context.Context, lease *kernel.ExecutionL
 		if e != nil {
 			return kernel.Snapshot{}, e
 		}
-		completion, completionErr := loadOwnedCallbackReturn(ctx, tx, recovery.grant)
+		completion, completionErr := loadPhysicalCallbackReturn(ctx, tx, recovery.grant)
 		if errors.Is(completionErr, kernel.ErrNotFound) {
 			return kernel.Snapshot{}, kernel.ErrExecutionConflict
 		}

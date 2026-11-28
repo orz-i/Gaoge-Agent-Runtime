@@ -62,7 +62,7 @@ func RunChildExecutionSuite(t *testing.T, create func(*testing.T) kernel.Store) 
 		if err = store.FinishChildExecution(t.Context(), grant, kernel.ChildExecutionSettlement{}); !errors.Is(err, kernel.ErrExecutionConflict) {
 			t.Fatalf("original Grant was retired before physical callback completion: %v", err)
 		}
-		if markErr := store.MarkChildExecutionSettled(t.Context(), grant, kernel.ChildExecutionSettlement{}); !errors.Is(markErr, kernel.ErrExecutionConflict) {
+		if markErr := underlying.(kernel.OwnedPhysicalExecutionStore).RecordPhysicalCallbackReturn(t.Context(), grant, grant.ExpectedRevision, kernel.PhysicalCallbackOutcome{HostCompleted: true}, kernel.PhysicalCallbackReturn{}); !errors.Is(markErr, kernel.ErrExecutionConflict) {
 			t.Fatalf("untrusted direct Store Mark succeeded: %v", markErr)
 		}
 		latest, loadErr := rt.Load(t.Context(), child.Run.ID)
@@ -70,9 +70,17 @@ func RunChildExecutionSuite(t *testing.T, create func(*testing.T) kernel.Store) 
 			t.Fatal(loadErr)
 		}
 		proof := featurecontrol.Seal(latest.Run.ID, latest.Run.Revision, "agent_child_physical_settled", grant.ID, latest.State, latest.Checkpoint)
-		if err = rt.MarkChildExecutionSettled(t.Context(), grant, proof); err != nil {
+		if err = rt.RecordPhysicalCallbackReturn(t.Context(), grant, latest.Run.Revision, kernel.PhysicalCallbackOutcome{HostCompleted: true}, proof); err != nil {
 			t.Fatalf("trusted Agent post-callback settlement marker was rejected: %v", err)
 		}
+		returned, returnErr := rt.LookupPhysicalCallbackReturn(t.Context(), grant)
+		if returnErr != nil || returned.GrantID != grant.ID || !returned.MatchesReturnSnapshot(latest) || returned.LeaseOwned || returned.ControlCustody != "" {
+			t.Fatalf("original child return fact: %+v %v", returned, returnErr)
+		}
+		if err = rt.RecordPhysicalCallbackReturn(t.Context(), grant, latest.Run.Revision, kernel.PhysicalCallbackOutcome{HostCompleted: true}, proof); err != nil {
+			t.Fatalf("exact original return replay: %v", err)
+		}
+
 		forgedRevision := grant
 		forgedRevision.ExpectedRevision++
 		if err = store.FinishChildExecution(t.Context(), forgedRevision, kernel.ChildExecutionSettlement{}); !errors.Is(err, kernel.ErrExecutionConflict) {

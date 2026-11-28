@@ -14,7 +14,7 @@ import (
 // child or issue any external operation.
 type RootDeferredCleanupScope struct {
 	grant          kernel.ChildExecutionGrant
-	completion     kernel.OwnedPhysicalCallbackCompletion
+	completion     kernel.PhysicalCallbackCompletion
 	retirementOnly bool
 	valid          bool
 }

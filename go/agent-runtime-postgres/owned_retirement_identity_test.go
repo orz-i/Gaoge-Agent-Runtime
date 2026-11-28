@@ -50,7 +50,7 @@ func runOwnedRetirementFinishNativeIdentity(t *testing.T, factory func(*testing.
 			g := kernel.ChildExecutionGrant{ID: "retire-grant", ChildRunID: snap.Run.ID, ExpectedRevision: snap.Run.Revision, ExecutionOwnerID: lease.OwnerID, ExecutionLeaseID: lease.LeaseID, ExecutionEpoch: lease.Epoch, AdmissionSourceHash: strings.Repeat("a", 64), AdmissionOperation: "start"}
 			// Original callback/mark fixture, with a separate missing-return
 			// case that must not release the lease or erase its grant.
-			c := kernel.OwnedPhysicalCallbackCompletion{GrantID: g.ID, ReturnRevision: snap.Run.Revision, ReturnSourceHash: strings.Repeat("b", 64), HostCompleted: true, LeaseOwned: true}
+			c := kernel.PhysicalCallbackCompletion{GrantID: g.ID, ReturnRevision: snap.Run.Revision, ReturnSourceHash: strings.Repeat("b", 64), HostCompleted: true, LeaseOwned: true}
 			row := pgPhysicalRecord(g, g.ChildRunID)
 			if strings.HasPrefix(mode, "legacy-mark") {
 				row.SettledRevision = snap.Run.Revision

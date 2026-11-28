@@ -281,7 +281,7 @@ func (r *Runner) parkUnsentAfterDispatchCAS(ctx context.Context, source kernel.S
 // reconcileOriginalUnsentTool consumes only the original native no-send
 // proof. A successor cannot create this proof from an undispatched ledger,
 // a context error, or a missing provider receipt.
-func (r *Runner) reconcileOriginalUnsentTool(ctx context.Context, s kernel.Snapshot, state runState, g kernel.ChildExecutionGrant, c kernel.OwnedPhysicalCallbackCompletion, q tools.ExecutionRequest, b kernel.OwnedToolReturn) (kernel.Snapshot, error) {
+func (r *Runner) reconcileOriginalUnsentTool(ctx context.Context, s kernel.Snapshot, state runState, g kernel.ChildExecutionGrant, c kernel.PhysicalCallbackCompletion, q tools.ExecutionRequest, b kernel.OwnedToolReturn) (kernel.Snapshot, error) {
 	if !b.Unsent || state.ToolDispatchID != q.Call.ID || !c.MatchesReturnSnapshot(s) {
 		return s, ErrToolReceiptMismatch
 	}

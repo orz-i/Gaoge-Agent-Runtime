@@ -101,7 +101,7 @@ func TestVerifiedToolOutcomeSettlementIsIdempotentAndFrozen(t *testing.T) {
 			if e != nil {
 				t.Fatal(e)
 			}
-			c, e := base.LookupOwnedPhysicalCallbackReturn(ctx, g)
+			c, e := base.LookupPhysicalCallbackReturn(ctx, g)
 			if e != nil {
 				t.Fatal(e)
 			}

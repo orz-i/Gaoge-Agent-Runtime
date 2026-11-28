@@ -52,11 +52,14 @@ func (s *ea1ChildStartStore) BeginChildExecution(ctx context.Context, g kernel.C
 	}
 	return err
 }
-func (s *ea1ChildStartStore) MarkChildExecutionSettled(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
+func (s *ea1ChildStartStore) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, outcome kernel.PhysicalCallbackOutcome, p kernel.PhysicalCallbackReturn) error {
+	if g.IsOwned() {
+		return s.OwnedPhysicalExecutionStore.RecordPhysicalCallbackReturn(ctx, g, rev, outcome, p)
+	}
 	if s.beforeMark != nil {
 		s.beforeMark(g)
 	}
-	err := s.ChildExecutionStore.MarkChildExecutionSettled(ctx, g, p)
+	err := s.OwnedPhysicalExecutionStore.RecordPhysicalCallbackReturn(ctx, g, rev, outcome, p)
 	if err == nil {
 		s.marks++
 	}

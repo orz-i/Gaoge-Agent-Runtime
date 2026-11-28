@@ -70,8 +70,8 @@ func (s *admissionACKStore) CheckOwnedPhysicalEntry(ctx context.Context, g kerne
 	return window, err
 }
 
-func (s *admissionACKStore) RecordOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, revision uint64, o kernel.OwnedPhysicalCallbackOutcome, p kernel.OwnedPhysicalCallbackReturn) error {
-	err := s.OwnedPhysicalExecutionStore.RecordOwnedPhysicalCallbackReturn(ctx, g, revision, o, p)
+func (s *admissionACKStore) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, revision uint64, o kernel.PhysicalCallbackOutcome, p kernel.PhysicalCallbackReturn) error {
+	err := s.OwnedPhysicalExecutionStore.RecordPhysicalCallbackReturn(ctx, g, revision, o, p)
 	if err == nil && s.mode == "no-entry-record-ack" {
 		return errAdmissionTransport
 	}
@@ -318,7 +318,7 @@ func runPhysicalAdmissionACKCase(t *testing.T, factory func(*testing.T) (kernel.
 			if lookupErr != nil || g != w.grant || !errors.Is(err, agent.ErrRootOutcomeUnknown) {
 				t.Fatalf("unacknowledged cleanup lost fence: %+v %v %v", g, lookupErr, err)
 			}
-			c, e := fresh.LookupOwnedPhysicalCallbackReturn(t.Context(), g)
+			c, e := fresh.LookupPhysicalCallbackReturn(t.Context(), g)
 			if e != nil || !c.MatchesNotEnteredSnapshot(g, w.source) || c.HostCompleted || c.MatchesReturnSnapshot(w.source) {
 				t.Fatalf("durable no-entry fact not distinct: %+v %v", c, e)
 			}
@@ -458,7 +458,7 @@ func runPhysicalAdmissionACKCase(t *testing.T, factory func(*testing.T) (kernel.
 	if lookupErr != nil || g != w.grant {
 		t.Fatalf("committed but unqualified ACK lost original fence: %+v %v", g, lookupErr)
 	}
-	if _, e = fresh.LookupOwnedPhysicalCallbackReturn(t.Context(), g); !errors.Is(e, kernel.ErrNotFound) {
+	if _, e = fresh.LookupPhysicalCallbackReturn(t.Context(), g); !errors.Is(e, kernel.ErrNotFound) {
 		t.Fatalf("unentered callback fabricated return: %v", e)
 	}
 	// Restart/reconciliation cannot invent a callback from the persisted
@@ -648,7 +648,7 @@ func runPhysicalAdmissionACKRace(t *testing.T, factory func(*testing.T) (kernel.
 		t.Fatalf("losing admission changed first active grant: %+v %v", g, e)
 	}
 	ea1CompBarrierUnchanged(t, f.observer, winnerSnapshot)
-	if _, e = f.observer.LookupOwnedPhysicalCallbackReturn(ctx, grants[0]); !errors.Is(e, kernel.ErrNotFound) {
+	if _, e = f.observer.LookupPhysicalCallbackReturn(ctx, grants[0]); !errors.Is(e, kernel.ErrNotFound) {
 		t.Fatalf("loser manufactured callback return: %v", e)
 	}
 	if _, e = f.observer.LoadOwnedRetirement(ctx, grants[0].ID); !errors.Is(e, kernel.ErrNotFound) {

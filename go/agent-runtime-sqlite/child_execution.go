@@ -73,21 +73,7 @@ func (s *Store) BeginChildExecution(ctx context.Context, grant kernel.ChildExecu
 	return tx.Commit()
 }
 
-// Borrowed MarkChildExecutionSettled is separate from Finish to survive a crash or
-// lost acknowledgement after the first-party physical callback returned.
-// A clean but still-running callback cannot generate this persisted marker.
-func (s *Store) MarkChildExecutionSettled(ctx context.Context, grant kernel.ChildExecutionGrant, permit kernel.ChildExecutionSettlement) error {
-	return s.settleChildExecution(ctx, grant, permit, true)
-}
-
 func (s *Store) FinishChildExecution(ctx context.Context, grant kernel.ChildExecutionGrant, permit kernel.ChildExecutionSettlement) error {
-	return s.settleChildExecution(ctx, grant, permit, false)
-}
-
-func (s *Store) settleChildExecution(ctx context.Context, grant kernel.ChildExecutionGrant, permit kernel.ChildExecutionSettlement, markOnly bool) error {
-	if markOnly && grant.IsOwned() {
-		return kernel.ErrExecutionConflict
-	}
 	if s == nil || s.db == nil || ctx == nil || grant.ID == "" || grant.ChildRunID == "" || grant.ExpectedRevision == 0 {
 		return kernel.ErrInvalidInput
 	}
@@ -116,46 +102,18 @@ func (s *Store) settleChildExecution(ctx context.Context, grant kernel.ChildExec
 	if !permit.Matches(grant, child) {
 		return kernel.ErrExecutionConflict
 	}
-	if markOnly {
-		revision := child.Run.Revision
-		var total, valid int
-		if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM runtime_child_effect_grants WHERE grant_id=?", grant.ID).Scan(&total); err != nil {
-			return err
-		}
-		if total == 0 {
+	if !grant.IsOwned() {
+		completion, e := loadPhysicalCallbackReturn(ctx, tx, grant)
+		if e != nil || !kernel.ReturnedChildEffect(grant, child, completion) {
+			if e != nil && !errors.Is(e, kernel.ErrNotFound) {
+				return e
+			}
 			return kernel.ErrExecutionConflict
 		}
-		if err = tx.QueryRowContext(ctx,
-			"SELECT count(*) FROM runtime_child_effect_grants WHERE grant_id=? AND child_run_id=? AND start_revision=? AND (settled_revision=0 OR settled_revision=?)",
-			grant.ID, grant.ChildRunID, grant.ExpectedRevision, revision).Scan(&valid); err != nil {
-			return err
-		}
-		if valid != total {
-			return kernel.ErrExecutionConflict
-		}
-		query := "UPDATE runtime_child_effect_grants SET settled_revision=? WHERE grant_id=? AND child_run_id=? AND start_revision=? AND (settled_revision=0 OR settled_revision=?)"
-		args := []any{revision, grant.ID, grant.ChildRunID, grant.ExpectedRevision, revision}
-		result, err := tx.ExecContext(ctx, query, args...)
-		if err != nil {
-			return conflictOrDatabaseError(err)
-		}
-		rows, err := result.RowsAffected()
-		if err != nil {
-			return err
-		}
-		if rows != int64(total) {
-			return kernel.ErrExecutionConflict
-		}
-		return tx.Commit()
-	}
-
-	mark := child.Run.Revision
-	if grant.IsOwned() {
-		mark = 0
 	}
 	var correct, anyCount int
-	if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM runtime_child_effect_grants WHERE grant_id=? AND child_run_id=? AND start_revision=? AND settled_revision=?",
-		grant.ID, grant.ChildRunID, grant.ExpectedRevision, mark).Scan(&correct); err != nil {
+	if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM runtime_child_effect_grants WHERE grant_id=? AND child_run_id=? AND start_revision=? AND settled_revision=0",
+		grant.ID, grant.ChildRunID, grant.ExpectedRevision).Scan(&correct); err != nil {
 		return err
 	}
 	if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM runtime_child_effect_grants WHERE grant_id=?", grant.ID).Scan(&anyCount); err != nil {
@@ -194,8 +152,8 @@ func (s *Store) settleChildExecution(ctx context.Context, grant kernel.ChildExec
 		}
 	}
 	result, err := tx.ExecContext(ctx,
-		"DELETE FROM runtime_child_effect_grants WHERE grant_id=? AND child_run_id=? AND start_revision=? AND settled_revision=?",
-		grant.ID, grant.ChildRunID, grant.ExpectedRevision, mark)
+		"DELETE FROM runtime_child_effect_grants WHERE grant_id=? AND child_run_id=? AND start_revision=? AND settled_revision=0",
+		grant.ID, grant.ChildRunID, grant.ExpectedRevision)
 	if err != nil {
 		return conflictOrDatabaseError(err)
 	}
@@ -220,17 +178,18 @@ func (s *Store) LookupChildExecution(ctx context.Context, childID string) (kerne
 const physicalGrantColumns = "grant_id,child_run_id,start_revision,execution_owner_id,execution_lease_id,execution_epoch,admission_source_hash,admission_operation,settled_revision"
 
 func loadPhysicalGrant(ctx context.Context, q schemaQuery, runID string) (kernel.ChildExecutionGrant, uint64, error) {
-	rows, err := q.QueryContext(ctx, "SELECT DISTINCT "+physicalGrantColumns+" FROM runtime_child_effect_grants WHERE child_run_id=? LIMIT 2", runID)
+	rows, err := q.QueryContext(ctx, "SELECT DISTINCT "+physicalGrantColumns+",callback_return_revision,callback_return_source_hash,callback_host_completed,callback_lease_owned,callback_control_custody,callback_tool_returns FROM runtime_child_effect_grants WHERE child_run_id=? LIMIT 2", runID)
 	if err != nil {
 		return kernel.ChildExecutionGrant{}, 0, conflictOrDatabaseError(err)
 	}
 	defer func() { _ = rows.Close() }()
 	var g kernel.ChildExecutionGrant
 	var marked uint64
+	var returned kernel.PhysicalCallbackCompletion
 	count := 0
 	for rows.Next() {
 		count++
-		if err = rows.Scan(&g.ID, &g.ChildRunID, &g.ExpectedRevision, &g.ExecutionOwnerID, &g.ExecutionLeaseID, &g.ExecutionEpoch, &g.AdmissionSourceHash, &g.AdmissionOperation, &marked); err != nil {
+		if err = rows.Scan(&g.ID, &g.ChildRunID, &g.ExpectedRevision, &g.ExecutionOwnerID, &g.ExecutionLeaseID, &g.ExecutionEpoch, &g.AdmissionSourceHash, &g.AdmissionOperation, &marked, &returned.ReturnRevision, &returned.ReturnSourceHash, &returned.HostCompleted, &returned.LeaseOwned, &returned.ControlCustody, &returned.ToolReturns); err != nil {
 			return g, 0, err
 		}
 	}

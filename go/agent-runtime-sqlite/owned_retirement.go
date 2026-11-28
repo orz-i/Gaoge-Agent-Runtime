@@ -11,10 +11,10 @@ import (
 
 var _ kernel.OwnedRetirementStore = (*Store)(nil)
 
-func sqliteOwnedCompletion(ctx context.Context, q schemaQuery, g kernel.ChildExecutionGrant) (kernel.OwnedPhysicalCallbackCompletion, error) {
-	c, e := loadOwnedCallbackReturn(ctx, q, g)
+func sqliteOwnedCompletion(ctx context.Context, q schemaQuery, g kernel.ChildExecutionGrant) (kernel.PhysicalCallbackCompletion, error) {
+	c, e := loadPhysicalCallbackReturn(ctx, q, g)
 	if errors.Is(e, kernel.ErrNotFound) {
-		return kernel.OwnedPhysicalCallbackCompletion{}, nil
+		return kernel.PhysicalCallbackCompletion{}, nil
 	}
 	return c, e
 }

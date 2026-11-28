@@ -56,5 +56,5 @@ func (s *Store) VerifyExecutionCustody(ctx context.Context, expected kernel.Snap
 		}
 		return kernel.VerifyExecutionCustodyFacts(expected, current, native.epoch, native.physicalEpoch, native.lease, active, receipts, original.grant, original.completion, requirement)
 	}
-	return kernel.VerifyExecutionCustodyFacts(expected, current, native.epoch, native.physicalEpoch, lease, active, receipts, kernel.ChildExecutionGrant{}, kernel.OwnedPhysicalCallbackCompletion{}, requirement)
+	return kernel.VerifyExecutionCustodyFacts(expected, current, native.epoch, native.physicalEpoch, lease, active, receipts, kernel.ChildExecutionGrant{}, kernel.PhysicalCallbackCompletion{}, requirement)
 }

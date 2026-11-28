@@ -75,16 +75,16 @@ func RunEA1OwnedCallbackReturn(t *testing.T, factory func(*testing.T) (kernel.St
 				}
 				time.Sleep(5 * time.Millisecond)
 			}
-			outcome := kernel.OwnedPhysicalCallbackOutcome{HostCompleted: known, LeaseOwned: true}
-			proof := featurecontrol.Seal(initial.Run.ID, initial.Run.Revision, "agent_owned_callback_return", g.ID, kernel.OwnedPhysicalCallbackReturnPayload(initial, outcome), nil)
-			if e = rt.RecordOwnedPhysicalCallbackReturn(t.Context(), g, initial.Run.Revision, outcome, proof); e != nil {
+			outcome := kernel.PhysicalCallbackOutcome{HostCompleted: known, LeaseOwned: true}
+			proof := featurecontrol.Seal(initial.Run.ID, initial.Run.Revision, "agent_owned_callback_return", g.ID, kernel.PhysicalCallbackReturnPayload(initial, outcome), nil)
+			if e = rt.RecordPhysicalCallbackReturn(t.Context(), g, initial.Run.Revision, outcome, proof); e != nil {
 				t.Fatal(e)
 			}
-			before, e := observer.LookupOwnedPhysicalCallbackReturn(t.Context(), g)
+			before, e := observer.LookupPhysicalCallbackReturn(t.Context(), g)
 			if e != nil || before.GrantID != g.ID || before.ReturnRevision != initial.Run.Revision || before.HostCompleted != known || !before.LeaseOwned || len(before.ReturnSourceHash) != 64 {
 				t.Fatalf("persisted completion: %+v %v", before, e)
 			}
-			if e = observer.RecordOwnedPhysicalCallbackReturn(t.Context(), g, initial.Run.Revision, outcome, proof); e != nil {
+			if e = observer.RecordPhysicalCallbackReturn(t.Context(), g, initial.Run.Revision, outcome, proof); e != nil {
 				t.Fatalf("same completion retry: %v", e)
 			}
 			// The same opaque Run identity does not allow a different Grant or
@@ -95,15 +95,15 @@ func RunEA1OwnedCallbackReturn(t *testing.T, factory func(*testing.T) (kernel.St
 				func() kernel.ChildExecutionGrant { v := g; v.ExecutionOwnerID += "-foreign"; return v }(),
 				func() kernel.ChildExecutionGrant { v := g; v.ExecutionEpoch++; return v }(),
 			} {
-				c, lookupErr := observer.LookupOwnedPhysicalCallbackReturn(t.Context(), foreign)
-				if !errors.Is(lookupErr, kernel.ErrExecutionConflict) || c != (kernel.OwnedPhysicalCallbackCompletion{}) {
+				c, lookupErr := observer.LookupPhysicalCallbackReturn(t.Context(), foreign)
+				if !errors.Is(lookupErr, kernel.ErrExecutionConflict) || c != (kernel.PhysicalCallbackCompletion{}) {
 					t.Fatalf("foreign lookup leaked original evidence: %+v %v", c, lookupErr)
 				}
 			}
 			changed := outcome
 			changed.HostCompleted = !known
-			forged := featurecontrol.Seal(initial.Run.ID, initial.Run.Revision, "agent_owned_callback_return", g.ID, kernel.OwnedPhysicalCallbackReturnPayload(initial, changed), nil)
-			if e = observer.RecordOwnedPhysicalCallbackReturn(t.Context(), g, initial.Run.Revision, changed, forged); !errors.Is(e, kernel.ErrExecutionConflict) {
+			forged := featurecontrol.Seal(initial.Run.ID, initial.Run.Revision, "agent_owned_callback_return", g.ID, kernel.PhysicalCallbackReturnPayload(initial, changed), nil)
+			if e = observer.RecordPhysicalCallbackReturn(t.Context(), g, initial.Run.Revision, changed, forged); !errors.Is(e, kernel.ErrExecutionConflict) {
 				t.Fatalf("completion changed: %v", e)
 			}
 			actual, e := observer.Load(t.Context(), initial.Run.ID)
@@ -136,7 +136,7 @@ func RunEA1OwnedCallbackReturn(t *testing.T, factory func(*testing.T) (kernel.St
 				if e != nil || evidence.EventHead != initial.EventHead || evidence.Run.Revision != initial.Run.Revision+1 {
 					t.Fatalf("evidence-only CAS: %+v %v", evidence, e)
 				}
-				persisted, e := observer.LookupOwnedPhysicalCallbackReturn(t.Context(), g)
+				persisted, e := observer.LookupPhysicalCallbackReturn(t.Context(), g)
 				if e != nil || persisted != before {
 					t.Fatal("evidence CAS replaced callback outcome")
 				}
@@ -172,7 +172,7 @@ func RunEA1OwnedCallbackReturn(t *testing.T, factory func(*testing.T) (kernel.St
 			if e = observer.FinishChildExecution(t.Context(), g, stale); !errors.Is(e, kernel.ErrExecutionConflict) {
 				t.Fatalf("stale settlement accepted: %v", e)
 			}
-			completion, e := rt.LookupOwnedPhysicalCallbackReturn(t.Context(), g)
+			completion, e := rt.LookupPhysicalCallbackReturn(t.Context(), g)
 			if e != nil || completion != before {
 				t.Fatal("receipt CAS rewrote callback completion")
 			}
@@ -180,10 +180,10 @@ func RunEA1OwnedCallbackReturn(t *testing.T, factory func(*testing.T) (kernel.St
 			if e = rt.FinishChildExecution(t.Context(), g, recovered); e != nil {
 				t.Fatal(e)
 			}
-			if _, e = observer.LookupOwnedPhysicalCallbackReturn(t.Context(), g); !errors.Is(e, kernel.ErrNotFound) {
+			if _, e = observer.LookupPhysicalCallbackReturn(t.Context(), g); !errors.Is(e, kernel.ErrNotFound) {
 				t.Fatalf("retired completion exists: %v", e)
 			}
-			if e = observer.RecordOwnedPhysicalCallbackReturn(context.WithoutCancel(t.Context()), g, initial.Run.Revision, outcome, proof); !errors.Is(e, kernel.ErrExecutionConflict) {
+			if e = observer.RecordPhysicalCallbackReturn(context.WithoutCancel(t.Context()), g, initial.Run.Revision, outcome, proof); !errors.Is(e, kernel.ErrExecutionConflict) {
 				t.Fatalf("Finish allowed reconstruction: %v", e)
 			}
 			final, loadErr := observer.Load(t.Context(), initial.Run.ID)

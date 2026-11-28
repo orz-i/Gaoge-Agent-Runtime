@@ -112,23 +112,7 @@ func (store *KernelStore) BeginChildExecution(ctx context.Context, grant kernel.
 	})
 }
 
-// MarkChildExecutionSettled durably records a borrowed Agent callback
-// completion against the original Grant and the exact child revision. The
-// following Finish is a separate recoverable transaction: a crash between
-// the two leaves a provably settled marker, whereas a crash before Mark
-// leaves the physical effect quarantined.
-func (store *KernelStore) MarkChildExecutionSettled(ctx context.Context, grant kernel.ChildExecutionGrant, permit kernel.ChildExecutionSettlement) error {
-	return store.settleChildExecution(ctx, grant, permit, true)
-}
-
 func (store *KernelStore) FinishChildExecution(ctx context.Context, grant kernel.ChildExecutionGrant, permit kernel.ChildExecutionSettlement) error {
-	return store.settleChildExecution(ctx, grant, permit, false)
-}
-
-func (store *KernelStore) settleChildExecution(ctx context.Context, grant kernel.ChildExecutionGrant, permit kernel.ChildExecutionSettlement, markOnly bool) error {
-	if markOnly && grant.IsOwned() {
-		return kernel.ErrExecutionConflict
-	}
 	if store == nil || store.db == nil || ctx == nil || grant.ID == "" || grant.ChildRunID == "" || grant.ExpectedRevision == 0 {
 		return kernel.ErrInvalidInput
 	}
@@ -147,40 +131,16 @@ func (store *KernelStore) settleChildExecution(ctx context.Context, grant kernel
 		if !permit.Matches(grant, snapshot) {
 			return kernel.ErrExecutionConflict
 		}
-		revision := child.Revision
 		var records []models.KernelChildEffectGrantRecord
 		if err = tx.Where("grant_id = ?", grant.ID).Find(&records).Error; err != nil {
 			return translateKernelError(err)
 		}
-		if len(records) == 0 || child.Revision == 0 {
+		if len(records) == 0 {
 			return kernel.ErrExecutionConflict
 		}
-		if markOnly {
-			for _, record := range records {
-				if pgPhysicalGrant(record) != grant ||
-					(record.SettledRevision != 0 && record.SettledRevision != revision) {
-					return kernel.ErrExecutionConflict
-				}
-			}
-			updates := map[string]any{"settled_revision": revision}
-			result := tx.Model(&models.KernelChildEffectGrantRecord{}).
-				Where("grant_id = ? AND child_run_id = ? AND start_revision = ? AND (settled_revision = 0 OR settled_revision = ?)",
-					grant.ID, grant.ChildRunID, grant.ExpectedRevision, revision).UpdateColumns(updates)
-			if result.Error != nil {
-				return translateKernelApplyError(result.Error)
-			}
-			if result.RowsAffected != int64(len(records)) {
-				return kernel.ErrExecutionConflict
-			}
-			return nil
-		}
-
-		mark := child.Revision
-		if grant.IsOwned() {
-			mark = 0
-		}
 		for _, record := range records {
-			if pgPhysicalGrant(record) != grant || record.SettledRevision != mark || record.SettlementEvidence != "" {
+			if pgPhysicalGrant(record) != grant || record.SettledRevision != 0 || record.SettlementEvidence != "" ||
+				(!grant.IsOwned() && !kernel.ReturnedChildEffect(grant, snapshot, pgCallbackCompletion(record))) {
 				return kernel.ErrExecutionConflict
 			}
 		}
@@ -199,8 +159,8 @@ func (store *KernelStore) settleChildExecution(ctx context.Context, grant kernel
 				return e
 			}
 		}
-		result := tx.Where("grant_id = ? AND child_run_id = ? AND start_revision = ? AND settled_revision = ?",
-			grant.ID, grant.ChildRunID, grant.ExpectedRevision, mark).Delete(&models.KernelChildEffectGrantRecord{})
+		result := tx.Where("grant_id = ? AND child_run_id = ? AND start_revision = ? AND settled_revision = 0",
+			grant.ID, grant.ChildRunID, grant.ExpectedRevision).Delete(&models.KernelChildEffectGrantRecord{})
 		if result.Error != nil {
 			return translateKernelApplyError(result.Error)
 		}
@@ -227,7 +187,7 @@ func (store *KernelStore) LookupChildExecution(ctx context.Context, childID stri
 		return kernel.ChildExecutionGrant{}, kernel.ErrExecutionConflict
 	}
 	for _, row := range rows {
-		if pgPhysicalGrant(row) != original || original.ExpectedRevision == 0 || row.SettledRevision != rows[0].SettledRevision {
+		if pgPhysicalGrant(row) != original || original.ExpectedRevision == 0 || row.SettledRevision != rows[0].SettledRevision || pgCallbackCompletion(row) != pgCallbackCompletion(rows[0]) {
 			return kernel.ChildExecutionGrant{}, kernel.ErrExecutionConflict
 		}
 	}

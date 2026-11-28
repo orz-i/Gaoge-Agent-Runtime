@@ -207,7 +207,7 @@ func ea1RootResumeBarrier(t *testing.T, factory func(*testing.T) (kernel.Store, 
 			if hostEntered && e != nil || !hostEntered && (!errors.Is(e, kernel.ErrExecutionConflict) || !errors.Is(e, kernel.ErrChildExecutionBusy)) {
 				t.Fatalf("original entry qualification changed: %v", e)
 			}
-			if _, e = f.observer.LookupOwnedPhysicalCallbackReturn(ctx, g); !errors.Is(e, kernel.ErrNotFound) {
+			if _, e = f.observer.LookupPhysicalCallbackReturn(ctx, g); !errors.Is(e, kernel.ErrNotFound) {
 				t.Fatalf("active callback fabricated return fact: %v", e)
 			}
 		}
@@ -291,7 +291,7 @@ func ea1RootUnknownResume(t *testing.T, factory func(*testing.T) (kernel.Store, 
 	if g.AdmissionOperation != "resume" || g.ExpectedRevision != f.prepared.Run.Revision || g.ExecutionOwnerID != lease.OwnerID || g.ExecutionLeaseID != lease.LeaseID || g.ExecutionEpoch != lease.Epoch {
 		t.Fatal("unknown lost original Resume authority")
 	}
-	completion, e := rt.LookupOwnedPhysicalCallbackReturn(t.Context(), g)
+	completion, e := rt.LookupPhysicalCallbackReturn(t.Context(), g)
 	if e != nil || !completion.HostCompleted {
 		t.Fatalf("actual native return not retained: %v", e)
 	}
@@ -368,7 +368,7 @@ func ea1RootUnknownResume(t *testing.T, factory func(*testing.T) (kernel.Store, 
 		if err != nil || same != g {
 			t.Fatal("TTL recovery changed original scope")
 		}
-		c, err := freshRT.LookupOwnedPhysicalCallbackReturn(t.Context(), g)
+		c, err := freshRT.LookupPhysicalCallbackReturn(t.Context(), g)
 		if err != nil || !ea1RecoveryJSONEqual(c, completion) {
 			t.Fatal("TTL upgraded Host unknown")
 		}

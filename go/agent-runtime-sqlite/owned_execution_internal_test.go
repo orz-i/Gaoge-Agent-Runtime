@@ -223,7 +223,7 @@ func TestOwnedSchemaMigrationPreservesOriginalGrants(t *testing.T) {
 		if marked != expected {
 			t.Fatal("migration changed completion marker")
 		}
-		if _, e := loadOwnedCallbackReturn(t.Context(), current.db, g); !errors.Is(e, kernel.ErrNotFound) {
+		if _, e := loadPhysicalCallbackReturn(t.Context(), current.db, g); !errors.Is(e, kernel.ErrNotFound) {
 			t.Fatalf("migration fabricated callback return: %v", e)
 		}
 	}
@@ -375,18 +375,18 @@ func TestOwnedBarrierRejectsUnboundControlAndExpiredTakeover(t *testing.T) {
 	if _, err = s.RenewExecution(t.Context(), kernel.ExecutionRenewRequest{Lease: renewed, LeaseDuration: time.Minute}); !errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("expired lease revived: %v", err)
 	}
-	if _, err = s.LookupOwnedPhysicalCallbackReturn(t.Context(), g); !errors.Is(err, kernel.ErrNotFound) {
+	if _, err = s.LookupPhysicalCallbackReturn(t.Context(), g); !errors.Is(err, kernel.ErrNotFound) {
 		t.Fatalf("missing completion: %v", err)
 	}
 	wrongGrant := g
 	wrongGrant.ExecutionEpoch++
-	if _, err = s.LookupOwnedPhysicalCallbackReturn(t.Context(), wrongGrant); !errors.Is(err, kernel.ErrExecutionConflict) {
+	if _, err = s.LookupPhysicalCallbackReturn(t.Context(), wrongGrant); !errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("foreign completion lookup: %v", err)
 	}
-	if err = s.RecordOwnedPhysicalCallbackReturn(t.Context(), g, before.Run.Revision, kernel.OwnedPhysicalCallbackOutcome{HostCompleted: true}, kernel.OwnedPhysicalCallbackReturn{}); !errors.Is(err, kernel.ErrExecutionConflict) {
+	if err = s.RecordPhysicalCallbackReturn(t.Context(), g, before.Run.Revision, kernel.PhysicalCallbackOutcome{HostCompleted: true}, kernel.PhysicalCallbackReturn{}); !errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("forged callback return: %v", err)
 	}
-	if err = s.MarkChildExecutionSettled(t.Context(), g, kernel.ChildExecutionSettlement{}); !errors.Is(err, kernel.ErrExecutionConflict) {
+	if err = s.RecordPhysicalCallbackReturn(t.Context(), g, g.ExpectedRevision, kernel.PhysicalCallbackOutcome{HostCompleted: true}, kernel.PhysicalCallbackReturn{}); !errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("forged Mark: %v", err)
 	}
 	if err = s.FinishChildExecution(t.Context(), g, kernel.ChildExecutionSettlement{}); !errors.Is(err, kernel.ErrExecutionConflict) {

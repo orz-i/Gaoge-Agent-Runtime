@@ -439,7 +439,7 @@ func ea1ControlSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, 
 		t.Fatal("control lost original native/source authority")
 	}
 	if phase == "P3" {
-		completion, e := rt.LookupOwnedPhysicalCallbackReturn(ctx, grant)
+		completion, e := rt.LookupPhysicalCallbackReturn(ctx, grant)
 		if e != nil || !completion.HostCompleted || !completion.LeaseOwned {
 			t.Fatalf("real original callback return missing: %v", e)
 		}

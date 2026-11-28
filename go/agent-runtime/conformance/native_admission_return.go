@@ -144,7 +144,7 @@ func nativeAdmissionReturns(t *testing.T, factory func(*testing.T) (kernel.Store
 				if err != nil {
 					t.Fatal("unknown grant removed", err)
 				}
-				c, err := rt.LookupOwnedPhysicalCallbackReturn(ctx, g)
+				c, err := rt.LookupPhysicalCallbackReturn(ctx, g)
 				if err != nil || c.HostCompleted {
 					t.Fatal("unknown callback got original Host completion", err, c)
 				}

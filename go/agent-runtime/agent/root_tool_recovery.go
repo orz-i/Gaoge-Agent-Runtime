@@ -75,7 +75,7 @@ func (runner *Runner) reconcileOriginalToolReturnIfPresent(ctx context.Context, 
 	if !grant.IsOwned() {
 		return s, false, nil
 	}
-	completion, err := runner.runtime.LookupOwnedPhysicalCallbackReturn(ctx, grant)
+	completion, err := runner.runtime.LookupPhysicalCallbackReturn(ctx, grant)
 	if errors.Is(err, kernel.ErrNotFound) {
 		return s, false, nil
 	}
@@ -103,7 +103,7 @@ func (runner *Runner) reconcileRootTool(ctx context.Context, snapshot kernel.Sna
 	return runner.reconcileRootToolReceipt(ctx, snapshot, state, grant, callID, true)
 }
 func (runner *Runner) reconcileRootToolReceipt(ctx context.Context, snapshot kernel.Snapshot, state runState, grant kernel.ChildExecutionGrant, callID string, continueTerminal bool) (kernel.Snapshot, error) {
-	completion, err := runner.runtime.LookupOwnedPhysicalCallbackReturn(ctx, grant)
+	completion, err := runner.runtime.LookupPhysicalCallbackReturn(ctx, grant)
 	if err != nil || !completion.HostCompleted || completion.GrantID != grant.ID {
 		return snapshot, errors.Join(ErrToolOutcomeUnknown, ErrRootOutcomeUnknown, err)
 	}

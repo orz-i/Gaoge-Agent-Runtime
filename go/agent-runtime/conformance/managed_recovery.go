@@ -467,7 +467,7 @@ func runManagedStoreCallbackEntry(t *testing.T, factory func(*testing.T) Managed
 		t.Fatalf("entered successor re-admitted: %v", e)
 	}
 	managedStoreSame(t, f, left)
-	if _, e = f.store.LookupOwnedPhysicalCallbackReturn(t.Context(), g); !errors.Is(e, kernel.ErrNotFound) {
+	if _, e = f.store.LookupPhysicalCallbackReturn(t.Context(), g); !errors.Is(e, kernel.ErrNotFound) {
 		t.Fatalf("entry fabricated callback return: %v", e)
 	}
 	if _, e = f.store.LoadOwnedRetirement(t.Context(), g.ID); !errors.Is(e, kernel.ErrNotFound) {

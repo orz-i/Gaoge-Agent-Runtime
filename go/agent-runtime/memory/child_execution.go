@@ -13,11 +13,10 @@ var _ kernel.ChildExecutionStore = (*Store)(nil)
 // consumed, only its immutable identity or owned retirement fact remains.
 // No identity may be reused, including after a managed transfer/cancel.
 type memoryEffect struct {
-	grant           kernel.ChildExecutionGrant
-	ancestors       []string
-	settledRevision uint64
-	completion      kernel.OwnedPhysicalCallbackCompletion
-	retirement      *kernel.OwnedRetirementReceipt
+	grant      kernel.ChildExecutionGrant
+	ancestors  []string
+	completion kernel.PhysicalCallbackCompletion
+	retirement *kernel.OwnedRetirementReceipt
 }
 
 func (e memoryEffect) active() bool { return len(e.ancestors) != 0 }
@@ -114,38 +113,6 @@ func (store *Store) BeginChildExecution(ctx context.Context, grant kernel.ChildE
 	return nil
 }
 
-// Borrowed MarkChildExecutionSettled requires an exact persisted child revision and
-// original Grant. The callback-completion marker cannot be inferred from a
-// clean-looking Run while the original physical callback is still active.
-func (store *Store) MarkChildExecutionSettled(ctx context.Context, grant kernel.ChildExecutionGrant, permit kernel.ChildExecutionSettlement) error {
-	if grant.IsOwned() {
-		return kernel.ErrExecutionConflict
-	}
-	if store == nil || ctx == nil || grant.ID == "" || grant.ChildRunID == "" {
-		return kernel.ErrInvalidInput
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	store.mu.Lock()
-	defer store.mu.Unlock()
-	if err := store.nativeEntryGateLocked(grant.ChildRunID); err != nil {
-		return err
-	}
-	original, ok := store.activeEffect(grant.ID)
-	if !ok || original.grant != grant {
-		return kernel.ErrExecutionConflict
-	}
-	child, ok := store.snapshotLocked(grant.ChildRunID)
-	if !ok || !permit.Matches(grant, child) ||
-		(original.settledRevision != 0 && original.settledRevision != child.Run.Revision) {
-		return kernel.ErrExecutionConflict
-	}
-	original.settledRevision = child.Run.Revision
-	store.effects[grant.ID] = original
-	return nil
-}
-
 // FinishChildExecution requires the original immutable Grant identity. An
 // unknown result never calls this port and therefore fences parent terminal
 // control until explicit result reconciliation instead of inventing cleanup.
@@ -167,11 +134,8 @@ func (store *Store) FinishChildExecution(ctx context.Context, grant kernel.Child
 		return kernel.ErrExecutionConflict
 	}
 	if grant.IsOwned() {
-		if previous.settledRevision != 0 {
-			return kernel.ErrExecutionConflict
-		}
 		return store.retireOwnedLocked(previous, permit)
-	} else if previous.settledRevision == 0 || child.Run.Revision != previous.settledRevision || !permit.Matches(grant, child) {
+	} else if !kernel.ReturnedChildEffect(grant, child, previous.completion) || !permit.Matches(grant, child) {
 		return kernel.ErrExecutionConflict
 	}
 	store.consumeEffectLocked(previous, nil)

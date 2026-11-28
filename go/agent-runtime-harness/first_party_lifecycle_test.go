@@ -290,12 +290,12 @@ type firstPartyChildReturnCut struct {
 	before bool
 }
 
-func (s *firstPartyChildReturnCut) RecordOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, o kernel.OwnedPhysicalCallbackOutcome, p kernel.OwnedPhysicalCallbackReturn) error {
+func (s *firstPartyChildReturnCut) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, o kernel.PhysicalCallbackOutcome, p kernel.PhysicalCallbackReturn) error {
 	if s.before && g.AdmissionOperation == "approval" && o.HostCompleted {
 		s.grant = g
 		panic(managedObligationCrash{})
 	}
-	err := s.Store.RecordOwnedPhysicalCallbackReturn(ctx, g, rev, o, p)
+	err := s.Store.RecordPhysicalCallbackReturn(ctx, g, rev, o, p)
 	if err == nil && g.AdmissionOperation == "approval" && o.HostCompleted {
 		s.grant = g
 		panic(managedObligationCrash{})

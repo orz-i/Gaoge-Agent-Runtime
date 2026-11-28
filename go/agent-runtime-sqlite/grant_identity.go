@@ -37,7 +37,7 @@ func sqliteConsumeManagedGrant(ctx context.Context, tx *sql.Tx, g kernel.ChildEx
 	if err != nil || mark != 0 {
 		return kernel.ErrExecutionConflict
 	}
-	_, err = loadOwnedCallbackReturn(ctx, tx, g)
+	_, err = loadPhysicalCallbackReturn(ctx, tx, g)
 	if !errors.Is(err, kernel.ErrNotFound) {
 		return kernel.ErrExecutionConflict
 	}

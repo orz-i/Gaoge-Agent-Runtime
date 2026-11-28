@@ -52,7 +52,7 @@ func (s *KernelStore) VerifyExecutionCustody(ctx context.Context, expected kerne
 				return translateKernelError(err)
 			}
 			var grant kernel.ChildExecutionGrant
-			var completion kernel.OwnedPhysicalCallbackCompletion
+			var completion kernel.PhysicalCallbackCompletion
 			if len(roots) == 1 && roots[0].ParentRunID == expected.Run.ID {
 				grant, completion = pgPhysicalGrant(roots[0]), pgCallbackCompletion(roots[0])
 			} else if len(roots) != 0 {
@@ -71,6 +71,6 @@ func (s *KernelStore) VerifyExecutionCustody(ctx context.Context, expected kerne
 		if !lease.ExpiresAt.After(now) {
 			lease = kernel.ExecutionLease{}
 		}
-		return kernel.VerifyExecutionCustodyFacts(expected, current, run.ExecutionEpoch, run.ExecutionPhysicalEpoch, lease, active != 0, receipts, kernel.ChildExecutionGrant{}, kernel.OwnedPhysicalCallbackCompletion{}, requirement)
+		return kernel.VerifyExecutionCustodyFacts(expected, current, run.ExecutionEpoch, run.ExecutionPhysicalEpoch, lease, active != 0, receipts, kernel.ChildExecutionGrant{}, kernel.PhysicalCallbackCompletion{}, requirement)
 	})
 }

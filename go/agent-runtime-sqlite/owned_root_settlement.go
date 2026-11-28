@@ -79,9 +79,9 @@ func (s *Store) VerifyExecutionCustody(ctx context.Context, expected kernel.Snap
 	}
 	if requirement == kernel.CustodyReturned {
 		grant, _, err := loadPhysicalGrant(ctx, tx, expected.Run.ID)
-		var completion kernel.OwnedPhysicalCallbackCompletion
+		var completion kernel.PhysicalCallbackCompletion
 		if err == nil {
-			completion, err = loadOwnedCallbackReturn(ctx, tx, grant)
+			completion, err = loadPhysicalCallbackReturn(ctx, tx, grant)
 			if err != nil && !errors.Is(err, kernel.ErrNotFound) {
 				return err
 			}
@@ -90,5 +90,5 @@ func (s *Store) VerifyExecutionCustody(ctx context.Context, expected kernel.Snap
 		}
 		return kernel.VerifyExecutionCustodyFacts(expected, current, epoch, physicalEpoch, originalLease, active != 0, receipts, grant, completion, requirement)
 	}
-	return kernel.VerifyExecutionCustodyFacts(expected, current, epoch, physicalEpoch, lease, active != 0, receipts, kernel.ChildExecutionGrant{}, kernel.OwnedPhysicalCallbackCompletion{}, requirement)
+	return kernel.VerifyExecutionCustodyFacts(expected, current, epoch, physicalEpoch, lease, active != 0, receipts, kernel.ChildExecutionGrant{}, kernel.PhysicalCallbackCompletion{}, requirement)
 }
