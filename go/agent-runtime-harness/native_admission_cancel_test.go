@@ -243,7 +243,7 @@ func (s *nativeDispatchCancelKernelStore) CheckExecution(ctx context.Context, id
 }
 
 func TestHarnessElectedCancellationAtActualToolDispatch(t *testing.T) {
-	for _, order := range []string{"none", "outer", "inner", "closure-cas"} {
+	for _, order := range []string{"none", "inner", "closure-cas"} {
 		t.Run(order, func(t *testing.T) { testHarnessCancelAtActualToolDispatch(t, order, "") })
 	}
 }
@@ -289,26 +289,15 @@ func testHarnessCancelAtActualToolDispatch(t *testing.T, timelineOrder, retireme
 		if err != nil {
 			t.Fatal(err)
 		}
-		layers := []plugin.ToolMiddleware{b}
+		var layers []plugin.ToolMiddleware
 		if timelineOrder != "none" && timelineOrder != "closure-cas" {
 			timeline, e := NewBoundedToolTimelineAdapter(store, hostedBudgetClock{}, nil)
 			if e != nil {
 				t.Fatal(e)
 			}
-			if timelineOrder == "outer" {
-				layers = []plugin.ToolMiddleware{timeline, b}
-			} else {
-				layers = append(layers, timeline)
-			}
+			layers = append(layers, timeline)
 		}
-		d := agent.Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg}
-		if len(layers) == 1 {
-			d.BoundedBudget = b
-		} else {
-			d.RunMiddleware = []plugin.RunMiddleware{b}
-			d.ModelMiddleware = []plugin.ModelMiddleware{b}
-			d.ToolMiddleware = layers
-		}
+		d := agent.Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, BoundedBudget: b, ToolMiddleware: layers}
 		native, err := agent.NewRunner(d)
 		if err != nil {
 			t.Fatal(err)
@@ -560,11 +549,7 @@ func testHarnessCancelAtActualToolDispatch(t *testing.T, timelineOrder, retireme
 			t.Fatal("unknown Tool item status", item)
 		}
 	}
-	want := 0
-	if timelineOrder == "outer" {
-		want = 1
-	}
-	if startedItems != want || failedItems != want {
-		t.Fatal("outer timeline did not close exact admission attempt", startedItems, failedItems, want)
+	if startedItems != 0 || failedItems != 0 {
+		t.Fatal("capacity denial entered the Tool timeline", startedItems, failedItems)
 	}
 }

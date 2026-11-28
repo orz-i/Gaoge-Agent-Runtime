@@ -8,6 +8,7 @@ import (
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
@@ -30,7 +31,7 @@ func TestSuspendedToolSettlementRequiresOriginalCallbackAndReservation(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := &Runner{toolBudget: a}
+	r := &Runner{boundedBudget: a}
 	s := kernel.Snapshot{Run: kernel.Run{ID: "run", Revision: 7}}
 	q := tools.ExecutionRequest{RunID: "run", Call: tools.Call{ID: "call", ToolKey: "read", Arguments: []byte("{}")}}
 	const id = "tool:run:call"
@@ -83,7 +84,6 @@ func (s unacknowledgedToolLedger) SaveBudget(ctx context.Context, ledger budget.
 }
 
 type toolAccountingPorts struct {
-	BoundedBudgetPorts
 	fail error
 }
 
@@ -97,6 +97,13 @@ func (p toolAccountingPorts) Project(_ context.Context, ledger budget.Ledger) er
 		}
 	}
 	return nil
+}
+func (p toolAccountingPorts) PlanModel(_ context.Context, l budget.Ledger, r model.Request) (model.Request, budget.Reservation, error) {
+	return p.PreviewModel(l, r)
+}
+func (toolAccountingPorts) PreviewModel(_ budget.Ledger, r model.Request) (model.Request, budget.Reservation, error) {
+	hash, err := model.PhysicalRequestHash(r)
+	return r, budget.Reservation{ID: "model:" + r.InvocationID, RunID: r.RunID, RequestHash: hash, Requested: budget.Usage{LLMCalls: 1}}, err
 }
 func (toolAccountingPorts) ToolReservationActive(plugin.ToolInvocation) bool { return true }
 func TestToolRejectionCannotAdvanceWithoutAccountingAcknowledgement(t *testing.T) {
@@ -143,7 +150,7 @@ func TestOriginalHeldToolReplayPreservesNativeReceiptBytes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := &Runner{toolBudget: a}
+	r := &Runner{boundedBudget: a}
 	q := tools.ExecutionRequest{RunID: "run", Call: tools.Call{ID: "call", ToolKey: "read", Arguments: []byte("{}")}}
 	id := "tool:run:call"
 	b := kernel.OwnedToolReturn{CallID: q.Call.ID, LedgerID: "turn", RequestDigest: kernel.ManagedDigest(q)}

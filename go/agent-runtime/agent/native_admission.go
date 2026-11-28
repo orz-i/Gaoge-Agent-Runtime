@@ -135,6 +135,48 @@ func (r *Runner) invokeNativeRun(ctx context.Context, source kernel.Snapshot, in
 		grant.IsOwned() != (source.Run.ParentRunID == "") || r.rootCallbacks.entered.Load() {
 		return source, kernel.ErrExecutionConflict
 	}
+	// In the transitional split-store path, the frozen Run facts are the
+	// scope authority on re-entry. Read them before physical callback entry;
+	// a wrong/missing ledger must never create a replacement scope.
+	var originalBudget *budget.Ledger
+	if r.atomicBudget() == nil && frame.managedObligations == nil {
+		state, err := decodeState(source.State)
+		if err != nil {
+			return source, err
+		}
+		ledgerID, known := "", false
+		if n := len(state.ModelInvocations); n > 0 && state.ModelInvocations[n-1].SamplingPlan != nil {
+			ledgerID, known = state.ModelInvocations[n-1].SamplingPlan.LedgerID, true
+		}
+		mismatch := budget.ErrLedgerConflict
+		if a := state.ToolAdmission; a != nil && a.BudgetBound {
+			if known && ledgerID != a.LedgerID {
+				return source, ErrToolReceiptMismatch
+			}
+			ledgerID, known, mismatch = a.LedgerID, true, ErrToolReceiptMismatch
+		}
+		if known {
+			if r.boundedBudget == nil {
+				if ledgerID != "" {
+					return source, mismatch
+				}
+			} else {
+				a := r.boundedBudget
+				scope, err := a.resolveScope(ctx, inv.RunID)
+				if err != nil || scope.LedgerID != ledgerID {
+					return source, errors.Join(mismatch, err)
+				}
+				l := budget.Ledger{}
+				if ledgerID != "" {
+					l, err = a.loadExistingScope(ctx, inv.RunID, scope)
+					if err != nil {
+						return source, errors.Join(mismatch, err)
+					}
+				}
+				originalBudget = &l
+			}
+		}
+	}
 	if grant.IsOwned() {
 		// Owned entry additionally consumes the original Store lease/epoch
 		// after all setup reads. A borrowed Grant has already fenced its
@@ -162,7 +204,7 @@ func (r *Runner) invokeNativeRun(ctx context.Context, source kernel.Snapshot, in
 	if !r.rootCallbacks.entered.CompareAndSwap(false, true) {
 		return source, kernel.ErrExecutionConflict
 	}
-	result, err := r.invokeFirstPartyRun(callbackscope.BindRunCall(ctx, frame), inv, func(c context.Context) (kernel.Snapshot, error) {
+	result, err := r.invokeFirstPartyRun(callbackscope.BindRunCall(ctx, frame), inv, originalBudget, func(c context.Context) (kernel.Snapshot, error) {
 		frame.entered.Store(true)
 		return next(c)
 	})

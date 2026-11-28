@@ -65,11 +65,11 @@ func TestSharedBudgetRejectsDuplicatePhysicalReceipt(t *testing.T) {
 				t.Fatal(err)
 			}
 			m := &reusedBudgetModel{freshSecond: mutate}
-			chain := []plugin.ModelMiddleware{mustBudgetAdapter(t, shared)}
+			var chain []plugin.ModelMiddleware
 			if mutate {
 				chain = append(chain, duplicateResponseMiddleware{})
 			}
-			runner, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: m, Catalog: registry, Executor: registry, ModelMiddleware: chain, RunMiddleware: []plugin.RunMiddleware{mustBudgetAdapter(t, shared)}})
+			runner, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: m, Catalog: registry, Executor: registry, BoundedBudget: mustBudgetAdapter(t, shared), ModelMiddleware: chain})
 			if err != nil {
 				t.Fatal(err)
 			}

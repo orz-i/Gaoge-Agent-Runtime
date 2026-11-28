@@ -101,7 +101,7 @@ func originalToolApprovalRecovery(t *testing.T, factory func(*testing.T) (kernel
 				}
 				d := agent.Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, Approvals: interactionadapter.New(interactions), DelegatedToolResults: reader, ToolOutcomeVerifier: reader, DeferResumption: true}
 				if mode != "unmetered-recovery" && mode != "unmetered-approved-pending" {
-					d.ToolMiddleware = []plugin.ToolMiddleware{b}
+					d.BoundedBudget = b
 				}
 				if withPolicy {
 					d.ApprovalPolicies = []plugin.ApprovalPolicy{policy}

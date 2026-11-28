@@ -11,8 +11,8 @@ import (
 )
 
 // Adapter composes one native, trusted execution/settlement path around this
-// Host-owned BudgetAuthority. Host code installs the same native adapter in
-// each selected Run/Model/Tool middleware slot; the authority cannot dispatch.
+// Host-owned BudgetAuthority. Host code selects it through BoundedBudget;
+// the Runner owns the fixed Run/Model/Tool stages and the authority cannot dispatch.
 func (authority *BudgetAuthority) Adapter() (*agent.BoundedBudgetAdapter, error) {
 	if authority == nil {
 		return nil, ErrInvalidRequest

@@ -14,7 +14,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
@@ -109,7 +108,7 @@ func TestSettledQuotaRejectionSurvivesRootReceiptFault(t *testing.T) {
 					t.Fatal(err)
 				}
 				adapter := mustBudgetAdapter(t, shared)
-				deps := agent.Dependencies{Runtime: rt, Model: client, Clock: durabilityTestClock{now: now}, ModelOutcomeVerifier: shared, RunMiddleware: []plugin.RunMiddleware{adapter}, ModelMiddleware: []plugin.ModelMiddleware{adapter}}
+				deps := agent.Dependencies{Runtime: rt, Model: client, Clock: durabilityTestClock{now: now}, ModelOutcomeVerifier: shared, BoundedBudget: adapter}
 				start := agent.StartRequest{ID: req.RunID, Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "owner"}, Thread: kernel.ThreadRef{Kind: "test", ID: "quota-recovery"}, Goal: "finish", MaxModelOutputTokens: 128, Limits: budget.Limits{MaxLLMCalls: 1}}
 				if scenario.hosted {
 					deps.HostedTools = governanceHostedCatalog{}

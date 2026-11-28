@@ -26,25 +26,19 @@ func (p admissionCancelPorts) Project(_ context.Context, l budget.Ledger) error 
 	return nil
 }
 
-type admissionOpaqueRun struct{ mode string }
+type admissionOpaqueRun struct{ entered *int }
 
 func (admissionOpaqueRun) Name() string { return "fixture.opaque-admission" }
 func (m admissionOpaqueRun) Run(ctx context.Context, _ plugin.RunInvocation, next plugin.RunNext) (kernel.Snapshot, error) {
-	if m.mode == "opaque-before" {
-		return kernel.Snapshot{}, budget.ErrExhausted
-	}
-	s, err := next(ctx)
-	if m.mode == "opaque-mask" {
-		return s, nil
-	}
-	return s, errors.Join(err, errors.New("unqualified outer callback error"))
+	*m.entered++
+	return next(ctx)
 }
 
 // One original native ledger cancellation, with the exact Run middleware
 // invocation and its complete callback lifetime. No typed Host error or
 // failed projection can manufacture a completed Grant.
 func nativeAdmissionReturns(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store), ledgerFactory func(*testing.T) (budget.LedgerStore, func() budget.LedgerStore)) {
-	for _, mode := range []string{"tool-only", "run-and-tool", "parented-run-and-tool", "projection-failure", "opaque-before", "opaque-after", "opaque-mask"} {
+	for _, mode := range []string{"run-and-tool", "parented-run-and-tool", "projection-failure", "opaque-unentered"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx := t.Context()
 			base, peer, reopen := factory(t)
@@ -67,7 +61,7 @@ func nativeAdmissionReturns(t *testing.T, factory func(*testing.T) (kernel.Store
 				t.Fatal(err)
 			}
 			m := &settledToolModel{}
-			physical, policy, reads := 0, 0, 0
+			physical, policy, reads, opaque := 0, 0, 0, 0
 			reg, err := tools.NewRegistry([]tools.Registration{{Definition: tools.Definition{Key: "read", Name: "read", InputSchema: json.RawMessage(`{"type":"object"}`)}, Handler: tools.HandlerFunc(func(_ context.Context, q tools.ExecutionRequest) (tools.ExecutionResult, error) {
 				physical++
 				return tools.ExecutionResult{Content: json.RawMessage("{}"), Receipt: tools.Receipt{ExecutionID: q.Call.ID, Disposition: "committed"}}, nil
@@ -97,12 +91,9 @@ func nativeAdmissionReturns(t *testing.T, factory func(*testing.T) (kernel.Store
 					reads++
 					return tools.ExecutionResult{}, agent.ErrToolOutcomeUnknown
 				})
-				d := agent.Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, ApprovalPolicies: []plugin.ApprovalPolicy{p}, ToolMiddleware: []plugin.ToolMiddleware{a}, ToolOutcomeVerifier: reader, DelegatedToolResults: reader, StartControlPreflight: func(context.Context, agent.StartRequest) error { return nil }}
-				if mode != "tool-only" {
-					d.RunMiddleware = []plugin.RunMiddleware{a}
-				}
-				if replace && (mode == "opaque-before" || mode == "opaque-after" || mode == "opaque-mask") {
-					d.RunMiddleware = append([]plugin.RunMiddleware{admissionOpaqueRun{mode: mode}}, d.RunMiddleware...)
+				d := agent.Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, ApprovalPolicies: []plugin.ApprovalPolicy{p}, BoundedBudget: a, ToolOutcomeVerifier: reader, DelegatedToolResults: reader, StartControlPreflight: func(context.Context, agent.StartRequest) error { return nil }}
+				if replace && (mode == "opaque-unentered") {
+					d.RunMiddleware = append([]plugin.RunMiddleware{admissionOpaqueRun{entered: &opaque}}, d.RunMiddleware...)
 				}
 				r, err := agent.NewRunner(d)
 				if err != nil {
@@ -142,16 +133,10 @@ func nativeAdmissionReturns(t *testing.T, factory func(*testing.T) (kernel.Store
 			if err != nil {
 				t.Fatal(err)
 			}
-			if physical != 0 || policy != 1 || len(m.calls) != 1 || reads != 0 {
+			if physical != 0 || policy != 1 || len(m.calls) != 1 || reads != 0 || opaque != 0 {
 				t.Fatal("cancelled scope dispatched new work", physical, policy, reads)
 			}
-			if mode == "tool-only" {
-				if !errors.Is(resumeErr, budget.ErrExhausted) || got.Run.Status != kernel.RunStatusFailed || outcome.Kind() != agent.PhysicalCallSettled {
-					t.Fatal("tool-only original denial changed", resumeErr, got.Run, outcome.Kind())
-				}
-				return
-			}
-			if mode == "run-and-tool" || mode == "parented-run-and-tool" {
+			if mode != "projection-failure" {
 				if !errors.Is(resumeErr, budget.ErrExhausted) || errors.Is(resumeErr, agent.ErrRootOutcomeUnknown) || errors.Is(resumeErr, kernel.ErrChildExecutionBusy) || !reflect.DeepEqual(initial, cur) || !reflect.DeepEqual(got, cur) || outcome.Kind() != agent.PhysicalCallSettled {
 					t.Fatal("native no-entry return not qualified", resumeErr, got.Run, cur.Run, outcome.Kind())
 				}

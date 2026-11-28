@@ -88,7 +88,7 @@ func testSharedBudgetUnsentClaim(t *testing.T, bounded bool, outputCeiling int64
 	if bounded {
 		gate = agent.NewModelAdmissionBarrier(held.entered, held.release)
 	}
-	runner, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Clock: clock, Model: provider, ModelMiddleware: []plugin.ModelMiddleware{boundedBudget, gate}})
+	runner, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Clock: clock, Model: provider, BoundedBudget: boundedBudget, ModelMiddleware: []plugin.ModelMiddleware{gate}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +205,7 @@ func TestPreIntentFailureDoesNotReserveSharedModelBudget(t *testing.T) {
 	}
 	provider := &countedBudgetModel{}
 	runner, err := agent.NewRunner(agent.Dependencies{
-		Runtime: rt, Model: provider, ModelMiddleware: []plugin.ModelMiddleware{mustBudgetAdapter(t, shared)},
+		Runtime: rt, Model: provider, BoundedBudget: mustBudgetAdapter(t, shared),
 		PrepareModelRequest: func(context.Context, model.Request) (model.Request, error) {
 			return model.Request{}, errors.New("pre-intent context admission rejected")
 		},
@@ -268,7 +268,7 @@ func TestPermanentModelDispatchViolationTerminatesAndReleasesUnsentBudget(t *tes
 	provider := &countedBudgetModel{}
 	runner, err := agent.NewRunner(agent.Dependencies{
 		Runtime: runtime, Model: provider,
-		ModelMiddleware: []plugin.ModelMiddleware{mustBudgetAdapter(t, shared), corruptFrozenModelRequest{}},
+		BoundedBudget: mustBudgetAdapter(t, shared), ModelMiddleware: []plugin.ModelMiddleware{corruptFrozenModelRequest{}},
 	})
 	if err != nil {
 		t.Fatal(err)

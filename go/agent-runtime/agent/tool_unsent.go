@@ -99,7 +99,7 @@ func (state *runState) markUnsentTool(call tools.Call, disposition unsentToolDis
 // ledger only. The native coordinator validates the no-dispatch predicate
 // again at CAS. A lost ACK cannot make Release look like an unknown result.
 func (r *Runner) loadBoundToolLedger(ctx context.Context, runID string, scope BoundedBudgetScope) (budget.Ledger, error) {
-	b := r.toolBudget
+	b := r.boundedBudget
 	if b == nil || scope.LedgerID == "" {
 		return budget.Ledger{}, ErrToolReceiptMismatch
 	}
@@ -121,7 +121,7 @@ func (r *Runner) inspectUnsentReservation(ctx context.Context, runID string, cal
 	if !a.BudgetBound {
 		return zero, none, nil
 	}
-	b := r.toolBudget
+	b := r.boundedBudget
 	if b == nil {
 		return zero, none, ErrToolReceiptMismatch
 	}
@@ -163,7 +163,7 @@ func (r *Runner) resolveInspectedUnsent(ctx context.Context, runID string, a *to
 	if l.ID == "" {
 		return "", nil
 	}
-	b := r.toolBudget
+	b := r.boundedBudget
 	var err error
 	if a.Unsent.Reservation {
 		l, err = b.coordinator.ResolveUnsentTool(ctx, l.ID, expected, a.Unsent.Release, l.Revision)

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/callbackscope"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
@@ -36,10 +37,10 @@ func finishNativeStage(ticket *callbackscope.Ticket, err *error) {
 }
 
 // The Runner now fixes this order: original Budget scope, Context hydration,
-// actual Run continuation, then Budget projection/settlement. Host middleware
+// generic Run chain/continuation, then Budget projection/settlement. Host middleware
 // cannot supply a new Next for any of these first-party stages.
-func (r *Runner) invokeFirstPartyRun(ctx context.Context, inv plugin.RunInvocation, terminal plugin.RunNext) (out kernel.Snapshot, err error) {
-	b := r.nativeBudget
+func (r *Runner) invokeFirstPartyRun(ctx context.Context, inv plugin.RunInvocation, originalBudget *budget.Ledger, terminal plugin.RunNext) (out kernel.Snapshot, err error) {
+	b := r.boundedBudget
 	if b == nil {
 		return r.invokeContextRun(ctx, inv, terminal)
 	}
@@ -48,7 +49,7 @@ func (r *Runner) invokeFirstPartyRun(ctx context.Context, inv plugin.RunInvocati
 		return kernel.Snapshot{}, ErrInvalidRequest
 	}
 	defer finishNativeStage(ticket, &err)
-	admission, err := b.admitRun(stageCtx, inv)
+	admission, err := b.admitRun(stageCtx, inv, originalBudget)
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
@@ -62,9 +63,6 @@ func (r *Runner) invokeFirstPartyRun(ctx context.Context, inv plugin.RunInvocati
 func (r *Runner) invokeContextRun(ctx context.Context, inv plugin.RunInvocation, terminal plugin.RunNext) (out kernel.Snapshot, err error) {
 	a := r.boundedContext
 	if a == nil {
-		if r.nativeBudget != nil {
-			return terminal(ctx) // complete native topology has no Host Run chain
-		}
 		return r.runChain.Invoke(ctx, inv, terminal)
 	}
 	stageCtx, ticket := callbackscope.Enter(ctx, inv.RunID, a, inv)
@@ -101,7 +99,7 @@ func (r *Runner) invokeContextRun(ctx context.Context, inv plugin.RunInvocation,
 }
 
 func (r *Runner) invokeFirstPartyModel(ctx context.Context, request model.Request, emit model.StreamSink, terminal plugin.ModelNext) (out model.Response, err error) {
-	a := r.nativeBudget
+	a := r.boundedBudget
 	if a == nil {
 		return r.modelChain.Invoke(ctx, request, emit, terminal)
 	}
@@ -110,13 +108,15 @@ func (r *Runner) invokeFirstPartyModel(ctx context.Context, request model.Reques
 		return model.Response{}, ErrInvalidRequest
 	}
 	defer finishNativeStage(ticket, &err)
-	// The concrete Budget operation is the only selected physical owner.
-	// It calls the existing provider admission terminal synchronously.
-	return a.Model(stageCtx, model.CloneRequest(request), emit, terminal)
+	// Budget always encloses the generic chain and physical admission terminal.
+	// Atomic composition rejects nonempty generic chains at construction.
+	return a.Model(stageCtx, model.CloneRequest(request), emit, func(ctx context.Context, request model.Request, emit model.StreamSink) (model.Response, error) {
+		return r.modelChain.Invoke(ctx, request, emit, terminal)
+	})
 }
 
 func (r *Runner) invokeFirstPartyTool(ctx context.Context, inv plugin.ToolInvocation, terminal plugin.ToolNext) (out tools.ExecutionResult, err error) {
-	a := r.nativeBudget
+	a := r.boundedBudget
 	if a == nil {
 		return r.toolChain.Invoke(ctx, inv, terminal)
 	}
@@ -128,5 +128,7 @@ func (r *Runner) invokeFirstPartyTool(ctx context.Context, inv plugin.ToolInvoca
 	// Keep the exact original Tool authority and budget receipt ticket.
 	inv.Definition = tools.CloneDefinition(inv.Definition)
 	inv.Request = tools.CloneExecutionRequest(inv.Request)
-	return a.Tool(stageCtx, inv, terminal)
+	return a.Tool(stageCtx, inv, func(ctx context.Context) (tools.ExecutionResult, error) {
+		return r.toolChain.Invoke(ctx, inv, terminal)
+	})
 }

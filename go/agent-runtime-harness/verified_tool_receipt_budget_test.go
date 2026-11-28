@@ -11,7 +11,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
@@ -85,7 +84,7 @@ func TestVerifiedToolOutcomeSettlementIsIdempotentAndFrozen(t *testing.T) {
 				})
 				deps := agent.Dependencies{Runtime: rt, Model: m, Catalog: registry, Executor: registry, ToolOutcomeVerifier: verifier}
 				if withBudget {
-					deps.ToolMiddleware = []plugin.ToolMiddleware{mustBudgetAdapter(t, shared)}
+					deps.BoundedBudget = mustBudgetAdapter(t, shared)
 				}
 				r, e := agent.NewRunner(deps)
 				if e != nil {

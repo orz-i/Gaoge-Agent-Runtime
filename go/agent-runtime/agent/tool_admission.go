@@ -15,7 +15,7 @@ import (
 // It does not enter Tool middleware, invoke a Tool, mint a receipt or charge
 // usage. A waiting reservation is an admission fact, not a physical intent.
 func (r *Runner) admitPendingToolBudget(ctx context.Context, s kernel.Snapshot, e pendingToolExecution) (kernel.Snapshot, pendingToolExecution, *toolBudgetAdmission, bool, error) {
-	a := r.toolBudget
+	a := r.boundedBudget
 	state := e.state
 	if a == nil {
 		if state.ToolAdmission != nil && state.ToolAdmission.BudgetBound {

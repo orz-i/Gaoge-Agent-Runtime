@@ -504,35 +504,25 @@ func observeExactOwnedRetirement(ctx context.Context, rt *kernel.Runtime, grant 
 	return true, nil
 }
 
-func collectBoundedCallbacks(d Dependencies, nativeContext *BoundedContextAdapter, nativeBudget *BoundedBudgetAdapter) []any {
+func collectBoundedCallbacks(d Dependencies) []any {
 	var result []any
-	if nativeContext != nil {
-		result = append(result, nativeContext)
+	if d.BoundedContext != nil {
+		result = append(result, d.BoundedContext)
 	}
-	if nativeBudget != nil {
-		result = append(result, nativeBudget)
+	if d.BoundedBudget != nil {
+		result = append(result, d.BoundedBudget)
 	}
 	if d.Inputs != nil {
 		result = append(result, inputReadStage)
 	}
-	for _, m := range d.RunMiddleware {
-		switch value := m.(type) {
-		case *BoundedBudgetAdapter:
-			result = append(result, value)
-		}
-	}
 	for _, m := range d.ModelMiddleware {
 		switch value := m.(type) {
-		case *BoundedBudgetAdapter:
-			result = append(result, value)
 		case *ModelAdmissionBarrier:
 			result = append(result, value)
 		}
 	}
 	for _, m := range d.ToolMiddleware {
 		switch value := m.(type) {
-		case *BoundedBudgetAdapter:
-			result = append(result, value)
 		case *BoundedToolTimelineAdapter:
 			result = append(result, value)
 		}

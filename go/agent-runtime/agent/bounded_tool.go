@@ -14,19 +14,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
-// Select the actual Tool settlement owner, never a Run/Model-only adapter.
-func selectedToolBudget(d Dependencies) *BoundedBudgetAdapter {
-	if d.BoundedBudget != nil {
-		return d.BoundedBudget
-	}
-	for _, layer := range d.ToolMiddleware {
-		if a, ok := layer.(*BoundedBudgetAdapter); ok {
-			return a
-		}
-	}
-	return nil
-}
-
 // This policy only classifies infrastructure concurrency; it cannot certify
 // callback completion, Tool effects, or the outcome of a physical dispatch.
 type BoundedBudgetToolPorts interface {
@@ -35,7 +22,7 @@ type BoundedBudgetToolPorts interface {
 
 // toolBudgetAdmission is an in-process ticket for one already reserved Call.
 // The durable Agent admission and ledger are the authorities; the ticket
-// merely prevents the middleware from resolving or reserving a second scope.
+// prevents the fixed Budget stage from resolving or reserving a second scope.
 type toolBudgetAdmission struct {
 	adapter *BoundedBudgetAdapter
 	request tools.ExecutionRequest

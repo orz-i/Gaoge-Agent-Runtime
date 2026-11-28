@@ -12,23 +12,7 @@ import (
 // authorization, projection and completion obligations. An arbitrary Host
 // layer cannot be skipped (its policy is unknown) or entered after expiry.
 func supportsReceiptOnlyRunChain(d Dependencies) bool {
-	runBudget := d.BoundedBudget
-	for _, layer := range d.RunMiddleware {
-		switch a := layer.(type) {
-		case *BoundedBudgetAdapter:
-			runBudget = a
-		default:
-			return false
-		}
-	}
-	// Never consume a budgeted receipt without its original Run-level
-	// admission/terminal projection owner, even in a partial composition.
-	for _, a := range []*BoundedBudgetAdapter{selectedSamplingBudget(d), selectedToolBudget(d)} {
-		if a != nil && a != runBudget {
-			return false
-		}
-	}
-	return true
+	return len(d.RunMiddleware) == 0
 }
 
 // expiredRootReceipt selects a single already-committed receipt BEFORE
@@ -49,7 +33,7 @@ func (r *Runner) expiredRootReceipt(source kernel.Snapshot, frame *nativeRunAdmi
 		for _, receipt := range state.RecoveredTools {
 			if sameRecoveredCall(receipt.Call, call) {
 				frame.receiptLedger = receipt.LedgerID
-				if receipt.LedgerID != "" && r.toolBudget == nil {
+				if receipt.LedgerID != "" && r.boundedBudget == nil {
 					return nil, kernel.ErrDeadline
 				}
 				found = true
@@ -85,7 +69,7 @@ func (r *Runner) expiredRootReceipt(source kernel.Snapshot, frame *nativeRunAdmi
 	}
 	if invocation.SamplingPlan != nil {
 		frame.receiptLedger = invocation.SamplingPlan.LedgerID
-		if frame.receiptLedger != "" && r.samplingBudget == nil {
+		if frame.receiptLedger != "" && r.boundedBudget == nil {
 			return nil, kernel.ErrDeadline
 		}
 	}

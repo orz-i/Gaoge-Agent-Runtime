@@ -108,32 +108,16 @@ func (p dispatchDenialPorts) Project(_ context.Context, l budget.Ledger) error {
 	return nil
 }
 
-type dispatchDenialOpaqueLayer struct {
-	mode  string
-	calls *int
-}
+type dispatchDenialOpaqueLayer struct{ calls *int }
 
 func (dispatchDenialOpaqueLayer) Name() string { return "fixture.opaque-tool-denial" }
 func (m dispatchDenialOpaqueLayer) Tool(ctx context.Context, _ plugin.ToolInvocation, next plugin.ToolNext) (tools.ExecutionResult, error) {
 	*m.calls++
-	if m.mode == "opaque-before" {
-		return tools.ExecutionResult{}, budget.ErrExhausted
-	}
-	out, err := next(ctx)
-	switch m.mode {
-	case "opaque-mask":
-		return out, nil
-	case "opaque-augment":
-		return out, errors.Join(err, errors.New("opaque tool callback failed"))
-	case "opaque-forged-result":
-		return tools.ExecutionResult{Content: json.RawMessage("{}"), Receipt: tools.Receipt{ExecutionID: "original-call", Disposition: "committed"}}, err
-	default:
-		return out, err
-	}
+	return next(ctx)
 }
 
 func toolDispatchDenial(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store), ledgerFactory func(*testing.T) (budget.LedgerStore, func() budget.LedgerStore)) {
-	for _, mode := range []string{"budget-only", "timeline-outer", "timeline-inner", "parented", "cleanup-cas", "projection-failure", "timeline-failure", "opaque-before", "opaque-pass", "opaque-mask", "opaque-augment", "opaque-forged-result", "opaque-inner-unentered", "dispatch-write-before", "dispatch-write-ack", "actual-handler-error", "retirement-recovery-before", "retirement-recovery-ack", "retirement-finish-before", "retirement-finish-ack"} {
+	for _, mode := range []string{"budget-only", "timeline-inner", "parented", "cleanup-cas", "projection-failure", "opaque-inner-unentered", "dispatch-write-before", "dispatch-write-ack", "actual-handler-error", "retirement-recovery-before", "retirement-recovery-ack", "retirement-finish-before", "retirement-finish-ack"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx := t.Context()
 			retirementMode := strings.HasPrefix(mode, "retirement-")
@@ -179,9 +163,7 @@ func toolDispatchDenial(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 				t.Fatal(err)
 			}
 			timeline := &toolConsumptionTimeline{}
-			if mode == "timeline-failure" {
-				timeline.fail = errors.New("outer timeline terminal append failed")
-			}
+
 			mk := func(rt *kernel.Runtime, l budget.LedgerStore, original bool) *agent.Runner {
 				t.Helper()
 				ports := dispatchDenialPorts{capacityAdmissionPorts: capacityAdmissionPorts{settledToolPorts: settledToolPorts{id: scope}, limits: limits}, hits: &projection}
@@ -192,21 +174,17 @@ func toolDispatchDenial(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 				if err != nil {
 					t.Fatal(err)
 				}
-				layers := []plugin.ToolMiddleware{b}
+				var layers []plugin.ToolMiddleware
 				if original {
 					track, err := agent.NewBoundedToolTimelineAdapter(timeline)
 					if err != nil {
 						t.Fatal(err)
 					}
 					switch mode {
-					case "timeline-outer", "timeline-failure", "parented":
-						layers = []plugin.ToolMiddleware{track, b}
-					case "timeline-inner":
+					case "timeline-inner", "parented":
 						layers = append(layers, track)
-					case "opaque-before", "opaque-pass", "opaque-mask", "opaque-augment", "opaque-forged-result":
-						layers = append([]plugin.ToolMiddleware{dispatchDenialOpaqueLayer{mode: mode, calls: &opaque}}, layers...)
 					case "opaque-inner-unentered":
-						layers = append(layers, dispatchDenialOpaqueLayer{mode: mode, calls: &opaque})
+						layers = append(layers, dispatchDenialOpaqueLayer{calls: &opaque})
 					}
 				}
 				p, err := agent.NewBoundedToolApproval(func(context.Context, tools.ExecutionRequest) (plugin.ApprovalRequirement, error) {
@@ -220,7 +198,7 @@ func toolDispatchDenial(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 					reads++
 					return tools.ExecutionResult{}, agent.ErrToolOutcomeUnknown
 				})
-				d := agent.Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, RunMiddleware: []plugin.RunMiddleware{b}, ToolMiddleware: layers, ToolOutcomeVerifier: reader, DelegatedToolResults: reader, StartControlPreflight: func(context.Context, agent.StartRequest) error { return nil }}
+				d := agent.Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, BoundedBudget: b, ToolMiddleware: layers, ToolOutcomeVerifier: reader, DelegatedToolResults: reader, StartControlPreflight: func(context.Context, agent.StartRequest) error { return nil }}
 				if original && !retirementMode {
 					d.ApprovalPolicies = []plugin.ApprovalPolicy{p}
 				}
@@ -267,7 +245,7 @@ func toolDispatchDenial(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 			if physical != wantPhysical || policies != wantPolicies || reads != 0 || len(m.calls) != 1 || len(res.Receipt) != 0 || res.Usage != (budget.Usage{}) {
 				t.Fatal("original no-send/unknown effect identity changed", physical, policies, reads, len(m.calls), res)
 			}
-			positive := mode == "budget-only" || mode == "timeline-outer" || mode == "timeline-inner" || mode == "parented" || mode == "opaque-inner-unentered"
+			positive := mode == "budget-only" || mode == "timeline-inner" || mode == "parented" || mode == "opaque-inner-unentered"
 			if positive {
 				if !errors.Is(runErr, budget.ErrExhausted) || errors.Is(runErr, agent.ErrRootOutcomeUnknown) || errors.Is(runErr, kernel.ErrChildExecutionBusy) || got.Run.Status != kernel.RunStatusFailed || cur.Run.Status != kernel.RunStatusFailed || outcome.Kind() != agent.PhysicalCallSettled {
 					t.Fatal("exact actual native denial did not terminalize/retire", runErr, got.Run, cur.Run, outcome.Kind())
@@ -275,12 +253,8 @@ func toolDispatchDenial(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 				if _, err = observer.LookupChildExecution(ctx, root); !errors.Is(err, kernel.ErrNotFound) {
 					t.Fatal("exact denial retained grant", err)
 				}
-				wantTimeline := 0
-				if mode == "timeline-outer" || mode == "parented" {
-					wantTimeline = 1
-				}
-				if timeline.starts != wantTimeline || timeline.ends != wantTimeline || opaque != 0 {
-					t.Fatal("unexpected admitted callbacks", timeline, opaque)
+				if timeline.starts != 0 || timeline.ends != 0 || opaque != 0 {
+					t.Fatal("denied admission entered downstream callbacks", timeline, opaque)
 				}
 				return
 			}
@@ -389,14 +363,7 @@ func toolDispatchDenial(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 			if mode == "projection-failure" && projection != 1 {
 				t.Fatal("projection fault not reached", projection)
 			}
-			if mode == "timeline-failure" && (timeline.starts != 1 || timeline.ends != 1) {
-				t.Fatal("timeline fault not reached", timeline)
-			}
-			if mode == "opaque-before" || mode == "opaque-pass" || mode == "opaque-mask" || mode == "opaque-augment" || mode == "opaque-forged-result" {
-				if opaque != 1 {
-					t.Fatal("opaque layer not entered", opaque)
-				}
-			}
+
 			if mode == "dispatch-write-before" && res.Dispatched || (mode == "dispatch-write-ack" || mode == "actual-handler-error") && !res.Dispatched {
 				t.Fatal("unexpected actual dispatch fact", mode, res)
 			}

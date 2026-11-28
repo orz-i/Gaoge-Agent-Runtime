@@ -17,7 +17,7 @@ import (
 )
 
 type settledToolPorts struct {
-	agent.BoundedBudgetPorts
+	nativeModelBudgetPorts
 	id      string
 	project func(context.Context, budget.Ledger) error
 }
@@ -124,14 +124,11 @@ func RunSettledToolRecovery(t *testing.T, factory func(*testing.T) (kernel.Store
 				if e != nil {
 					t.Fatal(e)
 				}
-				layers := []plugin.ToolMiddleware{a}
+				var layers []plugin.ToolMiddleware
 				if opaque {
 					layers = append(layers, ea1OpaqueToolMiddleware{})
 				}
-				d := agent.Dependencies{Runtime: rt, Model: m, Catalog: registry, Executor: registry, ToolMiddleware: layers}
-				if variant == "cancel-during-project" {
-					d.RunMiddleware = []plugin.RunMiddleware{a}
-				}
+				d := agent.Dependencies{Runtime: rt, Model: m, Catalog: registry, Executor: registry, BoundedBudget: a, ToolMiddleware: layers}
 				if verify {
 					d.ToolOutcomeVerifier = agent.ToolOutcomeVerifierFunc(func(context.Context, tools.ExecutionRequest) (tools.ExecutionResult, error) {
 						verifications++

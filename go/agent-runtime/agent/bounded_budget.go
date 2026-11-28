@@ -43,56 +43,16 @@ func NewBoundedBudgetAdapter(store budget.LedgerStore, ports BoundedBudgetPorts)
 	}
 	return &BoundedBudgetAdapter{budget.Coordinator{Store: store}, ports}, nil
 }
-func (*BoundedBudgetAdapter) Name() string { return "runtime.bounded_budget.v1" }
 
-// One Agent execution has ONE original Budget ticket owner. Different
-// adapters in Run/Model/Tool chains would split the scope and allow a callback
-// to be charged or certified by an unrelated budget authority.
+// One explicit owner accounts for every Run, Model and Tool stage. Atomic
+// accounting cannot be combined with a generic chain: its physical receipt
+// transitions must remain inside the fixed first-party boundary.
 func validBoundedBudgetComposition(dependencies Dependencies) bool {
 	if a := dependencies.BoundedBudget; a != nil {
 		return a.coordinator.Store != nil && a.ports != nil &&
-			len(dependencies.RunMiddleware) == 0 && len(dependencies.ModelMiddleware) == 0 && len(dependencies.ToolMiddleware) == 0
+			(a.nativeStore() == nil || len(dependencies.RunMiddleware) == 0 && len(dependencies.ModelMiddleware) == 0 && len(dependencies.ToolMiddleware) == 0)
 	}
-	var original *BoundedBudgetAdapter
-	accept := func(candidate *BoundedBudgetAdapter) bool {
-		if candidate == nil {
-			return false
-		}
-		if original == nil {
-			original = candidate
-			return true
-		}
-		return original == candidate
-	}
-	run, modelSelected, tool := false, false, false
-	for _, layer := range dependencies.RunMiddleware {
-		if b, ok := layer.(*BoundedBudgetAdapter); ok {
-			if run || !accept(b) {
-				return false
-			}
-			run = true
-		}
-	}
-	for _, layer := range dependencies.ModelMiddleware {
-		if b, ok := layer.(*BoundedBudgetAdapter); ok {
-			if modelSelected || !accept(b) {
-				return false
-			}
-			modelSelected = true
-		}
-	}
-	for _, layer := range dependencies.ToolMiddleware {
-		if b, ok := layer.(*BoundedBudgetAdapter); ok {
-			if tool || !accept(b) {
-				return false
-			}
-			tool = true
-		}
-	}
-	// A complete first-party Budget must use BoundedBudget; the old exact
-	// three-layer registration is no longer a selectable topology.
-	return !(run && modelSelected && tool && len(dependencies.RunMiddleware) == 1 &&
-		len(dependencies.ModelMiddleware) == 1 && len(dependencies.ToolMiddleware) == 1)
+	return true
 }
 
 // Native scope selection is creation-only. Later phases use the persisted
@@ -309,8 +269,8 @@ func requireReceiptConsumption(ctx context.Context, runID, originalLedger string
 		}
 		return nil
 	}
-	// A Model/Tool-only native composition has no enclosing budget Run
-	// layer. It still cannot ignore the exact durable ledger of its receipt.
+	// Receipt recovery outside the admitted Run frame still checks the
+	// exact durable ledger without creating a new reservation.
 	if originalLedger == "" {
 		return nil
 	}
@@ -333,10 +293,10 @@ func requireReceiptConsumption(ctx context.Context, runID, originalLedger string
 	return nil
 }
 
-// Run is the explicit middleware compatibility spelling. Native Runner
-// stages use the same admission and settlement operations directly.
+// Run is the standalone accounting entry. Runner stages use the same
+// admission and settlement operations directly.
 func (a *BoundedBudgetAdapter) Run(ctx context.Context, inv plugin.RunInvocation, next plugin.RunNext) (kernel.Snapshot, error) {
-	admission, err := a.admitRun(ctx, inv)
+	admission, err := a.admitRun(ctx, inv, nil)
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
@@ -344,7 +304,7 @@ func (a *BoundedBudgetAdapter) Run(ctx context.Context, inv plugin.RunInvocation
 	return a.finishRun(ctx, inv, admission, out, callErr, false)
 }
 
-func (a *BoundedBudgetAdapter) admitRun(ctx context.Context, inv plugin.RunInvocation) (*runBudgetAdmission, error) {
+func (a *BoundedBudgetAdapter) admitRun(ctx context.Context, inv plugin.RunInvocation, original *budget.Ledger) (*runBudgetAdmission, error) {
 	frame, _ := callbackscope.RunCall(ctx).(*nativeRunAdmission)
 	receiptOnly := frame != nil && frame.invocation == inv && frame.receiptOnly
 	var l budget.Ledger
@@ -360,6 +320,8 @@ func (a *BoundedBudgetAdapter) admitRun(ctx context.Context, inv plugin.RunInvoc
 		}
 	} else if receiptOnly {
 		l, err = a.bindReceiptScope(ctx, inv.RunID, frame.receiptLedger)
+	} else if original != nil {
+		l = *original
 	} else {
 		l, err = a.bind(ctx, inv.RunID)
 	}
@@ -445,7 +407,7 @@ func (a *BoundedBudgetAdapter) finishRun(ctx context.Context, inv plugin.RunInvo
 // stored budgets retain their old conservative callback boundary until the
 // Host storage and managed recovery cutover is complete.
 func (r *Runner) atomicBudget() *BoundedBudgetAdapter {
-	a := r.nativeBudget
+	a := r.boundedBudget
 	if a == nil || !r.runtime.UsesLedgerStore(a.coordinator.Store) {
 		return nil
 	}

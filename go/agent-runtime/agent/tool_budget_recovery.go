@@ -174,7 +174,7 @@ func originalCallReturn(s kernel.Snapshot, c kernel.OwnedPhysicalCallbackComplet
 }
 
 func (r *Runner) originalToolLedger(ctx context.Context, q tools.ExecutionRequest, b kernel.OwnedToolReturn) (*BoundedBudgetAdapter, budget.Ledger, error) {
-	a := r.toolBudget
+	a := r.boundedBudget
 	if a == nil || b.LedgerID == "" {
 		return nil, budget.Ledger{}, ErrToolReceiptMismatch
 	}
@@ -198,10 +198,10 @@ func (r *Runner) originalToolLedger(ctx context.Context, q tools.ExecutionReques
 // An observer must not accept a paid Tool without original accounting
 // evidence, or silently switch to a newly resolved ledger.
 func (r *Runner) requireUnmeteredToolRecovery(ctx context.Context, runID string) error {
-	if r.toolBudget == nil {
+	if r.boundedBudget == nil {
 		return nil
 	}
-	scope, err := r.toolBudget.resolveScope(ctx, runID)
+	scope, err := r.boundedBudget.resolveScope(ctx, runID)
 	if err != nil {
 		return err
 	}
@@ -306,7 +306,7 @@ func (r *Runner) settleToolHold(ctx context.Context, request tools.ExecutionRequ
 }
 
 func (r *Runner) settleVerifiedToolReservation(ctx context.Context, request tools.ExecutionRequest, original func(string) bool, usage budget.Usage, receipt json.RawMessage) error {
-	a := r.toolBudget
+	a := r.boundedBudget
 	if a == nil {
 		return ErrToolReceiptMismatch
 	}

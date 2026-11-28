@@ -501,7 +501,7 @@ func (runner *Runner) buildInvocation(ctx context.Context, snapshot kernel.Snaps
 		return ModelInvocation{}, err
 	}
 	preparation := &modelPreparation{run: snapshot.Run, client: runner.model, now: runner.clock.Now(),
-		original: model.CloneRequest(request), catalog: definitions, budget: runner.samplingBudget}
+		original: model.CloneRequest(request), catalog: definitions, budget: runner.boundedBudget}
 	defer preparation.close()
 	if summaryEligible(snapshot, state) {
 		if runner.contextSummary == nil {
@@ -812,7 +812,7 @@ func (runner *Runner) executeModelInvocation(
 	}
 	generateCtx := ctx
 	if invocation.SamplingPlan != nil {
-		if (invocation.SamplingPlan.LedgerID != "" && runner.samplingBudget == nil) || !invocation.SamplingPlan.valid(invocation.Request) {
+		if (invocation.SamplingPlan.LedgerID != "" && runner.boundedBudget == nil) || !invocation.SamplingPlan.valid(invocation.Request) {
 			return snapshot, state, ErrInvalidRequest
 		}
 	}

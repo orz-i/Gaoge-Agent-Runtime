@@ -187,14 +187,14 @@ func (runner *Runner) qualifiedRecoveredModelReceipt(state runState, inv ModelIn
 // its committed rejection. Reads never acquire or alter budget rights.
 func (runner *Runner) originalModelReservation(ctx context.Context, inv ModelInvocation) (budget.Reservation, error) {
 	plan := inv.SamplingPlan
-	if plan == nil || plan.LedgerID == "" || !plan.valid(inv.Request) || runner.samplingBudget == nil {
+	if plan == nil || plan.LedgerID == "" || !plan.valid(inv.Request) || runner.boundedBudget == nil {
 		return budget.Reservation{}, ErrInvalidRequest
 	}
 	expected, err := plan.reservation(inv.Request)
 	if err != nil {
 		return budget.Reservation{}, err
 	}
-	ledger, err := runner.samplingBudget.coordinator.Store.LoadBudget(ctx, plan.LedgerID)
+	ledger, err := runner.boundedBudget.coordinator.Store.LoadBudget(ctx, plan.LedgerID)
 	if err != nil {
 		return budget.Reservation{}, err
 	}

@@ -282,8 +282,8 @@ type Dependencies struct {
 	PrepareModelRequest ModelRequestPreparer
 	// BoundedContext selects the fixed Context hydration and preparation stage.
 	BoundedContext *BoundedContextAdapter
-	// BoundedBudget selects one native Run, Model and Tool accounting owner.
-	// The Runner owns its execution order; do not also register middleware.
+	// BoundedBudget selects the single Run, Model and Tool accounting owner.
+	// The Runner fixes its order outside generic chains. Atomic budgets reject middleware.
 	BoundedBudget *BoundedBudgetAdapter
 	// ManagedRecovery selects source-bound recovery of the first-party Agent
 	// lifecycle. Context, Summary, Budget and Inputs use their actual stages.
@@ -372,9 +372,7 @@ type Runner struct {
 	rootCallbacks            *rootCallbackState
 	boundedCallbacks         []any
 	boundedContext           *BoundedContextAdapter
-	nativeBudget             *BoundedBudgetAdapter
-	samplingBudget           *BoundedBudgetAdapter
-	toolBudget               *BoundedBudgetAdapter
+	boundedBudget            *BoundedBudgetAdapter
 	managedObligationSource  *managedObligations
 	contextSummary           *ContextSummaryAdapter
 	managedRecovery          bool
@@ -540,11 +538,9 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 	if err := selectFirstPartyStages(&dependencies); err != nil {
 		return nil, err
 	}
-	nativeBudget := dependencies.BoundedBudget
-	for _, b := range []*BoundedBudgetAdapter{nativeBudget, selectedSamplingBudget(dependencies), selectedToolBudget(dependencies)} {
-		if b != nil && b.nativeStore() != nil && (b != nativeBudget || !dependencies.Runtime.UsesLedgerStore(b.coordinator.Store)) {
-			return nil, ErrInvalidRequest
-		}
+	boundedBudget := dependencies.BoundedBudget
+	if boundedBudget != nil && boundedBudget.nativeStore() != nil && !dependencies.Runtime.UsesLedgerStore(boundedBudget.coordinator.Store) {
+		return nil, ErrInvalidRequest
 	}
 	progressPolicy, err := normalizeToolProgressPolicy(dependencies.ToolProgressPolicy, dependencies.Catalog)
 	if err != nil {
@@ -642,7 +638,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		executor: dependencies.Executor, approvals: dependencies.Approvals,
 		approvalControlPreflight: dependencies.ApprovalControlPreflight,
 		startControlPreflight:    dependencies.StartControlPreflight,
-		runMiddlewareConfigured:  len(dependencies.RunMiddleware) > 0 || dependencies.BoundedContext != nil || nativeBudget != nil || dependencies.Inputs != nil,
+		runMiddlewareConfigured:  len(dependencies.RunMiddleware) > 0 || dependencies.BoundedContext != nil || boundedBudget != nil || dependencies.Inputs != nil,
 		receiptOnlyRunChain:      supportsReceiptOnlyRunChain(dependencies),
 		hostedTools:              dependencies.HostedTools, discovery: dependencies.ToolDiscovery, observers: observers, telemetry: telemetry, approvalPolicies: approvalPolicies,
 		completionPolicies:   compactCompletionPolicies(dependencies.CompletionPolicies),
@@ -660,17 +656,15 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		toolLimiter:          newCallLimiter(execution.Tool.MaxConcurrency),
 		runChain:             runChain, modelChain: modelChain, toolChain: toolChain,
 		boundedContext:   dependencies.BoundedContext,
-		nativeBudget:     nativeBudget,
-		samplingBudget:   selectedSamplingBudget(dependencies),
-		toolBudget:       selectedToolBudget(dependencies),
+		boundedBudget:    boundedBudget,
 		contextSummary:   dependencies.ContextSummary,
 		managedRecovery:  dependencies.ManagedRecovery,
-		boundedCallbacks: collectBoundedCallbacks(dependencies, dependencies.BoundedContext, nativeBudget),
+		boundedCallbacks: collectBoundedCallbacks(dependencies),
 		// Native pre-Start cancellation and deferred post-callback custody
 		// share the SAME Host-callback trust decision. Native Start remains
 		// strictly middleware-free while the deferred path may also accept
 		// the audited, callback-scoped first-party middleware below.
-		kernelOwnedStartCancellation: control && dependencies.Inputs == nil && dependencies.BoundedContext == nil && nativeBudget == nil &&
+		kernelOwnedStartCancellation: control && dependencies.Inputs == nil && dependencies.BoundedContext == nil && boundedBudget == nil &&
 			len(dependencies.RunMiddleware) == 0 &&
 			len(dependencies.ModelMiddleware) == 0 && len(dependencies.ToolMiddleware) == 0 &&
 			!dependencies.ManagedRecovery,
@@ -1438,7 +1432,7 @@ func (runner *Runner) consumeCompletedModel(ctx context.Context, snapshot kernel
 	if invocation.SamplingPlan != nil {
 		ledgerID = invocation.SamplingPlan.LedgerID
 	}
-	if err := requireReceiptConsumption(ctx, snapshot.Run.ID, ledgerID, runner.samplingBudget); err != nil {
+	if err := requireReceiptConsumption(ctx, snapshot.Run.ID, ledgerID, runner.boundedBudget); err != nil {
 		// Preserve the exact committed receipt and its charge. A refused
 		// local consumption neither resends nor terminalizes the Run.
 		return snapshot, true, err
@@ -2480,7 +2474,7 @@ func (runner *Runner) consumeRecoveredPending(ctx context.Context, snapshot kern
 				return snapshot, true, ErrToolReceiptMismatch, true
 			}
 		}
-		if err := requireReceiptConsumption(ctx, snapshot.Run.ID, receipt.LedgerID, runner.toolBudget); err != nil {
+		if err := requireReceiptConsumption(ctx, snapshot.Run.ID, receipt.LedgerID, runner.boundedBudget); err != nil {
 			return snapshot, true, err, true
 		}
 		execution.state.RecoveredTools = append(execution.state.RecoveredTools[:index], execution.state.RecoveredTools[index+1:]...)

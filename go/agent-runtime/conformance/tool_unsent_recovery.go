@@ -148,7 +148,7 @@ func toolUnsentRecovery(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 			limits := budget.Limits{MaxToolCalls: 1, MaxConcurrentRuns: 1}
 			coord := budget.Coordinator{Store: ledger}
 			cut := errors.New("original unsent protocol fault")
-			if terminal {
+			blockPeer := func() {
 				if _, e := coord.Ensure(ctx, scope, limits); e != nil {
 					t.Fatal(e)
 				}
@@ -162,6 +162,7 @@ func toolUnsentRecovery(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 					t.Fatal(e)
 				}
 			}
+			peerBlocked := false
 			m := &settledToolModel{}
 			physical, policies, reads, projectHits := 0, 0, 0, 0
 			reg, e := tools.NewRegistry([]tools.Registration{{Definition: tools.Definition{Key: "read", Name: "read", InputSchema: json.RawMessage(`{"type":"object"}`)}, Handler: tools.HandlerFunc(func(_ context.Context, q tools.ExecutionRequest) (tools.ExecutionResult, error) {
@@ -182,6 +183,7 @@ func toolUnsentRecovery(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 					t.Fatal(e)
 				}
 				layers := []plugin.ToolMiddleware{timeline}
+				var bounded *agent.BoundedBudgetAdapter
 				if !unmetered {
 					ports := unsentProjectionPorts{capacityAdmissionPorts: capacityAdmissionPorts{settledToolPorts: settledToolPorts{id: scope}, limits: limits}, hits: &projectHits}
 					if projectionFault {
@@ -191,10 +193,18 @@ func toolUnsentRecovery(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 					if e != nil {
 						t.Fatal(e)
 					}
-					layers = append(layers, b)
+					bounded = b
 				}
 				p, e := agent.NewBoundedToolApproval(func(context.Context, tools.ExecutionRequest) (plugin.ApprovalRequirement, error) {
 					policies++
+					if terminal && !peerBlocked {
+						current, err := ledger.LoadBudget(ctx, scope)
+						if err != nil || current.View("").Usage.LLMCalls != 1 {
+							t.Fatalf("Model not settled before Tool wait: %v", err)
+						}
+						blockPeer()
+						peerBlocked = true
+					}
 					return plugin.ApprovalNotRequired, nil
 				})
 				if e != nil {
@@ -204,7 +214,7 @@ func toolUnsentRecovery(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 					reads++
 					return tools.ExecutionResult{}, agent.ErrToolOutcomeUnknown
 				})
-				d := agent.Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, ToolMiddleware: layers, ToolOutcomeVerifier: reader, DelegatedToolResults: reader}
+				d := agent.Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, BoundedBudget: bounded, ToolMiddleware: layers, ToolOutcomeVerifier: reader, DelegatedToolResults: reader}
 				if policy {
 					d.ApprovalPolicies = []plugin.ApprovalPolicy{p}
 				}

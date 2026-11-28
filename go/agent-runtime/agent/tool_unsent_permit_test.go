@@ -62,7 +62,7 @@ func TestNativeToolPermitPrecedesSharedCapacity(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			r, err := NewRunner(Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, ApprovalPolicies: []plugin.ApprovalPolicy{policy}, ToolMiddleware: []plugin.ToolMiddleware{adapter},
+			r, err := NewRunner(Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, ApprovalPolicies: []plugin.ApprovalPolicy{policy}, BoundedBudget: adapter, StartControlPreflight: func(context.Context, StartRequest) error { return nil },
 				Execution: ExecutionPolicy{Tool: CallPolicy{Timeout: time.Second, MaxAttempts: 1, MaxConcurrency: 1}}})
 			if err != nil {
 				t.Fatal(err)
@@ -114,8 +114,12 @@ func TestNativeToolPermitPrecedesSharedCapacity(t *testing.T) {
 					}
 				}
 			}
-			if _, err = ledger.LoadBudget(ctx, "turn"); !errors.Is(err, budget.ErrLedgerNotFound) {
-				t.Fatal("local queue acquired shared capacity", err)
+			admitted, err := ledger.LoadBudget(ctx, "turn")
+			if err != nil || admitted.View("").Usage.LLMCalls != 1 || admitted.View("").Reserved.ToolCalls != 0 {
+				t.Fatal("local queue changed the original model-only accounting", err, admitted.View(""))
+			}
+			if _, exists := admitted.Reservations["tool:"+req.ID+":permit-call"]; exists {
+				t.Fatal("local queue acquired shared Tool capacity")
 			}
 			cancel()
 			select {

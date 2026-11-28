@@ -146,7 +146,7 @@ func toolBatchBoundary(t *testing.T, factory func(*testing.T) (kernel.Store, ker
 					}
 					return result(q.Call.ID), nil
 				})
-				d := agent.Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, Approvals: interactionadapter.New(interactions), ToolMiddleware: []plugin.ToolMiddleware{b}, ToolOutcomeVerifier: reader, DelegatedToolResults: reader, DeferResumption: true}
+				d := agent.Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, Approvals: interactionadapter.New(interactions), BoundedBudget: b, ToolOutcomeVerifier: reader, DelegatedToolResults: reader, DeferResumption: true}
 				if withPolicy {
 					d.ApprovalPolicies = []plugin.ApprovalPolicy{p}
 				}

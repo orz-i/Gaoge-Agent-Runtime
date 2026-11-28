@@ -63,9 +63,7 @@ func toolCapacityAdmission(t *testing.T, factory func(*testing.T) (kernel.Store,
 					t.Fatal(err)
 				}
 			}
-			if !mixed {
-				blockPeer()
-			}
+			peerBlocked := false
 			child, err := observer.Create(ctx, kernel.CreateRequest{ID: "original-child", Kind: "fixture.child", Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "test", ID: "thread"}, Goal: "child", State: json.RawMessage("{}")})
 			if err != nil {
 				t.Fatal(err)
@@ -105,12 +103,24 @@ func toolCapacityAdmission(t *testing.T, factory func(*testing.T) (kernel.Store,
 					t.Fatal(e)
 				}
 				layers := []plugin.ToolMiddleware{track}
+				var bounded *agent.BoundedBudgetAdapter
 				if ledgerID != "" {
-					b, e := agent.NewBoundedBudgetAdapter(l, capacityAdmissionPorts{settledToolPorts: settledToolPorts{id: ledgerID}, limits: limits, inactiveChild: mode == "mixed-slot"})
+					b, e := agent.NewBoundedBudgetAdapter(l, capacityAdmissionPorts{settledToolPorts: settledToolPorts{id: ledgerID, project: func(_ context.Context, current budget.Ledger) error {
+						if !mixed && !peerBlocked {
+							for _, res := range current.Reservations {
+								if res.RunID == rootID && res.Requested.LLMCalls == 1 && res.Status == budget.ReservationSettled {
+									blockPeer() // Compete with Tool admission, not the preceding Model.
+									peerBlocked = true
+									break
+								}
+							}
+						}
+						return nil
+					}}, limits: limits, inactiveChild: mode == "mixed-slot"})
 					if e != nil {
 						t.Fatal(e)
 					}
-					layers = append(layers, b)
+					bounded = b
 				}
 				p, e := agent.NewBoundedToolApproval(func(_ context.Context, q tools.ExecutionRequest) (plugin.ApprovalRequirement, error) {
 					policies[q.Call.ID]++
@@ -139,7 +149,7 @@ func toolCapacityAdmission(t *testing.T, factory func(*testing.T) (kernel.Store,
 					}
 					return result(q.Call.ID), nil
 				})
-				d := agent.Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, Approvals: interactionadapter.New(it), ToolMiddleware: layers, ToolOutcomeVerifier: reader, DelegatedToolResults: reader, DeferResumption: true}
+				d := agent.Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, Approvals: interactionadapter.New(it), BoundedBudget: bounded, ToolMiddleware: layers, ToolOutcomeVerifier: reader, DelegatedToolResults: reader, DeferResumption: true}
 				if policyEnabled {
 					d.ApprovalPolicies = []plugin.ApprovalPolicy{p}
 				}

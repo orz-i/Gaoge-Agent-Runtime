@@ -15,8 +15,10 @@
   and the public `BoundedContextAdapter.Prepare` / `PrepareRequest` methods. The
   single `NewBoundedContextAdapter` supplies hydration and preparation to the Runner;
   no separate Host lifecycle or standalone compaction entry remains.
-- Configure a complete shared Budget through `Dependencies.BoundedBudget`. The old
-  exact Run/Model/Tool triple registration is rejected rather than normalized.
+- Configure Budget exclusively through `Dependencies.BoundedBudget`; partial and
+  triple middleware registrations no longer compile (`BoundedBudgetAdapter.Name`
+  is removed). One owner encloses the fixed Run/Model/Tool stages and any remaining
+  split-store generic chain. Atomic Budget plus generic middleware is rejected.
 
 ## Owned physical callback entry and no-entry retirement
 

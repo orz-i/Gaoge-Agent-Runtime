@@ -80,7 +80,7 @@ func TestBudgetProjectionFailureCannotEraseSettledModelReceipt(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			runner, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: client, ModelOutcomeVerifier: shared, Clock: durabilityTestClock{now: now}, ModelMiddleware: []plugin.ModelMiddleware{mustBudgetAdapter(t, shared)}, RunMiddleware: []plugin.RunMiddleware{opaqueBudgetHostRun{}, mustBudgetAdapter(t, shared)}})
+			runner, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: client, ModelOutcomeVerifier: shared, Clock: durabilityTestClock{now: now}, BoundedBudget: mustBudgetAdapter(t, shared), RunMiddleware: []plugin.RunMiddleware{opaqueBudgetHostRun{}}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -106,7 +106,7 @@ func TestBudgetProjectionFailureCannotEraseSettledModelReceipt(t *testing.T) {
 			}
 			if replay {
 				projection.fail = true // Pure receipt recovery must never call this projection.
-				runner, err = agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: client, ModelOutcomeVerifier: shared, Clock: durabilityTestClock{now: now.Add(3 * time.Minute)}, ModelMiddleware: []plugin.ModelMiddleware{mustBudgetAdapter(t, shared)}, RunMiddleware: []plugin.RunMiddleware{opaqueBudgetHostRun{}, mustBudgetAdapter(t, shared)}})
+				runner, err = agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: client, ModelOutcomeVerifier: shared, Clock: durabilityTestClock{now: now.Add(3 * time.Minute)}, BoundedBudget: mustBudgetAdapter(t, shared), RunMiddleware: []plugin.RunMiddleware{opaqueBudgetHostRun{}}})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -180,7 +180,7 @@ func TestSettledRejectionRecoversSDKReceiptWithoutRegeneration(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					runner, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: client, ModelOutcomeVerifier: shared, Clock: durabilityTestClock{now: at}, ModelMiddleware: []plugin.ModelMiddleware{mustBudgetAdapter(t, shared)}, RunMiddleware: []plugin.RunMiddleware{opaqueBudgetHostRun{}, mustBudgetAdapter(t, shared)}})
+					runner, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: client, ModelOutcomeVerifier: shared, Clock: durabilityTestClock{now: at}, BoundedBudget: mustBudgetAdapter(t, shared), RunMiddleware: []plugin.RunMiddleware{opaqueBudgetHostRun{}}})
 					if err != nil {
 						t.Fatal(err)
 					}

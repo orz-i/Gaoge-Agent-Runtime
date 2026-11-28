@@ -75,7 +75,7 @@ func mixedOriginalToolConsumption(t *testing.T, factory func(*testing.T) (kernel
 		if e != nil {
 			t.Fatal(e)
 		}
-		r, e := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, ToolMiddleware: []plugin.ToolMiddleware{a}, ToolOutcomeVerifier: agent.ToolOutcomeVerifierFunc(func(c context.Context, q tools.ExecutionRequest) (tools.ExecutionResult, error) {
+		r, e := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, BoundedBudget: a, ToolOutcomeVerifier: agent.ToolOutcomeVerifierFunc(func(c context.Context, q tools.ExecutionRequest) (tools.ExecutionResult, error) {
 			verifications[q.Call.ID]++
 			if _, ok := children[q.Call.ID]; !ok {
 				return tools.ExecutionResult{}, errors.New("unexpected original receipt lookup")
@@ -192,82 +192,74 @@ func (p *toolConsumptionTimeline) AppendToolTimeline(_ context.Context, _ agent.
 }
 
 // Qualification occurs at the actual Call return, before any correction or
-// successor Model admission. Exercise both orderings and success/rejection.
+// successor Model admission. Budget always encloses Timeline and the handler.
 func toolTimelineConsumption(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store), ledgerFactory func(*testing.T) (budget.LedgerStore, func() budget.LedgerStore)) {
-	for _, outerBudget := range []bool{false, true} {
-		for _, refuse := range []bool{false, true} {
-			for _, fail := range []bool{false, true} {
-				t.Run(fmt.Sprintf("budget-outer=%v/rejected=%v/fail=%v", outerBudget, refuse, fail), func(t *testing.T) {
-					ctx := t.Context()
-					backing, _, _ := factory(t)
-					rt := ea1StartRuntime(t, backing)
-					ledger, _ := newToolTestLedger(t, ledgerFactory)
-					a, e := agent.NewBoundedBudgetAdapter(ledger, settledToolPorts{id: "original-ledger"})
-					if e != nil {
-						t.Fatal(e)
+	for _, refuse := range []bool{false, true} {
+		for _, fail := range []bool{false, true} {
+			t.Run(fmt.Sprintf("rejected=%v/fail=%v", refuse, fail), func(t *testing.T) {
+				ctx := t.Context()
+				backing, _, _ := factory(t)
+				rt := ea1StartRuntime(t, backing)
+				ledger, _ := newToolTestLedger(t, ledgerFactory)
+				a, e := agent.NewBoundedBudgetAdapter(ledger, settledToolPorts{id: "original-ledger"})
+				if e != nil {
+					t.Fatal(e)
+				}
+				timeline := &toolConsumptionTimeline{}
+				if fail {
+					timeline.fail = errors.New("terminal timeline write failed")
+				}
+				b, e := agent.NewBoundedToolTimelineAdapter(timeline)
+				if e != nil {
+					t.Fatal(e)
+				}
+				layers := []plugin.ToolMiddleware{b}
+				m := &settledToolModel{}
+				calls := 0
+				reg, e := tools.NewRegistry([]tools.Registration{{Definition: tools.Definition{Key: "read", Name: "read", InputSchema: json.RawMessage(`{"type":"object"}`)}, Handler: tools.HandlerFunc(func(_ context.Context, q tools.ExecutionRequest) (tools.ExecutionResult, error) {
+					calls++
+					if refuse {
+						return tools.RecoverableNoEffectResult(q.Call.ID, tools.NewRecoverableCallErrorAllowCompletion("tool.denied", "original refusal", nil))
 					}
-					timeline := &toolConsumptionTimeline{}
-					if fail {
-						timeline.fail = errors.New("terminal timeline write failed")
+					return tools.ExecutionResult{Content: json.RawMessage("{}"), Receipt: tools.Receipt{ExecutionID: q.Call.ID, Disposition: "committed"}}, nil
+				})}})
+				if e != nil {
+					t.Fatal(e)
+				}
+				r, e := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, BoundedBudget: a, ToolMiddleware: layers})
+				if e != nil {
+					t.Fatal(e)
+				}
+				final, e := r.StartRun(ctx, agent.StartRequest{ID: "timeline-root", Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "test", ID: "thread"}, Goal: "read", ToolKeys: []string{"read"}})
+				if calls != 1 || timeline.starts != 1 || timeline.ends != 1 {
+					t.Fatal("fixture failure", calls, timeline)
+				}
+				l, loadErr := ledger.LoadBudget(ctx, "original-ledger")
+				if loadErr != nil {
+					t.Fatal(loadErr)
+				}
+				if fail {
+					if !errors.Is(e, agent.ErrToolOutcomeUnknown) || !errors.Is(e, timeline.fail) || final.Run.Status != kernel.RunStatusRunning || len(m.calls) != 1 {
+						t.Fatal("unqualified Call advanced", e, final.Run.Status, len(m.calls))
 					}
-					b, e := agent.NewBoundedToolTimelineAdapter(timeline)
-					if e != nil {
-						t.Fatal(e)
+					grant, gErr := rt.LookupChildExecution(ctx, final.Run.ID)
+					if gErr != nil {
+						t.Fatal(gErr)
 					}
-					layers := []plugin.ToolMiddleware{b, a}
-					if outerBudget {
-						layers = []plugin.ToolMiddleware{a, b}
+					c, cErr := rt.LookupOwnedPhysicalCallbackReturn(ctx, grant)
+					if cErr != nil || c.HostCompleted || c.ToolReturns != "" {
+						t.Fatal("unacknowledged callback certified", cErr, c)
 					}
-					m := &settledToolModel{}
-					calls := 0
-					reg, e := tools.NewRegistry([]tools.Registration{{Definition: tools.Definition{Key: "read", Name: "read", InputSchema: json.RawMessage(`{"type":"object"}`)}, Handler: tools.HandlerFunc(func(_ context.Context, q tools.ExecutionRequest) (tools.ExecutionResult, error) {
-						calls++
-						if refuse {
-							return tools.RecoverableNoEffectResult(q.Call.ID, tools.NewRecoverableCallErrorAllowCompletion("tool.denied", "original refusal", nil))
-						}
-						return tools.ExecutionResult{Content: json.RawMessage("{}"), Receipt: tools.Receipt{ExecutionID: q.Call.ID, Disposition: "committed"}}, nil
-					})}})
-					if e != nil {
-						t.Fatal(e)
+					if _, e = r.Resume(ctx, final.Run.ID, final.Run.Revision); !errors.Is(e, agent.ErrToolOutcomeUnknown) || calls != 1 || len(m.calls) != 1 {
+						t.Fatal("resume bypassed failure", e)
 					}
-					r, e := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, ToolMiddleware: layers})
-					if e != nil {
-						t.Fatal(e)
+					if l.View("").Usage.ToolCalls != 0 || l.View("").Reserved.ToolCalls != 1 {
+						t.Fatal("outer Budget accepted unqualified result", l.View(""))
 					}
-					final, e := r.StartRun(ctx, agent.StartRequest{ID: "timeline-root", Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "test", ID: "thread"}, Goal: "read", ToolKeys: []string{"read"}})
-					if calls != 1 || timeline.starts != 1 || timeline.ends != 1 {
-						t.Fatal("fixture failure", calls, timeline)
-					}
-					l, loadErr := ledger.LoadBudget(ctx, "original-ledger")
-					if loadErr != nil {
-						t.Fatal(loadErr)
-					}
-					if fail {
-						if !errors.Is(e, agent.ErrToolOutcomeUnknown) || !errors.Is(e, timeline.fail) || final.Run.Status != kernel.RunStatusRunning || len(m.calls) != 1 {
-							t.Fatal("unqualified Call advanced", e, final.Run.Status, len(m.calls))
-						}
-						grant, gErr := rt.LookupChildExecution(ctx, final.Run.ID)
-						if gErr != nil {
-							t.Fatal(gErr)
-						}
-						c, cErr := rt.LookupOwnedPhysicalCallbackReturn(ctx, grant)
-						if cErr != nil || c.HostCompleted || c.ToolReturns != "" {
-							t.Fatal("unacknowledged callback certified", cErr, c)
-						}
-						if _, e = r.Resume(ctx, final.Run.ID, final.Run.Revision); !errors.Is(e, agent.ErrToolOutcomeUnknown) || calls != 1 || len(m.calls) != 1 {
-							t.Fatal("resume bypassed failure", e)
-						}
-						if outerBudget && (l.View("").Usage.ToolCalls != 0 || l.View("").Reserved.ToolCalls != 1) {
-							t.Fatal("outer Budget accepted unqualified result", l.View(""))
-						}
-						if !outerBudget && (l.View("").Usage.ToolCalls != 1 || l.View("").Reserved.ToolCalls != 0) {
-							t.Fatal("original inner accounting lost", l.View(""))
-						}
-					} else if e != nil || final.Run.Status != kernel.RunStatusCompleted || len(m.calls) != 2 || l.View("").Usage.ToolCalls != 1 || l.View("").Reserved.ToolCalls != 0 || rt.VerifyOwnedRootSettlement(ctx, final) != nil {
-						t.Fatal("qualified outcome lost", e, final.Run.Status, len(m.calls), l.View(""))
-					}
-				})
-			}
+				} else if e != nil || final.Run.Status != kernel.RunStatusCompleted || len(m.calls) != 2 || l.View("").Usage.ToolCalls != 1 || l.View("").Reserved.ToolCalls != 0 || rt.VerifyOwnedRootSettlement(ctx, final) != nil {
+					t.Fatal("qualified outcome lost", e, final.Run.Status, len(m.calls), l.View(""))
+				}
+			})
 		}
 	}
 }

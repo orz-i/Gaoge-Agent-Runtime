@@ -5,7 +5,6 @@ import (
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
 // trustedDeferredPreparationStack checks only code that may execute while
@@ -22,17 +21,7 @@ func trustedDeferredPreparationStack(d Dependencies) bool {
 // may be native even when an input source is configured; an executing frame
 // that actually reads that Host source cannot claim scoped control custody.
 func nativeRunLayers(d Dependencies) bool {
-	if len(d.Observers) != 0 || len(d.Telemetry) != 0 {
-		return false
-	}
-	for _, item := range d.RunMiddleware {
-		switch item.(type) {
-		case *BoundedBudgetAdapter:
-		default:
-			return false
-		}
-	}
-	return true
+	return len(d.RunMiddleware) == 0 && len(d.Observers) == 0 && len(d.Telemetry) == 0
 }
 
 // scopedDeferredRootCallbacks checks callbacks that can enter an owned Agent Root.
@@ -47,14 +36,14 @@ func scopedDeferredRootCallbacks(d Dependencies) bool {
 	}
 	for _, item := range d.ModelMiddleware {
 		switch item.(type) {
-		case *BoundedBudgetAdapter, *ModelAdmissionBarrier:
+		case *ModelAdmissionBarrier:
 		default:
 			return false
 		}
 	}
 	for _, item := range d.ToolMiddleware {
 		switch item.(type) {
-		case *BoundedBudgetAdapter, *BoundedToolTimelineAdapter:
+		case *BoundedToolTimelineAdapter:
 		default:
 			return false
 		}
@@ -133,7 +122,3 @@ func (runner *Runner) VerifiedDeferredRootControl(ctx context.Context, rt *kerne
 	}
 	return rt.VerifyOwnedRootSettlement(ctx, child) == nil
 }
-
-var (
-	_ plugin.RunMiddleware = (*BoundedBudgetAdapter)(nil)
-)

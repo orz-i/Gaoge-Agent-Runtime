@@ -28,13 +28,13 @@ func (r *Runner) freezeManagedSource(ctx context.Context, s kernel.Snapshot, sta
 		return p, l, false, ErrInvalidRequest
 	}
 	p.SourceRevision, p.InputBinding, p.InputCursor = s.Run.Revision+1, state.InputBinding, state.InputCursor
-	if r.nativeBudget != nil {
+	if r.boundedBudget != nil {
 		admission := r.nativeRunBudget(ctx, s.Run.ID)
 		if admission == nil || admission.projectionErr != nil || admission.ledger.ID != binding.TurnID {
 			return p, l, false, ErrInvalidRequest
 		}
 		var err error
-		l, err = r.nativeBudget.observeRunBudget(ctx, admission.ledger, s.Run.ID)
+		l, err = r.boundedBudget.observeRunBudget(ctx, admission.ledger, s.Run.ID)
 		if err != nil {
 			return p, l, false, err
 		}
@@ -60,8 +60,8 @@ func managedObligationsQuiescent(state runState) bool {
 }
 
 func (r *Runner) managedBudgetOwner() any {
-	if r.nativeBudget != nil {
-		return r.nativeBudget
+	if r.boundedBudget != nil {
+		return r.boundedBudget
 	}
 	return nil
 }
@@ -81,7 +81,7 @@ func (r *Runner) freezeManagedObligations(ctx context.Context, s kernel.Snapshot
 			return nil, false, ErrInvalidRequest
 		}
 	}
-	if r.nativeBudget != nil {
+	if r.boundedBudget != nil {
 		if inv.Status != ModelInvocationConsumed && (inv.SamplingPlan == nil || inv.SamplingPlan.LedgerID != l.ID) {
 			return nil, false, ErrInvalidRequest
 		}
@@ -126,7 +126,7 @@ func (r *Runner) validateManagedObligations(point kernel.ManagedSafePoint) (mana
 	if err != nil || !state.ManagedRecovery || !r.SupportsManagedRecovery() ||
 		state.InputBinding != p.InputBinding || state.InputCursor != p.InputCursor ||
 		(p.InputBinding != "" && (r.inputs == nil || r.inputBinding != p.InputBinding)) ||
-		(p.LedgerID != "") != (r.nativeBudget != nil) {
+		(p.LedgerID != "") != (r.boundedBudget != nil) {
 		return p, ErrInvalidRequest
 	}
 	if !managedObligationsQuiescent(state) {
@@ -183,7 +183,7 @@ func (r *Runner) checkManagedLedger(ctx context.Context, p managedObligations, h
 	if p.LedgerID == "" {
 		return budget.Ledger{}, nil
 	}
-	l, err := r.nativeBudget.coordinator.Store.LoadBudget(ctx, p.LedgerID)
+	l, err := r.boundedBudget.coordinator.Store.LoadBudget(ctx, p.LedgerID)
 	if err != nil {
 		return l, err
 	}
@@ -263,7 +263,7 @@ func (r *Runner) qualifyManagedFrontier(ctx context.Context, t kernel.ManagedTra
 	p.Phase = string(last.Status)
 	p.RequalifiedFrom = t.SafePoint.ID
 	if p.LedgerID != "" {
-		l, e := r.nativeBudget.coordinator.Store.LoadBudget(ctx, p.LedgerID)
+		l, e := r.boundedBudget.coordinator.Store.LoadBudget(ctx, p.LedgerID)
 		if e != nil {
 			return empty, nil, e
 		}

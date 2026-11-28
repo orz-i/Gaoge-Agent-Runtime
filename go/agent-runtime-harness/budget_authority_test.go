@@ -12,7 +12,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
 type ledgerTestModel struct {
@@ -41,7 +40,7 @@ func newLedgerHarness(t *testing.T, client *ledgerTestModel) (*harness.MemorySto
 	if err != nil {
 		t.Fatal(err)
 	}
-	direct, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: client, ModelMiddleware: []plugin.ModelMiddleware{mustBudgetAdapter(t, shared)}})
+	direct, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: client, BoundedBudget: mustBudgetAdapter(t, shared)})
 	if err != nil {
 		t.Fatal(err)
 	}

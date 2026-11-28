@@ -22,7 +22,7 @@ func (runner *Runner) SupportsContextSummary() bool {
 // permission and is used only to reject mismatched Host compositions.
 func (runner *Runner) UsesBudgetedContextSummary(adapter *BoundedBudgetAdapter) bool {
 	return runner.SupportsContextSummary() &&
-		adapter != nil && runner.samplingBudget == adapter && runner.toolBudget == adapter
+		adapter != nil && runner.boundedBudget == adapter
 }
 
 type contextSummaryModelKey struct{}
@@ -36,10 +36,10 @@ func validSummaryComposition(d Dependencies) bool {
 		d.PrepareModelRequest != nil || len(d.RunMiddleware) != 0 {
 		return false
 	}
-	if selectedSamplingBudget(d) == nil {
-		return selectedToolBudget(d) == nil && (d.BoundedContext == nil || d.BoundedContext == summary.bounded)
+	if d.BoundedBudget == nil {
+		return d.BoundedContext == nil || d.BoundedContext == summary.bounded
 	}
-	return d.BoundedContext == summary.bounded && d.BoundedBudget != nil
+	return d.BoundedContext == summary.bounded
 }
 
 func cloneContextSummaryBinding(value *ContextSummaryBinding) *ContextSummaryBinding {

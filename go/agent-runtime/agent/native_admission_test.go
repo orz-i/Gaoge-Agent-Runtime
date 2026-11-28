@@ -50,7 +50,7 @@ func TestNativeRunAdmissionDenialAtStartPrepareAndApproval(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			r, err := NewRunner(Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, Approvals: interactionadapter.New(gate), ApprovalPolicies: []plugin.ApprovalPolicy{policy}, RunMiddleware: []plugin.RunMiddleware{adapter}, ToolMiddleware: []plugin.ToolMiddleware{adapter}})
+			r, err := NewRunner(Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, Approvals: interactionadapter.New(gate), ApprovalPolicies: []plugin.ApprovalPolicy{policy}, BoundedBudget: adapter})
 			if err != nil {
 				t.Fatal(err)
 			}
