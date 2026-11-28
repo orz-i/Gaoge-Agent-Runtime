@@ -267,6 +267,10 @@ func TestNamedAgentHostSelectionRejectsIncompleteOrConflictingAuthority(t *testi
 		{"missing model", func(o *harness.AgentSessionOptions) { o.NamedAgents[0].Model = "" }},
 		{"unknown Tool key", func(o *harness.AgentSessionOptions) { o.NamedAgents[0].ToolKeys = []string{"private.unknown"} }},
 		{"reserved Skill reader manually assigned", func(o *harness.AgentSessionOptions) { o.NamedAgents[0].ToolKeys = []string{harness.SkillReadToolKey} }},
+		{"root archive grant cannot be manually assigned", func(o *harness.AgentSessionOptions) {
+			o.Context.ReadArtifacts = true
+			o.NamedAgents[0].ToolKeys = []string{harness.ContextArtifactToolKey}
+		}},
 		{"duplicate selected member", func(o *harness.AgentSessionOptions) { o.NamedAgents = append(o.NamedAgents, o.NamedAgents[0]) }},
 		{"different model output ceiling", func(o *harness.AgentSessionOptions) { o.NamedAgents[0].MaxModelOutputTokens = -1 }},
 		{"bad Skill content hash", func(o *harness.AgentSessionOptions) { o.NamedAgents[0].Skills[0].ContentHash = "forged" }},

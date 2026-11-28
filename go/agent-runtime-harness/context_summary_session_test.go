@@ -367,6 +367,7 @@ func TestAgentSessionSummaryProducesNativeStateAndVerifiesPriorOrigin(t *testing
 					}
 				}
 				options.Session.Transcript = nil
+				options.Session.Config.WorkingStateSummary = nil // Original policy, not a reopened handle, selects summary execution.
 				reopened, err := harness.OpenAgentSession(options)
 				if err != nil {
 					t.Fatal(err)
