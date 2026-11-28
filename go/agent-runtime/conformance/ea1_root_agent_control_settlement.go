@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -132,7 +133,14 @@ func ea1ControlSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, 
 	setup := makeRunner(rt, "original-start-owner", false)
 	req := agent.StartRequest{ID: "root-control-settlement", RequestID: "original-request", Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "owner"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "original-thread"}, Goal: "original control", Instructions: "Keep original source", Model: "fixture-model", ModelOptions: json.RawMessage(`{"temperature":0.1}`), ToolKeys: []string{"effect"}, Limits: agent.Limits{MaxLLMCalls: 2, MaxToolCalls: 1}}
 	if phase == "P5-run-deadline" {
-		deadline := time.Now().UTC().Add(ea1StoreBackedDeadline)
+		// This deadline spans Start and the later control admission. Windows
+		// SQLite CI needs extra I/O margin before the original callback enters;
+		// the callback still waits for the real frozen deadline below.
+		window := ea1StoreBackedDeadline
+		if runtime.GOOS == "windows" {
+			window = 10 * time.Second
+		}
+		deadline := time.Now().UTC().Add(window)
 		req.DeadlineAt = &deadline
 	}
 	var created kernel.Snapshot
@@ -328,6 +336,10 @@ func ea1ControlSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, 
 	}
 	var out kernel.Snapshot
 	var operationErr error
+	var deadlineMargin time.Duration
+	if phase == "P5-run-deadline" {
+		deadlineMargin = time.Until(*req.DeadlineAt)
+	}
 	if entry == "approval" {
 		out, operationErr = runner.ResolveApproval(ctx, req.ID, initial.Run.Revision, plugin.ApprovalResponse{Decision: plugin.ApprovalApprove})
 	} else {
@@ -337,7 +349,7 @@ func ea1ControlSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, 
 	verifyHook = nil
 	if phase == "P5-run-deadline" {
 		if contested.ID == "" {
-			t.Fatal("deadline never reached actual callback")
+			t.Fatalf("deadline never reached actual callback: remaining at control admission=%s err=%v", deadlineMargin, operationErr)
 		}
 		if len(physical.requests) != 1 {
 			t.Fatal("deadline replayed Model")
