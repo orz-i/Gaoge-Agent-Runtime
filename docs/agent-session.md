@@ -465,12 +465,14 @@ the [steering guide](run-inputs-and-parallel-reads.md). The managed
 lifecycle can preserve the committed input binding and cursor; the Host must
 retain that log across restarts. A queued input is not an applied input and
 cannot rewrite an already frozen invocation.
-There is deliberately no `SessionClient.Steer` method: `RunInputSource` has no
-write capability. The Host authenticates the original Run/Actor/Thread and
-`View.InputBinding`, then submits through its own existing writer (the example
-uses `MemoryRunInputs.Submit`). Only the native input cursor proves application.
-Adding a method that merely claims to queue into a read-only port would not
-implement steering.
+Use `SessionClient.Steer(ctx, turnID, runID, inputID, text)` with the same
+Host input log when it also implements
+`Submit(context.Context, kernel.Run, string, string) (agent.RunInput, error)`.
+The Session verifies its frozen Actor, Thread, original Run/Attempt and input
+binding before invoking that writer. A read-only input source cannot queue input.
+Reuse the original input ID on retry; the committed native input cursor alone
+proves application. The Host remains responsible for authenticating the caller,
+retaining the input log, and persisting admitted user input in its transcript.
 
 Hosts can now supply bounded, source-bound task data through
 `ContextSeed.WorkingState`. See [Explicit WorkingState](working-state.md) for

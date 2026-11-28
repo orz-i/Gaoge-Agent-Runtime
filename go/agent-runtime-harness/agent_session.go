@@ -349,7 +349,11 @@ func OpenAgentSession(options AgentSessionOptions) (*SessionClient, error) {
 			return nil, err
 		}
 	}
-	return host.OpenSession(options.Session)
+	session, err := host.OpenSession(options.Session)
+	if err == nil {
+		session.inputs = options.Inputs
+	}
+	return session, err
 }
 
 // Root and private member Tools use one registration/policy boundary. Selection

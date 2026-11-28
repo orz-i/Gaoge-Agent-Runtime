@@ -52,6 +52,7 @@ type SessionClient struct {
 	thread     kernel.ThreadRef
 	config     ConfigSnapshot
 	transcript TranscriptSource
+	inputs     agent.RunInputSource
 }
 
 // OpenSession binds a SessionClient to an already composed Harness Runner.
@@ -129,6 +130,50 @@ func (session *SessionClient) Prompt(ctx context.Context, turnID, prompt string)
 		Thread: session.thread, RequestID: strings.TrimSpace(turnID), Goal: prompt,
 		Config: cloneConfigSnapshot(session.config), Context: normalized,
 	})
+}
+
+// Steer appends authenticated user input to the original Host log when that
+// log also implements Submit. The caller names the exact Run to avoid sending
+// an input meant for a previous Attempt to a replacement Run. A queued receipt
+// does not promise application: only the native InputCursor proves delivery.
+func (session *SessionClient) Steer(ctx context.Context, turnID, runID, inputID, text string) (agent.RunInput, error) {
+	id, err := session.authorizedTurnID(ctx, turnID)
+	if err != nil {
+		return agent.RunInput{}, err
+	}
+	log, ok := session.inputs.(interface {
+		Submit(context.Context, kernel.Run, string, string) (agent.RunInput, error)
+	})
+	if !ok || runID == "" {
+		return agent.RunInput{}, ErrInvalidRequest
+	}
+	turn, err := loadVerifiedTurn(ctx, session.runner.store, id)
+	if err != nil {
+		return agent.RunInput{}, err
+	}
+	owner, err := session.runner.store.GetInvocationByExecutionRefID(ctx, runID)
+	if err != nil || session.checkFrozenRootOwner(turn, owner) != nil || owner.ExecutionRefID != runID {
+		return agent.RunInput{}, errors.Join(ErrConflict, err)
+	}
+	if _, err = verifyProtectiveInvocation(ctx, session.runner.store, owner); err != nil {
+		return agent.RunInput{}, err
+	}
+	snapshot, err := session.runner.runtime.Load(ctx, runID)
+	if err != nil {
+		return agent.RunInput{}, err
+	}
+	if err = validateRootRuntimeOwnership(owner, snapshot); err != nil {
+		return agent.RunInput{}, err
+	}
+	view, err := agent.ViewState(snapshot)
+	if err != nil || snapshot.Run.Status != kernel.RunStatusRunning || view.InputBinding == "" || view.InputBinding != session.inputs.BindingID() {
+		return agent.RunInput{}, errors.Join(ErrInvalidRequest, err)
+	}
+	receipt, err := log.Submit(ctx, snapshot.Run, inputID, text)
+	if err == nil && (receipt.ID != inputID || receipt.Text != text || receipt.Sequence == 0) {
+		return agent.RunInput{}, ErrConflict
+	}
+	return receipt, err
 }
 
 // Load obtains an existing durable Turn without generating another model call.
