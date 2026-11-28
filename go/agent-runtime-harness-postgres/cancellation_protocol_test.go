@@ -435,7 +435,7 @@ func TestCancellationProtocolHostDurableCutRecovery(t *testing.T) {
 
 func TestCancellationProtocolWaitingNoDispatchAllDurableCuts(t *testing.T) {
 	for _, backend := range generationBackends {
-		for _, phase := range []string{"none", "intent-before", "intent-ack-loss", "requested-before", "requested-ack-loss", "creation-before", "creation-ack-loss", "confirmed-before", "confirmed-ack-loss", "projection-before", "projection-ack-loss", "completion-before", "completion-ack-loss"} {
+		for _, phase := range []string{"none", "requested-before", "requested-ack-loss", "creation-before", "creation-ack-loss", "confirmed-before", "confirmed-ack-loss", "projection-before", "projection-ack-loss"} {
 			t.Run(backend+"/"+phase, func(t *testing.T) {
 				cut := &protocolCut{phase: phase}
 				m := &generationModel{}
@@ -456,6 +456,28 @@ func TestCancellationProtocolWaitingNoDispatchAllDurableCuts(t *testing.T) {
 				if _, err = s.GetInvocationByExecutionRefID(t.Context(), cut.runID); !errors.Is(err, harness.ErrNotFound) {
 					t.Fatalf("waiting admitted Invocation: %v", err)
 				}
+				// A public append may not mint the no-Run projection.
+				for _, source := range protocolItems(t, s, first.Turn.ID) {
+					if source.Kind != harness.ItemDelegation || source.RunID != cut.runID || source.Status != harness.ItemWaiting {
+						continue
+					}
+					var payload map[string]json.RawMessage
+					if err := json.Unmarshal(source.Payload, &payload); err != nil {
+						t.Fatal(err)
+					}
+					payload["status"] = json.RawMessage(`"cancelled"`)
+					raw, err := json.Marshal(payload)
+					if err != nil {
+						t.Fatal(err)
+					}
+					forged := source
+					forged.Status, forged.Seq, forged.ParentItemID, forged.Payload = harness.ItemCancelled, 0, source.ID, raw
+					sum := sha256.Sum256([]byte(first.Turn.ID + "\x00" + wait.Delegation.ID + "\x00" + string(harness.ItemCancelled) + "\x00"))
+					forged.ID = "hid_" + hex.EncodeToString(sum[:])[:24]
+					if _, _, err = s.AppendItem(t.Context(), forged); !errors.Is(err, harness.ErrConflict) {
+						t.Fatalf("public native projection minted: %v", err)
+					}
+				}
 				calls := m.calls
 				cut.armed = true
 				_, firstErr := r.CancelSubtask(t.Context(), first.Turn.ID, wait.Delegation.ID, "cancel no-dispatch child")
@@ -468,8 +490,13 @@ func TestCancellationProtocolWaitingNoDispatchAllDurableCuts(t *testing.T) {
 				if _, err = r.Cancel(t.Context(), first.Turn.ID, "stop owning Turn"); err != nil {
 					t.Fatal(err)
 				}
-				if m.calls != calls || harness.ActiveCancellationFence(protocolItems(t, s, first.Turn.ID)) {
-					t.Fatal("waiting recovery changed physical effects or stranded fence")
+				if m.calls != calls {
+					t.Fatal("waiting recovery changed physical effects")
+				}
+				for _, item := range protocolItems(t, s, first.Turn.ID) {
+					if item.ParentItemID == harness.CancellationFenceParentItemID {
+						t.Fatal("native waiting cancellation elected Host authority")
+					}
 				}
 			})
 		}
@@ -479,9 +506,9 @@ func TestCancellationProtocolWaitingNoDispatchAllDurableCuts(t *testing.T) {
 func TestCancellationProtocolInitialRootNoDispatchAllDurableCuts(t *testing.T) {
 	for _, backend := range generationBackends {
 		for _, withBudget := range []bool{false, true} {
-			phases := []string{"none", "intent-before", "intent-ack-loss", "atomic-before", "atomic-ack-loss", "completion-before", "completion-ack-loss"}
+			phases := []string{"none", "creation-before", "creation-ack-loss", "atomic-before", "atomic-ack-loss"}
 			if withBudget {
-				phases = append(phases, "creation-before", "creation-ack-loss", "projection-before", "projection-ack-loss")
+				phases = append(phases, "projection-before", "projection-ack-loss")
 			}
 			for _, phase := range phases {
 				name := backend + "/plain/" + phase
@@ -645,7 +672,7 @@ func TestCancellationProtocolWaitingToStartedNoInvocationRetainsHistory(t *testi
 				name = backend + "/replacement"
 			}
 			t.Run(name, func(t *testing.T) {
-				cut := &protocolCut{phase: "intent-ack-loss"}
+				cut := &protocolCut{phase: "creation-ack-loss"}
 				m := &generationModel{}
 				r, store, rt, native, req := newGenerationHarnessBackend(t, backend, m, func(base generationStore) generationStore { cut.generationStore = base; return cut })
 				req.Config.SharedBudget.MaxConcurrentDescendants = 1
