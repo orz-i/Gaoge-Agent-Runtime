@@ -71,8 +71,7 @@ func TestHarnessToolCapacityWaitIsNotPhysicalDispatch(t *testing.T) {
 			t.Fatal(e)
 		}
 		b := mustBudgetAdapter(t, authority)
-		layers := []plugin.ToolMiddleware{track}
-		r, e := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, BoundedBudget: b, ToolMiddleware: layers, ApprovalPolicies: []plugin.ApprovalPolicy{approval}, ToolOutcomeVerifier: agent.ToolOutcomeVerifierFunc(func(context.Context, tools.ExecutionRequest) (tools.ExecutionResult, error) {
+		r, e := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, BoundedBudget: b, ToolTimeline: track, ApprovalPolicies: []plugin.ApprovalPolicy{approval}, ToolOutcomeVerifier: agent.ToolOutcomeVerifierFunc(func(context.Context, tools.ExecutionRequest) (tools.ExecutionResult, error) {
 			lookups++
 			return tools.ExecutionResult{}, agent.ErrToolOutcomeUnknown
 		})})

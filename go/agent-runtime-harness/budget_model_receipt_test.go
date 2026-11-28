@@ -14,19 +14,9 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
 var errBudgetResponseRejected = errors.New("completed model response was rejected")
-
-// An opaque Host callback has no trusted completion ticket. Native Budget
-// receipts cannot certify another layer's unreturned physical effects.
-type opaqueBudgetHostRun struct{}
-
-func (opaqueBudgetHostRun) Name() string { return "test.opaque-host-budget-layer" }
-func (opaqueBudgetHostRun) Run(ctx context.Context, _ plugin.RunInvocation, next plugin.RunNext) (kernel.Snapshot, error) {
-	return next(ctx)
-}
 
 type rejectedReceiptModel struct {
 	calls      int
@@ -80,7 +70,7 @@ func TestBudgetProjectionFailureCannotEraseSettledModelReceipt(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			runner, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: client, ModelOutcomeVerifier: shared, Clock: durabilityTestClock{now: now}, BoundedBudget: mustBudgetAdapter(t, shared), RunMiddleware: []plugin.RunMiddleware{opaqueBudgetHostRun{}}})
+			runner, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: client, ModelOutcomeVerifier: shared, Clock: durabilityTestClock{now: now}, BoundedBudget: mustBudgetAdapter(t, shared)})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -106,7 +96,7 @@ func TestBudgetProjectionFailureCannotEraseSettledModelReceipt(t *testing.T) {
 			}
 			if replay {
 				projection.fail = true // Pure receipt recovery must never call this projection.
-				runner, err = agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: client, ModelOutcomeVerifier: shared, Clock: durabilityTestClock{now: now.Add(3 * time.Minute)}, BoundedBudget: mustBudgetAdapter(t, shared), RunMiddleware: []plugin.RunMiddleware{opaqueBudgetHostRun{}}})
+				runner, err = agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: client, ModelOutcomeVerifier: shared, Clock: durabilityTestClock{now: now.Add(3 * time.Minute)}, BoundedBudget: mustBudgetAdapter(t, shared)})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -180,7 +170,7 @@ func TestSettledRejectionRecoversSDKReceiptWithoutRegeneration(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					runner, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: client, ModelOutcomeVerifier: shared, Clock: durabilityTestClock{now: at}, BoundedBudget: mustBudgetAdapter(t, shared), RunMiddleware: []plugin.RunMiddleware{opaqueBudgetHostRun{}}})
+					runner, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: client, ModelOutcomeVerifier: shared, Clock: durabilityTestClock{now: at}, BoundedBudget: mustBudgetAdapter(t, shared)})
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -229,14 +219,23 @@ func TestRejectedCompletedResponseSettlesUsageAndReplaysFailureAfterRestart(t *t
 	cause := errors.New("private invalid output detail")
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	response, err := mustBudgetAdapter(t, shared).Model(ctx, request, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
-		cancel() // Known final receipts must survive caller cancellation.
-		return model.Response{
-			ResponseID:      "provider-complete",
-			Usage:           &model.Usage{InputTokens: 20, OutputTokens: 10},
-			HostedToolCalls: []model.HostedToolCall{{ID: "completed-search", ToolKey: "native.search", Status: "completed"}},
-		}, model.NewResponseRejectedError(model.NewClassifiedError(cause, "model.upstream_request_invalid"))
-	})
+	var fixturePhysical1 model.Request
+	response, err := func() (model.Response, error) {
+		var admissionErr error
+		fixturePhysical1, admissionErr = admitModelLedgerFixture(ctx, shared, request)
+		if admissionErr != nil {
+			return model.Response{}, admissionErr
+		}
+		response, callErr := func(q model.Request) (model.Response, error) {
+			cancel() // Known final receipts must survive caller cancellation.
+			return model.Response{
+				ResponseID:      "provider-complete",
+				Usage:           &model.Usage{InputTokens: 20, OutputTokens: 10},
+				HostedToolCalls: []model.HostedToolCall{{ID: "completed-search", ToolKey: "native.search", Status: "completed"}},
+			}, model.NewResponseRejectedError(model.NewClassifiedError(cause, "model.upstream_request_invalid"))
+		}(fixturePhysical1)
+		return settleModelLedgerFixture(ctx, shared, fixturePhysical1, response, callErr)
+	}()
 	if !errors.Is(err, cause) || !model.IsResponseRejectedError(err) || response.ResponseID != "provider-complete" {
 		t.Fatalf("rejection lost its receipt/cause: %+v %v", response, err)
 	}
@@ -258,10 +257,7 @@ func TestRejectedCompletedResponseSettlesUsageAndReplaysFailureAfterRestart(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, err = mustBudgetAdapter(t, restarted).Model(t.Context(), request, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
-		t.Fatal("completed rejected generation was dispatched again")
-		return model.Response{}, nil
-	})
+	response, err = restarted.VerifyModelOutcome(t.Context(), fixturePhysical1)
 	if !model.IsResponseRejectedError(err) || model.ClassifiedErrorCode(err) != "model.upstream_request_invalid" || response.ResponseID != "provider-complete" {
 		t.Fatalf("replay turned rejection into success: %+v %v", response, err)
 	}
@@ -271,12 +267,21 @@ func TestRejectedResponseCannotTurnPartialUsageIntoKnownCompletion(t *testing.T)
 	for _, marked := range []bool{false, true} {
 		t.Run(map[bool]string{false: "partial_stream", true: "missing_usage"}[marked], func(t *testing.T) {
 			store, shared, request := hostedBudgetFixture(t, budget.Limits{MaxLLMCalls: 2, MaxToolCalls: 1})
-			_, err := mustBudgetAdapter(t, shared).Model(t.Context(), request, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
-				if marked {
-					return model.Response{}, model.NewResponseRejectedError(errors.New("missing final receipt"))
+			var fixturePhysical2 model.Request
+			_, err := func() (model.Response, error) {
+				var admissionErr error
+				fixturePhysical2, admissionErr = admitModelLedgerFixture(t.Context(), shared, request)
+				if admissionErr != nil {
+					return model.Response{}, admissionErr
 				}
-				return model.Response{Usage: &model.Usage{OutputTokens: 7}}, context.DeadlineExceeded
-			})
+				response, callErr := func(q model.Request) (model.Response, error) {
+					if marked {
+						return model.Response{}, model.NewResponseRejectedError(errors.New("missing final receipt"))
+					}
+					return model.Response{Usage: &model.Usage{OutputTokens: 7}}, context.DeadlineExceeded
+				}(fixturePhysical2)
+				return settleModelLedgerFixture(t.Context(), shared, fixturePhysical2, response, callErr)
+			}()
 			if err == nil {
 				t.Fatal("uncertain outcome became successful")
 			}

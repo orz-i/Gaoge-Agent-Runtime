@@ -10,7 +10,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
 func TestPR72NativeAgentPreCreateInputErrorRetiresGrant(t *testing.T) {
@@ -127,56 +126,3 @@ func TestPR72NativeAgentNoEffectReceiptLostACKDoesNotInferFailure(t *testing.T) 
 // Host Run middleware is not a custom Agent implementation: it cannot grant
 // the exact native Agent's Start permission to fail after physical effects by
 // returning a generic unverified no-effect claim.
-type pr72NativeMiddlewarePublicProof struct{ calls atomic.Int32 }
-
-func (*pr72NativeMiddlewarePublicProof) Name() string { return "pr72.native-middleware-public-proof" }
-func (m *pr72NativeMiddlewarePublicProof) Run(_ context.Context, _ plugin.RunInvocation, _ plugin.RunNext) (kernel.Snapshot, error) {
-	m.calls.Add(1) // Represents an already-issued external side effect.
-	return kernel.Snapshot{}, errors.New("host middleware falsely certified zero effects")
-}
-
-func TestPR72NativeAgentMiddlewareCannotForgePublicStartNoEffect(t *testing.T) {
-	rt, err := kernel.New(kernel.Dependencies{Store: memory.NewStore(), Clock: fixedClock{}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	middleware := &pr72NativeMiddlewarePublicProof{}
-	direct, err := agent.NewRunner(agent.Dependencies{
-		Runtime: rt, Model: directModel{}, RunMiddleware: []plugin.RunMiddleware{middleware},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	backing := harness.NewMemoryStore()
-	runner, err := harness.NewRunner(harness.Dependencies{
-		Runtime: rt, Agent: direct, Store: backing, Clock: fixedClock{},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	request := testStartRequest()
-	_, startErr := runner.StartAgentTurn(t.Context(), request)
-	if !errors.Is(startErr, harness.ErrExecutionOutcomeUnknown) || middleware.calls.Load() != 1 {
-		t.Fatalf("middleware public proof discharged native Agent: err=%v calls=%d", startErr, middleware.calls.Load())
-	}
-	sid, err := harness.SessionID(request.HostThread)
-	if err != nil {
-		t.Fatal(err)
-	}
-	tid, err := harness.TurnID(sid, request.HostTurn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	turn, err := backing.GetTurn(t.Context(), tid)
-	if err != nil || turn.Status != harness.TurnAccepted {
-		t.Fatalf("unknown native middleware effect was terminalized: status=%s err=%v", turn.Status, err)
-	}
-	items, err := runner.ListTimeline(t.Context(), tid, 0, 500)
-	if err != nil || !harness.PendingExecutionDispatch(items, "") {
-		t.Fatalf("middleware discharged unknown dispatch: err=%v", err)
-	}
-	_, cancelErr := runner.Cancel(t.Context(), tid, "cancel unverified native middleware")
-	if !errors.Is(cancelErr, harness.ErrConflict) {
-		t.Fatalf("operator cancellation escaped unknown native middleware effect: %v", cancelErr)
-	}
-}

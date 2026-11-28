@@ -2,7 +2,7 @@ package harness
 
 import (
 	"context"
-	"encoding/json"
+
 	"errors"
 	"reflect"
 	"strings"
@@ -14,78 +14,7 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
-
-type relabelBudgetReceiptMiddleware struct{ usage bool }
-
-func (relabelBudgetReceiptMiddleware) Name() string { return "relabel-budget-receipt" }
-func (m relabelBudgetReceiptMiddleware) Model(ctx context.Context, req model.Request, emit model.StreamSink, next plugin.ModelNext) (model.Response, error) {
-	r, err := next(ctx, req, emit)
-	if m.usage {
-		if r.Usage != nil {
-			r.Usage.InputTokens++
-		}
-	} else {
-		r.ResponseID = "replacement-" + req.InvocationID
-	}
-	return r, err
-}
-func TestBudgetCompletionAuthorityRejectsMutation(t *testing.T) {
-	for _, usage := range []bool{false, true} {
-		name := map[bool]string{false: "id", true: "usage"}[usage]
-		t.Run(name, func(t *testing.T) {
-			store, shared, request := hostedBudgetFixture(t, budget.Limits{MaxLLMCalls: 4, MaxToolCalls: 2})
-			rt, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
-			if err != nil {
-				t.Fatal(err)
-			}
-			effects := 0
-			registry, err := tools.NewRegistry([]tools.Registration{{
-				Definition: tools.Definition{Key: "lookup", Name: "lookup", InputSchema: json.RawMessage(`{"type":"object"}`)},
-				Handler: tools.HandlerFunc(func(_ context.Context, req tools.ExecutionRequest) (tools.ExecutionResult, error) {
-					effects++
-					return tools.ExecutionResult{Content: json.RawMessage(`{}`), Receipt: tools.Receipt{ExecutionID: req.Call.ID, Disposition: "committed"}}, nil
-				}),
-			}})
-			if err != nil {
-				t.Fatal(err)
-			}
-			client := &reusedBudgetModel{}
-			mutator := relabelBudgetReceiptMiddleware{usage: usage}
-			chain := []plugin.ModelMiddleware{mutator}
-			runner, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: client, Catalog: registry, Executor: registry, BoundedBudget: mustBudgetAdapter(t, shared), ModelMiddleware: chain, RunMiddleware: []plugin.RunMiddleware{opaqueBudgetHostRun{}}})
-			if err != nil {
-				t.Fatal(err)
-			}
-			result, callErr := runner.StartRun(t.Context(), agent.StartRequest{ID: request.RunID, Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "owner"}, Thread: kernel.ThreadRef{Kind: "test", ID: name}, Goal: "lookup", Model: "audit", ToolKeys: []string{"lookup"}, Limits: agent.Limits{MaxLLMCalls: 4, MaxToolCalls: 2}})
-			if callErr == nil || client.calls != 1 || effects != 0 {
-				t.Fatalf("mutation accepted: err=%v calls=%d effects=%d", callErr, client.calls, effects)
-			}
-			view, err := agent.ViewState(result)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if view.Budget.Usage.LLMCalls != 0 || view.ModelInvocations[0].Status != agent.ModelInvocationPending {
-				t.Fatalf("rewritten Agent receipt stored: %+v", view)
-			}
-			ledger, err := store.LoadBudget(t.Context(), "hosted-budget-turn")
-			if err != nil {
-				t.Fatal(err)
-			}
-			got := ledger.View("")
-			if got.Usage.LLMCalls != 0 || !got.UnknownUsage {
-				t.Fatalf("unverified downstream receipt settled: %+v", got)
-			}
-			for _, reservation := range ledger.Reservations {
-				if strings.Contains(string(reservation.Receipt), "replacement-") {
-					t.Fatal("fabricated identity persisted")
-				}
-			}
-		})
-	}
-}
 
 type namedBudgetReceiptModel struct {
 	*rejectedReceiptModel
@@ -123,7 +52,7 @@ func TestNamedBudgetCompletionReplayDoesNotRedispatchProvider(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				runner, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: client, ModelOutcomeVerifier: shared, Clock: durabilityTestClock{now: at}, BoundedBudget: mustBudgetAdapter(t, shared), RunMiddleware: []plugin.RunMiddleware{opaqueBudgetHostRun{}}})
+				runner, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: client, ModelOutcomeVerifier: shared, Clock: durabilityTestClock{now: at}, BoundedBudget: mustBudgetAdapter(t, shared)})
 				if err != nil {
 					t.Fatal(err)
 				}

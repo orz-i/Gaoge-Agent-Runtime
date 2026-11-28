@@ -11,15 +11,15 @@ func TestHostedPendingReceiptCanCompleteInLaterModelResponse(t *testing.T) {
 	store, turn, _, invocation := contextRunMiddlewareFixture(t)
 	call := model.HostedToolCall{ID: "paused_native_search", ToolKey: "native.search", Status: "in_progress", Input: json.RawMessage(`{"query":"news"}`)}
 	request := model.Request{RunID: invocation.ExecutionRefID}
-	if err := appendHostedToolTimelineItem(t.Context(), store, systemClock{}, nil, turn, invocation, request, call, nil, 0); err != nil {
+	if err := appendHostedToolTimelineItem(t.Context(), store, systemClock{}, nil, turn, invocation, request, call, 0); err != nil {
 		t.Fatal(err)
 	}
 	call.Input = json.RawMessage(`{"query":"news","freshness":"day"}`)
-	if err := appendHostedToolTimelineItem(t.Context(), store, systemClock{}, nil, turn, invocation, request, call, nil, 0); err != nil {
+	if err := appendHostedToolTimelineItem(t.Context(), store, systemClock{}, nil, turn, invocation, request, call, 0); err != nil {
 		t.Fatalf("reobserving a pending search must not rewrite its started fact: %v", err)
 	}
 	call.Status, call.Output = "completed", json.RawMessage(`{"source":"https://example.org/news"}`)
-	if err := appendHostedToolTimelineItem(t.Context(), store, systemClock{}, nil, turn, invocation, request, call, nil, 0); err != nil {
+	if err := appendHostedToolTimelineItem(t.Context(), store, systemClock{}, nil, turn, invocation, request, call, 0); err != nil {
 		t.Fatalf("pending receipt must not conflict with the actual completion: %v", err)
 	}
 	items, err := listAllItems(t.Context(), store, turn.ID)

@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
 func mustBudgetAdapter(t testing.TB, authority *BudgetAuthority) *agent.BoundedBudgetAdapter {
@@ -24,16 +23,6 @@ func TestBudgetAuthorityHasOneNativeDriverAndNoLegacyPluginEngine(t *testing.T) 
 	authority, err := NewBudgetAuthority(BudgetAuthorityDependencies{Store: NewMemoryStore(), Clock: hostedBudgetClock{}})
 	if err != nil {
 		t.Fatal(err)
-	}
-	var candidate any = authority
-	if _, ok := candidate.(plugin.RunMiddleware); ok {
-		t.Fatal("Host authority can execute Run callbacks")
-	}
-	if _, ok := candidate.(plugin.ModelMiddleware); ok {
-		t.Fatal("Host authority can execute Model callbacks")
-	}
-	if _, ok := candidate.(plugin.ToolMiddleware); ok {
-		t.Fatal("Host authority can execute Tool callbacks")
 	}
 	first, err := authority.Adapter()
 	if err != nil || first == nil {

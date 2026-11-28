@@ -194,12 +194,12 @@ func runHostedToolTimeline(t *testing.T, client model.Client, suffix string) (ha
 	if err != nil {
 		t.Fatal(err)
 	}
-	modelTimeline, err := harness.NewModelTimelineMiddleware(store, timelineTestClock{}, turnFeed)
+	modelTimeline, err := harness.NewModelTimelineObserver(store, runtime, timelineTestClock{}, turnFeed)
 	if err != nil {
 		t.Fatal(err)
 	}
 	agentRunner, err := agent.NewRunner(agent.Dependencies{
-		Runtime: runtime, Model: client, ModelMiddleware: []plugin.ModelMiddleware{modelTimeline},
+		Runtime: runtime, Model: client, Observers: []plugin.Observer{modelTimeline},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -345,7 +345,7 @@ func newTimelineHarnessDependencies(t *testing.T) (*kernel.Runtime, *agent.Runne
 		t.Fatal(err)
 	}
 	clock := timelineTestClock{}
-	modelTimeline, err := harness.NewModelTimelineMiddleware(store, clock, nil)
+	modelTimeline, err := harness.NewModelTimelineObserver(store, runtime, clock, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -355,8 +355,8 @@ func newTimelineHarnessDependencies(t *testing.T) (*kernel.Runtime, *agent.Runne
 	}
 	agentRunner, err := agent.NewRunner(agent.Dependencies{
 		Runtime: runtime, Model: &timelineModel{}, Catalog: registry, Executor: registry,
-		ModelMiddleware:  []plugin.ModelMiddleware{modelTimeline},
-		ToolMiddleware:   []plugin.ToolMiddleware{toolTimeline},
+		Observers:        []plugin.Observer{modelTimeline},
+		ToolTimeline:     toolTimeline,
 		ApprovalPolicies: []plugin.ApprovalPolicy{policy},
 		Limits:           agent.Limits{MaxLLMCalls: 3, MaxToolCalls: 1},
 	})

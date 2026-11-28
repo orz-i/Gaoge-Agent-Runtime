@@ -289,15 +289,15 @@ func testHarnessCancelAtActualToolDispatch(t *testing.T, timelineOrder, retireme
 		if err != nil {
 			t.Fatal(err)
 		}
-		var layers []plugin.ToolMiddleware
+		var timeline *agent.BoundedToolTimelineAdapter
 		if timelineOrder != "none" && timelineOrder != "closure-cas" {
-			timeline, e := NewBoundedToolTimelineAdapter(store, hostedBudgetClock{}, nil)
+			var e error
+			timeline, e = NewBoundedToolTimelineAdapter(store, hostedBudgetClock{}, nil)
 			if e != nil {
 				t.Fatal(e)
 			}
-			layers = append(layers, timeline)
 		}
-		d := agent.Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, BoundedBudget: b, ToolMiddleware: layers}
+		d := agent.Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, BoundedBudget: b, ToolTimeline: timeline}
 		native, err := agent.NewRunner(d)
 		if err != nil {
 			t.Fatal(err)

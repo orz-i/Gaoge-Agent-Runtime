@@ -7,146 +7,146 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
-// After physical Tool dispatch, a "recoverable" error without an original
-// CallID-bound rejection is neither a settled Tool charge nor proof that a
-// remote effect did not occur. The same held reservation blocks redispatch.
-func TestToolRecoverableErrorWithoutRejectedProofPreservesBudget(t *testing.T) {
-	for _, variant := range []string{"missing", "wrong-id"} {
-		t.Run(variant, func(t *testing.T) {
-			store, shared, _ := hostedBudgetFixture(t, budget.Limits{MaxToolCalls: 1})
-			request := tools.ExecutionRequest{RunID: "hosted-run",
-				Call: tools.Call{ID: "frozen-error", ToolKey: "local.read", Arguments: json.RawMessage(`{}`)}}
-			invocation := plugin.ToolInvocation{
-				Run:        kernel.Run{ID: request.RunID},
-				Definition: tools.Definition{Key: "local.read", Name: "read", InputSchema: json.RawMessage(`{}`)},
-				Request:    request,
+// Exercise the actual frozen Tool admission, not an independently callable Budget wrapper.
+func TestToolRejectedReceiptAuthority(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		result       func(string) (tools.ExecutionResult, error)
+		known, allow bool
+	}{
+		{"missing", func(string) (tools.ExecutionResult, error) {
+			return tools.ExecutionResult{}, tools.NewRecoverableCallError("tool.read_failed", "reply lost", errors.New("unknown effect"))
+		}, false, false},
+		{"wrong-id", func(string) (tools.ExecutionResult, error) {
+			return tools.RecoverableNoEffectResult("other-call", tools.NewRecoverableCallError("tool.read_failed", "reply lost", nil))
+		}, false, false},
+		{"unknown-disposition", func(id string) (tools.ExecutionResult, error) {
+			return tools.ExecutionResult{Content: json.RawMessage("{}"), Receipt: tools.Receipt{ExecutionID: id, Disposition: "provider_unrecognized"}}, nil
+		}, false, false},
+		{"rejection-without-proof", func(id string) (tools.ExecutionResult, error) {
+			return tools.ExecutionResult{Content: json.RawMessage("{}"), Receipt: tools.Receipt{ExecutionID: id, Disposition: tools.ReceiptDispositionRejected}}, nil
+		}, false, false},
+		{"required-correction", func(id string) (tools.ExecutionResult, error) {
+			return tools.RecoverableNoEffectResult(id, tools.NewRecoverableCallErrorWithBlockedTools("tool.authorization_denied", "not authorized", nil, "local.read", "local.related"))
+		}, true, false},
+		{"allow-completion", func(id string) (tools.ExecutionResult, error) {
+			e := tools.NewRecoverableCallErrorWithBlockedTools("tool.authorization_denied", "not authorized", nil, "local.read", "local.related")
+			var c *tools.RecoverableCallError
+			errors.As(e, &c)
+			c.AllowCompletion = true
+			return tools.RecoverableNoEffectResult(id, e)
+		}, true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store, shared, request := hostedBudgetFixture(t, budget.Limits{MaxToolCalls: 1, MaxLLMCalls: 3})
+			rt, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
+			if err != nil {
+				t.Fatal(err)
 			}
+			provider := &heldToolRecoveryModel{}
 			physical := 0
-			cause := tools.NewRecoverableCallError("tool.read_failed", "reply lost after effect", errors.New("remote side effect may have occurred"))
-			_, err := mustBudgetAdapter(t, shared).Tool(t.Context(), invocation, func(context.Context) (tools.ExecutionResult, error) {
+			reg, err := tools.NewRegistry([]tools.Registration{{Definition: tools.Definition{Key: "local.read", Name: "read", InputSchema: json.RawMessage(`{"type":"object"}`)}, Handler: tools.HandlerFunc(func(_ context.Context, q tools.ExecutionRequest) (tools.ExecutionResult, error) {
 				physical++
-				if variant == "wrong-id" {
-					return tools.RecoverableNoEffectResult("other-call", cause)
+				return tc.result(q.Call.ID)
+			})}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			r, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: provider, Catalog: reg, Executor: reg, BoundedBudget: mustBudgetAdapter(t, shared)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			snap, err := r.StartRun(t.Context(), agent.StartRequest{ID: request.RunID, Actor: kernel.ActorRef{TenantID: "audit", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "test", ID: "thread"}, Goal: "read", ToolKeys: []string{"local.read"}})
+			if physical != 1 {
+				t.Fatalf("physical=%d err=%v", physical, err)
+			}
+			ledger, e := store.LoadBudget(t.Context(), "hosted-budget-turn")
+			if e != nil {
+				t.Fatal(e)
+			}
+			view := ledger.View("")
+			if !tc.known {
+				if err == nil || view.Reserved.ToolCalls != 1 || view.Usage.ToolCalls != 0 {
+					t.Fatalf("unknown effect settled: %+v %v", view, err)
 				}
-				return tools.ExecutionResult{}, cause
-			})
-			if !errors.Is(err, cause) || physical != 1 {
-				t.Fatalf("missing initial physical dispatch: err=%v count=%d", err, physical)
+				if _, e = r.Resume(t.Context(), snap.Run.ID, snap.Run.Revision); e == nil || physical != 1 {
+					t.Fatalf("unknown effect replayed: %v physical=%d", e, physical)
+				}
+				return
 			}
-			ledger, err := store.LoadBudget(t.Context(), "hosted-budget-turn")
-			if err != nil || ledger.View("").Reserved.ToolCalls != 1 || ledger.View("").Usage.ToolCalls != 0 {
-				t.Fatalf("ambiguous error released Tool quota: view=%+v err=%v", ledger.View(""), err)
+			if view.Usage.ToolCalls != 1 || view.Reserved.ToolCalls != 0 {
+				t.Fatalf("known rejection not settled: %+v %v", view, err)
 			}
-			_, err = mustBudgetAdapter(t, shared).Tool(t.Context(), invocation, func(context.Context) (tools.ExecutionResult, error) {
-				physical++
-				return tools.ExecutionResult{Content: json.RawMessage(`{}`),
-					Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: "committed"}}, nil
-			})
-			if !errors.Is(err, budget.ErrWaiting) || physical != 1 {
-				t.Fatalf("unknown Tool physical effect was retried: err=%v physical=%d", err, physical)
-			}
-		})
-	}
-}
-
-func TestToolExactRejectedNoEffectReceiptSettlesBudgetOnce(t *testing.T) {
-	store, shared, _ := hostedBudgetFixture(t, budget.Limits{MaxToolCalls: 1})
-	request := tools.ExecutionRequest{RunID: "hosted-run",
-		Call: tools.Call{ID: "rejected-before-effect", ToolKey: "local.read", Arguments: json.RawMessage(`{}`)}}
-	invocation := plugin.ToolInvocation{Run: kernel.Run{ID: request.RunID},
-		Definition: tools.Definition{Key: "local.read", Name: "read", InputSchema: json.RawMessage(`{}`)},
-		Request:    request}
-	cause := tools.NewRecoverableCallError("tool.invalid_input", "invalid", errors.New("pre-effect"))
-	physical := 0
-	receipt, err := mustBudgetAdapter(t, shared).Tool(t.Context(), invocation, func(context.Context) (tools.ExecutionResult, error) {
-		physical++
-		return tools.RecoverableNoEffectResult(request.Call.ID, cause)
-	})
-	if !errors.Is(err, cause) || physical != 1 || receipt.Receipt.Disposition != tools.ReceiptDispositionRejected {
-		t.Fatalf("pre-effect no-effect attestation missing: %+v err=%v physical=%d", receipt, err, physical)
-	}
-	ledger, err := store.LoadBudget(t.Context(), "hosted-budget-turn")
-	if err != nil || ledger.View("").Usage.ToolCalls != 1 || ledger.View("").Reserved.ToolCalls != 0 {
-		t.Fatalf("explicit known rejected Tool failed accounting: view=%+v err=%v", ledger.View(""), err)
-	}
-}
-
-// A valid identity with an unknown or error-only "rejected" status is still
-// NOT an authoritative terminal Tool receipt. The shared Ledger must retain
-// its Held reservation and refuse a second physical dispatch.
-func TestUnknownSuccessfulToolDispositionPreservesHeldBudget(t *testing.T) {
-	for _, disposition := range []string{"provider_unrecognized", tools.ReceiptDispositionRejected} {
-		t.Run(disposition, func(t *testing.T) {
-			store, shared, _ := hostedBudgetFixture(t, budget.Limits{MaxToolCalls: 1})
-			request := tools.ExecutionRequest{RunID: "hosted-run", Call: tools.Call{
-				ID: "unknown-receipt", ToolKey: "local.read", Arguments: json.RawMessage(`{}`),
-			}}
-			invocation := plugin.ToolInvocation{
-				Run:        kernel.Run{ID: request.RunID},
-				Definition: tools.Definition{Key: "local.read", Name: "read", InputSchema: json.RawMessage(`{}`)},
-				Request:    request,
-			}
-			physical := 0
-			_, err := mustBudgetAdapter(t, shared).Tool(t.Context(), invocation, func(context.Context) (tools.ExecutionResult, error) {
-				physical++
-				return tools.ExecutionResult{Content: json.RawMessage(`{}`),
-					Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: disposition}}, nil
-			})
-			if !errors.Is(err, tools.ErrInvalidCall) || physical != 1 {
-				t.Fatalf("invalid disposition settled as valid result: %q err=%v physical=%d", disposition, err, physical)
-			}
-			ledger, err := store.LoadBudget(t.Context(), "hosted-budget-turn")
-			if err != nil || ledger.View("").Reserved.ToolCalls != 1 || ledger.View("").Usage.ToolCalls != 0 {
-				t.Fatalf("invalid disposition consumed quota as terminal receipt: %+v err=%v", ledger.View(""), err)
-			}
-			_, err = mustBudgetAdapter(t, shared).Tool(t.Context(), invocation, func(context.Context) (tools.ExecutionResult, error) {
-				physical++
-				return tools.ExecutionResult{Content: json.RawMessage(`{}`),
-					Receipt: tools.Receipt{ExecutionID: request.Call.ID, Disposition: "committed"}}, nil
-			})
-			if !errors.Is(err, budget.ErrWaiting) || physical != 1 {
-				t.Fatalf("unrecognized disposition allowed second external Tool call: err=%v physical=%d", err, physical)
-			}
-		})
-	}
-}
-
-// A permanent denial is not a request for a replacement Tool call. Reopening
-// the original budget receipt must preserve both the blocked keys and the
-// exact permission to finish, without invoking the physical executor again.
-func TestToolRejectedReplayPreservesCompletionAndBlockedKeys(t *testing.T) {
-	for _, allow := range []bool{false, true} {
-		t.Run(map[bool]string{false: "required-correction", true: "allow-completion"}[allow], func(t *testing.T) {
-			store, shared, _ := hostedBudgetFixture(t, budget.Limits{MaxToolCalls: 1})
-			request := tools.ExecutionRequest{RunID: "hosted-run", Call: tools.Call{ID: "original-denial", ToolKey: "local.read", Arguments: json.RawMessage(`{}`)}}
-			invocation := plugin.ToolInvocation{Run: kernel.Run{ID: request.RunID}, Definition: tools.Definition{Key: "local.read", Name: "read", InputSchema: json.RawMessage(`{}`)}, Request: request}
-			cause := tools.NewRecoverableCallErrorWithBlockedTools("tool.authorization_denied", "not authorized", nil, "local.read", "local.related")
-			var classified *tools.RecoverableCallError
-			if !errors.As(cause, &classified) {
-				t.Fatal("missing classification")
-			}
-			classified.AllowCompletion = allow
-			physical := 0
-			for i := 0; i < 2; i++ {
-				result, err := mustBudgetAdapter(t, shared).Tool(t.Context(), invocation, func(context.Context) (tools.ExecutionResult, error) {
-					physical++
-					return tools.RecoverableNoEffectResult(request.Call.ID, cause)
-				})
-				code, _, _ := tools.RecoverableCallErrorInfo(err)
-				if !tools.ValidRecoverableNoEffectReceipt(result, err, request.Call.ID) || code != "tool.authorization_denied" || tools.RecoverableCallErrorAllowsCompletion(err) != allow || !slices.Equal(tools.RecoverableCallErrorBlockedToolKeys(err), []string{"local.read", "local.related"}) || physical != 1 {
-					t.Fatalf("original denial semantics lost (pass=%d physical=%d): %+v %v", i, physical, result, err)
+			var found bool
+			for _, res := range ledger.Reservations {
+				if res.Requested.ToolCalls != 1 || res.Status != budget.ReservationSettled {
+					continue
+				}
+				var evidence struct {
+					Result          tools.ExecutionResult
+					ErrorCode       string
+					BlockedTools    []string
+					AllowCompletion bool
+				}
+				if json.Unmarshal(res.Receipt, &evidence) != nil {
+					continue
+				}
+				if evidence.Result.Receipt.ExecutionID != "held-call" {
+					continue
+				}
+				found = true
+				if evidence.Result.Receipt.Disposition != tools.ReceiptDispositionRejected || evidence.ErrorCode != "tool.authorization_denied" || evidence.AllowCompletion != tc.allow || !slices.Equal(evidence.BlockedTools, []string{"local.read", "local.related"}) {
+					t.Fatalf("changed rejection evidence: %+v", evidence)
 				}
 			}
-			ledger, err := store.LoadBudget(t.Context(), "hosted-budget-turn")
-			if err != nil || ledger.View("").Usage.ToolCalls != 1 || ledger.View("").Reserved.ToolCalls != 0 {
-				t.Fatal("replayed budget changed", err)
+			if !found {
+				t.Fatal("original Tool receipt not persisted")
+			}
+			if len(provider.requests) > 1 && slices.ContainsFunc(provider.requests[1].Tools, func(d tools.Definition) bool { return d.Key == "local.read" }) {
+				t.Fatal("denied Tool was reauthorized")
 			}
 		})
 	}
+}
+
+// Keep the Provider-error fence on an actual dispatched Agent invocation.
+func TestProviderBusyErrorDoesNotProveNoSend(t *testing.T) {
+	store, shared, q := hostedBudgetFixture(t, budget.Limits{MaxLLMCalls: 1})
+	rt, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	r, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: budgetFixtureModelFunc(func(context.Context, model.Request) (model.Response, error) {
+		calls++
+		return model.Response{}, agent.ErrModelInvocationBusy
+	}), BoundedBudget: mustBudgetAdapter(t, shared)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap, err := r.StartRun(t.Context(), agent.StartRequest{ID: q.RunID, Actor: kernel.ActorRef{TenantID: "audit", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "test", ID: "thread"}, Goal: "answer"})
+	if err == nil || calls != 1 || agent.IsModelPreDispatchDenied(err) {
+		t.Fatalf("provider busy qualified as no-send: %v %d", err, calls)
+	}
+	ledger, e := store.LoadBudget(t.Context(), "hosted-budget-turn")
+	if e != nil || !ledger.View("").UnknownUsage || ledger.View("").Reserved.LLMCalls != 1 {
+		t.Fatalf("unknown result refunded: %+v %v", ledger, e)
+	}
+	if _, e = r.Resume(t.Context(), snap.Run.ID, snap.Run.Revision); e == nil || calls != 1 {
+		t.Fatalf("unknown provider call replayed: %v %d", e, calls)
+	}
+}
+
+type budgetFixtureModelFunc func(context.Context, model.Request) (model.Response, error)
+
+func (m budgetFixtureModelFunc) Generate(ctx context.Context, q model.Request) (model.Response, error) {
+	return m(ctx, q)
 }

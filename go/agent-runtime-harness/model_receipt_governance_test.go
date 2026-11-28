@@ -21,10 +21,19 @@ func TestPhysicalReceiptRejectsByteDistinctOpaqueRequest(t *testing.T) {
 	store, shared, r := hostedBudgetFixture(t, budget.Limits{MaxLLMCalls: 2})
 	r.Messages = append(r.Messages, model.Message{Role: model.RoleAssistant, ToolCalls: []tools.Call{{ID: "call1", ToolKey: "local.read", Arguments: json.RawMessage(`{"x": 1, "y": "<ok>"}`)}}})
 	var physical model.Request
-	_, err := mustBudgetAdapter(t, shared).Model(t.Context(), r, nil, func(_ context.Context, q model.Request, _ model.StreamSink) (model.Response, error) {
-		physical = model.CloneRequest(q)
-		return model.Response{Content: "original effect", ResponseID: "receipt-1", Usage: &model.Usage{InputTokens: 1, OutputTokens: 1}}, nil
-	})
+	var fixturePhysical1 model.Request
+	_, err := func() (model.Response, error) {
+		var admissionErr error
+		fixturePhysical1, admissionErr = admitModelLedgerFixture(t.Context(), shared, r)
+		if admissionErr != nil {
+			return model.Response{}, admissionErr
+		}
+		response, callErr := func(q model.Request) (model.Response, error) {
+			physical = model.CloneRequest(q)
+			return model.Response{Content: "original effect", ResponseID: "receipt-1", Usage: &model.Usage{InputTokens: 1, OutputTokens: 1}}, nil
+		}(fixturePhysical1)
+		return settleModelLedgerFixture(t.Context(), shared, fixturePhysical1, response, callErr)
+	}()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,10 +50,10 @@ func TestPhysicalReceiptRejectsByteDistinctOpaqueRequest(t *testing.T) {
 	if _, err = shared.VerifyModelOutcome(t.Context(), changed); !errors.Is(err, ErrConflict) {
 		t.Fatalf("byte-distinct request accepted: %v", err)
 	}
-	if _, err = mustBudgetAdapter(t, shared).Model(t.Context(), changed, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
-		t.Fatal("mutated logical intent dispatched")
-		return model.Response{}, nil
-	}); !errors.Is(err, budget.ErrLedgerConflict) {
+	if _, err = func() (model.Response, error) {
+		_, e := admitModelLedgerFixture(t.Context(), shared, changed)
+		return model.Response{}, e
+	}(); !errors.Is(err, budget.ErrLedgerConflict) {
 		t.Fatalf("logical identity lost original bytes: %v", err)
 	}
 	after, err := store.LoadBudget(t.Context(), "hosted-budget-turn")
@@ -366,10 +375,19 @@ func TestPhysicalReceiptRejectsMissingAndExplicitNullSubstitution(t *testing.T) 
 			}
 			request.Messages = append(request.Messages, model.Message{Role: model.RoleAssistant, ToolCalls: []tools.Call{{ID: "call", ToolKey: "local.read", Arguments: original}}})
 			var physical model.Request
-			_, err := mustBudgetAdapter(t, shared).Model(t.Context(), request, nil, func(_ context.Context, r model.Request, _ model.StreamSink) (model.Response, error) {
-				physical = model.CloneRequest(r)
-				return model.Response{Content: "effect", ResponseID: "original", Usage: &model.Usage{InputTokens: 1, OutputTokens: 1}}, nil
-			})
+			var fixturePhysical2 model.Request
+			_, err := func() (model.Response, error) {
+				var admissionErr error
+				fixturePhysical2, admissionErr = admitModelLedgerFixture(t.Context(), shared, request)
+				if admissionErr != nil {
+					return model.Response{}, admissionErr
+				}
+				response, callErr := func(r model.Request) (model.Response, error) {
+					physical = model.CloneRequest(r)
+					return model.Response{Content: "effect", ResponseID: "original", Usage: &model.Usage{InputTokens: 1, OutputTokens: 1}}, nil
+				}(fixturePhysical2)
+				return settleModelLedgerFixture(t.Context(), shared, fixturePhysical2, response, callErr)
+			}()
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -385,10 +403,10 @@ func TestPhysicalReceiptRejectsMissingAndExplicitNullSubstitution(t *testing.T) 
 			if _, err := shared.VerifyModelOutcome(t.Context(), changed); !errors.Is(err, ErrConflict) {
 				t.Fatalf("substituted receipt identity accepted: %v", err)
 			}
-			if _, err = mustBudgetAdapter(t, shared).Model(t.Context(), changed, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
-				t.Fatal("changed invocation dispatched")
-				return model.Response{}, nil
-			}); !errors.Is(err, budget.ErrLedgerConflict) {
+			if _, err = func() (model.Response, error) {
+				_, e := admitModelLedgerFixture(t.Context(), shared, changed)
+				return model.Response{}, e
+			}(); !errors.Is(err, budget.ErrLedgerConflict) {
 				t.Fatalf("substituted logical identity accepted: %v", err)
 			}
 			after, err := store.LoadBudget(t.Context(), "hosted-budget-turn")

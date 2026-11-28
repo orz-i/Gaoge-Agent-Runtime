@@ -13,7 +13,7 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	runtimemodel "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
+
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
@@ -241,7 +241,7 @@ func (fixture *asyncDelegationFixture) compose(t *testing.T, canceller harness.R
 		t.Fatal(err)
 	}
 	dependencies := delegationAgentDependencies(fixture.runtime, fixture.model, registry, policy, 4, false)
-	dependencies.ToolMiddleware = []plugin.ToolMiddleware{timeline}
+	dependencies.ToolTimeline = timeline
 	dependencies.ToolOutcomeVerifier = handler
 	direct, err := agent.NewRunner(dependencies)
 	if err != nil {

@@ -17,19 +17,21 @@ import (
 type ledgerTestModel struct {
 	request model.Request
 	missing bool
+	calls   int
 }
 
 func (*ledgerTestModel) PlanTokenAdmission(context.Context, model.Request) (model.TokenAdmission, error) {
 	return model.TokenAdmission{InputUpperBound: 100, MaxOutputTokens: 50}, nil
 }
 func (client *ledgerTestModel) Generate(_ context.Context, request model.Request) (model.Response, error) {
+	client.calls++
 	client.request = model.CloneRequest(request)
 	if client.missing {
 		return model.Response{}, nil
 	}
 	return model.Response{Content: "receipt", Usage: &model.Usage{InputTokens: 20, OutputTokens: 10, CacheReadTokens: 15, ReasoningTokens: 5}}, nil
 }
-func newLedgerHarness(t *testing.T, client *ledgerTestModel) (*harness.MemoryStore, *harness.BudgetAuthority, harness.Snapshot) {
+func newLedgerHarness(t *testing.T, client *ledgerTestModel) (*harness.MemoryStore, *harness.BudgetAuthority, harness.Snapshot, *kernel.Runtime) {
 	t.Helper()
 	store := harness.NewMemoryStore()
 	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore(), Clock: fixedClock{}})
@@ -54,23 +56,29 @@ func newLedgerHarness(t *testing.T, client *ledgerTestModel) (*harness.MemorySto
 	if err != nil && !client.missing {
 		t.Fatal(err)
 	}
-	return store, shared, snapshot
+	return store, shared, snapshot, runtime
 }
 func TestSharedBudgetUnknownReceiptSurvivesRestartWithoutRedispatch(t *testing.T) {
 	client := &ledgerTestModel{missing: true}
-	store, _, snapshot := newLedgerHarness(t, client)
+	store, _, snapshot, rt := newLedgerHarness(t, client)
 	shared, err := harness.NewBudgetAuthority(harness.BudgetAuthorityDependencies{Store: store, Clock: fixedClock{}, Meter: client})
 	if err != nil {
 		t.Fatal(err)
 	}
 	request := client.request
-	request.MaxOutputTokens = 0
-	_, err = mustBudgetAdapter(t, shared).Model(t.Context(), request, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
-		t.Fatal("unknown dispatched request was sent twice")
-		return model.Response{}, nil
-	})
-	if !model.IsRetryableError(err) || !errors.Is(err, budget.ErrWaiting) {
-		t.Fatalf("recovery=%v", err)
+	if _, err := shared.VerifyModelOutcome(t.Context(), request); !errors.Is(err, harness.ErrConflict) {
+		t.Fatalf("unsettled receipt verified: %v", err)
+	}
+	current, err := rt.Load(t.Context(), request.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: client, BoundedBudget: mustBudgetAdapter(t, shared), ModelOutcomeVerifier: shared})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := restarted.Resume(t.Context(), current.Run.ID, current.Run.Revision); err == nil || client.calls != 1 {
+		t.Fatalf("unknown result regained dispatch: err=%v calls=%d", err, client.calls)
 	}
 	ledger, err := store.LoadBudget(t.Context(), snapshot.Turn.ID)
 	if err != nil {
@@ -83,13 +91,9 @@ func TestSharedBudgetUnknownReceiptSurvivesRestartWithoutRedispatch(t *testing.T
 }
 func TestSharedBudgetReplaysSettledReceiptAndRejectsUnmeteredRemote(t *testing.T) {
 	client := &ledgerTestModel{}
-	store, shared, snapshot := newLedgerHarness(t, client)
+	store, shared, snapshot, _ := newLedgerHarness(t, client)
 	request := client.request
-	request.MaxOutputTokens = 0
-	response, err := mustBudgetAdapter(t, shared).Model(t.Context(), request, nil, func(context.Context, model.Request, model.StreamSink) (model.Response, error) {
-		t.Fatal("settled request was sent twice")
-		return model.Response{}, nil
-	})
+	response, err := shared.VerifyModelOutcome(t.Context(), request)
 	if err != nil || response.Content != "receipt" {
 		t.Fatalf("replay=%+v %v", response, err)
 	}
@@ -105,13 +109,13 @@ func TestSharedBudgetReplaysSettledReceiptAndRejectsUnmeteredRemote(t *testing.T
 		t.Fatalf("remote=%v", err)
 	}
 	request.Model = "different-model"
-	if _, err = mustBudgetAdapter(t, shared).Model(t.Context(), request, nil, nil); !errors.Is(err, budget.ErrLedgerConflict) {
+	if _, err = shared.VerifyModelOutcome(t.Context(), request); !errors.Is(err, harness.ErrConflict) {
 		t.Fatalf("changed request=%v", err)
 	}
 }
 func TestBudgetModelOutcomeVerifierOnlyReadsOriginalPhysicalSettledReceipt(t *testing.T) {
 	client := &ledgerTestModel{}
-	store, shared, snapshot := newLedgerHarness(t, client)
+	store, shared, snapshot, _ := newLedgerHarness(t, client)
 	request := model.CloneRequest(client.request)
 	before, err := store.LoadBudget(t.Context(), snapshot.Turn.ID)
 	if err != nil {
