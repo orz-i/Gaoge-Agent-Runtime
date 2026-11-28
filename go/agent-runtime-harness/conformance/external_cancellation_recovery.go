@@ -130,7 +130,10 @@ func NativeExternalCancellationRecovery(t *testing.T, factory func(*testing.T) N
 				}
 				if !cut.hit {
 					cut.phase = phase
-					_, e = b.host.ContinueExternalToolCancellation(ctx, start.Turn.ID, id, control.ControlID, "original")
+					_, continuationErr := b.host.ContinueExternalToolCancellation(ctx, start.Turn.ID, id, control.ControlID, "original")
+					if continuationErr != nil && !cut.hit {
+						t.Fatalf("continuation before simulated interruption: %v", continuationErr)
+					}
 				}
 				if !cut.hit {
 					t.Fatalf("cut missed: %s", phase)
@@ -231,7 +234,7 @@ func NativeExternalCancellationConcurrent(t *testing.T, factory func(*testing.T)
 			defer wg.Done()
 			parked, e := b.agent.Resume(ctx, id, current.Run.Revision)
 			if e != nil || parked.Run.Revision != current.Run.Revision {
-				errs <- fmt.Errorf("Resume escaped: %w", e)
+				errs <- fmt.Errorf("resume escaped: %w", e)
 			}
 		}()
 	}

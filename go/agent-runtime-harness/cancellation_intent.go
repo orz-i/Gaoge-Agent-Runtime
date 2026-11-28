@@ -183,7 +183,7 @@ func (runner *Runner) resumeCommittedCancellationFence(ctx context.Context, turn
 	receipts = cancellationFenceReceipts(items)
 	if !terminal && source != "host" && !runner.quiescentDelegationCancellationReady(ctx, runID, snapshot) &&
 		!runner.nativeRootCancellationReady(ctx, turn, runID, snapshot) &&
-		!(runner.nativeBudget() && runner.nativeExternalCancellationWait(ctx, runID, elected.ID) == nil) {
+		(!runner.nativeBudget() || runner.nativeExternalCancellationWait(ctx, runID, elected.ID) != nil) {
 		return runner.resumeDeferredChildGrantCancellation(ctx, turn, runID, snapshot, items, receipts)
 	}
 	if elected.ID != "" {
