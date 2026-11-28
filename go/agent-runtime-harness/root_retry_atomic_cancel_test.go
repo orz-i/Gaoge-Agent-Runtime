@@ -185,8 +185,8 @@ func testRootRetryCommittedAckLoss(t *testing.T, historicalTerminalChild bool) {
 		t.Fatalf("partial cancellation CAS after lost ACK: %+v %v", committed, err)
 	}
 	before, err := store.ListItems(t.Context(), first.Turn.ID, 0, 1000)
-	if err != nil || harness.ActiveCancellationFence(before) != historicalTerminalChild {
-		t.Fatalf("only independent child cleanup may retain a Host fence: %v", err)
+	if err != nil || harness.ActiveCancellationFence(before) {
+		t.Fatalf("completed product-only child must not retain a Host cancellation fence: %v", err)
 	}
 	decision, err := rt.LoadCreationDecision(t.Context(), inv.ExecutionRefID)
 	if err != nil || decision.Status != kernel.RunStatusCancelled {

@@ -47,6 +47,16 @@ func (runner *Runner) collectCancellationScope(ctx context.Context, turn Turn, r
 	}
 	affected := map[string]struct{}{rootRunID: {}}
 	targets := make(map[string]struct{})
+	// Root cancellation already owns the Turn's full product scope.
+	// Child cancellation must follow only its original ancestry.
+	if root, ok := topLevelInvocation(invocations); ok && root.ExecutionRefID == rootRunID {
+		for _, owner := range invocations {
+			targets[owner.ID] = struct{}{}
+			if owner.ExecutionRefID != "" {
+				affected[owner.ExecutionRefID] = struct{}{}
+			}
+		}
+	}
 	visited := make(map[string]struct{})
 	for {
 		if err = ctx.Err(); err != nil {

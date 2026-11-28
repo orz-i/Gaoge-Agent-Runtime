@@ -1082,6 +1082,9 @@ func (runner *Runner) Cancel(ctx context.Context, turnID string, reason string) 
 		// ability to fence a running callback. Reject before electing or
 		// invoking any external cleanup, without minting a Host Start grant.
 		if _, checkErr := runner.runtime.LookupChildExecution(ctx, invocation.ExecutionRefID); checkErr == nil {
+			if !runner.localRelationCancellerOwnsKernel(agent.RunKind) {
+				return Snapshot{}, ErrConflict
+			}
 			current, loadErr := runner.runtime.Load(ctx, invocation.ExecutionRefID)
 			if loadErr != nil {
 				return Snapshot{}, loadErr

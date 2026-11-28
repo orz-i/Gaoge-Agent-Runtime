@@ -175,7 +175,7 @@ func TestRootPhaseRecoveryDoesNotBorrowCustomCancellerAuthority(t *testing.T) {
 		t.Run(backend, func(t *testing.T) {
 			var cut *cancellationPhaseCut
 			r, store, rt, native, request := newGenerationHarnessBackend(t, backend, &generationModel{}, func(base generationStore) generationStore {
-				cut = &cancellationPhaseCut{generationStore: base, phase: "intent-ack-loss"}
+				cut = &cancellationPhaseCut{generationStore: base, phase: "control-ack-loss"}
 				return cut
 			})
 			started, err := r.StartAgentTurn(t.Context(), request)
@@ -199,8 +199,18 @@ func TestRootPhaseRecoveryDoesNotBorrowCustomCancellerAuthority(t *testing.T) {
 				t.Fatalf("unknown Host cleanup inherited native proof: calls=%d err=%v", custom.calls, err)
 			}
 			items, err := store.ListItems(t.Context(), started.Turn.ID, 0, 500)
-			if err != nil || !harness.ActiveCancellationFence(items) {
-				t.Fatalf("uncertain Host route lost its protective fence: %v", err)
+			if err != nil || harness.ActiveCancellationFence(items) {
+				t.Fatalf("foreign canceller elected separate authority: %v", err)
+			}
+			root, _ := harness.TopLevelInvocation(started)
+			childID := started.Subtasks[0].RunID
+			parent, pe := rt.Load(t.Context(), root.ExecutionRefID)
+			child, ce := rt.Load(t.Context(), childID)
+			if pe != nil || ce != nil || (parent.Run.Status != kernel.RunStatusCancelled && child.Run.Status != kernel.RunStatusCancelled) {
+				t.Fatalf("lost ACK did not retain original native control fact: parent=%s child=%s %v %v", parent.Run.Status, child.Run.Status, pe, ce)
+			}
+			if out, e := r.Cancel(t.Context(), started.Turn.ID, "resume original native control"); e != nil || out.Turn.Status != harness.TurnCancelled {
+				t.Fatalf("native control could not recover: %s %v", out.Turn.Status, e)
 			}
 		})
 	}
