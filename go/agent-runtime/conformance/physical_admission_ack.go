@@ -615,6 +615,12 @@ func runPhysicalAdmissionACKRace(t *testing.T, factory func(*testing.T) (kernel.
 	case <-ctx.Done():
 		t.Fatal("first callback absent")
 	}
+	// The fixed Model admission barrier follows committed Model intent.
+	// Compare the winner's exact paused snapshot, not the pre-admission one.
+	winnerSnapshot, e := f.observer.Load(ctx, f.prepared.Run.ID)
+	if e != nil || winnerSnapshot.Run.Revision <= f.prepared.Run.Revision || models[0].calls.Load() != 0 {
+		t.Fatalf("winner did not stop after intent and before Provider dispatch: %+v %v", winnerSnapshot.Run, e)
+	}
 	close(releaseAdmissions[1])
 	select {
 	case <-entered[1]:
@@ -641,7 +647,7 @@ func runPhysicalAdmissionACKRace(t *testing.T, factory func(*testing.T) (kernel.
 	if g, e := f.observer.LookupChildExecution(ctx, f.prepared.Run.ID); e != nil || g != grants[0] {
 		t.Fatalf("losing admission changed first active grant: %+v %v", g, e)
 	}
-	ea1CompBarrierUnchanged(t, f.observer, f.prepared)
+	ea1CompBarrierUnchanged(t, f.observer, winnerSnapshot)
 	if _, e = f.observer.LookupOwnedPhysicalCallbackReturn(ctx, grants[0]); !errors.Is(e, kernel.ErrNotFound) {
 		t.Fatalf("loser manufactured callback return: %v", e)
 	}
