@@ -280,7 +280,7 @@ type Dependencies struct {
 	// ToolTimeline projects the fixed Tool lifecycle; it cannot dispatch Tools.
 	ToolTimeline *BoundedToolTimelineAdapter
 	// PrepareModelRequest is the only pre-commit message/Tool schema projection.
-	// It does not choose an Agent mode. ModelMiddleware cannot rewrite frozen input.
+	// After the intent commits, only its frozen physical plan may be dispatched.
 	PrepareModelRequest ModelRequestPreparer
 	// BoundedContext selects the fixed Context hydration and preparation stage.
 	BoundedContext *BoundedContextAdapter
@@ -365,7 +365,7 @@ type Runner struct {
 	approvals                plugin.ApprovalHandler
 	approvalControlPreflight func(context.Context, kernel.Snapshot) error
 	startControlPreflight    func(context.Context, StartRequest) error
-	runMiddlewareConfigured  bool
+	hasRunStages             bool
 	rootCallbacks            *rootCallbackState
 	boundedCallbacks         []any
 	boundedContext           *BoundedContextAdapter
@@ -623,7 +623,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		executor: dependencies.Executor, approvals: dependencies.Approvals,
 		approvalControlPreflight: dependencies.ApprovalControlPreflight,
 		startControlPreflight:    dependencies.StartControlPreflight,
-		runMiddlewareConfigured:  dependencies.BoundedContext != nil || boundedBudget != nil || dependencies.Inputs != nil,
+		hasRunStages:             dependencies.BoundedContext != nil || boundedBudget != nil || dependencies.Inputs != nil,
 		hostedTools:              dependencies.HostedTools, discovery: dependencies.ToolDiscovery, observers: observers, telemetry: telemetry, approvalPolicies: approvalPolicies,
 		completionPolicies:    compactCompletionPolicies(dependencies.CompletionPolicies),
 		toolProgressPolicy:    progressPolicy,
@@ -732,7 +732,7 @@ func (runner *Runner) startRunWithMiddleware(ctx context.Context, request StartR
 		return kernel.Snapshot{}, nativeStartNoEffect(err)
 	}
 	if request.ParentRunID != "" {
-		if runner.startControlPreflight == nil && runner.runMiddlewareConfigured {
+		if runner.startControlPreflight == nil && runner.hasRunStages {
 			return kernel.Snapshot{}, nativeStartNoEffect(ErrInvalidRequest)
 		}
 		if runner.startControlPreflight != nil {
@@ -1866,10 +1866,8 @@ func withBlockedToolGuidance(messages []model.Message, toolKeys []string) []mode
 	return append([]model.Message{{Role: model.RoleSystem, Content: model.TextParts(guidance)}}, messages...)
 }
 
-// ValidateModelResponseAuthority lets accounting middleware apply the Agent's
-// frozen invocation authority before persisting a downstream model receipt.
-// Contexts outside an Agent invocation have no additional authority guard.
-func ValidateModelResponseAuthority(ctx context.Context, response model.Response, err error) (model.Response, error) {
+// The original physical receipt must qualify before accounting can persist it.
+func validateModelResponseAuthority(ctx context.Context, response model.Response, err error) (model.Response, error) {
 	call := modelCallFrom(ctx)
 	if call != nil && call.completion != nil {
 		return call.completion.validate(response, err)
@@ -1877,15 +1875,8 @@ func ValidateModelResponseAuthority(ctx context.Context, response model.Response
 	return response, err
 }
 
-// ReplayModelResponseAuthority registers a trusted accounting receipt without
-// re-dispatching its Provider. Accounting middleware must first verify that the
-// settled reservation and receipt belong to this InvocationID and physical request hash.
-// Agent additionally checks the original frozen SamplingPlan. This is a trusted Host
-// attestation API, not a sandbox for malicious in-process plugins: matching
-// request fields alone cannot prove that a caller read a settled ledger.
-// Ordinary middleware must use
-// ValidateModelResponseAuthority, which cannot manufacture a trusted source.
-func ReplayModelResponseAuthority(ctx context.Context, request model.Request, response model.Response, err error) (model.Response, error) {
+// Only the fixed Budget stage may register a read of the original settled receipt.
+func replayModelResponseAuthority(ctx context.Context, request model.Request, response model.Response, err error) (model.Response, error) {
 	call := modelCallFrom(ctx)
 	if call != nil && call.completion != nil {
 		return call.completion.replay(request, response, err)
@@ -1902,13 +1893,12 @@ func (runner *Runner) generateModel(
 			return nil
 		}
 		runner.publishValue(ctx, request.RunID, plugin.Event{
-			Type: EventModelDelta, Delta: event.Delta,
+			Type: EventModelDelta, Message: request.InvocationID, Delta: event.Delta,
 		}, event)
 		return nil
 	}
 	// All provider-visible instructions and Tool schemas were sealed before
-	// persisting the ModelInvocation. Middleware is strictly observational or
-	// budget-narrowing: no late message/schema compatibility injection.
+	// persisting the ModelInvocation. No late message/schema rewrite is permitted.
 	frozen := model.CloneRequest(request)
 	denialScope := &modelDenialScope{}
 	call := &modelCallScope{denial: denialScope}
@@ -1925,7 +1915,7 @@ func (runner *Runner) generateModel(
 		}
 		if beforeProvider != nil {
 			// The final chance to reject an expired or stolen invocation claim
-			// is AFTER ModelMiddleware, before physical Provider dispatch.
+			// is after the fixed admission stages and before physical Provider dispatch.
 			if err := beforeProvider(callCtx, candidate); err != nil {
 				// This is an execution admission rejection, not a Provider
 				// failure. The caller must not terminalize a recoverable Run.
@@ -1943,10 +1933,7 @@ func (runner *Runner) generateModel(
 		// settlement are the existing Agent Run transitions.
 		return runner.invokeAdmittedModel(ctx, call.samplingPlan().request(frozen), emit, terminal)
 	}
-	response, err := runner.invokeFirstPartyModel(ctx, request, emit, terminal)
-	// Model layer completion is tracked by the actual chain lifecycle; only
-	// concrete Runtime-owned adapters can supply internal error-path receipts.
-	return response, err
+	return runner.invokeFirstPartyModel(ctx, request, emit, terminal)
 }
 
 func (runner *Runner) generateProviderModel(

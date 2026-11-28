@@ -194,10 +194,10 @@ func compose(store kernel.Store, state *taskState, client model.Client, config s
 		return nil, err
 	}
 	dependencies := agent.Dependencies{
-		Runtime: rt, Model: observedModelClient{client: client, state: state}, Catalog: registry, Executor: registry, Clock: state.clock,
-		BoundedContext:  bounded,
-		Limits:          taskLimits(),
-		RunExecution:    &agent.RunExecution{OwnerID: owner, LeaseDuration: leaseDuration},
+		Runtime: rt, Model: observeTaskModel(client, state), Catalog: registry, Executor: registry, Clock: state.clock,
+		BoundedContext: bounded,
+		Limits:         taskLimits(),
+		RunExecution:   &agent.RunExecution{OwnerID: owner, LeaseDuration: leaseDuration},
 		Execution: agent.ExecutionPolicy{
 			Model: agent.CallPolicy{Timeout: modelTimeout, MaxAttempts: 1, MaxConcurrency: 1},
 			Tool:  agent.CallPolicy{Timeout: toolTimeout, MaxAttempts: 1, MaxConcurrency: 1},
@@ -238,6 +238,34 @@ type observedModelClient struct {
 	state  *taskState
 }
 
+// Only the example's private instrumentation is wrapped. A named Provider
+// keeps its real request-bound identity, and an anonymous fixture stays anonymous.
+func observeTaskModel(client model.Client, state *taskState) model.Client {
+	observed := observedModelClient{client: client, state: state}
+	if _, ok := client.(model.RequestProviderNamer); ok {
+		return observedNamedModelClient{observed}
+	}
+	if _, ok := client.(model.ProviderNamer); ok {
+		return observedNamedModelClient{observed}
+	}
+	return observed
+}
+
+type observedNamedModelClient struct{ observedModelClient }
+
+func (client observedNamedModelClient) ProviderNameForRequest(request model.Request) string {
+	if p, ok := client.client.(model.RequestProviderNamer); ok {
+		return p.ProviderNameForRequest(request)
+	}
+	return client.client.(model.ProviderNamer).ProviderName()
+}
+func (client observedModelClient) BindingFingerprintForRequest(request model.Request) string {
+	if p, ok := client.client.(model.RequestBindingFingerprinter); ok {
+		return p.BindingFingerprintForRequest(request)
+	}
+	return ""
+}
+
 func (client observedModelClient) Generate(ctx context.Context, request model.Request) (model.Response, error) {
 	return client.GenerateStream(ctx, request, nil)
 }
@@ -251,16 +279,14 @@ func (client observedModelClient) GenerateStream(ctx context.Context, request mo
 	} else {
 		response, err = client.client.Generate(ctx, request)
 	}
-	{
-		client.state.mu.Lock()
-		client.state.requests = append(client.state.requests, model.CloneRequest(request))
-		receipt := numericUsage(response.Usage)
-		client.state.observations = append(client.state.observations, modelObservation{
-			DurationMs: time.Since(started).Milliseconds(), Usage: receipt,
-		})
-		client.state.mu.Unlock()
-		client.state.recordInputCountUsageComparison(request, receipt, err)
-	}
+	client.state.mu.Lock()
+	client.state.requests = append(client.state.requests, model.CloneRequest(request))
+	receipt := numericUsage(response.Usage)
+	client.state.observations = append(client.state.observations, modelObservation{
+		DurationMs: time.Since(started).Milliseconds(), Usage: receipt,
+	})
+	client.state.mu.Unlock()
+	client.state.recordInputCountUsageComparison(request, receipt, err)
 	return response, err
 }
 

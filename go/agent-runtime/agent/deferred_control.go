@@ -10,17 +10,15 @@ import (
 // trustedDeferredPreparationStack checks only code that may execute while
 // the Deferred Agent is being PREPARED. Host authorization preflights are
 // contractually read-only; Approval/Completion policies and Model/Tool
-// middleware cannot run before the first admitted physical callback. The
+// stages cannot run before the first admitted physical callback. The
 // Kernel separately proves that no such callback has ever been dispatched.
 // This does not grant custody after any physical callback starts.
 func trustedDeferredPreparationStack(d Dependencies) bool {
-	return d.Inputs == nil && nativeRunLayers(d)
+	return d.Inputs == nil && noLiveObservers(d)
 }
 
-// Input is an explicit stage, not Run middleware. The candidate Run stack
-// may be native even when an input source is configured; an executing frame
-// that actually reads that Host source cannot claim scoped control custody.
-func nativeRunLayers(d Dependencies) bool {
+// Live observers do not certify physical completion. Input reads are tracked separately.
+func noLiveObservers(d Dependencies) bool {
 	return len(d.Observers) == 0 && len(d.Telemetry) == 0
 }
 
@@ -29,7 +27,7 @@ func nativeRunLayers(d Dependencies) bool {
 // policies are checked at their actual entry inside the owned callback journal.
 // Every other unscoped Host callback keeps the stack opaque.
 func scopedDeferredRootCallbacks(d Dependencies) bool {
-	if !nativeRunLayers(d) ||
+	if !noLiveObservers(d) ||
 		d.PrepareModelRequest != nil || d.NormalizeModelPolicy != nil ||
 		len(d.CompletionPolicies) != 0 || d.ToolDiscovery != nil {
 		return false

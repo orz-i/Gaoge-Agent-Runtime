@@ -800,7 +800,7 @@ func (runner *Runner) executeModelInvocation(
 		Attempt: int(invocation.ExecutionAttempt), ObservedAt: startedAt,
 	})
 	runner.publish(ctx, snapshot.Run.ID, plugin.Event{
-		Type: EventModelStarted, Revision: snapshot.Run.Revision, Status: string(snapshot.Run.Status),
+		Type: EventModelStarted, Message: invocation.ID, Revision: snapshot.Run.Revision, Status: string(snapshot.Run.Status),
 	})
 	authority := modelCompletionAuthority{
 		named:   invocation.Provider != "" && invocation.BindingFingerprint != "",
@@ -1032,7 +1032,7 @@ func (runner *Runner) executeModelInvocation(
 		Duration: endedAt.Sub(startedAt), Usage: telemetryModelUsage(response.Usage), ErrorCode: invocation.ErrorCode,
 	})
 	runner.publish(ctx, next.Run.ID, plugin.Event{
-		Type: EventModelCompleted, Revision: next.Run.Revision, Status: string(next.Run.Status),
+		Type: EventModelCompleted, Message: invocation.ID, Revision: next.Run.Revision, Status: string(next.Run.Status),
 	})
 	if invocation.Purpose != ModelInvocationContextSummary {
 		runner.publishHostedToolReceipts(ctx, next, response.HostedToolCalls)

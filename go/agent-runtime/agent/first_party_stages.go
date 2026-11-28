@@ -114,7 +114,7 @@ func (r *Runner) invokeFirstPartyModel(ctx context.Context, request model.Reques
 		return model.Response{}, ErrInvalidRequest
 	}
 	defer finishNativeStage(ticket, &err)
-	return a.Model(stageCtx, model.CloneRequest(request), emit, func(ctx context.Context, request model.Request, emit model.StreamSink) (model.Response, error) {
+	return a.invokeModel(stageCtx, model.CloneRequest(request), emit, func(ctx context.Context, request model.Request, emit model.StreamSink) (model.Response, error) {
 		return r.invokeAdmittedModel(ctx, request, emit, terminal)
 	})
 }
@@ -125,6 +125,9 @@ func (r *Runner) invokeAdmittedModel(ctx context.Context, request model.Request,
 		return terminal(ctx, request, emit)
 	}
 	stageCtx, ticket := callbackscope.Enter(ctx, request.RunID, b, request)
+	if ticket == nil {
+		return model.Response{}, ErrInvalidRequest
+	}
 	defer finishNativeStage(ticket, &err)
 	if err = b.wait(stageCtx); err != nil {
 		return model.Response{}, err
@@ -147,7 +150,7 @@ func (r *Runner) invokeFirstPartyTool(ctx context.Context, inv plugin.ToolInvoca
 	// Keep the exact original Tool authority and budget receipt ticket.
 	inv.Definition = tools.CloneDefinition(inv.Definition)
 	inv.Request = tools.CloneExecutionRequest(inv.Request)
-	return a.Tool(stageCtx, inv, func(ctx context.Context) (tools.ExecutionResult, error) {
+	return a.invokeTool(stageCtx, inv, func(ctx context.Context) (tools.ExecutionResult, error) {
 		return r.invokeProjectedTool(ctx, inv, terminal)
 	})
 }
@@ -158,6 +161,9 @@ func (r *Runner) invokeProjectedTool(ctx context.Context, inv plugin.ToolInvocat
 		return terminal(ctx)
 	}
 	stageCtx, ticket := callbackscope.EnterTool(ctx, inv.Run.ID, a, inv)
+	if ticket == nil {
+		return tools.ExecutionResult{}, ErrInvalidRequest
+	}
 	defer finishNativeStage(ticket, &err)
 	scope, started, err := a.start(stageCtx, inv)
 	if err != nil {

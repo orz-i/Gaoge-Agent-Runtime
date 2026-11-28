@@ -292,17 +292,6 @@ func requireReceiptConsumption(ctx context.Context, runID, originalLedger string
 	return nil
 }
 
-// Run is the standalone accounting entry. Runner stages use the same
-// admission and settlement operations directly.
-func (a *BoundedBudgetAdapter) Run(ctx context.Context, inv plugin.RunInvocation, next runContinuation) (kernel.Snapshot, error) {
-	admission, err := a.admitRun(ctx, inv, nil)
-	if err != nil {
-		return kernel.Snapshot{}, err
-	}
-	out, callErr := next(ctx)
-	return a.finishRun(ctx, inv, admission, out, callErr, false)
-}
-
 func (a *BoundedBudgetAdapter) admitRun(ctx context.Context, inv plugin.RunInvocation, original *budget.Ledger) (*runBudgetAdmission, error) {
 	frame, _ := callbackscope.RunCall(ctx).(*nativeRunAdmission)
 	receiptOnly := frame != nil && frame.invocation == inv && frame.receiptOnly
@@ -476,7 +465,7 @@ func (a *BoundedBudgetAdapter) planModelSuspend(ctx context.Context, inv ModelIn
 }
 
 // Plan the receipt using the original physical identity and the same
-// accounting reducer as standalone model calls. No independently committed
+// accounting reducer as the split-store stage. No independently committed
 // receipt, speculative projection, or callback-return proof is required.
 func (a *BoundedBudgetAdapter) planModelReceipt(ctx context.Context, inv ModelInvocation, out model.Response, callErr error) (*budget.LedgerMutation, model.Response, error, error) {
 	plan := inv.SamplingPlan
@@ -508,7 +497,7 @@ func (a *BoundedBudgetAdapter) planModelReceipt(ctx context.Context, inv ModelIn
 	return mutation, settled, receiptErr, nil
 }
 
-func (a *BoundedBudgetAdapter) Model(ctx context.Context, request model.Request, emit model.StreamSink, next modelCall) (model.Response, error) {
+func (a *BoundedBudgetAdapter) invokeModel(ctx context.Context, request model.Request, emit model.StreamSink, next modelCall) (model.Response, error) {
 	original := model.CloneRequest(request)
 	call := modelCallFrom(ctx)
 	frozen := call.samplingPlan()
@@ -530,9 +519,8 @@ func (a *BoundedBudgetAdapter) Model(ctx context.Context, request model.Request,
 		callbackscope.Record(ctx, a, "budget.unconfigured.returned", original)
 		return out, e
 	}
-	// A Runtime invocation may not acquire a new ledger or re-plan after its
-	// original intent was committed. Standalone calls have no such intent.
-	if call != nil && (frozen == nil || frozen.LedgerID == "") {
+	// The Runtime must not acquire a new ledger after the original intent.
+	if frozen == nil || frozen.LedgerID == "" {
 		return model.Response{}, budget.ErrLedgerConflict
 	}
 	if strings.TrimSpace(request.InvocationID) == "" {
@@ -563,7 +551,7 @@ func (a *BoundedBudgetAdapter) Model(ctx context.Context, request model.Request,
 	projectErr := a.ports.Project(ctx, l)
 	if value := l.Reservations[res.ID]; err == nil && value.Status == budget.ReservationSettled {
 		out, callErr := budget.DecodeModelReceipt(value)
-		out, callErr = ReplayModelResponseAuthority(ctx, request, out, callErr)
+		out, callErr = replayModelResponseAuthority(ctx, request, out, callErr)
 		if projectErr == nil {
 			a.record(ctx, "budget.model.replayed", original, l, res.ID)
 		}
@@ -583,7 +571,7 @@ func (a *BoundedBudgetAdapter) Model(ctx context.Context, request model.Request,
 		return model.Response{}, err
 	}
 	out, callErr := next(ctx, request, emit)
-	out, callErr = ValidateModelResponseAuthority(ctx, out, callErr)
+	out, callErr = validateModelResponseAuthority(ctx, out, callErr)
 	accounting := context.WithoutCancel(ctx)
 	if modelDeniedForRequest(ctx, original, callErr) {
 		updated, e := a.coordinator.RequeueProvenUnsent(accounting, l.ID, res.ID, dispatched.Revision)
@@ -622,33 +610,10 @@ func (a *BoundedBudgetAdapter) Model(ctx context.Context, request model.Request,
 	return a.settledModelResult(ctx, settled, errors.Join(receiptErr, callErr), projectErr)
 }
 
-// samplingReservation either reconstructs the previously admitted physical
-// request or plans a legacy standalone Budget call. A live ledger may refuse
-// the frozen plan; it must never rewrite it after Context admission.
-func (a *BoundedBudgetAdapter) samplingReservation(ctx context.Context, ledger budget.Ledger, original model.Request, frozen *SamplingPlan) (model.Request, budget.Reservation, error) {
+// Reconstruct the frozen physical request against the current original ledger.
+func (a *BoundedBudgetAdapter) samplingReservation(_ context.Context, ledger budget.Ledger, original model.Request, frozen *SamplingPlan) (model.Request, budget.Reservation, error) {
 	if frozen == nil {
-		request, res, err := a.ports.PlanModel(ctx, ledger, model.CloneRequest(original))
-		if err != nil {
-			return request, res, err
-		}
-		if res.RunID != original.RunID || res.ID == "" || !validDispatchModelRequest(original, request) {
-			return request, res, ErrInvalidRequest
-		}
-		// Standalone Adapter calls have no durable Agent intent. Their ledger
-		// still binds the physical receipt before dispatch. Existing settled
-		// reservations can be replayed by their original logical admission ID.
-		if res.Status == budget.ReservationSettled || res.Dispatched {
-			return request, res, nil
-		}
-		hash, err := model.PhysicalRequestHash(request)
-		if err != nil {
-			return request, res, err
-		}
-		if res.PhysicalRequestHash != "" && res.PhysicalRequestHash != hash {
-			return request, res, budget.ErrLedgerConflict
-		}
-		res.PhysicalRequestHash = hash
-		return request, res, nil
+		return model.Request{}, budget.Reservation{}, budget.ErrLedgerConflict
 	}
 	if frozen.LedgerID != ledger.ID || !frozen.valid(original) ||
 		ledger.HasRunTokenLimits(original.RunID) != (frozen.Requested.InputTokens > 0) {

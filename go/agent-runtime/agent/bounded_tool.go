@@ -54,29 +54,16 @@ func (a *BoundedBudgetAdapter) reserveTool(ctx context.Context, inv plugin.ToolI
 	return l, err
 }
 
-func (a *BoundedBudgetAdapter) Tool(ctx context.Context, inv plugin.ToolInvocation, next toolCall) (tools.ExecutionResult, error) {
+func (a *BoundedBudgetAdapter) invokeTool(ctx context.Context, inv plugin.ToolInvocation, next toolCall) (tools.ExecutionResult, error) {
 	if inv.Run.ID == "" || inv.Request.RunID != inv.Run.ID || inv.Request.Call.ID == "" {
 		return tools.ExecutionResult{}, ErrInvalidRequest
 	}
-	var l budget.Ledger
-	var err error
 	authority := toolAuthority(ctx)
-	if authority != nil {
-		ticket := authority.budget
-		if ticket == nil || ticket.adapter != a || !sameRecoveredCall(ticket.request.Call, inv.Request.Call) || ticket.request.RunID != inv.Request.RunID {
-			return tools.ExecutionResult{}, ErrToolReceiptMismatch
-		}
-		l = ticket.ledger
-	} else {
-		// Standalone direct use shares the exact same reservation primitive.
-		l, err = a.bind(ctx, inv.Run.ID)
-		if err == nil {
-			l, err = a.reserveTool(ctx, inv, l)
-		}
-		if err != nil {
-			return tools.ExecutionResult{}, err
-		}
+	if authority == nil || authority.budget == nil || authority.budget.adapter != a ||
+		!sameRecoveredCall(authority.budget.request.Call, inv.Request.Call) || authority.budget.request.RunID != inv.Request.RunID {
+		return tools.ExecutionResult{}, ErrToolReceiptMismatch
 	}
+	l := authority.budget.ledger
 	record := func(op string, ledger budget.Ledger) bool {
 		return callbackscope.Record(ctx, a, op, struct {
 			Invocation plugin.ToolInvocation
@@ -119,7 +106,7 @@ func (a *BoundedBudgetAdapter) Tool(ctx context.Context, inv plugin.ToolInvocati
 	if err != nil {
 		// Actual, definitive denial before Next. A Store error after a
 		// possible Dispatch commit is not a native no-send return.
-		if authority != nil && authority.budget.cancelledDispatch(dispatched, err) {
+		if authority.budget.cancelledDispatch(dispatched, err) {
 			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 			projectErr := a.ports.Project(cleanup, dispatched)
 			cancel()
