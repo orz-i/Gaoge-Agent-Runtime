@@ -79,6 +79,7 @@ func TestAgentStateMissingOrContradictoryOriginalEvidenceFailsClosed(t *testing.
 		edit func(*persistedRunState)
 	}{
 		{"missing-original", func(v *persistedRunState) { v.OriginalStateEvidence = nil }},
+		{"prior-wire-version", func(v *persistedRunState) { v.OriginalStateEvidence.Version = "agent-state-opaque-v3" }},
 		{"changed-original", func(v *persistedRunState) { v.OriginalStateEvidence.Fields[0].Raw = []byte(`{"html":"forged"}`) }},
 		{"stripped-field", func(v *persistedRunState) { v.OriginalStateEvidence.Fields = v.OriginalStateEvidence.Fields[:1] }},
 		{"duplicate-field", func(v *persistedRunState) {

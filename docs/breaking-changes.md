@@ -79,6 +79,8 @@ accept call increments only; both grant paths extend the same cumulative
 ceiling within the original hard Run limits. The read-only View still exposes
 renewal progress. Host retry seals the single original allowance, including
 its nested renewal policy, and rejects legacy separate-policy inputs.
+Removing the independent admission field also changes Config admission hashes
+for requests without an allowance; use only the new writer on a fresh Profile.
 
 The private Agent state evidence version is v4; the single allowance record
 contains the ceiling, renewal policy and progress. Older sealed states are
