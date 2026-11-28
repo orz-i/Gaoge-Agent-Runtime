@@ -64,10 +64,10 @@ func (s *Store) LoadManagedRecovery(ctx context.Context, runID string) (kernel.M
 var _ kernel.ManagedRecoveryStore = (*Store)(nil)
 
 func (s *Store) nativeEntryGateLocked(runID string) error {
-	native := s.execution[runID]
+	native := s.runs[runID].execution
 	pending := false
-	for id := range s.childGrantOwners[runID] {
-		g, ok := s.childGrants[id]
+	for id := range s.effectOwners[runID] {
+		g, ok := s.activeEffect(id)
 		if !ok {
 			return kernel.ErrExecutionConflict
 		}
@@ -96,7 +96,7 @@ func (s *Store) saveManagedLocked(t kernel.ManagedTransfer) {
 }
 
 func (s *Store) managedCurrentLocked(runID string) (kernel.ManagedTransfer, kernel.Snapshot, error) {
-	snap, exists := s.records[runID]
+	snap, exists := s.snapshotLocked(runID)
 	if !exists {
 		return kernel.ManagedTransfer{}, kernel.Snapshot{}, kernel.ErrNotFound
 	}
@@ -105,16 +105,6 @@ func (s *Store) managedCurrentLocked(runID string) (kernel.ManagedTransfer, kern
 		return kernel.ManagedTransfer{}, kernel.Snapshot{}, kernel.ErrExecutionConflict
 	}
 	return cloneMemoryManagedTransfer(t), cloneSnapshot(snap), nil
-}
-
-func (s *Store) removeManagedGrantLocked(g memoryChildGrant) {
-	delete(s.childGrants, g.grant.ID)
-	for _, id := range g.ancestors {
-		delete(s.childGrantOwners[id], g.grant.ID)
-		if len(s.childGrantOwners[id]) == 0 {
-			delete(s.childGrantOwners, id)
-		}
-	}
 }
 
 func (s *Store) CommitManagedCancellation(ctx context.Context, q kernel.ManagedCancelRequest) (kernel.ManagedTransfer, error) {
@@ -134,8 +124,8 @@ func (s *Store) CommitManagedCancellation(ctx context.Context, q kernel.ManagedC
 		return cloneMemoryManagedTransfer(t), nil
 	}
 	expected := kernel.ManagedCurrentGrant(t)
-	old, ok := s.childGrants[expected.ID]
-	state := s.execution[q.RunID]
+	old, ok := s.activeEffect(expected.ID)
+	state := s.runs[q.RunID].execution
 	if !ok || !s.managedSoleGrantLocked(q.RunID, expected.ID) || old.grant != expected || old.settledRevision != 0 || old.completion.GrantID != "" || !expected.MatchesExecution(state.lease) || state.epoch != expected.ExecutionEpoch || state.epoch == math.MaxUint64 || state.quarantineRev != 0 || t.SafePoint.Host.KernelAuthority != s.managedAuthority {
 		return kernel.ManagedTransfer{}, kernel.ErrExecutionConflict
 	}
@@ -145,16 +135,16 @@ func (s *Store) CommitManagedCancellation(ctx context.Context, q kernel.ManagedC
 	}
 	// The original physical Grant index does not include independently
 	// owned logical children. Check their actual native ancestry under mu.
-	for id, child := range s.records {
+	for id, child := range s.runs {
 		if (child.Run.Status == kernel.RunStatusCompleted || child.Run.Status == kernel.RunStatusFailed || child.Run.Status == kernel.RunStatusCancelled) &&
-			len(s.childGrantOwners[id]) == 0 && s.execution[id].quarantineRev == 0 {
+			len(s.effectOwners[id]) == 0 && s.runs[id].execution.quarantineRev == 0 {
 			continue
 		}
 		for parent, depth := kernel.RunParentID(child.Run), 0; parent != "" && depth < 64; depth++ {
 			if parent == q.RunID {
 				return kernel.ManagedTransfer{}, kernel.ErrExecutionConflict
 			}
-			parent = kernel.RunParentID(s.records[parent].Run)
+			parent = kernel.RunParentID(s.runs[parent].Snapshot.Run)
 		}
 	}
 	next, m, err := kernel.ManagedCancellationMutation(t, q, snap, s.currentExecutionTime())
@@ -165,21 +155,13 @@ func (s *Store) CommitManagedCancellation(ctx context.Context, q kernel.ManagedC
 	if err != nil {
 		return kernel.ManagedTransfer{}, err
 	}
-	if ledger != nil {
-		s.ledgers[ledger.ScopeID()] = ledger.Next()
-	}
-	// This exact reducer is the qualified native cancellation path. Never pass an ordinary
-	// mutation through a temporarily removed fence or fabricate callback return.
-	terminal := snapshotFromRecord(m.Record)
-	journal := appendEvents(s.events[q.RunID], m.Events, m.Record.Run.UpdatedAt)
-	terminal.EventHead = int64(len(journal))
-	s.records[q.RunID] = cloneSnapshot(terminal)
-	s.events[q.RunID] = journal
-	s.appendCommittedTransition(m.Record.Run, m.Events)
+	// The original managed selection is qualified above. Commit the same
+	// Run/accounting/journal facts as every other native transition.
+	terminal := s.commitRunLocked(snapshotFromRecord(m.Record), m.Events, ledger)
 	state.epoch++
 	state.lease = kernel.ExecutionLease{}
-	s.execution[q.RunID] = state
-	s.removeManagedGrantLocked(old)
+	s.setExecutionLocked(q.RunID, state)
+	s.consumeEffectLocked(old, nil)
 	next.Terminal = &terminal
 	s.saveManagedLocked(next)
 	return cloneMemoryManagedTransfer(next), nil
@@ -203,15 +185,15 @@ func (s *Store) LoadManagedRecoveryByID(ctx context.Context, id string) (kernel.
 
 // Never discard independently indexed descendant authority during transfer.
 func (s *Store) managedSoleGrantLocked(runID, grantID string) bool {
-	owners := s.childGrantOwners[runID]
+	owners := s.effectOwners[runID]
 	_, ok := owners[grantID]
 	return ok && len(owners) == 1
 }
 
 func (s *Store) observeManagedLocked(t kernel.ManagedTransfer) (kernel.ManagedTransfer, error) {
 	if t.SuccessorGrant.ID != "" && t.Terminal == nil {
-		if receipt, ok := s.ownedRetirements[t.SuccessorGrant.ID]; ok {
-			closed, e := kernel.ObserveManagedRetirement(t, receipt)
+		if receipt := s.effects[t.SuccessorGrant.ID].retirement; receipt != nil {
+			closed, e := kernel.ObserveManagedRetirement(t, *receipt)
 			if e != nil {
 				return closed, e
 			}

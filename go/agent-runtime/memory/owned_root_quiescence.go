@@ -17,14 +17,14 @@ func (s *Store) VerifyExecutionCustody(ctx context.Context, expected kernel.Snap
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	current, exists := s.records[expected.Run.ID]
+	current, exists := s.snapshotLocked(expected.Run.ID)
 	if !exists {
 		return kernel.ErrNotFound
 	}
 	if err := s.nativeEntryGateLocked(expected.Run.ID); err != nil {
 		return err
 	}
-	native := s.execution[expected.Run.ID]
+	native := s.runs[expected.Run.ID].execution
 	if native.quarantineRev != 0 {
 		return kernel.ErrExecutionConflict
 	}
@@ -35,25 +35,18 @@ func (s *Store) VerifyExecutionCustody(ctx context.Context, expected kernel.Snap
 	if !lease.ExpiresAt.After(s.currentExecutionTime()) {
 		lease = kernel.ExecutionLease{}
 	}
-	active := len(s.childGrantOwners[expected.Run.ID]) != 0
-	for _, g := range s.childGrants {
-		if g.grant.ChildRunID == expected.Run.ID {
-			active = true
-		}
-	}
-	receipts := make([]kernel.OwnedRetirementReceipt, 0)
-	for id, r := range s.ownedRetirements {
-		if r.Evidence.Grant.ChildRunID != expected.Run.ID {
-			continue
-		}
-		if r.Evidence.Grant.ID != id {
-			return kernel.ErrExecutionConflict
-		}
-		receipts = append(receipts, r)
+	active := len(s.effectOwners[expected.Run.ID]) != 0
+	receipts, err := s.retirementsLocked(expected.Run.ID)
+	if err != nil {
+		return err
 	}
 	if requirement == kernel.CustodyReturned {
-		var original memoryChildGrant
-		for _, candidate := range s.childGrants {
+		var original memoryEffect
+		for id := range s.effectOwners[expected.Run.ID] {
+			candidate, ok := s.activeEffect(id)
+			if !ok {
+				return kernel.ErrExecutionConflict
+			}
 			if candidate.grant.ChildRunID == expected.Run.ID {
 				if original.grant.ID != "" {
 					return kernel.ErrExecutionConflict

@@ -69,14 +69,14 @@ func (store *Store) AcquireExecution(ctx context.Context, request kernel.Executi
 	if err := store.nativeEntryGateLocked(request.RunID); err != nil {
 		return kernel.ExecutionLease{}, kernel.ErrChildExecutionBusy
 	}
-	snap, ok := store.records[request.RunID]
+	snap, ok := store.snapshotLocked(request.RunID)
 	if !ok {
 		return kernel.ExecutionLease{}, kernel.ErrNotFound
 	}
 	if _, exists := store.ownedGrantLocked(request.RunID); exists {
 		return kernel.ExecutionLease{}, kernel.ErrChildExecutionBusy
 	}
-	state := store.execution[request.RunID]
+	state := store.runs[request.RunID].execution
 	current := state.lease
 	current.Epoch = state.epoch
 	id, err := newMemoryLeaseID()
@@ -88,7 +88,7 @@ func (store *Store) AcquireExecution(ctx context.Context, request kernel.Executi
 		return kernel.ExecutionLease{}, err
 	}
 	state.epoch, state.lease = lease.Epoch, lease
-	store.execution[request.RunID] = state
+	store.setExecutionLocked(request.RunID, state)
 	return lease, nil
 }
 func (store *Store) RenewExecution(ctx context.Context, req kernel.ExecutionRenewRequest) (kernel.ExecutionLease, error) {
@@ -104,7 +104,7 @@ func (store *Store) RenewExecution(ctx context.Context, req kernel.ExecutionRene
 		return kernel.ExecutionLease{}, err
 	}
 	now := store.currentExecutionTime()
-	state := store.execution[req.Lease.RunID]
+	state := store.runs[req.Lease.RunID].execution
 	if g, ok := store.ownedGrantLocked(req.Lease.RunID); ok && !g.grant.MatchesExecution(req.Lease) {
 		return kernel.ExecutionLease{}, kernel.ErrExecutionConflict
 	}
@@ -112,7 +112,7 @@ func (store *Store) RenewExecution(ctx context.Context, req kernel.ExecutionRene
 		return kernel.ExecutionLease{}, kernel.ErrExecutionConflict
 	}
 	state.lease.ExpiresAt = now.Add(req.LeaseDuration)
-	store.execution[req.Lease.RunID] = state
+	store.setExecutionLocked(req.Lease.RunID, state)
 	return state.lease, nil
 }
 func (store *Store) ReleaseExecution(ctx context.Context, lease kernel.ExecutionLease) error {
@@ -130,12 +130,12 @@ func (store *Store) ReleaseExecution(ctx context.Context, lease kernel.Execution
 	if _, exists := store.ownedGrantLocked(lease.RunID); exists {
 		return kernel.ErrChildExecutionBusy
 	}
-	state := store.execution[lease.RunID]
+	state := store.runs[lease.RunID].execution
 	if !activeMemoryLease(state, lease, store.currentExecutionTime()) {
 		return kernel.ErrExecutionConflict
 	}
 	state.lease = kernel.ExecutionLease{} // Preserve epoch; old token stays fenced.
-	store.execution[lease.RunID] = state
+	store.setExecutionLocked(lease.RunID, state)
 	return nil
 }
 func (store *Store) ApplyExecution(ctx context.Context, lease kernel.ExecutionLease, expectedRevision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
@@ -150,7 +150,7 @@ func (store *Store) ApplyExecution(ctx context.Context, lease kernel.ExecutionLe
 	if err := store.nativeEntryGateLocked(lease.RunID); err != nil {
 		return kernel.Snapshot{}, err
 	}
-	state := store.execution[lease.RunID]
+	state := store.runs[lease.RunID].execution
 	if g, ok := store.ownedGrantLocked(lease.RunID); ok && !g.grant.MatchesExecution(lease) {
 		return kernel.Snapshot{}, kernel.ErrExecutionConflict
 	}
@@ -160,7 +160,7 @@ func (store *Store) ApplyExecution(ctx context.Context, lease kernel.ExecutionLe
 	if !activeMemoryLease(state, lease, store.currentExecutionTime()) {
 		return kernel.Snapshot{}, kernel.ErrExecutionConflict
 	}
-	current, ok := store.records[lease.RunID]
+	current, ok := store.snapshotLocked(lease.RunID)
 	if !ok {
 		return kernel.Snapshot{}, kernel.ErrNotFound
 	}
@@ -191,14 +191,14 @@ func (store *Store) CheckExecution(ctx context.Context, runID string, lease *ker
 	if err := store.nativeEntryGateLocked(runID); err != nil {
 		return err
 	}
-	snap, ok := store.records[runID]
+	snap, ok := store.snapshotLocked(runID)
 	if !ok {
 		return kernel.ErrNotFound
 	}
 	if snap.Run.Status == kernel.RunStatusCompleted || snap.Run.Status == kernel.RunStatusFailed || snap.Run.Status == kernel.RunStatusCancelled {
 		return kernel.ErrTerminal
 	}
-	state := store.execution[runID]
+	state := store.runs[runID].execution
 	if state.quarantineRev != 0 {
 		return kernel.ErrExecutionQuarantined
 	}

@@ -25,7 +25,7 @@ func (store *Store) ApplyControl(ctx context.Context, runID string, expectedRevi
 	if err := store.nativeEntryGateLocked(runID); err != nil {
 		return kernel.Snapshot{}, false, err
 	}
-	current, ok := store.records[runID]
+	current, ok := store.snapshotLocked(runID)
 	if !ok {
 		return kernel.Snapshot{}, false, kernel.ErrNotFound
 	}
@@ -40,7 +40,7 @@ func (store *Store) ApplyControl(ctx context.Context, runID string, expectedRevi
 	if err := kernel.ValidateControl(current, guard, mutation, store.currentExecutionTime()); err != nil {
 		return kernel.Snapshot{}, false, err
 	}
-	authority := store.execution[runID]
+	authority := store.runs[runID].execution
 	if authority.quarantineRev != 0 && mutation.Record.Run.Status == kernel.RunStatusRunning {
 		// An unrelated validated control cannot age out a poisoned work
 		// identity while the same Feature wait remains unresolved.
@@ -50,8 +50,8 @@ func (store *Store) ApplyControl(ctx context.Context, runID string, expectedRevi
 	// for control writes as well as ordinary Apply. Check BEFORE revoking
 	// a Run Execution epoch so a rejected Cancel is truly no-mutation.
 	ownedApproval := false
-	for id := range store.childGrantOwners[runID] {
-		original, ok := store.childGrants[id]
+	for id := range store.effectOwners[runID] {
+		original, ok := store.activeEffect(id)
 		if !ok {
 			return kernel.Snapshot{}, false, kernel.ErrExecutionConflict
 		}
@@ -84,7 +84,7 @@ func (store *Store) ApplyControl(ctx context.Context, runID string, expectedRevi
 	if revoked {
 		authority.epoch++
 		authority.lease = kernel.ExecutionLease{}
-		store.execution[runID] = authority
+		store.setExecutionLocked(runID, authority)
 	}
 	return snapshot, revoked, nil
 }

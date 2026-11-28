@@ -8,11 +8,41 @@ import (
 
 var _ kernel.ChildExecutionStore = (*Store)(nil)
 
-type memoryChildGrant struct {
+// A physical operation has one stable record for its entire lifetime. An
+// active record owns its original Grant and live ancestor index. Once
+// consumed, only its immutable identity or owned retirement fact remains.
+// No identity may be reused, including after a managed transfer/cancel.
+type memoryEffect struct {
 	grant           kernel.ChildExecutionGrant
 	ancestors       []string
 	settledRevision uint64
 	completion      kernel.OwnedPhysicalCallbackCompletion
+	retirement      *kernel.OwnedRetirementReceipt
+}
+
+func (e memoryEffect) active() bool { return len(e.ancestors) != 0 }
+
+// The owner map is an index of active operations, never a second authority.
+func (s *Store) activeEffect(id string) (memoryEffect, bool) {
+	e, ok := s.effects[id]
+	return e, ok && e.active()
+}
+
+func (s *Store) consumeEffectLocked(e memoryEffect, retirement *kernel.OwnedRetirementReceipt) {
+	id := e.grant.ID
+	if retirement == nil {
+		s.effects[id] = memoryEffect{grant: e.grant}
+	} else {
+		// The retirement receipt already contains the complete original identity,
+		// completion and Run snapshot. Do not retain a duplicate live record.
+		s.effects[id] = memoryEffect{retirement: retirement}
+	}
+	for _, owner := range e.ancestors {
+		delete(s.effectOwners[owner], id)
+		if len(s.effectOwners[owner]) == 0 {
+			delete(s.effectOwners, owner)
+		}
+	}
 }
 
 func (store *Store) validateLiveRunOwners(ctx context.Context, run kernel.Run) ([]string, error) {
@@ -20,7 +50,7 @@ func (store *Store) validateLiveRunOwners(ctx context.Context, run kernel.Run) (
 		if err := store.nativeEntryGateLocked(id); err != nil {
 			return kernel.Snapshot{}, err
 		}
-		parent, ok := store.records[id]
+		parent, ok := store.snapshotLocked(id)
 		if !ok {
 			return kernel.Snapshot{}, kernel.ErrNotFound
 		}
@@ -42,7 +72,7 @@ func (store *Store) BeginChildExecution(ctx context.Context, grant kernel.ChildE
 	if err := store.nativeEntryGateLocked(grant.ChildRunID); err != nil {
 		return err
 	}
-	child, ok := store.records[grant.ChildRunID]
+	child, ok := store.snapshotLocked(grant.ChildRunID)
 	if !ok {
 		return kernel.ErrNotFound
 	}
@@ -65,23 +95,21 @@ func (store *Store) BeginChildExecution(ctx context.Context, grant kernel.ChildE
 	// The first-party Feature receives a per-revision scoped mutation permit,
 	// while unbound Kernel.Cancel/Apply/Control must fail until settlement.
 	ancestors = append(ancestors, child.Run.ID)
-	if store.grantIdentityUsedLocked(grant.ID) {
+	if _, occupied := store.effects[grant.ID]; occupied {
 		return kernel.ErrExecutionConflict
 	}
-	for _, previous := range store.childGrants {
-		if previous.grant.ChildRunID == grant.ChildRunID {
+	for id := range store.effectOwners[grant.ChildRunID] {
+		previous, ok := store.activeEffect(id)
+		if !ok || previous.grant.ChildRunID == grant.ChildRunID {
 			return kernel.ErrChildExecutionBusy
 		}
 	}
-	if err := store.reserveGrantIdentityLocked(grant); err != nil {
-		return err
-	}
-	store.childGrants[grant.ID] = memoryChildGrant{grant: grant, ancestors: ancestors}
+	store.effects[grant.ID] = memoryEffect{grant: grant, ancestors: ancestors}
 	for _, id := range ancestors {
-		if store.childGrantOwners[id] == nil {
-			store.childGrantOwners[id] = make(map[string]struct{})
+		if store.effectOwners[id] == nil {
+			store.effectOwners[id] = make(map[string]struct{})
 		}
-		store.childGrantOwners[id][grant.ID] = struct{}{}
+		store.effectOwners[id][grant.ID] = struct{}{}
 	}
 	return nil
 }
@@ -104,17 +132,17 @@ func (store *Store) MarkChildExecutionSettled(ctx context.Context, grant kernel.
 	if err := store.nativeEntryGateLocked(grant.ChildRunID); err != nil {
 		return err
 	}
-	original, ok := store.childGrants[grant.ID]
+	original, ok := store.activeEffect(grant.ID)
 	if !ok || original.grant != grant {
 		return kernel.ErrExecutionConflict
 	}
-	child, ok := store.records[grant.ChildRunID]
+	child, ok := store.snapshotLocked(grant.ChildRunID)
 	if !ok || !permit.Matches(grant, child) ||
 		(original.settledRevision != 0 && original.settledRevision != child.Run.Revision) {
 		return kernel.ErrExecutionConflict
 	}
 	original.settledRevision = child.Run.Revision
-	store.childGrants[grant.ID] = original
+	store.effects[grant.ID] = original
 	return nil
 }
 
@@ -133,8 +161,8 @@ func (store *Store) FinishChildExecution(ctx context.Context, grant kernel.Child
 	if err := store.nativeEntryGateLocked(grant.ChildRunID); err != nil {
 		return err
 	}
-	previous, ok := store.childGrants[grant.ID]
-	child := store.records[grant.ChildRunID]
+	previous, ok := store.activeEffect(grant.ID)
+	child := store.runs[grant.ChildRunID].Snapshot
 	if !ok || previous.grant != grant {
 		return kernel.ErrExecutionConflict
 	}
@@ -142,19 +170,11 @@ func (store *Store) FinishChildExecution(ctx context.Context, grant kernel.Child
 		if previous.settledRevision != 0 {
 			return kernel.ErrExecutionConflict
 		}
-		if err := store.retireOwnedLocked(previous, permit); err != nil {
-			return err
-		}
+		return store.retireOwnedLocked(previous, permit)
 	} else if previous.settledRevision == 0 || child.Run.Revision != previous.settledRevision || !permit.Matches(grant, child) {
 		return kernel.ErrExecutionConflict
 	}
-	delete(store.childGrants, grant.ID)
-	for _, id := range previous.ancestors {
-		delete(store.childGrantOwners[id], grant.ID)
-		if len(store.childGrantOwners[id]) == 0 {
-			delete(store.childGrantOwners, id)
-		}
-	}
+	store.consumeEffectLocked(previous, nil)
 	return nil
 }
 
@@ -168,7 +188,11 @@ func (store *Store) LookupChildExecution(ctx context.Context, childID string) (k
 	store.mu.RLock()
 	defer store.mu.RUnlock()
 	var candidate kernel.ChildExecutionGrant
-	for _, value := range store.childGrants {
+	for id := range store.effectOwners[childID] {
+		value, ok := store.activeEffect(id)
+		if !ok {
+			return kernel.ChildExecutionGrant{}, kernel.ErrExecutionConflict
+		}
 		if value.grant.ChildRunID != childID {
 			continue
 		}

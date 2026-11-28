@@ -17,36 +17,31 @@ func cloneOwnedRetirement(r kernel.OwnedRetirementReceipt) kernel.OwnedRetiremen
 }
 
 // retireOwnedLocked commits the exact managed closure with ordinary retirement.
-func (s *Store) retireOwnedLocked(previous memoryChildGrant, permit kernel.ChildExecutionSettlement) error {
+func (s *Store) retireOwnedLocked(previous memoryEffect, permit kernel.ChildExecutionSettlement) error {
 	g := previous.grant
-	current := s.records[g.ChildRunID]
-	native := s.execution[g.ChildRunID]
+	current := s.runs[g.ChildRunID].Snapshot
+	native := s.runs[g.ChildRunID].execution
 	if native.epoch != g.ExecutionEpoch || native.physicalEpoch != g.ExecutionEpoch ||
 		native.quarantineRev != 0 || len(previous.ancestors) != 1 || previous.ancestors[0] != g.ChildRunID ||
-		len(s.childGrantOwners[g.ChildRunID]) != 1 {
+		len(s.effectOwners[g.ChildRunID]) != 1 {
 		return kernel.ErrExecutionConflict
 	}
-	if _, ok := s.childGrantOwners[g.ChildRunID][g.ID]; !ok {
-		return kernel.ErrExecutionConflict
-	}
-	if _, exists := s.ownedRetirements[g.ID]; exists {
+	if _, ok := s.effectOwners[g.ChildRunID][g.ID]; !ok {
 		return kernel.ErrExecutionConflict
 	}
 	closures, err := kernel.CloseManagedRetirement(g, current, s.managedAuthority, s.managedTransfers[s.managedCurrent[g.ChildRunID]])
 	if err != nil {
 		return err
 	}
-	r, err := kernel.BuildOwnedRetirementReceipt(g, cloneSnapshot(current), s.execution[g.ChildRunID].lease, previous.completion, permit, closures)
+	r, err := kernel.BuildOwnedRetirementReceipt(g, cloneSnapshot(current), s.runs[g.ChildRunID].execution.lease, previous.completion, permit, closures)
 	if err != nil {
 		return err
 	}
-	if s.ownedRetirements == nil {
-		s.ownedRetirements = make(map[string]kernel.OwnedRetirementReceipt)
-	}
-	s.ownedRetirements[g.ID] = cloneOwnedRetirement(r)
+	retirement := cloneOwnedRetirement(r)
+	s.consumeEffectLocked(previous, &retirement)
 	if r.Evidence.Completion.LeaseOwned {
 		native.lease = kernel.ExecutionLease{}
-		s.execution[g.ChildRunID] = native
+		s.setExecutionLocked(g.ChildRunID, native)
 	}
 	return nil
 }
@@ -59,10 +54,11 @@ func (s *Store) LoadOwnedRetirement(ctx context.Context, id string) (kernel.Owne
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	r, ok := s.ownedRetirements[id]
-	if !ok {
-		return r, kernel.ErrNotFound
+	effect := s.effects[id]
+	if effect.retirement == nil {
+		return kernel.OwnedRetirementReceipt{}, kernel.ErrNotFound
 	}
+	r := *effect.retirement
 	if !r.Valid() || r.Evidence.Grant.ID != id {
 		return kernel.OwnedRetirementReceipt{}, kernel.ErrExecutionConflict
 	}
@@ -77,32 +73,36 @@ func (s *Store) LookupOwnedRetirementForRun(ctx context.Context, runID string) (
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	rows := make([]kernel.OwnedRetirementReceipt, 0)
-	for id, r := range s.ownedRetirements {
-		if r.Evidence.Grant.ChildRunID != runID {
-			continue
-		}
-		if r.Evidence.Grant.ID != id {
-			return kernel.OwnedRetirementReceipt{}, kernel.ErrExecutionConflict
-		}
-		rows = append(rows, r)
+	rows, err := s.retirementsLocked(runID)
+	if err != nil {
+		return kernel.OwnedRetirementReceipt{}, err
 	}
-	native := s.execution[runID]
-	hasGrants := len(s.childGrantOwners[runID]) != 0
-	for _, g := range s.childGrants {
-		if g.grant.ChildRunID == runID {
-			hasGrants = true
-		}
-	}
+	native := s.runs[runID].execution
+	hasGrants := len(s.effectOwners[runID]) != 0
 	if e := s.nativeEntryGateLocked(runID); e != nil {
 		return kernel.OwnedRetirementReceipt{}, e
 	}
 	if native.quarantineRev != 0 {
 		return kernel.OwnedRetirementReceipt{}, kernel.ErrExecutionConflict
 	}
-	r, e := kernel.SelectOwnedRetirementForRun(runID, rows, s.records[runID], native.epoch, native.lease, hasGrants)
+	r, e := kernel.SelectOwnedRetirementForRun(runID, rows, s.runs[runID].Snapshot, native.epoch, native.lease, hasGrants)
 	if e != nil {
 		return kernel.OwnedRetirementReceipt{}, e
 	}
 	return cloneOwnedRetirement(r), nil
+}
+
+// Historical receipts are views of the same consumed operation records.
+func (s *Store) retirementsLocked(runID string) ([]kernel.OwnedRetirementReceipt, error) {
+	rows := make([]kernel.OwnedRetirementReceipt, 0)
+	for id, e := range s.effects {
+		if e.retirement == nil || e.retirement.Evidence.Grant.ChildRunID != runID {
+			continue
+		}
+		if e.retirement.Evidence.Grant.ID != id {
+			return nil, kernel.ErrExecutionConflict
+		}
+		rows = append(rows, *e.retirement)
+	}
+	return rows, nil
 }

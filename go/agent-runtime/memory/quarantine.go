@@ -29,7 +29,7 @@ func (store *Store) QuarantineExecution(ctx context.Context, value kernel.Execut
 	if err := store.nativeEntryGateLocked(value.RunID); err != nil {
 		return err
 	}
-	snapshot, ok := store.records[value.RunID]
+	snapshot, ok := store.snapshotLocked(value.RunID)
 	if !ok {
 		return kernel.ErrNotFound
 	}
@@ -42,7 +42,7 @@ func (store *Store) QuarantineExecution(ctx context.Context, value kernel.Execut
 	if _, exists := store.ownedGrantLocked(value.RunID); exists {
 		return kernel.ErrChildExecutionBusy
 	}
-	state := store.execution[value.RunID]
+	state := store.runs[value.RunID].execution
 	if state.epoch == 0 {
 		return kernel.ErrExecutionRequired
 	}
@@ -55,12 +55,12 @@ func (store *Store) QuarantineExecution(ctx context.Context, value kernel.Execut
 	if state.epoch == math.MaxUint64 {
 		return kernel.ErrExecutionConflict
 	}
-	state = store.execution[value.RunID]
+	state = store.runs[value.RunID].execution
 	state.epoch++
 	state.lease = kernel.ExecutionLease{}
 	state.quarantineRev, state.quarantineGen, state.quarantineCode =
 		value.Revision, value.Generation, value.Reason
-	store.execution[value.RunID] = state
+	store.setExecutionLocked(value.RunID, state)
 	return nil
 }
 
@@ -78,17 +78,17 @@ func (store *Store) RepairExecutionQuarantine(ctx context.Context, value kernel.
 	if err := store.nativeEntryGateLocked(value.RunID); err != nil {
 		return err
 	}
-	snapshot, ok := store.records[value.RunID]
+	snapshot, ok := store.snapshotLocked(value.RunID)
 	if !ok {
 		return kernel.ErrNotFound
 	}
-	state := store.execution[value.RunID]
+	state := store.runs[value.RunID].execution
 	if snapshot.Run.Revision != value.Revision || snapshot.Run.Status != kernel.RunStatusRunning ||
 		state.quarantineRev != value.Revision || state.quarantineGen != value.Generation ||
 		state.quarantineCode != value.Reason {
 		return kernel.ErrConflict
 	}
 	state.quarantineRev, state.quarantineGen, state.quarantineCode = 0, 0, ""
-	store.execution[value.RunID] = state
+	store.setExecutionLocked(value.RunID, state)
 	return nil
 }
