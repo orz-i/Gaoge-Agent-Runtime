@@ -34,7 +34,7 @@ func (s *Store) migrateV9ToV10(ctx context.Context) error {
 		return err
 	}
 	if version == 10 {
-		return validateSchemaDDL(ctx, tx, schemaDDL)
+		return validateSchemaDDL(ctx, tx, schemaV10DDL())
 	}
 	if version != 9 {
 		return fmt.Errorf("%w: migration requires exact v9, got %d", ErrUnsupportedSchema, version)
@@ -54,7 +54,7 @@ func (s *Store) migrateV9ToV10(ctx context.Context) error {
 	if _, err = tx.ExecContext(ctx, "PRAGMA user_version=10"); err != nil {
 		return err
 	}
-	if err = validateSchemaDDL(ctx, tx, schemaDDL); err != nil {
+	if err = validateSchemaDDL(ctx, tx, schemaV10DDL()); err != nil {
 		return err
 	}
 	return conflictOrDatabaseError(tx.Commit())

@@ -92,12 +92,22 @@ func TestPR82NeverDispatchedHandoffCanBeCancelled(t *testing.T) {
 		if role {
 			delegation.MemberRevision = "member-v2"
 		}
-		if err := f.runner.prepareHandoffChild(t.Context(), f.turn, f.parent, delegation, f.startedItemID); err != nil {
+		started, err := f.runner.recordDelegationItem(t.Context(), f.turn, f.parent, delegation, ItemStarted, "")
+		if err != nil {
 			t.Fatal(err)
 		}
-		runs, err := f.runner.cancelTurnDescendants(t.Context(), f.turn.ID, f.parent.ID, f.parent.ExecutionRefID, "stop")
-		if err != nil || runs[delegation.ChildRunID].Run.Status != kernel.RunStatusCancelled || f.handoff.calls != 0 {
-			t.Fatalf("no-effect cancellation failed: role=%t snapshot=%+v err=%v calls=%d", role, runs[delegation.ChildRunID].Run, err, f.handoff.calls)
+		if err := f.runner.prepareHandoffChild(t.Context(), f.turn, f.parent, delegation, started); err != nil {
+			t.Fatal(err)
+		}
+		child, err := f.store.GetInvocationByExecutionRefID(t.Context(), delegation.ChildRunID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = f.runner.CancelInvocation(t.Context(), child.ID, "stop")
+		actual, loadErr := f.store.GetInvocation(t.Context(), child.ID)
+		_, runErr := f.runtime.Load(t.Context(), delegation.ChildRunID)
+		if err != nil || loadErr != nil || actual.Status != InvocationCancelled || !errors.Is(runErr, kernel.ErrNotFound) || f.handoff.calls != 0 {
+			t.Fatalf("no-effect cancellation failed: role=%t invocation=%s err=%v load=%v run=%v calls=%d", role, actual.Status, err, loadErr, runErr, f.handoff.calls)
 		}
 	}
 }
@@ -126,7 +136,7 @@ func TestPR82UnsealedHandoffCannotClaimNoExternalEffect(t *testing.T) {
 	if !isHandoffDelegationInvocation(child) {
 		t.Fatal("test did not create a legacy Handoff child identity")
 	}
-	if _, err := f.runner.cancelTurnDescendants(t.Context(), f.turn.ID, f.parent.ID, f.parent.ExecutionRefID, "stop"); !errors.Is(err, ErrHandoffCancellationUnverified) {
+	if _, err := f.runner.CancelInvocation(t.Context(), child.ID, "stop"); !errors.Is(err, ErrHandoffCancellationUnverified) {
 		t.Fatalf("unsealed Handoff was treated as no effect: %v", err)
 	}
 }
@@ -137,6 +147,11 @@ func TestPR82UnsealedHandoffCannotClaimNoExternalEffect(t *testing.T) {
 func TestPR82RejectedHandoffDispatchAllowsNoEffectCancellation(t *testing.T) {
 	f := newPR82HandoffFixture(t)
 	delegation := f.delegation()
+	started, err := f.runner.recordDelegationItem(t.Context(), f.turn, f.parent, delegation, ItemStarted, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.startedItemID = started
 	if err := f.runner.prepareHandoffChild(t.Context(), f.turn, f.parent, delegation, f.startedItemID); err != nil {
 		t.Fatal(err)
 	}
@@ -158,9 +173,15 @@ func TestPR82RejectedHandoffDispatchAllowsNoEffectCancellation(t *testing.T) {
 		t.Fatalf("pre-effect rejection did not block Handoff: err=%v calls=%d", err, f.handoff.calls)
 	}
 	f.runner.store = f.store
-	runs, err := f.runner.cancelTurnDescendants(t.Context(), f.turn.ID, f.parent.ID, f.parent.ExecutionRefID, "stop")
-	if err != nil || runs[delegation.ChildRunID].Run.Status != kernel.RunStatusCancelled {
-		t.Fatalf("proven no-effect grant blocked cancellation: run=%+v err=%v", runs[delegation.ChildRunID].Run, err)
+	child, err := f.store.GetInvocationByExecutionRefID(t.Context(), delegation.ChildRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.runner.CancelInvocation(t.Context(), child.ID, "stop")
+	current, loadErr := f.store.GetInvocation(t.Context(), child.ID)
+	_, runErr := f.runtime.Load(t.Context(), delegation.ChildRunID)
+	if err != nil || loadErr != nil || current.Status != InvocationCancelled || !errors.Is(runErr, kernel.ErrNotFound) || f.handoff.calls != 0 {
+		t.Fatalf("proven no-effect grant blocked cancellation: invocation=%s err=%v load=%v run=%v", current.Status, err, loadErr, runErr)
 	}
 }
 
@@ -181,9 +202,14 @@ func TestPR82LocalHandoffChildStillUsesVerifiedKernelCancellation(t *testing.T) 
 		t.Fatal(err)
 	}
 	f.runner.cancellation = f.runtime
-	snapshot, found, err := f.runner.cancelRuntimeRun(t.Context(), delegation.ChildRunID, "stop", nil)
-	if err != nil || !found || snapshot.Run.ID != delegation.ChildRunID || snapshot.Run.Status != kernel.RunStatusCancelled {
-		t.Fatalf("legitimate local Kernel cancellation lost: %+v found=%t err=%v", snapshot.Run, found, err)
+	child, err := f.store.GetInvocationByExecutionRefID(t.Context(), delegation.ChildRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.runner.CancelInvocation(t.Context(), child.ID, "stop")
+	snapshot, loadErr := f.runtime.Load(t.Context(), delegation.ChildRunID)
+	if err != nil || loadErr != nil || snapshot.Run.ID != delegation.ChildRunID || snapshot.Run.Status != kernel.RunStatusCancelled {
+		t.Fatalf("legitimate local Kernel cancellation lost: %+v load=%v err=%v", snapshot.Run, loadErr, err)
 	}
 }
 

@@ -112,7 +112,7 @@ func ea1NewChildStart(t *testing.T, factory func(*testing.T) (kernel.Store, kern
 	f.rt = ea1StartRuntime(t, f.store)
 	f.request = agent.StartRequest{ID: "actual-start-child", ParentRunID: "middle", OriginFingerprint: agent.FrozenOriginFingerprint([]byte(`{"source":"original-child"}`)), RequestID: "original-child-effect", Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "owner"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"}, Goal: "original Child Start", Instructions: "Preserve child source", Model: "fixture-model", ModelOptions: json.RawMessage(`{"temperature":0.1}`), Limits: agent.Limits{MaxLLMCalls: 2, MaxToolCalls: 1}}
 	if deadline {
-		due := time.Now().UTC().Add(time.Second)
+		due := time.Now().UTC().Add(ea1StoreBackedDeadline)
 		f.request.DeadlineAt = &due
 	}
 	if withTool {
@@ -145,7 +145,7 @@ func ea1NewChildStart(t *testing.T, factory func(*testing.T) (kernel.Store, kern
 	return f
 }
 func (f *ea1ChildStartFixture) runner(rt *kernel.Runtime, owner string, host bool) *agent.Runner {
-	d := agent.Dependencies{Runtime: rt, Model: f.physical, Catalog: f.catalog, Executor: f.catalog, RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: 2 * time.Second}, Execution: ea1StoreBackedExecutionPolicy()}
+	d := agent.Dependencies{Runtime: rt, Model: f.physical, Catalog: f.catalog, Executor: f.catalog, RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: ea1FixtureLeaseWindow(f.request.DeadlineAt)}, Execution: ea1StoreBackedExecutionPolicy()}
 	if host {
 		d.RunMiddleware = []plugin.RunMiddleware{f.host}
 		d.StartControlPreflight = func(ctx context.Context, r agent.StartRequest) error {
@@ -468,7 +468,7 @@ func ea1ChildStartPhase(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 			f.unchanged(f.peer, s, g)
 			wrong := g
 			wrong.ID += "-foreign"
-			if e := f.peerStore.(kernel.ChildExecutionStore).FinishChildExecution(ctx, wrong); !errors.Is(e, kernel.ErrExecutionConflict) {
+			if e := f.peerStore.(kernel.ChildExecutionStore).FinishChildExecution(ctx, wrong, kernel.ChildExecutionSettlement{}); !errors.Is(e, kernel.ErrExecutionConflict) {
 				t.Fatalf("foreign grant retired callback: %v", e)
 			}
 			f.unchanged(f.peer, s, g)

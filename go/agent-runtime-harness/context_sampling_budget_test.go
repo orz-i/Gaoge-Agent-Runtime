@@ -92,7 +92,7 @@ func TestContextSharedBudgetAdmitsExactFinalSamplingPlan(t *testing.T) {
 					inv.Request.MaxOutputTokens != 128 || p.Requested.InputTokens != 100 || p.Requested.OutputTokens != 48 {
 					t.Fatalf("logical intent and physical plan were not frozen separately: %+v", inv)
 				}
-				l, err := store.LoadBudget(t.Context(), p.LedgerID)
+				l, err := options.Runtime.BudgetStore().LoadBudget(t.Context(), p.LedgerID)
 				res := l.Reservations["model:"+r.InvocationID]
 				if err != nil || res.Requested != p.Requested || !res.Dispatched {
 					t.Fatalf("reservation did not match frozen plan: %+v %v", res, err)
@@ -116,7 +116,7 @@ func TestContextSharedBudgetAdmitsExactFinalSamplingPlan(t *testing.T) {
 				if loadErr != nil {
 					t.Fatal(loadErr)
 				}
-				ledger, loadErr := store.LoadBudget(t.Context(), loaded.Turn.ID)
+				ledger, loadErr := options.Runtime.BudgetStore().LoadBudget(t.Context(), loaded.Turn.ID)
 				if loadErr != nil || len(ledger.Reservations) != 0 {
 					t.Fatalf("rejection reserved quota: %+v %v", ledger, loadErr)
 				}
@@ -131,12 +131,12 @@ func TestContextSharedBudgetAdmitsExactFinalSamplingPlan(t *testing.T) {
 			if err != nil || result.Turn.Status != harness.TurnCompleted || len(client.requests) != 1 || toolCalls != 0 {
 				t.Fatalf("admitted sample did not complete exactly once: status=%s err=%v calls=%d", result.Turn.Status, err, len(client.requests))
 			}
-			ledger, err := store.LoadBudget(t.Context(), result.Turn.ID)
+			ledger, err := options.Runtime.BudgetStore().LoadBudget(t.Context(), result.Turn.ID)
 			res := ledger.Reservations["model:"+client.requests[0].InvocationID]
 			if err != nil || res.Status != budget.ReservationSettled || res.Usage.InputTokens != 20 || res.Usage.OutputTokens != 5 {
 				t.Fatalf("final settlement was not conserved: %+v %v", res, err)
 			}
-			shared, err := harness.NewBudgetAuthority(harness.BudgetAuthorityDependencies{Store: store, Clock: fixedClock{}, Meter: meter})
+			shared, err := harness.NewBudgetAuthority(harness.BudgetAuthorityDependencies{Store: store, Runtime: options.Runtime, Clock: fixedClock{}, Meter: meter})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -154,7 +154,7 @@ func TestContextSharedBudgetAdmitsExactFinalSamplingPlan(t *testing.T) {
 					t.Fatalf("accepted nonphysical receipt identity: %v", err)
 				}
 			}
-			unchanged, err := store.LoadBudget(t.Context(), result.Turn.ID)
+			unchanged, err := options.Runtime.BudgetStore().LoadBudget(t.Context(), result.Turn.ID)
 			if err != nil || !reflect.DeepEqual(ledger, unchanged) {
 				t.Fatal("receipt lookup modified ledger")
 			}
@@ -206,7 +206,7 @@ func TestContextSharedBudgetResumesFrozenSamplingPlanWithoutReplanning(t *testin
 	}
 	before := view.ModelInvocations[0]
 	physical := model.CloneRequest(meter.metered[len(meter.metered)-1])
-	ledger, err := store.LoadBudget(t.Context(), pending.Turn.ID)
+	ledger, err := base.LoadBudget(t.Context(), pending.Turn.ID)
 	if err != nil || len(ledger.Reservations) != 0 {
 		t.Fatalf("candidate planning reserved quota: %+v %v", ledger, err)
 	}
@@ -233,7 +233,7 @@ func TestContextSharedBudgetResumesFrozenSamplingPlanWithoutReplanning(t *testin
 	if err != nil || result.Turn.Status != harness.TurnCompleted || len(secondClient.requests) != 1 || len(meter.metered) != meterCalls || len(meter.counted) != countCalls {
 		t.Fatalf("recovery repeated sampling admission: status=%s err=%v calls=%d meter=%d count=%d", result.Turn.Status, err, len(secondClient.requests), len(meter.metered), len(meter.counted))
 	}
-	ledger, err = store.LoadBudget(t.Context(), pending.Turn.ID)
+	ledger, err = base.LoadBudget(t.Context(), pending.Turn.ID)
 	res := ledger.Reservations["model:"+before.ID]
 	if err != nil || res.Status != budget.ReservationSettled || res.Requested != before.SamplingPlan.Requested || res.Usage.LLMCalls != 1 {
 		t.Fatalf("recovery changed the original quota: %+v %v", res, err)

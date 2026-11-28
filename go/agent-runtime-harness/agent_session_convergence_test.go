@@ -243,7 +243,7 @@ func TestAgentSessionSharedBudgetAccountsOriginalModelAndToolEffects(t *testing.
 	if err != nil || done.Turn.Status != harness.TurnCompleted || calls != 1 || len(client.requests) != 2 {
 		t.Fatalf("standard shared budget: status=%s err=%v tool=%d model=%d", done.Turn.Status, err, calls, len(client.requests))
 	}
-	ledger, err := store.LoadBudget(t.Context(), done.Turn.ID)
+	ledger, err := runStore.LoadBudget(t.Context(), done.Turn.ID)
 	if err != nil || ledger.View("").Usage.LLMCalls != 2 || ledger.View("").Usage.ToolCalls != 1 {
 		t.Fatalf("accounting was not durable: %+v err=%v", ledger.View("").Usage, err)
 	}
@@ -442,7 +442,7 @@ func TestAgentSessionSharedBudgetCoversSelectedSubAgent(t *testing.T) {
 	if err != nil || done.Turn.Status != harness.TurnCompleted || steps != 4 || children != 2 || privateCalls != 1 {
 		t.Fatalf("budgeted subagent: status=%s err=%v modelSteps=%d children=%d", done.Turn.Status, err, steps, children)
 	}
-	ledger, err := store.LoadBudget(t.Context(), done.Turn.ID)
+	ledger, err := runs.LoadBudget(t.Context(), done.Turn.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

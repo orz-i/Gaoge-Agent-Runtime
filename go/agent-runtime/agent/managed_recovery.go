@@ -2,195 +2,192 @@ package agent
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
+	"encoding/json"
 	"errors"
 
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/callbackscope"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
-// SupportsManagedContextRecovery selects an explicitly configured concrete
-// lifecycle, not a general claim that arbitrary middleware is safe to resume.
-func (r *Runner) SupportsManagedContextRecovery() bool {
-	return r != nil && r.managedContextRecovery != nil
+// SupportsManagedRecovery identifies the original first-party recovery selection.
+func (r *Runner) SupportsManagedRecovery() bool {
+	return r != nil && r.managedRecovery
 }
 
-func (r *Runner) commitManagedModelIntent(ctx context.Context, s kernel.Snapshot, state runState, inv ModelInvocation, m kernel.Mutation) (kernel.Snapshot, error) {
-	if state.SummaryNativeRecovery && inv.Purpose == ModelInvocationContextSummary {
-		return r.commitSummarySafePoint(ctx, s, state, m)
+func (r *Runner) managedOriginalDispatch(ctx context.Context, id string) (kernel.ManagedHostBinding, bool) {
+	b, ok := r.runtime.ManagedDispatch(ctx, id)
+	if !r.SupportsManagedRecovery() || !ok || r.activePhysicalGrant == nil || r.activeRunLease == nil || !b.MatchesOriginalGrant(*r.activePhysicalGrant) {
+		return kernel.ManagedHostBinding{}, false
 	}
-	if r.managedContextRecovery == nil || r.activeRootGrant == nil || r.activeRunLease == nil || s.Run.ParentRunID != "" {
-		return r.runtime.Apply(ctx, s.Run.ID, s.Run.Revision, m)
+	return b, true
+}
+
+func (r *Runner) qualifyManagedModelBoundary(ctx context.Context, s kernel.Snapshot, state runState, inv ModelInvocation, mutation *budget.LedgerMutation) (*kernel.ManagedSafePoint, error) {
+	if inv.Purpose == ModelInvocationContextSummary {
+		if !validSummaryNativePhase(state) {
+			return nil, ErrInvalidRequest
+		}
 	}
-	binding, ok := r.runtime.ManagedDispatch(ctx, s.Run.ID)
+	binding, ok := r.managedOriginalDispatch(ctx, s.Run.ID)
 	if !ok {
-		return r.runtime.Apply(ctx, s.Run.ID, s.Run.Revision, m)
+		if inv.Purpose == ModelInvocationContextSummary {
+			return nil, kernel.ErrExecutionRequired
+		}
+		return nil, nil
 	}
-	// Only actual returned operations can describe a suspendable frame. This
-	// leaves opaque/incomplete configurations on existing fail-closed semantics.
-	lifecycle, ok := callbackscope.ManagedSuspension(ctx, r.managedContextRecovery, inv.Request)
-	if !ok || !knownRootPhysicalSettlement(s) || state.ToolDispatchID != "" || state.ToolWait != nil || len(state.DeferredChildren) != 0 || inv.DispatchAttempt != 0 {
-		return r.runtime.Apply(ctx, s.Run.ID, s.Run.Revision, m)
+	raw, eligible, err := r.freezeManagedObligations(ctx, s, state, inv, binding, mutation)
+	if err != nil {
+		return nil, err
+	}
+	if !eligible || !knownRootStatePhysicalSettlement(state) {
+		if inv.Purpose == ModelInvocationContextSummary && inv.Status == ModelInvocationPending {
+			return nil, ErrRootOutcomeUnknown
+		}
+		return nil, nil
 	}
 	id := "managed-safe-" + kernel.ManagedDigest(struct {
 		Grant, Invocation string
 		Revision          uint64
-	}{r.activeRootGrant.ID, inv.ID, s.Run.Revision + 1})
-	p := kernel.ManagedSafePoint{ID: id, RecoveryID: kernel.ManagedRecoveryID(id, binding), Host: binding, OriginalGrant: *r.activeRootGrant, OriginalLease: *r.activeRunLease, ModelInvocationID: inv.ID, ModelRequestHash: inv.RequestHash, LifecycleVersion: "managed-context-v1", LifecycleSource: lifecycle}
-	proof := featurecontrol.Seal(s.Run.ID, s.Run.Revision, "managed_intent_source", r.activeRootGrant.ID, s.State, p)
-	return r.runtime.ApplyManagedModelIntent(ctx, s.Run.ID, s.Run.Revision, m, p, proof)
+	}{r.activePhysicalGrant.ID, inv.ID, s.Run.Revision + 1})
+	return r.managedTransitionPoint(inv, binding, id, raw), nil
+}
+
+// The concrete phase validators share construction of the original point.
+// Only commitNativeTransition seals and commits it together with the mutation.
+func (r *Runner) managedTransitionPoint(inv ModelInvocation, binding kernel.ManagedHostBinding, id string, lifecycle json.RawMessage) *kernel.ManagedSafePoint {
+	return &kernel.ManagedSafePoint{ID: id, RecoveryID: kernel.ManagedRecoveryID(id, binding), Host: binding,
+		OriginalGrant: *r.activePhysicalGrant, OriginalLease: *r.activeRunLease, ModelInvocationID: inv.ID, ModelRequestHash: inv.RequestHash,
+		LifecycleVersion: kernel.ManagedLifecycleAgentObligations, LifecycleSource: lifecycle}
 }
 
 // RecoverManagedContinuation never claims an interrupted callback returned.
 // It resumes only the exact persisted concrete continuation, after Kernel-first
-// PARK and committed Host mode selection. No configurable callback runs before
-// the new owner's explicit LeaveManagedSafePoint ACK.
-func (r *Runner) RecoverManagedContinuation(ctx context.Context, id string) (kernel.Snapshot, kernel.ManagedClosureProof, error) {
-	if !r.SupportsManagedContextRecovery() && !r.SupportsSummaryNativeRecovery() {
+// read-only authorization and native mode admission. The common native callback-entry
+// transaction consumes the successor's recovery qualification before entry.
+func (r *Runner) RecoverManagedContinuation(ctx context.Context, original kernel.ManagedTransfer) (kernel.Snapshot, kernel.ManagedClosureProof, error) {
+	return r.recoverManagedContinuation(ctx, original, "", "")
+}
+
+// CancelManagedContinuation is the explicitly authorized native cancellation
+// command. The Store arbitrates it against successor admission.
+func (r *Runner) CancelManagedContinuation(ctx context.Context, original kernel.ManagedTransfer, reason string) (kernel.Snapshot, kernel.ManagedClosureProof, error) {
+	return r.recoverManagedContinuation(ctx, original, kernel.ManagedCancel, reason)
+}
+
+func (r *Runner) recoverManagedContinuation(ctx context.Context, original kernel.ManagedTransfer, requiredMode kernel.ManagedRecoveryMode, reason string) (kernel.Snapshot, kernel.ManagedClosureProof, error) {
+	if !r.SupportsManagedRecovery() {
 		return kernel.Snapshot{}, kernel.ManagedClosureProof{}, ErrRootOutcomeUnknown
 	}
+	id := original.SafePoint.Host.RunID
 	current, err := r.runtime.LoadManagedRecovery(ctx, id)
 	if err != nil {
 		return kernel.Snapshot{}, kernel.ManagedClosureProof{}, err
 	}
-	if current.SafePoint.LifecycleVersion == kernel.ManagedLifecycleWorkingStateSummary {
-		if err = r.preflightSummaryTransfer(ctx, current); err != nil {
-			return kernel.Snapshot{}, kernel.ManagedClosureProof{}, err
-		}
-	} else if !r.SupportsManagedContextRecovery() {
-		return kernel.Snapshot{}, kernel.ManagedClosureProof{}, ErrRootOutcomeUnknown
+	if !current.Valid() || kernel.ManagedDigest(current) != kernel.ManagedDigest(original) {
+		return kernel.Snapshot{}, kernel.ManagedClosureProof{}, kernel.ErrExecutionConflict
 	}
-	// Once a Host selection exists, later safe points may have moved the Run's
-	// current pointer. Reconstruct the ORIGINAL selected transfer from its ID.
-	reservation, readErr := r.runtime.ReadManagedReservation(ctx, current.SafePoint.Host, "")
-	if readErr == nil {
-		if !reservation.Valid() {
-			return kernel.Snapshot{}, kernel.ManagedClosureProof{}, kernel.ErrExecutionConflict
-		}
-		original, e := r.runtime.LoadManagedRecoveryByID(ctx, reservation.SuspensionID)
-		if e != nil {
-			return kernel.Snapshot{}, kernel.ManagedClosureProof{}, e
-		}
-		current = original
-	} else if !errors.Is(readErr, kernel.ErrNotFound) {
-		return kernel.Snapshot{}, kernel.ManagedClosureProof{}, readErr
+	if expected, ok := r.runtime.ManagedDispatch(ctx, id); ok && kernel.ManagedDigest(expected) != kernel.ManagedDigest(current.SafePoint.Host) {
+		return kernel.Snapshot{}, kernel.ManagedClosureProof{}, kernel.ErrExecutionConflict
 	}
-	if current.State == kernel.ManagedClosed || current.State == kernel.ManagedCancelled {
+	if err = r.runtime.VerifyManagedApproval(ctx, current.SafePoint.Host); err != nil {
+		return kernel.Snapshot{}, kernel.ManagedClosureProof{}, errors.Join(ErrRootOutcomeUnknown, err)
+	}
+	if _, err = r.validateManagedObligations(current.SafePoint); err != nil {
+		return kernel.Snapshot{}, kernel.ManagedClosureProof{}, err
+	}
+	// Native successor admission freezes the original selection in the
+	// current transfer. Successors cannot publish a new safe point for that
+	// dispatch, so a Host reservation lookup is not a recovery authority.
+	if requiredMode != "" && current.Selection.Mode != "" && current.Selection.Mode != requiredMode {
+		return kernel.Snapshot{}, kernel.ManagedClosureProof{}, kernel.ErrExecutionConflict
+	}
+	if current.Selection.Mode == kernel.ManagedResume && current.SuccessorGrant.ID != "" &&
+		!current.Resolved() {
+		// A real returned successor is ordinary Agent work awaiting its
+		// original receipt. Never re-admit it or mint another callback.
+		if source, loadErr := r.runtime.Load(ctx, id); loadErr == nil {
+			if scope, scopeErr := r.RootDeferredCleanupEligibility(ctx, id, source.Run.Revision); scopeErr == nil && scope.grant == current.SuccessorGrant {
+				next, receiptErr := r.ReconcileRootDeferredChildren(ctx, id, source.Run.Revision, scope)
+				if errors.Is(receiptErr, ErrToolOutcomeUnknown) && !scope.RetirementOnly() {
+					return next, kernel.ManagedClosureProof{}, nil
+				}
+				if receiptErr != nil {
+					return next, kernel.ManagedClosureProof{}, receiptErr
+				}
+				p, closeErr := r.runtime.ManagedRecoveryClosure(ctx, current.SafePoint.ID)
+				return next, p, closeErr
+			}
+		}
+	}
+	if current.Resolved() {
 		p, e := r.runtime.ManagedRecoveryClosure(ctx, current.SafePoint.ID)
-		if e == nil {
-			e = r.retireManagedClosure(ctx, p)
-		}
 		return p.Snapshot(), p, e
 	}
-	parked, err := r.runtime.ParkManagedContinuation(ctx, id)
+	var cancelReason []string
+	if requiredMode == kernel.ManagedCancel {
+		cancelReason = []string{reason}
+	}
+	selected, obligations, err := r.authorizeManagedFrontier(ctx, current, cancelReason...)
 	if err != nil {
 		return kernel.Snapshot{}, kernel.ManagedClosureProof{}, err
 	}
-	selected, err := r.runtime.SelectManagedContinuation(ctx, parked)
-	if err != nil {
-		return kernel.Snapshot{}, kernel.ManagedClosureProof{}, err
+	if requiredMode != "" && selected.Authorization().Mode != requiredMode {
+		return kernel.Snapshot{}, kernel.ManagedClosureProof{}, kernel.ErrExecutionConflict
 	}
-	if selected.Reservation().Mode == kernel.ManagedCancel {
-		t, e := r.runtime.CancelParkedManagedContinuation(ctx, selected)
+	if selected.Authorization().Mode == kernel.ManagedCancel {
+		t, e := r.runtime.CommitManagedCancellation(ctx, selected)
 		if e != nil {
 			return kernel.Snapshot{}, kernel.ManagedClosureProof{}, e
 		}
 		p, e := r.runtime.ManagedRecoveryClosure(ctx, t.SafePoint.ID)
 		return p.Snapshot(), p, e
 	}
-	claimant, err := newManagedClaimantID()
+	point := selected.Point()
+	scoped, v, err := r.runtime.AdmitManagedContinuation(ctx, selected, r.runExecution.OwnerID, r.runExecution.LeaseDuration)
 	if err != nil {
 		return kernel.Snapshot{}, kernel.ManagedClosureProof{}, err
 	}
-	t, err := r.runtime.EnableManagedContinuation(ctx, selected, claimant, r.runExecution.OwnerID, r.runExecution.LeaseDuration)
+	snapshot, err := scoped.Load(ctx, id)
 	if err != nil {
 		return kernel.Snapshot{}, kernel.ManagedClosureProof{}, err
 	}
-	bound, err := r.runtime.WithExecution(t.SuccessorLease)
-	if err != nil {
-		return kernel.Snapshot{}, kernel.ManagedClosureProof{}, err
-	}
-	// This is BEFORE Hydrate, provider identity methods, clocks, telemetry,
-	// observers, catalog discovery, or the ordinary Resume prelude.
-	if _, err = bound.LeaveManagedSafePoint(ctx, id); err != nil {
-		return kernel.Snapshot{}, kernel.ManagedClosureProof{}, err
-	}
-	snapshot, err := bound.Load(ctx, id)
-	if err != nil {
-		return kernel.Snapshot{}, kernel.ManagedClosureProof{}, err
+	// Admission reserves the exact original obligation. Recheck the
+	// same point before entry, including any read-only Context rollover.
+	if obligations, err = r.preflightManagedPoint(ctx, point, snapshot); err != nil {
+		return snapshot, kernel.ManagedClosureProof{}, err
 	}
 	state, err := decodeState(snapshot.State)
 	if err != nil {
 		return snapshot, kernel.ManagedClosureProof{}, err
 	}
-	if t.SafePoint.LifecycleVersion == kernel.ManagedLifecycleWorkingStateSummary {
-		if err = r.validateSummarySafePoint(t.SafePoint); err != nil || !kernel.ManagedSourceMatches(t.SafePoint, snapshot) {
-			return snapshot, kernel.ManagedClosureProof{}, errors.Join(ErrRootOutcomeUnknown, err)
-		}
-	} else {
-		inv, ok := activeModelInvocation(state)
-		if !ok || inv.ID != t.SafePoint.ModelInvocationID || inv.RequestHash != t.SafePoint.ModelRequestHash || inv.Status != ModelInvocationPending || inv.DispatchAttempt != 0 || !knownRootPhysicalSettlement(snapshot) {
-			return snapshot, kernel.ManagedClosureProof{}, ErrRootOutcomeUnknown
-		}
-	}
-	ownerProof := featurecontrol.Seal(id, snapshot.Run.Revision, "agent_physical_owner", t.SuccessorGrant.ID, snapshot.State, snapshot.Checkpoint)
-	scoped, err := bound.WithPhysicalGrant(ctx, t.SuccessorGrant, ownerProof)
+	// Rebind only the original stored dispatch. This is a storage read before
+	// native callback entry; it does not create a second physical dispatch.
+	ctx, err = r.runtime.BindManagedDispatch(ctx, point.Host)
 	if err != nil {
 		return snapshot, kernel.ManagedClosureProof{}, err
 	}
-	// Rebind only the original stored dispatch. This is an actual storage read,
-	// after Leave; it does not create a second physical Host dispatch.
-	ctx, err = r.runtime.BindManagedDispatch(ctx, t.SafePoint.Host)
-	if err != nil {
-		return snapshot, kernel.ManagedClosureProof{}, err
-	}
-	result, runErr := r.executeOwnedRoot(ctx, snapshot, bound, scoped, t.SuccessorGrant, t.SuccessorLease, false, func(next context.Context, owner *Runner, source kernel.Snapshot) (kernel.Snapshot, error) {
-		return owner.invokeNativeRun(next, source, runInvocation(plugin.RunResume, source), func(drive context.Context) (kernel.Snapshot, error) { return owner.resumeRunning(drive, source, state) })
+	// Carry the exact original ledger into native Run admission; do not
+	// Ensure/Register or rebind the original managed source during recovery.
+	recovering := *r
+	recovering.managedObligationSource = &obligations
+	result, runErr := recovering.executeNativeSegment(ctx, snapshot, scoped, v.Grant, &v.Lease, false, v.Grant.AdmissionOperation, v.Grant.AdmissionSourceHash, func(next context.Context, owner *Runner, source kernel.Snapshot) (kernel.Snapshot, error) {
+		return owner.invokeNativeRun(next, source, runInvocation(plugin.RunResume, source), func(drive context.Context) (kernel.Snapshot, error) {
+			frontier, err := owner.recoverManagedModelFrontier(drive, source, obligations)
+			if err != nil {
+				return frontier, err
+			}
+			return owner.resumeRunning(drive, frontier, state)
+		})
 	})
-	closure, closureErr := r.runtime.ManagedRecoveryClosure(context.WithoutCancel(ctx), t.SafePoint.ID)
+	closure, closureErr := r.runtime.ManagedRecoveryClosure(context.WithoutCancel(ctx), point.ID)
 	if closureErr != nil {
+		if runErr == nil {
+			if scope, err := r.RootDeferredCleanupEligibility(ctx, id, result.Run.Revision); err == nil && scope.grant == v.Grant && !scope.RetirementOnly() {
+				return result, kernel.ManagedClosureProof{}, nil
+			}
+		}
 		return result, kernel.ManagedClosureProof{}, errors.Join(runErr, ErrRootOutcomeUnknown, closureErr)
 	}
 	return result, closure, runErr
-}
-
-// A crash after real Mark+completion but before Finish may repair ONLY the
-// already marked original successor. No callback or execution owner is adopted.
-func (r *Runner) retireManagedClosure(ctx context.Context, p kernel.ManagedClosureProof) error {
-	t := p.Transfer()
-	if t.State != kernel.ManagedClosed {
-		return nil
-	}
-	g, e := r.runtime.LookupChildExecution(ctx, t.SafePoint.Host.RunID)
-	if errors.Is(e, kernel.ErrNotFound) {
-		return nil
-	}
-	if e != nil {
-		return e
-	}
-	if g != t.SuccessorGrant {
-		return kernel.ErrExecutionConflict
-	}
-	s := p.Snapshot()
-	proof := featurecontrol.Seal(s.Run.ID, s.Run.Revision, "agent_owned_physical_settled", g.ID, s.State, s.Checkpoint)
-	if e = r.runtime.FinishChildExecution(ctx, g, proof); e != nil {
-		return e
-	}
-	if e = r.runtime.ReleaseExecution(ctx, t.SuccessorLease); e != nil && !errors.Is(e, kernel.ErrExecutionConflict) {
-		return e
-	}
-	return nil
-}
-
-// Internal entropy is not an IDSource callback and cannot run user code before
-// the newly enabled owner has acknowledged LeaveManagedSafePoint.
-func newManagedClaimantID() (string, error) {
-	var id [32]byte
-	if _, err := rand.Read(id[:]); err != nil {
-		return "", err
-	}
-	return "managedclaimant-" + hex.EncodeToString(id[:]), nil
 }

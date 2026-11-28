@@ -149,25 +149,25 @@ func TestContextSummaryNativeBridgeRejectsForeignNamesWrappersAndMarkers(t *test
 	}
 }
 
-type summaryNativeParkTrap struct {
+type summaryNativeAdmissionTrap struct {
 	*memory.Store
-	transfer kernel.ManagedTransfer
-	current  kernel.Snapshot
-	parks    int
+	transfer   kernel.ManagedTransfer
+	current    kernel.Snapshot
+	admissions int
 }
 
-func (s *summaryNativeParkTrap) Load(context.Context, string) (kernel.Snapshot, error) {
+func (s *summaryNativeAdmissionTrap) Load(context.Context, string) (kernel.Snapshot, error) {
 	return cloneSummarySnapshot(s.current), nil
 }
-func (s *summaryNativeParkTrap) LoadManagedRecovery(context.Context, string) (kernel.ManagedTransfer, error) {
+func (s *summaryNativeAdmissionTrap) LoadManagedRecovery(context.Context, string) (kernel.ManagedTransfer, error) {
 	return s.transfer, nil
 }
-func (s *summaryNativeParkTrap) ParkManagedRecovery(context.Context, kernel.ManagedParkRequest) (kernel.ManagedTransfer, error) {
-	s.parks++
-	return kernel.ManagedTransfer{}, kernel.ErrExecutionConflict
+func (s *summaryNativeAdmissionTrap) BeginOwnedPhysicalExecution(context.Context, kernel.OwnedPhysicalAdmission) (kernel.OwnedPhysicalAdmissionResult, error) {
+	s.admissions++
+	return kernel.OwnedPhysicalAdmissionResult{}, kernel.ErrExecutionConflict
 }
 
-func summaryNativePointFixture(t *testing.T, completed bool) (*Runner, *summaryNativeParkTrap) {
+func summaryNativePointFixture(t *testing.T, completed bool) (*Runner, *summaryNativeAdmissionTrap) {
 	t.Helper()
 	event := "agent.model_invocation.pending"
 	if completed {
@@ -186,7 +186,7 @@ func summaryNativePointFixture(t *testing.T, completed bool) (*Runner, *summaryN
 	}
 	// This is a pure validation fixture, never persisted as recovery authority.
 	// The Kernel opaque-proof test separately rejects metadata without a seal.
-	state.SummaryNativeRecovery = true
+	state.ManagedRecovery = true
 	snapshot.State, err = encodeState(state)
 	if err != nil {
 		t.Fatal(err)
@@ -195,26 +195,26 @@ func summaryNativePointFixture(t *testing.T, completed bool) (*Runner, *summaryN
 	authority := kernel.ManagedAuthority{Namespace: strings.Repeat("1", 64), Generation: 1, Version: 1}
 	hostAuthority := kernel.ManagedAuthority{Namespace: strings.Repeat("2", 64), Generation: 1, Version: 1}
 	lease := kernel.ExecutionLease{RunID: request.ID, OwnerID: "owner", LeaseID: "lease", Epoch: 1, ExpiresAt: time.Now().Add(time.Hour)}
-	grant := kernel.ChildExecutionGrant{ID: "grant", ChildRunID: request.ID, ExpectedRevision: 1, ExecutionOwnerID: lease.OwnerID, ExecutionLeaseID: lease.LeaseID, ExecutionEpoch: lease.Epoch,
+	grantID, _ := kernel.OwnedPhysicalDispatchGrantID(request.ID, "start", "nativecmd_original-dispatch")
+	grant := kernel.ChildExecutionGrant{ID: grantID, ChildRunID: request.ID, ExpectedRevision: 1, ExecutionOwnerID: lease.OwnerID, ExecutionLeaseID: lease.LeaseID, ExecutionEpoch: lease.Epoch,
 		AdmissionOperation: "start", AdmissionSourceHash: strings.Repeat("d", 64)}
 	host := kernel.ManagedHostBinding{KernelAuthority: authority, HostAuthority: hostAuthority, TurnID: invocation.ContextSummary.Cursor.Turn.ID,
 		InvocationID: invocation.ContextSummary.Root.InvocationID, Attempt: uint32(invocation.ContextSummary.Root.Attempt), RunID: request.ID,
-		DispatchID: "original-dispatch", Phase: "start", Source: json.RawMessage(`{"original":true}`)}
-	lifecycle, err := json.Marshal(contextSummaryLifecycle{Phase: invocation.Status, SourceRevision: snapshot.Run.Revision,
-		InvocationID: invocation.ID, RequestHash: invocation.RequestHash, BindingDigest: kernel.ManagedDigest(invocation.ContextSummary)})
+		DispatchID: "nativecmd_original-dispatch", Phase: "start", Source: json.RawMessage(`{"original":true}`)}
+	lifecycle, err := json.Marshal(kernel.ManagedAgentObligations{Phase: string(invocation.Status), Purpose: ModelInvocationContextSummary, SourceRevision: snapshot.Run.Revision, InvocationID: invocation.ID, RequestHash: invocation.RequestHash, SamplingDigest: kernel.ManagedDigest(invocation.SamplingPlan), BindingDigest: kernel.ManagedDigest(invocation.ContextSummary), Journal: json.RawMessage(`{"returned":"source"}`)})
 	if err != nil {
 		t.Fatal(err)
 	}
 	point := kernel.ManagedSafePoint{ID: "summary-test-point", Host: host, OriginalGrant: grant, OriginalLease: lease, Source: snapshot,
-		ModelInvocationID: invocation.ID, ModelRequestHash: invocation.RequestHash, LifecycleVersion: kernel.ManagedLifecycleWorkingStateSummary, LifecycleSource: lifecycle}
+		ModelInvocationID: invocation.ID, ModelRequestHash: invocation.RequestHash, LifecycleVersion: kernel.ManagedLifecycleAgentObligations, LifecycleSource: lifecycle}
 	point.RecoveryID = kernel.ManagedRecoveryID(point.ID, host)
-	trap := &summaryNativeParkTrap{Store: memory.NewStore(), transfer: kernel.ManagedInitialTransfer(point), current: snapshot}
+	trap := &summaryNativeAdmissionTrap{Store: memory.NewStore(), transfer: kernel.ManagedInitialTransfer(point), current: snapshot}
 	nativeRuntime, err := kernel.New(kernel.Dependencies{Store: trap})
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner.runtime, runner.summaryNativeRecovery = nativeRuntime, true
-	if err = runner.validateSummarySafePoint(point); err != nil {
+	runner.runtime, runner.managedRecovery = nativeRuntime, true
+	if _, err = runner.validateManagedObligations(point); err != nil {
 		t.Fatalf("invalid baseline phase fixture: %v", err)
 	}
 	return runner, trap
@@ -226,18 +226,18 @@ func TestContextSummaryNativeRejectsInvalidSourceBeforePark(t *testing.T) {
 			runner, trap := summaryNativePointFixture(t, true)
 			switch name {
 			case "wrong handle":
-				runner.summaryNativeRecovery = false
+				runner.managedRecovery = false
 			case "unknown lifecycle":
 				trap.transfer.SafePoint.LifecycleVersion = "working-state-summary-v1"
 			case "wrong phase":
-				var source contextSummaryLifecycle
+				var source kernel.ManagedAgentObligations
 				if err := json.Unmarshal(trap.transfer.SafePoint.LifecycleSource, &source); err != nil {
 					t.Fatal(err)
 				}
-				source.Phase = ModelInvocationConsumed
+				source.Phase = string(ModelInvocationConsumed)
 				trap.transfer.SafePoint.LifecycleSource, _ = json.Marshal(source)
 			case "wrong revision":
-				var source contextSummaryLifecycle
+				var source kernel.ManagedAgentObligations
 				if err := json.Unmarshal(trap.transfer.SafePoint.LifecycleSource, &source); err != nil {
 					t.Fatal(err)
 				}
@@ -245,13 +245,13 @@ func TestContextSummaryNativeRejectsInvalidSourceBeforePark(t *testing.T) {
 				trap.transfer.SafePoint.LifecycleSource, _ = json.Marshal(source)
 			case "unfrozen mode":
 				state, _ := decodeState(trap.transfer.SafePoint.Source.State)
-				state.SummaryNativeRecovery = false
+				state.ManagedRecovery = false
 				trap.transfer.SafePoint.Source.State, _ = encodeState(state)
 			}
 			before := append(json.RawMessage(nil), trap.current.State...)
-			_, _, err := runner.RecoverManagedContinuation(t.Context(), trap.current.Run.ID)
-			if err == nil || trap.parks != 0 || !reflect.DeepEqual(before, trap.current.State) {
-				t.Fatalf("invalid phase mutated before rejection: err=%v parks=%d", err, trap.parks)
+			_, _, err := runner.RecoverManagedContinuation(t.Context(), trap.transfer)
+			if err == nil || trap.admissions != 0 || !reflect.DeepEqual(before, trap.current.State) {
+				t.Fatalf("invalid phase mutated before rejection: err=%v admissions=%d", err, trap.admissions)
 			}
 		})
 	}
@@ -260,6 +260,11 @@ func TestContextSummaryNativeRejectsInvalidSourceBeforePark(t *testing.T) {
 func TestContextSummaryNativeUnknownDispatchAndSecondPhaseStayFenced(t *testing.T) {
 	for _, secondPhase := range []bool{false, true} {
 		runner, trap := summaryNativePointFixture(t, secondPhase)
+		stale := trap.transfer
+		stale.Revision++
+		if _, _, e := runner.RecoverManagedContinuation(t.Context(), stale); !errors.Is(e, kernel.ErrExecutionConflict) || trap.admissions != 0 {
+			t.Fatalf("stale original transfer selected a later dispatch: %v", e)
+		}
 		state, err := decodeState(trap.current.State)
 		if err != nil {
 			t.Fatal(err)
@@ -267,7 +272,6 @@ func TestContextSummaryNativeUnknownDispatchAndSecondPhaseStayFenced(t *testing.
 		if secondPhase {
 			_, _ = consumeLastModelInvocation(&state, time.Now())
 			_, _ = chargeConsumedModelUsage(&state, state.ModelInvocations[0])
-			trap.transfer.State = kernel.ManagedInvalidated
 		} else {
 			invocation := &state.ModelInvocations[0]
 			invocation.ExecutionAttempt, invocation.DispatchAttempt = 1, 1
@@ -281,10 +285,16 @@ func TestContextSummaryNativeUnknownDispatchAndSecondPhaseStayFenced(t *testing.
 		trap.current.Run.Revision++
 		trap.current.EventHead++
 		before := cloneSummarySnapshot(trap.current)
-		_, _, recoveryErr := runner.RecoverManagedContinuation(t.Context(), trap.current.Run.ID)
-		if secondPhase && !errors.Is(recoveryErr, kernel.ErrExecutionConflict) || !secondPhase && !errors.Is(recoveryErr, ErrModelOutcomeUnknown) ||
-			trap.parks != 0 || !reflect.DeepEqual(before, trap.current) {
-			t.Fatalf("unsupported phase got transfer or rewrite: second=%v err=%v parks=%d", secondPhase, recoveryErr, trap.parks)
+		// Qualification itself must reject the original frontier before any
+		// Store PARK. This synthetic Runtime has no registered Host, so the
+		// public entry also independently fails its Host storage boundary.
+		_, _, qualificationErr := runner.qualifyManagedFrontier(t.Context(), trap.transfer)
+		if secondPhase && !errors.Is(qualificationErr, ErrRootOutcomeUnknown) || !secondPhase && !errors.Is(qualificationErr, ErrModelOutcomeUnknown) {
+			t.Fatalf("unsafe qualification: %v", qualificationErr)
+		}
+		_, _, recoveryErr := runner.RecoverManagedContinuation(t.Context(), trap.transfer)
+		if recoveryErr == nil || trap.admissions != 0 || !reflect.DeepEqual(before, trap.current) {
+			t.Fatalf("unsupported phase got transfer or rewrite: second=%v err=%v admissions=%d", secondPhase, recoveryErr, trap.admissions)
 		}
 	}
 }
@@ -292,7 +302,7 @@ func TestContextSummaryNativeUnknownDispatchAndSecondPhaseStayFenced(t *testing.
 func TestContextSummaryRecoverySelectionIsFrozenInAggregate(t *testing.T) {
 	runner, _, _, _, _, request := newSummaryCoreFixture(t, nil)
 	// Unit-test state freezing independently of the first-party bridge gate.
-	runner.summaryNativeRecovery = true
+	runner.managedRecovery = true
 	encoded, err := runner.prepareStartState(t.Context(), request)
 	if err != nil {
 		t.Fatal(err)
@@ -301,12 +311,12 @@ func TestContextSummaryRecoverySelectionIsFrozenInAggregate(t *testing.T) {
 	if !runner.VerifyFrozenStartRequest(snapshot, request) {
 		t.Fatal("original frozen selection failed replay")
 	}
-	runner.summaryNativeRecovery = false
+	runner.managedRecovery = false
 	if runner.VerifyFrozenStartRequest(snapshot, request) {
 		t.Fatal("reopened handle erased original native selection")
 	}
 	view, err := ViewState(snapshot)
-	if err != nil || !view.SummaryNativeRecovery {
+	if err != nil || !view.ManagedRecovery {
 		t.Fatal("native selection was not persisted")
 	}
 }
@@ -340,6 +350,23 @@ func TestContextSummaryInputByteCeilingIncludesFinalInvocationID(t *testing.T) {
 		}
 		if len(provider.calls()) != want {
 			t.Fatalf("stricter full request ceiling ignored final ID: limit=%d calls=%d", limit, len(provider.calls()))
+		}
+	}
+}
+
+func TestContextSummaryControlCustodyDependsOnActualStage(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		_, rt, ports, provider, clock, request := newSummaryCoreFixture(t, nil)
+		if !enabled {
+			request.WorkingStateSummary = nil
+		}
+		runner := summaryCoreRunner(t, rt, ports, provider, clock, nil)
+		done, err := runner.StartRun(t.Context(), request)
+		if err != nil || done.Run.Status != kernel.RunStatusCompleted {
+			t.Fatalf("summary fixture enabled=%t: %v", enabled, err)
+		}
+		if got := runner.VerifiedDeferredRootControl(t.Context(), rt, done); got == enabled {
+			t.Fatalf("summary enabled=%t actual control custody=%t", enabled, got)
 		}
 	}
 }

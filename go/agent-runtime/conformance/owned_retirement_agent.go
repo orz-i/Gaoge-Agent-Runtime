@@ -13,17 +13,17 @@ import (
 
 type retirementAgentDeathStore struct {
 	managedStorePorts
-	dead           bool
-	hits, ackCalls int
-	grant          kernel.ChildExecutionGrant
-	acquired       kernel.ExecutionLease
+	dead     bool
+	hits     int
+	grant    kernel.ChildExecutionGrant
+	acquired kernel.ExecutionLease
 }
 
-func (s *retirementAgentDeathStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant) error {
+func (s *retirementAgentDeathStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
 	if s.dead {
 		return errRetirementLostACK
 	}
-	if e := s.managedStorePorts.FinishChildExecution(ctx, g); e != nil {
+	if e := s.managedStorePorts.FinishChildExecution(ctx, g, p); e != nil {
 		return e
 	}
 	s.dead = true
@@ -43,20 +43,13 @@ func (s *retirementAgentDeathStore) LookupOwnedRetirementForRun(ctx context.Cont
 	}
 	return s.managedStorePorts.LookupOwnedRetirementForRun(ctx, id)
 }
-func (s *retirementAgentDeathStore) AcknowledgeOwnedRetirement(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.OwnedRetirementAcknowledgement) (kernel.OwnedRetirementAckResult, error) {
-	s.ackCalls++
-	if s.dead {
-		return kernel.OwnedRetirementAckResult{}, errRetirementLostACK
-	}
-	return s.managedStorePorts.AcknowledgeOwnedRetirement(ctx, g, p)
-}
 
-func (s *retirementAgentDeathStore) AcquireExecution(ctx context.Context, r kernel.ExecutionAcquireRequest) (kernel.ExecutionLease, error) {
-	l, e := s.managedStorePorts.AcquireExecution(ctx, r)
-	if e == nil {
-		s.acquired = l
+func (s *retirementAgentDeathStore) BeginOwnedPhysicalExecution(ctx context.Context, a kernel.OwnedPhysicalAdmission) (kernel.OwnedPhysicalAdmissionResult, error) {
+	v, e := s.managedStorePorts.BeginOwnedPhysicalExecution(ctx, a)
+	if e == nil && a.AcquiresLease() {
+		s.acquired = v.Lease
 	}
-	return l, e
+	return v, e
 }
 
 type retirementAgentModel struct {
@@ -95,7 +88,7 @@ func runRetirementActualAgentRecovery(t *testing.T, factory func(*testing.T) Man
 		t.Fatalf("original source: %v", e)
 	}
 	retired, e := base.LoadOwnedRetirement(t.Context(), fault.grant.ID)
-	if e != nil || retired.Phase != "RETIRED" {
+	if e != nil || !retired.Valid() {
 		t.Fatalf("Finish not durable: %v", e)
 	}
 	if _, e = base.LookupChildExecution(t.Context(), req.ID); !errors.Is(e, kernel.ErrNotFound) {
@@ -116,10 +109,10 @@ func runRetirementActualAgentRecovery(t *testing.T, factory func(*testing.T) Man
 		t.Fatalf("recovery mutated/replayed original source: %v", e)
 	}
 	acknowledged, e := freshRT.LoadOwnedRetirement(t.Context(), fault.grant.ID)
-	if e != nil || acknowledged.Phase != "ACKNOWLEDGED" || acknowledged.Identity() != retired.Identity() {
+	if e != nil || !acknowledged.Valid() || acknowledged.Identity() != retired.Identity() {
 		t.Fatalf("original receipt not acknowledged: %v", e)
 	}
-	if e = fresh.ReconcileRootPhysicalExecution(t.Context(), req.ID); !errors.Is(e, kernel.ErrNotFound) {
+	if e = fresh.ReconcileRootPhysicalExecution(t.Context(), req.ID); e != nil {
 		t.Fatalf("public runID selected historical ACK: %v", e)
 	}
 }
@@ -146,11 +139,10 @@ func runRetirementTwoGenerations(t *testing.T, factory func(*testing.T) ManagedR
 		t.Fatalf("first real yield/Finish death: %v", e)
 	}
 	r1, e := base.LoadOwnedRetirement(t.Context(), first.grant.ID)
-	if e != nil || r1.Phase != "RETIRED" {
+	if e != nil || !r1.Valid() {
 		t.Fatalf("first receipt: %v", e)
 	}
 	firstRequest, firstResponse := model.CloneRequest(physical.request), model.CloneResponse(physical.response)
-	b.AdvanceTo(first.acquired.ExpiresAt.Add(100 * time.Millisecond))
 	if e = base.CheckExecution(t.Context(), req.ID, &first.acquired); !errors.Is(e, kernel.ErrExecutionConflict) {
 		t.Fatalf("original lease not actually expired: %v", e)
 	}
@@ -163,11 +155,11 @@ func runRetirementTwoGenerations(t *testing.T, factory func(*testing.T) ManagedR
 		t.Fatal("second generation did not acquire new actual authority")
 	}
 	r2, e := base.LoadOwnedRetirement(t.Context(), second.grant.ID)
-	if e != nil || r2.Phase != "RETIRED" {
+	if e != nil || !r2.Valid() {
 		t.Fatalf("second receipt: %v", e)
 	}
 	unchanged, e := base.LoadOwnedRetirement(t.Context(), first.grant.ID)
-	if e != nil || unchanged.Phase != "ACKNOWLEDGED" || unchanged.Identity() != r1.Identity() {
+	if e != nil || !unchanged.Valid() || unchanged.Identity() != r1.Identity() {
 		t.Fatal("successor did not atomically acknowledge the exact prior callback before advancing")
 	}
 	if firstRequest.InvocationID == physical.request.InvocationID || kernel.ManagedDigest(firstResponse) != kernel.ManagedDigest(physical.response) {
@@ -185,14 +177,14 @@ func runRetirementTwoGenerations(t *testing.T, factory func(*testing.T) ManagedR
 		t.Fatal("public recovery mutated source or sent model again")
 	}
 	old, e := freshRT.LoadOwnedRetirement(t.Context(), r1.Evidence.Grant.ID)
-	if e != nil || old.Phase != "ACKNOWLEDGED" || old.Identity() != r1.Identity() {
+	if e != nil || !old.Valid() || old.Identity() != r1.Identity() {
 		t.Fatal("historical acknowledged retirement identity changed")
 	}
 	ack, e := freshRT.LoadOwnedRetirement(t.Context(), r2.Evidence.Grant.ID)
-	if e != nil || ack.Phase != "ACKNOWLEDGED" || ack.Identity() != r2.Identity() {
+	if e != nil || !ack.Valid() || ack.Identity() != r2.Identity() {
 		t.Fatalf("current r2 not exclusively ACKed: %v", e)
 	}
-	if e = fresh.ReconcileRootPhysicalExecution(t.Context(), req.ID); !errors.Is(e, kernel.ErrNotFound) {
+	if e = fresh.ReconcileRootPhysicalExecution(t.Context(), req.ID); e != nil {
 		t.Fatalf("historical r1 selected after r2 ACK: %v", e)
 	}
 }

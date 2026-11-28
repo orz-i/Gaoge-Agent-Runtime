@@ -9,25 +9,28 @@ import (
 	"sync"
 	"time"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
 // Store is the single-process atomic Kernel adapter used by minimal hosts and tests.
 type Store struct {
-	mu               sync.RWMutex
-	records          map[string]kernel.Snapshot
-	events           map[string][]kernel.Event
-	transitions      map[string]transitionState
-	transitionOrder  []string
-	execution        map[string]memoryExecutionState
-	childGrants      map[string]memoryChildGrant
-	grantIdentities  map[string]string
-	ownedRetirements map[string]kernel.OwnedRetirementReceipt
-	childGrantOwners map[string]map[string]struct{}
-	executionClock   func() time.Time
-	managedAuthority kernel.ManagedAuthority
-	managedTransfers map[string]kernel.ManagedTransfer
-	managedCurrent   map[string]string
+	mu                sync.RWMutex
+	records           map[string]kernel.Snapshot
+	creationDecisions map[string]kernel.RunCreationDecision
+	ledgers           budget.LedgerMap
+	events            map[string][]kernel.Event
+	transitions       map[string]transitionState
+	transitionOrder   []string
+	execution         map[string]memoryExecutionState
+	childGrants       map[string]memoryChildGrant
+	grantIdentities   map[string]string
+	ownedRetirements  map[string]kernel.OwnedRetirementReceipt
+	childGrantOwners  map[string]map[string]struct{}
+	executionClock    func() time.Time
+	managedAuthority  kernel.ManagedAuthority
+	managedTransfers  map[string]kernel.ManagedTransfer
+	managedCurrent    map[string]string
 }
 
 type transitionState struct {
@@ -53,30 +56,40 @@ func cloneRun(run kernel.Run) kernel.Run {
 // NewStore creates an empty in-memory Kernel Store.
 func NewStore() *Store {
 	return &Store{
+		ledgers: make(budget.LedgerMap),
 		records: make(map[string]kernel.Snapshot), events: make(map[string][]kernel.Event),
-		transitions:      make(map[string]transitionState),
-		execution:        make(map[string]memoryExecutionState),
-		childGrants:      make(map[string]memoryChildGrant),
-		grantIdentities:  make(map[string]string),
-		childGrantOwners: make(map[string]map[string]struct{}),
-		executionClock:   time.Now,
-		managedAuthority: newMemoryManagedAuthority(),
-		managedTransfers: make(map[string]kernel.ManagedTransfer),
-		managedCurrent:   make(map[string]string),
+		creationDecisions: make(map[string]kernel.RunCreationDecision),
+		transitions:       make(map[string]transitionState),
+		execution:         make(map[string]memoryExecutionState),
+		childGrants:       make(map[string]memoryChildGrant),
+		grantIdentities:   make(map[string]string),
+		childGrantOwners:  make(map[string]map[string]struct{}),
+		executionClock:    time.Now,
+		managedAuthority:  newMemoryManagedAuthority(),
+		managedTransfers:  make(map[string]kernel.ManagedTransfer),
+		managedCurrent:    make(map[string]string),
 	}
 }
 
 // Create atomically inserts one Run record.
-func (store *Store) Create(_ context.Context, record kernel.Record, events []kernel.EventDraft) (kernel.Snapshot, error) {
+func (store *Store) Create(ctx context.Context, record kernel.Record, events []kernel.EventDraft) (kernel.Snapshot, error) {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	if _, exists := store.records[record.Run.ID]; exists {
 		return kernel.Snapshot{}, kernel.ErrAlreadyExists
 	}
-	if record.Run.ParentRunID != "" {
-		if _, err := store.childAncestorsLocked(record.Run); err != nil {
-			return kernel.Snapshot{}, err
-		}
+	if decision, rejected := store.creationDecisions[record.Run.ID]; rejected {
+		return kernel.Snapshot{}, decision.Rejection()
+	}
+
+	if _, err := store.validateLiveRunOwners(ctx, record.Run); err != nil {
+		return kernel.Snapshot{}, err
+	}
+	if err := store.validateCreationRetry(ctx, record.BudgetEnrollment); err != nil {
+		return kernel.Snapshot{}, err
+	}
+	if err := kernel.EnrollRunBudget(ctx, store.ledgers, record); err != nil {
+		return kernel.Snapshot{}, err
 	}
 	snapshot := snapshotFromRecord(record)
 	journal := appendEvents(nil, events, record.Run.UpdatedAt)
@@ -88,6 +101,61 @@ func (store *Store) Create(_ context.Context, record kernel.Record, events []ker
 	store.events[record.Run.ID] = cloneEvents(journal)
 	store.appendCommittedTransition(record.Run, events)
 	return cloneSnapshot(snapshot), nil
+}
+
+// DecideBeforeCreate and Create share the same native mutex and ledger CAS.
+func (s *Store) DecideBeforeCreate(ctx context.Context, q kernel.RunCreationDecision) (kernel.RunCreationDecision, error) {
+	var zero kernel.RunCreationDecision
+	if ctx == nil || !q.Valid() {
+		return zero, kernel.ErrInvalidInput
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return zero, err
+	}
+	if _, ok := s.records[q.RunID]; ok {
+		return zero, kernel.ErrAlreadyExists
+	}
+	if c, ok := s.creationDecisions[q.RunID]; ok {
+		if !c.MatchesSelection(q) {
+			return zero, kernel.ErrConflict
+		}
+		return c, nil
+	}
+	if err := s.validateCreationRetry(ctx, &q.Budget); err != nil {
+		return zero, err
+	}
+	if err := budget.CloseBeforeEnrollment(ctx, s.ledgers, q.RunID, q.Budget); err != nil {
+		return zero, err
+	}
+	s.creationDecisions[q.RunID] = q
+	return q, nil
+}
+
+func (s *Store) loadCreationDecision(_ context.Context, id string) (kernel.RunCreationDecision, error) {
+	if c, ok := s.creationDecisions[id]; ok {
+		return c, nil
+	}
+	if _, ok := s.records[id]; ok {
+		return kernel.RunCreationDecision{}, kernel.ErrAlreadyExists
+	}
+	return kernel.RunCreationDecision{}, kernel.ErrNotFound
+}
+
+func (s *Store) LoadCreationDecision(ctx context.Context, id string) (kernel.RunCreationDecision, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.loadCreationDecision(ctx, id)
+}
+
+func (s *Store) validateCreationRetry(ctx context.Context, e *budget.RunEnrollment) error {
+	return kernel.ValidateCreationRetry(ctx, e, func(_ context.Context, id string) (kernel.Snapshot, error) {
+		if v, ok := s.records[id]; ok {
+			return v, nil
+		}
+		return kernel.Snapshot{}, kernel.ErrNotFound
+	}, s.loadCreationDecision)
 }
 
 // ListEvents returns one isolated page without reading or cloning the aggregate.
@@ -123,18 +191,27 @@ func (store *Store) Load(_ context.Context, runID string) (kernel.Snapshot, erro
 }
 
 // Apply performs one revision-checked atomic replacement and event append.
-func (store *Store) Apply(_ context.Context, runID string, expectedRevision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
+func (store *Store) Apply(ctx context.Context, runID string, expectedRevision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	if store.execution[runID].epoch > 0 {
 		return kernel.Snapshot{}, kernel.ErrExecutionRequired
 	}
-	return store.applyLocked(runID, expectedRevision, mutation)
+	if mutation.Ledger != nil {
+		current, ok := store.records[runID]
+		if !ok || current.Run.ParentRunID == "" || !mutation.PhysicalPermit.IsPresent() {
+			return kernel.Snapshot{}, kernel.ErrExecutionRequired
+		}
+		if _, err := store.validateLiveRunOwners(ctx, current.Run); err != nil {
+			return kernel.Snapshot{}, err
+		}
+	}
+	return store.applyLocked(ctx, runID, expectedRevision, mutation, false)
 }
 
 // applyLocked is reached only after ordinary or fenced eligibility checks.
-func (store *Store) applyLocked(runID string, expectedRevision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
-	if err := store.managedGateLocked(runID); err != nil {
+func (store *Store) applyLocked(ctx context.Context, runID string, expectedRevision uint64, mutation kernel.StoreMutation, control bool) (kernel.Snapshot, error) {
+	if err := store.nativeEntryGateLocked(runID); err != nil {
 		return kernel.Snapshot{}, err
 	}
 	current, ok := store.records[runID]
@@ -143,9 +220,6 @@ func (store *Store) applyLocked(runID string, expectedRevision uint64, mutation 
 	}
 	if current.Run.Revision != expectedRevision {
 		return kernel.Snapshot{}, kernel.ErrConflict
-	}
-	if _, err := store.settleRetirementSuccessorLocked(runID); err != nil {
-		return kernel.Snapshot{}, err
 	}
 	if current.Run.ParentRunID != mutation.Record.Run.ParentRunID {
 		return kernel.Snapshot{}, kernel.ErrExecutionConflict
@@ -191,11 +265,15 @@ func (store *Store) applyLocked(runID string, expectedRevision uint64, mutation 
 	if safe.ID != "" && !kernel.ManagedSourceMatches(safe, next) {
 		return kernel.Snapshot{}, kernel.ErrExecutionConflict
 	}
-	if id := store.managedCurrent[runID]; id != "" {
-		store.managedTransfers[id] = kernel.ManagedInvalidateMutation(store.managedTransfers[id])
+	ledger, err := kernel.PlanRunBudgetMutation(ctx, store.ledgers, current.Run, mutation, control)
+	if err != nil {
+		return kernel.Snapshot{}, err
 	}
 	if safe.ID != "" {
 		store.saveManagedLocked(kernel.ManagedInitialTransfer(safe))
+	}
+	if ledger != nil {
+		store.ledgers[ledger.ScopeID()] = ledger.Next()
 	}
 	store.records[runID] = cloneSnapshot(next)
 	store.events[runID] = nextEvents

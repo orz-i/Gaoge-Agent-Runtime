@@ -12,6 +12,7 @@ import (
 type retryBudgetAdmission struct {
 	turnID, invocationID, previousRunID, nextRunID string
 	attempt                                        int
+	native                                         bool
 }
 type retryBudgetAdmissionKey struct{}
 
@@ -19,35 +20,26 @@ type retryBudgetAdmissionKey struct{}
 // Turn budget ledger. A foreign LedgerStore cannot be atomically committed:
 // reject before mutating Invocation, rather than attempting a two-store saga.
 func (runner *Runner) withAtomicRetryBudget(ctx context.Context, turn Turn, original Invocation, nextRunID string) (context.Context, error) {
-	if runner.budgets == nil {
-		return ctx, nil
-	}
-	l, err := runner.loadTurnBudget(ctx, turn)
-	if err != nil {
+	l, err := runner.frozenTurnBudget(ctx, turn)
+	if err != nil || l == nil {
 		return ctx, err
 	}
-	if l == nil {
-		// An original Turn whose frozen configuration required shared
-		// accounting cannot recreate a fresh ledger during Retry: that
-		// would erase historical charges/unknown provider dispatches.
-		// A genuinely unbudgeted Turn retains its existing Retry path.
-		config, configErr := loadSealedConfig(ctx, runner.store, turn.ConfigSnapshotID)
-		if configErr != nil {
-			return ctx, configErr
+	if runner.nativeBudget() {
+		// The Host selects an Attempt; preflight the existing native ledger
+		// without independently advancing its execution generation.
+		if _, err = budget.PlanRootRetry(*l, original.ID, original.ExecutionRefID, nextRunID, original.Attempt+1); err != nil {
+			return ctx, err
 		}
-		if config.SharedBudget != nil {
-			return ctx, ErrExecutionOutcomeUnknown
+	} else {
+		authoritative, ok := runner.store.(budget.LedgerStore)
+		if !ok || authoritative != runner.budgets.dependencies.Ledgers {
+			return ctx, ErrConflict
 		}
-		return ctx, nil
-	}
-	authoritative, ok := runner.store.(budget.LedgerStore)
-	if !ok || authoritative != runner.budgets.dependencies.Ledgers {
-		return ctx, ErrConflict
 	}
 	return context.WithValue(ctx, retryBudgetAdmissionKey{}, retryBudgetAdmission{
 		turnID: turn.ID, invocationID: original.ID,
 		previousRunID: original.ExecutionRefID, nextRunID: nextRunID,
-		attempt: original.Attempt + 1,
+		attempt: original.Attempt + 1, native: runner.nativeBudget(),
 	}), nil
 }
 
@@ -72,5 +64,45 @@ func AtomicRetryBudgetForStore(ctx context.Context, original Invocation, nextRun
 		value.attempt != original.Attempt+1 || original.Attempt < 1 || original.ParentItemID != "" {
 		return false, ErrConflict
 	}
-	return true, nil
+	return !value.native, nil
+}
+
+// nativeRetrySelection returns the original Store-owned Host selection.
+// The immutable transition already exists; never derive a new RunID here.
+func nativeRetrySelection(ctx context.Context, store Store, inv Invocation) (rootRetryTransition, error) {
+	var selection rootRetryTransition
+	fact, err := store.GetItem(ctx, stableID("hrootretry", inv.ID, attemptString(inv.Attempt)))
+	if err != nil {
+		return selection, err
+	}
+	return retrySelectionFromFact(inv, fact)
+}
+
+func retrySelectionFromItems(inv Invocation, items []Item) (rootRetryTransition, error) {
+	var source Item
+	id := stableID("hrootretry", inv.ID, attemptString(inv.Attempt))
+	for _, item := range items {
+		if item.ID == id {
+			if source.ID != "" {
+				return rootRetryTransition{}, ErrConflict
+			}
+			source = item
+		}
+	}
+	if source.ID == "" {
+		return rootRetryTransition{}, ErrNotFound
+	}
+	return retrySelectionFromFact(inv, source)
+}
+
+func retrySelectionFromFact(inv Invocation, fact Item) (rootRetryTransition, error) {
+	var selection rootRetryTransition
+	if fact.ID != stableID("hrootretry", inv.ID, attemptString(inv.Attempt)) || fact.Seq == 0 || fact.TurnID != inv.TurnID || fact.InvocationID != inv.ID || fact.RunID != inv.ExecutionRefID ||
+		fact.ParentItemID != RootRetryTransitionParentItemID || fact.Kind != ItemDiagnostic || fact.Status != ItemCompleted ||
+		!decodeTypedAuthorityJSON(fact.Payload, &selection) || selection.Version != 1 || selection.Next != invocationAttempt(inv) ||
+		selection.Previous.InvocationID != inv.ID || selection.Previous.Attempt != inv.Attempt-1 || !validChildAttempt(selection.Previous) ||
+		selection.Previous.ExecutionRefID == inv.ExecutionRefID || selection.InputHash != inv.InputHash {
+		return selection, ErrConflict
+	}
+	return selection, nil
 }

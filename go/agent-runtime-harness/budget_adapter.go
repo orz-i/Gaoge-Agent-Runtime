@@ -5,6 +5,7 @@ import (
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
@@ -25,6 +26,17 @@ func (authority *BudgetAuthority) Adapter() (*agent.BoundedBudgetAdapter, error)
 }
 
 type boundedBudgetPorts struct{ authority *BudgetAuthority }
+
+// Managed continuation uses the original Host selection and the native
+// Runtime accounting store, never a Host-owned accounting history.
+func (p boundedBudgetPorts) ContextSummaryRecoveryHost() kernel.ManagedRecoveryHostStore {
+	d := p.authority.dependencies
+	host, ok := d.Store.(kernel.ManagedRecoveryHostStore)
+	if !ok || d.Runtime == nil || !d.Runtime.UsesLedgerStore(d.Ledgers) {
+		return nil
+	}
+	return host
+}
 
 func (p boundedBudgetPorts) ResolveScope(ctx context.Context, runID string) (agent.BoundedBudgetScope, error) {
 	return p.authority.resolveScope(ctx, runID)

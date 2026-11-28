@@ -2,14 +2,12 @@ package conformance
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"testing"
 	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 )
 
 // AR-C is actual kernel.Runtime.Cancel over real Root Agent state. It has no
@@ -131,7 +129,7 @@ func ea1RootCancelPreflight(t *testing.T, factory func(*testing.T) (kernel.Store
 		return nil
 	}
 	_, e := f.runner(f.rt, "candidate", true).Resume(t.Context(), f.request.ID, f.prepared.Run.Revision)
-	if !errors.Is(e, kernel.ErrExecutionConflict) || hits != 1 {
+	if !errors.Is(e, kernel.ErrConflict) || hits != 1 {
 		t.Fatalf("pre-owned Cancel did not win: %v", e)
 	}
 	ea1CompBarrierUnchanged(t, f.observer, cancelled)
@@ -141,7 +139,7 @@ func ea1RootCancelActive(t *testing.T, factory func(*testing.T) (kernel.Store, k
 	f := ea1NewResumeFixture(t, factory, false)
 	hits := 0
 	var original kernel.ChildExecutionGrant
-	check := func(ctx context.Context) {
+	check := func(ctx context.Context, entered bool) {
 		hits++
 		before, e := f.observer.Load(ctx, f.request.ID)
 		if e != nil {
@@ -160,8 +158,9 @@ func ea1RootCancelActive(t *testing.T, factory func(*testing.T) (kernel.Store, k
 			t.Fatal("scope replaced")
 		}
 		ea1CancelRejected(t, f.observer, before, g, kernel.ErrChildExecutionBusy)
-		if e = f.peer.(kernel.ExecutionStore).CheckExecution(ctx, f.request.ID, &f.store.acquired); e != nil {
-			t.Fatal("Cancel revoked active owner", e)
+		e = f.peer.(kernel.ExecutionStore).CheckExecution(ctx, f.request.ID, &f.store.acquired)
+		if entered && e != nil || !entered && (!errors.Is(e, kernel.ErrExecutionConflict) || !errors.Is(e, kernel.ErrChildExecutionBusy)) {
+			t.Fatal("Cancel changed original entry qualification", e)
 		}
 		m, n := f.physical.counts()
 		if m != 0 || n != 0 {
@@ -172,10 +171,10 @@ func ea1RootCancelActive(t *testing.T, factory func(*testing.T) (kernel.Store, k
 		if f.host.calls != 0 {
 			t.Fatal("late admission cut")
 		}
-		check(ctx)
+		check(ctx, false)
 		return nil
 	}
-	f.host.before = func(ctx context.Context) error { check(ctx); return nil }
+	f.host.before = func(ctx context.Context) error { check(ctx, true); return nil }
 	out, e := f.runner(f.rt, "original", true).Resume(t.Context(), f.request.ID, f.prepared.Run.Revision)
 	if e != nil || hits != 2 || f.host.calls != 1 {
 		t.Fatalf("original callback could not finish: %v", e)
@@ -190,123 +189,5 @@ func ea1RootCancelUnknown(t *testing.T, factory func(*testing.T) (kernel.Store, 
 	ea1RootCancelUnknownWithModelReadDelay(t, factory, kind, 0)
 }
 func ea1RootCancelUnknownWithModelReadDelay(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store), kind string, delay time.Duration) {
-	f := ea1NewResumeFixture(t, factory, kind == "tool")
-	f.physical.modelReadDelay = delay
-	injected := errors.New("actual Resume physical outcome missing")
-	event := "agent.model_invocation.completed"
-	if kind == "tool" {
-		event = "tool.completed"
-	}
-	fault := &ea1AgentReceiptFault{Store: f.store, ExecutionStore: f.store, ControlStore: f.store, ChildExecutionStore: f.store, ExecutionQuarantineStore: f.store, OwnedPhysicalExecutionStore: f.store, event: event, injected: injected}
-	rt := ea1StartRuntime(t, fault)
-	f.physical.rt = rt
-	if kind == "host" {
-		f.host.unknown = injected
-	}
-	runner := f.runner(rt, "resume-owner", true)
-	_, e := runner.Resume(t.Context(), f.request.ID, f.prepared.Run.Revision)
-	if !errors.Is(e, injected) || f.host.calls != 1 {
-		t.Fatalf("actual Resume unknown cut missing: %v", e)
-	}
-	before, e := rt.Load(t.Context(), f.request.ID)
-	if e != nil || !runner.VerifyFrozenStartRequest(before, f.request) {
-		t.Fatal("original Resume source lost")
-	}
-	g, e := rt.LookupChildExecution(t.Context(), f.request.ID)
-	if e != nil {
-		t.Fatal(e)
-	}
-	lease := f.store.acquired
-	if g.AdmissionOperation != "resume" || g.ExpectedRevision != f.prepared.Run.Revision || g.ExecutionOwnerID != lease.OwnerID || g.ExecutionLeaseID != lease.LeaseID || g.ExecutionEpoch != lease.Epoch {
-		t.Fatal("unknown lost original Resume authority")
-	}
-	completion, e := rt.LookupOwnedPhysicalCallbackReturn(t.Context(), g)
-	if e != nil || completion.HostCompleted {
-		t.Fatalf("actual opaque Host error not retained: %v", e)
-	}
-	m, n := f.physical.counts()
-	if kind == "host" {
-		if m != 0 || n != 0 || f.host.sends != 1 || fault.failures != 0 {
-			t.Fatal("Host fixture substituted Model/Tool send")
-		}
-	} else {
-		if fault.failures != 1 || m != 1 || (kind == "tool" && n != 1) || (kind == "model" && n != 0) {
-			t.Fatal("actual Resume dispatch not reached")
-		}
-		view, e := agent.ViewState(before)
-		if e != nil || len(view.ModelInvocations) != 1 {
-			t.Fatal("original invocation missing")
-		}
-		inv := view.ModelInvocations[0]
-		f.physical.assertOriginal(t, f.request, inv)
-		original := f.physical.intents[0]
-		canonical := model.CloneRequest(original.Request)
-		canonical.InvocationID = ""
-		hash, sourceErr := ea1ModelIntentEvidenceHash(canonical, original.CatalogFingerprints, original.Provider, original.BindingFingerprint)
-		if sourceErr != nil || original.RequestHash != hash || inv.RequestHash != original.RequestHash || inv.ID != original.ID || inv.ExecutionAttempt != original.ExecutionAttempt || inv.DispatchAttempt != original.DispatchAttempt || inv.Provider != original.Provider || inv.BindingFingerprint != original.BindingFingerprint || inv.SourceRevision != original.SourceRevision || inv.SourceRevision < f.prepared.Run.Revision {
-			t.Fatal("Resume invocation not exact original source hash")
-		}
-		if kind == "model" && (inv.Status != agent.ModelInvocationPending || inv.CompletedAt != nil || !ea1RecoveryJSONEqual(inv.Response, model.Response{})) {
-			t.Fatal("missing Model receipt fabricated as completed")
-		}
-		if kind == "tool" {
-			var marker struct {
-				ToolDispatchID string `json:"toolDispatchID"`
-			}
-			if json.Unmarshal(before.State, &marker) != nil || marker.ToolDispatchID != "original-tool-call" {
-				t.Fatal("original unresolved Tool intent missing")
-			}
-		}
-		if inv.Provider != f.physical.ProviderName() || inv.BindingFingerprint != f.physical.BindingFingerprintForRequest(inv.Request) || inv.ExecutionAttempt != 1 || inv.DispatchAttempt != 1 {
-			t.Fatal("original request provider/attempt lost")
-		}
-		if kind == "tool" {
-			ea1StartSettlementJSONEqual(t, "prior consumed Model response", inv.Response, f.physical.response)
-		}
-	}
-	ea1CancelRejected(t, f.observer, before, g, kernel.ErrChildExecutionBusy)
-	if e = f.peer.(kernel.ExecutionStore).CheckExecution(t.Context(), f.request.ID, &lease); e != nil {
-		t.Fatalf("rejected Cancel revoked original native owner: %v", e)
-	}
-	ea1AwaitNativeExpiry(t, f.peer.(kernel.ExecutionStore), f.store.renewals.latest(t, lease))
-	fresh := f.reopen()
-	freshRT := ea1StartRuntime(t, fresh)
-	f.physical.rt = freshRT
-	// Feature claim/RetryAfter time is advanced independently; native expiry
-	// above was awaited against the real authoritative Store clock.
-	f.clockOffset = 3 * time.Minute
-	next := f.runner(freshRT, "fresh-owner", true)
-	if e = fresh.(kernel.ExecutionStore).CheckExecution(t.Context(), f.request.ID, &lease); !errors.Is(e, kernel.ErrExecutionConflict) {
-		t.Fatalf("Store native TTL not expired: %v", e)
-	}
-	for range 2 {
-		ea1CancelRejected(t, freshRT, before, g, kernel.ErrChildExecutionBusy)
-		_, e = next.Resume(t.Context(), f.request.ID, before.Run.Revision)
-		want := agent.ErrRootOutcomeUnknown
-		switch kind {
-		case "model":
-			want = agent.ErrModelOutcomeUnknown
-		case "tool":
-			want = agent.ErrToolOutcomeUnknown
-		}
-		if !errors.Is(e, want) {
-			t.Fatalf("Resume wrong unknown boundary: %v want %v", e, want)
-		}
-		ea1CompBarrierUnchanged(t, freshRT, before)
-		same, err := freshRT.LookupChildExecution(t.Context(), f.request.ID)
-		if err != nil || same != g {
-			t.Fatal("TTL recovery changed original scope")
-		}
-		c, err := freshRT.LookupOwnedPhysicalCallbackReturn(t.Context(), g)
-		if err != nil || !ea1RecoveryJSONEqual(c, completion) {
-			t.Fatal("TTL upgraded Host unknown")
-		}
-		a, b := f.physical.counts()
-		if a != m || b != n || f.host.calls != 1 || (kind == "host" && f.host.sends != 1) {
-			t.Fatal("unknown Resume replayed physical callback")
-		}
-		if err = fresh.(kernel.ExecutionStore).CheckExecution(t.Context(), f.request.ID, &lease); !errors.Is(err, kernel.ErrExecutionConflict) {
-			t.Fatal("recovery revived original epoch")
-		}
-	}
+	ea1RootUnknownResume(t, factory, kind, delay, true)
 }

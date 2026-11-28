@@ -16,7 +16,7 @@ func (runner *Runner) continueModel(ctx context.Context, snapshot kernel.Snapsho
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
-	return runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
+	return runner.commitNativeTransition(ctx, snapshot, kernel.Mutation{
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
 		Events: []kernel.EventDraft{{Type: "agent.model_continued", Message: response.ResponseID, Wakeup: true,
 			WakeupAt: agentWakeupAt(runner.clock.Now())}},

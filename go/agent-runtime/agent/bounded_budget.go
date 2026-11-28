@@ -17,6 +17,7 @@ type BoundedBudgetScope struct {
 	LedgerID string
 	Limits   budget.Limits
 	Runs     []BoundedBudgetRunBinding
+	Retry    budget.RootRetryGrant
 }
 type BoundedBudgetRunBinding struct {
 	RunID   string
@@ -48,6 +49,10 @@ func (*BoundedBudgetAdapter) Name() string { return "runtime.bounded_budget.v1" 
 // adapters in Run/Model/Tool chains would split the scope and allow a callback
 // to be charged or certified by an unrelated budget authority.
 func validBoundedBudgetComposition(dependencies Dependencies) bool {
+	if a := dependencies.BoundedBudget; a != nil {
+		return a.coordinator.Store != nil && a.ports != nil &&
+			len(dependencies.RunMiddleware) == 0 && len(dependencies.ModelMiddleware) == 0 && len(dependencies.ToolMiddleware) == 0
+	}
 	var original *BoundedBudgetAdapter
 	accept := func(candidate *BoundedBudgetAdapter) bool {
 		if candidate == nil {
@@ -86,8 +91,54 @@ func validBoundedBudgetComposition(dependencies Dependencies) bool {
 	}
 	return true
 }
-func (a *BoundedBudgetAdapter) bind(ctx context.Context, id string) (budget.Ledger, error) {
+
+// Native scope selection is creation-only. Later phases use the persisted
+// Run binding; a Host lookup cannot move or retroactively enroll a Run.
+func (a *BoundedBudgetAdapter) nativeStore() kernel.Store {
+	store, _ := a.coordinator.Store.(kernel.Store)
+	return store
+}
+func (a *BoundedBudgetAdapter) resolveScope(ctx context.Context, id string) (BoundedBudgetScope, error) {
+	if a.nativeStore() != nil {
+		l, err := a.boundNativeLedger(ctx, id, "")
+		if err != nil || l.ID == "" {
+			return BoundedBudgetScope{}, err
+		}
+		return BoundedBudgetScope{LedgerID: l.ID, Limits: l.Limits, Runs: []BoundedBudgetRunBinding{{RunID: id, Binding: l.Runs[id]}}}, nil
+	}
+	return a.ports.ResolveScope(ctx, id)
+}
+
+func (a *BoundedBudgetAdapter) creationBudget(ctx context.Context, id string) (*budget.RunEnrollment, error) {
 	scope, err := a.ports.ResolveScope(ctx, id)
+	if err != nil || scope.LedgerID == "" {
+		return nil, err
+	}
+	var binding budget.RunBudget
+	found := false
+	for _, run := range scope.Runs {
+		if run.RunID == id {
+			if found {
+				return nil, budget.ErrLedgerConflict
+			}
+			binding, found = run.Binding, true
+		}
+	}
+	if !found {
+		return nil, budget.ErrLedgerConflict
+	}
+	e := budget.RunEnrollment{ScopeID: scope.LedgerID, Limits: scope.Limits, Binding: binding, Retry: scope.Retry}
+	if !e.Valid(id) {
+		return nil, budget.ErrLedgerConflict
+	}
+	return &e, nil
+}
+
+func (a *BoundedBudgetAdapter) bind(ctx context.Context, id string) (budget.Ledger, error) {
+	if a.nativeStore() != nil {
+		return a.boundNativeLedger(ctx, id, "")
+	}
+	scope, err := a.resolveScope(ctx, id)
 	if err != nil {
 		return budget.Ledger{}, err
 	}
@@ -97,6 +148,9 @@ func (a *BoundedBudgetAdapter) bind(ctx context.Context, id string) (budget.Ledg
 func (a *BoundedBudgetAdapter) bindScope(ctx context.Context, id string, scope BoundedBudgetScope) (budget.Ledger, error) {
 	if scope.LedgerID == "" {
 		return budget.Ledger{}, nil
+	}
+	if a.nativeStore() != nil {
+		return a.boundNativeLedger(ctx, id, scope.LedgerID)
 	}
 	l, err := a.coordinator.Ensure(ctx, scope.LedgerID, scope.Limits)
 	if err != nil {
@@ -123,10 +177,35 @@ func (a *BoundedBudgetAdapter) bindScope(ctx context.Context, id string, scope B
 	return l, nil
 }
 
+func (a *BoundedBudgetAdapter) boundNativeLedger(ctx context.Context, id, expected string) (budget.Ledger, error) {
+	s, e := a.nativeStore().Load(ctx, id)
+	if e != nil {
+		return budget.Ledger{}, e
+	}
+	if expected != "" && expected != s.Run.BudgetScopeID {
+		return budget.Ledger{}, budget.ErrLedgerConflict
+	}
+	if s.Run.BudgetScopeID == "" {
+		// Unbudgeted Runs may not acquire a scope on Resume.
+		scope, e := a.ports.ResolveScope(ctx, id)
+		if e != nil {
+			return budget.Ledger{}, e
+		}
+		if scope.LedgerID != "" {
+			return budget.Ledger{}, budget.ErrLedgerConflict
+		}
+		return budget.Ledger{}, nil
+	}
+	return kernel.LoadRunBudget(ctx, a.coordinator.Store, s.Run)
+}
+
 // A known receipt cannot create or rebind accounting authority. Use the
 // selected native Run adapter, but qualify the already-existing ledger
 // before consuming any local result after the deadline.
 func (a *BoundedBudgetAdapter) bindReceiptScope(ctx context.Context, runID, originalLedger string) (budget.Ledger, error) {
+	if a.nativeStore() != nil {
+		return a.boundNativeLedger(ctx, runID, originalLedger)
+	}
 	scope, err := a.ports.ResolveScope(ctx, runID)
 	if err != nil {
 		return budget.Ledger{}, err
@@ -137,6 +216,11 @@ func (a *BoundedBudgetAdapter) bindReceiptScope(ctx context.Context, runID, orig
 	if scope.LedgerID == "" {
 		return budget.Ledger{}, nil
 	}
+	return a.loadExistingScope(ctx, runID, scope)
+}
+
+// No receipt or unsent Tool check may establish an accounting binding.
+func (a *BoundedBudgetAdapter) loadExistingScope(ctx context.Context, runID string, scope BoundedBudgetScope) (budget.Ledger, error) {
 	l, err := a.coordinator.Store.LoadBudget(ctx, scope.LedgerID)
 	if err != nil {
 		return l, err
@@ -246,18 +330,38 @@ func requireReceiptConsumption(ctx context.Context, runID, originalLedger string
 	return nil
 }
 
+// Run is the explicit middleware compatibility spelling. Native Runner
+// stages use the same admission and settlement operations directly.
 func (a *BoundedBudgetAdapter) Run(ctx context.Context, inv plugin.RunInvocation, next plugin.RunNext) (kernel.Snapshot, error) {
+	admission, err := a.admitRun(ctx, inv)
+	if err != nil {
+		return kernel.Snapshot{}, err
+	}
+	out, callErr := next(ctx)
+	return a.finishRun(ctx, inv, admission, out, callErr, false)
+}
+
+func (a *BoundedBudgetAdapter) admitRun(ctx context.Context, inv plugin.RunInvocation) (*runBudgetAdmission, error) {
 	frame, _ := callbackscope.RunCall(ctx).(*nativeRunAdmission)
 	receiptOnly := frame != nil && frame.invocation == inv && frame.receiptOnly
 	var l budget.Ledger
 	var err error
-	if receiptOnly {
+	if frame != nil && frame.managedObligations != nil {
+		p := frame.managedObligations
+		if p.LedgerID == "" {
+			return nil, budget.ErrLedgerConflict
+		}
+		l, err = a.bindReceiptScope(ctx, inv.RunID, p.LedgerID)
+		if err == nil && !p.MatchesLiveLedger(l, frame.managedHost) {
+			err = budget.ErrLedgerConflict
+		}
+	} else if receiptOnly {
 		l, err = a.bindReceiptScope(ctx, inv.RunID, frame.receiptLedger)
 	} else {
 		l, err = a.bind(ctx, inv.RunID)
 	}
 	if err != nil {
-		return kernel.Snapshot{}, err
+		return nil, err
 	}
 	var ownErr error
 	if l.ID != "" {
@@ -267,7 +371,7 @@ func (a *BoundedBudgetAdapter) Run(ctx context.Context, inv plugin.RunInvocation
 		// is not the Run entry decision.
 		current, observeErr := a.observeRunBudget(ctx, l, inv.RunID)
 		if observeErr != nil {
-			return kernel.Snapshot{}, errors.Join(ownErr, observeErr)
+			return nil, errors.Join(ownErr, observeErr)
 		}
 		if current.RunCancelled(inv.RunID) && current.Revision != l.Revision {
 			// Only an actual acknowledged projection of the elected denial
@@ -282,28 +386,47 @@ func (a *BoundedBudgetAdapter) Run(ctx context.Context, inv plugin.RunInvocation
 			// model receipt, or certify a failed Host projection.
 			if ownErr == nil {
 				if denial := recordBudgetRunDenial(ctx, a, inv, l); denial != nil {
-					return kernel.Snapshot{}, denial
+					return nil, denial
 				}
 			}
-			return kernel.Snapshot{}, errors.Join(budget.ErrExhausted, ownErr)
+			return nil, errors.Join(budget.ErrExhausted, ownErr)
 		}
 		if receiptOnly && ownErr != nil {
-			return kernel.Snapshot{}, ownErr
+			return nil, ownErr
 		}
 	}
 	admission := &runBudgetAdmission{adapter: a, ledger: l, projectionErr: ownErr}
 	if frame != nil && frame.invocation == inv {
 		frame.budget.Store(admission)
 	}
-	out, callErr := next(ctx)
+	return admission, nil
+}
+
+func (a *BoundedBudgetAdapter) finishRun(ctx context.Context, inv plugin.RunInvocation, admission *runBudgetAdmission, out kernel.Snapshot, callErr error, atomic bool) (kernel.Snapshot, error) {
+	l, ownErr := admission.ledger, admission.projectionErr
 	if denial := admission.receiptDenial.Load(); denial != nil {
 		l = *denial
 		ownErr = errors.Join(ownErr, a.ports.Project(context.WithoutCancel(ctx), l))
 	}
 	if l.ID != "" && out.Run.ID == inv.RunID && (out.Run.Status == kernel.RunStatusCompleted || out.Run.Status == kernel.RunStatusFailed || out.Run.Status == kernel.RunStatusCancelled) {
-		updated, e := a.coordinator.FinishRuns(context.WithoutCancel(ctx), l.ID, inv.RunID)
-		ownErr = errors.Join(ownErr, e, a.ports.Project(context.WithoutCancel(ctx), updated))
-		l = updated
+		accounting := context.WithoutCancel(ctx)
+		var updated budget.Ledger
+		var e error
+		if atomic {
+			// The terminal Run transaction already returned lifetime capacity.
+			// A Host projection cannot create a missing execution fact.
+			updated, e = a.observeRunBudget(accounting, l, inv.RunID)
+			if e == nil && !updated.FinishedRuns[inv.RunID] {
+				e = budget.ErrLedgerConflict
+			}
+		} else {
+			updated, e = a.coordinator.FinishRuns(accounting, l.ID, inv.RunID)
+		}
+		ownErr = errors.Join(ownErr, e)
+		if e == nil {
+			ownErr = errors.Join(ownErr, a.ports.Project(accounting, updated))
+			l = updated
+		}
 	}
 	if ownErr == nil {
 		callbackscope.Record(ctx, a, "budget.run.returned", struct {
@@ -313,11 +436,125 @@ func (a *BoundedBudgetAdapter) Run(ctx context.Context, inv plugin.RunInvocation
 	}
 	return out, errors.Join(callErr, ownErr)
 }
+
+// A co-located native budget is not model middleware: its dispatch and
+// receipt are mutations of the existing Agent invocation. Opaque/externally
+// stored budgets retain their old conservative callback boundary until the
+// Host storage and managed recovery cutover is complete.
+func (r *Runner) atomicBudget() *BoundedBudgetAdapter {
+	a := r.nativeBudget
+	if a == nil || !r.runtime.UsesLedgerStore(a.coordinator.Store) {
+		return nil
+	}
+	return a
+}
+
+// UsesNativeBudget proves that the configured Host adapter is the same
+// concrete accounting stage selected by this Agent, not just the same DB.
+func (r *Runner) UsesNativeBudget(a *BoundedBudgetAdapter) bool {
+	return r != nil && a != nil && r.atomicBudget() == a
+}
+
+func (r *Runner) atomicModelBudget(plan *SamplingPlan) *BoundedBudgetAdapter {
+	if plan == nil || plan.LedgerID == "" {
+		return nil
+	}
+	return r.atomicBudget()
+}
+
+func (a *BoundedBudgetAdapter) planModelDispatch(ctx context.Context, original, candidate model.Request, plan *SamplingPlan) (*budget.LedgerMutation, error) {
+	l, err := a.bindReceiptScope(ctx, original.RunID, plan.LedgerID)
+	if err != nil {
+		return nil, err
+	}
+	physical, res, err := a.samplingReservation(ctx, l, original, plan)
+	if err != nil {
+		return nil, err
+	}
+	if !sameBoundedValue(physical, candidate) {
+		return nil, ErrInvalidRequest
+	}
+	if res.Dispatched || res.Status == budget.ReservationSettled {
+		return nil, ErrModelOutcomeUnknown
+	}
+	mutation, err := budget.PlanDispatch(ctx, l, res, true)
+	if errors.Is(err, budget.ErrWaiting) {
+		return nil, model.NewRetryableError(err)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if mutation == nil {
+		return nil, budget.ErrLedgerConflict
+	}
+	return mutation, nil
+}
+
+// A returned call with an unknown outcome retains its dispatched quota, but
+// no longer occupies a live execution slot. Commit this with the existing
+// Run outcome diagnostic, not as an independent accounting write.
+func (a *BoundedBudgetAdapter) planModelSuspend(ctx context.Context, inv ModelInvocation) (*budget.LedgerMutation, error) {
+	l, err := a.coordinator.Store.LoadBudget(ctx, inv.SamplingPlan.LedgerID)
+	if err != nil {
+		return nil, err
+	}
+	_, res, err := a.samplingReservation(ctx, l, inv.Request, inv.SamplingPlan)
+	if err != nil {
+		return nil, err
+	}
+	if !res.Dispatched || res.Status != budget.ReservationHeld {
+		return nil, budget.ErrLedgerConflict
+	}
+	return budget.PlanLedgerMutation(ctx, l, func(c budget.Coordinator) error {
+		_, e := c.Suspend(ctx, l.ID, res.ID)
+		return e
+	})
+}
+
+// Plan the receipt using the original physical identity and the same
+// accounting reducer as standalone model calls. No independently committed
+// receipt, speculative projection, or callback-return proof is required.
+func (a *BoundedBudgetAdapter) planModelReceipt(ctx context.Context, inv ModelInvocation, out model.Response, callErr error) (*budget.LedgerMutation, model.Response, error, error) {
+	plan := inv.SamplingPlan
+	l, err := a.coordinator.Store.LoadBudget(ctx, plan.LedgerID)
+	if err != nil {
+		return nil, model.Response{}, nil, err
+	}
+	physical, res, err := a.samplingReservation(ctx, l, inv.Request, plan)
+	if err != nil {
+		return nil, model.Response{}, nil, err
+	}
+	if !res.Dispatched || res.Status != budget.ReservationHeld {
+		return nil, model.Response{}, nil, budget.ErrLedgerConflict
+	}
+	mutation, err := budget.PlanLedgerMutation(ctx, l, func(c budget.Coordinator) error {
+		_, e := c.SettleModel(ctx, l.ID, physical, out, callErr)
+		return e
+	})
+	if err != nil {
+		return nil, model.Response{}, nil, err
+	}
+	if mutation == nil {
+		return nil, model.Response{}, nil, budget.ErrLedgerConflict
+	}
+	settled, receiptErr := budget.DecodeModelReceipt(mutation.Next().Reservations[res.ID])
+	if receiptErr != nil && !model.IsResponseRejectedError(receiptErr) {
+		return nil, model.Response{}, nil, receiptErr
+	}
+	return mutation, settled, receiptErr, nil
+}
+
 func (a *BoundedBudgetAdapter) Model(ctx context.Context, request model.Request, emit model.StreamSink, next plugin.ModelNext) (model.Response, error) {
 	original := model.CloneRequest(request)
 	call := modelCallFrom(ctx)
 	frozen := call.samplingPlan()
-	l, err := a.bind(ctx, request.RunID)
+	var l budget.Ledger
+	var err error
+	if frozen != nil && frozen.LedgerID != "" {
+		l, err = a.bindReceiptScope(ctx, request.RunID, frozen.LedgerID)
+	} else {
+		l, err = a.bind(ctx, request.RunID)
+	}
 	if err != nil {
 		return model.Response{}, err
 	}

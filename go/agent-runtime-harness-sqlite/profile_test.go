@@ -74,8 +74,8 @@ func TestProfileRequiresItsOriginalSchemaAndAuthority(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, damage := range map[string]string{
-		"schema-version":           "PRAGMA user_version=4",
-		"old-schema-version":       "PRAGMA user_version=2",
+		"schema-version":           "PRAGMA user_version=5",
+		"old-schema-version":       "PRAGMA user_version=3",
 		"legacy-capability-column": `ALTER TABLE agent_harness_invocations ADD COLUMN capability_key TEXT NOT NULL DEFAULT 'runtime.agent'`,
 		"legacy-version-column":    `ALTER TABLE agent_harness_invocations ADD COLUMN definition_version TEXT NOT NULL DEFAULT 'v1'`,
 		"profile-kind":             "PRAGMA application_id=123",

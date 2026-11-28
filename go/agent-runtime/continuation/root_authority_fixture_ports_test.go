@@ -35,11 +35,11 @@ func (s *claimantAfterCreateStore) LookupChildExecution(ctx context.Context, id 
 func (s *claimantAfterCreateStore) MarkChildExecutionSettled(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
 	return s.Store.(kernel.ChildExecutionStore).MarkChildExecutionSettled(ctx, g, p)
 }
-func (s *claimantAfterCreateStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant) error {
-	return s.Store.(kernel.ChildExecutionStore).FinishChildExecution(ctx, g)
+func (s *claimantAfterCreateStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
+	return s.Store.(kernel.ChildExecutionStore).FinishChildExecution(ctx, g, p)
 }
-func (s *claimantAfterCreateStore) BeginOwnedPhysicalExecution(ctx context.Context, g kernel.ChildExecutionGrant, l kernel.ExecutionLease, p kernel.OwnedPhysicalAdmission) error {
-	return s.Store.(kernel.OwnedPhysicalExecutionStore).BeginOwnedPhysicalExecution(ctx, g, l, p)
+func (s *claimantAfterCreateStore) BeginOwnedPhysicalExecution(ctx context.Context, p kernel.OwnedPhysicalAdmission) (kernel.OwnedPhysicalAdmissionResult, error) {
+	return s.Store.(kernel.OwnedPhysicalExecutionStore).BeginOwnedPhysicalExecution(ctx, p)
 }
 func (s *claimantAfterCreateStore) CheckOwnedPhysicalEntry(ctx context.Context, g kernel.ChildExecutionGrant, l kernel.ExecutionLease, source kernel.Snapshot) (kernel.OwnedPhysicalEntryWindow, error) {
 	return s.Store.(kernel.OwnedPhysicalExecutionStore).CheckOwnedPhysicalEntry(ctx, g, l, source)
@@ -68,7 +68,4 @@ func (s *claimantAfterCreateStore) LoadOwnedRetirement(ctx context.Context, id s
 }
 func (s *claimantAfterCreateStore) LookupOwnedRetirementForRun(ctx context.Context, id string) (kernel.OwnedRetirementReceipt, error) {
 	return s.Store.(kernel.OwnedRetirementStore).LookupOwnedRetirementForRun(ctx, id)
-}
-func (s *claimantAfterCreateStore) AcknowledgeOwnedRetirement(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.OwnedRetirementAcknowledgement) (kernel.OwnedRetirementAckResult, error) {
-	return s.Store.(kernel.OwnedRetirementStore).AcknowledgeOwnedRetirement(ctx, g, p)
 }

@@ -27,7 +27,7 @@ func TestOwnedRetirementV5MigrationPreservesOriginalNativeMark(t *testing.T) {
 	}
 	// Original v5 row fixture, not a newly asserted authorization proof.
 	old := &Store{db: raw}
-	rt, e := kernel.New(kernel.Dependencies{Store: old})
+	rt, e := kernel.New(kernel.Dependencies{Store: legacyRunFixtureStore{old}})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -87,6 +87,9 @@ func TestOwnedRetirementV5MigrationPreservesOriginalNativeMark(t *testing.T) {
 		t.Fatal(e)
 	}
 	if e = MigrateV9ToV10(t.Context(), path); e != nil {
+		t.Fatal(e)
+	}
+	if e = MigrateV10ToV11(t.Context(), path); e != nil {
 		t.Fatal(e)
 	}
 	current, e := OpenExisting(t.Context(), path)

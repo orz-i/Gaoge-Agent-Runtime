@@ -44,23 +44,35 @@ Tool or including an evidence reference does not select or authorize that Tool.
 
 Ordinary `OpenAgentSession` supports recovery after the original callback has
 returned. For takeover after a process exits inside that callback, explicitly
-select `AgentSessionContextOptions.SummaryNativeRecovery`. The Kernel Runtime
+select `AgentSessionContextOptions.ManagedRecovery`. The Kernel Runtime
 must have a `ManagedRecoveryHost` bound to the exact same Harness Store. This
 mode requires the built-in Harness bounded Context/summary bridges and the
 restricted native callback composition checked by the constructor. Custom or
-wrapped Context ports cannot opt into this proof with a marker or flag. It is separate from
-and mutually exclusive with the existing `ManagedRecovery` option. Shared
-budget plus summary remains rejected. The constructor still does not read
-history, call a model, or perform Store I/O.
+wrapped Context ports cannot opt into this proof with a marker or flag.
+Summary is an optional stage in the same Agent recovery lifecycle.
+Ordinary and managed summary support `SharedBudget` with the native Runtime
+ledger composition. The combined managed proof is limited to the
+original first-party suspension and settled or not-yet-dispatched model
+obligations; it excludes unresolved reservations and unknown provider effects.
+A budgeted summary uses the same physical sampling admission, original ledger
+reservation, settlement and receipt recovery as business sampling. A candidate
+that cannot be admitted, or would consume the last available shared model call,
+is skipped. These planning checks do not replace the live ledger CAS.
+Reopen a budgeted summary Turn with its summary capability and original budget
+composition configured. Drain or reconcile in-flight invocations before rolling
+back to a reader that does not support a budgeted summary sampling plan. Never
+reinterpret an older unbudgeted intent as a new budgeted one. The constructor
+still does not read history, call a model, or perform Store I/O.
 
 The selected window resolver and token counter remain read-only measurement
 dependencies. Recovery may repeat these reads; they must not hide model
 generation, Tool execution or business mutations. The exact Store ports remain
 trusted storage with their original immutable-write/CAS contracts.
-Dedicated native summary recovery rejects Host `Inputs` before binding or
-reading an input source. Ordinary Session composition may use queued inputs;
-they enter before a later business intent is frozen and cannot rewrite an
-already pending intent or turn a summary into an assistant answer.
+The exact combined native summary proof can carry the original Host Inputs
+binding and committed cursor. No new input is read before native callback entry; queued inputs
+enter before a later business intent is frozen and cannot rewrite an already
+pending intent or turn a summary into an assistant answer. Custom or
+unqualified input callbacks do not gain recovery authority.
 
 ## Trigger and state ownership
 
@@ -136,24 +148,26 @@ assistant transcript, never completes RequiredToolKeys and never supplies
 business Provider continuation/replay state. A frozen business intent resumes
 without another summary or another request projection.
 
-`SummaryNativeRecovery` freezes the original native recovery choice in the
-Run. It records dedicated, source-bound safe points with summary pending,
-completed and consumed transitions in the original Kernel commit. Recovery
+`ManagedRecovery` freezes the original native recovery choice in the
+Run. The common AgentObligations source records summary pending, completed
+and consumed transitions in the original Kernel commit. Recovery
 parks the original physical frame, obtains the original Host recovery decision,
-enables a successor and leaves the safe point before resuming effects. It does
+enables a successor and consumes its frontier at native callback entry before resuming effects. It does
 not manufacture a callback-return receipt or expire an unknown effect by TTL.
 Claim/dispatch invalidates a pending safe point: a Provider response without a
 durable receipt remains unknown and cannot be redispatched. A new handle cannot
 retrofit this authority onto an ordinary Run; a recovery handle for a Run that
 selected it must retain the required native composition, even with nil current
-summary policy.
+summary policy. If SharedBudget or Inputs was selected at the original safe
+point, the mixed proof freezes the ledger and the committed input cursor.
+Recovery uses the original ledger without creating or registering a new scope;
+it cannot apply new user input before the frozen summary completes. The
+first business request can consume input queued during the suspension.
 
-The dedicated proof covers only the summary pending/completed/consumed phases
-and the original dispatch's first managed transfer, including repair of its
-selected safe point. It does not add takeover authority for a later business
-pending intent. A second hard crash at another phase after a transfer remains
-blocked by the original immutable Host reservation; no continuation-chain
-protocol or unlimited cross-phase crash recovery is introduced.
+The unified proof covers eligible summary, business and preparation phases
+of the original dispatch's first managed transfer. A second hard crash after
+a selected transfer remains blocked by the original immutable reservation;
+no continuation-chain protocol or unlimited cross-phase recovery is introduced.
 
 Absent policy, purpose and derivation fields preserve old JSON/hash behavior.
 Upgrade readers before admitting the new protocol: older readers must reject

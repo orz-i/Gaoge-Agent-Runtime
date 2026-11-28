@@ -9,6 +9,12 @@
 > Model dispatch and pre-intent preparation have additional breaking contracts;
 > see [ADR 0010](docs/adr/0010-prestable-model-dispatch-contract.md).
 
+> **Execution authority hard cut (unreleased beta.24):** qualified local Root
+> and Named Agent execution uses the original Runtime Store for identity,
+> admission, accounting, receipts and recovery. Host selection and product
+> projection remain separate. Stop old writers and follow the
+> [SQLite v11 / PostgreSQL cutover instructions](docs/breaking-changes.md#native-accounting-table-sqlite-v11).
+
 Gaoge Agent Runtime is a framework-neutral runtime SDK for durable, tool-using
 agents. It separates the deterministic run state machine from optional agent,
 harness, HTTP, protocol, and persistence capabilities.

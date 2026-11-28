@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
@@ -74,6 +75,13 @@ func (runner *Runner) resumeTurn(ctx context.Context, turnID string, expected *s
 	runtimeSnapshot, err := runner.runtime.Load(ctx, invocation.ExecutionRefID)
 	if err != nil {
 		if errors.Is(err, kernel.ErrNotFound) {
+			if revision == 0 {
+				if d, native, e := runner.readUncreatedRootDecision(ctx, turn, invocation); native && e == nil {
+					return runner.projectNativeCreationDecision(ctx, turn, invocation, d)
+				} else if e != nil && (!native || !errors.Is(e, kernel.ErrNotFound)) {
+					return runner.resumeTurnError(ctx, turn, nil, e)
+				}
+			}
 			err = errors.Join(ErrNotFound, err)
 		}
 		return runner.resumeTurnError(ctx, turn, nil, err)
@@ -98,8 +106,11 @@ func (runner *Runner) resumeTurn(ctx context.Context, turnID string, expected *s
 	}
 	// Managed recovery is a separate source-bound continuation. Validate
 	// frozen admission first, but do not run ordinary restoration/preparation
-	// or terminal projection before Kernel PARK/ENABLE or exact T4 repair.
+	// or terminal projection before native recovery admission or exact retirement repair.
 	if err = runner.requireFrozenAdmission(ctx, turn); err != nil {
+		return runner.resumeTurnError(ctx, turn, &runtimeSnapshot, err)
+	}
+	if err = runner.recoverReturnedChildDispatches(ctx, turn); err != nil {
 		return runner.resumeTurnError(ctx, turn, &runtimeSnapshot, err)
 	}
 	if recovered, managed, recoveryErr := runner.recoverManagedInvocation(ctx, invocation); managed {
@@ -121,6 +132,11 @@ func (runner *Runner) resumeTurn(ctx context.Context, turnID string, expected *s
 	// Approval or allowance control may already be committed while the Turn
 	// projection is stale. The Run and unresolved interactions own this gate.
 	if status != TurnRunning {
+		if !terminalRuntimeStatus(runtimeSnapshot.Run.Status) {
+			if _, err = runner.recoverOriginalPhysicalDispatch(ctx, invocation); err != nil {
+				return runner.resumeTurnError(ctx, turn, &runtimeSnapshot, err)
+			}
+		}
 		return runner.syncRuntimeSnapshotWithRetry(ctx, turn, invocation, runtimeSnapshot)
 	}
 	if err = runner.requireFrozenAdmission(ctx, turn); err != nil {
@@ -129,15 +145,30 @@ func (runner *Runner) resumeTurn(ctx context.Context, turnID string, expected *s
 	if err = runner.refreshStandardRemoteChildren(ctx, turn); err != nil {
 		return runner.resumeTurnError(ctx, turn, &runtimeSnapshot, err)
 	}
-	if runner.standardRemoteCoordinator() != nil {
-		// The original Agent owns the retained physical Tool grant. Recover
-		// its exact terminal child receipts before issuing another Resume
-		// grant; never re-enter a still-dispatched delegation Tool.
-		original, ok := runner.agent.(*agent.Runner)
-		if !ok {
-			return Snapshot{}, ErrConflict
+	if runner.nativeBudget() && runner.relations != nil && runner.standardDelegationReceiptOwner() != nil {
+		// An original capacity wait can now reach native Create after
+		// a definitive rejection. This is not replay of the Tool handler.
+		_, e := runner.ResumeWaitingDelegation(ctx, runtimeSnapshot.Run.ID, runtimeSnapshot.Run.Revision)
+		if errors.Is(e, budget.ErrWaiting) {
+			return runner.loadSnapshot(ctx, turn, &runtimeSnapshot)
 		}
+		if e != nil {
+			return runner.resumeTurnError(ctx, turn, &runtimeSnapshot, e)
+		}
+	}
+	if original := runner.standardDelegationReceiptOwner(); original != nil {
+		// Local and remote standard delegates both leave an original native
+		// Tool receipt obligation. The original Agent owns its retained
+		// physical grant, not the transport. Recover the exact terminal
+		// child receipt before issuing another Resume grant.
 		if scope, scopeErr := original.RootDeferredCleanupEligibility(ctx, runtimeSnapshot.Run.ID, runtimeSnapshot.Run.Revision); scopeErr == nil && scope.Valid() {
+			items, evidenceErr := runner.loadGlobalPhysicalEvidence(ctx, turn.ID)
+			if evidenceErr != nil {
+				return runner.resumeTurnError(ctx, turn, &runtimeSnapshot, evidenceErr)
+			}
+			if ActiveCancellationFence(items) {
+				return runner.resumeTurnError(ctx, turn, &runtimeSnapshot, ErrConflict)
+			}
 			repaired, receiptErr := original.ReconcileRootDeferredChildren(ctx, runtimeSnapshot.Run.ID, runtimeSnapshot.Run.Revision, scope)
 			if errors.Is(receiptErr, agent.ErrToolOutcomeUnknown) {
 				// The peer has not reached terminal evidence yet. No new

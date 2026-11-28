@@ -230,7 +230,7 @@ func TestDeferredRouteLegacyRoutedObservationRemainsUnavailable(t *testing.T) {
 	if _, _, err = r.localDelegationObservation(t.Context(), "child"); !errors.Is(err, ErrHandoffCancellationUnverified) {
 		t.Fatalf("legacy observation=%v", err)
 	}
-	if err = r.reconcileLocalTerminalHandoffEvidence(t.Context(), Turn{ID: "turn"}); err != nil {
+	if err = r.recoverReturnedChildDispatches(t.Context(), Turn{ID: "turn"}, true); err != nil {
 		t.Fatalf("legacy no-op=%v", err)
 	}
 }

@@ -12,31 +12,10 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
 func workingStateSummaryContract() *model.OutputContract {
 	return &model.OutputContract{Name: "working_state_summary", Schema: json.RawMessage(`{"type":"object","properties":{"goal":{"type":"string"},"constraints":{"type":"array","items":{"type":"string"}},"completed":{"type":"array","items":{"type":"string"}},"pending":{"type":"array","items":{"type":"string"}},"decisions":{"type":"array","items":{"type":"string"}}},"required":["goal","constraints","completed","pending","decisions"],"additionalProperties":false}`)}
-}
-
-func (runner *Runner) buildInvocation(ctx context.Context, snapshot kernel.Snapshot, state runState) (ModelInvocation, error) {
-	request, definitions, err := runner.buildUnpreparedModelRequest(ctx, snapshot, state)
-	if err != nil {
-		return ModelInvocation{}, err
-	}
-	if summaryEligible(snapshot, state) {
-		if runner.contextSummary == nil {
-			return ModelInvocation{}, ErrInvalidRequest
-		}
-		planned, ok, planErr := runner.contextSummary.plan(ctx, runner, snapshot, state, request, definitions)
-		if planErr != nil {
-			return ModelInvocation{}, planErr
-		}
-		if ok {
-			return planned, nil
-		}
-	}
-	return runner.prepareBusinessInvocation(ctx, snapshot, request, definitions)
 }
 
 func summaryEligible(snapshot kernel.Snapshot, state runState) bool {
@@ -47,7 +26,8 @@ func summaryEligible(snapshot kernel.Snapshot, state runState) bool {
 		(state.CallAllowance == nil || state.CallAllowance.LLMCalls == 0 || state.CallAllowance.LLMCalls-state.Budget.Usage.LLMCalls >= 2)
 }
 
-func (adapter *ContextSummaryAdapter) plan(ctx context.Context, runner *Runner, snapshot kernel.Snapshot, state runState, incoming model.Request, definitions []tools.Definition) (ModelInvocation, bool, error) {
+func (adapter *ContextSummaryAdapter) plan(ctx context.Context, runner *Runner, snapshot kernel.Snapshot, state runState, preparation *modelPreparation) (ModelInvocation, bool, error) {
+	incoming := preparation.original
 	if !summaryStatelessOptions(incoming.ModelOptions) {
 		return ModelInvocation{}, false, nil
 	}
@@ -98,8 +78,6 @@ func (adapter *ContextSummaryAdapter) plan(ctx context.Context, runner *Runner, 
 	if err != nil {
 		return ModelInvocation{}, false, err
 	}
-	preparation := &modelPreparation{run: snapshot.Run, client: runner.model, now: runner.clock.Now(),
-		original: model.CloneRequest(incoming), catalog: definitions}
 	business, err := preparation.candidate(plan.Request)
 	if err != nil {
 		return ModelInvocation{}, false, err
@@ -181,13 +159,7 @@ func (adapter *ContextSummaryAdapter) plan(ctx context.Context, runner *Runner, 
 	if providerName(runner.model, request) != providerName(runner.model, incoming) || modelBindingFingerprint(runner.model, request) != modelBindingFingerprint(runner.model, incoming) {
 		return ModelInvocation{}, false, ErrProviderBindingMismatch
 	}
-	inputPolicy := policy
-	if inputPolicy.MaxInputTokens <= 0 || binding.Policy.MaxInputTokens < inputPolicy.MaxInputTokens {
-		inputPolicy.MaxInputTokens = binding.Policy.MaxInputTokens
-	}
-	if binding.Policy.MaxSerializedBytes < inputPolicy.MaxSerializedBytes {
-		inputPolicy.MaxSerializedBytes = binding.Policy.MaxSerializedBytes
-	}
+	inputPolicy := summaryInputPolicy(binding)
 	// The summary has a distinct tool-free header and output contract.
 	// Freeze its own frame before deriving the durable invocation identity.
 	binding.SummaryAccounting, err = adapter.bounded.manager.FreezeRequestAccounting(ctx, request, plan.ModelWindow)
@@ -200,22 +172,61 @@ func (adapter *ContextSummaryAdapter) plan(ctx context.Context, runner *Runner, 
 	// The invocation ID is excluded from its own request hash, so its actual
 	// value can be derived before admission without creating a durable intent.
 	// Equal-length placeholders prove byte size but not an exact token count.
-	planned, err := planModelInvocation(snapshot.Run, runner.model, request, nil,
-		ModelInvocationContextSummary, binding, runner.clock.Now())
+	planned, err := planModelInvocation(preparation.run, preparation.client, request, nil,
+		ModelInvocationContextSummary, binding, preparation.now)
 	if err != nil {
 		return ModelInvocation{}, false, err
 	}
-	inputBudget, err := adapter.bounded.manager.AssessModelRequestWithAccounting(ctx, planned.Request, plan.ModelWindow, inputPolicy, binding.SummaryAccounting)
-	if err != nil {
-		return ModelInvocation{}, false, err
-	}
-	if !runtimecontext.WithinHardBudget(inputBudget, inputPolicy) {
+	// Keep the original source-bound summary request within its own byte
+	// envelope, even if a physical budget restriction changes its header.
+	if !contextSummaryInputBytesWithinPolicy(planned) {
 		return ModelInvocation{}, false, nil
 	}
-	if !matchesFrozenProviderBinding(runner.model, planned) {
+	if preparation.budget != nil {
+		ledger, err := preparation.samplingLedger(ctx)
+		if err != nil {
+			return ModelInvocation{}, false, err
+		}
+		// Summary is optional. Do not deliberately use the last shared
+		// model call on a summary instead of the user's business request.
+		if ledger.ID != "" {
+			for id := snapshot.Run.ID; ; id = ledger.Runs[id].ParentRunID {
+				view := ledger.View(id)
+				if view.Limits.MaxLLMCalls > 0 && view.Remaining.LLMCalls < 2 {
+					return ModelInvocation{}, false, nil
+				}
+				if id == "" {
+					break
+				}
+			}
+		}
+	}
+	physical, err := assessInvocationCandidate(ctx, adapter.bounded,
+		modelCandidate{request: model.CloneRequest(request), modelWindow: plan.ModelWindow, invocation: &planned, preparation: preparation},
+		planned.Request, plan.ModelWindow, inputPolicy, binding.SummaryAccounting)
+	if err != nil {
+		return ModelInvocation{}, false, err
+	}
+	// A summary is optional; a denied or waiting candidate does not seal
+	// an intent or reserve quota. Ordinary preparation may still succeed.
+	if physical.disposition != candidateAdmitted {
+		return ModelInvocation{}, false, nil
+	}
+	if physical.invocation == nil || physical.invocation.SamplingPlan == nil || !matchesFrozenProviderBinding(runner.model, *physical.invocation) {
 		return ModelInvocation{}, false, ErrInvalidRequest
 	}
-	return planned, true, nil
+	return *physical.invocation, true, nil
+}
+
+func summaryInputPolicy(binding *ContextSummaryBinding) runtimecontext.Policy {
+	policy := runtimecontext.NormalizePolicy(binding.ContextPolicy)
+	if policy.MaxInputTokens <= 0 || binding.Policy.MaxInputTokens < policy.MaxInputTokens {
+		policy.MaxInputTokens = binding.Policy.MaxInputTokens
+	}
+	if binding.Policy.MaxSerializedBytes < policy.MaxSerializedBytes {
+		policy.MaxSerializedBytes = binding.Policy.MaxSerializedBytes
+	}
+	return runtimecontext.NormalizePolicy(policy)
 }
 
 func summaryStateFitsEnvelope(value *runtimecontext.WorkingState) bool {

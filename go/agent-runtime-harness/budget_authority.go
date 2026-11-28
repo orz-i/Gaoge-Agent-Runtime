@@ -5,14 +5,19 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+	"reflect"
 	"sync"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 )
 
 type BudgetAuthorityDependencies struct {
+	// Runtime selects its exact native ledger. Store remains the Host
+	// selection and product projection source, not the accounting writer.
+	Runtime   *kernel.Runtime
 	Store     Store
 	Ledgers   budget.LedgerStore
 	Relations ContextRunRelationSource
@@ -21,7 +26,7 @@ type BudgetAuthorityDependencies struct {
 	TurnFeed  *TurnFeed
 }
 
-// BudgetAuthority is the Host-owned ledger and original-receipt authority.
+// BudgetAuthority adapts the frozen Host selection to a ledger and projects its facts.
 // It NEVER implements Run/Model/Tool middleware: the sole physical execution
 // driver is the native agent.BoundedBudgetAdapter, composed via Adapter().
 type BudgetAuthority struct {
@@ -32,13 +37,56 @@ type BudgetAuthority struct {
 }
 
 func NewBudgetAuthority(dependencies BudgetAuthorityDependencies) (*BudgetAuthority, error) {
-	if dependencies.Ledgers == nil {
+	if dependencies.Runtime != nil {
+		if dependencies.Ledgers != nil && !dependencies.Runtime.UsesLedgerStore(dependencies.Ledgers) {
+			return nil, ErrInvalidRequest
+		}
+		dependencies.Ledgers = dependencies.Runtime.BudgetStore()
+	} else if dependencies.Ledgers == nil {
 		dependencies.Ledgers, _ = dependencies.Store.(budget.LedgerStore)
 	}
 	if dependencies.Store == nil || dependencies.Ledgers == nil || dependencies.Clock == nil {
 		return nil, ErrInvalidRequest
 	}
 	return &BudgetAuthority{dependencies: dependencies}, nil
+}
+
+// loadLedger refuses to create a second accounting history when an existing
+// Turn was admitted by the other composition.
+// Same-table PostgreSQL installations may observe the identical record
+// through both connections; a concurrent revision change may be retried.
+func (authority *BudgetAuthority) loadLedger(ctx context.Context, id string) (budget.Ledger, error) {
+	d := authority.dependencies
+	var other budget.LedgerStore
+	if d.Runtime != nil {
+		other, _ = d.Store.(budget.LedgerStore)
+		if d.Runtime.UsesLedgerStore(other) {
+			other = nil
+		}
+	}
+	if other == nil {
+		return d.Ledgers.LoadBudget(ctx, id)
+	}
+	for range 4 {
+		legacy, e := other.LoadBudget(ctx, id)
+		if errors.Is(e, budget.ErrLedgerNotFound) {
+			return d.Ledgers.LoadBudget(ctx, id)
+		}
+		if e != nil {
+			return budget.Ledger{}, e
+		}
+		current, e := d.Ledgers.LoadBudget(ctx, id)
+		if errors.Is(e, budget.ErrLedgerNotFound) {
+			return budget.Ledger{}, ErrExecutionOutcomeUnknown
+		}
+		if e != nil {
+			return budget.Ledger{}, e
+		}
+		if reflect.DeepEqual(legacy, current) {
+			return current, nil
+		}
+	}
+	return budget.Ledger{}, ErrExecutionOutcomeUnknown
 }
 
 func (authority *BudgetAuthority) coordinator() budget.Coordinator {
@@ -72,9 +120,42 @@ func (authority *BudgetAuthority) resolveScope(ctx context.Context, runID string
 		return agent.BoundedBudgetScope{}, err
 	}
 	scope := agent.BoundedBudgetScope{LedgerID: turn.ID, Limits: *config.SharedBudget}
-	existing, err := d.Ledgers.LoadBudget(ctx, turn.ID)
+	existing, err := authority.loadLedger(ctx, turn.ID)
 	if err != nil && !errors.Is(err, budget.ErrLedgerNotFound) {
 		return scope, err
+	}
+	if d.Runtime != nil {
+		inv, e := verifiedRunInvocation(ctx, d.Store, runID)
+		if e != nil && !errors.Is(e, ErrNotFound) {
+			return scope, e
+		}
+		if e == nil {
+			if inv.TurnID != turn.ID {
+				return scope, ErrConflict
+			}
+			if inv.ParentItemID != "" && isHandoffDelegationInvocation(inv) {
+				frozen, parent, e := readOriginalHandoffParent(ctx, d.Store, d.Relations, inv, true)
+				if e != nil || d.Relations == nil {
+					return scope, errors.Join(ErrConflict, e)
+				}
+				binding := budget.RunBudget{ParentRunID: parent.ExecutionRefID, Limits: delegationBudgetLimits(frozen)}
+				if old, ok := existing.Runs[runID]; ok && old != binding {
+					return scope, budget.ErrLedgerConflict
+				}
+				scope.Runs = []agent.BoundedBudgetRunBinding{{RunID: runID, Binding: binding}}
+				return scope, nil
+			}
+			if inv.ParentItemID == "" && inv.Attempt > 1 {
+				if inv.Status != InvocationAccepted {
+					return scope, ErrConflict
+				}
+				selection, e := nativeRetrySelection(ctx, d.Store, inv)
+				if e != nil {
+					return scope, e
+				}
+				scope.Retry = budget.RootRetryGrant{InvocationID: inv.ID, OriginalRunID: selection.Previous.ExecutionRefID, Attempt: inv.Attempt, Active: true}
+			}
+		}
 	}
 	seen := map[string]bool{}
 	var visit func(string) error
@@ -107,6 +188,16 @@ func (authority *BudgetAuthority) resolveScope(ctx context.Context, runID string
 }
 
 func (authority *BudgetAuthority) bindRun(ctx context.Context, runID string) (budget.Ledger, error) {
+	// Existing local native Runs cannot be registered or rebound by a Host.
+	if rt := authority.dependencies.Runtime; rt != nil {
+		snap, err := rt.Load(ctx, runID)
+		if err == nil && snap.Run.Kind == "agent" {
+			return kernel.LoadRunBudget(ctx, authority.dependencies.Ledgers, snap.Run)
+		}
+		if err != nil && !errors.Is(err, kernel.ErrNotFound) {
+			return budget.Ledger{}, err
+		}
+	}
 	scope, err := authority.resolveScope(ctx, runID)
 	if err != nil || scope.LedgerID == "" {
 		return budget.Ledger{}, err

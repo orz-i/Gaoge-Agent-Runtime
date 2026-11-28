@@ -1,62 +1,42 @@
 package kernel
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
-	"sort"
-
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
 )
 
-// ErrOwnedRetirementPending preserves an original closure whose exact source,
-// owner or completion cannot be reconciled before a successor mutation.
-var ErrOwnedRetirementPending = errors.New("kernel original owned retirement must be acknowledged before successor")
-
-// ReduceOwnedRetirementSuccessor is a pure Store-transaction reducer. The
-// authoritative Store supplies its persisted retirement, current Run and owner
-// under the SAME Run lock as the proposed successor. It closes only a genuine
-// already-finished callback; it cannot retire an active grant, infer callback
-// completion from TTL, upgrade custody, or authorize physical dispatch.
-func ReduceOwnedRetirementSuccessor(r OwnedRetirementReceipt, current Snapshot, epoch uint64, lease ExecutionLease, hasGrants bool) (OwnedRetirementReceipt, bool, error) {
-	if !r.Valid() || r.Phase != "RETIRED" || r.Evidence.Completion.GrantID == "" {
-		return r, false, ErrOwnedRetirementPending
-	}
-	g := r.Evidence.Grant
-	p := OwnedRetirementAcknowledgement{proof: featurecontrol.Seal(g.ChildRunID, r.Evidence.Snapshot.Run.Revision,
-		"agent_owned_retirement_ack", g.ID, OwnedRetirementAcknowledgementPayload(r), nil)}
-	next, _, release, err := ReduceOwnedRetirementACK(r, g, p, current, epoch, lease, hasGrants)
-	if err != nil {
-		return r, false, errors.Join(ErrOwnedRetirementPending, err)
-	}
-	return next, release, nil
-}
-
-// These records are Store facts, not dispatch or acknowledgement capabilities.
+// These records are immutable Store facts, not execution capabilities.
 type OwnedSettlementEvidence struct {
 	Version    uint64
 	Grant      ChildExecutionGrant
 	Snapshot   Snapshot
 	Completion OwnedPhysicalCallbackCompletion
-	MarkOrigin string
 }
 type OwnedRetirementReceipt struct {
-	Version     uint64
-	Evidence    OwnedSettlementEvidence
-	Closures    []ManagedTransfer
-	Phase       string
-	ACKIdentity string
+	Version  uint64
+	Evidence OwnedSettlementEvidence
+	Closures []ManagedTransfer
+	// The immutable Finish fact has one integrity digest, no ACK state.
+	Digest string
 }
-type OwnedRetirementAckResult struct {
-	ReceiptID              string
-	SettledSourceDigest    string
-	PreviouslyAcknowledged bool
-	Disposition            string
+
+// No intermediate retirement or old ACK tuple is a Finish fact.
+func (r *OwnedRetirementReceipt) UnmarshalJSON(raw []byte) error {
+	type fact OwnedRetirementReceipt
+	var value fact
+	d := json.NewDecoder(bytes.NewReader(raw))
+	d.DisallowUnknownFields()
+	if err := d.Decode(&value); err != nil {
+		return err
+	}
+	*r = OwnedRetirementReceipt(value)
+	return nil
 }
+
 type OwnedRetirementStore interface {
 	LoadOwnedRetirement(context.Context, string) (OwnedRetirementReceipt, error)
 	LookupOwnedRetirementForRun(context.Context, string) (OwnedRetirementReceipt, error)
-	AcknowledgeOwnedRetirement(context.Context, ChildExecutionGrant, OwnedRetirementAcknowledgement) (OwnedRetirementAckResult, error)
 }
 
 func (e OwnedSettlementEvidence) Valid() bool {
@@ -65,36 +45,50 @@ func (e OwnedSettlementEvidence) Valid() bool {
 		return false
 	}
 	if c.GrantID == "" {
-		return c == (OwnedPhysicalCallbackCompletion{}) && e.MarkOrigin == "LEGACY_UNKNOWN"
+		return false
 	}
 	if c.NotEntered() {
-		return e.MarkOrigin == "NOT_ENTERED" && c.MatchesNotEnteredSnapshot(g, s)
+		return c.MatchesNotEnteredSnapshot(g, s)
 	}
-	return ValidateOwnedPhysicalCompletion(g, c) == nil && c.HostCompleted && c.ReturnRevision <= s.Run.Revision &&
-		(e.MarkOrigin == "OWNER_RETURN" || e.MarkOrigin == "RECOVERED_RETURN" || e.MarkOrigin == "LEGACY_UNKNOWN")
+	return ValidateOwnedPhysicalCompletion(g, c) == nil && c.HostCompleted && c.ReturnRevision <= s.Run.Revision
 }
 
-// ValidateOwnedRetirementClosures validates only existing CLOSED T4 facts.
-// The caller must enumerate all matching histories under the Run transaction.
-func ValidateOwnedRetirementClosures(g ChildExecutionGrant, s Snapshot, a ManagedAuthority, histories []ManagedTransfer) ([]ManagedTransfer, error) {
-	out := make([]ManagedTransfer, 0)
-	for _, t := range histories {
-		if t.SuccessorGrant != g {
-			continue
-		}
-		if !t.SafePoint.Valid() || !t.Selection.Valid() || t.Selection.Mode != ManagedResume || t.SafePoint.Host.KernelAuthority != a || t.State != ManagedClosed || t.Revision == 0 || t.Terminal == nil || ManagedDigest(*t.Terminal) != ManagedDigest(s) {
-			return nil, ErrExecutionConflict
-		}
-		out = append(out, t)
+// CloseManagedRetirement derives the managed closure only from the exact
+// entered successor and its settled Run. Caller validates the retirement
+// evidence and commits the closure, retirement receipt and Grant deletion
+// together. A managed Grant without its selected current point cannot finish.
+func CloseManagedRetirement(g ChildExecutionGrant, s Snapshot, a ManagedAuthority, t ManagedTransfer) ([]ManagedTransfer, error) {
+	if g.AdmissionOperation != "managed_resume" {
+		return []ManagedTransfer{}, nil
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].SafePoint.ID < out[j].SafePoint.ID })
-	for i := 1; i < len(out); i++ {
-		if out[i-1].SafePoint.ID == out[i].SafePoint.ID {
-			return nil, ErrExecutionConflict
-		}
+	if !t.Valid() || !managedResumeSelectionMatches(t) ||
+		t.SafePoint.Host.KernelAuthority != a || t.SafePoint.Host.RunID != g.ChildRunID ||
+		t.SuccessorGrant != g ||
+		t.Revision == 0 || t.Terminal != nil || s.Run.ID != g.ChildRunID {
+		return nil, ErrExecutionConflict
 	}
-	return out, nil
+	t.Revision = s.Run.Revision
+	terminal := managedClone(s)
+	t.Terminal = &terminal
+	return []ManagedTransfer{t}, nil
 }
+
+// MatchesManagedClosure verifies the same committed retirement fact; no
+// separate pre-retirement closure can certify a returned successor.
+func ObserveManagedRetirement(t ManagedTransfer, r OwnedRetirementReceipt) (ManagedTransfer, error) {
+	closures, err := CloseManagedRetirement(t.SuccessorGrant, r.Evidence.Snapshot, t.SafePoint.Host.KernelAuthority, t)
+	if err != nil || len(closures) != 1 || !r.MatchesManagedClosure(closures[0], r.Evidence.Snapshot) {
+		return ManagedTransfer{}, ErrExecutionConflict
+	}
+	return closures[0], nil
+}
+
+func (r OwnedRetirementReceipt) MatchesManagedClosure(t ManagedTransfer, s Snapshot) bool {
+	return r.Valid() && r.Evidence.Grant == t.SuccessorGrant &&
+		len(r.Closures) == 1 && ManagedDigest(r.Closures[0]) == ManagedDigest(t) &&
+		ManagedDigest(r.Evidence.Snapshot) == ManagedDigest(s)
+}
+
 func (r OwnedRetirementReceipt) Identity() string {
 	return ManagedDigest(struct {
 		Version  uint64
@@ -103,66 +97,41 @@ func (r OwnedRetirementReceipt) Identity() string {
 	}{r.Version, r.Evidence, r.Closures})
 }
 func (r OwnedRetirementReceipt) Valid() bool {
-	if r.Version != 1 || !r.Evidence.Valid() || r.Closures == nil || (r.Evidence.Completion.NotEntered() && len(r.Closures) != 0) {
+	if r.Version != 1 || !r.Evidence.Valid() || r.Evidence.Completion.GrantID == "" || r.Closures == nil || (r.Evidence.Completion.NotEntered() && len(r.Closures) != 0) {
+		return false
+	}
+	if r.Evidence.Grant.AdmissionOperation == "managed_resume" {
+		if len(r.Closures) != 1 || !r.Evidence.Completion.HostCompleted || !r.Evidence.Completion.LeaseOwned {
+			return false
+		}
+	} else if len(r.Closures) != 0 {
 		return false
 	}
 	for i, t := range r.Closures {
-		if !t.SafePoint.Valid() || !t.Selection.Valid() || t.Selection.Mode != ManagedResume || t.SuccessorGrant != r.Evidence.Grant || t.State != ManagedClosed || t.Revision == 0 || t.Terminal == nil || ManagedDigest(*t.Terminal) != ManagedDigest(r.Evidence.Snapshot) || (i > 0 && r.Closures[i-1].SafePoint.ID >= t.SafePoint.ID) {
+		if !t.Resolved() || t.Selection.Mode != ManagedResume || t.SuccessorGrant != r.Evidence.Grant || t.Revision == 0 || ManagedDigest(*t.Terminal) != ManagedDigest(r.Evidence.Snapshot) || (i > 0 && r.Closures[i-1].SafePoint.ID >= t.SafePoint.ID) {
 			return false
 		}
 	}
-	return (r.Phase == "RETIRED" && r.ACKIdentity == "") || (r.Phase == "ACKNOWLEDGED" && r.ACKIdentity == r.Identity())
-}
-func OwnedRetirementAcknowledgementPayload(r OwnedRetirementReceipt) json.RawMessage {
-	b, _ := json.Marshal(struct{ Identity string }{r.Identity()})
-	return b
+	return r.Digest != "" && r.Digest == r.Identity()
 }
 
-type OwnedRetirementAcknowledgement struct{ proof *featurecontrol.Proof }
-
-func (p OwnedRetirementAcknowledgement) Matches(g ChildExecutionGrant, r OwnedRetirementReceipt) bool {
-	if !r.Valid() || r.Evidence.Grant != g || r.Evidence.Completion.GrantID == "" {
-		return false
-	}
-	return p.proof.Matches(g.ChildRunID, r.Evidence.Snapshot.Run.Revision, "agent_owned_retirement_ack", g.ID, OwnedRetirementAcknowledgementPayload(r), nil)
-}
-
-// ReduceOwnedRetirementACK is shared by all Stores under their transaction.
-// A repeated ACK is a historical read, never authority over current state.
-func ReduceOwnedRetirementACK(r OwnedRetirementReceipt, g ChildExecutionGrant, p OwnedRetirementAcknowledgement, current Snapshot, epoch uint64, lease ExecutionLease, hasGrants bool) (OwnedRetirementReceipt, OwnedRetirementAckResult, bool, error) {
-	if !p.Matches(g, r) {
-		return r, OwnedRetirementAckResult{}, false, ErrExecutionConflict
-	}
-	result := OwnedRetirementAckResult{ReceiptID: g.ID, SettledSourceDigest: ManagedDigest(r.Evidence.Snapshot), PreviouslyAcknowledged: r.Phase == "ACKNOWLEDGED", Disposition: "preserved_borrowed"}
-	if r.Evidence.Completion.LeaseOwned {
-		result.Disposition = "released_owned"
-	}
-	if result.PreviouslyAcknowledged {
-		return r, result, false, nil
-	}
-	if hasGrants || epoch != g.ExecutionEpoch || !g.MatchesExecution(lease) || ManagedDigest(current) != ManagedDigest(r.Evidence.Snapshot) {
-		return r, OwnedRetirementAckResult{}, false, ErrExecutionConflict
-	}
-	r.Phase = "ACKNOWLEDGED"
-	r.ACKIdentity = r.Identity()
-	return r, result, r.Evidence.Completion.LeaseOwned, nil
-}
-
-// SelectOwnedRetirementForRun is a read-only selector, never an ACK permit.
-// Stores supply all receipts for this Run under the same lock as native state.
+// SelectOwnedRetirementForRun observes only the exact completed physical
+// source at the current epoch. It performs no retirement or lease write.
 func SelectOwnedRetirementForRun(runID string, receipts []OwnedRetirementReceipt, current Snapshot, epoch uint64, lease ExecutionLease, hasGrants bool) (OwnedRetirementReceipt, error) {
 	var selected OwnedRetirementReceipt
 	for _, r := range receipts {
 		if !r.Valid() || r.Evidence.Grant.ChildRunID != runID {
 			return OwnedRetirementReceipt{}, ErrExecutionConflict
 		}
-		if r.Phase == "ACKNOWLEDGED" {
+		g := r.Evidence.Grant
+		if current.Run.ID != runID || epoch != g.ExecutionEpoch || ManagedDigest(current) != ManagedDigest(r.Evidence.Snapshot) {
 			continue
 		}
-		g := r.Evidence.Grant
-		// Valid historical rows remain durable facts, not candidates for a
-		// different current source or native owner. Never ACK them by Run ID.
-		if current.Run.ID != runID || epoch != g.ExecutionEpoch || !g.MatchesExecution(lease) || ManagedDigest(current) != ManagedDigest(r.Evidence.Snapshot) {
+		if r.Evidence.Completion.LeaseOwned {
+			if lease.OwnerID != "" || lease.LeaseID != "" || !lease.ExpiresAt.IsZero() {
+				continue
+			}
+		} else if !g.MatchesExecution(lease) {
 			continue
 		}
 		if selected.Version != 0 {

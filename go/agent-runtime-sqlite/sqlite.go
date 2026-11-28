@@ -9,12 +9,13 @@ import (
 
 	ncruces "github.com/ncruces/go-sqlite3"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-sqlite/profile"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget/sqlledger"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	sqlite3 "modernc.org/sqlite"
 )
 
-// Schema v10 reserves every physical Grant identity. Open never migrates.
-const schemaVersion = 10
+// Schema v11 includes the native transaction-owned budget ledger. Open never migrates.
+const schemaVersion = 11
 
 var (
 	ErrUnsupportedSchema = profile.ErrUnsupportedSchema
@@ -114,6 +115,12 @@ func (s *Store) initialize(ctx context.Context, create bool) error {
 		if _, err := sqliteManagedAuthority(ctx, s.db); err != nil {
 			return err
 		}
+		if err := validateFinalRetirements(ctx, s.db); err != nil {
+			return err
+		}
+		if err := validateNativeBudgetBindings(ctx, s.db); err != nil {
+			return err
+		}
 	}
 	if create {
 		var existing int
@@ -163,7 +170,9 @@ func (s *Store) initialize(ctx context.Context, create bool) error {
 
 const callbackToolReturnsColumn = "callback_tool_returns TEXT NOT NULL DEFAULT ''"
 
-var schemaDDL = append(schemaV9DDL(), grantIdentityDDL)
+var schemaDDL = append(schemaV10DDL(), sqlledger.SQLiteDDL, runIdentityDDL)
+
+func schemaV10DDL() []string { return append(schemaV9DDL(), grantIdentityDDL) }
 
 func schemaV9DDL() []string {
 	out := schemaV8DDL()

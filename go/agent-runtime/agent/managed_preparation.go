@@ -1,0 +1,123 @@
+package agent
+
+import (
+	"context"
+	"encoding/json"
+	"strconv"
+
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/callbackscope"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
+)
+
+// Only the registered concrete first-party Context bridge can read this
+// preparation source. It is a storage read, never a configurable preparation
+// callback, and cannot select or enable an execution owner.
+type managedPreparationContextPort interface {
+	ReadManagedPreparationContext(context.Context, kernel.ManagedHostBinding, *kernel.ManagedPreparationContext, []model.Message) (kernel.ManagedPreparationContext, error)
+}
+
+func (r *Runner) readManagedPreparationContext(ctx context.Context, b kernel.ManagedHostBinding, expected *kernel.ManagedPreparationContext, state runState) (kernel.ManagedPreparationContext, error) {
+	if !r.SupportsManagedRecovery() {
+		return kernel.ManagedPreparationContext{}, ErrInvalidRequest
+	}
+	port, ok := r.nativeContext.ports.(managedPreparationContextPort)
+	if !ok {
+		return kernel.ManagedPreparationContext{}, ErrInvalidRequest
+	}
+	var messages []model.Message
+	if expected != nil {
+		_, _, messages = projectModelPreparation(state, nil, nil)
+	}
+	return port.ReadManagedPreparationContext(ctx, b, expected, messages)
+}
+
+func managedPreparationState(status kernel.RunStatus, state runState) bool {
+	if status != kernel.RunStatusRunning || !managedObligationsQuiescent(state) || !knownRootStatePhysicalSettlement(state) {
+		return false
+	}
+	_, active := activeModelInvocation(state)
+	return !active
+}
+
+func managedPreparationLedger(state runState, l budget.Ledger) bool {
+	for _, inv := range state.ModelInvocations {
+		if inv.Status != ModelInvocationConsumed || !managedModelLedgerPhase(inv, l) {
+			return false
+		}
+	}
+	return true
+}
+
+// A first-owner native preparation point is established BEFORE input reading
+// or candidate preparation. It covers no dispatched request. A previously
+// elected successor still owns its original transfer, never a new selection.
+func (r *Runner) managedPreparationBinding(ctx context.Context, s kernel.Snapshot) (kernel.ManagedHostBinding, bool) {
+	if s.Run.ParentRunID != "" {
+		return kernel.ManagedHostBinding{}, false
+	}
+	frame, _ := callbackscope.RunCall(ctx).(*nativeRunAdmission)
+	if frame == nil || frame.invocation.RunID != s.Run.ID || !frame.entered.Load() || frame.receiptOnly {
+		return kernel.ManagedHostBinding{}, false
+	}
+	return r.managedOriginalDispatch(ctx, s.Run.ID)
+}
+
+func (r *Runner) ensureManagedPreparation(ctx context.Context, s kernel.Snapshot, state runState) (kernel.Snapshot, error) {
+	_, ok := r.managedPreparationBinding(ctx, s)
+	if !ok || !managedPreparationState(s.Run.Status, state) {
+		return s, nil
+	}
+	current, err := r.runtime.LoadManagedRecovery(ctx, s.Run.ID)
+	if err == nil && current.Valid() && current.Selection.Mode == "" && current.Terminal == nil && current.SafePoint.OriginalGrant == *r.activePhysicalGrant &&
+		kernel.ManagedSourceMatches(current.SafePoint, s) {
+		if o, ok := current.SafePoint.AgentObligations(); ok && o.Phase == "prepare" {
+			return s, nil
+		}
+	}
+	if err != nil && !kernel.ManagedRecoveryAbsent(err) {
+		return s, err
+	}
+	m := kernel.Mutation{Status: kernel.RunStatusRunning, State: s.State, Checkpoint: s.Checkpoint, ErrorCode: s.Run.ErrorCode, ErrorDetail: s.Run.ErrorDetail,
+		Events: []kernel.EventDraft{{Type: "agent.native_preparation.ready", Message: "First-party model preparation frontier"}}}
+	return r.commitNativeTransition(ctx, s, m)
+}
+
+func (r *Runner) qualifyManagedPreparation(ctx context.Context, s kernel.Snapshot, state runState, m kernel.Mutation, b kernel.ManagedHostBinding) (*kernel.ManagedSafePoint, error) {
+	p, l, eligible, err := r.freezeManagedSource(ctx, s, state, b, m.Ledger)
+	if err != nil || !eligible {
+		return nil, err
+	}
+	if p.LedgerID != "" && !managedPreparationLedger(state, l) {
+		return nil, budget.ErrLedgerConflict
+	}
+	source, err := r.readManagedPreparationContext(ctx, b, nil, state)
+	if err != nil {
+		return nil, err
+	}
+	p.Phase = "prepare"
+	p.PreparationContext = &source
+	journal, ok := callbackscope.ManagedPreparationSuspension(ctx, r.nativeContext, r.managedBudgetOwner(),
+		strconv.FormatUint(p.SourceRevision, 10), struct {
+			Revision, Cursor uint64
+			Context          kernel.ManagedPreparationContext
+		}{p.SourceRevision, p.InputCursor, source})
+	if !ok {
+		return nil, nil
+	}
+	if !kernel.ManagedPreparationTransition(m.Events) {
+		return nil, ErrInvalidRequest
+	}
+	p.PreparationTransitionDigest = kernel.ManagedDigest(m.Events)
+	p.Journal = journal
+	raw, err := json.Marshal(p)
+	if err != nil {
+		return nil, err
+	}
+	id := "managed-safe-" + kernel.ManagedDigest(struct {
+		Grant, Phase string
+		Revision     uint64
+	}{r.activePhysicalGrant.ID, p.Phase, p.SourceRevision})
+	return r.managedTransitionPoint(ModelInvocation{}, b, id, raw), nil
+}

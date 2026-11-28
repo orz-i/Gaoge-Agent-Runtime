@@ -47,15 +47,24 @@ func (runner *Runner) RootDeferredCleanupEligibility(ctx context.Context, runID 
 	if err != nil {
 		return RootDeferredCleanupScope{}, err
 	}
-	if completion == nil || completion.NotEntered() {
-		// No-entry is only admission retirement, never child-cleanup custody.
+	if completion == nil {
 		return RootDeferredCleanupScope{}, ErrRootOutcomeUnknown
 	}
 	scope := RootDeferredCleanupScope{grant: grant, completion: *completion, valid: true}
+	if completion.NotEntered() {
+		// Exact no-entry can retire its native admission, never authorize
+		// child cleanup. This is the same retirement-only path as a known
+		// settled callback, including after a lost Finish response.
+		if !completion.MatchesNotEnteredSnapshot(grant, snapshot) {
+			return RootDeferredCleanupScope{}, ErrRootOutcomeUnknown
+		}
+		scope.retirementOnly = true
+		return scope, nil
+	}
 	// Receipt recovery and retirement are separate durable transitions.
 	// A lost recovery ACK, Mark or Finish error must resume the latter
 	// with the SAME whole-callback evidence, even after the last marker
-	// disappeared. A pending RETIRED receipt also qualifies here.
+	// disappeared. An exact current final receipt also qualifies here.
 	if knownRootPhysicalSettlement(snapshot) {
 		scope.retirementOnly = true
 		return scope, nil

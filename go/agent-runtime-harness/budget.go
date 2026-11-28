@@ -11,7 +11,7 @@ func (runner *Runner) loadTurnBudget(ctx context.Context, turn Turn) (*budget.Le
 	if runner.budgets == nil {
 		return nil, nil
 	}
-	ledger, err := runner.budgets.dependencies.Ledgers.LoadBudget(ctx, turn.ID)
+	ledger, err := runner.budgets.loadLedger(ctx, turn.ID)
 	if errors.Is(err, budget.ErrLedgerNotFound) {
 		return nil, nil
 	}
@@ -19,6 +19,30 @@ func (runner *Runner) loadTurnBudget(ctx context.Context, turn Turn) (*budget.Le
 		return nil, err
 	}
 	return &ledger, nil
+}
+
+// Frozen selection and the actual ledger must agree before executable control.
+// An unused authority does not create an accounting obligation.
+func (runner *Runner) frozenTurnBudget(ctx context.Context, turn Turn) (*budget.Ledger, error) {
+	config, err := loadSealedConfig(ctx, runner.store, turn.ConfigSnapshotID)
+	if err != nil {
+		return nil, err
+	}
+	ledger, err := runner.loadTurnBudget(ctx, turn)
+	if err != nil {
+		return nil, err
+	}
+	if config.TurnID != turn.ID || (config.SharedBudget == nil) != (ledger == nil) ||
+		ledger != nil && (ledger.ID != turn.ID || ledger.Limits != *config.SharedBudget) {
+		return nil, ErrExecutionOutcomeUnknown
+	}
+	return ledger, nil
+}
+
+// nativeBudget is selected by the standard first-party composition; the
+// same Runtime owns effect admission, receipt and local cancellation.
+func (runner *Runner) nativeBudget() bool {
+	return runner.budgets != nil && runner.budgets.dependencies.Runtime == runner.runtime
 }
 
 // Cancellation closes the original Root subtree, not the cumulative Turn

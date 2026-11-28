@@ -175,10 +175,14 @@ func TestPR82HandoffCancelRequiresFixedActualChildKernel(t *testing.T) {
 func TestPR82HandoffWithoutGrantCannotCancelCollidingRun(t *testing.T) {
 	f := newPR82HandoffFixture(t)
 	d := f.delegation()
-	if err := f.runner.prepareHandoffChild(t.Context(), f.turn, f.parent, d, f.startedItemID); err != nil {
+	started, err := f.runner.recordDelegationItem(t.Context(), f.turn, f.parent, d, ItemStarted, "")
+	if err != nil {
 		t.Fatal(err)
 	}
-	_, err := f.runtime.Create(t.Context(), kernel.CreateRequest{ID: d.ChildRunID, Kind: agent.RunKind,
+	if err := f.runner.prepareHandoffChild(t.Context(), f.turn, f.parent, d, started); err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.runtime.Create(t.Context(), kernel.CreateRequest{ID: d.ChildRunID, Kind: agent.RunKind,
 		Actor: f.parentRun.Run.Actor, Thread: f.parentRun.Run.Thread,
 		RequestID: f.parentRun.Run.ID + ":" + d.ID, Goal: d.Goal, State: []byte(`{}`)})
 	if err != nil {

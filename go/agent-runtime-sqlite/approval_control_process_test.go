@@ -61,12 +61,12 @@ func (s *controlTestFencedCreateStore) Create(ctx context.Context, record kernel
 	record.ExecutionRequired = true
 	return s.Store.Create(ctx, record, events)
 }
-func (s *controlTestFencedCreateStore) AcquireExecution(ctx context.Context, req kernel.ExecutionAcquireRequest) (kernel.ExecutionLease, error) {
-	lease, err := s.Store.AcquireExecution(ctx, req)
-	if err == nil {
-		s.lease = lease
+func (s *controlTestFencedCreateStore) BeginOwnedPhysicalExecution(ctx context.Context, p kernel.OwnedPhysicalAdmission) (kernel.OwnedPhysicalAdmissionResult, error) {
+	v, e := s.Store.BeginOwnedPhysicalExecution(ctx, p)
+	if e == nil {
+		s.lease = v.Lease
 	}
-	return lease, err
+	return v, e
 }
 
 func controlTestRunner(rt *kernel.Runtime, markerPath string, deferResumption bool) (*agent.Runner, error) {

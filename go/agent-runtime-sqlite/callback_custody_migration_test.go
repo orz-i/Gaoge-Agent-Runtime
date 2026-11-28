@@ -24,7 +24,7 @@ func TestCallbackCustodyMigrationPreservesUnknownHistory(t *testing.T) {
 	if _, err = db.Exec("PRAGMA user_version=6"); err != nil {
 		t.Fatal(err)
 	}
-	rt, err := kernel.New(kernel.Dependencies{Store: &Store{db: db}})
+	rt, err := kernel.New(kernel.Dependencies{Store: legacyRunFixtureStore{&Store{db: db}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,6 +59,9 @@ func TestCallbackCustodyMigrationPreservesUnknownHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err = MigrateV9ToV10(t.Context(), path); err != nil {
+		t.Fatal(err)
+	}
+	if err = MigrateV10ToV11(t.Context(), path); err != nil {
 		t.Fatal(err)
 	}
 	s, err := OpenExisting(t.Context(), path)

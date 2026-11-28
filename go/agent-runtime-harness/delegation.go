@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,7 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
@@ -69,7 +71,7 @@ func normalizeDelegateRequest(request DelegateRequest) (DelegateRequest, error) 
 	// The Host may only fill execution options. Physical identity, parent
 	// lineage, Actor/Thread, Goal, and continuation grants are Runtime-owned.
 	a := &request.Agent
-	if a.ID != "" || a.RequestID != "" || a.ParentRunID != "" || a.OriginFingerprint != "" ||
+	if a.ID != "" || a.RequestID != "" || a.ParentRunID != "" || a.LogicalParentRunID != "" || a.OriginFingerprint != "" ||
 		a.Actor != (kernel.ActorRef{}) || a.Thread != (kernel.ThreadRef{}) || a.Goal != "" ||
 		a.DeadlineAt != nil || a.CallAllowance != nil || a.AutoAllowance != nil ||
 		len(a.RequiredToolKeys) != 0 || model.ValidateOutputContract(a.OutputContract) != nil || a.MaxModelOutputTokens < 0 || !enforceableHarnessBudgetLimits(a.Limits) {
@@ -177,36 +179,51 @@ func (runner *Runner) delegate(ctx context.Context, turn Turn, invocation Invoca
 	if err != nil {
 		return DelegationResult{}, err
 	}
-	if err = runner.admitDelegationChild(ctx, turn, invocation, delegation); err != nil {
-		if errors.Is(err, budget.ErrWaiting) {
-			// Freeze the requested delegation, but create no child Invocation,
-			// relation or Run until lifetime capacity is available. The same
-			// logical Tool call is observed again by the scheduled continuation.
-			if _, itemErr := runner.recordDelegationItem(ctx, turn, invocation, delegation, ItemWaiting, "", request.callHash); itemErr != nil {
-				return DelegationResult{}, itemErr
-			}
-			snapshot, loadErr := runner.Load(ctx, turn.ID)
-			return DelegationResult{Delegation: delegation, Snapshot: snapshot}, loadErr
+	startedItemID, admitted, err := runner.admitOriginalDelegation(ctx, turn, invocation, delegation)
+	if errors.Is(err, budget.ErrWaiting) {
+		if _, e := runner.recordDelegationItem(ctx, turn, invocation, delegation, ItemWaiting, "", request.callHash); e != nil {
+			return DelegationResult{}, e
 		}
-		return DelegationResult{}, err
+		snapshot, e := runner.Load(ctx, turn.ID)
+		return DelegationResult{Delegation: delegation, Snapshot: snapshot}, e
 	}
-	// Ordinary Tool/Manual entry and autonomous Waiting recovery share the
-	// same Store-serialized first-writer boundary. A settled physical Grant
-	// is not permission to call StartOrLoad again; even a returned Running
-	// child could have performed non-idempotent remote work. Reconciliation
-	// must use the original read-only receipt path instead.
-	startedItemID, admitted, err := runner.recordDelegationItemWithAdmission(ctx, turn, invocation, delegation, ItemStarted, "")
 	if err != nil {
 		return DelegationResult{}, err
 	}
 	if !admitted {
-		// Do not issue another physical Handoff, but allow a duplicate
-		// Manual/API caller to read a fully authenticated *original*
-		// terminal result. A merely Running child, absent grant receipt,
-		// foreign route, or inconsistent terminal projection is unknown.
 		return runner.verifiedTerminalDelegationReplay(ctx, turn, delegation, startedItemID)
 	}
-	return runner.executeDelegation(ctx, turn, invocation, parent, delegation, startedItemID)
+
+	return runner.executeDelegation(ctx, turn, invocation, parent, delegation, startedItemID, request.callHash)
+}
+
+// Both an ordinary Start and an original capacity wakeup admit the same
+// immutable child. A known prior Start is read before budget mutation;
+// only the original native rejection can re-enter its existing identity.
+func (runner *Runner) admitOriginalDelegation(ctx context.Context, turn Turn, owner Invocation, d handoff.Delegation) (string, bool, error) {
+	id := stableID("hid", turn.ID, d.ID, string(ItemStarted))
+	started, err := runner.store.GetItem(ctx, id)
+	retry := err == nil
+	if retry {
+		p, valid := frozenDelegationAdmissionPayload(owner, started)
+		if !valid || started.Status != ItemStarted || started.ID != id || started.InvocationID != owner.ID ||
+			started.RunID != d.ChildRunID || p.ParentRunID != owner.ExecutionRefID || !sameHandoffFrozenExecution(d, *p.Execution) {
+			return id, false, ErrConflict
+		}
+		ready, e := runner.retryNativeDelegation(ctx, turn, d, id)
+		if e != nil || !ready {
+			return id, false, e
+		}
+	} else if !errors.Is(err, ErrNotFound) {
+		return id, false, err
+	}
+	if err = runner.admitDelegationChild(ctx, turn, owner, d); err != nil {
+		return id, false, err
+	}
+	if retry {
+		return id, true, nil
+	}
+	return runner.recordDelegationItemWithAdmission(ctx, turn, owner, d, ItemStarted, "")
 }
 
 // verifiedTerminalDelegationReplay is read-only. It cannot run the original
@@ -228,34 +245,16 @@ func (runner *Runner) verifiedTerminalDelegationReplay(
 	if err != nil {
 		return unknown()
 	}
-	items, err := listAllItems(ctx, runner.store, turn.ID)
-	if err != nil || !VerifiedTerminalHandoffChild(root, childOwner, items) {
+	items, err := runner.loadGlobalPhysicalEvidence(ctx, turn.ID)
+	if err != nil {
 		return unknown()
 	}
-	child, physical, err := runner.delegationObservation(ctx, frozen.ChildRunID)
-	if err != nil || !sameHandoffFrozenExecution(frozen, physical) ||
-		!terminalRuntimeStatus(child.Run.Status) {
+	status, valid := verifiedTerminalHandoffProjection(root, childOwner, items)
+	if !valid {
 		return unknown()
 	}
-	result := frozen
-	result.Status = handoff.Status(child.Run.Status)
-	result.ErrorCode = child.Run.ErrorCode
-	if child.Result != nil {
-		result.Result = append(json.RawMessage(nil), child.Result.Content...)
-	}
-	// A physical terminal Run and a forged terminal Item must never
-	// disagree. The ordinary original-return Item is authoritative only
-	// when VerifiedTerminalHandoffChild also verified its unique grant.
-	matched := false
-	for _, item := range items {
-		if item.Kind == ItemDelegation && item.ParentItemID == startedItemID {
-			if item.Status != delegationItemStatus(result.Status) {
-				return unknown()
-			}
-			matched = true
-		}
-	}
-	if !matched {
+	result, _, err := runner.terminalDelegationOutcome(ctx, childOwner, frozen)
+	if err != nil || status != delegationItemStatus(result.Status) {
 		return unknown()
 	}
 	snapshot, err := runner.Load(ctx, turn.ID)
@@ -299,7 +298,7 @@ func (runner *Runner) prepareDelegation(
 		ID: delegationID, MemberID: request.MemberID, ChildRunID: childRunID,
 		Goal: request.Goal, Status: handoff.StatusQueued,
 	}
-	if frozen, found, loadErr := runner.frozenDelegation(ctx, turn.ID, delegationID); found || loadErr != nil {
+	if frozen, found, loadErr := runner.frozenDelegation(ctx, turn.ID, delegationID, invocation.ID); found || loadErr != nil {
 		return frozen, parent, loadErr
 	}
 	// The Host chose the named Agent before entering Runtime. Freeze only the
@@ -425,7 +424,72 @@ func (runner *Runner) prepareDelegation(
 	resolved.MaxChildRuns, resolved.MaxConcurrentRuns, resolved.MaxCostUnits, resolved.MaxStateBytes = 0, 0, 0, 0
 	resolved.MaxConcurrentDescendants = 0
 	delegation.Limits = resolved
-	return delegation, parent, nil
+	native, err := runner.nativeHandoff(ctx, turn.ID, delegation)
+	delegation.NativeLocal = native != nil
+	return delegation, parent, err
+}
+
+// Retry only the immutable same child after an actual native no-effect
+// rejection. The Store's original dispatch fence still elects the next
+// caller, including a concurrent cancellation or an already returned Start.
+func (runner *Runner) retryNativeDelegation(ctx context.Context, turn Turn, d handoff.Delegation, startedID string) (bool, error) {
+	if !d.NativeLocal && runner.nativeLocalDelegation(d) == nil {
+		return false, nil
+	}
+	owner, e := verifiedRunInvocation(ctx, runner.store, d.ChildRunID)
+	if errors.Is(e, ErrNotFound) {
+		return false, nil
+	}
+	if e != nil {
+		return false, e
+	}
+	if owner.TurnID != turn.ID || owner.ParentItemID != startedID {
+		return false, ErrConflict
+	}
+	frozen, e := decodeFrozenHandoffDelegation(owner.Input)
+	if e != nil || !sameHandoffFrozenExecution(frozen, d) {
+		return false, ErrConflict
+	}
+	items, e := runner.loadGlobalPhysicalEvidence(ctx, turn.ID)
+	if e != nil {
+		return false, e
+	}
+	if d.NativeLocal {
+		// Only a recorded original Waiting admission can attempt the same
+		// identity after a budget-capacity rejection. Create still elects.
+		native, err := runner.nativeHandoff(ctx, turn.ID, d)
+		if err != nil || native == nil || owner.Status != InvocationAccepted || ActiveCancellationFence(items) || PendingExecutionDispatch(items, owner.ID) {
+			return false, err
+		}
+		waiting, e := runner.store.GetItem(ctx, stableID("hid", turn.ID, d.ID, string(ItemWaiting)))
+		if errors.Is(e, ErrNotFound) {
+			return false, nil
+		}
+		if e != nil {
+			return false, e
+		}
+		root, e := loadTopLevelInvocation(ctx, runner.store, turn.ID)
+		if e != nil {
+			return false, e
+		}
+		payload, valid := frozenDelegationAdmissionPayload(root, waiting)
+		if !valid || !sameHandoffFrozenExecution(*payload.Execution, d) {
+			return false, ErrConflict
+		}
+		if _, e = runner.runtime.LoadCreationDecision(ctx, d.ChildRunID); !errors.Is(e, kernel.ErrNotFound) {
+			if e == nil || errors.Is(e, kernel.ErrAlreadyExists) {
+				return false, nil
+			}
+			return false, e
+		}
+	} else if !verifiedRejectedHandoffStarts(items, owner) {
+		return false, nil
+	}
+	_, e = runner.runtime.Load(ctx, d.ChildRunID)
+	if errors.Is(e, kernel.ErrNotFound) {
+		return true, nil
+	}
+	return false, e
 }
 
 func (runner *Runner) executeDelegation(
@@ -434,7 +498,7 @@ func (runner *Runner) executeDelegation(
 	invocation Invocation,
 	parent kernel.Snapshot,
 	delegation handoff.Delegation,
-	startedItemID string,
+	startedItemID, callHash string,
 ) (DelegationResult, error) {
 	if err := runner.ensureDelegationRelation(ctx, invocation.ExecutionRefID, delegation); err != nil {
 		return DelegationResult{}, err
@@ -445,9 +509,38 @@ func (runner *Runner) executeDelegation(
 	if err := runner.prepareHandoffChild(ctx, turn, invocation, delegation, startedItemID); err != nil {
 		return DelegationResult{}, err
 	}
-	delegation, delegateErr := runner.dispatchHandoff(ctx, turn, parent, delegation, startedItemID)
+	returned, delegateErr := runner.dispatchHandoff(ctx, turn, parent, delegation, startedItemID)
+	if isDispatchProvenNoEffect(delegateErr) {
+		if errors.Is(delegateErr, budget.ErrWaiting) {
+			if _, e := runner.recordDelegationItem(ctx, turn, invocation, delegation, ItemWaiting, "", callHash); e != nil {
+				return DelegationResult{}, errors.Join(ErrExecutionOutcomeUnknown, e)
+			}
+			snapshot, e := runner.Load(ctx, turn.ID)
+			return DelegationResult{Delegation: delegation, Snapshot: snapshot}, e
+		}
+		// Project the original rejected Host selection, not a synthetic
+		// terminal Kernel Run. Never let it block a parent's known no-effect
+		// Tool receipt or grant another Attempt.
+		child, e := verifiedRunInvocation(ctx, runner.store, delegation.ChildRunID)
+		if e != nil || child.ParentItemID != startedItemID {
+			return DelegationResult{}, errors.Join(ErrExecutionOutcomeUnknown, e)
+		}
+		witness, e := withOriginalNoEffectTerminalWitness(ctx, child, delegateErr)
+		if e != nil {
+			return DelegationResult{}, e
+		}
+		_, e = runner.syncInvocationStatus(witness, child, InvocationFailed, agentStartFailedCode, delegateErr.Error())
+		if e != nil {
+			return DelegationResult{}, errors.Join(ErrExecutionOutcomeUnknown, e)
+		}
+		return DelegationResult{}, delegateErr
+	}
+	if returned.ID == "" {
+		return DelegationResult{}, delegateErr
+	}
+	delegation = returned
 	status := delegationItemStatus(delegation.Status)
-	if status != ItemStarted {
+	if status != ItemStarted && !delegation.NativeLocal {
 		if _, itemErr := runner.recordDelegationItem(ctx, turn, invocation, delegation, status, startedItemID); itemErr != nil {
 			return DelegationResult{}, errors.Join(delegateErr, itemErr)
 		}
@@ -457,76 +550,6 @@ func (runner *Runner) executeDelegation(
 		delegateErr = nil
 	}
 	return DelegationResult{Delegation: delegation, Snapshot: snapshot}, errors.Join(delegateErr, loadErr)
-}
-
-// reconcileLocalTerminalHandoffEvidence repairs a durable terminal
-// ChildRunner observation before the original root's terminal Store CAS.
-// It never starts/resumes/cancels the child: only a statically composed
-// local ChildRunner with proven Kernel ownership may supply this result.
-// Remote or ambiguous routes remain fenced until their own first-party
-// terminal Handoff fact is committed.
-func (runner *Runner) reconcileLocalTerminalHandoffEvidence(
-	ctx context.Context, turn Turn,
-) error {
-	coordinator, ok := runner.handoffs.(*handoff.Coordinator)
-	if !ok || !coordinator.SupportsLocalDelegationObservation(runner.runtime) {
-		return nil
-	}
-	items, err := listAllItems(ctx, runner.store, turn.ID)
-	if err != nil {
-		return err
-	}
-	proven := make(map[string]kernel.Snapshot)
-	for _, item := range items {
-		if item.Kind != ItemDelegation || item.Status != ItemStarted {
-			continue
-		}
-		// A second terminal projection is not permitted to mint an
-		// alternate result or mutate the existing immutable receipt.
-		hasTerminal := false
-		for _, next := range items {
-			if next.Kind == ItemDelegation && next.ParentItemID == item.ID &&
-				(next.Status == ItemCompleted || next.Status == ItemFailed ||
-					next.Status == ItemCancelled) {
-				hasTerminal = true
-				break
-			}
-		}
-		if hasTerminal {
-			continue
-		}
-		owner, loadErr := runner.store.GetInvocationByExecutionRefID(ctx, item.RunID)
-		if errors.Is(loadErr, ErrNotFound) {
-			// A frozen Started admission can precede child Invocation creation.
-			// This same no-dispatch source is used by Cancel, Retry and Store
-			// terminal CAS; no child observation/terminal receipt is invented.
-			_, _, valid, proofErr := runner.readNoInvocationDelegationSource(ctx, turn, item.RunID, items)
-			if proofErr != nil {
-				return proofErr
-			}
-			if valid {
-				continue
-			}
-		}
-		if loadErr != nil || !isHandoffDelegationInvocation(owner) ||
-			owner.TurnID != turn.ID || owner.ParentItemID != item.ID {
-			return ErrConflict
-		}
-		child, _, observationErr := runner.delegationObservation(ctx, item.RunID)
-		if errors.Is(observationErr, kernel.ErrNotFound) || (!coordinator.ObservesLocalKernelRunner(runner.runtime) && errors.Is(observationErr, ErrHandoffCancellationUnverified)) {
-			continue
-		}
-		if observationErr != nil {
-			return observationErr
-		}
-		if terminalRuntimeStatus(child.Run.Status) {
-			proven[item.RunID] = child
-		}
-	}
-	if len(proven) == 0 {
-		return nil
-	}
-	return runner.syncTerminalDelegations(ctx, turn, proven)
 }
 
 // dispatchHandoff uses the native Feature dispatch grant for every delegated
@@ -550,6 +573,9 @@ func (runner *Runner) dispatchHandoff(
 	if decodeErr != nil || !sameHandoffFrozenExecution(frozen, delegation) {
 		return handoff.Delegation{}, ErrConflict
 	}
+	if frozen.NativeLocal {
+		return runner.dispatchNativeHandoff(ctx, turn, parent, child, frozen)
+	}
 	// Unlike a native Feature Start, Handoff may route to an independent
 	// child Runner. Its own observed outcome, not a fabricated local Kernel
 	// snapshot, is the only evidence that its StartOrLoad finished.
@@ -557,10 +583,28 @@ func (runner *Runner) dispatchHandoff(
 	if err != nil {
 		return handoff.Delegation{}, err
 	}
-	started, startErr := runner.handoffs.StartOrLoad(withoutContextCheckpoint(ctx), parent, delegation)
+	var started handoff.Delegation
+	var startErr error
+	if native := runner.nativeLocalDelegation(frozen); native != nil {
+		_, outcome, e := native.ObservePhysicalDispatch(withoutContextCheckpoint(ctx), child.ExecutionRefID, plugin.RunStart, grant.ID, func(c context.Context) (kernel.Snapshot, error) {
+			started, startErr = runner.handoffs.StartOrLoad(c, parent, delegation)
+			return kernel.Snapshot{}, startErr
+		})
+		startErr = e
+		if started.ID == "" && agent.IsNativeStartNoEffect(startErr) {
+			if e = runner.finishPhysicalDispatchGrant(ctx, grant, "native_agent_start_no_effect"); e != nil {
+				return handoff.Delegation{}, errors.Join(ErrExecutionOutcomeUnknown, startErr, e)
+			}
+			return handoff.Delegation{}, dispatchProvenNoEffect{cause: startErr}
+		}
+		if !outcome.Matches(child.ExecutionRefID, plugin.RunStart) || outcome.Kind() == agent.PhysicalCallCreated {
+			return handoff.Delegation{}, errors.Join(ErrExecutionOutcomeUnknown, startErr)
+		}
+	} else {
+		started, startErr = runner.handoffs.StartOrLoad(withoutContextCheckpoint(ctx), parent, delegation)
+	}
 	if !sameHandoffFrozenExecution(frozen, started) ||
-		(started.Status != handoff.StatusRunning && started.Status != handoff.StatusCompleted &&
-			started.Status != handoff.StatusFailed && started.Status != handoff.StatusCancelled) {
+		(started.Status != handoff.StatusRunning && !terminalDelegationStatus(started.Status)) {
 		// The call may already have reached an external ChildRunner. Keep
 		// the open grant/Attempt for explicit, read-only reconciliation.
 		return handoff.Delegation{}, errors.Join(ErrExecutionOutcomeUnknown, startErr)
@@ -571,56 +615,14 @@ func (runner *Runner) dispatchHandoff(
 	return started, startErr
 }
 
-// A Handoff reply may project only outcome fields. Compare the full frozen
-// execution envelope, not a selected identity subset: any future Delegation
-// field is immutable by default until explicitly admitted as an outcome.
-// It preserves the exact persisted JSON representation and ordered slice
-// identity. encoding/json compacts and escapes RawMessage when persisting
-// Invocation.Input, so compare its canonical wire representation rather than
-// rejecting the original valid request's whitespace or escaping. Empty slices
-// and nil are equivalent: Handoff's cloneDelegation uses append(nil, ...)
-// and legitimately projects a previously allocated empty ToolKeys slice as nil.
+// Compare the exact persisted execution envelope, excluding only product
+// outcome fields. JSON serialization is the same canonicalization used at
+// admission (including ordered slices, omitempty and RawMessage normalization).
+// New fields are immutable by default; invalid returned JSON fails closed.
 func sameHandoffFrozenExecution(expected, returned handoff.Delegation) bool {
-	returned.Status, returned.Result = expected.Status, expected.Result
-	returned.ErrorCode, returned.Error = expected.ErrorCode, expected.Error
-	if !normalizeHandoffForComparison(&expected) || !normalizeHandoffForComparison(&returned) {
-		return false
-	}
-	return reflect.DeepEqual(expected, returned)
-}
-
-func normalizeHandoffForComparison(value *handoff.Delegation) bool {
-	if value.OutputContract != nil {
-		// Frozen Handoff JSON has normalized the nested schema at admission;
-		// compare equivalent immutable bytes, not caller-owned input spacing.
-		encoded, err := json.Marshal(value.OutputContract.Schema)
-		if err != nil {
-			return false
-		}
-		value.OutputContract = model.CloneOutputContract(value.OutputContract)
-		value.OutputContract.Schema = encoded
-	}
-	if len(value.ModelOptions) == 0 {
-		value.ModelOptions = nil
-	} else {
-		// json.Marshal(Delegation) applied this exact RawMessage
-		// normalization at admission. Invalid returned JSON fails closed.
-		canonical, err := json.Marshal(value.ModelOptions)
-		if err != nil {
-			return false
-		}
-		value.ModelOptions = canonical
-	}
-	if len(value.ToolKeys) == 0 {
-		value.ToolKeys = nil
-	}
-	if len(value.InitialToolKeys) == 0 {
-		value.InitialToolKeys = nil
-	}
-	if len(value.HostedToolGrants) == 0 {
-		value.HostedToolGrants = nil
-	}
-	return true
+	a, err := json.Marshal(frozenDelegationExecution(expected))
+	b, otherErr := json.Marshal(frozenDelegationExecution(returned))
+	return err == nil && otherErr == nil && bytes.Equal(a, b)
 }
 
 func (runner *Runner) projectDelegationRelations(ctx context.Context, turn Turn) error {

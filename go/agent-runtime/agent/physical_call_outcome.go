@@ -128,7 +128,7 @@ func (runner *Runner) originalPhysicalDispatch(ctx context.Context, runID, opera
 		return ""
 	}
 	switch operation {
-	case "start":
+	case "start", "prepare":
 		if o.operation != plugin.RunStart {
 			return ""
 		}

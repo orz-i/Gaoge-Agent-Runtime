@@ -8,7 +8,6 @@ import (
 
 	interactionadapter "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/adapters/interaction"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/interaction"
@@ -28,15 +27,10 @@ type AgentSessionContextOptions struct {
 	Accounting    runtimecontext.RequestAccounting
 	// ReadArtifacts explicitly grants the built-in scoped archive reader.
 	ReadArtifacts bool
-	// ManagedRecovery explicitly selects the existing concrete Context recovery
-	// lifecycle. Runtime must already be bound to this exact Harness Store.
-	// The default uses ordinary bounded Context and its existing receipt-based
-	// recovery; arbitrary interrupted callbacks do not become safe to replay.
+	// ManagedRecovery opts the first-party Agent into original-source recovery.
+	// Context, Summary, SharedBudget and Inputs use the same lifecycle.
+	// Runtime must be bound to this exact Harness Store.
 	ManagedRecovery bool
-	// SummaryNativeRecovery explicitly enables the source-bound summary safe
-	// points. Runtime must use this exact Harness Store as ManagedRecoveryHost.
-	// It is separate from ordinary receipt recovery and ManagedRecovery.
-	SummaryNativeRecovery bool
 }
 
 // SessionTool pairs one selected local Tool with its explicit Host policy.
@@ -96,7 +90,7 @@ type AgentSessionOptions struct {
 	// explicitly granted archive reader) into bounded exploration.
 	ExploreReads bool
 	// Inputs optionally binds an authenticated, Host-owned user input log.
-	// It is not supported with either native managed recovery option.
+	// Managed recovery retains the original binding and committed cursor.
 	Inputs       agent.RunInputSource
 	Session      SessionOptions
 	Context      AgentSessionContextOptions
@@ -111,10 +105,6 @@ type AgentSessionOptions struct {
 func OpenAgentSession(options AgentSessionOptions) (*SessionClient, error) {
 	options.Session.Config.ContextBase = nil
 	if options.Runtime == nil || options.Store == nil || options.Model == nil || options.Context.ResolveWindow == nil {
-		return nil, ErrInvalidRequest
-	}
-	if (options.Context.ManagedRecovery && options.Context.SummaryNativeRecovery) ||
-		(options.Inputs != nil && (options.Context.ManagedRecovery || options.Context.SummaryNativeRecovery)) {
 		return nil, ErrInvalidRequest
 	}
 	options.Session.Config = cloneConfigSnapshot(options.Session.Config)
@@ -194,15 +184,11 @@ func OpenAgentSession(options AgentSessionOptions) (*SessionClient, error) {
 		return nil, err
 	}
 	*config = normalized
-	if options.Context.ManagedRecovery && config.WorkingStateSummary != nil {
-		return nil, ErrInvalidRequest
-	}
 	if config.SharedBudget != nil {
-		if !enforceableHarnessBudgetLimits(*config.SharedBudget) || options.Context.ManagedRecovery ||
-			options.Context.SummaryNativeRecovery || config.WorkingStateSummary != nil {
+		if !enforceableHarnessBudgetLimits(*config.SharedBudget) {
 			return nil, ErrInvalidRequest
 		}
-		if _, ok := options.Store.(budget.LedgerStore); !ok {
+		if options.Runtime.BudgetStore() == nil {
 			return nil, ErrInvalidRequest
 		}
 		if delegated && (options.Handoffs != nil || options.RemoteChildren != nil) {
@@ -210,8 +196,8 @@ func OpenAgentSession(options AgentSessionOptions) (*SessionClient, error) {
 			return nil, ErrInvalidRequest
 		}
 	}
-	if options.Context.ManagedRecovery || options.Context.SummaryNativeRecovery {
-		host, ok := options.Store.(managedHostStore)
+	if options.Context.ManagedRecovery {
+		host, ok := options.Store.(kernel.ManagedRecoveryHostStore)
 		if !ok || !options.Runtime.SupportsManagedRecovery() || !options.Runtime.UsesManagedRecoveryHost(host) {
 			return nil, ErrInvalidRequest
 		}
@@ -311,14 +297,23 @@ func openBoundedAgentSession(options AgentSessionOptions, registrations []tools.
 	dependencies := agent.Dependencies{
 		Runtime: options.Runtime, Model: options.Model, Catalog: registry, Executor: registry,
 		HostedTools: options.HostedTools, ToolDiscovery: options.ToolDiscovery,
-		Approvals:     interactionadapter.New(approvals),
-		RunMiddleware: []plugin.RunMiddleware{bounded}, Inputs: options.Inputs,
+		Approvals:      interactionadapter.New(approvals),
+		BoundedContext: bounded, Inputs: options.Inputs,
 		Limits: options.Limits, Execution: options.Execution, RunExecution: options.RunExecution,
 	}
 	if len(exploration) != 0 {
 		dependencies.ToolProgressPolicy = &agent.ToolProgressPolicy{ExplorationToolKeys: exploration}
 	}
-	approval, err := NewFrozenApprovalPolicy(options.Store)
+	frozenApproval, err := NewFrozenApprovalPolicy(options.Store)
+	if err != nil {
+		return nil, err
+	}
+	// Approval is a first-party read-only decision stage, not a generic
+	// Host policy callback. The original native approval return and the
+	// frozen Harness owner are both required for later control.
+	approval, err := agent.NewBoundedToolApproval(func(ctx context.Context, request tools.ExecutionRequest) (plugin.ApprovalRequirement, error) {
+		return frozenApproval.requirement(ctx, request.RunID, request.Call.ToolKey, true)
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -330,7 +325,7 @@ func openBoundedAgentSession(options AgentSessionOptions, registrations []tools.
 			meter, _ = options.Model.(model.TokenAdmissionPlanner)
 		}
 		shared, err = NewBudgetAuthority(BudgetAuthorityDependencies{
-			Store: options.Store, Relations: options.Relations, Meter: meter, Clock: systemClock{},
+			Store: options.Store, Relations: options.Relations, Meter: meter, Clock: systemClock{}, Runtime: options.Runtime,
 		})
 		if err != nil {
 			return nil, err
@@ -339,26 +334,18 @@ func openBoundedAgentSession(options AgentSessionOptions, registrations []tools.
 		if adapterErr != nil {
 			return nil, adapterErr
 		}
-		// Budget wraps Context: Context preparation must run in its own
-		// original trusted Context ticket, not inside the Budget Run ticket.
-		dependencies.RunMiddleware = append([]plugin.RunMiddleware{adapter}, dependencies.RunMiddleware...)
-		dependencies.ModelMiddleware = []plugin.ModelMiddleware{adapter}
+		dependencies.BoundedBudget = adapter
 		dependencies.ModelOutcomeVerifier = shared
-		dependencies.ToolMiddleware = []plugin.ToolMiddleware{adapter}
-		// Keep the same Context preparer without a competing summary lifecycle.
-		dependencies.BoundedContext = bounded
 	}
 	if delegation != nil {
 		dependencies.ToolOutcomeVerifier = delegation
 	}
-	if options.Context.ManagedRecovery {
-		dependencies.ManagedContextRecovery = bounded
-	} else if shared == nil {
+	dependencies.ManagedRecovery = options.Context.ManagedRecovery
+	if shared == nil || options.Session.Config.WorkingStateSummary != nil {
 		dependencies.ContextSummary, err = NewContextSummaryAdapter(options.Store, options.Runtime, bounded, resolveWindow)
 		if err != nil {
 			return nil, err
 		}
-		dependencies.SummaryNativeRecovery = options.Context.SummaryNativeRecovery
 	}
 	loop, err := agent.NewRunner(dependencies)
 	if err != nil {
@@ -541,14 +528,11 @@ func (session *SessionClient) preflightAgentSessionResume(ctx context.Context, t
 		!reflect.DeepEqual(originalNamed, currentNamed) {
 		return ErrInvalidRequest
 	}
-	if config.SharedBudget != nil && (session.runner.budgets == nil ||
-		config.WorkingStateSummary != nil ||
-		session.runner.agent.(*agent.Runner).SupportsManagedContextRecovery() ||
-		session.runner.agent.(*agent.Runner).SupportsSummaryNativeRecovery()) {
+	if config.SharedBudget != nil && session.runner.budgets == nil {
 		return ErrInvalidRequest
 	}
-	if config.WorkingStateSummary != nil {
-		if native, ok := session.runner.agent.(*agent.Runner); !ok || !native.SupportsContextSummary() || native.SupportsManagedContextRecovery() {
+	if native, ok := session.runner.agent.(*agent.Runner); ok {
+		if config.WorkingStateSummary != nil && !native.SupportsContextSummary() {
 			return ErrInvalidRequest
 		}
 		root, err := loadTopLevelInvocation(ctx, store, turn.ID)
@@ -560,9 +544,11 @@ func (session *SessionClient) preflightAgentSessionResume(ctx context.Context, t
 			return loadErr
 		}
 		if loadErr == nil {
+			if err := checkRootModelPolicy(root, snapshot, config); err != nil {
+				return err
+			}
 			view, viewErr := agent.ViewState(snapshot)
-			native := session.runner.agent.(*agent.Runner)
-			if viewErr != nil || view.SummaryNativeRecovery != native.SupportsSummaryNativeRecovery() {
+			if viewErr != nil || view.ManagedRecovery != native.SupportsManagedRecovery() {
 				return ErrInvalidRequest
 			}
 		}

@@ -44,20 +44,20 @@ func TestIssue107MemoryChildGrantAtomicParentTerminal(t *testing.T) {
 			t.Fatalf("ancestor=%s terminal CAS escaped pending Grant: %v", id, cancelErr)
 		}
 	}
-	if err = store.FinishChildExecution(t.Context(), kernel.ChildExecutionGrant{ID: grant.ID, ChildRunID: "different", ExpectedRevision: grant.ExpectedRevision}); !errors.Is(err, kernel.ErrExecutionConflict) {
+	if err = store.FinishChildExecution(t.Context(), kernel.ChildExecutionGrant{ID: grant.ID, ChildRunID: "different", ExpectedRevision: grant.ExpectedRevision}, kernel.ChildExecutionSettlement{}); !errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("forged child released original Grant: %v", err)
 	}
-	if err = store.FinishChildExecution(t.Context(), grant); !errors.Is(err, kernel.ErrExecutionConflict) {
+	if err = store.FinishChildExecution(t.Context(), grant, kernel.ChildExecutionSettlement{}); !errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("unsafe original pre-callback release accepted: %v", err)
 	}
 	proof := featurecontrol.Seal(child.Run.ID, child.Run.Revision, "agent_child_physical_settled", grant.ID, child.State, child.Checkpoint)
 	if err = rt.MarkChildExecutionSettled(t.Context(), grant, proof); err != nil {
 		t.Fatal(err)
 	}
-	if err = store.FinishChildExecution(t.Context(), grant); err != nil {
+	if err = rt.FinishChildExecution(t.Context(), grant, proof); err != nil {
 		t.Fatal(err)
 	}
-	if err = store.FinishChildExecution(t.Context(), grant); !errors.Is(err, kernel.ErrExecutionConflict) {
+	if err = store.FinishChildExecution(t.Context(), grant, kernel.ChildExecutionSettlement{}); !errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("duplicate Grant settlement accepted: %v", err)
 	}
 	cancelled, err := rt.Cancel(t.Context(), root.Run.ID, root.Run.Revision, "after physical receipt")
@@ -109,7 +109,7 @@ func TestIssue107MemoryParentCancelChildBeginLinearizable(t *testing.T) {
 				if err = rt.MarkChildExecutionSettled(t.Context(), grant, proof); err != nil {
 					t.Fatal(err)
 				}
-				if err = localStore.FinishChildExecution(t.Context(), grant); err != nil {
+				if err = rt.FinishChildExecution(t.Context(), grant, proof); err != nil {
 					t.Fatal(err)
 				}
 			} else if cancelErr == nil {

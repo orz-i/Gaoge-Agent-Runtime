@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
@@ -33,7 +32,7 @@ func (runner *Runner) ReconcileChildPhysicalGrant(ctx context.Context, childRunI
 	if err != nil {
 		return err
 	}
-	proof := featurecontrol.Seal(snapshot.Run.ID, snapshot.Run.Revision, "agent_child_physical_settled", grant.ID, snapshot.State, snapshot.Checkpoint)
+	proof := physicalSettlementProof(grant, snapshot)
 	err = runner.runtime.FinishChildExecution(ctx, grant, proof)
 	if errors.Is(err, kernel.ErrExecutionConflict) {
 		// A clean-looking Run cannot retire the Grant without its original

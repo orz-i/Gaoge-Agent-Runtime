@@ -147,6 +147,19 @@ func (c *Coordinator) UsesLocalAgentForDelegation(rt *kernel.Runtime, original *
 	}
 	return c.UsesLocalAgentRunner(rt, original)
 }
+
+// UsesEagerLocalAgentForDelegation identifies the original synchronous
+// first-party Start route. Deferred or arbitrary routes retain their own
+// actual callback/transport contract.
+func (c *Coordinator) UsesEagerLocalAgentForDelegation(rt *kernel.Runtime, original *agent.Runner, d Delegation) bool {
+	if c == nil || d.Remote || c.deferredAgent != nil {
+		return false
+	}
+	if r, ok := c.resolver.(*deferredAgentRoutes); ok && !r.eager {
+		return false
+	}
+	return c.UsesLocalAgentForDelegation(rt, original, d)
+}
 func (c *Coordinator) OwnsLocalDelegation(rt *kernel.Runtime, d Delegation) bool {
 	if original := c.localDeferredAgent(d); original != nil {
 		return original.OwnsKernelRuntime(rt)

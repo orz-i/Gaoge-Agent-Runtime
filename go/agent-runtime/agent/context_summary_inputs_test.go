@@ -119,20 +119,21 @@ func TestContextSummaryNativeInputStateRejectedBeforePark(t *testing.T) {
 			if mode != "binding" {
 				state.InputCursor = 1
 			}
-			if _, valid := summaryNativePhase(state); valid {
-				t.Fatal("native phase accepted an uncertified Host input frame")
-			}
-			raw, err := json.Marshal(state)
+			// A new profile can freeze a legitimate input binding; the old
+			// summary proof cannot be reinterpreted as that profile even
+			// when the altered state has its own valid aggregate seal.
+			raw, err := encodeState(state)
 			if err != nil {
 				t.Fatal(err)
 			}
 			trap.current.State, trap.transfer.SafePoint.Source.State = raw, append(json.RawMessage(nil), raw...)
-			if _, err = decodeState(raw); !errors.Is(err, ErrInvalidRequest) {
-				t.Fatalf("impossible mixed native/input aggregate was decoded: %v", err)
+			_, err = decodeState(raw)
+			if mode == "cursor" && !errors.Is(err, ErrInvalidRequest) {
+				t.Fatalf("cursor without binding was decoded: %v", err)
 			}
-			_, _, err = runner.RecoverManagedContinuation(t.Context(), trap.current.Run.ID)
-			if !errors.Is(err, ErrInvalidRequest) || trap.parks != 0 || !bytes.Equal(trap.current.State, raw) {
-				t.Fatalf("invalid mixed frame reached PARK: err=%v parks=%d", err, trap.parks)
+			_, _, err = runner.RecoverManagedContinuation(t.Context(), trap.transfer)
+			if !errors.Is(err, ErrInvalidRequest) || trap.admissions != 0 || !bytes.Equal(trap.current.State, raw) {
+				t.Fatalf("invalid mixed frame reached PARK: err=%v admissions=%d", err, trap.admissions)
 			}
 		})
 	}

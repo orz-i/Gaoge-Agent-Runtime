@@ -75,6 +75,7 @@ type Delegation struct {
 	MemberID       string       `json:"memberID"`
 	MemberRevision string       `json:"memberRevision,omitempty"`
 	Remote         bool         `json:"remote,omitempty"`
+	NativeLocal    bool         `json:"nativeLocal,omitempty"`
 	Instructions   string       `json:"instructions,omitempty"`
 	Limits         agent.Limits `json:"limits,omitempty"`
 	// Full Host-selected subtree ceilings belong to the shared ledger. The
@@ -271,28 +272,14 @@ func (coordinator *Coordinator) StartOrLoad(
 	parent kernel.Snapshot,
 	delegation Delegation,
 ) (Delegation, error) {
-	if coordinator == nil || coordinator.resolver == nil || !validDelegation(delegation) || !validParentOrigin(parent.Run) {
+	if delegation.NativeLocal {
 		return Delegation{}, ErrInvalidDelegation
 	}
-	delegation, err := boundDelegationModelOutput(parent, delegation)
-	if err != nil {
-		return Delegation{}, err
-	}
-	children, err := coordinator.resolveChild(ctx, delegation)
-	if err != nil {
-		return Delegation{}, err
-	}
-	if err = verifyRemoteBeforeObservation(ctx, children, delegation, parent.Run); err != nil {
-		return Delegation{}, err
-	}
-	child, err := children.LoadRun(ctx, delegation.ChildRunID)
+	delegation, children, child, err := coordinator.observeRoutedChild(ctx, parent, delegation)
 	if err == nil {
-		if !verifiedRoutedChild(children, delegation, parent.Run, child) {
-			return Delegation{}, ErrChildRunUnverified
-		}
-		return projectChild(delegation, child), childStateError(child)
+		return ProjectChild(delegation, child), childStateError(child)
 	}
-	if !errors.Is(err, kernel.ErrNotFound) {
+	if children == nil || !errors.Is(err, kernel.ErrNotFound) {
 		return Delegation{}, err
 	}
 	start := children.StartRun
@@ -315,13 +302,47 @@ func (coordinator *Coordinator) StartOrLoad(
 			return Delegation{}, err // No new remote execution after expiry/revocation.
 		}
 	}
-	child, err = start(childCtx, agent.StartRequest{
+	request := childStartRequest(parent.Run, delegation)
+	request.DeadlineAt = childDeadline
+	child, err = start(childCtx, request)
+	if child.Run.ID == "" && err != nil {
+		return Delegation{}, err
+	}
+	if !verifiedRoutedChild(children, delegation, parent.Run, child) {
+		return Delegation{}, errors.Join(ErrChildRunUnverified, err)
+	}
+	return ProjectChild(delegation, child), errors.Join(childStateError(child), err)
+}
+
+// StartNative uses the exact original, statically selected local Agent.
+// Unlike an opaque ChildRunner it never performs Load-or-Start based on a
+// remote response. Native Create arbitrates the immutable Run identity.
+func (c *Coordinator) StartNative(ctx context.Context, rt *kernel.Runtime, native *agent.Runner, parent kernel.Snapshot, d Delegation, frozenInput []byte) (kernel.Snapshot, error) {
+	if !d.NativeLocal || d.Remote || !validDelegation(d) || !validParentOrigin(parent.Run) ||
+		len(frozenInput) == 0 || !c.UsesLocalAgentForDelegation(rt, native, d) {
+		return kernel.Snapshot{}, ErrInvalidDelegation
+	}
+	d, err := boundDelegationModelOutput(parent, d)
+	if err != nil {
+		return kernel.Snapshot{}, err
+	}
+	req := childStartRequest(parent.Run, d)
+	req.LogicalParentRunID = parent.Run.ID
+	req.OriginFingerprint = agent.FrozenOriginFingerprint(frozenInput)
+	if c.IsDeferredLocalDelegation(rt, d) {
+		return native.PrepareRun(ctx, req)
+	}
+	return native.StartRun(ctx, req)
+}
+
+func childStartRequest(parent kernel.Run, delegation Delegation) agent.StartRequest {
+	return agent.StartRequest{
 		ID:                   delegation.ChildRunID,
-		Actor:                parent.Run.Actor,
-		Thread:               parent.Run.Thread,
-		RequestID:            parent.Run.ID + ":" + delegation.ID,
+		Actor:                parent.Actor,
+		Thread:               parent.Thread,
+		RequestID:            parent.ID + ":" + delegation.ID,
 		Goal:                 delegation.Goal,
-		DeadlineAt:           childDeadline,
+		DeadlineAt:           parent.DeadlineAt,
 		Instructions:         delegation.Instructions,
 		Limits:               delegation.Limits,
 		Model:                delegation.Model,
@@ -331,42 +352,43 @@ func (coordinator *Coordinator) StartOrLoad(
 		ToolKeys:             append([]string(nil), delegation.ToolKeys...),
 		InitialToolKeys:      append([]string(nil), delegation.InitialToolKeys...),
 		HostedToolGrants:     append([]agent.HostedToolGrant(nil), delegation.HostedToolGrants...),
-	})
-	if child.Run.ID == "" && err != nil {
-		return Delegation{}, err
+		DisableInputs:        !delegation.Remote,
 	}
-	if !verifiedRoutedChild(children, delegation, parent.Run, child) {
-		return Delegation{}, errors.Join(ErrChildRunUnverified, err)
-	}
-	return projectChild(delegation, child), errors.Join(childStateError(child), err)
 }
 
 // Refresh projects one Child Run without starting it. The caller must supply
 // the authoritative parent Run: the Delegation alone does not freeze an
 // Actor/Thread proof and cannot authorize an unrelated Run on lookup.
 func (coordinator *Coordinator) Refresh(ctx context.Context, parent kernel.Snapshot, delegation Delegation) (Delegation, error) {
-	if coordinator == nil || coordinator.resolver == nil || !validDelegation(delegation) || !validParentOrigin(parent.Run) {
-		return Delegation{}, ErrInvalidDelegation
-	}
-	delegation, err := boundDelegationModelOutput(parent, delegation)
+	delegation, _, child, err := coordinator.observeRoutedChild(ctx, parent, delegation)
 	if err != nil {
 		return Delegation{}, err
 	}
-	children, err := coordinator.resolveChild(ctx, delegation)
+	return ProjectChild(delegation, child), childStateError(child)
+}
+
+// A routed read selects and validates the same immutable original for Start
+// and Refresh. Only a missing Run from that selected runner permits Start.
+func (coordinator *Coordinator) observeRoutedChild(ctx context.Context, parent kernel.Snapshot, d Delegation) (Delegation, ChildRunner, kernel.Snapshot, error) {
+	if coordinator == nil || coordinator.resolver == nil || !validDelegation(d) || !validParentOrigin(parent.Run) {
+		return d, nil, kernel.Snapshot{}, ErrInvalidDelegation
+	}
+	d, err := boundDelegationModelOutput(parent, d)
 	if err != nil {
-		return Delegation{}, err
+		return d, nil, kernel.Snapshot{}, err
 	}
-	if err = verifyRemoteBeforeObservation(ctx, children, delegation, parent.Run); err != nil {
-		return Delegation{}, err
-	}
-	child, err := children.LoadRun(ctx, delegation.ChildRunID)
+	children, err := coordinator.resolveChild(ctx, d)
 	if err != nil {
-		return Delegation{}, err
+		return d, nil, kernel.Snapshot{}, err
 	}
-	if !verifiedRoutedChild(children, delegation, parent.Run, child) {
-		return Delegation{}, ErrChildRunUnverified
+	if err = verifyRemoteBeforeObservation(ctx, children, d, parent.Run); err != nil {
+		return d, nil, kernel.Snapshot{}, err
 	}
-	return projectChild(delegation, child), childStateError(child)
+	child, err := children.LoadRun(ctx, d.ChildRunID)
+	if err == nil && !verifiedRoutedChild(children, d, parent.Run, child) {
+		err = ErrChildRunUnverified
+	}
+	return d, children, child, err
 }
 
 // A Delegation's ChildRunID comes from the request, not the ChildRunner's
@@ -394,6 +416,9 @@ func VerifiedChildRun(delegation Delegation, parent kernel.Run, child kernel.Sna
 	}
 	if child.Run.Kind == RemoteAgentRunKind && !RemoteGoalOnly(delegation) {
 		return false // Remote protocol cannot attest local sampling or structured output.
+	}
+	if delegation.NativeLocal && (child.Run.Kind != agent.RunKind || child.Run.ParentRunID != "" || child.Run.LogicalParentRunID != parent.ID) {
+		return false
 	}
 	if child.Run.Kind == agent.RunKind && delegation.Remote {
 		return false // A native Run can never prove a Host-selected remote effect.
@@ -586,7 +611,9 @@ func resolveQuorumJoin(join Join) (JoinStatus, string, string) {
 	return JoinPending, "", ""
 }
 
-func projectChild(delegation Delegation, child kernel.Snapshot) Delegation {
+// ProjectChild maps an already authenticated child observation to product data.
+// It confers no execution or observation authority.
+func ProjectChild(delegation Delegation, child kernel.Snapshot) Delegation {
 	projected := cloneDelegation(delegation)
 	projected.Result = nil
 	projected.ErrorCode = child.Run.ErrorCode
@@ -649,7 +676,7 @@ func RemoteGoalOnly(delegation Delegation) bool {
 func validDelegation(delegation Delegation) bool {
 	validStatus := delegation.Status == StatusQueued || delegation.Status == StatusRunning ||
 		delegation.Status == StatusCompleted || delegation.Status == StatusFailed || delegation.Status == StatusCancelled
-	if delegation.MaxModelOutputTokens < 0 || model.ValidateOutputContract(delegation.OutputContract) != nil || strings.TrimSpace(delegation.ID) == "" || strings.TrimSpace(delegation.MemberID) == "" ||
+	if (delegation.NativeLocal && delegation.Remote) || delegation.MaxModelOutputTokens < 0 || model.ValidateOutputContract(delegation.OutputContract) != nil || strings.TrimSpace(delegation.ID) == "" || strings.TrimSpace(delegation.MemberID) == "" ||
 		strings.TrimSpace(delegation.ChildRunID) == "" || strings.TrimSpace(delegation.Goal) == "" || !validStatus {
 		return false
 	}

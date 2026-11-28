@@ -61,10 +61,14 @@ func TestOwnedBoundedContextCompositionExcludesOtherPreparers(t *testing.T) {
 	if !validBoundedContextComposition(d) || !scopedDeferredRootCallbacks(d) {
 		t.Fatal("valid concrete adapter rejected")
 	}
-	for _, layers := range [][]plugin.RunMiddleware{nil, {a, a}, {a, b}, {b}} {
+	d.RunMiddleware = nil
+	if !validBoundedContextComposition(d) {
+		t.Fatal("explicit concrete native Context rejected")
+	}
+	for _, layers := range [][]plugin.RunMiddleware{{a, a}, {a, b}, {b}} {
 		d.RunMiddleware = layers
 		if validBoundedContextComposition(d) {
-			t.Fatal("ambiguous or absent adapter accepted")
+			t.Fatal("ambiguous or foreign adapter accepted")
 		}
 	}
 	d.RunMiddleware = []plugin.RunMiddleware{a}

@@ -29,6 +29,7 @@ func (runner *Runner) VerifyFrozenStartRequest(snapshot kernel.Snapshot, request
 		snapshot.Run.Thread != request.Thread ||
 		snapshot.Run.RequestID != strings.TrimSpace(request.RequestID) ||
 		snapshot.Run.ParentRunID != request.ParentRunID ||
+		(request.LogicalParentRunID != "" && snapshot.Run.LogicalParentRunID != request.LogicalParentRunID) ||
 		snapshot.Run.Goal != strings.TrimSpace(request.Goal) {
 		return false
 	}
@@ -47,7 +48,7 @@ func (runner *Runner) VerifyFrozenStartRequest(snapshot kernel.Snapshot, request
 		state.Model != strings.TrimSpace(request.Model) ||
 		state.MaxModelOutputTokens != request.MaxModelOutputTokens ||
 		!reflect.DeepEqual(state.WorkingStateSummary, request.WorkingStateSummary) ||
-		state.SummaryNativeRecovery != (request.WorkingStateSummary != nil && runner.summaryNativeRecovery) ||
+		state.ManagedRecovery != runner.managedRecovery ||
 		!bytes.Equal(state.ModelOptions, request.ModelOptions) ||
 		!slices.Equal(state.ToolKeys, normalizedToolKeys(request.ToolKeys)) ||
 		len(state.RequiredToolKeys) != 0 || len(state.HostedToolGrants) != 0 ||
@@ -86,7 +87,7 @@ func validFrozenOriginFingerprint(value string) bool {
 // Host Effect input must still have its exact frozen bytes and relationship;
 // mutable relation lookup failure is not permission to discard this source.
 func MatchesFrozenOrigin(snapshot kernel.Snapshot, frozenInput []byte) bool {
-	if snapshot.Run.Kind != RunKind || snapshot.Run.ParentRunID == "" {
+	if snapshot.Run.Kind != RunKind || kernel.RunParentID(snapshot.Run) == "" {
 		return false
 	}
 	state, err := decodeState(snapshot.State)

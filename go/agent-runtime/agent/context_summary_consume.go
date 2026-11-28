@@ -19,6 +19,9 @@ func (runner *Runner) consumeContextSummary(ctx context.Context, snapshot kernel
 	if !ok || last.Status != ModelInvocationCompleted || last.Purpose != ModelInvocationContextSummary || !validContextSummaryInvocation(*last) {
 		return snapshot, ErrInvalidRequest
 	}
+	if runner.rootCallbacks != nil {
+		runner.rootCallbacks.summaryPhaseEntered.Store(true)
+	}
 	invocation := cloneModelInvocation(*last)
 	binding := invocation.ContextSummary
 	read, err := adapter.ports.ReadSummary(ctx, *cloneContextSummaryBinding(binding))
@@ -133,7 +136,7 @@ func (runner *Runner) consumeContextSummary(ctx context.Context, snapshot kernel
 		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint,
 		Events: []kernel.EventDraft{{Type: EventContextSummaryConsumed, Message: invocation.ID, Wakeup: true}},
 	}
-	next, err := runner.commitSummarySafePoint(ctx, snapshot, state, mutation)
+	next, err := runner.commitNativeTransition(ctx, snapshot, mutation)
 	if err != nil && next.Run.ID == "" {
 		return snapshot, err
 	}
@@ -172,14 +175,6 @@ func reconcileSummaryCursor(binding ContextSummaryBinding, read ContextSummaryRe
 	}
 	if summaryTurnProjection(expected, cursor.Turn) {
 		return cursor, true, nil
-	}
-	// The same one Accepted->Running projection may precede the Context CAS.
-	if binding.Cursor.Turn.Status == "accepted" && cursor.Turn.Status == "running" &&
-		cursor.Turn.Revision == binding.Cursor.Turn.Revision+2 && !cursor.Turn.UpdatedAt.Before(expected.UpdatedAt) {
-		expected.Status, expected.Revision, expected.UpdatedAt = cursor.Turn.Status, cursor.Turn.Revision, cursor.Turn.UpdatedAt
-		if sameBoundedValue(expected, cursor.Turn) {
-			return cursor, true, nil
-		}
 	}
 	return SummaryCursor{}, false, ErrInvalidRequest
 }

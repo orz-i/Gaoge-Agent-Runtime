@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
@@ -15,6 +16,23 @@ func (runner *Runner) standardRemoteCoordinator() *handoff.Coordinator {
 		return nil
 	}
 	return c
+}
+
+// standardDelegationReceiptOwner selects the same original native Agent
+// for local eager children and standard remote children. This is not a
+// physical grant: the Agent still requires the persisted exact callback
+// return and the original child/ledger receipt before any consumption.
+func (runner *Runner) standardDelegationReceiptOwner() *agent.Runner {
+	original, ok := runner.agent.(*agent.Runner)
+	coordinator, bound := runner.handoffs.(*handoff.Coordinator)
+	native, local := runner.cancellation.(*kernel.Runtime)
+	if !ok || !bound || !local || native != runner.runtime || !original.ObservesKernelRuntime(runner.runtime) {
+		return nil
+	}
+	if coordinator.UsesLocalAgentRunner(runner.runtime, original) || runner.standardRemoteCoordinator() != nil {
+		return original
+	}
+	return nil
 }
 
 // observeOriginalRemote is read-only with respect to peer effects: it can

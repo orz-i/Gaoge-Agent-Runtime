@@ -11,7 +11,7 @@ import "context"
 // New security tests must NOT use this helper to prove unauthorized terminal
 // transitions are blocked; those tests call the Store with ordinary context.
 func terminalFixtureContext(ctx context.Context, owner Invocation, status TurnStatus) context.Context {
-	return withTerminalWitness(ctx, owner, status, terminalFromKernel)
+	return withTerminalWitness(ctx, owner, status)
 }
 
 // TerminalFixtureContextForTest is exported ONLY from a *_test.go source

@@ -23,7 +23,7 @@ func (s *Store) VerifyCompletedToolReturn(ctx context.Context, expected kernel.S
 
 // VerifyOwnedRootSettlement is read-only under the same Store lock that
 // serializes physical grants and Kernel control writes. No public Run metadata
-// can substitute for the exact acknowledged owner callback retirement.
+// can substitute for the exact retired owner callback retirement.
 func (s *Store) VerifyOwnedRootSettlement(ctx context.Context, expected kernel.Snapshot) error {
 	return s.verifyRootSettlement(ctx, expected, kernel.VerifyOwnedRootSettlementFacts)
 }
@@ -41,7 +41,7 @@ func (s *Store) verifyRootSettlement(ctx context.Context, expected kernel.Snapsh
 	if !exists {
 		return kernel.ErrNotFound
 	}
-	if err := s.managedGateLocked(expected.Run.ID); err != nil {
+	if err := s.nativeEntryGateLocked(expected.Run.ID); err != nil {
 		return err
 	}
 	native := s.execution[expected.Run.ID]

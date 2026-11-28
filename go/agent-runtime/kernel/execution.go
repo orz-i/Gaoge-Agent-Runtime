@@ -3,6 +3,7 @@ package kernel
 import (
 	"context"
 	"errors"
+	"math"
 	"strings"
 	"time"
 )
@@ -46,6 +47,38 @@ type ExecutionAcquireRequest struct {
 type ExecutionRenewRequest struct {
 	Lease         ExecutionLease
 	LeaseDuration time.Duration
+}
+
+// PlanExecutionAcquire is the shared lease transition, evaluated only with
+// native Store time and the current locked Run/owner. It never writes.
+func PlanExecutionAcquire(run Run, current ExecutionLease, now time.Time, q ExecutionAcquireRequest, token string, quarantined bool) (ExecutionLease, error) {
+	if !validExecutionAcquireRequest(q) || q.RunID != run.ID || token == "" {
+		return ExecutionLease{}, ErrInvalidInput
+	}
+	switch run.Status {
+	case RunStatusCompleted, RunStatusFailed, RunStatusCancelled:
+		return ExecutionLease{}, ErrTerminal
+	case RunStatusRunning:
+	case RunStatusWaitingInput:
+		if run.Kind != "agent" || current.Epoch == 0 {
+			return ExecutionLease{}, ErrExecutionConflict
+		}
+	case RunStatusPausedBudget:
+		return ExecutionLease{}, ErrExecutionConflict
+	default:
+		return ExecutionLease{}, ErrExecutionConflict
+	}
+	if quarantined {
+		return ExecutionLease{}, ErrExecutionQuarantined
+	}
+	if current.Epoch == 0 {
+		return ExecutionLease{}, ErrExecutionRequired
+	}
+	if current.Epoch >= math.MaxInt64 || now.Before(current.ExpiresAt) {
+		return ExecutionLease{}, ErrExecutionConflict
+	}
+	ttl := ((q.LeaseDuration + time.Millisecond - 1) / time.Millisecond) * time.Millisecond
+	return ExecutionLease{RunID: run.ID, OwnerID: strings.TrimSpace(q.OwnerID), LeaseID: token, Epoch: current.Epoch + 1, ExpiresAt: now.Add(ttl)}, nil
 }
 
 // ExecutionStore is an opt-in Stage 2 Store port. It is NOT folded into

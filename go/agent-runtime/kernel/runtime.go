@@ -6,9 +6,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"time"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
 )
 
@@ -148,8 +150,12 @@ func (runtime *Runtime) Create(ctx context.Context, request CreateRequest) (Snap
 	if request.ExecutionRequired && !runtime.SupportsExecution() {
 		return Snapshot{}, ErrExecutionRequired
 	}
-	if request.ParentRunID != "" {
-		if request.ParentRunID == request.ID || strings.TrimSpace(request.ParentRunID) != request.ParentRunID ||
+	if request.ParentRunID != "" || request.LogicalParentRunID != "" {
+		if request.ParentRunID != "" && request.LogicalParentRunID != "" ||
+			request.ParentRunID == request.ID && request.ParentRunID != "" ||
+			request.LogicalParentRunID == request.ID && request.LogicalParentRunID != "" ||
+			strings.TrimSpace(request.ParentRunID) != request.ParentRunID ||
+			strings.TrimSpace(request.LogicalParentRunID) != request.LogicalParentRunID ||
 			!runtime.SupportsChildExecution() {
 			return Snapshot{}, ErrExecutionRequired
 		}
@@ -171,11 +177,25 @@ func (runtime *Runtime) Create(ctx context.Context, request CreateRequest) (Snap
 		ExecutionRequired: request.ExecutionRequired,
 		Run: Run{
 			ID: runID, Kind: request.Kind, Actor: request.Actor, Thread: request.Thread,
-			RequestID: strings.TrimSpace(request.RequestID), ParentRunID: request.ParentRunID,
+			RequestID: strings.TrimSpace(request.RequestID), ParentRunID: request.ParentRunID, LogicalParentRunID: request.LogicalParentRunID,
 			Goal:   strings.TrimSpace(request.Goal),
 			Status: RunStatusRunning, Revision: 1, DeadlineAt: deadlineAt, CreatedAt: now, UpdatedAt: now,
 		},
 		State: cloneJSON(request.State),
+	}
+	if request.Budget != nil {
+		if !request.Budget.Valid(runID) || runtime.BudgetStore() == nil || !runtime.SupportsChildExecution() {
+			return Snapshot{}, ErrExecutionRequired
+		}
+		record.BudgetEnrollment = request.Budget
+		record.Run.BudgetScopeID = request.Budget.ScopeID
+		if request.LogicalParentRunID != "" && request.LogicalParentRunID != request.Budget.Binding.ParentRunID {
+			return Snapshot{}, ErrInvalidInput
+		}
+		record.Run.LogicalParentRunID = request.Budget.Binding.ParentRunID
+	}
+	if !ValidRunBudgetBinding(record.Run) {
+		return Snapshot{}, ErrInvalidInput
 	}
 	events := append([]EventDraft{{Type: "run.created", Message: "Run created"}}, request.Events...)
 	return runtime.store.Create(ctx, record, events)
@@ -196,6 +216,25 @@ func (runtime *Runtime) ListEvents(ctx context.Context, runID string, afterSeq i
 		return nil, ErrInvalidInput
 	}
 	return runtime.store.ListEvents(ctx, strings.TrimSpace(runID), afterSeq, limit)
+}
+
+// BudgetStore is the native accounting participant of this Runtime's Store.
+func (runtime *Runtime) BudgetStore() budget.LedgerStore {
+	if runtime == nil {
+		return nil
+	}
+	store, _ := runtime.store.(budget.LedgerStore)
+	return store
+}
+
+// UsesLedgerStore checks composition identity, never just equality of ledger
+// IDs or database names. Only a shared Store instance can couple the writes.
+func (runtime *Runtime) UsesLedgerStore(ledger budget.LedgerStore) bool {
+	if runtime == nil || ledger == nil {
+		return false
+	}
+	local, ok := runtime.store.(budget.LedgerStore)
+	return ok && reflect.ValueOf(local).Comparable() && reflect.ValueOf(ledger).Comparable() && local == ledger
 }
 
 // Apply validates and atomically commits one feature-owned state transition.
@@ -225,6 +264,14 @@ func (runtime *Runtime) apply(ctx context.Context, runID string, expectedRevisio
 	if err = validateMutation(current, mutation); err != nil {
 		return Snapshot{}, err
 	}
+	if mutation.Ledger != nil {
+		if (runtime.execution == nil && (current.Run.ParentRunID == "" || runtime.physicalGrant == nil || runtime.physicalGrant.IsOwned())) || evidence {
+			return Snapshot{}, ErrExecutionRequired
+		}
+		if _, ok := runtime.store.(budget.LedgerStore); !ok {
+			return Snapshot{}, ErrExecutionRequired
+		}
+	}
 	proposed := runtime.makeStoreMutation(current, mutation)
 	if runtime.physicalGrant != nil {
 		if current.Run.ID != runtime.physicalGrant.ChildRunID {
@@ -246,6 +293,13 @@ func (runtime *Runtime) apply(ctx context.Context, runID string, expectedRevisio
 		candidate.Source = Snapshot{Run: proposed.Record.Run, State: cloneJSON(proposed.Record.State), Checkpoint: cloneCheckpoint(proposed.Record.Checkpoint), Result: cloneResult(proposed.Record.Result), EventHead: current.EventHead + int64(len(proposed.Events))}
 		if !candidate.Valid() {
 			return Snapshot{}, ErrInvalidInput
+		}
+		if mutation.Ledger != nil {
+			p, ok := candidate.AgentObligations()
+			l := mutation.Ledger.Next()
+			if !ok || p.LedgerRevision != l.Revision || !p.MatchesLiveLedger(l, candidate.Host) {
+				return Snapshot{}, budget.ErrLedgerConflict
+			}
 		}
 		proposed.ManagedSafePoint = ManagedSafePointProof{point: candidate, proof: featurecontrol.Seal(current.Run.ID, current.Run.Revision, "managed_safe_point", runtime.physicalGrant.ID, current.State, candidate)}
 	}
@@ -277,7 +331,7 @@ func (runtime *Runtime) makeStoreMutation(current Snapshot, mutation Mutation) S
 		Run: next, State: cloneJSON(mutation.State),
 		Checkpoint: cloneCheckpoint(mutation.Checkpoint), Result: cloneResult(mutation.Result),
 	}
-	return StoreMutation{Record: record, Events: mutation.Events}
+	return StoreMutation{Record: record, Events: mutation.Events, Ledger: mutation.Ledger}
 }
 
 // NewID creates a public identifier through the configured entropy source.

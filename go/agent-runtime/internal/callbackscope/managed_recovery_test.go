@@ -10,31 +10,31 @@ func TestManagedSuspensionRequiresActualQuiescentFrame(t *testing.T) {
 	a := new(int)
 	s := New(Binding{RunID: "run", GrantID: "grant"}, []any{a})
 	ctx, ticket := Enter(Bind(context.Background(), s), "run", a, "original-input")
-	if _, ok := ManagedSuspension(ctx, a, "request"); ok {
+	if _, ok := ManagedObligationSuspension(ctx, a, nil, "request", ""); ok {
 		t.Fatal("configuration alone certified frame")
 	}
 	Operation(ctx, a, "managed.hydrated", "actual-source")
 	ManagedPrepareEntered(ctx, a)
-	if _, ok := ManagedSuspension(ctx, a, "request"); ok {
+	if _, ok := ManagedObligationSuspension(ctx, a, nil, "request", ""); ok {
 		t.Fatal("inflight Prepare certified")
 	}
 	ManagedPrepareReturned(ctx, a, "actual-request", nil)
-	if _, ok := ManagedSuspension(ctx, a, "request"); !ok {
+	if _, ok := ManagedObligationSuspension(ctx, a, nil, "request", ""); !ok {
 		t.Fatal("actual returned bounded preparation rejected")
 	}
 	otherCtx, other := Enter(ctx, "run", new(int), "opaque")
-	if _, ok := ManagedSuspension(otherCtx, a, "request"); ok {
+	if _, ok := ManagedObligationSuspension(otherCtx, a, nil, "request", ""); ok {
 		t.Fatal("foreign frame adopted proof")
 	}
-	if _, ok := ManagedSuspension(ctx, a, "request"); ok {
+	if _, ok := ManagedObligationSuspension(ctx, a, nil, "request", ""); ok {
 		t.Fatal("outstanding sibling certified")
 	}
 	Returned(other, errors.New("unknown"))
-	if _, ok := ManagedSuspension(ctx, a, "request"); ok {
+	if _, ok := ManagedObligationSuspension(ctx, a, nil, "request", ""); ok {
 		t.Fatal("unknown sibling certified")
 	}
 	Returned(ticket, nil)
-	if _, ok := ManagedSuspension(ctx, a, "request"); ok {
+	if _, ok := ManagedObligationSuspension(ctx, a, nil, "request", ""); ok {
 		t.Fatal("returned frame reused as suspended")
 	}
 }
@@ -48,13 +48,13 @@ func TestManagedPreparationTracksSuccessiveActualRequests(t *testing.T) {
 		if !ManagedPrepareReturned(ctx, a, request, nil) {
 			t.Fatal("legitimate next preparation rejected")
 		}
-		if _, ok := ManagedSuspension(ctx, a, request); !ok {
+		if _, ok := ManagedObligationSuspension(ctx, a, nil, request, ""); !ok {
 			t.Fatal("missing returned prepare")
 		}
 	}
 	ManagedPrepareEntered(ctx, a)
 	ManagedPrepareReturned(ctx, a, "failed", errors.New("write uncertain"))
-	if _, ok := ManagedSuspension(ctx, a, "failed"); ok {
+	if _, ok := ManagedObligationSuspension(ctx, a, nil, "failed", ""); ok {
 		t.Fatal("failed Prepare certified")
 	}
 }

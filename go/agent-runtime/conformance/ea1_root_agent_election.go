@@ -48,12 +48,22 @@ func (s *ea1ElectionStore) Create(ctx context.Context, r kernel.Record, e []kern
 	}
 	return out, err
 }
-func (s *ea1ElectionStore) AcquireExecution(ctx context.Context, r kernel.ExecutionAcquireRequest) (kernel.ExecutionLease, error) {
-	out, err := s.ExecutionStore.AcquireExecution(ctx, r)
+
+// Parented runs still use the real child lease admission.
+func (s *ea1ElectionStore) AcquireExecution(ctx context.Context, req kernel.ExecutionAcquireRequest) (kernel.ExecutionLease, error) {
+	lease, err := s.ExecutionStore.AcquireExecution(ctx, req)
 	if err == nil {
-		s.acquired = out
+		s.acquired = lease
 	}
-	return out, err
+	return lease, err
+}
+
+func (s *ea1ElectionStore) BeginOwnedPhysicalExecution(ctx context.Context, a kernel.OwnedPhysicalAdmission) (kernel.OwnedPhysicalAdmissionResult, error) {
+	v, e := s.OwnedPhysicalExecutionStore.BeginOwnedPhysicalExecution(ctx, a)
+	if e == nil && a.AcquiresLease() {
+		s.acquired = v.Lease
+	}
+	return v, e
 }
 
 func (s *ea1ElectionStore) ApplyExecution(ctx context.Context, lease kernel.ExecutionLease, revision uint64, m kernel.StoreMutation) (kernel.Snapshot, error) {
@@ -152,10 +162,8 @@ func ea1NewElection(t *testing.T, factory func(*testing.T) (kernel.Store, kernel
 	return f
 }
 func (f *ea1ElectionFixture) runner(rt *kernel.Runtime, owner string, host bool) *agent.Runner {
-	ttl, callTimeout := 2*time.Second, ea1StoreBackedCallTimeout
-	if f.renewalFixture {
-		// Leave the same 500 ms renewal threshold but more margin for
-		// deliberately delaying a completed Model receipt on Windows.
+	ttl, callTimeout := ea1FixtureLeaseWindow(f.request.DeadlineAt), ea1StoreBackedCallTimeout
+	if f.renewalFixture { // Preserve the 500 ms renewal threshold.
 		ttl, callTimeout = 4*time.Second, 2500*time.Millisecond
 	}
 	deps := agent.Dependencies{Runtime: rt, Model: f.physical, Catalog: f.catalog, Executor: f.catalog, ModelOutcomeVerifier: f.modelVerifier, ToolOutcomeVerifier: f.toolVerifier, RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: ttl}, Execution: ea1FixtureExecutionPolicy(callTimeout)}
@@ -292,7 +300,7 @@ func ea1AgentElectionEntry(t *testing.T, factory func(*testing.T) (kernel.Store,
 		}
 	}
 	if cut == "deadline" {
-		deadline := time.Now().UTC().Add(time.Second)
+		deadline := time.Now().UTC().Add(ea1StoreBackedDeadline)
 		f.request.DeadlineAt = &deadline
 	}
 	var prepared kernel.Snapshot
@@ -431,7 +439,7 @@ func ea1AgentElectionRecovery(t *testing.T, factory func(*testing.T) (kernel.Sto
 		f.store.event = "tool.completed"
 	}
 	if mode == "deadline-known" {
-		deadline := time.Now().UTC().Add(time.Second)
+		deadline := time.Now().UTC().Add(ea1StoreBackedDeadline)
 		f.request.DeadlineAt = &deadline
 	}
 	// No arbitrary Host callback can turn a failed receipt write into unknown
@@ -593,7 +601,7 @@ func ea1AgentElectionRecovery(t *testing.T, factory func(*testing.T) (kernel.Sto
 		t.Fatal("complete original receipt changed across reopen")
 	}
 	fresh := f.runner(freshRT, "fresh-after-receipt", false)
-	if e = fresh.ReconcileRootPhysicalExecution(ctx, f.request.ID); !errors.Is(e, kernel.ErrNotFound) {
+	if e = fresh.ReconcileRootPhysicalExecution(ctx, f.request.ID); e != nil {
 		t.Fatalf("duplicate retirement invented scope: %v", e)
 	}
 	if kind == "model" {

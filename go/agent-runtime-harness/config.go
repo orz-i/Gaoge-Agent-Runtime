@@ -360,7 +360,7 @@ func SealConfigSnapshot(turnID string, value ConfigSnapshot, now time.Time) (Con
 		return ConfigSnapshot{}, err
 	}
 	if agent.ValidateWorkingStateSummaryPolicy(value.WorkingStateSummary) != nil ||
-		(value.WorkingStateSummary != nil && (value.MaxModelOutputTokens <= 0 || value.SharedBudget != nil)) {
+		(value.WorkingStateSummary != nil && value.MaxModelOutputTokens <= 0) {
 		return ConfigSnapshot{}, ErrInvalidRequest
 	}
 	value.WorkingStateSummary = agent.CloneWorkingStateSummaryPolicy(value.WorkingStateSummary)

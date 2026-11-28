@@ -17,51 +17,77 @@ func (s *Store) ownedGrantLocked(runID string) (memoryChildGrant, bool) {
 	}
 	return memoryChildGrant{}, false
 }
-func (s *Store) BeginOwnedPhysicalExecution(ctx context.Context, g kernel.ChildExecutionGrant, l kernel.ExecutionLease, p kernel.OwnedPhysicalAdmission) error {
-	if s == nil || ctx == nil || kernel.ValidateOwnedPhysicalAdmissionRequest(g, l) != nil {
-		return kernel.ErrInvalidInput
+func (s *Store) BeginOwnedPhysicalExecution(ctx context.Context, p kernel.OwnedPhysicalAdmission) (kernel.OwnedPhysicalAdmissionResult, error) {
+	var zero kernel.OwnedPhysicalAdmissionResult
+	if s == nil || ctx == nil {
+		return zero, kernel.ErrInvalidInput
+	}
+	g := p.Candidate().Grant
+	if !g.Identity().Valid() {
+		return kernel.OwnedPhysicalAdmissionResult{}, kernel.ErrExecutionConflict
 	}
 	if e := ctx.Err(); e != nil {
-		return e
+		return zero, e
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.managedGateLocked(g.ChildRunID); err != nil {
-		return err
-	}
 	current, ok := s.records[g.ChildRunID]
 	if !ok {
-		return kernel.ErrNotFound
+		return zero, kernel.ErrNotFound
+	}
+	if _, e := s.validateLiveRunOwners(ctx, current.Run); e != nil {
+		return zero, e
 	}
 	if s.grantIdentityUsedLocked(g.ID) {
-		return kernel.ErrExecutionConflict
-	}
-	closure, err := s.planRetirementSuccessorLocked(g.ChildRunID)
-	if err != nil {
-		return err
+		return zero, kernel.ErrExecutionConflict
 	}
 	native := s.execution[g.ChildRunID]
-	if closure.release {
-		native.lease = kernel.ExecutionLease{}
-	}
-	hasGrants := len(s.childGrantOwners[g.ChildRunID]) != 0
-	for _, old := range s.childGrants {
-		if old.grant.ChildRunID == g.ChildRunID {
-			hasGrants = true
+	persisted := native.lease
+	persisted.Epoch = native.epoch
+	var v kernel.OwnedPhysicalAdmissionResult
+	var next kernel.ManagedTransfer
+	var old memoryChildGrant
+	var e error
+	if p.IsManagedRecovery() {
+		var found bool
+		old, found = s.ownedGrantLocked(g.ChildRunID)
+		if !found || !s.managedSoleGrantLocked(g.ChildRunID, old.grant.ID) || old.settledRevision != 0 || old.completion.GrantID != "" || native.quarantineRev != 0 {
+			return zero, kernel.ErrExecutionConflict
 		}
+		t := s.managedTransfers[s.managedCurrent[g.ChildRunID]]
+		v, next, e = kernel.ResolveManagedPhysicalAdmission(ctx, t, p, current, persisted, old.grant, s.managedAuthority, native.physicalEpoch, s.currentExecutionTime(), s.ledgers)
+	} else {
+		hasGrants := len(s.childGrantOwners[g.ChildRunID]) != 0
+		for _, old := range s.childGrants {
+			if old.grant.ChildRunID == g.ChildRunID {
+				hasGrants = true
+			}
+		}
+		v, e = kernel.ResolveOwnedPhysicalAdmission(current, persisted, s.currentExecutionTime(), native.quarantineRev != 0, hasGrants, p)
 	}
-	if err := kernel.ValidateOwnedPhysicalAdmission(g, current, l, native.lease, s.currentExecutionTime(), native.quarantineRev != 0, hasGrants, p); err != nil {
-		return err
+	if e != nil {
+		return zero, e
 	}
-	if err := s.reserveGrantIdentityLocked(g); err != nil {
-		return err
+	g = v.Grant
+	entryEpoch, e := kernel.PrepareOwnedEntryEpoch(g, native.epoch, native.physicalEpoch)
+	if e != nil {
+		return zero, e
 	}
-	s.commitRetirementSuccessorLocked(g.ChildRunID, closure)
+	if e = s.reserveGrantIdentityLocked(g); e != nil {
+		return zero, e
+	}
+	if p.IsManagedRecovery() {
+		s.removeManagedGrantLocked(old)
+		s.saveManagedLocked(next)
+	}
 	s.childGrants[g.ID] = memoryChildGrant{grant: g, ancestors: []string{g.ChildRunID}}
 	s.childGrantOwners[g.ChildRunID] = map[string]struct{}{g.ID: {}}
-	native.physicalEpoch = g.ExecutionEpoch
+	if p.AcquiresLease() {
+		native.epoch, native.lease = v.Lease.Epoch, v.Lease
+	}
+	native.physicalEpoch = entryEpoch
 	s.execution[g.ChildRunID] = native
-	return nil
+	return v, nil
 }
 func (s *Store) loadOwnedPhysicalGrantLocked(g kernel.ChildExecutionGrant) (memoryChildGrant, error) {
 	original, ok := s.childGrants[g.ID]
@@ -83,14 +109,17 @@ func (s *Store) CheckOwnedPhysicalEntry(ctx context.Context, g kernel.ChildExecu
 	if s == nil || ctx == nil || kernel.ValidateOwnedPhysicalAdmissionRequest(g, l) != nil {
 		return kernel.OwnedPhysicalEntryWindow{}, kernel.ErrInvalidInput
 	}
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return kernel.OwnedPhysicalEntryWindow{}, err
 	}
 	current, ok := s.records[g.ChildRunID]
 	if !ok {
 		return kernel.OwnedPhysicalEntryWindow{}, kernel.ErrNotFound
+	}
+	if _, e := s.validateLiveRunOwners(ctx, current.Run); e != nil {
+		return kernel.OwnedPhysicalEntryWindow{}, e
 	}
 	original, err := s.loadOwnedPhysicalGrantLocked(g)
 	if err != nil {
@@ -101,8 +130,20 @@ func (s *Store) CheckOwnedPhysicalEntry(ctx context.Context, g kernel.ChildExecu
 		return kernel.OwnedPhysicalEntryWindow{}, kernel.ErrExecutionConflict
 	}
 	native := s.execution[g.ChildRunID]
-	return kernel.ValidateOwnedPhysicalEntry(g, expected, current, l, native.lease, s.currentExecutionTime(), native.quarantineRev != 0, native.physicalEpoch,
-		original.settledRevision, original.completion, s.managedTransfers[s.managedCurrent[g.ChildRunID]])
+	var transfer kernel.ManagedTransfer
+	if g.AdmissionOperation == "managed_resume" {
+		transfer = s.managedTransfers[s.managedCurrent[g.ChildRunID]]
+	}
+	window, err := kernel.ValidateOwnedPhysicalEntry(g, expected, current, l, native.lease, s.currentExecutionTime(), native.quarantineRev != 0, native.physicalEpoch,
+		original.settledRevision, original.completion, transfer)
+	if err == nil {
+		if g.AdmissionOperation == "managed_resume" && transfer.SafePoint.Host.KernelAuthority != s.managedAuthority {
+			return kernel.OwnedPhysicalEntryWindow{}, kernel.ErrExecutionConflict
+		}
+		native.physicalEpoch = g.ExecutionEpoch
+		s.execution[g.ChildRunID] = native
+	}
+	return window, err
 }
 
 func (s *Store) ApplyOwnedPhysicalRecovery(ctx context.Context, g kernel.ChildExecutionGrant, revision uint64, m kernel.StoreMutation, p kernel.OwnedPhysicalRecovery) (kernel.Snapshot, error) {
@@ -114,7 +155,7 @@ func (s *Store) ApplyOwnedPhysicalRecovery(ctx context.Context, g kernel.ChildEx
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.managedGateLocked(g.ChildRunID); err != nil {
+	if err := s.nativeEntryGateLocked(g.ChildRunID); err != nil {
 		return kernel.Snapshot{}, err
 	}
 	current, ok := s.records[g.ChildRunID]
@@ -129,7 +170,7 @@ func (s *Store) ApplyOwnedPhysicalRecovery(ctx context.Context, g kernel.ChildEx
 		return kernel.Snapshot{}, err
 	}
 	m.PhysicalPermit = p.PhysicalPermit(g, current, m)
-	return s.applyLocked(g.ChildRunID, revision, m)
+	return s.applyLocked(ctx, g.ChildRunID, revision, m, false)
 }
 
 // RecordOwnedPhysicalCallbackReturn changes only the original physical scope,
@@ -143,20 +184,23 @@ func (s *Store) RecordOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := s.managedGateLocked(g.ChildRunID); err != nil {
-		return err
-	}
 	original, err := s.loadOwnedPhysicalGrantLocked(g)
 	current, exists := s.records[g.ChildRunID]
 	if err != nil || !exists {
 		return kernel.ErrExecutionConflict
 	}
-	completion, write, err := kernel.ReduceOwnedPhysicalCallbackReturn(g, current, s.execution[g.ChildRunID].lease, rev, o, p, original.completion, original.settledRevision)
+	native := s.execution[g.ChildRunID]
+	if native.epoch != g.ExecutionEpoch {
+		return kernel.ErrExecutionConflict
+	}
+	completion, write, err := kernel.ReduceOwnedPhysicalCallbackReturn(g, current, native.lease, rev, o, p, original.completion, original.settledRevision, native.physicalEpoch)
 	if err != nil || !write {
 		return err
 	}
 	original.completion = completion
 	s.childGrants[g.ID] = original
+	native.physicalEpoch = g.ExecutionEpoch
+	s.execution[g.ChildRunID] = native
 	return nil
 }
 func (s *Store) LookupOwnedPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant) (kernel.OwnedPhysicalCallbackCompletion, error) {

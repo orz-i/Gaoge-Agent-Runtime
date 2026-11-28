@@ -46,24 +46,36 @@ func validChildAttempt(value childAttemptBinding) bool {
 		strings.TrimSpace(value.ExecutionRefID) != "" && value.Attempt > 0
 }
 
+func validChildRootBinding(binding childRootBinding) bool {
+	if !validChildAttempt(binding.attempt()) {
+		return false
+	}
+	seen := map[string]struct{}{binding.InvocationID: {}}
+	for _, parent := range binding.Parents {
+		if !validChildAttempt(parent) {
+			return false
+		}
+		if _, duplicate := seen[parent.InvocationID]; duplicate {
+			return false
+		}
+		seen[parent.InvocationID] = struct{}{}
+	}
+	return true
+}
+
 // A child freezes its original Agent root/ancestor Attempts. A changed
 // current owner is never authority for the old child physical effect.
 func sealChildRootInput(input json.RawMessage, inputHash string, root Invocation, parents ...childAttemptBinding) (json.RawMessage, string, error) {
-	if len(input) == 0 || hashInvocationBytes(input) != inputHash ||
-		!validChildAttempt(invocationAttempt(root)) || strings.TrimSpace(root.ParentItemID) != "" ||
-		!validInvocationStatus(root.Status) ||
-		terminalInvocationStatus(root.Status) {
+	selection := childRootBinding{InvocationID: root.ID, ExecutionRefID: root.ExecutionRefID, Attempt: root.Attempt, Parents: parents}
+	if strings.TrimSpace(root.ParentItemID) != "" || !validInvocationStatus(root.Status) || terminalInvocationStatus(root.Status) {
 		return nil, "", ErrConflict
 	}
-	seen := map[string]struct{}{root.ID: {}}
-	for _, parent := range parents {
-		if !validChildAttempt(parent) {
-			return nil, "", ErrConflict
-		}
-		if _, duplicate := seen[parent.InvocationID]; duplicate {
-			return nil, "", ErrConflict
-		}
-		seen[parent.InvocationID] = struct{}{}
+	return sealChildRootBinding(input, inputHash, selection)
+}
+
+func sealChildRootBinding(input json.RawMessage, inputHash string, selection childRootBinding) (json.RawMessage, string, error) {
+	if len(input) == 0 || hashInvocationBytes(input) != inputHash || !validChildRootBinding(selection) {
+		return nil, "", ErrConflict
 	}
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(input, &fields); err != nil || fields == nil {
@@ -72,9 +84,7 @@ func sealChildRootInput(input json.RawMessage, inputHash string, root Invocation
 	if _, reserved := fields[childRootKey]; reserved {
 		return nil, "", ErrConflict
 	}
-	binding, err := json.Marshal(childRootBinding{
-		InvocationID: root.ID, ExecutionRefID: root.ExecutionRefID, Attempt: root.Attempt, Parents: parents,
-	})
+	binding, err := json.Marshal(selection)
 	if err != nil {
 		return nil, "", err
 	}
@@ -100,20 +110,31 @@ func frozenChildRoot(invocation Invocation) (childRootBinding, error) {
 		return childRootBinding{}, ErrConflict
 	}
 	var binding childRootBinding
-	if err := json.Unmarshal(raw, &binding); err != nil || !validChildAttempt(binding.attempt()) {
+	if err := json.Unmarshal(raw, &binding); err != nil || !validChildRootBinding(binding) {
 		return childRootBinding{}, ErrConflict
 	}
-	seen := map[string]struct{}{binding.InvocationID: {}}
-	for _, parent := range binding.Parents {
-		if !validChildAttempt(parent) {
-			return childRootBinding{}, ErrConflict
+	return binding, nil
+}
+
+func verifyFrozenChildAttempts(ctx context.Context, store Store, child, root Invocation) (childRootBinding, error) {
+	binding, err := frozenChildRoot(child)
+	if err != nil || child.TurnID != root.TurnID || binding.attempt() != invocationAttempt(root) {
+		return binding, ErrConflict
+	}
+	for _, ancestor := range binding.Parents {
+		parent, err := store.GetInvocation(ctx, ancestor.InvocationID)
+		if err != nil || parent.ParentItemID == "" || parent.TurnID != child.TurnID || invocationAttempt(parent) != ancestor {
+			return binding, errors.Join(ErrConflict, err)
 		}
-		if _, duplicate := seen[parent.InvocationID]; duplicate {
-			return childRootBinding{}, ErrConflict
-		}
-		seen[parent.InvocationID] = struct{}{}
 	}
 	return binding, nil
+}
+
+func (binding childRootBinding) immediateParent() childAttemptBinding {
+	if len(binding.Parents) != 0 {
+		return binding.Parents[0]
+	}
+	return binding.attempt()
 }
 
 // loadFrozenChildRoot loads the original root by indexed identity. A root
@@ -236,7 +257,7 @@ func (runner *Runner) requireRunDescendsFrom(ctx context.Context, runID, ownerRu
 // Invocation carries its own inherited ancestor proof: a Host delegation
 // Item may end its Item chain without losing the transitive owner Attempts.
 func (runner *Runner) freezeChildParentAttempts(
-	ctx context.Context, turnID, parentItemID string, root Invocation,
+	ctx context.Context, turnID, parentItemID string, root Invocation, skipOwnerID string,
 ) ([]childAttemptBinding, error) {
 	seenItems := make(map[string]struct{})
 	seenParents := map[string]childAttemptBinding{}
@@ -264,7 +285,7 @@ func (runner *Runner) freezeChildParentAttempts(
 		if err != nil || item.ID != id || item.TurnID != turnID || item.Seq == 0 {
 			return nil, errors.Join(ErrConflict, err)
 		}
-		if item.InvocationID != "" {
+		if item.InvocationID != "" && item.InvocationID != skipOwnerID {
 			owner, loadErr := runner.store.GetInvocation(ctx, item.InvocationID)
 			if loadErr != nil || owner.ID != item.InvocationID || owner.TurnID != turnID {
 				return nil, errors.Join(ErrConflict, loadErr)

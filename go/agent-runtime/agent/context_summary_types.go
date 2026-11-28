@@ -11,7 +11,7 @@ import (
 
 const (
 	ModelInvocationContextSummary = "context_summary"
-	WorkingStateSummaryVersion    = kernel.ManagedLifecycleWorkingStateSummary
+	WorkingStateSummaryVersion    = "working-state-summary-v3"
 	EventContextSummaryConsumed   = "agent.context_summary.consumed"
 )
 

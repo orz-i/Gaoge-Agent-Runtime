@@ -73,7 +73,7 @@ func TestWorkingStateSummaryConfigRejectsUnboundedAndUnsupportedCombinations(t *
 		{"missing byte limit", func(c *ConfigSnapshot) { c.WorkingStateSummary.MaxSerializedBytes = 0 }},
 		{"negative byte limit", func(c *ConfigSnapshot) { c.WorkingStateSummary.MaxSerializedBytes = -1 }},
 		{"missing per call cap", func(c *ConfigSnapshot) { c.MaxModelOutputTokens = 0 }},
-		{"shared budget", func(c *ConfigSnapshot) { c.SharedBudget = &budget.Limits{MaxLLMCalls: 4} }},
+		{"invalid shared budget", func(c *ConfigSnapshot) { c.SharedBudget = &budget.Limits{MaxLLMCalls: -1} }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			config := ConfigSnapshot{WorkingStateSummary: &agent.WorkingStateSummaryPolicy{MaxInputTokens: 4096, MaxSerializedBytes: 16384}, AgentSpec: AgentSpec{MaxModelOutputTokens: 128}}
@@ -82,5 +82,34 @@ func TestWorkingStateSummaryConfigRejectsUnboundedAndUnsupportedCombinations(t *
 				t.Fatalf("invalid summary admission accepted: %v", err)
 			}
 		})
+	}
+}
+
+// Sealing the configuration is not execution admission. The original
+// summary policy and budget must both contribute to the immutable identity;
+// the Runner still has to prove the concrete shared owner at execution time.
+func TestWorkingStateSummaryConfigSealsSharedBudget(t *testing.T) {
+	now := time.Now()
+	config := ConfigSnapshot{WorkingStateSummary: &agent.WorkingStateSummaryPolicy{MaxInputTokens: 4096, MaxSerializedBytes: 16384}, AgentSpec: AgentSpec{MaxModelOutputTokens: 128}, SharedBudget: &budget.Limits{MaxLLMCalls: 4}}
+	original, err := SealConfigSnapshot("summary-budget-turn", config, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := cloneConfigSnapshot(original)
+	changed.SharedBudget.MaxLLMCalls++
+	other, err := SealConfigSnapshot(original.TurnID, changed, now)
+	if err != nil || original.ID == other.ID || original.SharedBudget.MaxLLMCalls != 4 {
+		t.Fatalf("shared budget did not seal independently: %v", err)
+	}
+	raw, err := json.Marshal(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var restored ConfigSnapshot
+	if err = json.Unmarshal(raw, &restored); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = canonicalSealedConfig(restored); err != nil {
+		t.Fatal(err)
 	}
 }

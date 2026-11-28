@@ -385,30 +385,31 @@ func TestResumeTurnDoesNotReplayRetryableErrorAfterModelDispatch(t *testing.T) {
 }
 
 type interleavedResumeStore struct {
-	*harness.MemoryStore
+	*memory.Store
 	onResume func()
 }
 
-func (s *interleavedResumeStore) AppendItem(ctx context.Context, item harness.Item) (harness.Item, bool, error) {
-	grant, fresh, err := s.MemoryStore.AppendItem(ctx, item)
-	if phase, ok := harness.VerifiedExecutionDispatchGrant(grant); err == nil && fresh && ok && phase == "resume" && s.onResume != nil {
-		s.onResume()
+func (s *interleavedResumeStore) BeginOwnedPhysicalExecution(ctx context.Context, p kernel.OwnedPhysicalAdmission) (kernel.OwnedPhysicalAdmissionResult, error) {
+	if p.Candidate().Grant.AdmissionOperation == "resume" && s.onResume != nil {
+		f := s.onResume
+		s.onResume = nil
+		f()
 	}
-	return grant, fresh, err
+	return s.Store.BeginOwnedPhysicalExecution(ctx, p)
 }
 
-// A Ready delivery may finish the original Agent after Harness admits a competing
-// resume but before the losing native call validates its expected revision.
+// A Ready delivery may finish the original Agent before the competing
+// native admission transaction takes the Run lock.
 func TestResumeTurnRejectsStaleDispatchWithoutHidingOriginalResult(t *testing.T) {
 	clock := newResumeTurnClock()
-	store := &interleavedResumeStore{MemoryStore: harness.NewMemoryStore()}
+	store := &interleavedResumeStore{Store: memory.NewStoreWithExecutionClock(clock)}
 	calls := 0
 	provider := resumeTurnModelFunc(func(context.Context, model.Request) (model.Response, error) {
 		calls++
 		return model.Response{Content: "original result", Continue: calls == 1}, nil
 	})
 	var deps agent.Dependencies
-	host, rt := newResumeTurnHarness(t, memory.NewStoreWithExecutionClock(clock), store, provider, clock, func(d *agent.Dependencies) { deps = *d })
+	host, rt := newResumeTurnHarness(t, store, harness.NewMemoryStore(), provider, clock, func(d *agent.Dependencies) { deps = *d })
 	start, err := host.StartAgentTurn(t.Context(), testStartRequest())
 	if err != nil || start.Turn.Status != harness.TurnRunning {
 		t.Fatalf("initial yield: %s %v", start.Turn.Status, err)
@@ -452,12 +453,9 @@ func TestResumeTurnRejectsStaleDispatchWithoutHidingOriginalResult(t *testing.T)
 	}
 	for _, item := range final.Items {
 		if phase, ok := harness.VerifiedExecutionDispatchGrant(item); ok && phase == "resume" {
-			if boundary, ok := harness.VerifiedExecutionDispatchReceipt(item, final.Items); ok && boundary == "physical_dispatch_rejected" {
-				return
-			}
+			t.Fatal("native Resume still wrote a Host grant")
 		}
 	}
-	t.Fatal("missing original rejected resume receipt")
 }
 
 func TestResumeTurnDoesNotReplayUnknownNativeToolOutcome(t *testing.T) {

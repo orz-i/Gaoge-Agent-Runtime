@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
@@ -56,10 +57,10 @@ func sameRecoveredCall(a, b tools.Call) bool {
 	return reflect.DeepEqual(a, b)
 }
 
-// reconcileOriginalToolReturnIfPresent never consults a provider or dispatches
-// work. Only a fully returned original Root callback with sealed settlement
-// or native no-send proof can select this path. Missing/opaque completion
-// remains unresolved.
+// reconcileOriginalToolReturnIfPresent uses the original returned Call.
+// A sealed receipt or no-send proof can recover locally; a bound held
+// reservation can use the composed read-only verifier. Neither path
+// dispatches work, and a missing/opaque callback return stays unresolved.
 func (runner *Runner) reconcileOriginalToolReturnIfPresent(ctx context.Context, s kernel.Snapshot, state runState) (kernel.Snapshot, bool, error) {
 	if s.Run.Status != kernel.RunStatusRunning || s.Run.ParentRunID != "" || state.ToolWait != nil || state.ToolDispatchID == "" {
 		return s, false, nil
@@ -89,7 +90,7 @@ func (runner *Runner) reconcileOriginalToolReturnIfPresent(ctx context.Context, 
 	if err != nil {
 		return s, true, errors.Join(ErrToolOutcomeUnknown, err)
 	}
-	if !found || (binding.ReceiptDigest == "" && !binding.Unsent) {
+	if !found || (binding.ReceiptDigest == "" && !binding.Unsent && (binding.LedgerID == "" || runner.toolOutcomeVerifier == nil)) {
 		return s, false, nil
 	}
 	repaired, err := runner.reconcileRootToolReceipt(ctx, s, state, grant, state.ToolDispatchID, false)
@@ -127,6 +128,7 @@ func (runner *Runner) reconcileRootToolReceipt(ctx context.Context, snapshot ker
 	}
 	ledgerID := binding.LedgerID
 	var outcome toolOutcomeReceipt
+	var ledgerMutation *budget.LedgerMutation
 	if bound && binding.ReceiptDigest != "" {
 		if state.ToolWait != nil || state.ExternalToolHold != nil {
 			return snapshot, ErrToolReceiptMismatch
@@ -178,7 +180,8 @@ func (runner *Runner) reconcileRootToolReceipt(ctx context.Context, snapshot ker
 		}
 		if bound && binding.LedgerID != "" {
 			childWait := state.ToolWait != nil && state.ToolWait.Kind == tools.PendingChildTerminal
-			if err := runner.settleOriginalHeldTool(ctx, request, binding, verified, childWait); err != nil {
+			ledgerMutation, err = runner.settleOriginalHeldTool(ctx, request, binding, verified, childWait)
+			if err != nil {
 				return snapshot, errors.Join(ErrToolOutcomeUnknown, err)
 			}
 		}
@@ -227,8 +230,8 @@ func (runner *Runner) reconcileRootToolReceipt(ctx context.Context, snapshot ker
 		return snapshot, err
 	}
 	source := featurecontrol.Seal(snapshot.Run.ID, snapshot.Run.Revision, "agent_owned_receipt_recovery_source", grant.ID, snapshot.State, snapshot.Checkpoint)
-	target := featurecontrol.Seal(snapshot.Run.ID, snapshot.Run.Revision, "agent_owned_receipt_recovery_target", grant.ID, encoded, snapshot.Checkpoint)
-	repaired, err := runner.runtime.ApplyOwnedPhysicalRecovery(ctx, grant, snapshot.Run.Revision, kernel.Mutation{Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint, ErrorCode: snapshot.Run.ErrorCode, ErrorDetail: snapshot.Run.ErrorDetail, Events: []kernel.EventDraft{{Type: "tool.receipt_recovered", Message: callID, Wakeup: true}}}, source, target)
+	target := featurecontrol.Seal(snapshot.Run.ID, snapshot.Run.Revision, "agent_owned_receipt_recovery_target", grant.ID, encoded, kernel.ReceiptRecoveryTarget(snapshot.Checkpoint, ledgerMutation))
+	repaired, err := runner.runtime.ApplyOwnedPhysicalRecovery(ctx, grant, snapshot.Run.Revision, kernel.Mutation{Ledger: ledgerMutation, Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint, ErrorCode: snapshot.Run.ErrorCode, ErrorDetail: snapshot.Run.ErrorDetail, Events: []kernel.EventDraft{{Type: "tool.receipt_recovered", Message: callID, Wakeup: true}}}, source, target)
 	if err != nil {
 		return snapshot, err
 	}

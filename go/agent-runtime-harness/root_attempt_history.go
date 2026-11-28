@@ -36,64 +36,27 @@ func RootRetryTransitionFact(previous Invocation, nextRunID string, now time.Tim
 		ParentItemID: RootRetryTransitionParentItemID, Payload: payload, CreatedAt: now.UTC(), UpdatedAt: now.UTC()}, nil
 }
 
-func historicalRetryRootBound(current Invocation, frozen childRootBinding, ledger *budget.Ledger, facts ...[]Item) bool {
-	if frozen.InvocationID != current.ID || frozen.Attempt < 1 || frozen.Attempt >= current.Attempt || frozen.ExecutionRefID == current.ExecutionRefID {
+func historicalRetryRootBound(current Invocation, frozen childRootBinding, ledger *budget.Ledger, items []Item) bool {
+	if frozen.InvocationID != current.ID || frozen.Attempt < 1 || frozen.Attempt >= current.Attempt || frozen.ExecutionRefID == current.ExecutionRefID ||
+		(ledger != nil && (ledger.ID != current.TurnID || ledger.Revision == 0)) {
 		return false
 	}
-	// Budget grants from the original atomic Store CAS are also immutable
-	// ancestry authority. They remain mandatory whenever accounting exists.
-	if ledger != nil {
-		if ledger.ID != current.TurnID || ledger.Revision == 0 {
-			return false
-		}
-		runID := current.ExecutionRefID
-		for attempt := current.Attempt; attempt > frozen.Attempt; attempt-- {
-			grant, ok := ledger.RootRetries[runID]
-			if !ok || grant.InvocationID != current.ID || grant.Attempt != attempt || grant.OriginalRunID == "" || grant.OriginalRunID == runID ||
-				grant.Active != (attempt == current.Attempt) || !ledger.CancelledRuns[grant.OriginalRunID] {
-				return false
-			}
-			runID = grant.OriginalRunID
-		}
-		if runID != frozen.ExecutionRefID {
-			return false
-		}
-	}
-	var items []Item
-	if len(facts) != 0 {
-		items = facts[0]
-	}
+	// The Store-owned Attempt selection is mandatory. A budget grant proves
+	// native accounting for that SAME transition, never a substitute for it.
 	bound := invocationAttempt(current)
 	for bound.Attempt > frozen.Attempt {
-		id := stableID("hrootretry", current.ID, attemptString(bound.Attempt))
-		matches := 0
-		var source rootRetryTransition
-		for _, fact := range items {
-			if fact.ID != id {
-				continue
-			}
-			matches++
-			if fact.Seq == 0 || fact.TurnID != current.TurnID || fact.InvocationID != current.ID || fact.RunID != bound.ExecutionRefID ||
-				fact.ParentItemID != RootRetryTransitionParentItemID || fact.Kind != ItemDiagnostic || fact.Status != ItemCompleted ||
-				!decodeTypedAuthorityJSON(fact.Payload, &source) || source.Version != 1 || source.Next != bound ||
-				source.Previous.InvocationID != current.ID || !validChildAttempt(source.Previous) || source.Previous.Attempt != bound.Attempt-1 ||
-				source.Previous.ExecutionRefID == bound.ExecutionRefID || source.InputHash != current.InputHash {
-				return false
-			}
-		}
-		if matches == 0 {
-			if ledger == nil {
-				return false
-			}
-			// Pre-existing atomic budget grants remain original authority.
-			// Upgrading must not require backfilling historical Item facts;
-			// continue validating every other present/missing link as well.
-			grant := ledger.RootRetries[bound.ExecutionRefID]
-			bound = childAttemptBinding{InvocationID: current.ID, ExecutionRefID: grant.OriginalRunID, Attempt: bound.Attempt - 1}
-			continue
-		}
-		if matches != 1 {
+		attempt := current
+		attempt.Attempt, attempt.ExecutionRefID = bound.Attempt, bound.ExecutionRefID
+		source, err := retrySelectionFromItems(attempt, items)
+		if err != nil {
 			return false
+		}
+		if ledger != nil {
+			g, ok := ledger.RootRetries[bound.ExecutionRefID]
+			if !ok || g.InvocationID != current.ID || g.Attempt != bound.Attempt || g.OriginalRunID != source.Previous.ExecutionRefID ||
+				g.Active != (bound.Attempt == current.Attempt) || !ledger.CancelledRuns[g.OriginalRunID] {
+				return false
+			}
 		}
 		bound = source.Previous
 	}

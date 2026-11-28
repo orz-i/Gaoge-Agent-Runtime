@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/callbackscope"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
@@ -215,7 +216,7 @@ func validToolWaitState(state runState) bool {
 	return ok && wait.CallID == call.ID && wait.ToolKey == call.ToolKey
 }
 
-func (runner *Runner) persistToolWait(ctx context.Context, snapshot kernel.Snapshot, state runState, descriptor *tools.PendingExecution) (kernel.Snapshot, bool, error) {
+func (runner *Runner) persistToolWait(ctx context.Context, snapshot kernel.Snapshot, state runState, descriptor *tools.PendingExecution, ledger *budget.LedgerMutation) (kernel.Snapshot, bool, error) {
 	if !tools.ValidPending(descriptor) || state.ToolWait != nil {
 		failed, err := runner.fail(ctx, snapshot, state, "agent.tool_wait_invalid", tools.ErrInvalidCall)
 		return failed, true, err
@@ -240,7 +241,7 @@ func (runner *Runner) persistToolWait(ctx context.Context, snapshot kernel.Snaps
 	// their original serial receipt/fencing contract.
 	if pending.Kind == tools.PendingChildTerminal &&
 		len(state.PendingCalls) > 1 && snapshot.Checkpoint == nil && state.PendingApproval == nil && independentChildBatch(state) {
-		return runner.deferChildCall(ctx, snapshot, state, call)
+		return runner.deferChildCall(ctx, snapshot, state, call, ledger)
 	}
 	events := []kernel.EventDraft{{Type: EventToolPending, Message: string(pending.Kind)}}
 	if pending.DeadlineAt != nil {
@@ -252,8 +253,8 @@ func (runner *Runner) persistToolWait(ctx context.Context, snapshot kernel.Snaps
 	if err != nil {
 		return kernel.Snapshot{}, true, err
 	}
-	next, err := runner.runtime.Apply(ctx, snapshot.Run.ID, snapshot.Run.Revision, kernel.Mutation{
-		Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint, Events: events,
+	next, err := runner.commitNativeTransition(ctx, snapshot, kernel.Mutation{
+		Ledger: ledger, Status: kernel.RunStatusRunning, State: encoded, Checkpoint: snapshot.Checkpoint, Events: events,
 	})
 	return next, true, err
 }

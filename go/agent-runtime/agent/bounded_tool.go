@@ -16,6 +16,9 @@ import (
 
 // Select the actual Tool settlement owner, never a Run/Model-only adapter.
 func selectedToolBudget(d Dependencies) *BoundedBudgetAdapter {
+	if d.BoundedBudget != nil {
+		return d.BoundedBudget
+	}
 	for _, layer := range d.ToolMiddleware {
 		if a, ok := layer.(*BoundedBudgetAdapter); ok {
 			return a

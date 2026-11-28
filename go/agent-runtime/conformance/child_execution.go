@@ -56,10 +56,10 @@ func RunChildExecutionSuite(t *testing.T, create func(*testing.T) kernel.Store) 
 		if observed, lookupErr := rt.LookupChildExecution(t.Context(), child.Run.ID); lookupErr != nil || observed != grant {
 			t.Fatalf("untrusted retirement affected original Grant: %+v err=%v", observed, lookupErr)
 		}
-		if err = store.FinishChildExecution(t.Context(), kernel.ChildExecutionGrant{ID: grant.ID, ChildRunID: "foreign", ExpectedRevision: grant.ExpectedRevision}); err == nil {
+		if err = store.FinishChildExecution(t.Context(), kernel.ChildExecutionGrant{ID: grant.ID, ChildRunID: "foreign", ExpectedRevision: grant.ExpectedRevision}, kernel.ChildExecutionSettlement{}); err == nil {
 			t.Fatal("foreign child retired trusted Grant")
 		}
-		if err = store.FinishChildExecution(t.Context(), grant); !errors.Is(err, kernel.ErrExecutionConflict) {
+		if err = store.FinishChildExecution(t.Context(), grant, kernel.ChildExecutionSettlement{}); !errors.Is(err, kernel.ErrExecutionConflict) {
 			t.Fatalf("original Grant was retired before physical callback completion: %v", err)
 		}
 		if markErr := store.MarkChildExecutionSettled(t.Context(), grant, kernel.ChildExecutionSettlement{}); !errors.Is(markErr, kernel.ErrExecutionConflict) {
@@ -75,16 +75,19 @@ func RunChildExecutionSuite(t *testing.T, create func(*testing.T) kernel.Store) 
 		}
 		forgedRevision := grant
 		forgedRevision.ExpectedRevision++
-		if err = store.FinishChildExecution(t.Context(), forgedRevision); !errors.Is(err, kernel.ErrExecutionConflict) {
+		if err = store.FinishChildExecution(t.Context(), forgedRevision, kernel.ChildExecutionSettlement{}); !errors.Is(err, kernel.ErrExecutionConflict) {
 			t.Fatalf("settled original Grant could be retired using a forged StartRevision: original=%d forged=%d err=%v", grant.ExpectedRevision, forgedRevision.ExpectedRevision, err)
 		}
-		if err = store.FinishChildExecution(t.Context(), grant); err != nil {
+		if err = store.FinishChildExecution(t.Context(), grant, kernel.ChildExecutionSettlement{}); !errors.Is(err, kernel.ErrExecutionConflict) {
+			t.Fatalf("marked borrowed grant accepted empty Finish permit: %v", err)
+		}
+		if err = rt.FinishChildExecution(t.Context(), grant, proof); err != nil {
 			t.Fatal(err)
 		}
 		if _, lookupErr := rt.LookupChildExecution(t.Context(), child.Run.ID); !errors.Is(lookupErr, kernel.ErrNotFound) {
 			t.Fatalf("settled physical Grant still reads active: %v", lookupErr)
 		}
-		if err = store.FinishChildExecution(t.Context(), grant); !errors.Is(err, kernel.ErrExecutionConflict) {
+		if err = store.FinishChildExecution(t.Context(), grant, kernel.ChildExecutionSettlement{}); !errors.Is(err, kernel.ErrExecutionConflict) {
 			t.Fatalf("replayed Grant retirement succeeded: %v", err)
 		}
 		if err = store.BeginChildExecution(t.Context(), grant); !errors.Is(err, kernel.ErrExecutionConflict) {

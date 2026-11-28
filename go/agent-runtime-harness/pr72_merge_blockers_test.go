@@ -14,23 +14,24 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 )
 
-type pr72PausedStartGrantStore struct {
-	harness.Store
+type pr72PausedCreateStore struct {
+	*memory.Store
 	stopped atomic.Bool
 	entered chan struct{}
 	release chan struct{}
 }
 
-func (s *pr72PausedStartGrantStore) AppendItem(ctx context.Context, item harness.Item) (harness.Item, bool, error) {
-	saved, created, err := s.Store.AppendItem(ctx, item)
-	if err == nil && created && item.Kind == harness.ItemDiagnostic && item.ParentItemID == harness.ExecutionDispatchParentItemID && s.stopped.CompareAndSwap(false, true) {
+func (s *pr72PausedCreateStore) Create(ctx context.Context, r kernel.Record, events []kernel.EventDraft) (kernel.Snapshot, error) {
+	saved, err := s.Store.Create(ctx, r, events)
+	if err == nil && s.stopped.CompareAndSwap(false, true) {
 		close(s.entered)
 		<-s.release
 	}
-	return saved, created, err
+	return saved, err
 }
 func TestPR72ConcurrentStartReplayDoesNotTerminalizeActiveDispatch(t *testing.T) {
-	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore(), Clock: fixedClock{}})
+	store := &pr72PausedCreateStore{Store: memory.NewStore(), entered: make(chan struct{}), release: make(chan struct{})}
+	runtime, err := kernel.New(kernel.Dependencies{Store: store, Clock: fixedClock{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,8 +40,7 @@ func TestPR72ConcurrentStartReplayDoesNotTerminalizeActiveDispatch(t *testing.T)
 		t.Fatal(err)
 	}
 	backing := harness.NewMemoryStore()
-	store := &pr72PausedStartGrantStore{Store: backing, entered: make(chan struct{}), release: make(chan struct{})}
-	runner, err := harness.NewRunner(harness.Dependencies{Runtime: runtime, Agent: direct, Store: store, Clock: fixedClock{}})
+	runner, err := harness.NewRunner(harness.Dependencies{Runtime: runtime, Agent: direct, Store: backing, Clock: fixedClock{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,12 +57,12 @@ func TestPR72ConcurrentStartReplayDoesNotTerminalizeActiveDispatch(t *testing.T)
 	select {
 	case <-store.entered:
 	case <-time.After(5 * time.Second):
-		t.Fatal("original dispatch did not acquire grant")
+		t.Fatal("original native Create did not commit")
 	}
 	second, secondErr := runner.StartAgentTurn(t.Context(), request)
-	if !errors.Is(secondErr, harness.ErrConflict) {
+	if secondErr != nil && !errors.Is(secondErr, harness.ErrConflict) || secondErr == nil && second.Turn.Status != harness.TurnRunning {
 		close(store.release)
-		t.Fatalf("concurrent replay must return a conflict, not a failure projection: turn=%s err=%v", second.Turn.Status, secondErr)
+		t.Fatalf("concurrent replay must observe the original Run or conflict: turn=%s err=%v", second.Turn.Status, secondErr)
 	}
 	sessionID, err := harness.SessionID(request.HostThread)
 	if err != nil {
@@ -79,8 +79,8 @@ func TestPR72ConcurrentStartReplayDoesNotTerminalizeActiveDispatch(t *testing.T)
 	if loadErr != nil {
 		t.Fatal(loadErr)
 	}
-	if during.Status != harness.TurnAccepted {
-		t.Errorf("replay terminalized an active dispatch: %s", during.Status)
+	if during.Status != harness.TurnAccepted && during.Status != harness.TurnRunning {
+		t.Errorf("replay terminalized an active native Start: %s", during.Status)
 	}
 	select {
 	case original := <-first:
@@ -93,6 +93,15 @@ func TestPR72ConcurrentStartReplayDoesNotTerminalizeActiveDispatch(t *testing.T)
 	after, err := backing.GetTurn(t.Context(), turnID)
 	if err != nil || after.Status != harness.TurnCompleted {
 		t.Fatalf("final status=%s err=%v", after.Status, err)
+	}
+	items, err := runner.ListTimeline(t.Context(), turnID, 0, 500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range items {
+		if item.ParentItemID == harness.ExecutionDispatchParentItemID {
+			t.Fatal("concurrent native Start created Host grant")
+		}
 	}
 }
 
@@ -119,6 +128,9 @@ func (s *pr72DispatchReceiptObserver) AppendItem(ctx context.Context, item harne
 	}
 	return saved, fresh, err
 }
+
+type pr72OpaqueAgent struct{ *agent.Runner }
+
 func TestPR72DispatchCompletionUsesBoundedIndependentContext(t *testing.T) {
 	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore(), Clock: fixedClock{}})
 	if err != nil {
@@ -129,7 +141,7 @@ func TestPR72DispatchCompletionUsesBoundedIndependentContext(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := &pr72DispatchReceiptObserver{Store: harness.NewMemoryStore()}
-	runner, err := harness.NewRunner(harness.Dependencies{Runtime: runtime, Agent: direct, Store: store, Clock: fixedClock{}})
+	runner, err := harness.NewRunner(harness.Dependencies{Runtime: runtime, Agent: &pr72OpaqueAgent{direct}, Store: store, Clock: fixedClock{}})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -153,12 +153,12 @@ func TestOriginalHeldToolReplayPreservesNativeReceiptBytes(t *testing.T) {
 	}
 	result := tools.ExecutionResult{Content: []byte(`{ "a": 1 }`), Receipt: tools.Receipt{ExecutionID: q.Call.ID, Disposition: "committed"}}
 	for range 2 {
-		if err = r.settleOriginalHeldTool(ctx, q, b, result, true); err != nil {
+		if _, err = r.settleOriginalHeldTool(ctx, q, b, result, true); err != nil {
 			t.Fatal(err)
 		}
 	}
 	result.Content = []byte(`{"a":1}`)
-	if err = r.settleOriginalHeldTool(ctx, q, b, result, true); !errors.Is(err, ErrToolReceiptMismatch) {
+	if _, err = r.settleOriginalHeldTool(ctx, q, b, result, true); !errors.Is(err, ErrToolReceiptMismatch) {
 		t.Fatal("accepted changed original receipt bytes", err)
 	}
 	l, err := store.LoadBudget(ctx, "turn")

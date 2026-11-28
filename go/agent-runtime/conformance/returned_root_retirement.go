@@ -50,40 +50,14 @@ func (s *returnedRootRetirementFault) ApplyOwnedPhysicalRecovery(ctx context.Con
 	}
 	return next, err
 }
-func (s *returnedRootRetirementFault) MarkChildExecutionSettled(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
-	if s.dead {
-		return errReturnedRootRetirementCut
-	}
-	if s.mode == "mark-before" {
-		return s.cut(g)
-	}
-	err := s.managedStorePorts.MarkChildExecutionSettled(ctx, g, p)
-	if err == nil && s.mode == "mark-ack" {
-		return s.cut(g)
-	}
-	return err
-}
-func (s *returnedRootRetirementFault) CompleteManagedRecovery(ctx context.Context, g kernel.ChildExecutionGrant, source kernel.Snapshot, p kernel.ManagedCompletionProof) error {
-	if s.dead {
-		return errReturnedRootRetirementCut
-	}
-	if s.mode == "t4-before" {
-		return s.cut(g)
-	}
-	err := s.managedStorePorts.CompleteManagedRecovery(ctx, g, source, p)
-	if err == nil && s.mode == "t4-ack" {
-		return s.cut(g)
-	}
-	return err
-}
-func (s *returnedRootRetirementFault) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant) error {
+func (s *returnedRootRetirementFault) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
 	if s.dead {
 		return errReturnedRootRetirementCut
 	}
 	if s.mode == "finish-before" {
 		return s.cut(g)
 	}
-	err := s.managedStorePorts.FinishChildExecution(ctx, g)
+	err := s.managedStorePorts.FinishChildExecution(ctx, g, p)
 	if err == nil && s.mode == "finish-ack" {
 		return s.cut(g)
 	}
@@ -94,17 +68,4 @@ func (s *returnedRootRetirementFault) LoadOwnedRetirement(ctx context.Context, i
 		return kernel.OwnedRetirementReceipt{}, errReturnedRootRetirementCut
 	}
 	return s.managedStorePorts.LoadOwnedRetirement(ctx, id)
-}
-func (s *returnedRootRetirementFault) AcknowledgeOwnedRetirement(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.OwnedRetirementAcknowledgement) (kernel.OwnedRetirementAckResult, error) {
-	if s.dead {
-		return kernel.OwnedRetirementAckResult{}, errReturnedRootRetirementCut
-	}
-	if s.mode == "ack-before" {
-		return kernel.OwnedRetirementAckResult{}, s.cut(g)
-	}
-	out, err := s.managedStorePorts.AcknowledgeOwnedRetirement(ctx, g, p)
-	if err == nil && s.mode == "ack-ack" {
-		return kernel.OwnedRetirementAckResult{}, s.cut(g)
-	}
-	return out, err
 }

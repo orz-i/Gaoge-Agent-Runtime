@@ -13,7 +13,8 @@ func validBoundedContextComposition(d Dependencies) bool {
 	if a == nil {
 		return true
 	}
-	if a.manager == nil || a.ports == nil || d.PrepareModelRequest != nil || d.ManagedContextRecovery != nil || d.ContextSummary != nil || d.SummaryNativeRecovery {
+	if a.manager == nil || a.ports == nil || d.PrepareModelRequest != nil ||
+		(d.ContextSummary != nil && d.ContextSummary.bounded != a) {
 		return false
 	}
 	count := 0
@@ -25,7 +26,7 @@ func validBoundedContextComposition(d Dependencies) bool {
 			count++
 		}
 	}
-	return count == 1
+	return count == 1 || len(d.RunMiddleware) == 0
 }
 
 // A private, source-bound preparation rejection is not a provider
@@ -44,6 +45,17 @@ func (e provenCandidateRejection) Unwrap() error { return e.cause }
 // neither claims managed suspension nor grants trust to generic Host callbacks.
 func (r *Runner) prepareBoundedContext(ctx context.Context, source kernel.Snapshot, request model.Request) (model.Request, error) {
 	a := r.boundedContext
+	// A managed transfer must retain the exact original hydrated frame's
+	// preparation evidence. The actual preparation and sampling selection
+	// remain the same concrete operation as the ordinary native path.
+	if _, bound := r.managedOriginalDispatch(ctx, source.Run.ID); r.managedRecovery && (bound || r.managedObligationSource != nil) {
+		prepared, err := a.Prepare(ctx, model.CloneRequest(request))
+		r.noteRootCallbackFailure(err)
+		if err == nil && !validPreparedModelRequest(request, prepared) {
+			err = ErrInvalidRequest
+		}
+		return model.CloneRequest(prepared), err
+	}
 	callCtx, ticket := callbackscope.EnterPreparation(ctx, request.RunID, a, struct {
 		Source  kernel.Snapshot
 		Request model.Request

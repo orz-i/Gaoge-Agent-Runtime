@@ -210,40 +210,14 @@ func (s *nativeDispatchCancelKernelStore) ApplyOwnedPhysicalRecovery(ctx context
 	}
 	return next, err
 }
-func (s *nativeDispatchCancelKernelStore) MarkChildExecutionSettled(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
-	if s.interrupted {
-		return errOriginalRetirementCut
-	}
-	if s.retirementCut == "mark-before" {
-		return s.interrupt(g)
-	}
-	err := s.Store.MarkChildExecutionSettled(ctx, g, p)
-	if err == nil && s.retirementCut == "mark-ack" {
-		return s.interrupt(g)
-	}
-	return err
-}
-func (s *nativeDispatchCancelKernelStore) CompleteManagedRecovery(ctx context.Context, g kernel.ChildExecutionGrant, source kernel.Snapshot, p kernel.ManagedCompletionProof) error {
-	if s.interrupted {
-		return errOriginalRetirementCut
-	}
-	if s.retirementCut == "t4-before" {
-		return s.interrupt(g)
-	}
-	err := s.Store.CompleteManagedRecovery(ctx, g, source, p)
-	if err == nil && s.retirementCut == "t4-ack" {
-		return s.interrupt(g)
-	}
-	return err
-}
-func (s *nativeDispatchCancelKernelStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant) error {
+func (s *nativeDispatchCancelKernelStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
 	if s.interrupted {
 		return errOriginalRetirementCut
 	}
 	if s.retirementCut == "finish-before" {
 		return s.interrupt(g)
 	}
-	err := s.Store.FinishChildExecution(ctx, g)
+	err := s.Store.FinishChildExecution(ctx, g, p)
 	if err == nil && s.retirementCut == "finish-ack" {
 		return s.interrupt(g)
 	}
@@ -254,19 +228,6 @@ func (s *nativeDispatchCancelKernelStore) LoadOwnedRetirement(ctx context.Contex
 		return kernel.OwnedRetirementReceipt{}, errOriginalRetirementCut
 	}
 	return s.Store.LoadOwnedRetirement(ctx, id)
-}
-func (s *nativeDispatchCancelKernelStore) AcknowledgeOwnedRetirement(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.OwnedRetirementAcknowledgement) (kernel.OwnedRetirementAckResult, error) {
-	if s.interrupted {
-		return kernel.OwnedRetirementAckResult{}, errOriginalRetirementCut
-	}
-	if s.retirementCut == "ack-before" {
-		return kernel.OwnedRetirementAckResult{}, s.interrupt(g)
-	}
-	out, err := s.Store.AcknowledgeOwnedRetirement(ctx, g, p)
-	if err == nil && s.retirementCut == "ack-ack" {
-		return kernel.OwnedRetirementAckResult{}, s.interrupt(g)
-	}
-	return out, err
 }
 
 func (s *nativeDispatchCancelKernelStore) CheckExecution(ctx context.Context, id string, l *kernel.ExecutionLease) error {
@@ -290,7 +251,7 @@ func TestHarnessElectedCancellationRetirementWindows(t *testing.T) {
 	t.Run("elected-without-busy-witness/finish-ack", func(t *testing.T) {
 		testHarnessCancelAtActualToolDispatch(t, "closure-cas", "finish-ack/no-busy")
 	})
-	for _, cut := range []string{"recovery-before", "recovery-ack", "mark-before", "mark-ack", "t4-before", "t4-ack", "finish-before", "finish-ack", "ack-before", "ack-ack"} {
+	for _, cut := range []string{"recovery-before", "recovery-ack", "finish-before", "finish-ack"} {
 		t.Run("receipt-only/"+cut, func(t *testing.T) { testHarnessCancelAtActualToolDispatch(t, "closure-cas", cut) })
 		if cut != "recovery-before" && cut != "recovery-ack" {
 			t.Run("terminal/"+cut, func(t *testing.T) { testHarnessCancelAtActualToolDispatch(t, "none", cut) })
@@ -489,16 +450,12 @@ func testHarnessCancelAtActualToolDispatch(t *testing.T, timelineOrder, retireme
 			t.Fatal("unexpected receipt consumption", retirementCut, marked, e)
 		}
 		originalRetired, e = rt.LoadOwnedRetirement(ctx, originalGrant.ID)
-		if retirementCut == "finish-ack" || retirementCut == "ack-before" || retirementCut == "ack-ack" {
+		if retirementCut == "finish-ack" {
 			if e != nil {
 				t.Fatal(e)
 			}
-			want := "RETIRED"
-			if retirementCut == "ack-ack" {
-				want = "ACKNOWLEDGED"
-			}
-			if originalRetired.Phase != want {
-				t.Fatal("wrong committed retirement phase", originalRetired.Phase, want)
+			if !originalRetired.Valid() {
+				t.Fatal("invalid committed retirement fact", originalRetired)
 			}
 			if _, e = rt.LookupChildExecution(ctx, inv.ExecutionRefID); !errors.Is(e, kernel.ErrNotFound) {
 				t.Fatal("Finish retained original grant", e)
@@ -547,12 +504,18 @@ func testHarnessCancelAtActualToolDispatch(t *testing.T, timelineOrder, retireme
 	}
 	if retirementCut != "" {
 		receipt, e := rt.LoadOwnedRetirement(ctx, originalGrant.ID)
-		if e != nil || receipt.Phase != "ACKNOWLEDGED" || receipt.Evidence.Grant != originalGrant || (originalRetired.Version != 0 && receipt.Identity() != originalRetired.Identity()) {
+		if e != nil || !receipt.Valid() || receipt.Evidence.Grant != originalGrant || (originalRetired.Version != 0 && receipt.Identity() != originalRetired.Identity()) {
 			t.Fatal("original retirement was not acknowledged exactly", e, receipt)
 		}
-		if _, e = rt.LookupOwnedRetirementForRun(ctx, inv.ExecutionRefID); !errors.Is(e, kernel.ErrNotFound) {
-			t.Fatal("pending retirement survived cancellation", e)
+		currentReceipt, e := rt.LookupOwnedRetirementForRun(ctx, inv.ExecutionRefID)
+		if kernel.ManagedDigest(final) == kernel.ManagedDigest(receipt.Evidence.Snapshot) {
+			if e != nil || kernel.ManagedDigest(currentReceipt) != kernel.ManagedDigest(receipt) {
+				t.Fatal("original final receipt changed", e)
+			}
+		} else if !errors.Is(e, kernel.ErrNotFound) {
+			t.Fatal("historical receipt selected for changed source", e)
 		}
+
 	}
 	ledger, err = store.LoadBudget(ctx, started.Turn.ID)
 	if err != nil {

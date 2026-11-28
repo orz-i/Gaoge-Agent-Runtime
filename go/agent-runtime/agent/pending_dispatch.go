@@ -8,20 +8,31 @@ import (
 // FrozenExternalToolCall returns only the exact call already bound to an external
 // result wait. The caller may correlate or cancel that operation, never resend it.
 func FrozenExternalToolCall(snapshot kernel.Snapshot) (tools.Call, bool, error) {
+	call, _, ok, err := frozenToolWait(snapshot, tools.PendingExternalResult)
+	return call, ok, err
+}
+
+// FrozenChildWaitCall observes the exact committed delegation wait. It does
+// not authorize replay of the Tool or execution of another child.
+func FrozenChildWaitCall(snapshot kernel.Snapshot) (tools.Call, tools.PendingExecution, bool, error) {
+	return frozenToolWait(snapshot, tools.PendingChildTerminal)
+}
+
+func frozenToolWait(snapshot kernel.Snapshot, kind tools.PendingKind) (tools.Call, tools.PendingExecution, bool, error) {
 	if snapshot.Run.Kind != RunKind || snapshot.Run.Status != kernel.RunStatusRunning {
-		return tools.Call{}, false, nil
+		return tools.Call{}, tools.PendingExecution{}, false, nil
 	}
 	state, err := decodeState(snapshot.State)
 	if err != nil {
-		return tools.Call{}, false, err
+		return tools.Call{}, tools.PendingExecution{}, false, err
 	}
-	if state.ToolWait == nil || state.ToolWait.Kind != tools.PendingExternalResult {
-		return tools.Call{}, false, nil
+	if state.ToolWait == nil || state.ToolWait.Kind != kind {
+		return tools.Call{}, tools.PendingExecution{}, false, nil
 	}
 	if len(state.PendingCalls) == 0 || state.ToolDispatchID == "" || state.PendingCalls[0].ID != state.ToolDispatchID || state.ToolWait.CallID != state.ToolDispatchID {
-		return tools.Call{}, false, ErrToolOutcomeUnknown
+		return tools.Call{}, tools.PendingExecution{}, false, ErrToolOutcomeUnknown
 	}
-	return tools.CloneCall(state.PendingCalls[0]), true, nil
+	return tools.CloneCall(state.PendingCalls[0]), *tools.ClonePending(&state.ToolWait.PendingExecution), true, nil
 }
 
 // FrozenPendingDispatch returns an isolated copy of a Tool call whose

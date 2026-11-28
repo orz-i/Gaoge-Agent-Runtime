@@ -317,6 +317,39 @@ func (ledger *Ledger) applyReservation(request Reservation, active bool) (error,
 	return nil, nil
 }
 
+// PlanDispatch reserves and admits the exact original Model or Tool
+// in one ledger revision. Waiting does not create an independent marker;
+// the existing Run transition owns the capacity disposition.
+func PlanDispatch(ctx context.Context, original Ledger, request Reservation, active bool) (*LedgerMutation, error) {
+	model := validReservationRequest(request) && strings.HasPrefix(request.ID, "model:") && request.PhysicalRequestHash != "" && request.Requested.LLMCalls == 1
+	if !model && !validToolReservationIdentity(request) {
+		return nil, ErrInvalidUsage
+	}
+	return PlanLedgerMutation(ctx, original, func(c Coordinator) error {
+		_, err := c.update(ctx, original.ID, func(l *Ledger) error {
+			if existing, ok := l.Reservations[request.ID]; ok {
+				if existing.Dispatched || existing.Status == ReservationSettled || existing.Requested != request.Requested || existing.RunID != request.RunID || existing.RequestHash != request.RequestHash || existing.PhysicalRequestHash != request.PhysicalRequestHash {
+					return ErrLedgerConflict
+				}
+			}
+			denial, err := l.applyReservation(request, active)
+			if err != nil {
+				return err
+			}
+			if denial != nil {
+				return denial
+			}
+			r := l.Reservations[request.ID]
+			if err = dispatchReservation(&r); err != nil {
+				return err
+			}
+			l.Reservations[request.ID] = r
+			return nil
+		})
+		return err
+	})
+}
+
 // Dispatch marks the point after which timeouts and cancellation cannot refund
 // the reservation. It is persisted before the external call is made.
 func (coordinator Coordinator) Dispatch(ctx context.Context, scopeID, id string) (Ledger, error) {
@@ -510,18 +543,22 @@ func (coordinator Coordinator) CancelRun(ctx context.Context, scopeID, runID str
 		return Ledger{}, ErrInvalidUsage
 	}
 	return coordinator.update(ctx, scopeID, func(ledger *Ledger) error {
-		if ledger.CancelledRuns == nil {
-			ledger.CancelledRuns = map[string]bool{}
-		}
-		ledger.CancelledRuns[runID] = true
-		for id, value := range ledger.Reservations {
-			if ledger.contains(runID, value.RunID) && !value.Dispatched && value.Status != ReservationSettled {
-				value.Status, value.Active = ReservationReleased, false
-				ledger.Reservations[id] = value
-			}
-		}
-		return nil
+		return ledger.applyRunCancellation(runID)
 	})
+}
+
+func (ledger *Ledger) applyRunCancellation(runID string) error {
+	if ledger.CancelledRuns == nil {
+		ledger.CancelledRuns = map[string]bool{}
+	}
+	ledger.CancelledRuns[runID] = true
+	for id, value := range ledger.Reservations {
+		if ledger.contains(runID, value.RunID) && !value.Dispatched && value.Status != ReservationSettled {
+			value.Status, value.Active = ReservationReleased, false
+			ledger.Reservations[id] = value
+		}
+	}
+	return nil
 }
 
 // RunCancelled is the single cancellation predicate for admission, cleanup,

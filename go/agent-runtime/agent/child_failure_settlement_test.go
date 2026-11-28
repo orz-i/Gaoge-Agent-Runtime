@@ -103,12 +103,12 @@ func (s *childFailureStore) MarkChildExecutionSettled(ctx context.Context, g ker
 	}
 	return err
 }
-func (s *childFailureStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant) error {
+func (s *childFailureStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
 	s.finishes++
 	if s.fault == "finish" {
 		return errChildFailureFixture
 	}
-	return s.Store.FinishChildExecution(ctx, g)
+	return s.Store.FinishChildExecution(ctx, g, p)
 }
 
 func TestChildPhysicalFailureSettlement(t *testing.T) {

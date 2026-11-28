@@ -106,6 +106,11 @@ func TestLocalDelegationExternalWaitDoesNotPollAndResumesBothCalls(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
+	for _, item := range started.Items {
+		if item.ParentItemID == harness.ExecutionDispatchParentItemID {
+			t.Fatal("external Tool wait elected a second Host dispatch")
+		}
+	}
 	rootID := snapshotExecutionRef(t, started)
 	root, err := runtime.Load(t.Context(), rootID)
 	if err != nil {
@@ -137,6 +142,10 @@ func TestLocalDelegationExternalWaitDoesNotPollAndResumesBothCalls(t *testing.T)
 	}
 	if err != nil || child.Run.Status != kernel.RunStatusCompleted {
 		t.Fatalf("child=%#v, %v", child.Run, err)
+	}
+	receipt, receiptErr := runtime.LookupOwnedRetirementForRun(t.Context(), child.Run.ID)
+	if receiptErr != nil || !receipt.Valid() || kernel.ManagedDigest(receipt.Evidence.Snapshot) != kernel.ManagedDigest(child) {
+		t.Fatalf("external Tool history lacks exact native retirement: %v", receiptErr)
 	}
 	verifiedParent := reconcileDelegationRoot(t, direct, root)
 	completed, err := direct.Resume(t.Context(), rootID, verifiedParent.Run.Revision)

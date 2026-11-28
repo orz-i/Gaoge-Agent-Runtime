@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	harness "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-harness"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
@@ -41,19 +42,67 @@ func (*summarySessionModel) Capabilities(context.Context, string) (model.Capabil
 	return model.Capabilities{StructuredJSONSchema: true}, nil
 }
 
+var errSharedSummaryReceiptCut = errors.New("injected shared summary receipt acknowledgement loss")
+
+type sharedSummaryReceiptFaultStore struct {
+	*memory.Store
+	armed, after, fired bool
+}
+
+func (s *sharedSummaryReceiptFaultStore) ApplyExecution(ctx context.Context, lease kernel.ExecutionLease, revision uint64, mutation kernel.StoreMutation) (kernel.Snapshot, error) {
+	if s.armed && !s.fired {
+		for _, event := range mutation.Events {
+			if event.Type == "agent.model_invocation.completed" {
+				s.fired = true
+				if s.after {
+					if _, err := s.Store.ApplyExecution(ctx, lease, revision, mutation); err != nil {
+						return kernel.Snapshot{}, err
+					}
+				}
+				return kernel.Snapshot{}, errSharedSummaryReceiptCut
+			}
+		}
+	}
+	return s.Store.ApplyExecution(ctx, lease, revision, mutation)
+}
+
 func TestAgentSessionSummaryProducesNativeStateAndVerifiesPriorOrigin(t *testing.T) {
-	for _, name := range []string{"success", "invalid output fallback", "missing prior origin", "native recovery complete source"} {
+	for _, name := range []string{"success", "invalid output fallback", "missing prior origin", "native recovery complete source", "shared budget", "shared token budget", "last shared call", "shared before receipt", "shared after receipt", "combined managed pending", "combined managed completed", "combined managed consumed", "combined managed input before", "combined managed input after", "combined managed business before", "combined managed business after"} {
 		t.Run(name, func(t *testing.T) {
 			invalid := name == "invalid output fallback"
-			nativeRecovery := name == "native recovery complete source"
-			store, runs := harness.NewMemoryStore(), memory.NewStore()
+			combined := strings.HasPrefix(name, "combined managed ")
+			inputFrontier := strings.HasPrefix(name, "combined managed input ")
+			businessFrontier := strings.HasPrefix(name, "combined managed business ")
+			interphase := inputFrontier || businessFrontier
+			var inputs *managedCountingInputs
+			nativeRecovery := name == "native recovery complete source" || combined
+			shared := strings.HasPrefix(name, "shared ") || name == "last shared call" || combined
+			fault := name == "shared before receipt" || name == "shared after receipt"
+			tokenBudget := name == "shared token budget"
+			clock := &managedObligationClock{now: time.Now().UTC()}
+			store, runs := harness.NewMemoryStore(), memory.NewStoreWithExecutionClock(clock)
+			backing := &sharedSummaryReceiptFaultStore{Store: runs, after: name == "shared after receipt"}
 			client := &summarySessionModel{}
 			summaryCalls := 0
 			client.generate = func(request model.Request) (model.Response, error) {
 				response := model.Response{Content: "answer", Usage: &model.Usage{InputTokens: 10, OutputTokens: 5}}
 				if request.OutputContract != nil && request.OutputContract.Name == "working_state_summary" {
 					summaryCalls++
-					if len(request.Tools) != 0 || len(request.HostedTools) != 0 || request.RequireToolCall || request.MaxOutputTokens != 128 {
+					if interphase {
+						run, e := runs.Load(t.Context(), request.RunID)
+						if e != nil {
+							return response, e
+						}
+						if _, e = inputs.Submit(t.Context(), run.Run, "later", "late summary steering"); e != nil {
+							return response, e
+						}
+					}
+					backing.armed = fault
+					wantCap := int64(128)
+					if tokenBudget {
+						wantCap = 48
+					}
+					if len(request.Tools) != 0 || len(request.HostedTools) != 0 || request.RequireToolCall || request.MaxOutputTokens != wantCap {
 						t.Fatal("summary changed frozen output cap or retained Tool authority")
 					}
 					response.Content = `{"goal":"retain verified evidence","constraints":["never invent facts"],"completed":[],"pending":["verify original evidence"],"decisions":[]}`
@@ -63,7 +112,7 @@ func TestAgentSessionSummaryProducesNativeStateAndVerifiesPriorOrigin(t *testing
 				}
 				return response, nil
 			}
-			options := agentSessionOptions(t, runs, store, client)
+			options := agentSessionOptions(t, backing, store, client)
 			options.Context.ResolveWindow = func(context.Context, model.Request) (runtimecontext.ModelWindow, error) {
 				return runtimecontext.ModelWindow{ContextTokens: 65536, ReservedOutputTokens: 128}, nil
 			}
@@ -100,22 +149,189 @@ func TestAgentSessionSummaryProducesNativeStateAndVerifiesPriorOrigin(t *testing
 				t.Fatal(err)
 			}
 			options.Session.Config.WorkingStateSummary = &agent.WorkingStateSummaryPolicy{MaxInputTokens: 60000, MaxSerializedBytes: 100000}
+			if shared {
+				options.Session.Config.SharedBudget = &budget.Limits{MaxLLMCalls: 2}
+				if name == "last shared call" {
+					options.Session.Config.SharedBudget.MaxLLMCalls = 1
+				}
+				if tokenBudget {
+					options.Session.Config.SharedBudget.MaxInputTokens = 1000
+					options.Session.Config.SharedBudget.MaxOutputTokens = 100
+					options.BudgetMeter = &samplingMeter{}
+				}
+			}
+			var combinedStore *managedObligationStore
 			if nativeRecovery {
-				options.Runtime, err = kernel.New(kernel.Dependencies{Store: runs, ManagedRecoveryHost: store})
+				var nativeStore kernel.Store = runs
+				if combined {
+					event := "agent.model_invocation.pending"
+					switch name {
+					case "combined managed completed":
+						event = "agent.model_invocation.completed"
+					case "combined managed consumed":
+						event = agent.EventContextSummaryConsumed
+					}
+					count := 1
+					if inputFrontier {
+						event = "agent.input_applied"
+					}
+					if businessFrontier {
+						count = 2
+					}
+					combinedStore = &managedObligationStore{Store: runs, event: event, count: count, before: strings.HasSuffix(name, " before")}
+					nativeStore = combinedStore
+					queue, e := agent.NewMemoryRunInputs("summary-queue")
+					if e != nil {
+						t.Fatal(e)
+					}
+					inputs = &managedCountingInputs{MemoryRunInputs: queue}
+					options.Inputs = inputs
+				}
+				options.Runtime, err = kernel.New(kernel.Dependencies{Store: nativeStore, ManagedRecoveryHost: store})
 				if err != nil {
 					t.Fatal(err)
 				}
-				options.Context.SummaryNativeRecovery = true
+				options.Context.ManagedRecovery = true
 			}
 			session, err := harness.OpenAgentSession(options)
 			if err != nil {
 				t.Fatal(err)
 			}
-			second, err := session.Prompt(t.Context(), "second", secondText)
+			var second harness.Snapshot
+			if combined {
+				crashManagedObligation(t, func() { _, _ = session.Prompt(t.Context(), "second", secondText) })
+				if !combinedStore.hit {
+					t.Fatal("missing combined summary point")
+				}
+				pending, e := session.Load(t.Context(), "second")
+				if e != nil {
+					t.Fatal(e)
+				}
+				root, ok := harness.TopLevelInvocation(pending)
+				if !ok {
+					t.Fatal("missing original root")
+				}
+				original, e := runs.Load(t.Context(), root.ExecutionRefID)
+				if e != nil {
+					t.Fatal(e)
+				}
+				before, e := agent.ViewState(original)
+				wantInv, wantCursor := 1, uint64(0)
+				if interphase && (!inputFrontier || !strings.HasSuffix(name, " before")) {
+					wantCursor = 1
+				}
+				if businessFrontier && strings.HasSuffix(name, " after") {
+					wantInv = 2
+				}
+				if e != nil || len(before.ModelInvocations) != wantInv || before.InputCursor != wantCursor {
+					t.Fatalf("wrong summary source: %v inv=%d cursor=%d", e, len(before.ModelInvocations), before.InputCursor)
+				}
+				point, e := options.Runtime.LoadManagedRecovery(t.Context(), root.ExecutionRefID)
+				if e != nil || point.SafePoint.LifecycleVersion != kernel.ManagedLifecycleAgentObligations || !point.Valid() {
+					t.Fatalf("missing original combined point: %v %s %s", e, point.Selection.Mode, point.SafePoint.LifecycleVersion)
+				}
+				if interphase {
+					p, ok := point.SafePoint.AgentObligations()
+					if !ok || !kernel.ManagedSourceMatches(point.SafePoint, original) || before.ModelInvocations[0].Status != agent.ModelInvocationConsumed ||
+						(wantInv == 1 && (p.Phase != "prepare" || p.PreparationContext == nil || p.InvocationID != "")) {
+						t.Fatalf("missing exact summary-to-business frontier: %+v", p)
+					}
+				} else if _, e = inputs.Submit(t.Context(), original.Run, "later", "late summary steering"); e != nil {
+					t.Fatal(e)
+				}
+				reads := inputs.reads
+				options.Runtime, e = kernel.New(kernel.Dependencies{Store: runs, ManagedRecoveryHost: store})
+				if e != nil {
+					t.Fatal(e)
+				}
+				options.Session.Transcript = nil
+				session, e = harness.OpenAgentSession(options)
+				if e != nil {
+					t.Fatal(e)
+				}
+				if _, e = session.Resume(t.Context(), "second"); e == nil || inputs.reads != reads {
+					t.Fatalf("live owner did not block recovery: %v", e)
+				}
+				clock.now = clock.now.Add(25 * time.Hour)
+				second, err = session.Resume(t.Context(), "second")
+				if err != nil || second.Turn.Status != harness.TurnCompleted {
+					t.Fatalf("combined summary recovery: %v status=%s", err, second.Turn.Status)
+				}
+				after, e := runs.Load(t.Context(), root.ExecutionRefID)
+				if e != nil {
+					t.Fatal(e)
+				}
+				view, e := agent.ViewState(after)
+				if e != nil || view.InputCursor != 1 || view.ModelInvocations[0].ID != before.ModelInvocations[0].ID {
+					t.Fatalf("source identity or input changed: %v cursor=%d", e, view.InputCursor)
+				}
+				if wantInv == 2 && view.ModelInvocations[1].ID != before.ModelInvocations[1].ID {
+					t.Fatal("business intent replaced")
+				}
+				if len(client.requests) != 3 || strings.Contains(requestTextManaged(client.requests[1]), "late summary steering") || strings.Count(requestTextManaged(client.requests[2]), "late summary steering") != 1 {
+					t.Fatal("late input changed frozen summary or disappeared before business")
+				}
+			} else {
+				second, err = session.Prompt(t.Context(), "second", secondText)
+			}
+			if fault {
+				if !errors.Is(err, errSharedSummaryReceiptCut) || !backing.fired || summaryCalls != 1 || len(client.requests) != 2 {
+					t.Fatalf("summary fault missed original receipt boundary: %v calls=%d/%d", err, summaryCalls, len(client.requests))
+				}
+				root, ok := harness.TopLevelInvocation(second)
+				if !ok {
+					t.Fatal("missing original root")
+				}
+				raw, loadErr := options.Runtime.Load(t.Context(), root.ExecutionRefID)
+				view, viewErr := agent.ViewState(raw)
+				if loadErr != nil || viewErr != nil || len(view.ModelInvocations) != 1 || view.Budget.Usage.LLMCalls != 0 {
+					t.Fatalf("fault consumed original summary before recovery: load=%v view=%v usage=%+v", loadErr, viewErr, view.Budget.Usage)
+				}
+				expected := agent.ModelInvocationPending
+				if backing.after {
+					expected = agent.ModelInvocationCompleted
+				}
+				if view.ModelInvocations[0].Status != expected {
+					t.Fatalf("wrong persisted invocation status %s", view.ModelInvocations[0].Status)
+				}
+				ledger, ledgerErr := runs.LoadBudget(t.Context(), second.Turn.ID)
+				res := ledger.Reservations["model:"+view.ModelInvocations[0].ID]
+				if ledgerErr != nil || len(ledger.Reservations) != 1 || !res.Dispatched ||
+					(backing.after && (res.Status != budget.ReservationSettled || res.Usage.LLMCalls != 1)) ||
+					(!backing.after && (res.Status != budget.ReservationHeld || len(res.Receipt) != 0 || res.Usage.LLMCalls != 0)) {
+					t.Fatalf("split summary receipt and Run transaction: %v %+v", ledgerErr, res)
+				}
+				options.Session.Transcript = nil
+				session, err = harness.OpenAgentSession(options)
+				if err != nil {
+					t.Fatal(err)
+				}
+				second, err = session.Resume(t.Context(), "second")
+				if !backing.after {
+					// No original external verifier is configured by this fixture.
+					// An interrupted atomic receipt must never be reconstructed
+					// from the fact that the model was called.
+					if err == nil || len(client.requests) != 2 || summaryCalls != 1 {
+						t.Fatalf("unknown original summary replayed: %v calls=%d", err, len(client.requests))
+					}
+					return
+				}
+				if err != nil || second.Turn.Status != harness.TurnCompleted {
+					t.Fatalf("settled original summary did not progress: %s %v", second.Turn.Status, err)
+				}
+			}
 			if err != nil {
 				t.Fatal(err)
 			}
 			checkpoint := requireStoredContextCheckpoint(t, store, second.Turn.ContextCheckpointID)
+			if name == "last shared call" {
+				ledger, err := runs.LoadBudget(t.Context(), second.Turn.ID)
+				if err != nil || second.Turn.Status != harness.TurnCompleted || summaryCalls != 0 ||
+					checkpoint.Window.WorkingState != nil || ledger.View("").Usage.LLMCalls != 1 || len(client.requests) != 2 {
+					t.Fatalf("optional summary consumed the last shared call: status=%s usage=%+v summaries=%d err=%v", second.Turn.Status, ledger.View("").Usage, summaryCalls, err)
+				}
+				return
+			}
 			if summaryCalls != 1 || len(client.requests) != 3 {
 				root, _ := harness.TopLevelInvocation(second)
 				observed, _ := options.Runtime.Load(t.Context(), root.ExecutionRefID)
@@ -136,6 +352,28 @@ func TestAgentSessionSummaryProducesNativeStateAndVerifiesPriorOrigin(t *testing
 			if err != nil || len(view.ModelInvocations) != 2 || view.ModelInvocations[0].Purpose != agent.ModelInvocationContextSummary || view.ModelInvocations[0].Status != agent.ModelInvocationConsumed || view.Budget.Usage.LLMCalls != 2 {
 				t.Fatalf("summary did not use and consume the native ledger exactly once: %+v err=%v", view, err)
 			}
+			if shared {
+				ledger, err := runs.LoadBudget(t.Context(), second.Turn.ID)
+				if err != nil || ledger.View("").Usage.LLMCalls != 2 || len(ledger.Reservations) != 2 {
+					t.Fatalf("summary and business did not join a single shared ledger: %+v err=%v", ledger.View(""), err)
+				}
+				for _, request := range client.requests[1:] {
+					res := ledger.Reservations["model:"+request.InvocationID]
+					hash, err := model.PhysicalRequestHash(request)
+					if err != nil || res.Status != budget.ReservationSettled || res.PhysicalRequestHash != hash || res.Usage.LLMCalls != 1 {
+						t.Fatalf("receipt did not settle original physical sampling: %+v err=%v", res, err)
+					}
+				}
+				options.Session.Transcript = nil
+				reopened, err := harness.OpenAgentSession(options)
+				if err != nil {
+					t.Fatal(err)
+				}
+				again, err := reopened.Resume(t.Context(), "second")
+				if err != nil || again.Turn.Status != harness.TurnCompleted || len(client.requests) != 3 {
+					t.Fatalf("reopen repeated a shared model effect: %+v err=%v", again.Turn, err)
+				}
+			}
 			if invalid {
 				if checkpoint.Window.WorkingState != nil {
 					t.Fatal("invalid summary installed WorkingState")
@@ -145,6 +383,9 @@ func TestAgentSessionSummaryProducesNativeStateAndVerifiesPriorOrigin(t *testing
 			state := runtimecontext.CloneWorkingState(checkpoint.Window.WorkingState)
 			if state == nil || state.Version != 1 || state.Derivation == nil || !agent.VerifyWorkingStateSummaryOrigin(runtimeSnapshot, state, second.Turn.SessionID, options.Session.Actor, options.Session.Thread) {
 				t.Fatalf("installed state has no matching native origin: %+v", state)
+			}
+			if shared {
+				return
 			}
 			if name == "missing prior origin" {
 				options.Store = missingSummaryOriginStore{Store: store, runID: root.ExecutionRefID}
@@ -186,7 +427,7 @@ func TestAgentSessionSummaryProducesNativeStateAndVerifiesPriorOrigin(t *testing
 			if err != nil {
 				t.Fatal(err)
 			}
-			options.Context.SummaryNativeRecovery = !nativeRecovery
+			options.Context.ManagedRecovery = !nativeRecovery
 			retrospective, err := harness.OpenAgentSession(options)
 			if err != nil {
 				t.Fatal(err)
@@ -203,20 +444,17 @@ func TestAgentSessionSummaryProducesNativeStateAndVerifiesPriorOrigin(t *testing
 }
 
 func TestAgentSessionSummaryRejectsUnsupportedComposition(t *testing.T) {
-	for _, mode := range []string{"managed", "both recovery modes", "missing summary host binding", "shared budget", "zero input", "zero bytes"} {
+	for _, mode := range []string{"missing managed host binding", "shared native budget", "zero input", "zero bytes"} {
 		t.Run(mode, func(t *testing.T) {
 			client := &agentSessionModel{}
 			options := agentSessionOptions(t, memory.NewStore(), harness.NewMemoryStore(), client)
 			options.Session.Config.WorkingStateSummary = summaryTestPolicy()
 			switch mode {
-			case "managed":
+			case "missing managed host binding":
 				options.Context.ManagedRecovery = true
-			case "both recovery modes":
-				options.Context.ManagedRecovery, options.Context.SummaryNativeRecovery = true, true
-			case "missing summary host binding":
-				options.Context.SummaryNativeRecovery = true
-			case "shared budget":
+			case "shared native budget":
 				options.Session.Config.SharedBudget = &budget.Limits{MaxLLMCalls: 3}
+				options.Context.ManagedRecovery = true
 			case "zero input":
 				options.Session.Config.WorkingStateSummary.MaxInputTokens = 0
 			case "zero bytes":
@@ -229,7 +467,7 @@ func TestAgentSessionSummaryRejectsUnsupportedComposition(t *testing.T) {
 	}
 }
 
-func TestAgentSessionSummaryNativeRecoveryRequiresExactHostStore(t *testing.T) {
+func TestAgentSessionManagedRecoveryRequiresExactHostStore(t *testing.T) {
 	store, runs := harness.NewMemoryStore(), memory.NewStore()
 	client := &summarySessionModel{}
 	options := agentSessionOptions(t, runs, store, client)
@@ -238,7 +476,7 @@ func TestAgentSessionSummaryNativeRecoveryRequiresExactHostStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	options.Context.SummaryNativeRecovery = true
+	options.Context.ManagedRecovery = true
 	options.Session.Config.WorkingStateSummary = summaryTestPolicy()
 	if _, err := harness.OpenAgentSession(options); err != nil {
 		t.Fatalf("matching explicit native summary recovery composition rejected: %v", err)
@@ -276,7 +514,7 @@ func TestNativeSummaryValidatesBothConcreteBridgesActualStore(t *testing.T) {
 			if _, err := agent.NewRunner(dependencies); err != nil {
 				t.Fatalf("ordinary adapter construction was unnecessarily restricted: %v", err)
 			}
-			dependencies.SummaryNativeRecovery = true
+			dependencies.ManagedRecovery = true
 			if _, err := agent.NewRunner(dependencies); !errors.Is(err, agent.ErrInvalidRequest) {
 				t.Fatalf("native summary accepted a foreign actual bridge Store: %v", err)
 			}

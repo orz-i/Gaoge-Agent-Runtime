@@ -68,3 +68,52 @@ func TestContextSummaryReconcilesBackdatedCommitTimeAfterACKLoss(t *testing.T) {
 		})
 	}
 }
+
+// The mutable Turn diagnostic projection is not Context authority. Neither a
+// larger revision nor an error string can substitute a different owner or
+// source, or reopen an already-terminal Turn.
+func TestSummaryTurnProjectionPreservesFrozenSource(t *testing.T) {
+	now := time.Unix(100, 0).UTC()
+	original := SummaryTurn{ID: "turn", SessionID: "session", ConfigSnapshotID: "config", ContextCheckpointID: "checkpoint",
+		ContextRef: SummaryCheckpointRef{ID: "checkpoint", ContentHash: "hash", LineageHash: "lineage"},
+		Status:     "accepted", Revision: 2, CreatedAt: now, UpdatedAt: now}
+	original.HostTurn.Kind, original.HostTurn.ID = "turn", "host-turn"
+	current := original
+	current.Status, current.Revision, current.UpdatedAt = "running", 5, now.Add(time.Second)
+	current.ErrorCode, current.ErrorDetail = "agent.model_failed", "original outcome uncertain"
+	if !summaryTurnProjection(original, current) {
+		t.Fatal("live diagnostic projection blocked exact original source")
+	}
+	cleared := current
+	cleared.Revision++
+	cleared.UpdatedAt = cleared.UpdatedAt.Add(time.Second)
+	cleared.ErrorCode, cleared.ErrorDetail = "", ""
+	if !summaryTurnProjection(current, cleared) {
+		t.Fatal("diagnostic clear blocked exact original source")
+	}
+	for _, tc := range []struct {
+		name   string
+		mutate func(*SummaryTurn)
+	}{
+		{"same revision", func(s *SummaryTurn) { s.Revision = original.Revision }},
+		{"backdated", func(s *SummaryTurn) { s.UpdatedAt = original.UpdatedAt.Add(-time.Second) }},
+		{"terminal", func(s *SummaryTurn) { s.Status = "cancelled" }},
+		{"waiting", func(s *SummaryTurn) { s.Status = "waiting_input" }},
+		{"foreign turn", func(s *SummaryTurn) { s.ID = "other" }},
+		{"foreign session", func(s *SummaryTurn) { s.SessionID = "other" }},
+		{"foreign host", func(s *SummaryTurn) { s.HostTurn.ID = "other" }},
+		{"foreign config", func(s *SummaryTurn) { s.ConfigSnapshotID = "other" }},
+		{"foreign checkpoint", func(s *SummaryTurn) { s.ContextCheckpointID = "other" }},
+		{"changed content", func(s *SummaryTurn) { s.ContextRef.ContentHash = "other" }},
+		{"changed lineage", func(s *SummaryTurn) { s.ContextRef.LineageHash = "other" }},
+		{"changed creation", func(s *SummaryTurn) { s.CreatedAt = s.CreatedAt.Add(time.Second) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			candidate := current
+			tc.mutate(&candidate)
+			if summaryTurnProjection(original, candidate) {
+				t.Fatal("mutable projection substituted frozen source or invalid status")
+			}
+		})
+	}
+}

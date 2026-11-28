@@ -29,7 +29,7 @@ func (runner *Runner) nativeRootCancellationReady(ctx context.Context, turn Turn
 		return true
 	}
 	// The same returned-root proof covers outstanding receipts, already
-	// consumed obligations awaiting retirement, and exact pending ACK.
+	// consumed obligations awaiting retirement, and exact completed retirement.
 	// Only its actual returned original callback, safe complete history, and
 	// first-party typed receipt-recovery eligibility may re-enter the native
 	// Cancel/cleanup CAS. It may still reject an unsettled child below.

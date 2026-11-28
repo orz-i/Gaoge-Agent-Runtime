@@ -7,6 +7,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/jsoncontract"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
@@ -258,7 +259,11 @@ func (session *SessionClient) Cancel(ctx context.Context, turnID, reason string)
 	if err != nil {
 		return Snapshot{}, err
 	}
-	result, cancelErr := session.runner.Cancel(ctx, id, reason)
+	runner, err := session.protectiveRunner(ctx, id)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	result, cancelErr := runner.Cancel(ctx, id, reason)
 	return session.verifySnapshot(id, result, cancelErr)
 }
 
@@ -303,8 +308,40 @@ func (session *SessionClient) CancelSubtask(ctx context.Context, turnID, taskID,
 	if err != nil {
 		return Snapshot{}, err
 	}
-	result, cancelErr := session.runner.CancelSubtask(ctx, id, taskID, reason)
+	runner, err := session.protectiveRunner(ctx, id)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	result, cancelErr := runner.CancelSubtask(ctx, id, taskID, reason)
 	return session.verifySnapshot(id, result, cancelErr)
+}
+
+// A reopened standard handle may omit the optional budget execution adapter.
+// Native Run cancellation derives its scope from the persisted Run. This
+// adapter is retained for Host projection and cancellation of an unstarted
+// selected Attempt, which has no Run yet.
+func (session *SessionClient) protectiveRunner(ctx context.Context, turnID string) (*Runner, error) {
+	runner := session.runner
+	if !session.agentSessionOnly || runner.budgets != nil || runner.runtime.BudgetStore() == nil {
+		return runner, nil
+	}
+	authority, err := NewBudgetAuthority(BudgetAuthorityDependencies{
+		Runtime: runner.runtime, Store: runner.store, Relations: runner.relationReader,
+		Clock: runner.clock, TurnFeed: runner.turnFeed,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if _, err := authority.loadLedger(ctx, turnID); errors.Is(err, budget.ErrLedgerNotFound) {
+		return runner, nil
+	} else if err != nil {
+		return nil, err
+	}
+	// Only this control call acquires the read/project adapter. The reopened
+	// Agent does not gain permission to execute without its frozen budget.
+	control := *runner
+	control.budgets = authority
+	return &control, nil
 }
 
 // authorizedProtectiveTurn proves the exact Session Actor and original root

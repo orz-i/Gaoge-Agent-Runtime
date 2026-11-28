@@ -172,7 +172,7 @@ func (f *pr82HandoffFixture) delegation() handoff.Delegation {
 }
 
 func (f *pr82HandoffFixture) execute(ctx context.Context) (DelegationResult, error) {
-	return f.runner.executeDelegation(ctx, f.turn, f.parent, f.parentRun, f.delegation(), f.startedItemID)
+	return f.runner.executeDelegation(ctx, f.turn, f.parent, f.parentRun, f.delegation(), f.startedItemID, "")
 }
 
 func TestPR82RoleHandoffRefusesParentTerminalAndCancellationAfterChildCreate(t *testing.T) {

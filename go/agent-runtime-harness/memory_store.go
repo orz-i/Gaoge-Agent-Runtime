@@ -21,9 +21,7 @@ const maxListItems = 500
 
 // MemoryStore is the reference Store implementation used by conformance and small embedded hosts.
 type MemoryStore struct {
-	managedAuthority    kernel.ManagedAuthority
-	managedReservations map[string]kernel.ManagedHostReservation
-	managedClosures     map[string]string
+	managedAuthority kernel.ManagedAuthority
 	*budget.MemoryLedgerStore
 	mu                      sync.RWMutex
 	sessions                map[string]Session
@@ -116,9 +114,6 @@ func (store *MemoryStore) UpdateInvocation(ctx context.Context, value Invocation
 		return Invocation{}, ErrConflict
 	}
 	if current.ExecutionRefID != value.ExecutionRefID {
-		return Invocation{}, ErrConflict
-	}
-	if terminalInvocationStatus(value.Status) && store.managedReservedTurnLocked(value.TurnID) {
 		return Invocation{}, ErrConflict
 	}
 	// Every terminal CAS must assess the same globally complete original
@@ -550,7 +545,7 @@ func NewMemoryStore() *MemoryStore {
 		panic(err)
 	}
 	return &MemoryStore{
-		managedAuthority: authority, managedReservations: map[string]kernel.ManagedHostReservation{}, managedClosures: map[string]string{},
+		managedAuthority:  authority,
 		MemoryLedgerStore: budget.NewMemoryLedgerStore(),
 		sessions:          map[string]Session{}, turns: map[string]Turn{}, configs: map[string]ConfigSnapshot{},
 		invocations: map[string]Invocation{}, invocationExecutionRefs: map[string]string{},
@@ -833,9 +828,6 @@ func (store *MemoryStore) UpdateTurn(ctx context.Context, value Turn, expectedRe
 	if current.Revision != expectedRevision || !sameTurnIdentity(current, value) {
 		return Turn{}, ErrConflict
 	}
-	if terminalTurnStatus(value.Status) && store.managedReservedTurnLocked(value.ID) {
-		return Turn{}, ErrConflict
-	}
 	if terminalTurnStatus(current.Status) && current.Status != value.Status {
 		return Turn{}, ErrConflict
 	}
@@ -956,20 +948,19 @@ func (store *MemoryStore) AppendItem(ctx context.Context, value Item) (Item, boo
 		}
 		return cloneItem(existing), false, nil
 	}
-	if IsManagedDispatchClosure(value) || store.managedReservedCompletionLocked(value) {
+	if IsManagedDispatchClosure(value) {
 		return Item{}, false, ErrConflict
 	}
 	if value.Kind == ItemDiagnostic && value.Status == ItemStarted {
 		switch value.ParentItemID {
 		case CancellationFenceParentItemID:
-			if expectedRoot, _, bound := CancellationAttemptForStore(ctx); bound {
-				root := store.invocations[expectedRoot.ID]
-				target := store.invocations[store.invocationExecutionRefs[value.RunID]]
-				if !ValidCancellationAttemptAdmission(ctx, value, root, target) {
-					return Item{}, false, ErrConflict
-				}
+			expectedRoot, _, _ := CancellationAttemptForStore(ctx)
+			root := store.invocations[expectedRoot.ID]
+			target := store.invocations[store.invocationExecutionRefs[value.RunID]]
+			if !ValidCancellationAttemptAdmission(ctx, value, root, target) {
+				return Item{}, false, ErrConflict
 			}
-			if store.managedReservedTurnLocked(value.TurnID) || store.activeCancellationFenceLocked(value.TurnID) {
+			if store.activeCancellationFenceLocked(value.TurnID) {
 				return Item{}, false, ErrConflict
 			}
 		case ExecutionDispatchParentItemID:
@@ -977,22 +968,38 @@ func (store *MemoryStore) AppendItem(ctx context.Context, value Item) (Item, boo
 			if proofErr != nil {
 				return Item{}, false, proofErr
 			}
-			if _, valid := ValidExecutionDispatchGrantAdmission(value); !valid {
+			phase, valid := ValidExecutionDispatchGrantAdmission(value)
+			if !valid {
 				return Item{}, false, ErrConflict
 			}
 			turn, turnFound := store.turns[value.TurnID]
 			owner, ownerFound := store.invocations[value.InvocationID]
-			if !turnFound || terminalTurnStatus(turn.Status) ||
-				!ownerFound || owner.TurnID != value.TurnID ||
-				owner.ExecutionRefID != value.RunID ||
-				terminalInvocationStatus(owner.Status) ||
-				store.activeCancellationFenceLocked(value.TurnID) ||
-				PendingExecutionDispatch(physicalItems, value.InvocationID) {
+			if !turnFound || !ownerFound || store.activeCancellationFenceLocked(value.TurnID) ||
+				executionDispatchAdmissionBlocked(physicalItems, value.InvocationID, phase) {
 				return Item{}, false, ErrConflict
+			}
+			if err := ValidateHostExecutionDispatchOwner(value, owner, turn.Status, func(id string) (Invocation, error) {
+				if target, ok := store.invocations[store.invocationExecutionRefs[id]]; ok {
+					return target, nil
+				}
+				return Invocation{}, ErrNotFound
+			}); err != nil {
+				return Item{}, false, err
 			}
 		}
 	}
 	value.Seq = uint64(len(store.items[value.TurnID]) + 1)
+	if value.ParentItemID == ExecutionDispatchParentItemID {
+		if parent, ok := OriginalApprovalRequestID(value); ok {
+			decision, err := PlanOriginalApprovalAdmission(value, store.itemIDs[parent], store.itemChildren[parent])
+			if err != nil {
+				return Item{}, false, err
+			}
+			if _, exists := store.itemIDs[decision.ID]; exists {
+				return Item{}, false, ErrConflict
+			}
+		}
+	}
 	if value.Kind == ItemSubtask {
 		facts, err := store.globalPhysicalEvidenceLocked(value.TurnID)
 		if err != nil {
@@ -1046,6 +1053,8 @@ func (store *MemoryStore) AppendItem(ctx context.Context, value Item) (Item, boo
 			return Item{}, false, ErrConflict
 		}
 	}
+	var approval Item
+	var appendApproval bool
 	if grant, found := store.itemIDs[value.ParentItemID]; found &&
 		grant.Kind == ItemDiagnostic && grant.Status == ItemStarted &&
 		grant.ParentItemID == ExecutionDispatchParentItemID {
@@ -1061,13 +1070,21 @@ func (store *MemoryStore) AppendItem(ctx context.Context, value Item) (Item, boo
 		if len(store.itemChildren[grant.ID]) != 0 {
 			return Item{}, false, ErrConflict
 		}
+		if !ValidOriginalApprovalSettlement(ctx, grant, value) {
+			return Item{}, false, ErrConflict
+		}
+		var err error
+		approval, appendApproval, err = store.planOriginalApprovalLocked(grant, value)
+		if err != nil {
+			return Item{}, false, err
+		}
 	}
-	value = cloneItem(value)
-	store.items[value.TurnID] = append(store.items[value.TurnID], value)
-	store.itemIDs[value.ID] = value
-	if value.ParentItemID != "" {
-		store.itemChildren[value.ParentItemID] = append(store.itemChildren[value.ParentItemID], value)
+	if appendApproval {
+		approval.Seq = value.Seq
+		store.appendSettlementItemLocked(approval)
+		value.Seq++
 	}
+	store.appendSettlementItemLocked(value)
 	return cloneItem(value), true, nil
 }
 

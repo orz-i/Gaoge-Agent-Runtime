@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"sync/atomic"
 
@@ -58,6 +59,29 @@ func executionDispatchReceiptIndex(items []Item) map[string][]Item {
 	return byGrant
 }
 
+type originalApprovalDispatchKey struct{}
+
+// The existing immutable physical grant carries the exact approval request.
+// Legacy two-field grants remain readable for ordinary return retirement.
+func executionDispatchFields(raw json.RawMessage) (map[string]string, bool) {
+	if fields, ok := authorityStringFields(raw, "phase", "physicalRunID"); ok {
+		return fields, true
+	}
+	fields, ok := authorityStringFields(raw, "phase", "physicalRunID", "checkpointID", "decision", "comment")
+	if !ok || (fields["phase"] != "resolve-approval" && fields["phase"] != "resolve-subtask-approval") {
+		return nil, false
+	}
+	a := kernel.ManagedApprovalDecision{CheckpointID: fields["checkpointID"], Decision: fields["decision"], Comment: fields["comment"]}
+	return fields, a.Valid()
+}
+func originalDispatchApproval(grant Item) (*kernel.ManagedApprovalDecision, bool) {
+	fields, ok := executionDispatchFields(grant.Payload)
+	if !ok || (fields["phase"] != "resolve-approval" && fields["phase"] != "resolve-subtask-approval") || fields["checkpointID"] == "" {
+		return nil, false
+	}
+	return &kernel.ManagedApprovalDecision{CheckpointID: fields["checkpointID"], Decision: fields["decision"], Comment: fields["comment"]}, true
+}
+
 // ValidExecutionDispatchGrantAdmission checks the exact original physical
 // phase before a Store has assigned its per-Turn Seq. Memory and SQL use this
 // same proof before committing a grant. A fabricated phase is not authority.
@@ -67,7 +91,7 @@ func ValidExecutionDispatchGrantAdmission(grant Item) (string, bool) {
 		grant.TurnID == "" || grant.InvocationID == "" || grant.RunID == "" {
 		return "", false
 	}
-	original, ok := authorityStringFields(grant.Payload, "phase", "physicalRunID")
+	original, ok := executionDispatchFields(grant.Payload)
 	if !ok || original["physicalRunID"] == "" {
 		return "", false
 	}
@@ -78,13 +102,51 @@ func ValidExecutionDispatchGrantAdmission(grant Item) (string, bool) {
 		if original["physicalRunID"] == grant.RunID {
 			return phase, true
 		}
-	case "resolve-subtask-approval", "resolve-wait":
+	case "resolve-subtask-approval":
+		if original["checkpointID"] != "" && original["physicalRunID"] != grant.RunID {
+			return "", false
+		}
 		// These explicitly target a proven descendant Kernel Run, not
 		// necessarily the owning Harness Invocation's root Run. The
 		// final physical call separately checks the child association.
 		return phase, true
 	}
 	return "", false
+}
+
+// HostExecutionDispatchOwnerAllowed is evaluated under the original Turn
+// lock. Native Named Agent commands cannot elect Host execution authority.
+func HostExecutionDispatchOwnerAllowed(owner Invocation) bool {
+	if !validInvocationStatus(owner.Status) || terminalInvocationStatus(owner.Status) {
+		return false
+	}
+	if owner.ParentItemID != "" && (isHandoffDelegationInvocation(owner) || strings.HasPrefix(owner.ParentItemID, "hid_")) {
+		d, err := decodeFrozenHandoffDelegation(owner.Input)
+		return err == nil && !d.NativeLocal
+	}
+	return true
+}
+
+// ValidateHostExecutionDispatchOwner checks both the elected owner and any
+// separately targeted subtask. The original Turn lock covers both reads.
+func ValidateHostExecutionDispatchOwner(grant Item, owner Invocation, status TurnStatus, lookup func(string) (Invocation, error)) error {
+	if !validTurnStatus(status) || terminalTurnStatus(status) || owner.ID != grant.InvocationID || owner.TurnID != grant.TurnID || owner.ExecutionRefID != grant.RunID || !HostExecutionDispatchOwnerAllowed(owner) {
+		return ErrConflict
+	}
+	fields, valid := executionDispatchFields(grant.Payload)
+	if !valid {
+		return ErrConflict
+	}
+	if fields["phase"] == "resolve-subtask-approval" && fields["physicalRunID"] != grant.RunID {
+		target, err := lookup(fields["physicalRunID"])
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			return err
+		}
+		if err == nil && !HostExecutionDispatchOwnerAllowed(target) {
+			return ErrConflict
+		}
+	}
+	return nil
 }
 
 // VerifiedExecutionDispatchGrant also requires the original Store-allocated
@@ -122,12 +184,6 @@ func VerifiedExecutionDispatchReceipt(grant Item, receipts []Item) (string, bool
 		receipt.RunID != grant.RunID || receipt.Seq <= grant.Seq {
 		return "", false
 	}
-	// Managed closure has its own exact five-field schema. Do not relax the
-	// original single-field receipt contract or accept duplicate/unknown keys.
-	if phase == "start" && managedDispatchReceipt(receipt) {
-		fields, _ := authorityStringFields(receipt.Payload, "boundary", "recoveryID", "mode", "selectionHash", "terminalHash")
-		return fields["boundary"], true
-	}
 	payload, ok := authorityStringFields(receipt.Payload, "boundary")
 	if !ok {
 		return "", false
@@ -142,8 +198,8 @@ func VerifiedExecutionDispatchReceipt(grant Item, receipts []Item) (string, bool
 		if phase != "handoff-start" {
 			return payload["boundary"], true
 		}
-	case "native_agent_start_no_effect", "native_kernel_epoch_recovered":
-		if phase == "start" || phase == "start-retry" {
+	case "native_agent_start_no_effect":
+		if phase == "start" || phase == "start-retry" || phase == "handoff-start" {
 			return payload["boundary"], true
 		}
 	case "native_agent_callback_not_entered":
@@ -153,13 +209,13 @@ func VerifiedExecutionDispatchReceipt(grant Item, receipts []Item) (string, bool
 			phase == "resolve-approval" || phase == "resolve-subtask-approval" {
 			return payload["boundary"], true
 		}
+	case approvalNotAppliedBoundary:
+		if _, ok := originalDispatchApproval(grant); ok {
+			return payload["boundary"], true
+		}
 	case "native_agent_control_no_effect":
 		if phase == "resolve-approval" || phase == "resolve-subtask-approval" ||
 			phase == "grant-call-allowance" {
-			return payload["boundary"], true
-		}
-	case "native_allowance_committed":
-		if phase == "grant-call-allowance" {
 			return payload["boundary"], true
 		}
 	case "handoff_start_returned":
@@ -170,16 +226,24 @@ func VerifiedExecutionDispatchReceipt(grant Item, receipts []Item) (string, bool
 	return "", false
 }
 
+// ExecutionDispatchBlocksAdmission shares the exact receipt predicate
+// between Store admission and the no-new-effect election. A Handoff Start
+// may retry a definitive rejection, never an actually returned Start.
+func ExecutionDispatchBlocksAdmission(grant Item, receipts []Item, requestedPhase string) bool {
+	boundary, settled := VerifiedExecutionDispatchReceipt(grant, receipts)
+	phase, _ := VerifiedExecutionDispatchGrant(grant)
+	return !settled || requestedPhase == "handoff-start" && (phase != requestedPhase || boundary != "physical_dispatch_rejected" && boundary != "native_agent_start_no_effect")
+}
 func PendingExecutionDispatch(items []Item, invocationID string) bool {
+	return executionDispatchAdmissionBlocked(items, invocationID, "")
+}
+func executionDispatchAdmissionBlocked(items []Item, invocationID, phase string) bool {
 	receipts := executionDispatchReceiptIndex(items)
 	for _, item := range items {
-		if item.ParentItemID != ExecutionDispatchParentItemID {
+		if item.ParentItemID != ExecutionDispatchParentItemID || (invocationID != "" && item.InvocationID != invocationID) {
 			continue
 		}
-		if invocationID != "" && item.InvocationID != invocationID {
-			continue
-		}
-		if _, settled := VerifiedExecutionDispatchReceipt(item, receipts[item.ID]); !settled {
+		if ExecutionDispatchBlocksAdmission(item, receipts[item.ID], phase) {
 			return true
 		}
 	}
@@ -217,14 +281,13 @@ func (runner *Runner) pendingExecutionDispatch(
 		}
 		// A foreign Invocation's malformed receipt must not veto a
 		// disjoint targeted cancellation. After the original scope is
-		// established, a present-but-contradictory receipt disables the
-		// otherwise valid native Kernel Start cancellation exception.
+		// established, a contradictory receipt blocks any settlement.
 		if len(receipts[item.ID]) != 0 {
 			return true, nil
 		}
 		// The same exact original-dispatch repair used by Resume is also
 		// available to protective control. Never require a new physical
-		// call to close an already acknowledged Kernel no-entry.
+		// call to close an already acknowledged native retirement.
 		if native, ok := runner.agent.(*agent.Runner); ok && native.ObservesKernelRuntime(runner.runtime) {
 			owner, ownerErr := runner.store.GetInvocation(ctx, item.InvocationID)
 			if ownerErr != nil {
@@ -233,7 +296,7 @@ func (runner *Runner) pendingExecutionDispatch(
 			if owner.ID != item.InvocationID || owner.TurnID != turnID || owner.ExecutionRefID != item.RunID {
 				return false, ErrConflict
 			}
-			repaired, repairErr := runner.recoverUnenteredDispatch(ctx, owner)
+			repaired, repairErr := runner.recoverOriginalPhysicalDispatch(ctx, owner)
 			if repairErr != nil {
 				return false, repairErr
 			}
@@ -241,56 +304,10 @@ func (runner *Runner) pendingExecutionDispatch(
 				continue
 			}
 		}
-		if (phase.Phase == "start" || phase.Phase == "start-retry") &&
-			runner.nativeAgentStartOwnedByKernel(ctx, item, phase.PhysicalRunID) {
-			// Only the exact first-party Agent with an authoritative
-			// Kernel Run can be cancelled before its Start receipt. Native
-			// Agent execution checks Kernel CAS (and Epoch when configured)
-			// before continuing; composite Features can still create children
-			// after their parent Kernel Run has been created.
-			continue
-		}
+
 		return true, nil
 	}
 	return false, nil
-}
-
-// nativeAgentStartOwnedByKernel is the sole exception to an outstanding
-// physical Start grant blocking cancellation. Run existence is not sufficient:
-// only a concrete first-party Agent, exact Root Invocation ownership and
-// native Agent Run can use Kernel cancellation CAS (and an acquired native
-// execution Epoch where present). A custom Agent, composite Feature or
-// delegated child never inherits this exception.
-func (runner *Runner) nativeAgentStartOwnedByKernel(ctx context.Context, grant Item, physicalRunID string) bool {
-	if runner == nil || runner.runtime == nil || runner.store == nil || physicalRunID == "" ||
-		physicalRunID != grant.RunID || grant.InvocationID == "" {
-		return false
-	}
-	native, ok := runner.agent.(*agent.Runner)
-	if !ok || !native.NativeStartCancellationFencedByKernel(runner.runtime) {
-		return false
-	}
-	// A custom or separately bound RuntimeCanceller cannot claim that
-	// cancelling this Kernel Run fences the native Agent's execution.
-	canceller, nativeCancel := runner.cancellation.(*kernel.Runtime)
-	if !nativeCancel || canceller != runner.runtime {
-		return false
-	}
-	owner, err := runner.store.GetInvocation(ctx, grant.InvocationID)
-	if err != nil || owner.ID != grant.InvocationID || owner.TurnID != grant.TurnID ||
-		owner.ParentItemID != "" || owner.ExecutionRefID != grant.RunID {
-		return false
-	}
-	started, err := runner.runtime.Load(ctx, grant.RunID)
-	if err != nil || started.Run.ID != grant.RunID ||
-		started.Run.Kind != agent.RunKind || started.Run.Status != kernel.RunStatusRunning {
-		return false
-	}
-	// Native Agent Runs can be unleased (Kernel CAS) or require a bound
-	// Epoch (Kernel Store fencing). Either case has a first-party native
-	// continuation guard. Any other Store error gives no cancel authority.
-	proof := runner.runtime.RequireExecution(ctx, grant.RunID)
-	return proof == nil || errors.Is(proof, kernel.ErrExecutionRequired)
 }
 
 // withPhysicalInvocationDispatch is the single Harness physical Start/Resume
@@ -302,21 +319,7 @@ func (runner *Runner) withPhysicalInvocationDispatch(
 	ctx context.Context, invocation Invocation, phase string,
 	physical func(context.Context) (kernel.Snapshot, error),
 ) (kernel.Snapshot, error) {
-	return runner.withPhysicalInvocationDispatchFor(ctx, invocation, phase, invocation.ExecutionRefID, physical)
-}
-
-// SubAgent control may mutate a proven descendant Run rather
-// than the owning Harness Invocation's root Run. The durable grant still
-// belongs to the owning Invocation for cancellation arbitration.
-func (runner *Runner) withPhysicalInvocationDispatchFor(
-	ctx context.Context, invocation Invocation, phase, resultRunID string,
-	physical func(context.Context) (kernel.Snapshot, error),
-) (kernel.Snapshot, error) {
-	if physical == nil {
-		return kernel.Snapshot{}, ErrInvalidRequest
-	}
-	return runner.withPhysicalInvocationDispatchForContext(ctx, invocation, phase, resultRunID,
-		nil, physical)
+	return runner.withPhysicalInvocationDispatchForContext(ctx, invocation, phase, invocation.ExecutionRefID, nil, physical)
 }
 
 // An AgentTask approval carries a private per-call proof only AFTER the
@@ -336,6 +339,20 @@ func (runner *Runner) withPhysicalSubtaskApprovalDispatch(
 		&subtaskApprovalDispatchScope{
 			ChildRunID: childRunID, CheckpointID: checkpointID, Revision: childRevision,
 		}, physical)
+}
+
+// Native callback names are shared by initial dispatch and original receipt recovery.
+func nativeDispatchOperation(phase string) plugin.RunOperation {
+	switch phase {
+	case "start", "start-retry", "handoff-start":
+		return plugin.RunStart
+	case "resume":
+		return plugin.RunResume
+	case "resolve-approval", "resolve-subtask-approval":
+		return plugin.RunResolveApproval
+	default:
+		return ""
+	}
 }
 
 func (runner *Runner) withPhysicalInvocationDispatchForContext(
@@ -375,10 +392,7 @@ func (runner *Runner) withPhysicalInvocationDispatchForContext(
 			return kernel.Snapshot{}, errors.Join(ErrConflict, loadErr)
 		}
 	}
-	physicalCtx, bindErr := runner.bindManagedOriginalDispatch(ctx, invocation, grant)
-	if bindErr != nil {
-		return kernel.Snapshot{}, errors.Join(bindErr, runner.finishPhysicalDispatchGrant(ctx, grant, "physical_dispatch_rejected"))
-	}
+	physicalCtx := ctx
 	if scope != nil {
 		bound := *scope
 		bound.GrantID = grant.ID
@@ -392,18 +406,8 @@ func (runner *Runner) withPhysicalInvocationDispatchForContext(
 		physicalCtx = context.WithValue(physicalCtx, subtaskApprovalDispatchContextKey{}, bound)
 	}
 	native, nativeAgent := runner.agent.(*agent.Runner)
-	var operation plugin.RunOperation
-	observe := nativeAgent
-	switch phase {
-	case "start", "start-retry":
-		operation = plugin.RunStart
-	case "resume":
-		operation = plugin.RunResume
-	case "resolve-approval", "resolve-subtask-approval":
-		operation = plugin.RunResolveApproval
-	default:
-		observe = false // Pure native allowance CAS and non-Agent features keep their own exact contracts.
-	}
+	operation := nativeDispatchOperation(phase)
+	observe := nativeAgent && operation != "" && phase != "handoff-start"
 	var snapshot kernel.Snapshot
 	var physicalErr error
 	var outcome agent.PhysicalCallOutcome
@@ -461,9 +465,6 @@ func (runner *Runner) withPhysicalInvocationDispatchForContext(
 	if observe && outcome.Kind() == agent.PhysicalCallNotEntered {
 		boundary = "native_agent_callback_not_entered"
 	}
-	if phase == "grant-call-allowance" && nativeAgent && physicalErr == nil {
-		boundary = "native_allowance_committed"
-	}
 	receiptErr := runner.finishPhysicalDispatchGrant(ctx, grant, boundary)
 	if boundary == "native_agent_callback_not_entered" {
 		if receiptErr != nil {
@@ -505,6 +506,18 @@ func (runner *Runner) beginPhysicalInvocationDispatch(
 		Phase         string `json:"phase"`
 		PhysicalRunID string `json:"physicalRunID,omitempty"`
 	}{Phase: phase, PhysicalRunID: physicalRunID})
+	if approval, ok := ctx.Value(originalApprovalDispatchKey{}).(kernel.ManagedApprovalDecision); ok && (phase == "resolve-approval" || phase == "resolve-subtask-approval") {
+		if !approval.Valid() {
+			return Item{}, ErrInvalidRequest
+		}
+		payload, err = json.Marshal(struct {
+			Phase         string `json:"phase"`
+			PhysicalRunID string `json:"physicalRunID"`
+			CheckpointID  string `json:"checkpointID"`
+			Decision      string `json:"decision"`
+			Comment       string `json:"comment"`
+		}{phase, physicalRunID, approval.CheckpointID, approval.Decision, approval.Comment})
+	}
 	if err != nil {
 		return Item{}, err
 	}
@@ -516,23 +529,9 @@ func (runner *Runner) beginPhysicalInvocationDispatch(
 		ParentItemID: ExecutionDispatchParentItemID, Payload: payload,
 		CreatedAt: now, UpdatedAt: now,
 	}
-	if phase == "grant-call-allowance" {
-		if original, ok := ctx.Value(allowanceGrantKey{}).(string); ok {
-			grant.ID = original
-		}
-	}
 	_, fresh, appendErr := runner.store.AppendItem(ctx, grant)
 	if errors.Is(appendErr, ErrConflict) {
-		repaired, repairErr := runner.recoverUnenteredDispatch(ctx, invocation)
-		if repairErr != nil {
-			return Item{}, errors.Join(ErrConflict, repairErr)
-		}
-		if repaired {
-			_, fresh, appendErr = runner.store.AppendItem(ctx, grant)
-		}
-	}
-	if phase == "resume" && errors.Is(appendErr, ErrConflict) {
-		repaired, repairErr := runner.recoverAllowanceDispatch(ctx, invocation)
+		repaired, repairErr := runner.recoverOriginalPhysicalDispatch(ctx, invocation)
 		if repairErr != nil {
 			return Item{}, errors.Join(ErrConflict, repairErr)
 		}
@@ -556,71 +555,38 @@ func (runner *Runner) requireLiveInvocationParents(ctx context.Context, invocati
 	if invocation.ParentItemID == "" {
 		return nil
 	}
-	// The Input was sealed at the first admission. A parent's stable ID
-	// becoming Running on Attempt 2 cannot authorize an older descendant.
 	proof, err := frozenChildRoot(invocation)
 	if err != nil {
 		return err
-	}
-	expected := make(map[string]childAttemptBinding, len(proof.Parents))
-	for _, bound := range proof.Parents {
-		expected[bound.InvocationID] = bound
-	}
-	seen := make(map[string]struct{})
-	for id := invocation.ParentItemID; id != ""; {
-		if _, cycle := seen[id]; cycle {
-			return ErrConflict
-		}
-		seen[id] = struct{}{}
-		item, loadErr := runner.store.GetItem(ctx, id)
-		if errors.Is(loadErr, ErrNotFound) || errors.Is(loadErr, ErrInvalidRequest) {
-			return ErrConflict
-		}
-		if loadErr != nil {
-			return loadErr
-		}
-		if item.ID != id || item.TurnID != invocation.TurnID || item.Seq == 0 {
-			return ErrConflict
-		}
-		if ownerID := item.InvocationID; ownerID != "" && ownerID != invocation.ID {
-			bound := proof.attempt()
-			if ownerID != proof.InvocationID {
-				var found bool
-				bound, found = expected[ownerID]
-				if !found {
-					return ErrConflict // Unfrozen ancestor cannot grant authority.
-				}
-			}
-			if err := runner.requireItemOwnerAttempt(ctx, item, bound); err != nil {
-				return err
-			}
-		}
-		id = item.ParentItemID
-	}
-	// An Item ancestry may end at a Host delegation boundary. Validate ALL
-	// inherited owners even when no Item in this immediate chain names them.
-	for _, bound := range proof.Parents {
-		if err := runner.requireLiveParentAttempt(ctx, invocation.TurnID, bound); err != nil {
-			return err
-		}
 	}
 	root, err := runner.loadFrozenChildRoot(ctx, invocation)
 	if err != nil {
 		return err
 	}
-	if runner.runtime == nil || strings.TrimSpace(root.ExecutionRefID) == "" {
+	// Derive the same ordered transitive Attempt selection as admission.
+	// Do not adopt a current Item owner or permit a missing ancestor.
+	parents, err := runner.freezeChildParentAttempts(ctx, invocation.TurnID, invocation.ParentItemID, root, invocation.ID)
+	if err != nil || !slices.Equal(parents, proof.Parents) {
+		return errors.Join(ErrConflict, err)
+	}
+	if runner.runtime == nil {
 		return ErrConflict
 	}
 	state, err := runner.runtime.Load(ctx, root.ExecutionRefID)
 	if err != nil || state.Run.ID != root.ExecutionRefID || terminalRuntimeStatus(state.Run.Status) {
 		return errors.Join(ErrConflict, err)
 	}
-	// Admission and this final post-grant check both prove the frozen root
-	// before a child may physically start or resume after a concurrent change.
 	return validateRootRuntimeOwnership(root, state)
 }
 
 func (runner *Runner) finishPhysicalDispatchGrant(ctx context.Context, grant Item, boundary string) error {
+	// The caller may have disconnected while the physical Feature returned.
+	settlementCtx, stopSettlement := cancellationSettlementContext(ctx)
+	defer stopSettlement()
+	settlementCtx, boundary, err := runner.qualifyApprovalSettlement(settlementCtx, grant, boundary)
+	if err != nil {
+		return err
+	}
 	now := runner.clock.Now().UTC()
 	payload, err := json.Marshal(struct {
 		Boundary string `json:"boundary"`
@@ -628,17 +594,18 @@ func (runner *Runner) finishPhysicalDispatchGrant(ctx context.Context, grant Ite
 	if err != nil {
 		return err
 	}
-	// The caller may have disconnected while the physical Feature returned.
-	// Preserve the completion opportunity, but never wait unboundedly on a
-	// blocked Store row. An expired/lost ACK is not a settled grant.
-	settlementCtx, stopSettlement := cancellationSettlementContext(ctx)
-	defer stopSettlement()
-	_, _, err = runner.store.AppendItem(settlementCtx, Item{
-		ID: stableID("hdispatchdone", grant.ID), TurnID: grant.TurnID,
-		InvocationID: grant.InvocationID, RunID: grant.RunID,
-		Kind: ItemDiagnostic, Status: ItemCompleted,
-		ParentItemID: grant.ID,
-		Payload:      payload, CreatedAt: now, UpdatedAt: now,
+	_, fresh, err := runner.store.AppendItem(settlementCtx, Item{
+		ID: stableID("hdispatchdone", grant.ID), TurnID: grant.TurnID, InvocationID: grant.InvocationID, RunID: grant.RunID,
+		Kind: ItemDiagnostic, Status: ItemCompleted, ParentItemID: grant.ID, Payload: payload, CreatedAt: now, UpdatedAt: now,
 	})
+	if err == nil && fresh && boundary == "physical_dispatch_returned" && runner.turnFeed != nil {
+		if a, ok := originalDispatchApproval(grant); ok {
+			// Durable projection was part of the Store transaction. The
+			// feed is only a live notification, not a second write.
+			if item, e := runner.store.GetItem(settlementCtx, stableID("hia", grant.TurnID, a.CheckpointID, "decision")); e == nil {
+				publishItemFact(settlementCtx, runner.turnFeed, item)
+			}
+		}
+	}
 	return errors.Join(err, settlementCtx.Err())
 }

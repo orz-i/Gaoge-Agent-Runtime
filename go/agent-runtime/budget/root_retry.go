@@ -15,48 +15,52 @@ func (coordinator Coordinator) CancelRoot(ctx context.Context, scopeID, rootRunI
 		return Ledger{}, ErrInvalidUsage
 	}
 	return coordinator.update(ctx, scopeID, func(l *Ledger) error {
-		if binding, exists := l.Runs[rootRunID]; exists && binding.ParentRunID != "" {
-			return ErrLedgerConflict
-		}
-		grant, retryRoot := l.RootRetries[rootRunID]
-		if _, ok := l.Runs[rootRunID]; !ok && (!retryRoot || !grant.Active) {
-			return ErrLedgerNotFound
-		}
-		if retryRoot && !grant.Active {
-			return ErrLedgerConflict
-		}
-		if !retryRoot {
-			for _, other := range l.RootRetries {
-				if other.Active {
-					return ErrLedgerConflict
-				}
-			}
-		}
-		if retryRoot {
-			if l.CancelledRuns == nil {
-				l.CancelledRuns = map[string]bool{}
-			}
-			l.CancelledRuns[rootRunID] = true
-		} else {
-			l.Cancelled = true
-		}
-		for id, r := range l.Reservations {
-			if (retryRoot && !l.contains(rootRunID, r.RunID)) || r.Dispatched || r.Status == ReservationSettled {
-				continue
-			}
-			r.Status, r.Active = ReservationReleased, false
-			l.Reservations[id] = r
-		}
-		return nil
+		return l.applyRootCancellation(rootRunID)
 	})
 }
 
+// The same reducer serves standalone and Run-transaction cancellation.
+func (l *Ledger) applyRootCancellation(rootRunID string) error {
+	if binding, exists := l.Runs[rootRunID]; exists && binding.ParentRunID != "" {
+		return ErrLedgerConflict
+	}
+	grant, retryRoot := l.RootRetries[rootRunID]
+	if _, ok := l.Runs[rootRunID]; !ok && (!retryRoot || !grant.Active) {
+		return ErrLedgerNotFound
+	}
+	if retryRoot && !grant.Active {
+		return ErrLedgerConflict
+	}
+	if !retryRoot {
+		for _, other := range l.RootRetries {
+			if other.Active {
+				return ErrLedgerConflict
+			}
+		}
+	}
+	if retryRoot {
+		if l.CancelledRuns == nil {
+			l.CancelledRuns = map[string]bool{}
+		}
+		l.CancelledRuns[rootRunID] = true
+	} else {
+		l.Cancelled = true
+	}
+	for id, r := range l.Reservations {
+		if (retryRoot && !l.contains(rootRunID, r.RunID)) || r.Dispatched || r.Status == ReservationSettled {
+			continue
+		}
+		r.Status, r.Active = ReservationReleased, false
+		l.Reservations[id] = r
+	}
+	return nil
+}
+
 // PlanRootRetry computes the entire bounded next-Root accounting transition
-// without performing ANY Store write. Only the owning Harness Store may
-// persist its result while holding the original Turn lock and committing the
-// immutable Invocation Attempt/RunID rotation in the same atomic operation.
-// Budget Coordinator no longer exposes a standalone mutation path capable
-// of authorizing a non-existent next Attempt.
+// without performing ANY Store write. The split-store Host transaction
+// commits it with the original Attempt rotation. A native Runtime ledger
+// instead consumes the exact already-committed immutable Host selection
+// before physical Start. Neither path infers a successor from a ledger ID.
 //
 // The input is cloned: rejections, conflicts and idempotent replays cannot
 // rewrite historical charges, unknown reservations or previous receipts.
@@ -68,7 +72,7 @@ func PlanRootRetry(original Ledger, invocationID, priorRunID, nextRunID string, 
 		return Ledger{}, ErrInvalidUsage
 	}
 	next := CloneLedger(original)
-	if err := planRootRetry(&next, invocationID, priorRunID, nextRunID, attempt); err != nil {
+	if err := planRootRetry(&next, invocationID, priorRunID, nextRunID, attempt, true); err != nil {
 		return original, err
 	}
 	if reflect.DeepEqual(original, next) {
@@ -78,7 +82,7 @@ func PlanRootRetry(original Ledger, invocationID, priorRunID, nextRunID string, 
 	return next, nil
 }
 
-func planRootRetry(l *Ledger, invocationID, priorRunID, nextRunID string, attempt int) error {
+func planRootRetry(l *Ledger, invocationID, priorRunID, nextRunID string, attempt int, requireQuota bool) error {
 	wanted := RootRetryGrant{InvocationID: invocationID, OriginalRunID: priorRunID, Attempt: attempt, Active: true}
 	if existing, ok := l.RootRetries[nextRunID]; ok {
 		if existing != wanted || l.CancelledRuns[nextRunID] {
@@ -90,14 +94,17 @@ func planRootRetry(l *Ledger, invocationID, priorRunID, nextRunID string, attemp
 		if original.ParentRunID != "" {
 			return ErrLedgerConflict
 		}
-	} else if attempt <= 2 {
-		return ErrLedgerConflict
+	} else if attempt == 2 {
+		if !l.Cancelled || !l.CancelledRuns[priorRunID] || len(l.CancelledRuns) != 1 ||
+			len(l.Runs) != 0 || len(l.Reservations) != 0 || len(l.RootRetries) != 0 || len(l.FinishedRuns) != 0 {
+			return ErrLedgerConflict
+		}
 	} else {
 		// A later Attempt can be proven cancelled or failed before its
-		// physical Agent Run was ever registered. The original Harness
-		// Store terminal CAS is checked in the same transaction as this
-		// budget transition; a matching active predecessor grant, checked
-		// below, is sufficient and does not fabricate an earlier Run.
+		// physical Agent Run was ever registered. The original Host
+		// terminal/selection evidence must be validated by the caller.
+		// The matching predecessor grant below preserves the generation
+		// history without fabricating an earlier Run.
 		previous, ok := l.RootRetries[priorRunID]
 		if !ok || !previous.Active || previous.Attempt != attempt-1 || previous.InvocationID != invocationID {
 			return ErrLedgerConflict
@@ -129,10 +136,10 @@ func planRootRetry(l *Ledger, invocationID, priorRunID, nextRunID string, attemp
 		}
 	}
 	view := l.View("")
-	if (l.Limits.MaxLLMCalls > 0 && view.Remaining.LLMCalls < 1) ||
+	if requireQuota && ((l.Limits.MaxLLMCalls > 0 && view.Remaining.LLMCalls < 1) ||
 		(l.Limits.MaxTotalTokens > 0 && view.Remaining.TotalTokens < 1) ||
 		(l.Limits.MaxInputTokens > 0 && view.Remaining.InputTokens < 1) ||
-		(l.Limits.MaxOutputTokens > 0 && view.Remaining.OutputTokens < 1) {
+		(l.Limits.MaxOutputTokens > 0 && view.Remaining.OutputTokens < 1)) {
 		return ErrExhausted
 	}
 	if l.RootRetries == nil {

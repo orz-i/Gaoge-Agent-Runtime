@@ -27,10 +27,10 @@ func RunEA1RootAgentStartSettlementSuite(t *testing.T, factory func(*testing.T) 
 	for _, phase := range []string{"P3", "P4"} {
 		for _, tool := range []bool{false, true} {
 			kind := map[bool]string{false: "model-yield", true: "terminal-tool"}[tool]
-			t.Run(phase+"/"+kind, func(t *testing.T) { ea1RootStartSettlement(t, factory, phase, tool, false) })
+			t.Run(phase+"/"+kind, func(t *testing.T) { ea1RootSettlement(t, factory, phase, tool, false, "start", false) })
 		}
 	}
-	t.Run("P3/committed-model-receipt-unknown-host", func(t *testing.T) { ea1RootStartSettlement(t, factory, "P3", false, true) })
+	t.Run("P3/committed-model-receipt-unknown-host", func(t *testing.T) { ea1RootSettlement(t, factory, "P3", false, true, "start", false) })
 }
 
 type ea1StartSettlementStore struct {
@@ -39,11 +39,11 @@ type ea1StartSettlementStore struct {
 	kernel.ControlStore
 	kernel.ChildExecutionStore
 	kernel.OwnedPhysicalExecutionStore
-	mode                                string
-	fault                               error
-	created                             func(kernel.Snapshot)
-	markCalls, markCommits, finishCalls int
-	original                            kernel.ChildExecutionGrant
+	mode                                  string
+	fault                                 error
+	created                               func(kernel.Snapshot)
+	markCalls, finishCommits, finishCalls int
+	original                              kernel.ChildExecutionGrant
 }
 
 func (s *ea1StartSettlementStore) Create(ctx context.Context, r kernel.Record, e []kernel.EventDraft) (kernel.Snapshot, error) {
@@ -55,25 +55,35 @@ func (s *ea1StartSettlementStore) Create(ctx context.Context, r kernel.Record, e
 }
 func (s *ea1StartSettlementStore) MarkChildExecutionSettled(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
 	s.markCalls++
+	return s.ChildExecutionStore.MarkChildExecutionSettled(ctx, g, p)
+}
+func (s *ea1StartSettlementStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
+	s.finishCalls++
 	s.original = g
 	if s.mode == "P3" {
 		return s.fault
 	}
-	if e := s.ChildExecutionStore.MarkChildExecutionSettled(ctx, g, p); e != nil {
-		return e
+	err := s.ChildExecutionStore.FinishChildExecution(ctx, g, p)
+	if err == nil {
+		s.finishCommits++
+		if s.mode == "P4" {
+			return s.fault
+		}
 	}
-	s.markCommits++
-	if s.mode == "P4" {
-		return s.fault
-	}
-	return nil
+	return err
 }
-func (s *ea1StartSettlementStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant) error {
-	s.finishCalls++
-	if s.mode == "P3" || s.mode == "P4" {
-		return s.fault
+
+// P4 uses an actually committed final receipt; a new process observes it
+// without invoking a callback or requiring any intermediate marker.
+func ea1AssertFinishedOriginal(t *testing.T, rt *kernel.Runtime, g kernel.ChildExecutionGrant, s kernel.Snapshot) {
+	t.Helper()
+	r, e := rt.LoadOwnedRetirement(t.Context(), g.ID)
+	if e != nil || !r.Valid() || r.Evidence.Grant != g || !reflect.DeepEqual(r.Evidence.Snapshot, s) || !r.Evidence.Completion.HostCompleted || !r.Evidence.Completion.LeaseOwned {
+		t.Fatalf("original committed Finish missing: %v %+v", e, r)
 	}
-	return s.ChildExecutionStore.FinishChildExecution(ctx, g)
+	if _, e = rt.LookupChildExecution(t.Context(), s.Run.ID); !errors.Is(e, kernel.ErrNotFound) {
+		t.Fatalf("Finish retained grant: %v", e)
+	}
 }
 
 type ea1StartSettlementPhysical struct {
@@ -167,7 +177,7 @@ func (p *ea1StartSettlementPhysical) execute(_ context.Context, req tools.Execut
 	p.mu.Unlock()
 	return result, nil
 }
-func ea1RootStartSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, func() kernel.Store), phase string, withTool, unknownHost bool) {
+func ea1RootSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, func() kernel.Store), phase string, withTool, unknownHost bool, operation string, cancelBefore bool) {
 	t.Helper()
 	backing, reopen := factory(t)
 	fault := errors.New("test-only original settlement transport fault")
@@ -175,7 +185,11 @@ func ea1RootStartSettlement(t *testing.T, factory func(*testing.T) (kernel.Store
 	if unknownHost {
 		mode = "unknown"
 	}
-	wrapped := &ea1StartSettlementStore{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ControlStore: backing.(kernel.ControlStore), ChildExecutionStore: backing.(kernel.ChildExecutionStore), OwnedPhysicalExecutionStore: backing.(kernel.OwnedPhysicalExecutionStore), mode: mode, fault: fault}
+	initialMode := mode
+	if operation == "resume" {
+		initialMode = "setup"
+	}
+	wrapped := &ea1StartSettlementStore{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ControlStore: backing.(kernel.ControlStore), ChildExecutionStore: backing.(kernel.ChildExecutionStore), OwnedPhysicalExecutionStore: backing.(kernel.OwnedPhysicalExecutionStore), mode: initialMode, fault: fault}
 	rt, err := kernel.New(kernel.Dependencies{Store: wrapped})
 	if err != nil {
 		t.Fatal(err)
@@ -186,28 +200,66 @@ func ea1RootStartSettlement(t *testing.T, factory func(*testing.T) (kernel.Store
 	if err != nil {
 		t.Fatal(err)
 	}
+	var middleware plugin.RunMiddleware = physical
+	otherOperation := "resume"
+	if operation == "resume" {
+		middleware = ea1ResumeSettlementMiddleware{physical}
+		otherOperation = "start"
+	}
 	makeRunner := func(runtime *kernel.Runtime, owner string) *agent.Runner {
-		r, e := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: physical, Catalog: catalog, Executor: catalog, RunMiddleware: []plugin.RunMiddleware{physical}, ToolMiddleware: []plugin.ToolMiddleware{physical}, RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: 3 * time.Minute}})
+		r, e := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: physical, Catalog: catalog, Executor: catalog, RunMiddleware: []plugin.RunMiddleware{middleware}, ToolMiddleware: []plugin.ToolMiddleware{physical}, RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: 3 * time.Minute}})
 		if e != nil {
 			t.Fatal(e)
 		}
 		return r
 	}
-	runner := makeRunner(rt, "original-start-owner")
-	req := agent.StartRequest{ID: "root-start-settlement", RequestID: "original-request", Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "owner"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "original-thread"}, Goal: "original root settlement", Instructions: "Keep the original source.", Model: "fixture-model", ModelOptions: json.RawMessage(`{"temperature":0.1}`), Limits: agent.Limits{MaxLLMCalls: 2, MaxToolCalls: 1}}
+	owner := "original-" + operation + "-owner"
+	runner := makeRunner(rt, owner)
+	setup := runner
+	if operation == "resume" {
+		setup, err = agent.NewRunner(agent.Dependencies{Runtime: rt, Model: physical, Catalog: catalog, Executor: catalog, RunExecution: &agent.RunExecution{OwnerID: "prepare-only-owner", LeaseDuration: 3 * time.Minute}})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	req := agent.StartRequest{ID: "root-" + operation + "-settlement", RequestID: "original-request", Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "owner"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "original-thread"}, Goal: "original root settlement", Instructions: "Keep the original source.", Model: "fixture-model", ModelOptions: json.RawMessage(`{"temperature":0.1}`), Limits: agent.Limits{MaxLLMCalls: 2, MaxToolCalls: 1}}
 	if withTool {
 		req.ToolKeys = []string{"effect"}
 	}
 	var created kernel.Snapshot
 	wrapped.created = func(s kernel.Snapshot) {
 		created = s
-		if s.Run.ParentRunID != "" || req.OriginFingerprint != "" || !runner.VerifyFrozenStartRequest(s, req) {
+		if s.Run.ParentRunID != "" || req.OriginFingerprint != "" || !setup.VerifyFrozenStartRequest(s, req) {
 			t.Fatal("actual Create did not preserve original Root source")
 		}
 	}
-	_, startErr := runner.StartRun(t.Context(), req)
-	if created.Run.ID != req.ID {
-		t.Fatal("actual StartRun never created original source")
+	var startErr error
+	var expectedRevision uint64
+	if operation == "resume" {
+		prepared, err := setup.PrepareRun(t.Context(), req)
+		if err != nil || created.Run.ID != req.ID || prepared.Run.Status != kernel.RunStatusRunning {
+			t.Fatalf("actual PrepareRun did not create resumable source: %v", err)
+		}
+		if _, err = rt.LookupChildExecution(t.Context(), req.ID); !errors.Is(err, kernel.ErrNotFound) {
+			t.Fatalf("setup scope not retired before Resume: %v", err)
+		}
+		physical.mu.Lock()
+		setupDispatched := len(physical.requests) != 0 || len(physical.responses) != 0 || len(physical.toolRequests) != 0 || physical.hostCalls != 0
+		physical.mu.Unlock()
+		if setupDispatched {
+			t.Fatal("PrepareRun dispatched physical work")
+		}
+		// Arm after real deferred creation and its setup scope retirement.
+		wrapped.mode = mode
+		wrapped.markCalls, wrapped.finishCommits, wrapped.finishCalls = 0, 0, 0
+		expectedRevision = prepared.Run.Revision
+		_, startErr = runner.Resume(t.Context(), req.ID, expectedRevision)
+	} else {
+		_, startErr = runner.StartRun(t.Context(), req)
+		if created.Run.ID != req.ID {
+			t.Fatal("actual StartRun never created original source")
+		}
+		expectedRevision = created.Run.Revision
 	}
 	if unknownHost {
 		if !errors.Is(startErr, physical.hostFault) || wrapped.markCalls != 0 || wrapped.finishCalls != 0 {
@@ -220,22 +272,55 @@ func ea1RootStartSettlement(t *testing.T, factory func(*testing.T) (kernel.Store
 	if err != nil {
 		t.Fatal(err)
 	}
+	cancelSettled := func(runtime *kernel.Runtime) {
+		t.Helper()
+		if withTool {
+			ea1CancelRejected(t, runtime, before, kernel.ChildExecutionGrant{}, kernel.ErrTerminal)
+		} else {
+			out, e := runtime.Cancel(t.Context(), req.ID, before.Run.Revision, "original cancel")
+			if e != nil {
+				t.Fatal("settled original receipt still blocked cancellation", e)
+			}
+			ea1CancelCommitted(t, runtime, before, out)
+		}
+	}
+	if phase == "P4" && wrapped.finishCommits == 1 {
+		if wrapped.markCalls != 0 || wrapped.finishCalls != 1 {
+			t.Fatal("retirement was not one transaction")
+		}
+		ea1AssertStartSettlementReceipt(t, physical, req, definition, before, withTool)
+		freshStore := reopen()
+		freshRT := ea1StartRuntime(t, freshStore)
+		ea1AssertFinishedOriginal(t, freshRT, wrapped.original, before)
+		fresh := makeRunner(freshRT, "fresh-recovery-owner")
+		if e := fresh.ReconcileRootPhysicalExecution(t.Context(), req.ID); e != nil {
+			t.Fatalf("final receipt recovery: %v", e)
+		}
+		ea1AssertFinishedOriginal(t, freshRT, wrapped.original, before)
+		if cancelBefore || operation == "resume" {
+			cancelSettled(freshRT)
+		}
+		return
+	}
 	grant, err := rt.LookupChildExecution(t.Context(), req.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if grant.ExecutionOwnerID != "original-start-owner" || grant.ExecutionLeaseID == "" || grant.ExecutionEpoch == 0 || grant.AdmissionOperation != "start" || len(grant.AdmissionSourceHash) != 64 || grant.ExpectedRevision != created.Run.Revision {
+	if grant.ExecutionOwnerID != owner || grant.ExecutionLeaseID == "" || grant.ExecutionEpoch == 0 || grant.AdmissionOperation != operation || len(grant.AdmissionSourceHash) != 64 || grant.ExpectedRevision != expectedRevision {
 		t.Fatal("original owned source binding missing")
 	}
-	if phase == "P4" && !unknownHost {
-		if wrapped.markCalls != 2 || wrapped.markCommits != 2 || wrapped.finishCalls != 1 {
-			t.Fatal("actual original Mark commit/ACK-loss not reached")
-		}
-	} else if !unknownHost && (wrapped.markCommits != 0 || wrapped.markCalls < 2) {
-		t.Fatal("P3 did not retain unmarked callback-return fact")
+	if wrapped.markCalls != 0 || wrapped.finishCommits != 0 || (!unknownHost && wrapped.finishCalls != 1) {
+		t.Fatal("wrong precommit Finish boundary")
 	}
 	completion := ea1AssertOriginalRootCompletion(t, rt, grant, before, !unknownHost, true)
 	ea1AssertStartSettlementReceipt(t, physical, req, definition, before, withTool)
+	wantCancel := kernel.ErrChildExecutionBusy
+	if before.Run.Status == kernel.RunStatusCompleted {
+		wantCancel = kernel.ErrTerminal
+	}
+	if cancelBefore {
+		ea1CancelRejected(t, rt, before, grant, wantCancel)
+	}
 	freshStore := reopen()
 	freshRT, e := kernel.New(kernel.Dependencies{Store: freshStore})
 	if e != nil {
@@ -255,11 +340,14 @@ func ea1RootStartSettlement(t *testing.T, factory func(*testing.T) (kernel.Store
 		t.Fatal("reopen lost original immutable scope")
 	}
 	assertUnchanged()
+	if cancelBefore {
+		ea1CancelRejected(t, freshRT, before, grant, wantCancel)
+	}
 	// Exact identity remains required even if the caller knows a real marker.
-	for _, mutate := range []func(*kernel.ChildExecutionGrant){func(g *kernel.ChildExecutionGrant) { g.ID += "-foreign" }, func(g *kernel.ChildExecutionGrant) { g.ExecutionEpoch++ }, func(g *kernel.ChildExecutionGrant) { g.AdmissionOperation = "resume" }, func(g *kernel.ChildExecutionGrant) { g.AdmissionSourceHash = strings.Repeat("0", 64) }} {
+	for _, mutate := range []func(*kernel.ChildExecutionGrant){func(g *kernel.ChildExecutionGrant) { g.ID += "-foreign" }, func(g *kernel.ChildExecutionGrant) { g.ExecutionEpoch++ }, func(g *kernel.ChildExecutionGrant) { g.AdmissionOperation = otherOperation }, func(g *kernel.ChildExecutionGrant) { g.AdmissionSourceHash = strings.Repeat("0", 64) }} {
 		wrong := grant
 		mutate(&wrong)
-		if e = freshStore.(kernel.ChildExecutionStore).FinishChildExecution(t.Context(), wrong); !errors.Is(e, kernel.ErrExecutionConflict) {
+		if e = freshStore.(kernel.ChildExecutionStore).FinishChildExecution(t.Context(), wrong, kernel.ChildExecutionSettlement{}); !errors.Is(e, kernel.ErrExecutionConflict) {
 			t.Fatalf("foreign authority retired original: %v", e)
 		}
 		same, e := freshRT.LookupChildExecution(t.Context(), req.ID)
@@ -269,7 +357,7 @@ func ea1RootStartSettlement(t *testing.T, factory func(*testing.T) (kernel.Store
 		assertUnchanged()
 	}
 	if phase == "P3" {
-		if e = freshStore.(kernel.ChildExecutionStore).FinishChildExecution(t.Context(), grant); !errors.Is(e, kernel.ErrExecutionConflict) {
+		if e = freshStore.(kernel.ChildExecutionStore).FinishChildExecution(t.Context(), grant, kernel.ChildExecutionSettlement{}); !errors.Is(e, kernel.ErrExecutionConflict) {
 			t.Fatalf("receipt alone retired unmarked scope: %v", e)
 		}
 		assertUnchanged()
@@ -296,10 +384,13 @@ func ea1RootStartSettlement(t *testing.T, factory func(*testing.T) (kernel.Store
 	if _, e = freshRT.LookupChildExecution(t.Context(), req.ID); !errors.Is(e, kernel.ErrNotFound) {
 		t.Fatalf("scope not retired: %v", e)
 	}
-	if e = fresh.ReconcileRootPhysicalExecution(t.Context(), req.ID); !errors.Is(e, kernel.ErrNotFound) {
+	if e = fresh.ReconcileRootPhysicalExecution(t.Context(), req.ID); e != nil {
 		t.Fatalf("duplicate reconciliation invented work: %v", e)
 	}
 	assertUnchanged()
+	if cancelBefore {
+		cancelSettled(freshRT)
+	}
 }
 func ea1AssertStartSettlementReceipt(t *testing.T, p *ea1StartSettlementPhysical, req agent.StartRequest, definition tools.Definition, s kernel.Snapshot, withTool bool) {
 	t.Helper()
@@ -316,19 +407,25 @@ func ea1AssertStartSettlementReceipt(t *testing.T, p *ea1StartSettlementPhysical
 	if e != nil || inv.RequestHash != digest || !reflect.DeepEqual(inv.Request, actual) || actual.RunID != req.ID || actual.Model != req.Model || !reflect.DeepEqual(actual.ModelOptions, req.ModelOptions) || inv.ID != actual.InvocationID || inv.Provider != p.ProviderName() || inv.BindingFingerprint != strings.Repeat("b", 64) || inv.SourceRevision == 0 || inv.ExecutionAttempt != 1 || inv.DispatchAttempt != 1 {
 		t.Fatal("full original Model request/hash/provider/attempt mismatch")
 	}
+	var frozen struct {
+		OriginFingerprint string `json:"originFingerprint"`
+	}
+	if req.ParentRunID != "" && (json.Unmarshal(s.State, &frozen) != nil || frozen.OriginFingerprint != req.OriginFingerprint || frozen.OriginFingerprint == "") {
+		t.Fatal("original frozen child origin lost")
+	}
 	view, e := agent.ViewState(s)
 	if e != nil || len(view.ModelInvocations) != 1 {
 		t.Fatalf("persisted receipt missing: %v", e)
 	}
 	settled := view.ModelInvocations[0]
-	if settled.ID != inv.ID || settled.RequestHash != inv.RequestHash || settled.Provider != inv.Provider || settled.BindingFingerprint != inv.BindingFingerprint || settled.ExecutionAttempt != 1 || settled.DispatchAttempt != 1 || settled.Status != agent.ModelInvocationConsumed || settled.ProviderResponseID != "original-response" || settled.CompletedAt == nil || settled.ConsumedAt == nil || settled.Usage == nil || settled.Usage.InputTokens != 7 || settled.Usage.OutputTokens != 3 {
+	if settled.ID != inv.ID || settled.SourceRevision != inv.SourceRevision || settled.RequestHash != inv.RequestHash || settled.Provider != inv.Provider || settled.BindingFingerprint != inv.BindingFingerprint || settled.ExecutionAttempt != 1 || settled.DispatchAttempt != 1 || settled.Status != agent.ModelInvocationConsumed || settled.ProviderResponseID != "original-response" || settled.CompletedAt == nil || settled.ConsumedAt == nil || settled.Usage == nil || settled.Usage.InputTokens != 7 || settled.Usage.OutputTokens != 3 {
 		t.Fatal("consumed receipt not original physical result")
 	}
 	// Compare the whole provider response, including optional fields and raw JSON,
 	// through its persisted JSON representation rather than only receipt metadata.
 	ea1StartSettlementJSONEqual(t, "durable Model response", settled.Response, p.responses[0])
-	if s.Run.ID != req.ID || s.Run.ParentRunID != "" || s.Run.Actor != req.Actor || s.Run.Thread != req.Thread || s.Run.RequestID != req.RequestID || s.Run.Goal != req.Goal || !reflect.DeepEqual(view.Budget.Limits, req.Limits) {
-		t.Fatal("frozen Root source/budget changed")
+	if s.Run.ID != req.ID || s.Run.ParentRunID != req.ParentRunID || s.Run.Actor != req.Actor || s.Run.Thread != req.Thread || s.Run.RequestID != req.RequestID || s.Run.Goal != req.Goal || !reflect.DeepEqual(view.Budget.Limits, req.Limits) {
+		t.Fatal("frozen Agent source/budget changed")
 	}
 	if withTool {
 		if s.Run.Status != kernel.RunStatusCompleted || len(p.toolInvocations) != 1 || len(p.toolRequests) != 1 || len(p.receipts) != 1 {
@@ -344,7 +441,7 @@ func ea1AssertStartSettlementReceipt(t *testing.T, p *ea1StartSettlementPhysical
 		want := tools.ExecutionRequest{RunID: req.ID, Call: tools.Call{ID: "original-call", ToolKey: "effect", Arguments: json.RawMessage(`{"source":"original"}`)}}
 		// Agent binds the public Call.Name from the original catalog definition.
 		want.Call.Name = definition.Name
-		if !reflect.DeepEqual(tr, want) || !reflect.DeepEqual(ti.Request, tr) || !reflect.DeepEqual(ti.Definition, definition) || ti.Run.Actor != req.Actor || ti.Run.Thread != req.Thread || receipt.Receipt.ExecutionID != tr.Call.ID || receipt.Receipt.Disposition != "committed" || string(receipt.Content) != `{"committed":"original"}` || view.Budget.Usage.ToolCalls != 1 {
+		if !reflect.DeepEqual(tr, want) || !reflect.DeepEqual(ti.Request, tr) || !reflect.DeepEqual(ti.Definition, definition) || ti.Run.Actor != req.Actor || ti.Run.Thread != req.Thread || ti.Run.ParentRunID != req.ParentRunID || receipt.Receipt.ExecutionID != tr.Call.ID || receipt.Receipt.Disposition != "committed" || string(receipt.Content) != `{"committed":"original"}` || view.Budget.Usage.ToolCalls != 1 {
 			t.Fatal("full Tool definition/request/receipt source mismatch")
 		}
 	} else if len(p.toolRequests) != 0 || s.Run.Status != kernel.RunStatusRunning || view.Budget.Usage.ToolCalls != 0 {

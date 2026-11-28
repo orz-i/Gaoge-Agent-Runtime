@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget/sqlledger"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
@@ -241,14 +242,15 @@ func (s *Store) Create(ctx context.Context, record kernel.Record, drafts []kerne
 		return kernel.Snapshot{}, conflictOrDatabaseError(err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err = sqliteReserveRunIdentity(ctx, tx, record.Run.ID); err != nil {
+		return kernel.Snapshot{}, err
+	}
 	reservedEpoch := 0
 	if record.ExecutionRequired {
 		reservedEpoch = 1
 	}
-	if record.Run.ParentRunID != "" {
-		if _, err = sqliteLiveChildAncestors(ctx, tx, record.Run); err != nil {
-			return kernel.Snapshot{}, err
-		}
+	if _, err = sqliteValidateLiveRunOwners(ctx, tx, record.Run); err != nil {
+		return kernel.Snapshot{}, err
 	}
 	_, err = tx.ExecContext(ctx,
 		`INSERT INTO runtime_runs(run_id,scope_id,kind,status,revision,run_json,state_json,checkpoint_json,result_json,event_head,execution_epoch)
@@ -260,6 +262,12 @@ func (s *Store) Create(ctx context.Context, record kernel.Record, drafts []kerne
 			return kernel.Snapshot{}, fmt.Errorf("%w: %w", kernel.ErrAlreadyExists, err)
 		}
 		return kernel.Snapshot{}, conflictOrDatabaseError(err)
+	}
+	if e := sqliteValidateCreationRetry(ctx, tx, record.BudgetEnrollment); e != nil {
+		return kernel.Snapshot{}, e
+	}
+	if e := kernel.EnrollRunBudget(ctx, sqlledger.Store{DB: tx}, record); e != nil {
+		return kernel.Snapshot{}, conflictOrDatabaseError(e)
 	}
 	if err = writeEvents(ctx, tx, record.Run.ID, 0, record.Run.UpdatedAt, drafts); err != nil {
 		return kernel.Snapshot{}, err
@@ -332,14 +340,24 @@ func (s *Store) applyWithAuthority(ctx context.Context, lease *kernel.ExecutionL
 		return kernel.Snapshot{}, conflictOrDatabaseError(err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if mutation.Ledger != nil {
+		if lease == nil && guard == nil && recovery == nil && (mutation.Record.Run.ParentRunID == "" || !mutation.PhysicalPermit.IsPresent()) {
+			return kernel.Snapshot{}, kernel.ErrExecutionRequired
+		}
+	}
 	// Read under the same writer transaction, never trust preflight parent
 	// status or a matching revision observed before the writer lock.
 	current, readErr := loadTx(ctx, tx, runID)
 	if readErr != nil {
 		return kernel.Snapshot{}, readErr
 	}
-	if _, err = sqliteSettleRetirementSuccessor(ctx, tx, runID); err != nil {
-		return kernel.Snapshot{}, err
+	accounting := sqlledger.Store{DB: tx}
+	ledger, e := kernel.PlanRunBudgetMutation(ctx, accounting, current.Run, mutation, guard != nil)
+	if e != nil {
+		return kernel.Snapshot{}, conflictOrDatabaseError(e)
+	}
+	if e = accounting.Apply(ctx, runID, ledger); e != nil {
+		return kernel.Snapshot{}, conflictOrDatabaseError(e)
 	}
 	// Read native authority in this same writer transaction before physical
 	// fence precedence; control and opaque recovery have distinct authority.
@@ -352,7 +370,7 @@ func (s *Store) applyWithAuthority(ctx context.Context, lease *kernel.ExecutionL
 			return kernel.Snapshot{}, kernel.ErrExecutionRequired
 		}
 	}
-	if e := sqliteManagedGate(ctx, tx, runID); e != nil {
+	if e := sqliteNativeEntryGate(ctx, tx, runID); e != nil {
 		return kernel.Snapshot{}, e
 	}
 	// Only ordinary leased writes use this gate. Trusted approval and opaque
@@ -385,8 +403,8 @@ func (s *Store) applyWithAuthority(ctx context.Context, lease *kernel.ExecutionL
 	if current.Run.ParentRunID != mutation.Record.Run.ParentRunID {
 		return kernel.Snapshot{}, kernel.ErrExecutionConflict
 	}
-	if guard != nil && guard.Kind == kernel.ControlApproval && current.Run.ParentRunID != "" {
-		if _, err := sqliteLiveChildAncestors(ctx, tx, current.Run); err != nil {
+	if ((guard != nil && guard.Kind == kernel.ControlApproval) || (guard == nil && recovery == nil && mutation.Ledger != nil)) && current.Run.ParentRunID != "" {
+		if _, err := sqliteValidateLiveRunOwners(ctx, tx, current.Run); err != nil {
 			return kernel.Snapshot{}, err
 		}
 	}

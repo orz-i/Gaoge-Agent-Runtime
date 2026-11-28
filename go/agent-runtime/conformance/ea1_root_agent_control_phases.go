@@ -327,7 +327,7 @@ func ea1ApprovalPreflight(t *testing.T, factory func(*testing.T) (kernel.Store, 
 		}
 	}
 }
-func ea1ControlFence(t *testing.T, f *ea1ControlFixture, before kernel.Snapshot, g kernel.ChildExecutionGrant, lease kernel.ExecutionLease) {
+func ea1ControlFence(t *testing.T, f *ea1ControlFixture, before kernel.Snapshot, g kernel.ChildExecutionGrant, lease kernel.ExecutionLease, entered bool) {
 	t.Helper()
 	unchanged := func() {
 		ea1CompBarrierUnchanged(t, f.observer, before)
@@ -347,7 +347,9 @@ func ea1ControlFence(t *testing.T, f *ea1ControlFixture, before kernel.Snapshot,
 	}
 	_, e = bound.Apply(t.Context(), before.Run.ID, before.Run.Revision, kernel.Mutation{Status: kernel.RunStatusRunning, State: before.State, Checkpoint: before.Checkpoint})
 	want := kernel.ErrChildExecutionBusy
-	if before.Run.Status == kernel.RunStatusWaitingInput {
+	if !entered {
+		want = kernel.ErrExecutionConflict
+	} else if before.Run.Status == kernel.RunStatusWaitingInput {
 		want = kernel.ErrExecutionRequired
 	}
 	if !errors.Is(e, want) {
@@ -370,7 +372,11 @@ func ea1ControlFence(t *testing.T, f *ea1ControlFixture, before kernel.Snapshot,
 	}
 	unchanged()
 	e = f.peer.(kernel.ExecutionStore).CheckExecution(t.Context(), before.Run.ID, &lease)
-	if before.Run.Status == kernel.RunStatusWaitingInput {
+	if !entered {
+		if !errors.Is(e, kernel.ErrExecutionConflict) || !errors.Is(e, kernel.ErrChildExecutionBusy) {
+			t.Fatalf("control changed pending entry: %v", e)
+		}
+	} else if before.Run.Status == kernel.RunStatusWaitingInput {
 		if !errors.Is(e, kernel.ErrExecutionRequired) {
 			t.Fatalf("waiting state allowed dispatch: %v", e)
 		}
@@ -383,7 +389,7 @@ func ea1ApprovalBarrier(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 	r := f.runner(f.rt, true, true)
 	checks := 0
 	var original kernel.ChildExecutionGrant
-	check := func() {
+	check := func(entered bool) {
 		checks++
 		g, e := f.observer.LookupChildExecution(t.Context(), f.request.ID)
 		if e != nil {
@@ -398,7 +404,7 @@ func ea1ApprovalBarrier(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 		} else if original != g {
 			t.Fatal("approval changed admitted scope")
 		}
-		ea1ControlFence(t, f, f.waiting, g, l)
+		ea1ControlFence(t, f, f.waiting, g, l, entered)
 		if _, e = f.observer.LookupOwnedPhysicalCallbackReturn(t.Context(), g); !errors.Is(e, kernel.ErrNotFound) {
 			t.Fatal("active approval fabricated callback return")
 		}
@@ -411,10 +417,10 @@ func ea1ApprovalBarrier(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 		if f.host.calls != 0 || f.approval.calls != 0 {
 			t.Fatal("post-admission cut too late")
 		}
-		check()
+		check(false)
 		return nil
 	}
-	f.approval.before = check
+	f.approval.before = func() { check(true) }
 	out, e := r.ResolveApproval(t.Context(), f.request.ID, f.waiting.Run.Revision, plugin.ApprovalResponse{Decision: plugin.ApprovalApprove})
 	if e != nil || checks != 2 || f.host.calls != 1 || f.approval.calls != 1 || out.Run.Status != kernel.RunStatusRunning {
 		t.Fatalf("same original approval could not finish after rejected controls: %v", e)
@@ -588,7 +594,7 @@ func ea1ToolWaitPhase(t *testing.T, factory func(*testing.T) (kernel.Store, kern
 		if sameWait.Generation != wait.Generation || sameWait.SignalID != "original-ready" {
 			t.Fatal("ready signal changed original generation")
 		}
-		f.verify = func() { ea1ControlFence(t, f, before, g, l) }
+		f.verify = func() { ea1ControlFence(t, f, before, g, l, true) }
 		_, e = r.ResumeToolWait(t.Context(), f.request.ID, before.Run.Revision, wait.Generation)
 		if !errors.Is(e, agent.ErrToolOutcomeUnknown) || f.lookups != 1 {
 			t.Fatalf("actual ToolWait verifier boundary missing: %v", e)

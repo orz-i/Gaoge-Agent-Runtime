@@ -65,9 +65,17 @@ func TestUnstartedRetryRejectsMissingFrozenIntermediateHandoff(t *testing.T) {
 	intent := Item{ID: "intent", TurnID: old.TurnID, RunID: current.ExecutionRefID, Kind: ItemDiagnostic, Status: ItemStarted,
 		Seq: 5, ParentItemID: CancellationFenceParentItemID,
 		Payload: json.RawMessage("{\"boundary\":\"cancel_scope_pending\",\"runID\":\"new-root-run\"}")}
-	evidence := append(facts, intent)
+	previous := old
+	previous.Status = InvocationCancelled
+	transition, err := RootRetryTransitionFact(previous, current.ExecutionRefID, child.CreatedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transition.Seq = 5
+	intent.Seq = 6
+	evidence := append(facts, transition, intent)
 	turn := Turn{ID: old.TurnID, Status: TurnRunning}
-	t.Logf("isHandoff=%t rootbind=%t terminal=%t effectFence=%v history=%t", isHandoffDelegationInvocation(child), historicalRetryRootBound(current, func() childRootBinding { b, _ := frozenChildRoot(child); return b }(), &l), VerifiedTerminalHandoffChild(old, child, facts), RetryChildEffectFence([]Invocation{child}, evidence, current), validUnstartedRetryHistoricalChildren(current, []Invocation{child}, evidence, &l))
+	t.Logf("isHandoff=%t rootbind=%t terminal=%t effectFence=%v history=%t", isHandoffDelegationInvocation(child), historicalRetryRootBound(current, func() childRootBinding { b, _ := frozenChildRoot(child); return b }(), &l, evidence), VerifiedTerminalHandoffChild(old, child, facts), RetryChildEffectFence([]Invocation{child}, evidence, current), validUnstartedRetryHistoricalChildren(current, []Invocation{child}, evidence, &l))
 	result := ValidUndispatchedRootCancellationEvidence(current, turn, evidence, true, &l, []Invocation{child})
 	t.Logf("original terminal Turn ancestry guard=false; new unstarted cancellation guard=%t despite missing nested parent Invocation", result)
 	if result {
@@ -108,7 +116,15 @@ func TestUnstartedRetryRejectsCorruptHandoffClassification(t *testing.T) {
 		Payload: json.RawMessage("{\"boundary\":\"cancel_scope_pending\",\"runID\":\"next-root-run\"}")}
 	// The Handoff start/terminal items have been corrupted or lost, but an
 	// externally dispatched Handoff child still has a settled physical grant.
-	evidence := append(append([]Item(nil), facts[2:]...), intent)
+	previous := old
+	previous.Status = InvocationCancelled
+	transition, err := RootRetryTransitionFact(previous, current.ExecutionRefID, child.CreatedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transition.Seq = 5
+	intent.Seq = 6
+	evidence := append(append([]Item(nil), facts[2:]...), transition, intent)
 	if PendingExecutionDispatch(evidence, "") {
 		t.Fatal("physical grant fixture must be settled")
 	}

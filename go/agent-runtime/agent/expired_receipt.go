@@ -12,14 +12,14 @@ import (
 // authorization, projection and completion obligations. An arbitrary Host
 // layer cannot be skipped (its policy is unknown) or entered after expiry.
 func supportsReceiptOnlyRunChain(d Dependencies) bool {
-	var runBudget *BoundedBudgetAdapter
+	runBudget := d.BoundedBudget
 	for _, layer := range d.RunMiddleware {
 		switch a := layer.(type) {
 		case *BoundedBudgetAdapter:
 			runBudget = a
-		case *BoundedContextAdapter, *runInputBoundary:
-			// Bounded hydration and the input scope are native, explicitly
-			// selected operations, not an arbitrary effect-capable RunNext.
+		case *BoundedContextAdapter:
+			// Bounded hydration is native, not an arbitrary RunNext.
+			// Input reads are separate and excluded by the persisted binding.
 		default:
 			return false
 		}

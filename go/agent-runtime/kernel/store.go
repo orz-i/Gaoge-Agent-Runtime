@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"time"
+
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 )
 
 var (
@@ -23,6 +25,7 @@ type Record struct {
 	// Existing/legacy Runs keep Epoch 0 and cannot switch modes implicitly.
 	// This flag is NOT another persisted status or mutable Run field.
 	ExecutionRequired bool
+	BudgetEnrollment  *budget.RunEnrollment // creation-only, never a mutable binding
 	Run               Run
 	State             json.RawMessage
 	Checkpoint        *Checkpoint
@@ -49,6 +52,9 @@ func NeedsTransitionProjection(status RunStatus, events []EventDraft) bool {
 type StoreMutation struct {
 	Record Record
 	Events []EventDraft
+	// Ledger is the original accounting CAS, committed or rolled back with the Run.
+	// Only the existing fenced execution/control write paths may accept it.
+	Ledger *budget.LedgerMutation
 	// PhysicalPermit proves an Agent's original active execution
 	// segment for precisely the current Run state/revision. Only a first-party
 	// Kernel scoped Runtime can populate this nonforgeable field.
@@ -123,6 +129,8 @@ type EventJournal interface {
 // transaction boundary; projector claim/ack is deliberately separate.
 type Store interface {
 	Create(context.Context, Record, []EventDraft) (Snapshot, error)
+	DecideBeforeCreate(context.Context, RunCreationDecision) (RunCreationDecision, error)
+	LoadCreationDecision(context.Context, string) (RunCreationDecision, error)
 	Load(context.Context, string) (Snapshot, error)
 	Apply(context.Context, string, uint64, StoreMutation) (Snapshot, error)
 	EventJournal

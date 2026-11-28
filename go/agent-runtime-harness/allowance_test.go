@@ -39,7 +39,8 @@ func TestHarnessProjectsBudgetPauseAndGrantsOwnerBoundDirectRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := harness.NewMemoryStore()
-	host, err := harness.NewRunner(harness.Dependencies{Runtime: runtime, Agent: direct, Store: store, Clock: fixedClock{}})
+	handler := &recordingInteractionResponseHandler{}
+	host, err := harness.NewRunner(harness.Dependencies{Runtime: runtime, Agent: direct, Store: store, Clock: fixedClock{}, Interactions: handler})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,6 +68,14 @@ func TestHarnessProjectsBudgetPauseAndGrantsOwnerBoundDirectRun(t *testing.T) {
 	if err != nil || granted.Turn.Status != harness.TurnRunning || len(granted.Invocations) != 1 ||
 		granted.Invocations[0].Attempt != 1 || granted.Invocations[0].ExecutionRefID != run.Run.ID {
 		t.Fatalf("granted Turn=%#v Invocations=%#v err=%v", granted.Turn, granted.Invocations, err)
+	}
+	for _, item := range granted.Items {
+		if phase, ok := harness.VerifiedExecutionDispatchGrant(item); ok && phase == "grant-call-allowance" {
+			t.Fatal("successful native allowance elected Host dispatch")
+		}
+	}
+	if handler.calls != 0 || handler.validationCalls != 0 {
+		t.Fatal("native allowance entered unrelated handler")
 	}
 	if _, err = host.GrantCallAllowance(t.Context(), paused.Turn.ID, paused.Turn.Revision, agent.CallAllowance{LLMCalls: 1}); !errors.Is(err, harness.ErrConflict) {
 		t.Fatalf("duplicate grant admitted: %v", err)

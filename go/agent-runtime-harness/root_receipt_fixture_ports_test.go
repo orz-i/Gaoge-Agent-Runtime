@@ -46,11 +46,11 @@ func (s *receiptFaultStore) LookupChildExecution(ctx context.Context, id string)
 func (s *receiptFaultStore) MarkChildExecutionSettled(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
 	return s.Store.(kernel.ChildExecutionStore).MarkChildExecutionSettled(ctx, g, p)
 }
-func (s *receiptFaultStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant) error {
-	return s.Store.(kernel.ChildExecutionStore).FinishChildExecution(ctx, g)
+func (s *receiptFaultStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
+	return s.Store.(kernel.ChildExecutionStore).FinishChildExecution(ctx, g, p)
 }
-func (s *receiptFaultStore) BeginOwnedPhysicalExecution(ctx context.Context, g kernel.ChildExecutionGrant, l kernel.ExecutionLease, p kernel.OwnedPhysicalAdmission) error {
-	return s.Store.(kernel.OwnedPhysicalExecutionStore).BeginOwnedPhysicalExecution(ctx, g, l, p)
+func (s *receiptFaultStore) BeginOwnedPhysicalExecution(ctx context.Context, p kernel.OwnedPhysicalAdmission) (kernel.OwnedPhysicalAdmissionResult, error) {
+	return s.Store.(kernel.OwnedPhysicalExecutionStore).BeginOwnedPhysicalExecution(ctx, p)
 }
 func (s *receiptFaultStore) CheckOwnedPhysicalEntry(ctx context.Context, g kernel.ChildExecutionGrant, l kernel.ExecutionLease, source kernel.Snapshot) (kernel.OwnedPhysicalEntryWindow, error) {
 	return s.Store.(kernel.OwnedPhysicalExecutionStore).CheckOwnedPhysicalEntry(ctx, g, l, source)
@@ -88,9 +88,6 @@ func (s *receiptFaultStore) RepairExecutionQuarantine(ctx context.Context, q ker
 // Preserve the backend's atomic retirement authority through this fault decorator.
 func (s *receiptFaultStore) LoadOwnedRetirement(ctx context.Context, id string) (kernel.OwnedRetirementReceipt, error) {
 	return s.Store.(kernel.OwnedRetirementStore).LoadOwnedRetirement(ctx, id)
-}
-func (s *receiptFaultStore) AcknowledgeOwnedRetirement(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.OwnedRetirementAcknowledgement) (kernel.OwnedRetirementAckResult, error) {
-	return s.Store.(kernel.OwnedRetirementStore).AcknowledgeOwnedRetirement(ctx, g, p)
 }
 
 func (s *receiptFaultStore) LookupOwnedRetirementForRun(ctx context.Context, id string) (kernel.OwnedRetirementReceipt, error) {

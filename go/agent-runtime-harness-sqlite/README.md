@@ -1,9 +1,9 @@
 # Harness SQLite Store
 
-The desktop adapter implements `harness.Store`, the Turn budget ledger and the
-managed recovery Host Store. It uses modernc SQLite with a private on-disk file
-and runs with `CGO_ENABLED=0`. Timeline, Handoff and cancellation facts use the
-same ownership and receipt checks as the relational PostgreSQL adapter.
+The desktop adapter implements `harness.Store` and the managed recovery Host
+Store for product projections and independently fenced Host effects. It uses
+modernc SQLite with a private on-disk file and `CGO_ENABLED=0`. Timeline,
+Handoff and cancellation share the relational PostgreSQL receipt checks.
 
 ## Create and reopen a profile
 
@@ -27,20 +27,19 @@ runner, err := harness.NewRunner(harness.Dependencies{
 })
 ```
 
-The Host supplies its configured Kernel and Agent to this constructor. If a
-SharedBudget is authorized, the Host provides a single `BudgetAuthority` and
-uses its native `Adapter()` for Run/Model/Tool execution. The Kernel file owns the
-physical Run and executor authority. The Harness file owns the Session, Turn,
-Invocation, original dispatch, response receipts and budget reservations.
+For SharedBudget, pass the exact Kernel Runtime to `BudgetAuthority` and select
+its native `Adapter()` once. The Kernel file owns first-party execution and
+budget reservations; their Run/Model/Tool changes commit together. The Harness
+file owns Session/Turn/Invocation and budget projections plus dispatch/return
+evidence for independently fenced Host effects.
 
 ## Persistence and recovery
 
-Schema v3 uses application ID `GAHS`. The new pre-stable Harness Store
+Schema v4 uses application ID `GAHS`. The new pre-stable Harness Store
 Checkpoint payload is `checkpoint-opaque-v1`, preserving original Tool-call
 arguments and Provider Replay bytes across close/reopen and duplicate writes.
 It cannot interpret older Checkpoint payloads; start with a fresh profile and
-do not mix writers from different beta.24 source revisions. The SQL table and
-index definitions remain unchanged. Creation initializes and checkpoints a
+do not mix writers from different beta.24 source revisions. Schema v4 removes the retired Host reservation table and its indexes. Creation initializes and checkpoints a
 temporary database before atomically publishing it without overwrite. Reopen
 checks the application ID, version, WAL mode, exact table and index definitions,
 and the original managed recovery authority. A missing or damaged profile
@@ -55,9 +54,9 @@ Retry the original operation with its original identity and expected revision.
 Resume the original Turn after a process exits. A committed dispatch return
 can finish projection. An outstanding external call stays pending until the
 Runtime receives its original evidence. The two databases commit independently.
-The current pre-stable Schema v3 deletes obsolete `execution_class`,
+Schema v3 deleted obsolete `execution_class`,
 `capability_key` and `definition_version` columns from Agent Invocations.
-Older Harness SQLite v1/v2 files are rejected on reopen;
+Schema v4 also removes the retired Host reservation table. Older Harness SQLite v1–v3 files are rejected on reopen;
 there is no implicit migration or fallback to the legacy execution interpreter.
 For a consistent backup of a desktop profile, stop its executors, close both
 Stores, and retain both databases together.

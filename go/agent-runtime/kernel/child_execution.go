@@ -30,27 +30,11 @@ type ChildExecutionGrant struct {
 	AdmissionOperation  string
 }
 
-// ChildExecutionSettlement is the opaque first-party Agent physical
-// callback completion permit. Only the internal Feature control
-// boundary can populate it. Store adapters MUST validate Matches against the
-// authoritative child Snapshot INSIDE the SAME transaction as setting the
-// durable settlement revision; a direct Store call with a zero/forged permit
-// can never release an unsettled Grant.
+// ChildExecutionSettlement is the opaque first-party physical-return
+// qualification. Store adapters validate it under the Run transaction;
+// a visible Grant ID or a clean Run cannot manufacture this permit.
 type ChildExecutionSettlement struct {
-	proof     *featurecontrol.Proof
-	execution *ExecutionLease
-	recovery  bool
-}
-
-// IsRecovery identifies a sealed first-party receipt-only settlement.
-func (s ChildExecutionSettlement) IsRecovery() bool { return s.recovery }
-
-// ExecutionLease returns an isolated original bearer, never new authority.
-func (s ChildExecutionSettlement) ExecutionLease() (ExecutionLease, bool) {
-	if s.execution == nil {
-		return ExecutionLease{}, false
-	}
-	return *s.execution, true
+	proof *featurecontrol.Proof
 }
 
 func (settlement ChildExecutionSettlement) Matches(grant ChildExecutionGrant, snapshot Snapshot) bool {
@@ -59,6 +43,7 @@ func (settlement ChildExecutionSettlement) Matches(grant ChildExecutionGrant, sn
 		return false
 	}
 	var proofKind string
+	var extra any = snapshot.Checkpoint
 	switch snapshot.Run.Kind {
 	case "agent":
 		proofKind = "agent_child_physical_settled"
@@ -70,12 +55,10 @@ func (settlement ChildExecutionSettlement) Matches(grant ChildExecutionGrant, sn
 			return false
 		}
 		proofKind = "agent_owned_physical_settled"
-		if settlement.recovery {
-			proofKind = "agent_owned_physical_recovered"
-		}
+		extra = snapshot
 	}
 	return settlement.proof.Matches(grant.ChildRunID, snapshot.Run.Revision,
-		proofKind, grant.ID, snapshot.State, snapshot.Checkpoint)
+		proofKind, grant.ID, snapshot.State, extra)
 }
 
 // PhysicalApplyPermit is an opaque per-Run write proof for a Root or child
@@ -177,15 +160,22 @@ func (runtime *Runtime) WithPhysicalGrant(ctx context.Context, grant ChildExecut
 // writes/terminal Control on the executing Run ITSELF and every immutable
 // ancestor in the SAME Store transaction; a read-then-check fallback is
 // insufficient.
+// The Mark port records only borrowed parent-bound callback returns.
+// Finish validates the private settlement permit for both grant kinds.
 // Finish may retire a Grant only after the owning Feature has certified the
-// physical execution returned with no unresolved effects. ErrChildExecutionBusy
+// physical execution returned with no unresolved effects. For an owned Grant,
+// the exact sealed settlement and durable original callback return are validated
+// and Finish commits the final retirement receipt, any Managed closure, exact
+// Grant deletion and release of its own Lease in one transaction; a borrowed
+// Lease is preserved. There is no subsequent retirement ACK mutation.
+// ErrChildExecutionBusy
 // from a parent ApplyControl MUST be an atomic, no-mutation rejection; the
 // Kernel can mint a private control no-effect proof only under this contract.
 type ChildExecutionStore interface {
 	BeginChildExecution(context.Context, ChildExecutionGrant) error
 	LookupChildExecution(context.Context, string) (ChildExecutionGrant, error)
 	MarkChildExecutionSettled(context.Context, ChildExecutionGrant, ChildExecutionSettlement) error
-	FinishChildExecution(context.Context, ChildExecutionGrant) error
+	FinishChildExecution(context.Context, ChildExecutionGrant, ChildExecutionSettlement) error
 }
 
 func (runtime *Runtime) SupportsChildExecution() bool {
@@ -218,28 +208,11 @@ func (runtime *Runtime) BeginChildExecution(ctx context.Context, childRunID stri
 	return grant, nil
 }
 
-// MarkChildExecutionSettled is issued only AFTER the entire original physical
-// callback has returned. The Agent supplies a private Feature proof bound to
-// the persisted child state and revision; the Store then persists that
-// revision against the original Grant. A crashed worker cannot mint this
-// marker merely because an unreturned callback has not yet staged a Tool ID.
+// MarkChildExecutionSettled is the original returned-callback witness for
+// a parent-bound borrowed Grant only. Owned Grants already have a durable
+// callback-return fact and retire directly with Finish.
 func (runtime *Runtime) MarkChildExecutionSettled(ctx context.Context, grant ChildExecutionGrant, proof *featurecontrol.Proof) error {
-	if runtime == nil || ctx == nil || grant.ID == "" || grant.ChildRunID == "" || grant.ExpectedRevision == 0 {
-		return ErrInvalidInput
-	}
-	store, ok := runtime.store.(ChildExecutionStore)
-	if !ok {
-		return ErrExecutionRequired
-	}
-	snapshot, err := runtime.Load(ctx, grant.ChildRunID)
-	if err != nil {
-		return err
-	}
-	permit := ChildExecutionSettlement{proof: proof, execution: runtime.execution}
-	if !permit.Matches(grant, snapshot) {
-		return ErrExecutionConflict
-	}
-	return store.MarkChildExecutionSettled(ctx, grant, permit)
+	return runtime.settleChildExecution(ctx, grant, proof, true)
 }
 
 // FinishChildExecution releases only its exact original Grant. A timed-out
@@ -247,6 +220,13 @@ func (runtime *Runtime) MarkChildExecutionSettled(ctx context.Context, grant Chi
 // not authorize Finish; the persisted Grant deliberately blocks terminal
 // parent state until its outcome has been reconciled.
 func (runtime *Runtime) FinishChildExecution(ctx context.Context, grant ChildExecutionGrant, proof *featurecontrol.Proof) error {
+	return runtime.settleChildExecution(ctx, grant, proof, false)
+}
+
+func (runtime *Runtime) settleChildExecution(ctx context.Context, grant ChildExecutionGrant, proof *featurecontrol.Proof, markOnly bool) error {
+	if markOnly && grant.IsOwned() {
+		return ErrExecutionConflict
+	}
 	if runtime == nil || ctx == nil || grant.ID == "" || grant.ChildRunID == "" || grant.ExpectedRevision == 0 {
 		return ErrInvalidInput
 	}
@@ -254,22 +234,18 @@ func (runtime *Runtime) FinishChildExecution(ctx context.Context, grant ChildExe
 	if !ok {
 		return ErrExecutionRequired
 	}
-	// A public Lookup reveals the original Grant, not permission to retire
-	// an uncertain physical callback. The Store also MUST require a previously
-	// committed, exact-revision settlement marker, minted after callback return.
 	snapshot, err := runtime.Load(ctx, grant.ChildRunID)
 	if err != nil {
 		return err
 	}
-	// Agent child settlement uses the original sealed physical proof.
-	permit := ChildExecutionSettlement{proof: proof, execution: runtime.execution}
+	permit := ChildExecutionSettlement{proof: proof}
 	if !permit.Matches(grant, snapshot) {
-		permit.recovery = true
-		if !grant.IsOwned() || !permit.Matches(grant, snapshot) {
-			return ErrExecutionConflict
-		}
+		return ErrExecutionConflict
 	}
-	return store.FinishChildExecution(ctx, grant)
+	if markOnly {
+		return store.MarkChildExecutionSettled(ctx, grant, permit)
+	}
+	return store.FinishChildExecution(ctx, grant, permit)
 }
 
 // LookupChildExecution returns the exact original Store-backed unresolved

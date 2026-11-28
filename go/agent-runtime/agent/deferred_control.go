@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
@@ -14,6 +15,13 @@ import (
 // Kernel separately proves that no such callback has ever been dispatched.
 // This does not grant custody after any physical callback starts.
 func trustedDeferredPreparationStack(d Dependencies) bool {
+	return d.Inputs == nil && nativeRunLayers(d)
+}
+
+// Input is an explicit stage, not Run middleware. The candidate Run stack
+// may be native even when an input source is configured; an executing frame
+// that actually reads that Host source cannot claim scoped control custody.
+func nativeRunLayers(d Dependencies) bool {
 	if len(d.Observers) != 0 || len(d.Telemetry) != 0 {
 		return false
 	}
@@ -32,7 +40,7 @@ func trustedDeferredPreparationStack(d Dependencies) bool {
 // policies are checked at their actual entry inside the owned callback journal.
 // Every other unscoped Host callback keeps the stack opaque.
 func scopedDeferredRootCallbacks(d Dependencies) bool {
-	if !trustedDeferredPreparationStack(d) ||
+	if !nativeRunLayers(d) ||
 		d.PrepareModelRequest != nil || d.NormalizeModelPolicy != nil ||
 		len(d.CompletionPolicies) != 0 || d.ToolDiscovery != nil {
 		return false
@@ -76,7 +84,7 @@ func (runner *Runner) VerifiedDeferredRootControl(ctx context.Context, rt *kerne
 	if runner.trustedDeferredPreparedControl && rt.VerifyPreparedRootSettlement(ctx, child) == nil {
 		return true
 	}
-	boundedToolControl := runner.boundedApproval && runner.scopedRootCallbacks && runner.delegatedToolResults != nil
+	boundedToolControl := runner.boundedApproval && runner.scopedRootCallbacks
 	if !runner.trustedDeferredRootControl && !boundedToolControl {
 		return false
 	}
@@ -94,7 +102,34 @@ func (runner *Runner) VerifiedDeferredRootControl(ctx context.Context, rt *kerne
 	}
 	if boundedToolControl {
 		state, err := decodeState(child.State)
-		return err == nil && rt.VerifyBoundedToolControl(ctx, child) == nil && runner.verifyToolHistory(ctx, child.Run.ID, state)
+		if err != nil || rt.VerifyBoundedToolControl(ctx, child) != nil {
+			return false
+		}
+		// Co-located execution already committed original Tool outcomes
+		// with the Run's receipt transitions. The native Cancel CAS checks
+		// all admitted accounting obligations; a second external owner
+		// receipt is not required to stop an otherwise quiescent Agent.
+		// Delegated result verification remains a distinct read-only API.
+		if a := runner.atomicBudget(); a != nil {
+			l, e := a.bindReceiptScope(ctx, child.Run.ID, "")
+			if e != nil {
+				return false
+			}
+			if l.ID != "" {
+				for _, res := range l.Reservations {
+					if res.RunID == child.Run.ID && res.Dispatched && res.Status != budget.ReservationSettled {
+						return false
+					}
+				}
+				return true
+			}
+		}
+		// Split-store legacy compositions still require independent owner
+		// evidence for a nonempty Tool history.
+		if state.Budget.Usage.ToolCalls == 0 && len(state.DelegatedToolReceipts) == 0 && len(state.RecoveredTools) == 0 {
+			return true
+		}
+		return runner.verifyToolHistory(ctx, child.Run.ID, state)
 	}
 	return rt.VerifyOwnedRootSettlement(ctx, child) == nil
 }

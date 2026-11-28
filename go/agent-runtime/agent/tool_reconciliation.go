@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"strings"
-	"time"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
@@ -86,24 +85,8 @@ func (runner *Runner) ReconcileToolOutcome(ctx context.Context, runID string,
 	if err := runner.requireUnmeteredToolRecovery(ctx, runID); err != nil {
 		return snapshot, errors.Join(ErrToolOutcomeUnknown, err)
 	}
-	return runner.withRunOwner(ctx, runID, expectedRevision,
-		func(nextCtx context.Context, scoped *Runner) (out kernel.Snapshot, callbackErr error) {
-			// This callback makes a trusted READ-ONLY provider lookup and a
-			// Store receipt CAS, never an external Tool dispatch. Therefore a
-			// failed lookup must not retain an idle execution lease for TTL.
-			defer func() {
-				if callbackErr == nil {
-					return
-				}
-				if scoped.activeRunLease != nil {
-					cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(nextCtx), 2*time.Second)
-					defer cancel()
-					releaseErr := scoped.runtime.ReleaseExecution(cleanupCtx, *scoped.activeRunLease)
-					if releaseErr != nil && !errors.Is(releaseErr, kernel.ErrExecutionConflict) {
-						callbackErr = errors.Join(callbackErr, releaseErr)
-					}
-				}
-			}()
+	return runner.withRunOwner(ctx, runID, expectedRevision, true,
+		func(nextCtx context.Context, scoped *Runner) (kernel.Snapshot, error) {
 			fresh, freshState, loadErr := scoped.loadState(nextCtx, runID)
 			if loadErr != nil {
 				return kernel.Snapshot{}, loadErr

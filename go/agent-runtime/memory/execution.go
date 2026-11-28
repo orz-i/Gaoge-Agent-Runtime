@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"math"
 	"strings"
 	"time"
 
@@ -67,55 +66,26 @@ func (store *Store) AcquireExecution(ctx context.Context, request kernel.Executi
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	if err := store.managedGateLocked(request.RunID); err != nil {
+	if err := store.nativeEntryGateLocked(request.RunID); err != nil {
 		return kernel.ExecutionLease{}, kernel.ErrChildExecutionBusy
 	}
 	snap, ok := store.records[request.RunID]
 	if !ok {
 		return kernel.ExecutionLease{}, kernel.ErrNotFound
 	}
-	switch snap.Run.Status {
-	case kernel.RunStatusCompleted, kernel.RunStatusFailed, kernel.RunStatusCancelled:
-		return kernel.ExecutionLease{}, kernel.ErrTerminal
-	case kernel.RunStatusRunning:
-	case kernel.RunStatusWaitingInput:
-		if snap.Run.Kind != "agent" || store.execution[request.RunID].epoch == 0 {
-			return kernel.ExecutionLease{}, kernel.ErrExecutionConflict
-		}
-	case kernel.RunStatusPausedBudget:
-		// Never grant execution for a pending approval/budget gate.
-		return kernel.ExecutionLease{}, kernel.ErrExecutionConflict
-	default:
-		// Unknown statuses are not executable.
-		return kernel.ExecutionLease{}, kernel.ErrExecutionConflict
-	}
 	if _, exists := store.ownedGrantLocked(request.RunID); exists {
 		return kernel.ExecutionLease{}, kernel.ErrChildExecutionBusy
 	}
-	if _, err := store.settleRetirementSuccessorLocked(request.RunID); err != nil {
-		return kernel.ExecutionLease{}, err
-	}
-	now := store.currentExecutionTime()
 	state := store.execution[request.RunID]
-	if state.quarantineRev != 0 {
-		return kernel.ExecutionLease{}, kernel.ErrExecutionQuarantined
-	}
-	if state.epoch == 0 {
-		return kernel.ExecutionLease{}, kernel.ErrExecutionRequired
-	}
-	if state.epoch > 0 && now.Before(state.lease.ExpiresAt) {
-		return kernel.ExecutionLease{}, kernel.ErrExecutionConflict
-	}
-	if state.epoch == math.MaxUint64 {
-		return kernel.ExecutionLease{}, kernel.ErrExecutionConflict
-	}
+	current := state.lease
+	current.Epoch = state.epoch
 	id, err := newMemoryLeaseID()
 	if err != nil {
 		return kernel.ExecutionLease{}, err
 	}
-	lease := kernel.ExecutionLease{
-		RunID: request.RunID, OwnerID: strings.TrimSpace(request.OwnerID), LeaseID: id,
-		Epoch: state.epoch + 1, ExpiresAt: now.Add(request.LeaseDuration),
+	lease, err := kernel.PlanExecutionAcquire(snap.Run, current, store.currentExecutionTime(), request, id, state.quarantineRev != 0)
+	if err != nil {
+		return kernel.ExecutionLease{}, err
 	}
 	state.epoch, state.lease = lease.Epoch, lease
 	store.execution[request.RunID] = state
@@ -130,7 +100,7 @@ func (store *Store) RenewExecution(ctx context.Context, req kernel.ExecutionRene
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	if err := store.managedGateLocked(req.Lease.RunID); err != nil {
+	if err := store.nativeEntryGateLocked(req.Lease.RunID); err != nil {
 		return kernel.ExecutionLease{}, err
 	}
 	now := store.currentExecutionTime()
@@ -154,19 +124,11 @@ func (store *Store) ReleaseExecution(ctx context.Context, lease kernel.Execution
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	if err := store.managedGateLocked(lease.RunID); err != nil {
+	if err := store.nativeEntryGateLocked(lease.RunID); err != nil {
 		return err
 	}
 	if _, exists := store.ownedGrantLocked(lease.RunID); exists {
 		return kernel.ErrChildExecutionBusy
-	}
-	original := store.execution[lease.RunID].lease
-	released, err := store.settleRetirementSuccessorLocked(lease.RunID)
-	if err != nil {
-		return err
-	}
-	if released && original.OwnerID == lease.OwnerID && original.LeaseID == lease.LeaseID && original.Epoch == lease.Epoch {
-		return nil
 	}
 	state := store.execution[lease.RunID]
 	if !activeMemoryLease(state, lease, store.currentExecutionTime()) {
@@ -185,10 +147,7 @@ func (store *Store) ApplyExecution(ctx context.Context, lease kernel.ExecutionLe
 	}
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	if err := store.managedGateLocked(lease.RunID); err != nil {
-		return kernel.Snapshot{}, err
-	}
-	if _, err := store.settleRetirementSuccessorLocked(lease.RunID); err != nil {
+	if err := store.nativeEntryGateLocked(lease.RunID); err != nil {
 		return kernel.Snapshot{}, err
 	}
 	state := store.execution[lease.RunID]
@@ -205,12 +164,17 @@ func (store *Store) ApplyExecution(ctx context.Context, lease kernel.ExecutionLe
 	if !ok {
 		return kernel.Snapshot{}, kernel.ErrNotFound
 	}
+	if mutation.Ledger != nil && current.Run.ParentRunID != "" {
+		if _, err := store.validateLiveRunOwners(ctx, current.Run); err != nil {
+			return kernel.Snapshot{}, err
+		}
+	}
 	if current.Run.Status != kernel.RunStatusRunning {
 		// Even the incumbent owner cannot lift a manual approval/budget gate.
 		// Only a Feature-validated ApplyControl can release it.
 		return kernel.Snapshot{}, kernel.ErrExecutionRequired
 	}
-	return store.applyLocked(lease.RunID, expectedRevision, mutation)
+	return store.applyLocked(ctx, lease.RunID, expectedRevision, mutation, false)
 }
 
 // CheckExecution obtains the Store-owned clock under the same mutex as epoch
@@ -224,7 +188,7 @@ func (store *Store) CheckExecution(ctx context.Context, runID string, lease *ker
 	}
 	store.mu.RLock()
 	defer store.mu.RUnlock()
-	if err := store.managedGateLocked(runID); err != nil {
+	if err := store.nativeEntryGateLocked(runID); err != nil {
 		return err
 	}
 	snap, ok := store.records[runID]

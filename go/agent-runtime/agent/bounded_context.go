@@ -93,20 +93,33 @@ func NewBoundedContextAdapter(manager *runtimecontext.Manager, ports BoundedCont
 }
 func (*BoundedContextAdapter) Name() string { return "runtime.bounded_context.v1" }
 func (a *BoundedContextAdapter) Run(ctx context.Context, inv plugin.RunInvocation, next plugin.RunNext) (kernel.Snapshot, error) {
-	hydrated, source, err := a.ports.Hydrate(ctx, inv)
+	hydrated, source, err := a.hydrate(ctx, inv)
 	if err != nil {
 		return kernel.Snapshot{}, err
 	}
-	if hydrated == nil || source.RunID != inv.RunID || len(source.SourceBinding) == 0 || !json.Valid(source.SourceBinding) {
-		return kernel.Snapshot{}, ErrInvalidRequest
-	}
-	callbackscope.Operation(ctx, a, "managed.hydrated", source)
 	snapshot, nextErr := next(hydrated)
-	// Runtime owns this entire sequence: one successful read/binding operation,
-	// all Next work returned, and no post-Next host operation can be hidden here.
-	callbackscope.Record(ctx, a, "context.hydrate.returned", source)
+	a.finishHydration(ctx, source)
 	return snapshot, nextErr
 }
+
+func (a *BoundedContextAdapter) hydrate(ctx context.Context, inv plugin.RunInvocation) (context.Context, BoundedContextHydration, error) {
+	hydrated, source, err := a.ports.Hydrate(ctx, inv)
+	if err != nil {
+		return ctx, BoundedContextHydration{}, err
+	}
+	if hydrated == nil || source.RunID != inv.RunID || len(source.SourceBinding) == 0 || !json.Valid(source.SourceBinding) {
+		return ctx, BoundedContextHydration{}, ErrInvalidRequest
+	}
+	callbackscope.Operation(ctx, a, "managed.hydrated", source)
+	return hydrated, source, nil
+}
+
+func (a *BoundedContextAdapter) finishHydration(ctx context.Context, source BoundedContextHydration) {
+	// Hydration has returned and all downstream work has actually exited.
+	// There is no hidden post-Next Host callback here.
+	callbackscope.Record(ctx, a, "context.hydrate.returned", source)
+}
+
 func (a *BoundedContextAdapter) Prepare(ctx context.Context, incoming model.Request) (prepared model.Request, prepareErr error) {
 	callbackscope.ManagedPrepareEntered(ctx, a)
 	defer func() { callbackscope.ManagedPrepareReturned(ctx, a, prepared, prepareErr) }()

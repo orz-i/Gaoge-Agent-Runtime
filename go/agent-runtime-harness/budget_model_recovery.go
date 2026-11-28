@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 )
 
@@ -17,20 +18,32 @@ func (authority *BudgetAuthority) VerifyModelOutcome(ctx context.Context, reques
 	if authority == nil || strings.TrimSpace(request.RunID) == "" || strings.TrimSpace(request.InvocationID) == "" {
 		return model.Response{}, ErrInvalidRequest
 	}
-	turn, _, err := resolveContextTurnForRun(ctx, authority.dependencies.Store, authority.dependencies.Relations, request.RunID)
-	if err != nil {
-		return model.Response{}, err
-	}
-	config, err := loadSealedConfig(ctx, authority.dependencies.Store, turn.ConfigSnapshotID)
-	if err != nil || config.SharedBudget == nil {
-		return model.Response{}, errors.Join(ErrConflict, err)
-	}
-	ledger, err := authority.dependencies.Ledgers.LoadBudget(ctx, turn.ID)
-	if err != nil {
-		return model.Response{}, err
-	}
-	if ledger.ID != turn.ID {
-		return model.Response{}, ErrConflict
+	var ledger budget.Ledger
+	if rt := authority.dependencies.Runtime; rt != nil {
+		run, err := rt.Load(ctx, request.RunID)
+		if err != nil {
+			return model.Response{}, err
+		}
+		ledger, err = kernel.LoadRunBudget(ctx, authority.dependencies.Ledgers, run.Run)
+		if err != nil {
+			return model.Response{}, err
+		}
+	} else {
+		turn, _, err := resolveContextTurnForRun(ctx, authority.dependencies.Store, authority.dependencies.Relations, request.RunID)
+		if err != nil {
+			return model.Response{}, err
+		}
+		config, err := loadSealedConfig(ctx, authority.dependencies.Store, turn.ConfigSnapshotID)
+		if err != nil || config.SharedBudget == nil {
+			return model.Response{}, errors.Join(ErrConflict, err)
+		}
+		ledger, err = authority.loadLedger(ctx, turn.ID)
+		if err != nil {
+			return model.Response{}, err
+		}
+		if ledger.ID != turn.ID {
+			return model.Response{}, ErrConflict
+		}
 	}
 	if _, ok := ledger.Runs[request.RunID]; !ok {
 		return model.Response{}, ErrConflict

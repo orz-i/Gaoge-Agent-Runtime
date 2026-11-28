@@ -89,7 +89,7 @@ func (runner *Runner) resumeDeferredChildGrantCancellation(
 		return Item{}, ErrConflict
 	}
 	ledger, err := runner.loadTurnBudget(ctx, turn)
-	if err != nil || ledger != nil && !ledger.RunCancelled(runID) {
+	if err != nil || ledger != nil && !ledger.RunCancelled(runID) && !runner.nativeBudget() {
 		return Item{}, errors.Join(ErrConflict, err)
 	}
 	var candidate Item
@@ -141,7 +141,7 @@ func (runner *Runner) cleanupReturnedRootChildren(ctx context.Context, turn Turn
 		return false, err
 	}
 	ledger, err := runner.loadTurnBudget(ctx, turn)
-	if err != nil || ledger != nil && !ledger.RunCancelled(current.Run.ID) {
+	if err != nil || ledger != nil && !ledger.RunCancelled(current.Run.ID) && !runner.nativeBudget() {
 		return false, errors.Join(ErrConflict, err)
 	}
 	scope, err := native.RootDeferredCleanupEligibility(ctx, current.Run.ID, current.Run.Revision)
@@ -159,7 +159,7 @@ func (runner *Runner) cleanupReturnedRootChildren(ctx context.Context, turn Turn
 		_, err = native.ReconcileRootDeferredChildren(ctx, current.Run.ID, current.Run.Revision, scope)
 		return true, err
 	}
-	if _, err = runner.cancelTurnDescendants(ctx, turn.ID, invocation.ID, current.Run.ID, reason); err != nil {
+	if _, err = runner.cancelOwnedDescendants(ctx, turn, current.Run.ID, reason); err != nil {
 		return true, err
 	}
 	latest, err := runner.runtime.Load(ctx, current.Run.ID)
@@ -174,24 +174,23 @@ func (runner *Runner) cleanupReturnedRootChildren(ctx context.Context, turn Turn
 	return true, err
 }
 
-// reconcileTerminalRootCancellation closes only an existing exact original
-// native retirement before the elected cancellation projects a terminal Run.
+// reconcileTerminalRootRetirement closes only an existing exact original
+// native retirement before projecting a terminal Run.
 // Terminal status is not a callback return. A legacy terminal Run without
 // any native grant/retirement keeps its existing projection semantics.
-func (runner *Runner) reconcileTerminalRootCancellation(ctx context.Context, current kernel.Snapshot) error {
-	native, ok := runner.agent.(*agent.Runner)
-	rt, nativeKernel := runner.cancellation.(*kernel.Runtime)
-	if !ok || !nativeKernel || rt != runner.runtime || !native.ObservesKernelRuntime(rt) || current.Run.Kind != agent.RunKind || current.Run.ParentRunID != "" {
+func (runner *Runner) reconcileTerminalRootRetirement(ctx context.Context, current kernel.Snapshot) error {
+	rt := runner.runtime
+	if !rt.SupportsChildExecution() || current.Run.Kind != agent.RunKind || current.Run.ParentRunID != "" {
 		return nil
 	}
 	if _, err := rt.LookupChildExecution(ctx, current.Run.ID); errors.Is(err, kernel.ErrNotFound) {
-		if _, err = rt.LookupOwnedRetirementForRun(ctx, current.Run.ID); errors.Is(err, kernel.ErrNotFound) {
-			return nil
-		} else if err != nil {
-			return err
-		}
+		return nil
 	} else if err != nil {
 		return err
+	}
+	native, ok := runner.agent.(*agent.Runner)
+	if !ok || !native.ObservesKernelRuntime(rt) {
+		return agent.ErrRootOutcomeUnknown
 	}
 	// Use the same native retirement predicate even on a committed
 	// business failure; a merely pending undispatched Model intent

@@ -151,7 +151,7 @@ func ea1RootResumePreflight(t *testing.T, factory func(*testing.T) (kernel.Store
 		revision = winner.Run.Revision
 		want = agent.ErrRunTerminal
 	case "admission-revision", "admission-cancel":
-		want = kernel.ErrExecutionConflict
+		want = kernel.ErrConflict
 		f.store.beforeOwned = func(ctx context.Context, g kernel.ChildExecutionGrant) error {
 			hits++
 			if g.AdmissionOperation != "resume" || g.ExpectedRevision != f.prepared.Run.Revision {
@@ -159,11 +159,18 @@ func ea1RootResumePreflight(t *testing.T, factory func(*testing.T) (kernel.Store
 			}
 			var e error
 			if vector == "admission-revision" {
-				bound, e2 := f.observer.WithExecution(f.store.acquired)
+				competitor, e2 := f.observer.AcquireExecution(ctx, kernel.ExecutionAcquireRequest{RunID: id, OwnerID: "competing-revision", LeaseDuration: time.Minute})
+				if e2 != nil {
+					t.Fatal(e2)
+				}
+				bound, e2 := f.observer.WithExecution(competitor)
 				if e2 != nil {
 					t.Fatal(e2)
 				}
 				winner, e = bound.Apply(ctx, id, revision, kernel.Mutation{Status: kernel.RunStatusRunning, State: f.prepared.State, Checkpoint: f.prepared.Checkpoint})
+				if e == nil {
+					e = f.observer.ReleaseExecution(ctx, competitor)
+				}
 			} else {
 				winner, e = f.observer.Cancel(ctx, id, revision, "Cancel wins actual admission")
 			}
@@ -231,8 +238,9 @@ func ea1RootResumeBarrier(t *testing.T, factory func(*testing.T) (kernel.Store, 
 			if e != nil || same != g {
 				t.Fatal("competing control changed scope")
 			}
-			if e = f.peer.(kernel.ExecutionStore).CheckExecution(ctx, f.request.ID, &lease); e != nil {
-				t.Fatalf("original native authority revoked: %v", e)
+			e = f.peer.(kernel.ExecutionStore).CheckExecution(ctx, f.request.ID, &lease)
+			if hostEntered && e != nil || !hostEntered && (!errors.Is(e, kernel.ErrExecutionConflict) || !errors.Is(e, kernel.ErrChildExecutionBusy)) {
+				t.Fatalf("original entry qualification changed: %v", e)
 			}
 			if _, e = f.observer.LookupOwnedPhysicalCallbackReturn(ctx, g); !errors.Is(e, kernel.ErrNotFound) {
 				t.Fatalf("active callback fabricated return fact: %v", e)
@@ -293,6 +301,10 @@ func ea1RootResumeUnknown(t *testing.T, factory func(*testing.T) (kernel.Store, 
 	ea1RootResumeUnknownWithModelReadDelay(t, factory, kind, 0)
 }
 func ea1RootResumeUnknownWithModelReadDelay(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store), kind string, delay time.Duration) {
+	ea1RootUnknownResume(t, factory, kind, delay, false)
+}
+
+func ea1RootUnknownResume(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store), kind string, delay time.Duration, cancel bool) {
 	f := ea1NewResumeFixture(t, factory, kind == "tool")
 	f.physical.modelReadDelay = delay
 	injected := errors.New("actual Resume physical outcome missing")
@@ -367,6 +379,12 @@ func ea1RootResumeUnknownWithModelReadDelay(t *testing.T, factory func(*testing.
 			ea1StartSettlementJSONEqual(t, "prior consumed Model response", inv.Response, f.physical.response)
 		}
 	}
+	if cancel {
+		ea1CancelRejected(t, f.observer, before, g, kernel.ErrChildExecutionBusy)
+		if e = f.peer.(kernel.ExecutionStore).CheckExecution(t.Context(), f.request.ID, &lease); e != nil {
+			t.Fatalf("rejected Cancel revoked original native owner: %v", e)
+		}
+	}
 	ea1AwaitNativeExpiry(t, f.peer.(kernel.ExecutionStore), f.store.renewals.latest(t, lease))
 	fresh := f.reopen()
 	freshRT := ea1StartRuntime(t, fresh)
@@ -379,6 +397,9 @@ func ea1RootResumeUnknownWithModelReadDelay(t *testing.T, factory func(*testing.
 		t.Fatalf("Store native TTL not expired: %v", e)
 	}
 	for range 2 {
+		if cancel {
+			ea1CancelRejected(t, freshRT, before, g, kernel.ErrChildExecutionBusy)
+		}
 		_, e = next.Resume(t.Context(), f.request.ID, before.Run.Revision)
 		want := agent.ErrRootOutcomeUnknown
 		switch kind {

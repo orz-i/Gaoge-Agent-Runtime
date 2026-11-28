@@ -48,7 +48,7 @@ func TestEncryptedV8RelationMigrationPreservesOriginalAuthority(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := &Store{db: db}
-	rt, err := kernel.New(kernel.Dependencies{Store: s})
+	rt, err := kernel.New(kernel.Dependencies{Store: legacyRunFixtureStore{s}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,6 +93,9 @@ func TestEncryptedV8RelationMigrationPreservesOriginalAuthority(t *testing.T) {
 		if err = MigrateV9ToV10With(ctx, path, open); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if err = MigrateV10ToV11With(ctx, path, open); err != nil {
+		t.Fatal(err)
 	}
 	s, err = OpenExistingWith(ctx, path, open)
 	if err != nil {

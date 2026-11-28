@@ -10,9 +10,7 @@ import (
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 )
 
@@ -146,24 +144,6 @@ func (runner *Runner) materializeSubtask(ctx context.Context, value Subtask, led
 	// A coincidentally named local Kernel Run may be a different task or even
 	// a foreign Tenant, and must not overwrite the delegated status, Goal,
 	// Result, approval, or the early terminal guard in CancelSubtask.
-	var delegatedChild Invocation
-	if value.Kind == "delegation" {
-		child, err := runner.store.GetInvocationByExecutionRefID(ctx, value.RunID)
-		if errors.Is(err, ErrNotFound) {
-			return value, nil // No frozen child identity to authorize a local read.
-		}
-		if err != nil {
-			return value, err
-		}
-		if !isHandoffDelegationInvocation(child) {
-			return value, nil
-		}
-		coordinator, ok := runner.handoffs.(*handoff.Coordinator)
-		if !ok || !coordinator.SupportsLocalDelegationObservation(runner.runtime) {
-			return value, nil // Remote/dynamic execution has no same-Kernel proof.
-		}
-		delegatedChild = child
-	}
 	snapshot, err := runner.runtime.Load(ctx, value.RunID)
 	if errors.Is(err, kernel.ErrNotFound) {
 		return value, nil
@@ -171,19 +151,14 @@ func (runner *Runner) materializeSubtask(ctx context.Context, value Subtask, led
 	if err != nil {
 		return value, err
 	}
-	if delegatedChild.ID != "" {
-		if _, _, err := runner.localHandoffCancellationAuthority(ctx, delegatedChild, snapshot); err != nil {
-			// A foreign or unverifiable local observation cannot replace the
-			// durable Handoff Item. This is a deliberate read-only fallback,
-			// not permission for physical cancellation or remote recovery.
-			return value, nil //nolint:nilerr // Deliberately retain persisted source on failed local proof.
-		}
-	}
-	if proofErr := runner.verifyLocalRelationRun(ctx, snapshot, false); proofErr != nil {
+	frozen, _, proofErr := runner.verifiedLocalRelation(ctx, snapshot, false)
+	if proofErr != nil {
 		if !errors.Is(proofErr, ErrRuntimeCancellationUnverified) {
 			return value, proofErr
 		}
-		// Keep only persisted relation/delegation facts, never a foreign Run.
+		return value, nil
+	}
+	if value.Kind == "delegation" && frozen.ID == "" {
 		return value, nil
 	}
 	value.Status = string(snapshot.Run.Status)
@@ -349,14 +324,16 @@ func (runner *Runner) CancelSubtask(ctx context.Context, turnID, taskID, reason 
 	if err = runner.recordSubtaskItem(ctx, turn.ID, task); err != nil {
 		return Snapshot{}, err
 	}
-	if ledger, loadErr := runner.loadTurnBudget(ctx, turn); loadErr != nil {
-		return Snapshot{}, loadErr
-	} else if ledger != nil {
-		if _, err = runner.budgets.coordinator().CancelRun(ctx, turn.ID, task.RunID); err != nil {
-			return Snapshot{}, err
+	if !runner.nativeBudget() {
+		if ledger, loadErr := runner.loadTurnBudget(ctx, turn); loadErr != nil {
+			return Snapshot{}, loadErr
+		} else if ledger != nil {
+			if _, err = runner.budgets.coordinator().CancelRun(ctx, turn.ID, task.RunID); err != nil {
+				return Snapshot{}, err
+			}
 		}
 	}
-	_, found, cancelErr := runner.cancelRuntimeRun(ctx, task.RunID, reason, nil)
+	target, found, cancelErr := runner.cancelRuntimeRun(ctx, task.RunID, reason, nil)
 	// Only conflicts from the TARGET cancellation itself can prove that no
 	// physical cancellation began. A later descendant-cleanup conflict may
 	// follow already committed effects; it must retain the intent.
@@ -365,6 +342,11 @@ func (runner *Runner) CancelSubtask(ctx context.Context, turnID, taskID, reason 
 		var descendants map[string]kernel.Snapshot
 		descendants, cancelErr = runner.cancelOwnedDescendants(ctx, turn, task.RunID, reason)
 		if cancelErr == nil {
+			// Project the target from its verified cancellation outcome, not
+			// a speculative Invocation status written before Kernel control.
+			if found {
+				descendants[task.RunID] = target
+			}
 			cancelErr = runner.syncInvocationRuns(ctx, turn, descendants)
 		}
 		if cancelErr == nil {
@@ -445,12 +427,27 @@ func (runner *Runner) ResolveSubtaskApproval(ctx context.Context, turnID, taskID
 	if err != nil || invocation.ParentItemID == "" || invocation.ExecutionRefID != task.RunID || invocation.TurnID != turn.ID {
 		return Snapshot{}, errors.Join(ErrConflict, err)
 	}
-	resolved, resolveErr := runner.withPhysicalSubtaskApprovalDispatch(
-		ctx, invocation, task.RunID, snapshot.Run.Revision, checkpointID,
-		func(physicalCtx context.Context) (kernel.Snapshot, error) {
-			return runner.agent.ResolveApproval(physicalCtx, task.RunID, snapshot.Run.Revision,
-				plugin.ApprovalResponse{Decision: decision, Comment: request.Comment})
-		})
+	frozen, decodeErr := decodeFrozenHandoffDelegation(invocation.Input)
+	if decodeErr != nil {
+		return Snapshot{}, decodeErr
+	}
+	a := kernel.ManagedApprovalDecision{CheckpointID: checkpointID, Decision: string(request.Decision), Comment: strings.TrimSpace(request.Comment)}
+	ctx, nativeApproval, err := runner.prepareApprovalDispatch(ctx, turn, invocation, snapshot, a)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	resolve := runner.approvalCallback(snapshot, decision, a.Comment)
+	var resolved kernel.Snapshot
+	var resolveErr error
+	if frozen.NativeLocal {
+		native, e := runner.nativeHandoff(ctx, turn.ID, frozen)
+		if e != nil || native == nil || !nativeApproval {
+			return Snapshot{}, errors.Join(ErrConflict, e)
+		}
+		resolved, resolveErr = runner.resolveNativeApproval(ctx, native, turn, invocation, snapshot, a, resolve)
+	} else {
+		resolved, resolveErr = runner.withPhysicalSubtaskApprovalDispatch(ctx, invocation, task.RunID, snapshot.Run.Revision, checkpointID, resolve)
+	}
 	if resolveErr != nil {
 		return Snapshot{}, resolveErr
 	}
@@ -458,11 +455,10 @@ func (runner *Runner) ResolveSubtaskApproval(ctx context.Context, turnID, taskID
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if err = runner.recordApprovalDecisionItem(ctx, turn, invocation, pending, request); err != nil {
-		return Snapshot{}, err
-	}
-	if err = runner.syncSubtaskItems(ctx, turn); err != nil {
-		return Snapshot{}, err
+	if !nativeApproval {
+		if err = runner.recordApprovalDecisionItem(ctx, turn, invocation, pending, request); err != nil {
+			return Snapshot{}, err
+		}
 	}
 	return runner.syncChildInvocationSnapshot(ctx, turn, invocation, resolved)
 }

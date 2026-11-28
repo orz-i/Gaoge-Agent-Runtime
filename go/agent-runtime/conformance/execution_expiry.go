@@ -11,20 +11,23 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
-// The EA1 receipt/settlement fixtures read the actual Store from the
-// original Model callback. A tiny per-call timeout makes slow native or
-// race-instrumented I/O win before the intended injected receipt fault.
-// These fixtures use a two-second lease with a strictly greater than one
-// second production safety margin; 900 ms fits it without changing expiry,
-// retry counts, deadline-specific cases or any production execution policy.
+// EA1 Store-backed callbacks need I/O margin within the two-second default lease.
 const ea1StoreBackedCallTimeout = 900 * time.Millisecond
+const ea1StoreBackedDeadline = 3 * time.Second
+
+// Deadline fixtures must expire the Run before its live native Lease.
+func ea1FixtureLeaseWindow(deadline *time.Time) time.Duration {
+	if deadline != nil {
+		return 2 * ea1StoreBackedDeadline
+	}
+	return 2 * time.Second
+}
 
 func ea1StoreBackedExecutionPolicy() agent.ExecutionPolicy {
 	return ea1FixtureExecutionPolicy(ea1StoreBackedCallTimeout)
 }
 
-// Explicit timing cases can still select their own bounded window (e.g.
-// renewal or async middleware); they retain the same single-attempt policy.
+// Renewal and async timing fixtures retain the same single-attempt policy.
 func ea1FixtureExecutionPolicy(timeout time.Duration) agent.ExecutionPolicy {
 	call := agent.CallPolicy{Timeout: timeout, MaxAttempts: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}
 	return agent.ExecutionPolicy{Model: call, Tool: call}
@@ -66,25 +69,27 @@ func (r *ea1LeaseRenewals) latest(t *testing.T, original kernel.ExecutionLease) 
 	return latest
 }
 
-// Only for a RUNNING original Run: CheckExecution refuses WAITING_INPUT for
-// reasons unrelated to expiry. The original grant/source invariants are
-// independently asserted by the surrounding conformance fixture.
-//
-// Wait for the latest actual Store expiry, then require the Store itself to
-// reject the original token. A local-clock timer is a scheduling hint, not
-// proof; a still-live token is polled within a bounded monotonic deadline.
-// Never renew, release, acquire, or convert another error into expiry.
 func ea1AwaitNativeExpiry(t *testing.T, store kernel.ExecutionStore, lease kernel.ExecutionLease) {
+	t.Helper()
+	if delay := time.Until(lease.ExpiresAt); delay > 5*time.Second {
+		t.Fatalf("unexpected native lease duration: %s", delay)
+	}
+	AwaitNativeExecutionExpiry(t, store, lease, 7*time.Second)
+}
+
+// AwaitNativeExecutionExpiry is the common conformance wait for a RUNNING
+// original Run. The caller independently verifies the original grant and
+// source. ExpiresAt is only a scheduling hint, including a historical safe
+// point's expiry: the same bearer may have been renewed without a state CAS.
+// Never renew, release, acquire, or convert another error into expiry.
+func AwaitNativeExecutionExpiry(t *testing.T, store kernel.ExecutionStore, lease kernel.ExecutionLease, maxWait time.Duration) {
 	t.Helper()
 	if lease.RunID == "" || lease.OwnerID == "" || lease.LeaseID == "" || lease.Epoch == 0 || lease.ExpiresAt.IsZero() {
 		t.Fatalf("missing original native lease: %+v", lease)
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 7*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), maxWait)
 	defer cancel()
 	if delay := time.Until(lease.ExpiresAt); delay > 0 {
-		if delay > 5*time.Second {
-			t.Fatalf("unexpected native lease duration: %s", delay)
-		}
 		timer := time.NewTimer(delay)
 		defer timer.Stop()
 		select {

@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
 )
@@ -35,7 +37,6 @@ func (r *Runtime) LoadManagedRecovery(ctx context.Context, id string) (ManagedTr
 type managedDispatchKey struct{}
 type managedDispatchBinding struct {
 	runtime *Runtime
-	host    ManagedRecoveryHostStore
 	binding ManagedHostBinding
 }
 
@@ -55,29 +56,25 @@ func (r *Runtime) BindManagedDispatch(ctx context.Context, b ManagedHostBinding)
 	if ka != b.KernelAuthority || ha != b.HostAuthority {
 		return ctx, ErrExecutionConflict
 	}
-	original, e := host.ReadManagedOriginalDispatch(ctx, b)
-	if e != nil {
+	if e = host.VerifyManagedOriginalDispatch(ctx, b); e != nil {
 		return ctx, e
 	}
-	if !reflect.DeepEqual(original, b) {
-		return ctx, ErrExecutionConflict
-	}
-	return context.WithValue(ctx, managedDispatchKey{}, managedDispatchBinding{r, host, managedClone(b)}), nil
+	return context.WithValue(ctx, managedDispatchKey{}, managedDispatchBinding{r, managedClone(b)}), nil
 }
 
 // ManagedDispatch is read-only and does not mint lifecycle evidence. Scoped
 // Runtime copies share the same actual Store and must have the original Run.
 func (r *Runtime) ManagedDispatch(ctx context.Context, id string) (ManagedHostBinding, bool) {
 	b, ok := ctx.Value(managedDispatchKey{}).(managedDispatchBinding)
-	if !ok || b.runtime == nil || r == nil || b.runtime.store != r.store || b.runtime.managedHost != r.managedHost || r.managedHost == nil || b.host != r.managedHost.store || b.binding.RunID != id {
+	if !ok || b.runtime == nil || r == nil || b.runtime.store != r.store || b.runtime.managedHost != r.managedHost || r.managedHost == nil || b.binding.RunID != id {
 		return ManagedHostBinding{}, false
 	}
 	return managedClone(b.binding), true
 }
 
-// ApplyManagedModelIntent is callable only by a first-party implementation
-// possessing an internal source proof. T0 still uses normal ApplyExecution.
-func (r *Runtime) ApplyManagedModelIntent(ctx context.Context, id string, rev uint64, m Mutation, p ManagedSafePoint, proof *featurecontrol.Proof) (Snapshot, error) {
+// ApplyManagedNativeTransition commits a qualified native phase and its
+// exact safe point through the same existing ApplyExecution transaction.
+func (r *Runtime) ApplyManagedNativeTransition(ctx context.Context, id string, rev uint64, m Mutation, p ManagedSafePoint, proof *featurecontrol.Proof) (Snapshot, error) {
 	if r == nil || r.execution == nil || r.physicalGrant == nil {
 		return Snapshot{}, ErrExecutionRequired
 	}
@@ -92,109 +89,100 @@ func (r *Runtime) ApplyManagedModelIntent(ctx context.Context, id string, rev ui
 	scoped.managedIntent = &ManagedSafePointProof{point: managedClone(p), proof: proof}
 	return scoped.Apply(ctx, id, rev, m)
 }
-func (r *Runtime) LeaveManagedSafePoint(ctx context.Context, id string) (ManagedTransfer, error) {
-	if r == nil || r.execution == nil {
-		return ManagedTransfer{}, ErrExecutionRequired
-	}
-	s, ok := r.store.(ManagedRecoveryStore)
-	if !ok {
-		return ManagedTransfer{}, ErrExecutionRequired
-	}
-	t, e := s.LoadManagedRecovery(ctx, id)
-	if e != nil {
-		return ManagedTransfer{}, e
-	}
-	if t.State == ManagedInvalidated {
-		return t, nil
-	}
-	return s.LeaveManagedSafePoint(ctx, ManagedLeaveRequest{RunID: id, SuspensionID: t.SafePoint.ID, ExpectedRevision: t.SafePoint.Source.Run.Revision, ExpectedTransferRevision: t.Revision, Generation: t.Generation, Lease: *r.execution})
+
+// AuthorizeManagedContinuation observes the original Host command. The native
+// admission transaction alone checks and consumes execution eligibility.
+func (r *Runtime) AuthorizeManagedContinuation(ctx context.Context, t ManagedTransfer, cancelReason ...string) (ManagedAdmissionProof, error) {
+	return r.authorizeManaged(ctx, t, ManagedFrontierQualification{}, cancelReason...)
 }
 
-// ParkManagedContinuation reads no custom clock and writes no Host records.
-func (r *Runtime) ParkManagedContinuation(ctx context.Context, id string) (ManagedParkedProof, error) {
-	s, ok := r.store.(ManagedRecoveryStore)
-	if !ok {
-		return ManagedParkedProof{}, ErrExecutionRequired
+func (r *Runtime) AuthorizeQualifiedManagedContinuation(ctx context.Context, prior ManagedTransfer, point ManagedSafePoint, proof *featurecontrol.Proof, cancelReason ...string) (ManagedAdmissionProof, error) {
+	if proof == nil {
+		return ManagedAdmissionProof{}, ErrExecutionRequired
 	}
-	t, e := s.LoadManagedRecovery(ctx, id)
-	if e != nil {
-		return ManagedParkedProof{}, e
+	return r.authorizeManaged(ctx, prior, ManagedFrontierQualification{prior: managedClone(prior), point: managedClone(point), proof: proof}, cancelReason...)
+}
+
+func (r *Runtime) authorizeManaged(ctx context.Context, t ManagedTransfer, qualification ManagedFrontierQualification, cancelReason ...string) (ManagedAdmissionProof, error) {
+	if r == nil || ctx == nil || r.managedHost == nil || !t.Valid() || t.Terminal != nil || len(cancelReason) > 1 {
+		return ManagedAdmissionProof{}, ErrExecutionConflict
 	}
-	if t.State != ManagedParked {
-		t, e = s.ParkManagedRecovery(ctx, ManagedParkRequest{RunID: id, SuspensionID: t.SafePoint.ID, ExpectedRevision: t.SafePoint.Source.Run.Revision})
-		if e != nil {
-			return ManagedParkedProof{}, e
+	q := ManagedRecoverySourceRequest{RunID: t.SafePoint.Host.RunID, SuspensionID: t.SafePoint.ID, ExpectedRevision: t.SafePoint.Source.Run.Revision, ExpectedTransferDigest: ManagedDigest(t), Qualification: qualification}
+	current, err := r.LoadManagedRecovery(ctx, q.RunID)
+	if err != nil {
+		return ManagedAdmissionProof{}, err
+	}
+	if q.ExpectedTransferDigest == "" || ManagedDigest(current) != q.ExpectedTransferDigest {
+		return ManagedAdmissionProof{}, ErrExecutionConflict
+	}
+	authority, err := r.ManagedRecoveryAuthority(ctx)
+	if err != nil {
+		return ManagedAdmissionProof{}, err
+	}
+	if authority != t.SafePoint.Host.KernelAuthority {
+		return ManagedAdmissionProof{}, ErrExecutionConflict
+	}
+	if qualification.proof != nil {
+		if !qualification.matches(t, qualification.point.Source) {
+			return ManagedAdmissionProof{}, ErrExecutionConflict
 		}
-	}
-	a, e := s.ManagedRecoveryAuthority(ctx)
-	if e != nil {
-		return ManagedParkedProof{}, e
-	}
-	if a != t.SafePoint.Host.KernelAuthority {
-		return ManagedParkedProof{}, ErrExecutionConflict
-	}
-	return ManagedParkedProof{transfer: managedClone(t), authority: a, valid: true}, nil
-}
-
-// SelectManagedContinuation only accepts the fixed committed Host selection.
-func (r *Runtime) SelectManagedContinuation(ctx context.Context, p ManagedParkedProof) (ManagedSelectionProof, error) {
-	if r == nil || r.managedHost == nil || !p.Matches(p.transfer.SafePoint.Host) {
-		return ManagedSelectionProof{}, ErrExecutionConflict
+		t.SafePoint = managedClone(qualification.point)
+		t.Revision = t.SafePoint.Source.Run.Revision
+		q.ExpectedRevision = t.Revision
 	}
 	host := r.managedHost.store
-	current, e := r.LoadManagedRecovery(ctx, p.transfer.SafePoint.Host.RunID)
-	if e != nil {
-		return ManagedSelectionProof{}, e
+	a, err := host.ManagedRecoveryAuthority(ctx)
+	if err != nil {
+		return ManagedAdmissionProof{}, err
 	}
-	if !reflect.DeepEqual(current, p.transfer) {
-		return ManagedSelectionProof{}, ErrExecutionConflict
+	if a != t.SafePoint.Host.HostAuthority {
+		return ManagedAdmissionProof{}, ErrExecutionConflict
 	}
-	a, e := host.ManagedRecoveryAuthority(ctx)
-	if e != nil {
-		return ManagedSelectionProof{}, e
+	v := t.Selection
+	if v.Mode == "" {
+		if err = host.VerifyManagedOriginalDispatch(ctx, t.SafePoint.Host); err != nil {
+			return ManagedAdmissionProof{}, err
+		}
+		v = ManagedRecoveryAuthorization{Mode: ManagedResume}
+		if len(cancelReason) == 1 {
+			if !utf8.ValidString(cancelReason[0]) {
+				return ManagedAdmissionProof{}, ErrInvalidInput
+			}
+			v.Mode = ManagedCancel
+			v.CancellationReason = strings.TrimSpace(cancelReason[0])
+		}
 	}
-	if a != p.transfer.SafePoint.Host.HostAuthority {
-		return ManagedSelectionProof{}, ErrExecutionConflict
+	selected := ManagedAdmissionProof{reservation: v, transfer: managedClone(t), request: q, valid: true}
+	if !selected.Matches(t, v.Mode) {
+		return ManagedAdmissionProof{}, ErrExecutionConflict
 	}
-	_, e = host.ReserveManagedRecovery(ctx, p)
-	if e != nil {
-		return ManagedSelectionProof{}, e
-	}
-	v, e := host.ReadManagedRecovery(ctx, p.transfer.SafePoint.Host, p.transfer.SafePoint.RecoveryID)
-	if e != nil {
-		return ManagedSelectionProof{}, e
-	}
-	proof := ManagedSelectionProof{reservation: managedClone(v), transfer: managedClone(current), valid: true}
-	if !proof.Matches(current, v.Mode) {
-		return ManagedSelectionProof{}, ErrExecutionConflict
-	}
-	return proof, nil
+	return selected, nil
 }
-func (r *Runtime) EnableManagedContinuation(ctx context.Context, p ManagedSelectionProof, claimant, owner string, d time.Duration) (ManagedTransfer, error) {
-	s, ok := r.store.(ManagedRecoveryStore)
-	if !ok {
-		return ManagedTransfer{}, ErrExecutionRequired
+
+func (r *Runtime) AdmitManagedContinuation(ctx context.Context, p ManagedAdmissionProof, owner string, d time.Duration) (*Runtime, OwnedPhysicalAdmissionResult, error) {
+	var zero OwnedPhysicalAdmissionResult
+	if r == nil || ctx == nil || r.execution != nil || r.physicalGrant != nil {
+		return nil, zero, ErrExecutionConflict
 	}
-	// Fixed internal entropy only: even after PARK, no configured callback may
-	// run before Leave. These tokens identify THIS actual claimant.
 	lid, e := (randomIDSource{}).NewID("managedlease")
 	if e != nil {
-		return ManagedTransfer{}, e
+		return nil, zero, e
 	}
 	gid, e := (randomIDSource{}).NewID("managedgrant")
 	if e != nil {
-		return ManagedTransfer{}, e
+		return nil, zero, e
 	}
-	t := p.transfer
-	return s.EnableManagedRecovery(ctx, ManagedEnableRequest{RunID: t.SafePoint.Host.RunID, SuspensionID: t.SafePoint.ID, ExpectedTransferRevision: t.Revision, Generation: t.Generation, ClaimantID: claimant, OwnerID: owner, LeaseID: lid, GrantID: gid, LeaseDuration: d, Selection: p})
+	source := p.transfer.SafePoint.Source
+	admission := p.OwnedAdmission(ExecutionAcquireRequest{RunID: source.Run.ID, OwnerID: owner, LeaseDuration: d}, lid, gid)
+	return r.admitOwnedPhysical(ctx, source, admission)
 }
-func (r *Runtime) CancelParkedManagedContinuation(ctx context.Context, p ManagedSelectionProof) (ManagedTransfer, error) {
+func (r *Runtime) CommitManagedCancellation(ctx context.Context, p ManagedAdmissionProof) (ManagedTransfer, error) {
 	s, ok := r.store.(ManagedRecoveryStore)
 	if !ok {
 		return ManagedTransfer{}, ErrExecutionRequired
 	}
 	t := p.transfer
-	return s.CancelParkedManagedContinuation(ctx, ManagedCancelRequest{RunID: t.SafePoint.Host.RunID, SuspensionID: t.SafePoint.ID, ExpectedTransferRevision: t.Revision, Generation: t.Generation, Selection: p})
+	return s.CommitManagedCancellation(ctx, ManagedCancelRequest{RunID: t.SafePoint.Host.RunID, SuspensionID: t.SafePoint.ID, Selection: p})
 }
 
 // ManagedRecoveryAbsent is only a compatibility helper for non-opted-in Runs.
@@ -202,17 +190,19 @@ func ManagedRecoveryAbsent(err error) bool {
 	return errors.Is(err, ErrNotFound) || errors.Is(err, ErrExecutionRequired)
 }
 
-func (r *Runtime) CompleteManagedRecovery(ctx context.Context, g ChildExecutionGrant, s Snapshot, proof *featurecontrol.Proof) error {
-	store, ok := r.store.(ManagedRecoveryStore)
-	if !ok {
+// VerifyManagedApproval reads the exact original native journal decision;
+// neither recovery admission nor result observation can use a Host receipt.
+func (r *Runtime) VerifyManagedApproval(ctx context.Context, b ManagedHostBinding) error {
+	if b.Approval == nil {
 		return nil
 	}
-	p := ManagedCompletionProof{proof: proof}
-	if !p.Matches(g, s) {
-		return ErrExecutionConflict
+	applied, err := r.CommittedApprovalDispatch(ctx, b.RunID, b.DispatchID, *b.Approval)
+	if err != nil || !applied {
+		return errors.Join(ErrExecutionConflict, err)
 	}
-	return store.CompleteManagedRecovery(ctx, g, s, p)
+	return nil
 }
+
 func (r *Runtime) ManagedRecoveryClosure(ctx context.Context, id string) (ManagedClosureProof, error) {
 	store, ok := r.store.(ManagedRecoveryStore)
 	if !ok {
@@ -222,7 +212,8 @@ func (r *Runtime) ManagedRecoveryClosure(ctx context.Context, id string) (Manage
 	if e != nil {
 		return ManagedClosureProof{}, e
 	}
-	if (t.State != ManagedClosed && t.State != ManagedCancelled) || t.Terminal == nil || !t.Selection.Valid() {
+	if !t.Resolved() || !t.SafePoint.Valid() ||
+		(t.Selection.Mode == ManagedCancel && t.Terminal.Run.Status != RunStatusCancelled) {
 		return ManagedClosureProof{}, ErrExecutionConflict
 	}
 	a, e := store.ManagedRecoveryAuthority(ctx)
@@ -239,7 +230,34 @@ func (r *Runtime) ManagedRecoveryClosure(ctx context.Context, id string) (Manage
 	if ManagedDigest(s) != ManagedDigest(*t.Terminal) {
 		return ManagedClosureProof{}, ErrExecutionConflict
 	}
-	return ManagedClosureProof{transfer: managedClone(t), snapshot: s, valid: true}, nil
+	if e = r.VerifyManagedApproval(ctx, t.SafePoint.Host); e != nil {
+		return ManagedClosureProof{}, e
+	}
+	if t.Selection.Mode == ManagedResume {
+		receipt, err := r.LoadOwnedRetirement(ctx, t.SuccessorGrant.ID)
+		if err != nil {
+			return ManagedClosureProof{}, err
+		}
+		if !receipt.MatchesManagedClosure(t, s) {
+			return ManagedClosureProof{}, ErrExecutionConflict
+		}
+	}
+	p, _ := t.SafePoint.AgentObligations()
+	if p.LedgerID != "" {
+		ledger := r.BudgetStore()
+		if ledger == nil {
+			return ManagedClosureProof{}, ErrExecutionRequired
+		}
+		l, e := ledger.LoadBudget(ctx, p.LedgerID)
+		if e != nil {
+			return ManagedClosureProof{}, e
+		}
+		if e = ValidateManagedBudgetClosure(t.SafePoint, s, t.Selection.Mode, l); e != nil {
+			return ManagedClosureProof{}, e
+		}
+	}
+	t.Terminal = &s
+	return ManagedClosureProof{transfer: managedClone(t)}, nil
 }
 
 func (r *Runtime) LoadManagedRecoveryByID(ctx context.Context, id string) (ManagedTransfer, error) {
@@ -284,17 +302,4 @@ func (r *Runtime) UsesManagedRecoveryHost(host ManagedRecoveryHostStore) bool {
 	}
 	value := reflect.ValueOf(host)
 	return value.Kind() == reflect.Pointer && !value.IsNil() && value.Type().Comparable() && r.managedHost.store == host
-}
-func (r *Runtime) ReadManagedReservation(ctx context.Context, b ManagedHostBinding, id string) (ManagedHostReservation, error) {
-	if r == nil || r.managedHost == nil {
-		return ManagedHostReservation{}, ErrExecutionRequired
-	}
-	a, e := r.managedHost.store.ManagedRecoveryAuthority(ctx)
-	if e != nil {
-		return ManagedHostReservation{}, e
-	}
-	if a != b.HostAuthority {
-		return ManagedHostReservation{}, ErrExecutionConflict
-	}
-	return r.managedHost.store.ReadManagedRecovery(ctx, b, id)
 }

@@ -59,22 +59,26 @@ func (m localModel) Generate(ctx context.Context, _ model.Request) (model.Respon
 }
 
 type receiptCut struct {
-	*harnesssqlite.Store
+	*kernelsqlite.Store
 }
 
-func (s receiptCut) AppendItem(ctx context.Context, item harness.Item) (harness.Item, bool, error) {
-	saved, fresh, err := s.Store.AppendItem(ctx, item)
-	if err == nil && fresh && strings.HasPrefix(item.ID, "hdispatchdone_") {
+func (s receiptCut) FinishChildExecution(ctx context.Context, grant kernel.ChildExecutionGrant, permit kernel.ChildExecutionSettlement) error {
+	err := s.Store.FinishChildExecution(ctx, grant, permit)
+	if err == nil {
 		fmt.Println("at-cut")
 		<-ctx.Done()
-		return saved, fresh, ctx.Err()
+		return ctx.Err()
 	}
-	return saved, fresh, err
+	return err
 }
 
 func runnerFor(t *testing.T, host harness.Store, runs *kernelsqlite.Store, client localModel) *harness.Runner {
 	t.Helper()
-	rt, err := kernel.New(kernel.Dependencies{Store: runs})
+	var execution kernel.Store = runs
+	if client.phase == "after-receipt" {
+		execution = receiptCut{runs}
+	}
+	rt, err := kernel.New(kernel.Dependencies{Store: execution})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,11 +112,7 @@ func TestCrashWorker(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = runs.Close() }()
-	var store harness.Store = host
-	if phase == "after-receipt" {
-		store = receiptCut{host}
-	}
-	runner := runnerFor(t, store, runs, localModel{dir, phase})
+	runner := runnerFor(t, host, runs, localModel{dir, phase})
 	_, err = runner.StartAgentTurn(t.Context(), request())
 	t.Fatalf("StartAgentTurn returned before cut: %v", err)
 }
@@ -202,25 +202,26 @@ func TestRunnerRecoversOriginalDispatchAfterProcessKill(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			var grant harness.Item
 			for _, item := range before {
 				if item.ParentItemID == harness.ExecutionDispatchParentItemID {
-					if grant.ID != "" {
-						t.Fatal("duplicate grants before replay")
-					}
-					grant = item
+					t.Fatal("native root acquired Host dispatch")
 				}
 			}
-			if grant.ID == "" {
-				t.Fatal("missing original dispatch")
+			owners, err := host.ListInvocations(t.Context(), turnID)
+			if err != nil || len(owners) != 1 {
+				t.Fatalf("original invocation: %v %+v", err, owners)
 			}
-			children, err := host.ListItemChildren(t.Context(), grant.ID, harness.ItemChildProofAll)
-			if err != nil {
-				t.Fatal(err)
-			}
-			boundary, returned := harness.VerifiedExecutionDispatchReceipt(grant, children)
-			if returned != (phase == "after-receipt") || (returned && boundary != "physical_dispatch_returned") {
-				t.Fatalf("receipt after kill: %q %t", boundary, returned)
+			runID := owners[0].ExecutionRefID
+			grant, grantErr := runs.LookupChildExecution(t.Context(), runID)
+			receipt, receiptErr := runs.LookupOwnedRetirementForRun(t.Context(), runID)
+			returned := phase == "after-receipt"
+			if returned {
+				if !errors.Is(grantErr, kernel.ErrNotFound) || receiptErr != nil || !receipt.Valid() ||
+					!receipt.Evidence.Completion.HostCompleted || receipt.Evidence.Snapshot.Run.Status != kernel.RunStatusCompleted {
+					t.Fatalf("original retirement missing: %v %v %+v", grantErr, receiptErr, receipt)
+				}
+			} else if grantErr != nil || !grant.IsOwned() || !errors.Is(receiptErr, kernel.ErrNotFound) {
+				t.Fatalf("unknown original grant: %v %v %+v", grantErr, receiptErr, grant)
 			}
 			snap, replayErr := runner.StartAgentTurn(t.Context(), req)
 			if returned && (replayErr != nil || snap.Turn.Status != harness.TurnCompleted) {
@@ -230,20 +231,21 @@ func TestRunnerRecoversOriginalDispatchAfterProcessKill(t *testing.T) {
 				t.Fatalf("recover pending dispatch: %s %v", snap.Turn.Status, replayErr)
 			}
 			items, err := host.ListItems(t.Context(), turnID, 0, 100)
-			if err != nil || harness.PendingExecutionDispatch(items, grant.InvocationID) == returned {
-				t.Fatalf("pending after replay: %+v %v", items, err)
+			if err != nil || harness.PendingExecutionDispatch(items, owners[0].ID) {
+				t.Fatalf("replay acquired Host authority: %+v %v", items, err)
 			}
-			grants, receipts := 0, 0
 			for _, item := range items {
 				if item.ParentItemID == harness.ExecutionDispatchParentItemID {
-					grants++
-				}
-				if item.ParentItemID == grant.ID {
-					receipts++
+					t.Fatal("replay created Host dispatch")
 				}
 			}
-			if grants != 1 || receipts != len(children) {
-				t.Fatalf("replay changed grant/receipt counts: %d/%d", grants, receipts)
+			if returned {
+				again, err := runs.LookupOwnedRetirementForRun(t.Context(), runID)
+				if err != nil || kernel.ManagedDigest(again) != kernel.ManagedDigest(receipt) {
+					t.Fatalf("replay changed retirement: %v", err)
+				}
+			} else if again, err := runs.LookupChildExecution(t.Context(), runID); err != nil || again != grant {
+				t.Fatalf("replay changed unknown original grant: %v", err)
 			}
 			calls, err := os.ReadFile(filepath.Join(dir, "model.calls"))
 			if err != nil || string(calls) != "call\n" {

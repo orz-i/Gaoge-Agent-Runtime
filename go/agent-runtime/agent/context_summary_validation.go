@@ -14,23 +14,35 @@ import (
 )
 
 func (runner *Runner) SupportsContextSummary() bool {
-	return runner != nil && runner.contextSummary != nil && runner.managedContextRecovery == nil
+	return runner != nil && runner.contextSummary != nil
+}
+
+// UsesBudgetedContextSummary checks the exact concrete budget owner selected
+// for the shared summary/business sampling protocol. It grants no execution
+// permission and is used only to reject mismatched Host compositions.
+func (runner *Runner) UsesBudgetedContextSummary(adapter *BoundedBudgetAdapter) bool {
+	return runner.SupportsContextSummary() &&
+		adapter != nil && runner.samplingBudget == adapter && runner.toolBudget == adapter
 }
 
 type contextSummaryModelKey struct{}
 
-func summaryBudgetConfigured(dependencies Dependencies) bool {
-	for _, layer := range dependencies.RunMiddleware {
-		if _, ok := layer.(*BoundedBudgetAdapter); ok {
-			return true
-		}
+// Summary uses its original Context hydration/commit owner. Budgeted
+// summary is admitted only through the same complete native topology that
+// owns business sampling and result consumption, never a partial chain.
+func validSummaryComposition(d Dependencies) bool {
+	summary := d.ContextSummary
+	if summary == nil || summary.bounded == nil || summary.ports == nil ||
+		d.PrepareModelRequest != nil {
+		return false
 	}
-	for _, layer := range dependencies.ModelMiddleware {
-		if _, ok := layer.(*BoundedBudgetAdapter); ok {
-			return true
-		}
+	b := selectedSamplingBudget(d)
+	if b == nil {
+		return selectedToolBudget(d) == nil && contextOnlyRun(d, summary.bounded) &&
+			(d.BoundedContext == nil || d.BoundedContext == summary.bounded)
 	}
-	return false
+	return d.BoundedContext == summary.bounded &&
+		(d.BoundedBudget == b || completeLegacyBudget(d, summary.bounded) == b)
 }
 
 func cloneContextSummaryBinding(value *ContextSummaryBinding) *ContextSummaryBinding {
@@ -103,6 +115,17 @@ func validContextSummaryInvocation(invocation ModelInvocation) bool {
 	}
 	if invocation.Status == ModelInvocationPending || invocation.Status == ModelInvocationCompleted {
 		request := invocation.Request
+		if plan := invocation.SamplingPlan; plan != nil {
+			// Old, unbudgeted intents could acquire only a physical hash at
+			// dispatch. Never reinterpret that hash as a budgeted admission.
+			if plan.Window.ContextTokens == 0 {
+				if plan.LedgerID != "" {
+					return false
+				}
+			} else if plan.Policy != summaryInputPolicy(invocation.ContextSummary) {
+				return false
+			}
+		}
 		return invocation.ContextSummary.SummaryAccounting.MatchesRequest(request) &&
 			len(request.Tools) == 0 && len(request.HostedTools) == 0 && !request.RequireToolCall &&
 			request.HostedToolCallLimit != nil && *request.HostedToolCallLimit == 0 &&
@@ -132,11 +155,8 @@ func contextSummaryInputBytesWithinPolicy(invocation ModelInvocation) bool {
 }
 
 func validContextSummaryState(state runState) bool {
-	if state.SummaryNativeRecovery && state.WorkingStateSummary == nil || state.WorkingStateSummary != nil && state.MaxModelOutputTokens <= 0 {
+	if state.WorkingStateSummary != nil && state.MaxModelOutputTokens <= 0 {
 		return false
-	}
-	if state.SummaryNativeRecovery && (state.InputBinding != "" || state.InputCursor != 0) {
-		return false // Host input boundaries are not part of the dedicated transfer proof.
 	}
 	for index, invocation := range state.ModelInvocations {
 		if invocation.Purpose == ModelInvocationContextSummary && (index != 0 || state.WorkingStateSummary == nil ||
@@ -196,16 +216,26 @@ func VerifyWorkingStateSummaryOrigin(snapshot kernel.Snapshot, state *runtimecon
 	return false
 }
 
-// summaryTurnProjection permits only the one original Accepted-to-Running
-// projection. It never treats arbitrary revisions or status changes as retries.
+// summaryTurnProjection compares the exact immutable Context owner and
+// reference, allowing only forward live status/diagnostic projections.
 func summaryTurnProjection(original, current SummaryTurn) bool {
 	if sameBoundedValue(original, current) {
 		return true
 	}
-	if original.Status != "accepted" || current.Status != "running" || current.Revision != original.Revision+1 || current.UpdatedAt.Before(original.UpdatedAt) {
+	// Turn lifecycle/diagnostic projection may advance independently of a
+	// frozen summary: an unknown model outcome can be published and later
+	// cleared while the original invocation and Context stay unchanged.
+	// Do not make projection revision or diagnostics a second source owner.
+	// Accept only a forward live projection with every immutable identity and
+	// exact Context reference unchanged. The actual Context CAS still uses
+	// the freshly read revision; no earlier projection grants write authority.
+	if (original.Status != "accepted" && original.Status != "running") ||
+		current.Status != "running" || current.Revision <= original.Revision ||
+		current.UpdatedAt.Before(original.UpdatedAt) {
 		return false
 	}
 	expected := original
 	expected.Status, expected.Revision, expected.UpdatedAt = current.Status, current.Revision, current.UpdatedAt
+	expected.ErrorCode, expected.ErrorDetail = current.ErrorCode, current.ErrorDetail
 	return sameBoundedValue(expected, current)
 }

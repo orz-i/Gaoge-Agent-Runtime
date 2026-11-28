@@ -229,7 +229,7 @@ func TestPR82HandoffReturnMustMatchFrozenMemberAndRoleIdentity(t *testing.T) {
 				return d, handoff.ErrChildPending
 			}
 			dispatch := func() error {
-				_, err := f.runner.executeDelegation(t.Context(), f.turn, f.parent, f.parentRun, delegation, f.startedItemID)
+				_, err := f.runner.executeDelegation(t.Context(), f.turn, f.parent, f.parentRun, delegation, f.startedItemID, "")
 				return err
 			}
 			if err := dispatch(); !errors.Is(err, ErrExecutionOutcomeUnknown) {

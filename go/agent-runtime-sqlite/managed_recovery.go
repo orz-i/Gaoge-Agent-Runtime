@@ -8,6 +8,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget/sqlledger"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
@@ -48,7 +49,7 @@ func sqliteLoadManaged(ctx context.Context, q schemaQuery, id string) (kernel.Ma
 	if e = json.Unmarshal(b, &t); e != nil {
 		return t, kernel.ErrExecutionConflict
 	}
-	if t.SafePoint.Host.RunID != id || t.SafePoint.ID != sid || t.SafePoint.RecoveryID != rid || t.Revision != rev || !t.SafePoint.Valid() {
+	if t.SafePoint.Host.RunID != id || t.SafePoint.ID != sid || t.SafePoint.RecoveryID != rid || t.Revision != rev || !t.Valid() {
 		return t, kernel.ErrExecutionConflict
 	}
 	return t, nil
@@ -57,7 +58,8 @@ func (s *Store) LoadManagedRecovery(ctx context.Context, id string) (kernel.Mana
 	if s == nil || s.db == nil || ctx == nil || id == "" {
 		return kernel.ManagedTransfer{}, kernel.ErrInvalidInput
 	}
-	return sqliteLoadManaged(ctx, s.db, id)
+	t, e := sqliteLoadManaged(ctx, s.db, id)
+	return sqliteObserveManaged(ctx, s.db, t, e)
 }
 func sqliteSaveManaged(ctx context.Context, tx *sql.Tx, t kernel.ManagedTransfer) error {
 	b, e := json.Marshal(t)
@@ -71,15 +73,18 @@ func sqliteSaveManaged(ctx context.Context, tx *sql.Tx, t kernel.ManagedTransfer
 	_, e = tx.ExecContext(ctx, `INSERT INTO runtime_managed_transfers(run_id,suspension_id,recovery_id,revision,payload_json) VALUES(?,?,?,?,?) ON CONFLICT(run_id) DO UPDATE SET suspension_id=excluded.suspension_id,recovery_id=excluded.recovery_id,revision=excluded.revision,payload_json=excluded.payload_json`, t.SafePoint.Host.RunID, t.SafePoint.ID, t.SafePoint.RecoveryID, t.Revision, b)
 	return conflictOrDatabaseError(e)
 }
-func sqliteManagedGate(ctx context.Context, q schemaQuery, id string) error {
-	t, e := sqliteLoadManaged(ctx, q, id)
-	if errors.Is(e, kernel.ErrNotFound) {
-		return nil
+func sqliteNativeEntryGate(ctx context.Context, q schemaQuery, id string) error {
+	var pending, valid int
+	if e := q.QueryRowContext(ctx, `SELECT count(*), COALESCE(SUM(CASE WHEN g.execution_epoch=r.execution_epoch AND r.execution_physical_epoch<g.execution_epoch AND g.execution_owner_id=r.execution_owner AND g.execution_lease_id=r.execution_lease_id AND r.execution_quarantine_revision=0 THEN 1 ELSE 0 END),0) FROM runtime_child_effect_grants g JOIN runtime_runs r ON r.run_id=g.child_run_id WHERE g.child_run_id=? AND g.parent_run_id=g.child_run_id AND g.execution_epoch<>0 AND (g.execution_epoch<>r.execution_epoch OR g.execution_epoch<>r.execution_physical_epoch)`, id).Scan(&pending, &valid); e != nil {
+		return conflictOrDatabaseError(e)
 	}
-	if e != nil {
-		return e
+	if pending == 1 && valid == 1 {
+		return errors.Join(kernel.ErrExecutionConflict, kernel.ErrChildExecutionBusy)
 	}
-	return kernel.ManagedOrdinaryGate(t)
+	if pending != 0 {
+		return kernel.ErrExecutionConflict
+	}
+	return nil
 }
 func sqliteManagedLease(ctx context.Context, q schemaQuery, id string) (kernel.ExecutionLease, uint64, error) {
 	l := kernel.ExecutionLease{RunID: id}
@@ -121,7 +126,7 @@ func sqliteManagedGrant(ctx context.Context, tx *sql.Tx, id string) (kernel.Chil
 	}
 	return g, nil
 }
-func (s *Store) managedTx(ctx context.Context, id string, f func(*sql.Tx, kernel.Snapshot, kernel.ExecutionLease, kernel.ManagedTransfer, time.Time) (kernel.ManagedTransfer, error)) (kernel.ManagedTransfer, error) {
+func (s *Store) managedTx(ctx context.Context, id string, f func(*sql.Tx, kernel.Snapshot, kernel.ExecutionLease, kernel.ManagedTransfer, uint64, time.Time) (kernel.ManagedTransfer, error)) (kernel.ManagedTransfer, error) {
 	if s == nil || s.db == nil || ctx == nil || id == "" {
 		return kernel.ManagedTransfer{}, kernel.ErrInvalidInput
 	}
@@ -156,7 +161,11 @@ func (s *Store) managedTx(ctx context.Context, id string, f func(*sql.Tx, kernel
 	if e != nil {
 		return t, e
 	}
-	out, e := f(tx, snap, l, t, time.UnixMilli(ms).UTC())
+	var physicalEpoch uint64
+	if e = tx.QueryRowContext(ctx, "SELECT execution_physical_epoch FROM runtime_runs WHERE run_id=?", id).Scan(&physicalEpoch); e != nil {
+		return t, e
+	}
+	out, e := f(tx, snap, l, t, physicalEpoch, time.UnixMilli(ms).UTC())
 	if e != nil {
 		return kernel.ManagedTransfer{}, e
 	}
@@ -165,93 +174,8 @@ func (s *Store) managedTx(ctx context.Context, id string, f func(*sql.Tx, kernel
 	}
 	return out, nil
 }
-func (s *Store) ParkManagedRecovery(ctx context.Context, q kernel.ManagedParkRequest) (kernel.ManagedTransfer, error) {
-	return s.managedTx(ctx, q.RunID, func(tx *sql.Tx, snap kernel.Snapshot, l kernel.ExecutionLease, t kernel.ManagedTransfer, now time.Time) (kernel.ManagedTransfer, error) {
-		a, e := sqliteManagedAuthority(ctx, tx)
-		if e != nil {
-			return t, e
-		}
-		g, e := sqliteManagedGrant(ctx, tx, q.RunID)
-		if e != nil {
-			return t, e
-		}
-		n, e := kernel.ManagedParkTransfer(t, q, snap, l, g, a, now)
-		if e != nil {
-			return t, e
-		}
-		if n.Revision == t.Revision {
-			return n, nil
-		}
-		return n, sqliteSaveManaged(ctx, tx, n)
-	})
-}
-func (s *Store) LeaveManagedSafePoint(ctx context.Context, q kernel.ManagedLeaveRequest) (kernel.ManagedTransfer, error) {
-	return s.managedTx(ctx, q.RunID, func(tx *sql.Tx, snap kernel.Snapshot, l kernel.ExecutionLease, t kernel.ManagedTransfer, now time.Time) (kernel.ManagedTransfer, error) {
-		g, e := sqliteManagedGrant(ctx, tx, q.RunID)
-		if e != nil {
-			return t, e
-		}
-		want, _ := kernel.ManagedCurrentAuthority(t)
-		if g != want {
-			return t, kernel.ErrExecutionConflict
-		}
-		n, e := kernel.ManagedLeaveTransfer(t, q, snap, l, now)
-		if e != nil {
-			return t, e
-		}
-		return n, sqliteSaveManaged(ctx, tx, n)
-	})
-}
-func (s *Store) EnableManagedRecovery(ctx context.Context, q kernel.ManagedEnableRequest) (kernel.ManagedTransfer, error) {
-	return s.managedTx(ctx, q.RunID, func(tx *sql.Tx, snap kernel.Snapshot, l kernel.ExecutionLease, t kernel.ManagedTransfer, now time.Time) (kernel.ManagedTransfer, error) {
-		if kernel.ManagedEnableReplay(t, q, snap, l, now) {
-			return t, nil
-		}
-		if l.Epoch >= math.MaxInt64 {
-			return t, kernel.ErrExecutionConflict
-		}
-		g, e := sqliteManagedGrant(ctx, tx, q.RunID)
-		if e != nil {
-			return t, e
-		}
-		want, _ := kernel.ManagedCurrentAuthority(t)
-		if g != want {
-			return t, kernel.ErrExecutionConflict
-		}
-		// Native SQLite lease representation is millisecond exact.
-		ttl, ok := sqliteLeaseMilliseconds(q.LeaseDuration)
-		if !ok {
-			return t, kernel.ErrInvalidInput
-		}
-		q.LeaseDuration = time.Duration(ttl) * time.Millisecond
-		if !g.MatchesExecution(l) {
-			return t, kernel.ErrExecutionConflict
-		}
-		if _, e = sqliteSettleRetirementSuccessor(ctx, tx, q.RunID); e != nil {
-			return t, e
-		}
-		n, e := kernel.ManagedEnabledTransfer(t, q, snap, l.Epoch, now)
-		if e != nil {
-			return t, e
-		}
-		if e = sqliteReserveGrantIdentity(ctx, tx, n.SuccessorGrant); e != nil {
-			return t, e
-		}
-		if e = sqliteConsumeManagedGrant(ctx, tx, g); e != nil {
-			return t, e
-		}
-		ng := n.SuccessorGrant
-		if _, e = tx.ExecContext(ctx, `INSERT INTO runtime_child_effect_grants(grant_id,parent_run_id,child_run_id,start_revision,execution_owner_id,execution_lease_id,execution_epoch,admission_source_hash,admission_operation) VALUES(?,?,?,?,?,?,?,?,?)`, ng.ID, q.RunID, q.RunID, ng.ExpectedRevision, ng.ExecutionOwnerID, ng.ExecutionLeaseID, ng.ExecutionEpoch, ng.AdmissionSourceHash, ng.AdmissionOperation); e != nil {
-			return t, conflictOrDatabaseError(e)
-		}
-		if _, e = tx.ExecContext(ctx, `UPDATE runtime_runs SET execution_epoch=?,execution_physical_epoch=?,execution_owner=?,execution_lease_id=?,execution_expiry_ms=? WHERE run_id=?`, n.SuccessorLease.Epoch, n.SuccessorGrant.ExecutionEpoch, n.SuccessorLease.OwnerID, n.SuccessorLease.LeaseID, n.SuccessorLease.ExpiresAt.UnixMilli(), q.RunID); e != nil {
-			return t, e
-		}
-		return n, sqliteSaveManaged(ctx, tx, n)
-	})
-}
-func (s *Store) CancelParkedManagedContinuation(ctx context.Context, q kernel.ManagedCancelRequest) (kernel.ManagedTransfer, error) {
-	return s.managedTx(ctx, q.RunID, func(tx *sql.Tx, snap kernel.Snapshot, l kernel.ExecutionLease, t kernel.ManagedTransfer, now time.Time) (kernel.ManagedTransfer, error) {
+func (s *Store) CommitManagedCancellation(ctx context.Context, q kernel.ManagedCancelRequest) (kernel.ManagedTransfer, error) {
+	return s.managedTx(ctx, q.RunID, func(tx *sql.Tx, snap kernel.Snapshot, l kernel.ExecutionLease, t kernel.ManagedTransfer, physicalEpoch uint64, now time.Time) (kernel.ManagedTransfer, error) {
 		if kernel.ManagedCancelReplay(t, q, snap) {
 			return t, nil
 		}
@@ -262,15 +186,40 @@ func (s *Store) CancelParkedManagedContinuation(ctx context.Context, q kernel.Ma
 		if e != nil {
 			return t, e
 		}
-		want, _ := kernel.ManagedCurrentAuthority(t)
+		want := kernel.ManagedCurrentGrant(t)
 		if g != want {
 			return t, kernel.ErrExecutionConflict
 		}
 		if !g.MatchesExecution(l) {
 			return t, kernel.ErrExecutionConflict
 		}
+		t, e = kernel.PrepareManagedAdmission(t, q.Selection, snap, l, g, t.SafePoint.Host.KernelAuthority, physicalEpoch, now)
+		if e != nil {
+			return t, e
+		}
+		// Native Create and terminal control share the writer transaction.
+		var busy bool
+		if e = tx.QueryRowContext(ctx, `WITH RECURSIVE children(id) AS (
+			SELECT run_id FROM runtime_runs WHERE json_extract(CAST(run_json AS TEXT),'$.parentRunID')=? OR json_extract(CAST(run_json AS TEXT),'$.logicalParentRunID')=?
+			UNION SELECT r.run_id FROM runtime_runs r JOIN children c ON json_extract(CAST(r.run_json AS TEXT),'$.parentRunID')=c.id OR json_extract(CAST(r.run_json AS TEXT),'$.logicalParentRunID')=c.id)
+			SELECT EXISTS(SELECT 1 FROM children c JOIN runtime_runs r ON r.run_id=c.id
+			WHERE r.status NOT IN ('completed','failed','cancelled') OR r.execution_quarantine_revision<>0
+			OR EXISTS(SELECT 1 FROM runtime_child_effect_grants g WHERE g.child_run_id=c.id))`, q.RunID, q.RunID).Scan(&busy); e != nil {
+			return t, conflictOrDatabaseError(e)
+		}
+		if busy {
+			return t, kernel.ErrExecutionConflict
+		}
 		n, m, e := kernel.ManagedCancellationMutation(t, q, snap, now)
 		if e != nil {
+			return t, e
+		}
+		accounting := sqlledger.Store{DB: tx}
+		ledger, e := kernel.ManagedCancellationLedger(ctx, t, accounting)
+		if e != nil {
+			return t, e
+		}
+		if e = accounting.Apply(ctx, q.RunID, ledger); e != nil {
 			return t, e
 		}
 		encoded, e := encodeRecord(m.Record)
@@ -313,21 +262,6 @@ func (s *Store) CancelParkedManagedContinuation(ctx context.Context, q kernel.Ma
 	})
 }
 func sqliteManagedMutation(ctx context.Context, tx *sql.Tx, current kernel.Snapshot, m kernel.StoreMutation, lease *kernel.ExecutionLease) error {
-	old, e := sqliteLoadManaged(ctx, tx, current.Run.ID)
-	if e != nil && !errors.Is(e, kernel.ErrNotFound) {
-		return e
-	}
-	if e == nil {
-		if e = kernel.ManagedOrdinaryGate(old); e != nil {
-			return e
-		}
-		n := kernel.ManagedInvalidateMutation(old)
-		if n.Revision != old.Revision {
-			if e = sqliteSaveManaged(ctx, tx, n); e != nil {
-				return e
-			}
-		}
-	}
 	if !m.ManagedSafePoint.Present() {
 		return nil
 	}
@@ -360,10 +294,14 @@ func (s *Store) LoadManagedRecoveryByID(ctx context.Context, id string) (kernel.
 	if s == nil || s.db == nil || ctx == nil || id == "" {
 		return kernel.ManagedTransfer{}, kernel.ErrInvalidInput
 	}
+	t, e := sqliteLoadManagedByID(ctx, s.db, id)
+	return sqliteObserveManaged(ctx, s.db, t, e)
+}
+func sqliteLoadManagedByID(ctx context.Context, q schemaQuery, id string) (kernel.ManagedTransfer, error) {
 	var b []byte
 	var run, rid string
 	var rev uint64
-	e := s.db.QueryRowContext(ctx, `SELECT run_id,recovery_id,revision,payload_json FROM runtime_managed_history WHERE suspension_id=?`, id).Scan(&run, &rid, &rev, &b)
+	e := q.QueryRowContext(ctx, `SELECT run_id,recovery_id,revision,payload_json FROM runtime_managed_history WHERE suspension_id=?`, id).Scan(&run, &rid, &rev, &b)
 	if errors.Is(e, sql.ErrNoRows) {
 		return kernel.ManagedTransfer{}, kernel.ErrNotFound
 	}
@@ -371,112 +309,22 @@ func (s *Store) LoadManagedRecoveryByID(ctx context.Context, id string) (kernel.
 		return kernel.ManagedTransfer{}, e
 	}
 	var t kernel.ManagedTransfer
-	if e = json.Unmarshal(b, &t); e != nil || t.SafePoint.ID != id || t.SafePoint.RecoveryID != rid || t.SafePoint.Host.RunID != run || t.Revision != rev || !t.SafePoint.Valid() {
+	if e = json.Unmarshal(b, &t); e != nil || t.SafePoint.ID != id || t.SafePoint.RecoveryID != rid || t.SafePoint.Host.RunID != run || t.Revision != rev || !t.Valid() {
 		return t, kernel.ErrExecutionConflict
 	}
 	return t, nil
 }
-func (s *Store) CompleteManagedRecovery(ctx context.Context, g kernel.ChildExecutionGrant, snapshot kernel.Snapshot, p kernel.ManagedCompletionProof) error {
-	if s == nil || s.db == nil || ctx == nil || !g.IsOwned() {
-		return kernel.ErrInvalidInput
+
+func sqliteObserveManaged(ctx context.Context, q schemaQuery, t kernel.ManagedTransfer, e error) (kernel.ManagedTransfer, error) {
+	if e != nil || t.SuccessorGrant.ID == "" || t.Terminal != nil {
+		return t, e
 	}
-	tx, e := s.db.BeginTx(ctx, nil)
+	r, e := sqliteLoadOwnedRetirement(ctx, q, t.SuccessorGrant.ID)
+	if errors.Is(e, kernel.ErrNotFound) {
+		return t, nil
+	}
 	if e != nil {
-		return conflictOrDatabaseError(e)
+		return t, e
 	}
-	defer func() { _ = tx.Rollback() }()
-	actual, e := loadTx(ctx, tx, g.ChildRunID)
-	if e != nil {
-		return e
-	}
-	rows, e := tx.QueryContext(ctx, `SELECT payload_json FROM runtime_managed_history WHERE run_id=?`, g.ChildRunID)
-	if e != nil {
-		return e
-	}
-	var all []kernel.ManagedTransfer
-	for rows.Next() {
-		var b []byte
-		if e = rows.Scan(&b); e != nil {
-			_ = rows.Close()
-			return e
-		}
-		var t kernel.ManagedTransfer
-		if e = json.Unmarshal(b, &t); e != nil {
-			_ = rows.Close()
-			return kernel.ErrExecutionConflict
-		}
-		all = append(all, t)
-	}
-	e = rows.Err()
-	_ = rows.Close()
-	if e != nil {
-		return e
-	}
-	matches := false
-	for _, t := range all {
-		if !t.SafePoint.Valid() || t.SafePoint.Host.RunID != g.ChildRunID {
-			return kernel.ErrExecutionConflict
-		}
-		if t.SuccessorGrant == g && t.Selection.Valid() {
-			matches = true
-		}
-	}
-	if !matches {
-		return nil
-	}
-	authority, e := sqliteManagedAuthority(ctx, tx)
-	if e != nil {
-		return e
-	}
-	if kernel.ManagedDigest(actual) != kernel.ManagedDigest(snapshot) || !p.Matches(g, actual) {
-		return kernel.ErrExecutionConflict
-	}
-	if e = sqliteManagedGate(ctx, tx, g.ChildRunID); e != nil {
-		return e
-	}
-	currentGrant, mark, e := loadPhysicalGrant(ctx, tx, g.ChildRunID)
-	if e != nil {
-		return e
-	}
-	if currentGrant != g || mark != actual.Run.Revision {
-		return kernel.ErrExecutionConflict
-	}
-	current, ce := sqliteLoadManaged(ctx, tx, g.ChildRunID)
-	if ce != nil && !errors.Is(ce, kernel.ErrNotFound) {
-		return ce
-	}
-	for _, t := range all {
-		if t.SuccessorGrant != g || !t.Selection.Valid() {
-			continue
-		}
-		if t.Selection.Mode != kernel.ManagedResume || t.SafePoint.Host.KernelAuthority != authority {
-			return kernel.ErrExecutionConflict
-		}
-		if t.State == kernel.ManagedClosed {
-			if t.Terminal == nil || kernel.ManagedDigest(*t.Terminal) != kernel.ManagedDigest(actual) {
-				return kernel.ErrExecutionConflict
-			}
-			continue
-		}
-		if t.State != kernel.ManagedInvalidated && t.State != kernel.ManagedEnabled {
-			return kernel.ErrExecutionConflict
-		}
-		t.State = kernel.ManagedClosed
-		t.Revision++
-		t.Terminal = &actual
-		if ce == nil && current.SafePoint.ID == t.SafePoint.ID {
-			if e = sqliteSaveManaged(ctx, tx, t); e != nil {
-				return e
-			}
-		} else {
-			b, e := json.Marshal(t)
-			if e != nil {
-				return e
-			}
-			if _, e = tx.ExecContext(ctx, `UPDATE runtime_managed_history SET revision=?,payload_json=? WHERE suspension_id=?`, t.Revision, b, t.SafePoint.ID); e != nil {
-				return e
-			}
-		}
-	}
-	return conflictOrDatabaseError(tx.Commit())
+	return kernel.ObserveManagedRetirement(t, r)
 }

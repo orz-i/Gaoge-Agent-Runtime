@@ -53,22 +53,21 @@ func verifiedTerminalHandoffFrozenSource(
 // item, a single terminal child of that item, and the original physical
 // handoff grant's unique observed-return receipt.
 func VerifiedTerminalHandoffChild(root, child Invocation, items []Item) bool {
+	_, valid := verifiedTerminalHandoffProjection(root, child, items)
+	return valid
+}
+
+func verifiedTerminalHandoffProjection(root, child Invocation, items []Item) (ItemStatus, bool) {
 	frozen, binding, valid := verifiedTerminalHandoffFrozenSource(root, child)
 	if !valid {
-		return false
+		return "", false
 	}
 	// A nested Subagent's original parent is the closest frozen ancestor
 	// Attempt, not necessarily the top-level Turn Invocation. This derives
 	// the only permitted parent from the original sealed child input.
 	// ValidTurnTerminalDescendants independently checks every ancestor
 	// against the Store-serialized Invocation set before terminal Turn CAS.
-	immediate := binding.attempt()
-	if len(binding.Parents) != 0 {
-		// Frozen ancestors are ordered nearest-first by sealChildRootInput.
-		// A great-grandchild must belong to its leaf parent, not the
-		// coordinator farther up the same Turn.
-		immediate = binding.Parents[0]
-	}
+	immediate := binding.immediateParent()
 	startedID := child.ParentItemID
 	var started, terminal Item
 	startCount, terminalCount := 0, 0
@@ -90,51 +89,27 @@ func VerifiedTerminalHandoffChild(root, child Invocation, items []Item) bool {
 		terminal.TurnID != root.TurnID || terminal.InvocationID != immediate.InvocationID ||
 		terminal.RunID != child.ExecutionRefID || terminal.Seq <= started.Seq ||
 		terminal.ParentItemID != started.ID {
-		return false
+		return "", false
 	}
 	var startPayload, terminalPayload delegationItemPayload
-	if !decodeTypedAuthorityJSON(started.Payload, &startPayload) ||
-		!decodeTypedAuthorityJSON(terminal.Payload, &terminalPayload) ||
-		startPayload.DelegationID != frozen.ID || terminalPayload.DelegationID != frozen.ID ||
-		startPayload.ChildRunID != frozen.ChildRunID || terminalPayload.ChildRunID != frozen.ChildRunID ||
-		startPayload.ParentRunID != immediate.ExecutionRefID ||
-		terminalPayload.ParentRunID != immediate.ExecutionRefID ||
-		startPayload.MemberID != frozen.MemberID || terminalPayload.MemberID != frozen.MemberID ||
-		startPayload.Goal != frozen.Goal || terminalPayload.Goal != frozen.Goal {
-		return false
+	if !decodeTypedAuthorityJSON(started.Payload, &startPayload) || !decodeTypedAuthorityJSON(terminal.Payload, &terminalPayload) ||
+		!matchesDelegationPayload(startPayload, frozen, immediate.ExecutionRefID) ||
+		!matchesDelegationPayload(terminalPayload, frozen, immediate.ExecutionRefID) ||
+		!terminalDelegationStatus(terminalPayload.Status) {
+		return "", false
 	}
-	var expected ItemStatus
-	switch terminalPayload.Status {
-	case handoff.StatusCompleted:
-		expected = ItemCompleted
-	case handoff.StatusFailed:
-		expected = ItemFailed
-	case handoff.StatusCancelled:
-		expected = ItemCancelled
-	case handoff.StatusQueued, handoff.StatusRunning:
-		return false
-	default:
-		return false
+	expected := delegationItemStatus(terminalPayload.Status)
+	if terminal.Status != expected || terminal.ID != stableID("hid", child.TurnID, frozen.ID, string(expected)) {
+		return "", false
 	}
-	if terminal.Status != expected ||
-		terminal.ID != stableID("hid", child.TurnID, frozen.ID, string(expected)) {
-		return false
+
+	if frozen.NativeLocal {
+		// Native child status was projected only from the original Kernel
+		// terminal or immutable negative decision by the private Runner
+		// witness. The Delegation result is product data, not another grant.
+		return expected, terminalInvocationStatus(child.Status) && string(child.Status) == string(terminalPayload.Status) &&
+			startPayload.Execution != nil && terminalPayload.Execution != nil && !PendingExecutionDispatch(items, child.ID)
 	}
-	// Handoff's terminal Item alone is not evidence that an independent
-	// ChildRunner start was observed. Require the owning child Invocation's
-	// physical grant and matching non-ambiguous handoff_start_returned.
-	receipts := executionDispatchReceiptIndex(items)
-	grants := 0
-	for _, item := range items {
-		if item.ParentItemID != ExecutionDispatchParentItemID ||
-			item.InvocationID != child.ID || item.RunID != child.ExecutionRefID {
-			continue
-		}
-		grants++
-		boundary, ok := VerifiedExecutionDispatchReceipt(item, receipts[item.ID])
-		if !ok || boundary != "handoff_start_returned" {
-			return false
-		}
-	}
-	return grants == 1
+	_, returned, valid := handoffDispatchHistory(items, child)
+	return expected, valid && returned == 1
 }

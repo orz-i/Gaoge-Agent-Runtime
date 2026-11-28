@@ -7,11 +7,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
 func TestOwnedRetirementFinishNativeIdentity(t *testing.T) {
-	for _, mode := range []string{"owner", "lease", "epoch", "cleared", "expired"} {
+	for _, mode := range []string{"owner", "lease", "epoch", "cleared", "expired", "legacy-mark", "legacy-mark-with-return"} {
 		t.Run(mode, func(t *testing.T) {
 			store, e := CreateNew(t.Context(), ownedPrivatePath(t, "identity.sqlite"))
 			if e != nil {
@@ -35,10 +36,27 @@ func TestOwnedRetirementFinishNativeIdentity(t *testing.T) {
 				t.Fatal(e)
 			}
 			g := kernel.ChildExecutionGrant{ID: "retire-grant", ChildRunID: snap.Run.ID, ExpectedRevision: snap.Run.Revision, ExecutionOwnerID: lease.OwnerID, ExecutionLeaseID: lease.LeaseID, ExecutionEpoch: lease.Epoch, AdmissionSourceHash: strings.Repeat("a", 64), AdmissionOperation: "start"}
-			// Original legacy marker row: no fabricated first-party callback evidence.
-			_, e = store.db.Exec("INSERT INTO runtime_child_effect_grants(grant_id,parent_run_id,child_run_id,start_revision,settled_revision,execution_owner_id,execution_lease_id,execution_epoch,admission_source_hash,admission_operation) VALUES(?,?,?,?,?,?,?,?,?,?)", g.ID, g.ChildRunID, g.ChildRunID, g.ExpectedRevision, snap.Run.Revision, g.ExecutionOwnerID, g.ExecutionLeaseID, g.ExecutionEpoch, g.AdmissionSourceHash, g.AdmissionOperation)
+			// Persist an exact original callback/mark fixture. A legacy mark
+			// without this return is separately required to remain fenced.
+			c := kernel.OwnedPhysicalCallbackCompletion{GrantID: g.ID, ReturnRevision: snap.Run.Revision, ReturnSourceHash: strings.Repeat("b", 64), HostCompleted: true, LeaseOwned: true}
+			_, e = store.db.Exec("UPDATE runtime_runs SET execution_physical_epoch=? WHERE run_id=?", g.ExecutionEpoch, g.ChildRunID)
 			if e != nil {
 				t.Fatal(e)
+			}
+			_, e = store.db.Exec("INSERT INTO runtime_child_effect_grants(grant_id,parent_run_id,child_run_id,start_revision,settled_revision,execution_owner_id,execution_lease_id,execution_epoch,admission_source_hash,admission_operation) VALUES(?,?,?,?,?,?,?,?,?,?)", g.ID, g.ChildRunID, g.ChildRunID, g.ExpectedRevision, 0, g.ExecutionOwnerID, g.ExecutionLeaseID, g.ExecutionEpoch, g.AdmissionSourceHash, g.AdmissionOperation)
+			if e != nil {
+				t.Fatal(e)
+			}
+			if mode != "legacy-mark" {
+				_, e = store.db.Exec("UPDATE runtime_child_effect_grants SET callback_return_revision=?,callback_return_source_hash=?,callback_host_completed=1,callback_lease_owned=1 WHERE grant_id=?", c.ReturnRevision, c.ReturnSourceHash, g.ID)
+				if e != nil {
+					t.Fatal(e)
+				}
+			}
+			if strings.HasPrefix(mode, "legacy-mark") {
+				if _, e = store.db.Exec("UPDATE runtime_child_effect_grants SET settled_revision=? WHERE grant_id=?", snap.Run.Revision, g.ID); e != nil {
+					t.Fatal(e)
+				}
 			}
 			query := ""
 			switch mode {
@@ -51,6 +69,8 @@ func TestOwnedRetirementFinishNativeIdentity(t *testing.T) {
 			case "cleared":
 				query = "execution_owner='',execution_lease_id='',execution_expiry_ms=0"
 			case "expired":
+				query = "execution_expiry_ms=1"
+			case "legacy-mark", "legacy-mark-with-return":
 				query = "execution_expiry_ms=1"
 			}
 			if _, e = store.db.Exec("UPDATE runtime_runs SET "+query+" WHERE run_id=?", g.ChildRunID); e != nil {
@@ -96,13 +116,13 @@ func TestOwnedRetirementFinishNativeIdentity(t *testing.T) {
 			before := readRows("runtime_runs")
 			grants := readRows("runtime_child_effect_grants")
 			receipts := readRows("runtime_owned_retirements")
-			e = store.FinishChildExecution(t.Context(), g)
+			e = conformance.FinishOwnedFixture(t.Context(), rt, g, snap)
 			if mode == "expired" {
 				if e != nil {
 					t.Fatalf("expiry changed identity: %v", e)
 				}
 				r, e := store.LoadOwnedRetirement(t.Context(), g.ID)
-				if e != nil || r.Evidence.MarkOrigin != "LEGACY_UNKNOWN" || r.Evidence.Completion.GrantID != "" {
+				if e != nil || r.Evidence.Completion.NotEntered() || r.Evidence.Completion != c {
 					t.Fatalf("legacy retirement fabricated proof: %+v %v", r, e)
 				}
 				if _, e = store.LookupChildExecution(t.Context(), g.ChildRunID); !errors.Is(e, kernel.ErrNotFound) {
@@ -116,8 +136,14 @@ func TestOwnedRetirementFinishNativeIdentity(t *testing.T) {
 					t.Fatal("rejected finish changed durable grants/receipts")
 				}
 			}
-			if !reflect.DeepEqual(before, readRows("runtime_runs")) {
-				t.Fatal("Finish changed aggregate/native authority")
+			if mode == "expired" {
+				current, e := rt.Load(t.Context(), g.ChildRunID)
+				native, _, le := sqliteManagedLease(t.Context(), store.db, g.ChildRunID)
+				if e != nil || le != nil || kernel.ManagedDigest(current) != kernel.ManagedDigest(snap) || native.OwnerID != "" || native.LeaseID != "" || native.Epoch != lease.Epoch || !native.ExpiresAt.IsZero() {
+					t.Fatalf("finish changed source or retained lease: %v %v", e, le)
+				}
+			} else if !reflect.DeepEqual(before, readRows("runtime_runs")) {
+				t.Fatal("rejected finish changed aggregate/native authority")
 			}
 		})
 	}

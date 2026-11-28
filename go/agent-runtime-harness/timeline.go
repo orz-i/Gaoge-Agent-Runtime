@@ -501,11 +501,31 @@ func (runner *Runner) recordContextItem(ctx context.Context, turn Turn) error {
 	}
 	now := runner.clock.Now().UTC()
 	invocation, _ := loadTopLevelInvocation(ctx, runner.store, turn.ID)
-	_, err = appendItemFact(ctx, runner.store, runner.turnFeed, Item{
-		ID: stableID("hic", turn.ID, turn.ContextRef.ID), TurnID: turn.ID,
+	item := Item{ID: stableID("hic", turn.ID, turn.ContextRef.ID), TurnID: turn.ID,
 		Kind: ItemContext, Status: ItemCompleted, RunID: invocation.ExecutionRefID, InvocationID: invocation.ID,
-		Payload: payload, CreatedAt: now, UpdatedAt: now,
-	})
+		Payload: payload, CreatedAt: now, UpdatedAt: now}
+	// A reused checkpoint is an immutable Turn fact, not a new Attempt.
+	// Verify its historical owner rather than rewriting its original RunID.
+	if invocation.Attempt > 1 {
+		if original, e := runner.store.GetItem(ctx, item.ID); e == nil && original.RunID != item.RunID {
+			items, err := listAllItems(ctx, runner.store, turn.ID)
+			if err != nil {
+				return err
+			}
+			ledger, err := runner.loadTurnBudget(ctx, turn)
+			if err != nil {
+				return err
+			}
+			item.RunID = original.RunID
+			if _, ok := historicalRootForRun(invocation, original.RunID, items, ledger); !ok || original.Seq == 0 || !sameItemIdentity(original, item) {
+				return ErrConflict
+			}
+			return nil
+		} else if e != nil && !errors.Is(e, ErrNotFound) {
+			return e
+		}
+	}
+	_, err = appendItemFact(ctx, runner.store, runner.turnFeed, item)
 	return err
 }
 

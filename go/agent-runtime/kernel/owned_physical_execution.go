@@ -3,14 +3,13 @@ package kernel
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
 	"time"
 
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
 )
 
@@ -36,10 +35,12 @@ var ErrPhysicalAdmissionCommitUnknown = errors.New("kernel physical admission co
 // public Grant ID is already present. Only an actual COMMIT failure may be
 // returned through this attempt's OwnedPhysicalAdmission.CommitOutcome.
 // Observations and receipt-only recovery never grant fresh dispatch authority.
+// CheckOwnedPhysicalEntry atomically consumes the original Grant entry epoch
+// before acknowledging callback entry, including Managed successors; no replay.
 type OwnedPhysicalExecutionStore interface {
 	RecordOwnedPhysicalCallbackReturn(context.Context, ChildExecutionGrant, uint64, OwnedPhysicalCallbackOutcome, OwnedPhysicalCallbackReturn) error
 	LookupOwnedPhysicalCallbackReturn(context.Context, ChildExecutionGrant) (OwnedPhysicalCallbackCompletion, error)
-	BeginOwnedPhysicalExecution(context.Context, ChildExecutionGrant, ExecutionLease, OwnedPhysicalAdmission) error
+	BeginOwnedPhysicalExecution(context.Context, OwnedPhysicalAdmission) (OwnedPhysicalAdmissionResult, error)
 	CheckOwnedPhysicalEntry(context.Context, ChildExecutionGrant, ExecutionLease, Snapshot) (OwnedPhysicalEntryWindow, error)
 	ApplyOwnedPhysicalRecovery(context.Context, ChildExecutionGrant, uint64, StoreMutation, OwnedPhysicalRecovery) (Snapshot, error)
 }
@@ -52,6 +53,33 @@ type OwnedPhysicalAdmission struct {
 	proof      *featurecontrol.Proof
 	attempt    [32]byte
 	dispatchID string
+	acquire    ExecutionAcquireRequest
+	candidate  OwnedPhysicalAdmissionResult
+	recovery   ManagedAdmissionProof
+}
+
+// OwnedPhysicalAdmissionResult is the single admitted native segment.
+type OwnedPhysicalAdmissionResult struct {
+	Grant ChildExecutionGrant
+	Lease ExecutionLease
+}
+
+func (p OwnedPhysicalAdmission) AcquiresLease() bool     { return p.acquire.RunID != "" }
+func (p OwnedPhysicalAdmission) IsManagedRecovery() bool { return p.recovery.valid }
+
+// Candidate exposes only the immutable request identity, not dispatch
+// authority. Fresh candidates have no epoch or authoritative expiration.
+func (p OwnedPhysicalAdmission) Candidate() OwnedPhysicalAdmissionResult { return p.candidate }
+
+// OwnedPhysicalAdmissionSubject seals the same intent for fresh and borrowed
+// owners, including the operation and original Host dispatch correlation.
+func OwnedPhysicalAdmissionSubject(q ExecutionAcquireRequest, l ExecutionLease, operation, dispatchID string) string {
+	l.ExpiresAt = time.Time{}
+	return ManagedDigest(struct {
+		Request               ExecutionAcquireRequest
+		Lease                 ExecutionLease
+		Operation, DispatchID string
+	}{q, l, operation, dispatchID})
 }
 
 // The error classification alone is not evidence of this invocation's
@@ -80,7 +108,7 @@ func (p OwnedPhysicalAdmission) CommitOutcome(err error) error {
 	}
 	for _, denial := range [...]error{
 		ErrInvalidInput, ErrNotFound, ErrAlreadyExists, ErrConflict, ErrTerminal, ErrDeadline,
-		ErrExecutionConflict, ErrExecutionRequired, ErrExecutionQuarantined, ErrChildExecutionBusy, ErrOwnedRetirementPending,
+		ErrExecutionConflict, ErrExecutionRequired, ErrExecutionQuarantined, ErrChildExecutionBusy,
 	} {
 		if errors.Is(err, denial) {
 			return err
@@ -95,52 +123,51 @@ func (p OwnedPhysicalAdmission) commitUncertain(err error) bool {
 }
 
 func (p OwnedPhysicalAdmission) Matches(g ChildExecutionGrant, s Snapshot, l ExecutionLease) bool {
-	domain, subject := "agent_owned_physical_admission", l.LeaseID
+	candidate := p.candidate
+	if p.attempt == ([32]byte{}) || !g.Identity().Valid() ||
+		g.ID != candidate.Grant.ID || g.ChildRunID != candidate.Grant.ChildRunID || g.ExpectedRevision != candidate.Grant.ExpectedRevision ||
+		g.AdmissionOperation != candidate.Grant.AdmissionOperation || l.OwnerID != candidate.Lease.OwnerID || l.LeaseID != candidate.Lease.LeaseID ||
+		(!p.AcquiresLease() && l.Epoch != candidate.Lease.Epoch) || !g.MatchesExecution(l) {
+		return false
+	}
+	if p.IsManagedRecovery() {
+		return p.AcquiresLease() && g.AdmissionOperation == "managed_resume" && !strings.HasPrefix(g.ID, ownedDispatchGrantPrefix) &&
+			p.recovery.Matches(p.recovery.transfer, ManagedResume) && ManagedSourceMatches(p.recovery.transfer.SafePoint, s) &&
+			g.AdmissionSourceHash == ownedAdmissionAttemptHash(s, l, g.AdmissionOperation, g.ID, p.attempt)
+	}
+	if !ordinaryOwnedOperation(g.AdmissionOperation) {
+		return false
+	}
 	if p.dispatchID != "" {
-		id, err := OwnedPhysicalDispatchGrantID(g.ChildRunID, g.AdmissionOperation, p.dispatchID)
-		if err != nil || g.ID != id {
+		id, e := OwnedPhysicalDispatchGrantID(g.ChildRunID, g.AdmissionOperation, p.dispatchID)
+		if e != nil || g.ID != id {
 			return false
 		}
-		domain, subject = "agent_owned_physical_dispatch_admission", ManagedDigest(struct{ LeaseID, DispatchID string }{l.LeaseID, p.dispatchID})
 	} else if strings.HasPrefix(g.ID, ownedDispatchGrantPrefix) {
 		return false
 	}
-	return p.attempt != ([32]byte{}) && s.Run.Kind == "agent" && s.Run.ParentRunID == "" && (s.Run.Status == RunStatusRunning || s.Run.Status == RunStatusWaitingInput) && s.Run.Revision == g.ExpectedRevision && g.Identity().Valid() && g.MatchesExecution(l) &&
+	borrowed := candidate.Lease
+	if p.AcquiresLease() {
+		borrowed = ExecutionLease{}
+	}
+	return s.Run.Kind == "agent" && s.Run.ParentRunID == "" && s.Run.Revision == g.ExpectedRevision &&
+		(s.Run.Status == RunStatusRunning || s.Run.Status == RunStatusWaitingInput) &&
 		g.AdmissionSourceHash == ownedAdmissionAttemptHash(s, l, g.AdmissionOperation, g.ID, p.attempt) &&
-		p.proof.Matches(s.Run.ID, s.Run.Revision, domain, subject, s.State, s.Checkpoint)
+		p.proof.Matches(s.Run.ID, s.Run.Revision, "agent_owned_physical_admission", OwnedPhysicalAdmissionSubject(p.acquire, borrowed, g.AdmissionOperation, p.dispatchID), s.State, s)
 }
 
 func ownedAdmissionAttemptHash(s Snapshot, l ExecutionLease, operation, grantID string, attempt [32]byte) string {
-	source := ownedAdmissionHash(s, l, operation)
-	if source == "" || attempt == ([32]byte{}) {
+	if attempt == ([32]byte{}) {
 		return ""
 	}
-	// Both source and attempt have a fixed length; the grant ID is the
-	// remainder. This domain is distinct from the stable managed source hash.
-	payload := append([]byte("owned-physical-admission-attempt/v1\x00"+source), attempt[:]...)
-	digest := sha256.Sum256(append(payload, []byte(grantID)...))
-	return hex.EncodeToString(digest[:])
-}
-
-func ownedAdmissionHash(s Snapshot, l ExecutionLease, operation string) string {
-	encoded, e := json.Marshal(struct {
-		ID                        string
-		Kind                      RunKind
-		Actor                     ActorRef
-		Thread                    ThreadRef
-		RequestID, ParentID, Goal string
-		Revision                  uint64
-		State                     json.RawMessage
-		Checkpoint                *Checkpoint
-		OwnerID, LeaseID          string
-		Epoch                     uint64
-	}{s.Run.ID, s.Run.Kind, s.Run.Actor, s.Run.Thread, s.Run.RequestID, s.Run.ParentRunID, s.Run.Goal, s.Run.Revision, s.State, s.Checkpoint, l.OwnerID, l.LeaseID, l.Epoch})
-	if e != nil {
-		return ""
-	}
-	encoded = append(append([]byte(operation), 0), encoded...)
-	digest := sha256.Sum256(encoded)
-	return hex.EncodeToString(digest[:])
+	l.ExpiresAt = time.Time{}
+	return ManagedDigest(struct {
+		Domain             string
+		Source             Snapshot
+		Lease              ExecutionLease
+		Operation, GrantID string
+		Attempt            [32]byte
+	}{"owned-physical-admission-attempt/v2", s, l, operation, grantID, attempt})
 }
 
 // BoundExecutionLease returns a copy; it cannot renew, acquire or transfer it.
@@ -159,6 +186,10 @@ func (r *Runtime) SupportsOwnedPhysicalExecution() bool {
 }
 
 const ownedDispatchGrantPrefix = "owneddispatch_"
+const ownedNativeCommandGrantPrefix = ownedDispatchGrantPrefix + "native_"
+
+// NativeCommandCorrelation identifies a native operation, not a Host Item.
+func NativeCommandCorrelation(id string) bool { return strings.HasPrefix(id, "nativecmd_") }
 
 // OwnedPhysicalDispatchGrantID links an existing Host dispatch to its one
 // native Grant identity. The reserved namespace prevents ordinary IDSource
@@ -169,98 +200,129 @@ func OwnedPhysicalDispatchGrantID(runID, operation, dispatchID string) (string, 
 		dispatchID == "" || strings.TrimSpace(dispatchID) != dispatchID || len(dispatchID) > 256 {
 		return "", ErrInvalidInput
 	}
-	return ownedDispatchGrantPrefix + ManagedDigest(struct{ RunID, Operation, DispatchID string }{runID, operation, dispatchID}), nil
+	prefix := ownedDispatchGrantPrefix
+	if NativeCommandCorrelation(dispatchID) {
+		prefix = ownedNativeCommandGrantPrefix
+	}
+	return prefix + ManagedDigest(struct{ RunID, Operation, DispatchID string }{runID, operation, dispatchID}), nil
 }
 
-func (r *Runtime) BeginOwnedPhysicalExecution(ctx context.Context, id string, revision uint64, proof *featurecontrol.Proof, operation ...string) (ChildExecutionGrant, error) {
-	if len(operation) != 1 {
-		return ChildExecutionGrant{}, ErrInvalidInput
+// AdmitOwnedPhysicalExecution is the sole native Root admission. A fresh
+// owner request is admitted atomically with its Grant, or a caller-bound
+// Lease is borrowed unchanged. No ordinary Acquire/Release compensation.
+func (r *Runtime) AdmitOwnedPhysicalExecution(ctx context.Context, s Snapshot, q ExecutionAcquireRequest, proof *featurecontrol.Proof, operation, dispatchID string) (*Runtime, OwnedPhysicalAdmissionResult, error) {
+	var zero OwnedPhysicalAdmissionResult
+	id, rev := s.Run.ID, s.Run.Revision
+	if r == nil || ctx == nil || id == "" || rev == 0 || !ordinaryOwnedOperation(operation) {
+		return nil, zero, ErrInvalidInput
 	}
-	return r.beginOwnedPhysicalExecution(ctx, id, revision, proof, operation[0], "")
-}
-
-// BeginOwnedPhysicalExecutionForDispatch uses the existing admission with
-// an additional original Host-dispatch correlation, not a second permit.
-func (r *Runtime) BeginOwnedPhysicalExecutionForDispatch(ctx context.Context, id string, revision uint64, proof *featurecontrol.Proof, operation, dispatchID string) (ChildExecutionGrant, error) {
-	if _, err := OwnedPhysicalDispatchGrantID(id, operation, dispatchID); err != nil {
-		return ChildExecutionGrant{}, err
+	_, ok := r.store.(OwnedPhysicalExecutionStore)
+	if !ok || !r.SupportsExecution() || !r.SupportsChildExecution() {
+		return nil, zero, ErrExecutionRequired
 	}
-	return r.beginOwnedPhysicalExecution(ctx, id, revision, proof, operation, dispatchID)
-}
-
-func (r *Runtime) beginOwnedPhysicalExecution(ctx context.Context, id string, revision uint64, proof *featurecontrol.Proof, operation, dispatchID string) (ChildExecutionGrant, error) {
-	if r == nil || ctx == nil || id == "" || revision == 0 || strings.TrimSpace(operation) == "" || operation != strings.TrimSpace(operation) {
-		return ChildExecutionGrant{}, ErrInvalidInput
+	if r.physicalGrant != nil {
+		return nil, zero, ErrExecutionConflict
 	}
-	store, ok := r.store.(OwnedPhysicalExecutionStore)
-	if !ok {
-		return ChildExecutionGrant{}, ErrExecutionRequired
-	}
-	l, ok := r.BoundExecutionLease()
-	if !ok || l.RunID != id {
-		return ChildExecutionGrant{}, ErrExecutionRequired
-	}
-	s, e := r.Load(ctx, id)
-	if e != nil {
-		return ChildExecutionGrant{}, e
-	}
-	if s.Run.Revision != revision {
-		return ChildExecutionGrant{}, ErrConflict
+	l, bound := r.BoundExecutionLease()
+	if bound {
+		if l.RunID != id || q != (ExecutionAcquireRequest{}) {
+			return nil, zero, ErrExecutionConflict
+		}
+	} else if q.RunID != id || !validExecutionAcquireRequest(q) || strings.TrimSpace(q.OwnerID) != q.OwnerID {
+		return nil, zero, ErrInvalidInput
 	}
 	var gid string
+	var e error
 	if dispatchID != "" {
 		gid, e = OwnedPhysicalDispatchGrantID(id, operation, dispatchID)
 	} else {
 		gid, e = r.NewID("ownedgrant")
 		if e == nil && strings.HasPrefix(gid, ownedDispatchGrantPrefix) {
-			return ChildExecutionGrant{}, ErrInvalidInput
+			return nil, zero, ErrInvalidInput
 		}
 	}
 	if e != nil {
-		return ChildExecutionGrant{}, e
+		return nil, zero, e
 	}
-	p := OwnedPhysicalAdmission{proof: proof, dispatchID: dispatchID}
-	// Do not use configured IDSource or other Host callbacks for attempt
-	// entropy: two contenders may deliberately return the same public ID.
+	p := OwnedPhysicalAdmission{proof: proof, dispatchID: dispatchID, acquire: q}
 	if _, e = rand.Read(p.attempt[:]); e != nil {
-		return ChildExecutionGrant{}, e
+		return nil, zero, e
 	}
-	g := ChildExecutionGrant{ID: gid, ChildRunID: id, ExpectedRevision: revision, ExecutionOwnerID: l.OwnerID, ExecutionLeaseID: l.LeaseID, ExecutionEpoch: l.Epoch, AdmissionSourceHash: ownedAdmissionAttemptHash(s, l, operation, gid, p.attempt), AdmissionOperation: operation}
-	if !p.Matches(g, s, l) {
-		return ChildExecutionGrant{}, ErrExecutionConflict
+	if !bound {
+		// The private invocation generates an unpredictable lease token, while
+		// the Store alone chooses epoch and expiry at its locked transaction.
+		var token [16]byte
+		if _, e = rand.Read(token[:]); e != nil {
+			return nil, zero, e
+		}
+		l = ExecutionLease{RunID: id, OwnerID: q.OwnerID, LeaseID: hex.EncodeToString(token[:])}
 	}
-	if e = store.BeginOwnedPhysicalExecution(ctx, g, l, p); e != nil {
-		return r.recoverOwnedAdmissionACK(ctx, g, p, e)
+	g := ChildExecutionGrant{ID: gid, ChildRunID: id, ExpectedRevision: rev, ExecutionOwnerID: l.OwnerID, ExecutionLeaseID: l.LeaseID, ExecutionEpoch: l.Epoch, AdmissionOperation: operation}
+	if bound {
+		g.AdmissionSourceHash = ownedAdmissionAttemptHash(s, l, operation, gid, p.attempt)
 	}
-	return g, nil
+	p.candidate = OwnedPhysicalAdmissionResult{Grant: g, Lease: l}
+	borrowed := l
+	if !bound {
+		borrowed = ExecutionLease{}
+	}
+	if !proof.Matches(id, rev, "agent_owned_physical_admission", OwnedPhysicalAdmissionSubject(q, borrowed, operation, dispatchID), s.State, s) {
+		return nil, zero, ErrExecutionConflict
+	}
+	return r.admitOwnedPhysical(ctx, s, p)
 }
 
-// Only an explicitly uncertain COMMIT of this in-flight invocation may be
-// disambiguated. A lookup is observation, never an alternate admission path.
-// Do not turn a definite Store refusal (even a joined error) into success.
-func (r *Runtime) recoverOwnedAdmissionACK(ctx context.Context, g ChildExecutionGrant, attempt OwnedPhysicalAdmission, cause error) (ChildExecutionGrant, error) {
-	if !attempt.commitUncertain(cause) {
-		return ChildExecutionGrant{}, cause
+// Both ordinary and recovered segments use the same commit outcome and
+// scoped native bearer. A separate recovery ACK cannot elect an owner.
+func (r *Runtime) admitOwnedPhysical(ctx context.Context, s Snapshot, p OwnedPhysicalAdmission) (*Runtime, OwnedPhysicalAdmissionResult, error) {
+	var zero OwnedPhysicalAdmissionResult
+	if r == nil || ctx == nil {
+		return nil, zero, ErrInvalidInput
 	}
-	if err := ctx.Err(); err != nil {
-		return ChildExecutionGrant{}, errors.Join(cause, err)
-	}
-	physical, ok := r.store.(ChildExecutionStore)
+	store, ok := r.store.(OwnedPhysicalExecutionStore)
 	if !ok {
-		return ChildExecutionGrant{}, cause
+		return nil, zero, ErrExecutionRequired
 	}
-	// Bound the reconciliation read and inherit caller cancellation. Never
-	// resume physical execution from a detached cleanup context.
-	readCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-	stored, err := physical.LookupChildExecution(readCtx, g.ChildRunID)
-	if err != nil || stored != g {
-		return ChildExecutionGrant{}, errors.Join(cause, err)
+	id, gid := s.Run.ID, p.Candidate().Grant.ID
+	v, e := store.BeginOwnedPhysicalExecution(ctx, p)
+	if e != nil {
+		if !p.commitUncertain(e) {
+			return nil, zero, e
+		}
+		// A commit error is not a grant. Compare the exact candidate, private
+		// attempt and durable original row before returning a bearer.
+		physical, ok := r.store.(ChildExecutionStore)
+		if !ok || ctx.Err() != nil {
+			return nil, zero, errors.Join(e, ctx.Err())
+		}
+		readCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+		stored, readErr := physical.LookupChildExecution(readCtx, id)
+		if readErr != nil || stored != v.Grant || readCtx.Err() != nil {
+			return nil, zero, errors.Join(e, readErr, readCtx.Err())
+		}
 	}
-	if err = readCtx.Err(); err != nil {
-		return ChildExecutionGrant{}, errors.Join(cause, err)
+	if v.Grant.ID != gid || !validExecutionLease(v.Lease) || !p.Matches(v.Grant, s, v.Lease) {
+		return nil, zero, errors.Join(ErrPhysicalAdmissionCommitUnknown, e)
 	}
-	return g, nil
+	// Bind both capabilities from the one committed result. No second
+	// read/owner proof is required. Callback entry revalidates the native
+	// identity, current Snapshot and Store time before any effect.
+	scoped := *r
+	scoped.execution, scoped.physicalGrant = &v.Lease, &v.Grant
+	return &scoped, v, nil
+}
+
+// ReceiptRecoveryTarget includes the optional accounting CAS in the same
+// existing opaque target seal. A receipt-only permit never authorizes send.
+func ReceiptRecoveryTarget(checkpoint *Checkpoint, ledger *budget.LedgerMutation) any {
+	if ledger == nil {
+		return checkpoint
+	}
+	return struct {
+		Checkpoint *Checkpoint
+		Ledger     *budget.LedgerMutation
+	}{checkpoint, ledger}
 }
 
 // OwnedPhysicalRecovery is first-party-only, exact source AND target CAS
@@ -286,13 +348,16 @@ func (p OwnedPhysicalRecovery) Matches(g ChildExecutionGrant, current Snapshot, 
 	if !reflect.DeepEqual(run, current.Run) || m.Record.ExecutionRequired || !reflect.DeepEqual(m.Record.Result, current.Result) {
 		return false
 	}
+	if m.Ledger != nil && (p.modelEvidence || len(m.Events) != 1 || (m.Events[0].Type != "agent.model_invocation.completed" && m.Events[0].Type != "tool.receipt_recovered")) {
+		return false
+	}
 	if p.modelEvidence {
 		if len(m.Events) != 0 || m.Record.Run.ErrorCode != current.Run.ErrorCode || m.Record.Run.ErrorDetail != current.Run.ErrorDetail || !reflect.DeepEqual(m.Record.Checkpoint, current.Checkpoint) {
 			return false
 		}
 		return p.source.Matches(current.Run.ID, current.Run.Revision, "agent_owned_model_receipt_evidence_source", g.ID, current.State, current.Checkpoint) && p.target.Matches(current.Run.ID, current.Run.Revision, "agent_owned_model_receipt_evidence_target", g.ID, m.Record.State, m.Record.Checkpoint)
 	}
-	return p.source.Matches(current.Run.ID, current.Run.Revision, "agent_owned_receipt_recovery_source", g.ID, current.State, current.Checkpoint) && p.target.Matches(current.Run.ID, current.Run.Revision, "agent_owned_receipt_recovery_target", g.ID, m.Record.State, m.Record.Checkpoint)
+	return p.source.Matches(current.Run.ID, current.Run.Revision, "agent_owned_receipt_recovery_source", g.ID, current.State, current.Checkpoint) && p.target.Matches(current.Run.ID, current.Run.Revision, "agent_owned_receipt_recovery_target", g.ID, m.Record.State, ReceiptRecoveryTarget(m.Record.Checkpoint, m.Ledger))
 }
 
 // PhysicalPermit is usable only for this already-validated receipt-only CAS.
@@ -313,7 +378,7 @@ func (r *Runtime) ApplyOwnedModelReceiptEvidence(ctx context.Context, g ChildExe
 }
 func (r *Runtime) applyOwnedPhysicalPurpose(ctx context.Context, g ChildExecutionGrant, revision uint64, m Mutation, source, target *featurecontrol.Proof, evidence bool) (Snapshot, error) {
 
-	if r == nil || ctx == nil || revision == 0 || hasReservedApplyEvidence(m.Events) {
+	if r == nil || ctx == nil || revision == 0 || (evidence && m.Ledger != nil) || hasReservedApplyEvidence(m.Events) {
 		return Snapshot{}, ErrInvalidInput
 	}
 	store, ok := r.store.(OwnedPhysicalExecutionStore)
@@ -330,31 +395,15 @@ func (r *Runtime) applyOwnedPhysicalPurpose(ctx context.Context, g ChildExecutio
 	if e = validateMutation(s, m); e != nil {
 		return Snapshot{}, e
 	}
+	if m.Ledger != nil {
+		if _, ok := r.store.(budget.LedgerStore); !ok {
+			return Snapshot{}, ErrExecutionRequired
+		}
+	}
 	proposed := r.makeStoreMutation(s, m)
 	p := OwnedPhysicalRecovery{source: source, target: target, modelEvidence: evidence}
 	if !p.Matches(g, s, proposed) {
 		return Snapshot{}, ErrExecutionConflict
 	}
 	return store.ApplyOwnedPhysicalRecovery(ctx, g, revision, proposed, p)
-}
-
-// MarkOwnedPhysicalRecovered never supplies an execution lease. Agent must
-// prove durable callback-returned, Host completion, and all original receipts.
-func (r *Runtime) MarkOwnedPhysicalRecovered(ctx context.Context, g ChildExecutionGrant, proof *featurecontrol.Proof) error {
-	if r == nil || ctx == nil || !g.IsOwned() {
-		return ErrInvalidInput
-	}
-	store, ok := r.store.(ChildExecutionStore)
-	if !ok {
-		return ErrExecutionRequired
-	}
-	s, e := r.Load(ctx, g.ChildRunID)
-	if e != nil {
-		return e
-	}
-	p := ChildExecutionSettlement{proof: proof, recovery: true}
-	if !p.Matches(g, s) {
-		return ErrExecutionConflict
-	}
-	return store.MarkChildExecutionSettled(ctx, g, p)
 }

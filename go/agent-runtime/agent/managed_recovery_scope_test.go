@@ -54,7 +54,7 @@ func TestManagedContextActualEarlyReturnCanSuspendButIsNotCompletion(t *testing.
 	lifecycle := callbackscope.New(callbackscope.Binding{RunID: "run", GrantID: "original"}, []any{adapter})
 	_, e = chain.Invoke(callbackscope.Bind(t.Context(), lifecycle), plugin.RunInvocation{RunID: "run", Operation: plugin.RunStart}, func(ctx context.Context) (kernel.Snapshot, error) {
 		request := model.Request{RunID: "run", Model: "first"}
-		if _, ok := callbackscope.ManagedSuspension(ctx, adapter, request); ok {
+		if _, ok := callbackscope.ManagedObligationSuspension(ctx, adapter, nil, request, ""); ok {
 			t.Fatal("hydration alone certified preparation")
 		}
 		for _, name := range []string{"first", "second"} {
@@ -62,7 +62,7 @@ func TestManagedContextActualEarlyReturnCanSuspendButIsNotCompletion(t *testing.
 			if _, err := adapter.Prepare(ctx, request); err != nil {
 				t.Fatal(err)
 			}
-			if _, ok := callbackscope.ManagedSuspension(ctx, adapter, request); !ok {
+			if _, ok := callbackscope.ManagedObligationSuspension(ctx, adapter, nil, request, ""); !ok {
 				t.Fatal("actual successful early return not recorded")
 			}
 		}
@@ -95,26 +95,12 @@ func TestManagedContextFailedPreparationCannotCreateSafePoint(t *testing.T) {
 		if err == nil {
 			t.Fatal("missing fixture failure")
 		}
-		if _, ok := callbackscope.ManagedSuspension(ctx, adapter, request); ok {
+		if _, ok := callbackscope.ManagedObligationSuspension(ctx, adapter, nil, request, ""); ok {
 			t.Fatal("uncertain prepare certified")
 		}
 		return kernel.Snapshot{}, err
 	})
 	if e == nil {
 		t.Fatal("failed Prepare swallowed")
-	}
-}
-
-func TestManagedClaimantUsesFixedInternalEntropy(t *testing.T) {
-	first, err := newManagedClaimantID()
-	if err != nil {
-		t.Fatal(err)
-	}
-	second, err := newManagedClaimantID()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(first) != len("managedclaimant-")+64 || first == second {
-		t.Fatal("claimants are not distinct internal entropy")
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/handoff"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
 func nonAssignableRuntimeTool(key string) bool {
@@ -94,25 +95,55 @@ func frozenDelegationExecution(value handoff.Delegation) *handoff.Delegation {
 	return &value
 }
 
-func (runner *Runner) frozenDelegation(ctx context.Context, turnID, id string) (handoff.Delegation, bool, error) {
-	items, err := listAllItems(ctx, runner.store, turnID)
-	if err != nil {
+func (runner *Runner) frozenDelegation(ctx context.Context, turnID, id string, ownerID ...string) (handoff.Delegation, bool, error) {
+	owner := ""
+	if len(ownerID) == 1 {
+		owner = ownerID[0]
+	}
+	payload, found, err := runner.originalDelegationPayload(ctx, turnID, id, owner)
+	if err != nil || !found {
 		return handoff.Delegation{}, false, err
 	}
-	for _, item := range items {
-		if item.Kind != ItemDelegation || (item.Status != ItemStarted && item.Status != ItemWaiting) {
-			continue
-		}
-		var payload delegationItemPayload
-		if !decodeTypedAuthorityJSON(item.Payload, &payload) {
-			// An obsolete Role-bearing Item is not a new member authority.
-			return handoff.Delegation{}, false, ErrConflict
-		}
-		if payload.DelegationID == id && payload.Execution != nil {
-			return *payload.Execution, true, nil
-		}
+	if payload.Execution == nil || payload.DelegationID != id {
+		return handoff.Delegation{}, false, ErrConflict
 	}
-	return handoff.Delegation{}, false, nil
+	return *payload.Execution, true, nil
+}
+
+// The standard local child uses the exact same native budget adapter and
+// Runtime as its root. Route identity is a composition fact, not inferred
+// from a same-ID local Run.
+func (runner *Runner) nativeLocalDelegation(d handoff.Delegation) *agent.Runner {
+	if !runner.nativeBudget() {
+		return nil
+	}
+	native, ok := runner.agent.(*agent.Runner)
+	c, bound := runner.handoffs.(*handoff.Coordinator)
+	if !ok || !bound || !c.UsesEagerLocalAgentForDelegation(runner.runtime, native, d) {
+		return nil
+	}
+	return native
+}
+
+// Only a fixed, scoped local Agent in this exact Runtime may replace
+// Host Dispatch. The selected route is frozen with the original Delegation.
+func (runner *Runner) nativeHandoff(ctx context.Context, turnID string, d handoff.Delegation) (*agent.Runner, error) {
+	c, ok := runner.handoffs.(*handoff.Coordinator)
+	if !ok || d.Remote {
+		return nil, nil
+	}
+	native, err := runner.nativeRootCommands(ctx, turnID, true)
+	if err != nil || native == nil || !c.UsesLocalAgentForDelegation(runner.runtime, native, d) {
+		return nil, err
+	}
+	return native, nil
+}
+
+func delegationBudgetLimits(d handoff.Delegation) budget.Limits {
+	if d.SubtreeLimits != nil {
+		return *d.SubtreeLimits
+	}
+	return d.Limits
 }
 
 func (runner *Runner) admitDelegationChild(ctx context.Context, turn Turn, parent Invocation, delegation handoff.Delegation) error {
@@ -122,10 +153,7 @@ func (runner *Runner) admitDelegationChild(ctx context.Context, turn Turn, paren
 	}
 	// Historical frozen Waiting envelopes cannot bypass the current meter
 	// contract. Reject unsupported hard limits before any ledger mutation.
-	childLimits := delegation.Limits
-	if delegation.SubtreeLimits != nil {
-		childLimits = *delegation.SubtreeLimits
-	}
+	childLimits := delegationBudgetLimits(delegation)
 	if !enforceableHarnessBudgetLimits(childLimits) {
 		return ErrInvalidRequest
 	}
@@ -137,9 +165,20 @@ func (runner *Runner) admitDelegationChild(ctx context.Context, turn Turn, paren
 	if err != nil {
 		return err
 	}
-	// Recover terminal releases missed between the Runtime commit and the budget
-	// commit. Waiting coordinators and merely cancelled requests still occupy
-	// capacity until their Run has actually ended.
+	binding := budget.RunBudget{ParentRunID: parent.ExecutionRefID, Limits: childLimits}
+	if delegation.NativeLocal || runner.nativeLocalDelegation(delegation) != nil {
+		// Capacity preview only. Do not consume a child count, lifetime
+		// slot, or project a phantom registration before native Create.
+		if ledger.ID != turn.ID {
+			return budget.ErrLedgerConflict
+		}
+		draft := budget.LedgerMap{ledger.ID: ledger}
+		_, err = (budget.Coordinator{Store: draft}).RegisterRun(ctx, ledger.ID, delegation.ChildRunID, binding)
+		return err
+	}
+	// Reconcile legacy/remote lifetime releases and uncreated reservations.
+	// A native local terminal Run must already have settled its own ledger.
+	// Waiting or merely cancelled requests retain lifetime capacity.
 	var finished []string
 	for id, binding := range ledger.Runs {
 		if ledger.FinishedRuns[id] {
@@ -170,6 +209,12 @@ func (runner *Runner) admitDelegationChild(ctx context.Context, turn Turn, paren
 			return loadErr
 		}
 		if terminalRuntimeStatus(snapshot.Run.Status) {
+			// Native terminal commits already settle the lifetime in the
+			// same transaction. Missing accounting is not a repairable
+			// Host projection, nor permission to admit another descendant.
+			if runner.budgets.dependencies.Runtime != nil && snapshot.Run.Kind == "agent" {
+				return ErrExecutionOutcomeUnknown
+			}
 			finished = append(finished, id)
 		}
 	}
@@ -180,10 +225,7 @@ func (runner *Runner) admitDelegationChild(ctx context.Context, turn Turn, paren
 	}
 	// Admission happens before child topology facts are appended so a hard
 	// descendant ceiling cannot leave a phantom relation or child Invocation.
-	ledger, err = coordinator.RegisterRun(ctx, turn.ID, delegation.ChildRunID, budget.RunBudget{
-		ParentRunID: parent.ExecutionRefID,
-		Limits:      childLimits,
-	})
+	ledger, err = coordinator.RegisterRun(ctx, turn.ID, delegation.ChildRunID, binding)
 	if err != nil {
 		return err
 	}
@@ -206,7 +248,7 @@ func (runner *Runner) prepareHandoffChild(ctx context.Context, turn Turn, parent
 	}
 	// Delegate Items may stop at the immediate Invocation owner, so inherit
 	// the already-frozen intermediate owners as well as the root Attempt.
-	parentAttempts, err := runner.freezeChildParentAttempts(ctx, turn.ID, parentItemID, root)
+	parentAttempts, err := runner.freezeChildParentAttempts(ctx, turn.ID, parentItemID, root, "")
 	if err != nil {
 		return err
 	}
@@ -266,4 +308,122 @@ func isHandoffDelegationInvocation(invocation Invocation) bool {
 	}
 	id, err := AgentInvocationID(invocation.TurnID, invocation.ParentItemID, delegation.ID)
 	return err == nil && id == invocation.ID
+}
+
+// nativeChildSelection uses the same original sealed parent and child identity
+// for Create, definitive rejection and cancellation. No Host grant is needed.
+func (r *Runner) nativeChildSelection(ctx context.Context, turn Turn, owner Invocation, status kernel.RunStatus, reason string) (handoff.Delegation, Invocation, kernel.RunCreationDecision, *agent.Runner, error) {
+	d, parent, e := r.originalHandoffParent(ctx, owner)
+	if e != nil || !d.NativeLocal || owner.TurnID != turn.ID || owner.Attempt != 1 {
+		return d, parent, kernel.RunCreationDecision{}, nil, errors.Join(ErrConflict, e)
+	}
+	native, err := r.nativeHandoff(ctx, turn.ID, d)
+	if err != nil || native == nil {
+		return d, parent, kernel.RunCreationDecision{}, nil, errors.Join(ErrConflict, err)
+	}
+	q, e := r.nativeChildCreationSelection(ctx, turn, d, parent.ExecutionRefID, owner.Input, status, reason)
+	return d, parent, q, native, e
+}
+
+func (r *Runner) nativeChildCreationSelection(ctx context.Context, turn Turn, d handoff.Delegation, parentRunID string, input json.RawMessage, status kernel.RunStatus, reason string) (kernel.RunCreationDecision, error) {
+	q := kernel.RunCreationDecision{RunID: d.ChildRunID, LogicalParentRunID: parentRunID, OriginFingerprint: agent.FrozenOriginFingerprint(input), Status: status, Reason: strings.TrimSpace(reason)}
+	config, err := loadSealedConfig(ctx, r.store, turn.ConfigSnapshotID)
+	if err != nil {
+		return q, err
+	}
+	if config.SharedBudget != nil {
+		if !r.nativeBudget() {
+			return q, ErrConflict
+		}
+		q.Budget = budget.RunEnrollment{ScopeID: turn.ID, Limits: *config.SharedBudget, Binding: budget.RunBudget{ParentRunID: parentRunID, Limits: delegationBudgetLimits(d)}}
+	}
+	return q, nil
+}
+
+func (r *Runner) nativeChildDecision(ctx context.Context, turn Turn, owner Invocation) (kernel.RunCreationDecision, error) {
+	_, _, q, _, e := r.nativeChildSelection(ctx, turn, owner, kernel.RunStatusCancelled, "")
+	if e != nil {
+		return q, e
+	}
+	return r.readNativeCreationDecision(ctx, q)
+}
+
+// Project only the immutable native negative decision; no synthetic Kernel
+// snapshot, lease, ledger member or ChildRunner receipt is created.
+func (r *Runner) projectUncreatedNativeChild(ctx context.Context, turn Turn, owner Invocation, d kernel.RunCreationDecision) (handoff.Delegation, error) {
+	frozen, parent, q, _, e := r.nativeChildSelection(ctx, turn, owner, d.Status, d.Reason)
+	if e != nil || !d.MatchesSelection(q) {
+		return handoff.Delegation{}, errors.Join(ErrConflict, e)
+	}
+	if e = r.projectCreationDecisionBudget(ctx, d); e != nil {
+		return handoff.Delegation{}, e
+	}
+	current, e := r.store.GetInvocation(ctx, owner.ID)
+	if e != nil || !sameFrozenInvocationAuthority(owner, current) {
+		return handoff.Delegation{}, errors.Join(ErrConflict, e)
+	}
+	code := agentStartFailedCode
+	if d.Status == kernel.RunStatusCancelled {
+		code = "run.cancelled"
+	}
+	current, e = r.syncInvocationStatus(withTerminalWitness(ctx, current, TurnStatus(d.Status)), current, invocationStatusFromTurn(TurnStatus(d.Status)), code, d.Reason)
+	if e != nil {
+		return handoff.Delegation{}, e
+	}
+	frozen.Status, frozen.ErrorCode, frozen.Error = handoff.Status(d.Status), current.ErrorCode, current.ErrorDetail
+	_, e = r.recordDelegationItem(ctx, turn, parent, frozen, delegationItemStatus(frozen.Status), owner.ParentItemID)
+	return frozen, e
+}
+
+func (r *Runner) dispatchNativeHandoff(ctx context.Context, turn Turn, parent kernel.Snapshot, child Invocation, d handoff.Delegation) (handoff.Delegation, error) {
+	frozen, owner, q, native, e := r.nativeChildSelection(ctx, turn, child, kernel.RunStatusCancelled, "")
+	if e != nil || !sameHandoffFrozenExecution(frozen, d) || owner.ExecutionRefID != parent.Run.ID {
+		return handoff.Delegation{}, errors.Join(ErrConflict, e)
+	}
+	if e := r.originalNativeCommand(ctx, child); e != nil {
+		return handoff.Delegation{}, errors.Join(ErrConflict, e)
+	}
+	decision, e := r.readNativeCreationDecision(ctx, q)
+	var startErr error
+	if errors.Is(e, kernel.ErrNotFound) {
+		c := r.handoffs.(*handoff.Coordinator)
+		var snap kernel.Snapshot
+		var outcome agent.PhysicalCallOutcome
+		snap, outcome, startErr = r.observeNativeCommand(withoutContextCheckpoint(ctx), native, child, "start", nil, func(cctx context.Context) (kernel.Snapshot, error) {
+			return c.StartNative(cctx, r.runtime, native, parent, d, child.Input)
+		})
+		if snap.Run.ID != "" {
+			current, original, err := r.localDelegationObservation(ctx, child.ExecutionRefID)
+			if err != nil || kernel.ManagedDigest(current) != kernel.ManagedDigest(snap) {
+				return handoff.Delegation{}, errors.Join(ErrExecutionOutcomeUnknown, startErr, err)
+			}
+			// An original retained grant qualifies only a pending wait, not
+			// a returned effect. No second election or terminal projection.
+			if outcome.Kind() == agent.PhysicalCallUnknown && snap.Run.Status == kernel.RunStatusRunning && errors.Is(startErr, agent.ErrRootOutcomeUnknown) {
+				if g, err := r.runtime.LookupChildExecution(ctx, child.ExecutionRefID); err == nil && g.IsOwned() && g.AdmissionOperation == "start" {
+					return handoff.ProjectChild(original, current), handoff.ErrChildPending
+				}
+			}
+			if !outcome.Matches(child.ExecutionRefID, plugin.RunStart) || outcome.Kind() == agent.PhysicalCallCreated || outcome.Kind() == agent.PhysicalCallNotEntered {
+				return handoff.Delegation{}, errors.Join(ErrExecutionOutcomeUnknown, startErr)
+			}
+			if _, err = r.syncChildInvocationSnapshot(ctx, turn, child, current); err != nil {
+				return handoff.Delegation{}, errors.Join(ErrExecutionOutcomeUnknown, err)
+			}
+			result := handoff.ProjectChild(original, current)
+			if result.Status == handoff.StatusFailed || result.Status == handoff.StatusCancelled {
+				startErr = errors.Join(startErr, handoff.ErrChildFailed)
+			}
+			return result, startErr
+		}
+		if agent.IsNativeStartNoEffect(startErr) && errors.Is(startErr, budget.ErrWaiting) {
+			return handoff.Delegation{}, dispatchProvenNoEffect{cause: startErr}
+		}
+		decision, e = r.resolveNativeStartDecision(ctx, q, startErr)
+	}
+	if e != nil {
+		return handoff.Delegation{}, errors.Join(ErrExecutionOutcomeUnknown, startErr, e)
+	}
+	result, e := r.projectUncreatedNativeChild(ctx, turn, child, decision)
+	return result, errors.Join(handoff.ErrChildFailed, startErr, e)
 }

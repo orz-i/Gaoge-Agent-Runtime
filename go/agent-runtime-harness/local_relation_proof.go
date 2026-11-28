@@ -18,26 +18,21 @@ import (
 // Native Invocation owners use their configured Agent; delegated/raw Feature
 // children must retain the original fixed Agent object and all its hooks.
 func (runner *Runner) verifyLocalApprovalRun(ctx context.Context, candidate kernel.Snapshot) error {
-	if err := runner.verifyLocalRelationRun(ctx, candidate, false); err != nil {
+	frozen, _, err := runner.verifiedLocalRelation(ctx, candidate, false)
+	if err != nil {
 		return err
 	}
 	if err := runner.requireLiveApprovalAncestors(ctx, candidate.Run.ID); err != nil {
 		return err
 	}
-	owner, err := runner.store.GetInvocationByExecutionRefID(ctx, candidate.Run.ID)
-	if err != nil {
-		return err
-	}
-	if !isHandoffDelegationInvocation(owner) {
-		return nil
-	}
-	original, ok := runner.agent.(*agent.Runner)
-	coordinator, bound := runner.handoffs.(*handoff.Coordinator)
-	frozen, _, proofErr := runner.localHandoffCancellationAuthority(ctx, owner, candidate)
-	if !ok || !bound || proofErr != nil ||
-		(!coordinator.ObservesLocalKernelRunner(runner.runtime) && candidate.Run.Kind != agent.RunKind) ||
-		!coordinator.UsesLocalAgentForDelegation(runner.runtime, original, frozen) {
-		return ErrRuntimeCancellationUnverified
+	if frozen.ID != "" {
+		original, ok := runner.agent.(*agent.Runner)
+		coordinator, bound := runner.handoffs.(*handoff.Coordinator)
+		if !ok || !bound ||
+			(!coordinator.ObservesLocalKernelRunner(runner.runtime) && candidate.Run.Kind != agent.RunKind) ||
+			!coordinator.UsesLocalAgentForDelegation(runner.runtime, original, frozen) {
+			return ErrRuntimeCancellationUnverified
+		}
 	}
 	return nil
 }
@@ -117,73 +112,81 @@ func (runner *Runner) requireLiveApprovalAncestors(ctx context.Context, childRun
 }
 
 func (runner *Runner) verifyLocalRelationRun(ctx context.Context, candidate kernel.Snapshot, control bool) error {
-	return runner.verifyLocalRelationChain(ctx, candidate, control, make(map[string]bool))
+	_, _, err := runner.verifiedLocalRelation(ctx, candidate, control)
+	return err
 }
 
-func (runner *Runner) verifyLocalRelationChain(ctx context.Context, candidate kernel.Snapshot, control bool, seen map[string]bool) error {
-	unverified := func() error {
-		return fmt.Errorf("Run %q has no verified local execution owner: %w", candidate.Run.ID, ErrRuntimeCancellationUnverified)
+func (runner *Runner) verifiedLocalRelation(ctx context.Context, candidate kernel.Snapshot, control bool) (handoff.Delegation, kernel.Run, error) {
+	var frozen handoff.Delegation
+	var parent kernel.Run
+	unverified := func(cause error) (handoff.Delegation, kernel.Run, error) {
+		return frozen, parent, errors.Join(cause, fmt.Errorf("Run %q has no verified local execution owner: %w", candidate.Run.ID, ErrRuntimeCancellationUnverified))
 	}
-	if candidate.Run.ID == "" || seen[candidate.Run.ID] {
-		return unverified()
+	if candidate.Run.ID == "" {
+		return unverified(nil)
 	}
-	seen[candidate.Run.ID] = true
 	var relation runrelation.Relation
 	relationErr := runrelation.ErrNotFound
 	if runner.relationReader != nil {
 		relation, relationErr = runner.relationReader.GetByChild(ctx, candidate.Run.ID)
 	}
 	if relationErr != nil && !errors.Is(relationErr, runrelation.ErrNotFound) {
-		return errors.Join(unverified(), relationErr)
+		return unverified(relationErr)
 	}
 	owner, err := runner.store.GetInvocationByExecutionRefID(ctx, candidate.Run.ID)
 	if err != nil {
-		return errors.Join(unverified(), err)
+		return unverified(err)
 	}
 	// A relation is only an index. It cannot grant a foreign parent control
 	// over an otherwise legitimate Run merely by naming its ID. Only the
 	// original frozen child Invocation and Delegation receipt can
 	// authenticate an incoming edge. Never accept a retired Capability relation.
 	if relationErr == nil && (relation.Kind != runrelation.KindDelegation || !isHandoffDelegationInvocation(owner)) {
-		return unverified()
+		return unverified(nil)
 	}
 	if isHandoffDelegationInvocation(owner) {
 		coordinator, ok := runner.handoffs.(*handoff.Coordinator)
 		if !ok {
-			return unverified()
+			return unverified(nil)
 		}
-		frozen, parent, proofErr := runner.localHandoffCancellationAuthority(ctx, owner, candidate)
+		var proofErr error
+		frozen, parent, proofErr = runner.localHandoffCancellationAuthority(ctx, owner, candidate)
 		if proofErr != nil {
-			return unverified()
+			return unverified(nil)
 		}
 		switch candidate.Run.Kind {
 		case handoff.RemoteAgentRunKind:
 			if !coordinator.ObservesRemoteShadow(ctx, runner.runtime, frozen, candidate) ||
 				(control && !runner.remoteHandoffCancellerOwnsDelegation(ctx, frozen, candidate)) {
-				return unverified()
+				return unverified(nil)
 			}
 		case agent.RunKind:
-			if !coordinator.ObservesLocalDelegation(runner.runtime, frozen) ||
-				(control && (!coordinator.VerifiedLocalDelegationControl(ctx, runner.runtime, frozen, candidate) ||
-					!runner.localRelationCancellerOwnsKernel(agent.RunKind))) {
-				return unverified()
+			if !coordinator.ObservesLocalDelegation(runner.runtime, frozen) || control &&
+				(!runner.localRelationCancellerOwnsKernel(agent.RunKind) ||
+					!frozen.NativeLocal && !coordinator.VerifiedLocalDelegationControl(ctx, runner.runtime, frozen, candidate)) {
+				return unverified(nil)
+			}
+			if control && frozen.NativeLocal {
+				if native, e := runner.nativeHandoff(ctx, owner.TurnID, frozen); e != nil || native == nil {
+					return unverified(e)
+				}
 			}
 		default:
-			return unverified()
+			return unverified(nil)
 		}
 		if relationErr == nil && (relation.Kind != runrelation.KindDelegation ||
 			relation.ChildRunID != candidate.Run.ID || relation.ParentRunID != parent.ID ||
 			relation.OwnerNodeID != frozen.ID) {
-			return unverified()
+			return unverified(nil)
 		}
 	} else {
 		// Only an Agent root can be locally owned without Delegation.
 		if owner.ParentItemID != "" {
-			return unverified()
+			return unverified(nil)
 		}
 		if proofErr := validateRootRuntimeOwnership(owner, candidate); proofErr != nil {
-			return errors.Join(unverified(), proofErr)
+			return unverified(proofErr)
 		}
 	}
-	return nil
+	return frozen, parent, nil
 }

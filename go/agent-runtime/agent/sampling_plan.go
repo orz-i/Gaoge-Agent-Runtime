@@ -187,6 +187,9 @@ func newSamplingPlan(ledger budget.Ledger, original, request model.Request, rese
 // The same selected model middleware owns both candidate planning and
 // reservation. Run/Tool-only adapters do not narrow a sampling request.
 func selectedSamplingBudget(dependencies Dependencies) *BoundedBudgetAdapter {
+	if dependencies.BoundedBudget != nil {
+		return dependencies.BoundedBudget
+	}
 	for _, layer := range dependencies.ModelMiddleware {
 		if adapter, ok := layer.(*BoundedBudgetAdapter); ok {
 			return adapter

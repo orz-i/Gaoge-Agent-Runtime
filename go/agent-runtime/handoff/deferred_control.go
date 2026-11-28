@@ -70,13 +70,24 @@ func (c *Coordinator) VerifiedLocalDelegationControl(
 	// witness, including middleware-free/native Agent compositions. Preserve
 	// the legacy eager ChildRunner route's separate strict Kernel ownership.
 	if routed := c.localDeferredAgent(original); routed != nil {
-		if c.OwnsStandardRemoteRoutes(rt) {
-			return routed.OwnsKernelRuntime(rt)
+		if c.OwnsStandardRemoteRoutes(rt) && routed.OwnsKernelRuntime(rt) {
+			return true
 		}
 		return routed.VerifiedDeferredRootControl(ctx, rt, child)
 	}
 	if c.deferredAgent != nil {
 		return c.deferredAgent.VerifiedDeferredRootControl(ctx, rt, child)
 	}
-	return c.OwnsLocalDelegation(rt, original)
+	if c.OwnsLocalDelegation(rt, original) {
+		return true
+	}
+	// An eager first-party Agent is not globally callback-free. It can
+	// nevertheless prove the exact already-returned native execution in
+	// the same way as a deferred Agent. Never extend this to custom routes.
+	fixed, ok := c.resolver.(staticChildRunnerResolver)
+	if !ok {
+		return false
+	}
+	native, ok := fixed.children.(*agent.Runner)
+	return ok && native.VerifiedDeferredRootControl(ctx, rt, child)
 }

@@ -140,10 +140,12 @@ verifier for the unsent Call.
 Receipt consumption and Grant retirement are separate durable transitions
 but one original recovery scope. Once all original physical obligations
 have drained, the same original callback completion and exact current
-source drive the existing Mark / managed T4 / Finish / Retirement ACK
-protocol, even if a receipt CAS acknowledgement was lost. A current
-RETIRED row is selected only by the original owner/source and Store lock;
-historical ACKs never authorize a successor. `RootDeferredCleanupEligibility`
+source drive atomic Finish (including full-Snapshot settlement validation,
+managed closure, receipt and owned Lease release), even if a receipt CAS
+response was lost. Parent-bound borrowed Grants retain their original Mark
+return witness; Owned Grant retirement does not write an intermediate Mark. The current
+final receipt is selected only by the exact source, epoch and Lease
+disposition; historical receipts never authorize a successor. `RootDeferredCleanupEligibility`
 includes the retirement-only phase, and its observed scope may be passed
 to `ReconcileRootDeferredChildren` to prevent reselecting a different
 Grant. Elected Harness cancellation resumes this same scope without a

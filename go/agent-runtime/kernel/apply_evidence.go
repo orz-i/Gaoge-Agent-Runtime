@@ -16,6 +16,10 @@ import (
 // same Store CAS as the Feature state, not a separate durable authority.
 const identifiedApplyEventType = "kernel.apply.evidence"
 
+// Retired pre-cutover correlation event; the reserved namespace remains
+// unavailable to arbitrary Apply callers. New controls do not write it.
+const allowanceDispatchEvent = "kernel.allowance.dispatch_committed"
+
 var (
 	ErrApplyAlreadyCommitted = errors.New("kernel identified Apply is already committed")
 	ErrApplyOutcomeUnknown   = errors.New("kernel Apply outcome cannot be proven from the retained journal")
@@ -53,7 +57,7 @@ func validApplyOperation(id string, expectedRevision uint64) bool {
 
 func hasReservedApplyEvidence(events []EventDraft) bool {
 	for _, event := range events {
-		if event.Type == identifiedApplyEventType || event.Type == allowanceDispatchEvent {
+		if event.Type == identifiedApplyEventType || event.Type == allowanceDispatchEvent || event.Type == approvalDispatchEvent {
 			return true
 		}
 	}
@@ -61,11 +65,14 @@ func hasReservedApplyEvidence(events []EventDraft) bool {
 }
 
 func digestApplyMutation(m Mutation) (string, error) {
+	if m.Ledger != nil {
+		return "", ErrInvalidInput
+	}
 	// EventDraft.Wakeup is internal projection metadata (json:"-"), but it
 	// affects durable delivery. Include it in the signature explicitly.
 	flags := make([]bool, len(m.Events))
 	for i := range m.Events {
-		if m.Events[i].Type == identifiedApplyEventType || m.Events[i].Type == allowanceDispatchEvent {
+		if m.Events[i].Type == identifiedApplyEventType || m.Events[i].Type == allowanceDispatchEvent || m.Events[i].Type == approvalDispatchEvent {
 			return "", ErrInvalidInput
 		}
 		flags[i] = m.Events[i].Wakeup

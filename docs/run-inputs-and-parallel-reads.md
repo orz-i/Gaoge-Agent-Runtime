@@ -33,7 +33,9 @@ source before offering a Host queue operation. `View.InputCursor` reports the
 last applied source sequence. Input while a Tool
 or Model outcome is unknown does not bypass reconciliation. Inputs do not reset
 completion repair or exhausted budgets. The initial delivery supports root
-Agents only; a child must not inherit its supervisor's input log.
+Agents only; the local Handoff path explicitly disables the supervisor's input
+log when starting a logical child, even though that child is an independent
+Kernel root. Existing Runs keep their originally persisted binding.
 
 ### Queueing is not an atomic terminal-delivery promise
 
@@ -59,10 +61,19 @@ Capacity rejection is `ErrInputQueueFull`, not evidence that the Run's execution
 budget was consumed. Submission does not start a worker or wake an approval or
 budget pause; existing authorized continuation and approval controls still apply.
 The source is a trusted input-storage port, not arbitrary effectful middleware.
-The SDK binds reads to the original Run callback and journals that concrete
-frame's return without granting callback-free/deferred-control custody. Inputs
-cannot be combined with the separately opted-in `ManagedContextRecovery` path
-or `SummaryNativeRecovery`; ordinary bounded Session composition remains supported.
+The Runner reads inputs directly at its native safe point, inside the original
+Run callback. It checks execution ownership and deadline before and after the
+read and journals that read's return, not an input-application commit or the
+return of any enclosing Host middleware. No input RunNext wrapper or
+callback-free custody is granted. A frame that actually reads the Host input
+source cannot claim scoped deferred-control custody; an independently retired
+child that never entered that boundary may qualify using its original proofs.
+Inputs can be combined with `ManagedRecovery` through the common Agent
+obligation proof, including optional Summary and SharedBudget. The persisted aggregate and proof retain the original input binding and
+committed cursor. Reopening must select that source; no source read occurs
+before the successor consumes the frontier at native callback entry, and no new input can rewrite its
+frozen request. CANCEL does not read or advance the queue. Active external
+effects and unresolved reservations are not made transferable by enabling Inputs.
 
 For durable queue delivery, implement the same read-only port over Host storage
 and retain records for the Run's recovery lifetime. Preserve these new user

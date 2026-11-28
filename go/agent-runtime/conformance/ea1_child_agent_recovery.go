@@ -1,7 +1,6 @@
 package conformance
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,156 +11,13 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
 // RunEA1ChildAgentRecoveryUnknownSuite covers AC-Q P2 only. Actual child
 // Host/Model/Tool send precedes uncertain receipt; reconciliation never sends.
 func RunEA1ChildAgentRecoveryUnknownSuite(t *testing.T, factory func(*testing.T) (kernel.Store, func() kernel.Store)) {
 	t.Run("host_middleware", func(t *testing.T) { ea1ChildRecoveryHost(t, factory, false) })
-	for _, kind := range []string{"model", "tool"} {
-		t.Run(kind, func(t *testing.T) {
-			backing, reopen := factory(t)
-			native, ok := backing.(kernel.ExecutionStore)
-			if !ok {
-				t.Fatal("missing native ExecutionStore")
-			}
-			event := "agent.model_invocation.completed"
-			if kind == "tool" {
-				event = "tool.completed"
-			}
-			injected := errors.New("test-only physical response received but original receipt not committed")
-			fault := &ea1AgentReceiptFault{Store: backing, ExecutionStore: native, OwnedPhysicalExecutionStore: backing.(kernel.OwnedPhysicalExecutionStore),
-				ControlStore: backing.(kernel.ControlStore), ChildExecutionStore: backing.(kernel.ChildExecutionStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), event: event, injected: injected}
-			rt, err := kernel.New(kernel.Dependencies{Store: fault})
-			if err != nil {
-				t.Fatal(err)
-			}
-			physical := &ea1UnknownAgentPhysical{tool: kind == "tool", rt: rt}
-			catalog, err := tools.NewRegistry([]tools.Registration{{
-				Definition: tools.Definition{Key: "effect", Name: "Effect", InputSchema: json.RawMessage(`{"type":"object"}`)},
-				Handler:    tools.HandlerFunc(physical.execute),
-			}})
-			if err != nil {
-				t.Fatal(err)
-			}
-			makeRunner := func(runtime *kernel.Runtime, owner string, offset time.Duration) *agent.Runner {
-				r, e := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: physical, Catalog: catalog, Executor: catalog,
-					Clock: ea1UnknownAgentClock{offset: offset}, RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: 2 * time.Second},
-					Execution: ea1StoreBackedExecutionPolicy()})
-				if e != nil {
-					t.Fatal(e)
-				}
-				return r
-			}
-			first := makeRunner(rt, "first-owner", 0)
-			parent := ea1ChildRecoveryParent(t, rt)
-			request := agent.StartRequest{ID: "unknown-child", ParentRunID: parent.Run.ID, RequestID: "original-child-effect", OriginFingerprint: agent.FrozenOriginFingerprint([]byte(`{"source":"original-child"}`)), Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"}, Goal: "original physical attempt"}
-			if kind == "tool" {
-				request.ToolKeys = []string{"effect"}
-			}
-			_, firstErr := first.StartRun(t.Context(), request)
-			if !errors.Is(firstErr, injected) || fault.failures != 1 {
-				t.Fatalf("receipt failure not reached: %v failures=%d", firstErr, fault.failures)
-			}
-			pending, err := rt.Load(t.Context(), request.ID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			view, err := agent.ViewState(pending)
-			if err != nil || len(view.ModelInvocations) != 1 || pending.Run.Status != kernel.RunStatusRunning {
-				t.Fatalf("original pending source missing: %v", err)
-			}
-			calls, toolCalls := physical.counts()
-			if calls != 1 || (kind == "tool" && toolCalls != 1) || (kind == "model" && toolCalls != 0) {
-				t.Fatalf("first physical counts model=%d tool=%d", calls, toolCalls)
-			}
-			invocation := view.ModelInvocations[0]
-			if invocation.ID == "" || invocation.RunID != request.ID || invocation.RequestHash == "" || invocation.ExecutionAttempt != 1 {
-				t.Fatal("original invocation/attempt missing")
-			}
-			if kind == "model" && invocation.Status != agent.ModelInvocationPending {
-				t.Fatal("uncommitted Model receipt fabricated")
-			}
-			if kind == "tool" {
-				var state struct {
-					ToolDispatchID string `json:"toolDispatchID"`
-				}
-				if e := json.Unmarshal(pending.State, &state); e != nil || state.ToolDispatchID != "original-tool-call" {
-					t.Fatalf("original Tool dispatch marker missing: %v", e)
-				}
-				if invocation.Status != agent.ModelInvocationConsumed || invocation.CompletedAt == nil || invocation.ConsumedAt == nil || invocation.RequestHash == "" ||
-					len(invocation.Response.ToolCalls) != 1 || invocation.Response.ToolCalls[0].ID != "original-tool-call" ||
-					invocation.Response.ToolCalls[0].ToolKey != "effect" || !bytes.Equal(invocation.Response.ToolCalls[0].Arguments, json.RawMessage(`{"source":"original"}`)) {
-					t.Fatal("Tool fixture lost exact consumed Model receipt")
-				}
-			}
-			physical.assertOriginal(t, request, invocation)
-			originalJSON, err := json.Marshal(pending)
-			if err != nil {
-				t.Fatal(err)
-			}
-			// Await real Store expiry, not Agent clock advancement or private SQL.
-			lease := fault.lastLease()
-			if lease.RunID != request.ID || lease.OwnerID != "first-owner" {
-				t.Fatal("fault did not observe native original lease")
-			}
-			ea1AwaitNativeExpiry(t, native, fault.renewals.latest(t, lease))
-			if err = native.CheckExecution(t.Context(), request.ID, &lease); !errors.Is(err, kernel.ErrExecutionConflict) {
-				t.Fatalf("old native owner still valid after real expiry: %v", err)
-			}
-			grant, err := rt.LookupChildExecution(t.Context(), request.ID)
-			if err != nil || grant.ChildRunID != request.ID {
-				t.Fatalf("original child grant: %v", err)
-			}
-			fresh := reopen()
-			ownerRT, err := kernel.New(kernel.Dependencies{Store: fresh})
-			if err != nil {
-				t.Fatal(err)
-			}
-			durable, err := ownerRT.Load(t.Context(), request.ID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			durableJSON, err := json.Marshal(durable)
-			if err != nil || !bytes.Equal(originalJSON, durableJSON) {
-				t.Fatal("original pending source changed across reopen")
-			}
-			physical.rt = ownerRT
-			next := makeRunner(ownerRT, "fresh-owner", 3*time.Minute)
-			resumeErr := next.ReconcileChildPhysicalGrant(t.Context(), request.ID)
-			if !errors.Is(resumeErr, kernel.ErrChildExecutionBusy) {
-				t.Fatalf("unknown child reconciliation: %v", resumeErr)
-			}
-			ea1CompBarrierUnchanged(t, ownerRT, parent)
-			same, lookupErr := ownerRT.LookupChildExecution(t.Context(), request.ID)
-			if lookupErr != nil || same != grant {
-				t.Fatal("unknown recovery changed original grant")
-			}
-			afterCalls, afterTools := physical.counts()
-			// No provider idempotency or affirmative no-effect proof exists here.
-			// Reusing InvocationID is not permission for another physical send.
-			if afterCalls != calls || afterTools != toolCalls {
-				t.Errorf("EA-06 UNKNOWN replay: model %d->%d tool %d->%d resumeErr=%v originalInvocation=%s attempt=%d", calls, afterCalls, toolCalls, afterTools, resumeErr, invocation.ID, invocation.ExecutionAttempt)
-			}
-			if kind == "tool" && !errors.Is(resumeErr, kernel.ErrChildExecutionBusy) {
-				t.Errorf("Tool unknown must remain typed quarantine: %v", resumeErr)
-			}
-			// Model has no established ModelUnknown error contract. Assert the safety
-			// property instead of inventing an error or accepting TTL as no-effect.
-			final, err := ownerRT.Load(t.Context(), request.ID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			finalJSON, err := json.Marshal(final)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !bytes.Equal(originalJSON, finalJSON) {
-				t.Errorf("UNKNOWN recovery changed original full Run/invocation/attempt state; resumeErr=%v", resumeErr)
-			}
-		})
-	}
+	ea1AgentUnknownReceipts(t, factory, true)
 }
 
 func ea1ChildRecoveryParent(t *testing.T, rt *kernel.Runtime) kernel.Snapshot {

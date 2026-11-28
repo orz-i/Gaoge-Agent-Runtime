@@ -13,6 +13,7 @@ import (
 // before closing an accepted-but-unstarted replacement under cancellation.
 func TestUnstartedRetryCancellationPreservesHistoricalHandoffProof(t *testing.T) {
 	original, completedChild, facts := originalTerminalHandoffFixture(t)
+	original.Status = InvocationCancelled
 	now := time.Date(2026, 11, 19, 3, 0, 0, 0, time.UTC)
 	completedChild.Status = InvocationCompleted
 	completedChild.Attempt = 1
@@ -35,8 +36,14 @@ func TestUnstartedRetryCancellationPreservesHistoricalHandoffProof(t *testing.T)
 		},
 		CancelledRuns: map[string]bool{original.ExecutionRefID: true, next.ExecutionRefID: true},
 	}
+	transition, err := RootRetryTransitionFact(original, next.ExecutionRefID, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transition.Seq = 5
+	facts = append(facts, transition)
 	intent := Item{ID: "original-replacement-cancel", TurnID: turn.ID, RunID: next.ExecutionRefID,
-		Kind: ItemDiagnostic, Status: ItemStarted, Seq: 5,
+		Kind: ItemDiagnostic, Status: ItemStarted, Seq: 6,
 		ParentItemID: CancellationFenceParentItemID,
 		Payload:      json.RawMessage(`{"boundary":"cancel_scope_pending","runID":"next-root-run"}`),
 	}
@@ -60,6 +67,15 @@ func TestUnstartedRetryCancellationPreservesHistoricalHandoffProof(t *testing.T)
 		InvocationID: next.ID, OriginalRunID: original.ExecutionRefID, Attempt: next.Attempt, Active: false,
 	}
 	ledger.CancelledRuns[third.ExecutionRefID] = true
+	previous := next
+	previous.Status = InvocationCancelled
+	transition, err = RootRetryTransitionFact(previous, third.ExecutionRefID, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transition.Seq = 6
+	all = append(all[:len(all)-1], transition, all[len(all)-1])
+	all[len(all)-1].Seq = 7
 	all[len(all)-1].RunID = third.ExecutionRefID
 	all[len(all)-1].Payload = json.RawMessage(`{"boundary":"cancel_scope_pending","runID":"third-root-run"}`)
 	if !ValidUndispatchedRootCancellationEvidence(third, turn, all, true, &ledger, []Invocation{completedChild}) {

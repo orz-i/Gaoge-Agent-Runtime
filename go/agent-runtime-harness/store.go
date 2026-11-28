@@ -103,10 +103,10 @@ type Store interface {
 	// Attempt and its execution reference back into Accepted.
 	UpdateInvocation(context.Context, Invocation, uint64) (Invocation, error)
 	RetryInvocation(context.Context, string, uint64, string, time.Time) (Invocation, error)
-	// CancelUndispatchedRoot commits the original no-physical-admission Root
+	// SettleUncreatedRoot commits the original no-physical-admission Root
 	// Invocation AND Turn terminal revisions under their admission lock. Both
 	// first Accepted Roots and accepted Retry generations use this authority.
-	CancelUndispatchedRoot(context.Context, Invocation, Turn) (Invocation, Turn, error)
+	SettleUncreatedRoot(context.Context, Invocation, Turn) (Invocation, Turn, error)
 	ListInvocations(context.Context, string) ([]Invocation, error)
 	CreateInteraction(context.Context, Interaction, uint64, uint64) (Interaction, bool, error)
 	GetInteraction(context.Context, string) (Interaction, error)
@@ -130,6 +130,12 @@ type Store interface {
 	// insertion MUST serialize against these grants on the same Turn lock.
 	// Runner-bound cancellation admission MUST also recheck its exact immutable
 	// Root/target Attempt in that same critical section (CancellationAttemptForStore).
+	// Captured native approval dispatches additionally require the exact
+	// original waiting request and no decision at fresh admission. On
+	// completion, the Store verifies ValidOriginalApprovalSettlement and
+	// uses PlanOriginalApprovalSettlement under the same Turn lock to
+	// atomically append the decision (unless already exact) and receipt.
+	// Managed closure uses the same reducer with its opaque closure proof.
 	// Custom Stores must implement the hard-cut semantics; a loose
 	// append-only implementation is no longer a safe execution Store.
 	AppendItem(context.Context, Item) (Item, bool, error)

@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -20,6 +21,51 @@ func ownedPrivatePath(t *testing.T, name string) string {
 	t.Helper()
 	return filepath.Join(testprofile.Dir(t), name)
 }
+
+// legacyRunFixtureStore writes historical root fixtures using only the
+// schema shared by v3-v10. Do not run the modern identity/ledger writer
+// against an older schema or add new tables before testing migration.
+type legacyRunFixtureStore struct{ *Store }
+
+func (s legacyRunFixtureStore) Create(ctx context.Context, record kernel.Record, drafts []kernel.EventDraft) (kernel.Snapshot, error) {
+	if record.ExecutionRequired || record.BudgetEnrollment != nil || record.Run.ParentRunID != "" {
+		return kernel.Snapshot{}, kernel.ErrInvalidInput
+	}
+	encoded, err := encodeRecord(record)
+	if err != nil {
+		return kernel.Snapshot{}, err
+	}
+	events, err := encodeEvents(drafts)
+	if err != nil {
+		return kernel.Snapshot{}, err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return kernel.Snapshot{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	_, err = tx.ExecContext(ctx, `INSERT INTO runtime_runs(run_id,scope_id,kind,status,revision,run_json,state_json,checkpoint_json,result_json,event_head)
+		VALUES(?,?,?,?,?,?,?,?,?,?)`, record.Run.ID, record.Run.Actor.TenantID, string(record.Run.Kind), string(record.Run.Status), record.Run.Revision,
+		encoded.run, encoded.state, encoded.checkpoint, encoded.result, len(drafts))
+	if err != nil {
+		return kernel.Snapshot{}, err
+	}
+	if err = writeEvents(ctx, tx, record.Run.ID, 0, record.Run.UpdatedAt, drafts); err != nil {
+		return kernel.Snapshot{}, err
+	}
+	if err = writeReady(ctx, tx, record.Run, drafts, events); err != nil {
+		return kernel.Snapshot{}, err
+	}
+	if err = writeCommitProof(ctx, tx, record.Run, commitFingerprint(encoded, events)); err != nil {
+		return kernel.Snapshot{}, err
+	}
+	snapshot, err := loadTx(ctx, tx, record.Run.ID)
+	if err != nil {
+		return kernel.Snapshot{}, err
+	}
+	return snapshot, tx.Commit()
+}
+
 func TestOwnedSchemaMigrationPreservesOriginalGrants(t *testing.T) {
 	path := ownedPrivatePath(t, "legacy.sqlite")
 	raw, err := sql.Open("sqlite", "file:"+filepath.ToSlash(path))
@@ -35,7 +81,7 @@ func TestOwnedSchemaMigrationPreservesOriginalGrants(t *testing.T) {
 		t.Fatal(err)
 	}
 	old := &Store{db: raw}
-	rt, err := kernel.New(kernel.Dependencies{Store: old})
+	rt, err := kernel.New(kernel.Dependencies{Store: legacyRunFixtureStore{old}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,6 +177,9 @@ func TestOwnedSchemaMigrationPreservesOriginalGrants(t *testing.T) {
 	if err = MigrateV9ToV10(t.Context(), path); err != nil {
 		t.Fatal(err)
 	}
+	if err = MigrateV10ToV11(t.Context(), path); err != nil {
+		t.Fatal(err)
+	}
 	current, err := OpenExisting(t.Context(), path)
 	if err != nil {
 		t.Fatal(err)
@@ -205,10 +254,13 @@ func TestOwnedBarrierRejectsUnboundControlAndExpiredTakeover(t *testing.T) {
 	if err = s.BeginChildExecution(t.Context(), g); !errors.Is(err, kernel.ErrInvalidInput) {
 		t.Fatalf("old Begin accepted owned binding: %v", err)
 	}
-	if err = s.BeginOwnedPhysicalExecution(t.Context(), g, lease, kernel.OwnedPhysicalAdmission{}); !errors.Is(err, kernel.ErrExecutionConflict) {
+	if _, err = s.BeginOwnedPhysicalExecution(t.Context(), kernel.OwnedPhysicalAdmission{}); !errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("forged admission accepted: %v", err)
 	}
 	if _, err = s.db.Exec(`INSERT INTO runtime_child_effect_grants(grant_id,parent_run_id,child_run_id,start_revision,execution_owner_id,execution_lease_id,execution_epoch,admission_source_hash,admission_operation) VALUES(?,?,?,?,?,?,?,?,?)`, g.ID, g.ChildRunID, g.ChildRunID, g.ExpectedRevision, g.ExecutionOwnerID, g.ExecutionLeaseID, g.ExecutionEpoch, g.AdmissionSourceHash, g.AdmissionOperation); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.db.Exec("UPDATE runtime_runs SET execution_physical_epoch=? WHERE run_id=?", g.ExecutionEpoch, g.ChildRunID); err != nil {
 		t.Fatal(err)
 	}
 	record := kernel.Record{Run: before.Run, State: before.State, Checkpoint: before.Checkpoint, Result: before.Result}
@@ -337,7 +389,7 @@ func TestOwnedBarrierRejectsUnboundControlAndExpiredTakeover(t *testing.T) {
 	if err = s.MarkChildExecutionSettled(t.Context(), g, kernel.ChildExecutionSettlement{}); !errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("forged Mark: %v", err)
 	}
-	if err = s.FinishChildExecution(t.Context(), g); !errors.Is(err, kernel.ErrExecutionConflict) {
+	if err = s.FinishChildExecution(t.Context(), g, kernel.ChildExecutionSettlement{}); !errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("unmarked Finish: %v", err)
 	}
 	after, err := s.Load(t.Context(), "root")
@@ -402,6 +454,9 @@ func TestOwnedRecoveryPropagatesNonNotFoundAndRejectsCorruptSelfScope(t *testing
 	); err != nil {
 		t.Fatal(err)
 	}
+	if _, err = s.db.Exec("UPDATE runtime_runs SET execution_physical_epoch=? WHERE run_id=?", g.ExecutionEpoch, g.ChildRunID); err != nil {
+		t.Fatal(err)
+	}
 	record := kernel.Record{Run: before.Run, State: before.State, Checkpoint: before.Checkpoint, Result: before.Result}
 	record.Run.Revision++
 	mutation := kernel.StoreMutation{Record: record}
@@ -425,7 +480,7 @@ func TestOwnedRecoveryPropagatesNonNotFoundAndRejectsCorruptSelfScope(t *testing
 	if _, err = s.db.Exec(`UPDATE runtime_child_effect_grants SET parent_run_id=?,callback_return_revision=0,settled_revision=? WHERE grant_id=?`, other.Run.ID, before.Run.Revision, g.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err = s.FinishChildExecution(ctx, g); !errors.Is(err, kernel.ErrExecutionConflict) || errors.Is(err, sql.ErrNoRows) {
+	if err = s.FinishChildExecution(ctx, g, kernel.ChildExecutionSettlement{}); !errors.Is(err, kernel.ErrExecutionConflict) || errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("FinishChildExecution on non-self-scoped grant got %v, want ErrExecutionConflict", err)
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -433,10 +488,7 @@ func TestOwnedRecoveryPropagatesNonNotFoundAndRejectsCorruptSelfScope(t *testing
 		t.Fatal(err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err = sqliteOwnedMarkEvidence(ctx, tx, g, before, before.Run.Revision, kernel.ChildExecutionSettlement{}); !errors.Is(err, kernel.ErrExecutionConflict) || errors.Is(err, sql.ErrNoRows) {
-		t.Fatalf("sqliteOwnedMarkEvidence on non-self-scoped grant got %v, want ErrExecutionConflict", err)
-	}
-	if err = sqlitePersistOwnedRetirement(ctx, tx, g, before, lease); !errors.Is(err, kernel.ErrExecutionConflict) || errors.Is(err, sql.ErrNoRows) {
+	if err = sqlitePersistOwnedRetirement(ctx, tx, g, before, lease, kernel.ChildExecutionSettlement{}); !errors.Is(err, kernel.ErrExecutionConflict) || errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("sqlitePersistOwnedRetirement on non-self-scoped grant got %v, want ErrExecutionConflict", err)
 	}
 }

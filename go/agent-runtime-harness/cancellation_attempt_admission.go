@@ -37,17 +37,8 @@ func (runner *Runner) bindCancellationAttempt(ctx context.Context, turn Turn, ru
 			if !sameFrozenInvocationAuthority(root, target) {
 				return ctx, ErrConflict
 			}
-		} else {
-			binding, bindErr := frozenChildRoot(target)
-			if bindErr != nil || binding.attempt() != invocationAttempt(root) {
-				return ctx, errors.Join(ErrHandoffCancellationUnverified, ErrConflict)
-			}
-			for _, ancestor := range binding.Parents {
-				parent, loadErr := runner.store.GetInvocation(ctx, ancestor.InvocationID)
-				if loadErr != nil || parent.TurnID != turn.ID || invocationAttempt(parent) != ancestor {
-					return ctx, errors.Join(ErrHandoffCancellationUnverified, ErrConflict, loadErr)
-				}
-			}
+		} else if _, err = verifyFrozenChildAttempts(ctx, runner.store, target, root); err != nil {
+			return ctx, errors.Join(ErrHandoffCancellationUnverified, err)
 		}
 	} else {
 		// Waiting-only delegations have no child Invocation by design. Their
@@ -99,7 +90,8 @@ func CancellationAttemptForStore(ctx context.Context) (Invocation, Invocation, b
 func ValidCancellationAttemptAdmission(ctx context.Context, intent Item, root, target Invocation) bool {
 	proof, ok := ctx.Value(cancellationAttemptAdmissionKey{}).(cancellationAttemptAdmission)
 	if !ok {
-		return true // Explicit raw Store intents retain their protective contract.
+		source, protocol := cancellationProtocol(intent)
+		return !protocol || source != "native"
 	}
 	if proof.runID != intent.RunID || root.TurnID != intent.TurnID || root.ParentItemID != "" ||
 		!sameFrozenInvocationAuthority(proof.root, root) {

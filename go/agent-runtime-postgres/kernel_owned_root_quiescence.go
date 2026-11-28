@@ -39,7 +39,7 @@ func (s *KernelStore) verifyRootSettlement(ctx context.Context, expected kernel.
 		if err != nil {
 			return err
 		}
-		if err = pgManagedGate(tx, expected.Run.ID); err != nil {
+		if err = pgNativeEntryGate(tx, expected.Run.ID); err != nil {
 			return err
 		}
 		if run.ExecutionQuarantineRevision != 0 {

@@ -20,11 +20,10 @@ type rootRetirementFaultStore struct {
 	cut                    string
 	hit                    bool
 	grant                  kernel.ChildExecutionGrant
-	acknowledgements       []kernel.OwnedRetirementAckResult
 	releases               int
 	unavailableAfterFinish bool
 	markCalls              int
-	markCommits            int
+	finishCommits          int
 	finishCalls            int
 }
 
@@ -44,28 +43,19 @@ func (s *rootRetirementFaultStore) RecordOwnedPhysicalCallbackReturn(ctx context
 }
 func (s *rootRetirementFaultStore) MarkChildExecutionSettled(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
 	s.markCalls++
+	return s.Store.MarkChildExecutionSettled(ctx, g, p)
+}
+func (s *rootRetirementFaultStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
+	s.finishCalls++
 	s.grant = g
-	if s.cut == "mark-never-committed" {
+	if s.cut == "finish-never-committed" {
 		s.hit = true
 		return errRootRetirementACKLost
 	}
-	err := s.Store.MarkChildExecutionSettled(ctx, g, p)
+	err := s.Store.FinishChildExecution(ctx, g, p)
 	if err == nil {
-		s.markCommits++
-		if s.cut == "mark-always-lost" {
-			s.hit = true
-			return errRootRetirementACKLost
-		}
-		s.grant = g
-		if s.lose("mark") {
-			return errRootRetirementACKLost
-		}
+		s.finishCommits++
 	}
-	return err
-}
-func (s *rootRetirementFaultStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant) error {
-	s.finishCalls++
-	err := s.Store.FinishChildExecution(ctx, g)
 	if err == nil && s.lose("death") {
 		s.unavailableAfterFinish = true
 		return errRootRetirementACKLost
@@ -82,23 +72,13 @@ func (s *rootRetirementFaultStore) LoadOwnedRetirement(ctx context.Context, id s
 	return s.Store.LoadOwnedRetirement(ctx, id)
 }
 
-func (s *rootRetirementFaultStore) AcknowledgeOwnedRetirement(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.OwnedRetirementAcknowledgement) (kernel.OwnedRetirementAckResult, error) {
-	result, err := s.Store.AcknowledgeOwnedRetirement(ctx, g, p)
-	if err == nil {
-		s.acknowledgements = append(s.acknowledgements, result)
-		if s.lose("ack") {
-			return kernel.OwnedRetirementAckResult{}, errRootRetirementACKLost
-		}
-	}
-	return result, err
-}
 func (s *rootRetirementFaultStore) ReleaseExecution(ctx context.Context, l kernel.ExecutionLease) error {
 	s.releases++
 	return s.Store.ReleaseExecution(ctx, l)
 }
 
 func TestRootRetirementActualCallbackSurvivesCommittedACKLoss(t *testing.T) {
-	for _, cut := range []string{"record", "mark", "finish", "ack"} {
+	for _, cut := range []string{"record", "finish"} {
 		t.Run(cut, func(t *testing.T) {
 			store := &rootRetirementFaultStore{Store: memory.NewStore(), cut: cut}
 			rt, err := kernel.New(kernel.Dependencies{Store: store})
@@ -119,25 +99,13 @@ func TestRootRetirementActualCallbackSurvivesCommittedACKLoss(t *testing.T) {
 				t.Fatalf("original full result changed: %#v %v", persisted, err)
 			}
 			receipt, err := store.LoadOwnedRetirement(t.Context(), store.grant.ID)
-			if err != nil || !receipt.Valid() || receipt.Phase != "ACKNOWLEDGED" || receipt.Evidence.Grant != store.grant || !reflect.DeepEqual(receipt.Evidence.Snapshot, completed) || !receipt.Evidence.Completion.HostCompleted || !receipt.Evidence.Completion.LeaseOwned {
+			if err != nil || !receipt.Valid() || receipt.Evidence.Grant != store.grant || !reflect.DeepEqual(receipt.Evidence.Snapshot, completed) || !receipt.Evidence.Completion.HostCompleted || !receipt.Evidence.Completion.LeaseOwned {
 				t.Fatalf("missing original durable ACK: %#v %v", receipt, err)
 			}
 			if store.releases != 0 {
 				t.Fatalf("ordinary Release bypassed atomic ACK: %d", store.releases)
 			}
-			expectedACKs := 1
-			if cut == "ack" {
-				expectedACKs = 2
-			}
-			if len(store.acknowledgements) != expectedACKs {
-				t.Fatalf("ACKs=%#v", store.acknowledgements)
-			}
-			for i, ack := range store.acknowledgements {
-				if ack.ReceiptID != store.grant.ID || ack.SettledSourceDigest != kernel.ManagedDigest(completed) || ack.Disposition != "released_owned" || ack.PreviouslyAcknowledged != (i > 0) {
-					t.Fatalf("wrong ACK %d: %#v", i, ack)
-				}
-			}
-			if err := store.FinishChildExecution(t.Context(), store.grant); !errors.Is(err, kernel.ErrExecutionConflict) {
+			if err := store.FinishChildExecution(t.Context(), store.grant, kernel.ChildExecutionSettlement{}); !errors.Is(err, kernel.ErrExecutionConflict) {
 				t.Fatalf("generic missing Finish changed contract: %v", err)
 			}
 		})
@@ -176,12 +144,11 @@ func TestRootRetirementPreservesBorrowedLease(t *testing.T) {
 		t.Fatalf("borrowed result=%#v err=%v calls=%d", completed, err, model.calls)
 	}
 	receipt, err := store.LoadOwnedRetirement(t.Context(), store.grant.ID)
-	if err != nil || receipt.Phase != "ACKNOWLEDGED" || receipt.Evidence.Completion.LeaseOwned || !store.grant.MatchesExecution(lease) {
+	if err != nil || !receipt.Valid() || receipt.Evidence.Completion.LeaseOwned || !store.grant.MatchesExecution(lease) {
 		t.Fatalf("borrowed receipt=%#v err=%v", receipt, err)
 	}
-	last := store.acknowledgements[len(store.acknowledgements)-1]
-	if last.Disposition != "preserved_borrowed" || store.releases != 0 {
-		t.Fatalf("borrowed lease release: %#v count=%d", last, store.releases)
+	if store.releases != 0 {
+		t.Fatalf("borrowed lease released: %d", store.releases)
 	}
 	// Terminal CheckExecution intentionally cannot attest lease ownership; the
 	// caller's actual original Release succeeds only if its exact token survived.
@@ -254,7 +221,7 @@ func TestRootRetirementFreshRunnerRecoversFinishedCallByRunID(t *testing.T) {
 		t.Fatalf("lost original source: %#v %v", before, err)
 	}
 	retired, err := base.LoadOwnedRetirement(t.Context(), store.grant.ID)
-	if err != nil || retired.Phase != "RETIRED" {
+	if err != nil || !retired.Valid() {
 		t.Fatalf("Finish did not commit before death: %#v %v", retired, err)
 	}
 	if _, err := base.LookupChildExecution(t.Context(), original.Run.ID); !errors.Is(err, kernel.ErrNotFound) {
@@ -276,19 +243,19 @@ func TestRootRetirementFreshRunnerRecoversFinishedCallByRunID(t *testing.T) {
 		t.Fatalf("recovery mutated source/replayed: %#v %v calls=%d", after, err, model.calls)
 	}
 	acknowledged, err := base.LoadOwnedRetirement(t.Context(), store.grant.ID)
-	if err != nil || acknowledged.Phase != "ACKNOWLEDGED" || acknowledged.Identity() != retired.Identity() {
+	if err != nil || !acknowledged.Valid() || acknowledged.Identity() != retired.Identity() {
 		t.Fatalf("recovery did not acknowledge original evidence: %#v %v", acknowledged, err)
 	}
-	if err := fresh.ReconcileRootPhysicalExecution(t.Context(), original.Run.ID); !errors.Is(err, kernel.ErrNotFound) {
+	if err := fresh.ReconcileRootPhysicalExecution(t.Context(), original.Run.ID); err != nil {
 		t.Fatalf("RunID selected historical ACK: %v", err)
 	}
 }
 
-func TestRootRetirementPersistentMarkACKLossRequiresActualCommittedMarker(t *testing.T) {
+func TestRootRetirementFinishRequiresActualCommit(t *testing.T) {
 	for _, committed := range []bool{true, false} {
-		cut := "mark-never-committed"
+		cut := "finish-never-committed"
 		if committed {
-			cut = "mark-always-lost"
+			cut = "finish"
 		}
 		t.Run(cut, func(t *testing.T) {
 			base := memory.NewStore()
@@ -302,25 +269,25 @@ func TestRootRetirementPersistentMarkACKLossRequiresActualCommittedMarker(t *tes
 			if err != nil {
 				t.Fatal(err)
 			}
-			result, callErr := runner.StartRun(t.Context(), startRequest("persistent-"+cut, "original-request", "finish without inventing marker"))
-			if !store.hit || store.markCalls != 2 || store.finishCalls != 1 || model.calls != 1 || store.releases != 0 {
-				t.Fatalf("wrong actual cut counts: mark=%d committed=%d finish=%d model=%d release=%d hit=%v", store.markCalls, store.markCommits, store.finishCalls, model.calls, store.releases, store.hit)
+			result, callErr := runner.StartRun(t.Context(), startRequest("persistent-"+cut, "original-request", "finish without inventing receipt"))
+			if !store.hit || store.markCalls != 0 || store.finishCalls != 1 || model.calls != 1 || store.releases != 0 {
+				t.Fatalf("wrong actual cut counts: mark=%d committed=%d finish=%d model=%d release=%d hit=%v", store.markCalls, store.finishCommits, store.finishCalls, model.calls, store.releases, store.hit)
 			}
 			actual, err := base.Load(t.Context(), result.Run.ID)
 			if err != nil || !reflect.DeepEqual(actual, result) {
 				t.Fatalf("full original aggregate changed: %#v %v", actual, err)
 			}
 			if committed {
-				if callErr != nil || result.Run.Status != kernel.RunStatusCompleted || store.markCommits != 2 || len(store.acknowledgements) != 1 {
-					t.Fatalf("committed marker not recovered: %#v err=%v commits=%d ACKs=%#v", result, callErr, store.markCommits, store.acknowledgements)
+				if callErr != nil || result.Run.Status != kernel.RunStatusCompleted || store.finishCommits != 1 {
+					t.Fatalf("committed marker not recovered: %#v err=%v commits=%d", result, callErr, store.finishCommits)
 				}
 				receipt, err := base.LoadOwnedRetirement(t.Context(), store.grant.ID)
-				if err != nil || !receipt.Valid() || receipt.Phase != "ACKNOWLEDGED" || receipt.Evidence.Grant != store.grant || !reflect.DeepEqual(receipt.Evidence.Snapshot, result) {
+				if err != nil || !receipt.Valid() || receipt.Evidence.Grant != store.grant || !reflect.DeepEqual(receipt.Evidence.Snapshot, result) {
 					t.Fatalf("wrong durable retirement: %#v %v", receipt, err)
 				}
 			} else {
-				if !errors.Is(callErr, agent.ErrRootOutcomeUnknown) || !errors.Is(callErr, errRootRetirementACKLost) || !errors.Is(callErr, kernel.ErrExecutionConflict) || store.markCommits != 0 || len(store.acknowledgements) != 0 {
-					t.Fatalf("missing marker was accepted/error chain lost: result=%#v err=%v commits=%d ACKs=%#v", result, callErr, store.markCommits, store.acknowledgements)
+				if !errors.Is(callErr, agent.ErrRootOutcomeUnknown) || !errors.Is(callErr, errRootRetirementACKLost) || store.finishCommits != 0 {
+					t.Fatalf("missing marker was accepted/error chain lost: result=%#v err=%v commits=%d", result, callErr, store.finishCommits)
 				}
 				if _, err := base.LoadOwnedRetirement(t.Context(), store.grant.ID); !errors.Is(err, kernel.ErrNotFound) {
 					t.Fatalf("fabricated retirement without marker: %v", err)
@@ -329,7 +296,7 @@ func TestRootRetirementPersistentMarkACKLossRequiresActualCommittedMarker(t *tes
 				if err != nil || retained != store.grant {
 					t.Fatalf("original barrier changed: %#v %v", retained, err)
 				}
-				if err := base.FinishChildExecution(t.Context(), retained); !errors.Is(err, kernel.ErrExecutionConflict) {
+				if err := base.FinishChildExecution(t.Context(), retained, kernel.ChildExecutionSettlement{}); !errors.Is(err, kernel.ErrExecutionConflict) {
 					t.Fatalf("ordinary Finish accepted absent marker: %v", err)
 				}
 			}

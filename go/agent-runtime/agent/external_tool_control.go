@@ -202,7 +202,7 @@ func (r *Runner) retireExternalToolControl(ctx context.Context, s kernel.Snapsho
 		if loadErr != nil {
 			return loadErr
 		}
-		found, ackErr := acknowledgeExactOwnedRetirement(ctx, r.runtime, record.Evidence.Grant, s, &record.Evidence.Completion)
+		found, ackErr := observeExactOwnedRetirement(ctx, r.runtime, record.Evidence.Grant, s, &record.Evidence.Completion)
 		if !found {
 			return errors.Join(ErrRootOutcomeUnknown, ackErr)
 		}

@@ -16,9 +16,9 @@ import (
 // original Tool handler, preparation policies, model, or a new logical Call.
 //
 // The exact prior ToolDispatchID, immutable Invocation, Waiting Item and
-// frozen child identity must all agree. RegisterRun and AppendItem remain
-// CAS/idempotent, while beginPhysicalInvocationDispatch fences the actual
-// ChildRunner effect. An ambiguous Started/Grant outcome is never restarted.
+// frozen child identity must all agree. Native local capacity is only
+// consumed by Create; the original dispatch admission fences actual work.
+// An ambiguous Started/Grant outcome is never restarted.
 func (runner *Runner) ResumeWaitingDelegation(
 	ctx context.Context, parentRunID string, expectedRevision uint64,
 ) (bool, error) {
@@ -34,6 +34,10 @@ func (runner *Runner) ResumeWaitingDelegation(
 		return false, kernel.ErrConflict
 	}
 	call, pending, err := agent.FrozenPendingDispatch(parent)
+	var wait tools.PendingExecution
+	if err == nil && !pending {
+		call, wait, pending, err = agent.FrozenChildWaitCall(parent)
+	}
 	if err != nil || !pending || call.ToolKey != DelegationToolKey {
 		return false, err
 	}
@@ -74,56 +78,27 @@ func (runner *Runner) ResumeWaitingDelegation(
 	if err != nil {
 		return true, err
 	}
-	startedItemID := stableID("hid", turn.ID, frozen.ID, string(ItemStarted))
-	if started, loadErr := runner.store.GetItem(ctx, startedItemID); loadErr == nil {
-		// A competing worker or crashed predecessor has already committed
-		// admission. Never dispatch the same child twice: there may be an
-		// unknown physical Start behind this Started Item. Keep the original
-		// continuation retryable, rather than falsely ACKing the wait.
-		var original delegationItemPayload
-		if started.Seq == 0 || started.ID != startedItemID ||
-			started.TurnID != turn.ID || started.InvocationID != owner.ID ||
-			started.RunID != frozen.ChildRunID || started.Kind != ItemDelegation ||
-			started.Status != ItemStarted ||
-			!decodeTypedAuthorityJSON(started.Payload, &original) ||
-			original.Execution == nil ||
-			!sameHandoffFrozenExecution(frozen, *original.Execution) ||
-			original.ParentRunID != parentRunID || original.DelegationID != frozen.ID ||
-			original.ChildRunID != frozen.ChildRunID ||
-			original.MemberID != frozen.MemberID ||
-			original.MemberRevision != frozen.MemberRevision ||
-			original.Goal != frozen.Goal ||
-			original.Status != handoff.StatusQueued || len(original.Result) != 0 ||
-			original.Execution.Status != handoff.StatusQueued ||
-			len(original.Execution.Result) != 0 ||
-			original.Execution.Error != "" || original.Execution.ErrorCode != "" {
-			return true, ErrConflict
-		}
-		return true, ErrExecutionOutcomeUnknown
-	} else if !errors.Is(loadErr, ErrNotFound) {
-		return true, loadErr
+	if wait.Kind != "" && (wait.OperationID != frozen.ID || wait.ChildRunID != frozen.ChildRunID) {
+		return true, ErrConflict
 	}
-	if err := runner.admitDelegationChild(ctx, turn, owner, frozen); err != nil {
-		if errors.Is(err, budget.ErrWaiting) {
-			return true, budget.ErrWaiting
-		}
-		return true, err
-	}
-	// The same Store enforces cancellation-intent and frozen-original grant
-	// exclusion on this stable Started Item. No independent worker identity.
-	_, admitted, err := runner.recordDelegationItemWithAdmission(ctx, turn, owner, frozen, ItemStarted, "")
+	startedItemID, admitted, err := runner.admitOriginalDelegation(ctx, turn, owner, frozen)
 	if err != nil {
 		return true, err
 	}
 	if !admitted {
-		// A concurrent worker won the Store CAS. It alone can start the
-		// child; without its physical return receipt, our outcome is unknown.
+		if frozen.NativeLocal || runner.nativeLocalDelegation(frozen) != nil {
+			if _, e := runner.runtime.Load(ctx, frozen.ChildRunID); e == nil {
+				return false, nil
+			} else if !errors.Is(e, kernel.ErrNotFound) {
+				return true, e
+			}
+		}
 		return true, ErrExecutionOutcomeUnknown
 	}
-	// This is the first child physical dispatch, not a replay of the parent
-	// Agent Tool call. An already committed/uncertain child Grant remains
-	// fenced by executeDelegation.
-	_, err = runner.executeDelegation(ctx, turn, owner, parent, frozen, startedItemID)
+	result, err := runner.executeDelegation(ctx, turn, owner, parent, frozen, startedItemID, hashInvocationBytes(call.Arguments))
+	if err == nil && result.Delegation.Status == handoff.StatusQueued {
+		return true, budget.ErrWaiting
+	}
 	return true, err
 }
 
@@ -140,35 +115,11 @@ func verifiedFrozenWaitingDelegation(
 		return handoff.Delegation{}, ErrConflict
 	}
 	id := delegationToolID(owner, call.ID)
-	if waiting.Kind != ItemDelegation || waiting.Status != ItemWaiting ||
-		waiting.Seq == 0 || waiting.TurnID != turn.ID ||
-		waiting.InvocationID != owner.ID ||
-		waiting.ID != stableID("hid", turn.ID, id, string(ItemWaiting)) ||
-		waiting.ParentItemID != "" ||
-		waiting.RunID != stableID("hchild", parentRunID, id) {
+	payload, valid := frozenDelegationAdmissionPayload(owner, waiting)
+	if !valid || waiting.Status != ItemWaiting || waiting.InvocationID != owner.ID ||
+		payload.DelegationID != id || waiting.RunID != stableID("hchild", parentRunID, id) ||
+		payload.ParentRunID != parentRunID || payload.OriginalCallHash != hashInvocationBytes(call.Arguments) {
 		return handoff.Delegation{}, ErrConflict
 	}
-	// Host policy may change the model-proposed Goal, role and allowed
-	// tools once on first dispatch. Its already-frozen Waiting Item is
-	// the authority; its original Tool arguments hash binds that fact to
-	// this exact committed model call without rerunning Host policy.
-	var payload delegationItemPayload
-	if !decodeTypedAuthorityJSON(waiting.Payload, &payload) {
-		return handoff.Delegation{}, ErrConflict
-	}
-	frozen := payload.Execution
-	if frozen == nil || frozen.ID != id || frozen.ChildRunID != waiting.RunID ||
-		frozen.Status != handoff.StatusQueued || len(frozen.Result) != 0 ||
-		frozen.Error != "" || frozen.ErrorCode != "" ||
-		payload.DelegationID != id || payload.ChildRunID != waiting.RunID ||
-		payload.ParentRunID != parentRunID ||
-		len(payload.OriginalCallHash) != 64 ||
-		payload.OriginalCallHash != hashInvocationBytes(call.Arguments) ||
-		payload.Status != handoff.StatusQueued || len(payload.Result) != 0 ||
-		frozen.MemberID != payload.MemberID ||
-		frozen.MemberRevision != payload.MemberRevision ||
-		frozen.Goal != payload.Goal {
-		return handoff.Delegation{}, ErrConflict
-	}
-	return *frozen, nil
+	return *payload.Execution, nil
 }

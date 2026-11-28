@@ -63,19 +63,37 @@ The desktop Host creates separate Kernel and Harness files in one private profil
 directory. The Harness adapter shares the PostgreSQL adapter's relational
 admission and receipt implementation and runs it on a native SQLite pool.
 SQLite acquires its writer lock before validating a mutation. The Kernel owns
-physical execution and the Harness owns the original dispatch and return
-records. Recovery across the two files uses these records. A PostgreSQL Host
-can place both schemas in one database and uses the same recovery protocol.
+first-party physical execution and accounting; the Harness owns product
+projections and the dispatch/return records of independent opaque effects.
+A PostgreSQL Host can place both schemas in one database and uses the same
+authority protocol.
 [Desktop Harness SQLite](../go/agent-runtime-harness-sqlite/README.md).
+
+Before a Run exists, Create and DecideBeforeCreate arbitrate one immutable
+native Run identity: created, cancelled or definitively failed. Negative
+decisions close the exact budget generation in the same transaction without
+inventing a Run, membership, event or lease. An explicitly selected Retry can
+consume an original negative identity, including an uncreated first Attempt.
+Unknown results cannot authorize a new Attempt. Qualified first-party Root
+Start/Retry use the native admission and retirement directly, without a Host
+dispatch grant or receipt. Harness projects a committed negative decision with
+SettleUncreatedRoot; external and opaque dispatches retain their own fence.
 
 ## Context execution path
 
-The supported SDK composes one concrete `agent.NewBoundedContextAdapter` for
-Context hydration, bounded model-request preparation and exact artifact/
-checkpoint CAS. `ContextSummary` optionally performs a separate, frozen
+The supported SDK selects one concrete `agent.NewBoundedContextAdapter`
+through `agent.Dependencies.BoundedContext`. The Runner owns Context hydration,
+bounded model-request preparation and exact artifact/checkpoint CAS as native
+stages rather than requiring a Host Run middleware entry. `ContextSummary` optionally performs a separate, frozen
 summary-purpose ModelInvocation under that same bounded lifecycle;
-`SummaryNativeRecovery` and managed Context recovery retain their own original
-Kernel proofs. The never-connected `SamplingContextPorts` alternative and
+`ManagedRecovery` uses the same AgentObligations source, native preparation,
+original-grant native entry and retirement protocol for Context and Summary.
+The successor's enabled frontier is consumed by the common callback-entry
+transaction. Closure, retirement, Grant removal and owned Lease release
+commit together; Owned Finish consumes the original durable callback return
+and exact Snapshot proof directly, without a settlement Mark.
+Parent-bound borrowed callbacks retain their own return witness.
+Recovery observes the immutable native receipt before projecting product state; no Managed Host closure is written. The never-connected `SamplingContextPorts` alternative and
 `ContextPreparation` selector were retired before beta.24 instead of
 maintaining a second generic context executor. A Context receipt is not proof
 of an unknown Provider effect, and an unrelated Store ACK cannot authorize
@@ -97,7 +115,7 @@ model, HTTP/OpenAPI and TypeScript. The persisted event is
 `agent_invocation`; Tool definition versions remain independent Tool proofs.
 Because removal changes Start admission hashes, legacy pre-stable Host Turns
 must be explicitly retired and their effects reconciled before manual
-PostgreSQL DDL or new Harness SQLite Schema v3 enrollment. New storage never
+PostgreSQL DDL or new Harness SQLite Schema v4 enrollment. New storage never
 promotes old non-Agent data into native Agent authority.
 
 ## Host-selected Named Agent capabilities
@@ -118,24 +136,41 @@ continue to authorize all external effects and recovery.
 ## Shared Budget execution and Host ownership
 
 The sole first-party budget **execution** driver is
-`agent.BoundedBudgetAdapter` in the Agent Run/Model/Tool chains. When composing
+`agent.BoundedBudgetAdapter`, selected once through
+`agent.Dependencies.BoundedBudget`. The Runner owns its Run admission, Model
+and Tool accounting, and Run settlement stages. When composing
 an explicit Harness Runner, the Host constructs a single
 `harness.BudgetAuthority` with its selected ledger Store, relation index,
 token-admission planner and clock. `authority.Adapter()` returns the same
-native adapter pointer for each middleware chain; the Host passes `authority`
+native adapter pointer to select once; the Host passes `authority`
 separately into `harness.Dependencies.Budget` and may use its receipt-only
 verifiers. The Host `BudgetAuthority` does **not** implement any executable
 Run, Model or Tool Middleware: it cannot launch Provider or Tool effects.
 The recommended `OpenAgentSession` performs this exact composition itself.
-`agent.NewRunner` rejects two different native Budget Adapter instances or a
-duplicate adapter in any one chain; it does not require optional budgeted
-chains on an unbudgeted Agent. This binds the trusted original callback scope
-without creating a second execution path.
+`agent.NewRunner` normalizes the historical exact complete first-party
+middleware spelling to the same native stages. An explicit Budget owner
+cannot be combined with caller middleware; the older partial or opaque
+chains retain their actual execution and proof restrictions. Multiple or
+duplicate Budget adapters remain invalid. This does not retrospectively
+qualify any original opaque callback return.
 
 The native Adapter alone performs the original reservation/dispatch, trusted
 Provider and Tool return observation, settlement and cancellation-aware
-accounting. The Host authority owns frozen Run/ancestor Ledger scope,
-Host-selected meter/limits and budget Timeline projection. An uncertain
+accounting. The Host selects the frozen Run/ancestor scope and meter/limits,
+and projects the budget Timeline. Standard and Managed execution commit
+physical accounting in the Runtime Store, with the Run mutation. Fixed eager
+local Named Agents preview capacity without a Host enrollment: their frozen
+child scope and lifetime capacity are enrolled in native Run Create.
+For qualified scoped local Root and Named Agent starts, native Run Create
+competes with the original negative identity decision for cancellation or
+definitive failure, with any budget enrollment in the same transaction.
+Native Resume, allowance and scoped Approval use the original Runtime
+admission/control, and approval projection reads the Kernel journal.
+Actual external accounting, cancellation, opaque or independently routed
+callbacks retain their distinct Host effect boundary. Unused optional
+authorities do not create a new Host execution election.
+Definitively refused capacity can resume the same selection;
+an uncertain Create or callback cannot be replayed. An uncertain
 Provider or Tool result retains its original quota; a proven Agent terminal
 pre-dispatch denial can release only the matching original request's reserved
 quota. Other Host middleware may not borrow the native Adapter's callback
@@ -194,10 +229,18 @@ alone is not a physical-effect receipt.
 - Each physical Root/Child Start, Resume and Tool/Model call requires its
   original frozen execution identity and the appropriate Store-serialized
   physical grant or lease. The durable identity is stable across restart.
+- Automatic Root admission commits the next native Lease Epoch, exact
+  physical Grant, and original admission identity together in the same Store
+  transaction, against the complete frozen Snapshot. An explicitly borrowed
+  native Lease is validated by the same reducer without acquiring or releasing
+  it. There is no preliminary automatic Acquire or compensating Release.
+  Runtime returns a scope bound to the committed pair; the physical Grant
+  is an invocation fence, not an independently acquired execution owner.
 - An owned physical admission may recover a lost COMMIT acknowledgement
   only within its original live invocation, from a direct attempt-bound
-  Store outcome and the exact persisted admission commitment. Public Grant
-  identity, a definite refusal or a later observer never grants dispatch.
+  Store outcome carrying the original candidate and the exact persisted
+  admission commitment. Public Grant identity, a definite refusal or a later
+  observer never grants dispatch.
 - After admission acknowledgement, the actual owned RunChain entry still
   checks the exact original Grant, persisted owner/epoch, source revision and
   operation status against Store time. Runtime accounts for the observation's
@@ -223,6 +266,16 @@ alone is not a physical-effect receipt.
   post-election inspection. Repair does not authorize new dispatch or close
   the cancellation intent itself. No-entry cannot create callback custody;
   an unchanged suffix of such retirements preserves prior actual custody.
+- Qualified local Root Start/Retry and Named Agent Start use the same native
+  Run identity, with Create competing against definitive negative decisions.
+  Ordinary and Managed continuation use the same native Grant/lease, entry
+  and retirement authority; allowance uses the guarded control CAS and
+  approval uses the original checkpoint/journal. Harness checks frozen
+  ownership, actual accounting obligations and outstanding Host effects
+  without electing another execution dispatch. Externally bound leases,
+  independent accounting/cancellation and opaque callbacks retain their
+  actual effect boundaries. Terminal projection observes the persisted
+  native retirement; unknown original effects remain fenced.
 - Cancellation competes atomically with new dispatch admission. A cancelled
   parent cannot start a late child, while an unsettled child grant prevents
   premature terminalization of its ancestors.

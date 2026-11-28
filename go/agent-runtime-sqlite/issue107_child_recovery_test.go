@@ -61,13 +61,13 @@ func TestIssue107SQLiteGrantSurvivesReopenUntilOriginalSettlement(t *testing.T) 
 	if lookupErr != nil || original != grant {
 		t.Fatalf("original Grant not recoverable: %+v err=%v", original, lookupErr)
 	}
-	if err = second.FinishChildExecution(t.Context(), original); !errors.Is(err, kernel.ErrExecutionConflict) {
+	if err = second.FinishChildExecution(t.Context(), original, kernel.ChildExecutionSettlement{}); !errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("reopened pending Grant was unsafely retired: %v", err)
 	}
 	if err = second.MarkChildExecutionSettled(t.Context(), original, kernel.ChildExecutionSettlement{}); !errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("untrusted direct Store Mark authorized cleanup: %v", err)
 	}
-	if err = second.FinishChildExecution(t.Context(), original); !errors.Is(err, kernel.ErrExecutionConflict) {
+	if err = second.FinishChildExecution(t.Context(), original, kernel.ChildExecutionSettlement{}); !errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("unknown physical outcome released without receipt: %v", err)
 	}
 	if _, err = recovered.Cancel(t.Context(), parent.Run.ID, parent.Run.Revision, "unknown after restart"); !errors.Is(err, kernel.ErrChildExecutionBusy) {
