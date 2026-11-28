@@ -12,7 +12,6 @@ import (
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
@@ -195,9 +194,8 @@ func compose(store kernel.Store, state *taskState, client model.Client, config s
 		return nil, err
 	}
 	dependencies := agent.Dependencies{
-		Runtime: rt, Model: client, Catalog: registry, Executor: registry, Clock: state.clock,
+		Runtime: rt, Model: observedModelClient{client: client, state: state}, Catalog: registry, Executor: registry, Clock: state.clock,
 		BoundedContext:  bounded,
-		ModelMiddleware: []plugin.ModelMiddleware{outputCeiling{tokens: config.outputTokens, state: state}},
 		Limits:          taskLimits(),
 		RunExecution:    &agent.RunExecution{OwnerID: owner, LeaseDuration: leaseDuration},
 		Execution: agent.ExecutionPolicy{
@@ -235,31 +233,33 @@ func compose(store kernel.Store, state *taskState, client model.Client, config s
 	})
 }
 
-type outputCeiling struct {
-	tokens int64
+type observedModelClient struct {
+	client model.Client
 	state  *taskState
 }
 
-func (outputCeiling) Name() string { return "task-agent.output-ceiling" }
+func (client observedModelClient) Generate(ctx context.Context, request model.Request) (model.Response, error) {
+	return client.GenerateStream(ctx, request, nil)
+}
 
-func (ceiling outputCeiling) Model(ctx context.Context, request model.Request, sink model.StreamSink, next plugin.ModelNext) (model.Response, error) {
-	// The Config freezes the per-call ceiling before Context preparation.
-	// Keep this observation middleware's existing ability to tighten it.
-	if request.MaxOutputTokens == 0 || request.MaxOutputTokens > ceiling.tokens {
-		request.MaxOutputTokens = ceiling.tokens
-	}
+func (client observedModelClient) GenerateStream(ctx context.Context, request model.Request, sink model.StreamSink) (model.Response, error) {
 	started := time.Now()
-	response, err := next(ctx, request, sink)
-	// An ownership rejection before physical dispatch is not a model call.
-	if !agent.IsModelPreDispatchDenied(err) {
-		ceiling.state.mu.Lock()
-		ceiling.state.requests = append(ceiling.state.requests, model.CloneRequest(request))
+	var response model.Response
+	var err error
+	if streaming, ok := client.client.(model.StreamingClient); ok {
+		response, err = streaming.GenerateStream(ctx, request, sink)
+	} else {
+		response, err = client.client.Generate(ctx, request)
+	}
+	{
+		client.state.mu.Lock()
+		client.state.requests = append(client.state.requests, model.CloneRequest(request))
 		receipt := numericUsage(response.Usage)
-		ceiling.state.observations = append(ceiling.state.observations, modelObservation{
+		client.state.observations = append(client.state.observations, modelObservation{
 			DurationMs: time.Since(started).Milliseconds(), Usage: receipt,
 		})
-		ceiling.state.mu.Unlock()
-		ceiling.state.recordInputCountUsageComparison(request, receipt, err)
+		client.state.mu.Unlock()
+		client.state.recordInputCountUsageComparison(request, receipt, err)
 	}
 	return response, err
 }

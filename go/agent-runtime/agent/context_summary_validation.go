@@ -33,7 +33,7 @@ type contextSummaryModelKey struct{}
 func validSummaryComposition(d Dependencies) bool {
 	summary := d.ContextSummary
 	if summary == nil || summary.bounded == nil || summary.ports == nil ||
-		d.PrepareModelRequest != nil || len(d.RunMiddleware) != 0 {
+		d.PrepareModelRequest != nil {
 		return false
 	}
 	if d.BoundedBudget == nil {

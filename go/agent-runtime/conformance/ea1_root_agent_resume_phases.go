@@ -22,7 +22,7 @@ func RunEA1RootAgentResumePhases(t *testing.T, factory func(*testing.T) (kernel.
 		t.Run("P0/"+vector, func(t *testing.T) { ea1RootResumePreflight(t, factory, vector) })
 	}
 	t.Run("P1/admitted-before-dispatch", func(t *testing.T) { ea1RootResumeBarrier(t, factory) })
-	for _, kind := range []string{"model", "tool", "host"} {
+	for _, kind := range []string{"model", "tool"} {
 		t.Run("P2/"+kind, func(t *testing.T) { ea1RootResumeUnknown(t, factory, kind) })
 	}
 	// Reproduce slow, successful Model-side intent reads independently
@@ -53,23 +53,6 @@ type ea1ResumeHost struct {
 	unknown      error
 }
 
-func (*ea1ResumeHost) Name() string { return "ea1.actual.resume.host" }
-func (h *ea1ResumeHost) Run(ctx context.Context, inv plugin.RunInvocation, next plugin.RunNext) (kernel.Snapshot, error) {
-	h.calls++
-	if inv.Operation != plugin.RunResume || inv.RunID != h.request.ID || inv.Actor != h.request.Actor || inv.Thread != h.request.Thread || inv.Goal != h.request.Goal || inv.ParentRunID != "" {
-		h.t.Fatal("callback did not preserve actual original Resume identity")
-	}
-	if h.before != nil {
-		if e := h.before(ctx); e != nil {
-			return kernel.Snapshot{}, e
-		}
-	}
-	if h.unknown != nil {
-		h.sends++
-		return kernel.Snapshot{}, h.unknown
-	}
-	return next(ctx)
-}
 func ea1NewResumeFixture(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store), tool bool) *ea1ResumeFixture {
 	backing, peer, reopen := factory(t)
 	wrapped := ea1AgentAdmissionWrap(t, backing)
@@ -112,11 +95,7 @@ func ea1NewResumeFixture(t *testing.T, factory func(*testing.T) (kernel.Store, k
 	return f
 }
 func (f *ea1ResumeFixture) runner(rt *kernel.Runtime, owner string, withHost bool) *agent.Runner {
-	var middleware []plugin.RunMiddleware
-	if withHost {
-		middleware = []plugin.RunMiddleware{f.host}
-	}
-	r, e := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: f.physical, Catalog: f.catalog, Executor: f.catalog, RunMiddleware: middleware, Clock: ea1UnknownAgentClock{offset: f.clockOffset}, RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: 2 * time.Second}, Execution: ea1StoreBackedExecutionPolicy()})
+	r, e := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: f.physical, Catalog: f.catalog, Executor: f.catalog, Clock: ea1UnknownAgentClock{offset: f.clockOffset}, RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: 2 * time.Second}, Execution: ea1StoreBackedExecutionPolicy()})
 	if e != nil {
 		f.t.Fatal(e)
 	}

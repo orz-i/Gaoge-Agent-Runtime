@@ -11,7 +11,7 @@ import (
 func validBoundedContextComposition(d Dependencies) bool {
 	a := d.BoundedContext
 	return a == nil || a.manager != nil && a.ports != nil && d.PrepareModelRequest == nil &&
-		len(d.RunMiddleware) == 0 && (d.ContextSummary == nil || d.ContextSummary.bounded == a)
+		(d.ContextSummary == nil || d.ContextSummary.bounded == a)
 }
 
 // A private, source-bound preparation rejection is not a provider

@@ -24,14 +24,13 @@ func RunEA1ChildAgentStartPhases(t *testing.T, factory func(*testing.T) (kernel.
 	for _, v := range []string{"origin", "actor", "thread", "missing-parent", "terminal-parent", "preflight", "duplicate", "stale-admission", "parent-wins"} {
 		t.Run("P0/"+v, func(t *testing.T) { ea1ChildStartPreflight(t, factory, v) })
 	}
-	t.Run("P1/host-before-next", func(t *testing.T) { ea1ChildStartPhase(t, factory, "P1", "host") })
-	for _, kind := range []string{"host", "model", "tool"} {
+	for _, kind := range []string{"model", "tool"} {
 		t.Run("P2/"+kind, func(t *testing.T) { ea1ChildStartPhase(t, factory, "P2", kind) })
 	}
 	for _, kind := range []string{"model", "tool"} {
 		t.Run("P3/"+kind, func(t *testing.T) { ea1ChildStartPhase(t, factory, "P3", kind) })
 	}
-	for _, kind := range []string{"host", "model", "tool", "deadline"} {
+	for _, kind := range []string{"model", "tool", "deadline"} {
 		t.Run("P5/"+kind, func(t *testing.T) { ea1ChildStartPhase(t, factory, "P5", kind) })
 	}
 }
@@ -72,23 +71,6 @@ type ea1ChildStartHost struct {
 	sendUnknown  bool
 }
 
-func (*ea1ChildStartHost) Name() string { return "ea1.actual.child.start" }
-func (h *ea1ChildStartHost) Run(ctx context.Context, inv plugin.RunInvocation, next plugin.RunNext) (kernel.Snapshot, error) {
-	if inv.Operation != plugin.RunStart || inv.RunID != h.request.ID || inv.ParentRunID != h.request.ParentRunID || inv.Actor != h.request.Actor || inv.Thread != h.request.Thread {
-		return kernel.Snapshot{}, agent.ErrInvalidRequest
-	}
-	h.calls++
-	if h.hook != nil {
-		h.hook()
-	}
-	if h.failure != nil {
-		if h.sendUnknown {
-			h.sends++
-		}
-		return kernel.Snapshot{}, h.failure
-	}
-	return next(ctx)
-}
 
 type ea1ChildStartFixture struct {
 	t            *testing.T
@@ -147,7 +129,6 @@ func ea1NewChildStart(t *testing.T, factory func(*testing.T) (kernel.Store, kern
 func (f *ea1ChildStartFixture) runner(rt *kernel.Runtime, owner string, host bool) *agent.Runner {
 	d := agent.Dependencies{Runtime: rt, Model: f.physical, Catalog: f.catalog, Executor: f.catalog, RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: ea1FixtureLeaseWindow(f.request.DeadlineAt)}, Execution: ea1StoreBackedExecutionPolicy()}
 	if host {
-		d.RunMiddleware = []plugin.RunMiddleware{f.host}
 		d.StartControlPreflight = func(ctx context.Context, r agent.StartRequest) error {
 			if f.preflightErr != nil {
 				return f.preflightErr

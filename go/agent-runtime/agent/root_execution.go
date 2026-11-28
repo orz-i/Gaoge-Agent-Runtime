@@ -515,17 +515,11 @@ func collectBoundedCallbacks(d Dependencies) []any {
 	if d.Inputs != nil {
 		result = append(result, inputReadStage)
 	}
-	for _, m := range d.ModelMiddleware {
-		switch value := m.(type) {
-		case *ModelAdmissionBarrier:
-			result = append(result, value)
-		}
+	if d.ModelAdmissionBarrier != nil {
+		result = append(result, d.ModelAdmissionBarrier)
 	}
-	for _, m := range d.ToolMiddleware {
-		switch value := m.(type) {
-		case *BoundedToolTimelineAdapter:
-			result = append(result, value)
-		}
+	if d.ToolTimeline != nil {
+		result = append(result, d.ToolTimeline)
 	}
 	return result
 }

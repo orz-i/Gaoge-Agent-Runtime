@@ -118,7 +118,7 @@ func recordBudgetRunDenial(ctx context.Context, adapter *BoundedBudgetAdapter, i
 // Both Root and native parented executions consume this same original
 // admission return. It leaves the existing snapshot unchanged so an already
 // elected cancellation can perform its own Kernel CAS after retirement.
-func (r *Runner) invokeNativeRun(ctx context.Context, source kernel.Snapshot, inv plugin.RunInvocation, next plugin.RunNext) (kernel.Snapshot, error) {
+func (r *Runner) invokeNativeRun(ctx context.Context, source kernel.Snapshot, inv plugin.RunInvocation, next runContinuation) (kernel.Snapshot, error) {
 	if source.Run.BudgetScopeID != "" && r.atomicBudget() == nil {
 		return source, budget.ErrLedgerConflict
 	}

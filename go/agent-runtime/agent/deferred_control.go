@@ -21,7 +21,7 @@ func trustedDeferredPreparationStack(d Dependencies) bool {
 // may be native even when an input source is configured; an executing frame
 // that actually reads that Host source cannot claim scoped control custody.
 func nativeRunLayers(d Dependencies) bool {
-	return len(d.RunMiddleware) == 0 && len(d.Observers) == 0 && len(d.Telemetry) == 0
+	return len(d.Observers) == 0 && len(d.Telemetry) == 0
 }
 
 // scopedDeferredRootCallbacks checks callbacks that can enter an owned Agent Root.
@@ -33,20 +33,6 @@ func scopedDeferredRootCallbacks(d Dependencies) bool {
 		d.PrepareModelRequest != nil || d.NormalizeModelPolicy != nil ||
 		len(d.CompletionPolicies) != 0 || d.ToolDiscovery != nil {
 		return false
-	}
-	for _, item := range d.ModelMiddleware {
-		switch item.(type) {
-		case *ModelAdmissionBarrier:
-		default:
-			return false
-		}
-	}
-	for _, item := range d.ToolMiddleware {
-		switch item.(type) {
-		case *BoundedToolTimelineAdapter:
-		default:
-			return false
-		}
 	}
 	return true
 }

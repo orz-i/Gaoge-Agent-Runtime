@@ -275,8 +275,10 @@ type Dependencies struct {
 	ToolDiscovery         ToolDiscovery
 	Observers             []plugin.Observer
 	Telemetry             []observability.Recorder
-	RunMiddleware         []plugin.RunMiddleware
-	ModelMiddleware       []plugin.ModelMiddleware
+	// ModelAdmissionBarrier synchronizes admission before the final physical guard.
+	ModelAdmissionBarrier *ModelAdmissionBarrier
+	// ToolTimeline projects the fixed Tool lifecycle; it cannot dispatch Tools.
+	ToolTimeline *BoundedToolTimelineAdapter
 	// PrepareModelRequest is the only pre-commit message/Tool schema projection.
 	// It does not choose an Agent mode. ModelMiddleware cannot rewrite frozen input.
 	PrepareModelRequest ModelRequestPreparer
@@ -289,7 +291,6 @@ type Dependencies struct {
 	ContextSummary *ContextSummaryAdapter
 	// NormalizeModelPolicy selects and freezes Host options/route policy before preparation.
 	NormalizeModelPolicy ModelPolicyNormalizer
-	ToolMiddleware       []plugin.ToolMiddleware
 	CompletionPolicies   []CompletionPolicy
 	Limits               Limits
 	Execution            ExecutionPolicy
@@ -365,7 +366,6 @@ type Runner struct {
 	approvalControlPreflight func(context.Context, kernel.Snapshot) error
 	startControlPreflight    func(context.Context, StartRequest) error
 	runMiddlewareConfigured  bool
-	receiptOnlyRunChain      bool
 	rootCallbacks            *rootCallbackState
 	boundedCallbacks         []any
 	boundedContext           *BoundedContextAdapter
@@ -378,11 +378,10 @@ type Runner struct {
 	discovery                ToolDiscovery
 	observers                *plugin.ObserverSet
 	telemetry                *observability.Set
-	runChain                 *plugin.RunChain
-	modelChain               *plugin.ModelChain
+	modelAdmissionBarrier    *ModelAdmissionBarrier
+	toolTimeline             *BoundedToolTimelineAdapter
 	prepareModelRequest      ModelRequestPreparer
 	modelPolicyNormalizer    ModelPolicyNormalizer
-	toolChain                *plugin.ToolChain
 	completionPolicies       []CompletionPolicy
 	toolProgressPolicy       *ToolProgressPolicy
 	inputs                   RunInputSource
@@ -551,18 +550,6 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 			return nil, ErrInvalidRequest
 		}
 	}
-	runChain, err := plugin.NewRunChain(dependencies.RunMiddleware...)
-	if err != nil {
-		return nil, errors.Join(ErrInvalidRequest, err)
-	}
-	modelChain, err := plugin.NewModelChain(dependencies.ModelMiddleware...)
-	if err != nil {
-		return nil, errors.Join(ErrInvalidRequest, err)
-	}
-	toolChain, err := plugin.NewToolChain(dependencies.ToolMiddleware...)
-	if err != nil {
-		return nil, errors.Join(ErrInvalidRequest, err)
-	}
 	observers, err := plugin.NewObserverSet(dependencies.Observers...)
 	if err != nil {
 		return nil, errors.Join(ErrInvalidRequest, err)
@@ -636,35 +623,34 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		executor: dependencies.Executor, approvals: dependencies.Approvals,
 		approvalControlPreflight: dependencies.ApprovalControlPreflight,
 		startControlPreflight:    dependencies.StartControlPreflight,
-		runMiddlewareConfigured:  len(dependencies.RunMiddleware) > 0 || dependencies.BoundedContext != nil || boundedBudget != nil || dependencies.Inputs != nil,
-		receiptOnlyRunChain:      supportsReceiptOnlyRunChain(dependencies),
+		runMiddlewareConfigured:  dependencies.BoundedContext != nil || boundedBudget != nil || dependencies.Inputs != nil,
 		hostedTools:              dependencies.HostedTools, discovery: dependencies.ToolDiscovery, observers: observers, telemetry: telemetry, approvalPolicies: approvalPolicies,
-		completionPolicies:   compactCompletionPolicies(dependencies.CompletionPolicies),
-		toolProgressPolicy:   progressPolicy,
-		inputs:               dependencies.Inputs,
-		inputBinding:         inputBinding,
-		limits:               dependencies.Limits,
-		execution:            execution,
-		runExecution:         runExecution,
-		defaultRunOwner:      dependencies.RunExecution == nil,
-		toolOutcomeVerifier:  dependencies.ToolOutcomeVerifier,
-		delegatedToolResults: dependencies.DelegatedToolResults,
-		modelOutcomeVerifier: dependencies.ModelOutcomeVerifier,
-		modelLimiter:         newCallLimiter(execution.Model.MaxConcurrency),
-		toolLimiter:          newCallLimiter(execution.Tool.MaxConcurrency),
-		runChain:             runChain, modelChain: modelChain, toolChain: toolChain,
-		boundedContext:   dependencies.BoundedContext,
-		boundedBudget:    boundedBudget,
-		contextSummary:   dependencies.ContextSummary,
-		managedRecovery:  managedRecovery,
-		boundedCallbacks: collectBoundedCallbacks(dependencies),
+		completionPolicies:    compactCompletionPolicies(dependencies.CompletionPolicies),
+		toolProgressPolicy:    progressPolicy,
+		inputs:                dependencies.Inputs,
+		inputBinding:          inputBinding,
+		limits:                dependencies.Limits,
+		execution:             execution,
+		runExecution:          runExecution,
+		defaultRunOwner:       dependencies.RunExecution == nil,
+		toolOutcomeVerifier:   dependencies.ToolOutcomeVerifier,
+		delegatedToolResults:  dependencies.DelegatedToolResults,
+		modelOutcomeVerifier:  dependencies.ModelOutcomeVerifier,
+		modelLimiter:          newCallLimiter(execution.Model.MaxConcurrency),
+		toolLimiter:           newCallLimiter(execution.Tool.MaxConcurrency),
+		modelAdmissionBarrier: dependencies.ModelAdmissionBarrier,
+		toolTimeline:          dependencies.ToolTimeline,
+		boundedContext:        dependencies.BoundedContext,
+		boundedBudget:         boundedBudget,
+		contextSummary:        dependencies.ContextSummary,
+		managedRecovery:       managedRecovery,
+		boundedCallbacks:      collectBoundedCallbacks(dependencies),
 		// Native pre-Start cancellation and deferred post-callback custody
 		// share the SAME Host-callback trust decision. Native Start remains
 		// strictly middleware-free while the deferred path may also accept
 		// the audited, callback-scoped first-party middleware below.
 		kernelOwnedStartCancellation: control && dependencies.Inputs == nil && dependencies.BoundedContext == nil && boundedBudget == nil &&
-			len(dependencies.RunMiddleware) == 0 &&
-			len(dependencies.ModelMiddleware) == 0 && len(dependencies.ToolMiddleware) == 0 &&
+			dependencies.ModelAdmissionBarrier == nil && dependencies.ToolTimeline == nil &&
 			!managedRecovery,
 		prepareModelRequest:            dependencies.PrepareModelRequest,
 		trustedDeferredPreparedControl: trustedDeferredPreparationStack(dependencies),
@@ -1955,7 +1941,7 @@ func (runner *Runner) generateModel(
 	if runner.atomicModelBudget(call.samplingPlan()) != nil {
 		// No budget callback surrounds the physical call: admission and receipt
 		// settlement are the existing Agent Run transitions.
-		return terminal(ctx, call.samplingPlan().request(frozen), emit)
+		return runner.invokeAdmittedModel(ctx, call.samplingPlan().request(frozen), emit, terminal)
 	}
 	response, err := runner.invokeFirstPartyModel(ctx, request, emit, terminal)
 	// Model layer completion is tracked by the actual chain lifecycle; only
@@ -2604,7 +2590,7 @@ func (runner *Runner) invokePendingTool(
 		var out tools.ExecutionResult
 		var chainErr error
 		if atomicBudget {
-			out, chainErr = terminal(callCtx)
+			out, chainErr = runner.invokeProjectedTool(callCtx, invocation, terminal)
 		} else {
 			out, chainErr = runner.invokeFirstPartyTool(callCtx, invocation, terminal)
 		}

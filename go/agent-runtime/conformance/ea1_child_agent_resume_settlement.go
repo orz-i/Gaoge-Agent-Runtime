@@ -73,19 +73,6 @@ type ea1ChildSettlementHost struct {
 	before    func()
 }
 
-func (h *ea1ChildSettlementHost) Name() string { return h.name }
-func (h *ea1ChildSettlementHost) Run(ctx context.Context, i plugin.RunInvocation, next plugin.RunNext) (kernel.Snapshot, error) {
-	if i.Operation != h.operation || i.RunID != h.request.ID || i.ParentRunID != h.request.ParentRunID || i.Actor != h.request.Actor || i.Thread != h.request.Thread || i.Goal != h.request.Goal {
-		return kernel.Snapshot{}, agent.ErrInvalidRequest
-	}
-	h.physical.mu.Lock()
-	h.physical.hostCalls++
-	h.physical.mu.Unlock()
-	if h.before != nil {
-		h.before()
-	}
-	return next(ctx)
-}
 
 type ea1ChildResumeSettlementFixture struct {
 	t                                      *testing.T
@@ -162,11 +149,7 @@ func ea1NewChildResumeSettlement(t *testing.T, factory func(*testing.T) (kernel.
 	return f
 }
 func (f *ea1ChildResumeSettlementFixture) runner(rt *kernel.Runtime, owner string, host bool) *agent.Runner {
-	var middleware []plugin.RunMiddleware
-	if host {
-		middleware = []plugin.RunMiddleware{f.host}
-	}
-	r, e := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: f.physical, Catalog: f.registry, Executor: f.registry, RunMiddleware: middleware, ToolMiddleware: []plugin.ToolMiddleware{f.physical}, RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: 3 * time.Minute}})
+	r, e := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: f.physical, Catalog: f.registry, Executor: f.registry, RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: 3 * time.Minute}})
 	if e != nil {
 		f.t.Fatal(e)
 	}

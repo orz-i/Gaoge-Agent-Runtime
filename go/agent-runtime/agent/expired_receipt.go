@@ -4,24 +4,15 @@ import (
 	"context"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
-
-// supportsReceiptOnlyRunChain is a composition decision, not a second
-// execution chain. The exact first-party Run layers still own their native
-// authorization, projection and completion obligations. An arbitrary Host
-// layer cannot be skipped (its policy is unknown) or entered after expiry.
-func supportsReceiptOnlyRunChain(d Dependencies) bool {
-	return len(d.RunMiddleware) == 0
-}
 
 // expiredRootReceipt selects a single already-committed receipt BEFORE
 // entering any Run layer. Its terminal is consumed by the original RunChain;
 // no arbitrary Host middleware, Provider or Tool dispatch can be reached.
 // No original lifecycle obligation is omitted.
-func (r *Runner) expiredRootReceipt(source kernel.Snapshot, frame *nativeRunAdmission) (plugin.RunNext, error) {
+func (r *Runner) expiredRootReceipt(source kernel.Snapshot, frame *nativeRunAdmission) (runContinuation, error) {
 	state, err := decodeState(source.State)
-	if err != nil || !r.receiptOnlyRunChain || !knownRootPhysicalSettlement(source) || state.InputBinding != "" {
+	if err != nil || !knownRootPhysicalSettlement(source) || state.InputBinding != "" {
 		return nil, kernel.ErrDeadline
 	}
 	// Durable events remain part of the receipt CAS. The expired path does

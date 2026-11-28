@@ -29,8 +29,8 @@ func summaryNativeBridge(value any, name string, runtime *kernel.Runtime) bool {
 func validManagedDependencies(d Dependencies) bool {
 	a := d.BoundedContext
 	return d.Runtime != nil && d.Runtime.SupportsManagedRecovery() && d.Runtime.HasManagedRecoveryHost() &&
-		a != nil && d.PrepareModelRequest == nil && len(d.RunMiddleware) == 0 &&
-		len(d.ModelMiddleware) == 0 && len(d.ToolMiddleware) == 0 && len(d.Observers) == 0 && len(d.Telemetry) == 0 && len(d.CompletionPolicies) == 0 &&
+		a != nil && d.PrepareModelRequest == nil && d.ModelAdmissionBarrier == nil && d.ToolTimeline == nil &&
+		len(d.Observers) == 0 && len(d.Telemetry) == 0 && len(d.CompletionPolicies) == 0 &&
 		d.NormalizeModelPolicy == nil && d.ToolDiscovery == nil &&
 		summaryNativeBridge(a.ports, "boundedContextPorts", d.Runtime) &&
 		(d.ContextSummary == nil || summaryNativeBridge(d.ContextSummary.ports, "contextSummaryPorts", d.Runtime)) &&

@@ -19,31 +19,9 @@ func RunEA1ChildAgentResumePhases(t *testing.T, factory func(*testing.T) (kernel
 	for _, kind := range []string{"missing", "stale-revision", "terminal", "parent-wins", "stale-admission"} {
 		t.Run("P0/"+kind, func(t *testing.T) { ea1ChildResumePreflight(t, factory, kind) })
 	}
-	t.Run("P1/host-before-next", func(t *testing.T) { ea1ChildResumePhase(t, factory, "P1", "host") })
-	for _, kind := range []string{"host", "model", "tool"} {
+	for _, kind := range []string{"model", "tool"} {
 		t.Run("P2/"+kind, func(t *testing.T) { ea1ChildResumePhase(t, factory, "P2", kind) })
 	}
-}
-
-type ea1ChildResumeHost struct{ host *ea1ChildStartHost }
-
-func (ea1ChildResumeHost) Name() string { return "ea1.actual.child.resume" }
-func (h ea1ChildResumeHost) Run(ctx context.Context, inv plugin.RunInvocation, next plugin.RunNext) (kernel.Snapshot, error) {
-	want := h.host.request
-	if inv.Operation != plugin.RunResume || inv.RunID != want.ID || inv.ParentRunID != want.ParentRunID || inv.Actor != want.Actor || inv.Thread != want.Thread {
-		return kernel.Snapshot{}, agent.ErrInvalidRequest
-	}
-	h.host.calls++
-	if h.host.hook != nil {
-		h.host.hook()
-	}
-	if h.host.failure != nil {
-		if h.host.sendUnknown {
-			h.host.sends++
-		}
-		return kernel.Snapshot{}, h.host.failure
-	}
-	return next(ctx)
 }
 
 type ea1ChildResumeFixture struct {
@@ -77,9 +55,6 @@ func ea1NewChildResume(t *testing.T, factory func(*testing.T) (kernel.Store, ker
 }
 func (f *ea1ChildResumeFixture) runner(rt *kernel.Runtime, owner string, host bool) *agent.Runner {
 	d := agent.Dependencies{Runtime: rt, Model: f.physical, Catalog: f.catalog, Executor: f.catalog, RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: 2 * time.Second}, Execution: ea1StoreBackedExecutionPolicy()}
-	if host {
-		d.RunMiddleware = []plugin.RunMiddleware{ea1ChildResumeHost{f.host}}
-	}
 	r, e := agent.NewRunner(d)
 	if e != nil {
 		f.t.Fatal(e)

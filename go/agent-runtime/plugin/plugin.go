@@ -6,19 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
-	"sync"
-	"sync/atomic"
-
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/callbackscope"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
 var (
 	ErrInvalidRegistration = errors.New("invalid runtime plugin registration")
 	ErrDuplicateName       = errors.New("duplicate runtime plugin name")
-	ErrNextAlreadyCalled   = errors.New("runtime plugin next already called")
 )
 
 // RunOperation identifies the public Feature operation wrapped by Run middleware.
@@ -52,38 +46,11 @@ func approvalPolicyNames(values []ApprovalPolicy) []string {
 	return result
 }
 
-// RunNext executes the next Run middleware or the Feature operation exactly once.
-type RunNext func(context.Context) (kernel.Snapshot, error)
-
-// RunMiddleware wraps one public Feature Run operation.
-type RunMiddleware interface {
-	Name() string
-	Run(context.Context, RunInvocation, RunNext) (kernel.Snapshot, error)
-}
-
-// ModelNext executes the next Model middleware or provider exactly once.
-type ModelNext func(context.Context, model.Request, model.StreamSink) (model.Response, error)
-
-// ModelMiddleware wraps one provider-neutral Model call.
-type ModelMiddleware interface {
-	Name() string
-	Model(context.Context, model.Request, model.StreamSink, ModelNext) (model.Response, error)
-}
-
 // ToolInvocation contains immutable Tool identity and current Run facts.
 type ToolInvocation struct {
 	Run        kernel.Run
 	Definition tools.Definition
 	Request    tools.ExecutionRequest
-}
-
-// ToolNext executes the next Tool middleware or executor exactly once.
-type ToolNext func(context.Context) (tools.ExecutionResult, error)
-
-// ToolMiddleware wraps one stable Tool execution without allowing call identity replacement.
-type ToolMiddleware interface {
-	Name() string
-	Tool(context.Context, ToolInvocation, ToolNext) (tools.ExecutionResult, error)
 }
 
 // Event is one non-authoritative live Runtime fact delivered to optional observers.
@@ -193,215 +160,6 @@ type ApprovalHandler interface {
 	ResolveToolApproval(*kernel.Checkpoint, ApprovalResponse) (*kernel.Checkpoint, error)
 }
 
-// RunChain freezes explicit Run middleware order.
-type RunChain struct{ middleware []RunMiddleware }
-
-// NewRunChain validates and freezes Run middleware in outermost-to-innermost order.
-func NewRunChain(middleware ...RunMiddleware) (*RunChain, error) {
-	if err := validateNamed(middlewareNames(middleware)); err != nil {
-		return nil, err
-	}
-	return &RunChain{middleware: append([]RunMiddleware(nil), middleware...)}, nil
-}
-
-// Invoke executes one Run chain with single-next enforcement.
-func (chain *RunChain) Invoke(ctx context.Context, invocation RunInvocation, terminal RunNext) (kernel.Snapshot, error) {
-	if chain == nil || terminal == nil {
-		return kernel.Snapshot{}, ErrInvalidRegistration
-	}
-	next := terminal
-	for index := len(chain.middleware) - 1; index >= 0; index-- {
-		current := chain.middleware[index]
-		downstream := next
-		next = func(callCtx context.Context) (out kernel.Snapshot, callbackErr error) {
-			layerCtx, ticket := callbackscope.Enter(callCtx, invocation.RunID, current, invocation)
-			lifetime := newNextLifetime()
-			defer func() {
-				lifetime.finish()
-				if failure := recover(); failure != nil {
-					callbackscope.Aborted(ticket)
-					panic(failure)
-				}
-				callbackscope.Returned(ticket, callbackErr)
-			}()
-			return current.Run(layerCtx, invocation, onceRunNext(func(nextCtx context.Context) (kernel.Snapshot, error) {
-				if !lifetime.enter() {
-					return kernel.Snapshot{}, ErrNextAlreadyCalled
-				}
-				defer lifetime.leave()
-				return downstream(callbackscope.Inherit(nextCtx, layerCtx))
-			}))
-		}
-	}
-	return next(ctx)
-}
-
-// ModelChain freezes explicit Model middleware order.
-type ModelChain struct{ middleware []ModelMiddleware }
-
-// NewModelChain validates and freezes Model middleware in outermost-to-innermost order.
-func NewModelChain(middleware ...ModelMiddleware) (*ModelChain, error) {
-	if err := validateNamed(modelMiddlewareNames(middleware)); err != nil {
-		return nil, err
-	}
-	return &ModelChain{middleware: append([]ModelMiddleware(nil), middleware...)}, nil
-}
-
-// Invoke executes one Model chain with isolated request copies and single-next enforcement.
-func (chain *ModelChain) Invoke(
-	ctx context.Context,
-	request model.Request,
-	emit model.StreamSink,
-	terminal ModelNext,
-) (model.Response, error) {
-	if chain == nil || terminal == nil {
-		return model.Response{}, ErrInvalidRegistration
-	}
-	next := terminal
-	for index := len(chain.middleware) - 1; index >= 0; index-- {
-		current := chain.middleware[index]
-		downstream := next
-		next = func(callCtx context.Context, callRequest model.Request, callEmit model.StreamSink) (out model.Response, callbackErr error) {
-			layerCtx, ticket := callbackscope.Enter(callCtx, request.RunID, current, callRequest)
-			lifetime := newNextLifetime()
-			defer func() {
-				lifetime.finish()
-				if failure := recover(); failure != nil {
-					callbackscope.Aborted(ticket)
-					panic(failure)
-				}
-				callbackscope.Returned(ticket, callbackErr)
-			}()
-			return current.Model(layerCtx, model.CloneRequest(callRequest), callEmit,
-				onceModelNext(func(nextCtx context.Context, nextRequest model.Request, nextEmit model.StreamSink) (model.Response, error) {
-					if !lifetime.enter() {
-						return model.Response{}, ErrNextAlreadyCalled
-					}
-					defer lifetime.leave()
-					return downstream(callbackscope.InheritModel(nextCtx, layerCtx), nextRequest, nextEmit)
-				}))
-		}
-	}
-	return next(ctx, model.CloneRequest(request), emit)
-}
-
-// ToolChain freezes explicit Tool middleware order.
-type ToolChain struct{ middleware []ToolMiddleware }
-
-// NewToolChain validates and freezes Tool middleware in outermost-to-innermost order.
-func NewToolChain(middleware ...ToolMiddleware) (*ToolChain, error) {
-	if err := validateNamed(toolMiddlewareNames(middleware)); err != nil {
-		return nil, err
-	}
-	return &ToolChain{middleware: append([]ToolMiddleware(nil), middleware...)}, nil
-}
-
-// Invoke executes one Tool chain with an isolated invocation and single-next enforcement.
-func (chain *ToolChain) Invoke(
-	ctx context.Context,
-	invocation ToolInvocation,
-	terminal ToolNext,
-) (tools.ExecutionResult, error) {
-	if chain == nil || terminal == nil {
-		return tools.ExecutionResult{}, ErrInvalidRegistration
-	}
-	next := terminal
-	for index := len(chain.middleware) - 1; index >= 0; index-- {
-		current := chain.middleware[index]
-		downstream := next
-		next = func(callCtx context.Context) (out tools.ExecutionResult, callbackErr error) {
-			layerCtx, ticket := callbackscope.EnterTool(callCtx, invocation.Run.ID, current, invocation)
-			lifetime := newNextLifetime()
-			defer func() {
-				lifetime.finish()
-				if failure := recover(); failure != nil {
-					callbackscope.Aborted(ticket)
-					panic(failure)
-				}
-				callbackscope.Returned(ticket, callbackErr)
-			}()
-			return current.Tool(layerCtx, cloneToolInvocation(invocation), onceToolNext(func(nextCtx context.Context) (tools.ExecutionResult, error) {
-				if !lifetime.enter() {
-					return tools.ExecutionResult{}, ErrNextAlreadyCalled
-				}
-				defer lifetime.leave()
-				return downstream(callbackscope.InheritTool(nextCtx, layerCtx))
-			}))
-		}
-	}
-	return next(ctx)
-}
-
-// nextLifetime is the single physical-callback lifetime contract for Run,
-// Model and Tool middleware. Single-use alone is insufficient: a middleware
-// may retain Next and invoke it after its own Run/Model/Tool method returns,
-// or start a goroutine that continues dispatching effects after that return.
-//
-// Admit Next while its parent callback is active, count admitted calls before
-// releasing the mutex, and wait for all admitted descendants before returning
-// to an enclosing Kernel physical Grant. After finish closes admission,
-// a retained callback fails before reaching any downstream external effect.
-//
-// Do not add a deadline or detach an in-flight Next: an unknown callback must
-// retain its original physical Grant rather than manufacture a no-effect
-// acknowledgement on caller timeout.
-type nextLifetime struct {
-	mu       sync.Mutex
-	open     bool
-	inflight sync.WaitGroup
-}
-
-func newNextLifetime() *nextLifetime { return &nextLifetime{open: true} }
-
-func (scope *nextLifetime) enter() bool {
-	scope.mu.Lock()
-	defer scope.mu.Unlock()
-	if !scope.open {
-		return false
-	}
-	scope.inflight.Add(1)
-	return true
-}
-
-func (scope *nextLifetime) leave() { scope.inflight.Done() }
-
-func (scope *nextLifetime) finish() {
-	scope.mu.Lock()
-	scope.open = false
-	scope.mu.Unlock()
-	scope.inflight.Wait()
-}
-
-func onceRunNext(next RunNext) RunNext {
-	var called atomic.Bool
-	return func(ctx context.Context) (kernel.Snapshot, error) {
-		if !called.CompareAndSwap(false, true) {
-			return kernel.Snapshot{}, ErrNextAlreadyCalled
-		}
-		return next(ctx)
-	}
-}
-
-func onceModelNext(next ModelNext) ModelNext {
-	var called atomic.Bool
-	return func(ctx context.Context, request model.Request, emit model.StreamSink) (model.Response, error) {
-		if !called.CompareAndSwap(false, true) {
-			return model.Response{}, ErrNextAlreadyCalled
-		}
-		return next(ctx, model.CloneRequest(request), emit)
-	}
-}
-
-func onceToolNext(next ToolNext) ToolNext {
-	var called atomic.Bool
-	return func(ctx context.Context) (tools.ExecutionResult, error) {
-		if !called.CompareAndSwap(false, true) {
-			return tools.ExecutionResult{}, ErrNextAlreadyCalled
-		}
-		return next(ctx)
-	}
-}
-
 func validateNamed(names []string) error {
 	seen := make(map[string]struct{}, len(names))
 	for _, raw := range names {
@@ -415,39 +173,6 @@ func validateNamed(names []string) error {
 		seen[name] = struct{}{}
 	}
 	return nil
-}
-
-func middlewareNames(values []RunMiddleware) []string {
-	result := make([]string, len(values))
-	for index, value := range values {
-		if value == nil {
-			return append(result[:index], "")
-		}
-		result[index] = value.Name()
-	}
-	return result
-}
-
-func modelMiddlewareNames(values []ModelMiddleware) []string {
-	result := make([]string, len(values))
-	for index, value := range values {
-		if value == nil {
-			return append(result[:index], "")
-		}
-		result[index] = value.Name()
-	}
-	return result
-}
-
-func toolMiddlewareNames(values []ToolMiddleware) []string {
-	result := make([]string, len(values))
-	for index, value := range values {
-		if value == nil {
-			return append(result[:index], "")
-		}
-		result[index] = value.Name()
-	}
-	return result
 }
 
 func observerNames(values []Observer) []string {

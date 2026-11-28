@@ -49,8 +49,7 @@ func NewBoundedBudgetAdapter(store budget.LedgerStore, ports BoundedBudgetPorts)
 // transitions must remain inside the fixed first-party boundary.
 func validBoundedBudgetComposition(dependencies Dependencies) bool {
 	if a := dependencies.BoundedBudget; a != nil {
-		return a.coordinator.Store != nil && a.ports != nil &&
-			(a.nativeStore() == nil || len(dependencies.RunMiddleware) == 0 && len(dependencies.ModelMiddleware) == 0 && len(dependencies.ToolMiddleware) == 0)
+		return a.coordinator.Store != nil && a.ports != nil
 	}
 	return true
 }
@@ -295,7 +294,7 @@ func requireReceiptConsumption(ctx context.Context, runID, originalLedger string
 
 // Run is the standalone accounting entry. Runner stages use the same
 // admission and settlement operations directly.
-func (a *BoundedBudgetAdapter) Run(ctx context.Context, inv plugin.RunInvocation, next plugin.RunNext) (kernel.Snapshot, error) {
+func (a *BoundedBudgetAdapter) Run(ctx context.Context, inv plugin.RunInvocation, next runContinuation) (kernel.Snapshot, error) {
 	admission, err := a.admitRun(ctx, inv, nil)
 	if err != nil {
 		return kernel.Snapshot{}, err
@@ -509,7 +508,7 @@ func (a *BoundedBudgetAdapter) planModelReceipt(ctx context.Context, inv ModelIn
 	return mutation, settled, receiptErr, nil
 }
 
-func (a *BoundedBudgetAdapter) Model(ctx context.Context, request model.Request, emit model.StreamSink, next plugin.ModelNext) (model.Response, error) {
+func (a *BoundedBudgetAdapter) Model(ctx context.Context, request model.Request, emit model.StreamSink, next modelCall) (model.Response, error) {
 	original := model.CloneRequest(request)
 	call := modelCallFrom(ctx)
 	frozen := call.samplingPlan()

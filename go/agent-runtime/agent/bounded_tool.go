@@ -54,7 +54,7 @@ func (a *BoundedBudgetAdapter) reserveTool(ctx context.Context, inv plugin.ToolI
 	return l, err
 }
 
-func (a *BoundedBudgetAdapter) Tool(ctx context.Context, inv plugin.ToolInvocation, next plugin.ToolNext) (tools.ExecutionResult, error) {
+func (a *BoundedBudgetAdapter) Tool(ctx context.Context, inv plugin.ToolInvocation, next toolCall) (tools.ExecutionResult, error) {
 	if inv.Run.ID == "" || inv.Request.RunID != inv.Run.ID || inv.Request.Call.ID == "" {
 		return tools.ExecutionResult{}, ErrInvalidRequest
 	}
@@ -203,32 +203,35 @@ func NewBoundedToolTimelineAdapter(ports BoundedToolTimelinePorts) (*BoundedTool
 	}
 	return &BoundedToolTimelineAdapter{ports: ports}, nil
 }
-func (*BoundedToolTimelineAdapter) Name() string { return "runtime.bounded_tool_timeline.v1" }
-func (a *BoundedToolTimelineAdapter) Tool(ctx context.Context, inv plugin.ToolInvocation, next plugin.ToolNext) (tools.ExecutionResult, error) {
+func (a *BoundedToolTimelineAdapter) start(ctx context.Context, inv plugin.ToolInvocation) (BoundedToolTimelineScope, string, error) {
 	scope, err := a.ports.ResolveToolTimeline(ctx, inv)
 	if err != nil {
-		return tools.ExecutionResult{}, err
+		return scope, "", err
 	}
 	if scope.RunID != inv.Run.ID || inv.Request.RunID != inv.Run.ID || inv.Request.Call.ID == "" {
-		return tools.ExecutionResult{}, ErrInvalidRequest
+		return scope, "", ErrInvalidRequest
 	}
 	if !scope.Active {
-		out, e := next(ctx)
-		callbackscope.Record(ctx, a, "timeline.tool.unconfigured.returned", scope)
-		return out, e
+		return scope, "", nil
 	}
 	if scope.TurnID == "" || len(scope.SourceBinding) == 0 || !json.Valid(scope.SourceBinding) {
-		return tools.ExecutionResult{}, ErrInvalidRequest
+		return scope, "", ErrInvalidRequest
 	}
 	started, err := a.ports.AppendToolTimeline(ctx, scope, inv, tools.ExecutionResult{}, "started", "")
 	if err != nil {
-		return tools.ExecutionResult{}, err
+		return scope, "", err
 	}
 	if started == "" {
-		return tools.ExecutionResult{}, ErrInvalidRequest
+		return scope, "", ErrInvalidRequest
 	}
-	result, callErr := next(ctx)
-	result, callErr = toolAuthority(ctx).validate(result, callErr)
+	return scope, started, nil
+}
+
+func (a *BoundedToolTimelineAdapter) finish(ctx context.Context, scope BoundedToolTimelineScope, started string, inv plugin.ToolInvocation, result tools.ExecutionResult, callErr error) (tools.ExecutionResult, error) {
+	if !scope.Active {
+		callbackscope.Record(ctx, a, "timeline.tool.unconfigured.returned", scope)
+		return result, callErr
+	}
 	if callErr == nil && strings.TrimSpace(result.Receipt.Disposition) == tools.ReceiptDispositionPending {
 		return result, nil
 	}

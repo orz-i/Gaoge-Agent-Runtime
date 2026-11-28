@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 )
 
 func appendHostedToolStartedItem(
@@ -66,7 +65,7 @@ func agentMessagePreviewEvent(event model.StreamEvent) (model.StreamEvent, bool)
 	return event, event.Delta != "" || event.Reasoning != nil || event.Usage != nil || strings.TrimSpace(event.ResponseID) != ""
 }
 
-func (middleware *ModelTimelineMiddleware) recordHostedToolStreamEvent(
+func (middleware *ModelTimelineClient) recordHostedToolStreamEvent(
 	ctx context.Context,
 	turn Turn,
 	invocation Invocation,
@@ -159,37 +158,38 @@ func hostedToolTerminalStatus(status string) bool {
 	}
 }
 
-type ModelTimelineMiddleware struct {
+// ModelTimelineClient projects observations at the existing provider boundary.
+// Projection failures never replace a physical provider response or error.
+type ModelTimelineClient struct {
 	store Store
 	clock Clock
 	feed  *TurnFeed
+	client model.Client
 }
 
-func NewModelTimelineMiddleware(store Store, clock Clock, feed *TurnFeed) (*ModelTimelineMiddleware, error) {
-	if store == nil || clock == nil {
+func NewModelTimelineClient(store Store, clock Clock, feed *TurnFeed, client model.Client) (*ModelTimelineClient, error) {
+	if store == nil || clock == nil || client == nil {
 		return nil, ErrInvalidRequest
 	}
-	return &ModelTimelineMiddleware{store: store, clock: clock, feed: feed}, nil
+	return &ModelTimelineClient{store: store, clock: clock, feed: feed, client: client}, nil
 }
 
-func (*ModelTimelineMiddleware) Name() string { return "harness.timeline.model" }
+func (client *ModelTimelineClient) Generate(ctx context.Context, request model.Request) (model.Response, error) {
+	return client.GenerateStream(ctx, request, nil)
+}
 
-func (middleware *ModelTimelineMiddleware) Model(
+func (middleware *ModelTimelineClient) GenerateStream(
 	ctx context.Context,
 	request model.Request,
 	emit model.StreamSink,
-	next plugin.ModelNext,
 ) (model.Response, error) {
 	turn, invocation, harnessRun, err := timelineTurn(ctx, middleware.store, request.RunID)
-	if err != nil {
-		return model.Response{}, err
-	}
-	if !harnessRun || invocation.ParentItemID != "" {
-		return next(ctx, request, emit)
+	if err != nil || !harnessRun || invocation.ParentItemID != "" {
+		return middleware.generate(ctx, request, emit)
 	}
 	messageItemID, hasMessageItem, err := activeAgentMessageItemID(ctx, middleware.store, turn)
 	if err != nil {
-		return model.Response{}, err
+		return middleware.generate(ctx, request, emit)
 	}
 	if !hasMessageItem {
 		messageItemID = stableID("him", turn.ID, request.RunID, strconv.Itoa(len(request.Messages)))
@@ -202,9 +202,7 @@ func (middleware *ModelTimelineMiddleware) Model(
 	hostedTools := newHostedToolStreamTracker(turn.ID)
 	stream := func(event model.StreamEvent) error {
 		if event.HostedToolCall != nil {
-			if streamErr := middleware.recordHostedToolStreamEvent(ctx, turn, invocation, request.RunID, hostedTools, *event.HostedToolCall); streamErr != nil {
-				return streamErr
-			}
+			_ = middleware.recordHostedToolStreamEvent(ctx, turn, invocation, request.RunID, hostedTools, *event.HostedToolCall)
 		}
 		if middleware.feed != nil {
 			preview, ok := agentMessagePreviewEvent(event)
@@ -223,16 +221,21 @@ func (middleware *ModelTimelineMiddleware) Model(
 		}
 		return nil
 	}
-	response, callErr := next(ctx, request, stream)
+	response, callErr := middleware.generate(ctx, request, stream)
 	if callErr != nil {
 		return response, callErr
 	}
-	if err = appendModelTimelineItems(
+	_ = appendModelTimelineItems(
 		ctx, middleware.store, middleware.clock, middleware.feed, turn, invocation, request, response, hostedTools,
-	); err != nil {
-		return response, err
-	}
+	)
 	return response, nil
+}
+
+func (client *ModelTimelineClient) generate(ctx context.Context, request model.Request, emit model.StreamSink) (model.Response, error) {
+	if streaming, ok := client.client.(model.StreamingClient); ok {
+		return streaming.GenerateStream(ctx, request, emit)
+	}
+	return client.client.Generate(ctx, request)
 }
 
 type toolTimelinePayload struct {

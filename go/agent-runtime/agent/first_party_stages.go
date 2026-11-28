@@ -38,10 +38,14 @@ func finishNativeStage(ticket *callbackscope.Ticket, err *error) {
 	callbackscope.Returned(ticket, *err)
 }
 
-// The Runner now fixes this order: original Budget scope, Context hydration,
-// generic Run chain/continuation, then Budget projection/settlement. Host middleware
-// cannot supply a new Next for any of these first-party stages.
-func (r *Runner) invokeFirstPartyRun(ctx context.Context, inv plugin.RunInvocation, originalBudget *budget.Ledger, terminal plugin.RunNext) (out kernel.Snapshot, err error) {
+// Private continuations connect only the fixed Runtime stages. They are not
+// registration points and never cross a Host extension boundary.
+type runContinuation func(context.Context) (kernel.Snapshot, error)
+type modelCall func(context.Context, model.Request, model.StreamSink) (model.Response, error)
+type toolCall func(context.Context) (tools.ExecutionResult, error)
+
+// Original Budget scope, Context hydration, native operation, then settlement.
+func (r *Runner) invokeFirstPartyRun(ctx context.Context, inv plugin.RunInvocation, originalBudget *budget.Ledger, terminal runContinuation) (out kernel.Snapshot, err error) {
 	b := r.boundedBudget
 	if b == nil {
 		return r.invokeContextRun(ctx, inv, terminal)
@@ -62,10 +66,10 @@ func (r *Runner) invokeFirstPartyRun(ctx context.Context, inv plugin.RunInvocati
 	return b.finishRun(stageCtx, inv, admission, out, err, r.atomicBudget() == b)
 }
 
-func (r *Runner) invokeContextRun(ctx context.Context, inv plugin.RunInvocation, terminal plugin.RunNext) (out kernel.Snapshot, err error) {
+func (r *Runner) invokeContextRun(ctx context.Context, inv plugin.RunInvocation, terminal runContinuation) (out kernel.Snapshot, err error) {
 	a := r.boundedContext
 	if a == nil {
-		return r.runChain.Invoke(ctx, inv, terminal)
+		return terminal(ctx)
 	}
 	stageCtx, ticket := callbackscope.Enter(ctx, inv.RunID, a, inv)
 	if ticket == nil {
@@ -100,27 +104,40 @@ func (r *Runner) invokeContextRun(ctx context.Context, inv plugin.RunInvocation,
 	return out, err
 }
 
-func (r *Runner) invokeFirstPartyModel(ctx context.Context, request model.Request, emit model.StreamSink, terminal plugin.ModelNext) (out model.Response, err error) {
+func (r *Runner) invokeFirstPartyModel(ctx context.Context, request model.Request, emit model.StreamSink, terminal modelCall) (out model.Response, err error) {
 	a := r.boundedBudget
 	if a == nil {
-		return r.modelChain.Invoke(ctx, request, emit, terminal)
+		return r.invokeAdmittedModel(ctx, request, emit, terminal)
 	}
 	stageCtx, ticket := callbackscope.Enter(ctx, request.RunID, a, request)
 	if ticket == nil {
 		return model.Response{}, ErrInvalidRequest
 	}
 	defer finishNativeStage(ticket, &err)
-	// Budget always encloses the generic chain and physical admission terminal.
-	// Atomic composition rejects nonempty generic chains at construction.
 	return a.Model(stageCtx, model.CloneRequest(request), emit, func(ctx context.Context, request model.Request, emit model.StreamSink) (model.Response, error) {
-		return r.modelChain.Invoke(ctx, request, emit, terminal)
+		return r.invokeAdmittedModel(ctx, request, emit, terminal)
 	})
 }
 
-func (r *Runner) invokeFirstPartyTool(ctx context.Context, inv plugin.ToolInvocation, terminal plugin.ToolNext) (out tools.ExecutionResult, err error) {
+func (r *Runner) invokeAdmittedModel(ctx context.Context, request model.Request, emit model.StreamSink, terminal modelCall) (out model.Response, err error) {
+	b := r.modelAdmissionBarrier
+	if b == nil {
+		return terminal(ctx, request, emit)
+	}
+	stageCtx, ticket := callbackscope.Enter(ctx, request.RunID, b, request)
+	defer finishNativeStage(ticket, &err)
+	if err = b.wait(stageCtx); err != nil {
+		return model.Response{}, err
+	}
+	out, err = terminal(stageCtx, request, emit)
+	callbackscope.Record(stageCtx, b, "model.admission_barrier.returned", request)
+	return out, err
+}
+
+func (r *Runner) invokeFirstPartyTool(ctx context.Context, inv plugin.ToolInvocation, terminal toolCall) (out tools.ExecutionResult, err error) {
 	a := r.boundedBudget
 	if a == nil {
-		return r.toolChain.Invoke(ctx, inv, terminal)
+		return r.invokeProjectedTool(ctx, inv, terminal)
 	}
 	stageCtx, ticket := callbackscope.EnterTool(ctx, inv.Run.ID, a, inv)
 	if ticket == nil {
@@ -131,6 +148,21 @@ func (r *Runner) invokeFirstPartyTool(ctx context.Context, inv plugin.ToolInvoca
 	inv.Definition = tools.CloneDefinition(inv.Definition)
 	inv.Request = tools.CloneExecutionRequest(inv.Request)
 	return a.Tool(stageCtx, inv, func(ctx context.Context) (tools.ExecutionResult, error) {
-		return r.toolChain.Invoke(ctx, inv, terminal)
+		return r.invokeProjectedTool(ctx, inv, terminal)
 	})
+}
+
+func (r *Runner) invokeProjectedTool(ctx context.Context, inv plugin.ToolInvocation, terminal toolCall) (out tools.ExecutionResult, err error) {
+	a := r.toolTimeline
+	if a == nil {
+		return terminal(ctx)
+	}
+	stageCtx, ticket := callbackscope.EnterTool(ctx, inv.Run.ID, a, inv)
+	defer finishNativeStage(ticket, &err)
+	scope, started, err := a.start(stageCtx, inv)
+	if err != nil {
+		return tools.ExecutionResult{}, err
+	}
+	out, err = terminal(stageCtx)
+	return a.finish(stageCtx, scope, started, inv, out, err)
 }

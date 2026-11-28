@@ -109,23 +109,6 @@ func (*ea1StartSettlementPhysical) ProviderName() string { return "ea1-settlemen
 func (*ea1StartSettlementPhysical) BindingFingerprintForRequest(model.Request) string {
 	return strings.Repeat("b", 64)
 }
-func (p *ea1StartSettlementPhysical) Name() string { return "ea1.original-start-callback" }
-func (p *ea1StartSettlementPhysical) Run(ctx context.Context, inv plugin.RunInvocation, next plugin.RunNext) (kernel.Snapshot, error) {
-	p.mu.Lock()
-	p.hostCalls++
-	p.mu.Unlock()
-	if inv.Operation != plugin.RunStart || inv.ParentRunID != "" {
-		return kernel.Snapshot{}, errors.New("not the original Root Start callback")
-	}
-	result, err := next(ctx)
-	if p.hostUnknown {
-		p.mu.Lock()
-		p.hostSends++
-		p.mu.Unlock()
-		return result, errors.Join(err, p.hostFault)
-	}
-	return result, err
-}
 func (p *ea1StartSettlementPhysical) Generate(ctx context.Context, req model.Request) (model.Response, error) {
 	if p.modelReadDelay > 0 {
 		timer := time.NewTimer(p.modelReadDelay)
@@ -163,15 +146,14 @@ func (p *ea1StartSettlementPhysical) Generate(ctx context.Context, req model.Req
 	p.mu.Unlock()
 	return response, nil
 }
-func (p *ea1StartSettlementPhysical) Tool(ctx context.Context, inv plugin.ToolInvocation, next plugin.ToolNext) (tools.ExecutionResult, error) {
-	p.mu.Lock()
-	p.toolInvocations = append(p.toolInvocations, inv)
-	p.mu.Unlock()
-	return next(ctx)
-}
-func (p *ea1StartSettlementPhysical) execute(_ context.Context, req tools.ExecutionRequest) (tools.ExecutionResult, error) {
+func (p *ea1StartSettlementPhysical) execute(ctx context.Context, req tools.ExecutionRequest) (tools.ExecutionResult, error) {
+	snapshot, err := p.rt.Load(ctx, req.RunID)
+	if err != nil {
+		return tools.ExecutionResult{}, err
+	}
 	result := tools.ExecutionResult{Content: json.RawMessage(`{"committed":"original"}`), Receipt: tools.Receipt{ExecutionID: req.Call.ID, Disposition: "committed"}}
 	p.mu.Lock()
+	p.toolInvocations = append(p.toolInvocations, plugin.ToolInvocation{Run: snapshot.Run, Request: tools.CloneExecutionRequest(req)})
 	p.toolRequests = append(p.toolRequests, req)
 	p.receipts = append(p.receipts, result)
 	p.mu.Unlock()
@@ -200,14 +182,12 @@ func ea1RootSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, fun
 	if err != nil {
 		t.Fatal(err)
 	}
-	var middleware plugin.RunMiddleware = physical
 	otherOperation := "resume"
 	if operation == "resume" {
-		middleware = ea1ResumeSettlementMiddleware{physical}
 		otherOperation = "start"
 	}
 	makeRunner := func(runtime *kernel.Runtime, owner string) *agent.Runner {
-		r, e := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: physical, Catalog: catalog, Executor: catalog, RunMiddleware: []plugin.RunMiddleware{middleware}, ToolMiddleware: []plugin.ToolMiddleware{physical}, RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: 3 * time.Minute}})
+		r, e := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: physical, Catalog: catalog, Executor: catalog, RunExecution: &agent.RunExecution{OwnerID: owner, LeaseDuration: 3 * time.Minute}})
 		if e != nil {
 			t.Fatal(e)
 		}
