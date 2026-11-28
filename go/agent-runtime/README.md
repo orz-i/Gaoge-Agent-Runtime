@@ -17,6 +17,12 @@ runtime, err := kernel.New(kernel.Dependencies{Store: store})
 Production hosts normally pair Core with the PostgreSQL Store and either the
 Redis or memory generation stream adapter.
 
+**Agent state wire hard cut:** original state evidence v3 removes the duplicate
+`ModelInvocation.Usage` field (use `Response.Usage`) and omits empty consumed
+requests. The original response and transcript are retained. Existing v2 state
+is not rehashed or resumed by the v3 decoder; drain it using the previous
+writer. SQL schema migration does not convert Agent state.
+
 ## Optional Agent Run execution lease (original Stage 2B)
 
 **Tool retry/disposition contract:** Even an explicit

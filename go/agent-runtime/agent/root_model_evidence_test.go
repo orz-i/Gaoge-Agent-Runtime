@@ -102,7 +102,7 @@ func TestRootUnknownHostRetainsExactModelEvidenceWithoutConsumption(t *testing.T
 	}
 	prior := mustModelInvocationView(t, before).ModelInvocations[0]
 	after := mustModelInvocationView(t, evidence).ModelInvocations[0]
-	if after.Status != agent.ModelInvocationCompleted || after.ConsumedAt != nil || after.CompletedAt == nil || after.ID != prior.ID || after.RunID != prior.RunID || after.RequestHash != prior.RequestHash || after.SourceRevision != prior.SourceRevision || after.Provider != prior.Provider || after.BindingFingerprint != prior.BindingFingerprint || after.ExecutionAttempt != prior.ExecutionAttempt || after.DispatchAttempt != prior.DispatchAttempt || !reflect.DeepEqual(after.Request, prior.Request) || after.Response.Content != "done" || after.Usage == nil || after.Usage.InputTokens != 7 {
+	if after.Status != agent.ModelInvocationCompleted || after.ConsumedAt != nil || after.CompletedAt == nil || after.ID != prior.ID || after.RunID != prior.RunID || after.RequestHash != prior.RequestHash || after.SourceRevision != prior.SourceRevision || after.Provider != prior.Provider || after.BindingFingerprint != prior.BindingFingerprint || after.ExecutionAttempt != prior.ExecutionAttempt || after.DispatchAttempt != prior.DispatchAttempt || !reflect.DeepEqual(after.Request, prior.Request) || after.Response.Content != "done" || after.Response.Usage == nil || after.Response.Usage.InputTokens != 7 {
 		t.Fatalf("receipt/source mismatch: %+v", after)
 	}
 	duplicate, err := runner.ReconcileModelOutcome(t.Context(), evidence.Run.ID, evidence.Run.Revision)

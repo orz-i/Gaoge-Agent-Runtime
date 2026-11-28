@@ -317,7 +317,7 @@ func assertNativeReceiptConsumed(t *testing.T, runtime *kernel.Runtime, before, 
 	if receipt.Request.RunID != "" || receipt.Request.InvocationID != "" || len(receipt.Request.Messages) != 0 || len(receipt.Request.Tools) != 0 || receipt.SamplingPlan != nil {
 		t.Fatal("consumed invocation retained executable request instead of original hash")
 	}
-	if receipt.Status != agent.ModelInvocationConsumed || receipt.ProviderResponseID != "known-completion" || receipt.Usage == nil || receipt.Usage.InputTokens != 20 || receipt.Usage.OutputTokens != 10 || receipt.ConsumedAt == nil || view.Budget.Usage.LLMCalls != 1 || view.Budget.Usage.ToolCalls != 0 {
+	if receipt.Status != agent.ModelInvocationConsumed || receipt.ProviderResponseID != "known-completion" || receipt.Response.Usage == nil || receipt.Response.Usage.InputTokens != 20 || receipt.Response.Usage.OutputTokens != 10 || receipt.ConsumedAt == nil || view.Budget.Usage.LLMCalls != 1 || view.Budget.Usage.ToolCalls != 0 {
 		t.Fatalf("original receipt not consumed exactly once: %+v", view)
 	}
 	if _, err = runtime.LookupChildExecution(t.Context(), before.Run.ID); !errors.Is(err, kernel.ErrNotFound) {

@@ -146,7 +146,7 @@ func TestPendingNamedProviderBindingResumesOnlyItsOriginalCatalogSnapshot(t *tes
 					assertProviderUnknownNoReplay(t, base, now, agent.Dependencies{Model: newModel()}, first, physicalErr, func() int64 { return int64(physical) })
 					return
 				}
-				if active.DispatchAttempt != 0 || active.ProviderResponseID != "" || active.Usage != nil ||
+				if active.DispatchAttempt != 0 || active.ProviderResponseID != "" || active.Response.Usage != nil ||
 					!reflect.DeepEqual(active.Request, store.rejected.Request) || active.RequestHash != store.rejected.RequestHash ||
 					active.ID != store.rejected.ID || active.SourceRevision != store.rejected.SourceRevision ||
 					active.BindingFingerprint != store.rejected.BindingFingerprint || active.Provider != store.rejected.Provider ||
@@ -191,8 +191,7 @@ func TestPendingNamedProviderBindingResumesOnlyItsOriginalCatalogSnapshot(t *tes
 					final.ModelInvocations[0].ExecutionAttempt != 2 || final.ModelInvocations[0].DispatchAttempt != 2 ||
 					final.ModelInvocations[0].ProviderResponseID != "historical-"+protocol ||
 					final.ModelInvocations[0].Response.ResponseID != "historical-"+protocol ||
-					final.ModelInvocations[0].Usage == nil || final.ModelInvocations[0].Usage.InputTokens != 2 || final.ModelInvocations[0].Usage.OutputTokens != 1 ||
-					!reflect.DeepEqual(final.ModelInvocations[0].Usage, final.ModelInvocations[0].Response.Usage) ||
+					final.ModelInvocations[0].Response.Usage == nil || final.ModelInvocations[0].Response.Usage.InputTokens != 2 || final.ModelInvocations[0].Response.Usage.OutputTokens != 1 ||
 					final.ModelInvocations[0].Response.Content != "Done" || len(final.ModelInvocations[0].Response.ToolCalls) != 0 ||
 					final.Budget.Usage.LLMCalls != 1 || final.Budget.Usage.ToolCalls != 0 || final.Budget.Usage.InputTokens != 2 || final.Budget.Usage.OutputTokens != 1 {
 					t.Fatalf("same original logical ModelInvocation was not consumed: %+v err=%v", final, err)

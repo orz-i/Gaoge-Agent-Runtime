@@ -121,7 +121,7 @@ func TestDuplicatePhysicalProviderCompletionIDNeverAuthorizesNewTool(t *testing.
 				view.ModelInvocations[0].ProviderResponseID != "reused-provider-id" ||
 				view.ModelInvocations[1].Status != agent.ModelInvocationPending ||
 				view.ModelInvocations[1].ProviderResponseID != "" ||
-				view.ModelInvocations[1].Usage != nil ||
+				view.ModelInvocations[1].Response.Usage != nil ||
 				len(view.ModelInvocations[1].Response.ToolCalls) != 0 ||
 				view.ModelInvocations[1].Response.ProviderReplay != nil {
 				t.Fatalf("duplicate physical response reused billed authority: budget=%+v invocations=%+v",
@@ -251,7 +251,7 @@ func TestLateDuplicatePhysicalProviderCompletionIDNeverAuthorizesNewTool(t *test
 				view.ModelInvocations[0].ProviderResponseID != "reused-provider-id" ||
 				view.ModelInvocations[1].Status != agent.ModelInvocationPending ||
 				view.ModelInvocations[1].ProviderResponseID != "" ||
-				view.ModelInvocations[1].Usage != nil ||
+				view.ModelInvocations[1].Response.Usage != nil ||
 				len(view.ModelInvocations[1].Response.ToolCalls) != 0 ||
 				view.ModelInvocations[1].Response.ProviderReplay != nil {
 				t.Fatalf("duplicate physical response reused billed authority: budget=%+v invocations=%+v",

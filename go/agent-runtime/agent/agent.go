@@ -1402,13 +1402,18 @@ func (runner *Runner) driveStep(ctx context.Context, snapshot kernel.Snapshot) (
 		}
 		return snapshot, true, err
 	}
-	return runner.consumeCompletedModel(ctx, snapshot, state, invocation)
+	return runner.consumeCompletedModel(ctx, snapshot, state)
 }
 
 // consumeCompletedModel processes exactly one persisted model receipt; it
 // never calls a provider. The ordinary drive and the expired receipt-only
 // path share this reducer, but the latter excludes Host-dependent branches.
-func (runner *Runner) consumeCompletedModel(ctx context.Context, snapshot kernel.Snapshot, state runState, invocation ModelInvocation) (kernel.Snapshot, bool, error) {
+func (runner *Runner) consumeCompletedModel(ctx context.Context, snapshot kernel.Snapshot, state runState) (kernel.Snapshot, bool, error) {
+	invocation, ok := activeModelInvocation(state)
+	if !ok || invocation.Status != ModelInvocationCompleted {
+		failed, e := runner.fail(ctx, snapshot, state, "agent.model_invocation_invalid", ErrInvalidRequest)
+		return failed, true, e
+	}
 	ledgerID := ""
 	if invocation.SamplingPlan != nil {
 		ledgerID = invocation.SamplingPlan.LedgerID
@@ -1418,20 +1423,11 @@ func (runner *Runner) consumeCompletedModel(ctx context.Context, snapshot kernel
 		// local consumption neither resends nor terminalizes the Run.
 		return snapshot, true, err
 	}
-	if invocation.Purpose == ModelInvocationContextSummary {
-		next, summaryErr := runner.consumeContextSummary(ctx, snapshot, state)
-		return next, summaryErr != nil, summaryErr
-	}
 	consumed, ok := consumeLastModelInvocation(&state, runner.clock.Now())
 	if !ok {
 		failed, failErr := runner.fail(ctx, snapshot, state, "agent.model_invocation_invalid", ErrInvalidRequest)
 		return failed, true, failErr
 	}
-	definitions, catalogFingerprints := modelDefinitions(consumed)
-	response := model.CloneResponse(consumed.Response)
-	// User-visible consumption retains the existing whitespace normalization;
-	// the original durable receipt itself is never rewritten.
-	response.Content = strings.TrimSpace(response.Content)
 	budgetDimension, budgetErr := chargeConsumedModelUsage(&state, consumed)
 	if budgetErr != nil {
 		failed, failErr := runner.fail(ctx, snapshot, state, "agent.usage_invalid", budgetErr)
@@ -1444,6 +1440,15 @@ func (runner *Runner) consumeCompletedModel(ctx context.Context, snapshot kernel
 		)
 		return failed, true, failErr
 	}
+	if consumed.Purpose == ModelInvocationContextSummary {
+		next, e := runner.consumeContextSummary(ctx, snapshot, state, consumed)
+		return next, e != nil, e
+	}
+	definitions, catalogFingerprints := modelDefinitions(consumed)
+	response := model.CloneResponse(consumed.Response)
+	// User-visible consumption retains the existing whitespace normalization;
+	// the original durable receipt itself is never rewritten.
+	response.Content = strings.TrimSpace(response.Content)
 	if consumed.ErrorCode != "" {
 		if consumed.ErrorCode != rejectedModelResponseCode {
 			failed, failErr := runner.fail(ctx, snapshot, state, consumed.ErrorCode, ErrModelFailure)
@@ -3206,7 +3211,7 @@ func chargeConsumedModelUsage(state *runState, invocation ModelInvocation) (runt
 	if state == nil {
 		return "", ErrInvalidRequest
 	}
-	if runtimebudget.HasTokenLimits(state.Budget.Limits) && invocation.Usage == nil {
+	if runtimebudget.HasTokenLimits(state.Budget.Limits) && invocation.Response.Usage == nil {
 		usage, err := runtimebudget.ChargeModelCall(state.Budget.Usage, nil)
 		if err != nil {
 			return "", errors.Join(ErrInvalidModelResponse, err)
@@ -3215,12 +3220,12 @@ func chargeConsumedModelUsage(state *runState, invocation ModelInvocation) (runt
 		return "", ErrUsageUnavailable
 	}
 	var observed *runtimebudget.TokenUsage
-	if invocation.Usage != nil {
+	if invocation.Response.Usage != nil {
 		observed = &runtimebudget.TokenUsage{
-			InputTokens: invocation.Usage.InputTokens, OutputTokens: invocation.Usage.OutputTokens,
-			CacheReadTokens:  invocation.Usage.CacheReadTokens,
-			CacheWriteTokens: invocation.Usage.CacheWriteTokens,
-			ReasoningTokens:  invocation.Usage.ReasoningTokens,
+			InputTokens: invocation.Response.Usage.InputTokens, OutputTokens: invocation.Response.Usage.OutputTokens,
+			CacheReadTokens:  invocation.Response.Usage.CacheReadTokens,
+			CacheWriteTokens: invocation.Response.Usage.CacheWriteTokens,
+			ReasoningTokens:  invocation.Response.Usage.ReasoningTokens,
 		}
 	}
 	usage, err := runtimebudget.ChargeModelCall(state.Budget.Usage, observed)

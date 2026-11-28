@@ -98,7 +98,7 @@ func TestOpenAIContradictoryEarlySSELifecycleNeverExecutesLocalTool(t *testing.T
 				len(view.ModelInvocations) != 2 ||
 				view.ModelInvocations[1].Status != agent.ModelInvocationPending ||
 				view.ModelInvocations[1].ProviderResponseID != "" ||
-				view.ModelInvocations[1].Usage != nil ||
+				view.ModelInvocations[1].Response.Usage != nil ||
 				len(view.ModelInvocations[1].Response.ToolCalls) != 0 ||
 				view.ModelInvocations[1].Response.ProviderReplay != nil {
 				t.Fatalf("early lifecycle contradiction minted a completion: budget=%+v invocations=%+v",

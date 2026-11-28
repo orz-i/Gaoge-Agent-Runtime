@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"errors"
-	"reflect"
 	"strings"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
@@ -90,7 +89,7 @@ func (runner *Runner) ReconcileModelOutcome(ctx context.Context, runID string, r
 	if originalInvocation.Status == ModelInvocationCompleted {
 		// Immutable original evidence: neither another receipt nor another
 		// verifier response may overwrite it, even under the same call ID.
-		if !samePersistedModelResponse(originalInvocation.Response, inv.Response) || !reflect.DeepEqual(originalInvocation.Usage, inv.Usage) || originalInvocation.ProviderResponseID != inv.ProviderResponseID || originalInvocation.ErrorCode != inv.ErrorCode {
+		if !samePersistedModelResponse(originalInvocation.Response, inv.Response) || originalInvocation.ProviderResponseID != inv.ProviderResponseID || originalInvocation.ErrorCode != inv.ErrorCode {
 			return snapshot, ErrInvalidModelResponse
 		}
 		if !completion.HostCompleted {
@@ -158,7 +157,6 @@ func (runner *Runner) qualifiedRecoveredModelReceipt(state runState, inv ModelIn
 	inv.Status = ModelInvocationCompleted
 	inv.ProviderResponseID = strings.TrimSpace(response.ResponseID)
 	inv.Response = model.CloneResponse(response)
-	inv.Usage = model.CloneUsage(response.Usage)
 	inv.ExecutionLeaseUntil = nil
 	inv.RetryAfter = nil
 	if clearDiagnostic {
@@ -267,7 +265,7 @@ func matchesSettledModelReceipt(inv ModelInvocation, res budget.Reservation) err
 		response = model.BillingOnlyResponse(response)
 	}
 	if !samePersistedModelResponse(inv.Response, response) ||
-		!reflect.DeepEqual(inv.Usage, response.Usage) || inv.ProviderResponseID != strings.TrimSpace(response.ResponseID) {
+		inv.ProviderResponseID != strings.TrimSpace(response.ResponseID) {
 		return errors.Join(ErrModelOutcomeUnknown, ErrInvalidModelResponse)
 	}
 	return nil

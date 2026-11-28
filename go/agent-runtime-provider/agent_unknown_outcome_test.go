@@ -39,7 +39,7 @@ func assertProviderUnknownNoReplay(t *testing.T, store *memory.Store, clock *pro
 	// ViewState clones Response: empty ToolCalls, HostedToolCalls and Artifacts
 	// are allocated zero-length slices. Compare the complete canonical zero
 	// response, not a literal with nil slices; no response field is ignored.
-	if pending.Status != agent.ModelInvocationPending || pending.DispatchAttempt == 0 || pending.ID == "" || pending.RequestHash == "" || pending.BindingFingerprint == "" || pending.ProviderResponseID != "" || pending.Usage != nil || pending.RetryAfter != nil || !reflect.DeepEqual(pending.Response, model.CloneResponse(model.Response{})) {
+	if pending.Status != agent.ModelInvocationPending || pending.DispatchAttempt == 0 || pending.ID == "" || pending.RequestHash == "" || pending.BindingFingerprint == "" || pending.ProviderResponseID != "" || pending.Response.Usage != nil || pending.RetryAfter != nil || !reflect.DeepEqual(pending.Response, model.CloneResponse(model.Response{})) {
 		t.Fatalf("unknown has false receipt/retry/source: %+v", pending)
 	}
 	assertProviderPendingSource(t, before.Run.ID, pending)

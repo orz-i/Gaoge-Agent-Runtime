@@ -257,7 +257,7 @@ func TestIndependentPaidRequiredToolResponseMustHaveDurableAgentReceipt(t *testi
 			}
 			for index, invocation := range view.ModelInvocations {
 				if invocation.Status != agent.ModelInvocationConsumed || invocation.ExecutionAttempt != 1 ||
-					invocation.Usage == nil || invocation.Usage.InputTokens != 17 || invocation.Usage.OutputTokens != 5 ||
+					invocation.Response.Usage == nil || invocation.Response.Usage.InputTokens != 17 || invocation.Response.Usage.OutputTokens != 5 ||
 					invocation.CompletedAt == nil || invocation.ConsumedAt == nil || invocation.ProviderResponseID == "" ||
 					invocation.ExecutionLeaseUntil != nil ||
 					(index == 1 && invocation.ErrorCode != "model.post_generation_failed") {
@@ -351,7 +351,7 @@ func TestIndependentUnfinishedOpenAIToolCallCannotExecuteThroughAgent(t *testing
 			if last.Status != agent.ModelInvocationConsumed || last.ExecutionAttempt != 1 ||
 				last.ProviderResponseID != "response-2" || last.ErrorCode != "model.post_generation_failed" ||
 				last.CompletedAt == nil || last.ConsumedAt == nil || last.ExecutionLeaseUntil != nil ||
-				last.Usage == nil || last.Usage.InputTokens != 17 || last.Usage.OutputTokens != 5 ||
+				last.Response.Usage == nil || last.Response.Usage.InputTokens != 17 || last.Response.Usage.OutputTokens != 5 ||
 				last.Response.Content != "" || len(last.Response.ToolCalls) != 0 ||
 				last.Response.ProviderReplay != nil {
 				t.Fatalf("unsafe/non-durable rejected Tool receipt: %+v", last)
