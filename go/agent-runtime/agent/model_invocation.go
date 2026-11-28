@@ -893,13 +893,6 @@ func (runner *Runner) executeModelInvocation(
 	}
 	late := errors.Is(err, ErrModelLateResult)
 	knownRejection := model.IsResponseRejectedError(err) && response.Usage != nil && model.ValidUsage(response.Usage)
-	if knownRejection {
-		// The rejected assistant reply is NOT an authorized transcript or
-		// executable Tool payload. Persist only the verified billing receipt
-		// even for custom named clients and Model middleware that return
-		// an unsanitized rejected Response.
-		response = model.BillingOnlyResponse(response)
-	}
 	var denied modelPreDispatchDenied
 	if errors.As(err, &denied) {
 		// Nothing reached the Provider. Keep the committed pending Claim
@@ -962,6 +955,12 @@ func (runner *Runner) executeModelInvocation(
 		if err != nil && !knownRejection {
 			return snapshot, state, errors.Join(ErrModelOutcomeUnknown, err)
 		}
+	}
+	if knownRejection {
+		// The accounting reducer must see the original physical receipt,
+		// including Hosted Tool effects, before rejected execution payloads
+		// are stripped from the persisted Agent response.
+		response = model.BillingOnlyResponse(response)
 	}
 	completedAt := runner.clock.Now().UTC()
 	invocation.Status = ModelInvocationCompleted
