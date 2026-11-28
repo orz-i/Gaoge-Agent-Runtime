@@ -1,7 +1,6 @@
 package postgres
 
 import (
-	"encoding/json"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"gorm.io/gorm"
@@ -63,23 +62,7 @@ func pgBackfillGrantIdentities(tx *gorm.DB) error {
 		}
 		managed = append(managed, ids...)
 	}
-	var transfers []models.KernelManagedTransferRecord
-	if err := tx.Find(&transfers).Error; err != nil {
-		return translateKernelError(err)
-	}
-	for _, tr := range transfers {
-		t, err := pgLoadManaged(tx, tr.RunID)
-		if err != nil {
-			return err
-		}
-		// A pre-cut redundant payload must match before it may be discarded.
-		if tr.Payload != "null" {
-			var original kernel.ManagedTransfer
-			if err = json.Unmarshal([]byte(tr.Payload), &original); err != nil || kernel.ManagedDigest(original) != kernel.ManagedDigest(t) {
-				return kernel.ErrExecutionConflict
-			}
-		}
-	}
+
 	ids, err := kernel.MergeGrantIdentities(active, retired, managed)
 	if err != nil {
 		return err

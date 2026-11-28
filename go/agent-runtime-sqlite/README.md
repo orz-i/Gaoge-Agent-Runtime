@@ -15,6 +15,11 @@ and profile restrictions are described in the
 [beta.24 upgrade notes](../../docs/releases/v0.1.0-beta.24.md).
 No production support is implied by `go.work`.
 
+**Schema v12:** stop previous writers and back up the profile before running
+`MigrateV11ToV12` (or `MigrateV11ToV12With`). Migration verifies the old current
+index against original history before dropping it. It does not rewrite Run
+payloads, receipts, or quota. A conflicting index is rejected atomically.
+
 ## Minimal desktop example
 
 From the repository root, initialize a private Profile directory and

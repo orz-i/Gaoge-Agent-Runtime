@@ -34,8 +34,7 @@ func (s *KernelStore) ManagedRecoveryAuthority(ctx context.Context) (kernel.Mana
 }
 func pgLoadManaged(tx *gorm.DB, id string) (kernel.ManagedTransfer, error) {
 	var r models.KernelManagedHistoryRecord
-	result := tx.Raw(`SELECT COALESCE(h.suspension_id,'') AS suspension_id,COALESCE(h.recovery_id,'') AS recovery_id,COALESCE(h.run_id,'') AS run_id,COALESCE(h.revision,0) AS revision,COALESCE(h.payload,'') AS payload
- FROM agent_kernel_managed_transfers c LEFT JOIN agent_kernel_managed_history h ON h.suspension_id=c.suspension_id AND h.run_id=c.run_id AND h.recovery_id=c.recovery_id AND h.revision=c.revision WHERE c.run_id=?`, id).Scan(&r)
+	result := tx.Where("run_id = ?", id).Order("revision DESC").Limit(1).Find(&r)
 	if result.Error != nil {
 		return kernel.ManagedTransfer{}, translateKernelError(result.Error)
 	}
@@ -58,11 +57,7 @@ func pgSaveManaged(tx *gorm.DB, t kernel.ManagedTransfer) error {
 		return e
 	}
 	h := models.KernelManagedHistoryRecord{SuspensionID: t.SafePoint.ID, RecoveryID: t.SafePoint.RecoveryID, RunID: t.SafePoint.Host.RunID, Revision: t.Revision, Payload: string(b)}
-	if e = tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "suspension_id"}}, DoUpdates: clause.AssignmentColumns([]string{"revision", "payload"})}).Create(&h).Error; e != nil {
-		return translateKernelError(e)
-	}
-	r := models.KernelManagedTransferRecord{RunID: h.RunID, SuspensionID: h.SuspensionID, RecoveryID: h.RecoveryID, Revision: h.Revision, Payload: "null"}
-	return translateKernelError(tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "run_id"}}, DoUpdates: clause.AssignmentColumns([]string{"suspension_id", "recovery_id", "revision", "payload"})}).Create(&r).Error)
+	return translateKernelError(tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "suspension_id"}}, DoUpdates: clause.AssignmentColumns([]string{"revision", "payload"})}).Create(&h).Error)
 }
 
 // A current owned Grant must have crossed native entry before any ordinary

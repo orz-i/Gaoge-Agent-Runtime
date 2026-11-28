@@ -14,8 +14,8 @@ import (
 	sqlite3 "modernc.org/sqlite"
 )
 
-// Schema v11 includes the native transaction-owned budget ledger. Open never migrates.
-const schemaVersion = 11
+// Schema v12 derives Managed recovery from its original history. Open never migrates.
+const schemaVersion = 12
 
 var (
 	ErrUnsupportedSchema = profile.ErrUnsupportedSchema
@@ -170,7 +170,19 @@ func (s *Store) initialize(ctx context.Context, create bool) error {
 
 const callbackToolReturnsColumn = "callback_tool_returns TEXT NOT NULL DEFAULT ''"
 
-var schemaDDL = append(schemaV10DDL(), sqlledger.SQLiteDDL, runIdentityDDL)
+func schemaV11DDL() []string { return append(schemaV10DDL(), sqlledger.SQLiteDDL, runIdentityDDL) }
+
+const managedRevisionIndexDDL = "CREATE UNIQUE INDEX runtime_managed_history_run_revision ON runtime_managed_history(run_id,revision)"
+
+var schemaDDL = func() []string {
+	out := []string{}
+	for _, ddl := range schemaV11DDL() {
+		if !strings.HasPrefix(ddl, "CREATE TABLE runtime_managed_transfers ") {
+			out = append(out, ddl)
+		}
+	}
+	return append(out, managedRevisionIndexDDL)
+}()
 
 func schemaV10DDL() []string { return append(schemaV9DDL(), grantIdentityDDL) }
 

@@ -32,6 +32,9 @@ func validateSchemaDDL(ctx context.Context, query schemaQuery, ddlSet []string) 
 			return fmt.Errorf("%w: malformed expected DDL", ErrUnsupportedSchema)
 		}
 		kind, name := strings.ToLower(parts[1]), parts[2]
+		if strings.EqualFold(parts[1], "UNIQUE") && len(parts) >= 4 && strings.EqualFold(parts[2], "INDEX") {
+			kind, name = "index", parts[3]
+		}
 		expected[schemaObject{kind, name}] = struct{}{}
 		var actual string
 		err := query.QueryRowContext(ctx, "SELECT sql FROM sqlite_master WHERE type=? AND name=?", kind, name).Scan(&actual)

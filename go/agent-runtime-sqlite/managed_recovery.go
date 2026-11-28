@@ -35,8 +35,7 @@ func (s *Store) ManagedRecoveryAuthority(ctx context.Context) (kernel.ManagedAut
 	return sqliteManagedAuthority(ctx, s.db)
 }
 func sqliteLoadManaged(ctx context.Context, q schemaQuery, id string) (kernel.ManagedTransfer, error) {
-	return scanManagedHistory(q.QueryRowContext(ctx, `SELECT COALESCE(h.suspension_id,''),COALESCE(h.run_id,''),COALESCE(h.recovery_id,''),COALESCE(h.revision,0),COALESCE(h.payload_json,'')
- FROM runtime_managed_transfers c LEFT JOIN runtime_managed_history h ON h.suspension_id=c.suspension_id AND h.run_id=c.run_id AND h.recovery_id=c.recovery_id AND h.revision=c.revision WHERE c.run_id=?`, id))
+	return scanManagedHistory(q.QueryRowContext(ctx, `SELECT suspension_id,run_id,recovery_id,revision,payload_json FROM runtime_managed_history WHERE run_id=? ORDER BY revision DESC LIMIT 1`, id))
 }
 func (s *Store) LoadManagedRecovery(ctx context.Context, id string) (kernel.ManagedTransfer, error) {
 	if s == nil || s.db == nil || ctx == nil || id == "" {
@@ -51,10 +50,6 @@ func sqliteSaveManaged(ctx context.Context, tx *sql.Tx, t kernel.ManagedTransfer
 		return e
 	}
 	_, e = tx.ExecContext(ctx, `INSERT INTO runtime_managed_history(suspension_id,recovery_id,run_id,revision,payload_json) VALUES(?,?,?,?,?) ON CONFLICT(suspension_id) DO UPDATE SET revision=excluded.revision,payload_json=excluded.payload_json`, t.SafePoint.ID, t.SafePoint.RecoveryID, t.SafePoint.Host.RunID, t.Revision, b)
-	if e != nil {
-		return conflictOrDatabaseError(e)
-	}
-	_, e = tx.ExecContext(ctx, `INSERT INTO runtime_managed_transfers(run_id,suspension_id,recovery_id,revision,payload_json) VALUES(?,?,?,?,?) ON CONFLICT(run_id) DO UPDATE SET suspension_id=excluded.suspension_id,recovery_id=excluded.recovery_id,revision=excluded.revision,payload_json=excluded.payload_json`, t.SafePoint.Host.RunID, t.SafePoint.ID, t.SafePoint.RecoveryID, t.Revision, []byte("null"))
 	return conflictOrDatabaseError(e)
 }
 func sqliteNativeEntryGate(ctx context.Context, q schemaQuery, id string) error {

@@ -15,6 +15,11 @@ removed in beta.24. Legacy tables can be retired only after explicitly
 reconciling obsolete executions and following
 [`docs/migrations/retire-obsolete-orchestration.sql`](../../docs/migrations/retire-obsolete-orchestration.sql).
 
+Managed recovery now derives current state from the unique latest history
+revision. Stop previous writers and back up before `Migrate`; it verifies the
+legacy current index before removing it. A conflicting index rolls back the
+migration.
+
 Run migrations explicitly before starting workers. Constructing a store does
 not migrate the schema. The experimental Stage 2 Phase 1 branch adds
 **Epoch-derived sticky fencing**, owner/lease identity and Store-owned

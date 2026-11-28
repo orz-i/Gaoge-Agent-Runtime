@@ -32,7 +32,7 @@ func TestRetirementCutoverRejectsUnfinishedHistory(t *testing.T) {
 				t.Fatal(e)
 			}
 			if upgrade {
-				if _, e = s.db.Exec("DROP TABLE agent_harness_budgets; DROP TABLE runtime_run_identities"); e != nil {
+				if _, e = s.db.Exec("DROP TABLE agent_harness_budgets; DROP TABLE runtime_run_identities; DROP INDEX runtime_managed_history_run_revision; " + managedSchemaDDL[2]); e != nil {
 					t.Fatal(e)
 				}
 				if _, e = s.db.Exec("PRAGMA user_version=10"); e != nil {
@@ -64,7 +64,7 @@ func TestRetirementCutoverRejectsUnfinishedHistory(t *testing.T) {
 				t.Fatalf("legacy row was altered: %v %s %s", e, phase, payload)
 			}
 			var version int
-			if e = raw.QueryRow("PRAGMA user_version").Scan(&version); e != nil || version != map[bool]int{true: 10, false: 11}[upgrade] {
+			if e = raw.QueryRow("PRAGMA user_version").Scan(&version); e != nil || version != map[bool]int{true: 10, false: 12}[upgrade] {
 				t.Fatalf("schema was changed: %v %d", e, version)
 			}
 

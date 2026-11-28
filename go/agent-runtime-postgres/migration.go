@@ -3,10 +3,12 @@ package postgres
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime-postgres/models"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget/sqlledger"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -22,7 +24,7 @@ func Models() []interface{} {
 		&models.KernelRunRecord{}, &models.KernelRunIdentityRecord{}, &models.KernelEventRecord{}, &models.KernelTransitionOutboxRecord{},
 		&models.KernelChildEffectGrantRecord{}, &models.KernelGrantIdentityRecord{},
 		&models.KernelOwnedRetirementRecord{},
-		&models.KernelManagedAuthorityRecord{}, &models.KernelManagedTransferRecord{}, &models.KernelManagedHistoryRecord{},
+		&models.KernelManagedAuthorityRecord{}, &models.KernelManagedHistoryRecord{},
 		&models.RunRelationRecord{}, &sqlledger.Record{},
 	}
 }
@@ -48,7 +50,7 @@ func Migrate(db *gorm.DB) error {
 			managed = "json_type(payload,'$.State') IS NOT NULL OR json_type(payload,'$.Selection.ID') IS NOT NULL"
 			retirement = "json_type(payload,'$.Phase') IS NOT NULL OR json_type(payload,'$.ACKIdentity') IS NOT NULL"
 		}
-		if err := tx.Raw("SELECT count(*) FROM (SELECT payload FROM agent_kernel_managed_transfers UNION ALL SELECT payload FROM agent_kernel_managed_history) m WHERE " + managed).Scan(&pending).Error; err != nil {
+		if err := tx.Raw("SELECT count(*) FROM agent_kernel_managed_history WHERE " + managed).Scan(&pending).Error; err != nil {
 			return err
 		}
 		if pending != 0 {
@@ -60,6 +62,15 @@ func Migrate(db *gorm.DB) error {
 		if pending != 0 {
 			return errors.New("postgres kernel migration rejects retired receipt wire; use a fresh profile")
 		}
+		if tx.Migrator().HasTable("agent_kernel_managed_transfers") {
+			if err := pgValidateManagedCurrent(tx); err != nil {
+				return err
+			}
+			if err := tx.Exec("DROP TABLE agent_kernel_managed_transfers").Error; err != nil {
+				return err
+			}
+		}
+
 		if err := validateNativeBudgetBindings(tx); err != nil {
 			return err
 		}
@@ -100,6 +111,39 @@ func validateNativeBudgetBindings(db *gorm.DB) error {
 	}
 	if invalid != 0 {
 		return errors.New("postgres kernel migration requires reconciling inconsistent native budget bindings with the previous writer")
+	}
+	return nil
+}
+
+// The previous table contained only an index/duplicate payload. Drop it
+// only when every Run points to its exact newest original history.
+func pgValidateManagedCurrent(tx *gorm.DB) error {
+	var rows []struct {
+		RunID, SuspensionID, RecoveryID string
+		Revision                        uint64
+		Payload                         string
+	}
+	if e := tx.Table("agent_kernel_managed_transfers").Find(&rows).Error; e != nil {
+		return e
+	}
+	var runs int64
+	if e := tx.Raw("SELECT count(DISTINCT run_id) FROM agent_kernel_managed_history").Scan(&runs).Error; e != nil {
+		return e
+	}
+	if runs != int64(len(rows)) {
+		return errors.New("postgres managed history has missing current index")
+	}
+	for _, row := range rows {
+		t, e := pgLoadManaged(tx, row.RunID)
+		if e != nil || t.SafePoint.ID != row.SuspensionID || t.SafePoint.RecoveryID != row.RecoveryID || t.Revision != row.Revision {
+			return errors.New("postgres managed current index does not name latest history")
+		}
+		if row.Payload != "null" {
+			var old kernel.ManagedTransfer
+			if e = json.Unmarshal([]byte(row.Payload), &old); e != nil || kernel.ManagedDigest(old) != kernel.ManagedDigest(t) {
+				return errors.New("postgres managed current duplicate payload conflicts with original history")
+			}
+		}
 	}
 	return nil
 }

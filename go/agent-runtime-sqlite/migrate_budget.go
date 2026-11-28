@@ -34,7 +34,7 @@ func (s *Store) migrateV10ToV11(ctx context.Context) error {
 		return err
 	}
 	if version == 11 {
-		if err = validateSchemaDDL(ctx, tx, schemaDDL); err != nil {
+		if err = validateSchemaDDL(ctx, tx, schemaV11DDL()); err != nil {
 			return err
 		}
 		if err = validateFinalRetirements(ctx, tx); err != nil {
@@ -64,7 +64,7 @@ func (s *Store) migrateV10ToV11(ctx context.Context) error {
 	if _, err = tx.ExecContext(ctx, "PRAGMA user_version=11"); err != nil {
 		return conflictOrDatabaseError(err)
 	}
-	if err = validateSchemaDDL(ctx, tx, schemaDDL); err != nil {
+	if err = validateSchemaDDL(ctx, tx, schemaV11DDL()); err != nil {
 		return err
 	}
 	return conflictOrDatabaseError(tx.Commit())
@@ -80,10 +80,7 @@ func validateFinalRetirements(ctx context.Context, q schemaQuery) error {
 	if pending != 0 {
 		return fmt.Errorf("%w: %d unfinished original retirements; drain with the previous writer", ErrUnsupportedSchema, pending)
 	}
-	if err := q.QueryRowContext(ctx, `SELECT count(*) FROM (
-        SELECT payload_json FROM runtime_managed_transfers
-        UNION ALL SELECT payload_json FROM runtime_managed_history
-        ) WHERE json_type(CAST(payload_json AS TEXT),'$.State') IS NOT NULL
+	if err := q.QueryRowContext(ctx, `SELECT count(*) FROM runtime_managed_history WHERE json_type(CAST(payload_json AS TEXT),'$.State') IS NOT NULL
         OR json_type(CAST(payload_json AS TEXT),'$.Selection.ID') IS NOT NULL`).Scan(&pending); err != nil {
 		return err
 	}

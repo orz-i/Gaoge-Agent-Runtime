@@ -10,24 +10,12 @@ type KernelManagedAuthorityRecord struct {
 
 func (KernelManagedAuthorityRecord) TableName() string { return "agent_kernel_managed_authority" }
 
-// One current index per Run. The referenced history owns the full payload.
-// Payload is a legacy NOT NULL column, written as JSON null until AC03.
-type KernelManagedTransferRecord struct {
-	RunID        string `gorm:"size:64;primaryKey"`
-	SuspensionID string `gorm:"size:128;not null;uniqueIndex"`
-	RecoveryID   string `gorm:"size:128;not null;uniqueIndex"`
-	Revision     uint64 `gorm:"not null"`
-	Payload      string `gorm:"type:text;not null"`
-}
-
-func (KernelManagedTransferRecord) TableName() string { return "agent_kernel_managed_transfers" }
-
 // Historical certificates are never overwritten by a later suspension.
 type KernelManagedHistoryRecord struct {
 	SuspensionID string `gorm:"size:128;primaryKey"`
 	RecoveryID   string `gorm:"size:128;not null;uniqueIndex"`
-	RunID        string `gorm:"size:64;not null;index"`
-	Revision     uint64 `gorm:"not null"`
+	RunID        string `gorm:"size:64;not null;uniqueIndex:idx_managed_history_run_revision"`
+	Revision     uint64 `gorm:"not null;uniqueIndex:idx_managed_history_run_revision"`
 	Payload      string `gorm:"type:text;not null"`
 }
 
