@@ -51,7 +51,7 @@ func TestContextSummaryNativeBindsHostInputsWithRealBridges(t *testing.T) {
 		t.Fatalf("the same native composition without Host inputs must be valid: %v", err)
 	}
 	legacy := dependencies
-	legacy.PrepareModelRequest = bounded.Prepare
+	legacy.PrepareModelRequest = harness.MaterializeContextWindowRequest
 	if _, err = agent.NewRunner(legacy); !errors.Is(err, agent.ErrInvalidRequest) {
 		t.Fatalf("summary accepted competing Host preparation: %v", err)
 	}

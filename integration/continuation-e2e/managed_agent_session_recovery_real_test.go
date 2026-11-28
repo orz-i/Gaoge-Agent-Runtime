@@ -27,7 +27,6 @@ import (
 	runtimecontext "github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/context"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 	gormpostgres "gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -402,10 +401,10 @@ func TestManagedAgentSessionRecoveryProcess(t *testing.T) {
 	if phase == "" {
 		t.Skip("subprocess helper")
 	}
-	starting := phase == "crash" || phase == "opaque-crash"
+	starting := phase == "crash" || phase == "unmanaged-crash"
 	retirementCut := ""
 	switch phase {
-	case "crash", "opaque-crash", "resume", "resume-closed", "refresh-closed":
+	case "crash", "unmanaged-crash", "resume", "resume-closed", "refresh-closed":
 	case "resume-finish-before", "resume-finish-after":
 		retirementCut = strings.TrimPrefix(phase, "resume-")
 	default:
@@ -417,7 +416,7 @@ func TestManagedAgentSessionRecoveryProcess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session := newManagedRecoverySessionWithComposition(t, db, files, starting, phase != "opaque-crash", facade, retirementCut)
+	session := newManagedRecoverySessionWithComposition(t, db, files, starting, phase != "unmanaged-crash", facade, retirementCut)
 	if starting {
 		_, err := session.Prompt(t.Context(), managedRecoveryTurn, managedRecoveryPrompt)
 		t.Fatalf("expected process exit after second model intent commit, got %v", err)
@@ -664,15 +663,6 @@ func newManagedRecoverySessionWithComposition(t *testing.T, db *gorm.DB, files s
 		Runtime: runtime, Model: managedRecoveryModel{logPath: filepath.Join(files, "model.jsonl")},
 		Catalog: registry, Executor: registry, BoundedContext: bounded, ManagedRecovery: managed,
 		RunExecution: runExecution, Execution: execution,
-	}
-	if !managed {
-		ordinary, ordinaryErr := harness.NewContextRunMiddleware(hostStore, nil)
-		if ordinaryErr != nil {
-			t.Fatal(ordinaryErr)
-		}
-		dependencies.BoundedContext = nil
-		dependencies.RunMiddleware = []plugin.RunMiddleware{ordinary}
-		dependencies.PrepareModelRequest = bounded.Prepare
 	}
 	direct, err := agent.NewRunner(dependencies)
 	if err != nil {

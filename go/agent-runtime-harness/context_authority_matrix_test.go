@@ -52,14 +52,14 @@ func TestAuditMatrixForeignTurnIdentityNeverAuthorizesDifferentSession(t *testin
 		t.Fatal(err)
 	}
 	wrapped := matrixWrongTurnStore{Store: store, requestedTurn: turn.ID, foreignTurn: other}
-	mw, err := NewContextRunMiddleware(wrapped, nil)
+	mw, err := newContextHydrationProbe(wrapped, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, operation := range []plugin.RunOperation{plugin.RunStart, plugin.RunResume, plugin.RunResolveApproval} {
 		t.Run(string(operation), func(t *testing.T) {
 			called := false
-			_, err = mw.Run(t.Context(), plugin.RunInvocation{Operation: operation, Kind: kernel.RunKind("agent"), RunID: root.ExecutionRefID}, func(ctx context.Context) (kernel.Snapshot, error) {
+			_, err = mw.check(t.Context(), plugin.RunInvocation{Operation: operation, Kind: kernel.RunKind("agent"), RunID: root.ExecutionRefID}, func(ctx context.Context) (kernel.Snapshot, error) {
 				called = true
 				if got, ok := CurrentContextCheckpoint(ctx); ok {
 					t.Errorf("FOREIGN SESSION CHECKPOINT ACCEPTED: scope=%s content=%q", got.ScopeID, model.TextValue(got.Window.Entries[0].Message.Content))
@@ -122,7 +122,7 @@ func TestAuditMatrixArtifactPayloadIdentityAndHashNeverTrusted(t *testing.T) {
 
 func TestAuditMatrixExcludedContextCannotCarryReboundCheckpoint(t *testing.T) {
 	store, turn, checkpoint, root := contextRunMiddlewareFixture(t)
-	mw, err := NewContextRunMiddleware(store, nil)
+	mw, err := newContextHydrationProbe(store, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +133,7 @@ func TestAuditMatrixExcludedContextCannotCarryReboundCheckpoint(t *testing.T) {
 				id = "unrelated-turn"
 			}
 			ctx := withContextWindowBinding(withContextCheckpoint(WithoutContextWindow(t.Context()), checkpoint), id, ContextWindowOwner)
-			_, err = mw.Run(ctx, plugin.RunInvocation{Operation: plugin.RunResume, Kind: kernel.RunKind("agent"), RunID: root.ExecutionRefID}, func(got context.Context) (kernel.Snapshot, error) {
+			_, err = mw.check(ctx, plugin.RunInvocation{Operation: plugin.RunResume, Kind: kernel.RunKind("agent"), RunID: root.ExecutionRefID}, func(got context.Context) (kernel.Snapshot, error) {
 				if cp, ok := CurrentContextCheckpoint(got); ok {
 					t.Errorf("explicitly EXCLUDED Context was forwarded: %s", cp.ID)
 				}
@@ -175,7 +175,7 @@ func TestAuditPropertyContextAuthorityTransitions(t *testing.T) {
 			return false
 		}
 		relations := contextRunRelationFixture{"state-plain-child": {ParentRunID: root.ExecutionRefID, ChildRunID: "state-plain-child", Kind: runrelation.KindDelegation, OwnerNodeID: "plain-child", CreatedAt: time.Now().UTC()}, "state-specialist-grandchild": {ParentRunID: child.ExecutionRefID, ChildRunID: "state-specialist-grandchild", Kind: runrelation.KindDelegation, OwnerNodeID: "spec-child", CreatedAt: time.Now().UTC()}, "state-invalid-child": {ParentRunID: root.ExecutionRefID, ChildRunID: "state-invalid-child", Kind: runrelation.Kind("not-a-kind"), OwnerNodeID: "bad", CreatedAt: time.Now().UTC()}}
-		mw, err := NewContextRunMiddleware(store, relations)
+		mw, err := newContextHydrationProbe(store, relations)
 		if err != nil {
 			t.Error(err)
 			return false
@@ -211,7 +211,7 @@ func TestAuditPropertyContextAuthorityTransitions(t *testing.T) {
 			wantAccess = ContextWindowReadOnly
 		}
 		calls := 0
-		_, err = mw.Run(ctx, plugin.RunInvocation{Operation: op, Kind: kernel.RunKind("agent"), RunID: runIDs[class]}, func(nextCtx context.Context) (kernel.Snapshot, error) {
+		_, err = mw.check(ctx, plugin.RunInvocation{Operation: op, Kind: kernel.RunKind("agent"), RunID: runIDs[class]}, func(nextCtx context.Context) (kernel.Snapshot, error) {
 			calls++
 			got, has := CurrentContextCheckpoint(nextCtx)
 			binding, hasBinding := CurrentContextWindowBinding(nextCtx)
@@ -279,13 +279,13 @@ func TestAuditPropertyInvalidRelationFieldsCannotGrantContext(t *testing.T) {
 		case 9:
 			base.ChildRunID = " prop-child "
 		}
-		mw, err := NewContextRunMiddleware(store, contextRunRelationFixture{"prop-child": base})
+		mw, err := newContextHydrationProbe(store, contextRunRelationFixture{"prop-child": base})
 		if err != nil {
 			t.Error(err)
 			return false
 		}
 		called := false
-		_, err = mw.Run(t.Context(), plugin.RunInvocation{Operation: plugin.RunResume, Kind: kernel.RunKind("agent"), RunID: "prop-child"}, func(ctx context.Context) (kernel.Snapshot, error) {
+		_, err = mw.check(t.Context(), plugin.RunInvocation{Operation: plugin.RunResume, Kind: kernel.RunKind("agent"), RunID: "prop-child"}, func(ctx context.Context) (kernel.Snapshot, error) {
 			called = true
 			return kernel.Snapshot{}, nil
 		})
@@ -336,12 +336,12 @@ func TestAuditMatrixRootProvenanceMutationNeverGrantsOwner(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Logf("fixture mode=%s accepted_by_validInvocation=%v", mode, validInvocation(val))
-			mw, err := NewContextRunMiddleware(corrupted, nil)
+			mw, err := newContextHydrationProbe(corrupted, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
 			calls := 0
-			_, err = mw.Run(t.Context(), plugin.RunInvocation{Operation: plugin.RunResume, Kind: kernel.RunKind("agent"), RunID: root.ExecutionRefID}, func(ctx context.Context) (kernel.Snapshot, error) {
+			_, err = mw.check(t.Context(), plugin.RunInvocation{Operation: plugin.RunResume, Kind: kernel.RunKind("agent"), RunID: root.ExecutionRefID}, func(ctx context.Context) (kernel.Snapshot, error) {
 				calls++
 				if cp, ok := CurrentContextCheckpoint(ctx); ok {
 					t.Errorf("unproven Agent Root retained Checkpoint %s; original scope=%s", cp.ID, checkpoint.ScopeID)

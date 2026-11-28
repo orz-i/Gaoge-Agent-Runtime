@@ -11,6 +11,10 @@
 - Configure `BoundedContextAdapter` exclusively through `Dependencies.BoundedContext`
   (or the matching Summary owner). Its executable `Run` middleware interface and
   registration name are removed; a competing Run wrapper or request preparer is rejected.
+- Removed `NewContextRunMiddleware`, `HydrateContextRun`, `NewManagedContextPreparer`,
+  and the public `BoundedContextAdapter.Prepare` / `PrepareRequest` methods. The
+  single `NewBoundedContextAdapter` supplies hydration and preparation to the Runner;
+  no separate Host lifecycle or standalone compaction entry remains.
 - Configure a complete shared Budget through `Dependencies.BoundedBudget`. The old
   exact Run/Model/Tool triple registration is rejected rather than normalized.
 

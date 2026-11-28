@@ -15,7 +15,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/memory"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/model"
-	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/plugin"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -115,20 +114,15 @@ func TestRealPostgresManagedSessionCompactionAcrossStoreRestart(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		preparer, err := harness.NewManagedContextPreparer(store, manager, func(context.Context, model.Request) (runtimecontext.ModelWindow, error) {
+		preparer, err := harness.NewBoundedContextAdapter(store, manager, func(context.Context, model.Request) (runtimecontext.ModelWindow, error) {
 			return runtimecontext.ModelWindow{ContextTokens: 2000, ReservedOutputTokens: 128}, nil
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		runContext, err := harness.NewContextRunMiddleware(store, nil)
+		}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
 		direct, err := agent.NewRunner(agent.Dependencies{
 			Runtime: rt, Model: client, Catalog: registry, Executor: registry,
-			PrepareModelRequest: preparer,
-			RunMiddleware:       []plugin.RunMiddleware{runContext},
+			BoundedContext: preparer,
 		})
 		if err != nil {
 			t.Fatal(err)

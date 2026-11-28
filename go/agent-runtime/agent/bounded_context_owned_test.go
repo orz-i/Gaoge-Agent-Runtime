@@ -59,7 +59,7 @@ func TestOwnedBoundedContextCompositionExcludesOtherPreparers(t *testing.T) {
 	if _, legacy := any(a).(plugin.RunMiddleware); legacy {
 		t.Fatal("Context adapter still implements executable middleware")
 	}
-	d.PrepareModelRequest = a.Prepare
+	d.PrepareModelRequest = a.prepareManaged
 	if validBoundedContextComposition(d) || scopedDeferredRootCallbacks(d) {
 		t.Fatal("generic callback was trusted")
 	}

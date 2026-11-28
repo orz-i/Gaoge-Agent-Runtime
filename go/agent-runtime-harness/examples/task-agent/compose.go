@@ -134,12 +134,7 @@ func (counter recordedInputTokenCounter) Count(ctx context.Context, request runt
 // compose is deliberately local to this example: the host chooses stores,
 // authority, real model limits, preparation order and execution ownership.
 func compose(store kernel.Store, state *taskState, client model.Client, config settings, owner string, transcript harness.TranscriptSource) (*harness.SessionClient, error) {
-	return composeContextMode(store, state, client, config, owner, transcript, false)
-}
 
-// The ordinary mode exists only for the example's opaque-failure regression.
-// It is not a fallback or an alternate recovery path in the public example.
-func composeContextMode(store kernel.Store, state *taskState, client model.Client, config settings, owner string, transcript harness.TranscriptSource, opaque bool) (*harness.SessionClient, error) {
 	rt, err := kernel.New(kernel.Dependencies{Store: store, Clock: state.clock})
 	if err != nil {
 		return nil, err
@@ -209,19 +204,6 @@ func composeContextMode(store kernel.Store, state *taskState, client model.Clien
 			Model: agent.CallPolicy{Timeout: modelTimeout, MaxAttempts: 1, MaxConcurrency: 1},
 			Tool:  agent.CallPolicy{Timeout: toolTimeout, MaxAttempts: 1, MaxConcurrency: 1},
 		},
-	}
-	if opaque {
-		prepare, err := harness.NewManagedContextPreparer(state.store, manager, resolve)
-		if err != nil {
-			return nil, err
-		}
-		rehydrate, err := harness.NewContextRunMiddleware(state.store, nil)
-		if err != nil {
-			return nil, err
-		}
-		dependencies.BoundedContext = nil
-		dependencies.PrepareModelRequest = prepare
-		dependencies.RunMiddleware = []plugin.RunMiddleware{rehydrate}
 	}
 	agentRunner, err := agent.NewRunner(dependencies)
 	if err != nil {

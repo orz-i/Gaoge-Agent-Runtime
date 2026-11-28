@@ -108,23 +108,16 @@ func (a *BoundedContextAdapter) finishHydration(ctx context.Context, source Boun
 	callbackscope.Record(ctx, a, "context.hydrate.returned", source)
 }
 
-func (a *BoundedContextAdapter) Prepare(ctx context.Context, incoming model.Request) (prepared model.Request, prepareErr error) {
+func (a *BoundedContextAdapter) prepareManaged(ctx context.Context, incoming model.Request) (prepared model.Request, prepareErr error) {
 	callbackscope.ManagedPrepareEntered(ctx, a)
 	defer func() { callbackscope.ManagedPrepareReturned(ctx, a, prepared, prepareErr) }()
-	return a.prepare(ctx, incoming, nil, true)
-}
-
-// PrepareRequest is the ordinary Host request-preparer composition. It uses
-// the same candidate selection and Context writes but cannot record a native
-// managed recovery receipt on the surrounding Host callback ticket.
-func (a *BoundedContextAdapter) PrepareRequest(ctx context.Context, incoming model.Request) (model.Request, error) {
-	return a.prepare(ctx, incoming, nil, false)
+	return a.prepare(ctx, incoming, nil)
 }
 
 // prepare owns the only Context preparation algorithm. Only a rejection
 // computed by this concrete adapter can set rejected, never an error supplied
 // by a Host port. Managed transfer and ordinary owned execution share it.
-func (a *BoundedContextAdapter) prepare(ctx context.Context, incoming model.Request, rejected *candidateRejection, journal bool) (model.Request, error) {
+func (a *BoundedContextAdapter) prepare(ctx context.Context, incoming model.Request, rejected *candidateRejection) (model.Request, error) {
 	plan, err := a.ports.Plan(ctx, model.CloneRequest(incoming))
 	if err != nil {
 		return model.Request{}, err
@@ -204,15 +197,13 @@ func (a *BoundedContextAdapter) prepare(ctx context.Context, incoming model.Requ
 	if err = a.ports.BindCheckpoint(ctx, plan.Checkpoint.ID, saved); err != nil {
 		return model.Request{}, err
 	}
-	if journal {
-		callbackscope.Operation(ctx, a, "context.checkpoint:"+saved.ID, struct {
-			RunID, TurnID       string
-			TurnRevision        uint64
-			Source              json.RawMessage
-			Previous, Committed runtimecontext.Checkpoint
-			Artifacts           []runtimecontext.Artifact
-		}{incoming.RunID, plan.TurnID, plan.TurnRevision, plan.SourceBinding, *plan.Checkpoint, saved, choice.artifacts})
-	}
+	callbackscope.Operation(ctx, a, "context.checkpoint:"+saved.ID, struct {
+		RunID, TurnID       string
+		TurnRevision        uint64
+		Source              json.RawMessage
+		Previous, Committed runtimecontext.Checkpoint
+		Artifacts           []runtimecontext.Artifact
+	}{incoming.RunID, plan.TurnID, plan.TurnRevision, plan.SourceBinding, *plan.Checkpoint, saved, choice.artifacts})
 	return request, nil
 }
 func sameBoundedValue(a, b any) bool {

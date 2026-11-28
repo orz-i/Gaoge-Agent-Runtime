@@ -13,6 +13,21 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/runrelation"
 )
 
+type contextHydrationProbe struct{ boundedContextPorts }
+
+func newContextHydrationProbe(store Store, relations ContextRunRelationSource) (contextHydrationProbe, error) {
+	return contextHydrationProbe{boundedContextPorts{store: store, relations: relations}}, nil
+}
+
+// check only asserts the returned Context; it does not execute a Run.
+func (p contextHydrationProbe) check(ctx context.Context, inv plugin.RunInvocation, assert func(context.Context) (kernel.Snapshot, error)) (kernel.Snapshot, error) {
+	hydrated, _, err := p.Hydrate(ctx, inv)
+	if err != nil {
+		return kernel.Snapshot{}, err
+	}
+	return assert(hydrated)
+}
+
 type contextRunRelationFixture map[string]runrelation.Relation
 
 func TestDelegatedSpecialistResumeDoesNotRehydrateSupervisorContext(t *testing.T) {
@@ -39,11 +54,11 @@ func TestDelegatedSpecialistResumeDoesNotRehydrateSupervisorContext(t *testing.T
 	if _, _, err = store.CreateInvocation(t.Context(), child); err != nil {
 		t.Fatal(err)
 	}
-	middleware, err := NewContextRunMiddleware(store, nil)
+	middleware, err := newContextHydrationProbe(store, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = middleware.Run(t.Context(), plugin.RunInvocation{Operation: plugin.RunResume, Kind: kernel.RunKind("agent"), RunID: child.ExecutionRefID}, func(ctx context.Context) (kernel.Snapshot, error) {
+	_, err = middleware.check(t.Context(), plugin.RunInvocation{Operation: plugin.RunResume, Kind: kernel.RunKind("agent"), RunID: child.ExecutionRefID}, func(ctx context.Context) (kernel.Snapshot, error) {
 		if _, ok := CurrentContextCheckpoint(ctx); ok {
 			t.Fatal("supervisor history leaked into specialist")
 		}
@@ -80,12 +95,12 @@ func TestContextRunMiddlewareRehydratesTopLevelAgentAsOwner(t *testing.T) {
 		t.Run(string(operation), func(t *testing.T) {
 			t.Parallel()
 			store, turn, checkpoint, root := contextRunMiddlewareFixture(t)
-			middleware, err := NewContextRunMiddleware(store, nil)
+			middleware, err := newContextHydrationProbe(store, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
 
-			_, err = middleware.Run(t.Context(), plugin.RunInvocation{
+			_, err = middleware.check(t.Context(), plugin.RunInvocation{
 				Operation: operation, Kind: kernel.RunKind("agent"), RunID: root.ExecutionRefID,
 			}, func(ctx context.Context) (kernel.Snapshot, error) {
 				assertContextRunHydration(t, ctx, turn.ID, ContextWindowOwner, checkpoint)
@@ -101,7 +116,7 @@ func TestContextRunMiddlewareRehydratesTopLevelAgentAsOwner(t *testing.T) {
 func TestContextRunMiddlewareRehydratesDescendantAgentReadOnly(t *testing.T) {
 	store, turn, checkpoint, root := contextRunMiddlewareFixture(t)
 	const childRunID = "agent-capability-child"
-	middleware, err := NewContextRunMiddleware(store, contextRunRelationFixture{
+	middleware, err := newContextHydrationProbe(store, contextRunRelationFixture{
 		childRunID: {
 			ParentRunID: root.ExecutionRefID, ChildRunID: childRunID,
 			Kind: runrelation.KindDelegation, OwnerNodeID: "child-1", CreatedAt: time.Now().UTC(),
@@ -111,7 +126,7 @@ func TestContextRunMiddlewareRehydratesDescendantAgentReadOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = middleware.Run(t.Context(), plugin.RunInvocation{
+	_, err = middleware.check(t.Context(), plugin.RunInvocation{
 		Operation: plugin.RunResume, Kind: kernel.RunKind("agent"), RunID: childRunID,
 	}, func(ctx context.Context) (kernel.Snapshot, error) {
 		assertContextRunHydration(t, ctx, turn.ID, ContextWindowReadOnly, checkpoint)
@@ -142,12 +157,12 @@ func TestContextRunMiddlewareReplacesStaleProcessCheckpointWithDurableTurnHead(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	middleware, err := NewContextRunMiddleware(store, nil)
+	middleware, err := newContextHydrationProbe(store, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	stale := withContextWindowBinding(withContextCheckpoint(t.Context(), checkpoint), turn.ID, ContextWindowOwner)
-	_, err = middleware.Run(stale, plugin.RunInvocation{
+	_, err = middleware.check(stale, plugin.RunInvocation{
 		Operation: plugin.RunResume, Kind: kernel.RunKind("agent"), RunID: root.ExecutionRefID,
 	}, func(ctx context.Context) (kernel.Snapshot, error) {
 		assertContextRunHydration(t, ctx, turn.ID, ContextWindowOwner, next)
