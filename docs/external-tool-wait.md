@@ -21,6 +21,11 @@ A provider may emit a readiness notification **inside `Tool.Execute`**, before t
 
 ## Recovery and execution trees
 
+Native external cancellation is being corrected in Draft PR #162. See the
+[candidate continuation contract and incomplete acceptance checkpoint](releases/unreleased-native-external-tool-cancellation.md)
+before adopting it; current focused tests do not establish real-engine or
+downstream readiness.
+
 Wait generations are independent of Run revisions. Deadline and readiness deliveries validate their wait generation and use the current CAS. If an unrelated revision lands between the continuation's load and its generation-guarded resume, the dispatcher retries against the latest Run within a bounded budget. Continued CAS contention returns a retryable error to the leased Worker for NACK/redelivery; it must never be interpreted as a completed wakeup. Obsolete generations and terminal Runs are no-ops. The deadline is projected once from durable registration; normal waiting does not call the executor/model or requeue once per second.
 
 Use the SDK transition outbox, continuation dispatcher and first-party Agent resumer. ResumeToolWait supplies generation validation. If a host wraps the Agent resumer, its wrapper must preserve the ToolWaitResumer contract. Child-terminal deliveries resolve the current parent revision; relation reconciliation can reproject a child fact consumed before its parent committed waiting.

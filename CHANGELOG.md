@@ -5,6 +5,13 @@ Versioning once it reaches `v1.0.0`; prereleases use SemVer prerelease labels.
 
 ## [0.1.0-beta.24] — unreleased architecture hard cut
 
+- **Native external Tool cancellation candidate (Draft PR #162, issue #160):**
+  retain the original native election across receipt recovery/Grant retirement,
+  bind the original owner control and introduce explicit same-control Harness
+  continuation without pre-cancelling SharedBudget. This is an incomplete Draft,
+  not a downstream-qualified release; see the
+  [checkpoint, compatibility boundary and remaining acceptance gates](docs/releases/unreleased-native-external-tool-cancellation.md).
+
 - **One Root/Named Agent capability definition:** `AgentSpec` is the sole
   Host-selected immutable Model, Instructions, output contract, local Tool,
   Hosted Tool grant, Skill and limits bundle for Root and named child Agents.
