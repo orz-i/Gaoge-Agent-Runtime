@@ -182,7 +182,7 @@ func ea1ChildResumeSettlement(t *testing.T, factory func(*testing.T) (kernel.Sto
 	ar := ea1StartRuntime(t, a)
 	fresh := f.runner(ar, "fresh-recovery", true)
 	ea1ChildRecoveryPhaseUnchanged(t, ar, before, f.parent, f.grandparent, g)
-	e = fresh.ReconcileChildPhysicalGrant(t.Context(), f.request.ID)
+	e = fresh.ReconcilePhysicalExecution(t.Context(), f.request.ID)
 	if phase == "P3" {
 		if !errors.Is(e, kernel.ErrChildExecutionBusy) || !errors.Is(e, kernel.ErrExecutionConflict) {
 			t.Fatal("Child recovery invented uncommitted marker", e)
@@ -202,7 +202,7 @@ func ea1ChildResumeSettlement(t *testing.T, factory func(*testing.T) (kernel.Sto
 		if e != nil {
 			t.Fatal("original committed marker could not recover", e)
 		}
-		if e = fresh.ReconcileChildPhysicalGrant(t.Context(), f.request.ID); !errors.Is(e, kernel.ErrNotFound) {
+		if e = fresh.ReconcilePhysicalExecution(t.Context(), f.request.ID); !errors.Is(e, kernel.ErrNotFound) {
 			t.Fatal("original marker replayed", e)
 		}
 		ea1CompBarrierUnchanged(t, ar, before)

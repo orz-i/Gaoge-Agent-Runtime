@@ -534,7 +534,7 @@ func ea1AgentElectionRecovery(t *testing.T, factory func(*testing.T) (kernel.Sto
 			t.Fatalf("TTL granted unknown replay: %v", err)
 		}
 		ea1ControlUnchanged(t, freshRT, before, grant)
-		if e := retry.ReconcileRootPhysicalExecution(ctx, f.request.ID); !errors.Is(e, agent.ErrRootOutcomeUnknown) {
+		if e := retry.ReconcilePhysicalExecution(ctx, f.request.ID); !errors.Is(e, agent.ErrRootOutcomeUnknown) {
 			t.Fatalf("unknown retired after TTL: %v", e)
 		}
 		f.originalReceipt(before, kind == "tool")
@@ -592,7 +592,7 @@ func ea1AgentElectionRecovery(t *testing.T, factory func(*testing.T) (kernel.Sto
 		t.Fatal("complete original receipt changed across reopen")
 	}
 	fresh := f.runner(freshRT, "fresh-after-receipt", false)
-	if e = fresh.ReconcileRootPhysicalExecution(ctx, f.request.ID); e != nil {
+	if e = fresh.ReconcilePhysicalExecution(ctx, f.request.ID); e != nil {
 		t.Fatalf("duplicate retirement invented scope: %v", e)
 	}
 	if kind == "model" {

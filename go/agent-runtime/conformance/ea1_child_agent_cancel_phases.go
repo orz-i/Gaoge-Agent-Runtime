@@ -335,7 +335,7 @@ func ea1ChildCancelUnknownWithModelReadDelay(
 			t.Fatal("original native token revived", e)
 		}
 	}
-	if e = f.runner(ar, "recovery-only", true).ReconcileChildPhysicalGrant(t.Context(), f.request.ID); !errors.Is(e, kernel.ErrChildExecutionBusy) {
+	if e = f.runner(ar, "recovery-only", true).ReconcilePhysicalExecution(t.Context(), f.request.ID); !errors.Is(e, kernel.ErrChildExecutionBusy) {
 		t.Fatal("unknown child retired by recovery", e)
 	}
 	ea1ChildRecoveryPhaseUnchanged(t, ar, before, f.parent, f.grandparent, g)
@@ -413,7 +413,7 @@ func ea1ChildCancelSettlement(t *testing.T, factory func(*testing.T) (kernel.Sto
 	a, _ := f.reopen()
 	ar := ea1StartRuntime(t, a)
 	ea1ChildRecoveryPhaseControls(t, ar, before, f.parent, f.grandparent, g)
-	e = f.runner(ar, "fresh-recovery", true).ReconcileChildPhysicalGrant(t.Context(), f.request.ID)
+	e = f.runner(ar, "fresh-recovery", true).ReconcilePhysicalExecution(t.Context(), f.request.ID)
 	if phase == "P3" {
 		if !errors.Is(e, kernel.ErrChildExecutionBusy) || !errors.Is(e, kernel.ErrExecutionConflict) {
 			t.Fatal("original receipt fabricated missing marker", e)
@@ -426,7 +426,7 @@ func ea1ChildCancelSettlement(t *testing.T, factory func(*testing.T) (kernel.Sto
 		if _, lookupErr := ar.LookupChildExecution(t.Context(), f.request.ID); !errors.Is(lookupErr, kernel.ErrNotFound) {
 			t.Fatal("original marker recovery did not retire scope", lookupErr)
 		}
-		if replayErr := f.runner(ar, "second-inspection", true).ReconcileChildPhysicalGrant(t.Context(), f.request.ID); !errors.Is(replayErr, kernel.ErrNotFound) {
+		if replayErr := f.runner(ar, "second-inspection", true).ReconcilePhysicalExecution(t.Context(), f.request.ID); !errors.Is(replayErr, kernel.ErrNotFound) {
 			t.Fatal("original marker replayed", replayErr)
 		}
 		if tool {

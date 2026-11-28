@@ -126,22 +126,22 @@ func ea1ChildRecoveryAdmission(t *testing.T, factory func(*testing.T) (kernel.St
 	assertOriginal()
 	{
 		var nilRunner *agent.Runner
-		if e = nilRunner.ReconcileChildPhysicalGrant(context.Background(), request.ID); !errors.Is(e, agent.ErrInvalidRequest) {
+		if e = nilRunner.ReconcilePhysicalExecution(context.Background(), request.ID); !errors.Is(e, agent.ErrInvalidRequest) {
 			t.Fatalf("nil: %v", e)
 		}
 		assertOriginal()
 		for _, tc := range []struct {
 			id   string
 			want error
-		}{{"", kernel.ErrInvalidInput}, {"missing", kernel.ErrNotFound}, {wrong.Run.ID, agent.ErrInvalidRequest}, {root.Run.ID, agent.ErrInvalidRequest}, {corrupt.Run.ID, kernel.ErrChildExecutionBusy}, {clean.Run.ID, kernel.ErrNotFound}} {
-			if e = owner.ReconcileChildPhysicalGrant(t.Context(), tc.id); !errors.Is(e, tc.want) {
+		}{{"", kernel.ErrInvalidInput}, {"missing", kernel.ErrNotFound}, {wrong.Run.ID, agent.ErrInvalidRequest}, {root.Run.ID, kernel.ErrNotFound}, {corrupt.Run.ID, kernel.ErrChildExecutionBusy}, {clean.Run.ID, kernel.ErrNotFound}} {
+			if e = owner.ReconcilePhysicalExecution(t.Context(), tc.id); !errors.Is(e, tc.want) {
 				t.Fatalf("input %q: %v want %v", tc.id, e, tc.want)
 			}
 			assertOriginal()
 		}
 	}
 	for i := 0; i < 2; i++ {
-		if e = owner.ReconcileChildPhysicalGrant(t.Context(), request.ID); !errors.Is(e, kernel.ErrChildExecutionBusy) {
+		if e = owner.ReconcilePhysicalExecution(t.Context(), request.ID); !errors.Is(e, kernel.ErrChildExecutionBusy) {
 			t.Fatalf("unknown Host callback retired: %v", e)
 		}
 		assertOriginal()

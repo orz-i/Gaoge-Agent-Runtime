@@ -351,7 +351,7 @@ func ea1ChildControlUnknown(t *testing.T, factory func(*testing.T) (kernel.Store
 	f.physical.rt = rt
 	r := f.runner(rt, true)
 	f.unchanged(rt, s, g)
-	if e = r.ReconcileChildPhysicalGrant(t.Context(), s.Run.ID); !errors.Is(e, kernel.ErrChildExecutionBusy) {
+	if e = r.ReconcilePhysicalExecution(t.Context(), s.Run.ID); !errors.Is(e, kernel.ErrChildExecutionBusy) {
 		t.Fatalf("unknown approval callback invented settlement: %v", e)
 	}
 	if kind == "tool" {

@@ -204,7 +204,7 @@ func ea1ChildResumePhase(t *testing.T, factory func(*testing.T) (kernel.Store, k
 	f.physical.rt = freshRT
 	f.unchanged(freshRT, s, g)
 	recovery := f.runner(freshRT, "fresh-resume-owner", true)
-	if e := recovery.ReconcileChildPhysicalGrant(ctx, s.Run.ID); !errors.Is(e, kernel.ErrChildExecutionBusy) {
+	if e := recovery.ReconcilePhysicalExecution(ctx, s.Run.ID); !errors.Is(e, kernel.ErrChildExecutionBusy) {
 		t.Fatalf("unknown Resume scope retired: %v", e)
 	}
 	expected = kernel.ErrChildExecutionBusy

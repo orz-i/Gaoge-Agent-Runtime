@@ -195,7 +195,7 @@ func ea1ChildApprovalSettlement(t *testing.T, factory func(*testing.T) (kernel.S
 	ar := ea1StartRuntime(t, a)
 	fresh := f.runner(ar, "fresh-recovery", true)
 	ea1ChildRecoveryPhaseUnchanged(t, ar, before, f.parent, f.grandparent, g)
-	e = fresh.ReconcileChildPhysicalGrant(t.Context(), f.request.ID)
+	e = fresh.ReconcilePhysicalExecution(t.Context(), f.request.ID)
 	if phase == "P3" {
 		if !errors.Is(e, kernel.ErrChildExecutionBusy) || !errors.Is(e, kernel.ErrExecutionConflict) {
 			t.Fatal("receipt alone invented missing approval marker", e)
@@ -208,7 +208,7 @@ func ea1ChildApprovalSettlement(t *testing.T, factory func(*testing.T) (kernel.S
 		ea1CompBarrierUnchanged(t, ar, before)
 		ea1CompBarrierUnchanged(t, ar, f.parent)
 		ea1CompBarrierUnchanged(t, ar, f.grandparent)
-		if e = fresh.ReconcileChildPhysicalGrant(t.Context(), f.request.ID); !errors.Is(e, kernel.ErrNotFound) {
+		if e = fresh.ReconcilePhysicalExecution(t.Context(), f.request.ID); !errors.Is(e, kernel.ErrNotFound) {
 			t.Fatal("original approval marker replayed", e)
 		}
 	}

@@ -89,7 +89,7 @@ func TestIssue107RealPostgresPhysicalSettlementAckLostAcrossStoreInstances(t *te
 	if err != nil || original.ChildRunID != "child" {
 		t.Fatalf("original committed Grant missing: %+v err=%v", original, err)
 	}
-	if err = resumedAgent.ReconcileChildPhysicalGrant(t.Context(), "child"); err != nil {
+	if err = resumedAgent.ReconcilePhysicalExecution(t.Context(), "child"); err != nil {
 		t.Fatalf("durably proven callback completion cannot recover: %v", err)
 	}
 	if _, err = resumedRuntime.Cancel(t.Context(), root.Run.ID, root.Run.Revision, "after original settled"); err != nil {

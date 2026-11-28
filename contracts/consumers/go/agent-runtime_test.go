@@ -111,7 +111,7 @@ var (
 	_ childPhysicalStoreContract                                                         = (*memory.Store)(nil)
 	_                                                                                    = (*kernel.Runtime).AdmitPhysicalExecution
 	_ func(*kernel.Runtime, context.Context, string) (kernel.ChildExecutionGrant, error) = (*kernel.Runtime).LookupChildExecution
-	_ func(*agent.Runner, context.Context, string) error                                 = (*agent.Runner).ReconcileChildPhysicalGrant
+	_ func(*agent.Runner, context.Context, string) error                                 = (*agent.Runner).ReconcilePhysicalExecution
 	_ func(*kernel.Runtime) *kernel.Runtime                                              = (*kernel.Runtime).WithoutPhysicalGrant
 	_ func([]byte) string                                                                = agent.FrozenOriginFingerprint
 	_ func(kernel.Snapshot, []byte) bool                                                 = agent.MatchesFrozenOrigin

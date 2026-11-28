@@ -1116,7 +1116,7 @@ func (runner *Runner) Resume(ctx context.Context, runID string, expectedRevision
 	}
 	if snapshot.Run.ParentRunID == "" && knownRootPhysicalSettlement(snapshot) {
 		if retained, lookupErr := runner.runtime.LookupChildExecution(ctx, runID); lookupErr == nil && retained.IsOwned() {
-			if recoveryErr := runner.ReconcileRootPhysicalExecution(ctx, runID); recoveryErr != nil {
+			if recoveryErr := runner.ReconcilePhysicalExecution(ctx, runID); recoveryErr != nil {
 				return snapshot, recoveryErr
 			}
 		} else if lookupErr != nil && !errors.Is(lookupErr, kernel.ErrNotFound) {
@@ -2300,7 +2300,7 @@ func (runner *Runner) consumeRecoveredPending(ctx context.Context, snapshot kern
 			if loadErr != nil {
 				return snapshot, true, loadErr, true
 			}
-			out, loadErr := decodeToolOutcome(res.Receipt, execution.call.ID, true)
+			out, loadErr := decodeToolOutcome(res.Receipt, execution.call.ID)
 			if loadErr != nil || !reflect.DeepEqual(out, receipt.Outcome) {
 				return snapshot, true, ErrToolReceiptMismatch, true
 			}

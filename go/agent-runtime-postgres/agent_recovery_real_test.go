@@ -292,7 +292,7 @@ func TestRealPostgresRecordedCallbackSurvivesProcessCrash(t *testing.T) {
 	if e != nil || !completion.HostCompleted {
 		t.Fatalf("actual callback return absent: %+v %v", completion, e)
 	}
-	if e = runner.ReconcileRootPhysicalExecution(t.Context(), agentCrashRunID); e != nil {
+	if e = runner.ReconcilePhysicalExecution(t.Context(), agentCrashRunID); e != nil {
 		t.Fatal(e)
 	}
 	view := recoveryAgentView(t, snapshot)

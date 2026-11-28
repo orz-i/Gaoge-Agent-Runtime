@@ -85,7 +85,7 @@ func TestIssue107SQLiteOriginalPhysicalReceiptAckLostAcrossRestart(t *testing.T)
 	if err != nil || original.ChildRunID != "child" {
 		t.Fatalf("original Grant missing after restart: %+v err=%v", original, err)
 	}
-	if err = resumedAgent.ReconcileChildPhysicalGrant(t.Context(), "child"); err != nil {
+	if err = resumedAgent.ReconcilePhysicalExecution(t.Context(), "child"); err != nil {
 		t.Fatalf("durably proven callback-completed marker did not allow bounded recovery: %v", err)
 	}
 	if _, err = resumedRuntime.Cancel(t.Context(), root.Run.ID, root.Run.Revision, "now physically settled"); err != nil {

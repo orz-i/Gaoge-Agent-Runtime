@@ -148,7 +148,7 @@ func ea1AgentUnknownReceipts(t *testing.T, factory func(*testing.T) (kernel.Stor
 			next := makeRunner(ownerRT, "fresh-owner", 3*time.Minute)
 			var resumeErr error
 			if child {
-				resumeErr = next.ReconcileChildPhysicalGrant(t.Context(), request.ID)
+				resumeErr = next.ReconcilePhysicalExecution(t.Context(), request.ID)
 				if !errors.Is(resumeErr, kernel.ErrChildExecutionBusy) {
 					t.Fatalf("unknown child reconciliation: %v", resumeErr)
 				}

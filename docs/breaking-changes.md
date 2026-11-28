@@ -39,6 +39,8 @@
 
 - The Kernel Store now exposes one Run write transaction, `Commit(ctx, runID, revision, mutation, authority)`. Removed Store `Apply`, `ApplyExecution`, `ApplyControl`, `ApplyOwnedPhysicalRecovery` and `ControlStore`; existing Runtime feature methods submit that same command. Original lease, control or receipt proof are transient mutually exclusive authority inputs (zero is an unclaimed/ancestor-fenced write), not selectable execution modes. The same native transaction qualifies source, commits Run/accounting/journal and returns the actual committed snapshot and owner-revocation result. Store implementations and fault fixtures must use the new method; no fallback write port is retained.
 
+- Agent physical return recovery now exposes only `Runner.ReconcilePhysicalExecution(ctx, runID)`, replacing `ReconcileChildPhysicalGrant` and `ReconcileRootPhysicalExecution`. The persisted Run parent relation selects the original ownership constraint; an unreturned callback remains fenced. Original Tool ledger outcomes always require their original opaque evidence.
+
 ## Native SQL Profile hard cut (AC-03)
 
 SQLite v14 and the matching PostgreSQL layout store one permanent Effect

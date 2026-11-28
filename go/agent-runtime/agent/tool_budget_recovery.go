@@ -60,7 +60,7 @@ func (f *originalToolFrame) recordSettled(q tools.ExecutionRequest, ledger budge
 	if err != nil {
 		return
 	}
-	if _, err = decodeToolOutcome(res.Receipt, q.Call.ID, true); err != nil {
+	if _, err = decodeToolOutcome(res.Receipt, q.Call.ID); err != nil {
 		return
 	}
 	f.returns.Store(q.Call.ID, kernel.OwnedToolReturn{CallID: q.Call.ID, RequestDigest: res.RequestHash, LedgerID: ledger.ID, ReceiptDigest: kernel.ManagedDigest(res.Receipt)})
@@ -197,7 +197,7 @@ func (r *Runner) readOriginalSettledTool(ctx context.Context, q tools.ExecutionR
 	if err != nil || b.ReceiptDigest == "" || kernel.ManagedDigest(res.Receipt) != b.ReceiptDigest {
 		return toolOutcomeReceipt{}, ErrToolReceiptMismatch
 	}
-	return decodeToolOutcome(res.Receipt, q.Call.ID, true)
+	return decodeToolOutcome(res.Receipt, q.Call.ID)
 }
 
 // The original held reservation must match before the Host verifier is
@@ -234,7 +234,7 @@ func (r *Runner) settleOriginalHeldTool(ctx context.Context, q tools.ExecutionRe
 		if err != nil {
 			return nil, err
 		}
-		outcome, err := decodeToolOutcome(known.Receipt, q.Call.ID, true)
+		outcome, err := decodeToolOutcome(known.Receipt, q.Call.ID)
 		if err != nil || outcome.ErrorCode != "" || !reflect.DeepEqual(outcome.Result, tools.CloneExecutionResult(result)) {
 			return nil, ErrToolReceiptMismatch
 		}

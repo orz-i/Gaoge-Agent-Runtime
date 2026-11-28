@@ -235,7 +235,7 @@ func TestRootRetirementFreshRunnerRecoversFinishedCallByRunID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := fresh.ReconcileRootPhysicalExecution(t.Context(), original.Run.ID); err != nil {
+	if err := fresh.ReconcilePhysicalExecution(t.Context(), original.Run.ID); err != nil {
 		t.Fatalf("public only-RunID recovery failed: %v", err)
 	}
 	after, err := base.Load(t.Context(), original.Run.ID)
@@ -246,7 +246,7 @@ func TestRootRetirementFreshRunnerRecoversFinishedCallByRunID(t *testing.T) {
 	if err != nil || !acknowledged.Valid() || acknowledged.Identity() != retired.Identity() {
 		t.Fatalf("recovery did not acknowledge original evidence: %#v %v", acknowledged, err)
 	}
-	if err := fresh.ReconcileRootPhysicalExecution(t.Context(), original.Run.ID); err != nil {
+	if err := fresh.ReconcilePhysicalExecution(t.Context(), original.Run.ID); err != nil {
 		t.Fatalf("RunID selected historical ACK: %v", err)
 	}
 }

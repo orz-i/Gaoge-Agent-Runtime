@@ -71,7 +71,7 @@ retryable error permits resending. A pre-dispatch denial remains distinct from
 an uncertain physical outcome. No background recovery worker is started.
 A completed receipt may be consumed without reissuing the original invocation.
 Root Host errors retain the original scope; TTL cannot manufacture completion.
-`ReconcileRootPhysicalExecution` can retire a durable completion marker or an
+`ReconcilePhysicalExecution` can retire a durable completion marker or an
 original grant-bound callback-returned completion record with all physical intents settled.
 A clean snapshot alone is insufficient. A Run status alone never proves callback completion; the original opaque
 completion record or durable settlement marker is required. This is not production multi-worker certification.

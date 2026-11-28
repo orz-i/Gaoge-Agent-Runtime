@@ -175,7 +175,7 @@ func TestAgentCrashSubprocess(t *testing.T) {
 			if e != nil || !completion.HostCompleted {
 				t.Fatalf("callback return absent: %+v %v", completion, e)
 			}
-			if e = runner.ReconcileRootPhysicalExecution(ctx, current.Run.ID); e != nil {
+			if e = runner.ReconcilePhysicalExecution(ctx, current.Run.ID); e != nil {
 				t.Fatal(e)
 			}
 			after, e := runtime.Load(ctx, current.Run.ID)

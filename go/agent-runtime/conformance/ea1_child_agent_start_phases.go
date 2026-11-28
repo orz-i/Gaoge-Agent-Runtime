@@ -432,7 +432,7 @@ func ea1ChildStartPhase(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 			barrier()
 			s := f.load(f.peer)
 			f.receipts(s, true)
-			if e := f.runner(f.peer, "pre-mark-recovery", false).ReconcileChildPhysicalGrant(ctx, s.Run.ID); !errors.Is(e, kernel.ErrChildExecutionBusy) || !errors.Is(e, kernel.ErrExecutionConflict) {
+			if e := f.runner(f.peer, "pre-mark-recovery", false).ReconcilePhysicalExecution(ctx, s.Run.ID); !errors.Is(e, kernel.ErrChildExecutionBusy) || !errors.Is(e, kernel.ErrExecutionConflict) {
 				t.Fatalf("clean pre-Mark receipt invented retirement: %v", e)
 			}
 			f.unchanged(f.peer, s, g)
@@ -480,7 +480,7 @@ func ea1ChildStartPhase(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 		f.physical.rt = freshRT
 		f.unchanged(freshRT, s, g)
 		recovery := f.runner(freshRT, "fresh-child", useHost)
-		if e := recovery.ReconcileChildPhysicalGrant(ctx, s.Run.ID); !errors.Is(e, kernel.ErrChildExecutionBusy) {
+		if e := recovery.ReconcilePhysicalExecution(ctx, s.Run.ID); !errors.Is(e, kernel.ErrChildExecutionBusy) {
 			t.Fatalf("unknown child retired: %v", e)
 		}
 		expected = kernel.ErrChildExecutionBusy

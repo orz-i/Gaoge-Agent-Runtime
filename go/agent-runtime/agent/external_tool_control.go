@@ -219,7 +219,7 @@ func (r *Runner) retireExternalToolControl(ctx context.Context, s kernel.Snapsho
 	if g.ID != grantID {
 		return ErrToolReceiptMismatch
 	}
-	return r.ReconcileRootPhysicalExecution(ctx, s.Run.ID)
+	return r.ReconcilePhysicalExecution(ctx, s.Run.ID)
 }
 
 // A state field alone cannot assert a previous callback return. Keep the

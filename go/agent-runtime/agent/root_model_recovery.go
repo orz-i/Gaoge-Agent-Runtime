@@ -95,7 +95,7 @@ func (runner *Runner) ReconcileModelOutcome(ctx context.Context, runID string, r
 		if !completion.HostCompleted {
 			return snapshot, ErrRootOutcomeUnknown
 		}
-		if err = runner.ReconcileRootPhysicalExecution(ctx, runID); err != nil {
+		if err = runner.ReconcilePhysicalExecution(ctx, runID); err != nil {
 			return snapshot, err
 		}
 		return snapshot, nil
@@ -122,7 +122,7 @@ func (runner *Runner) ReconcileModelOutcome(ctx context.Context, runID string, r
 	if err != nil {
 		return snapshot, errors.Join(ErrModelOutcomeUnknown, err)
 	}
-	if err = runner.ReconcileRootPhysicalExecution(ctx, runID); err != nil {
+	if err = runner.ReconcilePhysicalExecution(ctx, runID); err != nil {
 		return repaired, err
 	}
 	return repaired, nil

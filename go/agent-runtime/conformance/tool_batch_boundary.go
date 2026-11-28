@@ -212,7 +212,7 @@ func toolBatchBoundary(t *testing.T, factory func(*testing.T) (kernel.Store, ker
 				if _, e = r.Resume(ctx, req.ID, before.Run.Revision); !errors.Is(e, agent.ErrApprovalRequired) {
 					t.Fatal("unknown original authorization was bypassed", e)
 				}
-				if e = r.ReconcileRootPhysicalExecution(ctx, req.ID); !errors.Is(e, agent.ErrRootOutcomeUnknown) {
+				if e = r.ReconcilePhysicalExecution(ctx, req.ID); !errors.Is(e, agent.ErrRootOutcomeUnknown) {
 					t.Fatal("unknown authorization retired", e)
 				}
 				after, e := rt.Load(ctx, req.ID)

@@ -264,7 +264,7 @@ func ea1RootSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, fun
 		freshRT := ea1StartRuntime(t, freshStore)
 		ea1AssertFinishedOriginal(t, freshRT, wrapped.original, before)
 		fresh := makeRunner(freshRT, "fresh-recovery-owner")
-		if e := fresh.ReconcileRootPhysicalExecution(t.Context(), req.ID); e != nil {
+		if e := fresh.ReconcilePhysicalExecution(t.Context(), req.ID); e != nil {
 			t.Fatalf("final receipt recovery: %v", e)
 		}
 		ea1AssertFinishedOriginal(t, freshRT, wrapped.original, before)
@@ -333,14 +333,14 @@ func ea1RootSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, fun
 		}
 		assertUnchanged()
 	}
-	e = fresh.ReconcileRootPhysicalExecution(t.Context(), req.ID)
+	e = fresh.ReconcilePhysicalExecution(t.Context(), req.ID)
 	if e != nil {
 		t.Fatalf("original settlement could not recover: %v", e)
 	}
 	if _, e = freshRT.LookupChildExecution(t.Context(), req.ID); !errors.Is(e, kernel.ErrNotFound) {
 		t.Fatalf("scope not retired: %v", e)
 	}
-	if e = fresh.ReconcileRootPhysicalExecution(t.Context(), req.ID); e != nil {
+	if e = fresh.ReconcilePhysicalExecution(t.Context(), req.ID); e != nil {
 		t.Fatalf("duplicate reconciliation invented work: %v", e)
 	}
 	assertUnchanged()

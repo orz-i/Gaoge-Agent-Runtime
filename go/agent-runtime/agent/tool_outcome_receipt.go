@@ -30,7 +30,7 @@ const toolOutcomeEvidenceVersion = "budget-tool-outcome-opaque-v1"
 
 type persistedToolOutcome struct {
 	toolOutcomeReceipt
-	Evidence *jsoncontract.OpaqueEvidence `json:"_originalEvidence,omitempty"`
+	Evidence *jsoncontract.OpaqueEvidence `json:"_originalEvidence"`
 }
 
 func encodeToolOutcome(r toolOutcomeReceipt) (json.RawMessage, error) {
@@ -44,20 +44,14 @@ func encodeToolOutcome(r toolOutcomeReceipt) (json.RawMessage, error) {
 	return json.Marshal(persistedToolOutcome{toolOutcomeReceipt: r, Evidence: &seal})
 }
 
-func decodeToolOutcome(raw json.RawMessage, id string, requireOriginal bool) (toolOutcomeReceipt, error) {
+func decodeToolOutcome(raw json.RawMessage, id string) (toolOutcomeReceipt, error) {
 	var saved persistedToolOutcome
 	if err := json.Unmarshal(raw, &saved); err != nil {
 		return toolOutcomeReceipt{}, err
 	}
 	r := saved.toolOutcomeReceipt
-	if saved.Evidence != nil {
-		if err := jsoncontract.RestoreOpaque(toolOutcomeEvidenceVersion, &r, saved.Evidence); err != nil {
-			return toolOutcomeReceipt{}, errors.Join(ErrToolReceiptMismatch, err)
-		}
-	} else if requireOriginal {
-		// Old adapter-only receipts remain readable but cannot claim newly
-		// sealed native original-callback custody.
-		return toolOutcomeReceipt{}, ErrToolReceiptMismatch
+	if err := jsoncontract.RestoreOpaque(toolOutcomeEvidenceVersion, &r, saved.Evidence); err != nil {
+		return toolOutcomeReceipt{}, errors.Join(ErrToolReceiptMismatch, err)
 	}
 	if _, err := r.terminalError(id); err != nil {
 		return toolOutcomeReceipt{}, err

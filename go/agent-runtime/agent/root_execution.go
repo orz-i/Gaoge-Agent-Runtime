@@ -357,10 +357,11 @@ func recordPhysicalReturn(ctx context.Context, rt *kernel.Runtime, g kernel.Chil
 	return c, false, nil
 }
 
-// ReconcileRootPhysicalExecution consumes the existing native retirement
-// protocol after every original physical obligation has been settled. A
-// clean feature state alone never manufactures a callback completion.
-func (runner *Runner) ReconcileRootPhysicalExecution(ctx context.Context, runID string) error {
+// ReconcilePhysicalExecution consumes the original physical return after its
+// obligations have settled. The persisted Run selects its ownership constraint;
+// no caller-selected mode, clean snapshot, or expired lease proves a return.
+// This receipt-only operation never dispatches Models, Tools or child Runs.
+func (runner *Runner) ReconcilePhysicalExecution(ctx context.Context, runID string) error {
 	if runner == nil || runner.runtime == nil {
 		return ErrInvalidRequest
 	}
@@ -368,8 +369,25 @@ func (runner *Runner) ReconcileRootPhysicalExecution(ctx context.Context, runID 
 	if err != nil {
 		return err
 	}
-	if snapshot.Run.Kind != RunKind || snapshot.Run.ParentRunID != "" {
+	if snapshot.Run.Kind != RunKind {
 		return ErrInvalidRequest
+	}
+	if snapshot.Run.ParentRunID != "" {
+		if !knownAgentPhysicalSettlement(snapshot) {
+			return kernel.ErrChildExecutionBusy
+		}
+		grant, err := runner.runtime.LookupChildExecution(ctx, snapshot.Run.ID)
+		if err != nil {
+			return err
+		}
+		err = finishPhysicalReturn(ctx, runner.runtime, grant, snapshot, nil)
+		if errors.Is(err, kernel.ErrExecutionConflict) {
+			// A clean-looking Run cannot retire the Grant without its original
+			// post-callback return fact. This remains quarantined, not a
+			// generic no-effect conflict eligible for automatic retry.
+			return errors.Join(kernel.ErrChildExecutionBusy, err)
+		}
+		return err
 	}
 	grant, completion, err := runner.originalRootReturn(ctx, snapshot)
 	if err != nil {

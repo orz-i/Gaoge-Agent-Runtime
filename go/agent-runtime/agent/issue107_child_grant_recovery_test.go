@@ -63,7 +63,7 @@ func TestIssue107ManualGrantRecoveryOnlyAfterPhysicalStateSettles(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = runner.ReconcileChildPhysicalGrant(t.Context(), child.Run.ID); !errors.Is(err, kernel.ErrChildExecutionBusy) {
+	if err = runner.ReconcilePhysicalExecution(t.Context(), child.Run.ID); !errors.Is(err, kernel.ErrChildExecutionBusy) {
 		t.Fatalf("unknown external dispatch was retired: %v", err)
 	}
 	if got, lookupErr := rt.LookupChildExecution(t.Context(), child.Run.ID); lookupErr != nil || got != original {
@@ -92,13 +92,13 @@ func TestIssue107ManualGrantRecoveryOnlyAfterPhysicalStateSettles(t *testing.T) 
 	if markErr := rt.RecordPhysicalCallbackReturn(t.Context(), original, final.Run.Revision, kernel.PhysicalCallbackOutcome{HostCompleted: true}, featurecontrol.Seal(final.Run.ID, final.Run.Revision, "agent_physical_callback_return", original.ID, kernel.PhysicalCallbackReturnPayload(final, kernel.PhysicalCallbackOutcome{HostCompleted: true}), nil)); markErr != nil {
 		t.Fatal(markErr)
 	}
-	if err = runner.ReconcileChildPhysicalGrant(t.Context(), child.Run.ID); err != nil {
+	if err = runner.ReconcilePhysicalExecution(t.Context(), child.Run.ID); err != nil {
 		t.Fatalf("known-satisfied physical Grant could not recover: %v", err)
 	}
 	if _, err = rt.Cancel(t.Context(), parent.Run.ID, parent.Run.Revision, "after trusted receipt"); err != nil {
 		t.Fatal(err)
 	}
-	if err = runner.ReconcileChildPhysicalGrant(t.Context(), child.Run.ID); !errors.Is(err, kernel.ErrNotFound) {
+	if err = runner.ReconcilePhysicalExecution(t.Context(), child.Run.ID); !errors.Is(err, kernel.ErrNotFound) {
 		t.Fatalf("retired Grant replay accepted: %v", err)
 	}
 }

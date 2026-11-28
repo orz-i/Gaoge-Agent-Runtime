@@ -415,7 +415,7 @@ func ea1ControlSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, 
 		freshRT := ea1StartRuntime(t, freshStore)
 		ea1AssertFinishedOriginal(t, freshRT, wrapped.original, before)
 		fresh := makeRunner(freshRT, "fresh-control-recovery", false)
-		if e := fresh.ReconcileRootPhysicalExecution(ctx, req.ID); e != nil {
+		if e := fresh.ReconcilePhysicalExecution(ctx, req.ID); e != nil {
 			t.Fatal(e)
 		}
 		ea1AssertFinishedOriginal(t, freshRT, wrapped.original, before)
@@ -487,14 +487,14 @@ func ea1ControlSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, 
 		t.Fatalf("foreign epoch retired scope: %v", err)
 	}
 	ea1ControlUnchanged(t, freshRT, before, grant)
-	if err = fresh.ReconcileRootPhysicalExecution(ctx, req.ID); err != nil {
+	if err = fresh.ReconcilePhysicalExecution(ctx, req.ID); err != nil {
 		t.Fatal(err)
 	}
 	after, err := freshRT.Load(ctx, req.ID)
 	if err != nil || !reflect.DeepEqual(after, before) {
 		t.Fatal("retirement changed committed control/receipt")
 	}
-	if err = fresh.ReconcileRootPhysicalExecution(ctx, req.ID); err != nil {
+	if err = fresh.ReconcilePhysicalExecution(ctx, req.ID); err != nil {
 		t.Fatalf("duplicate retirement: %v", err)
 	}
 	if entry == "toolwait" {

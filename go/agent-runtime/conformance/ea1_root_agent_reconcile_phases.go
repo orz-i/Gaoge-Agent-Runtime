@@ -212,7 +212,7 @@ func ea1RootReconcilePhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 		return r.ReconcileToolOutcome(t.Context(), request.ID, revision, call)
 	}
 	if phase == "P0" {
-		if e := runner.ReconcileRootPhysicalExecution(t.Context(), "missing-root"); !errors.Is(e, kernel.ErrNotFound) {
+		if e := runner.ReconcilePhysicalExecution(t.Context(), "missing-root"); !errors.Is(e, kernel.ErrNotFound) {
 			t.Fatalf("missing original Root accepted: %v", e)
 		}
 		if kind == "model" {
@@ -325,7 +325,7 @@ func ea1RootReconcilePhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 			t.Fatalf("unknown contract lost: %v", err)
 		}
 		unchanged(freshRT)
-		if e := next.ReconcileRootPhysicalExecution(t.Context(), request.ID); !errors.Is(e, agent.ErrRootOutcomeUnknown) {
+		if e := next.ReconcilePhysicalExecution(t.Context(), request.ID); !errors.Is(e, agent.ErrRootOutcomeUnknown) {
 			t.Fatalf("unknown Root retired: %v", e)
 		}
 		unchanged(freshRT)
@@ -415,7 +415,7 @@ func ea1RootReconcilePhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 	if e != nil || !ea1RecoveryJSONEqual(durable, committed) {
 		t.Fatal("receipt changed across reopen")
 	}
-	e = next.ReconcileRootPhysicalExecution(t.Context(), request.ID)
+	e = next.ReconcilePhysicalExecution(t.Context(), request.ID)
 	if noHoldSuccess {
 		if e != nil {
 			t.Fatalf("current final retirement could not be observed: %v", e)
@@ -438,7 +438,7 @@ func ea1RootReconcilePhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 	if e != nil || !finalReceipt.Valid() || finalReceipt.Evidence.Grant != grant || !ea1RecoveryJSONEqual(finalReceipt.Evidence.Snapshot, committed) {
 		t.Fatalf("missing exact final retirement receipt: %v", e)
 	}
-	if e = next.ReconcileRootPhysicalExecution(t.Context(), request.ID); e != nil {
+	if e = next.ReconcilePhysicalExecution(t.Context(), request.ID); e != nil {
 		t.Fatalf("repeat final receipt observation: %v", e)
 	}
 	if retained, e := freshRT.LoadOwnedRetirement(t.Context(), grant.ID); e != nil || !ea1RecoveryJSONEqual(retained, finalReceipt) {

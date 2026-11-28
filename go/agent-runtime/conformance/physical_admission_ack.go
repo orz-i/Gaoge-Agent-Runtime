@@ -464,7 +464,7 @@ func runPhysicalAdmissionACKCase(t *testing.T, factory func(*testing.T) (kernel.
 	// Restart/reconciliation cannot invent a callback from the persisted
 	// attempt alone or retire a barrier without its original return.
 	observerRunner := admissionACKRunner(t, fresh, &ea1AdmissionModel{}, nil)
-	if e = observerRunner.ReconcileRootPhysicalExecution(t.Context(), g.ChildRunID); !errors.Is(e, agent.ErrRootOutcomeUnknown) {
+	if e = observerRunner.ReconcilePhysicalExecution(t.Context(), g.ChildRunID); !errors.Is(e, agent.ErrRootOutcomeUnknown) {
 		t.Fatalf("observer adopted admission without original ACK: %v", e)
 	}
 	if retained, e := fresh.LookupChildExecution(t.Context(), g.ChildRunID); e != nil || retained != g {

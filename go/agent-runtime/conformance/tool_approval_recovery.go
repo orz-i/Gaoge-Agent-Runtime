@@ -209,7 +209,7 @@ func originalToolApprovalRecovery(t *testing.T, factory func(*testing.T) (kernel
 					if makeRunner(rt, l, true).VerifiedDeferredRootControl(ctx, rt, staged) {
 						t.Fatal("unretired recovery acquired control")
 					}
-					if err = r.ReconcileRootPhysicalExecution(ctx, req.ID); err != nil {
+					if err = r.ReconcilePhysicalExecution(ctx, req.ID); err != nil {
 						t.Fatal("retire original recovered receipt", err)
 					}
 				}

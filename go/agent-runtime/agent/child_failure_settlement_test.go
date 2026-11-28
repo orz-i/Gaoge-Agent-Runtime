@@ -247,7 +247,7 @@ func TestChildPhysicalFailureSettlement(t *testing.T) {
 						t.Fatalf("settlement error lost original cause: %v", err)
 					}
 					store.fault = ""
-					recovery := runner.ReconcileChildPhysicalGrant(t.Context(), request.ID)
+					recovery := runner.ReconcilePhysicalExecution(t.Context(), request.ID)
 					if tc.fault == "mark" {
 						if !errors.Is(recovery, kernel.ErrChildExecutionBusy) {
 							t.Fatalf("missing marker invented on recovery: %v", recovery)

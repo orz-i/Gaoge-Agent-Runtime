@@ -44,7 +44,7 @@ func TestRootPendingSignalRetainsOriginalScopeUntilVerifiedReceipt(t *testing.T)
 		t.Fatalf("stale generation = %#v, %v", stale.Run, err)
 	}
 	// Readiness is not a provider receipt and cannot retire the grant.
-	if err = fixture.runner.ReconcileRootPhysicalExecution(t.Context(), ready.Run.ID); !errors.Is(err, agent.ErrRootOutcomeUnknown) {
+	if err = fixture.runner.ReconcilePhysicalExecution(t.Context(), ready.Run.ID); !errors.Is(err, agent.ErrRootOutcomeUnknown) {
 		t.Fatalf("ready-only settlement = %v", err)
 	}
 	retained, err = fixture.runtime.LookupChildExecution(t.Context(), waiting.Run.ID)

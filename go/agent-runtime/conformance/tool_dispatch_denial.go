@@ -189,7 +189,7 @@ func toolDispatchDenial(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 					if err != nil || c.HostCompleted || c.ControlCustody != "" || r.VerifiedDeferredRootControl(ctx, rt, cur) {
 						t.Fatal("failed projection manufactured control custody", err, c)
 					}
-					if err = r.ReconcileRootPhysicalExecution(ctx, root); !errors.Is(err, agent.ErrRootOutcomeUnknown) {
+					if err = r.ReconcilePhysicalExecution(ctx, root); !errors.Is(err, agent.ErrRootOutcomeUnknown) {
 						t.Fatal("replacement retired unknown original projection", err)
 					}
 					return
