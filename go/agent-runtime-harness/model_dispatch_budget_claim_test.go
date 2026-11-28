@@ -37,10 +37,9 @@ func (client *countedBudgetModel) Generate(_ context.Context, request model.Requ
 	return model.Response{Content: "successful recovery"}, nil
 }
 
-// Shared Budget persists its dispatched marker BEFORE calling the next
-// Middleware. If Agent's final Claim gate then proves the Provider was never
-// invoked, the budget must not leave an unknown charge that permanently
-// prevents a valid later Resume with the same durable invocation identity.
+// The admission barrier precedes the atomic native dispatch. The final
+// claim gate must not leave any reservation or unknown charge if no physical
+// request was admitted; the exact durable invocation may later resume.
 func TestSharedBudgetReleasesProvenUnsentModelClaimAndAllowsRecovery(t *testing.T) {
 	testSharedBudgetUnsentClaim(t, 0)
 }
@@ -48,7 +47,7 @@ func TestSharedBudgetPreservesFrozenOutputLimitOnProvenUnsentRecovery(t *testing
 	testSharedBudgetUnsentClaim(t, 128)
 }
 func testSharedBudgetUnsentClaim(t *testing.T, outputCeiling int64) {
-	store, shared, _ := hostedBudgetFixture(t, budget.Limits{MaxLLMCalls: 2, MaxConcurrentRuns: 1})
+	_, shared, _ := hostedBudgetFixture(t, budget.Limits{MaxLLMCalls: 2, MaxConcurrentRuns: 1})
 	clock := newBudgetClaimClock()
 	runtime, err := kernel.New(kernel.Dependencies{Store: memory.NewStore(), Clock: clock})
 	if err != nil {
@@ -90,8 +89,8 @@ func testSharedBudgetUnsentClaim(t *testing.T, outputCeiling int64) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !ledger.View("").UnknownUsage || provider.calls.Load() != 0 {
-		t.Fatalf("fixture did not persist preflight dispatch marker: %+v calls=%d", ledger.View(""), provider.calls.Load())
+	if ledger.View("").UnknownUsage || len(ledger.Reservations) != 0 || provider.calls.Load() != 0 {
+		t.Fatalf("pre-entry barrier admitted a physical effect: %+v calls=%d", ledger.View(""), provider.calls.Load())
 	}
 	clock.Advance(3 * time.Minute)
 	unblock()
@@ -119,7 +118,7 @@ func testSharedBudgetUnsentClaim(t *testing.T, outputCeiling int64) {
 	if provider.outputCeiling.Load() != outputCeiling {
 		t.Fatalf("budget recovery changed the frozen output ceiling: got=%d want=%d", provider.outputCeiling.Load(), outputCeiling)
 	}
-	ledger, err = store.LoadBudget(t.Context(), "hosted-budget-turn")
+	ledger, err = runtime.BudgetStore().LoadBudget(t.Context(), "hosted-budget-turn")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +188,7 @@ func TestPreIntentFailureDoesNotReserveSharedModelBudget(t *testing.T) {
 	if err == nil {
 		t.Fatal("pre-intent rejection was not observed")
 	}
-	ledger, err := store.LoadBudget(t.Context(), "hosted-budget-turn")
+	ledger, err := rt.BudgetStore().LoadBudget(t.Context(), "hosted-budget-turn")
 	if err != nil && !errors.Is(err, budget.ErrLedgerNotFound) {
 		t.Fatal(err)
 	}

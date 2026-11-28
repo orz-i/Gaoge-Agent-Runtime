@@ -18,6 +18,7 @@ type heldToolRecoveryFault struct {
 	*memory.Store
 	cut   error
 	fired bool
+	after bool
 }
 
 func (s *heldToolRecoveryFault) Commit(commitCtx context.Context, commitID string, commitRev uint64, commitMutation kernel.StoreMutation, commitAuth kernel.CommitAuthority) (kernel.Snapshot, bool, error) {
@@ -25,6 +26,11 @@ func (s *heldToolRecoveryFault) Commit(commitCtx context.Context, commitID strin
 		for _, ev := range commitMutation.Events {
 			if ev.Type == "tool.receipt_recovered" && !s.fired {
 				s.fired = true
+				if s.after {
+					if _, _, e := s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth); e != nil {
+						return kernel.Snapshot{}, false, e
+					}
+				}
 				return kernel.Snapshot{}, false, s.cut
 			}
 		}
@@ -44,15 +50,15 @@ func (m *heldToolRecoveryModel) Generate(_ context.Context, q model.Request) (mo
 }
 
 // Actual Harness Budget ports and native Agent recovery use one original-byte
-// settlement codec. Cut after ledger CAS, before native receipt CAS; the Host
-// verifier is a read-only evidence source, not another settlement driver.
+// settlement codec. A lost ACK after the atomic receipt/ledger CAS retains the
+// exact staged receipt; the Host verifier cannot overwrite it.
 func TestVerifiedToolOutcomeSettlementIsIdempotentAndFrozen(t *testing.T) {
 	for _, kind := range []string{"child_terminal", "scheduled", "pending"} {
 		t.Run(kind, func(t *testing.T) {
 			ctx := t.Context()
-			ledger, shared, _ := hostedBudgetFixture(t, budget.Limits{MaxToolCalls: 2})
+			_, shared, _ := hostedBudgetFixture(t, budget.Limits{MaxToolCalls: 2})
 			base := memory.NewStore()
-			fault := &heldToolRecoveryFault{Store: base, cut: errors.New("after native ledger CAS, before receipt CAS")}
+			fault := &heldToolRecoveryFault{Store: base, cut: errors.New("after native receipt/ledger CAS ACK lost"), after: true}
 			m := &heldToolRecoveryModel{}
 			physical, lookups := 0, 0
 			const original = `{ "answer": "<>&" }`
@@ -87,7 +93,7 @@ func TestVerifiedToolOutcomeSettlementIsIdempotentAndFrozen(t *testing.T) {
 				})
 				deps := agent.Dependencies{Runtime: rt, Model: m, Catalog: registry, Executor: registry, ToolOutcomeVerifier: verifier}
 				if withBudget {
-					deps.BoundedBudget = mustBudgetAdapter(t, shared)
+					deps.BoundedBudget = mustBudgetAdapter(t, bindHostedBudgetAuthority(t, rt, shared))
 				}
 				r, e := agent.NewRunner(deps)
 				if e != nil {
@@ -119,7 +125,7 @@ func TestVerifiedToolOutcomeSettlementIsIdempotentAndFrozen(t *testing.T) {
 			if !errors.Is(e, fault.cut) || !fault.fired || lookups != 1 {
 				t.Fatal("injected recovery cut not reached", e, lookups)
 			}
-			saved, e := ledger.LoadBudget(ctx, "hosted-budget-turn")
+			saved, e := base.LoadBudget(ctx, "hosted-budget-turn")
 			if e != nil {
 				t.Fatal(e)
 			}
@@ -133,22 +139,20 @@ func TestVerifiedToolOutcomeSettlementIsIdempotentAndFrozen(t *testing.T) {
 			if json.Unmarshal(held.Receipt, &envelope) != nil || len(envelope.Evidence) == 0 {
 				t.Fatal("native settlement used legacy bytes", string(held.Receipt))
 			}
-			if _, e = makeRunner(base, false).ReconcileToolOutcome(ctx, started.Run.ID, started.Run.Revision, "held-call"); !errors.Is(e, agent.ErrToolReceiptMismatch) || lookups != 1 {
-				t.Fatal("replacement removed original settlement owner", e, lookups)
+			staged, e := base.Load(ctx, started.Run.ID)
+			if e != nil || staged.Run.Revision != started.Run.Revision+1 {
+				t.Fatal("native receipt not atomically committed", e)
+			}
+			if _, e = makeRunner(base, false).Resume(ctx, staged.Run.ID, staged.Run.Revision); e == nil || lookups != 1 {
+				t.Fatal("replacement removed original accounting owner", e, lookups)
 			}
 			raw = changed
 			r = makeRunner(base, true)
-			_, e = r.ReconcileToolOutcome(ctx, started.Run.ID, started.Run.Revision, "held-call")
-			if !errors.Is(e, agent.ErrToolReceiptMismatch) || lookups != 2 || physical != 1 || len(m.requests) != 1 {
-				t.Fatal("changed original receipt accepted", e, lookups, physical)
-			}
-			raw = original
-			staged, e := r.ReconcileToolOutcome(ctx, started.Run.ID, started.Run.Revision, "held-call")
-			if e != nil || lookups != 3 {
-				t.Fatal("exact replay rejected", e, lookups)
+			if _, e = r.ReconcileToolOutcome(ctx, started.Run.ID, started.Run.Revision, "held-call"); !errors.Is(e, kernel.ErrConflict) || lookups != 1 {
+				t.Fatal("stale recovery could overwrite original", e, lookups)
 			}
 			final, e := r.Resume(ctx, staged.Run.ID, staged.Run.Revision)
-			if e != nil || final.Run.Status != kernel.RunStatusCompleted || len(m.requests) != 2 || physical != 1 {
+			if e != nil || final.Run.Status != kernel.RunStatusCompleted || len(m.requests) != 2 || physical != 1 || lookups != 1 {
 				t.Fatal("unexpected consumption", e, final.Run.Status, len(m.requests), physical)
 			}
 			seen := false
@@ -163,7 +167,7 @@ func TestVerifiedToolOutcomeSettlementIsIdempotentAndFrozen(t *testing.T) {
 			if !seen {
 				t.Fatal("missing original Tool receipt")
 			}
-			after, e := ledger.LoadBudget(ctx, "hosted-budget-turn")
+			after, e := base.LoadBudget(ctx, "hosted-budget-turn")
 			if e != nil || after.View("").Usage.ToolCalls != 1 || after.View("").Reserved.ToolCalls != 0 || string(after.Reservations["tool:hosted-run:held-call"].Receipt) != string(held.Receipt) {
 				t.Fatal("replay rewrote receipt or charged twice", e, after.View(""))
 			}

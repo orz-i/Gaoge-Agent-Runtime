@@ -23,10 +23,14 @@ type rejectedReceiptModel struct {
 	cancel     context.CancelFunc
 	accepted   bool
 	onGenerate func()
+	request    model.Request
+	response   model.Response
+	receiptErr error
 }
 
-func (client *rejectedReceiptModel) Generate(context.Context, model.Request) (model.Response, error) {
+func (client *rejectedReceiptModel) Generate(_ context.Context, q model.Request) (model.Response, error) {
 	client.calls++
+	client.request = model.CloneRequest(q)
 	if client.onGenerate != nil {
 		client.onGenerate()
 	}
@@ -34,10 +38,20 @@ func (client *rejectedReceiptModel) Generate(context.Context, model.Request) (mo
 		client.cancel()
 	}
 	response := model.Response{Content: "known final answer", ResponseID: "known-completion", Usage: &model.Usage{InputTokens: 20, OutputTokens: 10}}
-	if client.accepted {
-		return response, nil
+	client.response = model.CloneResponse(response)
+	if !client.accepted {
+		client.receiptErr = model.NewResponseRejectedError(model.NewClassifiedError(errBudgetResponseRejected, client.code))
 	}
-	return response, model.NewResponseRejectedError(model.NewClassifiedError(errBudgetResponseRejected, client.code))
+	return response, client.receiptErr
+}
+
+// Provider evidence is available independently of the local Run/ledger CAS.
+// Lookups are read-only and qualify the exact frozen physical request.
+func (client *rejectedReceiptModel) VerifyModelOutcome(_ context.Context, q model.Request) (model.Response, error) {
+	if client.calls != 1 || !reflect.DeepEqual(model.CloneRequest(q), client.request) {
+		return model.Response{}, ErrConflict
+	}
+	return model.CloneResponse(client.response), client.receiptErr
 }
 
 type receiptProjectionFaultStore struct {
@@ -62,67 +76,67 @@ func TestBudgetProjectionFailureCannotEraseSettledModelReceipt(t *testing.T) {
 			base := memory.NewStore()
 			backing := &receiptFaultStore{Store: base, fired: !replay}
 			now := time.Now().UTC()
-			runtime, err := kernel.New(kernel.Dependencies{Store: backing, Clock: durabilityTestClock{now: now}})
+			rt, err := kernel.New(kernel.Dependencies{Store: backing, Clock: durabilityTestClock{now: now}})
 			if err != nil {
 				t.Fatal(err)
 			}
-			shared := bindHostedBudgetAuthority(t, runtime, fixtureAuthority)
-			runner, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: client, ModelOutcomeVerifier: shared, Clock: durabilityTestClock{now: now}, BoundedBudget: mustBudgetAdapter(t, shared)})
+			shared := bindHostedBudgetAuthority(t, rt, fixtureAuthority)
+			deps := agent.Dependencies{Runtime: rt, Model: client, ModelOutcomeVerifier: client, Clock: durabilityTestClock{now: now}, BoundedBudget: mustBudgetAdapter(t, shared)}
+			runner, err := agent.NewRunner(deps)
 			if err != nil {
 				t.Fatal(err)
 			}
-			final, callErr := runner.StartRun(t.Context(), agent.StartRequest{ID: request.RunID, Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "owner"}, Thread: kernel.ThreadRef{Kind: "test", ID: "receipt"}, Goal: "finish", Limits: budget.Limits{MaxLLMCalls: 1}})
+			_, callErr := runner.StartRun(t.Context(), agent.StartRequest{ID: request.RunID, Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "owner"}, Thread: kernel.ThreadRef{Kind: "test", ID: "receipt"}, Goal: "finish", Limits: budget.Limits{MaxLLMCalls: 1}})
 			if callErr == nil || client.calls != 1 {
 				t.Fatalf("original projection/receipt fault missing: %v calls=%d", callErr, client.calls)
 			}
-			original, err := runtime.Load(t.Context(), request.RunID)
+			original, err := rt.Load(t.Context(), request.RunID)
 			if err != nil {
 				t.Fatal(err)
 			}
-			grant, err := runtime.LookupChildExecution(t.Context(), request.RunID)
+			ledgerBefore, err := rt.BudgetStore().LoadBudget(t.Context(), "hosted-budget-turn")
 			if err != nil {
 				t.Fatal(err)
 			}
-			completion, err := runtime.LookupPhysicalCallbackReturn(t.Context(), grant)
-			if err != nil || completion.HostCompleted != replay {
-				t.Fatalf("incorrect original fixed-stage completion: %+v %v", completion, err)
-			}
-			ledgerBefore, err := runtime.BudgetStore().LoadBudget(t.Context(), "hosted-budget-turn")
-			if err != nil {
-				t.Fatal(err)
-			}
+			id := "model:" + client.request.InvocationID
+			res := ledgerBefore.Reservations[id]
 			if replay {
-				projection.fail = true // Pure receipt recovery must never call this projection.
-				runner, err = agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: client, ModelOutcomeVerifier: shared, Clock: durabilityTestClock{now: now.Add(3 * time.Minute)}, BoundedBudget: mustBudgetAdapter(t, shared)})
+				if !res.Dispatched || res.Status != budget.ReservationHeld || ledgerBefore.View("").Usage.LLMCalls != 0 {
+					t.Fatalf("pre-commit fault split original receipt: %+v", res)
+				}
+				projection.fail = true
+				runner, err = agent.NewRunner(deps)
 				if err != nil {
 					t.Fatal(err)
 				}
-				final, callErr = runner.ReconcileModelOutcome(t.Context(), original.Run.ID, original.Run.Revision)
-				if callErr != nil || final.Run.Status != kernel.RunStatusRunning {
-					t.Fatalf("receipt repair reran projection or advanced Run: %+v %v", final.Run, callErr)
+				original, err = runner.ReconcileModelOutcome(t.Context(), original.Run.ID, original.Run.Revision)
+				if err != nil {
+					t.Fatal("receipt-only recovery used projection", err)
 				}
-				view, e := agent.ViewState(final)
-				if e != nil || len(view.ModelInvocations) != 1 || view.ModelInvocations[0].Status != agent.ModelInvocationCompleted || view.ModelInvocations[0].ConsumedAt != nil || view.Budget.Usage.LLMCalls != 0 || view.ModelInvocations[0].ErrorCode != "" || view.ModelInvocations[0].Response.Content != "known final answer" {
-					t.Fatalf("receipt repair consumed or rewrote original evidence: %+v %v", view, e)
-				}
-
-			} else {
-				// The original callback already consumed its known rejected response
-				// before Host return. Do not roll back that real terminal outcome.
-				view, viewErr := agent.ViewState(final)
-				if viewErr != nil || final.Run.Status != kernel.RunStatusFailed || final.Run.ErrorCode != "model.post_generation_failed" || len(view.ModelInvocations) != 1 || view.ModelInvocations[0].Status != agent.ModelInvocationConsumed || view.ModelInvocations[0].ProviderResponseID != "known-completion" || view.Budget.Usage.TotalTokens != 30 {
-					t.Fatalf("original known rejection lost: %+v %v", view, viewErr)
-				}
+			} else if res.Status != budget.ReservationSettled || ledgerBefore.View("").Usage.TotalTokens != 30 {
+				t.Fatalf("projection erased original committed receipt: %+v", res)
 			}
-			ledgerAfter, err := runtime.BudgetStore().LoadBudget(t.Context(), "hosted-budget-turn")
-			if err != nil || !reflect.DeepEqual(ledgerBefore, ledgerAfter) || ledgerAfter.View("").UnknownUsage || ledgerAfter.View("").Usage.LLMCalls != 1 || ledgerAfter.View("").Usage.TotalTokens != 30 || ledgerAfter.View("").Usage.ToolCalls != 0 || ledgerAfter.View("").Reserved.LLMCalls != 0 || client.calls != 1 {
-				t.Fatalf("known ledger receipt changed: %+v %v calls=%d", ledgerAfter, err, client.calls)
+			v, err := agent.ViewState(original)
+			if err != nil || len(v.ModelInvocations) != 1 || v.ModelInvocations[0].ErrorCode != "" || v.ModelInvocations[0].Response.Content != "known final answer" {
+				t.Fatalf("original successful receipt rewritten: %+v %v", v, err)
 			}
-			actualGrant, err := runtime.LookupChildExecution(t.Context(), request.RunID)
-			if (replay && !errors.Is(err, kernel.ErrNotFound)) || (!replay && (err != nil || actualGrant != grant)) {
-				t.Fatalf("incorrect original grant retirement: %v", err)
+			ledger, err := rt.BudgetStore().LoadBudget(t.Context(), "hosted-budget-turn")
+			if err != nil || ledger.View("").UnknownUsage || ledger.View("").Usage.LLMCalls != 1 || ledger.View("").Usage.TotalTokens != 30 || ledger.View("").Reserved.LLMCalls != 0 || client.calls != 1 {
+				t.Fatalf("original receipt accounting: %+v %v", ledger, err)
 			}
-
+			if !replay && !reflect.DeepEqual(res, ledger.Reservations[id]) {
+				t.Fatal("projection changed settled bytes")
+			}
+			projection.fail = false
+			if original.Run.Status == kernel.RunStatusRunning {
+				original, err = runner.Resume(t.Context(), original.Run.ID, original.Run.Revision)
+			}
+			if err != nil || original.Run.Status != kernel.RunStatusCompleted || client.calls != 1 {
+				t.Fatal("committed success did not resume", err, original.Run.Status, client.calls)
+			}
+			if _, err = rt.LookupChildExecution(t.Context(), request.RunID); !errors.Is(err, kernel.ErrNotFound) {
+				t.Fatal("settled grant retained", err)
+			}
 		})
 	}
 }
@@ -171,7 +185,7 @@ func TestSettledRejectionRecoversSDKReceiptWithoutRegeneration(t *testing.T) {
 						t.Fatal(err)
 					}
 					shared = bindHostedBudgetAuthority(t, runtime, fixtureAuthority)
-					runner, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: client, ModelOutcomeVerifier: shared, Clock: durabilityTestClock{now: at}, BoundedBudget: mustBudgetAdapter(t, shared)})
+					runner, err := agent.NewRunner(agent.Dependencies{Runtime: runtime, Model: client, ModelOutcomeVerifier: client, Clock: durabilityTestClock{now: at}, BoundedBudget: mustBudgetAdapter(t, shared)})
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -191,6 +205,13 @@ func TestSettledRejectionRecoversSDKReceiptWithoutRegeneration(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
+				id := "model:" + client.request.InvocationID
+				if fault == "before_receipt_commit" {
+					res := ledgerBefore.Reservations[id]
+					if res.Status != budget.ReservationHeld || !res.Dispatched || ledgerBefore.View("").Usage.LLMCalls != 0 {
+						t.Fatal("receipt committed outside Run", res)
+					}
+				}
 				final := pending
 				if pending.Run.Status == kernel.RunStatusRunning {
 					final, err = restarted.Resume(t.Context(), pending.Run.ID, pending.Run.Revision)
@@ -208,7 +229,7 @@ func TestSettledRejectionRecoversSDKReceiptWithoutRegeneration(t *testing.T) {
 					t.Fatal("original rejected receipt lost rejection")
 				}
 				ledger, err := runtime.BudgetStore().LoadBudget(t.Context(), "hosted-budget-turn")
-				if err != nil || !reflect.DeepEqual(ledgerBefore.Reservations, ledger.Reservations) || ledger.View("").UnknownUsage || ledger.View("").Reserved.LLMCalls != 0 || ledger.View("").Usage.TotalTokens != 30 || ledger.View("").Usage.ToolCalls != 0 || client.calls != 1 {
+				if err != nil || (fault != "before_receipt_commit" && !reflect.DeepEqual(ledgerBefore.Reservations, ledger.Reservations)) || ledger.Reservations[id].Status != budget.ReservationSettled || ledger.View("").UnknownUsage || ledger.View("").Reserved.LLMCalls != 0 || ledger.View("").Usage.TotalTokens != 30 || ledger.View("").Usage.ToolCalls != 0 || client.calls != 1 {
 					t.Fatalf("receipt lookup changed ledger/generation: %+v %v calls=%d", ledger, err, client.calls)
 				}
 

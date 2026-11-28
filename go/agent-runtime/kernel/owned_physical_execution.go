@@ -377,8 +377,15 @@ func (p OwnedPhysicalRecovery) Matches(g ChildExecutionGrant, current Snapshot, 
 	if !reflect.DeepEqual(run, current.Run) || m.Record.ExecutionRequired || !reflect.DeepEqual(m.Record.Result, current.Result) {
 		return false
 	}
-	if m.Ledger != nil && (p.modelEvidence || len(m.Events) != 1 || (m.Events[0].Type != "agent.model_invocation.completed" && m.Events[0].Type != "tool.receipt_recovered")) {
-		return false
+	if m.Ledger != nil {
+		if p.modelEvidence || len(m.Events) != 1 {
+			return false
+		}
+		switch m.Events[0].Type {
+		case "agent.model_invocation.completed", "tool.receipt_recovered", "tool.admission_unsent", "tool.external_no_effect":
+		default:
+			return false
+		}
 	}
 	if p.modelEvidence {
 		if len(m.Events) != 0 || m.Record.Run.ErrorCode != current.Run.ErrorCode || m.Record.Run.ErrorDetail != current.Run.ErrorDetail || !reflect.DeepEqual(m.Record.Checkpoint, current.Checkpoint) {

@@ -22,14 +22,15 @@ func TestHarnessToolCapacityWaitIsNotPhysicalDispatch(t *testing.T) {
 	limits := budget.Limits{MaxToolCalls: 3, MaxConcurrentRuns: 1}
 	store, shared, _ := hostedBudgetFixture(t, limits)
 	const ledgerID = "hosted-budget-turn"
-	coord := budget.Coordinator{Store: store}
+	ks := memory.NewStore()
+	coord := budget.Coordinator{Store: ks}
 	if _, err := coord.Ensure(ctx, ledgerID, limits); err != nil {
 		t.Fatal(err)
 	}
 	peerBlocked := false
 	approval, err := agent.NewBoundedToolApproval(func(c context.Context, _ tools.ExecutionRequest) (plugin.ApprovalRequirement, error) {
 		if !peerBlocked {
-			original, err := store.LoadBudget(c, ledgerID)
+			original, err := ks.LoadBudget(c, ledgerID)
 			if err != nil || original.View("").Usage.LLMCalls != 1 {
 				t.Fatalf("first model not settled before capacity competition: %v", err)
 			}
@@ -50,7 +51,6 @@ func TestHarnessToolCapacityWaitIsNotPhysicalDispatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ks := memory.NewStore()
 	m := &heldToolRecoveryModel{}
 	physical, lookups := 0, 0
 	reg, err := tools.NewRegistry([]tools.Registration{{Definition: tools.Definition{Key: "local.read", Name: "read", InputSchema: json.RawMessage(`{"type":"object"}`)}, Handler: tools.HandlerFunc(func(_ context.Context, q tools.ExecutionRequest) (tools.ExecutionResult, error) {
@@ -70,7 +70,7 @@ func TestHarnessToolCapacityWaitIsNotPhysicalDispatch(t *testing.T) {
 		if e != nil {
 			t.Fatal(e)
 		}
-		b := mustBudgetAdapter(t, authority)
+		b := mustBudgetAdapter(t, bindHostedBudgetAuthority(t, rt, authority))
 		r, e := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, BoundedBudget: b, ToolTimeline: track, ApprovalPolicies: []plugin.ApprovalPolicy{approval}, ToolOutcomeVerifier: agent.ToolOutcomeVerifierFunc(func(context.Context, tools.ExecutionRequest) (tools.ExecutionResult, error) {
 			lookups++
 			return tools.ExecutionResult{}, agent.ErrToolOutcomeUnknown
@@ -94,12 +94,12 @@ func TestHarnessToolCapacityWaitIsNotPhysicalDispatch(t *testing.T) {
 			t.Fatal("capacity wait invented physical timeline", item)
 		}
 	}
-	l, err := store.LoadBudget(ctx, ledgerID)
+	l, err := ks.LoadBudget(ctx, ledgerID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	wait := l.Reservations["tool:hosted-run:held-call"]
-	if wait.Status != budget.ReservationWaiting || wait.Dispatched || wait.Active {
+	if wait.ID != "" || wait.Dispatched || wait.Active {
 		t.Fatal("capacity wait dispatched", wait)
 	}
 	if _, err = ks.LookupChildExecution(ctx, cur.Run.ID); !errors.Is(err, kernel.ErrNotFound) {
@@ -141,7 +141,7 @@ func TestHarnessToolCapacityWaitIsNotPhysicalDispatch(t *testing.T) {
 	if started != 1 || completed != 1 {
 		t.Fatal("original Tool timeline not exactly once", started, completed)
 	}
-	l, err = store.LoadBudget(ctx, ledgerID)
+	l, err = ks.LoadBudget(ctx, ledgerID)
 	if err != nil || l.View("").Usage.ToolCalls != 1 || l.View("").Reserved.ToolCalls != 0 {
 		t.Fatal("wrong original capacity accounting", err, l.View(""))
 	}

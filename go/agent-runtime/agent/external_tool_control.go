@@ -156,6 +156,9 @@ func (r *Runner) ReconcileExternalToolNoEffectForControl(ctx context.Context, re
 		return original.snapshot, r.retireExternalToolControl(ctx, original.snapshot, previous.GrantID)
 	}
 	state := original.state
+	if original.snapshot.Run.BudgetScopeID != "" && (state.ExternalToolHold == nil || state.ExternalToolHold.LedgerID != original.snapshot.Run.BudgetScopeID) {
+		return original.snapshot, ErrToolReceiptMismatch
+	}
 	var ledger *budget.LedgerMutation
 	if hold := state.ExternalToolHold; hold != nil {
 		if hold.GrantID != original.grant.ID || hold.RequestHash != kernel.ManagedDigest(original.request) {
@@ -192,6 +195,9 @@ func (r *Runner) applyExternalControlState(ctx context.Context, s kernel.Snapsho
 		return s, err
 	}
 	m := kernel.Mutation{Ledger: ledger, Status: s.Run.Status, State: encoded, Checkpoint: s.Checkpoint, ErrorCode: s.Run.ErrorCode, ErrorDetail: s.Run.ErrorDetail}
+	if ledger != nil {
+		m.Events = []kernel.EventDraft{{Type: "tool.external_no_effect", Message: state.ExternalToolCancellation.Call.ID}}
+	}
 
 	source := featurecontrol.Seal(s.Run.ID, s.Run.Revision, "agent_owned_receipt_recovery_source", g.ID, s.State, s.Checkpoint)
 	target := featurecontrol.Seal(s.Run.ID, s.Run.Revision, "agent_owned_receipt_recovery_target", g.ID, encoded, kernel.ReceiptRecoveryTarget(s.Checkpoint, ledger))

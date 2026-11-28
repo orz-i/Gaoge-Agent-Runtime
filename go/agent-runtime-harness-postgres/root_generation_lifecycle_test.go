@@ -109,6 +109,11 @@ func newGenerationHarnessBackend(t *testing.T, backend string, m *generationMode
 	for _, wrap := range wrappers {
 		hs = wrap(hs)
 	}
+	if capture, ok := hs.(interface {
+		wrapGenerationKernel(kernel.Store) kernel.Store
+	}); ok {
+		ks = capture.wrapGenerationKernel(ks)
+	}
 	rt, err := kernel.New(kernel.Dependencies{Store: ks})
 	if err != nil {
 		t.Fatal(err)
@@ -144,7 +149,18 @@ func newGenerationHarnessBackend(t *testing.T, backend string, m *generationMode
 	if err != nil {
 		t.Fatal(err)
 	}
-	r, err := harness.NewRunner(harness.Dependencies{Runtime: rt, Agent: original, Store: hs, Clock: generationClock{}, Handoffs: c, Relations: relations, Budget: shared, DelegationPolicy: generationPolicy{}})
+	if capture, ok := hs.(interface {
+		setGenerationBudget(*harness.BudgetAuthority)
+	}); ok {
+		capture.setGenerationBudget(shared)
+	}
+	hd := harness.Dependencies{Runtime: rt, Agent: original, Store: hs, Clock: generationClock{}, Handoffs: c, Relations: relations, Budget: shared, DelegationPolicy: generationPolicy{}}
+	hostOnly, _ := hs.(interface{ hostProtocolFixture() bool })
+	if hostOnly != nil && hostOnly.hostProtocolFixture() {
+		hd.Agent = hostProtocolAgent{original}
+		hd.Budget = nil
+	}
+	r, err := harness.NewRunner(hd)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,6 +177,9 @@ func newGenerationHarnessBackend(t *testing.T, backend string, m *generationMode
 
 				ToolKeys: []string{harness.DelegationToolKey}},
 		},
+	}
+	if hostOnly != nil && hostOnly.hostProtocolFixture() {
+		req.Config.SharedBudget = nil
 	}
 	return r, hs, rt, original, req
 }
@@ -316,8 +335,9 @@ func TestRetriedRootCancellationCleansItsDeferredChildren(t *testing.T) {
 				if err != nil || child.Run.Status != kernel.RunStatusCancelled {
 					t.Fatalf("live child after cancellation: %+v %v", child.Run, err)
 				}
-				ledger, err := hs.LoadBudget(t.Context(), next.Turn.ID)
-				if err != nil || ledger.Cancelled != closeOriginal || !ledger.View("").Cancelled || ledger.View("").Usage.LLMCalls != 2 {
+				ledger, err := rt.BudgetStore().LoadBudget(t.Context(), next.Turn.ID)
+				current, ok := harness.TopLevelInvocation(next)
+				if err != nil || !ok || ledger.Cancelled || !ledger.RunCancelled(current.ExecutionRefID) || ledger.View("").Usage.LLMCalls != 2 {
 					t.Fatalf("changed history or divergent current cancellation: %+v %v", ledger, err)
 				}
 				items, err := hs.ListItems(t.Context(), first.Turn.ID, 0, 500)
@@ -462,18 +482,22 @@ func TestPreparedChildCancellationSurvivesLeaseOnlyEpochs(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if cancelWhileHeld {
-					if _, err = r.CancelSubtask(t.Context(), first.Turn.ID, first.Subtasks[0].ID, "compete with undispatched lease"); err == nil {
-						t.Fatal("live execution lease incorrectly claimed settled")
+				// A lease without an entered physical Grant carries no effect.
+				// The native Cancel CAS can revoke it; its bearer may not renew.
+				if !cancelWhileHeld {
+					if err = rt.ReleaseExecution(t.Context(), lease); err != nil {
+						t.Fatal(err)
+					}
+					if err = rt.VerifyExecutionCustody(t.Context(), child, kernel.CustodyPrepared); err != nil {
+						t.Fatalf("lease-only epoch invalidated physical history: %v", err)
 					}
 				}
-				if err = rt.ReleaseExecution(t.Context(), lease); err != nil {
-					t.Fatal(err)
-				}
-				if err = rt.VerifyExecutionCustody(t.Context(), child, kernel.CustodyPrepared); err != nil {
-					t.Fatalf("lease-only epoch invalidated physical history: %v", err)
-				}
 				cancelled, err := r.CancelSubtask(t.Context(), first.Turn.ID, first.Subtasks[0].ID, "stop undispatched child")
+				if cancelWhileHeld && err == nil {
+					if _, renewErr := rt.RenewExecution(t.Context(), kernel.ExecutionRenewRequest{Lease: lease, LeaseDuration: time.Minute}); renewErr == nil {
+						t.Fatal("cancelled lease retained authority")
+					}
+				}
 				if err != nil || len(cancelled.Subtasks) != 1 || cancelled.Subtasks[0].Status != "cancelled" {
 					t.Fatalf("original prepared cancellation/recovery: %+v %v", cancelled.Subtasks, err)
 				}

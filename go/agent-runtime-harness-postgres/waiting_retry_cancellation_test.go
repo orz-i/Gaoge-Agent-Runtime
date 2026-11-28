@@ -12,13 +12,20 @@ import (
 
 var errWaitingRetryACKLost = errors.New("committed Retry response lost")
 
-type waitingRetryACKCut struct{ generationStore }
+type waitingRetryACKCut struct {
+	generationStore
+	armed bool
+}
 
 func (s *waitingRetryACKCut) RetryInvocation(ctx context.Context, id string, rev uint64, next string, at time.Time) (harness.Invocation, error) {
-	_, err := s.generationStore.RetryInvocation(ctx, id, rev, next, at)
+	updated, err := s.generationStore.RetryInvocation(ctx, id, rev, next, at)
 	if err != nil {
 		return harness.Invocation{}, err
 	}
+	if !s.armed {
+		return updated, nil
+	}
+	s.armed = false
 	return harness.Invocation{}, errWaitingRetryACKLost
 }
 
@@ -29,7 +36,8 @@ func TestWaitingOnlyHistorySurvivesRetryAndNoRunCancellation(t *testing.T) {
 			name = "sql"
 		}
 		t.Run(name, func(t *testing.T) {
-			r, hs, rt, native, req := newGenerationHarness(t, sqlBackend, &generationModel{})
+			cut := &waitingRetryACKCut{}
+			r, hs, rt, _, req := newGenerationHarnessBackend(t, name, &generationModel{}, func(base generationStore) generationStore { cut.generationStore = base; return cut })
 			req.Config.SharedBudget.MaxConcurrentDescendants = 1
 			first, err := r.StartAgentTurn(t.Context(), req)
 			if err != nil || len(first.Subtasks) != 1 {
@@ -47,8 +55,8 @@ func TestWaitingOnlyHistorySurvivesRetryAndNoRunCancellation(t *testing.T) {
 				t.Fatalf("original Cancel: %+v %v", stopped.Turn, err)
 			}
 			root, _ := harness.TopLevelInvocation(stopped)
-			cut := generationRunnerForStore(t, &waitingRetryACKCut{hs}, rt, native)
-			if _, err = cut.RetryInvocation(t.Context(), root.ID); !errors.Is(err, errWaitingRetryACKLost) {
+			cut.armed = true
+			if _, err = r.RetryInvocation(t.Context(), root.ID); !errors.Is(err, errWaitingRetryACKLost) {
 				t.Fatalf("Retry crash cut: %v", err)
 			}
 			for range 2 {

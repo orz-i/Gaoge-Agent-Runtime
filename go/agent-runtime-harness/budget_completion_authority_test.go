@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"errors"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -50,7 +49,7 @@ func TestNamedBudgetCompletionReplayDoesNotRedispatchProvider(t *testing.T) {
 					t.Fatal(err)
 				}
 				shared = bindHostedBudgetAuthority(t, rt, fixtureAuthority, client)
-				runner, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: client, ModelOutcomeVerifier: shared, Clock: durabilityTestClock{now: at}, BoundedBudget: mustBudgetAdapter(t, shared)})
+				runner, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: client, ModelOutcomeVerifier: client, Clock: durabilityTestClock{now: at}, BoundedBudget: mustBudgetAdapter(t, shared)})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -86,7 +85,13 @@ func TestNamedBudgetCompletionReplayDoesNotRedispatchProvider(t *testing.T) {
 			if _, err := shared.VerifyModelOutcome(t.Context(), inv.Request); !errors.Is(err, ErrConflict) {
 				t.Fatalf("logical receipt query accepted: %v", err)
 			}
-			recovered, err := shared.VerifyModelOutcome(t.Context(), client.physical)
+			if res := ledgerBefore.Reservations["model:"+inv.ID]; res.Status != budget.ReservationHeld || !res.Dispatched || ledgerBefore.View("").Usage.LLMCalls != 0 {
+				t.Fatal("pre-commit receipt split", res)
+			}
+			if _, err = shared.VerifyModelOutcome(t.Context(), client.physical); !errors.Is(err, ErrConflict) {
+				t.Fatal("uncommitted ledger supplied receipt", err)
+			}
+			recovered, err := client.VerifyModelOutcome(t.Context(), client.physical)
 			if recovered.ResponseID != "known-completion" || (err == nil) != accepted || (!accepted && !model.IsResponseRejectedError(err)) {
 				t.Fatalf("wrong physical receipt: %+v %v", recovered, err)
 			}
@@ -101,7 +106,7 @@ func TestNamedBudgetCompletionReplayDoesNotRedispatchProvider(t *testing.T) {
 				t.Fatalf("named receipt source/outcome lost: %+v calls=%d", view.ModelInvocations, client.calls)
 			}
 			ledger, err := runtime.BudgetStore().LoadBudget(t.Context(), "hosted-budget-turn")
-			if err != nil || !reflect.DeepEqual(ledgerBefore.Reservations, ledger.Reservations) || ledger.View("").Usage.TotalTokens != 30 || ledger.View("").UnknownUsage {
+			if err != nil || ledger.Reservations["model:"+inv.ID].Status != budget.ReservationSettled || ledger.View("").Usage.TotalTokens != 30 || ledger.View("").UnknownUsage {
 				t.Fatalf("replay bill changed: %+v %v", ledger, err)
 			}
 

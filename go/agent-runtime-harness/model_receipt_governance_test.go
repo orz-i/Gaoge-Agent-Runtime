@@ -79,10 +79,27 @@ func (m *governanceReceiptModel) Generate(_ context.Context, r model.Request) (m
 	return model.CloneResponse(m.responses[len(m.requests)-1]), nil
 }
 
+func (m *governanceReceiptModel) VerifyModelOutcome(_ context.Context, q model.Request) (model.Response, error) {
+	for i, original := range m.requests {
+		if reflect.DeepEqual(model.CloneRequest(q), original) {
+			return model.CloneResponse(m.responses[i]), nil
+		}
+	}
+	return model.Response{}, ErrConflict
+}
+
 type governanceHostedCatalog struct{}
 
 func (governanceHostedCatalog) Resolve(_ context.Context, key, _ string) (model.HostedTool, bool, error) {
 	return model.HostedTool{Key: key, DefinitionVersion: "v1"}, key == "native.search", nil
+}
+
+func assertQuotaReceipt(t *testing.T, shared *BudgetAuthority, physical model.Request, original model.Response) {
+	t.Helper()
+	receipt, err := shared.VerifyModelOutcome(t.Context(), physical)
+	if !errors.Is(err, budget.ErrInvalidUsage) || !model.IsResponseRejectedError(err) || model.ClassifiedErrorCode(err) != "model.post_generation_failed" || receipt.Content != "" || len(receipt.HostedToolCalls) != 0 || receipt.ResponseID != original.ResponseID {
+		t.Fatalf("wrong durable rejection: %+v %v", receipt, err)
+	}
 }
 
 func TestSettledQuotaRejectionSurvivesRootReceiptFault(t *testing.T) {
@@ -100,12 +117,12 @@ func TestSettledQuotaRejectionSurvivesRootReceiptFault(t *testing.T) {
 		for _, mode := range []string{"ordinary", "lost_receipt_commit", "external_success_cannot_override_rejection"} {
 			fault := mode != "ordinary"
 			t.Run(scenario.name+"/"+mode, func(t *testing.T) {
-				store, fixtureAuthority, req := hostedBudgetFixture(t, scenario.limits)
+				_, fixtureAuthority, req := hostedBudgetFixture(t, scenario.limits)
 				client := &governanceReceiptModel{responses: []model.Response{scenario.response}}
 				base := memory.NewStore()
 				var backing kernel.Store = base
 				if fault {
-					backing = &receiptFaultStore{Store: base}
+					backing = &receiptFaultStore{Store: base, afterCommit: mode == "external_success_cannot_override_rejection"}
 				}
 				now := time.Now().UTC()
 				rt, err := kernel.New(kernel.Dependencies{Store: backing, Clock: durabilityTestClock{now: now}})
@@ -114,7 +131,7 @@ func TestSettledQuotaRejectionSurvivesRootReceiptFault(t *testing.T) {
 				}
 				shared := bindHostedBudgetAuthority(t, rt, fixtureAuthority, client)
 				adapter := mustBudgetAdapter(t, shared)
-				deps := agent.Dependencies{Runtime: rt, Model: client, Clock: durabilityTestClock{now: now}, ModelOutcomeVerifier: shared, BoundedBudget: adapter}
+				deps := agent.Dependencies{Runtime: rt, Model: client, Clock: durabilityTestClock{now: now}, ModelOutcomeVerifier: client, BoundedBudget: adapter}
 				start := agent.StartRequest{ID: req.RunID, Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "owner"}, Thread: kernel.ThreadRef{Kind: "test", ID: "quota-recovery"}, Goal: "finish", MaxModelOutputTokens: 128, Limits: budget.Limits{MaxLLMCalls: 1}}
 				if scenario.hosted {
 					deps.HostedTools = governanceHostedCatalog{}
@@ -141,12 +158,16 @@ func TestSettledQuotaRejectionSurvivesRootReceiptFault(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				receipt, receiptErr := shared.VerifyModelOutcome(t.Context(), physical)
-				if !errors.Is(receiptErr, budget.ErrInvalidUsage) || !model.IsResponseRejectedError(receiptErr) || model.ClassifiedErrorCode(receiptErr) != "model.post_generation_failed" || receipt.Content != "" || len(receipt.HostedToolCalls) != 0 || receipt.ResponseID != "receipt" {
-					t.Fatalf("wrong durable rejection: %+v %v", receipt, receiptErr)
-				}
-				if ledger.View("").Usage.LLMCalls != 1 || ledger.View("").Usage.OutputTokens != scenario.response.Usage.OutputTokens {
-					t.Fatal("observed charge was lost")
+				originalReservation := ledger.Reservations["model:"+physical.InvocationID]
+				if mode == "lost_receipt_commit" {
+					if !originalReservation.Dispatched || originalReservation.Status != budget.ReservationHeld || ledger.View("").Usage.LLMCalls != 0 {
+						t.Fatal("pre-commit failure split quota", originalReservation)
+					}
+				} else {
+					assertQuotaReceipt(t, shared, physical, scenario.response)
+					if ledger.View("").Usage.LLMCalls != 1 || ledger.View("").Usage.OutputTokens != scenario.response.Usage.OutputTokens {
+						t.Fatal("observed charge was lost")
+					}
 				}
 				if !fault {
 					if result.Run.Status != kernel.RunStatusFailed || result.Run.ErrorCode != "model.post_generation_failed" {
@@ -158,13 +179,17 @@ func TestSettledQuotaRejectionSurvivesRootReceiptFault(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				grant, err := rt.LookupChildExecution(t.Context(), req.RunID)
-				if err != nil {
-					t.Fatal(err)
-				}
-				cb, err := rt.LookupPhysicalCallbackReturn(t.Context(), grant)
-				if err != nil || !cb.HostCompleted {
-					t.Fatalf("fixture must retain returned Host: %+v %v", cb, err)
+				if mode == "lost_receipt_commit" {
+					grant, e := rt.LookupChildExecution(t.Context(), req.RunID)
+					if e != nil {
+						t.Fatal(e)
+					}
+					cb, e := rt.LookupPhysicalCallbackReturn(t.Context(), grant)
+					if e != nil || !cb.HostCompleted {
+						t.Fatal("fixture must retain returned Host", cb, e)
+					}
+				} else if _, e := rt.LookupChildExecution(t.Context(), req.RunID); !errors.Is(e, kernel.ErrNotFound) {
+					t.Fatal("ACKed native receipt did not retire", e)
 				}
 				if mode == "external_success_cannot_override_rejection" {
 					deps.ModelOutcomeVerifier = agent.ModelOutcomeVerifierFunc(func(context.Context, model.Request) (model.Response, error) {
@@ -176,18 +201,25 @@ func TestSettledQuotaRejectionSurvivesRootReceiptFault(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				repaired, err := restarted.ReconcileModelOutcome(t.Context(), pending.Run.ID, pending.Run.Revision)
-				if err != nil {
-					t.Fatal(err)
+				repaired := pending
+				if mode == "lost_receipt_commit" {
+					repaired, err = restarted.ReconcileModelOutcome(t.Context(), pending.Run.ID, pending.Run.Revision)
+					if err != nil {
+						t.Fatal(err)
+					}
 				}
 				view, err := agent.ViewState(repaired)
 				if err != nil || view.ModelInvocations[0].ErrorCode != "model.post_generation_failed" || view.ModelInvocations[0].Response.Content != "" {
 					t.Fatalf("recovery promoted rejection: %+v %v", view, err)
 				}
-				unchanged, err := store.LoadBudget(t.Context(), "hosted-budget-turn")
-				if err != nil || !reflect.DeepEqual(unchanged, ledger) {
+				settled, err := rt.BudgetStore().LoadBudget(t.Context(), "hosted-budget-turn")
+				if err != nil || settled.View("").Usage.LLMCalls != 1 || settled.View("").Usage.OutputTokens != scenario.response.Usage.OutputTokens {
+					t.Fatal("recovery lost original accounting", err)
+				}
+				if mode == "external_success_cannot_override_rejection" && !reflect.DeepEqual(settled, ledger) {
 					t.Fatal("reconciliation changed settled accounting")
 				}
+				assertQuotaReceipt(t, shared, physical, scenario.response)
 				final, resumeErr := restarted.Resume(t.Context(), repaired.Run.ID, repaired.Run.Revision)
 				if final.Run.Status != kernel.RunStatusFailed || final.Run.ErrorCode != "model.post_generation_failed" || resumeErr == nil || len(client.requests) != 1 {
 					t.Fatalf("resume promoted rejected outcome: %+v %v", final.Run, resumeErr)
@@ -222,7 +254,7 @@ func TestRecoveredAcceptedReceiptRetainsOriginalToolAndReplayBytes(t *testing.T)
 		t.Fatal(err)
 	}
 	adapter := mustBudgetAdapter(t, shared)
-	deps := agent.Dependencies{Runtime: rt, Model: client, ModelOutcomeVerifier: shared, Catalog: registry, Executor: registry, BoundedBudget: adapter}
+	deps := agent.Dependencies{Runtime: rt, Model: client, ModelOutcomeVerifier: client, Catalog: registry, Executor: registry, BoundedBudget: adapter}
 	runner, err := agent.NewRunner(deps)
 	if err != nil {
 		t.Fatal(err)
@@ -231,9 +263,9 @@ func TestRecoveredAcceptedReceiptRetainsOriginalToolAndReplayBytes(t *testing.T)
 	if err == nil || !fault.fired || len(client.requests) != 1 || effects != 0 {
 		t.Fatalf("missing receipt fault: %v", err)
 	}
-	receipt, err := shared.VerifyModelOutcome(t.Context(), client.requests[0])
-	if err != nil || !reflect.DeepEqual(model.CloneResponse(receipt), model.CloneResponse(original)) {
-		t.Fatalf("ledger changed original: %+v %v", receipt, err)
+	l, err := rt.BudgetStore().LoadBudget(t.Context(), "hosted-budget-turn")
+	if err != nil || l.Reservations["model:"+client.requests[0].InvocationID].Status != budget.ReservationHeld || l.View("").Usage.LLMCalls != 0 {
+		t.Fatal("uncommitted original receipt escaped transaction", err)
 	}
 	restarted, err := agent.NewRunner(deps)
 	if err != nil {
@@ -242,6 +274,10 @@ func TestRecoveredAcceptedReceiptRetainsOriginalToolAndReplayBytes(t *testing.T)
 	repaired, err := restarted.ReconcileModelOutcome(t.Context(), pending.Run.ID, pending.Run.Revision)
 	if err != nil {
 		t.Fatal(err)
+	}
+	receipt, err := shared.VerifyModelOutcome(t.Context(), client.requests[0])
+	if err != nil || !reflect.DeepEqual(model.CloneResponse(receipt), model.CloneResponse(original)) {
+		t.Fatalf("ledger changed original: %+v %v", receipt, err)
 	}
 	view, err := agent.ViewState(repaired)
 	publicOriginal := model.CloneResponse(original)
@@ -310,7 +346,6 @@ func TestModelReceiptPresenceDoesNotChangeToolExecutionAuthority(t *testing.T) {
 					if mode == "shared_budget" {
 						adapter := mustBudgetAdapter(t, shared)
 						deps.BoundedBudget = adapter
-						deps.ModelOutcomeVerifier = shared
 					}
 					runner, err := agent.NewRunner(deps)
 					if err != nil {

@@ -26,7 +26,7 @@ func TestFailedRootRetryPreservesIndependentTerminalChildProjection(t *testing.T
 				t.Fatalf("original child did not settle: %+v %v", completed.Run, err)
 			}
 			originalChild, err := store.GetInvocationByExecutionRefID(t.Context(), child.Run.ID)
-			if err != nil || originalChild.Status != harness.InvocationAccepted {
+			if err != nil || originalChild.Status != harness.InvocationRunning {
 				t.Fatalf("independent child projection fixture: %+v %v", originalChild, err)
 			}
 			parent, err := rt.Load(t.Context(), root.ExecutionRefID)
@@ -56,8 +56,16 @@ func TestFailedRootRetryPreservesIndependentTerminalChildProjection(t *testing.T
 				t.Fatalf("full terminal receipt blocked Retry or replayed child Model: status=%s calls=%d err=%v", retried.Turn.Status, m.calls, err)
 			}
 			retained, err := store.GetInvocation(t.Context(), originalChild.ID)
-			if err != nil || retained.Status != harness.InvocationAccepted || retained.Revision != originalChild.Revision || retained.ExecutionRefID != originalChild.ExecutionRefID {
-				t.Fatalf("Retry rewrote independent child projection: %+v %v", retained, err)
+			// Native recovery may project the independently completed child exactly
+			// once. It must keep the original generation, input, and Run identity.
+			if err != nil || retained.Status != harness.InvocationCompleted || retained.Revision != originalChild.Revision+1 ||
+				retained.ExecutionRefID != originalChild.ExecutionRefID || retained.InputHash != originalChild.InputHash ||
+				retained.Attempt != originalChild.Attempt || retained.ParentItemID != originalChild.ParentItemID {
+				t.Fatalf("Retry changed independent child ownership or outcome: %+v %v", retained, err)
+			}
+			childAfter, err := rt.Load(t.Context(), child.Run.ID)
+			if err != nil || kernel.ManagedDigest(childAfter) != kernel.ManagedDigest(completed) {
+				t.Fatalf("Retry mutated original terminal child Run: %v", err)
 			}
 			for _, original := range facts {
 				retained, err := store.GetItem(t.Context(), original.ID)

@@ -15,35 +15,10 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/tools"
 )
 
-// Model one exact interleaving: after the elected Harness budget cancellation
-// CAS is durable but before its ACK, a native continuation attempts Resume.
-type nativeAdmissionCancelStore struct {
-	*MemoryStore
-	afterCancel   func()
-	cancelACKCut  bool
-	cancelACKHits int
-}
-
-func (s *nativeAdmissionCancelStore) SaveBudget(ctx context.Context, l budget.Ledger, rev uint64) error {
-	if err := s.MemoryStore.SaveBudget(ctx, l, rev); err != nil {
-		return err
-	}
-	if l.Cancelled && s.cancelACKCut {
-		s.cancelACKCut = false
-		s.cancelACKHits++
-		return errOriginalBudgetCancelACK
-	}
-	if l.Cancelled && s.afterCancel != nil {
-		action := s.afterCancel
-		s.afterCancel = nil
-		action()
-	}
-	return nil
-}
-
 type nativeAdmissionCancelModel struct {
-	store *nativeAdmissionCancelStore
-	calls int
+	store  *MemoryStore
+	ledger budget.LedgerStore
+	calls  int
 }
 
 func (m *nativeAdmissionCancelModel) Generate(ctx context.Context, q model.Request) (model.Response, error) {
@@ -55,7 +30,7 @@ func (m *nativeAdmissionCancelModel) Generate(ctx context.Context, q model.Reque
 	if err != nil {
 		return model.Response{}, err
 	}
-	c := budget.Coordinator{Store: m.store}
+	c := budget.Coordinator{Store: m.ledger}
 	if _, err = c.RegisterRun(ctx, inv.TurnID, "peer-run", budget.RunBudget{}); err != nil {
 		return model.Response{}, err
 	}
@@ -65,100 +40,12 @@ func (m *nativeAdmissionCancelModel) Generate(ctx context.Context, q model.Reque
 	return model.Response{ToolCalls: []tools.Call{{ID: "held-call", ToolKey: "local.read", Arguments: json.RawMessage("{}")}}}, nil
 }
 
-func TestHarnessElectedCancellationSurvivesNativeRunAdmissionDenial(t *testing.T) {
-	ctx := t.Context()
-	store := &nativeAdmissionCancelStore{MemoryStore: NewMemoryStore()}
-	rt, err := kernel.New(kernel.Dependencies{Store: memory.NewStore()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	shared, err := NewBudgetAuthority(BudgetAuthorityDependencies{Store: store, Clock: hostedBudgetClock{}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	b, err := shared.Adapter()
-	if err != nil {
-		t.Fatal(err)
-	}
-	m := &nativeAdmissionCancelModel{store: store}
-	physical := 0
-	reg, err := tools.NewRegistry([]tools.Registration{{Definition: tools.Definition{Key: "local.read", Name: "read", InputSchema: json.RawMessage(`{"type":"object"}`)}, Handler: tools.HandlerFunc(func(_ context.Context, q tools.ExecutionRequest) (tools.ExecutionResult, error) {
-		physical++
-		return tools.ExecutionResult{Content: json.RawMessage("{}"), Receipt: tools.Receipt{ExecutionID: q.Call.ID, Disposition: "committed"}}, nil
-	})}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	native, err := agent.NewRunner(agent.Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, BoundedBudget: b})
-	if err != nil {
-		t.Fatal(err)
-	}
-	host, err := NewRunner(Dependencies{Runtime: rt, Agent: native, Store: store, Clock: hostedBudgetClock{}, Budget: shared, Catalog: reg})
-	if err != nil {
-		t.Fatal(err)
-	}
-	req := StartRequest{HostThread: HostRef{Kind: "conversation", ID: "native-admission-thread"}, HostTurn: HostRef{Kind: "conversation_turn", ID: "native-admission-turn"}, Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "native-admission-thread"}, Goal: "read", Config: ConfigSnapshot{AgentSpec: AgentSpec{Model: "fixture", ToolKeys: []string{"local.read"}}, ToolPolicies: []ToolPolicySnapshot{{Key: "local.read", DefinitionVersion: "v1", ExecutionMode: "local_dispatch", ApprovalMode: "never"}}, SharedBudget: &budget.Limits{MaxLLMCalls: 2, MaxToolCalls: 1}}}
-	started, err := host.StartAgentTurn(ctx, req)
-	if err != nil || started.Turn.Status != TurnRunning || m.calls != 1 || physical != 0 {
-		t.Fatal("capacity wait setup", err, started.Turn.Status, m.calls, physical)
-	}
-	inv, ok := TopLevelInvocation(started)
-	if !ok {
-		t.Fatal("missing root invocation")
-	}
-	before, err := rt.Load(ctx, inv.ExecutionRefID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ledger, err := store.LoadBudget(ctx, started.Turn.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	id := "tool:" + inv.ExecutionRefID + ":held-call"
-	if ledger.Reservations[id].Status != budget.ReservationWaiting {
-		t.Fatal("missing original capacity wait", ledger.Reservations[id])
-	}
-	interleavings := 0
-	store.afterCancel = func() {
-		interleavings++
-		out, obs, err := native.ObservePhysicalCall(ctx, inv.ExecutionRefID, plugin.RunResume, func(c context.Context) (kernel.Snapshot, error) {
-			return native.Resume(c, inv.ExecutionRefID, before.Run.Revision)
-		})
-		if !errors.Is(err, budget.ErrExhausted) || errors.Is(err, agent.ErrRootOutcomeUnknown) || out.Run.Revision != before.Run.Revision || obs.Kind() != agent.PhysicalCallSettled {
-			t.Fatal("native cancelled admission not qualified", err, out.Run, obs.Kind())
-		}
-		if _, err = rt.LookupChildExecution(ctx, inv.ExecutionRefID); !errors.Is(err, kernel.ErrNotFound) {
-			t.Fatal("native refusal retained grant", err)
-		}
-	}
-	stopped, err := host.Cancel(ctx, started.Turn.ID, "finish elected cancellation")
-	if err != nil || stopped.Turn.Status != TurnCancelled || interleavings != 1 || physical != 0 || m.calls != 1 {
-		t.Fatal("original elected cancellation failed", err, stopped.Turn.Status, interleavings, physical, m.calls)
-	}
-	final, err := rt.Load(ctx, inv.ExecutionRefID)
-	if err != nil || final.Run.Status != kernel.RunStatusCancelled {
-		t.Fatal("Kernel did not commit original cancel", err, final.Run.Status)
-	}
-	ledger, err = store.LoadBudget(ctx, started.Turn.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	r := ledger.Reservations[id]
-	if r.Status != budget.ReservationReleased || r.Dispatched || r.Active || r.Usage != (budget.Usage{}) {
-		t.Fatal("unsent cancellation changed accounting", r)
-	}
-	items, err := store.ListItems(ctx, started.Turn.ID, 0, 500)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if ActiveCancellationFence(items) {
-		t.Fatal("original cancellation election retained fence")
-	}
-}
-
 type nativeDispatchCancelKernelStore struct {
 	*memory.Store
 	action         func()
+	afterControl   func()
+	controlACK     bool
+	controlHits    int
 	pending        bool
 	hits           int
 	closureCuts    int
@@ -203,7 +90,20 @@ func (s *nativeDispatchCancelKernelStore) Commit(commitCtx context.Context, comm
 		}
 		return next, false, err
 	}
-	return s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+	next, replay, err := s.Store.Commit(commitCtx, commitID, commitRev, commitMutation, commitAuth)
+	if err == nil && commitAuth.Control != nil && commitAuth.Control.Kind == kernel.ControlCancel && (s.afterControl != nil || s.controlACK) {
+		s.controlHits++
+		if s.afterControl != nil {
+			fn := s.afterControl
+			s.afterControl = nil
+			fn()
+		}
+		if s.controlACK {
+			s.controlACK = false
+			return kernel.Snapshot{}, false, errOriginalBudgetCancelACK
+		}
+	}
+	return next, replay, err
 }
 
 var errOriginalRetirementCut = errors.New("original native receipt/retirement interrupted")
@@ -248,314 +148,268 @@ func (s *nativeDispatchCancelKernelStore) CheckExecution(ctx context.Context, id
 	return err
 }
 
+type nativeCancelFixture struct {
+	store         *MemoryStore
+	ks            *nativeDispatchCancelKernelStore
+	rt            *kernel.Runtime
+	native        *agent.Runner
+	host          *Runner
+	model         *nativeAdmissionCancelModel
+	physical      int
+	start         Snapshot
+	before        kernel.Snapshot
+	turnID, runID string
+}
+
+func newNativeCancelFixture(t *testing.T, timeline bool) *nativeCancelFixture {
+	t.Helper()
+	f := &nativeCancelFixture{store: NewMemoryStore(), ks: &nativeDispatchCancelKernelStore{Store: memory.NewStore()}}
+	f.model = &nativeAdmissionCancelModel{store: f.store, ledger: f.ks}
+	f.compose(t, f.ks, timeline)
+	req := StartRequest{HostThread: HostRef{Kind: "conversation", ID: "native-admission-thread"}, HostTurn: HostRef{Kind: "conversation_turn", ID: "native-admission-turn"}, Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "native-admission-thread"}, Goal: "read", Config: ConfigSnapshot{AgentSpec: AgentSpec{Model: "fixture", ToolKeys: []string{"local.read"}}, ToolPolicies: []ToolPolicySnapshot{{Key: "local.read", DefinitionVersion: "v1", ExecutionMode: "local_dispatch", ApprovalMode: "never"}}, SharedBudget: &budget.Limits{MaxLLMCalls: 2, MaxToolCalls: 1}}}
+	var e error
+	f.start, e = f.host.StartAgentTurn(t.Context(), req)
+	if e != nil || f.start.Turn.Status != TurnRunning || f.model.calls != 1 || f.physical != 0 {
+		t.Fatal("native capacity wait", e, f.start.Turn.Status, f.model.calls, f.physical)
+	}
+	inv, ok := TopLevelInvocation(f.start)
+	if !ok {
+		t.Fatal("missing original invocation")
+	}
+	f.turnID, f.runID = f.start.Turn.ID, inv.ExecutionRefID
+	f.before, e = f.rt.Load(t.Context(), f.runID)
+	if e != nil {
+		t.Fatal(e)
+	}
+	ledger, e := f.rt.BudgetStore().LoadBudget(t.Context(), f.turnID)
+	if e != nil || ledger.Reservations["tool:"+f.runID+":held-call"].ID != "" || ledger.View(f.runID).Usage.LLMCalls != 1 {
+		t.Fatal("capacity wait invented an effect", ledger, e)
+	}
+	return f
+}
+
+func (f *nativeCancelFixture) compose(t *testing.T, s kernel.Store, timeline bool) {
+	t.Helper()
+	var e error
+	f.rt, e = kernel.New(kernel.Dependencies{Store: s})
+	if e != nil {
+		t.Fatal(e)
+	}
+	shared, e := NewBudgetAuthority(BudgetAuthorityDependencies{Runtime: f.rt, Store: f.store, Clock: hostedBudgetClock{}})
+	if e != nil {
+		t.Fatal(e)
+	}
+	b, e := shared.Adapter()
+	if e != nil {
+		t.Fatal(e)
+	}
+	reg, e := tools.NewRegistry([]tools.Registration{{Definition: tools.Definition{Key: "local.read", Name: "read", InputSchema: json.RawMessage(`{"type":"object"}`)}, Handler: tools.HandlerFunc(func(_ context.Context, q tools.ExecutionRequest) (tools.ExecutionResult, error) {
+		f.physical++
+		return tools.ExecutionResult{Content: json.RawMessage("{}"), Receipt: tools.Receipt{ExecutionID: q.Call.ID, Disposition: "committed"}}, nil
+	})}})
+	if e != nil {
+		t.Fatal(e)
+	}
+	deps := agent.Dependencies{Runtime: f.rt, Model: f.model, Catalog: reg, Executor: reg, BoundedBudget: b}
+	if timeline {
+		deps.ToolTimeline, e = NewBoundedToolTimelineAdapter(f.store, hostedBudgetClock{}, nil)
+		if e != nil {
+			t.Fatal(e)
+		}
+	}
+	f.native, e = agent.NewRunner(deps)
+	if e != nil {
+		t.Fatal(e)
+	}
+	f.host, e = NewRunner(Dependencies{Runtime: f.rt, Agent: f.native, Store: f.store, Clock: hostedBudgetClock{}, Budget: shared, Catalog: reg})
+	if e != nil {
+		t.Fatal(e)
+	}
+}
+
+func (f *nativeCancelFixture) cancel(t *testing.T) (Snapshot, error) {
+	return f.host.Cancel(t.Context(), f.turnID, "stop original Run")
+}
+func (f *nativeCancelFixture) verifyCancelled(t *testing.T) {
+	t.Helper()
+	final, e := f.rt.Load(t.Context(), f.runID)
+	if e != nil || final.Run.Status != kernel.RunStatusCancelled {
+		t.Fatal("original Run not cancelled", e, final.Run)
+	}
+	if _, e = f.rt.LookupChildExecution(t.Context(), f.runID); !errors.Is(e, kernel.ErrNotFound) {
+		t.Fatal("original grant retained", e)
+	}
+	ledger, e := f.rt.BudgetStore().LoadBudget(t.Context(), f.turnID)
+	if e != nil {
+		t.Fatal(e)
+	}
+	res := ledger.Reservations["tool:"+f.runID+":held-call"]
+	if !ledger.RunCancelled(f.runID) || !ledger.FinishedRuns[f.runID] || res.ID != "" && (res.Status != budget.ReservationReleased || res.Dispatched || res.Active || res.Usage != (budget.Usage{})) || ledger.View(f.runID).Usage.ToolCalls != 0 || f.physical != 0 || f.model.calls != 1 {
+		t.Fatal("cancel changed original effects", res, ledger.View(f.runID), f.physical, f.model.calls)
+	}
+	items, e := f.store.ListItems(t.Context(), f.turnID, 0, 500)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if ActiveCancellationFence(items) {
+		t.Fatal("original cancellation fence retained")
+	}
+	for _, item := range items {
+		if item.Kind == ItemTool {
+			t.Fatal("no-entry created physical timeline", item)
+		}
+	}
+}
+
+// A native control commits Run and budget together. A Resume racing the
+// successful control ACK cannot acquire a fresh effect.
+func TestHarnessElectedCancellationSurvivesNativeRunAdmissionDenial(t *testing.T) {
+	for _, lost := range []bool{false, true} {
+		t.Run(map[bool]string{false: "control_return", true: "control_ack_lost"}[lost], func(t *testing.T) {
+			f := newNativeCancelFixture(t, false)
+			f.ks.controlACK = lost
+			f.ks.afterControl = func() {
+				out, e := f.native.Resume(t.Context(), f.runID, f.before.Run.Revision+1)
+				if !errors.Is(e, agent.ErrRunTerminal) || out.Run.Status != kernel.RunStatusCancelled || f.physical != 0 || f.model.calls != 1 {
+					t.Fatal("native control allowed successor", e, out.Run)
+				}
+				l, e := f.rt.BudgetStore().LoadBudget(t.Context(), f.turnID)
+				if e != nil || !l.RunCancelled(f.runID) || !l.FinishedRuns[f.runID] {
+					t.Fatal("terminal control split ledger", e)
+				}
+			}
+			out, e := f.cancel(t)
+			if lost {
+				if !errors.Is(e, errOriginalBudgetCancelACK) {
+					t.Fatal("control ACK fault not reached", e)
+				}
+				out, e = f.cancel(t)
+			}
+			if e != nil || out.Turn.Status != TurnCancelled || f.ks.controlHits != 1 {
+				t.Fatal("original native control failed", e, out.Turn.Status, f.ks.controlHits)
+			}
+			f.verifyCancelled(t)
+		})
+	}
+}
+
 func TestHarnessElectedCancellationAtActualToolDispatch(t *testing.T) {
 	for _, order := range []string{"none", "inner", "closure-cas"} {
 		t.Run(order, func(t *testing.T) { testHarnessCancelAtActualToolDispatch(t, order, "") })
 	}
 }
 func TestHarnessElectedCancellationRetirementWindows(t *testing.T) {
-	t.Run("elected-without-busy-witness/finish-ack", func(t *testing.T) {
-		testHarnessCancelAtActualToolDispatch(t, "closure-cas", "finish-ack/no-busy")
-	})
 	for _, cut := range []string{"recovery-before", "recovery-ack", "finish-before", "finish-ack"} {
 		t.Run("receipt-only/"+cut, func(t *testing.T) { testHarnessCancelAtActualToolDispatch(t, "closure-cas", cut) })
-		if cut != "recovery-before" && cut != "recovery-ack" {
-			t.Run("terminal/"+cut, func(t *testing.T) { testHarnessCancelAtActualToolDispatch(t, "none", cut) })
+		if cut == "finish-before" || cut == "finish-ack" {
+			t.Run("original-return/"+cut, func(t *testing.T) { testHarnessCancelAtActualToolDispatch(t, "none", cut) })
 		}
 	}
+	t.Run("control-ack-after-receipt", func(t *testing.T) { testHarnessCancelAtActualToolDispatch(t, "closure-cas", "control-ack") })
 }
-func testHarnessCancelAtActualToolDispatch(t *testing.T, timelineOrder, retirementCut string) {
-	noBusyWitness := retirementCut == "finish-ack/no-busy"
-	if noBusyWitness {
-		retirementCut = "finish-ack"
-	}
+
+func testHarnessCancelAtActualToolDispatch(t *testing.T, order, cut string) {
+	f := newNativeCancelFixture(t, order == "inner")
 	ctx := t.Context()
-	store := &nativeAdmissionCancelStore{MemoryStore: NewMemoryStore()}
-	ks := &nativeDispatchCancelKernelStore{Store: memory.NewStore()}
-	rt, err := kernel.New(kernel.Dependencies{Store: ks})
-	if err != nil {
-		t.Fatal(err)
+	if _, e := (budget.Coordinator{Store: f.rt.BudgetStore()}).Release(ctx, f.turnID, "peer-slot"); e != nil {
+		t.Fatal(e)
 	}
-	m := &nativeAdmissionCancelModel{store: store}
-	physical := 0
-	reg, err := tools.NewRegistry([]tools.Registration{{Definition: tools.Definition{Key: "local.read", Name: "read", InputSchema: json.RawMessage(`{"type":"object"}`)}, Handler: tools.HandlerFunc(func(_ context.Context, q tools.ExecutionRequest) (tools.ExecutionResult, error) {
-		physical++
-		return tools.ExecutionResult{Content: json.RawMessage("{}"), Receipt: tools.Receipt{ExecutionID: q.Call.ID, Disposition: "committed"}}, nil
-	})}})
-	if err != nil {
-		t.Fatal(err)
+	callCtx, stop := context.WithCancel(ctx)
+	defer stop()
+	var firstCancel error
+	f.ks.action = func() {
+		// The original dispatch intent already committed. Native control must
+		// reject the active Grant; the actual callback then proves non-entry.
+		_, firstCancel = f.cancel(t)
+		stop()
 	}
-	compose := func(rt *kernel.Runtime) (*agent.Runner, *Runner) {
-		t.Helper()
-		shared, err := NewBudgetAuthority(BudgetAuthorityDependencies{Store: store, Clock: hostedBudgetClock{}})
-		if err != nil {
-			t.Fatal(err)
-		}
-		b, err := shared.Adapter()
-		if err != nil {
-			t.Fatal(err)
-		}
-		var timeline *agent.BoundedToolTimelineAdapter
-		if timelineOrder != "none" && timelineOrder != "closure-cas" {
-			var e error
-			timeline, e = NewBoundedToolTimelineAdapter(store, hostedBudgetClock{}, nil)
-			if e != nil {
-				t.Fatal(e)
-			}
-		}
-		d := agent.Dependencies{Runtime: rt, Model: m, Catalog: reg, Executor: reg, BoundedBudget: b, ToolTimeline: timeline}
-		native, err := agent.NewRunner(d)
-		if err != nil {
-			t.Fatal(err)
-		}
-		host, err := NewRunner(Dependencies{Runtime: rt, Agent: native, Store: store, Clock: hostedBudgetClock{}, Budget: shared, Catalog: reg})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return native, host
-	}
-	native, host := compose(rt)
-	req := StartRequest{HostThread: HostRef{Kind: "conversation", ID: "native-admission-thread"}, HostTurn: HostRef{Kind: "conversation_turn", ID: "native-admission-turn"}, Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "native-admission-thread"}, Goal: "read", Config: ConfigSnapshot{AgentSpec: AgentSpec{Model: "fixture", ToolKeys: []string{"local.read"}}, ToolPolicies: []ToolPolicySnapshot{{Key: "local.read", DefinitionVersion: "v1", ExecutionMode: "local_dispatch", ApprovalMode: "never"}}, SharedBudget: &budget.Limits{MaxLLMCalls: 2, MaxToolCalls: 1}}}
-	started, err := host.StartAgentTurn(ctx, req)
-	if err != nil || started.Turn.Status != TurnRunning || m.calls != 1 || physical != 0 {
-		t.Fatal("capacity wait setup", err, started.Turn.Status, m.calls, physical)
-	}
-	inv, ok := TopLevelInvocation(started)
-	if !ok {
-		t.Fatal("missing root invocation")
-	}
-	before, err := rt.Load(ctx, inv.ExecutionRefID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ledger, err := store.LoadBudget(ctx, started.Turn.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	id := "tool:" + inv.ExecutionRefID + ":held-call"
-	if ledger.Reservations[id].Status != budget.ReservationWaiting {
-		t.Fatal("missing original capacity wait", ledger.Reservations[id])
-	}
-
-	// Release peer capacity, then make the elected cancellation race AFTER
-	// the last Ledger read and successful native Store check, before actual
-	// Budget Dispatch. No extra guard read can repair this interleaving.
-	c := budget.Coordinator{Store: store}
-	if _, err = c.Release(ctx, started.Turn.ID, "peer-slot"); err != nil {
-		t.Fatal(err)
-	}
-	var initialCancelErr error
-	if timelineOrder == "closure-cas" {
-		ks.closureCuts = 2
-	} else if retirementCut != "" {
-		ks.retirementCut = retirementCut
-	}
-	store.cancelACKCut = noBusyWitness
-	ks.action = func() {
-		_, initialCancelErr = host.Cancel(ctx, started.Turn.ID, "cancel at actual native dispatch")
-	}
-	got, obs, resumeErr := native.ObservePhysicalCall(ctx, inv.ExecutionRefID, plugin.RunResume, func(c context.Context) (kernel.Snapshot, error) {
-		return native.Resume(c, inv.ExecutionRefID, before.Run.Revision)
-	})
-	wantCancelErr := kernel.ErrChildExecutionBusy
-	if noBusyWitness {
-		wantCancelErr = errOriginalBudgetCancelACK
-		if store.cancelACKHits != 1 {
-			t.Fatal("budget cancel ACK cut not reached")
-		}
-	}
-	if ks.hits != 1 || !errors.Is(initialCancelErr, wantCancelErr) {
-		t.Fatal("original elected cancellation cut missing", ks.hits, initialCancelErr)
-	}
-	if noBusyWitness {
-		items, err := store.ListItems(ctx, started.Turn.ID, 0, 500)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, item := range items {
-			if item.ParentItemID == DeferredChildGrantCancellationParentItemID {
-				t.Fatal("unexpected busy witness", item)
-			}
-		}
-		if !ActiveCancellationFence(items) {
-			t.Fatal("election lost before Kernel control")
-		}
-	}
-	if !errors.Is(resumeErr, budget.ErrExhausted) || physical != 0 || m.calls != 1 {
-		t.Fatal("actual native dispatch denial was not returned", resumeErr, got.Run, obs.Kind(), physical, m.calls)
-	}
-	if timelineOrder == "closure-cas" {
-		if ks.cuts != 2 || !errors.Is(resumeErr, agent.ErrRootOutcomeUnknown) || obs.Kind() != agent.PhysicalCallDurableYield {
-			t.Fatal("original native no-send return missing at cleanup cut", resumeErr, obs.Kind(), ks.cuts)
-		}
-		g, e := rt.LookupChildExecution(ctx, inv.ExecutionRefID)
-		if e != nil {
-			t.Fatal(e)
-		}
-		c, e := rt.LookupPhysicalCallbackReturn(ctx, g)
-		b, found, bErr := c.ToolReturns.Find("held-call")
-		if e != nil || bErr != nil || !c.HostCompleted || !found || !b.Unsent {
-			t.Fatal("original no-send return not sealed", c, e, b, bErr)
-		}
-	} else if retirementCut != "" {
-		if ks.retirementHits != 1 || !errors.Is(resumeErr, errOriginalRetirementCut) || !errors.Is(resumeErr, agent.ErrRootOutcomeUnknown) || got.Run.Status != kernel.RunStatusFailed {
-			t.Fatal("terminal original retirement cut not reached", resumeErr, got.Run, ks.retirementHits)
-		}
+	if order == "closure-cas" {
+		f.ks.closureCuts = 1
 	} else {
-		if errors.Is(resumeErr, agent.ErrRootOutcomeUnknown) || obs.Kind() != agent.PhysicalCallSettled {
-			t.Fatal("actual native dispatch denial did not close its original grant", resumeErr, got.Run, obs.Kind())
-		}
-		if _, err = rt.LookupChildExecution(ctx, inv.ExecutionRefID); !errors.Is(err, kernel.ErrNotFound) {
-			t.Fatal("actual native dispatch denial retained grant", err)
-		}
-		if _, marked, err := agent.FrozenPendingDispatch(got); err != nil || marked {
-			t.Fatal("native denial retained marker", err)
-		}
+		f.ks.retirementCut = cut
 	}
-	var originalRetired kernel.OwnedRetirementReceipt
+	got, obs, e := f.native.ObservePhysicalCall(callCtx, f.runID, plugin.RunResume, func(c context.Context) (kernel.Snapshot, error) {
+		return f.native.Resume(c, f.runID, f.before.Run.Revision)
+	})
+	if f.ks.hits != 1 || !errors.Is(firstCancel, kernel.ErrChildExecutionBusy) || !errors.Is(e, context.Canceled) || f.physical != 0 || f.model.calls != 1 {
+		t.Fatal("original dispatch/cancel cut not reached", firstCancel, e, obs.Kind(), f.ks.hits, f.physical, f.model.calls)
+	}
+	current, readErr := f.rt.Load(ctx, f.runID)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	grant, grantErr := f.rt.LookupChildExecution(ctx, f.runID)
 	var originalGrant kernel.ChildExecutionGrant
-	if retirementCut != "" {
-		if timelineOrder == "closure-cas" {
-			ks.retirementCut = retirementCut
-			var firstErr error
-			if noBusyWitness {
-				// The independent receipt-only owner finishes after the
-				// election's budget ACK failure, without a Kernel busy witness.
-				current, e := rt.Load(ctx, inv.ExecutionRefID)
-				if e != nil {
-					t.Fatal(e)
-				}
-				_, firstErr = native.ReconcileRootDeferredChildren(ctx, current.Run.ID, current.Run.Revision)
-			} else {
-				_, firstErr = host.Cancel(ctx, started.Turn.ID, "recover original receipt/retirement")
-			}
-			if !errors.Is(firstErr, errOriginalRetirementCut) || ks.retirementHits != 1 {
-				t.Fatal("original receipt/retirement cut not reached", firstErr, ks.retirementHits)
+	if order == "closure-cas" {
+		if f.ks.cuts != 1 || grantErr != nil {
+			t.Fatal("no-send closure cut missing", f.ks.cuts, grantErr, e)
+		}
+		completion, er := f.rt.LookupPhysicalCallbackReturn(ctx, grant)
+		b, found, er2 := completion.ToolReturns.Find("held-call")
+		if er != nil || er2 != nil || !completion.HostCompleted || !found || !b.Unsent {
+			t.Fatal("original no-entry return not sealed", completion, er, er2)
+		}
+		l, er := f.rt.BudgetStore().LoadBudget(ctx, f.turnID)
+		if er != nil || !l.Reservations["tool:"+f.runID+":held-call"].Dispatched || l.View(f.runID).Usage.ToolCalls != 0 {
+			t.Fatal("failed no-send CAS released original hold", er, l)
+		}
+		originalGrant = grant
+		if cut != "control-ack" {
+			f.ks.retirementCut = cut
+		}
+		if cut != "" && cut != "control-ack" {
+			_, er = f.native.ReconcileRootDeferredChildren(ctx, current.Run.ID, current.Run.Revision)
+			if !errors.Is(er, errOriginalRetirementCut) || f.ks.retirementHits != 1 {
+				t.Fatal("receipt recovery cut missing", er, f.ks.retirementHits)
 			}
 		}
-		originalGrant = ks.cutGrant
-		if originalGrant.ID == "" {
-			t.Fatal("original grant missing")
+	} else if cut != "" {
+		if f.ks.retirementHits != 1 || !errors.Is(e, errOriginalRetirementCut) {
+			t.Fatal("original retirement cut missing", e, f.ks.retirementHits, got.Run)
 		}
-		// Rebuild from the underlying Store, not the interrupted callback
-		// or its Runner. Inspect exact durable state at the failed boundary.
-		rt, err = kernel.New(kernel.Dependencies{Store: ks.Store})
-		if err != nil {
-			t.Fatal(err)
+		originalGrant = f.ks.cutGrant
+	} else if !errors.Is(grantErr, kernel.ErrNotFound) {
+		t.Fatal("acknowledged no-entry retained grant", grantErr)
+	}
+	if cut != "" && cut != "control-ack" {
+		// Drop the faulting Store wrapper and inspect the original durable facts.
+		f.compose(t, f.ks.Store, order == "inner")
+		current, readErr = f.rt.Load(ctx, f.runID)
+		if readErr != nil {
+			t.Fatal(readErr)
 		}
-		native, host = compose(rt)
-		current, e := rt.Load(ctx, inv.ExecutionRefID)
-		if e != nil {
-			t.Fatal(e)
-		}
-		_, marked, e := agent.FrozenPendingDispatch(current)
-		if e != nil || marked != (retirementCut == "recovery-before") {
-			t.Fatal("unexpected receipt consumption", retirementCut, marked, e)
-		}
-		originalRetired, e = rt.LoadOwnedRetirement(ctx, originalGrant.ID)
-		if retirementCut == "finish-ack" {
-			if e != nil {
-				t.Fatal(e)
-			}
-			if !originalRetired.Valid() {
-				t.Fatal("invalid committed retirement fact", originalRetired)
-			}
-			if _, e = rt.LookupChildExecution(ctx, inv.ExecutionRefID); !errors.Is(e, kernel.ErrNotFound) {
-				t.Fatal("Finish retained original grant", e)
-			}
-		} else {
-			if !errors.Is(e, kernel.ErrNotFound) {
-				t.Fatal("premature retirement", e)
-			}
-			g, e := rt.LookupChildExecution(ctx, inv.ExecutionRefID)
-			if e != nil || g != originalGrant {
-				t.Fatal("original grant changed", e, g)
-			}
-			completion, e := rt.LookupPhysicalCallbackReturn(ctx, g)
-			if e != nil || !completion.HostCompleted {
-				t.Fatal("original callback evidence lost", e, completion)
+		if cut == "recovery-before" {
+			_, marked, er := agent.FrozenPendingDispatch(current)
+			if er != nil || !marked {
+				t.Fatal("failed receipt recovery cleared original intent", er)
 			}
 		}
 	}
-	if noBusyWitness {
-		current, e := rt.Load(ctx, inv.ExecutionRefID)
-		if e != nil {
-			t.Fatal(e)
+	if cut == "control-ack" {
+		current, readErr = f.rt.Load(ctx, f.runID)
+		if readErr != nil {
+			t.Fatal(readErr)
 		}
-		turn, e := store.GetTurn(ctx, started.Turn.ID)
-		if e != nil {
-			t.Fatal(e)
+		if _, er := f.native.ReconcileRootDeferredChildren(ctx, current.Run.ID, current.Run.Revision); er != nil {
+			t.Fatal("original no-send recovery", er)
 		}
-		if !host.nativeRootCancellationReady(ctx, turn, inv.ExecutionRefID, current) {
-			t.Fatal("exact retired original did not qualify same election before Kernel busy")
+		f.ks.controlACK = true
+	}
+	out, err := f.cancel(t)
+	if cut == "control-ack" {
+		if !errors.Is(err, errOriginalBudgetCancelACK) {
+			t.Fatal("terminal native control ACK cut missing", err)
 		}
+		out, err = f.cancel(t)
 	}
-	stopped, err := host.Cancel(ctx, started.Turn.ID, "finish original elected cancellation")
-	if err != nil || !terminalTurnStatus(stopped.Turn.Status) {
-		t.Fatal("original cancellation could not finish", err, stopped.Turn.Status)
+	if err != nil || out.Turn.Status != TurnCancelled {
+		t.Fatal("original cancellation failed", err, out.Turn.Status)
 	}
-	final, err := rt.Load(ctx, inv.ExecutionRefID)
-	if timelineOrder == "closure-cas" {
-		if err != nil || final.Run.Status != kernel.RunStatusCancelled {
-			t.Fatal("elected cancellation could not consume original no-send return", err, final.Run)
+	f.verifyCancelled(t)
+	if originalGrant.ID != "" {
+		retired, er := f.rt.LoadOwnedRetirement(ctx, originalGrant.ID)
+		if er != nil || !retired.Valid() || retired.Evidence.Grant != originalGrant {
+			t.Fatal("original retirement identity lost", er, retired)
 		}
-	} else if err != nil || final.Run.Status != kernel.RunStatusFailed || final.Run.ErrorCode != "agent.shared_budget_exhausted" {
-		t.Fatal("original terminal denial was not preserved", err, final.Run)
-	}
-	if _, err = rt.LookupChildExecution(ctx, inv.ExecutionRefID); !errors.Is(err, kernel.ErrNotFound) {
-		t.Fatal("elected cancellation retained original grant", err)
-	}
-	if retirementCut != "" {
-		receipt, e := rt.LoadOwnedRetirement(ctx, originalGrant.ID)
-		if e != nil || !receipt.Valid() || receipt.Evidence.Grant != originalGrant || (originalRetired.Version != 0 && receipt.Identity() != originalRetired.Identity()) {
-			t.Fatal("original retirement was not acknowledged exactly", e, receipt)
-		}
-		currentReceipt, e := rt.LookupOwnedRetirementForRun(ctx, inv.ExecutionRefID)
-		if kernel.ManagedDigest(final) == kernel.ManagedDigest(receipt.Evidence.Snapshot) {
-			if e != nil || kernel.ManagedDigest(currentReceipt) != kernel.ManagedDigest(receipt) {
-				t.Fatal("original final receipt changed", e)
-			}
-		} else if !errors.Is(e, kernel.ErrNotFound) {
-			t.Fatal("historical receipt selected for changed source", e)
-		}
-
-	}
-	ledger, err = store.LoadBudget(ctx, started.Turn.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	r := ledger.Reservations[id]
-	if !ledger.Cancelled || r.Status != budget.ReservationReleased || r.Dispatched || r.Active || r.Usage != (budget.Usage{}) || len(r.Receipt) != 0 {
-		t.Fatal("cancelled reservation acquired effects", r)
-	}
-	items, err := store.ListItems(ctx, started.Turn.ID, 0, 500)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if ActiveCancellationFence(items) {
-		t.Fatal("elected cancellation retained fence")
-	}
-	startedItems, failedItems := 0, 0
-	for _, item := range items {
-		if item.Kind != ItemTool {
-			continue
-		}
-		var p toolTimelinePayload
-		if err = json.Unmarshal(item.Payload, &p); err != nil || p.ExecutionID != "" || p.Disposition != "" {
-			t.Fatal("invented physical Tool result", item, err)
-		}
-		switch item.Status {
-		case ItemStarted:
-			startedItems++
-		case ItemFailed:
-			failedItems++
-		case ItemWaiting, ItemCompleted, ItemCancelled:
-			t.Fatal("incorrect Tool timeline", item)
-		default:
-			t.Fatal("unknown Tool item status", item)
-		}
-	}
-	if startedItems != 0 || failedItems != 0 {
-		t.Fatal("capacity denial entered the Tool timeline", startedItems, failedItems)
 	}
 }
