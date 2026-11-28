@@ -111,6 +111,9 @@ func (r *Runner) externalControlWait(ctx context.Context, revision uint64, c Ext
 		return out, errors.Join(ErrToolOutcomeUnknown, err)
 	}
 	wait := state.ToolWait
+	if wait.DeadlineAt != nil && !r.clock.Now().Before(*wait.DeadlineAt) {
+		return out, errors.Join(ErrToolOutcomeUnknown, kernel.ErrDeadline)
+	}
 	if wait.SignalID != "" || call.ID != c.CallID || wait.OperationID != c.OperationID || wait.InputDigest != c.InputDigest {
 		return out, ErrToolReceiptMismatch
 	}

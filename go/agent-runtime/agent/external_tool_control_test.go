@@ -83,6 +83,35 @@ func TestExternalNoEffectRequiresTheOriginalWaitAndReadOnlyOwner(t *testing.T) {
 	}
 }
 
+func TestExpiredExternalCancellationWaitDoesNotReadOrAcceptOwnerReceipt(t *testing.T) {
+	f, owner, wait := newControlWait(t)
+	ctx := t.Context()
+	const electionID = "sdk-cancellation-election"
+	elected, err := f.runner.ElectExternalToolCancellation(ctx, wait.Run.ID, wait.Run.Revision, electionID, wait.Run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = f.runner.BindExternalToolCancellationControl(ctx, elected.Run.Revision, electionID, wait.Run.ID, owner.original); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := f.runner.QueryPendingTool(ctx, wait.Run.ID, owner.original.CallID)
+	if err != nil || pending.DeadlineAt == nil {
+		t.Fatalf("pending wait: %+v %v", pending, err)
+	}
+	f.clock.now = *pending.DeadlineAt
+	if _, err = f.runner.ReconcileExternalToolNoEffectForControl(ctx, wait.Run.Revision, owner.original); !errors.Is(err, kernel.ErrDeadline) || !errors.Is(err, agent.ErrToolOutcomeUnknown) {
+		t.Fatalf("expired no-effect receipt: %v", err)
+	}
+	f.ready = true
+	if _, err = f.runner.ReconcileExternalToolForControl(ctx, wait.Run.ID, wait.Run.Revision, owner.original.CallID); !errors.Is(err, kernel.ErrDeadline) || !errors.Is(err, agent.ErrToolOutcomeUnknown) {
+		t.Fatalf("expired committed receipt: %v", err)
+	}
+	current, err := f.runtime.Load(ctx, wait.Run.ID)
+	if err != nil || current.Run.Revision != elected.Run.Revision+1 || owner.reads != 0 || f.lookups != 0 || f.executions != 1 {
+		t.Fatalf("expired wait changed state or queried owner: run=%+v owner_reads=%d lookups=%d executions=%d err=%v", current.Run, owner.reads, f.lookups, f.executions, err)
+	}
+}
+
 func TestExternalNoEffectSurvivesLostResponseAndParksWorker(t *testing.T) {
 	f, owner, wait := newControlWait(t)
 	ctx := t.Context()

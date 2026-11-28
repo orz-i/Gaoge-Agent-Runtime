@@ -17,6 +17,18 @@ func TestNativeAuthorityCutoverSQLite(t *testing.T) {
 	conformance.NativeAuthorityCutover(t, nativeAuthoritySQLiteFixture)
 }
 
+func TestNativeExternalCancellationSQLite(t *testing.T) {
+	conformance.NativeExternalCancellation(t, nativeAuthoritySQLiteFixture)
+}
+
+func TestNativeExternalCancellationRecoverySQLite(t *testing.T) {
+	conformance.NativeExternalCancellationRecovery(t, nativeAuthoritySQLiteFixture)
+}
+
+func TestNativeExternalCancellationConcurrentSQLite(t *testing.T) {
+	conformance.NativeExternalCancellationConcurrent(t, nativeAuthoritySQLiteFixture)
+}
+
 func TestSQLiteRejectedHostedReceiptPreservesOriginalQuota(t *testing.T) {
 	conformance.RejectedHostedReceiptPreservesOriginalQuota(t, nativeAuthoritySQLiteFixture)
 }

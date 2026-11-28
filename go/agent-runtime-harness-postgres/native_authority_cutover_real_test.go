@@ -19,6 +19,18 @@ func TestRealPostgresNativeAuthorityCutover(t *testing.T) {
 	conformance.NativeAuthorityCutover(t, nativeAuthorityPostgresFixture)
 }
 
+func TestRealPostgresNativeExternalCancellation(t *testing.T) {
+	conformance.NativeExternalCancellation(t, nativeAuthorityPostgresFixture)
+}
+
+func TestRealPostgresNativeExternalCancellationRecovery(t *testing.T) {
+	conformance.NativeExternalCancellationRecovery(t, nativeAuthorityPostgresFixture)
+}
+
+func TestRealPostgresNativeExternalCancellationConcurrent(t *testing.T) {
+	conformance.NativeExternalCancellationConcurrent(t, nativeAuthorityPostgresFixture)
+}
+
 func TestPostgresRejectedHostedReceiptPreservesOriginalQuota(t *testing.T) {
 	conformance.RejectedHostedReceiptPreservesOriginalQuota(t, nativeAuthorityPostgresFixture)
 }

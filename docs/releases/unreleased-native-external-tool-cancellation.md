@@ -52,38 +52,68 @@ closure. It must adopt the explicit same-control continuation port before the
 new candidate can pass the unchanged downstream test assertions. No downstream
 source or SDK pin has been changed in this checkpoint.
 
-## Local evidence at this checkpoint
+## Local evidence at this checkpoint (2026-11-28)
 
 PASS on Windows AMD64, Go 1.27.4:
 
 ```text
-go test -race -count=1 -v ./go/agent-runtime-harness ./go/agent-runtime/agent -run '^(TestNativeExternalCancellationRetainsOriginalElection|TestExternalWaitOnMemberOnlyToolUsesExactElectedSubtree|TestExternalNoEffect.*)$'
+go test -race -count=1 ./go/agent-runtime-harness
+go test -race -count=1 ./go/agent-runtime/agent
+go test -race -count=1 ./go/agent-runtime-harness -run '^TestNativeExternalCancellation(Memory|RecoveryMemory|ConcurrentMemory)$'
+go test -race -count=1 ./go/agent-runtime-harness-sqlite -run '^TestNativeExternalCancellation(SQLite|RecoverySQLite|ConcurrentSQLite)$'
+go vet ./go/agent-runtime/agent ./go/agent-runtime-harness ./go/agent-runtime-harness-sqlite ./go/agent-runtime-harness-postgres
 ```
 
-The new native test covers Root external waits, Member cancellation and parent
-cancellation with an active Member. Assertions include one retained election,
-held unknown quota, started-owner refusal, foreign owner control refusal,
-exact no-effect receipt replay, original native retirement, parked Resume after
-retirement, ordinary/foreign final cancellation rejection, and zero Tool usage
-after the same-control continuation.
+The focused real PostgreSQL 16 conformance also passed under `-race`:
 
-The complete Agent package unit command passed during development. A combined
-Agent/Harness full command exceeded its 120-second local command limit after
-the Agent package passed; **full Harness validation is not claimed**.
-Docker Desktop's Linux engine was unavailable. No real PostgreSQL/Redis,
-downstream reproduction, release, deployment or merge is claimed.
+```text
+$env:TEST_POSTGRES_DSN='postgres://agent_runtime:agent_runtime@127.0.0.1:55432/agent_runtime?sslmode=disable'
+go test -race -count=1 -v ./go/agent-runtime-harness-postgres -run '^(TestRealPostgresNativeExternalCancellation|TestRealPostgresNativeExternalCancellationRecovery|TestRealPostgresNativeExternalCancellationConcurrent)$' -timeout 5m
+```
+
+Coverage now exercises direct Root, targeted Member, parent and nested
+cancellation; committed and no-effect owner receipts; sibling holds; restart
+reconstruction; concurrent Resume/notification/foreign-control attempts; and
+before/after recovery, retirement and cancellation-CAS acknowledgement cuts.
+The original Tool and Model are asserted not to replay, and committed usage is
+settled exactly once. An expired elected wait rejects both committed and
+no-effect receipt reads without contacting the owner.
+
+The full PostgreSQL harness integration command was attempted with disposable
+PostgreSQL/Redis services. The new external-cancellation real-Postgres tests
+passed in that run, but the package later hit its 10-minute test timeout in the
+existing `TestRealPostgresRootGenerationLifecycle/terminal-independent-child-retry/sql`
+test. The whole real-engine harness suite is therefore **not** claimed as PASS.
+
+The real PostgreSQL/Redis continuation integration command
+`node scripts/run-integration.mjs --suite=continuation` also ran. The
+PostgreSQL/Redis cancellation and external-signal recovery tests passed,
+including `TestRealPostgresNativeNoEffectCancelAcrossConnections` and
+`TestRealPostgresRedisNativeEarlySignalProviderRecovery`. The overall package
+still failed on this Windows host because the unrelated SQLite A2A fixture
+rejected the temporary directory's ACLs in
+`TestRealPostgresAndSQLiteA2AControlAdmissionAcrossConnections/sqlite`; the
+complete integration profile is **not** claimed as PASS. Both test runs used
+disposable services and removed their test containers/volumes afterward. No
+Gaoge Browser downstream run, release, deployment, merge or full CI consumer
+gate is claimed.
 
 ## Remaining work before Ready / merge
 
-- Complete native committed-owner coverage, including exact billing and final
-  continuation with no ordinary Model/Tool replay.
-- Exercise multiple Members, nested scope, untouched sibling holds and original
-  delegation charges, rather than relying on the single-Member fixture.
-- Add deterministic concurrent Resume/control and before/after-CAS and
-  retirement-ACK loss tests, rebuilding from persisted Stores after each cut.
-- Review missing/foreign/late/ambiguous receipt and expired wait behavior.
-- Run shared native conformance on Memory, SQLite and real PostgreSQL; run the
-  complete affected unit, Race, vet/static and consumer gates.
+- Verify the real Browser owner's committed-receipt schema and billing mapping
+  in the downstream composition; SDK fixtures cover the receipt contract and
+  exact Tool reservation settlement, but are not a substitute for that host.
+- Keep the passing multiple-Member, nested-scope, sibling-hold and original
+  delegation-charge tests enabled on every backend.
+- Keep deterministic concurrent Resume/control and before/after-CAS and
+  retirement-ACK loss tests enabled, rebuilding from persisted Stores after each
+  cut.
+- Review late/ambiguous owner-receipt behavior and its interaction with expired
+  waits; missing, foreign, started, denied and expired receipts are covered by
+  the current fixtures.
+- Run the complete real-engine harness suite to completion and execute the full
+  static/consumer gates; focused PostgreSQL tests, affected unit/Race packages,
+  focused SQLite tests and `go vet` have passed, but do not replace those gates.
 - Independently run the unchanged Gaoge tests
   `TestPostgresBrowserCancellationRespectsMemberScope` and
   `TestPostgresBrowserCancellationRequiresOriginalOwnerReceipt` with disposable

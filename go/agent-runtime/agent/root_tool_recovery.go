@@ -48,6 +48,9 @@ func (runner *Runner) ReconcileExternalToolForControl(ctx context.Context, runID
 	if err != nil || !waiting || call.ID != callID || s.Run.ParentRunID != "" {
 		return s, errors.Join(ErrToolOutcomeUnknown, err)
 	}
+	if state.ExternalToolElection != nil && state.ToolWait.DeadlineAt != nil && !runner.clock.Now().Before(*state.ToolWait.DeadlineAt) {
+		return s, errors.Join(ErrToolOutcomeUnknown, kernel.ErrDeadline)
+	}
 	grant, err := runner.runtime.LookupChildExecution(ctx, runID)
 	if err != nil {
 		return s, err
