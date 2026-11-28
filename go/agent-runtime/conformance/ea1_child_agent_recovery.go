@@ -130,10 +130,12 @@ func ea1ChildRecoveryAdmission(t *testing.T, factory func(*testing.T) (kernel.St
 			t.Fatalf("nil: %v", e)
 		}
 		assertOriginal()
+		// The prepared Root already owns an exact retired callback receipt;
+		// the unified entry observes it without mutating any Run.
 		for _, tc := range []struct {
 			id   string
 			want error
-		}{{"", kernel.ErrInvalidInput}, {"missing", kernel.ErrNotFound}, {wrong.Run.ID, agent.ErrInvalidRequest}, {root.Run.ID, kernel.ErrNotFound}, {corrupt.Run.ID, kernel.ErrChildExecutionBusy}, {clean.Run.ID, kernel.ErrNotFound}} {
+		}{{"", kernel.ErrInvalidInput}, {"missing", kernel.ErrNotFound}, {wrong.Run.ID, agent.ErrInvalidRequest}, {root.Run.ID, nil}, {corrupt.Run.ID, kernel.ErrChildExecutionBusy}, {clean.Run.ID, kernel.ErrNotFound}} {
 			if e = owner.ReconcilePhysicalExecution(t.Context(), tc.id); !errors.Is(e, tc.want) {
 				t.Fatalf("input %q: %v want %v", tc.id, e, tc.want)
 			}
