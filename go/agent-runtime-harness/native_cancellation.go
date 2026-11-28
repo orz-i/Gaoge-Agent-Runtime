@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/agent"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/budget"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
@@ -40,6 +41,36 @@ func (r *Runner) needsHostCancellation(ctx context.Context, turn Turn, runID str
 		return true, err
 	}
 	if root.ExecutionRefID == runID {
+		// A replacement selected by the Host but not yet created has no
+		// current native retry enrollment. Use the same pure enrollment
+		// planner only to qualify predecessor history; the actual negative
+		// decision and accounting still commit together in Runtime.
+		if root.Attempt > 1 && root.Status == InvocationAccepted && ledger != nil {
+			if _, enrolled := ledger.RootRetries[runID]; !enrolled {
+				if _, e := r.runtime.LoadCreationDecision(ctx, runID); errors.Is(e, kernel.ErrNotFound) {
+					selection, e := nativeRetrySelection(ctx, r.store, root)
+					if e != nil {
+						return true, e
+					}
+					planned, e := budget.PlanRootRetry(*ledger, root.ID, selection.Previous.ExecutionRefID, runID, root.Attempt)
+					if e != nil {
+						return true, e
+					}
+					children := make([]Invocation, 0, len(owners)-1)
+					for _, owner := range owners {
+						if owner.ID != root.ID {
+							children = append(children, owner)
+						}
+					}
+					if !validUnstartedRetryHistoricalChildren(root, children, items, &planned) {
+						return true, ErrConflict
+					}
+					return false, nil
+				} else if e != nil {
+					return true, errors.Join(ErrConflict, e)
+				}
+			}
+		}
 		_, historical, e := r.currentCancellationChildren(ctx, turn, root.ID, owners)
 		if e != nil {
 			return true, e
