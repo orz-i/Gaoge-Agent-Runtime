@@ -1475,6 +1475,9 @@ func (runner *Runner) recordRuntimeSnapshotItems(
 	invocation Invocation,
 	runtimeSnapshot kernel.Snapshot,
 ) error {
+	if err := runner.recordModelTimelineItems(ctx, turn, invocation, runtimeSnapshot); err != nil {
+		return err
+	}
 	if err := runner.recordAgentRunItem(ctx, turn, invocation, runtimeSnapshot); err != nil {
 		return err
 	}

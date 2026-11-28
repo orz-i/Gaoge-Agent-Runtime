@@ -54,8 +54,8 @@ func agentMessagePreviewEvent(event model.StreamEvent) (model.StreamEvent, bool)
 	return event, event.Delta != "" || event.Reasoning != nil || event.Usage != nil || strings.TrimSpace(event.ResponseID) != ""
 }
 
-// ModelTimelineObserver projects live facts and committed Model receipts using
-// the existing observer boundary. It never wraps or changes the Provider.
+// ModelTimelineObserver projects best-effort live facts. Committed Model
+// receipts are projected by the ordinary Harness snapshot synchronization.
 type ModelTimelineObserver struct {
 	store   Store
 	runtime *kernel.Runtime
@@ -72,7 +72,7 @@ func NewModelTimelineObserver(store Store, runtime *kernel.Runtime, clock Clock,
 func (*ModelTimelineObserver) Name() string { return "harness.timeline.model" }
 
 func (p *ModelTimelineObserver) Observe(ctx context.Context, event plugin.Event) {
-	if event.Type != agent.EventModelStarted && event.Type != agent.EventModelDelta && event.Type != agent.EventModelCompleted {
+	if event.Type != agent.EventModelStarted && event.Type != agent.EventModelDelta {
 		return
 	}
 	turn, invocation, active, err := timelineTurn(ctx, p.store, event.RunID)
@@ -121,19 +121,12 @@ func (p *ModelTimelineObserver) Observe(ctx context.Context, event plugin.Event)
 	if original.ID != event.Message || original.Purpose == agent.ModelInvocationContextSummary {
 		return
 	}
-	if event.Type == agent.EventModelStarted {
-		if p.feed != nil {
-			_, found, err := activeAgentMessageItemID(ctx, p.store, turn)
-			if err == nil && !found {
-				_, _ = p.feed.Publish(ctx, turn.ID, TurnEventDraft{Type: EventItemStarted, ItemID: stableID("him", turn.ID, event.RunID, event.Message), ItemKind: ItemAgentMessage, Status: string(ItemStarted)})
-			}
+	if p.feed != nil {
+		_, found, err := activeAgentMessageItemID(ctx, p.store, turn)
+		if err == nil && !found {
+			_, _ = p.feed.Publish(ctx, turn.ID, TurnEventDraft{Type: EventItemStarted, ItemID: stableID("him", turn.ID, event.RunID, event.Message), ItemKind: ItemAgentMessage, Status: string(ItemStarted)})
 		}
-		return
 	}
-	if original.Status != agent.ModelInvocationCompleted || original.ErrorCode != "" {
-		return
-	}
-	_ = appendModelTimelineItems(ctx, p.store, p.clock, p.feed, turn, invocation, original.Request, original.Response)
 }
 
 type toolTimelinePayload struct {
@@ -179,24 +172,39 @@ func timelineTurn(ctx context.Context, store Store, executionRefID string) (Turn
 	return turn, invocation, err == nil, err
 }
 
-func appendModelTimelineItems(
-	ctx context.Context,
-	store Store,
-	clock Clock,
-	feed *TurnFeed,
-	turn Turn,
-	invocation Invocation,
-	request model.Request,
-	response model.Response,
-) error {
-	for _, artifact := range response.Artifacts {
-		if err := appendArtifactTimelineItem(ctx, store, clock, feed, turn, invocation, request.RunID, artifact); err != nil {
+// Project immutable receipts, including consumed invocations whose executable
+// Request was intentionally discarded. Refresh uses this same projection,
+// so an interrupted append never requires a new Provider call.
+func (runner *Runner) recordModelTimelineItems(ctx context.Context, turn Turn, invocation Invocation, snapshot kernel.Snapshot) error {
+	if invocation.ParentItemID != "" || snapshot.Run.Kind != agent.RunKind {
+		return nil
+	}
+	view, err := agent.ViewState(snapshot)
+	if err != nil {
+		// Preserve the existing opaque AgentStarter projection contract; only
+		// a decodable native Agent receipt can create these facts.
+		if _, native := runner.agent.(*agent.Runner); native {
 			return err
 		}
+		return nil
 	}
-	for index, call := range response.HostedToolCalls {
-		if err := appendHostedToolTimelineItem(ctx, store, clock, feed, turn, invocation, request, call, index); err != nil {
-			return err
+	for _, receipt := range view.ModelInvocations {
+		if receipt.Purpose == agent.ModelInvocationContextSummary || receipt.ErrorCode != "" ||
+			(receipt.Status != agent.ModelInvocationCompleted && receipt.Status != agent.ModelInvocationConsumed) {
+			continue
+		}
+		if receipt.RunID != snapshot.Run.ID {
+			return ErrConflict
+		}
+		for _, artifact := range receipt.Response.Artifacts {
+			if err = appendArtifactTimelineItem(ctx, runner.store, runner.clock, runner.turnFeed, turn, invocation, receipt.RunID, artifact); err != nil {
+				return err
+			}
+		}
+		for index, call := range receipt.Response.HostedToolCalls {
+			if err = appendHostedToolTimelineItem(ctx, runner.store, runner.clock, runner.turnFeed, turn, invocation, receipt.RunID, receipt.ID, call, index); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -259,7 +267,7 @@ func appendHostedToolTimelineItem(
 	feed *TurnFeed,
 	turn Turn,
 	invocation Invocation,
-	request model.Request,
+	runID, modelInvocationID string,
 	call model.HostedToolCall,
 	ordinal int,
 ) error {
@@ -280,28 +288,35 @@ func appendHostedToolTimelineItem(
 	}
 	identity := strings.TrimSpace(call.ID)
 	if identity == "" {
-		identity = hashTimelineBytes(call.Input)
+		// Anonymous observations have no remote effect identity. Distinguish
+		// receipt-local facts without guessing a physical execution ID.
+		identity = stableID("hihta", modelInvocationID, strconv.Itoa(ordinal+1))
 	}
+	itemID := stableID("hiht", turn.ID, call.ToolKey, identity, string(status))
 	parentItemID := ""
 	if strings.TrimSpace(call.ID) != "" {
 		id := hostedStreamItemID(turn.ID, call)
 		started, err := store.GetItem(ctx, id)
 		if err == nil {
-			if started.TurnID != turn.ID || started.RunID != request.RunID || started.InvocationID != invocation.ID || started.Kind != ItemTool || started.Status != ItemStarted {
+			if started.TurnID != turn.ID || started.RunID != runID || started.InvocationID != invocation.ID || started.Kind != ItemTool || started.Status != ItemStarted {
 				return ErrConflict
 			}
 			parentItemID = id
+			// A later live start must not rewrite an already projected receipt.
+			if existing, e := store.GetItem(ctx, itemID); e == nil {
+				if existing.ParentItemID == "" {
+					parentItemID = ""
+				}
+			} else if !errors.Is(e, ErrNotFound) {
+				return e
+			}
 		} else if !errors.Is(err, ErrNotFound) {
 			return err
 		}
 	}
-	if identity == "" {
-		identity = firstNonEmpty(parentItemID, strconv.Itoa(ordinal+1))
-	}
 	now := clock.Now().UTC()
 	_, err = appendItemFact(ctx, store, feed, Item{
-		ID: stableID("hiht", turn.ID, call.ToolKey, identity, string(status)), TurnID: turn.ID,
-		Kind: ItemTool, Status: status, RunID: request.RunID, InvocationID: invocation.ID, ParentItemID: parentItemID,
+		ID: itemID, TurnID: turn.ID, Kind: ItemTool, Status: status, RunID: runID, InvocationID: invocation.ID, ParentItemID: parentItemID,
 		Payload: payload, CreatedAt: now, UpdatedAt: now,
 	})
 	return err

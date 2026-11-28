@@ -22,7 +22,8 @@
   Use explicit first-party stages, request preparation, model/Tool ports and
   observers instead. Standalone Budget execution and public Model response
   authority registration are removed. Use `harness.NewModelTimelineObserver`
-  with the existing Runtime and observer registration for Model timeline projection.
+  for best-effort live events. The Harness snapshot synchronization projects
+  committed Model receipt facts idempotently, including on Refresh after restart.
 
 - Removed `agent.Dependencies.ManagedRecovery` and `AgentSessionContextOptions.ManagedRecovery`. Recovery capability is derived from the exact registered Host Store and first-party stage sources; the persisted original capability cannot be changed on reopen.
 
