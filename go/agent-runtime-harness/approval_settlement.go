@@ -180,7 +180,7 @@ func (r *Runner) readNativeApprovalProjection(ctx context.Context, turn Turn, in
 }
 
 func (r *Runner) recordNativeApprovalDecisions(ctx context.Context, turn Turn, inv Invocation, snapshot kernel.Snapshot) error {
-	if snapshot.Run.Kind != "agent" || !r.runtime.SupportsOwnedPhysicalExecution() {
+	if snapshot.Run.Kind != "agent" || !r.runtime.SupportsPhysicalExecution() {
 		return nil
 	}
 	if inv.ParentItemID == "" {

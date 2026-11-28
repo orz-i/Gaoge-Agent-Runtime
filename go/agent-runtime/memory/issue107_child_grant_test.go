@@ -30,7 +30,7 @@ func TestIssue107MemoryChildGrantAtomicParentTerminal(t *testing.T) {
 	root := newIssue107Run(t, rt, "root", "")
 	mid := newIssue107Run(t, rt, "middle-child", root.Run.ID)
 	child := newIssue107Run(t, rt, "agentchild", mid.Run.ID)
-	grant, err := rt.BeginChildExecution(t.Context(), child.Run.ID, child.Run.Revision)
+	grant, err := conformance.AdmitChildFixture(t.Context(), rt, child.Run.ID, child.Run.Revision)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestIssue107MemoryChildGrantAtomicParentTerminal(t *testing.T) {
 	if err != nil || cancelled.Run.Status != kernel.RunStatusCancelled {
 		t.Fatalf("verified settlement did not unlock ancestor: %+v err=%v", cancelled.Run, err)
 	}
-	if _, err = rt.BeginChildExecution(t.Context(), child.Run.ID, child.Run.Revision); !errors.Is(err, kernel.ErrExecutionConflict) {
+	if _, err = conformance.AdmitChildFixture(t.Context(), rt, child.Run.ID, child.Run.Revision); !errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("terminated ancestor admitted child: %v", err)
 	}
 	if _, err = rt.Create(t.Context(), kernel.CreateRequest{ID: "late-child", Kind: "agent", ParentRunID: root.Run.ID, Actor: root.Run.Actor, Thread: root.Run.Thread, Goal: "late", State: []byte(`{}`)}); !errors.Is(err, kernel.ErrExecutionConflict) {
@@ -89,7 +89,7 @@ func TestIssue107MemoryParentCancelChildBeginLinearizable(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				<-gate
-				grant, beginErr = rt.BeginChildExecution(context.Background(), child.Run.ID, child.Run.Revision)
+				grant, beginErr = conformance.AdmitChildFixture(context.Background(), rt, child.Run.ID, child.Run.Revision)
 			}()
 			go func() {
 				defer wg.Done()

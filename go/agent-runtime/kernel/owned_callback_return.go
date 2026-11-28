@@ -232,7 +232,7 @@ func (r *Runtime) RecordPhysicalCallbackReturn(ctx context.Context, g ChildExecu
 	if r == nil || ctx == nil || !g.Identity().Valid() || g.ExpectedRevision == 0 || revision == 0 {
 		return ErrInvalidInput
 	}
-	store, ok := r.store.(OwnedPhysicalExecutionStore)
+	store, ok := r.store.(PhysicalExecutionStore)
 	if !ok {
 		return ErrExecutionRequired
 	}
@@ -242,7 +242,7 @@ func (r *Runtime) LookupPhysicalCallbackReturn(ctx context.Context, g ChildExecu
 	if r == nil || ctx == nil || !g.Identity().Valid() || g.ExpectedRevision == 0 {
 		return PhysicalCallbackCompletion{}, ErrInvalidInput
 	}
-	store, ok := r.store.(OwnedPhysicalExecutionStore)
+	store, ok := r.store.(PhysicalExecutionStore)
 	if !ok {
 		return PhysicalCallbackCompletion{}, ErrExecutionRequired
 	}

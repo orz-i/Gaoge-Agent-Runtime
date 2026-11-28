@@ -2,6 +2,7 @@ package memory_test
 
 import (
 	"errors"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance"
 	"testing"
 	"time"
 
@@ -26,7 +27,7 @@ func TestRemovedCompositeKindCannotReceivePhysicalExecutionGrant(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := rt.BeginChildExecution(t.Context(), snap.Run.ID, snap.Run.Revision); !errors.Is(err, kernel.ErrExecutionRequired) {
+			if _, err := conformance.AdmitChildFixture(t.Context(), rt, snap.Run.ID, snap.Run.Revision); !errors.Is(err, kernel.ErrExecutionRequired) {
 				t.Fatalf("removed kind %s gained physical execution authority: %v", name, err)
 			}
 		})

@@ -271,7 +271,7 @@ func ea1RootUnknownResume(t *testing.T, factory func(*testing.T) (kernel.Store, 
 	if kind == "tool" {
 		event = "tool.completed"
 	}
-	fault := &ea1AgentReceiptFault{Store: f.store, ExecutionStore: f.store, ControlStore: f.store, ChildExecutionStore: f.store, ExecutionQuarantineStore: f.store, OwnedPhysicalExecutionStore: f.store, event: event, injected: injected}
+	fault := &ea1AgentReceiptFault{Store: f.store, ExecutionStore: f.store, ControlStore: f.store, ExecutionQuarantineStore: f.store, PhysicalExecutionStore: f.store, event: event, injected: injected}
 	rt := ea1StartRuntime(t, fault)
 	f.physical.rt = rt
 	runner := f.runner(rt, "resume-owner", true)

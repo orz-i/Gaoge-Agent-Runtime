@@ -2,6 +2,7 @@ package sqlite_test
 
 import (
 	"errors"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance"
 	"path/filepath"
 	"testing"
 
@@ -34,7 +35,7 @@ func TestIssue107SQLiteGrantSurvivesReopenUntilOriginalSettlement(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	grant, err := rt.BeginChildExecution(t.Context(), child.Run.ID, child.Run.Revision)
+	grant, err := conformance.AdmitChildFixture(t.Context(), rt, child.Run.ID, child.Run.Revision)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +55,7 @@ func TestIssue107SQLiteGrantSurvivesReopenUntilOriginalSettlement(t *testing.T) 
 	if !errors.Is(err, kernel.ErrChildExecutionBusy) {
 		t.Fatalf("reopened Store lost original pending Grant: %v", err)
 	}
-	if _, err = recovered.BeginChildExecution(t.Context(), child.Run.ID, child.Run.Revision); !errors.Is(err, kernel.ErrChildExecutionBusy) {
+	if _, err = conformance.AdmitChildFixture(t.Context(), recovered, child.Run.ID, child.Run.Revision); !errors.Is(err, kernel.ErrChildExecutionBusy) {
 		t.Fatalf("restarted worker replayed unresolved Tool: %v", err)
 	}
 	original, lookupErr := recovered.LookupChildExecution(t.Context(), child.Run.ID)

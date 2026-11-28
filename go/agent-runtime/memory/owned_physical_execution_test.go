@@ -44,16 +44,13 @@ func ownedPhysicalAdmit(t *testing.T, bound *kernel.Runtime, v kernel.Snapshot, 
 	if v.Run.Status == kernel.RunStatusWaitingInput {
 		operation = "approval"
 	}
-	proof := featurecontrol.Seal(v.Run.ID, v.Run.Revision, "agent_owned_physical_admission", kernel.OwnedPhysicalAdmissionSubject(q, l, operation, ""), v.State, v)
-	_, admission, e := bound.AdmitOwnedPhysicalExecution(t.Context(), v, q, proof, operation, "")
+	proof := featurecontrol.Seal(v.Run.ID, v.Run.Revision, "agent_owned_physical_admission", kernel.PhysicalAdmissionSubject(q, l, operation, ""), v.State, v)
+	scoped, admission, e := bound.AdmitPhysicalExecution(t.Context(), v, q, proof, operation, "")
 	g := admission.Grant
 	if e != nil {
 		t.Fatal(e)
 	}
-	scoped, e := bound.WithPhysicalGrant(t.Context(), g, featurecontrol.Seal(v.Run.ID, v.Run.Revision, "agent_physical_owner", g.ID, v.State, v.Checkpoint))
-	if e != nil {
-		t.Fatal(e)
-	}
+
 	if _, e := scoped.CheckOwnedPhysicalEntry(t.Context(), v); e != nil {
 		t.Fatal(e)
 	}
@@ -61,15 +58,15 @@ func ownedPhysicalAdmit(t *testing.T, bound *kernel.Runtime, v kernel.Snapshot, 
 }
 func TestOwnedPhysicalMemoryAdmissionBindingAndTTL(t *testing.T) {
 	s, rt, bound, v, l, clock := ownedPhysicalFixture(t)
-	if _, _, e := bound.AdmitOwnedPhysicalExecution(t.Context(), v, kernel.ExecutionAcquireRequest{}, nil, "start", ""); !errors.Is(e, kernel.ErrExecutionConflict) {
+	if _, _, e := bound.AdmitPhysicalExecution(t.Context(), v, kernel.ExecutionAcquireRequest{}, nil, "start", ""); !errors.Is(e, kernel.ErrExecutionConflict) {
 		t.Fatalf("nil proof: %v", e)
 	}
 	g, scoped := ownedPhysicalAdmit(t, bound, v, l)
 	if !g.MatchesExecution(l) || g.AdmissionOperation != "start" || g.AdmissionSourceHash == "" {
 		t.Fatal("missing immutable native binding")
 	}
-	if e := s.BeginChildExecution(t.Context(), g); !errors.Is(e, kernel.ErrInvalidInput) {
-		t.Fatalf("owned passed old admission: %v", e)
+	if _, e := s.BeginPhysicalExecution(t.Context(), kernel.PhysicalAdmission{}); !errors.Is(e, kernel.ErrExecutionConflict) {
+		t.Fatalf("unsealed command admitted: %v", e)
 	}
 	before, e := rt.Load(t.Context(), v.Run.ID)
 	if e != nil {

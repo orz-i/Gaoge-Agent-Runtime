@@ -61,8 +61,8 @@ func (s *controlTestFencedCreateStore) Create(ctx context.Context, record kernel
 	record.ExecutionRequired = true
 	return s.Store.Create(ctx, record, events)
 }
-func (s *controlTestFencedCreateStore) BeginOwnedPhysicalExecution(ctx context.Context, p kernel.OwnedPhysicalAdmission) (kernel.OwnedPhysicalAdmissionResult, error) {
-	v, e := s.Store.BeginOwnedPhysicalExecution(ctx, p)
+func (s *controlTestFencedCreateStore) BeginPhysicalExecution(ctx context.Context, p kernel.PhysicalAdmission) (kernel.PhysicalAdmissionResult, error) {
+	v, e := s.Store.BeginPhysicalExecution(ctx, p)
 	if e == nil {
 		s.lease = v.Lease
 	}

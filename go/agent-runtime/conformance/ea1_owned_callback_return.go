@@ -17,8 +17,8 @@ import (
 type ea1OwnedRecoveryCapture struct {
 	kernel.Store
 	kernel.ExecutionStore
-	kernel.ChildExecutionStore
-	kernel.OwnedPhysicalExecutionStore
+
+	kernel.PhysicalExecutionStore
 	mutation kernel.StoreMutation
 	permit   kernel.OwnedPhysicalRecovery
 }
@@ -26,7 +26,7 @@ type ea1OwnedRecoveryCapture struct {
 func (s *ea1OwnedRecoveryCapture) ApplyOwnedPhysicalRecovery(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, m kernel.StoreMutation, p kernel.OwnedPhysicalRecovery) (kernel.Snapshot, error) {
 	s.mutation = m
 	s.permit = p
-	return s.OwnedPhysicalExecutionStore.ApplyOwnedPhysicalRecovery(ctx, g, rev, m, p)
+	return s.PhysicalExecutionStore.ApplyOwnedPhysicalRecovery(ctx, g, rev, m, p)
 }
 
 // RunEA1OwnedCallbackReturn exercises the actual first-party opaque ports,
@@ -41,7 +41,7 @@ func RunEA1OwnedCallbackReturn(t *testing.T, factory func(*testing.T) (kernel.St
 			if e != nil {
 				t.Fatal(e)
 			}
-			captured := &ea1OwnedRecoveryCapture{Store: peer, ExecutionStore: peer.(kernel.ExecutionStore), ChildExecutionStore: peer.(kernel.ChildExecutionStore), OwnedPhysicalExecutionStore: peer.(kernel.OwnedPhysicalExecutionStore)}
+			captured := &ea1OwnedRecoveryCapture{Store: peer, ExecutionStore: peer.(kernel.ExecutionStore), PhysicalExecutionStore: peer.(kernel.PhysicalExecutionStore)}
 			observer, e := kernel.New(kernel.Dependencies{Store: captured})
 			if e != nil {
 				t.Fatal(e)
@@ -58,7 +58,7 @@ func RunEA1OwnedCallbackReturn(t *testing.T, factory func(*testing.T) (kernel.St
 			if e != nil {
 				t.Fatal(e)
 			}
-			g, e := admitBorrowed(t.Context(), bound, initial, "start", "")
+			_, g, e := admitBorrowed(t.Context(), bound, initial, "start", "")
 			if e != nil {
 				t.Fatal(e)
 			}
@@ -154,12 +154,12 @@ func RunEA1OwnedCallbackReturn(t *testing.T, factory func(*testing.T) (kernel.St
 			}
 			// The exact original authority losing only its revision is a normal
 			// CAS conflict; a changed grant is never eligible for that retry class.
-			if _, e = captured.OwnedPhysicalExecutionStore.ApplyOwnedPhysicalRecovery(t.Context(), g, initial.Run.Revision, captured.mutation, captured.permit); !errors.Is(e, kernel.ErrConflict) {
+			if _, e = captured.PhysicalExecutionStore.ApplyOwnedPhysicalRecovery(t.Context(), g, initial.Run.Revision, captured.mutation, captured.permit); !errors.Is(e, kernel.ErrConflict) {
 				t.Fatalf("pure stale receipt CAS: %v", e)
 			}
 			foreign := g
 			foreign.ExecutionEpoch++
-			if _, e = captured.OwnedPhysicalExecutionStore.ApplyOwnedPhysicalRecovery(t.Context(), foreign, initial.Run.Revision, captured.mutation, captured.permit); !errors.Is(e, kernel.ErrExecutionConflict) {
+			if _, e = captured.PhysicalExecutionStore.ApplyOwnedPhysicalRecovery(t.Context(), foreign, initial.Run.Revision, captured.mutation, captured.permit); !errors.Is(e, kernel.ErrExecutionConflict) {
 				t.Fatalf("foreign receipt CAS became retryable: %v", e)
 			}
 			unchanged, e := observer.Load(t.Context(), g.ChildRunID)

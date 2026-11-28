@@ -144,51 +144,49 @@ func knownPhysicalSettlement(state runState, borrowed bool) bool {
 // withNativeSegment selects only the original native ownership constraint;
 // all first-party execution enters the same callback lifecycle.
 func (runner *Runner) withNativeSegment(ctx context.Context, snapshot kernel.Snapshot, operation string, execute func(context.Context, *Runner, kernel.Snapshot) (kernel.Snapshot, error)) (kernel.Snapshot, error) {
-	if snapshot.Run.ParentRunID != "" {
-		rt := runner.runtime.WithoutPhysicalGrant()
-		child, err := rt.Load(ctx, snapshot.Run.ID)
-		if err != nil {
-			return kernel.Snapshot{}, err
-		}
-		sourceHash := kernel.ManagedDigest(struct {
-			Snapshot  kernel.Snapshot
-			Operation string
-		}{child, operation})
-		if sourceHash == "" {
-			return child, ErrInvalidRequest
-		}
-		grant, err := rt.BeginChildExecution(ctx, snapshot.Run.ID, snapshot.Run.Revision)
-		if err != nil {
-			return child, err
-		}
-		proof := featurecontrol.Seal(child.Run.ID, child.Run.Revision, "agent_physical_owner", grant.ID, child.State, child.Checkpoint)
-		bound, err := rt.WithPhysicalGrant(ctx, grant, proof)
-		if err != nil {
-			return child, errors.Join(kernel.ErrChildExecutionBusy, err)
-		}
-		return runner.executeNativeSegment(ctx, child, bound, grant, nil, false, operation, sourceHash, execute)
+	rt := runner.runtime
+	parented := snapshot.Run.ParentRunID != ""
+	if parented {
+		rt = rt.WithoutPhysicalGrant()
 	}
-	if !runner.runtime.SupportsOwnedPhysicalExecution() || !runner.runtime.SupportsOwnedRetirement() {
+	if !runner.runtime.SupportsPhysicalExecution() || !runner.runtime.SupportsOwnedRetirement() {
 		return snapshot, kernel.ErrExecutionRequired
 	}
-	if _, err := runner.runtime.LookupChildExecution(ctx, snapshot.Run.ID); err == nil {
-		return snapshot, ErrRootOutcomeUnknown
-	} else if !errors.Is(err, kernel.ErrNotFound) {
-		return snapshot, err
+	if !parented {
+		if _, err := rt.LookupChildExecution(ctx, snapshot.Run.ID); err == nil {
+			return snapshot, ErrRootOutcomeUnknown
+		} else if !errors.Is(err, kernel.ErrNotFound) {
+			return snapshot, err
+		}
 	}
-	lease, external := runner.runtime.BoundExecutionLease()
+	lease, external := rt.BoundExecutionLease()
 	dispatchID := runner.originalPhysicalDispatch(ctx, snapshot.Run.ID, operation)
 	var q kernel.ExecutionAcquireRequest
-	if !external {
+	if parented {
+		lease = kernel.ExecutionLease{}
+		external = false
+		dispatchID = ""
+	} else if !external {
 		q = kernel.ExecutionAcquireRequest{RunID: snapshot.Run.ID, OwnerID: runner.runExecution.OwnerID, LeaseDuration: runner.runExecution.LeaseDuration}
 	}
-	proof := featurecontrol.Seal(snapshot.Run.ID, snapshot.Run.Revision, "agent_owned_physical_admission", kernel.OwnedPhysicalAdmissionSubject(q, lease, operation, dispatchID), snapshot.State, snapshot)
-	scopedRT, admitted, err := runner.runtime.AdmitOwnedPhysicalExecution(ctx, snapshot, q, proof, operation, dispatchID)
+	subject := kernel.PhysicalAdmissionSubject(q, lease, operation, dispatchID)
+	if parented {
+		subject = kernel.PhysicalAdmissionSubject(q, lease, "", "")
+	}
+	proof := featurecontrol.Seal(snapshot.Run.ID, snapshot.Run.Revision, "agent_owned_physical_admission", subject, snapshot.State, snapshot)
+	scopedRT, admitted, err := rt.AdmitPhysicalExecution(ctx, snapshot, q, proof, operation, dispatchID)
 	if err != nil {
 		if errors.Is(err, kernel.ErrPhysicalAdmissionCommitUnknown) {
 			err = errors.Join(ErrRootOutcomeUnknown, err)
 		}
 		return snapshot, err
+	}
+	if parented {
+		sourceHash := kernel.ManagedDigest(struct {
+			Snapshot  kernel.Snapshot
+			Operation string
+		}{snapshot, operation})
+		return runner.executeNativeSegment(ctx, snapshot, scopedRT, admitted.Grant, nil, false, operation, sourceHash, execute)
 	}
 	return runner.executeNativeSegment(ctx, snapshot, scopedRT, admitted.Grant, &admitted.Lease, external, admitted.Grant.AdmissionOperation, admitted.Grant.AdmissionSourceHash, execute)
 }

@@ -42,7 +42,7 @@ type ea1RootRecoveryFault struct {
 }
 
 func (s *ea1RootRecoveryFault) ApplyOwnedPhysicalRecovery(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, m kernel.StoreMutation, p kernel.OwnedPhysicalRecovery) (kernel.Snapshot, error) {
-	out, err := s.OwnedPhysicalExecutionStore.ApplyOwnedPhysicalRecovery(ctx, g, rev, m, p)
+	out, err := s.PhysicalExecutionStore.ApplyOwnedPhysicalRecovery(ctx, g, rev, m, p)
 	if err == nil && s.phase == "P3" && s.cuts == 0 {
 		s.cuts++
 		s.recoveryGrant = g
@@ -63,12 +63,12 @@ func (s *ea1RootRecoveryFault) FinishChildExecution(ctx context.Context, g kerne
 			s.heldSource = source
 			return s.injected
 		}
-		if e := s.ChildExecutionStore.FinishChildExecution(ctx, g, p); e != nil {
+		if e := s.PhysicalExecutionStore.FinishChildExecution(ctx, g, p); e != nil {
 			return e
 		}
 		return s.injected
 	}
-	return s.ChildExecutionStore.FinishChildExecution(ctx, g, p)
+	return s.PhysicalExecutionStore.FinishChildExecution(ctx, g, p)
 }
 
 type ea1RootRecoveryPhysical struct {
@@ -95,7 +95,7 @@ func ea1RootReconcilePhase(t *testing.T, factory func(*testing.T) (kernel.Store,
 	if kind == "tool" {
 		event = "tool.completed"
 	}
-	initial := &ea1AgentReceiptFault{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ControlStore: backing.(kernel.ControlStore), ChildExecutionStore: backing.(kernel.ChildExecutionStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), OwnedPhysicalExecutionStore: backing.(kernel.OwnedPhysicalExecutionStore), event: event, injected: injected}
+	initial := &ea1AgentReceiptFault{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ControlStore: backing.(kernel.ControlStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), PhysicalExecutionStore: backing.(kernel.PhysicalExecutionStore), event: event, injected: injected}
 	fault := &ea1RootRecoveryFault{ea1AgentReceiptFault: initial}
 	rt := ea1StartRuntime(t, fault)
 	competitor := ea1StartRuntime(t, peer)

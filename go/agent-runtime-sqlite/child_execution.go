@@ -10,8 +10,7 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
-var _ kernel.ChildExecutionStore = (*Store)(nil)
-var _ kernel.OwnedPhysicalExecutionStore = (*Store)(nil)
+var _ kernel.PhysicalExecutionStore = (*Store)(nil)
 
 func sqliteValidateLiveRunOwners(ctx context.Context, tx *sql.Tx, run kernel.Run) ([]string, error) {
 	return kernel.ValidateLiveRunOwners(ctx, run, func(ctx context.Context, id string) (kernel.Snapshot, error) {
@@ -20,57 +19,6 @@ func sqliteValidateLiveRunOwners(ctx context.Context, tx *sql.Tx, run kernel.Run
 		}
 		return loadTx(ctx, tx, id)
 	})
-}
-
-func (s *Store) BeginChildExecution(ctx context.Context, grant kernel.ChildExecutionGrant) error {
-	if s == nil || s.db == nil || ctx == nil || !grant.Identity().Valid() || grant.ExpectedRevision == 0 || grant.IsOwned() {
-		return kernel.ErrInvalidInput
-	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return conflictOrDatabaseError(err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	child, err := loadTx(ctx, tx, grant.ChildRunID)
-	if err != nil {
-		return err
-	}
-	if e := sqliteNativeEntryGate(ctx, tx, grant.ChildRunID); e != nil {
-		return e
-	}
-	if (child.Run.Status != kernel.RunStatusRunning && child.Run.Status != kernel.RunStatusWaitingInput) ||
-		child.Run.Revision != grant.ExpectedRevision {
-		return kernel.ErrExecutionConflict
-	}
-	var ids []string
-	if child.Run.Kind != "agent" {
-		return kernel.ErrExecutionRequired
-	}
-	if child.Run.ParentRunID != "" {
-		ids, err = sqliteValidateLiveRunOwners(ctx, tx, child.Run)
-		if err != nil {
-			return err
-		}
-	}
-	// Self + ancestor execution fencing is atomic in the SQLite writer.
-	ids = append(ids, child.Run.ID)
-	if err = sqliteReserveGrantIdentity(ctx, tx, grant); err != nil {
-		return err
-	}
-	var count int
-	if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM runtime_child_effect_grants WHERE child_run_id=?", grant.ChildRunID).Scan(&count); err != nil {
-		return err
-	}
-	if count > 0 {
-		return kernel.ErrChildExecutionBusy
-	}
-	for _, id := range ids {
-		_, err = tx.ExecContext(ctx, "INSERT INTO runtime_child_effect_grants(grant_id,parent_run_id,child_run_id,start_revision) VALUES(?,?,?,?)", grant.ID, id, grant.ChildRunID, grant.ExpectedRevision)
-		if err != nil {
-			return conflictOrDatabaseError(err)
-		}
-	}
-	return tx.Commit()
 }
 
 func (s *Store) FinishChildExecution(ctx context.Context, grant kernel.ChildExecutionGrant, permit kernel.ChildExecutionSettlement) error {
@@ -250,14 +198,14 @@ func sqliteBoundLeaseCurrent(ctx context.Context, tx *sql.Tx, g kernel.ChildExec
 	return nil
 }
 
-func (s *Store) BeginOwnedPhysicalExecution(ctx context.Context, permit kernel.OwnedPhysicalAdmission) (kernel.OwnedPhysicalAdmissionResult, error) {
-	var zero kernel.OwnedPhysicalAdmissionResult
+func (s *Store) BeginPhysicalExecution(ctx context.Context, permit kernel.PhysicalAdmission) (kernel.PhysicalAdmissionResult, error) {
+	var zero kernel.PhysicalAdmissionResult
 	if s == nil || s.db == nil || ctx == nil {
 		return zero, kernel.ErrInvalidInput
 	}
 	g := permit.Candidate().Grant
 	if !g.Identity().Valid() {
-		return kernel.OwnedPhysicalAdmissionResult{}, kernel.ErrExecutionConflict
+		return kernel.PhysicalAdmissionResult{}, kernel.ErrExecutionConflict
 	}
 	tx, e := s.db.BeginTx(ctx, nil)
 	if e != nil {
@@ -268,11 +216,17 @@ func (s *Store) BeginOwnedPhysicalExecution(ctx context.Context, permit kernel.O
 	if e != nil {
 		return zero, e
 	}
-	if _, e = sqliteValidateLiveRunOwners(ctx, tx, current.Run); e != nil {
+	ancestors, e := sqliteValidateLiveRunOwners(ctx, tx, current.Run)
+	if e != nil {
 		return zero, e
 	}
 	if e = sqliteReserveGrantIdentity(ctx, tx, g); e != nil {
 		return zero, e
+	}
+	if !g.IsOwned() {
+		if e = sqliteNativeEntryGate(ctx, tx, g.ChildRunID); e != nil {
+			return zero, e
+		}
 	}
 	native, quarantine, e := sqliteManagedLease(ctx, tx, g.ChildRunID)
 	if e != nil {
@@ -286,7 +240,7 @@ func (s *Store) BeginOwnedPhysicalExecution(ctx context.Context, permit kernel.O
 	if e = tx.QueryRowContext(ctx, "SELECT execution_physical_epoch FROM runtime_runs WHERE run_id=?", g.ChildRunID).Scan(&physicalEpoch); e != nil {
 		return zero, e
 	}
-	var v kernel.OwnedPhysicalAdmissionResult
+	var v kernel.PhysicalAdmissionResult
 	var next kernel.ManagedTransfer
 	if permit.IsManagedRecovery() {
 		if quarantine != 0 {
@@ -313,22 +267,33 @@ func (s *Store) BeginOwnedPhysicalExecution(ctx context.Context, permit kernel.O
 		}
 	} else {
 		var count int
-		if e = tx.QueryRowContext(ctx, "SELECT count(*) FROM runtime_child_effect_grants WHERE parent_run_id=? OR child_run_id=?", g.ChildRunID, g.ChildRunID).Scan(&count); e != nil {
+		query := "SELECT count(*) FROM runtime_child_effect_grants WHERE child_run_id=?"
+		args := []any{g.ChildRunID}
+		if g.IsOwned() {
+			query += " OR parent_run_id=?"
+			args = append(args, g.ChildRunID)
+		}
+		if e = tx.QueryRowContext(ctx, query, args...).Scan(&count); e != nil {
 			return zero, e
 		}
-		v, e = kernel.ResolveOwnedPhysicalAdmission(current, native, time.UnixMilli(now).UTC(), quarantine != 0, count != 0, permit)
+		v, e = kernel.ResolvePhysicalAdmission(current, native, time.UnixMilli(now).UTC(), quarantine != 0, count != 0, permit)
 		if e != nil {
 			return zero, e
 		}
 	}
 	g = v.Grant
+	for _, id := range append(ancestors, g.ChildRunID) {
+		_, e = tx.ExecContext(ctx, `INSERT INTO runtime_child_effect_grants(grant_id,parent_run_id,child_run_id,start_revision,execution_owner_id,execution_lease_id,execution_epoch,admission_source_hash,admission_operation) VALUES(?,?,?,?,?,?,?,?,?)`, g.ID, id, g.ChildRunID, g.ExpectedRevision, g.ExecutionOwnerID, g.ExecutionLeaseID, g.ExecutionEpoch, g.AdmissionSourceHash, g.AdmissionOperation)
+		if e != nil {
+			return zero, conflictOrDatabaseError(e)
+		}
+	}
+	if !g.IsOwned() {
+		return v, permit.CommitOutcome(conflictOrDatabaseError(tx.Commit()))
+	}
 	physicalEpoch, e = kernel.PrepareOwnedEntryEpoch(g, native.Epoch, physicalEpoch)
 	if e != nil {
 		return zero, e
-	}
-	_, e = tx.ExecContext(ctx, `INSERT INTO runtime_child_effect_grants(grant_id,parent_run_id,child_run_id,start_revision,execution_owner_id,execution_lease_id,execution_epoch,admission_source_hash,admission_operation) VALUES(?,?,?,?,?,?,?,?,?)`, g.ID, g.ChildRunID, g.ChildRunID, g.ExpectedRevision, g.ExecutionOwnerID, g.ExecutionLeaseID, g.ExecutionEpoch, g.AdmissionSourceHash, g.AdmissionOperation)
-	if e != nil {
-		return zero, conflictOrDatabaseError(e)
 	}
 	var changed sql.Result
 	if permit.AcquiresLease() {

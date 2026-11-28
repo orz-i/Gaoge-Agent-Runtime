@@ -80,7 +80,7 @@ func loadOwnedPhysicalGrant(ctx context.Context, q schemaQuery, g kernel.ChildEx
 }
 
 func (s *Store) CheckOwnedPhysicalEntry(ctx context.Context, g kernel.ChildExecutionGrant, l kernel.ExecutionLease, expected kernel.Snapshot) (kernel.OwnedPhysicalEntryWindow, error) {
-	if s == nil || s.db == nil || ctx == nil || kernel.ValidateOwnedPhysicalAdmissionRequest(g, l) != nil {
+	if s == nil || s.db == nil || ctx == nil || kernel.ValidatePhysicalAdmissionRequest(g, l) != nil {
 		return kernel.OwnedPhysicalEntryWindow{}, kernel.ErrInvalidInput
 	}
 	tx, err := s.db.BeginTx(ctx, nil)

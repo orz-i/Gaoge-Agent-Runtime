@@ -44,7 +44,7 @@ func ea1ControlSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, 
 	ctx := t.Context()
 	backing, peerStore, reopen := factory(t)
 	fault := errors.New("original control settlement transport fault")
-	wrapped := &ea1StartSettlementStore{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ControlStore: backing.(kernel.ControlStore), ChildExecutionStore: backing.(kernel.ChildExecutionStore), OwnedPhysicalExecutionStore: backing.(kernel.OwnedPhysicalExecutionStore), mode: "setup", fault: fault}
+	wrapped := &ea1StartSettlementStore{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ControlStore: backing.(kernel.ControlStore), PhysicalExecutionStore: backing.(kernel.PhysicalExecutionStore), mode: "setup", fault: fault}
 	rt, err := kernel.New(kernel.Dependencies{Store: wrapped})
 	if err != nil {
 		t.Fatal(err)
@@ -481,7 +481,7 @@ func ea1ControlSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, 
 	ea1ControlUnchanged(t, freshRT, before, grant)
 	wrong := grant
 	wrong.ExecutionEpoch++
-	if err = freshStore.(kernel.ChildExecutionStore).FinishChildExecution(ctx, wrong, kernel.ChildExecutionSettlement{}); !errors.Is(err, kernel.ErrExecutionConflict) {
+	if err = freshStore.(kernel.PhysicalExecutionStore).FinishChildExecution(ctx, wrong, kernel.ChildExecutionSettlement{}); !errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("foreign epoch retired scope: %v", err)
 	}
 	ea1ControlUnchanged(t, freshRT, before, grant)

@@ -43,17 +43,20 @@ type ea1ChildRecoveryPhaseStore struct {
 	afterBegin, beforeMark func()
 }
 
-func (s *ea1ChildRecoveryPhaseStore) BeginChildExecution(ctx context.Context, g kernel.ChildExecutionGrant) error {
-	err := s.ChildExecutionStore.BeginChildExecution(ctx, g)
+func (s *ea1ChildRecoveryPhaseStore) BeginPhysicalExecution(ctx context.Context, p kernel.PhysicalAdmission) (kernel.PhysicalAdmissionResult, error) {
+	if p.Candidate().Grant.IsOwned() {
+		return s.ea1AgentAdmissionStore.BeginPhysicalExecution(ctx, p)
+	}
+	result, err := s.ea1AgentAdmissionStore.BeginPhysicalExecution(ctx, p)
 	if err == nil && s.afterBegin != nil {
 		s.afterBegin()
 	}
-	return err
+	return result, err
 }
 
 func (s *ea1ChildRecoveryPhaseStore) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, outcome kernel.PhysicalCallbackOutcome, p kernel.PhysicalCallbackReturn) error {
 	if g.IsOwned() {
-		return s.OwnedPhysicalExecutionStore.RecordPhysicalCallbackReturn(ctx, g, rev, outcome, p)
+		return s.PhysicalExecutionStore.RecordPhysicalCallbackReturn(ctx, g, rev, outcome, p)
 	}
 	if s.beforeMark != nil {
 		s.beforeMark()
@@ -61,7 +64,7 @@ func (s *ea1ChildRecoveryPhaseStore) RecordPhysicalCallbackReturn(ctx context.Co
 	if s.mode == "unmarked" {
 		return s.fault
 	}
-	e := s.OwnedPhysicalExecutionStore.RecordPhysicalCallbackReturn(ctx, g, rev, outcome, p)
+	e := s.PhysicalExecutionStore.RecordPhysicalCallbackReturn(ctx, g, rev, outcome, p)
 	if e == nil {
 		s.marks++
 	}
@@ -74,7 +77,7 @@ func (s *ea1ChildRecoveryPhaseStore) FinishChildExecution(ctx context.Context, g
 	if s.mode == "marked" || s.mode == "P5" {
 		return s.fault
 	}
-	s.lastFinish = func() error { return s.ChildExecutionStore.FinishChildExecution(ctx, g, p) }
+	s.lastFinish = func() error { return s.PhysicalExecutionStore.FinishChildExecution(ctx, g, p) }
 	e := s.lastFinish()
 	if e == nil {
 		s.finishes++

@@ -39,8 +39,8 @@ func ea1AgentUnknownReceipts(t *testing.T, factory func(*testing.T) (kernel.Stor
 				event = "tool.completed"
 			}
 			injected := errors.New("test-only physical response received but original receipt not committed")
-			fault := &ea1AgentReceiptFault{Store: backing, ExecutionStore: native, OwnedPhysicalExecutionStore: backing.(kernel.OwnedPhysicalExecutionStore),
-				ControlStore: backing.(kernel.ControlStore), ChildExecutionStore: backing.(kernel.ChildExecutionStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), event: event, injected: injected}
+			fault := &ea1AgentReceiptFault{Store: backing, ExecutionStore: native, PhysicalExecutionStore: backing.(kernel.PhysicalExecutionStore),
+				ControlStore: backing.(kernel.ControlStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), event: event, injected: injected}
 			rt, err := kernel.New(kernel.Dependencies{Store: fault})
 			if err != nil {
 				t.Fatal(err)
@@ -189,9 +189,9 @@ type ea1AgentReceiptFault struct {
 	kernel.Store
 	kernel.ExecutionStore
 	kernel.ControlStore
-	kernel.ChildExecutionStore
+
 	kernel.ExecutionQuarantineStore
-	kernel.OwnedPhysicalExecutionStore
+	kernel.PhysicalExecutionStore
 	event    string
 	injected error
 	failures int

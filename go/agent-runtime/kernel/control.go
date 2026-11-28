@@ -232,8 +232,8 @@ func (runtime *Runtime) ApplyControl(ctx context.Context, runID string, expected
 	if store, ok := runtime.store.(ControlStore); ok {
 		snapshot, revoked, writeErr := store.ApplyControl(ctx, runID, expectedRevision, guard, next)
 		if guard.Kind == ControlCancel && errors.Is(writeErr, ErrChildExecutionBusy) {
-			if _, authorized := runtime.store.(ChildExecutionStore); authorized {
-				// Every ChildExecutionStore MUST attest this busy outcome was
+			if _, authorized := runtime.store.(PhysicalExecutionStore); authorized {
+				// Every PhysicalExecutionStore MUST attest this busy outcome was
 				// rejected BEFORE any CAS mutation; unlike a generic Store
 				// ErrConflict it is a source-specific no-effect proof.
 				return Snapshot{}, false, &controlChildBusyNoEffect{cause: writeErr}

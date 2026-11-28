@@ -85,7 +85,7 @@ func runNativeBudgetControl(t *testing.T, factory func(*testing.T) ExecutionBudg
 			if mode != "cancel" {
 				var grant kernel.ChildExecutionGrant
 				if mode == "reject-active-grant-then-approve" {
-					grant, err = rt.BeginChildExecution(ctx, "child", waiting.Run.Revision)
+					grant, err = AdmitChildFixture(ctx, rt, "child", waiting.Run.Revision)
 					if err != nil {
 						t.Fatal(err)
 					}

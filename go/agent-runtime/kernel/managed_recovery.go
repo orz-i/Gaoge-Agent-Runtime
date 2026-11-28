@@ -447,21 +447,21 @@ func managedResumeSelectionMatches(t ManagedTransfer) bool {
 // OwnedAdmission turns an already authorized recovery source into the same
 // native admission permit as ordinary execution. The Lease token supplies
 // the private attempt commitment; there is no separate claimant identity.
-func (p ManagedAdmissionProof) OwnedAdmission(q ExecutionAcquireRequest, leaseID, grantID string) OwnedPhysicalAdmission {
+func (p ManagedAdmissionProof) OwnedAdmission(q ExecutionAcquireRequest, leaseID, grantID string) PhysicalAdmission {
 	t := p.transfer
 	if !p.Matches(t, ManagedResume) || q.RunID != t.SafePoint.Host.RunID || !validExecutionAcquireRequest(q) || strings.TrimSpace(q.OwnerID) != q.OwnerID || leaseID == "" || !(GrantIdentity{GrantID: grantID, RunID: q.RunID}).Valid() {
-		return OwnedPhysicalAdmission{}
+		return PhysicalAdmission{}
 	}
 	l := ExecutionLease{RunID: q.RunID, OwnerID: q.OwnerID, LeaseID: leaseID}
 	g := ChildExecutionGrant{ID: grantID, ChildRunID: q.RunID, ExpectedRevision: t.SafePoint.Source.Run.Revision, ExecutionOwnerID: q.OwnerID, ExecutionLeaseID: leaseID, AdmissionOperation: "managed_resume"}
-	return OwnedPhysicalAdmission{acquire: q, attempt: sha256.Sum256([]byte(leaseID)), candidate: OwnedPhysicalAdmissionResult{Grant: g, Lease: l}, recovery: p}
+	return PhysicalAdmission{acquire: q, attempt: sha256.Sum256([]byte(leaseID)), candidate: PhysicalAdmissionResult{Grant: g, Lease: l}, recovery: p}
 }
 
 // ResolveManagedPhysicalAdmission qualifies the sole expired predecessor,
 // then delegates the new owner to the ordinary native admission reducer.
 // The returned recovery facts and native segment commit together.
-func ResolveManagedPhysicalAdmission(ctx context.Context, t ManagedTransfer, p OwnedPhysicalAdmission, s Snapshot, l ExecutionLease, g ChildExecutionGrant, a ManagedAuthority, physicalEpoch uint64, now time.Time, ledger budget.LedgerStore) (OwnedPhysicalAdmissionResult, ManagedTransfer, error) {
-	var zero OwnedPhysicalAdmissionResult
+func ResolveManagedPhysicalAdmission(ctx context.Context, t ManagedTransfer, p PhysicalAdmission, s Snapshot, l ExecutionLease, g ChildExecutionGrant, a ManagedAuthority, physicalEpoch uint64, now time.Time, ledger budget.LedgerStore) (PhysicalAdmissionResult, ManagedTransfer, error) {
+	var zero PhysicalAdmissionResult
 	t, err := PrepareManagedAdmission(t, p.recovery, s, l, g, a, physicalEpoch, now)
 	if err != nil {
 		return zero, ManagedTransfer{}, err
@@ -469,7 +469,7 @@ func ResolveManagedPhysicalAdmission(ctx context.Context, t ManagedTransfer, p O
 	if _, err = managedRecoveryLedger(ctx, t, ledger); err != nil {
 		return zero, ManagedTransfer{}, err
 	}
-	v, err := ResolveOwnedPhysicalAdmission(s, l, now, false, false, p)
+	v, err := ResolvePhysicalAdmission(s, l, now, false, false, p)
 	if err != nil {
 		return zero, ManagedTransfer{}, err
 	}

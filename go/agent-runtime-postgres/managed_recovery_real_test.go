@@ -86,16 +86,16 @@ type managedProjectionStore struct {
 	t *testing.T
 }
 
-func (s *managedProjectionStore) BeginOwnedPhysicalExecution(ctx context.Context, p kernel.OwnedPhysicalAdmission) (kernel.OwnedPhysicalAdmissionResult, error) {
+func (s *managedProjectionStore) BeginPhysicalExecution(ctx context.Context, p kernel.PhysicalAdmission) (kernel.PhysicalAdmissionResult, error) {
 	if !p.IsManagedRecovery() {
-		return s.KernelStore.BeginOwnedPhysicalExecution(ctx, p)
+		return s.KernelStore.BeginPhysicalExecution(ctx, p)
 	}
 	id := p.Candidate().Grant.ChildRunID
 	before, e := s.Load(ctx, id)
 	if e != nil {
-		return kernel.OwnedPhysicalAdmissionResult{}, e
+		return kernel.PhysicalAdmissionResult{}, e
 	}
-	out, callErr := s.KernelStore.BeginOwnedPhysicalExecution(ctx, p)
+	out, callErr := s.KernelStore.BeginPhysicalExecution(ctx, p)
 	after, e := s.Load(ctx, id)
 	if e != nil || kernel.ManagedDigest(before) != kernel.ManagedDigest(after) {
 		s.t.Errorf("native admission changed sealed aggregate: %v", e)

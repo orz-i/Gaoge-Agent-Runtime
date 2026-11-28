@@ -35,7 +35,7 @@ func RunEA1ChildAgentRecoveryAdmissionSuite(t *testing.T, factory func(*testing.
 func ea1ChildRecoveryAdmission(t *testing.T, factory func(*testing.T) (kernel.Store, func() kernel.Store)) {
 	backing, reopen := factory(t)
 	cut := errors.New("original child Model receipt CAS failed")
-	fault := &ea1AgentReceiptFault{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ControlStore: backing.(kernel.ControlStore), ChildExecutionStore: backing.(kernel.ChildExecutionStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), OwnedPhysicalExecutionStore: backing.(kernel.OwnedPhysicalExecutionStore), event: "agent.model_invocation.completed", injected: cut}
+	fault := &ea1AgentReceiptFault{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ControlStore: backing.(kernel.ControlStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), PhysicalExecutionStore: backing.(kernel.PhysicalExecutionStore), event: "agent.model_invocation.completed", injected: cut}
 	rt := ea1StartRuntime(t, fault)
 	parent := ea1ChildRecoveryParent(t, rt)
 	physical := &ea1StartSettlementPhysical{rt: rt}

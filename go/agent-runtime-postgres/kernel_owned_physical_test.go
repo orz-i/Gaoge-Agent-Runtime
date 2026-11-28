@@ -67,11 +67,8 @@ func runOwnedPhysicalBindingGuards(t *testing.T, db *gorm.DB) {
 		t.Fatal(e)
 	}
 	grant := kernel.ChildExecutionGrant{ID: "owned-original-grant", ChildRunID: original.Run.ID, ExpectedRevision: original.Run.Revision, ExecutionOwnerID: lease.OwnerID, ExecutionLeaseID: lease.LeaseID, ExecutionEpoch: lease.Epoch, AdmissionSourceHash: strings.Repeat("a", 64), AdmissionOperation: "start"}
-	if _, e = store.BeginOwnedPhysicalExecution(ctx, kernel.OwnedPhysicalAdmission{}); !errors.Is(e, kernel.ErrExecutionConflict) {
+	if _, e = store.BeginPhysicalExecution(ctx, kernel.PhysicalAdmission{}); !errors.Is(e, kernel.ErrExecutionConflict) {
 		t.Fatalf("forged admission: %v", e)
-	}
-	if e = store.BeginChildExecution(ctx, grant); !errors.Is(e, kernel.ErrInvalidInput) {
-		t.Fatalf("legacy Begin accepted owned binding: %v", e)
 	}
 	row := pgPhysicalRecord(grant, grant.ChildRunID)
 	if e = db.Create(&row).Error; e != nil {

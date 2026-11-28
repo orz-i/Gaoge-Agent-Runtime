@@ -5,9 +5,9 @@ import (
 	"time"
 )
 
-// ValidateOwnedPhysicalAdmissionRequest rejects malformed native identities
+// ValidatePhysicalAdmissionRequest rejects malformed native identities
 // before acquiring any Store lock. The claimed expiry remains informational.
-func ValidateOwnedPhysicalAdmissionRequest(g ChildExecutionGrant, claimed ExecutionLease) error {
+func ValidatePhysicalAdmissionRequest(g ChildExecutionGrant, claimed ExecutionLease) error {
 	if !g.Identity().Valid() || g.ExpectedRevision == 0 || !validExecutionLease(claimed) || claimed.Epoch > math.MaxInt64 || !g.MatchesExecution(claimed) {
 		return ErrInvalidInput
 	}
@@ -30,12 +30,27 @@ func ValidateOwnedPhysicalRecoveryRequest(g ChildExecutionGrant, revision uint64
 	return nil
 }
 
-// ResolveOwnedPhysicalAdmission is the common Store reducer. A fresh claim
+// ResolvePhysicalAdmission is the common Store reducer. A fresh claim
 // and physical identity are planned from the same locked source. A borrowed
 // claim is checked against the existing owner and never changes the Lease.
-func ResolveOwnedPhysicalAdmission(current Snapshot, persisted ExecutionLease, now time.Time, quarantined, hasGrants bool, permit OwnedPhysicalAdmission) (OwnedPhysicalAdmissionResult, error) {
-	var zero OwnedPhysicalAdmissionResult
+func ResolvePhysicalAdmission(current Snapshot, persisted ExecutionLease, now time.Time, quarantined, hasGrants bool, permit PhysicalAdmission) (PhysicalAdmissionResult, error) {
+	var zero PhysicalAdmissionResult
 	g, claimed := permit.candidate.Grant, permit.candidate.Lease
+	if !g.IsOwned() {
+		if current.Run.Kind != "agent" {
+			return zero, ErrExecutionRequired
+		}
+		if !permit.Matches(g, current, ExecutionLease{}) {
+			return zero, ErrExecutionConflict
+		}
+		if quarantined {
+			return zero, ErrExecutionQuarantined
+		}
+		if hasGrants {
+			return zero, ErrChildExecutionBusy
+		}
+		return PhysicalAdmissionResult{Grant: g}, nil
+	}
 	if permit.attempt == ([32]byte{}) {
 		return zero, ErrExecutionConflict
 	}
@@ -54,7 +69,7 @@ func ResolveOwnedPhysicalAdmission(current Snapshot, persisted ExecutionLease, n
 		g.ExecutionEpoch = lease.Epoch
 		g.AdmissionSourceHash = ownedAdmissionAttemptHash(current, lease, g.AdmissionOperation, g.ID, permit.attempt)
 	}
-	if err := ValidateOwnedPhysicalAdmissionRequest(g, claimed); err != nil {
+	if err := ValidatePhysicalAdmissionRequest(g, claimed); err != nil {
 		return zero, err
 	}
 	if !permit.Matches(g, current, claimed) || !g.MatchesExecution(persisted) || !now.Before(persisted.ExpiresAt) {
@@ -68,7 +83,7 @@ func ResolveOwnedPhysicalAdmission(current Snapshot, persisted ExecutionLease, n
 	}
 	// For a borrowed Lease, use the authoritative expiration, never the
 	// caller's informational timestamp.
-	return OwnedPhysicalAdmissionResult{Grant: g, Lease: persisted}, nil
+	return PhysicalAdmissionResult{Grant: g, Lease: persisted}, nil
 }
 
 // ValidatePhysicalCompletion checks the shape of an original persisted

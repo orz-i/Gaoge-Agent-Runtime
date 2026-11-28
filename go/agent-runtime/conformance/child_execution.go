@@ -1,12 +1,28 @@
 package conformance
 
 import (
+	"context"
 	"errors"
 	"testing"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/internal/featurecontrol"
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
+
+// AdmitChildFixture exercises the unified, source-sealed admission in the
+// existing low-level conformance cases. The expected revision is supplied
+// explicitly for stale/future-source tests.
+func AdmitChildFixture(ctx context.Context, rt *kernel.Runtime, id string, rev uint64) (kernel.ChildExecutionGrant, error) {
+	source, err := rt.Load(ctx, id)
+	if err != nil {
+		return kernel.ChildExecutionGrant{}, err
+	}
+	source.Run.Revision = rev
+	q := kernel.ExecutionAcquireRequest{}
+	proof := featurecontrol.Seal(id, rev, "agent_owned_physical_admission", kernel.PhysicalAdmissionSubject(q, kernel.ExecutionLease{}, "", ""), source.State, source)
+	_, result, err := rt.AdmitPhysicalExecution(ctx, source, q, proof, "start", "")
+	return result.Grant, err
+}
 
 // RunChildExecutionSuite is the cross-Store source-of-truth conformance for
 // durable parent/child physical admissions. Every store must enforce these
@@ -33,7 +49,7 @@ func RunChildExecutionSuite(t *testing.T, create func(*testing.T) kernel.Store) 
 		root := newRun("root", "")
 		middle := newRun("middle", root.Run.ID)
 		child := newRun("child", middle.Run.ID)
-		grant, err := rt.BeginChildExecution(t.Context(), child.Run.ID, child.Run.Revision)
+		grant, err := AdmitChildFixture(t.Context(), rt, child.Run.ID, child.Run.Revision)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -46,10 +62,10 @@ func RunChildExecutionSuite(t *testing.T, create func(*testing.T) kernel.Store) 
 				t.Fatalf("ancestor %s committed terminal despite pending Grant: %v", owner.Run.ID, err)
 			}
 		}
-		if _, err = rt.BeginChildExecution(t.Context(), child.Run.ID, child.Run.Revision); !errors.Is(err, kernel.ErrChildExecutionBusy) {
+		if _, err = AdmitChildFixture(t.Context(), rt, child.Run.ID, child.Run.Revision); !errors.Is(err, kernel.ErrChildExecutionBusy) {
 			t.Fatalf("concurrent second physical Grant was accepted: %v", err)
 		}
-		store := underlying.(kernel.ChildExecutionStore)
+		store := underlying.(kernel.PhysicalExecutionStore)
 		if err = rt.FinishChildExecution(t.Context(), grant, nil); !errors.Is(err, kernel.ErrExecutionConflict) {
 			t.Fatalf("outside SDK Feature could retire Grant without trusted proof: %v", err)
 		}
@@ -62,7 +78,7 @@ func RunChildExecutionSuite(t *testing.T, create func(*testing.T) kernel.Store) 
 		if err = store.FinishChildExecution(t.Context(), grant, kernel.ChildExecutionSettlement{}); !errors.Is(err, kernel.ErrExecutionConflict) {
 			t.Fatalf("original Grant was retired before physical callback completion: %v", err)
 		}
-		if markErr := underlying.(kernel.OwnedPhysicalExecutionStore).RecordPhysicalCallbackReturn(t.Context(), grant, grant.ExpectedRevision, kernel.PhysicalCallbackOutcome{HostCompleted: true}, kernel.PhysicalCallbackReturn{}); !errors.Is(markErr, kernel.ErrExecutionConflict) {
+		if markErr := underlying.(kernel.PhysicalExecutionStore).RecordPhysicalCallbackReturn(t.Context(), grant, grant.ExpectedRevision, kernel.PhysicalCallbackOutcome{HostCompleted: true}, kernel.PhysicalCallbackReturn{}); !errors.Is(markErr, kernel.ErrExecutionConflict) {
 			t.Fatalf("untrusted direct Store Mark succeeded: %v", markErr)
 		}
 		latest, loadErr := rt.Load(t.Context(), child.Run.ID)
@@ -98,14 +114,18 @@ func RunChildExecutionSuite(t *testing.T, create func(*testing.T) kernel.Store) 
 		if err = store.FinishChildExecution(t.Context(), grant, kernel.ChildExecutionSettlement{}); !errors.Is(err, kernel.ErrExecutionConflict) {
 			t.Fatalf("replayed Grant retirement succeeded: %v", err)
 		}
-		if err = store.BeginChildExecution(t.Context(), grant); !errors.Is(err, kernel.ErrExecutionConflict) {
+		reuse, e := kernel.New(kernel.Dependencies{Store: underlying, IDs: fixedGrantIDs{grant.ID}})
+		if e != nil {
+			t.Fatal(e)
+		}
+		if _, err = AdmitChildFixture(t.Context(), reuse, child.Run.ID, latest.Run.Revision); !errors.Is(err, kernel.ErrExecutionConflict) {
 			t.Fatalf("finished borrowed identity became available again: %v", err)
 		}
 		cancelled, err := rt.Cancel(t.Context(), root.Run.ID, root.Run.Revision, "after physical receipt")
 		if err != nil || cancelled.Run.Status != kernel.RunStatusCancelled {
 			t.Fatalf("verified completion failed: %+v err=%v", cancelled.Run, err)
 		}
-		if _, err = rt.BeginChildExecution(t.Context(), child.Run.ID, child.Run.Revision); !errors.Is(err, kernel.ErrExecutionConflict) {
+		if _, err = AdmitChildFixture(t.Context(), rt, child.Run.ID, child.Run.Revision); !errors.Is(err, kernel.ErrExecutionConflict) {
 			t.Fatalf("cancelled ancestor admitted new work: %v", err)
 		}
 	})

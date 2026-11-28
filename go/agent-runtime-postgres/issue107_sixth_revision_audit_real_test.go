@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance"
 	"os"
 	"strings"
 	"testing"
@@ -50,7 +51,7 @@ func TestAuditIssue107PostgresBeginCannotBindCallerExpectedChildRevision(t *test
 		t.Fatal(err)
 	}
 	child, err := rt.Create(t.Context(), kernel.CreateRequest{
-		ID: "child", Kind: "workflow", ParentRunID: parent.Run.ID, Actor: actor, Thread: thread,
+		ID: "child", Kind: "agent", ParentRunID: parent.Run.ID, Actor: actor, Thread: thread,
 		Goal: "child with pending effect at revision R", State: []byte(`{}`),
 	})
 	if err != nil {
@@ -69,10 +70,13 @@ func TestAuditIssue107PostgresBeginCannotBindCallerExpectedChildRevision(t *test
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 	defer cancel()
 	admitted := make(chan error, 1)
+	peer, e := kernel.New(kernel.Dependencies{Store: NewKernelStore(otherDB)})
+	if e != nil {
+		t.Fatal(e)
+	}
 	go func() {
-		admitted <- NewKernelStore(otherDB).BeginChildExecution(ctx, kernel.ChildExecutionGrant{
-			ID: "grant-from-stale-caller-revision", ChildRunID: child.Run.ID, ExpectedRevision: child.Run.Revision,
-		})
+		_, beginErr := conformance.AdmitChildFixture(ctx, peer, child.Run.ID, child.Run.Revision)
+		admitted <- beginErr
 	}()
 	blocked := false
 	for i := 0; i < 90; i++ {

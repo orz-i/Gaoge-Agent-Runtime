@@ -470,7 +470,7 @@ func ManagedPhysicalDispatch(t *testing.T, factory func(*testing.T) (kernel.Stor
 				}
 				observed, e := base.(kernel.ManagedRecoveryStore).LoadManagedRecovery(ctx, root.ExecutionRefID)
 				receipt, retErr := base.(kernel.OwnedRetirementStore).LoadOwnedRetirement(ctx, fault.grant.ID)
-				grant, grantErr := base.(kernel.ChildExecutionStore).LookupChildExecution(ctx, root.ExecutionRefID)
+				grant, grantErr := base.(kernel.PhysicalExecutionStore).LookupChildExecution(ctx, root.ExecutionRefID)
 				if e != nil {
 					t.Fatal(e)
 				}

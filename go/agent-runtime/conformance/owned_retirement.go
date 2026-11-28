@@ -54,15 +54,15 @@ type retirementFixture struct {
 	grant     kernel.ChildExecutionGrant
 }
 
-func admitBorrowed(ctx context.Context, rt *kernel.Runtime, s kernel.Snapshot, operation, dispatchID string) (kernel.ChildExecutionGrant, error) {
+func admitBorrowed(ctx context.Context, rt *kernel.Runtime, s kernel.Snapshot, operation, dispatchID string) (*kernel.Runtime, kernel.ChildExecutionGrant, error) {
 	l, _ := rt.BoundExecutionLease()
 	q := kernel.ExecutionAcquireRequest{}
-	proof := featurecontrol.Seal(s.Run.ID, s.Run.Revision, "agent_owned_physical_admission", kernel.OwnedPhysicalAdmissionSubject(q, l, operation, dispatchID), s.State, s)
-	scoped, v, e := rt.AdmitOwnedPhysicalExecution(ctx, s, q, proof, operation, dispatchID)
+	proof := featurecontrol.Seal(s.Run.ID, s.Run.Revision, "agent_owned_physical_admission", kernel.PhysicalAdmissionSubject(q, l, operation, dispatchID), s.State, s)
+	scoped, v, e := rt.AdmitPhysicalExecution(ctx, s, q, proof, operation, dispatchID)
 	if e == nil {
 		_, e = scoped.CheckOwnedPhysicalEntry(ctx, s)
 	}
-	return v.Grant, e
+	return scoped, v.Grant, e
 }
 
 func retirementSetup(t *testing.T, factory func(*testing.T) ManagedRecoveryStoreFixture) retirementFixture {
@@ -88,7 +88,7 @@ func retirementSetup(t *testing.T, factory func(*testing.T) ManagedRecoveryStore
 	if e != nil {
 		t.Fatal(e)
 	}
-	g, e := admitBorrowed(t.Context(), bound, v, "start", "")
+	_, g, e := admitBorrowed(t.Context(), bound, v, "start", "")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -210,7 +210,7 @@ func runRetirementACKWindows(t *testing.T, factory func(*testing.T) ManagedRecov
 	if e != nil {
 		t.Fatal(e)
 	}
-	nextGrant, e := admitBorrowed(t.Context(), nextRT, changed, "resume", "")
+	_, nextGrant, e := admitBorrowed(t.Context(), nextRT, changed, "resume", "")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -247,7 +247,7 @@ func runRetirementRejectedFinish(t *testing.T, factory func(*testing.T) ManagedR
 		if e != nil {
 			t.Fatal(e)
 		}
-		if _, e = f.rt.BeginChildExecution(t.Context(), child.Run.ID, child.Run.Revision); e != nil {
+		if _, e = AdmitChildFixture(t.Context(), f.rt, child.Run.ID, child.Run.Revision); e != nil {
 			t.Fatal(e)
 		}
 	}
@@ -345,18 +345,14 @@ func runRetirementCompetition(t *testing.T, factory func(*testing.T) ManagedReco
 func runRetirementManaged(t *testing.T, factory func(*testing.T) ManagedRecoveryStoreFixture) {
 	f := managedStoreSetup(t, factory)
 	selection, _ := managedStoreSelection(t, f, kernel.ManagedResume)
-	enabled, e := enableManagedRecovery(t.Context(), f.store, managedEnableRequest{RunID: f.source.Run.ID, SuspensionID: f.point.ID, OwnerID: "owner", LeaseID: "lease", GrantID: "successor", LeaseDuration: time.Minute, Selection: selection})
+	scoped, admitted, e := f.runtime.AdmitManagedContinuation(t.Context(), selection, "owner", time.Minute)
 	if e != nil {
 		t.Fatal(e)
 	}
-	bound, e := f.runtime.WithExecution(enabled.SuccessorLease)
-	if e != nil {
-		t.Fatal(e)
-	}
-	g := enabled.SuccessorGrant
-	scoped, e := bound.WithPhysicalGrant(t.Context(), g, featurecontrol.Seal(f.source.Run.ID, f.source.Run.Revision, "agent_physical_owner", g.ID, f.source.State, f.source.Checkpoint))
-	if e != nil {
-		t.Fatal(e)
+	g := admitted.Grant
+	enabled, e := f.store.LoadManagedRecoveryByID(t.Context(), f.point.ID)
+	if e != nil || enabled.SuccessorGrant != g || enabled.SuccessorLease != admitted.Lease {
+		t.Fatalf("lost managed admission: %v", e)
 	}
 	if _, e = scoped.CheckOwnedPhysicalEntry(t.Context(), f.source); e != nil {
 		t.Fatal(e)
@@ -435,7 +431,7 @@ func runRetiredGrantIDReuse(t *testing.T, factory func(*testing.T) ManagedRecove
 	if e != nil {
 		t.Fatal(e)
 	}
-	g, e := admitBorrowed(ctx, b, v, "start", "")
+	_, g, e := admitBorrowed(ctx, b, v, "start", "")
 	if !errors.Is(e, kernel.ErrExecutionConflict) || g != (kernel.ChildExecutionGrant{}) {
 		t.Fatalf("retired ID was admitted: %+v %v", g, e)
 	}
@@ -490,12 +486,12 @@ func runGrantIdentityRace(t *testing.T, factory func(*testing.T) ManagedRecovery
 	results := make(chan result, 2)
 	go func() {
 		<-start
-		g, e := admitBorrowed(ctx, bound, root, "start", "")
+		_, g, e := admitBorrowed(ctx, bound, root, "start", "")
 		results <- result{g, e}
 	}()
 	go func() {
 		<-start
-		g, e := childRT.BeginChildExecution(ctx, child.Run.ID, child.Run.Revision)
+		g, e := AdmitChildFixture(ctx, childRT, child.Run.ID, child.Run.Revision)
 		results <- result{g, e}
 	}()
 	close(start)
@@ -547,14 +543,14 @@ func runGrantIdentityRace(t *testing.T, factory func(*testing.T) ManagedRecovery
 	if e != nil {
 		t.Fatal(e)
 	}
-	if _, e = fresh.BeginChildExecution(ctx, child.Run.ID, child.Run.Revision); !errors.Is(e, kernel.ErrExecutionConflict) {
+	if _, e = AdmitChildFixture(ctx, fresh, child.Run.ID, child.Run.Revision); !errors.Is(e, kernel.ErrExecutionConflict) {
 		t.Fatalf("consumed ID re-admitted as borrowed: %v", e)
 	}
 	freshBound, e := fresh.WithExecution(lease)
 	if e != nil {
 		t.Fatal(e)
 	}
-	if _, e = admitBorrowed(ctx, freshBound, root, "start", ""); !errors.Is(e, kernel.ErrExecutionConflict) {
+	if _, _, e = admitBorrowed(ctx, freshBound, root, "start", ""); !errors.Is(e, kernel.ErrExecutionConflict) {
 		t.Fatalf("consumed ID re-admitted as owned: %v", e)
 	}
 }
@@ -572,26 +568,30 @@ func runGrantIdentityRollback(t *testing.T, factory func(*testing.T) ManagedReco
 	if e != nil {
 		t.Fatal(e)
 	}
+	parent, e := first.Create(ctx, kernel.CreateRequest{ID: "identity-parent", Kind: "agent", Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"}, Goal: "parent", State: []byte("{}")})
+	if e != nil {
+		t.Fatal(e)
+	}
 	create := func(id string) kernel.Snapshot {
 		t.Helper()
-		s, e := first.Create(ctx, kernel.CreateRequest{ID: id, Kind: "agent", Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"}, Goal: "identity rollback", State: []byte("{}")})
+		s, e := first.Create(ctx, kernel.CreateRequest{ID: id, ParentRunID: parent.Run.ID, Kind: "agent", Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"}, Goal: "identity rollback", State: []byte("{}")})
 		if e != nil {
 			t.Fatal(e)
 		}
 		return s
 	}
 	a, other := create("busy-run"), create("unrelated-run")
-	original, e := first.BeginChildExecution(ctx, a.Run.ID, a.Run.Revision)
+	original, e := AdmitChildFixture(ctx, first, a.Run.ID, a.Run.Revision)
 	if e != nil {
 		t.Fatal(e)
 	}
-	if _, e = second.BeginChildExecution(ctx, a.Run.ID, a.Run.Revision); !errors.Is(e, kernel.ErrChildExecutionBusy) {
+	if _, e = AdmitChildFixture(ctx, second, a.Run.ID, a.Run.Revision); !errors.Is(e, kernel.ErrChildExecutionBusy) {
 		t.Fatalf("busy child error: %v", e)
 	}
 	if got, e := first.LookupChildExecution(ctx, a.Run.ID); e != nil || got != original {
 		t.Fatalf("rejected attempt changed original grant: %+v %v", got, e)
 	}
-	if got, e := second.BeginChildExecution(ctx, other.Run.ID, other.Run.Revision); e != nil || got.ID != "rolled-back-id" {
+	if got, e := AdmitChildFixture(ctx, second, other.Run.ID, other.Run.Revision); e != nil || got.ID != "rolled-back-id" {
 		t.Fatalf("failed attempt permanently reserved ID: %+v %v", got, e)
 	}
 }

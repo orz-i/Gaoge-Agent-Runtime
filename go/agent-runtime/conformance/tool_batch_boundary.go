@@ -159,12 +159,12 @@ func toolBatchBoundary(t *testing.T, factory func(*testing.T) (kernel.Store, ker
 			var fault *batchBoundaryFault
 			initial := backing
 			if mode == "approval-frontier-before" || mode == "approval-frontier-ack" || mode == "approval-frontier-persistent" {
-				fault = &batchBoundaryFault{ea1AgentReceiptFault: &ea1AgentReceiptFault{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ControlStore: backing.(kernel.ControlStore), ChildExecutionStore: backing.(kernel.ChildExecutionStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), OwnedPhysicalExecutionStore: backing.(kernel.OwnedPhysicalExecutionStore), injected: errors.New("batch frontier commit fault")}, after: mode == "approval-frontier-ack", persistent: mode == "approval-frontier-persistent"}
+				fault = &batchBoundaryFault{ea1AgentReceiptFault: &ea1AgentReceiptFault{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ControlStore: backing.(kernel.ControlStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), PhysicalExecutionStore: backing.(kernel.PhysicalExecutionStore), injected: errors.New("batch frontier commit fault")}, after: mode == "approval-frontier-ack", persistent: mode == "approval-frontier-persistent"}
 				initial = fault
 			}
 			var denialFault *toolDispatchDenialStore
 			if actualDenial {
-				denialFault = &toolDispatchDenialStore{ea1AgentReceiptFault: &ea1AgentReceiptFault{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ControlStore: backing.(kernel.ControlStore), ChildExecutionStore: backing.(kernel.ChildExecutionStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), OwnedPhysicalExecutionStore: backing.(kernel.OwnedPhysicalExecutionStore), injected: errors.New("batch no-send CAS cut")}, afterCallID: "next-call"}
+				denialFault = &toolDispatchDenialStore{ea1AgentReceiptFault: &ea1AgentReceiptFault{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ControlStore: backing.(kernel.ControlStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), PhysicalExecutionStore: backing.(kernel.PhysicalExecutionStore), injected: errors.New("batch no-send CAS cut")}, afterCallID: "next-call"}
 				denialFault.afterCheck = func() {
 					if _, err := (budget.Coordinator{Store: ledger}).CancelRoot(ctx, "original-ledger", "batch-boundary"); err != nil {
 						t.Fatal(err)

@@ -198,9 +198,9 @@ func TestManagedTransferWireRejectsRetiredAuthority(t *testing.T) {
 type managedConfiguredKernel struct {
 	Store
 	ManagedRecoveryStore
-	OwnedPhysicalExecutionStore
+	PhysicalExecutionStore
 	transfer ManagedTransfer
-	enable   OwnedPhysicalAdmissionResult
+	enable   PhysicalAdmissionResult
 }
 
 func (s *managedConfiguredKernel) ManagedRecoveryAuthority(context.Context) (ManagedAuthority, error) {
@@ -209,10 +209,10 @@ func (s *managedConfiguredKernel) ManagedRecoveryAuthority(context.Context) (Man
 func (s *managedConfiguredKernel) LoadManagedRecovery(context.Context, string) (ManagedTransfer, error) {
 	return managedClone(s.transfer), nil
 }
-func (s *managedConfiguredKernel) BeginOwnedPhysicalExecution(_ context.Context, p OwnedPhysicalAdmission) (OwnedPhysicalAdmissionResult, error) {
+func (s *managedConfiguredKernel) BeginPhysicalExecution(_ context.Context, p PhysicalAdmission) (PhysicalAdmissionResult, error) {
 	s.enable = p.Candidate()
 	point := s.transfer.SafePoint
-	return ResolveOwnedPhysicalAdmission(point.Source, point.OriginalLease, point.OriginalLease.ExpiresAt.Add(time.Millisecond), false, false, p)
+	return ResolvePhysicalAdmission(point.Source, point.OriginalLease, point.OriginalLease.ExpiresAt.Add(time.Millisecond), false, false, p)
 }
 
 type managedConfiguredHost struct {

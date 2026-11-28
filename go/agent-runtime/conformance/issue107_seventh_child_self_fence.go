@@ -33,7 +33,7 @@ func RunAuditPhysicalChildSelfFence(t *testing.T, makeStore func(*testing.T) ker
 		if err != nil {
 			t.Fatal(err)
 		}
-		grant, err := rt.BeginChildExecution(t.Context(), child.Run.ID, child.Run.Revision)
+		grant, err := AdmitChildFixture(t.Context(), rt, child.Run.ID, child.Run.Revision)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -68,7 +68,7 @@ func RunAuditPhysicalChildSelfFence(t *testing.T, makeStore func(*testing.T) ker
 		if err != nil {
 			t.Fatal(err)
 		}
-		grant, err := rt.BeginChildExecution(t.Context(), child.Run.ID, child.Run.Revision)
+		grant, err := AdmitChildFixture(t.Context(), rt, child.Run.ID, child.Run.Revision)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -106,7 +106,7 @@ func RunAuditPhysicalChildSelfFence(t *testing.T, makeStore func(*testing.T) ker
 		if err != nil {
 			t.Fatal(err)
 		}
-		grant, err := rt.BeginChildExecution(t.Context(), child.Run.ID, child.Run.Revision)
+		grant, err := AdmitChildFixture(t.Context(), rt, child.Run.ID, child.Run.Revision)
 		if err != nil {
 			t.Fatal(err)
 		}

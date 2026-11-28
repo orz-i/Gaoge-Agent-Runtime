@@ -180,7 +180,7 @@ func (r *Runner) invokeNativeRun(ctx context.Context, source kernel.Snapshot, in
 	if grant.IsOwned() {
 		// Owned entry additionally consumes the original Store lease/epoch
 		// after all setup reads. A borrowed Grant has already fenced its
-		// native ancestors under BeginChildExecution.
+		// native ancestors under BeginPhysicalExecution.
 		deadlineElapsed, err := r.runtime.CheckOwnedPhysicalEntry(ctx, source)
 		if err != nil {
 			return source, err

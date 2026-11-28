@@ -37,8 +37,8 @@ type ea1StartSettlementStore struct {
 	kernel.Store
 	kernel.ExecutionStore
 	kernel.ControlStore
-	kernel.ChildExecutionStore
-	kernel.OwnedPhysicalExecutionStore
+
+	kernel.PhysicalExecutionStore
 	mode                                  string
 	fault                                 error
 	created                               func(kernel.Snapshot)
@@ -55,10 +55,10 @@ func (s *ea1StartSettlementStore) Create(ctx context.Context, r kernel.Record, e
 }
 func (s *ea1StartSettlementStore) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, outcome kernel.PhysicalCallbackOutcome, p kernel.PhysicalCallbackReturn) error {
 	if g.IsOwned() {
-		return s.OwnedPhysicalExecutionStore.RecordPhysicalCallbackReturn(ctx, g, rev, outcome, p)
+		return s.PhysicalExecutionStore.RecordPhysicalCallbackReturn(ctx, g, rev, outcome, p)
 	}
 	s.markCalls++
-	return s.OwnedPhysicalExecutionStore.RecordPhysicalCallbackReturn(ctx, g, rev, outcome, p)
+	return s.PhysicalExecutionStore.RecordPhysicalCallbackReturn(ctx, g, rev, outcome, p)
 }
 func (s *ea1StartSettlementStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
 	s.finishCalls++
@@ -66,7 +66,7 @@ func (s *ea1StartSettlementStore) FinishChildExecution(ctx context.Context, g ke
 	if s.mode == "P3" {
 		return s.fault
 	}
-	err := s.ChildExecutionStore.FinishChildExecution(ctx, g, p)
+	err := s.PhysicalExecutionStore.FinishChildExecution(ctx, g, p)
 	if err == nil {
 		s.finishCommits++
 		if s.mode == "P4" {
@@ -167,7 +167,7 @@ func ea1RootSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, fun
 	if operation == "resume" {
 		initialMode = "setup"
 	}
-	wrapped := &ea1StartSettlementStore{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ControlStore: backing.(kernel.ControlStore), ChildExecutionStore: backing.(kernel.ChildExecutionStore), OwnedPhysicalExecutionStore: backing.(kernel.OwnedPhysicalExecutionStore), mode: initialMode, fault: fault}
+	wrapped := &ea1StartSettlementStore{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ControlStore: backing.(kernel.ControlStore), PhysicalExecutionStore: backing.(kernel.PhysicalExecutionStore), mode: initialMode, fault: fault}
 	rt, err := kernel.New(kernel.Dependencies{Store: wrapped})
 	if err != nil {
 		t.Fatal(err)
@@ -319,7 +319,7 @@ func ea1RootSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, fun
 	for _, mutate := range []func(*kernel.ChildExecutionGrant){func(g *kernel.ChildExecutionGrant) { g.ID += "-foreign" }, func(g *kernel.ChildExecutionGrant) { g.ExecutionEpoch++ }, func(g *kernel.ChildExecutionGrant) { g.AdmissionOperation = otherOperation }, func(g *kernel.ChildExecutionGrant) { g.AdmissionSourceHash = strings.Repeat("0", 64) }} {
 		wrong := grant
 		mutate(&wrong)
-		if e = freshStore.(kernel.ChildExecutionStore).FinishChildExecution(t.Context(), wrong, kernel.ChildExecutionSettlement{}); !errors.Is(e, kernel.ErrExecutionConflict) {
+		if e = freshStore.(kernel.PhysicalExecutionStore).FinishChildExecution(t.Context(), wrong, kernel.ChildExecutionSettlement{}); !errors.Is(e, kernel.ErrExecutionConflict) {
 			t.Fatalf("foreign authority retired original: %v", e)
 		}
 		same, e := freshRT.LookupChildExecution(t.Context(), req.ID)
@@ -329,7 +329,7 @@ func ea1RootSettlement(t *testing.T, factory func(*testing.T) (kernel.Store, fun
 		assertUnchanged()
 	}
 	if phase == "P3" {
-		if e = freshStore.(kernel.ChildExecutionStore).FinishChildExecution(t.Context(), grant, kernel.ChildExecutionSettlement{}); !errors.Is(e, kernel.ErrExecutionConflict) {
+		if e = freshStore.(kernel.PhysicalExecutionStore).FinishChildExecution(t.Context(), grant, kernel.ChildExecutionSettlement{}); !errors.Is(e, kernel.ErrExecutionConflict) {
 			t.Fatalf("receipt alone retired unmarked scope: %v", e)
 		}
 		assertUnchanged()

@@ -165,8 +165,8 @@ func TestRootRetirementPreservesBorrowedLease(t *testing.T) {
 type retirementHiddenStore struct {
 	kernel.Store
 	kernel.ExecutionStore
-	kernel.ChildExecutionStore
-	kernel.OwnedPhysicalExecutionStore
+
+	kernel.PhysicalExecutionStore
 	creates int
 }
 
@@ -178,7 +178,7 @@ func (s *retirementHiddenStore) Create(ctx context.Context, r kernel.Record, e [
 func TestRootRetirementCapabilityRequiredBeforeCreate(t *testing.T) {
 	for _, explicit := range []bool{false, true} {
 		base := memory.NewStore()
-		store := &retirementHiddenStore{Store: base, ExecutionStore: base, ChildExecutionStore: base, OwnedPhysicalExecutionStore: base}
+		store := &retirementHiddenStore{Store: base, ExecutionStore: base, PhysicalExecutionStore: base}
 		rt, err := kernel.New(kernel.Dependencies{Store: store})
 		if err != nil {
 			t.Fatal(err)

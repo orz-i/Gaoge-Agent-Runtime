@@ -14,8 +14,8 @@ import (
 type retirementKernelPorts interface {
 	kernel.Store
 	kernel.ExecutionStore
-	kernel.ChildExecutionStore
-	kernel.OwnedPhysicalExecutionStore
+
+	kernel.PhysicalExecutionStore
 	kernel.OwnedRetirementStore
 	kernel.ControlStore
 	kernel.ExecutionCustodyStore

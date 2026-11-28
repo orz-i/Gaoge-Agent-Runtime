@@ -15,8 +15,8 @@ type noEntryKernelPorts interface {
 	kernel.Store
 	kernel.ExecutionStore
 	kernel.ControlStore
-	kernel.ChildExecutionStore
-	kernel.OwnedPhysicalExecutionStore
+
+	kernel.PhysicalExecutionStore
 	kernel.OwnedRetirementStore
 	kernel.ExecutionCustodyStore
 }
@@ -31,12 +31,12 @@ type noEntryKernelCut struct {
 	beforeAdmission, afterAdmission func()
 }
 
-func (s *noEntryKernelCut) BeginOwnedPhysicalExecution(ctx context.Context, p kernel.OwnedPhysicalAdmission) (kernel.OwnedPhysicalAdmissionResult, error) {
+func (s *noEntryKernelCut) BeginPhysicalExecution(ctx context.Context, p kernel.PhysicalAdmission) (kernel.PhysicalAdmissionResult, error) {
 	if hook := s.beforeAdmission; hook != nil {
 		s.beforeAdmission = nil
 		hook()
 	}
-	out, err := s.noEntryKernelPorts.BeginOwnedPhysicalExecution(ctx, p)
+	out, err := s.noEntryKernelPorts.BeginPhysicalExecution(ctx, p)
 	if hook := s.afterAdmission; hook != nil && err == nil {
 		s.afterAdmission = nil
 		hook()

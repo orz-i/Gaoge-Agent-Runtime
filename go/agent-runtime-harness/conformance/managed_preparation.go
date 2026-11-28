@@ -151,7 +151,7 @@ func AwaitManagedOriginalLeaseExpiry(t *testing.T, store kernel.Store, source ke
 	t.Helper()
 	ports, ok := store.(interface {
 		kernel.ExecutionStore
-		kernel.ChildExecutionStore
+		kernel.PhysicalExecutionStore
 		kernel.ManagedRecoveryStore
 	})
 	if !ok || source.Run.Status != kernel.RunStatusRunning || transfer.SafePoint.Host.RunID != source.Run.ID ||

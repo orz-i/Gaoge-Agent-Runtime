@@ -55,7 +55,7 @@ func mixedOriginalToolConsumption(t *testing.T, factory func(*testing.T) (kernel
 		children[id] = s
 	}
 	cut := errors.New("rejected Tool correction write cut")
-	fault := &ea1AgentReceiptFault{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ControlStore: backing.(kernel.ControlStore), ChildExecutionStore: backing.(kernel.ChildExecutionStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), OwnedPhysicalExecutionStore: backing.(kernel.OwnedPhysicalExecutionStore), event: "tool.correction_requested", injected: cut}
+	fault := &ea1AgentReceiptFault{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ControlStore: backing.(kernel.ControlStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), PhysicalExecutionStore: backing.(kernel.PhysicalExecutionStore), event: "tool.correction_requested", injected: cut}
 	m := &mixedToolModel{}
 	physical := map[string]int{}
 	verifications := map[string]int{}

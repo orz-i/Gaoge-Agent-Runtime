@@ -6,8 +6,6 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
-var _ kernel.ChildExecutionStore = (*Store)(nil)
-
 // A physical operation has one stable record for its entire lifetime. An
 // active record owns its original Grant and live ancestor index. Once
 // consumed, only its immutable identity or owned retirement fact remains.
@@ -55,62 +53,6 @@ func (store *Store) validateLiveRunOwners(ctx context.Context, run kernel.Run) (
 		}
 		return parent, nil
 	})
-}
-
-// BeginChildExecution is a persistent physical admission serialized with
-// parent Cancel/Fail/Complete, including native and unleased Run transitions.
-func (store *Store) BeginChildExecution(ctx context.Context, grant kernel.ChildExecutionGrant) error {
-	if store == nil || ctx == nil || !grant.Identity().Valid() || grant.ExpectedRevision == 0 || grant.IsOwned() {
-		return kernel.ErrInvalidInput
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	store.mu.Lock()
-	defer store.mu.Unlock()
-	if err := store.nativeEntryGateLocked(grant.ChildRunID); err != nil {
-		return err
-	}
-	child, ok := store.snapshotLocked(grant.ChildRunID)
-	if !ok {
-		return kernel.ErrNotFound
-	}
-	if child.Run.Revision != grant.ExpectedRevision ||
-		(child.Run.Status != kernel.RunStatusRunning && child.Run.Status != kernel.RunStatusWaitingInput) {
-		return kernel.ErrExecutionConflict
-	}
-	var ancestors []string
-	if child.Run.Kind != "agent" {
-		return kernel.ErrExecutionRequired
-	}
-	if child.Run.ParentRunID != "" {
-		var err error
-		ancestors, err = store.validateLiveRunOwners(ctx, child.Run)
-		if err != nil {
-			return err
-		}
-	}
-	// Every physical execution fences its OWN Run and ALL ancestors.
-	// The first-party Feature receives a per-revision scoped mutation permit,
-	// while unbound Kernel.Cancel/Apply/Control must fail until settlement.
-	ancestors = append(ancestors, child.Run.ID)
-	if _, occupied := store.effects[grant.ID]; occupied {
-		return kernel.ErrExecutionConflict
-	}
-	for id := range store.effectOwners[grant.ChildRunID] {
-		previous, ok := store.activeEffect(id)
-		if !ok || previous.grant.ChildRunID == grant.ChildRunID {
-			return kernel.ErrChildExecutionBusy
-		}
-	}
-	store.effects[grant.ID] = memoryEffect{grant: grant, ancestors: ancestors}
-	for _, id := range ancestors {
-		if store.effectOwners[id] == nil {
-			store.effectOwners[id] = make(map[string]struct{})
-		}
-		store.effectOwners[id][grant.ID] = struct{}{}
-	}
-	return nil
 }
 
 // FinishChildExecution requires the original immutable Grant identity. An

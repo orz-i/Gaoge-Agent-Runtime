@@ -123,7 +123,7 @@ func toolDispatchDenial(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 			coord := budget.Coordinator{Store: ledger}
 			cut := errors.New("native no-send closure CAS failed")
 			store := &toolDispatchDenialStore{ea1AgentReceiptFault: &ea1AgentReceiptFault{
-				Store: base, ExecutionStore: base.(kernel.ExecutionStore), ControlStore: base.(kernel.ControlStore), ChildExecutionStore: base.(kernel.ChildExecutionStore), ExecutionQuarantineStore: base.(kernel.ExecutionQuarantineStore), OwnedPhysicalExecutionStore: base.(kernel.OwnedPhysicalExecutionStore), injected: cut,
+				Store: base, ExecutionStore: base.(kernel.ExecutionStore), ControlStore: base.(kernel.ControlStore), ExecutionQuarantineStore: base.(kernel.ExecutionQuarantineStore), PhysicalExecutionStore: base.(kernel.PhysicalExecutionStore), injected: cut,
 			}}
 			cancelled := mode != "dispatch-write-before" && mode != "dispatch-write-ack" && mode != "actual-handler-error"
 			if cancelled {

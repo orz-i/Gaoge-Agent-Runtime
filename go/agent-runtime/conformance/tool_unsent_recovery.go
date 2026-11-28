@@ -227,7 +227,7 @@ func toolUnsentRecovery(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 				return r
 			}
 			faultFor := func(s kernel.Store) *unsentRecoveryFault {
-				return &unsentRecoveryFault{ea1AgentReceiptFault: &ea1AgentReceiptFault{Store: s, ExecutionStore: s.(kernel.ExecutionStore), ControlStore: s.(kernel.ControlStore), ChildExecutionStore: s.(kernel.ChildExecutionStore), ExecutionQuarantineStore: s.(kernel.ExecutionQuarantineStore), OwnedPhysicalExecutionStore: s.(kernel.OwnedPhysicalExecutionStore), injected: cut}}
+				return &unsentRecoveryFault{ea1AgentReceiptFault: &ea1AgentReceiptFault{Store: s, ExecutionStore: s.(kernel.ExecutionStore), ControlStore: s.(kernel.ControlStore), ExecutionQuarantineStore: s.(kernel.ExecutionQuarantineStore), PhysicalExecutionStore: s.(kernel.PhysicalExecutionStore), injected: cut}}
 			}
 			req := agent.StartRequest{ID: root, Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "actor"}, Thread: kernel.ThreadRef{Kind: "test", ID: "thread"}, Goal: "read", ToolKeys: []string{"read"}}
 			ks := base

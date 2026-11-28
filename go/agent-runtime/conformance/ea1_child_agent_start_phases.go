@@ -42,24 +42,28 @@ type ea1ChildStartStore struct {
 	admissions, marks int
 }
 
-func (s *ea1ChildStartStore) BeginChildExecution(ctx context.Context, g kernel.ChildExecutionGrant) error {
+func (s *ea1ChildStartStore) BeginPhysicalExecution(ctx context.Context, p kernel.PhysicalAdmission) (kernel.PhysicalAdmissionResult, error) {
+	if p.Candidate().Grant.IsOwned() {
+		return s.ea1ElectionStore.BeginPhysicalExecution(ctx, p)
+	}
+	g := p.Candidate().Grant
 	if s.beforeAdmission != nil {
 		s.beforeAdmission(g)
 	}
-	err := s.ChildExecutionStore.BeginChildExecution(ctx, g)
+	result, err := s.ea1ElectionStore.BeginPhysicalExecution(ctx, p)
 	if err == nil {
 		s.admissions++
 	}
-	return err
+	return result, err
 }
 func (s *ea1ChildStartStore) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, outcome kernel.PhysicalCallbackOutcome, p kernel.PhysicalCallbackReturn) error {
 	if g.IsOwned() {
-		return s.OwnedPhysicalExecutionStore.RecordPhysicalCallbackReturn(ctx, g, rev, outcome, p)
+		return s.PhysicalExecutionStore.RecordPhysicalCallbackReturn(ctx, g, rev, outcome, p)
 	}
 	if s.beforeMark != nil {
 		s.beforeMark(g)
 	}
-	err := s.OwnedPhysicalExecutionStore.RecordPhysicalCallbackReturn(ctx, g, rev, outcome, p)
+	err := s.PhysicalExecutionStore.RecordPhysicalCallbackReturn(ctx, g, rev, outcome, p)
 	if err == nil {
 		s.marks++
 	}
@@ -82,7 +86,7 @@ type ea1ChildStartFixture struct {
 
 func ea1NewChildStart(t *testing.T, factory func(*testing.T) (kernel.Store, kernel.Store, func() kernel.Store), withTool, deadline bool) *ea1ChildStartFixture {
 	backing, peer, reopen := factory(t)
-	fault := &ea1AgentReceiptFault{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ControlStore: backing.(kernel.ControlStore), ChildExecutionStore: backing.(kernel.ChildExecutionStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), OwnedPhysicalExecutionStore: backing.(kernel.OwnedPhysicalExecutionStore), injected: errors.New("original child receipt unavailable")}
+	fault := &ea1AgentReceiptFault{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ControlStore: backing.(kernel.ControlStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), PhysicalExecutionStore: backing.(kernel.PhysicalExecutionStore), injected: errors.New("original child receipt unavailable")}
 	f := &ea1ChildStartFixture{t: t, store: &ea1ChildStartStore{ea1ElectionStore: &ea1ElectionStore{ea1AgentReceiptFault: fault}}, peer: ea1StartRuntime(t, peer), peerStore: peer, reopen: reopen}
 	f.rt = ea1StartRuntime(t, f.store)
 	f.request = agent.StartRequest{ID: "actual-start-child", ParentRunID: "middle", OriginFingerprint: agent.FrozenOriginFingerprint([]byte(`{"source":"original-child"}`)), RequestID: "original-child-effect", Actor: kernel.ActorRef{TenantID: "tenant", ActorID: "owner"}, Thread: kernel.ThreadRef{Kind: "conversation", ID: "thread"}, Goal: "original Child Start", Instructions: "Preserve child source", Model: "fixture-model", ModelOptions: json.RawMessage(`{"temperature":0.1}`), Limits: agent.Limits{MaxLLMCalls: 2, MaxToolCalls: 1}}
@@ -434,7 +438,7 @@ func ea1ChildStartPhase(t *testing.T, factory func(*testing.T) (kernel.Store, ke
 			f.unchanged(f.peer, s, g)
 			wrong := g
 			wrong.ID += "-foreign"
-			if e := f.peerStore.(kernel.ChildExecutionStore).FinishChildExecution(ctx, wrong, kernel.ChildExecutionSettlement{}); !errors.Is(e, kernel.ErrExecutionConflict) {
+			if e := f.peerStore.(kernel.PhysicalExecutionStore).FinishChildExecution(ctx, wrong, kernel.ChildExecutionSettlement{}); !errors.Is(e, kernel.ErrExecutionConflict) {
 				t.Fatalf("foreign grant retired callback: %v", e)
 			}
 			f.unchanged(f.peer, s, g)

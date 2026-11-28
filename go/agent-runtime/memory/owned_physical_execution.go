@@ -6,7 +6,7 @@ import (
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
 )
 
-var _ kernel.OwnedPhysicalExecutionStore = (*Store)(nil)
+var _ kernel.PhysicalExecutionStore = (*Store)(nil)
 
 // ownedGrantLocked is always called under the Store's authoritative mutex.
 func (s *Store) ownedGrantLocked(runID string) (memoryEffect, bool) {
@@ -18,14 +18,14 @@ func (s *Store) ownedGrantLocked(runID string) (memoryEffect, bool) {
 	}
 	return memoryEffect{}, false
 }
-func (s *Store) BeginOwnedPhysicalExecution(ctx context.Context, p kernel.OwnedPhysicalAdmission) (kernel.OwnedPhysicalAdmissionResult, error) {
-	var zero kernel.OwnedPhysicalAdmissionResult
+func (s *Store) BeginPhysicalExecution(ctx context.Context, p kernel.PhysicalAdmission) (kernel.PhysicalAdmissionResult, error) {
+	var zero kernel.PhysicalAdmissionResult
 	if s == nil || ctx == nil {
 		return zero, kernel.ErrInvalidInput
 	}
 	g := p.Candidate().Grant
 	if !g.Identity().Valid() {
-		return kernel.OwnedPhysicalAdmissionResult{}, kernel.ErrExecutionConflict
+		return kernel.PhysicalAdmissionResult{}, kernel.ErrExecutionConflict
 	}
 	if e := ctx.Err(); e != nil {
 		return zero, e
@@ -36,7 +36,8 @@ func (s *Store) BeginOwnedPhysicalExecution(ctx context.Context, p kernel.OwnedP
 	if !ok {
 		return zero, kernel.ErrNotFound
 	}
-	if _, e := s.validateLiveRunOwners(ctx, current.Run); e != nil {
+	ancestors, e := s.validateLiveRunOwners(ctx, current.Run)
+	if e != nil {
 		return zero, e
 	}
 	if _, occupied := s.effects[g.ID]; occupied {
@@ -45,10 +46,14 @@ func (s *Store) BeginOwnedPhysicalExecution(ctx context.Context, p kernel.OwnedP
 	native := s.runs[g.ChildRunID].execution
 	persisted := native.lease
 	persisted.Epoch = native.epoch
-	var v kernel.OwnedPhysicalAdmissionResult
+	var v kernel.PhysicalAdmissionResult
 	var next kernel.ManagedTransfer
 	var old memoryEffect
-	var e error
+	if !g.IsOwned() {
+		if e = s.nativeEntryGateLocked(g.ChildRunID); e != nil {
+			return zero, e
+		}
+	}
 	if p.IsManagedRecovery() {
 		var found bool
 		old, found = s.ownedGrantLocked(g.ChildRunID)
@@ -59,27 +64,45 @@ func (s *Store) BeginOwnedPhysicalExecution(ctx context.Context, p kernel.OwnedP
 		v, next, e = kernel.ResolveManagedPhysicalAdmission(ctx, t, p, current, persisted, old.grant, s.managedAuthority, native.physicalEpoch, s.currentExecutionTime(), s.ledgers)
 	} else {
 		hasGrants := len(s.effectOwners[g.ChildRunID]) != 0
-		v, e = kernel.ResolveOwnedPhysicalAdmission(current, persisted, s.currentExecutionTime(), native.quarantineRev != 0, hasGrants, p)
+		if !g.IsOwned() {
+			hasGrants = false
+			for id := range s.effectOwners[g.ChildRunID] {
+				previous, ok := s.activeEffect(id)
+				if !ok || previous.grant.ChildRunID == g.ChildRunID {
+					hasGrants = true
+					break
+				}
+			}
+		}
+		v, e = kernel.ResolvePhysicalAdmission(current, persisted, s.currentExecutionTime(), native.quarantineRev != 0, hasGrants, p)
 	}
 	if e != nil {
 		return zero, e
 	}
 	g = v.Grant
-	entryEpoch, e := kernel.PrepareOwnedEntryEpoch(g, native.epoch, native.physicalEpoch)
-	if e != nil {
-		return zero, e
+	if g.IsOwned() {
+		entryEpoch, e := kernel.PrepareOwnedEntryEpoch(g, native.epoch, native.physicalEpoch)
+		if e != nil {
+			return zero, e
+		}
+		if p.IsManagedRecovery() {
+			s.consumeEffectLocked(old, nil)
+			s.saveManagedLocked(next)
+		}
+		if p.AcquiresLease() {
+			native.epoch, native.lease = v.Lease.Epoch, v.Lease
+		}
+		native.physicalEpoch = entryEpoch
+		s.setExecutionLocked(g.ChildRunID, native)
 	}
-	if p.IsManagedRecovery() {
-		s.consumeEffectLocked(old, nil)
-		s.saveManagedLocked(next)
+	ancestors = append(ancestors, g.ChildRunID)
+	s.effects[g.ID] = memoryEffect{grant: g, ancestors: ancestors}
+	for _, id := range ancestors {
+		if s.effectOwners[id] == nil {
+			s.effectOwners[id] = make(map[string]struct{})
+		}
+		s.effectOwners[id][g.ID] = struct{}{}
 	}
-	s.effects[g.ID] = memoryEffect{grant: g, ancestors: []string{g.ChildRunID}}
-	s.effectOwners[g.ChildRunID] = map[string]struct{}{g.ID: {}}
-	if p.AcquiresLease() {
-		native.epoch, native.lease = v.Lease.Epoch, v.Lease
-	}
-	native.physicalEpoch = entryEpoch
-	s.setExecutionLocked(g.ChildRunID, native)
 	return v, nil
 }
 func (s *Store) loadOwnedPhysicalGrantLocked(g kernel.ChildExecutionGrant) (memoryEffect, error) {
@@ -100,7 +123,7 @@ func (s *Store) loadOwnedPhysicalGrantLocked(g kernel.ChildExecutionGrant) (memo
 }
 
 func (s *Store) CheckOwnedPhysicalEntry(ctx context.Context, g kernel.ChildExecutionGrant, l kernel.ExecutionLease, expected kernel.Snapshot) (kernel.OwnedPhysicalEntryWindow, error) {
-	if s == nil || ctx == nil || kernel.ValidateOwnedPhysicalAdmissionRequest(g, l) != nil {
+	if s == nil || ctx == nil || kernel.ValidatePhysicalAdmissionRequest(g, l) != nil {
 		return kernel.OwnedPhysicalEntryWindow{}, kernel.ErrInvalidInput
 	}
 	s.mu.Lock()

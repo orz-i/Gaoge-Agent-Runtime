@@ -31,6 +31,8 @@
 
 - Child and Root physical callback returns now use `RecordPhysicalCallbackReturn`, `LookupPhysicalCallbackReturn` and the common `PhysicalCallbackCompletion` fact. The separate `MarkChildExecutionSettled` command and Memory settled-revision field are removed. Child consumption validates the original complete return snapshot; new SQL writes use the same callback-return columns. Old SQL settled-revision-only rows fail closed pending the AC-03 schema cut; a legacy revision marker cannot fabricate a return receipt.
 
+- Physical execution admission now uses one `kernel.PhysicalExecutionStore` and `BeginPhysicalExecution` transaction with `PhysicalAdmission`. The old Child/Owned Store interfaces and admission methods are removed. Runtime binds the original committed result directly through `AdmitPhysicalExecution`; `WithPhysicalGrant` and standalone unleased Root admission are removed. Parent-bound operations still fence immutable physical ancestors; independently leased operations retain native lease/epoch and attempt-specific commit acknowledgement, and managed continuation consumes the original predecessor in that same admission transaction. A visible Grant cannot be converted into a new admission permit.
+
 ## Owned physical callback entry and no-entry retirement
 
 Custom `OwnedPhysicalExecutionStore` adapters must implement

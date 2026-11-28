@@ -251,10 +251,7 @@ func TestOwnedBarrierRejectsUnboundControlAndExpiredTakeover(t *testing.T) {
 		t.Fatal(err)
 	}
 	g := kernel.ChildExecutionGrant{ID: "owned", ChildRunID: "root", ExpectedRevision: before.Run.Revision, ExecutionOwnerID: lease.OwnerID, ExecutionLeaseID: lease.LeaseID, ExecutionEpoch: lease.Epoch, AdmissionSourceHash: strings.Repeat("a", 64), AdmissionOperation: "start"}
-	if err = s.BeginChildExecution(t.Context(), g); !errors.Is(err, kernel.ErrInvalidInput) {
-		t.Fatalf("old Begin accepted owned binding: %v", err)
-	}
-	if _, err = s.BeginOwnedPhysicalExecution(t.Context(), kernel.OwnedPhysicalAdmission{}); !errors.Is(err, kernel.ErrExecutionConflict) {
+	if _, err = s.BeginPhysicalExecution(t.Context(), kernel.PhysicalAdmission{}); !errors.Is(err, kernel.ErrExecutionConflict) {
 		t.Fatalf("forged admission accepted: %v", err)
 	}
 	if _, err = s.db.Exec(`INSERT INTO runtime_child_effect_grants(grant_id,parent_run_id,child_run_id,start_revision,execution_owner_id,execution_lease_id,execution_epoch,admission_source_hash,admission_operation) VALUES(?,?,?,?,?,?,?,?,?)`, g.ID, g.ChildRunID, g.ChildRunID, g.ExpectedRevision, g.ExecutionOwnerID, g.ExecutionLeaseID, g.ExecutionEpoch, g.AdmissionSourceHash, g.AdmissionOperation); err != nil {

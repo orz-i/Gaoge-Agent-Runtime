@@ -44,8 +44,8 @@ func (s *retirementAgentDeathStore) LookupOwnedRetirementForRun(ctx context.Cont
 	return s.managedStorePorts.LookupOwnedRetirementForRun(ctx, id)
 }
 
-func (s *retirementAgentDeathStore) BeginOwnedPhysicalExecution(ctx context.Context, a kernel.OwnedPhysicalAdmission) (kernel.OwnedPhysicalAdmissionResult, error) {
-	v, e := s.managedStorePorts.BeginOwnedPhysicalExecution(ctx, a)
+func (s *retirementAgentDeathStore) BeginPhysicalExecution(ctx context.Context, a kernel.PhysicalAdmission) (kernel.PhysicalAdmissionResult, error) {
+	v, e := s.managedStorePorts.BeginPhysicalExecution(ctx, a)
 	if e == nil && a.AcquiresLease() {
 		s.acquired = v.Lease
 	}

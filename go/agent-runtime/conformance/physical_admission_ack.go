@@ -52,7 +52,7 @@ func (s *admissionACKStore) CheckOwnedPhysicalEntry(ctx context.Context, g kerne
 	if s.mode == "entry-unavailable" || strings.HasPrefix(s.mode, "no-entry-") {
 		return kernel.OwnedPhysicalEntryWindow{}, errAdmissionTransport
 	}
-	window, err := s.OwnedPhysicalExecutionStore.CheckOwnedPhysicalEntry(ctx, g, l, source)
+	window, err := s.PhysicalExecutionStore.CheckOwnedPhysicalEntry(ctx, g, l, source)
 	if err == nil && s.mode == "cancelled-at-entry" {
 		s.cancel()
 	}
@@ -71,7 +71,7 @@ func (s *admissionACKStore) CheckOwnedPhysicalEntry(ctx context.Context, g kerne
 }
 
 func (s *admissionACKStore) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, revision uint64, o kernel.PhysicalCallbackOutcome, p kernel.PhysicalCallbackReturn) error {
-	err := s.OwnedPhysicalExecutionStore.RecordPhysicalCallbackReturn(ctx, g, revision, o, p)
+	err := s.PhysicalExecutionStore.RecordPhysicalCallbackReturn(ctx, g, revision, o, p)
 	if err == nil && s.mode == "no-entry-record-ack" {
 		return errAdmissionTransport
 	}
@@ -82,14 +82,14 @@ func (s *admissionACKStore) FinishChildExecution(ctx context.Context, g kernel.C
 	if s.mode == "no-entry-finish-unavailable" {
 		return errAdmissionTransport
 	}
-	err := s.ChildExecutionStore.FinishChildExecution(ctx, g, p)
+	err := s.PhysicalExecutionStore.FinishChildExecution(ctx, g, p)
 	if err == nil && s.mode == "no-entry-finish-ack" {
 		return errAdmissionTransport
 	}
 	return err
 }
 
-func (s *admissionACKStore) BeginOwnedPhysicalExecution(ctx context.Context, p kernel.OwnedPhysicalAdmission) (kernel.OwnedPhysicalAdmissionResult, error) {
+func (s *admissionACKStore) BeginPhysicalExecution(ctx context.Context, p kernel.PhysicalAdmission) (kernel.PhysicalAdmissionResult, error) {
 	l := p.Candidate().Lease
 	g := p.Candidate().Grant
 	s.grant = g
@@ -97,16 +97,16 @@ func (s *admissionACKStore) BeginOwnedPhysicalExecution(ctx context.Context, p k
 	var err error
 	s.source, err = s.Load(ctx, g.ChildRunID)
 	if err != nil {
-		return kernel.OwnedPhysicalAdmissionResult{}, err
+		return kernel.PhysicalAdmissionResult{}, err
 	}
 	defer func() { s.attempted = true }()
 	switch s.mode {
 	case "denied-before":
-		return kernel.OwnedPhysicalAdmissionResult{}, kernel.ErrExecutionConflict
+		return kernel.PhysicalAdmissionResult{}, kernel.ErrExecutionConflict
 	case "unknown-before":
-		return kernel.OwnedPhysicalAdmissionResult{}, p.CommitOutcome(errAdmissionTransport)
+		return kernel.PhysicalAdmissionResult{}, p.CommitOutcome(errAdmissionTransport)
 	}
-	v, nativeErr := s.ea1AgentAdmissionStore.BeginOwnedPhysicalExecution(ctx, p)
+	v, nativeErr := s.ea1AgentAdmissionStore.BeginPhysicalExecution(ctx, p)
 	s.nativeErr = nativeErr
 	if v.Grant.ID != "" {
 		s.grant, s.lease = v.Grant, v.Lease
@@ -164,7 +164,7 @@ func (s *admissionACKStore) LookupChildExecution(ctx context.Context, id string)
 			return kernel.ChildExecutionGrant{}, errAdmissionTransport
 		}
 	}
-	return s.ChildExecutionStore.LookupChildExecution(ctx, id)
+	return s.PhysicalExecutionStore.LookupChildExecution(ctx, id)
 }
 
 // RunPhysicalAdmissionACKSuite verifies the same write-capable admission

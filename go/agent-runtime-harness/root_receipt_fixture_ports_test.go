@@ -37,21 +37,19 @@ func (s *receiptFaultStore) ApplyExecution(ctx context.Context, l kernel.Executi
 func (s *receiptFaultStore) ApplyControl(ctx context.Context, id string, r uint64, g kernel.ControlGuard, m kernel.StoreMutation) (kernel.Snapshot, bool, error) {
 	return s.Store.(kernel.ControlStore).ApplyControl(ctx, id, r, g, m)
 }
-func (s *receiptFaultStore) BeginChildExecution(ctx context.Context, g kernel.ChildExecutionGrant) error {
-	return s.Store.(kernel.ChildExecutionStore).BeginChildExecution(ctx, g)
-}
+
 func (s *receiptFaultStore) LookupChildExecution(ctx context.Context, id string) (kernel.ChildExecutionGrant, error) {
-	return s.Store.(kernel.ChildExecutionStore).LookupChildExecution(ctx, id)
+	return s.Store.(kernel.PhysicalExecutionStore).LookupChildExecution(ctx, id)
 }
 
 func (s *receiptFaultStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
-	return s.Store.(kernel.ChildExecutionStore).FinishChildExecution(ctx, g, p)
+	return s.Store.(kernel.PhysicalExecutionStore).FinishChildExecution(ctx, g, p)
 }
-func (s *receiptFaultStore) BeginOwnedPhysicalExecution(ctx context.Context, p kernel.OwnedPhysicalAdmission) (kernel.OwnedPhysicalAdmissionResult, error) {
-	return s.Store.(kernel.OwnedPhysicalExecutionStore).BeginOwnedPhysicalExecution(ctx, p)
+func (s *receiptFaultStore) BeginPhysicalExecution(ctx context.Context, p kernel.PhysicalAdmission) (kernel.PhysicalAdmissionResult, error) {
+	return s.Store.(kernel.PhysicalExecutionStore).BeginPhysicalExecution(ctx, p)
 }
 func (s *receiptFaultStore) CheckOwnedPhysicalEntry(ctx context.Context, g kernel.ChildExecutionGrant, l kernel.ExecutionLease, source kernel.Snapshot) (kernel.OwnedPhysicalEntryWindow, error) {
-	return s.Store.(kernel.OwnedPhysicalExecutionStore).CheckOwnedPhysicalEntry(ctx, g, l, source)
+	return s.Store.(kernel.PhysicalExecutionStore).CheckOwnedPhysicalEntry(ctx, g, l, source)
 }
 
 func (s *receiptFaultStore) ApplyOwnedPhysicalRecovery(ctx context.Context, g kernel.ChildExecutionGrant, r uint64, m kernel.StoreMutation, p kernel.OwnedPhysicalRecovery) (kernel.Snapshot, error) {
@@ -60,21 +58,21 @@ func (s *receiptFaultStore) ApplyOwnedPhysicalRecovery(ctx context.Context, g ke
 		if !s.fired && event.Type == "agent.model_invocation.completed" {
 			s.fired = true
 			if s.afterCommit {
-				if _, err := s.Store.(kernel.OwnedPhysicalExecutionStore).ApplyOwnedPhysicalRecovery(ctx, g, r, m, p); err != nil {
+				if _, err := s.Store.(kernel.PhysicalExecutionStore).ApplyOwnedPhysicalRecovery(ctx, g, r, m, p); err != nil {
 					return kernel.Snapshot{}, err
 				}
 			}
 			return kernel.Snapshot{}, errBudgetResponseRejected
 		}
 	}
-	return s.Store.(kernel.OwnedPhysicalExecutionStore).ApplyOwnedPhysicalRecovery(ctx, g, r, m, p)
+	return s.Store.(kernel.PhysicalExecutionStore).ApplyOwnedPhysicalRecovery(ctx, g, r, m, p)
 
 }
 func (s *receiptFaultStore) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, r uint64, o kernel.PhysicalCallbackOutcome, p kernel.PhysicalCallbackReturn) error {
-	return s.Store.(kernel.OwnedPhysicalExecutionStore).RecordPhysicalCallbackReturn(ctx, g, r, o, p)
+	return s.Store.(kernel.PhysicalExecutionStore).RecordPhysicalCallbackReturn(ctx, g, r, o, p)
 }
 func (s *receiptFaultStore) LookupPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant) (kernel.PhysicalCallbackCompletion, error) {
-	return s.Store.(kernel.OwnedPhysicalExecutionStore).LookupPhysicalCallbackReturn(ctx, g)
+	return s.Store.(kernel.PhysicalExecutionStore).LookupPhysicalCallbackReturn(ctx, g)
 }
 func (s *receiptFaultStore) QuarantineExecution(ctx context.Context, q kernel.ExecutionQuarantine) error {
 	return s.Store.(kernel.ExecutionQuarantineStore).QuarantineExecution(ctx, q)

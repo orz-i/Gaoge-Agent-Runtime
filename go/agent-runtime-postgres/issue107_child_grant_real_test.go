@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance"
 	"os"
 	"strings"
 	"sync"
@@ -66,7 +67,7 @@ func TestIssue107RealPostgresChildGrantVsParentTermination(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				<-start
-				grant, beginErr = one.BeginChildExecution(context.Background(), child.Run.ID, child.Run.Revision)
+				grant, beginErr = conformance.AdmitChildFixture(context.Background(), one, child.Run.ID, child.Run.Revision)
 			}()
 			go func() {
 				defer wg.Done()

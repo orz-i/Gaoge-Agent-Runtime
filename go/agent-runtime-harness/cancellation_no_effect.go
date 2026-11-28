@@ -38,7 +38,7 @@ func (runner *Runner) releaseNoEffectCancellation(
 	_, preflightRead := cause.(cancellationReadNoEffect) //nolint:errorlint // Only a direct Harness-minted proof is valid.
 	nativeNoEffect := nativeKernel && kernel.IsControlNoEffect(cause)
 	// A mixed, same-Kernel Host Canceller may pass through the Kernel's
-	// unforgeable ChildExecutionStore busy-no-effect proof. Recheck its
+	// unforgeable PhysicalExecutionStore busy-no-effect proof. Recheck its
 	// exact native RunKind before trusting it; arbitrary custom Cancellers
 	// cannot manufacture admission authority from an error string.
 	hostChildBusyNoEffect := false

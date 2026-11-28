@@ -10,7 +10,7 @@ import (
 	"gorm.io/gorm"
 )
 
-var _ kernel.OwnedPhysicalExecutionStore = (*KernelStore)(nil)
+var _ kernel.PhysicalExecutionStore = (*KernelStore)(nil)
 
 func pgPhysicalGrant(r models.KernelChildEffectGrantRecord) kernel.ChildExecutionGrant {
 	return kernel.ChildExecutionGrant{ID: r.GrantID, ChildRunID: r.ChildRunID, ExpectedRevision: r.StartRevision,
@@ -63,14 +63,14 @@ func pgMatchOwnedPhysical(tx *gorm.DB, runID string, lease *kernel.ExecutionLeas
 	return nil
 }
 
-func (store *KernelStore) BeginOwnedPhysicalExecution(ctx context.Context, admission kernel.OwnedPhysicalAdmission) (kernel.OwnedPhysicalAdmissionResult, error) {
-	var result kernel.OwnedPhysicalAdmissionResult
+func (store *KernelStore) BeginPhysicalExecution(ctx context.Context, admission kernel.PhysicalAdmission) (kernel.PhysicalAdmissionResult, error) {
+	var result kernel.PhysicalAdmissionResult
 	if store == nil || store.db == nil || ctx == nil {
 		return result, kernel.ErrInvalidInput
 	}
 	grant := admission.Candidate().Grant
 	if !grant.Identity().Valid() {
-		return kernel.OwnedPhysicalAdmissionResult{}, kernel.ErrExecutionConflict
+		return kernel.PhysicalAdmissionResult{}, kernel.ErrExecutionConflict
 	}
 	// Only actual COMMIT uncertainty carries the original candidate.
 	readyToCommit := false
@@ -79,7 +79,8 @@ func (store *KernelStore) BeginOwnedPhysicalExecution(ctx context.Context, admis
 		if e != nil {
 			return e
 		}
-		if _, e = pgValidateLiveRunOwners(ctx, tx, source.Run); e != nil {
+		ancestors, e := pgValidateLiveRunOwners(ctx, tx, source.Run)
+		if e != nil {
 			return e
 		}
 		current, e := lockKernelRun(tx, grant.ChildRunID)
@@ -93,11 +94,20 @@ func (store *KernelStore) BeginOwnedPhysicalExecution(ctx context.Context, admis
 		if e != nil {
 			return e
 		}
+		if !grant.IsOwned() {
+			if e = pgNativeEntryGate(tx, grant.ChildRunID); e != nil {
+				return e
+			}
+			if source.Run.Kind != snapshot.Run.Kind || source.Run.ParentRunID != snapshot.Run.ParentRunID ||
+				source.Run.LogicalParentRunID != snapshot.Run.LogicalParentRunID || source.Run.Actor != snapshot.Run.Actor || source.Run.Thread != snapshot.Run.Thread {
+				return kernel.ErrExecutionConflict
+			}
+		}
 		now, e := pgStoreNow(tx)
 		if e != nil {
 			return e
 		}
-		var v kernel.OwnedPhysicalAdmissionResult
+		var v kernel.PhysicalAdmissionResult
 		var next kernel.ManagedTransfer
 		if admission.IsManagedRecovery() {
 			if current.ExecutionQuarantineRevision != 0 {
@@ -124,17 +134,29 @@ func (store *KernelStore) BeginOwnedPhysicalExecution(ctx context.Context, admis
 			}
 		} else {
 			var active int64
-			if e = tx.Model(&models.KernelChildEffectGrantRecord{}).Where("parent_run_id = ? OR child_run_id = ?", grant.ChildRunID, grant.ChildRunID).Count(&active).Error; e != nil {
+			query := tx.Model(&models.KernelChildEffectGrantRecord{}).Where("child_run_id = ?", grant.ChildRunID)
+			if grant.IsOwned() {
+				query = query.Or("parent_run_id = ?", grant.ChildRunID)
+			}
+			if e = query.Count(&active).Error; e != nil {
 				return translateKernelError(e)
 			}
-			v, e = kernel.ResolveOwnedPhysicalAdmission(snapshot, pgManagedLease(current), now, current.ExecutionQuarantineRevision != 0, active != 0, admission)
+			v, e = kernel.ResolvePhysicalAdmission(snapshot, pgManagedLease(current), now, current.ExecutionQuarantineRevision != 0, active != 0, admission)
 			if e != nil {
 				return e
 			}
 		}
-		row := pgPhysicalRecord(v.Grant, v.Grant.ChildRunID)
-		if e = tx.Create(&row).Error; e != nil {
+		rows := make([]models.KernelChildEffectGrantRecord, 0, len(ancestors)+1)
+		for _, id := range append(ancestors, v.Grant.ChildRunID) {
+			rows = append(rows, pgPhysicalRecord(v.Grant, id))
+		}
+		if e = tx.Create(&rows).Error; e != nil {
 			return translateKernelApplyError(e)
+		}
+		if !v.Grant.IsOwned() {
+			result = v
+			readyToCommit = true
+			return nil
 		}
 		entryEpoch, e := kernel.PrepareOwnedEntryEpoch(v.Grant, current.ExecutionEpoch, current.ExecutionPhysicalEpoch)
 		if e != nil {
@@ -181,7 +203,7 @@ func (store *KernelStore) BeginOwnedPhysicalExecution(ctx context.Context, admis
 }
 
 func (store *KernelStore) CheckOwnedPhysicalEntry(ctx context.Context, g kernel.ChildExecutionGrant, l kernel.ExecutionLease, expected kernel.Snapshot) (kernel.OwnedPhysicalEntryWindow, error) {
-	if store == nil || store.db == nil || ctx == nil || kernel.ValidateOwnedPhysicalAdmissionRequest(g, l) != nil {
+	if store == nil || store.db == nil || ctx == nil || kernel.ValidatePhysicalAdmissionRequest(g, l) != nil {
 		return kernel.OwnedPhysicalEntryWindow{}, kernel.ErrInvalidInput
 	}
 	var window kernel.OwnedPhysicalEntryWindow

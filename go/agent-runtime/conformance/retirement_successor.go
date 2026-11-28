@@ -41,7 +41,7 @@ func runRetirementSuccessorClosure(t *testing.T, factory func(*testing.T) Manage
 		if err != nil {
 			t.Fatal(err)
 		}
-		childGrant, err = f.rt.BeginChildExecution(t.Context(), child.Run.ID, child.Run.Revision)
+		childGrant, err = AdmitChildFixture(t.Context(), f.rt, child.Run.ID, child.Run.Revision)
 		if err != nil {
 			t.Fatal(err)
 		}

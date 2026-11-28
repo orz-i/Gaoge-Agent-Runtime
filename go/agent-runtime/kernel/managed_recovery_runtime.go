@@ -159,8 +159,8 @@ func (r *Runtime) authorizeManaged(ctx context.Context, t ManagedTransfer, quali
 	return selected, nil
 }
 
-func (r *Runtime) AdmitManagedContinuation(ctx context.Context, p ManagedAdmissionProof, owner string, d time.Duration) (*Runtime, OwnedPhysicalAdmissionResult, error) {
-	var zero OwnedPhysicalAdmissionResult
+func (r *Runtime) AdmitManagedContinuation(ctx context.Context, p ManagedAdmissionProof, owner string, d time.Duration) (*Runtime, PhysicalAdmissionResult, error) {
+	var zero PhysicalAdmissionResult
 	if r == nil || ctx == nil || r.execution != nil || r.physicalGrant != nil {
 		return nil, zero, ErrExecutionConflict
 	}
@@ -174,7 +174,7 @@ func (r *Runtime) AdmitManagedContinuation(ctx context.Context, p ManagedAdmissi
 	}
 	source := p.transfer.SafePoint.Source
 	admission := p.OwnedAdmission(ExecutionAcquireRequest{RunID: source.Run.ID, OwnerID: owner, LeaseDuration: d}, lid, gid)
-	return r.admitOwnedPhysical(ctx, source, admission)
+	return r.admitPhysical(ctx, source, admission)
 }
 func (r *Runtime) CommitManagedCancellation(ctx context.Context, p ManagedAdmissionProof) (ManagedTransfer, error) {
 	s, ok := r.store.(ManagedRecoveryStore)

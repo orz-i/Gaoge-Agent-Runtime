@@ -389,13 +389,13 @@ type interleavedResumeStore struct {
 	onResume func()
 }
 
-func (s *interleavedResumeStore) BeginOwnedPhysicalExecution(ctx context.Context, p kernel.OwnedPhysicalAdmission) (kernel.OwnedPhysicalAdmissionResult, error) {
+func (s *interleavedResumeStore) BeginPhysicalExecution(ctx context.Context, p kernel.PhysicalAdmission) (kernel.PhysicalAdmissionResult, error) {
 	if p.Candidate().Grant.AdmissionOperation == "resume" && s.onResume != nil {
 		f := s.onResume
 		s.onResume = nil
 		f()
 	}
-	return s.Store.BeginOwnedPhysicalExecution(ctx, p)
+	return s.Store.BeginPhysicalExecution(ctx, p)
 }
 
 // A Ready delivery may finish the original Agent before the competing

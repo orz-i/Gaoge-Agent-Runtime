@@ -8,8 +8,6 @@ import (
 	"gorm.io/gorm"
 )
 
-var _ kernel.ChildExecutionStore = (*KernelStore)(nil)
-
 func pgValidateLiveRunOwners(ctx context.Context, tx *gorm.DB, run kernel.Run) ([]string, error) {
 	var ids []string
 	if _, err := kernel.ValidateLiveRunOwners(ctx, run, func(ctx context.Context, id string) (kernel.Snapshot, error) {
@@ -36,79 +34,6 @@ func pgValidateLiveRunOwners(ctx context.Context, tx *gorm.DB, run kernel.Run) (
 			return kernel.Snapshot{}, kernel.ErrExecutionConflict
 		}
 		return snapshot, pgNativeEntryGate(tx, id)
-	})
-}
-
-func (store *KernelStore) BeginChildExecution(ctx context.Context, grant kernel.ChildExecutionGrant) error {
-	if store == nil || store.db == nil || ctx == nil || !grant.Identity().Valid() || grant.ExpectedRevision == 0 || grant.IsOwned() {
-		return kernel.ErrInvalidInput
-	}
-	return store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var child models.KernelRunRecord
-		if err := tx.Where("run_id = ?", grant.ChildRunID).First(&child).Error; err != nil {
-			return translateKernelError(err)
-		}
-		if child.Revision != grant.ExpectedRevision ||
-			(child.Status != string(kernel.RunStatusRunning) && child.Status != string(kernel.RunStatusWaitingInput)) {
-			return kernel.ErrExecutionConflict
-		}
-		var ids []string
-		if child.Kind != "agent" {
-			return kernel.ErrExecutionRequired
-		}
-		if child.ParentRunID != "" {
-			var ancestorErr error
-			source, e := kernelSnapshotFrom(child)
-			if e != nil {
-				return e
-			}
-			ids, ancestorErr = pgValidateLiveRunOwners(ctx, tx, source.Run)
-			if ancestorErr != nil {
-				return ancestorErr
-			}
-		}
-		// The Store always locks the executing child LAST; persist its OWN
-		// fence in addition to every root-to-leaf ancestor so direct Cancel
-		// and unbound Apply cannot change it while the external call runs.
-		ids = append(ids, child.RunID)
-		lockedChild, lockErr := lockKernelRun(tx, grant.ChildRunID)
-		if lockErr != nil {
-			return lockErr
-		}
-		if e := pgNativeEntryGate(tx, grant.ChildRunID); e != nil {
-			return e
-		}
-		if lockedChild.Revision != grant.ExpectedRevision ||
-			lockedChild.ParentRunID != child.ParentRunID ||
-			lockedChild.Kind != child.Kind ||
-			lockedChild.TenantID != child.TenantID ||
-			lockedChild.ActorID != child.ActorID ||
-			lockedChild.ThreadKind != child.ThreadKind ||
-			lockedChild.ThreadID != child.ThreadID ||
-			(lockedChild.Status != string(kernel.RunStatusRunning) &&
-				lockedChild.Status != string(kernel.RunStatusWaitingInput)) {
-			return kernel.ErrExecutionConflict
-		}
-		// Ancestor and child locks serialize contenders; never trust a
-		// pre-lock observation or a uniqueness check as the sole guard.
-		if err := pgReserveGrantIdentity(tx, grant); err != nil {
-			return err
-		}
-		var active int64
-		if err := tx.Model(&models.KernelChildEffectGrantRecord{}).Where("child_run_id = ?", grant.ChildRunID).Count(&active).Error; err != nil {
-			return translateKernelError(err)
-		}
-		if active > 0 {
-			return kernel.ErrChildExecutionBusy
-		}
-		rows := make([]models.KernelChildEffectGrantRecord, 0, len(ids))
-		for _, id := range ids {
-			rows = append(rows, models.KernelChildEffectGrantRecord{GrantID: grant.ID, ParentRunID: id, ChildRunID: grant.ChildRunID, StartRevision: grant.ExpectedRevision})
-		}
-		if err := tx.Create(&rows).Error; err != nil {
-			return translateKernelApplyError(err)
-		}
-		return nil
 	})
 }
 

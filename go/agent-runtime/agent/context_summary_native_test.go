@@ -161,9 +161,9 @@ func (s *summaryNativeAdmissionTrap) Load(context.Context, string) (kernel.Snaps
 func (s *summaryNativeAdmissionTrap) LoadManagedRecovery(context.Context, string) (kernel.ManagedTransfer, error) {
 	return s.transfer, nil
 }
-func (s *summaryNativeAdmissionTrap) BeginOwnedPhysicalExecution(context.Context, kernel.OwnedPhysicalAdmission) (kernel.OwnedPhysicalAdmissionResult, error) {
+func (s *summaryNativeAdmissionTrap) BeginPhysicalExecution(context.Context, kernel.PhysicalAdmission) (kernel.PhysicalAdmissionResult, error) {
 	s.admissions++
-	return kernel.OwnedPhysicalAdmissionResult{}, kernel.ErrExecutionConflict
+	return kernel.PhysicalAdmissionResult{}, kernel.ErrExecutionConflict
 }
 
 func summaryNativePointFixture(t *testing.T, completed bool) (*Runner, *summaryNativeAdmissionTrap) {

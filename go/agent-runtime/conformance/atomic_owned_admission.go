@@ -35,15 +35,15 @@ func runAtomicOwnedAdmission(t *testing.T, factory func(*testing.T) ManagedRecov
 			// Deterministic Host dispatch linkage also checks that a refused
 			// transaction did not burn an otherwise unused Grant ID.
 			dispatchID := "atomic-original"
-			admit := func(r *kernel.Runtime, v kernel.Snapshot, request kernel.ExecutionAcquireRequest, wrongProof bool) (*kernel.Runtime, kernel.OwnedPhysicalAdmissionResult, error) {
-				subject := kernel.OwnedPhysicalAdmissionSubject(request, kernel.ExecutionLease{}, "start", dispatchID)
+			admit := func(r *kernel.Runtime, v kernel.Snapshot, request kernel.ExecutionAcquireRequest, wrongProof bool) (*kernel.Runtime, kernel.PhysicalAdmissionResult, error) {
+				subject := kernel.PhysicalAdmissionSubject(request, kernel.ExecutionLease{}, "start", dispatchID)
 				if wrongProof {
 					subject = "foreign-proof"
 				}
 				proof := featurecontrol.Seal(v.Run.ID, v.Run.Revision, "agent_owned_physical_admission", subject, v.State, v)
-				return r.AdmitOwnedPhysicalExecution(ctx, v, request, proof, "start", dispatchID)
+				return r.AdmitPhysicalExecution(ctx, v, request, proof, "start", dispatchID)
 			}
-			assertAdmission := func(r *kernel.Runtime, v kernel.OwnedPhysicalAdmissionResult, wantEpoch uint64) {
+			assertAdmission := func(r *kernel.Runtime, v kernel.PhysicalAdmissionResult, wantEpoch uint64) {
 				t.Helper()
 				if v.Lease.Epoch != wantEpoch || !v.Grant.MatchesExecution(v.Lease) {
 					t.Fatalf("split admission or wrong epoch: %+v", v)
@@ -66,7 +66,7 @@ func runAtomicOwnedAdmission(t *testing.T, factory func(*testing.T) ManagedRecov
 				if e = r.RequireExecution(ctx, source.Run.ID); e != nil {
 					t.Fatalf("entered runtime not native owner: %v", e)
 				}
-				if _, e = b.Peer.(kernel.OwnedPhysicalExecutionStore).CheckOwnedPhysicalEntry(ctx, g, v.Lease, source); !errors.Is(e, kernel.ErrExecutionConflict) {
+				if _, e = b.Peer.(kernel.PhysicalExecutionStore).CheckOwnedPhysicalEntry(ctx, g, v.Lease, source); !errors.Is(e, kernel.ErrExecutionConflict) {
 					t.Fatalf("repeated entry admitted: %v", e)
 				}
 				if e = peer.ReleaseExecution(ctx, v.Lease); !errors.Is(e, kernel.ErrChildExecutionBusy) {
@@ -79,7 +79,7 @@ func runAtomicOwnedAdmission(t *testing.T, factory func(*testing.T) ManagedRecov
 			if mode == "two-fresh-contenders" {
 				type result struct {
 					r *kernel.Runtime
-					v kernel.OwnedPhysicalAdmissionResult
+					v kernel.PhysicalAdmissionResult
 					e error
 				}
 				start := make(chan struct{})
@@ -136,7 +136,7 @@ func runAtomicOwnedAdmission(t *testing.T, factory func(*testing.T) ManagedRecov
 				if e != nil {
 					t.Fatal(e)
 				}
-				childGrant, e = peer.BeginChildExecution(ctx, child.Run.ID, child.Run.Revision)
+				childGrant, e = AdmitChildFixture(ctx, peer, child.Run.ID, child.Run.Revision)
 				if e != nil {
 					t.Fatal(e)
 				}
@@ -144,7 +144,7 @@ func runAtomicOwnedAdmission(t *testing.T, factory func(*testing.T) ManagedRecov
 				want = kernel.ErrChildExecutionBusy
 			}
 			scoped, v, e := admit(rt, candidate, q, wrongProof)
-			if !errors.Is(e, want) || scoped != nil || v != (kernel.OwnedPhysicalAdmissionResult{}) {
+			if !errors.Is(e, want) || scoped != nil || v != (kernel.PhysicalAdmissionResult{}) {
 				t.Fatalf("rejected admission: %v %+v", e, v)
 			}
 			if g, e := peer.LookupChildExecution(ctx, source.Run.ID); !errors.Is(e, kernel.ErrNotFound) {

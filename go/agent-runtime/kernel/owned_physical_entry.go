@@ -27,7 +27,7 @@ func (r *Runtime) CheckOwnedPhysicalEntry(ctx context.Context, expected Snapshot
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}
-	store, ok := r.store.(OwnedPhysicalExecutionStore)
+	store, ok := r.store.(PhysicalExecutionStore)
 	if !ok {
 		return false, ErrExecutionRequired
 	}
@@ -67,7 +67,7 @@ func PrepareOwnedEntryEpoch(g ChildExecutionGrant, epoch, previous uint64) (uint
 func ValidateOwnedPhysicalEntry(g ChildExecutionGrant, expected, current Snapshot, claimed, persisted ExecutionLease,
 	now time.Time, quarantined bool, physicalEpoch, marked uint64, completion PhysicalCallbackCompletion, transfer ManagedTransfer,
 ) (OwnedPhysicalEntryWindow, error) {
-	if err := ValidateOwnedPhysicalAdmissionRequest(g, claimed); err != nil {
+	if err := ValidatePhysicalAdmissionRequest(g, claimed); err != nil {
 		return OwnedPhysicalEntryWindow{}, err
 	}
 	if current.Run.ID != g.ChildRunID || current.Run.Kind != "agent" || current.Run.ParentRunID != "" ||

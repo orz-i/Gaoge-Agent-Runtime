@@ -7,7 +7,7 @@ package kernel
 // read-only operations under the Kernel Store contract.
 //
 // Never attach this proof to arbitrary errors returned by a write-capable
-// Store. A separate, tightly typed ChildExecutionStore busy-no-effect proof
+// Store. A separate, tightly typed PhysicalExecutionStore busy-no-effect proof
 // is permitted only by its explicitly audited, atomic no-mutation contract;
 // generic errors (including Store ErrConflict) can follow a committed CAS.
 type controlPreStoreFailure struct {
@@ -42,7 +42,7 @@ func controlStoreOutcome(cause error) error {
 	return &controlStoreOutcomeError{cause: cause}
 }
 
-// controlChildBusyNoEffect is minted ONLY by Kernel for a ChildExecutionStore
+// controlChildBusyNoEffect is minted ONLY by Kernel for a PhysicalExecutionStore
 // whose atomic contract guarantees ErrChildExecutionBusy was returned before
 // mutating a parent Run. It is not a generic Store conflict or timeout proof.
 // The Store has authoritative, immutable pending child Grants under its CAS.
@@ -52,7 +52,7 @@ func (e *controlChildBusyNoEffect) Error() string { return e.cause.Error() }
 func (e *controlChildBusyNoEffect) Unwrap() error { return e.cause }
 
 // IsControlNoEffect reports direct Kernel-created pre-Store failures OR the
-// narrowly attested atomic ChildExecutionStore busy rejection. It intentionally does not traverse wrapped errors; a consumer must
+// narrowly attested atomic PhysicalExecutionStore busy rejection. It intentionally does not traverse wrapped errors; a consumer must
 // not mistake an externally wrapped error for Kernel write-boundary evidence.
 // The original error remains inspectable with errors.Is/As.
 func IsControlNoEffect(err error) bool {

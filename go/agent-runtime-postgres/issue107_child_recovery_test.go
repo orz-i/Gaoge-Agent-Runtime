@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"errors"
+	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/conformance"
 	"testing"
 
 	"github.com/orz-i/Gaoge-Agent-Runtime/go/agent-runtime/kernel"
@@ -25,7 +26,7 @@ func TestIssue107PostgresChildGrantSurvivesNewStoreInstance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	grant, err := rt.BeginChildExecution(t.Context(), child.Run.ID, child.Run.Revision)
+	grant, err := conformance.AdmitChildFixture(t.Context(), rt, child.Run.ID, child.Run.Revision)
 	if err != nil {
 		t.Fatal(err)
 	}

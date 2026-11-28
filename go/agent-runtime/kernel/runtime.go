@@ -156,7 +156,7 @@ func (runtime *Runtime) Create(ctx context.Context, request CreateRequest) (Snap
 			request.LogicalParentRunID == request.ID && request.LogicalParentRunID != "" ||
 			strings.TrimSpace(request.ParentRunID) != request.ParentRunID ||
 			strings.TrimSpace(request.LogicalParentRunID) != request.LogicalParentRunID ||
-			!runtime.SupportsChildExecution() {
+			!runtime.SupportsPhysicalExecution() {
 			return Snapshot{}, ErrExecutionRequired
 		}
 	}
@@ -184,7 +184,7 @@ func (runtime *Runtime) Create(ctx context.Context, request CreateRequest) (Snap
 		State: cloneJSON(request.State),
 	}
 	if request.Budget != nil {
-		if !request.Budget.Valid(runID) || runtime.BudgetStore() == nil || !runtime.SupportsChildExecution() {
+		if !request.Budget.Valid(runID) || runtime.BudgetStore() == nil || !runtime.SupportsPhysicalExecution() {
 			return Snapshot{}, ErrExecutionRequired
 		}
 		record.BudgetEnrollment = request.Budget

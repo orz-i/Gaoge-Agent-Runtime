@@ -35,7 +35,7 @@ func originalToolApprovalRecovery(t *testing.T, factory func(*testing.T) (kernel
 			backing, peer, reopen := factory(t)
 			observer := ea1StartRuntime(t, peer)
 			ledger, reopenLedger := newToolTestLedger(t, ledgerFactory)
-			fault := &ea1AgentReceiptFault{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ControlStore: backing.(kernel.ControlStore), ChildExecutionStore: backing.(kernel.ChildExecutionStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), OwnedPhysicalExecutionStore: backing.(kernel.OwnedPhysicalExecutionStore), event: "tool.completed", injected: errors.New("original approved Tool CAS cut")}
+			fault := &ea1AgentReceiptFault{Store: backing, ExecutionStore: backing.(kernel.ExecutionStore), ControlStore: backing.(kernel.ControlStore), ExecutionQuarantineStore: backing.(kernel.ExecutionQuarantineStore), PhysicalExecutionStore: backing.(kernel.PhysicalExecutionStore), event: "tool.completed", injected: errors.New("original approved Tool CAS cut")}
 			held := strings.HasPrefix(mode, "held-approved-") || mode == "unmetered-approved-pending"
 			initial := backing
 			if mode != "normal" && !held {
@@ -189,7 +189,7 @@ func originalToolApprovalRecovery(t *testing.T, factory func(*testing.T) (kernel
 				}
 				var staged kernel.Snapshot
 				if mode == "lost-recovery-ack" {
-					under := &ea1AgentReceiptFault{Store: fresh, ExecutionStore: fresh.(kernel.ExecutionStore), ControlStore: fresh.(kernel.ControlStore), ChildExecutionStore: fresh.(kernel.ChildExecutionStore), ExecutionQuarantineStore: fresh.(kernel.ExecutionQuarantineStore), OwnedPhysicalExecutionStore: fresh.(kernel.OwnedPhysicalExecutionStore), injected: fault.injected}
+					under := &ea1AgentReceiptFault{Store: fresh, ExecutionStore: fresh.(kernel.ExecutionStore), ControlStore: fresh.(kernel.ControlStore), ExecutionQuarantineStore: fresh.(kernel.ExecutionQuarantineStore), PhysicalExecutionStore: fresh.(kernel.PhysicalExecutionStore), injected: fault.injected}
 					cut := &ea1RootRecoveryFault{ea1AgentReceiptFault: under, phase: "P3"}
 					r = makeRunner(ea1StartRuntime(t, cut), l, false)
 					if _, err = r.ReconcileToolOutcome(ctx, req.ID, before.Run.Revision, "original-call"); !errors.Is(err, fault.injected) {

@@ -49,12 +49,15 @@ type ea1ChildCancelStore struct {
 	begins, marks, finishes, markAttempts, applyHits, nativeHits, controlHits int
 }
 
-func (s *ea1ChildCancelStore) BeginChildExecution(ctx context.Context, g kernel.ChildExecutionGrant) error {
-	e := s.ChildExecutionStore.BeginChildExecution(ctx, g)
+func (s *ea1ChildCancelStore) BeginPhysicalExecution(ctx context.Context, p kernel.PhysicalAdmission) (kernel.PhysicalAdmissionResult, error) {
+	if p.Candidate().Grant.IsOwned() {
+		return s.ea1AgentAdmissionStore.BeginPhysicalExecution(ctx, p)
+	}
+	result, e := s.ea1AgentAdmissionStore.BeginPhysicalExecution(ctx, p)
 	if e == nil {
 		s.begins++
 	}
-	return e
+	return result, e
 }
 func (s *ea1ChildCancelStore) matched(id string, m kernel.StoreMutation, event string) bool {
 	if id != s.runID || m.Record.Run.ID != s.runID || event == "" {
@@ -91,16 +94,16 @@ func (s *ea1ChildCancelStore) ApplyControl(ctx context.Context, id string, rev u
 }
 func (s *ea1ChildCancelStore) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, outcome kernel.PhysicalCallbackOutcome, p kernel.PhysicalCallbackReturn) error {
 	if g.IsOwned() {
-		return s.OwnedPhysicalExecutionStore.RecordPhysicalCallbackReturn(ctx, g, rev, outcome, p)
+		return s.PhysicalExecutionStore.RecordPhysicalCallbackReturn(ctx, g, rev, outcome, p)
 	}
 	if g.ChildRunID != s.runID {
-		return s.OwnedPhysicalExecutionStore.RecordPhysicalCallbackReturn(ctx, g, rev, outcome, p)
+		return s.PhysicalExecutionStore.RecordPhysicalCallbackReturn(ctx, g, rev, outcome, p)
 	}
 	s.markAttempts++
 	if s.mode == "P3" {
 		return s.fault
 	}
-	e := s.OwnedPhysicalExecutionStore.RecordPhysicalCallbackReturn(ctx, g, rev, outcome, p)
+	e := s.PhysicalExecutionStore.RecordPhysicalCallbackReturn(ctx, g, rev, outcome, p)
 	if e == nil {
 		s.marks++
 		if s.mode == "P4" {
@@ -110,7 +113,7 @@ func (s *ea1ChildCancelStore) RecordPhysicalCallbackReturn(ctx context.Context, 
 	return e
 }
 func (s *ea1ChildCancelStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
-	e := s.ChildExecutionStore.FinishChildExecution(ctx, g, p)
+	e := s.PhysicalExecutionStore.FinishChildExecution(ctx, g, p)
 	if e == nil {
 		s.finishes++
 	}

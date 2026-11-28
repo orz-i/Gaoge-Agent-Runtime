@@ -269,7 +269,7 @@ type Dependencies struct {
 	// middleware is configured, a parent-bound Start MUST pass it before
 	// Kernel.Create; otherwise an invalid Host relation can create an
 	// orphan child and leave an unresolved physical Grant on rejection.
-	// Physical permission still comes only from Store BeginChildExecution.
+	// Physical permission still comes only from Store BeginPhysicalExecution.
 	StartControlPreflight func(context.Context, StartRequest) error
 	HostedTools           HostedToolCatalog
 	ToolDiscovery         ToolDiscovery
@@ -579,7 +579,7 @@ func NewRunner(dependencies Dependencies) (*Runner, error) {
 		return nil, errors.Join(ErrInvalidRequest, err)
 	}
 	var runExecution *RunExecution
-	if !dependencies.Runtime.SupportsExecution() || !dependencies.Runtime.SupportsOwnedPhysicalExecution() || !dependencies.Runtime.SupportsChildExecution() {
+	if !dependencies.Runtime.SupportsExecution() || !dependencies.Runtime.SupportsPhysicalExecution() {
 		return nil, ErrInvalidRequest
 	}
 	if !dependencies.Runtime.SupportsOwnedRetirement() {

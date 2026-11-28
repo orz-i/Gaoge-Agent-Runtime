@@ -95,23 +95,26 @@ var (
 // the Agent's internal settlement proof. Store backends must check the opaque
 // marker inside their own authoritative commit transaction.
 type childPhysicalStoreContract interface {
-	BeginChildExecution(context.Context, kernel.ChildExecutionGrant) error
+	BeginPhysicalExecution(context.Context, kernel.PhysicalAdmission) (kernel.PhysicalAdmissionResult, error)
 	LookupChildExecution(context.Context, string) (kernel.ChildExecutionGrant, error)
-	MarkChildExecutionSettled(context.Context, kernel.ChildExecutionGrant, kernel.ChildExecutionSettlement) error
+	RecordPhysicalCallbackReturn(context.Context, kernel.ChildExecutionGrant, uint64, kernel.PhysicalCallbackOutcome, kernel.PhysicalCallbackReturn) error
+	LookupPhysicalCallbackReturn(context.Context, kernel.ChildExecutionGrant) (kernel.PhysicalCallbackCompletion, error)
+	CheckOwnedPhysicalEntry(context.Context, kernel.ChildExecutionGrant, kernel.ExecutionLease, kernel.Snapshot) (kernel.OwnedPhysicalEntryWindow, error)
+	ApplyOwnedPhysicalRecovery(context.Context, kernel.ChildExecutionGrant, uint64, kernel.StoreMutation, kernel.OwnedPhysicalRecovery) (kernel.Snapshot, error)
 	FinishChildExecution(context.Context, kernel.ChildExecutionGrant, kernel.ChildExecutionSettlement) error
 }
 
 var (
-	_ kernel.ChildExecutionStore                                                                 = (childPhysicalStoreContract)(nil)
-	_ childPhysicalStoreContract                                                                 = (kernel.ChildExecutionStore)(nil)
-	_ childPhysicalStoreContract                                                                 = (*memory.Store)(nil)
-	_ func(*kernel.Runtime, context.Context, string, uint64) (kernel.ChildExecutionGrant, error) = (*kernel.Runtime).BeginChildExecution
-	_ func(*kernel.Runtime, context.Context, string) (kernel.ChildExecutionGrant, error)         = (*kernel.Runtime).LookupChildExecution
-	_ func(*agent.Runner, context.Context, string) error                                         = (*agent.Runner).ReconcileChildPhysicalGrant
-	_ func(*kernel.Runtime) *kernel.Runtime                                                      = (*kernel.Runtime).WithoutPhysicalGrant
-	_ func([]byte) string                                                                        = agent.FrozenOriginFingerprint
-	_ func(kernel.Snapshot, []byte) bool                                                         = agent.MatchesFrozenOrigin
-	_                                                                                            = agent.Dependencies{
+	_ kernel.PhysicalExecutionStore                                                      = (childPhysicalStoreContract)(nil)
+	_ childPhysicalStoreContract                                                         = (kernel.PhysicalExecutionStore)(nil)
+	_ childPhysicalStoreContract                                                         = (*memory.Store)(nil)
+	_                                                                                    = (*kernel.Runtime).AdmitPhysicalExecution
+	_ func(*kernel.Runtime, context.Context, string) (kernel.ChildExecutionGrant, error) = (*kernel.Runtime).LookupChildExecution
+	_ func(*agent.Runner, context.Context, string) error                                 = (*agent.Runner).ReconcileChildPhysicalGrant
+	_ func(*kernel.Runtime) *kernel.Runtime                                              = (*kernel.Runtime).WithoutPhysicalGrant
+	_ func([]byte) string                                                                = agent.FrozenOriginFingerprint
+	_ func(kernel.Snapshot, []byte) bool                                                 = agent.MatchesFrozenOrigin
+	_                                                                                    = agent.Dependencies{
 		ApprovalControlPreflight: func(context.Context, kernel.Snapshot) error { return nil },
 		StartControlPreflight:    func(context.Context, agent.StartRequest) error { return nil },
 	}

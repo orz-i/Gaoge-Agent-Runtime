@@ -480,9 +480,9 @@ type ea1AgentAdmissionStore struct {
 	kernel.Store
 	kernel.ExecutionStore
 	kernel.ControlStore
-	kernel.ChildExecutionStore
+
 	kernel.ExecutionQuarantineStore
-	kernel.OwnedPhysicalExecutionStore
+	kernel.PhysicalExecutionStore
 	acquired     kernel.ExecutionLease
 	renewals     ea1LeaseRenewals
 	releaseCalls int
@@ -505,19 +505,15 @@ func ea1AgentAdmissionWrap(t *testing.T, s kernel.Store) *ea1AgentAdmissionStore
 	if !ok {
 		t.Fatal("missing actual ControlStore")
 	}
-	physical, ok := s.(kernel.ChildExecutionStore)
-	if !ok {
-		t.Fatal("missing physical Store observation")
-	}
 	quarantine, ok := s.(kernel.ExecutionQuarantineStore)
 	if !ok {
 		t.Fatal("missing quarantine Store")
 	}
-	owned, ok := s.(kernel.OwnedPhysicalExecutionStore)
+	owned, ok := s.(kernel.PhysicalExecutionStore)
 	if !ok {
 		t.Fatal("missing owned physical Store")
 	}
-	return &ea1AgentAdmissionStore{OwnedPhysicalExecutionStore: owned, Store: s, ExecutionStore: execution, ControlStore: control, ChildExecutionStore: physical, ExecutionQuarantineStore: quarantine}
+	return &ea1AgentAdmissionStore{PhysicalExecutionStore: owned, Store: s, ExecutionStore: execution, ControlStore: control, ExecutionQuarantineStore: quarantine}
 }
 func (s *ea1AgentAdmissionStore) Create(ctx context.Context, r kernel.Record, events []kernel.EventDraft) (kernel.Snapshot, error) {
 	v, e := s.Store.Create(ctx, r, events)
@@ -540,21 +536,24 @@ func (s *ea1AgentAdmissionStore) AcquireExecution(ctx context.Context, r kernel.
 }
 
 func (s *ea1AgentAdmissionStore) CheckOwnedPhysicalEntry(ctx context.Context, g kernel.ChildExecutionGrant, l kernel.ExecutionLease, source kernel.Snapshot) (kernel.OwnedPhysicalEntryWindow, error) {
-	window, err := s.OwnedPhysicalExecutionStore.CheckOwnedPhysicalEntry(ctx, g, l, source)
+	window, err := s.PhysicalExecutionStore.CheckOwnedPhysicalEntry(ctx, g, l, source)
 	if err == nil && s.afterEntry != nil {
 		err = s.afterEntry(ctx)
 	}
 	return window, err
 }
 
-func (s *ea1AgentAdmissionStore) BeginOwnedPhysicalExecution(ctx context.Context, a kernel.OwnedPhysicalAdmission) (kernel.OwnedPhysicalAdmissionResult, error) {
+func (s *ea1AgentAdmissionStore) BeginPhysicalExecution(ctx context.Context, a kernel.PhysicalAdmission) (kernel.PhysicalAdmissionResult, error) {
 	g := a.Candidate().Grant
+	if !g.IsOwned() {
+		return s.PhysicalExecutionStore.BeginPhysicalExecution(ctx, a)
+	}
 	if s.beforeOwned != nil {
 		if e := s.beforeOwned(ctx, g); e != nil {
-			return kernel.OwnedPhysicalAdmissionResult{}, e
+			return kernel.PhysicalAdmissionResult{}, e
 		}
 	}
-	v, e := s.OwnedPhysicalExecutionStore.BeginOwnedPhysicalExecution(ctx, a)
+	v, e := s.PhysicalExecutionStore.BeginPhysicalExecution(ctx, a)
 	if e == nil {
 		if a.AcquiresLease() {
 			s.acquired = v.Lease

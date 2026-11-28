@@ -35,27 +35,31 @@ type ea1ChildResumeSettlementStore struct {
 	marks, finishes, begins int
 }
 
-func (s *ea1ChildResumeSettlementStore) BeginChildExecution(ctx context.Context, g kernel.ChildExecutionGrant) error {
+func (s *ea1ChildResumeSettlementStore) BeginPhysicalExecution(ctx context.Context, p kernel.PhysicalAdmission) (kernel.PhysicalAdmissionResult, error) {
+	if p.Candidate().Grant.IsOwned() {
+		return s.ea1AgentAdmissionStore.BeginPhysicalExecution(ctx, p)
+	}
+	g := p.Candidate().Grant
 	if s.beforeBegin != nil {
 		s.beforeBegin(g)
 	}
-	e := s.ChildExecutionStore.BeginChildExecution(ctx, g)
+	result, e := s.ea1AgentAdmissionStore.BeginPhysicalExecution(ctx, p)
 	if e == nil {
 		s.begins++
 		if s.afterBegin != nil {
 			s.afterBegin(ctx)
 		}
 	}
-	return e
+	return result, e
 }
 func (s *ea1ChildResumeSettlementStore) RecordPhysicalCallbackReturn(ctx context.Context, g kernel.ChildExecutionGrant, rev uint64, outcome kernel.PhysicalCallbackOutcome, p kernel.PhysicalCallbackReturn) error {
 	if g.IsOwned() {
-		return s.OwnedPhysicalExecutionStore.RecordPhysicalCallbackReturn(ctx, g, rev, outcome, p)
+		return s.PhysicalExecutionStore.RecordPhysicalCallbackReturn(ctx, g, rev, outcome, p)
 	}
 	if s.mode == "P3" {
 		return s.fault
 	}
-	e := s.OwnedPhysicalExecutionStore.RecordPhysicalCallbackReturn(ctx, g, rev, outcome, p)
+	e := s.PhysicalExecutionStore.RecordPhysicalCallbackReturn(ctx, g, rev, outcome, p)
 	if e == nil {
 		s.marks++
 		if s.mode == "P4" {
@@ -65,7 +69,7 @@ func (s *ea1ChildResumeSettlementStore) RecordPhysicalCallbackReturn(ctx context
 	return e
 }
 func (s *ea1ChildResumeSettlementStore) FinishChildExecution(ctx context.Context, g kernel.ChildExecutionGrant, p kernel.ChildExecutionSettlement) error {
-	e := s.ChildExecutionStore.FinishChildExecution(ctx, g, p)
+	e := s.PhysicalExecutionStore.FinishChildExecution(ctx, g, p)
 	if e == nil {
 		s.finishes++
 	}
